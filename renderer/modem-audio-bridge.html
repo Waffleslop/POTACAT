@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' blob:; connect-src 'self';">
+  <title>POTACAT modem audio bridge</title>
+</head>
+<body>
+  <!-- Hidden window. POTACAT captures the radio's RX audio here and plays the
+       modem's TX audio to the radio, so an external modem (ardopcf, later
+       Dire Wolf and VARA via a cable) never opens a sound device itself:
+       docs/modem-audio-bridge-plan.md. -->
+  <script src="modem-audio-bridge.js"></script>
+</body>
+</html>

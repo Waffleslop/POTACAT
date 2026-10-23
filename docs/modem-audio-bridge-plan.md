@@ -1,6 +1,6 @@
 # Modem audio bridge — plan (explicit)
 
-**Status (2026-10-23): planned, not started.** Owner: desktop. Casey asked for the detail after the
+**Status: phase 1 BUILT 2026-10-23** (bridge window + sound-device route on every rig, ARDOP never opens a device; proven by test/modem-bridge-test.js against Chromium's fake audio device + a real ModemAudioServer; not yet run on a real USB-CODEC rig). Phases 2–4 planned. Owner: desktop. Casey asked for the detail after the
 VARA plan showed that every external modem's problems come from the modem opening the radio's
 sound card itself. This plan makes POTACAT the only program that ever touches the radio's audio,
 and feeds every modem (ardopcf today, Dire Wolf, VARA via a virtual cable, Mercury later) over the

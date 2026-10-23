@@ -582,12 +582,20 @@
     var a = (state && state.audio) || {};
     var el = $('wl-sound');
     if (!a.needed) { el.textContent = ''; return; }
-    if (a.viaPotacat) { el.textContent = 'Radio sound: via POTACAT (' + a.capture + '), no sound card needed'; return; }
-    el.innerHTML = a.ready
-      ? 'Radio sound: ' + esc(shortName(a.capture)) + ' / ' + esc(shortName(a.playback)) + ' · <a id="wl-sound-change">Change</a>'
-      : 'Radio sound not set · <a id="wl-sound-change">Choose</a>';
-    var ch = $('wl-sound-change');
-    if (ch) ch.onclick = function () { openSoundCard(null); };
+    // Packet (Dire Wolf) still opens the sound card itself; its pick lives in a.packet.
+    if (currentMode().id === 'packet' && a.packet && a.packet.needed) {
+      el.innerHTML = a.packet.ready
+        ? 'Radio sound: ' + esc(shortName(a.packet.capture)) + ' / ' + esc(shortName(a.packet.playback)) + ' · <a id="wl-sound-change">Change</a>'
+        : 'Radio sound not set · <a id="wl-sound-change">Choose</a>';
+      var ch = $('wl-sound-change');
+      if (ch) ch.onclick = function () { openSoundCard(null); };
+      return;
+    }
+    // Everything else rides POTACAT: the Flex Direct / Icom Network stream, or
+    // the audio bridge on the radio's own sound card (the devices FT8 uses).
+    var b = a.bridge || null;
+    if (b && b.state === 'error') { el.innerHTML = '<span style="color:#e94560">Radio sound: ' + esc(b.error) + '</span>'; return; }
+    el.textContent = 'Radio sound: via POTACAT (' + shortName(a.capture) + (a.playback && a.playback !== a.capture ? ' → ' + shortName(a.playback) : '') + ')' + (b && b.state === 'starting' ? ' — opening…' : '');
   }
   function fillSelect(sel, list, pick) {
     sel.innerHTML = '<option value="">(choose)</option>' + list.map(function (d) {
@@ -600,7 +608,7 @@
     card.classList.add('show');
     window.api.audioList().then(function (r) {
       if (!r || !r.ok) { $('wl-sound-hint').textContent = (r && r.error) || 'Could not list the sound devices'; return; }
-      var a = (state && state.audio) || {};
+      var a = ((state && state.audio) || {}).packet || (state && state.audio) || {};
       fillSelect($('wl-sound-in'), r.devices.capture, (prefill && prefill.capture) || a.capture);
       fillSelect($('wl-sound-out'), r.devices.playback, (prefill && prefill.playback) || a.playback);
       $('wl-sound-hint').textContent = 'The same devices your radio uses for FT8 — on a Flex, DAX RX and DAX TX.';
@@ -617,7 +625,8 @@
   // main pick and save. Silent when it can tell; a card for what it can't.
   function autoSound() {
     var a = (state && state.audio) || {};
-    if (soundTried || !a.needed || a.ready) return;
+    // Only packet needs a pick now (ARDOP's audio rides POTACAT on every rig).
+    if (soundTried || !a.needed || a.ready || currentMode().id !== 'packet') return;
     soundTried = true;
     window.api.audioRig().then(function (rig) {
       var labels = Promise.resolve({});

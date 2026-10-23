@@ -3025,9 +3025,9 @@
         <span class="help-text" style="display:block;margin-bottom:4px;">ARDOP (HF) and packet (VHF/UHF, through Dire Wolf) are open and built into POTACAT (Windows and Linux). Mercury uses your Mercury setup above.</span>
         <span class="help-text hidden" id="winlink-audio-via" style="display:block;margin-bottom:4px;color:var(--accent-green,#4ecca3);"></span>
         <div id="winlink-audio-pick" style="margin-top:4px;">
-        <span class="help-text" style="display:block;margin-bottom:4px;">The modem takes its audio from the radio's sound device: the radio's USB sound card, or DAX on a Flex that is not on Flex Direct (with DAX running).</span>
+        <span class="help-text" style="display:block;margin-bottom:4px;">ARDOP's audio goes through POTACAT on every radio, using the Audio devices set for the radio in My Rigs — nothing to pick. Packet (Dire Wolf) still opens the radio's sound card itself; choose its devices here if the automatic pick is wrong.</span>
         <div style="margin-top:4px;">
-          <button type="button" id="winlink-ardop-discover">Find the radio's sound devices</button>
+          <button type="button" id="winlink-ardop-discover">Find the radio's sound devices (packet)</button>
           <span class="help-text" id="winlink-ardop-status" style="margin-left:6px;"></span>
         </div>
         <div id="winlink-ardop-devices" class="hidden" style="margin-top:5px;display:flex;gap:12px;flex-wrap:wrap;">

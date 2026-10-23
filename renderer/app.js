@@ -5150,6 +5150,7 @@ if (setMercuryEnable) {
       via.classList.toggle('hidden', !socket);
       pick.classList.toggle('hidden', socket);
       if (socket) via.textContent = `${rig.name || 'This radio'} is on ${src === 'smartsdr' ? 'Flex Direct' : 'Icom Network'}: the modem's audio rides POTACAT's own stream — no sound device to pick, nothing to set up.`;
+      else via.textContent = '';
     };
     const ardopBtn = document.getElementById('winlink-ardop-discover');
     const ardopStatus = document.getElementById('winlink-ardop-status');

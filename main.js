@@ -8481,12 +8481,24 @@ function winlinkPayload() {
     audio: (() => {
       const rig = winlinkActiveRig();
       const a = (rig && rig.winlinkAudio) || {};
-      const needed = winlinkState.snapshot().modes.some((m) => m.available && (m.id === 'ardop' || m.id === 'packet'));
-      if (winlinkSocketAudioRoute()) {
-        const via = settings.audioSource === 'smartsdr' ? 'Flex Direct' : 'Icom Network';
-        return { needed, ready: true, viaPotacat: true, capture: via, playback: via, rigName: (rig && rig.name) || '' };
+      const modes = winlinkState.snapshot().modes;
+      const packetOn = modes.some((m) => m.available && m.id === 'packet');
+      const anyRadio = modes.some((m) => m.available && (m.id === 'ardop' || m.id === 'packet'));
+      // `needed`/`ready` = "does the packet picker still have work": Dire Wolf
+      // opens the sound card itself until its socket patch (plan phase 3).
+      // ARDOP never needs a pick on any rig — the bridge carries its audio.
+      if (winlinkIpAudioRoute()) {
+        const via = winlinkAudioRouteName();
+        return { needed: anyRadio, ready: true, viaPotacat: true, capture: via, playback: via, rigName: (rig && rig.name) || '' };
       }
-      return { needed, ready: !!(a.captureLabel && a.playbackLabel), capture: a.captureLabel || '', playback: a.playbackLabel || '', rigName: (rig && rig.name) || '' };
+      const packetReady = !!(a.captureLabel && a.playbackLabel);
+      return {
+        needed: anyRadio, ready: !packetOn || packetReady, viaPotacat: true,
+        capture: modemBridge.captureLabel || 'the radio\'s audio input', playback: modemBridge.playbackLabel || 'the radio\'s audio output',
+        bridge: { state: modemBridge.state, error: modemBridge.error },
+        packet: { needed: packetOn, ready: packetReady, capture: a.captureLabel || '', playback: a.playbackLabel || '' },
+        rigName: (rig && rig.name) || '',
+      };
     })(),
   });
 }
@@ -8807,19 +8819,31 @@ function armWinlinkTxFailsafe() {
 // frames POTACAT already has in main are fed in, and the modem's transmit
 // audio goes out on the same dax_tx / RS-BA1 voice path the phone mic uses.
 
-function winlinkSocketAudioRoute() {
+// The modem never opens a sound device (docs/modem-audio-bridge-plan.md):
+// ardopcf takes its audio over POTACAT's loopback socket on EVERY rig. The
+// radio side is one of three POTACAT-owned sources — the Flex Direct stream,
+// the Icom Network stream, or (phase 1, 2026-10-23) the modem audio bridge
+// window, which captures the rig's FT8 input device and plays to its FT8
+// output device, exactly the devices the operator already chose.
+function winlinkSocketAudioRoute() { return true; }
+/** The two rigs whose audio main already holds; everything else is the bridge window. */
+function winlinkIpAudioRoute() {
   return settings.audioSource === 'smartsdr' || settings.audioSource === 'icom-network';
+}
+function winlinkAudioRouteName() {
+  if (settings.audioSource === 'smartsdr') return 'Flex Direct';
+  if (settings.audioSource === 'icom-network') return 'Icom Network';
+  return 'the radio\'s sound card';
 }
 
 async function startWinlinkAudio() {
   stopWinlinkAudio();
-  if (!winlinkSocketAudioRoute()) return;
   const srv = new ModemAudioServer({
     makeResampler: (a, b) => new mercuryAudioBridge.StreamingResampler(a, b),
     txOutRate: 24000,
     log: winlinkLog,
   });
-  srv.on('modem-connected', () => winlinkLog(`modem audio: ardopcf connected — radio audio via ${settings.audioSource === 'smartsdr' ? 'Flex Direct' : 'Icom Network'}, no sound card`));
+  srv.on('modem-connected', () => winlinkLog(`modem audio: ardopcf connected — radio audio via ${winlinkAudioRouteName()}${winlinkIpAudioRoute() ? ', no sound card' : ` (${modemBridge.captureLabel || 'input'} → ${modemBridge.playbackLabel || 'output'})`}`));
   srv.on('modem-gone', () => { if (winlinkSessionActive()) winlinkLog('modem audio: the modem closed its audio connection'); });
   srv.on('tx', (mono24k) => {
     if (!winlinkTxActive) return; // the modem only sends while it has PTT; anything else is a stray
@@ -8827,6 +8851,8 @@ async function startWinlinkAudio() {
       if (smartSdrAudio && smartSdrAudio.txReady) smartSdrAudio.pushTxAudioChunk(mono24k);
     } else if (settings.audioSource === 'icom-network') {
       pushIcomNetworkVoiceChunk(mono24k);
+    } else if (modemBridgeWin && !modemBridgeWin.isDestroyed() && modemBridge.playback) {
+      audioSafeSend(modemBridgeWin.webContents, 'modem-bridge-tx', { pcm: mono24k });
     }
   });
   try {
@@ -8839,6 +8865,83 @@ async function startWinlinkAudio() {
 
 function stopWinlinkAudio() {
   if (winlinkAudio) { try { winlinkAudio.close(); } catch {} winlinkAudio = null; }
+}
+
+// ── the modem audio bridge window (renderer/modem-audio-bridge.html) ─────────
+// Runs on sound-device rigs while anything wants the radio's RX audio for a
+// modem — the mail window (its waterfall), a watching ECHOCAT device, or a
+// session — and adds playback for the length of a session. Hidden, never
+// shown; destroyed when nothing wants it, and in gracefulCleanup.
+let modemBridgeWin = null;
+const modemBridge = { state: 'off', error: '', captureLabel: '', playbackLabel: '', playback: false, sampleRate: 0, level: 0, startedAt: 0 };
+const _modemBridgeWaiters = [];
+function modemBridgeDevices() {
+  const rig = winlinkActiveRig();
+  return { inputId: (rig && rig.remoteAudioInput) || settings.remoteAudioInput || '', outputId: (rig && rig.remoteAudioOutput) || settings.remoteAudioOutput || '' };
+}
+function modemBridgeWanted() {
+  if (winlinkIpAudioRoute() || isRemoteMode()) return false;
+  if (!winlinkState.snapshot().modes.some((m) => m.available && m.id === 'ardop')) return false;
+  return !!((winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) || _winlinkRemoteWatchers > 0 || winlinkSessionActive());
+}
+function modemBridgeSettle(ok) {
+  while (_modemBridgeWaiters.length) { const w = _modemBridgeWaiters.shift(); clearTimeout(w.timer); w.resolve(ok); }
+}
+/** Resolves true when the bridge reports ok (capture, and playback if asked), false on error/timeout. */
+function modemBridgeReady(timeoutMs = 8000) {
+  if (modemBridge.state === 'ok') return Promise.resolve(true);
+  if (modemBridge.state === 'error' || modemBridge.state === 'off') return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const w = { resolve, timer: setTimeout(() => { const i = _modemBridgeWaiters.indexOf(w); if (i >= 0) _modemBridgeWaiters.splice(i, 1); resolve(modemBridge.state === 'ok'); }, timeoutMs) };
+    _modemBridgeWaiters.push(w);
+  });
+}
+function startModemBridge({ playback } = {}) {
+  const dev = modemBridgeDevices();
+  const cfg = { ...dev, playback: !!playback, txGain: _jtcatDirectTxGainLevel };
+  modemBridge.state = 'starting'; modemBridge.error = ''; modemBridge.playback = !!playback; modemBridge.startedAt = Date.now();
+  if (modemBridgeWin && !modemBridgeWin.isDestroyed()) {
+    modemBridgeWin.webContents.send('modem-bridge-start', cfg);
+    return;
+  }
+  modemBridgeWin = new BrowserWindow({
+    width: 320, height: 200, show: false, skipTaskbar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-modem-audio-bridge.js'),
+      contextIsolation: true, nodeIntegration: false,
+      autoplayPolicy: 'no-user-gesture-required',
+      backgroundThrottling: false, // a throttled worklet starves the modem
+    },
+  });
+  modemBridgeWin.webContents.session.setPermissionRequestHandler((_wc, _perm, cb) => cb(true));
+  modemBridgeWin.loadFile(path.join(__dirname, 'renderer', 'modem-audio-bridge.html'));
+  modemBridgeWin.webContents.on('did-finish-load', () => {
+    if (modemBridgeWin && !modemBridgeWin.isDestroyed()) modemBridgeWin.webContents.send('modem-bridge-start', { ...modemBridgeDevices(), playback: modemBridge.playback, txGain: _jtcatDirectTxGainLevel });
+  });
+  modemBridgeWin.on('closed', () => { modemBridgeWin = null; if (modemBridge.state !== 'off') { modemBridge.state = 'off'; modemBridgeSettle(false); } });
+  winlinkLog(`modem audio bridge: opening the radio's sound card (${dev.inputId ? 'input set' : 'NO input set'}, ${dev.outputId ? 'output set' : 'NO output set'})`);
+}
+function stopModemBridge(why) {
+  if (modemBridgeWin && !modemBridgeWin.isDestroyed()) {
+    try { modemBridgeWin.webContents.send('modem-bridge-stop'); } catch {}
+    const w = modemBridgeWin; modemBridgeWin = null;
+    setTimeout(() => { try { if (!w.isDestroyed()) w.destroy(); } catch {} }, 300);
+    winlinkLog(`modem audio bridge: closed (${why || 'not needed'})`);
+  }
+  modemBridge.state = 'off'; modemBridge.playback = false; modemBridge.captureLabel = ''; modemBridge.playbackLabel = ''; modemBridge.error = '';
+  modemBridgeSettle(false);
+}
+/** Open or close the bridge to match demand; call whenever demand may have changed. */
+function winlinkSyncModemBridge() {
+  const want = modemBridgeWanted();
+  if (want && !modemBridgeWin) startModemBridge({ playback: winlinkSessionActive() });
+  else if (!want && modemBridgeWin) stopModemBridge();
+}
+function modemBridgePlayback(on) {
+  modemBridge.playback = !!on;
+  if (!modemBridgeWin || modemBridgeWin.isDestroyed()) return;
+  if (on) modemBridge.state = 'starting';
+  modemBridgeWin.webContents.send('modem-bridge-playback', { on: !!on, ...modemBridgeDevices(), txGain: _jtcatDirectTxGainLevel });
 }
 
 /** Receive audio from the radio link → the modem (called from the Flex and Icom RX taps). */
@@ -8884,6 +8987,7 @@ function winlinkSetRemoteWatch(count) {
   // (even with its own waterfall hidden) and relays magnitudes while a device watches.
   winlinkPopoutSend('winlink-remote-watch', n > 0);
   winlinkLog(n > 0 ? `${n} ECHOCAT device${n > 1 ? 's' : ''} watching the waterfall` : 'no ECHOCAT device watching the waterfall');
+  winlinkSyncModemBridge();
 }
 
 /**
@@ -9012,7 +9116,7 @@ function winlinkSaveRigAudio({ captureLabel, playbackLabel }) {
 async function winlinkAutoAudio({ inputLabel, outputLabel } = {}) {
   const rig = winlinkActiveRig();
   if (!rig) return { ok: false, error: 'No radio set up' };
-  if (winlinkSocketAudioRoute()) return { ok: true, auto: true, viaPotacat: true, capture: settings.audioSource, playback: settings.audioSource };
+  if (winlinkIpAudioRoute()) return { ok: true, auto: true, viaPotacat: true, capture: settings.audioSource, playback: settings.audioSource };
   const saved = rig.winlinkAudio || {};
   if (saved.captureLabel && saved.playbackLabel) return { ok: true, auto: false, capture: saved.captureLabel, playback: saved.playbackLabel };
   if (!ArdopProcess.ardopSupported(process.platform) || !findArdop().found) return { ok: false, error: 'No device list on this system' };
@@ -9037,12 +9141,21 @@ async function spawnArdopSocket() {
   if (!winlinkAudio || !winlinkAudio.port) throw new Error('POTACAT\'s modem audio server is not running — restart Winlink');
   if (settings.audioSource === 'smartsdr' && !(smartSdrAudio && smartSdrAudio.connected)) throw new Error('Flex Direct audio is not connected — the radio must be on for ARDOP');
   if (settings.audioSource === 'icom-network' && !_icomNetworkTransport) throw new Error('Icom Network audio is not connected — the radio must be on for ARDOP');
+  if (!winlinkIpAudioRoute()) {
+    // The bridge window must hold the radio's input AND output before the
+    // modem keys; a device it cannot open ends the attempt here, with the
+    // reason, never with a silent transmission.
+    if (!modemBridgeWin) startModemBridge({ playback: true });
+    else if (!modemBridge.playback) modemBridgePlayback(true);
+    const ok = await modemBridgeReady(10000);
+    if (!ok) throw new Error(modemBridge.error || 'The radio\'s sound card did not open in time — see the [Winlink] lines in the log');
+  }
   const p = winlinkPaths();
   fs.mkdirSync(p.ardopLogs, { recursive: true });
   const dev = `tcp:${winlinkAudio.port}`;
   const args = ArdopProcess.buildArdopArgs({ port: _winlinkArdopPort(), capture: dev, playback: dev, logDir: p.ardopLogs, driveLevel: winlinkArdopLabels().driveLevel, mycall: settings.myCallsign });
   const bin = findArdop();
-  winlinkLog(`ardop: audio via POTACAT (${settings.audioSource === 'smartsdr' ? 'Flex Direct' : 'Icom Network'}, no sound card)`);
+  winlinkLog(`ardop: audio via POTACAT (${winlinkAudioRouteName()}${winlinkIpAudioRoute() ? ', no sound card' : ''})`);
   winlinkLog('ardop spawn: ' + [bin.path, ...args].map((a) => /\s/.test(a) ? `"${a}"` : a).join(' '));
   return spawnArdopProcess(bin, args);
 }
@@ -9066,7 +9179,7 @@ function listArdopDevices() {
 async function spawnArdop() {
   killArdop();
   if (!ArdopProcess.ardopSupported(process.platform)) throw new Error('ARDOP (ardopcf) has no macOS build');
-  if (winlinkSocketAudioRoute()) return spawnArdopSocket();
+  return spawnArdopSocket(); // every rig: the modem never opens a sound device
   let labels = winlinkArdopLabels();
   if (!labels.captureLabel || !labels.playbackLabel) { await winlinkAutoAudio(); labels = winlinkArdopLabels(); }
   if (!labels.captureLabel || !labels.playbackLabel) throw new Error('POTACAT could not tell which sound devices are your radio\'s — choose them in the Winlink window');
@@ -9233,7 +9346,7 @@ function winlinkFlexDaxOn() {
   // dax_tx stream and handleRemotePtt asserts the TX source per key-down
   // (assertFlexTxDaxForTx) — nothing to switch here, and the DAX-panel
   // advice below would be wrong.
-  if (winlinkSocketAudioRoute()) return;
+  if (winlinkIpAudioRoute()) return;
   let fam = '';
   try { fam = RigFamily.rigFamily(winlinkActiveRig()); } catch {}
   if (fam !== 'flex') { if (fam && fam !== 'none') winlinkLog(`TX audio source: not a Flex (${fam}) — nothing to switch`); return; }
@@ -9296,6 +9409,8 @@ function winlinkEndSession(state, text, received = 0) {
     }
     winlinkFlexDaxRestore();
     releaseRadio('winlink');
+    if (modemBridgeWin) modemBridgePlayback(false);
+    setTimeout(winlinkSyncModemBridge, 0);
   }
   winlinkState.setSession({ state, text: text || '', error: state === 'error' ? (text || 'Session failed') : '', errorKind: state === 'error' ? (_winlinkSessionErrorKind || 'failed') : '', ptt: false, prompt: null });
   // Survives a restart, so every surface can say "Last check: …" (winlink-state.lastSession).
@@ -9638,12 +9753,13 @@ onRemoteServer((rs) => {
 
 function winlinkDiagLine() {
   if (!patClient && !patProc) return 'not started (starts on first use)';
+  const audioLine = winlinkIpAudioRoute() ? `audio ${winlinkAudioRouteName()}` : `audio bridge ${modemBridge.state}${modemBridge.captureLabel ? ' (' + modemBridge.captureLabel + ' → ' + (modemBridge.playbackLabel || '-') + ')' : ''}${modemBridge.error ? ' ' + modemBridge.error : ''}`;
   const p = winlinkState.snapshot();
   const s = p.session;
   return `${p.patReady ? `Pat ready :${_patHttpPort}` : `Pat not ready${p.patError ? ' (' + p.patError + ')' : ''}`}`
     + `, shim :${_winlinkShimPort || '-'}, mode ${settings.winlinkDefaultMode || 'telnet'}`
     + `, password ${settings.winlinkPassword ? 'set' : 'MISSING'}, notice ${settings.winlinkNoticeAcceptedAt ? 'accepted' : 'not accepted'}`
-    + `, session ${s.state}${s.error ? ' (' + s.error + ')' : ''}`;
+    + `, session ${s.state}${s.error ? ' (' + s.error + ')' : ''}, ${audioLine}`;
 }
 
 
@@ -32630,7 +32746,7 @@ app.whenReady().then(() => {
         settings.winlinkPopoutBounds = winlinkPopoutWin.getBounds(); saveSettings(settings);
       }
     });
-    winlinkPopoutWin.on('closed', () => { winlinkPopoutWin = null; _winlinkWatchAudio = false; winlinkPreviewRestore('window closed'); });
+    winlinkPopoutWin.on('closed', () => { winlinkPopoutWin = null; _winlinkWatchAudio = false; winlinkPreviewRestore('window closed'); winlinkSyncModemBridge(); });
     winlinkPopoutWin.webContents.on('did-finish-load', () => {
       winlinkPopoutSend('winlink-state', winlinkPayload());
       for (const box of WinlinkStateLib.BOXES) winlinkPopoutSend('winlink-mailbox', { box, messages: winlinkState.list(box) });
@@ -32638,6 +32754,7 @@ app.whenReady().then(() => {
       winlinkPopoutSend('winlink-popout-theme', { theme: settings.lightMode ? 'light' : 'dark', variant: settings.darkVariant || 'navy' });
       pushWinlinkRigPower(true);
       winlinkPopoutSend('winlink-remote-watch', _winlinkRemoteWatchers > 0);
+      winlinkSyncModemBridge();
     });
     winlinkPopoutWin.webContents.on('before-input-event', (_e, input) => {
       if (input.key === 'F12' && input.type === 'keyDown') winlinkPopoutWin.webContents.toggleDevTools();
@@ -33033,10 +33150,38 @@ app.whenReady().then(() => {
   ipcMain.on('winlink-cmd-abort', () => winlinkAbortSession('stopped by the operator'));
   ipcMain.handle('winlink-cmd-qsy', (_e, o = {}) => winlinkPreviewQsy(o));
   ipcMain.on('winlink-watch-audio', (_e, on) => { _winlinkWatchAudio = !!on; });
+  // The modem audio bridge window: the radio's RX audio, and its status.
+  ipcMain.on('modem-bridge-rx', (e, d) => {
+    if (!modemBridgeWin || modemBridgeWin.isDestroyed() || e.sender !== modemBridgeWin.webContents || !d || !d.pcm) return;
+    const pcm = d.pcm instanceof Float32Array ? d.pcm : new Float32Array(d.pcm.buffer ? d.pcm.buffer : d.pcm);
+    winlinkFeedRx(pcm, Number(d.sampleRate) || 48000);
+  });
+  ipcMain.on('modem-bridge-status', (e, s = {}) => {
+    if (!modemBridgeWin || modemBridgeWin.isDestroyed() || e.sender !== modemBridgeWin.webContents) return;
+    if (typeof s.level === 'number') { modemBridge.level = s.level; return; }
+    if (s.stopped) return;
+    if (s.ok) {
+      modemBridge.state = 'ok'; modemBridge.error = '';
+      if (s.captureLabel) modemBridge.captureLabel = s.captureLabel;
+      if (s.playbackLabel) modemBridge.playbackLabel = s.playbackLabel;
+      if (s.sampleRate) modemBridge.sampleRate = s.sampleRate;
+      if (typeof s.playback === 'boolean') modemBridge.playback = s.playback;
+      winlinkLog(`modem audio bridge: ${modemBridge.captureLabel || 'input'}${modemBridge.playback ? ' → ' + (modemBridge.playbackLabel || 'output') : ''} ready${modemBridge.sampleRate ? ' at ' + modemBridge.sampleRate + ' Hz' : ''}`);
+      modemBridgeSettle(true);
+    } else {
+      modemBridge.state = 'error'; modemBridge.error = String(s.error || 'unknown error');
+      winlinkLog(`modem audio bridge: ${modemBridge.error}`);
+      modemBridgeSettle(false);
+      // A device that went away mid-session ends the session with the reason.
+      if (s.captureEnded && winlinkSessionActive()) winlinkAbortSession(modemBridge.error);
+    }
+    winlinkPush();
+  });
   // The mail window's own FFT on a sound-device rig, relayed to watching devices
   // (never on the socket routes — main runs its own FFT there, and two sources
   // would double the frame rate).
   ipcMain.on('winlink-spectrum-mags', (_e, arr) => {
+    // Kept for an older mail window; every rig's frames now come from main.
     if (!Array.isArray(arr) || arr.length !== WinlinkSpectrum.MAGS || winlinkSocketAudioRoute()) return;
     winlinkSpectrumPublish(Float32Array.from(arr, Number));
   });
@@ -41284,6 +41429,7 @@ function gracefulCleanup() {
   // radio can stay keyed with no audio (a silent-carrier FCC issue).
   try { handleRemotePtt(false); } catch {}
   try { stopLoggerCat(); } catch {}
+  try { stopModemBridge('quit'); } catch {}
   // A WSPR beacon armed at quit must give the radio its power back NOW, while
   // the CAT/SmartSDR links below are still open — stopJtcat() runs after they
   // are torn down and could no longer reach the rig. (smartsdr.disconnect()

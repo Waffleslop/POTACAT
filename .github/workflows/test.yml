@@ -255,6 +255,10 @@ jobs:
         env:
           LAYOUT_REQUIRED: '1'
         run: xvfb-run -a node test/layout-alignment-test.js
+      - name: Modem audio bridge (real bridge window, fake audio device, real modem socket)
+        env:
+          LAYOUT_REQUIRED: '1'
+        run: xvfb-run -a node test/modem-bridge-test.js
 
   lockfile-check:
     runs-on: ubuntu-latest

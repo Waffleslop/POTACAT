@@ -83,6 +83,7 @@ const TESTS = [
   'test/winlink-main-wiring-test.js',
   'test/rigctld-shim-hamlib-test.js',
   'test/modem-audio-server-test.js',
+  'test/modem-bridge-test.js',
   'test/wspr-daily-test.js',
   'test/wspr-power-memory-test.js',
   'test/js8-native-test.js',
