@@ -467,6 +467,7 @@ contextBridge.exposeInMainWorld('api', {
   winlinkListArdopDevices: () => ipcRenderer.invoke('winlink-list-ardop-devices'),
   winlinkAccountCheck: (call) => ipcRenderer.invoke('winlink-account-check', call),
   winlinkVaraFind: (kind) => ipcRenderer.invoke('winlink-vara-find', { kind }),
+  winlinkVaraSetup: (kind, devices) => ipcRenderer.invoke('winlink-vara-setup', { kind, devices }),
   winlinkRegister: (o) => ipcRenderer.invoke('winlink-register', o),
   onWinlinkState: (cb) => ipcRenderer.on('winlink-state', (_e, s) => cb(s)),
   jtcatSetUltracat: (on) => ipcRenderer.send('jtcat-set-ultracat', on),

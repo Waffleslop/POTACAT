@@ -5174,6 +5174,44 @@ if (setMercuryEnable) {
       fill(setVaraCableIn, 'audioinput', wantIn || '');
       fill(setVaraCableOut, 'audiooutput', wantOut || '');
     };
+    // "Set up VARA for me": the renderer supplies the device list (only a
+    // page can enumerate audio devices), main does the rest and says what
+    // it did or exactly what is missing.
+    const varaSetupStatus = document.getElementById('vara-setup-status');
+    const varaSetupRun = async (kind) => {
+      const btn = document.getElementById(kind === 'fm' ? 'vara-setup-fm' : 'vara-setup-hf');
+      if (!varaSetupStatus || !window.api.winlinkVaraSetup) return;
+      let devs = [];
+      try {
+        // Labels are blank until the page has held a media permission once.
+        let list = await navigator.mediaDevices.enumerateDevices();
+        if (!list.some((d) => d.label)) {
+          try { const s = await navigator.mediaDevices.getUserMedia({ audio: true }); s.getTracks().forEach((t) => t.stop()); } catch {}
+          list = await navigator.mediaDevices.enumerateDevices();
+        }
+        devs = list.filter((d) => d.kind === 'audioinput' || d.kind === 'audiooutput').map((d) => ({ kind: d.kind, label: d.label || '', deviceId: d.deviceId }));
+      } catch {}
+      if (btn) btn.disabled = true;
+      varaSetupStatus.style.color = '';
+      varaSetupStatus.textContent = 'Setting up… (starts VARA, about 10 seconds)';
+      let r = null;
+      try { r = await window.api.winlinkVaraSetup(kind, devs); } catch (e) { r = { ok: false, error: e.message }; }
+      if (btn) btn.disabled = false;
+      if (!r || !r.ok) {
+        varaSetupStatus.style.color = 'var(--accent-red,#e94560)';
+        varaSetupStatus.textContent = (r && r.error) || 'Could not set up VARA';
+        return;
+      }
+      varaSetupStatus.textContent = r.text;
+      // Mirror what main saved so a later Save in this panel keeps it.
+      if (kind === 'fm') { if (setVaraFmEnable) setVaraFmEnable.checked = true; if (setVaraFmPath && !setVaraFmPath.value) setVaraFmPath.value = r.path || ''; }
+      else { if (setVaraHfEnable) setVaraHfEnable.checked = true; if (setVaraHfPath && !setVaraHfPath.value) setVaraHfPath.value = r.path || ''; }
+      if (r.cable && window.fillVaraCableDevices) window.fillVaraCableDevices(r.cable.inputId || '', r.cable.outputId || '');
+    };
+    const varaSetupHf = document.getElementById('vara-setup-hf');
+    const varaSetupFm = document.getElementById('vara-setup-fm');
+    if (varaSetupHf) varaSetupHf.addEventListener('click', () => varaSetupRun('hf'));
+    if (varaSetupFm) varaSetupFm.addEventListener('click', () => varaSetupRun('fm'));
     const acctStatus = document.getElementById('winlink-account-status');
     const regBox = document.getElementById('winlink-register');
     const acctBtn = document.getElementById('winlink-account-check');

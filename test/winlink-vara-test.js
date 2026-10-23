@@ -180,7 +180,88 @@ function fnBody(src, name) {
     assert.ok(!/vara\.exe|varafm\.exe|rosmodem/i.test(text), 'never bundled, fetched or attributed as shipped');
     assert.ok(!/licen[cs]e key|VARA_KEY|varaLicen/i.test(main + app), 'POTACAT never touches a VARA licence');
     const html = read('renderer/index.html');
-    assert.ok(/set PTT to <b>None<\/b>/.test(html) && /Without a licence VARA runs at reduced speed/.test(html));
+    assert.ok(/PTT = <b>VOX<\/b>/.test(html) && /Without a licence it runs at reduced speed/.test(html));
+    assert.ok(!/PTT to <b>None<\/b>/.test(html), 'VARA has no "None"; the dialog says VOX');
+  });
+
+  console.log('Set up VARA for me (lib/vara-setup.js)');
+  const S = require('../lib/vara-setup');
+  const DEV = (kind, label, id) => ({ kind, label, deviceId: id });
+  const CABLES = [
+    DEV('audiooutput', 'Speakers (Realtek(R) Audio)', 'spk'),
+    DEV('audiooutput', 'CABLE Input (VB-Audio Virtual Cable)', 'cab-in'),
+    DEV('audioinput', 'CABLE Output (VB-Audio Virtual Cable)', 'cab-out'),
+    DEV('audiooutput', 'Hi-Fi Cable Input (VB-Audio Hi-Fi Cable)', 'hifi-in'),
+    DEV('audioinput', 'Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)', 'hifi-out'),
+    DEV('audioinput', 'Voicemeeter Output (VB-Audio Voicemeeter VAIO)', 'vm-out'),
+    DEV('audiooutput', 'Voicemeeter Input (VB-Audio Voicemeeter VAIO)', 'vm-in'),
+    DEV('audioinput', 'default', 'default'),
+  ];
+  await test('two cables are paired by name and direction; Voicemeeter is seen but never used', () => {
+    const p = S.planCables(CABLES);
+    assert.strictEqual(p.ok, true);
+    assert.strictEqual(p.found, 2);
+    assert.strictEqual(p.voicemeeter, true);
+    assert.strictEqual(p.toVara.name, 'CABLE');
+    assert.strictEqual(p.fromVara.name, 'Hi-Fi Cable');
+    // VARA records the radio from cable 1's Output end, plays TX into cable 2's Input end, both as 31-char MME names.
+    assert.strictEqual(p.vara.inputName, 'CABLE Output (VB-Audio Virtual ');
+    assert.strictEqual(p.vara.outputName, 'Hi-Fi Cable Input (VB-Audio Hi-');
+    assert.strictEqual(p.vara.inputName.length, 31);
+    // POTACAT plays into cable 1's Input end and records cable 2's Output end.
+    assert.deepStrictEqual([p.potacat.outputId, p.potacat.inputId], ['cab-in', 'hifi-out']);
+  });
+  await test('the A+B pack wins over the free pair, A before B', () => {
+    const p = S.planCables(CABLES.concat([
+      DEV('audiooutput', 'CABLE-B Input (VB-Audio Cable B)', 'b-in'), DEV('audioinput', 'CABLE-B Output (VB-Audio Cable B)', 'b-out'),
+      DEV('audiooutput', 'CABLE-A Input (VB-Audio Cable A)', 'a-in'), DEV('audioinput', 'CABLE-A Output (VB-Audio Cable A)', 'a-out'),
+    ]));
+    assert.deepStrictEqual([p.toVara.name, p.fromVara.name], ['CABLE-A', 'CABLE-B']);
+    assert.strictEqual(p.vara.inputName, 'CABLE-A Output (VB-Audio Cable ');
+  });
+  await test('one cable or none: the advice names the free second cable and where it is; a half cable is not a cable', () => {
+    const one = S.planCables(CABLES.filter((d) => !/Hi-Fi/.test(d.label)));
+    assert.strictEqual(one.ok, false);
+    assert.ok(/One virtual cable found \(CABLE\)/.test(one.advice) && /Hi-Fi Cable/.test(one.advice) && /vb-audio\.com\/Cable/.test(one.advice));
+    const none = S.planCables(CABLES.filter((d) => !/cable/i.test(d.label)));
+    assert.ok(/No virtual audio cable found/.test(none.advice) && /Voicemeeter is installed/.test(none.advice));
+    const half = S.planCables([DEV('audiooutput', 'CABLE Input (VB-Audio Virtual Cable)', 'x'), DEV('audiooutput', 'Hi-Fi Cable Input (VB-Audio Hi-Fi Cable)', 'y')]);
+    assert.strictEqual(half.found, 0);
+  });
+  await test('VARA.ini is patched on its named lines only, CRLF kept, missing keys added under their section', () => {
+    const ini = '[Soundcard]\r\nInput Device Name=DAX RX 1 (FlexRadio DAX)\r\nOutput Device Name=DAX TX (FlexRadio DAX)\r\nALC Drive Level=-5\r\n[PTT]\r\nRig=52\r\nPTTPort=COM1\r\nVia=3\r\n[Setup]\r\nRegistration Code=\r\nTCP Command Port=8300\r\n[Position]\r\nTop Position=3375\r\n';
+    const r = S.planVaraIniPatch(ini, { inputName: 'CABLE Output (VB-Audio Virtual Cable)', outputName: 'Hi-Fi Cable Input (VB-Audio Hi-Fi Cable)', port: 8300 });
+    assert.ok(r.text.includes('\r\nInput Device Name=CABLE Output (VB-Audio Virtual \r\n'), 'input, 31 chars');
+    assert.ok(r.text.includes('\r\nOutput Device Name=Hi-Fi Cable Input (VB-Audio Hi-\r\n'));
+    assert.ok(r.text.includes('\r\nVia=' + S.VARA_PTT_VIA_VOX + '\r\n'));
+    assert.ok(r.text.includes('ALC Drive Level=-5') && r.text.includes('Rig=52') && r.text.includes('Registration Code=') && r.text.includes('Top Position=3375'), 'every other line passes through');
+    assert.ok(!/\n(?!\r)/.test(r.text.replace(/\r\n/g, '\r\n')) || /\r\n/.test(r.text), 'CRLF kept');
+    assert.deepStrictEqual(r.changes.map((c) => c.key), ['Input Device Name', 'Output Device Name', 'Via']);
+    const again = S.planVaraIniPatch(r.text, { inputName: 'CABLE Output (VB-Audio Virtual Cable)', outputName: 'Hi-Fi Cable Input (VB-Audio Hi-Fi Cable)', port: 8300 });
+    assert.strictEqual(again.changes.length, 0, 'idempotent');
+    assert.strictEqual(again.text, r.text);
+    const empty = S.planVaraIniPatch('', { inputName: 'A Output', outputName: 'B Input', port: 8310 });
+    assert.ok(/\[Soundcard\]\nInput Device Name=A Output\nOutput Device Name=B Input\n\n\[PTT\]\nVia=1\n\n\[Setup\]\nTCP Command Port=8310\n/.test(empty.text), 'built from nothing: ' + JSON.stringify(empty.text));
+  });
+  await test('VARA\'s log names the device it could not open', () => {
+    assert.strictEqual(S.varaLogDeviceProblem('2026-10-23 12:00:00    WARNING: VARA is not connected to any App via TCP Port 8300\n'), '');
+    assert.ok(/input and output device/.test(S.varaLogDeviceProblem('x\n2026-09-30 18:30:27    Soundcard Output Device missing in action !\n2026-09-30 18:30:27    Soundcard Input Device missing in action !\n')));
+    assert.ok(/^VARA could not open its output device/.test(S.varaLogDeviceProblem('Soundcard Output Device missing in action !')));
+  });
+  await test('wiring: the button, the IPC, the preload, the ini written only while VARA is closed, a backup first', () => {
+    const html = read('renderer/index.html');
+    assert.ok(/id="vara-setup-hf"/.test(html) && /id="vara-setup-fm"/.test(html) && /Set up VARA HF for me/.test(html));
+    assert.ok(/vb-audio\.com\/Cable\//.test(html) && /Hi-Fi Cable/.test(html), 'the two free cables are named and linked');
+    const fn = fnBody(main, 'winlinkVaraSetup');
+    assert.ok(/if \(probe\.ok\) return \{ ok: false, step: 'running'/.test(fn), 'never written under a running VARA');
+    assert.ok(/fs\.copyFileSync\(iniPath, iniPath \+ '\.potacat-'/.test(fn), 'backup before the write');
+    assert.ok(/VaraSetup\.planVaraIniPatch\(iniText, \{ inputName: plan\.vara\.inputName, outputName: plan\.vara\.outputName, port \}\)/.test(fn));
+    assert.ok(/rig\.modemCable = \{ inputId: plan\.potacat\.inputId, outputId: plan\.potacat\.outputId \}/.test(fn), 'POTACAT\'s side saved on the rig');
+    assert.ok(/VaraSetup\.varaLogDeviceProblem\(/.test(fn), 'VARA\'s log is the verdict');
+    assert.ok(/ipcMain\.handle\('winlink-vara-setup'/.test(main));
+    assert.ok(/winlinkVaraSetup: \(kind, devices\) => ipcRenderer\.invoke\('winlink-vara-setup'/.test(read('preload.js')));
+    assert.ok(/window\.api\.winlinkVaraSetup\(kind, devs\)/.test(read('renderer/app.js')));
+    assert.ok(!/kill\(|taskkill/.test(fn), 'POTACAT never closes VARA');
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

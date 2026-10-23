@@ -148,3 +148,7 @@ as the fallback for operators who already run DAX. Settings copy offers the cabl
   port; the probe tells them when both answer on the same port.
 - Licence: POTACAT must never enter, store or automate a VARA licence key, and must not imply the
   free version is full speed.
+
+## Set up VARA for me (2026-10-23, Casey: "We need this to be super simple")
+
+One button in Settings > Station > Winlink > VARA (`lib/vara-setup.js` pure rules, `winlinkVaraSetup` in main.js, IPC `winlink-vara-setup`): finds VARA.exe, pairs the two virtual cables from the renderer's device list (VB-CABLE A+B first, else VB-CABLE + Hi-Fi Cable; Voicemeeter never auto-picked), writes VARA.ini beside the program (`[Soundcard] Input/Output Device Name` as 31-character MME names, `[PTT] Via` = VOX, `[Setup] TCP Command Port`; only while VARA is closed, backup first, named lines only), saves `rig.modemCable` and turns the mode on, starts VARA, and reads VARAHF.log for "Soundcard ... Device missing in action" as the verdict. The user installs three things (VARA, VB-CABLE, Hi-Fi Cable) and clicks once. Facts from a real C:\VARA install: VARA is VB6 on MME (31-char names); its PTT dialog offers VOX / COM / CAT / RA-Board (no "None"); stock ini ships Via=3 (CAT, COM1). `VARA_PTT_VIA_VOX = 1` is inferred (1-based option order); confirmed on the first real run.

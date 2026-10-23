@@ -3047,7 +3047,20 @@
         </label>
         <div id="winlink-vara-section" class="hidden" style="margin-top:10px;">
           <div style="font-weight:600;">VARA (your own copy, Windows)</div>
-          <span class="help-text" style="display:block;margin-bottom:4px;">VARA is EA5HVK's modem, installed and licensed by you (<a href="https://rosmodem.wordpress.com/" data-external style="color:var(--accent-blue,#4fc3f7);">rosmodem.wordpress.com</a>); POTACAT points its Winlink client at it and keys the radio. In VARA set PTT to <b>None</b>. Without a licence VARA runs at reduced speed. Nothing of VARA is installed or downloaded by POTACAT.</span>
+          <span class="help-text" style="display:block;margin-bottom:4px;">VARA is EA5HVK's modem, installed and licensed by you; nothing of VARA is installed or downloaded by POTACAT. Without a licence it runs at reduced speed. Three things to install, then one click:</span>
+          <ol class="help-text" style="margin:0 0 6px 18px;padding:0;">
+            <li>VARA HF (and VARA FM if you want VHF) from <a href="https://rosmodem.wordpress.com/" data-external style="color:var(--accent-blue,#4fc3f7);">rosmodem.wordpress.com</a>.</li>
+            <li>Two virtual audio cables, both free from <a href="https://vb-audio.com/Cable/" data-external style="color:var(--accent-blue,#4fc3f7);">vb-audio.com/Cable</a>: <b>VB-CABLE</b> and the <b>Hi-Fi Cable</b> (or the donation A+B pack). Run each installer as administrator, then reboot.</li>
+            <li>Click <b>Set up VARA for me</b>. POTACAT writes VARA's sound-card and PTT settings (PTT via VOX: POTACAT keys the radio), wires its own side to the cables, starts VARA and checks that it opened them.</li>
+          </ol>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:6px;">
+            <button type="button" id="vara-setup-hf" class="btn btn-primary btn-sm">Set up VARA HF for me</button>
+            <button type="button" id="vara-setup-fm" class="btn btn-sm">Set up VARA FM for me</button>
+            <span class="help-text" id="vara-setup-status" style="flex-basis:100%;"></span>
+          </div>
+          <details style="margin-bottom:4px;">
+          <summary class="help-text" style="cursor:pointer;">Details and manual settings</summary>
+          <span class="help-text" style="display:block;margin:4px 0;">If you set VARA by hand instead: Settings &gt; SoundCard = the cable ends named below, Settings &gt; PTT = <b>VOX</b> (VARA has no "None"; VOX means VARA keys nothing and POTACAT keys the radio through Pat).</span>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
             <label class="checkbox-label"><input type="checkbox" id="set-vara-hf-enable"> Use VARA HF</label>
             <label>Program: <input type="text" id="set-vara-hf-path" placeholder="C:\VARA\VARA.exe (found for you)" style="width:210px;"> <button type="button" id="vara-hf-browse">Browse&hellip;</button> <button type="button" id="vara-hf-find">Find / test</button></label>
@@ -3070,6 +3083,7 @@
             <label>To VARA (the cable POTACAT plays into): <select id="set-vara-cable-out" style="max-width:260px;"></select></label>
           </div>
           <span class="help-text" style="display:block;">Saved for the active radio.</span>
+          </details>
         </div>
         <label class="checkbox-label" style="margin-top:6px;"><input type="checkbox" id="set-winlink-prediction" checked> Rank gateways by predicted propagation</label>
         <span class="help-text" style="display:block;">The gateway list is ordered by the path VOACAP expects to be open right now, not by distance. Your grid square and each gateway's are sent to POTACAT's VOACAP service at api.potacat.com; a VOACAP you installed yourself is used instead. Off = nearest first, nothing sent.</span>
