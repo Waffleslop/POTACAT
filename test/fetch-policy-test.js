@@ -1,12 +1,16 @@
 // Outbound fetch never offers Brotli — lib/fetch-policy.js (CVE-2026-111497,
-// Electron 39 has no fixed Node). A real loopback server echoes the
-// Accept-Encoding it received.
+// Electron 39 has no fixed Node). A real loopback HTTPS server echoes the
+// Accept-Encoding it received. HTTPS, not HTTP: undici offers `br` only on
+// https: URLs (plain http gets "gzip, deflate" already), and every host
+// POTACAT fetches is https.
 'use strict';
 const assert = require('assert');
-const http = require('http');
+const https = require('https');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const P = require('../lib/fetch-policy');
+const { getOrCreateTlsCert } = require('../lib/remote-server');
 
 let pass = 0, fail = 0;
 async function test(name, fn) {
@@ -26,13 +30,17 @@ async function test(name, fn) {
     assert.strictEqual(out.headers.get('x-a'), '1');
   });
 
-  console.log('live');
+  console.log('live (HTTPS, self-signed)');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'potacat-fetch-policy-'));
+  const cert = getOrCreateTlsCert(tmp, {});
   const seen = [];
-  const srv = http.createServer((req, res) => { seen.push(req.headers['accept-encoding'] || ''); res.end('ok'); });
+  const srv = https.createServer({ cert: cert.cert, key: cert.key }, (req, res) => { seen.push(req.headers['accept-encoding'] || ''); res.end('ok'); });
   await new Promise((r) => srv.listen(0, '127.0.0.1', r));
-  const base = `http://127.0.0.1:${srv.address().port}`;
+  const base = `https://127.0.0.1:${srv.address().port}`;
+  const prevTls = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
   try {
-    await test('unwrapped Node fetch offers br (the reason this exists)', async () => {
+    await test('unwrapped Node fetch offers br over https (the reason this exists)', async () => {
       await fetch(base + '/plain');
       assert.ok(/\bbr\b/.test(seen[seen.length - 1]), 'Node offered: ' + seen[seen.length - 1]);
     });
@@ -50,7 +58,11 @@ async function test(name, fn) {
       assert.strictEqual(seen[seen.length - 1], 'identity');
     });
   } finally {
-    srv.close();
+    if (prevTls === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED; else process.env.NODE_TLS_REJECT_UNAUTHORIZED = prevTls;
+    // Let the TLS sockets close before the process ends: a hard process.exit
+    // with handles still closing trips libuv's async.c assertion on Windows.
+    await new Promise((r) => srv.close(r));
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
   }
 
   console.log('wiring');
@@ -63,5 +75,5 @@ async function test(name, fn) {
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);
-  process.exit(fail ? 1 : 0);
+  process.exitCode = fail ? 1 : 0;
 })();
