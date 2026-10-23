@@ -12156,12 +12156,15 @@ function openQuickLog() {
   });
 }
 
-// Debounced QRZ name lookup when typing callsign in Quick Log mode
+// Debounced QRZ name lookup whenever the operator types a callsign — including
+// over a spot's prefilled one. A multi-op activation is spotted under ONE call,
+// so changing it to the op actually worked must fetch THAT op's name; the old
+// "Quick Log only" guard kept the spotted op's name (Mac user, 2026-10-23; the
+// Ctrl+L pop-out already looked up on every edit). The name is callsign 1's,
+// so a comma list looks up its first call.
 logCallsign.addEventListener('input', () => {
-  // Only do live lookup in Quick Log mode (no pre-existing callsign on the spot)
-  if (currentLogSpot && currentLogSpot.callsign) return;
   clearTimeout(quickLogLookupTimer);
-  const cs = logCallsign.value.trim().toUpperCase();
+  const cs = (logCallsign.value.split(',')[0] || '').trim().toUpperCase();
   if (cs.length < 3) { logOpName.value = ''; return; }
   quickLogLookupTimer = setTimeout(async () => {
     // Check local cache first
@@ -12172,9 +12175,12 @@ logCallsign.addEventListener('input', () => {
     }
     // Fetch from QRZ via IPC
     const result = await window.api.qrzLookup(cs);
-    if (result && logCallsign.value.trim().toUpperCase() === cs) {
+    if ((logCallsign.value.split(',')[0] || '').trim().toUpperCase() !== cs) return; // typed on
+    if (result) {
       qrzData.set(JtcatParser.baseCall(cs), result);
       logOpName.value = qrzDisplayName(result);
+    } else {
+      logOpName.value = ''; // never leave the previous op's name on a new call
     }
   }, 500);
 });
