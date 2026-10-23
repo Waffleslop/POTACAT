@@ -146,6 +146,18 @@ and spots from a state or country still needed.
    agree, tints `#4fc3f7` / `#4ecca3`.
 4. **ECHOCAT**: web map and rows, hello capability, mobile handoff
    (`potacat-app/docs/desktop-handoffs/worked-overlay.md`).
+   **BUILT 2026-10-23**: a device has no roster, so the shack sends the STATUS of
+   every state and entity under its scope (S2C `worked-overlay {show, scope, band,
+   mode, confirmedOnly, states:{NJ:'confirmed'…}, countries:{…}, counts}`, worked ones
+   only — a few KB — hydrated at connect, re-pushed on every change including a logged
+   QSO), C2S `worked-overlay-set` (Guest Pass refused), capability `worked-overlay`,
+   polygons at `GET /geo/worked-overlay.json` (main's getter via
+   `setWorkedOverlayGeo`, same gate as the page). ECHOCAT Web inlines
+   `worked-roster.js` + `worked-overlay.js` and calls `attach(L, map, api, {web:true})`
+   on the Spots map (both creation sites) and the FT8 map, with the same legend. The
+   web decode rows already had the state badge from phase 2. Not on the web: the spot
+   row state pill (a spot's band differs from the dial's; needs the roster). Mobile
+   handoff written: `potacat-app/docs/desktop-handoffs/worked-overlay.md`.
 
 Rough size: phase 1 a day, 2 half a day, 3 a day and a half (most of it the asset
 build and three map surfaces), 4 half a day plus the app's own work.

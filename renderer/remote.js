@@ -136,6 +136,32 @@
 
   // --- State ---
   let ws = null;
+
+  // --- Worked-states / countries map tints (lib/worked-overlay.js, inlined) ---
+  // The shack decides which places are worked under ITS scope and sends the
+  // statuses (S2C worked-overlay); this page only draws them on the Spots and
+  // FT8 maps and relays the legend's switches back (C2S worked-overlay-set,
+  // the same settings F6/F7/F8 drive on the desktop).
+  let workedOverlayLast = null;
+  const workedOverlaySubs = [];
+  const workedOverlayApi = {
+    workedOverlayGet: () => Promise.resolve(workedOverlayLast),
+    onWorkedOverlayState: (cb) => { workedOverlaySubs.push(cb); },
+    workedOverlayGeo: () => fetch('/geo/worked-overlay.json', { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    workedOverlaySet: (patch) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(Object.assign({ type: 'worked-overlay-set' }, patch || {}))); },
+  };
+  function workedOverlayReceive(msg) {
+    workedOverlayLast = {
+      states: !!(msg.show && msg.show.states), countries: !!(msg.show && msg.show.countries),
+      scope: msg.scope || 'band-mode', band: msg.band || '', mode: msg.mode || '', confirmedOnly: !!msg.confirmedOnly,
+      stateMap: msg.states || {}, countryMap: msg.countries || {}, counts: msg.counts || null,
+    };
+    for (const cb of workedOverlaySubs) { try { cb(workedOverlayLast); } catch { /* one map's failure never blanks the other */ } }
+  }
+  function workedOverlayAttach(map) {
+    if (!map || map._workedOverlay || !window.WorkedOverlay) return;
+    map._workedOverlay = WorkedOverlay.attach(L, map, workedOverlayApi, { web: true });
+  }
   let spots = [];
   let donorCallsigns = new Set();
   // bandFilter removed — now multi-select dropdown
@@ -1944,6 +1970,13 @@
         // The active rig's presets (lib/rig-presets.js), hydrated at connect
         // and after every change on any surface.
         if (typeof window.__vfReceiveRigPresets === 'function') window.__vfReceiveRigPresets(msg);
+        break;
+      case 'worked-overlay':
+        // Worked-states / countries map tints: statuses under the shack's scope.
+        workedOverlayReceive(msg);
+        break;
+      case 'worked-overlay-refused':
+        showToast('Only the owner can change the map shading');
         break;
       case 'rig-preset-applied':
         // A preset went on (a tap here or elsewhere, or the shack on a mode
@@ -6623,6 +6656,7 @@
           className: 'dark-tiles',
           noWrap: true
         }).addTo(spotMap);
+        workedOverlayAttach(spotMap); // worked-states / countries tints + legend
       }
       setTimeout(() => spotMap.invalidateSize(), 100);
       renderMapSpots();
@@ -8369,6 +8403,7 @@
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
           maxZoom: 18, className: 'dark-tiles',
         }).addTo(ft8Map);
+        workedOverlayAttach(ft8Map); // worked-states / countries tints + legend
         // Center on home QTH if available
         if (phoneGrid) {
           var pos = gridToLatLonLocal(phoneGrid);
@@ -14436,6 +14471,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
         className: 'dark-tiles',
         noWrap: true,
       }).addTo(spotMap);
+      workedOverlayAttach(spotMap); // worked-states / countries tints + legend
       // Give CSS a tick to settle, then ask Leaflet to remeasure.
       // Do it several times — Leaflet needs the container size to be accurate
       // at the moment renderMapSpots() runs, and initial layout in popouts is

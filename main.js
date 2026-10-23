@@ -20940,6 +20940,13 @@ function connectRemote() {
     saveRigPresets({ presets, byMode }, 'device');
   });
 
+  // Worked-states / countries map tints: a device flips the shack's shared
+  // switches; the polygons are served from main's copy; the current statuses
+  // are cached in the server for hydration (a rebuilt server starts empty).
+  remoteServer.on('worked-overlay-set', (patch) => applyWorkedOverlayPatch(patch, 'ECHOCAT'));
+  if (typeof remoteServer.setWorkedOverlayGeo === 'function') remoteServer.setWorkedOverlayGeo(() => workedOverlayGeo());
+  sendWorkedOverlayToClients();
+
   // Phone requests to toggle remote CW on/off
   remoteServer.on('cw-enable-request', ({ enabled }) => {
     settings.remoteCwEnabled = !!enabled;
@@ -25995,6 +26002,7 @@ function workedOverlayWindows() {
 
 function sendWorkedRoster() {
   for (const w of workedOverlayWindows()) w.webContents.send('worked-roster', workedRoster);
+  sendWorkedOverlayToClients(); // the statuses ECHOCAT draws changed with the roster
 }
 
 // --- Worked overlay (map tints) state: main owns it, every map draws it ---
@@ -26020,9 +26028,37 @@ function broadcastWorkedOverlayState(force) {
   if (!force && key === _workedOverlayLastKey) return;
   _workedOverlayLastKey = key;
   for (const w of workedOverlayWindows()) w.webContents.send('worked-overlay-state', st);
-  if (win && !win.isDestroyed() && remoteServer && remoteServer.running && typeof remoteServer.broadcastWorkedOverlay === 'function') {
-    remoteServer.broadcastWorkedOverlay(st);
-  }
+  sendWorkedOverlayToClients();
+}
+
+/**
+ * ECHOCAT's copy (S2C worked-overlay): a device has no roster, so the shack
+ * sends the STATUS of every state and DXCC entity under the current scope
+ * (only the worked/confirmed ones — a few KB) plus the counts for the legend.
+ */
+function workedOverlayWebPayload() {
+  const st = workedOverlayState();
+  const opts = { scope: st.scope, band: st.band, mode: st.mode, confirmedOnly: st.confirmedOnly };
+  const states = {};
+  const countries = {};
+  const stateKeys = WorkedRoster.US_STATES.concat(WorkedRoster.CA_PROVINCES).map((s) => s.code);
+  for (const c of stateKeys) { const s = WorkedRoster.status(workedRoster, 'state', c, opts); if (s !== 'none') states[c] = s; }
+  const ents = ctyDb ? ctyDb.entities.map((e) => e.name) : Object.keys((workedRoster && workedRoster.entities) || {});
+  for (const n of ents) { const s = WorkedRoster.status(workedRoster, 'entity', n, opts); if (s !== 'none') countries[n] = s; }
+  return {
+    show: { states: st.states, countries: st.countries },
+    scope: st.scope, band: st.band, mode: st.mode, confirmedOnly: st.confirmedOnly,
+    states, countries,
+    counts: {
+      states: WorkedRoster.counts(workedRoster, 'state', WorkedRoster.US_STATES.map((s) => s.code), opts),
+      countries: WorkedRoster.counts(workedRoster, 'entity', ents, opts),
+    },
+  };
+}
+
+function sendWorkedOverlayToClients() {
+  if (!(remoteServer && typeof remoteServer.sendWorkedOverlay === 'function')) return;
+  try { remoteServer.sendWorkedOverlay(workedOverlayWebPayload()); } catch (err) { console.error('[Map] worked-overlay push failed:', err.message); }
 }
 
 /** The dial moved or changed mode: re-push if the band or mode family changed (deduped, 400 ms). */

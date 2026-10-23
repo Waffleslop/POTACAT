@@ -150,5 +150,40 @@ test('wiring: every map window attaches the overlay and its keys, main owns the 
   }
 });
 
+test('web: status maps draw the same tints without a roster; ECHOCAT wiring', () => {
+  const statusOf = WO.mapStatusOf({ NJ: 'confirmed', TX: 'worked', XX: 'bogus' }, { Japan: 'worked' });
+  assert.strictEqual(statusOf('state', 'NJ'), 'confirmed');
+  assert.strictEqual(statusOf('state', 'XX'), 'none', 'an unknown status word is not worked');
+  assert.strictEqual(statusOf('entity', 'Japan'), 'worked');
+  assert.strictEqual(statusOf('entity', 'Alaska'), 'none');
+  const gb = geoCountries.features.find((f) => f.properties.dxcc.includes('England'));
+  assert.strictEqual(WO.featureStatusWith(WO.mapStatusOf({}, { Wales: 'confirmed' }), 'entity', gb), 'confirmed');
+  const made = [];
+  const L = { layerGroup: () => ({ addLayer(l) { made.push(l); } }), geoJSON: (fc, o) => ({ kind: 'geojson', style: o.style }), circle: (ll, o) => ({ kind: 'circle', color: o.color }) };
+  WO.buildLayerWith(L, { states: geoStates, countries: geoCountries, points: [{ name: 'Guam', lat: 13, lon: 144 }] }, WO.mapStatusOf({ TX: 'worked' }, { Guam: 'confirmed' }), { states: true, countries: true }, 'p');
+  assert.strictEqual(made.filter((m) => m.kind === 'circle').length, 3, 'Guam confirmed draws at three copies');
+  assert.strictEqual(made.filter((m) => m.kind === 'circle')[0].color, '#4ecca3');
+  // server + protocol + page
+  const rs = rd('lib/remote-server.js');
+  assert.ok(rs.includes("'worked-overlay',") && rs.includes("case 'worked-overlay-set':") && rs.includes('sendWorkedOverlay(payload)') && rs.includes("pathname === '/geo/worked-overlay.json'"));
+  assert.ok(/if \(this\._lastWorkedOverlay\) this\._sendTo\(ws, this\._lastWorkedOverlay\);/.test(rs), 'hydrated at connect');
+  assert.ok(/worked-overlay-refused', reason: 'guest-pass'/.test(rs), 'Guest Pass refused');
+  assert.ok(/\['worked-roster-js', 'worked-roster\.js'\], \['worked-overlay-js', 'worked-overlay\.js'\]/.test(rs), 'both modules inlined into the page');
+  const proto = rd('lib/echocat-protocol.js');
+  for (const k of ["'worked-overlay':", "'worked-overlay-set':", "'worked-overlay-refused':"]) assert.ok(proto.includes(k), k);
+  const html = rd('renderer/remote.html');
+  assert.ok(html.includes('<!-- worked-roster-js -->') && html.includes('<!-- worked-overlay-js -->'));
+  assert.ok(html.indexOf('<!-- worked-roster-js -->') < html.indexOf('<!-- worked-overlay-js -->'), 'roster before overlay');
+  const rj = rd('renderer/remote.js');
+  assert.strictEqual((rj.match(/workedOverlayAttach\(spotMap\)/g) || []).length, 2, 'both spot-map creations attach');
+  assert.strictEqual((rj.match(/workedOverlayAttach\(ft8Map\)/g) || []).length, 1, 'the FT8 map attaches');
+  assert.ok(rj.includes("case 'worked-overlay':") && rj.includes("type: 'worked-overlay-set'") && rj.includes("fetch('/geo/worked-overlay.json'"));
+  const main = rd('main.js');
+  assert.ok(main.includes("remoteServer.on('worked-overlay-set'") && main.includes('remoteServer.setWorkedOverlayGeo(') && /sendWorkedOverlay\(workedOverlayWebPayload\(\)\)/.test(main));
+  const on = main.indexOf("remoteServer.on('worked-overlay-set'");
+  const cr = main.indexOf('function connectRemote(');
+  assert.ok(on > cr, 'wired inside connectRemote (the server is rebuilt on reconnect)');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
