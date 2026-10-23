@@ -226,12 +226,22 @@ void StopCodec(char * strFault)
 }"""),
 ])
 
+# ── TNC listeners on loopback only ───────────────────────────────────────
+# Both sockets (command 8515, data 8516) bind INADDR_ANY upstream. POTACAT's
+# Pat is always on this PC, and a 0.0.0.0 listener is what makes Windows
+# Firewall pop "allow ardopcf.exe" on the first session. Loopback needs no
+# rule anywhere.
+tcp_orig, tcp_new = edit('TCPHostInterface.c', [
+    ("\tpsin=&local_sin;\n\tpsin->sin_family = AF_INET;\n\tpsin->sin_addr.s_addr = INADDR_ANY;\n\n\tif (port)\n\t{\n\t\tsock = socket(AF_INET, SOCK_STREAM, 0);\n\n\t\tif (sock == INVALID_SOCKET)\n\t\t{\n\t\t\tZF_LOGD(\"socket() failed error %d\", WSAGetLastError());\n\t\t\treturn 0;\n\t\t}\n",
+     "\tpsin=&local_sin;\n\tpsin->sin_family = AF_INET;\n\tpsin->sin_addr.s_addr = htonl(INADDR_LOOPBACK);  // POTACAT: the host is always this PC\n\n\tif (port)\n\t{\n\t\tsock = socket(AF_INET, SOCK_STREAM, 0);\n\n\t\tif (sock == INVALID_SOCKET)\n\t\t{\n\t\t\tZF_LOGD(\"socket() failed error %d\", WSAGetLastError());\n\t\t\treturn 0;\n\t\t}\n"),
+])
+
 mk_orig, mk_new = edit('Makefile', [
     ("\tsrc/common/ARDOPC.o \\\n", "\tsrc/common/ARDOPC.o \\\n\tsrc/common/SocketAudio.o \\\n"),
 ])
 
 out = []
-for path, a, b in [('src/windows/Waveout.c', wo_orig, wo_new), ('src/linux/ALSASound.c', al_orig, al_new), ('Makefile', mk_orig, mk_new)]:
+for path, a, b in [('src/windows/Waveout.c', wo_orig, wo_new), ('src/linux/ALSASound.c', al_orig, al_new), ('src/common/TCPHostInterface.c', tcp_orig, tcp_new), ('Makefile', mk_orig, mk_new)]:
     out.extend(difflib.unified_diff(a.splitlines(True), b.splitlines(True), 'a/' + path, 'b/' + path))
 open(out_path, 'w', encoding='utf-8', newline='').write(''.join(out))
 print('wrote', out_path, sum(1 for l in out if l.startswith('+') and not l.startswith('+++')), 'added lines')

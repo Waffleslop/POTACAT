@@ -168,6 +168,17 @@
  	CloseSoundCard();
  }
  
+--- a/src/common/TCPHostInterface.c
++++ b/src/common/TCPHostInterface.c
+@@ -490,7 +490,7 @@
+ 
+ 	psin=&local_sin;
+ 	psin->sin_family = AF_INET;
+-	psin->sin_addr.s_addr = INADDR_ANY;
++	psin->sin_addr.s_addr = htonl(INADDR_LOOPBACK);  // POTACAT: the host is always this PC
+ 
+ 	if (port)
+ 	{
 --- a/Makefile
 +++ b/Makefile
 @@ -48,6 +48,7 @@

@@ -72,18 +72,18 @@ jobs:
       - name: Build Pat (Winlink client — MIT, separate exe)
         shell: bash
         # Winlink sidecars (docs/winlink-integration-plan.md), built from the
-        # pinned tags in scripts/build-winlink-helpers.sh. continue-on-error
-        # until the first green run on every runner: without them POTACAT says
-        # "Pat not found" / greys ARDOP, it never breaks. Drop it once green.
-        continue-on-error: true
+        # pinned tags in scripts/build-winlink-helpers.sh.
+        # winlink-helpers.yml is green on every runner (2026-10-22), so a build
+        # failure here FAILS the release: an installer without them would tell
+        # every user "Pat not found" after the fact.
         run: bash scripts/build-winlink-helpers.sh pat
       - name: Build ardopcf + Dire Wolf (ARDOP modem MIT, packet TNC GPL-2.0 — separate exes)
         shell: msys2 {0}
         # Winlink sidecars (docs/winlink-integration-plan.md), built from the
-        # pinned tags in scripts/build-winlink-helpers.sh. continue-on-error
-        # until the first green run on every runner: without them POTACAT says
-        # "Pat not found" / greys ARDOP, it never breaks. Drop it once green.
-        continue-on-error: true
+        # pinned tags in scripts/build-winlink-helpers.sh.
+        # winlink-helpers.yml is green on every runner (2026-10-22), so a build
+        # failure here FAILS the release: an installer without them would tell
+        # every user "Pat not found" after the fact.
         run: bash scripts/build-winlink-helpers.sh ardop direwolf
       - name: Fetch cloudflared (POTACAT Cloud tunnel binary)
         run: node scripts/fetch-cloudflared.js --platform=win
@@ -185,10 +185,10 @@ jobs:
           cache: false
       - name: Build Pat (Winlink client — MIT, separate exe; no ardopcf on macOS)
         # Winlink sidecars (docs/winlink-integration-plan.md), built from the
-        # pinned tags in scripts/build-winlink-helpers.sh. continue-on-error
-        # until the first green run on every runner: without them POTACAT says
-        # "Pat not found" / greys ARDOP, it never breaks. Drop it once green.
-        continue-on-error: true
+        # pinned tags in scripts/build-winlink-helpers.sh.
+        # winlink-helpers.yml is green on every runner (2026-10-22), so a build
+        # failure here FAILS the release: an installer without them would tell
+        # every user "Pat not found" after the fact.
         run: bash scripts/build-winlink-helpers.sh pat
       - name: Fetch cloudflared (POTACAT Cloud tunnel binary)
         run: node scripts/fetch-cloudflared.js --platform=mac --arch=arm64
@@ -284,10 +284,10 @@ jobs:
           cache: false
       - name: Build Pat (Winlink client — MIT, separate exe; no ardopcf on macOS)
         # Winlink sidecars (docs/winlink-integration-plan.md), built from the
-        # pinned tags in scripts/build-winlink-helpers.sh. continue-on-error
-        # until the first green run on every runner: without them POTACAT says
-        # "Pat not found" / greys ARDOP, it never breaks. Drop it once green.
-        continue-on-error: true
+        # pinned tags in scripts/build-winlink-helpers.sh.
+        # winlink-helpers.yml is green on every runner (2026-10-22), so a build
+        # failure here FAILS the release: an installer without them would tell
+        # every user "Pat not found" after the fact.
         run: bash scripts/build-winlink-helpers.sh pat
       - name: Fetch cloudflared (POTACAT Cloud tunnel binary)
         run: node scripts/fetch-cloudflared.js --platform=mac --arch=x64
@@ -442,10 +442,10 @@ jobs:
           cache: false
       - name: Build Pat + ardopcf + Dire Wolf (Winlink client, ARDOP modem, packet TNC — separate exes)
         # Winlink sidecars (docs/winlink-integration-plan.md), built from the
-        # pinned tags in scripts/build-winlink-helpers.sh. continue-on-error
-        # until the first green run on every runner: without them POTACAT says
-        # "Pat not found" / greys ARDOP, it never breaks. Drop it once green.
-        continue-on-error: true
+        # pinned tags in scripts/build-winlink-helpers.sh.
+        # winlink-helpers.yml is green on every runner (2026-10-22), so a build
+        # failure here FAILS the release: an installer without them would tell
+        # every user "Pat not found" after the fact.
         run: |
           sudo apt-get install -y libasound2-dev libhamlib-dev cmake patchelf
           bash scripts/build-winlink-helpers.sh pat ardop direwolf
@@ -587,10 +587,10 @@ jobs:
           cache: false
       - name: Build Pat + ardopcf + Dire Wolf (Winlink client, ARDOP modem, packet TNC — separate exes)
         # Winlink sidecars (docs/winlink-integration-plan.md), built from the
-        # pinned tags in scripts/build-winlink-helpers.sh. continue-on-error
-        # until the first green run on every runner: without them POTACAT says
-        # "Pat not found" / greys ARDOP, it never breaks. Drop it once green.
-        continue-on-error: true
+        # pinned tags in scripts/build-winlink-helpers.sh.
+        # winlink-helpers.yml is green on every runner (2026-10-22), so a build
+        # failure here FAILS the release: an installer without them would tell
+        # every user "Pat not found" after the fact.
         run: |
           sudo apt-get install -y libasound2-dev libhamlib-dev cmake patchelf
           bash scripts/build-winlink-helpers.sh pat ardop direwolf

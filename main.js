@@ -9230,6 +9230,11 @@ function winlinkAccountGate(what) {
   return null;
 }
 async function winlinkAccountCheck(call) {
+  // Enable was just saved: Pat is starting. Wait for it rather than telling
+  // a new user to try again.
+  if (settings.enableWinlink && !(patClient && winlinkState.snapshot().patReady)) {
+    for (let i = 0; i < 30 && !(patClient && winlinkState.snapshot().patReady); i++) await new Promise((r) => setTimeout(r, 500));
+  }
   const gate = winlinkAccountGate('the check'); if (gate) return gate;
   const callsign = String(call || settings.myCallsign || '').toUpperCase();
   if (!callsign) return { ok: false, error: 'Set your callsign first' };

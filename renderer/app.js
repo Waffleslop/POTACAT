@@ -5113,6 +5113,14 @@ if (setMercuryEnable) {
     const regBox = document.getElementById('winlink-register');
     const acctBtn = document.getElementById('winlink-account-check');
     if (acctBtn) acctBtn.addEventListener('click', async () => {
+      // One click for a new user: Enable ticked but not yet saved means Pat
+      // is not running — save now (which starts it), then check.
+      let savedEnabled = false;
+      try { savedEnabled = !!(await window.api.getSettings()).enableWinlink; } catch {}
+      if (setWinlinkEnable.checked && !savedEnabled) {
+        acctStatus.textContent = 'Saving and starting Winlink…';
+        try { settingsSave.click(); } catch {}
+      }
       acctStatus.textContent = 'Checking…';
       const r = await window.api.winlinkAccountCheck();
       if (!r || !r.ok) { acctStatus.textContent = (r && r.error) || 'Could not check'; return; }
