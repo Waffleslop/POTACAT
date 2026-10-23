@@ -108,7 +108,7 @@ test('PTT off waits for the modem\'s last samples to clear POTACAT\'s pipeline; 
 
 test('the macOS modem builds: ardopcf against the ALSA stand-in, Dire Wolf with the socket patch, bundled and arch-checked', () => {
   const script = read('scripts/build-winlink-helpers.sh');
-  assert.ok(/make ardopcf CC=cc CFLAGS="-g -MMD -std=gnu17 -I\$ROOT\/helpers\/alsa-stub" LDFLAGS="" LDLIBS="-lm -lpthread"/.test(script), 'mac ardopcf: stub include, no -lasound, no GNU-ld map flag');
+  assert.ok(/make ardopcf CC=cc CFLAGS="-g -MMD -std=gnu17[^"]* -I\$ROOT\/helpers\/alsa-stub" LDFLAGS="" LDLIBS="-lm -lpthread"/.test(script), 'mac ardopcf: stub include, no -lasound, no GNU-ld map flag');
   assert.ok(/git -C "\$WORK\/direwolf" apply --ignore-whitespace "\$ROOT\/third_party\/direwolf\/potacat-socket-audio\.patch"/.test(script), 'Dire Wolf gets the socket patch');
   assert.ok(/cp "\$ROOT\/third_party\/direwolf\/src\/audio_tcp\.c" "\$ROOT\/third_party\/direwolf\/src\/audio_tcp\.h" "\$WORK\/direwolf\/src\/"/.test(script));
   assert.ok(/sed -i\.bak 's\/\[ \\t\]\*\$\/\/' src\/audio\.c src\/audio_win\.c src\/audio_portaudio\.c src\/audio\.h src\/CMakeLists\.txt/.test(script), 'trailing blanks stripped the way the generator did');
