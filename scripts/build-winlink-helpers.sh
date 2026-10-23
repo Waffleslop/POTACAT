@@ -136,7 +136,11 @@ if [[ " $want " == *" ardop "* ]]; then
       Z="$WORK/ardop/lib/zf_log/zf_log/zf_log.c"
       sed -i.bak 's|STATIC_ASSERT(buf_sz_less_than_pipe_buf, ZF_LOG_BUF_SZ <= PIPE_BUF);|/* POTACAT macOS: pipe-atomicity assert dropped (PIPE_BUF is 512 here; ardopcf logs to files) */|' "$Z" && rm -f "$Z.bak"
       grep -q 'POTACAT macOS: pipe-atomicity' "$Z" || { echo "::error::zf_log PIPE_BUF assert patch did not apply"; exit 1; }
-      ( cd "$WORK/ardop" && make ardopcf CC=cc CFLAGS="-g -MMD -std=gnu17 -Wno-int-conversion -I$ROOT/helpers/alsa-stub" LDFLAGS="" LDLIBS="-lm -lpthread" )
+      # -include sys/types.h -D_DARWIN_C_SOURCE: LinSerial.c and
+      # TCPHostInterface.c use the BSD `u_long` without including
+      # <sys/types.h>; Xcode 16's headers happen to pull it in, Xcode 15.4's
+      # (macos-14) do not (run 39906494543).
+      ( cd "$WORK/ardop" && make ardopcf CC=cc CFLAGS="-g -MMD -std=gnu17 -Wno-int-conversion -D_DARWIN_C_SOURCE -include sys/types.h -I$ROOT/helpers/alsa-stub" LDFLAGS="" LDLIBS="-lm -lpthread" )
     else
       ( cd "$WORK/ardop" && make ardopcf CFLAGS="-g -MMD -std=gnu17" )
     fi
@@ -164,7 +168,10 @@ if [[ " $want " == *" direwolf "* ]]; then
     # right-stripped copies, so strip the same five files first (sed -i.bak:
     # the one spelling GNU and BSD sed share).
     cp "$ROOT/third_party/direwolf/src/audio_tcp.c" "$ROOT/third_party/direwolf/src/audio_tcp.h" "$WORK/direwolf/src/"
-    ( cd "$WORK/direwolf" && sed -i.bak 's/[ \t]*$//' src/audio.c src/audio_win.c src/audio_portaudio.c src/audio.h src/CMakeLists.txt && rm -f src/*.bak )
+    # $'…' hands BOTH seds a literal tab: BSD sed reads '\t' inside [] as a
+    # backslash and a 't', left every trailing tab in place, and three hunks
+    # failed on the first Mac build (run 39906494543).
+    ( cd "$WORK/direwolf" && sed -i.bak $'s/[ \t]*$//' src/audio.c src/audio_win.c src/audio_portaudio.c src/audio.h src/CMakeLists.txt && rm -f src/*.bak )
     git -C "$WORK/direwolf" apply --ignore-whitespace "$ROOT/third_party/direwolf/potacat-socket-audio.patch" || { echo "::error::potacat-socket-audio.patch did not apply to direwolf $DIREWOLF_TAG"; exit 1; }
     for f in audio.c audio_win.c audio_portaudio.c; do
       grep -q 'tcpaudio_open' "$WORK/direwolf/src/$f" || { echo "::error::socket audio hook missing from $f"; exit 1; }
