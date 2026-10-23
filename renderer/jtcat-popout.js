@@ -5062,11 +5062,14 @@ function _applyPopoutTheme(payload) {
             // also says which entry to pick (KF1G 2026-09-05).
             const savedId = String(constraints.deviceId && constraints.deviceId.exact || '');
             window.api.jtcatLog(savedId.indexOf('alsa:') === 0
-              ? '[JTCAT popout] The saved audio input "' + savedId + '" is a raw ALSA device — POTACAT cannot capture FT8 audio from raw ALSA through the browser path. Falling back to the DEFAULT input. Pick the PulseAudio/PipeWire device for the same card in Settings > Radio, not the one under "ALSA hardware (raw)".'
-              : '[JTCAT popout] Saved audio input device not found (' + [e && e.name, e && e.message].filter(Boolean).join(': ') + ') — falling back to the DEFAULT input. If you upgraded to SmartSDR 4.2.18+ (DAXv2), every DAX device changed: re-select your rig audio devices in Settings > Radio.');
+              ? '[JTCAT popout] The saved audio input "' + savedId + '" is a raw ALSA device — POTACAT cannot capture FT8 audio from raw ALSA through the browser path, and does not fall back to the default input. Pick the PulseAudio/PipeWire device for the same card in Settings > Radio, not the one under "ALSA hardware (raw)".'
+              : '[JTCAT popout] Saved audio input device not found (' + [e && e.name, e && e.message].filter(Boolean).join(': ') + ') — NOT falling back to the default input (it is usually a microphone). If you upgraded to SmartSDR 4.2.18+ (DAXv2), every DAX device changed: re-select your rig audio devices in Settings > Radio.');
           }
-          delete constraints.deviceId;
-          popoutAudioStream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+          // NEVER substitute the default input: on a Mac it is the built-in
+          // microphone — decodes only with the radio's speaker up, and the room
+          // audible to anyone listening (KF0WWL 2026-10-23). Same rule as the
+          // ECHOCAT bridge (remote-audio.html). No audio beats the wrong audio.
+          throw new Error('The radio\'s audio input could not be opened, so nothing was captured (the microphone was NOT used). Pick the radio\'s input again in Settings > My Rigs > Audio.');
         }
       }
       _audioStartStage = 'capture-ctx (state pending)';
@@ -5205,6 +5208,13 @@ function _applyPopoutTheme(payload) {
         window.api.jtcatLog('[JTCAT popout] AUDIO START FAILED (' + (audioSource || 'device') + '): ' +
           (err.message || err) + ' — the waterfall will be blank (decode is unaffected on SmartSDR Direct). ' +
           'Close and reopen the JTCAT window to retry.');
+      }
+      // On screen too: "no decodes" with nothing visible is the worst outcome.
+      if (jpWfSilentEl) {
+        jpWfSilentEl.classList.add('show');
+        jpWfSilentEl.style.pointerEvents = 'auto';
+        jpWfSilentEl.style.cursor = 'pointer';
+        jpWfSilentEl.textContent = (err && err.message) || 'Audio not started — click to retry';
       }
     }
   }

@@ -17405,8 +17405,9 @@ settingsSave.addEventListener('click', async () => {
     swrGuard: swrGuardVal,
     swrGuardMax: swrGuardMaxVal,
     cwKeyPort: cwKeyPortVal,
-    remoteAudioInput: selectedRig ? (selectedRig.remoteAudioInput || '') : '',
-    remoteAudioOutput: selectedRig ? (selectedRig.remoteAudioOutput || '') : '',
+    // No rig selected → leave the stored devices alone (as audioSource does):
+    // writing '' here made every capture path open the system default input.
+    ...(selectedRig ? { remoteAudioInput: selectedRig.remoteAudioInput || '', remoteAudioOutput: selectedRig.remoteAudioOutput || '' } : {}),
     appMode: document.querySelector('input[name="set-app-mode"]:checked')?.value || 'hunter',
   });
   // Reflect the Mercury enable state in the More ▾ menu without a reload.

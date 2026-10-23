@@ -434,6 +434,7 @@ const { RemoteServer } = require('./lib/remote-server');
 const { buildDiagnosticSnapshot, redactLogLines } = require('./lib/diagnostic-snapshot');
 const { BUG_REPORT_MARKER, selectReportLines, maskHomeDir, sessionLogRotationMoves } = require('./lib/bug-report-log');
 const { healActiveRig } = require('./lib/active-rig');
+const { healRigAudioMirror } = require('./lib/rig-audio-mirror');
 const { decideAtuKeepOn, ATU_KEEP_ON_POLL_MS, ATU_KEEP_ON_FIRST_POLL_MS } = require('./lib/atu-keep-on');
 // Per-rig "Keep the tuner on after a tune cycle" (lib/atu-keep-on.js): after
 // the tune command, ask `AC;` until the radio reports the tuner off, then
@@ -472,7 +473,18 @@ function healActiveRigNow(where) {
     sendCatLog(`[CAT] activeRigId named no rig (${r.staleId || 'unset'}); adopted "${r.rig.name || r.rig.model || 'rig'}" because its connection target is the one in use (${where})`);
     try { saveSettings(settings); } catch {}
   }
+  healRigAudioMirrorNow(where);
   return r;
+}
+// The capture paths read settings.remoteAudioInput; the rig holds the truth.
+// An empty mirror opened the Mac's built-in mic for ECHOCAT and FT8 (KF0WWL).
+function healRigAudioMirrorNow(where) {
+  const a = healRigAudioMirror(settings);
+  if (a.changed) {
+    sendCatLog(`[Audio] the radio's audio devices were not in the runtime settings (${a.fields.map((f) => `${f.key} was ${f.was ? 'a different device' : 'EMPTY — the system default, often the built-in mic'}`).join('; ')}); restored from the active rig (${where})`);
+    try { saveSettings(settings); } catch {}
+  }
+  return a;
 }
 // Lines kept before the "recording started" marker: a report is usually
 // filed AFTER the thing happened (lib/bug-report-log.js, KF0U 2026-10-20).
@@ -38174,6 +38186,8 @@ app.whenReady().then(() => {
         settings.catTarget = rigNow.catTarget;
       }
     }
+    // The rig's audio devices win over an empty or stale mirror in the blob.
+    healRigAudioMirror(settings);
     saveSettings(settings);
 
     // Watchlist group edits (lists, colors, emoji) must reach every open

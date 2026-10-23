@@ -90,11 +90,29 @@ window.api.onStartAudio(async (config) => {
       // recording device and have never set anything. That case keeps working,
       // but it no longer does so silently — the label is logged below so a
       // "why is my microphone on" report answers itself.
-      localStream = await navigator.mediaDevices.getUserMedia({ audio: baseAudio });
-      window.api.sendAudioStatus({
-        warning: 'No radio audio input is configured, so the system DEFAULT recording device was opened. '
-          + 'If that is a microphone, set the radio\'s input in Settings > My Rigs > Audio.',
-      });
+      // The configured OUTPUT names the radio's sound card: its input is the
+      // same physical device (one groupId), never the built-in mic.
+      let twinId = '';
+      try {
+        if (config.outputDeviceId) {
+          const devs = await navigator.mediaDevices.enumerateDevices();
+          const out = devs.find((d) => d.kind === 'audiooutput' && d.deviceId === config.outputDeviceId);
+          const twin = out && out.groupId ? devs.find((d) => d.kind === 'audioinput' && d.groupId === out.groupId && d.deviceId !== 'default' && d.deviceId !== 'communications') : null;
+          if (twin) twinId = twin.deviceId;
+        }
+      } catch {}
+      if (twinId) {
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: { ...baseAudio, deviceId: { exact: twinId } } });
+        window.api.sendAudioStatus({
+          warning: 'No radio audio input is configured; used the input of the radio\'s sound card (the same device as its output). Set it in Settings > My Rigs > Audio to make this explicit.',
+        });
+      } else {
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: baseAudio });
+        window.api.sendAudioStatus({
+          warning: 'No radio audio input is configured, so the system DEFAULT recording device was opened. '
+            + 'If that is a microphone, set the radio\'s input in Settings > My Rigs > Audio.',
+        });
+      }
     }
     // Always name what is actually being sent to the phone. One line here
     // would have answered N2FSM's report in a single message.
