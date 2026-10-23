@@ -3196,7 +3196,7 @@
            "token" on the wire and in the app's older copy). Off at install. -->
       <div class="pair-section" id="remote-password-section">
         <strong>Password-protect your rig</strong>
-        <span class="help-text" style="display:block;margin:2px 0 6px;">Anyone who opens your ECHOCAT address (this PC on your network or Tailscale, port 7300) can see and control your radio. Turn this on and they must enter this password first — in the ECHOCAT web page or the mobile app's connect screen. Devices you pair by QR code or tap-to-pair get it automatically, and the POTACAT Cloud tunnel has its own sign-in. Off when POTACAT is installed. (Older app versions call this the access token.)</span>
+        <span class="help-text" style="display:block;margin:2px 0 6px;">Anyone who opens your ECHOCAT address (this PC on your network or Tailscale, port 7300) can see and control your radio. Turn this on and the ECHOCAT web page asks for this password first. The mobile app never types it: it arrives inside the QR code, tap-to-pair or link you pair with, and the POTACAT Cloud tunnel has its own sign-in. Off when POTACAT is installed. (Older app versions call this the access token.)</span>
         <label class="checkbox-label" style="margin:0;"><input type="checkbox" id="set-remote-require-token"> Require a password to reach my ECHOCAT address</label>
         <div id="remote-token-row" class="hidden" style="margin-top:6px;display:flex;align-items:center;gap:8px;">
           <label>Password:
