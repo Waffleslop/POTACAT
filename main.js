@@ -8648,6 +8648,8 @@ async function startWinlinkShim() {
     getPtt: () => winlinkTxActive,
     setFreqHz: (hz) => {
       if (!_winlinkShimArmed || radioOwner !== 'winlink') { winlinkLog(`refused Pat's tune to ${(hz / 1e6).toFixed(4)} MHz — no radio session is running`); return false; }
+      if (_atuTuneEpisode && Math.abs(hz - (_currentFreqHz || 0)) > 100) { winlinkLog(`held Pat's tune to ${(hz / 1e6).toFixed(4)} MHz — an ATU tune is running`); return false; }
+      if (Math.abs(hz - (_currentFreqHz || 0)) <= 1) return true; // Pat's QSX back to the dial it is already on
       tuneRadio(hz / 1000, undefined, undefined, { origin: 'Winlink (Pat via the rigctld shim)' });
       return true;
     },
@@ -9189,7 +9191,7 @@ function winlinkEndSession(state, text, received = 0) {
     if (s.mode === 'mercury') winlinkTakeMercuryBack();
     // Pat QSXes the dial back itself; POTACAT puts the MODE back too.
     if (s.tuned && s.returnTo && s.returnTo.mode && s.returnTo.freqHz) {
-      setTimeout(() => { try { tuneRadio(s.returnTo.freqHz / 1000, s.returnTo.mode, undefined, { origin: 'Winlink session ended' }); } catch {} }, 1500);
+      setTimeout(() => winlinkRestoreDial(s.returnTo), 1500);
     }
     winlinkFlexDaxRestore();
     releaseRadio('winlink');
@@ -9198,6 +9200,22 @@ function winlinkEndSession(state, text, received = 0) {
   winlinkLog(`session ${state === 'done' ? 'finished' : 'failed'}: ${text}`);
   winlinkSessionPush();
   winlinkRefreshMailboxes();
+}
+
+/**
+ * Put the dial back after a session — but never under a running ATU tune.
+ * The SWR guard's auto-tune sweeps the gateway frequency; a QSY mid-sweep
+ * made the 8600 report TUNE_FAIL_BYPASS and the guard blame the antenna
+ * (K3SBP 2026-10-23). Waits for the episode to resolve (≤ 30 s), then tunes.
+ */
+function winlinkRestoreDial(returnTo, waitedMs = 0) {
+  if (!returnTo || !returnTo.freqHz) return;
+  if (_atuTuneEpisode && waitedMs < 30000) {
+    if (waitedMs === 0) winlinkLog(`holding the return to ${(returnTo.freqHz / 1e6).toFixed(4)} MHz until the ATU tune finishes`);
+    setTimeout(() => winlinkRestoreDial(returnTo, waitedMs + 500), 500);
+    return;
+  }
+  try { tuneRadio(returnTo.freqHz / 1000, returnTo.mode || undefined, undefined, { origin: 'Winlink session ended' }); } catch {}
 }
 
 function winlinkAbortSession(why) {
@@ -15787,14 +15805,24 @@ function connectSmartSdr() {
     // true ratio, not a scaled meter.
     // A frame at near-zero forward power (between words on SSB) neither
     // counts nor resets — it used to reset, so voice never tripped.
-    if (settings.swrGuard !== false && !_swrTripped && Date.now() > _swrGuardSuppressUntil) {
+    // Every frame's fate is counted into the TX window (logFlexTxRfSummary
+    // prints it), so a burst at SWR 4.6 that did NOT trip says why — K3SBP's
+    // second ARDOP attempt on 2026-10-23 had three such bursts and the log
+    // could not tell suppressed from ignored from disabled.
+    const g = _flexTxRf && (_flexTxRf.guard || (_flexTxRf.guard = { over: 0, ok: 0, ignored: 0, suppressed: 0, off: 0, tripped: 0 }));
+    if (settings.swrGuard === false) { if (g) g.off++; }
+    else if (_swrTripped) { if (g) g.tripped++; }
+    else if (Date.now() <= _swrGuardSuppressUntil) { if (g) g.suppressed++; }
+    else {
       const fwdW = (Date.now() - _flexLastFwdAt < 500) ? _flexLastFwdW : null;
       const verdict = SwrGuard.swrFrameVerdict({ swr, fwdW, limit: swrGuardMax() });
       if (verdict === 'over') {
+        if (g) g.over++;
         if (++_swrGuardHits >= 3) tripSwrGuard(swr);
       } else if (verdict === 'ok') {
         _swrGuardHits = 0;
-      }
+        if (g) g.ok++;
+      } else if (g) g.ignored++;
     }
     // Track for the status snapshot (mobile desktop-ask meter-scale-and-
     // flex-swr-snapshot.md): a phone connecting mid-session should see SWR
@@ -22499,7 +22527,20 @@ function logFlexTxRfSummary() {
   const raw = rf.peakW < 1 ? ` [meter peak ${rawW > 0 ? (10 * Math.log10(rawW) + 30).toFixed(1) + ' dBm = ' + rawW.toPrecision(2) + ' W' : 'nothing'}]` : '';
   const kv = _flexTransmitKv || {};
   const txFilt = (kv.lo != null || kv.hi != null) ? `; TX filter ${kv.lo || '?'}-${kv.hi || '?'} Hz` : '';
-  sendCatLog(`[TX] RF out: peak ${peak} W${swr} (Flex TX bridge, ${rf.frames} frames over ${secs} s${setTo}${txFilt})${raw}`);
+  // The SWR guard's view of this window, only when it mattered: the match was
+  // over the limit and nothing tripped.
+  let guardNote = '';
+  const g = rf.guard;
+  if (g && rf.maxSwr > swrGuardMax() && !g.tripped && !(g.over >= 3)) {
+    const parts = [];
+    if (g.off) parts.push(`${g.off} with the guard off`);
+    if (g.suppressed) parts.push(`${g.suppressed} inside the ATU-tune window (until ${new Date(_swrGuardSuppressUntil).toISOString().slice(11, 19)}Z)`);
+    if (g.ignored) parts.push(`${g.ignored} under ${SwrGuard.SWR_MIN_FWD_W} W forward`);
+    if (g.over) parts.push(`${g.over} over the limit (fewer than the 3 in a row needed)`);
+    if (g.ok) parts.push(`${g.ok} under the limit`);
+    guardNote = `; SWR guard did not trip: ${parts.join(', ') || 'no SWR frames judged'}`;
+  }
+  sendCatLog(`[TX] RF out: peak ${peak} W${swr} (Flex TX bridge, ${rf.frames} frames over ${secs} s${setTo}${txFilt}${guardNote})${raw}`);
 }
 
 // Say what the radio's RF power is set to at every JTCAT key-down, and warn —
@@ -29224,7 +29265,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
       : (mode === 'CW' ? 'CW' : (mode === 'AM' ? 'AM' : (mode === 'FM' ? 'FM' : (mode === 'SSB' ? ssbSide : (mode === 'USB' ? 'USB' : (mode === 'LSB' ? 'LSB' : null))))));
     if (mode) _modeSuppressUntil = Date.now() + 2000;
     const _flexLabel = smartSdr.mode === 'self' ? 'Flex Direct' : 'Flex API (bound)';
-    sendCatLog(`tune via ${_flexLabel}: slice=${sliceIndex} freq=${freqMhz.toFixed(6)}MHz mode=${mode}${flexMode && mode !== flexMode ? '->' + flexMode : ''} filter=${filterWidth}${useVfoShift ? ` (VFO shifted +${settings.cwXit}Hz for XIT)` : ''}`);
+    sendCatLog(`tune via ${_flexLabel}: slice=${sliceIndex} freq=${freqMhz.toFixed(6)}MHz mode=${mode || '(unchanged)'}${flexMode && mode !== flexMode ? '->' + flexMode : ''} filter=${filterWidth}${useVfoShift ? ` (VFO shifted +${settings.cwXit}Hz for XIT)` : ''}`);
     // Per-band antenna selection — same lookup as the SmartSDR-Win path
     // above. Fires before tuneSlice so the antenna is already switched
     // when the freq lands.

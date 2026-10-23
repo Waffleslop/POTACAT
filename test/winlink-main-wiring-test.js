@@ -207,3 +207,12 @@ test('an SWR-guard trip aborts a running Winlink session with the reason in sess
   assert.ok(/if \(winlinkSessionActive\(\)\) winlinkAbortSession\(`SWR \$\{swr\.toFixed\(1\)\}:1/.test(trip), 'tripSwrGuard stops the session');
   assert.ok(/_winlinkSessionError = `Stopped: \$\{why\}`;/.test(fnBody(main, 'winlinkAbortSession')), 'the reason reaches session.error');
 });
+
+test('the session-end dial restore and Pat\'s QSX wait for a running ATU tune; the guard counts every frame', () => {
+  const restore = fnBody(main, 'winlinkRestoreDial');
+  assert.ok(/if \(_atuTuneEpisode && waitedMs < 30000\)/.test(restore), 'held while the episode runs');
+  assert.ok(/setTimeout\(\(\) => winlinkRestoreDial\(s\.returnTo\), 1500\);/.test(main), 'winlinkEndSession restores through it');
+  const shim = fnBody(main, 'startWinlinkShim');
+  assert.ok(/if \(_atuTuneEpisode && Math\.abs\(hz - \(_currentFreqHz \|\| 0\)\) > 100\)/.test(shim), 'the shim holds a QSY under a tune');
+  assert.ok(/g\.suppressed\+\+/.test(main) && /SWR guard did not trip:/.test(main), 'the RF summary says why the guard stayed quiet');
+});
