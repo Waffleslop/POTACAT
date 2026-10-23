@@ -35641,8 +35641,10 @@ app.whenReady().then(() => {
       'https://github.com/Rhizomatica/', 'https://rhizomatica.github.io/',
       // Winlink: Pat, ardopcf and the Winlink network (Settings > Station > Winlink).
       'https://getpat.io/', 'https://github.com/la5nta/', 'https://github.com/pflarue/', 'https://winlink.org/', 'https://www.winlink.org/',
-      // VARA (the operator's own copy) and the virtual audio cable it needs —
-      // links in Settings > Station > Winlink. Neither is downloaded by POTACAT.
+      // VARA (the operator brings their own copy) and the virtual audio cable it
+      // needs: links in Settings > Station > Winlink. Neither is downloaded by
+      // POTACAT. No apostrophes in this comment: the links test reads the
+      // quoted strings of this block.
       'https://rosmodem.wordpress.com/', 'https://vb-audio.com/',
       // JS8Call — download + docs links in Settings. The gate is a prefix
       // match that fails CLOSED with no error, so the scheme matters: the
