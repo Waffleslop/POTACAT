@@ -6139,6 +6139,10 @@ a.settings-echocat-badge-link:hover {
   align-items: center;
   margin-bottom: 12px;
 }
+/* The Log QSO form can be dragged by its title bar (N3CDF / N0KAH 2026-10-23:
+   it covered the callsigns being logged). */
+#log-dialog .log-dialog-header { cursor: move; user-select: none; }
+#log-dialog.dragged { margin: 0; right: auto; bottom: auto; }
 
 .log-dialog-header h3 {
   margin-bottom: 0;

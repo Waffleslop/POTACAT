@@ -783,6 +783,12 @@ function _applyPopoutTheme(payload) {
       // without an extra click. (W9TEF: "the call should pre-fill, and it
       // should be on RST Sent so I can quickly type in the RST".)
       if (p.callsign && !callInput.value) {
+        // A tuned POTA/SOTA/WWFF spot's program and reference (Ctrl+L), like the Log button's.
+        if (p.type && p.type !== 'dx') {
+          selectChip(p.type);
+          refInput.value = String(p.reference || '').toUpperCase();
+          if (refNameEl && p.parkName) refNameEl.textContent = p.parkName;
+        }
         callInput.value = String(p.callsign).toUpperCase();
         reportCall();
         // Trigger the callsign lookup so QTH/past QSOs populate.

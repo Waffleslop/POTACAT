@@ -12156,11 +12156,24 @@ function openQuickLog() {
   // in the prefill and skips its callsign-input focus, jumping straight
   // to RST Sent.
   const tunedCall = (lastTunedSpot && lastTunedSpot.callsign) ? lastTunedSpot.callsign : '';
+  // The tuned spot's PROGRAM and reference come along too, as the Log button
+  // sends them — Ctrl+L on a POTA spot used to open as DX with no park, and
+  // switching to POTA did not fill the reference (N0KAH 2026-10-23). Only
+  // while the radio is still on that spot (within 1 kHz), and only for a spot
+  // the window's one-reference form can hold.
+  let programFill = {};
+  if (lastTunedSpot && tunedCall && spotFitsPopout(lastTunedSpot)
+      && Math.abs((parseFloat(lastTunedSpot.frequency) || 0) - (radioFreqKhz || 0)) <= 1) {
+    const p = detectSpotPrograms(lastTunedSpot);
+    const type = p.types[0] || 'dx';
+    if (type !== 'dx') programFill = { type, reference: p.refs[type] || '', parkName: p.names[type] || '' };
+  }
   window.api.openLogPopout({
     callsign: tunedCall,
     freqKhz: radioFreqKhz || null,
     mode: radioMode || null,
     power: radioPower || lastLogPower || null,
+    ...programFill,
   });
 }
 
@@ -12203,6 +12216,48 @@ if (window.api.onCm108Ptt) {
     status.textContent = 'Looking…';
     try { _cm108Dev = null; const dev = await cm108Device(true); status.textContent = 'Found ' + window.Cm108Ptt.describe(dev) + ' — PTT will key it.'; }
     catch (e) { status.textContent = (e && e.message) || String(e); }
+  });
+})();
+
+// The Log QSO form moves by its title bar and opens where it was last put
+// (kept inside the window). Double-click the title to send it back to centre.
+const LOG_DIALOG_POS_KEY = 'potacat-log-dialog-pos';
+function placeLogDialog() {
+  let pos = null;
+  try { pos = JSON.parse(localStorage.getItem(LOG_DIALOG_POS_KEY) || 'null'); } catch {}
+  if (!pos || !Number.isFinite(pos.left) || !Number.isFinite(pos.top)) { logDialog.classList.remove('dragged'); logDialog.style.left = logDialog.style.top = ''; return; }
+  const w = logDialog.offsetWidth, h = logDialog.offsetHeight;
+  logDialog.classList.add('dragged');
+  logDialog.style.left = Math.max(0, Math.min(pos.left, window.innerWidth - w)) + 'px';
+  logDialog.style.top = Math.max(0, Math.min(pos.top, window.innerHeight - Math.min(h, 80))) + 'px';
+}
+(function makeLogDialogDraggable() {
+  const head = logDialog && logDialog.querySelector('.log-dialog-header');
+  if (!head) return;
+  let drag = null;
+  head.addEventListener('mousedown', (e) => {
+    if (e.button !== 0 || e.target.closest('button, input, select, a')) return;
+    const r = logDialog.getBoundingClientRect();
+    logDialog.classList.add('dragged');
+    logDialog.style.left = r.left + 'px';
+    logDialog.style.top = r.top + 'px';
+    drag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!drag) return;
+    const w = logDialog.offsetWidth;
+    logDialog.style.left = Math.max(0, Math.min(e.clientX - drag.dx, window.innerWidth - w)) + 'px';
+    logDialog.style.top = Math.max(0, Math.min(e.clientY - drag.dy, window.innerHeight - 40)) + 'px';
+  });
+  window.addEventListener('mouseup', () => {
+    if (!drag) return;
+    drag = null;
+    try { localStorage.setItem(LOG_DIALOG_POS_KEY, JSON.stringify({ left: parseInt(logDialog.style.left, 10), top: parseInt(logDialog.style.top, 10) })); } catch {}
+  });
+  head.addEventListener('dblclick', () => {
+    try { localStorage.removeItem(LOG_DIALOG_POS_KEY); } catch {}
+    placeLogDialog();
   });
 })();
 
@@ -14531,6 +14586,7 @@ function openLogPopup(spot) {
 
   refreshLogAsOperators(); // Log as: back to the active operator on every open
   logDialog.showModal();
+  placeLogDialog();
   // Focus RST Sent so user can immediately type signal report
   if (n1mmRst) {
     const firstDigit = document.querySelector('#rst-sent-split .rst-digit');
