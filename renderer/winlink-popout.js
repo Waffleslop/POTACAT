@@ -170,6 +170,19 @@
     var ptt = $('wl-ptt');
     ptt.textContent = active && ss.mode !== 'telnet' ? (ss.ptt ? 'TX' : 'RX') : '';
     ptt.classList.toggle('on', !!ss.ptt);
+    // Audio levels (session.audio, pushed twice a second during a radio
+    // session): what the modem hears from the radio — and how much POTACAT
+    // trimmed it to keep VARA's input out of the red — and what it sends back.
+    var au = ss.audio || null;
+    var ael = $('wl-audio');
+    if (active && au && ss.mode !== 'telnet') {
+      var parts = [];
+      if (au.toModemDb != null) parts.push('to modem ' + au.toModemDb + ' dB' + (au.trimDb ? ' (trimmed ' + Math.abs(au.trimDb) + ' dB)' : ''));
+      else if (au.rxDb != null && au.rxDb > -90) parts.push('radio ' + au.rxDb + ' dB');
+      if (au.fromModemDb != null && au.fromModemDb > -90) parts.push('from modem ' + au.fromModemDb + ' dB');
+      ael.textContent = parts.join(' · ');
+      ael.classList.toggle('hot', !!au.hot);
+    } else { ael.textContent = ''; ael.classList.remove('hot'); }
     $('wl-bar').style.width = (active && ss.total ? ss.pct : 0) + '%';
     var text = ss.error && st === 'error' ? ss.error : (ss.text || '');
     if (active && ss.subject) text = (ss.direction === 'receiving' ? 'Receiving ' : 'Sending ') + '"' + ss.subject + '" ' + (ss.total ? fmtSize(ss.bytes) + ' / ' + fmtSize(ss.total) : '');

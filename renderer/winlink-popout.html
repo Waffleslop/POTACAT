@@ -65,6 +65,8 @@
     .wl-state.error { color: #e94560; }
     .wl-ptt { padding: 0 6px; border-radius: 3px; font-weight: 700; font-size: 11px; }
     .wl-ptt.on { background: var(--accent-red, #e94560); color: #fff; }
+    .wl-audio { font-size: 11px; opacity: 0.8; font-family: Consolas, "Courier New", monospace; white-space: nowrap; }
+    .wl-audio.hot { color: var(--accent-red, #e94560); opacity: 1; font-weight: 700; }
     .wl-bar { flex: 0 0 120px; height: 6px; background: var(--bg-tertiary, #2a2a40); border-radius: 3px; overflow: hidden; }
     .wl-bar > div { height: 100%; width: 0; background: var(--accent-blue, #4fc3f7); }
     .wl-text { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -177,6 +179,7 @@
   <div class="wl-session">
     <span class="wl-state idle" id="wl-state">idle</span>
     <span class="wl-ptt" id="wl-ptt"></span>
+    <span class="wl-audio" id="wl-audio" title="Audio levels in dBFS (0 = full scale). The radio audio the modem hears is trimmed automatically when it reaches the red."></span>
     <div class="wl-bar"><div id="wl-bar"></div></div>
     <span class="wl-text" id="wl-text"></span>
     <span id="wl-remaining"></span>

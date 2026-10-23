@@ -1661,6 +1661,7 @@ const winlinkState = new WinlinkStateLib.WinlinkState();
 let winlinkShim = null;         // loopback rigctld shim Pat keys and tunes through
 let _winlinkShimPort = 0;
 let _winlinkShimArmed = false;  // Pat may tune/key only while a radio session runs
+let _winlinkShimRefusedAt = 0;  // last "no session" PTT refusal (rate-limits the log line + the repeat hang-up)
 let _winlinkUnkeyTimer = null;  // the modem asked for PTT off; the tail of its audio is still in POTACAT's pipeline
 let ardopProc = null;           // ardopcf for an ARDOP session
 let direwolfProc = null;        // Dire Wolf for a packet (AX.25) session
@@ -8619,6 +8620,8 @@ async function winlinkVaraSetup({ kind: k, devices, inputLabel, outputLabel } = 
  * port, start the program for them when asked (detached, their window, never
  * stopped by POTACAT), wait for the port, or say exactly what is missing.
  */
+const VARA_LAUNCH_WAIT_MS = 45000;      // a cold VARA start on a busy PC
+const _varaLaunch = { hf: null, fm: null }; // { child, at } for a VARA POTACAT started that may still be coming up
 async function winlinkVaraReady(mode, { configured } = {}) {
   const kind = VaraProcess.kindOfMode(mode);
   const name = VaraProcess.varaName(kind);
@@ -8636,20 +8639,32 @@ async function winlinkVaraReady(mode, { configured } = {}) {
           if (!c.ok && c.step !== 'running') winlinkLog(`${name}: not configured for this radio — ${c.error}`);
         } catch (e) { winlinkLog(`${name}: configure failed — ${e.message}`); }
       }
-      winlinkLog(`${name}: nothing on 127.0.0.1:${port} — starting ${bin.path}`);
-      try {
-        const child = spawn(bin.path, [], { ...VaraProcess.varaSpawnOptions(), cwd: path.dirname(bin.path) });
-        child.on('error', (e) => winlinkLog(`${name}: could not start: ${e.message}`));
-        child.unref();
-      } catch (e) {
-        throw new Error(`${name} could not be started (${e.message}) — start it yourself, with its PTT set to VOX`);
+      // ONE launch at a time. VARA takes 10–20 s to come up on a cold start
+      // (21 s on K3SBP's PC, 2026-10-23); a second session started meanwhile
+      // used to spawn VARA.exe again, which answered with its own "VARA is
+      // already open" box and never the port. A launch that is still inside
+      // its window is joined, not repeated.
+      const launched = _varaLaunch[kind];
+      if (launched && launched.child && launched.child.exitCode === null && Date.now() - launched.at < VARA_LAUNCH_WAIT_MS) {
+        winlinkLog(`${name}: still starting (launched ${Math.round((Date.now() - launched.at) / 1000)} s ago) — waiting for its port`);
+      } else {
+        winlinkLog(`${name}: nothing on 127.0.0.1:${port} — starting ${bin.path}`);
+        try {
+          const child = spawn(bin.path, [], { ...VaraProcess.varaSpawnOptions(), cwd: path.dirname(bin.path) });
+          child.on('error', (e) => winlinkLog(`${name}: could not start: ${e.message}`));
+          child.on('exit', () => { if (_varaLaunch[kind] && _varaLaunch[kind].child === child) _varaLaunch[kind] = null; });
+          child.unref();
+          _varaLaunch[kind] = { child, at: Date.now() };
+        } catch (e) {
+          throw new Error(`${name} could not be started (${e.message}) — start it yourself, with its PTT set to VOX`);
+        }
       }
-      const until = Date.now() + VaraProcess.VARA_DEFAULTS.launchWaitMs;
+      const until = _varaLaunch[kind] ? _varaLaunch[kind].at + VARA_LAUNCH_WAIT_MS : Date.now() + VaraProcess.VARA_DEFAULTS.launchWaitMs;
       while (!probe.ok && Date.now() < until) {
         await new Promise((r) => setTimeout(r, 1000));
         probe = await VaraProcess.probeVaraPort(port);
       }
-      if (!probe.ok) throw new Error(`${name} was started but is not answering on port ${port} — check the port in its Settings (POTACAT expects ${port}) and that its PTT is set to VOX`);
+      if (!probe.ok) throw new Error(`${name} was started but is not answering on port ${port} after ${Math.round(VARA_LAUNCH_WAIT_MS / 1000)} s — check the port in its Settings (POTACAT expects ${port}) and that its PTT is set to VOX`);
     } else if (bin.found) {
       throw new Error(`${name} is not running — start it (with its PTT set to VOX), or turn on "Start VARA for me" in Settings > Station > Winlink`);
     } else {
@@ -9042,7 +9057,17 @@ async function startWinlinkShim() {
         _winlinkUnkeyTimer = setTimeout(() => { _winlinkUnkeyTimer = null; winlinkUnkeyNow(); }, winlinkUnkeyDrainMs());
         return true;
       }
-      if (!_winlinkShimArmed || radioOwner !== 'winlink') { winlinkLog('refused Pat\'s PTT — no radio session is running'); return false; }
+      if (!_winlinkShimArmed || radioOwner !== 'winlink') {
+        // Pat is still on a call POTACAT has ended (a VARA dial that waited
+        // for a clear channel outlives the first disconnect): refuse the key,
+        // and tell Pat again, at most every 3 s, until it stops asking.
+        if (Date.now() - _winlinkShimRefusedAt > 3000) {
+          _winlinkShimRefusedAt = Date.now();
+          winlinkLog('refused Pat\'s PTT — no radio session is running (telling Pat to hang up)');
+          if (patClient) patClient.disconnect(true).catch(() => {});
+        }
+        return false;
+      }
       if (_swrTripped) { winlinkLog('refused Pat\'s PTT — the SWR guard has tripped'); return false; }
       if (_winlinkUnkeyTimer) {
         // Keyed again inside the drain hold: stay keyed, nothing to re-assert.
@@ -9325,6 +9350,12 @@ function winlinkSyncModemBridge() {
 let _cableRxResampler = null;   // radio RX (any rate) → 24 kHz for the cable's play worklet
 let _cableTxResampler = null;   // VARA's TX (the cable's capture rate) → 24 kHz for the radio TX path
 let _cableRxRate = 0, _cableTxRate = 0;
+// The level of the radio audio VARA hears through the cable (lib/modem-rx-level.js):
+// trimmed automatically when it reaches the red, shown on every surface.
+const { RxLeveler } = require('./lib/modem-rx-level');
+let _cableRxLeveler = null;
+let _cableRxTrimLoggedAt = 0;
+let _winlinkRxPeak = 0, _winlinkRxPeakAt = 0; // the radio feed's own peak (any radio mode), for the meter
 /** The one place modem TX audio (24 kHz mono) meets the radio: Flex stream, Icom Network, or the radio side of the bridge. */
 function winlinkDispatchTx(mono24k) {
   if (settings.audioSource === 'smartsdr') {
@@ -9345,12 +9376,31 @@ function modemBridgePlayback(on) {
 /** Receive audio from the radio link → the modem (called from the Flex and Icom RX taps). */
 function winlinkFeedRx(pcm, sampleRate) {
   if (winlinkAudio && winlinkAudio.connected) winlinkAudio.feedRx(pcm, sampleRate);
+  // The feed's own peak, held 500 ms, for the session meter (any radio mode).
+  if (winlinkSessionActive()) {
+    const now = Date.now();
+    let pk = 0;
+    for (let i = 0; i < pcm.length; i++) { const a = pcm[i] < 0 ? -pcm[i] : pcm[i]; if (a > pk) pk = a; }
+    if (pk > _winlinkRxPeak || now - _winlinkRxPeakAt > 500) { _winlinkRxPeak = pk; _winlinkRxPeakAt = now; }
+  }
   // VARA hears the radio through the virtual cable: the cable side's playback.
   if (modemBridge.cable.state === 'ok' && modemBridgeWin && !modemBridgeWin.isDestroyed()) {
     const f32 = pcm instanceof Float32Array ? pcm : new Float32Array(pcm);
     if (sampleRate !== _cableRxRate) { _cableRxRate = sampleRate; _cableRxResampler = sampleRate === 24000 ? null : new mercuryAudioBridge.StreamingResampler(sampleRate, 24000); }
     const out = _cableRxResampler ? _cableRxResampler.process(f32) : f32;
-    if (out.length) audioSafeSend(modemBridgeWin.webContents, 'modem-bridge-cable-tx', { pcm: out });
+    if (out.length) {
+      // Level: the receiver's audio at unity put VARA's input VU on the red
+      // line and its busy detector never cleared (K3SBP 2026-10-23). Trim a
+      // hot feed at once, say so once, let a quiet one creep back.
+      if (!_cableRxLeveler) _cableRxLeveler = new RxLeveler();
+      const before = _cableRxLeveler.trims;
+      const leveled = _cableRxLeveler.process(out === f32 ? Float32Array.from(out) : out);
+      if (_cableRxLeveler.trims !== before && Date.now() - _cableRxTrimLoggedAt > 10000) {
+        _cableRxTrimLoggedAt = Date.now();
+        winlinkLog(`radio audio to the modem trimmed by ${Math.abs(Math.round(_cableRxLeveler.gainDb))} dB — it was reaching the red (peak ${_cableRxLeveler.levels().inDb} dBFS); a hot input keeps VARA's busy detector from ever seeing a clear channel`);
+      }
+      audioSafeSend(modemBridgeWin.webContents, 'modem-bridge-cable-tx', { pcm: leveled });
+    }
   }
   // The mail window's waterfall ("is this frequency in use?") on the rigs
   // whose audio only main has; a sound-device rig's window captures its own.
@@ -9638,6 +9688,18 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
   if (!m) return { ok: false, error: `Unknown mode ${mode}` };
   if (!m.available) return { ok: false, error: m.reason, reason: 'unavailable' };
   const radio = WinlinkModes.isRadioMode(mode);
+  // Pat may still be on the last call: a VARA dial waiting for a clear
+  // channel ignores the first disconnect and goes on dialing once the channel
+  // clears (K3SBP 2026-10-23: 45 s of PTT requests after Stop). A new session
+  // on top of that collides at Pat ("Session failure") — refuse until it is
+  // really over, and tell Pat again.
+  if (radio && patClient) {
+    const busy = await winlinkPatStillBusy();
+    if (busy) {
+      patClient.disconnect(true).catch(() => {});
+      return { ok: false, error: `Pat is still ${busy} the last call — wait a few seconds and try again`, reason: 'pat-busy' };
+    }
+  }
   const url = WinlinkPat.sessionUrl({ mode, gateway, dialKhz, bw: mode === 'vara' ? settings.winlinkVaraBw : undefined, rowUrl });
   if (!url) return { ok: false, error: 'Pick a gateway first' };
   if (radio) {
@@ -9665,18 +9727,34 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
   }
 
   // Run the rest without blocking the caller (the pop-out / phone get pushes).
+  // Every await below is followed by a liveness check: a session the operator
+  // stopped (or that a later session replaced) must never carry on into the
+  // next one. On 2026-10-23 a stopped VARA attempt resumed 20 s later when
+  // VARA finally answered, opened the cable, QSYed, dialled through Pat,
+  // collided with the live attempt ("Session failure") and then tore that
+  // one down as its own failure.
+  const seq = ++_winlinkSessionSeq;
+  const live = () => seq === _winlinkSessionSeq && winlinkSessionActive();
+  const cancelled = () => Object.assign(new Error('cancelled'), { cancelled: true });
   (async () => {
     try {
       if (mode === 'ardop') await spawnArdop();
       if (mode === 'packet') await spawnDirewolf();
       if (mode === 'mercury') winlinkHandMercuryToPat();
-      if (mode === 'vara' || mode === 'varafm') { await winlinkVaraReady(mode); await winlinkVaraAudioReady(); }
+      if (!live()) throw cancelled();
+      if (mode === 'vara' || mode === 'varafm') {
+        await winlinkVaraReady(mode);
+        if (!live()) throw cancelled();
+        await winlinkVaraAudioReady();
+        if (!live()) throw cancelled();
+      }
       if (mode === 'mercury' || mode === 'vara') {
         const want = mode === 'mercury' ? `127.0.0.1:${mercuryProcess.mercuryPorts(settings).control}` : `127.0.0.1:${_winlinkVaraPort()}`;
         if (want !== _patVaraAddr) {
           writePatConfig({ varaAddr: want });
           await patClient.reload().catch(() => {});
           if (!(await winlinkWaitPatReady(15000))) throw new Error('Pat did not come back after switching its VARA port');
+          if (!live()) throw cancelled();
         }
       }
       if (radio) {
@@ -9693,15 +9771,58 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
           else winlinkSessionPush(); // keeps the countdown fresh on every surface
         }, 15000);
       }
+      if (radio) winlinkStartSessionMeter();
       winlinkState.setSession({ state: 'connecting', text: radio ? `Calling ${String(gateway).toUpperCase()}` : 'Connecting to the CMS' });
       winlinkSessionPush();
       const received = await patClient.connect(url);
+      if (!live()) throw cancelled();
       winlinkEndSession('done', winlinkSessionSummary(mode, winlinkState.session.sent, received, gateway), received);
     } catch (e) {
+      if (e && e.cancelled) { winlinkLog(`attempt #${seq} ended after it was stopped — nothing more done for it`); return; }
+      if (!live()) { winlinkLog(`attempt #${seq} failed after it was stopped (${e && e.message ? e.message : e}) — ignored`); return; }
       winlinkEndSession('error', _winlinkSessionError || e.message || String(e));
     }
   })();
   return { ok: true };
+}
+
+let _winlinkSessionSeq = 0; // the attempt a start chain belongs to; a stopped one can never end a later one
+let _winlinkMeterTimer = null;
+
+/** Is Pat still dialing or connected from the last call? '' when idle. Pat's keys have varied in case. */
+async function winlinkPatStillBusy() {
+  try {
+    const st = await patClient.status();
+    if (!st || typeof st !== 'object') return '';
+    const v = (k) => st[k] !== undefined ? st[k] : st[k.charAt(0).toUpperCase() + k.slice(1)];
+    if (v('connected')) return 'on';
+    if (v('dialing')) return 'hanging up';
+    return '';
+  } catch { return ''; }
+}
+
+/**
+ * Audio levels on every surface while a radio session runs: the radio feed
+ * the modem hears (and the trim applied to it on the cable route) and what
+ * the modem sends back. Pushed twice a second — the session payload is small.
+ */
+function winlinkAudioLevels() {
+  const db = (p) => (p > 0 ? Math.max(-90, Math.round(20 * Math.log10(p))) : -90);
+  const out = { rxDb: db(Date.now() - _winlinkRxPeakAt < 1500 ? _winlinkRxPeak : 0) };
+  if (_cableRxLeveler && modemBridge.cable.state === 'ok') {
+    const l = _cableRxLeveler.levels();
+    out.toModemDb = l.outDb; out.trimDb = l.trimDb; out.hot = l.hot;
+    out.fromModemDb = db(modemBridge.cable.level || 0);
+  }
+  return out;
+}
+function winlinkStartSessionMeter() {
+  clearInterval(_winlinkMeterTimer);
+  _winlinkMeterTimer = setInterval(() => {
+    if (!winlinkSessionActive()) { clearInterval(_winlinkMeterTimer); _winlinkMeterTimer = null; return; }
+    winlinkState.setSession({ audio: winlinkAudioLevels() });
+    winlinkSessionPush();
+  }, 500);
 }
 
 // A Winlink modem (ardopcf / Dire Wolf / Mercury) sends its audio to the DAX
@@ -9768,6 +9889,8 @@ function winlinkEndSession(state, text, received = 0) {
   const s = winlinkState.session;
   clearTimeout(_winlinkCapTimer); _winlinkCapTimer = null;
   clearInterval(_winlinkWatchdog); _winlinkWatchdog = null;
+  clearInterval(_winlinkMeterTimer); _winlinkMeterTimer = null;
+  _cableRxLeveler = null; // the next session starts at unity and finds its own level
   clearWinlinkTxFailsafe();
   _winlinkShimArmed = false;
   if (_winlinkUnkeyTimer) { clearTimeout(_winlinkUnkeyTimer); _winlinkUnkeyTimer = null; }
