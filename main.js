@@ -8385,7 +8385,10 @@ function winlinkPayload() {
   winlinkState.setModes(winlinkModes());
   winlinkState.setAutoCheck({ enabled: !!settings.winlinkTelnetAutoCheck, min: _winlinkAutoCheckMin() });
   return winlinkState.snapshot({
-    enabled: !!settings.enableWinlink,
+    // Always available (Casey 2026-10-23: no "turn on"). Pat starts on first
+    // use — patStarted false means "not running yet, any request starts it".
+    enabled: true,
+    patStarted: !!patClient,
     mycall: String(settings.myCallsign || '').toUpperCase(),
     hasPassword: !!settings.winlinkPassword,
     noticeAccepted: !!settings.winlinkNoticeAcceptedAt,
@@ -8580,9 +8583,26 @@ function winlinkTransportDownText(mode) {
   return 'The modem is not answering';
 }
 
+/**
+ * Winlink is always available; Pat runs only once someone uses it — the mail
+ * window, an ECHOCAT device's Mail tab, the account check, a session or the
+ * internet auto-check. Resolves true once Pat answers (≤ 15 s).
+ */
+let _winlinkStarting = null;
+async function winlinkEnsureStarted() {
+  if (patClient && winlinkState.snapshot().patReady) return true;
+  if (!_winlinkStarting && !patProc) {
+    _winlinkStarting = connectWinlink().catch(() => {}).finally(() => { _winlinkStarting = null; });
+  }
+  for (let i = 0; i < 30 && !(patClient && winlinkState.snapshot().patReady); i++) {
+    if (!_winlinkStarting && !patProc) break;   // it gave up — patError says why
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return !!(patClient && winlinkState.snapshot().patReady);
+}
+
 async function connectWinlink() {
   disconnectWinlink();
-  if (!settings.enableWinlink) { winlinkPush(); return; }
   const call = String(settings.myCallsign || '').trim();
   if (!call) {
     winlinkState.setPat({ ready: false, error: 'Set your callsign in Settings first' });
@@ -8796,7 +8816,6 @@ function winlinkSetRemoteWatch(count) {
 function winlinkPreviewQsy({ dialKhz, mode } = {}) {
   const khz = Number(dialKhz);
   if (!Number.isFinite(khz) || khz <= 0) return { ok: false, error: 'No frequency' };
-  if (!settings.enableWinlink) return { ok: false, error: 'Winlink is off' };
   if (isRemoteMode()) return { ok: false, error: 'Radio sessions key the shack\'s radio — tune from the shack PC', reason: 'remote' };
   if (winlinkSessionActive()) return { ok: false, error: 'A session is running' };
   if (radioOwner !== 'none' && radioOwner !== 'winlink') return { ok: false, error: `The radio is in use by ${radioOwner}`, reason: 'radio-busy' };
@@ -9044,8 +9063,7 @@ function winlinkSessionPush() {
  * @returns {{ok:boolean, error?:string, reason?:string}}
  */
 async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin } = {}) {
-  if (!settings.enableWinlink) return { ok: false, error: 'Winlink is off — turn it on in Settings > Station', reason: 'disabled' };
-  if (!patClient || !winlinkState.snapshot().patReady) return { ok: false, error: 'Pat is not running yet' };
+  if (!(await winlinkEnsureStarted())) return { ok: false, error: winlinkState.snapshot().patError || 'Winlink could not start — see the [Winlink] lines in the log' };
   if (!settings.winlinkNoticeAcceptedAt) return { ok: false, error: 'Read and accept the Winlink notice first' };
   if (!settings.winlinkPassword) return { ok: false, error: 'Set your Winlink password in Settings > Station > Winlink first' };
   if (winlinkSessionActive()) return { ok: false, error: 'A Winlink session is already running' };
@@ -9225,16 +9243,11 @@ function winlinkRestoreDial(returnTo, waitedMs = 0) {
 // never said back: not in winlink-state (hasPassword only), the log, the
 // diagnostic snapshot or the settings push (an explicit whitelist).
 function winlinkAccountGate(what) {
-  if (!settings.enableWinlink) return { ok: false, error: `Turn Winlink on and save first — ${what} runs through Pat` };
-  if (!patClient) return { ok: false, error: `Turn Winlink on and save first — ${what} runs through Pat` };
+  if (!patClient || !winlinkState.snapshot().patReady) return { ok: false, error: `Winlink could not start — ${what} runs through Pat. ${winlinkState.snapshot().patError || 'See the [Winlink] lines in the log.'}` };
   return null;
 }
 async function winlinkAccountCheck(call) {
-  // Enable was just saved: Pat is starting. Wait for it rather than telling
-  // a new user to try again.
-  if (settings.enableWinlink && !(patClient && winlinkState.snapshot().patReady)) {
-    for (let i = 0; i < 30 && !(patClient && winlinkState.snapshot().patReady); i++) await new Promise((r) => setTimeout(r, 500));
-  }
+  await winlinkEnsureStarted();
   const gate = winlinkAccountGate('the check'); if (gate) return gate;
   const callsign = String(call || settings.myCallsign || '').toUpperCase();
   if (!callsign) return { ok: false, error: 'Set your callsign first' };
@@ -9248,7 +9261,8 @@ function winlinkPasswordProblem(pw) {
   return '';
 }
 /** An existing account's password, typed on any surface: saved, Pat relaunched with it. */
-function winlinkSetPassword(password, origin) {
+async function winlinkSetPassword(password, origin) {
+  await winlinkEnsureStarted();
   const gate = winlinkAccountGate('the password'); if (gate) return gate;
   const pw = String(password || '');
   const problem = winlinkPasswordProblem(pw); if (problem) return { ok: false, error: problem };
@@ -9260,6 +9274,7 @@ function winlinkSetPassword(password, origin) {
   return { ok: true };
 }
 async function winlinkRegister({ password, recoveryEmail } = {}, origin) {
+  await winlinkEnsureStarted();
   const gate = winlinkAccountGate('registration'); if (gate) return gate;
   const pw = String(password || '');
   const problem = winlinkPasswordProblem(pw); if (problem) return { ok: false, error: problem };
@@ -9275,6 +9290,7 @@ async function winlinkRegister({ password, recoveryEmail } = {}, origin) {
   } catch (e) { return { ok: false, error: e.message }; }
 }
 async function winlinkRecoveryEmailGet() {
+  await winlinkEnsureStarted();
   const gate = winlinkAccountGate('the recovery address'); if (gate) return gate;
   try {
     const r = await patClient.recoveryEmail();
@@ -9283,6 +9299,7 @@ async function winlinkRecoveryEmailGet() {
   } catch (e) { return { ok: false, error: e.message }; }
 }
 async function winlinkRecoveryEmailSet(email) {
+  await winlinkEnsureStarted();
   const gate = winlinkAccountGate('the recovery address'); if (gate) return gate;
   const addr = String(email || '').trim();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) return { ok: false, error: 'That is not an email address' };
@@ -9319,7 +9336,7 @@ function _winlinkAutoCheckMin() {
 
 function winlinkArmAutoCheck() {
   clearTimeout(_winlinkAutoCheckTimer); _winlinkAutoCheckTimer = null;
-  if (!settings.enableWinlink || !settings.winlinkTelnetAutoCheck) return;
+  if (!settings.winlinkTelnetAutoCheck) return;
   _winlinkAutoCheckTimer = setTimeout(async () => {
     _winlinkAutoCheckTimer = null;
     // Internet only, by construction: this function never passes a radio mode.
@@ -9434,6 +9451,8 @@ function winlinkSetMode(mode) {
 // server already refused Guest Passes; `reply` answers the device that asked.
 async function winlinkHandleRemote({ type, req = {}, reply }) {
   const result = (op, r) => reply({ type: 'winlink-result', op, ok: !!(r && r.ok), ...(r && r.error ? { error: String(r.error) } : {}) });
+  // Any request from a device's Mail tab starts Pat (the first one waits ≤ 15 s).
+  if (type !== 'winlink-watch') winlinkEnsureStarted();
   try {
     switch (type) {
       case 'winlink-list': {
@@ -9490,7 +9509,7 @@ async function winlinkHandleRemote({ type, req = {}, reply }) {
         return;
       }
       case 'winlink-set-password':
-        result('set-password', winlinkSetPassword(req.password, 'ECHOCAT device'));
+        result('set-password', await winlinkSetPassword(req.password, 'ECHOCAT device'));
         return;
       case 'winlink-register':
         result('register', await winlinkRegister({ password: req.password, recoveryEmail: req.recoveryEmail }, 'ECHOCAT device'));
@@ -9534,7 +9553,7 @@ onRemoteServer((rs) => {
 });
 
 function winlinkDiagLine() {
-  if (!settings.enableWinlink) return 'off';
+  if (!patClient && !patProc) return 'not started (starts on first use)';
   const p = winlinkState.snapshot();
   const s = p.session;
   return `${p.patReady ? `Pat ready :${_patHttpPort}` : `Pat not ready${p.patError ? ' (' + p.patError + ')' : ''}`}`
@@ -30099,7 +30118,7 @@ app.whenReady().then(() => {
   // ever flipped on by the user.
   if (settings.myCallsign) connectRbn();
   if (settings.enableMercury) connectMercury();
-  if (settings.enableWinlink) connectWinlink();
+  if (settings.winlinkPassword) connectWinlink(); // an account holder: inbox ready; others start on first use
   connectSmartSdr(); // connects if smartSdrSpots, CW keyer, or WSJT-X+Flex
   connectTci();
   connectAntennaGenius();
@@ -32811,7 +32830,7 @@ app.whenReady().then(() => {
   });
   // ─── Winlink IPC (the mail window + Settings). Every surface goes through
   // the same winlink* functions; a radio session starts only from Connect.
-  ipcMain.on('winlink-popout-open', () => { openWinlinkPopout(); });
+  ipcMain.on('winlink-popout-open', () => { openWinlinkPopout(); winlinkEnsureStarted(); });
   ipcMain.on('winlink-popout-minimize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.minimize(); });
   ipcMain.on('winlink-popout-maximize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) { if (w.isMaximized()) w.unmaximize(); else w.maximize(); } });
   ipcMain.on('winlink-popout-close', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.close(); });
@@ -38311,8 +38330,9 @@ app.whenReady().then(() => {
     // Winlink: relaunch Pat for a config key; re-arm the internet auto-check;
     // otherwise just re-push (modes depend on the rig, Mercury and VARA port).
     if (winlinkChanged) {
-      if (settings.enableWinlink) connectWinlink();
-      else disconnectWinlink();
+      // Relaunch a running Pat with the new config; a password just set starts it.
+      if (patProc || patClient || settings.winlinkPassword) connectWinlink();
+      else winlinkPush();
     } else {
       if (winlinkAutoCheckChanged) winlinkArmAutoCheck();
       winlinkPush();

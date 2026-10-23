@@ -246,13 +246,24 @@ console.log('the release announcement');
 test('What\'s New carries the Winlink card once per profile, with a working opt-in checkbox', () => {
   const html = read('renderer/index.html');
   const app = read('renderer/app.js');
-  assert.ok(/id="whats-new-feature"/.test(html) && /id="whats-new-winlink-enable"/.test(html));
+  assert.ok(/id="whats-new-feature"/.test(html) && /id="whats-new-winlink-settings"/.test(html) && !/whats-new-winlink-enable/.test(html));
   assert.ok(/Over the internet:<\/b> Windows, Linux and Mac/.test(html) && /Over the radio \(ARDOP\):<\/b> Windows and Linux/.test(html), 'the platform claim is exactly what ships');
   const fn = fnBody(app, 'renderWinlinkAnnounce');
-  assert.ok(/s\.enableWinlink === true \|\| s\.winlinkAnnounced/.test(fn), 'never to a profile with Winlink on, and once');
+  assert.ok(/if \(s\.winlinkAnnounced\)/.test(fn), 'once per profile');
   assert.ok(/saveSettings\(\{ winlinkAnnounced:/.test(fn), 'stamped when shown');
-  assert.ok(/saveSettings\(\{ enableWinlink: box\.checked \}\)/.test(fn), 'the checkbox is the same opt-in as Settings');
+  assert.ok(!/enableWinlink/.test(fn), 'no opt-in: Winlink is always available');
   assert.ok(/await renderWinlinkAnnounce\(\);\n\s*dialog\.showModal\(\);/.test(app), 'rendered before the dialog opens');
   // A partial save of enableWinlink must start Pat (the save handler's relaunch gate).
   assert.ok(/const winlinkChanged = \['enableWinlink'/.test(main));
+});
+
+test('Winlink is always available and Pat starts on first use', () => {
+  assert.ok(!/settings\.enableWinlink/.test(main), 'no code path in main is gated on enableWinlink');
+  assert.ok(/enabled: true,\n\s*patStarted: !!patClient,/.test(fnBody(main, 'winlinkPayload')));
+  assert.ok(/ipcMain\.on\('winlink-popout-open', \(\) => \{ openWinlinkPopout\(\); winlinkEnsureStarted\(\); \}\);/.test(main), 'the mail window starts it');
+  assert.ok(/if \(type !== 'winlink-watch'\) winlinkEnsureStarted\(\);/.test(fnBody(main, 'winlinkHandleRemote')), 'a device request starts it');
+  assert.ok(/if \(settings\.winlinkPassword\) connectWinlink\(\);/.test(main), 'an account holder has it running from launch');
+  for (const f of ['winlinkAccountCheck', 'winlinkSetPassword', 'winlinkRegister', 'winlinkStartSession']) {
+    assert.ok(/await winlinkEnsureStarted\(\)/.test(fnBody(main, f)), f + ' starts Pat first');
+  }
 });

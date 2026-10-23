@@ -2986,10 +2986,12 @@
     <!-- 8a3. Winlink email (Pat) -->
     <fieldset class="source-toggles collapsible" data-settings-tab="station" id="winlink-fieldset">
       <legend>Winlink (email over radio)</legend>
-      <label class="checkbox-label">
-        <input type="checkbox" id="set-winlink-enable"> Enable Winlink email
+      <!-- Always on (no "turn on"): the input stays, hidden and checked, so
+           the existing load/save wiring keeps its shape. Pat starts on first use. -->
+      <label class="checkbox-label hidden">
+        <input type="checkbox" id="set-winlink-enable" checked> Enable Winlink email
       </label>
-      <div id="winlink-config" class="radio-sub hidden">
+      <div id="winlink-config" class="radio-sub">
         <span class="help-text" style="display:block;margin-bottom:6px;">Send and receive Winlink email from POTACAT, and from ECHOCAT on your phone. POTACAT runs Pat, the open-source Winlink client, in the background. Over the internet it works with no radio; over the radio, POTACAT tunes and keys for the session through its own CAT control. Open it from More &rarr; Winlink Mail.</span>
         <label>Winlink password:
           <input type="password" id="set-winlink-password" autocomplete="off" style="width:150px;" placeholder="6 to 12 characters">
@@ -4495,10 +4497,11 @@
         <li><b>Over the internet:</b> Windows, Linux and Mac</li>
         <li><b>Over the radio (ARDOP):</b> Windows and Linux</li>
       </ul>
-      <label class="checkbox-label" style="margin:0;"><input type="checkbox" id="whats-new-winlink-enable"> Turn on Winlink email</label>
-      <div id="whats-new-winlink-next" class="hidden help-text" style="margin-top:6px;">
-        Winlink is on. Next: <a href="#" id="whats-new-winlink-settings">set up your Winlink account</a> (check it or create one), then open <a href="#" id="whats-new-winlink-open">Winlink Mail</a>. It is also under More &gt; Winlink Mail.
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button type="button" id="whats-new-winlink-settings">Set up my Winlink account</button>
+        <button type="button" id="whats-new-winlink-open">Open Winlink Mail</button>
       </div>
+      <div class="help-text" style="margin-top:6px;">It is ready now, under More &gt; Winlink Mail. Already have an account? Set up finds it; new to Winlink? It creates one.</div>
     </div>
     <div id="whats-new-body" style="max-height:400px;overflow-y:auto;padding:8px 0;font-size:13px;line-height:1.5;color:var(--text-secondary);"></div>
   </dialog>

@@ -2031,7 +2031,7 @@ async function loadPrefs() {
   var mercuryBtn = document.getElementById('view-mercury-btn');
   if (mercuryBtn) mercuryBtn.classList.toggle('hidden', !settings.enableMercury);
   var winlinkBtn = document.getElementById('view-winlink-btn');
-  if (winlinkBtn) winlinkBtn.classList.toggle('hidden', !settings.enableWinlink);
+  if (winlinkBtn) winlinkBtn.classList.remove('hidden'); // Winlink is always available
   updateDxccButton();
   // Pi access — JTCAT button visibility on startup
   if (jtcatBtn) jtcatBtn.classList.remove('hidden');
@@ -5113,15 +5113,7 @@ if (setMercuryEnable) {
     const regBox = document.getElementById('winlink-register');
     const acctBtn = document.getElementById('winlink-account-check');
     if (acctBtn) acctBtn.addEventListener('click', async () => {
-      // One click for a new user: Enable ticked but not yet saved means Pat
-      // is not running — save now (which starts it), then check.
-      let savedEnabled = false;
-      try { savedEnabled = !!(await window.api.getSettings()).enableWinlink; } catch {}
-      if (setWinlinkEnable.checked && !savedEnabled) {
-        acctStatus.textContent = 'Saving and starting Winlink…';
-        try { settingsSave.click(); } catch {}
-      }
-      acctStatus.textContent = 'Checking…';
+      acctStatus.textContent = 'Checking… (the first check starts Winlink, a few seconds)';
       const r = await window.api.winlinkAccountCheck();
       if (!r || !r.ok) { acctStatus.textContent = (r && r.error) || 'Could not check'; return; }
       acctStatus.textContent = r.exists ? `${r.callsign} has a Winlink account.` : `${r.callsign} has no Winlink account yet.`;
@@ -16470,8 +16462,8 @@ async function openSettingsDialog(tab) {
   setTciMaxAge.value = s.tciMaxAge != null ? s.tciMaxAge : 15;
   tciConfig.classList.toggle('hidden', !s.tciSpots);
   if (setWinlinkEnable) {
-    setWinlinkEnable.checked = s.enableWinlink === true;
-    winlinkConfig.classList.toggle('hidden', !s.enableWinlink);
+    setWinlinkEnable.checked = true;
+    winlinkConfig.classList.remove('hidden');
     if (window.refreshWinlinkAudioRow) window.refreshWinlinkAudioRow();
     setWinlinkPassword.value = s.winlinkPassword || '';
     setWinlinkAutoCheck.checked = s.winlinkTelnetAutoCheck === true;
@@ -17415,7 +17407,7 @@ settingsSave.addEventListener('click', async () => {
   var mercuryViewBtn = document.getElementById('view-mercury-btn');
   if (mercuryViewBtn && setMercuryEnable) mercuryViewBtn.classList.toggle('hidden', !setMercuryEnable.checked);
   var winlinkViewBtn = document.getElementById('view-winlink-btn');
-  if (winlinkViewBtn && setWinlinkEnable) winlinkViewBtn.classList.toggle('hidden', !setWinlinkEnable.checked);
+  if (winlinkViewBtn) winlinkViewBtn.classList.remove('hidden');
   grid = setGrid.value.trim();
   distUnit = setDistUnit.value;
   maxAgeMin = maxAgeVal;
@@ -20586,7 +20578,7 @@ catLogClearBtn.addEventListener('click', () => {
     } catch {}
     // Winlink: Pat's state, the shim, the session — only when it is on.
     let winlinkLine = '';
-    try { if (s.enableWinlink && window.api.winlinkDiag) winlinkLine = await window.api.winlinkDiag(); } catch {}
+    try { if (window.api.winlinkDiag) winlinkLine = await window.api.winlinkDiag(); } catch {}
     const md = {
       version: window._appVersion || s.appVersion || 'unknown',
       platform: window.api.platform,
@@ -25203,27 +25195,16 @@ async function showWhatsNew(version) {
 }
 
 // The Winlink announcement on the What's New dialog: shown once per profile
-// (settings.winlinkAnnounced, stamped when it is shown) and never to a profile
-// that already has Winlink on. The checkbox is the whole opt-in: saving
-// enableWinlink starts Pat exactly as the Settings checkbox does.
+// (settings.winlinkAnnounced, stamped when it is shown). Winlink is always
+// available — no opt-in — so the card offers the next steps only.
 async function renderWinlinkAnnounce() {
   const card = document.getElementById('whats-new-feature');
   if (!card) return;
   let s = {};
   try { s = await window.api.getSettings(); } catch {}
-  if (s.enableWinlink === true || s.winlinkAnnounced) { card.classList.add('hidden'); return; }
+  if (s.winlinkAnnounced) { card.classList.add('hidden'); return; }
   card.classList.remove('hidden');
   try { await window.api.saveSettings({ winlinkAnnounced: new Date().toISOString() }); } catch {}
-  const box = document.getElementById('whats-new-winlink-enable');
-  const next = document.getElementById('whats-new-winlink-next');
-  box.checked = false;
-  next.classList.add('hidden');
-  box.onchange = async () => {
-    try { await window.api.saveSettings({ enableWinlink: box.checked }); } catch {}
-    next.classList.toggle('hidden', !box.checked);
-    const btn = document.getElementById('view-winlink-btn');
-    if (btn) btn.classList.toggle('hidden', !box.checked);
-  };
   document.getElementById('whats-new-winlink-settings').onclick = (e) => {
     e.preventDefault();
     document.getElementById('whats-new-dialog').close();
