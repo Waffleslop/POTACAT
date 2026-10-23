@@ -8403,6 +8403,7 @@ function winlinkPayload() {
     patStarted: !!patClient,
     mycall: String(settings.myCallsign || '').toUpperCase(),
     hasPassword: !!settings.winlinkPassword,
+    lastSession: settings.winlinkLastSession || null,
     noticeAccepted: !!settings.winlinkNoticeAcceptedAt,
     noticeText: WINLINK_NOTICE_TEXT,
     mode: WinlinkModes.pickWinlinkMode(winlinkState.snapshot().modes, settings.winlinkDefaultMode || 'telnet'),
@@ -9229,6 +9230,9 @@ function winlinkEndSession(state, text, received = 0) {
     releaseRadio('winlink');
   }
   winlinkState.setSession({ state, text: text || '', error: state === 'error' ? (text || 'Session failed') : '', errorKind: state === 'error' ? (_winlinkSessionErrorKind || 'failed') : '', ptt: false, prompt: null });
+  // Survives a restart, so every surface can say "Last check: …" (winlink-state.lastSession).
+  settings.winlinkLastSession = { at: Date.now(), ok: state === 'done', text: String(text || (state === 'done' ? 'Session finished' : 'Session failed')).slice(0, 200) };
+  try { saveSettings(settings); } catch {}
   winlinkLog(`session ${state === 'done' ? 'finished' : 'failed'}: ${text}`);
   winlinkSessionPush();
   winlinkRefreshMailboxes();
