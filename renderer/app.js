@@ -5191,11 +5191,22 @@ if (setMercuryEnable) {
         }
         devs = list.filter((d) => d.kind === 'audioinput' || d.kind === 'audiooutput').map((d) => ({ kind: d.kind, label: d.label || '', deviceId: d.deviceId }));
       } catch {}
+      // The radio's own devices (the rig's FT8 input/output), as labels: on a
+      // USB-sound-card rig VARA opens these directly and no cable exists.
+      const labels = { inputLabel: '', outputLabel: '' };
+      try {
+        const rig = window.api.winlinkAudioRig ? await window.api.winlinkAudioRig() : null;
+        if (rig && rig.ok) {
+          const i = devs.find((d) => d.kind === 'audioinput' && d.deviceId === rig.inputId);
+          const o = devs.find((d) => d.kind === 'audiooutput' && d.deviceId === rig.outputId);
+          labels.inputLabel = i ? i.label : ''; labels.outputLabel = o ? o.label : '';
+        }
+      } catch {}
       if (btn) btn.disabled = true;
       varaSetupStatus.style.color = '';
       varaSetupStatus.textContent = 'Setting up… (starts VARA, about 10 seconds)';
       let r = null;
-      try { r = await window.api.winlinkVaraSetup(kind, devs); } catch (e) { r = { ok: false, error: e.message }; }
+      try { r = await window.api.winlinkVaraSetup(kind, devs, labels); } catch (e) { r = { ok: false, error: e.message }; }
       if (btn) btn.disabled = false;
       if (!r || !r.ok) {
         varaSetupStatus.style.color = 'var(--accent-red,#e94560)';
@@ -5206,7 +5217,7 @@ if (setMercuryEnable) {
       // Mirror what main saved so a later Save in this panel keeps it.
       if (kind === 'fm') { if (setVaraFmEnable) setVaraFmEnable.checked = true; if (setVaraFmPath && !setVaraFmPath.value) setVaraFmPath.value = r.path || ''; }
       else { if (setVaraHfEnable) setVaraHfEnable.checked = true; if (setVaraHfPath && !setVaraHfPath.value) setVaraHfPath.value = r.path || ''; }
-      if (r.cable && window.fillVaraCableDevices) window.fillVaraCableDevices(r.cable.inputId || '', r.cable.outputId || '');
+      if (window.fillVaraCableDevices) window.fillVaraCableDevices(r.cable ? r.cable.inputId || '' : '', r.cable ? r.cable.outputId || '' : '');
     };
     const varaSetupHf = document.getElementById('vara-setup-hf');
     const varaSetupFm = document.getElementById('vara-setup-fm');

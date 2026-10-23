@@ -243,6 +243,22 @@ function fnBody(src, name) {
     const empty = S.planVaraIniPatch('', { inputName: 'A Output', outputName: 'B Input', port: 8310 });
     assert.ok(/\[Soundcard\]\nInput Device Name=A Output\nOutput Device Name=B Input\n\n\[PTT\]\nVia=1\n\n\[Setup\]\nTCP Command Port=8310\n/.test(empty.text), 'built from nothing: ' + JSON.stringify(empty.text));
   });
+  await test('the rig layer decides the route: network-audio rigs get cables, every other rig is direct, PTT is VOX everywhere', () => {
+    assert.strictEqual(S.varaRouteFor({ audioSource: 'smartsdr' }).route, 'cable');
+    assert.strictEqual(S.varaRouteFor({ audioSource: 'icom-network' }).route, 'cable');
+    for (const src of ['dax', 'device', 'usb', '', undefined]) assert.strictEqual(S.varaRouteFor({ audioSource: src }).route, 'direct', 'direct for ' + src);
+    const d = S.planDirect({ capture: 'Microphone (USB Audio CODEC)', playback: 'Speakers (USB Audio CODEC)' });
+    assert.strictEqual(d.ok, true);
+    assert.deepStrictEqual(d.vara, { inputName: 'Microphone (USB Audio CODEC)', outputName: 'Speakers (USB Audio CODEC)' });
+    assert.strictEqual(S.planDirect({ capture: 'DAX Audio RX 1 (FlexRadio Systems DAX)', playback: 'x' }).vara.inputName, 'DAX Audio RX 1 (FlexRadio Syste');
+    assert.ok(/Settings > My Rigs/.test(S.planDirect({}).advice));
+    const txt = S.describeSetup({ kind: 'hf', plan: d, path: 'C:\\VARA\\VARA.exe', port: 8300, version: 'VARA HF 4.8.9', iniChanged: true });
+    assert.ok(/uses the radio's sound card directly/.test(txt) && /No cable/.test(txt));
+    const saved = S.planCablesFromSaved({ inputId: 'hifi-out', outputId: 'cab-in', inputLabel: 'Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)', outputLabel: 'CABLE Input (VB-Audio Virtual Cable)', toVaraCaptureLabel: 'CABLE Output (VB-Audio Virtual Cable)', fromVaraPlaybackLabel: 'Hi-Fi Cable Input (VB-Audio Hi-Fi Cable)' });
+    assert.strictEqual(saved.ok, true);
+    assert.deepStrictEqual([saved.toVara.name, saved.fromVara.name, saved.vara.inputName], ['CABLE', 'Hi-Fi Cable', 'CABLE Output (VB-Audio Virtual ']);
+    assert.ok(/Click Set up VARA for me once/.test(S.planCablesFromSaved({ inputId: 'x' }).advice));
+  });
   await test('VARA\'s log names the device it could not open', () => {
     assert.strictEqual(S.varaLogDeviceProblem('2026-10-23 12:00:00    WARNING: VARA is not connected to any App via TCP Port 8300\n'), '');
     assert.ok(/input and output device/.test(S.varaLogDeviceProblem('x\n2026-09-30 18:30:27    Soundcard Output Device missing in action !\n2026-09-30 18:30:27    Soundcard Input Device missing in action !\n')));
@@ -252,16 +268,24 @@ function fnBody(src, name) {
     const html = read('renderer/index.html');
     assert.ok(/id="vara-setup-hf"/.test(html) && /id="vara-setup-fm"/.test(html) && /Set up VARA HF for me/.test(html));
     assert.ok(/vb-audio\.com\/Cable\//.test(html) && /Hi-Fi Cable/.test(html), 'the two free cables are named and linked');
-    const fn = fnBody(main, 'winlinkVaraSetup');
+    const fn = fnBody(main, 'winlinkVaraConfigure');
+    assert.ok(/VaraSetup\.varaRouteFor\(\{ audioSource: settings\.audioSource \}\)/.test(fn), 'the route is the rig layer\'s');
+    assert.ok(/const a = await winlinkAutoAudio\(\{ inputLabel, outputLabel \}\);/.test(fn), 'direct route = the radio\'s own devices, the ARDOP pick');
+    assert.ok(/rig\.modemCable = null;/.test(fn), 'direct route leaves no cable on the rig');
     assert.ok(/if \(probe\.ok\) return \{ ok: false, step: 'running'/.test(fn), 'never written under a running VARA');
+    const ready = fnBody(main, 'winlinkVaraReady');
+    assert.ok(/const c = await winlinkVaraConfigure\(\{ kind, quiet: true \}\);/.test(ready), 'a session configures VARA for the radio before starting it');
+    assert.ok(/winlinkVaraConfigure\(\{ kind, quiet: true \}\)\.then/.test(main), 'a rig switch re-syncs a closed VARA');
+    assert.ok(!/PTT set to None/.test(main), 'VARA has no None: VOX');
     assert.ok(/fs\.copyFileSync\(iniPath, iniPath \+ '\.potacat-'/.test(fn), 'backup before the write');
     assert.ok(/VaraSetup\.planVaraIniPatch\(iniText, \{ inputName: plan\.vara\.inputName, outputName: plan\.vara\.outputName, port \}\)/.test(fn));
-    assert.ok(/rig\.modemCable = \{ inputId: plan\.potacat\.inputId, outputId: plan\.potacat\.outputId \}/.test(fn), 'POTACAT\'s side saved on the rig');
-    assert.ok(/VaraSetup\.varaLogDeviceProblem\(/.test(fn), 'VARA\'s log is the verdict');
+    assert.ok(/rig\.modemCable = \{ inputId: plan\.potacat\.inputId, outputId: plan\.potacat\.outputId, inputLabel/.test(fn), 'POTACAT\'s side saved on the rig, labels included for later syncs');
+    assert.ok(/VaraSetup\.varaLogDeviceProblem\(/.test(fnBody(main, 'winlinkVaraSetup')), 'VARA\'s log is the verdict');
     assert.ok(/ipcMain\.handle\('winlink-vara-setup'/.test(main));
-    assert.ok(/winlinkVaraSetup: \(kind, devices\) => ipcRenderer\.invoke\('winlink-vara-setup'/.test(read('preload.js')));
-    assert.ok(/window\.api\.winlinkVaraSetup\(kind, devs\)/.test(read('renderer/app.js')));
-    assert.ok(!/kill\(|taskkill/.test(fn), 'POTACAT never closes VARA');
+    assert.ok(/winlinkVaraSetup: \(kind, devices, labels\) => ipcRenderer\.invoke\('winlink-vara-setup'/.test(read('preload.js')));
+    assert.ok(/window\.api\.winlinkVaraSetup\(kind, devs, labels\)/.test(read('renderer/app.js')), 'the button hands over the rig\'s device labels');
+    assert.ok(!/kill\(|taskkill/.test(fn + fnBody(main, 'winlinkVaraSetup')), 'POTACAT never closes VARA');
+    assert.ok(/A radio with a USB sound card needs no cable/.test(html), 'the copy says the radio decides');
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);

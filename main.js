@@ -8490,25 +8490,38 @@ function findVara(kind) {
 }
 
 /**
- * "Set up VARA for me" (lib/vara-setup.js has the rules): find the program,
- * pair the two virtual cables from the renderer's device list, write VARA's
- * own ini (only while VARA is not running: it rewrites the file at exit),
- * point POTACAT's cable side at the matching ends, turn the mode on, start
- * VARA, and read its log for the one line that says a device name did not
- * match. Every failure is one sentence naming the missing piece.
- * @param {{kind:'hf'|'fm', devices:Array}} o  devices = enumerateDevices rows {kind,label,deviceId}
+ * VARA configured FROM THE RADIO (lib/vara-setup.js has the rules; Casey
+ * 2026-10-23: "part of the rig control layer, all VARA settings
+ * pre-configured based on the radio"). The rig's audio source decides the
+ * route: a network-audio rig (Flex Direct, Icom Network) gets the two
+ * virtual cables; every other rig has VARA open its own sound card, the
+ * devices POTACAT's ARDOP pick already resolved. PTT is VOX always. VARA's
+ * ini is written only while VARA is closed (it rewrites the file at exit),
+ * after a backup, on named lines only. Runs from the Settings button (with
+ * the renderer's device list and the rig's device labels), before a session
+ * starts VARA, and on a rig switch — so VARA matches the radio in use.
+ * @returns {Promise<{ok, route?, plan?, iniChanged?, bin?, port?, error?, step?}>}
  */
-async function winlinkVaraSetup({ kind: k, devices } = {}) {
+async function winlinkVaraConfigure({ kind: k, devices, inputLabel, outputLabel, quiet } = {}) {
   const kind = k === 'fm' ? 'fm' : 'hf';
   const name = VaraProcess.varaName(kind);
   if (process.platform !== 'win32') return { ok: false, error: `${name} runs on Windows only` };
   const bin = findVara(kind);
   if (!bin.found) return { ok: false, step: 'program', error: `${name} is not installed (looked for ${VaraProcess.varaBinaryName(kind)} in the usual places). Install it from rosmodem.wordpress.com, or set its path below, then click again.` };
-  const plan = VaraSetup.planCables(devices);
-  if (!plan.ok) return { ok: false, step: 'cables', found: plan.found, error: plan.advice };
+  const rig = winlinkActiveRig();
+  const { route, why } = VaraSetup.varaRouteFor({ audioSource: settings.audioSource });
+  let plan;
+  if (route === 'direct') {
+    const a = await winlinkAutoAudio({ inputLabel, outputLabel });
+    plan = VaraSetup.planDirect({ capture: a && a.ok && a.capture, playback: a && a.ok && a.playback });
+    if (!plan.ok) return { ok: false, step: 'devices', error: (a && a.error ? a.error + '. ' : '') + plan.advice };
+  } else {
+    plan = Array.isArray(devices) && devices.length ? VaraSetup.planCables(devices) : VaraSetup.planCablesFromSaved(rig && rig.modemCable);
+    if (!plan.ok) return { ok: false, step: 'cables', found: plan.found, error: plan.advice };
+  }
   const port = kind === 'fm' ? _winlinkVaraFmPort() : _winlinkVaraPort();
   const probe = await VaraProcess.probeVaraPort(port, { timeoutMs: 1500 });
-  if (probe.ok) return { ok: false, step: 'running', error: `${name} is running. Close it (its settings file is written only while it is closed), then click Set up again.` };
+  if (probe.ok) return { ok: false, step: 'running', route, plan, error: `${name} is running. Close it (its settings file is written only while it is closed), then click Set up again.` };
   // VARA's own settings file, beside the program.
   const iniPath = path.join(path.dirname(bin.path), kind === 'fm' ? 'VARAFM.ini' : 'VARA.ini');
   let iniText = '';
@@ -8521,21 +8534,37 @@ async function winlinkVaraSetup({ kind: k, devices } = {}) {
     } catch (e) {
       return { ok: false, step: 'ini', error: `Could not write ${iniPath}: ${e.message}. Set VARA's SoundCard to ${plan.vara.inputName} / ${plan.vara.outputName} and PTT to VOX by hand.` };
     }
-    winlinkLog(`${name} setup: wrote ${iniPath} — ${patched.changes.map((c) => c.section + '.' + c.key + '=' + c.to).join(', ')}`);
+    winlinkLog(`${name} configured for ${rig && rig.name ? rig.name : 'the radio'} (${route}: ${why}) — wrote ${iniPath}: ${patched.changes.map((c) => c.section + '.' + c.key + '=' + c.to).join(', ')}`);
+  } else if (!quiet) {
+    winlinkLog(`${name} already matches ${rig && rig.name ? rig.name : 'the radio'} (${route})`);
   }
-  // POTACAT's side: the cable ends it opens, saved on the active rig; the mode on.
-  const rig = winlinkActiveRig();
-  if (rig) rig.modemCable = { inputId: plan.potacat.inputId, outputId: plan.potacat.outputId };
+  // POTACAT's side, saved on the rig: the cable ends it opens (cable route) or none (direct).
+  if (rig) {
+    if (route === 'cable') {
+      rig.modemCable = { inputId: plan.potacat.inputId, outputId: plan.potacat.outputId, inputLabel: plan.potacat.inputLabel, outputLabel: plan.potacat.outputLabel, toVaraCaptureLabel: plan.toVara.captureLabel, fromVaraPlaybackLabel: plan.fromVara.playbackLabel };
+    } else {
+      rig.modemCable = null;
+    }
+  }
   if (kind === 'fm') settings.enableVaraFm = true; else settings.enableVaraHf = true;
   if (bin.path && !(kind === 'fm' ? settings.winlinkVaraFmPath : settings.winlinkVaraHfPath)) {
     if (kind === 'fm') settings.winlinkVaraFmPath = bin.path; else settings.winlinkVaraHfPath = bin.path;
   }
   saveSettings(settings);
-  winlinkLog(`${name} setup: cables — radio→VARA ${plan.toVara.name} (POTACAT plays ${plan.potacat.outputLabel}; VARA records "${plan.vara.inputName}"), VARA→radio ${plan.fromVara.name} (VARA plays "${plan.vara.outputName}"; POTACAT records ${plan.potacat.inputLabel})`);
-  // Start it and let it open the devices; its log is the verdict.
+  if (route === 'cable') winlinkLog(`${name} cables — radio→VARA ${plan.toVara.name} (POTACAT plays ${plan.potacat.outputLabel}; VARA records "${plan.vara.inputName}"), VARA→radio ${plan.fromVara.name} (VARA plays "${plan.vara.outputName}"; POTACAT records ${plan.potacat.inputLabel})`);
+  return { ok: true, route, plan, iniChanged: !!patched.changes.length, bin, port };
+}
+
+/** The Settings button: configure for this radio, start VARA, read its log for the verdict. */
+async function winlinkVaraSetup({ kind: k, devices, inputLabel, outputLabel } = {}) {
+  const kind = k === 'fm' ? 'fm' : 'hf';
+  const name = VaraProcess.varaName(kind);
+  const c = await winlinkVaraConfigure({ kind, devices, inputLabel, outputLabel });
+  if (!c.ok) return c;
+  const { plan, bin, port } = c;
   let version = '';
   try {
-    await winlinkVaraReady(VaraProcess.varaModeId(kind));
+    await winlinkVaraReady(VaraProcess.varaModeId(kind), { configured: true });
     const p2 = await VaraProcess.probeVaraPort(port, { timeoutMs: 1500 });
     version = (p2 && p2.version) || '';
   } catch (e) {
@@ -8553,11 +8582,11 @@ async function winlinkVaraSetup({ kind: k, devices } = {}) {
     fs.closeSync(fd);
     problem = VaraSetup.varaLogDeviceProblem(buf.toString('utf8'));
   } catch { /* no log yet: nothing to report */ }
-  if (problem) { winlinkLog(`${name} setup: ${problem}`); return { ok: false, step: 'devices', error: problem, cable: plan.potacat }; }
-  const text = VaraSetup.describeSetup({ kind, plan, path: bin.path, port, version, iniChanged: !!patched.changes.length });
+  if (problem) { winlinkLog(`${name} setup: ${problem}`); return { ok: false, step: 'devices', error: problem, cable: plan.potacat || null }; }
+  const text = VaraSetup.describeSetup({ kind, plan, path: bin.path, port, version, iniChanged: c.iniChanged });
   winlinkLog(`${name} setup: ${text}`);
   winlinkPush();
-  return { ok: true, text, cable: plan.potacat, path: bin.path, version };
+  return { ok: true, route: c.route, text, cable: plan.potacat || null, path: bin.path, version };
 }
 
 /**
@@ -8565,7 +8594,7 @@ async function winlinkVaraSetup({ kind: k, devices } = {}) {
  * port, start the program for them when asked (detached, their window, never
  * stopped by POTACAT), wait for the port, or say exactly what is missing.
  */
-async function winlinkVaraReady(mode) {
+async function winlinkVaraReady(mode, { configured } = {}) {
   const kind = VaraProcess.kindOfMode(mode);
   const name = VaraProcess.varaName(kind);
   const port = kind === 'fm' ? _winlinkVaraFmPort() : _winlinkVaraPort();
@@ -8573,22 +8602,31 @@ async function winlinkVaraReady(mode) {
   if (!probe.ok) {
     const bin = findVara(kind);
     if (settings.winlinkVaraAutoLaunch !== false && bin.found) {
+      // VARA is closed: make its settings match the radio in use before it
+      // reads them (the rig layer's decision; a problem is logged, never fatal
+      // here — the session then fails with VARA's own words if it matters).
+      if (!configured) {
+        try {
+          const c = await winlinkVaraConfigure({ kind, quiet: true });
+          if (!c.ok && c.step !== 'running') winlinkLog(`${name}: not configured for this radio — ${c.error}`);
+        } catch (e) { winlinkLog(`${name}: configure failed — ${e.message}`); }
+      }
       winlinkLog(`${name}: nothing on 127.0.0.1:${port} — starting ${bin.path}`);
       try {
         const child = spawn(bin.path, [], { ...VaraProcess.varaSpawnOptions(), cwd: path.dirname(bin.path) });
         child.on('error', (e) => winlinkLog(`${name}: could not start: ${e.message}`));
         child.unref();
       } catch (e) {
-        throw new Error(`${name} could not be started (${e.message}) — start it yourself, with its PTT set to None`);
+        throw new Error(`${name} could not be started (${e.message}) — start it yourself, with its PTT set to VOX`);
       }
       const until = Date.now() + VaraProcess.VARA_DEFAULTS.launchWaitMs;
       while (!probe.ok && Date.now() < until) {
         await new Promise((r) => setTimeout(r, 1000));
         probe = await VaraProcess.probeVaraPort(port);
       }
-      if (!probe.ok) throw new Error(`${name} was started but is not answering on port ${port} — check the port in its Settings (POTACAT expects ${port}) and that its PTT is set to None`);
+      if (!probe.ok) throw new Error(`${name} was started but is not answering on port ${port} — check the port in its Settings (POTACAT expects ${port}) and that its PTT is set to VOX`);
     } else if (bin.found) {
-      throw new Error(`${name} is not running — start it (with its PTT set to None), or turn on "Start VARA for me" in Settings > Station > Winlink`);
+      throw new Error(`${name} is not running — start it (with its PTT set to VOX), or turn on "Start VARA for me" in Settings > Station > Winlink`);
     } else {
       throw new Error(`${name} is not answering on port ${port} and its program was not found — start it yourself, or set its path in Settings > Station > Winlink`);
     }
@@ -33571,7 +33609,7 @@ app.whenReady().then(() => {
     const probe = await VaraProcess.probeVaraPort(port, { timeoutMs: 1500 });
     return { kind, found: bin.found, path: bin.found ? bin.path : '', port, running: probe.ok, version: probe.version || '', text: VaraProcess.describeVara(kind, { enabled: true, found: bin.found, path: bin.found ? bin.path : '', probe }) };
   });
-  ipcMain.handle('winlink-vara-setup', (_e, o = {}) => winlinkVaraSetup({ kind: o.kind, devices: Array.isArray(o.devices) ? o.devices.slice(0, 200) : [] }));
+  ipcMain.handle('winlink-vara-setup', (_e, o = {}) => winlinkVaraSetup({ kind: o.kind, devices: Array.isArray(o.devices) ? o.devices.slice(0, 200) : [], inputLabel: String(o.inputLabel || ''), outputLabel: String(o.outputLabel || '') }));
   ipcMain.handle('winlink-audio-save', (_e, o = {}) => {
     if (!o.captureLabel || !o.playbackLabel) return { ok: false, error: 'Choose both' };
     const ok = winlinkSaveRigAudio(o);
@@ -38845,6 +38883,17 @@ app.whenReady().then(() => {
     if (activeRigChanged) {
       const rigNow = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
       if (rigNow && rigNow.audioSource) settings.audioSource = rigNow.audioSource;
+      // VARA follows the radio: a closed VARA's settings are rewritten for
+      // the new rig's route and devices (a running one is left alone and
+      // re-synced when it next starts).
+      if (process.platform === 'win32' && (settings.enableVaraHf || settings.enableVaraFm)) {
+        setTimeout(() => {
+          for (const kind of ['hf', 'fm']) {
+            if (!(kind === 'fm' ? settings.enableVaraFm : settings.enableVaraHf)) continue;
+            winlinkVaraConfigure({ kind, quiet: true }).then((c) => { if (!c.ok && c.step !== 'running') winlinkLog(`${VaraProcess.varaName(kind)}: not configured for ${rigNow && rigNow.name ? rigNow.name : 'the new radio'} — ${c.error}`); }).catch(() => {});
+          }
+        }, 1500);
+      }
       // The catTarget mirror was MISSING here: activating a rig by id alone
       // (the blue dot in My Rigs sends just activeRigId) left the global
       // settings.catTarget stale or unset, so startup silently skipped the

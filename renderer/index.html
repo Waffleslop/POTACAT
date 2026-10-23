@@ -3050,8 +3050,8 @@
           <span class="help-text" style="display:block;margin-bottom:4px;">VARA is EA5HVK's modem, installed and licensed by you; nothing of VARA is installed or downloaded by POTACAT. Without a licence it runs at reduced speed. Three things to install, then one click:</span>
           <ol class="help-text" style="margin:0 0 6px 18px;padding:0;">
             <li>VARA HF (and VARA FM if you want VHF) from <a href="https://rosmodem.wordpress.com/" data-external style="color:var(--accent-blue,#4fc3f7);">rosmodem.wordpress.com</a>.</li>
-            <li>Two virtual audio cables, both free from <a href="https://vb-audio.com/Cable/" data-external style="color:var(--accent-blue,#4fc3f7);">vb-audio.com/Cable</a>: <b>VB-CABLE</b> and the <b>Hi-Fi Cable</b> (or the donation A+B pack). Run each installer as administrator, then reboot.</li>
-            <li>Click <b>Set up VARA for me</b>. POTACAT writes VARA's sound-card and PTT settings (PTT via VOX: POTACAT keys the radio), wires its own side to the cables, starts VARA and checks that it opened them.</li>
+            <li><b>Only for a radio whose audio comes over the network (Flex Direct, Icom Network):</b> two virtual audio cables, both free from <a href="https://vb-audio.com/Cable/" data-external style="color:var(--accent-blue,#4fc3f7);">vb-audio.com/Cable</a>: <b>VB-CABLE</b> and the <b>Hi-Fi Cable</b> (or the donation A+B pack). Run each installer as administrator, then reboot. A radio with a USB sound card needs no cable: VARA uses it directly.</li>
+            <li>Click <b>Set up VARA for me</b>. POTACAT configures VARA for the active radio: its sound card (or the cables), PTT via VOX (POTACAT keys the radio), the port; then starts VARA and checks that it opened the devices. VARA is re-configured whenever a session starts it or you switch radios.</li>
           </ol>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:6px;">
             <button type="button" id="vara-setup-hf" class="btn btn-primary btn-sm">Set up VARA HF for me</button>
