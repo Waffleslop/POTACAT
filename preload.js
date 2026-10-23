@@ -319,6 +319,8 @@ contextBridge.exposeInMainWorld('api', {
   installUpdate: () => ipcRenderer.send('install-update'),
   checkForUpdates: () => ipcRenderer.send('check-for-updates'),
   onCatLog: (cb) => ipcRenderer.on('cat-log', (_e, msg) => cb(msg)),
+  onCm108Ptt: (cb) => ipcRenderer.on('cm108-ptt', (_e, d) => cb(d)),
+  cm108PttResult: (r) => ipcRenderer.send('cm108-ptt-result', r),
   onCatLogHistory: (cb) => ipcRenderer.on('cat-log-history', (_e, lines) => cb(lines)),
   markBugReportStart: () => ipcRenderer.invoke('bug-report-mark'),
   getBugReportLog: () => ipcRenderer.invoke('get-bug-report-log'),

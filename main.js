@@ -435,6 +435,7 @@ const { buildDiagnosticSnapshot, redactLogLines } = require('./lib/diagnostic-sn
 const { BUG_REPORT_MARKER, selectReportLines, maskHomeDir, sessionLogRotationMoves } = require('./lib/bug-report-log');
 const { healActiveRig } = require('./lib/active-rig');
 const { healRigAudioMirror } = require('./lib/rig-audio-mirror');
+const Cm108Ptt = require('./lib/cm108-ptt');
 const { decideAtuKeepOn, ATU_KEEP_ON_POLL_MS, ATU_KEEP_ON_FIRST_POLL_MS } = require('./lib/atu-keep-on');
 // Per-rig "Keep the tuner on after a tune cycle" (lib/atu-keep-on.js): after
 // the tune command, ask `AC;` until the radio reports the tuner off, then
@@ -22755,7 +22756,16 @@ function handleRemotePtt(state, opts = {}) {
   }
   const target = settings.catTarget;
   if (target && target.type === 'none') {
-    // No CAT control: the radio's VOX keys on the audio that follows. Not a
+    // No CAT control, but the USB sound card keys the radio through its CM108
+    // GPIO pin (Digirig Lite + a Baofeng, 2026-10-23): the main window's
+    // renderer drives it over WebHID (lib/cm108-ptt.js) and reports back.
+    if (target.ptt === 'cm108') {
+      const gpio = Number.isInteger(target.gpio) ? target.gpio : 3;
+      if (win && !win.isDestroyed()) win.webContents.send('cm108-ptt', { state: !!state, gpio });
+      else sendCatLog('[PTT] FAILED: the sound-card PTT needs the POTACAT window, which is not open');
+      return;
+    }
+    // Otherwise the radio's VOX keys on the audio that follows. Not a
     // failure, so not "PTT FAILED" — one quiet line per edge.
     sendCatLog(`[PTT] ${state ? 'TX' : 'RX'} — no CAT control, the radio's VOX keys on the audio`);
     return;
@@ -26522,6 +26532,18 @@ function createWindow() {
 
   // Allow MIDI device access for CW keyer
   win.webContents.session.setPermissionRequestHandler((wc, perm, cb) => cb(true));
+  // Sound-card PTT (CM108 GPIO, lib/cm108-ptt.js): WebHID may open C-Media /
+  // SSS sound cards and nothing else, and a PTT from a phone must work with
+  // no click on this PC, so those devices are granted without a chooser.
+  // Electron allows every permission check by default; saying so for 'hid'
+  // keeps WebHID on whatever Electron's default becomes.
+  win.webContents.session.setPermissionCheckHandler(() => true);
+  win.webContents.session.setDevicePermissionHandler((d) => d.deviceType === 'hid' && !!(d.device && Cm108Ptt.isCm108(d.device.vendorId, d.device.productId)));
+  win.webContents.session.on('select-hid-device', (event, details, callback) => {
+    event.preventDefault();
+    const dev = (details.deviceList || []).find((x) => Cm108Ptt.isCm108(x.vendorId, x.productId));
+    callback(dev ? dev.deviceId : '');
+  });
 
   if (!HEADLESS) win.show();
   logStartupStage('win.show() (window visible)');
@@ -32895,6 +32917,11 @@ app.whenReady().then(() => {
   // ─── Winlink IPC (the mail window + Settings). Every surface goes through
   // the same winlink* functions; a radio session starts only from Connect.
   ipcMain.on('winlink-popout-open', () => { openWinlinkPopout(); winlinkEnsureStarted(); });
+  // The renderer's answer to a sound-card PTT edge (cm108-ptt): one log line.
+  ipcMain.on('cm108-ptt-result', (_e, r = {}) => {
+    if (r.ok) sendCatLog(`[PTT] ${r.state ? 'TX' : 'RX'} — sound-card PTT, GPIO${r.gpio} on ${r.device || 'the USB sound card'}`);
+    else sendCatLog(`[PTT] FAILED: sound-card PTT — ${r.error || 'unknown error'}`);
+  });
   ipcMain.on('winlink-popout-minimize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.minimize(); });
   ipcMain.on('winlink-popout-maximize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) { if (w.isMaximized()) w.unmaximize(); else w.maximize(); } });
   ipcMain.on('winlink-popout-close', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.close(); });

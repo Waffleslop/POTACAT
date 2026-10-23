@@ -2278,6 +2278,9 @@ async function populateRadioSection(currentTarget) {
     setK4networkPassword.value = currentTarget.password || '';
   } else if (currentTarget.type === 'none') {
     setRadioType('nocat');
+    { const ps = document.getElementById('set-nocat-ptt'); if (ps) ps.value = currentTarget.ptt === 'cm108' ? 'cm108' : 'vox'; }
+    { const gs = document.getElementById('set-nocat-gpio'); if (gs) gs.value = String(currentTarget.gpio || 3); }
+    { const row = document.getElementById('nocat-cm108-row'); if (row) row.classList.toggle('hidden', currentTarget.ptt !== 'cm108'); }
   } else if (currentTarget.type === 'serial') {
     setRadioType('serialcat');
     serialcatPortsLoaded = true;
@@ -2933,9 +2936,14 @@ function buildCatTargetFromForm() {
       port: parseInt(setRigctldnetPort.value, 10) || 4532,
     };
   } else if (radioType === 'nocat') {
-    // No CAT control: VOX-keyed kits (Pebble HF, uSDX builds). A real
-    // target, not null, so the rig is "configured" and activates like any
-    // other; main.js treats type 'none' as nothing-to-connect.
+    // No CAT control: VOX-keyed kits (Pebble HF, uSDX builds), or a handheld
+    // keyed by its sound card's CM108 GPIO (Digirig Lite). A real target, not
+    // null, so the rig is "configured" and activates like any other; main.js
+    // treats type 'none' as nothing-to-connect.
+    const pttSel = document.getElementById('set-nocat-ptt');
+    if (pttSel && pttSel.value === 'cm108') {
+      return { type: 'none', ptt: 'cm108', gpio: parseInt(document.getElementById('set-nocat-gpio').value, 10) || 3 };
+    }
     return { type: 'none' };
   }
   return null;
@@ -12155,6 +12163,48 @@ function openQuickLog() {
     power: radioPower || lastLogPower || null,
   });
 }
+
+// ── Sound-card PTT (CM108 GPIO over WebHID, lib/cm108-ptt.js) ────────────────
+// main sends cm108-ptt {state, gpio} for a no-CAT rig keyed by its USB sound
+// card (Digirig Lite + Baofeng). The device is kept open between edges; the
+// session grants C-Media/SSS devices without a chooser (main.js).
+let _cm108Dev = null;
+async function cm108Device(interactive) {
+  if (_cm108Dev && _cm108Dev.opened) return _cm108Dev;
+  if (!navigator.hid) throw new Error('this build has no WebHID');
+  let list = (await navigator.hid.getDevices()).filter((d) => window.Cm108Ptt.isCm108(d.vendorId, d.productId));
+  if (!list.length && interactive) list = await navigator.hid.requestDevice({ filters: window.Cm108Ptt.hidFilters() });
+  // A CM108 exposes one HID interface with an output report; take the one that has it.
+  const dev = list.find((d) => (d.collections || []).some((c) => (c.outputReports || []).length)) || list[0];
+  if (!dev) throw new Error('no CM108/CM119 USB sound card found — is the Digirig plugged in?');
+  if (!dev.opened) await dev.open();
+  _cm108Dev = dev;
+  return dev;
+}
+if (window.api.onCm108Ptt) {
+  window.api.onCm108Ptt(async ({ state, gpio }) => {
+    try {
+      const dev = await cm108Device(false);
+      await dev.sendReport(0, new Uint8Array(window.Cm108Ptt.report(state, gpio)));
+      window.api.cm108PttResult({ ok: true, state, gpio, device: window.Cm108Ptt.describe(dev) });
+    } catch (e) {
+      _cm108Dev = null;
+      window.api.cm108PttResult({ ok: false, state, gpio, error: (e && e.message) || String(e) });
+    }
+  });
+}
+(function wireNocatPtt() {
+  const sel = document.getElementById('set-nocat-ptt');
+  const row = document.getElementById('nocat-cm108-row');
+  if (sel && row) sel.addEventListener('change', () => row.classList.toggle('hidden', sel.value !== 'cm108'));
+  const find = document.getElementById('nocat-cm108-find');
+  const status = document.getElementById('nocat-cm108-status');
+  if (find) find.addEventListener('click', async () => {
+    status.textContent = 'Looking…';
+    try { _cm108Dev = null; const dev = await cm108Device(true); status.textContent = 'Found ' + window.Cm108Ptt.describe(dev) + ' — PTT will key it.'; }
+    catch (e) { status.textContent = (e && e.message) || String(e); }
+  });
+})();
 
 // Debounced QRZ name lookup whenever the operator types a callsign — including
 // over a spot's prefilled one. A multi-op activation is spotted under ONE call,

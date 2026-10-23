@@ -1999,7 +1999,19 @@
         </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="nocat"> No CAT control (VOX)</label>
         <div id="nocat-config" class="radio-sub hidden">
-          <span class="help-text" style="font-size:12px;">For radios with no computer control at all — VOX-keyed kits such as the <b>Pebble HF</b> or a uSDX without a CAT port. POTACAT will not try to connect to anything or key PTT: you tune the radio by hand (spot clicks and band buttons show you the frequency to set) and the radio's VOX keys on POTACAT's audio. Set the audio Input and Output below to the sound card that connects to the radio, and turn its output up enough to trip the VOX.</span>
+          <span class="help-text" style="font-size:12px;">For radios with no computer control at all — VOX-keyed kits such as the <b>Pebble HF</b> or a uSDX without a CAT port, or a handheld such as a Baofeng on a sound-card interface. You tune the radio by hand (spot clicks and band buttons show you the frequency to set). Set the audio Input and Output below to the sound card that connects to the radio.</span>
+          <label style="display:block;margin-top:6px;">Transmit (PTT):
+            <select id="set-nocat-ptt">
+              <option value="vox">The radio's VOX keys on POTACAT's audio</option>
+              <option value="cm108">The USB sound card keys it (Digirig Lite, CM108 / CM119 PTT)</option>
+            </select>
+          </label>
+          <div id="nocat-cm108-row" class="hidden" style="margin-top:4px;">
+            <label>PTT pin: GPIO <select id="set-nocat-gpio"><option value="3" selected>3 (Digirig Lite, most cables)</option><option value="1">1</option><option value="2">2</option><option value="4">4</option></select></label>
+            <button type="button" id="nocat-cm108-find" style="margin-left:6px;">Find the sound card</button>
+            <span class="help-text" id="nocat-cm108-status" style="margin-left:6px;"></span>
+            <span class="help-text" style="display:block;font-size:11px;">PTT keys from any surface — this PC, ECHOCAT on your phone, FT8. Linux: the sound card's hidraw device needs read/write for your user (the udev rule Dire Wolf documents).</span>
+          </div>
         </div>
         <details id="rig-external-atu-details" style="margin-top:8px;">
           <summary style="cursor:pointer;font-size:13px;color:#4fc3f7;">External ATU (optional)</summary>
@@ -4829,6 +4841,7 @@
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>
   <script src="../lib/rig-family.js"></script>
   <script src="../lib/spot-row.js"></script>
+  <script src="../lib/cm108-ptt.js"></script>
   <script src="../lib/remote-features.js"></script>
   <script src="../lib/cloud-billing-ui.js"></script>
   <script src="../lib/custom-cat-follow.js"></script>
