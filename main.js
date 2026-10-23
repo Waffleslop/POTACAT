@@ -88,6 +88,9 @@ const { app, BrowserWindow, ipcMain, Menu, dialog, Notification, screen, nativeI
 // remote mode the SHACK's engine answers it and the local handler never runs.
 // One interception point instead of a remote branch in each handler (the
 // function itself is defined with the other remote-mode helpers below).
+// Outbound fetch never offers Brotli (CVE-2026-111497; Electron 39 carries
+// no fixed Node). Installed before any module that fetches is loaded.
+require('./lib/fetch-policy').installNoBrotliFetch(globalThis);
 const RemoteBridge = require('./lib/remote-bridge');
 {
   const _ipcOn = ipcMain.on.bind(ipcMain);

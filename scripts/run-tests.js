@@ -197,6 +197,7 @@ const TESTS = [
   'test/jtcat-split-panes-test.js',
   'test/qrz-base-call-test.js',
   'test/external-links-allowed-test.js',
+  'test/fetch-policy-test.js',
   'test/icom-picker-models-test.js',
   'test/k9cyt-requests-test.js',
   'test/respot-templates-remote-test.js',
