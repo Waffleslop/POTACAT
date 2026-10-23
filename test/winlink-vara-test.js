@@ -191,12 +191,31 @@ function fnBody(src, name) {
     DEV('audiooutput', 'Speakers (Realtek(R) Audio)', 'spk'),
     DEV('audiooutput', 'CABLE Input (VB-Audio Virtual Cable)', 'cab-in'),
     DEV('audioinput', 'CABLE Output (VB-Audio Virtual Cable)', 'cab-out'),
-    DEV('audiooutput', 'Hi-Fi Cable Input (VB-Audio Hi-Fi Cable)', 'hifi-in'),
+    // Windows (WASAPI, what the renderer sees) names the Hi-Fi Cable's playback
+    // end "Speakers (…)"; VARA's MME list calls it "Hi-Fi Cable Input" — seen
+    // on K3SBP's PC 2026-10-23. Pairing is by family, direction by kind.
+    DEV('audiooutput', 'Speakers (VB-Audio Hi-Fi Cable)', 'hifi-in'),
     DEV('audioinput', 'Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)', 'hifi-out'),
     DEV('audioinput', 'Voicemeeter Output (VB-Audio Voicemeeter VAIO)', 'vm-out'),
     DEV('audiooutput', 'Voicemeeter Input (VB-Audio Voicemeeter VAIO)', 'vm-in'),
     DEV('audioinput', 'default', 'default'),
   ];
+  const MME = {
+    capture: [{ name: 'Mic In (Elgato Wave:3)' }, { name: 'Hi-Fi Cable Output (VB-Audio Hi' }, { name: 'CABLE Output (VB-Audio Virtual ' }, { name: 'DAX Audio RX 1 (FlexRadio Syste' }],
+    playback: [{ name: 'Hi-Fi Cable Input (VB-Audio Hi-' }, { name: 'CABLE Input (VB-Audio Virtual C' }, { name: 'Headphones (Elgato Wave:3)' }],
+  };
+  await test('VARA\'s names come from the MME listing, where the Hi-Fi Cable is not called Speakers', () => {
+    const p = S.planCables(CABLES, { mme: MME });
+    assert.strictEqual(p.vara.fromListing, true);
+    assert.strictEqual(p.vara.inputName, 'CABLE Output (VB-Audio Virtual ');
+    assert.strictEqual(p.vara.outputName, 'Hi-Fi Cable Input (VB-Audio Hi-');
+    assert.deepStrictEqual(S.mmeNamesFor('CABLE-A', MME, { captureLabel: 'CABLE-A Output (VB-Audio Cable A)', playbackLabel: 'CABLE-A Input (VB-Audio Cable A)' }), { capture: 'CABLE-A Output (VB-Audio Cable ', playback: 'CABLE-A Input (VB-Audio Cable A', fromListing: false }, 'not in the listing: the 31-char label, flagged');
+    assert.strictEqual(S.cableFamily('Speakers (VB-Audio Hi-Fi Cable)'), 'Hi-Fi Cable');
+    assert.strictEqual(S.cableFamily('CABLE Input (VB-Audio Virtual Cable)'), 'CABLE');
+    assert.strictEqual(S.cableFamily('CABLE-B Output (VB-Audio Cable B)'), 'CABLE-B');
+    assert.strictEqual(S.cableFamily('Voicemeeter Input (VB-Audio Voicemeeter VAIO)'), null);
+    assert.strictEqual(S.cableFamily('Speakers (Realtek(R) Audio)'), null);
+  });
   await test('two cables are paired by name and direction; Voicemeeter is seen but never used', () => {
     const p = S.planCables(CABLES);
     assert.strictEqual(p.ok, true);
@@ -204,10 +223,10 @@ function fnBody(src, name) {
     assert.strictEqual(p.voicemeeter, true);
     assert.strictEqual(p.toVara.name, 'CABLE');
     assert.strictEqual(p.fromVara.name, 'Hi-Fi Cable');
-    // VARA records the radio from cable 1's Output end, plays TX into cable 2's Input end, both as 31-char MME names.
+    // No MME listing given: the WASAPI labels cut to 31, flagged as a guess.
     assert.strictEqual(p.vara.inputName, 'CABLE Output (VB-Audio Virtual ');
-    assert.strictEqual(p.vara.outputName, 'Hi-Fi Cable Input (VB-Audio Hi-');
-    assert.strictEqual(p.vara.inputName.length, 31);
+    assert.strictEqual(p.vara.outputName, 'Speakers (VB-Audio Hi-Fi Cable)');
+    assert.strictEqual(p.vara.fromListing, false);
     // POTACAT plays into cable 1's Input end and records cable 2's Output end.
     assert.deepStrictEqual([p.potacat.outputId, p.potacat.inputId], ['cab-in', 'hifi-out']);
   });
@@ -225,7 +244,7 @@ function fnBody(src, name) {
     assert.ok(/One virtual cable found \(CABLE\)/.test(one.advice) && /Hi-Fi Cable/.test(one.advice) && /vb-audio\.com\/Cable/.test(one.advice));
     const none = S.planCables(CABLES.filter((d) => !/cable/i.test(d.label)));
     assert.ok(/No virtual audio cable found/.test(none.advice) && /Voicemeeter is installed/.test(none.advice));
-    const half = S.planCables([DEV('audiooutput', 'CABLE Input (VB-Audio Virtual Cable)', 'x'), DEV('audiooutput', 'Hi-Fi Cable Input (VB-Audio Hi-Fi Cable)', 'y')]);
+    const half = S.planCables([DEV('audiooutput', 'CABLE Input (VB-Audio Virtual Cable)', 'x'), DEV('audiooutput', 'Speakers (VB-Audio Hi-Fi Cable)', 'y')]);
     assert.strictEqual(half.found, 0);
   });
   await test('VARA.ini is patched on its named lines only, CRLF kept, missing keys added under their section', () => {
@@ -254,9 +273,9 @@ function fnBody(src, name) {
     assert.ok(/Settings > My Rigs/.test(S.planDirect({}).advice));
     const txt = S.describeSetup({ kind: 'hf', plan: d, path: 'C:\\VARA\\VARA.exe', port: 8300, version: 'VARA HF 4.8.9', iniChanged: true });
     assert.ok(/uses the radio's sound card directly/.test(txt) && /No cable/.test(txt));
-    const saved = S.planCablesFromSaved({ inputId: 'hifi-out', outputId: 'cab-in', inputLabel: 'Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)', outputLabel: 'CABLE Input (VB-Audio Virtual Cable)', toVaraCaptureLabel: 'CABLE Output (VB-Audio Virtual Cable)', fromVaraPlaybackLabel: 'Hi-Fi Cable Input (VB-Audio Hi-Fi Cable)' });
+    const saved = S.planCablesFromSaved({ inputId: 'hifi-out', outputId: 'cab-in', inputLabel: 'Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)', outputLabel: 'CABLE Input (VB-Audio Virtual Cable)', varaInputName: 'CABLE Output (VB-Audio Virtual ', varaOutputName: 'Hi-Fi Cable Input (VB-Audio Hi-' });
     assert.strictEqual(saved.ok, true);
-    assert.deepStrictEqual([saved.toVara.name, saved.fromVara.name, saved.vara.inputName], ['CABLE', 'Hi-Fi Cable', 'CABLE Output (VB-Audio Virtual ']);
+    assert.deepStrictEqual([saved.toVara.name, saved.fromVara.name, saved.vara.inputName, saved.vara.outputName], ['CABLE', 'Hi-Fi Cable', 'CABLE Output (VB-Audio Virtual ', 'Hi-Fi Cable Input (VB-Audio Hi-']);
     assert.ok(/Click Set up VARA for me once/.test(S.planCablesFromSaved({ inputId: 'x' }).advice));
   });
   await test('VARA\'s log names the device it could not open', () => {
@@ -279,7 +298,8 @@ function fnBody(src, name) {
     assert.ok(!/PTT set to None/.test(main), 'VARA has no None: VOX');
     assert.ok(/fs\.copyFileSync\(iniPath, iniPath \+ '\.potacat-'/.test(fn), 'backup before the write');
     assert.ok(/VaraSetup\.planVaraIniPatch\(iniText, \{ inputName: plan\.vara\.inputName, outputName: plan\.vara\.outputName, port \}\)/.test(fn));
-    assert.ok(/rig\.modemCable = \{ inputId: plan\.potacat\.inputId, outputId: plan\.potacat\.outputId, inputLabel/.test(fn), 'POTACAT\'s side saved on the rig, labels included for later syncs');
+    assert.ok(/rig\.modemCable = \{ inputId: plan\.potacat\.inputId, outputId: plan\.potacat\.outputId, inputLabel: plan\.potacat\.inputLabel, outputLabel: plan\.potacat\.outputLabel, varaInputName: plan\.vara\.inputName, varaOutputName: plan\.vara\.outputName \}/.test(fn), 'POTACAT\'s side and VARA\'s names saved on the rig for later syncs');
+    assert.ok(/const l = await listArdopDevices\(\); if \(l && l\.ok\) mme = l\.devices;/.test(fn) && /VaraSetup\.planCables\(devices, \{ mme \}\)/.test(fn), 'VARA\'s names come from the MME listing');
     assert.ok(/VaraSetup\.varaLogDeviceProblem\(/.test(fnBody(main, 'winlinkVaraSetup')), 'VARA\'s log is the verdict');
     assert.ok(/ipcMain\.handle\('winlink-vara-setup'/.test(main));
     assert.ok(/winlinkVaraSetup: \(kind, devices, labels\) => ipcRenderer\.invoke\('winlink-vara-setup'/.test(read('preload.js')));

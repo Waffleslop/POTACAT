@@ -8516,7 +8516,16 @@ async function winlinkVaraConfigure({ kind: k, devices, inputLabel, outputLabel,
     plan = VaraSetup.planDirect({ capture: a && a.ok && a.capture, playback: a && a.ok && a.playback });
     if (!plan.ok) return { ok: false, step: 'devices', error: (a && a.error ? a.error + '. ' : '') + plan.advice };
   } else {
-    plan = Array.isArray(devices) && devices.length ? VaraSetup.planCables(devices) : VaraSetup.planCablesFromSaved(rig && rig.modemCable);
+    if (Array.isArray(devices) && devices.length) {
+      // VARA's names come from the same kind of listing VARA uses (MME, via
+      // ardopcf); the renderer's labels only identify the cables.
+      let mme = null;
+      try { if (findArdop().found) { const l = await listArdopDevices(); if (l && l.ok) mme = l.devices; } } catch { mme = null; }
+      plan = VaraSetup.planCables(devices, { mme });
+      if (plan.ok && !plan.vara.fromListing) winlinkLog(`${name}: no MME device listing — VARA's device names are the Windows labels cut to 31 characters (check VARA's SoundCard menu if it says a device is missing)`);
+    } else {
+      plan = VaraSetup.planCablesFromSaved(rig && rig.modemCable);
+    }
     if (!plan.ok) return { ok: false, step: 'cables', found: plan.found, error: plan.advice };
   }
   const port = kind === 'fm' ? _winlinkVaraFmPort() : _winlinkVaraPort();
@@ -8541,7 +8550,7 @@ async function winlinkVaraConfigure({ kind: k, devices, inputLabel, outputLabel,
   // POTACAT's side, saved on the rig: the cable ends it opens (cable route) or none (direct).
   if (rig) {
     if (route === 'cable') {
-      rig.modemCable = { inputId: plan.potacat.inputId, outputId: plan.potacat.outputId, inputLabel: plan.potacat.inputLabel, outputLabel: plan.potacat.outputLabel, toVaraCaptureLabel: plan.toVara.captureLabel, fromVaraPlaybackLabel: plan.fromVara.playbackLabel };
+      rig.modemCable = { inputId: plan.potacat.inputId, outputId: plan.potacat.outputId, inputLabel: plan.potacat.inputLabel, outputLabel: plan.potacat.outputLabel, varaInputName: plan.vara.inputName, varaOutputName: plan.vara.outputName };
     } else {
       rig.modemCable = null;
     }
