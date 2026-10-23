@@ -28089,6 +28089,7 @@ autoUpdater.on('update-not-available', () => {
 
 autoUpdater.on('error', (err) => {
   console.error('autoUpdater error:', err);
+  try { sendCatLog('[update] error: ' + (err && err.message || err)); } catch {}
   if (win && !win.isDestroyed()) {
     win.webContents.send('update-error', err?.message || String(err));
   }
@@ -28120,7 +28121,25 @@ ipcMain.on('install-update', async () => {
     return;
   }
   sendCatLog('[update] quitAndInstall — applying the downloaded update now');
-  autoUpdater.quitAndInstall();
+  // "Restart to Upgrade doesn't do anything" (two machines, two OSes, from
+  // 1.11.3): quitAndInstall can return without quitting — Squirrel.Mac still
+  // finishing its own copy of the download, a Windows installer spawn that
+  // failed, an AppImage it could not replace — and the button just sat
+  // there. If POTACAT is still running 20 s later, say so and hand the
+  // operator the download, instead of leaving them clicking.
+  const stall = setTimeout(() => {
+    sendCatLog('[update] STALLED: still running 20 s after quitAndInstall — the updater did not restart POTACAT (see the [updater] lines above). Offered the manual download.');
+    if (win && !win.isDestroyed()) win.webContents.send('update-error', 'The update downloaded but did not start. Install it by hand this once — the download page is opening — and automatic updates carry on from there.');
+    try { require('electron').shell.openExternal('https://github.com/Waffleslop/POTACAT/releases/latest'); } catch {}
+  }, 20000);
+  if (typeof stall.unref === 'function') stall.unref();
+  try {
+    autoUpdater.quitAndInstall();
+  } catch (err) {
+    clearTimeout(stall);
+    sendCatLog('[update] quitAndInstall threw: ' + (err && err.message || err));
+    if (win && !win.isDestroyed()) win.webContents.send('update-error', 'The update could not be applied: ' + (err && err.message || err));
+  }
 });
 ipcMain.on('check-for-updates', () => { checkForUpdates(); });
 

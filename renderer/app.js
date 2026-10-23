@@ -17731,6 +17731,10 @@ window.api.onUpdateDownloaded(() => {
   actionBtn.textContent = 'Restart to Upgrade';
   actionBtn.disabled = false;
   actionBtn.onclick = () => {
+    // Say it is working: on a Mac the restart can take a few seconds while
+    // macOS finishes its copy of the update.
+    actionBtn.textContent = 'Restarting\u2026';
+    actionBtn.disabled = true;
     window.api.installUpdate();
   };
 });
