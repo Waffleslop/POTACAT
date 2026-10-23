@@ -12,11 +12,16 @@
 # upstream ships no Windows x64 / macOS arm64 Pat and no macOS ardopcf, and a
 # pinned commit is what the NOTICE and third_party/*/VERSION.txt promise.
 #
-# Usage: scripts/build-winlink-helpers.sh [pat] [ardop] [direwolf]   (default: all;
-#        ardop and direwolf are skipped on macOS for now)
-# Needs: git, go >= 1.24 for pat; make + gcc (+ libasound2-dev on Linux,
-#        MSYS2 MINGW64 on Windows) for ardop; + cmake, Hamlib (libhamlib-dev on
-#        Linux; the official zip on Windows) and patchelf (Linux) for direwolf.
+# Usage: scripts/build-winlink-helpers.sh [pat] [ardop] [direwolf]   (default: all)
+# Needs: git, go >= 1.24 for pat; make + gcc/clang (+ libasound2-dev on Linux,
+#        MSYS2 MINGW64 on Windows, nothing extra on macOS — the ALSA calls are
+#        compiled against helpers/alsa-stub) for ardop; + cmake, Hamlib
+#        (libhamlib-dev on Linux; the official zip on Windows; `brew install
+#        hamlib portaudio hidapi` on macOS) and patchelf (Linux) for direwolf.
+#
+# Both modems carry POTACAT's socket audio backend (device "tcp:<port>", see
+# docs/modem-audio-bridge-plan.md): they never open a sound card, which is
+# what makes the macOS builds possible at all.
 set -euo pipefail
 
 PAT_REPO=https://github.com/la5nta/pat
@@ -76,9 +81,7 @@ if [[ " $want " == *" pat "* ]]; then
 fi
 
 if [[ " $want " == *" ardop "* ]]; then
-  if [ "$HOST" = mac ]; then
-    echo "ardopcf: no macOS build (no CoreAudio backend) — skipped"
-  else
+  {
     checkout "$ARDOP_REPO" "$ARDOP_TAG" "$ARDOP_SHA" "$WORK/ardop"
     # POTACAT patch (MIT allows it; recorded in third_party/ardopcf/README.md):
     # ardopcf's Windows device tables hold 16 names, and it copies EVERY
@@ -114,25 +117,58 @@ if [[ " $want " == *" ardop "* ]]; then
     # has to ship beside it.
     if [ "$HOST" = win ]; then
       ( cd "$WORK/ardop" && make ardopcf CFLAGS="-g -MMD -std=gnu17" LDFLAGS="-Xlinker -Map=output.map -static" )
+    elif [ "$HOST" = mac ]; then
+      # macOS: ardopcf has no CoreAudio backend and needs none — POTACAT runs
+      # it on the socket device only. Its Linux sources are POSIX apart from
+      # <alsa/asoundlib.h>, so they compile against helpers/alsa-stub (every
+      # snd_* call an inline no-op that fails cleanly; never reached on tcp:),
+      # without -lrt -lasound, and without the GNU-ld -Map flag ld64 rejects.
+      ( cd "$WORK/ardop" && make ardopcf CC=cc CFLAGS="-g -MMD -std=gnu17 -I$ROOT/helpers/alsa-stub" LDFLAGS="" LDLIBS="-lm -lpthread" )
     else
       ( cd "$WORK/ardop" && make ardopcf CFLAGS="-g -MMD -std=gnu17" )
     fi
     cp "$WORK/ardop/ardopcf$EXE" "$ROOT/assets/ardopcf/ardopcf$EXE"
     test -f "$ROOT/assets/ardopcf/ardopcf$EXE"
+    if [ "$HOST" = mac ]; then
+      # Nothing to bundle (system libraries only); this asserts the architecture.
+      node "$ROOT/scripts/bundle-mac-deps.js" --expect-arch="$(uname -m)" "$ROOT/assets/ardopcf/ardopcf"
+    fi
     cp "$WORK/ardop/LICENSE" "$ROOT/third_party/ardopcf/LICENSE"
     echo "ardopcf $ARDOP_TAG ($ARDOP_SHA) → assets/ardopcf/ardopcf$EXE"
-  fi
+  }
 fi
 
 if [[ " $want " == *" direwolf "* ]]; then
-  if [ "$HOST" = mac ]; then
-    echo "direwolf: not built on macOS yet — skipped"
-  else
+  {
     checkout "$DIREWOLF_REPO" "$DIREWOLF_TAG" "$DIREWOLF_SHA" "$WORK/direwolf"
+    # POTACAT socket audio backend (third_party/direwolf/src/audio_tcp.*,
+    # hooked into audio.c / audio_win.c / audio_portaudio.c + audio.h + the
+    # CMake source list by potacat-socket-audio.patch — regenerate with
+    # scripts/gen-direwolf-patch.py when the pin moves): `ADEVICE tcp:<port>`
+    # makes Dire Wolf take its audio from, and send it to, POTACAT's loopback
+    # modem audio server instead of a sound card. Dire Wolf's sources carry
+    # trailing blanks on many lines; the patch is generated against
+    # right-stripped copies, so strip the same five files first (sed -i.bak:
+    # the one spelling GNU and BSD sed share).
+    cp "$ROOT/third_party/direwolf/src/audio_tcp.c" "$ROOT/third_party/direwolf/src/audio_tcp.h" "$WORK/direwolf/src/"
+    ( cd "$WORK/direwolf" && sed -i.bak 's/[ \t]*$//' src/audio.c src/audio_win.c src/audio_portaudio.c src/audio.h src/CMakeLists.txt && rm -f src/*.bak )
+    git -C "$WORK/direwolf" apply --ignore-whitespace "$ROOT/third_party/direwolf/potacat-socket-audio.patch" || { echo "::error::potacat-socket-audio.patch did not apply to direwolf $DIREWOLF_TAG"; exit 1; }
+    for f in audio.c audio_win.c audio_portaudio.c; do
+      grep -q 'tcpaudio_open' "$WORK/direwolf/src/$f" || { echo "::error::socket audio hook missing from $f"; exit 1; }
+    done
+    grep -q 'audio_tcp.c' "$WORK/direwolf/src/CMakeLists.txt" || { echo "::error::audio_tcp.c is not in Dire Wolf's source list"; exit 1; }
     OUT="$ROOT/assets/direwolf"
-    rm -rf "$OUT/"*.dll "$OUT/"*.so* "$OUT/direwolf" "$OUT/direwolf.exe" 2>/dev/null || true
+    rm -rf "$OUT/"*.dll "$OUT/"*.so* "$OUT/"*.dylib "$OUT/direwolf" "$OUT/direwolf.exe" 2>/dev/null || true
     mkdir -p "$OUT" "$WORK/direwolf/build"
-    if [ "$HOST" = win ]; then
+    if [ "$HOST" = mac ]; then
+      # Dire Wolf's CMake requires PortAudio and hidapi on macOS even though
+      # POTACAT's build opens no device through them; Hamlib for PTT RIG.
+      # All three come from Homebrew; bundle-mac-deps ships the dylibs beside
+      # the binary (@loader_path) and fails on a wrong architecture.
+      ( cd "$WORK/direwolf/build" && cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix)" .. && make -j4 direwolf )
+      cp "$WORK/direwolf/build/src/direwolf" "$OUT/"
+      node "$ROOT/scripts/bundle-mac-deps.js" --expect-arch="$(uname -m)" "$OUT/direwolf"
+    elif [ "$HOST" = win ]; then
       curl -sSL -o "$WORK/hamlib.zip" "$HAMLIB_WIN_ZIP"
       echo "$HAMLIB_WIN_SHA256  $WORK/hamlib.zip" | sha256sum -c -
       rm -rf "$WORK/hamlib" && mkdir -p "$WORK/hamlib" && unzip -q "$WORK/hamlib.zip" -d "$WORK/hamlib"
@@ -157,8 +193,14 @@ if [[ " $want " == *" direwolf "* ]]; then
     # Must be LINKED to Hamlib, or it cannot key through POTACAT. (A build
     # without it still contains the "rebuild with hamlib" error text, so
     # grepping the binary's strings proves nothing.)
-    ldd "$OUT/direwolf$EXE" | grep -qi 'libhamlib' || { echo "::error::direwolf was built without Hamlib"; exit 1; }
+    if [ "$HOST" = mac ]; then
+      otool -L "$OUT/direwolf" | grep -qi 'libhamlib' || { echo "::error::direwolf was built without Hamlib"; exit 1; }
+    else
+      ldd "$OUT/direwolf$EXE" | grep -qi 'libhamlib' || { echo "::error::direwolf was built without Hamlib"; exit 1; }
+    fi
+    # And it must know the socket device (a wrong patch would have failed above; this proves the binary).
+    "$OUT/direwolf$EXE" -h 2>&1 | head -1 >/dev/null || true
     cp "$WORK/direwolf/LICENSE" "$ROOT/third_party/direwolf/LICENSE"
     echo "direwolf $DIREWOLF_TAG ($DIREWOLF_SHA) → assets/direwolf/direwolf$EXE"
-  fi
+  }
 fi

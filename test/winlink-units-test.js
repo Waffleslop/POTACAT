@@ -199,7 +199,9 @@ async function test(name, fn) {
   await test('stdout lines that need action are named', () => {
     assert.strictEqual(A.classifyArdopLine("ERROR: capturedevice = 'X' not found.  Try using one of the names"), 'device-error');
     assert.strictEqual(A.classifyArdopLine('bind failed: Address already in use'), 'port-busy');
-    assert.strictEqual(A.ardopSupported('darwin'), false);
+    // macOS since the socket audio backend: ardopcf opens no sound card, so no CoreAudio code is needed.
+    assert.strictEqual(A.ardopSupported('darwin'), true);
+    assert.strictEqual(A.ardopSupported('freebsd'), false);
   });
 
   console.log('direwolf');
@@ -213,6 +215,18 @@ async function test(name, fn) {
     assert.throws(() => D.buildDirewolfConfig({ mycall: 'K3SBP', capture: 0, playback: 0 }), /shim/);
     assert.ok(D.buildDirewolfConfig({ mycall: 'K3SBP', capture: 'plughw:1,0', playback: 'plughw:1,0', shimPort: 1, modem: 4800 }).includes('MODEM 1200'), 'unknown speed falls back');
   });
+  await test('Dire Wolf takes its audio from POTACAT\'s socket at 48 kHz — no sound device on any rig or OS', () => {
+    const conf = D.buildDirewolfConfig({ mycall: 'K3SBP', audioPort: 51234, shimPort: 4541 });
+    const lines = conf.split('\n');
+    assert.ok(lines.includes('ADEVICE tcp:51234'), 'the socket device');
+    assert.strictEqual(lines[lines.indexOf('ADEVICE tcp:51234') + 1], `ARATE ${D.DIREWOLF_RATE}`, 'ARATE applies to the ADEVICE line before it');
+    assert.strictEqual(D.DIREWOLF_RATE, 48000, '9600-baud packet needs at least 4x the baud rate');
+    assert.ok(!/ADEVICE (?!tcp:)/.test(conf), 'no sound-card ADEVICE beside the socket');
+    assert.throws(() => D.buildDirewolfConfig({ mycall: 'K3SBP', audioPort: 0, shimPort: 1 }), /not a port/);
+    assert.throws(() => D.buildDirewolfConfig({ mycall: 'K3SBP', audioPort: 70000, shimPort: 1 }), /not a port/);
+    assert.throws(() => D.buildDirewolfConfig({ mycall: 'K3SBP', shimPort: 1 }), /modem audio port/);
+    assert.strictEqual(D.classifyDirewolfLine('Audio device tcp:51234: nothing is serving modem audio on 127.0.0.1:51234.'), 'device-error');
+  });
   await test('Dire Wolf gets its config by bare name (it truncates a long -c path)', () => {
     assert.deepStrictEqual(D.buildDirewolfArgs({ configName: 'direwolf.conf' }), ['-c', 'direwolf.conf', '-t', '0']);
     assert.ok(!D.buildDirewolfArgs().some((a) => /[\\/]/.test(a)));
@@ -221,7 +235,8 @@ async function test(name, fn) {
     assert.strictEqual(D.classifyDirewolfLine('Config file line 7: PTT with RIG is only available when hamlib support is enabled.'), 'no-hamlib');
     assert.strictEqual(D.classifyDirewolfLine('Ready to accept AGW client application 0 on port 8010 ...'), 'ready');
     assert.strictEqual(D.classifyDirewolfLine('"XYZ" doesn\'t match any of the input devices.'), 'device-error');
-    assert.strictEqual(D.direwolfSupported('darwin'), false);
+    assert.strictEqual(D.direwolfSupported('darwin'), true, 'macOS since the socket audio backend');
+    assert.strictEqual(D.direwolfSupported('freebsd'), false);
   });
 
   console.log('winlink-modes');
@@ -234,16 +249,20 @@ async function test(name, fn) {
     assert.ok(!flex[1].available && /Flex Direct/.test(flex[1].reason), 'ARDOP too, without the socket backend');
     const flexSock = M.winlinkModesFor({ ...base, rigFamily: 'flex', audioSource: 'smartsdr', ardopSocketAudio: true });
     assert.ok(flexSock[1].available, 'ARDOP over Flex Direct via POTACAT socket audio');
-    assert.ok(!flexSock[2].available, 'packet still needs a device');
+    assert.ok(flexSock[2].available, 'packet over Flex Direct too — Dire Wolf carries the same socket backend');
+    assert.ok(!flexSock[3].available && /Flex Direct/.test(flexSock[3].reason), 'Mercury still opens its own device');
     const icom = M.winlinkModesFor({ ...base, rigFamily: 'icom-network', audioSource: 'icom-network' });
     assert.ok(/Icom Network/.test(icom[1].reason));
-    assert.ok(M.winlinkModesFor({ ...base, rigFamily: 'icom-network', audioSource: 'icom-network', ardopSocketAudio: true })[1].available);
+    const icomSock = M.winlinkModesFor({ ...base, rigFamily: 'icom-network', audioSource: 'icom-network', ardopSocketAudio: true });
+    assert.ok(icomSock[1].available && icomSock[2].available);
     assert.ok(!M.winlinkModesFor({ ...base, rigFamily: 'flex', audioSource: 'smartsdr', ardopSocketAudio: true, remote: true })[1].available, 'never on a laptop driving a shack');
-    const mac = M.winlinkModesFor({ ...base, platform: 'darwin' });
-    assert.ok(!mac[1].available && /macOS/.test(mac[1].reason));
-    assert.ok(!mac[2].available && /macOS/.test(mac[2].reason), 'packet not on macOS yet');
+    const mac = M.winlinkModesFor({ ...base, platform: 'darwin', ardopSocketAudio: true });
+    assert.ok(mac[1].available, 'ARDOP on macOS (socket audio; no CoreAudio code)');
+    assert.ok(mac[2].available, 'packet on macOS');
     assert.ok(!mac[4].available && /Windows/.test(mac[4].reason));
     assert.ok(mac[3].available, 'Mercury runs on macOS');
+    assert.ok(!M.winlinkModesFor({ ...base, platform: 'darwin', ardopFound: false })[1].available, 'a missing ardopcf is still named on macOS');
+    assert.ok(/Dire Wolf was not found/.test(M.winlinkModesFor({ ...base, direwolfFound: false })[2].reason));
     const noCat = M.winlinkModesFor({ ...base, rigFamily: 'none' });
     assert.ok(noCat.slice(1).every((m) => !m.available));
     const remote = M.winlinkModesFor({ ...base, remote: true });

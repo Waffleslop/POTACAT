@@ -183,13 +183,20 @@ jobs:
         with:
           go-version: '1.24'
           cache: false
-      - name: Build Pat (Winlink client — MIT, separate exe; no ardopcf on macOS)
+      - name: Build Pat + ardopcf + Dire Wolf (Winlink client, ARDOP modem, packet TNC — separate exes)
         # Winlink sidecars (docs/winlink-integration-plan.md), built from the
-        # pinned tags in scripts/build-winlink-helpers.sh.
-        # winlink-helpers.yml is green on every runner (2026-10-22), so a build
-        # failure here FAILS the release: an installer without them would tell
-        # every user "Pat not found" after the fact.
-        run: bash scripts/build-winlink-helpers.sh pat
+        # pinned tags in scripts/build-winlink-helpers.sh. Both modems run on
+        # POTACAT's socket audio (no CoreAudio code): ardopcf compiles against
+        # helpers/alsa-stub; Dire Wolf's CMake wants PortAudio/hidapi/Hamlib
+        # from Homebrew, bundled beside it by bundle-mac-deps.
+        # winlink-helpers.yml is green on every runner, so a build failure
+        # here FAILS the release: an installer without them would tell every
+        # user "Pat not found" after the fact.
+        run: |
+          brew install portaudio hidapi
+          bash scripts/build-winlink-helpers.sh pat ardop direwolf
+          test -f assets/ardopcf/ardopcf
+          test -f assets/direwolf/direwolf
       - name: Fetch cloudflared (POTACAT Cloud tunnel binary)
         run: node scripts/fetch-cloudflared.js --platform=mac --arch=arm64
       - name: Build macOS dmg (arm64)
@@ -284,13 +291,23 @@ jobs:
         with:
           go-version: '1.24'
           cache: false
-      - name: Build Pat (Winlink client — MIT, separate exe; no ardopcf on macOS)
+      - name: Build Pat + ardopcf + Dire Wolf (Winlink client, ARDOP modem, packet TNC — separate exes)
         # Winlink sidecars (docs/winlink-integration-plan.md), built from the
-        # pinned tags in scripts/build-winlink-helpers.sh.
-        # winlink-helpers.yml is green on every runner (2026-10-22), so a build
-        # failure here FAILS the release: an installer without them would tell
-        # every user "Pat not found" after the fact.
-        run: bash scripts/build-winlink-helpers.sh pat
+        # pinned tags in scripts/build-winlink-helpers.sh. Both modems run on
+        # POTACAT's socket audio (no CoreAudio code): ardopcf compiles against
+        # helpers/alsa-stub; Dire Wolf's CMake wants PortAudio/hidapi/Hamlib
+        # from this Intel runner's own Homebrew (x86_64 bottles), bundled
+        # beside it by bundle-mac-deps, which fails on any arm64 piece.
+        # winlink-helpers.yml is green on every runner, so a build failure
+        # here FAILS the release: an installer without them would tell every
+        # user "Pat not found" after the fact.
+        run: |
+          brew install portaudio hidapi hamlib
+          bash scripts/build-winlink-helpers.sh pat ardop direwolf
+          test -f assets/ardopcf/ardopcf
+          test -f assets/direwolf/direwolf
+          lipo -archs assets/ardopcf/ardopcf | grep -q x86_64
+          lipo -archs assets/direwolf/direwolf | grep -q x86_64
       - name: Fetch cloudflared (POTACAT Cloud tunnel binary)
         run: node scripts/fetch-cloudflared.js --platform=mac --arch=x64
       - name: Build macOS dmg (x64)

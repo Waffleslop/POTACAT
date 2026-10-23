@@ -70,6 +70,22 @@ test('resampler passthrough when rates equal', () => {
   assert.deepStrictEqual(Array.from(r.process(inp)), [1, 2, 3]);
 });
 
+test('integer-ratio upsampling never yields NaN at a chunk boundary (one zero sample per chunk in the modem TX path, 2026-10-23)', () => {
+  for (const [from, to] of [[12000, 24000], [24000, 48000], [8000, 24000], [12000, 48000]]) {
+    const r = new StreamingResampler(from, to);
+    const tone = new Float32Array(from);
+    for (let i = 0; i < tone.length; i++) tone[i] = 0.5 * Math.sin(2 * Math.PI * 1000 * i / from);
+    let nan = 0, total = 0;
+    for (let i = 0; i < tone.length; i += 256) {
+      const o = r.process(tone.subarray(i, i + 256));
+      total += o.length;
+      for (const v of o) if (!Number.isFinite(v)) nan++;
+    }
+    assert.strictEqual(nan, 0, `${from}→${to}: ${nan} non-finite samples`);
+    assert.ok(Math.abs(total - to) <= to / from + 1, `${from}→${to}: ${total} samples out`); // the last chunk's tail waits for a neighbour that never comes
+  }
+});
+
 test('MERCURY_FIFO_RATE is 8000', () => assert.strictEqual(MERCURY_FIFO_RATE, 8000));
 
 // ---- strategy resolver ----

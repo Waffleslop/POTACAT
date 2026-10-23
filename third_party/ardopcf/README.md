@@ -8,7 +8,11 @@ its loopback host port — never linked.
 - License: MIT (`LICENSE`, copied from the pinned tag)
 - Pinned: see `VERSION.txt`. Upstream has stopped development; this is a
   fixed, known-good version.
-- Windows and Linux only: ardopcf has no macOS (CoreAudio) backend.
+- Windows, Linux and macOS. ardopcf has no macOS (CoreAudio) backend and
+  POTACAT needs none: it runs the modem on the socket audio device only, so
+  the macOS build compiles the Linux sources against a no-op ALSA stand-in
+  (`helpers/alsa-stub/alsa/asoundlib.h`, every `snd_*` call fails cleanly
+  and is never reached on `tcp:`), without `-lasound`.
 - Built by `scripts/build-winlink-helpers.sh` (make; MSYS2 MINGW64 on
   Windows, statically linked), staged to `assets/ardopcf/`, packaged to
   `resources/bin/ardopcf[.exe]`.

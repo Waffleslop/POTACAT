@@ -210,7 +210,8 @@
           "direwolf",
           "direwolf.exe",
           "*.dll",
-          "*.so*"
+          "*.so*",
+          "*.dylib"
         ]
       },
       {

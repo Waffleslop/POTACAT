@@ -398,7 +398,8 @@ const { createRigctldServer } = require('./lib/rigctld-server');
 const ArdopProcess = require('./lib/ardop-process');
 const DirewolfProcess = require('./lib/direwolf-process');
 const WinlinkModes = require('./lib/winlink-modes');
-const { ModemAudioServer } = require('./lib/modem-audio-server');
+const ModemAudioServerMod = require('./lib/modem-audio-server');
+const { ModemAudioServer } = ModemAudioServerMod;
 const { buildAdifFields, buildAdifRecord, sqliteQsoToAdifFields, ADIF_HEADER, adifField } = require('./lib/adif-writer');
 const QsoLog = require('./lib/qso-log');
 const OriginHealth = require('./lib/origin-health');
@@ -1648,6 +1649,7 @@ const winlinkState = new WinlinkStateLib.WinlinkState();
 let winlinkShim = null;         // loopback rigctld shim Pat keys and tunes through
 let _winlinkShimPort = 0;
 let _winlinkShimArmed = false;  // Pat may tune/key only while a radio session runs
+let _winlinkUnkeyTimer = null;  // the modem asked for PTT off; the tail of its audio is still in POTACAT's pipeline
 let ardopProc = null;           // ardopcf for an ARDOP session
 let direwolfProc = null;        // Dire Wolf for a packet (AX.25) session
 let winlinkAudio = null;        // ModemAudioServer: the modem's audio over POTACAT's radio link (no sound card)
@@ -8360,6 +8362,12 @@ function disconnectMercury() {
 const _wlNet = require('net');
 const WINLINK_PTT_FAILSAFE_MS = 30000;
 const WINLINK_NO_PROGRESS_MS = 180000;
+// PTT-off is delayed this long after the modem asks, so the tail of its audio
+// clears POTACAT's pipeline (socket → resampler → bridge ring / Flex or Icom
+// stream) before the carrier drops. The modem has already waited out its own
+// playback clock; a real sound card's output latency is about this much.
+const WINLINK_UNKEY_DRAIN_BRIDGE_MS = 250;
+const WINLINK_UNKEY_DRAIN_IP_MS = 120;
 const WINLINK_PAT_READY_MS = 10000;
 const WINLINK_NOTICE_TEXT = 'Winlink is amateur radio: no business or commercial traffic, nothing that needs privacy (messages are not encrypted and can be read by anyone), and messages for third parties in other countries only where your licence allows it.';
 
@@ -8759,7 +8767,7 @@ async function startWinlinkShim() {
   if (!port) { winlinkLog('no free port 4540-4549 for the radio control shim — radio sessions are off this run'); return; }
   winlinkShim = createRigctldServer({
     getFreqHz: () => _currentFreqHz || 0,
-    getPtt: () => winlinkTxActive,
+    getPtt: () => winlinkTxActive && !_winlinkUnkeyTimer, // the REQUESTED state: Hamlib re-reads PTT after a set and would otherwise see "still keyed" through the drain hold
     setFreqHz: (hz) => {
       if (!_winlinkShimArmed || radioOwner !== 'winlink') { winlinkLog(`refused Pat's tune to ${(hz / 1e6).toFixed(4)} MHz — no radio session is running`); return false; }
       if (_atuTuneEpisode && Math.abs(hz - (_currentFreqHz || 0)) > 100) { winlinkLog(`held Pat's tune to ${(hz / 1e6).toFixed(4)} MHz — an ATU tune is running`); return false; }
@@ -8769,14 +8777,25 @@ async function startWinlinkShim() {
     },
     setPtt: (on) => {
       if (!on) {
-        clearWinlinkTxFailsafe();
-        if (winlinkTxActive) { winlinkTxActive = false; try { handleRemotePtt(false); } catch {} }
-        if (settings.audioSource === 'icom-network') icomNetworkVoiceTx(false, 'Winlink');
-        winlinkState.setSession({ ptt: false }); winlinkSessionPush();
+        // The modem's last samples are still on their way to the radio (the
+        // socket, the resampler, the bridge window's ring or the Flex/Icom
+        // stream): drop PTT after they have played, not before, or every
+        // frame loses its tail. The modem itself already waited for its
+        // own clock (audio_tcp.c / SocketAudio.c), so this is only POTACAT's
+        // share of the latency.
+        if (_winlinkUnkeyTimer) return true;
+        _winlinkUnkeyTimer = setTimeout(() => { _winlinkUnkeyTimer = null; winlinkUnkeyNow(); }, winlinkUnkeyDrainMs());
         return true;
       }
       if (!_winlinkShimArmed || radioOwner !== 'winlink') { winlinkLog('refused Pat\'s PTT — no radio session is running'); return false; }
       if (_swrTripped) { winlinkLog('refused Pat\'s PTT — the SWR guard has tripped'); return false; }
+      if (_winlinkUnkeyTimer) {
+        // Keyed again inside the drain hold: stay keyed, nothing to re-assert.
+        clearTimeout(_winlinkUnkeyTimer); _winlinkUnkeyTimer = null;
+        armWinlinkTxFailsafe();
+        winlinkSessionTouch();
+        return true;
+      }
       winlinkTxActive = true;
       const icom = detectRigType() === 'icom' || (getActiveRigModel()?.brand === 'Icom');
       if (settings.audioSource === 'icom-network') icomNetworkVoiceTx(true, 'Winlink');
@@ -8791,8 +8810,22 @@ async function startWinlinkShim() {
   catch (e) { winlinkLog(`radio control shim could not listen: ${e.message}`); winlinkShim = null; _winlinkShimPort = 0; }
 }
 
+/** PTT off for the Winlink modem, now (the drain hold has run, or the session is ending). */
+function winlinkUnkeyNow() {
+  if (_winlinkUnkeyTimer) { clearTimeout(_winlinkUnkeyTimer); _winlinkUnkeyTimer = null; }
+  clearWinlinkTxFailsafe();
+  if (winlinkTxActive) { winlinkTxActive = false; try { handleRemotePtt(false); } catch {} }
+  if (settings.audioSource === 'icom-network') icomNetworkVoiceTx(false, 'Winlink');
+  winlinkState.setSession({ ptt: false }); winlinkSessionPush();
+}
+/** How long the modem's final samples take to reach the radio after it stops writing. */
+function winlinkUnkeyDrainMs() {
+  return winlinkIpAudioRoute() ? WINLINK_UNKEY_DRAIN_IP_MS : WINLINK_UNKEY_DRAIN_BRIDGE_MS;
+}
+
 function stopWinlinkShim() {
   _winlinkShimArmed = false;
+  if (_winlinkUnkeyTimer) { clearTimeout(_winlinkUnkeyTimer); _winlinkUnkeyTimer = null; }
   stopWinlinkAudio();
   if (winlinkShim) { try { winlinkShim.close(); } catch {} winlinkShim = null; }
   _winlinkShimPort = 0;
@@ -8836,14 +8869,21 @@ function winlinkAudioRouteName() {
   return 'the radio\'s sound card';
 }
 
-async function startWinlinkAudio() {
+/**
+ * The loopback audio server the modem connects to, at the MODEM's rate:
+ * 12000 for ardopcf, 48000 for Dire Wolf (lib/direwolf-process.js
+ * DIREWOLF_RATE). One modem runs at a time, so one server, rebuilt when the
+ * next session's modem wants another rate.
+ */
+async function startWinlinkAudio({ modemRate = ModemAudioServerMod.MODEM_RATE } = {}) {
   stopWinlinkAudio();
   const srv = new ModemAudioServer({
     makeResampler: (a, b) => new mercuryAudioBridge.StreamingResampler(a, b),
     txOutRate: 24000,
+    modemRate,
     log: winlinkLog,
   });
-  srv.on('modem-connected', () => winlinkLog(`modem audio: ardopcf connected — radio audio via ${winlinkAudioRouteName()}${winlinkIpAudioRoute() ? ', no sound card' : ` (${modemBridge.captureLabel || 'input'} → ${modemBridge.playbackLabel || 'output'})`}`));
+  srv.on('modem-connected', () => winlinkLog(`modem audio: the modem connected at ${modemRate} samples/s — radio audio via ${winlinkAudioRouteName()}${winlinkIpAudioRoute() ? ', no sound card' : ` (${modemBridge.captureLabel || 'input'} → ${modemBridge.playbackLabel || 'output'})`}`));
   srv.on('modem-gone', () => { if (winlinkSessionActive()) winlinkLog('modem audio: the modem closed its audio connection'); });
   srv.on('tx', (mono24k) => {
     if (!winlinkTxActive) return; // the modem only sends while it has PTT; anything else is a stray
@@ -8867,6 +8907,32 @@ function stopWinlinkAudio() {
   if (winlinkAudio) { try { winlinkAudio.close(); } catch {} winlinkAudio = null; }
 }
 
+/**
+ * Everything a socket-audio modem needs before it is launched, for any rig:
+ * the audio server at the modem's rate, the radio's audio path up (Flex
+ * Direct / Icom Network connected, or the bridge window holding the sound
+ * card's input AND output). Resolves the device spec for the modem's
+ * command line / config, or throws the one reason it cannot run — never a
+ * silent transmission.
+ */
+async function winlinkModemAudioReady({ modemRate, modemName }) {
+  if (!winlinkAudio || !winlinkAudio.port || winlinkAudio.modemRate !== modemRate) await startWinlinkAudio({ modemRate });
+  if (!winlinkAudio || !winlinkAudio.port) throw new Error('POTACAT\'s modem audio server is not running — restart Winlink');
+  if (settings.audioSource === 'smartsdr' && !(smartSdrAudio && smartSdrAudio.connected)) throw new Error(`Flex Direct audio is not connected — the radio must be on for ${modemName}`);
+  if (settings.audioSource === 'icom-network' && !_icomNetworkTransport) throw new Error(`Icom Network audio is not connected — the radio must be on for ${modemName}`);
+  if (!winlinkIpAudioRoute()) {
+    // The bridge window must hold the radio's input AND output before the
+    // modem keys; a device it cannot open ends the attempt here, with the
+    // reason, never with a silent transmission.
+    if (!modemBridgeWin) startModemBridge({ playback: true });
+    else if (!modemBridge.playback) modemBridgePlayback(true);
+    const ok = await modemBridgeReady(10000);
+    if (!ok) throw new Error(modemBridge.error || 'The radio\'s sound card did not open in time — see the [Winlink] lines in the log');
+  }
+  winlinkLog(`${modemName}: audio via POTACAT (${winlinkAudioRouteName()}${winlinkIpAudioRoute() ? ', no sound card' : ''})`);
+  return `tcp:${winlinkAudio.port}`;
+}
+
 // ── the modem audio bridge window (renderer/modem-audio-bridge.html) ─────────
 // Runs on sound-device rigs while anything wants the radio's RX audio for a
 // modem — the mail window (its waterfall), a watching ECHOCAT device, or a
@@ -8881,7 +8947,7 @@ function modemBridgeDevices() {
 }
 function modemBridgeWanted() {
   if (winlinkIpAudioRoute() || isRemoteMode()) return false;
-  if (!winlinkState.snapshot().modes.some((m) => m.available && m.id === 'ardop')) return false;
+  if (!winlinkState.snapshot().modes.some((m) => m.available && (m.id === 'ardop' || m.id === 'packet'))) return false;
   return !!((winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) || _winlinkRemoteWatchers > 0 || winlinkSessionActive());
 }
 function modemBridgeSettle(ok) {
@@ -9025,28 +9091,23 @@ function killDirewolf() {
   if (direwolfProc) { try { direwolfProc.kill(); } catch {} direwolfProc = null; }
 }
 
-/** Launch Dire Wolf for a packet session: devices resolved fresh, PTT through the shim. */
+/** Launch Dire Wolf for a packet session: audio through POTACAT's socket (no sound device), PTT through the shim. */
 async function spawnDirewolf() {
   killDirewolf();
-  if (!DirewolfProcess.direwolfSupported(process.platform)) throw new Error('Packet on macOS is not ready yet');
+  if (!DirewolfProcess.direwolfSupported(process.platform)) throw new Error('Packet (Dire Wolf) is not available on this system');
   if (!_winlinkShimPort) throw new Error('The radio control shim is not running — restart Winlink');
-  let labels = winlinkArdopLabels();
-  if (!labels.captureLabel || !labels.playbackLabel) { await winlinkAutoAudio(); labels = winlinkArdopLabels(); }
-  if (!labels.captureLabel || !labels.playbackLabel) throw new Error('POTACAT could not tell which sound devices are your radio\'s — choose them in the Winlink window');
-  const listing = await listArdopDevices();
-  if (!listing.ok) throw new Error(listing.error);
-  const r = ArdopProcess.resolveArdopDevices({ ...labels, devices: listing.devices });
-  if (!r.ok) throw new Error(`Packet audio device missing: ${r.missing.join(', ')} — pick them in Settings > Station > Winlink`);
+  const bin = findDirewolf();
+  if (!bin.found) throw new Error('Dire Wolf was not found — reinstall POTACAT or set its path in Settings');
+  await winlinkModemAudioReady({ modemRate: DirewolfProcess.DIREWOLF_RATE, modemName: 'direwolf' });
   const p = winlinkPaths();
   fs.mkdirSync(p.dir, { recursive: true });
   const confPath = path.join(p.dir, 'direwolf.conf');
   fs.writeFileSync(confPath, DirewolfProcess.buildDirewolfConfig({
-    mycall: settings.myCallsign, capture: r.capture, playback: r.playback,
+    mycall: settings.myCallsign, audioPort: winlinkAudio.port,
     modem: settings.winlinkPacketModem, agwPort: _winlinkAgwPort(), shimPort: _winlinkShimPort,
   }));
-  const bin = findDirewolf();
   const args = DirewolfProcess.buildDirewolfArgs({ configName: path.basename(confPath) }); // spawned with cwd = p.dir
-  winlinkLog(`direwolf: ${r.captureName} → in, ${r.playbackName} → out, ${DirewolfProcess.MODEMS.includes(Number(settings.winlinkPacketModem)) ? settings.winlinkPacketModem : 1200} baud`);
+  winlinkLog(`direwolf: ${DirewolfProcess.MODEMS.includes(Number(settings.winlinkPacketModem)) ? settings.winlinkPacketModem : 1200} baud, audio on 127.0.0.1:${winlinkAudio.port} at ${DirewolfProcess.DIREWOLF_RATE} samples/s`);
   winlinkLog('direwolf spawn: ' + [bin.path, ...args].map((a) => /\s/.test(a) ? `"${a}"` : a).join(' '));
   return await new Promise((resolve, reject) => {
     let proc;
@@ -9137,25 +9198,11 @@ async function winlinkAutoAudio({ inputLabel, outputLabel } = {}) {
 
 /** ardopcf with POTACAT's socket audio backend: no device listing, no sound card. */
 async function spawnArdopSocket() {
-  if (!winlinkAudio || !winlinkAudio.port) await startWinlinkAudio();
-  if (!winlinkAudio || !winlinkAudio.port) throw new Error('POTACAT\'s modem audio server is not running — restart Winlink');
-  if (settings.audioSource === 'smartsdr' && !(smartSdrAudio && smartSdrAudio.connected)) throw new Error('Flex Direct audio is not connected — the radio must be on for ARDOP');
-  if (settings.audioSource === 'icom-network' && !_icomNetworkTransport) throw new Error('Icom Network audio is not connected — the radio must be on for ARDOP');
-  if (!winlinkIpAudioRoute()) {
-    // The bridge window must hold the radio's input AND output before the
-    // modem keys; a device it cannot open ends the attempt here, with the
-    // reason, never with a silent transmission.
-    if (!modemBridgeWin) startModemBridge({ playback: true });
-    else if (!modemBridge.playback) modemBridgePlayback(true);
-    const ok = await modemBridgeReady(10000);
-    if (!ok) throw new Error(modemBridge.error || 'The radio\'s sound card did not open in time — see the [Winlink] lines in the log');
-  }
+  const dev = await winlinkModemAudioReady({ modemRate: ModemAudioServerMod.MODEM_RATE, modemName: 'ardop' });
   const p = winlinkPaths();
   fs.mkdirSync(p.ardopLogs, { recursive: true });
-  const dev = `tcp:${winlinkAudio.port}`;
   const args = ArdopProcess.buildArdopArgs({ port: _winlinkArdopPort(), capture: dev, playback: dev, logDir: p.ardopLogs, driveLevel: winlinkArdopLabels().driveLevel, mycall: settings.myCallsign });
   const bin = findArdop();
-  winlinkLog(`ardop: audio via POTACAT (${winlinkAudioRouteName()}${winlinkIpAudioRoute() ? ', no sound card' : ''})`);
   winlinkLog('ardop spawn: ' + [bin.path, ...args].map((a) => /\s/.test(a) ? `"${a}"` : a).join(' '));
   return spawnArdopProcess(bin, args);
 }
@@ -9178,24 +9225,10 @@ function listArdopDevices() {
 
 async function spawnArdop() {
   killArdop();
-  if (!ArdopProcess.ardopSupported(process.platform)) throw new Error('ARDOP (ardopcf) has no macOS build');
-  return spawnArdopSocket(); // every rig: the modem never opens a sound device
-  let labels = winlinkArdopLabels();
-  if (!labels.captureLabel || !labels.playbackLabel) { await winlinkAutoAudio(); labels = winlinkArdopLabels(); }
-  if (!labels.captureLabel || !labels.playbackLabel) throw new Error('POTACAT could not tell which sound devices are your radio\'s — choose them in the Winlink window');
-  const listing = await listArdopDevices();
-  if (!listing.ok) throw new Error(listing.error);
-  const r = ArdopProcess.resolveArdopDevices({ ...labels, devices: listing.devices });
-  if (!r.ok) {
-    throw new Error(`The radio's sound device is not connected now: ${r.missing.join(', ')} is not in the device list (${listing.devices.capture.length} capture, ${listing.devices.playback.length} playback) — pick them in Settings > Station > Winlink`);
-  }
-  const p = winlinkPaths();
-  fs.mkdirSync(p.ardopLogs, { recursive: true });
-  const args = ArdopProcess.buildArdopArgs({ port: _winlinkArdopPort(), capture: r.capture, playback: r.playback, logDir: p.ardopLogs, driveLevel: labels.driveLevel, mycall: settings.myCallsign });
+  if (!ArdopProcess.ardopSupported(process.platform)) throw new Error('ARDOP (ardopcf) is not available on this system');
   const bin = findArdop();
-  winlinkLog(`ardop: ${r.captureName} → in, ${r.playbackName} → out`);
-  winlinkLog('ardop spawn: ' + [bin.path, ...args].map((a) => /\s/.test(a) ? `"${a}"` : a).join(' '));
-  return spawnArdopProcess(bin, args);
+  if (!bin.found) throw new Error('ardopcf was not found — reinstall POTACAT or set its path in Settings');
+  return spawnArdopSocket(); // every rig, every OS: the modem never opens a sound device
 }
 
 function spawnArdopProcess(bin, args) {
@@ -9397,6 +9430,7 @@ function winlinkEndSession(state, text, received = 0) {
   clearInterval(_winlinkWatchdog); _winlinkWatchdog = null;
   clearWinlinkTxFailsafe();
   _winlinkShimArmed = false;
+  if (_winlinkUnkeyTimer) { clearTimeout(_winlinkUnkeyTimer); _winlinkUnkeyTimer = null; }
   if (winlinkTxActive) { winlinkTxActive = false; try { handleRemotePtt(false); } catch {} }
   const radio = WinlinkModes.isRadioMode(s.mode);
   if (radio) {
@@ -33215,7 +33249,7 @@ app.whenReady().then(() => {
     return { ok };
   });
   ipcMain.handle('winlink-list-ardop-devices', async () => {
-    if (!ArdopProcess.ardopSupported(process.platform)) return { ok: false, error: 'ARDOP (ardopcf) has no macOS build' };
+    if (!ArdopProcess.ardopSupported(process.platform)) return { ok: false, error: 'ARDOP (ardopcf) is not available on this system' };
     return listArdopDevices();
   });
   ipcMain.handle('winlink-account-check', (_e, call) => winlinkAccountCheck(call));

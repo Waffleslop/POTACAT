@@ -52,9 +52,10 @@ test('Pat never gets --listen / --send-only; ardopcf never gets a PTT or CAT fla
   assert.ok(!buildPatArgs({ configPath: 'x' }).some((a) => /listen|send-only/.test(a)));
   assert.ok(!/--listen|'-l'/.test(fnBody(main, 'spawnPat')));
   const { FORBIDDEN_FLAGS } = require('../lib/ardop-process');
-  const spawnArdop = fnBody(main, 'spawnArdop');
+  const spawnArdop = fnBody(main, 'spawnArdop') + fnBody(main, 'spawnArdopSocket');
   for (const f of FORBIDDEN_FLAGS) assert.ok(!spawnArdop.includes(`'${f}'`), f);
   assert.ok(/ArdopProcess\.buildArdopArgs\(/.test(spawnArdop), 'args come from the guarded builder');
+  assert.ok(/return spawnArdopSocket\(\);/.test(fnBody(main, 'spawnArdop')), 'the one launch path is the socket one');
 });
 
 test('Dire Wolf\'s config comes from the guarded builder and keys through the shim port', () => {
@@ -63,10 +64,69 @@ test('Dire Wolf\'s config comes from the guarded builder and keys through the sh
   assert.ok(!/PTT (COM|RTS|DTR|GPIO|VOX)/i.test(sd));
 });
 
-test('radio sound just works: picked automatically at session start, kept through Settings saves', () => {
-  for (const fn of ['spawnArdop', 'spawnDirewolf']) assert.ok(/await winlinkAutoAudio\(\)/.test(fnBody(main, fn)), fn + ' tries the automatic pick before refusing');
+test('both modems take their audio from POTACAT at their own rate; neither picks a sound device', () => {
+  // One readiness path for every socket-audio modem: the server at the modem's
+  // rate, the radio's audio link up, the bridge window holding both devices.
+  const ready = fnBody(main, 'winlinkModemAudioReady');
+  assert.ok(/winlinkAudio\.modemRate !== modemRate\) await startWinlinkAudio\(\{ modemRate \}\)/.test(ready), 'the server is rebuilt when the next modem wants another rate');
+  assert.ok(/if \(!winlinkIpAudioRoute\(\)\) \{[\s\S]*?modemBridgeReady\(10000\)[\s\S]*?throw new Error\(modemBridge\.error/.test(ready), 'waits for the bridge and fails with its reason');
+  const ardop = fnBody(main, 'spawnArdopSocket');
+  assert.ok(/winlinkModemAudioReady\(\{ modemRate: ModemAudioServerMod\.MODEM_RATE, modemName: 'ardop' \}\)/.test(ardop), 'ardopcf at 12 kHz');
+  const dw = fnBody(main, 'spawnDirewolf');
+  assert.ok(/winlinkModemAudioReady\(\{ modemRate: DirewolfProcess\.DIREWOLF_RATE, modemName: 'direwolf' \}\)/.test(dw), 'Dire Wolf at its ARATE');
+  assert.ok(/audioPort: winlinkAudio\.port/.test(dw), 'Dire Wolf gets the socket, not device names');
+  for (const fn of ['spawnArdop', 'spawnArdopSocket', 'spawnDirewolf']) {
+    const b = fnBody(main, fn);
+    assert.ok(!/resolveArdopDevices\(|listArdopDevices\(|proposeArdopDevices\(|winlinkAutoAudio\(/.test(b), fn + ' never resolves a sound device');
+  }
+  assert.ok(!/has no macOS build/.test(main), 'the macOS refusal is gone from main (both modems build there now)');
+  assert.ok(/m\.id === 'ardop' \|\| m\.id === 'packet'/.test(fnBody(main, 'modemBridgeWanted')), 'the bridge serves packet as well as ARDOP');
+  // The old operator-facing pick survives only for the hand-built-modem IPC and keeps its rig key.
   assert.ok(/ArdopProcess\.proposeArdopDevices\(/.test(fnBody(main, 'winlinkAutoAudio')));
   assert.ok(/const SETUP_KEYS = \[[^\]]*'winlinkAudio'/.test(main), 'a pick saved by main survives the main window\'s older rig list');
+});
+
+test('PTT off waits for the modem\'s last samples to clear POTACAT\'s pipeline; the session end does not wait', () => {
+  const shim = fnBody(main, 'startWinlinkShim');
+  assert.ok(/if \(!on\) \{[\s\S]*?_winlinkUnkeyTimer = setTimeout\(\(\) => \{ _winlinkUnkeyTimer = null; winlinkUnkeyNow\(\); \}, winlinkUnkeyDrainMs\(\)\)/.test(shim), 'PTT off is deferred by the drain time');
+  assert.ok(/getPtt: \(\) => winlinkTxActive && !_winlinkUnkeyTimer/.test(shim), 'the shim reports the REQUESTED PTT (Hamlib re-reads it after a set)');
+  assert.ok(/if \(_winlinkUnkeyTimer\) \{[\s\S]*?clearTimeout\(_winlinkUnkeyTimer\); _winlinkUnkeyTimer = null;[\s\S]*?armWinlinkTxFailsafe\(\)/.test(shim), 'keyed again inside the hold stays keyed');
+  const now = fnBody(main, 'winlinkUnkeyNow');
+  assert.ok(/clearWinlinkTxFailsafe\(\)/.test(now) && /handleRemotePtt\(false\)/.test(now));
+  assert.ok(/clearTimeout\(_winlinkUnkeyTimer\)/.test(fnBody(main, 'winlinkEndSession')), 'session end unkeys at once');
+  assert.ok(/const WINLINK_UNKEY_DRAIN_BRIDGE_MS = 250;/.test(main) && /const WINLINK_UNKEY_DRAIN_IP_MS = 120;/.test(main));
+  // The modems pace themselves like a sound card and wait out their own clock before asking for PTT off.
+  const dwTcp = read('third_party/direwolf/src/audio_tcp.c');
+  assert.ok(/TCPAUDIO_LEAD_MS/.test(dwTcp) && /void tcpaudio_wait \(void\)/.test(dwTcp), 'Dire Wolf backend paces and drains');
+  const patch = read('third_party/direwolf/potacat-socket-audio.patch');
+  for (const f of ['src/audio.c', 'src/audio_win.c', 'src/audio_portaudio.c']) {
+    assert.ok(patch.includes(`+++ b/${f}`), `${f} is hooked`);
+  }
+  assert.strictEqual((patch.match(/\+\s*tcpaudio_wait \(\);/g) || []).length, 3, 'audio_wait drains on all three backends');
+  assert.ok(patch.includes('+  audio_tcp.c') && patch.includes('+	AUDIO_IN_TYPE_TCP };'), 'source list and enum');
+});
+
+test('the macOS modem builds: ardopcf against the ALSA stand-in, Dire Wolf with the socket patch, bundled and arch-checked', () => {
+  const script = read('scripts/build-winlink-helpers.sh');
+  assert.ok(/make ardopcf CC=cc CFLAGS="-g -MMD -std=gnu17 -I\$ROOT\/helpers\/alsa-stub" LDFLAGS="" LDLIBS="-lm -lpthread"/.test(script), 'mac ardopcf: stub include, no -lasound, no GNU-ld map flag');
+  assert.ok(/git -C "\$WORK\/direwolf" apply --ignore-whitespace "\$ROOT\/third_party\/direwolf\/potacat-socket-audio\.patch"/.test(script), 'Dire Wolf gets the socket patch');
+  assert.ok(/cp "\$ROOT\/third_party\/direwolf\/src\/audio_tcp\.c" "\$ROOT\/third_party\/direwolf\/src\/audio_tcp\.h" "\$WORK\/direwolf\/src\/"/.test(script));
+  assert.ok(/sed -i\.bak 's\/\[ \\t\]\*\$\/\/' src\/audio\.c src\/audio_win\.c src\/audio_portaudio\.c src\/audio\.h src\/CMakeLists\.txt/.test(script), 'trailing blanks stripped the way the generator did');
+  assert.ok(!/no macOS build|not built on macOS yet/.test(script), 'no macOS skip left');
+  assert.ok(/bundle-mac-deps\.js" --expect-arch="\$\(uname -m\)" "\$OUT\/direwolf"/.test(script), 'Dire Wolf dylibs bundled and arch-checked');
+  assert.ok(/otool -L "\$OUT\/direwolf" \| grep -qi 'libhamlib'/.test(script), 'the mac build still refuses a Dire Wolf without Hamlib');
+  const stub = read('helpers/alsa-stub/alsa/asoundlib.h');
+  for (const sym of ['snd_pcm_open', 'snd_pcm_readi', 'snd_pcm_writei', 'snd_card_next', 'snd_pcm_hw_params_set_rate', 'snd_strerror']) assert.ok(stub.includes(sym + '('), sym);
+  assert.ok(!/snd_pcm_open[\s\S]{0,200}return 0;/.test(stub), 'opening a device always fails cleanly');
+  const rel = read('.github/workflows/release.yml');
+  assert.strictEqual((rel.match(/bash scripts\/build-winlink-helpers\.sh pat ardop direwolf/g) || []).length, 4, 'all four non-Windows release jobs build both modems (Windows builds them in two steps)');
+  assert.ok(/brew install portaudio hidapi/.test(rel), 'the mac jobs install what Dire Wolf\'s CMake requires');
+  const pkg = JSON.parse(read('package.json'));
+  const dw = pkg.build.extraResources.find((r) => r.from === 'assets/direwolf');
+  assert.ok(dw && dw.filter.includes('*.dylib'), 'the mac dylibs ship beside direwolf');
+  const helpers = read('.github/workflows/winlink-helpers.yml');
+  assert.ok(/brew install portaudio hidapi hamlib/.test(helpers) && /pat ardop direwolf/.test(helpers.split('mac:')[1] || ''), 'the helper workflow builds both on macOS');
+  assert.ok(/'scripts\/gen-direwolf-patch\.py'/.test(helpers) && /'helpers\/alsa-stub\/\*\*'/.test(helpers), 'and reruns when the patch generator or stub changes');
 });
 
 test('a Flex keys the modem\'s DAX audio, not the silent mic, and gets its mic back', () => {
@@ -80,7 +140,7 @@ test('modem audio rides POTACAT\'s radio link on Flex Direct / Icom Network — 
   assert.ok(/winlinkFeedRx\(pcm, sampleRate\)/.test(main.slice(main.indexOf("smartSdrAudio.on('audio-frame'"), main.indexOf("smartSdrAudio.on('audio-frame'") + 300)), 'Flex dax_rx frames feed the modem');
   assert.ok(/if \(!meta\.silence\) winlinkFeedRx\(pcm, sampleRate\)/.test(fnBody(main, 'handleIcomNetworkPacedRxFrame')), 'Icom paced frames feed the modem');
   const sock = fnBody(main, 'spawnArdopSocket');
-  assert.ok(/capture: dev, playback: dev/.test(sock) && /tcp:\$\{winlinkAudio\.port\}/.test(sock), 'ardopcf gets tcp:<port> for both devices');
+  assert.ok(/capture: dev, playback: dev/.test(sock) && /tcp:\$\{winlinkAudio\.port\}/.test(fnBody(main, 'winlinkModemAudioReady')), 'ardopcf gets tcp:<port> for both devices');
   assert.ok(/return spawnArdopSocket\(\); \/\/ every rig/.test(fnBody(main, 'spawnArdop')), 'ardopcf is always on the socket');
   const tx = fnBody(main, 'startWinlinkAudio');
   assert.ok(/if \(!winlinkTxActive\) return;/.test(tx) && /pushTxAudioChunk\(mono24k\)/.test(tx) && /pushIcomNetworkVoiceChunk\(mono24k\)/.test(tx), 'modem TX goes to dax_tx / RS-BA1 only while keyed');
@@ -236,7 +296,7 @@ test('account check / set-password / register / recovery email are on the wire, 
   assert.ok(!/password: settings\.winlinkPassword/.test(fnBody(main, 'winlinkPayload')), 'winlink-state carries hasPassword only');
   assert.ok(/hasPassword: !!settings\.winlinkPassword/.test(fnBody(main, 'winlinkPayload')));
   // Settings IPC and the device share one implementation.
-  assert.ok(/ipcMain\.handle\('winlink-register', \(_e, o = \{\}\) => winlinkRegister\(o, 'Settings'\)\);/.test(main));
+  assert.ok(/ipcMain\.handle\('winlink-register', \(_e, o = \{\}\) => winlinkRegister\(o, (\(o && o\.origin\) \|\| )?'Settings'\)\);/.test(main));
   // session.errorKind rides beside the text.
   assert.ok(/errorKind: state === 'error' \? \(_winlinkSessionErrorKind \|\| 'failed'\) : ''/.test(main));
   assert.ok(/_winlinkSessionErrorKind = 'login-failed'/.test(main));
@@ -288,7 +348,7 @@ test('on a sound-device rig the bridge window carries the modem audio; the modem
   assert.ok(/function winlinkIpAudioRoute\(\)/.test(main));
   const srv = fnBody(main, 'startWinlinkAudio');
   assert.ok(/audioSafeSend\(modemBridgeWin\.webContents, 'modem-bridge-tx', \{ pcm: mono24k \}\)/.test(srv), 'TX goes to the bridge window on a sound-device rig');
-  const spawn = fnBody(main, 'spawnArdopSocket');
+  const spawn = fnBody(main, 'winlinkModemAudioReady');
   assert.ok(/if \(!winlinkIpAudioRoute\(\)\) \{[\s\S]*?modemBridgeReady\(10000\)[\s\S]*?throw new Error\(modemBridge\.error/.test(spawn), 'the session waits for the bridge and fails with its reason');
   assert.ok(/ipcMain\.on\('modem-bridge-rx'[\s\S]{0,400}winlinkFeedRx\(pcm, /.test(main), 'bridge RX feeds the server (and the waterfall)');
   assert.ok(/if \(s\.captureEnded && winlinkSessionActive\(\)\) winlinkAbortSession\(modemBridge\.error\);/.test(main), 'an unplugged device ends the session');

@@ -12,6 +12,8 @@ on:
     paths:
       - 'scripts/build-winlink-helpers.sh'
       - 'scripts/gen-ardopcf-patch.py'
+      - 'scripts/gen-direwolf-patch.py'
+      - 'helpers/alsa-stub/**'
       - 'third_party/ardopcf/**'
       - 'third_party/pat/**'
       - 'third_party/direwolf/**'
@@ -92,9 +94,21 @@ jobs:
         with:
           go-version: '1.24'
           cache: false
-      - name: Pat (ardopcf and Dire Wolf are not built on macOS yet)
-        run: bash scripts/build-winlink-helpers.sh pat
+      - name: Dire Wolf's build dependencies (PortAudio and hidapi are required by its CMake on macOS; Hamlib for PTT RIG)
+        run: brew install portaudio hidapi hamlib
+      - name: Pat + ardopcf + Dire Wolf (both modems on POTACAT's socket audio — no CoreAudio needed)
+        run: bash scripts/build-winlink-helpers.sh pat ardop direwolf
       - name: Smoke test
         run: |
           ./assets/pat/pat version
           file assets/pat/pat
+          file assets/ardopcf/ardopcf
+          ./assets/ardopcf/ardopcf -h | head -3 || true
+          # ardopcf must accept the socket device and report the connection refusal, not an ALSA error
+          # (perl alarm: macOS has no `timeout`; a modem that sat in its main loop would hang the job)
+          (perl -e 'alarm 10; exec @ARGV' -- ./assets/ardopcf/ardopcf --hostcommands "CLOSE" 8515 tcp:1 tcp:1 2>&1 || true) | head -20
+          (perl -e 'alarm 10; exec @ARGV' -- ./assets/ardopcf/ardopcf --hostcommands "CLOSE" 8515 tcp:1 tcp:1 2>&1 || true) | grep -qi 'socket audio' || { echo "::error::ardopcf did not take the tcp: device"; exit 1; }
+          ls -la assets/direwolf
+          otool -L assets/direwolf/direwolf
+          otool -L assets/direwolf/direwolf | grep -i hamlib
+          ./assets/direwolf/direwolf -h 2>&1 | head -3 || true

@@ -1,0 +1,338 @@
+--- a/src/audio.h
++++ b/src/audio.h
+@@ -43,7 +43,8 @@
+ enum audio_in_type_e {
+ 	AUDIO_IN_TYPE_SOUNDCARD,
+ 	AUDIO_IN_TYPE_SDR_UDP,
+-	AUDIO_IN_TYPE_STDIN };
++	AUDIO_IN_TYPE_STDIN,
++	AUDIO_IN_TYPE_TCP };	/* POTACAT: "tcp:<port>", both directions, audio_tcp.c */
+ 
+ /* For option to try fixing frames with bad CRC. */
+ 
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -33,6 +33,7 @@
+   ais.c
+   aprs_tt.c
+   audio_stats.c
++  audio_tcp.c
+   ax25_link.c
+   ax25_pad.c
+   ax25_pad2.c
+--- a/src/audio.c
++++ b/src/audio.c
+@@ -90,6 +90,7 @@
+ 
+ #include "audio.h"
+ #include "audio_stats.h"
++#include "audio_tcp.h"
+ #include "textcolor.h"
+ #include "dtime_now.h"
+ #include "demod.h"		/* for alevel_t & demod_get_audio_level() */
+@@ -306,6 +307,9 @@
+ 	        strcasecmp(pa->adev[a].adevice_in,"udp:") == 0) {
+ 	        snprintf (pa->adev[a].adevice_in, sizeof(pa->adev[a].adevice_in), "udp:%d", DEFAULT_UDP_AUDIO_PORT);
+ 	      }
++	    }
++	    if (tcpaudio_is_spec(pa->adev[a].adevice_in)) {
++	      adev[a].g_audio_in_type = AUDIO_IN_TYPE_TCP;	/* POTACAT socket audio, both directions */
+ 	    }
+ 
+ /* Let user know what is going on. */
+@@ -445,6 +449,13 @@
+ 
+ 	        break;
+ 
++	      case AUDIO_IN_TYPE_TCP:
++	        if (tcpaudio_open (pa->adev[a].adevice_in, pa->adev[a].samples_per_sec, pa->adev[a].num_channels, pa->adev[a].bits_per_sample) < 0) {
++	          return (-1);
++	        }
++	        adev[a].inbuf_size_in_bytes = 1024;
++	        break;
++
+ 	      default:
+ 
+ 	        text_color_set(DW_COLOR_ERROR);
+@@ -456,6 +467,9 @@
+  * Output device.  Only "soundcard" is supported at this time.
+  */
+ 
++	    if (adev[a].g_audio_in_type == AUDIO_IN_TYPE_TCP) {
++	      adev[a].outbuf_size_in_bytes = 1024;	/* POTACAT: transmit audio goes back down the same socket */
++	    } else {
+ #if USE_ALSA
+ 	    err = snd_pcm_open (&(adev[a].audio_out_handle), audio_out_name, SND_PCM_STREAM_PLAYBACK, 0);
+ 
+@@ -498,6 +512,7 @@
+ 	      return (-1);
+ 	    }
+ #endif
++	    }
+ 
+ /*
+  * Finally allocate buffer for each direction.
+@@ -1240,6 +1255,20 @@
+ /*
+  * stdin.
+  */
++	  case AUDIO_IN_TYPE_TCP:
++
++	    while (adev[a].inbuf_next >= adev[a].inbuf_len) {
++	      int res = tcpaudio_read (adev[a].inbuf_ptr, adev[a].inbuf_size_in_bytes);
++	      if (res <= 0) {
++	        text_color_set(DW_COLOR_INFO);
++	        dw_printf ("\nAudio via POTACAT: the audio connection closed.  Exiting.\n");
++	        exit (0);
++	      }
++	      adev[a].inbuf_len = res;
++	      adev[a].inbuf_next = 0;
++	    }
++	    break;
++
+ 	  case AUDIO_IN_TYPE_STDIN:
+ 
+ 	    while (adev[a].inbuf_next >= adev[a].inbuf_len) {
+@@ -1308,6 +1337,9 @@
+ 
+ int audio_put (int a, int c)
+ {
++	if (adev[a].g_audio_in_type == AUDIO_IN_TYPE_TCP) {
++	  return (tcpaudio_put (c));
++	}
+ 	/* Should never be full at this point. */
+ 	assert (adev[a].outbuf_len < adev[a].outbuf_size_in_bytes);
+ 
+@@ -1338,6 +1370,9 @@
+ 
+ int audio_flush (int a)
+ {
++	if (adev[a].g_audio_in_type == AUDIO_IN_TYPE_TCP) {
++	  return (tcpaudio_flush ());
++	}
+ #if USE_ALSA
+ 	int k;
+ 	unsigned char *psound;
+@@ -1553,6 +1588,10 @@
+ {
+ 
+ 	audio_flush (a);
++	if (adev[a].g_audio_in_type == AUDIO_IN_TYPE_TCP) {
++	  tcpaudio_wait ();	/* until the last sample has played — then PTT may drop */
++	  return;
++	}
+ 
+ #if USE_ALSA
+ 
+@@ -1618,6 +1657,10 @@
+ 
+ 	for (a = 0; a < MAX_ADEVS; a++) {
+ 
++	  if (adev[a].g_audio_in_type == AUDIO_IN_TYPE_TCP) {
++	    tcpaudio_close ();
++	    continue;
++	  }
+ #if USE_ALSA
+ 	  if (adev[a].audio_in_handle != NULL && adev[a].audio_out_handle != NULL) {
+ 
+--- a/src/audio_win.c
++++ b/src/audio_win.c
+@@ -65,6 +65,7 @@
+ 
+ #include "audio.h"
+ #include "audio_stats.h"
++#include "audio_tcp.h"
+ #include "textcolor.h"
+ #include "ptt.h"
+ #include "demod.h"		/* for alevel_t & demod_get_audio_level() */
+@@ -307,6 +308,9 @@
+ 	        strcasecmp(pa->adev[a].adevice_in,"udp:") == 0) {
+ 	        snprintf (pa->adev[a].adevice_in, sizeof(pa->adev[a].adevice_in), "udp:%d", DEFAULT_UDP_AUDIO_PORT);
+ 	      }
++	    }
++	    else if (tcpaudio_is_spec(pa->adev[a].adevice_in)) {
++	      A->g_audio_in_type = AUDIO_IN_TYPE_TCP;	/* POTACAT socket audio, both directions */
+ 	    }
+ 	    else {
+ 	      A->g_audio_in_type = AUDIO_IN_TYPE_SOUNDCARD;
+@@ -526,11 +530,13 @@
+  * Soundcard is only possibility at this time.
+  */
+ 
++	     if (A->g_audio_in_type != AUDIO_IN_TYPE_TCP) {
+ 	     err = waveOutOpen (&(A->audio_out_handle), out_dev_no[a], &wf, (DWORD_PTR)out_callback, a, CALLBACK_FUNCTION);
+ 	     if (err != MMSYSERR_NOERROR) {
+ 	       text_color_set(DW_COLOR_ERROR);
+ 	       dw_printf ("Could not open audio device for output.\n");
+ 	       return (-1);
++	     }
+ 	     }
+ 
+ 
+@@ -658,6 +664,14 @@
+ /*
+  * stdin.
+  */
++   	       case AUDIO_IN_TYPE_TCP:
++	         if (tcpaudio_open (pa->adev[a].adevice_in, pa->adev[a].samples_per_sec, pa->adev[a].num_channels, pa->adev[a].bits_per_sample) < 0) {
++	           return (-1);
++	         }
++	         A->stream_next= 0;
++	         A->stream_len = 0;
++	         break;
++
+    	       case AUDIO_IN_TYPE_STDIN:
+ 
+ 	         // https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/setmode?view=msvc-170
+@@ -890,6 +904,23 @@
+ /*
+  * stdin.
+  */
++   	  case AUDIO_IN_TYPE_TCP:
++
++	    while (A->stream_next >= A->stream_len) {
++	      int res = tcpaudio_read (A->stream_data, sizeof(A->stream_data));
++	      if (res <= 0) {
++	        text_color_set(DW_COLOR_INFO);
++	        dw_printf ("\nAudio via POTACAT: the audio connection closed.  Exiting.\n");
++	        exit (0);
++	      }
++	      A->stream_len = res;
++	      A->stream_next = 0;
++	    }
++	    sample = A->stream_data[A->stream_next] & 0xff;
++	    A->stream_next++;
++	    return (sample);
++	    break;
++
+    	  case AUDIO_IN_TYPE_STDIN:
+ 
+ 	    while (A->stream_next >= A->stream_len) {
+@@ -953,6 +984,9 @@
+ 
+ 	struct adev_s *A;
+ 	A = &(adev[a]);
++	if (A->g_audio_in_type == AUDIO_IN_TYPE_TCP) {
++	  return (tcpaudio_put (c));
++	}
+ 
+ /*
+  * Wait if no buffers are available.
+@@ -1026,6 +1060,9 @@
+ 	struct adev_s *A;
+ 
+ 	A = &(adev[a]);
++	if (A->g_audio_in_type == AUDIO_IN_TYPE_TCP) {
++	  return (tcpaudio_flush ());
++	}
+ 
+ 	p = (LPWAVEHDR)(&(A->out_wavehdr[A->out_current]));
+ 
+@@ -1093,6 +1130,9 @@
+ {
+ 
+ 	audio_flush (a);
++	if (adev[a].g_audio_in_type == AUDIO_IN_TYPE_TCP) {
++	  tcpaudio_wait ();	/* until the last sample has played — then PTT may drop */
++	}
+ 
+ } /* end audio_wait */
+ 
+@@ -1123,6 +1163,10 @@
+ 
+             struct adev_s *A = &(adev[a]);
+ 
++	    if (A->g_audio_in_type == AUDIO_IN_TYPE_TCP) {
++	      tcpaudio_close ();
++	      continue;
++	    }
+ 	    assert (A->audio_in_handle != 0);
+ 	    assert (A->audio_out_handle != 0);
+ 
+--- a/src/audio_portaudio.c
++++ b/src/audio_portaudio.c
+@@ -58,6 +58,7 @@
+ 
+ #include "audio.h"
+ #include "audio_stats.h"
++#include "audio_tcp.h"
+ #include "textcolor.h"
+ #include "dtime_now.h"
+ #include "demod.h"		/* for alevel_t & demod_get_audio_level() */
+@@ -623,6 +624,9 @@
+ 					snprintf (pa->adev[a].adevice_in, sizeof(pa->adev[a].adevice_in), "udp:%d", DEFAULT_UDP_AUDIO_PORT);
+ 				}
+ 			}
++			if (tcpaudio_is_spec(pa->adev[a].adevice_in)) {
++				adev[a].g_audio_in_type = AUDIO_IN_TYPE_TCP;	/* POTACAT socket audio, both directions */
++			}
+ 
+ 			/* Let user know what is going on. */
+ 			/* If not specified, the device names should be "default". */
+@@ -716,6 +720,15 @@
+ 
+ 					//adev[a].inbuf_size_in_bytes = 1024;
+ 
++					break;
++
++				case AUDIO_IN_TYPE_TCP:
++					/* POTACAT socket audio: no PortAudio stream either way, so the sanity checks below see real sizes. */
++					if (tcpaudio_open (pa->adev[a].adevice_in, pa->adev[a].samples_per_sec, pa->adev[a].num_channels, pa->adev[a].bits_per_sample) < 0) {
++						return (-1);
++					}
++					adev[a].inbuf_size_in_bytes = 1024;
++					adev[a].outbuf_size_in_bytes = 1024;
+ 					break;
+ 
+ 				default:
+@@ -1089,6 +1102,20 @@
+ 			/*
+ 			 * stdin.
+ 			 */
++		case AUDIO_IN_TYPE_TCP:
++
++			while (adev[a].inbuf_next >= adev[a].inbuf_len) {
++				int res = tcpaudio_read (adev[a].inbuf_ptr, adev[a].inbuf_size_in_bytes);
++				if (res <= 0) {
++					text_color_set(DW_COLOR_INFO);
++					dw_printf ("\nAudio via POTACAT: the audio connection closed.  Exiting.\n");
++					exit (0);
++				}
++				adev[a].inbuf_len = res;
++				adev[a].inbuf_next = 0;
++			}
++			break;
++
+ 		case AUDIO_IN_TYPE_STDIN:
+ 
+ 			while (adev[a].inbuf_next >= adev[a].inbuf_len) {
+@@ -1156,6 +1183,9 @@
+ {
+ 	int err = 0;
+ 	size_t frames = 0;
++	if (adev[a].g_audio_in_type == AUDIO_IN_TYPE_TCP) {
++		return (c >= 0 ? tcpaudio_put (c) : tcpaudio_flush ());	/* audio_flush() calls audio_put(a, -1) */
++	}
+ 
+ 	//#define __TIMED__
+ #ifdef __TIMED__
+@@ -1267,6 +1297,9 @@
+ void audio_wait (int a)
+ {
+ 	audio_flush(a);
++	if (adev[a].g_audio_in_type == AUDIO_IN_TYPE_TCP) {
++		tcpaudio_wait ();	/* until the last sample has played — then PTT may drop */
++	}
+ 
+ #if DEBUG
+ 	text_color_set(DW_COLOR_DEBUG);
+@@ -1293,6 +1326,9 @@
+ 	int a;
+ 
+ 	for (a = 0; a < MAX_ADEVS; a++) {
++		if(adev[a].g_audio_in_type == AUDIO_IN_TYPE_TCP) {
++			tcpaudio_close ();
++		}
+ 		if(adev[a].g_audio_in_type == AUDIO_IN_TYPE_SOUNDCARD) {
+ 
+ 			audio_wait (a);
