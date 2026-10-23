@@ -105,8 +105,27 @@ A "VARA (your own copy, Windows)" row replacing the hidden fields:
 - `winlink-main-wiring-test`: session start probes/launches before connecting; QSY FM for varafm;
   nothing of VARA in `extraResources`, `scripts/build-winlink-helpers.sh` or NOTICE (never bundled).
 
+## The audio fight (Casey, 2026-10-23: "won't this make a fight with audio channels?")
+
+Yes — VARA is a separate program opening the radio's sound card, the situation ARDOP was in before
+its socket backend and JS8Call still is. What holds today: the `winlink` radio-owner lock stops
+FT8/SSTV/Mercury/phone TX during a session; Windows shared-mode capture lets VARA and POTACAT's
+waterfall read the same input at once. What fights: on a Flex, DAX is back in the loop
+(`winlinkFlexDaxOn/Restore`, with every DAX-era failure); a device opened exclusively by VARA
+silences POTACAT's waterfall for the session (say so in the window, never a blank waterfall); any
+TX path not yet under the radio-owner lock (SSTV, tune — listed follow-ups) could mix audio on a
+USB-CODEC output.
+
+**Order of work therefore:** the universal audio bridge (one-click plan step 1 — POTACAT captures
+and plays the radio itself and feeds the modem over a socket) comes FIRST. VARA cannot speak the
+socket, but it can use a virtual audio cable (VB-Cable, free, third-party driver, operator-installed)
+and POTACAT bridges the cable to the radio exactly as it does for ARDOP: VARA never touches DAX or
+the CODEC, POTACAT owns the only connection to the radio, the fight ends. DAX / direct CODEC stays
+as the fallback for operators who already run DAX. Settings copy offers the cable route first.
+
 ## Phases
 
+0. **Audio bridge first** (one-click plan step 1), then the virtual-cable route below.
 1. **Spike (Windows PC with VARA HF + VARA FM trial installed):** exe/ini paths and keys, `VERSION`
    reply, PTT lines with PTT=None, VARA FM port change, a trial-licence session each to the nearest
    gateway (VARA HF: KG4OCM 7102.1 from the 8600 over DAX; VARA FM needs a 2 m FM radio on a sound
