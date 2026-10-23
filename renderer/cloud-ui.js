@@ -110,7 +110,10 @@
 
     accountCallsign = subscription?.callsign || user?.callsign || '';
     userCallsignSpan.textContent = accountCallsign;
-    userEmailSpan.textContent = user?.email || 'unknown';
+    // An Apple "Hide My Email" account (user.emailIsRelay) has an address
+    // the operator has never seen: the callsign is the name they recognise,
+    // the relay address is noise, so it is not shown.
+    userEmailSpan.textContent = (user?.emailIsRelay && accountCallsign) ? 'signed in with Apple' : (user?.email || 'unknown');
     if (callsignEditLink) callsignEditLink.classList.toggle('hidden', !accountCallsign);
     // No callsign on the account → open the editor unprompted; it's the
     // one fix for the tunnel's no_callsign refusal and the free trial.
@@ -500,13 +503,21 @@
     emailSignInBtn.addEventListener('click', async () => {
       const email = emailInput.value.trim();
       const password = passwordInput.value;
-      if (!email || !password) return showError('Enter email and password');
+      if (!email || !password) return showError('Enter your email or callsign, and your password');
 
       emailSignInBtn.disabled = true;
       try {
         const result = await window.api.cloudLogin(email, password);
         if (result.error) {
           showError(result.error);
+          // No account under that email: the usual cause is an ECHOCAT
+          // sign-up through Apple with a hidden relay address. The callsign
+          // is the one name they know, so point at it right here.
+          if (result.code === 'no_account' && email.includes('@')) {
+            emailInput.placeholder = 'Try your callsign, e.g. N2PPI';
+            emailInput.value = '';
+            try { emailInput.focus(); } catch {}
+          }
         } else {
           passwordInput.value = '';
           await refreshStatus();
@@ -828,7 +839,7 @@
       const email = (forgotEmailInput && forgotEmailInput.value || '').trim();
       if (!email) {
         if (forgotStatus) {
-          forgotStatus.textContent = 'Enter an email first.';
+          forgotStatus.textContent = 'Enter the email or callsign first.';
           forgotStatus.style.color = 'var(--accent-red)';
         }
         return;
@@ -850,7 +861,9 @@
           // way such an account can ever sign in on the desktop (KC3SRV).
           let msg;
           if (res.status === 404) {
-            msg = "No POTACAT Cloud account uses that email. Double-check the spelling, or sign up.";
+            // The server's message names the Apple-relay case (cloud
+            // 2026-10-23); the local line cannot.
+            msg = res.message || "No POTACAT Cloud account uses that email or callsign. Double-check the spelling, or sign up.";
           } else if (res.error === 'network') {
             msg = 'No connection. Check your network and try again.';
           } else {

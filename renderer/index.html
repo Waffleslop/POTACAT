@@ -3460,8 +3460,12 @@
         <label id="cloud-callsign-label" class="hidden" style="margin-bottom:4px;">Callsign
           <input type="text" id="cloud-callsign" placeholder="e.g. K3SBP" style="text-transform:uppercase;">
         </label>
-        <label style="margin-bottom:4px;">Email
-          <input type="email" id="cloud-email" placeholder="your@email.com">
+        <!-- Email OR callsign (cloud 2026-10-23): an ECHOCAT account made with
+             Sign in with Apple + Hide My Email lives under a relay address the
+             user has never seen; their callsign is the one name they know. The
+             server resolves either; the value is still sent as `email`. -->
+        <label style="margin-bottom:4px;">Email or callsign
+          <input type="text" id="cloud-email" placeholder="Email or callsign" autocapitalize="off" spellcheck="false">
         </label>
         <label style="margin-bottom:4px;">Password
           <input type="password" id="cloud-password" placeholder="Min 8 characters">
@@ -3486,8 +3490,8 @@
              the email is registered — enumeration defense — so the UI
              always shows the same "check your inbox" success. -->
         <div id="cloud-forgot-section" class="hidden" style="margin-top:6px;padding:8px 10px;background:var(--bg-panel);border:1px solid var(--border-primary);border-radius:6px;">
-          <p style="font-size:12px;color:var(--text-secondary);margin:0 0 6px;">Enter the email for your POTACAT Cloud account. We'll send you a reset link if a matching account exists.</p>
-          <input type="email" id="cloud-forgot-email" placeholder="you@example.com" style="width:100%;margin-bottom:6px;">
+          <p style="font-size:12px;color:var(--text-secondary);margin:0 0 6px;">Email or callsign on the account. We'll send a reset link to the account's email if one matches.</p>
+          <input type="text" id="cloud-forgot-email" placeholder="Email or callsign" autocapitalize="off" spellcheck="false" style="width:100%;margin-bottom:6px;">
           <div style="display:flex;gap:6px;align-items:center;">
             <button type="button" id="cloud-forgot-send" class="btn btn-primary btn-sm">Send reset link</button>
             <button type="button" id="cloud-forgot-cancel" class="btn btn-sm">Cancel</button>
@@ -4703,7 +4707,7 @@
            does not ship, so it could only answer "Google Client ID not
            configured" (fresh install, 2026-10-21). -->
       <div id="welcome-cloud-login" class="hidden" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
-        <input type="email" id="welcome-cloud-email" placeholder="Email" autocomplete="username" style="flex:1;min-width:150px;">
+        <input type="text" id="welcome-cloud-email" placeholder="Email or callsign" autocomplete="username" autocapitalize="off" spellcheck="false" style="flex:1;min-width:150px;">
         <input type="password" id="welcome-cloud-password" placeholder="Password" autocomplete="current-password" style="flex:1;min-width:120px;">
         <button type="button" id="welcome-cloud-signin" class="btn btn-primary">Sign in</button>
       </div>

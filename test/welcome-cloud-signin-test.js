@@ -29,6 +29,18 @@ test('the setup screen never calls Google sign-in', () => {
 
 test('the form exists and Enter submits', () => {
   for (const id of ['welcome-cloud-login', 'welcome-cloud-email', 'welcome-cloud-password', 'welcome-cloud-signin']) assert.ok(html.includes(`id="${id}"`), id);
+  // Cloud 2026-10-23: the login name is an email OR a callsign (Apple relay
+  // accounts). A type="email" box refuses a callsign before it is sent.
+  for (const id of ['cloud-email', 'welcome-cloud-email', 'cloud-forgot-email']) {
+    const m = html.match(new RegExp(`<input[^>]*id="${id}"[^>]*>`));
+    assert.ok(m && /type="text"/.test(m[0]) && /placeholder="Email or callsign"/.test(m[0]), `${id} takes a callsign`);
+  }
+  const ipc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'cloud-ipc.js'), 'utf8');
+  assert.ok(/return \{ error: err\.message, code: err\.code \|\| undefined \};/.test(ipc), 'cloud-login hands the error code to the renderer');
+  const ui = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'cloud-ui.js'), 'utf8');
+  assert.ok(/result\.code === 'no_account' && email\.includes\('@'\)/.test(ui), 'no account under an email → try the callsign');
+  assert.ok(/user\?\.emailIsRelay && accountCallsign\) \? 'signed in with Apple'/.test(ui), 'relay address is never shown as the account name');
+  assert.ok(/msg = res\.message \|\| "No POTACAT Cloud account uses that email or callsign/.test(ui), 'forgot-password 404 shows the server message');
   assert.ok(/cloudPassword\.addEventListener\('keydown', \(e\) => \{ if \(e\.key === 'Enter'\)/.test(app));
 });
 
