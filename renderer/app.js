@@ -1000,6 +1000,24 @@ const wasEls = {
   backfillStatus: document.getElementById('was-backfill-status'),
 };
 let workedRoster = null; // lib/worked-roster.js shape, from main ('worked-roster')
+let workedOverlayScope = 'band-mode';
+let workedOverlayConfirmedOnly = false;
+
+/**
+ * The states a spot's park puts it in that are still wanted for WAS on the
+ * SPOT's own band and mode (what you would work them on). A park's state is
+ * exact (its location), so no lookup: US-NJ,US-PA = either. [] when the
+ * roster has not arrived, the spot has no park state, or nothing is wanted.
+ */
+function spotWantedStates(s) {
+  if (!workedRoster || !window.WorkedRoster || !window.WatchlistGroups) return [];
+  const codes = WatchlistGroups.spotStates(s.locationDesc)
+    .filter((t) => t.startsWith('US-') || t.startsWith('CA-'))
+    .map((t) => t.slice(3));
+  if (!codes.length) return [];
+  const opts = { scope: workedOverlayScope, band: s.band, mode: spotModeKey(s), confirmedOnly: workedOverlayConfirmedOnly };
+  return codes.filter((c) => WorkedRoster.isWanted(workedRoster, 'state', c, opts));
+}
 const dxccCountEl = document.getElementById('dxcc-count');
 const dxccPlaceholder = document.getElementById('dxcc-placeholder');
 const dxccBandSelectEl = document.getElementById('dxcc-band-select');
@@ -1959,6 +1977,9 @@ async function loadPrefs() {
   enableGma = settings.enableGma === true; // default false (opt-in)
   enableParc = settings.enableParc === true; // default false (opt-in)
   enableDxcc = settings.enableDxcc === true;  // default false
+  // Worked-overlay scope (WAS): which band/mode a 'still wanted' answer is about
+  workedOverlayScope = (window.WorkedRoster && WorkedRoster.SCOPES.includes(settings.workedOverlayScope)) ? settings.workedOverlayScope : 'band-mode';
+  workedOverlayConfirmedOnly = settings.workedOverlayConfirmedOnly === true;
   enableCluster = settings.enableCluster === true; // default false
   enableCwSpots = settings.enableCwSpots === true; // default false
   showDxBar = settings.showDxBar === true;
@@ -14006,6 +14027,9 @@ function render() {
       if (isNewPark) {
         tr.classList.add('new-park');
       }
+      // Wanted state for WAS (the park's state, exact; the spot's band + mode)
+      const wantedStates = spotWantedStates(s);
+      if (wantedStates.length) tr.classList.add('wanted-state');
 
       // Highlight the row currently being scanned
       if (scanSpot && s.frequency === scanSpot.frequency) {
@@ -14330,7 +14354,7 @@ function render() {
       const cells = [
         { val: s.mode, col: 'mode' },
         { val: s.wpm != null ? String(s.wpm) : '', col: 'wpm' },
-        { val: refDisplay, wwff: !!s.wwffReference, newPark: isNewPark, col: 'reference' },
+        { val: refDisplay, wwff: !!s.wwffReference, newPark: isNewPark, wantedStates, col: 'reference' },
         { val: parkDisplay, col: 'parkName' },
         { val: s.locationDesc, col: 'locationDesc' },
         { val: (s.lat != null && s.lon != null) ? latLonToGridLocal(s.lat, s.lon).slice(0, 4) : '', col: 'grid' },
@@ -14393,6 +14417,13 @@ function render() {
           nb.className = 'ref-new-pill';
           nb.style.cssText = `background:${SOURCE_COLORS_ACTIVE.pota};color:#000;font-size:9px;font-weight:bold;padding:1px 3px;border-radius:3px;margin-left:4px;`;
           td.appendChild(nb);
+        }
+        if (cell.wantedStates && cell.wantedStates.length) {
+          const sb = document.createElement('span');
+          sb.textContent = cell.wantedStates.join('/');
+          sb.className = 'ref-state-pill';
+          sb.title = (cell.wantedStates.length > 1 ? 'States you still need' : 'A state you still need') + ' for Worked All States on ' + (s.band || 'this band') + ' ' + (spotModeKey(s) || '') + ': ' + cell.wantedStates.join(', ');
+          td.appendChild(sb);
         }
         if (cell.wwff) {
           const badge = document.createElement('span');

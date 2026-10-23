@@ -7889,7 +7889,7 @@
 
         // Always show decodes from/to our active QSO partner
         const isQsoPartner = ft8QsoState && ft8QsoState.call && upper.indexOf(ft8QsoState.call.toUpperCase()) >= 0;
-        const isWanted = d.newDxcc || d.newCall || d.newGrid;
+        const isWanted = d.newDxcc || d.newCall || d.newGrid || d.wantedState;
 
         // Apply CQ filter — always show CQ, 73, directed-at-me, hunted, and QSO partner
         if (ft8CqFilter && !isCq && !is73 && !isDirected && !isHunt && !isQsoPartner) return;
@@ -7901,6 +7901,7 @@
         let badges = '';
         if (d.chaseMatch) badges += '<span class="ft8-badge ft8-badge-chase" title="Chase target: ' + esc(ft8ChaseTarget) + '">◎</span>';
         if (d.newDxcc) badges += '<span class="ft8-badge ft8-badge-dxcc" title="New DXCC: ' + esc(d.entity || '') + '">D</span>';
+        if (d.wantedState && d.state && d.state.code) badges += '<span class="ft8-badge ft8-badge-state" title="' + esc(d.state.certain ? 'New state: ' + d.state.code : 'New state? ' + d.state.code) + '">' + esc(d.state.code) + (d.state.certain ? '' : '?') + '</span>';
         if (d.newGrid) badges += '<span class="ft8-badge ft8-badge-grid" title="New grid: ' + esc(d.grid || '') + '">G</span>';
         if (d.newCall) badges += '<span class="ft8-badge ft8-badge-call" title="New call: ' + esc(d.call || '') + '">C</span>';
         if (d.watched) badges += '<span class="ft8-badge ft8-badge-watch" title="Watchlist">W</span>';

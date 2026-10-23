@@ -32,6 +32,8 @@ const DECODES = [
   { id: 'big-dt', d: { db: -7, dt: 12.44, df: 640, text: 'CQ DX JA1XYZ PM95' } },
   { id: 'badges-entity', d: { db: -12, dt: 0.1, df: 1520, text: 'CQ KH6/W1ABCD/P BL11' }, badges: '<span class="ft8-badge ft8-badge-dxcc">D</span><span class="ft8-badge ft8-badge-call">C</span>', entity: 'Hawaii' },
   { id: 'long-free-text', d: { db: 9, dt: -0.3, df: 3001, text: 'K1ABC W2XYZ R-08 THIS IS A LONG FREE TEXT LINE' } },
+  // Wanted-state badge (WAS): a straddling grid shows every candidate with a ?
+  { id: 'state-badge', d: { db: -3, dt: 0.4, df: 1210, text: 'CQ K2ABC FN20' }, badges: '<span class="ft8-badge ft8-badge-state">NJ/NY/PA?</span><span class="ft8-badge ft8-badge-call">C</span>', entity: 'United States' },
   { id: 'tx', tx: true, text: 'W2XYZ K1ABC -12' },
 ];
 

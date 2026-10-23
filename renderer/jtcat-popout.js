@@ -907,7 +907,7 @@ function _applyPopoutTheme(payload) {
       isCq: upper.startsWith('CQ '),
       isDirected: !!myCallsign && JtcatParser.isAddressedTo(upper, myCallsign),
       is73: upper.indexOf('RR73') >= 0 || upper.indexOf(' 73') >= 0,
-      isWanted: d.newDxcc || d.newCall || d.newGrid,
+      isWanted: d.newDxcc || d.newCall || d.newGrid || d.wantedState,
     };
   }
 
@@ -942,6 +942,10 @@ function _applyPopoutTheme(payload) {
     // information.)
     if (d.chaseMatch) badges += '<span class="jp-badge jp-badge-chase" title="Chase match — this station matches your chase target (' + esc(chaseTarget) + ')">◎</span>';
     if (d.newDxcc) badges += '<span class="jp-badge jp-badge-dxcc" title="D: New DXCC on this band — you have not worked ' + esc(d.entity || 'this entity') + ' on this band yet">D</span>';
+    // Wanted state (Worked All States): the state the grid puts them in (a
+    // straddling grid shows every candidate with a ?), still needed on this
+    // band and mode under the worked-overlay scope (main enriches d.state).
+    if (d.wantedState && d.state && d.state.code) badges += '<span class="jp-badge jp-badge-state" title="' + esc(d.state.certain ? 'New state: ' + d.state.code + ' is one you still need on this band and mode' : (d.state.source === 'qrz' ? 'New state? QRZ lists ' + d.state.code + ' as their home state (no grid in the message), one you still need' : 'New state? Grid ' + (d.grid || '') + ' straddles ' + d.state.code + '; at least one of them is one you still need')) + '">' + esc(d.state.code) + (d.state.certain ? '' : '?') + '</span>';
     if (d.newGrid) badges += '<span class="jp-badge jp-badge-grid" title="G: New grid — you have not worked grid ' + esc(d.grid || '?') + ' before">G</span>';
     if (d.newCall) badges += '<span class="jp-badge jp-badge-call" title="C: New call — ' + esc(d.call || 'this station') + ' is not in your log yet">C</span>';
     if (d.watched) badges += '<span class="jp-badge jp-badge-watch" title="W: Watchlist — ' + esc(d.call || 'this station') + ' matches your watchlist">W</span>';

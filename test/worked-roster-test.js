@@ -39,13 +39,13 @@ test('state keys: US states on US/Alaska/Hawaii calls, DC counts as MD, province
   assert.deepStrictEqual(WR.stateKeys('United States', 'ON'), [], 'a province on a US call is a typo, not Ontario');
   assert.deepStrictEqual(WR.stateKeys('Canada', 'ON'), ['ON']);
   assert.deepStrictEqual(WR.stateKeys('Canada', 'PQ'), ['QC'], 'old province spelling');
-  assert.deepStrictEqual(WR.stateKeys('Australia', 'NSW'), ['NSW']);
+  assert.deepStrictEqual(WR.stateKeys('Australia', 'NSW'), [], 'Australia is not tracked: NT/WA/SA collide with US and Canadian codes');
   assert.deepStrictEqual(WR.stateKeys('Mexico', 'JAL'), []);
   assert.deepStrictEqual(WR.stateKeys('Japan', 'NJ'), []);
   assert.deepStrictEqual(WR.stateKeys('United States', ''), []);
 });
 
-test('the three code sets never collide (bare codes are safe roster keys)', () => {
+test('the US and Canadian code sets never collide (bare codes are safe roster keys)', () => {
   const us = new Set(WR.US_STATES.map((s) => s.code));
   const ca = new Set(WR.CA_PROVINCES.map((s) => s.code));
   for (const c of ca) assert.ok(!us.has(c), 'CA/US collision ' + c);

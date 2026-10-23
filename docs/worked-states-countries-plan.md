@@ -112,6 +112,19 @@ and spots from a state or country still needed.
    contact, QRZ for the rest, 150 live lookups per press, a `mutateLog` edit).
    Checked live in a scratch profile with a six-QSO log.
 2. **Badges and Hunt**: decode and spot badges with certainty, the Hunt option.
+   **BUILT 2026-10-23**: `scripts/build-geo-assets.js` → `assets/geo/` (countries
+   110 m 176 KB, US + CA states 50 m simplified 199 KB, `grid-states.json` 28 KB:
+   1824 grids, ~470 straddlers; small or narrow states — NJ, CT, TN, IN, MD… —
+   never fill a 2°×1° grid alone, so they are always straddlers and QRZ or the
+   all-wanted rule decides); `lib/grid-state.js`; main `workedOverlayEnrichDecode`
+   at both decode sites (`r.state`, `r.wantedState`, `r.wantedCountry`, 6 QRZ
+   lookups a minute for unsettled CQ callers); `Hunt: Wanted states` on the pop-out
+   and ECHOCAT Web (`matchesHuntFilter` 'wanted-state', `huntMayAnswer`); the
+   pop-out and web decode rows show the state badge (purple `#e040fb`, `?` for a
+   guess) and count it as Wanted; desktop spot rows get the park's state as a pill
+   on the Reference cell when still wanted on the spot's band and mode.
+   Settings `workedOverlayScope` / `workedOverlayConfirmedOnly` exist (defaults
+   band-mode / false) with no UI yet — phase 3's F8 and legend.
 3. **Map overlays**: geo assets, the layer on the three maps, F6/F7/F8, legend, scope
    following the radio.
 4. **ECHOCAT**: web map and rows, hello capability, mobile handoff

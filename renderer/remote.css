@@ -2827,6 +2827,7 @@ html, body {
 .ft8-badge { font-size: 9px; font-weight: 700; padding: 0 3px; border-radius: 2px; margin-right: 1px; line-height: 1.4; display: inline-block; vertical-align: baseline; }
 .ft8-badge-chase { background: #ffcc33; color: #1a1a2e; }
 .ft8-badge-dxcc { background: var(--accent, #e94560); color: #fff; }
+.ft8-badge-state { background: #e040fb; color: #000; }
 .ft8-badge-grid { background: #4fc3f7; color: #000; }
 .ft8-badge-call { background: #f0a500; color: #000; }
 .ft8-badge-watch { background: #ff4081; color: #fff; }

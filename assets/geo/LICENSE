@@ -1,0 +1,4 @@
+The files in this folder are derived from Natural Earth (naturalearthdata.com),
+1:110m Admin 0 Countries and 1:50m Admin 1 States and Provinces.
+Natural Earth is in the public domain: no permission is needed to use, modify
+or redistribute it. Rebuilt with scripts/build-geo-assets.js.

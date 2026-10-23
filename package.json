@@ -55,6 +55,7 @@
       "assets/icon-light.png",
       "assets/cty.dat",
       "assets/js8-jsc-map.json",
+      "assets/geo/**/*",
       "LICENSE",
       "NOTICE",
       "LICENSES/**/*",

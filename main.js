@@ -421,6 +421,7 @@ const SstvFeedGate = require('./lib/sstv-feed-gate'); // pure ingress-gate decis
 const HuntedPark = require('./lib/hunted-park'); // worked-call → live program-spot park refs (JTCAT logging)
 const WorkedBefore = require('./lib/worked-before'); // JTCAT worked-before policy: rework window + activator exception
 const WorkedRoster = require('./lib/worked-roster'); // states + DXCC entities worked/confirmed by band and mode (WAS, map overlays)
+const GridState = require('./lib/grid-state'); // a decode's US state / province from its grid (certain or straddling), QRZ second
 const { describeJtcatTxAudioFault } = require('./lib/jtcat-tx-audio-fault'); // renderer TX route refused: configured output device unavailable
 const EventRegistry = require('./lib/event-registry'); // unified Events/Contests registry (roadmap #1 Phase A)
 const { SstvManager } = require('./lib/sstv-manager');
@@ -13040,11 +13041,27 @@ function jtcatHuntProgramMatch(d, filterMode) {
     const { band, mode } = jtcatCurrentBandMode(ft8Engine);
     eventMatch = d.eventMatch || eventDecodeMatch(activeEvents, settings.events, d.call, band, mode);
   }
+  // Hunt: Wanted states (WAS) — a CQ from a station whose grid puts it in a
+  // state still needed on this band and mode, or in a straddling grid whose
+  // every state is needed (Casey 2026-10-23). The same roster and scope the
+  // decode badge used; never a QRZ-only guess (lib/grid-state.js).
+  let stateWanted = false;
+  if (filterMode === 'wanted-state') {
+    const { band, mode } = jtcatCurrentBandMode(ft8Engine);
+    const opts = workedOverlayOpts(band, mode);
+    stateWanted = GridState.huntMayAnswer(d.state, (c) => WorkedRoster.isWanted(workedRoster, 'state', c, opts));
+  }
   const ok = _jtcatStateMachine.matchesHuntFilter(d.text, filterMode, {
     spottedSigs,
     spottedEnabled: jtcatHuntSpottedEnabled(),
     eventNeeded: !!(eventMatch && eventMatch.status !== 'worked'),
+    stateWanted,
   });
+  if (ok && stateWanted && !_jtcatSpottedHuntLogged.has(d.call)) {
+    _jtcatSpottedHuntLogged.add(d.call);
+    const where = d.state.candidates.length > 1 ? `in ${d.state.code} (grid ${d.grid} straddles, all still needed)` : `in ${d.state.code} (grid ${d.grid})`;
+    sendCatLog(`[JTCAT] Hunt: ${d.call} is ${where}, a state you still need — answering their CQ`);
+  }
   // Say why a station with no program modifier in its CQ is being answered —
   // once per callsign, since the same activator calls every other cycle.
   if (ok && hunted && !matchesAutoCqFilter(d.text, filterMode) && !_jtcatSpottedHuntLogged.has(d.call)) {
@@ -15096,6 +15113,7 @@ function startJtcat(mode) {
           r.grid = gm[1].toUpperCase();
           r.newGrid = !rosterWorkedGrids.has(r.grid);
         }
+        workedOverlayEnrichDecode(r, uc, currentBand, data.mode || 'FT8');
         // Chase target highlight (renderer/cq-target.js). One rule for popout + phone.
                 // CQ modifier (NA/EU/POTA/TEST...) for the watchlist tag highlighter.
         // A pure text parse - deliberately NOT gated on chase context. The
@@ -25978,6 +25996,54 @@ function workedRosterAdd(call, entry) {
     sendWorkedRoster();
   } catch (err) {
     console.error('[Roster] worked roster add failed:', err.message);
+  }
+}
+
+/**
+ * The scope every "is this state / country still wanted" answer uses:
+ * settings.workedOverlayScope ('any' | 'band' | 'band-mode' | 'band-exact',
+ * default band + award family, Casey 2026-10-23) and workedOverlayConfirmedOnly,
+ * against the band and mode the caller is looking at (the dial for a decode,
+ * the spot's own for a spot).
+ */
+function workedOverlayOpts(band, mode) {
+  const scope = WorkedRoster.SCOPES.includes(settings.workedOverlayScope) ? settings.workedOverlayScope : 'band-mode';
+  return { scope, band: band || '', mode: mode || '', confirmedOnly: settings.workedOverlayConfirmedOnly === true };
+}
+
+// QRZ lookups the state badge may spend on CQ callers whose grid does not
+// settle the state (no grid, or a straddler): a handful a minute, cache-first,
+// results land for the NEXT cycle. Never on a station that is not US/VE.
+let _wasQrzBudgetAt = 0;
+let _wasQrzBudget = 0;
+
+/**
+ * Decode enrichment for the worked-states / worked-countries overlays, run
+ * from BOTH decode sites (single and multi-slice): r.wantedCountry, and for
+ * a US/VE call r.state = {code, candidates, certain, source, wanted[],
+ * allWanted} + r.wantedState (any candidate wanted: the badge). Hunt uses
+ * GridState.huntMayAnswer (every candidate wanted, never a QRZ guess).
+ */
+function workedOverlayEnrichDecode(r, call, band, mode) {
+  try {
+    const opts = workedOverlayOpts(band, mode);
+    if (r.entity) r.wantedCountry = WorkedRoster.isWanted(workedRoster, 'entity', r.entity, opts);
+    if (!WorkedRoster.tracksEntity(r.entity)) return;
+    const cached = qrz && qrz.cached ? qrz.cached(call) : undefined;
+    const st = GridState.stateForDecode({ grid: r.grid, qrzState: cached && cached.state, entity: r.entity });
+    if (st) {
+      st.wanted = st.candidates.filter((c) => WorkedRoster.isWanted(workedRoster, 'state', c, opts));
+      st.allWanted = st.wanted.length === st.candidates.length;
+      r.state = st;
+      r.wantedState = st.wanted.length > 0;
+    }
+    if (cached === undefined && settings.enableQrz && qrz && qrz.configured && /^CQ /i.test(r.text || '') && (!st || !st.certain)) {
+      const now = Date.now();
+      if (now - _wasQrzBudgetAt > 60000) { _wasQrzBudgetAt = now; _wasQrzBudget = 6; }
+      if (_wasQrzBudget > 0) { _wasQrzBudget--; qrz.lookup(call).catch(() => {}); }
+    }
+  } catch (err) {
+    console.error('[Roster] decode state enrichment failed:', err.message);
   }
 }
 
@@ -41017,6 +41083,7 @@ app.whenReady().then(() => {
               r.grid = gm[1].toUpperCase();
               r.newGrid = !rosterWorkedGrids.has(r.grid);
             }
+            workedOverlayEnrichDecode(r, uc, currentBand, s.mode || 'FT8');
                         // CQ modifier (NA/EU/POTA/TEST...) for the watchlist tag highlighter.
         // A pure text parse - deliberately NOT gated on chase context. The
         // original insertion inherited an if(chaseCtx) guard from the line it
