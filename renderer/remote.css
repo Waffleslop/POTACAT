@@ -801,6 +801,11 @@ html, body {
   min-width: 140px;
   max-height: 300px;
   overflow-y: auto;
+  /* Scrolling to the end of a menu must not carry on into the PAGE: that
+     page scroll is what closes an open panel, so the menu vanished as soon
+     as a finger or wheel reached its last item (LZ3AW 2026-10-23). */
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* An open panel is moved to <body> (see openDropdownPanel in remote.js), so

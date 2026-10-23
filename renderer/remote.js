@@ -3390,6 +3390,9 @@
     if (left + width > window.innerWidth - margin) left = window.innerWidth - width - margin;
     panel.style.left = Math.max(margin, left) + 'px';
     panel.style.top = (rect.bottom + 4) + 'px';
+    // Fit the screen below the button, so every item is reachable by
+    // scrolling the panel itself (never the page).
+    panel.style.maxHeight = Math.max(120, Math.min(300, window.innerHeight - rect.bottom - 4 - margin)) + 'px';
     // A fixed panel does not follow its button, so scrolling the bar (or the
     // page) closes it rather than leaving it pointing at nothing. Scrolling
     // INSIDE the panel is the one scroll that must not close it: the capture
