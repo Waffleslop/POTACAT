@@ -322,6 +322,22 @@ t('has the two entry points, robots/referrer meta and the fragment redeem paths'
   assert.ok(a.indexOf('history.replaceState') < a.indexOf("redeem('/api/pair-account'"), 'the fragment is stripped BEFORE the credential is posted');
   for (const n of G.CONNECT_NOTICES) assert.ok(a.includes("'" + n + "'"), 'notice copy for ' + n);
 });
+
+t('the anonymous pages wear potacat.com\'s look and fetch nothing from anyone', () => {
+  // Casey 2026-10-23: the gate was still on the old dark ECHOCAT palette
+  // while potacat.com and login.potacat.com (where it sends people) are
+  // light sky / ink / marigold.
+  for (const html of [G.buildConnectPageHtml(), G.buildStubHtml()]) {
+    assert.ok(html.includes('--sky:#eef5fa') && html.includes('--marigold:#fbbf24') && html.includes('--ink:#0b2239'), 'the site tokens');
+    assert.ok(html.includes('<span>POTACAT</span>') && html.includes('src="data:image/png;base64,'), 'brand row with the inlined icon');
+    assert.ok(!/#1a1a2e|#16213e|#4fc3f7|#e94560/.test(html), 'none of the old palette');
+    assert.ok(!/fonts\.googleapis|fonts\.gstatic|<link /.test(html), 'no request to a font host or any other host');
+    assert.ok(!/https?:\/\/(?!potacat\.com|login\.potacat\.com)/.test(html), 'links only to potacat.com');
+    assert.ok(html.includes('padding:28px 16px 40px'), '16 px gutter for phones');
+  }
+  assert.ok(G.buildStubHtml().includes('accepts connections from paired'), 'the live tunnel test\'s stub tell');
+  assert.strictEqual(G.buildStubHtml(), G.buildStubHtml(), 'the stub is one constant');
+});
 t('no emojis in the copy', () => {
   assert.ok(!/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(G.buildConnectPageHtml()));
 });
