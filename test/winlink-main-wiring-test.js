@@ -241,3 +241,18 @@ test('account check / set-password / register / recovery email are on the wire, 
   assert.ok(/errorKind: state === 'error' \? \(_winlinkSessionErrorKind \|\| 'failed'\) : ''/.test(main));
   assert.ok(/_winlinkSessionErrorKind = 'login-failed'/.test(main));
 });
+
+console.log('the release announcement');
+test('What\'s New carries the Winlink card once per profile, with a working opt-in checkbox', () => {
+  const html = read('renderer/index.html');
+  const app = read('renderer/app.js');
+  assert.ok(/id="whats-new-feature"/.test(html) && /id="whats-new-winlink-enable"/.test(html));
+  assert.ok(/Over the internet:<\/b> Windows, Linux and Mac/.test(html) && /Over the radio \(ARDOP\):<\/b> Windows and Linux/.test(html), 'the platform claim is exactly what ships');
+  const fn = fnBody(app, 'renderWinlinkAnnounce');
+  assert.ok(/s\.enableWinlink === true \|\| s\.winlinkAnnounced/.test(fn), 'never to a profile with Winlink on, and once');
+  assert.ok(/saveSettings\(\{ winlinkAnnounced:/.test(fn), 'stamped when shown');
+  assert.ok(/saveSettings\(\{ enableWinlink: box\.checked \}\)/.test(fn), 'the checkbox is the same opt-in as Settings');
+  assert.ok(/await renderWinlinkAnnounce\(\);\n\s*dialog\.showModal\(\);/.test(app), 'rendered before the dialog opens');
+  // A partial save of enableWinlink must start Pat (the save handler's relaunch gate).
+  assert.ok(/const winlinkChanged = \['enableWinlink'/.test(main));
+});

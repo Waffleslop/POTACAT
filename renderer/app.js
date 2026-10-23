@@ -25178,6 +25178,7 @@ async function showWhatsNew(version) {
 
   title.textContent = `What's New in v${version}`;
   body.innerHTML = '<em>Loading release notes...</em>';
+  await renderWinlinkAnnounce();
   dialog.showModal();
 
   closeBtn.onclick = () => dialog.close();
@@ -25199,6 +25200,43 @@ async function showWhatsNew(version) {
   } else {
     body.innerHTML = '<p>No release notes available for this version.</p>';
   }
+}
+
+// The Winlink announcement on the What's New dialog: shown once per profile
+// (settings.winlinkAnnounced, stamped when it is shown) and never to a profile
+// that already has Winlink on. The checkbox is the whole opt-in: saving
+// enableWinlink starts Pat exactly as the Settings checkbox does.
+async function renderWinlinkAnnounce() {
+  const card = document.getElementById('whats-new-feature');
+  if (!card) return;
+  let s = {};
+  try { s = await window.api.getSettings(); } catch {}
+  if (s.enableWinlink === true || s.winlinkAnnounced) { card.classList.add('hidden'); return; }
+  card.classList.remove('hidden');
+  try { await window.api.saveSettings({ winlinkAnnounced: new Date().toISOString() }); } catch {}
+  const box = document.getElementById('whats-new-winlink-enable');
+  const next = document.getElementById('whats-new-winlink-next');
+  box.checked = false;
+  next.classList.add('hidden');
+  box.onchange = async () => {
+    try { await window.api.saveSettings({ enableWinlink: box.checked }); } catch {}
+    next.classList.toggle('hidden', !box.checked);
+    const btn = document.getElementById('view-winlink-btn');
+    if (btn) btn.classList.toggle('hidden', !box.checked);
+  };
+  document.getElementById('whats-new-winlink-settings').onclick = (e) => {
+    e.preventDefault();
+    document.getElementById('whats-new-dialog').close();
+    openSettingsDialog('station').then(() => {
+      const fs = document.getElementById('winlink-fieldset');
+      if (fs) { fs.classList.remove('collapsed'); fs.scrollIntoView({ block: 'start' }); }
+    });
+  };
+  document.getElementById('whats-new-winlink-open').onclick = (e) => {
+    e.preventDefault();
+    document.getElementById('whats-new-dialog').close();
+    if (window.api.winlinkPopoutOpen) window.api.winlinkPopoutOpen();
+  };
 }
 
 // Release notes -> HTML: lib/release-notes-format.js (tested).
