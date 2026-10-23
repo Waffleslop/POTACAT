@@ -125,7 +125,11 @@ if [[ " $want " == *" ardop "* ]]; then
       # <alsa/asoundlib.h>, so they compile against helpers/alsa-stub (every
       # snd_* call an inline no-op that fails cleanly; never reached on tcp:),
       # without -lrt -lasound, and without the GNU-ld -Map flag ld64 rejects.
-      ( cd "$WORK/ardop" && make ardopcf CC=cc CFLAGS="-g -MMD -std=gnu17 -I$ROOT/helpers/alsa-stub" LDFLAGS="" LDLIBS="-lm -lpthread" )
+      # -Wno-int-conversion: lib/rawhid/rawhid.c's non-Windows CM108 PTT path
+      # hands a hid_device* to int parameters (a warning under GCC, an error
+      # under Apple clang 16); POTACAT never gives ardopcf a PTT flag, so that
+      # code is never reached.
+      ( cd "$WORK/ardop" && make ardopcf CC=cc CFLAGS="-g -MMD -std=gnu17 -Wno-int-conversion -I$ROOT/helpers/alsa-stub" LDFLAGS="" LDLIBS="-lm -lpthread" )
     else
       ( cd "$WORK/ardop" && make ardopcf CFLAGS="-g -MMD -std=gnu17" )
     fi
