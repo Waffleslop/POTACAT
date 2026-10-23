@@ -2358,6 +2358,8 @@ html, body {
 .spot-card.worked .spot-call { color: var(--text-dim); }
 .spot-card.worked-today { opacity: 0.45; }
 .worked-check { color: var(--pota, #4ecca3); font-size: 13px; font-weight: bold; margin-right: 3px; }
+/* Worked today on another band/mode: dim, so a new band still reads workable. */
+.worked-check.other { opacity: 0.4; font-weight: normal; }
 #spot-worked-note { font-size: 10px; color: var(--text-dim); padding: 2px 8px; }
 #spot-worked-note.hidden { display: none; }
 .worked-chip { --src-color: var(--text-dim); }

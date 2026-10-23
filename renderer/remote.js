@@ -3055,12 +3055,18 @@
       const newPark = isNewPark(s);
       const workedToday = isWorkedSpot(s);
       const workedEver = !workedToday && hasWorkedOnBandMode(s);
+      let workedOther = '';
+      if (!workedToday && !workedEver) {
+        const d = new Date();
+        const today = d.getUTCFullYear() + String(d.getUTCMonth() + 1).padStart(2, '0') + String(d.getUTCDate()).padStart(2, '0');
+        workedOther = SpotRow.workedElsewhereTitle(SpotRow.workedElsewhereToday(workedQsos.get((s.callsign || '').toUpperCase()), s.band, spotModeKey(s), today));
+      }
       const isSkipped = scanSkipped.has(spotSkipKey(s)) || (workedToday && !scanForceUnskipped.has(spotSkipKey(s)));
       const dxe = dxeKind(s.callsign, dxeState);
       const call = (s.callsign || '').toUpperCase();
       return SpotRow.spotRowHtml(s, {
         tuned: !!(tunedFreqKhz && s.frequency === tunedFreqKhz),
-        newPark, workedToday, workedEver, isSkipped,
+        newPark, workedToday, workedEver, workedOther, isSkipped,
         dxe: dxe === 'contest' ? 'contest' : dxe ? 'dxpedition' : '',
         dxeTitle: dxe ? dxeTitle(s.callsign) : '',
         opName: qrzNameCache[call] || '',

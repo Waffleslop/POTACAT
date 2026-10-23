@@ -5799,6 +5799,13 @@ a.settings-echocat-badge-link:hover {
   color: var(--accent-green);
   font-size: 11px;
 }
+/* Worked today on another band/mode — dim, so this band still reads workable. */
+.worked-other .callsign-cell::before {
+  content: "\2713 ";
+  color: var(--accent-green);
+  font-size: 11px;
+  opacity: 0.4;
+}
 
 /* Dim only if worked today (same UTC date) */
 .worked-today {

@@ -13673,9 +13673,17 @@ function render() {
       }
 
       // Already-worked check — checkmark for any prior QSO, dim only if worked today
+      let workedOtherTitle = '';
       if (isWorked) {
         tr.classList.add('already-worked');
         if (isWorkedToday) tr.classList.add('worked-today');
+      } else if (window.SpotRow) {
+        // Worked today on ANOTHER band/mode: a dim check + tooltip, so an
+        // activator who moved after the QSO no longer looks never-worked.
+        const d = new Date();
+        const today = d.getUTCFullYear() + String(d.getUTCMonth() + 1).padStart(2, '0') + String(d.getUTCDate()).padStart(2, '0');
+        workedOtherTitle = SpotRow.workedElsewhereTitle(SpotRow.workedElsewhereToday(workedQsos.get(String(s.callsign || '').toUpperCase()), s.band, spotModeKey(s), today));
+        if (workedOtherTitle) tr.classList.add('worked-other');
       }
 
       // New park indicator (POTA/WWFF spot with a reference not in worked parks)
@@ -13821,6 +13829,7 @@ function render() {
       const callTd = document.createElement('td');
       callTd.className = 'callsign-cell';
       callTd.setAttribute('data-col', 'callsign');
+      if (workedOtherTitle) callTd.title = workedOtherTitle;
       // Own-call row: ONE leading cat and nothing else \u2014 the donor paw and
       // creator badges below are suppressed for your own call (K3SBP saw
       // "cat K3SBP paw cat" when spotted; the trailing badges are for OTHER
