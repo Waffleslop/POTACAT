@@ -16,10 +16,19 @@
 #ifndef POTACAT_ALSA_STUB_H
 #define POTACAT_ALSA_STUB_H
 
-#include <stddef.h>
+/* The real asoundlib.h pulls these in, and ALSASound.c relies on it (usleep,
+ * open/O_WRONLY/close came from here on Linux — the first Mac build failed
+ * on exactly those). Same list as alsa-lib 1.2's header. */
+#include <unistd.h>
+#include <stdio.h>
 #include <stdlib.h>
-#include <errno.h>
 #include <string.h>
+#include <fcntl.h>
+#include <assert.h>
+#include <poll.h>
+#include <errno.h>
+#include <stddef.h>
+#include <sys/types.h>
 #include <alloca.h>
 
 #ifdef __cplusplus
