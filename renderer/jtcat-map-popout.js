@@ -34,6 +34,12 @@
     var markerLayer = L.layerGroup().addTo(map);
     var arcLayer = L.layerGroup().addTo(map);
     var homeMarker = null;
+    // Worked-states / countries tints under the grid rectangles + F6/F7/F8
+    // legend (lib/worked-overlay.js). Main owns the state.
+    if (window.WorkedOverlay) {
+      var workedOverlayCtl = WorkedOverlay.attach(L, map, window.api);
+      document.addEventListener('keydown', function (e) { workedOverlayCtl.onKey(e); });
+    }
 
     function gridToLatLon(grid) {
       if (!grid || grid.length < 4) return null;

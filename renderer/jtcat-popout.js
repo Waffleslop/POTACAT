@@ -412,6 +412,20 @@ function _applyPopoutTheme(payload) {
   var arcLayer = L.layerGroup();
   var homeMarker = null;
   var nightLayer = null;
+  // Worked-states / countries tints (lib/worked-overlay.js): attached when
+  // the map is made; F6/F7/F8 work before that too, against main's state.
+  var workedOverlayCtl = null;
+  var workedOverlayLastState = null;
+  if (window.api.onWorkedOverlayState) window.api.onWorkedOverlayState(function (s) { if (s) workedOverlayLastState = s; });
+  document.addEventListener('keydown', function (e) {
+    if (!window.WorkedOverlay) return;
+    if (modeSelect && modeSelect.value === 'JTTY') return; // F1-F12 are the JTTY macros on that pane
+    if (workedOverlayCtl) { workedOverlayCtl.onKey(e); return; }
+    if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
+    if (e.target && e.target.matches && e.target.matches('input, select, textarea, [contenteditable]')) return;
+    var patch = WorkedOverlay.keyPatch(e.key, workedOverlayLastState);
+    if (patch && window.api.workedOverlaySet) { e.preventDefault(); window.api.workedOverlaySet(patch); }
+  });
 
   function initMap() {
     var center = [20, 0];
@@ -431,6 +445,7 @@ function _applyPopoutTheme(payload) {
     markerLayer.addTo(map);
     arcLayer.addTo(map);
     updateMapHome();
+    if (window.WorkedOverlay) workedOverlayCtl = WorkedOverlay.attach(L, map, window.api);
   }
 
   // Day/night terminator — ported from the Propagation popout (prop-popout.js).

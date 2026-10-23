@@ -1002,6 +1002,8 @@ const wasEls = {
 let workedRoster = null; // lib/worked-roster.js shape, from main ('worked-roster')
 let workedOverlayScope = 'band-mode';
 let workedOverlayConfirmedOnly = false;
+let workedOverlayCtl = null;       // lib/worked-overlay.js attach() on the Spots map (made with the map)
+let workedOverlayLastState = null; // main's worked-overlay-state, kept for F6/F7/F8 before the map exists
 
 /**
  * The states a spot's park puts it in that are still wanted for WAS on the
@@ -10865,6 +10867,11 @@ function initMap() {
   // created lazily on first view, so the events may already be loaded.
   renderEventMapOverlay();
 
+  // Worked-states / countries tints under the markers, with the F6/F7/F8
+  // legend (lib/worked-overlay.js; main owns the state, so the pop-out map
+  // and the JTCAT maps show the same thing).
+  if (window.WorkedOverlay) workedOverlayCtl = WorkedOverlay.attach(L, map, window.api);
+
   // Add day/night overlay and refresh every 60s
   updateNightOverlay();
   setInterval(updateNightOverlay, 60000);
@@ -11601,6 +11608,12 @@ document.addEventListener('keydown', (e) => {
   if (bareFKey && !e.shiftKey && /^F([1-9]|1[0-2])$/.test(e.key) && cwMacroBoxVisible
       && (!e.target.matches('input, select, textarea') || e.target === cwMacroInput)) {
     if (sendCwMacroByIndex(parseInt(e.key.slice(1), 10) - 1)) { e.preventDefault(); return; }
+  }
+  // F6 / F7 / F8 — worked-states / countries map tints and their scope. The
+  // setting is shared by every map window, so it works with no map open.
+  if (bareFKey && !e.shiftKey && /^F[678]$/.test(e.key) && !e.target.matches('input, select, textarea') && window.WorkedOverlay) {
+    if (workedOverlayCtl) { if (workedOverlayCtl.onKey(e)) return; }
+    else { e.preventDefault(); window.api.workedOverlaySet(WorkedOverlay.keyPatch(e.key, workedOverlayLastState)); return; }
   }
   // F1 — Hotkeys help
   if (e.key === 'F1' && bareFKey && !e.shiftKey && !e.target.matches('input, select, textarea')) {
@@ -12822,6 +12835,19 @@ if (window.api.onWorkedRoster) {
     workedRoster = roster;
     if (currentView === 'was') renderWasView();
   });
+}
+// The map-tint state from main (F6/F7/F8 on any window, the legend boxes, a
+// band or mode change): the spot rows' wanted-state pill follows the scope.
+if (window.api.onWorkedOverlayState) {
+  window.api.onWorkedOverlayState((s) => {
+    if (!s) return;
+    const scopeChanged = s.scope !== workedOverlayScope || !!s.confirmedOnly !== workedOverlayConfirmedOnly;
+    workedOverlayLastState = s;
+    if (window.WorkedRoster && WorkedRoster.SCOPES.includes(s.scope)) workedOverlayScope = s.scope;
+    workedOverlayConfirmedOnly = !!s.confirmedOnly;
+    if (scopeChanged && showTable) render();
+  });
+  if (window.api.workedOverlayGet) window.api.workedOverlayGet().then((s) => { if (s && !workedOverlayLastState) workedOverlayLastState = s; }).catch(() => {});
 }
 if (window.api.getWorkedRoster) {
   window.api.getWorkedRoster().then((roster) => {

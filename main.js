@@ -3178,6 +3178,8 @@ function sendCatFrequency(hz) {
   // Same reasoning, same sink: JTCAT's RX level is remembered per band, so a
   // band change restores the level that band was last run at.
   jtcatRxGainFollowBand(hz);
+  // And the worked-states / countries map tints follow the dial's band.
+  workedOverlayFollowDial();
   if (win && !win.isDestroyed()) win.webContents.send('cat-frequency', hz);
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-frequency', hz);
   if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('cat-frequency', hz);
@@ -3229,6 +3231,7 @@ function sendCatMode(mode) {
     return;
   }
   _lastRejectedMode = '';
+  workedOverlayFollowDial(); // the map tints follow the dial's mode family (deferred past the assignment below)
   // While FreeDV engine is active, display the codec name (FREEDV-RADEV1
   // / FREEDV-700E / etc.) instead of the radio's actual carrier mode.
   // The rig HAS to be in a digital sideband for FreeDV to work, but the
@@ -25985,8 +25988,82 @@ function rebuildWorkedRoster() {
   sendWorkedRoster();
 }
 
+/** Every window that draws a map with the worked tints, plus the main window. */
+function workedOverlayWindows() {
+  return [win, popoutWin, jtcatPopoutWin, jtcatMapPopoutWin].filter((w) => w && !w.isDestroyed());
+}
+
 function sendWorkedRoster() {
-  if (win && !win.isDestroyed()) win.webContents.send('worked-roster', workedRoster);
+  for (const w of workedOverlayWindows()) w.webContents.send('worked-roster', workedRoster);
+}
+
+// --- Worked overlay (map tints) state: main owns it, every map draws it ---
+// settings.workedOverlayStates / Countries (F6 / F7 or the legend boxes),
+// workedOverlayScope (F8), workedOverlayConfirmedOnly; band and mode follow
+// the dial so the map answers "what can I work right now".
+let _workedOverlayLastKey = '';
+let _workedOverlayDialTimer = null;
+let _workedOverlayGeo = null;
+
+function workedOverlayState() {
+  const o = workedOverlayOpts(_currentFreqHz ? (freqToBand(_currentFreqHz / 1e6) || '') : '', _currentMode || '');
+  return {
+    states: settings.workedOverlayStates === true,
+    countries: settings.workedOverlayCountries === true,
+    scope: o.scope, confirmedOnly: o.confirmedOnly, band: o.band, mode: o.mode,
+  };
+}
+
+function broadcastWorkedOverlayState(force) {
+  const st = workedOverlayState();
+  const key = JSON.stringify(st);
+  if (!force && key === _workedOverlayLastKey) return;
+  _workedOverlayLastKey = key;
+  for (const w of workedOverlayWindows()) w.webContents.send('worked-overlay-state', st);
+  if (win && !win.isDestroyed() && remoteServer && remoteServer.running && typeof remoteServer.broadcastWorkedOverlay === 'function') {
+    remoteServer.broadcastWorkedOverlay(st);
+  }
+}
+
+/** The dial moved or changed mode: re-push if the band or mode family changed (deduped, 400 ms). */
+function workedOverlayFollowDial() {
+  clearTimeout(_workedOverlayDialTimer);
+  _workedOverlayDialTimer = setTimeout(() => { try { broadcastWorkedOverlayState(false); } catch {} }, 400);
+}
+
+function applyWorkedOverlayPatch(patch, origin) {
+  const p = patch || {};
+  let changed = false;
+  if (typeof p.states === 'boolean' && settings.workedOverlayStates !== p.states) { settings.workedOverlayStates = p.states; changed = true; }
+  if (typeof p.countries === 'boolean' && settings.workedOverlayCountries !== p.countries) { settings.workedOverlayCountries = p.countries; changed = true; }
+  if (typeof p.scope === 'string' && WorkedRoster.SCOPES.includes(p.scope) && settings.workedOverlayScope !== p.scope) { settings.workedOverlayScope = p.scope; changed = true; }
+  if (typeof p.confirmedOnly === 'boolean' && settings.workedOverlayConfirmedOnly !== p.confirmedOnly) { settings.workedOverlayConfirmedOnly = p.confirmedOnly; changed = true; }
+  if (!changed) { broadcastWorkedOverlayState(true); return; }
+  try { saveSettings(settings); } catch (err) { console.error('[Map] worked overlay settings save failed:', err.message); }
+  const st = workedOverlayState();
+  sendCatLog(`[Map] Worked overlay: states ${st.states ? 'on' : 'off'}, countries ${st.countries ? 'on' : 'off'}, scope ${st.scope}${st.confirmedOnly ? ' (confirmed only)' : ''}${origin ? ' — ' + origin : ''}`);
+  broadcastWorkedOverlayState(true);
+}
+
+/**
+ * The polygons (assets/geo, Natural Earth, public domain) plus a point for
+ * every DXCC entity no polygon stands for (islands, bases), from cty.dat.
+ * Read once, served to every map window on demand.
+ */
+function workedOverlayGeo() {
+  if (_workedOverlayGeo) return _workedOverlayGeo;
+  const dir = path.join(__dirname, 'assets', 'geo');
+  const read = (f) => { try { return JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch (err) { sendCatLog(`[Map] Could not read ${f}: ${err.message}`); return null; } };
+  const states = read('states.json');
+  const countries = read('countries.json');
+  const covered = new Set();
+  for (const f of (countries && countries.features) || []) for (const n of (f.properties && f.properties.dxcc) || []) covered.add(n);
+  const ents = ctyDb ? ctyDb.entities : [];
+  const points = ents
+    .filter((e) => !covered.has(e.name) && Number.isFinite(e.lat) && Number.isFinite(e.lon))
+    .map((e) => ({ name: e.name, lat: e.lat, lon: e.lon }));
+  _workedOverlayGeo = { states, countries, points, entityNames: ents.map((e) => e.name) };
+  return _workedOverlayGeo;
 }
 
 /** A logged QSO just saved: fold it into the roster without a re-parse. */
@@ -39586,6 +39663,9 @@ app.whenReady().then(() => {
 
   // --- Worked roster (Worked All States view, map overlays) ---
   ipcMain.handle('worked-roster-get', () => workedRoster);
+  ipcMain.handle('worked-overlay-get', () => workedOverlayState());
+  ipcMain.handle('worked-overlay-geo', () => workedOverlayGeo());
+  ipcMain.on('worked-overlay-set', (_e, patch) => applyWorkedOverlayPatch(patch, 'this PC'));
 
   // "Fill missing states from QRZ": a log EDIT the operator asks for, through
   // lib/qso-log.js so the cloud copy follows. Records with no STATE whose

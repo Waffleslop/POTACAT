@@ -152,17 +152,153 @@ function gridAt(lon, lat) {
 }
 
 // ---------------------------------------------------------------- countries
+// Every output feature carries `dxcc`: the cty.dat ENTITY NAMES it stands
+// for (the worked roster is keyed by those names), so the renderer needs no
+// mapping of its own. Most come from name matching against cty.dat; the rest
+// from DXCC_BY_ISO. Some entities are PARTS of a Natural Earth country
+// (Alaska and Hawaii inside the US, Sardinia inside Italy, the Galapagos
+// inside Ecuador): PART_RULES assign a multipolygon part to another entity by
+// the box its centroid falls in. European and Asiatic Russia are one
+// polygon, clipped at 60 E (CLIP_RULES) — the DXCC line follows the Urals,
+// and a straight line there is within a degree of it for a map tint.
+// Entities with no polygon (islands, bases) are drawn as circles at cty.dat's
+// own lat/lon by the app, so nothing here has to be complete.
+const { loadCtyDat } = require('../lib/cty');
+const cty = loadCtyDat(path.join(__dirname, '..', 'assets', 'cty.dat'));
+const ctyNames = new Set(cty.entities.map((e) => e.name));
+const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z]/g, '');
+const ctyByNorm = new Map(cty.entities.map((e) => [norm(e.name), e.name]));
+
+const DXCC_BY_ISO = {
+  BA: ['Bosnia-Herzegovina'], CI: ["Cote d'Ivoire"], CD: ['Dem. Rep. of the Congo'], KP: ['DPR of Korea'],
+  DE: ['Fed. Rep. of Germany'], SK: ['Slovak Republic'], XK: ['Republic of Kosovo'], SS: ['Republic of South Sudan'],
+  TT: ['Trinidad & Tobago'], FK: ['Falkland Islands'], TR: ['Asiatic Turkey'], TF: ['Kerguelen Islands'],
+  GB: ['England', 'Scotland', 'Wales'], CY: ['Cyprus'], SO: ['Somalia'],
+};
+// NE features with no ISO: N. Cyprus and Somaliland are parts of those entities for DXCC.
+const DXCC_BY_NAME = { 'N. Cyprus': ['Cyprus'], 'Somaliland': ['Somalia'] };
+
+// [minLon, minLat, maxLon, maxLat] boxes, tested against a PART's centroid.
+const PART_RULES = [
+  { iso: 'US', dxcc: ['Alaska'], box: [-180, 50, -128, 75] },
+  { iso: 'US', dxcc: ['Alaska'], box: [165, 50, 180, 75] },           // Aleutians past the antimeridian
+  { iso: 'US', dxcc: ['Hawaii'], box: [-180, 15, -150, 30] },
+  { iso: 'FR', dxcc: ['French Guiana'], box: [-60, 0, -48, 8] },
+  { iso: 'FR', dxcc: ['Corsica'], box: [8, 41, 10, 43.2] },
+  { iso: 'NO', dxcc: ['Svalbard'], box: [8, 73, 36, 82] },
+  { iso: 'NO', dxcc: ['Jan Mayen'], box: [-10, 70, -7, 72] },
+  { iso: 'RU', dxcc: ['Kaliningrad'], box: [19, 54, 23.5, 56] },
+  { iso: 'RU', dxcc: ['Franz Josef Land'], box: [40, 79, 70, 83] },
+  { iso: 'IT', dxcc: ['Sardinia'], box: [8, 38.7, 10, 41.4] },
+  { iso: 'IT', dxcc: ['Sicily'], box: [12, 36.5, 15.8, 38.4] },
+  { iso: 'GR', dxcc: ['Crete'], box: [23, 34.5, 26.5, 35.8] },
+  { iso: 'GR', dxcc: ['Dodecanese'], box: [26.5, 35, 29, 37.5] },
+  { iso: 'ES', dxcc: ['Balearic Islands'], box: [1, 38.5, 4.5, 40.2] },
+  { iso: 'ES', dxcc: ['Canary Islands'], box: [-19, 27, -13, 29.5] },
+  { iso: 'PT', dxcc: ['Azores'], box: [-32, 36, -24, 40] },
+  { iso: 'PT', dxcc: ['Madeira Islands'], box: [-18, 32, -16, 33.5] },
+  { iso: 'IN', dxcc: ['Andaman & Nicobar Is.'], box: [90, 5, 95, 15] },
+  { iso: 'EC', dxcc: ['Galapagos Islands'], box: [-93, -2.5, -88, 1.5] },
+  { iso: 'MY', dxcc: ['East Malaysia'], box: [108, 0, 120, 8] },
+  { iso: 'GB', dxcc: ['Northern Ireland'], box: [-8.5, 53.9, -5.3, 55.5] },
+  { iso: 'GB', dxcc: ['Shetland Islands'], box: [-2, 59.7, 0, 61] },
+  { iso: 'DK', dxcc: ['Faroe Islands'], box: [-8, 61, -6, 63] },
+  { iso: 'CL', dxcc: ['Easter Island'], box: [-110.5, -27.5, -108.5, -26.5] },
+  { iso: 'CL', dxcc: ['Juan Fernandez Islands'], box: [-81, -34.5, -78, -33] },
+  { iso: 'BR', dxcc: ['Fernando de Noronha'], box: [-33, -4.5, -32, -3.5] },
+  { iso: 'JP', dxcc: ['Ogasawara'], box: [141, 24, 143, 28] },
+  { iso: 'CN', dxcc: ['Hong Kong'], box: [113.8, 22.1, 114.5, 22.6] },
+  { iso: 'AU', dxcc: ['Lord Howe Island'], box: [158, -32, 160, -31] },
+  { iso: 'NZ', dxcc: ['Chatham Islands'], box: [-177.5, -44.5, -175.5, -43.5] },
+  { iso: 'NZ', dxcc: ['N.Z. Subantarctic Is.'], box: [165, -53, 180, -47.5] },
+  { iso: 'YE', dxcc: ['Yemen'], box: [52, 12, 55, 13] },              // Socotra stays Yemen
+  { iso: 'MY', dxcc: ['West Malaysia'], box: [99, 0, 105, 8] },
+];
+// A vertical cut through one country: the part west of `lon` is one entity, east another.
+const CLIP_RULES = [
+  { iso: 'RU', lon: 60, west: ['European Russia'], east: ['Asiatic Russia'] },
+];
+
+function centroidOf(poly) {
+  let sx = 0, sy = 0, n = 0;
+  for (const [x, y] of poly[0]) { sx += x; sy += y; n++; }
+  return [sx / n, sy / n];
+}
+function inBox(c, b) { return c[0] >= b[0] && c[0] <= b[2] && c[1] >= b[1] && c[1] <= b[3]; }
+
+// Sutherland-Hodgman clip of a ring against lon = x, keeping one side.
+function clipRingLon(ring, x, keepWest) {
+  const inside = (p) => keepWest ? p[0] <= x : p[0] >= x;
+  const cross = (a, b) => { const t = (x - a[0]) / (b[0] - a[0]); return [x, a[1] + t * (b[1] - a[1])]; };
+  const out = [];
+  const pts = ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1] ? ring.slice(0, -1) : ring;
+  for (let i = 0; i < pts.length; i++) {
+    const cur = pts[i], prev = pts[(i + pts.length - 1) % pts.length];
+    if (inside(cur)) { if (!inside(prev)) out.push(cross(prev, cur)); out.push(cur); }
+    else if (inside(prev)) out.push(cross(prev, cur));
+  }
+  if (out.length < 3) return null;
+  out.push([out[0][0], out[0][1]]);
+  return out;
+}
+function clipPolygonLon(poly, x, keepWest) {
+  const outer = clipRingLon(poly[0], x, keepWest);
+  if (!outer) return null;
+  const holes = poly.slice(1).map((h) => clipRingLon(h, x, keepWest)).filter(Boolean);
+  return [outer, ...holes];
+}
+
 const countries = readGeo('ne_110m_admin_0_countries.geojson');
 const outCountries = { type: 'FeatureCollection', features: [] };
+const assigned = new Set();
+const partLog = [];
 for (const f of countries.features) {
   const p = f.properties;
   const iso = (p.ISO_A2_EH && p.ISO_A2_EH !== '-99') ? p.ISO_A2_EH : ((p.ISO_A2 && p.ISO_A2 !== '-99') ? p.ISO_A2 : '');
-  const geom = cleanGeometry({ type: f.geometry.type, coordinates: roundCoords(f.geometry.coordinates, 2) });
-  if (!geom) continue;
-  outCountries.features.push({ type: 'Feature', properties: { iso, name: p.NAME, long: p.NAME_LONG, a3: p.ADM0_A3, sov: p.SOVEREIGNT }, geometry: geom });
+  // the entity names this country stands for
+  let dxcc = DXCC_BY_ISO[iso] || DXCC_BY_NAME[p.NAME] || [];
+  if (!dxcc.length) {
+    for (const k of [p.NAME, p.NAME_LONG, p.SOVEREIGNT, p.ADMIN, p.FORMAL_EN]) {
+      const hit = ctyByNorm.get(norm(k));
+      if (hit) { dxcc = [hit]; break; }
+    }
+  }
+  if (!dxcc.length) console.warn('no DXCC entity for', iso, p.NAME);
+  // split multipolygon parts to other entities where PART_RULES say so
+  const polys = polygonsOf(f.geometry);
+  const groups = new Map(); // key -> { dxcc, polys }
+  for (const poly of polys) {
+    const c = centroidOf(poly);
+    const rule = PART_RULES.find((r) => r.iso === iso && inBox(c, r.box));
+    const names = rule ? rule.dxcc : dxcc;
+    const key = names.join('|');
+    if (!groups.has(key)) groups.set(key, { dxcc: names, polys: [] });
+    groups.get(key).polys.push(poly);
+    if (rule) partLog.push(`${iso} part at ${c[0].toFixed(1)},${c[1].toFixed(1)} -> ${names.join('/')}`);
+  }
+  for (const g of groups.values()) {
+    let pieces = [{ dxcc: g.dxcc, polys: g.polys }];
+    const clip = CLIP_RULES.find((r) => r.iso === iso && g.dxcc === dxcc);
+    if (clip) {
+      const west = g.polys.map((poly) => clipPolygonLon(poly, clip.lon, true)).filter(Boolean);
+      const east = g.polys.map((poly) => clipPolygonLon(poly, clip.lon, false)).filter(Boolean);
+      pieces = [{ dxcc: clip.west, polys: west }, { dxcc: clip.east, polys: east }];
+    }
+    for (const piece of pieces) {
+      if (!piece.polys.length) continue;
+      const geom = cleanGeometry({ type: 'MultiPolygon', coordinates: roundCoords(piece.polys, 2) });
+      if (!geom) continue;
+      piece.dxcc.forEach((n) => assigned.add(n));
+      for (const n of piece.dxcc) if (!ctyNames.has(n)) console.warn('DXCC name not in cty.dat:', n);
+      outCountries.features.push({ type: 'Feature', properties: { iso, name: p.NAME, dxcc: piece.dxcc }, geometry: geom });
+    }
+  }
 }
 fs.writeFileSync(path.join(outDir, 'countries.json'), JSON.stringify(outCountries));
-console.log('countries.json:', outCountries.features.length, 'features,', (fs.statSync(path.join(outDir, 'countries.json')).size / 1024).toFixed(0), 'KB');
+console.log('countries.json:', outCountries.features.length, 'features,', (fs.statSync(path.join(outDir, 'countries.json')).size / 1024).toFixed(0), 'KB;',
+  assigned.size, 'of', cty.entities.length, 'DXCC entities have a polygon (the rest draw as circles)');
+console.log(partLog.join('\n'));
+console.log('circle entities:', cty.entities.filter((e) => !assigned.has(e.name)).map((e) => e.name).join(', '));
 
 // ------------------------------------------------------------------- states
 const admin1 = readGeo('ne_50m_admin_1_states_provinces.geojson');

@@ -127,6 +127,23 @@ and spots from a state or country still needed.
    band-mode / false) with no UI yet — phase 3's F8 and legend.
 3. **Map overlays**: geo assets, the layer on the three maps, F6/F7/F8, legend, scope
    following the radio.
+   **BUILT 2026-10-23**: `lib/worked-overlay.js` (tints, scope text, `buildLayer`,
+   the legend control, `attach(L, map, api)` = the whole per-window glue, `keyPatch`)
+   on FOUR maps: the Spots map, its pop-out, the JTCAT window map and the JTCAT map
+   pop-out; a `workedOverlayPane` at z 350 keeps the tints under markers, CQ grid
+   rectangles, arcs and the night shade. Main owns the state (`workedOverlayState`,
+   settings `workedOverlayStates` / `Countries` / `Scope` / `ConfirmedOnly`, IPC
+   `worked-overlay-get/set/geo`, push `worked-overlay-state`) and re-pushes when the
+   dial's band or mode family changes (`workedOverlayFollowDial` from both sinks).
+   `countries.json` features carry `dxcc: [entity names]` (name match + a manual
+   table in the build script; Alaska/Hawaii, Sardinia/Sicily, Crete, Corsica, French
+   Guiana, Svalbard, Kaliningrad, N. Ireland, East/West Malaysia are PARTS assigned by
+   centroid; Russia is clipped at 60 E into European/Asiatic; GB's island stands for
+   England + Scotland + Wales, best status wins); 190 of 346 entities have a polygon,
+   the rest draw as circles at cty.dat's lat/lon when worked. F6/F7/F8 work with no
+   map open (the setting is shared) and the JTTY pane keeps its macros. Hotkeys
+   dialog lists them. Live-checked in a scratch profile: main map and pop-out legends
+   agree, tints `#4fc3f7` / `#4ecca3`.
 4. **ECHOCAT**: web map and rows, hello capability, mobile handoff
    (`potacat-app/docs/desktop-handoffs/worked-overlay.md`).
 

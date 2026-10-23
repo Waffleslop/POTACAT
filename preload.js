@@ -291,6 +291,12 @@ contextBridge.exposeInMainWorld('api', {
   onWorkedRoster: (cb) => ipcRenderer.on('worked-roster', (_e, roster) => cb(roster)),
   getWorkedRoster: () => ipcRenderer.invoke('worked-roster-get'),
   wasBackfillStates: () => ipcRenderer.invoke('was-backfill-states'),
+  // Map tints (lib/worked-overlay.js): main owns the state (settings) and
+  // the dial's band/mode, every map window draws from the same push.
+  workedOverlayGet: () => ipcRenderer.invoke('worked-overlay-get'),
+  workedOverlaySet: (patch) => ipcRenderer.send('worked-overlay-set', patch),
+  workedOverlayGeo: () => ipcRenderer.invoke('worked-overlay-geo'),
+  onWorkedOverlayState: (cb) => ipcRenderer.on('worked-overlay-state', (_e, s) => cb(s)),
   onClusterStatus: (cb) => ipcRenderer.on('cluster-status', (_e, s) => cb(s)),
   // Spots Source menu: saved cluster nodes on/off (main is the one writer).
   clusterNodeChoices: () => ipcRenderer.invoke('cluster-node-choices'),

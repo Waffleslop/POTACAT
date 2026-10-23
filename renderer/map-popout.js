@@ -261,6 +261,12 @@ function initMap() {
   markerLayer = L.featureGroup().addTo(map);
   eventLayer = L.layerGroup().addTo(map);
   bindPopupClickHandlers(map);
+  // Worked-states / countries tints under the markers + F6/F7/F8 legend
+  // (lib/worked-overlay.js). Main owns the state; this window only draws.
+  if (window.WorkedOverlay) {
+    const workedOverlayCtl = WorkedOverlay.attach(L, map, window.api);
+    document.addEventListener('keydown', (e) => { workedOverlayCtl.onKey(e); });
+  }
   updateNightOverlay();
   setInterval(updateNightOverlay, 60000);
 
