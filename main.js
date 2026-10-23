@@ -14959,6 +14959,8 @@ function startJtcat(mode) {
       if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
         jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: dialMsg });
       }
+      // ...and on the ECHOCAT device: a web/phone-owned session was refused in silence.
+      if (remoteServer && remoteServer.hasClient()) remoteServer.broadcastJtcatQsoState({ phase: 'error', error: dialMsg });
       try { if (ft8Engine && ft8Engine._txActive) ft8Engine.txComplete(); } catch {}
       return;
     }
@@ -19759,6 +19761,18 @@ function connectRemote() {
     _freqSuppressUntil = Date.now() + 3000;
     // Only clear XIT for manual freq entry (no mode); apply CW XIT for spot clicks
     tuneRadio(freqKhz, mode, bearing, { clearXit: !mode });
+    // The wrong-band TX guard exists for a DESKTOP spots-table click moving the
+    // radio under a JTCAT window (KF0U). A tune from the ECHOCAT device is the
+    // operator's own deliberate move from the screen running FT8 — a spot
+    // click or a typed frequency — so it moves the anchor. Without this, TX
+    // started after the first spot click and never again (LZ3AW 2026-10-23:
+    // "second spot: QSO initiated, TX never comes; same when I type a
+    // frequency"), and the refusal went only to the desktop pop-out. Not for
+    // a phone/voice tune, which must still be refused under FT8.
+    if (_jtcatExpectedDialHz > 0 && (!mode || /^(FT8|FT4|FT2|DIGU|PKTUSB|DATA|JTTY|PSK|JS8|WSPR)/i.test(String(mode)))) {
+      const hz = Math.round(parseFloat(freqKhz) * 1000);
+      if (hz > 0) _jtcatExpectedDialHz = hz;
+    }
     // Auto-tune KiwiSDR
     if (kiwiActive && kiwiClient && kiwiClient.connected && freqKhz > 100) {
       const m = (mode || _currentMode || 'USB').toLowerCase().replace('digu', 'usb').replace('digl', 'lsb').replace('pktusb', 'usb').replace('pktlsb', 'lsb').replace('ft8', 'usb').replace('ft4', 'usb').replace('ssb', freqKhz >= 10000 ? 'usb' : 'lsb');
