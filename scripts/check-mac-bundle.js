@@ -17,7 +17,7 @@ for (const d of fs.readdirSync('dist')) {
 if (!apps.length) { console.error('::error::no POTACAT.app found under dist/'); process.exit(1); }
 let bad = 0;
 for (const res of apps) {
-  const listed = new Set(asar.listPackage(path.join(res, 'app.asar')).map((f) => f.replace(/\/g, '/').replace(/^\//, '')));
+  const listed = new Set(asar.listPackage(path.join(res, 'app.asar')).map((f) => f.split(path.sep).join('/').split('\\').join('/').replace(/^\//, '')));
   for (const f of REQUIRED) {
     const inAsar = listed.has(f);
     const onDisk = fs.existsSync(path.join(res, f));
