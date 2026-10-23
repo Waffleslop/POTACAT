@@ -216,6 +216,21 @@ function fnBody(src, name) {
     assert.strictEqual(S.cableFamily('Voicemeeter Input (VB-Audio Voicemeeter VAIO)'), null);
     assert.strictEqual(S.cableFamily('Speakers (Realtek(R) Audio)'), null);
   });
+  await test('K3SBP PC: both cables have a playback end called "Speakers (…)", and VB-CABLE 45 16-channel end is never the one picked', () => {
+    const real = [
+      DEV('audiooutput', 'CABLE In 16 Ch (VB-Audio Virtual Cable)', 'c16'),
+      DEV('audiooutput', 'Speakers (VB-Audio Virtual Cable)', 'cab-in'),
+      DEV('audiooutput', 'Speakers (VB-Audio Hi-Fi Cable)', 'hifi-in'),
+      DEV('audioinput', 'CABLE Output (VB-Audio Virtual Cable)', 'cab-out'),
+      DEV('audioinput', 'Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)', 'hifi-out'),
+    ];
+    const mme = { capture: [{ name: 'Hi-Fi Cable Output (VB-Audio Hi' }, { name: 'CABLE Output (VB-Audio Virtual ' }], playback: [{ name: 'CABLE Input (VB-Audio Virtual C' }, { name: 'Hi-Fi Cable Input (VB-Audio Hi-' }, { name: 'CABLE In 16ch (VB-Audio Virtual' }] };
+    const p = S.planCables(real, { mme });
+    assert.deepStrictEqual([p.potacat.outputId, p.potacat.inputId], ['cab-in', 'hifi-out'], 'the plain two-channel end, whichever Windows listed first');
+    assert.deepStrictEqual(p.vara, { inputName: 'CABLE Output (VB-Audio Virtual ', outputName: 'Hi-Fi Cable Input (VB-Audio Hi-', fromListing: true });
+    const only16 = S.planCables(real.filter((d) => d.deviceId !== 'cab-in'), { mme });
+    assert.strictEqual(only16.potacat.outputId, 'c16', 'with nothing else the 16-channel end still pairs');
+  });
   await test('two cables are paired by name and direction; Voicemeeter is seen but never used', () => {
     const p = S.planCables(CABLES);
     assert.strictEqual(p.ok, true);
