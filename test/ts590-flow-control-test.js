@@ -33,9 +33,9 @@ assert(RIG_MODELS['TS-590S/SG'].serialHandshake === 'hardware', 'TS-590S/SG: har
 assert(RIG_MODELS['TS-990S'].serialHandshake === 'hardware', 'TS-990S: hardware (rigctld -m 2039: Hardware)');
 assert(RIG_MODELS['TS-480'].serialHandshake === undefined, 'TS-480: unchanged (rigctld -m 2028: None; LZ3AW\'s works today)');
 assert(RIG_MODELS['TS-890S'].serialHandshake === undefined, 'TS-890S: unchanged (rigctld -m 2041: None)');
-assert(RIG_MODELS['TS-2000'].serialHandshake === undefined, 'TS-2000: unchanged');
+assert(RIG_MODELS['TS-2000'].serialHandshake === 'hardware', 'TS-2000: hardware (rigctld -m 2014 --show-conf: Hardware; WX4MWA 2026-10-23 never got a reply with RTS low)');
 const flagged = Object.entries(RIG_MODELS).filter(([, m]) => m.serialHandshake).map(([k]) => k).sort();
-assert(JSON.stringify(flagged) === JSON.stringify(['TS-590S/SG', 'TS-990S']), `only the two Kenwoods that need it carry the flag (got ${flagged.join(', ')})`);
+assert(JSON.stringify(flagged) === JSON.stringify(['TS-2000', 'TS-590S/SG', 'TS-990S']), `only the three Kenwoods Hamlib opens with Hardware handshake carry the flag (got ${flagged.join(', ')})`);
 for (const [k, m] of Object.entries(RIG_MODELS)) {
   if (m.serialHandshake) assert(m.serialHandshake === 'hardware', `${k}: the only value the transport knows is 'hardware'`);
 }

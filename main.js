@@ -2803,7 +2803,10 @@ function listRigs(rigctldPath) {
       }
       const lines = stdout.split('\n');
       const rigs = [];
-      const SKIP_IDS = new Set([1, 2, 6]);
+      // Not radios: 1 Dummy, 2 NET rigctl, 4 FLRig, 5 TRXManager, 6 TCI — bridges
+      // to another program. WX4MWA (2026-10-23) ended up on 4 for a TS-2000 on
+      // COM6: rigctld opened "FLRig" over TCP and reported "COM6 No such file".
+      const SKIP_IDS = new Set([1, 2, 4, 5, 6]);
       const SKIP_MFG = new Set(['Dummy', 'NET']);
       for (const line of lines) {
         const m = line.match(/^\s*(\d+)\s+(\S+(?:\s+\S+)*?)\s{2,}(\S+(?:\s+\S+)*?)\s{2,}(\S+)\s+(\S+)/);
@@ -2890,10 +2893,41 @@ async function waitForSerialPortFree(path, timeoutMs = 4000) {
   }
 }
 
+/** Hamlib model ids that are bridges to another program, never a radio on a serial port. */
+const HAMLIB_BRIDGE_MODELS = { 1: 'Dummy', 2: 'NET rigctl', 4: 'FLRig', 5: 'TRXManager', 6: 'TCI' };
+let _hamlibRigList = null;
+/**
+ * The Hamlib model id for the rig's Radio Model, by name against `rigctld -l`
+ * ("Kenwood" + "TS-2000" → 2014), or 0. Only consulted when the configured id
+ * is a bridge model with a serial port — the one combination that can never
+ * work (WX4MWA 2026-10-23: -m 4 FLRig on COM6, "Invalid parameter … COM6 No
+ * such file or directory", a reconnect loop that looked like a flaky radio).
+ */
+async function hamlibModelForRadio(rigctldPath) {
+  const name = String(getActiveRigModelName() || '').trim();
+  if (!name) return 0;
+  const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  try { if (!_hamlibRigList) _hamlibRigList = await listRigs(rigctldPath); } catch { return 0; }
+  const want = norm(name);
+  const hit = _hamlibRigList.find((r) => norm(r.model) === want)
+    || _hamlibRigList.find((r) => want.startsWith(norm(r.model)) || norm(r.model).startsWith(want));
+  return hit ? hit.id : 0;
+}
+
 function spawnRigctld(target, portOverride) {
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     const rigctldPath = findRigctld();
     const port = portOverride || String(target.rigctldPort || 4532);
+    if (HAMLIB_BRIDGE_MODELS[Number(target.rigId)] && target.serialPort) {
+      const bridge = HAMLIB_BRIDGE_MODELS[Number(target.rigId)];
+      const fixed = await hamlibModelForRadio(rigctldPath);
+      if (fixed) {
+        sendCatLog(`[rigctld] Hamlib model ${target.rigId} is ${bridge}, a bridge to another program, not a radio — using ${fixed} (${getActiveRigModelName()}) for ${target.serialPort}. Set the Hamlib model to ${fixed} in Settings > My Rigs to keep it.`);
+        target = { ...target, rigId: fixed };
+      } else {
+        sendCatLog(`[rigctld] Hamlib model ${target.rigId} is ${bridge}, a bridge to another program, not a radio: rigctld cannot open ${target.serialPort} with it. Pick your radio's own Hamlib model in Settings > My Rigs (the list shows the number beside each radio).`);
+      }
+    }
     // rigctld opens the serial port itself, so SerialTransport's dial-in/
     // callout fallback can't help it — and rigctld has none of its own: given
     // a macOS /dev/tty.* node it exits with "Resource busy" and the operator
@@ -24045,6 +24079,10 @@ function broadcastRemoteRadioStatus() {
     // null here (both objects absent) reads as "missing" to the mobile
     // merge-over-previous logic and would hold a stale connected state.
     catConnected: !!((cat && cat.connected) || (smartSdr && smartSdr.connected)),
+    // A "No CAT control (VOX)" rig: nothing reports a mode or keys by CAT; the
+    // sound card keys the radio (Digirig Lite + CM108, 2026-10-24). Clients
+    // gate PTT on a voice mode — this says there will never be one to wait for.
+    noCat: !!(settings.catTarget && settings.catTarget.type === 'none'),
     // Whether the RADIO is switched on (null = cannot tell): catConnected
     // is only the port, which a USB CAT link keeps
     // open with the radio off. rigPoweredForStatus() has the evidence.

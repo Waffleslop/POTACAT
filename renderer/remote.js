@@ -426,6 +426,7 @@
   let _mapHomeGrid = null;
   let currentFreqKhz = 0;
   let currentMode = '';
+  let currentNoCat = false; // status.noCat: a "No CAT control (VOX)" rig, keyed by its sound card
   let tunedFreqKhz = '';
 
   // Spot column visibility — persisted in localStorage
@@ -2783,6 +2784,7 @@
         }
       }
     }
+    if (typeof s.noCat === 'boolean' && s.noCat !== currentNoCat) { currentNoCat = s.noCat; updateSsbPanelVisibility(); }
     if (s.mode) {
       currentMode = s.mode;
       quickLogFollowRadio();
@@ -10990,9 +10992,15 @@ var _paddleHoldTimer = { dit: null, dah: null };
            m === 'USB-D' || m === 'LSB-D' || m.indexOf('FREEDV') === 0;
   }
 
+  // A "No CAT control (VOX)" rig never reports a mode: the sound card keys it,
+  // so voice is the default whenever no digital engine is running (Digirig
+  // Lite + CM108 tester, 2026-10-24: Live / Vol / Scan and no PTT on the web).
+  function voiceByDefault() {
+    return !!currentNoCat && !currentMode && !ft8Running;
+  }
   function updateSsbPanelVisibility() {
     var voiceTabs = { spots: 1, map: 1, log: 1, activate: 1 };
-    var show = isVoiceMode(currentMode) && !!voiceTabs[activeTab] && audioEnabled;
+    var show = (isVoiceMode(currentMode) || voiceByDefault()) && !!voiceTabs[activeTab] && audioEnabled;
     ssbPanel.classList.toggle('hidden', !show);
   }
 
