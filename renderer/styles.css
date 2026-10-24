@@ -10630,3 +10630,21 @@ main.banner-logger-active #event-progress-overlay {
   color: var(--text-dim, var(--text-tertiary));
   white-space: normal;
 }
+
+/* Rig presets: the editor's include-tick rows, band rules and chips (Rig menu tab + Settings > Profiles) */
+.rig-preset-field { align-items: center; }
+.rig-preset-field input[type=checkbox] { width: auto; margin: 0 4px 0 0; }
+.rig-preset-field label { min-width: 150px; }
+.rig-preset-rules { display: flex; flex-direction: column; gap: 3px; font-size: 11px; }
+.rig-preset-rule { display: flex; align-items: center; gap: 6px; padding: 2px 6px; border-radius: 4px; background: var(--bg-primary); }
+.rig-preset-rule > span { flex: 1; }
+.rig-preset-rule button, .rig-preset-rule-line button { background: transparent; border: 1px solid var(--border-secondary); color: var(--text-secondary); border-radius: 3px; cursor: pointer; font-size: 10px; padding: 0 5px; }
+.rig-preset-rule button:disabled { opacity: .35; cursor: default; }
+.rig-preset-rule-add { border: 1px dashed var(--border-secondary); border-radius: 4px; padding: 4px 6px; margin-top: 2px; }
+.rig-preset-chips { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; margin: 2px 0; }
+.rig-preset-chips-label { font-size: 10px; color: var(--text-tertiary); min-width: 36px; }
+.rig-preset-chip { background: var(--bg-primary); border: 1px solid var(--border-secondary); color: var(--text-secondary); border-radius: 10px; padding: 1px 7px; font-size: 10px; cursor: pointer; }
+.rig-preset-chip.on { background: var(--accent-blue, #4fc3f7); color: #10202a; border-color: transparent; }
+.rig-preset-rule-line { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
+.settings-preset-root { max-width: 560px; }
+.settings-preset-root .rig-preset-item { font-size: 12px; }

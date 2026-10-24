@@ -438,28 +438,10 @@
           <button class="rig-btn" id="rig-custom-add" style="margin-top:4px;font-size:11px;padding:2px 8px;">+ Add</button>
         </div>
         <div id="rig-tab-presets" class="rig-tab-panel hidden">
-          <!-- Rig presets (lib/rig-presets.js): list (tap = apply), the
-               mode-family assignments, and an inline editor. Rendered by
-               rigPresetsRender() in app.js from the main process payload. -->
-          <div id="rig-preset-caps-note" class="rig-preset-note hidden"></div>
-          <div id="rig-preset-list" class="rig-preset-list"></div>
-          <div class="rig-preset-actions">
-            <button class="rig-btn" id="rig-preset-new" style="font-size:11px;padding:2px 8px;">+ New preset</button>
-          </div>
-          <div id="rig-preset-editor" class="rig-preset-editor hidden">
-            <div class="rig-popover-row"><label>Name</label><input type="text" id="rig-preset-name" maxlength="40" placeholder="e.g. FT8" style="flex:1;"></div>
-            <div class="rig-popover-row" id="rig-preset-txpower-row"><label>TX power</label><input type="number" id="rig-preset-txpower" min="0" max="2000" step="1" placeholder="leave as is" style="width:90px;"><span>W</span></div>
-            <div class="rig-popover-row" id="rig-preset-rfgain-row"><label>RF gain</label><input type="number" id="rig-preset-rfgain" min="0" max="100" step="1" placeholder="leave as is" style="width:90px;"><span>%</span></div>
-            <div class="rig-popover-row" id="rig-preset-afgain-row"><label>AF gain</label><input type="number" id="rig-preset-afgain" min="0" max="100" step="1" placeholder="leave as is" style="width:90px;"><span>%</span></div>
-            <div class="rig-preset-actions">
-              <button class="rig-btn" id="rig-preset-use-current" title="Fill the fields with the radio's current levels">Use current</button>
-              <button class="rig-btn" id="rig-preset-save">Save</button>
-              <button class="rig-btn" id="rig-preset-cancel">Cancel</button>
-            </div>
-            <div class="rig-preset-note">A blank field leaves that level alone. AF gain is the radio's speaker level: 0 silences the shack for FT8.</div>
-          </div>
-          <div class="rig-preset-note" style="margin-top:8px;">Apply by itself when the mode changes to:</div>
-          <div id="rig-preset-bymode" class="rig-preset-bymode"></div>
+          <!-- Rig presets (lib/rig-presets.js): list (tap = apply), the editor,
+               the mode-family assignments and the band rules. Mounted by
+               rigPresetsMount() in app.js — the same editor as Settings > Profiles. -->
+          <div id="rig-preset-root" class="rig-preset-root"></div>
         </div>
         <div id="rig-tab-commands" class="rig-tab-panel hidden">
           <div id="rig-cmd-header" style="font-size:10px;color:var(--text-tertiary);margin-bottom:4px;"></div>
@@ -1341,6 +1323,7 @@
         <button type="button" class="settings-tab active" data-tab="summary">Summary</button>
         <button type="button" class="settings-tab" data-tab="station">Station</button>
         <button type="button" class="settings-tab" data-tab="radio">Radio</button>
+        <button type="button" class="settings-tab" data-tab="profiles">Profiles</button>
         <button type="button" class="settings-tab" data-tab="spots">Spots</button>
         <button type="button" class="settings-tab" data-tab="tuning">Tuning</button>
         <button type="button" class="settings-tab" data-tab="logging">Logging</button>
@@ -2598,6 +2581,12 @@
         </div>
         <span class="help-text" style="display:block;margin-top:4px;">Default N1MM+ broadcast port is 12060. Check your device/software documentation for the correct port.</span>
       </div>
+    </fieldset>
+    <!-- Profiles: rig presets (lib/rig-presets.js), the same editor as the Rig menu's Presets tab -->
+    <fieldset class="source-toggles" data-settings-tab="profiles">
+      <legend>Profiles</legend>
+      <span class="help-text" style="display:block;margin-bottom:6px;">A rig profile is a named set of radio settings for the active rig: TX power, gains, the RX filter, noise blanker, noise reduction, notch, compressor, VOX, preamp, attenuator, AGC. Tick only what the profile should set; everything else is left as it is. Tap one to apply it, or let the triggers apply it: a profile per mode (all SSB on one, all digital on another), and band rules on top for finer control (20 m SSB this, 40 m SSB that). Profiles also live in the Rig menu's Presets tab, the VFO window and ECHOCAT.</span>
+      <div id="settings-preset-root" class="rig-preset-root settings-preset-root"></div>
     </fieldset>
     <!-- 7. Logging -->
     <fieldset class="source-toggles" data-settings-tab="logging">

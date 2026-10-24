@@ -693,6 +693,7 @@ const GLOBAL_KEYS = new Set([
   'activeRigId',       // last-selected rig (global default)
   'rigPresets',        // named TX power / RF gain / AF gain sets, per rig (lib/rig-presets.js)
   'rigPresetByMode',   // { rigId|'*': { ssb|cw|digital|fm|am: presetId } } — applied on a mode-family change
+  'rigPresetRules',    // { rigId|'*': [{ bands, families, presetId }] } — band + mode rules, first match wins; byMode is the fallback
   'remoteShackAudio',  // this PC's speaker/mic/volume/PTT key for a remote shack (machine devices)
   'echocatMultiClient', // this shack lets the owner's devices connect together (server property)
   'firstRun',          // first-time-launch flag
@@ -3220,6 +3221,8 @@ function sendCatFrequency(hz) {
     const b = freqToBand(hz / 1e6);
     if (b && b !== _swrTrippedBand) clearSwrTrip('band change');
   }
+  // Rig presets: a band rule (20 m SSB → A, 40 m SSB → B) is decided here too.
+  try { rigPresetOnBand(); } catch { /* presets are best-effort */ }
   // A tune result still in flight was for the band we just left.
   if (_atuTuneEpisode && _atuTuneEpisode.band && hz > 0) {
     const b = freqToBand(hz / 1e6);
@@ -3339,7 +3342,9 @@ const _fwdPowerHold = require('./lib/meter-peak-hold').createPeakHold({ holdMs: 
 // the same 100 W. The decision is pure (decideModePreset); this is the glue.
 const RigPresets = require('./lib/rig-presets');
 let _rigPresetFamily = null;   // the mode family last SETTLED on (null until the first mode)
-let _rigPresetPending = null;  // { preset, family } waiting for the mode to settle
+let _rigPresetMatchId = null;  // the preset the triggers last chose (band + family), applied or not
+let _rigPresetLastBand = '';   // the band the triggers were last asked about
+let _rigPresetPending = null;  // { preset, family, matchId } waiting for the mode to settle
 let _rigPresetTimer = null;
 const RIG_PRESET_SETTLE_MS = 1500;
 
@@ -3352,7 +3357,14 @@ function rigSupportsAfGain(rigType) {
 
 function rigPresetCaps() {
   const caps = getRigCapabilities(detectRigType()) || {};
-  return { txpower: !!caps.txpower, rfgain: !!caps.rfgain, afgain: !!caps.afgain };
+  const out = {};
+  for (const f of RigPresets.FIELDS) out[f.cap] = !!caps[f.cap];
+  if (Array.isArray(caps.agcModes) && caps.agcModes.length) out.agcModes = caps.agcModes.slice();
+  return out;
+}
+/** The band the dial is on, for the preset triggers ('' when unknown). */
+function rigPresetBand() {
+  return _currentFreqHz > 0 ? (freqToBand(_currentFreqHz / 1e6) || '') : '';
 }
 
 /** What every surface renders: the active rig's presets, its family map,
@@ -3364,14 +3376,19 @@ function rigPresetsPayload() {
   const presets = RigPresets.presetsForRig(all, rigId);
   const details = {};
   for (const p of presets) details[p.id] = RigPresets.describePreset(p, caps);
+  const rules = RigPresets.rulesForRig(settings.rigPresetRules, rigId);
   return {
     presets,
     byMode: RigPresets.byModeForRig(settings.rigPresetByMode, rigId),
+    rules, // [{ bands, families, presetId }] — first match wins, byMode is the fallback
+    ruleTexts: rules.map((r) => RigPresets.describeRule(r, presets)),
     rigId,
     caps,
-    details, // id → { text: '60 W · RF 50%', skipped: ['AF 0%'] } so every surface shows one wording
+    details, // id → { text: '60 W · RF 50% · NB off', skipped: ['AF 0%'] } so every surface shows one wording
     families: RigPresets.FAMILIES,
     familyLabels: RigPresets.FAMILY_LABELS,
+    bands: RigPresets.BANDS,
+    fields: RigPresets.FIELDS,
   };
 }
 
@@ -3388,7 +3405,7 @@ function rigPresetsBroadcast() {
  * preset without a rig is stamped with the active rig — 60 W means something
  * different on the next radio.
  */
-function saveRigPresets({ presets, byMode }, origin) {
+function saveRigPresets({ presets, byMode, rules }, origin) {
   const rigId = settings.activeRigId || null;
   const key = RigPresets.rigKey(rigId);
   const existing = RigPresets.sanitizePresets(settings.rigPresets);
@@ -3403,6 +3420,10 @@ function saveRigPresets({ presets, byMode }, origin) {
   if (byMode && typeof byMode === 'object' && !Array.isArray(byMode)) map[key] = byMode;
   settings.rigPresets = merged;
   settings.rigPresetByMode = RigPresets.sanitizeByMode(map, merged);
+  // Rules absent = left alone (as byMode); an array replaces this rig's list.
+  const ruleMap = (settings.rigPresetRules && typeof settings.rigPresetRules === 'object') ? { ...settings.rigPresetRules } : {};
+  if (Array.isArray(rules)) ruleMap[key] = rules;
+  settings.rigPresetRules = RigPresets.sanitizeRules(ruleMap, merged);
   saveSettings(settings);
   if (origin !== 'settings') sendCatLog(`[Rig preset] ${incoming.length} preset(s) saved for this rig (${origin})`);
   rigPresetsBroadcast();
@@ -3457,14 +3478,16 @@ function rigPresetClearPending() {
  *  of a voice PTT and a tune passes through transient modes — and the preset
  *  goes on when the new family is still there at the end of it. */
 function rigPresetOnMode(mode) {
+  _rigPresetLastBand = rigPresetBand();
   const d = RigPresets.decideModePreset({
-    mode, prevFamily: _rigPresetFamily, transmitting: rigPresetTransmitting(), remote: isRemoteMode(),
-    presets: settings.rigPresets, byMode: settings.rigPresetByMode, rigId: settings.activeRigId || null,
+    mode, band: _rigPresetLastBand, prevFamily: _rigPresetFamily, prevMatchId: _rigPresetMatchId,
+    transmitting: rigPresetTransmitting(), remote: isRemoteMode(),
+    presets: settings.rigPresets, byMode: settings.rigPresetByMode, rules: settings.rigPresetRules, rigId: settings.activeRigId || null,
   });
   if (d.reason === 'apply') {
-    if (_rigPresetPending && _rigPresetPending.family === d.family) return; // already settling
+    if (_rigPresetPending && _rigPresetPending.matchId === d.matchId) return; // already settling
     rigPresetClearPending();
-    _rigPresetPending = { preset: d.apply, family: d.family, tries: 0 };
+    _rigPresetPending = { preset: d.apply, family: d.family, matchId: d.matchId, via: d.via, tries: 0 };
     _rigPresetTimer = setTimeout(rigPresetSettle, RIG_PRESET_SETTLE_MS);
     return;
   }
@@ -3473,9 +3496,19 @@ function rigPresetOnMode(mode) {
     if (!_rigPresetTimer) _rigPresetTimer = setTimeout(() => { _rigPresetTimer = null; rigPresetOnMode(_currentMode); }, 1000);
     return;
   }
-  // same / first / unassigned / no-family / remote: settle on that family now.
-  if (_rigPresetPending && _rigPresetPending.family !== d.family) rigPresetClearPending();
+  // same / first / unassigned / no-family / remote: settle on that context now.
+  if (_rigPresetPending && _rigPresetPending.matchId !== d.matchId) rigPresetClearPending();
   _rigPresetFamily = d.family;
+  _rigPresetMatchId = d.matchId;
+}
+
+/** Every dial change comes through here (sendCatFrequency): a band change can
+ *  change which preset the rules choose (20 m SSB vs 40 m SSB), so the mode
+ *  decision is re-asked with the new band. Same-band QSYs cost nothing. */
+function rigPresetOnBand() {
+  const band = rigPresetBand();
+  if (!band || band === _rigPresetLastBand) return;
+  rigPresetOnMode(_currentMode);
 }
 
 /** `force`: apply even while something reads as transmitting — the JTCAT
@@ -3502,7 +3535,9 @@ function rigPresetSettle(force) {
   }
   rigPresetClearPending();
   _rigPresetFamily = nowFamily;
-  applyRigPreset(pending.preset, 'mode', `mode changed to ${_currentMode}`);
+  _rigPresetMatchId = pending.matchId;
+  const band = rigPresetBand();
+  applyRigPreset(pending.preset, 'mode', pending.via === 'rule' ? `${band ? band + ' ' : ''}${_currentMode} (rule)` : `mode changed to ${_currentMode}`);
 }
 
 /** Called right before JTCAT keys: a preset still settling for the current
@@ -3523,11 +3558,12 @@ function rigPresetOnEngineStart() {
   if (_rigPresetPending) { rigPresetFlushPending(); return; }
   if (RigPresets.modeFamily(_currentMode) !== 'digital') return; // the mode change will do it
   const rigId = settings.activeRigId || null;
-  const map = RigPresets.byModeForRig(settings.rigPresetByMode, rigId);
-  if (!map.digital) return;
-  const preset = RigPresets.findPreset(RigPresets.presetsForRig(RigPresets.sanitizePresets(settings.rigPresets), rigId), map.digital);
+  const m = RigPresets.matchTrigger({ band: rigPresetBand(), family: 'digital', rules: settings.rigPresetRules, byMode: settings.rigPresetByMode, rigId });
+  if (!m.presetId) return;
+  const preset = RigPresets.findPreset(RigPresets.presetsForRig(RigPresets.sanitizePresets(settings.rigPresets), rigId), m.presetId);
   if (!preset) return;
   _rigPresetFamily = 'digital';
+  _rigPresetMatchId = preset.id;
   applyRigPreset(preset, 'mode', 'digital engine started');
 }
 
@@ -21329,8 +21365,8 @@ function connectRemote() {
   remoteServer.on('apply-rig-preset', ({ id }) => {
     applyRigPreset(id, 'device');
   });
-  remoteServer.on('rig-presets-update', ({ presets, byMode }) => {
-    saveRigPresets({ presets, byMode }, 'device');
+  remoteServer.on('rig-presets-update', ({ presets, byMode, rules }) => {
+    saveRigPresets({ presets, byMode, rules }, 'device');
   });
 
   // Worked-states / countries map tints: a device flips the shack's shared
@@ -39971,7 +40007,7 @@ app.whenReady().then(() => {
     }
     // Rig presets saved through the generic settings path (the VFO window's
     // settings sheet): sanitize and tell every surface, like the IPC save.
-    if (has('rigPresets') || has('rigPresetByMode')) {
+    if (has('rigPresets') || has('rigPresetByMode') || has('rigPresetRules')) {
       saveRigPresets({ presets: settings.rigPresets, byMode: settings.rigPresetByMode }, 'settings');
     }
 

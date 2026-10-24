@@ -24093,36 +24093,72 @@ rigTabBtns.forEach(btn => {
 });
 
 // --- Rig presets (lib/rig-presets.js) ---
-// Named TX power / RF gain / AF gain sets for the ACTIVE rig. Main owns the
-// list (settings.rigPresets, per rig) and the family map; this tab renders
-// the payload it sends, applies by id, and saves whole lists back. The same
-// payload drives the VFO window, ECHOCAT Web and the app.
+// A named set of rig settings for the ACTIVE rig — levels, the RX filter,
+// the NB/NR/notch/comp/VOX/preamp/att switches, AGC — each one INCLUDED or
+// left alone, applied by a tap or by the triggers: the five family selects
+// ("all SSB → Hunting, all digital → FT8") and, for the nuanced, band + mode
+// rules ("20 m SSB → Hunting 20", first match wins, the family select is the
+// fallback). Main owns the lists (settings.rigPresets / rigPresetByMode /
+// rigPresetRules, per rig). ONE editor, mounted in the Rig menu's Presets tab
+// and in Settings > Profiles (rigPresetsMount); the same payload drives the
+// VFO window, ECHOCAT Web and the app.
 const rigTabPresets = document.getElementById('rig-tab-presets');
-const rigPresetListEl = document.getElementById('rig-preset-list');
-const rigPresetByModeEl = document.getElementById('rig-preset-bymode');
-const rigPresetEditor = document.getElementById('rig-preset-editor');
-const rigPresetCapsNote = document.getElementById('rig-preset-caps-note');
-let rigPresetsData = { presets: [], byMode: {}, caps: {}, details: {}, families: [], familyLabels: {} };
-let rigPresetEditingId = null; // null = new
+let rigPresetsData = { presets: [], byMode: {}, rules: [], caps: {}, details: {}, families: [], familyLabels: {}, bands: [], fields: [] };
+const rigPresetMounts = []; // one per surface: { root, parts, editingId }
 
 function rigPresetsLoad() {
   if (!window.api.rigPresetsGet) return;
-  window.api.rigPresetsGet().then((p) => { if (p) { rigPresetsData = p; rigPresetsRender(); } }).catch(() => {});
+  window.api.rigPresetsGet().then((p) => { if (p) { rigPresetsData = p; rigPresetsRenderAll(); } }).catch(() => {});
 }
-if (window.api.onRigPresetsChanged) window.api.onRigPresetsChanged((p) => { if (p) { rigPresetsData = p; rigPresetsRender(); } });
+if (window.api.onRigPresetsChanged) window.api.onRigPresetsChanged((p) => { if (p) { rigPresetsData = p; rigPresetsRenderAll(); } });
 
-function rigPresetsRender() {
+function rigPresetsSave(data) {
+  if (!window.api.rigPresetsSave) return;
+  window.api.rigPresetsSave(data).then((p) => { if (p) { rigPresetsData = p; rigPresetsRenderAll(); } }).catch(() => {});
+}
+function rigPresetsRenderAll() { for (const m of rigPresetMounts) rigPresetsRenderInto(m); }
+
+/** Mount the editor into `root` (empty container). Re-renders on every payload. */
+function rigPresetsMount(root) {
+  if (!root) return null;
+  const m = { root, editingId: null, parts: {} };
+  root.innerHTML = '';
+  const mk = (cls) => { const d = document.createElement('div'); d.className = cls; root.appendChild(d); return d; };
+  m.parts.note = mk('rig-preset-note hidden');
+  m.parts.list = mk('rig-preset-list');
+  const actions = mk('rig-preset-actions');
+  const newBtn = document.createElement('button'); newBtn.className = 'rig-btn'; newBtn.style.cssText = 'font-size:11px;padding:2px 8px;'; newBtn.textContent = '+ New preset';
+  newBtn.addEventListener('click', (e) => { e.stopPropagation(); rigPresetOpenEditor(m, null); });
+  actions.appendChild(newBtn);
+  m.parts.editor = mk('rig-preset-editor hidden');
+  const h1 = mk('rig-preset-note'); h1.style.marginTop = '8px'; h1.textContent = 'Apply by itself when the mode changes to:';
+  m.parts.byMode = mk('rig-preset-bymode');
+  const h2 = mk('rig-preset-note'); h2.style.marginTop = '8px'; h2.textContent = 'Band rules (checked first, top to bottom; the mode list above is the fallback):';
+  m.parts.rules = mk('rig-preset-rules');
+  // Keystrokes and clicks inside the editor must not reach the popover's close/keyboard handlers.
+  root.addEventListener('click', (e) => e.stopPropagation());
+  root.addEventListener('keydown', (e) => e.stopPropagation());
+  rigPresetMounts.push(m);
+  rigPresetsRenderInto(m);
+  return m;
+}
+
+function rigPresetFieldAvailable(f, caps) { return !!(caps && caps[f.cap]); }
+
+function rigPresetsRenderInto(m) {
   const d = rigPresetsData;
   const caps = d.caps || {};
-  const anyCap = !!(caps.txpower || caps.rfgain || caps.afgain);
-  rigPresetCapsNote.classList.toggle('hidden', anyCap);
-  rigPresetCapsNote.textContent = anyCap ? '' : 'This radio reports no adjustable TX power, RF gain or AF gain, so a preset has nothing to set here. Presets are kept per rig.';
+  const fields = d.fields || [];
+  const anyCap = fields.some((f) => rigPresetFieldAvailable(f, caps));
+  m.parts.note.classList.toggle('hidden', anyCap);
+  m.parts.note.textContent = anyCap ? '' : 'This radio reports nothing a preset could set (no adjustable power, gains, filter or switches over CAT). Presets are kept per rig.';
   // List
-  rigPresetListEl.innerHTML = '';
+  const list = m.parts.list;
+  list.innerHTML = '';
   if (!d.presets.length) {
     const e = document.createElement('div'); e.className = 'rig-preset-note';
     e.textContent = 'No presets for this rig yet. Set the radio the way you want it for a mode, then + New preset and Use current.';
-    rigPresetListEl.appendChild(e);
+    list.appendChild(e);
   }
   for (const p of d.presets) {
     const det = (d.details && d.details[p.id]) || { text: '', skipped: [] };
@@ -24133,81 +24169,173 @@ function rigPresetsRender() {
     const detail = document.createElement('span'); detail.className = 'rig-preset-detail'; detail.textContent = det.text || '(nothing set)';
     row.appendChild(name); row.appendChild(detail);
     if (det.skipped && det.skipped.length) {
-      const sk = document.createElement('span'); sk.className = 'rig-preset-skipped'; sk.textContent = det.skipped.join(' ');
+      const sk = document.createElement('span'); sk.className = 'rig-preset-skipped'; sk.textContent = det.skipped.join(' · ');
       sk.title = 'Not available on this radio'; row.appendChild(sk);
     }
     const edit = document.createElement('button'); edit.innerHTML = '&#x270E;'; edit.title = 'Edit';
-    edit.addEventListener('click', (e) => { e.stopPropagation(); rigPresetOpenEditor(p); });
+    edit.addEventListener('click', (e) => { e.stopPropagation(); rigPresetOpenEditor(m, p); });
     const del = document.createElement('button'); del.className = 'rig-preset-del'; del.innerHTML = '&times;'; del.title = 'Delete';
     del.addEventListener('click', (e) => {
       e.stopPropagation();
-      rigPresetsSave({ presets: d.presets.filter(x => x.id !== p.id), byMode: d.byMode });
+      rigPresetsSave({ presets: d.presets.filter(x => x.id !== p.id), byMode: d.byMode, rules: (d.rules || []).filter(r => r.presetId !== p.id) });
     });
     row.appendChild(edit); row.appendChild(del);
     row.addEventListener('click', () => { window.api.rigPresetsApply(p.id); });
-    rigPresetListEl.appendChild(row);
+    list.appendChild(row);
   }
-  // Family assignments
-  rigPresetByModeEl.innerHTML = '';
+  // Family assignments (the simple form)
+  const bm = m.parts.byMode;
+  bm.innerHTML = '';
   for (const fam of (d.families || [])) {
     const lab = document.createElement('span'); lab.textContent = (d.familyLabels && d.familyLabels[fam]) || fam;
     const sel = document.createElement('select');
     const none = document.createElement('option'); none.value = ''; none.textContent = '— leave the radio as it is'; sel.appendChild(none);
-    for (const p of d.presets) {
-      const o = document.createElement('option'); o.value = p.id; o.textContent = p.name; sel.appendChild(o);
-    }
+    for (const p of d.presets) { const o = document.createElement('option'); o.value = p.id; o.textContent = p.name; sel.appendChild(o); }
     sel.value = (d.byMode && d.byMode[fam]) || '';
     sel.addEventListener('change', () => {
       const byMode = { ...(d.byMode || {}) };
       if (sel.value) byMode[fam] = sel.value; else delete byMode[fam];
-      rigPresetsSave({ presets: d.presets, byMode });
+      rigPresetsSave({ presets: d.presets, byMode, rules: d.rules });
     });
-    rigPresetByModeEl.appendChild(lab); rigPresetByModeEl.appendChild(sel);
+    bm.appendChild(lab); bm.appendChild(sel);
   }
-  // Editor fields the radio cannot take are hidden (never a wrong number sent).
-  document.getElementById('rig-preset-txpower-row').style.display = caps.txpower ? '' : 'none';
-  document.getElementById('rig-preset-rfgain-row').style.display = caps.rfgain ? '' : 'none';
-  document.getElementById('rig-preset-afgain-row').style.display = caps.afgain ? '' : 'none';
+  rigPresetsRenderRules(m);
 }
 
-function rigPresetsSave(data) {
-  if (!window.api.rigPresetsSave) return;
-  window.api.rigPresetsSave(data).then((p) => { if (p) { rigPresetsData = p; rigPresetsRender(); } }).catch(() => {});
+/** The band + mode rules: existing ones as lines with a remove button, then one row to add a rule. */
+function rigPresetsRenderRules(m) {
+  const d = rigPresetsData;
+  const box = m.parts.rules;
+  box.innerHTML = '';
+  const rules = d.rules || [];
+  if (!d.presets.length) { const e = document.createElement('div'); e.className = 'rig-preset-note'; e.textContent = 'Make a preset first.'; box.appendChild(e); return; }
+  rules.forEach((r, i) => {
+    const row = document.createElement('div'); row.className = 'rig-preset-rule';
+    const txt = document.createElement('span'); txt.textContent = (d.ruleTexts && d.ruleTexts[i]) || '';
+    const up = document.createElement('button'); up.innerHTML = '&#x25B2;'; up.title = 'Check this rule earlier'; up.disabled = i === 0;
+    up.addEventListener('click', (e) => { e.stopPropagation(); const next = rules.slice(); [next[i - 1], next[i]] = [next[i], next[i - 1]]; rigPresetsSave({ presets: d.presets, byMode: d.byMode, rules: next }); });
+    const del = document.createElement('button'); del.className = 'rig-preset-del'; del.innerHTML = '&times;'; del.title = 'Remove this rule';
+    del.addEventListener('click', (e) => { e.stopPropagation(); rigPresetsSave({ presets: d.presets, byMode: d.byMode, rules: rules.filter((_, j) => j !== i) }); });
+    row.appendChild(txt); row.appendChild(up); row.appendChild(del);
+    box.appendChild(row);
+  });
+  // Add a rule: band chips (none = any band), mode chips (none = any mode), preset, Add.
+  const add = document.createElement('div'); add.className = 'rig-preset-rule-add';
+  const chosen = { bands: new Set(), families: new Set() };
+  const chipRow = (label, items, labelOf, set) => {
+    const wrap = document.createElement('div'); wrap.className = 'rig-preset-chips';
+    const l = document.createElement('span'); l.className = 'rig-preset-chips-label'; l.textContent = label; wrap.appendChild(l);
+    for (const it of items) {
+      const c = document.createElement('button'); c.type = 'button'; c.className = 'rig-preset-chip'; c.textContent = labelOf(it);
+      c.addEventListener('click', (e) => { e.stopPropagation(); if (set.has(it)) set.delete(it); else set.add(it); c.classList.toggle('on', set.has(it)); });
+      wrap.appendChild(c);
+    }
+    return wrap;
+  };
+  add.appendChild(chipRow('Band', d.bands || [], (b) => b, chosen.bands));
+  add.appendChild(chipRow('Mode', d.families || [], (f) => ({ ssb: 'SSB', cw: 'CW', digital: 'Digital', fm: 'FM', am: 'AM' })[f] || f, chosen.families));
+  const line = document.createElement('div'); line.className = 'rig-preset-rule-line';
+  const arrow = document.createElement('span'); arrow.textContent = 'apply';
+  const sel = document.createElement('select');
+  for (const p of d.presets) { const o = document.createElement('option'); o.value = p.id; o.textContent = p.name; sel.appendChild(o); }
+  const btn = document.createElement('button'); btn.className = 'rig-btn'; btn.style.cssText = 'font-size:11px;padding:2px 8px;'; btn.textContent = '+ Add rule';
+  const hint = document.createElement('span'); hint.className = 'rig-preset-note'; hint.textContent = 'No band picked = any band; no mode picked = any mode.';
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!chosen.bands.size && !chosen.families.size) { hint.textContent = 'Pick at least a band or a mode (any band + any mode is what the list above is for).'; return; }
+    const rule = { bands: [...chosen.bands], families: [...chosen.families], presetId: sel.value };
+    rigPresetsSave({ presets: d.presets, byMode: d.byMode, rules: rules.concat([rule]) });
+  });
+  line.appendChild(arrow); line.appendChild(sel); line.appendChild(btn);
+  add.appendChild(line); add.appendChild(hint);
+  box.appendChild(add);
 }
 
-function rigPresetOpenEditor(p) {
-  rigPresetEditingId = p ? p.id : null;
-  document.getElementById('rig-preset-name').value = p ? p.name : '';
-  document.getElementById('rig-preset-txpower').value = p && p.txPower != null ? p.txPower : '';
-  document.getElementById('rig-preset-rfgain').value = p && p.rfGain != null ? p.rfGain : '';
-  document.getElementById('rig-preset-afgain').value = p && p.afGain != null ? p.afGain : '';
-  rigPresetEditor.classList.remove('hidden');
-  document.getElementById('rig-preset-name').focus();
+/** The editor: one row per field the radio takes — an "include" tick, the label, the control. */
+function rigPresetOpenEditor(m, p) {
+  const d = rigPresetsData;
+  const caps = d.caps || {};
+  m.editingId = p ? p.id : null;
+  const ed = m.parts.editor;
+  ed.innerHTML = '';
+  const nameRow = document.createElement('div'); nameRow.className = 'rig-popover-row';
+  const nameLab = document.createElement('label'); nameLab.textContent = 'Name';
+  const nameIn = document.createElement('input'); nameIn.type = 'text'; nameIn.maxLength = 40; nameIn.placeholder = 'e.g. FT8'; nameIn.style.flex = '1'; nameIn.value = p ? p.name : '';
+  nameRow.appendChild(nameLab); nameRow.appendChild(nameIn); ed.appendChild(nameRow);
+  const controls = {}; // key → { inc, ctl, f }
+  const groups = [['tx', 'Transmit'], ['rx', 'Receive']];
+  for (const [g, title] of groups) {
+    const fs = (d.fields || []).filter((f) => f.group === g && rigPresetFieldAvailable(f, caps));
+    if (!fs.length) continue;
+    const h = document.createElement('div'); h.className = 'rig-preset-note'; h.textContent = title; ed.appendChild(h);
+    for (const f of fs) {
+      const row = document.createElement('div'); row.className = 'rig-popover-row rig-preset-field';
+      const inc = document.createElement('input'); inc.type = 'checkbox'; inc.title = 'Include this setting in the preset (unticked = left as it is)';
+      const lab = document.createElement('label'); lab.textContent = f.label + (f.unit ? ' (' + f.unit + ')' : '');
+      let ctl;
+      if (f.kind === 'switch') {
+        ctl = document.createElement('select');
+        for (const [v, t] of [['on', 'On'], ['off', 'Off']]) { const o = document.createElement('option'); o.value = v; o.textContent = t; ctl.appendChild(o); }
+      } else if (f.kind === 'choice') {
+        ctl = document.createElement('select');
+        const opts = (f.key === 'agc' && Array.isArray(caps.agcModes) && caps.agcModes.length) ? caps.agcModes : f.options;
+        for (const v of opts) { const o = document.createElement('option'); o.value = v; o.textContent = v; ctl.appendChild(o); }
+      } else {
+        ctl = document.createElement('input'); ctl.type = 'number'; ctl.min = f.min; ctl.max = f.max; ctl.step = f.kind === 'width' ? 50 : 1; ctl.style.width = '80px';
+      }
+      const has = p && p[f.key] !== undefined && p[f.key] !== null;
+      inc.checked = !!has;
+      if (has) ctl.value = f.kind === 'switch' ? (p[f.key] ? 'on' : 'off') : String(p[f.key]);
+      ctl.disabled = !inc.checked;
+      inc.addEventListener('change', () => { ctl.disabled = !inc.checked; });
+      ctl.addEventListener('input', () => { if (!inc.checked) { inc.checked = true; ctl.disabled = false; } });
+      row.appendChild(inc); row.appendChild(lab); row.appendChild(ctl); ed.appendChild(row);
+      controls[f.key] = { inc, ctl, f };
+    }
+  }
+  const actions = document.createElement('div'); actions.className = 'rig-preset-actions';
+  const useBtn = document.createElement('button'); useBtn.className = 'rig-btn'; useBtn.textContent = 'Use current'; useBtn.title = 'Fill every field with the radio\'s current setting and include it';
+  useBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const s = customRigState || {};
+    for (const k of Object.keys(controls)) {
+      const { inc, ctl, f } = controls[k];
+      const v = s[k];
+      if (v === undefined || v === null || (k === 'txPower' && !(v > 0))) continue;
+      if (f.kind === 'switch') ctl.value = v ? 'on' : 'off';
+      else ctl.value = String(v);
+      inc.checked = true; ctl.disabled = false;
+    }
+  });
+  const saveBtn = document.createElement('button'); saveBtn.className = 'rig-btn'; saveBtn.textContent = 'Save';
+  saveBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const name = nameIn.value.trim();
+    if (!name) { nameIn.focus(); return; }
+    const edited = { id: m.editingId || undefined, name };
+    for (const k of Object.keys(controls)) {
+      const { inc, ctl, f } = controls[k];
+      if (!inc.checked || ctl.value === '') { edited[k] = null; continue; } // null = drop the field on this save
+      edited[k] = f.kind === 'switch' ? ctl.value === 'on' : (f.kind === 'choice' ? ctl.value : Number(ctl.value));
+    }
+    const list = d.presets.slice();
+    const i = list.findIndex(x => x.id === m.editingId);
+    if (i >= 0) list[i] = { ...list[i], ...edited }; else list.push(edited);
+    ed.classList.add('hidden');
+    rigPresetsSave({ presets: list, byMode: d.byMode, rules: d.rules });
+  });
+  const cancel = document.createElement('button'); cancel.className = 'rig-btn'; cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', (e) => { e.stopPropagation(); ed.classList.add('hidden'); });
+  actions.appendChild(useBtn); actions.appendChild(saveBtn); actions.appendChild(cancel); ed.appendChild(actions);
+  const note = document.createElement('div'); note.className = 'rig-preset-note';
+  note.textContent = 'Only ticked settings are sent; the rest of the radio is left as it is. AF gain is the speaker level: 0 silences the shack for FT8.';
+  ed.appendChild(note);
+  ed.classList.remove('hidden');
+  nameIn.focus();
 }
-document.getElementById('rig-preset-new').addEventListener('click', (e) => { e.stopPropagation(); rigPresetOpenEditor(null); });
-document.getElementById('rig-preset-cancel').addEventListener('click', (e) => { e.stopPropagation(); rigPresetEditor.classList.add('hidden'); });
-document.getElementById('rig-preset-use-current').addEventListener('click', (e) => {
-  e.stopPropagation();
-  const s = customRigState || {};
-  if (s.txPower > 0) document.getElementById('rig-preset-txpower').value = s.txPower;
-  if (s.rfGain != null) document.getElementById('rig-preset-rfgain').value = s.rfGain;
-  if (s.afGain != null) document.getElementById('rig-preset-afgain').value = s.afGain;
-});
-document.getElementById('rig-preset-save').addEventListener('click', (e) => {
-  e.stopPropagation();
-  const name = document.getElementById('rig-preset-name').value.trim();
-  if (!name) { document.getElementById('rig-preset-name').focus(); return; }
-  const num = (id) => { const v = document.getElementById(id).value; return v === '' ? undefined : Number(v); };
-  const edited = { id: rigPresetEditingId || undefined, name, txPower: num('rig-preset-txpower'), rfGain: num('rig-preset-rfgain'), afGain: num('rig-preset-afgain') };
-  const list = rigPresetsData.presets.slice();
-  const i = list.findIndex(x => x.id === rigPresetEditingId);
-  if (i >= 0) list[i] = { ...list[i], ...edited }; else list.push(edited);
-  rigPresetEditor.classList.add('hidden');
-  rigPresetsSave({ presets: list, byMode: rigPresetsData.byMode });
-});
-// Keystrokes inside the editor must not reach the popover's close/keyboard handlers.
-rigPresetEditor.addEventListener('click', (e) => e.stopPropagation());
-rigPresetEditor.addEventListener('keydown', (e) => e.stopPropagation());
+rigPresetsMount(document.getElementById('rig-preset-root'));
+rigPresetsMount(document.getElementById('settings-preset-root'));
+rigPresetsLoad(); // both surfaces start from main's payload; every change is pushed after that
 
 // --- Custom CAT Buttons ---
 const rigCustomSlotsContainer = document.getElementById('rig-custom-slots');
