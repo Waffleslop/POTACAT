@@ -260,6 +260,7 @@ test('winlink-watch subscribes a device; the shack computes bins and the Busy ve
   const popJs = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'winlink-popout.js'), 'utf8');
   assert.ok(popHtml.includes('<script src="../lib/winlink-spectrum.js"></script>'), 'the mail window loads the shared rule');
   assert.ok(/new WinlinkSpectrum\.BusyDetector\(/.test(popJs) && /WinlinkSpectrum\.markerBand\(mode, /.test(popJs), 'the mail window uses the shared rule for both the badge and the markers');
+  assert.ok(/if \(key === wfMarkersKey\) return;/.test(popJs), 'an unchanged band never resets the badge (every state push passes through wfMarkers)');
   assert.ok(!/centre/.test(popJs) && !/centre/.test(popHtml) && !/centre/.test(fs.readFileSync(path.join(__dirname, '..', 'lib', 'winlink-spectrum.js'), 'utf8')), 'center, not centre (Casey 2026-10-23)');
   assert.ok(/if \(_winlinkRemoteWatchers > 0\) winlinkSpecAcc\(\)\.push\(pcm, sampleRate\);/.test(main), 'fed from the socket routes only while watched');
   assert.ok(/winlink-spectrum-mags[\s\S]*?winlinkSocketAudioRoute\(\)\) return;/.test(main), 'the window relays only on a sound-device rig');

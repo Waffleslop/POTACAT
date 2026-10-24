@@ -366,7 +366,7 @@
   // is lib/winlink-spectrum.js (BusyDetector — the same one the shack runs
   // for ECHOCAT devices): a sustained signal enters, hysteresis and a 4 s
   // hold keep it, so the badge does not blink between frames.
-  var busyDet = new WinlinkSpectrum.BusyDetector(0, 1, WF_BINS), busyLastRender = 0;
+  var busyDet = new WinlinkSpectrum.BusyDetector(0, 1, WF_BINS), busyLastRender = 0, wfMarkersKey = '';
   function busyUpdate(mags) {
     var now = performance.now();
     var v = busyDet.update(mags, now);
@@ -455,6 +455,12 @@
     // modem's own bandwidth from Settings (state.modemBw).
     var band = WinlinkSpectrum.markerBand(mode, (state && state.modemBw) || { ardop: state && state.ardopBw });
     var lo = band.lo, hi = band.hi;
+    // Every state push (the audio meter, twice a second) comes through here:
+    // only a CHANGED band resets the detector and the badge, or the badge
+    // blinks "Clear" / "—" for as long as the window is open (K3SBP 2026-10-23).
+    var key = lo + '|' + hi + '|' + band.label;
+    if (key === wfMarkersKey) return;
+    wfMarkersKey = key;
     busyDet.setBand(lo, hi); $('wl-wf-busy').className = 'wl-busy'; $('wl-wf-busy').textContent = '—';
     wf.setMarkers([{ pos: lo, color: [0.3, 0.8, 0.6, 0.8] }, { pos: hi, color: [0.3, 0.8, 0.6, 0.8] }]);
     $('wl-wf-note').textContent = band.label;
