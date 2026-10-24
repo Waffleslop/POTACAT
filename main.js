@@ -14811,7 +14811,15 @@ async function jtcatAutoLog(qso, opts) {
   const now = new Date();
   const qsoDate = now.toISOString().slice(0, 10).replace(/-/g, '');
   const qsoTime = now.toISOString().slice(11, 16).replace(/:/g, '');
-  const freqKhz = _currentFreqHz ? _currentFreqHz / 1000 : 0;
+  // The radio's dial, else the dial the JTCAT window is set to. With no dial
+  // from the radio (a no-CAT radio, or CAT not answering) the record went out
+  // with frequency 0 and no band, and Wavelog refused it (KJ5NVM 2026-10-24,
+  // FT-450D whose CAT never answered while VOX keyed the FT8 audio).
+  const dialHz = _currentFreqHz > 0 ? _currentFreqHz : (_jtcatExpectedDialHz > 0 ? _jtcatExpectedDialHz : 0);
+  if (!(_currentFreqHz > 0) && dialHz > 0) {
+    sendCatLog(`[JTCAT] No frequency from the radio: logging ${q.call} on the JTCAT band's dial, ${(dialHz / 1000).toFixed(1)} kHz`);
+  }
+  const freqKhz = dialHz ? dialHz / 1000 : 0;
   const freqMhz = freqKhz / 1000;
   const band = freqToBand(freqMhz) || '';
   const mode = ft8Engine ? ft8Engine._mode : 'FT8';

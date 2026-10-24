@@ -198,5 +198,10 @@ test('a squelched FM / no-CAT radio is never reported as a dead audio link (KS9B
   assert.ok(body.indexOf('audioSilenceIsSquelch()') > 0 && body.indexOf('audioSilenceIsSquelch()') < body.indexOf("type: 'audio-health', ok: false"), 'checked before the phone is told');
 });
 
+test('FT8 auto-log with no dial from the radio uses the JTCAT band dial, never frequency 0 (KJ5NVM)', () => {
+  const main = read('main.js').replace(/\r\n/g, '\n');
+  assert.ok(/const dialHz = _currentFreqHz > 0 \? _currentFreqHz : \(_jtcatExpectedDialHz > 0 \? _jtcatExpectedDialHz : 0\);\n[\s\S]{0,400}const freqKhz = dialHz \? dialHz \/ 1000 : 0;/.test(main));
+});
+
 console.log(`\nNo CAT control: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
