@@ -292,6 +292,14 @@ function fnBody(src, name) {
     assert.strictEqual(saved.ok, true);
     assert.deepStrictEqual([saved.toVara.name, saved.fromVara.name, saved.vara.inputName, saved.vara.outputName], ['CABLE', 'Hi-Fi Cable', 'CABLE Output (VB-Audio Virtual ', 'Hi-Fi Cable Input (VB-Audio Hi-']);
     assert.ok(/Click Set up VARA for me once/.test(S.planCablesFromSaved({ inputId: 'x' }).advice));
+    // A plan saved with the two ids and labels but without VARA's names (an
+    // earlier shape) is still configured: the names come from the labels.
+    const old = S.planCablesFromSaved({ inputId: 'hifi-out', outputId: 'cab-in', inputLabel: 'Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)', outputLabel: 'CABLE Input (VB-Audio Virtual Cable)' });
+    assert.strictEqual(old.ok, true, 'ids + labels are a configured cable route');
+    assert.strictEqual(old.vara.inputName, 'CABLE Output (VB-Audio Virtual ');
+    assert.strictEqual(old.vara.outputName, 'Hi-Fi Cable Input (VB-Audio Hi-');
+    assert.strictEqual(old.vara.fromListing, false);
+    assert.strictEqual(S.planCablesFromSaved({ inputId: 'a', outputId: 'b' }).ok, false, 'no labels, no names: not configured');
   });
   await test('VARA\'s log names the device it could not open', () => {
     assert.strictEqual(S.varaLogDeviceProblem('2026-10-23 12:00:00    WARNING: VARA is not connected to any App via TCP Port 8300\n'), '');

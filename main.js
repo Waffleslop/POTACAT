@@ -3556,6 +3556,25 @@ function vfoMetersAvailable() {
   return out;
 }
 
+// Meter pushes to ECHOCAT clients. The Flex streams its TX-bridge meters at
+// ~16 frames/s whether or not it is transmitting (0 W and SWR 1.0 on
+// receive), and every frame went to every client: ~33 messages a second per
+// phone, and the bug report's desktop log was nothing but them (Casey's
+// BUG-K3SBP-20261024-0CD289). A client gets a value when it CHANGED (0.1 W,
+// 0.05 SWR) and at most every 250 ms; a return to 0 goes out at once. The
+// desktop's own windows still get every frame.
+const _remoteMeterLast = { 'fwd-power': { v: null, at: 0 }, 'swr-ratio': { v: null, at: 0 } };
+function remoteMeterPush(type, value) {
+  if (!(remoteServer && remoteServer.running)) return;
+  const m = _remoteMeterLast[type];
+  const now = Date.now();
+  const step = type === 'fwd-power' ? 0.1 : 0.05;
+  if (m.v !== null && Math.abs(value - m.v) < step) return;
+  if (value !== 0 && now - m.at < 250) return;
+  m.v = value; m.at = now;
+  remoteServer.sendToClient({ type, value });
+}
+
 function sendCatFwdPower(watts) {
   noteMeterSeen('power');
   const w = Math.round((Number(watts) || 0) * 10) / 10;
@@ -3569,7 +3588,7 @@ function sendCatFwdPower(watts) {
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-fwd-power', v);
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('cat-fwd-power', v);
     if (winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) winlinkPopoutWin.webContents.send('cat-fwd-power', v);
-    if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'fwd-power', value: v });
+    remoteMeterPush('fwd-power', v);
   };
   push(_fwdPowerHold.sample(w));
   if (_fwdPowerClearTimer) clearTimeout(_fwdPowerClearTimer);
@@ -4021,13 +4040,20 @@ function describeRemotePath(addr) {
 function gatherDesktopRawDiagnostic() {
   const activeRig = (() => { try { return (settings.rigs || []).find(r => r && r.id === settings.activeRigId) || null; } catch { return null; } })();
   const catTarget = (cat && cat._target) || (settings && settings.catTarget) || null;
+  // The path actually driving the radio. On a Flex that is the SmartSDR API
+  // (Flex Direct) whenever it can tune — the same predicate the tune path
+  // uses — and the CAT entry beside it may be a dead shim port: the report
+  // said "CAT: TCP 127.0.0.1:5002 (status=disconnected)" while Flex Direct
+  // was tuning fine (BUG-K3SBP-20261024-0CD289).
+  const flexDirect = !!(smartSdr && smartSdr.canTune && (smartSdr.mode === 'self' || !cat || !cat.connected));
   const catTransport = (() => {
+    if (flexDirect) return `Flex Direct${catTarget && catTarget.host ? ' ' + catTarget.host : ''} (SmartSDR API, slice ${smartSdr.ourSliceIndex != null ? smartSdr.ourSliceIndex : '?'})`;
     if (!catTarget) return null;
     if (catTarget.host) return `${(catTarget.type || 'tcp').toUpperCase()} ${catTarget.host}${catTarget.port ? ':' + catTarget.port : ''}`;
     if (catTarget.path) return `${(catTarget.type || 'serial')} ${catTarget.path}`;
     return null;
   })();
-  const catConnected = !!(cat && cat.connected);
+  const catConnected = flexDirect || !!(cat && cat.connected);
 
   let tunnel = null;
   try { tunnel = cloudTunnel ? cloudTunnel.getState() : null; } catch {}
@@ -4080,7 +4106,7 @@ function gatherDesktopRawDiagnostic() {
       configured: !!activeRig,
       profile: activeRig ? (activeRig.name || activeRig.model || null) : null,
       catTransport,
-      catStatus: !catTarget ? 'not_configured' : (catConnected ? 'connected' : 'disconnected'),
+      catStatus: !catTarget && !flexDirect ? 'not_configured' : (catConnected ? 'connected' : 'disconnected'),
       catLastPollAgeMs: (() => {
         try {
           const t = cat && cat._lastReadOkMs;
@@ -8622,6 +8648,19 @@ async function winlinkVaraSetup({ kind: k, devices, inputLabel, outputLabel } = 
  * stopped by POTACAT), wait for the port, or say exactly what is missing.
  */
 const VARA_LAUNCH_WAIT_MS = 45000;      // a cold VARA start on a busy PC
+
+/** Is a VARA.exe / VARAFM.exe process running (Windows)? Elsewhere, or on any error, false. */
+function varaProcessRunning(kind) {
+  if (process.platform !== 'win32') return Promise.resolve(false);
+  const image = kind === 'fm' ? 'VARAFM.exe' : 'VARA.exe';
+  return new Promise((resolve) => {
+    try {
+      require('child_process').execFile('tasklist', ['/FI', `IMAGENAME eq ${image}`, '/NH', '/FO', 'CSV'], { timeout: 4000, windowsHide: true }, (err, stdout) => {
+        resolve(!err && new RegExp('^"' + image.replace('.', '\\.') + '"', 'im').test(String(stdout || '')));
+      });
+    } catch { resolve(false); }
+  });
+}
 const _varaLaunch = { hf: null, fm: null }; // { child, at } for a VARA POTACAT started that may still be coming up
 async function winlinkVaraReady(mode, { configured } = {}) {
   const kind = VaraProcess.kindOfMode(mode);
@@ -8634,12 +8673,22 @@ async function winlinkVaraReady(mode, { configured } = {}) {
       // VARA is closed: make its settings match the radio in use before it
       // reads them (the rig layer's decision; a problem is logged, never fatal
       // here — the session then fails with VARA's own words if it matters).
+      let notConfigured = '';
       if (!configured) {
         try {
           const c = await winlinkVaraConfigure({ kind, quiet: true });
-          if (!c.ok && c.step !== 'running') winlinkLog(`${name}: not configured for this radio — ${c.error}`);
+          if (!c.ok && c.step !== 'running') { notConfigured = c.error || 'not set up'; winlinkLog(`${name}: not configured for this radio — ${c.error}`); }
         } catch (e) { winlinkLog(`${name}: configure failed — ${e.message}`); }
       }
+      // VARA open but silent on its port (a different port in its Settings,
+      // or a hung copy): a second VARA.exe only answers with its own "already
+      // open" box and never the port — 45 s of nothing on the phone (Casey,
+      // BUG-K3SBP-20261024-0CD289). Say what is wrong instead of launching.
+      if (await varaProcessRunning(kind)) {
+        _winlinkSessionErrorKind = 'vara-not-answering';
+        throw new Error(`${name} is open on the shack PC but is not answering on port ${port} — in its Settings > ${name === 'VARA FM' ? 'VARA FM' : 'VARA'} Setup set the TCP port to ${port} (and PTT to VOX), or close ${name} and try again`);
+      }
+      const progress = (txt) => { if (winlinkSessionActive()) { winlinkState.setSession({ text: txt }); winlinkSessionPush(); } };
       // ONE launch at a time. VARA takes 10–20 s to come up on a cold start
       // (21 s on K3SBP's PC, 2026-10-23); a second session started meanwhile
       // used to spawn VARA.exe again, which answered with its own "VARA is
@@ -8657,19 +8706,32 @@ async function winlinkVaraReady(mode, { configured } = {}) {
           child.unref();
           _varaLaunch[kind] = { child, at: Date.now() };
         } catch (e) {
-          throw new Error(`${name} could not be started (${e.message}) — start it yourself, with its PTT set to VOX`);
+          _winlinkSessionErrorKind = 'vara-not-answering';
+          throw new Error(`${name} could not be started on the shack PC (${e.message}) — start it there yourself, with its PTT set to VOX`);
         }
       }
+      // The phone sees the wait, not only "Preparing VARA HF".
+      progress(`Starting ${name} on the shack PC`);
+      const startedAt = _varaLaunch[kind] ? _varaLaunch[kind].at : Date.now();
       const until = _varaLaunch[kind] ? _varaLaunch[kind].at + VARA_LAUNCH_WAIT_MS : Date.now() + VaraProcess.VARA_DEFAULTS.launchWaitMs;
+      let lastTick = 0;
       while (!probe.ok && Date.now() < until) {
         await new Promise((r) => setTimeout(r, 1000));
         probe = await VaraProcess.probeVaraPort(port);
+        const s = Math.round((Date.now() - startedAt) / 1000);
+        if (!probe.ok && s - lastTick >= 5) { lastTick = s; progress(`Starting ${name} on the shack PC (${s} s)`); }
       }
-      if (!probe.ok) throw new Error(`${name} was started but is not answering on port ${port} after ${Math.round(VARA_LAUNCH_WAIT_MS / 1000)} s — check the port in its Settings (POTACAT expects ${port}) and that its PTT is set to VOX`);
+      if (!probe.ok) {
+        _winlinkSessionErrorKind = notConfigured ? 'vara-not-configured' : 'vara-not-answering';
+        throw new Error(`${name} was started on the shack PC but is not answering on port ${port} after ${Math.round(VARA_LAUNCH_WAIT_MS / 1000)} s — check the port in its Settings (POTACAT expects ${port}) and that its PTT is set to VOX` +
+          (notConfigured ? `. ${name} is not set up for this radio yet: run "Set up VARA for me" in POTACAT on the shack PC once (${notConfigured})` : ''));
+      }
     } else if (bin.found) {
-      throw new Error(`${name} is not running — start it (with its PTT set to VOX), or turn on "Start VARA for me" in Settings > Station > Winlink`);
+      _winlinkSessionErrorKind = 'vara-not-running';
+      throw new Error(`${name} is not running on the shack PC — start it there (with its PTT set to VOX), or turn on "Start VARA for me" in Settings > Station > Winlink`);
     } else {
-      throw new Error(`${name} is not answering on port ${port} and its program was not found — start it yourself, or set its path in Settings > Station > Winlink`);
+      _winlinkSessionErrorKind = 'vara-not-found';
+      throw new Error(`${name} is not answering on port ${port} and its program was not found on the shack PC — start it there yourself, or set its path in Settings > Station > Winlink`);
     }
   }
   winlinkLog(`${name} ready on 127.0.0.1:${port}${probe.version ? ' — ' + probe.version : probe.silent ? ' (answered the connection, no VERSION reply)' : ''}`);
@@ -9847,7 +9909,23 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
       winlinkEndSession('done', winlinkSessionSummary(mode, winlinkState.session.sent, received, gateway), received);
     } catch (e) {
       if (e && e.cancelled) { winlinkLog(`attempt #${seq} ended after it was stopped — nothing more done for it`); return; }
-      if (!live()) { winlinkLog(`attempt #${seq} failed after it was stopped (${e && e.message ? e.message : e}) — ignored`); return; }
+      if (!live()) {
+        // The attempt is over, but its reason is the one line that explains
+        // the failure (VARA not answering after 45 s under an operator's
+        // Stop) — keep it on the last-session record every surface shows.
+        const why = e && e.message ? e.message : String(e);
+        winlinkLog(`attempt #${seq} failed after it was stopped (${why}) — kept as the reason`);
+        try {
+          const ls = settings.winlinkLastSession;
+          if (ls && !ls.ok && !String(ls.text || '').includes(why)) {
+            ls.text = `${ls.text || 'Session failed'} — ${why}`.slice(0, 300);
+            saveSettings(settings);
+            if (!winlinkSessionActive()) winlinkState.setSession({ error: ls.text, errorKind: _winlinkSessionErrorKind || 'stopped' });
+            winlinkPush();
+          }
+        } catch {}
+        return;
+      }
       winlinkEndSession('error', _winlinkSessionError || e.message || String(e));
     }
   })();
@@ -16715,7 +16793,7 @@ function connectSmartSdr() {
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('cat-swr-ratio', swr);
     if (winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) winlinkPopoutWin.webContents.send('cat-swr-ratio', swr);
     if (js8PopoutWin && !js8PopoutWin.isDestroyed()) js8PopoutWin.webContents.send('cat-swr-ratio', swr);
-    if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'swr-ratio', value: swr });
+    remoteMeterPush('swr-ratio', swr);
     // SWR guard: these frames only flow during TX (src=TX- bridge meter), so
     // a sustained over-limit value here means we are RIGHT NOW transmitting
     // into a bad match. 3-frame debounce rides out ATU-settling spikes;
@@ -16753,7 +16831,7 @@ function connectSmartSdr() {
     _swrRatioClearTimer = setTimeout(() => {
       _swrRatioClearTimer = null;
       _currentSwrRatio = 0;
-      if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'swr-ratio', value: 0 });
+      remoteMeterPush('swr-ratio', 0);
     }, 10000);
   });
 
@@ -20847,17 +20925,13 @@ function connectRemote() {
     remoteServer.sendVfoProfiles(settings.vfoProfiles || []);
     // Rig presets (TX power / RF gain / AF gain sets) for the active rig.
     remoteServer.sendRigPresets(rigPresetsPayload());
-    // Sync voice macros to phone
-    ensureVoiceMacroDir();
-    const vmLabels = settings.voiceMacroLabels || [];
-    for (let i = 0; i < VOICE_MACRO_MAX; i++) {
-      const p = voiceMacroPath(i);
-      if (fs.existsSync(p)) {
-        const audio = fs.readFileSync(p).toString('base64');
-        remoteServer.sendToClient({ type: 'voice-macro-sync', idx: i, label: vmLabels[i] || '', audio });
-      }
-    }
-    if (vmLabels.length) remoteServer.sendToClient({ type: 'voice-macro-labels', labels: vmLabels });
+    // Voice macros: the server hydrates them itself (lib/remote-server.js
+    // _sendVoiceMacroHydration) from the store main keeps current — a
+    // manifest of labels and hashes for a client that declares
+    // 'voice-macro-manifest', the audio only on its request; the whole set,
+    // as before, for an older client. 270 KB of unchanged audio used to go
+    // out on every reconnect (BUG-K3SBP-20261024-0CD289).
+    voiceMacroStoreSync();
 
     // Propagation snapshots — RBN spots and PSKReporter Map spots/status.
     // Mobile Prop tab needs these to render immediately on connect rather
@@ -23141,12 +23215,14 @@ function connectRemote() {
     // Notify desktop renderer to refresh
     if (win && !win.isDestroyed()) win.webContents.send('voice-macros-updated');
     console.log(`[Voice] Received macro ${idx} from phone`);
+    voiceMacroStoreSync();
   });
 
   remoteServer.on('voice-macro-delete', ({ idx }) => {
     const p = voiceMacroPath(idx);
     if (fs.existsSync(p)) fs.unlinkSync(p);
     if (win && !win.isDestroyed()) win.webContents.send('voice-macros-updated');
+    voiceMacroStoreSync();
   });
 
   // Phone-tapped a voice macro slot. Audio playback owns the rig's USB CODEC
@@ -26543,6 +26619,43 @@ const VOICE_MACRO_MAX = 25;
 const VOICE_MACRO_DIR = path.join(app.getPath('userData'), 'voice-macros');
 function ensureVoiceMacroDir() { if (!fs.existsSync(VOICE_MACRO_DIR)) fs.mkdirSync(VOICE_MACRO_DIR, { recursive: true }); }
 function voiceMacroPath(idx) { return path.join(VOICE_MACRO_DIR, `macro-${idx}.webm`); }
+// The macro store the ECHOCAT server hydrates clients from: labels and a
+// content hash per recorded slot, the audio read only when a client asks
+// for a slot whose hash it does not hold. Hashes are cached by mtime/size.
+const _voiceMacroHashCache = new Map();
+function voiceMacroHash(idx) {
+  try {
+    const p = voiceMacroPath(idx);
+    const st = fs.statSync(p);
+    const c = _voiceMacroHashCache.get(idx);
+    if (c && c.mtimeMs === st.mtimeMs && c.size === st.size) return c.hash;
+    const hash = require('crypto').createHash('sha1').update(fs.readFileSync(p)).digest('hex').slice(0, 16);
+    _voiceMacroHashCache.set(idx, { mtimeMs: st.mtimeMs, size: st.size, hash });
+    return hash;
+  } catch { return ''; }
+}
+function voiceMacroManifest() {
+  const labels = settings.voiceMacroLabels || [];
+  const out = [];
+  for (let i = 0; i < VOICE_MACRO_MAX; i++) {
+    const p = voiceMacroPath(i);
+    let st = null;
+    try { st = fs.statSync(p); } catch { st = null; }
+    if (!st) continue;
+    out.push({ idx: i, label: labels[i] || '', hash: voiceMacroHash(i), bytes: st.size });
+  }
+  return out;
+}
+function voiceMacroStoreSync() {
+  if (!remoteServer || typeof remoteServer.setVoiceMacros !== 'function') return;
+  try { ensureVoiceMacroDir(); } catch {}
+  remoteServer.setVoiceMacros({
+    manifest: voiceMacroManifest(),
+    labels: settings.voiceMacroLabels || [],
+    audioOf: (idx) => { try { return fs.readFileSync(voiceMacroPath(idx)).toString('base64'); } catch { return null; } },
+  });
+}
+onRemoteServer(() => voiceMacroStoreSync());
 
 function loadLocalWorkedParks() {
   try {
@@ -42389,8 +42502,9 @@ app.whenReady().then(() => {
     // Sync to connected ECHOCAT phone
     if (remoteServer && remoteServer.hasClient()) {
       const label = (settings.voiceMacroLabels || [])[idx] || '';
-      remoteServer.sendToClient({ type: 'voice-macro-sync', idx, label, audio: base64 });
+      remoteServer.sendToClient({ type: 'voice-macro-sync', idx, label, audio: base64, hash: voiceMacroHash(idx) });
     }
+    voiceMacroStoreSync();
     return true;
   });
 
@@ -42406,6 +42520,7 @@ app.whenReady().then(() => {
     if (remoteServer && remoteServer.hasClient()) {
       remoteServer.sendToClient({ type: 'voice-macro-delete', idx });
     }
+    voiceMacroStoreSync();
     return true;
   });
 
