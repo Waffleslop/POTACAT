@@ -116,6 +116,8 @@ jobs:
         run: node test/idle-mode-remote-test.js
       - name: Run No CAT control (VOX) rig type (N4FFF Pebble HF)
         run: node test/nocat-rig-test.js
+      - name: Run DXLab Commander rig type (TCP command port, command sequences)
+        run: node test/commander-codec-test.js
       - name: Run removed features stay removed (FT8 Battle Royale)
         run: node test/removed-features-test.js
       - name: Run DXpeditions in the Contests view

@@ -342,6 +342,8 @@ const { KenwoodCodec } = require('./lib/codecs/kenwood-codec');
 const { YaesuLegacyCodec } = require('./lib/codecs/yaesu-legacy-codec');
 const { RigctldCodec } = require('./lib/codecs/rigctld-codec');
 const { CivCodec } = require('./lib/codecs/civ-codec');
+const { CommanderCodec } = require('./lib/codecs/commander-codec');
+const CommanderSequences = require('./lib/commander-sequences');
 const { getTuneQuirks, resolveSerialHandshake } = require('./lib/rig-models');
 const { gridToLatLon, latLonToGrid, haversineDistanceMiles, bearing } = require('./lib/grid');
 const { activationStationFill } = require('./lib/activation-station'); // N7VBN: station side of activation records
@@ -2422,6 +2424,7 @@ function detectRigType() {
   if (!target) return 'unknown';
   if (target.type === 'icom' || target.type === 'civ-tcp' || target.type === 'icom-network') return 'icom';
   if (target.type === 'rigctld' || target.type === 'rigctldnet') return 'rigctld';
+  if (target.type === 'dxlab-commander') return 'commander';
   if (target.type === 'tcp') {
     // NOT every TCP CAT target is a Flex. SmartSDR's CAT shim is localhost-only
     // on 5002-5005; a Hermes Lite 2 behind Thetis or Zeus is a TS-2000 emulator
@@ -2473,6 +2476,19 @@ function getActiveRigModel() {
   const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
   const modelName = activeRig?.model || null;
   const rigType = detectRigType();
+  // DXLab Commander has one fixed model. Its panel controls are exactly the
+  // ones the operator mapped to a Commander command sequence, and the codec
+  // needs the same sequences and decimal style, so both ride on the model.
+  if (rigType === 'commander') {
+    const base = getModel(null, 'commander');
+    const t = (activeRig && activeRig.catTarget) || settings.catTarget || {};
+    const sequences = CommanderSequences.cleanSequences(t.sequences);
+    return {
+      ...base,
+      caps: { ...base.caps, ...CommanderSequences.capsFromSequences(sequences) },
+      commander: { decimal: t.decimal === ',' ? ',' : '.', sequences },
+    };
+  }
   // An explicit rigs[].model that names a known entry wins outright.
   const explicit = modelName ? getModel(modelName, null) : null;
   if (explicit) return explicit;
@@ -2595,7 +2611,7 @@ function _rigCapabilitiesForType(rigType) {
     // CI-V 0x14 03, Hamlib L SQL, Flex slice squelch). Clients gate it to FM
     // mode. See lib/rig-controls.js 'set-squelch'. An unsupported SQ just
     // returns a harmless rejection.
-    caps.squelch = true;
+    caps.squelch = model.protocol !== 'commander'; // Commander's TCP interface has no squelch command
     // VFO/split — readback-backed on Kenwood serial (IF;) and rigctld (v/s),
     // so those get the split control + trustworthy indicator. Yaesu keeps
     // vfo (VS;/SV; writes work; indicator optimistic) but not split until
@@ -6823,6 +6839,27 @@ async function connectCat() {
     cat.on('alc', sendCatAlc);
     const { host, port } = resolveCatHostPort(target, 4532, 'remote rigctld');
     sendCatLog(`Connecting to remote rigctld on ${host}:${port}`);
+    transport.connect({ host, port });
+
+  } else if (target.type === 'dxlab-commander') {
+    // DXLab Commander's TCP command port (Base Port + 2, 52002 by default).
+    // getActiveRigModel() already folded this rig's decimal style and command
+    // sequences into the model, and the sequences into its panel caps.
+    transport = new TcpTransport();
+    const model = rigModel || getModel(null, 'commander');
+    model.tune = getTuneQuirks(model);
+    codec = new CommanderCodec(model, (data) => transport.write(data));
+    cat = new RigController(model, transport, codec);
+    cat._debug = true;
+    cat.on('log', sendCatLog);
+    cat.on('status', (s) => {
+      sendCatLog(`DXLab Commander status: connected=${s.connected}${s.error ? ' error=' + s.error : ''}`);
+      sendCatStatus(s);
+    });
+    cat.on('frequency', catFrequencyHandler);
+    cat.on('mode', catModeHandler);
+    const { host, port } = resolveCatHostPort(target, CommanderSequences.DEFAULT_PORT, 'DXLab Commander');
+    sendCatLog(`Connecting to DXLab Commander on ${host}:${port}`);
     transport.connect({ host, port });
 
   } else if (target.type === 'icom') {

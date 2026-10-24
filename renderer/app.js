@@ -937,6 +937,29 @@ const icomConfig = document.getElementById('icom-config');
 const rigctldnetConfig = document.getElementById('rigctldnet-config');
 const setRigctldnetHost = document.getElementById('set-rigctldnet-host');
 const setRigctldnetPort = document.getElementById('set-rigctldnet-port');
+// DXLab Commander: host/port/decimal plus one text box per sequence slot
+// (lib/commander-sequences.js owns the slot table; the boxes are built from it).
+const dxlabCommanderConfig = document.getElementById('dxlab-commander-config');
+const setDxlabCommanderHost = document.getElementById('set-dxlab-commander-host');
+const setDxlabCommanderPort = document.getElementById('set-dxlab-commander-port');
+const setDxlabCommanderDecimal = document.getElementById('set-dxlab-commander-decimal');
+const commanderSequenceInputs = {};
+(function buildCommanderSequenceFields() {
+  const box = document.getElementById('dxlab-commander-sequences');
+  if (!box || !window.CommanderSequences) return;
+  for (const slot of window.CommanderSequences.SEQUENCE_SLOTS) {
+    const label = document.createElement('label');
+    label.style.cssText = 'display:block;margin-top:3px;';
+    label.append(slot.label + ': ');
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'sequence name or #3';
+    input.style.width = '170px';
+    label.appendChild(input);
+    box.appendChild(label);
+    commanderSequenceInputs[slot.key] = input;
+  }
+})();
 const setTcpcatHost = document.getElementById('set-tcpcat-host');
 const setTcpcatPort = document.getElementById('set-tcpcat-port');
 const k4networkConfig = document.getElementById('k4network-config');
@@ -2270,6 +2293,7 @@ function updateRadioSubPanels() {
   if (icomNetworkConfig) icomNetworkConfig.classList.toggle('hidden', type !== 'icom-network');
   hamlibConfig.classList.toggle('hidden', type !== 'hamlib');
   rigctldnetConfig.classList.toggle('hidden', type !== 'rigctldnet');
+  if (dxlabCommanderConfig) dxlabCommanderConfig.classList.toggle('hidden', type !== 'dxlab-commander');
   const nocatConfig = document.getElementById('nocat-config');
   if (nocatConfig) nocatConfig.classList.toggle('hidden', type !== 'nocat');
   if (type === 'serialcat' && !serialcatPortsLoaded) {
@@ -2371,6 +2395,14 @@ async function populateRadioSection(currentTarget) {
     setRadioType('rigctldnet');
     setRigctldnetHost.value = currentTarget.host || '127.0.0.1';
     setRigctldnetPort.value = currentTarget.port || 4532;
+  } else if (currentTarget.type === 'dxlab-commander') {
+    setRadioType('dxlab-commander');
+    setDxlabCommanderHost.value = currentTarget.host || '127.0.0.1';
+    setDxlabCommanderPort.value = currentTarget.port || window.CommanderSequences.DEFAULT_PORT;
+    setDxlabCommanderDecimal.value = currentTarget.decimal === ',' ? ',' : '.';
+    for (const [key, input] of Object.entries(commanderSequenceInputs)) {
+      input.value = (currentTarget.sequences && currentTarget.sequences[key]) || '';
+    }
   } else {
     setRadioType('flex');
   }
@@ -2812,6 +2844,9 @@ function describeRigTarget(target) {
   if (target.type === 'rigctldnet') {
     return `rigctld on ${target.host || '127.0.0.1'}:${target.port || 4532}`;
   }
+  if (target.type === 'dxlab-commander') {
+    return `DXLab Commander on ${target.host || '127.0.0.1'}:${target.port || window.CommanderSequences.DEFAULT_PORT}`;
+  }
   return 'Unknown';
 }
 
@@ -2991,6 +3026,16 @@ function buildCatTargetFromForm() {
       type: 'rigctldnet',
       host: setRigctldnetHost.value.trim() || '127.0.0.1',
       port: parseInt(setRigctldnetPort.value, 10) || 4532,
+    };
+  } else if (radioType === 'dxlab-commander') {
+    const typed = {};
+    for (const [key, input] of Object.entries(commanderSequenceInputs)) typed[key] = input.value;
+    return {
+      type: 'dxlab-commander',
+      host: setDxlabCommanderHost.value.trim() || '127.0.0.1',
+      port: parseInt(setDxlabCommanderPort.value, 10) || window.CommanderSequences.DEFAULT_PORT,
+      decimal: setDxlabCommanderDecimal.value === ',' ? ',' : '.',
+      sequences: window.CommanderSequences.cleanSequences(typed),
     };
   } else if (radioType === 'nocat') {
     // No CAT control: VOX-keyed kits (Pebble HF, uSDX builds), or a handheld
@@ -24947,6 +24992,7 @@ function updateWelcomeRadioSubPanels() {
   document.getElementById('welcome-icom-config').classList.toggle('hidden', type !== 'icom');
   document.getElementById('welcome-hamlib-config').classList.toggle('hidden', type !== 'hamlib');
   document.getElementById('welcome-rigctldnet-config').classList.toggle('hidden', type !== 'rigctldnet');
+  document.getElementById('welcome-dxlab-commander-config').classList.toggle('hidden', type !== 'dxlab-commander');
   const wNocat = document.getElementById('welcome-nocat-config');
   if (wNocat) wNocat.classList.toggle('hidden', type !== 'nocat');
   if (type === 'serialcat' && !welcomeSerialcatLoaded) {
@@ -25048,6 +25094,12 @@ function buildWelcomeCatTarget() {
       type: 'rigctldnet',
       host: document.getElementById('welcome-rigctldnet-host').value.trim() || '127.0.0.1',
       port: parseInt(document.getElementById('welcome-rigctldnet-port').value, 10) || 4532,
+    };
+  } else if (type === 'dxlab-commander') {
+    return {
+      type: 'dxlab-commander',
+      host: document.getElementById('welcome-dxlab-commander-host').value.trim() || '127.0.0.1',
+      port: parseInt(document.getElementById('welcome-dxlab-commander-port').value, 10) || window.CommanderSequences.DEFAULT_PORT,
     };
   } else if (type === 'nocat') {
     return { type: 'none' }; // No CAT control (VOX) — see buildCatTargetFromForm

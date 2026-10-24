@@ -2054,6 +2054,24 @@
           <label>Host: <input type="text" id="set-rigctldnet-host" placeholder="192.168.1.100" value="127.0.0.1"></label>
           <label>Port: <input type="number" id="set-rigctldnet-port" min="1" max="65535" value="4532"></label>
         </div>
+        <label class="radio-label"><input type="radio" name="radio-type" value="dxlab-commander"> DXLab Commander</label>
+        <div id="dxlab-commander-config" class="radio-sub hidden">
+          <span class="help-text">Control the radio through DXLab Commander's TCP port. Commander must be running. Its port is the Base Port in Commander's Net Serv window plus 2 (default 52000 + 2 = 52002).</span>
+          <label>Host: <input type="text" id="set-dxlab-commander-host" placeholder="127.0.0.1" value="127.0.0.1"></label>
+          <label>Port: <input type="number" id="set-dxlab-commander-port" min="1" max="65535" value="52002"></label>
+          <label>Decimal point:
+            <select id="set-dxlab-commander-decimal">
+              <option value=".">Period (1,234.5)</option>
+              <option value=",">Comma (1.234,5)</option>
+            </select>
+          </label>
+          <span class="help-text">Match the Windows number format on the computer running Commander. It only matters for a frequency with a fraction of a kHz, such as a spot at 14074.5.</span>
+          <details style="margin-top:6px;">
+            <summary>Commander command sequences (optional)</summary>
+            <span class="help-text" style="display:block;margin:4px 0;">Commander's TCP interface has no commands for these controls, but it can run a command sequence you build in its Command Sequences window. Enter a sequence's name (or #3 for Commander's third sequence) and the matching control appears in POTACAT. A toggle needs both its on and off sequence.</span>
+            <div id="dxlab-commander-sequences"></div>
+          </details>
+        </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="nocat"> No CAT control (VOX)</label>
         <div id="nocat-config" class="radio-sub hidden">
           <span class="help-text" style="font-size:12px;">For radios with no computer control at all — VOX-keyed kits such as the <b>Pebble HF</b> or a uSDX without a CAT port, a handheld such as a Baofeng on a sound-card interface, or a mobile FM radio such as the <b>Yaesu FTM-510D</b> through its DATA jack. You tune the radio by hand (spot clicks and band buttons show you the frequency to set). Set the audio Input and Output below to the sound card that connects to the radio.</span>
@@ -4927,6 +4945,12 @@
           <label>Host: <input type="text" id="welcome-rigctldnet-host" placeholder="192.168.1.100" value="127.0.0.1"></label>
           <label>Port: <input type="number" id="welcome-rigctldnet-port" min="1" max="65535" value="4532"></label>
         </div>
+        <label class="radio-label"><input type="radio" name="welcome-radio-type" value="dxlab-commander"> DXLab Commander</label>
+        <div id="welcome-dxlab-commander-config" class="radio-sub hidden">
+          <span class="help-text">Control the radio through DXLab Commander's TCP port (Commander's Base Port + 2, default 52002). Commander must be running. Add command sequences later in Settings &gt; My Rigs.</span>
+          <label>Host: <input type="text" id="welcome-dxlab-commander-host" placeholder="127.0.0.1" value="127.0.0.1"></label>
+          <label>Port: <input type="number" id="welcome-dxlab-commander-port" min="1" max="65535" value="52002"></label>
+        </div>
         <label class="radio-label"><input type="radio" name="welcome-radio-type" value="nocat"> No CAT control (VOX)</label>
         <div id="welcome-nocat-config" class="radio-sub hidden">
           <span class="help-text">For a radio with no computer control — a VOX-keyed kit such as the Pebble HF. You tune it by hand; POTACAT's audio keys it through its VOX. Choose the sound card that connects to the radio as the audio Input and Output afterwards (Settings &gt; My Rigs).</span>
@@ -4951,6 +4975,7 @@
 
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>
   <script src="../lib/rig-family.js"></script>
+  <script src="../lib/commander-sequences.js"></script>
   <script src="../lib/spot-row.js"></script>
   <script src="../lib/cm108-ptt.js"></script>
   <script src="../lib/remote-features.js"></script>
