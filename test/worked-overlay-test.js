@@ -137,6 +137,11 @@ test('wiring: every map window attaches the overlay and its keys, main owns the 
   const jpJs = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-popout.js'), 'utf8');
   assert.ok(jpHtml.includes('id="jp-worked-toggle"') && jpHtml.indexOf('id="jp-worked-toggle"') > jpHtml.indexOf('id="jp-map-toggle"'), 'Worked sits beside Map');
   assert.ok(/workedOverlayCtl\.setLegendVisible\(!workedOverlayCtl\.legendVisible\)/.test(jpJs), 'the button flips the box through the overlay');
+  // The FT8 map pop-out: a Worked button of its own, and the theme payload read as {theme, variant}, never written raw into data-theme.
+  const mpHtml = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-map-popout.html'), 'utf8');
+  const mpJs = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-map-popout.js'), 'utf8');
+  assert.ok(mpHtml.includes('id="tb-worked"') && /workedOverlayCtl\.setLegendVisible\(!workedOverlayCtl\.legendVisible\)/.test(mpJs), 'the map pop-out has its own Worked button');
+  assert.ok(!/setAttribute\('data-theme', theme\)/.test(mpJs) && /payload\.theme/.test(mpJs), 'the map pop-out reads the {theme, variant} payload (it wrote "[object Object]" into data-theme until 2026-10-23)');
   assert.ok(/function sendCatFrequency[\s\S]{0,2500}workedOverlayFollowDial\(\);/.test(main), 'frequency sink re-pushes');
   assert.ok(/function sendCatMode[\s\S]{0,1500}workedOverlayFollowDial\(\);/.test(main), 'mode sink re-pushes');
   assert.ok(/for \(const w of workedOverlayWindows\(\)\) w\.webContents\.send\('worked-roster'/.test(main), 'the roster reaches every map window');
