@@ -12087,6 +12087,18 @@ function announceActivationContact(entry, records, freqKhz) {
   }
 }
 
+// The saved record's own fields for a log-ok `records[]` entry (additive;
+// older devices ignore them). Only fields the record actually holds.
+const LOG_OK_SAVED_FIELDS = ['frequency', 'band', 'mode', 'state', 'gridsquare', 'country', 'dxcc', 'name', 'county'];
+function logOkSavedFields(r) {
+  const out = {};
+  for (const k of LOG_OK_SAVED_FIELDS) {
+    const v = r && r[k];
+    if (v != null && v !== '') out[k] = String(v);
+  }
+  return out;
+}
+
 async function logContact(entry, opts) {
   opts = opts || {};
   if (!entry || !String(entry.callsign || '').trim()) return { success: false, error: 'Missing callsign', records: [] };
@@ -22550,6 +22562,11 @@ function connectRemote() {
           mySig: r.mySig || '', mySigInfo: r.mySigInfo || '',
           // Whose logbook this copy went into (Log as / Log as: both).
           operator: r.bookOf || '',
+          // What the desktop SAVED, so the device's copy carries it too: a
+          // phone-built copy had no band, state or grid, and an activation
+          // recap read off those copies showed "0 States" and "Bands: other"
+          // for 100 QSOs (NA4DQ 2026-10-24). Only fields the record holds.
+          ...logOkSavedFields(r),
         })),
         reqId,
         // Whether the desktop takes care of the Cloud copy, so a device that
