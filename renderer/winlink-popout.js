@@ -317,7 +317,7 @@
       $('wl-c-body').value = pre.body || '';
       pendingFiles = [];
       renderFiles();
-      $('wl-c-err').textContent = '';
+      $('wl-c-err').textContent = pre.note || '';
       (pre.to ? $('wl-c-body') : $('wl-c-to')).focus();
     });
   }
@@ -350,6 +350,14 @@
     });
   });
   $('wl-settings').addEventListener('click', function () { window.api.openSettings(); });
+  // POTA spot: a message to spot@pota.tdod.org, one line per park; the
+  // operator reads and edits it before it goes in the Outbox.
+  function composeSpot(t) {
+    if (!t || !t.to) return;
+    compose({ to: t.to, subject: t.subject, body: t.body, note: (t.missing && t.missing.length) ? 'Fill in ' + t.missing.join(', ') + ' before it goes out.' : 'Check the line, then Put in Outbox and Send / Receive. It posts a real POTA spot.' });
+  }
+  $('wl-pota-spot').addEventListener('click', function () { window.api.potaSpotTemplate({}).then(composeSpot); });
+  if (window.api.onComposePrefill) window.api.onComposePrefill(composeSpot);
 
   // ── waterfall: is the gateway frequency in use? ──────────────────────────
   // 0–3000 Hz of the receiver's passband, from main's direct-audio frames

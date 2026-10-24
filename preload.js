@@ -475,6 +475,7 @@ contextBridge.exposeInMainWorld('api', {
   mercuryListDevices: () => ipcRenderer.invoke('mercury-list-devices'),
   // Winlink (Pat) — the mail window, Settings helpers, the bug-report line.
   winlinkPopoutOpen: () => ipcRenderer.send('winlink-popout-open'),
+  winlinkPotaSpotOpen: (o) => ipcRenderer.send('winlink-pota-spot-open', o || {}),
   winlinkDiag: () => ipcRenderer.invoke('winlink-diag'),
   winlinkListArdopDevices: () => ipcRenderer.invoke('winlink-list-ardop-devices'),
   winlinkAccountCheck: (call) => ipcRenderer.invoke('winlink-account-check', call),

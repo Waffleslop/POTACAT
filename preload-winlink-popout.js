@@ -14,6 +14,9 @@ contextBridge.exposeInMainWorld('api', {
   pickAttachments: () => ipcRenderer.invoke('winlink-pick-attachments'),
   send: (msg) => ipcRenderer.invoke('winlink-cmd-send', msg),
   posreport: (o) => ipcRenderer.invoke('winlink-cmd-posreport', o),
+  // POTA self-spot by email (spot@pota.tdod.org), filled from the live activation.
+  potaSpotTemplate: (o) => ipcRenderer.invoke('winlink-pota-spot-template', o || {}),
+  onComposePrefill: (cb) => ipcRenderer.on('winlink-compose-prefill', (_e, m) => cb(m || {})),
 
   // Sessions — Connect is the only way a radio session starts.
   connect: (o) => ipcRenderer.invoke('winlink-cmd-connect', o),

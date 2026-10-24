@@ -395,6 +395,7 @@ const { attachMercuryRadioBridge } = require('./lib/mercury-radio-bridge');
 const mercuryAudioBridge = require('./lib/mercury-audio-bridge');
 const MercuryAppProto = require('./lib/mercury-app-protocol');
 const WinlinkPat = require('./lib/winlink-pat');
+const PotaEmailSpot = require('./lib/pota-email-spot');
 const { WinlinkClient } = require('./lib/winlink-client');
 const WinlinkStateLib = require('./lib/winlink-state');
 const { createRigctldServer } = require('./lib/rigctld-server');
@@ -1655,6 +1656,7 @@ let mercuryReassembler = null;  // app-protocol frame reassembler on the data so
 let mercuryChatTail = [];       // recent chat/system lines for replay on popout open (cap 200)
 let mercuryRxFile = null;       // in-progress inbound file { name, size, received, path, ws }
 // Winlink via Pat (lib/winlink-*.js; the section after disconnectMercury()).
+let _winlinkPendingCompose = null; // a compose the Mail window opens on (Activation's Winlink spot)
 let patProc = null;             // the `pat http` child process
 let patClient = null;           // WinlinkClient on Pat's loopback API
 let _patHttpPort = 0;           // Pat's API port this run (127.0.0.1 only)
@@ -10368,6 +10370,34 @@ function winlinkArmAutoCheck() {
 async function winlinkSend({ to, cc, subject, body, p2p, attachments } = {}) {
   if (!patClient) return { ok: false, error: 'Pat is not running' };
   if (!settings.winlinkNoticeAcceptedAt) return { ok: false, error: 'Read and accept the Winlink notice first' };
+  // A POTA spot by email: the service reads one line per message, so an
+  // n-fer's lines go out as one message per park.
+  if (PotaEmailSpot.isSpotAddress(to)) {
+    const sp = PotaEmailSpot.splitSpotBody(body);
+    if (!sp.ok) return sp;
+    for (const line of sp.bodies) {
+      const r = await winlinkSendOne({ to: PotaEmailSpot.SPOT_ADDRESS, subject: subject || 'POTA spot', body: line });
+      if (!r.ok) return r;
+    }
+    winlinkLog(`POTA spot by email: ${sp.bodies.join(' | ')} — in the Outbox`);
+    return { ok: true, spots: sp.bodies.length };
+  }
+  return winlinkSendOne({ to, cc, subject, body, p2p, attachments });
+}
+
+// The POTA spot template for the live activation: the operator's call, every
+// POTA park of the activation, and the frequency/mode given (Activation's Spot
+// passes its calling frequency) or the radio's.
+function winlinkPotaSpotTemplate(over = {}) {
+  const refs = liveActivationMyRefs().filter((r) => r.sig === 'POTA').map((r) => r.ref);
+  const rigMode = String(_currentMode || '').toUpperCase();
+  const dataMode = rigMode === 'DIGU' || rigMode === 'DIGL' || /-D$/.test(rigMode) || rigMode === 'PKTUSB' || rigMode === 'PKTLSB';
+  const mode = over.mode || (dataMode ? String((ft8Engine && ft8Engine._mode) || 'FT8').toUpperCase() : rigMode);
+  const freqKhz = Number(over.freqKhz) || (_currentFreqHz ? _currentFreqHz / 1000 : 0);
+  return PotaEmailSpot.buildSpotMessage({ call: settings.myCallsign || '', refs, freqKhz, mode, comment: over.comment || '' });
+}
+
+async function winlinkSendOne({ to, cc, subject, body, p2p, attachments } = {}) {
   const c = WinlinkPat.composeFields({ to, cc, subject, body, p2p });
   if (!c.ok) return c;
   const files = (Array.isArray(attachments) ? attachments : []).filter((a) => a && a.name && a.data).map((a) => ({ name: path.basename(String(a.name)), data: Buffer.isBuffer(a.data) ? a.data : Buffer.from(String(a.data), 'base64') }));
@@ -33993,6 +34023,7 @@ app.whenReady().then(() => {
     winlinkPopoutWin.on('closed', () => { winlinkPopoutWin = null; _winlinkWatchAudio = false; winlinkPreviewRestore('window closed'); winlinkSyncModemBridge(); });
     winlinkPopoutWin.webContents.on('did-finish-load', () => {
       winlinkPopoutSend('winlink-state', winlinkPayload());
+      if (_winlinkPendingCompose) { winlinkPopoutSend('winlink-compose-prefill', _winlinkPendingCompose); _winlinkPendingCompose = null; }
       for (const box of WinlinkStateLib.BOXES) winlinkPopoutSend('winlink-mailbox', { box, messages: winlinkState.list(box) });
       winlinkPopoutSend('winlink-session', { ...winlinkState.session, remainingSec: winlinkState.remainingSec() });
       winlinkPopoutSend('winlink-popout-theme', { theme: settings.lightMode ? 'light' : 'dark', variant: settings.darkVariant || 'navy' });
@@ -34346,6 +34377,15 @@ app.whenReady().then(() => {
   // ─── Winlink IPC (the mail window + Settings). Every surface goes through
   // the same winlink* functions; a radio session starts only from Connect.
   ipcMain.on('winlink-popout-open', () => { openWinlinkPopout(); winlinkEnsureStarted(); });
+  ipcMain.handle('winlink-pota-spot-template', (_e, o = {}) => winlinkPotaSpotTemplate(o));
+  // Activation's "Winlink" spot button: the Mail window opens on the spot,
+  // filled in; the operator reads it, queues it and starts the session.
+  ipcMain.on('winlink-pota-spot-open', (_e, o = {}) => {
+    _winlinkPendingCompose = winlinkPotaSpotTemplate(o);
+    const wasOpen = !!(winlinkPopoutWin && !winlinkPopoutWin.isDestroyed());
+    openWinlinkPopout(); winlinkEnsureStarted();
+    if (wasOpen && !winlinkPopoutWin.webContents.isLoading()) { winlinkPopoutSend('winlink-compose-prefill', _winlinkPendingCompose); _winlinkPendingCompose = null; }
+  });
   // The renderer's answer to a sound-card PTT edge (cm108-ptt): one log line.
   ipcMain.on('cm108-ptt-result', (_e, r = {}) => {
     if (r.ok) sendCatLog(`[PTT] ${r.state ? 'TX' : 'RX'} — sound-card PTT, GPIO${r.gpio} on ${r.device || 'the USB sound card'}`);

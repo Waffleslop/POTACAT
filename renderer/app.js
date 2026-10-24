@@ -2081,6 +2081,9 @@ async function loadPrefs() {
   if (mercuryBtn) mercuryBtn.classList.toggle('hidden', !settings.enableMercury);
   var winlinkBtn = document.getElementById('view-winlink-btn');
   if (winlinkBtn) winlinkBtn.classList.remove('hidden'); // Winlink is always available
+  // Spot by Winlink: offered once the operator has used Winlink (notice accepted).
+  var spotWlBtn = document.getElementById('activator-spot-winlink-btn');
+  if (spotWlBtn) spotWlBtn.classList.toggle('hidden', !settings.winlinkNoticeAcceptedAt);
   updateDxccButton();
   // Pi access — JTCAT button visibility on startup
   if (jtcatBtn) jtcatBtn.classList.remove('hidden');
@@ -27633,21 +27636,33 @@ if (activatorExportBtn) {
 }
 
 // --- Self-spot button ---
+// The self-spot target. While away on a P2P excursion the radio — and
+// therefore activatorFreqKhz and the mode select — is on the OTHER activator's
+// frequency. Spotting that would send every POTA hunter piling onto somebody
+// else's QSO. Always self-spot the calling frequency.
+function activatorSpotTarget() {
+  const away = !!activatorHomeFreqHz;
+  const freq = away ? Math.round(activatorHomeFreqHz / 1000) : activatorFreqKhz;
+  const mode = (away && activatorHomeMode)
+    ? activatorHomeMode
+    : (document.getElementById('activator-mode').value || _currentMode || 'SSB');
+  return { away, freq, mode };
+}
+const activatorSpotWinlinkBtn = document.getElementById('activator-spot-winlink-btn');
+if (activatorSpotWinlinkBtn) {
+  activatorSpotWinlinkBtn.addEventListener('click', () => {
+    if (!primaryParkRef()) { showLogToast('Set a park reference first', { warn: true }); return; }
+    const { freq, mode } = activatorSpotTarget();
+    if (window.api.winlinkPotaSpotOpen) window.api.winlinkPotaSpotOpen({ freqKhz: freq || 0, mode });
+  });
+}
 if (activatorSpotBtn) {
   activatorSpotBtn.addEventListener('click', async () => {
     const ref = primaryParkRef();
     if (!ref) { showLogToast('Set a park reference first', { warn: true }); return; }
     if (!myCallsign) { showLogToast('Set your callsign in Settings first', { warn: true }); return; }
-    // While away on a P2P excursion the radio — and therefore
-    // activatorFreqKhz and the mode select — is on the OTHER activator's
-    // frequency. Spotting that would send every POTA hunter piling onto
-    // somebody else's QSO. Always self-spot the calling frequency.
-    const away = !!activatorHomeFreqHz;
-    const freq = away ? Math.round(activatorHomeFreqHz / 1000) : activatorFreqKhz;
+    const { away, freq, mode } = activatorSpotTarget();
     if (!freq) { showLogToast('No frequency — tune your radio first', { warn: true }); return; }
-    const mode = (away && activatorHomeMode)
-      ? activatorHomeMode
-      : (document.getElementById('activator-mode').value || _currentMode || 'SSB');
     try {
       const result = await window.api.quickRespot({
         callsign: myCallsign,
