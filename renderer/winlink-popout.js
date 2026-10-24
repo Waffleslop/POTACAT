@@ -362,34 +362,20 @@
   var wfSpeed = 60, wfShown = true, wfHidden = false;
   var wfRemote = false; // an ECHOCAT device is watching through the shack
   var wfAvg = new Float32Array(WF_BINS), wfAvgN = 0, wfLastLineMs = 0;
-  // Busy: a signal in the modem's band that stands above the passband's noise
-  // floor. Like with like (the rule in lib/winlink-spectrum.js, which decides
-  // the same badge for ECHOCAT devices): the 90th percentile of the marked
-  // band against the 90th percentile of the bins OUTSIDE it, so noise reads
-  // 0 dB whatever its level; busy at +8 dB (a modem or voice filling the
-  // band) or a +20 dB peak (one strong carrier), held for 3 s so a pause
-  // between a station's overs still reads Busy.
-  var busyLoBin = 0, busyHiBin = WF_BINS, busyUntil = 0, busyPeakDb = 0, busyLastRender = 0;
-  var busyOut = new Float32Array(WF_BINS), busyBand = new Float32Array(WF_BINS);
+  // Busy: a signal in the modem's band that stands above the noise. The rule
+  // is lib/winlink-spectrum.js (BusyDetector — the same one the shack runs
+  // for ECHOCAT devices): a sustained signal enters, hysteresis and a 4 s
+  // hold keep it, so the badge does not blink between frames.
+  var busyDet = new WinlinkSpectrum.BusyDetector(0, 1, WF_BINS), busyLastRender = 0;
   function busyUpdate(mags) {
-    var n = 0, m = 0;
-    for (var b = 0; b < WF_BINS; b++) { if (b >= busyLoBin && b < busyHiBin) busyBand[n++] = mags[b]; else busyOut[m++] = mags[b]; }
-    if (!n || !m) return;
-    var band = busyBand.subarray(0, n); Array.prototype.sort.call(band);
-    var out = busyOut.subarray(0, m); Array.prototype.sort.call(out);
-    var ref = out[(m * 0.9) | 0];
-    var db = (band[(n * 0.9) | 0] - ref) * 4.3429; // mags are ln(power): 10·log10 = 4.343·ln
-    var peak = (band[n - 1] - ref) * 4.3429;
     var now = performance.now();
-    if (db >= 8 || peak >= 20) { busyUntil = now + 3000; var d = Math.max(db, peak); if (d > busyPeakDb) busyPeakDb = d; }
-    if (now - busyLastRender < 250) return;
+    var v = busyDet.update(mags, now);
+    if (!v.changed && now - busyLastRender < 500) return;
     busyLastRender = now;
     var el = $('wl-wf-busy');
-    var busy = now < busyUntil;
-    if (!busy) busyPeakDb = 0;
-    el.className = 'wl-busy ' + (busy ? 'busy' : 'clear');
-    el.textContent = busy ? 'BUSY +' + Math.round(busyPeakDb) + ' dB' : 'Clear';
-    el.title = busy ? 'A signal in the modem’s band, ' + Math.round(busyPeakDb) + ' dB over the noise — wait, or pick another gateway' : 'Nothing above the noise in the modem’s band';
+    el.className = 'wl-busy ' + (v.busy ? 'busy' : 'clear');
+    el.textContent = v.busy ? 'BUSY +' + v.peakDb + ' dB' : 'Clear';
+    el.title = v.busy ? 'A signal in the modem’s band, ' + v.peakDb + ' dB over the noise — wait, or pick another gateway' : 'Nothing above the noise in the modem’s band';
   }
   var wfCtx = null, wfStream = null, wfAnalyser = null, wfTimer = null;
   var wfRe = new Float32Array(WF_N), wfIm = new Float32Array(WF_N), wfWin = null, wfMags = new Float32Array(WF_BINS);
@@ -465,14 +451,13 @@
   $('wl-wf-show-btn').addEventListener('click', function () { wfShown = true; window.api.setPref('winlinkWaterfallShown', true); wfSync(); });
   function wfMarkers(mode) {
     if (!wf) return;
-    // ARDOP's signal sits on 1500 Hz, its bandwidth either side; packet (1200 baud AFSK) on 1200/2200.
-    var bw = mode === 'ardop' ? (Number((state && state.ardopBw) || 500)) : 2000;
-    var lo = (1500 - bw / 2) / 3000, hi = (1500 + bw / 2) / 3000;
-    if (mode === 'packet') { lo = 1000 / 3000; hi = 2400 / 3000; }
-    busyLoBin = Math.max(0, (lo * WF_BINS) | 0); busyHiBin = Math.min(WF_BINS, Math.ceil(hi * WF_BINS));
-    busyUntil = 0; busyPeakDb = 0; $('wl-wf-busy').className = 'wl-busy'; $('wl-wf-busy').textContent = '—';
+    // The modem's band and its label come from the shared rule, with each
+    // modem's own bandwidth from Settings (state.modemBw).
+    var band = WinlinkSpectrum.markerBand(mode, (state && state.modemBw) || { ardop: state && state.ardopBw });
+    var lo = band.lo, hi = band.hi;
+    busyDet.setBand(lo, hi); $('wl-wf-busy').className = 'wl-busy'; $('wl-wf-busy').textContent = '—';
     wf.setMarkers([{ pos: lo, color: [0.3, 0.8, 0.6, 0.8] }, { pos: hi, color: [0.3, 0.8, 0.6, 0.8] }]);
-    $('wl-wf-note').textContent = mode === 'packet' ? 'Packet tones 1200 / 2200 Hz' : 'ARDOP centre 1500 Hz, ' + bw + ' Hz wide';
+    $('wl-wf-note').textContent = band.label;
   }
   function wfStart(mode) {
     var a = (state && state.audio) || {};

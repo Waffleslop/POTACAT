@@ -1683,7 +1683,7 @@ let _winlinkWatchAudio = false;      // the mail window shows the waterfall
 const WinlinkSpectrum = require('./lib/winlink-spectrum');
 let _winlinkRemoteWatchers = 0;
 let _winlinkSpecAcc = null;
-let _winlinkBusySt = { until: 0, peakDb: 0 };
+let _winlinkBusy = null; // WinlinkSpectrum.BusyDetector for the band the devices watch, rebuilt when it changes
 let _winlinkSpecLastAt = 0;
 let _winlinkPreviewReturnTo = null;  // dial/mode before a gateway pick tuned the radio
 
@@ -8724,6 +8724,7 @@ function winlinkPayload() {
     mode: WinlinkModes.pickWinlinkMode(winlinkState.snapshot().modes, settings.winlinkDefaultMode || 'telnet'),
     lastGateway: settings.winlinkLastGateway || null,
     ardopBw: [200, 500, 1000, 2000].includes(Number(settings.winlinkArdopBw)) ? Number(settings.winlinkArdopBw) : 500,
+    modemBw: winlinkModemBw(),
     wf: { speed: Math.max(1, Math.min(60, parseInt(settings.winlinkWaterfallSpeed, 10) || 60)), shown: settings.winlinkWaterfallShown !== false },
     audio: (() => {
       const rig = winlinkActiveRig();
@@ -9415,6 +9416,16 @@ function winlinkSpecAcc() {
   return _winlinkSpecAcc;
 }
 
+/** Each soundcard modem's bandwidth in Hz, for the waterfall's band markers and label (every surface). */
+function winlinkModemBw() {
+  const pick = (v, ok, dflt) => (ok.includes(Number(v)) ? Number(v) : dflt);
+  return {
+    ardop: pick(settings.winlinkArdopBw, [200, 500, 1000, 2000], 500),
+    vara: pick(settings.winlinkVaraBw, [500, 2300, 2750], 2300),
+    mercury: pick(settings.mercuryBw, [500, 2300, 2750], 2300),
+  };
+}
+
 /**
  * One waterfall frame for the watching devices: 128 bins over 0–3000 Hz, the
  * modem's band markers and the Busy/Clear verdict (the verdict runs on EVERY
@@ -9426,9 +9437,11 @@ function winlinkSpectrumPublish(mags) {
   if (_winlinkRemoteWatchers <= 0 || !remoteServer || !remoteServer.running) return;
   const now = Date.now();
   const mode = WinlinkModes.pickWinlinkMode(winlinkState.snapshot().modes, settings.winlinkDefaultMode || 'telnet');
-  const band = WinlinkSpectrum.markerBand(mode, settings.winlinkArdopBw);
-  const v = WinlinkSpectrum.busyVerdict(mags, band.lo, band.hi, _winlinkBusySt, now);
-  if (now - _winlinkSpecLastAt < 100) return;
+  const band = WinlinkSpectrum.markerBand(mode, winlinkModemBw());
+  if (!_winlinkBusy) _winlinkBusy = new WinlinkSpectrum.BusyDetector(band.lo, band.hi);
+  else if (_winlinkBusy.loBin !== Math.floor(band.lo * WinlinkSpectrum.MAGS) || _winlinkBusy.hiBin !== Math.ceil(band.hi * WinlinkSpectrum.MAGS)) _winlinkBusy.setBand(band.lo, band.hi);
+  const v = _winlinkBusy.update(mags, now);
+  if (now - _winlinkSpecLastAt < 100 && !v.changed) return;
   _winlinkSpecLastAt = now;
   remoteServer.broadcastWinlinkSpectrum({ bins: WinlinkSpectrum.wireBins(mags), busy: v.busy, peakDb: v.peakDb, lo: band.lo, hi: band.hi, label: band.label });
 }

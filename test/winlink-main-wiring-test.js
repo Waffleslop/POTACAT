@@ -254,7 +254,13 @@ test('winlink-watch subscribes a device; the shack computes bins and the Busy ve
   assert.ok(/broadcastWinlinkSpectrum\(frame\)[\s\S]*?bufferedAmount > 8192\) continue/.test(server), 'frames are dropped, never queued');
   assert.ok(/_onClientGone\(ws\) \{\n\s*const watchedWinlink = !!ws\._winlinkWatch;/.test(server), 'a vanished watcher is recounted');
   assert.ok(/rs\.on\('winlink-watch', \(\{ count \} = \{\}\) => winlinkSetRemoteWatch\(count\)\);/.test(main), 'wired inside onRemoteServer');
-  assert.ok(/function winlinkSpectrumPublish\(mags\)[\s\S]*?WinlinkSpectrum\.busyVerdict\(mags, band\.lo, band\.hi, _winlinkBusySt, now\)[\s\S]*?broadcastWinlinkSpectrum\(\{ bins: WinlinkSpectrum\.wireBins\(mags\), busy: v\.busy/.test(main), 'the verdict is decided on the shack');
+  assert.ok(/function winlinkSpectrumPublish\(mags\)[\s\S]*?WinlinkSpectrum\.markerBand\(mode, winlinkModemBw\(\)\)[\s\S]*?const v = _winlinkBusy\.update\(mags, now\);[\s\S]*?broadcastWinlinkSpectrum\(\{ bins: WinlinkSpectrum\.wireBins\(mags\), busy: v\.busy/.test(main), 'the verdict is decided on the shack, by the shared BusyDetector');
+  assert.ok(/modemBw: winlinkModemBw\(\),/.test(main), 'the mail window gets every modem\'s bandwidth');
+  const popHtml = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'winlink-popout.html'), 'utf8');
+  const popJs = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'winlink-popout.js'), 'utf8');
+  assert.ok(popHtml.includes('<script src="../lib/winlink-spectrum.js"></script>'), 'the mail window loads the shared rule');
+  assert.ok(/new WinlinkSpectrum\.BusyDetector\(/.test(popJs) && /WinlinkSpectrum\.markerBand\(mode, /.test(popJs), 'the mail window uses the shared rule for both the badge and the markers');
+  assert.ok(!/centre/.test(popJs) && !/centre/.test(popHtml) && !/centre/.test(fs.readFileSync(path.join(__dirname, '..', 'lib', 'winlink-spectrum.js'), 'utf8')), 'center, not centre (Casey 2026-10-23)');
   assert.ok(/if \(_winlinkRemoteWatchers > 0\) winlinkSpecAcc\(\)\.push\(pcm, sampleRate\);/.test(main), 'fed from the socket routes only while watched');
   assert.ok(/winlink-spectrum-mags[\s\S]*?winlinkSocketAudioRoute\(\)\) return;/.test(main), 'the window relays only on a sound-device rig');
 });
