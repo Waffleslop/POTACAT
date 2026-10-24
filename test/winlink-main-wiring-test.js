@@ -74,6 +74,9 @@ test('both modems take their audio from POTACAT at their own rate; neither picks
   assert.ok(/winlinkModemAudioReady\(\{ modemRate: ModemAudioServerMod\.MODEM_RATE, modemName: 'ardop' \}\)/.test(ardop), 'ardopcf at 12 kHz');
   const dw = fnBody(main, 'spawnDirewolf');
   assert.ok(/winlinkModemAudioReady\(\{ modemRate: DirewolfProcess\.DIREWOLF_RATE, modemName: 'direwolf' \}\)/.test(dw), 'Dire Wolf at its ARATE');
+  // Readiness = the AGW port accepting OR the ready line; a timeout names what Dire Wolf last printed.
+  assert.ok(/net\.connect\(\{ host: '127\.0\.0\.1', port: _winlinkAgwPort\(\) \}\)/.test(dw) && /ready\('AGW port '/.test(dw), 'the AGW port is probed, not only the stdout line');
+  assert.ok(/it last said: \$\{lastLines\.join/.test(dw), 'a Dire Wolf failure quotes its last lines');
   assert.ok(/audioPort: winlinkAudio\.port/.test(dw), 'Dire Wolf gets the socket, not device names');
   for (const fn of ['spawnArdop', 'spawnArdopSocket', 'spawnDirewolf']) {
     const b = fnBody(main, fn);

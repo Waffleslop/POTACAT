@@ -9556,11 +9556,27 @@ async function spawnDirewolf() {
     direwolfProc = proc;
     let settled = false;
     let lines = 0;
-    const fail = (msg) => { if (!settled) { settled = true; try { proc.kill(); } catch {} reject(new Error(msg)); } };
+    const lastLines = []; // what Dire Wolf said last, for a timeout that would otherwise say nothing
+    let probeTimer = null;
+    const fail = (msg) => { if (!settled) { settled = true; clearInterval(probeTimer); try { proc.kill(); } catch {} reject(new Error(msg)); } };
+    const ready = (how) => { if (!settled) { settled = true; clearInterval(probeTimer); winlinkLog(`direwolf: ready (${how})`); resolve(proc); } };
+    // Readiness is the AGW port ACCEPTING, not only the "Ready to accept"
+    // line: a build whose stdout reaches us late or not at all (a user's
+    // phone session failed with "never opened its AGW port" with no Dire
+    // Wolf line in sight, 2026-10-23) must not be declared dead while it is
+    // listening. Probed every half second until something settles it.
+    probeTimer = setInterval(() => {
+      if (settled) { clearInterval(probeTimer); return; }
+      const sock = net.connect({ host: '127.0.0.1', port: _winlinkAgwPort() });
+      sock.once('connect', () => { sock.destroy(); ready('AGW port ' + _winlinkAgwPort() + ' is accepting'); });
+      sock.once('error', () => { sock.destroy(); });
+      sock.setTimeout(400, () => sock.destroy());
+    }, 500);
     const onLine = (chunk) => {
       for (const line of chunk.toString().split(/\r?\n/).filter(Boolean)) {
+        lastLines.push(line); if (lastLines.length > 3) lastLines.shift();
         const kind = DirewolfProcess.classifyDirewolfLine(line);
-        if (kind === 'ready') { winlinkLog(`direwolf: ${line}`); if (!settled) { settled = true; resolve(proc); } continue; }
+        if (kind === 'ready') { winlinkLog(`direwolf: ${line}`); ready('its own ready line'); continue; }
         if (kind === 'no-hamlib') { winlinkLog(`direwolf: ${line}`); fail('This Dire Wolf was built without Hamlib, so POTACAT cannot key the radio through it — use the bundled one'); continue; }
         if (kind === 'device-error') { winlinkLog(`direwolf: ${line}`); fail(line); continue; }
         if (kind === 'ptt-error') { winlinkLog(`direwolf: ${line}`); fail('Dire Wolf could not reach POTACAT\'s radio control: ' + line); continue; }
@@ -9570,13 +9586,14 @@ async function spawnDirewolf() {
     };
     proc.stdout.on('data', onLine);
     proc.stderr.on('data', onLine);
-    proc.on('error', (e) => { if (direwolfProc === proc) direwolfProc = null; if (!settled) { settled = true; reject(e); } });
+    proc.on('error', (e) => { if (direwolfProc === proc) direwolfProc = null; if (!settled) { settled = true; clearInterval(probeTimer); reject(e); } });
     proc.on('exit', (code) => {
       if (direwolfProc === proc) direwolfProc = null;
-      if (!settled) { settled = true; reject(new Error(`Dire Wolf exited (code ${code})`)); return; }
+      if (!settled) { settled = true; clearInterval(probeTimer); reject(new Error(`Dire Wolf exited (code ${code})` + (lastLines.length ? ` — it last said: ${lastLines.join(' | ')}` : ' before printing anything'))); return; }
       if (winlinkSessionActive() && winlinkState.session.mode === 'packet') winlinkAbortSession('Dire Wolf stopped');
     });
-    setTimeout(() => fail(`Dire Wolf never opened its AGW port ${_winlinkAgwPort()}`), 10000);
+    setTimeout(() => fail(`Dire Wolf never opened its AGW port ${_winlinkAgwPort()} in 15 s` +
+      (lastLines.length ? ` — it last said: ${lastLines.join(' | ')}` : ' and printed nothing (the log has its spawn line; is direwolf.exe being blocked by antivirus or another program?)')), 15000);
   });
 }
 
