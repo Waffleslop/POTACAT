@@ -126,6 +126,11 @@ test('buildLayer draws states and countries under a pane, circles only for worke
 test('wiring: every map window attaches the overlay and its keys, main owns the state and follows the dial', () => {
   const main = rd('main.js');
   assert.ok(main.includes("ipcMain.handle('worked-overlay-get'") && main.includes("ipcMain.handle('worked-overlay-geo'") && main.includes("ipcMain.on('worked-overlay-set'"));
+  // The legend's Update from LoTW / QRZ buttons run the SAME code as the Settings button and the WAS view's button.
+  assert.ok(main.includes("ipcMain.handle('worked-sync'") && main.includes('async function lotwDownloadConfirmations(') && main.includes('async function wasBackfillStates('), 'worked-sync shares the LoTW and QRZ code paths');
+  assert.ok(/lotwDownloadConfirmations\(\{\}\)/.test(main) && /await wasBackfillStates\(\)/.test(main));
+  const ov = fs.readFileSync(path.join(__dirname, '..', 'lib', 'worked-overlay.js'), 'utf8');
+  assert.ok(/createLegend\(L, [\s\S]{0,200}?!o\.web && api\.workedSync/.test(ov), 'the legend offers sync only where the api has it (never on ECHOCAT Web)');
   assert.ok(/function sendCatFrequency[\s\S]{0,2500}workedOverlayFollowDial\(\);/.test(main), 'frequency sink re-pushes');
   assert.ok(/function sendCatMode[\s\S]{0,1500}workedOverlayFollowDial\(\);/.test(main), 'mode sink re-pushes');
   assert.ok(/for \(const w of workedOverlayWindows\(\)\) w\.webContents\.send\('worked-roster'/.test(main), 'the roster reaches every map window');
@@ -146,7 +151,7 @@ test('wiring: every map window attaches the overlay and its keys, main owns the 
   assert.ok(/\/\^F\[678\]\$\/\.test\(e\.key\)/.test(rd('renderer/app.js')), 'F6/F7/F8 in the main keydown');
   for (const pre of ['preload.js', 'preload-popout.js', 'preload-jtcat-popout.js']) {
     const p = rd(pre);
-    for (const k of ['workedOverlayGet', 'workedOverlaySet', 'workedOverlayGeo', 'onWorkedOverlayState', 'getWorkedRoster', 'onWorkedRoster']) assert.ok(p.includes(k + ':'), pre + ' lacks ' + k);
+    for (const k of ['workedOverlayGet', 'workedOverlaySet', 'workedOverlayGeo', 'onWorkedOverlayState', 'getWorkedRoster', 'onWorkedRoster', 'workedSync']) assert.ok(p.includes(k + ':'), pre + ' lacks ' + k);
   }
 });
 

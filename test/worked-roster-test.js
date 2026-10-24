@@ -167,7 +167,8 @@ test('wiring: main.js builds the roster from workedQsos, adds live, serves and p
   assert.ok(main.includes("ipcMain.handle('was-backfill-states'"));
   assert.ok(/webContents\.send\('worked-roster', workedRoster\)/.test(main));
   // the backfill is a log EDIT through qso-log with the cloud sink, never a raw rewrite
-  const bf = main.slice(main.indexOf("ipcMain.handle('was-backfill-states'"), main.indexOf("ipcMain.handle('was-backfill-states'") + 6000);
+  // The handler body is the named function (the map legend's sync button shares it).
+  const bf = main.slice(main.indexOf('async function wasBackfillStates('), main.indexOf('async function wasBackfillStates(') + 6000);
   assert.ok(/mutateLog\(logPath,[\s\S]*\{ sink: qsoLogSink \}\)/.test(bf));
   assert.ok(!/rewriteAdifFile|appendRawQso/.test(bf));
   assert.ok(/stateKeys\(ent, state\)\.length/.test(bf), 'a state QRZ lists that is not one for that entity is never written');

@@ -296,6 +296,7 @@ contextBridge.exposeInMainWorld('api', {
   workedOverlayGet: () => ipcRenderer.invoke('worked-overlay-get'),
   workedOverlaySet: (patch) => ipcRenderer.send('worked-overlay-set', patch),
   workedOverlayGeo: () => ipcRenderer.invoke('worked-overlay-geo'),
+  workedSync: (kind) => ipcRenderer.invoke('worked-sync', kind),
   onWorkedOverlayState: (cb) => ipcRenderer.on('worked-overlay-state', (_e, s) => cb(s)),
   onClusterStatus: (cb) => ipcRenderer.on('cluster-status', (_e, s) => cb(s)),
   // Spots Source menu: saved cluster nodes on/off (main is the one writer).

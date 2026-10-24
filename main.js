@@ -36154,7 +36154,7 @@ app.whenReady().then(() => {
 
   // ── LoTW Phase 3: confirmation download (lotwreport.adi) ────────────
   // Different auth than upload: the LoTW WEBSITE login, not the TQSL cert.
-  ipcMain.handle('lotw-download-confirmations', async (_e, opts) => {
+  async function lotwDownloadConfirmations(opts) {
     const { buildLotwReportQuery, parseLotwAdif, looksLikeLotwAuthFailure, stampLotwConfirmations } = require('./lib/lotw-report');
     const { lotwKey } = require('./lib/lotw-flags');
     const login = (opts && opts.login) || settings.lotwLogin;
@@ -36216,7 +36216,8 @@ app.whenReady().then(() => {
     }
     sendCatLog(`[LoTW] Confirmations: ${stats.confirmed} new, ${stats.alreadyConfirmed} already marked, ${stats.unmatched.length} unmatched — ${totalConfirmed} QSOs confirmed total`);
     return { ok: true, message: `${stats.confirmed} new confirmation${stats.confirmed === 1 ? '' : 's'} — ${totalConfirmed} QSOs confirmed on LoTW.` + (stats.detailed ? ` ${stats.detailed} QSOs gained the other station's state or grid.` : '') + (stats.unmatched.length ? ` ${stats.unmatched.length} had no matching QSO here (see log).` : '') };
-  });
+  }
+  ipcMain.handle('lotw-download-confirmations', (_e, opts) => lotwDownloadConfirmations(opts));
 
   // ── Club Log bulk upload (putlogs.php). The per-QSO realtime push
   // lives in the QSO fan-out next to the SOTA uploader. ──────────────
@@ -39896,7 +39897,7 @@ app.whenReady().then(() => {
   // call; a contact logged at a park takes the PARK's state when the park
   // sits in one state, and is left alone when it straddles (the park, not
   // the home QTH, is where they were). Nothing is guessed from a grid.
-  ipcMain.handle('was-backfill-states', async () => {
+  async function wasBackfillStates() {
     const MAX_LIVE_LOOKUPS = 150; // one press = one bounded run; press again for more
     if (!(qrz && qrz.configured && settings.enableQrz)) {
       return { ok: false, error: 'QRZ lookups are not set up. Turn on "QRZ.com Callsign Lookup" under Settings > Station and enter your QRZ login first.' };
@@ -39967,6 +39968,24 @@ app.whenReady().then(() => {
     const remaining = candidates - filled;
     sendCatLog(`[WAS] Filled STATE on ${filled} QSO${filled === 1 ? '' : 's'} (${fromPark} from the park, ${filled - fromPark} from QRZ; ${live} QRZ lookups); ${remaining} still without a state` + (skippedForBudget ? ` — ${skippedForBudget} calls not looked up yet, press again` : ''));
     return { ok: true, filled, fromPark, remaining, live, more: skippedForBudget > 0 };
+  }
+  ipcMain.handle('was-backfill-states', () => wasBackfillStates());
+  // The map legend's "Update from LoTW / QRZ" buttons (every map window, the
+  // FT8 window included — Casey 2026-10-23: syncing LoTW and WAS should be
+  // easy from there). One sentence back, the WAS view's own words.
+  ipcMain.handle('worked-sync', async (_e, kind) => {
+    if (kind === 'lotw') {
+      if (!settings.lotwLogin || !settings.lotwPassword) return { ok: false, text: 'Enter your lotw.arrl.org website login under Settings > Logging > "Upload to ARRL Logbook of the World" first (not the certificate password).' };
+      const r = await lotwDownloadConfirmations({});
+      return { ok: !!(r && r.ok), text: (r && r.message) || 'LoTW download failed.' };
+    }
+    if (kind === 'qrz') {
+      const r = await wasBackfillStates();
+      if (!r || !r.ok) return { ok: false, text: (r && r.error) || 'Could not fill states.' };
+      if (!r.filled) return { ok: true, text: r.remaining ? `No states found for the ${r.remaining} QSO${r.remaining === 1 ? '' : 's'} still without one.` : 'Every QSO already has a state.' };
+      return { ok: true, text: `Filled ${r.filled} QSO${r.filled === 1 ? '' : 's'}` + (r.remaining ? `, ${r.remaining} still without a state` : '') + (r.more ? ' (press again for more)' : '') + '.' };
+    }
+    return { ok: false, text: 'Unknown sync.' };
   });
 
   // --- Log Import IPC ---
