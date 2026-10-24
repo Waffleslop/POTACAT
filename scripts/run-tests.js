@@ -161,6 +161,7 @@ const TESTS = [
   'test/jtty-remote-test.js',
   'test/jtty-txfreq-remote-test.js',
   'test/nocat-rig-test.js',
+  'test/commander-codec-test.js',
   'test/logger-cat-test.js',
   'test/cm108-ptt-test.js',
   'test/removed-features-test.js',
