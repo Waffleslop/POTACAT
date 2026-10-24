@@ -9,6 +9,8 @@ const path = require('path');
 
 const TESTS = [
   'test/rig-test.js',
+  'test/cat-port-presence-test.js',
+  'test/echocat-connect-diet-test.js',
   'test/cw-live-watchdog-test.js',
   'test/lz3aw-web-parity-test.js',
   'test/lz3aw-round5-test.js',
