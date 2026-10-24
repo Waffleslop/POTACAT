@@ -218,6 +218,7 @@ const TESTS = [
   'test/lz3aw-batch-b-test.js',
   'test/lotw-report-test.js',
   'test/rumlogng-logbook-test.js',
+  'test/wsjtx-status-bridge-test.js',
   'test/kf0u-stuck-ptt-test.js',
   'test/active-rig-heal-test.js',
   'test/cw-popover-clamp-test.js',

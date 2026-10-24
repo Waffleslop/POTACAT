@@ -431,7 +431,7 @@ const { IambicKeyer } = require('./lib/keyer');
 const { WinKeyer } = require('./lib/winkeyer');
 const { parsePotaParksCSV, parsePotaActivationsCSV } = require('./lib/pota-parks');
 const { PotaSync } = require('./lib/pota-sync');
-const { WsjtxClient, extractCallsigns, encodeHeartbeat, encodeLoggedAdif, encodeQsoLogged } = require('./lib/wsjtx');
+const { WsjtxClient, extractCallsigns, encodeHeartbeat, encodeStatus, encodeLoggedAdif, encodeQsoLogged } = require('./lib/wsjtx');
 const { PskrClient } = require('./lib/pskreporter');
 const PskrTx = require('./lib/pskreporter-tx');
 const { Ft8Engine, freqsForMode } = require('./lib/ft8-engine');
@@ -26943,6 +26943,22 @@ function loadWorkedParks() {
 // QSO_LOGGED / LOGGED_ADIF messages. A long-lived socket sending periodic
 // heartbeats solves this. Used by both the main logbook path (HamRS/Log4OM/
 // MacLoggerDX) and the parallel Extra UDP destination (GridTracker direct).
+// What the bridges report as POTACAT's Status: the radio's dial, the JTCAT
+// mode while the engine runs (else the rig's mode, sidebands as SSB), and the
+// operator's call and grid.
+function wsjtxBridgeStatus() {
+  const rigMode = String(_currentMode || '').toUpperCase();
+  const mode = ft8Engine ? String(ft8Engine._mode || 'FT8').toUpperCase()
+    : (rigMode === 'USB' || rigMode === 'LSB') ? 'SSB' : rigMode;
+  return {
+    dialFreqHz: _currentFreqHz || 0,
+    mode,
+    deCall: (settings && settings.myCallsign) || '',
+    deGrid: String((settings && settings.grid) || '').slice(0, 6),
+    transmitting: !!(cat && cat._transmitting),
+  };
+}
+
 function createWsjtxUdpBridge(label) {
   return {
     label,
@@ -26981,6 +26997,15 @@ function createWsjtxUdpBridge(label) {
       if (!this.socket) return;
       const buf = encodeHeartbeat(this.id, 3);
       this.socket.send(buf, 0, buf.length, this.port, this.host);
+      this._sendStatus();
+    },
+
+    // GridTracker2 drops every message from a source, logged QSOs included,
+    // until that source has sent a Status (see encodeStatus in lib/wsjtx.js).
+    _sendStatus(over) {
+      if (!this.socket) return;
+      const buf = encodeStatus(this.id, Object.assign(wsjtxBridgeStatus(), over || {}));
+      this.socket.send(buf, 0, buf.length, this.port, this.host);
     },
 
     sendQso(qsoData, adifText) {
@@ -27001,6 +27026,10 @@ function createWsjtxUdpBridge(label) {
             parseInt(t.slice(0, 2), 10), parseInt(t.slice(2, 4), 10), t.length >= 6 ? parseInt(t.slice(4, 6), 10) : 0
           ));
         }
+
+        // A Status on the QSO's own band and mode first, so the receiver has
+        // a valid source even when the contact beats the first heartbeat.
+        this._sendStatus(freqHz > 0 ? { dialFreqHz: freqHz, mode: (qsoData.mode || '').toUpperCase() } : null);
 
         // LOGGED_ADIF (type 12) first — carries POTA_REF, SIG_INFO, and other
         // program-specific fields. Then QSO_LOGGED (type 5) for apps that
