@@ -56,10 +56,16 @@ test('a TX gate with no dial known falls back to the power-readable rule only', 
   assert.strictEqual(pe.interceptCatCommand({ type: 'tx_enable' }).allowed, true);
 });
 
-test('wiring: both TX gates hand the live dial and mode to the pass', () => {
+test('wiring: both TX gates hand the live dial and mode to the pass, and a refusal reaches the guest\'s device', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
   const n = (main.match(/interceptCatCommand\(\{ type: 'tx_enable', freqHz: _currentFreqHz, mode: _currentMode \}\)/g) || []).length;
   assert.strictEqual(n, 2, 'gatedSetTransmit and gatedSmartSdrTransmit');
+  assert.strictEqual((main.match(/passTxBlocked\(res\);/g) || []).length, 2, 'both gates tell the device');
+  assert.ok(/sendToPassSessions\(\{ type: 'tune-blocked', reason: res\.userVisible \}\)/.test(main), 'as a tune-blocked alert the app already shows');
+  assert.ok(/const applied = !!state && !passTxJustBlocked\(\);/.test(main), 'ptt-applied says false for a refused press');
+  const srv = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8');
+  assert.ok(/sendToPassSessions\(msg\) \{/.test(srv));
+  assert.ok(/if \(rest\.hideOutOfBand\) rest\.hideOutOfBand = false;/.test(srv), 'a guest never inherits the owner\'s out-of-band hiding');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

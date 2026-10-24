@@ -20896,7 +20896,9 @@ function connectRemote() {
     // key command issued; excludes WS RTT and the rig's own T/R switch).
     // The whole handler is deliberately synchronous — nothing awaits ahead
     // of the key command — so this measures real work, not queueing.
-    try { remoteServer.sendToClient({ type: 'ptt-applied', state: !!state, ms: Date.now() - _pttT0 }); } catch { /* ignore */ }
+    // A pass-refused key-down is not applied: say so, never a success echo.
+    const applied = !!state && !passTxJustBlocked();
+    try { remoteServer.sendToClient({ type: 'ptt-applied', state: state ? applied : false, ms: Date.now() - _pttT0 }); } catch { /* ignore */ }
   });
 
   // Scan on/off sync (scan-state-sync-desktop). The scan engine lives in the
@@ -30397,6 +30399,19 @@ let _freqSuppressUntil = 0;
 // PassEnforcement interceptor when a pass session is active. Idle
 // state: zero-cost passthrough. TX-off is never gated (always allowed
 // to release the rig even after pass expiry).
+// A key-down the pass refused: the guest's device is told (ECHOCAT renders a
+// non-SWR tune-blocked as an alert with the reason, in shipped builds), and
+// the `ptt` handler answers ptt-applied {state:false} instead of a success
+// echo over dead air (echocat session's review, 2026-10-24).
+let _passTxBlockedAt = 0;
+function passTxBlocked(res) {
+  _passTxBlockedAt = Date.now();
+  if (remoteServer && remoteServer.running) {
+    try { remoteServer.sendToPassSessions({ type: 'tune-blocked', reason: res.userVisible }); } catch { /* older server */ }
+  }
+}
+function passTxJustBlocked() { return Date.now() - _passTxBlockedAt < 500; }
+
 function gatedSetTransmit(state) {
   if (passEnforcement && state) {
     const res = passEnforcement.interceptCatCommand({ type: 'tx_enable', freqHz: _currentFreqHz, mode: _currentMode });
@@ -30405,6 +30420,7 @@ function gatedSetTransmit(state) {
       if (win && !win.isDestroyed()) {
         win.webContents.send('pass-cat-blocked', { command: 'tx_enable', reason: res.reason, userVisible: res.userVisible });
       }
+      passTxBlocked(res);
       return false;
     }
   }
@@ -30449,6 +30465,7 @@ function gatedSmartSdrTransmit(state) {
       if (win && !win.isDestroyed()) {
         win.webContents.send('pass-cat-blocked', { command: 'tx_enable', reason: res.reason, userVisible: res.userVisible });
       }
+      passTxBlocked(res);
       return false;
     }
   }
