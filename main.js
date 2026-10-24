@@ -30388,7 +30388,7 @@ let _freqSuppressUntil = 0;
 // to release the rig even after pass expiry).
 function gatedSetTransmit(state) {
   if (passEnforcement && state) {
-    const res = passEnforcement.interceptCatCommand({ type: 'tx_enable' });
+    const res = passEnforcement.interceptCatCommand({ type: 'tx_enable', freqHz: _currentFreqHz, mode: _currentMode });
     if (!res.allowed) {
       sendCatLog(`[pass] TX blocked: ${res.userVisible}`);
       if (win && !win.isDestroyed()) {
@@ -30432,7 +30432,7 @@ function gatedSetTxPower(value, opts = {}) {
 // wrappers don't apply to smartSdr.*. Same gate policy, different rig.
 function gatedSmartSdrTransmit(state) {
   if (passEnforcement && state) {
-    const res = passEnforcement.interceptCatCommand({ type: 'tx_enable' });
+    const res = passEnforcement.interceptCatCommand({ type: 'tx_enable', freqHz: _currentFreqHz, mode: _currentMode });
     if (!res.allowed) {
       sendCatLog(`[pass] TX blocked (Flex): ${res.userVisible}`);
       if (win && !win.isDestroyed()) {
