@@ -42,5 +42,15 @@ test('wiring: connectCat waits for a missing port, a lost link checks it, None i
   assert.ok(/settings\.catNone = !target;/.test(main) && /if \(has\('activeRigId'\)\) settings\.catNone = !newSettings\.activeRigId;/.test(main), 'both None choices set it, picking a rig clears it');
 });
 
+test('Windows: a port serialport does not list but SERIALCOMM records is present (Ten-Tec Jupiter owner)', () => {
+  const out = 'HKEY_LOCAL_MACHINE\\HARDWARE\\DEVICEMAP\\SERIALCOMM\r\n    \\Device\\Serial0    REG_SZ    COM1\r\n    \\Device\\VCP0    REG_SZ    COM3\r\n\r\n';
+  const listed = P.parseSerialCommRegistry(out);
+  assert.deepStrictEqual(listed, ['COM1', 'COM3']);
+  assert.ok(P.portListed('com3', listed, 'win32'));
+  assert.deepStrictEqual(P.parseSerialCommRegistry(''), []);
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(/if \(SerialPortPresence\.portListed\(port, list\)\) return true;[\s\S]{0,300}if \(process\.platform === 'win32'\) return SerialPortPresence\.portListed\(port, await windowsSerialCommPorts\(\)\);/.test(main), 'the registry is asked before a port is called missing');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

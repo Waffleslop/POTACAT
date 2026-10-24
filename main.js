@@ -6635,8 +6635,20 @@ async function serialPortPresent(port) {
   try {
     const { SerialPort } = require('serialport');
     const list = await SerialPort.list();
-    return SerialPortPresence.portListed(port, list);
+    if (SerialPortPresence.portListed(port, list)) return true;
+    // Windows' own record of every COM port: serialport's list misses ports
+    // whose driver registers no COM-port interface (see the lib).
+    if (process.platform === 'win32') return SerialPortPresence.portListed(port, await windowsSerialCommPorts());
+    return false;
   } catch { return true; } // cannot tell: let the connect try, as before
+}
+function windowsSerialCommPorts() {
+  return new Promise((resolve, reject) => {
+    require('child_process').execFile('reg', ['query', 'HKLM\\HARDWARE\\DEVICEMAP\\SERIALCOMM'], { timeout: 3000, windowsHide: true }, (err, stdout) => {
+      if (err && !stdout) return reject(err); // cannot tell → the caller lets the connect try
+      resolve(SerialPortPresence.parseSerialCommRegistry(stdout));
+    });
+  });
 }
 function stopCatPortWatch() {
   if (_catPortWatch) { clearInterval(_catPortWatch.timer); _catPortWatch = null; }
