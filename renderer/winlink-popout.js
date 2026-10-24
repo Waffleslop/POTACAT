@@ -179,7 +179,7 @@
       var parts = [];
       if (au.toModemDb != null) parts.push('to modem ' + au.toModemDb + ' dB' + (au.trimDb ? ' (trimmed ' + Math.abs(au.trimDb) + ' dB)' : ''));
       else if (au.rxDb != null && au.rxDb > -90) parts.push('radio ' + au.rxDb + ' dB');
-      if (au.fromModemDb != null && au.fromModemDb > -90) parts.push('from modem ' + au.fromModemDb + ' dB');
+      if (au.fromModemDb != null && au.fromModemDb > -90) parts.push('from modem ' + au.fromModemDb + ' dB' + (au.boostDb ? ' (raised ' + au.boostDb + ' dB)' : ''));
       ael.textContent = parts.join(' · ');
       ael.classList.toggle('hot', !!au.hot);
     } else { ael.textContent = ''; ael.classList.remove('hot'); }

@@ -731,6 +731,7 @@ const GLOBAL_KEYS = new Set([
   'winlinkPatPath',    // Winlink: explicit Pat binary on THIS machine
   'winlinkArdopPath',  // Winlink: explicit ardopcf binary on THIS machine
   'winlinkArdopPort',  // Winlink: ardopcf host port on this machine (default 8515)
+  'winlinkModemTxGain', // Winlink: the transmit-audio gain learned per modem ({vara: 2.1, ...}) — the installed modem's level, a machine fact
   'winlinkVaraPort',   // Winlink: the operator's own VARA HF TNC port on this machine (default 8300)
   'winlinkVaraFmPort', // Winlink: the operator's own VARA FM port on this machine (default 8310 — VARA FM ships on 8300 too)
   'winlinkVaraHfPath', // Winlink: where VARA.exe is on THIS machine (blank = the usual places)
@@ -9353,12 +9354,15 @@ let _cableTxResampler = null;   // VARA's TX (the cable's capture rate) → 24 k
 let _cableRxRate = 0, _cableTxRate = 0;
 // The level of the radio audio VARA hears through the cable (lib/modem-rx-level.js):
 // trimmed automatically when it reaches the red, shown on every surface.
-const { RxLeveler } = require('./lib/modem-rx-level');
+const { RxLeveler, TxLeveler } = require('./lib/modem-rx-level');
 let _cableRxLeveler = null;
+let _modemTxLeveler = null;   // TxLeveler on the modem's transmit audio, one per session (seeded from settings.winlinkModemTxGain)
+let _modemTxBoostLogged = false;
 let _cableRxTrimLoggedAt = 0;
 let _winlinkRxPeak = 0, _winlinkRxPeakAt = 0; // the radio feed's own peak (any radio mode), for the meter
 /** The one place modem TX audio (24 kHz mono) meets the radio: Flex stream, Icom Network, or the radio side of the bridge. */
 function winlinkDispatchTx(mono24k) {
+  mono24k = winlinkLevelModemTx(mono24k);
   if (settings.audioSource === 'smartsdr') {
     if (smartSdrAudio && smartSdrAudio.txReady) smartSdrAudio.pushTxAudioChunk(mono24k);
   } else if (settings.audioSource === 'icom-network') {
@@ -9366,6 +9370,40 @@ function winlinkDispatchTx(mono24k) {
   } else if (modemBridgeWin && !modemBridgeWin.isDestroyed() && modemBridge.playback) {
     audioSafeSend(modemBridgeWin.webContents, 'modem-bridge-tx', { pcm: mono24k });
   }
+}
+/**
+ * The modem's transmit audio is brought up to full scale (lib/modem-rx-level.js
+ * TxLeveler): on Flex Direct / Icom Network full scale IS the set RF power,
+ * and a soundcard chain was calibrated against POTACAT's own full-scale FT8
+ * tone, so a modem playing at -7 dBFS (VARA's default drive: 8 W of 36 W on
+ * K3SBP's Flex, 2026-10-23) under-drives every route alike. The learned gain
+ * is kept per modem across sessions so the first frame already goes out right.
+ */
+function winlinkModemTxGainKey() { return String((winlinkState.session && winlinkState.session.mode) || 'modem'); }
+function winlinkLevelModemTx(mono24k) {
+  if (!_modemTxLeveler) {
+    const saved = settings.winlinkModemTxGain && Number(settings.winlinkModemTxGain[winlinkModemTxGainKey()]);
+    _modemTxLeveler = new TxLeveler({ gain: saved >= 1 && saved <= 8 ? saved : 1 });
+    _modemTxBoostLogged = false;
+  }
+  const out = _modemTxLeveler.process(mono24k);
+  if (!_modemTxBoostLogged && _modemTxLeveler.gainDb >= 2) {
+    _modemTxBoostLogged = true;
+    const l = _modemTxLeveler.levels();
+    winlinkLog(`modem transmit audio raised ${l.boostDb} dB — the modem plays about ${l.inDb} dBFS peak and full scale is the set RF power (the modem's own drive slider does the same)`);
+  }
+  return out;
+}
+function winlinkRememberModemTxGain() {
+  if (!_modemTxLeveler) return;
+  const key = winlinkModemTxGainKey();
+  const g = Math.round(_modemTxLeveler.gain * 100) / 100;
+  const saved = settings.winlinkModemTxGain && settings.winlinkModemTxGain[key];
+  if (_modemTxLeveler.gainDb >= 1) winlinkLog(`modem transmit audio: peak ${_modemTxLeveler.levels().inDb} dBFS from the modem, raised ${_modemTxLeveler.levels().boostDb} dB`);
+  _modemTxLeveler = null;
+  if (saved === g) return;
+  settings.winlinkModemTxGain = { ...(settings.winlinkModemTxGain || {}), [key]: g };
+  saveSettings(settings);
 }
 function modemBridgePlayback(on) {
   modemBridge.playback = !!on;
@@ -9827,6 +9865,11 @@ function winlinkAudioLevels() {
     out.toModemDb = l.outDb; out.trimDb = l.trimDb; out.hot = l.hot;
     out.fromModemDb = db(modemBridge.cable.level || 0);
   }
+  if (_modemTxLeveler) {
+    const t = _modemTxLeveler.levels();
+    if (out.fromModemDb == null) out.fromModemDb = t.inDb;
+    out.boostDb = t.boostDb;
+  }
   return out;
 }
 function winlinkStartSessionMeter() {
@@ -9904,6 +9947,7 @@ function winlinkEndSession(state, text, received = 0) {
   clearInterval(_winlinkWatchdog); _winlinkWatchdog = null;
   clearInterval(_winlinkMeterTimer); _winlinkMeterTimer = null;
   _cableRxLeveler = null; // the next session starts at unity and finds its own level
+  winlinkRememberModemTxGain(); // the transmit gain it learned is this modem's, kept for the next session
   clearWinlinkTxFailsafe();
   _winlinkShimArmed = false;
   if (_winlinkUnkeyTimer) { clearTimeout(_winlinkUnkeyTimer); _winlinkUnkeyTimer = null; }
@@ -36124,8 +36168,13 @@ app.whenReady().then(() => {
     if (settings.lotwLastQslDownload) {
       qslSince = new Date(settings.lotwLastQslDownload - 7 * 86400000).toISOString().slice(0, 10);
     }
+    // Once: pulls before 2026-10-23 stamped the confirmation and dropped
+    // the other station's certified STATE / county / grid that rides it.
+    // One full pull fills those in for every confirmation already marked.
+    const detailPull = qslSince && !settings.lotwDetailPulled;
+    if (detailPull) qslSince = null;
     const q = buildLotwReportQuery({ login, password, qslSince });
-    sendCatLog('[LoTW] Downloading confirmations' + (qslSince ? ` issued since ${qslSince}` : ' (full history — the first run can take a minute)'));
+    sendCatLog('[LoTW] Downloading confirmations' + (qslSince ? ` issued since ${qslSince}` : detailPull ? ' (full history once more, to pick up the states and grids LoTW certifies for each confirmation)' : ' (full history — the first run can take a minute)'));
     const res = await new Promise((resolve) => {
       const https = require('https');
       const req = https.get({ hostname: q.host, path: q.path, timeout: 120000 }, (resp) => {
@@ -36147,13 +36196,15 @@ app.whenReady().then(() => {
     let stats;
     const { qsos } = mutateQsoLog((log) => {
       stats = stampLotwConfirmations(log, records, lotwKey);
-      if (!stats.confirmed) return false;
+      if (!stats.confirmed && !stats.detailed) return false;
     });
-    if (stats.confirmed > 0) {
+    if (stats.confirmed > 0 || stats.detailed > 0) {
       loadWorkedQsos();
       if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) qsoPopoutWin.webContents.send('qso-popout-refresh');
     }
+    if (stats.detailed > 0) sendCatLog(`[LoTW] ${stats.detailed} QSOs gained the other station's certified state, county or grid from LoTW (what Worked All States counts)`);
     settings.lotwLastQslDownload = Date.now();
+    settings.lotwDetailPulled = true;
     if (opts && opts.login) settings.lotwLogin = opts.login;
     if (opts && opts.password) settings.lotwPassword = opts.password;
     saveSettings(settings);
@@ -36164,7 +36215,7 @@ app.whenReady().then(() => {
       sendCatLog(`[LoTW] ${stats.unmatched.length} confirmations had no matching QSO in this log: ` + stats.unmatched.slice(0, 5).join('; ') + (stats.unmatched.length > 5 ? ' ...' : ''));
     }
     sendCatLog(`[LoTW] Confirmations: ${stats.confirmed} new, ${stats.alreadyConfirmed} already marked, ${stats.unmatched.length} unmatched — ${totalConfirmed} QSOs confirmed total`);
-    return { ok: true, message: `${stats.confirmed} new confirmation${stats.confirmed === 1 ? '' : 's'} — ${totalConfirmed} QSOs confirmed on LoTW.` + (stats.unmatched.length ? ` ${stats.unmatched.length} had no matching QSO here (see log).` : '') };
+    return { ok: true, message: `${stats.confirmed} new confirmation${stats.confirmed === 1 ? '' : 's'} — ${totalConfirmed} QSOs confirmed on LoTW.` + (stats.detailed ? ` ${stats.detailed} QSOs gained the other station's state or grid.` : '') + (stats.unmatched.length ? ` ${stats.unmatched.length} had no matching QSO here (see log).` : '') };
   });
 
   // ── Club Log bulk upload (putlogs.php). The per-QSO realtime push
