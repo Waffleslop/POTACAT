@@ -24735,6 +24735,16 @@ ipcMain.handle('remote-shack-switch-rig', (_e, rigId) => {
   return { ok: true };
 });
 
+// Silence from the radio is expected, not a dead audio link, on FM (the squelch
+// mutes the receiver completely) and on a radio with no CAT control, whose mode
+// POTACAT cannot see (handhelds and FM mobiles on a Digirig).
+let _audioSquelchNoted = false;
+function audioSilenceIsSquelch() {
+  const t = settings.catTarget || {};
+  if (t.type === 'none') return true;
+  return /FM/.test(String(_currentMode || '').toUpperCase());
+}
+
 // --- Remote Audio (hidden BrowserWindow for WebRTC) ---
 // Single source of truth for the config payload sent to the audio bridge
 // renderer on every (re)start. Both the "window already open" hot path
@@ -39341,8 +39351,20 @@ app.whenReady().then(() => {
   // the bridge's peak monitor is reporting; broadcastRemoteRadioStatus
   // also picks this up to populate audioOk on the periodic status push.
   ipcMain.on('remote-audio-health', (_e, state) => {
-    const newSilent = !!(state && state.silent);
+    let newSilent = !!(state && state.silent);
     const reason = (state && state.reason) || '';
+    // Exact digital silence is what an FM radio with its squelch closed sends
+    // a sound card (a handheld on a Digirig: no hiss at all until a signal
+    // opens it). Reported as a dead bridge, the phone rebuilt the audio every
+    // 90 s, so a reset could land on the transmission it was waiting for
+    // (KS9B, 2 m handheld on a Digirig Lite, 2026-10-24). Not a fault there.
+    if (newSilent && audioSilenceIsSquelch()) {
+      if (!_audioSquelchNoted) {
+        _audioSquelchNoted = true;
+        sendCatLog('[Echo CAT] Radio audio is silent between signals — normal for FM with the squelch closed (or a radio with no CAT control); the audio link is left running');
+      }
+      newSilent = false;
+    }
     if (_audioBridgeSilent === newSilent) return;
     _audioBridgeSilent = newSilent;
     _audioBridgeSilentSince = newSilent ? Date.now() : 0;

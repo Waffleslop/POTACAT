@@ -190,5 +190,13 @@ test('the wrong-band TX guard trusts only a live dial, and a dropped rig takes i
   assert.ok(/cat\.disconnect\(\);\s*_icomNetworkTransport = null;[\s\S]{0,300}_currentFreqHz = 0;/.test(main), 'dial cleared on teardown');
 });
 
+test('a squelched FM / no-CAT radio is never reported as a dead audio link (KS9B, 2 m handheld)', () => {
+  const main = read('main.js').replace(/\r\n/g, '\n');
+  assert.ok(/function audioSilenceIsSquelch\(\) \{\n\s*const t = settings\.catTarget \|\| \{\};\n\s*if \(t\.type === 'none'\) return true;\n\s*return \/FM\/\.test\(/.test(main), 'no CAT or FM');
+  const at = main.indexOf("ipcMain.on('remote-audio-health'");
+  const body = main.slice(at, at + 1500);
+  assert.ok(body.indexOf('audioSilenceIsSquelch()') > 0 && body.indexOf('audioSilenceIsSquelch()') < body.indexOf("type: 'audio-health', ok: false"), 'checked before the phone is told');
+});
+
 console.log(`\nNo CAT control: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
