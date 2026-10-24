@@ -78,6 +78,9 @@ contextBridge.exposeInMainWorld('api', {
   // engine setter and echoes state to the phone (jtcat-hold-tx-state).
   jtcatSetHoldTxFreq: (enabled) => ipcRenderer.send('jtcat-set-hold-tx-freq', !!enabled),
   jtcatSetTxSlot: (slot) => ipcRenderer.send('jtcat-set-tx-slot', slot),
+  jtcatTxSlotGet: () => ipcRenderer.invoke('jtcat-tx-slot-get'),
+  onJtcatTxSlotState: (cb) => ipcRenderer.on('jtcat-tx-slot-state', (_e, data) => cb(data)),
+  onJtcatSlotRefused: (cb) => ipcRenderer.on('jtcat-slot-refused', (_e, data) => cb(data)),
   // TX power — synced through main (settings.jtcatTxGain) the same way as RX
   // gain below since 2026-09-09: report our slider, receive everyone else's.
   jtcatSetTxGain: (level) => ipcRenderer.send('jtcat-set-tx-gain', level),

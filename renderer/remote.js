@@ -2521,6 +2521,12 @@
         break;
 
       // --- JTCAT (FT8/FT4) ---
+      case 'jtcat-tx-slot-state':
+        if (typeof reflectFt8TxSlot === 'function') reflectFt8TxSlot(msg.lock);
+        break;
+      case 'jtcat-slot-refused':
+        if (typeof showFt8SlotRefused === 'function') showFt8SlotRefused(msg);
+        break;
       case 'jtcat-rx-gain-state': {
         // Desktop-authoritative synced RX gain — sent at connect and whenever
         // any surface moves it. Our own drags aren't echoed back (the desktop
@@ -8214,14 +8220,57 @@
     }
   });
 
-  // Slot cycle: auto -> even -> odd -> auto
+  // TX slot LOCK: Auto -> 1st (even) -> 2nd (odd) -> Auto. The desktop
+  // persists it and echoes jtcat-tx-slot-state to every client (main.js
+  // applyJtcatTxSlotLock), so this button always shows the shack's lock.
+  function reflectFt8TxSlot(lock) {
+    ft8TxSlot = (lock === 'even' || lock === 'odd') ? lock : 'auto';
+    ft8SlotBtn.textContent = ft8TxSlot === 'auto' ? 'Slot: Auto' : ft8TxSlot === 'even' ? 'Slot: 1st' : 'Slot: 2nd';
+    ft8SlotBtn.classList.toggle('locked', ft8TxSlot !== 'auto');
+    ft8SlotBtn.title = ft8TxSlot === 'auto'
+      ? 'TX slot: Auto. Replies go opposite the station; a new CQ stays in the slot you last transmitted in. Tap to lock.'
+      : 'TX slot locked to ' + (ft8TxSlot === 'even' ? '1st (even)' : '2nd (odd)') + ': every CQ and reply stays there. Tap to change.';
+  }
   ft8SlotBtn.addEventListener('click', () => {
-    if (ft8TxSlot === 'auto') ft8TxSlot = 'even';
-    else if (ft8TxSlot === 'even') ft8TxSlot = 'odd';
-    else ft8TxSlot = 'auto';
-    ft8SlotBtn.textContent = ft8TxSlot === 'auto' ? 'Auto' : ft8TxSlot === 'even' ? 'Even' : 'Odd';
-    ft8Send({ type: 'jtcat-set-tx-slot', slot: ft8TxSlot });
+    const next = ft8TxSlot === 'auto' ? 'even' : ft8TxSlot === 'even' ? 'odd' : 'auto';
+    reflectFt8TxSlot(next);
+    ft8Send({ type: 'jtcat-set-tx-slot', slot: next });
   });
+  reflectFt8TxSlot('auto');
+  // A tap on a station in the locked slot was refused by the shack: say why,
+  // and offer to unlock and send the same reply again.
+  let ft8SlotToast = null;
+  function hideFt8SlotToast() {
+    if (ft8SlotToast) { ft8SlotToast.remove(); ft8SlotToast = null; }
+  }
+  function showFt8SlotRefused(r) {
+    hideFt8SlotToast();
+    const el = document.createElement('div');
+    el.className = 'ft8-slot-toast';
+    const msgEl = document.createElement('span');
+    msgEl.textContent = (r && r.text) || 'That station transmits in the slot you locked.';
+    el.appendChild(msgEl);
+    if (r && r.retry && r.retryType) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = 'Unlock and call';
+      b.addEventListener('click', () => {
+        hideFt8SlotToast();
+        reflectFt8TxSlot('auto');
+        ft8Send({ type: 'jtcat-set-tx-slot', slot: 'auto' });
+        ft8Send(Object.assign({}, r.retry, { type: r.retryType }));
+      });
+      el.appendChild(b);
+    }
+    const keep = document.createElement('button');
+    keep.type = 'button';
+    keep.textContent = 'Keep locked';
+    keep.addEventListener('click', hideFt8SlotToast);
+    el.appendChild(keep);
+    document.body.appendChild(el);
+    ft8SlotToast = el;
+    setTimeout(() => { if (ft8SlotToast === el) hideFt8SlotToast(); }, 12000);
+  }
 
   // CQ button
   ft8CqBtn.addEventListener('click', () => {

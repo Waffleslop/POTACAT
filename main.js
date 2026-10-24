@@ -2167,6 +2167,7 @@ let _currentSplit = false; // rig split state, readback-fed (IF; P12 / rigctld s
 let _currentFilterWidth = 0;
 
 const RelogGuard = require('./lib/jtcat-relog-guard');
+const JtcatTxSlot = require('./lib/jtcat-tx-slot');
 // The callsign being worked — CW-macro {call} on every surface. See
 // lib/typed-call.js for the rule (most recently changed non-empty field wins).
 const { TypedCallTracker } = require('./lib/typed-call');
@@ -13602,6 +13603,8 @@ function jtcatWorkableCallers(results, myCall, opts) {
       if (!jtcatHuntProgramMatch(d, filterMode)) return false;
       if (jtcatSessionHas(d.call, dupeBandMode.band, dupeBandMode.mode)) return false;
       if (isWorked(d.call)) return false;
+      // Under a TX slot lock, a station calling CQ in our own slot is not workable.
+      if (!JtcatTxSlot.workableUnderLock(jtcatTxSlotLock(), d.slot)) return false;
       return true;
     });
 }
@@ -13796,6 +13799,79 @@ function jtcatDirectedMsg(theirCall, myCall, payload) {
     || (theirCall + ' ' + myCall + (payload ? ' ' + payload : ''));
 }
 
+// ── TX slot lock (lib/jtcat-tx-slot.js; Casey 2026-10-24) ────────────────
+// settings.jtcatTxSlotLock 'auto' | 'even' | 'odd' (per profile). The engines
+// enforce it (Ft8Engine.setSlotLock via JtcatManager); these helpers decide
+// the slot for every CQ and every reply so no path picks one on its own.
+let _jtcatLastTx = null; // { slot, at } of our last FT8/FT4/FT2 transmission
+
+function jtcatTxSlotLock() { return JtcatTxSlot.normalizeLock(settings.jtcatTxSlotLock); }
+
+function jtcatNoteTxSlot(slot) {
+  if (JtcatTxSlot.isSlot(slot)) _jtcatLastTx = { slot, at: Date.now() };
+}
+
+/** Point `engine` at the slot a new CQ goes out in; returns the slot. */
+function jtcatCqSlot(engine) {
+  const eng = engine || ft8Engine;
+  const periodMs = 1000 * (eng && typeof eng._cycleSec === 'function' ? eng._cycleSec() : 15);
+  // Fire in the CURRENT slot when early enough for late-start truncation (up
+  // to 7 s, WSJT-X waveform-truncation parity), else the next boundary.
+  const lateCapMs = (eng && eng._lateStartTxMs > 0 && eng._mode === 'FT8') ? Math.min(eng._lateStartTxMs, 7000) : 500;
+  const d = JtcatTxSlot.decideCqSlot({ lock: jtcatTxSlotLock(), lastTx: _jtcatLastTx, nowMs: Date.now(), periodMs, lateCapMs });
+  if (eng) eng.setTxSlot(d.slot);
+  return d.slot;
+}
+
+/**
+ * Point `engine` at the slot a reply to `call` goes out in, or refuse it.
+ * A refusal is logged and shown on the surface that asked (with the original
+ * request echoed back as `retry`, so "Unlock and call" re-sends it verbatim).
+ * @returns {boolean} false = refused, do not transmit
+ */
+function jtcatReplySlot(engine, call, theirSlot, opts = {}) {
+  const eng = engine || ft8Engine;
+  const lock = jtcatTxSlotLock();
+  const d = JtcatTxSlot.decideReplySlot({ lock, theirSlot, fallbackSlot: eng && eng._lastRxSlot, hound: !!opts.hound });
+  if (!d.ok) {
+    const text = JtcatTxSlot.refusalText(call, lock);
+    sendCatLog(`[JTCAT] Not calling ${call || 'that station'}: they transmit in ${JtcatTxSlot.slotLabel(lock)}, the slot you locked`);
+    const payload = { call: call || '', lock, text, retry: opts.retry || null, retryType: opts.retryType || '' };
+    if (opts.source === 'remote') {
+      if (remoteServer) remoteServer.sendToAsker({ type: 'jtcat-slot-refused', ...payload }); // the device that tapped, not every device
+    } else if (opts.source === 'popout' && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+      jtcatPopoutWin.webContents.send('jtcat-slot-refused', payload);
+    }
+    return false;
+  }
+  if (d.override) sendCatLog(`[JTCAT] Hound reply: transmitting in ${JtcatTxSlot.slotLabel(d.slot)}, opposite the Fox, past your ${JtcatTxSlot.slotLabel(lock)} lock`);
+  if (eng) eng.setTxSlot(d.slot, d.override ? { override: true } : undefined);
+  return true;
+}
+
+/** The one writer for the lock: persist, every engine, every surface, the log. */
+function applyJtcatTxSlotLock(value, origin) {
+  const lock = JtcatTxSlot.normalizeLock(value);
+  const changed = lock !== jtcatTxSlotLock();
+  settings.jtcatTxSlotLock = lock;
+  if (changed) saveSettings(settings);
+  if (jtcatManager && typeof jtcatManager.setSlotLock === 'function') jtcatManager.setSlotLock(lock);
+  else if (ft8Engine && typeof ft8Engine.setSlotLock === 'function') ft8Engine.setSlotLock(lock);
+  if (changed) {
+    sendCatLog(lock === 'auto'
+      ? `[JTCAT] TX slot unlocked (Auto)${origin === 'remote' ? ' by the ECHOCAT client' : ''}`
+      : `[JTCAT] TX slot locked to ${JtcatTxSlot.slotLabel(lock)}${origin === 'remote' ? ' by the ECHOCAT client' : ''}: CQs and replies stay there`);
+  }
+  jtcatBroadcastTxSlotLock();
+  return lock;
+}
+
+function jtcatBroadcastTxSlotLock() {
+  const lock = jtcatTxSlotLock();
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-tx-slot-state', { lock });
+  if (remoteServer && typeof remoteServer.broadcastJtcatTxSlotState === 'function') remoteServer.broadcastJtcatTxSlotState({ lock });
+}
+
 // Build a fresh CQ QSO object and start transmitting. Returns the QSO or null
 // if callsign/grid/engine aren't ready. Shared by re-arm; mirrors the manual
 // CQ button's message build.
@@ -13806,22 +13882,12 @@ async function jtcatBuildCqQso(modifier) {
   const fd = jtcatFdContext();
   if (fd) modifier = 'FD'; // Field Day CQ is always "CQ FD <call> <grid>"
   const txMsg = buildCqTxMsg(myCall, myGrid, modifier);
-  // Time-aware TX slot (K3SBP 2026-07-17: Run took a full cycle to key up).
-  // Fire in the CURRENT slot when we're early enough for late-start
-  // truncation (up to 7 s, WSJT-X waveform-truncation parity), else target
-  // the literal NEXT boundary's parity. The old opposite-of-_lastRxSlot pick
-  // pinned a parity for no reason — a fresh CQ has no partner to be opposite
-  // OF — and could skip a perfectly reachable boundary, stretching the first
-  // transmission out to ~27 s after the Run click.
+  // Time-aware TX slot (K3SBP 2026-07-17: Run took a full cycle to key up):
+  // the lock, else our last transmission's slot, else the soonest reachable
+  // boundary (jtcatCqSlot). A fresh CQ has no partner to be opposite OF.
   const cycleMs = 1000 * (typeof ft8Engine._cycleSec === 'function' ? ft8Engine._cycleSec() : 15);
-  const nowMs = Date.now();          // wall clock — TX scheduling never uses the RX-latency-adjusted clock
-  const msIntoCycle = nowMs % cycleMs;
-  const slotIdx = Math.floor(nowMs / cycleMs);
-  const curSlot = slotIdx % 2 === 0 ? 'even' : 'odd';
-  const lateCap = (ft8Engine._lateStartTxMs > 0 && ft8Engine._mode === 'FT8')
-    ? Math.min(ft8Engine._lateStartTxMs, 7000)
-    : 500; // FT4/late-start-off: only the 500 ms pad window reaches the current slot
-  ft8Engine.setTxSlot(msIntoCycle <= lateCap ? curSlot : (curSlot === 'even' ? 'odd' : 'even'));
+  const msIntoCycle = Date.now() % cycleMs; // wall clock — TX scheduling never uses the RX-latency-adjusted clock
+  jtcatCqSlot(ft8Engine);
   const qso = { mode: 'cq', call: null, grid: null, phase: 'cq', txMsg, cqMsg: txMsg,
     report: null, sentReport: null, myCall, myGrid, txRetries: 0 };
   if (fd) { qso.fd = true; qso.myExch = fd.myExch; }
@@ -14951,7 +15017,9 @@ async function jtcatTryAnswerDirectCaller(results, myCall, myGrid) {
       parts[0] === myCall &&
       parts[1] !== myCall &&
       JtcatParser.looksLikeCallsign(parts[1]) &&
-      !(workedQsos && workedQsos.has(parts[1])));
+      !(workedQsos && workedQsos.has(parts[1])))
+    // A caller in our own locked slot can't be worked without moving.
+    .filter(({ d }) => JtcatTxSlot.workableUnderLock(jtcatTxSlotLock(), d.slot));
   if (!callers.length) return false;
   callers.sort((a, b) => ((b.d.db == null ? -999 : b.d.db) - (a.d.db == null ? -999 : a.d.db)));
   const caller = callers[0].d;
@@ -14969,8 +15037,8 @@ async function jtcatTryAnswerDirectCaller(results, myCall, myGrid) {
   // Every decode now carries its slot (ft8-engine stamps it per job); the
   // engine's last RX slot is the fallback, never a bare 'even' — that default
   // put half of all replies in the activator's own slot (K4HXM 2026-09-18).
-  const theirSlot = caller.slot || ft8Engine._lastRxSlot || 'even';      // reply on the opposite slot
-  ft8Engine.setTxSlot(theirSlot === 'even' ? 'odd' : 'even');
+  // Opposite their slot, or the operator's lock (jtcatReplySlot).
+  jtcatReplySlot(ft8Engine, senderCall, caller.slot);
 
   const owner = (jtcatAutoCqOwner === 'remote') ? 'remote' : 'popout';
   if (owner === 'remote') { remoteJtcatQso = qso; processRemoteJtcatQso(results); }
@@ -15328,6 +15396,7 @@ function startJtcat(mode) {
   jtcatFullAutoCq = false;
   jtcatFullAutoCqOwner = null;
   if (!jtcatManager) jtcatManager = new JtcatManager();
+  jtcatManager.setSlotLock(jtcatTxSlotLock()); // the operator's TX slot lock reaches every slice
   jtcatManager.startSlice({
     sliceId: 'default',
     mode: mode || 'FT8',
@@ -15859,8 +15928,8 @@ function startJtcat(mode) {
           ft8Engine.setTxFreq(best.df);
           ft8Engine._txEnabled = true;
           // Match their TX slot: they CQ on slot X, we reply on the opposite
-          const theirSlot = best.slot || ft8Engine._lastRxSlot || 'even';
-          ft8Engine.setTxSlot(theirSlot === 'even' ? 'odd' : 'even');
+          // (Hunt candidates are already filtered to the other slot under a lock.)
+          jtcatReplySlot(ft8Engine, best.call, best.slot);
 
           if (jtcatAutoCqOwner === 'remote') {
             remoteJtcatQso = qso;
@@ -16090,6 +16159,7 @@ function startJtcat(mode) {
     // every TX-block guard above so refused cycles don't count as tries.
     if (ft8Engine) ft8Engine._lastTxPeriodKey = jtcatPeriodUtc(modeForTx);
     jtcatNoteTxSent(data.message);
+    jtcatNoteTxSlot(data.slot); // an Auto CQ keeps the slot we last transmitted in
     const networkStartDelayMs = jtcatNetworkTxStartDelayMs(modeForTx);
     handleRemotePtt(true, { audio: true });
     armJtcatTxFailsafe(settings.audioSource === 'icom-network' ? 'Icom Network RS-BA1' : (settings.audioSource === 'smartsdr' ? 'SmartSDR Direct' : 'local audio'), data.samples, 12000, data.offsetMs || 0, networkStartDelayMs);
@@ -21127,6 +21197,7 @@ function connectRemote() {
     // shows the shack's real value (a zeroed slider = blank waterfall) and
     // never pushes its own stale copy.
     remoteServer.sendToClient({ type: 'jtcat-rx-gain-state', value: typeof settings.jtcatRxGain === 'number' ? settings.jtcatRxGain : 1 });
+    remoteServer.sendToClient({ type: 'jtcat-tx-slot-state', lock: jtcatTxSlotLock() });
     // TX power — same arrangement since 2026-09-09. The web client used to
     // push its own saved copy here instead, which is how a phone's 5% became
     // the shack's 5% for good (NA7C).
@@ -22662,8 +22733,8 @@ function connectRemote() {
     // popout + Full Auto CQ so all three agree and clamp identically.
     const txMsg = buildCqTxMsg(myCall, myGrid, modifier != null ? modifier : (settings.jtcatChaseTarget || ''));
     // TX on next available slot
-    const nextSlot = ft8Engine._lastRxSlot === 'even' ? 'odd' : (ft8Engine._lastRxSlot === 'odd' ? 'even' : 'even');
-    ft8Engine.setTxSlot(nextSlot);
+    // The lock, else our last transmission's slot, else the soonest boundary.
+    const nextSlot = jtcatCqSlot(ft8Engine);
     // Tell the phone the planned slot so its "QUEUED Ns" countdown
     // can target the next start of that parity. Without `slot` here
     // mobile only knows the next cycle boundary, so if the desktop
@@ -22709,6 +22780,13 @@ function connectRemote() {
         if (action.theirReport != null) data.theirReport = action.theirReport;
       }
     }
+    // TX slot: opposite theirs, or the operator's lock. A station in our own
+    // locked slot is refused BEFORE anything is torn down (jtcatReplySlot).
+    {
+      const fox = !!(data.text && (JtcatParser.inferReplyStep({ text: data.text }, myCall) || {}).fox);
+      const hound = (!!settings.jtcatHoundMode || fox) && !jtcatFdContext();
+      if (!jtcatReplySlot(targetEngine, call, slot, { hound, source: 'remote', retry: data, retryType: 'jtcat-reply' })) return;
+    }
     // If replacing an active QSO that had reports exchanged but wasn't logged yet, log it
     if (remoteJtcatQso && remoteJtcatQso.call && remoteJtcatQso.report &&
         remoteJtcatQso.phase !== '73' && remoteJtcatQso.phase !== 'done' &&
@@ -22728,9 +22806,7 @@ function connectRemote() {
     if (houndReply && replyTxFreq < 1000) replyTxFreq = 1000 + Math.floor(Math.random() * 2000);
     targetEngine.setTxFreq(replyTxFreq);
     targetEngine.setRxFreq(df);
-    // TX on opposite slot from the station we're replying to (use slot from decode data)
-    const targetSlot = slot || targetEngine._lastRxSlot;
-    targetEngine.setTxSlot(targetSlot === 'even' ? 'odd' : (targetSlot === 'odd' ? 'even' : 'auto'));
+    // (TX slot already set above by jtcatReplySlot.)
 
     // Compute next TX message from the explicit `nextStep` set by phone-side
     // FT8 click handler. Falls back to legacy `rr73`/`report` flags for any
@@ -23165,7 +23241,7 @@ function connectRemote() {
   });
 
   remoteServer.on('jtcat-set-tx-slot', ({ slot }) => {
-    if (ft8Engine) ft8Engine.setTxSlot(slot);
+    applyJtcatTxSlotLock(slot, 'remote');
   });
 
   // ECHOCAT FT8 gain controls — relay to main renderer
@@ -35835,6 +35911,14 @@ app.whenReady().then(() => {
     const myCall = (settings.myCallsign || '').toUpperCase();
     const myGrid = (settings.grid || '').toUpperCase().substring(0, 4);
     if (!myCall) return;
+    // TX slot: opposite theirs, or the operator's lock. A station in our own
+    // locked slot is refused BEFORE anything is torn down; the window offers
+    // "Unlock and call", which re-sends this same request (jtcatReplySlot).
+    {
+      const fox = !!(data.text && (JtcatParser.inferReplyStep({ text: data.text }, myCall) || {}).fox);
+      const hound = (!!settings.jtcatHoundMode || fox) && !jtcatFdContext();
+      if (!jtcatReplySlot(replyEngine, data.call, data.slot, { hound, source: 'popout', retry: data, retryType: 'jtcat-popout-reply' })) return;
+    }
     // If replacing an active QSO that had reports exchanged but wasn't logged yet, log it
     if (popoutJtcatQso && popoutJtcatQso.call && popoutJtcatQso.report &&
         popoutJtcatQso.phase !== '73' && popoutJtcatQso.phase !== 'done' &&
@@ -35859,9 +35943,7 @@ app.whenReady().then(() => {
     if (houndReply && replyTxFreq < 1000) replyTxFreq = 1000 + Math.floor(Math.random() * 2000);
     replyEngine.setTxFreq(replyTxFreq);
     replyEngine.setRxFreq(data.df || 1500);
-    // TX on opposite slot from the station we're replying to
-    const targetSlot = data.slot || replyEngine._lastRxSlot;
-    replyEngine.setTxSlot(targetSlot === 'even' ? 'odd' : (targetSlot === 'odd' ? 'even' : 'auto'));
+    // (TX slot already set above by jtcatReplySlot.)
 
     // Helper: render a signal report for our SNR field (e.g. -10, +05).
     const fmtSnr = (snr) => {
@@ -36069,9 +36151,10 @@ app.whenReady().then(() => {
     // when Hold TX Freq is on, so a pinned offset is still respected.
     // (K3SBP 2026-06-19 — desktop CQ was stuck at 1500 Hz.)
     ft8Engine.setTxFreq(jtcatQuietFreq);
-    // TX on opposite slot from last decode; default to 'even' if no decodes yet
-    const nextSlot = ft8Engine._lastRxSlot === 'even' ? 'odd' : 'even';
-    ft8Engine.setTxSlot(nextSlot);
+    // The lock, else our last transmission's slot, else the soonest boundary
+    // (never the opposite of whatever decode came in last: an activator's CQ
+    // wandered between slots from QSO to QSO).
+    const nextSlot = jtcatCqSlot(ft8Engine);
     popoutJtcatQso = { mode: 'cq', call: null, grid: null, phase: 'cq', txMsg, cqMsg: txMsg, report: null, sentReport: null, myCall, myGrid, txRetries: 0 };
     if (fdCtx) { popoutJtcatQso.fd = true; popoutJtcatQso.myExch = fdCtx.myExch; }
     ft8Engine._txEnabled = true;
@@ -41604,7 +41687,9 @@ app.whenReady().then(() => {
     if (/^(CQ( [A-Z0-9]{1,4})? )?[A-Z0-9/<>]{3,12}( [A-Z0-9/<>]{3,12})?( [A-Z0-9 +\-]{1,6})?$/.test(t)) return { ok: true, text: t };
     return { ok: false, reason: 'Not a standard exchange and longer than 13-char free text' };
   });
-  ipcMain.on('jtcat-set-tx-slot', (_e, slot) => { if (ft8Engine) ft8Engine.setTxSlot(slot); });
+  // The pop-out's Auto / 1st / 2nd control sets the operator's LOCK (persisted).
+  ipcMain.on('jtcat-set-tx-slot', (_e, slot) => { applyJtcatTxSlotLock(slot, 'popout'); });
+  ipcMain.handle('jtcat-tx-slot-get', () => ({ lock: jtcatTxSlotLock() }));
   // TX power from any window's slider — one writer, synced everywhere else
   // (applyJtcatTxGain); the origin is skipped so a dragging slider isn't
   // fought by its own echo.
@@ -41819,6 +41904,7 @@ app.whenReady().then(() => {
     jtcatHuntFallbackMode = '';
     jtcatHuntQuietPeriods = 0;
     if (!jtcatManager) jtcatManager = new JtcatManager();
+    jtcatManager.setSlotLock(jtcatTxSlotLock());
 
     for (const s of slices) {
       const freqKhz = s.freqKhz || 14074;
@@ -41997,6 +42083,7 @@ app.whenReady().then(() => {
         // handler; jtcatHandleRetryStall counts one try per stamped TX.
         engine._lastTxPeriodKey = jtcatPeriodUtc(engine._mode || 'FT8');
         jtcatNoteTxSent(data.message);
+        jtcatNoteTxSlot(data.slot);
         rigPresetFlushPending();
         console.log(`[JTCAT Multi] TX start on ${s.sliceId}/${s.band} — PTT on, message: ${data.message}, ${catState}`);
         sendCatLog(`FT8 TX (${s.band}): ${data.message} freq=${data.freq}Hz slot=${data.slot} ${catState}`);

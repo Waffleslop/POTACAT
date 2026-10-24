@@ -2870,6 +2870,9 @@ html, body {
 .ft8-tx-btn.ft8-txing { background: var(--accent, #e94560); color: #fff; animation: ft8-pulse 1s ease-in-out infinite; }
 @keyframes ft8-pulse { 0%,100% { opacity:1; } 50% { opacity:0.7; } }
 .ft8-slot-btn { background: #2a4a7a; color: #4fc3f7; }
+.ft8-slot-btn.locked { background: #4fc3f7; color: #1a1a2e; }
+.ft8-slot-toast { position: fixed; left: 50%; bottom: 72px; transform: translateX(-50%); z-index: 9999; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; width: max-content; max-width: calc(100vw - 32px); padding: 8px 12px; border-radius: 6px; background: var(--bg-card, #16213e); border: 1px solid #4fc3f7; color: var(--text, #fff); font-size: 13px; box-shadow: 0 4px 14px rgba(0,0,0,0.4); }
+.ft8-slot-toast button { font-size: 13px; padding: 4px 10px; border-radius: 4px; border: 1px solid #4fc3f7; background: transparent; color: #4fc3f7; cursor: pointer; }
 .ft8-cq-btn { background: #1a3a2a; color: var(--pota); border: 1px solid var(--pota); }
 .ft8-cq-btn.active { background: var(--pota); color: #000; }
 .ft8-tx-msg {

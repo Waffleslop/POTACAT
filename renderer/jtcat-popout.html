@@ -342,6 +342,9 @@
     /* Selects share the .jp-btn scale so the bar reads as one family
        (Casey 2026-07-16: Chase vs Hunt looked like different UIs). */
     .jp-select { font-size: 12px; font-weight: 600; padding: 4px 6px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-tertiary); color: var(--text-primary); cursor: pointer; }
+    .jp-select.jp-slot-locked { border-color: #4fc3f7; color: #4fc3f7; }
+    .jp-slot-toast { position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%); z-index: 9999; display: flex; gap: 10px; align-items: center; max-width: 92vw; padding: 8px 12px; border-radius: 6px; background: var(--bg-secondary, #16213e); border: 1px solid #4fc3f7; color: var(--text-primary); font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,0.4); }
+    .jp-slot-toast button { font-size: 12px; padding: 3px 8px; border-radius: 4px; border: 1px solid #4fc3f7; background: transparent; color: #4fc3f7; cursor: pointer; white-space: nowrap; }
     /* AUTO group — visually binds Hunt + Run (the two mutually-exclusive
        automatic-operation modes) so their association is legible. */
     .jp-auto-group { display: flex; align-items: center; gap: 6px; padding: 2px 6px; border: 1px dashed var(--border-primary); border-radius: 6px; flex-shrink: 0; }
@@ -831,6 +834,13 @@
     <button id="jp-halt-tx" class="jp-btn jp-halt">Halt TX</button>
     <span class="jp-ctl-sep"></span>
     <button id="jp-cq" class="jp-btn">CQ</button>
+    <!-- TX slot lock (lib/jtcat-tx-slot.js): Auto, or every CQ and reply in
+         1st (even) / 2nd (odd). Saved per profile; same control on ECHOCAT. -->
+    <select id="jp-tx-slot" class="jp-select" title="TX slot. Auto: replies go opposite the station, and a new CQ stays in the slot you last transmitted in. 1st / 2nd: every CQ and reply stays in that slot; stations in it are not called.">
+      <option value="auto">Slot: Auto</option>
+      <option value="even">Slot: 1st (even)</option>
+      <option value="odd">Slot: 2nd (odd)</option>
+    </select>
     <!-- Chase target: what you call CQ to (CQ <tag> …) AND the entity whose
          decodes get highlighted. Populated from CqTarget.QUICK_PICKS; "Custom…"
          reveals the input for a US state (FL) or DXCC prefix (JA). -->

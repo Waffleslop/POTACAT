@@ -331,6 +331,58 @@ function _applyPopoutTheme(payload) {
       modeHopModesEl.appendChild(chip);
     });
   }
+  // TX slot lock (main.js applyJtcatTxSlotLock is the one writer; this select
+  // and every ECHOCAT client follow jtcat-tx-slot-state).
+  var txSlotSelect = document.getElementById('jp-tx-slot');
+  function reflectTxSlot(lock) {
+    if (!txSlotSelect) return;
+    var v = (lock === 'even' || lock === 'odd') ? lock : 'auto';
+    txSlotSelect.value = v;
+    txSlotSelect.classList.toggle('jp-slot-locked', v !== 'auto');
+  }
+  if (txSlotSelect) {
+    txSlotSelect.addEventListener('change', function () {
+      reflectTxSlot(txSlotSelect.value);
+      window.api.jtcatSetTxSlot(txSlotSelect.value);
+    });
+    if (window.api.jtcatTxSlotGet) window.api.jtcatTxSlotGet().then(function (st) { reflectTxSlot(st && st.lock); }).catch(function () {});
+    if (window.api.onJtcatTxSlotState) window.api.onJtcatTxSlotState(function (st) { reflectTxSlot(st && st.lock); });
+  }
+  // A reply to a station in the locked slot was refused: say why, and offer
+  // to unlock and send the same reply again.
+  var slotToastEl = null;
+  var slotToastTimer = null;
+  function hideSlotToast() {
+    if (slotToastTimer) { clearTimeout(slotToastTimer); slotToastTimer = null; }
+    if (slotToastEl) { slotToastEl.remove(); slotToastEl = null; }
+  }
+  if (window.api.onJtcatSlotRefused) window.api.onJtcatSlotRefused(function (r) {
+    hideSlotToast();
+    slotToastEl = document.createElement('div');
+    slotToastEl.className = 'jp-slot-toast';
+    var msg = document.createElement('span');
+    msg.textContent = (r && r.text) || 'That station transmits in the slot you locked.';
+    slotToastEl.appendChild(msg);
+    if (r && r.retry) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = 'Unlock and call';
+      btn.addEventListener('click', function () {
+        hideSlotToast();
+        reflectTxSlot('auto');
+        window.api.jtcatSetTxSlot('auto');
+        window.api.jtcatReply(r.retry);
+      });
+      slotToastEl.appendChild(btn);
+    }
+    var close = document.createElement('button');
+    close.type = 'button';
+    close.textContent = 'Keep locked';
+    close.addEventListener('click', hideSlotToast);
+    slotToastEl.appendChild(close);
+    document.body.appendChild(slotToastEl);
+    slotToastTimer = setTimeout(hideSlotToast, 12000);
+  });
   var huntSpottedToggle = document.getElementById('jp-hunt-spotted');
   var huntSpotted = true;   // default on — see main.js jtcatHuntProgramMatch
   var skipTx1 = false;
