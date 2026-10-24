@@ -136,7 +136,7 @@ function fnBody(src, name) {
   console.log('main.js wiring');
   await test('a VARA session probes/starts VARA and readies its audio before Pat connects; VARA FM QSYs to FM', () => {
     const s = fnBody(main, 'winlinkStartSession');
-    assert.ok(/if \(mode === 'vara' \|\| mode === 'varafm'\) \{ await winlinkVaraReady\(mode\); await winlinkVaraAudioReady\(\); \}/.test(s));
+    assert.ok(/if \(mode === 'vara' \|\| mode === 'varafm'\) \{\s*await winlinkVaraReady\(mode\);\s*if \(!live\(\)\) throw cancelled\(\);\s*await winlinkVaraAudioReady\(\);/.test(s));
     assert.ok(s.indexOf('await winlinkVaraReady(mode)') < s.indexOf('await patClient.connect(url)'), 'before the connect');
     assert.ok(/WinlinkModes\.isFmMode\(mode\) \? 'FM' : 'DIGU'/.test(s), 'FM for packet and VARA FM, USB data for the rest');
     assert.ok(/mode === 'varafm' \? 'varafm' : 'varahf'/.test(fnBody(main, 'winlinkGateways')), 'the gateway list asks Pat for varafm');
