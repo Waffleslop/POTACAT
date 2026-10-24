@@ -219,6 +219,7 @@ const TESTS = [
   'test/lotw-report-test.js',
   'test/rumlogng-logbook-test.js',
   'test/wsjtx-status-bridge-test.js',
+  'test/directory-echocat-seed-test.js',
   'test/kf0u-stuck-ptt-test.js',
   'test/active-rig-heal-test.js',
   'test/cw-popover-clamp-test.js',

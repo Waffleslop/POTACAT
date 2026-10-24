@@ -28173,6 +28173,13 @@ function createWindow() {
       fetchDirectory();
     }
     setInterval(() => { if (settings.enableDirectory) fetchDirectory(); }, 4 * 3600000);
+    // connectRemote() builds a NEW server with an empty directory, and only a
+    // fetch (every 4 h) or a net-reminder edit refilled it: until then every
+    // phone connected to a blank HF Nets / SWL tab. Seed each new server.
+    onRemoteServer((rs) => {
+      if (!settings.enableDirectory || (!directoryNets.length && !directorySwl.length)) return;
+      rs.broadcastDirectory({ nets: directoryNets, swl: directorySwl, userNets: buildUserNetsForBroadcast() });
+    });
     // Auto-reopen pop-out map if it was open when the app last closed
     if (settings.mapPopoutOpen) {
       ipcMain.emit('popout-map-open');
@@ -29100,8 +29107,10 @@ function pushDirectoryToRenderer() {
   if (win && !win.isDestroyed()) {
     win.webContents.send('directory-data', { nets: directoryNets, swl: directorySwl });
   }
-  // Also push to ECHOCAT phone client (only when directory feature is enabled)
-  if (remoteServer && remoteServer.running && settings.enableDirectory) {
+  // Also to ECHOCAT (only when the directory feature is enabled). Not gated on
+  // the server LISTENING: broadcastDirectory also stores the snapshot that every
+  // connecting device is hydrated with, and a server still binding missed it.
+  if (remoteServer && settings.enableDirectory) {
     remoteServer.broadcastDirectory({
       nets: directoryNets,
       swl: directorySwl,
