@@ -5251,6 +5251,27 @@ function _applyPopoutTheme(payload) {
     if (splitterEl) splitterEl.style.display = mapVisible ? '' : 'none';
     if (mapVisible && map) setTimeout(function() { map.invalidateSize(); }, 100);
   });
+  // "Worked": the worked-states / countries box on the map. One preference
+  // for every map window on this machine (lib/worked-overlay.js keeps it).
+  var workedToggleBtn = document.getElementById('jp-worked-toggle');
+  if (workedToggleBtn) {
+    var syncWorkedBtn = function(on) { workedToggleBtn.classList.toggle('active', !!on); };
+    syncWorkedBtn(!(window.WorkedOverlay && WorkedOverlay.legendHidden()));
+    workedToggleBtn.addEventListener('click', function() {
+      if (workedOverlayCtl && workedOverlayCtl.setLegendVisible) {
+        workedOverlayCtl.setLegendVisible(!workedOverlayCtl.legendVisible);
+        syncWorkedBtn(workedOverlayCtl.legendVisible);
+      } else if (window.WorkedOverlay) {
+        // no map yet: flip the stored preference, the map reads it when it opens
+        var hide = !WorkedOverlay.legendHidden();
+        try { localStorage.setItem(WorkedOverlay.LEGEND_HIDDEN_KEY, hide ? '1' : '0'); } catch (e) {}
+        syncWorkedBtn(!hide);
+      }
+    });
+    window.addEventListener('storage', function(ev) {
+      if (ev && window.WorkedOverlay && ev.key === WorkedOverlay.LEGEND_HIDDEN_KEY) syncWorkedBtn(!WorkedOverlay.legendHidden());
+    });
+  }
 
   // --- Pane splitter (user report 2026-07-11: resize windows within JTCAT).
   // Drag the divider between Band Activity and the map; ratio persists per

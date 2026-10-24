@@ -131,6 +131,12 @@ test('wiring: every map window attaches the overlay and its keys, main owns the 
   assert.ok(/lotwDownloadConfirmations\(\{\}\)/.test(main) && /await wasBackfillStates\(\)/.test(main));
   const ov = fs.readFileSync(path.join(__dirname, '..', 'lib', 'worked-overlay.js'), 'utf8');
   assert.ok(/createLegend\(L, [\s\S]{0,200}?!o\.web && api\.workedSync/.test(ov), 'the legend offers sync only where the api has it (never on ECHOCAT Web)');
+  // The box can be hidden: "Worked" beside Map in the FT8 window, one machine-wide preference every map window reads.
+  assert.ok(/ctl\.setLegendVisible = function/.test(ov) && /function legendHidden\(\)/.test(ov), 'the overlay owns the legend visibility');
+  const jpHtml = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-popout.html'), 'utf8');
+  const jpJs = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-popout.js'), 'utf8');
+  assert.ok(jpHtml.includes('id="jp-worked-toggle"') && jpHtml.indexOf('id="jp-worked-toggle"') > jpHtml.indexOf('id="jp-map-toggle"'), 'Worked sits beside Map');
+  assert.ok(/workedOverlayCtl\.setLegendVisible\(!workedOverlayCtl\.legendVisible\)/.test(jpJs), 'the button flips the box through the overlay');
   assert.ok(/function sendCatFrequency[\s\S]{0,2500}workedOverlayFollowDial\(\);/.test(main), 'frequency sink re-pushes');
   assert.ok(/function sendCatMode[\s\S]{0,1500}workedOverlayFollowDial\(\);/.test(main), 'mode sink re-pushes');
   assert.ok(/for \(const w of workedOverlayWindows\(\)\) w\.webContents\.send\('worked-roster'/.test(main), 'the roster reaches every map window');
