@@ -242,4 +242,20 @@ test('wiring: band changes reach the decision from the one frequency sink; rules
   assert.ok(proto.isKnownType('rig-presets'));
 });
 
+test('Monitor (K8IKO): MON on/off and level are preset fields, sent only to a rig that takes them', () => {
+  const p = RP.sanitizePresets([{ name: 'FT8', mon: false, monLevel: 40 }])[0];
+  assert.strictEqual(p.mon, false);
+  assert.strictEqual(p.monLevel, 40);
+  assert.deepStrictEqual(RP.presetCommands(p, { mon: true, monLevel: true }), [
+    { action: 'set-mon', value: false, field: 'mon' },
+    { action: 'set-mon-level', value: 40, field: 'monLevel' },
+  ]);
+  assert.deepStrictEqual(RP.presetCommands(p, { mon: false, monLevel: false }), []);
+  assert.strictEqual(RP.describePreset(p, { mon: true, monLevel: true }).text, 'MON off · MON 40%');
+  assert.deepStrictEqual(RP.describePreset(p, {}).skipped, ['MON off', 'MON 40%']);
+  assert.strictEqual(RP.sanitizePresets([{ name: 'x', monLevel: 150 }])[0].monLevel, undefined);
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.ok(/case 'set-mon': \{/.test(main) && /case 'set-mon-level': \{/.test(main), 'the dispatcher verbs the fields name');
+});
+
 console.log(`\nrig-presets: ${passed} passed`);
