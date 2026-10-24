@@ -3119,6 +3119,9 @@ function sendCatStatus(s) {
         // the line high and only a physical unplug cleared it (N7BBQ, FT-891).
         // De-key first, ask questions later.
         dropCwKeyLine('CAT link lost');
+        // The radio unplugged or switched off with its port gone: stop
+        // reconnecting to nothing and wait for the port instead.
+        setTimeout(() => { catPortGoneCheck().catch(() => {}); }, 500);
         // Link loss within ~3 s of driving the key line = the transmit almost
         // certainly reset the USB itself (RF into the shared FT-891 CAT+key
         // device). Point the operator at the real cause, not just "check USB".
@@ -6573,6 +6576,52 @@ function connectCatSafe(context) {
   connectCat().catch((err) => sendCatLog(`[CAT] Connect failed (${context}): ${err.message || err}`));
 }
 
+// ── The radio's serial port is not there (unplugged / switched off) ─────────
+// Not an error to retry against: POTACAT waits for the port to appear and then
+// connects, saying so once. See lib/serial-port-presence.js for the G90 report.
+const SerialPortPresence = require('./lib/serial-port-presence');
+let _catPortWatch = null; // { port, timer }
+async function serialPortPresent(port) {
+  if (!SerialPortPresence.isDevicePort(port)) return true;
+  try {
+    const { SerialPort } = require('serialport');
+    const list = await SerialPort.list();
+    return SerialPortPresence.portListed(port, list);
+  } catch { return true; } // cannot tell: let the connect try, as before
+}
+function stopCatPortWatch() {
+  if (_catPortWatch) { clearInterval(_catPortWatch.timer); _catPortWatch = null; }
+}
+function startCatPortWatch(port) {
+  if (_catPortWatch && _catPortWatch.port === port) return;
+  stopCatPortWatch();
+  sendCatLog(`[CAT] ${port} is not there — the radio is unplugged or switched off. POTACAT will connect when ${port} appears.`);
+  const w = { port, timer: null, busy: false };
+  w.timer = setInterval(async () => {
+    if (w.busy || _catPortWatch !== w) return;
+    w.busy = true;
+    try {
+      if (await serialPortPresent(port)) {
+        stopCatPortWatch();
+        sendCatLog(`[CAT] ${port} is back — connecting`);
+        connectCatSafe('port appeared');
+      }
+    } finally { w.busy = false; }
+  }, 4000);
+  _catPortWatch = w;
+}
+/** Drop the live connection to a port that has gone, and wait for it (mid-session unplug). */
+async function catPortGoneCheck() {
+  const port = SerialPortPresence.portOfTarget(settings.catTarget);
+  if (!port || _catPortWatch || _connectCatPending) return;
+  if (await serialPortPresent(port)) return;
+  if (cat) { try { cat.removeAllListeners(); cat.disconnect(); } catch {} cat = null; }
+  killRigctld();
+  _currentFreqHz = 0;
+  sendCatStatus({ connected: false, target: settings.catTarget, error: `${port} is not there` });
+  startCatPortWatch(port);
+}
+
 // The two ways connectCat() declines to touch the radio used to say NOTHING.
 // A log with no "Connecting to <brand> on <port>" line, no transport error and
 // no retry loop reads exactly like a broken cable — while the only message the
@@ -6682,6 +6731,17 @@ async function connectCat() {
   killRigctld();
   healActiveRigNow('connect');
   let target = settings.catTarget;
+  if (!target && settings.catNone) {
+    // The operator picked "None": no radio, and no auto-activating the only
+    // configured rig behind their back (G90 owner, 2026-10-24: "even when I
+    // set CAT to None, it still keeps trying to reconnect").
+    stopCatPortWatch();
+    cat = null;
+    _currentFreqHz = 0;
+    logConnectCatSkip('[CAT] No radio selected (None) — not connecting. Pick a rig in Settings > My Rigs or the CAT menu to connect.');
+    sendCatStatus({ connected: false });
+    return;
+  }
   if (!target) {
     // A rig configured in My Rigs but never ACTIVATED leaves the global
     // catTarget unset — startup then SILENTLY skipped the connect (no
@@ -6721,9 +6781,24 @@ async function connectCat() {
       : target.ptt === 'serial' ? `${target.pttLine === 'dtr' ? 'DTR' : 'RTS'} on ${target.pttPort || '(no PTT port set)'} keys it`
       : 'its VOX keys on POTACAT\'s audio';
     sendCatLog(`[CAT] No CAT control for this radio: tune it by hand, and ${keyed}. Spot clicks and band buttons will show the frequency to set.`);
+    stopCatPortWatch();
     return;
   }
   closeNocatPttPort();
+  {
+    // The radio's serial port must exist before anything opens it: rigctld
+    // starts and listens without its port, which made a TCP "link" that died
+    // ten seconds later, over and over (G90 owner, 2026-10-24).
+    const devPort = SerialPortPresence.portOfTarget(target);
+    if (devPort && !(await serialPortPresent(devPort))) {
+      cat = null;
+      _currentFreqHz = 0;
+      sendCatStatus({ connected: false, target, error: `${devPort} is not there` });
+      startCatPortWatch(devPort);
+      return;
+    }
+    stopCatPortWatch();
+  }
   if (target.type === 'icom-network' && !_icomNetworkConnectRetryActive && !_icomNetworkConnectRetryTimer) {
     clearIcomNetworkConnectRetry(true);
   }
@@ -39508,6 +39583,9 @@ app.whenReady().then(() => {
     // same helper from its own handler; this path covers the case
     // where the user picks a different rig from the desktop rig list.
     const activeRigChanged = has('activeRigId') && newSettings.activeRigId !== settings.activeRigId;
+    // "None" in Settings > My Rigs is a choice too: remembered so connectCat
+    // never auto-activates the only rig over it; picking a rig clears it.
+    if (has('activeRigId')) settings.catNone = !newSettings.activeRigId;
 
     // CAT-relevant change? A full settings-save (e.g. toggling a spot source
     // in the Spots panel) used to ALWAYS call connectCat() below, which for a
@@ -40985,6 +41063,7 @@ app.whenReady().then(() => {
 
   ipcMain.on('connect-cat', (_e, target) => {
     settings.catTarget = target;
+    settings.catNone = !target; // "None" in the CAT menu is a choice, kept across restarts
     saveSettings(settings);
     // Don't touch local CAT in remote-client mode — the rig lives on
     // the shack. The user must explicitly switch back via the Remote

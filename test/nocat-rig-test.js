@@ -129,7 +129,7 @@ test('FTM-510D (2026-10-23): a no-CAT 2 m / 70 cm mobile keyed through its DATA 
   assert.ok(app.includes("if (pttDl) pttDl.appendChild(opt.cloneNode(true));"), 'the port list is the same one the CW Key Port offers');
   // main: the dispatcher's third path, lines dropped at open, closed on rig change and quit.
   const main = read('main.js');
-  assert.ok(main.includes("if (target.ptt === 'serial') {\n      nocatSerialPtt(!!state, target);\n      return;\n    }"), 'handleRemotePtt routes to the serial line');
+  assert.ok(/if \(target\.ptt === 'serial'\) \{\r?\n      nocatSerialPtt\(!!state, target\);\r?\n      return;\r?\n    \}/.test(main), 'handleRemotePtt routes to the serial line');
   assert.ok(main.includes("function nocatSerialPtt(state, target)") && main.includes("port.set({ dtr: false, rts: false }, () => {"), 'both lines dropped at open');
   assert.ok(main.includes("hupcl: true"), 'lines drop on close');
   assert.ok((main.match(/closeNocatPttPort\(\);/g) || []).length >= 3, 'closed on a rig change (both branches) and at quit');
