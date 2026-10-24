@@ -2895,6 +2895,8 @@ async function waitForSerialPortFree(path, timeoutMs = 4000) {
 
 /** Hamlib model ids that are bridges to another program, never a radio on a serial port. */
 const HAMLIB_BRIDGE_MODELS = { 1: 'Dummy', 2: 'NET rigctl', 4: 'FLRig', 5: 'TRXManager', 6: 'TCI' };
+/** Hamlib models whose serial level converter draws its power from DTR/RTS. */
+const HAMLIB_LINES_POWER_RIG = { 16002: 'Ten-Tec TT-538 Jupiter', 16007: 'Ten-Tec TT-516 Argonaut V' };
 let _hamlibRigList = null;
 /**
  * The Hamlib model id for the rig's Radio Model, by name against `rigctld -l`
@@ -2976,6 +2978,15 @@ function spawnRigctld(target, portOverride) {
       args.push('--ptt-file=' + (calloutTwin(target.pttPort) || target.pttPort));
     }
     if (target.dtrOff) args.push('--set-conf=dtr_state=OFF,rts_state=OFF');
+    else if (HAMLIB_LINES_POWER_RIG[Number(target.rigId)]) {
+      // Radios whose serial interface is POWERED by the handshake lines
+      // (Hamlib calls the conf "set state of DTR/RTS for external powering"):
+      // the Ten-Tec Jupiter and Argonaut V work in ACLog only with its Power
+      // Option = Both (NO4D 2026-10-24). Hamlib leaves the lines "Unset";
+      // POTACAT raises both unless the operator asked for DTR/RTS off.
+      args.push('--set-conf=dtr_state=ON,rts_state=ON');
+      sendCatLog(`[rigctld] ${HAMLIB_LINES_POWER_RIG[Number(target.rigId)]}: DTR and RTS raised to power its serial interface (ACLog's "Power Option = Both")`);
+    }
     if (target.verbose) args.push('-vvvv');
 
     if (!portOverride) killRigctld();

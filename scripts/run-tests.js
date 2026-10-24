@@ -11,6 +11,7 @@ const TESTS = [
   'test/rig-test.js',
   'test/cat-port-presence-test.js',
   'test/guest-pass-listen-test.js',
+  'test/rigctld-spawn-test.js',
   'test/echocat-connect-diet-test.js',
   'test/cw-live-watchdog-test.js',
   'test/lz3aw-web-parity-test.js',
