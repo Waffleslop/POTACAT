@@ -145,7 +145,7 @@
     $('wl-radio-pick').style.display = radio ? 'inline-flex' : 'none';
     var note = '';
     if (m.id === 'mercury') note = 'Experimental: few gateways run Mercury yet.';
-    if (m.id === 'vara' || m.id === 'varafm') note = 'Your own ' + (m.id === 'varafm' ? 'VARA FM' : 'VARA HF') + ', with its PTT set to None — POTACAT starts it if needed and keys the radio.';
+    if (m.id === 'vara' || m.id === 'varafm') note = 'Your own ' + (m.id === 'varafm' ? 'VARA FM' : 'VARA HF') + ', with its PTT set to VOX — POTACAT starts it if needed and keys the radio.';
     if (m.id === 'telnet') {
       // Say WHY the radio modes are greyed — a tooltip on a disabled option
       // is invisible on most systems. One line per distinct reason.

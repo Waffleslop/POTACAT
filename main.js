@@ -9178,8 +9178,8 @@ function winlinkOnPatEvent(ev) {
 }
 
 function winlinkTransportDownText(mode) {
-  if (mode === 'vara') return `VARA HF is not answering on port ${_winlinkVaraPort()} — start VARA (and set its PTT to None) first`;
-  if (mode === 'varafm') return `VARA FM is not answering on port ${_winlinkVaraFmPort()} — start VARA FM (PTT None; port ${_winlinkVaraFmPort()} in its Settings) first`;
+  if (mode === 'vara') return `VARA HF is not answering on port ${_winlinkVaraPort()} — start VARA (and set its PTT to VOX) first`;
+  if (mode === 'varafm') return `VARA FM is not answering on port ${_winlinkVaraFmPort()} — start VARA FM (PTT VOX; port ${_winlinkVaraFmPort()} in its Settings) first`;
   if (mode === 'mercury') return 'Mercury is not answering — check Mercury in Settings > Station';
   if (mode === 'ardop') return 'ardopcf is not answering — see the [Winlink] ardop lines above';
   return 'The modem is not answering';
