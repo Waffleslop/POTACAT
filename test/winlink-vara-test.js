@@ -143,6 +143,13 @@ function fnBody(src, name) {
     assert.ok(/varaFmAddr: `127\.0\.0\.1:\$\{_winlinkVaraFmPort\(\)\}`/.test(fnBody(main, 'writePatConfig')));
     assert.ok(/if \(mode === 'varafm'\) return `VARA FM is not answering/.test(fnBody(main, 'winlinkTransportDownText')));
   });
+  await test('a VARA whose port Pat holds from the last session is reused, not refused (W7RTA)', () => {
+    const s = fnBody(main, 'winlinkVaraReady');
+    const reuse = s.indexOf("_patHoldsVara[kind] === patProc && await varaProcessRunning(kind)");
+    assert.ok(reuse > 0, 'reuse check');
+    assert.ok(reuse < s.indexOf('is open on the shack PC but is not answering'), 'before the not-answering refusal');
+    assert.ok(/_patHoldsVara\[kind\] = patProc;[^\n]*\n\s*winlinkLog\(`\$\{name\} ready on/.test(s), 'marked when Pat is handed VARA');
+  });
   await test('VARA\'s transmit audio reaches the radio only while it has PTT, through the one TX dispatch; the radio reaches VARA through the cable playback', () => {
     const rx = main.slice(main.indexOf("ipcMain.on('modem-bridge-cable-rx'"), main.indexOf("ipcMain.on('modem-bridge-cable-status'"));
     assert.ok(/if \(!winlinkTxActive\) return;/.test(rx), 'idle hiss never reaches the transmitter');

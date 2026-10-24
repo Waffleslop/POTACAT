@@ -8818,11 +8818,21 @@ function varaProcessRunning(kind) {
   });
 }
 const _varaLaunch = { hf: null, fm: null }; // { child, at } for a VARA POTACAT started that may still be coming up
+// The Pat process that opened VARA's command port in an earlier session. Pat
+// keeps that one connection for its whole life (app/connect.go initVARAHF:
+// Ping, reuse) and VARA takes ONE host, so after the first session the probe
+// below finds the port taken and every later Send/Receive was refused as "not
+// answering" until VARA was restarted (W7RTA IC-7300, 2026-10-24).
+const _patHoldsVara = { hf: null, fm: null };
 async function winlinkVaraReady(mode, { configured } = {}) {
   const kind = VaraProcess.kindOfMode(mode);
   const name = VaraProcess.varaName(kind);
   const port = kind === 'fm' ? _winlinkVaraFmPort() : _winlinkVaraPort();
   let probe = await VaraProcess.probeVaraPort(port);
+  if (!probe.ok && patProc && _patHoldsVara[kind] === patProc && await varaProcessRunning(kind)) {
+    winlinkLog(`${name} on 127.0.0.1:${port} is held by Pat from the last session — reusing it`);
+    return;
+  }
   if (!probe.ok) {
     const bin = findVara(kind);
     if (settings.winlinkVaraAutoLaunch !== false && bin.found) {
@@ -8890,6 +8900,7 @@ async function winlinkVaraReady(mode, { configured } = {}) {
       throw new Error(`${name} is not answering on port ${port} and its program was not found on the shack PC — start it there yourself, or set its path in Settings > Station > Winlink`);
     }
   }
+  _patHoldsVara[kind] = patProc; // Pat opens it this session and keeps it
   winlinkLog(`${name} ready on 127.0.0.1:${port}${probe.version ? ' — ' + probe.version : probe.silent ? ' (answered the connection, no VERSION reply)' : ''}`);
 }
 
