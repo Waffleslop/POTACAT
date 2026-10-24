@@ -1925,6 +1925,8 @@ function applyTheme(light, darkVariant) {
   } else {
     document.documentElement.removeAttribute('data-dark-variant');
   }
+  // The Propagation map's dots and arcs are styled for the theme at draw time.
+  if (typeof rerenderRbn === 'function') rerenderRbn();
 }
 
 async function loadPrefs() {
@@ -21431,6 +21433,11 @@ async function updateRbnHomeMarker() {
   );
 
   rbnMap.setView([pos.lat, pos.lon], rbnMap.getZoom());
+  // The arcs need the home position, and this reads it asynchronously — the
+  // first render of the markers ran before it was known, so the view opened
+  // with dots and no arcs until the next batch of reports arrived (K3SBP
+  // 2026-10-23). Draw them now that it is.
+  if (rbnMarkerLayer && (currentView === 'rbn' || activatorRbnVisible)) renderRbnMarkers();
 }
 
 function updateRbnNightOverlay() {
@@ -21529,6 +21536,10 @@ function renderRbnMarkers() {
   _rbnRenderedKey = rbnSpotsKey(filtered);
   const unit = distUnit === 'km' ? 'km' : 'mi';
   const activeBands = new Set();
+  // Light theme: the band colours sit on pale tiles, and under the night
+  // shade they go murky — a dark outline keeps every dot readable (K3SBP
+  // 2026-10-23, green dots lost in his own night).
+  const lightTheme = document.documentElement.getAttribute('data-theme') === 'light';
 
   // Draw arcs first (underneath markers)
   if (rbnHomePos) {
@@ -21540,8 +21551,8 @@ function renderRbnMarkers() {
         const offsetPoints = arcPoints.map(([lat, lon]) => [lat, lon + offset]);
         L.polyline(offsetPoints, {
           color: color,
-          weight: 1.5,
-          opacity: 0.45,
+          weight: lightTheme ? 2 : 1.5,
+          opacity: lightTheme ? 0.6 : 0.45,
           interactive: false,
         }).addTo(rbnMarkerLayer);
       }
@@ -21572,10 +21583,10 @@ function renderRbnMarkers() {
       L.circleMarker([s.lat, s.lon + offset], {
         radius: 7,
         fillColor: color,
-        color: color,
-        weight: 1,
+        color: lightTheme ? '#1a1a2e' : color,
+        weight: lightTheme ? 1.5 : 1,
         opacity: 0.9,
-        fillOpacity: 0.7,
+        fillOpacity: lightTheme ? 0.9 : 0.7,
       }).bindPopup(popupContent).addTo(rbnMarkerLayer);
     }
   }
