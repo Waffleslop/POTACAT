@@ -23949,7 +23949,19 @@ function handleRemotePtt(state, opts = {}) {
   // is MIC,ACC — plain USB keys with silence; WB8IMY IC-7300, 2026-09-26),
   // so the switch happens whether or not the SSB-over-DATA setting is on.
   const forceData = !!opts.forceDataMode;
-  if (state && (settings.ssbOverData || forceData) && audioActive && (!ft8Engine || forceData)) {
+  // A Yaesu's DATA-U is not a mic-off USB: it takes the DATA filter and TX
+  // processing, and with DATA MODE = PSK it shifts the carrier too, so a voice
+  // macro or phone audio sent that way goes out narrow and wrong (K3SBP
+  // FT-710, 2026-10-24: "kicks the 710 into Data-U, transmitting the voice all
+  // wonky"). Voice stays in USB/LSB there; FreeDV and forced callers still switch.
+  const _pttRig = getActiveRigModel();
+  const yaesuVoice = !forceData && !!(_pttRig && _pttRig.brand === 'Yaesu') &&
+    !(typeof freedvEngine !== 'undefined' && freedvEngine);
+  if (state && settings.ssbOverData && !forceData && yaesuVoice && audioActive && !ft8Engine && !_ssbOverDataYaesuWarned) {
+    _ssbOverDataYaesuWarned = true;
+    sendCatLog('[PTT] SSB-over-DATA skipped for voice on a Yaesu: its DATA-U narrows and shifts voice. To keep the hand mic quiet during voice macros, set the SSB audio source to the rear/USB input in the radio menu.');
+  }
+  if (state && (settings.ssbOverData || forceData) && !yaesuVoice && audioActive && (!ft8Engine || forceData)) {
     // Switch to DATA mode before TX to prevent local mic bleed
     // Skip when JTCAT is active — it manages its own DATA mode
     const curMode = (_currentMode || '').toUpperCase();
@@ -42653,7 +42665,7 @@ app.whenReady().then(() => {
   });
   // Desktop voice macro PTT — voice macros play audio through the rig's
   // USB CODEC, so SSB-over-DATA's mode switch IS appropriate here when
-  // the user has it enabled.
+  // the user has it enabled (never on a Yaesu: see handleRemotePtt).
   ipcMain.on('voice-macro-ptt', (_e, state) => {
     handleRemotePtt(!!state, { audio: true });
   });
