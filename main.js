@@ -347,6 +347,7 @@ const { gridToLatLon, latLonToGrid, haversineDistanceMiles, bearing } = require(
 const ActivationMapData = require('./lib/activation-map-data');
 const LogFreq = require('./lib/log-freq');
 const RigBands = require('./lib/rig-bands');
+const AwardTables = require('./lib/award-tables');
 const { activationStationFill } = require('./lib/activation-station'); // N7VBN: station side of activation records
 const { freqToBand } = require('./lib/bands');
 const { splitHostPort } = require('./lib/host-port');
@@ -22419,6 +22420,25 @@ function connectRemote() {
         type: 'diagnostic-snapshot', requestId: requestId || '', source: 'desktop',
         error: String((err && err.message) || err),
       });
+    }
+  });
+
+  // WAS / DXCC tables for a device (lib/award-tables.js): the same rows the
+  // desktop's Worked All States and DXCC views draw.
+  remoteServer.on('award-table-get', async ({ ws, table, mode, band, count, reqId }) => {
+    try {
+      let payload;
+      if (table === 'dxcc') {
+        payload = AwardTables.buildDxccTable(await buildDxccData(), AwardTables.DXCC_BANDS, { mode, band });
+        payload.enabled = settings.enableDxcc === true;
+      } else {
+        payload = AwardTables.buildWasTable(workedRoster, { mode, count });
+        payload.enabled = true;
+      }
+      remoteServer.sendAwardTable(ws, { ...payload, reqId });
+    } catch (err) {
+      sendCatLog(`[Echo CAT] Award table (${table}) failed: ${err.message}`);
+      remoteServer.sendAwardTable(ws, { table, mode, bands: [], rows: [], summary: { error: err.message }, reqId });
     }
   });
 
