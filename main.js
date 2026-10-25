@@ -345,6 +345,7 @@ const { CivCodec } = require('./lib/codecs/civ-codec');
 const { getTuneQuirks, resolveSerialHandshake } = require('./lib/rig-models');
 const { gridToLatLon, latLonToGrid, haversineDistanceMiles, bearing } = require('./lib/grid');
 const ActivationMapData = require('./lib/activation-map-data');
+const LogFreq = require('./lib/log-freq');
 const { activationStationFill } = require('./lib/activation-station'); // N7VBN: station side of activation records
 const { freqToBand } = require('./lib/bands');
 const { splitHostPort } = require('./lib/host-port');
@@ -12111,6 +12112,26 @@ async function logContact(entry, opts) {
     : (entry.activation === false ? [] : liveActivationMyRefs());
   const e = { ...entry };
   delete e.activation;
+  // The frequency as typed, in whatever unit (lib/log-freq.js, the app's
+  // rule): MHz in the kHz box saved FREQ 0.014285 with no BAND for NA4DQ's
+  // whole activation. A value in no amateur band is saved BLANK, never as a
+  // sub-1 MHz FREQ with no band; the contact itself is always kept.
+  if (e.frequency != null && String(e.frequency).trim() !== '' && Number(e.frequency) !== 0) {
+    const f = LogFreq.parseLogFreq(e.frequency);
+    if (f.kind === 'ok') {
+      if (Math.abs(f.khz - Number(e.frequency)) > 0.0005) sendCatLog(`[QSO] Frequency "${e.frequency}" for ${e.callsign} read as ${f.text} kHz (${f.band})`);
+      e.frequency = f.text;
+      e.band = f.band;
+    } else if (f.kind === 'bad' && !(Number(e.frequency) >= 1000)) {
+      sendCatLog(`[QSO] Frequency "${e.frequency}" for ${e.callsign} is in no amateur band: logged with the frequency blank`);
+      e.frequency = '';
+      e.band = '';
+    } else if (f.kind === 'bad') {
+      // A kHz value above the app's table (13 cm and up, bands_above_70cm) is
+      // kept as typed: blanking it would lose a real microwave contact.
+      sendCatLog(`[QSO] Frequency ${e.frequency} kHz for ${e.callsign} is outside the usual band list: kept as typed`);
+    }
+  }
   const records = QsoExpand.expandContact(e, {
     myRefs,
     callInfo: (c) => infos.get(c) || null,
@@ -22497,8 +22518,10 @@ function connectRemote() {
       // qsoAt (epoch ms) is the EXCHANGE time — JS8 is logged after the
       // conversation, the web's offline queue after reconnecting.
       const at = Number(data.qsoAt);
-      const freqKhz = parseFloat(data.freqKhz) || 0;
-      const band = freqToBand(freqKhz / 1000) || '';
+      // The frequency goes to logContact AS TYPED: it reads MHz, kHz, Hz and
+      // a decimal comma there (lib/log-freq.js). parseFloat here turned
+      // "14,285" into 14 and took "14.285" (MHz) as 14.285 kHz (NA4DQ).
+      const rawFreq = data.freqKhz == null ? '' : String(data.freqKhz).trim();
       // The worked station's grid as SAID on the air (JS8 heartbeat, FT8).
       const theirGrid = /^[A-R]{2}[0-9]{2}([A-Xa-x]{2})?$/.test(String(data.theirGrid || '')) ? String(data.theirGrid).toUpperCase() : '';
       // Additional parks (older app builds) join the comma list of refs.
@@ -22507,9 +22530,9 @@ function connectRemote() {
       const upMode = String(data.mode || '').toUpperCase();
       const entry = {
         callsign: String(data.callsign),
-        frequency: String(freqKhz),
+        frequency: rawFreq,
         mode: upMode,
-        band,
+        band: '',
         qsoAt: Number.isFinite(at) && at > 0 ? at : Date.now(),
         rstSent: data.rstSent || '',
         rstRcvd: data.rstRcvd || '',
@@ -22551,10 +22574,12 @@ function connectRemote() {
       // Session contacts (dupe = same call + band in this session), one per call.
       let first = null;
       for (const call of result.calls) {
-        const isDupe = remoteServer.getSessionContacts().some((c) => c.callsign.toUpperCase() === call && c.band === band);
         const rec = result.records.find((r) => r.callsign === call) || result.records[0];
+        // The frequency and band as SAVED (logContact read the typed value).
+        const band = rec.band || '';
+        const isDupe = remoteServer.getSessionContacts().some((c) => c.callsign.toUpperCase() === call && c.band === band);
         const contact = remoteServer.addSessionContact({
-          callsign: call, timeUtc: rec.timeOn, freqKhz: String(freqKhz), mode: rec.mode, band,
+          callsign: call, timeUtc: rec.timeOn, freqKhz: String(rec.frequency || ''), mode: rec.mode, band,
           rstSent: rec.rstSent, rstRcvd: rec.rstRcvd, dupe: isDupe,
         });
         if (!first) first = contact;
@@ -26587,9 +26612,46 @@ function repairQsoLogFieldNames(logPath) {
   }
 }
 
+// Once per log path per session: records saved with MHz typed into a kHz box
+// (NA4DQ 2026-10-24: FREQ 0.014285, no BAND, 100 contacts) get the frequency
+// the operator meant and its band (lib/log-freq.js repairMhzTypedAsKhz —
+// FREQ under 1 MHz outside 2200 m / 630 m, no BAND, x1000 lands in a band).
+// Through mutateLog, so the Cloud copies heal too; the original is kept.
+const _qsoLogFreqRepairChecked = new Set();
+function repairQsoLogMhzFreqs(logPath) {
+  if (!logPath || _qsoLogFreqRepairChecked.has(logPath)) return;
+  _qsoLogFreqRepairChecked.add(logPath);
+  try {
+    if (!fs.existsSync(logPath)) return;
+    // Cheap pre-check: only a log holding a FREQ that starts "0." can need it.
+    if (!/<FREQ:\d+(:[A-Z])?>0\./i.test(fs.readFileSync(logPath, 'utf-8'))) return;
+    let fixed = 0;
+    let backedUp = false;
+    QsoLog.mutateLog(logPath, (qsos) => {
+      for (const q of qsos) {
+        const r = LogFreq.repairMhzTypedAsKhz(q);
+        if (!r) continue;
+        if (!backedUp) {
+          const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '');
+          fs.copyFileSync(logPath, `${logPath}.pre-freq-repair-${stamp}.bak`);
+          backedUp = true;
+        }
+        q.FREQ = r.freqMhz;
+        q.BAND = r.band;
+        fixed++;
+      }
+      return fixed > 0 ? qsos : false;
+    }, { sink: qsoLogSink });
+    if (fixed) sendCatLog(`[Log] Repaired ${fixed} QSO record(s) saved with MHz typed as kHz (frequency under 1 MHz, no band): frequency and band set (original kept as .pre-freq-repair-*.bak)`);
+  } catch (err) {
+    sendCatLog(`[Log] Frequency repair skipped: ${err.message}`);
+  }
+}
+
 // --- Worked QSOs tracking ---
 function loadWorkedQsos() {
   repairQsoLogFieldNames(qsoLogPath());
+  repairQsoLogMhzFreqs(qsoLogPath());
   if (!settings.adifLogPath) return;
   try {
     workedQsos = parseWorkedQsos(settings.adifLogPath);
