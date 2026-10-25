@@ -10500,13 +10500,37 @@ async function winlinkAttachment(box, mid, name) {
   catch (e) { return { ok: false, error: e.message }; }
 }
 
+// Pat's gateway list is ONE cache file for every mode (its data dir,
+// rmslist.json), and Pat writes it by truncating and copying into it in place
+// (pat v1.0.0 internal/cmsapi GetGatewayStatusCached: os.Create + io.Copy).
+// Two requests that overlap while it is missing interleave their writes, and
+// from then on every list is "500 — invalid character ':' after object
+// key:value pair": Pat never re-downloads a cache that exists (a user picking
+// Mercury, 2026-10-24). So POTACAT asks one at a time, and a list Pat cannot
+// parse is fetched once more with force-download, which rewrites the file.
+let _winlinkRmslistChain = Promise.resolve();
+function winlinkRmslistSafe(opts) {
+  const run = async () => {
+    try {
+      return await patClient.rmslist(opts);
+    } catch (e) {
+      if (!WinlinkPat.isCorruptCacheError(e && e.message)) throw e;
+      winlinkLog(`gateway list: Pat's cached list is damaged (${e.message}) — downloading it again`);
+      return patClient.rmslist({ ...opts, forceDownload: true });
+    }
+  };
+  const p = _winlinkRmslistChain.then(run, run);
+  _winlinkRmslistChain = p.catch(() => {});
+  return p;
+}
+
 async function winlinkGateways(mode, band) {
   if (!patClient) return { ok: false, error: 'Pat is not running' };
   // Winlink lists Mercury-capable gateways under VARA (Mercury speaks VARA's
   // TNC protocol); the operator's own tagged list rides on top.
   const patMode = mode === 'ardop' ? 'ardop' : mode === 'packet' ? 'packet' : mode === 'varafm' ? 'varafm' : 'varahf';
   try {
-    let list = await patClient.rmslist({ mode: patMode, band });
+    let list = await winlinkRmslistSafe({ mode: patMode, band });
     if (mode === 'mercury') {
       const tagged = new Set((settings.winlinkMercuryGateways || []).map((c) => String(c).toUpperCase()));
       list = list.map((g) => ({ ...g, mercury: tagged.has(g.call) }));

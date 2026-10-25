@@ -229,5 +229,17 @@ test('POTACAT answers the password prompt from the profile, never the busy chann
   assert.strictEqual(W.autoPromptAnswer({ kind: 'prompt', prompt: 'multi-select', options: [{ value: 'a' }, { value: 'b' }] }), 'a,b');
 });
 
+test('a gateway list Pat cannot parse is recognised; other failures are not (Mercury user 2026-10-24)', () => {
+  assert.ok(W.isCorruptCacheError("gateway list: 500 error — invalid character ':' after object key:value pair"));
+  assert.ok(W.isCorruptCacheError('unexpected end of JSON input'));
+  assert.ok(W.isCorruptCacheError('json: cannot unmarshal string into Go value of type cmsapi.GatewayStatus'));
+  for (const m of ['Pat is not running', 'gateway list: 502 Bad Gateway', 'gateway list: Pat did not answer within 30 s', '']) assert.ok(!W.isCorruptCacheError(m), m);
+  const main = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(/let list = await winlinkRmslistSafe\(\{ mode: patMode, band \}\);/.test(main), 'every gateway list goes through the safe path');
+  assert.ok(/if \(!WinlinkPat\.isCorruptCacheError\(e && e\.message\)\) throw e;[\s\S]{0,200}patClient\.rmslist\(\{ \.\.\.opts, forceDownload: true \}\)/.test(main), 'one re-download on a damaged cache');
+  assert.ok(/const p = _winlinkRmslistChain\.then\(run, run\);/.test(main), 'one request at a time');
+  assert.strictEqual((main.match(/patClient\.rmslist\(/g) || []).length, 2, 'no other caller bypasses it');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
