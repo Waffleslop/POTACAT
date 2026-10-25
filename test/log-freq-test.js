@@ -49,10 +49,18 @@ test('refuses what lands in no band, allows empty', () => {
   assert.strictEqual(parseLogFreq('').kind, 'empty');
   assert.strictEqual(parseLogFreq('   ').kind, 'empty');
   assert.strictEqual(parseLogFreq(undefined).kind, 'empty');
-  for (const bad of ['14.4', '15000', '0', 'abc', '14.285.5', '1296', '-14285']) {
+  for (const bad of ['14.4', '15000', '0', 'abc', '14.285.5', '1000', '-14285']) {
     assert.strictEqual(parseLogFreq(bad).kind, 'bad', bad);
   }
   assert.strictEqual(parseLogFreq(14285).kind, 'ok', 'a number, not only a string');
+});
+
+test('knows the microwave bands (potacat-app d505524)', () => {
+  assert.strictEqual(ok('2304100').band, '13cm');
+  assert.deepStrictEqual(ok('1296.1'), { kind: 'ok', khz: 1296100, band: '23cm', text: '1296100' });
+  assert.strictEqual(ok('10368.1').band, '3cm');
+  assert.strictEqual(ok('3500').band, '80m', 'kHz still wins where both readings are bands');
+  assert.strictEqual(ok('10120').band, '30m');
 });
 
 test('hamBandOfKhz', () => {
@@ -97,7 +105,7 @@ test('wiring: logContact reads the typed frequency; log-qso hands it over raw; t
   const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
   const lc = main.slice(main.indexOf('async function logContact('), main.indexOf('const records = QsoExpand.expandContact(e,'));
   assert.ok(/LogFreq\.parseLogFreq\(e\.frequency\)/.test(lc) && /e\.frequency = '';\n\s*e\.band = '';/.test(lc), 'a value in no band is saved blank');
-  assert.ok(/f\.kind === 'bad' && !\(Number\(e\.frequency\) >= 1000\)/.test(lc), 'only a sub-1 MHz value is blanked; a microwave kHz value is kept');
+  assert.ok(!/kept as typed/.test(lc), 'no keep-as-typed exception: the table covers 2200 m to 1.25 cm, so nothing is saved without a BAND');
   assert.ok(/const rawFreq = data\.freqKhz == null \? '' : String\(data\.freqKhz\)\.trim\(\);/.test(main));
   assert.ok(!/const freqKhz = parseFloat\(data\.freqKhz\) \|\| 0;/.test(main), 'log-qso no longer parseFloats the box');
   assert.ok(/repairQsoLogFieldNames\(qsoLogPath\(\)\);\n\s*repairQsoLogMhzFreqs\(qsoLogPath\(\)\);/.test(main));

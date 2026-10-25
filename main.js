@@ -12122,14 +12122,12 @@ async function logContact(entry, opts) {
       if (Math.abs(f.khz - Number(e.frequency)) > 0.0005) sendCatLog(`[QSO] Frequency "${e.frequency}" for ${e.callsign} read as ${f.text} kHz (${f.band})`);
       e.frequency = f.text;
       e.band = f.band;
-    } else if (f.kind === 'bad' && !(Number(e.frequency) >= 1000)) {
+    } else if (f.kind === 'bad') {
+      // lib/log-freq.js knows 2200 m through 1.25 cm, so anything else is a
+      // typo, never a real contact's frequency.
       sendCatLog(`[QSO] Frequency "${e.frequency}" for ${e.callsign} is in no amateur band: logged with the frequency blank`);
       e.frequency = '';
       e.band = '';
-    } else if (f.kind === 'bad') {
-      // A kHz value above the app's table (13 cm and up, bands_above_70cm) is
-      // kept as typed: blanking it would lose a real microwave contact.
-      sendCatLog(`[QSO] Frequency ${e.frequency} kHz for ${e.callsign} is outside the usual band list: kept as typed`);
     }
   }
   const records = QsoExpand.expandContact(e, {
