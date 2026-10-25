@@ -27368,7 +27368,8 @@ function createWsjtxUdpBridge(label) {
 
         // A Status on the QSO's own band and mode first, so the receiver has
         // a valid source even when the contact beats the first heartbeat.
-        this._sendStatus(freqHz > 0 ? { dialFreqHz: freqHz, mode: (qsoData.mode || '').toUpperCase() } : null);
+        const statusMode = String(qsoData.mode || '').toUpperCase();
+        this._sendStatus(freqHz > 0 ? { dialFreqHz: freqHz, mode: statusMode } : null);
 
         // LOGGED_ADIF (type 12) first — carries POTA_REF, SIG_INFO, and other
         // program-specific fields. Then QSO_LOGGED (type 5) for apps that
