@@ -16848,6 +16848,10 @@ async function openSettingsDialog(tab) {
   setEnableFreedv.checked = s.enableFreedv === true;
   document.getElementById('set-freedv-use-data-mode').checked = s.freedvUseDataMode !== false; // default true
   document.getElementById('set-jtcat-use-data-mode').checked = s.jtcatUseDataMode !== false; // default true
+  // A Flex tunes through SmartSDR, where this setting never applies: hidden
+  // there, shown for every other radio (phone parity, potacat-app c3c9e9e).
+  const jtcatDataModeRow = document.getElementById('jtcat-use-data-mode-row');
+  if (jtcatDataModeRow) jtcatDataModeRow.classList.toggle('hidden', window.RigFamily.isFlex((s.rigs || []).find(r => r.id === s.activeRigId)));
   document.getElementById('set-freedv-force-sideband').value = s.freedvForceSideband || '';
   document.getElementById('set-enable-auto-sstv').checked = s.enableAutoSstv === true;
   document.getElementById('set-auto-sstv-min').value = s.autoSstvInactivityMin || 90;
