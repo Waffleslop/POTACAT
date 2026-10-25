@@ -1862,7 +1862,7 @@ document.addEventListener('keydown', (e) => {
 // A state token (`US-NJ`, bare `NJ`, `CA-ON`) is a STATE rule: it matches
 // every park spot whose location names that state (N0KAH 2026-10-06).
 // Mirrored in main.js for the desktop notifications.
-const WATCH_BANDS = new Set(['160m','80m','60m','40m','30m','20m','17m','15m','12m','10m','6m','4m','2m','70cm','1.25m','33cm','23cm']);
+const WATCH_BANDS = new Set(['2200m','630m','160m','80m','60m','40m','30m','20m','17m','15m','12m','10m','6m','4m','2m','70cm','1.25m','33cm','23cm','13cm','9cm','6cm','3cm','1.25cm']);
 function parseWatchlist(str) {
   if (!str) return [];
   const rules = [];
@@ -3084,6 +3084,66 @@ function readSdrScopeForm() {
   if (rigModelSelect) rigModelSelect.addEventListener('change', syncSdrScopeForm);
 }
 
+// ── Bands this radio is used on (lib/rig-bands.js) ──────────────────────
+// Pre-ticked with the model's own bands; the operator can add a band (a
+// transverter) or untick one. Saved as rig.bands only once touched, so an
+// untouched rig keeps following its model's list (and unknown models stay
+// unrestricted). main.js activeRigBands() is the one reader.
+const rigBandsState = { selected: new Set(), touched: false, native: null };
+function rigEditorModelName() {
+  const m = rigModelSelect ? rigModelSelect.value : '';
+  if (m) return m;
+  try { const t = buildCatTargetFromForm(); return (t && t.civModel) || ''; } catch { return ''; }
+}
+function renderRigBandsGrid() {
+  const grid = document.getElementById('rig-bands-grid');
+  if (!grid || !window.RigBands) return;
+  grid.textContent = '';
+  const native = rigBandsState.native ? new Set(rigBandsState.native) : null;
+  for (const b of window.RigBands.ALL_BANDS) {
+    const lab = document.createElement('label');
+    if (native && !native.has(b)) {
+      lab.className = 'rig-band-extra';
+      lab.title = 'Not a band this model covers on its own (a transverter or an option)';
+    }
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = rigBandsState.selected.has(b);
+    cb.addEventListener('change', () => {
+      rigBandsState.touched = true;
+      if (cb.checked) rigBandsState.selected.add(b); else rigBandsState.selected.delete(b);
+    });
+    lab.appendChild(cb);
+    lab.appendChild(document.createTextNode(b));
+    grid.appendChild(lab);
+  }
+}
+async function loadRigBandsForModel() {
+  let native = null;
+  try { const r = await window.api.rigBandsNative(rigEditorModelName()); native = r && Array.isArray(r.bands) ? r.bands : null; } catch { /* older main */ }
+  rigBandsState.native = native;
+  // An unknown model is not restricted: every band ticked until the operator says otherwise.
+  if (!rigBandsState.touched) rigBandsState.selected = new Set(native || (window.RigBands ? window.RigBands.ALL_BANDS : []));
+  renderRigBandsGrid();
+}
+async function initRigBandsForEditor(rig) {
+  const saved = rig && window.RigBands ? window.RigBands.cleanBands(rig.bands) : null;
+  rigBandsState.touched = !!saved;
+  rigBandsState.selected = new Set(saved || []);
+  await loadRigBandsForModel();
+}
+/** rig.bands to save: the operator's ticks once touched, else undefined (follow the model). */
+function rigBandsToSave() {
+  if (!rigBandsState.touched || !window.RigBands) return undefined;
+  const list = window.RigBands.ALL_BANDS.filter((b) => rigBandsState.selected.has(b));
+  return list.length ? list : undefined;
+}
+if (rigModelSelect) rigModelSelect.addEventListener('change', () => { loadRigBandsForModel(); });
+{
+  const reset = document.getElementById('rig-bands-reset');
+  if (reset) reset.addEventListener('click', () => { rigBandsState.touched = false; loadRigBandsForModel(); });
+}
+
 async function openRigEditor(mode, rigId) {
   rigEditorMode = mode;
   editingRigId = rigId || null;
@@ -3155,6 +3215,7 @@ async function openRigEditor(mode, rigId) {
   rigSetupAutoOpened = false;
   setRigSetupPanelOpen(false);
   refreshRigSetupNotes();
+  await initRigBandsForEditor(mode === 'edit' ? currentRigs.find(r => r.id === rigId) : null);
 
   rigEditor.classList.remove('hidden');
   rigAddBtn.classList.add('hidden');
@@ -3288,6 +3349,7 @@ async function saveRigEditor() {
       rig.flexBandAntennaMap = flexBandAntennaMap;
       if (rigSdrScope) rig.sdrScope = rigSdrScope;
       rig.setupDone = [...rigSetupDone];
+      { const rb = rigBandsToSave(); if (rb) rig.bands = rb; else delete rig.bands; }
     }
   } else {
     const newRig = {
@@ -3311,6 +3373,7 @@ async function saveRigEditor() {
       flexBandAntennaMap,
       ...(rigSdrScope ? { sdrScope: rigSdrScope } : {}),
       setupDone: [...rigSetupDone],
+      ...(rigBandsToSave() ? { bands: rigBandsToSave() } : {}),
     };
     currentRigs.push(newRig);
     _stationSetupOpenAfterSave = newRig.id;
@@ -3464,14 +3527,14 @@ initMultiDropdown(propModeFilterEl, 'Mode', rerenderRbn);
 // --- Band QSY buttons (shown when Radio band filter is active) ---
 const BAND_QSY_FREQS = {
   // SSB calling frequencies (kHz) — used for SSB/phone modes
-  ssb: { '160m': 1900, '80m': 3860, '60m': 5357, '40m': 7200, '30m': 10130, '20m': 14260, '17m': 18130, '15m': 21300, '12m': 24960, '10m': 28400, '6m': 50125, '4m': 70200, '2m': 144200, '70cm': 432100, '1.25m': 222100, '33cm': 903100, '23cm': 1296100 },
+  ssb: { '2200m': 137, '630m': 475, '160m': 1900, '80m': 3860, '60m': 5357, '40m': 7200, '30m': 10130, '20m': 14260, '17m': 18130, '15m': 21300, '12m': 24960, '10m': 28400, '6m': 50125, '4m': 70200, '2m': 144200, '70cm': 432100, '1.25m': 222100, '33cm': 903100, '23cm': 1296100, '13cm': 2304100, '9cm': 3400100, '6cm': 5760100, '3cm': 10368100, '1.25cm': 24048100 },
   // CW calling frequencies
-  cw: { '160m': 1820, '80m': 3530, '60m': 5332, '40m': 7030, '30m': 10110, '20m': 14030, '17m': 18080, '15m': 21030, '12m': 24900, '10m': 28030, '6m': 50090, '4m': 70100, '2m': 144050, '70cm': 432050, '1.25m': 222100, '33cm': 903100, '23cm': 1296100 },
+  cw: { '2200m': 136, '630m': 474, '160m': 1820, '80m': 3530, '60m': 5332, '40m': 7030, '30m': 10110, '20m': 14030, '17m': 18080, '15m': 21030, '12m': 24900, '10m': 28030, '6m': 50090, '4m': 70100, '2m': 144050, '70cm': 432050, '1.25m': 222100, '33cm': 903100, '23cm': 1296100, '13cm': 2304100, '9cm': 3400100, '6cm': 5760100, '3cm': 10368100, '1.25cm': 24048100 },
   // Digital/FT8 frequencies (above 2m: WSJT-X defaults; 33cm has none, so the weak-signal calling frequency)
-  digi: { '160m': 1840, '80m': 3573, '60m': 5357, '40m': 7074, '30m': 10136, '20m': 14074, '17m': 18100, '15m': 21074, '12m': 24915, '10m': 28074, '6m': 50313, '4m': 70154, '2m': 144174, '70cm': 432065, '1.25m': 222065, '33cm': 903100, '23cm': 1296174 },
+  digi: { '2200m': 136, '630m': 474.2, '160m': 1840, '80m': 3573, '60m': 5357, '40m': 7074, '30m': 10136, '20m': 14074, '17m': 18100, '15m': 21074, '12m': 24915, '10m': 28074, '6m': 50313, '4m': 70154, '2m': 144174, '70cm': 432065, '1.25m': 222065, '33cm': 903100, '23cm': 1296174, '13cm': 2304100, '9cm': 3400100, '6cm': 5760100, '3cm': 10368100, '1.25cm': 24048100 },
 };
-const BAND_QSY_ORDER = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '4m', '2m', '70cm', '1.25m', '33cm', '23cm'];
-const BAND_QSY_LABELS = { '160m': '160', '80m': '80', '60m': '60', '40m': '40', '30m': '30', '20m': '20', '17m': '17', '15m': '15', '12m': '12', '10m': '10', '6m': '6', '4m': '4', '2m': '2', '70cm': '70cm', '1.25m': '222', '33cm': '33cm', '23cm': '23cm' };
+const BAND_QSY_ORDER = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '4m', '2m', '70cm', '1.25m', '33cm', '23cm', '13cm', '9cm', '6cm', '3cm', '1.25cm'];
+const BAND_QSY_LABELS = { '2200m': '2200', '630m': '630', '160m': '160', '80m': '80', '60m': '60', '40m': '40', '30m': '30', '20m': '20', '17m': '17', '15m': '15', '12m': '12', '10m': '10', '6m': '6', '4m': '4', '2m': '2', '70cm': '70cm', '1.25m': '222', '33cm': '33cm', '23cm': '23cm', '13cm': '13cm', '9cm': '9cm', '6cm': '6cm', '3cm': '3cm', '1.25cm': '24G' };
 const bandButtonsEl = document.getElementById('band-buttons');
 
 function buildBandButtons() {
@@ -3483,6 +3546,7 @@ function buildBandButtons() {
     btn.title = `QSY to ${band}`;
     bandButtonsEl.appendChild(btn);
   }
+  if (typeof applyRigBandsMain === 'function') applyRigBandsMain();
 }
 buildBandButtons();
 
@@ -10572,12 +10636,14 @@ const RBN_BAND_COLORS_NORMAL = {
   '30m': '#00cccc', '20m': '#4488ff', '17m': '#8844ff', '15m': '#cc44ff',
   '12m': '#ff44cc', '10m': '#ff4488', '6m': '#e0e0e0', '4m': '#b0e0e6', '2m': '#88ff88', '70cm': '#ffaa44',
   '1.25m': '#c8a2ff', '33cm': '#ffd59e', '23cm': '#9ef5e0',
+  '13cm': '#ffb3c6', '9cm': '#d4a5ff', '6cm': '#a5d8ff', '3cm': '#ffe08a', '1.25cm': '#b5f5a5', '2200m': '#8d6e63', '630m': '#a1887f',
 };
 const RBN_BAND_COLORS_CB = {
   '160m': '#ffa726', '80m': '#ffca28', '60m': '#fff176', '40m': '#4fc3f7',
   '30m': '#00cccc', '20m': '#4488ff', '17m': '#8844ff', '15m': '#cc44ff',
   '12m': '#ff44cc', '10m': '#ff4488', '6m': '#e0e0e0', '4m': '#b0e0e6', '2m': '#88ff88', '70cm': '#ffaa44',
   '1.25m': '#c8a2ff', '33cm': '#ffd59e', '23cm': '#9ef5e0',
+  '13cm': '#ffb3c6', '9cm': '#d4a5ff', '6cm': '#a5d8ff', '3cm': '#ffe08a', '1.25cm': '#b5f5a5', '2200m': '#8d6e63', '630m': '#a1887f',
 };
 
 let SOURCE_COLORS_ACTIVE = { ...SOURCE_COLORS_NORMAL };
@@ -13837,7 +13903,7 @@ splitSplitterEl.addEventListener('mousedown', (e) => {
 });
 
 // --- DXCC Matrix Rendering ---
-const DXCC_BANDS = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '4m', '2m', '70cm', '1.25m', '33cm', '23cm'];
+const DXCC_BANDS = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '4m', '2m', '70cm', '1.25m', '33cm', '23cm', '13cm', '9cm', '6cm', '3cm', '1.25cm'];
 
 function isEntityConfirmedOnBand(ent, band, modeFilter) {
   const modes = ent.confirmed[band];
@@ -14656,11 +14722,13 @@ const CW_DIGI_MODES_SET = new Set(['CW', 'FT8', 'FT4', 'FT2', 'RTTY', 'DIGI', 'J
 
 // Band lookup for ADIF (frequency in kHz -> band string)
 const BAND_RANGES = [
+  [135.7, 137.8, '2200m'], [472, 479, '630m'],
   [1800, 2000, '160m'], [3500, 4000, '80m'], [5330, 5410, '60m'],
   [7000, 7300, '40m'], [10100, 10150, '30m'], [14000, 14350, '20m'],
   [18068, 18168, '17m'], [21000, 21450, '15m'], [24890, 24990, '12m'],
   [28000, 29700, '10m'], [50000, 54000, '6m'], [70000, 70500, '4m'], [144000, 148000, '2m'],
   [420000, 450000, '70cm'], [222000, 225000, '1.25m'], [902000, 928000, '33cm'], [1240000, 1300000, '23cm'],
+  [2300000, 2450000, '13cm'], [3300000, 3500000, '9cm'], [5650000, 5925000, '6cm'], [10000000, 10500000, '3cm'], [24000000, 24250000, '1.25cm'],
 ];
 
 function freqKhzToBand(khz) {
@@ -21284,7 +21352,31 @@ window.api.onSolarData((payload) => {
 
 
 // --- Band Activity Heatmap ---
-const HEATMAP_BANDS = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '4m', '2m', '70cm', '1.25m', '33cm', '23cm'];
+// ── Bands this radio is used on (main.js activeRigBands, lib/rig-bands.js) ──
+// null = not restricted. Every band picker and band button in this window
+// hides the others; the spot list itself is already filtered in main.
+var rigBandsList = null; // var, not let: renderBandActivity may run before this line
+function applyRigBandsMain() {
+  if (!window.RigBands) return;
+  const RB = window.RigBands;
+  RB.applyToElements(document, '#band-filter .multi-dropdown-item', rigBandsList);
+  RB.applyToElements(document, '#rbn-band-filter .multi-dropdown-item', rigBandsList);
+  RB.applyToElements(document, '#band-buttons button', rigBandsList);
+  RB.applyToElements(document, '.jtcat-band-btn', rigBandsList);
+  for (const id of ['dirv-band-filter', 'set-idle-psk-band', 'set-idle-wspr-band', 'welcome-idle-psk-band', 'welcome-idle-wspr-band']) {
+    const sel = document.getElementById(id);
+    if (!sel) continue;
+    RB.applyToElements(sel, 'option', rigBandsList);
+    RB.fixSelect(sel);
+  }
+  try { renderBandActivity(); } catch { /* not built yet */ }
+}
+if (window.api && window.api.rigBandsGet) {
+  window.api.rigBandsGet().then((d) => { rigBandsList = (d && d.bands) || null; applyRigBandsMain(); }).catch(() => {});
+  window.api.onRigBands((d) => { rigBandsList = (d && d.bands) || null; applyRigBandsMain(); });
+}
+
+const HEATMAP_BANDS = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '4m', '2m', '70cm', '1.25m', '33cm', '23cm', '13cm', '9cm', '6cm', '3cm', '1.25cm'];
 const HEATMAP_CONTINENTS = ['EU', 'NA', 'SA', 'AS', 'AF', 'OC'];
 
 function updateBandActivityVisibility() {
@@ -21319,13 +21411,15 @@ function renderBandActivity() {
     counts[key] = (counts[key] || 0) + 1;
   }
 
-  // Build grid: columns = header + bands, rows = header + continents
-  const cols = HEATMAP_BANDS.length + 1; // +1 for row labels
+  // Build grid: columns = header + bands, rows = header + continents.
+  // Only bands this radio is used on (rig editor, lib/rig-bands.js).
+  const HEATMAP_BANDS_RIG = window.RigBands ? window.RigBands.filterByBand(HEATMAP_BANDS, rigBandsList) : HEATMAP_BANDS;
+  const cols = HEATMAP_BANDS_RIG.length + 1; // +1 for row labels
   bandActivityBar.innerHTML = '';
 
   const grid = document.createElement('div');
   grid.className = 'band-activity-grid';
-  grid.style.gridTemplateColumns = `auto repeat(${HEATMAP_BANDS.length}, 1fr)`;
+  grid.style.gridTemplateColumns = `auto repeat(${HEATMAP_BANDS_RIG.length}, 1fr)`;
 
   // Header row: empty corner + band labels
   const corner = document.createElement('div');
@@ -21333,7 +21427,7 @@ function renderBandActivity() {
   corner.textContent = '';
   grid.appendChild(corner);
 
-  for (const band of HEATMAP_BANDS) {
+  for (const band of HEATMAP_BANDS_RIG) {
     const hdr = document.createElement('div');
     hdr.className = 'band-activity-header';
     hdr.textContent = band;
@@ -21347,7 +21441,7 @@ function renderBandActivity() {
     label.textContent = cont;
     grid.appendChild(label);
 
-    for (const band of HEATMAP_BANDS) {
+    for (const band of HEATMAP_BANDS_RIG) {
       const count = counts[`${band}|${cont}`] || 0;
       const cell = document.createElement('div');
       cell.className = 'band-activity-cell';
@@ -21600,7 +21694,7 @@ function renderRbnMarkers() {
 
 function renderRbnLegend(activeBands) {
   rbnLegendEl.innerHTML = '';
-  const sortedBands = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '4m', '2m', '70cm', '1.25m', '33cm', '23cm'];
+  const sortedBands = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '4m', '2m', '70cm', '1.25m', '33cm', '23cm', '13cm', '9cm', '6cm', '3cm', '1.25cm'];
   for (const band of sortedBands) {
     if (!activeBands.has(band)) continue;
     const item = document.createElement('span');
@@ -28242,6 +28336,8 @@ if (activatorCallsignInput) {
 
 /** Simple freq -> band for activator. Input in kHz. */
 function freqToBandActivator(khz) {
+  if (khz >= 135.7 && khz <= 137.8) return '2200m';
+  if (khz >= 472 && khz <= 479) return '630m';
   if (khz >= 1800 && khz <= 2000) return '160m';
   if (khz >= 3500 && khz <= 4000) return '80m';
   if (khz >= 5330 && khz <= 5410) return '60m';
@@ -28259,6 +28355,11 @@ function freqToBandActivator(khz) {
   if (khz >= 420000 && khz <= 450000) return '70cm';
   if (khz >= 902000 && khz <= 928000) return '33cm';
   if (khz >= 1240000 && khz <= 1300000) return '23cm';
+  if (khz >= 2300000 && khz <= 2450000) return '13cm';
+  if (khz >= 3300000 && khz <= 3500000) return '9cm';
+  if (khz >= 5650000 && khz <= 5925000) return '6cm';
+  if (khz >= 10000000 && khz <= 10500000) return '3cm';
+  if (khz >= 24000000 && khz <= 24250000) return '1.25cm';
   return '';
 }
 

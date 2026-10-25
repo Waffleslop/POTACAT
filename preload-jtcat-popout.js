@@ -1,6 +1,9 @@
 const { contextBridge, ipcRenderer, webFrame } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
+  // The active rig's bands (lib/rig-bands.js): {bands: string[]|null, all}.
+  rigBandsGet: () => ipcRenderer.invoke('rig-bands-get'),
+  onRigBands: (cb) => ipcRenderer.on('rig-bands', (_e, d) => cb(d)),
   // Driving a remote shack: its FT8 engine's spectrum (0..3000 Hz, 0..255 bins).
   onJtcatRemoteSpectrum: (cb) => ipcRenderer.on('jtcat-remote-spectrum', (_e, bins) => cb(bins)),
   // Mode hopping (the window called these without the preload having them).

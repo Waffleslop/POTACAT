@@ -222,6 +222,7 @@ const TESTS = [
   'test/jtcat-tx-slot-test.js',
   'test/activation-map-data-test.js',
   'test/log-freq-test.js',
+  'test/rig-bands-test.js',
   'test/directory-echocat-seed-test.js',
   'test/pota-email-spot-test.js',
   'test/kf0u-stuck-ptt-test.js',

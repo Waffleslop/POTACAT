@@ -1,6 +1,9 @@
 const { contextBridge, ipcRenderer, webFrame } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
+  // The active rig's bands (lib/rig-bands.js): {bands: string[]|null, all}.
+  rigBandsGet: () => ipcRenderer.invoke('rig-bands-get'),
+  onRigBands: (cb) => ipcRenderer.on('rig-bands', (_e, d) => cb(d)),
   platform: process.platform,
   // Driving a remote shack: its SSTV waterfall bins, and "not connected".
   onSstvRemoteWfBins: (cb) => ipcRenderer.on('sstv-remote-wf-bins', (_e, bins) => cb(bins)),

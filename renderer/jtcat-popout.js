@@ -1801,6 +1801,24 @@ function _applyPopoutTheme(payload) {
     '20m': 14078, '17m': 18104, '15m': 21078, '12m': 24922, '10m': 28078,
     '6m': 50318,
   };
+  // Bands this radio is used on (rig editor; main.js rig-bands). The band
+  // picker hides the others; the band the radio is on stays visible so the
+  // select never shows something else than the dial.
+  var jpRigBands = null;
+  function applyJpRigBands() {
+    if (!window.RigBands) return;
+    var sel = document.getElementById('jp-band');
+    var cur = sel ? sel.value : '';
+    window.RigBands.applyToElements(document, '.jp-band-opt', jpRigBands, function(el) {
+      return el.value === cur ? '' : el.dataset.band;
+    });
+    if (typeof wsprBuildHopChips === 'function') wsprBuildHopChips();
+  }
+  if (window.api.rigBandsGet) {
+    window.api.rigBandsGet().then(function(d) { jpRigBands = (d && d.bands) || null; applyJpRigBands(); }).catch(function() {});
+    window.api.onRigBands(function(d) { jpRigBands = (d && d.bands) || null; applyJpRigBands(); });
+  }
+
   function updateBandFreqs() {
     var m = modeSelect.value;
     var table = m === 'WSPR' ? WSPR_BAND_FREQS : m === 'PSK31' ? PSK_BAND_FREQS : m === 'JTTY' ? JTTY_BAND_FREQS : m === 'JS8' ? JS8_BAND_FREQS : m === 'FT2' ? FT2_BAND_FREQS : m === 'FT4' ? FT4_BAND_FREQS : FT8_BAND_FREQS;
@@ -2070,6 +2088,7 @@ function _applyPopoutTheme(payload) {
       var bandSel = document.createElement('select');
       bandSel.title = 'Band';
       Object.keys(BAND_FREQS).forEach(function(b) {
+        if (window.RigBands && !window.RigBands.allowed(jpRigBands, b) && b !== cfg.band) return;
         var opt = document.createElement('option');
         opt.value = b;
         opt.textContent = b;
@@ -2946,6 +2965,7 @@ function _applyPopoutTheme(payload) {
   }
   if (bandSelect) {
     bandSelect.addEventListener('change', function() {
+      setTimeout(applyJpRigBands, 0); // the band just left hides if the radio is not used on it
       var opt = bandSelect.options[bandSelect.selectedIndex];
       if (opt) selectBand(opt, true);
     });
@@ -3115,6 +3135,7 @@ function _applyPopoutTheme(payload) {
     wsprHopBandsEl.innerHTML = '';
     order.forEach(function(b) {
       if (!WSPR_BAND_FREQS[b]) return;
+      if (window.RigBands && !window.RigBands.allowed(jpRigBands, b)) return; // not a band this radio is used on
       var chip = document.createElement('span');
       chip.className = 'jp-wspr-chip' + (wsprHopSel.indexOf(b) >= 0 ? ' on' : '');
       chip.textContent = b.replace('m', '');

@@ -20,6 +20,7 @@
   <!-- decode-row-js -->
   <!-- worked-roster-js -->
   <!-- worked-overlay-js -->
+  <!-- rig-bands-js -->
   <script>if(localStorage.getItem('echocat-theme')==='light'){document.documentElement.setAttribute('data-theme','light');document.querySelector('meta[name="theme-color"]').content='#e8eaed'}</script>
 </head>
 <body>
@@ -958,6 +959,8 @@
         <button class="rc-dropdown-btn" type="button">Band: <span class="rc-dd-text">All</span></button>
         <div class="rc-dropdown-menu">
           <label class="rc-dropdown-item"><input type="checkbox" value="all" checked> All</label>
+          <label class="rc-dropdown-item"><input type="checkbox" value="2200m"> 2200m</label>
+          <label class="rc-dropdown-item"><input type="checkbox" value="630m"> 630m</label>
           <label class="rc-dropdown-item"><input type="checkbox" value="160m"> 160m</label>
           <label class="rc-dropdown-item"><input type="checkbox" value="80m"> 80m</label>
           <label class="rc-dropdown-item"><input type="checkbox" value="60m"> 60m</label>
@@ -975,6 +978,11 @@
           <label class="rc-dropdown-item"><input type="checkbox" value="1.25m"> 1.25m</label>
           <label class="rc-dropdown-item"><input type="checkbox" value="33cm"> 33cm</label>
           <label class="rc-dropdown-item"><input type="checkbox" value="23cm"> 23cm</label>
+          <label class="rc-dropdown-item"><input type="checkbox" value="13cm"> 13cm</label>
+          <label class="rc-dropdown-item"><input type="checkbox" value="9cm"> 9cm</label>
+          <label class="rc-dropdown-item"><input type="checkbox" value="6cm"> 6cm</label>
+          <label class="rc-dropdown-item"><input type="checkbox" value="3cm"> 3cm</label>
+          <label class="rc-dropdown-item"><input type="checkbox" value="1.25cm"> 1.25cm</label>
         </div>
       </div>
 
@@ -1252,10 +1260,10 @@
       <div class="lb-filter-bar" id="lb-filter-bar">
         <select id="lb-filter-band" title="Band">
           <option value="">All bands</option>
-          <option>160m</option><option>80m</option><option>60m</option><option>40m</option>
+          <option>2200m</option><option>630m</option><option>160m</option><option>80m</option><option>60m</option><option>40m</option>
           <option>30m</option><option>20m</option><option>17m</option><option>15m</option>
           <option>12m</option><option>10m</option><option>6m</option><option>2m</option><option>70cm</option>
-          <option>1.25m</option><option>33cm</option><option>23cm</option>
+          <option>1.25m</option><option>33cm</option><option>23cm</option><option>13cm</option><option>9cm</option><option>6cm</option><option>3cm</option><option>1.25cm</option>
         </select>
         <select id="lb-filter-mode" title="Mode">
           <option value="">All modes</option>

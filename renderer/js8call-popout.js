@@ -460,6 +460,16 @@
       bandEl.appendChild(o);
     });
   })();
+  // Bands this radio is used on (rig editor; main.js rig-bands).
+  function applyJs8RigBands(bands) {
+    if (!window.RigBands) return;
+    var cur = bandEl.value;
+    window.RigBands.applyToElements(bandEl, 'option', bands, function (o) { return o.value === cur ? '' : o.value; });
+  }
+  if (window.api.rigBandsGet) {
+    window.api.rigBandsGet().then(function (d) { applyJs8RigBands((d && d.bands) || null); }).catch(function () {});
+    window.api.onRigBands(function (d) { applyJs8RigBands((d && d.bands) || null); });
+  }
   bandEl.addEventListener('change', function () {
     if (!bandEl.value) return;
     window.api.setBand(bandEl.value).then(function (r) {

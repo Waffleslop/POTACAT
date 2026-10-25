@@ -6,6 +6,10 @@ const { contextBridge, ipcRenderer, shell, webFrame } = require('electron');
 // that needs those has to live in main and reach the renderer via IPC.
 
 contextBridge.exposeInMainWorld('api', {
+  // The active rig's bands (lib/rig-bands.js): {bands: string[]|null, all}.
+  rigBandsGet: () => ipcRenderer.invoke('rig-bands-get'),
+  onRigBands: (cb) => ipcRenderer.on('rig-bands', (_e, d) => cb(d)),
+  rigBandsNative: (model) => ipcRenderer.invoke('rig-bands-native', model),
   platform: process.platform,
   openExternal: (url) => ipcRenderer.send('open-external', url),
   pairRedeemUrl: (url) => ipcRenderer.invoke('pair-redeem-url', url),

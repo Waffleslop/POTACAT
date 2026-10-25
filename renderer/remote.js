@@ -2521,6 +2521,11 @@
         break;
 
       // --- JTCAT (FT8/FT4) ---
+      case 'rig-bands':
+        // The shack's active rig is used on these bands only (null = all).
+        webRigBands = Array.isArray(msg.bands) ? msg.bands : null;
+        applyWebRigBands();
+        break;
       case 'jtcat-tx-slot-state':
         if (typeof reflectFt8TxSlot === 'function') reflectFt8TxSlot(msg.lock);
         break;
@@ -8219,6 +8224,30 @@
       ft8Send({ type: 'jtcat-enable-tx', enabled: true });
     }
   });
+
+  // Bands the shack's rig is used on (S2C rig-bands, lib/rig-bands.js inlined):
+  // every band button and band picker on this page hides the others. The
+  // spot list itself is filtered on the shack.
+  var webRigBands = null;
+  function applyWebRigBands() {
+    var RB = window.RigBands;
+    if (!RB) return;
+    RB.applyToElements(document, '.vf-band', webRigBands);
+    RB.applyToElements(document, '#rc-band-filter .rc-dropdown-item', webRigBands);
+    var ft8Sel = document.getElementById('ft8-band-select');
+    if (ft8Sel) {
+      var cur = ft8Sel.value;
+      RB.applyToElements(ft8Sel, 'option', webRigBands, function (o) { return o.value === cur ? '' : o.value; });
+    }
+    var sstvSel = document.getElementById('sstv-freq-phone');
+    if (sstvSel) {
+      sstvSel.querySelectorAll('optgroup').forEach(function (g) {
+        var ok = RB.allowed(webRigBands, g.label);
+        g.hidden = !ok;
+        g.querySelectorAll('option').forEach(function (o) { o.hidden = !ok; o.disabled = !ok; });
+      });
+    }
+  }
 
   // TX slot LOCK: Auto -> 1st (even) -> 2nd (odd) -> Auto. The desktop
   // persists it and echoes jtcat-tx-slot-state to every client (main.js

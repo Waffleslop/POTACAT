@@ -60,6 +60,8 @@
         <div class="multi-dropdown-menu">
           <label class="multi-dropdown-item"><input type="checkbox" value="all" checked> All</label>
           <label class="multi-dropdown-item"><input type="checkbox" value="radio"> Radio</label>
+          <label class="multi-dropdown-item"><input type="checkbox" value="2200m"> 2200m</label>
+          <label class="multi-dropdown-item"><input type="checkbox" value="630m"> 630m</label>
           <label class="multi-dropdown-item"><input type="checkbox" value="160m"> 160m</label>
           <label class="multi-dropdown-item"><input type="checkbox" value="80m"> 80m</label>
           <label class="multi-dropdown-item"><input type="checkbox" value="60m"> 60m</label>
@@ -77,6 +79,11 @@
           <label class="multi-dropdown-item"><input type="checkbox" value="1.25m"> 1.25m</label>
           <label class="multi-dropdown-item"><input type="checkbox" value="33cm"> 33cm</label>
           <label class="multi-dropdown-item"><input type="checkbox" value="23cm"> 23cm</label>
+          <label class="multi-dropdown-item"><input type="checkbox" value="13cm"> 13cm</label>
+          <label class="multi-dropdown-item"><input type="checkbox" value="9cm"> 9cm</label>
+          <label class="multi-dropdown-item"><input type="checkbox" value="6cm"> 6cm</label>
+          <label class="multi-dropdown-item"><input type="checkbox" value="3cm"> 3cm</label>
+          <label class="multi-dropdown-item"><input type="checkbox" value="1.25cm"> 1.25cm</label>
         </div>
       </div>
       <div class="band-buttons hidden" id="band-buttons"></div>
@@ -958,6 +965,8 @@
         <label class="dxcc-filter-label">Band:
           <select id="dxcc-band-select">
             <option value="all">All Bands</option>
+            <option value="2200m">2200m</option>
+            <option value="630m">630m</option>
             <option value="160m">160m</option>
             <option value="80m">80m</option>
             <option value="60m">60m</option>
@@ -975,6 +984,11 @@
             <option value="1.25m">1.25m</option>
             <option value="33cm">33cm</option>
             <option value="23cm">23cm</option>
+            <option value="13cm">13cm</option>
+            <option value="9cm">9cm</option>
+            <option value="6cm">6cm</option>
+            <option value="3cm">3cm</option>
+            <option value="1.25cm">1.25cm</option>
           </select>
         </label>
         <label class="dxcc-filter-label">Mode:
@@ -997,6 +1011,8 @@
             <tr>
               <th class="dxcc-entity-col">Entity</th>
               <th class="dxcc-cont-col">Cont</th>
+              <th class="dxcc-band-col">2200m</th>
+              <th class="dxcc-band-col">630m</th>
               <th class="dxcc-band-col">160m</th>
               <th class="dxcc-band-col">80m</th>
               <th class="dxcc-band-col">60m</th>
@@ -1014,6 +1030,11 @@
               <th class="dxcc-band-col">1.25m</th>
               <th class="dxcc-band-col">33cm</th>
               <th class="dxcc-band-col">23cm</th>
+              <th class="dxcc-band-col">13cm</th>
+              <th class="dxcc-band-col">9cm</th>
+              <th class="dxcc-band-col">6cm</th>
+              <th class="dxcc-band-col">3cm</th>
+              <th class="dxcc-band-col">1.25cm</th>
             </tr>
           </thead>
           <tbody id="dxcc-matrix-body"></tbody>
@@ -1058,6 +1079,8 @@
           <thead>
             <tr>
               <th class="dxcc-entity-col">State</th>
+              <th class="dxcc-band-col was-band-col">2200m</th>
+              <th class="dxcc-band-col was-band-col">630m</th>
               <th class="dxcc-band-col was-band-col">160m</th>
               <th class="dxcc-band-col was-band-col">80m</th>
               <th class="dxcc-band-col was-band-col">60m</th>
@@ -1075,6 +1098,11 @@
               <th class="dxcc-band-col was-band-col">1.25m</th>
               <th class="dxcc-band-col was-band-col">33cm</th>
               <th class="dxcc-band-col was-band-col">23cm</th>
+              <th class="dxcc-band-col was-band-col">13cm</th>
+              <th class="dxcc-band-col was-band-col">9cm</th>
+              <th class="dxcc-band-col was-band-col">6cm</th>
+              <th class="dxcc-band-col was-band-col">3cm</th>
+              <th class="dxcc-band-col was-band-col">1.25cm</th>
             </tr>
           </thead>
           <tbody id="was-matrix-body"></tbody>
@@ -1202,6 +1230,8 @@
           <button class="multi-dropdown-btn" type="button">Band: <span class="multi-dropdown-text">All</span></button>
           <div class="multi-dropdown-menu">
             <label class="multi-dropdown-item"><input type="checkbox" value="all" checked> All</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="2200m"> 2200m</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="630m"> 630m</label>
             <label class="multi-dropdown-item"><input type="checkbox" value="160m"> 160m</label>
             <label class="multi-dropdown-item"><input type="checkbox" value="80m"> 80m</label>
             <label class="multi-dropdown-item"><input type="checkbox" value="60m"> 60m</label>
@@ -1219,6 +1249,11 @@
             <label class="multi-dropdown-item"><input type="checkbox" value="1.25m"> 1.25m</label>
             <label class="multi-dropdown-item"><input type="checkbox" value="33cm"> 33cm</label>
             <label class="multi-dropdown-item"><input type="checkbox" value="23cm"> 23cm</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="13cm"> 13cm</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="9cm"> 9cm</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="6cm"> 6cm</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="3cm"> 3cm</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="1.25cm"> 1.25cm</label>
           </div>
         </div>
         <div class="multi-dropdown" id="prop-mode-filter">
@@ -1704,6 +1739,15 @@
           </select>
         </label>
         <span class="help-text" style="margin-bottom:8px;display:block;">Selecting your model enables model-specific features: CW keying, ATU commands, CI-V address, filter control, and power limits.</span>
+        <!-- Bands this radio is used on (lib/rig-bands.js): pre-ticked with the
+             model's own bands; a transverter band can be added. Unticked bands
+             are hidden on every surface (spots, map, FT8, JTTY, SSTV, band buttons). -->
+        <div id="rig-bands-box" class="rig-bands-box">
+          <div class="rig-bands-title">Check all bands you can use with this radio</div>
+          <span id="rig-bands-help" class="help-text" style="display:block;margin-bottom:4px;">Ticked with the bands this model covers. Add a band you reach with a transverter, or untick one you never use. Unticked bands are hidden everywhere in POTACAT: spots, map, FT8, JTTY, SSTV and the band buttons.</span>
+          <div id="rig-bands-grid" class="rig-bands-grid"></div>
+          <button type="button" id="rig-bands-reset" class="rig-btn" style="margin-top:4px;font-size:11px;padding:2px 8px;">Use this model's bands</button>
+        </div>
         <!-- Rig setup notes (lib/rig-setup-notes.js): radio menu settings other
              operators needed before POTACAT could drive the radio. -->
         <div class="rig-setup-row">
@@ -4944,6 +4988,7 @@
 
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>
   <script src="../lib/rig-family.js"></script>
+  <script src="../lib/rig-bands.js"></script>
   <script src="../lib/spot-row.js"></script>
   <script src="../lib/cm108-ptt.js"></script>
   <script src="../lib/remote-features.js"></script>

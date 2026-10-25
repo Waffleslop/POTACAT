@@ -706,6 +706,7 @@
      both audio sources apply identical DSP. -->
 <script src="tx-eq-chain.js"></script>
 <script src="../lib/custom-cat-follow.js"></script>
+<script src="../lib/rig-bands.js"></script>
 <script>
 // --- State ---
 let currentFreqHz = 0;
@@ -736,6 +737,7 @@ let currentAfGain = null;  // 0–100, the last AF level main SENT (set-only); n
 let profiles = [];
 let profileDragFrom = null; // index of the profile being dragged (drag-to-reorder)
 let vfoHiddenBands = []; // band labels to hide, e.g. ['160m', '2m', '70cm']
+let vfoRigBands = null; // the active rig's bands (null = not restricted), main.js rig-bands
 let vfoLocked = false;
 
 const ICONS = {
@@ -949,6 +951,8 @@ window.api.onRadioState((s) => {
 
 // --- Bands ---
 const BANDS = [
+  { label: '2200m', freq: 136 },
+  { label: '630m', freq: 474 },
   { label: '160m', freq: 1800 },
   { label: '80m', freq: 3500 },
   { label: '60m', freq: 5332 },
@@ -966,11 +970,18 @@ const BANDS = [
   { label: '70cm', freq: 420000 },
   { label: '33cm', freq: 902000 },
   { label: '23cm', freq: 1240000 },
+  { label: '13cm', freq: 2304000 },
+  { label: '9cm', freq: 3400000 },
+  { label: '6cm', freq: 5760000 },
+  { label: '3cm', freq: 10368000 },
+  { label: '1.25cm', freq: 24048000 },
 ];
 
 function freqToBand(hz) {
   const khz = hz / 1000;
   for (const b of BANDS) {
+    if (b.label === '2200m' && khz >= 135.7 && khz <= 137.8) return b.label;
+    if (b.label === '630m' && khz >= 472 && khz <= 479) return b.label;
     if (b.label === '160m' && khz >= 1800 && khz <= 2000) return b.label;
     if (b.label === '80m' && khz >= 3500 && khz <= 4000) return b.label;
     if (b.label === '60m' && khz >= 5300 && khz <= 5500) return b.label;
@@ -988,6 +999,11 @@ function freqToBand(hz) {
     if (b.label === '70cm' && khz >= 420000 && khz <= 450000) return b.label;
     if (b.label === '33cm' && khz >= 902000 && khz <= 928000) return b.label;
     if (b.label === '23cm' && khz >= 1240000 && khz <= 1300000) return b.label;
+    if (b.label === '13cm' && khz >= 2300000 && khz <= 2450000) return b.label;
+    if (b.label === '9cm' && khz >= 3300000 && khz <= 3500000) return b.label;
+    if (b.label === '6cm' && khz >= 5650000 && khz <= 5925000) return b.label;
+    if (b.label === '3cm' && khz >= 10000000 && khz <= 10500000) return b.label;
+    if (b.label === '1.25cm' && khz >= 24000000 && khz <= 24250000) return b.label;
   }
   return null;
 }
@@ -996,6 +1012,8 @@ function buildBandGrid(container) {
   container.innerHTML = '';
   for (const b of BANDS) {
     if (vfoHiddenBands.includes(b.label)) continue;
+    // Only bands this radio is used on (rig editor, lib/rig-bands.js).
+    if (window.RigBands && !window.RigBands.allowed(vfoRigBands, b.label)) continue;
     const btn = document.createElement('button');
     btn.className = 'tog band-btn';
     btn.textContent = b.label;
@@ -1023,6 +1041,11 @@ function updateBandHighlight() {
 
 buildBandGrid(document.getElementById('band-grid-dial'));
 // band-grid-mode removed (Mode tab eliminated)
+// The band buttons follow the active rig's bands, now and as they change.
+if (window.api && window.api.rigBandsGet) {
+  window.api.rigBandsGet().then((d) => { vfoRigBands = (d && d.bands) || null; rebuildAllBandGrids(); }).catch(() => {});
+  window.api.onRigBands((d) => { vfoRigBands = (d && d.bands) || null; rebuildAllBandGrids(); });
+}
 
 // --- Modes ---
 const MODES = ['USB', 'LSB', 'CW', 'AM', 'FM', 'FT8', 'FT4', 'RTTY', 'DIGU', 'DIGL', 'RADE'];
@@ -2173,6 +2196,8 @@ function buildBandCheckboxes() {
   const container = document.getElementById('band-checkboxes');
   container.innerHTML = '';
   BANDS.forEach(b => {
+    // A band this radio is not used on is not offered (rig editor sets those).
+    if (window.RigBands && !window.RigBands.allowed(vfoRigBands, b.label)) return;
     const lbl = document.createElement('label');
     const cb = document.createElement('input');
     cb.type = 'checkbox';

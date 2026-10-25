@@ -308,3 +308,16 @@ document.addEventListener('keydown', e => {
     // Handled by main process before-input-event
   }
 });
+
+// Bands this radio is used on (rig editor; main.js rig-bands): the band
+// filter offers only those (the spot list itself is filtered in main).
+(function initRigBandsFilter() {
+  var sel = document.getElementById('filter-band');
+  if (!sel || !window.RigBands || !window.api || !window.api.rigBandsGet) return;
+  function apply(d) {
+    window.RigBands.applyToElements(sel, 'option', (d && d.bands) || null);
+    if (window.RigBands.fixSelect(sel)) sel.dispatchEvent(new Event('change'));
+  }
+  window.api.rigBandsGet().then(apply).catch(function () {});
+  window.api.onRigBands(apply);
+})();

@@ -346,6 +346,7 @@ const { getTuneQuirks, resolveSerialHandshake } = require('./lib/rig-models');
 const { gridToLatLon, latLonToGrid, haversineDistanceMiles, bearing } = require('./lib/grid');
 const ActivationMapData = require('./lib/activation-map-data');
 const LogFreq = require('./lib/log-freq');
+const RigBands = require('./lib/rig-bands');
 const { activationStationFill } = require('./lib/activation-station'); // N7VBN: station side of activation records
 const { freqToBand } = require('./lib/bands');
 const { splitHostPort } = require('./lib/host-port');
@@ -2568,6 +2569,8 @@ function getRigCapabilities(rigType) {
   // AF (speaker) level: the Flex slice's audio_level, or a codec with
   // setAfGain (CI-V 14 01, Kenwood/Yaesu AG, rigctld L AF). Set-only.
   caps.afgain = rigSupportsAfGain(rigType);
+  // The bands this radio is used on (null = not restricted), lib/rig-bands.js.
+  caps.bands = activeRigBands();
   return caps;
 }
 
@@ -2634,7 +2637,7 @@ const recentNotifications = new Map(); // callsign -> timestamp for dedup (5-min
 // Band/mode qualifiers are optional — omitted means match any. A state
 // token (`US-NJ`, bare `NJ`, `CA-ON`) is a STATE rule matched against a
 // park spot's location (N0KAH 2026-10-06); mirrors renderer/app.js.
-const WATCH_BANDS = new Set(['160m','80m','60m','40m','30m','20m','17m','15m','12m','10m','6m','4m','2m','70cm','1.25m','33cm','23cm']);
+const WATCH_BANDS = new Set(['2200m','630m','160m','80m','60m','40m','30m','20m','17m','15m','12m','10m','6m','4m','2m','70cm','1.25m','33cm','23cm','13cm','9cm','6cm','3cm','1.25cm']);
 function parseWatchlist(str) {
   if (!str) return [];
   const rules = [];
@@ -3861,6 +3864,7 @@ function sendCatAlc(val) {
 function broadcastRigState() {
   const rigType = detectRigType();
   const caps = getRigCapabilities(rigType);
+  rigBandsBroadcast(); // deduped: only a change in the active rig's bands goes out
   const state = {
     nb: _currentNbState,
     rfGain: _currentRfGain,
@@ -4501,6 +4505,44 @@ function activeRigSetupPointer(feature) {
       .filter(n => n.level === 'required' && !n.done && (!feature || n.feature === feature));
     return open.length ? ' — see Settings > My Rigs > (this rig) > Setup instructions: "' + open[0].title + '"' : '';
   } catch { return ''; }
+}
+
+// ── Bands this radio is used on (lib/rig-bands.js; Casey 2026-10-24) ─────
+// rig.bands (the rig editor's "Check all bands you can use with this radio")
+// wins; else the model's native bands; else null = not restricted. Every
+// operating surface and the spot list are filtered by it.
+function activeRigBands() {
+  if (isRemoteMode() && remoteRig.seen) {
+    const c = remoteRig.capabilities() || {};
+    return Array.isArray(c.bands) ? c.bands : null;
+  }
+  const rig = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
+  if (!rig) return null;
+  let name = rig.model || '';
+  // Icom CI-V rigs usually name their model in the connection form's picker.
+  if (!getModel(name, null) && rig.catTarget && rig.catTarget.civModel) name = rig.catTarget.civModel;
+  return RigBands.bandsForRig(rig, name, getModel(name, null));
+}
+
+let _rigBandsLastSent = '';
+/** Push the active rig's bands to every window and ECHOCAT client (deduped). */
+function rigBandsBroadcast(force) {
+  const bands = activeRigBands();
+  const key = JSON.stringify(bands);
+  if (!force && key === _rigBandsLastSent) return;
+  const changed = key !== _rigBandsLastSent;
+  _rigBandsLastSent = key;
+  const payload = { bands, all: RigBands.ALL_BANDS };
+  for (const w of [win, jtcatPopoutWin, sstvPopoutWin, vfoPopoutWin, spotsPopoutWin]) {
+    if (w && !w.isDestroyed()) w.webContents.send('rig-bands', payload);
+  }
+  if (js8PopoutWin && !js8PopoutWin.isDestroyed()) js8PopoutWin.webContents.send('rig-bands', payload);
+  if (remoteServer && remoteServer.running && typeof remoteServer.broadcastRigBands === 'function') remoteServer.broadcastRigBands(payload);
+  if (changed) {
+    sendCatLog(bands ? `[Rig] Bands for this radio: ${bands.join(' ')} (others are hidden everywhere; change them in the rig editor)` : '[Rig] Bands for this radio: not restricted (model not known; tick bands in the rig editor to limit them)');
+    // The spot list is filtered by band, so it is rebuilt with the new set.
+    try { sendMergedSpots(); } catch { /* window not ready */ }
+  }
 }
 
 function getActiveRigModelName() {
@@ -21238,6 +21280,7 @@ function connectRemote() {
     // never pushes its own stale copy.
     remoteServer.sendToClient({ type: 'jtcat-rx-gain-state', value: typeof settings.jtcatRxGain === 'number' ? settings.jtcatRxGain : 1 });
     remoteServer.sendToClient({ type: 'jtcat-tx-slot-state', lock: jtcatTxSlotLock() });
+    remoteServer.sendToClient({ type: 'rig-bands', bands: activeRigBands(), all: RigBands.ALL_BANDS });
     // TX power — same arrangement since 2026-09-09. The web client used to
     // push its own saved copy here instead, which is how a phone's 5% became
     // the shack's 5% for good (NA7C).
@@ -21837,6 +21880,7 @@ function connectRemote() {
     const rigs = (settings.rigs || []).map(r => ({ id: r.id, name: r.name, family: RigFamily.rigFamily(r) }));
     remoteServer.sendRigsToClient(rigs, rig.id);
     console.log('[Echo CAT] Switched rig to:', rig.name);
+    rigBandsBroadcast(); // the new rig's bands, everywhere
   });
 
   // --- Rig controls (filter, NB, VFO) ---
@@ -23864,6 +23908,7 @@ function connectRemote() {
     // the web pane and vice versa, so those keys push too.
     const jttyKeys = ['jttySerial', 'jttyMacros', 'jttyFt8Macros', 'jttyMacroStyle', 'jttyProfile', 'jtcatFdExch', 'pskMacros'];
     if (sdrSync || dxeChanged || jttyKeys.some((k) => Object.prototype.hasOwnProperty.call(partial || {}, k))) updateRemoteSettings();
+    rigBandsBroadcast();
   });
 }
 
@@ -26206,6 +26251,14 @@ function sendMergedSpots() {
   // CQ/ITU zones on every spot, every source (optional columns/fields on the
   // desktop table and ECHOCAT cards — LZ3AW item 30).
   CallZones.stampSpotZones(merged, callZonesOf);
+  // Only bands this radio is used on (rig editor, lib/rig-bands.js): a spot
+  // on a band it cannot work is never shown, on any surface or panadapter.
+  const rigBands = activeRigBands();
+  if (rigBands) {
+    const keep = merged.filter((sp) => RigBands.allowed(rigBands, sp.band));
+    merged.length = 0;
+    merged.push(...keep);
+  }
   lastMergedSpots = merged; // cached for the bandspread-popout-push override
   win.webContents.send('spots', merged);
   pushSpotsToSmartSdr(merged);
@@ -40494,6 +40547,7 @@ app.whenReady().then(() => {
       startIdlePauseTimer();
     }
 
+    rigBandsBroadcast(); // rig.bands edited, or a different rig active
     return settings;
   });
 
@@ -41793,6 +41847,10 @@ app.whenReady().then(() => {
   // The pop-out's Auto / 1st / 2nd control sets the operator's LOCK (persisted).
   ipcMain.on('jtcat-set-tx-slot', (_e, slot) => { applyJtcatTxSlotLock(slot, 'popout'); });
   ipcMain.handle('jtcat-tx-slot-get', () => ({ lock: jtcatTxSlotLock() }));
+  // The active rig's bands (null = not restricted) for any window's first paint.
+  ipcMain.handle('rig-bands-get', () => ({ bands: activeRigBands(), all: RigBands.ALL_BANDS }));
+  // The rig editor's checkboxes: a model's native bands, before the rig is saved.
+  ipcMain.handle('rig-bands-native', (_e, modelName) => ({ bands: RigBands.nativeBands(String(modelName || ''), getModel(String(modelName || ''), null)), all: RigBands.ALL_BANDS }));
   // TX power from any window's slider — one writer, synced everywhere else
   // (applyJtcatTxGain); the origin is skipped so a dragging slider isn't
   // fought by its own echo.
