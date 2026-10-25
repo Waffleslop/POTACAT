@@ -344,6 +344,7 @@ const { RigctldCodec } = require('./lib/codecs/rigctld-codec');
 const { CivCodec } = require('./lib/codecs/civ-codec');
 const { getTuneQuirks, resolveSerialHandshake } = require('./lib/rig-models');
 const { gridToLatLon, latLonToGrid, haversineDistanceMiles, bearing } = require('./lib/grid');
+const ActivationMapData = require('./lib/activation-map-data');
 const { activationStationFill } = require('./lib/activation-station'); // N7VBN: station side of activation records
 const { freqToBand } = require('./lib/bands');
 const { splitHostPort } = require('./lib/host-port');
@@ -22366,16 +22367,26 @@ function connectRemote() {
         const p = getParkDb(parksMap, parkRef);
         if (p) park = { ref: parkRef, name: p.name || '', lat: parseFloat(p.latitude) || null, lon: parseFloat(p.longitude) || null };
       }
-      // Resolve contact locations via cty.dat
+      // What the LOG holds for each contact (state, grid, band — NA4DQ
+      // 2026-10-24: a recap read off the phone's thin copies said "0 States").
+      // Taken only from saved records, never from the call area.
+      let fromLog = new Map();
+      try {
+        const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+        fromLog = ActivationMapData.logDetailsFor(parseAllRawQsos(logPath), (contacts || []).map((c) => c && c.callsign), parkRef);
+      } catch (err) { sendCatLog('[Echo CAT] Activation recap: log not read (' + err.message + ') — call-area placement only'); }
       const resolvedContacts = [];
       for (const c of (contacts || [])) {
         let loc = null;
-        // Try grid square first (more precise)
-        if (c.myGridsquare || c.gridsquare) {
-          // Grid squares would need client-side conversion; use cty.dat here
+        const logged = fromLog.get(String((c && c.callsign) || '').toUpperCase()) || {};
+        // A logged grid square places the contact precisely; else the call area.
+        const grid = logged.gridsquare || c.gridsquare || '';
+        if (grid) {
+          const ll = gridToLatLon(grid);
+          if (ll && Number.isFinite(ll.lat) && Number.isFinite(ll.lon)) loc = { lat: ll.lat, lon: ll.lon, name: logged.country || '', source: 'grid' };
         }
         // Resolve via cty.dat
-        if (ctyDb && c.callsign) {
+        if (!loc && ctyDb && c.callsign) {
           const entity = resolveCallsign(c.callsign, ctyDb);
           if (entity && entity.lat != null && entity.lon != null) {
             const area = getCallAreaCoords(c.callsign, entity.name);
@@ -22388,11 +22399,18 @@ function connectRemote() {
         }
         resolvedContacts.push({
           callsign: c.callsign || '',
-          freq: c.freq || '',
+          freq: c.freq || logged.freq || '',
           mode: c.mode || '',
           lat: loc ? loc.lat : null,
           lon: loc ? loc.lon : null,
           entityName: loc ? loc.name : '',
+          // From the saved record only (absent when the log has none):
+          ...(logged.state ? { state: logged.state } : {}),
+          ...(logged.gridsquare ? { gridsquare: logged.gridsquare } : {}),
+          ...(logged.band ? { band: logged.band } : {}),
+          ...(logged.county ? { county: logged.county } : {}),
+          // 'grid' = placed from a logged/sent grid square, 'call-area' = cty.dat guess
+          placedBy: loc ? (loc.source === 'grid' ? 'grid' : 'call-area') : '',
         });
       }
       remoteServer.sendActivationMapData({ parkRef, park, resolvedContacts });
