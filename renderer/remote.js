@@ -8234,6 +8234,8 @@
     if (!RB) return;
     RB.applyToElements(document, '.vf-band', webRigBands);
     RB.applyToElements(document, '#rc-band-filter .rc-dropdown-item', webRigBands);
+    var mailSel = document.getElementById('mail-band');
+    if (mailSel) { RB.applyToElements(mailSel, 'option', webRigBands); RB.fixSelect(mailSel); }
     var ft8Sel = document.getElementById('ft8-band-select');
     if (ft8Sel) {
       var cur = ft8Sel.value;

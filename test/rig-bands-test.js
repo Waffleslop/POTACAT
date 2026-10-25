@@ -105,16 +105,17 @@ test('every operating surface filters by the rig\'s bands', () => {
     'renderer/vfo-popout.html': ['window.RigBands.allowed(vfoRigBands, b.label)'],
     'renderer/js8call-popout.js': ['applyJs8RigBands'],
     'renderer/spots-popout.js': ["getElementById('filter-band')"],
-    'renderer/remote.js': ["'.vf-band'", "'#rc-band-filter .rc-dropdown-item'", "getElementById('ft8-band-select')", "getElementById('sstv-freq-phone')", "case 'rig-bands':"],
+    'renderer/winlink-popout.js': ["getElementById('wl-band')"],
+    'renderer/remote.js': ["'.vf-band'", "'#rc-band-filter .rc-dropdown-item'", "getElementById('ft8-band-select')", "getElementById('sstv-freq-phone')", "getElementById('mail-band')", "case 'rig-bands':"],
   };
   for (const [file, needles] of Object.entries(surfaces)) {
     const t = R(file);
     for (const n of needles) assert.ok(t.includes(n), file + ' lacks ' + n);
   }
-  for (const page of ['renderer/jtcat-popout.html', 'renderer/sstv-popout.html', 'renderer/vfo-popout.html', 'renderer/js8call-popout.html', 'renderer/spots-popout.html']) {
+  for (const page of ['renderer/jtcat-popout.html', 'renderer/sstv-popout.html', 'renderer/vfo-popout.html', 'renderer/js8call-popout.html', 'renderer/spots-popout.html', 'renderer/winlink-popout.html']) {
     assert.ok(R(page).includes('../lib/rig-bands.js'), page + ' loads lib/rig-bands.js');
   }
-  for (const pre of ['preload.js', 'preload-jtcat-popout.js', 'preload-sstv-popout.js', 'preload-vfo-popout.js', 'preload-js8call-popout.js', 'preload-spots-popout.js']) {
+  for (const pre of ['preload.js', 'preload-jtcat-popout.js', 'preload-sstv-popout.js', 'preload-vfo-popout.js', 'preload-js8call-popout.js', 'preload-spots-popout.js', 'preload-winlink-popout.js']) {
     const t = R(pre);
     assert.ok(t.includes("rigBandsGet: () => ipcRenderer.invoke('rig-bands-get')") && t.includes("ipcRenderer.on('rig-bands'"), pre);
   }

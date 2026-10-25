@@ -4533,7 +4533,7 @@ function rigBandsBroadcast(force) {
   const changed = key !== _rigBandsLastSent;
   _rigBandsLastSent = key;
   const payload = { bands, all: RigBands.ALL_BANDS };
-  for (const w of [win, jtcatPopoutWin, sstvPopoutWin, vfoPopoutWin, spotsPopoutWin]) {
+  for (const w of [win, jtcatPopoutWin, sstvPopoutWin, vfoPopoutWin, spotsPopoutWin, winlinkPopoutWin]) {
     if (w && !w.isDestroyed()) w.webContents.send('rig-bands', payload);
   }
   if (js8PopoutWin && !js8PopoutWin.isDestroyed()) js8PopoutWin.webContents.send('rig-bands', payload);

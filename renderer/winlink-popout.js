@@ -738,3 +738,16 @@
   });
   window.api.getState().then(function (s) { state = s; renderState(); renderSound(); autoSound(); wfSync(); });
 })();
+
+// Bands this radio is used on (rig editor; main.js rig-bands): the gateway
+// band filter offers only those.
+(function initRigBandsFilter() {
+  var sel = document.getElementById('wl-band');
+  if (!sel || !window.RigBands || !window.api || !window.api.rigBandsGet) return;
+  function apply(d) {
+    window.RigBands.applyToElements(sel, 'option', (d && d.bands) || null);
+    if (window.RigBands.fixSelect(sel)) sel.dispatchEvent(new Event('change'));
+  }
+  window.api.rigBandsGet().then(apply).catch(function () {});
+  window.api.onRigBands(apply);
+})();
