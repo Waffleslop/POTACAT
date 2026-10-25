@@ -112,5 +112,29 @@ test('wiring: logContact reads the typed frequency; log-qso hands it over raw; t
   assert.ok(/\.pre-freq-repair-/.test(main), 'the original is kept');
 });
 
+test('repair: kHz typed into the Activation panel MHz box (FREQ 7182, no BAND)', () => {
+  const { repairKhzTypedAsMhz } = require('../lib/log-freq');
+  assert.deepStrictEqual(repairKhzTypedAsMhz({ FREQ: '7182.000000', BAND: '' }), { freqMhz: '7.182', band: '40m' });
+  assert.deepStrictEqual(repairKhzTypedAsMhz({ FREQ: '14285.5' }), { freqMhz: '14.2855', band: '20m' });
+  assert.deepStrictEqual(repairKhzTypedAsMhz({ FREQ: '3550' }), { freqMhz: '3.55', band: '80m' });
+  assert.strictEqual(repairKhzTypedAsMhz({ FREQ: '3400' }), null, '3400 MHz is 9 cm, a real frequency');
+  assert.strictEqual(repairKhzTypedAsMhz({ FREQ: '7182', BAND: '40m' }), null, 'a band means the record was read');
+  assert.strictEqual(repairKhzTypedAsMhz({ FREQ: '1296.1' }), null, '23 cm is real');
+  assert.strictEqual(repairKhzTypedAsMhz({ FREQ: '10368.1' }), null, '3 cm is real');
+  assert.strictEqual(repairKhzTypedAsMhz({ FREQ: '14.285' }), null);
+  assert.strictEqual(repairKhzTypedAsMhz({ FREQ: '9000' }), null, 'in no band either way');
+});
+
+test('wiring: the Activation panel reads its box through LogFreq and the repair tries both mistakes', () => {
+  const root = path.join(__dirname, '..');
+  const app = fs.readFileSync(path.join(root, 'renderer', 'app.js'), 'utf8');
+  const html = fs.readFileSync(path.join(root, 'renderer', 'index.html'), 'utf8');
+  const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
+  assert.ok(html.includes('<script src="../lib/log-freq.js"></script>'));
+  assert.ok(/window\.LogFreq\.parseLogFreq\(raw\)/.test(app));
+  assert.ok(!/parseFloat\(activatorFreqInput\.value\)/.test(app), 'no MHz-only read of the box is left');
+  assert.ok(/LogFreq\.repairMhzTypedAsKhz\(q\) \|\| LogFreq\.repairKhzTypedAsMhz\(q\)/.test(main));
+});
+
 console.log(`\nLog frequency: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

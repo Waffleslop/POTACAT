@@ -27468,8 +27468,8 @@ async function activatorLogContact() {
   const stateVal = activatorStateInput ? activatorStateInput.value.trim().toUpperCase() : '';
 
   // Frequency: prefer the input field (may have been manually entered), fall back to CAT
-  const inputMhz = parseFloat(activatorFreqInput.value);
-  const freqKhz = inputMhz > 0 ? Math.round(inputMhz * 1000) : (activatorFreqKhz || radioFreqKhz || 0);
+  const typedKhz = readActivatorFreqKhz();
+  const freqKhz = typedKhz > 0 ? Math.round(typedKhz) : (activatorFreqKhz || radioFreqKhz || 0);
   const freqMhz = freqKhz ? (freqKhz / 1000).toFixed(3) : '';
   const band = freqToBandActivator(freqKhz) || '';
   // No radio reading and nothing typed: a contact with no frequency has no
@@ -28311,10 +28311,30 @@ function updateActivatorHomeUi() {
   }
 }
 
+/**
+ * The Activation panel's frequency box, in kHz (0 = empty or unreadable).
+ * The box says MHz, but operators type kHz too: "7182" was read as 7182 MHz,
+ * logged with no band and refused by POTA.app (a 1.11 activator, 2026-10-25).
+ * Read through lib/log-freq.js, the rule every log path uses: MHz, kHz or Hz,
+ * whichever lands in an amateur band. A readable value is shown back in MHz.
+ */
+function readActivatorFreqKhz() {
+  const raw = activatorFreqInput.value;
+  if (!raw || !raw.trim()) return 0;
+  const f = window.LogFreq ? window.LogFreq.parseLogFreq(raw) : null;
+  if (f && f.kind === 'ok') {
+    const shown = (f.khz / 1000).toFixed(3);
+    if (activatorFreqInput.value !== shown && document.activeElement !== activatorFreqInput) activatorFreqInput.value = shown;
+    return f.khz;
+  }
+  const mhz = parseFloat(raw);
+  return mhz > 0 ? mhz * 1000 : 0;
+}
+
 function tuneActivatorFreq() {
-  const mhz = parseFloat(activatorFreqInput.value);
-  if (!mhz || mhz <= 0) return;
-  const khz = Math.round(mhz * 1000);
+  const typedKhz = readActivatorFreqKhz();
+  if (!typedKhz) return;
+  const khz = Math.round(typedKhz);
   if (khz === activatorFreqKhz) return; // already there
   // The operator typed a frequency and committed it — that is them declaring
   // a new calling QRG, so stop offering to drag them back to the old one.

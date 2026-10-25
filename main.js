@@ -26728,13 +26728,15 @@ function repairQsoLogMhzFreqs(logPath) {
   _qsoLogFreqRepairChecked.add(logPath);
   try {
     if (!fs.existsSync(logPath)) return;
-    // Cheap pre-check: only a log holding a FREQ that starts "0." can need it.
-    if (!/<FREQ:\d+(:[A-Z])?>0\./i.test(fs.readFileSync(logPath, 'utf-8'))) return;
+    // Cheap pre-check: only a log holding a FREQ that starts "0." (MHz typed
+    // as kHz) or has 3+ digits before the point (kHz typed into the
+    // Activation panel's MHz box before 1.13.4: FREQ 7182, no BAND) can need it.
+    if (!/<FREQ:\d+(:[A-Z])?>(0\.|\d{3})/i.test(fs.readFileSync(logPath, 'utf-8'))) return;
     let fixed = 0;
     let backedUp = false;
     QsoLog.mutateLog(logPath, (qsos) => {
       for (const q of qsos) {
-        const r = LogFreq.repairMhzTypedAsKhz(q);
+        const r = LogFreq.repairMhzTypedAsKhz(q) || LogFreq.repairKhzTypedAsMhz(q);
         if (!r) continue;
         if (!backedUp) {
           const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '');
@@ -26747,7 +26749,7 @@ function repairQsoLogMhzFreqs(logPath) {
       }
       return fixed > 0 ? qsos : false;
     }, { sink: qsoLogSink });
-    if (fixed) sendCatLog(`[Log] Repaired ${fixed} QSO record(s) saved with MHz typed as kHz (frequency under 1 MHz, no band): frequency and band set (original kept as .pre-freq-repair-*.bak)`);
+    if (fixed) sendCatLog(`[Log] Repaired ${fixed} QSO record(s) saved with the frequency in the wrong unit and no band: frequency and band set (original kept as .pre-freq-repair-*.bak)`);
   } catch (err) {
     sendCatLog(`[Log] Frequency repair skipped: ${err.message}`);
   }
