@@ -2693,6 +2693,10 @@
             </label>
             <div id="logbook-help" class="help-text" style="margin-top:4px;"></div>
           </div>
+          <div id="logbook-n3fjp-config" class="hidden" style="margin-top:6px;">
+            <label class="checkbox-label"><input type="checkbox" id="set-n3fjp-pull"> Also bring in contacts I log in N3FJP on its own</label>
+            <div class="help-text" style="margin-top:4px;line-height:1.5;">While N3FJP is open, POTACAT reads its log through the same API every 5 minutes and adds any contact it doesn't have, so it reaches your POTACAT log and POTACAT Cloud. The first time it reads the whole N3FJP log. Contacts already in your log are skipped, the same as Import Log.</div>
+          </div>
           <div id="logbook-log4om-config" class="hidden" style="margin-top:6px;">
             <label class="checkbox-label"><input type="checkbox" id="set-log4om-wsjtx-binary"> Use WSJT-X binary protocol (required for QRZ/Clublog propagation)</label>
             <div class="help-text" style="margin-top:4px;line-height:1.5;">Log4OM treats plain ADIF UDP as a batch import and will not propagate those QSOs to QRZ/Clublog. Enable this to send QSOs in WSJT-X binary format instead — Log4OM will then propagate them like a manually-logged QSO. In Log4OM, change the UDP Inbound entry's Type from "ADIF-MESSAGE" to "WSJT-X" (same port).</div>

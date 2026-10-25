@@ -1290,6 +1290,7 @@ const logbookHelp = document.getElementById('logbook-help');
 const logbookWavelogConfig = document.getElementById('logbook-wavelog-config');
 const logbookLog4omConfig = document.getElementById('logbook-log4om-config');
 const setLog4omWsjtxBinary = document.getElementById('set-log4om-wsjtx-binary');
+const setN3fjpPull = document.getElementById('set-n3fjp-pull');
 const setWavelogUrl = document.getElementById('set-wavelog-url');
 const setWavelogApiKey = document.getElementById('set-wavelog-api-key');
 const setWavelogStationId = document.getElementById('set-wavelog-station-id');
@@ -9502,6 +9503,7 @@ function updateLogbookPortConfig() {
   const type = setLogbookType.value;
   const defaults = LOGBOOK_DEFAULTS[type];
   logbookLog4omConfig.classList.toggle('hidden', type !== 'log4om');
+  { const n3 = document.getElementById('logbook-n3fjp-config'); if (n3) n3.classList.toggle('hidden', type !== 'n3fjp'); }
   if (defaults && defaults.fileWatch) {
     logbookInstructions.innerHTML = defaults.instructions;
     logbookInstructions.classList.remove('hidden');
@@ -16811,6 +16813,7 @@ async function openSettingsDialog(tab) {
   setLogbookHost.value = s.logbookHost || '127.0.0.1';
   setLogbookPort.value = s.logbookPort || '';
   setLog4omWsjtxBinary.checked = s.log4omWsjtxBinary === true;
+  if (setN3fjpPull) setN3fjpPull.checked = s.n3fjpPull === true;
   setWavelogUrl.value = s.wavelogUrl || '';
   setWavelogApiKey.value = s.wavelogApiKey || '';
   setWavelogStationId.value = s.wavelogStationId || '';
@@ -17803,6 +17806,7 @@ settingsSave.addEventListener('click', async () => {
     logbookHost: logbookHostVal,
     logbookPort: logbookPortVal,
     log4omWsjtxBinary: setLog4omWsjtxBinary.checked,
+    n3fjpPull: !!(setN3fjpPull && setN3fjpPull.checked),
     wavelogUrl: setWavelogUrl.value.trim(),
     wavelogApiKey: setWavelogApiKey.value.trim(),
     wavelogStationId: setWavelogStationId.value.trim(),

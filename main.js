@@ -27974,7 +27974,7 @@ function forwardToLogbook(qsoData, s = settings) {
     return hamrsBridge.sendQso(qsoData, adifText);
   }
   if (type === 'n3fjp') {
-    return sendN3fjpTcp(qsoData, host, port || 1100);
+    return n3fjpQueue(() => sendN3fjpTcp(qsoData, host, port || 1100));
   }
   if (type === 'dxkeeper') {
     return sendDxkeeperTcp(qsoData, host, port || 52001);
@@ -28069,6 +28069,80 @@ function sendN3fjpTcp(qsoData, host, port) {
     });
   });
 }
+
+// N3FJP takes one API connection at a time and needs a moment between them,
+// so the forward of a QSO and the pull of its log never overlap.
+let _n3fjpChain = Promise.resolve();
+function n3fjpQueue(fn) {
+  const run = _n3fjpChain.then(fn, fn);
+  _n3fjpChain = run.catch(() => {});
+  return run;
+}
+
+// Bring in contacts logged in N3FJP on its own (W6ING, lib/n3fjp-pull.js).
+// The first pull reads the whole N3FJP log, later ones the latest 200; the
+// duplicate check is the Import Log one, so POTACAT's own forwarded QSOs and
+// anything already imported are skipped.
+const N3fjpPull = require('./lib/n3fjp-pull');
+const N3FJP_PULL_RECENT = 200;
+const N3FJP_PULL_EVERY_MS = 5 * 60 * 1000;
+let _n3fjpPullRunning = false;
+let _n3fjpPullUnreachableLogged = false;
+let _n3fjpPullSampleLogged = false;
+let _n3fjpPullUnreadable = false; // a reply with nothing readable: stop for this session
+function n3fjpPullWanted() {
+  return !!(settings && settings.n3fjpPull && settings.sendToLogbook && settings.logbookType === 'n3fjp');
+}
+async function n3fjpPull(reason) {
+  if (!n3fjpPullWanted() || _n3fjpPullRunning || _n3fjpPullUnreadable || !app.isReady()) return null;
+  _n3fjpPullRunning = true;
+  const host = settings.logbookHost || '127.0.0.1';
+  const port = parseInt(settings.logbookPort, 10) || 1100;
+  const full = !settings.n3fjpPullFullDone;
+  try {
+    const reply = await n3fjpQueue(() => N3fjpPull.requestList(host, port, N3fjpPull.listCommand({ recent: full ? 0 : N3FJP_PULL_RECENT })));
+    _n3fjpPullUnreachableLogged = false;
+    const { records, dropped } = N3fjpPull.parseListReply(reply);
+    if (!_n3fjpPullSampleLogged || (!records.length && reply.trim())) {
+      _n3fjpPullSampleLogged = true;
+      sendCatLog(`[N3FJP] Log reply (${reply.length} bytes, ${records.length} contacts read, ${dropped} unreadable). Start: ${reply.slice(0, 300).replace(/\s+/g, ' ')}`);
+    }
+    if (dropped) sendCatLog(`[N3FJP] ${dropped} N3FJP contact(s) had no call, date, time or band POTACAT could read and were left out`);
+    if (!records.length && reply.trim().length > 50) {
+      // Asking again every 5 minutes would re-read the whole N3FJP log for nothing.
+      _n3fjpPullUnreadable = true;
+      sendCatLog('[N3FJP] POTACAT could not read any contacts in N3FJP\'s reply, so it stops asking until the next launch. Please send this log with Report a Bug.');
+      return { imported: 0, skipped: 0, dropped };
+    }
+    for (const r of records) r.APP_POTACAT_IMPORTED_FROM = 'N3FJP';
+    const { imported, skipped } = importQsoRecords(records);
+    if (full && (records.length || !reply.trim())) {
+      settings.n3fjpPullFullDone = true;
+      saveSettings(settings);
+    }
+    if (imported > 0) {
+      loadWorkedQsos();
+      loadWorkedParks();
+      scanLogForEvents();
+      rebuildContestHistory();
+      if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) qsoPopoutWin.webContents.send('qso-popout-refresh');
+    }
+    if (imported > 0 || full) {
+      sendCatLog(`[N3FJP] Brought in ${imported} contact(s) logged in N3FJP${skipped ? `, ${skipped} already in this log` : ''} (${full ? 'whole N3FJP log' : `latest ${N3FJP_PULL_RECENT}`}, ${reason})`);
+    }
+    return { imported, skipped, dropped };
+  } catch (err) {
+    if (!_n3fjpPullUnreachableLogged) {
+      _n3fjpPullUnreachableLogged = true;
+      sendCatLog(`[N3FJP] Could not read the N3FJP log at ${host}:${port} (${err.message}). POTACAT tries again every 5 minutes while N3FJP is closed.`);
+    }
+    return null;
+  } finally {
+    _n3fjpPullRunning = false;
+  }
+}
+setTimeout(() => { n3fjpPull('launch').catch(() => {}); }, 30000);
+setInterval(() => { n3fjpPull('every 5 minutes').catch(() => {}); }, N3FJP_PULL_EVERY_MS);
 
 /**
  * Send a QSO to DXLab DXKeeper via TCP externallog command.
@@ -40076,6 +40150,10 @@ app.whenReady().then(() => {
     // same helper from its own handler; this path covers the case
     // where the user picks a different rig from the desktop rig list.
     const activeRigChanged = has('activeRigId') && newSettings.activeRigId !== settings.activeRigId;
+    // Turning on the N3FJP pull reads the N3FJP log now, not in 5 minutes.
+    if (has('n3fjpPull') && newSettings.n3fjpPull && !settings.n3fjpPull) {
+      setTimeout(() => { n3fjpPull('turned on').catch(() => {}); }, 3000);
+    }
     // "None" in Settings > My Rigs is a choice too: remembered so connectCat
     // never auto-activates the only rig over it; picking a rig clears it.
     if (has('activeRigId')) settings.catNone = !newSettings.activeRigId;
