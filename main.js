@@ -441,6 +441,7 @@ const { PskrClient } = require('./lib/pskreporter');
 const PskrTx = require('./lib/pskreporter-tx');
 const { Ft8Engine, freqsForMode } = require('./lib/ft8-engine');
 const { checkClockOffset, syncSystemClock, classifyClockOffset } = require('./lib/ntp');
+const StationClock = require('./lib/station-clock'); // FT8/FT4/FT2/WSPR/JTTY slot clock, correctable from an ECHOCAT device
 const JtcatParser = require('./renderer/jtcat-parser'); // shared FT8 message classifier (also a browser global in the renderers)
 const CqTarget = require('./renderer/cq-target'); // shared CQ "chase target" tags + decode-match (also a browser global)
 const { RemoteServer } = require('./lib/remote-server');
@@ -13733,7 +13734,7 @@ function jtcatRunWorkableCount(results) {
 // K3SBP 2026-06-15.
 function jtcatPeriodUtc(mode, atMs) {
   const cycleMs = mode === 'FT2' ? 3800 : mode === 'FT4' ? 7500 : 15000;
-  const d = new Date(Math.floor((Number.isFinite(atMs) ? atMs : Date.now()) / cycleMs) * cycleMs);
+  const d = new Date(Math.floor((Number.isFinite(atMs) ? atMs : StationClock.now()) / cycleMs) * cycleMs);
   return String(d.getUTCHours()).padStart(2, '0') + ':' +
          String(d.getUTCMinutes()).padStart(2, '0') + ':' +
          String(d.getUTCSeconds()).padStart(2, '0');
@@ -13914,7 +13915,7 @@ let _jtcatLastTx = null; // { slot, at } of our last FT8/FT4/FT2 transmission
 function jtcatTxSlotLock() { return JtcatTxSlot.normalizeLock(settings.jtcatTxSlotLock); }
 
 function jtcatNoteTxSlot(slot) {
-  if (JtcatTxSlot.isSlot(slot)) _jtcatLastTx = { slot, at: Date.now() };
+  if (JtcatTxSlot.isSlot(slot)) _jtcatLastTx = { slot, at: StationClock.now() };
 }
 
 /** Point `engine` at the slot a new CQ goes out in; returns the slot. */
@@ -13924,7 +13925,7 @@ function jtcatCqSlot(engine) {
   // Fire in the CURRENT slot when early enough for late-start truncation (up
   // to 7 s, WSJT-X waveform-truncation parity), else the next boundary.
   const lateCapMs = (eng && eng._lateStartTxMs > 0 && eng._mode === 'FT8') ? Math.min(eng._lateStartTxMs, 7000) : 500;
-  const d = JtcatTxSlot.decideCqSlot({ lock: jtcatTxSlotLock(), lastTx: _jtcatLastTx, nowMs: Date.now(), periodMs, lateCapMs });
+  const d = JtcatTxSlot.decideCqSlot({ lock: jtcatTxSlotLock(), lastTx: _jtcatLastTx, nowMs: StationClock.now(), periodMs, lateCapMs });
   if (eng) eng.setTxSlot(d.slot);
   return d.slot;
 }
@@ -13992,7 +13993,7 @@ async function jtcatBuildCqQso(modifier) {
   // the lock, else our last transmission's slot, else the soonest reachable
   // boundary (jtcatCqSlot). A fresh CQ has no partner to be opposite OF.
   const cycleMs = 1000 * (typeof ft8Engine._cycleSec === 'function' ? ft8Engine._cycleSec() : 15);
-  const msIntoCycle = Date.now() % cycleMs; // wall clock — TX scheduling never uses the RX-latency-adjusted clock
+  const msIntoCycle = StationClock.now() % cycleMs; // wall clock — TX scheduling never uses the RX-latency-adjusted clock
   jtcatCqSlot(ft8Engine);
   const qso = { mode: 'cq', call: null, grid: null, phase: 'cq', txMsg, cqMsg: txMsg,
     report: null, sentReport: null, myCall, myGrid, txRetries: 0 };
@@ -14409,7 +14410,7 @@ function pskrQueueDecodes(data) {
   const dialHz = _currentFreqHz || 0;
   if (!dialHz) return;
   const myCall = (settings.myCallsign || '').toUpperCase();
-  const nowSec = Math.floor(Date.now() / 1000);
+  const nowSec = Math.floor(StationClock.now() / 1000);
   for (const r of (data.results || [])) {
     const call = (r.call || '').toUpperCase();
     if (!call || call === myCall) continue;            // skip our own call
@@ -14429,7 +14430,7 @@ function pskrQueueDecodes(data) {
 function pskrQueueWsprSpots(spots) {
   if (!settings.pskrUpload) return;
   const myCall = (settings.myCallsign || '').toUpperCase();
-  const nowSec = Math.floor(Date.now() / 1000);
+  const nowSec = Math.floor(StationClock.now() / 1000);
   for (const s of (spots || [])) {
     const call = (s.call || '').toUpperCase();
     if (!call || call === myCall) continue;
@@ -14740,17 +14741,17 @@ function wsprBeaconTick() {
   // them is indistinguishable from a dead one — N7BBQ armed it, watched 5
   // silent minutes (a 51% outcome at 20% x 3 slots), and reported TX broken.
   // decideSlot is decide-once-per-slot, so this never re-rolls the dice.
-  const slotNow = Math.floor(Date.now() / 120000);
+  const slotNow = Math.floor(StationClock.now() / 120000);
   if (slotNow !== _jtcatWsprAnnouncedSlot) {
     _jtcatWsprAnnouncedSlot = slotNow;
-    const willTx = jtcatWsprScheduler.decideSlot(Date.now());
+    const willTx = jtcatWsprScheduler.decideSlot(StationClock.now());
     const payload = { enabled: true, slotTx: willTx, txPct: jtcatWsprScheduler.txPct };
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       jtcatPopoutWin.webContents.send('jtcat-wspr-beacon-state', payload);
     }
     if (remoteServer && remoteServer.hasClient()) remoteServer.broadcastJtcatWsprBeaconState(payload);
   }
-  const plan = jtcatWsprScheduler.tick(Date.now());
+  const plan = jtcatWsprScheduler.tick(StationClock.now());
   if (!plan) return;
   const call = (settings.myCallsign || '').trim().toUpperCase();
   const grid = (settings.grid || '').trim().toUpperCase().slice(0, 4);
@@ -14831,7 +14832,7 @@ function setWsprBeacon(on, opts = {}) {
   const dbm = Math.min(JTCAT_WSPR_MAX_DBM, settings.wsprDbm != null ? settings.wsprDbm : 30);
   _jtcatWsprAnnouncedSlot = -1; // re-announce the current slot's draw on (re)arm
   const avgMin = jtcatWsprScheduler.txPct > 0 ? Math.round(200 / jtcatWsprScheduler.txPct) : 0;
-  const secToNextSlot = Math.ceil((120000 - (Date.now() % 120000)) / 1000);
+  const secToNextSlot = Math.ceil((120000 - (StationClock.now() % 120000)) / 1000);
   sendCatLog(`[JTCAT] WSPR beacon ARMED: ${call} ${grid} @ ${dbm} dBm (${wsprWattsFromDbm(dbm) >= 1 ? '1 W' : Math.round(wsprWattsFromDbm(dbm) * 1000) + ' mW'} max), TX ${jtcatWsprScheduler.txPct}% of slots.` +
     (jtcatWsprScheduler.txPct > 0
       ? ` First transmission fires on the next even-minute slot (~${secToNextSlot}s) to confirm the chain` +
@@ -16458,6 +16459,59 @@ function broadcastJtcatClock(payload) {
   if (js8PopoutWin && !js8PopoutWin.isDestroyed()) js8PopoutWin.webContents.send('jtcat-clock', payload);
 }
 
+// --- Slot clock corrected from an ECHOCAT device (lib/station-clock.js) ---
+// Fields every jtcatClockSync payload carries: where the time comes from and
+// the correction in use (how far the computer's clock is ahead, ms).
+function stationClockFields() {
+  const sc = StationClock.info();
+  return { source: sc ? 'device' : 'ntp', correctionMs: StationClock.aheadMs() };
+}
+
+// What NTP last said about the computer's RAW clock: 'ok'|'warn'|'bad', or
+// null when no internet time server answered. Set by runJtcatClockCheck.
+let _ntpRawClockLevel = null;
+function stationClockNtpRawLevel() { return _ntpRawClockLevel; }
+
+// A change of clock under a running engine is a clock step: re-baseline every
+// slice, exactly as when the operator fixes the OS clock mid-session.
+function stationClockRebaseline() {
+  if (!jtcatManager || !jtcatManager._engines) return;
+  for (const [, entry] of jtcatManager._engines) {
+    const eng = entry && entry.engine;
+    if (eng && eng._running && typeof eng.reBaseline === 'function') eng.reBaseline();
+  }
+}
+
+function stationClockPublish() {
+  const sc = StationClock.info();
+  if (sc) {
+    jtcatLastClock = { offsetMs: 0, server: sc.device, level: 'ok', ok: true, checkedAt: Date.now(), ...stationClockFields() };
+  } else if (jtcatLastClock) {
+    jtcatLastClock = { ...jtcatLastClock, ...stationClockFields() };
+  }
+  broadcastJtcatClock(jtcatLastClock);
+  updateRemoteSettings();
+  stationSetupNotify();
+}
+
+function stationClockApply(aheadMs, meta) {
+  const prev = StationClock.aheadMs();
+  StationClock.setCorrection(aheadMs, meta);
+  const s = (aheadMs / 1000).toFixed(2);
+  sendCatLog(`[Clock] Using the time from ${meta.device}: shack clock was ${aheadMs >= 0 ? '+' : ''}${s} s off (round trip ${meta.rttMs} ms). ` +
+    'POTACAT corrects its FT8 timing; the computer\'s own clock is unchanged.');
+  if (Math.abs(aheadMs - prev) >= 50) stationClockRebaseline();
+  stationClockPublish();
+}
+
+function stationClockClear(why) {
+  const prev = StationClock.aheadMs();
+  if (!StationClock.clear()) return;
+  sendCatLog(`[Clock] Stopped using a device's time: ${why}.`);
+  if (Math.abs(prev) >= 50) stationClockRebaseline();
+  stationClockPublish();
+}
+
 // The "Fix it" button on every surface (FT8, JS8, Station Setup). The fix is
 // judged by the re-measure, never by Windows having accepted the commands: a
 // resync that only SLEWS the clock was reported as success while the banner
@@ -16482,17 +16536,31 @@ async function runJtcatClockCheck() {
   const prevLevel = jtcatLastClock && jtcatLastClock.level;
   try {
     const res = await checkClockOffset();
-    const level = classifyClockOffset(res.offset);
+    // The computer's own clock is in spec: a correction from a device is no
+    // longer wanted (the clock was fixed, or the device measured wrongly).
+    _ntpRawClockLevel = classifyClockOffset(res.offset);
+    if (_ntpRawClockLevel === 'ok' && StationClock.info()) {
+      stationClockClear('the computer\'s clock is now correct (internet time server)');
+    }
+    // NTP's offset is server minus the RAW clock; what the modes run on is
+    // the corrected clock, which is aheadMs later than raw.
+    const offset = res.offset + StationClock.aheadMs();
+    const level = classifyClockOffset(offset);
     // Every server's answer, for the log: a warning on a PC that something
     // else keeps synced (KC1SSY, Dimension 4) is then readable from one line.
     const readings = (res.results || []).map((r) => r.error
       ? `${r.server} no reply`
       : `${r.server} ${r.offset >= 0 ? '+' : ''}${(r.offset / 1000).toFixed(2)}s (rtt ${r.roundtrip} ms)`).join(', ');
-    jtcatLastClock = { offsetMs: res.offset, server: res.server, level, ok: level === 'ok', checkedAt: Date.now(), readings };
+    jtcatLastClock = { offsetMs: offset, server: res.server, level, ok: level === 'ok', checkedAt: Date.now(), readings, ...stationClockFields() };
   } catch (e) {
     // NTP unreachable (offline, firewall). Don't claim the clock is bad —
     // just report unknown so we don't nag a user whose clock is actually fine.
-    jtcatLastClock = { offsetMs: null, server: null, level: 'unknown', ok: false, error: e.message, checkedAt: Date.now() };
+    // With a device's correction in use, that device IS the measurement.
+    _ntpRawClockLevel = null;
+    const sc = StationClock.info();
+    jtcatLastClock = sc
+      ? { offsetMs: 0, server: sc.device, level: 'ok', ok: true, checkedAt: Date.now(), ...stationClockFields() }
+      : { offsetMs: null, server: null, level: 'unknown', ok: false, error: e.message, checkedAt: Date.now(), ...stationClockFields() };
   }
   // The clock just came back into spec (the user fixed it / w32tm resync took
   // effect). The running engine carries stale slot-timing + latency-calibration
@@ -16517,6 +16585,8 @@ async function runJtcatClockCheck() {
     const off = jtcatLastClock.offsetMs;
     if (jtcatLastClock.level === 'unknown') {
       sendCatLog(`[Clock] could not reach an NTP server — clock offset unknown (${jtcatLastClock.error || 'no reason given'})`);
+    } else if (jtcatLastClock.level === 'ok' && jtcatLastClock.source === 'device') {
+      sendCatLog(`[Clock] FT8 timing runs on the time from ${StationClock.info().device} (the computer's clock is ${(jtcatLastClock.correctionMs / 1000).toFixed(2)}s ${jtcatLastClock.correctionMs >= 0 ? 'fast' : 'slow'}) — in spec`);
     } else if (jtcatLastClock.level === 'ok') {
       sendCatLog(`[Clock] PC clock is ${(off / 1000).toFixed(2)}s off UTC (${jtcatLastClock.server}) — in spec`);
     } else {
@@ -22191,6 +22261,20 @@ function connectRemote() {
   remoteServer.on('tx-drive-refused', () => {
     sendCatLog('[Audio] TX drive change refused — Guest Pass clients cannot change the host TX level.');
     try { remoteServer.broadcastTxDriveState(currentTxDrive()); } catch { /* ignore */ }
+  });
+
+  // A device's measurement of the shack clock. The reply goes to the asker,
+  // synchronously, while its message is being handled.
+  remoteServer.on('clock-apply', (m) => {
+    const d = StationClock.decideClockApply(m, { guest: m.guest, ntpLevel: stationClockNtpRawLevel() });
+    if (!d.ok) {
+      const message = StationClock.describeApplyError(d.error);
+      sendCatLog(`[Clock] Time from ${m.device || 'an ECHOCAT device'} not used: ${message}`);
+      remoteServer.sendToAsker({ type: 'clock-apply-result', ok: false, error: d.error, message, correctionMs: StationClock.aheadMs() });
+      return;
+    }
+    stationClockApply(d.aheadMs, { source: 'device', device: m.device || 'an ECHOCAT device', rttMs: Math.round(Number(m.rttMs)), samples: Number(m.samples) || 0 });
+    remoteServer.sendToAsker({ type: 'clock-apply-result', ok: true, correctionMs: StationClock.aheadMs() });
   });
 
   remoteServer.on('tx-eq-set', (eqConfig) => {
