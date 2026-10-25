@@ -2589,7 +2589,7 @@ async function populateRigModelDropdown() {
   }
 }
 
-if (rigModelSelect) rigModelSelect.addEventListener('change', () => {
+if (rigModelSelect) rigModelSelect.addEventListener('change', async () => {
   const modelName = rigModelSelect.value;
   if (!modelName) return;
   let brand = null;
@@ -2599,6 +2599,16 @@ if (rigModelSelect) rigModelSelect.addEventListener('change', () => {
   if (!brand) return;
   const groupOf = rigModelData.find((g) => g.brand === brand);
   const noCat = !!(groupOf && Array.isArray(groupOf.noCat) && groupOf.noCat.includes(modelName));
+  const hamlib = groupOf && groupOf.hamlib && groupOf.hamlib[modelName];
+  if (hamlib) {
+    // Xiegu G90: Other Rig (Hamlib) with its Hamlib model and baud rate.
+    setRadioType('hamlib');
+    hamlibFieldsLoaded = true;
+    await populateHamlibFields({ rigId: hamlib.rigId, baudRate: hamlib.baudRate });
+    updateRadioSubPanels();
+    if (!setRigName.value.trim()) setRigName.value = modelName;
+    return;
+  }
   if (noCat) setRadioType('nocat');           // Pebble HF and friends: nothing to connect to
   else if (brand === 'FlexRadio') setRadioType('flex');
   else if (brand === 'Icom') setRadioType('icom');
