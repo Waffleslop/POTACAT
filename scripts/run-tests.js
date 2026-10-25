@@ -259,6 +259,7 @@ const TESTS = [
   'test/decode-contract-test.js',
   'test/layout-alignment-test.js',
   'test/g90-hamlib-model-test.js',
+  'test/voice-data-mode-test.js',
 ];
 
 const root = path.join(__dirname, '..');

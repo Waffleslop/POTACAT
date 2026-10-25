@@ -7314,6 +7314,13 @@ async function connectCat() {
     const overrides = activeRig?.model && settings.rigCommandOverrides[activeRig.model];
     if (overrides) cat.applyCommandOverrides(overrides);
   }
+  // Voice in DATA mode (GitHub #24): this rig takes voice as USB-D/LSB-D.
+  // Any edit of a rig reconnects CAT, so connecting is the one place to apply it.
+  if (cat && typeof cat.setVoiceAsData === 'function') {
+    const vRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
+    cat.setVoiceAsData(!!(vRig && vRig.voiceAsData));
+    if (vRig && vRig.voiceAsData) sendCatLog('[CAT] Voice in DATA mode is on for this rig: USB and LSB go to the radio as USB-D and LSB-D, and the radio's own microphone is off.');
+  }
   // Linux cdc_acm radios reject TIOCMSET, so node-serialport's port.set()
   // call to flip DTR for paddle keying fails on the first try and every try
   // after. The transport emits 'pin-unsupported' once per connection — we
@@ -24245,7 +24252,10 @@ function handleRemotePtt(state, opts = {}) {
     _ssbOverDataYaesuWarned = true;
     sendCatLog('[PTT] SSB-over-DATA skipped for voice on a Yaesu: its DATA-U narrows and shifts voice. To keep the hand mic quiet during voice macros, set the SSB audio source to the rear/USB input in the radio menu.');
   }
-  if (state && (settings.ssbOverData || forceData) && !yaesuVoice && audioActive && (!ft8Engine || forceData)) {
+  // A rig with Voice in DATA mode is in USB-D/LSB-D already (GitHub #24).
+  const _voiceRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
+  const voiceInData = !forceData && !!(_voiceRig && _voiceRig.voiceAsData);
+  if (state && (settings.ssbOverData || forceData) && !yaesuVoice && !voiceInData && audioActive && (!ft8Engine || forceData)) {
     // Switch to DATA mode before TX to prevent local mic bleed
     // Skip when JTCAT is active — it manages its own DATA mode
     const curMode = (_currentMode || '').toUpperCase();

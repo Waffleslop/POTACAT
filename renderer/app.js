@@ -2277,6 +2277,9 @@ function updateRadioSubPanels() {
   rigctldnetConfig.classList.toggle('hidden', type !== 'rigctldnet');
   const nocatConfig = document.getElementById('nocat-config');
   if (nocatConfig) nocatConfig.classList.toggle('hidden', type !== 'nocat');
+  // Voice in DATA mode runs in the rig controller: serial, Icom and Hamlib links.
+  const voiceAsDataRow = document.getElementById('rig-voice-as-data');
+  if (voiceAsDataRow) voiceAsDataRow.classList.toggle('hidden', !['serialcat', 'icom', 'civ-tcp', 'icom-network', 'hamlib', 'rigctldnet'].includes(type));
   if (type === 'serialcat' && !serialcatPortsLoaded) {
     loadSerialcatPorts();
   }
@@ -3197,6 +3200,8 @@ async function openRigEditor(mode, rigId) {
       if (extAtuSecsEl) extAtuSecsEl.value = rig.externalAtuSeconds || 4;
       const atuKeepOnEl = document.getElementById('set-atu-keep-on');
       if (atuKeepOnEl) atuKeepOnEl.checked = !!rig.atuKeepOn;
+      const voiceAsDataEl = document.getElementById('set-voice-as-data');
+      if (voiceAsDataEl) voiceAsDataEl.checked = !!rig.voiceAsData;
       // Per-rig Flex band→antenna map. Always rebuilt so editing a
       // different rig doesn't show the previous rig's selections.
       buildFlexBandAntennaMap(rig.flexBandAntennaMap || {});
@@ -3215,6 +3220,7 @@ async function openRigEditor(mode, rigId) {
     updateRadioSubPanels();
     buildFlexBandAntennaMap({});
     fillSdrScopeForm(null);
+    { const v = document.getElementById('set-voice-as-data'); if (v) v.checked = false; }
     await populateRigAudioDevices('', '');
   }
 
@@ -3332,6 +3338,8 @@ async function saveRigEditor() {
   const rigExternalAtuSeconds = extAtuSecsEl ? Math.max(1, Math.min(15, parseFloat(extAtuSecsEl.value) || 4)) : 4;
   const atuKeepOnEl = document.getElementById('set-atu-keep-on');
   const rigAtuKeepOn = !!(atuKeepOnEl && atuKeepOnEl.checked);
+  const voiceAsDataEl = document.getElementById('set-voice-as-data');
+  const rigVoiceAsData = !!(voiceAsDataEl && voiceAsDataEl.checked);
 
   // Per-rig Flex per-band antenna map (skipped silently for non-Flex
   // rigs — empty map serializes as `{}`, no runtime impact).
@@ -3356,6 +3364,7 @@ async function saveRigEditor() {
       rig.externalAtuWatts = rigExternalAtuWatts;
       rig.externalAtuSeconds = rigExternalAtuSeconds;
       rig.atuKeepOn = rigAtuKeepOn;
+      if (rigVoiceAsData) rig.voiceAsData = true; else delete rig.voiceAsData;
       rig.flexBandAntennaMap = flexBandAntennaMap;
       if (rigSdrScope) rig.sdrScope = rigSdrScope;
       rig.setupDone = [...rigSetupDone];
@@ -3380,6 +3389,7 @@ async function saveRigEditor() {
       externalAtuWatts: rigExternalAtuWatts,
       externalAtuSeconds: rigExternalAtuSeconds,
       atuKeepOn: rigAtuKeepOn,
+      ...(rigVoiceAsData ? { voiceAsData: true } : {}),
       flexBandAntennaMap,
       ...(rigSdrScope ? { sdrScope: rigSdrScope } : {}),
       setupDone: [...rigSetupDone],
