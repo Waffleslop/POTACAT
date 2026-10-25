@@ -32,6 +32,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - name: Every source file parses
+        run: node test/syntax-check-test.js
       - name: Run JTCAT regression suite
         run: node test/jtcat-test.js
       - name: Run JTCAT parser suite

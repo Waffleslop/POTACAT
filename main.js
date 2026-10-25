@@ -7319,7 +7319,7 @@ async function connectCat() {
   if (cat && typeof cat.setVoiceAsData === 'function') {
     const vRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
     cat.setVoiceAsData(!!(vRig && vRig.voiceAsData));
-    if (vRig && vRig.voiceAsData) sendCatLog('[CAT] Voice in DATA mode is on for this rig: USB and LSB go to the radio as USB-D and LSB-D, and the radio's own microphone is off.');
+    if (vRig && vRig.voiceAsData) sendCatLog("[CAT] Voice in DATA mode is on for this rig: USB and LSB go to the radio as USB-D and LSB-D, and the radio's own microphone is off.");
   }
   // Linux cdc_acm radios reject TIOCMSET, so node-serialport's port.set()
   // call to flip DTR for paddle keying fails on the first try and every try

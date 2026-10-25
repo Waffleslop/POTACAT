@@ -8,6 +8,7 @@ const { spawnSync } = require('child_process');
 const path = require('path');
 
 const TESTS = [
+  'test/syntax-check-test.js', // every source file parses (a main.js syntax error passed every other test)
   'test/rig-test.js',
   'test/cat-port-presence-test.js',
   'test/guest-pass-listen-test.js',
