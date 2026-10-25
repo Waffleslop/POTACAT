@@ -3043,11 +3043,49 @@ function _applyPopoutTheme(payload) {
     if (t && /^\d{4}$/.test(t)) return t.slice(0, 2) + ':' + t.slice(2);
     return t || '';
   }
+  // SNR colour steps: one table for the dots, the "heard you" lines AND the
+  // map legend, so the legend can never disagree with what is drawn.
+  var WSPR_SNR_STEPS = [
+    { min: -10, color: '#4ecca3', label: '−10 dB or better' },   // strong — green
+    { min: -20, color: '#f0a500', label: '−11 to −20 dB' }, // moderate — amber
+    { min: -Infinity, color: '#e94560', label: 'below −20 dB' },  // weak — red
+  ];
+  var WSPR_SNR_NONE = { color: '#888', label: 'no SNR reported' };
   function wsprSnrColor(snr) {
-    if (snr == null) return '#888';
-    if (snr >= -10) return '#4ecca3';   // strong — green
-    if (snr >= -20) return '#f0a500';   // moderate — amber
-    return '#e94560';                   // weak — red
+    if (snr == null) return WSPR_SNR_NONE.color;
+    for (var i = 0; i < WSPR_SNR_STEPS.length; i++) if (snr >= WSPR_SNR_STEPS[i].min) return WSPR_SNR_STEPS[i].color;
+    return WSPR_SNR_STEPS[WSPR_SNR_STEPS.length - 1].color;
+  }
+  // The map legend for WSPR (a user remembered one; there wasn't). Shown only
+  // in WSPR mode, beside the dots it explains.
+  var wsprLegend = null;
+  function wsprLegendControl() {
+    if (wsprLegend || typeof L === 'undefined') return wsprLegend;
+    wsprLegend = L.control({ position: 'bottomright' });
+    wsprLegend.onAdd = function() {
+      var d = L.DomUtil.create('div', 'jp-wspr-legend');
+      var t = document.createElement('div');
+      t.className = 'jp-wspr-legend-title';
+      t.textContent = 'Signal (SNR)';
+      d.appendChild(t);
+      WSPR_SNR_STEPS.concat([WSPR_SNR_NONE]).forEach(function(step) {
+        var row = document.createElement('div');
+        row.className = 'jp-wspr-legend-row';
+        var dot = document.createElement('span');
+        dot.className = 'jp-wspr-legend-dot';
+        dot.style.background = step.color;
+        row.appendChild(dot);
+        row.appendChild(document.createTextNode(step.label));
+        d.appendChild(row);
+      });
+      var note = document.createElement('div');
+      note.className = 'jp-wspr-legend-note';
+      note.textContent = 'Dots: stations heard. Dashed lines: stations that heard you.';
+      d.appendChild(note);
+      L.DomEvent.disableClickPropagation(d);
+      return d;
+    };
+    return wsprLegend;
   }
 
   function applyWsprMode(on) {
@@ -3064,9 +3102,12 @@ function _applyPopoutTheme(payload) {
         markerLayer.clearLayers(); arcLayer.clearLayers();
         if (!map.hasLayer(wsprMarkerLayer)) wsprMarkerLayer.addTo(map);
         if (wsprShowHeard.checked && !map.hasLayer(wsprHeardLayer)) wsprHeardLayer.addTo(map);
+        var lg = wsprLegendControl();
+        if (lg && !lg._map) lg.addTo(map);
       } else {
         if (map.hasLayer(wsprMarkerLayer)) wsprMarkerLayer.remove();
         if (map.hasLayer(wsprHeardLayer)) wsprHeardLayer.remove();
+        if (wsprLegend && wsprLegend._map) wsprLegend.remove();
       }
     }
     if (on) wsprRender();

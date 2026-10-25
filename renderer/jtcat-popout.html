@@ -343,6 +343,12 @@
        (Casey 2026-07-16: Chase vs Hunt looked like different UIs). */
     .jp-select { font-size: 12px; font-weight: 600; padding: 4px 6px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-tertiary); color: var(--text-primary); cursor: pointer; }
     .jp-select.jp-slot-locked { border-color: #4fc3f7; color: #4fc3f7; }
+    /* WSPR map legend (jtcat-popout.js wsprLegendControl): the SNR colour steps */
+    .jp-wspr-legend { background: var(--bg-secondary, #16213e); color: var(--text-primary, #e0e0e0); border: 1px solid var(--border-primary, #2a3a5e); border-radius: 4px; padding: 5px 8px; font-size: 11px; line-height: 1.5; max-width: 190px; box-shadow: 0 2px 8px rgba(0,0,0,0.35); }
+    .jp-wspr-legend-title { font-weight: 700; margin-bottom: 2px; }
+    .jp-wspr-legend-row { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+    .jp-wspr-legend-dot { width: 9px; height: 9px; border-radius: 50%; border: 1px solid #fff; flex: 0 0 auto; }
+    .jp-wspr-legend-note { margin-top: 3px; opacity: 0.75; white-space: normal; }
     .jp-slot-toast { position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%); z-index: 9999; display: flex; gap: 10px; align-items: center; max-width: 92vw; padding: 8px 12px; border-radius: 6px; background: var(--bg-secondary, #16213e); border: 1px solid #4fc3f7; color: var(--text-primary); font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,0.4); }
     .jp-slot-toast button { font-size: 12px; padding: 3px 8px; border-radius: 4px; border: 1px solid #4fc3f7; background: transparent; color: #4fc3f7; cursor: pointer; white-space: nowrap; }
     /* AUTO group — visually binds Hunt + Run (the two mutually-exclusive
