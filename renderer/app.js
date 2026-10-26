@@ -15455,7 +15455,7 @@ function showLogToast(message, opts) {
 }
 
 // --- External ATU tune progress modal ---
-// Shown while POTACAT emits a low-power CW carrier for an RF-sensing tuner
+// Shown while POTACAT emits a low-power AM carrier for an RF-sensing tuner
 // (LDG Z-100plus, MFJ, etc.). Stop button aborts the TX cycle early.
 (function setupExternalAtuModal() {
   let modal = null;
@@ -15472,7 +15472,7 @@ function showLogToast(message, opts) {
       '<div style="font-size:28px;margin-bottom:10px;">📡</div>',
       '<div style="font-size:15px;font-weight:700;margin-bottom:8px;">Tuning external ATU</div>',
       '<div id="ext-atu-countdown" style="font-size:28px;font-family:monospace;margin-bottom:6px;color:#e94560;">' + remaining.toFixed(1) + 's</div>',
-      '<div style="font-size:12px;color:#ccc;margin-bottom:16px;">Low-power CW carrier out — the tuner\'s relays will click as it matches.</div>',
+      '<div style="font-size:12px;color:#ccc;margin-bottom:16px;">Low-power carrier out (AM) — the tuner\'s relays will click as it matches.</div>',
       '<button type="button" id="ext-atu-stop" style="padding:8px 18px;background:#c24150;color:#fff;border:none;border-radius:4px;font-weight:700;cursor:pointer;">Stop</button>',
     ].join('');
     modal.appendChild(card);
