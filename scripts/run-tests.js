@@ -194,6 +194,7 @@ const TESTS = [
   'test/ts590-flow-control-test.js',
   'test/github-issues-2026-10-26-test.js', // #107 FT-450 test, #106 interface PTT, #103 Auto RTS trial
   'test/duo-vfo-wire-test.js',        // iPhone Duo VFO pane: tuned-spot, swr-guard-state, atu-tune, tx-eq, status.meters
+  'test/activator-hunter-parks-test.js', // WD3D: their parks as a comma list (n-fer P2P)
   'test/yaesu-fa-digits-test.js',
   'test/log-as-test.js',
   'test/save-qso-stall-test.js',

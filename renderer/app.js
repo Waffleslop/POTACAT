@@ -27503,16 +27503,29 @@ async function activatorLogContact() {
   const rawCallsign = activatorCallsignInput.value.trim().toUpperCase();
   if (!rawCallsign) return;
 
-  // If hunter park input has a value but hunterParkRefs is empty (user typed directly
-  // without selecting from dropdown), parse the input as a park reference
+  // Their park(s) as typed. A comma list is an n-fer (WD3D 2026-10-26: "US-1234,
+  // US-5678" for a 2-fer logged NO park, silently — the box only ever read one
+  // reference). A reference that is not one is refused, never dropped.
   const hunterInput = document.getElementById('activator-hunter-park');
-  if (hunterInput && hunterInput.value.trim() && hunterParkRefs.length === 0) {
-    const typed = hunterInput.value.trim().toUpperCase();
-    // Accept POTA/WWFF-shaped refs (K-1234, US-1234, KFF-1234), SOTA summits
-    // (W4C/CM-001), and WWBOTA bunkers (B/US-1234); tag the real program so
-    // the ADIF SIG is right (summit-to-park typed by hand used to log SIG=POTA)
-    if (/^[A-Z]{1,4}-\d{3,5}$/.test(typed) || /^[A-Z0-9]{1,4}\/[A-Z]{2}-\d{3}$/.test(typed) || /^B\/[A-Z]{1,3}-\d{3,5}$/.test(typed)) {
-      hunterParkRefs = [{ ref: typed, name: '', program: inferParkProgram(typed) }];
+  if (hunterInput && hunterInput.value.trim()) {
+    const parsed = parseHunterParkInput(hunterInput.value);
+    if (parsed.bad.length) {
+      hunterInput.style.outline = '1px solid #e94560';
+      hunterInput.focus();
+      showLogToast(`Not logged: "${parsed.bad[0]}" is not a park or summit reference. Separate their parks with commas, e.g. US-1234, US-5678.`, { warn: true, duration: 7000 });
+      return;
+    }
+    hunterInput.style.outline = '';
+    if (parsed.refs.length > 1 || hunterParkRefs.length === 0) {
+      // The typed list, plus anything behind the +N badge, names kept.
+      const known = new Map(hunterParkRefs.map(p => [p.ref, p]));
+      const merged = [];
+      for (const ref of [...parsed.refs, ...hunterParkRefs.slice(1).map(p => p.ref)]) {
+        if (merged.some(p => p.ref === ref) || merged.length >= MAX_N_FER) continue;
+        const k = known.get(ref);
+        merged.push({ ref, name: (k && k.name) || '', program: (k && k.program) || inferParkProgram(ref) });
+      }
+      hunterParkRefs = merged;
     }
   }
   if (!primaryParkRef()) {
@@ -28640,6 +28653,21 @@ if (hunterParkExtraBadge) {
   hunterParkExtraBadge.addEventListener('click', () => openMultiparkDialog('hunter'));
 }
 
+/** The "their park" box: one reference or a comma list (an n-fer). Accepts
+ *  POTA/WWFF-shaped refs (K-1234, US-1234, KFF-1234), SOTA summits (W4C/CM-001)
+ *  and WWBOTA bunkers (B/US-1234); the program is tagged from the shape so the
+ *  ADIF SIG is right (summit-to-park typed by hand used to log SIG=POTA).
+ *  @returns {{refs: string[], bad: string[]}} */
+function parseHunterParkInput(text) {
+  const refs = [], bad = [];
+  for (const tok of String(text || '').toUpperCase().split(/[,;\s]+/).filter(Boolean)) {
+    const ok = /^[A-Z]{1,4}-\d{3,5}$/.test(tok) || /^[A-Z0-9]{1,4}\/[A-Z]{2}-\d{3}$/.test(tok) || /^B\/[A-Z]{1,3}-\d{3,5}$/.test(tok);
+    if (!ok) bad.push(tok);
+    else if (!refs.includes(tok)) refs.push(tok);
+  }
+  return { refs, bad };
+}
+
 // --- Hunter Park Autocomplete ---
 const hunterParkInput = document.getElementById('activator-hunter-park');
 const hunterParkDropdown = document.getElementById('activator-hunter-dropdown');
@@ -28648,8 +28676,13 @@ let hunterParkSearchTimeout = null;
 if (hunterParkInput) {
   hunterParkInput.addEventListener('input', () => {
     clearTimeout(hunterParkSearchTimeout);
-    const query = hunterParkInput.value.trim();
-    if (query.length < 2) { hunterParkDropdown.classList.add('hidden'); hunterParkRefs = []; return; }
+    hunterParkInput.style.outline = '';
+    // In a comma list, search for the reference being typed (the last one).
+    const full = hunterParkInput.value;
+    const cut = full.lastIndexOf(',');
+    const head = cut >= 0 ? full.slice(0, cut + 1) + ' ' : '';
+    const query = (cut >= 0 ? full.slice(cut + 1) : full).trim();
+    if (query.length < 2) { hunterParkDropdown.classList.add('hidden'); if (cut < 0) hunterParkRefs = []; return; }
     hunterParkSearchTimeout = setTimeout(async () => {
       const results = await window.api.searchParks(query);
       if (!results || !results.length) { hunterParkDropdown.classList.add('hidden'); return; }
@@ -28660,9 +28693,17 @@ if (hunterParkInput) {
         item.innerHTML = `<span class="activator-dropdown-ref">${park.reference}</span><span class="activator-dropdown-name">${park.name || ''}</span><span class="activator-dropdown-loc">${park.locationDesc || ''}</span>`;
         item.addEventListener('mousedown', (e) => {
           e.preventDefault();
-          hunterParkRefs = [{ ref: park.reference, name: park.name || '', program: inferParkProgram(park.reference) }];
-          hunterParkInput.value = park.reference;
+          const picked = { ref: park.reference, name: park.name || '', program: inferParkProgram(park.reference) };
           hunterParkDropdown.classList.add('hidden');
+          if (head) {
+            // Completing the next park of a comma list: keep the list as typed.
+            hunterParkInput.value = head + park.reference;
+            const prior = parseHunterParkInput(head).refs;
+            hunterParkRefs = [...hunterParkRefs.filter(p => prior.includes(p.ref)), picked];
+            return;
+          }
+          hunterParkRefs = [picked];
+          hunterParkInput.value = park.reference;
           updateHunterParkDisplay();
         });
         hunterParkDropdown.appendChild(item);
