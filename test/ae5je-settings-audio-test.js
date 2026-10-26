@@ -69,6 +69,12 @@ test('renderer: runs at launch, on device change and after a pick; keeps current
   assert.ok(/currentRigs = currentRigs\.map\(/.test(app), 'the editor copy is updated or its next save restores the dead IDs');
 });
 
+test('W4DLG: a missing input on a non-Flex rig gets no SmartSDR/DAX advice', () => {
+  const pop = read('renderer', 'jtcat-popout.js');
+  assert.ok(/\(popoutIsFlex\s*\n?\s*\? 'If you upgraded to SmartSDR 4\.2\.18\+/.test(pop), 'the DAXv2 hint is Flex-only');
+  assert.ok(/popoutIsFlex \? ' \(decode is unaffected on SmartSDR Direct\)' : ' and nothing decodes'/.test(pop));
+});
+
 console.log('\nSettings saved line');
 test('a failed save is named with the likely cause', () => {
   const line = S.describeSaveStatus({ now: 100000, files: [{ label: 'settings.json', lastWrite: { at: 40000, ok: false, error: "EPERM: operation not permitted, open '~\\AppData\\Roaming\\POTACAT\\settings.json'" } }] });

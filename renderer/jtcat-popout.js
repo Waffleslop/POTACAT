@@ -5196,7 +5196,13 @@ function _applyPopoutTheme(payload) {
             const savedId = String(constraints.deviceId && constraints.deviceId.exact || '');
             window.api.jtcatLog(savedId.indexOf('alsa:') === 0
               ? '[JTCAT popout] The saved audio input "' + savedId + '" is a raw ALSA device — POTACAT cannot capture FT8 audio from raw ALSA through the browser path, and does not fall back to the default input. Pick the PulseAudio/PipeWire device for the same card in Settings > Radio, not the one under "ALSA hardware (raw)".'
-              : '[JTCAT popout] Saved audio input device not found (' + [e && e.name, e && e.message].filter(Boolean).join(': ') + ') — NOT falling back to the default input (it is usually a microphone). If you upgraded to SmartSDR 4.2.18+ (DAXv2), every DAX device changed: re-select your rig audio devices in Settings > Radio.');
+              : '[JTCAT popout] Saved audio input device not found (' + [e && e.name, e && e.message].filter(Boolean).join(': ') + ') — NOT falling back to the default input (it is usually a microphone). '
+                // DAX advice only for a Flex: a G90 owner was told about
+                // SmartSDR 4.2.18 (W4DLG 2026-10-25). Elsewhere the usual cause
+                // is the device coming back under a new ID ("2- USB Audio Device").
+                + (popoutIsFlex
+                  ? 'If you upgraded to SmartSDR 4.2.18+ (DAXv2), every DAX device changed: re-select your rig audio devices in Settings > My Rigs > Audio.'
+                  : 'The device may have been unplugged or moved to another USB port (Windows then renames it, e.g. "2- USB Audio Device"): re-select it in Settings > My Rigs > Audio.'));
           }
           // NEVER substitute the default input: on a Mac it is the built-in
           // microphone — decodes only with the radio's speaker up, and the room
@@ -5339,7 +5345,7 @@ function _applyPopoutTheme(payload) {
       // DAX/radio fault to the operator. Say what failed and how to retry.
       if (window.api.jtcatLog) {
         window.api.jtcatLog('[JTCAT popout] AUDIO START FAILED (' + (audioSource || 'device') + '): ' +
-          (err.message || err) + ' — the waterfall will be blank (decode is unaffected on SmartSDR Direct). ' +
+          (err.message || err) + ' — the waterfall will be blank' + (popoutIsFlex ? ' (decode is unaffected on SmartSDR Direct)' : ' and nothing decodes') + '. ' +
           'Close and reopen the JTCAT window to retry.');
       }
       // On screen too: "no decodes" with nothing visible is the worst outcome.
