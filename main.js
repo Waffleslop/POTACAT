@@ -28645,6 +28645,7 @@ function createWindow() {
   const defaultH = Math.min(700, primary.height);
   const isMac = process.platform === 'darwin';
   win = new BrowserWindow({
+    minWidth: 640, minHeight: 420, // never smaller than its own controls (N0KAH 2026-10-24)
     // Explicit x/y centered on the PRIMARY display. Without them the window
     // manager picks the placement, and on Linux that's often monitor 1 even
     // when the user's primary is monitor 2 (KM4CFT 2026-07-21).
@@ -33115,6 +33116,7 @@ app.whenReady().then(() => {
 
     const isMac = process.platform === 'darwin';
     popoutWin = new BrowserWindow({
+      minWidth: 360, minHeight: 300, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 800,
       height: 600,
       title: 'POTACAT Map',
@@ -33203,6 +33205,7 @@ app.whenReady().then(() => {
 
     const isMac = process.platform === 'darwin';
     propPopoutWin = new BrowserWindow({
+      minWidth: 480, minHeight: 360, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 900,
       height: 650,
       title: 'POTACAT — Propagation',
@@ -33278,6 +33281,7 @@ app.whenReady().then(() => {
     }
     const isMac = process.platform === 'darwin';
     pairPopoutWin = new BrowserWindow({
+      minWidth: 360, minHeight: 420, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 500,
       height: 600,
       title: 'POTACAT — Pair Mobile App',
@@ -33326,6 +33330,7 @@ app.whenReady().then(() => {
     }
     const isMac = process.platform === 'darwin';
     pairRequestPopoutWin = new BrowserWindow({
+      minWidth: 340, minHeight: 260, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 420,
       height: 440,
       title: 'POTACAT — Pair request',
@@ -33518,6 +33523,7 @@ app.whenReady().then(() => {
 
     const isMac = process.platform === 'darwin';
     qsoPopoutWin = new BrowserWindow({
+      minWidth: 560, minHeight: 360, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 900,
       height: 600,
       title: 'POTACAT Logbook',
@@ -33753,6 +33759,7 @@ app.whenReady().then(() => {
 
     const isMac = process.platform === 'darwin';
     spotsPopoutWin = new BrowserWindow({
+      minWidth: 480, minHeight: 300, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 900,
       height: 500,
       title: 'POTACAT Spots',
@@ -33843,6 +33850,7 @@ app.whenReady().then(() => {
 
     const isMac = process.platform === 'darwin';
     clusterPopoutWin = new BrowserWindow({
+      minWidth: 420, minHeight: 260, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 700,
       height: 450,
       title: 'DX Cluster Terminal',
@@ -33923,6 +33931,7 @@ app.whenReady().then(() => {
     }
     const isMac = process.platform === 'darwin';
     bandspreadPopoutWin = new BrowserWindow({
+      minWidth: 480, minHeight: 240, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 900,
       height: 320,
       title: 'Bandspread',
@@ -34050,6 +34059,7 @@ app.whenReady().then(() => {
 
     const isMac = process.platform === 'darwin';
     actmapPopoutWin = new BrowserWindow({
+      minWidth: 420, minHeight: 360, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 700,
       height: 500,
       title: 'Activation Map',
@@ -34247,6 +34257,7 @@ app.whenReady().then(() => {
     const isMac = process.platform === 'darwin';
     const vfoAlwaysOnTop = settings.vfoAlwaysOnTop !== false; // default true
     vfoPopoutWin = new BrowserWindow({
+      minWidth: 300, minHeight: 360, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 360, height: 760, title: 'VFO',
       backgroundColor: getThemeWindowBg(),
       show: false,
@@ -34341,6 +34352,7 @@ app.whenReady().then(() => {
     if (conditionsPopoutWin && !conditionsPopoutWin.isDestroyed()) { conditionsPopoutWin.focus(); return; }
     const isMac = process.platform === 'darwin';
     conditionsPopoutWin = new BrowserWindow({
+      minWidth: 520, minHeight: 400, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 1100, height: 720, title: 'POTACAT — Conditions',
       backgroundColor: getThemeWindowBg(),
       show: false,
@@ -34491,6 +34503,7 @@ app.whenReady().then(() => {
     }
     const isMac = process.platform === 'darwin';
     jtcatPopoutWin = new BrowserWindow({
+      minWidth: 760, minHeight: 480, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 1100,
       height: 700,
       title: 'POTACAT — JTCAT',
@@ -34674,6 +34687,7 @@ app.whenReady().then(() => {
     if (mercuryPopoutWin && !mercuryPopoutWin.isDestroyed()) { mercuryPopoutWin.focus(); return; }
     const isMac = process.platform === 'darwin';
     mercuryPopoutWin = new BrowserWindow({
+      minWidth: 480, minHeight: 360, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 720, height: 560, title: 'POTACAT — Mercury HF Data',
       backgroundColor: getThemeWindowBg(), show: false,
       ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
@@ -34713,6 +34727,7 @@ app.whenReady().then(() => {
     if (winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) { winlinkPopoutWin.focus(); return; }
     const isMac = process.platform === 'darwin';
     winlinkPopoutWin = new BrowserWindow({
+      minWidth: 600, minHeight: 420, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 900, height: 640, title: 'POTACAT — Winlink Mail',
       backgroundColor: getThemeWindowBg(), show: false,
       ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
@@ -34769,6 +34784,7 @@ app.whenReady().then(() => {
     if (js8PopoutWin && !js8PopoutWin.isDestroyed()) { js8PopoutWin.focus(); return; }
     const isMac = process.platform === 'darwin';
     js8PopoutWin = new BrowserWindow({
+      minWidth: 560, minHeight: 420, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 760, height: 600, title: 'POTACAT — JS8Call',
       backgroundColor: getThemeWindowBg(), show: false,
       ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
@@ -34861,6 +34877,7 @@ app.whenReady().then(() => {
   ipcMain.on('js8-map-popout', () => {
     if (js8MapWin && !js8MapWin.isDestroyed()) { js8MapWin.focus(); return; }
     js8MapWin = new BrowserWindow({
+      minWidth: 400, minHeight: 300, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 700, height: 500, title: 'JS8 Heartbeat Map',
       backgroundColor: getThemeWindowBg(), frame: false,
       icon: getIconPath(),
@@ -35308,6 +35325,7 @@ app.whenReady().then(() => {
       return;
     }
     jtcatMapPopoutWin = new BrowserWindow({
+      minWidth: 360, minHeight: 300, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 700, height: 500,
       backgroundColor: getThemeWindowBg(),
       frame: false,
@@ -36125,6 +36143,7 @@ app.whenReady().then(() => {
     sstvPopoutOpenedBy = (opts && opts.openedBy === 'app') ? 'app' : 'desktop';
     if (sstvTemplateSync) sstvTemplateSync.sync('sstv-window').catch(() => {});
     sstvPopoutWin = new BrowserWindow({
+      minWidth: 640, minHeight: 480, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 900,
       height: 700,
       title: 'POTACAT — SSTV',
@@ -36194,6 +36213,7 @@ app.whenReady().then(() => {
     if (scopePopoutWin && !scopePopoutWin.isDestroyed()) { scopePopoutWin.focus(); return; }
     const isMac = process.platform === 'darwin';
     scopePopoutWin = new BrowserWindow({
+      minWidth: 480, minHeight: 300, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 1000,
       height: 640,
       title: 'POTACAT — Band Scope',
