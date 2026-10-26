@@ -6801,6 +6801,52 @@ function armSerialHandshakeFallback(rigCat, target) {
   rigCat.on('ptt', onTx);
 }
 
+// Auto RTS on a direct-serial Yaesu: a radio whose CAT RTS menu is ENABLE
+// waits for RTS and never answers while POTACAT holds it low — the link sits
+// on "Radio not connected" with a healthy port (cgripp256, FTDX10, #103: RTS/CTS
+// worked, Auto did not). When Auto holds RTS low and the opened port gets no
+// frequency reply in SERIAL_HS_NOANSWER_MS, try RTS/CTS for THIS SESSION; only
+// a radio that then answers is saved as RTS/CTS on the rig. If neither answers
+// (radio off, wrong baud) the trial ends and Auto is left as it was.
+const SERIAL_HS_NOANSWER_MS = 12000;
+const _serialHsTrial = new Map(); // port path -> 'hardware' (trying) | 'done'
+function armSerialHandshakeNoAnswerTrial(rigCat, transport, target, hs) {
+  const path = target && target.path;
+  if (!path) return;
+  const trial = _serialHsTrial.get(path);
+  if (hs.source === 'model' && trial === 'done') return;
+  let answered = false;
+  let timer = null;
+  rigCat.once('frequency', () => {
+    answered = true;
+    if (timer) clearTimeout(timer);
+    if (hs.source !== 'trial') return;
+    _serialHsTrial.set(path, 'done');
+    for (const r of settings.rigs || []) {
+      if (r && r.catTarget && r.catTarget.type === 'serial' && r.catTarget.path === path) r.catTarget.serialHandshake = 'hardware';
+    }
+    if (settings.catTarget && settings.catTarget.type === 'serial' && settings.catTarget.path === path) settings.catTarget.serialHandshake = 'hardware';
+    saveSettings(settings);
+    sendCatLog(`[CAT] The radio answers with RTS/CTS flow control on ${path} (its CAT RTS menu is on) — saved on this rig as RTS line "RTS/CTS flow control".`);
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('app-notice', { message: 'The radio only answers with RTS/CTS flow control — POTACAT now uses it for this rig', duration: 10000 });
+    }
+  });
+  transport.once('connect', () => {
+    timer = setTimeout(() => {
+      if (answered || cat !== rigCat) return;
+      if (hs.source === 'trial') {
+        _serialHsTrial.set(path, 'done');
+        sendCatLog(`[CAT] No answer on ${path} with RTS/CTS flow control either — back to RTS held low. Check the radio is on, and its CAT baud rate matches.`);
+      } else {
+        _serialHsTrial.set(path, 'hardware');
+        sendCatLog(`[CAT] No answer on ${path} in ${SERIAL_HS_NOANSWER_MS / 1000} s with RTS held low — trying RTS/CTS flow control (a Yaesu whose CAT RTS menu is on waits for RTS).`);
+      }
+      setTimeout(() => connectCatSafe('rts-trial'), 300);
+    }, SERIAL_HS_NOANSWER_MS);
+  });
+}
+
 async function connectCat() {
   // A new connection (or another rig) starts with nothing seen this session;
   // what this rig reported before still comes from rig.metersSeen.
@@ -7347,11 +7393,13 @@ async function connectCat() {
     cat.on('swr', sendCatSwr);
     cat.on('alc', sendCatAlc);
     sendCatLog(`Connecting to ${model.brand || 'radio'} on ${target.path}`);
-    const hs = resolveSerialHandshake(model, target);
+    let hs = resolveSerialHandshake(model, target);
+    if (hs.source === 'model' && _serialHsTrial.get(target.path) === 'hardware') hs = { handshake: 'hardware', source: 'trial' };
     if (hs.handshake === 'hardware') {
-      sendCatLog(`[CAT] RTS/CTS flow control on (${hs.source === 'rig' ? 'set on this rig' : 'the radio model default'}) — RTS stays asserted. If the radio transmits as soon as POTACAT connects, set My Rigs > RTS line to "Held low".`);
-      if (hs.source === 'model') armSerialHandshakeFallback(cat, target);
+      sendCatLog(`[CAT] RTS/CTS flow control on (${hs.source === 'rig' ? 'set on this rig' : hs.source === 'trial' ? 'trying it: the radio did not answer with RTS held low' : 'the radio model default'}) — RTS stays asserted. If the radio transmits as soon as POTACAT connects, set My Rigs > RTS line to "Held low".`);
+      if (hs.source !== 'rig') armSerialHandshakeFallback(cat, target);
     }
+    if (hs.source !== 'rig' && model.brand === 'Yaesu') armSerialHandshakeNoAnswerTrial(cat, transport, target, hs);
     transport.connect({ path: target.path, baudRate: target.baudRate || 9600, dtrOff: target.dtrOff, connectDelay: model.connectDelay, serialHandshake: hs.handshake, stopBits: model.serialStopBits });
   }
 
@@ -31086,6 +31134,15 @@ function gatedSetTransmit(state) {
       return false;
     }
   }
+  // "The interface keys it" (catTarget.ptt === 'vox' on a CAT radio): CAT
+  // tunes, but the audio interface's own VOX/PTT (SignaLink) keys the radio
+  // through its data jack. A CAT TX on a TS-2000 keys the FRONT MIC, so the
+  // SignaLink's audio on ACC2 never went out (Rich-AI4BN, #106).
+  const t = settings.catTarget;
+  if (t && t.type !== 'none' && t.ptt === 'vox') {
+    sendCatLog(`[PTT] ${state ? 'TX' : 'RX'} — not keyed over CAT; the audio interface (VOX / SignaLink) keys the radio`);
+    return true;
+  }
   if (cat && cat.connected) cat.setTransmit(state);
   return true;
 }
@@ -41246,8 +41303,10 @@ app.whenReady().then(() => {
         buf += text;
         console.log('[serial-cat-test] rx:', JSON.stringify(text));
         // A startup banner may not be semicolon-terminated, so scan the whole
-        // stream instead of assuming FA starts a delimited message.
-        const faMatch = /FA(\d{9,11});/.exec(buf);
+        // stream instead of assuming FA starts a delimited message. Eight
+        // digits is the FT-450/FT-2000/FTDX3000/FTDX5000 generation (#107:
+        // "FA28074000;" was reported as no valid reply).
+        const faMatch = /FA(\d{8,11});/.exec(buf);
         if (!faMatch || settled) return;
         settled = true;
         clearTimeout(timeout);

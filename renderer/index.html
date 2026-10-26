@@ -1905,7 +1905,14 @@
               <option value="hardware">RTS/CTS flow control</option>
             </select>
           </label>
-          <span class="help-text" style="margin-top:2px;display:block;">Auto uses RTS/CTS flow control for the Kenwood TS-590 and TS-990 and holds RTS low for every other radio. Choose <b>Held low</b> if the radio transmits as soon as POTACAT connects: some radios that copy the TS-590's commands (FX4CR) key PTT on RTS.</span>
+          <span class="help-text" style="margin-top:2px;display:block;">Auto uses RTS/CTS flow control for the Kenwood TS-590, TS-990 and TS-2000 and holds RTS low for every other radio. A Yaesu that does not answer with RTS held low (its CAT RTS menu is on) is tried with RTS/CTS, and kept on it if it answers. Choose <b>Held low</b> if the radio transmits as soon as POTACAT connects: some radios that copy the TS-590's commands (FX4CR) key PTT on RTS.</span>
+          <label style="margin-top:6px;">Transmit (PTT):
+            <select id="set-serialcat-ptt">
+              <option value="cat" selected>Over CAT</option>
+              <option value="vox">The audio interface keys it (SignaLink, the radio's VOX)</option>
+            </select>
+          </label>
+          <span class="help-text" style="margin-top:2px;display:block;">CAT still tunes and changes mode. Choose <b>The audio interface keys it</b> when a SignaLink or similar on the radio's data jack (TS-2000 ACC2) does the keying: over CAT some radios transmit from the front microphone, so the interface's audio never goes out.</span>
           <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
             <button type="button" id="serialcat-test-btn">Test Connection</button>
             <span id="serialcat-test-result" style="font-size:12px;"></span>

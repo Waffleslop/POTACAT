@@ -192,6 +192,7 @@ const TESTS = [
   'test/echocat-web-micgain-test.js',
   'test/cloud-billing-ui-test.js',
   'test/ts590-flow-control-test.js',
+  'test/github-issues-2026-10-26-test.js', // #107 FT-450 test, #106 interface PTT, #103 Auto RTS trial
   'test/yaesu-fa-digits-test.js',
   'test/log-as-test.js',
   'test/save-qso-stall-test.js',

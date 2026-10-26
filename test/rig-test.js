@@ -1985,18 +1985,19 @@ test('kenwood getVfoSplit polls IF;', () => {
   assert.strictEqual(writes[0], 'IF;');
 });
 
-test('Yaesu is gated out: getVfoSplit no-ops, IF-shaped input emits nothing, FA polling unchanged', () => {
+test('Yaesu is gated out of IF;: VS; is its readback, an IF-shaped frame emits nothing', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FT891_MODEL);
   let emitted = false;
   codec.on('vfo', () => { emitted = true; });
   codec.on('split', () => { emitted = true; });
-  codec.getVfoSplit();
+  codec.getVfoSplit();          // VS; (#100), never IF;
   codec.onData(Buffer.from(kenwoodIf({ vfo: '1', split: '1' })));
-  codec.setVfo('B');           // VS1; write still works (no readback yet)
-  codec.getFrequency();        // must stay FA; — no _rxVfo flip without readback
   assert.strictEqual(emitted, false);
   assert.ok(!writes.includes('IF;'));
-  assert.strictEqual(writes[writes.length - 1], 'FA;');
+  assert.ok(writes.includes('VS;'));
+  codec.setVfo('B');            // VS1; + optimistic retarget, confirmed by VS;
+  codec.getFrequency();
+  assert.strictEqual(writes[writes.length - 1], 'FB;');
 });
 
 test('rigctld v/s parse: VFOB is consumed, never a phantom mode', () => {
@@ -2984,6 +2985,80 @@ console.log('\n=== CivCodec: a lost DATA frame is noticed and re-sent (IK4IDF IC
     codec.on('log', (l) => logs.push(l));
     codec.onData(reply([0x26, 0x00, 0x01, 0x01, 0x02]));
     assert.ok(!logs.some(l => /unhandled CI-V frame cmd=0x26/.test(l)));
+  });
+}
+
+// Yaesu VS; readback (#100, FT-710): with the radio on VFO B, a tune must
+// write FB and the dial must poll FB — VS1 is the only way POTACAT learns it.
+console.log('\n=== Yaesu VFO readback (VS;) ===');
+{
+  const { RIG_MODELS } = require('../lib/rig-models');
+  test('FT-710 on VFO B: VS1 retargets tune and poll to FB', () => {
+    const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS['FT-710']);
+    let vfo = null; codec.on('vfo', (v) => { vfo = v; });
+    codec.getVfoSplit();
+    assert.ok(writes.includes('VS;'), 'polls VS;');
+    codec.onData(Buffer.from('VS1;'));
+    assert.strictEqual(vfo, 'B');
+    writes.length = 0;
+    codec.setFrequency(14074000);
+    assert.ok(writes[0].startsWith('FB'), 'tune writes FB, got ' + writes[0]);
+    writes.length = 0;
+    codec.getFrequency();
+    assert.deepStrictEqual(writes, ['FB;']);
+    codec.onData(Buffer.from('VS0;'));
+    writes.length = 0;
+    codec.setFrequency(14074000);
+    assert.ok(writes[0].startsWith('FA'), 'back on A writes FA');
+  });
+  test('A Yaesu that never answers VS; stops being asked', () => {
+    const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS['FT-710']);
+    const logs = []; codec.on('log', (l) => logs.push(l));
+    for (let i = 0; i < 10; i++) codec.getVfoSplit();
+    assert.strictEqual(writes.filter((w) => w === 'VS;').length, 5);
+    assert.ok(logs.some((l) => /does not answer VS;/.test(l)));
+    codec.setFrequency(14074000);
+    assert.ok(writes[writes.length - 1].startsWith('FA'));
+  });
+  test('FT-991A (no VFO select) never polls VS;', () => {
+    const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS['FT-991/991A']);
+    codec.getVfoSplit();
+    assert.ok(!writes.includes('VS;'));
+  });
+  test('Yaesu setVfo(B) retargets at once and confirms with VS;', () => {
+    const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS['FTDX10']);
+    codec.setVfo('B');
+    assert.deepStrictEqual(writes, ['VS1;', 'VS;', 'FB;']);
+    codec.onData(Buffer.from('VS0;')); // queued before the switch: stale, ignored
+    writes.length = 0;
+    codec.setFrequency(7074000);
+    assert.ok(writes[0].startsWith('FB'));
+  });
+}
+
+// CI-V forward power (#102, IC-7200): 15 11 is read while transmitting and
+// reported in watts on Icom's scale; a radio that NAKs it is asked no more.
+console.log('\n=== CI-V RF power meter (15 11) ===');
+{
+  const { RIG_MODELS } = require('../lib/rig-models');
+  test('IC-7200: 15 11 asked, 0143 = 50 W, 0213 = 100 W', () => {
+    const { codec, writes } = captureWrites(CivCodec, RIG_MODELS['IC-7200']);
+    const watts = []; codec.on('powerMeter', (w) => watts.push(w));
+    codec.getPowerMeter();
+    assert.strictEqual(writes[writes.length - 1], 'fefe76e01511fd');
+    const frame = (hi, lo) => Buffer.from([0xFE, 0xFE, 0xE0, 0x76, 0x15, 0x11, hi, lo, 0xFD]);
+    codec.onData(frame(0x01, 0x43));
+    codec.onData(frame(0x02, 0x13));
+    codec.onData(frame(0x00, 0x00));
+    assert.deepStrictEqual(watts, [50, 100, 0]);
+  });
+  test('A radio that NAKs 15 11 three times is not asked again', () => {
+    const { codec, writes } = captureWrites(CivCodec, RIG_MODELS['IC-7200']);
+    const nak = Buffer.from([0xFE, 0xFE, 0xE0, 0x76, 0xFA, 0xFD]);
+    for (let i = 0; i < 3; i++) { codec.getPowerMeter(); codec.onData(nak); }
+    const n = writes.length;
+    codec.getPowerMeter();
+    assert.strictEqual(writes.length, n);
   });
 }
 
