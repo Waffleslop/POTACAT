@@ -5620,8 +5620,12 @@ a.settings-echocat-badge-link:hover {
   color: var(--accent-red);
 }
 
-/* DXCC Tracker */
-#dxcc-view {
+/* DXCC Tracker — and Worked All States, which reuses its markup. Without the
+   flex column + height the table container is never bounded, so its
+   overflow:auto never scrolls (N0KAH 2026-10-26: the WAS table could only be
+   seen whole on a big monitor). */
+#dxcc-view,
+#was-view {
   display: flex;
   flex-direction: column;
   height: 100%;
