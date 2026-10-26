@@ -1904,6 +1904,8 @@ let _remoteTxState = false;
 let _externalAtuActive = false;
 let _externalAtuCancel = false;
 let runExternalAtuTune = async () => false;
+// The RF-sense tuner's carrier mode — AM, never CW (see runExternalAtuTune).
+const EXTERNAL_ATU_CARRIER_MODE = 'AM';
 // THE single rig-control dispatcher. Both transports — desktop IPC
 // (ipcMain.handle 'rig-control') and the ECHOCAT phone (remoteServer.on
 // 'rig-control') — route through this one function so a control added once
@@ -22309,8 +22311,16 @@ function connectRemote() {
 
   // --- External ATU (LDG Z-100plus, MFJ, other RF-sensing tuners) ---
   // These tuners have no CAT — they sense carrier on the feedline and match
-  // autonomously. We emit a low-power CW carrier so the tuner has something
-  // to detect, then restore the rig's previous mode and power.
+  // autonomously. We emit a low-power carrier so the tuner has something to
+  // detect, then restore the rig's previous mode and power.
+  // The carrier is AM, not CW (N8JMS FTDX10, 2026-10-26: "sending a low power
+  // CW carrier for 4 seconds, but my power meter shows no power output"). A
+  // CAT transmit in CW keys the transmitter with the KEY UP — Yaesu/Kenwood
+  // TX1;/TX; and Icom 1C 00 make no RF in CW (G5HOW FTDX10, KM4CFT IC-7300,
+  // the paddle notes in buildPaddleKeyRig) — so the CW carrier never existed
+  // over CAT. AM transmits its carrier with no key and no audio on every
+  // brand; it was the operator's own workaround. Radios cap the AM carrier
+  // (25 W on an FTDX10/IC-7300), which is also this tune's ceiling.
   _externalAtuActive = false;
   _externalAtuCancel = false;
   runExternalAtuTune = async function () {
@@ -22329,11 +22339,12 @@ function connectRemote() {
     _externalAtuCancel = false;
     const restoreMode = _currentMode || 'USB';
     const restorePower = _currentTxPower > 0 ? _currentTxPower : (settings.defaultPower || 100);
-    sendCatLog(`[ExtATU] Firing ${watts} W CW carrier for ${seconds}s (mode ${restoreMode} → CW, power ${restorePower}W → ${watts}W)`);
+    const carrierMode = EXTERNAL_ATU_CARRIER_MODE;
+    sendCatLog(`[ExtATU] Firing ${watts} W ${carrierMode} carrier for ${seconds}s (mode ${restoreMode} → ${carrierMode}, power ${restorePower}W → ${watts}W)`);
     if (win && !win.isDestroyed()) win.webContents.send('external-atu-start', { seconds });
     try {
-      if (cat.setModeOnly) cat.setModeOnly('CW', _currentFreqHz);
-      else if (cat.setMode) cat.setMode('CW');
+      if (cat.setModeOnly) cat.setModeOnly(carrierMode, _currentFreqHz);
+      else if (cat.setMode) cat.setMode(carrierMode);
       gatedSetTxPower(watts);
       await new Promise(r => setTimeout(r, 300));
       if (_externalAtuCancel) throw new Error('cancelled');

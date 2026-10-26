@@ -2142,7 +2142,7 @@
               <label style="margin-left:8px;">Carrier duration (s):
                 <input type="number" id="set-external-atu-seconds" min="1" max="15" step="0.5" value="4" style="width:60px;">
               </label>
-              <span class="help-text" style="margin-top:4px;display:block;">Tune button emits a low-power CW carrier so the RF-sensing tuner can match. Rig restores to its previous mode and power afterwards. 1 to 25 W; your radio may not go below its own minimum (5 W on many rigs).</span>
+              <span class="help-text" style="margin-top:4px;display:block;">Tune button emits a low-power carrier (in AM, which needs no key or audio) so the RF-sensing tuner can match. Rig restores to its previous mode and power afterwards. 1 to 25 W; your radio may not go below its own minimum (5 W on many rigs).</span>
             </div>
             <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-atu-keep-on"> Keep the tuner on after a tune cycle</label>
             <span class="help-text" style="margin-left:24px;display:block;">For a Yaesu with a tuner on its TUNER jack (FT-710 + mAT-30): the radio runs the tune, then switches the tuner off. With this on, POTACAT watches the cycle and sends AC001; the moment the radio reports the tuner off, so it stays online.</span>

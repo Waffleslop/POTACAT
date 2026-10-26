@@ -197,6 +197,7 @@ const TESTS = [
   'test/activator-hunter-parks-test.js', // WD3D: their parks as a comma list (n-fer P2P)
   'test/vfo-power-button-test.js',    // KQ5O: Power On/Off at the bottom of the VFO window
   'test/dx-rule-test.js',            // G4BFG: DX = another entity, or the operator's HF / 6 m-up distance
+  'test/external-atu-carrier-test.js', // N8JMS: RF-sense tuner carrier in AM (CW over CAT is key-up)
   'test/yaesu-fa-digits-test.js',
   'test/log-as-test.js',
   'test/save-qso-stall-test.js',
