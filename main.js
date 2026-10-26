@@ -23754,6 +23754,15 @@ function connectRemote() {
     if (win && !win.isDestroyed()) win.webContents.send('voice-macros-updated');
     console.log(`[Voice] Received macro ${idx} from phone`);
     voiceMacroStoreSync();
+    // Echo the saved slot to every client, the uploader included: the phone
+    // waits for this as its confirmation, and a second phone or the web
+    // client learns of the recording now instead of at its next connect
+    // (Casey 2026-10-25: "the desktop didn't confirm it"). Same shape the
+    // desktop's own save pushes.
+    if (remoteServer && remoteServer.hasClient() && fs.existsSync(voiceMacroPath(idx))) {
+      const l = (settings.voiceMacroLabels || [])[idx] || '';
+      remoteServer.sendToClient({ type: 'voice-macro-sync', idx, label: l, audio: fs.readFileSync(voiceMacroPath(idx)).toString('base64'), hash: voiceMacroHash(idx) });
+    }
   });
 
   remoteServer.on('voice-macro-delete', ({ idx }) => {
@@ -23761,6 +23770,7 @@ function connectRemote() {
     if (fs.existsSync(p)) fs.unlinkSync(p);
     if (win && !win.isDestroyed()) win.webContents.send('voice-macros-updated');
     voiceMacroStoreSync();
+    if (remoteServer && remoteServer.hasClient()) remoteServer.sendToClient({ type: 'voice-macro-delete', idx });
   });
 
   // Phone-tapped a voice macro slot. Audio playback owns the rig's USB CODEC
@@ -23769,7 +23779,9 @@ function connectRemote() {
   // takes, and it already handles PTT-on / play / PTT-off via voice-macro-ptt.
   // (Gap 18.)
   remoteServer.on('voice-macro-play', ({ idx }) => {
-    if (typeof idx !== 'number' || idx < 0 || idx > 4) return;
+    // 25 slots since the editor grew (the phone matches, potacat-app a7e9a7c);
+    // this guard still said 5, so a tap on slot 6+ from a phone did nothing.
+    if (typeof idx !== 'number' || idx < 0 || idx >= VOICE_MACRO_MAX) return;
     if (!win || win.isDestroyed()) {
       sendCatLog(`[Echo CAT] voice-macro-play idx=${idx} ignored — desktop window not available`);
       return;

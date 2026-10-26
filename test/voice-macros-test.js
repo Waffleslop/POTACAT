@@ -66,6 +66,17 @@ function labelsAt(idx, val) {
   return a;
 }
 
+console.log('=== main.js: a phone save or delete reaches every client (Casey 2026-10-25) ===');
+{
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  const sync = main.slice(main.indexOf("remoteServer.on('voice-macro-sync'"), main.indexOf("remoteServer.on('voice-macro-delete'"));
+  eq(/remoteServer\.sendToClient\(\{ type: 'voice-macro-sync', idx, label: l, audio: [^}]*hash: voiceMacroHash\(idx\) \}\)/.test(sync), true, 'a phone upload is echoed as voice-macro-sync with the hash (the uploader\'s confirmation)');
+  const del = main.slice(main.indexOf("remoteServer.on('voice-macro-delete'"), main.indexOf("remoteServer.on('voice-macro-play'"));
+  eq(/sendToClient\(\{ type: 'voice-macro-delete', idx \}\)/.test(del), true, 'a phone delete is pushed to the other clients');
+  const play = main.slice(main.indexOf("remoteServer.on('voice-macro-play'"), main.indexOf("remoteServer.on('voice-macro-play'") + 400);
+  eq(/idx >= VOICE_MACRO_MAX\) return;/.test(play), true, 'voice-macro-play accepts every one of the 25 slots');
+}
+
 console.log('\n' + '='.repeat(50));
 console.log(`Results: ${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
