@@ -6680,6 +6680,12 @@ let _catPortWatch = null; // { port, timer }
 async function serialPortPresent(port) {
   if (!SerialPortPresence.isDevicePort(port)) return true;
   try {
+    // Linux/macOS: the /dev node exists exactly while the device is plugged
+    // in, and so does a /dev/serial/by-id/... symlink (udev makes and removes
+    // it with the device). serialport's list names the node, never the
+    // symlink, so a by-id path was "not there" for as long as POTACAT ran
+    // while Test Connection opened it fine (KM4CFT FTDX10, 2026-10-25).
+    if (process.platform !== 'win32' && fs.existsSync(port)) return true;
     const { SerialPort } = require('serialport');
     const list = await SerialPort.list();
     if (SerialPortPresence.portListed(port, list)) return true;

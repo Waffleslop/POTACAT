@@ -52,5 +52,15 @@ test('Windows: a port serialport does not list but SERIALCOMM records is present
   assert.ok(/if \(SerialPortPresence\.portListed\(port, list\)\) return true;[\s\S]{0,300}if \(process\.platform === 'win32'\) return SerialPortPresence\.portListed\(port, await windowsSerialCommPorts\(\)\);/.test(main), 'the registry is asked before a port is called missing');
 });
 
+test('Linux/macOS: a /dev path that exists is present before any list is consulted (KM4CFT, /dev/serial/by-id symlink)', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  const fn = main.slice(main.indexOf('async function serialPortPresent('), main.indexOf('function windowsSerialCommPorts('));
+  const exists = fn.indexOf("if (process.platform !== 'win32' && fs.existsSync(port)) return true;");
+  assert.ok(exists > 0, 'the filesystem is asked');
+  assert.ok(exists < fn.indexOf('SerialPort.list()'), 'before serialport lists anything');
+  // The by-id path is not in the list — the list alone would call it missing.
+  assert.ok(!P.portListed('/dev/serial/by-id/usb-Silicon_Labs_CP2105-if00-port0', [{ path: '/dev/ttyUSB0' }], 'linux'));
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
