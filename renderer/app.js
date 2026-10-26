@@ -3443,6 +3443,9 @@ async function saveRigEditor() {
   // nothing in the editor said so. A {rigs}-only save is partial, so main's
   // save handler persists WITHOUT touching the CAT connection.
   const _ssSave = window.api.saveSettings({ rigs: currentRigs });
+  // Learn the names of the devices just picked, so a later ID change can be
+  // followed (lib/audio-device-heal.js).
+  Promise.resolve(_ssSave).then(() => healRigAudioDevicesNow('rig editor'));
   // A radio was just added: open its Station Setup checklist so the operator
   // is walked through the rest instead of left to find it.
   if (_stationSetupOpenAfterSave && typeof window.openStationSetup === 'function') {
@@ -16369,6 +16372,7 @@ quickAudioInput.addEventListener('change', async () => {
   if (activeRig) {
     activeRig.remoteAudioInput = quickAudioInput.value;
     await window.api.saveSettings({ rigs, remoteAudioInput: quickAudioInput.value });
+    healRigAudioDevicesNow('audio menu');
   } else {
     await window.api.saveSettings({ remoteAudioInput: quickAudioInput.value });
   }
@@ -16381,6 +16385,7 @@ quickAudioOutput.addEventListener('change', async () => {
   if (activeRig) {
     activeRig.remoteAudioOutput = quickAudioOutput.value;
     await window.api.saveSettings({ rigs, remoteAudioOutput: quickAudioOutput.value });
+    healRigAudioDevicesNow('audio menu');
   } else {
     await window.api.saveSettings({ remoteAudioOutput: quickAudioOutput.value });
   }
@@ -21218,6 +21223,10 @@ catLogClearBtn.addEventListener('click', () => {
     // Winlink: Pat's state, the shim, the session — only when it is on.
     let winlinkLine = '';
     try { if (window.api.winlinkDiag) winlinkLine = await window.api.winlinkDiag(); } catch {}
+    // Whether settings are reaching disk (AE5JE + Bitdefender: a blocked save
+    // keeps changes for the session only, and every launch "forgot").
+    let settingsSaved = '(unknown)';
+    try { if (window.api.settingsSaveStatus) settingsSaved = await window.api.settingsSaveStatus(); } catch {}
     const md = {
       version: window._appVersion || s.appVersion || 'unknown',
       platform: window.api.platform,
@@ -21229,6 +21238,7 @@ catLogClearBtn.addEventListener('click', () => {
       stationSetup,
       echocatServer,
       winlink: winlinkLine,
+      settingsSaved,
     };
     // Complete-from-launch log: main reads startup.log + session.log (both
     // capture everything since process start, including the pre-window lines
@@ -21289,6 +21299,7 @@ catLogClearBtn.addEventListener('click', () => {
       '**Station Setup:** ' + md.stationSetup,
       '**ECHOCAT server:** ' + md.echocatServer,
       ...(md.winlink ? ['**Winlink:** ' + md.winlink] : []),
+      '**Settings saved:** ' + md.settingsSaved,
       '',
       '### What I tried to do',
       '<!-- fill in: the steps you took -->',
@@ -28782,7 +28793,43 @@ if (hunterParkInput) {
 loadPrefs().then(() => {
   render();
   checkFirstRun();
+  // A saved audio device whose ID changed since the last run (USB port,
+  // driver update, security software resetting POTACAT's storage — AE5JE
+  // + Bitdefender) is followed by its name before anything opens it.
+  healRigAudioDevicesNow('launch');
 });
+
+// Follow each rig's saved audio devices by NAME when their IDs change, and
+// learn the names while the IDs work (lib/audio-device-heal.js). Runs at
+// launch, on every device plug/unplug, and after a device is picked here.
+const _audioHealSaid = new Set();
+let _audioHealBusy = false;
+async function healRigAudioDevicesNow(why) {
+  if (_audioHealBusy || !window.AudioDeviceHeal || !navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+  _audioHealBusy = true;
+  try {
+    const s = await window.api.getSettings();
+    if (!Array.isArray(s.rigs) || !s.rigs.length) return;
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const r = AudioDeviceHeal.healRigAudioDevices(s.rigs, devices);
+    for (const note of r.notes) {
+      if (_audioHealSaid.has(note)) continue;
+      _audioHealSaid.add(note);
+      try { window.api.jtcatLog(note + ` (${why})`); } catch {}
+    }
+    if (!r.changed) return;
+    // The renderer's rig copy is what the editor saves whole: keep it current
+    // or the next editor save puts the dead IDs back.
+    if (Array.isArray(currentRigs) && currentRigs.length) {
+      currentRigs = currentRigs.map((rig) => r.rigs.find((x) => x && rig && x.id === rig.id) || rig);
+    }
+    await window.api.saveSettings({ rigs: r.rigs });
+  } catch { /* enumerateDevices refused: nothing to follow */ }
+  finally { _audioHealBusy = false; }
+}
+if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+  navigator.mediaDevices.addEventListener('devicechange', () => setTimeout(() => healRigAudioDevicesNow('device change'), 1500));
+}
 // Fetch active events on startup
 window.api.getActiveEvents().then((events) => {
   console.log('[Events] loaded', events.length, 'events:', events.map(e => e.id));

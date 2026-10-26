@@ -451,6 +451,7 @@ const CqTarget = require('./renderer/cq-target'); // shared CQ "chase target" ta
 const { RemoteServer } = require('./lib/remote-server');
 const { buildDiagnosticSnapshot, redactLogLines } = require('./lib/diagnostic-snapshot');
 const { BUG_REPORT_MARKER, selectReportLines, maskHomeDir, sessionLogRotationMoves } = require('./lib/bug-report-log');
+const SettingsSaveStatus = require('./lib/settings-save-status');
 const { healActiveRig } = require('./lib/active-rig');
 const { healRigAudioMirror } = require('./lib/rig-audio-mirror');
 const Cm108Ptt = require('./lib/cm108-ptt');
@@ -874,12 +875,49 @@ function _readJsonSafe(p, fallback) {
   try { return JSON.parse(fs.readFileSync(p, 'utf-8')); }
   catch { return fallback; }
 }
+// What happened to each settings file this session, for the bug report's
+// "Settings saved" line (lib/settings-save-status.js). A failed save keeps the
+// change in memory for the session only and used to say nothing anywhere:
+// AE5JE's audio devices and window positions forgot themselves every launch
+// on a PC running Bitdefender (2026-10-26). The error still throws, as before.
+const _settingsWriteStatus = new Map(); // path -> { at, ok, error }
+const _settingsWriteFailSaid = new Set();
+const _settingsMtimeAtLaunch = new Map(); // path -> mtimeMs | null
+function _noteSettingsMtime(p) {
+  if (_settingsMtimeAtLaunch.has(p)) return;
+  try { _settingsMtimeAtLaunch.set(p, fs.statSync(p).mtimeMs); } catch { _settingsMtimeAtLaunch.set(p, null); }
+}
 function _writeJsonAtomic(p, obj) {
+  _noteSettingsMtime(p);
   try { fs.mkdirSync(path.dirname(p), { recursive: true }); } catch {}
-  fs.writeFileSync(p, JSON.stringify(obj, null, 2));
+  try {
+    fs.writeFileSync(p, JSON.stringify(obj, null, 2));
+    _settingsWriteStatus.set(p, { at: Date.now(), ok: true });
+  } catch (err) {
+    const msg = String((err && err.message) || err).replace(require('os').homedir(), '~');
+    _settingsWriteStatus.set(p, { at: Date.now(), ok: false, error: msg });
+    if (!_settingsWriteFailSaid.has(msg)) {
+      _settingsWriteFailSaid.add(msg);
+      try { sendCatLog(`[Settings] Could not save ${path.basename(p)}: ${msg} — changes made now last only until POTACAT closes. Security software blocking %APPDATA%\POTACAT (Bitdefender Safe Files, for one) does this.`); } catch { /* before the log is up */ }
+    }
+    throw err;
+  }
+}
+/** The bug report's "Settings saved" line. */
+function settingsSaveStatusLine() {
+  const files = [{ label: 'settings.json', p: SETTINGS_PATH }];
+  if (settings && settings.activeProfile) files.push({ label: `profile ${settings.activeProfile}`, p: profileSettingsPath(settings.activeProfile) });
+  return SettingsSaveStatus.describeSaveStatus({
+    now: Date.now(),
+    files: files.map((f) => {
+      _noteSettingsMtime(f.p);
+      return { label: f.label, mtimeMsAtLaunch: _settingsMtimeAtLaunch.get(f.p), lastWrite: _settingsWriteStatus.get(f.p) || null };
+    }),
+  });
 }
 
 function loadSettings() {
+  _noteSettingsMtime(SETTINGS_PATH); // before any write: how old the file was at launch
   const global = _readJsonSafe(SETTINGS_PATH, null);
   if (!global) {
     // Truly fresh install: return defaults, no profile yet. RBN + PSKReporter
@@ -896,6 +934,7 @@ function loadSettings() {
   // here so the migration writes happen at a deterministic point with the
   // app already initialized.
   if (!global.activeProfile) return global;
+  _noteSettingsMtime(profileSettingsPath(global.activeProfile));
   const profile = _readJsonSafe(profileSettingsPath(global.activeProfile), {});
   // Profile values lose to global values on key collision — global is
   // always authoritative for machine-scoped fields.
@@ -40042,6 +40081,7 @@ app.whenReady().then(() => {
 
   // --- Directory IPC ---
   ipcMain.on('fetch-directory', () => { fetchDirectory(); });
+  ipcMain.handle('settings-save-status', () => { try { return settingsSaveStatusLine(); } catch { return '(unknown)'; } });
   ipcMain.handle('get-directory', () => ({ nets: directoryNets, swl: directorySwl }));
 
   // --- Events IPC ---

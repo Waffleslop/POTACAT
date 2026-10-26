@@ -482,6 +482,7 @@ contextBridge.exposeInMainWorld('api', {
   winlinkPopoutOpen: () => ipcRenderer.send('winlink-popout-open'),
   winlinkPotaSpotOpen: (o) => ipcRenderer.send('winlink-pota-spot-open', o || {}),
   winlinkDiag: () => ipcRenderer.invoke('winlink-diag'),
+  settingsSaveStatus: () => ipcRenderer.invoke('settings-save-status'),
   winlinkListArdopDevices: () => ipcRenderer.invoke('winlink-list-ardop-devices'),
   winlinkAccountCheck: (call) => ipcRenderer.invoke('winlink-account-check', call),
   winlinkVaraFind: (kind) => ipcRenderer.invoke('winlink-vara-find', { kind }),
