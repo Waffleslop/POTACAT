@@ -118,6 +118,19 @@ check('first eligible slot after arming ALWAYS fires (N7BBQ: silence looked brok
   assert.strictEqual(sch.tick(3 * SLOT + 100), null); // back to the rng: listen
 });
 
+check('armed MID-slot: the guarantee waits for the next slot (K3SBP 2026-10-26)', () => {
+  // main.js arms at ~slot+112 s and announces the current slot a second later
+  // (decideSlot); that slot can no longer transmit, so it must not spend the
+  // first-TX guarantee. The next slot fires even though the rng says listen.
+  const sch = new S.WsprScheduler({ txPct: 5, rng: () => 0.99 });
+  sch.setEnabled(true);
+  assert.strictEqual(sch.decideSlot(5 * SLOT + 112000), false, 'the passed slot is announced as listen');
+  assert.strictEqual(sch.tick(5 * SLOT + 113000), null);
+  const plan = sch.tick(6 * SLOT + 100);
+  assert.ok(plan && plan.slotNumber === 6, 'the first startable slot did not fire');
+  assert.strictEqual(sch.tick(7 * SLOT + 100), null, 'then back to the rng');
+});
+
 check('TX 0% stays listen-only — no guaranteed first TX either', () => {
   const sch = new S.WsprScheduler({ txPct: 0, rng: () => 0.0 });
   sch.setEnabled(true);
