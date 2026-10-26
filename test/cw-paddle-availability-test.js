@@ -37,6 +37,18 @@ console.log('rigctld has no per-element CW keying:');
 expect({ transportType: 'rigctld', paddleKey: 'dtr', protocol: 'civ', hasKeyPort: false },
   false, 'rigctld-no-per-element-cw', 'rigctld, no key port (any model)');
 
+// A remote rigctld (type 'rigctldnet', generic model protocol 'rigctld') used to
+// read as available: its paddleKey is false, so the 'txrx' default met a
+// protocol that was not kenwood. A paddle press there is T 1, a dead key.
+expect({ transportType: 'rigctldnet', paddleKey: false, protocol: 'rigctld', hasKeyPort: false },
+  false, 'rigctld-no-per-element-cw', 'rigctld Network, no key port');
+
+console.log('flrig has no per-element CW keying either (its own reason, the phone words it):');
+expect({ transportType: 'flrig', paddleKey: false, protocol: 'flrig', hasKeyPort: false },
+  false, 'flrig-no-per-element-cw', 'flrig, no key port');
+expect({ transportType: 'flrig', paddleKey: false, protocol: 'flrig', hasKeyPort: true },
+  true, null, 'flrig WITH key port configured');
+
 console.log('Real key-line routes stay available:');
 // Icom's real key route is 'dtr' (or CW text 0x17); 'txrx' isn't flagged dead
 // because Icom never routes paddles through it. (0x1C 0x01 is the ATU, not a key.)
