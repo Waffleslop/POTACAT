@@ -1136,7 +1136,6 @@ const rbnTableBody = document.getElementById('rbn-table-body');
 const rbnDistHeader = document.getElementById('rbn-dist-header');
 const rbnBandFilterEl = document.getElementById('rbn-band-filter');
 // Directory browser (inside Settings > Net Reminders)
-const setEnableDirectory = document.getElementById('set-enable-directory');
 const dirControls = document.getElementById('dir-controls');
 const dirBrowseBtn = document.getElementById('dir-browse-btn');
 const dirBrowser = document.getElementById('dir-browser');
@@ -2189,7 +2188,7 @@ async function loadPrefs() {
         setView('dxcc');
       } else if (viewState.lastView === 'was') {
         setView('was');
-      } else if (viewState.lastView === 'directory' && settings.enableDirectory) {
+      } else if (viewState.lastView === 'directory') {
         setView('directory');
       } else {
         showTable = viewState.showTable !== false;
@@ -13781,14 +13780,6 @@ if (viewDirectoryBtn) viewDirectoryBtn.addEventListener('click', () => {
   }
   setView('directory');
 });
-// Show Directory button at startup if enabled (without waiting for Settings dialog)
-(async () => {
-  const s = await window.api.getSettings();
-  if (s.enableDirectory) {
-    setEnableDirectory.checked = true;
-    updateDirectoryButton();
-  }
-})();
 // "More" views dropdown toggle
 const viewsDropdown = document.getElementById('views-dropdown');
 if (viewsDropdown) {
@@ -16864,9 +16855,6 @@ async function openSettingsDialog(tab) {
   renderNetList(currentNetReminders);
   netEditor.classList.add('hidden');
   netAddBtn.classList.remove('hidden');
-  // Directory opt-in
-  setEnableDirectory.checked = s.enableDirectory === true;
-  dirControls.classList.toggle('hidden', !s.enableDirectory);
   updateDirectoryButton();
   if (dirBrowser) dirBrowser.classList.add('hidden');
   if (dirBrowseBtn) dirBrowseBtn.classList.remove('hidden');
@@ -17820,7 +17808,6 @@ settingsSave.addEventListener('click', async () => {
     clusterSpotterCqZones: clusterSpotterCqZonesStr,
     clusterSpotterItuZones: clusterSpotterItuZonesStr,
     netReminders: currentNetReminders,
-    enableDirectory: setEnableDirectory.checked,
     showBeacons: showBeaconsEnabled,
     showDxBar: showDxBarEnabled,
     enableClusterTerminal: clusterTerminalEnabled,
@@ -20297,10 +20284,8 @@ if (dirvSuggestSheet) dirvSuggestSheet.addEventListener('click', (e) => {
 
 function updateDirectoryButton() {
   if (!viewDirectoryBtn) return;
-  // Show when directory is enabled, OR user has custom net reminders
-  const show = setEnableDirectory?.checked || (currentNetReminders && currentNetReminders.length > 0);
-  viewDirectoryBtn.classList.toggle('hidden', !show);
-  if (!show && currentView === 'directory') setView('table');
+  // The directory is always on (Casey 2026-10-26): its menu entry always shows.
+  viewDirectoryBtn.classList.remove('hidden');
 }
 
 function renderDirectory() {
@@ -20567,15 +20552,6 @@ if (dirSearchInput) dirSearchInput.addEventListener('input', () => { renderDirec
 // Directory refresh button
 if (dirRefreshBtn) dirRefreshBtn.addEventListener('click', () => { window.api.fetchDirectory(); });
 
-// Directory opt-in checkbox
-if (setEnableDirectory) setEnableDirectory.addEventListener('change', () => {
-  const on = setEnableDirectory.checked;
-  dirControls.classList.toggle('hidden', !on);
-  if (!on && dirBrowser) {
-    dirBrowser.classList.add('hidden');
-    dirBrowseBtn.classList.remove('hidden');
-  }
-});
 
 // Browse / close directory browser — now opens the full Directory View
 if (dirBrowseBtn) dirBrowseBtn.addEventListener('click', () => {

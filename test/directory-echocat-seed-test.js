@@ -18,14 +18,26 @@ const rs = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js')
 console.log('directory echocat seed');
 
 test('every new ECHOCAT server is seeded with the directory', () => {
-  assert.ok(/onRemoteServer\(\(rs\) => \{\n\s*if \(!settings\.enableDirectory \|\| \(!directoryNets\.length && !directorySwl\.length\)\) return;\n\s*rs\.broadcastDirectory\(\{ nets: directoryNets, swl: directorySwl, userNets: buildUserNetsForBroadcast\(\) \}\);/.test(src));
+  assert.ok(/onRemoteServer\(\(rs\) => \{\n\s*if \(!directoryNets\.length && !directorySwl\.length\) return;\n\s*rs\.broadcastDirectory\(\{ nets: directoryNets, swl: directorySwl, userNets: buildUserNetsForBroadcast\(\) \}\);/.test(src));
 });
 
 test('the directory push is not gated on the server listening', () => {
   const at = src.indexOf('function pushDirectoryToRenderer()');
   const body = src.slice(at, at + 800);
-  assert.ok(/if \(remoteServer && settings\.enableDirectory\) \{/.test(body));
-  assert.ok(!/remoteServer\.running && settings\.enableDirectory/.test(body));
+  assert.ok(/if \(remoteServer\) \{\n\s*remoteServer\.broadcastDirectory\(/.test(body));
+  assert.ok(!/remoteServer\.running/.test(body));
+});
+
+// Casey 2026-10-26: the directory is always on. An opt-in setting let the
+// desktop menu show it while phones were never sent it (3 operators' Dir tabs
+// stuck on "Waiting for directory data").
+test('the directory has no off switch anywhere', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  for (const [name, text] of [['main.js', src], ['app.js', app], ['index.html', html]]) {
+    assert.ok(!/enableDirectory|set-enable-directory/.test(text), name + ' still reads the old setting');
+  }
+  assert.ok(/setInterval\(\(\) => \{ fetchDirectory\(\); \}, 4 \* 3600000\)/.test(src), 'refreshed every 4 h, ungated');
 });
 
 test('the server stores the snapshot and hydrates each device from it', () => {

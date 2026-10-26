@@ -28919,20 +28919,23 @@ function createWindow() {
     updateRemoteSettings(); // seed ECHOCAT catalog/subscriptions (no-op if remote server not up yet)
     scanLogForEvents();
     rebuildContestHistory();
-    // Load directory cache and fetch fresh data (only if enabled)
-    if (settings.enableDirectory) {
+    // The HF Nets / SWL directory is always on (Casey 2026-10-26). It was an
+    // opt-in setting, but the More menu showed it regardless and phones were
+    // only sent it when the setting was on: three operators' ECHOCAT Dir tabs
+    // sat on "Waiting for directory data" while their desktop showed it.
+    {
       const dirCache = loadDirectoryCache();
       directoryNets = dirCache.nets || [];
       directorySwl = dirCache.swl || [];
       pushDirectoryToRenderer();
       fetchDirectory();
     }
-    setInterval(() => { if (settings.enableDirectory) fetchDirectory(); }, 4 * 3600000);
+    setInterval(() => { fetchDirectory(); }, 4 * 3600000);
     // connectRemote() builds a NEW server with an empty directory, and only a
     // fetch (every 4 h) or a net-reminder edit refilled it: until then every
     // phone connected to a blank HF Nets / SWL tab. Seed each new server.
     onRemoteServer((rs) => {
-      if (!settings.enableDirectory || (!directoryNets.length && !directorySwl.length)) return;
+      if (!directoryNets.length && !directorySwl.length) return;
       rs.broadcastDirectory({ nets: directoryNets, swl: directorySwl, userNets: buildUserNetsForBroadcast() });
     });
     // Auto-reopen pop-out map if it was open when the app last closed
@@ -29862,10 +29865,10 @@ function pushDirectoryToRenderer() {
   if (win && !win.isDestroyed()) {
     win.webContents.send('directory-data', { nets: directoryNets, swl: directorySwl });
   }
-  // Also to ECHOCAT (only when the directory feature is enabled). Not gated on
+  // Also to ECHOCAT (always: the directory has no off switch). Not gated on
   // the server LISTENING: broadcastDirectory also stores the snapshot that every
   // connecting device is hydrated with, and a server still binding missed it.
-  if (remoteServer && settings.enableDirectory) {
+  if (remoteServer) {
     remoteServer.broadcastDirectory({
       nets: directoryNets,
       swl: directorySwl,
