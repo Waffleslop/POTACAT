@@ -134,6 +134,8 @@ let potaAgeLimit = false;
 let sotaMaxAgeMin = 30;  // SOTA max spot age in minutes
 let dxcMaxAgeMin = 15;   // DX cluster max spot age in minutes — DX spots aren't re-posted like POTA
 let maxDistMi = 0;       // max distance in miles (0 = no limit)
+let dxDistanceHf = 0;    // DX distance in MILES, HF (0 = a different DXCC entity)
+let dxDistanceVhf = 0;   // DX distance in MILES, 6 m and up
 let scanDwell = 7;       // seconds per frequency during scan
 let enablePota = true;
 let enableSota = false;
@@ -385,6 +387,7 @@ let hideWorkedParks = false;
 let hideWorkedCallRef = false; // strict: hide only when CALL + REF + UTC-date + BAND + MODE all match a logged QSO
 let prioritizeNewParks = false; // sort unworked-park spots to the top of the table
 let hideQrt = true; // hide spots with QRT in comments (default on)
+let dxOnly = false; // only spots main stamped isDx (lib/dx-rule.js)
 let spotMuteRules = []; // "hide {continent} on {band}" rules — lib/spot-mute-rules.js (N7BBQ)
 let showBearing = false;
 let respotDefault = true; // default: re-spot on POTA after logging
@@ -781,6 +784,7 @@ const spotsStrictAtno = document.getElementById('spots-strict-atno');
 const spotsStrictAtnoLabel = document.getElementById('spots-strict-atno-label');
 const spotsHideOob = document.getElementById('spots-hide-oob');
 const spotsHideQrt = document.getElementById('spots-hide-qrt');
+const spotsDxOnly = document.getElementById('spots-dx-only');
 const spotsShowHidden = document.getElementById('spots-show-hidden');
 const quickShowMeter = document.getElementById('quick-show-meter');
 const spotsHiddenCount = document.getElementById('spots-hidden-count');
@@ -2038,6 +2042,7 @@ async function loadPrefs() {
   licenseClass = settings.licenseClass || 'none';
   hideOutOfBand = settings.hideOutOfBand === true;
   hideWorked = settings.hideWorked === true;
+  dxOnly = settings.dxOnly === true;
   hideWorkedParks = settings.hideWorkedParks === true;
   hideWorkedCallRef = settings.hideWorkedCallRef === true;
   prioritizeNewParks = settings.prioritizeNewParks === true;
@@ -2159,6 +2164,8 @@ async function loadPrefs() {
   sotaMaxAgeMin = parseInt(settings.sotaMaxAge, 10) || 30;
   dxcMaxAgeMin = parseInt(settings.dxcMaxAge, 10) || 15;
   maxDistMi = parseInt(settings.maxDist, 10) || 0;
+  dxDistanceHf = Number(settings.dxDistanceHf) || 0;
+  dxDistanceVhf = Number(settings.dxDistanceVhf) || 0;
   updateHeaders();
 
   // Restore view state
@@ -10193,6 +10200,7 @@ function getFiltered() {
     if (hideWorkedCallRef && isWorkedSpotStrict(s)) return false;
     if (hideWorkedParks && s.source === 'pota' && s.reference && workedParksSet.has(s.reference)) return false;
     if (hideQrt && s.comments && s.comments.toLowerCase().includes('qrt')) return false;
+    if (dxOnly && !s.isDx) return false;
     if (!showHiddenSpots && isSpotHidden(s.callsign, s.frequency, s.band)) return false;
     if (maxDistMi > 0 && s.distance != null) {
       // maxDistMi is stored in the user's chosen unit; s.distance is always in miles
@@ -11415,7 +11423,9 @@ const PRIVILEGE_RANGES = {
 };
 
 const SOURCE_LABELS = {
-  pota: 'POTA', sota: 'SOTA', dxc: 'DX', cwspots: 'CW',
+  // 'dxc' is the DX CLUSTER feed, not DX: a German operator saw a Bulgarian
+  // cluster spot labelled DX (G4BFG). DX is now the spot's isDx (lib/dx-rule.js).
+  pota: 'POTA', sota: 'SOTA', dxc: 'Cluster', cwspots: 'CW',
   rbn: 'RBN', wwff: 'WWFF', llota: 'LLOTA', tiles: 'Tiles', gma: 'GMA', parc: 'PARC', pskr: 'FreeDV', net: 'NET',
 };
 const CW_DIGI_MODES = new Set(['CW', 'FT8', 'FT4', 'FT2', 'RTTY', 'DIGI', 'JS8', 'PSK31', 'PSK']);
@@ -14527,7 +14537,7 @@ function render() {
         { val: s.wpm != null ? String(s.wpm) : '', col: 'wpm' },
         { val: refDisplay, wwff: !!s.wwffReference, newPark: isNewPark, wantedStates, col: 'reference' },
         { val: parkDisplay, col: 'parkName' },
-        { val: s.locationDesc, col: 'locationDesc' },
+        { val: s.locationDesc, dx: !!s.isDx, col: 'locationDesc' },
         { val: (s.lat != null && s.lon != null) ? latLonToGridLocal(s.lat, s.lon).slice(0, 4) : '', col: 'grid' },
         { val: s.cqZone != null ? String(s.cqZone) : '', col: 'cqz' },
         { val: s.ituZone != null ? String(s.ituZone) : '', col: 'ituz' },
@@ -14588,6 +14598,13 @@ function render() {
           nb.className = 'ref-new-pill';
           nb.style.cssText = `background:${SOURCE_COLORS_ACTIVE.pota};color:#000;font-size:9px;font-weight:bold;padding:1px 3px;border-radius:3px;margin-left:4px;`;
           td.appendChild(nb);
+        }
+        if (cell.dx) {
+          const db = document.createElement('span');
+          db.textContent = 'DX';
+          db.className = 'ref-dx-pill';
+          db.title = window.DxRule ? DxRule.describeRule(parseFloat(s.frequency), { hfMi: dxDistanceHf, vhfMi: dxDistanceVhf }) : 'DX';
+          td.appendChild(db);
         }
         if (cell.wantedStates && cell.wantedStates.length) {
           const sb = document.createElement('span');
@@ -15725,6 +15742,7 @@ function syncSpotsPanel() {
   spotsStrictAtno.checked = strictAtno;
   spotsHideOob.checked = hideOutOfBand;
   spotsHideQrt.checked = hideQrt;
+  if (spotsDxOnly) spotsDxOnly.checked = dxOnly;
   spotsShowHidden.checked = showHiddenSpots;
   quickShowMeter.checked = meterBoxVisible;
   const hCount = hiddenSpotCount();
@@ -15793,6 +15811,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   strictAtno = spotsStrictAtno.checked;
   hideOutOfBand = spotsHideOob.checked;
   hideQrt = spotsHideQrt.checked;
+  if (spotsDxOnly) dxOnly = spotsDxOnly.checked;
   showHiddenSpots = spotsShowHidden.checked;
   enableDxcc = spotsDxcc.checked;
 
@@ -15825,7 +15844,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
     enableCluster, enableCwSpots, enableRbn, enablePskr, enableDxe,
     enableDxeSources: { ...enableDxeSources },
     hideWorked, hideWorkedParks, hideWorkedCallRef, prioritizeNewParks, strictAtno, hideOutOfBand,
-    enableDxcc,
+    enableDxcc, dxOnly,
   });
 
   render();
@@ -16615,6 +16634,17 @@ async function openSettingsDialog(tab) {
   if (setPotaAgeLimit) setPotaAgeLimit.checked = s.potaAgeLimit === true;
   setMaxDist.value = s.maxDist || 0;
   setMaxDistUnit.textContent = (s.distUnit || 'mi') === 'km' ? 'km' : 'miles';
+  // DX distances are stored in MILES (main applies them to spot.distance);
+  // shown and typed in the operator's unit.
+  {
+    const km = (s.distUnit || 'mi') === 'km';
+    const show = (mi) => (Number(mi) > 0 ? String(Math.round(km ? mi * MI_TO_KM : mi)) : '');
+    const hf = document.getElementById('set-dx-dist-hf');
+    const vhf = document.getElementById('set-dx-dist-vhf');
+    if (hf) hf.value = show(s.dxDistanceHf);
+    if (vhf) vhf.value = show(s.dxDistanceVhf);
+    document.querySelectorAll('.set-dx-dist-unit').forEach((el) => { el.textContent = km ? 'km' : 'miles'; });
+  }
   setSotaMaxAge.value = s.sotaMaxAge || 30;
   setDxcMaxAge.value = s.dxcMaxAge || 15;
   setRefreshInterval.value = s.refreshInterval || 30;
@@ -17478,6 +17508,14 @@ settingsSave.addEventListener('click', async () => {
   const respotPresetsVal = collectRespotPresets();
   const maxAgeVal = parseInt(setMaxAge.value, 10) || 5;
   const maxDistVal = parseInt(setMaxDist.value, 10) || 0;
+  const dxDistMi = (id) => {
+    const el = document.getElementById(id);
+    const n = el ? parseFloat(el.value) : NaN;
+    if (!(n > 0)) return 0;
+    return Math.round(setDistUnit.value === 'km' ? n / MI_TO_KM : n);
+  };
+  const dxDistanceHfVal = dxDistMi('set-dx-dist-hf');
+  const dxDistanceVhfVal = dxDistMi('set-dx-dist-vhf');
   const sotaMaxAgeVal = parseInt(setSotaMaxAge.value, 10) || 30;
   const dxcMaxAgeVal = parseInt(setDxcMaxAge.value, 10) || 15;
   const refreshIntervalVal = Math.max(15, parseInt(setRefreshInterval.value, 10) || 30);
@@ -17718,6 +17756,8 @@ settingsSave.addEventListener('click', async () => {
     maxAgeMin: maxAgeVal,
     potaAgeLimit: !!(setPotaAgeLimit && setPotaAgeLimit.checked),
     maxDist: maxDistVal,
+    dxDistanceHf: dxDistanceHfVal,
+    dxDistanceVhf: dxDistanceVhfVal,
     sotaMaxAge: sotaMaxAgeVal,
     dxcMaxAge: dxcMaxAgeVal,
     refreshInterval: refreshIntervalVal,
@@ -17976,6 +18016,8 @@ settingsSave.addEventListener('click', async () => {
   maxAgeMin = maxAgeVal;
   potaAgeLimit = !!(setPotaAgeLimit && setPotaAgeLimit.checked);
   maxDistMi = maxDistVal;
+  dxDistanceHf = dxDistanceHfVal;
+  dxDistanceVhf = dxDistanceVhfVal;
   sotaMaxAgeMin = sotaMaxAgeVal;
   dxcMaxAgeMin = dxcMaxAgeVal;
   scanDwell = dwellVal;

@@ -368,6 +368,7 @@ const SwrGuard = require('./lib/swr-guard'); // SWR-guard auto-tune + ATU result
 const { encodeWspr } = require('./lib/wspr/encode');
 const { loadCtyDat, resolveCallsign, resolveZones, getAllEntities } = require('./lib/cty');
 const CallZones = require('./lib/call-zones'); // CQ/ITU zones for spots + logbook rows (LZ3AW item 30)
+const DxRule = require('./lib/dx-rule'); // what counts as DX: another entity, or the operator's distance (G4BFG)
 const ClusterNodeChoice = require('./lib/cluster-node-choice'); // turn saved cluster nodes on/off from the Source menu (LZ3AW item 1)
 const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseAdifStream, parseSqliteFile, parseSqliteConfirmed, isSqliteFile, parseRecord: parseAdifRecord, normalizeMode: normalizeLogMode } = require('./lib/adif');
 const { qsoDayInScheduleEntry, matchChecklistItem, matchRegionPatterns, activeScheduleEntry, coveringScheduleEntries, matchingRegionEntry, matchEventQsoForStamp, retroStampMatches, retroCorrectStamps } = require('./lib/event-progress');
@@ -26546,6 +26547,31 @@ function dedupeCrossSource(spots) {
   return [...passthrough, ...collapsed];
 }
 
+// The DX flag on every spot, every source (lib/dx-rule.js). Entities are
+// cached per callsign: the merged list is rebuilt every couple of seconds.
+const _dxEntityCache = new Map();
+function dxEntityOf(call) {
+  if (!ctyDb || !call) return '';
+  const key = String(call).toUpperCase();
+  if (_dxEntityCache.has(key)) return _dxEntityCache.get(key);
+  if (_dxEntityCache.size > 5000) _dxEntityCache.clear();
+  let name = '';
+  try { const e = resolveCallsign(key, ctyDb); name = (e && e.name) || ''; } catch { /* unknown call */ }
+  _dxEntityCache.set(key, name);
+  return name;
+}
+function dxRuleOpts() {
+  return { hfMi: settings.dxDistanceHf, vhfMi: settings.dxDistanceVhf };
+}
+function stampSpotDx(spots) {
+  const myEntity = dxEntityOf(settings.myCallsign);
+  const opts = dxRuleOpts();
+  for (const sp of spots) {
+    if (!sp || sp.source === 'net') continue;
+    sp.isDx = DxRule.isDx({ myEntity, theirEntity: dxEntityOf(sp.callsign), distanceMi: sp.distance, freqKhz: parseFloat(sp.frequency) }, opts);
+  }
+}
+
 function sendMergedSpots() {
   if (!win || win.isDestroyed()) return;
   const netSpots = getActiveNetSpots();
@@ -26556,6 +26582,7 @@ function sendMergedSpots() {
   // CQ/ITU zones on every spot, every source (optional columns/fields on the
   // desktop table and ECHOCAT cards — LZ3AW item 30).
   CallZones.stampSpotZones(merged, callZonesOf);
+  stampSpotDx(merged);
   // Only bands this radio is used on (rig editor, lib/rig-bands.js): a spot
   // on a band it cannot work is never shown, on any surface or panadapter.
   const rigBands = activeRigBands();
@@ -40344,6 +40371,11 @@ app.whenReady().then(() => {
 
     const pskrChanged = has('enablePskr') && newSettings.enablePskr !== settings.enablePskr;
 
+    // The DX flag is stamped on every spot from these (stampSpotDx).
+    const dxRuleChanged = (has('dxDistanceHf') && newSettings.dxDistanceHf !== settings.dxDistanceHf) ||
+      (has('dxDistanceVhf') && newSettings.dxDistanceVhf !== settings.dxDistanceVhf) ||
+      (has('myCallsign') && newSettings.myCallsign !== settings.myCallsign);
+
     const pskrMapChanged = (has('enablePskrMap') && newSettings.enablePskrMap !== settings.enablePskrMap) ||
       (has('myCallsign') && newSettings.myCallsign !== settings.myCallsign);
 
@@ -40598,6 +40630,9 @@ app.whenReady().then(() => {
       if (typeof sendMergedSpots === 'function') {
         try { sendMergedSpots(); } catch { /* ignore */ }
       }
+    }
+    if (dxRuleChanged && !panadapterChanged) {
+      try { sendMergedSpots(); } catch { /* ignore */ }
     }
 
     // Reconnect cluster if settings changed

@@ -559,6 +559,7 @@
   let searchDebounce = null;
   let workedParksSet = new Set();  // park refs from CSV for new-to-me filter
   let showNewOnly = false;
+  let dxOnly = false; // only spots the shack stamped isDx (lib/dx-rule.js)
   let workedQsos = new Map();     // callsign -> [{date, ref, band, mode}]
   let wqChunkAccum = [];          // in-flight chunked worked-qsos accumulator
   let hideWorked = false;
@@ -3054,6 +3055,7 @@
       if (spotMatchesMuteRule(s)) return false;
       if (showNewOnly && !isNewPark(s)) return false;
       if (hideWorked && isWorkedSpot(s)) return false;
+      if (dxOnly && !s.isDx) return false;
       // Hidden on the desktop's list: every spot of the call, this kHz, or
       // this band (the row's H button; lifts when they QSY to another band).
       if (isSpotHiddenByList(s.callsign, s.frequency, s.band)) return false;
@@ -3605,6 +3607,11 @@
       renderSpots();
       if (activeTab === 'map') renderMapSpots();
       sendFilters();
+    } else if (cb.id === 'rc-dx-only') {
+      dxOnly = cb.checked;
+      renderSpots();
+      if (activeTab === 'map') renderMapSpots();
+      sendFilters();
     }
   });
 
@@ -3635,6 +3642,7 @@
         sort: spotSort,
         newOnly: showNewOnly,
         hideWorked: hideWorked,
+        dxOnly: dxOnly,
       }
     }));
   }
@@ -3671,6 +3679,11 @@
       hideWorked = f.hideWorked;
       const cb = document.getElementById('rc-hide-worked');
       if (cb) cb.checked = f.hideWorked;
+    }
+    if (f.dxOnly != null) {
+      dxOnly = !!f.dxOnly;
+      const cb = document.getElementById('rc-dx-only');
+      if (cb) cb.checked = dxOnly;
     }
     // Per-band region mutes — desktop-owned (settings.spotMuteRules), merged
     // into this payload at send. Applied here, displayed under the region

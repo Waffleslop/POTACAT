@@ -5781,6 +5781,7 @@ a.settings-echocat-badge-link:hover {
 .was-backfill-status { font-size: 11px; color: var(--text-secondary); }
 #was-count.was-count-confirmed { color: #4ecca3; }
 .ref-state-pill { background: #e040fb; color: #000; font-size: 9px; font-weight: bold; padding: 1px 3px; border-radius: 3px; margin-left: 4px; }
+.ref-dx-pill { background: #ffd740; color: #000; font-size: 9px; font-weight: bold; padding: 1px 3px; border-radius: 3px; margin-left: 4px; }
 #was-placeholder { text-align: center; padding: 16px 20px; color: var(--text-tertiary); font-size: 12px; }
 
 .dxcc-unworked {

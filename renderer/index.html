@@ -146,6 +146,7 @@
               <label class="spots-toggle" id="spots-strict-atno-label" title="Mark parks NEW unless they're in your imported POTA hunter CSV. Local-only QSOs that haven't reached pota.app won't suppress the NEW flag (K0OTC)."><input type="checkbox" id="spots-strict-atno"> Strict ATNO (POTA-credited only)</label>
               <label class="spots-toggle" title="Hide spots your license class can't operate (and any truly out-of-band frequencies). Needs your License Class set in Settings → Operator — if it's None, nothing is hidden."><input type="checkbox" id="spots-hide-oob"> Hide out-of-privilege</label>
               <label class="spots-toggle"><input type="checkbox" id="spots-hide-qrt" checked> Hide QRT spots</label>
+              <label class="spots-toggle" id="spots-dx-only-label" title="Only stations that count as DX: a different country from yours, or farther than your DX distance (Settings)."><input type="checkbox" id="spots-dx-only"> DX only</label>
               <label class="spots-toggle"><input type="checkbox" id="spots-show-hidden"> Show hidden spots <span id="spots-hidden-count" class="spots-hidden-badge hidden">0</span></label>
             </div>
           </div>
@@ -2371,6 +2372,13 @@
       <label>Max Distance (0 = no limit):
         <input type="number" id="set-max-dist" min="0" max="25000" step="50" value="0">
         <span class="help-text" id="set-max-dist-unit">miles</span>
+      </label>
+      <label title="Which spots get the DX mark and pass the DX only filter. Blank: any station in a different country (DXCC entity) from yours.">DX means farther than (blank = a different country):
+        <span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          HF <input type="number" id="set-dx-dist-hf" min="0" max="9999" step="50" placeholder="—" style="width:70px;">
+          6 m and up <input type="number" id="set-dx-dist-vhf" min="0" max="9999" step="10" placeholder="—" style="width:70px;">
+          <span class="help-text set-dx-dist-unit">miles</span>
+        </span>
       </label>
       <label class="checkbox-label" title="Hide spots your license class can't operate, plus any truly out-of-band frequencies."><input type="checkbox" id="set-hide-out-of-band"> Hide spots outside my license privileges</label>
       <span class="help-text" style="display:block;margin:-2px 0 6px;">Uses your <strong>License Class</strong> (Settings → Operator). If that's set to None, nothing is hidden.</span>
@@ -5030,6 +5038,7 @@
   <script src="../lib/rig-gain-steps.js"></script>
   <script src="../lib/spot-mute-rules.js"></script>
   <script src="../lib/call-filter.js"></script>
+  <script src="../lib/dx-rule.js"></script>
   <script src="../lib/log-freq.js"></script>
   <script src="../lib/release-notes-format.js"></script>
   <script src="../lib/watchlist-groups.js"></script>

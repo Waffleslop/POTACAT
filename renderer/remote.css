@@ -4455,3 +4455,4 @@ body.popout-mode .popout-only { display: flex; }
 .rc-dxe-sources.off { opacity: 0.45; }
 .dxe-badge { margin-left: 4px; padding: 0 4px; border-radius: 3px; font-size: 10px; font-weight: 700; color: #fff; background: #e94560; vertical-align: middle; }
 .dxe-badge.contest { background: #4fc3f7; color: #10131f; }
+.dx-badge { margin-left: 4px; padding: 0 4px; border-radius: 3px; font-size: 10px; font-weight: 700; color: #000; background: #ffd740; vertical-align: middle; }
