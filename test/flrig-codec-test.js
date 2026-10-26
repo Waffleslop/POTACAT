@@ -65,7 +65,14 @@ function parseCall(xml) {
   return { method: m ? m[1] : '', params };
 }
 
-function fakeFlrig({ vocab = VOCAB.FTDX10, xcvr = 'FTDX10', online = true, version = '2.0.12', pwrScale = 1, closeAfterEach = false, missing = [] } = {}) {
+// What the fake implements; real flrig turns introspection on
+// (xml_server.cxx enableIntrospection(true)), so system.listMethods answers.
+const FAKE_METHODS = ['main.get_version', 'rig.get_xcvr', 'rig.get_modes', 'rig.get_maxpwr', 'rig.get_pwrmeter_scale',
+  'rig.get_vfo', 'rig.set_vfo', 'rig.get_mode', 'rig.set_mode', 'rig.get_ptt', 'rig.set_ptt', 'rig.get_AB', 'rig.set_AB',
+  'rig.get_split', 'rig.set_split', 'rig.get_DBM', 'rig.get_SWR', 'rig.get_pwrmeter', 'rig.get_power', 'rig.set_power',
+  'rig.get_rfgain', 'rig.set_rfgain', 'rig.get_volume', 'rig.set_volume', 'rig.tune'];
+
+function fakeFlrig({ vocab = VOCAB.FTDX10, xcvr = 'FTDX10', online = true, version = '2.0.12', pwrScale = 1, closeAfterEach = false, missing = [], introspect = true, offers = null, raw = {} } = {}) {
   const st = { freq: 14020700, mode: 'CW-U', ptt: 0, ab: 'A', split: 0, power: 100, dbm: -73, swr: '1.5', pwr: '50', rfgain: 100, volume: 20, calls: [], online, xcvr };
   const socks = new Set();
   const server = net.createServer((sock) => {
@@ -94,7 +101,12 @@ function fakeFlrig({ vocab = VOCAB.FTDX10, xcvr = 'FTDX10', online = true, versi
     const p0 = params[0] ? params[0].value : undefined;
     const t0 = params[0] ? params[0].type : undefined;
     if (missing.includes(method)) return xmlrpcppFault(`${method}: unknown method name`);
+    if (raw[method]) return raw[method];
+    if (offers && !offers.includes(method) && method !== 'system.listMethods') return xmlrpcppFault(`${method}: unknown method name`);
     switch (method) {
+      case 'system.listMethods':
+        if (!introspect) return xmlrpcppFault(`${method}: unknown method name`);
+        return xmlrpcpp(ARR(['system.listMethods', 'system.methodHelp', ...(offers || FAKE_METHODS.filter((m) => !missing.includes(m)))]));
       case 'main.get_version': return xmlrpcpp(S(version));
       case 'rig.get_xcvr': return xmlrpcpp(S(st.online ? st.xcvr : ''));
       case 'rig.get_modes': return st.online ? xmlrpcpp(ARR(vocab)) : xmlrpcpp('');
@@ -235,7 +247,10 @@ function rig(port, { model } = {}) {
       assert.deepStrictEqual(r.ev.ptt, [], 'PTT is reported on CHANGE only; RX at connect is no change');
       assert.strictEqual(r.ev.smeter[0], 121, 'S9');
       const order = f.st.calls.map((c) => c.method);
-      assert.deepStrictEqual(order.slice(0, 6), ['main.get_version', 'rig.get_xcvr', 'rig.get_modes', 'rig.get_maxpwr', 'rig.get_pwrmeter_scale', 'rig.set_ptt'], order.join(','));
+      // What the server offers is asked first; the connect safety (PTT off)
+      // goes out with it, and the rest of the probe follows the answer.
+      assert.deepStrictEqual(order.slice(0, 2), ['system.listMethods', 'rig.set_ptt'], order.join(','));
+      assert.deepStrictEqual(order.slice(2, 7), ['main.get_version', 'rig.get_xcvr', 'rig.get_modes', 'rig.get_maxpwr', 'rig.get_pwrmeter_scale'], order.join(','));
       assert.strictEqual(f.calls('rig.set_ptt')[0].params[0].value, '0', 'the connect safety is PTT OFF');
       assert.ok(r.ev.logs.some((l) => /flrig 2\.0\.12 holds the radio: FTDX10/.test(l)), r.ev.logs.join('\n'));
       assert.ok(r.ev.logs.some((l) => /flrig modes: LSB USB CW-U/.test(l)));
@@ -306,7 +321,7 @@ function rig(port, { model } = {}) {
     } finally { r.stop(); await f.close(); }
   });
   await test('an older flrig without a method: that readback is latched off and said once; everything else keeps polling', async () => {
-    const f = fakeFlrig({ missing: ['rig.get_DBM', 'rig.get_maxpwr'] }); const port = await f.listen();
+    const f = fakeFlrig({ missing: ['rig.get_DBM', 'rig.get_maxpwr'], introspect: false }); const port = await f.listen();
     const r = rig(port);
     try {
       await until(() => f.calls('rig.get_vfo').length >= 4, 4000);
@@ -315,6 +330,38 @@ function rig(port, { model } = {}) {
       assert.strictEqual(r.ev.logs.filter((l) => /does not have rig\.get_DBM/.test(l)).length, 1);
       assert.deepStrictEqual(r.ev.smeter, []);
     } finally { r.stop(); await f.close(); }
+  });
+  await test('WG9I: a bridge that lists a few methods is never asked for the rest', async () => {
+    const offers = ['rig.get_vfo', 'rig.set_vfo', 'rig.get_mode', 'rig.set_mode', 'rig.get_ptt', 'rig.set_ptt', 'rig.get_xcvr', 'main.get_version'];
+    const f = fakeFlrig({ offers }); const port = await f.listen();
+    const r = rig(port);
+    try {
+      assert.ok(await until(() => f.calls('rig.get_vfo').length >= 3 && r.ev.mode.length, 5000), r.ev.logs.join('\n'));
+      const asked = new Set(f.st.calls.map((c) => c.method));
+      for (const m of asked) assert.ok(m === 'system.listMethods' || offers.includes(m), 'asked an unlisted method: ' + m);
+      assert.ok(r.ev.logs.some((l) => /does not list rig\.get_maxpwr/.test(l)), r.ev.logs.join('\n'));
+      assert.strictEqual(r.ev.frequency[0], 14020700);
+    } finally { r.stop(); await f.close(); }
+  });
+  await test('WG9I: a reply that used to recurse until the stack ran out is a fault; the link stays up', async () => {
+    const bad = xmlrpcpp('<value><struct><member><value><i4>100</i4></value></member></struct></value>');
+    const f = fakeFlrig({ introspect: false, raw: { 'rig.get_maxpwr': bad } }); const port = await f.listen();
+    const r = rig(port);
+    try {
+      assert.ok(await until(() => f.calls('rig.get_vfo').length >= 3, 5000), r.ev.logs.join('\n'));
+      assert.strictEqual(r.ev.frequency[0], 14020700, 'polling carried on past the bad reply');
+      assert.ok(!r.ev.status.some((st) => st.connected === false));
+    } finally { r.stop(); await f.close(); }
+  });
+  await test('one setter a server lacks never switches the other setters off', () => {
+    const writes = [];
+    const c = new FlrigCodec(flrigModel('IC-7300'), (x) => writes.push(x));
+    c.on('log', () => {});
+    c._call('set', 'rig.set_micgain', [X.i4(5)]);
+    c.onData(xmlrpcppFault('rig.set_micgain: unknown method name').body);
+    c.setTransmit(true);
+    assert.ok(writes.some((w) => /rig\.set_ptt/.test(w)), 'PTT still goes out after a missing setter');
+    assert.strictEqual(c._call('set', 'rig.set_micgain', []), false, 'the missing one stays off');
   });
   await test('a server that closes the socket after every reply is not a lost link', async () => {
     const f = fakeFlrig({ closeAfterEach: true }); const port = await f.listen();
