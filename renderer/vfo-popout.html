@@ -519,6 +519,15 @@
       <div class="card tool-card widget-section" id="widget-voice">
         <div class="macro-row"><span class="macro-label">Voice</span><div id="voice-macro-row" style="display:contents"></div></div>
       </div>
+      <!-- Radio power: always the last block, below the ordered ones, for a
+           radio whose model can be switched over CAT (vfo-radio-state.power). -->
+      <div class="card tool-card" id="sec-power" style="display:none">
+        <div class="ptt-log-row">
+          <span class="macro-label">Radio</span>
+          <button class="tog" id="vfo-power-on" title="Switch the radio on">Power On</button>
+          <button class="tog" id="vfo-power-off" title="Switch the radio off. Press twice: the first press asks.">Power Off</button>
+        </div>
+      </div>
       <div class="card tool-card widget-section" id="widget-kiwi">
         <div class="ptt-log-row" id="kiwi-btn-row"></div>
         <div id="kiwi-volume-row" style="display:none;align-items:center;gap:8px;font-size:11px;color:var(--text-dim);">
@@ -922,6 +931,7 @@ window.api.onRadioState((s) => {
     nbOn = s.nb;
     document.querySelectorAll('.nb-toggle').forEach(b => b.classList.toggle('on', nbOn));
   }
+  if (s.power != null) document.getElementById('sec-power').style.display = s.power ? '' : 'none';
   if (s.atu != null) {
     atuOn = s.atu;
     document.querySelectorAll('.atu-toggle').forEach(b => b.classList.toggle('on', atuOn));
@@ -1157,6 +1167,29 @@ filterSlider.addEventListener('change', () => {
 
 // --- NB / ATU toggles ---
 let nbOn = false, atuOn = false;
+
+// Radio power (bottom of the dial pane). Power On needs no link: the radio is
+// off, so it cannot answer. Power Off asks once: the first press turns the
+// button into "Press again to power off" for 4 s (no browser dialog — it
+// would block the window).
+(function wirePowerButtons() {
+  const on = document.getElementById('vfo-power-on');
+  const off = document.getElementById('vfo-power-off');
+  if (!on || !off) return;
+  let armTimer = null;
+  const disarm = () => { clearTimeout(armTimer); armTimer = null; off.textContent = 'Power Off'; off.classList.remove('on'); };
+  on.addEventListener('click', () => { disarm(); window.api.rigControl({ action: 'power-on' }); });
+  off.addEventListener('click', () => {
+    if (!armTimer) {
+      off.textContent = 'Press again to power off';
+      off.classList.add('on');
+      armTimer = setTimeout(disarm, 4000);
+      return;
+    }
+    disarm();
+    window.api.rigControl({ action: 'power-off' });
+  });
+})();
 
 function buildRigToggles() {
   document.querySelectorAll('.rig-toggles-shared').forEach(row => {
@@ -1913,6 +1946,9 @@ function applyOrder() {
     const el = b && document.getElementById(b.el);
     if (el) pane.appendChild(el);
   }
+  // Radio power stays below every ordered block.
+  const power = document.getElementById('sec-power');
+  if (power) pane.appendChild(power);
 }
 
 function orderBlockShown(b) {

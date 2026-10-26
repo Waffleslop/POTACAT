@@ -24710,7 +24710,15 @@ function sendVfoState() {
     breakIn: _currentBreakInState,
     customCatButtons: settings.customCatButtons || [],
     meters: vfoMetersAvailable(),   // only these meter rows are drawn
+    // Power On/Off at the bottom of the window. From the radio MODEL, never
+    // from the CAT link: a switched-off radio does not answer, and the main
+    // window's Rig button (shown only while CAT answers) hid Power On exactly
+    // when it was needed (KQ5O FTDX101MP over a remote shack, 2026-10-26).
+    power: vfoPowerAvailable(),
   });
+}
+function vfoPowerAvailable() {
+  try { return !!getRigCapabilities(detectRigType()).power; } catch { return false; }
 }
 
 function applyFreedvAudioMute() {
