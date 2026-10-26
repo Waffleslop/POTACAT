@@ -7065,6 +7065,9 @@ async function connectCat() {
       sendCatLog(`rigctld-net status: connected=${s.connected}${s.error ? ' error=' + s.error : ''}`);
       sendCatStatus(s);
     });
+    cat.on('ptt-unavailable', () => {
+      if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: `The rigctld server at ${target.host || '127.0.0.1'}:${target.port || 4532} cannot key the radio (no PTT). Transmit from POTACAT will not work over this link.`, warn: true, duration: 12000 });
+    });
     cat.on('frequency', catFrequencyHandler);
     cat.on('mode', catModeHandler);
     cat.on('nb', sendCatNb);
@@ -24444,6 +24447,9 @@ function handleRemotePtt(state, opts = {}) {
       // frames; restarting mid-stream after a TX gap looks like packet loss).
       if (state && target && target.type === 'k4-network') {
         try { _resetK4TxBuf(); } catch {}
+      }
+      if (state && cat.pttUnavailable) {
+        sendCatLog('PTT FAILED: this rigctld server has no PTT (it answered RPRT -11 to "T") — the radio will not key. Let POTACAT hold the radio, or run flrig.');
       }
       if (_civPttDelayMs > 0) {
         // Icom SSB-over-DATA: let the mode frame clear the bus before keying.

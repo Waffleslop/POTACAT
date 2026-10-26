@@ -212,5 +212,37 @@ test('a frequency reply arriving while the S-meter is pending is not stolen', ()
   assert.strictEqual(valueOf(events, 'smeter'), 54);
 });
 
+test('a server that rejects `T` is named once as unable to key (KM4CFT, a logger\'s rigctld emulation)', () => {
+  const { codec, logs, events } = makeCodec();
+  let unavailable = 0;
+  codec.on('ptt-unavailable', () => unavailable++);
+  codec.setTransmit(false);                  // the connect safety T 0
+  codec.onData('RPRT -11\n');
+  assert.strictEqual(unavailable, 1);
+  assert.ok(logs.some((l) => /cannot key the radio/.test(l) && /"T 0"/.test(l) && /RPRT -11/.test(l)), logs.join('\n'));
+  codec.setTransmit(true);
+  codec.onData('RPRT -11\n');
+  codec.setTransmit(false);
+  codec.onData('RPRT -11\n');
+  assert.strictEqual(unavailable, 1, 'said once per connection');
+  // A rejected `v` is not a PTT verdict.
+  const c2 = makeCodec();
+  let u2 = 0;
+  c2.codec.on('ptt-unavailable', () => u2++);
+  c2.codec.getVfoSplit();
+  c2.codec.onData('RPRT -11\n');
+  assert.strictEqual(u2, 0);
+  // Wiring: the controller carries the flag and main's key-down names it.
+  const fs = require('fs');
+  const path = require('path');
+  const rc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'rig-controller.js'), 'utf8');
+  assert.ok(/this\._codec\.on\('ptt-unavailable', \(\) => \{ this\.pttUnavailable = true;/.test(rc));
+  assert.ok(/this\.pttUnavailable = false;/.test(rc), 'cleared on connect');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.ok(/if \(state && cat\.pttUnavailable\) \{\s*sendCatLog\('PTT FAILED: this rigctld server has no PTT/.test(main));
+  assert.ok(/cat\.on\('ptt-unavailable'/.test(main), 'the rigctld Network branch raises a notice');
+  void events;
+});
+
 console.log(`\nResults: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
