@@ -2020,17 +2020,44 @@ function clearSwrTrip(reason) {
   pushVfoSwrState();
 }
 
+/** Stamp an EQ config onto the active rig so a rig switch restores it. Shared
+ *  by the VFO window's "Save for rig" and a device's tx-eq-save-rig-default. */
+function saveTxEqRigDefault(eqConfig) {
+  if (!eqConfig || typeof eqConfig !== 'object') return { ok: false, reason: 'no-config' };
+  const rigs = Array.isArray(settings.rigs) ? settings.rigs : [];
+  const activeId = settings.activeRigId;
+  if (!activeId) return { ok: false, reason: 'no-active-rig' };
+  const idx = rigs.findIndex((r) => r && r.id === activeId);
+  if (idx < 0) return { ok: false, reason: 'rig-not-found' };
+  rigs[idx] = {
+    ...rigs[idx],
+    txEqEnabled: !!eqConfig.enabled,
+    txEqPreset:  eqConfig.preset || 'ragchew',
+    txEqCustomParams: eqConfig.customParams || rigs[idx].txEqCustomParams || null,
+  };
+  settings.rigs = rigs;
+  saveSettings(settings);
+  sendCatLog(`[TX EQ] Saved as default for rig "${rigs[idx].name || activeId}": ${rigs[idx].txEqPreset}${rigs[idx].txEqEnabled ? '' : ' (off)'}`);
+  return { ok: true, rigName: rigs[idx].name || activeId };
+}
+
 /** The VFO window's SWR card: shown while the guard is latched, gone when it
  *  clears. The 'tune-blocked' toast alone vanished after 3 s. */
+function swrGuardStatePayload() {
+  return {
+    tripped: !!_swrTripped, message: _swrTripMessage || '',
+    swr: _swrTripped ? _swrTripSwr : null, limit: swrGuardMax(), band: _swrTrippedBand || '',
+    atuFailed: !!(_swrTripped && _swrAtuFailed),
+  };
+}
 function pushVfoSwrState() {
+  const state = swrGuardStatePayload();
+  // The same card on a device VFO pane (S2C swr-guard-state, deduped there).
+  if (remoteServer && remoteServer.running) {
+    try { remoteServer.sendSwrGuardState(state); } catch {}
+  }
   if (!vfoPopoutWin || vfoPopoutWin.isDestroyed()) return;
-  try {
-    vfoPopoutWin.webContents.send('vfo-swr-guard-state', {
-      tripped: !!_swrTripped, message: _swrTripMessage || '',
-      swr: _swrTripped ? _swrTripSwr : null, limit: swrGuardMax(), band: _swrTrippedBand || '',
-      atuFailed: !!(_swrTripped && _swrAtuFailed),
-    });
-  } catch {}
+  try { vfoPopoutWin.webContents.send('vfo-swr-guard-state', state); } catch {}
 }
 
 /** The SSTV window's view of the radio: whether it has a tuner, and the SWR
@@ -21101,6 +21128,10 @@ function connectRemote() {
   // advertising the capability — "idle" must be a stated fact, not an
   // absence the client has to interpret.
   pushActivityState();
+  // Same for the VFO pane's cards: the SWR guard state and the tuned spot are
+  // facts at connect, not something a device waits for the next change to learn.
+  try { remoteServer.sendSwrGuardState(swrGuardStatePayload()); } catch {}
+  try { remoteServer.sendTunedSpot({ ops: (_lastVfoTunedSpot && Array.isArray(_lastVfoTunedSpot.ops)) ? _lastVfoTunedSpot.ops : [] }); } catch {}
   // Surface our package version in the v1 protocol `hello` so connected
   // clients can show "POTACAT desktop 1.5.13" and decide whether to
   // suggest an update.
@@ -22379,6 +22410,19 @@ function connectRemote() {
     // happen in one place. _e is null since this isn't a renderer call.
     ipcMain.emit('tx-eq-set', null, eqConfig);
   });
+  // "Save for rig" from a device: the CURRENT EQ, through the same function
+  // the VFO window's button calls. The answer goes to the asker.
+  remoteServer.on('tx-eq-save-rig-default', () => {
+    const r = saveTxEqRigDefault({
+      enabled: !!settings.txEqEnabled,
+      preset: settings.txEqPreset || 'ragchew',
+      customParams: settings.txEqCustomParams || null,
+    });
+    try { remoteServer.sendToAsker({ type: 'tx-eq-saved', ok: !!r.ok, rigName: r.rigName || '', reason: r.reason || '' }); } catch { /* ignore */ }
+  });
+  // SWR guard Override from a device — the desktop card's button. Guest Pass
+  // clients are refused in the remote-server demux.
+  remoteServer.on('swr-guard-override', () => clearSwrTrip('override from an ECHOCAT device'));
 
   // Rig-control from the ECHOCAT phone goes through the SAME dispatcher as the
   // desktop IPC (applyRigControl). There is intentionally NO second switch here
@@ -24783,6 +24827,10 @@ function broadcastRemoteRadioStatus() {
     swrRatio: _currentSwrRatio,
     alc: _currentAlc,
     power: _currentPower,
+    // Which of those meters this radio really reports — the same answer that
+    // decides the desktop VFO window's meter rows, so a device never draws a
+    // bar that will never move.
+    meters: vfoMetersAvailable(),
     capabilities: getRigCapabilities(rigType),
     // Rig-control registry — lets the ECHOCAT phone render its rig panel
     // data-driven (labels/group/txOnly/caps per action) from one source of
@@ -34288,6 +34336,10 @@ app.whenReady().then(() => {
 
   ipcMain.on('vfo-tuned-spot', (_e, spot) => {
     _lastVfoTunedSpot = spot || null; // replayed when the VFO window loads
+    // A device VFO pane draws the same card (S2C tuned-spot; null = no spot).
+    if (remoteServer && remoteServer.running) {
+      try { remoteServer.sendTunedSpot({ ops: (spot && Array.isArray(spot.ops)) ? spot.ops : [] }); } catch {}
+    }
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) {
       vfoPopoutWin.webContents.send('vfo-tuned-spot', spot);
     }
@@ -39566,24 +39618,7 @@ app.whenReady().then(() => {
   // global setting"). Triggered from the VFO popout's "Save as rig
   // default" button. On rig switch, _applyRigEqDefault (below) reads
   // these back and emits a tx-eq-set so the global EQ state matches.
-  ipcMain.handle('tx-eq-save-rig-default', (_e, eqConfig) => {
-    if (!eqConfig || typeof eqConfig !== 'object') return { ok: false, reason: 'no-config' };
-    const rigs = Array.isArray(settings.rigs) ? settings.rigs : [];
-    const activeId = settings.activeRigId;
-    if (!activeId) return { ok: false, reason: 'no-active-rig' };
-    const idx = rigs.findIndex((r) => r && r.id === activeId);
-    if (idx < 0) return { ok: false, reason: 'rig-not-found' };
-    rigs[idx] = {
-      ...rigs[idx],
-      txEqEnabled: !!eqConfig.enabled,
-      txEqPreset:  eqConfig.preset || 'ragchew',
-      txEqCustomParams: eqConfig.customParams || rigs[idx].txEqCustomParams || null,
-    };
-    settings.rigs = rigs;
-    saveSettings(settings);
-    sendCatLog(`[TX EQ] Saved as default for rig "${rigs[idx].name || activeId}": ${rigs[idx].txEqPreset}${rigs[idx].txEqEnabled ? '' : ' (off)'}`);
-    return { ok: true, rigName: rigs[idx].name || activeId };
-  });
+  ipcMain.handle('tx-eq-save-rig-default', (_e, eqConfig) => saveTxEqRigDefault(eqConfig));
 
   // Shack-side TX drive — ONE choke point (mirrors tx-eq-set): clamp, persist
   // globally AND onto the active rig so it follows a rig switch, push live to
