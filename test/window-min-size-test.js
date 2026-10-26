@@ -35,5 +35,12 @@ test('a minimum never exceeds the window\'s own opening size', () => {
     if (mh && h) assert.ok(mh <= h, `minHeight ${mh} > height ${h} in ${(b.match(/title:\s*([^,\n]+)/) || [])[1]}`);
   }
 });
+test('W9TEF: the Conditions window restores any size it can have, and saves while maximized', () => {
+  assert.ok(/const CONDITIONS_MIN_W = (\d+);/.test(main) && Number(RegExp.$1) <= 400, 'its minimum is no larger than the old restore floor');
+  assert.ok(/saved\.width >= CONDITIONS_MIN_W && saved\.height >= CONDITIONS_MIN_H && isOnScreen\(saved\)/.test(main));
+  assert.ok(!/saved\.width > 400 && saved\.height > 300/.test(main), 'the 400x300 floor is gone');
+  assert.ok(/settings\.conditionsPopoutBounds = conditionsPopoutWin\.getNormalBounds\(\);/.test(main));
+  assert.ok(/if \(settings\.conditionsPopoutMaximized\) conditionsPopoutWin\.maximize\(\);/.test(main));
+});
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

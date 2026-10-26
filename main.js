@@ -1943,6 +1943,10 @@ let _remoteTxState = false;
 let _externalAtuActive = false;
 let _externalAtuCancel = false;
 let runExternalAtuTune = async () => false;
+// The Conditions pop-out's minimum size, which is also the smallest saved size
+// it restores (W9TEF keeps it as a narrow strip on a second screen).
+const CONDITIONS_MIN_W = 360;
+const CONDITIONS_MIN_H = 280;
 // The RF-sense tuner's carrier mode — AM, never CW (see runExternalAtuTune).
 const EXTERNAL_ATU_CARRIER_MODE = 'AM';
 // THE single rig-control dispatcher. Both transports — desktop IPC
@@ -34355,7 +34359,7 @@ app.whenReady().then(() => {
     if (conditionsPopoutWin && !conditionsPopoutWin.isDestroyed()) { conditionsPopoutWin.focus(); return; }
     const isMac = process.platform === 'darwin';
     conditionsPopoutWin = new BrowserWindow({
-      minWidth: 520, minHeight: 400, // never smaller than its own controls (N0KAH 2026-10-24)
+      minWidth: CONDITIONS_MIN_W, minHeight: CONDITIONS_MIN_H, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 1100, height: 720, title: 'POTACAT — Conditions',
       backgroundColor: getThemeWindowBg(),
       show: false,
@@ -34366,10 +34370,15 @@ app.whenReady().then(() => {
         contextIsolation: true, nodeIntegration: false,
       },
     });
+    // Any saved size the window can have is restored. The old floor (wider
+    // than 400, taller than 300) threw away the narrow strip people keep on a
+    // second screen and reopened it at 1100x720 (W9TEF 2026-10-22: "remembers
+    // its open/close status, but not the size/position").
     const saved = settings.conditionsPopoutBounds;
-    if (saved && saved.width > 400 && saved.height > 300 && isOnScreen(saved)) {
+    if (saved && saved.width >= CONDITIONS_MIN_W && saved.height >= CONDITIONS_MIN_H && isOnScreen(saved)) {
       conditionsPopoutWin.setBounds(clampToWorkArea(saved));
     }
+    if (settings.conditionsPopoutMaximized) conditionsPopoutWin.maximize();
     conditionsPopoutWin.show();
     conditionsPopoutWin.setMenuBarVisibility(false);
     conditionsPopoutWin.loadFile(path.join(__dirname, 'renderer', 'conditions-popout.html'), { query: { theme: settings.lightMode ? 'light' : 'dark', variant: settings.darkVariant || 'navy' } });
@@ -34386,9 +34395,12 @@ app.whenReady().then(() => {
       else fetchAllSolar();
     });
     conditionsPopoutWin.on('close', () => {
-      if (conditionsPopoutWin && !conditionsPopoutWin.isDestroyed()
-          && !conditionsPopoutWin.isMaximized() && !conditionsPopoutWin.isMinimized()) {
-        settings.conditionsPopoutBounds = conditionsPopoutWin.getBounds();
+      if (conditionsPopoutWin && !conditionsPopoutWin.isDestroyed() && !conditionsPopoutWin.isMinimized()) {
+        // getNormalBounds(): the un-maximized rect even while maximized, so a
+        // window kept maximized still remembers its screen (the main window's
+        // KM4CFT rule); skipping a maximized close saved nothing at all.
+        settings.conditionsPopoutMaximized = conditionsPopoutWin.isMaximized();
+        settings.conditionsPopoutBounds = conditionsPopoutWin.getNormalBounds();
         try { settings.conditionsPopoutZoom = conditionsPopoutWin.webContents.getZoomLevel(); } catch { /* ignore */ }
         saveSettings(settings);
       }
