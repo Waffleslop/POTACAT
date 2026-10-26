@@ -341,6 +341,9 @@ const { RsBa1Transport } = require('./lib/rsba1-transport');
 const { KenwoodCodec } = require('./lib/codecs/kenwood-codec');
 const { YaesuLegacyCodec } = require('./lib/codecs/yaesu-legacy-codec');
 const { RigctldCodec } = require('./lib/codecs/rigctld-codec');
+// flrig holds the radio, POTACAT is one of its clients (KM4CFT 2026-10-25).
+const { FlrigCodec, flrigModel } = require('./lib/codecs/flrig-codec');
+const { FlrigTransport, probeFlrig } = require('./lib/flrig-transport');
 const { CivCodec } = require('./lib/codecs/civ-codec');
 const { getTuneQuirks, resolveSerialHandshake } = require('./lib/rig-models');
 const { gridToLatLon, latLonToGrid, haversineDistanceMiles, bearing } = require('./lib/grid');
@@ -2432,6 +2435,7 @@ function detectRigType() {
   if (!target) return 'unknown';
   if (target.type === 'icom' || target.type === 'civ-tcp' || target.type === 'icom-network') return 'icom';
   if (target.type === 'rigctld' || target.type === 'rigctldnet') return 'rigctld';
+  if (target.type === 'flrig') return 'flrig';
   if (target.type === 'tcp') {
     // NOT every TCP CAT target is a Flex. SmartSDR's CAT shim is localhost-only
     // on 5002-5005; a Hermes Lite 2 behind Thetis or Zeus is a TS-2000 emulator
@@ -2485,6 +2489,10 @@ function getActiveRigModel() {
   const rigType = detectRigType();
   // An explicit rigs[].model that names a known entry wins outright.
   const explicit = modelName ? getModel(modelName, null) : null;
+  // flrig holds the radio: the picked Radio Model supplies bands, power limits
+  // and presets; the protocol and caps are the flrig codec's, whatever brand
+  // the model is (lib/codecs/flrig-codec.js flrigModel).
+  if (rigType === 'flrig') return flrigModel(explicit || getModel(null, 'flrig'));
   if (explicit) return explicit;
   const generic = getModel(modelName, rigType); // per-type fallback (or null)
   // Icom CI-V rigs are identified by CI-V address, so rigs[].model is usually
@@ -2612,8 +2620,8 @@ function _rigCapabilitiesForType(rigType) {
     // so those get the split control + trustworthy indicator. Yaesu keeps
     // vfo (VS;/SV; writes work; indicator optimistic) but not split until
     // its readback lands. Models may override either.
-    if (caps.vfo == null) caps.vfo = model.brand === 'Kenwood' || model.brand === 'Yaesu' || model.protocol === 'rigctld';
-    if (caps.split == null) caps.split = model.brand === 'Kenwood' || model.protocol === 'rigctld';
+    if (caps.vfo == null) caps.vfo = model.brand === 'Kenwood' || model.brand === 'Yaesu' || model.protocol === 'rigctld' || model.protocol === 'flrig';
+    if (caps.split == null) caps.split = model.brand === 'Kenwood' || model.protocol === 'rigctld' || model.protocol === 'flrig';
     return caps;
   }
   // Fallback to generic per-type. squelch:true on every real CAT backend (not
@@ -2627,6 +2635,10 @@ function _rigCapabilitiesForType(rigType) {
     case 'kenwood': return { nb: true, atu: true, vfo: true, split: true, filter: true, filterType: 'direct', rfgain: true, txpower: true, power: true, squelch: true };
     case 'icom':    return { nb: false, atu: false, vfo: false, filter: false, filterType: 'none', rfgain: false, txpower: false, power: true, squelch: true };
     case 'rigctld': return { nb: true, atu: true, vfo: true, split: true, filter: true, filterType: 'passband', rfgain: true, txpower: true, power: true, squelch: true };
+    // flrig's XML-RPC API: frequency, mode, PTT, A/B, split, power, RF/AF
+    // gain and the tuner start (lib/codecs/flrig-codec.js flrigModel is the
+    // authoritative set; this is the no-model fallback).
+    case 'flrig':   return flrigModel(null).caps;
     default:        return { nb: false, atu: false, vfo: false, filter: false, filterType: 'none', rfgain: false, txpower: false, power: false };
   }
 }
@@ -3362,7 +3374,7 @@ function rigSupportsAfGain(rigType) {
   if (rigType === 'flex') return true;
   if (rigType === 'none') return false;
   if (cat && cat._codec && typeof cat._codec.setAfGain === 'function') return true;
-  return rigType === 'rigctld' || rigType === 'icom' || rigType === 'kenwood' || rigType === 'yaesu';
+  return rigType === 'rigctld' || rigType === 'icom' || rigType === 'kenwood' || rigType === 'yaesu' || rigType === 'flrig';
 }
 
 function rigPresetCaps() {
@@ -7076,6 +7088,33 @@ async function connectCat() {
     cat.on('alc', sendCatAlc);
     const { host, port } = resolveCatHostPort(target, 4532, 'remote rigctld');
     sendCatLog(`Connecting to remote rigctld on ${host}:${port}`);
+    transport.connect({ host, port });
+
+  } else if (target.type === 'flrig') {
+    // flrig (W1HKJ) holds the radio and POTACAT is one of its clients, beside
+    // a logger or fldigi — the station keeps the program it already runs
+    // (KM4CFT, FTDX10 under Ham2K Polo, 2026-10-25). XML-RPC over HTTP on
+    // flrig's server port (12345): lib/flrig-transport.js carries the calls,
+    // lib/codecs/flrig-codec.js speaks flrig's methods and nothing brand-
+    // specific; getActiveRigModel already returned flrigModel(picked model).
+    transport = new FlrigTransport();
+    const model = rigModel || flrigModel(null);
+    codec = new FlrigCodec(model, (data) => transport.write(data));
+    cat = new RigController(model, transport, codec);
+    cat._debug = true;
+    cat.on('log', sendCatLog);
+    cat.on('status', (s) => {
+      sendCatLog(`flrig status: connected=${s.connected}${s.error ? ' error=' + s.error : ''}`);
+      sendCatStatus(s);
+    });
+    cat.on('frequency', catFrequencyHandler);
+    cat.on('mode', catModeHandler);
+    cat.on('power', sendCatPower);
+    cat.on('powerMeter', sendCatFwdPower);
+    cat.on('smeter', sendCatSmeter);
+    cat.on('swr', sendCatSwr);
+    const { host, port } = resolveCatHostPort(target, 12345, 'flrig');
+    sendCatLog(`Connecting to flrig on ${host}:${port}`);
     transport.connect({ host, port });
 
   } else if (target.type === 'icom') {
@@ -30856,6 +30895,9 @@ function describeTargetForMigration(target) {
     const port = target.serialPort || 'unknown';
     return `Hamlib Rig on ${port}`;
   }
+  if (target.type === 'flrig') {
+    return `flrig on ${target.host || '127.0.0.1'}:${target.port || 12345}`;
+  }
   return 'Radio';
 }
 
@@ -37217,6 +37259,9 @@ app.whenReady().then(() => {
     const allowed = [
       'https://www.qrz.com/', 'https://caseystanton.com/', 'https://github.com/Waffleslop/POTACAT/',
       'https://hamlib.github.io/', 'https://github.com/Hamlib/', 'https://discord.gg/',
+      // flrig (W1HKJ) downloads: the rig editor's "FLRig (a shared radio)" help.
+      // w1hkj.com no longer hosts them; SourceForge is the project's home.
+      'https://sourceforge.net/projects/fldigi/',
       // Mercury HF data modem (Rhizomatica) — download + docs links in Settings.
       'https://github.com/Rhizomatica/', 'https://rhizomatica.github.io/',
       // Winlink: Pat, ardopcf and the Winlink network (Settings > Station > Winlink).
@@ -41528,6 +41573,20 @@ app.whenReady().then(() => {
         timeoutMs: 18000,
       });
     });
+  });
+
+  // Rig editor "Test Connection" for an flrig rig: one probe, no live
+  // connection touched (flrig takes any number of clients).
+  ipcMain.handle('test-flrig', async (_e, config) => {
+    const c = config || {};
+    const { host, port } = resolveCatHostPort({ host: c.host, port: c.port }, 12345, 'flrig test');
+    const r = await probeFlrig({ host, port });
+    if (!r.ok) return { success: false, error: r.error };
+    const radio = r.xcvr
+      ? `${r.xcvr}, ${(r.freqHz / 1e6).toFixed(6)} MHz ${r.mode}`
+      : 'no transceiver online in flrig yet (Config > Setup > Transceiver, then Init)';
+    return { success: true, version: r.version, xcvr: r.xcvr, frequency: r.freqHz, mode: r.mode, modes: r.modes,
+      message: `Connected! flrig ${r.version}: ${radio}` };
   });
 
   ipcMain.handle('test-hamlib', async (_e, config) => {

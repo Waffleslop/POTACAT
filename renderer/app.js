@@ -937,6 +937,12 @@ const icomConfig = document.getElementById('icom-config');
 const rigctldnetConfig = document.getElementById('rigctldnet-config');
 const setRigctldnetHost = document.getElementById('set-rigctldnet-host');
 const setRigctldnetPort = document.getElementById('set-rigctldnet-port');
+// FLRig (a shared radio): flrig holds the radio, POTACAT is one of its clients.
+const flrigConfig = document.getElementById('flrig-config');
+const setFlrigHost = document.getElementById('set-flrig-host');
+const setFlrigPort = document.getElementById('set-flrig-port');
+const flrigTestBtn = document.getElementById('flrig-test-btn');
+const flrigTestResult = document.getElementById('flrig-test-result');
 const setTcpcatHost = document.getElementById('set-tcpcat-host');
 const setTcpcatPort = document.getElementById('set-tcpcat-port');
 const k4networkConfig = document.getElementById('k4network-config');
@@ -2276,11 +2282,12 @@ function updateRadioSubPanels() {
   if (icomNetworkConfig) icomNetworkConfig.classList.toggle('hidden', type !== 'icom-network');
   hamlibConfig.classList.toggle('hidden', type !== 'hamlib');
   rigctldnetConfig.classList.toggle('hidden', type !== 'rigctldnet');
+  if (flrigConfig) flrigConfig.classList.toggle('hidden', type !== 'flrig');
   const nocatConfig = document.getElementById('nocat-config');
   if (nocatConfig) nocatConfig.classList.toggle('hidden', type !== 'nocat');
-  // Voice in DATA mode runs in the rig controller: serial, Icom and Hamlib links.
+  // Voice in DATA mode runs in the rig controller: serial, Icom, Hamlib and flrig links.
   const voiceAsDataRow = document.getElementById('rig-voice-as-data');
-  if (voiceAsDataRow) voiceAsDataRow.classList.toggle('hidden', !['serialcat', 'icom', 'civ-tcp', 'icom-network', 'hamlib', 'rigctldnet'].includes(type));
+  if (voiceAsDataRow) voiceAsDataRow.classList.toggle('hidden', !['serialcat', 'icom', 'civ-tcp', 'icom-network', 'hamlib', 'rigctldnet', 'flrig'].includes(type));
   if (type === 'serialcat' && !serialcatPortsLoaded) {
     loadSerialcatPorts();
   }
@@ -2380,6 +2387,10 @@ async function populateRadioSection(currentTarget) {
     setRadioType('rigctldnet');
     setRigctldnetHost.value = currentTarget.host || '127.0.0.1';
     setRigctldnetPort.value = currentTarget.port || 4532;
+  } else if (currentTarget.type === 'flrig') {
+    setRadioType('flrig');
+    if (setFlrigHost) setFlrigHost.value = currentTarget.host || '127.0.0.1';
+    if (setFlrigPort) setFlrigPort.value = currentTarget.port || 12345;
   } else {
     setRadioType('flex');
   }
@@ -2613,7 +2624,11 @@ if (rigModelSelect) rigModelSelect.addEventListener('change', async () => {
     if (!setRigName.value.trim()) setRigName.value = modelName;
     return;
   }
+  // A radio reached through another program (flrig, a remote rigctld) keeps
+  // that connection: the model picked here only supplies bands and limits.
+  const shared = ['flrig', 'rigctldnet'].includes(getSelectedRadioType());
   if (noCat) setRadioType('nocat');           // Pebble HF and friends: nothing to connect to
+  else if (shared) { /* keep flrig / rigctld Network */ }
   else if (brand === 'FlexRadio') setRadioType('flex');
   else if (brand === 'Icom') setRadioType('icom');
   else setRadioType('serialcat');
@@ -2831,6 +2846,9 @@ function describeRigTarget(target) {
   if (target.type === 'rigctldnet') {
     return `rigctld on ${target.host || '127.0.0.1'}:${target.port || 4532}`;
   }
+  if (target.type === 'flrig') {
+    return `flrig on ${target.host || '127.0.0.1'}:${target.port || 12345}`;
+  }
   return 'Unknown';
 }
 
@@ -3010,6 +3028,12 @@ function buildCatTargetFromForm() {
       type: 'rigctldnet',
       host: setRigctldnetHost.value.trim() || '127.0.0.1',
       port: parseInt(setRigctldnetPort.value, 10) || 4532,
+    };
+  } else if (radioType === 'flrig') {
+    return {
+      type: 'flrig',
+      host: (setFlrigHost && setFlrigHost.value.trim()) || '127.0.0.1',
+      port: parseInt(setFlrigPort && setFlrigPort.value, 10) || 12345,
     };
   } else if (radioType === 'nocat') {
     // No CAT control: VOX-keyed kits (Pebble HF, uSDX builds), or a handheld
@@ -3248,6 +3272,7 @@ function closeRigEditor() {
   rigAddBtn.classList.remove('hidden');
   hamlibTestResult.textContent = '';
   hamlibTestResult.className = '';
+  if (flrigTestResult) { flrigTestResult.textContent = ''; flrigTestResult.className = ''; }
 }
 
 async function deleteRig(rigId) {
@@ -9681,6 +9706,30 @@ hamlibTestBtn.addEventListener('click', async () => {
     hamlibTestResult.className = 'hamlib-test-fail';
   } finally {
     hamlibTestBtn.disabled = false;
+  }
+});
+
+// flrig test connection: one probe of flrig's XML-RPC server (main: test-flrig).
+if (flrigTestBtn) flrigTestBtn.addEventListener('click', async () => {
+  const host = (setFlrigHost && setFlrigHost.value.trim()) || '127.0.0.1';
+  const port = parseInt(setFlrigPort && setFlrigPort.value, 10) || 12345;
+  flrigTestBtn.disabled = true;
+  flrigTestResult.textContent = 'Testing...';
+  flrigTestResult.className = '';
+  try {
+    const result = await window.api.testFlrig({ host, port });
+    if (result && result.success) {
+      flrigTestResult.textContent = result.message || 'Connected!';
+      flrigTestResult.className = 'hamlib-test-success';
+    } else {
+      flrigTestResult.textContent = `Failed: ${(result && result.error) || 'no reply'}`;
+      flrigTestResult.className = 'hamlib-test-fail';
+    }
+  } catch (err) {
+    flrigTestResult.textContent = `Error: ${err.message}`;
+    flrigTestResult.className = 'hamlib-test-fail';
+  } finally {
+    flrigTestBtn.disabled = false;
   }
 });
 
@@ -25211,6 +25260,8 @@ function updateWelcomeRadioSubPanels() {
   document.getElementById('welcome-icom-config').classList.toggle('hidden', type !== 'icom');
   document.getElementById('welcome-hamlib-config').classList.toggle('hidden', type !== 'hamlib');
   document.getElementById('welcome-rigctldnet-config').classList.toggle('hidden', type !== 'rigctldnet');
+  const wFlrig = document.getElementById('welcome-flrig-config');
+  if (wFlrig) wFlrig.classList.toggle('hidden', type !== 'flrig');
   const wNocat = document.getElementById('welcome-nocat-config');
   if (wNocat) wNocat.classList.toggle('hidden', type !== 'nocat');
   if (type === 'serialcat' && !welcomeSerialcatLoaded) {
@@ -25312,6 +25363,12 @@ function buildWelcomeCatTarget() {
       type: 'rigctldnet',
       host: document.getElementById('welcome-rigctldnet-host').value.trim() || '127.0.0.1',
       port: parseInt(document.getElementById('welcome-rigctldnet-port').value, 10) || 4532,
+    };
+  } else if (type === 'flrig') {
+    return {
+      type: 'flrig',
+      host: document.getElementById('welcome-flrig-host').value.trim() || '127.0.0.1',
+      port: parseInt(document.getElementById('welcome-flrig-port').value, 10) || 12345,
     };
   } else if (type === 'nocat') {
     return { type: 'none' }; // No CAT control (VOX) — see buildCatTargetFromForm

@@ -2086,6 +2086,16 @@
           <label>Host: <input type="text" id="set-rigctldnet-host" placeholder="192.168.1.100" value="127.0.0.1"></label>
           <label>Port: <input type="number" id="set-rigctldnet-port" min="1" max="65535" value="4532"></label>
         </div>
+        <label class="radio-label"><input type="radio" name="radio-type" value="flrig"> FLRig (a shared radio)</label>
+        <div id="flrig-config" class="radio-sub hidden">
+          <span class="help-text" style="font-size:12px;">flrig holds the radio and POTACAT is one of its clients, beside your logger or fldigi. POTACAT tunes, changes mode, keys PTT, reads the S-meter, SWR and power, and sets RF power through flrig. Filter width, CW keying and the radio's menus stay in flrig. Pick your Radio Model above for the right bands and power limits. In flrig, Config &gt; Setup &gt; Xcvr sets the server port (12345). <a href="https://sourceforge.net/projects/fldigi/files/flrig/" data-external="1">Download flrig</a>.</span>
+          <label>Host: <input type="text" id="set-flrig-host" placeholder="127.0.0.1" value="127.0.0.1"></label>
+          <label>Port: <input type="number" id="set-flrig-port" min="1" max="65535" value="12345"></label>
+          <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
+            <button type="button" id="flrig-test-btn">Test Connection</button>
+            <span id="flrig-test-result" style="font-size:12px;"></span>
+          </div>
+        </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="nocat"> No CAT control (VOX)</label>
         <div id="nocat-config" class="radio-sub hidden">
           <span class="help-text" style="font-size:12px;">For radios with no computer control at all — VOX-keyed kits such as the <b>Pebble HF</b> or a uSDX without a CAT port, a handheld such as a Baofeng on a sound-card interface, or a mobile FM radio such as the <b>Yaesu FTM-510D</b> through its DATA jack. You tune the radio by hand (spot clicks and band buttons show you the frequency to set). Set the audio Input and Output below to the sound card that connects to the radio.</span>
@@ -4973,6 +4983,12 @@
           <span class="help-text">Connect to a remote rigctld server (e.g. on another machine)</span>
           <label>Host: <input type="text" id="welcome-rigctldnet-host" placeholder="192.168.1.100" value="127.0.0.1"></label>
           <label>Port: <input type="number" id="welcome-rigctldnet-port" min="1" max="65535" value="4532"></label>
+        </div>
+        <label class="radio-label"><input type="radio" name="welcome-radio-type" value="flrig"> FLRig (a shared radio)</label>
+        <div id="welcome-flrig-config" class="radio-sub hidden">
+          <span class="help-text">flrig holds the radio and POTACAT shares it with your other programs. Give flrig's address and server port (Config &gt; Setup &gt; Xcvr in flrig; 12345 by default).</span>
+          <label>Host: <input type="text" id="welcome-flrig-host" placeholder="127.0.0.1" value="127.0.0.1"></label>
+          <label>Port: <input type="number" id="welcome-flrig-port" min="1" max="65535" value="12345"></label>
         </div>
         <label class="radio-label"><input type="radio" name="welcome-radio-type" value="nocat"> No CAT control (VOX)</label>
         <div id="welcome-nocat-config" class="radio-sub hidden">

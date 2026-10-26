@@ -267,6 +267,7 @@ contextBridge.exposeInMainWorld('api', {
   rotctldListModels: () => ipcRenderer.invoke('rotctld-list-models'),
   listRigs: () => ipcRenderer.invoke('list-rigs'),
   testHamlib: (config) => ipcRenderer.invoke('test-hamlib', config),
+  testFlrig: (config) => ipcRenderer.invoke('test-flrig', config),
   testSerialCat: (config) => ipcRenderer.invoke('test-serial-cat', config),
   testIcomCiv: (config) => ipcRenderer.invoke('test-icom-civ', config),
   testCivTcp: (config) => ipcRenderer.invoke('test-civ-tcp', config),
