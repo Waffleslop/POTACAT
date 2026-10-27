@@ -21023,6 +21023,7 @@ function buildPaddleKeyRig() {
   let _cwKeyPortLineLogged = '';   // the key-port line last announced
   let _cwTxrxPttOnlyLogged = false;
   paddleKeyRig = ({ down }) => {
+    if (down && !passTxAllowed('CW')) return; // a guest's paddle obeys the pass like every other key
     // A paddle keys the rig outside the controller's own PTT path. Hold the
     // TX flag past each edge so a CAT-muted TS-480 is not declared DOWN ten
     // seconds into an over — which forced the key line low mid-word
@@ -21839,6 +21840,7 @@ function connectRemote() {
 
   remoteServer.on('cw-text', ({ text, wpm, live }) => {
     if (!text) return;
+    if (!passTxAllowed('CW')) return; // the one privilege gate every transmit path uses
     // Honor the WPM the phone sends inline with the macro so a bare cw-text
     // (no preceding cw-config) still keys at the right speed — and it flows
     // through the one authoritative writer, keeping settings.cwWpm current.
@@ -23491,26 +23493,7 @@ function connectRemote() {
   });
   remoteServer.on('jtcat-set-hound-mode', ({ enabled } = {}) => applyJtcatFlag('jtcatHoundMode', enabled, 'Hound mode'));
 
-  remoteServer.on('jtcat-halt-tx', () => {
-    clearJtcatTxFailsafe();
-    clearJtcatIcomHardRelease();
-    if (jtcatManager) {
-      for (const id of jtcatManager.sliceIds) {
-        const eng = jtcatManager.getEngine(id);
-        if (eng) { eng._txEnabled = false; eng.setTxMessage(''); if (eng._txActive) eng.txComplete(); }
-        jtcatManager.releaseTx(id);
-      }
-    } else if (ft8Engine) {
-      ft8Engine._txEnabled = false;
-      ft8Engine.setTxMessage('');
-      if (ft8Engine._txActive) ft8Engine.txComplete();
-    }
-    remoteJtcatQso = null;
-    remoteJtcatBroadcastQso();
-    if (_icomNetworkTransport) { try { _icomNetworkTransport.cancelTx(); } catch {} }
-    if (smartSdrAudio) { try { smartSdrAudio.cancelTx(); } catch {} }
-    handleRemotePtt(false);
-  });
+  remoteServer.on('jtcat-halt-tx', jtcatHaltTxNow);
 
   remoteServer.on('jtcat-set-mode', ({ mode }) => {
     if (!ft8Engine) return;
@@ -23947,13 +23930,7 @@ function connectRemote() {
   // the popout to stop audio playback, then notify all clients.
   remoteServer.on('sstv-halt-tx', () => {
     console.log('[SSTV] ECHOCAT requested TX halt');
-    try { handleRemotePtt(false); } catch (e) { console.error('[SSTV] halt PTT release:', e); }
-    if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
-      sstvPopoutWin.webContents.send('sstv-abort-tx');
-    }
-    if (remoteServer) {
-      remoteServer.broadcastSstvTxStatus({ state: 'rx' });
-    }
+    sstvHaltTxNow();
   });
 
   // Newest first, one page at a time. A client that says thumbs:true gets
@@ -31358,6 +31335,78 @@ function passTxBlocked(res) {
 }
 function passTxJustBlocked() { return Date.now() - _passTxBlockedAt < 500; }
 
+/** Every transmit path that is not a PTT asks this (CW text, the paddle). */
+function passTxAllowed(mode) {
+  if (!passEnforcement || passEnforcement.getState() === 'idle') return true;
+  const res = passEnforcement.interceptCatCommand({ type: 'tx_enable', freqHz: _currentFreqHz, mode: mode || _currentMode });
+  if (res.allowed) return true;
+  if (!passTxJustBlocked()) sendCatLog(`[pass] ${mode || 'TX'} blocked: ${res.userVisible}`);
+  passTxBlocked(res);
+  return false;
+}
+
+/**
+ * The end of a Guest Pass stops everything the guest started, whatever
+ * surface started it: Run/Hunt, the WSPR beacon, an FT8/JTTY/PSK message in
+ * flight, CW text or a held paddle, an SSTV picture, a Mercury session, PTT.
+ * Returns what it stopped, for the log. (docs/share-my-rig-lease-plan.md, 8)
+ */
+function passLeaseStopTransmitters(reason) {
+  const stopped = [];
+  const step = (name, fn) => { try { if (fn()) stopped.push(name); } catch (e) { sendCatLog(`[pass] stopping ${name} failed: ${e && e.message || e}`); } };
+  step('Run', () => { if (!jtcatFullAutoCq) return false; stopFullAutoCq('pass-' + reason); return true; });
+  step('Hunt', () => { if (jtcatAutoCqMode === 'off') return false; setJtcatHuntMode('off'); return true; });
+  step('WSPR beacon', () => { if (!(wsprBeaconArmed() || jtcatWsprBeaconTimer)) return false; setWsprBeacon(false, { why: 'pass ' + reason }); return true; });
+  step('JTCAT TX', () => { const was = !!(ft8Engine && ft8Engine._txActive); jtcatHaltTxNow(); return was; });
+  step('CW', () => {
+    cancelAllCwSends();
+    if (keyer) keyer.stop();
+    if (winKeyer && winKeyer.connected) winKeyer.cancelText();
+    if (smartSdr && smartSdr.connected) smartSdr.cwStop();
+    return false;
+  });
+  step('SSTV', () => { sstvHaltTxNow(); return false; });
+  step('Mercury', () => { if (!mercuryClient) return false; mercuryClient.abort(); return false; });
+  step('PTT', () => {
+    handleRemotePtt(false);
+    if (cat && cat.connected) gatedSetTransmit(false);
+    if (smartSdr && smartSdr.connected) gatedSmartSdrTransmit(false);
+    return false;
+  });
+  return stopped;
+}
+
+function jtcatHaltTxNow() {
+  clearJtcatTxFailsafe();
+  clearJtcatIcomHardRelease();
+  if (jtcatManager) {
+    for (const id of jtcatManager.sliceIds) {
+      const eng = jtcatManager.getEngine(id);
+      if (eng) { eng._txEnabled = false; eng.setTxMessage(''); if (eng._txActive) eng.txComplete(); }
+      jtcatManager.releaseTx(id);
+    }
+  } else if (ft8Engine) {
+    ft8Engine._txEnabled = false;
+    ft8Engine.setTxMessage('');
+    if (ft8Engine._txActive) ft8Engine.txComplete();
+  }
+  remoteJtcatQso = null;
+  remoteJtcatBroadcastQso();
+  if (_icomNetworkTransport) { try { _icomNetworkTransport.cancelTx(); } catch {} }
+  if (smartSdrAudio) { try { smartSdrAudio.cancelTx(); } catch {} }
+  handleRemotePtt(false);
+}
+
+function sstvHaltTxNow() {
+  try { handleRemotePtt(false); } catch (e) { console.error('[SSTV] halt PTT release:', e); }
+  if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+    sstvPopoutWin.webContents.send('sstv-abort-tx');
+  }
+  if (remoteServer) {
+    remoteServer.broadcastSstvTxStatus({ state: 'rx' });
+  }
+}
+
 function gatedSetTransmit(state) {
   if (passEnforcement && state) {
     const res = passEnforcement.interceptCatCommand({ type: 'tx_enable', freqHz: _currentFreqHz, mode: _currentMode });
@@ -32896,7 +32945,10 @@ app.whenReady().then(() => {
       if (win && !win.isDestroyed()) {
         win.webContents.send('pass-enforcement-ended', info);
       }
-      sendCatLog(`[pass] session ended: ${info.reason}`);
+      // The lease is over: stop what the guest left running BEFORE the
+      // guest is told (interceptCatCommand already refuses: state 'ended').
+      const stopped = passLeaseStopTransmitters(info.reason);
+      sendCatLog(`[pass] session ended: ${info.reason}${stopped.length ? ' — stopped ' + stopped.join(', ') : ''}; guest disconnected`);
       // #46a: also broadcast to pass-authed WS clients so mobile gets
       // real-time end (its client-side timer is UX-only).
       try { if (remoteServer) remoteServer.broadcastPassEnded(info.reason, info.code); } catch {}

@@ -47,6 +47,7 @@ const TESTS = [
   'test/ft8-engine-rebaseline-test.js',
   'test/guest-pass-test.js',
   'test/guest-pass-onair-call-test.js', // the pass's station call is the on-air call (K3SBP on W7RTA's pass)
+  'test/guest-pass-lease-end-test.js', // the end of a pass stops every transmitter and closes the guest socket
   'test/propagation-always-on-test.js', // RBN + PSKReporter Propagation has no switch
   'test/install-defaults-test.js', // logging/solar/band activity always on; SOTA/WWFF/LLOTA + a random cluster node once
   'test/pair-request-tunnel-gate-test.js',
