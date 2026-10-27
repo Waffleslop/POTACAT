@@ -453,6 +453,13 @@ test('FT-710: MD0 answers 9/E/F read as RTTY, PSK and FM', () => {
   assert.deepStrictEqual(modes, ['RTTY', 'PSK', 'FM', 'DIGU', 'CW']);
 });
 
+test('FT-710: the CW key note names the FT-710 PC KEYING menu, not the FT-891 one', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const notes = RIG_MODELS['FT-710'].notes.join('\n');
+  assert.ok(/CW SETTING -> MODE CW -> PC KEYING = DTR/.test(notes), notes);
+  assert.ok(!/USB Keying \(CW\)/.test(notes), 'USB Keying (CW) is an FT-891 menu');
+});
+
 test('FT-710: PSK is shown but never sent; a PSK width uses the DATA chart', () => {
   const { RIG_MODELS } = require('../lib/rig-models');
   const model = RIG_MODELS['FT-710'];
