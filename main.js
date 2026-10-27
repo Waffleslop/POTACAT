@@ -1717,6 +1717,7 @@ let _winlinkShimRefusedAt = 0;  // last "no session" PTT refusal (rate-limits th
 let _winlinkUnkeyTimer = null;  // the modem asked for PTT off; the tail of its audio is still in POTACAT's pipeline
 let ardopProc = null;           // ardopcf for an ARDOP session
 let direwolfProc = null;        // Dire Wolf for a packet (AX.25) session
+let _direwolfHeard = 0;         // frames Dire Wolf decoded from the radio since it started
 let winlinkAudio = null;        // ModemAudioServer: the modem's audio over POTACAT's radio link (no sound card)
 let winlinkTxActive = false;    // Pat has the transmitter keyed (via the shim)
 let _winlinkTxFailsafeTimer = null;
@@ -10041,6 +10042,8 @@ async function spawnDirewolf() {
     direwolfProc = proc;
     let settled = false;
     let lines = 0;
+    let heardLines = 0;
+    _direwolfHeard = 0;
     const lastLines = []; // what Dire Wolf said last, for a timeout that would otherwise say nothing
     let probeTimer = null;
     const fail = (msg) => { if (!settled) { settled = true; clearInterval(probeTimer); try { proc.kill(); } catch {} reject(new Error(msg)); } };
@@ -10066,6 +10069,15 @@ async function spawnDirewolf() {
         if (kind === 'device-error') { winlinkLog(`direwolf: ${line}`); fail(line); continue; }
         if (kind === 'ptt-error') { winlinkLog(`direwolf: ${line}`); fail('Dire Wolf could not reach POTACAT\'s radio control: ' + line); continue; }
         if (kind === 'port-busy') { winlinkLog(`direwolf: ${line}`); fail(`Dire Wolf's AGW port ${_winlinkAgwPort()} is in use — is another packet program running?`); continue; }
+        // Every frame it hears is logged (capped): the startup cap used to drop
+        // them, so a bug report could not say whether the radio's audio reached
+        // the modem at all (FT-991A packet, "Session failure {NumReceived:0}").
+        if (kind === 'heard' || kind === 'frame') {
+          if (kind === 'heard') _direwolfHeard++;
+          if (heardLines++ < 300) winlinkLog(`direwolf: ${line}`);
+          else if (heardLines === 301) winlinkLog('direwolf: (more received frames not logged)');
+          continue;
+        }
         if (lines++ < 40) winlinkLog(`direwolf: ${line}`);
       }
     };
@@ -10348,6 +10360,9 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
           }
         } catch {}
         return;
+      }
+      if (mode === 'packet' && _direwolfHeard === 0) {
+        winlinkLog('packet: Dire Wolf decoded nothing from the radio this session. The gateway may have answered (you can see it on the waterfall) but its reply never reached the modem: check the radio audio Input in Settings > Radio, its level, and that the radio is in FM with the squelch open.');
       }
       winlinkEndSession('error', _winlinkSessionError || e.message || String(e));
     }
