@@ -493,6 +493,8 @@ contextBridge.exposeInMainWorld('api', {
   winlinkVaraSetup: (kind, devices, labels) => ipcRenderer.invoke('winlink-vara-setup', { kind, devices, ...(labels || {}) }),
   winlinkAudioRig: () => ipcRenderer.invoke('winlink-audio-rig'),
   winlinkRegister: (o) => ipcRenderer.invoke('winlink-register', o),
+  winlinkRecoveryEmailGet: () => ipcRenderer.invoke('winlink-recovery-email-get'),
+  winlinkRecoveryEmailSet: (email) => ipcRenderer.invoke('winlink-recovery-email-set', email),
   onWinlinkState: (cb) => ipcRenderer.on('winlink-state', (_e, s) => cb(s)),
   jtcatSetUltracat: (on) => ipcRenderer.send('jtcat-set-ultracat', on),
   jtcatPopoutTheme: (theme) => ipcRenderer.send('jtcat-popout-theme', theme),

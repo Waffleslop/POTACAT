@@ -3144,6 +3144,17 @@
           <label>Recovery email (optional): <input type="text" id="set-winlink-recovery" style="width:200px;"></label>
           <button type="button" id="winlink-register-btn">Create my Winlink account</button>
         </div>
+        <!-- An existing account's password-recovery address (Pat 1.0 account
+             API; K9ONR asked 2026-10-27). Shown after Check my account. -->
+        <div id="winlink-recovery-box" class="hidden" style="margin-top:6px;padding:7px 9px;border:1px solid var(--border-primary);border-radius:4px;">
+          <span class="help-text" style="display:block;margin-bottom:4px;">Winlink sends a forgotten password to this address.</span>
+          <span>Recovery email: <strong id="winlink-recovery-current">&hellip;</strong></span>
+          <div style="margin-top:4px;">
+            <input type="text" id="set-winlink-recovery-new" style="width:200px;" placeholder="new address" autocomplete="off">
+            <button type="button" id="winlink-recovery-change">Change</button>
+            <span class="help-text" id="winlink-recovery-status" style="margin-left:6px;"></span>
+          </div>
+        </div>
         <label class="checkbox-label" style="margin-top:8px;">
           <input type="checkbox" id="set-winlink-autocheck"> Check mail over the internet every
           <input type="number" id="set-winlink-autocheck-min" min="10" max="240" value="30" style="width:55px;"> minutes

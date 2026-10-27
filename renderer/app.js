@@ -5383,6 +5383,33 @@ if (setMercuryEnable) {
       if (!r || !r.ok) { acctStatus.textContent = (r && r.error) || 'Could not check'; return; }
       acctStatus.textContent = r.exists ? `${r.callsign} has a Winlink account.` : `${r.callsign} has no Winlink account yet.`;
       regBox.classList.toggle('hidden', !!r.exists);
+      if (r.exists) showWinlinkRecovery(); else if (recBox) recBox.classList.add('hidden');
+    });
+    // An existing account's recovery address: read through Pat with the
+    // saved password, changed in place.
+    const recBox = document.getElementById('winlink-recovery-box');
+    const recCurrent = document.getElementById('winlink-recovery-current');
+    const recStatus = document.getElementById('winlink-recovery-status');
+    async function showWinlinkRecovery() {
+      if (!recBox || !window.api.winlinkRecoveryEmailGet) return;
+      recBox.classList.remove('hidden');
+      recCurrent.textContent = '…';
+      recStatus.textContent = '';
+      const r = await window.api.winlinkRecoveryEmailGet();
+      if (r && r.ok) recCurrent.textContent = r.email || 'none set';
+      else { recCurrent.textContent = 'unknown'; recStatus.textContent = (r && r.error) || 'Could not read it (is your Winlink password saved?)'; }
+    }
+    const recChange = document.getElementById('winlink-recovery-change');
+    if (recChange) recChange.addEventListener('click', async () => {
+      const input = document.getElementById('set-winlink-recovery-new');
+      const email = input.value.trim();
+      if (!email) { recStatus.textContent = 'Type the new address first'; return; }
+      recChange.disabled = true;
+      recStatus.textContent = 'Saving…';
+      const r = await window.api.winlinkRecoveryEmailSet(email);
+      recChange.disabled = false;
+      if (r && r.ok) { recCurrent.textContent = email; input.value = ''; recStatus.textContent = 'Changed.'; }
+      else recStatus.textContent = (r && r.error) || 'Could not change it';
     });
     const regBtn = document.getElementById('winlink-register-btn');
     if (regBtn) regBtn.addEventListener('click', async () => {
