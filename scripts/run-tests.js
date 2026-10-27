@@ -200,6 +200,7 @@ const TESTS = [
   'test/external-atu-carrier-test.js', // N8JMS: RF-sense tuner carrier in AM (CW over CAT is key-up)
   'test/jtcat-map-popout-arcs-test.js', // TacticalIndex: QSO arcs in the JTCAT map pop-out
   'test/ae5je-settings-audio-test.js', // AE5JE: audio devices follow their name; bug report says whether settings saves land
+  'test/page-script-globals-test.js', // one top-level scope per page: a second const of the same name stops a script (WB3EGD, the dead 1.13.5 audio heal)
   'test/window-min-size-test.js',     // N0KAH: no window shrinks past its own controls
   'test/yaesu-fa-digits-test.js',
   'test/log-as-test.js',
