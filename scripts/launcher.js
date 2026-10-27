@@ -766,6 +766,28 @@ function generateTlsCert() {
   return { cert: certPem, key: privateKey };
 }
 
+// --- One port, both protocols ---
+// The Cloud Tunnel reaches the launcher over plain HTTP on 7301 (cloudflared
+// cannot know which a station runs), while a launcher that found the
+// Tailscale certificate serves HTTPS there for iOS. A TLS connection opens
+// with a handshake record (first byte 0x16); anything else is HTTP. So the
+// port answers both, and neither path depends on how the other is set up.
+function createDualServer(tls, handler) {
+  const httpsServer = https.createServer(tls, handler);
+  const httpServer = http.createServer(handler);
+  const server = net.createServer((socket) => {
+    socket.once('data', (buf) => {
+      socket.pause();
+      socket.unshift(buf);
+      (buf[0] === 0x16 ? httpsServer : httpServer).emit('connection', socket);
+      process.nextTick(() => socket.resume());
+    });
+    socket.on('error', () => {});
+  });
+  server.on('close', () => { httpsServer.close(); httpServer.close(); });
+  return server;
+}
+
 // --- Format uptime ---
 function formatUptime(ms) {
   if (ms < 60000) return Math.floor(ms / 1000) + 's';
@@ -1069,13 +1091,13 @@ function main() {
     // Trusted Tailscale cert available — always prefer it. This is the only
     // HTTPS mode iOS can actually reach (self-signed is rejected, plaintext
     // HTTP is blocked by ATS).
-    server = https.createServer({ cert: _tsCert.cert, key: _tsCert.key }, handleRequest);
+    server = createDualServer({ cert: _tsCert.cert, key: _tsCert.key }, handleRequest);
     _usingHttps = true;
-    console.log('[Launcher] Serving HTTPS with the Tailscale cert (iOS-trusted)');
+    console.log('[Launcher] Serving HTTPS with the Tailscale cert (iOS-trusted), and HTTP on the same port for the Cloud Tunnel');
   } else if (config.https) {
     const tls = generateTlsCert();
     if (tls) {
-      server = https.createServer({ cert: tls.cert, key: tls.key }, handleRequest);
+      server = createDualServer({ cert: tls.cert, key: tls.key }, handleRequest);
       _usingHttps = true;
       console.log('[Launcher] No Tailscale cert — serving HTTPS with a self-signed cert (browser-only; iOS will reject)');
     } else {
@@ -1121,4 +1143,4 @@ function main() {
 // Run directly (node launcher.js, the extracted copy) it starts at once;
 // POTACAT.exe --launcher requires it and calls main(); tests only require it.
 if (require.main === module) main();
-module.exports = { main, isTunnelRequest, clientKey, routeOf, readPairedDevices, deviceForToken, authorize, sameSecret, CloudReplica, handleRequest };
+module.exports = { main, createDualServer, generateTlsCert, isTunnelRequest, clientKey, routeOf, readPairedDevices, deviceForToken, authorize, sameSecret, CloudReplica, handleRequest };

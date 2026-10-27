@@ -120,6 +120,22 @@ function request(port, { method = 'GET', p = '/', headers = {} } = {}) {
     });
   } finally { server.close(); }
 
+  await check('one port answers HTTPS (Tailscale, for iOS) and HTTP (the Cloud Tunnel) alike', async () => {
+    const https = require('https');
+    const dual = L.createDualServer(L.generateTlsCert(), L.handleRequest);
+    await new Promise((r) => dual.listen(0, '127.0.0.1', r));
+    const dport = dual.address().port;
+    try {
+      const plain = await request(dport, { p: '/launcher/status', headers: { 'cf-connecting-ip': '192.0.2.7', host: 'k3sbp.potacat.com', authorization: 'Bearer ' + TOKEN_A } });
+      assert.strictEqual(plain.status, 200, 'HTTP through the tunnel');
+      const secure = await new Promise((resolve, reject) => {
+        const req = https.request({ host: '127.0.0.1', port: dport, path: '/status', rejectUnauthorized: false, headers: { authorization: 'Bearer K3SBP' } }, (res) => { res.resume(); resolve(res.statusCode); });
+        req.on('error', reject); req.end();
+      });
+      assert.strictEqual(secure, 200, 'HTTPS on the LAN');
+    } finally { dual.close(); }
+  });
+
   console.log('The Cloud Tunnel replica');
   function fakeSpawn() {
     const calls = [];
