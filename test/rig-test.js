@@ -411,6 +411,14 @@ test('FT-710: a USB -> CW tune sets the CW width in the CW chart', () => {
   assert.deepStrictEqual(sh, ['SH0010;']);
 });
 
+test('FT-710: AGC OFF/FAST/MID/SLOW/AUTO are GT00-GT04, and AUTO is offered', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS['FT-710']);
+  for (const agc of ['off', 'fast', 'med', 'slow', 'auto']) codec.setAgc(agc);
+  assert.deepStrictEqual(writes, ['GT00;', 'GT01;', 'GT02;', 'GT03;', 'GT04;']);
+  assert.ok(RIG_MODELS['FT-710'].agcModes.includes('auto'));
+});
+
 // =========================================================================
 console.log('\n=== KenwoodCodec (Kenwood TS-590) ===');
 
