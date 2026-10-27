@@ -200,9 +200,29 @@ check('SSB: a low-power frame between words neither counts nor resets', () => {
 
 check('main judges each SWR frame with the fresh forward power', () => {
   const at = mainSrc.indexOf("smartSdr.on('swr-ratio'");
-  const body = mainSrc.slice(at, at + 2500);
+  const body = mainSrc.slice(at, at + 4000);
   assert.ok(/SwrGuard\.swrFrameVerdict\(\{ swr, fwdW, limit: swrGuardMax\(\) \}\)/.test(body));
   assert.ok(/else if \(verdict === 'ok'\) \{\s*_swrGuardHits = 0;/.test(body), 'only a real reading resets');
+});
+
+check('a match fixed outside POTACAT ends the latch: measured in-limit transmit (K3SBP 17 m)', () => {
+  assert.strictEqual(G.SWR_CLEAR_OK_FRAMES, 10);
+  const at = mainSrc.indexOf("smartSdr.on('swr-ratio'");
+  const body = mainSrc.slice(at, at + 4000);
+  const latched = body.slice(body.indexOf('else if (_swrTripped) {'));
+  assert.ok(/if \(_atuSweeping \|\| fwdW == null\) _swrClearOkRun = 0;/.test(latched), 'never counts during a sweep or without forward power');
+  assert.ok(/if \(verdict === 'over'\) _swrClearOkRun = 0;/.test(latched), 'an over-limit frame restarts the count');
+  assert.ok(/\+\+_swrClearOkRun >= SwrGuard\.SWR_CLEAR_OK_FRAMES\) \{\s*clearSwrTrip\(/.test(latched), 'enough in-limit frames clear it');
+  const trip = mainSrc.slice(mainSrc.indexOf('function tripSwrGuard('), mainSrc.indexOf('function tripSwrGuard(') + 800);
+  assert.ok(/_swrClearOkRun = 0;/.test(trip) && /_atuSweepSinceTrip = false;/.test(trip), 'a new latch starts both counts fresh');
+});
+
+check('a match fixed outside POTACAT ends the latch: an ATU match from SmartSDR after a sweep', () => {
+  const at = mainSrc.indexOf('function onAtuStatus(');
+  const body = mainSrc.slice(at, mainSrc.indexOf('\n}', at));
+  assert.ok(/_atuSweeping = kind === 'sweeping';/.test(body), 'the sweep state is tracked from every status');
+  assert.ok(/if \(!episode\) \{[\s\S]*kind === 'matched' && _swrTripped && _atuSweepSinceTrip\) clearSwrTrip\(/.test(body),
+    'a match with no POTACAT episode clears only after a sweep seen since the trip');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

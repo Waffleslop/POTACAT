@@ -2013,6 +2013,9 @@ let _swrGuardSuppressUntil = 0; // no tripping during/just after an ATU tune
 let _swrLastAutoTune = 0;       // last auto-tune start (60 s gate)
 let _swrAutoTuneFailedBand = ''; // band whose auto-tune the radio reported as no match — no retry this session
 let _atuTuneEpisode = null;     // a Flex tune we are waiting on: { startedAt, auto, sawSweep, band, timer }
+let _atuSweeping = false;       // the radio's ATU is mid-sweep right now (atu status stream)
+let _atuSweepSinceTrip = false; // a sweep has been seen since the latch was set
+let _swrClearOkRun = 0;         // in-limit frames in a row while latched (SWR_CLEAR_OK_FRAMES ends it)
 
 function swrGuardBand() {
   return _currentFreqHz ? (freqToBand(_currentFreqHz / 1e6) || '') : '';
@@ -2056,6 +2059,7 @@ function clearSwrTrip(reason) {
   _swrTrippedBand = '';
   _swrHuntNoted = false;
   _swrGuardHits = 0;
+  _swrClearOkRun = 0;
   sendCatLog(`[SWR GUARD] TX re-enabled (${reason}).`);
   if (win && !win.isDestroyed()) {
     win.webContents.send('app-notice', { message: `TX re-enabled — SWR guard reset (${reason})`, duration: 5000 });
@@ -2156,8 +2160,21 @@ function noteAtuTuneStarted(opts) {
 // The radio's answer to a tune POTACAT is waiting on (any starter: the SWR
 // guard's auto-tune, the ATU button, ECHOCAT, band-change auto-tune).
 function onAtuStatus(kv) {
+  if (kv.status == null) return;
+  const kind = SwrGuard.classifyAtuStatus(kv.status);
+  _atuSweeping = kind === 'sweeping';
+  if (_atuSweeping && _swrTripped) { _atuSweepSinceTrip = true; _swrClearOkRun = 0; }
   const episode = _atuTuneEpisode;
-  if (!episode || kv.status == null) return;
+  if (!episode) {
+    // A tune POTACAT did not start (SmartSDR, Maestro, the radio's front
+    // panel) is still the radio reporting a match. K3SBP 2026-10-26, 17 m:
+    // POTACAT's ATU press failed, the match was then fixed from SmartSDR to
+    // 1.3:1, and the block stayed up with only "override" left. A sweep must
+    // have been seen since the trip, so a status the radio merely re-sends
+    // never clears it.
+    if (kind === 'matched' && _swrTripped && _atuSweepSinceTrip) clearSwrTrip(`ATU matched: ${kv.status}`);
+    return;
+  }
   const { outcome } = SwrGuard.decideAtuOutcome(episode, kv.status, Date.now());
   if (!outcome) return;
   clearTimeout(episode.timer);
@@ -2191,6 +2208,8 @@ function tripSwrGuard(swr) {
   _swrTripMessage = msg;
   _swrTripSwr = swr;
   _swrAtuFailed = false;
+  _swrClearOkRun = 0;
+  _atuSweepSinceTrip = false;
   // Kill whatever is transmitting, through the normal teardown paths.
   if (jtcatTuneState.active) stopJtcatTune();
   if (jtcatFullAutoCq) stopFullAutoCq('SWR guard tripped');
@@ -17440,7 +17459,22 @@ function connectSmartSdr() {
     // could not tell suppressed from ignored from disabled.
     const g = _flexTxRf && (_flexTxRf.guard || (_flexTxRf.guard = { over: 0, ok: 0, ignored: 0, suppressed: 0, off: 0, tripped: 0 }));
     if (settings.swrGuard === false) { if (g) g.off++; }
-    else if (_swrTripped) { if (g) g.tripped++; }
+    else if (_swrTripped) {
+      if (g) g.tripped++;
+      // A latch also ends on what the bridge MEASURES: a transmission keyed
+      // some other way (WinKeyer, paddle, mic) that holds inside the limit at
+      // real power proves the match was fixed (K3SBP 2026-10-26). Never during
+      // an ATU sweep, whose carrier passes through good and bad on its way.
+      const fwdW = (Date.now() - _flexLastFwdAt < 500) ? _flexLastFwdW : null;
+      if (_atuSweeping || fwdW == null) _swrClearOkRun = 0;
+      else {
+        const verdict = SwrGuard.swrFrameVerdict({ swr, fwdW, limit: swrGuardMax() });
+        if (verdict === 'over') _swrClearOkRun = 0;
+        else if (verdict === 'ok' && ++_swrClearOkRun >= SwrGuard.SWR_CLEAR_OK_FRAMES) {
+          clearSwrTrip(`measured SWR ${swr.toFixed(1)}:1 at ${Math.round(fwdW)} W on transmit`);
+        }
+      }
+    }
     else if (Date.now() <= _swrGuardSuppressUntil) { if (g) g.suppressed++; }
     else {
       const fwdW = (Date.now() - _flexLastFwdAt < 500) ? _flexLastFwdW : null;
