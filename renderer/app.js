@@ -5783,6 +5783,7 @@ function _gpFmtRemaining(seconds) {
   const cardOffer = document.getElementById('cloud-prompt-offer');
   const startBtn = document.getElementById('cloud-prompt-start');
   const laterBtn = document.getElementById('cloud-prompt-later');
+  const neverBtn = document.getElementById('cloud-prompt-never');
   let promptShown = false;
   let promptTries = 0;
 
@@ -5796,12 +5797,16 @@ function _gpFmtRemaining(seconds) {
     const settingsDlg = document.getElementById('settings-dialog');
     const otherCardVisible = (ssCard && !ssCard.classList.contains('hidden'))
       || (whatsNew && whatsNew.open) || (settingsDlg && settingsDlg.open);
-    const d = Billing.decideCloudPrompt({ ...inputs, otherCardVisible, shownThisLaunch: promptShown });
+    // Typing anywhere (a callsign, a log form, a macro): never over it.
+    const a = document.activeElement;
+    const typing = !!(a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT' || a.isContentEditable));
+    const d = Billing.decideCloudPrompt({ ...inputs, otherCardVisible, typing, shownThisLaunch: promptShown });
     if (d.show) {
       promptShown = true;
       const copy = Billing.promptCopy(d.qsos);
       if (cardText) cardText.textContent = copy.body;
       if (cardOffer) cardOffer.textContent = copy.offer;
+      if (neverBtn) neverBtn.classList.toggle('hidden', !d.offerNever);
       card.classList.remove('hidden');
       return;
     }
@@ -5817,9 +5822,13 @@ function _gpFmtRemaining(seconds) {
     hidePrompt();
     if (window.api.cloudPromptSnooze) window.api.cloudPromptSnooze().catch(() => {});
   });
-  // After the Station Setup launch card (12 s) and What's New have had
-  // their turn; the decision re-checks that nothing else is on screen.
-  setTimeout(promptCheck, 25000);
+  if (neverBtn) neverBtn.addEventListener('click', () => {
+    hidePrompt();
+    if (window.api.cloudPromptNever) window.api.cloudPromptNever().catch(() => {});
+  });
+  // Never in the first two minutes: they opened POTACAT to do something.
+  // The decision re-checks that nothing else is on screen.
+  setTimeout(promptCheck, (Billing && Billing.PROMPT_LAUNCH_DELAY_MS) || 120000);
 })();
 
 let _gpOwnerBannerTimer = null;
@@ -16686,6 +16695,7 @@ async function openSettingsDialog(tab) {
   if (tab) _openSettingsTab = tab;
   const s = await window.api.getSettings();
   setGrid.value = s.grid || '';
+  homeCountyLoad(s);
   setDistUnit.value = s.distUnit || 'mi';
   setMaxAge.value = s.maxAgeMin || 5;
   if (setPotaAgeLimit) setPotaAgeLimit.checked = s.potaAgeLimit === true;
@@ -17790,6 +17800,8 @@ settingsSave.addEventListener('click', async () => {
     // alone; the CAT pill's None is the explicit disconnect.
     ...(rigTarget ? { catTarget: rigTarget } : {}),
     grid: setGrid.value.trim() || 'FN20jb',
+    homeState: (document.getElementById('set-home-state') || {}).value || '',
+    homeCounty: (document.getElementById('set-home-county') || {}).value || '',
     distUnit: setDistUnit.value,
     maxAgeMin: maxAgeVal,
     potaAgeLimit: !!(setPotaAgeLimit && setPotaAgeLimit.checked),
@@ -27499,7 +27511,107 @@ function updateParkExtraBadge() {
     badge.classList.add('hidden');
   }
   updateCrossRefToggle();
+  refreshActivatorCounty();
 }
+
+// ── The operator's own county (lib/station-county.js; AE5JE 2026-10-27) ──
+let _countyList = null;
+async function countyList() {
+  if (_countyList) return _countyList;
+  try { _countyList = (await window.api.countyList()) || {}; } catch { _countyList = {}; }
+  return _countyList;
+}
+function fillCountySelect(sel, rows, value, blankLabel) {
+  if (!sel) return;
+  sel.innerHTML = '';
+  const o0 = document.createElement('option');
+  o0.value = ''; o0.textContent = blankLabel || '—';
+  sel.appendChild(o0);
+  for (const r of rows || []) {
+    const o = document.createElement('option');
+    o.value = r[0]; o.textContent = r[1] || r[0];
+    sel.appendChild(o);
+  }
+  sel.value = value || '';
+}
+function fillStateSelect(sel, states, value) {
+  if (!sel) return;
+  sel.innerHTML = '';
+  const o0 = document.createElement('option');
+  o0.value = ''; o0.textContent = '—';
+  sel.appendChild(o0);
+  for (const st of states) {
+    const o = document.createElement('option');
+    o.value = st; o.textContent = st;
+    sel.appendChild(o);
+  }
+  sel.value = value || '';
+}
+async function homeCountyLoad(s) {
+  const list = await countyList();
+  const stSel = document.getElementById('set-home-state');
+  const cSel = document.getElementById('set-home-county');
+  if (!stSel || !cSel) return;
+  fillStateSelect(stSel, Object.keys(list).sort(), s.homeState || '');
+  fillCountySelect(cSel, list[stSel.value] || [], s.homeCounty || '');
+}
+(function bindHomeCounty() {
+  const stSel = document.getElementById('set-home-state');
+  const cSel = document.getElementById('set-home-county');
+  const btn = document.getElementById('home-county-qrz');
+  const status = document.getElementById('home-county-status');
+  if (stSel) stSel.addEventListener('change', async () => {
+    fillCountySelect(cSel, (await countyList())[stSel.value] || [], '');
+  });
+  if (btn) btn.addEventListener('click', async () => {
+    status.textContent = 'Looking up…';
+    const r = await window.api.homeCountyFromQrz();
+    if (!r || !r.ok) { status.textContent = (r && r.error) || 'Could not look it up'; return; }
+    const list = await countyList();
+    stSel.value = r.state;
+    fillCountySelect(cSel, list[r.state] || [], r.county || '');
+    status.textContent = r.county ? `${r.county}, ${r.state} (from QRZ). Save to keep it.` : `${r.state} from QRZ; QRZ's county "${r.qrzCounty}" is not one LoTW knows: pick it from the list.`;
+  });
+})();
+
+// The activation bar: this park's county, remembered per park.
+let _activatorCountyRef = '';
+async function refreshActivatorCounty() {
+  const wrap = document.getElementById('activator-county-wrap');
+  const stSel = document.getElementById('activator-county-state');
+  const cSel = document.getElementById('activator-county');
+  if (!wrap || !stSel || !cSel || !window.api.parkCountyGet) return;
+  const ref = (activatorParkRefs && activatorParkRefs[0] && activatorParkRefs[0].ref) || '';
+  _activatorCountyRef = ref;
+  if (!ref) { wrap.classList.add('hidden'); return; }
+  const info = await window.api.parkCountyGet(ref);
+  if (_activatorCountyRef !== ref) return; // the park changed while we asked
+  if (!info || !info.us) { wrap.classList.add('hidden'); return; }
+  const list = await countyList();
+  const states = (info.states && info.states.length ? info.states : Object.keys(list)).filter((st) => list[st]);
+  const state = (info.choice && info.choice.state) || (states.length === 1 ? states[0] : '');
+  // A park in one state needs no state picker; a park across states asks
+  // which side the operator is on, as the log form already does.
+  stSel.classList.toggle('hidden', states.length === 1);
+  fillStateSelect(stSel, states, state);
+  fillCountySelect(cSel, list[state] || [], (info.choice && info.choice.county) || '', 'County…');
+  cSel.classList.toggle('county-unset', !(info.choice && info.choice.county));
+  wrap.classList.remove('hidden');
+}
+if (window.api.onParkCountyChanged) window.api.onParkCountyChanged(() => refreshActivatorCounty());
+(function bindActivatorCounty() {
+  const stSel = document.getElementById('activator-county-state');
+  const cSel = document.getElementById('activator-county');
+  if (stSel) stSel.addEventListener('change', async () => {
+    fillCountySelect(cSel, (await countyList())[stSel.value] || [], '', 'County…');
+  });
+  if (cSel) cSel.addEventListener('change', async () => {
+    const st = stSel.value || (stSel.options[1] && stSel.options[1].value) || '';
+    const r = await window.api.parkCountySet({ ref: _activatorCountyRef, state: st, county: cSel.value });
+    if (r && !r.ok) showLogToast(r.error || 'County not saved', { warn: true, duration: 5000 });
+    cSel.classList.toggle('county-unset', !cSel.value);
+  });
+})();
 
 /** Update hunter park input display and extra badge */
 function updateHunterParkDisplay() {

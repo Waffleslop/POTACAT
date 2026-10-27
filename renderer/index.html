@@ -520,6 +520,12 @@
         <div id="activator-park-dropdown" class="activator-dropdown hidden"></div>
       </div>
       <span id="activator-park-name" class="activator-park-name"></span>
+      <!-- This park's county, asked once and remembered per park (the
+           operator's own MY_CNTY on every contact from here). -->
+      <span id="activator-county-wrap" class="hidden" title="The county you are operating from in this park. Remembered for the park; sent to LoTW and your other loggers.">
+        <select id="activator-county-state" class="hidden" style="width:58px;"></select>
+        <select id="activator-county" style="max-width:150px;"><option value="">County…</option></select>
+      </span>
       <input type="text" id="activator-grid" class="activator-grid" placeholder="Grid" maxlength="6" spellcheck="false" autocomplete="off" title="Park grid square (editable)">
       <!-- The callsign used over the air for this activation (G8LIY/P, GM8LIY):
            logged as STATION_CALLSIGN on the activation's QSOs; OPERATOR stays
@@ -1603,6 +1609,15 @@
       <label>Owner callsign (optional): <input type="text" id="set-owner-callsign" maxlength="12" placeholder="same as My Callsign"></label>
       <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">ADIF OWNER_CALLSIGN — the station licensee, when that is not you. Left blank, nothing is written.</span>
       <label>QTH Grid Square: <input type="text" id="set-grid" maxlength="6"></label>
+      <!-- The operator's own state and county (ADIF MY_STATE / MY_CNTY;
+           lib/station-county.js). AE5JE 2026-10-27. -->
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <label>Home state: <select id="set-home-state" style="width:70px;"><option value="">—</option></select></label>
+        <label>Home county: <select id="set-home-county" style="width:190px;"><option value="">—</option></select></label>
+        <button type="button" id="home-county-qrz">Fill from QRZ</button>
+        <span class="help-text" id="home-county-status"></span>
+      </div>
+      <span class="help-text" style="display:block;margin-bottom:6px;">Written on contacts made from your home grid square and sent to LoTW and your other loggers. Contacts with another grid get no county rather than the wrong one. On an activation, POTACAT uses the county you choose for that park.</span>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-qrz"> QRZ.com Callsign Lookup</label>
       <div id="qrz-config" class="radio-sub hidden">
         <span class="help-text" style="font-size:12px;">Looks up operator first names from QRZ.com and shows them in the Operator column. Uses the QRZ XML API — a free QRZ account works.</span>
@@ -4680,6 +4695,7 @@
     <div class="ss-card-buttons">
       <button type="button" id="cloud-prompt-start" class="ss-btn ss-btn-primary">Start free trial</button>
       <button type="button" id="cloud-prompt-later" class="ss-btn">Not now</button>
+      <button type="button" id="cloud-prompt-never" class="ss-btn cp-never hidden">Don't suggest Cloud again</button>
     </div>
   </div>
   <dialog id="whats-new-dialog">

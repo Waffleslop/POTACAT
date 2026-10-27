@@ -151,7 +151,11 @@ assertEq(B.decideCheckoutPoll(NOW, NOW + B.CHECKOUT_POLL_MAX_MS, sub('trial', bi
 
 section('The Cloud prompt');
 const base = { loggedIn: false, localQsos: 120, snoozedUntil: 0, radioBusy: false, otherCardVisible: false, shownThisLaunch: false, guestPass: false, now: NOW };
-assertEq(B.decideCloudPrompt(base), { show: true, reason: 'ok', qsos: 120 }, 'the person it is for');
+assertEq(B.decideCloudPrompt(base), { show: true, reason: 'ok', qsos: 120, offerNever: false }, 'the person it is for');
+assertEq(B.decideCloudPrompt({ ...base, dismissals: 1 }).offerNever, true, 'after one "Not now", the card offers never');
+assertEq(B.decideCloudPrompt({ ...base, never: true }).reason, 'never', '"Don\'t suggest Cloud again" is for good');
+assertEq(B.decideCloudPrompt({ ...base, typing: true }), { show: false, reason: 'typing', retry: true }, 'never over typing; retries');
+assertEq(B.PROMPT_LAUNCH_DELAY_MS, 2 * 60 * 1000, 'never in the first two minutes');
 assertEq(B.decideCloudPrompt({ ...base, localQsos: 49 }).reason, 'few-qsos', '49 QSOs: not yet');
 assertEq(B.decideCloudPrompt({ ...base, localQsos: 50 }).show, true, '50 QSOs: yes');
 assertEq(B.decideCloudPrompt({ ...base, loggedIn: true }).reason, 'has-account', 'has an account: never');

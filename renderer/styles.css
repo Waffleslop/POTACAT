@@ -10370,6 +10370,12 @@ main.banner-logger-active #event-progress-overlay {
 .gp-list-error { color: var(--accent-red); }
 
 /* Owner banner — slightly more polished than the inline block */
+/* The activation bar's county picker (lib/station-county.js). Unset = dimmed
+   so a park with no county chosen yet reads as "still to do". */
+#activator-county-wrap { display: inline-flex; gap: 4px; align-items: center; margin-left: 6px; }
+#activator-county-wrap.hidden { display: none; }
+#activator-county.county-unset { opacity: 0.6; }
+
 #gp-owner-banner {
   background: linear-gradient(180deg, var(--accent-blue) 0%, color-mix(in srgb, var(--accent-blue) 80%, #000) 100%);
   border-bottom: 2px solid var(--accent-blue);

@@ -420,6 +420,7 @@ const { ModemAudioServer } = ModemAudioServerMod;
 const { buildAdifFields, buildAdifRecord, sqliteQsoToAdifFields, ADIF_HEADER, adifField } = require('./lib/adif-writer');
 const { PassQsoOutbox } = require('./lib/pass-qso-outbox');
 const QsoLog = require('./lib/qso-log');
+const StationCounty = require('./lib/station-county');
 const OriginHealth = require('./lib/origin-health');
 const { planImport, findDuplicateGroups } = require('./lib/qso-match');
 const { SmartSdrClient, setColorblindMode: setSmartSdrColorblind } = require('./lib/smartsdr');
@@ -12339,6 +12340,59 @@ function activationStationFillFor(rec, s = settings) {
   try { park = getParkDb(parksMap, rec.mySigInfo) || null; } catch {}
   return activationStationFill(rec, { myCallsign: s.myCallsign, park, latLonToGrid, parkStates: parkStatesFromLocation });
 }
+/**
+ * The station side of a record: the activation fill above, then the
+ * operator's own state and county (lib/station-county.js; AE5JE 2026-10-27):
+ * an activation takes the county chosen for that park, anything else the
+ * home state and county when made from the home grid. Blanks only.
+ */
+function stationLocationFillFor(rec, s = settings) {
+  if (!rec) return {};
+  const a = activationStationFillFor(rec, s);
+  const b = StationCounty.stationLocationFor({ ...rec, ...a }, {
+    home: { state: s.homeState, county: s.homeCounty, grid: s.grid },
+    parkCounty: (ref) => (s.parkCounties && typeof s.parkCounties === 'object' ? s.parkCounties[ref] : null) || null,
+  });
+  return { ...a, ...b };
+}
+
+// ── The county list LoTW accepts (assets/geo/us-counties.json, from TQSL) ──
+let _usCounties = null;
+function usCounties() {
+  if (_usCounties) return _usCounties;
+  try { _usCounties = JSON.parse(fs.readFileSync(path.join(__dirname, 'assets', 'geo', 'us-counties.json'), 'utf8')).states || {}; }
+  catch (err) { sendCatLog('[county] county list unavailable: ' + (err && err.message || err)); _usCounties = {}; }
+  return _usCounties;
+}
+/** A device's view of the park county: the choice, and the counties to pick from. */
+function activatorCountyState(ref) {
+  const r = String(ref || '').toUpperCase();
+  if (!r || !StationCounty.isUsParkRef(r)) return { county: null, countyChoices: null };
+  let park = null;
+  try { park = getParkDb(parksMap, r) || null; } catch {}
+  const list = usCounties();
+  const states = (park ? parkStatesFromLocation(park.locationDesc || '') : []).filter((st) => list[st]);
+  const counties = {};
+  for (const st of states) counties[st] = list[st].map((c) => c[0]);
+  return { county: (settings.parkCounties && settings.parkCounties[r]) || null, countyChoices: { states, counties } };
+}
+/** The operator's county choice for one park, remembered per park. */
+function setParkCounty(ref, state, county, origin) {
+  const r = String(ref || '').trim().toUpperCase();
+  if (!StationCounty.isUsParkRef(r)) return { ok: false, error: 'Counties are for US parks only' };
+  const st = String(state || '').trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(st)) return { ok: false, error: 'Pick the state first' };
+  const c = county ? StationCounty.knownCounty(usCounties(), st, county) : '';
+  if (county && !c) return { ok: false, error: `${county} is not a ${st} county LoTW knows` };
+  if (!settings.parkCounties || typeof settings.parkCounties !== 'object') settings.parkCounties = {};
+  if (c) settings.parkCounties[r] = { state: st, county: c };
+  else delete settings.parkCounties[r];
+  saveSettings(settings);
+  sendCatLog(c ? `[county] ${r}: ${c}, ${st} on every contact from this park (${origin})` : `[county] ${r}: county cleared (${origin})`);
+  try { pushActivatorStateToPhone(); } catch {}
+  if (origin !== 'activation bar' && win && !win.isDestroyed()) win.webContents.send('park-county-changed', { ref: r });
+  return { ok: true, ref: r, state: st, county: c };
+}
 function fillActivationExport(qsos) {
   return (qsos || []).map(q => ({ ...q, ...activationStationFillFor(q) }));
 }
@@ -12684,7 +12738,7 @@ async function saveQsoRecord(qsoData, opts) {
   }
   // Activation record: MY_GRIDSQUARE / MY_STATE from the park when the
   // logging path did not supply them (lib/activation-station.js).
-  Object.assign(qsoData, activationStationFillFor(qsoData, ops));
+  Object.assign(qsoData, stationLocationFillFor(qsoData, ops));
 
   // Auto-fill TX power from the live CAT reading (matches the TX Power slider)
   // when the caller didn't supply one — typical for the Logbook pop-out's
@@ -19338,6 +19392,7 @@ function pushActivatorStateToPhone() {
     parkRefs,
     grid: settings.grid || '',
     onAirCallsign: settings.activatorOnAirCallsign || '', // '' = the Station callsign
+    ...activatorCountyState(parkRefs[0] && parkRefs[0].ref),
   });
   remoteServer.sendSessionContacts();
 }
@@ -22806,7 +22861,7 @@ function connectRemote() {
     sendCatLog(`[events] set-event-progress ${eventId}: ${itemId}=${!!worked}`);
   });
 
-  remoteServer.on('set-activator-park', async ({ parkRef, parkRefs, activationType, activationName: actName, sig, onAirCallsign, end }) => {
+  remoteServer.on('set-activator-park', async ({ parkRef, parkRefs, activationType, activationName: actName, sig, onAirCallsign, end, county }) => {
     console.log('[Echo CAT] Set activator park:', parkRef || actName, 'type:', activationType, end ? '(ended)' : '');
     settings.appMode = end ? 'hunter' : 'activator';
     // The device's On-air call field: absent leaves the remembered value,
@@ -22832,6 +22887,11 @@ function connectRemote() {
     } else {
       settings.activatorParkRefs = [];
     }
+    // The county the device chose for this park (remembered per park).
+    if (refs.length && county && county.state) {
+      const r = setParkCounty(refs[0], county.state, county.county, 'ECHOCAT device');
+      if (!r.ok) sendCatLog(`[county] from the device: ${r.error}`);
+    }
     saveSettings(settings);
 
     // Push updated state to phone
@@ -22842,6 +22902,11 @@ function connectRemote() {
     }
     // Reset session contacts for new activation
     remoteServer.resetSessionContacts();
+  });
+
+  remoteServer.on('set-park-county', ({ ref, state, county }) => {
+    const r = setParkCounty(ref, state, county, 'ECHOCAT device');
+    if (!r.ok) sendCatLog(`[county] from the device: ${r.error}`);
   });
 
   remoteServer.on('search-parks', ({ query }) => {
@@ -33073,16 +33138,27 @@ app.whenReady().then(() => {
     loggedIn: !!settings.cloudAccessToken,
     localQsos: localQsoCount(),
     snoozedUntil: settings.cloudPromptSnoozedUntil || 0,
+    never: settings.cloudPromptNever === true,
+    dismissals: Number(settings.cloudPromptDismissals) || 0,
+    // Busy = transmitting, or an FT8/FT4/FT2 engine running (decoding).
     radioBusy: !!((typeof radioOwner === 'string' && radioOwner !== 'none')
       || (remoteServer && remoteServer._pttActive)
-      || (cat && cat._transmitting)),
+      || (cat && cat._transmitting)
+      || (ft8Engine && ft8Engine._running)),
     guestPass: false,
   }));
   ipcMain.handle('cloud-prompt-snooze', () => {
     settings.cloudPromptSnoozedUntil = Date.now() + CloudBillingUi.PROMPT_SNOOZE_MS;
+    settings.cloudPromptDismissals = (Number(settings.cloudPromptDismissals) || 0) + 1;
     saveSettings(settings);
-    sendCatLog('[Cloud] Cloud prompt: "Not now" — asking again in 30 days');
+    sendCatLog(`[Cloud] Cloud prompt: "Not now" (${settings.cloudPromptDismissals}) — asking again in 30 days`);
     return { ok: true, until: settings.cloudPromptSnoozedUntil };
+  });
+  ipcMain.handle('cloud-prompt-never', () => {
+    settings.cloudPromptNever = true;
+    saveSettings(settings);
+    sendCatLog('[Cloud] Cloud prompt: "Don\'t suggest Cloud again" — never shown again');
+    return { ok: true };
   });
 
   ipcMain.handle('cloud-tunnel-enable', async () => {
@@ -35751,6 +35827,29 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('winlink-account-check', (_e, call) => winlinkAccountCheck(call));
   ipcMain.handle('winlink-register', (_e, o = {}) => winlinkRegister(o, (o && o.origin) || 'Settings'));
+  // The operator's own county (lib/station-county.js; AE5JE 2026-10-27).
+  ipcMain.handle('county-list', () => usCounties());
+  ipcMain.handle('park-county-get', (_e, ref) => {
+    const r = String(ref || '').trim().toUpperCase();
+    if (!StationCounty.isUsParkRef(r)) return { ref: r, us: false };
+    let park = null;
+    try { park = getParkDb(parksMap, r) || null; } catch {}
+    const states = park ? parkStatesFromLocation(park.locationDesc || '') : [];
+    const choice = (settings.parkCounties && settings.parkCounties[r]) || null;
+    return { ref: r, us: true, states, choice };
+  });
+  ipcMain.handle('park-county-set', (_e, o = {}) => setParkCounty(o.ref, o.state, o.county, 'activation bar'));
+  ipcMain.handle('home-county-from-qrz', async () => {
+    const call = String(settings.myCallsign || '').trim().toUpperCase();
+    if (!call) return { ok: false, error: 'Set your callsign first' };
+    if (!qrz || !qrz.configured) return { ok: false, error: 'Turn on QRZ.com lookup first (just below)' };
+    let r = null;
+    try { r = await qrz.lookup(JtcatParser.baseCall(call)); } catch (err) { return { ok: false, error: 'QRZ lookup failed: ' + (err && err.message || err) }; }
+    const state = String((r && r.state) || '').trim().toUpperCase();
+    if (!/^[A-Z]{2}$/.test(state) || !usCounties()[state]) return { ok: false, error: `QRZ lists no US state for ${call}` };
+    const county = StationCounty.knownCounty(usCounties(), state, String((r && r.county) || '').replace(/\s+(County|Parish|Borough|Census Area|Municipality)$/i, ''));
+    return { ok: true, state, county, qrzCounty: (r && r.county) || '' };
+  });
   ipcMain.handle('winlink-recovery-email-get', () => winlinkRecoveryEmailGet());
   ipcMain.handle('winlink-recovery-email-set', (_e, email) => winlinkRecoveryEmailSet(email));
   ipcMain.handle('winlink-cmd-set-password', (_e, pw) => winlinkSetPassword(pw, 'mail window'));
@@ -37618,12 +37717,12 @@ app.whenReady().then(() => {
     const { home, activations } = splitForLotw(allQsos, {
       myCallsign: settings.myCallsign,
       fill: (q) => {
-        const f = activationStationFillFor({
+        const f = stationLocationFillFor({
           mySigInfo: q.MY_POTA_REF || q.MY_SIG_INFO || q.MY_SOTA_REF || q.MY_WWFF_REF,
           operator: q.OPERATOR, stationCallsign: q.STATION_CALLSIGN,
-          myGridsquare: q.MY_GRIDSQUARE, myState: q.MY_STATE,
+          myGridsquare: q.MY_GRIDSQUARE, myState: q.MY_STATE, myCounty: q.MY_CNTY,
         });
-        return { MY_GRIDSQUARE: f.myGridsquare, MY_STATE: f.myState };
+        return { MY_GRIDSQUARE: f.myGridsquare, MY_STATE: f.myState, MY_CNTY: f.myCounty };
       },
     });
     const runs = [];
