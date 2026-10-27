@@ -176,6 +176,7 @@ contextBridge.exposeInMainWorld('api', {
   onJtcatChaseTarget: (cb) => ipcRenderer.on('jtcat-chase-target', (_e, data) => cb(data)),
   // ULTRACAT (tier-2 easter egg) — Full Auto CQ run mode
   onJtcatUltracat: (cb) => ipcRenderer.on('jtcat-ultracat', (_e, on) => cb(on)),
+  onJtcatOnAirCall: (cb) => ipcRenderer.on('jtcat-on-air-call', (_e, call) => cb(call)),
   jtcatSetFullAutoCq: (on) => ipcRenderer.send('jtcat-popout-full-auto-cq', on),
   onJtcatFullAutoCqState: (cb) => ipcRenderer.on('jtcat-full-auto-cq-state', (_e, data) => cb(data)),
   // Map popout

@@ -28,6 +28,7 @@
       <strong><span id="gp-owner-callsign">&hellip;</span></strong>
       <span> is controlling this rig. Their access expires </span>
       <strong><span id="gp-owner-expires">&hellip;</span></strong><span>.</span>
+      <span id="gp-owner-onair" class="hidden"> TX as <strong><span id="gp-owner-onair-call"></span></strong> (Guest Pass).</span>
       <span class="gp-revoke-link">Revoke access</span>
     </div>
   </div>
@@ -2315,11 +2316,6 @@
           <span class="help-text" style="display:inline;margin-left:4px;">(0 = no limit)</span>
         </div>
       </div>
-      <label class="checkbox-label"><input type="checkbox" id="set-enable-rbn"> Reverse Beacon Network</label>
-      <div id="rbn-config" class="radio-sub hidden">
-        <span class="help-text" style="font-size:12px;">Shows where your CQ calls are being heard by RBN skimmers worldwide. Appears in the Propagation view.</span>
-        <span class="help-text" style="display:block;margin-top:4px;">RBN spots only appear while POTACAT is open — historical spots are not retrieved.</span>
-      </div>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-wsjtx"> WSJT-X Integration</label>
       <div id="wsjtx-config" class="radio-sub hidden">
         <span class="help-text" style="font-size:12px;">Connect to WSJT-X via UDP. POTA activators are highlighted in the decode window and decodes appear in POTACAT.</span>
@@ -2334,11 +2330,6 @@
       <label class="checkbox-label"><input type="checkbox" id="set-enable-pskr"> FreeDV (PSKReporter)</label>
       <div id="pskr-config" class="radio-sub hidden">
         <span class="help-text" style="margin-left:12px;display:block;">Live FreeDV reception reports from PSKReporter. Shows who is hearing FreeDV signals worldwide.</span>
-      </div>
-      <label class="checkbox-label"><input type="checkbox" id="set-enable-pskr-map"> PSKReporter Propagation</label>
-      <div id="pskr-map-config" class="radio-sub hidden">
-        <span class="help-text" style="margin-left:12px;display:block;">Shows where your FT8/FT4/CW transmissions are being received worldwide. Appears in the Propagation view alongside RBN.</span>
-        <span class="help-text" style="display:block;margin-top:4px;">Polls every 5 minutes (PSKReporter rate limit). Spots appear after the first poll completes. Requires your callsign above.</span>
       </div>
       <label class="checkbox-label"><input type="checkbox" id="set-pskr-upload"> Report my JTCAT decodes to PSKReporter</label>
       <div id="pskr-upload-config" class="radio-sub hidden">
@@ -2669,10 +2660,9 @@
     <!-- 7. Logging -->
     <fieldset class="source-toggles" data-settings-tab="logging">
       <legend>Logging</legend>
-      <label class="checkbox-label"><input type="checkbox" id="set-enable-logging"> Enable QSO Logging</label>
-      <label class="checkbox-label" style="margin-left:12px;"><input type="checkbox" id="set-enable-banner-logger"> Bottom Banner Logger</label>
-      <span class="help-text" style="margin-left:24px;display:block;">Persistent logging bar below the spot table for rapid QSO entry</span>
-      <div id="logging-config" class="radio-sub hidden">
+      <label class="checkbox-label"><input type="checkbox" id="set-enable-banner-logger"> Bottom Banner Logger</label>
+      <span class="help-text" style="margin-left:12px;display:block;">Persistent logging bar below the spot table for rapid QSO entry</span>
+      <div id="logging-config" class="radio-sub">
         <label>ADIF Log File:
           <div style="display:flex;gap:6px;margin-top:4px;">
             <input type="text" id="set-adif-log-path" readonly style="flex:1;">
@@ -3001,12 +2991,8 @@
       <label class="checkbox-label"><input type="checkbox" id="set-colorblind"> Colorblind mode (deuteranopia)</label>
       <label class="checkbox-label"><input type="checkbox" id="set-wcag-mode"> High contrast (WCAG AA)</label>
       <label class="checkbox-label"><input type="checkbox" id="set-color-rows" checked> Color table rows by spot source</label>
-      <label class="checkbox-label"><input type="checkbox" id="set-enable-solar"> Solar Propagation</label>
-      <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Shows SFI, K, and A indices in the status bar</span>
       <label class="checkbox-label"><input type="checkbox" id="set-show-meter" checked> Show S-Meter / SWR overlay</label>
       <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Floating meter box on the table view showing signal strength and SWR. Draggable.</span>
-      <label class="checkbox-label"><input type="checkbox" id="set-enable-band-activity"> Band Activity Heatmap</label>
-      <span class="help-text" style="margin-left:12px;display:block;">Displayed on the Map view only</span>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-split-view" checked> Enable split view</label>
       <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Show Table and Map side by side. When off, only one view is shown at a time.</span>
       <div id="split-orientation-config">

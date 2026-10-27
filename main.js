@@ -369,6 +369,7 @@ const { encodeWspr } = require('./lib/wspr/encode');
 const { loadCtyDat, resolveCallsign, resolveZones, getAllEntities } = require('./lib/cty');
 const CallZones = require('./lib/call-zones'); // CQ/ITU zones for spots + logbook rows (LZ3AW item 30)
 const DxRule = require('./lib/dx-rule'); // what counts as DX: another entity, or the operator's distance (G4BFG)
+const InstallDefaults = require('./lib/install-defaults'); // always-on features + the one-time defaults (Casey 2026-10-27)
 const ClusterNodeChoice = require('./lib/cluster-node-choice'); // turn saved cluster nodes on/off from the Source menu (LZ3AW item 1)
 const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseAdifStream, parseSqliteFile, parseSqliteConfirmed, isSqliteFile, parseRecord: parseAdifRecord, normalizeMode: normalizeLogMode } = require('./lib/adif');
 const { qsoDayInScheduleEntry, matchChecklistItem, matchRegionPatterns, activeScheduleEntry, coveringScheduleEntries, matchingRegionEntry, matchEventQsoForStamp, retroStampMatches, retroCorrectStamps } = require('./lib/event-progress');
@@ -916,7 +917,11 @@ function settingsSaveStatusLine() {
   });
 }
 
+// Every load: features with no switch are on, whatever an old file says.
 function loadSettings() {
+  return InstallDefaults.applyAlwaysOn(loadSettingsFromDisk());
+}
+function loadSettingsFromDisk() {
   _noteSettingsMtime(SETTINGS_PATH); // before any write: how old the file was at launch
   const global = _readJsonSafe(SETTINGS_PATH, null);
   if (!global) {
@@ -7906,9 +7911,20 @@ function connectCluster() {
       }
     });
 
-    client.on('status', () => {
+    client.on('status', (st) => {
       sendClusterStatus();
       sendClusterNodesToPopout();
+      // A node POTACAT picked for the operator died: try another from the
+      // list (never a node they chose — lib/install-defaults.js).
+      if (st && st.gaveUp && node.auto) {
+        const r = InstallDefaults.replaceDeadAutoNode(settings.clusterNodes, node.id, CLUSTER_PRESETS);
+        if (r) {
+          settings.clusterNodes = r.nodes;
+          saveSettings(settings);
+          sendCatLog(`[cluster] ${r.from} is not answering; trying ${r.to} instead (picked for you — choose your own in Settings > Spot Sources)`);
+          setImmediate(() => { disconnectCluster(); connectCluster(); });
+        }
+      }
     });
 
     client.connect({
@@ -12514,6 +12530,9 @@ async function saveQsoRecord(qsoData, opts) {
       return { success: false, error: 'client_capability_missing' };
     }
     try {
+      // The call it went out under (a Guest Pass's station call, else ours):
+      // the guest's book keeps STATION_CALLSIGN verbatim.
+      if (!qsoData.stationCallsign) qsoData.stationCallsign = onAirCall();
       // The device that ran this QSO, only: with several devices connected,
       // sending it to all of them logged the contact once per device.
       remoteServer.sendToActor({ type: 'qso-attributed', qso: qsoData });
@@ -13581,7 +13600,7 @@ function jtcatModeHopTick(results, mode) {
       : 'spot target ' + jtcatSpotTarget.call + ' is armed on this mode — it stays until worked, expired or cleared');
     return;
   }
-  const myCall = (settings.myCallsign || '').toUpperCase();
+  const myCall = onAirCall();
   if (!myCall) { jtcatModeHopNote('no callsign in Settings'); return; }
   const nowBand = freqToBand((_currentFreqHz || 0) / 1e6) || '';
   if (nowBand !== _jtcatModeHopBand) {
@@ -13921,7 +13940,7 @@ function jtcatWorkableCallers(results, myCall, opts) {
 
 /** The workable-caller count Run's pause/resume decisions run on. */
 function jtcatRunWorkableCount(results) {
-  const myCall = (settings.myCallsign || '').toUpperCase();
+  const myCall = onAirCall();
   if (!myCall) return 0;
   const { band, mode } = jtcatCurrentBandMode(ft8Engine);
   return jtcatWorkableCallers(results, myCall, {
@@ -14186,7 +14205,7 @@ function jtcatBroadcastTxSlotLock() {
 // if callsign/grid/engine aren't ready. Shared by re-arm; mirrors the manual
 // CQ button's message build.
 async function jtcatBuildCqQso(modifier) {
-  const myCall = (settings.myCallsign || '').toUpperCase();
+  const myCall = onAirCall();
   const myGrid = (settings.grid || '').toUpperCase().substring(0, 4);
   if (!myCall || !myGrid || !ft8Engine) return null;
   const fd = jtcatFdContext();
@@ -14339,7 +14358,7 @@ async function jtcatResumeRunCq(count) {
 // progress resets the quiet counter and returns.
 function jtcatHuntCqFallbackTick(results, mode) {
   if (!settings.jtcatHuntCqFallback || !settings.ultracat || !ft8Engine) return;
-  const myCall = (settings.myCallsign || '').toUpperCase();
+  const myCall = onAirCall();
   if (!myCall) return;
   const busy = (popoutJtcatQso && popoutJtcatQso.phase !== 'done')
             || (remoteJtcatQso && remoteJtcatQso.phase !== 'done');
@@ -15066,7 +15085,7 @@ function applyWsprBeaconControl(opts) {
   if (opts.enabled != null) setWsprBeacon(!!opts.enabled);
 }
 
-function remoteJtcatMyCall() { return (settings.myCallsign || '').toUpperCase(); }
+function remoteJtcatMyCall() { return onAirCall(); }
 function remoteJtcatMyGrid() { return (settings.grid || '').toUpperCase().substring(0, 4); }
 
 function remoteJtcatBroadcastQso() {
@@ -15721,7 +15740,7 @@ function startJtcat(mode) {
     // JS8 needs its station identity at construction — the engine's frame
     // builder refuses to queue TX without a callsign.
     submode: settings.js8Submode || 'NORMAL',
-    myCall: (settings.myCallsign || '').toUpperCase(),
+    myCall: onAirCall(),
     myGrid: (settings.grid || '').toUpperCase(),
     // JTTY exchange profile (unknown / field-day / rtty-roundup) shapes how
     // the grammar packs a typed exchange; the engine is built with it.
@@ -15789,7 +15808,7 @@ function startJtcat(mode) {
     // its TX message. Recovers marginal/late replies addressed to us.
     if (typeof ft8Engine.setApContext === 'function' && ft8Engine._mode !== 'PSK31') {
       const apOn = settings.jtcatApDecode !== false;
-      const apCall = (settings.myCallsign || '').toUpperCase();
+      const apCall = onAirCall();
       ft8Engine.setApContext({ enabled: apOn, myCall: apCall });
       sendCatLog(apOn && apCall
         ? `[JTCAT] AP decode armed for ${apCall} (recovers weak/late replies addressed to you)`
@@ -16006,7 +16025,7 @@ function startJtcat(mode) {
 
     // Stamp the authoritative callsign so renderers classify against the
     // current call, never a stale cached copy. K3SBP 2026-06-10.
-    data.myCall = (settings.myCallsign || '').toUpperCase();
+    data.myCall = onAirCall();
     // Contribute these FT8/FT4 decodes to PSKReporter (batched, gated). r.call
     // is the transmitter (CQ caller / "FROM" station), exactly what PSKReporter
     // wants — see extractCallsigns.
@@ -16170,7 +16189,7 @@ function startJtcat(mode) {
         } else if (tgt.status === 'armed' && !popoutJtcatQso && !remoteJtcatQso && !jtcatFullAutoCq) {
           // Idle — look for a polite opening: their CQ or QSO-end (tail-end).
           const hits = tgtResults
-            .map((d) => ({ d, trig: JtcatParser.classifySpotTargetTrigger(d.text, tgt.call, settings.myCallsign) }))
+            .map((d) => ({ d, trig: JtcatParser.classifySpotTargetTrigger(d.text, tgt.call, onAirCall()) }))
             .filter((h) => h.trig);
           if (hits.length) {
             hits.sort((a, b) => ((b.d.db == null ? -999 : b.d.db) - (a.d.db == null ? -999 : a.d.db)));
@@ -16195,7 +16214,7 @@ function startJtcat(mode) {
     // --- Auto-CQ Response ---
     // Only trigger when no active QSO is running and auto mode is enabled
     if (jtcatAutoCqMode !== 'off' && !popoutJtcatQso && !remoteJtcatQso) {
-      const myCall = (settings.myCallsign || '').toUpperCase();
+      const myCall = onAirCall();
       const myGrid = (settings.grid || '').toUpperCase().substring(0, 4);
       if (myCall && myGrid && ft8Engine && !jtcatSwrLatchBlocksHunt()) {
         const results = data.results || [];
@@ -19152,6 +19171,15 @@ function agSwitchForFreq(freqKhz) {
 
 // --- ECHOCAT ---
 // On-air callsign as the activator bar stores it: A-Z 0-9 /, at most 12.
+// The call this station transmits: during a Guest Pass session the pass's
+// station call when its issuer set one, else the Station callsign (Casey
+// 2026-10-27; lib/pass-enforcement.js onAirCallFor). Every JTCAT/JTTY
+// message, "addressed to me" match, AP decode context, CW {MYCALL} and the
+// SSTV call/CW ID read this, never settings.myCallsign directly.
+function onAirCall() {
+  const host = settings.myCallsign || '';
+  return passEnforcement ? passEnforcement.onAirCallsign(host) : String(host).toUpperCase();
+}
 function cleanOnAirCallsign(v) {
   return String(v || '').toUpperCase().replace(/[^A-Z0-9/]/g, '').slice(0, 12);
 }
@@ -20254,8 +20282,8 @@ function _sendCwTextToRadioImpl(text, opts) {
   // guard below must not eat them; the streamable backends (Flex cwx,
   // WinKeyer buffer, CAT KY) all append rather than restart.
   const live = !!(opts && opts.live);
-  const expanded = text.replace(/\{MYCALL\}/gi, settings.myCallsign || '')
-    .replace(/\{mycallsign\}/gi, settings.myCallsign || '');
+  const expanded = text.replace(/\{MYCALL\}/gi, onAirCall())
+    .replace(/\{mycallsign\}/gi, onAirCall());
   // Note: {call}, {op_firstname}, {state} are expanded client-side before reaching here
   console.log(`[CW] Text: ${expanded}`);
 
@@ -32406,6 +32434,15 @@ app.whenReady().then(() => {
       console.error('[multi-op] activeProfile self-heal failed:', err.message);
     }
   }
+  // One-time defaults (lib/install-defaults.js): SOTA/WWFF/LLOTA spots on,
+  // and a DX cluster node picked at random for a station that never set one.
+  {
+    const changed = InstallDefaults.applyDefaultsOnce(settings, CLUSTER_PRESETS);
+    if (changed.length) {
+      saveSettings(settings);
+      sendCatLog(`[Settings] Turned on by default: ${changed.join(', ')} (untick any of them in Settings)`);
+    }
+  }
   migrateLegacyCloudTunnelConfig(settings);
   logStartupStage('settings loaded');
   // Re-assert the login item when enabled so the registered exe path
@@ -32829,9 +32866,24 @@ app.whenReady().then(() => {
       // later if needed.
       rigPowerReadable: () => true,
     });
+    let passOnAirLast = onAirCall();
     passEnforcement.on('state-change', (state) => {
       if (win && !win.isDestroyed()) {
         win.webContents.send('pass-enforcement-state', passEnforcement.getSessionStatus());
+      }
+      // The on-air call follows the pass: say so once per change and re-arm
+      // the AP decoder, which hypothesises our call in the bits it fixes.
+      const nowCall = onAirCall();
+      if (nowCall !== passOnAirLast) {
+        const host = String(settings.myCallsign || '').toUpperCase();
+        sendCatLog(nowCall !== host
+          ? `[pass] On air as ${nowCall} for this session (Guest Pass station call)`
+          : `[pass] On air as ${host} again`);
+        passOnAirLast = nowCall;
+        if (ft8Engine && typeof ft8Engine.setApContext === 'function' && ft8Engine._mode !== 'PSK31') {
+          ft8Engine.setApContext({ myCall: nowCall });
+        }
+        try { if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-on-air-call', nowCall); } catch {}
       }
     });
     passEnforcement.on('expiring', (info) => {
@@ -34668,6 +34720,8 @@ app.whenReady().then(() => {
       // Send current theme
       const themePayload = { theme: settings.lightMode ? 'light' : 'dark', variant: settings.darkVariant || 'navy' };
       jtcatPopoutWin.webContents.send('jtcat-popout-theme', themePayload);
+      // The on-air call (a Guest Pass may have moved it off the Station call).
+      jtcatPopoutWin.webContents.send('jtcat-on-air-call', onAirCall());
       // Band scope availability (FT-710): the strip's toggle appears from this.
       jtcatPopoutWin.webContents.send('scope-state', yaesuScopeStatePayload());
       // Fresh popout: show the armed Spot Target banner immediately (the
@@ -34716,7 +34770,7 @@ app.whenReady().then(() => {
     if (mode !== 'FT8' && mode !== 'FT4' && mode !== 'FT2') return;
     const norm = JtcatParser.normalizeCall(String(t.call));
     if (!JtcatParser.looksLikeCallsign(norm)) return;
-    const myCall = (settings.myCallsign || '').toUpperCase();
+    const myCall = onAirCall();
     if (myCall && norm === JtcatParser.normalizeCall(myCall)) return; // can't target yourself
     const freqKhz = Number(t.freqKhz) || 0;
     jtcatSpotTarget = {
@@ -35478,9 +35532,9 @@ app.whenReady().then(() => {
       // sstvCwId in save-settings; default false.
       let outSamples = data.samples;
       let outDurSec = data.durationSec;
-      if (settings.sstvCwId && settings.myCallsign) {
+      if (settings.sstvCwId && onAirCall()) {
         try {
-          const morse = generateMorseSamples(settings.myCallsign, {
+          const morse = generateMorseSamples(onAirCall(), {
             wpm: 20,
             freqHz: 800,
             sampleRate: SSTV_SAMPLE_RATE,
@@ -35495,7 +35549,7 @@ app.whenReady().then(() => {
             merged.set(morse, outSamples.length + tail.length);
             outSamples = merged;
             outDurSec = merged.length / SSTV_SAMPLE_RATE;
-            sendCatLog(`[SSTV] CW ID appended: ${settings.myCallsign.toUpperCase()} (${(morse.length / SSTV_SAMPLE_RATE).toFixed(1)}s)`);
+            sendCatLog(`[SSTV] CW ID appended: ${onAirCall()} (${(morse.length / SSTV_SAMPLE_RATE).toFixed(1)}s)`);
           }
         } catch (err) {
           sendCatLog(`[SSTV] CW ID failed: ${err.message} — sending image without ID`);
@@ -36040,7 +36094,7 @@ app.whenReady().then(() => {
     try { const m = getActiveRigModel(); rigLabel = (rig && rig.name) || (m && m.name) || ''; } catch {}
     const watts = Number(_currentTxPower) || 0;
     return {
-      myCall: settings.myCallsign || '',
+      myCall: onAirCall(),
       grid: settings.grid || '',
       // The renderer's primaryParkRef()/primaryParkName() do not exist in main:
       // calling them threw on every request, so no template ever got
@@ -36641,7 +36695,7 @@ app.whenReady().then(() => {
     const replyEngine = (jtcatManager && data.sliceId) ? jtcatManager.getEngine(data.sliceId) : ft8Engine;
     if (!replyEngine) return;
     if (jtcatManager && data.sliceId) { jtcatManager.setTxSlice(data.sliceId); jtcatManager.requestTx(data.sliceId); }
-    const myCall = (settings.myCallsign || '').toUpperCase();
+    const myCall = onAirCall();
     const myGrid = (settings.grid || '').toUpperCase().substring(0, 4);
     if (!myCall) return;
     // TX slot: opposite theirs, or the operator's lock. A station in our own
@@ -36868,7 +36922,7 @@ app.whenReady().then(() => {
       sendCatLog('[JTCAT] CQ aborted — engine not running. Open JTCAT first.');
       return;
     }
-    const myCall = (settings.myCallsign || '').toUpperCase();
+    const myCall = onAirCall();
     const myGrid = (settings.grid || '').toUpperCase().substring(0, 4);
     if (!myCall || !myGrid) {
       console.log('[JTCAT Popout] CQ aborted — callsign:', myCall || '(empty)', 'grid:', myGrid || '(empty)');
@@ -40433,6 +40487,8 @@ app.whenReady().then(() => {
     for (const f of normalizeSettingsSerialPaths(newSettings)) sendCatLog(`[CAT] ${f.key} "${f.from}" saved as ${f.to}`);
     stampSstvTemplatesPatch(newSettings);
     setImmediate(() => afterSstvSettingsSaved(newSettings));
+    // An always-on feature has no off: a stale window's false never lands.
+    for (const k of InstallDefaults.ALWAYS_ON) if (k in newSettings) newSettings[k] = true;
     const _rigsBeforeSave = JSON.stringify(settings.rigs || []);
     const _activeRigBeforeSave = settings.activeRigId;
     // A remote shack's JTCAT window: its per-profile prefs reach the shack too.
@@ -42297,7 +42353,7 @@ app.whenReady().then(() => {
     settings.jtcatApDecode = !!enabled;
     saveSettings(settings);
     if (ft8Engine && typeof ft8Engine.setApContext === 'function') {
-      ft8Engine.setApContext({ enabled: settings.jtcatApDecode, myCall: settings.myCallsign || '' });
+      ft8Engine.setApContext({ enabled: settings.jtcatApDecode, myCall: onAirCall() });
     }
   });
   ipcMain.on('jtcat-enable-tx', (_e, enabled) => { if (ft8Engine) ft8Engine._txEnabled = enabled; });

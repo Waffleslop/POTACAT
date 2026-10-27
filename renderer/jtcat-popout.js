@@ -81,10 +81,19 @@ function _applyPopoutTheme(payload) {
     for (var i = 0; i < els.length; i++) els[i].classList.toggle('hidden', !on);
   }
   window.api.onJtcatUltracat(applyUltracat);
+  // A Guest Pass moved the on-air call (or gave it back): replies, macros
+  // and "to me" use it from the next message.
+  var onAirCallPushed = '';
+  if (window.api.onJtcatOnAirCall) window.api.onJtcatOnAirCall(function(call) {
+    if (!call) return;
+    onAirCallPushed = String(call).toUpperCase();
+    myCallsign = onAirCallPushed;
+    jttyMyCall = myCallsign;
+  });
 
   // Load settings
   window.api.getSettings().then(function(s) {
-    myCallsign = (s.myCallsign || '').toUpperCase();
+    myCallsign = onAirCallPushed || (s.myCallsign || '').toUpperCase();
     myGrid = (s.grid || '').toUpperCase().substring(0, 4);
     applyUltracat(!!s.ultracat);
     chaseTarget = s.jtcatChaseTarget || '';
@@ -1183,7 +1192,8 @@ function _applyPopoutTheme(payload) {
     // Keep our cached callsign current from the authoritative copy main stamps
     // on every batch, so classification never runs against a stale/empty call
     // (the original "reply to my CQ → grid instead of report" trigger).
-    if (data && data.myCall) myCallsign = data.myCall.toUpperCase();
+    // During a Guest Pass this is the pass's station call (main onAirCall).
+    if (data && data.myCall) { myCallsign = data.myCall.toUpperCase(); jttyMyCall = myCallsign; }
     renderDecodes(data);
     // NOTE: do NOT set "Sync: OK" here. Decodes arriving says nothing about
     // the PC clock — the real sync status comes from the NTP monitor via
@@ -4420,7 +4430,7 @@ function _applyPopoutTheme(payload) {
   function jttyInit(s) {
     if (!jttyPane) return;
     s = s || {};
-    jttyMyCall = String(s.myCallsign || '').toUpperCase().trim();
+    jttyMyCall = onAirCallPushed || String(s.myCallsign || '').toUpperCase().trim();
     jttyMyGrid = String(s.grid || '').toUpperCase().trim();
     jttySaved = { jttyMacros: s.jttyMacros, jttyTemplates: s.jttyTemplates, jttyFt8Macros: s.jttyFt8Macros };
     jttyStyle = JttyMacros.forSettings(s).style;

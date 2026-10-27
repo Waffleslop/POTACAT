@@ -1038,7 +1038,6 @@ const dxccAwardLabelEl = document.getElementById('dxcc-award-label');
 const dxccChallengeEl = document.getElementById('dxcc-challenge');
 const setEnableCluster = document.getElementById('set-enable-cluster');
 const setEnableCwSpots = document.getElementById('set-enable-cwspots');
-const setEnableRbn = document.getElementById('set-enable-rbn');
 const setEnableWsjtx = document.getElementById('set-enable-wsjtx');
 const wsjtxConfig = document.getElementById('wsjtx-config');
 const setWsjtxPort = document.getElementById('set-wsjtx-port');
@@ -1047,8 +1046,6 @@ const setWsjtxAutoLog = document.getElementById('set-wsjtx-auto-log');
 const wsjtxStatusEl = document.getElementById('wsjtx-status');
 const setEnablePskr = document.getElementById('set-enable-pskr');
 const pskrConfig = document.getElementById('pskr-config');
-const setEnablePskrMap = document.getElementById('set-enable-pskr-map');
-const pskrMapConfig = document.getElementById('pskr-map-config');
 const connPskrMap = document.getElementById('conn-pskr-map');
 const setPskrUpload = document.getElementById('set-pskr-upload');
 const pskrUploadConfig = document.getElementById('pskr-upload-config');
@@ -1080,7 +1077,6 @@ const netSaveBtn = document.getElementById('net-save-btn');
 const netCancelBtn = document.getElementById('net-cancel-btn');
 const setShowBeacons = document.getElementById('set-show-beacons');
 const setShowDxBar = document.getElementById('set-show-dx-bar');
-const rbnConfig = document.getElementById('rbn-config');
 // Settings connection pills
 const connBar = document.getElementById('settings-conn-status');
 const connCluster = document.getElementById('conn-cluster');
@@ -1275,13 +1271,9 @@ const aStatusEl = document.getElementById('a-status');
 const setColorblind = document.getElementById('set-colorblind');
 const setWcagMode = document.getElementById('set-wcag-mode');
 const setColorRows = document.getElementById('set-color-rows');
-const setEnableSolar = document.getElementById('set-enable-solar');
-const setEnableBandActivity = document.getElementById('set-enable-band-activity');
 const setShowBearing = document.getElementById('set-show-bearing');
-const setEnableLogging = document.getElementById('set-enable-logging');
 const setEnableBannerLogger = document.getElementById('set-enable-banner-logger');
 const setN1mmRst = document.getElementById('set-n1mm-rst');
-const loggingConfig = document.getElementById('logging-config');
 const setAdifLogPath = document.getElementById('set-adif-log-path');
 const adifLogBrowseBtn = document.getElementById('adif-log-browse-btn');
 const adifImportBtn = document.getElementById('adif-import-btn');
@@ -2010,7 +2002,7 @@ async function loadPrefs() {
       enableDxeSources[k] = settings.enableDxeSources[k] !== false;
     }
   }
-  enableSolar = settings.enableSolar === true;   // default false
+  enableSolar = true; // always on (lib/install-defaults.js ALWAYS_ON)
   // PSTRotator — show quick-toggle when rotor is configured
   rotorConfigured = !!settings.enableRotor;
   // Checked = the antenna actually turns on every QSY; Manual mode never does.
@@ -2019,10 +2011,10 @@ async function loadPrefs() {
   quickRotorDivider.classList.toggle('hidden', !rotorConfigured);
   // Color rows — default true (on)
   spotsTable.classList.toggle('no-source-tint', settings.colorRows === false);
-  enableBandActivity = settings.enableBandActivity === true; // default false
+  enableBandActivity = true; // always on
   updateSolarVisibility();
   qrzFullName = settings.qrzFullName === true;
-  enableLogging = settings.enableLogging === true;
+  enableLogging = true; // always on; cloud sync is the choice
   enableBannerLogger = settings.enableBannerLogger === true;
   // Sync custom CAT buttons from settings.json (authoritative source for ECHOCAT sync)
   if (settings.customCatButtons && Array.isArray(settings.customCatButtons)) {
@@ -2182,7 +2174,7 @@ async function loadPrefs() {
         setView('table');
         window.api.jtcatPopoutOpen();
       } else
-      if (viewState.lastView === 'rbn' && (enableRbn || enablePskrMap)) {
+      if (viewState.lastView === 'rbn') {
         setView('rbn');
       } else if (viewState.lastView === 'dxcc' && enableDxcc) {
         setView('dxcc');
@@ -3726,16 +3718,12 @@ function updateSettingsConnBar() {
 }
 
 function updateRbnButton() {
-  const propEnabled = enableRbn || enablePskrMap;
-  if (propEnabled) {
-    viewRbnBtn.classList.remove('hidden');
-  } else {
-    viewRbnBtn.classList.add('hidden');
-    if (currentView === 'rbn') setView('table');
-  }
-  // Update source toggle visibility based on which sources are enabled
-  propShowRbnEl.closest('label').classList.toggle('hidden', !enableRbn);
-  propShowPskrEl.closest('label').classList.toggle('hidden', !enablePskrMap);
+  // Propagation (RBN + PSKReporter "where am I heard") is always on: main
+  // collects both whenever a callsign is set, so there is nothing to enable
+  // (Casey 2026-10-27: "always working for everyone").
+  viewRbnBtn.classList.remove('hidden');
+  propShowRbnEl.closest('label').classList.remove('hidden');
+  propShowPskrEl.closest('label').classList.remove('hidden');
   // Also update the activator toolbar RBN button (safe even before DOM ref is set)
   if (typeof updateActivatorRbnButton === 'function') updateActivatorRbnButton();
 }
@@ -4969,11 +4957,6 @@ clusterAddBtn.addEventListener('click', () => {
   clusterCustomFields.classList.add('hidden');
 });
 
-// RBN checkbox toggles RBN config visibility
-setEnableRbn.addEventListener('change', () => {
-  rbnConfig.classList.toggle('hidden', !setEnableRbn.checked);
-});
-
 // WSJT-X checkbox toggles config visibility + warns about the CAT handover
 // before letting the user check the box (same confirm the CAT popover uses).
 setEnableWsjtx.addEventListener('change', () => {
@@ -4987,9 +4970,6 @@ setEnableWsjtx.addEventListener('change', () => {
 
 setEnablePskr.addEventListener('change', () => {
   pskrConfig.classList.toggle('hidden', !setEnablePskr.checked);
-});
-setEnablePskrMap.addEventListener('change', () => {
-  pskrMapConfig.classList.toggle('hidden', !setEnablePskrMap.checked);
 });
 if (setPskrUpload) {
   setPskrUpload.addEventListener('change', () => {
@@ -5835,6 +5815,13 @@ function _gpUpdateOwnerBanner(status) {
   const callEl = document.getElementById('gp-owner-callsign');
   const expEl = document.getElementById('gp-owner-expires');
   if (callEl) callEl.textContent = (status.operatorCallsign || status.controlOperatorCallsign || 'Guest').toString().toUpperCase();
+  // The call the station transmits for the session (main onAirCall): the
+  // pass's station call, which may not be ours.
+  const onAirEl = document.getElementById('gp-owner-onair');
+  const onAirCallEl = document.getElementById('gp-owner-onair-call');
+  const onAir = String(status.stationCallsign || '').toUpperCase().trim();
+  if (onAirCallEl) onAirCallEl.textContent = onAir;
+  if (onAirEl) onAirEl.classList.toggle('hidden', !onAir);
   _gpOwnerBannerExpiresAtMs = status.expiresAt ? new Date(status.expiresAt).getTime() : 0;
   const tick = () => {
     if (!_gpOwnerBannerExpiresAtMs) {
@@ -9508,10 +9495,6 @@ function readCwMacroEditor() {
   return macros.length ? macros : null;
 }
 
-// Logging checkbox toggles logging config visibility
-setEnableLogging.addEventListener('change', () => {
-  loggingConfig.classList.toggle('hidden', !setEnableLogging.checked);
-});
 
 // Send to Logbook checkbox toggles logbook dropdown visibility
 setSendToLogbook.addEventListener('change', () => {
@@ -15820,7 +15803,6 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   if (setEnableParc) setEnableParc.checked = enableParc;
   setEnableCluster.checked = enableCluster;
   setEnableCwSpots.checked = enableCwSpots;
-  setEnableRbn.checked = enableRbn;
   setEnablePskr.checked = enablePskr;
   setHideWorked.checked = hideWorked;
   setHideWorkedParks.checked = hideWorkedParks;
@@ -16817,7 +16799,6 @@ async function openSettingsDialog(tab) {
   if (cwClubsDiv && cwSpotsPreset) {
     cwClubsDiv.style.display = cwSpotsPreset.value === 'rbn.telegraphy.de:7000' ? '' : 'none';
   }
-  setEnableRbn.checked = s.enableRbn === true;
   setMyCallsign.value = s.myCallsign || '';
   if (setOwnerCallsign) setOwnerCallsign.value = s.ownerCallsign || '';
   // Load cluster nodes (migrate legacy if needed)
@@ -16859,7 +16840,6 @@ async function openSettingsDialog(tab) {
   if (dirBrowser) dirBrowser.classList.add('hidden');
   if (dirBrowseBtn) dirBrowseBtn.classList.remove('hidden');
   clusterConfig.classList.toggle('hidden', !s.enableCluster);
-  rbnConfig.classList.toggle('hidden', !s.enableRbn);
   setEnableWsjtx.checked = s.enableWsjtx === true;
   setWsjtxPort.value = s.wsjtxPort || 2237;
   setWsjtxHighlight.checked = s.wsjtxHighlight !== false;
@@ -16867,14 +16847,11 @@ async function openSettingsDialog(tab) {
   wsjtxConfig.classList.toggle('hidden', !s.enableWsjtx);
   setEnablePskr.checked = s.enablePskr === true;
   pskrConfig.classList.toggle('hidden', !s.enablePskr);
-  setEnablePskrMap.checked = s.enablePskrMap === true;
-  pskrMapConfig.classList.toggle('hidden', !s.enablePskrMap);
   if (setPskrUpload) {
     setPskrUpload.checked = s.pskrUpload === true;
     pskrUploadConfig.classList.toggle('hidden', !s.pskrUpload);
     if (setPskrAntenna) setPskrAntenna.value = s.pskrAntenna || '';
   }
-  setEnableLogging.checked = s.enableLogging === true;
   setEnableBannerLogger.checked = s.enableBannerLogger === true;
   setN1mmRst.checked = s.n1mmRst === true;
   if (s.adifLogPath) {
@@ -16897,13 +16874,11 @@ async function openSettingsDialog(tab) {
   setExtraUdpPort.value = s.extraUdpPort || 2237;
   setExtraUdpFormat.value = s.extraUdpFormat || 'wsjtx';
   extraUdpConfig.classList.toggle('hidden', !setExtraUdp.checked);
-  loggingConfig.classList.toggle('hidden', !s.enableLogging);
   logbookConfig.classList.toggle('hidden', !s.sendToLogbook);
   updateLogbookPortConfig();
   setColorblind.checked = s.colorblindMode === true;
   setWcagMode.checked = s.wcagMode === true;
   setColorRows.checked = s.colorRows !== false; // default true
-  setEnableSolar.checked = s.enableSolar === true;
   // Reconcile meter-box visibility: settings.json is authoritative (durable
   // across app updates). Fall back to localStorage only when settings.json
   // has no value yet (fresh install / pre-fix version).
@@ -16914,7 +16889,6 @@ async function openSettingsDialog(tab) {
     meterBox.classList.toggle('hidden', !meterBoxVisible);
   }
   document.getElementById('set-show-meter').checked = meterBoxVisible;
-  setEnableBandActivity.checked = s.enableBandActivity === true;
   setShowBearing.checked = s.showBearing === true;
   setEnableSplitView.checked = s.enableSplitView !== false;
   splitOrientationConfig.classList.toggle('hidden', !setEnableSplitView.checked);
@@ -17550,9 +17524,10 @@ settingsSave.addEventListener('click', async () => {
   respotPresets = respotPresetsVal.slice();
   let clusterEnabled = setEnableCluster.checked;
   let cwSpotsEnabled = setEnableCwSpots.checked;
-  let rbnEnabled = setEnableRbn.checked;
+  // RBN spots in the spot list: the Spots menu's RBN toggle (Propagation
+  // itself is always on and has no setting).
+  let rbnEnabled = enableRbn;
   const pskrEnabled = setEnablePskr.checked;
-  const pskrMapEnabled = setEnablePskrMap.checked;
 
   // DX Cluster and RBN require a callsign
   if (clusterEnabled && !myCallsign) {
@@ -17565,17 +17540,8 @@ settingsSave.addEventListener('click', async () => {
     setEnableCwSpots.checked = false;
     alert('CW Spots requires a callsign. Please enter your callsign above.');
   }
-  if (rbnEnabled && !myCallsign) {
-    rbnEnabled = false;
-    setEnableRbn.checked = false;
-    alert('RBN requires a callsign. Please enter your callsign above.');
-  }
-  let pskrMapEnabledVal = pskrMapEnabled;
-  if (pskrMapEnabledVal && !myCallsign) {
-    pskrMapEnabledVal = false;
-    setEnablePskrMap.checked = false;
-    alert('PSKReporter Map requires a callsign. Please enter your callsign above.');
-  }
+  if (rbnEnabled && !myCallsign) rbnEnabled = false;
+  const pskrMapEnabledVal = true; // always on; kept in settings for older readers
   const clusterNodes = currentClusterNodes;
   const showBeaconsEnabled = setShowBeacons.checked;
   const showDxBarEnabled = setShowDxBar.checked;
@@ -17597,7 +17563,7 @@ settingsSave.addEventListener('click', async () => {
   const colorblindEnabled = setColorblind.checked;
   const wcagEnabled = setWcagMode.checked;
   const colorRowsEnabled = setColorRows.checked;
-  const solarEnabled = setEnableSolar.checked;
+  const solarEnabled = true; // always on (lib/install-defaults.js ALWAYS_ON)
   // Sync meter visibility from Settings Display checkbox — persist to both
   // localStorage (fast path on next start) and settings.json (durable across
   // app updates; localStorage can reset when Electron bumps session partition).
@@ -17605,7 +17571,7 @@ settingsSave.addEventListener('click', async () => {
   localStorage.setItem('meterBoxVisible', meterBoxVisible);
   quickShowMeter.checked = meterBoxVisible;
   meterBox.classList.toggle('hidden', !meterBoxVisible);
-  const bandActivityEnabled = setEnableBandActivity.checked;
+  const bandActivityEnabled = true; // always on
   const showBearingEnabled = setShowBearing.checked;
   const enableSplitViewVal = setEnableSplitView.checked;
   const splitOrientationVal = document.getElementById('set-split-orientation').value;
@@ -17708,7 +17674,7 @@ settingsSave.addEventListener('click', async () => {
   const cwMacrosVal = readCwMacroEditor();
   const potaParksPath = setPotaParksPath.value.trim() || '';
   const hideWorkedParksEnabled = setHideWorkedParks.checked;
-  const loggingEnabled = setEnableLogging.checked;
+  const loggingEnabled = true; // always on; cloud sync is the choice
   const n1mmRstEnabled = setN1mmRst.checked;
   const adifLogPath = setAdifLogPath.value.trim() || '';
   const defaultPowerVal = parseInt(setDefaultPower.value, 10) || 100;
@@ -26216,12 +26182,8 @@ const activatorRbnBtn = document.getElementById('activator-rbn-btn');
 let activatorRbnVisible = false;
 
 function updateActivatorRbnButton() {
-  if (enableRbn) {
-    activatorRbnBtn.classList.remove('hidden');
-  } else {
-    activatorRbnBtn.classList.add('hidden');
-    if (activatorRbnVisible) toggleActivatorRbn();
-  }
+  // Always offered, like the Propagation view (see updateRbnButton).
+  activatorRbnBtn.classList.remove('hidden');
 }
 
 function applyActivatorRbnLayout() {
