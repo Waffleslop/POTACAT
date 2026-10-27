@@ -382,6 +382,36 @@ test('Indexed Yaesu: a same-mode tune keeps indexing by the reported mode', () =
 });
 
 // =========================================================================
+// FT-710 against its CAT reference (2306-C) and the radio itself (W3MDT,
+// firmware MAIN 01-12, 2026-10-22/23/27; every value below was sent to the
+// radio and read back).
+console.log('\n=== KenwoodCodec (Yaesu FT-710) ===');
+
+test('FT-710: filter width is SH00nn from Table 3 (23 SSB widths, 21 for CW/DATA; RTTY uses the same 21)', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS['FT-710']);
+  codec._lastParsedMode = 'USB';
+  codec.setFilterWidth(300);    // 01
+  codec.setFilterWidth(2400);   // 13
+  codec.setFilterWidth(3000);   // 20 (19 = 2900 Hz on the FTDX chart)
+  codec.setFilterWidth(4000);   // 23
+  codec._lastParsedMode = 'CW';
+  codec.setFilterWidth(500);    // 10
+  codec.setFilterWidth(4000);   // 21
+  codec._lastParsedMode = 'DIGU';
+  codec.setFilterWidth(3000);   // 18 (16 = 2000 Hz on the FTDX chart)
+  codec._lastParsedMode = 'RTTY';
+  codec.setFilterWidth(500);    // 10
+  assert.deepStrictEqual(writes, ['SH0001;', 'SH0013;', 'SH0020;', 'SH0023;', 'SH0010;', 'SH0021;', 'SH0018;', 'SH0010;']);
+});
+
+test('FT-710: a USB -> CW tune sets the CW width in the CW chart', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const sh = tuneWrites(RIG_MODELS['FT-710'], 'USB', 14030000, 'CW', 500).filter((w) => /^SH/.test(w));
+  assert.deepStrictEqual(sh, ['SH0010;']);
+});
+
+// =========================================================================
 console.log('\n=== KenwoodCodec (Kenwood TS-590) ===');
 
 const TS590_MODEL = {
