@@ -427,6 +427,16 @@ test('FT-710: COMP on/off is PR01;/PR00; (the default PR1;/PR0; are reads there)
   assert.deepStrictEqual(writes, ['PR01;', 'PR00;']);
 });
 
+test('FT-710: NB level is 0-10 (NL0000-NL0010); a 0-100 value clamps to 10', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const model = RIG_MODELS['FT-710'];
+  const { codec, writes } = captureWrites(KenwoodCodec, model);
+  for (const v of [0, 5, 10, 50]) codec.setNbLevel(v);
+  assert.deepStrictEqual(writes, ['NL0000;', 'NL0005;', 'NL0010;', 'NL0010;']);
+  assert.strictEqual(model.caps.nbLevel, true, 'NB level row shown');
+  assert.strictEqual(model.maxNbLevel, 10);
+});
+
 // =========================================================================
 console.log('\n=== KenwoodCodec (Kenwood TS-590) ===');
 
