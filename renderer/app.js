@@ -10087,8 +10087,8 @@ function radioModeToFilter(catMode) {
   if (m === 'FT8') return 'FT8';
   if (m === 'FT4') return 'FT4';
   if (m === 'FREEDV') return 'FREEDV';
-  // DATA modes (DIGU/PKTUSB/DIGL/PKTLSB) -> show all digital spots
-  if (m === 'DIGU' || m === 'PKTUSB' || m === 'DIGL' || m === 'PKTLSB') return 'DIGI';
+  // DATA modes (DIGU/PKTUSB/DIGL/PKTLSB) and PSK -> show all digital spots
+  if (m === 'DIGU' || m === 'PKTUSB' || m === 'DIGL' || m === 'PKTLSB' || m === 'PSK') return 'DIGI';
   return null;
 }
 
@@ -23753,7 +23753,7 @@ function rigPopulatePowerChoices(caps) {
 function rigGetFilterPresets(mode) {
   const m = (mode || '').toUpperCase();
   if (m === 'CW') return RIG_FILTER_PRESETS.CW;
-  if (['FT8','FT4','FT2','DIGU','DIGL','RTTY','PKTUSB','PKTLSB'].includes(m)) return RIG_FILTER_PRESETS.DIG;
+  if (['FT8','FT4','FT2','DIGU','DIGL','RTTY','PKTUSB','PKTLSB','PSK'].includes(m)) return RIG_FILTER_PRESETS.DIG;
   return RIG_FILTER_PRESETS.SSB;
 }
 

@@ -444,6 +444,39 @@ test('FT-710: TX power is 5-100 W (PC004; and PC101; are refused there)', () => 
   assert.deepStrictEqual(writes, ['PC005;', 'PC005;', 'PC100;', 'PC100;']);
 });
 
+test('FT-710: MD0 answers 9/E/F read as RTTY, PSK and FM', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const { codec } = captureWrites(KenwoodCodec, RIG_MODELS['FT-710']);
+  const modes = [];
+  codec.on('mode', (m) => modes.push(m));
+  codec.onData('MD09;MD0E;MD0F;MD0C;MD03;');
+  assert.deepStrictEqual(modes, ['RTTY', 'PSK', 'FM', 'DIGU', 'CW']);
+});
+
+test('FT-710: PSK is shown but never sent; a PSK width uses the DATA chart', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const model = RIG_MODELS['FT-710'];
+  const { codec, writes } = captureWrites(KenwoodCodec, model);
+  codec.onData('MD0E;');
+  assert.strictEqual(codec.resolveMode('PSK', 14070000), null, 'no set entry for PSK');
+  // A tune that re-sends the current mode (PSK) writes no MD.
+  assert.ok(!tuneWrites(model, 'PSK', 14070000, 'PSK', 0).some((w) => /^MD/.test(w)));
+  codec.setFilterWidth(500);
+  assert.deepStrictEqual(writes, ['SH0010;'], '500 Hz is index 10 in the DATA column (02 = 400 Hz in the SSB column)');
+  // The desktop offers the DIG width presets in PSK (source guard).
+  const app = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const presets = app.slice(app.indexOf('function rigGetFilterPresets'), app.indexOf('function rigBuildFilterPresets'));
+  assert.ok(/\[[^\]]*'PSK'[^\]]*\]\.includes\(m\)\) return RIG_FILTER_PRESETS\.DIG/.test(presets), presets);
+  // In PSK the desktop's spot filter shows digital spots, as in DATA, and the
+  // phone's log sheet defaults to PSK31 (both run from source).
+  const toFilter = new Function(app.slice(app.indexOf('function radioModeToFilter'), app.indexOf('function spotAgeSecs')) + '; return radioModeToFilter;')();
+  assert.strictEqual(toFilter('PSK'), 'DIGI');
+  const remote = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer', 'remote.js'), 'utf8');
+  const aliasEnd = remote.indexOf('\n  }\n', remote.indexOf('function aliasModeForLogSheet')) + 4;
+  const alias = new Function(remote.slice(remote.indexOf('const LOG_MODE_OPTIONS'), aliasEnd) + '; return aliasModeForLogSheet;')();
+  assert.strictEqual(alias('PSK'), 'PSK31');
+});
+
 // =========================================================================
 console.log('\n=== KenwoodCodec (Kenwood TS-590) ===');
 
