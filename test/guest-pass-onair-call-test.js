@@ -93,7 +93,7 @@ check('pass auth-ok carries the on-air call at the top level', () => {
   const src = fs.readFileSync(path.join(ROOT, 'lib/remote-server.js'), 'utf8');
   const i = src.indexOf('async _authenticatePass(');
   const body = src.slice(i, src.indexOf('passSession: {', i));
-  assert.ok(/stationCallsign:\s*this\._passOnAirCall\(ws\)/.test(body), 'auth-ok stationCallsign must be _passOnAirCall(ws)');
+  assert.ok(/stationCallsign:\s*String\(this\._passOnAirCall\(ws\) \|\| ''\)/.test(body), "auth-ok stationCallsign must be _passOnAirCall(ws), '' when listen-only (never null)");
   assert.ok(/settings:\s*this\._settingsFor\(ws\)/.test(body), 'auth-ok settings must be _settingsFor(ws)');
 });
 

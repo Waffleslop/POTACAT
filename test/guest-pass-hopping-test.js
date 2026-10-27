@@ -61,7 +61,7 @@ function server(port) {
   const expires = new Date(Date.now() + 3600_000).toISOString();
   rs.setPassValidator(async (code) => ({
     code, privilege_class: 'general', max_power_w: 100, allowed_modes: [], expires_at: expires,
-    station_callsign: '', owner_callsign: 'W7RTA', status: 'active', guest_callsign: code === CODE ? 'K3SBP' : 'N0CALL',
+    station_callsign: '', owner_callsign: 'W7RTA', status: 'active', guest_callsign: code === CODE ? 'K3SBP' : code === 'anon0000' ? null : 'N0CALL',
   }));
   // main's rules, reduced: one pass at a time.
   const live = { live: false, paused: false, code: null, call: '', endsAt: expires };
@@ -176,6 +176,19 @@ async function owner(port) {
       assert.ok(events.some((x) => x.e === 'pass-guest-left' && x.info.code === CODE));
       await sleep(100);
       assert.ok(!events.some((x) => x.e === 'pass-client-disconnected'), 'a clean leave starts no reconnect hold');
+    } finally { rs.stop(); await sleep(200); }
+  });
+
+  await checkAsync('a guest with no verified call is told an empty stationCallsign (listen only), never null', async () => {
+    const PORT = 17419;
+    const { rs } = server(PORT);
+    await sleep(500);
+    try {
+      const g = await guest(PORT, 'anon0000');
+      const ok = g.find('auth-ok');
+      assert.ok(ok, 'admitted');
+      assert.strictEqual(ok.stationCallsign, '', 'listen only is the empty string; null means an older desktop');
+      g.ws.close();
     } finally { rs.stop(); await sleep(200); }
   });
 
