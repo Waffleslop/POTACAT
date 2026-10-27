@@ -8197,8 +8197,7 @@ body.activator-spots-on #parks-stats-toggle,
 body.activator-spots-on #cat-log-toggle,
 body.activator-spots-on #cat-status,
 body.activator-spots-on #wsjtx-status,
-body.activator-spots-on #cw-keyer-status,
-body.activator-spots-on .solar-pill {
+body.activator-spots-on #cw-keyer-status {
   display: none !important;
 }
 

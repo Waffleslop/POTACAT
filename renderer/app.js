@@ -1265,9 +1265,6 @@ const clublogUploadBtn = document.getElementById('clublog-upload-btn');
 const clublogUploadResult = document.getElementById('clublog-upload-result');
 const distHeader = document.getElementById('dist-header');
 const utcClockEl = document.getElementById('utc-clock');
-const sfiStatusEl = document.getElementById('sfi-status');
-const kStatusEl = document.getElementById('k-status');
-const aStatusEl = document.getElementById('a-status');
 const setColorblind = document.getElementById('set-colorblind');
 const setWcagMode = document.getElementById('set-wcag-mode');
 const setColorRows = document.getElementById('set-color-rows');
@@ -2012,7 +2009,6 @@ async function loadPrefs() {
   // Color rows — default true (on)
   spotsTable.classList.toggle('no-source-tint', settings.colorRows === false);
   enableBandActivity = true; // always on
-  updateSolarVisibility();
   qrzFullName = settings.qrzFullName === true;
   enableLogging = true; // always on; cloud sync is the choice
   enableBannerLogger = settings.enableBannerLogger === true;
@@ -18053,7 +18049,6 @@ settingsSave.addEventListener('click', async () => {
   window.api.sendColorblindMode(colorblindEnabled);
   window.api.sendWcagMode(wcagEnabled);
   enableSolar = solarEnabled;
-  updateSolarVisibility();
   enableBandActivity = bandActivityEnabled;
   updateBandActivityVisibility();
   showBearing = showBearingEnabled;
@@ -21410,38 +21405,9 @@ catLogClearBtn.addEventListener('click', () => {
   });
 })();
 
-// --- Solar data listener ---
-function updateSolarVisibility() {
-  const method = enableSolar ? 'remove' : 'add';
-  sfiStatusEl.classList[method]('hidden');
-  kStatusEl.classList[method]('hidden');
-  aStatusEl.classList[method]('hidden');
-}
-
-window.api.onSolarData((payload) => {
-  const { sfi, kIndex, aIndex } = payload || {};
-  const hidden = enableSolar ? '' : ' hidden';
-
-  if (sfi != null) {
-    const sfiClass = sfi >= 100 ? 'connected' : sfi >= 70 ? 'warn' : 'disconnected';
-    sfiStatusEl.textContent = `SFI ${sfi}`;
-    sfiStatusEl.className = `status solar-pill ${sfiClass}${hidden}`;
-  }
-  if (kIndex != null) {
-    const kClass = kIndex <= 2 ? 'connected' : kIndex <= 4 ? 'warn' : 'disconnected';
-    kStatusEl.textContent = `K ${kIndex}`;
-    kStatusEl.className = `status solar-pill ${kClass}${hidden}`;
-  }
-  if (aIndex != null) {
-    const aClass = aIndex <= 7 ? 'connected' : aIndex <= 20 ? 'warn' : 'disconnected';
-    aStatusEl.textContent = `A ${aIndex}`;
-    aStatusEl.className = `status solar-pill ${aClass}${hidden}`;
-  }
-  // Note: the full Conditions panel lives in conditions-popout.html and
-  // subscribes to its own solar-data IPC — no in-window render here.
-});
-
-// Conditions popout owns its own render — see renderer/conditions-popout.js.
+// Solar conditions (SFI, K, A) live in the Conditions window only
+// (renderer/conditions-popout.js); the top bar no longer shows them
+// (Casey 2026-10-27).
 
 
 
