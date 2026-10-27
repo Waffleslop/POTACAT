@@ -19212,11 +19212,21 @@ function passLeaseBegin() {
   disconnectAprsGate();                  // the gate logs in as the owner
   passLeaseReconnectReporters();         // cluster login, PSKReporter and RBN follow the call
   passLeaseTellWindows(who.call);
+  // The guest may set TX drive and EQ for their own voice; the owner's come
+  // back at the end.
+  passLease.txDrive = currentTxDrive();
+  passLease.txEq = { enabled: !!settings.txEqEnabled, preset: settings.txEqPreset || 'ragchew', customParams: settings.txEqCustomParams || undefined };
+  if (remoteServer && remoteServer.setLeaseCall) remoteServer.setLeaseCall(who.call || null);
+  js8PushThreads();
 }
 function passLeaseEnd() {
   const host = String(settings.myCallsign || '').toUpperCase();
   const was = passLease; passLease = null;
+  if (remoteServer && remoteServer.setLeaseCall) remoteServer.setLeaseCall(null);
   if (was && was.js8Threads) js8Threads = was.js8Threads;
+  if (was && was.txDrive != null && was.txDrive !== currentTxDrive()) { try { ipcMain.emit('tx-drive-set', null, was.txDrive); } catch {} }
+  if (was && was.txEq && (was.txEq.enabled !== !!settings.txEqEnabled || was.txEq.preset !== (settings.txEqPreset || 'ragchew'))) { try { ipcMain.emit('tx-eq-set', null, was.txEq); } catch {} }
+  js8PushThreads();
   js8Station.call = host;
   try { const eng = js8Engine(); if (eng) eng.setStation({ call: host, grid: settings.grid }); } catch {}
   connectAprsGate();
@@ -22583,7 +22593,7 @@ function connectRemote() {
   // A guest tried to move it — re-send the real value so their slider snaps
   // back rather than displaying a change that never reached the radio.
   remoteServer.on('tx-drive-refused', () => {
-    sendCatLog('[Audio] TX drive change refused — Guest Pass clients cannot change the host TX level.');
+    sendCatLog('[Audio] TX drive change refused — a guest without a verified callsign cannot change the TX level.');
     try { remoteServer.broadcastTxDriveState(currentTxDrive()); } catch { /* ignore */ }
   });
 
@@ -33008,6 +33018,8 @@ app.whenReady().then(() => {
     // guest is connected, and rejects mismatch only while another
     // guest is live (single-pass invariant).
     onRemoteServer((rs) => {
+      // A rebuilt server inherits a lease in progress.
+      if (rs.setLeaseCall) rs.setLeaseCall(passLease && passLease.call ? passLease.call : null);
       rs.setPassValidator(async (code, sessionToken) => {
         // Phase 3 (cloud mig 009): every WS pass-auth attempt is
         // validated against the high-entropy session_token returned

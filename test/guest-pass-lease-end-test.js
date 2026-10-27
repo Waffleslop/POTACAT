@@ -113,8 +113,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const gate = main.slice(main.indexOf('function passTxAllowed('), main.indexOf('function passTxAllowed(') + 500);
     assert.ok(/interceptCatCommand\(\{ type: 'tx_enable'/.test(gate), 'the one gate');
   });
-  check('the owner\'s recordings, activation and WSPR beacon are refused to a guest', () => {
-    for (const t of ['voice-macro-sync', 'voice-macro-delete', 'voice-macro-get', 'voice-macro-play', 'set-activator-park', 'jtcat-wspr-beacon']) {
+  check('the owner\'s recordings and activation are refused to a guest; the WSPR beacon to a guest with no verified call', () => {
+    const w = rsSrc.indexOf("case 'jtcat-wspr-beacon':");
+    assert.ok(/if \(this\._guestLocked\(ws\)\)/.test(rsSrc.slice(w, w + 400)), 'jtcat-wspr-beacon');
+    for (const t of ['voice-macro-sync', 'voice-macro-delete', 'voice-macro-get', 'voice-macro-play', 'set-activator-park']) {
       const i = rsSrc.indexOf(`case '${t}':`);
       assert.ok(i > 0, t);
       const b = rsSrc.slice(i, i + 400);
