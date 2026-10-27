@@ -16211,6 +16211,12 @@ function startJtcat(mode) {
           // answer path — without this, hunting during FD weekend mis-sequenced
           // replies as standard QSOs. (2026-07-16, bottom-bar rework.)
           const fdCtx = jtcatFdContext();
+          // Skip Grid (WSJT-X "disable Tx1") applies to Hunt exactly as to a
+          // double-click answer: a signal report instead of the grid, and the
+          // QSO remembers it as sent. Hunt built its own opener and always sent
+          // the grid (KB2UXB 2026-10-26). Hound Tx1 keeps the grid.
+          const huntRpt = (!fdCtx && settings.jtcatSkipTx1 && !settings.jtcatHoundMode)
+            ? _jtcatStateMachine.formatReport(best.db) : null;
           // Create QSO — assign to the owner's state variable
           const qso = {
             mode: 'reply',
@@ -16220,9 +16226,9 @@ function startJtcat(mode) {
             myCall,
             myGrid,
             txMsg: fdCtx ? (best.call + ' ' + myCall + ' ' + fdCtx.myExch)
-                         : jtcatDirectedMsg(best.call, myCall, myGrid),
+                         : jtcatDirectedMsg(best.call, myCall, huntRpt || myGrid),
             report: null,
-            sentReport: null,
+            sentReport: huntRpt,
             txRetries: 0,
           };
           if (fdCtx) { qso.fd = true; qso.myExch = fdCtx.myExch; }
@@ -24036,6 +24042,18 @@ function connectRemote() {
       } else {
         q.phase = 'done';
       }
+    } else if (_jtcatStateMachine.skipAbandonsQso(q)) {
+      // They never answered: Skip stops calling them and goes back to
+      // listening (Hunt picks its next station), never a made-up exchange.
+      sendCatLog(`[JTCAT] Skip: ${q.call} never answered — stopped calling them; listening`);
+      if (jtcatSpotTarget && jtcatSpotTarget.status === 'engaged' &&
+        JtcatParser.normalizeCall(q.call) === JtcatParser.normalizeCall(jtcatSpotTarget.call)) clearSpotTarget('user');
+      remoteJtcatQso = null;
+      ft8Engine._txEnabled = false;
+      ft8Engine.setTxMessage('');
+      ft8Engine.setTxSlot('auto');
+      remoteJtcatBroadcastQso();
+      return;
     } else {
       if (q.phase === 'reply') {
         const rpt = q.sentReport || '-10';
@@ -36965,6 +36983,18 @@ app.whenReady().then(() => {
       } else {
         q.phase = 'done';
       }
+    } else if (_jtcatStateMachine.skipAbandonsQso(q)) {
+      // They never answered: Skip stops calling them and goes back to
+      // listening (Hunt picks its next station), never a made-up exchange.
+      sendCatLog(`[JTCAT] Skip: ${q.call} never answered — stopped calling them; listening`);
+      if (jtcatSpotTarget && jtcatSpotTarget.status === 'engaged' &&
+        JtcatParser.normalizeCall(q.call) === JtcatParser.normalizeCall(jtcatSpotTarget.call)) clearSpotTarget('user');
+      popoutJtcatQso = null;
+      eng._txEnabled = false;
+      eng.setTxMessage('');
+      eng.setTxSlot('auto');
+      popoutBroadcastQso();
+      return;
     } else {
       if (q.phase === 'reply') {
         const rpt = q.sentReport || '-10';
