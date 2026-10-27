@@ -320,6 +320,68 @@ test('FT-991A: the command table shows the resolved commands, Split Off and the 
 });
 
 // =========================================================================
+// Indexed-width Yaesus: a tune's width is looked up for the mode the tune
+// sets. The width goes out 100-200 ms after the mode with polling stopped, so
+// the codec's last parsed mode was still the old one and a USB -> CW tune
+// indexed 500 Hz in the SSB chart (SH0102; = 100 Hz in CW on the FTDX
+// generation). Found on an FT-710, 2026-10-22.
+console.log('\n=== Indexed-width Yaesu: a tune\'s width follows the mode it sets ===');
+
+// Drive RigController.tune() with its timers fired in order, synchronously.
+function tuneWrites(model, fromMode, freqHz, mode, filterWidth) {
+  const { RigController } = require('../lib/rig-controller');
+  const { EventEmitter } = require('events');
+  const writes = [];
+  const t = new EventEmitter(); t.connect = () => {}; t.disconnect = () => {};
+  t.write = (d) => writes.push(String(d));
+  const codec = new KenwoodCodec(model, (d) => t.write(d));
+  codec._lastParsedMode = fromMode;
+  const rc = new RigController(model, t, codec);
+  rc.connected = true;
+  rc._lastParsedMode = fromMode;
+  rc._startPolling = () => {}; rc._stopPolling = () => {};
+  const timers = [];
+  const realSetTimeout = global.setTimeout;
+  global.setTimeout = (fn, ms) => { timers.push({ fn, ms }); return {}; };
+  try { rc.tune(freqHz, mode, { filterWidth }); } finally { global.setTimeout = realSetTimeout; }
+  timers.sort((a, b) => a.ms - b.ms).forEach((x) => x.fn());
+  return writes;
+}
+
+// What a width click sends while the radio reports `mode`.
+function widthClickWrites(model, mode, hz) {
+  const { codec, writes } = captureWrites(KenwoodCodec, model);
+  codec._lastParsedMode = mode;
+  codec.setFilterWidth(hz);
+  return writes;
+}
+
+test('Indexed Yaesu: a USB -> CW tune indexes its width in the CW chart, every model', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const indexed = Object.entries(RIG_MODELS)
+    .filter(([, m]) => m.protocol === 'kenwood' && m.caps && m.caps.filterType === 'indexed');
+  assert.ok(indexed.length > 0);
+  for (const [name, model] of indexed) {
+    const sh = tuneWrites(model, 'USB', 14030000, 'CW', 500).filter((w) => /^SH/.test(w));
+    assert.deepStrictEqual(sh, widthClickWrites(model, 'CW', 500), name);
+  }
+});
+
+test('Indexed Yaesu: an FT8 tune from USB uses the DATA chart (FT8 goes out as DATA-U)', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const model = RIG_MODELS['FTDX10'];
+  const sh = tuneWrites(model, 'USB', 14074000, 'FT8', 3000).filter((w) => /^SH/.test(w));
+  assert.deepStrictEqual(sh, widthClickWrites(model, 'DIGU', 3000));
+});
+
+test('Indexed Yaesu: a same-mode tune keeps indexing by the reported mode', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const model = RIG_MODELS['FTDX10'];
+  const sh = tuneWrites(model, 'CW', 14030000, 'CW', 500).filter((w) => /^SH/.test(w));
+  assert.deepStrictEqual(sh, widthClickWrites(model, 'CW', 500));
+});
+
+// =========================================================================
 console.log('\n=== KenwoodCodec (Kenwood TS-590) ===');
 
 const TS590_MODEL = {
