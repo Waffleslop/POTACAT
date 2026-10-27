@@ -437,6 +437,13 @@ test('FT-710: NB level is 0-10 (NL0000-NL0010); a 0-100 value clamps to 10', () 
   assert.strictEqual(model.maxNbLevel, 10);
 });
 
+test('FT-710: TX power is 5-100 W (PC004; and PC101; are refused there)', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS['FT-710']);
+  for (const w of [3, 5, 100, 150]) codec.setTxPower(w);
+  assert.deepStrictEqual(writes, ['PC005;', 'PC005;', 'PC100;', 'PC100;']);
+});
+
 // =========================================================================
 console.log('\n=== KenwoodCodec (Kenwood TS-590) ===');
 
