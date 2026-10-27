@@ -82,7 +82,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     rs.broadcastPassEnded('expired', 'abcd1234');
     for (let i = 0; i < 40 && closed == null; i++) await sleep(50);
     assert.ok(got.some((m) => m.type === 'pass-ended' && m.reason === 'expired'), 'pass-ended was sent first');
-    assert.strictEqual(closed, 4001, 'then the socket was closed by the shack');
+    assert.strictEqual(closed, 4005, 'then the socket was closed by the shack (CLOSE_CODES.PASS_ENDED)');
     assert.strictEqual(rs.hasActivePassClient(), false, 'no live pass client remains');
     rs.stop();
     await sleep(200);
@@ -126,7 +126,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const b = rsSrc.slice(i, i + 1500);
     assert.ok(/client\._passSession = null;/.test(b));
     assert.ok(/client\._authenticated = false;/.test(b));
-    assert.ok(/client\.close\(4001/.test(b));
+    assert.ok(/client\.close\(protocol\.CLOSE_CODES\.PASS_ENDED/.test(b));
   });
 
   console.log(`\n${passed} passed, ${failed} failed`);
