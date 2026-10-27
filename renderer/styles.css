@@ -10380,7 +10380,6 @@ main.banner-logger-active #event-progress-overlay {
   align-items: center;
   gap: 12px;
   font-size: 13px;
-  cursor: pointer;
 }
 #gp-owner-banner.gp-banner-expiring {
   background: linear-gradient(180deg, var(--accent-red) 0%, color-mix(in srgb, var(--accent-red) 80%, #000) 100%);
@@ -10392,6 +10391,12 @@ main.banner-logger-active #event-progress-overlay {
 #gp-owner-banner .gp-revoke-link {
   margin-left: 6px;
   text-decoration: underline;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
 }
 
 /* Rig editor: setup instructions (lib/rig-setup-notes.js) */

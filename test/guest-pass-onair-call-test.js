@@ -133,9 +133,14 @@ check('CW {MYCALL}, SSTV CW ID and the SSTV call follow onAirCall()', () => {
   assert.ok(/myCall:\s*onAirCall\(\)/.test(main.slice(i, i + 800)), 'sstv-context myCall');
 });
 check('a forwarded guest QSO is stamped with the on-air call', () => {
-  const i = main.indexOf("type: 'qso-attributed', qso: qsoData");
-  assert.ok(i > 0);
-  assert.ok(/qsoData\.stationCallsign = onAirCall\(\)/.test(main.slice(i - 600, i)));
+  // Both forward sites: a guest's (passGuestLogContact, which also queues it
+  // for the guest's logbook) and an owner device's.
+  let i = -1, n = 0;
+  while ((i = main.indexOf("type: 'qso-attributed', qso: qsoData", i + 1)) > 0) {
+    n++;
+    assert.ok(/qsoData\.stationCallsign = onAirCall\(\)/.test(main.slice(i - 1500, i)), 'site ' + n);
+  }
+  assert.ok(n >= 2, 'both forward sites found');
 });
 check('a pass change begins and ends the lease, which re-arms AP and tells the JTCAT window', () => {
   const i = main.indexOf("passEnforcement.on('state-change'");

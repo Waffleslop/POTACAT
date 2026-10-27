@@ -20,16 +20,23 @@
   <!-- Owner-facing Guest Pass banner.
        Shown ONLY when a guest is currently controlling this rig via a
        redeemed pass. Reads from window.api.passEnforcementGetState()
-       on load and onPassEnforcementState/Expiring/Ended events. Click
-       the strip to revoke. -->
-  <div id="gp-owner-banner" class="hidden" title="Click to revoke guest access immediately">
+       on load and onPassEnforcementState/Expiring/Ended events. Take over
+       pauses the guest and gives you the radio; Give it back resumes them. -->
+  <div id="gp-owner-banner" class="hidden">
     <span aria-hidden="true">&#x1F511;</span>
     <div style="flex:1;line-height:1.3;">
-      <span>Your radio is lent to </span><strong><span id="gp-owner-callsign">&hellip;</span></strong>
-      <span id="gp-owner-onair"> and is on the air as <strong><span id="gp-owner-onair-call"></span></strong></span>
-      <span id="gp-owner-nocall" class="hidden"> (no verified callsign: listen only)</span>
-      <span>. Ends in </span><strong><span id="gp-owner-expires">&hellip;</span></strong><span>.</span>
-      <span class="gp-revoke-link">End now</span>
+      <span id="gp-owner-lent">
+        <span>Your radio is lent to </span><strong><span id="gp-owner-callsign">&hellip;</span></strong>
+        <span id="gp-owner-onair"> and is on the air as <strong><span id="gp-owner-onair-call"></span></strong></span>
+        <span id="gp-owner-nocall" class="hidden"> (no verified callsign: listen only)</span><span>.</span>
+      </span>
+      <span id="gp-owner-paused" class="hidden">
+        <span>You have your radio back. </span><strong><span id="gp-owner-paused-call"></span></strong><span>'s pass is paused.</span>
+      </span>
+      <span> Ends in </span><strong><span id="gp-owner-expires">&hellip;</span></strong><span>.</span>
+      <button type="button" id="gp-owner-takeover" class="gp-revoke-link">Take over</button>
+      <button type="button" id="gp-owner-giveback" class="gp-revoke-link hidden">Give it back</button>
+      <button type="button" id="gp-owner-end" class="gp-revoke-link">End now</button>
     </div>
   </div>
   <!-- POTACAT Cloud billing banner: grace / payment problem / expired, and

@@ -48,6 +48,8 @@ const TESTS = [
   'test/guest-pass-test.js',
   'test/guest-pass-onair-call-test.js', // the pass's station call is the on-air call (K3SBP on W7RTA's pass)
   'test/guest-pass-lease-end-test.js', // the end of a pass stops every transmitter and closes the guest socket
+  'test/guest-pass-hopping-test.js', // guests hop between rigs; the owner takes over and hands back
+  'test/pass-qso-outbox-test.js', // a guest's contacts reach the GUEST's cloud logbook, sent by the shack
   'test/propagation-always-on-test.js', // RBN + PSKReporter Propagation has no switch
   'test/install-defaults-test.js', // logging/solar/band activity always on; SOTA/WWFF/LLOTA + a random cluster node once
   'test/pair-request-tunnel-gate-test.js',

@@ -416,6 +416,7 @@ const WinlinkModes = require('./lib/winlink-modes');
 const ModemAudioServerMod = require('./lib/modem-audio-server');
 const { ModemAudioServer } = ModemAudioServerMod;
 const { buildAdifFields, buildAdifRecord, sqliteQsoToAdifFields, ADIF_HEADER, adifField } = require('./lib/adif-writer');
+const { PassQsoOutbox } = require('./lib/pass-qso-outbox');
 const QsoLog = require('./lib/qso-log');
 const OriginHealth = require('./lib/origin-health');
 const { planImport, findDuplicateGroups } = require('./lib/qso-match');
@@ -12262,6 +12263,70 @@ function shouldForwardClientDriven() {
   return false;
 }
 
+// A Guest Pass guest's contact (phase D, docs/share-my-rig-lease-plan.md): the
+// call it went out under, the guest as operator, the owner as the private
+// licensee field; queued for the guest's cloud logbook and forwarded to their
+// device. The owner's logbook is never written.
+let passQsoOutbox = null;
+function passGuestLogContact(qsoData, ctx, canReceive, origin) {
+  if (!qsoData.stationCallsign) qsoData.stationCallsign = onAirCall();
+  if (passLease) {
+    if (!qsoData.operator) qsoData.operator = onAirCall();
+    qsoData.stationLicensee = String(settings.myCallsign || '').toUpperCase();
+  }
+  if (!qsoData.uuid || !QsoLog.isValidUuid(qsoData.uuid)) qsoData.uuid = require('crypto').randomUUID();
+  const uuid = passQsoOutbox.add({
+    code: ctx.passSession.code,
+    token: ctx.passSession.sessionId,
+    call: qsoData.operator || qsoData.stationCallsign || '',
+    fields: buildAdifFields(qsoData),
+  });
+  if (!uuid) {
+    try { remoteServer.sendLogError(qsoData, { reason: 'forward-failed' }); } catch {}
+    sendCatLog(`[pass] guest contact ${qsoData.callsign || '?'} NOT queued (no pass session)`);
+    return { success: false, error: 'forward_failed' };
+  }
+  if (canReceive) {
+    try { remoteServer.sendToActor({ type: 'qso-attributed', qso: qsoData }); } catch {}
+  }
+  sendCatLog(`[pass] ${origin} contact ${qsoData.callsign || '?'} queued for ${qsoData.operator || 'the guest'}'s logbook${canReceive ? ' and forwarded to their device' : ''}`);
+  return { success: true, forwarded: true, guestLogbook: true };
+}
+// Contacts the cloud will never take (the session closed more than a day
+// ago, or a week of failures): written to a file under userData for the
+// owner to pass on, and said once on screen. Never into the owner's log.
+function passQsoWriteUndelivered({ entries, reason }) {
+  if (!entries || !entries.length) return;
+  const dir = path.join(app.getPath('userData'), 'guest-logs');
+  const files = new Set();
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    for (const e of entries) {
+      const who = String(e.call || 'guest').replace(/[^A-Z0-9]/gi, '_');
+      const file = path.join(dir, `guest-pass-${String(e.code).replace(/[^a-z0-9]/gi, '')}-${who}.adi`);
+      if (!fs.existsSync(file)) fs.writeFileSync(file, ADIF_HEADER, 'utf-8');
+      fs.appendFileSync(file, buildAdifRecordFromFields(e.fields) + '\n', 'utf-8');
+      files.add(file);
+    }
+  } catch (err) {
+    sendCatLog(`[pass] could not write undelivered guest contacts: ${err && err.message || err}`);
+    return;
+  }
+  const n = entries.length;
+  const msg = `${n} Guest Pass contact${n === 1 ? '' : 's'} could not reach the guest's logbook (${reason}). Saved in ${[...files].map((f) => path.basename(f)).join(', ')} under the guest-logs folder in POTACAT's data folder: please pass ${n === 1 ? 'it' : 'them'} on.`;
+  sendCatLog(`[pass] ${msg}`);
+  if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: msg, warn: true, duration: 20000 });
+}
+function buildAdifRecordFromFields(fields) {
+  return Object.entries(fields || {}).filter(([, v]) => v != null && v !== '').map(([k, v]) => adifField(k, v)).join(' ') + ' <EOR>';
+}
+function initPassQsoOutbox() {
+  if (passQsoOutbox) return;
+  passQsoOutbox = new PassQsoOutbox({ file: path.join(app.getPath('userData'), 'pass-qso-outbox.json'), log: sendCatLog });
+  passQsoOutbox.on('undelivered', passQsoWriteUndelivered);
+  passQsoOutbox.start();
+}
+
 // Fill the station side of an activation record from the park DB. Used by
 // saveQsoRecord and every activation export (the export writes the renderer's
 // copies, which never saw what saveQsoRecord stamped). Fills blanks only.
@@ -12526,21 +12591,23 @@ async function saveQsoRecord(qsoData, opts) {
     const ctx = remoteServer.activeClientContext();
     const caps = (ctx && ctx.capabilities) || [];
     const canReceive = caps.includes('qso-attributed');
+    // A Guest Pass guest: the shack sends the contact to the GUEST's cloud
+    // logbook itself (lib/pass-qso-outbox.js), so a browser guest has a
+    // logbook too and a phone that loses the link loses nothing. The device
+    // still gets its copy, with the same uuid.
+    if (ctx && ctx.passSession && ctx.passSession.sessionId && passQsoOutbox) {
+      return passGuestLogContact(qsoData, ctx, canReceive, origin);
+    }
     if (!canReceive) {
       remoteServer.sendLogError(qsoData, { reason: 'no-capability' });
       sendCatLog(`[architecture-b] dropping QSO from ${origin}: client lacks qso-attributed capability (${qsoData.callsign || '?'})`);
       return { success: false, error: 'client_capability_missing' };
     }
     try {
-      // The call it went out under (the lease identity, else ours): the
-      // guest's book keeps STATION_CALLSIGN verbatim. Under a lease the guest
-      // is also the operator, and the station licensee is kept as one private
-      // field in the guest's record only (Casey 2026-10-27: "Keep").
+      // The call it went out under: the receiving desktop's book keeps
+      // STATION_CALLSIGN verbatim. (A Guest Pass guest's contact took
+      // passGuestLogContact above, which stamps the lease identity.)
       if (!qsoData.stationCallsign) qsoData.stationCallsign = onAirCall();
-      if (passLease) {
-        if (!qsoData.operator) qsoData.operator = onAirCall();
-        qsoData.stationLicensee = String(settings.myCallsign || '').toUpperCase();
-      }
       // The device that ran this QSO, only: with several devices connected,
       // sending it to all of them logged the contact once per device.
       remoteServer.sendToActor({ type: 'qso-attributed', qso: qsoData });
@@ -24106,6 +24173,22 @@ function connectRemote() {
     sendCatLog(`[Echo CAT] Playing voice macro ${idx + 1} from phone`);
   });
 
+  // A device's own recording (a guest's voice macro on a lent rig): played
+  // once out the rig through the same renderer path and PTT as the shack's
+  // macros, never stored. The pass gate runs here AND on the PTT itself.
+  remoteServer.on('voice-macro-play-audio', ({ audio, label, guest }) => {
+    if (!win || win.isDestroyed()) {
+      sendCatLog('[Echo CAT] voice recording from a device ignored — desktop window not available');
+      return;
+    }
+    if (!passTxAllowed(_currentMode)) return;
+    win.webContents.send('play-voice-macro-audio', { audio, label });
+    sendCatLog(`[Echo CAT] Playing ${guest ? "the guest's" : "a device's"} voice recording${label ? ` "${label}"` : ''} (${Math.round(audio.length * 0.75 / 1024)} KB, not stored)`);
+  });
+  remoteServer.on('voice-macro-stop', () => {
+    if (win && !win.isDestroyed()) win.webContents.send('stop-voice-macro');
+  });
+
   remoteServer.on('jtcat-cancel-qso', () => {
     if (ft8Engine) {
       ft8Engine._txEnabled = false;
@@ -32975,6 +33058,7 @@ app.whenReady().then(() => {
   // PTT/power gating flows through gatedSetTransmit()/gatedSetTxPower()
   // helpers defined below.
   try {
+    initPassQsoOutbox();
     passEnforcement = new PassEnforcement({
       log: (msg) => sendCatLog(msg),
       // Power readability heuristic: rigctld + most CIV/Kenwood codecs
@@ -33004,7 +33088,9 @@ app.whenReady().then(() => {
       }
       // The lease is over: stop what the guest left running BEFORE the
       // guest is told (interceptCatCommand already refuses: state 'ended').
-      const stopped = passLeaseStopTransmitters(info.reason);
+      // A pass that ends while the owner has the radio (paused) leaves the
+      // owner's own transmitters alone.
+      const stopped = info.wasPaused ? [] : passLeaseStopTransmitters(info.reason);
       sendCatLog(`[pass] session ended: ${info.reason}${stopped.length ? ' — stopped ' + stopped.join(', ') : ''}; guest disconnected`);
       // #46a: also broadcast to pass-authed WS clients so mobile gets
       // real-time end (its client-side timer is UX-only).
@@ -33067,36 +33153,70 @@ app.whenReady().then(() => {
           passClientDisconnectTimer = null;
         }
       };
-      rs.on('pass-client-disconnected', ({ code }) => {
+      rs.on('pass-client-disconnected', ({ code }) => startPassHoldTimer(code));
+      function startPassHoldTimer(code) {
         clearPassDisconnectTimer();
         passClientDisconnectTimer = setTimeout(() => {
           passClientDisconnectTimer = null;
           const st = passEnforcement.getState();
-          if ((st === 'active' || st === 'expiring') && !remoteServer.hasActivePassClient()) {
+          if ((st === 'active' || st === 'expiring' || st === 'paused') && !remoteServer.hasActivePassClient()) {
             sendCatLog(`[pass] guest gone 60s with no reconnect — ending enforcement session for ${code}`);
             passEnforcement.endPass('disconnected');
           }
         }, 60_000);
+      }
+      // Guest Pass hopping (Casey 2026-10-27). Who has the radio: the owner at
+      // any time, else the guest who holds it — connected, paused by the
+      // owner, or dropped and inside the 60 s hold above — else the next pass
+      // holder. A guest who leaves on purpose frees it at once.
+      rs.setPassLiveCheck(() => {
+        const st = passEnforcement.getState();
+        const s = passEnforcement.getSessionStatus();
+        return { live: st === 'active' || st === 'expiring' || st === 'paused', paused: st === 'paused',
+          code: s.code || null, call: s.guestCallsign || s.onAirCallsign || '', endsAt: s.expiresAt || null };
+      });
+      rs.on('pass-paused', ({ source }) => {
+        // Stop the guest's transmissions while the station is still theirs,
+        // then the owner's call, limits and inbox come back (passLeaseEnd).
+        const stopped = passLeaseStopTransmitters('paused');
+        passEnforcement.pause();
+        sendCatLog(`[pass] The owner took the radio back (${source === 'desktop' ? 'this PC' : 'an owner device'}); the guest is paused${stopped.length ? ' — stopped ' + stopped.join(', ') : ''}`);
+      });
+      rs.on('pass-resumed', ({ guestConnected }) => {
+        // The owner's own transmissions stop before the station is lent again.
+        const stopped = passLeaseStopTransmitters('resumed');
+        passEnforcement.resume();
+        sendCatLog(`[pass] The radio is back with the guest${guestConnected ? '' : ' (not connected: held 60 s)'}${stopped.length ? ' — stopped ' + stopped.join(', ') : ''}`);
+      });
+      rs.on('pass-guest-left', ({ code }) => {
+        clearPassDisconnectTimer();
+        if (passEnforcement.endPassIfCode(code, 'left')) sendCatLog(`[pass] The guest left the rig; it is free for the next pass`);
       });
       rs.setPassAuthCallback(async (code, _sessionId, session) => {
-        clearPassDisconnectTimer();
         const state = passEnforcement.getState();
         if (state === 'idle') {
+          clearPassDisconnectTimer();
           await passEnforcement.loadPass(code, session);
           return;
         }
         const cur = passEnforcement.getSessionStatus();
         // Same-pass re-attach: reconnect after a WS blip or an app
         // relaunch resume. The enforcement session is already correct.
-        if (cur.code === code) { passEnforcement.adoptSession(session); return; }
-        // Different pass. Refuse only when a guest is actually
-        // CONNECTED under the current pass — that's the single-pass
-        // invariant. A lingering session with nobody attached (guest
-        // closed their app; grace timer hasn't fired yet) is stale:
-        // supersede it with the newly validated pass.
-        if (remoteServer.hasActivePassClient()) {
-          throw new Error('Another pass session is already active on this station');
+        if (cur.code === code) {
+          clearPassDisconnectTimer();
+          // A rebuilt server forgot the owner's take-over: the guest has it back.
+          if (state === 'paused' && !remoteServer.isPassPaused()) passEnforcement.resume();
+          passEnforcement.adoptSession(session);
+          return;
         }
+        // Different pass. Another guest holds the rig: connected, paused by the owner, or
+        // dropped inside the hold. auth-fail carries code 'rig_in_use'.
+        if (remoteServer.hasActivePassClient() || passClientDisconnectTimer || state === 'paused') {
+          const err = new Error('Another pass session is already active on this station');
+          err.code = 'rig_in_use'; err.by = 'guest';
+          throw err;
+        }
+        clearPassDisconnectTimer();
         sendCatLog(`[pass] superseding stale session ${cur.code} (no guest connected) with ${code}`);
         passEnforcement.endPass('superseded');
         // endPass settles to idle on the next tick (setImmediate) —
@@ -33121,6 +33241,17 @@ app.whenReady().then(() => {
     } catch (err) {
       return { error: err.message || String(err) };
     }
+  });
+
+  // The desktop banner's Take over / Give it back (the operator at the radio
+  // needs no confirm beyond the click).
+  ipcMain.handle('pass-take-over', async () => {
+    if (!passEnforcement || !remoteServer || !remoteServer.takeOverPass) return { error: 'No guest on the rig' };
+    return { ok: remoteServer.takeOverPass('desktop') };
+  });
+  ipcMain.handle('pass-give-back', async () => {
+    if (!remoteServer || !remoteServer.resumePass) return { error: 'No guest on the rig' };
+    return { ok: remoteServer.resumePass('desktop') };
   });
 
   ipcMain.handle('pass-enforcement-end', async (_evt, reason) => {
@@ -43810,6 +43941,12 @@ app.whenReady().then(() => {
   // the user has it enabled (never on a Yaesu: see handleRemotePtt).
   ipcMain.on('voice-macro-ptt', (_e, state) => {
     handleRemotePtt(!!state, { audio: true });
+  });
+  // Every surface's macro buttons show what is on the air.
+  ipcMain.on('voice-macro-playing', (_e, info) => {
+    if (remoteServer && remoteServer.broadcastVoiceMacroPlaying) {
+      remoteServer.broadcastVoiceMacroPlaying(!!(info && info.playing), info && info.label);
+    }
   });
 
   // VFO popout's manual PTT button — naked TX key with no audio bridge to

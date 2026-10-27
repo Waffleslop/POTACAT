@@ -5819,6 +5819,15 @@ function _gpUpdateOwnerBanner(status) {
   const onAir = String(status.onAirCallsign || '').toUpperCase().trim();
   const guest = String(status.guestCallsign || status.operatorCallsign || onAir || 'a guest').toUpperCase();
   if (callEl) callEl.textContent = guest;
+  // Paused: the owner took the radio back; the pass keeps counting down.
+  const paused = status.state === 'paused';
+  const showEl = (id, on) => { const el = document.getElementById(id); if (el) el.classList.toggle('hidden', !on); };
+  showEl('gp-owner-lent', !paused);
+  showEl('gp-owner-paused', paused);
+  showEl('gp-owner-takeover', !paused);
+  showEl('gp-owner-giveback', paused);
+  const pausedCallEl = document.getElementById('gp-owner-paused-call');
+  if (pausedCallEl) pausedCallEl.textContent = guest;
   const onAirEl = document.getElementById('gp-owner-onair');
   const onAirCallEl = document.getElementById('gp-owner-onair-call');
   const noCallEl = document.getElementById('gp-owner-nocall');
@@ -5841,9 +5850,20 @@ function _gpUpdateOwnerBanner(status) {
   banner.classList.remove('hidden');
 }
 
+async function _gpTakeOverFromOwnerBanner() {
+  if (!window.api || !window.api.passTakeOver) return;
+  try { await window.api.passTakeOver(); } catch (err) { console.error('[Guest Pass] take over failed:', err); }
+}
+async function _gpGiveBackFromOwnerBanner() {
+  if (!window.api || !window.api.passGiveBack) return;
+  try { await window.api.passGiveBack(); } catch (err) { console.error('[Guest Pass] give back failed:', err); }
+}
+
 async function _gpRevokeFromOwnerBanner() {
   if (!window.api || !window.api.passEnforcementEnd) return;
-  const ok = confirm('End this guest\'s access to your rig?');
+  // Ends this session only: the pass stays valid until it expires or is
+  // revoked in Share My Rig, so the guest can come back.
+  const ok = confirm('End this guest\'s session now? They can reconnect while the pass lasts. To stop that, revoke the pass in Share My Rig.');
   if (!ok) return;
   try {
     await window.api.passEnforcementEnd('owner_override');
@@ -5855,8 +5875,10 @@ async function _gpRevokeFromOwnerBanner() {
 
 // Initialize banner + listeners as soon as the renderer is ready.
 (function _gpInitOwnerBanner() {
-  const banner = document.getElementById('gp-owner-banner');
-  if (banner) banner.addEventListener('click', _gpRevokeFromOwnerBanner);
+  const bind = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); };
+  bind('gp-owner-takeover', _gpTakeOverFromOwnerBanner);
+  bind('gp-owner-giveback', _gpGiveBackFromOwnerBanner);
+  bind('gp-owner-end', _gpRevokeFromOwnerBanner);
   if (window.api && window.api.passEnforcementGetState) {
     window.api.passEnforcementGetState().then(_gpUpdateOwnerBanner).catch(() => {});
   }
@@ -22665,9 +22687,18 @@ async function updateVoiceMacroBar() {
 async function playVoiceMacro(idx, btn) {
   // Remote shack: its macro, played into its radio (hotkeys land here too).
   if (remoteShack && remoteShack.remote) { window.api.remoteVoiceMacroPlay(idx); return; }
-  if (voicePlayingIdx >= 0) stopVoicePlayback();
   var base64 = await window.api.voiceMacroLoad(idx);
   if (!base64) return;
+  playVoiceAudio(base64, { idx: idx, btn: btn, label: voiceMacroLabels[idx] || ('V' + (idx + 1)) });
+}
+
+// VOICE_DEVICE_IDX marks a recording a device sent (a guest's own macro on a
+// lent rig): played once like a slot, never stored.
+var VOICE_DEVICE_IDX = -2;
+var voicePlayingLabel = '';
+async function playVoiceAudio(base64, opts) {
+  var idx = opts.idx, btn = opts.btn || null;
+  if (voicePlayingIdx !== -1) stopVoicePlayback();
   var binary = atob(base64);
   var bytes = new Uint8Array(binary.length);
   for (var j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
@@ -22695,6 +22726,7 @@ async function playVoiceMacro(idx, btn) {
   }
   voicePlaybackCtx.decodeAudioData(bytes.buffer, function(audioBuffer) {
     voicePlayingIdx = idx;
+    voicePlayingLabel = opts.label || '';
     if (btn) btn.classList.add('active');
     voicePlaybackSource = voicePlaybackCtx.createBufferSource();
     voicePlaybackSource.buffer = audioBuffer;
@@ -22715,10 +22747,15 @@ async function playVoiceMacro(idx, btn) {
     voicePlaybackSource.start(0);
     if (monitor) { try { monitor.start(0); } catch (e) {} }
     voicePlaybackSource.onended = function() { stopVoicePlayback(); };
+    if (window.api.voiceMacroPlaying) window.api.voiceMacroPlaying({ playing: true, label: voicePlayingLabel });
+  }, function(err) {
+    console.warn('[Voice] Could not decode the recording:', err && err.message);
+    stopVoicePlayback();
   });
 }
 
 function stopVoicePlayback() {
+  var wasPlaying = voicePlayingIdx !== -1;
   if (voicePlaybackSource) { try { voicePlaybackSource.stop(); } catch(e) {} voicePlaybackSource = null; }
   if (voicePlaybackCtx) { voicePlaybackCtx.close().catch(function(){}); voicePlaybackCtx = null; }
   if (voiceMonitorSource) { try { voiceMonitorSource.stop(); } catch (e) {} voiceMonitorSource = null; }
@@ -22726,6 +22763,8 @@ function stopVoicePlayback() {
   window.api.voiceMacroPtt(false);
   voicePlayingIdx = -1;
   if (voiceMacroBtns) voiceMacroBtns.querySelectorAll('button.active').forEach(b => b.classList.remove('active'));
+  if (wasPlaying && window.api.voiceMacroPlaying) window.api.voiceMacroPlaying({ playing: false, label: voicePlayingLabel });
+  voicePlayingLabel = '';
 }
 
 // Local-only preview — plays the macro through the system default output so
@@ -22848,6 +22887,16 @@ window.api.onPlayVoiceMacro((idx) => {
   const btn = voiceMacroBtns ? voiceMacroBtns.querySelector(`button[data-idx="${idx}"]`) : null;
   playVoiceMacro(idx, btn);
 });
+// A device's own recording (a guest's macro on a lent rig), and a device's Stop.
+if (window.api.onPlayVoiceMacroAudio) {
+  window.api.onPlayVoiceMacroAudio((info) => {
+    if (!info || typeof info.audio !== 'string' || !info.audio) return;
+    playVoiceAudio(info.audio, { idx: VOICE_DEVICE_IDX, btn: null, label: info.label || '' });
+  });
+}
+if (window.api.onStopVoiceMacro) {
+  window.api.onStopVoiceMacro(() => { if (voicePlayingIdx !== -1) stopVoicePlayback(); });
+}
 
 // Voice macro recording UI in Settings
 async function renderVoiceMacroEditor() {

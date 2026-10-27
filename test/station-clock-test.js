@@ -118,7 +118,7 @@ test('wiring', () => {
   for (const t of ['clock-probe', 'clock-probe-reply', 'clock-apply', 'clock-apply-result']) {
     assert.ok(proto.MESSAGES && proto.MESSAGES[t] || read('lib/echocat-protocol.js').includes(`'${t}':`), t + ' in the registry');
   }
-  assert.ok(/'clock-from-device'\]/.test(rs), 'hello capability');
+  assert.ok(/capabilities: \[[\s\S]*?'clock-from-device'[\s\S]*?\],\n?\s*rigModel:/.test(rs.replace(/\r\n/g, '\n')), 'hello capability');
   assert.ok(/now: StationClock\.now\(\)/.test(rs), 'hello carries the corrected clock');
   for (const f of ['lib/ft8-engine.js', 'lib/jtty-engine.js', 'lib/js8-engine.js']) {
     const s = read(f);

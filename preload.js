@@ -203,6 +203,8 @@ contextBridge.exposeInMainWorld('api', {
   passEnforcementGetState: () => ipcRenderer.invoke('pass-enforcement-get-state'),
   passEnforcementLoad: (code) => ipcRenderer.invoke('pass-enforcement-load', code),
   passEnforcementEnd: (reason) => ipcRenderer.invoke('pass-enforcement-end', reason),
+  passTakeOver: () => ipcRenderer.invoke('pass-take-over'),
+  passGiveBack: () => ipcRenderer.invoke('pass-give-back'),
   onPassEnforcementState: (cb) => {
     const handler = (_e, status) => cb(status);
     ipcRenderer.on('pass-enforcement-state', handler);
@@ -532,6 +534,9 @@ contextBridge.exposeInMainWorld('api', {
   // Phone-tapped macro slot — main relays here so the renderer's playback
   // chain (which owns the audio path) handles it the same as a local click.
   onPlayVoiceMacro: (cb) => ipcRenderer.on('play-voice-macro', (_e, idx) => cb(idx)),
+  onPlayVoiceMacroAudio: (cb) => ipcRenderer.on('play-voice-macro-audio', (_e, info) => cb(info)),
+  onStopVoiceMacro: (cb) => ipcRenderer.on('stop-voice-macro', () => cb()),
+  voiceMacroPlaying: (info) => ipcRenderer.send('voice-macro-playing', info),
   cwCancel: () => ipcRenderer.send('cw-cancel'),
   onCwEcho: (cb) => ipcRenderer.on('cw-echo', (_e, data) => cb(data)),
   onWinkeyerBusy: (cb) => ipcRenderer.on('winkeyer-busy', (_e, busy) => cb(busy)),
