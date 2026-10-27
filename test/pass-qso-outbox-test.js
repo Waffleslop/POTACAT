@@ -90,6 +90,20 @@ function outbox(fetch, opts = {}) {
     }
   });
 
+  await check('the route\'s not_found is retried for a day, then handed back', async () => {
+    const fetch = fakeFetch(() => reply(404, { error: 'not_found' }));
+    const { box, now } = outbox(fetch);
+    let got = null;
+    box.on('undelivered', (x) => { got = x; });
+    box.add({ code: 'abcd1234', token: TOKEN, fields: fields('W1AW') });
+    box.stop();
+    await box.flush(); box.stop();
+    assert.strictEqual(box.pending(), 1, 'kept at first');
+    now.t += 25 * 3600 * 1000;
+    await box.flush(); box.stop();
+    assert.ok(got && got.entries.length === 1, 'handed back after a day');
+  });
+
   await check('410 (session closed over a day ago) hands the contacts back for the file', async () => {
     const fetch = fakeFetch(() => reply(410, { error: 'pass_session_closed' }));
     const { box } = outbox(fetch);
