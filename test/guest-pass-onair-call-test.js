@@ -26,13 +26,18 @@ function check(name, fn) {
 }
 
 console.log('rule:');
-check('the pass station call wins', () => {
+check("the guest's verified account callsign wins", () => {
+  assert.strictEqual(onAirCallFor({ guest_callsign: 'k3sbp', station_callsign: 'W7RTA' }, 'W7RTA'), 'K3SBP');
+});
+check('an older pass: the station call its issuer wrote', () => {
   assert.strictEqual(onAirCallFor({ station_callsign: 'k3sbp' }, 'W7RTA'), 'K3SBP');
 });
-check('no station call on the pass = the host call', () => {
-  assert.strictEqual(onAirCallFor({ station_callsign: '' }, 'w7rta'), 'W7RTA');
-  assert.strictEqual(onAirCallFor({}, 'W7RTA'), 'W7RTA');
-  assert.strictEqual(onAirCallFor(null, 'W7RTA'), 'W7RTA');
+check('a live pass with no call is listen-only, never the host call', () => {
+  assert.strictEqual(onAirCallFor({ station_callsign: '' }, 'w7rta'), '');
+  assert.strictEqual(onAirCallFor({}, 'W7RTA'), '');
+});
+check('no session = the host call', () => {
+  assert.strictEqual(onAirCallFor(null, 'w7rta'), 'W7RTA');
 });
 check('only callsign characters survive', () => {
   assert.strictEqual(onAirCallFor({ station_callsign: ' KH6/k3sbp ' }, 'W7RTA'), 'KH6/K3SBP');
@@ -69,10 +74,15 @@ check('a guest gets the pass call as settings.myCallsign', () => {
   assert.strictEqual(rs._settingsFor(ws).myCallsign, 'K3SBP');
   assert.strictEqual(rs._passOnAirCall(ws), 'K3SBP');
 });
-check('a pass naming no station call keeps the host call', () => {
+check("a pass with no verified call tells the guest no call (listen only), never the host's", () => {
   const rs = fakeServer();
   const ws = { _passSession: { passProfile: {} } };
-  assert.strictEqual(rs._settingsFor(ws).myCallsign, 'W7RTA');
+  assert.strictEqual(rs._settingsFor(ws).myCallsign, '');
+});
+check('the guest account callsign from validate-session wins', () => {
+  const rs = fakeServer();
+  const ws = { _passSession: { passProfile: { guest_callsign: 'K3SBP', station_callsign: 'W7RTA' } } };
+  assert.strictEqual(rs._settingsFor(ws).myCallsign, 'K3SBP');
 });
 check('the owner\'s own devices are untouched', () => {
   const rs = fakeServer();
@@ -127,11 +137,76 @@ check('a forwarded guest QSO is stamped with the on-air call', () => {
   assert.ok(i > 0);
   assert.ok(/qsoData\.stationCallsign = onAirCall\(\)/.test(main.slice(i - 600, i)));
 });
-check('a pass change re-arms AP and tells the JTCAT window', () => {
+check('a pass change begins and ends the lease, which re-arms AP and tells the JTCAT window', () => {
   const i = main.indexOf("passEnforcement.on('state-change'");
-  const b = main.slice(i, i + 1500);
-  assert.ok(/setApContext\(\{ myCall: nowCall \}\)/.test(b));
-  assert.ok(/'jtcat-on-air-call'/.test(b));
+  const b = main.slice(i, i + 900);
+  assert.ok(/passLeaseBegin\(\)/.test(b) && /passLeaseEnd\(\)/.test(b));
+  const t = fnBody('passLeaseTellWindows');
+  assert.ok(/setApContext\(\{ myCall: call \}\)/.test(t));
+  assert.ok(/'jtcat-on-air-call'/.test(t));
+});
+
+console.log('the lease (phase B):');
+check('no verified call refuses every transmit', () => {
+  const e = enf('active', { code: 'ABC', privilege_class: 'us_extra', allowed_modes: [], max_power_w: 100 });
+  e._expiresAtMs = Date.now() + 60000;
+  const r = e.interceptCatCommand({ type: 'tx_enable', freqHz: 14074000, mode: 'CW' });
+  assert.strictEqual(r.allowed, false);
+  assert.strictEqual(r.reason, 'no_callsign');
+  assert.strictEqual(e.interceptCatCommand({ type: 'sstv_tx', freqHz: 14230000 }).reason, 'no_callsign');
+  assert.strictEqual(e.interceptCatCommand({ type: 'tune', freqHz: 14074000 }).allowed, true, 'listening is fine');
+});
+check('the validated session carries the guest call into PassEnforcement', () => {
+  const e = enf('active', { code: 'ABC', station_callsign: 'W7RTA' });
+  e.adoptSession({ guest_callsign: 'K3SBP', guest_user_id: 'u1' });
+  assert.strictEqual(e.onAirCallsign('W7RTA'), 'K3SBP');
+  assert.strictEqual(e.getSessionStatus().onAirCallsign, 'K3SBP');
+  const pe = fs.readFileSync(path.join(ROOT, 'lib/pass-enforcement.js'), 'utf8');
+  assert.ok(/async loadPass\(code, session\)/.test(pe) && /this\.adoptSession\(session\);/.test(pe));
+  assert.ok(/loadPass\(code, session\)/.test(main), 'main hands the validated session over');
+  const rsrc = fs.readFileSync(path.join(ROOT, 'lib/remote-server.js'), 'utf8');
+  assert.ok(/this\._onPassAuth\(profile\.code, msg\.sessionId, profile\)/.test(rsrc));
+});
+check('everything that identifies or reports the station reads onAirCall()', () => {
+  const needles = [
+    /callsign: \(node\.loginCall && node\.loginCall\.trim\(\)\) \|\| onAirCall\(\)/,
+    /callsign: onAirCall\(\), \/\/ "where am I heard"/,
+    /const myCall = onAirCall\(\); \/\/ "where am I heard"/,
+    /\{ call: onAirCall\(\), grid: settings\.grid \}/,
+    /eng\.setStation\(\{ call: onAirCall\(\), grid: settings\.grid \}\)/,
+    /mercuryClient\.myCall\(onAirCall\(\)\)/,
+    /sanitizeSstvFilenamePart\(onAirCall\(\), ''\)/,
+  ];
+  for (const re of needles) assert.ok(re.test(main), 'missing ' + re);
+  assert.strictEqual((main.match(/spotter: onAirCall\(\),/g) || []).length, 3, 'POTA, WWFF and WWBOTA re-spots');
+  assert.ok(!/spotter: settings\.myCallsign/.test(main));
+  for (const name of ['wsprBeaconTick', 'pskrFlush']) assert.ok(!/settings\.myCallsign/.test(fnBody(name)), name);
+});
+check('the lease parks the owner: heartbeat off, own JS8 threads, no APRS gate, no activation refs', () => {
+  const b = fnBody('passLeaseBegin');
+  assert.ok(/js8SetHeartbeat\(false\)/.test(b));
+  assert.ok(/js8Threads = new Js8Threads/.test(b));
+  assert.ok(/disconnectAprsGate\(\)/.test(b));
+  assert.ok(/passLeaseReconnectReporters\(\)/.test(b));
+  const e = fnBody('passLeaseEnd');
+  assert.ok(/js8Threads = was\.js8Threads/.test(e) && /connectAprsGate\(\)/.test(e));
+  assert.ok(!/js8SetHeartbeat\(true\)/.test(e), 'an automatic transmitter is never restarted unattended');
+  assert.ok(/if \(passLease\) return \[\];/.test(fnBody('liveActivationMyRefs')));
+});
+check('a forwarded guest QSO names the guest as operator and keeps the licensee privately', () => {
+  const i = main.indexOf("type: 'qso-attributed', qso: qsoData");
+  const b = main.slice(i - 900, i);
+  assert.ok(/qsoData\.operator = onAirCall\(\)/.test(b));
+  assert.ok(/qsoData\.stationLicensee = /.test(b));
+});
+check('Share My Rig asks one callsign question, and no box is pre-filled with the owner', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'renderer/index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(ROOT, 'renderer/app.js'), 'utf8');
+  assert.ok(/Who is this pass for\?/.test(html));
+  assert.ok(/id="share-rig-for"/.test(html));
+  for (const id of ['share-rig-station', 'share-rig-operator', 'share-rig-control']) assert.ok(!html.includes('id="' + id + '"'), id);
+  assert.ok(!/_shareRigPrefillCallsigns/.test(app));
+  assert.ok(/can listen and log but not transmit/.test(html), 'the anonymous option says what it costs');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

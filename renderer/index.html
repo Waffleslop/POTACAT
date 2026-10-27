@@ -25,11 +25,11 @@
   <div id="gp-owner-banner" class="hidden" title="Click to revoke guest access immediately">
     <span aria-hidden="true">&#x1F511;</span>
     <div style="flex:1;line-height:1.3;">
-      <strong><span id="gp-owner-callsign">&hellip;</span></strong>
-      <span> is controlling this rig. Their access expires </span>
-      <strong><span id="gp-owner-expires">&hellip;</span></strong><span>.</span>
-      <span id="gp-owner-onair" class="hidden"> TX as <strong><span id="gp-owner-onair-call"></span></strong> (Guest Pass).</span>
-      <span class="gp-revoke-link">Revoke access</span>
+      <span>Your radio is lent to </span><strong><span id="gp-owner-callsign">&hellip;</span></strong>
+      <span id="gp-owner-onair"> and is on the air as <strong><span id="gp-owner-onair-call"></span></strong></span>
+      <span id="gp-owner-nocall" class="hidden"> (no verified callsign: listen only)</span>
+      <span>. Ends in </span><strong><span id="gp-owner-expires">&hellip;</span></strong><span>.</span>
+      <span class="gp-revoke-link">End now</span>
     </div>
   </div>
   <!-- POTACAT Cloud billing banner: grace / payment problem / expired, and
@@ -4075,7 +4075,7 @@
            _shareRigUpdateReachNotice() based on cloud-tunnel +
            Tailscale state. -->
       <div id="share-rig-reach-notice" class="share-rig-notice"></div>
-      <p class="share-rig-intro">Generate a time-boxed access pass for someone else. POTACAT enforces the privilege class, power cap, and expiry on this end — out-of-band tunes are blocked, TX power is clamped, the session auto-ends when the timer runs out.</p>
+      <p class="share-rig-intro">Lend your radio to another ham for a while. They sign in to POTACAT Cloud with their own callsign and operate as themselves: their call goes on the air and their QSOs go to their logbook, not yours. POTACAT keeps them inside the class, power and modes you allow, and hands the radio back when the time is up.</p>
 
       <div class="share-rig-section">
         <div class="share-rig-section-title">When?</div>
@@ -4155,13 +4155,11 @@
       </div>
 
       <div class="share-rig-section">
-        <div class="share-rig-section-title">§97.119 callsigns</div>
-        <div class="share-rig-grid">
-          <label>Station callsign <input type="text" id="share-rig-station" autocomplete="off" spellcheck="false"></label>
-          <label>Operator callsign <input type="text" id="share-rig-operator" placeholder="(left blank → guest's call)" autocomplete="off" spellcheck="false"></label>
-          <label>Control operator <input type="text" id="share-rig-control" autocomplete="off" spellcheck="false"></label>
+        <div class="share-rig-section-title">Who is this pass for?</div>
+        <div class="share-rig-row">
+          <label>Their callsign <input type="text" id="share-rig-for" placeholder="e.g. K3SBP" autocomplete="off" spellcheck="false" maxlength="15" style="width:120px;"></label>
         </div>
-        <span class="help-text">POTACAT writes whatever you set into the QSO's ADIF — see <a href="https://www.ecfr.gov/current/title-47/chapter-I/subchapter-D/part-97/subpart-B/section-97.119" id="share-rig-97119-link" data-external="1" class="share-rig-extlink">&sect;97.119</a>. We don't interpret the rule for you.</span>
+        <span class="help-text">Only this callsign's POTACAT Cloud account can use the pass. While it runs, the radio identifies as this call on every mode (FT8, CW, SSTV, Winlink, JS8) and every contact is logged under it. Your call appears nowhere on the air; the guest's log keeps a private note that the station is yours. Leave blank to let anyone with the link use it under their own account's callsign.</span>
       </div>
 
       <div class="share-rig-section">
@@ -4170,7 +4168,7 @@
           <input type="checkbox" id="share-rig-allow-anonymous">
           <span>
             <span class="share-rig-anon-title">Allow without a POTACAT Cloud sign-in</span>
-            <span class="share-rig-anon-sub">By default, your friend needs a free POTACAT Cloud account to redeem. Tick this for one-off guests who can't sign up (Field Day visitor, club net rotation, etc.). <b>Weaker §97.119 audit trail</b> — the QSO log will show the placeholder name you set above as the operator.</span>
+            <span class="share-rig-anon-sub">Normally your guest signs in with a free POTACAT Cloud account, which is how POTACAT knows the callsign to put on the air. Tick this for a one-off guest who cannot sign up (a Field Day visitor, a club net). <b>Without a sign-in there is no verified callsign, so they can listen and log but not transmit.</b></span>
           </span>
         </label>
       </div>
@@ -4198,6 +4196,7 @@
 
       <div class="share-rig-summary">
         <div><strong>Code:</strong> <span id="share-rig-result-code" class="share-rig-code"></span></div>
+        <div><strong>For:</strong> <span id="share-rig-result-for"></span></div>
         <div><strong>Expires:</strong> <span id="share-rig-result-expires"></span></div>
         <div><strong>Privileges:</strong> <span id="share-rig-result-priv"></span></div>
       </div>

@@ -5814,14 +5814,17 @@ function _gpUpdateOwnerBanner(status) {
   }
   const callEl = document.getElementById('gp-owner-callsign');
   const expEl = document.getElementById('gp-owner-expires');
-  if (callEl) callEl.textContent = (status.operatorCallsign || status.controlOperatorCallsign || 'Guest').toString().toUpperCase();
-  // The call the station transmits for the session (main onAirCall): the
-  // pass's station call, which may not be ours.
+  // The lease: who has the radio, and the call it is on the air as (the
+  // guest's own; '' = an unverified guest who may only listen).
+  const onAir = String(status.onAirCallsign || '').toUpperCase().trim();
+  const guest = String(status.guestCallsign || status.operatorCallsign || onAir || 'a guest').toUpperCase();
+  if (callEl) callEl.textContent = guest;
   const onAirEl = document.getElementById('gp-owner-onair');
   const onAirCallEl = document.getElementById('gp-owner-onair-call');
-  const onAir = String(status.stationCallsign || '').toUpperCase().trim();
+  const noCallEl = document.getElementById('gp-owner-nocall');
   if (onAirCallEl) onAirCallEl.textContent = onAir;
   if (onAirEl) onAirEl.classList.toggle('hidden', !onAir);
+  if (noCallEl) noCallEl.classList.toggle('hidden', !!onAir);
   _gpOwnerBannerExpiresAtMs = status.expiresAt ? new Date(status.expiresAt).getTime() : 0;
   const tick = () => {
     if (!_gpOwnerBannerExpiresAtMs) {
@@ -6835,7 +6838,6 @@ function _shareRigOpen() {
   if (!dlg) return;
   // Reset to form view, pre-fill callsigns from current settings.
   _shareRigShowFormView();
-  _shareRigPrefillCallsigns();
   _shareRigUpdateClassDetail();
   _shareRigUpdateReachNotice();
   _shareRigResetWhenSection();
@@ -6962,17 +6964,6 @@ function _shareRigShowResultView() {
   document.getElementById('share-rig-result-view').classList.remove('hidden');
 }
 
-async function _shareRigPrefillCallsigns() {
-  try {
-    const s = await window.api.getSettings();
-    const my = (s && s.myCallsign) ? String(s.myCallsign).toUpperCase() : '';
-    const station = document.getElementById('share-rig-station');
-    const control = document.getElementById('share-rig-control');
-    if (station && !station.value && my) station.value = my;
-    if (control && !control.value && my) control.value = my;
-  } catch {}
-}
-
 function _shareRigUpdateClassDetail() {
   const sel = document.getElementById('share-rig-class');
   const detail = document.getElementById('share-rig-class-detail');
@@ -7000,9 +6991,14 @@ async function _shareRigIssue() {
   const btn = document.getElementById('share-rig-issue');
   const watts = _shareRigSelectedWatts();
   const cls = document.getElementById('share-rig-class').value || 'general';
-  const station = (document.getElementById('share-rig-station').value || '').toUpperCase().trim() || null;
-  const operator = (document.getElementById('share-rig-operator').value || '').toUpperCase().trim() || null;
-  const control = (document.getElementById('share-rig-control').value || '').toUpperCase().trim() || null;
+  // Who the pass is for. The cloud lets only that account redeem it, and the
+  // call goes on the air; blank = anyone with the link, under their own
+  // account's call. The same value rides the legacy station_callsign field
+  // so a shack on an older build identifies the same way.
+  const forCall = (document.getElementById('share-rig-for').value || '').toUpperCase().replace(/[^A-Z0-9/]/g, '').slice(0, 15) || null;
+  const station = forCall;
+  const operator = forCall;
+  const control = null;
 
   // Body branches on When? mode. The "starts now" branch keeps the
   // legacy duration_seconds shape — backwards compatible with every
@@ -7073,6 +7069,7 @@ async function _shareRigIssue() {
     }
     _shareRigShowResultView();
     document.getElementById('share-rig-result-code').textContent = res.code || '';
+    document.getElementById('share-rig-result-for').textContent = forCall || 'Anyone with the link, under their own callsign';
     document.getElementById('share-rig-result-url').textContent = res.share_url || '';
     // Surface whether the recipient will need to sign in or not. The
     // copy here is the source of truth — the operator just made this

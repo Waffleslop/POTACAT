@@ -567,7 +567,8 @@ let registerCloudIpc;
 try { registerCloudIpc = require('./lib/cloud-ipc').registerCloudIpc; } catch { registerCloudIpc = null; }
 const { CloudTunnelManager } = require('./lib/cloud-tunnel');
 const { resolveCloudflaredPath } = require('./lib/cloudflared');
-const { PassEnforcement } = require('./lib/pass-enforcement');
+const PassEnforcementLib = require('./lib/pass-enforcement');
+const { PassEnforcement } = PassEnforcementLib;
 logStartupStage('top-level requires complete');
 
 // --- QRZ.com callsign lookup ---
@@ -7935,7 +7936,7 @@ function connectCluster() {
       // primary logger under their base call needs POTACAT to log in under a
       // distinct SSID (e.g. WG9I-2) to run both at once. Blank = base call.
       // (WG9I 2026-06-13.)
-      callsign: (node.loginCall && node.loginCall.trim()) || settings.myCallsign,
+      callsign: (node.loginCall && node.loginCall.trim()) || onAirCall(), // a leased station spots as its guest
       // Optional per-node password — for feeds that authenticate for real,
       // e.g. HamAlert's telnet cluster (hamalert.org:7300, HamAlert
       // username in loginCall + account password). Blank for normal nodes.
@@ -8180,7 +8181,7 @@ function connectRbn() {
   // Propagation popout. K3SBP 2026-05-04: collect propagation passively
   // regardless of the popout being open. ~1–15 KB/s + light regex parse,
   // well below "major consumer".
-  if (!settings.myCallsign) {
+  if (!onAirCall()) {
     sendRbnStatus({ connected: false });
     return;
   }
@@ -8196,7 +8197,7 @@ function connectRbn() {
     // arrives for the operator's own call we know the desktop received it
     // and forwarded; if there are no [RBN] heard lines after a CW session
     // the issue is upstream (no skimmer heard you), not POTACAT routing.
-    if (settings.myCallsign && raw.callsign.toUpperCase() === settings.myCallsign.toUpperCase()) {
+    if (onAirCall() && raw.callsign.toUpperCase() === onAirCall()) {
       sendCatLog(`[RBN] You were heard: ${spotter} ${raw.freqMHz.toFixed(3)} ${raw.mode || ''} ${raw.snr != null ? raw.snr + ' dB' : ''}`.replace(/\s+$/, ''));
     }
 
@@ -8325,7 +8326,7 @@ function connectRbn() {
   rbn.connect({
     host: 'telnet.reversebeacon.net',
     port: 7000,
-    callsign: settings.myCallsign,
+    callsign: onAirCall(), // "where am I heard": the guest's call under a lease
     watchlist: settings.watchlist || '',
   });
 }
@@ -11169,7 +11170,7 @@ let _aprsGateStamps = [];            // global rate window
 const _aprsGatePerCall = new Map();  // per-source last-gated ms
 
 function connectAprsGate() {
-  if (aprsGate || !settings.js8AprsGate || !settings.myCallsign) return;
+  if (aprsGate || !settings.js8AprsGate || !settings.myCallsign || passLease) return; // the gate logs in as the owner
   const { AprsIsClient } = require('./lib/aprs-is');
   aprsGate = new AprsIsClient({ call: settings.myCallsign, version: app.getVersion() });
   aprsGate.on('connected', () => sendCatLog('[APRS-IS] connected — logging in'));
@@ -11373,11 +11374,11 @@ function js8Transmit(text, to) {
   };
   const eng = js8Engine();
   if (!eng) return refuse('JS8 is not running. Start JTCAT in JS8 mode first.');
-  if (!settings.myCallsign) return refuse('Set your callsign in Settings first.');
+  if (!onAirCall()) return refuse(passLease ? PassEnforcementLib.NO_CALL_TEXT : 'Set your callsign in Settings first.');
   if (radioOwner !== 'none' && radioOwner !== 'jtcat') {
     return refuse(`the radio is busy (${radioOwner}).`);
   }
-  eng.setStation({ call: settings.myCallsign, grid: settings.grid });
+  eng.setStation({ call: onAirCall(), grid: settings.grid });
   // A CQ is a broadcast (no addressee) — pick a clear offset like FT8 does.
   // Directed messages stay on the current offset (a QSO shouldn't wander).
   if (!to && /^\s*CQ\b/i.test(String(text || ''))) js8AutoPickQuietFreq(eng);
@@ -11683,7 +11684,7 @@ function js8QueueHeartbeat() {
     return { ok: false, error: `the radio is busy (${radioOwner}).` };
   }
   const grid = String(settings.grid || '').slice(0, 4).toUpperCase();
-  eng.setStation({ call: settings.myCallsign, grid });
+  eng.setStation({ call: onAirCall(), grid });
   js8AutoPickQuietFreq(eng);   // a heartbeat is a broadcast — put it on a clear spot
   const text = grid ? `HB ${grid}` : 'HB';
   const frames = eng.setTxText(text);
@@ -12075,14 +12076,14 @@ function connectPskrMap() {
   pskrMapSpots = [];
 
   // Auto-connect whenever a callsign is configured. See connectRbn() rationale.
-  if (!settings.myCallsign) {
+  if (!onAirCall()) {
     sendPskrMapStatus({ connected: false });
     return;
   }
 
   pskrMap = new PskrClient();
   const myPos = gridToLatLon(settings.grid);
-  const myCall = settings.myCallsign.toUpperCase();
+  const myCall = onAirCall(); // "where am I heard" — the station's call, the guest's under a lease
 
   const PSKR_MAP_PER_BAND_CAP = 500; // reports kept per band (24 h max-age prune below)
   pskrMap.on('spot', (raw) => {
@@ -12329,6 +12330,7 @@ function reviewAskTick() {
 // activation's refs, unless entry.activation === false (a past QSO typed into
 // the Logbook is not part of today's activation).
 function liveActivationMyRefs() {
+  if (passLease) return []; // a guest's contact is theirs, at no park of the owner's
   const parkRefs = (settings.activatorParkRefs || []).filter((p) => p && p.ref);
   if (!(settings.activationActive || settings.appMode === 'activator') || !parkRefs.length) return [];
   return activationProgram.activationMyRefs(parkRefs, settings.activatorCrossRefs || []);
@@ -12530,9 +12532,15 @@ async function saveQsoRecord(qsoData, opts) {
       return { success: false, error: 'client_capability_missing' };
     }
     try {
-      // The call it went out under (a Guest Pass's station call, else ours):
-      // the guest's book keeps STATION_CALLSIGN verbatim.
+      // The call it went out under (the lease identity, else ours): the
+      // guest's book keeps STATION_CALLSIGN verbatim. Under a lease the guest
+      // is also the operator, and the station licensee is kept as one private
+      // field in the guest's record only (Casey 2026-10-27: "Keep").
       if (!qsoData.stationCallsign) qsoData.stationCallsign = onAirCall();
+      if (passLease) {
+        if (!qsoData.operator) qsoData.operator = onAirCall();
+        qsoData.stationLicensee = String(settings.myCallsign || '').toUpperCase();
+      }
       // The device that ran this QSO, only: with several devices connected,
       // sending it to all of them logged the contact once per device.
       remoteServer.sendToActor({ type: 'qso-attributed', qso: qsoData });
@@ -14631,7 +14639,7 @@ function pskrQueueDecodes(data) {
   if (mode !== 'FT8' && mode !== 'FT4') return; // WSPR -> wsprnet; only fast modes here
   const dialHz = _currentFreqHz || 0;
   if (!dialHz) return;
-  const myCall = (settings.myCallsign || '').toUpperCase();
+  const myCall = onAirCall();
   const nowSec = Math.floor(StationClock.now() / 1000);
   for (const r of (data.results || [])) {
     const call = (r.call || '').toUpperCase();
@@ -14651,7 +14659,7 @@ function pskrQueueDecodes(data) {
 // Same pskrUpload gate, same pending-map dedup (strongest per call).
 function pskrQueueWsprSpots(spots) {
   if (!settings.pskrUpload) return;
-  const myCall = (settings.myCallsign || '').toUpperCase();
+  const myCall = onAirCall();
   const nowSec = Math.floor(StationClock.now() / 1000);
   for (const s of (spots || [])) {
     const call = (s.call || '').toUpperCase();
@@ -14673,7 +14681,7 @@ function pskrQueueWsprSpots(spots) {
 function pskrFlush() {
   if (!settings.pskrUpload) { _pskrPending.clear(); return; }
   if (_pskrPending.size === 0) return;
-  const myCall = (settings.myCallsign || '').trim().toUpperCase();
+  const myCall = onAirCall();
   const grid = (settings.grid || '').trim().toUpperCase().slice(0, 6);
   if (!myCall || grid.length < 4) { _pskrPending.clear(); return; }
   const reports = Array.from(_pskrPending.values());
@@ -14712,7 +14720,7 @@ function startPskrReporter() {
 // lags wsprnet by a few minutes anyway) and only while in WSPR mode with a call.
 let _lastWsprHeardFetch = 0;
 async function maybeFetchWsprHeard(force) {
-  const call = (settings.myCallsign || '').trim();
+  const call = onAirCall();
   if (!call || !ft8Engine || ft8Engine._mode !== 'WSPR') return;
   if (!force && Date.now() - _lastWsprHeardFetch < 180000) return;
   _lastWsprHeardFetch = Date.now();
@@ -14975,7 +14983,7 @@ function wsprBeaconTick() {
   }
   const plan = jtcatWsprScheduler.tick(StationClock.now());
   if (!plan) return;
-  const call = (settings.myCallsign || '').trim().toUpperCase();
+  const call = onAirCall();
   const grid = (settings.grid || '').trim().toUpperCase().slice(0, 4);
   const dbm = Math.min(JTCAT_WSPR_MAX_DBM, settings.wsprDbm != null ? settings.wsprDbm : 30);
   // The audio dispatch prepends a ~500 ms PTT-settle lead before the waveform
@@ -15018,7 +15026,7 @@ function setWsprBeacon(on, opts = {}) {
     tellPopout(false);
     return;
   }
-  const call = (settings.myCallsign || '').trim().toUpperCase();
+  const call = onAirCall();
   const grid = (settings.grid || '').trim().toUpperCase().slice(0, 4);
   if (!ft8Engine || ft8Engine._mode !== 'WSPR') {
     sendCatLog('[JTCAT] WSPR beacon: switch JTCAT to WSPR mode first');
@@ -15887,7 +15895,7 @@ function startJtcat(mode) {
     // windows know JS8 is up.
     js8RxAssembler = new Js8RxAssembler({});
     js8Station = {
-      call: (settings.myCallsign || '').toUpperCase(),
+      call: onAirCall(),
       grid: (settings.grid || '').toUpperCase(),
     };
     js8Threads.setMyCall(js8Station.call);
@@ -16336,12 +16344,12 @@ function startJtcat(mode) {
     maybeHopBand();
 
     // Upload to wsprnet.org if enabled (keyed by our call + grid).
-    if (settings.wsprUpload && settings.myCallsign && settings.grid && spots.length) {
+    if (settings.wsprUpload && onAirCall() && settings.grid && spots.length) {
       try {
         const { dateYYMMDD, timeHHMM } = wsprnet.utcStamp(now);
         const res = await wsprnet.uploadSpots(
           spots,
-          { call: settings.myCallsign, grid: settings.grid },
+          { call: onAirCall(), grid: settings.grid },
           { dialMHz: ft8Engine._wsprDialMHz, dateYYMMDD, timeHHMM, version: 'POTACAT' }
         );
         if (res.uploaded) sendCatLog(`[JTCAT] WSPR: reported ${res.uploaded} spot${res.uploaded > 1 ? 's' : ''} to wsprnet.org`);
@@ -19179,6 +19187,55 @@ function agSwitchForFreq(freqKhz) {
 function onAirCall() {
   const host = settings.myCallsign || '';
   return passEnforcement ? passEnforcement.onAirCallsign(host) : String(host).toUpperCase();
+}
+
+// ── The lease (docs/share-my-rig-lease-plan.md) ──────────────────────────
+// While a Guest Pass session is live the station is the guest's: their call
+// on the air and in every report, the owner's automatic transmitters off,
+// the owner's inbox out of reach. passLease holds what to put back.
+let passLease = null;
+function passLeaseBegin() {
+  const who = passEnforcement.identity(settings.myCallsign || '');
+  const host = String(settings.myCallsign || '').toUpperCase();
+  passLease = { call: who.call, js8Threads, hbWasOn: js8HbEnabled };
+  sendCatLog(who.call
+    ? `[pass] Station lent: on the air as ${who.call} (${who.source === 'guest' ? "the guest's account callsign" : 'the callsign written on the pass'}) until the pass ends`
+    : `[pass] Station lent to a guest with no verified callsign: listen and log only, no transmit`);
+  // The owner's automatic transmitters stop and are NOT restarted at the
+  // end (an automatic transmitter must be attended — Part 97).
+  if (js8HbEnabled) { js8SetHeartbeat(false); sendCatLog('[pass] JS8 heartbeat off for the lease'); }
+  // JS8: the guest's own conversations; the owner's inbox is never sent.
+  js8Threads = new Js8Threads({});
+  js8Threads.setMyCall(who.call);
+  js8Station.call = who.call;
+  try { const eng = js8Engine(); if (eng) eng.setStation({ call: who.call, grid: settings.grid }); } catch {}
+  disconnectAprsGate();                  // the gate logs in as the owner
+  passLeaseReconnectReporters();         // cluster login, PSKReporter and RBN follow the call
+  passLeaseTellWindows(who.call);
+}
+function passLeaseEnd() {
+  const host = String(settings.myCallsign || '').toUpperCase();
+  const was = passLease; passLease = null;
+  if (was && was.js8Threads) js8Threads = was.js8Threads;
+  js8Station.call = host;
+  try { const eng = js8Engine(); if (eng) eng.setStation({ call: host, grid: settings.grid }); } catch {}
+  connectAprsGate();
+  passLeaseReconnectReporters();
+  passLeaseTellWindows(host);
+  sendCatLog(`[pass] Station back: on the air as ${host || '(no callsign)'}`);
+}
+function passLeaseReconnectReporters() {
+  try { if (settings.enableCluster) { disconnectCluster(); connectCluster(); } } catch (e) { sendCatLog('[pass] cluster re-login failed: ' + (e && e.message || e)); }
+  try { connectPskrMap(); } catch {}
+  try { connectRbn(); } catch {}
+}
+function passLeaseTellWindows(call) {
+  // AP decode hypothesises OUR call in the bits it fixes; the JTCAT window
+  // builds replies and "to me" from it.
+  if (ft8Engine && typeof ft8Engine.setApContext === 'function' && ft8Engine._mode !== 'PSK31') {
+    ft8Engine.setApContext({ myCall: call });
+  }
+  try { if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-on-air-call', call); } catch {}
 }
 function cleanOnAirCallsign(v) {
   return String(v || '').toUpperCase().replace(/[^A-Z0-9/]/g, '').slice(0, 12);
@@ -32915,25 +32972,15 @@ app.whenReady().then(() => {
       // later if needed.
       rigPowerReadable: () => true,
     });
-    let passOnAirLast = onAirCall();
     passEnforcement.on('state-change', (state) => {
       if (win && !win.isDestroyed()) {
         win.webContents.send('pass-enforcement-state', passEnforcement.getSessionStatus());
       }
-      // The on-air call follows the pass: say so once per change and re-arm
-      // the AP decoder, which hypothesises our call in the bits it fixes.
-      const nowCall = onAirCall();
-      if (nowCall !== passOnAirLast) {
-        const host = String(settings.myCallsign || '').toUpperCase();
-        sendCatLog(nowCall !== host
-          ? `[pass] On air as ${nowCall} for this session (Guest Pass station call)`
-          : `[pass] On air as ${host} again`);
-        passOnAirLast = nowCall;
-        if (ft8Engine && typeof ft8Engine.setApContext === 'function' && ft8Engine._mode !== 'PSK31') {
-          ft8Engine.setApContext({ myCall: nowCall });
-        }
-        try { if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-on-air-call', nowCall); } catch {}
-      }
+      // The lease: the station becomes the guest's on 'active' and the
+      // owner's again on 'ended' (docs/share-my-rig-lease-plan.md, 4 and 8).
+      const live = state === 'active' || state === 'expiring';
+      if (live && !passLease) passLeaseBegin();
+      else if (!live && passLease) passLeaseEnd();
     });
     passEnforcement.on('expiring', (info) => {
       if (win && !win.isDestroyed()) {
@@ -33019,17 +33066,17 @@ app.whenReady().then(() => {
           }
         }, 60_000);
       });
-      rs.setPassAuthCallback(async (code, _sessionId) => {
+      rs.setPassAuthCallback(async (code, _sessionId, session) => {
         clearPassDisconnectTimer();
         const state = passEnforcement.getState();
         if (state === 'idle') {
-          await passEnforcement.loadPass(code);
+          await passEnforcement.loadPass(code, session);
           return;
         }
         const cur = passEnforcement.getSessionStatus();
         // Same-pass re-attach: reconnect after a WS blip or an app
         // relaunch resume. The enforcement session is already correct.
-        if (cur.code === code) return;
+        if (cur.code === code) { passEnforcement.adoptSession(session); return; }
         // Different pass. Refuse only when a guest is actually
         // CONNECTED under the current pass — that's the single-pass
         // invariant. A lingering session with nobody attached (guest
@@ -33043,7 +33090,7 @@ app.whenReady().then(() => {
         // endPass settles to idle on the next tick (setImmediate) —
         // wait for it before loading the new pass.
         await new Promise((resolve) => setImmediate(resolve));
-        await passEnforcement.loadPass(code);
+        await passEnforcement.loadPass(code, session);
       });
     });
   } catch (err) {
@@ -35262,7 +35309,7 @@ app.whenReady().then(() => {
   const mercuryNotReady = () => mercuryPopoutSend('mercury-status', { connected: false, error: 'Mercury not running — enable it in Settings' });
   ipcMain.on('mercury-cmd-connect', (_e, their) => {
     if (!mercuryClient || !mercuryClient.connected) return mercuryNotReady();
-    const mine = (settings.myCallsign || '').trim();
+    const mine = onAirCall();
     const t = String(their || '').trim();
     if (!mine || !t) { sendCatLog('[Mercury] connect needs both my callsign and a target'); return; }
     mercuryClient.myCall(mine);
@@ -35285,7 +35332,7 @@ app.whenReady().then(() => {
     if (!mercuryClient) return mercuryNotReady();
     if (on) {
       const got = acquireRadio('mercury');
-      if (got) { mercuryClient.myCall((settings.myCallsign || '').trim()); mercuryClient.listen('ON'); sendCatLog('[Mercury] LISTEN ON'); }
+      if (got) { mercuryClient.myCall(onAirCall()); mercuryClient.listen('ON'); sendCatLog('[Mercury] LISTEN ON'); }
       mercuryPopoutSend('mercury-link', { listening: got });
     } else {
       mercuryClient.listen('OFF'); releaseRadio('mercury'); sendCatLog('[Mercury] LISTEN OFF');
@@ -35300,7 +35347,7 @@ app.whenReady().then(() => {
     const t = String(text || '');
     if (!t.trim() || !mercuryClient || !mercuryClient.arqConnected) return;
     mercuryClient.sendData(MercuryAppProto.encodeChat(t));
-    pushMercuryChat('tx', t, (settings.myCallsign || 'ME').toUpperCase());
+    pushMercuryChat('tx', t, onAirCall() || 'ME');
   });
   ipcMain.handle('mercury-cmd-send-file', async () => {
     if (!mercuryClient || !mercuryClient.arqConnected) return { started: false, error: 'no ARQ session' };
@@ -36000,7 +36047,7 @@ app.whenReady().then(() => {
       const modePart = sanitizeSstvFilenamePart(data.mode, 'unknown');
       const heardHz = data.freqHz !== undefined ? data.freqHz : (_currentFreqHz || null);
       const freqPart = heardHz ? `${Math.round(heardHz / 1000)}kHz` : '';
-      const callPart = sanitizeSstvFilenamePart(settings.myCallsign || '', '');
+      const callPart = sanitizeSstvFilenamePart(onAirCall(), '');
       const pieces = ['sstv', modePart, freqPart, callPart, ts, data.weak ? 'partial' : ''].filter(Boolean);
       const filename = `${pieces.join('_')}.png`;
       const { nativeImage } = require('electron');
@@ -36029,7 +36076,7 @@ app.whenReady().then(() => {
         freqHz: heardHz || null,
         freqKhz: heardHz ? Math.round(heardHz / 1000) : null,
         rigMode: data.rigMode !== undefined ? (data.rigMode || '') : (_currentMode || ''),
-        callsign: settings.myCallsign || '',
+        callsign: onAirCall(),
         postProcessed: settings.sstvPostProcess !== false,
         // A weak-tier decode kept by "Save every picture" — the sidecar says
         // so, and the filename carries "partial" so a folder sort shows it.
@@ -42120,11 +42167,11 @@ app.whenReady().then(() => {
     markUserActive();
     try {
       const errors = [];
-      if (data.potaRespot && data.potaReference && settings.myCallsign) {
+      if (data.potaRespot && data.potaReference && onAirCall()) {
         try {
           await postPotaRespot({
             activator: data.callsign,
-            spotter: settings.myCallsign.toUpperCase(),
+            spotter: onAirCall(),
             frequency: data.frequency,
             reference: data.potaReference,
             mode: data.mode,
@@ -42133,14 +42180,14 @@ app.whenReady().then(() => {
           trackRespot('pota');
         } catch (err) { errors.push('POTA: ' + err.message); }
       }
-      if (data.wwffRespot && data.wwffReference && settings.myCallsign) {
+      if (data.wwffRespot && data.wwffReference && onAirCall()) {
         if (!/^[A-Z0-9]{1,4}FF-\d{4}$/i.test(data.wwffReference)) {
           errors.push('WWFF: reference does not match WWFF format: ' + data.wwffReference);
         } else {
           try {
             await postWwffRespot({
               activator: data.callsign,
-              spotter: settings.myCallsign.toUpperCase(),
+              spotter: onAirCall(),
               frequency: data.frequency,
               reference: data.wwffReference,
               mode: data.mode,
@@ -42162,7 +42209,7 @@ app.whenReady().then(() => {
           trackRespot('llota');
         } catch (err) { errors.push('LLOTA: ' + err.message); }
       }
-      if (data.wwbotaRespot && data.wwbotaReference && settings.myCallsign) {
+      if (data.wwbotaRespot && data.wwbotaReference && onAirCall()) {
         if (!/^B\/[A-Z0-9]+-\d{1,5}$/i.test(data.wwbotaReference)) {
           errors.push('WWBOTA: reference does not match B/xx-#### format: ' + data.wwbotaReference);
         } else {
@@ -42171,7 +42218,7 @@ app.whenReady().then(() => {
             const baseComment = data.comment || '';
             const comment = baseComment.toUpperCase().includes(ref) ? baseComment : (baseComment ? `${ref} ${baseComment}` : ref);
             await postWwbotaSpot({
-              spotter: settings.myCallsign.toUpperCase(),
+              spotter: onAirCall(),
               call: data.callsign,
               freq: Number(data.frequency) / 1000, // kHz → MHz
               mode: data.mode,

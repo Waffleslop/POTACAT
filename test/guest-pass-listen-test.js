@@ -17,7 +17,7 @@ function tech(allowedModes) {
   const pe = new PassEnforcement({ revalidateMs: 0, rigPowerReadable: () => true });
   pe._state = 'active';
   pe._expiresAtMs = Date.now() + 3600000;
-  pe._pass = { code: 'T1', privilege_class: 'us_technician', privilege_class_short: 'tech', max_power_w: 100, allowed_modes: allowedModes || [] };
+  pe._pass = { code: 'T1', guest_callsign: 'KD9TEC', privilege_class: 'us_technician', privilege_class_short: 'tech', max_power_w: 100, allowed_modes: allowedModes || [] };
   return pe;
 }
 

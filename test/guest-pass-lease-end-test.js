@@ -38,7 +38,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await checkAsync('an ended session refuses transmit until it settles to idle, then the host is free again', async () => {
     const pe = new PassEnforcement({ revalidateMs: 0, log: () => {} });
     pe._state = 'active';
-    pe._pass = { code: 'abcd1234', privilege_class: 'us_extra', privilege_class_short: 'extra', max_power_w: 100, allowed_modes: [] };
+    pe._pass = { code: 'abcd1234', guest_callsign: 'K3SBP', privilege_class: 'us_extra', privilege_class_short: 'extra', max_power_w: 100, allowed_modes: [] };
     pe._expiresAtMs = Date.now() + 60000;
     assert.strictEqual(pe.interceptCatCommand({ type: 'tx_enable', freqHz: 14074000, mode: 'CW' }).allowed, true);
     pe.endPass('expired');
