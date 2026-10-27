@@ -419,6 +419,14 @@ test('FT-710: AGC OFF/FAST/MID/SLOW/AUTO are GT00-GT04, and AUTO is offered', ()
   assert.ok(RIG_MODELS['FT-710'].agcModes.includes('auto'));
 });
 
+test('FT-710: COMP on/off is PR01;/PR00; (the default PR1;/PR0; are reads there)', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS['FT-710']);
+  codec.setCompressor(true);
+  codec.setCompressor(false);
+  assert.deepStrictEqual(writes, ['PR01;', 'PR00;']);
+});
+
 // =========================================================================
 console.log('\n=== KenwoodCodec (Kenwood TS-590) ===');
 
