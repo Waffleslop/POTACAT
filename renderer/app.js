@@ -6341,11 +6341,48 @@ async function refreshLauncherStatus() {
     if (launcherInstallBtn)   launcherInstallBtn.classList.toggle('hidden', installed);
     if (launcherStartBtn)     launcherStartBtn.classList.toggle('hidden', !(installed && !running));
     if (launcherUninstallBtn) launcherUninstallBtn.classList.toggle('hidden', !installed);
+    renderLauncherCloud(s);
   } catch (err) {
     launcherStatusPill.textContent = 'status unavailable';
     launcherStatusPill.style.color = '#888';
   }
 }
+// Restart from anywhere: the launcher's own connector on the Cloud Tunnel.
+function launcherCloudText(s) {
+  if (!s.viaCloud) return { text: 'Restart from anywhere is off: the phone can restart POTACAT on your network and over Tailscale only.', color: '#888' };
+  if (!s.tunnelOn) return { text: 'Turn on the Cloud Tunnel (Cloud tab) to restart POTACAT from outside your network.', color: '#888' };
+  if (!s.running) return { text: 'Start the launcher to restart POTACAT from anywhere.', color: '#f0a500' };
+  switch (s.cloud) {
+    case 'replica-up': return { text: 'Reachable from anywhere through ' + s.cloudHost + ', even while POTACAT is closed.', color: '#4ecca3' };
+    case 'replica-starting': return { text: 'Connecting the launcher to your Cloud Tunnel…', color: '#f0a500' };
+    case 'no-cloudflared': return { text: 'The launcher could not find cloudflared, so it cannot reach the Cloud Tunnel.', color: '#e94560' };
+    case null: case undefined: return { text: 'Restart the launcher (Uninstall, then Install) to pick up restart from anywhere.', color: '#f0a500' };
+    default: return { text: 'Waiting for the launcher to connect to your Cloud Tunnel.', color: '#f0a500' };
+  }
+}
+function renderLauncherCloud(s) {
+  const row = document.getElementById('launcher-via-cloud-row');
+  const box = document.getElementById('launcher-via-cloud');
+  const line = document.getElementById('launcher-cloud-line');
+  if (!row || !box || !line) return;
+  const show = !!s.installed;
+  row.classList.toggle('hidden', !show);
+  line.classList.toggle('hidden', !show);
+  if (!show) return;
+  box.checked = s.viaCloud !== false;
+  const t = launcherCloudText(s);
+  line.textContent = t.text;
+  line.style.color = t.color;
+}
+(function bindLauncherViaCloud() {
+  const box = document.getElementById('launcher-via-cloud');
+  if (!box || !window.api.launcherSetViaCloud) return;
+  box.addEventListener('change', async () => {
+    try { renderLauncherCloud(await window.api.launcherSetViaCloud(box.checked)); } catch {}
+    // The launcher reads its config every 5 s; look again once it has.
+    setTimeout(refreshLauncherStatus, 7000);
+  });
+})();
 if (launcherInstallBtn) {
   launcherInstallBtn.addEventListener('click', async () => {
     launcherInstallBtn.disabled = true;
@@ -21181,6 +21218,8 @@ catLogClearBtn.addEventListener('click', () => {
     try { if (window.api.winlinkDiag) winlinkLine = await window.api.winlinkDiag(); } catch {}
     // Whether settings are reaching disk (AE5JE + Bitdefender: a blocked save
     // keeps changes for the session only, and every launch "forgot").
+    let launcherLine = '';
+    try { if (window.api.launcherDiag) launcherLine = await window.api.launcherDiag(); } catch {}
     let settingsSaved = '(unknown)';
     try { if (window.api.settingsSaveStatus) settingsSaved = await window.api.settingsSaveStatus(); } catch {}
     const md = {
@@ -21194,6 +21233,7 @@ catLogClearBtn.addEventListener('click', () => {
       stationSetup,
       echocatServer,
       winlink: winlinkLine,
+      launcher: launcherLine,
       settingsSaved,
     };
     // Complete-from-launch log: main reads startup.log + session.log (both
@@ -21255,6 +21295,7 @@ catLogClearBtn.addEventListener('click', () => {
       '**Station Setup:** ' + md.stationSetup,
       '**ECHOCAT server:** ' + md.echocatServer,
       ...(md.winlink ? ['**Winlink:** ' + md.winlink] : []),
+      ...(md.launcher ? ['**Launcher:** ' + md.launcher] : []),
       '**Settings saved:** ' + md.settingsSaved,
       '',
       '### What I tried to do',

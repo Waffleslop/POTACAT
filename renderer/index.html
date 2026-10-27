@@ -3482,6 +3482,11 @@
             <strong>Remote Launcher <span id="launcher-status-pill" class="help-text" style="font-weight:normal;margin-left:6px;color:#888;">checking&hellip;</span></strong>
             <span class="help-text" style="display:block;">Starts a tiny background server (port 7301) so the phone app can start/restart POTACAT when it crashes or you close it accidentally. Auto-launches at login.</span>
             <span id="launcher-status-detail" class="help-text" style="display:block;color:#888;font-size:11px;"></span>
+            <label id="launcher-via-cloud-row" class="hidden" style="display:flex;align-items:center;gap:6px;margin-top:6px;">
+              <input type="checkbox" id="launcher-via-cloud" checked>
+              <span>Restart from anywhere through your Cloud Tunnel</span>
+            </label>
+            <span id="launcher-cloud-line" class="help-text hidden" style="display:block;font-size:11px;"></span>
           </div>
           <div style="display:flex;gap:6px;">
             <button type="button" id="launcher-install-btn" style="padding:4px 12px;">Install</button>

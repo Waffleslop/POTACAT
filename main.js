@@ -244,7 +244,9 @@ if (process.argv.includes('--launcher')) {
   });
   app.whenReady().then(() => {
     if (fs.existsSync(launcherScript)) {
-      require(launcherScript);
+      // The script starts only when run directly or when told to.
+      const launcher = require(launcherScript);
+      if (launcher && typeof launcher.main === 'function') launcher.main();
       console.log('[Launcher] Running in headless mode on port 7301');
     } else {
       console.error('[Launcher] Script not found:', launcherScript);
@@ -701,6 +703,7 @@ const SETTINGS_PATH = path.join(app.getPath('userData'), 'settings.json');
 const PROFILES_DIR = path.join(app.getPath('userData'), 'profiles');
 const PROFILES_ARCHIVE_DIR = path.join(PROFILES_DIR, '_archived');
 const GLOBAL_KEYS = new Set([
+  'launcherViaCloud',  // Remote Launcher: restart from anywhere through the Cloud Tunnel (default on)
   'activeProfile',     // pointer to current operator
   'profiles',          // (reserved — currently unused but reserved against name collision)
   'rigs',              // rig hardware definitions
@@ -20976,6 +20979,47 @@ async function _uninstallLauncher() {
   }
 }
 
+// ── Restart from anywhere (docs/remote-launcher-anywhere-scope.md) ─────────
+// The launcher runs its own cloudflared connector on the Cloud Tunnel when
+// launcher-config.json carries the tunnel's token (Casey 2026-10-27: option
+// A, on by default). This keeps that copy exactly in step: written while the
+// launcher is installed, the tunnel is on and launcherViaCloud is not false;
+// removed otherwise (tunnel revoked, launcher uninstalled, setting off). The
+// file is the launcher's own config, never exported and never in a report.
+function launcherCloudSync(reason) {
+  let cfgPath, installed;
+  try {
+    const p = _launcherPaths();
+    cfgPath = path.join(p.launcherCfgDir, 'launcher-config.json');
+    installed = fs.existsSync(p.autostartPath);
+  } catch { return; }
+  if (!fs.existsSync(cfgPath)) return;          // never installed here
+  let cfg;
+  try { cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch { return; }
+  const creds = cloudTunnel && typeof cloudTunnel.launcherCredentials === 'function' ? cloudTunnel.launcherCredentials() : null;
+  let want = null;
+  if (installed && settings.launcherViaCloud === false) want = { enabled: false };
+  else if (installed && creds) {
+    let cloudflaredPath = '';
+    try { cloudflaredPath = resolveCloudflaredPath() || ''; } catch {}
+    want = { enabled: true, tunnelToken: creds.tunnelToken, cloudHost: creds.cloudHost, cloudflaredPath };
+  }
+  if (JSON.stringify(cfg.cloud || null) === JSON.stringify(want)) return;
+  if (want) cfg.cloud = want; else delete cfg.cloud;
+  try {
+    const tmp = cfgPath + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2), { mode: 0o600 });
+    fs.renameSync(tmp, cfgPath);
+    try { fs.chmodSync(cfgPath, 0o600); } catch {}
+  } catch (err) {
+    sendCatLog(`[Launcher] could not update the launcher's Cloud Tunnel settings: ${err && err.message || err}`);
+    return;
+  }
+  sendCatLog(want && want.tunnelToken
+    ? `[Launcher] Restart from anywhere: on, through ${want.cloudHost} (${reason})`
+    : `[Launcher] Restart from anywhere: off (${reason}; ${!installed ? 'launcher not installed' : settings.launcherViaCloud === false ? 'turned off in Settings' : 'no Cloud Tunnel'})`);
+}
+
 async function _launcherStatus() {
   const { autostartPath, launcherDest } = _launcherPaths();
   const installed = fs.existsSync(autostartPath);
@@ -21003,7 +21047,43 @@ async function _launcherStatus() {
     probe(require('https'), { ...baseOpts, rejectUnauthorized: false }),
   ]);
   const running = httpAlive || httpsAlive;
-  return { installed, running, autostartPath, launcherDest };
+  // The replica's state comes from the launcher's own authed /status (the
+  // callsign is accepted from this machine).
+  let cloud = null;
+  if (running) {
+    const readJson = (mod, opts) => new Promise((resolve) => {
+      const req = mod.request(opts, (res) => {
+        let body = ''; res.on('data', (c) => { body += c; });
+        res.on('end', () => { try { resolve(JSON.parse(body)); } catch { resolve(null); } });
+      });
+      req.on('error', () => resolve(null));
+      req.on('timeout', () => { req.destroy(); resolve(null); });
+      req.end();
+    });
+    const authed = { ...baseOpts, timeout: 3000, headers: { Authorization: 'Bearer ' + String(settings.myCallsign || '') } };
+    const st = httpAlive ? await readJson(require('http'), authed) : await readJson(require('https'), { ...authed, rejectUnauthorized: false });
+    if (st && typeof st.cloud === 'string') cloud = st.cloud;
+  }
+  const tunnel = cloudTunnel && typeof cloudTunnel.launcherCredentials === 'function' ? cloudTunnel.launcherCredentials() : null;
+  return {
+    installed, running, autostartPath, launcherDest,
+    viaCloud: settings.launcherViaCloud !== false,
+    tunnelOn: !!tunnel, cloudHost: tunnel ? tunnel.cloudHost : '',
+    cloud,                     // replica state from the launcher; null = an older launcher or not running
+  };
+}
+
+/** The bug report's **Launcher:** line. */
+async function launcherDiagLine() {
+  try {
+    const s = await _launcherStatus();
+    if (!s.installed && !s.running) return 'not installed';
+    const parts = [s.installed ? 'installed' : 'running without autostart', s.running ? 'running' : 'not running'];
+    if (!s.viaCloud) parts.push('restart from anywhere off');
+    else if (!s.tunnelOn) parts.push('no Cloud Tunnel');
+    else parts.push('cloud ' + (s.cloud || 'unknown (older launcher?)'));
+    return parts.join(', ');
+  } catch (err) { return 'unknown (' + (err && err.message || err) + ')'; }
 }
 
 let _restartInFlight = null;
@@ -32897,7 +32977,9 @@ app.whenReady().then(() => {
       // registration always runs before the tunnel is live (W7RTA).
       try { scheduleCloudDeviceReRegister('tunnel-state'); } catch {}
     });
+    cloudTunnel.on('credentials', () => launcherCloudSync('Cloud Tunnel changed'));
     cloudTunnel.loadFromDisk();
+    launcherCloudSync('startup');
     if (cloudTunnel.getState().enabled) {
       cloudTunnel.startHealthCheck();
     }
@@ -40093,13 +40175,23 @@ app.whenReady().then(() => {
   ipcMain.handle('launcher-install', async () => {
     const r = await _installLauncher();
     if (r && r.ok && settings.enableLauncher !== true) { settings.enableLauncher = true; saveSettings(settings); }
+    launcherCloudSync('launcher installed');
     return r;
   });
   ipcMain.handle('launcher-uninstall', async () => {
     const r = await _uninstallLauncher();
     if (r && r.ok && settings.enableLauncher !== false) { settings.enableLauncher = false; saveSettings(settings); }
+    launcherCloudSync('launcher uninstalled');
     return r;
   });
+  // "Restart from anywhere through your Cloud Tunnel" (Settings > ECHOCAT).
+  ipcMain.handle('launcher-set-via-cloud', async (_e, on) => {
+    settings.launcherViaCloud = !!on;
+    saveSettings(settings);
+    launcherCloudSync(on ? 'turned on in Settings' : 'turned off in Settings');
+    return _launcherStatus();
+  });
+  ipcMain.handle('launcher-diag', async () => launcherDiagLine());
   ipcMain.handle('launcher-status', async () => _launcherStatus());
   ipcMain.handle('launcher-start', async () => _startLauncher());
 
@@ -40341,6 +40433,7 @@ app.whenReady().then(() => {
         fs.mkdirSync(autostartDir, { recursive: true });
         fs.writeFileSync(path.join(autostartDir, 'potacat-launcher.desktop'), `[Desktop Entry]\nType=Application\nName=POTACAT Launcher\nExec=${exePath} --launcher\nHidden=false\nNoDisplay=true\nX-GNOME-Autostart-enabled=true\n`);
       }
+      launcherCloudSync('launcher installed');
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err.message };
@@ -40365,6 +40458,7 @@ app.whenReady().then(() => {
         const desktopPath = path.join(os.homedir(), '.config', 'autostart', 'potacat-launcher.desktop');
         if (fs.existsSync(desktopPath)) fs.unlinkSync(desktopPath);
       }
+      launcherCloudSync('launcher uninstalled');
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err.message };

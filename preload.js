@@ -159,6 +159,8 @@ contextBridge.exposeInMainWorld('api', {
   // dance previously buried in scripts/launcher-install.js as a UI button.
   launcherInstall: () => ipcRenderer.invoke('launcher-install'),
   launcherUninstall: () => ipcRenderer.invoke('launcher-uninstall'),
+  launcherSetViaCloud: (on) => ipcRenderer.invoke('launcher-set-via-cloud', on),
+  launcherDiag: () => ipcRenderer.invoke('launcher-diag'),
   launcherStatus: () => ipcRenderer.invoke('launcher-status'),
   launcherStart: () => ipcRenderer.invoke('launcher-start'),
   // --- ALSA bridge (Linux-only; resolves false / [] on Win+Mac) ----------
