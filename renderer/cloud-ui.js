@@ -50,6 +50,7 @@
   let _lastStatus = null;            // the last cloud-get-status payload
   let _lastBilling = null;           // subscription.billing, for the strip's button
   let _autoUploadAfterRegister = false; // set by openCloudSignup({autoUpload})
+  let _signupEntry = 'settings';         // set by openCloudSignup({entry}); lib/cloud-ipc.js SIGNUP_ENTRIES
   const syncEnabledCheck = document.getElementById('cloud-sync-enabled');
   const syncControls = document.getElementById('cloud-sync-controls');
   const deviceNameInput = document.getElementById('cloud-device-name');
@@ -539,7 +540,8 @@
 
       emailRegisterBtn.disabled = true;
       try {
-        const result = await window.api.cloudRegister(email, password, callsign);
+        const result = await window.api.cloudRegister(email, password, callsign, { entry: _signupEntry });
+        _signupEntry = 'settings';
         if (result.error) {
           showError(result.error);
         } else {
@@ -986,7 +988,61 @@
   if (uploadNudgeBtn) uploadNudgeBtn.addEventListener('click', () => runInitialUpload({ confirm: true }));
 
   /** "Your log is not backed up yet" — an account that has never uploaded. */
+  // The main-window card for the same case (decideUploadCard).
+  const _launchAt = Date.now();
+  let _uploadSeenSince = 0;
+  let _uploadCardShown = false;
+  let _uploadCardTimer = null;
+  async function maybeShowUploadCard(status, sub) {
+    const card = document.getElementById('cloud-upload-card');
+    if (!card || !Billing || !Billing.decideUploadCard || !window.api.cloudUploadCardGet) return;
+    const base = Billing.decideUploadNudge({
+      loggedIn: !!(status && status.loggedIn), subscription: sub,
+      cloudQsos: status && status.sync ? status.sync.totalQsos : null,
+      localQsos: status ? status.localQsos : null,
+    });
+    if (!base.show) { _uploadSeenSince = 0; card.classList.add('hidden'); return; }
+    if (!_uploadSeenSince) _uploadSeenSince = Date.now();
+    let extra = {};
+    try { extra = (await window.api.cloudUploadCardGet()) || {}; } catch {}
+    const a = document.activeElement;
+    const typing = !!(a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT' || a.isContentEditable));
+    const prompt = document.getElementById('cloud-prompt-card');
+    const ss = document.getElementById('station-setup-card');
+    const settingsDlg = document.getElementById('settings-dialog');
+    const d = Billing.decideUploadCard({
+      loggedIn: !!status.loggedIn, subscription: sub,
+      cloudQsos: status.sync ? status.sync.totalQsos : null, localQsos: status.localQsos,
+      shownThisLaunch: _uploadCardShown, snoozedUntil: extra.snoozedUntil, radioBusy: extra.radioBusy,
+      typing, otherCardVisible: !!((prompt && !prompt.classList.contains('hidden')) || (ss && !ss.classList.contains('hidden')) || (settingsDlg && settingsDlg.open)),
+      sinceLaunchMs: Date.now() - _launchAt, seenSince: _uploadSeenSince,
+    });
+    if (d.show) {
+      _uploadCardShown = true;
+      const n = d.localQsos.toLocaleString();
+      document.getElementById('cloud-upload-text').textContent = `${n} contacts on this PC are not backed up yet. The first upload after you signed up did not finish.`;
+      card.classList.remove('hidden');
+    } else if (d.retry && !_uploadCardTimer) {
+      _uploadCardTimer = setTimeout(() => { _uploadCardTimer = null; maybeShowUploadCard(_lastStatus || status, (_lastStatus && _lastStatus.subscription) || sub).catch(() => {}); }, 60000);
+    }
+  }
+  (function bindUploadCard() {
+    const card = document.getElementById('cloud-upload-card');
+    const now = document.getElementById('cloud-upload-now');
+    const later = document.getElementById('cloud-upload-later');
+    if (now) now.addEventListener('click', async () => {
+      if (card) card.classList.add('hidden');
+      try { await runInitialUpload({ confirm: false }); } catch {}
+      refreshStatus();
+    });
+    if (later) later.addEventListener('click', () => {
+      if (card) card.classList.add('hidden');
+      if (window.api.cloudUploadCardSnooze) window.api.cloudUploadCardSnooze().catch(() => {});
+    });
+  })();
+
   function renderUploadNudge(status, sub) {
+    maybeShowUploadCard(status, sub).catch(() => {});
     if (!uploadNudge) return;
     const d = Billing ? Billing.decideUploadNudge({
       loggedIn: !!(status && status.loggedIn),
@@ -1202,6 +1258,7 @@
   window.openCloudSignup = function (opts) {
     const o = opts || {};
     _autoUploadAfterRegister = !!o.autoUpload;
+    _signupEntry = o.entry || 'settings';
     const dlg = document.getElementById('settings-dialog');
     if (dlg && typeof dlg.showModal === 'function' && !dlg.open) {
       try { dlg.showModal(); } catch {}

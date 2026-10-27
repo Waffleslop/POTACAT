@@ -169,6 +169,38 @@ assertEq(B.PROMPT_SNOOZE_MS, 30 * day, 'snooze is 30 days');
 assert(/120 QSOs here and nowhere else/.test(B.promptCopy(120).body), 'copy names the count');
 assert(/uploaded in the first step/.test(B.promptCopy(120).offer), 'copy promises the upload');
 
+section('Upload card in the main window (the first upload did not finish)');
+{
+  const trial = sub('trial', bill('trial', 'trial'), { trialActive: true });
+  const ok = { loggedIn: true, subscription: trial, cloudQsos: 0, localQsos: 300, now: NOW, sinceLaunchMs: 3 * 60000, seenSince: NOW - 6 * 60000 };
+  assertEq(B.decideUploadCard(ok), { show: true, reason: 'ok', localQsos: 300 }, 'contacts here, none in the cloud, settled: show');
+  assertEq(B.decideUploadCard({ ...ok, localQsos: 0 }).show, false, 'nothing logged here (log in QRZ or elsewhere): never');
+  assertEq(B.decideUploadCard({ ...ok, cloudQsos: 12 }).show, false, 'uploaded: never');
+  assertEq(B.decideUploadCard({ ...ok, cloudQsos: null }).show, false, 'cloud count unknown: never');
+  assertEq(B.decideUploadCard({ ...ok, seenSince: NOW - 60000 }).reason, 'settling', 'a first upload may still be running');
+  assertEq(B.decideUploadCard({ ...ok, sinceLaunchMs: 30000 }).reason, 'launch', 'not in the first two minutes');
+  assertEq(B.decideUploadCard({ ...ok, snoozedUntil: NOW + day }).reason, 'snoozed', 'Not now = 7 days');
+  assertEq(B.decideUploadCard({ ...ok, typing: true }).retry, true, 'never over typing');
+  assertEq(B.decideUploadCard({ ...ok, shownThisLaunch: true }).reason, 'shown', 'once per launch');
+  assertEq(B.UPLOAD_CARD_SNOOZE_MS, 7 * day, 'snooze is 7 days');
+}
+
+section('Where a sign-up started');
+{
+  const fs = require('fs');
+  const path = require('path');
+  const ipc = fs.readFileSync(path.join(__dirname, '../lib/cloud-ipc.js'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, '../renderer/app.js'), 'utf8');
+  const m = /const SIGNUP_ENTRIES = \[([^\]]*)\]/.exec(ipc);
+  assert(m, 'the vocabulary is declared');
+  const known = m[1].split(',').map((x) => x.trim().replace(/'/g, ''));
+  const used = [...app.matchAll(/openCloudSignup\(\{[^}]*entry: '([a-z-]+)'/g)].map((x) => x[1]);
+  assert(used.length >= 6, 'the app labels its sign-up doors (' + used.length + ')');
+  for (const e of used) assert(known.includes(e), 'entry "' + e + '" is in SIGNUP_ENTRIES');
+  assert(/signup: signupSource\(opts && opts\.entry\)/.test(ipc), 'register sends it');
+  assert(!/signup:[^}]*(email|callsign|localQsos)/.test(ipc), 'nothing about the operator or the log');
+}
+
 section('Upload nudge (an account that never uploaded)');
 assert(B.decideUploadNudge({ loggedIn: true, subscription: sub('trial', bill('trial', 'trial'), { trialActive: true }), cloudQsos: 0, localQsos: 300 }).show, 'trial, 0 in cloud, 300 local → nudge');
 assert(!B.decideUploadNudge({ loggedIn: true, subscription: sub('trial', bill('trial', 'trial'), { trialActive: true }), cloudQsos: 300, localQsos: 300 }).show, 'uploaded → no nudge');

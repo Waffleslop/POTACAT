@@ -22279,7 +22279,7 @@ function connectRemote() {
     if (!cloudIpc) return { error: 'Cloud not initialized' };
     const sync = cloudIpc.getCloudSync();
     const deviceId = (() => { if (!settings.cloudDeviceId) { settings.cloudDeviceId = require('crypto').randomUUID(); saveSettings(settings); } return settings.cloudDeviceId; })();
-    const result = await sync._post('/v1/auth/register', { email: msg.email, password: msg.password, callsign: msg.callsign, displayName: msg.callsign, deviceId }, true);
+    const result = await sync._post('/v1/auth/register', { email: msg.email, password: msg.password, callsign: msg.callsign, displayName: msg.callsign, deviceId, signup: { client: 'echocat-device', entry: 'settings' } }, true);
     settings.cloudAccessToken = result.accessToken;
     settings.cloudRefreshToken = result.refreshToken;
     settings.cloudUser = result.user;
@@ -33153,6 +33153,19 @@ app.whenReady().then(() => {
     saveSettings(settings);
     sendCatLog(`[Cloud] Cloud prompt: "Not now" (${settings.cloudPromptDismissals}) — asking again in 30 days`);
     return { ok: true, until: settings.cloudPromptSnoozedUntil };
+  });
+  ipcMain.handle('cloud-upload-card-get', () => ({
+    snoozedUntil: settings.cloudUploadCardSnoozedUntil || 0,
+    radioBusy: !!((typeof radioOwner === 'string' && radioOwner !== 'none')
+      || (remoteServer && remoteServer._pttActive)
+      || (cat && cat._transmitting)
+      || (ft8Engine && ft8Engine._running)),
+  }));
+  ipcMain.handle('cloud-upload-card-snooze', () => {
+    settings.cloudUploadCardSnoozedUntil = Date.now() + CloudBillingUi.UPLOAD_CARD_SNOOZE_MS;
+    saveSettings(settings);
+    sendCatLog('[Cloud] "Not backed up" card: "Not now" — asking again in 7 days');
+    return { ok: true };
   });
   ipcMain.handle('cloud-prompt-never', () => {
     settings.cloudPromptNever = true;

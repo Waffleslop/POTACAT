@@ -5816,7 +5816,7 @@ function _gpFmtRemaining(seconds) {
   function hidePrompt() { if (card) card.classList.add('hidden'); }
   if (startBtn) startBtn.addEventListener('click', () => {
     hidePrompt();
-    if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register', autoUpload: true });
+    if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register', autoUpload: true, entry: 'cloud-prompt' });
   });
   if (laterBtn) laterBtn.addEventListener('click', () => {
     hidePrompt();
@@ -7154,7 +7154,7 @@ async function _shareRigIssue() {
           && res.billing.state !== 'none' && res.billing.state !== 'trial_expired') {
         window.api.cloudOpenBillingAction(res.billing).catch(() => {});
       } else if (res && res.error === 'subscription_required' && typeof window.openCloudSignup === 'function') {
-        window.openCloudSignup({});
+        window.openCloudSignup({ entry: 'share-rig' });
       }
       return;
     }
@@ -7360,7 +7360,7 @@ function _esc(s) {
     if (!a) return;
     e.preventDefault();
     // Signed out → the free-trial form; signed in → the subscribe section.
-    if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register' });
+    if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register', entry: 'notice' });
   });
 
   const issueBtn = document.getElementById('share-rig-issue');
@@ -8980,7 +8980,7 @@ function _wireSummaryCardActionsOnce() {
       if (act === 'cloud-signup') {
         // Signed out: the in-app create-account form (free trial), not a
         // payment page. Signed in without access: the subscribe section.
-        if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register' });
+        if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register', entry: 'summary' });
       }
       else if (act === 'cloud-manage') {
         const r = await window.api.cloudOpenManage();
@@ -9015,7 +9015,7 @@ function _wireSummaryCardActionsOnce() {
           };
           alert(map[r.error] || ('Could not turn on the tunnel: ' + r.error));
           // The wall: the fix is the subscribe section, one click away.
-          if (r.error === 'entitlement-required' && typeof window.openCloudSignup === 'function') window.openCloudSignup({});
+          if (r.error === 'entitlement-required' && typeof window.openCloudSignup === 'function') window.openCloudSignup({ entry: 'tunnel' });
           if (r.error === 'auth-required' && typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'signin' });
         }
       }
@@ -9218,7 +9218,7 @@ function _pairRenderState() {
         return;
       }
       // Jump the Settings dialog to the Cloud tab's create-account form.
-      if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register' });
+      if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register', entry: 'pairing' });
       else {
         const cloudTab = document.querySelector('.settings-tab[data-tab="cloud"]');
         if (cloudTab) cloudTab.click();

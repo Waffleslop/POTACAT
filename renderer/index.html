@@ -4698,6 +4698,17 @@
       <button type="button" id="cloud-prompt-never" class="ss-btn cp-never hidden">Don't suggest Cloud again</button>
     </div>
   </div>
+  <!-- Signed in, contacts on this PC, none in the cloud after the sign-in
+       catch-up: the first upload did not finish (lib/cloud-billing-ui.js
+       decideUploadCard). Never for an empty local log. -->
+  <div id="cloud-upload-card" class="station-setup-card cloud-prompt-card hidden" role="status">
+    <div class="cp-title">Your log has not reached POTACAT Cloud.</div>
+    <div id="cloud-upload-text" class="ss-card-text"></div>
+    <div class="ss-card-buttons">
+      <button type="button" id="cloud-upload-now" class="ss-btn ss-btn-primary">Upload now</button>
+      <button type="button" id="cloud-upload-later" class="ss-btn">Not now</button>
+    </div>
+  </div>
   <dialog id="whats-new-dialog">
     <div class="log-dialog-header">
       <h3 id="whats-new-title">What's New</h3>
