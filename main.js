@@ -704,6 +704,7 @@ const SETTINGS_PATH = path.join(app.getPath('userData'), 'settings.json');
 const PROFILES_DIR = path.join(app.getPath('userData'), 'profiles');
 const PROFILES_ARCHIVE_DIR = path.join(PROFILES_DIR, '_archived');
 const GLOBAL_KEYS = new Set([
+  'echocatAppConnected', // an owner's ECHOCAT phone/tablet app has connected: Settings hides the app badges
   'launcherViaCloud',  // Remote Launcher: restart from anywhere through the Cloud Tunnel (default on)
   'activeProfile',     // pointer to current operator
   'profiles',          // (reserved — currently unused but reserved against name collision)
@@ -12376,6 +12377,20 @@ function activatorCountyState(ref) {
   for (const st of states) counties[st] = list[st].map((c) => c[0]);
   return { county: (settings.parkCounties && settings.parkCounties[r]) || null, countyChoices: { states, counties } };
 }
+/**
+ * The owner has the ECHOCAT app: one of their own phones or tablets connected
+ * (never a Guest Pass device). Settings then drops the "Download ECHOCAT"
+ * badges, which only matter to someone who does not have it yet (Casey
+ * 2026-10-27). Remembered for good; the setting is per machine.
+ */
+function noteOwnerPhoneApp(platform) {
+  if (!ReviewAsk.isPhonePlatform(platform) || settings.echocatAppConnected === true) return;
+  settings.echocatAppConnected = true;
+  try { saveSettings(settings); } catch {}
+  sendCatLog(`[Echo CAT] Your ${/^ios/i.test(platform) ? 'iPhone/iPad' : 'Android'} app connected: Settings hides the app download badges`);
+  if (win && !win.isDestroyed()) win.webContents.send('echocat-app-connected');
+}
+
 /** The operator's county choice for one park, remembered per park. */
 function setParkCounty(ref, state, county, origin) {
   const r = String(ref || '').trim().toUpperCase();
@@ -21785,7 +21800,8 @@ function connectRemote() {
 
   // A phone or tablet (not a browser) connected today: one of the three days
   // the Rate-ECHOCAT card waits for (lib/review-ask.js).
-  remoteServer.on('client-hello', ({ platform } = {}) => {
+  remoteServer.on('client-hello', ({ platform, owner } = {}) => {
+    if (owner) noteOwnerPhoneApp(platform);
     if (!ReviewAsk.isPhonePlatform(platform)) return;
     const before = ReviewAsk.normalizeAsk(settings.echocatReviewAsk);
     const d = new Date();
@@ -21796,7 +21812,8 @@ function connectRemote() {
       try { saveSettings(settings); } catch {}
     }
   });
-  remoteServer.on('client-connected', ({ deviceId, profileCallsign } = {}) => {
+  remoteServer.on('client-connected', ({ deviceId, profileCallsign, platform, pass } = {}) => {
+    if (!pass) noteOwnerPhoneApp(platform);
     // This desktop is driving a remote shack: it has no radio of its own to
     // lend a phone, and chaining one link through another is not supported.
     if (isRemoteMode()) {

@@ -107,5 +107,20 @@ test('card: no incentives, no gating, never stacks on another notice', () => {
   assert.ok(/'Not now'/.test(card) && /Don\\'t ask again/.test(card));
 });
 
+test('an owner\'s phone app hides the Settings download badges, never a Guest Pass device', () => {
+  const root = require('path').join(__dirname, '..');
+  const main = fs.readFileSync(require('path').join(root, 'main.js'), 'utf8');
+  const rs = fs.readFileSync(require('path').join(root, 'lib/remote-server.js'), 'utf8');
+  const html = fs.readFileSync(require('path').join(root, 'renderer/index.html'), 'utf8');
+  const app = fs.readFileSync(require('path').join(root, 'renderer/app.js'), 'utf8');
+  assert.ok(/owner: !!ws\._authenticated && !ws\._passSession/.test(rs), 'hello says whether the device is the owner\'s');
+  assert.ok(/if \(owner\) noteOwnerPhoneApp\(platform\);/.test(main), 'a LAN owner device (auths before hello)');
+  assert.ok(/if \(!pass\) noteOwnerPhoneApp\(platform\);/.test(main), 'an owner device that auths after hello; never a pass');
+  const fn = main.slice(main.indexOf('function noteOwnerPhoneApp('), main.indexOf('function noteOwnerPhoneApp(') + 600);
+  assert.ok(/ReviewAsk\.isPhonePlatform\(platform\)/.test(fn) && /settings\.echocatAppConnected = true/.test(fn), 'phones and tablets only, remembered');
+  assert.ok(/id="settings-echocat-download"/.test(html));
+  assert.ok(/classList\.toggle\('hidden', s\.echocatAppConnected === true\)/.test(app), 'hidden on load');
+});
+
 console.log(`\nReview ask: ${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

@@ -16695,6 +16695,8 @@ async function openSettingsDialog(tab) {
   if (tab) _openSettingsTab = tab;
   const s = await window.api.getSettings();
   setGrid.value = s.grid || '';
+  // The owner already has the ECHOCAT app: no download badges.
+  { const dl = document.getElementById('settings-echocat-download'); if (dl) dl.classList.toggle('hidden', s.echocatAppConnected === true); }
   homeCountyLoad(s);
   setDistUnit.value = s.distUnit || 'mi';
   setMaxAge.value = s.maxAgeMin || 5;
@@ -27599,6 +27601,10 @@ async function refreshActivatorCounty() {
   wrap.classList.remove('hidden');
 }
 if (window.api.onParkCountyChanged) window.api.onParkCountyChanged(() => refreshActivatorCounty());
+if (window.api.onEchocatAppConnected) window.api.onEchocatAppConnected(() => {
+  const dl = document.getElementById('settings-echocat-download');
+  if (dl) dl.classList.add('hidden');
+});
 (function bindActivatorCounty() {
   const stSel = document.getElementById('activator-county-state');
   const cSel = document.getElementById('activator-county');

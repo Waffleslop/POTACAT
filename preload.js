@@ -498,6 +498,7 @@ contextBridge.exposeInMainWorld('api', {
   parkCountyGet: (ref) => ipcRenderer.invoke('park-county-get', ref),
   parkCountySet: (o) => ipcRenderer.invoke('park-county-set', o),
   homeCountyFromQrz: () => ipcRenderer.invoke('home-county-from-qrz'),
+  onEchocatAppConnected: (cb) => ipcRenderer.on('echocat-app-connected', () => cb()),
   onParkCountyChanged: (cb) => ipcRenderer.on('park-county-changed', (_e, d) => cb(d)),
   winlinkRecoveryEmailSet: (email) => ipcRenderer.invoke('winlink-recovery-email-set', email),
   onWinlinkState: (cb) => ipcRenderer.on('winlink-state', (_e, s) => cb(s)),
