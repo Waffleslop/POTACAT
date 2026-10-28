@@ -29245,9 +29245,21 @@ async function icomScopeCapture(seconds = 30) {
     const span = status(await ask(IcomScope.read.span()));
     lines.push(`# before: scope=${scopeWas ? (scopeWas.on ? 'on' : 'off') : 'no reply'} output=${outputWas ? (outputWas.on ? 'on' : 'off') : 'no reply'}`
       + ` mode=${mode ? mode.modeName : 'no reply'} span=${span ? span.spanHz : 'no reply'}`);
-    if (scopeWas && !scopeWas.on) send(IcomScope.write.scopeOn(true));
+    // A radio whose scope was off needs a moment to bring it up before it takes
+    // the output command; sent back to back, KW4FM's IC-7300 kept the scope and
+    // dropped the output (2026-10-28). Ask again once if nothing has arrived.
+    if (scopeWas && !scopeWas.on) { send(IcomScope.write.scopeOn(true)); await wait(800); }
+    let gotData = false;
+    const markData = () => { gotData = true; };
+    controller.on('scope-data', markData);
     if (!outputWas || !outputWas.on) send(IcomScope.write.output(true));
-    await wait(seconds * 1000);
+    await wait(2000);
+    if (!gotData && (!outputWas || !outputWas.on)) {
+      lines.push('# no scope data after 2 s; asking for scope output again');
+      send(IcomScope.write.output(true));
+    }
+    controller.removeListener('scope-data', markData);
+    await wait(Math.max(0, seconds * 1000 - 2000));
   } finally {
     // Put back what we changed, while the link is still the one we changed it on.
     if (cat === controller && controller.connected) {
