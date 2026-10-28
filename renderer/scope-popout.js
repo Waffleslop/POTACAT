@@ -197,7 +197,18 @@ window.api.onScopeFrame((f) => {
 });
 
 window.api.onScopeState(applyState);
-window.api.onCatFrequency((hz) => { if (hz > 0) { centerHz = hz; recomputeAxis(); } });
+// The dial is shown where the operator put it the moment a drag, wheel or key
+// tunes (the VFO window's _freqSuppressTarget pattern): a readback from just
+// before the tune is ignored until the radio arrives within 25 Hz, or 1.5 s pass.
+let dialTarget = { hz: 0, until: 0 };
+window.api.onCatFrequency((hz) => {
+  if (!(hz > 0)) return;
+  if (dialTarget.hz && Date.now() < dialTarget.until) {
+    if (Math.abs(hz - dialTarget.hz) > 25) return;
+    dialTarget = { hz: 0, until: 0 };
+  }
+  centerHz = hz; recomputeAxis();
+});
 window.api.onSpots((list) => { spots = Array.isArray(list) ? list : []; scheduleDraw(); });
 window.api.onPopoutTheme(_applyPopoutTheme);
 // The tuning step shared with the VFO window and ECHOCAT (settings.tuneStepHz).
@@ -212,7 +223,6 @@ function tuneToFraction(frac) {
   const hz = A.snapTapHz(A.binToHz(axis, Math.max(0, Math.min(1, frac)) * (BINS - 1)), state.spanHz);
   window.api.tune((hz / 1000).toFixed(3), null);
 }
-wf.onClick(tuneToFraction);
 // ─── Level window: drag the level scale (left edge) to move it, wheel to widen ──
 // A drag that starts in the gutter never tunes; neither does a click that moved.
 let gutterDrag = null;     // { y0, range0 }
@@ -230,8 +240,76 @@ function setRange(next, from) {
   if (from !== 'top') $('sc-top').value = String(range.hi);
   scheduleDraw();
 }
+// ─── Phase 4: tune with the mouse, wheel and keys (plan items 11-13) ────────
+// Every gesture ends in window.api.tune — the one tune path.
+function tuneDial(hz) {
+  if (!(hz > 0)) return;
+  dialTarget = { hz, until: Date.now() + 1500 };
+  centerHz = hz;
+  recomputeAxis();
+  window.api.tune((hz / 1000).toFixed(3), null);
+}
+const liveTune = V.throttleLast(tuneDial, 66);   // ~15 tunes a second while the passband is dragged
+function passbandCssPx(el) {
+  const pb = V.passbandHz(state.passband, centerHz);
+  const r = el.getBoundingClientRect();
+  const k = V.hzPerPx(axis, r.width);
+  if (!pb || !k) return null;
+  return { x0: (pb.loHz - axis.startHz) / k, x1: (pb.hiHz - axis.startHz) / k };
+}
+let tuneDrag = null;       // { el, kind, x0, dial0, moved, pointerId }
+function slidePreview(dx) {
+  const t = dx ? `translateX(${dx}px)` : '';
+  traceCanvas.style.transform = t;
+  wfCanvas.style.transform = t;
+}
+function startTuneDrag(el, e) {
+  if (e.button !== 0 || !axis.known || !centerHz) return false;
+  const r = el.getBoundingClientRect();
+  const kind = V.dragKind(axis, e.clientX - r.left, el === traceCanvas ? passbandCssPx(el) : null);
+  if (kind === 'none') return false;
+  tuneDrag = { el, kind, x0: e.clientX, dial0: centerHz, width: r.width, moved: false };
+  try { el.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+  return true;
+}
+function moveTuneDrag(e) {
+  if (!tuneDrag) return;
+  const dx = e.clientX - tuneDrag.x0;
+  if (!tuneDrag.moved && Math.abs(dx) < 4) return;
+  tuneDrag.moved = true;
+  suppressClick = true;
+  if (tuneDrag.kind === 'passband') liveTune.push(V.dragDialHz('passband', tuneDrag.dial0, dx, axis, tuneDrag.width));
+  else slidePreview(dx);   // CENTER: the trace slides; the radio tunes on release
+}
+function endTuneDrag(e) {
+  const d = tuneDrag;
+  if (!d) return;
+  tuneDrag = null;
+  try { d.el.releasePointerCapture(e.pointerId); } catch { /* released */ }
+  if (!d.moved) return;
+  if (d.kind === 'passband') { liveTune.flush(); return; }
+  slidePreview(0);
+  if (e.type !== 'pointercancel') tuneDial(V.dragDialHz('pan', d.dial0, e.clientX - d.x0, axis, d.width));
+}
+function wheelTune(e) {
+  e.preventDefault();
+  if (e.ctrlKey || e.metaKey) { zoomStep(e.deltaY > 0 ? +1 : -1); return; }
+  if (!axis.known || !centerHz) return;
+  const step = V.wheelStepHz(tuneStepHz, e.deltaY, e.shiftKey);
+  if (step) tuneDial(centerHz + step);
+}
+// The waterfall: the same drag (pan only — no passband handle there) and wheel.
+let wfSuppressClick = false;
+wf.onClick((frac) => { if (wfSuppressClick) { wfSuppressClick = false; return; } tuneToFraction(frac); });
+wfCanvas.addEventListener('pointerdown', (e) => { wfSuppressClick = false; startTuneDrag(wfCanvas, e); });
+wfCanvas.addEventListener('pointermove', (e) => { moveTuneDrag(e); if (tuneDrag && tuneDrag.moved) wfSuppressClick = true; });
+wfCanvas.addEventListener('pointerup', endTuneDrag);
+wfCanvas.addEventListener('pointercancel', endTuneDrag);
+wfCanvas.addEventListener('wheel', wheelTune, { passive: false });
+
 traceCanvas.addEventListener('pointermove', (e) => {
   traceCanvas.classList.toggle('in-gutter', !!gutterDrag || inGutter(e));
+  moveTuneDrag(e);
   if (!gutterDrag) return;
   const r = traceCanvas.getBoundingClientRect();
   const plotH = Math.max(1, r.height - 6);
@@ -242,16 +320,20 @@ traceCanvas.addEventListener('pointermove', (e) => {
 });
 traceCanvas.addEventListener('pointerdown', (e) => {
   suppressClick = false;
+  if (e.button === 0 && !inGutter(e)) { startTuneDrag(traceCanvas, e); return; }
   if (e.button !== 0 || !inGutter(e)) return;
   gutterDrag = { y0: e.clientY, range0: { ...range } };
   suppressClick = true;
   try { traceCanvas.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
 });
-const endGutterDrag = (e) => { if (gutterDrag) { gutterDrag = null; try { traceCanvas.releasePointerCapture(e.pointerId); } catch { /* released */ } } };
+const endGutterDrag = (e) => {
+  endTuneDrag(e);
+  if (gutterDrag) { gutterDrag = null; try { traceCanvas.releasePointerCapture(e.pointerId); } catch { /* released */ } }
+};
 traceCanvas.addEventListener('pointerup', endGutterDrag);
 traceCanvas.addEventListener('pointercancel', endGutterDrag);
 traceCanvas.addEventListener('wheel', (e) => {
-  if (!inGutter(e)) return;   // the wheel over the trace itself is Phase 4's (tuning)
+  if (!inGutter(e)) { wheelTune(e); return; }   // over the trace: tune (Ctrl = zoom)
   e.preventDefault();
   setRange(V.zoomRange(range, e.deltaY > 0 ? 1.12 : 1 / 1.12));
 }, { passive: false });
@@ -313,6 +395,14 @@ spotsCanvas.addEventListener('click', (e) => {
     tuneToFraction(x / r.width);
   }
 });
+// Double-click a spot label: its frequency AND its mode (plan item 12d).
+spotsCanvas.addEventListener('dblclick', (e) => {
+  const r = spotsCanvas.getBoundingClientRect();
+  const x = e.clientX - r.left;
+  const hit = spotHits.find((h) => x >= h.x0 && x <= h.x1);
+  const hz = hit && spotHz(hit.spot);
+  if (hz) window.api.tune((hz / 1000).toFixed(3), hit.spot.mode || null);
+});
 
 $('sc-enable').addEventListener('click', () => window.api.enableOnRadio());
 $('sc-diag-enable').addEventListener('click', () => window.api.enableOnRadio());
@@ -363,6 +453,18 @@ $('max-btn').addEventListener('click', () => window.api.maximize());
 $('close-btn').addEventListener('click', () => window.api.close());
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { gearPop.classList.remove('show'); return; }
+  // Keys (plan item 13): Left/Right step the dial by the synced step (Shift
+  // = ten), PageUp narrower / PageDown wider. Not while typing in a field.
+  const typing = e.target && /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName);
+  if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && axis.known && centerHz) {
+      e.preventDefault();
+      tuneDial(centerHz + (e.key === 'ArrowRight' ? 1 : -1) * tuneStepHz * (e.shiftKey ? 10 : 1));
+      return;
+    }
+    if (e.key === 'PageUp') { e.preventDefault(); zoomStep(-1); return; }
+    if (e.key === 'PageDown') { e.preventDefault(); zoomStep(+1); return; }
+  }
   if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) window.api.setZoom(Math.min(2, window.api.getZoom() + 0.1));
   if ((e.ctrlKey || e.metaKey) && e.key === '-') window.api.setZoom(Math.max(0.6, window.api.getZoom() - 0.1));
   if ((e.ctrlKey || e.metaKey) && e.key === '0') window.api.setZoom(1);
@@ -372,12 +474,8 @@ applyState(state);
 
 // Zoom: step through scope-state.spans from the one nearest the current span.
 function zoomStep(dir) {
-  const spans = Array.isArray(state.spans) ? state.spans : [];
-  if (spans.length < 2) return;
-  let i = 0;
-  for (let k = 0; k < spans.length; k++) if (Math.abs(spans[k] - state.spanHz) < Math.abs(spans[i] - state.spanHz)) i = k;
-  const next = spans[Math.max(0, Math.min(spans.length - 1, i + dir))];
-  if (next && next !== state.spanHz) window.api.setSpan(next);
+  const next = V.zoomSpan(state.spans, state.spanHz, dir);
+  if (next) window.api.setSpan(next);
 }
 $('sc-zoom-out').addEventListener('click', () => zoomStep(+1)); // wider
 $('sc-zoom-in').addEventListener('click', () => zoomStep(-1));  // narrower

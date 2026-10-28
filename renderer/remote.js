@@ -1033,10 +1033,20 @@
     if (!show && activeTab === 'scope') switchTab('spots');
     scopeSyncSubscription(activeTab);
   }
+  // The dial the scope draws around: where a drag, wheel or pinch just put
+  // it until the radio's readback arrives within 25 Hz (or 1.5 s pass) — the
+  // VFO window's optimistic pattern, so an old readback never snaps it back.
+  let scopeDialTarget = { hz: 0, until: 0 };
+  function scopeDialHz() {
+    const live = Math.round((currentFreqKhz || 0) * 1000);
+    if (scopeDialTarget.hz && Date.now() < scopeDialTarget.until && Math.abs(live - scopeDialTarget.hz) > 25) return scopeDialTarget.hz;
+    scopeDialTarget = { hz: 0, until: 0 };
+    return live;
+  }
   function scopeAxisNow() {
     const A = window.ScopeAxis;
     const st = scopeState || {};
-    const centerHz = Math.round((currentFreqKhz || 0) * 1000) || (st.centerHz || 0);
+    const centerHz = scopeDialHz() || (st.centerHz || 0);
     return A.scopeAxis({ centerHz, spanHz: st.spanHz || 0, anchor: st.anchor || 'center', bins: scopeLatest ? scopeLatest.length : 256 });
   }
   function scopeSizeCanvases() {
@@ -1143,7 +1153,7 @@
     const A = window.ScopeAxis;
     if (!A || !window.ScopeView) return;
     const axis = scopeAxisNow();
-    const centerHz = Math.round((currentFreqKhz || 0) * 1000);
+    const centerHz = scopeDialHz();
     for (const sf of scopeSurfaces) {
       if (!sf.visible(activeTab) || !sf.trace) continue;
       scopeDrawTrace(sf, axis, centerHz);
@@ -1182,6 +1192,95 @@
     scopeReadoutEl.style.top = Math.max(2, clientY - box.top - 30) + 'px';
   }
   function scopeHideReadout() { scopeReadoutAt = null; if (scopeReadoutEl) scopeReadoutEl.style.display = 'none'; }
+  function scopeTuneDial(hz) {
+    if (!(hz > 0)) return;
+    scopeDialTarget = { hz, until: Date.now() + 1500 };
+    sendToServer({ type: 'tune', freqKhz: (hz / 1000).toFixed(3), mode: '' });
+    scopeDrawAll();
+  }
+  const scopeLiveTune = window.ScopeView ? window.ScopeView.throttleLast(scopeTuneDial, 66) : null;
+  function scopeZoom(dir) {
+    const st = scopeState || {};
+    const next = window.ScopeView.zoomSpan(st.spans, st.spanHz, dir);
+    if (next) sendToServer({ type: 'scope-span', spanHz: next });
+  }
+  function scopeWireTuneGestures(el, withPassband) {
+    const V = window.ScopeView;
+    let drag = null;          // { kind, x0, y0, dial0, width, moved, decided }
+    const touches = new Map();
+    let pinch = null;         // { d0 }
+    const slide = (dx) => { const t = dx ? 'translateX(' + dx + 'px)' : ''; for (const sf2 of scopeSurfaces) if (sf2.full) { if (sf2.trace) sf2.trace.style.transform = t; if (sf2.wf) sf2.wf.style.transform = t; } };
+    const pbPx = () => {
+      const axis = scopeAxisNow();
+      const pb = V.passbandHz((scopeState || {}).passband, scopeDialHz());
+      const k = V.hzPerPx(axis, el.getBoundingClientRect().width);
+      return pb && k ? { x0: (pb.loHz - axis.startHz) / k, x1: (pb.hiHz - axis.startHz) / k } : null;
+    };
+    el.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'touch') {
+        touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (touches.size === 2) {
+          const [a, b] = [...touches.values()];
+          pinch = { d0: Math.hypot(a.x - b.x, a.y - b.y) };
+          drag = null; slide(0);
+          return;
+        }
+      }
+      if (e.button !== 0 || (withPassband && scopeInGutter(el, e))) return;
+      const axis = scopeAxisNow();
+      const r = el.getBoundingClientRect();
+      const kind = V.dragKind(axis, e.clientX - r.left, withPassband ? pbPx() : null);
+      if (kind === 'none' || !scopeDialHz()) return;
+      drag = { kind, x0: e.clientX, y0: e.clientY, dial0: scopeDialHz(), width: r.width, moved: false, touch: e.pointerType === 'touch' };
+    });
+    el.addEventListener('pointermove', (e) => {
+      if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinch && touches.size === 2) {
+        const [a, b] = [...touches.values()];
+        const step = V.pinchStep(pinch.d0, Math.hypot(a.x - b.x, a.y - b.y));
+        if (step) { scopeZoom(step); pinch.d0 = Math.hypot(a.x - b.x, a.y - b.y); }
+        scopeSuppressClick = true;
+        return;
+      }
+      if (!drag) return;
+      const dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
+      if (!drag.moved) {
+        if (drag.touch ? !V.touchIsHorizontal(dx, dy, 12) : Math.abs(dx) < 4) {
+          if (drag.touch && Math.abs(dy) > 12) drag = null;   // the page is scrolling
+          return;
+        }
+        drag.moved = true;
+        scopeSuppressClick = true;
+        clearTimeout(scopeHoldTimer);
+        try { el.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+      }
+      const axis = scopeAxisNow();
+      if (drag.kind === 'passband') scopeLiveTune.push(V.dragDialHz('passband', drag.dial0, dx, axis, drag.width));
+      else slide(dx);
+    });
+    const end = (e) => {
+      touches.delete(e.pointerId);
+      if (touches.size < 2) pinch = null;
+      const d = drag;
+      drag = null;
+      if (!d || !d.moved) return;
+      try { el.releasePointerCapture(e.pointerId); } catch { /* released */ }
+      if (d.kind === 'passband') { scopeLiveTune.flush(); return; }
+      const axis = scopeAxisNow();
+      slide(0);
+      if (e.type !== 'pointercancel') scopeTuneDial(V.dragDialHz('pan', d.dial0, e.clientX - d.x0, axis, d.width));
+    };
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
+    el.addEventListener('wheel', (e) => {
+      if (withPassband && scopeInGutter(el, e)) return;   // the level window's own wheel
+      e.preventDefault();
+      if (e.ctrlKey || e.metaKey) { scopeZoom(e.deltaY > 0 ? +1 : -1); return; }
+      if (!scopeAxisNow().known || !scopeDialHz()) return;
+      const step = V.wheelStepHz(scopeTuneStepHz, e.deltaY, e.shiftKey);
+      if (step) scopeTuneDial(scopeDialHz() + step);
+    }, { passive: false });
+  }
   function scopeTuneAt(clientX, el) {
     const axis = scopeAxisNow();
     if (!axis.known) return;
@@ -1226,6 +1325,11 @@
       e.preventDefault();
       scopeSetRange(window.ScopeView.zoomRange(scopeRange, e.deltaY > 0 ? 1.12 : 1 / 1.12));
     }, { passive: false });
+    // Phase 4 (plan items 11, 12, 12e): drag the passband to tune, drag
+    // elsewhere to slide the spectrum and tune on release, wheel steps the
+    // dial (Ctrl = zoom), pinch zooms. Touch: a sideways drag past 12 px is a
+    // scope gesture, an up/down one scrolls the page (touch-action: pan-y).
+    for (const el of [tr, sf.wf]) scopeWireTuneGestures(el, el === tr);
     for (const el of [sf.trace, sf.wf]) {
       el.addEventListener('pointermove', (e) => {
         if (e.pointerType === 'touch' && !scopeReadoutAt) { clearTimeout(scopeHoldTimer); return; }

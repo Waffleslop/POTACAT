@@ -429,5 +429,78 @@ test('Bandspread wiring: a scope watcher like the JTCAT strip, frames + state fa
   assert.ok(html.indexOf('../lib/scope-view.js') > 0 && html.indexOf('../lib/scope-axis.js') > 0, 'scripts loaded');
 });
 
+// ─── Phase 4: tuning gestures (plan items 11-13) ───────────────────────────
+console.log('Scope view — tuning gestures (Phase 4)');
+const ax4 = A.scopeAxis({ centerHz: 14074000, spanHz: 10000, anchor: 'center' });   // 14.069 .. 14.079
+test('dragKind: passband under the pointer = passband drag; elsewhere = pan; an assumed axis = none', () => {
+  const pb = { x0: 430, x1: 560 };
+  assert.strictEqual(V.dragKind(ax4, 500, pb), 'passband');
+  assert.strictEqual(V.dragKind(ax4, 428, pb), 'passband', 'a few px of slop');
+  assert.strictEqual(V.dragKind(ax4, 200, pb), 'pan');
+  assert.strictEqual(V.dragKind(ax4, 500, null), 'pan', 'the waterfall has no passband handle');
+  const assumed = A.scopeAxis({ centerHz: 14074000, spanHz: 10000, anchor: 'fix' });
+  assert.strictEqual(V.dragKind(assumed, 500, pb), 'none', 'FIX/CURSOR: no drag-tuning');
+});
+test('dragDialHz: the passband follows the pointer; a pan moves the dial the other way (CENTER: tune on release)', () => {
+  const k = V.hzPerPx(ax4, 1001);            // 10 Hz per px
+  assert.strictEqual(k, 10);
+  assert.strictEqual(V.dragDialHz('passband', 14074000, 50, ax4, 1001), 14074500);
+  assert.strictEqual(V.dragDialHz('pan', 14074000, 50, ax4, 1001), 14073500, 'spectrum dragged right = what was left of the dial comes under it');
+  assert.strictEqual(V.dragDialHz('pan', 14074000, -120, ax4, 1001), 14075200);
+});
+test('wheelStepHz: one synced step per notch, Shift = ten, wheel up = higher', () => {
+  assert.strictEqual(V.wheelStepHz(100, -1, false), 100);
+  assert.strictEqual(V.wheelStepHz(100, 3, false), -100);
+  assert.strictEqual(V.wheelStepHz(1000, -1, true), 10000);
+  assert.strictEqual(V.wheelStepHz(0, -1, false), 1000, 'no step known: 1 kHz, the VFO default');
+  assert.strictEqual(V.wheelStepHz(100, 0, false), 0);
+});
+test('zoomSpan: through scope-state.spans from the nearest one; null at either end or with no spans', () => {
+  const spans = [5000, 10000, 20000, 50000];
+  assert.strictEqual(V.zoomSpan(spans, 10000, +1), 20000);
+  assert.strictEqual(V.zoomSpan(spans, 10000, -1), 5000);
+  assert.strictEqual(V.zoomSpan(spans, 12000, +1), 20000, 'from the nearest');
+  assert.strictEqual(V.zoomSpan(spans, 50000, +1), null);
+  assert.strictEqual(V.zoomSpan([], 10000, +1), null);
+  assert.strictEqual(V.zoomSpan(undefined, 10000, +1), null);
+});
+test('touch: sideways past 12 px is a scope gesture, vertical is the page; pinch steps at 25 %', () => {
+  assert.strictEqual(V.touchIsHorizontal(13, 2), true);
+  assert.strictEqual(V.touchIsHorizontal(11, 0), false);
+  assert.strictEqual(V.touchIsHorizontal(20, 40), false);
+  assert.strictEqual(V.pinchStep(100, 130), -1, 'spread = narrower');
+  assert.strictEqual(V.pinchStep(100, 75), 1, 'closed = wider');
+  assert.strictEqual(V.pinchStep(100, 110), 0);
+});
+test('throttleLast: at most one send per interval, the last value always sent', () => {
+  let t = 0; const q = [];
+  const timers = { now: () => t, set: (f, d) => { q.push({ f, at: t + d }); return q.length; }, clear: (id) => { if (q[id - 1]) q[id - 1].f = null; } };
+  const sent = [];
+  const th = V.throttleLast((v) => sent.push(v), 66, timers);
+  th.push(1);                      // immediate
+  t = 10; th.push(2); t = 20; th.push(3);   // held; 3 replaces 2
+  assert.deepStrictEqual(sent, [1]);
+  t = 66; q.forEach((x) => { if (x.f && x.at <= t) { const f = x.f; x.f = null; f(); } });
+  assert.deepStrictEqual(sent, [1, 3], 'one send per 66 ms, the newest value');
+  t = 80; th.push(4); th.flush();
+  assert.deepStrictEqual(sent, [1, 3, 4], 'release always lands where the drag stopped');
+});
+test('surfaces wire the gestures to the one tune path', () => {
+  const pj = read('renderer/scope-popout.js');
+  assert.ok(/function tuneDial\(hz\) \{[\s\S]*?window\.api\.tune\(/.test(pj), 'pop-out tunes through window.api.tune');
+  assert.ok(/V\.throttleLast\(tuneDial, 66\)/.test(pj), '~15 sends a second');
+  assert.ok(/V\.wheelStepHz\(tuneStepHz/.test(pj), 'wheel uses the synced step');
+  assert.ok(/e\.key === 'PageUp'[\s\S]*?zoomStep\(-1\)/.test(pj) && /ArrowRight/.test(pj), 'keys');
+  assert.ok(/spotsCanvas\.addEventListener\('dblclick'/.test(pj), 'double-click a spot');
+  assert.ok(/Math\.abs\(hz - dialTarget\.hz\) > 25\) return;/.test(pj), 'optimistic dial');
+  const wj = read('renderer/remote.js');
+  assert.ok(/function scopeTuneDial\(hz\) \{[\s\S]*?sendToServer\(\{ type: 'tune'/.test(wj), 'web tunes through the tune message');
+  assert.ok(/sendToServer\(\{ type: 'scope-span', spanHz: next \}\)/.test(wj), 'web zoom = scope-span');
+  assert.ok(/V\.touchIsHorizontal\(dx, dy, 12\)/.test(wj) && /V\.pinchStep\(/.test(wj), 'touch rules');
+  assert.ok(/V\.wheelStepHz\(scopeTuneStepHz/.test(wj), 'web wheel uses the synced step');
+  assert.ok(/id="scope-phone-trace"[^>]*touch-action:pan-y/.test(read('renderer/remote.html')), 'vertical drags scroll the page');
+  assert.ok(/owner: yaesuScopeState\.kind === 1 \|\| yaesuScopeState\.source === 'flex' \|\| yaesuScopeState\.source === 'sdr' \? 'potacat' : 'radio'/.test(read('main.js')), 'scope-state owner');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

@@ -28539,6 +28539,11 @@ function scopeOverlay() {
     ? { flexLo: parseInt(_flexSliceKv.filter_lo, 10), flexHi: parseInt(_flexSliceKv.filter_hi, 10) } : {};
   const dialHz = _currentFreqHz || yaesuScopeState.centerHz || 0;
   return {
+    // Who positions the window (plan item 12b): POTACAT (the Flex pan, an
+    // SDR, the synthetic signal) or the radio (FT-710 / Icom). Both keep it
+    // centred on the dial today, so a drag on the trace previews and tunes on
+    // release either way; FIX / CURSOR (axis not known) does not drag.
+    owner: yaesuScopeState.kind === 1 || yaesuScopeState.source === 'flex' || yaesuScopeState.source === 'sdr' ? 'potacat' : 'radio',
     passband: ScopeOverlay.passbandFor({ mode: _currentMode, widthHz: _currentFilterWidth, ...flexEdges }),
     txHz: _currentSplit && _currentFreqOther > 0 ? _currentFreqOther : null,
     bandPlan: dialHz > 0 ? ScopeOverlay.bandPlanFor(dialHz, {
