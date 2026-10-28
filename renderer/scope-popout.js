@@ -64,11 +64,13 @@ function applyState(s) {
   pill.className = 'sc-pill ' + (state.status || 'stopped');
   pill.textContent = ({ stopped: 'Stopped', starting: 'Starting', live: 'Live', blocked: 'Blocked', error: 'Error', unavailable: 'Unavailable' })[state.status] || state.status;
   $('sc-synth-badge').style.display = state.kind === 1 ? '' : 'none';
-  // An SDR source (lib/sdr-scope.js) has no sweep speed and no SCU-LAN10.
+  // An SDR source (lib/sdr-scope.js) and a Flex panadapter (lib/flex-scope.js)
+  // have no sweep speed and no SCU-LAN10: those rows are the FT-710's.
   const sdr = state.source === 'sdr' && state.kind !== 1;
+  const notYaesu = (state.source === 'sdr' || state.source === 'flex') && state.kind !== 1;
   $('sc-sdr-badge').style.display = sdr ? '' : 'none';
-  $('sc-speed-wrap').style.display = sdr ? 'none' : '';
-  $('sc-sculan-wrap').style.display = sdr ? 'none' : '';
+  $('sc-speed-wrap').style.display = notYaesu ? 'none' : '';
+  $('sc-sculan-wrap').style.display = notYaesu ? 'none' : '';
   $('sc-span').textContent = A.formatSpan(state.spanHz);
   $('sc-mode').textContent = state.anchor ? ScopeAxis.anchorLabel(state.anchor) : '—';
   $('sc-speed').textContent = state.speed || '—';

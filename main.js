@@ -2681,6 +2681,9 @@ function getRigCapabilities(rigType) {
   if (yaesuScopeSynth && !caps.nativeScope) caps.nativeScope = 'synthetic';
   // A band scope from a separate SDR (lib/sdr-scope.js) gives ANY rig one —
   // the same flag, so the More menu, ECHOCAT Web and the app light up.
+  // Flex Direct: the radio's own panadapter (lib/flex-scope.js). Not while
+  // SmartSDR is running (bound): its pan is SmartSDR's.
+  if (!caps.nativeScope && flexScopeAvailable()) caps.nativeScope = 'flex';
   if (!caps.nativeScope && sdrScopeSettingsForActiveRig().enabled) caps.nativeScope = 'sdr';
   // AF (speaker) level: the Flex slice's audio_level, or a codec with
   // setAfGain (CI-V 14 01, Kenwood/Yaesu AG, rigctld L AF). Set-only.
@@ -17224,6 +17227,7 @@ const { computeSpectrumBins } = require('./lib/spectrum-fft');
 // lib/rx-spectrum-ring.js): the last second of RX audio from the Flex / Icom
 // Network stream, or from the ECHOCAT audio window's spectrum-only capture.
 const { RxSpectrumRing } = require('./lib/rx-spectrum-ring');
+const FlexScope = require('./lib/flex-scope');
 const rxSpecRing = new RxSpectrumRing();
 let _rxSpecBridgeOn = false;
 function rxSpectrumEngineLive() {
@@ -17792,6 +17796,8 @@ function connectSmartSdr() {
     if (settings.audioSource === 'smartsdr') startSmartSdrAudio();
   });
   smartSdr.on('slice-ready', ({ index }) => {
+    // A reconnect brings a fresh pan (or the same one, unsized): pick it up.
+    if (flexScopeOn && smartSdr.mode === 'self') { smartSdr.stopPanScope(); smartSdr.startPanScope(15); }
     if (smartSdr.mode === 'self') {
       sendCatLog(`Flex Direct: tuning radio slice ${index}`);
       // THIS is the moment the radio is controllable (canTune just went true).
@@ -17910,6 +17916,12 @@ function connectSmartSdr() {
   // followed slice rides on counts (a second panadapter's WNB is not ours),
   // and we only rebroadcast on actual change — pan status lines are chatty
   // (every center-freq drag) and must not become a broadcast storm.
+  // The Flex panadapter scope source: frames, and the pan's own axis.
+  smartSdr.on('pan-frame', (f) => { if (flexScopeOn) yaesuScopeOnFrame(f); });
+  smartSdr.on('pan-geometry', (g) => {
+    flexPanGeometry[g.panId] = { ...(flexPanGeometry[g.panId] || {}), ...g };
+    if (flexScopeOn && flexScopeApplyGeometry()) yaesuScopeBroadcastState();
+  });
   smartSdr.on('pan-status', ({ panId, wnb, wnbLevel }) => {
     if (smartSdr.ourPanId && panId !== smartSdr.ourPanId) return;
     let changed = false;
@@ -21867,7 +21879,6 @@ function connectRemote() {
     }
   });
   remoteServer.on('client-connected', ({ deviceId, profileCallsign, platform, pass } = {}) => {
-    if (!pass) noteOwnerPhoneApp(platform);
     // This desktop is driving a remote shack: it has no radio of its own to
     // lend a phone, and chaining one link through another is not supported.
     if (isRemoteMode()) {
@@ -21875,6 +21886,7 @@ function connectRemote() {
       remoteServer.refuseCurrentClient(REMOTE_NO_RADIO_TO_SHARE_MSG);
       return;
     }
+    if (!pass) noteOwnerPhoneApp(platform); // an owner device that was admitted
     // Cancel any pending teardown — the phone came back inside the
     // grace window, so the engine kept running and we're whole.
     if (_clientDisconnectGraceTimer) {
@@ -28314,6 +28326,13 @@ function yaesuScopeSetStatus(status, diag) {
 /** Called from sendCatFrequency — the single frequency sink — so every QSY path centres the axis. */
 function yaesuScopeNoteFrequency(hz) {
   if (!(hz > 0)) return;
+  // The Flex panadapter has its own centre (pan status) and the slice can sit
+  // anywhere in it; only when the dial leaves the view is the pan recentred.
+  if (flexScopeOn) {
+    const c = FlexScope.recentreFor(hz, yaesuScopeState.centerHz, yaesuScopeState.spanHz);
+    if (c && smartSdr) smartSdr.setPanCenter(c);
+    return;
+  }
   yaesuScopeState.centerHz = hz;
   if (yaesuScopeState.status === 'stopped') return;
   sdrScopeFollowDial(hz);
@@ -28329,7 +28348,9 @@ function startYaesuScope() {
   if (yaesuScopeProc) return;
   if (yaesuScopeRestartTimer) { clearTimeout(yaesuScopeRestartTimer); yaesuScopeRestartTimer = null; }
   const synth = yaesuScopeSynth;
-  if (!synth && scopeSourceKind() === 'sdr') { startSdrScope(); return; }
+  const kind = synth ? null : scopeSourceKind();
+  if (kind === 'sdr') { startSdrScope(); return; }
+  if (kind === 'flex') { startFlexScope(); return; }
   if (!synth && !yaesuScopeRigHasScope()) {
     yaesuScopeSetStatus('unavailable', { key: 'no-rig', severity: 'blocker',
       headline: 'The active rig has no USB band scope',
@@ -28409,6 +28430,7 @@ function stopYaesuScope(why) {
   if (isRemoteMode()) { remoteShackScopeSubscribe(false); return; }
   if (yaesuScopeRestartTimer) { clearTimeout(yaesuScopeRestartTimer); yaesuScopeRestartTimer = null; }
   if (sdrScopeClient) { stopSdrScope(why); return; }
+  if (flexScopeOn) { stopFlexScope(why); return; }
   yaesuScopeStopCatPolling();
   if (yaesuScopeScuLanWeSet) {
     yaesuScopeScuLanWeSet = false;
@@ -28435,7 +28457,7 @@ function yaesuScopeOnFrame(f) {
   if (!yaesuScopeWanted()) { stopYaesuScope('nobody is watching'); return; }
   if (yaesuScopeState.status !== 'live') {
     yaesuScopeRestarts = 0;
-    sendCatLog('[Scope] frames flowing (' + (f.kind === 1 ? 'synthetic signal' : yaesuScopeState.source === 'sdr' ? 'SDR' : 'live radio') + ')');
+    sendCatLog('[Scope] frames flowing (' + (f.kind === 1 ? 'synthetic signal' : yaesuScopeState.source === 'sdr' ? 'SDR' : yaesuScopeState.source === 'flex' ? 'Flex panadapter' : 'live radio') + ')');
     yaesuScopeSetStatus('live', null);
   }
   if (scopePopoutWin && !scopePopoutWin.isDestroyed()) {
@@ -28555,12 +28577,73 @@ function sdrScopeSettingsForActiveRig() {
   return SdrScope.normalizeSdrSettings(rig && rig.sdrScope);
 }
 
-/** Which source a scope start uses: 'sdr', 'yaesu' (FT-710 USB), or null. */
+/**
+ * Which source a scope start uses: 'sdr', 'yaesu' (FT-710 USB), 'flex' (a
+ * Flex's own panadapter, Flex Direct only), or null. A radio's own scope wins
+ * over a separate SDR unless the rig says preferSdr.
+ */
 function scopeSourceKind() {
   const sdr = sdrScopeSettingsForActiveRig();
   const native = yaesuScopeRigHasScope();
-  if (sdr.enabled && (!native || sdr.preferSdr)) return 'sdr';
-  return native ? 'yaesu' : null;
+  const flex = flexScopeAvailable();
+  if (sdr.enabled && (sdr.preferSdr || (!native && !flex))) return 'sdr';
+  if (native) return 'yaesu';
+  return flex ? 'flex' : null;
+}
+
+// ═══ The Flex's own panadapter (lib/flex-scope.js) ═══════════════════════════
+// Flex Direct only: POTACAT is the radio's GUI client and the pan the radio
+// built for our slice is ours; its FFT stream (class 0x8003) reaches the UDP
+// port POTACAT already listens on. 850 x 256 at 15 fps, the same frames and
+// fan-out as the FT-710 and SDR sources. The axis is the pan's own centre and
+// span (anchor 'pan', known), and the slice can sit anywhere in it.
+let flexScopeOn = false;
+let flexScopeRetry = null;
+const flexPanGeometry = {};          // panId -> { centerHz, spanHz }
+
+function flexScopeAvailable() {
+  return !!(smartSdr && smartSdr.connected && smartSdr.mode === 'self');
+}
+
+function flexScopeApplyGeometry() {
+  const id = smartSdr && (smartSdr.panScopeId || smartSdr.ourPanId);
+  const g = id && flexPanGeometry[id];
+  if (!g) return false;
+  let changed = false;
+  if (g.centerHz && g.centerHz !== yaesuScopeState.centerHz) { yaesuScopeState.centerHz = g.centerHz; changed = true; }
+  if (g.spanHz && g.spanHz !== yaesuScopeState.spanHz) { yaesuScopeState.spanHz = g.spanHz; changed = true; }
+  return changed;
+}
+
+function startFlexScope() {
+  if (flexScopeOn) return;
+  flexScopeOn = true;
+  Object.assign(yaesuScopeState, {
+    source: 'flex', kind: 0, spanCode: null, anchor: 'pan', modeCode: null, speed: null, scuLan: null,
+    frames: 0, misaligned: 0, helperPath: '', catReads: null,
+  });
+  flexScopeApplyGeometry();
+  yaesuScopeSetStatus('starting', null);
+  const tryStart = () => {
+    flexScopeRetry = null;
+    if (!flexScopeOn) return;
+    const id = flexScopeAvailable() ? smartSdr.startPanScope(15) : null;
+    if (id) {
+      sendCatLog(`[Scope] Flex panadapter ${id}: ${FlexScope.BINS} points at 15 fps`);
+      if (flexScopeApplyGeometry()) yaesuScopeBroadcastState();
+      return;
+    }
+    flexScopeRetry = setTimeout(tryStart, 1000);   // no pan known yet: the radio is still building it
+  };
+  tryStart();
+}
+
+function stopFlexScope(why) {
+  flexScopeOn = false;
+  if (flexScopeRetry) { clearTimeout(flexScopeRetry); flexScopeRetry = null; }
+  if (smartSdr) smartSdr.stopPanScope();
+  sendCatLog('[Scope] Flex panadapter stopped' + (why ? ' — ' + why : ''));
+  if (yaesuScopeState.status !== 'stopped') yaesuScopeSetStatus('stopped', null);
 }
 
 function startSdrScope() {
