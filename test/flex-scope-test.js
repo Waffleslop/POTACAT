@@ -113,10 +113,28 @@ check('the source is chosen only in Flex Direct; a radio\'s own scope wins over 
   assert.ok(/if \(sdr\.enabled && \(sdr\.preferSdr \|\| \(!native && !flex\)\)\) return 'sdr';/.test(main));
   assert.ok(/if \(!caps\.nativeScope && flexScopeAvailable\(\)\) caps\.nativeScope = 'flex';/.test(main));
 });
-check('the pan keeps its own centre: the dial only recentres it when it leaves the view', () => {
+check('always centred on the dial (Casey): anchor center, the pan follows at most 10x a second', () => {
   const fn = main.slice(main.indexOf('function yaesuScopeNoteFrequency('), main.indexOf('function startYaesuScope('));
-  assert.ok(fn.indexOf('if (flexScopeOn)') < fn.indexOf('yaesuScopeState.centerHz = hz;'));
-  assert.ok(/anchor: 'pan'/.test(main.slice(main.indexOf('function startFlexScope('), main.indexOf('function stopFlexScope('))));
+  assert.ok(/if \(flexScopeOn\) \{[\s\S]{0,600}yaesuScopeState\.centerHz = hz;\s+flexScopeQueueCenter\(hz\);/.test(fn));
+  const start = main.slice(main.indexOf('function startFlexScope('), main.indexOf('function stopFlexScope('));
+  assert.ok(/anchor: 'center'/.test(start) && /smartSdr\.setPanCenter\(_currentFreqHz\)/.test(start));
+  const q = main.slice(main.indexOf('function flexScopeQueueCenter('), main.indexOf('function flexScopeQueueCenter(') + 500);
+  assert.ok(/setTimeout\([\s\S]*\}, 100\);/.test(q), 'coalesced to 100 ms');
+});
+check('zoom: the steps, the command, remembered per source, on the wire', () => {
+  assert.deepStrictEqual(F.SPANS, [5000, 10000, 25000, 50000, 100000, 200000, 500000, 1000000]);
+  assert.strictEqual(F.nearestSpan(180000), 200000);
+  assert.strictEqual(F.nearestSpan(0), null);
+  const c = new SmartSdrClient(); const sent = []; c._send = (x) => sent.push(x);
+  c._slicePan = { 0: '0x40000000' }; c._ourSliceIndex = 0; c._guiMode = 'self';
+  c.startPanScope(15); c.setPanBandwidth(50000);
+  assert.strictEqual(sent[1], 'display pan set 0x40000000 bandwidth=0.050000');
+  const set = main.slice(main.indexOf('function setScopeSpan('), main.indexOf('function setScopeSpan(') + 700);
+  assert.ok(/settings\.flexScopeSpanHz = span;/.test(set) && /smartSdr\.setPanBandwidth\(span\)/.test(set));
+  assert.ok(/spans: scopeSpans\(\),/.test(main), 'scope-state carries the steps');
+  const rs = fs.readFileSync(path.join(ROOT, 'lib/remote-server.js'), 'utf8');
+  assert.ok(/'scope-span'\]/.test(rs) && /case 'scope-span':/.test(rs));
+  assert.ok(require('../lib/echocat-protocol').MESSAGES['scope-span']);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

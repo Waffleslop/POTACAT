@@ -72,6 +72,10 @@ function applyState(s) {
   $('sc-speed-wrap').style.display = notYaesu ? 'none' : '';
   $('sc-sculan-wrap').style.display = notYaesu ? 'none' : '';
   $('sc-span').textContent = A.formatSpan(state.spanHz);
+  // Zoom: only when the source offers steps (the Flex panadapter today).
+  const spans = Array.isArray(state.spans) ? state.spans : [];
+  $('sc-zoom-out').classList.toggle('hidden', spans.length < 2);
+  $('sc-zoom-in').classList.toggle('hidden', spans.length < 2);
   $('sc-mode').textContent = state.anchor ? ScopeAxis.anchorLabel(state.anchor) : '—';
   $('sc-speed').textContent = state.speed || '—';
   $('sc-sculan').textContent = state.scuLan === '1' ? 'ON' : state.scuLan === '0' ? 'OFF' : '—';
@@ -298,3 +302,15 @@ document.addEventListener('keydown', (e) => {
 });
 window.addEventListener('resize', () => { wf.resize(); scheduleDraw(); });
 applyState(state);
+
+// Zoom: step through scope-state.spans from the one nearest the current span.
+function zoomStep(dir) {
+  const spans = Array.isArray(state.spans) ? state.spans : [];
+  if (spans.length < 2) return;
+  let i = 0;
+  for (let k = 0; k < spans.length; k++) if (Math.abs(spans[k] - state.spanHz) < Math.abs(spans[i] - state.spanHz)) i = k;
+  const next = spans[Math.max(0, Math.min(spans.length - 1, i + dir))];
+  if (next && next !== state.spanHz) window.api.setSpan(next);
+}
+$('sc-zoom-out').addEventListener('click', () => zoomStep(+1)); // wider
+$('sc-zoom-in').addEventListener('click', () => zoomStep(-1));  // narrower

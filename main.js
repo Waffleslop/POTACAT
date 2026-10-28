@@ -23583,6 +23583,7 @@ function connectRemote() {
     if (on) { yaesuScopeRestarts = 0; startYaesuScope(); yaesuScopeBroadcastState(); }
     else if (!yaesuScopeWanted()) stopYaesuScope('ECHOCAT scope view closed');
   });
+  remoteServer.on('scope-span', ({ spanHz } = {}) => { setScopeSpan(spanHz, 'ECHOCAT device'); });
   remoteServer.on('scope-enable-radio', ({ guest } = {}) => {
     if (guest) {
       // A Guest Pass may look; the host's radio menu is not a guest's to
@@ -28276,6 +28277,7 @@ function yaesuScopeStatePayload() {
     axis: YaesuScope.scopeAxis({ centerHz: yaesuScopeState.centerHz, spanHz: yaesuScopeState.spanHz, anchor: yaesuScopeState.anchor }),
     fps: settings.yaesuScopeFps || 20,
     synth: yaesuScopeSynth,
+    spans: scopeSpans(),
     // Whether the active rig can do this at all — the JTCAT pop-out and the
     // web client show their band-scope controls only when it is true.
     available: yaesuScopeSynth || !!scopeSourceKind(),
@@ -28302,6 +28304,7 @@ function yaesuScopeRemotePayload(extra) {
     available: yaesuScopeSynth || !!scopeSourceKind(),
     fps: settings.yaesuScopeFps || 20,
     synth: yaesuScopeSynth,
+    spans: scopeSpans(),
     ...(extra || {}),
   };
 }
@@ -28329,8 +28332,13 @@ function yaesuScopeNoteFrequency(hz) {
   // The Flex panadapter has its own centre (pan status) and the slice can sit
   // anywhere in it; only when the dial leaves the view is the pan recentred.
   if (flexScopeOn) {
-    const c = FlexScope.recentreFor(hz, yaesuScopeState.centerHz, yaesuScopeState.spanHz);
-    if (c && smartSdr) smartSdr.setPanCenter(c);
+    // Casey 2026-10-28: "I want the frequency I'm tuned to to always be in the
+    // center." The axis is the dial (anchor 'center', so every client draws
+    // around its own live dial) and the pan follows it, at most 10 times a
+    // second while the knob spins.
+    yaesuScopeState.centerHz = hz;
+    flexScopeQueueCenter(hz);
+    if (yaesuScopeRemoteWants && Date.now() - yaesuScopeLastStateSend > 250) yaesuScopeBroadcastState();
     return;
   }
   yaesuScopeState.centerHz = hz;
@@ -28605,12 +28613,46 @@ function flexScopeAvailable() {
   return !!(smartSdr && smartSdr.connected && smartSdr.mode === 'self');
 }
 
+let flexScopeCenterTimer = null;
+let flexScopeCenterWant = 0;
+/** Recentre the pan on the dial, coalesced to one command per 100 ms. */
+function flexScopeQueueCenter(hz) {
+  flexScopeCenterWant = hz;
+  if (flexScopeCenterTimer) return;
+  if (smartSdr) smartSdr.setPanCenter(hz);
+  flexScopeCenterTimer = setTimeout(() => {
+    flexScopeCenterTimer = null;
+    if (flexScopeOn && smartSdr && flexScopeCenterWant && flexScopeCenterWant !== hz) smartSdr.setPanCenter(flexScopeCenterWant);
+  }, 100);
+}
+
+/** Zoom steps for the running source (scope-state.spans); empty = no zoom. */
+function scopeSpans() {
+  return flexScopeOn ? FlexScope.SPANS.slice() : [];
+}
+
+/** Zoom (C2S scope-span, the scope pop-out's - / +): remembered per source. */
+function setScopeSpan(hz, origin) {
+  if (!flexScopeOn || !smartSdr) return false;
+  const span = FlexScope.nearestSpan(hz);
+  if (!span) return false;
+  settings.flexScopeSpanHz = span;
+  saveSettings(settings);
+  smartSdr.setPanBandwidth(span);
+  yaesuScopeState.spanHz = span;   // the pan status confirms (or clamps) it
+  sendCatLog(`[Scope] Flex panadapter span ${span >= 1e6 ? span / 1e6 + ' MHz' : span / 1e3 + ' kHz'} (${origin})`);
+  yaesuScopeBroadcastState();
+  return true;
+}
+
 function flexScopeApplyGeometry() {
   const id = smartSdr && (smartSdr.panScopeId || smartSdr.ourPanId);
   const g = id && flexPanGeometry[id];
   if (!g) return false;
   let changed = false;
-  if (g.centerHz && g.centerHz !== yaesuScopeState.centerHz) { yaesuScopeState.centerHz = g.centerHz; changed = true; }
+  // Centred on the dial: the pan's own centre is only a fallback before the
+  // first frequency arrives.
+  if (g.centerHz && !yaesuScopeState.centerHz) { yaesuScopeState.centerHz = g.centerHz; changed = true; }
   if (g.spanHz && g.spanHz !== yaesuScopeState.spanHz) { yaesuScopeState.spanHz = g.spanHz; changed = true; }
   return changed;
 }
@@ -28619,8 +28661,9 @@ function startFlexScope() {
   if (flexScopeOn) return;
   flexScopeOn = true;
   Object.assign(yaesuScopeState, {
-    source: 'flex', kind: 0, spanCode: null, anchor: 'pan', modeCode: null, speed: null, scuLan: null,
+    source: 'flex', kind: 0, spanCode: null, anchor: 'center', modeCode: null, speed: null, scuLan: null,
     frames: 0, misaligned: 0, helperPath: '', catReads: null,
+    centerHz: _currentFreqHz || yaesuScopeState.centerHz || 0,
   });
   flexScopeApplyGeometry();
   yaesuScopeSetStatus('starting', null);
@@ -28629,8 +28672,13 @@ function startFlexScope() {
     if (!flexScopeOn) return;
     const id = flexScopeAvailable() ? smartSdr.startPanScope(15) : null;
     if (id) {
-      sendCatLog(`[Scope] Flex panadapter ${id}: ${FlexScope.BINS} points at 15 fps`);
-      if (flexScopeApplyGeometry()) yaesuScopeBroadcastState();
+      sendCatLog(`[Scope] Flex panadapter ${id}: ${FlexScope.BINS} points at 15 fps, centred on the dial`);
+      if (_currentFreqHz) smartSdr.setPanCenter(_currentFreqHz);
+      // Where the operator left the zoom last time.
+      const span = FlexScope.nearestSpan(settings.flexScopeSpanHz);
+      if (span) { smartSdr.setPanBandwidth(span); yaesuScopeState.spanHz = span; }
+      flexScopeApplyGeometry();
+      yaesuScopeBroadcastState();
       return;
     }
     flexScopeRetry = setTimeout(tryStart, 1000);   // no pan known yet: the radio is still building it
@@ -28641,6 +28689,7 @@ function startFlexScope() {
 function stopFlexScope(why) {
   flexScopeOn = false;
   if (flexScopeRetry) { clearTimeout(flexScopeRetry); flexScopeRetry = null; }
+  if (flexScopeCenterTimer) { clearTimeout(flexScopeCenterTimer); flexScopeCenterTimer = null; }
   if (smartSdr) smartSdr.stopPanScope();
   sendCatLog('[Scope] Flex panadapter stopped' + (why ? ' — ' + why : ''));
   if (yaesuScopeState.status !== 'stopped') yaesuScopeSetStatus('stopped', null);
@@ -37144,6 +37193,7 @@ app.whenReady().then(() => {
     // the More menu, the web client and the mobile app all gate on them.
     try { broadcastRigState(); } catch { /* no rig yet */ }
   });
+  ipcMain.on('scope-span', (_e, hz) => { setScopeSpan(hz, 'Band Scope window'); });
   ipcMain.on('scope-set-fps', (_e, fps) => {
     const v = Math.max(1, Math.min(60, Math.round(Number(fps) || 20)));
     if (v === (settings.yaesuScopeFps || 20)) return;

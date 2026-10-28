@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('api', {
   restart: () => ipcRenderer.send('scope-restart'),
   setSynth: (on) => ipcRenderer.send('scope-set-synth', !!on),
   setFps: (fps) => ipcRenderer.send('scope-set-fps', Number(fps)),
+  setSpan: (hz) => ipcRenderer.send('scope-span', Number(hz)),
   tune: (frequency, mode) => ipcRenderer.send('tune', { frequency, mode }),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   // Window controls
