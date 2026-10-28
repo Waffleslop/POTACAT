@@ -16245,19 +16245,13 @@ function _updateThemeToggleLabel() {
 // popouts read both fields, set data-theme + data-dark-variant on
 // their <html>. Receivers also accept plain string for backward
 // compat (older popout builds that haven't been updated yet).
-function _popoutThemePayload() {
-  return {
-    theme: setLightMode.checked ? 'light' : 'dark',
-    variant: _currentDarkVariant || 'navy',
-  };
-}
-
-quickLightMode.addEventListener('change', async () => {
-  const light = quickLightMode.checked;
-  applyTheme(light);
-  setLightMode.checked = light;
-  _updateThemeToggleLabel();
-  const p = _popoutThemePayload();
+/**
+ * Every pop-out window follows a theme change, whichever control made it (the
+ * menu's quick toggle or Settings). The Settings path used to miss the VFO,
+ * Log, pairing and Band Scope windows, which stayed in the old theme until a
+ * restart (a user, 2026-10-28). One list, both paths.
+ */
+function broadcastPopoutTheme(p) {
   if (popoutOpen) window.api.sendPopoutTheme(p);
   if (qsoPopoutOpen) window.api.sendQsoPopoutTheme(p);
   window.api.logPopoutTheme(p);
@@ -16271,6 +16265,21 @@ quickLightMode.addEventListener('change', async () => {
   window.api.vfoPopoutTheme(p);
   if (window.api.conditionsPopoutTheme) window.api.conditionsPopoutTheme(p);
   window.api.sendBandspreadPopoutTheme(p);
+}
+
+function _popoutThemePayload() {
+  return {
+    theme: setLightMode.checked ? 'light' : 'dark',
+    variant: _currentDarkVariant || 'navy',
+  };
+}
+
+quickLightMode.addEventListener('change', async () => {
+  const light = quickLightMode.checked;
+  applyTheme(light);
+  setLightMode.checked = light;
+  _updateThemeToggleLabel();
+  broadcastPopoutTheme(_popoutThemePayload());
   await window.api.saveSettings({ lightMode: light });
 });
 
@@ -18148,16 +18157,7 @@ settingsSave.addEventListener('click', async () => {
   updateLoggingVisibility();
   updateBannerLoggerVisibility();
   applyTheme(lightModeEnabled, darkVariantVal);
-  const _popoutTheme = { theme: lightModeEnabled ? 'light' : 'dark', variant: darkVariantVal };
-  if (popoutOpen) window.api.sendPopoutTheme(_popoutTheme);
-  if (qsoPopoutOpen) window.api.sendQsoPopoutTheme(_popoutTheme);
-  if (actmapPopoutOpen) window.api.actmapPopoutTheme(_popoutTheme);
-  if (spotsPopoutOpen) window.api.sendSpotsPopoutTheme(_popoutTheme);
-  if (clusterPopoutOpen) window.api.sendClusterPopoutTheme(_popoutTheme);
-  if (jtcatPopoutOpen) window.api.jtcatPopoutTheme(_popoutTheme);
-  window.api.sstvPopoutTheme(_popoutTheme);
-  if (window.api.conditionsPopoutTheme) window.api.conditionsPopoutTheme(_popoutTheme);
-  window.api.sendBandspreadPopoutTheme(_popoutTheme);
+  broadcastPopoutTheme({ theme: lightModeEnabled ? 'light' : 'dark', variant: darkVariantVal });
   enableDxcc = dxccEnabled;
   licenseClass = licenseClassVal;
   hideOutOfBand = hideOob;
