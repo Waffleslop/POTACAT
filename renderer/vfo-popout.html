@@ -1382,7 +1382,21 @@ STEPS.forEach((s, i) => {
   if (i === stepIdx) opt.selected = true;
   stepSelect.appendChild(opt);
 });
-stepSelect.addEventListener('change', () => { stepIdx = parseInt(stepSelect.value); });
+// The step is ONE value shared with the Band Scope and ECHOCAT devices
+// (settings.tuneStepHz, main's applyTuneStep): a change here is sent to main,
+// and a change anywhere else arrives on onTuneStep.
+function applyStepHz(hz) {
+  const i = STEPS.findIndex((s) => s.hz === Number(hz));
+  if (i < 0) return;
+  stepIdx = i;
+  stepSelect.value = String(i);
+}
+stepSelect.addEventListener('change', () => {
+  stepIdx = parseInt(stepSelect.value);
+  if (window.api.setTuneStep) window.api.setTuneStep(STEPS[stepIdx].hz);
+});
+if (window.api.onTuneStep) window.api.onTuneStep(applyStepHz);
+if (window.api.tuneStepGet) window.api.tuneStepGet().then(applyStepHz).catch(() => {});
 
 // --- VFO Dial (canvas) ---
 const canvas = document.getElementById('vfo-dial');

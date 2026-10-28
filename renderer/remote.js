@@ -978,6 +978,7 @@
   let scopeState = null;
   let scopeLatest = null;
   let scopeSubscribedSent = false;
+  let scopeTuneStepHz = 1000;   // the shack's synced tuning step (S2C tune-step)
   let scopeFloor = (() => { try { return Number(localStorage.getItem('echocat-scope-floor')) || 0; } catch { return 0; } })();
   let ft8BsOn = (() => { try { return localStorage.getItem('echocat-ft8-bandscope') === '1'; } catch { return false; } })();
 
@@ -1099,34 +1100,13 @@
     }
     if (any) scopeDrawAll();
   }
+  // The one trace painter (lib/scope-view.js, inlined) — the desktop Band
+  // Scope window draws with the same function. The page shows the mode line
+  // itself, so the painter's "axis assumed" notice stays off here.
   function scopeDrawTrace(canvas, axis, centerHz) {
-    const A = window.ScopeAxis;
-    const ctx = canvas.getContext('2d');
-    const w = canvas.width, h = canvas.height;
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, w, h);
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-    ctx.lineWidth = 1;
-    for (let i = 1; i < 10; i++) { const x = Math.round(i * w / 10) + 0.5; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
-    const bins = scopeLatest;
-    if (bins && bins.length > 1) {
-      ctx.strokeStyle = '#4fc3f7';
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      for (let i = 0; i < bins.length; i++) {
-        const x = i * (w - 1) / (bins.length - 1);
-        const y = h - 2 - (bins[i] / 255) * (h - 4);
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      }
-      ctx.stroke();
-    }
-    const rxBin = centerHz && axis.hzPerBin ? A.hzToBin(axis, centerHz) : null;
-    if (rxBin != null) {
-      const x = Math.round(rxBin * (w - 1) / (axis.bins - 1)) + 0.5;
-      ctx.strokeStyle = '#e94560';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
-    }
+    const st = scopeState || {};
+    window.ScopeView.drawTrace(canvas.getContext('2d'), { bins: scopeLatest, peak: null },
+      { w: canvas.width, h: canvas.height, dpr: 1, axis, dialHz: centerHz, spanHz: st.spanHz, anchor: st.anchor, notice: false });
   }
   function scopeDrawAll() {
     const A = window.ScopeAxis;
@@ -1908,6 +1888,11 @@
 
       // Shack-side TX drive — desktop is authoritative. Sent at connect and on
       // every change from any surface. Don't clobber the slider mid-drag.
+      case 'tune-step':
+        // The shack's tuning step (VFO + scope, one value); kept for the
+        // scope's wheel/step tuning (docs/scope-improvements-plan.md 12a).
+        if (Number(msg.hz) > 0) scopeTuneStepHz = Number(msg.hz);
+        break;
       case 'tx-drive-state': {
         var tdRow = document.getElementById('so-tx-drive-row');
         var tdEl = document.getElementById('rc-tx-drive');

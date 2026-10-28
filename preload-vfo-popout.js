@@ -5,6 +5,10 @@ contextBridge.exposeInMainWorld('api', {
   rigBandsGet: () => ipcRenderer.invoke('rig-bands-get'),
   onRigBands: (cb) => ipcRenderer.on('rig-bands', (_e, d) => cb(d)),
   platform: process.platform,
+  // The tuning step, synced with the Band Scope and every ECHOCAT device.
+  tuneStepGet: () => ipcRenderer.invoke('tune-step-get'),
+  setTuneStep: (hz) => ipcRenderer.send('tune-step-set', Number(hz)),
+  onTuneStep: (cb) => ipcRenderer.on('tune-step', (_e, hz) => cb(hz)),
   tune: (frequency, mode, bearing) => ipcRenderer.send('tune', { frequency, mode, bearing }),
   setVfoLock: (locked) => ipcRenderer.send('vfo-set-lock', locked),
   onVfoLockState: (cb) => ipcRenderer.on('vfo-lock-state', (_e, locked) => cb(locked)),

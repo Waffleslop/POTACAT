@@ -114,68 +114,9 @@ function scheduleDraw() {
 
 function drawTrace() {
   const { w, h, dpr } = sizeCanvas(traceCanvas);
-  const ctx = traceCanvas.getContext('2d');
-  ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, w, h);
-
-  // Grid: ten divisions, brighter at the centre where the dial sits.
-  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-  ctx.lineWidth = 1;
-  for (let i = 1; i < 10; i++) {
-    const x = Math.round(i * w / 10) + 0.5;
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
-  }
-  for (let i = 1; i < 4; i++) {
-    const y = Math.round(i * h / 4) + 0.5;
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
-  }
-
-  if (latest) {
-    const toY = (v) => h - (v / 255) * (h - 6 * dpr) - 3 * dpr;
-    if (peakHold) {
-      ctx.strokeStyle = 'rgba(240,165,0,0.55)';
-      ctx.lineWidth = 1 * dpr;
-      ctx.beginPath();
-      for (let i = 0; i < BINS; i++) {
-        const x = i * (w - 1) / (BINS - 1);
-        if (i === 0) ctx.moveTo(x, toY(peak[i])); else ctx.lineTo(x, toY(peak[i]));
-      }
-      ctx.stroke();
-    }
-    const grad = ctx.createLinearGradient(0, 0, 0, h);
-    grad.addColorStop(0, 'rgba(79,195,247,0.55)');
-    grad.addColorStop(1, 'rgba(79,195,247,0.05)');
-    ctx.beginPath();
-    ctx.moveTo(0, h);
-    for (let i = 0; i < BINS; i++) ctx.lineTo(i * (w - 1) / (BINS - 1), toY(smooth[i]));
-    ctx.lineTo(w, h);
-    ctx.closePath();
-    ctx.fillStyle = grad;
-    ctx.fill();
-    ctx.strokeStyle = '#4fc3f7';
-    ctx.lineWidth = 1.2 * dpr;
-    ctx.beginPath();
-    for (let i = 0; i < BINS; i++) {
-      const x = i * (w - 1) / (BINS - 1);
-      if (i === 0) ctx.moveTo(x, toY(smooth[i])); else ctx.lineTo(x, toY(smooth[i]));
-    }
-    ctx.stroke();
-  }
-
-  // Dial marker.
-  const rxBin = centerHz ? A.hzToBin(axis, centerHz) : null;
-  if (rxBin != null) {
-    const x = Math.round(rxBin * (w - 1) / (BINS - 1)) + 0.5;
-    ctx.strokeStyle = '#e94560';
-    ctx.lineWidth = 1.5 * dpr;
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
-  }
-
-  if (!axis.known && state.spanHz && state.anchor !== 'center' && state.anchor !== 'pan') {
-    ctx.fillStyle = 'rgba(240,165,0,0.9)';
-    ctx.font = `${11 * dpr}px sans-serif`;
-    ctx.fillText(`${state.anchor.toUpperCase()} mode — the radio does not report this window's edges; axis assumed around the dial`, 8 * dpr, 14 * dpr);
-  }
+  // The one trace painter (lib/scope-view.js); ECHOCAT Web draws with it too.
+  ScopeView.drawTrace(traceCanvas.getContext('2d'), { bins: latest ? smooth : null, peak },
+    { w, h, dpr, axis, dialHz: centerHz, spanHz: state.spanHz, anchor: state.anchor, peakHold });
 }
 
 const SPOT_COLORS = { pota: '#4ecca3', sota: '#f0a500', wwff: '#7ec8e3', dxc: '#e040fb', rbn: '#ff8a65', pskr: '#b39ddb', net: '#ffd54f' };
@@ -238,6 +179,11 @@ window.api.onScopeState(applyState);
 window.api.onCatFrequency((hz) => { if (hz > 0) { centerHz = hz; recomputeAxis(); } });
 window.api.onSpots((list) => { spots = Array.isArray(list) ? list : []; scheduleDraw(); });
 window.api.onPopoutTheme(_applyPopoutTheme);
+// The tuning step shared with the VFO window and ECHOCAT (settings.tuneStepHz).
+// Held here for the scope's wheel tuning (docs/scope-improvements-plan.md item 12a).
+let tuneStepHz = 1000;
+if (window.api.onTuneStep) window.api.onTuneStep((hz) => { if (hz > 0) tuneStepHz = hz; });
+if (window.api.tuneStepGet) window.api.tuneStepGet().then((hz) => { if (hz > 0) tuneStepHz = hz; }).catch(() => {});
 
 // ─── Interaction ───────────────────────────────────────────────────────────
 function tuneToFraction(frac) {

@@ -735,6 +735,7 @@ const GLOBAL_KEYS = new Set([
   'echocatMultiClient', // this shack lets the owner's devices connect together (server property)
   'firstRun',          // first-time-launch flag
   'yaesuScopeFps',     // band-scope helper frame rate — a display/machine property
+  'tuneStepHz',        // VFO knob/wheel + band scope tuning step, one synced value (applyTuneStep)
   'yaesuScopeHelperPath', // explicit yaesu-scope binary on THIS machine
   'piAccess',          // easter egg unlock (legacy — now-public features)
   'ultracat',          // ULTRACAT mode unlock (CTRL+SHIFT+click π — The Net)
@@ -22046,6 +22047,8 @@ function connectRemote() {
     // the authoritative value instead of a default it then "corrects" (the
     // jtcatUseDataMode display-lie class of bug).
     try { remoteServer.broadcastTxDriveState(currentTxDrive()); } catch { /* ignore */ }
+    // The synced tuning step (VFO + scope), so the device's step starts right.
+    try { remoteServer.broadcastTuneStep(currentTuneStepHz()); } catch { /* ignore */ }
     // Send worked parks for new-to-me filter
     if (workedParks.size > 0) {
       remoteServer.sendWorkedParks([...workedParks.keys()]);
@@ -22983,6 +22986,12 @@ function connectRemote() {
   remoteServer.on('tx-drive-refused', () => {
     sendCatLog('[Audio] TX drive change refused — a guest without a verified callsign cannot change the TX level.');
     try { remoteServer.broadcastTxDriveState(currentTxDrive()); } catch { /* ignore */ }
+  });
+  // A device moved the tuning step: the same writer as the desktop windows.
+  remoteServer.on('set-tune-step', ({ hz }) => { applyTuneStep(hz, 'remote'); });
+  // A guest's step is not the owner's: send the real one back.
+  remoteServer.on('tune-step-refused', () => {
+    try { remoteServer.broadcastTuneStep(currentTuneStepHz()); } catch { /* ignore */ }
   });
 
   // A device's measurement of the shack clock. The reply goes to the asker,
@@ -25908,6 +25917,32 @@ function _buildAudioBridgeConfig() {
 function currentTxDrive() {
   const v = Number(settings.txDrive);
   return Number.isFinite(v) ? Math.max(0, Math.min(200, v)) : 100;
+}
+
+// The tuning step — ONE value for the VFO window's knob and wheel and the
+// band scope (Casey 2026-10-28: "vfo and scope step should be synced"), on
+// this desktop and on every ECHOCAT device. The steps are the VFO window's
+// list; anything else is refused rather than rounded.
+const TUNE_STEPS_HZ = [10, 50, 100, 500, 1000, 5000, 10000, 25000];
+function currentTuneStepHz() {
+  const v = Number(settings.tuneStepHz);
+  return TUNE_STEPS_HZ.includes(v) ? v : 1000;
+}
+/** The one writer: persist, then tell both windows and every device. */
+function applyTuneStep(hz, origin) {
+  const v = Number(hz);
+  if (!TUNE_STEPS_HZ.includes(v)) return false;
+  if (v !== settings.tuneStepHz) {
+    settings.tuneStepHz = v;
+    saveSettings(settings);
+  }
+  for (const w of [vfoPopoutWin, scopePopoutWin]) {
+    if (w && !w.isDestroyed()) w.webContents.send('tune-step', v);
+  }
+  if (remoteServer && remoteServer.running) {
+    try { remoteServer.broadcastTuneStep(v); } catch { /* ignore */ }
+  }
+  return true;
 }
 
 // Apply per-rig TX EQ defaults if the rig profile has any. No-op when
@@ -41015,6 +41050,10 @@ app.whenReady().then(() => {
   // default" button. On rig switch, _applyRigEqDefault (below) reads
   // these back and emits a tx-eq-set so the global EQ state matches.
   ipcMain.handle('tx-eq-save-rig-default', (_e, eqConfig) => saveTxEqRigDefault(eqConfig));
+
+  // The synced tuning step, from the VFO window or the Band Scope window.
+  ipcMain.on('tune-step-set', (_e, hz) => { applyTuneStep(hz, 'desktop'); });
+  ipcMain.handle('tune-step-get', () => currentTuneStepHz());
 
   // Shack-side TX drive — ONE choke point (mirrors tx-eq-set): clamp, persist
   // globally AND onto the active rig so it follows a rig switch, push live to
