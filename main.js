@@ -28513,7 +28513,7 @@ function yaesuScopeRemotePayload(extra) {
   const asksForEnable = s.kind !== 1 && (s.scuLan === '0' || (s.diag && s.diag.key === 'silent'));
   const diag = (yaesuScopeRemoteIsGuest && asksForEnable) ? (s.source === 'icom' ? ICOM_SCOPE_GUEST_DIAG : YAESU_SCOPE_GUEST_DIAG) : s.diag;
   return {
-    status: s.status, kind: s.kind, spanHz: s.spanHz, anchor: s.anchor, speed: s.speed,
+    status: s.status, kind: s.kind, spanHz: s.spanHz, anchor: s.anchor, modeLabel: s.modeLabel || null, speed: s.speed,
     scuLan: s.scuLan, centerHz: s.centerHz, diag, source: s.source,
     axis: YaesuScope.scopeAxis({ centerHz: s.centerHz, spanHz: s.spanHz, anchor: s.anchor }),
     available: yaesuScopeSynth || !!scopeSourceKind(),
@@ -29432,6 +29432,9 @@ function icomScopeOnSweep(s) {
       st.anchor = ax.anchor;
       st.spanHz = ax.spanHz;
       st.modeCode = s.header.mode;
+      // The radio's own word for it: Scroll-C / Scroll-F are drawn like Fixed
+      // (the radio states both edges) but must not be called FIXED.
+      st.modeLabel = String(s.header.modeName || '').toUpperCase() || null;
       changed = true;
     }
     // Fixed: the window's own centre is the axis (the dial moves inside it).
@@ -29459,7 +29462,7 @@ function startIcomScope() {
   icomScopeGapMs = 0;
   icomScopePointsNoted = false;
   Object.assign(yaesuScopeState, {
-    source: 'icom', kind: 0, spanCode: null, spanHz: 0, anchor: 'center', modeCode: null, speed: null, scuLan: null,
+    source: 'icom', kind: 0, spanCode: null, spanHz: 0, anchor: 'center', modeCode: null, modeLabel: null, speed: null, scuLan: null,
     frames: 0, misaligned: 0, helperPath: '', catReads: null,
     centerHz: _currentFreqHz || yaesuScopeState.centerHz || 0,
   });
@@ -29483,6 +29486,7 @@ function stopIcomScope(why) {
   const ctl = icomScopeCtl;
   icomScopeDetach();
   icomScopePhase = 'idle';
+  yaesuScopeState.modeLabel = null;   // the next source's mode line is its own
   const name = (icomScopeEntry && icomScopeEntry.name) || 'Icom';
   if (icomScopeWeSet.output || icomScopeWeSet.scope) {
     const link = ctl && cat === ctl && ctl.connected ? ctl : (cat && cat.connected && typeof cat.sendScope === 'function' ? cat : null);

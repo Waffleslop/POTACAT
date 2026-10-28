@@ -234,6 +234,8 @@ const RECORDINGS = [
   { file: 'nj2dx-ic7300-center-14036-50k.txt', who: 'NJ2DX IC-7300', mode: 'center', sweeps: 122, centerHz: 14036000, spanHz: 50000, frames: 1348, maxLevel: 115 },
   // Fixed mode: division 1 carries the window's two edges, not a centre and half-span.
   { file: 'w0egr-ic7300-fixed-14000-14350.txt', who: 'W0EGR IC-7300 (Fixed)', mode: 'fixed', sweeps: 122, centerHz: 14175000, spanHz: 350000, lowHz: 14000000, highHz: 14350000, frames: 1347, maxLevel: 124 },
+  // Scroll-C: edges in the header like Fixed (the window jumps when the dial leaves it).
+  { file: 'ic7300-scrollc-7075-200k.txt', who: 'IC-7300 (Scroll-C)', mode: 'scroll-c', anchor: 'fixed', sweeps: 122, centerHz: 7075000, spanHz: 200000, lowHz: 6975000, highHz: 7175000, frames: 1348, maxLevel: 110 },
 ];
 for (const r of RECORDINGS) {
   check(`${r.who} recording: ${r.sweeps} whole sweeps, ${r.mode} ${r.centerHz / 1e6} MHz, ${r.spanHz / 1000} kHz wide, nothing dropped`, () => {
@@ -258,7 +260,7 @@ for (const r of RECORDINGS) {
     assert.strictEqual(sum.maxLevel, r.maxLevel);
     assert.ok(sum.maxLevel <= 160, 'levels stay on the 0..160 scale');
     assert.strictEqual(asm.dropped, 0);
-    assert.deepStrictEqual(S.axisFor(sweeps[0].header), { anchor: r.mode, centerHz: r.centerHz, spanHz: r.spanHz });
+    assert.deepStrictEqual(S.axisFor(sweeps[0].header), { anchor: r.anchor || r.mode, centerHz: r.centerHz, spanHz: r.spanHz });
     // The capture's own summary line agrees with what the parser reads back.
     assert.ok(text.includes(`# result: ${r.frames} data frames, ${r.sweeps} sweeps, points=475 maxLevel=${r.maxLevel} dropped=0`));
   });
@@ -318,6 +320,12 @@ check('main.js: the Icom source is wired into the one scope state', () => {
   assert.ok(/icomScopeWeSet\.scope\) \{ setTimeout\(\(\) => \{ try \{ link\.sendScope\(IcomScope\.write\.scopeOn\(false\)\)/.test(stop));
   // The axis comes from each sweep's header; a Fixed window's centre never follows the dial.
   assert.ok(/if \(!\(icomScopeOn && yaesuScopeState\.anchor === 'fixed'\)\) yaesuScopeState\.centerHz = hz;/.test(main));
+  // The mode line uses the radio's own word (SCROLL-C is drawn like Fixed, never called FIXED).
+  assert.ok(/st\.modeLabel = String\(s\.header\.modeName \|\| ''\)\.toUpperCase\(\) \|\| null;/.test(main));
+  assert.ok(/modeLabel: s\.modeLabel \|\| null/.test(main), 'the remote payload carries it');
+  for (const f of ['renderer/scope-popout.js', 'renderer/remote.js', 'renderer/jtcat-popout.js']) {
+    assert.ok(/modeLabel\)? \|\| \(/.test(fs.readFileSync(path.join(ROOT, f), 'utf8')), f + ' shows modeLabel first');
+  }
   // Levels are the radio's own scale, never claimed as dBm.
   assert.ok(/s\.source === 'icom' && icomScopeEntry\) return \{ unit: 'radio'/.test(main));
   // A guest's zoom and mode are put back.

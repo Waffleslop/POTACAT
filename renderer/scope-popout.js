@@ -89,7 +89,7 @@ function applyState(s) {
   const spans = Array.isArray(state.spans) ? state.spans : [];
   $('sc-zoom-out').classList.toggle('hidden', spans.length < 2);
   $('sc-zoom-in').classList.toggle('hidden', spans.length < 2);
-  $('sc-mode').textContent = state.anchor ? ScopeAxis.anchorLabel(state.anchor) : '—';
+  $('sc-mode').textContent = state.modeLabel || (state.anchor ? ScopeAxis.anchorLabel(state.anchor) : '—');
   $('sc-speed').textContent = state.speed || '—';
   $('sc-sculan').textContent = state.scuLan === '1' ? 'ON' : state.scuLan === '0' ? 'OFF' : '—';
   const needEnable = state.scuLan === '0' || (state.diag && state.diag.key === 'silent');

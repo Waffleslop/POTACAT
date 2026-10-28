@@ -1075,7 +1075,7 @@
     const synthEl = document.getElementById('scope-phone-synth');
     if (synthEl) synthEl.classList.toggle('hidden', !(st && st.kind === 1));
     const modeEl = document.getElementById('scope-phone-mode');
-    if (modeEl) modeEl.textContent = st && st.anchor ? ScopeAxis.anchorLabel(st.anchor) : '';
+    if (modeEl) modeEl.textContent = (st && st.modeLabel) || (st && st.anchor ? ScopeAxis.anchorLabel(st.anchor) : '');
     const suWrap = document.getElementById('scope-phone-sunits-wrap');
     if (suWrap) suWrap.classList.toggle('hidden', !(st && st.levelScale && st.levelScale.unit === 'dBm'));
     const needEnable = !!(st && st.kind !== 1 && (st.scuLan === '0' || (st.diag && st.diag.key === 'silent')));
