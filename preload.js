@@ -729,6 +729,8 @@ contextBridge.exposeInMainWorld('api', {
   potaSyncSetEnabled: (v) => ipcRenderer.invoke('pota-sync-set-enabled', v),
   potaSyncSetInterval: (v) => ipcRenderer.invoke('pota-sync-set-interval', v),
   onPotaSyncStatus: (cb) => ipcRenderer.on('pota-sync-status', (_e, data) => cb(data)),
+  potaHunterImport: (opts) => ipcRenderer.invoke('pota-hunter-import', opts),
+  onPotaHunterImportProgress: (cb) => ipcRenderer.on('pota-hunter-import-progress', (_e, data) => cb(data)),
   onCloudUploadProgress: (cb) => ipcRenderer.on('cloud-upload-progress', (_e, data) => cb(data)),
   // Settings → Summary card data
   getQsoCounts: () => ipcRenderer.invoke('get-qso-counts'),
