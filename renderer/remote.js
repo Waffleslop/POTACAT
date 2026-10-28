@@ -2149,6 +2149,18 @@
         // scope's wheel/step tuning (docs/scope-improvements-plan.md 12a).
         if (Number(msg.hz) > 0) scopeTuneStepHz = Number(msg.hz);
         break;
+      case 'rx-level-state': {
+        var rlRow = document.getElementById('so-rx-level-row');
+        var rlEl = document.getElementById('rc-rx-level');
+        var rlVal = document.getElementById('rc-rx-level-val');
+        if (rlRow) rlRow.classList.remove('hidden'); // desktop supports it
+        var rlDb = Math.round(Number(msg.value));
+        if (rlEl && isFinite(rlDb) && document.activeElement !== rlEl) {
+          rlEl.value = rlDb;
+          if (rlVal) rlVal.textContent = (rlDb > 0 ? '+' : '') + rlDb + ' dB';
+        }
+        break;
+      }
       case 'tx-drive-state': {
         var tdRow = document.getElementById('so-tx-drive-row');
         var tdEl = document.getElementById('rc-tx-drive');
@@ -5782,6 +5794,23 @@
     rcTxDrive.addEventListener('change', function() {
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'set-tx-drive', value: parseInt(rcTxDrive.value, 10) }));
+      }
+    });
+  }
+
+  // Shack-side receive level — the receive twin of the TX drive slider above:
+  // dB on the radio's audio before it reaches this device. Same send-on-release
+  // and echo rules; the row is revealed by rx-level-state.
+  var rcRxLevel = document.getElementById('rc-rx-level');
+  var rcRxLevelVal = document.getElementById('rc-rx-level-val');
+  if (rcRxLevel) {
+    rcRxLevel.addEventListener('input', function() {
+      var d = parseInt(rcRxLevel.value, 10) || 0;
+      if (rcRxLevelVal) rcRxLevelVal.textContent = (d > 0 ? '+' : '') + d + ' dB';
+    });
+    rcRxLevel.addEventListener('change', function() {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'set-rx-level', value: parseInt(rcRxLevel.value, 10) || 0 }));
       }
     });
   }

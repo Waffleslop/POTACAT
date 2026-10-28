@@ -1446,6 +1446,23 @@ const setRemoteToken = document.getElementById('set-remote-token');
 const remoteRegenToken = document.getElementById('remote-regen-token');
 const rigRemoteAudioInput = document.getElementById('rig-remote-audio-input');
 const rigRemoteAudioOutput = document.getElementById('rig-remote-audio-output');
+// Per-rig receive level to ECHOCAT devices (dB, -20..+20): the receive twin of
+// the shack-side TX drive, saved as rig.rxLevelDb and applied by main through
+// its one rx-level-set choke point (WB3EGD 2026-10-28, TS-480 ACC2 line out).
+const rigRxLevel = document.getElementById('rig-rx-level');
+const rigRxLevelVal = document.getElementById('rig-rx-level-val');
+function fmtRxLevelDb(v) { v = Math.round(Number(v) || 0); return (v > 0 ? '+' : '') + v + ' dB'; }
+function setRigRxLevelField(v) {
+  if (!rigRxLevel) return;
+  const n = Math.max(-20, Math.min(20, Math.round(Number(v) || 0)));
+  rigRxLevel.value = String(n);
+  if (rigRxLevelVal) rigRxLevelVal.textContent = fmtRxLevelDb(n);
+}
+function readRigRxLevelField() {
+  if (!rigRxLevel) return 0;
+  return Math.max(-20, Math.min(20, Math.round(Number(rigRxLevel.value) || 0)));
+}
+if (rigRxLevel) rigRxLevel.addEventListener('input', () => { if (rigRxLevelVal) rigRxLevelVal.textContent = fmtRxLevelDb(rigRxLevel.value); });
 const remoteAudioSummary = document.getElementById('remote-audio-summary');
 const setRemotePttTimeout = document.getElementById('set-remote-ptt-timeout');
 const setSsbOverData = document.getElementById('set-ssb-over-data');
@@ -3212,6 +3229,7 @@ if (rigModelSelect) rigModelSelect.addEventListener('change', () => { loadRigBan
 async function openRigEditor(mode, rigId) {
   rigEditorMode = mode;
   editingRigId = rigId || null;
+  setRigRxLevelField(0); // a new rig starts at unity; edit mode restores the rig's own below
   hamlibFieldsLoaded = false;
   serialcatPortsLoaded = false;
   icomPortsLoaded = false;
@@ -3234,6 +3252,7 @@ async function openRigEditor(mode, rigId) {
         syncRigAudioDeviceBypass();
       }
       await populateRigAudioDevices(rig.remoteAudioInput, rig.remoteAudioOutput);
+      setRigRxLevelField(rig.rxLevelDb);
       // Restore per-rig CW key port
       if (setCwKeyPort && rig.cwKeyPort) setCwKeyPort.value = rig.cwKeyPort;
       // Restore per-rig CW keying line (DTR/RTS override; default 'auto')
@@ -3373,6 +3392,7 @@ async function saveRigEditor() {
 
   const rigAudioIn = rigRemoteAudioInput.value || '';
   const rigAudioOut = rigRemoteAudioOutput.value || '';
+  const rigRxLevelDb = readRigRxLevelField();
   // Per-rig audio source. The select only ever holds options valid for the
   // selected radio type (rebuildAudioSourceOptions), so this is always legal.
   const rigAudioSource = setAudioSource ? setAudioSource.value : 'dax';
@@ -3406,6 +3426,7 @@ async function saveRigEditor() {
       rig.catTarget = catTarget;
       rig.remoteAudioInput = rigAudioIn;
       rig.remoteAudioOutput = rigAudioOut;
+      rig.rxLevelDb = rigRxLevelDb;
       rig.audioSource = rigAudioSource;
       rig.cwKeyPort = rigCwKeyPortVal;
       rig.cwKeyLine = rigCwKeyLineVal;
@@ -3431,6 +3452,7 @@ async function saveRigEditor() {
       catTarget,
       remoteAudioInput: rigAudioIn,
       remoteAudioOutput: rigAudioOut,
+      rxLevelDb: rigRxLevelDb,
       audioSource: rigAudioSource,
       cwKeyPort: rigCwKeyPortVal,
       cwKeyLine: rigCwKeyLineVal,
@@ -31471,6 +31493,13 @@ function firstEmptyKiwiHost() {
   const btn = document.getElementById('kiwi-add-row-btn');
   if (btn) btn.addEventListener('click', () => {
     const h = firstEmptyKiwiHost();
-    if (h) h.focus();
+    if (!h) return;
+    h.focus();
+    // Open the directory picker for that slot — focusing an empty box looked
+    // like nothing happening (AA5MP 2026-10-28), while the phone's Add SDR
+    // opens its browser straight away. Same behaviour here now.
+    const slot = parseInt(String(h.id).replace('set-kiwi-host-', ''), 10) || 1;
+    const browse = document.querySelector('.kiwi-browse-btn[data-slot="' + slot + '"]');
+    if (browse) browse.click();
   });
 })();

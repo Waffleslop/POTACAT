@@ -6588,6 +6588,14 @@ function ensureRemoteClient() {
         if (win && !win.isDestroyed()) win.webContents.send('remote-voice-macros', remoteShackVoice);
         break;
       }
+      case 'rx-level-state': {
+        const v = Number(msg.value);
+        if (!Number.isFinite(v)) break;
+        for (const w of [win, vfoPopoutWin]) {
+          if (w && !w.isDestroyed()) w.webContents.send('rx-level-update', v);
+        }
+        break;
+      }
       case 'tx-drive-state': {
         const v = Number(msg.value);
         if (!Number.isFinite(v)) break;
@@ -22071,6 +22079,7 @@ function connectRemote() {
     // the authoritative value instead of a default it then "corrects" (the
     // jtcatUseDataMode display-lie class of bug).
     try { remoteServer.broadcastTxDriveState(currentTxDrive()); } catch { /* ignore */ }
+    try { remoteServer.broadcastRxLevelState(currentRxLevel()); } catch { /* ignore */ }
     // The synced tuning step (VFO + scope), so the device's step starts right.
     try { remoteServer.broadcastTuneStep(currentTuneStepHz()); } catch { /* ignore */ }
     // Send worked parks for new-to-me filter
@@ -22701,6 +22710,7 @@ function connectRemote() {
     // ride the switch like the audio devices above. Funnels through the choke
     // point so the bridge, desktop UIs and the client echo all update.
     ipcMain.emit('tx-drive-set', null, rig.txDrive != null ? rig.txDrive : 100);
+    ipcMain.emit('rx-level-set', null, rig.rxLevelDb != null ? rig.rxLevelDb : 0);
     // Per-rig CW key port
     if (rig.cwKeyPort !== undefined) {
       settings.cwKeyPort = rig.cwKeyPort || '';
@@ -23010,6 +23020,14 @@ function connectRemote() {
   remoteServer.on('tx-drive-refused', () => {
     sendCatLog('[Audio] TX drive change refused — a guest without a verified callsign cannot change the TX level.');
     try { remoteServer.broadcastTxDriveState(currentTxDrive()); } catch { /* ignore */ }
+  });
+  // The receive level, same shape: one choke point, guests snapped back.
+  remoteServer.on('set-rx-level', ({ value }) => {
+    ipcMain.emit('rx-level-set', null, value);
+  });
+  remoteServer.on('rx-level-refused', () => {
+    sendCatLog('[Audio] Receive level change refused — a guest without a verified callsign cannot change it.');
+    try { remoteServer.broadcastRxLevelState(currentRxLevel()); } catch { /* ignore */ }
   });
   // A device moved the tuning step: the same writer as the desktop windows.
   remoteServer.on('set-tune-step', ({ hz }) => { applyTuneStep(hz, 'remote'); });
@@ -25933,6 +25951,9 @@ function _buildAudioBridgeConfig() {
     // Shack-side TX drive (percent, 100 = unity) applied to the client-mic
     // audio before it reaches the rig. See ipcMain.on('tx-drive-set').
     txDrive: currentTxDrive(),
+    // Shack-side receive level (dB) on the radio's audio before it reaches the
+    // device. See ipcMain.on('rx-level-set').
+    rxLevelDb: currentRxLevel(),
   };
 }
 
@@ -25942,6 +25963,16 @@ function _buildAudioBridgeConfig() {
 function currentTxDrive() {
   const v = Number(settings.txDrive);
   return Number.isFinite(v) ? Math.max(0, Math.min(200, v)) : 100;
+}
+
+/** Shack-side receive level in dB (-20..+20, default 0 = unity): the gain on the
+ *  radio's audio before it reaches an ECHOCAT device — the receive twin of
+ *  txDrive, per-rig (`rig.rxLevelDb`) with `settings.rxLevelDb` as the mirror.
+ *  WB3EGD 2026-10-28: a TS-480's ACC2 line out into a RigBlaster is fixed level,
+ *  the AF knob does nothing to it, and the phone sat at -47 dBFS. */
+function currentRxLevel() {
+  const v = Number(settings.rxLevelDb);
+  return Number.isFinite(v) ? Math.max(-20, Math.min(20, Math.round(v))) : 0;
 }
 
 // The tuning step — ONE value for the VFO window's knob and wheel and the
@@ -41612,6 +41643,35 @@ app.whenReady().then(() => {
     }
   });
 
+  // Shack-side RECEIVE level — the receive twin of tx-drive-set, same choke
+  // point shape: clamp, persist globally AND onto the active rig, push live to
+  // the audio bridge, mirror to desktop UIs, echo to clients. Every surface
+  // (rig editor, web slider, mobile, rig switch) funnels through here.
+  ipcMain.on('rx-level-set', (_e, value) => {
+    const v = Math.max(-20, Math.min(20, Math.round(Number(value))));
+    if (!Number.isFinite(v)) return;
+    // Remote shack: the level lives there (rx-level-state echoes back).
+    if (isRemoteMode()) {
+      if (isRemoteLinked()) remoteClient.sendRaw({ type: 'set-rx-level', value: v });
+      else if (_e && _e.sender) refuseRemoteNotLinked(_e.sender);
+      return;
+    }
+    const changed = v !== currentRxLevel();
+    settings.rxLevelDb = v;
+    const activeRig = (settings.rigs || []).find((r) => r.id === settings.activeRigId);
+    if (activeRig) activeRig.rxLevelDb = v;
+    saveSettings(settings);
+    if (changed) sendCatLog(`[Audio] Receive level to devices set to ${v > 0 ? '+' : ''}${v} dB`);
+    if (remoteAudioWin && !remoteAudioWin.isDestroyed()) {
+      remoteAudioWin.webContents.send('rx-level-update', v);
+    }
+    if (win && !win.isDestroyed()) win.webContents.send('rx-level-update', v);
+    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('rx-level-update', v);
+    if (remoteServer && remoteServer.running) {
+      try { remoteServer.broadcastRxLevelState(v); } catch { /* ignore */ }
+    }
+  });
+
   ipcMain.on('tx-eq-set', (_e, eqConfig) => {
     if (eqConfig && typeof eqConfig === 'object') {
       if (typeof eqConfig.enabled === 'boolean') settings.txEqEnabled = eqConfig.enabled;
@@ -42448,6 +42508,14 @@ app.whenReady().then(() => {
     };
     const _wlPrevGroups = Array.isArray(settings.watchlistGroups) ? settings.watchlistGroups : null;
     settings = { ...settings, ...newSettings };
+    // The rig editor saved a receive level for the active rig: route it through
+    // the one choke point so the bridge and every device follow (not in remote
+    // mode — this PC's rigs are not the radio then).
+    if (has('rigs') && !isRemoteMode()) {
+      const rigNow = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
+      const lvl = rigNow && rigNow.rxLevelDb != null ? Math.round(Number(rigNow.rxLevelDb)) : 0;
+      if (Number.isFinite(lvl) && lvl !== currentRxLevel()) ipcMain.emit('rx-level-set', null, lvl);
+    }
     // Active rig changed → its per-rig audio source is authoritative over
     // whatever audioSource the save blob carried (the renderer mirrors it
     // too, but partial saves and future callers shouldn't have to know).

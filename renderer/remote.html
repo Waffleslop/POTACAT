@@ -433,6 +433,14 @@
           </div>
         </div>
 
+        <div class="so-row hidden" id="so-rx-level-row" title="Shack-side receive level — the level of the radio's audio POTACAT sends to this device, in dB, set on the desktop and shared by every client. Raise it for a radio whose line output ignores its volume knob.">
+          <label class="so-label">RX Level</label>
+          <div class="so-slider-wrap">
+            <input type="range" id="rc-rx-level" class="so-slider" min="-20" max="20" value="0">
+            <span id="rc-rx-level-val" class="so-slider-val">0 dB</span>
+          </div>
+        </div>
+
         <!-- WebSDR -->
         <div class="so-section-label">WebSDR</div>
         <div class="so-row">

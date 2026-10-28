@@ -1816,6 +1816,10 @@
           <label style="margin-top:4px;display:block;">TX audio out (to radio):
             <select id="rig-remote-audio-output" style="width:100%;margin-top:2px;"><option value="">-- system default --</option></select>
           </label>
+          <label style="margin-top:6px;display:block;" id="rig-rx-level-row">Receive level to ECHOCAT devices: <span id="rig-rx-level-val">0 dB</span>
+            <input type="range" id="rig-rx-level" min="-20" max="20" step="1" value="0" style="width:100%;margin-top:2px;">
+            <span class="help-text" style="display:block;">Gain on the radio's audio before it goes to the phone or browser (0 dB = as captured). Raise it when the radio's line output ignores its volume knob, such as a fixed-level ACC jack into a sound-card interface. The TX Drive slider on the device is the transmit twin; JTCAT's own RX gain is separate.</span>
+          </label>
           <span class="help-text" id="rig-audio-devices-hint" style="margin-top:4px;display:block;">Soundcard devices for this rig &mdash; used for JTCAT FT8/FT4 receive &amp; transmit, SSTV, and ECHOCAT remote audio.<br>
             <b>Only hearing audio in DIGU / DIGL (USB-Data / LSB-Data)?</b> Your rig is probably routing RX to a separate USB audio stream for DATA modes. Pick the <i>main</i> USB Audio codec (not the "data" variant), and/or change your rig's menu so RX flows to the main USB audio in voice modes too &mdash; Yaesu: <code>USB Audio Mode</code> = AUTO, Icom: <code>USB AF Output</code> = AF, Kenwood: <code>Menu 75</code>. See docs/radio-setup-guide.md.</span>
           <span class="help-text" id="rig-audio-devices-bypass" style="display:none;margin-top:4px;">Not used for this audio source &mdash; POTACAT streams receive and transmit audio directly to/from the radio, so no soundcard device is needed.</span>
