@@ -2803,7 +2803,7 @@ function _applyPopoutTheme(payload) {
       var spanEl = document.getElementById('jp-bs-span');
       if (spanEl) spanEl.textContent = s && s.spanHz ? 'Span ' + window.ScopeAxis.formatSpan(s.spanHz) : '';
       var modeEl = document.getElementById('jp-bs-mode');
-      if (modeEl) modeEl.textContent = s && s.anchor ? s.anchor.toUpperCase() + (s.anchor !== 'center' ? ' (axis assumed)' : '') : '';
+      if (modeEl) modeEl.textContent = s && s.anchor ? (window.ScopeAxis ? window.ScopeAxis.anchorLabel(s.anchor) : String(s.anchor).toUpperCase()) : '';
       var needEnable = !!(s && s.kind !== 1 && (s.scuLan === '0' || (s.diag && s.diag.key === 'silent')));
       if (bsEnableBtn) bsEnableBtn.classList.toggle('hidden', !needEnable);
       bsApplyVisibility();

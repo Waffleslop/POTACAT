@@ -70,7 +70,7 @@ function applyState(s) {
   $('sc-speed-wrap').style.display = sdr ? 'none' : '';
   $('sc-sculan-wrap').style.display = sdr ? 'none' : '';
   $('sc-span').textContent = A.formatSpan(state.spanHz);
-  $('sc-mode').textContent = state.anchor ? state.anchor.toUpperCase() + (state.anchor !== 'center' ? ' (axis assumed)' : '') : '—';
+  $('sc-mode').textContent = state.anchor ? ScopeAxis.anchorLabel(state.anchor) : '—';
   $('sc-speed').textContent = state.speed || '—';
   $('sc-sculan').textContent = state.scuLan === '1' ? 'ON' : state.scuLan === '0' ? 'OFF' : '—';
   const needEnable = state.scuLan === '0' || (state.diag && state.diag.key === 'silent');
@@ -165,7 +165,7 @@ function drawTrace() {
     ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
   }
 
-  if (!axis.known && state.spanHz && state.anchor !== 'center') {
+  if (!axis.known && state.spanHz && state.anchor !== 'center' && state.anchor !== 'pan') {
     ctx.fillStyle = 'rgba(240,165,0,0.9)';
     ctx.font = `${11 * dpr}px sans-serif`;
     ctx.fillText(`${state.anchor.toUpperCase()} mode — the radio does not report this window's edges; axis assumed around the dial`, 8 * dpr, 14 * dpr);
