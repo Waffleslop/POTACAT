@@ -309,6 +309,18 @@
     .pane { display: none; flex-direction: column; gap: 10px; }
     .pane.active { display: flex; }
 
+    /* --- Profiles under the dial: a drop-down, closed unless open (a long
+       list took the screen; a user 2026-10-28) --- */
+    #sec-profiles-inline { position: relative; }
+    .profile-drop-btn { display: flex; align-items: center; gap: 6px; width: 100%; padding: 7px 10px; background: var(--s2); color: inherit; border: 1px solid var(--s3); border-radius: 8px; font: inherit; cursor: pointer; text-align: left; }
+    .profile-drop-btn:hover { background: var(--s3); }
+    .profile-drop-btn .caret { margin-left: auto; color: var(--t3); transition: transform .12s; }
+    .profile-drop-btn[aria-expanded="true"] .caret { transform: rotate(180deg); }
+    #profile-drop-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .profile-drop-panel { position: absolute; left: 0; right: 0; top: calc(100% + 2px); z-index: 50; max-height: 55vh; overflow-y: auto; padding: 6px; background: var(--s1, #16213e); border: 1px solid var(--s3); border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,.35); }
+    .profile-drop-panel[hidden] { display: none; }
+    .profile-drop-panel.up { top: auto; bottom: calc(100% + 2px); }
+
     /* --- Profiles --- */
     .profile-list { display: flex; flex-direction: column; gap: 4px; }
     .profile-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--s2); border-radius: 8px; cursor: pointer; }
@@ -493,9 +505,13 @@
         </div>
       </div>
       <div class="section vfo-section" id="sec-profiles-inline" style="display:none">
-        <div class="lbl">Profiles</div>
-        <div class="profile-list" id="profile-list-inline"></div>
-        <div class="profile-list" id="rig-preset-list-inline" style="margin-top:6px;"></div>
+        <button type="button" class="profile-drop-btn" id="profile-drop-btn" aria-expanded="false" aria-controls="profile-drop-panel">
+          <span id="profile-drop-label">Profiles</span><span class="caret">&#x25BE;</span>
+        </button>
+        <div class="profile-drop-panel" id="profile-drop-panel" hidden>
+          <div class="profile-list" id="profile-list-inline"></div>
+          <div class="profile-list" id="rig-preset-list-inline" style="margin-top:6px;"></div>
+        </div>
       </div>
 
       <div class="card tool-card widget-section" id="widget-cw-controls">
@@ -1753,9 +1769,48 @@ function beginRenameProfile(item, nameEl, profile, index) {
   input.addEventListener('blur', () => finish(true));
 }
 
+// The drop-down: closed by default; a pick, a click outside or Esc closes it.
+// The button names the profile last applied from it, else "Profiles (N)".
+let _inlineProfileName = '';
+function profileDropLabel() {
+  const el = document.getElementById('profile-drop-label');
+  if (el) el.textContent = _inlineProfileName || (profiles.length ? `Profiles (${profiles.length})` : 'Profiles');
+}
+function profileDropOpen(open) {
+  const btn = document.getElementById('profile-drop-btn');
+  const panel = document.getElementById('profile-drop-panel');
+  if (!btn || !panel) return;
+  panel.hidden = !open;
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (!open) return;
+  // Open toward the room: the section usually sits at the bottom of the
+  // window, where a drop-down would run off the edge.
+  const r = btn.getBoundingClientRect();
+  const below = window.innerHeight - r.bottom - 10;
+  const above = r.top - 10;
+  const want = Math.min(panel.scrollHeight, 420);
+  const up = below < want && above > below;
+  panel.classList.toggle('up', up);
+  panel.style.maxHeight = Math.max(120, up ? above : below) + 'px';
+}
+(function bindProfileDrop() {
+  const btn = document.getElementById('profile-drop-btn');
+  const panel = document.getElementById('profile-drop-panel');
+  if (!btn || !panel) return;
+  btn.addEventListener('click', () => profileDropOpen(panel.hidden));
+  // A pick (a profile or a rig preset) closes it, after the item's own handler.
+  panel.addEventListener('click', (e) => { if (e.target.closest('.profile-item')) setTimeout(() => profileDropOpen(false), 0); });
+  document.addEventListener('mousedown', (e) => {
+    if (!panel.hidden && !panel.contains(e.target) && !btn.contains(e.target)) profileDropOpen(false);
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !panel.hidden) profileDropOpen(false); });
+})();
+
 function renderInlineProfiles() {
   const list = document.getElementById('profile-list-inline');
   if (!list) return;
+  if (_inlineProfileName && !profiles.some((p) => p.name === _inlineProfileName)) _inlineProfileName = '';
+  profileDropLabel();
   if (profiles.length === 0) {
     list.innerHTML = '<div class="profile-empty">No profiles saved.</div>';
     return;
@@ -1769,7 +1824,7 @@ function renderInlineProfiles() {
       <span class="profile-name">${esc(p.name)}</span>
       <span class="profile-detail">${freqMhz} MHz ${p.mode || ''}${p.filterWidth ? ' BW:' + p.filterWidth : ''}${p.txPower != null ? ' ' + p.txPower + 'W' : ''}</span>
     `;
-    item.addEventListener('click', () => applyProfile(p));
+    item.addEventListener('click', () => { applyProfile(p); _inlineProfileName = p.name; profileDropLabel(); });
     list.appendChild(item);
   });
 }
