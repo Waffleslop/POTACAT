@@ -86,6 +86,30 @@ const FONT_SCALE_MIN = 0.7;
 const FONT_SCALE_MAX = 2.2;
 const FONT_SCALE_STEPS = [0.7, 0.85, 1.0, 1.15, 1.3, 1.5, 1.75, 2.0, 2.2];
 
+// --- The radio's band scope as a trace behind the spots ---
+// Shown when the active rig has a scope (scope-state.available) and the
+// Scope toggle is on (device-local, default on). While shown this window is
+// a scope watcher, like the JTCAT strip; main stops the source when nobody is.
+let scopeState = null;
+let scopeSmooth = null;
+let scopeOn = (() => { try { return localStorage.getItem('bandspread-scope') !== '0'; } catch { return true; } })();
+let scopeWatching = null;
+function scopeAvailable() { return !!(scopeState && scopeState.available); }
+function scopeShown() { return scopeOn && scopeAvailable(); }
+function scopeDialHz() { return Math.round((currentVfoKhz || 0) * 1000) || (scopeState && scopeState.centerHz) || 0; }
+function scopeSync() {
+  const btn = document.getElementById('bs-scope-toggle');
+  const sep = document.getElementById('bs-scope-sep');
+  if (btn) { btn.classList.toggle('hidden', !scopeAvailable()); btn.classList.toggle('on', scopeOn); }
+  if (sep) sep.classList.toggle('hidden', !scopeAvailable());
+  const want = scopeShown();
+  if (want !== scopeWatching) {
+    scopeWatching = want;
+    if (window.api.scopeWatch) window.api.scopeWatch(want);
+    if (!want) scopeSmooth = null;
+  }
+}
+
 const canvas = document.getElementById('bs-canvas');
 const ctx = canvas.getContext('2d');
 const wrap = document.getElementById('bs-canvas-wrap');
@@ -247,6 +271,30 @@ if (window.api.onView) {
     draw();
   });
 }
+
+// Scope trace: state decides the toggle; frames are smoothed (Light, as the
+// Band Scope window's default) and drawn at most once per animation frame.
+let scopeDrawPending = false;
+if (window.api.onScopeState) {
+  window.api.onScopeState((s) => { scopeState = s || null; scopeSync(); draw(); });
+}
+if (window.api.onScopeFrame) {
+  window.api.onScopeFrame((f) => {
+    if (!scopeShown() || !f || !f.bins || !f.bins.length) return;
+    const n = f.bins.length;
+    if (!scopeSmooth || scopeSmooth.length !== n) scopeSmooth = Float32Array.from(f.bins);
+    else window.ScopeView.smoothInto(scopeSmooth, f.bins, window.ScopeView.AVERAGING.light);
+    if (scopeDrawPending) return;
+    scopeDrawPending = true;
+    requestAnimationFrame(() => { scopeDrawPending = false; draw(); });
+  });
+}
+document.getElementById('bs-scope-toggle').addEventListener('click', () => {
+  scopeOn = !scopeOn;
+  try { localStorage.setItem('bandspread-scope', scopeOn ? '1' : '0'); } catch { /* private mode */ }
+  scopeSync();
+  draw();
+});
 
 window.api.onFrequencyUpdate((freqKhz) => {
   currentVfoKhz = parseFloat(freqKhz) || 0;
@@ -516,6 +564,31 @@ function draw() {
         ctx.stroke();
       }
       ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+  }
+
+  // 2b. The radio's band scope behind the spots (Scope toggle): only over the
+  // frequencies the scope covers, faint so the labels stay readable. Axis
+  // maths and the mapping are lib/scope-axis.js + lib/scope-view.js, the
+  // same as every other scope surface.
+  if (scopeShown() && scopeSmooth && window.ScopeView) {
+    const sAxis = window.ScopeAxis.scopeAxis({ centerHz: scopeDialHz(), spanHz: scopeState.spanHz || 0, anchor: scopeState.anchor || 'center' });
+    const pts = window.ScopeView.mappedTrace(scopeSmooth, sAxis, (hz) => xOf(hz / 1000), spotsTopY, spotsBottomY, lo * 1000, hi * 1000);
+    if (pts.length > 1) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, spotsBottomY);
+      for (const p of pts) ctx.lineTo(p.x, p.y);
+      ctx.lineTo(pts[pts.length - 1].x, spotsBottomY);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(79,195,247,0.10)';
+      ctx.fill();
+      ctx.beginPath();
+      pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+      ctx.strokeStyle = 'rgba(79,195,247,0.45)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
       ctx.restore();
     }
   }

@@ -41,6 +41,9 @@
       display: inline-flex; align-items: center; justify-content: center;
     }
     .bs-zoom-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+    .bs-zoom-btn.bs-wide { width: auto; padding: 0 7px; font-size: 11px; }
+    .bs-zoom-btn.bs-wide.on { color: var(--accent-blue); border-color: var(--accent-blue); }
+    .hidden { display: none !important; }
     .bs-zoom-val { font-size: calc(10px * var(--bs-scale)); color: var(--text-tertiary); min-width: 32px; text-align: center; }
 
     .bs-info { margin-left: auto; font-size: calc(11px * var(--bs-scale)); color: var(--text-tertiary); padding-right: 6px; }
@@ -86,6 +89,8 @@
       <span class="bs-zoom-val" id="bs-font-val">100%</span>
       <button class="bs-zoom-btn" id="bs-font-inc" title="Larger">A+</button>
     </div>
+    <div class="bs-sep hidden" id="bs-scope-sep"></div>
+    <button class="bs-zoom-btn bs-wide hidden" id="bs-scope-toggle" title="Draw the radio's band scope behind the spots, over the frequencies it covers">Scope</button>
     <div class="bs-info" id="bs-info">0 spots</div>
   </div>
   <div class="bs-canvas-wrap" id="bs-canvas-wrap">
@@ -93,6 +98,8 @@
     <div class="bs-tooltip" id="bs-tooltip"></div>
   </div>
 
+  <script src="../lib/scope-axis.js"></script>
+  <script src="../lib/scope-view.js"></script>
   <script src="bandspread-popout.js"></script>
 </body>
 </html>

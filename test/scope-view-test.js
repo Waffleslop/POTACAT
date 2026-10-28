@@ -393,5 +393,41 @@ test('ECHOCAT: guest refused, capability, protocol rows, web client stores it', 
   assert.ok(/case 'tune-step':/.test(read('renderer/remote.js')), 'web client handles it');
 });
 
+// ─── Bandspread: the scope trace on Bandspread's own axis ──────────────────
+test('mappedTrace: only the points inside the surface window, levels to its y range', () => {
+  const ax = A.scopeAxis({ centerHz: 14074000, spanHz: 10000, anchor: 'center' });   // 14.069 .. 14.079
+  const bins = new Array(11).fill(0).map((_, i) => i * 25.5);                           // 0 .. 255
+  // Bandspread shows 14.000 .. 14.350 over 0..3500 px: every point is inside.
+  const xOf = (hz) => (hz - 14000000) / 100;
+  let pts = V.mappedTrace(bins, ax, xOf, 10, 110, 14000000, 14350000);
+  assert.strictEqual(pts.length, 11);
+  assert.strictEqual(pts[0].x, 690); assert.strictEqual(pts[10].x, 790);
+  assert.strictEqual(pts[0].y, 110, 'level 0 at the bottom'); assert.ok(Math.abs(pts[10].y - 10) < 1e-9, 'level 255 at the top');
+  // A zoomed Bandspread (14.072 .. 14.076) gets only the covered stretch.
+  pts = V.mappedTrace(bins, ax, xOf, 10, 110, 14072000, 14076000);
+  assert.strictEqual(pts.length, 5);
+  assert.ok(pts.every((p) => p.x >= 720 && p.x <= 760));
+  // No overlap at all: nothing drawn.
+  assert.strictEqual(V.mappedTrace(bins, ax, xOf, 10, 110, 14100000, 14200000).length, 0);
+  assert.strictEqual(V.mappedTrace(null, ax, xOf, 10, 110, 0, 1e9).length, 0);
+});
+test('Bandspread wiring: a scope watcher like the JTCAT strip, frames + state fanned to it, toggle hidden without a scope', () => {
+  const m = read('main.js');
+  const wanted = m.slice(m.indexOf('function yaesuScopeWanted() {'), m.indexOf('function findYaesuScopeHelper'));
+  assert.ok(/yaesuScopeBandspreadWants && bandspreadPopoutWin && !bandspreadPopoutWin\.isDestroyed\(\)\) return true/.test(wanted), 'counted as a watcher');
+  assert.ok(/ipcMain\.on\('bandspread-scope-watch'/.test(m), 'watch IPC');
+  assert.strictEqual((m.match(/yaesuScopeBandspreadWants && bandspreadPopoutWin && !bandspreadPopoutWin\.isDestroyed\(\)\) \{?\s*bandspreadPopoutWin\.webContents\.send\('scope-frame'/g) || []).length, 2, 'local + remote-shack frames');
+  assert.ok((m.match(/bandspreadPopoutWin\.webContents\.send\('scope-state'/g) || []).length >= 3, 'state: broadcast, remote shack, on load');
+  assert.ok(/bandspreadPopoutWin = null;\s*if \(yaesuScopeBandspreadWants\) \{\s*yaesuScopeBandspreadWants = false;/.test(m), 'closing the window stops watching');
+  const pre = read('preload-bandspread-popout.js');
+  assert.ok(/scopeWatch: \(on\) => ipcRenderer\.send\('bandspread-scope-watch'/.test(pre) && /onScopeFrame/.test(pre) && /onScopeState/.test(pre), 'preload');
+  const js = read('renderer/bandspread-popout.js');
+  assert.ok(/btn\.classList\.toggle\('hidden', !scopeAvailable\(\)\)/.test(js), 'toggle hidden when the rig has no scope');
+  assert.ok(/localStorage\.getItem\('bandspread-scope'\) !== '0'/.test(js), 'on by default, device-local');
+  assert.ok(/ScopeView\.mappedTrace\(/.test(js), 'the shared mapping, not a fourth copy');
+  const html = read('renderer/bandspread-popout.html');
+  assert.ok(html.indexOf('../lib/scope-view.js') > 0 && html.indexOf('../lib/scope-axis.js') > 0, 'scripts loaded');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

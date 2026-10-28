@@ -18,6 +18,11 @@ contextBridge.exposeInMainWorld('api', {
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (s) => ipcRenderer.invoke('save-settings', s),
   tune: (frequency, mode) => ipcRenderer.send('tune', { frequency, mode }),
+  // The radio's band scope as a trace behind the spots (the Scope toggle):
+  // state always (does the rig have a scope?), frames only while watching.
+  onScopeState: (cb) => ipcRenderer.on('scope-state', (_e, s) => cb(s)),
+  onScopeFrame: (cb) => ipcRenderer.on('scope-frame', (_e, f) => cb(f)),
+  scopeWatch: (on) => ipcRenderer.send('bandspread-scope-watch', !!on),
   minimize: () => ipcRenderer.send('bandspread-popout-minimize'),
   maximize: () => ipcRenderer.send('bandspread-popout-maximize'),
   close: () => ipcRenderer.send('bandspread-popout-close'),

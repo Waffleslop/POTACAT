@@ -5948,6 +5948,7 @@ function remoteShackScopeState(state) {
   const payload = { ...(state || {}), remote: true };
   if (scopePopoutWin && !scopePopoutWin.isDestroyed()) scopePopoutWin.webContents.send('scope-state', payload);
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('scope-state', payload);
+  if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) bandspreadPopoutWin.webContents.send('scope-state', payload);
 }
 
 // An activation run on this desktop while driving a remote shack: the shack
@@ -6496,6 +6497,7 @@ function ensureRemoteClient() {
         const f = { seq: msg.seq, kind: msg.kind, bins: msg.bins };
         if (scopePopoutWin && !scopePopoutWin.isDestroyed()) scopePopoutWin.webContents.send('scope-frame', f);
         if (yaesuScopeJtcatWants && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('scope-frame', f);
+        if (yaesuScopeBandspreadWants && bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) bandspreadPopoutWin.webContents.send('scope-frame', f);
         break;
       }
       case 'scope-state': {
@@ -28405,6 +28407,7 @@ let yaesuScopeScuLanWeSet = false;   // POTACAT turned SCU-LAN10 on → it turns
 let yaesuScopeSynth = false;         // generated signal, no radio (pop-out gear menu)
 let yaesuScopeRemoteWants = false;   // an ECHOCAT client has its Scope view open
 let yaesuScopeJtcatWants = false;    // the JTCAT pop-out is showing the band scope strip
+let yaesuScopeBandspreadWants = false;   // the Bandspread window draws the scope trace behind its spots
 let yaesuScopeRemoteIsGuest = false; // ...and that client holds a Guest Pass (may watch, never change the radio)
 const YAESU_SCOPE_GUEST_DIAG = {
   key: 'guest', severity: 'blocker',
@@ -28434,6 +28437,7 @@ function yaesuScopeRigHasScope() {
 function yaesuScopeWanted() {
   if (scopePopoutWin && !scopePopoutWin.isDestroyed()) return true;
   if (yaesuScopeJtcatWants && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) return true;
+  if (yaesuScopeBandspreadWants && bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) return true;
   return !!(yaesuScopeRemoteWants && remoteServer && remoteServer.running && remoteServer.hasClient());
 }
 
@@ -28587,6 +28591,7 @@ function yaesuScopeBroadcastState() {
   const payload = yaesuScopeStatePayload();
   if (scopePopoutWin && !scopePopoutWin.isDestroyed()) scopePopoutWin.webContents.send('scope-state', payload);
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('scope-state', payload);
+  if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) bandspreadPopoutWin.webContents.send('scope-state', payload);
   if (yaesuScopeRemoteWants && remoteServer && remoteServer.running && typeof remoteServer.broadcastScopeState === 'function') {
     remoteServer.broadcastScopeState(yaesuScopeRemotePayload());
   }
@@ -28748,6 +28753,9 @@ function yaesuScopeOnFrame(f) {
   }
   if (yaesuScopeJtcatWants && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
     jtcatPopoutWin.webContents.send('scope-frame', { seq: f.seq, kind: f.kind, bins: f.wf1 });
+  }
+  if (yaesuScopeBandspreadWants && bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) {
+    bandspreadPopoutWin.webContents.send('scope-frame', { seq: f.seq, kind: f.kind, bins: f.wf1 });
   }
   if (yaesuScopeRemoteWants && remoteServer && remoteServer.running && remoteServer.hasClient()) {
     // The server paces each device (scopeRemoteGapMs) and peak-holds the
@@ -35317,6 +35325,10 @@ app.whenReady().then(() => {
     });
     bandspreadPopoutWin.on('closed', () => {
       bandspreadPopoutWin = null;
+      if (yaesuScopeBandspreadWants) {
+        yaesuScopeBandspreadWants = false;
+        if (!yaesuScopeWanted()) { try { stopYaesuScope('Bandspread closed'); } catch { /* not running */ } }
+      }
       if (win && !win.isDestroyed()) {
         win.webContents.send('bandspread-popout-status', false);
       }
@@ -35324,6 +35336,8 @@ app.whenReady().then(() => {
     bandspreadPopoutWin.webContents.on('did-finish-load', () => {
       const themePayload = { theme: settings.lightMode ? 'light' : 'dark', variant: settings.darkVariant || 'navy' };
       bandspreadPopoutWin.webContents.send('bandspread-popout-theme', themePayload);
+      // Whether the active rig has a scope: the window shows its Scope toggle only then.
+      bandspreadPopoutWin.webContents.send('scope-state', yaesuScopeStatePayload());
       // Tell the main renderer the popout is up so it can push the filtered
       // view (spots + active band) immediately. We no longer push an initial
       // unfiltered snapshot from main — the renderer is the source of truth.
@@ -37772,6 +37786,12 @@ app.whenReady().then(() => {
   });
   // The JTCAT pop-out's band-scope strip: it watches while shown, like a
   // subscribed ECHOCAT client, and the helper runs for whoever is watching.
+  // Bandspread's scope trace (its Scope toggle): a watcher exactly like the JTCAT strip.
+  ipcMain.on('bandspread-scope-watch', (_e, on) => {
+    yaesuScopeBandspreadWants = !!on;
+    if (on) { yaesuScopeRestarts = 0; startYaesuScope(); yaesuScopeBroadcastState(); }
+    else if (!yaesuScopeWanted()) stopYaesuScope('Bandspread scope hidden');
+  });
   ipcMain.on('jtcat-scope-watch', (_e, on) => {
     yaesuScopeJtcatWants = !!on;
     if (on) { yaesuScopeRestarts = 0; startYaesuScope(); yaesuScopeBroadcastState(); }
