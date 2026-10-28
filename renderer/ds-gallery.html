@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en" data-ds="night">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>POTACAT Components</title>
+<!-- Dev-only gallery of the component sheet (docs/design-system-plan.md Phase 2).
+     Every component, every state, in every theme, density and font size.
+     Not loaded by the app. Rendered by scripts/ds-gallery-shots.js. -->
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="ds.css">
+<style>
+  /* Gallery layout only (not part of the system). */
+  body { margin: 0; }
+  .g-wrap { max-width: 1100px; margin: 0 auto; padding-bottom: var(--ds-space-32); }
+  .g-bar { position: sticky; top: 0; z-index: 5; }
+  .g-row { display: flex; flex-wrap: wrap; gap: var(--ds-space-8); align-items: center; padding: 0 calc(var(--ds-gutter) + var(--ds-space-4)); }
+  .g-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--ds-space-12); padding: 0 var(--ds-gutter); }
+  .g-card { background: var(--ds-surface); border: var(--ds-stroke-hair) solid var(--ds-line); border-radius: var(--ds-radius-lg); padding: var(--ds-space-12); }
+  .g-note { padding: 0 calc(var(--ds-gutter) + var(--ds-space-4)); margin: 0 0 var(--ds-space-8); }
+  .g-inline-sheet { position: relative; padding: var(--ds-space-24); background: var(--ds-scrim); border-radius: var(--ds-radius-lg); margin: 0 var(--ds-gutter); display: flex; gap: var(--ds-space-16); flex-wrap: wrap; justify-content: center; }
+  .g-inline-sheet .ds-sheet, .g-inline-sheet .ds-dialog { max-width: 100%; }
+</style>
+</head>
+<body class="ds-root">
+<div class="g-wrap">
+
+  <div class="g-bar">
+    <div class="ds-appheader">
+      <span class="ds-appheader__freq">14.074.000</span>
+      <span class="ds-appheader__mode">USB-D</span>
+      <span class="ds-dot is-up">CAT</span>
+      <span class="ds-dot is-up">LINK</span>
+      <span class="ds-path is-remote">CLOUD</span>
+      <span class="ds-toolbar__spacer"></span>
+      <div class="ds-seg" role="group" aria-label="Theme" id="g-theme">
+        <button data-v="night" aria-pressed="true">POTACAT Dark</button>
+        <button data-v="dark">Midnight</button>
+        <button data-v="acid">Acid Burn</button>
+        <button data-v="light">POTACAT Light</button>
+      </div>
+      <div class="ds-seg" role="group" aria-label="Font size" id="g-scale">
+        <button data-v="1" aria-pressed="true">Standard</button>
+        <button data-v="1.3">Large</button>
+      </div>
+      <div class="ds-seg" role="group" aria-label="Density" id="g-density">
+        <button data-v="compact" aria-pressed="true">Compact</button>
+        <button data-v="touch">Touch</button>
+      </div>
+    </div>
+    <div class="ds-tabbar" role="tablist">
+      <button class="ds-tab" role="tab" aria-selected="true">Spots <span class="ds-badge">24</span></button>
+      <button class="ds-tab" role="tab">Map</button>
+      <button class="ds-tab" role="tab">FT8</button>
+      <button class="ds-tab" role="tab">Log</button>
+      <button class="ds-tab" role="tab">Settings</button>
+    </div>
+  </div>
+
+  <div class="ds-section-header">Type <button type="button">21 styles</button></div>
+  <div class="g-grid">
+    <div class="g-card">
+      <div class="ds-title-screen">Activation running</div>
+      <div class="ds-title-sheet">Log contact</div>
+      <div class="ds-title-card">Cloud account</div>
+      <div class="ds-row-title">K3SBP</div>
+      <div class="ds-row-body">Casey Stanton</div>
+      <div class="ds-row-value">14.074.0</div>
+    </div>
+    <div class="g-card">
+      <div class="ds-body">Body text for paragraphs, list-row labels and fields.</div>
+      <div class="ds-help ds-muted">Help under a field or a setting.</div>
+      <div class="ds-label">Label text</div>
+      <div class="ds-caption">Caption</div>
+      <div class="ds-eyebrow">Section eyebrow</div>
+      <div class="ds-eyebrow-strip ds-muted">Strip label</div>
+      <div class="ds-tag">Tag</div>
+    </div>
+    <div class="g-card">
+      <div class="ds-numeric-dial">14.074.000</div>
+      <div class="ds-numeric-header">7.074.000</div>
+      <div class="ds-numeric-mark">L</div>
+      <div class="ds-button-lg">Button large</div>
+      <div class="ds-button-md">Button medium</div>
+      <div class="ds-button-sm">Button small</div>
+      <div class="ds-mono">K1ABC W9XYZ EN52</div>
+      <div class="ds-mono-sm ds-muted">-12  0.2  1500</div>
+    </div>
+  </div>
+
+  <div class="ds-section-header">Buttons</div>
+  <p class="g-note ds-help ds-muted">Filled is the one main action. Tinted is a secondary action with a meaning. Gray is neutral, plain is text only. Air appears only on controls that key the radio.</p>
+  <div class="g-row">
+    <button class="ds-btn ds-btn--filled">Filled</button>
+    <button class="ds-btn ds-btn--filled ds-tone-ok">Log QSO</button>
+    <button class="ds-btn ds-btn--filled ds-tone-danger">Stop TX</button>
+    <button class="ds-btn ds-btn--tinted">Tinted</button>
+    <button class="ds-btn ds-btn--tinted ds-tone-warn">Tune</button>
+    <button class="ds-btn ds-btn--tinted ds-tone-danger">Delete</button>
+    <button class="ds-btn">Gray</button>
+    <button class="ds-btn ds-btn--plain">Plain</button>
+    <button class="ds-btn ds-btn--plain ds-btn--dismiss">Cancel</button>
+    <button class="ds-btn" disabled>Disabled</button>
+  </div>
+  <div class="g-row" style="margin-top: var(--ds-space-8);">
+    <button class="ds-btn ds-btn--filled ds-btn--lg">Large main action</button>
+    <button class="ds-btn ds-btn--filled">Medium</button>
+    <button class="ds-btn ds-btn--sm">Skip</button>
+    <button class="ds-btn ds-btn--sm">Hide</button>
+    <button class="ds-btn ds-btn--sm ds-btn--tinted">Refresh</button>
+    <button class="ds-btn ds-btn--tinted ds-tone-warn ds-btn--safety">Tune</button>
+  </div>
+
+  <div class="ds-section-header">Pills, chips and tags</div>
+  <div class="g-row">
+    <div class="ds-pills">
+      <button class="ds-pill is-on">20m</button>
+      <button class="ds-pill">40m</button>
+      <button class="ds-pill">CW</button>
+      <button class="ds-pill is-on">SSB</button>
+      <button class="ds-pill"><span class="ds-pill__count">24</span> <span class="ds-pill__unit">spots</span></button>
+      <button class="ds-pill ds-pill--capsule">Focus: POTA</button>
+    </div>
+  </div>
+  <div class="g-row" style="margin-top: var(--ds-space-8);">
+    <span class="ds-chip">20m</span><span class="ds-chip">3m</span><span class="ds-chip">-12</span>
+    <span class="ds-chip ds-chip--voice">SSB</span><span class="ds-chip ds-chip--cw">CW</span><span class="ds-chip ds-chip--digital">FT8</span>
+    <span class="ds-tag ds-tag--source">POTA</span><span class="ds-tag ds-tag--source">SOTA</span>
+    <span class="ds-tag ds-tag--brand">ATNO</span><span class="ds-tag ds-tag--ok">New slot</span><span class="ds-tag ds-tag--warn">Stale</span><span class="ds-tag ds-tag--quiet">Worked</span>
+  </div>
+
+  <div class="ds-section-header">Segmented and toggles</div>
+  <div class="g-row">
+    <div class="ds-seg"><button aria-pressed="true">Table</button><button>Map</button><button>Both</button></div>
+    <label class="ds-toggle"><input type="checkbox" checked><span></span>Auto-sync</label>
+    <label class="ds-toggle"><input type="checkbox"><span></span>Hunt spotted</label>
+    <label class="ds-toggle"><input type="checkbox" disabled><span></span>Disabled</label>
+  </div>
+
+  <div class="ds-section-header">Fields</div>
+  <div class="g-grid">
+    <div class="ds-field"><label for="g-f1">Callsign</label><input id="g-f1" placeholder="K1ABC"><span class="ds-field__help">The station you worked.</span></div>
+    <div class="ds-field is-error"><label for="g-f2">Frequency</label><input id="g-f2" value="14.07x"><span class="ds-field__help">Type the frequency in MHz, such as 14.074.</span></div>
+    <div class="ds-field"><label for="g-f3">Mode</label><select id="g-f3"><option>FT8</option><option>SSB</option></select></div>
+  </div>
+
+  <div class="ds-section-header">List group</div>
+  <div class="ds-list">
+    <div class="ds-list-row ds-list-row--pressable"><span class="ds-list-row__label">Radio<span class="ds-list-row__sub">IC-7300 on COM4, 115200 baud</span></span><span class="ds-list-row__value">Connected</span></div>
+    <div class="ds-list-row"><span class="ds-list-row__label">Auto-sync QSOs</span><label class="ds-toggle"><input type="checkbox" checked><span></span></label></div>
+    <div class="ds-list-row"><span class="ds-list-row__label">Callsign</span><span class="ds-list-row__value">K3SBP</span></div>
+    <div class="ds-list-row ds-list-row--danger ds-list-row--pressable"><span class="ds-list-row__label">Remove this rig</span></div>
+  </div>
+
+  <div class="ds-section-header">Banners</div>
+  <div style="display:grid;gap:var(--ds-space-8);">
+    <div class="ds-banner ds-tone-tint"><div class="ds-banner__title">Event focus: Route 66</div><div class="ds-banner__sub">Showing 12 event stations.</div></div>
+    <div class="ds-banner ds-tone-warn"><div class="ds-banner__title">Spots are 6 minutes old</div><div class="ds-banner__sub">The POTA feed has not answered since 14:02z.</div></div>
+    <div class="ds-banner ds-tone-danger"><div class="ds-banner__title">Radio link lost</div><div class="ds-banner__sub">COM4 stopped answering. Reconnecting.</div></div>
+    <div class="ds-banner ds-tone-ok"><div class="ds-banner__title">Logged K1ABC</div><div class="ds-banner__sub">Uploaded to QRZ and POTACAT Cloud.</div></div>
+    <div class="ds-banner ds-banner--air" style="--slot: 62%;"><div class="ds-banner__title">ON AIR  ·  2nd slot</div><div class="ds-banner__msg">CQ POTA K3SBP FN20</div><span class="ds-banner__slot"></span></div>
+  </div>
+
+  <div class="ds-section-header">Meters</div>
+  <div class="g-grid">
+    <div class="ds-meter"><span class="ds-meter__label">S</span><span class="ds-meter__track"><span class="ds-meter__fill" style="--value: 64%;"></span></span><span class="ds-meter__value">S7</span></div>
+    <div class="ds-meter ds-meter--swr"><span class="ds-meter__label">SWR</span><span class="ds-meter__track"><span class="ds-meter__fill" style="--value: 18%;"></span></span><span class="ds-meter__value">1.3</span></div>
+    <div class="ds-meter ds-meter--swr is-warn"><span class="ds-meter__label">SWR</span><span class="ds-meter__track"><span class="ds-meter__fill" style="--value: 55%;"></span></span><span class="ds-meter__value">2.4</span></div>
+    <div class="ds-meter ds-meter--swr is-trip"><span class="ds-meter__label">SWR</span><span class="ds-meter__track"><span class="ds-meter__fill" style="--value: 92%;"></span></span><span class="ds-meter__value">3.8</span></div>
+    <div class="ds-meter"><span class="ds-meter__label">PWR</span><span class="ds-meter__track"><span class="ds-meter__fill" style="--value: 0%;"></span></span><span class="ds-meter__value is-empty">--</span></div>
+  </div>
+
+  <div class="ds-section-header">Spot rows</div>
+  <div class="ds-spotrow">
+    <div class="ds-spotrow__id">
+      <span class="ds-spotrow__call">K1ABC <span class="ds-spotrow__star">&#9733;</span></span>
+      <span class="ds-spotrow__op">John Example</span>
+      <span class="ds-spotrow__meta"><span class="ds-tag ds-tag--source">POTA</span><span class="ds-chip ds-chip--cw">CW</span><span class="ds-chip">3m</span><span class="ds-spotrow__ref">US-0512</span><span class="ds-spotrow__park">Valley Forge National Historical Park</span></span>
+    </div>
+    <div class="ds-spotrow__value"><span class="ds-spotrow__dash"></span><span class="ds-spotrow__freq">14.062.0</span></div>
+    <button class="ds-spotrow__log" aria-label="Log K1ABC">L</button>
+  </div>
+  <div class="ds-spotrow is-tuned">
+    <div class="ds-spotrow__id">
+      <span class="ds-spotrow__call">W9XYZ/P <span class="ds-spotrow__check">&#10003;</span></span>
+      <span class="ds-spotrow__op">A Very Long Operator Name That Must Truncate Rather Than Wrap</span>
+      <span class="ds-spotrow__meta"><span class="ds-tag ds-tag--source">SOTA</span><span class="ds-chip ds-chip--voice">SSB</span><span class="ds-chip">12m</span><span class="ds-spotrow__ref">W4C/CM-001</span><span class="ds-spotrow__park">Mount Mitchell</span></span>
+    </div>
+    <div class="ds-spotrow__value"><span class="ds-spotrow__dash"></span><span class="ds-spotrow__freq">7.285.5</span></div>
+    <button class="ds-spotrow__log" aria-label="Log W9XYZ">L</button>
+  </div>
+
+  <div class="ds-section-header">Toolbar and action bar</div>
+  <div class="ds-toolbar">
+    <button class="ds-tool is-on">Hunt</button><button class="ds-tool">Auto CQ</button><button class="ds-tool">Hold TX</button><button class="ds-tool is-on">Late TX</button><button class="ds-tool">AP RX</button>
+    <span class="ds-toolbar__spacer"></span><span class="ds-caption ds-muted">FT8 · 20m</span>
+  </div>
+  <div style="padding: var(--ds-space-8) var(--ds-gutter) 0;"><div class="ds-slot" style="--slot: 40%;"><span></span></div></div>
+  <div class="ds-actionbar">
+    <button class="ds-action ds-tone-tint">TX CQ</button>
+    <button class="ds-action ds-tone-warn">Tune</button>
+    <button class="ds-action ds-tone-danger">HALT</button>
+  </div>
+
+  <div class="ds-section-header">Action strip</div>
+  <div class="ds-strip">
+    <button class="ds-ptt">PTT</button>
+    <button class="ds-ptt is-keyed">TX</button>
+    <button class="ds-halt">HALT</button>
+    <button class="ds-ctl">Scan</button>
+    <button class="ds-ctl is-ok">Audio</button>
+    <button class="ds-ctl is-warn">Scanning</button>
+    <button class="ds-macro">CQ</button>
+    <button class="ds-macro is-sending">599</button>
+    <button class="ds-macro" disabled>Empty</button>
+  </div>
+
+  <div class="ds-section-header">Sheet and dialog</div>
+  <div class="g-inline-sheet">
+    <div class="ds-sheet">
+      <div class="ds-sheet__head"><h2 class="ds-sheet__title">Log contact</h2><button class="ds-btn ds-btn--plain ds-btn--dismiss">Close</button></div>
+      <div class="ds-field"><label for="g-s1">Callsign</label><input id="g-s1" value="K1ABC"></div>
+      <div class="ds-sheet__actions"><button class="ds-btn ds-btn--filled ds-btn--lg ds-btn--block ds-tone-ok">Log QSO</button></div>
+    </div>
+    <div class="ds-dialog">
+      <h2 class="ds-sheet__title">Delete this QSO?</h2>
+      <p class="ds-body ds-muted">K1ABC on 20m CW at 14:02z. This cannot be undone.</p>
+      <div class="ds-sheet__actions"><button class="ds-btn ds-btn--plain ds-btn--dismiss">Cancel</button><button class="ds-btn ds-btn--tinted ds-tone-danger">Delete</button></div>
+    </div>
+  </div>
+
+  <div class="ds-section-header">Loading and empty</div>
+  <div class="g-row"><span class="ds-spinner" aria-label="Loading"></span><span class="ds-muted">Loading spots</span></div>
+  <div class="ds-empty">No spots match these filters.</div>
+</div>
+
+<script>
+  (function () {
+    function seg(id, apply) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener('click', function (e) {
+        var b = e.target.closest('button');
+        if (!b) return;
+        el.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
+        apply(b.dataset.v);
+      });
+    }
+    var root = document.documentElement;
+    seg('g-theme', function (v) { root.setAttribute('data-ds', v); });
+    seg('g-scale', function (v) { root.style.setProperty('--ds-font-scale', v); });
+    seg('g-density', function (v) { if (v === 'touch') root.setAttribute('data-density', 'touch'); else root.removeAttribute('data-density'); });
+    // ?ds=acid&scale=1.3&density=touch (used by the screenshot script)
+    var p = new URLSearchParams(location.search);
+    function pick(id, v) { var b = document.querySelector('#' + id + ' button[data-v="' + v + '"]'); if (b) b.click(); }
+    if (p.get('ds')) pick('g-theme', p.get('ds'));
+    if (p.get('scale')) pick('g-scale', p.get('scale'));
+    if (p.get('density')) pick('g-density', p.get('density'));
+  })();
+</script>
+</body>
+</html>

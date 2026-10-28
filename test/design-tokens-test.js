@@ -106,5 +106,14 @@ test('type: 21 styles, each sized by --ds-font-scale, tabular numerals, chrome p
   assert.ok(/\.ds-chrome \{ --ds-font-scale: 1; \}/.test(css));
 });
 
+test('ds.css reads only tokens: no hex, rgb() or white-text literals, every variable defined', () => {
+  const css = fs.readFileSync(path.join(root, 'renderer', 'ds.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(!/#[0-9a-f]{3,8}\b/i.test(css), 'a hex colour in ds.css');
+  assert.ok(!/\brgba?\(/i.test(css), 'an rgb() colour in ds.css');
+  assert.ok(!/color:\s*(white|#fff)/i.test(css), 'white text in ds.css');
+  const defined = new Set((fs.readFileSync(gen.OUT, 'utf8') + css).match(/--ds-[a-z0-9-]+(?=\s*:)/g));
+  for (const v of (css.match(/var\((--ds-[a-z0-9-]+)/g) || []).map((x) => x.slice(4))) assert.ok(defined.has(v), v + ' is used but never defined');
+});
+
 console.log(`\n${passed} passed, ${failed} failed, ${skipped} skipped`);
 process.exit(failed ? 1 : 0);
