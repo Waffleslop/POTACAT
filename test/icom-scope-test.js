@@ -230,6 +230,8 @@ check('Settings > My Rigs shows the button for the three CI-V connection types',
 const RECORDINGS = [
   { file: 'kw4fm-ic7300-center-7063-200k.txt', who: 'KW4FM IC-7300', mode: 'center', sweeps: 118, centerHz: 7063000, spanHz: 200000, frames: 1307, maxLevel: 121 },
   { file: 'ic7300-center-14252-100k.txt', who: 'IC-7300 on 20 m', mode: 'center', sweeps: 122, centerHz: 14252000, spanHz: 100000, frames: 1347, maxLevel: 79 },
+  // The radio's 27 15 said 25000: the HALF span (a 50 kHz window).
+  { file: 'nj2dx-ic7300-center-14036-50k.txt', who: 'NJ2DX IC-7300', mode: 'center', sweeps: 122, centerHz: 14036000, spanHz: 50000, frames: 1348, maxLevel: 115 },
   // Fixed mode: division 1 carries the window's two edges, not a centre and half-span.
   { file: 'w0egr-ic7300-fixed-14000-14350.txt', who: 'W0EGR IC-7300 (Fixed)', mode: 'fixed', sweeps: 122, centerHz: 14175000, spanHz: 350000, lowHz: 14000000, highHz: 14350000, frames: 1347, maxLevel: 124 },
 ];
