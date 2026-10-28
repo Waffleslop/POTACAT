@@ -541,6 +541,22 @@ const { callsignToProgram, fetchParksForProgram, loadParksCache, saveParksCache,
 // park state/grid in the log (W9TEF 2026-10-19). The live spot for exactly
 // that park carries its name, location and coordinates; a grid comes from
 // those. An n-fer spot is skipped: its name belongs to its first park only.
+/**
+ * The state an activator is in at a park that spans several, from their live
+ * POTA spot's locationCode (N0KAH 2026-10-28: "it asks you to fill in the
+ * state ... and of course I never remember to ask"). The newest spot of that
+ * park by that activator; only a state the park actually lies in. '' = ask.
+ */
+function spotParkState(ref, call) {
+  const want = String(ref || '').trim().toUpperCase();
+  if (!want) return '';
+  let park = null;
+  try { park = getParkDb(parksMap, want) || null; } catch {}
+  const spots = typeof lastMergedSpots !== 'undefined' ? lastMergedSpots : [];
+  const fallbackDesc = (spots.find((x) => x && String(x.reference || '').trim().toUpperCase() === want) || {}).locationDesc || '';
+  return QsoExpand.spotStateFor(spots, want, call, parkStatesFromLocation((park && park.locationDesc) || fallbackDesc));
+}
+
 function parkInfoFor(ref) {
   let db = null;
   try { db = getParkDb(parksMap, ref) || null; } catch { db = null; }
@@ -12565,6 +12581,20 @@ async function logContact(entry, opts) {
       sendCatLog(`[QSO] Frequency "${e.frequency}" for ${e.callsign} is in no amateur band: logged with the frequency blank`);
       e.frequency = '';
       e.band = '';
+    }
+  }
+  // A multi-state park with no state chosen: the activator's live spot says
+  // where they are (spotParkState). Per park, so an n-fer gets each one.
+  if (!e.parkState && e.sigInfo) {
+    const firstCall = String(e.callsign || '').split(',')[0].trim();
+    const picks = [];
+    for (const ref of String(e.sigInfo).split(',').map((r) => r.trim()).filter(Boolean)) {
+      const st = spotParkState(ref, firstCall);
+      if (st) picks.push(`${ref.toUpperCase()}:${st}`);
+    }
+    if (picks.length) {
+      e.parkState = picks.join(',');
+      sendCatLog(`[QSO] ${firstCall}: state from their spot (${picks.join(', ')})`);
     }
   }
   const records = QsoExpand.expandContact(e, {
@@ -26356,6 +26386,10 @@ function processPotaSpots(raw) {
       reference: s.reference || '',
       parkName: s.name || s.parkName || '',
       locationDesc: s.locationDesc || '',
+      // Where the activator says they ARE ("US-UT"), which a self-spot must
+      // send: for a park across several states it answers "which state?"
+      // (spotParkState). The park's own locationDesc lists them all.
+      locationCode: /^[A-Z]{2}-[A-Z0-9]{1,3}$/i.test(String(s.locationCode || '')) ? String(s.locationCode).toUpperCase() : '',
       distance,
       bearing: spotBearing,
       lat,
@@ -36045,6 +36079,8 @@ app.whenReady().then(() => {
   ipcMain.handle('winlink-account-check', (_e, call) => winlinkAccountCheck(call));
   ipcMain.handle('winlink-register', (_e, o = {}) => winlinkRegister(o, (o && o.origin) || 'Settings'));
   // The operator's own county (lib/station-county.js; AE5JE 2026-10-27).
+  // The state an activator's spot gives for a multi-state park ('' = ask).
+  ipcMain.handle('spot-park-state', (_e, ref, call) => spotParkState(ref, call));
   ipcMain.handle('county-list', () => usCounties());
   ipcMain.handle('park-county-get', (_e, ref) => {
     const r = String(ref || '').trim().toUpperCase();

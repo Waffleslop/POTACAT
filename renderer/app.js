@@ -4173,7 +4173,10 @@ async function saveBannerQso() {
     try {
       const parkData = await window.api.getPark(potaRef);
       const states = parkData ? parkStatesFromLocationLocal(parkData.locationDesc) : [];
-      if (states.length > 1) parkState = await promptParkState(potaRef, parkData.locationDesc);
+      // Their spot's locationCode says where they are; ask only when it doesn't.
+      const fromSpot = states.length > 1 && window.api.spotParkState ? await window.api.spotParkState(potaRef, callsigns[0]) : '';
+      if (fromSpot) parkState = fromSpot;
+      else if (states.length > 1) parkState = await promptParkState(potaRef, parkData.locationDesc);
     } catch {}
   }
 
@@ -15372,7 +15375,10 @@ logSaveBtn.addEventListener('click', async () => {
       try {
         const parkData = await window.api.getPark(potaRef);
         const states = parkData ? parkStatesFromLocationLocal(parkData.locationDesc) : [];
-        if (states.length > 1) parkState = await promptParkState(potaRef, parkData.locationDesc);
+        // Their spot's locationCode says where they are; ask only when it doesn't.
+        const fromSpot = states.length > 1 && window.api.spotParkState ? await window.api.spotParkState(potaRef, callsigns[0]) : '';
+        if (fromSpot) parkState = fromSpot;
+        else if (states.length > 1) parkState = await promptParkState(potaRef, parkData.locationDesc);
       } catch {}
     }
     const allRefs = sigInfo ? [sigInfo, ...addlParks].join(',') : '';

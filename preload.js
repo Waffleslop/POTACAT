@@ -495,6 +495,7 @@ contextBridge.exposeInMainWorld('api', {
   winlinkRegister: (o) => ipcRenderer.invoke('winlink-register', o),
   winlinkRecoveryEmailGet: () => ipcRenderer.invoke('winlink-recovery-email-get'),
   countyList: () => ipcRenderer.invoke('county-list'),
+  spotParkState: (ref, call) => ipcRenderer.invoke('spot-park-state', ref, call),
   parkCountyGet: (ref) => ipcRenderer.invoke('park-county-get', ref),
   parkCountySet: (o) => ipcRenderer.invoke('park-county-set', o),
   homeCountyFromQrz: () => ipcRenderer.invoke('home-county-from-qrz'),

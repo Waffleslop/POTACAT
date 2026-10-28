@@ -218,6 +218,7 @@ const TESTS = [
   'test/save-qso-stall-test.js',
   'test/pota-sync-login-test.js',
   'test/qso-expand-test.js',
+  'test/spot-park-state-test.js', // a multi-state park's state from the activator's spot locationCode (N0KAH)
   'test/log-dialog-qrz-test.js',
   'test/logging-parity-test.js',
   'test/pskr-map-band-cap-test.js',
