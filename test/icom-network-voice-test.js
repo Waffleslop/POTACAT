@@ -86,10 +86,13 @@ const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8').replace(/\r\n/g,
   const main = read('main.js');
   const vfo = read('renderer/vfo-popout.html');
 
-  await t('the VFO window PTT streams the mic over RS-BA1 and keys in DATA mode', () => {
+  await t('the VFO window PTT streams the mic over RS-BA1 and keys in DATA mode (unless DATA OFF MOD = LAN)', () => {
     const naked = main.slice(main.indexOf("ipcMain.on('naked-ptt'"), main.indexOf("ipcMain.on('naked-ptt'") + 400);
     assert.ok(/icomNetworkVoiceTx\(!!state, 'VFO window PTT'\)/.test(naked));
-    assert.ok(/forceDataMode: true/.test(naked));
+    // DATA at the factory setting; the one decision is icomLanVoicePttOpts (test/icom-lan-voice-test.js).
+    assert.ok(/handleRemotePtt\(!!state, icomLanVoicePttOpts\(\)\)/.test(naked));
+    const fn = main.slice(main.indexOf('function icomLanVoicePttOpts('), main.indexOf('function icomLanVoicePttOpts(') + 800);
+    assert.ok(/forceDataMode: true/.test(fn));
   });
 
   await t('the phone PTT uses the same helper', () => {

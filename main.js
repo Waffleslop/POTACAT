@@ -18949,6 +18949,25 @@ function icomNetworkVoiceTx(state, who) {
   return true;
 }
 
+/**
+ * How a voice PTT keys when its audio goes over the LAN. At an Icom's factory
+ * setting LAN audio reaches the transmitter only in DATA mode, so POTACAT
+ * switches to USB-D / LSB-D / FM-D / AM-D for the transmission. A radio whose
+ * DATA OFF MOD menu is LAN takes it in plain USB / LSB, and there the switch
+ * costs the voice its speech compressor and SSB TX filter: the operator ticks
+ * "Voice over the LAN stays in USB / LSB" (rig.lanVoiceInSsb). EA1BZN,
+ * IC-7300MK2, 2026-10-28: voice radiated but sounded poor, COMP never moved,
+ * and the log blamed SSB-over-DATA, which was off.
+ */
+function icomLanVoicePttOpts() {
+  const rig = (settings.rigs || []).find((r) => r && r.id === settings.activeRigId);
+  if (rig && rig.lanVoiceInSsb) return { audio: true };
+  return {
+    audio: true, forceDataMode: true,
+    dataReason: 'voice over the LAN: at the radio\'s factory setting LAN audio reaches the transmitter only in DATA mode. If its DATA OFF MOD menu is LAN, tick "Voice over the LAN stays in USB / LSB" in Settings > My Rigs',
+  };
+}
+
 // One 24 kHz mic chunk from the VFO window or the ECHOCAT bridge.
 function pushIcomNetworkVoiceChunk(samples) {
   const t = _icomNetworkTransport;
@@ -21972,9 +21991,9 @@ function connectRemote() {
       return;
     }
     // RS-BA1 streaming voice TX: the phone's mic goes to the radio over the
-    // LAN, and the radio takes LAN audio only in its DATA mode.
+    // LAN, in DATA mode unless the rig says its DATA OFF MOD is LAN.
     if (icomNetworkVoiceTx(state, 'ECHOCAT phone PTT')) {
-      handleRemotePtt(state, { audio: true, forceDataMode: true });
+      handleRemotePtt(state, icomLanVoicePttOpts());
     } else {
       handleRemotePtt(state);
     }
@@ -25177,7 +25196,9 @@ function handleRemotePtt(state, opts = {}) {
       // (K4GDJ FTDX101MP: dial walked to 7208.46 and never came back).
       // Both re-anchors must use this pre-PTT value.
       _ssbFreqBeforePtt = _currentFreqHz;
-      sendCatLog(`[PTT] ${curMode} -> ${dataMode} (SSB-over-DATA: mic disabled)`);
+      // Say WHY: a forced switch is not the SSB-over-DATA setting, and calling
+      // it that sent EA1BZN to check two options that were already off.
+      sendCatLog(`[PTT] ${curMode} -> ${dataMode} (${forceData ? (opts.dataReason || 'this audio reaches the radio only in DATA mode') : 'SSB-over-DATA: mic disabled'})`);
       // Yaesu rigs have a "DATA MODE" menu that controls whether DIGL/DIGU
       // behave as mic-disabled SSB (DATA MODE = Others/STD — carrier freq
       // unchanged) or as a subcarrier-offset PSK mode (DATA MODE = PSK —
@@ -45505,10 +45526,10 @@ app.whenReady().then(() => {
   // user's local speaker / sinkId, not necessarily the rig — so the
   // mode-switch assumption is wrong. Treat this as audio:false.
   // Icom Network is the exception: the window streams its mic to the radio
-  // over the LAN (dax-tx-chunk), and the radio takes LAN audio in DATA mode.
+  // over the LAN (dax-tx-chunk), in DATA mode unless the rig says its DATA OFF MOD is LAN.
   ipcMain.on('naked-ptt', (_e, state) => {
     if (icomNetworkVoiceTx(!!state, 'VFO window PTT')) {
-      handleRemotePtt(!!state, { audio: true, forceDataMode: true });
+      handleRemotePtt(!!state, icomLanVoicePttOpts());
       return;
     }
     handleRemotePtt(!!state, { audio: false });

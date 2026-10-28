@@ -92,6 +92,7 @@ const TESTS = [
   'test/yaesu-scope-test.js', // the FT-710's own scope: frame parser, axis, helper exit codes, remote payload guard (was CI-only)
   'test/flex-scope-test.js', // the Flex's own panadapter as the band scope (Flex Direct), against a real 8600 capture
   'test/icom-scope-test.js', // an Icom's own band scope over CI-V: parser, codec events, the owner's 30 s recording
+  'test/icom-lan-voice-test.js', // voice over an Icom's LAN: DATA mode, or USB/LSB when DATA OFF MOD = LAN (EA1BZN)
   'test/scope-view-test.js', // the scope's shared ticks + trace painter (every surface), the synced tuning step
   'test/scope-overlay-test.js', // the scope's passband, split TX marker and band plan (Phase 3)
   'test/flex-readback-test.js', // a Flex's controls read back from the radio's own status (real 8600 capture)

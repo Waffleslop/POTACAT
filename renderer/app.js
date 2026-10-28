@@ -2300,6 +2300,9 @@ function updateRadioSubPanels() {
   // Voice in DATA mode runs in the rig controller: serial, Icom, Hamlib and flrig links.
   const voiceAsDataRow = document.getElementById('rig-voice-as-data');
   if (voiceAsDataRow) voiceAsDataRow.classList.toggle('hidden', !['serialcat', 'icom', 'civ-tcp', 'icom-network', 'hamlib', 'rigctldnet', 'flrig'].includes(type));
+  // Voice streamed over the LAN goes only to an Icom Network radio.
+  const lanVoiceSsbRow = document.getElementById('rig-lan-voice-ssb');
+  if (lanVoiceSsbRow) lanVoiceSsbRow.classList.toggle('hidden', type !== 'icom-network');
   if (type === 'serialcat' && !serialcatPortsLoaded) {
     loadSerialcatPorts();
   }
@@ -3273,6 +3276,8 @@ async function openRigEditor(mode, rigId) {
       if (atuKeepOnEl) atuKeepOnEl.checked = !!rig.atuKeepOn;
       const voiceAsDataEl = document.getElementById('set-voice-as-data');
       if (voiceAsDataEl) voiceAsDataEl.checked = !!rig.voiceAsData;
+      const lanVoiceSsbEl = document.getElementById('set-lan-voice-ssb');
+      if (lanVoiceSsbEl) lanVoiceSsbEl.checked = !!rig.lanVoiceInSsb;
       // Per-rig Flex band→antenna map. Always rebuilt so editing a
       // different rig doesn't show the previous rig's selections.
       buildFlexBandAntennaMap(rig.flexBandAntennaMap || {});
@@ -3413,6 +3418,8 @@ async function saveRigEditor() {
   const rigAtuKeepOn = !!(atuKeepOnEl && atuKeepOnEl.checked);
   const voiceAsDataEl = document.getElementById('set-voice-as-data');
   const rigVoiceAsData = !!(voiceAsDataEl && voiceAsDataEl.checked);
+  const lanVoiceSsbEl = document.getElementById('set-lan-voice-ssb');
+  const rigLanVoiceInSsb = !!(lanVoiceSsbEl && lanVoiceSsbEl.checked);
 
   // Per-rig Flex per-band antenna map (skipped silently for non-Flex
   // rigs — empty map serializes as `{}`, no runtime impact).
@@ -3439,6 +3446,7 @@ async function saveRigEditor() {
       rig.externalAtuSeconds = rigExternalAtuSeconds;
       rig.atuKeepOn = rigAtuKeepOn;
       if (rigVoiceAsData) rig.voiceAsData = true; else delete rig.voiceAsData;
+      if (rigLanVoiceInSsb) rig.lanVoiceInSsb = true; else delete rig.lanVoiceInSsb;
       rig.flexBandAntennaMap = flexBandAntennaMap;
       if (rigSdrScope) rig.sdrScope = rigSdrScope;
       rig.setupDone = [...rigSetupDone];
@@ -3465,6 +3473,7 @@ async function saveRigEditor() {
       externalAtuSeconds: rigExternalAtuSeconds,
       atuKeepOn: rigAtuKeepOn,
       ...(rigVoiceAsData ? { voiceAsData: true } : {}),
+      ...(rigLanVoiceInSsb ? { lanVoiceInSsb: true } : {}),
       flexBandAntennaMap,
       ...(rigSdrScope ? { sdrScope: rigSdrScope } : {}),
       setupDone: [...rigSetupDone],
