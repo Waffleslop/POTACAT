@@ -2738,7 +2738,7 @@ function _applyPopoutTheme(payload) {
 
   function bsAxis() {
     var A = window.ScopeAxis; var s = bsState || {};
-    return A.scopeAxis({ centerHz: bsDialHz || s.centerHz || 0, spanHz: s.spanHz || 0, anchor: s.anchor || 'center' });
+    return A.scopeAxis({ centerHz: A.axisCenterFor(s, bsDialHz), spanHz: s.spanHz || 0, anchor: s.anchor || 'center' });
   }
   function bsSyncWatch() {
     var want = !!(bsOn && bsAvailable);
@@ -2819,7 +2819,10 @@ function _applyPopoutTheme(payload) {
       var modeEl = document.getElementById('jp-bs-mode');
       if (modeEl) modeEl.textContent = s && s.anchor ? (window.ScopeAxis ? window.ScopeAxis.anchorLabel(s.anchor) : String(s.anchor).toUpperCase()) : '';
       var needEnable = !!(s && s.kind !== 1 && (s.scuLan === '0' || (s.diag && s.diag.key === 'silent')));
-      if (bsEnableBtn) bsEnableBtn.classList.toggle('hidden', !needEnable);
+      if (bsEnableBtn) {
+        bsEnableBtn.classList.toggle('hidden', !needEnable);
+        bsEnableBtn.textContent = (s && s.enableLabel) || 'Enable SCU-LAN10';
+      }
       bsApplyVisibility();
       bsDraw();
     });

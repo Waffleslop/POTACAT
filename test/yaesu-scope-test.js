@@ -229,7 +229,8 @@ check('3. a Guest Pass cannot turn SCU-LAN10 on, and is told why', () => {
   // payload substitutes it whenever the honest card would ask for Enable,
   // so a QSY re-broadcast cannot un-say it (mobile review, 2026-09-21).
   const pay = mainSrc.slice(mainSrc.indexOf('function yaesuScopeRemotePayload'), mainSrc.indexOf('function yaesuScopeBroadcastState'));
-  assert.ok(/yaesuScopeRemoteIsGuest && asksForEnable\) \? YAESU_SCOPE_GUEST_DIAG : s\.diag/.test(pay), 'remote payload must substitute the guest diag for a guest session');
+  // One card per source: an Icom guest is told about the radio's scope, an FT-710 guest about SCU-LAN10.
+  assert.ok(/yaesuScopeRemoteIsGuest && asksForEnable\) \? \(s\.source === 'icom' \? ICOM_SCOPE_GUEST_DIAG : YAESU_SCOPE_GUEST_DIAG\) : s\.diag/.test(pay), 'remote payload must substitute the guest diag for a guest session');
   assert.ok(serverSrc.includes("this.emit('scope-subscribe', { on: !!msg.on, guest: !!ws._passSession })"), 'subscribe must carry the guest flag');
   const d = mainSrc.indexOf("remoteServer.on('client-disconnected'");
   assert.ok(mainSrc.slice(d, d + 1000).includes('yaesuScopeRemoteIsGuest = false'), 'guest flag must clear on disconnect');

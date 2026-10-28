@@ -62,7 +62,7 @@ $('sc-colormap').value = savedColormap;
 
 // ─── Axis + labels ─────────────────────────────────────────────────────────
 function recomputeAxis() {
-  axis = A.scopeAxis({ centerHz, spanHz: state.spanHz, anchor: state.anchor });
+  axis = A.scopeAxis({ centerHz: A.axisCenterFor(state, centerHz), spanHz: state.spanHz, anchor: state.anchor });
   const rxBin = centerHz ? A.hzToBin(axis, centerHz) : null;
   const marks = rxBin == null ? [] : [{ pos: rxBin / (BINS - 1), color: '#e94560', kind: 'rx' }];
   wf.setMarkers(marks.concat(V.passbandMarkers(state.passband, centerHz, axis)));
@@ -76,10 +76,11 @@ function applyState(s) {
   pill.className = 'sc-pill ' + (state.status || 'stopped');
   pill.textContent = ({ stopped: 'Stopped', starting: 'Starting', live: 'Live', blocked: 'Blocked', error: 'Error', unavailable: 'Unavailable' })[state.status] || state.status;
   $('sc-synth-badge').style.display = state.kind === 1 ? '' : 'none';
-  // An SDR source (lib/sdr-scope.js) and a Flex panadapter (lib/flex-scope.js)
-  // have no sweep speed and no SCU-LAN10: those rows are the FT-710's.
+  // An SDR source (lib/sdr-scope.js), a Flex panadapter (lib/flex-scope.js)
+  // and an Icom (lib/icom-scope.js) have no sweep speed and no SCU-LAN10:
+  // those rows are the FT-710's.
   const sdr = state.source === 'sdr' && state.kind !== 1;
-  const notYaesu = (state.source === 'sdr' || state.source === 'flex') && state.kind !== 1;
+  const notYaesu = (state.source === 'sdr' || state.source === 'flex' || state.source === 'icom') && state.kind !== 1;
   $('sc-sdr-badge').style.display = sdr ? '' : 'none';
   $('sc-speed-wrap').style.display = notYaesu ? 'none' : '';
   $('sc-sculan-wrap').style.display = notYaesu ? 'none' : '';
@@ -93,6 +94,11 @@ function applyState(s) {
   $('sc-sculan').textContent = state.scuLan === '1' ? 'ON' : state.scuLan === '0' ? 'OFF' : '—';
   const needEnable = state.scuLan === '0' || (state.diag && state.diag.key === 'silent');
   $('sc-enable').style.display = needEnable && state.kind !== 1 ? '' : 'none';
+  // The button says what it does on this radio (an Icom: its scope; the FT-710: SCU-LAN10).
+  const enableText = state.enableLabel || 'Enable SCU-LAN10 on the radio';
+  $('sc-enable').textContent = enableText;
+  $('sc-diag-enable').textContent = enableText;
+  $('sc-enable').title = state.enableTitle || 'Sends EX0301261; to the radio. POTACAT turns it back off when the scope closes.';
   $('sc-synth').checked = !!state.synth;
   if (s && s.fps) $('sc-fps').value = String(s.fps);
   $('sc-sunits-row').classList.toggle('hidden', !(state.levelScale && state.levelScale.unit === 'dBm'));

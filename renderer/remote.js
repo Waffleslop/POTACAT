@@ -1046,7 +1046,7 @@
   function scopeAxisNow() {
     const A = window.ScopeAxis;
     const st = scopeState || {};
-    const centerHz = scopeDialHz() || (st.centerHz || 0);
+    const centerHz = A.axisCenterFor(st, scopeDialHz());
     return A.scopeAxis({ centerHz, spanHz: st.spanHz || 0, anchor: st.anchor || 'center', bins: scopeLatest ? scopeLatest.length : 256 });
   }
   function scopeSizeCanvases() {
@@ -1080,7 +1080,10 @@
     if (suWrap) suWrap.classList.toggle('hidden', !(st && st.levelScale && st.levelScale.unit === 'dBm'));
     const needEnable = !!(st && st.kind !== 1 && (st.scuLan === '0' || (st.diag && st.diag.key === 'silent')));
     const enableEl = document.getElementById('scope-phone-enable');
-    if (enableEl) enableEl.classList.toggle('hidden', !needEnable);
+    if (enableEl) {
+      enableEl.classList.toggle('hidden', !needEnable);
+      enableEl.textContent = (st && st.enableLabel) || 'Enable SCU-LAN10';
+    }
     const diag = document.getElementById('scope-phone-diag');
     if (diag) {
       if (st && st.diag && status !== 'live') {

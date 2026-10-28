@@ -122,7 +122,8 @@ console.log('main.js wiring');
 const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
 check('the source is chosen only in Flex Direct; a radio\'s own scope wins over an SDR unless preferred', () => {
   assert.ok(/return !!\(smartSdr && smartSdr\.connected && smartSdr\.mode === 'self'\);/.test(main));
-  assert.ok(/if \(sdr\.enabled && \(sdr\.preferSdr \|\| \(!native && !flex\)\)\) return 'sdr';/.test(main));
+  // An Icom's own scope counts as the radio's own, like the FT-710's.
+  assert.ok(/if \(sdr\.enabled && \(sdr\.preferSdr \|\| \(!native && !icom && !flex\)\)\) return 'sdr';/.test(main));
   assert.ok(/if \(!caps\.nativeScope && flexScopeAvailable\(\)\) caps\.nativeScope = 'flex';/.test(main));
 });
 check('always centred on the dial (Casey): anchor center, the pan follows at most 10x a second', () => {

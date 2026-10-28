@@ -573,7 +573,7 @@ function draw() {
   // maths and the mapping are lib/scope-axis.js + lib/scope-view.js, the
   // same as every other scope surface.
   if (scopeShown() && scopeSmooth && window.ScopeView) {
-    const sAxis = window.ScopeAxis.scopeAxis({ centerHz: scopeDialHz(), spanHz: scopeState.spanHz || 0, anchor: scopeState.anchor || 'center' });
+    const sAxis = window.ScopeAxis.scopeAxis({ centerHz: window.ScopeAxis.axisCenterFor(scopeState, scopeDialHz()), spanHz: scopeState.spanHz || 0, anchor: scopeState.anchor || 'center' });
     const pts = window.ScopeView.mappedTrace(scopeSmooth, sAxis, (hz) => xOf(hz / 1000), spotsTopY, spotsBottomY, lo * 1000, hi * 1000);
     if (pts.length > 1) {
       ctx.save();

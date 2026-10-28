@@ -6,7 +6,16 @@ and a separate SDR (lib/sdr-scope.js). Every Icom with a spectrum scope streams 
 the same CI-V link POTACAT already drives the radio with, so nothing new is plugged in:
 no helper binary, no driver, no second cable.
 
-Status: PLANNED. Nothing built yet.
+Status (2026-10-28): steps 1-3 BUILT. Step 1 shipped in 1.13.6 (the recording button).
+Four IC-7300 owners recorded their radios the same day; three complete files are
+test/fixtures/icom-scope/. They settled the open questions: the 27 15 / header value is the
+HALF span (NJ2DX: 25000 = a 50 kHz span); the radio sends its scope over USB only at 115200
+(W0EGR refused at 19200, worked at 115200); a radio whose scope was off took the output
+request only on the second ask (KW4FM); a port splitter or Hamlib in between passes tuning
+and drops the scope. The live source (main.js `startIcomScope`) follows from those. Fixed
+mode is a KNOWN axis drawn at the window's own centre (`ScopeAxis.axisCenterFor`). Levels
+are labelled "dB (radio)", not dBm. Left: the Sub scope, a non-7300 owner's check, the
+docs and website handoffs (2.7, 2.8).
 
 ## 1. What the radio does (Icom's own references, checked)
 

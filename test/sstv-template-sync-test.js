@@ -214,7 +214,7 @@ test('an over-size set is not sent, and the reason is kept for the operator', as
 // ---- wiring --------------------------------------------------------------------
 test('main stamps identities on every template write path and syncs', () => {
   const main = R('main.js');
-  const ipcSave = main.slice(main.indexOf("ipcMain.handle('save-settings'"), main.indexOf("ipcMain.handle('save-settings'") + 600);
+  const ipcSave = main.slice(main.indexOf("ipcMain.handle('save-settings'"), main.indexOf("ipcMain.handle('save-settings'") + 1200);
   assert.ok(/stampSstvTemplatesPatch\(newSettings\)/.test(ipcSave), 'the SSTV window');
   const remoteSave = main.slice(main.indexOf("remoteServer.on('save-settings'"), main.indexOf("remoteServer.on('save-settings'") + 1200);
   assert.ok(/stampSstvTemplatesPatch\(partial\)/.test(remoteSave), 'the ECHOCAT web client');

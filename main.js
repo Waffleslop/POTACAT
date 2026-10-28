@@ -2703,6 +2703,9 @@ function getRigCapabilities(rigType) {
   // the same flag, so the More menu, ECHOCAT Web and the app light up.
   // Flex Direct: the radio's own panadapter (lib/flex-scope.js). Not while
   // SmartSDR is running (bound): its pan is SmartSDR's.
+  // An Icom with a scope, reached over CI-V (USB, CI-V over TCP, Icom
+  // Network): the radio's own spectrum (lib/icom-scope.js).
+  if (!caps.nativeScope && icomScopeModel()) caps.nativeScope = 'icom';
   if (!caps.nativeScope && flexScopeAvailable()) caps.nativeScope = 'flex';
   if (!caps.nativeScope && sdrScopeSettingsForActiveRig().enabled) caps.nativeScope = 'sdr';
   // AF (speaker) level: the Flex slice's audio_level, or a codec with
@@ -4775,6 +4778,20 @@ function stationSetupLive(rig) {
       status: isActive ? st.status : null,
       diagKey: isActive ? diag.key : null,
       diagHeadline: diag.headline, diagDetail: diag.detail, diagAction: diag.action,
+    };
+  }
+  // An Icom with a scope (lib/icom-scope.js): over CI-V, and over USB only at 115200.
+  const ct = rig.catTarget || {};
+  const icomName = rig.model || ct.civModel || '';
+  if (!scope && IcomScope.scopeModelFor(icomName)) {
+    const st = (typeof yaesuScopeState !== 'undefined' && yaesuScopeState) || {};
+    const diag = (isActive && st.source === 'icom' && st.diag) || {};
+    scope = {
+      icom: true, model: icomName,
+      overCiv: ICOM_SCOPE_CIV_TYPES.includes(ct.type),
+      baudTooSlow: icomScopeBaudTooSlow(ct), baud: ct.baudRate || null,
+      status: isActive && st.source === 'icom' ? st.status : null,
+      diagKey: diag.key || null, diagHeadline: diag.headline, diagDetail: diag.detail, diagAction: diag.action,
     };
   }
   return {
@@ -23711,10 +23728,11 @@ function connectRemote() {
       // Backstop only — the session-level flag already puts the guest card in
       // every broadcast; an older client that still shows the button gets it
       // re-said here.
-      sendCatLog('[Scope] a Guest Pass client asked to turn SCU-LAN10 on — refused (the host\'s radio settings are not a guest\'s to change)');
+      const icom = yaesuScopeState.source === 'icom';
+      sendCatLog(`[Scope] a Guest Pass client asked to turn ${icom ? 'the radio\'s scope' : 'SCU-LAN10'} on — refused (the host's radio settings are not a guest's to change)`);
       yaesuScopeRemoteIsGuest = true;
       if (remoteServer && remoteServer.running && typeof remoteServer.broadcastScopeState === 'function') {
-        remoteServer.broadcastScopeState(yaesuScopeRemotePayload({ diag: YAESU_SCOPE_GUEST_DIAG }));
+        remoteServer.broadcastScopeState(yaesuScopeRemotePayload({ diag: icom ? ICOM_SCOPE_GUEST_DIAG : YAESU_SCOPE_GUEST_DIAG }));
       }
       return;
     }
@@ -28415,6 +28433,20 @@ const YAESU_SCOPE_GUEST_DIAG = {
   detail: 'The scope streams only when SCU-LAN10 is on in the radio menu. Only the host can turn it on.',
   action: 'Ask the host to enable SCU-LAN10 on the radio (OPERATION SETTING > GENERAL > 26).',
 };
+const ICOM_SCOPE_GUEST_DIAG = {
+  key: 'guest', severity: 'blocker',
+  headline: 'The radio is not sending its scope, and a Guest Pass cannot change that',
+  detail: 'The scope streams only while it is on at the radio. Only the host can turn it on.',
+  action: 'Ask the host to show the scope on the radio (M.SCOPE).',
+};
+/** What the Enable button says on this source (the FT-710 wording is the clients' default). */
+function scopeEnableLabel() {
+  if (yaesuScopeState.source !== 'icom') return {};
+  return {
+    enableLabel: 'Turn the radio\'s scope on',
+    enableTitle: 'Turns the radio\'s scope and its output on (CI-V 27 10 / 27 11). POTACAT puts them back when the scope closes.',
+  };
+}
 let yaesuScopeLastStateSend = 0;
 const yaesuScopeState = {
   status: 'stopped',   // stopped | starting | live | blocked | error | unavailable
@@ -28460,6 +28492,7 @@ function yaesuScopeStatePayload() {
     spans: scopeSpans(),
     levelScale: scopeLevelScale(),
     ...scopeOverlay(),
+    ...scopeEnableLabel(),
     // Whether the active rig can do this at all — the JTCAT pop-out and the
     // web client show their band-scope controls only when it is true.
     available: yaesuScopeSynth || !!scopeSourceKind(),
@@ -28478,7 +28511,7 @@ function yaesuScopeRemotePayload(extra) {
   // the Enable press — a property of the session, so it is there from the
   // first frame and survives every re-broadcast (mobile review of item 3).
   const asksForEnable = s.kind !== 1 && (s.scuLan === '0' || (s.diag && s.diag.key === 'silent'));
-  const diag = (yaesuScopeRemoteIsGuest && asksForEnable) ? YAESU_SCOPE_GUEST_DIAG : s.diag;
+  const diag = (yaesuScopeRemoteIsGuest && asksForEnable) ? (s.source === 'icom' ? ICOM_SCOPE_GUEST_DIAG : YAESU_SCOPE_GUEST_DIAG) : s.diag;
   return {
     status: s.status, kind: s.kind, spanHz: s.spanHz, anchor: s.anchor, speed: s.speed,
     scuLan: s.scuLan, centerHz: s.centerHz, diag, source: s.source,
@@ -28492,6 +28525,7 @@ function yaesuScopeRemotePayload(extra) {
     frameMsCloud: scopeRemoteFrameMs(true),   // the server sends a Cloud device this one
     levelScale: scopeLevelScale(),
     ...scopeOverlay(),
+    ...scopeEnableLabel(),
     ...(extra || {}),
   };
 }
@@ -28522,6 +28556,10 @@ function scopeLevelScale() {
     return Number.isFinite(c.dbmMin) ? { unit: 'dBm', min: c.dbmMin, max: c.dbmMax } : { unit: null, min: 0, max: 255 };
   }
   if (s.source === 'sdr') return SdrScope.levelScale();
+  // An Icom's levels are on the radio's own scale (Hamlib: 0 = -80 dB, full
+  // = 0 dB on a 7300; -100..0 on a 7610), relative to its REF level, so
+  // they are labelled "dB (radio)" and never claimed as dBm.
+  if (s.source === 'icom' && icomScopeEntry) return { unit: 'radio', min: icomScopeEntry.dbmMin, max: icomScopeEntry.dbmMax };
   return { unit: null, min: 0, max: 255 };
 }
 
@@ -28575,6 +28613,8 @@ function scopeOverlaySync() {
 
 /** The source's own frame interval, ms. */
 function scopeSourceFrameMs() {
+  // An Icom sweeps at its own pace (about 4 a second on a 7300 at 115200): measured, not set.
+  if (yaesuScopeState.source === 'icom') return icomScopeGapMs || 250;
   const fps = yaesuScopeState.source === 'flex' ? 15 : yaesuScopeState.source === 'sdr' ? 12 : (settings.yaesuScopeFps || 20);
   return 1000 / fps;
 }
@@ -28626,7 +28666,9 @@ function yaesuScopeNoteFrequency(hz) {
     if (yaesuScopeRemoteWants && Date.now() - yaesuScopeLastStateSend > 250) yaesuScopeBroadcastState();
     return;
   }
-  yaesuScopeState.centerHz = hz;
+  // An Icom in Fixed mode holds its window still: its centre comes from the
+  // sweep header (icomScopeOnSweep), never from the dial.
+  if (!(icomScopeOn && yaesuScopeState.anchor === 'fixed')) yaesuScopeState.centerHz = hz;
   if (yaesuScopeState.status === 'stopped') return;
   sdrScopeFollowDial(hz);
   // The pop-out already receives cat-frequency; ECHOCAT wants the axis re-sent, throttled.
@@ -28644,6 +28686,7 @@ function startYaesuScope() {
   const kind = synth ? null : scopeSourceKind();
   if (kind === 'sdr') { startSdrScope(); return; }
   if (kind === 'flex') { startFlexScope(); return; }
+  if (kind === 'icom') { startIcomScope(); return; }
   if (!synth && !yaesuScopeRigHasScope()) {
     yaesuScopeSetStatus('unavailable', { key: 'no-rig', severity: 'blocker',
       headline: 'The active rig has no USB band scope',
@@ -28724,6 +28767,7 @@ function stopYaesuScope(why) {
   if (yaesuScopeRestartTimer) { clearTimeout(yaesuScopeRestartTimer); yaesuScopeRestartTimer = null; }
   if (sdrScopeClient) { stopSdrScope(why); return; }
   if (flexScopeOn) { stopFlexScope(why); return; }
+  if (icomScopeOn || (yaesuScopeState.source === 'icom' && !yaesuScopeProc)) { stopIcomScope(why); return; }
   yaesuScopeStopCatPolling();
   if (yaesuScopeScuLanWeSet) {
     yaesuScopeScuLanWeSet = false;
@@ -28750,7 +28794,8 @@ function yaesuScopeOnFrame(f) {
   if (!yaesuScopeWanted()) { stopYaesuScope('nobody is watching'); return; }
   if (yaesuScopeState.status !== 'live') {
     yaesuScopeRestarts = 0;
-    sendCatLog('[Scope] frames flowing (' + (f.kind === 1 ? 'synthetic signal' : yaesuScopeState.source === 'sdr' ? 'SDR' : yaesuScopeState.source === 'flex' ? 'Flex panadapter' : 'live radio') + ')');
+    sendCatLog('[Scope] frames flowing (' + (f.kind === 1 ? 'synthetic signal' : yaesuScopeState.source === 'sdr' ? 'SDR' : yaesuScopeState.source === 'flex' ? 'Flex panadapter'
+      : yaesuScopeState.source === 'icom' ? ((icomScopeEntry && icomScopeEntry.name) || 'Icom') + ' scope over CI-V' : 'live radio') + ')');
     yaesuScopeSetStatus('live', null);
   }
   if (scopePopoutWin && !scopePopoutWin.isDestroyed()) {
@@ -28841,6 +28886,7 @@ async function yaesuScopeReadRadio() {
 
 /** The operator pressed the button: turn SCU-LAN10 on. Remembered, logged, undone at stop. */
 function yaesuScopeEnableOnRadio() {
+  if (yaesuScopeState.source === 'icom' || icomScopeModel()) { icomScopeEnableOnRadio(); return; }
   if (!cat || !cat.connected || typeof cat.sendRaw !== 'function') {
     sendCatLog('[Scope] cannot enable SCU-LAN10 — no CAT link to the radio');
     return;
@@ -28882,9 +28928,11 @@ function sdrScopeSettingsForActiveRig() {
 function scopeSourceKind() {
   const sdr = sdrScopeSettingsForActiveRig();
   const native = yaesuScopeRigHasScope();
+  const icom = !!icomScopeModel();
   const flex = flexScopeAvailable();
-  if (sdr.enabled && (sdr.preferSdr || (!native && !flex))) return 'sdr';
+  if (sdr.enabled && (sdr.preferSdr || (!native && !icom && !flex))) return 'sdr';
   if (native) return 'yaesu';
+  if (icom) return 'icom';
   return flex ? 'flex' : null;
 }
 
@@ -28925,8 +28973,23 @@ function yaesuScopeCatWritable() {
 }
 
 /** Zoom steps for the running source (scope-state.spans); empty = no zoom. */
+/** An Icom scope that is streaming and can be written to. */
+function icomScopeWritable() {
+  return icomScopeOn && icomScopePhase === 'live' && !!icomScopeCtl && icomScopeCtl === cat && cat.connected;
+}
+
+/** The model's Center-mode span nearest hz (full width). */
+function icomNearestSpan(hz) {
+  const spans = (icomScopeEntry && icomScopeEntry.spans) || [];
+  let best = null;
+  for (const s of spans) if (best == null || Math.abs(Math.log(s / hz)) < Math.abs(Math.log(best / hz))) best = s;
+  return best;
+}
+
 function scopeSpans() {
   if (flexScopeOn) return FlexScope.SPANS.slice();
+  // An Icom zooms in Center mode only (27 15 is the Center span; Fixed has edges).
+  if (icomScopeOn) return icomScopeWritable() && yaesuScopeState.anchor === 'center' ? icomScopeEntry.spans.slice() : [];
   if (yaesuScopeCatWritable()) return Object.values(YaesuScope.SPAN_HZ_BY_CODE).sort((a, b) => a - b);
   return [];
 }
@@ -28955,7 +29018,9 @@ function scopeGuestNote(field) {
   if (!scopeGuestRestore) {
     scopeGuestRestore = flexScopeOn
       ? { source: 'flex', spanHz: settings.flexScopeSpanHz || yaesuScopeState.spanHz || null }
-      : { source: 'radio', spanCode: yaesuScopeState.spanCode, modeCode: yaesuScopeState.modeCode };
+      : icomScopeOn
+        ? { source: 'icom', spanHz: yaesuScopeState.anchor === 'center' ? yaesuScopeState.spanHz || null : null, modeCode: yaesuScopeState.modeCode }
+        : { source: 'radio', spanCode: yaesuScopeState.spanCode, modeCode: yaesuScopeState.modeCode };
     sendCatLog(`[Scope] a Guest Pass client changed the ${field}; the owner's scope settings come back when the session ends`);
   }
 }
@@ -28976,6 +29041,22 @@ function scopeGuestRestoreOwner(why) {
       yaesuScopeBroadcastState();
     }
     sendCatLog(`[Scope] guest session over (${why}): Flex panadapter span ${r.spanHz ? YaesuScope.formatSpan(r.spanHz) : 'unchanged'} restored`);
+    return;
+  }
+  if (r.source === 'icom') {
+    const name = (icomScopeEntry && icomScopeEntry.name) || 'Icom';
+    if (!icomScopeWritable()) {
+      sendCatLog(`[Scope] guest session over (${why}): the ${name} is not reachable over CI-V, so its scope span and mode could not be put back`);
+      return;
+    }
+    const parts = [];
+    if (r.spanHz && r.spanHz !== yaesuScopeState.spanHz) icomScopeCtl.sendScope(IcomScope.write.span(r.spanHz));
+    if (r.spanHz) parts.push('span ' + YaesuScope.formatSpan(r.spanHz));
+    if (r.modeCode != null && r.modeCode !== yaesuScopeState.modeCode) {
+      setTimeout(() => { if (icomScopeWritable()) icomScopeCtl.sendScope(IcomScope.write.mode(r.modeCode)); }, 300);
+    }
+    if (r.modeCode != null) parts.push('mode ' + String(IcomScope.MODE_NAMES[r.modeCode] || r.modeCode).toUpperCase());
+    sendCatLog(`[Scope] guest session over (${why}): ${name} ${parts.join(', ') || 'nothing to put back'} restored`);
     return;
   }
   if (!yaesuScopeCatWritable()) {
@@ -29002,6 +29083,16 @@ function scopeGuestRestoreOwner(why) {
  *  On the FT-710 it is the radio's own span (SS05). A Guest Pass may zoom
  *  either; the owner's span comes back after (scopeGuestRestore). */
 function setScopeSpan(hz, origin, { guest = false } = {}) {
+  if (icomScopeOn) {
+    // The Icom's own Center span (27 15); its next sweep header confirms it.
+    if (!icomScopeWritable() || yaesuScopeState.anchor !== 'center') return false;
+    const span = icomNearestSpan(Number(hz));
+    if (!span || span === yaesuScopeState.spanHz) return false;
+    if (guest) scopeGuestNote('Icom span'); else scopeGuestOwnerSet('spanHz', span);
+    icomScopeCtl.sendScope(IcomScope.write.span(span));
+    sendCatLog(`[Scope] ${icomScopeEntry.name} span ${YaesuScope.formatSpan(span)} (${origin}) — 27 15, radio write`);
+    return true;
+  }
   if (!flexScopeOn && yaesuScopeCatWritable()) {
     const want = Number(hz);
     if (!(want > 0)) return false;
@@ -29036,6 +29127,14 @@ function setScopeSpan(hz, origin, { guest = false } = {}) {
  *  keeps the radio's display (3DSS 0, W/F 4, W/F expanded 3). */
 const YAESU_CENTER_CODE_FOR = { 0: '0', 1: '0', 2: '0', 3: '3', 4: '4', 6: '3', 7: '4', 9: '3', A: '4' };
 function setScopeAnchor(anchor, origin, { guest = false } = {}) {
+  if (anchor === 'center' && icomScopeOn) {
+    if (!icomScopeWritable()) return false;
+    if (yaesuScopeState.anchor === 'center') { yaesuScopeBroadcastState(); return false; }
+    if (guest) scopeGuestNote('Icom scope mode'); else scopeGuestOwnerSet('modeCode', 0);
+    icomScopeCtl.sendScope(IcomScope.write.mode(0));
+    sendCatLog(`[Scope] ${icomScopeEntry.name} scope set to CENTER (${origin}) — 27 14 00, radio write, it stays in CENTER`);
+    return true;
+  }
   if (anchor !== 'center' || flexScopeOn || !yaesuScopeCatWritable()) return false;
   if (yaesuScopeState.anchor === 'center') { yaesuScopeBroadcastState(); return false; }
   const code = YAESU_CENTER_CODE_FOR[String(yaesuScopeState.modeCode || '0').toUpperCase()] || '0';
@@ -29097,6 +29196,321 @@ function stopFlexScope(why) {
   if (smartSdr) smartSdr.stopPanScope();
   sendCatLog('[Scope] Flex panadapter stopped' + (why ? ' — ' + why : ''));
   if (yaesuScopeState.status !== 'stopped') yaesuScopeSetStatus('stopped', null);
+}
+
+// ═══ An Icom's own scope over CI-V (lib/icom-scope.js) ════════════════════════
+// The radio streams its spectrum (CI-V 27 00) over the link POTACAT already
+// drives it with, once its scope (27 10) and scope output (27 11) are on.
+// Built against owners' recordings (test/fixtures/icom-scope/, AE5JE, W0EGR,
+// NJ2DX, KW4FM, 2026-10-28). What they taught: over USB the radio sends its
+// scope only at 115200 (W0EGR's 7300 refused at 19200); a radio whose scope
+// was off needs a moment before it takes the output request, and may need
+// asking twice (KW4FM); a port splitter or Hamlib in between passes the
+// tuning and drops the scope. The axis comes from each sweep's own header
+// (Center: centre and half-span; Fixed: the two edges), never the dial.
+// A setting POTACAT changes on the radio is a setting POTACAT puts back.
+// The connection types that carry CI-V 27 00 (rigctld and flrig do not pass it through).
+const ICOM_SCOPE_CIV_TYPES = ['icom', 'civ-tcp', 'icom-network'];
+let icomScopeOn = false;
+let icomScopeCtl = null;          // the RigController the listeners are on
+let icomScopeOff = null;          // removes them
+let icomScopeAsm = null;
+let icomScopeEntry = null;        // IcomScope.MODELS entry + name
+let icomScopeTimer = null;
+let icomScopePhase = 'idle';      // idle | asking | waiting | live | blocked
+let icomScopeAskedAt = 0;         // when scope output was last requested
+let icomScopeOutputAsks = 0;
+let icomScopeLastSweepAt = 0;
+let icomScopeGapMs = 0;           // rolling average of the sweep interval
+let icomScopeSeq = 0;
+let icomScopePointsNoted = false;
+let icomScopeWaiters = [];
+// What POTACAT turned on, so it is what POTACAT turns off. Survives a
+// reconnect: a radio that comes back still has the setting we made.
+const icomScopeWeSet = { scope: false, output: false };
+
+/** The active rig's Icom scope model, when it is reached over CI-V. */
+function icomScopeModel() {
+  const { target, model } = icomScopeCaptureTarget();
+  if (!ICOM_SCOPE_CIV_TYPES.includes(target.type)) return null;
+  const e = IcomScope.scopeModelFor(model);
+  return e ? { name: model, ...e } : null;
+}
+
+/** Over USB the radio sends its scope only at 115200; below 57600 it cannot carry it. */
+function icomScopeBaudTooSlow(target) {
+  const b = Number(target && target.baudRate);
+  return !!target && target.type === 'icom' && b > 0 && b < 57600;
+}
+
+const ICOM_SCOPE_BAUD_ACTION = 'On the radio: MENU > SET > Connectors > CI-V > CI-V USB Baud Rate, choose 115200. In POTACAT: Settings > My Rigs, edit this radio, Baud rate 115200.';
+
+function icomScopeDiag(key, extra = {}) {
+  const name = (icomScopeEntry && icomScopeEntry.name) || 'Icom';
+  const d = {
+    baud: {
+      severity: 'blocker',
+      headline: 'The band scope needs a faster link to the radio',
+      detail: `POTACAT talks to the ${name} at ${extra.baud || '?'} baud. Over USB the radio sends its scope only at 115200.`,
+      action: ICOM_SCOPE_BAUD_ACTION,
+    },
+    'no-link': {
+      severity: 'blocker',
+      headline: 'The radio is not connected',
+      detail: `The ${name}'s scope comes over the same link POTACAT tunes it with.`,
+      action: 'Make this radio the active rig and wait for the CAT link to come up.',
+    },
+    'no-answer': {
+      severity: 'blocker',
+      headline: 'The radio does not answer the scope commands',
+      detail: `The ${name} is connected but said nothing when POTACAT asked about its scope. A port-sharing program between POTACAT and the radio passes tuning but drops these, and older radio firmware may not know them.`,
+      action: 'Connect POTACAT to the radio\'s own COM port with no port splitter in between, then press Try again. If that does not help, check the radio\'s firmware version (MENU > SET > Others > Information).',
+    },
+    refused: {
+      severity: 'blocker',
+      headline: 'The radio refused to send its scope',
+      detail: `The ${name} answered "no" when POTACAT asked for its scope data. Over USB that is the baud rate: the radio sends its scope only at 115200.`,
+      action: ICOM_SCOPE_BAUD_ACTION,
+    },
+    silent: {
+      severity: 'blocker',
+      headline: 'The radio is not sending scope data',
+      detail: `The ${name} accepted the request, but no sweep has arrived.`,
+      action: 'Show the scope on the radio\'s screen (press M.SCOPE), then press Turn the radio\'s scope on.',
+    },
+  }[key];
+  return d ? { key, ...d } : null;
+}
+
+function icomScopeSetBlocked(key, extra) {
+  if (icomScopePhase === 'blocked' && yaesuScopeState.diag && yaesuScopeState.diag.key === key) return;
+  icomScopePhase = 'blocked';
+  const d = icomScopeDiag(key, extra);
+  sendCatLog(`[Scope] ${(icomScopeEntry && icomScopeEntry.name) || 'Icom'}: ${d.headline}${d.action ? ' — ' + d.action : ''}`);
+  yaesuScopeSetStatus('blocked', d);
+}
+
+/** Ask the radio one scope setting; resolves with its reply, false on a NAK, null on silence. */
+function icomScopeAsk(ctl, bytes) {
+  return new Promise((resolve) => {
+    const w = { sub: bytes[0], resolve };
+    icomScopeWaiters.push(w);
+    ctl.sendScope(bytes);
+    setTimeout(() => {
+      const i = icomScopeWaiters.indexOf(w);
+      if (i >= 0) { icomScopeWaiters.splice(i, 1); resolve(null); }
+    }, 1000);
+  });
+}
+
+function icomScopeDetach() {
+  if (icomScopeOff) { try { icomScopeOff(); } catch { /* controller gone */ } }
+  icomScopeOff = null;
+  icomScopeCtl = null;
+  icomScopeAsm = null;
+  for (const w of icomScopeWaiters.splice(0)) w.resolve(null);
+}
+
+function icomScopeAttach(ctl) {
+  icomScopeDetach();
+  icomScopeCtl = ctl;
+  const asm = new IcomScope.SweepAssembler();
+  icomScopeAsm = asm;
+  asm.on('sweep', (s) => { if (icomScopeAsm === asm) icomScopeOnSweep(s); });
+  const onData = (payload) => { if (icomScopeAsm === asm) asm.feed(IcomScope.parseScopeFrame(payload)); };
+  const onStatus = (payload) => {
+    const st = IcomScope.parseScopeStatus(payload);
+    if (!st) return;
+    const i = icomScopeWaiters.findIndex((w) => w.sub === st.sub);
+    if (i >= 0) icomScopeWaiters.splice(i, 1)[0].resolve(st);
+  };
+  const onNak = (sub) => {
+    const i = icomScopeWaiters.findIndex((w) => w.sub === sub);
+    if (i >= 0) { icomScopeWaiters.splice(i, 1)[0].resolve(false); return; }
+    // A refused WRITE: the output request is the one that matters.
+    if (sub === IcomScope.SUB.OUTPUT && icomScopeOn && icomScopePhase !== 'live') icomScopeSetBlocked('refused');
+  };
+  ctl.on('scope-data', onData);
+  ctl.on('scope-status', onStatus);
+  ctl.on('scope-nak', onNak);
+  icomScopeOff = () => {
+    ctl.removeListener('scope-data', onData);
+    ctl.removeListener('scope-status', onStatus);
+    ctl.removeListener('scope-nak', onNak);
+  };
+}
+
+/** Read the radio's scope and output switches, turn on what is off, ask for the data. */
+async function icomScopeBringUp(ctl) {
+  icomScopePhase = 'asking';
+  const name = icomScopeEntry.name;
+  const on = await icomScopeAsk(ctl, IcomScope.read.scopeOn());
+  const out = await icomScopeAsk(ctl, IcomScope.read.output());
+  if (!icomScopeOn || icomScopeCtl !== ctl) return;
+  if (on == null && out == null) { icomScopeSetBlocked('no-answer'); return; }
+  if (on === false || out === false) { icomScopeSetBlocked('refused'); return; }
+  if (on && !on.on) {
+    ctl.sendScope(IcomScope.write.scopeOn(true));
+    icomScopeWeSet.scope = true;
+    sendCatLog(`[Scope] ${name}: the radio's scope was off — turned it on (27 10); POTACAT turns it back off when the scope closes`);
+    // The radio needs a moment before it takes the output request (KW4FM's 7300 dropped one sent straight after).
+    await sleepMs(800);
+    if (!icomScopeOn || icomScopeCtl !== ctl) return;
+  }
+  if (!out || !out.on) {
+    ctl.sendScope(IcomScope.write.output(true));
+    icomScopeWeSet.output = true;
+    sendCatLog(`[Scope] ${name}: scope output turned on (27 11); POTACAT puts it back when the scope closes`);
+  }
+  icomScopeAskedAt = Date.now();
+  icomScopeOutputAsks = 1;
+  if (icomScopePhase === 'asking') icomScopePhase = 'waiting';
+}
+
+/** Once a second while the scope runs: the link, the rig, and a radio gone quiet. */
+function icomScopeTick() {
+  if (!icomScopeOn) return;
+  if (!yaesuScopeWanted()) { stopYaesuScope('nobody is watching'); return; }
+  // The operator switched to a radio this source does not serve: start over
+  // with whatever the new rig's scope is.
+  const entry = icomScopeModel();
+  if (!entry || entry.name !== icomScopeEntry.name) {
+    stopIcomScope('the active rig changed');
+    setTimeout(() => { if (yaesuScopeWanted()) startYaesuScope(); }, 400);
+    return;
+  }
+  const linked = !!(cat && cat.connected && typeof cat.sendScope === 'function');
+  if (!linked) {
+    if (icomScopeCtl) icomScopeDetach();
+    icomScopeSetBlocked('no-link');
+    return;
+  }
+  if (cat !== icomScopeCtl) {
+    // A new link (first start, or the radio reconnected): read its state again.
+    icomScopeAttach(cat);
+    icomScopeBringUp(cat);
+    return;
+  }
+  if (icomScopePhase === 'waiting' || icomScopePhase === 'live') {
+    const since = Date.now() - Math.max(icomScopeAskedAt, icomScopeLastSweepAt);
+    if (since < 3000) return;
+    if (icomScopeOutputAsks < 3) {
+      // Asked, and nothing came: ask again (the second request is what KW4FM's 7300 needed).
+      icomScopeOutputAsks++;
+      icomScopeAskedAt = Date.now();
+      cat.sendScope(IcomScope.write.output(true));
+      if (!icomScopeWeSet.output && icomScopePhase === 'waiting') icomScopeWeSet.output = true;
+      sendCatLog(`[Scope] ${icomScopeEntry.name}: no scope data for ${Math.round(since / 1000)} s — asking again (27 11)`);
+      return;
+    }
+    icomScopeSetBlocked('silent');
+  }
+}
+
+function icomScopeOnSweep(s) {
+  if (s.id !== 0) return;   // Main scope only; a 7610's Sub scope is a follow-up
+  const now = Date.now();
+  if (icomScopeLastSweepAt) {
+    const gap = now - icomScopeLastSweepAt;
+    if (gap > 0 && gap < 5000) icomScopeGapMs = icomScopeGapMs ? icomScopeGapMs * 0.9 + gap * 0.1 : gap;
+  }
+  icomScopeLastSweepAt = now;
+  icomScopeOutputAsks = 1;
+  if (icomScopePhase !== 'live') icomScopePhase = 'live';
+  const st = yaesuScopeState;
+  const ax = IcomScope.axisFor(s.header);
+  if (!icomScopePointsNoted && !s.empty) {
+    icomScopePointsNoted = true;
+    sendCatLog(`[Scope] ${icomScopeEntry.name}: sweeps of ${s.levels.length} points` + (s.levels.length !== icomScopeEntry.points ? ` (POTACAT expected ${icomScopeEntry.points}; please send a recording from Settings > My Rigs)` : '')
+      + (icomScopeEntry.unverified ? ' — this model\'s scope format is not yet confirmed by an owner' : ''));
+  }
+  let changed = false;
+  if (ax) {
+    if (ax.anchor !== st.anchor || ax.spanHz !== st.spanHz || s.header.mode !== st.modeCode) {
+      sendCatLog(`[Scope] ${icomScopeEntry.name}: ${String(s.header.modeName).toUpperCase()} mode, `
+        + (ax.anchor === 'fixed' ? `${YaesuScope.formatSpan(ax.spanHz)} from ${(s.header.lowHz / 1e6).toFixed(3)} MHz` : `span ${YaesuScope.formatSpan(ax.spanHz)}`));
+      st.anchor = ax.anchor;
+      st.spanHz = ax.spanHz;
+      st.modeCode = s.header.mode;
+      changed = true;
+    }
+    // Fixed: the window's own centre is the axis (the dial moves inside it).
+    // Center: the header's centre is the radio's dial; keep it for clients
+    // that have no dial of their own yet.
+    if (ax.centerHz && ax.centerHz !== st.centerHz && (ax.anchor === 'fixed' || !_currentFreqHz)) {
+      st.centerHz = ax.centerHz;
+      changed = true;
+    }
+  }
+  if (changed) yaesuScopeBroadcastState();
+  const levels = s.empty ? new Uint8Array(0) : s.levels;
+  yaesuScopeOnFrame(IcomScope.toScopeFrame(levels, { levelMax: icomScopeEntry.levelMax, seq: ++icomScopeSeq }));
+}
+
+function startIcomScope() {
+  if (icomScopeOn) return;
+  const entry = icomScopeModel();
+  if (!entry) return;
+  const { target } = icomScopeCaptureTarget();
+  icomScopeEntry = entry;
+  icomScopeOn = true;
+  icomScopePhase = 'idle';
+  icomScopeLastSweepAt = 0;
+  icomScopeGapMs = 0;
+  icomScopePointsNoted = false;
+  Object.assign(yaesuScopeState, {
+    source: 'icom', kind: 0, spanCode: null, spanHz: 0, anchor: 'center', modeCode: null, speed: null, scuLan: null,
+    frames: 0, misaligned: 0, helperPath: '', catReads: null,
+    centerHz: _currentFreqHz || yaesuScopeState.centerHz || 0,
+  });
+  if (icomScopeBaudTooSlow(target)) {
+    // Not one command sent: at this rate the radio refuses, and the scope
+    // would crowd out the tuning traffic if it did not.
+    icomScopeSetBlocked('baud', { baud: target.baudRate });
+    icomScopeOn = false;
+    return;
+  }
+  sendCatLog(`[Scope] ${entry.name} band scope over CI-V (${target.type}${target.baudRate ? ', ' + target.baudRate + ' baud' : ''})`);
+  yaesuScopeSetStatus('starting', null);
+  icomScopeTimer = setInterval(icomScopeTick, 1000);
+  icomScopeTick();
+}
+
+function stopIcomScope(why) {
+  const wasOn = icomScopeOn;
+  icomScopeOn = false;
+  if (icomScopeTimer) { clearInterval(icomScopeTimer); icomScopeTimer = null; }
+  const ctl = icomScopeCtl;
+  icomScopeDetach();
+  icomScopePhase = 'idle';
+  const name = (icomScopeEntry && icomScopeEntry.name) || 'Icom';
+  if (icomScopeWeSet.output || icomScopeWeSet.scope) {
+    const link = ctl && cat === ctl && ctl.connected ? ctl : (cat && cat.connected && typeof cat.sendScope === 'function' ? cat : null);
+    if (link) {
+      const put = [];
+      if (icomScopeWeSet.output) { link.sendScope(IcomScope.write.output(false)); put.push('scope output off'); }
+      // A short gap: two scope writes back to back is what a 7300 dropped once.
+      if (icomScopeWeSet.scope) { setTimeout(() => { try { link.sendScope(IcomScope.write.scopeOn(false)); } catch { /* link gone */ } }, 300); put.push('scope off'); }
+      sendCatLog(`[Scope] ${name}: put back as it was (${put.join(', ')})` + (why ? ' — ' + why : ''));
+    } else {
+      sendCatLog(`[Scope] ${name}: the radio is not connected, so its scope settings could not be put back` + (why ? ' — ' + why : ''));
+    }
+    icomScopeWeSet.output = false;
+    icomScopeWeSet.scope = false;
+  } else if (wasOn) {
+    sendCatLog(`[Scope] ${name} band scope stopped` + (why ? ' — ' + why : ''));
+  }
+  if (yaesuScopeState.status !== 'stopped') yaesuScopeSetStatus('stopped', null);
+}
+
+/** The operator pressed "Turn the radio's scope on": ask again from the start. */
+function icomScopeEnableOnRadio() {
+  if (!icomScopeOn) { yaesuScopeRestarts = 0; startYaesuScope(); return; }
+  sendCatLog(`[Scope] ${icomScopeEntry.name}: asking the radio for its scope again (operator)`);
+  icomScopeDetach();          // the next tick re-reads the radio and turns on what is off
+  icomScopePhase = 'idle';
+  yaesuScopeSetStatus('starting', null);
+  icomScopeTick();
 }
 
 function startSdrScope() {
@@ -29180,7 +29594,6 @@ function sdrScopeSettingsChanged(before, after) {
 // their radio sends (Settings > My Rigs > this radio > Record band scope
 // data) and the file becomes test/fixtures/icom-scope/. POTACAT turns the
 // radio's scope and scope output on for the recording and puts both back.
-const ICOM_SCOPE_CIV_TYPES = ['icom', 'civ-tcp', 'icom-network'];
 let icomScopeCaptureBusy = false;
 
 function icomScopeCaptureTarget() {
@@ -29198,6 +29611,8 @@ async function icomScopeCapture(seconds = 30) {
     return { ok: false, message: 'Connect the radio first: make this the active rig and wait for the CAT link to come up.' };
   }
   if (icomScopeCaptureBusy) return { ok: false, message: 'A recording is already running.' };
+  // The recording turns the scope output off when it ends, which would stop the live scope under its viewers.
+  if (icomScopeOn) return { ok: false, message: 'The band scope is open. Close the Band Scope window (and the scope in ECHOCAT, JTCAT and Bandspread), then record.' };
   icomScopeCaptureBusy = true;
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const file = path.join(app.getPath('userData'), `icom-scope-capture-${stamp}.txt`);

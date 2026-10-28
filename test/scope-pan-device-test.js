@@ -110,7 +110,7 @@ check('Guest Pass (Casey): the owner\'s span and mode come back when the session
   const note = fnOf('scopeGuestNote', 600);
   assert.ok(/if \(!scopeGuestRestore\) \{/.test(note), 'noted once, at the guest\'s FIRST change');
   assert.ok(/spanCode: yaesuScopeState\.spanCode, modeCode: yaesuScopeState\.modeCode/.test(note));
-  const back = fnOf('scopeGuestRestoreOwner');
+  const back = fnOf('scopeGuestRestoreOwner', 4000);   // Flex, Icom and FT-710 branches
   assert.ok(/cat\.sendRaw\(`SS05\$\{r\.spanCode\};`\);/.test(back) && /cat\.sendRaw\(`SS06\$\{r\.modeCode\};`\);/.test(back));
   assert.ok(/smartSdr\.setPanBandwidth\(r\.spanHz\)/.test(back), 'the Flex pan too');
   assert.ok(/setTimeout\(\(\) => yaesuScopeReadRadio\(\), 300\);/.test(back) && /guest session over/.test(back), 'then re-read, and logged');
