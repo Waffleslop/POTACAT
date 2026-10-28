@@ -226,5 +226,28 @@ check('Settings > My Rigs shows the button for the three CI-V connection types',
   assert.ok(/\['icom', 'civ-tcp', 'icom-network'\]\.includes\(getSelectedRadioType\(\)\)/.test(app));
 });
 
+// Real radios (test/fixtures/icom-scope/), recorded with the 1.13.6 button.
+check('KW4FM IC-7300 recording: 118 whole sweeps, Center 7.063 MHz, +/-100 kHz, nothing dropped', () => {
+  const text = fs.readFileSync(path.join(__dirname, 'fixtures/icom-scope/kw4fm-ic7300-center-7063-200k.txt'), 'utf8');
+  const asm = new S.SweepAssembler();
+  const sweeps = [];
+  asm.on('sweep', (s) => sweeps.push(s));
+  for (const c of S.parseCapture(text)) {
+    const f = c.frame;
+    if (c.dir === 'rx' && f[4] === 0x27 && f[5] === 0x00) asm.feed(S.parseScopeFrame(f.subarray(6, f.length - 1)));
+  }
+  const sum = S.summarizeSweeps(sweeps);
+  assert.strictEqual(sum.sweeps, 118);
+  assert.deepStrictEqual(sum.points, [475]);
+  assert.strictEqual(sum.mode, 'center');
+  assert.strictEqual(sum.centerHz, 7063000);
+  assert.strictEqual(sum.spanHz, 200000);
+  assert.strictEqual(asm.dropped, 0);
+  assert.ok(sum.maxLevel > 60 && sum.maxLevel <= 160, 'levels stay on the 0..160 scale');
+  assert.deepStrictEqual(S.axisFor(sweeps[0].header), { anchor: 'center', centerHz: 7063000, spanHz: 200000 });
+  // The capture's own summary line agrees with what the parser reads back.
+  assert.ok(/# result: 1307 data frames, 118 sweeps, points=475 maxLevel=121 dropped=0/.test(text));
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
