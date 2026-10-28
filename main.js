@@ -17878,6 +17878,13 @@ function connectSmartSdr() {
   // force-unmutes a slice it doesn't own (that stomped deliberate mutes —
   // KD0RC #67); it says so instead, so a silent waterfall is explainable.
   // Only for the slice we actually listen to, and only on a change.
+  // The radio's AGC read back into the rig state every surface shows.
+  smartSdr.on('slice-agc', ({ index, mode }) => {
+    const target = smartSdr.ourSliceIndex != null ? smartSdr.ourSliceIndex : getFlexSliceIndex();
+    if (index !== target || mode === _currentAgcMode) return;
+    _currentAgcMode = mode;
+    broadcastRigState();
+  });
   smartSdr.on('slice-mute', ({ index, muted }) => {
     const target = smartSdr.ourSliceIndex != null ? smartSdr.ourSliceIndex : getFlexSliceIndex();
     if (index !== target) return;

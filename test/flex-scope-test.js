@@ -106,6 +106,18 @@ check('Flex Direct sizes OUR pan and turns its packets into pan-frame events; bo
   assert.strictEqual(frames.length, n, 'stopped: no frames');
 });
 
+check('the slice\'s AGC is read back, on change only, into the rig state (Casey 2026-10-28)', () => {
+  const c = new SmartSdrClient();
+  const ev = [];
+  c.on('slice-agc', (e) => ev.push(e));
+  c._handleLine('S1A2B|slice 0 in_use=1 RF_frequency=14.074000 mode=USB agc_mode=med client_handle=0x1A2B');
+  c._handleLine('S1A2B|slice 0 agc_mode=med');
+  c._handleLine('S1A2B|slice 0 agc_mode=FAST');
+  assert.deepStrictEqual(ev, [{ index: 0, mode: 'med' }, { index: 0, mode: 'fast' }]);
+  const m = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+  assert.ok(/smartSdr\.on\('slice-agc'[\s\S]{0,300}_currentAgcMode = mode;\s*\r?\n\s*broadcastRigState\(\);/.test(m));
+});
+
 console.log('main.js wiring');
 const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
 check('the source is chosen only in Flex Direct; a radio\'s own scope wins over an SDR unless preferred', () => {
