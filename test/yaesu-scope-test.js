@@ -295,9 +295,10 @@ check('CURSOR and FIX modes are assumed, not known', () => {
 check('PAN (a panadapter that reports its own centre and span) is known; one label for every screen', () => {
   assert.strictEqual(S.scopeAxis({ centerHz: 14100000, spanHz: 200000, anchor: 'pan' }).known, true);
   assert.strictEqual(S.scopeAxis({ centerHz: 0, spanHz: 200000, anchor: 'pan' }).known, false, 'no centre reported yet');
-  assert.strictEqual(S.anchorLabel('pan'), 'PANADAPTER');
-  assert.strictEqual(S.anchorLabel('fix'), 'FIX (axis assumed)');
-  assert.strictEqual(S.anchorLabel('center'), 'CENTER');
+  const A = require('../lib/scope-axis');
+  assert.strictEqual(A.anchorLabel('pan'), 'PANADAPTER');
+  assert.strictEqual(A.anchorLabel('fix'), 'FIX (axis assumed)');
+  assert.strictEqual(A.anchorLabel('center'), 'CENTER');
 });
 
 check('a frequency outside the window maps to null', () => {
