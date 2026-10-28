@@ -979,17 +979,29 @@
   let scopeLatest = null;
   let scopeSubscribedSent = false;
   let scopeTuneStepHz = 1000;   // the shack's synced tuning step (S2C tune-step)
-  let scopeFloor = (() => { try { return Number(localStorage.getItem('echocat-scope-floor')) || 0; } catch { return 0; } })();
+  const scopeLsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch { return d; } };
+  const scopeLsSet = (k, v) => { try { localStorage.setItem(k, String(v)); } catch { /* private mode */ } };
+  // Level window (plan item 4): the bottom IS the old Floor ('echocat-scope-floor',
+  // same key, so a saved floor carries over); the top starts at full scale.
+  let scopeRange = { lo: Number(scopeLsGet('echocat-scope-floor', 0)) || 0, hi: Number(scopeLsGet('echocat-scope-top', 255)) || 255 };
+  let scopeAvg = scopeLsGet('echocat-scope-avg', 'light');
+  let scopePeakOn = scopeLsGet('echocat-scope-peak', '0') === '1';
+  let scopePeakDecay = scopeLsGet('echocat-scope-peak-decay', 'slow');
+  let scopeSUnits = scopeLsGet('echocat-scope-sunits', '0') === '1';
+  // Averaging + peak hold run on the RAW levels (the readout reads them).
+  let scopeSmooth = null, scopePeak = null;
   let ft8BsOn = (() => { try { return localStorage.getItem('echocat-ft8-bandscope') === '1'; } catch { return false; } })();
 
   // Two places draw the same stream: the Scope tab, and a strip above the FT8
   // tab's audio waterfall. One frame handler, one state handler, N surfaces.
+  // `full` = the Scope tab: level gutter, readout, peak hold; the FT8 strip
+  // gets the frequency scale only.
   const scopeSurfaces = [
-    { trace: document.getElementById('scope-phone-trace'), wf: document.getElementById('scope-phone-wf'),
-      lo: 'scope-phone-ax-lo', c: 'scope-phone-ax-c', hi: 'scope-phone-ax-hi', status: 'scope-phone-status', span: 'scope-phone-span',
+    { trace: document.getElementById('scope-phone-trace'), wf: document.getElementById('scope-phone-wf'), freq: document.getElementById('scope-phone-freq'),
+      status: 'scope-phone-status', span: 'scope-phone-span', full: true,
       visible: (tab) => tab === 'scope' },
-    { trace: document.getElementById('ft8-bs-trace'), wf: document.getElementById('ft8-bs-wf'),
-      lo: 'ft8-bs-lo', c: 'ft8-bs-c', hi: 'ft8-bs-hi', status: 'ft8-bs-status', span: 'ft8-bs-span',
+    { trace: document.getElementById('ft8-bs-trace'), wf: document.getElementById('ft8-bs-wf'), freq: document.getElementById('ft8-bs-freq'),
+      status: 'ft8-bs-status', span: 'ft8-bs-span', full: false,
       visible: (tab) => tab === 'ft8' && ft8BsOn && scopeAvailable() },
   ];
 
@@ -1027,10 +1039,10 @@
   }
   function scopeSizeCanvases() {
     for (const sf of scopeSurfaces) {
-      for (const c of [sf.trace, sf.wf]) {
+      for (const c of [sf.trace, sf.wf, sf.freq]) {
         if (!c) continue;
         const w = Math.max(160, Math.floor(c.clientWidth || 320));
-        const h = Math.max(40, Math.floor(c.clientHeight || c.height));
+        const h = Math.max(c === sf.freq ? 12 : 40, Math.floor(c.clientHeight || c.height));
         if (c.width !== w) c.width = w;
         if (c.height !== h) c.height = h;
       }
@@ -1052,6 +1064,8 @@
     if (synthEl) synthEl.classList.toggle('hidden', !(st && st.kind === 1));
     const modeEl = document.getElementById('scope-phone-mode');
     if (modeEl) modeEl.textContent = st && st.anchor ? ScopeAxis.anchorLabel(st.anchor) : '';
+    const suWrap = document.getElementById('scope-phone-sunits-wrap');
+    if (suWrap) suWrap.classList.toggle('hidden', !(st && st.levelScale && st.levelScale.unit === 'dBm'));
     const needEnable = !!(st && st.kind !== 1 && (st.scuLan === '0' || (st.diag && st.diag.key === 'silent')));
     const enableEl = document.getElementById('scope-phone-enable');
     if (enableEl) enableEl.classList.toggle('hidden', !needEnable);
@@ -1090,8 +1104,14 @@
   }
   function scopeRenderFrame(rawBins) {
     if (!rawBins || !rawBins.length) return;
-    const bins = window.ScopeAxis ? window.ScopeAxis.applyFloor(rawBins, scopeFloor) : rawBins;
-    scopeLatest = bins;
+    const V = window.ScopeView;
+    scopeLatest = rawBins;
+    if (V) {
+      if (!scopeSmooth || scopeSmooth.length !== rawBins.length) { scopeSmooth = Float32Array.from(rawBins); scopePeak = new Float32Array(rawBins.length); }
+      V.smoothInto(scopeSmooth, rawBins, V.AVERAGING[scopeAvg] || V.AVERAGING.light);
+      V.peakInto(scopePeak, rawBins, V.PEAK_DECAY[scopePeakDecay] != null ? V.PEAK_DECAY[scopePeakDecay] : V.PEAK_DECAY.slow);
+    }
+    const bins = V ? V.applyRange(rawBins, scopeRange.lo, scopeRange.hi) : rawBins;
     let any = false;
     for (const sf of scopeSurfaces) {
       if (!sf.visible(activeTab) || !sf.wf) continue;
@@ -1099,29 +1119,64 @@
       any = true;
     }
     if (any) scopeDrawAll();
+    if (scopeReadoutAt) scopeShowReadout(scopeReadoutAt.el, scopeReadoutAt.x, scopeReadoutAt.y);
   }
   // The one trace painter (lib/scope-view.js, inlined) — the desktop Band
   // Scope window draws with the same function. The page shows the mode line
   // itself, so the painter's "axis assumed" notice stays off here.
-  function scopeDrawTrace(canvas, axis, centerHz) {
+  function scopeDrawTrace(sf, axis, centerHz) {
     const st = scopeState || {};
-    window.ScopeView.drawTrace(canvas.getContext('2d'), { bins: scopeLatest, peak: null },
-      { w: canvas.width, h: canvas.height, dpr: 1, axis, dialHz: centerHz, spanHz: st.spanHz, anchor: st.anchor, notice: false });
+    const V = window.ScopeView;
+    const canvas = sf.trace;
+    const shown = scopeSmooth ? V.applyRange(scopeSmooth, scopeRange.lo, scopeRange.hi) : null;
+    const peak = sf.full && scopePeakOn && scopePeak ? V.applyRange(scopePeak, scopeRange.lo, scopeRange.hi) : null;
+    window.ScopeView.drawTrace(canvas.getContext('2d'), { bins: shown, peak },
+      { w: canvas.width, h: canvas.height, dpr: 1, axis, dialHz: centerHz, spanHz: st.spanHz, anchor: st.anchor, notice: false,
+        peakHold: !!peak, scale: V.displayScale(st.levelScale, scopeRange.lo, scopeRange.hi), gutter: sf.full, sUnits: sf.full && scopeSUnits });
   }
   function scopeDrawAll() {
     const A = window.ScopeAxis;
-    if (!A) return;
+    if (!A || !window.ScopeView) return;
     const axis = scopeAxisNow();
     const centerHz = Math.round((currentFreqKhz || 0) * 1000);
     for (const sf of scopeSurfaces) {
       if (!sf.visible(activeTab) || !sf.trace) continue;
-      const lo = document.getElementById(sf.lo), c = document.getElementById(sf.c), hi = document.getElementById(sf.hi);
-      if (lo) lo.textContent = axis.hzPerBin ? A.formatHz(axis.startHz) : '—';
-      if (c) c.textContent = centerHz ? A.formatHz(centerHz) : '—';
-      if (hi) hi.textContent = axis.hzPerBin ? A.formatHz(axis.endHz) : '—';
-      scopeDrawTrace(sf.trace, axis, centerHz);
+      scopeDrawTrace(sf, axis, centerHz);
+      if (sf.freq) window.ScopeView.drawFreqScale(sf.freq.getContext('2d'), { w: sf.freq.width, h: sf.freq.height, dpr: 1, axis, dialHz: centerHz });
     }
   }
+  function scopeSetRange(next, from) {
+    scopeRange = window.ScopeView.clampRange(next.lo, next.hi);
+    scopeLsSet('echocat-scope-floor', scopeRange.lo);
+    scopeLsSet('echocat-scope-top', scopeRange.hi);
+    const f = document.getElementById('scope-phone-floor');
+    if (f && from !== 'floor') f.value = String(Math.min(Number(f.max), scopeRange.lo));
+    const t = document.getElementById('scope-phone-top');
+    if (t && from !== 'top') t.value = String(scopeRange.hi);
+    scopeDrawAll();
+  }
+  // Cursor readout on the Scope tab: hover, or touch and hold (plan item 3).
+  const scopeReadoutEl = document.getElementById('scope-phone-readout');
+  let scopeReadoutAt = null;
+  function scopeShowReadout(el, clientX, clientY) {
+    const V = window.ScopeView;
+    const axis = scopeAxisNow();
+    const r = el.getBoundingClientRect();
+    if (!scopeReadoutEl || !V || !(r.width > 0) || !axis.hzPerBin) { if (scopeReadoutEl) scopeReadoutEl.style.display = 'none'; return; }
+    const frac = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+    const st = scopeState || {};
+    let text = V.formatReadout(window.ScopeAxis.binToHz(axis, frac * (axis.bins - 1)), scopeSmooth ? V.levelAt(scopeSmooth, frac) : null, st.levelScale, st.spanHz);
+    if (!axis.known) text += ' (axis assumed)';
+    scopeReadoutEl.textContent = text;
+    scopeReadoutEl.style.display = 'block';
+    const box = scopeReadoutEl.parentElement.getBoundingClientRect();
+    const w = scopeReadoutEl.offsetWidth;
+    let x = clientX - box.left + 12;
+    if (x + w > box.width - 4) x = clientX - box.left - w - 12;
+    scopeReadoutEl.style.left = Math.max(4, x) + 'px';
+    scopeReadoutEl.style.top = Math.max(2, clientY - box.top - 30) + 'px';
+  }
+  function scopeHideReadout() { scopeReadoutAt = null; if (scopeReadoutEl) scopeReadoutEl.style.display = 'none'; }
   function scopeTuneAt(clientX, el) {
     const axis = scopeAxisNow();
     if (!axis.known) return;
@@ -1131,17 +1186,101 @@
     const hz = window.ScopeAxis.snapTapHz(window.ScopeAxis.binToHz(axis, frac * (axis.bins - 1)), scopeState && scopeState.spanHz);
     sendToServer({ type: 'tune', freqKhz: (hz / 1000).toFixed(3), mode: '' });
   }
+  // A drag on the Scope tab's level scale (left edge) moves the level window
+  // and never tunes; the wheel there widens or narrows it.
+  let scopeGutterDrag = null;
+  let scopeSuppressClick = false;
+  let scopeHoldTimer = null;
+  const scopeInGutter = (el, e) => e.clientX - el.getBoundingClientRect().left <= window.ScopeView.GUTTER_PX;
   for (const sf of scopeSurfaces) {
-    for (const c of [sf.trace, sf.wf]) if (c) c.addEventListener('click', (e) => scopeTuneAt(e.clientX, c));
+    for (const c of [sf.trace, sf.wf, sf.freq]) if (c) c.addEventListener('click', (e) => {
+      if (scopeSuppressClick) { scopeSuppressClick = false; return; }
+      scopeTuneAt(e.clientX, c);
+    });
+    if (!sf.full || !window.ScopeView) continue;
+    const tr = sf.trace;
+    tr.addEventListener('pointerdown', (e) => {
+      scopeSuppressClick = false;
+      if (!scopeInGutter(tr, e)) return;
+      scopeGutterDrag = { y0: e.clientY, range0: { lo: scopeRange.lo, hi: scopeRange.hi } };
+      scopeSuppressClick = true;
+      try { tr.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+    });
+    tr.addEventListener('pointermove', (e) => {
+      tr.style.cursor = scopeGutterDrag || scopeInGutter(tr, e) ? 'ns-resize' : 'crosshair';
+      if (!scopeGutterDrag) return;
+      const plotH = Math.max(1, tr.getBoundingClientRect().height - 6);
+      const d = (e.clientY - scopeGutterDrag.y0) * (scopeGutterDrag.range0.hi - scopeGutterDrag.range0.lo) / plotH;
+      scopeSetRange(window.ScopeView.shiftRange(scopeGutterDrag.range0, d));
+    });
+    const endDrag = (e) => { if (scopeGutterDrag) { scopeGutterDrag = null; try { tr.releasePointerCapture(e.pointerId); } catch { /* released */ } } };
+    tr.addEventListener('pointerup', endDrag);
+    tr.addEventListener('pointercancel', endDrag);
+    tr.addEventListener('wheel', (e) => {
+      if (!scopeInGutter(tr, e)) return;
+      e.preventDefault();
+      scopeSetRange(window.ScopeView.zoomRange(scopeRange, e.deltaY > 0 ? 1.12 : 1 / 1.12));
+    }, { passive: false });
+    for (const el of [sf.trace, sf.wf]) {
+      el.addEventListener('pointermove', (e) => {
+        if (e.pointerType === 'touch' && !scopeReadoutAt) { clearTimeout(scopeHoldTimer); return; }
+        if (el === tr && (scopeGutterDrag || scopeInGutter(tr, e))) { scopeHideReadout(); return; }
+        scopeReadoutAt = { el, x: e.clientX, y: e.clientY };
+        scopeShowReadout(el, e.clientX, e.clientY);
+      });
+      el.addEventListener('pointerleave', scopeHideReadout);
+      el.addEventListener('pointerdown', (e) => {
+        if (e.pointerType !== 'touch') return;
+        clearTimeout(scopeHoldTimer);
+        const x = e.clientX, y = e.clientY;
+        // A hold shows the readout; lifting after it does not tune.
+        scopeHoldTimer = setTimeout(() => { scopeReadoutAt = { el, x, y }; scopeSuppressClick = true; scopeShowReadout(el, x, y); }, 400);
+      });
+      el.addEventListener('pointerup', (e) => { clearTimeout(scopeHoldTimer); if (e.pointerType === 'touch' && scopeReadoutAt) setTimeout(scopeHideReadout, 1500); });
+    }
   }
   const scopeFloorEl = document.getElementById('scope-phone-floor');
-  if (scopeFloorEl) {
-    scopeFloorEl.value = String(scopeFloor);
-    scopeFloorEl.addEventListener('input', (e) => {
-      scopeFloor = Number(e.target.value) || 0;
-      try { localStorage.setItem('echocat-scope-floor', String(scopeFloor)); } catch { /* private mode */ }
-    });
+  if (scopeFloorEl) scopeFloorEl.addEventListener('input', (e) => scopeSetRange({ lo: Number(e.target.value) || 0, hi: scopeRange.hi }, 'floor'));
+  const scopeTopEl = document.getElementById('scope-phone-top');
+  if (scopeTopEl) scopeTopEl.addEventListener('input', (e) => scopeSetRange({ lo: scopeRange.lo, hi: Number(e.target.value) || 255 }, 'top'));
+  const scopeRangeResetEl = document.getElementById('scope-phone-range-reset');
+  if (scopeRangeResetEl) scopeRangeResetEl.addEventListener('click', () => scopeSetRange({ lo: 0, hi: 255 }));
+  const scopeDisplayBtn = document.getElementById('scope-phone-display-btn');
+  if (scopeDisplayBtn) scopeDisplayBtn.addEventListener('click', () => {
+    const p = document.getElementById('scope-phone-display');
+    if (p) p.classList.toggle('hidden');
+    scopeSizeCanvases(); scopeDrawAll();
+  });
+  const scopeAvgEl = document.getElementById('scope-phone-avg');
+  if (scopeAvgEl) {
+    scopeAvgEl.value = scopeAvg;
+    scopeAvgEl.addEventListener('change', (e) => { scopeAvg = e.target.value; scopeLsSet('echocat-scope-avg', scopeAvg); });
   }
+  function scopeApplyPeakUi() {
+    const clr = document.getElementById('scope-phone-peak-clear');
+    if (clr) clr.classList.toggle('hidden', !scopePeakOn);
+    const dw = document.getElementById('scope-phone-peak-decay-wrap');
+    if (dw) dw.classList.toggle('hidden', !scopePeakOn);
+  }
+  const scopePeakEl = document.getElementById('scope-phone-peak');
+  if (scopePeakEl) {
+    scopePeakEl.checked = scopePeakOn;
+    scopePeakEl.addEventListener('change', (e) => { scopePeakOn = e.target.checked; scopeLsSet('echocat-scope-peak', scopePeakOn ? '1' : '0'); if (!scopePeakOn && scopePeak) scopePeak.fill(0); scopeApplyPeakUi(); scopeDrawAll(); });
+  }
+  const scopePeakDecayEl = document.getElementById('scope-phone-peak-decay');
+  if (scopePeakDecayEl) {
+    scopePeakDecayEl.value = scopePeakDecay;
+    scopePeakDecayEl.addEventListener('change', (e) => { scopePeakDecay = e.target.value; scopeLsSet('echocat-scope-peak-decay', scopePeakDecay); });
+  }
+  const scopePeakClearEl = document.getElementById('scope-phone-peak-clear');
+  if (scopePeakClearEl) scopePeakClearEl.addEventListener('click', () => { if (scopePeak) scopePeak.fill(0); scopeDrawAll(); });
+  const scopeSUnitsEl = document.getElementById('scope-phone-sunits');
+  if (scopeSUnitsEl) {
+    scopeSUnitsEl.checked = scopeSUnits;
+    scopeSUnitsEl.addEventListener('change', (e) => { scopeSUnits = e.target.checked; scopeLsSet('echocat-scope-sunits', scopeSUnits ? '1' : '0'); scopeDrawAll(); });
+  }
+  scopeApplyPeakUi();
+  if (window.ScopeView) scopeSetRange(scopeRange);
   const scopeEnableBtn = document.getElementById('scope-phone-enable');
   if (scopeEnableBtn) scopeEnableBtn.addEventListener('click', () => sendToServer({ type: 'scope-enable-radio' }));
   const ft8BsToggle = document.getElementById('ft8-bs-toggle');

@@ -2725,6 +2725,7 @@ function _applyPopoutTheme(payload) {
   var bsToggle = document.getElementById('jp-bandscope-toggle');
   var bsTrace = document.getElementById('jp-bs-trace');
   var bsWfCanvas = document.getElementById('jp-bs-wf');
+  var bsFreq = document.getElementById('jp-bs-freq');
   var bsEnableBtn = document.getElementById('jp-bs-enable');
   var bsWf = null;
   var bsState = null;
@@ -2788,10 +2789,13 @@ function _applyPopoutTheme(payload) {
     var rxBin = dial ? A.hzToBin(ax, dial) : null;
     if (rxBin != null) { var mx = Math.round(rxBin * (w - 1) / 849) + 0.5; ctx.strokeStyle = '#e94560'; ctx.lineWidth = 1.5 * dpr; ctx.beginPath(); ctx.moveTo(mx, 0); ctx.lineTo(mx, h); ctx.stroke(); }
     if (bsWf && bsWf.supported) bsWf.setMarkers(rxBin == null ? [] : [{ pos: rxBin / 849, color: '#e94560', kind: 'rx' }]);
-    var lo = document.getElementById('jp-bs-lo'), c = document.getElementById('jp-bs-c'), hi = document.getElementById('jp-bs-hi');
-    if (lo) lo.textContent = ax.hzPerBin ? A.formatHz(ax.startHz) : '';
-    if (c) c.textContent = dial ? A.formatHz(dial) : '';
-    if (hi) hi.textContent = ax.hzPerBin ? A.formatHz(ax.endHz) : '';
+    // The frequency scale strip: the same painter as the Band Scope window
+    // and ECHOCAT Web (lib/scope-view.js), so the ticks agree everywhere.
+    if (bsFreq && window.ScopeView) {
+      var fw = Math.max(1, Math.round(bsFreq.clientWidth * dpr)), fh = Math.max(1, Math.round(bsFreq.clientHeight * dpr));
+      if (bsFreq.width !== fw || bsFreq.height !== fh) { bsFreq.width = fw; bsFreq.height = fh; }
+      window.ScopeView.drawFreqScale(bsFreq.getContext('2d'), { w: fw, h: fh, dpr: dpr, axis: ax, dialHz: dial });
+    }
   }
   if (window.api.onScopeState) {
     window.api.onScopeState(function(s) {
@@ -2831,6 +2835,7 @@ function _applyPopoutTheme(payload) {
   }
   if (bsToggle) bsToggle.addEventListener('change', function() { bsSetOn(bsToggle.checked, true); });
   if (bsTrace) bsTrace.addEventListener('click', function(e) { var r = bsTrace.getBoundingClientRect(); if (r.width > 0) bsTune((e.clientX - r.left) / r.width); });
+  if (bsFreq) bsFreq.addEventListener('click', function(e) { var r = bsFreq.getBoundingClientRect(); if (r.width > 0) bsTune((e.clientX - r.left) / r.width); });
   if (bsEnableBtn) bsEnableBtn.addEventListener('click', function() { if (window.api.scopeEnableOnRadio) window.api.scopeEnableOnRadio(); });
   window.addEventListener('resize', function() { if (bsOn && bsAvailable) { if (bsWf && bsWf.supported) bsWf.resize(); bsDraw(); } });
 

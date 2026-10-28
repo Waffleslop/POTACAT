@@ -48,8 +48,11 @@
     #sc-trace { width: 100%; height: 140px; display: block; flex-shrink: 0; cursor: crosshair; }
     #sc-spots { width: 100%; height: 22px; display: block; flex-shrink: 0; background: #06060e; cursor: pointer; }
     #sc-wf { width: 100%; flex: 1; min-height: 80px; display: block; cursor: crosshair; }
-    .sc-axis { display: flex; justify-content: space-between; padding: 2px 8px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; color: var(--text-secondary); background: var(--bg-secondary); border-top: 1px solid var(--border-primary); flex-shrink: 0; }
-    .sc-axis .c { color: #e94560; font-weight: 700; }
+    #sc-freq { width: 100%; height: 20px; display: block; flex-shrink: 0; background: #0b0b16; cursor: crosshair; }
+    #sc-trace.in-gutter { cursor: ns-resize; }
+    .sc-readout { position: absolute; z-index: 4; pointer-events: none; display: none; padding: 2px 6px; border-radius: 3px; background: rgba(10,10,20,0.9); border: 1px solid rgba(79,195,247,0.5); color: #e0e6ee; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; white-space: nowrap; }
+    .sc-readout.show { display: block; }
+    .sc-pop input[type=range] { width: 120px; }
     .sc-unsupported { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; color: var(--text-secondary); background: var(--bg-primary); }
 
     .sc-gear { position: relative; }
@@ -81,13 +84,20 @@
     <button class="sc-btn accent" id="sc-enable" style="display:none" title="Sends EX0301261; to the radio. POTACAT turns it back off when the scope closes.">Enable SCU-LAN10 on the radio</button>
     <label class="sc-check" title="Noise floor: everything below this level is drawn black, so signals stand out. Display only — the radio's data is untouched."><span class="dim">Floor</span> <input type="range" id="sc-floor" min="0" max="200" value="0" style="width:110px;vertical-align:middle;"></label>
     <button class="sc-btn toggle on" id="sc-spots-toggle" title="Overlay POTA / SOTA / cluster spots that fall inside the scope">Spots</button>
+    <button class="sc-btn" id="sc-peak-clear" style="display:none" title="Clear the peak-hold line">Clear peaks</button>
     <button class="sc-btn" id="sc-retry" title="Stop and restart the scope helper">Retry</button>
     <div class="sc-gear">
       <button class="sc-btn" id="sc-gear-btn" title="Display settings">&#x2699;</button>
       <div class="sc-pop" id="sc-gear-pop">
         <div class="row"><span>Colour map</span><select id="sc-colormap"><option value="turbo">Turbo</option><option value="classic">Classic</option></select></div>
         <div class="row"><span>Frames per second</span><select id="sc-fps"><option value="10">10</option><option value="20">20</option><option value="30">30</option></select></div>
+        <div class="row"><span>Averaging</span><select id="sc-avg"><option value="off">Off</option><option value="light">Light</option><option value="medium">Medium</option><option value="heavy">Heavy</option></select></div>
+        <div class="row" title="The top of the trace. Drag the level scale at the left edge to move the whole window; the mouse wheel there widens or narrows it."><span>Top</span><input type="range" id="sc-top" min="16" max="255" value="255"></div>
+        <div class="row" title="The bottom of the trace: everything below it is drawn black. The same control as Floor."><span>Bottom</span><input type="range" id="sc-bottom" min="0" max="239" value="0"></div>
+        <div class="row"><button class="sc-btn" id="sc-range-reset" title="Full range, as the radio sends it">Reset levels</button></div>
         <div class="row"><label class="sc-check"><input type="checkbox" id="sc-peak"> Peak hold on the trace</label></div>
+        <div class="row" id="sc-peak-decay-row"><span>Peak decay</span><select id="sc-peak-decay"><option value="fast">Fast</option><option value="slow">Slow</option><option value="hold">Hold</option></select></div>
+        <div class="row hidden" id="sc-sunits-row"><label class="sc-check"><input type="checkbox" id="sc-sunits"> S-units on the level scale</label></div>
         <div class="row"><label class="sc-check"><input type="checkbox" id="sc-synth"> Synthetic signal (no radio)</label></div>
         <div class="hint">The synthetic signal exercises the whole path without an FT-710: a wandering carrier, a breathing SSB signal and a keying CW station.</div>
       </div>
@@ -106,11 +116,12 @@
 
   <div class="sc-stage">
     <canvas id="sc-trace"></canvas>
+    <canvas id="sc-freq"></canvas>
     <canvas id="sc-spots"></canvas>
+    <div class="sc-readout" id="sc-readout"></div>
     <canvas id="sc-wf"></canvas>
     <div class="sc-unsupported" id="sc-unsupported">WebGL2 is not available in this window — the waterfall cannot be drawn.</div>
   </div>
-  <div class="sc-axis"><span id="sc-ax-lo">—</span><span class="c" id="sc-ax-c">—</span><span id="sc-ax-hi">—</span></div>
 
   <script src="../lib/scope-axis.js"></script>
   <script src="../lib/scope-view.js"></script>

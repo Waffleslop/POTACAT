@@ -28449,6 +28449,7 @@ function yaesuScopeStatePayload() {
     fps: settings.yaesuScopeFps || 20,
     synth: yaesuScopeSynth,
     spans: scopeSpans(),
+    levelScale: scopeLevelScale(),
     // Whether the active rig can do this at all — the JTCAT pop-out and the
     // web client show their band-scope controls only when it is true.
     available: yaesuScopeSynth || !!scopeSourceKind(),
@@ -28479,6 +28480,7 @@ function yaesuScopeRemotePayload(extra) {
     ...scopeCalibration(),
     frameMs: scopeRemoteFrameMs(false),
     frameMsCloud: scopeRemoteFrameMs(true),   // the server sends a Cloud device this one
+    levelScale: scopeLevelScale(),
     ...(extra || {}),
   };
 }
@@ -28490,6 +28492,26 @@ function scopeCalibration() {
   const s = yaesuScopeState;
   if (s.source !== 'flex' || !Number.isFinite(s.dbmMin) || !Number.isFinite(s.dbmMax) || s.dbmMax <= s.dbmMin) return {};
   return { dbmMin: s.dbmMin, dbmMax: s.dbmMax };
+}
+
+/**
+ * What a level 0..255 means, for the scope's level scale and readout
+ * (docs/scope-improvements-plan.md item 2): { unit, min, max } where level 0
+ * is `min` and 255 is `max`. A number appears only when the source gives
+ * one — the Flex pan's dBm, an SDR's dB over its tracked noise floor (a fixed
+ * 60 dB mapping in lib/sdr-scope.js); the FT-710 and the synthetic signal are
+ * uncalibrated, so unit null = an unlabelled grid. Icom ('radio', from
+ * IcomScope.MODELS) joins when its scope source lands.
+ */
+function scopeLevelScale() {
+  const s = yaesuScopeState;
+  if (s.kind === 1) return { unit: null, min: 0, max: 255 };
+  if (s.source === 'flex') {
+    const c = scopeCalibration();
+    return Number.isFinite(c.dbmMin) ? { unit: 'dBm', min: c.dbmMin, max: c.dbmMax } : { unit: null, min: 0, max: 255 };
+  }
+  if (s.source === 'sdr') return SdrScope.levelScale();
+  return { unit: null, min: 0, max: 255 };
 }
 
 /** The source's own frame interval, ms. */

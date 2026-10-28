@@ -783,11 +783,9 @@
       <span id="jp-bs-mode"></span>
       <span style="flex:1"></span>
       <button type="button" id="jp-bs-enable" class="hidden" title="Turns SCU-LAN10 on in the radio menu (EX0301261;). POTACAT turns it back off when the scope stops." style="font-size:10px;padding:1px 6px;border:1px solid #e94560;background:var(--accent-red, #e94560);color:#fff;border-radius:3px;cursor:pointer;">Enable SCU-LAN10</button>
-      <span id="jp-bs-lo" style="font-family:monospace"></span>
-      <span id="jp-bs-c" style="font-family:monospace;color:#e94560;font-weight:700"></span>
-      <span id="jp-bs-hi" style="font-family:monospace"></span>
     </div>
     <canvas id="jp-bs-trace" style="width:100%;height:56px;display:block;cursor:crosshair;"></canvas>
+    <canvas id="jp-bs-freq" style="width:100%;height:18px;display:block;cursor:crosshair;background:#0b0b16;"></canvas>
     <canvas id="jp-bs-wf" style="width:100%;height:96px;display:block;cursor:crosshair;"></canvas>
   </div>
 
@@ -999,6 +997,7 @@
   <script src="cq-target.js"></script>
   <script src="../lib/wspr/stats.js"></script>
   <script src="../lib/scope-axis.js"></script>
+  <script src="../lib/scope-view.js"></script>
   <script src="../lib/jtty-macros.js"></script>
   <script src="../lib/decode-row.js"></script>
   <script src="../lib/worked-roster.js"></script>

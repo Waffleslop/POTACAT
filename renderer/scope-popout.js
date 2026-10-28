@@ -21,19 +21,31 @@ const BINS = A.BINS;
 const $ = (id) => document.getElementById(id);
 const traceCanvas = $('sc-trace');
 const spotsCanvas = $('sc-spots');
+const freqCanvas = $('sc-freq');
 const wfCanvas = $('sc-wf');
 
 // ─── State ─────────────────────────────────────────────────────────────────
 let state = { status: 'stopped', kind: 0, spanHz: 0, anchor: 'center', speed: null, scuLan: null, diag: null };
 let centerHz = 0;
 let axis = A.scopeAxis({ centerHz: 0, spanHz: 0 });
-let latest = null;            // Uint8Array(850), newest frame
+let latest = null;            // Uint8Array(850), newest RAW frame (before the level window)
+// Averaging and peak hold run on the RAW levels, so the cursor readout reads
+// the source's own value; the level window is applied when drawing.
 let smooth = new Float32Array(BINS);
 let peak = new Float32Array(BINS);
 let spots = [];
 let showSpots = true;
 let peakHold = false;
-let floor = (() => { try { return Number(localStorage.getItem('scope-floor')) || 0; } catch { return 0; } })();
+const V = window.ScopeView;
+const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch { return d; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, String(v)); } catch { /* private mode */ } };
+// Reference level + range (plan item 4): the window of levels the trace shows.
+// The bottom IS the old Floor ('scope-floor', same key), so a saved floor
+// carries over unchanged; the top is new and starts at full scale.
+let range = V.clampRange(Number(lsGet('scope-floor', 0)) || 0, Number(lsGet('scope-top', 255)) || 255);
+let avgMode = V.AVERAGING[lsGet('scope-avg', 'light')] ? lsGet('scope-avg', 'light') : 'light';
+let peakDecay = V.PEAK_DECAY[lsGet('scope-peak-decay', 'slow')] != null ? lsGet('scope-peak-decay', 'slow') : 'slow';
+let showSUnits = lsGet('scope-sunits', '0') === '1';
 let drawPending = false;
 
 // ─── Waterfall ─────────────────────────────────────────────────────────────
@@ -49,9 +61,6 @@ $('sc-colormap').value = savedColormap;
 // ─── Axis + labels ─────────────────────────────────────────────────────────
 function recomputeAxis() {
   axis = A.scopeAxis({ centerHz, spanHz: state.spanHz, anchor: state.anchor });
-  $('sc-ax-lo').textContent = axis.known || (centerHz && state.spanHz) ? A.formatHz(axis.startHz) : '—';
-  $('sc-ax-c').textContent = centerHz ? A.formatHz(centerHz) : '—';
-  $('sc-ax-hi').textContent = axis.known || (centerHz && state.spanHz) ? A.formatHz(axis.endHz) : '—';
   const rxBin = centerHz ? A.hzToBin(axis, centerHz) : null;
   wf.setMarkers(rxBin == null ? [] : [{ pos: rxBin / (BINS - 1), color: '#e94560', kind: 'rx' }]);
   scheduleDraw();
@@ -83,6 +92,7 @@ function applyState(s) {
   $('sc-enable').style.display = needEnable && state.kind !== 1 ? '' : 'none';
   $('sc-synth').checked = !!state.synth;
   if (s && s.fps) $('sc-fps').value = String(s.fps);
+  $('sc-sunits-row').classList.toggle('hidden', !(state.levelScale && state.levelScale.unit === 'dBm'));
 
   const diag = $('sc-diag');
   if (state.diag && state.status !== 'live') {
@@ -109,14 +119,21 @@ function sizeCanvas(c) {
 function scheduleDraw() {
   if (drawPending) return;
   drawPending = true;
-  requestAnimationFrame(() => { drawPending = false; drawTrace(); drawSpots(); });
+  requestAnimationFrame(() => { drawPending = false; drawTrace(); drawFreq(); drawSpots(); });
 }
 
 function drawTrace() {
   const { w, h, dpr } = sizeCanvas(traceCanvas);
   // The one trace painter (lib/scope-view.js); ECHOCAT Web draws with it too.
-  ScopeView.drawTrace(traceCanvas.getContext('2d'), { bins: latest ? smooth : null, peak },
-    { w, h, dpr, axis, dialHz: centerHz, spanHz: state.spanHz, anchor: state.anchor, peakHold });
+  ScopeView.drawTrace(traceCanvas.getContext('2d'),
+    { bins: latest ? V.applyRange(smooth, range.lo, range.hi) : null, peak: peakHold ? V.applyRange(peak, range.lo, range.hi) : null },
+    { w, h, dpr, axis, dialHz: centerHz, spanHz: state.spanHz, anchor: state.anchor, peakHold,
+      scale: V.displayScale(state.levelScale, range.lo, range.hi), gutter: true, sUnits: showSUnits });
+}
+
+function drawFreq() {
+  const { w, h, dpr } = sizeCanvas(freqCanvas);
+  ScopeView.drawFreqScale(freqCanvas.getContext('2d'), { w, h, dpr, axis, dialHz: centerHz });
 }
 
 const SPOT_COLORS = { pota: '#4ecca3', sota: '#f0a500', wwff: '#7ec8e3', dxc: '#e040fb', rbn: '#ff8a65', pskr: '#b39ddb', net: '#ffd54f' };
@@ -165,14 +182,14 @@ function drawSpots() {
 window.api.onScopeFrame((f) => {
   const raw = f && f.bins;
   if (!raw || raw.length !== BINS) return;
-  const bins = A.applyFloor(raw, floor);   // display floor, shared maths with the web client
-  latest = bins;
-  for (let i = 0; i < BINS; i++) {
-    smooth[i] = smooth[i] * 0.45 + bins[i] * 0.55;
-    peak[i] = Math.max(peak[i] - 0.6, bins[i]);
-  }
-  if (wf.supported) wf.pushFrame(bins);
+  latest = raw;
+  V.smoothInto(smooth, raw, V.AVERAGING[avgMode]);
+  V.peakInto(peak, raw, V.PEAK_DECAY[peakDecay]);
+  // The waterfall gets the level window too, as it got the floor (Phase 5
+  // gives it its own Auto black level).
+  if (wf.supported) wf.pushFrame(V.applyRange(raw, range.lo, range.hi));
   scheduleDraw();
+  if (readoutAt) showReadout(readoutAt.el, readoutAt.x, readoutAt.y);
 });
 
 window.api.onScopeState(applyState);
@@ -192,10 +209,95 @@ function tuneToFraction(frac) {
   window.api.tune((hz / 1000).toFixed(3), null);
 }
 wf.onClick(tuneToFraction);
+// ─── Level window: drag the level scale (left edge) to move it, wheel to widen ──
+// A drag that starts in the gutter never tunes; neither does a click that moved.
+let gutterDrag = null;     // { y0, range0 }
+let suppressClick = false;
+function inGutter(e) {
+  const r = traceCanvas.getBoundingClientRect();
+  return e.clientX - r.left <= V.GUTTER_PX;
+}
+function setRange(next, from) {
+  range = V.clampRange(next.lo, next.hi);
+  lsSet('scope-floor', range.lo);
+  lsSet('scope-top', range.hi);
+  if (from !== 'floor') floorEl.value = String(Math.min(Number(floorEl.max), range.lo));
+  if (from !== 'bottom') $('sc-bottom').value = String(range.lo);
+  if (from !== 'top') $('sc-top').value = String(range.hi);
+  scheduleDraw();
+}
+traceCanvas.addEventListener('pointermove', (e) => {
+  traceCanvas.classList.toggle('in-gutter', !!gutterDrag || inGutter(e));
+  if (!gutterDrag) return;
+  const r = traceCanvas.getBoundingClientRect();
+  const plotH = Math.max(1, r.height - 6);
+  const d = (e.clientY - gutterDrag.y0) * (gutterDrag.range0.hi - gutterDrag.range0.lo) / plotH;
+  if (Math.abs(e.clientY - gutterDrag.y0) > 2) suppressClick = true;
+  // Dragging down moves the trace down: the window slides up the levels.
+  setRange(V.shiftRange(gutterDrag.range0, d));
+});
+traceCanvas.addEventListener('pointerdown', (e) => {
+  suppressClick = false;
+  if (e.button !== 0 || !inGutter(e)) return;
+  gutterDrag = { y0: e.clientY, range0: { ...range } };
+  suppressClick = true;
+  try { traceCanvas.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+});
+const endGutterDrag = (e) => { if (gutterDrag) { gutterDrag = null; try { traceCanvas.releasePointerCapture(e.pointerId); } catch { /* released */ } } };
+traceCanvas.addEventListener('pointerup', endGutterDrag);
+traceCanvas.addEventListener('pointercancel', endGutterDrag);
+traceCanvas.addEventListener('wheel', (e) => {
+  if (!inGutter(e)) return;   // the wheel over the trace itself is Phase 4's (tuning)
+  e.preventDefault();
+  setRange(V.zoomRange(range, e.deltaY > 0 ? 1.12 : 1 / 1.12));
+}, { passive: false });
 traceCanvas.addEventListener('click', (e) => {
+  if (suppressClick) { suppressClick = false; return; }
   const r = traceCanvas.getBoundingClientRect();
   if (r.width > 0) tuneToFraction((e.clientX - r.left) / r.width);
 });
+freqCanvas.addEventListener('click', (e) => {
+  const r = freqCanvas.getBoundingClientRect();
+  if (r.width > 0) tuneToFraction((e.clientX - r.left) / r.width);
+});
+
+// ─── Cursor readout: frequency + level under the pointer (plan item 3) ──────
+const readoutEl = $('sc-readout');
+let readoutAt = null;      // { el, x, y } while the pointer is over a scope surface
+function showReadout(el, clientX, clientY) {
+  const r = el.getBoundingClientRect();
+  if (!(r.width > 0) || !axis.hzPerBin) { readoutEl.classList.remove('show'); return; }
+  const frac = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+  const hz = A.binToHz(axis, frac * (BINS - 1));
+  let text = V.formatReadout(hz, latest ? V.levelAt(smooth, frac) : null, state.levelScale, state.spanHz);
+  if (!axis.known) text += ' (axis assumed)';
+  readoutEl.textContent = text;
+  readoutEl.classList.add('show');
+  const stage = readoutEl.parentElement.getBoundingClientRect();
+  const w = readoutEl.offsetWidth;
+  let x = clientX - stage.left + 12;
+  if (x + w > stage.width - 4) x = clientX - stage.left - w - 12;
+  readoutEl.style.left = Math.max(4, x) + 'px';
+  readoutEl.style.top = Math.max(2, clientY - stage.top - 26) + 'px';
+}
+function hideReadout() { readoutAt = null; readoutEl.classList.remove('show'); }
+let holdTimer = null;
+for (const el of [traceCanvas, wfCanvas]) {
+  el.addEventListener('pointermove', (e) => {
+    if (e.pointerType === 'touch' && !readoutAt) return;   // touch: only after a hold
+    if (el === traceCanvas && (gutterDrag || inGutter(e))) { hideReadout(); return; }
+    readoutAt = { el, x: e.clientX, y: e.clientY };
+    showReadout(el, e.clientX, e.clientY);
+  });
+  el.addEventListener('pointerleave', hideReadout);
+  el.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'touch') return;
+    clearTimeout(holdTimer);
+    const x = e.clientX, y = e.clientY;
+    holdTimer = setTimeout(() => { readoutAt = { el, x, y }; showReadout(el, x, y); }, 400);
+  });
+  el.addEventListener('pointerup', () => clearTimeout(holdTimer));
+}
 spotsCanvas.addEventListener('click', (e) => {
   const r = spotsCanvas.getBoundingClientRect();
   const x = e.clientX - r.left;
@@ -227,12 +329,25 @@ $('sc-colormap').addEventListener('change', (e) => {
 });
 $('sc-fps').addEventListener('change', (e) => window.api.setFps(Number(e.target.value)));
 const floorEl = $('sc-floor');
-floorEl.value = String(floor);
-floorEl.addEventListener('input', (e) => {
-  floor = Number(e.target.value) || 0;
-  try { localStorage.setItem('scope-floor', String(floor)); } catch { /* private mode */ }
-});
-$('sc-peak').addEventListener('change', (e) => { peakHold = e.target.checked; if (!peakHold) peak.fill(0); scheduleDraw(); });
+// Floor (toolbar) and Bottom (gear) are the same value: the window's bottom.
+floorEl.addEventListener('input', (e) => setRange({ lo: Number(e.target.value) || 0, hi: range.hi }, 'floor'));
+$('sc-bottom').addEventListener('input', (e) => setRange({ lo: Number(e.target.value) || 0, hi: range.hi }, 'bottom'));
+$('sc-top').addEventListener('input', (e) => setRange({ lo: range.lo, hi: Number(e.target.value) || 255 }, 'top'));
+$('sc-range-reset').addEventListener('click', () => setRange({ lo: 0, hi: 255 }));
+setRange(range);
+$('sc-avg').value = avgMode;
+$('sc-avg').addEventListener('change', (e) => { avgMode = V.AVERAGING[e.target.value] ? e.target.value : 'light'; lsSet('scope-avg', avgMode); });
+$('sc-peak-decay').value = peakDecay;
+$('sc-peak-decay').addEventListener('change', (e) => { peakDecay = V.PEAK_DECAY[e.target.value] != null ? e.target.value : 'slow'; lsSet('scope-peak-decay', peakDecay); });
+$('sc-sunits').checked = showSUnits;
+$('sc-sunits').addEventListener('change', (e) => { showSUnits = e.target.checked; lsSet('scope-sunits', showSUnits ? '1' : '0'); scheduleDraw(); });
+function applyPeakUi() {
+  $('sc-peak-clear').style.display = peakHold ? '' : 'none';
+  $('sc-peak-decay-row').classList.toggle('hidden', !peakHold);
+}
+$('sc-peak').addEventListener('change', (e) => { peakHold = e.target.checked; if (!peakHold) peak.fill(0); applyPeakUi(); scheduleDraw(); });
+$('sc-peak-clear').addEventListener('click', () => { peak.fill(0); scheduleDraw(); });
+applyPeakUi();
 $('sc-synth').addEventListener('change', (e) => window.api.setSynth(e.target.checked));
 
 // ─── Window chrome ─────────────────────────────────────────────────────────
