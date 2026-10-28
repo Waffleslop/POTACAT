@@ -152,6 +152,44 @@
     }
   });
 
+  const hunterImportBtn = document.getElementById('pota-hunter-import');
+  const hunterPreviewBtn = document.getElementById('pota-hunter-import-preview');
+  const hunterImportStatus = document.getElementById('pota-hunter-import-status');
+  if (hunterImportBtn && window.api.potaHunterImport) {
+    if (window.api.onPotaHunterImportProgress) {
+      window.api.onPotaHunterImportProgress((p) => {
+        if (hunterImportStatus) hunterImportStatus.textContent =
+          `Downloading… ${p.fetched.toLocaleString()} of ${p.count.toLocaleString()} entries`;
+      });
+    }
+    // dryRun: the Preview button. Same download and review CSV, log untouched.
+    const runHunterImport = async (dryRun) => {
+      hunterImportBtn.disabled = true;
+      if (hunterPreviewBtn) hunterPreviewBtn.disabled = true;
+      hunterImportStatus.textContent = 'Downloading…';
+      try {
+        const res = await window.api.potaHunterImport({ dryRun });
+        if (!res || !res.ok) {
+          hunterImportStatus.textContent = '';
+          alert('POTA.app hunter log ' + (dryRun ? 'preview' : 'import') + ' failed: ' + ((res && res.error) || 'unknown error'));
+          return;
+        }
+        // The full summary is in main's dialog; keep the counts on screen.
+        const would = res.dryRun ? 'would be ' : '';
+        hunterImportStatus.textContent = (res.dryRun ? 'Preview: ' : '') +
+          `${res.downloaded.toLocaleString()} downloaded · ${res.updated.toLocaleString()} ${would}updated · ${res.added.toLocaleString()} ${would}added`;
+      } catch (err) {
+        hunterImportStatus.textContent = '';
+        alert('POTA.app hunter log ' + (dryRun ? 'preview' : 'import') + ' failed: ' + (err && err.message ? err.message : String(err)));
+      } finally {
+        hunterImportBtn.disabled = false;
+        if (hunterPreviewBtn) hunterPreviewBtn.disabled = false;
+      }
+    };
+    hunterImportBtn.addEventListener('click', () => runHunterImport(false));
+    if (hunterPreviewBtn) hunterPreviewBtn.addEventListener('click', () => runHunterImport(true));
+  }
+
   // Push updates from main — re-render panel + pill on every status change
   if (window.api.onPotaSyncStatus) {
     window.api.onPotaSyncStatus((st) => render(st));

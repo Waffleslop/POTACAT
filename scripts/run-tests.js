@@ -905,6 +905,7 @@ const TESTS = [
   'test/wspr-network-test.js', // WSPR band table and the wsprnet upload formatter (fake fetch)
   'test/wspr-stats-test.js', // WSPR stats: dBm to watts, miles per watt
   'test/wspr-wsprlive-test.js', // "Where am I heard" from wspr.live (fake fetch)
+  'test/pota-hunter-import-test.js',
 ];
 
 // Test files that CI does not run, each with the reason. A file named
