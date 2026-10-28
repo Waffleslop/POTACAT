@@ -90,6 +90,7 @@ function generate(t) {
     for (const x of t[family].tokens) fixed.push(`  --ds-${x.name}: ${x.value};`);
   };
   lengths('spacing'); lengths('radius'); lengths('size'); lengths('stroke');
+  if (t.icon && Array.isArray(t.icon.tokens)) lengths('icon');
   for (const x of t.opacity.tokens) fixed.push(`  --ds-${x.name}: ${x.value};`);
   fixed.push(`  --ds-font-sans: ${SANS_DESKTOP};`);
   fixed.push(`  --ds-font-mono: ${MONO_DESKTOP};`);

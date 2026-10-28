@@ -89,6 +89,14 @@ test('every desktop theme has a block, ids match the phone, Acid Burn is mono', 
   assert.ok(/--ds-font-body: var\(--ds-font-mono\);/.test(acid.slice(0, acid.indexOf('}'))));
 });
 
+test('band colours (one per band, data colours) and the fixed icon sizes are emitted', () => {
+  const css = fs.readFileSync(gen.OUT, 'utf8');
+  for (const b of ['160m', '80m', '40m', '20m', '6m', '2m', '70cm', '1-25m', '1-25cm', '2200m', '630m']) {
+    assert.ok(new RegExp('--ds-band-' + b + ': #[0-9a-f]{6};', 'i').test(css), 'band-' + b);
+  }
+  assert.ok(/--ds-icon-sm: 14px;/.test(css) && /--ds-icon-md: 18px;/.test(css) && /--ds-icon-lg: 24px;/.test(css));
+});
+
 test('type: 21 styles, each sized by --ds-font-scale, tabular numerals, chrome pins the scale', () => {
   const css = fs.readFileSync(gen.OUT, 'utf8');
   const n = t.type.groups.reduce((a, g) => a + g.styles.length, 0);
