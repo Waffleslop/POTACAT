@@ -85,11 +85,12 @@ check('FT-710 zoom: the ten SS05 spans only when the CAT link answers the scope 
   assert.ok(/if \(yaesuScopeCatWritable\(\)\) return Object\.values\(YaesuScope\.SPAN_HZ_BY_CODE\)/.test(fnOf('scopeSpans', 400)));
   const set = fnOf('setScopeSpan');
   assert.ok(/cat\.sendRaw\(`SS05\$\{code\};`\);/.test(set) && /setTimeout\(\(\) => yaesuScopeReadRadio\(\), 300\)/.test(set), 'write, then the radio\'s reply is the truth');
-  assert.ok(/if \(guest\) \{ sendCatLog\(/.test(set), 'a guest may not change the host\'s radio');
+  assert.ok(/if \(guest\) scopeGuestNote\('FT-710 span'\); else scopeGuestOwnerSet\('spanCode', code\);/.test(set), 'a guest may zoom; the owner\'s span is noted first');
 });
-check('CENTER keeps the radio\'s display, is logged as a radio write, and is refused a guest', () => {
+check('CENTER keeps the radio\'s display and is logged as a radio write; a guest\'s is noted for undoing', () => {
   const a = fnOf('setScopeAnchor');
-  assert.ok(/cat\.sendRaw\(`SS06\$\{code\};`\);/.test(a) && /radio write/.test(a) && /if \(guest\)/.test(a));
+  assert.ok(/cat\.sendRaw\(`SS06\$\{code\};`\);/.test(a) && /radio write/.test(a));
+  assert.ok(/if \(guest\) scopeGuestNote\('FT-710 scope mode'\); else scopeGuestOwnerSet\('modeCode', code\);/.test(a));
   const map = /const YAESU_CENTER_CODE_FOR = (\{[^}]+\});/.exec(main)[1];
   const t = eval('(' + map + ')');
   const ScopeAxis = require('../lib/scope-axis');
@@ -103,6 +104,20 @@ check('the pace: 66 ms for the FT-710 on the LAN, 100 ms on Cloud and for every 
   const g = fnOf('scopeRemoteGapMs', 300);
   assert.ok(/return !cloud && yaesuScopeState\.source === 'radio' \? 1000 \/ 15 : 100;/.test(g));
   assert.ok(/gapMs: scopeRemoteGapMs\(false\), cloudGapMs: scopeRemoteGapMs\(true\),/.test(main));
+});
+
+check('Guest Pass (Casey): the owner\'s span and mode come back when the session ends or the owner takes the radio', () => {
+  const note = fnOf('scopeGuestNote', 600);
+  assert.ok(/if \(!scopeGuestRestore\) \{/.test(note), 'noted once, at the guest\'s FIRST change');
+  assert.ok(/spanCode: yaesuScopeState\.spanCode, modeCode: yaesuScopeState\.modeCode/.test(note));
+  const back = fnOf('scopeGuestRestoreOwner');
+  assert.ok(/cat\.sendRaw\(`SS05\$\{r\.spanCode\};`\);/.test(back) && /cat\.sendRaw\(`SS06\$\{r\.modeCode\};`\);/.test(back));
+  assert.ok(/smartSdr\.setPanBandwidth\(r\.spanHz\)/.test(back), 'the Flex pan too');
+  assert.ok(/setTimeout\(\(\) => yaesuScopeReadRadio\(\), 300\);/.test(back) && /guest session over/.test(back), 'then re-read, and logged');
+  assert.ok(/passLeaseStopTransmitters\(info\.reason\);\s*scopeGuestRestoreOwner\(info\.reason \|\| 'ended'\);/.test(main), 'pass ended');
+  assert.ok(/if \(state === 'paused'\) scopeGuestRestoreOwner\('the owner took the radio'\);/.test(main), 'owner take-over');
+  const flex = fnOf('setScopeSpan');
+  assert.ok(/if \(guest\) \{\s*scopeGuestNote\('panadapter span'\);[^\n]*\n\s*\} else \{\s*scopeGuestOwnerSet\('spanHz', span\);\s*settings\.flexScopeSpanHz = span;/.test(flex), 'a guest\'s Flex zoom is never saved as the owner\'s');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

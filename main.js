@@ -28818,16 +28818,74 @@ function yaesuSpanCodeFor(hz) {
   return best;
 }
 
+/**
+ * A Guest Pass may zoom and centre the scope, and the owner's settings come
+ * back when the guest's turn ends (Casey 2026-10-28: "Guests should be
+ * allowed but once guest session is over. It should revert to the owners
+ * settings"). The owner's values are noted at the guest's FIRST change; a
+ * change the owner makes during the session becomes the value to put back.
+ * Restored when the pass ends (expiry, revoke, disconnect) and when the
+ * owner takes the radio (pass paused).
+ */
+let scopeGuestRestore = null;   // { source: 'radio', spanCode, modeCode } | { source: 'flex', spanHz }
+
+function scopeGuestNote(field) {
+  if (!scopeGuestRestore) {
+    scopeGuestRestore = flexScopeOn
+      ? { source: 'flex', spanHz: settings.flexScopeSpanHz || yaesuScopeState.spanHz || null }
+      : { source: 'radio', spanCode: yaesuScopeState.spanCode, modeCode: yaesuScopeState.modeCode };
+    sendCatLog(`[Scope] a Guest Pass client changed the ${field}; the owner's scope settings come back when the session ends`);
+  }
+}
+
+/** The owner changed it during a guest session: that is what to put back. */
+function scopeGuestOwnerSet(key, value) {
+  if (scopeGuestRestore && value != null) scopeGuestRestore[key] = value;
+}
+
+function scopeGuestRestoreOwner(why) {
+  const r = scopeGuestRestore;
+  if (!r) return;
+  scopeGuestRestore = null;
+  if (r.source === 'flex') {
+    if (flexScopeOn && smartSdr && r.spanHz && r.spanHz !== yaesuScopeState.spanHz) {
+      smartSdr.setPanBandwidth(r.spanHz);
+      yaesuScopeState.spanHz = r.spanHz;
+      yaesuScopeBroadcastState();
+    }
+    sendCatLog(`[Scope] guest session over (${why}): Flex panadapter span ${r.spanHz ? YaesuScope.formatSpan(r.spanHz) : 'unchanged'} restored`);
+    return;
+  }
+  if (!yaesuScopeCatWritable()) {
+    sendCatLog(`[Scope] guest session over (${why}): the FT-710 is not reachable over CAT, so its scope span and mode could not be put back`);
+    return;
+  }
+  const parts = [];
+  if (r.spanCode != null && String(r.spanCode) !== String(yaesuScopeState.spanCode)) {
+    cat.sendRaw(`SS05${r.spanCode};`);
+  }
+  if (r.spanCode != null) parts.push('span ' + YaesuScope.formatSpan(YaesuScope.SPAN_HZ_BY_CODE[r.spanCode]));
+  if (r.modeCode != null && String(r.modeCode) !== String(yaesuScopeState.modeCode)) {
+    cat.sendRaw(`SS06${r.modeCode};`);
+  }
+  if (r.modeCode != null) {
+    const m = YaesuScope.modeFromCode(r.modeCode);
+    if (m) parts.push('mode ' + String(m.anchor).toUpperCase() + ' ' + m.display);
+  }
+  sendCatLog(`[Scope] guest session over (${why}): ${parts.join(', ') || 'nothing to put back'} restored`);
+  setTimeout(() => yaesuScopeReadRadio(), 300);
+}
+
 /** Zoom (C2S scope-span, the scope pop-out's - / +): remembered per source.
- *  On the FT-710 it is the radio's own span (SS05), so a Guest Pass may not
- *  change it; the Flex pan is ours, so a guest may zoom it. */
+ *  On the FT-710 it is the radio's own span (SS05). A Guest Pass may zoom
+ *  either; the owner's span comes back after (scopeGuestRestore). */
 function setScopeSpan(hz, origin, { guest = false } = {}) {
   if (!flexScopeOn && yaesuScopeCatWritable()) {
-    if (guest) { sendCatLog('[Scope] a Guest Pass client asked to change the FT-710 span — refused (the host\'s radio settings are not a guest\'s to change)'); return false; }
     const want = Number(hz);
     if (!(want > 0)) return false;
     const code = yaesuSpanCodeFor(want);
     if (code == null || code === String(yaesuScopeState.spanCode)) return false;
+    if (guest) scopeGuestNote('FT-710 span'); else scopeGuestOwnerSet('spanCode', code);
     cat.sendRaw(`SS05${code};`);
     sendCatLog(`[Scope] FT-710 span ${YaesuScope.formatSpan(YaesuScope.SPAN_HZ_BY_CODE[code])} (${origin}) — SS05${code};`);
     setTimeout(() => yaesuScopeReadRadio(), 300);   // the radio's reply is the truth; it broadcasts on change
@@ -28836,8 +28894,13 @@ function setScopeSpan(hz, origin, { guest = false } = {}) {
   if (!flexScopeOn || !smartSdr) return false;
   const span = FlexScope.nearestSpan(hz);
   if (!span) return false;
-  settings.flexScopeSpanHz = span;
-  saveSettings(settings);
+  if (guest) {
+    scopeGuestNote('panadapter span');   // a guest's zoom is not remembered as the owner's
+  } else {
+    scopeGuestOwnerSet('spanHz', span);
+    settings.flexScopeSpanHz = span;
+    saveSettings(settings);
+  }
   smartSdr.setPanBandwidth(span);
   yaesuScopeState.spanHz = span;   // the pan status confirms (or clamps) it
   sendCatLog(`[Scope] Flex panadapter span ${span >= 1e6 ? span / 1e6 + ' MHz' : span / 1e3 + ' kHz'} (${origin})`);
@@ -28852,9 +28915,9 @@ function setScopeSpan(hz, origin, { guest = false } = {}) {
 const YAESU_CENTER_CODE_FOR = { 0: '0', 1: '0', 2: '0', 3: '3', 4: '4', 6: '3', 7: '4', 9: '3', A: '4' };
 function setScopeAnchor(anchor, origin, { guest = false } = {}) {
   if (anchor !== 'center' || flexScopeOn || !yaesuScopeCatWritable()) return false;
-  if (guest) { sendCatLog('[Scope] a Guest Pass client asked to put the FT-710 scope in CENTER — refused (the host\'s radio settings are not a guest\'s to change)'); return false; }
   if (yaesuScopeState.anchor === 'center') { yaesuScopeBroadcastState(); return false; }
   const code = YAESU_CENTER_CODE_FOR[String(yaesuScopeState.modeCode || '0').toUpperCase()] || '0';
+  if (guest) scopeGuestNote('FT-710 scope mode'); else scopeGuestOwnerSet('modeCode', code);
   cat.sendRaw(`SS06${code};`);
   sendCatLog(`[Scope] FT-710 scope set to CENTER (${origin}) — SS06${code}; radio write, it stays in CENTER`);
   setTimeout(() => yaesuScopeReadRadio(), 300);
@@ -33741,6 +33804,7 @@ app.whenReady().then(() => {
       rigPowerReadable: () => true,
     });
     passEnforcement.on('state-change', (state) => {
+      if (state === 'paused') scopeGuestRestoreOwner('the owner took the radio');
       if (win && !win.isDestroyed()) {
         win.webContents.send('pass-enforcement-state', passEnforcement.getSessionStatus());
       }
@@ -33765,6 +33829,7 @@ app.whenReady().then(() => {
       // A pass that ends while the owner has the radio (paused) leaves the
       // owner's own transmitters alone.
       const stopped = info.wasPaused ? [] : passLeaseStopTransmitters(info.reason);
+      scopeGuestRestoreOwner(info.reason || 'ended');
       sendCatLog(`[pass] session ended: ${info.reason}${stopped.length ? ' — stopped ' + stopped.join(', ') : ''}; guest disconnected`);
       // #46a: also broadcast to pass-authed WS clients so mobile gets
       // real-time end (its client-side timer is UX-only).
