@@ -11929,7 +11929,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
     echoCloudSigninBtn.addEventListener('click', function() {
       const email = echoCloudEmail ? echoCloudEmail.value.trim() : '';
       const pass = echoCloudPassword ? echoCloudPassword.value : '';
-      if (!email || !pass) return echoCloudShowError('Enter email and password');
+      if (!email || !pass) return echoCloudShowError('Enter your email or callsign, and your password');
       ws.send(JSON.stringify({ type: 'cloud-login', email: email, password: pass }));
     });
   }
