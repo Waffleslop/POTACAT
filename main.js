@@ -17937,6 +17937,7 @@ function connectSmartSdr() {
   // Only for the slice we actually listen to, and only on a change.
   // The radio's AGC read back into the rig state every surface shows.
   smartSdr.on('slice-agc', ({ index, mode }) => {
+    if (!smartSdr) return;   // a status line can land after quit cleared it
     const target = smartSdr.ourSliceIndex != null ? smartSdr.ourSliceIndex : getFlexSliceIndex();
     if (index !== target || mode === _currentAgcMode) return;
     _currentAgcMode = mode;
@@ -17944,6 +17945,7 @@ function connectSmartSdr() {
   });
   // The rest of the slice's controls, read back the same way (lib/flex-readback.js).
   smartSdr.on('slice-status', ({ index, kv }) => {
+    if (!smartSdr) return;   // a status line can land after quit cleared it
     const target = smartSdr.ourSliceIndex != null ? smartSdr.ourSliceIndex : getFlexSliceIndex();
     if (index !== target) return;
     if (_flexSliceKvIndex !== index) { _flexSliceKv = {}; _flexSliceKvIndex = index; }
