@@ -1778,6 +1778,12 @@
           <span id="rig-setup-summary" class="help-text"></span>
         </div>
         <div id="rig-setup-panel" class="rig-setup-panel hidden"></div>
+        <!-- Icom band scope (docs/icom-band-scope-plan.md): 30 s of what the
+             radio sends, so the scope can be built against a real radio. -->
+        <div id="icom-scope-capture-row" class="rig-setup-row hidden">
+          <button type="button" id="icom-scope-capture-btn" class="rig-btn">Record band scope data (30 s)</button>
+          <span id="icom-scope-capture-result" class="help-text">Helps POTACAT add this radio's band scope. Records the Icom POTACAT is connected to now, then puts the radio's scope settings back.</span>
+        </div>
         <label>CW keying line (USB CW over CAT port):
           <select id="set-cw-key-line" style="width:150px;">
             <option value="auto">Auto (model default)</option>

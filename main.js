@@ -347,6 +347,7 @@ const { RigctldCodec } = require('./lib/codecs/rigctld-codec');
 const { FlrigCodec, flrigModel } = require('./lib/codecs/flrig-codec');
 const { FlrigTransport, probeFlrig } = require('./lib/flrig-transport');
 const { CivCodec } = require('./lib/codecs/civ-codec');
+const IcomScope = require('./lib/icom-scope');
 const { getTuneQuirks, resolveSerialHandshake } = require('./lib/rig-models');
 const { gridToLatLon, latLonToGrid, haversineDistanceMiles, bearing } = require('./lib/grid');
 const ActivationMapData = require('./lib/activation-map-data');
@@ -29051,6 +29052,128 @@ function sdrScopeSettingsChanged(before, after) {
   }
 }
 
+// ═══ Icom band scope: the recording an owner sends us ═════════════════════════
+// The Icom scope source (docs/icom-band-scope-plan.md) is written from Icom's
+// CI-V references and Hamlib's parser; no Icom has been in the shack. Before
+// any of it is shown to an operator, an owner records 30 seconds of what
+// their radio sends (Settings > My Rigs > this radio > Record band scope
+// data) and the file becomes test/fixtures/icom-scope/. POTACAT turns the
+// radio's scope and scope output on for the recording and puts both back.
+const ICOM_SCOPE_CIV_TYPES = ['icom', 'civ-tcp', 'icom-network'];
+let icomScopeCaptureBusy = false;
+
+function icomScopeCaptureTarget() {
+  const rig = (settings.rigs || []).find((r) => r && r.id === settings.activeRigId) || null;
+  const target = (rig && rig.catTarget) || settings.catTarget || {};
+  return { rig, target, model: (rig && rig.model) || target.civModel || '' };
+}
+
+async function icomScopeCapture(seconds = 30) {
+  const { rig, target, model } = icomScopeCaptureTarget();
+  if (!ICOM_SCOPE_CIV_TYPES.includes(target.type)) {
+    return { ok: false, message: 'The active rig is not connected to an Icom over CI-V (Icom USB, CI-V over TCP or Icom Network).' };
+  }
+  if (!cat || !cat.connected || typeof cat.sendScope !== 'function') {
+    return { ok: false, message: 'Connect the radio first: make this the active rig and wait for the CAT link to come up.' };
+  }
+  if (icomScopeCaptureBusy) return { ok: false, message: 'A recording is already running.' };
+  icomScopeCaptureBusy = true;
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const file = path.join(app.getPath('userData'), `icom-scope-capture-${stamp}.txt`);
+  const lines = [
+    `# POTACAT ${app.getVersion()} Icom band scope capture`,
+    `# model=${model || '(none picked)'} transport=${target.type} baud=${target.baudRate || ''} civAddr=${target.civAddr || target.civAddress || ''} rig=${rig ? rig.name || rig.id : ''}`,
+    `# platform=${process.platform} seconds=${seconds}`,
+  ];
+  let bytes = 0;
+  const note = (dir, frame) => {
+    if (bytes > 4 * 1024 * 1024) return;
+    const l = IcomScope.captureLine(dir, frame);
+    bytes += l.length;
+    lines.push(l.trimEnd());
+  };
+  const controller = cat;
+  const waiters = [];
+  const onData = (_payload, frame) => note('rx', frame);
+  const onStatus = (payload, frame) => {
+    note('rx', frame);
+    for (const w of waiters.splice(0)) w.resolve(payload);
+  };
+  const onNak = (sub) => {
+    lines.push(`# NAK for 27 ${sub.toString(16).padStart(2, '0')}`);
+    for (const w of waiters.splice(0)) w.resolve(null);
+  };
+  controller.on('scope-data', onData);
+  controller.on('scope-status', onStatus);
+  controller.on('scope-nak', onNak);
+  const send = (bytesOut) => { const f = controller.sendScope(bytesOut); if (f) note('tx', f); };
+  const ask = (bytesOut) => new Promise((resolve) => {
+    const w = { resolve };
+    waiters.push(w);
+    send(bytesOut);
+    setTimeout(() => { const i = waiters.indexOf(w); if (i >= 0) { waiters.splice(i, 1); resolve(null); } }, 1000);
+  });
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const status = (p) => (p ? IcomScope.parseScopeStatus(p) : null);
+  let scopeWas = null, outputWas = null;
+  try {
+    sendCatLog(`[Scope] Icom capture: recording ${seconds} s of the radio's scope data to ${path.basename(file)}`);
+    scopeWas = status(await ask(IcomScope.read.scopeOn()));
+    outputWas = status(await ask(IcomScope.read.output()));
+    const mode = status(await ask(IcomScope.read.mode()));
+    const span = status(await ask(IcomScope.read.span()));
+    lines.push(`# before: scope=${scopeWas ? (scopeWas.on ? 'on' : 'off') : 'no reply'} output=${outputWas ? (outputWas.on ? 'on' : 'off') : 'no reply'}`
+      + ` mode=${mode ? mode.modeName : 'no reply'} span=${span ? span.spanHz : 'no reply'}`);
+    if (scopeWas && !scopeWas.on) send(IcomScope.write.scopeOn(true));
+    if (!outputWas || !outputWas.on) send(IcomScope.write.output(true));
+    await wait(seconds * 1000);
+  } finally {
+    // Put back what we changed, while the link is still the one we changed it on.
+    if (cat === controller && controller.connected) {
+      if (!outputWas || !outputWas.on) send(IcomScope.write.output(false));
+      if (scopeWas && !scopeWas.on) send(IcomScope.write.scopeOn(false));
+    }
+    await wait(300);
+    controller.removeListener('scope-data', onData);
+    controller.removeListener('scope-status', onStatus);
+    controller.removeListener('scope-nak', onNak);
+    icomScopeCaptureBusy = false;
+  }
+
+  // What the recording holds, read back through the same parser the scope will use.
+  const asm = new IcomScope.SweepAssembler();
+  const sweeps = [];
+  asm.on('sweep', (s) => sweeps.push(s));
+  let dataFrames = 0;
+  for (const l of lines) {
+    const m = /^\S+ rx ([0-9a-f]+)$/.exec(l);
+    if (!m) continue;
+    const f = Buffer.from(m[1], 'hex');
+    if (f[4] === 0x27 && f[5] === 0x00) { dataFrames++; asm.feed(IcomScope.parseScopeFrame(f.subarray(6, f.length - 1))); }
+  }
+  const sum = IcomScope.summarizeSweeps(sweeps);
+  lines.push(`# result: ${dataFrames} data frames, ${sum.sweeps} sweeps, points=${(sum.points || []).join('/')} maxLevel=${sum.maxLevel || 0} dropped=${asm.dropped}`);
+  try { fs.writeFileSync(file, lines.join('\n') + '\n'); } catch (err) {
+    return { ok: false, message: 'Could not write the recording: ' + err.message };
+  }
+  const slow = target.type === 'icom' && Number(target.baudRate) > 0 && Number(target.baudRate) < 57600;
+  let message;
+  if (sum.sweeps) {
+    message = `Recorded ${sum.sweeps} sweeps of ${sum.points.join('/')} points (${sum.mode} mode, `
+      + `${(sum.centerHz / 1e6).toFixed(3)} MHz, ${Math.round(sum.spanHz / 1000)} kHz wide). Thank you. Please send this file to POTACAT.`;
+  } else if (dataFrames) {
+    message = `The radio sent ${dataFrames} scope frames but no complete sweep. Please send this file to POTACAT anyway; it is exactly what we need to see.`;
+  } else if (scopeWas || outputWas) {
+    message = 'The radio answered the scope settings but sent no scope data. Open the scope screen on the radio and record again.';
+  } else {
+    message = 'The radio did not answer any scope command. Check that this Icom has a band scope and that the CI-V address matches.';
+  }
+  if (slow) message += ` (At ${target.baudRate} baud the scope shares a slow link; 115200 on both the radio and POTACAT records better.)`;
+  sendCatLog(`[Scope] Icom capture done: ${dataFrames} data frames, ${sum.sweeps} sweeps, file ${path.basename(file)}`);
+  try { require('electron').shell.showItemInFolder(file); } catch { /* no desktop */ }
+  return { ok: !!dataFrames, file, message, summary: sum, dataFrames };
+}
+
 const hamrsBridge = createWsjtxUdpBridge('HamRS');
 // Logbooks that take QSOs as WSJT-X datagrams (heartbeat, LOGGED_ADIF, then
 // QSO_LOGGED) over hamrsBridge. One list: the startup bridge start, the
@@ -37533,6 +37656,7 @@ app.whenReady().then(() => {
   ipcMain.on('scope-popout-close', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.close(); });
   ipcMain.on('scope-popout-minimize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.minimize(); });
   ipcMain.on('scope-popout-maximize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) { if (w.isMaximized()) w.unmaximize(); else w.maximize(); } });
+  ipcMain.handle('icom-scope-capture', () => icomScopeCapture(30));
   ipcMain.on('scope-enable-on-radio', () => {
     // Remote shack: its own Enable (SCU-LAN10 on the shack's FT-710).
     if (isRemoteMode()) { if (isRemoteLinked()) remoteClient.sendRaw({ type: 'scope-enable-radio' }); else refuseRemoteNotLinked(null); return; }

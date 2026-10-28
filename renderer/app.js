@@ -2663,7 +2663,36 @@ function setRigSetupPanelOpen(open) {
   rigSetupBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
 
+// Icom band scope recording (main.js icomScopeCapture): offered for the
+// three CI-V connection types only.
+const icomScopeCaptureRow = document.getElementById('icom-scope-capture-row');
+const icomScopeCaptureBtn = document.getElementById('icom-scope-capture-btn');
+const icomScopeCaptureResult = document.getElementById('icom-scope-capture-result');
+function refreshIcomScopeCaptureRow() {
+  if (!icomScopeCaptureRow) return;
+  const civ = ['icom', 'civ-tcp', 'icom-network'].includes(getSelectedRadioType());
+  icomScopeCaptureRow.classList.toggle('hidden', !civ || !window.api.icomScopeCapture);
+}
+if (icomScopeCaptureBtn) {
+  icomScopeCaptureBtn.addEventListener('click', async () => {
+    icomScopeCaptureBtn.disabled = true;
+    const label = icomScopeCaptureBtn.textContent;
+    icomScopeCaptureBtn.textContent = 'Recording (30 s)...';
+    icomScopeCaptureResult.textContent = 'Leave the radio on the band you use. The file opens in its folder when it is done.';
+    try {
+      const r = await window.api.icomScopeCapture();
+      icomScopeCaptureResult.textContent = (r && r.message) || 'Nothing was recorded.';
+    } catch (err) {
+      icomScopeCaptureResult.textContent = 'The recording failed: ' + (err && err.message ? err.message : err);
+    } finally {
+      icomScopeCaptureBtn.disabled = false;
+      icomScopeCaptureBtn.textContent = label;
+    }
+  });
+}
+
 async function refreshRigSetupNotes() {
+  refreshIcomScopeCaptureRow();
   if (!rigSetupBtn || !window.api.getRigSetupNotes) return;
   const seq = ++rigSetupSeq;
   let notes = [];
