@@ -227,27 +227,34 @@ check('Settings > My Rigs shows the button for the three CI-V connection types',
 });
 
 // Real radios (test/fixtures/icom-scope/), recorded with the 1.13.6 button.
-check('KW4FM IC-7300 recording: 118 whole sweeps, Center 7.063 MHz, +/-100 kHz, nothing dropped', () => {
-  const text = fs.readFileSync(path.join(__dirname, 'fixtures/icom-scope/kw4fm-ic7300-center-7063-200k.txt'), 'utf8');
-  const asm = new S.SweepAssembler();
-  const sweeps = [];
-  asm.on('sweep', (s) => sweeps.push(s));
-  for (const c of S.parseCapture(text)) {
-    const f = c.frame;
-    if (c.dir === 'rx' && f[4] === 0x27 && f[5] === 0x00) asm.feed(S.parseScopeFrame(f.subarray(6, f.length - 1)));
-  }
-  const sum = S.summarizeSweeps(sweeps);
-  assert.strictEqual(sum.sweeps, 118);
-  assert.deepStrictEqual(sum.points, [475]);
-  assert.strictEqual(sum.mode, 'center');
-  assert.strictEqual(sum.centerHz, 7063000);
-  assert.strictEqual(sum.spanHz, 200000);
-  assert.strictEqual(asm.dropped, 0);
-  assert.ok(sum.maxLevel > 60 && sum.maxLevel <= 160, 'levels stay on the 0..160 scale');
-  assert.deepStrictEqual(S.axisFor(sweeps[0].header), { anchor: 'center', centerHz: 7063000, spanHz: 200000 });
-  // The capture's own summary line agrees with what the parser reads back.
-  assert.ok(/# result: 1307 data frames, 118 sweeps, points=475 maxLevel=121 dropped=0/.test(text));
-});
+const RECORDINGS = [
+  { file: 'kw4fm-ic7300-center-7063-200k.txt', who: 'KW4FM IC-7300', sweeps: 118, centerHz: 7063000, spanHz: 200000, frames: 1307, maxLevel: 121 },
+  { file: 'ic7300-center-14252-100k.txt', who: 'IC-7300 on 20 m', sweeps: 122, centerHz: 14252000, spanHz: 100000, frames: 1347, maxLevel: 79 },
+];
+for (const r of RECORDINGS) {
+  check(`${r.who} recording: ${r.sweeps} whole sweeps, Center ${r.centerHz / 1e6} MHz, +/-${r.spanHz / 2000} kHz, nothing dropped`, () => {
+    const text = fs.readFileSync(path.join(__dirname, 'fixtures/icom-scope', r.file), 'utf8');
+    const asm = new S.SweepAssembler();
+    const sweeps = [];
+    asm.on('sweep', (s) => sweeps.push(s));
+    for (const c of S.parseCapture(text)) {
+      const f = c.frame;
+      if (c.dir === 'rx' && f[4] === 0x27 && f[5] === 0x00) asm.feed(S.parseScopeFrame(f.subarray(6, f.length - 1)));
+    }
+    const sum = S.summarizeSweeps(sweeps);
+    assert.strictEqual(sum.sweeps, r.sweeps);
+    assert.deepStrictEqual(sum.points, [475]);
+    assert.strictEqual(sum.mode, 'center');
+    assert.strictEqual(sum.centerHz, r.centerHz);
+    assert.strictEqual(sum.spanHz, r.spanHz);
+    assert.strictEqual(sum.maxLevel, r.maxLevel);
+    assert.ok(sum.maxLevel <= 160, 'levels stay on the 0..160 scale');
+    assert.strictEqual(asm.dropped, 0);
+    assert.deepStrictEqual(S.axisFor(sweeps[0].header), { anchor: 'center', centerHz: r.centerHz, spanHz: r.spanHz });
+    // The capture's own summary line agrees with what the parser reads back.
+    assert.ok(text.includes(`# result: ${r.frames} data frames, ${r.sweeps} sweeps, points=475 maxLevel=${r.maxLevel} dropped=0`));
+  });
+}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
