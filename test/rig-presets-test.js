@@ -258,4 +258,26 @@ test('Monitor (K8IKO): MON on/off and level are preset fields, sent only to a ri
   assert.ok(/case 'set-mon': \{/.test(main) && /case 'set-mon-level': \{/.test(main), 'the dispatcher verbs the fields name');
 });
 
+test('NB and NR levels (N0KAH, FTX-1): the radio\'s own steps, sent after the switch, never undoing an off', () => {
+  const ftx1 = { nb: true, nbLevel: true, nr: true, nrLevel: false, dnrLevel: true, maxNbLevel: 10, maxDnrLevel: 10 };
+  const p = RP.sanitizePresets([{ name: 'Noisy', nb: true, nbLevel: 6, nr: true, dnrLevel: 4, nrLevel: 50 }])[0];
+  assert.deepStrictEqual(RP.presetCommands(p, ftx1), [
+    { action: 'set-nb', value: true, field: 'nb' },
+    { action: 'set-nb-level', value: 6, field: 'nbLevel' },
+    { action: 'set-nr', value: true, field: 'nr' },
+    { action: 'set-dnr-level', value: 4, field: 'dnrLevel' },
+  ], 'the FTX-1 takes DNR, not the percent NR level');
+  assert.strictEqual(RP.describePreset(p, ftx1).text, 'NB on · NB 6 · NR on · DNR 4');
+  const off = RP.sanitizePresets([{ name: 'Quiet', nb: false, nbLevel: 6, nr: false, dnrLevel: 4 }])[0];
+  assert.deepStrictEqual(RP.presetCommands(off, ftx1).map((c) => c.action), ['set-nb', 'set-nr'], 'an off switch is not turned back on by its level');
+  const snap = RP.snapshotPreset('Now', { nbLevel: 3, dnrLevel: 7 });
+  assert.strictEqual(snap.nbLevel, 3);
+  assert.strictEqual(snap.dnrLevel, 7);
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.ok(/case 'set-nb-level': \{/.test(main) && /case 'set-dnr-level': \{/.test(main) && /case 'set-nr-level': \{/.test(main));
+  assert.ok(/nbLevel: _currentNbLevel,/.test(main) && /dnrLevel: _currentDnrLevel,/.test(main), '"Use current" reads them from the rig state');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  assert.ok(/const top = f\.maxCap && caps\[f\.maxCap\] != null \? caps\[f\.maxCap\] : f\.max;/.test(app) && /ctl\.max = top;/.test(app), 'the editor caps the input at the radio\'s top step');
+});
+
 console.log(`\nrig-presets: ${passed} passed`);

@@ -200,7 +200,9 @@ section('Mobile handoff follow-ups (2026-09-21)');
 
 check('1. the remote scope-state is an explicit field list — never helperPath', () => {
   const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf-8');
-  const fn = mainSrc.slice(mainSrc.indexOf('function yaesuScopeRemotePayload'), mainSrc.indexOf('function yaesuScopeBroadcastState'));
+  // The function body only: the helpers after it talk about frames in their comments.
+  const start = mainSrc.indexOf('function yaesuScopeRemotePayload');
+  const fn = start < 0 ? '' : mainSrc.slice(start, mainSrc.indexOf('\n}', start) + 2);
   assert.ok(fn.length > 0, 'yaesuScopeRemotePayload missing');
   assert.ok(!/\.\.\.yaesuScopeState\b/.test(fn) && !/helperPath|frames|misaligned/.test(fn), 'remote payload must not spread the local state');
   assert.ok(mainSrc.includes('remoteServer.broadcastScopeState(yaesuScopeRemotePayload())'), 'broadcast must use the remote payload');
@@ -290,6 +292,15 @@ check('CENTER mode: VFO ± span/2, first bin at the low edge, last at the high e
 check('CURSOR and FIX modes are assumed, not known', () => {
   assert.strictEqual(S.scopeAxis({ centerHz: 14074000, spanHz: 10000, anchor: 'cursor' }).known, false);
   assert.strictEqual(S.scopeAxis({ centerHz: 14074000, spanHz: 10000, anchor: 'fix' }).known, false);
+});
+
+check('PAN (a panadapter that reports its own centre and span) is known; one label for every screen', () => {
+  assert.strictEqual(S.scopeAxis({ centerHz: 14100000, spanHz: 200000, anchor: 'pan' }).known, true);
+  assert.strictEqual(S.scopeAxis({ centerHz: 0, spanHz: 200000, anchor: 'pan' }).known, false, 'no centre reported yet');
+  const A = require('../lib/scope-axis');
+  assert.strictEqual(A.anchorLabel('pan'), 'PANADAPTER');
+  assert.strictEqual(A.anchorLabel('fix'), 'FIX (axis assumed)');
+  assert.strictEqual(A.anchorLabel('center'), 'CENTER');
 });
 
 check('a frequency outside the window maps to null', () => {

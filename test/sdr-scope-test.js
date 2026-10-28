@@ -306,14 +306,14 @@ function bodyOf(name) {
 test('main: any rig with an SDR source advertises a scope', () => {
   assert.ok(/if \(!caps\.nativeScope && sdrScopeSettingsForActiveRig\(\)\.enabled\) caps\.nativeScope = 'sdr';/.test(bodyOf('getRigCapabilities')));
   const k = bodyOf('scopeSourceKind');
-  assert.ok(/sdr\.enabled && \(!native \|\| sdr\.preferSdr\)/.test(k), 'the FT-710 keeps its own scope unless the SDR is preferred');
+  assert.ok(/sdr\.enabled && \(sdr\.preferSdr \|\| \(!native && !flex\)\)/.test(k), 'the radio\'s own scope (FT-710, Flex Direct pan) wins unless the SDR is preferred');
   assert.ok(/available: yaesuScopeSynth \|\| !!scopeSourceKind\(\)/.test(bodyOf('yaesuScopeStatePayload')));
   assert.ok(/available: yaesuScopeSynth \|\| !!scopeSourceKind\(\)/.test(bodyOf('yaesuScopeRemotePayload')));
   assert.ok(/source: s\.source/.test(bodyOf('yaesuScopeRemotePayload')), 'ECHOCAT learns the source (explicit field list)');
 });
 
 test('main: start/stop/follow route through the one scope state', () => {
-  assert.ok(/if \(!synth && scopeSourceKind\(\) === 'sdr'\) \{ startSdrScope\(\); return; \}/.test(bodyOf('startYaesuScope')));
+  assert.ok(/const kind = synth \? null : scopeSourceKind\(\);/.test(bodyOf('startYaesuScope')) && /if \(kind === 'sdr'\) \{ startSdrScope\(\); return; \}/.test(bodyOf('startYaesuScope')));
   assert.ok(/if \(sdrScopeClient\) \{ stopSdrScope\(why\); return; \}/.test(bodyOf('stopYaesuScope')));
   assert.ok(/sdrScopeFollowDial\(hz\)/.test(bodyOf('yaesuScopeNoteFrequency')), 'the dial sink retunes the SDR');
   const st = bodyOf('startSdrScope');

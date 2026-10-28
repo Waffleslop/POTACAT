@@ -234,6 +234,14 @@ async function test(name, fn) {
   await test('Dire Wolf output that needs action is named — a build without Hamlib above all', () => {
     assert.strictEqual(D.classifyDirewolfLine('Config file line 7: PTT with RIG is only available when hamlib support is enabled.'), 'no-hamlib');
     assert.strictEqual(D.classifyDirewolfLine('Ready to accept AGW client application 0 on port 8010 ...'), 'ready');
+    // What it heard (FT-991A packet, NumReceived 0): the only proof RX audio reached the modem.
+    assert.strictEqual(D.classifyDirewolfLine('W1ABC-10 audio level = 48(12/11)   [NONE]   ||||||___'), 'heard');
+    assert.strictEqual(D.classifyDirewolfLine('[0.3] W1ABC-10>K3SBP:(UA res, f=1)'), 'frame');
+    assert.strictEqual(D.classifyDirewolfLine('[0L] K3SBP>W1ABC-10:(SABME cmd, p=1)'), 'frame');
+    assert.strictEqual(D.classifyDirewolfLine('Dire Wolf version 1.7'), 'log');
+    const mainSrc = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+    assert.ok(/kind === 'heard' \|\| kind === 'frame'/.test(mainSrc), 'heard frames bypass the 40-line startup cap');
+    assert.ok(/mode === 'packet' && _direwolfHeard === 0/.test(mainSrc), 'a packet failure with nothing decoded says so');
     assert.strictEqual(D.classifyDirewolfLine('"XYZ" doesn\'t match any of the input devices.'), 'device-error');
     assert.strictEqual(D.direwolfSupported('darwin'), true, 'macOS since the socket audio backend');
     assert.strictEqual(D.direwolfSupported('freebsd'), false);

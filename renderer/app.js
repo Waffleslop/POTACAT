@@ -1038,7 +1038,6 @@ const dxccAwardLabelEl = document.getElementById('dxcc-award-label');
 const dxccChallengeEl = document.getElementById('dxcc-challenge');
 const setEnableCluster = document.getElementById('set-enable-cluster');
 const setEnableCwSpots = document.getElementById('set-enable-cwspots');
-const setEnableRbn = document.getElementById('set-enable-rbn');
 const setEnableWsjtx = document.getElementById('set-enable-wsjtx');
 const wsjtxConfig = document.getElementById('wsjtx-config');
 const setWsjtxPort = document.getElementById('set-wsjtx-port');
@@ -1047,8 +1046,6 @@ const setWsjtxAutoLog = document.getElementById('set-wsjtx-auto-log');
 const wsjtxStatusEl = document.getElementById('wsjtx-status');
 const setEnablePskr = document.getElementById('set-enable-pskr');
 const pskrConfig = document.getElementById('pskr-config');
-const setEnablePskrMap = document.getElementById('set-enable-pskr-map');
-const pskrMapConfig = document.getElementById('pskr-map-config');
 const connPskrMap = document.getElementById('conn-pskr-map');
 const setPskrUpload = document.getElementById('set-pskr-upload');
 const pskrUploadConfig = document.getElementById('pskr-upload-config');
@@ -1080,7 +1077,6 @@ const netSaveBtn = document.getElementById('net-save-btn');
 const netCancelBtn = document.getElementById('net-cancel-btn');
 const setShowBeacons = document.getElementById('set-show-beacons');
 const setShowDxBar = document.getElementById('set-show-dx-bar');
-const rbnConfig = document.getElementById('rbn-config');
 // Settings connection pills
 const connBar = document.getElementById('settings-conn-status');
 const connCluster = document.getElementById('conn-cluster');
@@ -1269,19 +1265,12 @@ const clublogUploadBtn = document.getElementById('clublog-upload-btn');
 const clublogUploadResult = document.getElementById('clublog-upload-result');
 const distHeader = document.getElementById('dist-header');
 const utcClockEl = document.getElementById('utc-clock');
-const sfiStatusEl = document.getElementById('sfi-status');
-const kStatusEl = document.getElementById('k-status');
-const aStatusEl = document.getElementById('a-status');
 const setColorblind = document.getElementById('set-colorblind');
 const setWcagMode = document.getElementById('set-wcag-mode');
 const setColorRows = document.getElementById('set-color-rows');
-const setEnableSolar = document.getElementById('set-enable-solar');
-const setEnableBandActivity = document.getElementById('set-enable-band-activity');
 const setShowBearing = document.getElementById('set-show-bearing');
-const setEnableLogging = document.getElementById('set-enable-logging');
 const setEnableBannerLogger = document.getElementById('set-enable-banner-logger');
 const setN1mmRst = document.getElementById('set-n1mm-rst');
-const loggingConfig = document.getElementById('logging-config');
 const setAdifLogPath = document.getElementById('set-adif-log-path');
 const adifLogBrowseBtn = document.getElementById('adif-log-browse-btn');
 const adifImportBtn = document.getElementById('adif-import-btn');
@@ -1308,6 +1297,7 @@ const extraUdpConfig = document.getElementById('extra-udp-config');
 const setExtraUdpHost = document.getElementById('set-extra-udp-host');
 const setExtraUdpPort = document.getElementById('set-extra-udp-port');
 const setExtraUdpFormat = document.getElementById('set-extra-udp-format');
+const setExtraUdpDecodes = document.getElementById('set-extra-udp-decodes');
 if (setExtraUdp) {
   setExtraUdp.addEventListener('change', () => {
     extraUdpConfig.classList.toggle('hidden', !setExtraUdp.checked);
@@ -2010,7 +2000,7 @@ async function loadPrefs() {
       enableDxeSources[k] = settings.enableDxeSources[k] !== false;
     }
   }
-  enableSolar = settings.enableSolar === true;   // default false
+  enableSolar = true; // always on (lib/install-defaults.js ALWAYS_ON)
   // PSTRotator — show quick-toggle when rotor is configured
   rotorConfigured = !!settings.enableRotor;
   // Checked = the antenna actually turns on every QSY; Manual mode never does.
@@ -2019,10 +2009,9 @@ async function loadPrefs() {
   quickRotorDivider.classList.toggle('hidden', !rotorConfigured);
   // Color rows — default true (on)
   spotsTable.classList.toggle('no-source-tint', settings.colorRows === false);
-  enableBandActivity = settings.enableBandActivity === true; // default false
-  updateSolarVisibility();
+  enableBandActivity = true; // always on
   qrzFullName = settings.qrzFullName === true;
-  enableLogging = settings.enableLogging === true;
+  enableLogging = true; // always on; cloud sync is the choice
   enableBannerLogger = settings.enableBannerLogger === true;
   // Sync custom CAT buttons from settings.json (authoritative source for ECHOCAT sync)
   if (settings.customCatButtons && Array.isArray(settings.customCatButtons)) {
@@ -2182,7 +2171,7 @@ async function loadPrefs() {
         setView('table');
         window.api.jtcatPopoutOpen();
       } else
-      if (viewState.lastView === 'rbn' && (enableRbn || enablePskrMap)) {
+      if (viewState.lastView === 'rbn') {
         setView('rbn');
       } else if (viewState.lastView === 'dxcc' && enableDxcc) {
         setView('dxcc');
@@ -2674,7 +2663,36 @@ function setRigSetupPanelOpen(open) {
   rigSetupBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
 
+// Icom band scope recording (main.js icomScopeCapture): offered for the
+// three CI-V connection types only.
+const icomScopeCaptureRow = document.getElementById('icom-scope-capture-row');
+const icomScopeCaptureBtn = document.getElementById('icom-scope-capture-btn');
+const icomScopeCaptureResult = document.getElementById('icom-scope-capture-result');
+function refreshIcomScopeCaptureRow() {
+  if (!icomScopeCaptureRow) return;
+  const civ = ['icom', 'civ-tcp', 'icom-network'].includes(getSelectedRadioType());
+  icomScopeCaptureRow.classList.toggle('hidden', !civ || !window.api.icomScopeCapture);
+}
+if (icomScopeCaptureBtn) {
+  icomScopeCaptureBtn.addEventListener('click', async () => {
+    icomScopeCaptureBtn.disabled = true;
+    const label = icomScopeCaptureBtn.textContent;
+    icomScopeCaptureBtn.textContent = 'Recording (30 s)...';
+    icomScopeCaptureResult.textContent = 'Leave the radio on the band you use. The file opens in its folder when it is done.';
+    try {
+      const r = await window.api.icomScopeCapture();
+      icomScopeCaptureResult.textContent = (r && r.message) || 'Nothing was recorded.';
+    } catch (err) {
+      icomScopeCaptureResult.textContent = 'The recording failed: ' + (err && err.message ? err.message : err);
+    } finally {
+      icomScopeCaptureBtn.disabled = false;
+      icomScopeCaptureBtn.textContent = label;
+    }
+  });
+}
+
 async function refreshRigSetupNotes() {
+  refreshIcomScopeCaptureRow();
   if (!rigSetupBtn || !window.api.getRigSetupNotes) return;
   const seq = ++rigSetupSeq;
   let notes = [];
@@ -3726,16 +3744,12 @@ function updateSettingsConnBar() {
 }
 
 function updateRbnButton() {
-  const propEnabled = enableRbn || enablePskrMap;
-  if (propEnabled) {
-    viewRbnBtn.classList.remove('hidden');
-  } else {
-    viewRbnBtn.classList.add('hidden');
-    if (currentView === 'rbn') setView('table');
-  }
-  // Update source toggle visibility based on which sources are enabled
-  propShowRbnEl.closest('label').classList.toggle('hidden', !enableRbn);
-  propShowPskrEl.closest('label').classList.toggle('hidden', !enablePskrMap);
+  // Propagation (RBN + PSKReporter "where am I heard") is always on: main
+  // collects both whenever a callsign is set, so there is nothing to enable
+  // (Casey 2026-10-27: "always working for everyone").
+  viewRbnBtn.classList.remove('hidden');
+  propShowRbnEl.closest('label').classList.remove('hidden');
+  propShowPskrEl.closest('label').classList.remove('hidden');
   // Also update the activator toolbar RBN button (safe even before DOM ref is set)
   if (typeof updateActivatorRbnButton === 'function') updateActivatorRbnButton();
 }
@@ -4189,7 +4203,10 @@ async function saveBannerQso() {
     try {
       const parkData = await window.api.getPark(potaRef);
       const states = parkData ? parkStatesFromLocationLocal(parkData.locationDesc) : [];
-      if (states.length > 1) parkState = await promptParkState(potaRef, parkData.locationDesc);
+      // Their spot's locationCode says where they are; ask only when it doesn't.
+      const fromSpot = states.length > 1 && window.api.spotParkState ? await window.api.spotParkState(potaRef, callsigns[0]) : '';
+      if (fromSpot) parkState = fromSpot;
+      else if (states.length > 1) parkState = await promptParkState(potaRef, parkData.locationDesc);
     } catch {}
   }
 
@@ -4969,11 +4986,6 @@ clusterAddBtn.addEventListener('click', () => {
   clusterCustomFields.classList.add('hidden');
 });
 
-// RBN checkbox toggles RBN config visibility
-setEnableRbn.addEventListener('change', () => {
-  rbnConfig.classList.toggle('hidden', !setEnableRbn.checked);
-});
-
 // WSJT-X checkbox toggles config visibility + warns about the CAT handover
 // before letting the user check the box (same confirm the CAT popover uses).
 setEnableWsjtx.addEventListener('change', () => {
@@ -4987,9 +4999,6 @@ setEnableWsjtx.addEventListener('change', () => {
 
 setEnablePskr.addEventListener('change', () => {
   pskrConfig.classList.toggle('hidden', !setEnablePskr.checked);
-});
-setEnablePskrMap.addEventListener('change', () => {
-  pskrMapConfig.classList.toggle('hidden', !setEnablePskrMap.checked);
 });
 if (setPskrUpload) {
   setPskrUpload.addEventListener('change', () => {
@@ -5407,6 +5416,33 @@ if (setMercuryEnable) {
       if (!r || !r.ok) { acctStatus.textContent = (r && r.error) || 'Could not check'; return; }
       acctStatus.textContent = r.exists ? `${r.callsign} has a Winlink account.` : `${r.callsign} has no Winlink account yet.`;
       regBox.classList.toggle('hidden', !!r.exists);
+      if (r.exists) showWinlinkRecovery(); else if (recBox) recBox.classList.add('hidden');
+    });
+    // An existing account's recovery address: read through Pat with the
+    // saved password, changed in place.
+    const recBox = document.getElementById('winlink-recovery-box');
+    const recCurrent = document.getElementById('winlink-recovery-current');
+    const recStatus = document.getElementById('winlink-recovery-status');
+    async function showWinlinkRecovery() {
+      if (!recBox || !window.api.winlinkRecoveryEmailGet) return;
+      recBox.classList.remove('hidden');
+      recCurrent.textContent = '…';
+      recStatus.textContent = '';
+      const r = await window.api.winlinkRecoveryEmailGet();
+      if (r && r.ok) recCurrent.textContent = r.email || 'none set';
+      else { recCurrent.textContent = 'unknown'; recStatus.textContent = (r && r.error) || 'Could not read it (is your Winlink password saved?)'; }
+    }
+    const recChange = document.getElementById('winlink-recovery-change');
+    if (recChange) recChange.addEventListener('click', async () => {
+      const input = document.getElementById('set-winlink-recovery-new');
+      const email = input.value.trim();
+      if (!email) { recStatus.textContent = 'Type the new address first'; return; }
+      recChange.disabled = true;
+      recStatus.textContent = 'Saving…';
+      const r = await window.api.winlinkRecoveryEmailSet(email);
+      recChange.disabled = false;
+      if (r && r.ok) { recCurrent.textContent = email; input.value = ''; recStatus.textContent = 'Changed.'; }
+      else recStatus.textContent = (r && r.error) || 'Could not change it';
     });
     const regBtn = document.getElementById('winlink-register-btn');
     if (regBtn) regBtn.addEventListener('click', async () => {
@@ -5780,6 +5816,7 @@ function _gpFmtRemaining(seconds) {
   const cardOffer = document.getElementById('cloud-prompt-offer');
   const startBtn = document.getElementById('cloud-prompt-start');
   const laterBtn = document.getElementById('cloud-prompt-later');
+  const neverBtn = document.getElementById('cloud-prompt-never');
   let promptShown = false;
   let promptTries = 0;
 
@@ -5793,12 +5830,16 @@ function _gpFmtRemaining(seconds) {
     const settingsDlg = document.getElementById('settings-dialog');
     const otherCardVisible = (ssCard && !ssCard.classList.contains('hidden'))
       || (whatsNew && whatsNew.open) || (settingsDlg && settingsDlg.open);
-    const d = Billing.decideCloudPrompt({ ...inputs, otherCardVisible, shownThisLaunch: promptShown });
+    // Typing anywhere (a callsign, a log form, a macro): never over it.
+    const a = document.activeElement;
+    const typing = !!(a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT' || a.isContentEditable));
+    const d = Billing.decideCloudPrompt({ ...inputs, otherCardVisible, typing, shownThisLaunch: promptShown });
     if (d.show) {
       promptShown = true;
       const copy = Billing.promptCopy(d.qsos);
       if (cardText) cardText.textContent = copy.body;
       if (cardOffer) cardOffer.textContent = copy.offer;
+      if (neverBtn) neverBtn.classList.toggle('hidden', !d.offerNever);
       card.classList.remove('hidden');
       return;
     }
@@ -5808,15 +5849,19 @@ function _gpFmtRemaining(seconds) {
   function hidePrompt() { if (card) card.classList.add('hidden'); }
   if (startBtn) startBtn.addEventListener('click', () => {
     hidePrompt();
-    if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register', autoUpload: true });
+    if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register', autoUpload: true, entry: 'cloud-prompt' });
   });
   if (laterBtn) laterBtn.addEventListener('click', () => {
     hidePrompt();
     if (window.api.cloudPromptSnooze) window.api.cloudPromptSnooze().catch(() => {});
   });
-  // After the Station Setup launch card (12 s) and What's New have had
-  // their turn; the decision re-checks that nothing else is on screen.
-  setTimeout(promptCheck, 25000);
+  if (neverBtn) neverBtn.addEventListener('click', () => {
+    hidePrompt();
+    if (window.api.cloudPromptNever) window.api.cloudPromptNever().catch(() => {});
+  });
+  // Never in the first two minutes: they opened POTACAT to do something.
+  // The decision re-checks that nothing else is on screen.
+  setTimeout(promptCheck, (Billing && Billing.PROMPT_LAUNCH_DELAY_MS) || 120000);
 })();
 
 let _gpOwnerBannerTimer = null;
@@ -5834,7 +5879,26 @@ function _gpUpdateOwnerBanner(status) {
   }
   const callEl = document.getElementById('gp-owner-callsign');
   const expEl = document.getElementById('gp-owner-expires');
-  if (callEl) callEl.textContent = (status.operatorCallsign || status.controlOperatorCallsign || 'Guest').toString().toUpperCase();
+  // The lease: who has the radio, and the call it is on the air as (the
+  // guest's own; '' = an unverified guest who may only listen).
+  const onAir = String(status.onAirCallsign || '').toUpperCase().trim();
+  const guest = String(status.guestCallsign || status.operatorCallsign || onAir || 'a guest').toUpperCase();
+  if (callEl) callEl.textContent = guest;
+  // Paused: the owner took the radio back; the pass keeps counting down.
+  const paused = status.state === 'paused';
+  const showEl = (id, on) => { const el = document.getElementById(id); if (el) el.classList.toggle('hidden', !on); };
+  showEl('gp-owner-lent', !paused);
+  showEl('gp-owner-paused', paused);
+  showEl('gp-owner-takeover', !paused);
+  showEl('gp-owner-giveback', paused);
+  const pausedCallEl = document.getElementById('gp-owner-paused-call');
+  if (pausedCallEl) pausedCallEl.textContent = guest;
+  const onAirEl = document.getElementById('gp-owner-onair');
+  const onAirCallEl = document.getElementById('gp-owner-onair-call');
+  const noCallEl = document.getElementById('gp-owner-nocall');
+  if (onAirCallEl) onAirCallEl.textContent = onAir;
+  if (onAirEl) onAirEl.classList.toggle('hidden', !onAir);
+  if (noCallEl) noCallEl.classList.toggle('hidden', !!onAir);
   _gpOwnerBannerExpiresAtMs = status.expiresAt ? new Date(status.expiresAt).getTime() : 0;
   const tick = () => {
     if (!_gpOwnerBannerExpiresAtMs) {
@@ -5851,9 +5915,20 @@ function _gpUpdateOwnerBanner(status) {
   banner.classList.remove('hidden');
 }
 
+async function _gpTakeOverFromOwnerBanner() {
+  if (!window.api || !window.api.passTakeOver) return;
+  try { await window.api.passTakeOver(); } catch (err) { console.error('[Guest Pass] take over failed:', err); }
+}
+async function _gpGiveBackFromOwnerBanner() {
+  if (!window.api || !window.api.passGiveBack) return;
+  try { await window.api.passGiveBack(); } catch (err) { console.error('[Guest Pass] give back failed:', err); }
+}
+
 async function _gpRevokeFromOwnerBanner() {
   if (!window.api || !window.api.passEnforcementEnd) return;
-  const ok = confirm('End this guest\'s access to your rig?');
+  // Ends this session only: the pass stays valid until it expires or is
+  // revoked in Share My Rig, so the guest can come back.
+  const ok = confirm('End this guest\'s session now? They can reconnect while the pass lasts. To stop that, revoke the pass in Share My Rig.');
   if (!ok) return;
   try {
     await window.api.passEnforcementEnd('owner_override');
@@ -5865,8 +5940,10 @@ async function _gpRevokeFromOwnerBanner() {
 
 // Initialize banner + listeners as soon as the renderer is ready.
 (function _gpInitOwnerBanner() {
-  const banner = document.getElementById('gp-owner-banner');
-  if (banner) banner.addEventListener('click', _gpRevokeFromOwnerBanner);
+  const bind = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); };
+  bind('gp-owner-takeover', _gpTakeOverFromOwnerBanner);
+  bind('gp-owner-giveback', _gpGiveBackFromOwnerBanner);
+  bind('gp-owner-end', _gpRevokeFromOwnerBanner);
   if (window.api && window.api.passEnforcementGetState) {
     window.api.passEnforcementGetState().then(_gpUpdateOwnerBanner).catch(() => {});
   }
@@ -6333,11 +6410,48 @@ async function refreshLauncherStatus() {
     if (launcherInstallBtn)   launcherInstallBtn.classList.toggle('hidden', installed);
     if (launcherStartBtn)     launcherStartBtn.classList.toggle('hidden', !(installed && !running));
     if (launcherUninstallBtn) launcherUninstallBtn.classList.toggle('hidden', !installed);
+    renderLauncherCloud(s);
   } catch (err) {
     launcherStatusPill.textContent = 'status unavailable';
     launcherStatusPill.style.color = '#888';
   }
 }
+// Restart from anywhere: the launcher's own connector on the Cloud Tunnel.
+function launcherCloudText(s) {
+  if (!s.viaCloud) return { text: 'Restart from anywhere is off: the phone can restart POTACAT on your network and over Tailscale only.', color: '#888' };
+  if (!s.tunnelOn) return { text: 'Turn on the Cloud Tunnel (Cloud tab) to restart POTACAT from outside your network.', color: '#888' };
+  if (!s.running) return { text: 'Start the launcher to restart POTACAT from anywhere.', color: '#f0a500' };
+  switch (s.cloud) {
+    case 'replica-up': return { text: 'Reachable from anywhere through ' + s.cloudHost + ', even while POTACAT is closed.', color: '#4ecca3' };
+    case 'replica-starting': return { text: 'Connecting the launcher to your Cloud Tunnel…', color: '#f0a500' };
+    case 'no-cloudflared': return { text: 'The launcher could not find cloudflared, so it cannot reach the Cloud Tunnel.', color: '#e94560' };
+    case null: case undefined: return { text: 'Restart the launcher (Uninstall, then Install) to pick up restart from anywhere.', color: '#f0a500' };
+    default: return { text: 'Waiting for the launcher to connect to your Cloud Tunnel.', color: '#f0a500' };
+  }
+}
+function renderLauncherCloud(s) {
+  const row = document.getElementById('launcher-via-cloud-row');
+  const box = document.getElementById('launcher-via-cloud');
+  const line = document.getElementById('launcher-cloud-line');
+  if (!row || !box || !line) return;
+  const show = !!s.installed;
+  row.classList.toggle('hidden', !show);
+  line.classList.toggle('hidden', !show);
+  if (!show) return;
+  box.checked = s.viaCloud !== false;
+  const t = launcherCloudText(s);
+  line.textContent = t.text;
+  line.style.color = t.color;
+}
+(function bindLauncherViaCloud() {
+  const box = document.getElementById('launcher-via-cloud');
+  if (!box || !window.api.launcherSetViaCloud) return;
+  box.addEventListener('change', async () => {
+    try { renderLauncherCloud(await window.api.launcherSetViaCloud(box.checked)); } catch {}
+    // The launcher reads its config every 5 s; look again once it has.
+    setTimeout(refreshLauncherStatus, 7000);
+  });
+})();
 if (launcherInstallBtn) {
   launcherInstallBtn.addEventListener('click', async () => {
     launcherInstallBtn.disabled = true;
@@ -6848,7 +6962,6 @@ function _shareRigOpen() {
   if (!dlg) return;
   // Reset to form view, pre-fill callsigns from current settings.
   _shareRigShowFormView();
-  _shareRigPrefillCallsigns();
   _shareRigUpdateClassDetail();
   _shareRigUpdateReachNotice();
   _shareRigResetWhenSection();
@@ -6975,17 +7088,6 @@ function _shareRigShowResultView() {
   document.getElementById('share-rig-result-view').classList.remove('hidden');
 }
 
-async function _shareRigPrefillCallsigns() {
-  try {
-    const s = await window.api.getSettings();
-    const my = (s && s.myCallsign) ? String(s.myCallsign).toUpperCase() : '';
-    const station = document.getElementById('share-rig-station');
-    const control = document.getElementById('share-rig-control');
-    if (station && !station.value && my) station.value = my;
-    if (control && !control.value && my) control.value = my;
-  } catch {}
-}
-
 function _shareRigUpdateClassDetail() {
   const sel = document.getElementById('share-rig-class');
   const detail = document.getElementById('share-rig-class-detail');
@@ -7013,9 +7115,14 @@ async function _shareRigIssue() {
   const btn = document.getElementById('share-rig-issue');
   const watts = _shareRigSelectedWatts();
   const cls = document.getElementById('share-rig-class').value || 'general';
-  const station = (document.getElementById('share-rig-station').value || '').toUpperCase().trim() || null;
-  const operator = (document.getElementById('share-rig-operator').value || '').toUpperCase().trim() || null;
-  const control = (document.getElementById('share-rig-control').value || '').toUpperCase().trim() || null;
+  // Who the pass is for. The cloud lets only that account redeem it, and the
+  // call goes on the air; blank = anyone with the link, under their own
+  // account's call. The same value rides the legacy station_callsign field
+  // so a shack on an older build identifies the same way.
+  const forCall = (document.getElementById('share-rig-for').value || '').toUpperCase().replace(/[^A-Z0-9/]/g, '').slice(0, 15) || null;
+  const station = forCall;
+  const operator = forCall;
+  const control = null;
 
   // Body branches on When? mode. The "starts now" branch keeps the
   // legacy duration_seconds shape — backwards compatible with every
@@ -7080,12 +7187,13 @@ async function _shareRigIssue() {
           && res.billing.state !== 'none' && res.billing.state !== 'trial_expired') {
         window.api.cloudOpenBillingAction(res.billing).catch(() => {});
       } else if (res && res.error === 'subscription_required' && typeof window.openCloudSignup === 'function') {
-        window.openCloudSignup({});
+        window.openCloudSignup({ entry: 'share-rig' });
       }
       return;
     }
     _shareRigShowResultView();
     document.getElementById('share-rig-result-code').textContent = res.code || '';
+    document.getElementById('share-rig-result-for').textContent = forCall || 'Anyone with the link, under their own callsign';
     document.getElementById('share-rig-result-url').textContent = res.share_url || '';
     // Surface whether the recipient will need to sign in or not. The
     // copy here is the source of truth — the operator just made this
@@ -7285,7 +7393,7 @@ function _esc(s) {
     if (!a) return;
     e.preventDefault();
     // Signed out → the free-trial form; signed in → the subscribe section.
-    if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register' });
+    if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register', entry: 'notice' });
   });
 
   const issueBtn = document.getElementById('share-rig-issue');
@@ -8905,7 +9013,7 @@ function _wireSummaryCardActionsOnce() {
       if (act === 'cloud-signup') {
         // Signed out: the in-app create-account form (free trial), not a
         // payment page. Signed in without access: the subscribe section.
-        if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register' });
+        if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register', entry: 'summary' });
       }
       else if (act === 'cloud-manage') {
         const r = await window.api.cloudOpenManage();
@@ -8940,7 +9048,7 @@ function _wireSummaryCardActionsOnce() {
           };
           alert(map[r.error] || ('Could not turn on the tunnel: ' + r.error));
           // The wall: the fix is the subscribe section, one click away.
-          if (r.error === 'entitlement-required' && typeof window.openCloudSignup === 'function') window.openCloudSignup({});
+          if (r.error === 'entitlement-required' && typeof window.openCloudSignup === 'function') window.openCloudSignup({ entry: 'tunnel' });
           if (r.error === 'auth-required' && typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'signin' });
         }
       }
@@ -9143,7 +9251,7 @@ function _pairRenderState() {
         return;
       }
       // Jump the Settings dialog to the Cloud tab's create-account form.
-      if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register' });
+      if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register', entry: 'pairing' });
       else {
         const cloudTab = document.querySelector('.settings-tab[data-tab="cloud"]');
         if (cloudTab) cloudTab.click();
@@ -9508,10 +9616,6 @@ function readCwMacroEditor() {
   return macros.length ? macros : null;
 }
 
-// Logging checkbox toggles logging config visibility
-setEnableLogging.addEventListener('change', () => {
-  loggingConfig.classList.toggle('hidden', !setEnableLogging.checked);
-});
 
 // Send to Logbook checkbox toggles logbook dropdown visibility
 setSendToLogbook.addEventListener('change', () => {
@@ -15301,7 +15405,10 @@ logSaveBtn.addEventListener('click', async () => {
       try {
         const parkData = await window.api.getPark(potaRef);
         const states = parkData ? parkStatesFromLocationLocal(parkData.locationDesc) : [];
-        if (states.length > 1) parkState = await promptParkState(potaRef, parkData.locationDesc);
+        // Their spot's locationCode says where they are; ask only when it doesn't.
+        const fromSpot = states.length > 1 && window.api.spotParkState ? await window.api.spotParkState(potaRef, callsigns[0]) : '';
+        if (fromSpot) parkState = fromSpot;
+        else if (states.length > 1) parkState = await promptParkState(potaRef, parkData.locationDesc);
       } catch {}
     }
     const allRefs = sigInfo ? [sigInfo, ...addlParks].join(',') : '';
@@ -15820,7 +15927,6 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   if (setEnableParc) setEnableParc.checked = enableParc;
   setEnableCluster.checked = enableCluster;
   setEnableCwSpots.checked = enableCwSpots;
-  setEnableRbn.checked = enableRbn;
   setEnablePskr.checked = enablePskr;
   setHideWorked.checked = hideWorked;
   setHideWorkedParks.checked = hideWorkedParks;
@@ -16175,19 +16281,13 @@ function _updateThemeToggleLabel() {
 // popouts read both fields, set data-theme + data-dark-variant on
 // their <html>. Receivers also accept plain string for backward
 // compat (older popout builds that haven't been updated yet).
-function _popoutThemePayload() {
-  return {
-    theme: setLightMode.checked ? 'light' : 'dark',
-    variant: _currentDarkVariant || 'navy',
-  };
-}
-
-quickLightMode.addEventListener('change', async () => {
-  const light = quickLightMode.checked;
-  applyTheme(light);
-  setLightMode.checked = light;
-  _updateThemeToggleLabel();
-  const p = _popoutThemePayload();
+/**
+ * Every pop-out window follows a theme change, whichever control made it (the
+ * menu's quick toggle or Settings). The Settings path used to miss the VFO,
+ * Log, pairing and Band Scope windows, which stayed in the old theme until a
+ * restart (a user, 2026-10-28). One list, both paths.
+ */
+function broadcastPopoutTheme(p) {
   if (popoutOpen) window.api.sendPopoutTheme(p);
   if (qsoPopoutOpen) window.api.sendQsoPopoutTheme(p);
   window.api.logPopoutTheme(p);
@@ -16201,6 +16301,21 @@ quickLightMode.addEventListener('change', async () => {
   window.api.vfoPopoutTheme(p);
   if (window.api.conditionsPopoutTheme) window.api.conditionsPopoutTheme(p);
   window.api.sendBandspreadPopoutTheme(p);
+}
+
+function _popoutThemePayload() {
+  return {
+    theme: setLightMode.checked ? 'light' : 'dark',
+    variant: _currentDarkVariant || 'navy',
+  };
+}
+
+quickLightMode.addEventListener('change', async () => {
+  const light = quickLightMode.checked;
+  applyTheme(light);
+  setLightMode.checked = light;
+  _updateThemeToggleLabel();
+  broadcastPopoutTheme(_popoutThemePayload());
   await window.api.saveSettings({ lightMode: light });
 });
 
@@ -16625,6 +16740,9 @@ async function openSettingsDialog(tab) {
   if (tab) _openSettingsTab = tab;
   const s = await window.api.getSettings();
   setGrid.value = s.grid || '';
+  // The owner already has the ECHOCAT app: no download badges.
+  { const dl = document.getElementById('settings-echocat-download'); if (dl) dl.classList.toggle('hidden', s.echocatAppConnected === true); }
+  homeCountyLoad(s);
   setDistUnit.value = s.distUnit || 'mi';
   setMaxAge.value = s.maxAgeMin || 5;
   if (setPotaAgeLimit) setPotaAgeLimit.checked = s.potaAgeLimit === true;
@@ -16817,7 +16935,6 @@ async function openSettingsDialog(tab) {
   if (cwClubsDiv && cwSpotsPreset) {
     cwClubsDiv.style.display = cwSpotsPreset.value === 'rbn.telegraphy.de:7000' ? '' : 'none';
   }
-  setEnableRbn.checked = s.enableRbn === true;
   setMyCallsign.value = s.myCallsign || '';
   if (setOwnerCallsign) setOwnerCallsign.value = s.ownerCallsign || '';
   // Load cluster nodes (migrate legacy if needed)
@@ -16859,7 +16976,6 @@ async function openSettingsDialog(tab) {
   if (dirBrowser) dirBrowser.classList.add('hidden');
   if (dirBrowseBtn) dirBrowseBtn.classList.remove('hidden');
   clusterConfig.classList.toggle('hidden', !s.enableCluster);
-  rbnConfig.classList.toggle('hidden', !s.enableRbn);
   setEnableWsjtx.checked = s.enableWsjtx === true;
   setWsjtxPort.value = s.wsjtxPort || 2237;
   setWsjtxHighlight.checked = s.wsjtxHighlight !== false;
@@ -16867,14 +16983,11 @@ async function openSettingsDialog(tab) {
   wsjtxConfig.classList.toggle('hidden', !s.enableWsjtx);
   setEnablePskr.checked = s.enablePskr === true;
   pskrConfig.classList.toggle('hidden', !s.enablePskr);
-  setEnablePskrMap.checked = s.enablePskrMap === true;
-  pskrMapConfig.classList.toggle('hidden', !s.enablePskrMap);
   if (setPskrUpload) {
     setPskrUpload.checked = s.pskrUpload === true;
     pskrUploadConfig.classList.toggle('hidden', !s.pskrUpload);
     if (setPskrAntenna) setPskrAntenna.value = s.pskrAntenna || '';
   }
-  setEnableLogging.checked = s.enableLogging === true;
   setEnableBannerLogger.checked = s.enableBannerLogger === true;
   setN1mmRst.checked = s.n1mmRst === true;
   if (s.adifLogPath) {
@@ -16893,17 +17006,16 @@ async function openSettingsDialog(tab) {
   setWavelogApiKey.value = s.wavelogApiKey || '';
   setWavelogStationId.value = s.wavelogStationId || '';
   setExtraUdp.checked = s.extraUdpEnabled === true;
+  if (setExtraUdpDecodes) setExtraUdpDecodes.checked = s.extraUdpDecodes !== false;
   setExtraUdpHost.value = s.extraUdpHost || '127.0.0.1';
   setExtraUdpPort.value = s.extraUdpPort || 2237;
   setExtraUdpFormat.value = s.extraUdpFormat || 'wsjtx';
   extraUdpConfig.classList.toggle('hidden', !setExtraUdp.checked);
-  loggingConfig.classList.toggle('hidden', !s.enableLogging);
   logbookConfig.classList.toggle('hidden', !s.sendToLogbook);
   updateLogbookPortConfig();
   setColorblind.checked = s.colorblindMode === true;
   setWcagMode.checked = s.wcagMode === true;
   setColorRows.checked = s.colorRows !== false; // default true
-  setEnableSolar.checked = s.enableSolar === true;
   // Reconcile meter-box visibility: settings.json is authoritative (durable
   // across app updates). Fall back to localStorage only when settings.json
   // has no value yet (fresh install / pre-fix version).
@@ -16914,7 +17026,6 @@ async function openSettingsDialog(tab) {
     meterBox.classList.toggle('hidden', !meterBoxVisible);
   }
   document.getElementById('set-show-meter').checked = meterBoxVisible;
-  setEnableBandActivity.checked = s.enableBandActivity === true;
   setShowBearing.checked = s.showBearing === true;
   setEnableSplitView.checked = s.enableSplitView !== false;
   splitOrientationConfig.classList.toggle('hidden', !setEnableSplitView.checked);
@@ -17550,9 +17661,10 @@ settingsSave.addEventListener('click', async () => {
   respotPresets = respotPresetsVal.slice();
   let clusterEnabled = setEnableCluster.checked;
   let cwSpotsEnabled = setEnableCwSpots.checked;
-  let rbnEnabled = setEnableRbn.checked;
+  // RBN spots in the spot list: the Spots menu's RBN toggle (Propagation
+  // itself is always on and has no setting).
+  let rbnEnabled = enableRbn;
   const pskrEnabled = setEnablePskr.checked;
-  const pskrMapEnabled = setEnablePskrMap.checked;
 
   // DX Cluster and RBN require a callsign
   if (clusterEnabled && !myCallsign) {
@@ -17565,17 +17677,8 @@ settingsSave.addEventListener('click', async () => {
     setEnableCwSpots.checked = false;
     alert('CW Spots requires a callsign. Please enter your callsign above.');
   }
-  if (rbnEnabled && !myCallsign) {
-    rbnEnabled = false;
-    setEnableRbn.checked = false;
-    alert('RBN requires a callsign. Please enter your callsign above.');
-  }
-  let pskrMapEnabledVal = pskrMapEnabled;
-  if (pskrMapEnabledVal && !myCallsign) {
-    pskrMapEnabledVal = false;
-    setEnablePskrMap.checked = false;
-    alert('PSKReporter Map requires a callsign. Please enter your callsign above.');
-  }
+  if (rbnEnabled && !myCallsign) rbnEnabled = false;
+  const pskrMapEnabledVal = true; // always on; kept in settings for older readers
   const clusterNodes = currentClusterNodes;
   const showBeaconsEnabled = setShowBeacons.checked;
   const showDxBarEnabled = setShowDxBar.checked;
@@ -17597,7 +17700,7 @@ settingsSave.addEventListener('click', async () => {
   const colorblindEnabled = setColorblind.checked;
   const wcagEnabled = setWcagMode.checked;
   const colorRowsEnabled = setColorRows.checked;
-  const solarEnabled = setEnableSolar.checked;
+  const solarEnabled = true; // always on (lib/install-defaults.js ALWAYS_ON)
   // Sync meter visibility from Settings Display checkbox — persist to both
   // localStorage (fast path on next start) and settings.json (durable across
   // app updates; localStorage can reset when Electron bumps session partition).
@@ -17605,7 +17708,7 @@ settingsSave.addEventListener('click', async () => {
   localStorage.setItem('meterBoxVisible', meterBoxVisible);
   quickShowMeter.checked = meterBoxVisible;
   meterBox.classList.toggle('hidden', !meterBoxVisible);
-  const bandActivityEnabled = setEnableBandActivity.checked;
+  const bandActivityEnabled = true; // always on
   const showBearingEnabled = setShowBearing.checked;
   const enableSplitViewVal = setEnableSplitView.checked;
   const splitOrientationVal = document.getElementById('set-split-orientation').value;
@@ -17708,7 +17811,7 @@ settingsSave.addEventListener('click', async () => {
   const cwMacrosVal = readCwMacroEditor();
   const potaParksPath = setPotaParksPath.value.trim() || '';
   const hideWorkedParksEnabled = setHideWorkedParks.checked;
-  const loggingEnabled = setEnableLogging.checked;
+  const loggingEnabled = true; // always on; cloud sync is the choice
   const n1mmRstEnabled = setN1mmRst.checked;
   const adifLogPath = setAdifLogPath.value.trim() || '';
   const defaultPowerVal = parseInt(setDefaultPower.value, 10) || 100;
@@ -17745,6 +17848,8 @@ settingsSave.addEventListener('click', async () => {
     // alone; the CAT pill's None is the explicit disconnect.
     ...(rigTarget ? { catTarget: rigTarget } : {}),
     grid: setGrid.value.trim() || 'FN20jb',
+    homeState: (document.getElementById('set-home-state') || {}).value || '',
+    homeCounty: (document.getElementById('set-home-county') || {}).value || '',
     distUnit: setDistUnit.value,
     maxAgeMin: maxAgeVal,
     potaAgeLimit: !!(setPotaAgeLimit && setPotaAgeLimit.checked),
@@ -17899,6 +18004,7 @@ settingsSave.addEventListener('click', async () => {
     wavelogApiKey: setWavelogApiKey.value.trim(),
     wavelogStationId: setWavelogStationId.value.trim(),
     extraUdpEnabled: setExtraUdp.checked,
+    extraUdpDecodes: setExtraUdpDecodes ? setExtraUdpDecodes.checked : true,
     extraUdpHost: setExtraUdpHost.value.trim() || '127.0.0.1',
     extraUdpPort: parseInt(setExtraUdpPort.value, 10) || 2237,
     extraUdpFormat: setExtraUdpFormat.value || 'wsjtx',
@@ -18068,7 +18174,6 @@ settingsSave.addEventListener('click', async () => {
   window.api.sendColorblindMode(colorblindEnabled);
   window.api.sendWcagMode(wcagEnabled);
   enableSolar = solarEnabled;
-  updateSolarVisibility();
   enableBandActivity = bandActivityEnabled;
   updateBandActivityVisibility();
   showBearing = showBearingEnabled;
@@ -18090,16 +18195,7 @@ settingsSave.addEventListener('click', async () => {
   updateLoggingVisibility();
   updateBannerLoggerVisibility();
   applyTheme(lightModeEnabled, darkVariantVal);
-  const _popoutTheme = { theme: lightModeEnabled ? 'light' : 'dark', variant: darkVariantVal };
-  if (popoutOpen) window.api.sendPopoutTheme(_popoutTheme);
-  if (qsoPopoutOpen) window.api.sendQsoPopoutTheme(_popoutTheme);
-  if (actmapPopoutOpen) window.api.actmapPopoutTheme(_popoutTheme);
-  if (spotsPopoutOpen) window.api.sendSpotsPopoutTheme(_popoutTheme);
-  if (clusterPopoutOpen) window.api.sendClusterPopoutTheme(_popoutTheme);
-  if (jtcatPopoutOpen) window.api.jtcatPopoutTheme(_popoutTheme);
-  window.api.sstvPopoutTheme(_popoutTheme);
-  if (window.api.conditionsPopoutTheme) window.api.conditionsPopoutTheme(_popoutTheme);
-  window.api.sendBandspreadPopoutTheme(_popoutTheme);
+  broadcastPopoutTheme({ theme: lightModeEnabled ? 'light' : 'dark', variant: darkVariantVal });
   enableDxcc = dxccEnabled;
   licenseClass = licenseClassVal;
   hideOutOfBand = hideOob;
@@ -21201,6 +21297,8 @@ catLogClearBtn.addEventListener('click', () => {
     try { if (window.api.winlinkDiag) winlinkLine = await window.api.winlinkDiag(); } catch {}
     // Whether settings are reaching disk (AE5JE + Bitdefender: a blocked save
     // keeps changes for the session only, and every launch "forgot").
+    let launcherLine = '';
+    try { if (window.api.launcherDiag) launcherLine = await window.api.launcherDiag(); } catch {}
     let settingsSaved = '(unknown)';
     try { if (window.api.settingsSaveStatus) settingsSaved = await window.api.settingsSaveStatus(); } catch {}
     const md = {
@@ -21214,6 +21312,7 @@ catLogClearBtn.addEventListener('click', () => {
       stationSetup,
       echocatServer,
       winlink: winlinkLine,
+      launcher: launcherLine,
       settingsSaved,
     };
     // Complete-from-launch log: main reads startup.log + session.log (both
@@ -21275,6 +21374,7 @@ catLogClearBtn.addEventListener('click', () => {
       '**Station Setup:** ' + md.stationSetup,
       '**ECHOCAT server:** ' + md.echocatServer,
       ...(md.winlink ? ['**Winlink:** ' + md.winlink] : []),
+      ...(md.launcher ? ['**Launcher:** ' + md.launcher] : []),
       '**Settings saved:** ' + md.settingsSaved,
       '',
       '### What I tried to do',
@@ -21425,38 +21525,9 @@ catLogClearBtn.addEventListener('click', () => {
   });
 })();
 
-// --- Solar data listener ---
-function updateSolarVisibility() {
-  const method = enableSolar ? 'remove' : 'add';
-  sfiStatusEl.classList[method]('hidden');
-  kStatusEl.classList[method]('hidden');
-  aStatusEl.classList[method]('hidden');
-}
-
-window.api.onSolarData((payload) => {
-  const { sfi, kIndex, aIndex } = payload || {};
-  const hidden = enableSolar ? '' : ' hidden';
-
-  if (sfi != null) {
-    const sfiClass = sfi >= 100 ? 'connected' : sfi >= 70 ? 'warn' : 'disconnected';
-    sfiStatusEl.textContent = `SFI ${sfi}`;
-    sfiStatusEl.className = `status solar-pill ${sfiClass}${hidden}`;
-  }
-  if (kIndex != null) {
-    const kClass = kIndex <= 2 ? 'connected' : kIndex <= 4 ? 'warn' : 'disconnected';
-    kStatusEl.textContent = `K ${kIndex}`;
-    kStatusEl.className = `status solar-pill ${kClass}${hidden}`;
-  }
-  if (aIndex != null) {
-    const aClass = aIndex <= 7 ? 'connected' : aIndex <= 20 ? 'warn' : 'disconnected';
-    aStatusEl.textContent = `A ${aIndex}`;
-    aStatusEl.className = `status solar-pill ${aClass}${hidden}`;
-  }
-  // Note: the full Conditions panel lives in conditions-popout.html and
-  // subscribes to its own solar-data IPC — no in-window render here.
-});
-
-// Conditions popout owns its own render — see renderer/conditions-popout.js.
+// Solar conditions (SFI, K, A) live in the Conditions window only
+// (renderer/conditions-popout.js); the top bar no longer shows them
+// (Casey 2026-10-27).
 
 
 
@@ -22702,9 +22773,18 @@ async function updateVoiceMacroBar() {
 async function playVoiceMacro(idx, btn) {
   // Remote shack: its macro, played into its radio (hotkeys land here too).
   if (remoteShack && remoteShack.remote) { window.api.remoteVoiceMacroPlay(idx); return; }
-  if (voicePlayingIdx >= 0) stopVoicePlayback();
   var base64 = await window.api.voiceMacroLoad(idx);
   if (!base64) return;
+  playVoiceAudio(base64, { idx: idx, btn: btn, label: voiceMacroLabels[idx] || ('V' + (idx + 1)) });
+}
+
+// VOICE_DEVICE_IDX marks a recording a device sent (a guest's own macro on a
+// lent rig): played once like a slot, never stored.
+var VOICE_DEVICE_IDX = -2;
+var voicePlayingLabel = '';
+async function playVoiceAudio(base64, opts) {
+  var idx = opts.idx, btn = opts.btn || null;
+  if (voicePlayingIdx !== -1) stopVoicePlayback();
   var binary = atob(base64);
   var bytes = new Uint8Array(binary.length);
   for (var j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
@@ -22732,6 +22812,7 @@ async function playVoiceMacro(idx, btn) {
   }
   voicePlaybackCtx.decodeAudioData(bytes.buffer, function(audioBuffer) {
     voicePlayingIdx = idx;
+    voicePlayingLabel = opts.label || '';
     if (btn) btn.classList.add('active');
     voicePlaybackSource = voicePlaybackCtx.createBufferSource();
     voicePlaybackSource.buffer = audioBuffer;
@@ -22752,10 +22833,15 @@ async function playVoiceMacro(idx, btn) {
     voicePlaybackSource.start(0);
     if (monitor) { try { monitor.start(0); } catch (e) {} }
     voicePlaybackSource.onended = function() { stopVoicePlayback(); };
+    if (window.api.voiceMacroPlaying) window.api.voiceMacroPlaying({ playing: true, label: voicePlayingLabel });
+  }, function(err) {
+    console.warn('[Voice] Could not decode the recording:', err && err.message);
+    stopVoicePlayback();
   });
 }
 
 function stopVoicePlayback() {
+  var wasPlaying = voicePlayingIdx !== -1;
   if (voicePlaybackSource) { try { voicePlaybackSource.stop(); } catch(e) {} voicePlaybackSource = null; }
   if (voicePlaybackCtx) { voicePlaybackCtx.close().catch(function(){}); voicePlaybackCtx = null; }
   if (voiceMonitorSource) { try { voiceMonitorSource.stop(); } catch (e) {} voiceMonitorSource = null; }
@@ -22763,6 +22849,8 @@ function stopVoicePlayback() {
   window.api.voiceMacroPtt(false);
   voicePlayingIdx = -1;
   if (voiceMacroBtns) voiceMacroBtns.querySelectorAll('button.active').forEach(b => b.classList.remove('active'));
+  if (wasPlaying && window.api.voiceMacroPlaying) window.api.voiceMacroPlaying({ playing: false, label: voicePlayingLabel });
+  voicePlayingLabel = '';
 }
 
 // Local-only preview — plays the macro through the system default output so
@@ -22885,6 +22973,16 @@ window.api.onPlayVoiceMacro((idx) => {
   const btn = voiceMacroBtns ? voiceMacroBtns.querySelector(`button[data-idx="${idx}"]`) : null;
   playVoiceMacro(idx, btn);
 });
+// A device's own recording (a guest's macro on a lent rig), and a device's Stop.
+if (window.api.onPlayVoiceMacroAudio) {
+  window.api.onPlayVoiceMacroAudio((info) => {
+    if (!info || typeof info.audio !== 'string' || !info.audio) return;
+    playVoiceAudio(info.audio, { idx: VOICE_DEVICE_IDX, btn: null, label: info.label || '' });
+  });
+}
+if (window.api.onStopVoiceMacro) {
+  window.api.onStopVoiceMacro(() => { if (voicePlayingIdx !== -1) stopVoicePlayback(); });
+}
 
 // Voice macro recording UI in Settings
 async function renderVoiceMacroEditor() {
@@ -24477,7 +24575,9 @@ function rigPresetOpenEditor(m, p) {
     for (const f of fs) {
       const row = document.createElement('div'); row.className = 'rig-popover-row rig-preset-field';
       const inc = document.createElement('input'); inc.type = 'checkbox'; inc.title = 'Include this setting in the preset (unticked = left as it is)';
-      const lab = document.createElement('label'); lab.textContent = f.label + (f.unit ? ' (' + f.unit + ')' : '');
+      // A level in the radio's own steps shows its range (FTX-1 NB 0-10).
+      const top = f.maxCap && caps[f.maxCap] != null ? caps[f.maxCap] : f.max;
+      const lab = document.createElement('label'); lab.textContent = f.label + (f.unit ? ' (' + f.unit + ')' : f.maxCap ? ' (' + f.min + '-' + top + ')' : '');
       let ctl;
       if (f.kind === 'switch') {
         ctl = document.createElement('select');
@@ -24487,7 +24587,7 @@ function rigPresetOpenEditor(m, p) {
         const opts = (f.key === 'agc' && Array.isArray(caps.agcModes) && caps.agcModes.length) ? caps.agcModes : f.options;
         for (const v of opts) { const o = document.createElement('option'); o.value = v; o.textContent = v; ctl.appendChild(o); }
       } else {
-        ctl = document.createElement('input'); ctl.type = 'number'; ctl.min = f.min; ctl.max = f.max; ctl.step = f.kind === 'width' ? 50 : 1; ctl.style.width = '80px';
+        ctl = document.createElement('input'); ctl.type = 'number'; ctl.min = f.min; ctl.max = top; ctl.step = f.kind === 'width' ? 50 : 1; ctl.style.width = '80px';
       }
       const has = p && p[f.key] !== undefined && p[f.key] !== null;
       inc.checked = !!has;
@@ -26216,12 +26316,8 @@ const activatorRbnBtn = document.getElementById('activator-rbn-btn');
 let activatorRbnVisible = false;
 
 function updateActivatorRbnButton() {
-  if (enableRbn) {
-    activatorRbnBtn.classList.remove('hidden');
-  } else {
-    activatorRbnBtn.classList.add('hidden');
-    if (activatorRbnVisible) toggleActivatorRbn();
-  }
+  // Always offered, like the Propagation view (see updateRbnButton).
+  activatorRbnBtn.classList.remove('hidden');
 }
 
 function applyActivatorRbnLayout() {
@@ -27457,7 +27553,111 @@ function updateParkExtraBadge() {
     badge.classList.add('hidden');
   }
   updateCrossRefToggle();
+  refreshActivatorCounty();
 }
+
+// ── The operator's own county (lib/station-county.js; AE5JE 2026-10-27) ──
+let _countyList = null;
+async function countyList() {
+  if (_countyList) return _countyList;
+  try { _countyList = (await window.api.countyList()) || {}; } catch { _countyList = {}; }
+  return _countyList;
+}
+function fillCountySelect(sel, rows, value, blankLabel) {
+  if (!sel) return;
+  sel.innerHTML = '';
+  const o0 = document.createElement('option');
+  o0.value = ''; o0.textContent = blankLabel || '—';
+  sel.appendChild(o0);
+  for (const r of rows || []) {
+    const o = document.createElement('option');
+    o.value = r[0]; o.textContent = r[1] || r[0];
+    sel.appendChild(o);
+  }
+  sel.value = value || '';
+}
+function fillStateSelect(sel, states, value) {
+  if (!sel) return;
+  sel.innerHTML = '';
+  const o0 = document.createElement('option');
+  o0.value = ''; o0.textContent = '—';
+  sel.appendChild(o0);
+  for (const st of states) {
+    const o = document.createElement('option');
+    o.value = st; o.textContent = st;
+    sel.appendChild(o);
+  }
+  sel.value = value || '';
+}
+async function homeCountyLoad(s) {
+  const list = await countyList();
+  const stSel = document.getElementById('set-home-state');
+  const cSel = document.getElementById('set-home-county');
+  if (!stSel || !cSel) return;
+  fillStateSelect(stSel, Object.keys(list).sort(), s.homeState || '');
+  fillCountySelect(cSel, list[stSel.value] || [], s.homeCounty || '');
+}
+(function bindHomeCounty() {
+  const stSel = document.getElementById('set-home-state');
+  const cSel = document.getElementById('set-home-county');
+  const btn = document.getElementById('home-county-qrz');
+  const status = document.getElementById('home-county-status');
+  if (stSel) stSel.addEventListener('change', async () => {
+    fillCountySelect(cSel, (await countyList())[stSel.value] || [], '');
+  });
+  if (btn) btn.addEventListener('click', async () => {
+    status.textContent = 'Looking up…';
+    const r = await window.api.homeCountyFromQrz();
+    if (!r || !r.ok) { status.textContent = (r && r.error) || 'Could not look it up'; return; }
+    const list = await countyList();
+    stSel.value = r.state;
+    fillCountySelect(cSel, list[r.state] || [], r.county || '');
+    status.textContent = r.county ? `${r.county}, ${r.state} (from QRZ). Save to keep it.` : `${r.state} from QRZ; QRZ's county "${r.qrzCounty}" is not one LoTW knows: pick it from the list.`;
+  });
+})();
+
+// The activation bar: this park's county, remembered per park.
+let _activatorCountyRef = '';
+async function refreshActivatorCounty() {
+  const wrap = document.getElementById('activator-county-wrap');
+  const stSel = document.getElementById('activator-county-state');
+  const cSel = document.getElementById('activator-county');
+  if (!wrap || !stSel || !cSel || !window.api.parkCountyGet) return;
+  const ref = (activatorParkRefs && activatorParkRefs[0] && activatorParkRefs[0].ref) || '';
+  _activatorCountyRef = ref;
+  if (!ref) { wrap.classList.add('hidden'); return; }
+  const info = await window.api.parkCountyGet(ref);
+  if (_activatorCountyRef !== ref) return; // the park changed while we asked
+  if (!info || !info.us) { wrap.classList.add('hidden'); return; }
+  const list = await countyList();
+  const states = (info.states && info.states.length ? info.states : Object.keys(list)).filter((st) => list[st]);
+  const state = (info.choice && info.choice.state) || (states.length === 1 ? states[0] : '');
+  // A park in one state needs no state picker; a park across states asks
+  // which side the operator is on, as the log form already does.
+  stSel.classList.toggle('hidden', states.length === 1);
+  fillStateSelect(stSel, states, state);
+  fillCountySelect(cSel, list[state] || [], (info.choice && info.choice.county) || '', 'County…');
+  cSel.classList.toggle('county-unset', !(info.choice && info.choice.county));
+  wrap.classList.remove('hidden');
+}
+if (window.api.onParkCountyChanged) window.api.onParkCountyChanged(() => refreshActivatorCounty());
+if (window.api.onEchocatAppConnected) window.api.onEchocatAppConnected(() => {
+  const dl = document.getElementById('settings-echocat-download');
+  if (dl) dl.classList.add('hidden');
+});
+(function bindActivatorCounty() {
+  const stSel = document.getElementById('activator-county-state');
+  const cSel = document.getElementById('activator-county');
+  if (stSel) stSel.addEventListener('change', async () => {
+    fillCountySelect(cSel, (await countyList())[stSel.value] || [], '', 'County…');
+  });
+  if (cSel) cSel.addEventListener('change', async () => {
+    const st = stSel.value || (stSel.options[1] && stSel.options[1].value) || '';
+    const r = await window.api.parkCountySet({ ref: _activatorCountyRef, state: st, county: cSel.value });
+    if (r && !r.ok) showLogToast(r.error || 'County not saved', { warn: true, duration: 5000 });
+    cSel.classList.toggle('county-unset', !cSel.value);
+  });
+})();
 
 /** Update hunter park input display and extra badge */
 function updateHunterParkDisplay() {

@@ -101,6 +101,9 @@ contextBridge.exposeInMainWorld('api', {
   jtcatSpectrum: (bins) => ipcRenderer.send('jtcat-spectrum', bins),
   // JTCAT events
   onJtcatDecode: (cb) => ipcRenderer.on('jtcat-decode', (_e, data) => cb(data)),
+  // GridTracker's double-click (WSJT-X Reply) and stop (Halt Tx), via main.
+  onJtcatExternalReply: (cb) => ipcRenderer.on('jtcat-external-reply', (_e, d) => cb(d)),
+  onJtcatExternalHalt: (cb) => ipcRenderer.on('jtcat-external-halt', () => cb()),
   onJtcatWsprSpots: (cb) => ipcRenderer.on('jtcat-wspr-spots', (_e, data) => cb(data)),
   onJtcatWsprHeard: (cb) => ipcRenderer.on('jtcat-wspr-heard', (_e, data) => cb(data)),
   onJtcatWsprHopBand: (cb) => ipcRenderer.on('jtcat-wspr-hop-band', (_e, data) => cb(data)),
@@ -176,6 +179,7 @@ contextBridge.exposeInMainWorld('api', {
   onJtcatChaseTarget: (cb) => ipcRenderer.on('jtcat-chase-target', (_e, data) => cb(data)),
   // ULTRACAT (tier-2 easter egg) — Full Auto CQ run mode
   onJtcatUltracat: (cb) => ipcRenderer.on('jtcat-ultracat', (_e, on) => cb(on)),
+  onJtcatOnAirCall: (cb) => ipcRenderer.on('jtcat-on-air-call', (_e, call) => cb(call)),
   jtcatSetFullAutoCq: (on) => ipcRenderer.send('jtcat-popout-full-auto-cq', on),
   onJtcatFullAutoCqState: (cb) => ipcRenderer.on('jtcat-full-auto-cq-state', (_e, data) => cb(data)),
   // Map popout

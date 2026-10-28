@@ -214,10 +214,16 @@ async function connected(rc) {
     srv._admitClient(owner, null);
     const guest = fake({ _passSession: { code: 'abc' } });
     srv._admitClient(guest, null);
-    check(owner.closed && owner.sent.some(m => m.type === 'kicked'), 'a guest arriving displaces the owner\'s devices');
+    // Lend my rig (2026-10-27): the owner's devices are not kicked; they leave
+    // the shared set and wait for Take over (pass-guest-waiting).
+    check(!owner.closed && owner._ownerWaiting && !srv._clients.has(owner) && owner.sent.some(m => m.type === 'pass-guest-waiting'),
+      'a guest arriving moves the owner\'s devices to waiting, never sharing the rig');
+    // _admitClient is the primitive; an owner device reaching it while a guest
+    // holds the rig has already passed the wait gate (_ownerMustWait), i.e.
+    // the rig is paused or the guest is gone, so the guest socket goes.
     const owner2 = fake({ _pairedDevice: { id: 'p2' } });
     srv._admitClient(owner2, null);
-    check(guest.closed, 'an owner device arriving displaces the guest');
+    check(guest.closed, 'an owner device admitted past the gate displaces the guest');
     const sameAgain = fake({ _pairedDevice: { id: 'p2' } });
     srv._admitClient(sameAgain, null);
     check(owner2.closed && !sameAgain.closed, 'the same device reconnecting replaces its own stale socket');

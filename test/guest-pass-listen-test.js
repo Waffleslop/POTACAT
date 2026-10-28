@@ -17,7 +17,7 @@ function tech(allowedModes) {
   const pe = new PassEnforcement({ revalidateMs: 0, rigPowerReadable: () => true });
   pe._state = 'active';
   pe._expiresAtMs = Date.now() + 3600000;
-  pe._pass = { code: 'T1', privilege_class: 'us_technician', privilege_class_short: 'tech', max_power_w: 100, allowed_modes: allowedModes || [] };
+  pe._pass = { code: 'T1', guest_callsign: 'KD9TEC', privilege_class: 'us_technician', privilege_class_short: 'tech', max_power_w: 100, allowed_modes: allowedModes || [] };
   return pe;
 }
 
@@ -60,7 +60,7 @@ test('wiring: both TX gates hand the live dial and mode to the pass, and a refus
   const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
   const n = (main.match(/interceptCatCommand\(\{ type: 'tx_enable', freqHz: _currentFreqHz, mode: _currentMode \}\)/g) || []).length;
   assert.strictEqual(n, 2, 'gatedSetTransmit and gatedSmartSdrTransmit');
-  assert.strictEqual((main.match(/passTxBlocked\(res\);/g) || []).length, 2, 'both gates tell the device');
+  assert.strictEqual((main.match(/passTxBlocked\(res\);/g) || []).length, 3, 'both gates and passTxAllowed (CW text, the paddle) tell the device');
   assert.ok(/sendToPassSessions\(\{ type: 'tune-blocked', reason: res\.userVisible \}\)/.test(main), 'as a tune-blocked alert the app already shows');
   assert.ok(/const applied = !!state && !passTxJustBlocked\(\);/.test(main), 'ptt-applied says false for a refused press');
   const srv = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8');

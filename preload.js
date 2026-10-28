@@ -159,6 +159,8 @@ contextBridge.exposeInMainWorld('api', {
   // dance previously buried in scripts/launcher-install.js as a UI button.
   launcherInstall: () => ipcRenderer.invoke('launcher-install'),
   launcherUninstall: () => ipcRenderer.invoke('launcher-uninstall'),
+  launcherSetViaCloud: (on) => ipcRenderer.invoke('launcher-set-via-cloud', on),
+  launcherDiag: () => ipcRenderer.invoke('launcher-diag'),
   launcherStatus: () => ipcRenderer.invoke('launcher-status'),
   launcherStart: () => ipcRenderer.invoke('launcher-start'),
   // --- ALSA bridge (Linux-only; resolves false / [] on Win+Mac) ----------
@@ -203,6 +205,8 @@ contextBridge.exposeInMainWorld('api', {
   passEnforcementGetState: () => ipcRenderer.invoke('pass-enforcement-get-state'),
   passEnforcementLoad: (code) => ipcRenderer.invoke('pass-enforcement-load', code),
   passEnforcementEnd: (reason) => ipcRenderer.invoke('pass-enforcement-end', reason),
+  passTakeOver: () => ipcRenderer.invoke('pass-take-over'),
+  passGiveBack: () => ipcRenderer.invoke('pass-give-back'),
   onPassEnforcementState: (cb) => {
     const handler = (_e, status) => cb(status);
     ipcRenderer.on('pass-enforcement-state', handler);
@@ -247,6 +251,7 @@ contextBridge.exposeInMainWorld('api', {
   getSettings: () => ipcRenderer.invoke('get-settings'),
   getRigModels: () => ipcRenderer.invoke('get-rig-models'),
   getRigSetupNotes: (q) => ipcRenderer.invoke('get-rig-setup-notes', q),
+  icomScopeCapture: () => ipcRenderer.invoke('icom-scope-capture'),
   stationSetupGet: (rigId) => ipcRenderer.invoke('station-setup-get', rigId),
   stationSetupReport: (q) => ipcRenderer.invoke('station-setup-report', q),
   stationSetupAction: (q) => ipcRenderer.invoke('station-setup-action', q),
@@ -489,6 +494,15 @@ contextBridge.exposeInMainWorld('api', {
   winlinkVaraSetup: (kind, devices, labels) => ipcRenderer.invoke('winlink-vara-setup', { kind, devices, ...(labels || {}) }),
   winlinkAudioRig: () => ipcRenderer.invoke('winlink-audio-rig'),
   winlinkRegister: (o) => ipcRenderer.invoke('winlink-register', o),
+  winlinkRecoveryEmailGet: () => ipcRenderer.invoke('winlink-recovery-email-get'),
+  countyList: () => ipcRenderer.invoke('county-list'),
+  spotParkState: (ref, call) => ipcRenderer.invoke('spot-park-state', ref, call),
+  parkCountyGet: (ref) => ipcRenderer.invoke('park-county-get', ref),
+  parkCountySet: (o) => ipcRenderer.invoke('park-county-set', o),
+  homeCountyFromQrz: () => ipcRenderer.invoke('home-county-from-qrz'),
+  onEchocatAppConnected: (cb) => ipcRenderer.on('echocat-app-connected', () => cb()),
+  onParkCountyChanged: (cb) => ipcRenderer.on('park-county-changed', (_e, d) => cb(d)),
+  winlinkRecoveryEmailSet: (email) => ipcRenderer.invoke('winlink-recovery-email-set', email),
   onWinlinkState: (cb) => ipcRenderer.on('winlink-state', (_e, s) => cb(s)),
   jtcatSetUltracat: (on) => ipcRenderer.send('jtcat-set-ultracat', on),
   jtcatPopoutTheme: (theme) => ipcRenderer.send('jtcat-popout-theme', theme),
@@ -532,6 +546,9 @@ contextBridge.exposeInMainWorld('api', {
   // Phone-tapped macro slot — main relays here so the renderer's playback
   // chain (which owns the audio path) handles it the same as a local click.
   onPlayVoiceMacro: (cb) => ipcRenderer.on('play-voice-macro', (_e, idx) => cb(idx)),
+  onPlayVoiceMacroAudio: (cb) => ipcRenderer.on('play-voice-macro-audio', (_e, info) => cb(info)),
+  onStopVoiceMacro: (cb) => ipcRenderer.on('stop-voice-macro', () => cb()),
+  voiceMacroPlaying: (info) => ipcRenderer.send('voice-macro-playing', info),
   cwCancel: () => ipcRenderer.send('cw-cancel'),
   onCwEcho: (cb) => ipcRenderer.on('cw-echo', (_e, data) => cb(data)),
   onWinkeyerBusy: (cb) => ipcRenderer.on('winkeyer-busy', (_e, busy) => cb(busy)),
@@ -688,7 +705,7 @@ contextBridge.exposeInMainWorld('api', {
   qrzDebugDump: () => ipcRenderer.invoke('qrz-debug-dump'),
   cloudGoogleSignIn: () => ipcRenderer.invoke('cloud-google-signin'),
   cloudLogin: (email, password) => ipcRenderer.invoke('cloud-login', email, password),
-  cloudRegister: (email, password, callsign) => ipcRenderer.invoke('cloud-register', email, password, callsign),
+  cloudRegister: (email, password, callsign, opts) => ipcRenderer.invoke('cloud-register', email, password, callsign, opts || {}),
   cloudSetCallsign: (callsign) => ipcRenderer.invoke('cloud-set-callsign', callsign),
   cloudLogout: () => ipcRenderer.invoke('cloud-logout'),
   cloudGetStatus: () => ipcRenderer.invoke('cloud-get-status'),
@@ -713,6 +730,9 @@ contextBridge.exposeInMainWorld('api', {
   // inputs, the renderer decides and draws, main persists the snooze.
   cloudPromptGet: () => ipcRenderer.invoke('cloud-prompt-get'),
   cloudPromptSnooze: () => ipcRenderer.invoke('cloud-prompt-snooze'),
+  cloudPromptNever: () => ipcRenderer.invoke('cloud-prompt-never'),
+  cloudUploadCardGet: () => ipcRenderer.invoke('cloud-upload-card-get'),
+  cloudUploadCardSnooze: () => ipcRenderer.invoke('cloud-upload-card-snooze'),
   cloudGetSettings: () => ipcRenderer.invoke('cloud-get-settings'),
   cloudPutSettings: (data) => ipcRenderer.invoke('cloud-put-settings', data),
   onCloudSyncStatus: (cb) => ipcRenderer.on('cloud-sync-status', (_e, data) => cb(data)),

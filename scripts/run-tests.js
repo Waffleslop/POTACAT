@@ -46,6 +46,12 @@ const TESTS = [
   'test/jtcat-parser-test.js',
   'test/ft8-engine-rebaseline-test.js',
   'test/guest-pass-test.js',
+  'test/guest-pass-onair-call-test.js', // the pass's station call is the on-air call (K3SBP on W7RTA's pass)
+  'test/guest-pass-lease-end-test.js', // the end of a pass stops every transmitter and closes the guest socket
+  'test/guest-pass-hopping-test.js', // guests hop between rigs; the owner takes over and hands back
+  'test/pass-qso-outbox-test.js', // a guest's contacts reach the GUEST's cloud logbook, sent by the shack
+  'test/propagation-always-on-test.js', // RBN + PSKReporter Propagation has no switch
+  'test/install-defaults-test.js', // logging/solar/band activity always on; SOTA/WWFF/LLOTA + a random cluster node once
   'test/pair-request-tunnel-gate-test.js',
   'test/sstv-test.js',
   'test/sstv-quality-test.js',
@@ -81,6 +87,16 @@ const TESTS = [
   'test/ft8-message-buffer-test.js',
   'test/ft8-native-decoder-test.js',
   'test/jtcat-hunt-off-test.js',
+  'test/jtcat-snr-floor-test.js', // Hunt does not call a CQ below the operator's signal floor (per band)
+  'test/rx-spectrum-test.js', // the phone's VFO waterfall with no FT8 engine: Flex/Icom streams, the rig's sound card
+  'test/yaesu-scope-test.js', // the FT-710's own scope: frame parser, axis, helper exit codes, remote payload guard (was CI-only)
+  'test/flex-scope-test.js', // the Flex's own panadapter as the band scope (Flex Direct), against a real 8600 capture
+  'test/icom-scope-test.js', // an Icom's own band scope over CI-V: parser, codec events, the owner's 30 s recording
+  'test/flex-readback-test.js', // a Flex's controls read back from the radio's own status (real 8600 capture)
+  'test/scope-pan-device-test.js', // FT-710 zoom + CENTER over CAT, band scope frames sized and paced per device
+  'test/gridtracker-roster-test.js', // GridTracker as JTCAT's call roster: decodes out, its double-click and stop back in
+  'test/popout-theme-test.js', // every pop-out follows a theme change, from the quick toggle or Settings
+  'test/vfo-voice-macros-test.js', // the VFO window's voice macro bar follows renames and recordings
   'test/jtcat-remote-anchor-test.js',
   'test/rsba1-transport.test.js',
   'test/activation-log-test.js',
@@ -131,6 +147,7 @@ const TESTS = [
   'test/lz3aw-round6-test.js',
   'test/cw-auto-sync-test.js',
   'test/remote-launcher-test.js',
+  'test/launcher-cloud-test.js', // restart from anywhere: device token, tunnel policy, the launcher's own connector
   'test/echocat-token-test.js',
   'test/fresh-install-defaults-test.js',
   'test/review-ask-test.js',
@@ -200,12 +217,14 @@ const TESTS = [
   'test/external-atu-carrier-test.js', // N8JMS: RF-sense tuner carrier in AM (CW over CAT is key-up)
   'test/jtcat-map-popout-arcs-test.js', // TacticalIndex: QSO arcs in the JTCAT map pop-out
   'test/ae5je-settings-audio-test.js', // AE5JE: audio devices follow their name; bug report says whether settings saves land
+  'test/page-script-globals-test.js', // one top-level scope per page: a second const of the same name stops a script (WB3EGD, the dead 1.13.5 audio heal)
   'test/window-min-size-test.js',     // N0KAH: no window shrinks past its own controls
   'test/yaesu-fa-digits-test.js',
   'test/log-as-test.js',
   'test/save-qso-stall-test.js',
   'test/pota-sync-login-test.js',
   'test/qso-expand-test.js',
+  'test/spot-park-state-test.js', // a multi-state park's state from the activator's spot locationCode (N0KAH)
   'test/log-dialog-qrz-test.js',
   'test/logging-parity-test.js',
   'test/pskr-map-band-cap-test.js',
@@ -224,6 +243,7 @@ const TESTS = [
   'test/cw-greeting-test.js',
   'test/lotw-flags-test.js',
   'test/lotw-split-test.js',
+  'test/station-county-test.js', // the operator's own state and county: per park on activations, home only from the home grid
   'test/sdr-scope-test.js',
   'test/lz3aw-round14-test.js',
   'test/lz3aw-batch-b-test.js',

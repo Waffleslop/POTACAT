@@ -64,13 +64,19 @@ function applyState(s) {
   pill.className = 'sc-pill ' + (state.status || 'stopped');
   pill.textContent = ({ stopped: 'Stopped', starting: 'Starting', live: 'Live', blocked: 'Blocked', error: 'Error', unavailable: 'Unavailable' })[state.status] || state.status;
   $('sc-synth-badge').style.display = state.kind === 1 ? '' : 'none';
-  // An SDR source (lib/sdr-scope.js) has no sweep speed and no SCU-LAN10.
+  // An SDR source (lib/sdr-scope.js) and a Flex panadapter (lib/flex-scope.js)
+  // have no sweep speed and no SCU-LAN10: those rows are the FT-710's.
   const sdr = state.source === 'sdr' && state.kind !== 1;
+  const notYaesu = (state.source === 'sdr' || state.source === 'flex') && state.kind !== 1;
   $('sc-sdr-badge').style.display = sdr ? '' : 'none';
-  $('sc-speed-wrap').style.display = sdr ? 'none' : '';
-  $('sc-sculan-wrap').style.display = sdr ? 'none' : '';
+  $('sc-speed-wrap').style.display = notYaesu ? 'none' : '';
+  $('sc-sculan-wrap').style.display = notYaesu ? 'none' : '';
   $('sc-span').textContent = A.formatSpan(state.spanHz);
-  $('sc-mode').textContent = state.anchor ? state.anchor.toUpperCase() + (state.anchor !== 'center' ? ' (axis assumed)' : '') : '—';
+  // Zoom: only when the source offers steps (the Flex panadapter today).
+  const spans = Array.isArray(state.spans) ? state.spans : [];
+  $('sc-zoom-out').classList.toggle('hidden', spans.length < 2);
+  $('sc-zoom-in').classList.toggle('hidden', spans.length < 2);
+  $('sc-mode').textContent = state.anchor ? ScopeAxis.anchorLabel(state.anchor) : '—';
   $('sc-speed').textContent = state.speed || '—';
   $('sc-sculan').textContent = state.scuLan === '1' ? 'ON' : state.scuLan === '0' ? 'OFF' : '—';
   const needEnable = state.scuLan === '0' || (state.diag && state.diag.key === 'silent');
@@ -165,7 +171,7 @@ function drawTrace() {
     ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
   }
 
-  if (!axis.known && state.spanHz && state.anchor !== 'center') {
+  if (!axis.known && state.spanHz && state.anchor !== 'center' && state.anchor !== 'pan') {
     ctx.fillStyle = 'rgba(240,165,0,0.9)';
     ctx.font = `${11 * dpr}px sans-serif`;
     ctx.fillText(`${state.anchor.toUpperCase()} mode — the radio does not report this window's edges; axis assumed around the dial`, 8 * dpr, 14 * dpr);
@@ -296,3 +302,15 @@ document.addEventListener('keydown', (e) => {
 });
 window.addEventListener('resize', () => { wf.resize(); scheduleDraw(); });
 applyState(state);
+
+// Zoom: step through scope-state.spans from the one nearest the current span.
+function zoomStep(dir) {
+  const spans = Array.isArray(state.spans) ? state.spans : [];
+  if (spans.length < 2) return;
+  let i = 0;
+  for (let k = 0; k < spans.length; k++) if (Math.abs(spans[k] - state.spanHz) < Math.abs(spans[i] - state.spanHz)) i = k;
+  const next = spans[Math.max(0, Math.min(spans.length - 1, i + dir))];
+  if (next && next !== state.spanHz) window.api.setSpan(next);
+}
+$('sc-zoom-out').addEventListener('click', () => zoomStep(+1)); // wider
+$('sc-zoom-in').addEventListener('click', () => zoomStep(-1));  // narrower

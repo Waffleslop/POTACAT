@@ -81,10 +81,19 @@ function _applyPopoutTheme(payload) {
     for (var i = 0; i < els.length; i++) els[i].classList.toggle('hidden', !on);
   }
   window.api.onJtcatUltracat(applyUltracat);
+  // A Guest Pass moved the on-air call (or gave it back): replies, macros
+  // and "to me" use it from the next message.
+  var onAirCallPushed = '';
+  if (window.api.onJtcatOnAirCall) window.api.onJtcatOnAirCall(function(call) {
+    if (!call) return;
+    onAirCallPushed = String(call).toUpperCase();
+    myCallsign = onAirCallPushed;
+    jttyMyCall = myCallsign;
+  });
 
   // Load settings
   window.api.getSettings().then(function(s) {
-    myCallsign = (s.myCallsign || '').toUpperCase();
+    myCallsign = onAirCallPushed || (s.myCallsign || '').toUpperCase();
     myGrid = (s.grid || '').toUpperCase().substring(0, 4);
     applyUltracat(!!s.ultracat);
     chaseTarget = s.jtcatChaseTarget || '';
@@ -99,6 +108,11 @@ function _applyPopoutTheme(payload) {
     if (reworkDaysInput && typeof s.jtcatReworkDays === 'number') {
       reworkDaysInput.value = s.jtcatReworkDays;
     }
+    if (huntMinDbInput) {
+      var f = window.JtcatSnrFloor ? window.JtcatSnrFloor.parseDefault(s.jtcatHuntMinDb) : null;
+      huntMinDbInput.value = f == null ? '' : String(f);
+    }
+    if (huntMinDbBandInput) huntMinDbBandInput.value = s.jtcatHuntMinDbByBand || '';
     if (runPauseInput && typeof s.jtcatRunPauseAfter === 'number') {
       runPauseInput.value = s.jtcatRunPauseAfter;
     }
@@ -225,6 +239,8 @@ function _applyPopoutTheme(payload) {
     if (window.api.openWatchlistSettings) window.api.openWatchlistSettings();
   });
   var reworkDaysInput = document.getElementById('jp-rework-days');
+  var huntMinDbInput = document.getElementById('jp-hunt-min-db');
+  var huntMinDbBandInput = document.getElementById('jp-hunt-min-db-band');
   var relogMinInput = document.getElementById('jp-relog-min');
   var runPauseInput = document.getElementById('jp-run-pause-after');
   var wfSpeedInput = document.getElementById('jp-wf-speed');
@@ -1183,7 +1199,8 @@ function _applyPopoutTheme(payload) {
     // Keep our cached callsign current from the authoritative copy main stamps
     // on every batch, so classification never runs against a stale/empty call
     // (the original "reply to my CQ → grid instead of report" trigger).
-    if (data && data.myCall) myCallsign = data.myCall.toUpperCase();
+    // During a Guest Pass this is the pass's station call (main onAirCall).
+    if (data && data.myCall) { myCallsign = data.myCall.toUpperCase(); jttyMyCall = myCallsign; }
     renderDecodes(data);
     // NOTE: do NOT set "Sync: OK" here. Decodes arriving says nothing about
     // the PC clock — the real sync status comes from the NTP monitor via
@@ -2435,6 +2452,11 @@ function _applyPopoutTheme(payload) {
     setTxMsgDisplay('--');
   });
 
+  // GridTracker (or another WSJT-X companion) answered a decode: exactly a
+  // double-click on that row here, and its stop button is this Halt.
+  if (window.api.onJtcatExternalReply) window.api.onJtcatExternalReply(function(d) { onDecodeRowClick(d); });
+  if (window.api.onJtcatExternalHalt) window.api.onJtcatExternalHalt(function() { haltTxBtn.click(); });
+
   // Tune lives in the FT8 controls bar AND in the PSK31/JTTY panes (the pane
   // swap hides the bar, which left those modes with no way to tune — Casey
   // 2026-10-04). Every .jp-tune button is the same control with the same state.
@@ -2571,6 +2593,27 @@ function _applyPopoutTheme(payload) {
       if (n > 60) n = 60;
       maxAttemptsInput.value = n;
       window.api.saveSettings({ jtcatMaxQsoAttempts: n });
+    });
+  }
+  // Hunt's signal floor (lib/jtcat-snr-floor.js): normalised on change, and
+  // the by-band line says which pieces it could not read.
+  if (huntMinDbInput && window.JtcatSnrFloor) {
+    huntMinDbInput.addEventListener('change', function() {
+      var f = window.JtcatSnrFloor.parseDefault(huntMinDbInput.value);
+      huntMinDbInput.value = f == null ? '' : String(f);
+      window.api.saveSettings({ jtcatHuntMinDb: f == null ? '' : String(f) });
+    });
+  }
+  if (huntMinDbBandInput && window.JtcatSnrFloor) {
+    huntMinDbBandInput.addEventListener('change', function() {
+      var r = window.JtcatSnrFloor.parseByBand(huntMinDbBandInput.value);
+      var text = window.JtcatSnrFloor.formatByBand(r.map);
+      huntMinDbBandInput.value = text;
+      var help = document.getElementById('jp-hunt-min-db-band-help');
+      if (help) help.textContent = r.bad.length
+        ? 'Could not read: ' + r.bad.join(', ') + '. Write a band and a level, like 20m -18.'
+        : 'A band listed here uses its own level; any other band uses the one above.';
+      window.api.saveSettings({ jtcatHuntMinDbByBand: text });
     });
   }
   if (reworkDaysInput) {
@@ -2765,7 +2808,7 @@ function _applyPopoutTheme(payload) {
       var spanEl = document.getElementById('jp-bs-span');
       if (spanEl) spanEl.textContent = s && s.spanHz ? 'Span ' + window.ScopeAxis.formatSpan(s.spanHz) : '';
       var modeEl = document.getElementById('jp-bs-mode');
-      if (modeEl) modeEl.textContent = s && s.anchor ? s.anchor.toUpperCase() + (s.anchor !== 'center' ? ' (axis assumed)' : '') : '';
+      if (modeEl) modeEl.textContent = s && s.anchor ? (window.ScopeAxis ? window.ScopeAxis.anchorLabel(s.anchor) : String(s.anchor).toUpperCase()) : '';
       var needEnable = !!(s && s.kind !== 1 && (s.scuLan === '0' || (s.diag && s.diag.key === 'silent')));
       if (bsEnableBtn) bsEnableBtn.classList.toggle('hidden', !needEnable);
       bsApplyVisibility();
@@ -4420,7 +4463,7 @@ function _applyPopoutTheme(payload) {
   function jttyInit(s) {
     if (!jttyPane) return;
     s = s || {};
-    jttyMyCall = String(s.myCallsign || '').toUpperCase().trim();
+    jttyMyCall = onAirCallPushed || String(s.myCallsign || '').toUpperCase().trim();
     jttyMyGrid = String(s.grid || '').toUpperCase().trim();
     jttySaved = { jttyMacros: s.jttyMacros, jttyTemplates: s.jttyTemplates, jttyFt8Macros: s.jttyFt8Macros };
     jttyStyle = JttyMacros.forSettings(s).style;

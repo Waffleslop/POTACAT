@@ -14,6 +14,8 @@
 // =====================================================================
 
 const sm = require('../lib/jtcat-state-machine');
+const path = require('path');
+const fs = require('fs');
 
 let pass = 0;
 let fail = 0;
@@ -427,6 +429,29 @@ section('Stalled QSO — giveUpMessage flavors');
 // ============================================================
 // Group 2: CQ-mode state transitions
 // ============================================================
+section('Skip — a station that never answered is abandoned, not advanced (KB2UXB)');
+{
+  const q = (o) => Object.assign({ mode: 'reply', phase: 'reply', call: 'AA5SG', myCall: 'KB2UXB', report: null, sentReport: null }, o);
+  assert(sm.skipAbandonsQso(q()) === true, 'reply with no report from them → abandon');
+  assert(sm.skipAbandonsQso(q({ phase: 'r+report' })) === true, 'r+report reached only by Skip, still no report → abandon');
+  assert(sm.skipAbandonsQso(q({ sentReport: '-12' })) === true, 'Skip Grid sent our report; theirs never came → abandon');
+  assert(sm.skipAbandonsQso(q({ report: '-07' })) === false, 'their report in hand → Skip advances as before');
+  assert(sm.skipAbandonsQso(q({ phase: 'r+report', report: '-07', sentReport: '-10' })) === false, 'reports both ways → W8ATE closeout keeps working');
+  assert(sm.skipAbandonsQso(q({ fd: true })) === false, 'Field Day keeps its own ladder');
+  assert(sm.skipAbandonsQso(q({ mode: 'cq', phase: 'cq' })) === false, 'CQ side unchanged');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  for (const h of ["remoteServer.on('jtcat-skip-phase'", "ipcMain.on('jtcat-popout-skip-phase'"]) {
+    const at = main.indexOf(h);
+    const body = main.slice(at, at + 2500);
+    assert(body.includes('_jtcatStateMachine.skipAbandonsQso(q)'), h + ' asks skipAbandonsQso before advancing');
+    assert(body.indexOf('skipAbandonsQso') < body.indexOf("'R' + rpt"), h + ' abandons before the R-report advance');
+  }
+  const hunt = main.slice(main.indexOf("console.log(`[JTCAT Auto-CQ] Responding to"), main.indexOf("console.log(`[JTCAT Auto-CQ] Responding to") + 2500);
+  assert(hunt.includes('settings.jtcatSkipTx1'), 'Hunt reads Skip Grid');
+  assert(hunt.includes('jtcatDirectedMsg(best.call, myCall, huntRpt || myGrid)'), 'Hunt sends a report when Skip Grid is on');
+  assert(hunt.includes('sentReport: huntRpt,'), 'Hunt records the report it sent');
+}
+
 section('CQ mode — happy path');
 {
   const baseQ = () => ({

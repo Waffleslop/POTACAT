@@ -20,15 +20,23 @@
   <!-- Owner-facing Guest Pass banner.
        Shown ONLY when a guest is currently controlling this rig via a
        redeemed pass. Reads from window.api.passEnforcementGetState()
-       on load and onPassEnforcementState/Expiring/Ended events. Click
-       the strip to revoke. -->
-  <div id="gp-owner-banner" class="hidden" title="Click to revoke guest access immediately">
+       on load and onPassEnforcementState/Expiring/Ended events. Take over
+       pauses the guest and gives you the radio; Give it back resumes them. -->
+  <div id="gp-owner-banner" class="hidden">
     <span aria-hidden="true">&#x1F511;</span>
     <div style="flex:1;line-height:1.3;">
-      <strong><span id="gp-owner-callsign">&hellip;</span></strong>
-      <span> is controlling this rig. Their access expires </span>
-      <strong><span id="gp-owner-expires">&hellip;</span></strong><span>.</span>
-      <span class="gp-revoke-link">Revoke access</span>
+      <span id="gp-owner-lent">
+        <span>Your radio is lent to </span><strong><span id="gp-owner-callsign">&hellip;</span></strong>
+        <span id="gp-owner-onair"> and is on the air as <strong><span id="gp-owner-onair-call"></span></strong></span>
+        <span id="gp-owner-nocall" class="hidden"> (no verified callsign: listen only)</span><span>.</span>
+      </span>
+      <span id="gp-owner-paused" class="hidden">
+        <span>You have your radio back. </span><strong><span id="gp-owner-paused-call"></span></strong><span>'s pass is paused.</span>
+      </span>
+      <span> Ends in </span><strong><span id="gp-owner-expires">&hellip;</span></strong><span>.</span>
+      <button type="button" id="gp-owner-takeover" class="gp-revoke-link">Take over</button>
+      <button type="button" id="gp-owner-giveback" class="gp-revoke-link hidden">Give it back</button>
+      <button type="button" id="gp-owner-end" class="gp-revoke-link">End now</button>
     </div>
   </div>
   <!-- POTACAT Cloud billing banner: grace / payment problem / expired, and
@@ -458,9 +466,6 @@
         </div>
       </div>
       <span id="freedv-sync-indicator" class="status hidden" style="width:10px;height:10px;border-radius:50%;padding:0;min-width:10px;" title="FreeDV"></span>
-      <span id="sfi-status" class="status solar-pill hidden">SFI —</span>
-      <span id="k-status" class="status solar-pill hidden">K —</span>
-      <span id="a-status" class="status solar-pill hidden">A —</span>
       <button id="parks-stats-toggle" class="status parks-stats-btn hidden" title="Toggle POTA stats panel">POTA Stats</button>
       <button id="cat-log-toggle" class="status cat-log-btn hidden" title="Toggle CAT log panel">Verbose Log</button>
       <span id="spot-count"></span>
@@ -515,6 +520,12 @@
         <div id="activator-park-dropdown" class="activator-dropdown hidden"></div>
       </div>
       <span id="activator-park-name" class="activator-park-name"></span>
+      <!-- This park's county, asked once and remembered per park (the
+           operator's own MY_CNTY on every contact from here). -->
+      <span id="activator-county-wrap" class="hidden" title="The county you are operating from in this park. Remembered for the park; sent to LoTW and your other loggers.">
+        <select id="activator-county-state" class="hidden" style="width:58px;"></select>
+        <select id="activator-county" style="max-width:150px;"><option value="">County…</option></select>
+      </span>
       <input type="text" id="activator-grid" class="activator-grid" placeholder="Grid" maxlength="6" spellcheck="false" autocomplete="off" title="Park grid square (editable)">
       <!-- The callsign used over the air for this activation (G8LIY/P, GM8LIY):
            logged as STATION_CALLSIGN on the activation's QSOs; OPERATOR stays
@@ -1598,6 +1609,15 @@
       <label>Owner callsign (optional): <input type="text" id="set-owner-callsign" maxlength="12" placeholder="same as My Callsign"></label>
       <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">ADIF OWNER_CALLSIGN — the station licensee, when that is not you. Left blank, nothing is written.</span>
       <label>QTH Grid Square: <input type="text" id="set-grid" maxlength="6"></label>
+      <!-- The operator's own state and county (ADIF MY_STATE / MY_CNTY;
+           lib/station-county.js). AE5JE 2026-10-27. -->
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <label>Home state: <select id="set-home-state" style="width:70px;"><option value="">—</option></select></label>
+        <label>Home county: <select id="set-home-county" style="width:190px;"><option value="">—</option></select></label>
+        <button type="button" id="home-county-qrz">Fill from QRZ</button>
+        <span class="help-text" id="home-county-status"></span>
+      </div>
+      <span class="help-text" style="display:block;margin-bottom:6px;">Written on contacts made from your home grid square and sent to LoTW and your other loggers. Contacts with another grid get no county rather than the wrong one. On an activation, POTACAT uses the county you choose for that park.</span>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-qrz"> QRZ.com Callsign Lookup</label>
       <div id="qrz-config" class="radio-sub hidden">
         <span class="help-text" style="font-size:12px;">Looks up operator first names from QRZ.com and shows them in the Operator column. Uses the QRZ XML API — a free QRZ account works.</span>
@@ -1758,6 +1778,12 @@
           <span id="rig-setup-summary" class="help-text"></span>
         </div>
         <div id="rig-setup-panel" class="rig-setup-panel hidden"></div>
+        <!-- Icom band scope (docs/icom-band-scope-plan.md): 30 s of what the
+             radio sends, so the scope can be built against a real radio. -->
+        <div id="icom-scope-capture-row" class="rig-setup-row hidden">
+          <button type="button" id="icom-scope-capture-btn" class="rig-btn">Record band scope data (30 s)</button>
+          <span id="icom-scope-capture-result" class="help-text">Helps POTACAT add this radio's band scope. Records the Icom POTACAT is connected to now, then puts the radio's scope settings back.</span>
+        </div>
         <label>CW keying line (USB CW over CAT port):
           <select id="set-cw-key-line" style="width:150px;">
             <option value="auto">Auto (model default)</option>
@@ -2315,11 +2341,6 @@
           <span class="help-text" style="display:inline;margin-left:4px;">(0 = no limit)</span>
         </div>
       </div>
-      <label class="checkbox-label"><input type="checkbox" id="set-enable-rbn"> Reverse Beacon Network</label>
-      <div id="rbn-config" class="radio-sub hidden">
-        <span class="help-text" style="font-size:12px;">Shows where your CQ calls are being heard by RBN skimmers worldwide. Appears in the Propagation view.</span>
-        <span class="help-text" style="display:block;margin-top:4px;">RBN spots only appear while POTACAT is open — historical spots are not retrieved.</span>
-      </div>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-wsjtx"> WSJT-X Integration</label>
       <div id="wsjtx-config" class="radio-sub hidden">
         <span class="help-text" style="font-size:12px;">Connect to WSJT-X via UDP. POTA activators are highlighted in the decode window and decodes appear in POTACAT.</span>
@@ -2334,11 +2355,6 @@
       <label class="checkbox-label"><input type="checkbox" id="set-enable-pskr"> FreeDV (PSKReporter)</label>
       <div id="pskr-config" class="radio-sub hidden">
         <span class="help-text" style="margin-left:12px;display:block;">Live FreeDV reception reports from PSKReporter. Shows who is hearing FreeDV signals worldwide.</span>
-      </div>
-      <label class="checkbox-label"><input type="checkbox" id="set-enable-pskr-map"> PSKReporter Propagation</label>
-      <div id="pskr-map-config" class="radio-sub hidden">
-        <span class="help-text" style="margin-left:12px;display:block;">Shows where your FT8/FT4/CW transmissions are being received worldwide. Appears in the Propagation view alongside RBN.</span>
-        <span class="help-text" style="display:block;margin-top:4px;">Polls every 5 minutes (PSKReporter rate limit). Spots appear after the first poll completes. Requires your callsign above.</span>
       </div>
       <label class="checkbox-label"><input type="checkbox" id="set-pskr-upload"> Report my JTCAT decodes to PSKReporter</label>
       <div id="pskr-upload-config" class="radio-sub hidden">
@@ -2669,10 +2685,9 @@
     <!-- 7. Logging -->
     <fieldset class="source-toggles" data-settings-tab="logging">
       <legend>Logging</legend>
-      <label class="checkbox-label"><input type="checkbox" id="set-enable-logging"> Enable QSO Logging</label>
-      <label class="checkbox-label" style="margin-left:12px;"><input type="checkbox" id="set-enable-banner-logger"> Bottom Banner Logger</label>
-      <span class="help-text" style="margin-left:24px;display:block;">Persistent logging bar below the spot table for rapid QSO entry</span>
-      <div id="logging-config" class="radio-sub hidden">
+      <label class="checkbox-label"><input type="checkbox" id="set-enable-banner-logger"> Bottom Banner Logger</label>
+      <span class="help-text" style="margin-left:12px;display:block;">Persistent logging bar below the spot table for rapid QSO entry</span>
+      <div id="logging-config" class="radio-sub">
         <label>ADIF Log File:
           <div style="display:flex;gap:6px;margin-top:4px;">
             <input type="text" id="set-adif-log-path" readonly style="flex:1;">
@@ -2758,6 +2773,8 @@
               </select>
             </label>
             <div class="help-text" style="margin-top:4px;line-height:1.5;">For GridTracker: enable WSJT-X binary, point at the host/port GridTracker is listening on (default 2237). For older ADIF-only tools: switch the format to Plain ADIF.</div>
+            <label class="checkbox-label" style="margin-top:6px;"><input type="checkbox" id="set-extra-udp-decodes" checked> Send FT8/FT4 decodes too, and answer the station I double-click in GridTracker</label>
+            <div class="help-text" style="line-height:1.5;">WSJT-X binary only. GridTracker's call roster fills from the JTCAT window, and a double-click there answers that station in JTCAT, the same as a double-click in the decode list.</div>
           </div>
         </div>
         <div style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px;">
@@ -3001,12 +3018,8 @@
       <label class="checkbox-label"><input type="checkbox" id="set-colorblind"> Colorblind mode (deuteranopia)</label>
       <label class="checkbox-label"><input type="checkbox" id="set-wcag-mode"> High contrast (WCAG AA)</label>
       <label class="checkbox-label"><input type="checkbox" id="set-color-rows" checked> Color table rows by spot source</label>
-      <label class="checkbox-label"><input type="checkbox" id="set-enable-solar"> Solar Propagation</label>
-      <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Shows SFI, K, and A indices in the status bar</span>
       <label class="checkbox-label"><input type="checkbox" id="set-show-meter" checked> Show S-Meter / SWR overlay</label>
       <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Floating meter box on the table view showing signal strength and SWR. Draggable.</span>
-      <label class="checkbox-label"><input type="checkbox" id="set-enable-band-activity"> Band Activity Heatmap</label>
-      <span class="help-text" style="margin-left:12px;display:block;">Displayed on the Map view only</span>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-split-view" checked> Enable split view</label>
       <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Show Table and Map side by side. When off, only one view is shown at a time.</span>
       <div id="split-orientation-config">
@@ -3153,6 +3166,17 @@
           <span class="help-text" style="display:block;margin-bottom:4px;">No Winlink account for your callsign yet. Choose a password (6 to 12 characters: letters, numbers and . ! @ # $ % ^ & * ( ) _ — Winlink allows no dash or space) and, if you like, a recovery email, then create it.</span>
           <label>Recovery email (optional): <input type="text" id="set-winlink-recovery" style="width:200px;"></label>
           <button type="button" id="winlink-register-btn">Create my Winlink account</button>
+        </div>
+        <!-- An existing account's password-recovery address (Pat 1.0 account
+             API; K9ONR asked 2026-10-27). Shown after Check my account. -->
+        <div id="winlink-recovery-box" class="hidden" style="margin-top:6px;padding:7px 9px;border:1px solid var(--border-primary);border-radius:4px;">
+          <span class="help-text" style="display:block;margin-bottom:4px;">Winlink sends a forgotten password to this address.</span>
+          <span>Recovery email: <strong id="winlink-recovery-current">&hellip;</strong></span>
+          <div style="margin-top:4px;">
+            <input type="text" id="set-winlink-recovery-new" style="width:200px;" placeholder="new address" autocomplete="off">
+            <button type="button" id="winlink-recovery-change">Change</button>
+            <span class="help-text" id="winlink-recovery-status" style="margin-left:6px;"></span>
+          </div>
         </div>
         <label class="checkbox-label" style="margin-top:8px;">
           <input type="checkbox" id="set-winlink-autocheck"> Check mail over the internet every
@@ -3492,6 +3516,11 @@
             <strong>Remote Launcher <span id="launcher-status-pill" class="help-text" style="font-weight:normal;margin-left:6px;color:#888;">checking&hellip;</span></strong>
             <span class="help-text" style="display:block;">Starts a tiny background server (port 7301) so the phone app can start/restart POTACAT when it crashes or you close it accidentally. Auto-launches at login.</span>
             <span id="launcher-status-detail" class="help-text" style="display:block;color:#888;font-size:11px;"></span>
+            <label id="launcher-via-cloud-row" class="hidden" style="display:flex;align-items:center;gap:6px;margin-top:6px;">
+              <input type="checkbox" id="launcher-via-cloud" checked>
+              <span>Restart from anywhere through your Cloud Tunnel</span>
+            </label>
+            <span id="launcher-cloud-line" class="help-text hidden" style="display:block;font-size:11px;"></span>
           </div>
           <div style="display:flex;gap:6px;">
             <button type="button" id="launcher-install-btn" style="padding:4px 12px;">Install</button>
@@ -4010,7 +4039,7 @@
          If a file goes missing, the <img> degrades to its alt text. -->
     <div class="settings-footer">
       <div class="settings-footer-cols">
-        <div class="settings-footer-left">
+        <div class="settings-footer-left" id="settings-echocat-download">
           <div class="settings-echocat-title">Download ECHOCAT on your phone and tablet</div>
           <div class="settings-echocat-badges">
             <a class="settings-echocat-badge-link" data-external="1"
@@ -4095,7 +4124,7 @@
            _shareRigUpdateReachNotice() based on cloud-tunnel +
            Tailscale state. -->
       <div id="share-rig-reach-notice" class="share-rig-notice"></div>
-      <p class="share-rig-intro">Generate a time-boxed access pass for someone else. POTACAT enforces the privilege class, power cap, and expiry on this end — out-of-band tunes are blocked, TX power is clamped, the session auto-ends when the timer runs out.</p>
+      <p class="share-rig-intro">Lend your radio to another ham for a while. They sign in to POTACAT Cloud with their own callsign and operate as themselves: their call goes on the air and their QSOs go to their logbook, not yours. POTACAT keeps them inside the class, power and modes you allow, and hands the radio back when the time is up.</p>
 
       <div class="share-rig-section">
         <div class="share-rig-section-title">When?</div>
@@ -4175,13 +4204,11 @@
       </div>
 
       <div class="share-rig-section">
-        <div class="share-rig-section-title">§97.119 callsigns</div>
-        <div class="share-rig-grid">
-          <label>Station callsign <input type="text" id="share-rig-station" autocomplete="off" spellcheck="false"></label>
-          <label>Operator callsign <input type="text" id="share-rig-operator" placeholder="(left blank → guest's call)" autocomplete="off" spellcheck="false"></label>
-          <label>Control operator <input type="text" id="share-rig-control" autocomplete="off" spellcheck="false"></label>
+        <div class="share-rig-section-title">Who is this pass for?</div>
+        <div class="share-rig-row">
+          <label>Their callsign <input type="text" id="share-rig-for" placeholder="e.g. K3SBP" autocomplete="off" spellcheck="false" maxlength="15" style="width:120px;"></label>
         </div>
-        <span class="help-text">POTACAT writes whatever you set into the QSO's ADIF — see <a href="https://www.ecfr.gov/current/title-47/chapter-I/subchapter-D/part-97/subpart-B/section-97.119" id="share-rig-97119-link" data-external="1" class="share-rig-extlink">&sect;97.119</a>. We don't interpret the rule for you.</span>
+        <span class="help-text">Only this callsign's POTACAT Cloud account can use the pass. While it runs, the radio identifies as this call on every mode (FT8, CW, SSTV, Winlink, JS8) and every contact is logged under it. Your call appears nowhere on the air; the guest's log keeps a private note that the station is yours. Leave blank to let anyone with the link use it under their own account's callsign.</span>
       </div>
 
       <div class="share-rig-section">
@@ -4190,7 +4217,7 @@
           <input type="checkbox" id="share-rig-allow-anonymous">
           <span>
             <span class="share-rig-anon-title">Allow without a POTACAT Cloud sign-in</span>
-            <span class="share-rig-anon-sub">By default, your friend needs a free POTACAT Cloud account to redeem. Tick this for one-off guests who can't sign up (Field Day visitor, club net rotation, etc.). <b>Weaker §97.119 audit trail</b> — the QSO log will show the placeholder name you set above as the operator.</span>
+            <span class="share-rig-anon-sub">Normally your guest signs in with a free POTACAT Cloud account, which is how POTACAT knows the callsign to put on the air. Tick this for a one-off guest who cannot sign up (a Field Day visitor, a club net). <b>Without a sign-in there is no verified callsign, so they can listen and log but not transmit.</b></span>
           </span>
         </label>
       </div>
@@ -4218,6 +4245,7 @@
 
       <div class="share-rig-summary">
         <div><strong>Code:</strong> <span id="share-rig-result-code" class="share-rig-code"></span></div>
+        <div><strong>For:</strong> <span id="share-rig-result-for"></span></div>
         <div><strong>Expires:</strong> <span id="share-rig-result-expires"></span></div>
         <div><strong>Privileges:</strong> <span id="share-rig-result-priv"></span></div>
       </div>
@@ -4681,6 +4709,18 @@
     <div class="ss-card-buttons">
       <button type="button" id="cloud-prompt-start" class="ss-btn ss-btn-primary">Start free trial</button>
       <button type="button" id="cloud-prompt-later" class="ss-btn">Not now</button>
+      <button type="button" id="cloud-prompt-never" class="ss-btn cp-never hidden">Don't suggest Cloud again</button>
+    </div>
+  </div>
+  <!-- Signed in, contacts on this PC, none in the cloud after the sign-in
+       catch-up: the first upload did not finish (lib/cloud-billing-ui.js
+       decideUploadCard). Never for an empty local log. -->
+  <div id="cloud-upload-card" class="station-setup-card cloud-prompt-card hidden" role="status">
+    <div class="cp-title">Your log has not reached POTACAT Cloud.</div>
+    <div id="cloud-upload-text" class="ss-card-text"></div>
+    <div class="ss-card-buttons">
+      <button type="button" id="cloud-upload-now" class="ss-btn ss-btn-primary">Upload now</button>
+      <button type="button" id="cloud-upload-later" class="ss-btn">Not now</button>
     </div>
   </div>
   <dialog id="whats-new-dialog">

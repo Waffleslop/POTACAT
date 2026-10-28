@@ -1050,7 +1050,7 @@
     const synthEl = document.getElementById('scope-phone-synth');
     if (synthEl) synthEl.classList.toggle('hidden', !(st && st.kind === 1));
     const modeEl = document.getElementById('scope-phone-mode');
-    if (modeEl) modeEl.textContent = st && st.anchor ? st.anchor.toUpperCase() + (st.anchor !== 'center' ? ' (axis assumed)' : '') : '';
+    if (modeEl) modeEl.textContent = st && st.anchor ? ScopeAxis.anchorLabel(st.anchor) : '';
     const needEnable = !!(st && st.kind !== 1 && (st.scuLan === '0' || (st.diag && st.diag.key === 'silent')));
     const enableEl = document.getElementById('scope-phone-enable');
     if (enableEl) enableEl.classList.toggle('hidden', !needEnable);

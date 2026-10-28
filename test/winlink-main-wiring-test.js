@@ -417,6 +417,18 @@ test('the gateway reply says how it is ordered, on every surface', () => {
   assert.ok(/winlinkPrediction: setWinlinkPrediction \? setWinlinkPrediction\.checked : true,/.test(app));
 });
 
+test('the recovery email of an existing account is shown and changed in Settings (K9ONR)', () => {
+  const html = read('renderer/index.html');
+  assert.ok(/id="winlink-recovery-box"/.test(html) && /id="winlink-recovery-change"/.test(html));
+  assert.ok(/ipcMain\.handle\('winlink-recovery-email-get', \(\) => winlinkRecoveryEmailGet\(\)\)/.test(main));
+  assert.ok(/ipcMain\.handle\('winlink-recovery-email-set', \(_e, email\) => winlinkRecoveryEmailSet\(email\)\)/.test(main));
+  const app = read('renderer/app.js');
+  assert.ok(/if \(r\.exists\) showWinlinkRecovery\(\)/.test(app), 'shown once the account is found');
+  assert.ok(/window\.api\.winlinkRecoveryEmailSet\(email\)/.test(app));
+  const client = read('lib/winlink-client.js');
+  assert.ok(/'\/api\/winlink-account\/password-recovery-email'/.test(client), 'Pat 1.0.0 route (api/api.go)');
+});
+
 // The summary LAST. Until 2026-10-23 it sat above the later sections, so a
 // failure down here never reached the exit code — two stale assertions rode
 // through CI that way.

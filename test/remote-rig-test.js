@@ -396,7 +396,7 @@ test('ending an activation is sent only to a shack that advertises activation-en
 
 const asyncTests = [];
 asyncTests.push(['a desktop driving a shack refuses its own ECHOCAT devices', async () => {
-  const cc = main.slice(main.indexOf("remoteServer.on('client-connected', ({ deviceId, profileCallsign } = {}) => {"));
+  const cc = main.slice(main.indexOf("remoteServer.on('client-connected', ({ deviceId, profileCallsign"));
   assert.ok(/^[^\n]*\n[\s\S]{0,400}if \(isRemoteMode\(\)\) \{[\s\S]{0,200}remoteServer\.refuseCurrentClient\(REMOTE_NO_RADIO_TO_SHARE_MSG\);\n\s+return;/.test(cc));
   const ens = fnBody(main, 'function ensureRemoteClient() {');
   assert.ok(/remoteServer\.hasClient\(\)\) \{[\s\S]{0,200}refuseCurrentClient/.test(ens), 'a phone already attached is told too');
