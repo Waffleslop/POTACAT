@@ -87,6 +87,7 @@ const TESTS = [
   'test/ft8-message-buffer-test.js',
   'test/ft8-native-decoder-test.js',
   'test/jtcat-hunt-off-test.js',
+  'test/jtcat-snr-floor-test.js', // Hunt does not call a CQ below the operator's signal floor (per band)
   'test/jtcat-remote-anchor-test.js',
   'test/rsba1-transport.test.js',
   'test/activation-log-test.js',

@@ -421,6 +421,7 @@ const { buildAdifFields, buildAdifRecord, sqliteQsoToAdifFields, ADIF_HEADER, ad
 const { PassQsoOutbox } = require('./lib/pass-qso-outbox');
 const QsoLog = require('./lib/qso-log');
 const StationCounty = require('./lib/station-county');
+const JtcatSnrFloor = require('./lib/jtcat-snr-floor');
 const OriginHealth = require('./lib/origin-health');
 const { planImport, findDuplicateGroups } = require('./lib/qso-match');
 const { SmartSdrClient, setColorblindMode: setSmartSdrColorblind } = require('./lib/smartsdr');
@@ -14068,7 +14069,11 @@ function jtcatWorkableCallers(results, myCall, opts) {
   const dupeBandMode = jtcatCurrentBandMode(ft8Engine);
   const isWorked = (opts && opts.isWorked)
     || ((call) => jtcatIsWorkedCall(call, dupeBandMode.band, dupeBandMode.mode));
-  return (results || [])
+  // The operator's signal floor for this band (lib/jtcat-snr-floor.js): a
+  // CQ too weak for this station to complete is not workable.
+  const floor = JtcatSnrFloor.floorFor(settings, dupeBandMode.band);
+  let belowFloor = 0;
+  const out = (results || [])
     // Any CQ at all, then parse, THEN apply the program filter — the
     // spotted-activator half of that filter needs the callsign, which only
     // exists after the parse.
@@ -14081,9 +14086,15 @@ function jtcatWorkableCallers(results, myCall, opts) {
       if (isWorked(d.call)) return false;
       // Under a TX slot lock, a station calling CQ in our own slot is not workable.
       if (!JtcatTxSlot.workableUnderLock(jtcatTxSlotLock(), d.slot)) return false;
+      if (!JtcatSnrFloor.passes(d.db, floor)) { belowFloor++; return false; }
       return true;
     });
+  out.belowFloor = belowFloor;
+  out.floor = floor;
+  return out;
 }
+
+let _jtcatFloorNoteAt = 0;
 
 /** The workable-caller count Run's pause/resume decisions run on. */
 function jtcatRunWorkableCount(results) {
@@ -16371,6 +16382,12 @@ function startJtcat(mode) {
         const answeredCaller = await jtcatTryAnswerDirectCaller(results, myCall, myGrid);
         const candidates = answeredCaller ? []
           : jtcatWorkableCallers(results, myCall, { filterMode: jtcatAutoCqMode });
+        // Say why Hunt stayed quiet when the only CQs were under the floor
+        // (once a minute at most).
+        if (!answeredCaller && !candidates.length && candidates.belowFloor && Date.now() - (_jtcatFloorNoteAt || 0) > 60000) {
+          _jtcatFloorNoteAt = Date.now();
+          sendCatLog(`[JTCAT Hunt] Not calling ${candidates.belowFloor} CQ${candidates.belowFloor === 1 ? '' : 's'} below your ${candidates.floor} dB floor`);
+        }
 
         // Event-needed stations outrank raw signal strength (events-roadmap
         // #4): a tracked-event station you still need (13 Colonies etc. —

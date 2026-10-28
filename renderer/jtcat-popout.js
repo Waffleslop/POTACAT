@@ -108,6 +108,11 @@ function _applyPopoutTheme(payload) {
     if (reworkDaysInput && typeof s.jtcatReworkDays === 'number') {
       reworkDaysInput.value = s.jtcatReworkDays;
     }
+    if (huntMinDbInput) {
+      var f = window.JtcatSnrFloor ? window.JtcatSnrFloor.parseDefault(s.jtcatHuntMinDb) : null;
+      huntMinDbInput.value = f == null ? '' : String(f);
+    }
+    if (huntMinDbBandInput) huntMinDbBandInput.value = s.jtcatHuntMinDbByBand || '';
     if (runPauseInput && typeof s.jtcatRunPauseAfter === 'number') {
       runPauseInput.value = s.jtcatRunPauseAfter;
     }
@@ -234,6 +239,8 @@ function _applyPopoutTheme(payload) {
     if (window.api.openWatchlistSettings) window.api.openWatchlistSettings();
   });
   var reworkDaysInput = document.getElementById('jp-rework-days');
+  var huntMinDbInput = document.getElementById('jp-hunt-min-db');
+  var huntMinDbBandInput = document.getElementById('jp-hunt-min-db-band');
   var relogMinInput = document.getElementById('jp-relog-min');
   var runPauseInput = document.getElementById('jp-run-pause-after');
   var wfSpeedInput = document.getElementById('jp-wf-speed');
@@ -2581,6 +2588,27 @@ function _applyPopoutTheme(payload) {
       if (n > 60) n = 60;
       maxAttemptsInput.value = n;
       window.api.saveSettings({ jtcatMaxQsoAttempts: n });
+    });
+  }
+  // Hunt's signal floor (lib/jtcat-snr-floor.js): normalised on change, and
+  // the by-band line says which pieces it could not read.
+  if (huntMinDbInput && window.JtcatSnrFloor) {
+    huntMinDbInput.addEventListener('change', function() {
+      var f = window.JtcatSnrFloor.parseDefault(huntMinDbInput.value);
+      huntMinDbInput.value = f == null ? '' : String(f);
+      window.api.saveSettings({ jtcatHuntMinDb: f == null ? '' : String(f) });
+    });
+  }
+  if (huntMinDbBandInput && window.JtcatSnrFloor) {
+    huntMinDbBandInput.addEventListener('change', function() {
+      var r = window.JtcatSnrFloor.parseByBand(huntMinDbBandInput.value);
+      var text = window.JtcatSnrFloor.formatByBand(r.map);
+      huntMinDbBandInput.value = text;
+      var help = document.getElementById('jp-hunt-min-db-band-help');
+      if (help) help.textContent = r.bad.length
+        ? 'Could not read: ' + r.bad.join(', ') + '. Write a band and a level, like 20m -18.'
+        : 'A band listed here uses its own level; any other band uses the one above.';
+      window.api.saveSettings({ jtcatHuntMinDbByBand: text });
     });
   }
   if (reworkDaysInput) {

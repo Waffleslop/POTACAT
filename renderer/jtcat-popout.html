@@ -917,6 +917,12 @@
       <span class="jp-opt-help">How long a logged contact keeps Hunt and Auto CQ from calling that station again on the same band and mode. 0 = forever. A station spotted as an activator is always fair game unless you already worked them at that park today — a new park or a new UTC day counts fresh, matching program rules.</span>
     </label>
     <label class="jp-opt-row jp-opt-num-row">
+      <span class="jp-opt-label">Hunt: don't call below <input id="jp-hunt-min-db" type="text" inputmode="numeric" maxlength="4" placeholder="off" style="width:44px;"> dB</span>
+      <span class="jp-opt-help">Hunt only answers a CQ at least this strong, so it doesn't start contacts your station is unlikely to finish. Blank = call any signal. You can still double-click a weaker station to call it yourself.</span>
+      <span class="jp-opt-label" style="margin-top:4px;">By band: <input id="jp-hunt-min-db-band" type="text" maxlength="120" placeholder="e.g. 20m -18, 6m -12" style="width:170px;"></span>
+      <span class="jp-opt-help" id="jp-hunt-min-db-band-help">A band listed here uses its own level; any other band uses the one above.</span>
+    </label>
+    <label class="jp-opt-row jp-opt-num-row">
       <span class="jp-opt-label">Don't log the same station again for <input id="jp-relog-min" type="number" min="0" max="120" value="15"> minutes</span>
       <span class="jp-opt-help">If a station repeats their report after you sent RR73, answering them again is the same contact, not a new one. Within this many minutes on the same band and mode, the RR73 still goes out but no second log entry is made. 0 = log every completed exchange.</span>
     </label>
@@ -987,6 +993,7 @@
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>
   <script src="../lib/rig-family.js"></script>
   <script src="../lib/rig-bands.js"></script>
+  <script src="../lib/jtcat-snr-floor.js"></script>
   <script src="../lib/watchlist-groups.js"></script>
   <script src="jtcat-parser.js"></script>
   <script src="cq-target.js"></script>
