@@ -24401,6 +24401,7 @@ function connectRemote() {
     }
     // Notify desktop renderer to refresh
     if (win && !win.isDestroyed()) win.webContents.send('voice-macros-updated');
+    notifyVfoVoiceMacros();
     console.log(`[Voice] Received macro ${idx} from phone`);
     voiceMacroStoreSync();
     // Echo the saved slot to every client, the uploader included: the phone
@@ -24418,6 +24419,7 @@ function connectRemote() {
     const p = voiceMacroPath(idx);
     if (fs.existsSync(p)) fs.unlinkSync(p);
     if (win && !win.isDestroyed()) win.webContents.send('voice-macros-updated');
+    notifyVfoVoiceMacros();
     voiceMacroStoreSync();
     if (remoteServer && remoteServer.hasClient()) remoteServer.sendToClient({ type: 'voice-macro-delete', idx });
   });
@@ -28006,6 +28008,13 @@ function voiceMacroStoreSync() {
   });
 }
 onRemoteServer(() => voiceMacroStoreSync());
+
+// The VFO window draws the voice macro bar from the labels and recordings, so
+// every change to either reaches it now, not at its next open (N0KAH
+// 2026-10-28: a renamed macro kept its old name until the window was reopened).
+function notifyVfoVoiceMacros() {
+  if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('voice-macros-changed');
+}
 
 function loadLocalWorkedParks() {
   try {
@@ -44442,6 +44451,7 @@ app.whenReady().then(() => {
       remoteServer.sendToClient({ type: 'voice-macro-sync', idx, label, audio: base64, hash: voiceMacroHash(idx) });
     }
     voiceMacroStoreSync();
+    notifyVfoVoiceMacros();
     return true;
   });
 
@@ -44458,6 +44468,7 @@ app.whenReady().then(() => {
       remoteServer.sendToClient({ type: 'voice-macro-delete', idx });
     }
     voiceMacroStoreSync();
+    notifyVfoVoiceMacros();
     return true;
   });
 
@@ -44476,6 +44487,7 @@ app.whenReady().then(() => {
     if (remoteServer && remoteServer.hasClient()) {
       remoteServer.sendToClient({ type: 'voice-macro-labels', labels });
     }
+    notifyVfoVoiceMacros();
     return true;
   });
   // Desktop CW text sending (macros)

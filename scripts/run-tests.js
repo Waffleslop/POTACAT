@@ -91,6 +91,7 @@ const TESTS = [
   'test/rx-spectrum-test.js', // the phone's VFO waterfall with no FT8 engine: Flex/Icom streams, the rig's sound card
   'test/flex-scope-test.js', // the Flex's own panadapter as the band scope (Flex Direct), against a real 8600 capture
   'test/popout-theme-test.js', // every pop-out follows a theme change, from the quick toggle or Settings
+  'test/vfo-voice-macros-test.js', // the VFO window's voice macro bar follows renames and recordings
   'test/jtcat-remote-anchor-test.js',
   'test/rsba1-transport.test.js',
   'test/activation-log-test.js',

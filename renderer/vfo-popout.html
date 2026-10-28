@@ -2946,6 +2946,7 @@ loadCwMacros().catch(e => console.error('[VFO] loadCwMacros error:', e));
 
 // --- Voice Macros ---
 let voicePlayingIdx = -1;
+let voiceMacrosStale = false;   // a change arrived mid-playback
 let voicePlaybackSource = null;
 let voicePlaybackCtx = null;
 
@@ -3036,9 +3037,20 @@ function stopVoicePlayback() {
   voicePlayingIdx = -1;
   document.querySelectorAll('.voice-macro-btn.active').forEach(b => b.classList.remove('active'));
   releaseTxMeter();
+  if (voiceMacrosStale) {
+    voiceMacrosStale = false;
+    loadVoiceMacros().catch(e => console.error('[VFO] loadVoiceMacros error:', e));
+  }
 }
 
 loadVoiceMacros().catch(e => console.error('[VFO] loadVoiceMacros error:', e));
+// A rename or new recording in Settings (or from the phone) redraws the bar.
+// Not while one plays (the redraw would orphan its button's highlight):
+// then it redraws when the playback stops.
+if (window.api.onVoiceMacrosChanged) window.api.onVoiceMacrosChanged(() => {
+  if (voicePlayingIdx >= 0) { voiceMacrosStale = true; return; }
+  loadVoiceMacros().catch(e => console.error('[VFO] loadVoiceMacros error:', e));
+});
 
 // --- CW Speed / Text Controls ---
 const vfoCwWpm = document.getElementById('vfo-cw-wpm');

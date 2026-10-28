@@ -79,6 +79,8 @@ contextBridge.exposeInMainWorld('api', {
     setInterval(flush, 250);
   },
   onTheme: (cb) => ipcRenderer.on('vfo-popout-theme', (_e, theme) => cb(theme)),
+  // Voice macro labels or recordings changed (Settings, a recording, the phone).
+  onVoiceMacrosChanged: (cb) => ipcRenderer.on('voice-macros-changed', () => cb()),
   // Live profile-list updates pushed by main when ECHOCAT phone (or another
   // window) edits settings.vfoProfiles. Fires after a save() or delete on
   // the phone-side widget; lets the popout re-render without a manual reload.
