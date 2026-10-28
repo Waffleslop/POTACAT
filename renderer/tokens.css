@@ -131,7 +131,6 @@
   --ds-band-630m: #a1887f;
   --ds-shadow-card: none;
   --ds-shadow-sheet: none;
-  color-scheme: dark;
 }
 
 [data-ds="night"] {

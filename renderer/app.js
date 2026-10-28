@@ -1929,10 +1929,25 @@ function watchlistHasCallsign(rules, callsign) {
 // sites (welcome screen, quick light toggle) working without a thread
 // of plumbing. Updated when settings load OR the variant radio changes.
 let _currentDarkVariant = 'navy';
+// settings.appTheme: 'classic' (the light/dark/variant choices) or a
+// design-system theme shared with the phone (lib/app-theme.js). While one is
+// chosen it decides light vs dark and data-ds on <html>.
+let _currentAppTheme = 'classic';
+function _resolvedAppTheme(light) {
+  if (!window.AppTheme) return { theme: light ? 'light' : 'dark', variant: _currentDarkVariant || 'navy', ds: null };
+  return window.AppTheme.resolveAppTheme({ appTheme: _currentAppTheme, lightMode: !!light, darkVariant: _currentDarkVariant });
+}
 
 function applyTheme(light, darkVariant) {
-  document.documentElement.setAttribute('data-theme', light ? 'light' : 'dark');
   if (darkVariant !== undefined) _currentDarkVariant = darkVariant;
+  const _r = _resolvedAppTheme(light);
+  if (_r.ds) {
+    window.AppTheme.applyToDocument(document, _r);
+    if (typeof rerenderRbn === 'function') rerenderRbn();
+    return;
+  }
+  document.documentElement.removeAttribute('data-ds');
+  document.documentElement.setAttribute('data-theme', light ? 'light' : 'dark');
   // data-dark-variant is only set when in dark mode AND non-default.
   // Removing it when light or navy keeps the attribute set minimal and
   // means the CSS [data-dark-variant="charcoal"] block can be a single
@@ -1972,6 +1987,7 @@ async function loadPrefs() {
       quickShowMeter.checked = meterBoxVisible;
     }
   }
+  _currentAppTheme = settings.appTheme || 'classic';
   applyTheme(settings.lightMode === true, settings.darkVariant || 'navy');
   applyColorblindMode(settings.colorblindMode === true);
   applyWcagMode(settings.wcagMode === true);
@@ -16335,19 +16351,25 @@ function broadcastPopoutTheme(p) {
 }
 
 function _popoutThemePayload() {
-  return {
-    theme: setLightMode.checked ? 'light' : 'dark',
-    variant: _currentDarkVariant || 'navy',
-  };
+  const r = _resolvedAppTheme(setLightMode.checked);
+  const p = { theme: r.theme, variant: r.variant };
+  if (r.ds) p.ds = r.ds;
+  return p;
 }
 
 quickLightMode.addEventListener('change', async () => {
   const light = quickLightMode.checked;
+  // With a design-system theme chosen, the quick toggle moves between its
+  // light and dark themes (POTACAT Light / the chosen dark one).
+  const _wasAppTheme = _currentAppTheme;
+  if (window.AppTheme) _currentAppTheme = window.AppTheme.toggledAppTheme(_currentAppTheme, light);
   applyTheme(light);
   setLightMode.checked = light;
   _updateThemeToggleLabel();
   broadcastPopoutTheme(_popoutThemePayload());
-  await window.api.saveSettings({ lightMode: light });
+  const _quickSave = { lightMode: light };
+  if (_currentAppTheme !== _wasAppTheme) _quickSave.appTheme = _currentAppTheme;
+  await window.api.saveSettings(_quickSave);
 });
 
 // More dropdown → "Activator mode" entry. Behaves like the other
@@ -17324,6 +17346,7 @@ async function openSettingsDialog(tab) {
   setDisableAutoUpdate.checked = s.disableAutoUpdate === true;
   setEnableTelemetry.checked = s.enableTelemetry === true;
   setLightMode.checked = s.lightMode === true;
+  { const _at = document.getElementById('set-app-theme'); if (_at) _at.value = s.appTheme || 'classic'; }
   // Mirror the dark sub-variant radio. Default 'navy' for legacy users
   // who don't have the field yet; setting persists in settings.json.
   const _dvVal = s.darkVariant || 'navy';
@@ -17792,6 +17815,7 @@ settingsSave.addEventListener('click', async () => {
   const disableAutoUpdate = setDisableAutoUpdate.checked;
   const telemetryEnabled = setEnableTelemetry.checked;
   const lightModeEnabled = setLightMode.checked;
+  const appThemeVal = (document.getElementById('set-app-theme') || {}).value || 'classic';
   // Dark sub-variant — radio "navy" vs "charcoal". Reads the checked
   // radio; falls back to current value so missing UI doesn't reset it.
   const darkVariantRadio = document.querySelector('input[name="set-dark-variant"]:checked');
@@ -18043,6 +18067,7 @@ settingsSave.addEventListener('click', async () => {
     enableTelemetry: telemetryEnabled,
     lightMode: lightModeEnabled,
     darkVariant: darkVariantVal,
+    appTheme: appThemeVal,
     panadapterSyncTable: setPanadapterSyncTable.checked,
     panadapterPota:      setPanadapterPota.checked,
     panadapterSota:      setPanadapterSota.checked,
@@ -18225,8 +18250,9 @@ settingsSave.addEventListener('click', async () => {
   defaultPower = defaultPowerVal;
   updateLoggingVisibility();
   updateBannerLoggerVisibility();
+  _currentAppTheme = appThemeVal;
   applyTheme(lightModeEnabled, darkVariantVal);
-  broadcastPopoutTheme({ theme: lightModeEnabled ? 'light' : 'dark', variant: darkVariantVal });
+  broadcastPopoutTheme(_popoutThemePayload());
   enableDxcc = dxccEnabled;
   licenseClass = licenseClassVal;
   hideOutOfBand = hideOob;

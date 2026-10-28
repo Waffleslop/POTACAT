@@ -2999,6 +2999,16 @@
     <!-- 8. Display (trimmed — bearing moved to Antenna, SmartSDR absorbed) -->
     <fieldset class="source-toggles" data-settings-tab="display">
       <legend>Display</legend>
+      <label for="set-app-theme" style="display:block;margin-bottom:6px;">Theme:
+        <select id="set-app-theme">
+          <option value="classic">Classic (the light and dark modes below)</option>
+          <option value="potacat-dark">POTACAT Dark</option>
+          <option value="midnight">Midnight</option>
+          <option value="acid-burn">Acid Burn</option>
+          <option value="potacat-light">POTACAT Light</option>
+        </select>
+      </label>
+      <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">The four named themes are the same ones as the ECHOCAT app, colour for colour. Preview: windows are still being moved onto them, so a few controls keep their old look. Classic keeps the light, dark and variant choices below.</span>
       <label class="switch-label">
         <span>Dark Mode</span>
         <div class="switch">
@@ -5077,6 +5087,7 @@
 
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>
   <script src="../lib/rig-family.js"></script>
+  <script src="../lib/app-theme.js"></script>
   <script src="../lib/rig-bands.js"></script>
   <script src="../lib/spot-row.js"></script>
   <script src="../lib/cm108-ptt.js"></script>

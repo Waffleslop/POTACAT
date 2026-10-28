@@ -97,19 +97,22 @@ function generate(t) {
   fixed.push('  --ds-font-body: var(--ds-font-sans);');
   fixed.push('  --ds-font-scale: 1;');
 
-  const themeBlock = (column, scheme, font) => {
+  const themeBlock = (column, scheme, font, withScheme = true) => {
     const b = [];
     for (const tok of t.color.tokens) b.push(`  --ds-${tok.name}: ${colors[column][tok.name]};`);
     for (const tok of t.shadow.tokens) b.push(`  --ds-${tok.name}: ${shadowFor(tok, column, scheme)};`);
     if (font === 'mono') b.push('  --ds-font-body: var(--ds-font-mono);');
-    b.push(`  color-scheme: ${scheme};`);
+    // :root never sets color-scheme: the classic desktop themes own it until
+    // a data-ds theme is chosen (a dark scheme on :root would turn the
+    // classic light theme's form controls dark).
+    if (withScheme) b.push(`  color-scheme: ${scheme};`);
     return b;
   };
 
   const def = THEMES.find((x) => x.column === DEFAULT_COLUMN);
   L.push(':root {');
   L.push(...fixed);
-  L.push(...themeBlock(def.column, def.scheme, def.font));
+  L.push(...themeBlock(def.column, def.scheme, def.font, false));
   L.push('}');
   L.push('');
   for (const th of THEMES) {
