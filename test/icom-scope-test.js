@@ -228,11 +228,13 @@ check('Settings > My Rigs shows the button for the three CI-V connection types',
 
 // Real radios (test/fixtures/icom-scope/), recorded with the 1.13.6 button.
 const RECORDINGS = [
-  { file: 'kw4fm-ic7300-center-7063-200k.txt', who: 'KW4FM IC-7300', sweeps: 118, centerHz: 7063000, spanHz: 200000, frames: 1307, maxLevel: 121 },
-  { file: 'ic7300-center-14252-100k.txt', who: 'IC-7300 on 20 m', sweeps: 122, centerHz: 14252000, spanHz: 100000, frames: 1347, maxLevel: 79 },
+  { file: 'kw4fm-ic7300-center-7063-200k.txt', who: 'KW4FM IC-7300', mode: 'center', sweeps: 118, centerHz: 7063000, spanHz: 200000, frames: 1307, maxLevel: 121 },
+  { file: 'ic7300-center-14252-100k.txt', who: 'IC-7300 on 20 m', mode: 'center', sweeps: 122, centerHz: 14252000, spanHz: 100000, frames: 1347, maxLevel: 79 },
+  // Fixed mode: division 1 carries the window's two edges, not a centre and half-span.
+  { file: 'w0egr-ic7300-fixed-14000-14350.txt', who: 'W0EGR IC-7300 (Fixed)', mode: 'fixed', sweeps: 122, centerHz: 14175000, spanHz: 350000, lowHz: 14000000, highHz: 14350000, frames: 1347, maxLevel: 124 },
 ];
 for (const r of RECORDINGS) {
-  check(`${r.who} recording: ${r.sweeps} whole sweeps, Center ${r.centerHz / 1e6} MHz, +/-${r.spanHz / 2000} kHz, nothing dropped`, () => {
+  check(`${r.who} recording: ${r.sweeps} whole sweeps, ${r.mode} ${r.centerHz / 1e6} MHz, ${r.spanHz / 1000} kHz wide, nothing dropped`, () => {
     const text = fs.readFileSync(path.join(__dirname, 'fixtures/icom-scope', r.file), 'utf8');
     const asm = new S.SweepAssembler();
     const sweeps = [];
@@ -244,13 +246,17 @@ for (const r of RECORDINGS) {
     const sum = S.summarizeSweeps(sweeps);
     assert.strictEqual(sum.sweeps, r.sweeps);
     assert.deepStrictEqual(sum.points, [475]);
-    assert.strictEqual(sum.mode, 'center');
+    assert.strictEqual(sum.mode, r.mode);
+    if (r.lowHz) {
+      assert.strictEqual(sweeps[0].header.lowHz, r.lowHz);
+      assert.strictEqual(sweeps[0].header.highHz, r.highHz);
+    }
     assert.strictEqual(sum.centerHz, r.centerHz);
     assert.strictEqual(sum.spanHz, r.spanHz);
     assert.strictEqual(sum.maxLevel, r.maxLevel);
     assert.ok(sum.maxLevel <= 160, 'levels stay on the 0..160 scale');
     assert.strictEqual(asm.dropped, 0);
-    assert.deepStrictEqual(S.axisFor(sweeps[0].header), { anchor: 'center', centerHz: r.centerHz, spanHz: r.spanHz });
+    assert.deepStrictEqual(S.axisFor(sweeps[0].header), { anchor: r.mode, centerHz: r.centerHz, spanHz: r.spanHz });
     // The capture's own summary line agrees with what the parser reads back.
     assert.ok(text.includes(`# result: ${r.frames} data frames, ${r.sweeps} sweeps, points=475 maxLevel=${r.maxLevel} dropped=0`));
   });
