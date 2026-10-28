@@ -24543,7 +24543,9 @@ function rigPresetOpenEditor(m, p) {
     for (const f of fs) {
       const row = document.createElement('div'); row.className = 'rig-popover-row rig-preset-field';
       const inc = document.createElement('input'); inc.type = 'checkbox'; inc.title = 'Include this setting in the preset (unticked = left as it is)';
-      const lab = document.createElement('label'); lab.textContent = f.label + (f.unit ? ' (' + f.unit + ')' : '');
+      // A level in the radio's own steps shows its range (FTX-1 NB 0-10).
+      const top = f.maxCap && caps[f.maxCap] != null ? caps[f.maxCap] : f.max;
+      const lab = document.createElement('label'); lab.textContent = f.label + (f.unit ? ' (' + f.unit + ')' : f.maxCap ? ' (' + f.min + '-' + top + ')' : '');
       let ctl;
       if (f.kind === 'switch') {
         ctl = document.createElement('select');
@@ -24553,7 +24555,7 @@ function rigPresetOpenEditor(m, p) {
         const opts = (f.key === 'agc' && Array.isArray(caps.agcModes) && caps.agcModes.length) ? caps.agcModes : f.options;
         for (const v of opts) { const o = document.createElement('option'); o.value = v; o.textContent = v; ctl.appendChild(o); }
       } else {
-        ctl = document.createElement('input'); ctl.type = 'number'; ctl.min = f.min; ctl.max = f.max; ctl.step = f.kind === 'width' ? 50 : 1; ctl.style.width = '80px';
+        ctl = document.createElement('input'); ctl.type = 'number'; ctl.min = f.min; ctl.max = top; ctl.step = f.kind === 'width' ? 50 : 1; ctl.style.width = '80px';
       }
       const has = p && p[f.key] !== undefined && p[f.key] !== null;
       inc.checked = !!has;
