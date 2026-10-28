@@ -103,7 +103,8 @@ const fnOf = (name, len = 2500) => main.slice(main.indexOf('function ' + name + 
 check('every FT8/FT4 decode batch goes to the Extra UDP bridge, after a Status, unless turned off', () => {
   assert.ok(/pskrQueueDecodes\(data\);\s*\r?\n\s*\/\/ GridTracker[^\n]*\r?\n\s*gridTrackerSendDecodes\(data\);/.test(main));
   assert.ok(/return !!extraUdpBridge\.socket && settings\.extraUdpDecodes !== false;/.test(main));
-  assert.ok(/sendDecodes\(decodes, statusOver\) \{\s*if \(!this\.socket \|\| !decodes\.length\) return;\s*this\._sendStatus\(statusOver\);/.test(main));
+  assert.ok(/sendDecodes\(decodes, statusOver\) \{\s*if \(!this\.socket \|\| !decodes\.length\) return;\s*this\._sendStatus\(Object\.assign\(\{\}, statusOver, \{ decoding: true \}\)\);/.test(main));
+  assert.ok(/this\._sendStatus\(Object\.assign\(\{\}, statusOver, \{ decoding: false \}\)\);\s*\},/.test(main), 'the closing status is when GridTracker builds its roster');
 });
 check('the bridge listens on its own socket; a reply becomes a JTCAT double-click, a halt the Halt button', () => {
   assert.ok(/this\.socket\.on\('message', \(buf, rinfo\) => \{ if \(this\.onInbound\) this\.onInbound\(buf, rinfo\); \}\);/.test(main));

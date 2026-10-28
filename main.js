@@ -28256,15 +28256,19 @@ function createWsjtxUdpBridge(label) {
       this._sendStatus();
     },
 
-    /** FT8/FT4 decodes as WSJT-X DECODE messages, after a Status so the
-     *  receiver files them under the band and mode they were heard on. */
+    /** FT8/FT4 decodes as WSJT-X DECODE messages, between two Statuses the
+     *  way WSJT-X sends a cycle: "decoding" first, so the receiver files them
+     *  under the band and mode they were heard on, then "done", which is
+     *  when GridTracker builds its call roster (handleInstanceStatus,
+     *  Decoding == 0). */
     sendDecodes(decodes, statusOver) {
       if (!this.socket || !decodes.length) return;
-      this._sendStatus(statusOver);
+      this._sendStatus(Object.assign({}, statusOver, { decoding: true }));
       for (const dec of decodes) {
         const buf = encodeDecode(this.id, dec);
         this.socket.send(buf, 0, buf.length, this.port, this.host);
       }
+      this._sendStatus(Object.assign({}, statusOver, { decoding: false }));
     },
 
     // GridTracker2 drops every message from a source, logged QSOs included,
@@ -29036,7 +29040,7 @@ function gridTrackerSendDecodes(data) {
   }
   const qso = popoutJtcatQso || remoteJtcatQso;
   try {
-    extraUdpBridge.sendDecodes(out, { dxCall: (qso && qso.call) || '', txEnabled: !!(ft8Engine && ft8Engine._txEnabled), decoding: true });
+    extraUdpBridge.sendDecodes(out, { dxCall: (qso && qso.call) || '', txEnabled: !!(ft8Engine && ft8Engine._txEnabled) });
   } catch (e) {
     sendCatLog(`[GridTracker] could not send decodes: ${e.message}`);
   }
