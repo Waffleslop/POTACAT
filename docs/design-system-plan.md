@@ -1,6 +1,6 @@
 # POTACAT desktop + Remote Launcher design system — plan
 
-Status: PLAN, 2026-10-28 (Casey: "a comprehensive review of POTACAT and the Launcher for design ... one beautiful consistent design ... Acid Burn on the desktop too ... themes match ... skin POTACAT professionally, custom designs folks bring in").
+Status: Phase 0 (audit, docs/design-audit.md) and Phase 1 (assets/design/tokens.json + scripts/gen-design-tokens-css.js -> renderer/tokens.css, test/design-tokens-test.js) DONE 2026-10-28; Phase 2 next. Decisions taken: see docs/design-audit.md. Started as PLAN, 2026-10-28 (Casey: "a comprehensive review of POTACAT and the Launcher for design ... one beautiful consistent design ... Acid Burn on the desktop too ... themes match ... skin POTACAT professionally, custom designs folks bring in").
 
 Source of truth for the system: the phone's handoff `potacat-app/docs/desktop-handoffs/design-system-for-desktop.md` (2026-10-28, from `potacat-app/docs/design-system/tokens.json`). Read its section 0 first: the tokens, four themes (POTACAT Light, Midnight, POTACAT Dark, Acid Burn), contrast tests and font scaling are BUILT on the phone; the shared component library and skin import are DESIGNED, not built. The phone's lesson: colour reached every screen through a key remap, type reached only redesigned screens (80 TYPE uses vs 1,438 literal sizes), because components were never shared. So the desktop builds the components first.
 
