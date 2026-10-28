@@ -140,17 +140,40 @@ All tuning goes through the existing tune path, using the VFO window's optimisti
 | 5 waterfall divider/auto/time/speed | next | medium |
 | 6 spot lanes, Flex slices, TX tint | last | small-medium |
 | 7 handoffs | as each phase ships | |
+| 8 RTL-SDR v4: bundled rtl_tcp, v4 rules, Station Setup, antenna warning | can go right after 0, in parallel with 1-6 | medium (release.yml for 3 OSes) |
 
 Phases 1-2 alone already answer "make it look like a proper SDR display". Each phase is its own commit and is checked in a scratch `--user-data-dir` instance on `--synth`, plus the FT-710/Flex code paths against fixtures (`test/fixtures/flex-pan/8600-capture.txt`). Casey's own 8600 check comes when he says.
 
 Icom plugs into all of this when its captures arrive (`docs/icom-band-scope-plan.md` steps 3-5). Nothing here waits for it.
 
-## Questions for Casey
+## Decisions (Casey 2026-10-28)
 
-1. **No reported filter width:** draw the dashed "nominal" passband (recommended), or the dial line only?
-2. **Wheel step:** the scope's own step, defaulting by mode (recommended), or shared with the VFO window's step select?
-3. **FT-710/Icom CENTER pan:** dragging the scale retunes the radio on release (recommended; it is what the radio's own touchscreen does). Or should dragging be disabled on those sources?
-4. **Privilege shading** on by default (recommended), or off until the operator ticks it?
+1. **No reported filter width:** "do what's best" → the dashed "nominal" passband (item 8).
+2. **Wheel step:** "vfo and scope step should be synced" → ONE step, owned by main: `settings.tuneStepHz` (GLOBAL_KEY, default 1000, the VFO window's current default). The VFO window's step select and the scope's gear-menu step both write it through one IPC and both follow the push; ECHOCAT gets it as S2C `tune-step {hz}` + C2S `set-tune-step` (hello cap `tune-step`) so the web scope and the phone follow too. The VFO window's step is not persisted today (always 1 kHz at open); it is from now on.
+3. **CENTER-mode drag:** "do what's best" → drag previews, the radio tunes on release (item 12b).
+4. **Privilege shading:** on by default, with a gear-menu switch to turn it off.
+
+## Phase 8: anyone can have a band scope (RTL-SDR v4 + any radio)
+
+Casey: "I also want to be able to do this with my RTL-SDR v4 and QMX -- this way anyone can have a bandscope!" `lib/sdr-scope.js` already does the receiving (rtl_tcp client, FFT, known axis, click-to-tune, every surface) but has never run on hardware, and today the operator must find, install and start rtl_tcp themselves. This phase makes a $40 dongle a band scope for any radio POTACAT controls, the QMX first.
+
+**RTL-SDR v4 facts that change the code:**
+- The v4 (R828D tuner, greeting tuner type 6) covers HF through a BUILT-IN upconverter that the RTL-SDR Blog driver switches in by itself below about 28.8 MHz. **Direct sampling must be OFF on a v4**; the I/Q direct-sampling options are for v3-and-older dongles. `setupCommands` today sends whatever `rig.sdrScope.directSampling` says; on an R828D with HF tuning, POTACAT now forces off and logs once, and the rig editor hides the option when the last greeting said R828D.
+- The v4 needs the RTL-SDR Blog build of librtlsdr/rtl_tcp (older stock builds do not know its upconverter: HF is silent or wrong). The bundled binary is that build.
+- Its TCXO is about 1 ppm, so `ppm` stays 0 by default; the existing ppm field corrects older dongles.
+
+**POTACAT starts rtl_tcp itself** (as it does rotctld, `rotctldLaunch`):
+- `assets/rtl-sdr/` ships the RTL-SDR Blog release's `rtl_tcp` (+ `rtlsdr.dll`, `libusb-1.0.dll` on Windows); release.yml copies/builds it for macOS and Linux beside rigctld. GPL-2.0, run as a separate process and never linked, the same footing as the bundled Dire Wolf; license + source link in `third_party/rtl-sdr/`.
+- Per rig `rig.sdrScope.launch` (default on for a new SDR scope): POTACAT runs `rtl_tcp -a 127.0.0.1 -p <port>` (loopback only — rtl_tcp has no auth) while the scope is watched, stops it when nobody watches (the dongle is free for other software between uses), and connects as today. Off = connect to an rtl_tcp somewhere else (a Pi by the antenna), today's behaviour.
+- rtl_tcp's own output is the diagnosis, named in plain words (`describeSdrError` gains): "No supported devices found" (not plugged in), `usb_claim_interface error -3` / "Failed to open" (Windows: the WinUSB driver is not installed — Zadig; Linux: the DVB kernel driver holds it — blacklist `dvb_usb_rtl28xxu`; also: another program has the dongle), tuner type reported.
+
+**Station Setup gains a "Band scope from an SDR" step** for any rig with `sdrScope.enabled`: dongle found → tuner (v4 named) → frames arriving → **"Tune to a signal and click it"** (the operator confirms the click landed on it: proves the offset/ppm). Menu-free, so no rig-setup-notes needed; the Zadig instruction (Windows: Options > List All Devices, "Bulk-In, Interface (Interface 0)", WinUSB, Replace Driver) is a setup note scoped to the SDR scope, sourced from the RTL-SDR Blog quick start.
+
+**The antenna — the one thing software cannot fix.** A QMX has no receiver output, so the dongle needs its own antenna. A dongle on the SAME antenna as a transmitter (a T-piece, a splitter) is destroyed by the first transmission: 5 W is +37 dBm, the dongle's limit is about +10 dBm. The rig editor and the Station Setup step say so in one plain line, and suggest a separate wire, or a T/R switch / receiver protector for a shared antenna. While we transmit, the scope marks the rows (a thin TX band on the waterfall) and holds the auto-range, so the desensed dongle's blow-out does not reset the black level.
+
+**QMX specifics:** none in the scope — the dial comes from the QMX's CAT like any rig, offset 0. The same works for every radio with CAT, and for "No CAT control" radios the scope shows but cannot follow (it says so; centre set by hand, click shows the frequency instead of tuning).
+
+**Live test:** Casey's RTL-SDR v4 + QMX — the first hardware run of `lib/sdr-scope.js`. Needs the dongle plugged in, Zadig's WinUSB driver installed once (admin, Casey's click), and the QMX on CAT. In a scratch instance only.
 
 ## Not in this plan
 
