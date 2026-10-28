@@ -27698,6 +27698,10 @@ function mutateQsoLog(mutate) {
 function importQsoRecords(records) {
   const logPath = qsoLogPath();
   const existing = QsoLog.readLog(logPath);
+  // A logger that names the park only as POTA_REF (QLog) gets SIG / SIG_INFO
+  // filled in, so the Logbook and every export see it (KC9FOZ, 2026-10-22).
+  const { fillSigFromProgramRefs } = require('./lib/adif-normalize');
+  records = records.map(fillSigFromProgramRefs);
   const { fresh, skipped } = planImport(existing, records);
   QsoLog.appendRecords(logPath, fresh, { existing, sink: qsoLogSink });
   const unique = new Set(fresh.map((r) => String(r.CALL).toUpperCase())).size;
