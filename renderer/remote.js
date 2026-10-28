@@ -988,6 +988,8 @@
   let scopePeakOn = scopeLsGet('echocat-scope-peak', '0') === '1';
   let scopePeakDecay = scopeLsGet('echocat-scope-peak-decay', 'slow');
   let scopeSUnits = scopeLsGet('echocat-scope-sunits', '0') === '1';
+  // Licence-privilege shading: on by default (Casey 10/28).
+  let scopePrivileges = scopeLsGet('echocat-scope-privileges', '1') !== '0';
   // Averaging + peak hold run on the RAW levels (the readout reads them).
   let scopeSmooth = null, scopePeak = null;
   let ft8BsOn = (() => { try { return localStorage.getItem('echocat-ft8-bandscope') === '1'; } catch { return false; } })();
@@ -1132,7 +1134,10 @@
     const peak = sf.full && scopePeakOn && scopePeak ? V.applyRange(scopePeak, scopeRange.lo, scopeRange.hi) : null;
     window.ScopeView.drawTrace(canvas.getContext('2d'), { bins: shown, peak },
       { w: canvas.width, h: canvas.height, dpr: 1, axis, dialHz: centerHz, spanHz: st.spanHz, anchor: st.anchor, notice: false,
-        peakHold: !!peak, scale: V.displayScale(st.levelScale, scopeRange.lo, scopeRange.hi), gutter: sf.full, sUnits: sf.full && scopeSUnits });
+        peakHold: !!peak, scale: V.displayScale(st.levelScale, scopeRange.lo, scopeRange.hi), gutter: sf.full, sUnits: sf.full && scopeSUnits,
+        // Phase 3: passband, split TX, band plan. The FT8 strip draws edges
+        // and shading only (labels:false — it is too short for them).
+        overlay: { passband: st.passband, txHz: st.txHz, bandPlan: st.bandPlan, privileges: scopePrivileges, labels: sf.full, flag: sf.full } });
   }
   function scopeDrawAll() {
     const A = window.ScopeAxis;
@@ -1278,6 +1283,11 @@
   if (scopeSUnitsEl) {
     scopeSUnitsEl.checked = scopeSUnits;
     scopeSUnitsEl.addEventListener('change', (e) => { scopeSUnits = e.target.checked; scopeLsSet('echocat-scope-sunits', scopeSUnits ? '1' : '0'); scopeDrawAll(); });
+  }
+  const scopePrivilegesEl = document.getElementById('scope-phone-privileges');
+  if (scopePrivilegesEl) {
+    scopePrivilegesEl.checked = scopePrivileges;
+    scopePrivilegesEl.addEventListener('change', (e) => { scopePrivileges = e.target.checked; scopeLsSet('echocat-scope-privileges', scopePrivileges ? '1' : '0'); scopeDrawAll(); });
   }
   scopeApplyPeakUi();
   if (window.ScopeView) scopeSetRange(scopeRange);

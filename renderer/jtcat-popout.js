@@ -2788,7 +2788,12 @@ function _applyPopoutTheme(payload) {
     var dial = bsDialHz || (bsState && bsState.centerHz) || 0;   // no dial yet (no radio): main's centre
     var rxBin = dial ? A.hzToBin(ax, dial) : null;
     if (rxBin != null) { var mx = Math.round(rxBin * (w - 1) / 849) + 0.5; ctx.strokeStyle = '#e94560'; ctx.lineWidth = 1.5 * dpr; ctx.beginPath(); ctx.moveTo(mx, 0); ctx.lineTo(mx, h); ctx.stroke(); }
-    if (bsWf && bsWf.supported) bsWf.setMarkers(rxBin == null ? [] : [{ pos: rxBin / 849, color: '#e94560', kind: 'rx' }]);
+    // Passband + band edges (lib/scope-view.js): shading only, no labels — the strip is short.
+    var st = bsState || {};
+    if (window.ScopeView) window.ScopeView.drawOverlay(ctx, { w: w, h: h, dpr: dpr, axis: ax, dialHz: dial, passband: st.passband, txHz: st.txHz, bandPlan: st.bandPlan, labels: false, flag: false });
+    var marks = rxBin == null ? [] : [{ pos: rxBin / 849, color: '#e94560', kind: 'rx' }];
+    if (window.ScopeView) marks = marks.concat(window.ScopeView.passbandMarkers(st.passband, dial, ax));
+    if (bsWf && bsWf.supported) bsWf.setMarkers(marks);
     // The frequency scale strip: the same painter as the Band Scope window
     // and ECHOCAT Web (lib/scope-view.js), so the ticks agree everywhere.
     if (bsFreq && window.ScopeView) {

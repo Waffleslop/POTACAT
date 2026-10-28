@@ -384,6 +384,7 @@ const { stripSigTag, appendTag, ensureSigTag } = require('./lib/log-comment');
 const { buildWrlContactInfo } = require('./lib/wrl-packet');
 const YaesuScope = require('./lib/yaesu-scope');
 const SdrScope = require('./lib/sdr-scope');
+const ScopeOverlay = require('./lib/scope-overlay');
 const { explainRigctldFailure } = require('./lib/rigctld-stderr');
 const RigFamily = require('./lib/rig-family');
 const { stripSecrets, restoreSecrets } = require('./lib/settings-secrets');
@@ -4010,6 +4011,7 @@ function broadcastRigState() {
   const rigType = detectRigType();
   const caps = getRigCapabilities(rigType);
   rigBandsBroadcast(); // deduped: only a change in the active rig's bands goes out
+  scopeOverlaySync();   // deduped: the scope's passband / split / band plan
   const state = {
     nb: _currentNbState,
     rfGain: _currentRfGain,
@@ -17951,6 +17953,7 @@ function connectSmartSdr() {
     if (_flexSliceKvIndex !== index) { _flexSliceKv = {}; _flexSliceKvIndex = index; }
     Object.assign(_flexSliceKv, kv);
     applyFlexReadback(FlexReadback.sliceReadback(_flexSliceKv));
+    if (kv.filter_lo !== undefined || kv.filter_hi !== undefined) scopeOverlaySync();
   });
   smartSdr.on('atu-status', (kv) => applyFlexReadback(FlexReadback.atuReadback(kv)));
   smartSdr.on('slice-mute', ({ index, muted }) => {
@@ -28452,6 +28455,7 @@ function yaesuScopeStatePayload() {
     synth: yaesuScopeSynth,
     spans: scopeSpans(),
     levelScale: scopeLevelScale(),
+    ...scopeOverlay(),
     // Whether the active rig can do this at all — the JTCAT pop-out and the
     // web client show their band-scope controls only when it is true.
     available: yaesuScopeSynth || !!scopeSourceKind(),
@@ -28483,6 +28487,7 @@ function yaesuScopeRemotePayload(extra) {
     frameMs: scopeRemoteFrameMs(false),
     frameMsCloud: scopeRemoteFrameMs(true),   // the server sends a Cloud device this one
     levelScale: scopeLevelScale(),
+    ...scopeOverlay(),
     ...(extra || {}),
   };
 }
@@ -28514,6 +28519,49 @@ function scopeLevelScale() {
   }
   if (s.source === 'sdr') return SdrScope.levelScale();
   return { unit: null, min: 0, max: 255 };
+}
+
+/**
+ * What the scope draws over the spectrum (plan Phase 3, lib/scope-overlay.js):
+ *  - passband: dial offsets from the mode and filter — the Flex slice's own
+ *    filter_lo/filter_hi when we have them, else the reported width, else the
+ *    mode's nominal width (reported:false, drawn dashed). Offsets, so a tune
+ *    never re-sends it.
+ *  - txHz: the transmit frequency, only while the radio reports split.
+ *  - bandPlan: band edges, the licence class's privileges, digital dials.
+ */
+function scopeOverlay() {
+  const flexEdges = yaesuScopeState.source === 'flex' && _flexSliceKv
+    ? { flexLo: parseInt(_flexSliceKv.filter_lo, 10), flexHi: parseInt(_flexSliceKv.filter_hi, 10) } : {};
+  const dialHz = _currentFreqHz || yaesuScopeState.centerHz || 0;
+  return {
+    passband: ScopeOverlay.passbandFor({ mode: _currentMode, widthHz: _currentFilterWidth, ...flexEdges }),
+    txHz: _currentSplit && _currentFreqOther > 0 ? _currentFreqOther : null,
+    bandPlan: dialHz > 0 ? ScopeOverlay.bandPlanFor(dialHz, {
+      licenseClass: settings.licenseClass,
+      dials: { FT8: freqsForMode('FT8'), FT4: freqsForMode('FT4'), FT2: freqsForMode('FT2'), JTTY: ScopeOverlay.JTTY_DIALS, PSK: ScopeOverlay.PSK_DIALS },
+    }) : null,
+  };
+}
+
+// Re-send scope-state when the overlay changes (mode, filter, split, band,
+// licence class) — compared by content, coalesced to one send per 150 ms, and
+// only while a scope runs. Called from broadcastRigState (every mode/filter/
+// split change passes through it), the band check in yaesuScopeNoteFrequency
+// and the Flex slice status (filter edges can move without the width changing).
+let _scopeOverlayKey = '';
+let _scopeOverlayTimer = null;
+function scopeOverlaySync() {
+  if (yaesuScopeState.status === 'stopped' || yaesuScopeState.status === 'unavailable') return;
+  if (_scopeOverlayTimer) return;
+  _scopeOverlayTimer = setTimeout(() => {
+    _scopeOverlayTimer = null;
+    const o = scopeOverlay();
+    const key = JSON.stringify([o.passband, o.txHz, o.bandPlan && o.bandPlan.band, o.bandPlan && o.bandPlan.licenseClass]);
+    if (key === _scopeOverlayKey) return;
+    _scopeOverlayKey = key;
+    yaesuScopeBroadcastState();
+  }, 150);
 }
 
 /** The source's own frame interval, ms. */
@@ -28555,6 +28603,7 @@ function yaesuScopeSetStatus(status, diag) {
 /** Called from sendCatFrequency — the single frequency sink — so every QSY path centres the axis. */
 function yaesuScopeNoteFrequency(hz) {
   if (!(hz > 0)) return;
+  scopeOverlaySync();   // a band change moves the band plan (deduped by content)
   // The Flex panadapter has its own centre (pan status) and the slice can sit
   // anywhere in it; only when the dial leaves the view is the pan recentred.
   if (flexScopeOn) {
@@ -41697,6 +41746,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('save-settings', (_e, newSettings) => {
+    setTimeout(scopeOverlaySync, 0);   // the licence class shades the scope
     // Same self-drive exemption as the tune handler: the idle-RX popout
     // persists its own state (band, mode, gain) as it starts up.
     markUserActive({ selfDriven: isIdleRxSelfAction(_e.sender) });

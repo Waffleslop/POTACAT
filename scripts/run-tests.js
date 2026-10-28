@@ -93,6 +93,7 @@ const TESTS = [
   'test/flex-scope-test.js', // the Flex's own panadapter as the band scope (Flex Direct), against a real 8600 capture
   'test/icom-scope-test.js', // an Icom's own band scope over CI-V: parser, codec events, the owner's 30 s recording
   'test/scope-view-test.js', // the scope's shared ticks + trace painter (every surface), the synced tuning step
+  'test/scope-overlay-test.js', // the scope's passband, split TX marker and band plan (Phase 3)
   'test/flex-readback-test.js', // a Flex's controls read back from the radio's own status (real 8600 capture)
   'test/scope-pan-device-test.js', // FT-710 zoom + CENTER over CAT, band scope frames sized and paced per device
   'test/gridtracker-roster-test.js', // GridTracker as JTCAT's call roster: decodes out, its double-click and stop back in

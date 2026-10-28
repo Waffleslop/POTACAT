@@ -46,6 +46,8 @@ let range = V.clampRange(Number(lsGet('scope-floor', 0)) || 0, Number(lsGet('sco
 let avgMode = V.AVERAGING[lsGet('scope-avg', 'light')] ? lsGet('scope-avg', 'light') : 'light';
 let peakDecay = V.PEAK_DECAY[lsGet('scope-peak-decay', 'slow')] != null ? lsGet('scope-peak-decay', 'slow') : 'slow';
 let showSUnits = lsGet('scope-sunits', '0') === '1';
+// Licence-privilege shading (plan item 10): on by default (Casey 10/28).
+let showPrivileges = lsGet('scope-privileges', '1') !== '0';
 let drawPending = false;
 
 // ─── Waterfall ─────────────────────────────────────────────────────────────
@@ -62,7 +64,8 @@ $('sc-colormap').value = savedColormap;
 function recomputeAxis() {
   axis = A.scopeAxis({ centerHz, spanHz: state.spanHz, anchor: state.anchor });
   const rxBin = centerHz ? A.hzToBin(axis, centerHz) : null;
-  wf.setMarkers(rxBin == null ? [] : [{ pos: rxBin / (BINS - 1), color: '#e94560', kind: 'rx' }]);
+  const marks = rxBin == null ? [] : [{ pos: rxBin / (BINS - 1), color: '#e94560', kind: 'rx' }];
+  wf.setMarkers(marks.concat(V.passbandMarkers(state.passband, centerHz, axis)));
   scheduleDraw();
 }
 
@@ -128,7 +131,8 @@ function drawTrace() {
   ScopeView.drawTrace(traceCanvas.getContext('2d'),
     { bins: latest ? V.applyRange(smooth, range.lo, range.hi) : null, peak: peakHold ? V.applyRange(peak, range.lo, range.hi) : null },
     { w, h, dpr, axis, dialHz: centerHz, spanHz: state.spanHz, anchor: state.anchor, peakHold,
-      scale: V.displayScale(state.levelScale, range.lo, range.hi), gutter: true, sUnits: showSUnits });
+      scale: V.displayScale(state.levelScale, range.lo, range.hi), gutter: true, sUnits: showSUnits,
+      overlay: { passband: state.passband, txHz: state.txHz, bandPlan: state.bandPlan, privileges: showPrivileges } });
 }
 
 function drawFreq() {
@@ -339,6 +343,8 @@ $('sc-avg').value = avgMode;
 $('sc-avg').addEventListener('change', (e) => { avgMode = V.AVERAGING[e.target.value] ? e.target.value : 'light'; lsSet('scope-avg', avgMode); });
 $('sc-peak-decay').value = peakDecay;
 $('sc-peak-decay').addEventListener('change', (e) => { peakDecay = V.PEAK_DECAY[e.target.value] != null ? e.target.value : 'slow'; lsSet('scope-peak-decay', peakDecay); });
+$('sc-privileges').checked = showPrivileges;
+$('sc-privileges').addEventListener('change', (e) => { showPrivileges = e.target.checked; lsSet('scope-privileges', showPrivileges ? '1' : '0'); scheduleDraw(); });
 $('sc-sunits').checked = showSUnits;
 $('sc-sunits').addEventListener('change', (e) => { showSUnits = e.target.checked; lsSet('scope-sunits', showSUnits ? '1' : '0'); scheduleDraw(); });
 function applyPeakUi() {
