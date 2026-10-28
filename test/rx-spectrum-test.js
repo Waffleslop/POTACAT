@@ -73,7 +73,7 @@ check('a sound-card radio: the audio window captures the CHOSEN input only, spec
 });
 check('capability and wire', () => {
   const rs = fs.readFileSync(path.join(ROOT, 'lib/remote-server.js'), 'utf8');
-  assert.ok(/'rx-spectrum'\]/.test(rs));
+  assert.ok(/capabilities: \[[\s\S]*'rx-spectrum'/.test(rs));
   assert.ok(/type: 'jtcat-spectrum', bins, source: source \|\| 'engine'/.test(rs));
   const proto = require('../lib/echocat-protocol');
   assert.ok(proto.MESSAGES['jtcat-spectrum'].fields.source, 'source registered');

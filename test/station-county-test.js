@@ -108,7 +108,7 @@ check('Settings > Station has the home fields; the activation bar asks the park 
 
 check('a device chooses the park county too, and sees the choice and the list', () => {
   const rs = fs.readFileSync(path.join(ROOT, 'lib/remote-server.js'), 'utf8');
-  assert.ok(/'park-county'\]/.test(rs), 'capability');
+  assert.ok(/capabilities: \[[\s\S]*'park-county'/.test(rs), 'capability');
   assert.ok(/county: msg\.county && typeof msg\.county === 'object'/.test(rs));
   assert.ok(/const r = setParkCounty\(refs\[0\], county\.state, county\.county, 'ECHOCAT device'\);/.test(main));
   assert.ok(/\.\.\.activatorCountyState\(parkRefs\[0\] && parkRefs\[0\]\.ref\),/.test(main), 'activator-state carries county + countyChoices');

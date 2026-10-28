@@ -133,7 +133,7 @@ check('zoom: the steps, the command, remembered per source, on the wire', () => 
   assert.ok(/settings\.flexScopeSpanHz = span;/.test(set) && /smartSdr\.setPanBandwidth\(span\)/.test(set));
   assert.ok(/spans: scopeSpans\(\),/.test(main), 'scope-state carries the steps');
   const rs = fs.readFileSync(path.join(ROOT, 'lib/remote-server.js'), 'utf8');
-  assert.ok(/'scope-span'\]/.test(rs) && /case 'scope-span':/.test(rs));
+  assert.ok(/capabilities: \[[\s\S]*'scope-span'/.test(rs) && /case 'scope-span':/.test(rs));
   assert.ok(require('../lib/echocat-protocol').MESSAGES['scope-span']);
 });
 
