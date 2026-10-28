@@ -2000,6 +2000,7 @@ let _cwTxLockoutUntilMs = 0;
 let _cwTxLockoutTimer = null;
 let _currentNbState = false;
 let _currentSmeter = 0;
+let _currentSmeterDbm = null; // the S-meter in dBm, only from a radio that reports it (Flex)
 // Stored alongside _currentSmeter so broadcastRemoteRadioStatus() can include
 // them in the status snapshot — mobile reads status.swr / status.alc / .power
 // from the snapshot. Discrete {type:'smeter'|'swr'|'alc'} messages still fire
@@ -3966,8 +3967,11 @@ function sendCatFreqOther(hz) {
   if (remoteServer && remoteServer.running) remoteServer.sendFreqOther(v);
 }
 
-function sendCatSmeter(val) {
+function sendCatSmeter(val, dbm) {
   if (typeof val === 'number' && Number.isFinite(val)) noteMeterSeen('smeter');
+  // A radio that reports the S-meter in dBm (the Flex) passes it too; it is
+  // kept, never guessed from the 0-255 scale, for the phone's "S7 -79".
+  if (typeof dbm === 'number' && Number.isFinite(dbm)) _currentSmeterDbm = dbm;
   if (win && !win.isDestroyed()) win.webContents.send('cat-smeter', val);
   if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-smeter', val);
   // JTCAT popout carries S/SWR beside its RX and TX Pwr sliders — a digital
@@ -3976,7 +3980,7 @@ function sendCatSmeter(val) {
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-smeter', val);
   if (js8PopoutWin && !js8PopoutWin.isDestroyed()) js8PopoutWin.webContents.send('cat-smeter', val);
   _currentSmeter = val;
-  if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'smeter', value: val });
+  if (remoteServer && remoteServer.running) remoteServer.sendToClient(typeof dbm === 'number' && Number.isFinite(dbm) ? { type: 'smeter', value: val, dbm } : { type: 'smeter', value: val });
 }
 
 function sendCatSwr(val) {
@@ -17647,6 +17651,7 @@ function connectSmartSdr() {
   });
   smartSdr.on('disconnected', () => {
     sendCatLog('SmartSDR API disconnected — rig controls (ATU/filter/gain) unavailable');
+    _currentSmeterDbm = null;
     // Flex Direct: with no port-5002 CAT either, the radio is now uncontrollable.
     if (!cat || !cat.connected) sendCatStatus({ connected: false });
     // Recycle the audio client. This fires only on an UNEXPECTED drop (a kick —
@@ -25430,6 +25435,7 @@ function broadcastRemoteRadioStatus() {
     // including them on the snapshot ensures clients that connect mid-
     // session see the current values without waiting for the next poll.
     smeter: _currentSmeter,
+    ...(_currentSmeterDbm != null ? { smeterDbm: _currentSmeterDbm } : {}),
     swr: _currentSwr,
     // Flex TRUE SWR ratio (e.g. 1.4) — the SmartSDR path never feeds the raw
     // `swr` scale, so this is the only snapshot SWR a Flex rig has. Decays
@@ -28413,8 +28419,28 @@ function yaesuScopeRemotePayload(extra) {
     fps: settings.yaesuScopeFps || 20,
     synth: yaesuScopeSynth,
     spans: scopeSpans(),
+    ...scopeCalibration(),
+    frameMs: scopeRemoteFrameMs(),
     ...(extra || {}),
   };
+}
+
+/** dBm for a level, only for a source that knows it (the Flex pan:
+ *  dbm = dbmMin + level / 255 * (dbmMax - dbmMin)). The FT-710 scope and an
+ *  SDR are relative, so they carry neither. */
+function scopeCalibration() {
+  const s = yaesuScopeState;
+  if (s.source !== 'flex' || !Number.isFinite(s.dbmMin) || !Number.isFinite(s.dbmMax) || s.dbmMax <= s.dbmMin) return {};
+  return { dbmMin: s.dbmMin, dbmMax: s.dbmMax };
+}
+
+/** How far apart the frames a device receives are: the source's own rate,
+ *  thinned to no faster than one per 100 ms (yaesuScopeOnFrame), for the
+ *  phone's waterfall time scale. */
+function scopeRemoteFrameMs() {
+  const fps = yaesuScopeState.source === 'flex' ? 15 : yaesuScopeState.source === 'sdr' ? 12 : (settings.yaesuScopeFps || 20);
+  const src = 1000 / fps;
+  return Math.round(Math.ceil(100 / src - 1e-9) * src);
 }
 
 function yaesuScopeBroadcastState() {
@@ -28762,6 +28788,9 @@ function flexScopeApplyGeometry() {
   // first frequency arrives.
   if (g.centerHz && !yaesuScopeState.centerHz) { yaesuScopeState.centerHz = g.centerHz; changed = true; }
   if (g.spanHz && g.spanHz !== yaesuScopeState.spanHz) { yaesuScopeState.spanHz = g.spanHz; changed = true; }
+  // A calibrated source: level 0..255 = dbmMin..dbmMax (scopeCalibration).
+  if (Number.isFinite(g.dbmMin) && g.dbmMin !== yaesuScopeState.dbmMin) { yaesuScopeState.dbmMin = g.dbmMin; changed = true; }
+  if (Number.isFinite(g.dbmMax) && g.dbmMax !== yaesuScopeState.dbmMax) { yaesuScopeState.dbmMax = g.dbmMax; changed = true; }
   return changed;
 }
 

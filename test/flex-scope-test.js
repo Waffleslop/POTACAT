@@ -149,5 +149,17 @@ check('zoom: the steps, the command, remembered per source, on the wire', () => 
   assert.ok(require('../lib/echocat-protocol').MESSAGES['scope-span']);
 });
 
+check('a calibrated scale for the phone: the pan\'s dBm range, the frame spacing, the S-meter in dBm', () => {
+  const line = capture.find((l) => /\|display pan 0x40000000 .*min_dbm=/.test(l)).replace(/^.*?TCP /, '');
+  const g = F.parsePanGeometry(line);
+  assert.strictEqual(g.dbmMin, -125);
+  assert.strictEqual(g.dbmMax, -40);
+  const cal = main.slice(main.indexOf('function scopeCalibration('), main.indexOf('function scopeRemoteFrameMs('));
+  assert.ok(/s\.source !== 'flex'/.test(cal), 'only the Flex pan is calibrated');
+  assert.ok(/\.\.\.scopeCalibration\(\),\s*frameMs: scopeRemoteFrameMs\(\),/.test(main));
+  assert.ok(/this\.emit\('smeter', scaled, Math\.round\(dbm \* 10\) \/ 10\);/.test(fs.readFileSync(path.join(ROOT, 'lib/smartsdr.js'), 'utf8')));
+  assert.ok(/\.\.\.\(_currentSmeterDbm != null \? \{ smeterDbm: _currentSmeterDbm \} : \{\}\),/.test(main));
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
