@@ -17258,6 +17258,51 @@ const { computeSpectrumBins } = require('./lib/spectrum-fft');
 // Network stream, or from the ECHOCAT audio window's spectrum-only capture.
 const { RxSpectrumRing } = require('./lib/rx-spectrum-ring');
 const FlexScope = require('./lib/flex-scope');
+const FlexReadback = require('./lib/flex-readback');
+let _flexSliceKv = {};          // merged status of our slice, for the read-back
+let _flexSliceKvIndex = null;
+// A Flex's status → the rig state every surface shows, on a change only.
+// One row per field FlexReadback can state; nothing here assumes POTACAT set it.
+const FLEX_READBACK_FIELDS = {
+  nb: [() => _currentNbState, (v) => { _currentNbState = v; }],
+  nbLevel: [() => _currentNbLevel, (v) => { _currentNbLevel = v; }],
+  nr: [() => _currentNrState, (v) => { _currentNrState = v; }],
+  nrLevel: [() => _currentNrLevel, (v) => { _currentNrLevel = v; }],
+  anf: [() => _currentAnfState, (v) => { _currentAnfState = v; }],
+  apf: [() => _currentApfState, (v) => { _currentApfState = v; }],
+  nrl: [() => _currentNrlState, (v) => { _currentNrlState = v; }],
+  nrlLevel: [() => _currentNrlLevel, (v) => { _currentNrlLevel = v; }],
+  nrs: [() => _currentNrsState, (v) => { _currentNrsState = v; }],
+  nrsLevel: [() => _currentNrsLevel, (v) => { _currentNrsLevel = v; }],
+  nrf: [() => _currentNrfState, (v) => { _currentNrfState = v; }],
+  nrfLevel: [() => _currentNrfLevel, (v) => { _currentNrfLevel = v; }],
+  rnn: [() => _currentRnnState, (v) => { _currentRnnState = v; }],
+  rit: [() => _currentRitState, (v) => { _currentRitState = v; }],
+  afGain: [() => _currentAfGain, (v) => { _currentAfGain = v; }],
+  filterWidth: [() => _currentFilterWidth, (v) => { _currentFilterWidth = v; }],
+  squelch: [() => _currentSquelch, (v) => { _currentSquelch = v; }],
+  antennaPort: [() => _currentAntennaPort, (v) => { _currentAntennaPort = v; }],
+  comp: [() => _currentCompState, (v) => { _currentCompState = v; }],
+  compLevel: [() => _currentCompLevel, (v) => { _currentCompLevel = v; }],
+  vox: [() => _currentVoxState, (v) => { _currentVoxState = v; }],
+  voxLevel: [() => _currentVoxLevel, (v) => { _currentVoxLevel = v; }],
+  mon: [() => _currentMonState, (v) => { _currentMonState = v; }],
+  monLevel: [() => _currentMonLevel, (v) => { _currentMonLevel = v; }],
+  micGain: [() => _currentMicGain, (v) => { _currentMicGain = v; }],
+  rfgainDb: [() => _currentRfGainDb, (v) => { _currentRfGainDb = v; }],
+  rfGain: [() => _currentRfGain, (v) => { _currentRfGain = v; }],
+  atuActive: [() => _currentAtuState, (v) => { _currentAtuState = v; }],
+};
+function applyFlexReadback(patch) {
+  let changed = false;
+  for (const [k, v] of Object.entries(patch || {})) {
+    const f = FLEX_READBACK_FIELDS[k];
+    if (!f || f[0]() === v) continue;
+    f[1](v);
+    changed = true;
+  }
+  if (changed) broadcastRigState();
+}
 const rxSpecRing = new RxSpectrumRing();
 let _rxSpecBridgeOn = false;
 function rxSpectrumEngineLive() {
@@ -17687,7 +17732,10 @@ function connectSmartSdr() {
   // (lo/hi) decide whether an audio tone can modulate at all — K3SBP's 8600
   // made 4 W from FT8 at 1290 Hz and nothing from a 1500 Hz Tune tone at the
   // same 6 W setting (2026-09-25).
-  smartSdr.on('transmit-status', (kv) => { _flexTransmitKv = { ...(_flexTransmitKv || {}), ...(kv || {}) }; });
+  smartSdr.on('transmit-status', (kv) => {
+    _flexTransmitKv = { ...(_flexTransmitKv || {}), ...(kv || {}) };
+    applyFlexReadback(FlexReadback.transmitReadback(_flexTransmitKv));
+  });
   // Forward power (watts) from the Flex TX bridge. The emit existed since
   // the FWDPWR meter discovery shipped — with ZERO consumers; the wattmeter
   // was measured and thrown away (LZ3AW item 6). Same fan-out shape as
@@ -17885,6 +17933,15 @@ function connectSmartSdr() {
     _currentAgcMode = mode;
     broadcastRigState();
   });
+  // The rest of the slice's controls, read back the same way (lib/flex-readback.js).
+  smartSdr.on('slice-status', ({ index, kv }) => {
+    const target = smartSdr.ourSliceIndex != null ? smartSdr.ourSliceIndex : getFlexSliceIndex();
+    if (index !== target) return;
+    if (_flexSliceKvIndex !== index) { _flexSliceKv = {}; _flexSliceKvIndex = index; }
+    Object.assign(_flexSliceKv, kv);
+    applyFlexReadback(FlexReadback.sliceReadback(_flexSliceKv));
+  });
+  smartSdr.on('atu-status', (kv) => applyFlexReadback(FlexReadback.atuReadback(kv)));
   smartSdr.on('slice-mute', ({ index, muted }) => {
     const target = smartSdr.ourSliceIndex != null ? smartSdr.ourSliceIndex : getFlexSliceIndex();
     if (index !== target) return;
@@ -17959,8 +18016,9 @@ function connectSmartSdr() {
     flexPanGeometry[g.panId] = { ...(flexPanGeometry[g.panId] || {}), ...g };
     if (flexScopeOn && flexScopeApplyGeometry()) yaesuScopeBroadcastState();
   });
-  smartSdr.on('pan-status', ({ panId, wnb, wnbLevel }) => {
+  smartSdr.on('pan-status', ({ panId, wnb, wnbLevel, rfgain }) => {
     if (smartSdr.ourPanId && panId !== smartSdr.ourPanId) return;
+    if (rfgain !== undefined) applyFlexReadback(FlexReadback.panReadback({ rfgain }));
     let changed = false;
     if (wnb !== undefined && wnb !== _currentWnbState) { _currentWnbState = wnb; changed = true; }
     if (wnbLevel !== undefined && wnbLevel !== _currentWnbLevel) { _currentWnbLevel = wnbLevel; changed = true; }
