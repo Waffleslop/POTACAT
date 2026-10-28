@@ -541,6 +541,7 @@ const TESTS = [
   'test/tls-der-int-test.js', // ECHOCAT self-signed cert: the random serial is minimal DER (a leading 0x00 made OpenSSL reject ~1 in 512 certs)
   'test/rigctld-data-fm-test.js', // #259: DIGFM/DIGAM have rigctld tokens (PKTFM/PKTAM), so a packet key-down on FM sends the DATA mode
   'test/launcher-cert-der-test.js', // Remote Launcher cert: minimal DER serial; a saved cert that doesn't parse is regenerated
+  'test/pota-hunter-import-test.js',
 ];
 
 const root = path.join(__dirname, '..');
