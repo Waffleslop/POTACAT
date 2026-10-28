@@ -446,7 +446,7 @@ const { IambicKeyer } = require('./lib/keyer');
 const { WinKeyer } = require('./lib/winkeyer');
 const { parsePotaParksCSV, parsePotaActivationsCSV } = require('./lib/pota-parks');
 const { PotaSync } = require('./lib/pota-sync');
-const { WsjtxClient, extractCallsigns, encodeHeartbeat, encodeStatus, encodeLoggedAdif, encodeQsoLogged } = require('./lib/wsjtx');
+const { WsjtxClient, extractCallsigns, encodeHeartbeat, encodeStatus, encodeLoggedAdif, encodeQsoLogged, encodeDecode, decodeFromJtcat, parseBridgeInbound, replySlot } = require('./lib/wsjtx');
 const { PskrClient } = require('./lib/pskreporter');
 const PskrTx = require('./lib/pskreporter-tx');
 const { Ft8Engine, freqsForMode } = require('./lib/ft8-engine');
@@ -16225,6 +16225,8 @@ function startJtcat(mode) {
     // is the transmitter (CQ caller / "FROM" station), exactly what PSKReporter
     // wants — see extractCallsigns.
     pskrQueueDecodes(data);
+    // GridTracker's call roster (the Extra UDP destination, WSJT-X binary).
+    gridTrackerSendDecodes(data);
     if (win && !win.isDestroyed()) {
       win.webContents.send('jtcat-decode', data);
     }
@@ -28227,6 +28229,10 @@ function createWsjtxUdpBridge(label) {
       this.socket.on('error', (err) => {
         console.error(`[${this.label}] UDP error:`, err.message);
       });
+      // A companion app answers the address our packets came from (the
+      // socket binds to a free port on its first send): GridTracker's
+      // double-click and stop arrive here.
+      this.socket.on('message', (buf, rinfo) => { if (this.onInbound) this.onInbound(buf, rinfo); });
       this._sendHeartbeat();
       this.heartbeatTimer = setInterval(() => this._sendHeartbeat(), 15000);
       console.log(`[${this.label}] Bridge started -> ${this.host}:${this.port}`);
@@ -28248,6 +28254,17 @@ function createWsjtxUdpBridge(label) {
       const buf = encodeHeartbeat(this.id, 3);
       this.socket.send(buf, 0, buf.length, this.port, this.host);
       this._sendStatus();
+    },
+
+    /** FT8/FT4 decodes as WSJT-X DECODE messages, after a Status so the
+     *  receiver files them under the band and mode they were heard on. */
+    sendDecodes(decodes, statusOver) {
+      if (!this.socket || !decodes.length) return;
+      this._sendStatus(statusOver);
+      for (const dec of decodes) {
+        const buf = encodeDecode(this.id, dec);
+        this.socket.send(buf, 0, buf.length, this.port, this.host);
+      }
     },
 
     // GridTracker2 drops every message from a source, logged QSOs included,
@@ -28975,6 +28992,86 @@ const hamrsBridge = createWsjtxUdpBridge('HamRS');
 // start and only got its heartbeat after the first Settings save.
 const WSJTX_BINARY_LOGGERS = new Set(['hamrs', 'logger32', 'macloggerdx', 'rumlogng']);
 const extraUdpBridge = createWsjtxUdpBridge('Extra UDP');
+
+// --- GridTracker as the call roster for JTCAT (AE5JE 2026-10-28) ---
+// The Extra UDP destination (WSJT-X binary) also gets every FT8/FT4 decode,
+// and GridTracker's double-click on one answers it in the JTCAT window
+// exactly as a double-click there would (Hunt, auto-sequence and logging
+// unchanged); its stop button is JTCAT's Halt. settings.extraUdpDecodes
+// (default on) turns the decodes and the answering off.
+const GT_DECODE_KEEP_MS = 120000;
+let gtDecodeCache = [];   // { r, mode, at } — a reply finds its decode (slot, slice) here
+
+function gridTrackerDecodesOn() {
+  return !!extraUdpBridge.socket && settings.extraUdpDecodes !== false;
+}
+
+/** The UTC start of the slot a decode was heard in: the newest slot start
+ *  of its parity (r.slot, stamped by the engine per decode job). */
+function gtPeriodStart(mode, slot, now) {
+  const cycle = mode === 'FT2' ? 3800 : mode === 'FT4' ? 7500 : 15000;
+  let start = Math.floor(now / cycle) * cycle;
+  const parityOf = (t) => (Math.floor(t / cycle) % 2 === 0 ? 'even' : 'odd');
+  if (slot === 'even' || slot === 'odd') {
+    while (parityOf(start) !== slot) start -= cycle;
+    return start;
+  }
+  return start - cycle;   // a decode arrives after its slot ends
+}
+
+function gridTrackerSendDecodes(data) {
+  if (!gridTrackerDecodesOn() || !data || !Array.isArray(data.results) || !data.results.length) return;
+  const mode = String(data.mode || (ft8Engine && ft8Engine._mode) || 'FT8').toUpperCase();
+  if (mode !== 'FT8' && mode !== 'FT4' && mode !== 'FT2') return;
+  const now = StationClock.now();
+  const out = [];
+  for (const r of data.results) {
+    if (!r || !r.text) continue;
+    out.push(decodeFromJtcat(r, mode, gtPeriodStart(mode, r.slot, now)));
+    gtDecodeCache.push({ r, mode, at: Date.now() });
+  }
+  const cutoff = Date.now() - GT_DECODE_KEEP_MS;
+  if (gtDecodeCache.length > 600 || (gtDecodeCache[0] && gtDecodeCache[0].at < cutoff)) {
+    gtDecodeCache = gtDecodeCache.filter((e) => e.at >= cutoff).slice(-600);
+  }
+  const qso = popoutJtcatQso || remoteJtcatQso;
+  try {
+    extraUdpBridge.sendDecodes(out, { dxCall: (qso && qso.call) || '', txEnabled: !!(ft8Engine && ft8Engine._txEnabled), decoding: true });
+  } catch (e) {
+    sendCatLog(`[GridTracker] could not send decodes: ${e.message}`);
+  }
+}
+
+function gridTrackerInbound(buf) {
+  if (settings.extraUdpDecodes === false) return;
+  const msg = parseBridgeInbound(buf);
+  if (!msg) return;
+  if (msg.type === 'halt') {
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+      sendCatLog('[GridTracker] Halt TX');
+      jtcatPopoutWin.webContents.send('jtcat-external-halt');
+    }
+    return;
+  }
+  const rep = msg.reply;
+  const text = String(rep.message || '').trim();
+  if (!text) return;
+  if (!jtcatPopoutWin || jtcatPopoutWin.isDestroyed() || !ft8Engine) {
+    sendCatLog(`[GridTracker] asked to answer "${text}" — open the JTCAT window (FT8/FT4) to work stations from GridTracker`);
+    return;
+  }
+  // The decode it came from, for the slot and slice; else rebuilt from the reply.
+  let hit = null;
+  for (let i = gtDecodeCache.length - 1; i >= 0; i--) {
+    const e = gtDecodeCache[i];
+    if (String(e.r.text || '').trim() === text && Math.abs(Math.round(Number(e.r.df) || 0) - rep.deltaFrequency) <= 5) { hit = e.r; break; }
+  }
+  const d = hit || { text, df: rep.deltaFrequency, db: rep.snr, dt: rep.deltaTime, slot: replySlot(rep.time, rep.mode) };
+  sendCatLog(`[GridTracker] answering "${text}" @ ${d.df} Hz`);
+  jtcatPopoutWin.webContents.send('jtcat-external-reply', d);
+}
+extraUdpBridge.onInbound = gridTrackerInbound;
+
 
 // --- Logbook forwarding ---
 

@@ -2452,6 +2452,11 @@ function _applyPopoutTheme(payload) {
     setTxMsgDisplay('--');
   });
 
+  // GridTracker (or another WSJT-X companion) answered a decode: exactly a
+  // double-click on that row here, and its stop button is this Halt.
+  if (window.api.onJtcatExternalReply) window.api.onJtcatExternalReply(function(d) { onDecodeRowClick(d); });
+  if (window.api.onJtcatExternalHalt) window.api.onJtcatExternalHalt(function() { haltTxBtn.click(); });
+
   // Tune lives in the FT8 controls bar AND in the PSK31/JTTY panes (the pane
   // swap hides the bar, which left those modes with no way to tune — Casey
   // 2026-10-04). Every .jp-tune button is the same control with the same state.
