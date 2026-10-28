@@ -19,6 +19,38 @@ let kiwiActive = false;     // mobile path: true → peer plays Kiwi audio
 let freedvMuted = false; // persisted mute state for FreeDV
 const audioEl = document.getElementById('remote-playback');
 
+// ── The phone's VFO waterfall without an FT8 engine (rx-spectrum) ──────────
+// Its own capture of the radio's input, spectrum only: no WebRTC, never sent
+// anywhere but main, and never a device the operator did not choose (the same
+// rule as the audio capture below). 12 kHz mono, ~170 ms frames.
+let rxSpecStream = null, rxSpecCtx = null, rxSpecNode = null;
+function rxSpecStop() {
+  try { if (rxSpecNode) rxSpecNode.disconnect(); } catch {}
+  try { if (rxSpecCtx) rxSpecCtx.close(); } catch {}
+  if (rxSpecStream) rxSpecStream.getTracks().forEach((t) => t.stop());
+  rxSpecStream = null; rxSpecCtx = null; rxSpecNode = null;
+}
+if (window.api.onRxSpectrumWant) window.api.onRxSpectrumWant(async (o) => {
+  rxSpecStop();
+  if (!o || !o.on || !o.inputDeviceId) return;
+  try {
+    rxSpecStream = await navigator.mediaDevices.getUserMedia({ audio: {
+      deviceId: { exact: o.inputDeviceId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false,
+    } });
+    rxSpecCtx = new AudioContext({ sampleRate: 12000 });
+    const src = rxSpecCtx.createMediaStreamSource(rxSpecStream);
+    rxSpecNode = rxSpecCtx.createScriptProcessor(2048, 1, 1);
+    rxSpecNode.onaudioprocess = (e) => {
+      window.api.sendRxSpectrumPcm({ pcm: new Float32Array(e.inputBuffer.getChannelData(0)), sampleRate: rxSpecCtx.sampleRate });
+    };
+    src.connect(rxSpecNode);
+    rxSpecNode.connect(rxSpecCtx.destination); // a ScriptProcessor only runs when connected; it outputs silence
+  } catch (e) {
+    rxSpecStop();
+    window.api.sendRxSpectrumError([e && e.name, e && e.message].filter(Boolean).join(': ') || String(e));
+  }
+});
+
 window.api.onStartAudio(async (config) => {
   try {
     // Clean up any previous session

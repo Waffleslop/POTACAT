@@ -17220,6 +17220,33 @@ function stopJtcatTune() {
 // window happens to have audio. Stopped when nobody's subscribed
 // so CPU is zero when nobody's looking. K3SBP 2026-05-31.
 const { computeSpectrumBins } = require('./lib/spectrum-fft');
+// The phone's VFO waterfall with no FT8/JS8 engine running (cap 'rx-spectrum',
+// lib/rx-spectrum-ring.js): the last second of RX audio from the Flex / Icom
+// Network stream, or from the ECHOCAT audio window's spectrum-only capture.
+const { RxSpectrumRing } = require('./lib/rx-spectrum-ring');
+const rxSpecRing = new RxSpectrumRing();
+let _rxSpecBridgeOn = false;
+function rxSpectrumEngineLive() {
+  return !!((jtcatManager && jtcatManager.running) || (ft8Engine && ft8Engine._running));
+}
+/** Sound-card radios: the audio window captures the rig input for the spectrum. */
+function rxSpectrumSync() {
+  const socketAudio = settings.audioSource === 'smartsdr' || settings.audioSource === 'icom-network';
+  const want = !!(_mobileWantsSpectrum && remoteServer && remoteServer.hasClient()
+    && !rxSpectrumEngineLive() && !socketAudio && settings.remoteAudioInput);
+  if (want === _rxSpecBridgeOn) return;
+  // A window still loading would miss the message: make it, and ask again
+  // on the next tick (every 100 ms) once it has loaded.
+  if (want && (!remoteAudioWin || remoteAudioWin.isDestroyed() || !_remoteAudioWinLoaded)) {
+    if (!remoteAudioWin || remoteAudioWin.isDestroyed()) { try { prewarmRemoteAudioWindow(); } catch {} }
+    return;
+  }
+  _rxSpecBridgeOn = want;
+  if (remoteAudioWin && !remoteAudioWin.isDestroyed()) {
+    remoteAudioWin.webContents.send('rx-spectrum-want', { on: want, inputDeviceId: settings.remoteAudioInput || '' });
+  }
+  sendCatLog(want ? '[ECHOCAT] Phone waterfall: capturing the radio\'s receive audio for the spectrum' : '[ECHOCAT] Phone waterfall: spectrum capture stopped');
+}
 const SPECTRUM_INTERVAL_MS = 100;
 const SPECTRUM_BIN_COUNT = 160;
 // JTTY: a running average of the passband while the engine listens (the
@@ -17295,25 +17322,33 @@ function startInProcessSpectrum() {
     // A JS8 engine keeps its spectrum ring as _specBuffer/_specOffset; the
     // FT8 family as _audioBuffer/_audioOffset. Reading only the latter left
     // a remote JS8 waterfall black.
-    const specBuf = ft8Engine && (ft8Engine._audioBuffer || ft8Engine._specBuffer);
-    if (!specBuf) return;
+    rxSpectrumSync();
     if (!remoteServer || !remoteServer.hasClient()) return;
-    const bins = computeSpectrumBins(
-      specBuf,
-      (ft8Engine._audioBuffer ? ft8Engine._audioOffset : ft8Engine._specOffset) || 0,
-      SPECTRUM_BIN_COUNT,
-    );
+    // The engine's own buffer while it runs; otherwise the RX ring when audio
+    // is arriving (rx-spectrum). An idle engine's stale buffer is the old
+    // behaviour and stays the last resort.
+    const specBuf = ft8Engine && (ft8Engine._audioBuffer || ft8Engine._specBuffer);
+    let buf, off, source;
+    if (specBuf && rxSpectrumEngineLive()) {
+      buf = specBuf; off = (ft8Engine._audioBuffer ? ft8Engine._audioOffset : ft8Engine._specOffset) || 0; source = 'engine';
+    } else if (rxSpecRing.fresh()) {
+      buf = rxSpecRing.buffer; off = rxSpecRing.offset; source = 'rx';
+    } else if (specBuf) {
+      buf = specBuf; off = (ft8Engine._audioBuffer ? ft8Engine._audioOffset : ft8Engine._specOffset) || 0; source = 'engine';
+    } else return;
+    const bins = computeSpectrumBins(buf, off, SPECTRUM_BIN_COUNT);
     // Convert Uint8Array to plain array — JSON.stringify on Uint8Array
     // emits an object with numeric string keys, not what the protocol
     // validator expects.
     const out = new Array(bins.length);
     for (let i = 0; i < bins.length; i++) out[i] = bins[i];
-    remoteServer.broadcastJtcatSpectrum(out);
+    remoteServer.broadcastJtcatSpectrum(out, source);
   }, SPECTRUM_INTERVAL_MS);
   console.log('[JTCAT] In-process spectrum loop started');
 }
 
 function stopInProcessSpectrum() {
+  if (_rxSpecBridgeOn) { _rxSpecBridgeOn = false; if (remoteAudioWin && !remoteAudioWin.isDestroyed()) remoteAudioWin.webContents.send('rx-spectrum-want', { on: false }); }
   _releaseSpectrumPowerSave();
   if (!_spectrumTimer) return;
   clearInterval(_spectrumTimer);
@@ -17979,6 +18014,7 @@ function startSmartSdrAudio() {
   smartSdrAudio.on('log', (msg) => sendCatLog('[SmartSDR-Audio] ' + msg));
   smartSdrAudio.on('audio-frame', ({ pcm, sampleRate }) => {
     winlinkFeedRx(pcm, sampleRate); // Winlink modem over Flex Direct (no DAX)
+    if (_mobileWantsSpectrum) rxSpecRing.push(pcm, sampleRate); // the phone's VFO waterfall
     // Send the Float32Array directly. Electron's structured clone preserves
     // TypedArrays, and the receiver already wraps via `new Float32Array(...)`.
     // Both calls below are routed through audioSafeSend so a stalled
@@ -18588,6 +18624,7 @@ function queueIcomNetworkJtcatUiAudio(pcm, sampleRate, peak, jtcatRunning) {
 function handleIcomNetworkPacedRxFrame(pcm, sampleRate, meta = {}) {
   if (!meta.silence) winlinkFeedRx(pcm, sampleRate); // Winlink modem over Icom Network
   if (!pcm || !pcm.length) return;
+  if (_mobileWantsSpectrum && !meta.lossFill) rxSpecRing.push(pcm, sampleRate); // the phone's VFO waterfall
   const peak = meta.silence ? 0 : peakFloat32(pcm);
 
   // PLC: track last real (non-fill, non-silence) frame so loss-fill gaps can
@@ -23524,7 +23561,7 @@ function connectRemote() {
   remoteServer.on('jtcat-spectrum-subscribe', ({ on }) => {
     _mobileWantsSpectrum = !!on; // sticky — survives reconnects (see client-connected)
     if (on) startInProcessSpectrum();
-    else stopInProcessSpectrum();
+    else { stopInProcessSpectrum(); rxSpectrumSync(); rxSpecRing.clear(); }
   });
 
   // Band scope: the helper runs while the client's Scope view is on screen.
@@ -25842,6 +25879,7 @@ function prewarmRemoteAudioWindow() {
     _remoteAudioWinLoaded = false;
     _remoteAudioPendingStart = false;
     _remoteAudioWinShown = false;
+    _rxSpecBridgeOn = false; // a new window starts its spectrum capture again
   });
 }
 
@@ -40626,6 +40664,15 @@ app.whenReady().then(() => {
     if (remoteServer) {
       remoteServer.relaySignalToClient(data);
     }
+  });
+
+  // The audio window's spectrum-only capture (rx-spectrum): mono 12 kHz frames.
+  ipcMain.on('rx-spectrum-pcm', (_e, frame) => {
+    if (!_rxSpecBridgeOn || !frame || !frame.pcm) return;
+    rxSpecRing.push(frame.pcm, frame.sampleRate || 12000);
+  });
+  ipcMain.on('rx-spectrum-error', (_e, why) => {
+    sendCatLog(`[ECHOCAT] Phone waterfall: the radio's audio input could not be opened for the spectrum (${String(why || '').slice(0, 200)})`);
   });
 
   ipcMain.on('remote-audio-status', (_e, status) => {
