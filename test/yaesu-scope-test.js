@@ -200,7 +200,9 @@ section('Mobile handoff follow-ups (2026-09-21)');
 
 check('1. the remote scope-state is an explicit field list — never helperPath', () => {
   const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf-8');
-  const fn = mainSrc.slice(mainSrc.indexOf('function yaesuScopeRemotePayload'), mainSrc.indexOf('function yaesuScopeBroadcastState'));
+  // The function body only: the helpers after it talk about frames in their comments.
+  const start = mainSrc.indexOf('function yaesuScopeRemotePayload');
+  const fn = start < 0 ? '' : mainSrc.slice(start, mainSrc.indexOf('\n}', start) + 2);
   assert.ok(fn.length > 0, 'yaesuScopeRemotePayload missing');
   assert.ok(!/\.\.\.yaesuScopeState\b/.test(fn) && !/helperPath|frames|misaligned/.test(fn), 'remote payload must not spread the local state');
   assert.ok(mainSrc.includes('remoteServer.broadcastScopeState(yaesuScopeRemotePayload())'), 'broadcast must use the remote payload');
