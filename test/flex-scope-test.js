@@ -141,7 +141,7 @@ check('zoom: the steps, the command, remembered per source, on the wire', () => 
   c._slicePan = { 0: '0x40000000' }; c._ourSliceIndex = 0; c._guiMode = 'self';
   c.startPanScope(15); c.setPanBandwidth(50000);
   assert.strictEqual(sent[1], 'display pan set 0x40000000 bandwidth=0.050000');
-  const set = main.slice(main.indexOf('function setScopeSpan('), main.indexOf('function setScopeSpan(') + 700);
+  const set = main.slice(main.indexOf('function setScopeSpan('), main.indexOf('function setScopeSpan(') + 2000);
   assert.ok(/settings\.flexScopeSpanHz = span;/.test(set) && /smartSdr\.setPanBandwidth\(span\)/.test(set));
   assert.ok(/spans: scopeSpans\(\),/.test(main), 'scope-state carries the steps');
   const rs = fs.readFileSync(path.join(ROOT, 'lib/remote-server.js'), 'utf8');
@@ -156,7 +156,7 @@ check('a calibrated scale for the phone: the pan\'s dBm range, the frame spacing
   assert.strictEqual(g.dbmMax, -40);
   const cal = main.slice(main.indexOf('function scopeCalibration('), main.indexOf('function scopeRemoteFrameMs('));
   assert.ok(/s\.source !== 'flex'/.test(cal), 'only the Flex pan is calibrated');
-  assert.ok(/\.\.\.scopeCalibration\(\),\s*frameMs: scopeRemoteFrameMs\(\),/.test(main));
+  assert.ok(/\.\.\.scopeCalibration\(\),\s*frameMs: scopeRemoteFrameMs\(false\),\s*frameMsCloud: scopeRemoteFrameMs\(true\),/.test(main));
   assert.ok(/this\.emit\('smeter', scaled, Math\.round\(dbm \* 10\) \/ 10\);/.test(fs.readFileSync(path.join(ROOT, 'lib/smartsdr.js'), 'utf8')));
   assert.ok(/\.\.\.\(_currentSmeterDbm != null \? \{ smeterDbm: _currentSmeterDbm \} : \{\}\),/.test(main));
 });

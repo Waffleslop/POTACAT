@@ -23683,7 +23683,8 @@ function connectRemote() {
     if (on) { yaesuScopeRestarts = 0; startYaesuScope(); yaesuScopeBroadcastState(); }
     else if (!yaesuScopeWanted()) stopYaesuScope('ECHOCAT scope view closed');
   });
-  remoteServer.on('scope-span', ({ spanHz } = {}) => { setScopeSpan(spanHz, 'ECHOCAT device'); });
+  remoteServer.on('scope-span', ({ spanHz, guest } = {}) => { setScopeSpan(spanHz, 'ECHOCAT device', { guest }); });
+  remoteServer.on('scope-anchor', ({ anchor, guest } = {}) => { setScopeAnchor(anchor, 'ECHOCAT device', { guest }); });
   remoteServer.on('scope-enable-radio', ({ guest } = {}) => {
     if (guest) {
       // A Guest Pass may look; the host's radio menu is not a guest's to
@@ -28349,7 +28350,6 @@ const YAESU_SCOPE_GUEST_DIAG = {
   detail: 'The scope streams only when SCU-LAN10 is on in the radio menu. Only the host can turn it on.',
   action: 'Ask the host to enable SCU-LAN10 on the radio (OPERATION SETTING > GENERAL > 26).',
 };
-let yaesuScopeLastRemoteFrame = 0;
 let yaesuScopeLastStateSend = 0;
 const yaesuScopeState = {
   status: 'stopped',   // stopped | starting | live | blocked | error | unavailable
@@ -28420,7 +28420,8 @@ function yaesuScopeRemotePayload(extra) {
     synth: yaesuScopeSynth,
     spans: scopeSpans(),
     ...scopeCalibration(),
-    frameMs: scopeRemoteFrameMs(),
+    frameMs: scopeRemoteFrameMs(false),
+    frameMsCloud: scopeRemoteFrameMs(true),   // the server sends a Cloud device this one
     ...(extra || {}),
   };
 }
@@ -28434,13 +28435,23 @@ function scopeCalibration() {
   return { dbmMin: s.dbmMin, dbmMax: s.dbmMax };
 }
 
-/** How far apart the frames a device receives are: the source's own rate,
- *  thinned to no faster than one per 100 ms (yaesuScopeOnFrame), for the
- *  phone's waterfall time scale. */
-function scopeRemoteFrameMs() {
+/** The source's own frame interval, ms. */
+function scopeSourceFrameMs() {
   const fps = yaesuScopeState.source === 'flex' ? 15 : yaesuScopeState.source === 'sdr' ? 12 : (settings.yaesuScopeFps || 20);
-  const src = 1000 / fps;
-  return Math.round(Math.ceil(100 / src - 1e-9) * src);
+  return 1000 / fps;
+}
+
+/** The pace a device gets frames at: 100 ms over POTACAT Cloud; on the LAN
+ *  the FT-710's own scope runs at 15 fps (66 ms), the rest at 100 ms. */
+function scopeRemoteGapMs(cloud) {
+  return !cloud && yaesuScopeState.source === 'radio' ? 1000 / 15 : 100;
+}
+
+/** How far apart the frames a device receives are, on average (the server
+ *  paces to scopeRemoteGapMs, never faster than the source), for the
+ *  phone's waterfall time scale. */
+function scopeRemoteFrameMs(cloud) {
+  return Math.round(Math.max(scopeRemoteGapMs(!!cloud), scopeSourceFrameMs()));
 }
 
 function yaesuScopeBroadcastState() {
@@ -28609,11 +28620,12 @@ function yaesuScopeOnFrame(f) {
     jtcatPopoutWin.webContents.send('scope-frame', { seq: f.seq, kind: f.kind, bins: f.wf1 });
   }
   if (yaesuScopeRemoteWants && remoteServer && remoteServer.running && remoteServer.hasClient()) {
-    const now = Date.now();
-    if (now - yaesuScopeLastRemoteFrame >= 100) {   // ~10 fps, peak-held to 256 bins
-      yaesuScopeLastRemoteFrame = now;
-      remoteServer.broadcastScopeFrame({ seq: f.seq, kind: f.kind, bins: Array.from(YaesuScope.downsampleBins(f.wf1, 256)) });
-    }
+    // The server paces each device (scopeRemoteGapMs) and peak-holds the
+    // frame to the points that device asked for (scope-subscribe bins).
+    remoteServer.broadcastScopeFrame({
+      seq: f.seq, kind: f.kind, wf1: f.wf1,
+      gapMs: scopeRemoteGapMs(false), cloudGapMs: scopeRemoteGapMs(true),
+    });
   }
 }
 
@@ -28760,13 +28772,46 @@ function flexScopeQueueCenter(hz) {
   }, 100);
 }
 
-/** Zoom steps for the running source (scope-state.spans); empty = no zoom. */
-function scopeSpans() {
-  return flexScopeOn ? FlexScope.SPANS.slice() : [];
+/** The FT-710's own scope with a CAT link that answers its scope reads:
+ *  only then can POTACAT set (and confirm) its span and mode. rigctld
+ *  rejects SS05, which leaves catReads 'unanswered' and spanCode null. */
+function yaesuScopeCatWritable() {
+  const s = yaesuScopeState;
+  return s.source === 'radio' && s.kind === 0 && s.spanCode != null && s.catReads !== 'unanswered'
+    && !!cat && cat.connected && typeof cat.sendRaw === 'function';
 }
 
-/** Zoom (C2S scope-span, the scope pop-out's - / +): remembered per source. */
-function setScopeSpan(hz, origin) {
+/** Zoom steps for the running source (scope-state.spans); empty = no zoom. */
+function scopeSpans() {
+  if (flexScopeOn) return FlexScope.SPANS.slice();
+  if (yaesuScopeCatWritable()) return Object.values(YaesuScope.SPAN_HZ_BY_CODE).sort((a, b) => a - b);
+  return [];
+}
+
+/** The SS05 code whose span is nearest hz. */
+function yaesuSpanCodeFor(hz) {
+  let best = null;
+  for (const [code, span] of Object.entries(YaesuScope.SPAN_HZ_BY_CODE)) {
+    if (best == null || Math.abs(Math.log(span / hz)) < Math.abs(Math.log(YaesuScope.SPAN_HZ_BY_CODE[best] / hz))) best = code;
+  }
+  return best;
+}
+
+/** Zoom (C2S scope-span, the scope pop-out's - / +): remembered per source.
+ *  On the FT-710 it is the radio's own span (SS05), so a Guest Pass may not
+ *  change it; the Flex pan is ours, so a guest may zoom it. */
+function setScopeSpan(hz, origin, { guest = false } = {}) {
+  if (!flexScopeOn && yaesuScopeCatWritable()) {
+    if (guest) { sendCatLog('[Scope] a Guest Pass client asked to change the FT-710 span — refused (the host\'s radio settings are not a guest\'s to change)'); return false; }
+    const want = Number(hz);
+    if (!(want > 0)) return false;
+    const code = yaesuSpanCodeFor(want);
+    if (code == null || code === String(yaesuScopeState.spanCode)) return false;
+    cat.sendRaw(`SS05${code};`);
+    sendCatLog(`[Scope] FT-710 span ${YaesuScope.formatSpan(YaesuScope.SPAN_HZ_BY_CODE[code])} (${origin}) — SS05${code};`);
+    setTimeout(() => yaesuScopeReadRadio(), 300);   // the radio's reply is the truth; it broadcasts on change
+    return true;
+  }
   if (!flexScopeOn || !smartSdr) return false;
   const span = FlexScope.nearestSpan(hz);
   if (!span) return false;
@@ -28776,6 +28821,22 @@ function setScopeSpan(hz, origin) {
   yaesuScopeState.spanHz = span;   // the pan status confirms (or clamps) it
   sendCatLog(`[Scope] Flex panadapter span ${span >= 1e6 ? span / 1e6 + ' MHz' : span / 1e3 + ' kHz'} (${origin})`);
   yaesuScopeBroadcastState();
+  return true;
+}
+
+/** Put the FT-710's scope in CENTER (C2S scope-anchor): the phone's Pan can
+ *  only line its picture up with the dial when the scope is centred. The
+ *  operator asked, so the radio stays in CENTER afterwards. The CENTER code
+ *  keeps the radio's display (3DSS 0, W/F 4, W/F expanded 3). */
+const YAESU_CENTER_CODE_FOR = { 0: '0', 1: '0', 2: '0', 3: '3', 4: '4', 6: '3', 7: '4', 9: '3', A: '4' };
+function setScopeAnchor(anchor, origin, { guest = false } = {}) {
+  if (anchor !== 'center' || flexScopeOn || !yaesuScopeCatWritable()) return false;
+  if (guest) { sendCatLog('[Scope] a Guest Pass client asked to put the FT-710 scope in CENTER — refused (the host\'s radio settings are not a guest\'s to change)'); return false; }
+  if (yaesuScopeState.anchor === 'center') { yaesuScopeBroadcastState(); return false; }
+  const code = YAESU_CENTER_CODE_FOR[String(yaesuScopeState.modeCode || '0').toUpperCase()] || '0';
+  cat.sendRaw(`SS06${code};`);
+  sendCatLog(`[Scope] FT-710 scope set to CENTER (${origin}) — SS06${code}; radio write, it stays in CENTER`);
+  setTimeout(() => yaesuScopeReadRadio(), 300);
   return true;
 }
 
