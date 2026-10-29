@@ -278,6 +278,9 @@ test('NB and NR levels (N0KAH, FTX-1): the radio\'s own steps, sent after the sw
   assert.ok(/nbLevel: _currentNbLevel,/.test(main) && /dnrLevel: _currentDnrLevel,/.test(main), '"Use current" reads them from the rig state');
   const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
   assert.ok(/const top = f\.maxCap && caps\[f\.maxCap\] != null \? caps\[f\.maxCap\] : f\.max;/.test(app) && /ctl\.max = top;/.test(app), 'the editor caps the input at the radio\'s top step');
+  const fn = main.indexOf('function rigPresetCaps()');
+  const body = main.slice(fn, main.indexOf('\n}\n', fn));
+  assert.ok(/out\[f\.maxCap\] = caps\[f\.maxCap\]/.test(body), 'rigPresetCaps passes maxNbLevel/maxDnrLevel, or the editor shows 0-100 / 0-15 (N0KAH)');
 });
 
 console.log(`\nrig-presets: ${passed} passed`);

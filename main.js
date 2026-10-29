@@ -3516,6 +3516,11 @@ function rigPresetCaps() {
   const out = {};
   for (const f of RigPresets.FIELDS) out[f.cap] = !!caps[f.cap];
   if (Array.isArray(caps.agcModes) && caps.agcModes.length) out.agcModes = caps.agcModes.slice();
+  // A level's top step in the radio's own units (FTX-1 NB and DNR 0-10): without
+  // these the editor fell back to 0-100 / 0-15 (N0KAH 2026-10-28).
+  for (const f of RigPresets.FIELDS) {
+    if (f.maxCap && caps[f.maxCap] != null) out[f.maxCap] = caps[f.maxCap];
+  }
   return out;
 }
 /** The band the dial is on, for the preset triggers ('' when unknown). */
