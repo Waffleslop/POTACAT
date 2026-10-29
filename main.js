@@ -15013,10 +15013,13 @@ function wsprForcePowerCap() {
       smartSdr.setTxPower(1); capped = true;
     }
   } catch {}
-  // Kenwood-protocol CAT (PC command, in watts) — for non-Flex-Direct rigs.
+  // CAT rigs, through the same converter as every other power set: rigctld
+  // takes a 0..1 FRACTION, so the bare 1 this used to send was "L RFPOWER
+  // 1.000" = full power — a KX3 + KXPA100 set to 20 W beaconed at 110 W, a
+  // G90 at 5 W went to 20 W (WZ1H, Frank, 2026-10-24).
   try {
     if (cat && cat.connected && typeof cat.setTxPower === 'function') {
-      cat.setTxPower(JTCAT_WSPR_MAX_WATTS); capped = true;
+      if (gatedSetTxPower(JTCAT_WSPR_MAX_WATTS, { rigType: detectRigType() })) capped = true;
     }
   } catch {}
   return capped;
