@@ -2038,6 +2038,12 @@ thead th {
   width: 100%;
   background: var(--bg-primary);
   min-height: 0;
+  /* Leaflet's controls sit at z-index 800-1000; keep them inside the map so
+     the attribution never draws over a panel above it (POTA Stats, the
+     event board; KQ4SUB). */
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
 }
 
 .dark-tiles {
