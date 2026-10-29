@@ -29697,7 +29697,9 @@ async function icomScopeCapture(seconds = 30) {
     note('rx', frame);
     for (const w of waiters.splice(0)) w.resolve(payload);
   };
+  let naks = 0;
   const onNak = (sub) => {
+    naks++;
     lines.push(`# NAK for 27 ${sub.toString(16).padStart(2, '0')}`);
     for (const w of waiters.splice(0)) w.resolve(null);
   };
@@ -29775,6 +29777,10 @@ async function icomScopeCapture(seconds = 30) {
     message = `The radio sent ${dataFrames} scope frames but no complete sweep. Please send this file to POTACAT anyway; it is exactly what we need to see.`;
   } else if (scopeWas || outputWas) {
     message = 'The radio answered the scope settings but sent no scope data. Open the scope screen on the radio and record again.';
+  } else if (naks >= 4) {
+    // A NAK is the radio hearing the command and refusing it (IC-7410, 2026-10-28):
+    // the CI-V address is right, the radio has no band scope over CI-V.
+    message = `The ${model || 'radio'} heard every band scope command and answered that it does not support them, so it does not send a band scope over CI-V. Nothing more to record; thank you for checking.`;
   } else {
     message = 'The radio did not answer any scope command. Check that this Icom has a band scope and that the CI-V address matches.';
   }
