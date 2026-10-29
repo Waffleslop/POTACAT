@@ -15,6 +15,7 @@ const TESTS = [
   'test/rigctld-spawn-test.js',
   'test/echocat-connect-diet-test.js',
   'test/cw-live-watchdog-test.js',
+  'test/yaesu-cw-text-test.js',
   'test/lz3aw-web-parity-test.js',
   'test/lz3aw-round5-test.js',
   'test/call-filter-test.js',
