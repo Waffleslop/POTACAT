@@ -1175,6 +1175,22 @@ const FTX1_OPTIMA_MODEL = Object.assign({}, FTX1_FIELD_MODEL, {
   }),
 });
 
+// Preamp (N0KAH 2026-10-28): IPO/AMP1/AMP2 on HF/50 via PA0, on/off on VHF
+// (PA1) and UHF (PA2), chosen by the dial the radio last reported.
+test('FTX-1: preamp steps land on the band the dial is on (PA0 / PA1 / PA2)', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  for (const id of ['FTX-1 Field', 'FTX-1 Optima']) {
+    assert.ok(Array.isArray(RIG_MODELS[id].preampSteps) && RIG_MODELS[id].preampSteps.length === 3, id + ' has the ladder');
+    const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS[id]);
+    codec._lastFreqHz = 14074000; codec.setPreamp(2);
+    codec._lastFreqHz = 50313000; codec.setPreamp(1);
+    codec._lastFreqHz = 146520000; codec.setPreamp(2);
+    codec._lastFreqHz = 446000000; codec.setPreamp(0);
+    codec._lastFreqHz = 7074000; codec.setPreamp(true);
+    assert.deepStrictEqual(writes.slice(-5), ['PA02;', 'PA01;', 'PA11;', 'PA20;', 'PA01;'], id);
+  }
+});
+
 // Power: model-prefixed PC set/read (PC1xxx Field, PC2xxx Optima). Field
 // hardware confirms whole-watt CAT values: PC1001 -> 1W ... PC1010 -> 10W.
 test('FTX-1 Field: PC1004 reply maps back to observed 4 W', () => {
