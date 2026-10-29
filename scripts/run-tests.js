@@ -250,6 +250,7 @@ const TESTS = [
   'test/lotw-split-test.js',
   'test/station-county-test.js', // the operator's own state and county: per park on activations, home only from the home grid
   'test/sdr-scope-test.js',
+  'test/rtltcp-audio-test.js',
   'test/lz3aw-round14-test.js',
   'test/lz3aw-batch-b-test.js',
   'test/lotw-report-test.js',

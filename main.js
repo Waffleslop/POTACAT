@@ -384,6 +384,7 @@ const { stripSigTag, appendTag, ensureSigTag } = require('./lib/log-comment');
 const { buildWrlContactInfo } = require('./lib/wrl-packet');
 const YaesuScope = require('./lib/yaesu-scope');
 const SdrScope = require('./lib/sdr-scope');
+const RtlTcpAudio = require('./lib/rtltcp-audio');
 const ScopeOverlay = require('./lib/scope-overlay');
 const { explainRigctldFailure } = require('./lib/rigctld-stderr');
 const RigFamily = require('./lib/rig-family');
@@ -29658,7 +29659,38 @@ function startSdrScope() {
   });
   sendCatLog(`[Scope] SDR source: connecting to rtl_tcp at ${cfg.host}:${cfg.port}`);
   yaesuScopeSetStatus('starting', null);
+  // Someone is listening through this server (rtl_tcp takes one client): the
+  // listener lets go of its own connection and shares the scope's IQ.
+  const listener = rtlTcpListenerFor(cfg.host, cfg.port);
+  if (listener) listener.attach(client, rtlTcpScopeShareOf(client, cfg));
   client.start();
+}
+
+// ─── Listening through an rtl_tcp server (lib/rtltcp-audio.js) ───────────────
+// The SDR menu's rtl_tcp receiver and the band scope may be the same server.
+// The scope owns it while it runs; the listener demodulates the scope's IQ.
+
+function rtlTcpScopeShareOf(client, cfg) {
+  return { client, sampleRate: cfg.sampleRate, centerHz: () => (sdrScopeClient === client ? sdrScopeTunedHz : 0) };
+}
+
+/** The band scope's stream, if the scope is reading host:port right now. */
+function rtlTcpScopeShareFor(host, port) {
+  if (!sdrScopeClient || !sdrScopeCfg) return null;
+  if (!RtlTcpAudio.sameHost(sdrScopeCfg.host, host) || Number(sdrScopeCfg.port) !== Number(port)) return null;
+  return rtlTcpScopeShareOf(sdrScopeClient, sdrScopeCfg);
+}
+
+/** The rtl_tcp listener connected to host:port, if there is one. */
+function rtlTcpListenerFor(host, port) {
+  return kiwiClient instanceof RtlTcpAudio.RtlTcpAudioClient && kiwiClient.sameServer(host, port) ? kiwiClient : null;
+}
+
+/** The SDR's settings: the rig's "Band scope from an SDR" block when it names this server, else defaults. */
+function rtlTcpSdrSettingsFor(host, port) {
+  const cfg = sdrScopeSettingsForActiveRig();
+  if (RtlTcpAudio.sameHost(cfg.host, host) && cfg.port === Number(port)) return cfg;
+  return { host, port };
 }
 
 function stopSdrScope(why) {
@@ -29667,6 +29699,8 @@ function stopSdrScope(why) {
   sdrScopeBuilder = null;
   if (sdrScopeRetuneTimer) { clearTimeout(sdrScopeRetuneTimer); sdrScopeRetuneTimer = null; }
   if (client) {
+    // A listener sharing this stream goes back to a connection of its own.
+    if (kiwiClient instanceof RtlTcpAudio.RtlTcpAudioClient && kiwiClient.shared) kiwiClient.detach();
     client.stop();
     sendCatLog('[Scope] SDR source stopped' + (why ? ' — ' + why : ''));
   }
@@ -39632,7 +39666,8 @@ app.whenReady().then(() => {
   const { WebSdrClient } = require('./lib/websdr');
   // kiwiClient and kiwiActive declared near top of whenReady for global access
 
-  ipcMain.on('kiwi-connect', (_e, { host: rawHost, port: rawPort, password }) => {
+  let kiwiConnectSeq = 0; // a newer kiwi-connect during the rtl_tcp probe wins
+  ipcMain.on('kiwi-connect', async (_e, { host: rawHost, port: rawPort, password }) => {
     // Inline station password: "password@host:port" in the SDR field.
     // KiwiSDR sysops hand out passwords for full-length sessions on
     // preview-limited receivers (work item kiwi-preview-bump-too-busy);
@@ -39654,12 +39689,27 @@ app.whenReady().then(() => {
     const port = rawPort || 8073;
     if (!host) { sendCatLog('[WebSDR] No host specified'); return; }
     if (kiwiClient) kiwiClient.disconnect();
-    // Port-based protocol selection: 8073 = KiwiSDR, anything else = WebSDR.org.
+    // Protocol selection: 8073 = KiwiSDR. Any other port is asked first
+    // whether it is an rtl_tcp server (an RTL-SDR, or rsp_tcp for an SDRplay):
+    // rtl_tcp greets with "RTL0" the instant the socket opens, a WebSDR.org
+    // (an HTTP server) says nothing until asked, so a second of silence =
+    // WebSDR.org as before. A server that is already the band scope is not
+    // probed (rtl_tcp takes one client): the listener shares the scope's IQ.
     // WebSDR.org has its own byte-tagged binary protocol over a WebSocket at
-    // /~~stream — see lib/websdr.js. Both clients share the same EventEmitter
-    // shape so the wiring below works for either.
-    const isWebSdr = port !== 8073;
-    if (isWebSdr) {
+    // /~~stream — see lib/websdr.js. All three clients share the same
+    // EventEmitter shape so the wiring below works for any of them.
+    const seq = ++kiwiConnectSeq;
+    const isKiwi = port === 8073;
+    const scopeShare = isKiwi ? null : rtlTcpScopeShareFor(host, port);
+    const rtlHeader = isKiwi || scopeShare ? null : await RtlTcpAudio.probeRtlTcp(host, port, 1000);
+    if (seq !== kiwiConnectSeq) return; // the operator picked another receiver meanwhile
+    const isRtlTcp = !!(scopeShare || rtlHeader);
+    const isWebSdr = !isKiwi && !isRtlTcp;
+    const sdrKind = isRtlTcp ? 'rtl_tcp' : isWebSdr ? 'websdr' : 'kiwisdr';
+    if (isRtlTcp) {
+      kiwiClient = new RtlTcpAudio.RtlTcpAudioClient({ sdr: rtlTcpSdrSettingsFor(host, port) });
+      sendCatLog(`[WebSDR] ${host}:${port} is an rtl_tcp server (${rtlHeader ? rtlHeader.tunerName : 'shared with the band scope'}): POTACAT demodulates its IQ`);
+    } else if (isWebSdr) {
       kiwiClient = new WebSdrClient();
       sendCatLog(`[WebSDR] Using WebSDR.org protocol for ${host}:${port}`);
     } else {
@@ -39676,11 +39726,13 @@ app.whenReady().then(() => {
         kiwiClient.tune(_currentFreqHz / 1000, mode);
       }
       if (kiwiClient.setAgc) kiwiClient.setAgc(true);
+      // `kind` tells a phone not to open a station web page for rtl_tcp
+      // (there is none): its audio comes over the WebRTC voice path.
       for (const wc of require('electron').webContents.getAllWebContents()) {
-        wc.send('kiwi-status', { connected: true, host: kiwiFullHost });
+        wc.send('kiwi-status', { connected: true, host: kiwiFullHost, kind: sdrKind });
       }
       if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
-        remoteServer.sendToClient({ type: 'kiwi-status', connected: true, host: kiwiFullHost });
+        remoteServer.sendToClient({ type: 'kiwi-status', connected: true, host: kiwiFullHost, kind: sdrKind });
       }
       // Tell the WebRTC bridge to swap the peer's audio track from rig audio
       // to the Kiwi-fed MediaStreamDestination so mobile clients (which can't
@@ -39756,7 +39808,17 @@ app.whenReady().then(() => {
         remoteServer.sendToClient({ type: 'kiwi-status', connected: false, error: msg });
       }
     });
-    if (isWebSdr) {
+    if (isRtlTcp) {
+      // rtl_tcp: the target first, so the SDR goes straight to the dial.
+      if (_currentFreqHz > 0) kiwiClient.tune(_currentFreqHz / 1000, _currentMode || 'USB'); // normalizeMode reads DIGU/PKTLSB/…
+      if (scopeShare) {
+        kiwiClient.host = host;
+        kiwiClient.port = port;
+        kiwiClient.attach(scopeShare.client, scopeShare);
+      } else {
+        kiwiClient.connect(host, port);
+      }
+    } else if (isWebSdr) {
       // WebSDR.org: connect signature is (host, port, freqKhz, mode, options).
       // We send an initial tune at connect time so the receiver has a valid
       // frequency before any audio flows. Subsequent QSYs use kiwiClient.tune().

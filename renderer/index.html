@@ -3286,6 +3286,7 @@
     <fieldset class="source-toggles collapsible" data-settings-tab="station">
       <legend>WebSDR</legend>
       <span class="help-text">Listen through a remote receiver (KiwiSDR or WebSDR.org) while transmitting on your local radio. Useful for local QRM. Click <b>Browse</b> to pick from a curated list, or type a host manually. Port 8073 = KiwiSDR, other ports = WebSDR.org.</span>
+      <span class="help-text" style="display:block;margin-top:4px;">An <b>rtl_tcp</b> server works here too: an RTL-SDR running rtl_tcp, or an SDRplay running rsp_tcp, on this PC or a Pi by your antenna (for example <b>192.168.1.50:1234</b>). POTACAT recognises it when it connects and does the receiving itself. It sends about 4 Mbit/s, so use it on your own network. If that SDR is also your band scope (Settings &gt; My Rigs &gt; Band scope from an SDR), its gain and direct sampling settings are used, and listening shares the scope's connection.</span>
       <div style="display:flex;gap:6px;margin-top:8px;align-items:center;">
         <label style="flex:1;">Label: <input type="text" id="set-kiwi-label-1" placeholder="K3FEF" style="width:100%;max-width:80px;"></label>
         <label style="flex:3;">Host: <input type="text" id="set-kiwi-host-1" placeholder="host:port (e.g. k3fef.com:8073)" style="width:100%;max-width:260px;"></label>

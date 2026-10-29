@@ -164,6 +164,8 @@ jobs:
         run: node test/yaesu-scope-test.js
       - name: Run SDR band scope suite (rtl_tcp client vs a fake server, spectrum maths, wiring)
         run: node test/sdr-scope-test.js
+      - name: Run rtl_tcp listening suite (demodulator on generated IQ, client vs a fake server, scope sharing, wiring)
+        run: node test/rtltcp-audio-test.js
       - name: Compile the FT-710 scope helper and round-trip one synthetic frame through the parser
         run: |
           gcc -O2 -Wall -o /tmp/yaesu-scope helpers/yaesu-scope/yaesu-scope.c -ldl -lpthread -lm
