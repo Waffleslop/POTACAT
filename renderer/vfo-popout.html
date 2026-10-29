@@ -3561,14 +3561,20 @@ function placeKiwiDropdown(dd, anchor) {
   const below = window.innerHeight - r.bottom - M - 4;
   const above = r.top - M - 4;
   const up = below < 160 && above > below;
-  dd.style.maxHeight = Math.max(80, up ? above : below) + 'px';
+  // border-box, so the padding counts inside the height we allow: with a
+  // long list the menu otherwise ran past the top of the window and the
+  // first SDRs could not be clicked (K3SBP, Windows).
+  dd.style.boxSizing = 'border-box';
+  dd.style.overflowY = 'auto';
+  dd.style.maxHeight = Math.max(80, Math.min(up ? above : below, window.innerHeight - 2 * M)) + 'px';
   dd.style.minWidth = r.width + 'px';
   dd.style.maxWidth = (window.innerWidth - 2 * M) + 'px';
   dd.style.visibility = 'hidden';
   document.body.appendChild(dd);
   const w = dd.offsetWidth, h = dd.offsetHeight;
   dd.style.left = Math.max(M, Math.min(r.left, window.innerWidth - w - M)) + 'px';
-  dd.style.top = (up ? r.top - 4 - h : r.bottom + 4) + 'px';
+  const top = up ? r.top - 4 - h : r.bottom + 4;
+  dd.style.top = Math.max(M, Math.min(top, window.innerHeight - h - M)) + 'px';
   dd.style.visibility = '';
 }
 
