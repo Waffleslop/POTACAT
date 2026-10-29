@@ -84,12 +84,15 @@ check('FT-710 zoom: the ten SS05 spans only when the CAT link answers the scope 
   assert.ok(/s\.source === 'radio' && s\.kind === 0 && s\.spanCode != null && s\.catReads !== 'unanswered'/.test(w));
   assert.ok(/if \(yaesuScopeCatWritable\(\)\) return Object\.values\(YaesuScope\.SPAN_HZ_BY_CODE\)/.test(fnOf('scopeSpans', 400)));
   const set = fnOf('setScopeSpan');
-  assert.ok(/cat\.sendRaw\(`SS05\$\{code\};`\);/.test(set) && /setTimeout\(\(\) => yaesuScopeReadRadio\(\), 300\)/.test(set), 'write, then the radio\'s reply is the truth');
+  assert.ok(/const cmd = YaesuScope\.write\.span\(code\);\s*cat\.sendRaw\(cmd\);/.test(set) && /setTimeout\(\(\) => yaesuScopeReadRadio\(\), 300\)/.test(set), 'write, then the radio\'s reply is the truth');
   assert.ok(/if \(guest\) scopeGuestNote\('FT-710 span'\); else scopeGuestOwnerSet\('spanCode', code\);/.test(set), 'a guest may zoom; the owner\'s span is noted first');
+});
+check('no SS set goes out in the short form the FT-710 refuses (SS056;)', () => {
+  assert.ok(!/sendRaw\(`SS0[0-7]\$\{/.test(main));
 });
 check('CENTER keeps the radio\'s display and is logged as a radio write; a guest\'s is noted for undoing', () => {
   const a = fnOf('setScopeAnchor');
-  assert.ok(/cat\.sendRaw\(`SS06\$\{code\};`\);/.test(a) && /radio write/.test(a));
+  assert.ok(/const cmd = YaesuScope\.write\.mode\(code\);\s*cat\.sendRaw\(cmd\);/.test(a) && /radio write/.test(a));
   assert.ok(/if \(guest\) scopeGuestNote\('FT-710 scope mode'\); else scopeGuestOwnerSet\('modeCode', code\);/.test(a));
   const map = /const YAESU_CENTER_CODE_FOR = (\{[^}]+\});/.exec(main)[1];
   const t = eval('(' + map + ')');
@@ -111,7 +114,7 @@ check('Guest Pass (Casey): the owner\'s span and mode come back when the session
   assert.ok(/if \(!scopeGuestRestore\) \{/.test(note), 'noted once, at the guest\'s FIRST change');
   assert.ok(/spanCode: yaesuScopeState\.spanCode, modeCode: yaesuScopeState\.modeCode/.test(note));
   const back = fnOf('scopeGuestRestoreOwner', 4000);   // Flex, Icom and FT-710 branches
-  assert.ok(/cat\.sendRaw\(`SS05\$\{r\.spanCode\};`\);/.test(back) && /cat\.sendRaw\(`SS06\$\{r\.modeCode\};`\);/.test(back));
+  assert.ok(/cat\.sendRaw\(YaesuScope\.write\.span\(r\.spanCode\)\);/.test(back) && /cat\.sendRaw\(YaesuScope\.write\.mode\(r\.modeCode\)\);/.test(back));
   assert.ok(/smartSdr\.setPanBandwidth\(r\.spanHz\)/.test(back), 'the Flex pan too');
   assert.ok(/setTimeout\(\(\) => yaesuScopeReadRadio\(\), 300\);/.test(back) && /guest session over/.test(back), 'then re-read, and logged');
   assert.ok(/passLeaseStopTransmitters\(info\.reason\);\s*scopeGuestRestoreOwner\(info\.reason \|\| 'ended'\);/.test(main), 'pass ended');

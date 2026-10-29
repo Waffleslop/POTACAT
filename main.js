@@ -29172,11 +29172,11 @@ function scopeGuestRestoreOwner(why) {
   }
   const parts = [];
   if (r.spanCode != null && String(r.spanCode) !== String(yaesuScopeState.spanCode)) {
-    cat.sendRaw(`SS05${r.spanCode};`);
+    cat.sendRaw(YaesuScope.write.span(r.spanCode));
   }
   if (r.spanCode != null) parts.push('span ' + YaesuScope.formatSpan(YaesuScope.SPAN_HZ_BY_CODE[r.spanCode]));
   if (r.modeCode != null && String(r.modeCode) !== String(yaesuScopeState.modeCode)) {
-    cat.sendRaw(`SS06${r.modeCode};`);
+    cat.sendRaw(YaesuScope.write.mode(r.modeCode));
   }
   if (r.modeCode != null) {
     const m = YaesuScope.modeFromCode(r.modeCode);
@@ -29206,8 +29206,9 @@ function setScopeSpan(hz, origin, { guest = false } = {}) {
     const code = yaesuSpanCodeFor(want);
     if (code == null || code === String(yaesuScopeState.spanCode)) return false;
     if (guest) scopeGuestNote('FT-710 span'); else scopeGuestOwnerSet('spanCode', code);
-    cat.sendRaw(`SS05${code};`);
-    sendCatLog(`[Scope] FT-710 span ${YaesuScope.formatSpan(YaesuScope.SPAN_HZ_BY_CODE[code])} (${origin}) — SS05${code};`);
+    const cmd = YaesuScope.write.span(code);
+    cat.sendRaw(cmd);
+    sendCatLog(`[Scope] FT-710 span ${YaesuScope.formatSpan(YaesuScope.SPAN_HZ_BY_CODE[code])} (${origin}) — ${cmd}`);
     setTimeout(() => yaesuScopeReadRadio(), 300);   // the radio's reply is the truth; it broadcasts on change
     return true;
   }
@@ -29246,8 +29247,9 @@ function setScopeAnchor(anchor, origin, { guest = false } = {}) {
   if (yaesuScopeState.anchor === 'center') { yaesuScopeBroadcastState(); return false; }
   const code = YAESU_CENTER_CODE_FOR[String(yaesuScopeState.modeCode || '0').toUpperCase()] || '0';
   if (guest) scopeGuestNote('FT-710 scope mode'); else scopeGuestOwnerSet('modeCode', code);
-  cat.sendRaw(`SS06${code};`);
-  sendCatLog(`[Scope] FT-710 scope set to CENTER (${origin}) — SS06${code}; radio write, it stays in CENTER`);
+  const cmd = YaesuScope.write.mode(code);
+  cat.sendRaw(cmd);
+  sendCatLog(`[Scope] FT-710 scope set to CENTER (${origin}) — ${cmd} radio write, it stays in CENTER`);
   setTimeout(() => yaesuScopeReadRadio(), 300);
   return true;
 }

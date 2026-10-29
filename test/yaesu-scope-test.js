@@ -278,6 +278,17 @@ check('replies that are not SS are refused', () => {
   assert.strictEqual(S.parseSsReply(null), null);
 });
 
+check('SS sets carry P4-P7 as 0000; the FT-710 refuses the short SS056; (2026-10-29)', () => {
+  assert.strictEqual(S.write.span('6'), 'SS0560000;');
+  assert.strictEqual(S.write.mode('3'), 'SS0630000;');
+  for (const code of Object.keys(S.SPAN_HZ_BY_CODE)) {
+    assert.deepStrictEqual(S.parseSsReply(S.write.span(code)), { p2: 5, p3: code, rest: '0000' }, code);
+  }
+  for (const code of Object.keys(S.MODE_BY_CODE)) {
+    assert.deepStrictEqual(S.parseSsReply(S.write.mode(code)), { p2: 6, p3: code, rest: '0000' }, code);
+  }
+});
+
 section('Axis');
 
 check('CENTER mode: VFO ± span/2, first bin at the low edge, last at the high edge', () => {
