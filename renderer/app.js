@@ -24517,7 +24517,13 @@ function rigPresetsMount(root) {
   return m;
 }
 
-function rigPresetFieldAvailable(f, caps) { return !!(caps && caps[f.cap]); }
+// The same rule as lib/rig-presets.js fieldAvailable: a ladder rig gets the
+// preamp STEP field instead of the on/off switch (N0KAH, FTX-1).
+function rigPresetFieldAvailable(f, caps) {
+  if (!caps || !caps[f.cap]) return false;
+  if (f.kind === 'step' && !(Array.isArray(caps[f.cap]) && caps[f.cap].length >= 2)) return false;
+  return !(f.notCap && caps[f.notCap]);
+}
 
 function rigPresetsRenderInto(m) {
   const d = rigPresetsData;
@@ -24652,6 +24658,9 @@ function rigPresetOpenEditor(m, p) {
       if (f.kind === 'switch') {
         ctl = document.createElement('select');
         for (const [v, t] of [['on', 'On'], ['off', 'Off']]) { const o = document.createElement('option'); o.value = v; o.textContent = t; ctl.appendChild(o); }
+      } else if (f.kind === 'step') {
+        ctl = document.createElement('select');
+        for (const st of caps[f.cap]) { const o = document.createElement('option'); o.value = String(st.v); o.textContent = st.label; ctl.appendChild(o); }
       } else if (f.kind === 'choice') {
         ctl = document.createElement('select');
         const opts = (f.key === 'agc' && Array.isArray(caps.agcModes) && caps.agcModes.length) ? caps.agcModes : f.options;

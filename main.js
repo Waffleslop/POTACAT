@@ -3515,6 +3515,10 @@ function rigPresetCaps() {
   const caps = getRigCapabilities(detectRigType()) || {};
   const out = {};
   for (const f of RigPresets.FIELDS) out[f.cap] = !!caps[f.cap];
+  // A step field needs the ladder itself (its labels: IPO / AMP1 / AMP2).
+  for (const f of RigPresets.FIELDS) {
+    if (f.kind === 'step' && Array.isArray(caps[f.cap])) out[f.cap] = caps[f.cap].map((s) => ({ v: s.v, label: s.label }));
+  }
   if (Array.isArray(caps.agcModes) && caps.agcModes.length) out.agcModes = caps.agcModes.slice();
   // A level's top step in the radio's own units (FTX-1 NB and DNR 0-10): without
   // these the editor fell back to 0-100 / 0-15 (N0KAH 2026-10-28).

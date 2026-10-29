@@ -283,4 +283,23 @@ test('NB and NR levels (N0KAH, FTX-1): the radio\'s own steps, sent after the sw
   assert.ok(/out\[f\.maxCap\] = caps\[f\.maxCap\]/.test(body), 'rigPresetCaps passes maxNbLevel/maxDnrLevel, or the editor shows 0-100 / 0-15 (N0KAH)');
 });
 
+test('a preamp ladder is a step in a preset, offered instead of the switch (N0KAH, FTX-1)', () => {
+  const ladder = [{ v: 0, label: 'IPO' }, { v: 1, label: 'AMP1' }, { v: 2, label: 'AMP2' }];
+  const ladderCaps = { preamp: true, preampSteps: ladder };
+  assert.strictEqual(RP.fieldAvailable(RP.FIELD_BY_KEY.preamp, ladderCaps), false, 'no on/off switch on a ladder rig');
+  assert.strictEqual(RP.fieldAvailable(RP.FIELD_BY_KEY.preampStep, ladderCaps), true);
+  assert.strictEqual(RP.fieldAvailable(RP.FIELD_BY_KEY.preamp, { preamp: true }), true, 'a single-stage rig keeps the switch');
+  assert.strictEqual(RP.fieldAvailable(RP.FIELD_BY_KEY.preampStep, { preamp: true }), false);
+  const [p] = RP.sanitizePresets([{ name: 'HF DX', preampStep: '2' }]);
+  assert.strictEqual(p.preampStep, 2);
+  assert.deepStrictEqual(RP.presetCommands(p, ladderCaps), [{ action: 'set-preamp', value: 2, field: 'preampStep' }]);
+  assert.strictEqual(RP.describePreset(p, ladderCaps).text, 'Preamp AMP2');
+  assert.strictEqual(RP.sanitizePresets([{ name: 'x', preampStep: 'AMP2' }])[0].preampStep, undefined, 'junk is dropped');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.ok(/f\.kind === 'step' && Array\.isArray\(caps\[f\.cap\]\)\) out\[f\.cap\] = caps\[f\.cap\]\.map/.test(main), 'rigPresetCaps carries the ladder');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  assert.ok(/f\.kind === 'step'\) \{\s*ctl = document\.createElement\('select'\);/.test(app), 'the editor offers the steps');
+  assert.ok(/return !\(f\.notCap && caps\[f\.notCap\]\);/.test(app), 'and the same availability rule');
+});
+
 console.log(`\nrig-presets: ${passed} passed`);
