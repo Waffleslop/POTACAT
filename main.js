@@ -12607,6 +12607,22 @@ async function logContact(entry, opts) {
     : (entry.activation === false ? [] : liveActivationMyRefs());
   const e = { ...entry };
   delete e.activation;
+  // Never a record with no MODE (pota.app refuses the file; NA4DQ 2026-10-27).
+  // A blank mode takes the radio's voice/CW mode; a data mode cannot name the
+  // digital mode worked, and no radio means nothing to go by: refused, with
+  // the reason, so the operator picks one.
+  if (!String(e.mode || '').trim()) {
+    const fromRig = QsoExpand.logModeFromRig(_currentMode);
+    if (!fromRig) {
+      const why = _currentMode
+        ? `No mode given, and the radio is in ${_currentMode}, which does not say which mode was worked. Pick the mode and log again.`
+        : 'No mode given, and no mode from the radio. Pick the mode and log again.';
+      sendCatLog(`[QSO] Not logged: ${e.callsign} — ${why}`);
+      return { success: false, error: why, records: [] };
+    }
+    e.mode = fromRig;
+    sendCatLog(`[QSO] ${e.callsign}: no mode given — logged as ${fromRig}, the radio's mode`);
+  }
   // The frequency as typed, in whatever unit (lib/log-freq.js, the app's
   // rule): MHz in the kHz box saved FREQ 0.014285 with no BAND for NA4DQ's
   // whole activation. A value in no amateur band is saved BLANK, never as a

@@ -2,7 +2,9 @@
 // lib/qso-expand.js — the one definition of the records a logged contact
 // becomes (logging parity audit 2026-10-19). Run: node test/qso-expand-test.js
 const assert = require('assert');
-const { expandContact, defaultRst, utcParts } = require('../lib/qso-expand');
+const { expandContact, defaultRst, utcParts, logModeFromRig } = require('../lib/qso-expand');
+const fs = require('fs');
+const path = require('path');
 
 let passed = 0, failed = 0;
 function test(name, fn) {
@@ -135,6 +137,20 @@ test('defaults: RST by mode, qsoAt is the one time contract', () => {
 
 test('no callsign = no records', () => {
   assert.deepStrictEqual(expandContact({ ...base, callsign: ' , ' }, ctx()), []);
+});
+
+test('a blank mode takes the radio\'s voice/CW mode; a data mode or no radio is refused (NA4DQ)', () => {
+  assert.strictEqual(logModeFromRig('USB'), 'SSB');
+  assert.strictEqual(logModeFromRig('lsb'), 'SSB');
+  assert.strictEqual(logModeFromRig('CW-R'), 'CW');
+  assert.strictEqual(logModeFromRig('FMN'), 'FM');
+  assert.strictEqual(logModeFromRig('AM'), 'AM');
+  for (const m of ['USB-D', 'DIGU', 'PKTUSB', 'DATA-U', 'RTTY', '', null]) assert.strictEqual(logModeFromRig(m), '', String(m));
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const fn = main.indexOf('async function logContact(entry, opts)');
+  const body = main.slice(fn, fn + 3000);
+  assert.ok(body.includes('QsoExpand.logModeFromRig(_currentMode)'), 'logContact fills a blank mode from the radio');
+  assert.ok(/if \(!fromRig\) \{[\s\S]*?return \{ success: false/.test(body), 'and refuses when it cannot');
 });
 
 console.log(`\nQSO expand: ${passed} passed, ${failed} failed`);
