@@ -18,7 +18,9 @@ const rs = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js')
 console.log('directory echocat seed');
 
 test('every new ECHOCAT server is seeded with the directory', () => {
-  assert.ok(/onRemoteServer\(\(rs\) => \{\n\s*if \(!directoryNets\.length && !directorySwl\.length\) return;\n\s*rs\.broadcastDirectory\(\{ nets: directoryNets, swl: directorySwl, userNets: buildUserNetsForBroadcast\(\) \}\);/.test(src));
+  // Unconditional since 2026-10-29: the bundled Landmarks catalog means there
+  // is always something to send, even before the Google Sheet answers.
+  assert.ok(/onRemoteServer\(\(rs\) => \{\n\s*rs\.broadcastDirectory\(\{ nets: directoryNets, swl: directorySwl, userNets: buildUserNetsForBroadcast\(\), \.\.\.landmarksPayload\(\) \}\);/.test(src));
 });
 
 test('the directory push is not gated on the server listening', () => {
@@ -42,7 +44,8 @@ test('the directory has no off switch anywhere', () => {
 
 test('the server stores the snapshot and hydrates each device from it', () => {
   assert.ok(/broadcastDirectory\(data\) \{\n\s*this\._directoryData = data;/.test(rs));
-  assert.ok(/this\._sendTo\(ws, \{ type: 'directory', nets: this\._directoryData\.nets, swl: this\._directoryData\.swl/.test(rs));
+  assert.ok(rs.includes('this._sendTo(ws, this._directoryMessage(this._directoryData));'));
+  assert.ok(/_directoryMessage\(data\) \{\n\s*return \{\n\s*type: 'directory',\n\s*nets: data\.nets,\n\s*swl: data\.swl,/.test(rs));
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

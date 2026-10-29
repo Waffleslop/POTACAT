@@ -515,7 +515,9 @@
   let rotorEnabled = false;
   let directoryNets = [];
   let directorySwl = [];
-  let dirActiveTab = 'nets';
+  let directoryLandmarks = [];        // the Landmarks tab (lib/landmarks.js)
+  let directoryLandmarkCategories = [];
+  let dirActiveTab = 'nets';          // 'nets' | 'swl' | 'landmarks'
 
   // --- Colorblind mode ---
   const CB_COLORS = {
@@ -2322,9 +2324,11 @@
       case 'directory':
         directoryNets = msg.nets || [];
         directorySwl = msg.swl || [];
+        if (Array.isArray(msg.landmarks)) directoryLandmarks = msg.landmarks;
+        if (Array.isArray(msg.landmarkCategories)) directoryLandmarkCategories = msg.landmarkCategories;
         // Show/hide Dir tab based on whether we have data
         var dirTabBtn = document.getElementById('dir-tab-btn');
-        if (dirTabBtn) dirTabBtn.classList.toggle('hidden', !directoryNets.length && !directorySwl.length);
+        if (dirTabBtn) dirTabBtn.classList.toggle('hidden', !directoryNets.length && !directorySwl.length && !directoryLandmarks.length);
         if (activeTab === 'dir') renderDirectoryTab();
         break;
 
@@ -8532,6 +8536,8 @@
         g.querySelectorAll('option').forEach(function (o) { o.hidden = !ok; o.disabled = !ok; });
       });
     }
+    // The Landmarks tab hides what the shack's radio cannot tune.
+    if (activeTab === 'dir' && dirActiveTab === 'landmarks') renderDirectoryTab();
   }
 
   // TX slot LOCK: Auto -> 1st (even) -> 2nd (odd) -> Auto. The desktop
@@ -11770,11 +11776,146 @@ var _paddleHoldTimer = { dit: null, dah: null };
     if (!dirList) return;
     var search = (dirSearch ? dirSearch.value : '').toLowerCase().trim();
     dirList.innerHTML = '';
-    if (dirActiveTab === 'nets') {
+    if (dirActiveTab === 'landmarks') {
+      renderDirLandmarks(search);
+    } else if (dirActiveTab === 'nets') {
       renderDirNets(search);
     } else {
       renderDirSwl(search);
     }
+  }
+
+  // --- Landmarks (lib/landmarks.js, inlined into this page) ---
+  // Signals to dial into at any time. A card shows the one-line "what it is";
+  // a tap opens it in place with What you'll hear / Why it matters / Try this
+  // and a Tune button, so the text is read before the radio moves.
+  var lmkOpenId = null;
+  var lmkShowAll = false;
+  var lmkTickTimer = null;
+  var LMK_HINT_KEY = 'echocat-landmarks-hint-dismissed';
+  function lmkHintDismissed() { try { return localStorage.getItem(LMK_HINT_KEY) === '1'; } catch (e) { return false; } }
+  function lmkTune(lm) {
+    if (!lm || !lm.khz) return;
+    if (vfoLocked) { showToast('VFO Locked — Unlock VFO to change frequency', 2000); return; }
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'tune', freqKhz: String(lm.khz), mode: lm.mode }));
+    }
+  }
+  function renderDirLandmarks(search) {
+    var L = window.Landmarks;
+    if (!L) return;
+    if (!directoryLandmarks.length) {
+      dirList.innerHTML = '<div class="dir-empty">Waiting for landmarks from POTACAT</div>';
+      return;
+    }
+    var now = Date.now();
+    var rows = directoryLandmarks.map(function(lm, i) {
+      return { lm: lm, i: i, band: L.bandLabel(lm.khz), cd: L.status(lm, now), ok: L.receivable(lm, webRigBands) };
+    });
+    if (search) {
+      rows = rows.filter(function(r) {
+        return [r.lm.name, r.lm.line, r.lm.region, r.lm.mode].some(function(v) { return (v || '').toLowerCase().indexOf(search) >= 0; })
+          || String(r.lm.khz).indexOf(search) >= 0;
+      });
+    }
+    var hidden = rows.filter(function(r) { return !r.ok; });
+    var shown = lmkShowAll ? rows : rows.filter(function(r) { return r.ok; });
+
+    if (!lmkHintDismissed() && !search && directoryLandmarks.some(function(l) { return l.id === 'wwv-10000'; })) {
+      var hint = document.createElement('div');
+      hint.className = 'lmk-hint';
+      hint.innerHTML = '<p><b>New radio?</b> Tune <b>WWV on 10000 kHz</b>. A tick every second means the radio, the antenna and the audio all work.</p>'
+        + '<div class="lmk-actions"><button type="button" class="lmk-btn lmk-btn-tint" data-act="tune">Tune WWV</button>'
+        + '<button type="button" class="lmk-btn lmk-btn-plain" data-act="close">Got it</button></div>';
+      hint.addEventListener('click', function(ev) {
+        var act = ev.target && ev.target.dataset ? ev.target.dataset.act : '';
+        if (!act) return;
+        if (act === 'tune') {
+          var wwv = directoryLandmarks.filter(function(l) { return l.id === 'wwv-10000'; })[0];
+          if (wwv) { lmkOpenId = wwv.id; lmkTune(wwv); }
+        }
+        try { localStorage.setItem(LMK_HINT_KEY, '1'); } catch (e) { /* shows again next time */ }
+        renderDirectoryTab();
+      });
+      dirList.appendChild(hint);
+    }
+
+    var cats = directoryLandmarkCategories.length ? directoryLandmarkCategories
+      : L.CATEGORY_IDS.map(function(id) { return { id: id, label: id, reason: '' }; });
+    cats.forEach(function(cat) {
+      var inCat = shown.filter(function(r) { return r.lm.category === cat.id; });
+      if (!inCat.length) return;
+      // Live first, then by when it is next on, then in the catalog's own
+      // (curated) order: the most useful station first.
+      inCat.sort(function(a, b) { return (a.cd.sortKey - b.cd.sortKey) || (a.i - b.i); });
+      var head = document.createElement('div');
+      head.className = 'lmk-group';
+      head.innerHTML = esc(cat.label) + (cat.reason ? '<span>' + esc(cat.reason) + '</span>' : '');
+      dirList.appendChild(head);
+      inCat.forEach(function(r) {
+        var lm = r.lm, cd = r.cd;
+        var open = lm.id === lmkOpenId;
+        var tuned = currentFreqKhz && Math.abs(Number(lm.khz) - currentFreqKhz) < 0.5;
+        var card = document.createElement('div');
+        card.className = 'dir-card lmk-card' + (cd.status === 'live' ? ' dir-live' : cd.status === 'soon' ? ' dir-soon' : '')
+          + (tuned ? ' tuned' : '') + (open ? ' open' : '') + (r.ok ? '' : ' lmk-out');
+        var statusHtml = cd.label ? '<span class="dir-card-status ' + cd.status + '">' + esc(cd.label) + '</span>' : '';
+        var html = '<div class="dir-card-row"><span class="dir-card-name">' + esc(lm.name) + '</span>' + statusHtml + '</div>'
+          + '<div class="dir-card-detail"><span class="dir-card-freq">' + lm.khz + ' kHz</span> ' + esc(lm.mode) + ' · ' + esc(r.band) + '</div>'
+          + '<div class="lmk-line">' + esc(lm.line) + (lm.ncdxf ? '<span class="lmk-now" data-khz="' + lm.khz + '"></span>' : '') + '</div>';
+        if (open) {
+          html += '<div class="lmk-detail">'
+            + (lm.ncdxf ? '<div class="lmk-beacon" data-khz="' + lm.khz + '"><span class="lmk-beacon-now"></span>'
+              + '<div class="lmk-beacon-track"><div class="lmk-beacon-fill"></div></div><span class="lmk-beacon-next"></span></div>' : '')
+            + (r.ok ? '' : '<p class="lmk-note">The radio at the shack is not set up for this frequency.</p>')
+            + (lm.hear ? '<div class="lmk-sec"><b>What you’ll hear</b><p>' + esc(lm.hear) + '</p></div>' : '')
+            + (lm.why ? '<div class="lmk-sec"><b>Why it matters</b><p>' + esc(lm.why) + '</p></div>' : '')
+            + (lm.try ? '<div class="lmk-sec lmk-try"><b>Try this</b><p>' + esc(lm.try) + '</p></div>' : '')
+            + '<div class="lmk-actions"><button type="button" class="lmk-btn lmk-btn-tint" data-act="tune">Tune ' + lm.khz + ' kHz</button>'
+            + (lm.region ? '<span class="lmk-region">' + esc(lm.region) + '</span>' : '') + '</div>'
+            + '</div>';
+        }
+        card.innerHTML = html;
+        card.addEventListener('click', function(ev) {
+          if (ev.target && ev.target.dataset && ev.target.dataset.act === 'tune') { ev.stopPropagation(); lmkTune(lm); return; }
+          lmkOpenId = open ? null : lm.id;
+          renderDirectoryTab();
+        });
+        dirList.appendChild(card);
+      });
+    });
+    if (hidden.length) {
+      var note = document.createElement('div');
+      note.className = 'lmk-hidden-note';
+      note.innerHTML = (lmkShowAll
+        ? 'Greyed cards are outside the bands the radio at the shack is set up for. '
+        : hidden.length + (hidden.length === 1 ? ' landmark is' : ' landmarks are') + ' hidden: the radio at the shack is not set up for '
+          + (hidden.length === 1 ? 'its band' : 'their bands') + '. ')
+        + '<button type="button" class="lmk-btn lmk-btn-plain">' + (lmkShowAll ? 'Hide them' : 'Show anyway') + '</button>';
+      note.querySelector('button').addEventListener('click', function() { lmkShowAll = !lmkShowAll; renderDirectoryTab(); });
+      dirList.appendChild(note);
+    }
+    lmkUpdateLive();
+    if (!lmkTickTimer) lmkTickTimer = setInterval(function() {
+      if (activeTab !== 'dir' || dirActiveTab !== 'landmarks') { clearInterval(lmkTickTimer); lmkTickTimer = null; return; }
+      lmkUpdateLive();
+    }, 1000);
+  }
+  function lmkUpdateLive() {
+    var L = window.Landmarks;
+    if (!L || !dirList) return;
+    var now = Date.now();
+    dirList.querySelectorAll('.lmk-now').forEach(function(el) {
+      var b = L.beaconAt(el.dataset.khz, now);
+      el.textContent = b ? ' · now ' + b.now.call : '';
+    });
+    dirList.querySelectorAll('.lmk-beacon').forEach(function(box) {
+      var b = L.beaconAt(box.dataset.khz, now);
+      if (!b) return;
+      box.querySelector('.lmk-beacon-now').innerHTML = esc(b.now.call) + ' <span>' + esc(b.now.place) + '</span>';
+      box.querySelector('.lmk-beacon-fill').style.width = Math.min(100, (b.secondsInto / 10) * 100) + '%';
+      box.querySelector('.lmk-beacon-next').textContent = 'Next: ' + b.next.call + ', ' + b.next.place + ', in ' + Math.ceil(b.secondsLeft) + ' s';
+    });
   }
 
   function renderDirNets(search) {

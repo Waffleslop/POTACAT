@@ -1168,7 +1168,10 @@ const dirvNetsBody = document.getElementById('dirv-nets-body');
 const dirvSwlBody = document.getElementById('dirv-swl-body');
 const dirvPlaceholder = document.getElementById('dirv-placeholder');
 const dirvSuggestSheet = document.getElementById('dirv-suggest-sheet');
-let dirvActiveTab = 'nets';
+const dirvTabLandmarks = document.getElementById('dirv-tab-landmarks');
+const dirvLandmarksContainer = document.getElementById('dirv-landmarks-container');
+const dirvCategoryFilter = document.getElementById('dirv-category-filter');
+let dirvActiveTab = 'nets'; // 'nets' | 'swl' | 'landmarks'
 let dirvAutoRefreshTimer = null;
 const rbnMaxAgeInput = document.getElementById('rbn-max-age');
 const rbnAgeUnitSelect = document.getElementById('rbn-age-unit');
@@ -19967,6 +19970,10 @@ function renderDirectoryView() {
   const bandFilter = dirvBandFilter ? dirvBandFilter.value : 'all';
   const statusFilter = dirvStatusFilter ? dirvStatusFilter.value : 'all';
 
+  if (dirvActiveTab === 'landmarks') {
+    renderDirvLandmarks(search, bandFilter, dirvCategoryFilter ? dirvCategoryFilter.value : 'all');
+    return;
+  }
   if (dirvActiveTab === 'nets') {
     renderDirvNets(search, bandFilter, statusFilter);
     const table = dirvNetsContainer?.querySelector('.directory-view-table');
@@ -20250,15 +20257,218 @@ function renderDirvSwl(search, bandFilter, statusFilter) {
   }
 }
 
+// ── Landmarks (lib/landmarks.js) ─────────────────────────────────────────
+// Signals to dial into at any time. Each row has a one-line "what it is";
+// the station panel beside the table explains the selected row in four
+// parts. A click selects the row and tunes, as on the other two tabs.
+let directoryLandmarks = [];
+let directoryLandmarkCategories = [];
+let lmkSelectedId = null;
+let lmkShowAll = false;     // show rows the active radio cannot tune (this session)
+let lmkTickTimer = null;
+const LMK_HINT_KEY = 'potacat-landmarks-hint-dismissed';
+const lmkBody = document.getElementById('lmk-body');
+const lmkPanel = document.getElementById('lmk-panel');
+const lmkHint = document.getElementById('lmk-hint');
+
+function lmkTune(lm) {
+  if (!lm || !lm.khz) return;
+  window.api.tune(String(lm.khz), lm.mode);
+}
+function lmkIsTuned(lm) {
+  return radioFreqKhz !== null && Math.abs(Number(lm.khz) - radioFreqKhz) < 0.5;
+}
+function lmkHintDismissed() {
+  try { return localStorage.getItem(LMK_HINT_KEY) === '1'; } catch { return false; }
+}
+
+function renderDirvLandmarks(search, bandFilter, category) {
+  if (!lmkBody || !window.Landmarks) return;
+  const L = window.Landmarks;
+  const now = Date.now();
+  if (lmkHint) lmkHint.classList.toggle('hidden', lmkHintDismissed() || !directoryLandmarks.some(l => l.id === 'wwv-10000'));
+
+  let rows = directoryLandmarks.map((lm, i) => ({ lm, i, band: L.bandLabel(lm.khz), cd: L.status(lm, now), ok: L.receivable(lm, rigBandsList) }));
+  if (search) {
+    rows = rows.filter(r => [r.lm.name, r.lm.line, r.lm.region, r.lm.mode, r.lm.hear, r.lm.why].some(v => (v || '').toLowerCase().includes(search))
+      || String(r.lm.khz).includes(search));
+  }
+  if (bandFilter !== 'all') rows = rows.filter(r => r.band === bandFilter);
+  if (category && category !== 'all') rows = rows.filter(r => r.lm.category === category);
+  const hidden = rows.filter(r => !r.ok);
+  const shown = lmkShowAll ? rows : rows.filter(r => r.ok);
+
+  if (dirvCount) {
+    dirvCount.textContent = `${shown.length} landmark${shown.length !== 1 ? 's' : ''}`
+      + (hidden.length && !lmkShowAll ? ` · ${hidden.length} this radio cannot tune` : '');
+  }
+
+  lmkBody.innerHTML = '';
+  if (!directoryLandmarks.length) {
+    lmkBody.innerHTML = '<tr class="lmk-hidden-note"><td colspan="6">Loading landmarks...</td></tr>';
+    lmkRenderPanel(null, false);
+    return;
+  }
+  const order = directoryLandmarkCategories.length ? directoryLandmarkCategories : L.CATEGORY_IDS.map(id => ({ id, label: id, reason: '' }));
+  let firstLive = null;
+  for (const cat of order) {
+    const inCat = shown.filter(r => r.lm.category === cat.id);
+    if (!inCat.length) continue;
+    // Within a group: live first, then by when it is next on, then in the
+    // catalog's own order (curated: the most useful station first).
+    inCat.sort((a, b) => (a.cd.sortKey - b.cd.sortKey) || (a.i - b.i));
+    const g = document.createElement('tr');
+    g.className = 'lmk-group';
+    g.innerHTML = `<td colspan="6">${esc(cat.label)}${cat.reason ? `<span class="lmk-group-reason">${esc(cat.reason)}</span>` : ''}</td>`;
+    lmkBody.appendChild(g);
+    for (const r of inCat) {
+      const { lm, cd } = r;
+      if (!firstLive && cd.status === 'live' && r.ok) firstLive = lm;
+      const tr = document.createElement('tr');
+      tr.className = 'lmk-row'
+        + (cd.status === 'live' ? ' lmk-live' : '')
+        + (lm.id === lmkSelectedId ? ' lmk-selected' : '')
+        + (lmkIsTuned(lm) ? ' lmk-tuned' : '')
+        + (r.ok ? '' : ' lmk-out');
+      tr.tabIndex = 0;
+      tr.dataset.id = lm.id;
+      const badge = cd.status === 'none'
+        ? '<span class="lmk-badge none">—</span>'
+        : `<span class="lmk-badge ${cd.status}" title="${esc(cd.label)}">${cd.status === 'live' ? 'Live' : cd.status === 'soon' ? 'Soon' : cd.status === 'today' ? 'Today' : 'Later'}</span>`;
+      tr.innerHTML = `<td>${badge}</td>`
+        + `<td class="lmk-name">${esc(lm.name)}</td>`
+        + `<td>${lm.khz}</td>`
+        + `<td>${esc(lm.mode)}</td>`
+        + `<td>${esc(r.band)}</td>`
+        + `<td class="lmk-line">${esc(lm.line)}${lm.ncdxf ? `<span class="lmk-now" data-khz="${lm.khz}"></span>` : ''}</td>`;
+      const choose = () => {
+        lmkSelectedId = lm.id;
+        lmkTune(lm);
+        renderDirectoryView();
+      };
+      tr.addEventListener('click', choose);
+      tr.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); choose(); } });
+      lmkBody.appendChild(tr);
+    }
+  }
+  if (hidden.length) {
+    const tr = document.createElement('tr');
+    tr.className = 'lmk-hidden-note';
+    const names = hidden.slice(0, 4).map(r => r.lm.name).filter((v, i, a) => a.indexOf(v) === i).join(', ');
+    tr.innerHTML = lmkShowAll
+      ? `<td colspan="6">Rows in grey are outside the bands this radio is set up for. <button type="button" class="lmk-show-all">Hide them</button></td>`
+      : `<td colspan="6">${hidden.length} landmark${hidden.length !== 1 ? 's are' : ' is'} hidden because this radio is not set up for ${hidden.length !== 1 ? 'their bands' : 'its band'}${names ? ` (${esc(names)}${hidden.length > 4 ? ', ...' : ''})` : ''}. <button type="button" class="lmk-show-all">Show anyway</button></td>`;
+    tr.querySelector('.lmk-show-all').addEventListener('click', () => { lmkShowAll = !lmkShowAll; renderDirectoryView(); });
+    lmkBody.appendChild(tr);
+  }
+
+  // The panel follows the selection; with none, the tuned landmark, else the
+  // first one on the air, so the panel is never empty on first open.
+  let sel = directoryLandmarks.find(l => l.id === lmkSelectedId)
+    || directoryLandmarks.find(l => lmkIsTuned(l))
+    || firstLive;
+  lmkRenderPanel(sel, sel ? L.receivable(sel, rigBandsList) : true);
+  lmkUpdateLive();
+}
+
+function lmkRenderPanel(lm, ok) {
+  if (!lmkPanel) return;
+  if (!lm) {
+    lmkPanel.innerHTML = '<p class="lmk-panel-empty">Click a landmark to tune it and read about it here.</p>';
+    return;
+  }
+  const L = window.Landmarks;
+  const cat = directoryLandmarkCategories.find(c => c.id === lm.category);
+  const cd = L.status(lm, Date.now());
+  const meta = [cat ? cat.label : '', L.bandLabel(lm.khz), cd.label, lm.region].filter(Boolean).join(' · ');
+  const sec = (title, text, cls) => text ? `<section class="lmk-sec${cls ? ' ' + cls : ''}"><h4>${title}</h4><p>${esc(text)}</p></section>` : '';
+  lmkPanel.innerHTML = `
+    <div class="lmk-p-head">
+      <h3 class="lmk-p-name">${esc(lm.name)}</h3>
+      <span class="lmk-p-freq">${lm.khz} kHz ${esc(lm.mode)}</span>
+      <span class="lmk-p-meta">${esc(meta)}</span>
+    </div>
+    ${lm.ncdxf ? `<div class="lmk-beacon" data-khz="${lm.khz}">
+      <span class="lmk-beacon-label">On the air now</span>
+      <span class="lmk-beacon-now"></span>
+      <div class="lmk-beacon-track"><div class="lmk-beacon-fill"></div></div>
+      <span class="lmk-beacon-next"></span>
+    </div>` : ''}
+    <p class="lmk-p-lead">${esc(lm.line)}</p>
+    ${ok ? '' : '<p class="lmk-p-note">This radio is not set up for this frequency. If it does receive it, add the band in Settings &gt; My Rigs, or listen on a KiwiSDR from the VFO window’s SDR menu.</p>'}
+    ${sec('What you’ll hear', lm.hear)}
+    ${sec('Why it matters', lm.why)}
+    ${sec('Try this', lm.try, 'lmk-try')}
+    <div class="lmk-p-actions">
+      <button type="button" class="lmk-btn lmk-btn-tint" id="lmk-panel-tune">Tune ${lm.khz} kHz</button>
+      ${lm.url ? '<button type="button" class="lmk-link" id="lmk-panel-link">Station page</button>' : ''}
+    </div>`;
+  const tuneBtn = document.getElementById('lmk-panel-tune');
+  if (tuneBtn) tuneBtn.addEventListener('click', () => lmkTune(lm));
+  const link = document.getElementById('lmk-panel-link');
+  if (link) link.addEventListener('click', () => window.api.openExternal(lm.url));
+}
+
+/** Once a second: the NCDXF beacon on the air, in the rows and the panel. */
+function lmkUpdateLive() {
+  const L = window.Landmarks;
+  if (!L || dirvActiveTab !== 'landmarks') return;
+  const now = Date.now();
+  document.querySelectorAll('#lmk-body .lmk-now').forEach((el) => {
+    const b = L.beaconAt(el.dataset.khz, now);
+    el.textContent = b ? `· now ${b.now.call}` : '';
+  });
+  const box = lmkPanel && lmkPanel.querySelector('.lmk-beacon');
+  if (!box) return;
+  const b = L.beaconAt(box.dataset.khz, now);
+  if (!b) return;
+  const me = (typeof grid === 'string' && grid) ? gridToLatLonLocal(grid) : null;
+  let dist = '';
+  if (me) {
+    const km = L.distanceKm(me.lat, me.lon, b.now.lat, b.now.lon);
+    const v = distUnit === 'km' ? km : km * 0.621371;
+    dist = ` · about ${Math.round(v / 50) * 50 || Math.round(v)} ${distUnit === 'km' ? 'km' : 'mi'} away`;
+  }
+  box.querySelector('.lmk-beacon-now').innerHTML = `${esc(b.now.call)} <span class="lmk-beacon-place">${esc(b.now.place)}${esc(dist)}</span>`;
+  box.querySelector('.lmk-beacon-fill').style.width = `${Math.min(100, (b.secondsInto / 10) * 100)}%`;
+  box.querySelector('.lmk-beacon-next').textContent = `Next: ${b.next.call}, ${b.next.place}, in ${Math.ceil(b.secondsLeft)} s · then ${b.after.call}`;
+}
+function lmkStartTick() {
+  lmkStopTick();
+  lmkTickTimer = setInterval(() => {
+    if (currentView === 'directory' && dirvActiveTab === 'landmarks') lmkUpdateLive();
+  }, 1000);
+}
+function lmkStopTick() {
+  if (lmkTickTimer) { clearInterval(lmkTickTimer); lmkTickTimer = null; }
+}
+{
+  const tuneBtn = document.getElementById('lmk-hint-tune');
+  const closeBtn = document.getElementById('lmk-hint-close');
+  const dismiss = () => {
+    try { localStorage.setItem(LMK_HINT_KEY, '1'); } catch { /* private storage: shows again next launch */ }
+    if (lmkHint) lmkHint.classList.add('hidden');
+  };
+  if (tuneBtn) tuneBtn.addEventListener('click', () => {
+    const wwv = directoryLandmarks.find(l => l.id === 'wwv-10000');
+    if (wwv) { lmkSelectedId = wwv.id; lmkTune(wwv); }
+    dismiss();
+    renderDirectoryView();
+  });
+  if (closeBtn) closeBtn.addEventListener('click', dismiss);
+}
+
 // Auto-refresh countdowns every 30s while directory view is open
 function startDirvAutoRefresh() {
   stopDirvAutoRefresh();
   dirvAutoRefreshTimer = setInterval(() => {
     if (currentView === 'directory') renderDirectoryView();
   }, 30000);
+  lmkStartTick();
 }
 function stopDirvAutoRefresh() {
   if (dirvAutoRefreshTimer) { clearInterval(dirvAutoRefreshTimer); dirvAutoRefreshTimer = null; }
+  lmkStopTick();
 }
 
 // --- Directory View: Column Resize & Visibility ---
@@ -20408,22 +20618,33 @@ function initDirvHeaderMenu(table) {
 }
 
 // Directory view tab switching
-if (dirvTabNets) dirvTabNets.addEventListener('click', () => {
-  dirvActiveTab = 'nets';
-  dirvTabNets.classList.add('active');
-  dirvTabSwl.classList.remove('active');
-  dirvNetsContainer.classList.remove('hidden');
-  dirvSwlContainer.classList.add('hidden');
+function setDirvTab(tab) {
+  dirvActiveTab = tab;
+  const tabs = { nets: [dirvTabNets, dirvNetsContainer], swl: [dirvTabSwl, dirvSwlContainer], landmarks: [dirvTabLandmarks, dirvLandmarksContainer] };
+  for (const [id, [btn, box]] of Object.entries(tabs)) {
+    if (btn) btn.classList.toggle('active', id === tab);
+    if (box) box.classList.toggle('hidden', id !== tab);
+  }
+  // Landmarks are mostly always on, so "On Air Now" says nothing there; the
+  // tab filters by category instead.
+  if (dirvStatusFilter) dirvStatusFilter.classList.toggle('hidden', tab === 'landmarks');
+  if (dirvCategoryFilter) dirvCategoryFilter.classList.toggle('hidden', tab !== 'landmarks');
+  if (dirvSearch) dirvSearch.placeholder = tab === 'landmarks' ? 'Search landmarks...' : 'Search nets & broadcasts...';
+  const suggestNets = document.getElementById('dirv-suggest-nets');
+  const suggestLmk = document.getElementById('dirv-suggest-landmarks');
+  if (suggestNets) suggestNets.classList.toggle('hidden', tab === 'landmarks');
+  if (suggestLmk) suggestLmk.classList.toggle('hidden', tab !== 'landmarks');
+  if (dirvPlaceholder) dirvPlaceholder.classList.add('hidden');
   renderDirectoryView();
-});
-if (dirvTabSwl) dirvTabSwl.addEventListener('click', () => {
-  dirvActiveTab = 'swl';
-  dirvTabSwl.classList.add('active');
-  dirvTabNets.classList.remove('active');
-  dirvSwlContainer.classList.remove('hidden');
-  dirvNetsContainer.classList.add('hidden');
-  renderDirectoryView();
-});
+}
+if (dirvTabNets) dirvTabNets.addEventListener('click', () => setDirvTab('nets'));
+if (dirvTabSwl) dirvTabSwl.addEventListener('click', () => setDirvTab('swl'));
+if (dirvTabLandmarks) dirvTabLandmarks.addEventListener('click', () => setDirvTab('landmarks'));
+if (dirvCategoryFilter) dirvCategoryFilter.addEventListener('change', () => renderDirectoryView());
+{
+  const discordLink = document.getElementById('dirv-suggest-discord');
+  if (discordLink) discordLink.addEventListener('click', (e) => { e.preventDefault(); window.api.openExternal('https://potacat.com/discord'); });
+}
 
 // Directory view filters
 if (dirvSearch) dirvSearch.addEventListener('input', () => renderDirectoryView());
@@ -20723,6 +20944,8 @@ if (dirCloseBtn) dirCloseBtn.addEventListener('click', () => {
 window.api.onDirectoryData((data) => {
   directoryNets = data.nets || [];
   directorySwl = data.swl || [];
+  directoryLandmarks = Array.isArray(data.landmarks) ? data.landmarks : directoryLandmarks;
+  directoryLandmarkCategories = Array.isArray(data.landmarkCategories) ? data.landmarkCategories : directoryLandmarkCategories;
   renderDirectory();
   renderDirectoryView();
 });
@@ -21607,6 +21830,8 @@ function applyRigBandsMain() {
     RB.fixSelect(sel);
   }
   try { renderBandActivity(); } catch { /* not built yet */ }
+  // The Landmarks tab hides what this radio cannot tune.
+  try { if (currentView === 'directory' && dirvActiveTab === 'landmarks') renderDirectoryView(); } catch { /* not built yet */ }
 }
 if (window.api && window.api.rigBandsGet) {
   window.api.rigBandsGet().then((d) => { rigBandsList = (d && d.bands) || null; applyRigBandsMain(); }).catch(() => {});

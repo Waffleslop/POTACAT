@@ -7,6 +7,7 @@
   <script src="popout-theme-bootstrap.js"></script>
   <link rel="stylesheet" href="../node_modules/leaflet/dist/leaflet.css">
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="landmarks.css">
 </head>
 <body>
   <div class="titlebar">
@@ -1127,6 +1128,7 @@
         <div class="directory-tabs">
           <button id="dirv-tab-nets" class="directory-tab active" type="button">HF Nets</button>
           <button id="dirv-tab-swl" class="directory-tab" type="button">SWL Broadcasts</button>
+          <button id="dirv-tab-landmarks" class="directory-tab" type="button" title="Time stations, beacons, weather and calling frequencies you can tune at any time">Landmarks</button>
         </div>
         <input type="text" id="dirv-search" class="directory-search" placeholder="Search nets &amp; broadcasts...">
         <select id="dirv-band-filter" class="dirv-filter-select">
@@ -1151,6 +1153,14 @@
           <option value="all">All</option>
           <option value="live">On Air Now</option>
           <option value="today">Scheduled Today</option>
+        </select>
+        <select id="dirv-category-filter" class="dirv-filter-select hidden" aria-label="Category">
+          <option value="all">All categories</option>
+          <option value="time">Time signals</option>
+          <option value="beacon">Beacons</option>
+          <option value="weather">Weather</option>
+          <option value="calling">Calling frequencies</option>
+          <option value="oddity">Oddities</option>
         </select>
         <button id="dirv-refresh-btn" type="button" class="directory-refresh" title="Refresh from Google Sheets">&#x21BB;</button>
         <span id="dirv-count" class="dirv-count"></span>
@@ -1197,9 +1207,37 @@
           <tbody id="dirv-swl-body"></tbody>
         </table>
       </div>
+      <!-- Landmarks (lib/landmarks.js): a table with a one-line "what it is"
+           per row, and a station panel that explains the selected row. -->
+      <div id="dirv-landmarks-container" class="lmk hidden">
+        <div id="lmk-hint" class="lmk-hint hidden" role="note">
+          <span class="lmk-hint-text"><strong>New radio?</strong> Tune <strong>WWV on 10000 kHz</strong>. A tick every second means the radio, the antenna and the audio all work.</span>
+          <button type="button" id="lmk-hint-tune" class="lmk-btn lmk-btn-tint">Tune WWV</button>
+          <button type="button" id="lmk-hint-close" class="lmk-btn lmk-btn-plain">Got it</button>
+        </div>
+        <div class="lmk-split">
+          <div class="lmk-table-wrap">
+            <table class="directory-view-table lmk-table">
+              <thead>
+                <tr>
+                  <th class="lmk-col-status">Status</th>
+                  <th class="lmk-col-name">Name</th>
+                  <th class="lmk-col-freq">Freq (kHz)</th>
+                  <th class="lmk-col-mode">Mode</th>
+                  <th class="lmk-col-band">Band</th>
+                  <th class="lmk-col-line">What it is</th>
+                </tr>
+              </thead>
+              <tbody id="lmk-body"></tbody>
+            </table>
+          </div>
+          <aside id="lmk-panel" class="lmk-panel" aria-live="polite" aria-label="About this station"></aside>
+        </div>
+      </div>
       <div id="dirv-placeholder" class="hidden">Loading directory data...</div>
       <div class="dirv-footer">
-        <span class="dir-suggest-link">Want a net or SWL station added? <a href="#" id="dirv-suggest-sheet">Leave a comment on the Google Sheet</a></span>
+        <span class="dir-suggest-link" id="dirv-suggest-nets">Want a net or SWL station added? <a href="#" id="dirv-suggest-sheet">Leave a comment on the Google Sheet</a></span>
+        <span class="dir-suggest-link hidden" id="dirv-suggest-landmarks">Know a signal worth adding? <a href="#" id="dirv-suggest-discord">Suggest it on Discord</a></span>
         <span class="dirv-hint">Click a row to tune your radio</span>
       </div>
     </div>
@@ -5090,6 +5128,7 @@
   <script src="../lib/rig-family.js"></script>
   <script src="../lib/app-theme.js"></script>
   <script src="../lib/rig-bands.js"></script>
+  <script src="../lib/landmarks.js"></script>
   <script src="../lib/spot-row.js"></script>
   <script src="../lib/cm108-ptt.js"></script>
   <script src="../lib/remote-features.js"></script>

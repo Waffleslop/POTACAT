@@ -1866,6 +1866,15 @@ let _feedSchedulesStarted = false; // events + contests refresh timers, set up o
 let directoryNets = [];               // HF nets from community Google Sheet
 let directorySwl = [];                // SWL broadcasts from community Google Sheet
 const DIRECTORY_CACHE_PATH = path.join(app.getPath('userData'), 'directory-cache.json');
+// The Directory's Landmarks tab (lib/landmarks.js, data/landmarks.json): time
+// stations, beacons, weather, calling frequencies. Fetched from master with
+// the bundled copy as the fallback (lib/landmarks-feed.js).
+const landmarksFeed = new (require('./lib/landmarks-feed').LandmarksFeed)({
+  cachePath: path.join(app.getPath('userData'), 'landmarks-cache.json'),
+  log: (line) => { try { sendCatLog(line); } catch { console.log(line); } },
+});
+landmarksFeed.load();
+const LandmarksLib = require('./lib/landmarks');
 let pskr = null;
 let pskrSpots = [];       // streaming PSKReporter FreeDV spots (FIFO, max 500)
 let pskrFlushTimer = null; // throttle timer for PSKReporter -> renderer updates
@@ -30726,8 +30735,7 @@ function createWindow() {
     // fetch (every 4 h) or a net-reminder edit refilled it: until then every
     // phone connected to a blank HF Nets / SWL tab. Seed each new server.
     onRemoteServer((rs) => {
-      if (!directoryNets.length && !directorySwl.length) return;
-      rs.broadcastDirectory({ nets: directoryNets, swl: directorySwl, userNets: buildUserNetsForBroadcast() });
+      rs.broadcastDirectory({ nets: directoryNets, swl: directorySwl, userNets: buildUserNetsForBroadcast(), ...landmarksPayload() });
     });
     // Auto-reopen pop-out map if it was open when the app last closed
     if (settings.mapPopoutOpen) {
@@ -31612,11 +31620,17 @@ function saveDirectoryCache(data) {
 }
 
 async function fetchDirectory() {
-  const results = await Promise.allSettled([fetchDirectoryNets(), fetchDirectorySwl()]);
+  const results = await Promise.allSettled([fetchDirectoryNets(), fetchDirectorySwl(), landmarksFeed.refresh()]);
   if (results[0].status === 'fulfilled') directoryNets = results[0].value;
   if (results[1].status === 'fulfilled') directorySwl = results[1].value;
   saveDirectoryCache({ nets: directoryNets, swl: directorySwl, timestamp: Date.now() });
   pushDirectoryToRenderer();
+}
+
+/** The Landmarks part of every directory push (window and ECHOCAT alike). */
+function landmarksPayload() {
+  const c = landmarksFeed.catalog();
+  return { landmarks: c.landmarks, landmarkCategories: c.categories, ncdxf: LandmarksLib.NCDXF };
 }
 
 // Map settings.netReminders into the NetEntry shape the mobile Dir tab
@@ -31654,7 +31668,7 @@ function buildUserNetsForBroadcast() {
 
 function pushDirectoryToRenderer() {
   if (win && !win.isDestroyed()) {
-    win.webContents.send('directory-data', { nets: directoryNets, swl: directorySwl });
+    win.webContents.send('directory-data', { nets: directoryNets, swl: directorySwl, ...landmarksPayload() });
   }
   // Also to ECHOCAT (always: the directory has no off switch). Not gated on
   // the server LISTENING: broadcastDirectory also stores the snapshot that every
@@ -31664,6 +31678,7 @@ function pushDirectoryToRenderer() {
       nets: directoryNets,
       swl: directorySwl,
       userNets: buildUserNetsForBroadcast(),
+      ...landmarksPayload(),
     });
   }
 }
@@ -39540,7 +39555,7 @@ app.whenReady().then(() => {
     // current feed names that exact URL — data-driven, like contest links.
     const dxpLink = typeof url === 'string' && /^https?:///.test(url)
       && [...expeditionMeta.values()].some((m) => m && m.link === url);
-    if (allowed.some(prefix => url.startsWith(prefix)) || eventUrlAllowed(url) || dxpLink) {
+    if (allowed.some(prefix => url.startsWith(prefix)) || eventUrlAllowed(url) || landmarksFeed.urlAllowed(url) || dxpLink) {
       shell.openExternal(url);
     }
   });
@@ -42208,7 +42223,7 @@ app.whenReady().then(() => {
   // --- Directory IPC ---
   ipcMain.on('fetch-directory', () => { fetchDirectory(); });
   ipcMain.handle('settings-save-status', () => { try { return settingsSaveStatusLine(); } catch { return '(unknown)'; } });
-  ipcMain.handle('get-directory', () => ({ nets: directoryNets, swl: directorySwl }));
+  ipcMain.handle('get-directory', () => ({ nets: directoryNets, swl: directorySwl, ...landmarksPayload() }));
 
   // --- Events IPC ---
   ipcMain.handle('get-active-events', () => {

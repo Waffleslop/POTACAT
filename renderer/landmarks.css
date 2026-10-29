@@ -1,0 +1,294 @@
+/*
+ * The Directory's Landmarks tab (lib/landmarks.js).
+ *
+ * Reads only the desktop's theme variables (styles.css :root, the light and
+ * dark variants, and renderer/ds-bridge.css for the ECHOCAT themes), so the
+ * tab repaints with every theme change and needs no rule of its own per
+ * theme. No colour literals here: test/landmarks-test.js fails on one.
+ *
+ * Layout: the table on the left, the station panel on the right; the panel
+ * drops under the table in a narrow window.
+ */
+
+.lmk {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* First-open hint: one landmark that proves a new station works. */
+.lmk-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent-blue) 10%, var(--bg-primary));
+  border-bottom: 1px solid var(--border-primary);
+  flex-shrink: 0;
+}
+.lmk-hint-text { flex: 1 1 320px; min-width: 0; }
+.lmk-hint strong { color: var(--accent-blue); font-weight: 600; }
+
+.lmk-split {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.lmk-table-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: auto;
+}
+.lmk-table { table-layout: auto; }
+.lmk-table th { white-space: nowrap; }
+.lmk-col-status { width: 76px; }
+.lmk-col-freq { width: 88px; }
+.lmk-col-mode { width: 52px; }
+.lmk-col-band { width: 52px; }
+
+/* Category group rows */
+.lmk-table tbody tr.lmk-group { cursor: default; }
+.lmk-table tbody tr.lmk-group:hover { background: none; }
+.lmk-table tbody tr.lmk-group td {
+  background: var(--bg-secondary);
+  padding: 7px 8px 5px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.lmk-group-reason {
+  margin-left: 8px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-tertiary);
+}
+
+/* Station rows */
+.lmk-table tbody tr.lmk-row { outline: none; }
+.lmk-table tbody tr.lmk-row td { font-variant-numeric: tabular-nums; }
+.lmk-table tbody tr.lmk-live {
+  background: color-mix(in srgb, var(--accent-green) 9%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent-green);
+}
+.lmk-table tbody tr.lmk-row:hover {
+  background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
+}
+.lmk-table tbody tr.lmk-selected td {
+  background: color-mix(in srgb, var(--accent-blue) 18%, transparent);
+}
+.lmk-table tbody tr.lmk-row:focus-visible td {
+  box-shadow: inset 0 1px 0 var(--accent-blue), inset 0 -1px 0 var(--accent-blue);
+}
+/* The frequency the radio is on: framed, as on the other two tabs. */
+.lmk-table tbody tr.lmk-tuned td {
+  box-shadow: inset 0 2px 0 var(--text-primary), inset 0 -2px 0 var(--text-primary);
+}
+.lmk-table tbody tr.lmk-tuned td:first-child {
+  box-shadow: inset 4px 0 0 var(--text-primary), inset 0 2px 0 var(--text-primary), inset 0 -2px 0 var(--text-primary);
+}
+.lmk-table tbody tr.lmk-tuned td:last-child {
+  box-shadow: inset -4px 0 0 var(--text-primary), inset 0 2px 0 var(--text-primary), inset 0 -2px 0 var(--text-primary);
+}
+/* The spots table sets its second column (callsigns) in mono; a landmark's
+   name is a name, so it takes the body face back. */
+.lmk-table tbody td.lmk-name { font-family: inherit; font-weight: 600; color: var(--text-primary); }
+.lmk-line { color: var(--text-secondary); }
+.lmk-now {
+  margin-left: 6px;
+  color: var(--accent-green);
+  font-weight: 600;
+}
+.lmk-table tbody tr.lmk-out td { color: var(--text-tertiary); }
+
+/* The collapsed "this radio cannot tune these" line */
+.lmk-table tbody tr.lmk-hidden-note { cursor: default; }
+.lmk-table tbody tr.lmk-hidden-note:hover { background: none; }
+.lmk-table tbody tr.lmk-hidden-note td {
+  white-space: normal;
+  color: var(--text-tertiary);
+  font-style: italic;
+  padding: 8px;
+}
+
+/* Status badges: text on a fill comes from the on-* tokens. */
+.lmk-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+.lmk-badge.live { background: var(--accent-green); color: var(--on-accent-green); }
+/* Outlined, not filled: no classic theme has a text colour for amber. */
+.lmk-badge.soon { box-shadow: inset 0 0 0 1px var(--warn); color: var(--warn); }
+.lmk-badge.today,
+.lmk-badge.later { background: var(--bg-tertiary); color: var(--text-secondary); }
+.lmk-badge.none { padding: 1px 0; color: var(--text-tertiary); }
+
+/* Station panel */
+.lmk-panel {
+  flex: 0 0 340px;
+  min-width: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 16px 18px;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-primary);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+.lmk-p-head { display: grid; gap: 3px; }
+.lmk-p-name {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.25;
+  text-wrap: balance;
+  color: var(--text-primary);
+}
+.lmk-p-freq {
+  font-family: var(--ds-font-mono, ui-monospace, Consolas, monospace);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-blue);
+}
+.lmk-p-meta { font-size: 11px; color: var(--text-tertiary); }
+.lmk-p-lead {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-primary);
+}
+.lmk-sec h4 {
+  margin: 0 0 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.lmk-sec p {
+  margin: 0;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+.lmk-try {
+  padding: 9px 11px;
+  border: 1px solid var(--border-secondary);
+  border-radius: 6px;
+  background: var(--bg-primary);
+}
+.lmk-try h4 { color: var(--accent-blue); }
+
+/* The live NCDXF rotation */
+.lmk-beacon {
+  display: grid;
+  gap: 5px;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--accent-green) 40%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent-green) 8%, var(--bg-primary));
+}
+.lmk-beacon-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.lmk-beacon-now {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent-green);
+}
+.lmk-beacon-place { font-weight: 400; color: var(--text-primary); }
+.lmk-beacon-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-primary);
+  overflow: hidden;
+}
+.lmk-beacon-fill {
+  height: 100%;
+  width: 0;
+  background: var(--accent-green);
+  transition: width 0.25s linear;
+}
+.lmk-beacon-next { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+
+.lmk-p-note {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--warn-subtle);
+  color: var(--text-primary);
+  line-height: 1.45;
+}
+
+.lmk-p-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+.lmk-btn {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.lmk-btn:focus-visible,
+.lmk-link:focus-visible,
+.lmk-show-all:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+.lmk-btn-tint { background: var(--accent-blue); color: var(--on-accent-blue); }
+.lmk-btn-tint:hover { background: color-mix(in srgb, var(--accent-blue) 85%, var(--text-primary)); }
+.lmk-btn-plain {
+  background: transparent;
+  color: var(--text-secondary);
+  border-color: var(--border-secondary);
+}
+.lmk-btn-plain:hover { color: var(--text-primary); }
+.lmk-link,
+.lmk-show-all {
+  font: inherit;
+  font-size: 12px;
+  color: var(--link);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.lmk-panel-empty { color: var(--text-tertiary); line-height: 1.5; }
+
+@media (max-width: 900px) {
+  .lmk-split { flex-direction: column; }
+  .lmk-panel {
+    flex: 0 0 auto;
+    max-height: 48%;
+    border-left: none;
+    border-top: 1px solid var(--border-primary);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lmk-beacon-fill { transition: none; }
+}

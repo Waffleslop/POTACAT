@@ -3574,6 +3574,104 @@ html, body {
 
 .dir-empty { text-align: center; color: var(--text-dim); padding: 40px 0; font-size: 14px; }
 
+/* ── Dir > Landmarks (lib/landmarks.js) ──
+   Theme variables only (no colour literals), so it follows light/dark. */
+.lmk-hint {
+  margin: 4px 0 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--rbn) 12%, var(--bg-card));
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.lmk-hint b { color: var(--text); font-weight: 700; }
+.lmk-group {
+  padding: 12px 4px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.lmk-group span {
+  display: block;
+  margin-top: 1px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-dim);
+  opacity: 0.85;
+}
+.lmk-card .dir-card-detail { font-variant-numeric: tabular-nums; }
+.lmk-line { margin-top: 3px; font-size: 12px; color: var(--text); line-height: 1.35; }
+.lmk-now { color: var(--text); font-weight: 600; }
+.lmk-card.open { background: color-mix(in srgb, var(--rbn) 10%, var(--bg-card)); }
+.lmk-card.lmk-out { opacity: 0.6; }
+.lmk-detail { display: grid; gap: 8px; margin-top: 10px; cursor: default; }
+.lmk-sec b {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.lmk-sec p { font-size: 13px; line-height: 1.45; color: var(--text); }
+.lmk-try {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border, var(--bg-header));
+  background: var(--bg);
+}
+.lmk-try b { color: var(--text); }
+.lmk-note {
+  padding: 7px 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--sota) 18%, transparent);
+}
+.lmk-beacon {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--pota) 40%, transparent);
+  background: color-mix(in srgb, var(--pota) 8%, var(--bg));
+}
+.lmk-beacon-now { font-size: 14px; font-weight: 700; color: var(--text); }
+.lmk-beacon-now span { font-weight: 400; color: var(--text); }
+.lmk-beacon-track { height: 4px; border-radius: 2px; background: var(--bg-header); overflow: hidden; }
+.lmk-beacon-fill { height: 100%; width: 0; background: var(--pota); transition: width 0.25s linear; }
+.lmk-beacon-next { font-size: 12px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.lmk-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 2px; }
+.lmk-region { font-size: 11px; color: var(--text-dim); }
+.lmk-btn {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  min-height: 34px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+/* Tinted, not filled: the light theme keeps the dark theme's blue, and no
+   text colour reads on it in both. */
+.lmk-btn-tint { background: color-mix(in srgb, var(--rbn) 22%, var(--bg-card)); color: var(--text); border-color: var(--rbn); }
+.lmk-btn-plain { background: transparent; color: var(--text-dim); border-color: var(--border, var(--bg-header)); }
+.lmk-btn:focus-visible { outline: 2px solid var(--rbn); outline-offset: 2px; }
+.lmk-hidden-note {
+  margin: 10px 4px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+.lmk-hidden-note .lmk-btn { min-height: 28px; padding: 3px 10px; font-size: 12px; margin-left: 4px; }
+@media (prefers-reduced-motion: reduce) { .lmk-beacon-fill { transition: none; } }
+
 /* ── Speakermic Button (stacked above HALT) ── */
 .bb-halt-stack {
   display: flex;
