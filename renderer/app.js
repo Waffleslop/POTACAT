@@ -24034,7 +24034,9 @@ function positionRigPopover() {
   // scrollbar (overflow-y in CSS) instead of controls clipped off-screen.
   const maxH = Math.max(120, window.innerHeight - rect.bottom - 16);
   rigPopover.style.maxHeight = maxH + 'px';
-  // Align right edge to anchor right, clamped to parent
+  // Never wider than the bar it sits in; then align right edge to anchor right,
+  // clamped to parent.
+  rigPopover.style.maxWidth = Math.max(280, barRect.width - 8) + 'px';
   const popW = rigPopover.offsetWidth || 280;
   let left = rect.right - barRect.left - popW;
   if (left < 0) left = 0;
@@ -24045,6 +24047,17 @@ function positionRigPopover() {
 // Keep the height cap honest if the window is resized while the popover is
 // open (it repositions on every open anyway).
 window.addEventListener('resize', () => { if (rigPopoverOpen) positionRigPopover(); });
+// A tab that is wider than the one it was opened on (Presets fills in after
+// it loads) ran off the right edge until the window was resized (K8IKO):
+// re-place it whenever its size changes.
+if (typeof ResizeObserver === 'function') {
+  let _rigPopoverW = 0;
+  new ResizeObserver(() => {
+    if (!rigPopoverOpen) return;
+    const w = rigPopover.offsetWidth;
+    if (w !== _rigPopoverW) { _rigPopoverW = w; positionRigPopover(); }
+  }).observe(rigPopover);
+}
 
 function openRigPopover() {
   positionRigPopover();
