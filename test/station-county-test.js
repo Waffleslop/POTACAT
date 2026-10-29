@@ -39,6 +39,20 @@ check('a home contact takes the home state and county', () => {
   assert.deepStrictEqual(SC.stationLocationFor({}, ctx), { myState: 'VA', myCounty: 'VA,Fairfax' });
   assert.deepStrictEqual(SC.stationLocationFor({ myGridsquare: 'FM18ab' }, ctx), { myState: 'VA', myCounty: 'VA,Fairfax' }, 'same 4-char grid');
 });
+check('a forwarded home contact carries the home grid; activations, set grids and other states do not (AE5JE)', () => {
+  assert.strictEqual(SC.forwardHomeGrid({}, home), 'FM18lv');
+  assert.strictEqual(SC.forwardHomeGrid({ myState: 'VA' }, home), 'FM18lv');
+  assert.strictEqual(SC.forwardHomeGrid({ myState: 'MD' }, home), '', 'another state');
+  assert.strictEqual(SC.forwardHomeGrid({ myGridsquare: 'EM73' }, home), '', 'never over a grid it has');
+  assert.strictEqual(SC.forwardHomeGrid({ mySigInfo: 'US-1234' }, home), '', 'never on an activation');
+  assert.strictEqual(SC.forwardHomeGrid({ mySotaRef: 'W4V/SH-001' }, home), '');
+  assert.strictEqual(SC.forwardHomeGrid({}, { grid: 'nonsense' }), '');
+  const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+  const fn = main.indexOf('function forwardToLogbook(qsoData, s = settings)');
+  assert.ok(main.slice(fn, fn + 600).includes('StationCounty.forwardHomeGrid(qsoData'), 'the forward fills it');
+  const save = main.indexOf('function stationLocationFillFor(');
+  assert.ok(!main.slice(save, save + 800).includes('forwardHomeGrid'), 'the saved record (and so LoTW) never does');
+});
 check('a contact from another grid gets neither, never the wrong county', () => {
   assert.deepStrictEqual(SC.stationLocationFor({ myGridsquare: 'EM73' }, ctx), {});
 });

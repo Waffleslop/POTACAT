@@ -29948,6 +29948,10 @@ function rawQsoToQsoData(raw) {
 }
 
 function forwardToLogbook(qsoData, s = settings) {
+  // A home contact reaches the other logger with the home grid as
+  // MY_GRIDSQUARE (AE5JE). This copy only: the saved record and LoTW keep none.
+  const homeGrid = StationCounty.forwardHomeGrid(qsoData, { grid: s.grid, state: s.homeState });
+  if (homeGrid) qsoData = { ...qsoData, myGridsquare: homeGrid };
   const type = s.logbookType;
   const host = s.logbookHost || '127.0.0.1';
   const port = parseInt(s.logbookPort, 10);
