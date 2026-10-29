@@ -20630,6 +20630,24 @@ function _setCwPaddleAvailability(available, reason) {
 // When the DTR queue drains (absolute ms). Key-as-I-type appends to it.
 let _cwDtrQueueEndAt = 0;
 
+// POTACAT's own timers time every element on the CW key port, and macOS App
+// Nap delays and bunches the timers of an app in the background: jittery,
+// unreadable CW on air while the sidetone (made elsewhere) sounds fine
+// (N8JMS, FTDX10, 2026-10-28). Held for the message, released after it.
+let _cwAwakeId = null;
+let _cwAwakeTimer = null;
+function cwKeyingAwake(ms) {
+  try {
+    if (_cwAwakeId == null || !powerSaveBlocker.isStarted(_cwAwakeId)) _cwAwakeId = powerSaveBlocker.start('prevent-app-suspension');
+  } catch { return; }
+  if (_cwAwakeTimer) clearTimeout(_cwAwakeTimer);
+  _cwAwakeTimer = setTimeout(() => {
+    _cwAwakeTimer = null;
+    try { if (_cwAwakeId != null && powerSaveBlocker.isStarted(_cwAwakeId)) powerSaveBlocker.stop(_cwAwakeId); } catch {}
+    _cwAwakeId = null;
+  }, Math.max(1000, ms));
+}
+
 /**
  * @param {{live?: boolean}} [opts] live = key-as-I-type: APPEND this character
  *   after whatever is still keying. Every call used to cancel the in-flight
@@ -20687,6 +20705,7 @@ function sendCwTextViaDtrKey(text, wpm, dtrPins, opts) {
     t += 2 * unitMs; // inter-character gap = 3 units total (1 already added)
   }
   _cwDtrQueueEndAt = Date.now() + t;
+  cwKeyingAwake(t + 2000);
   // The rig is keyed for this long; a TS-480 mutes CAT meanwhile, and the
   // link watchdog must not read that as a dead radio (lib/rig-controller.js
   // noteTransmitting). RigController only — the legacy CatClient has no hold.
@@ -26247,6 +26266,8 @@ function connectKeyer() {
   keyer.setSwapPaddles(!!settings.cwSwapPaddles);
 
   keyer.on('key', ({ down }) => {
+    // The keyer's element timing is this app's timers too (cwKeyingAwake).
+    cwKeyingAwake(3000);
     // Driving a remote shack: the paddle keys the SHACK's radio.
     if (isRemoteMode()) {
       remotePaddleEdge(down);
