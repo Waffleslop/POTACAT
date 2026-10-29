@@ -29176,7 +29176,9 @@ function scopeGuestRestoreOwner(why) {
   }
   if (r.spanCode != null) parts.push('span ' + YaesuScope.formatSpan(YaesuScope.SPAN_HZ_BY_CODE[r.spanCode]));
   if (r.modeCode != null && String(r.modeCode) !== String(yaesuScopeState.modeCode)) {
-    cat.sendRaw(YaesuScope.write.mode(r.modeCode));
+    // An expanded mode reads back as 5/8/B and is set with 3/6/9.
+    const m = YaesuScope.modeFromCode(r.modeCode);
+    cat.sendRaw(YaesuScope.write.mode((m && m.setWith) || r.modeCode));
   }
   if (r.modeCode != null) {
     const m = YaesuScope.modeFromCode(r.modeCode);
@@ -29233,7 +29235,7 @@ function setScopeSpan(hz, origin, { guest = false } = {}) {
  *  only line its picture up with the dial when the scope is centred. The
  *  operator asked, so the radio stays in CENTER afterwards. The CENTER code
  *  keeps the radio's display (3DSS 0, W/F 4, W/F expanded 3). */
-const YAESU_CENTER_CODE_FOR = { 0: '0', 1: '0', 2: '0', 3: '3', 4: '4', 6: '3', 7: '4', 9: '3', A: '4' };
+const YAESU_CENTER_CODE_FOR = { 0: '0', 1: '0', 2: '0', 3: '3', 4: '4', 5: '3', 6: '3', 7: '4', 8: '3', 9: '3', A: '4', B: '3' };
 function setScopeAnchor(anchor, origin, { guest = false } = {}) {
   if (anchor === 'center' && icomScopeOn) {
     if (!icomScopeWritable()) return false;

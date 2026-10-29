@@ -258,7 +258,22 @@ check('SS mode reply → anchor, including the hex A for W/F FIX NORMAL', () => 
   assert.strictEqual(S.modeFromCode('7').anchor, 'cursor');
   assert.strictEqual(S.modeFromCode('A').anchor, 'fix');
   assert.strictEqual(S.modeFromCode('a').anchor, 'fix');
-  assert.strictEqual(S.modeFromCode('5'), null, '5 is unassigned in the manual');
+  assert.strictEqual(S.modeFromCode('C'), null, 'C is neither set nor answered');
+});
+
+check('SS mode reply: the EXPAND answers 5/8/B (FT-710, 2026-10-22/27)', () => {
+  // The radio answers 5/8/B for the modes set with 3/6/9; 8 and B used to
+  // decode to nothing, leaving the anchor at center and click-to-tune on.
+  for (const [code, anchor, setWith] of [['5', 'center', '3'], ['8', 'cursor', '6'], ['B', 'fix', '9']]) {
+    const m = S.modeFromCode(S.parseSsReply('SS06' + code + '0000').p3);
+    assert.deepStrictEqual({ anchor: m.anchor, display: m.display, expand: m.expand }, { anchor, display: 'W/F', expand: true }, code);
+    // Set with 3/6/9, which decode to the same mode.
+    assert.strictEqual(m.setWith, setWith, code);
+    const set = S.modeFromCode(m.setWith);
+    assert.deepStrictEqual({ anchor: set.anchor, display: set.display, expand: set.expand }, { anchor, display: 'W/F', expand: true }, setWith);
+  }
+  assert.strictEqual(S.scopeAxis({ centerHz: 14074000, spanHz: 10000, anchor: S.modeFromCode('8').anchor }).known, false);
+  assert.strictEqual(S.scopeAxis({ centerHz: 14074000, spanHz: 10000, anchor: S.modeFromCode('B').anchor }).known, false);
 });
 
 check('SS speed reply → STOP is recognised', () => {

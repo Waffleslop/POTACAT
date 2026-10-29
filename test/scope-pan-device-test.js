@@ -103,6 +103,16 @@ check('CENTER keeps the radio\'s display and is logged as a radio write; a guest
   }
   assert.ok(/remoteServer\.on\('scope-anchor', \(\{ anchor, guest \} = \{\}\) => \{ setScopeAnchor\(anchor, 'ECHOCAT device', \{ guest \}\); \}\);/.test(main));
 });
+check('FT-710: every SS06 code has a CENTER code that keeps its display and expansion', () => {
+  // The radio answers 5/8/B for the expanded modes set with 3/6/9; without
+  // them CENTER fell back to 0 and turned an expanded waterfall into 3DSS.
+  const t = eval('(' + /const YAESU_CENTER_CODE_FOR = (\{[^}]+\});/.exec(main)[1] + ')');
+  const { MODE_BY_CODE } = require('../lib/scope-axis');
+  for (const code of Object.keys(MODE_BY_CODE)) {
+    assert.ok(t[code] != null, code + ' has a CENTER code');
+    assert.strictEqual(!!MODE_BY_CODE[t[code]].expand, !!MODE_BY_CODE[code].expand, code + ' keeps its expansion');
+  }
+});
 check('the pace: 66 ms for the FT-710 on the LAN, 100 ms on Cloud and for every other source', () => {
   const g = fnOf('scopeRemoteGapMs', 300);
   assert.ok(/return !cloud && yaesuScopeState\.source === 'radio' \? 1000 \/ 15 : 100;/.test(g));
@@ -114,7 +124,7 @@ check('Guest Pass (Casey): the owner\'s span and mode come back when the session
   assert.ok(/if \(!scopeGuestRestore\) \{/.test(note), 'noted once, at the guest\'s FIRST change');
   assert.ok(/spanCode: yaesuScopeState\.spanCode, modeCode: yaesuScopeState\.modeCode/.test(note));
   const back = fnOf('scopeGuestRestoreOwner', 4000);   // Flex, Icom and FT-710 branches
-  assert.ok(/cat\.sendRaw\(YaesuScope\.write\.span\(r\.spanCode\)\);/.test(back) && /cat\.sendRaw\(YaesuScope\.write\.mode\(r\.modeCode\)\);/.test(back));
+  assert.ok(/cat\.sendRaw\(YaesuScope\.write\.span\(r\.spanCode\)\);/.test(back) && /cat\.sendRaw\(YaesuScope\.write\.mode\(\(m && m\.setWith\) \|\| r\.modeCode\)\);/.test(back), 'an expanded mode goes back with its set code');
   assert.ok(/smartSdr\.setPanBandwidth\(r\.spanHz\)/.test(back), 'the Flex pan too');
   assert.ok(/setTimeout\(\(\) => yaesuScopeReadRadio\(\), 300\);/.test(back) && /guest session over/.test(back), 'then re-read, and logged');
   assert.ok(/passLeaseStopTransmitters\(info\.reason\);\s*scopeGuestRestoreOwner\(info\.reason \|\| 'ended'\);/.test(main), 'pass ended');
