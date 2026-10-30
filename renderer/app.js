@@ -2522,7 +2522,7 @@ async function populateHamlibFields(savedTarget) {
     }
     // Restore PTT pin (DTR or RTS). Default DTR if nothing saved.
     if (setRigPttType) {
-      const t = (savedTarget && savedTarget.pttType) || 'DTR';
+      const t = (savedTarget && savedTarget.pttType) || 'RTS';   // Digirig keys PTT on RTS (K5LEB 2026-10-21: DTR never keyed his IC-718)
       setRigPttType.value = (t.toUpperCase() === 'RTS') ? 'RTS' : 'DTR';
     }
   }
@@ -3081,7 +3081,7 @@ function buildCatTargetFromForm() {
     // string means "no separate PTT port — let rigctld PTT via CAT".
     const pttManual = (setRigPttPortManual && setRigPttPortManual.value || '').trim();
     const pttPort = pttManual || (setRigPttPort && setRigPttPort.value) || '';
-    const pttType = (setRigPttType && setRigPttType.value) || 'DTR';
+    const pttType = (setRigPttType && setRigPttType.value) || 'RTS';
     return {
       type: 'rigctld',
       rigId: parseInt(setRigModel.value, 10),

@@ -3144,7 +3144,7 @@ function spawnRigctld(target, portOverride) {
     if (target.pttPort) {
       const ptt = String(target.pttPort).trim().toLowerCase();
       const cat = String(target.serialPort || '').trim().toLowerCase();
-      const pttType = (target.pttType || 'DTR').toUpperCase();
+      const pttType = (target.pttType || 'RTS').toUpperCase();   // Digirig keys on RTS; DTR is the CW/keyer line (K5LEB 2026-10-21)
       if (ptt === cat) {
         sendCatLog(`[rigctld] PTT Port matches CAT port (${target.pttPort}). ` +
           `OK for single-port adapters like DigiRig Mobile that key PTT via ${pttType} on the CI-V port. ` +

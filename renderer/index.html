@@ -2166,14 +2166,14 @@
               <select id="set-rig-ptt-port" style="flex:1;"><option value="">-- none (PTT via CAT) --</option></select>
               <input type="text" id="set-rig-ptt-port-manual" placeholder="or type COM port" style="width:120px;">
               <select id="set-rig-ptt-type" style="width:70px;" title="Pin used for PTT">
+                <option value="RTS" selected>RTS</option>
                 <option value="DTR">DTR</option>
-                <option value="RTS">RTS</option>
               </select>
             </div>
           </label>
           <span class="help-text" style="margin-top:2px;display:block;">For DigiRig / SignaLink / similar interfaces that key PTT via DTR or RTS.<br>
-          <strong>Two-port adapters</strong> (full-size DigiRig): pick the SECOND COM port (the one without CI-V data); usually DTR.<br>
-          <strong>Single-port adapters</strong> (DigiRig Mobile): pick the SAME port as CAT above; pin depends on the model — try DTR first, switch to RTS if PTT doesn't key.<br>
+          <strong>Two-port adapters</strong> (full-size DigiRig, or a Digirig Mobile beside a separate CAT cable): pick the port without CI-V data. A Digirig keys PTT on <b>RTS</b>; its DTR line is for CW.<br>
+          <strong>Single-port adapters</strong>: pick the SAME port as CAT above. Digirig = RTS; some SignaLink and home-made cables key on DTR — switch if PTT does not key.<br>
           Leave blank for rigs that PTT over CAT (most modern Yaesu / Icom).</span>
           <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
             <button type="button" id="hamlib-test-btn">Test Connection</button>
