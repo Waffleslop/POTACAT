@@ -29273,7 +29273,9 @@ function flexScopeApplyGeometry() {
   let changed = false;
   // Centred on the dial: the pan's own centre is only a fallback before the
   // first frequency arrives.
-  if (g.centerHz && !yaesuScopeState.centerHz) { yaesuScopeState.centerHz = g.centerHz; changed = true; }
+  // centerHz is always the DIAL: a pan centred by the digital view sits
+  // centerOffsetHz above it, and every client adds the offset back.
+  if (g.centerHz && !yaesuScopeState.centerHz) { yaesuScopeState.centerHz = g.centerHz - (yaesuScopeState.centerOffsetHz || 0); changed = true; }
   if (g.spanHz && g.spanHz !== yaesuScopeState.spanHz) { yaesuScopeState.spanHz = g.spanHz; changed = true; }
   // A calibrated source: level 0..255 = dbmMin..dbmMax (scopeCalibration).
   if (Number.isFinite(g.dbmMin) && g.dbmMin !== yaesuScopeState.dbmMin) { yaesuScopeState.dbmMin = g.dbmMin; changed = true; }
