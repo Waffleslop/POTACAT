@@ -2766,6 +2766,22 @@ function _applyPopoutTheme(payload) {
   function bsTune(frac) {
     var ax = bsAxis();
     if (!ax.known) return;
+    // The digital view (main: lib/scope-digital-view.js): a click picks the
+    // AUDIO frequency, like a click on the audio waterfall below. Retuning
+    // the radio here would pull the whole passband off the watering hole.
+    var dw = bsState && bsState.decodeWindow;
+    var dialNow = bsDialHz || (bsState && bsState.centerHz) || 0;
+    if (dw && dialNow) {
+      var abs = window.ScopeAxis.binToHz(ax, Math.max(0, Math.min(1, frac)) * 849);
+      var audio = Math.abs(abs - dialNow);
+      audio = Math.round(Math.max(100, Math.min(3000, audio)) / 10) * 10;
+      jpTxFreqHz = audio;
+      jpRxFreqHz = audio;
+      if (txFreqLabel) txFreqLabel.textContent = txFreqText(audio);
+      window.api.jtcatSetTxFreq(audio, true); // operator move — honored under Hold TX Freq, re-pins
+      window.api.jtcatSetRxFreq(audio);
+      return;
+    }
     var hz = window.ScopeAxis.snapTapHz(window.ScopeAxis.binToHz(ax, Math.max(0, Math.min(1, frac)) * 849), bsState && bsState.spanHz);
     window.api.tune((hz / 1000).toFixed(3), null);
   }
@@ -2791,7 +2807,29 @@ function _applyPopoutTheme(payload) {
     // Passband + band edges (lib/scope-view.js): shading only, no labels — the strip is short.
     var st = bsState || {};
     if (window.ScopeView) window.ScopeView.drawOverlay(ctx, { w: w, h: h, dpr: dpr, axis: ax, dialHz: dial, passband: st.passband, txHz: st.txHz, bandPlan: st.bandPlan, labels: false, flag: false });
+    // The digital view: the decode window shaded and its edges marked, and
+    // the TX audio frequency in red (the dial line sits off-screen to the left).
+    var dwin = st.decodeWindow;
+    if (dwin && dial) {
+      var wl = A.hzToBin(ax, dial + dwin.lo), wh = A.hzToBin(ax, dial + dwin.hi);
+      var b0 = wl == null ? 0 : wl, b1 = wh == null ? 849 : wh;
+      var x0 = Math.min(b0, b1) * (w - 1) / 849, x1 = Math.max(b0, b1) * (w - 1) / 849;
+      ctx.fillStyle = 'rgba(79,195,247,0.10)'; ctx.fillRect(x0, 0, Math.max(1, x1 - x0), h);
+      ctx.strokeStyle = 'rgba(79,195,247,0.6)'; ctx.lineWidth = 1 * dpr; ctx.setLineDash([3 * dpr, 3 * dpr]);
+      ctx.beginPath();
+      if (wl != null) { ctx.moveTo(x0 + 0.5, 0); ctx.lineTo(x0 + 0.5, h); }
+      if (wh != null) { ctx.moveTo(x1 - 0.5, 0); ctx.lineTo(x1 - 0.5, h); }
+      ctx.stroke(); ctx.setLineDash([]);
+    }
     var marks = rxBin == null ? [] : [{ pos: rxBin / 849, color: '#e94560', kind: 'rx' }];
+    if (dwin && dial && jpTxFreqHz) {
+      var txBin = A.hzToBin(ax, dial + (dwin.lo < 0 ? -jpTxFreqHz : jpTxFreqHz));
+      if (txBin != null) {
+        var tx = Math.round(txBin * (w - 1) / 849) + 0.5;
+        ctx.strokeStyle = '#ff2222'; ctx.lineWidth = 1 * dpr; ctx.beginPath(); ctx.moveTo(tx, 0); ctx.lineTo(tx, h); ctx.stroke();
+        marks.push({ pos: txBin / 849, color: '#ff2222', kind: 'tx' });
+      }
+    }
     if (window.ScopeView) marks = marks.concat(window.ScopeView.passbandMarkers(st.passband, dial, ax));
     if (bsWf && bsWf.supported) bsWf.setMarkers(marks);
     // The frequency scale strip: the same painter as the Band Scope window

@@ -128,7 +128,7 @@ check('the source is chosen only in Flex Direct; a radio\'s own scope wins over 
 });
 check('always centred on the dial (Casey): anchor center, the pan follows at most 10x a second', () => {
   const fn = main.slice(main.indexOf('function yaesuScopeNoteFrequency('), main.indexOf('function startYaesuScope('));
-  assert.ok(/if \(flexScopeOn\) \{[\s\S]{0,600}yaesuScopeState\.centerHz = hz;\s+flexScopeQueueCenter\(hz\);/.test(fn));
+  assert.ok(/if \(flexScopeOn\) \{[\s\S]{0,600}yaesuScopeState\.centerHz = hz;\s+flexScopeQueueCenter\(hz \+ \(yaesuScopeState\.centerOffsetHz \|\| 0\)\);/.test(fn));
   const start = main.slice(main.indexOf('function startFlexScope('), main.indexOf('function stopFlexScope('));
   assert.ok(/anchor: 'center'/.test(start) && /smartSdr\.setPanCenter\(_currentFreqHz\)/.test(start));
   const q = main.slice(main.indexOf('function flexScopeQueueCenter('), main.indexOf('function flexScopeQueueCenter(') + 500);

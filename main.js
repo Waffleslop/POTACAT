@@ -17335,6 +17335,7 @@ const { computeSpectrumBins } = require('./lib/spectrum-fft');
 // Network stream, or from the ECHOCAT audio window's spectrum-only capture.
 const { RxSpectrumRing } = require('./lib/rx-spectrum-ring');
 const FlexScope = require('./lib/flex-scope');
+const ScopeDigitalView = require('./lib/scope-digital-view');
 const FlexReadback = require('./lib/flex-readback');
 let _flexSliceKv = {};          // merged status of our slice, for the read-back
 let _flexSliceKvIndex = null;
@@ -18092,7 +18093,7 @@ function connectSmartSdr() {
   // and we only rebroadcast on actual change — pan status lines are chatty
   // (every center-freq drag) and must not become a broadcast storm.
   // The Flex panadapter scope source: frames, and the pan's own axis.
-  smartSdr.on('pan-frame', (f) => { if (flexScopeOn) yaesuScopeOnFrame(f); });
+  smartSdr.on('pan-frame', (f) => { if (flexScopeOn) { flexDigitalViewSync(); yaesuScopeOnFrame(f); } });
   smartSdr.on('pan-geometry', (g) => {
     flexPanGeometry[g.panId] = { ...(flexPanGeometry[g.panId] || {}), ...g };
     if (flexScopeOn && flexScopeApplyGeometry()) yaesuScopeBroadcastState();
@@ -28574,6 +28575,8 @@ const yaesuScopeState = {
   diag: null,          // { key, severity, headline, detail, action } — what to tell the operator
   helperPath: '',
   source: 'radio',     // 'radio' (FT-710 over USB, or synthetic) | 'sdr' (rtl_tcp, lib/sdr-scope.js)
+  centerOffsetHz: 0,   // the digital view: axis centre = dial + this (lib/scope-digital-view.js)
+  decodeWindow: null,  // { lo, hi } Hz from the dial: the mode's decode window, shaded by the JTCAT strip
 };
 
 function yaesuScopeRigHasScope() {
@@ -28603,7 +28606,7 @@ function findYaesuScopeHelper() {
 function yaesuScopeStatePayload() {
   return {
     ...yaesuScopeState,
-    axis: YaesuScope.scopeAxis({ centerHz: yaesuScopeState.centerHz, spanHz: yaesuScopeState.spanHz, anchor: yaesuScopeState.anchor }),
+    axis: YaesuScope.scopeAxis({ centerHz: yaesuScopeState.centerHz + (yaesuScopeState.centerOffsetHz || 0), spanHz: yaesuScopeState.spanHz, anchor: yaesuScopeState.anchor }),
     fps: settings.yaesuScopeFps || 20,
     synth: yaesuScopeSynth,
     spans: scopeSpans(),
@@ -28632,7 +28635,8 @@ function yaesuScopeRemotePayload(extra) {
   return {
     status: s.status, kind: s.kind, spanHz: s.spanHz, anchor: s.anchor, modeLabel: s.modeLabel || null, speed: s.speed,
     scuLan: s.scuLan, centerHz: s.centerHz, diag, source: s.source,
-    axis: YaesuScope.scopeAxis({ centerHz: s.centerHz, spanHz: s.spanHz, anchor: s.anchor }),
+    centerOffsetHz: s.centerOffsetHz || 0, decodeWindow: s.decodeWindow || null,
+    axis: YaesuScope.scopeAxis({ centerHz: s.centerHz + (s.centerOffsetHz || 0), spanHz: s.spanHz, anchor: s.anchor }),
     available: yaesuScopeSynth || !!scopeSourceKind(),
     fps: settings.yaesuScopeFps || 20,
     synth: yaesuScopeSynth,
@@ -28779,7 +28783,7 @@ function yaesuScopeNoteFrequency(hz) {
     // around its own live dial) and the pan follows it, at most 10 times a
     // second while the knob spins.
     yaesuScopeState.centerHz = hz;
-    flexScopeQueueCenter(hz);
+    flexScopeQueueCenter(hz + (yaesuScopeState.centerOffsetHz || 0));
     if (yaesuScopeRemoteWants && Date.now() - yaesuScopeLastStateSend > 250) yaesuScopeBroadcastState();
     return;
   }
@@ -29306,8 +29310,55 @@ function startFlexScope() {
   tryStart();
 }
 
+/**
+ * The digital view (Casey 2026-10-30): while the JTCAT window shows its band
+ * scope strip, the pan zooms to the mode's decode window and centres on it
+ * (dial + 1500 Hz for WSPR, + 1600 Hz for FT8 and friends on USB), so every
+ * signal the decoder can hear fills the strip. One pan serves every scope
+ * surface, so the Band Scope window and ECHOCAT see the same view meanwhile;
+ * the operator's own zoom and the dial centre come back when the strip hides.
+ * Checked on every pan frame (a string compare), which catches every mode
+ * change path (popout, phone, mode hop) without hooking each one.
+ */
+let flexDigitalViewKey = '';
+function flexDigitalViewWanted() {
+  if (!flexScopeOn || !yaesuScopeJtcatWants || !jtcatPopoutWin || jtcatPopoutWin.isDestroyed() || !ft8Engine) return null;
+  const id = smartSdr && (smartSdr.panScopeId || smartSdr.ourPanId);
+  const g = (id && flexPanGeometry[id]) || {};
+  return ScopeDigitalView.digitalView({ mode: ft8Engine._mode, rigMode: _currentMode, minSpanHz: g.minSpanHz });
+}
+function flexDigitalViewSync() {
+  if (!flexScopeOn || !smartSdr) return;
+  const v = flexDigitalViewWanted();
+  const key = ScopeDigitalView.viewKey(v);
+  if (key === flexDigitalViewKey) return;
+  const wasOn = !!flexDigitalViewKey;
+  flexDigitalViewKey = key;
+  const dial = _currentFreqHz || yaesuScopeState.centerHz || 0;
+  if (v) {
+    yaesuScopeState.centerOffsetHz = v.offsetHz;
+    yaesuScopeState.decodeWindow = v.window;
+    smartSdr.setPanBandwidth(v.spanHz);
+    yaesuScopeState.spanHz = v.spanHz;   // the pan status confirms (or clamps) it
+    if (dial) smartSdr.setPanCenter(dial + v.offsetHz);
+    sendCatLog(`[Scope] Flex panadapter: ${ft8Engine._mode} view, ${v.spanHz} Hz wide, centred ${v.offsetHz > 0 ? '+' : ''}${v.offsetHz} Hz from the dial (decode window ${v.window.lo} to ${v.window.hi} Hz)`);
+  } else if (wasOn) {
+    yaesuScopeState.centerOffsetHz = 0;
+    yaesuScopeState.decodeWindow = null;
+    const span = FlexScope.nearestSpan(settings.flexScopeSpanHz) || FlexScope.SPANS[2];
+    smartSdr.setPanBandwidth(span);
+    yaesuScopeState.spanHz = span;
+    if (dial) smartSdr.setPanCenter(dial);
+    sendCatLog(`[Scope] Flex panadapter: back to your zoom (${YaesuScope.formatSpan(span)}), centred on the dial`);
+  }
+  yaesuScopeBroadcastState();
+}
+
 function stopFlexScope(why) {
   flexScopeOn = false;
+  flexDigitalViewKey = '';
+  yaesuScopeState.centerOffsetHz = 0;
+  yaesuScopeState.decodeWindow = null;
   if (flexScopeRetry) { clearTimeout(flexScopeRetry); flexScopeRetry = null; }
   if (flexScopeCenterTimer) { clearTimeout(flexScopeCenterTimer); flexScopeCenterTimer = null; }
   if (smartSdr) smartSdr.stopPanScope();
@@ -36549,6 +36600,7 @@ app.whenReady().then(() => {
       }
       yaesuScopeJtcatWants = false;
       if (!yaesuScopeWanted()) { try { stopYaesuScope('JTCAT window closed'); } catch { /* not running */ } }
+      else flexDigitalViewSync();
       // Clear popout QSO state and halt TX so engine doesn't keep transmitting
       if (popoutJtcatQso) {
         popoutJtcatQso = null;
@@ -38427,6 +38479,7 @@ app.whenReady().then(() => {
     yaesuScopeJtcatWants = !!on;
     if (on) { yaesuScopeRestarts = 0; startYaesuScope(); yaesuScopeBroadcastState(); }
     else if (!yaesuScopeWanted()) stopYaesuScope('JTCAT band scope hidden');
+    else flexDigitalViewSync();   // another surface still watches: give it back the operator's zoom
   });
   const yaesuScopeRestartLater = (why) => {
     stopYaesuScope(why);
