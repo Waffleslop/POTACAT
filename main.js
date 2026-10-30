@@ -6468,6 +6468,9 @@ function ensureRemoteClient() {
     stopRemoteClientAudio();
   });
   remoteClient.on('kicked', (info) => {
+    // This PC stops driving the shack and does not reconnect by itself: the
+    // device that took the rig keeps it until Connect is pressed here again.
+    sendCatLog(`[Remote] another device took the rig${info && info.byPlatform ? ' (' + info.byPlatform + ')' : ''} — this PC is standing by; press Connect in Remote Radios to take it back`);
     if (win && !win.isDestroyed()) {
       win.webContents.send('remote-client-displaced', info);
     }
