@@ -272,7 +272,9 @@ async function test(name, fn) {
     assert.ok(!M.winlinkModesFor({ ...base, platform: 'darwin', ardopFound: false })[1].available, 'a missing ardopcf is still named on macOS');
     assert.ok(/Dire Wolf was not found/.test(M.winlinkModesFor({ ...base, direwolfFound: false })[2].reason));
     const noCat = M.winlinkModesFor({ ...base, rigFamily: 'none' });
-    assert.ok(noCat.slice(1).every((m) => !m.available));
+    // NA4DQ 2026-10-30: an HT with Dire Wolf and no CAT runs packet; the operator sets the dial by hand.
+    assert.ok(noCat[1].available && noCat[2].available && /No CAT control/.test(noCat[2].note), 'no-CAT radios run the radio modes, with the manual-QSY note');
+    assert.ok(!M.winlinkModesFor({ ...base, rigFamily: '' })[2].available, 'no radio at all is still refused');
     const remote = M.winlinkModesFor({ ...base, remote: true });
     assert.ok(remote.slice(1).every((m) => /shack/.test(m.reason)));
   });

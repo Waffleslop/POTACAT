@@ -10463,8 +10463,17 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
         // POTACAT's own QSY first, in data mode, so the rig preset for digital
         // fires and the operator sees the move before Pat keys anything.
         // Packet and VARA FM are FM (an Icom keys it in FM-D through forceDataMode); HF modems are USB data.
-        tuneRadio(Number(dialKhz), WinlinkModes.isFmMode(mode) ? 'FM' : 'DIGU', undefined, { origin: 'Winlink session' });
-        winlinkState.setSession({ tuned: true });
+        // No CAT control (NA4DQ): the operator sets the dial; POTACAT keys by
+        // VOX or the rig's PTT line, as for every other no-CAT transmission.
+        const noCat = !!(settings.catTarget && settings.catTarget.type === 'none');
+        if (noCat) {
+          const byHand = `Set the radio to ${(Number(dialKhz) / 1000).toFixed(4)} MHz ${WinlinkModes.isFmMode(mode) ? 'FM' : 'USB (data)'} yourself; POTACAT keys it by VOX or your PTT line`;
+          winlinkLog(`no CAT control: ${byHand}`);
+          winlinkState.setSession({ tuned: false, text: byHand });
+        } else {
+          tuneRadio(Number(dialKhz), WinlinkModes.isFmMode(mode) ? 'FM' : 'DIGU', undefined, { origin: 'Winlink session' });
+          winlinkState.setSession({ tuned: true });
+        }
         winlinkFlexDaxOn();
         _winlinkShimArmed = true;
         _winlinkCapTimer = setTimeout(() => winlinkAbortSession(`the session reached its ${capMin}-minute limit`), capMin * 60000);
