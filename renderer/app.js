@@ -28815,6 +28815,28 @@ function updateActivatorBandLabel(khz) {
 }
 
 /** Fill activator QSO form from a clicked spot (hunt while activating) */
+/** The P2P references a spot carries, primary program first, one entry per park. */
+function hunterParkRefsFromSpot(s) {
+  const PROGRAMS = { pota: 'POTA', wwff: 'WWFF', sota: 'SOTA', llota: 'LLOTA', wwbota: 'WWBOTA' };
+  const out = [];
+  const seen = new Set();
+  const push = (refs, program, name) => {
+    for (const r of String(refs || '').split(',').map(x => x.trim()).filter(Boolean)) {
+      const key = program + '|' + r.toUpperCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ ref: r, name: out.length === 0 ? (name || '') : '', program });
+    }
+  };
+  const primary = PROGRAMS[s.source];
+  if (primary) push(s.reference, primary, s.parkName);
+  for (const [type, program] of Object.entries(PROGRAMS)) {
+    if (program === primary) continue;
+    push(s[type + 'Reference'], program, '');
+  }
+  return out;
+}
+
 function fillActivatorFromSpot(s) {
   // FIRST statement, deliberately: this inherits the activationActive gate
   // from both call sites (spot-row click and the map popup's Tune button),
@@ -28832,14 +28854,12 @@ function fillActivatorFromSpot(s) {
   // Fill hunter park ref for any program with a P2P-creditable reference,
   // carrying the real program so the ADIF SIG isn't hardcoded POTA
   // (summit-to-park / WWFF P2P used to log SIG=POTA — wrong credit)
-  const spotProgram = { pota: 'POTA', wwff: 'WWFF', sota: 'SOTA', llota: 'LLOTA', wwbota: 'WWBOTA' }[s.source];
-  if (s.reference && spotProgram) {
-    hunterParkRefs = [{ ref: s.reference, name: s.parkName || '', program: spotProgram }];
-    updateHunterParkDisplay();
-  } else {
-    hunterParkRefs = [];
-    updateHunterParkDisplay();
-  }
+  // Every reference the spot carries: a two-fer's comma list in the primary
+  // field, and the other programs' own fields (an n-fer). WD3D 2026-10-29:
+  // "Right now it will only populate 1 park in the P2P log entry" — the
+  // operator had to type the second park by hand to get both credits.
+  hunterParkRefs = hunterParkRefsFromSpot(s);
+  updateHunterParkDisplay();
   resetActivatorRst();
   // QRZ lookup for op name and state
   if (s.callsign) {

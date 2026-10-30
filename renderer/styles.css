@@ -7507,6 +7507,10 @@ a.settings-echocat-badge-link:hover {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* The buttons on the right (Spot, Export ADIF, Logbook, Settings) wrap to a
+     second row instead of leaving the window at full screen with a large text
+     size (WD3D 2026-10-29: "the buttons disappear when you go full screen"). */
+  flex-wrap: wrap;
   padding: 8px 12px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-primary);
