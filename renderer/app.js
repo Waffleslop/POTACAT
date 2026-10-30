@@ -929,6 +929,7 @@ const setTgxlLabel3 = document.getElementById('set-tgxl-label-3');
 const tgxlAntButtons = document.getElementById('tgxl-ant-buttons');
 const setVerboseLog = document.getElementById('set-verbose-log');
 const setLightIcon = document.getElementById('set-light-icon');
+const setEnableBandActivity = document.getElementById('set-enable-band-activity');
 const setEnableSplitView = document.getElementById('set-enable-split-view');
 const splitOrientationConfig = document.getElementById('split-orientation-config');
 const continentFilterEl = document.getElementById('continent-filter');
@@ -2045,7 +2046,7 @@ async function loadPrefs() {
   quickRotorDivider.classList.toggle('hidden', !rotorConfigured);
   // Color rows — default true (on)
   spotsTable.classList.toggle('no-source-tint', settings.colorRows === false);
-  enableBandActivity = true; // always on
+  enableBandActivity = settings.enableBandActivity === true; // default off (Casey 2026-10-29)
   qrzFullName = settings.qrzFullName === true;
   enableLogging = true; // always on; cloud sync is the choice
   enableBannerLogger = settings.enableBannerLogger === true;
@@ -17082,6 +17083,7 @@ async function openSettingsDialog(tab) {
     meterBox.classList.toggle('hidden', !meterBoxVisible);
   }
   document.getElementById('set-show-meter').checked = meterBoxVisible;
+  setEnableBandActivity.checked = s.enableBandActivity === true;
   setShowBearing.checked = s.showBearing === true;
   setEnableSplitView.checked = s.enableSplitView !== false;
   splitOrientationConfig.classList.toggle('hidden', !setEnableSplitView.checked);
@@ -17765,7 +17767,7 @@ settingsSave.addEventListener('click', async () => {
   localStorage.setItem('meterBoxVisible', meterBoxVisible);
   quickShowMeter.checked = meterBoxVisible;
   meterBox.classList.toggle('hidden', !meterBoxVisible);
-  const bandActivityEnabled = true; // always on
+  const bandActivityEnabled = setEnableBandActivity.checked;
   const showBearingEnabled = setShowBearing.checked;
   const enableSplitViewVal = setEnableSplitView.checked;
   const splitOrientationVal = document.getElementById('set-split-orientation').value;

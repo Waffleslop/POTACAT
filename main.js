@@ -34214,12 +34214,13 @@ app.whenReady().then(() => {
     }
   }
   // One-time defaults (lib/install-defaults.js): SOTA/WWFF/LLOTA spots on,
-  // and a DX cluster node picked at random for a station that never set one.
+  // a DX cluster node picked at random for a station that never set one, and
+  // the band activity heatmap off (a choice again since 2026-10-29).
   {
     const changed = InstallDefaults.applyDefaultsOnce(settings, CLUSTER_PRESETS);
     if (changed.length) {
       saveSettings(settings);
-      sendCatLog(`[Settings] Turned on by default: ${changed.join(', ')} (untick any of them in Settings)`);
+      sendCatLog(`[Settings] One-time defaults: ${changed.join(', ')} (change any of them in Settings)`);
     }
   }
   migrateLegacyCloudTunnelConfig(settings);
