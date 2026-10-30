@@ -144,6 +144,55 @@
   nbu_done_${TAG}:
 !macroend
 
+; Ask a running POTACAT GUI to close and WAIT for it, before electron-builder's
+; own CHECK_APP_RUNNING. That check kills POTACAT.exe by image name only: a
+; cloudflared.exe / rigctld.exe / pat.exe POTACAT had started keeps its file in
+; <INSTDIR>esources locked, and the renderer processes take a moment to go,
+; so upgrades ended in "POTACAT cannot be closed" and then "Failed to uninstall
+; old application files" until Task Manager (W0TLP, KB2UXB, 2026-10-30). A
+; close request lets POTACAT run its own shutdown (stop the tunnel, rigctld,
+; Pat; save settings); only after 15 s is it ended outright.
+!macro _CloseGuiGracefully
+  !define /redef _CGID ${__COUNTER__}
+  nsExec::Exec `"$SYSDIR\cmd.exe" /C tasklist /FI "IMAGENAME eq POTACAT.exe" /FO CSV /NH | "$SYSDIRind.exe" /I "POTACAT.exe"`
+  Pop $R0
+  StrCmp $R0 "0" 0 cg_none_${_CGID}
+  !insertmacro _LogWrite "CloseGui: POTACAT.exe is running - asking it to close"
+  nsExec::Exec `"$SYSDIR\cmd.exe" /C taskkill /IM POTACAT.exe`
+  Pop $R0
+  StrCpy $R1 0
+  cg_wait_${_CGID}:
+    Sleep 1000
+    IntOp $R1 $R1 + 1
+    nsExec::Exec `"$SYSDIR\cmd.exe" /C tasklist /FI "IMAGENAME eq POTACAT.exe" /FO CSV /NH | "$SYSDIRind.exe" /I "POTACAT.exe"`
+    Pop $R0
+    StrCmp $R0 "0" 0 cg_closed_${_CGID}
+    IntCmp $R1 15 cg_force_${_CGID} cg_wait_${_CGID} cg_force_${_CGID}
+  cg_force_${_CGID}:
+    !insertmacro _LogWrite "CloseGui: still running after $R1 s - ending POTACAT.exe"
+    nsExec::Exec `"$SYSDIR\cmd.exe" /C taskkill /F /IM POTACAT.exe`
+    Pop $R0
+    Sleep 1000
+    Goto cg_done_${_CGID}
+  cg_closed_${_CGID}:
+    !insertmacro _LogWrite "CloseGui: POTACAT closed on request after $R1 s"
+    Sleep 500
+    Goto cg_done_${_CGID}
+  cg_none_${_CGID}:
+    !insertmacro _LogWrite "CloseGui: POTACAT.exe not running"
+  cg_done_${_CGID}:
+!macroend
+
+; Helpers POTACAT starts from <INSTDIR>esources (cloudflared, rigctld, rotctld,
+; Pat, ardopcf, Dire Wolf) are not POTACAT.exe, so nothing else stops them; a
+; survivor keeps its own file locked and the old files cannot be removed. Only
+; processes running FROM this install's resources folder are touched.
+!macro _StopHelpers
+  nsExec::Exec `powershell -NoProfile -NonInteractive -Command "Get-CimInstance Win32_Process | Where-Object { $$_.ExecutablePath -and $$_.ExecutablePath -like '$INSTDIResources\*' } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue }"`
+  Pop $R4
+  !insertmacro _LogWrite "StopHelpers: ended any helper left running from $INSTDIResources rc=$R4"
+!macroend
+
 ; customInit runs in the installer's .onInit, BEFORE installSection's
 ; CHECK_APP_RUNNING. Killing the launcher here means the app-running check then
 ; only sees the GUI (handled gracefully) — and crucially we do NOT redefine
@@ -154,6 +203,8 @@
   !insertmacro _LogWrite "=== POTACAT Installer ==="
   !insertmacro _LogWrite "customInit: Install dir = $INSTDIR"
   !insertmacro _KillLauncher
+  !insertmacro _CloseGuiGracefully
+  !insertmacro _StopHelpers
   ; Defuse v1.10.0's session-killing uninstaller wherever it may live: the
   ; per-user dir, both Program Files scopes, and (belt) the target $INSTDIR.
   !insertmacro _NeutralizeBadUninstaller "$LOCALAPPDATA\Programs\POTACAT" LU
@@ -169,6 +220,8 @@
 !macro customUnInit
   !insertmacro _LogWrite "customUnInit: stopping launcher before uninstall check"
   !insertmacro _KillLauncher
+  !insertmacro _CloseGuiGracefully
+  !insertmacro _StopHelpers
 !macroend
 
 !macro customInstall
