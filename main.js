@@ -15257,6 +15257,20 @@ function wsprBeaconTransmit(call, grid, dbm) {
 
 // 1 s tick: stops on watchdog / mode change, else asks the scheduler whether
 // this 2-minute slot transmits and, if so, keys at slot+1 s.
+/** Beacon run time, minutes; 0 = until the operator stops it (the default). */
+function wsprBeaconRunMin() {
+  const v = Number(settings.wsprBeaconRunMin);
+  return Number.isFinite(v) && v > 0 ? Math.min(v, 7 * 24 * 60) : 0;
+}
+function wsprRunLabel(min) {
+  if (!(min > 0)) return 'as long as you leave it on';
+  return min % 60 === 0 ? `${min / 60} h` : `${min} min`;
+}
+/** The beacon state every surface shows; runMin rides along (additive). */
+function wsprBeaconStateExtra() {
+  return { runMin: wsprBeaconRunMin(), runAsked: !!settings.wsprBeaconRunAsked };
+}
+
 function wsprBeaconTick() {
   if (!jtcatWsprScheduler) return;
   if (!ft8Engine || ft8Engine._mode !== 'WSPR') {
@@ -15265,9 +15279,12 @@ function wsprBeaconTick() {
   }
   // Part 97: automatic TX on the calling frequencies must be attended. Bounded
   // by the same 30-min watchdog as Full Auto CQ — re-arm to keep beaconing.
-  if (Date.now() - jtcatWsprBeaconArmedAt > JTCAT_FULL_AUTO_CQ_WATCHDOG_MS) {
-    sendCatLog('[JTCAT] WSPR beacon: 30-min attended-operator watchdog — stopping. Re-arm to continue.');
-    setWsprBeacon(false, { why: 'stopped by the 30-min watchdog' });
+  // How long the beacon runs is the operator's (K2BDE 2026-10-30: a 1 W
+  // overnight beacon stopped by the old 30-minute watchdog). 0 = until stopped.
+  const runMin = wsprBeaconRunMin();
+  if (runMin > 0 && Date.now() - jtcatWsprBeaconArmedAt > runMin * 60000) {
+    sendCatLog(`[JTCAT] WSPR beacon: ran for the ${wsprRunLabel(runMin)} you set — stopping. Re-arm to continue, or change the run time next to Beacon TX.`);
+    setWsprBeacon(false, { why: `stopped after the ${wsprRunLabel(runMin)} you set` });
     return;
   }
   if (ft8Engine._txActive) return;
@@ -15280,7 +15297,7 @@ function wsprBeaconTick() {
   if (slotNow !== _jtcatWsprAnnouncedSlot) {
     _jtcatWsprAnnouncedSlot = slotNow;
     const willTx = jtcatWsprScheduler.decideSlot(StationClock.now());
-    const payload = { enabled: true, slotTx: willTx, txPct: jtcatWsprScheduler.txPct };
+    const payload = { enabled: true, slotTx: willTx, txPct: jtcatWsprScheduler.txPct, ...wsprBeaconStateExtra() };
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       jtcatPopoutWin.webContents.send('jtcat-wspr-beacon-state', payload);
     }
@@ -15309,9 +15326,9 @@ function setWsprBeacon(on, opts = {}) {
   // optimistically; it waits for this.
   const tellPopout = (enabled) => {
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
-      jtcatPopoutWin.webContents.send('jtcat-wspr-beacon-state', { enabled });
+      jtcatPopoutWin.webContents.send('jtcat-wspr-beacon-state', { enabled, ...wsprBeaconStateExtra() });
     }
-    if (remoteServer && remoteServer.hasClient()) remoteServer.broadcastJtcatWsprBeaconState({ enabled });
+    if (remoteServer && remoteServer.hasClient()) remoteServer.broadcastJtcatWsprBeaconState({ enabled, ...wsprBeaconStateExtra() });
   };
   if (!on) {
     const wasArmed = wsprBeaconArmed() || !!jtcatWsprBeaconTimer;
@@ -15373,7 +15390,7 @@ function setWsprBeacon(on, opts = {}) {
       ? ` First transmission fires on the next even-minute slot (~${secToNextSlot}s) to confirm the chain` +
         (avgMin > 2 ? `; after that slots are drawn at random — roughly one TX every ${avgMin} minutes, listening slots in between are normal` : '')
       : ' TX 0% = listen only.') +
-    `. Attended only (30-min watchdog).`);
+    (wsprBeaconRunMin() > 0 ? ` It runs for ${wsprRunLabel(wsprBeaconRunMin())}, then stands down.` : ' It runs until you stop it.'));
   sendCatLog(capped
     ? '[JTCAT] WSPR: radio commanded to ~1 W (rfpower 1% on Flex / PC001 on CAT). Still verify actual output on a meter.' +
       (restoreWatts > 0
@@ -15390,6 +15407,8 @@ function applyWsprBeaconControl(opts) {
   opts = opts || {};
   if (opts.txPct != null) settings.wsprTxPct = Math.max(0, Math.min(100, opts.txPct));
   if (opts.dBm != null) settings.wsprDbm = clampWsprDbm(opts.dBm); // <=1 W, server-side
+  if (opts.runMin != null) { const v = Number(opts.runMin); settings.wsprBeaconRunMin = Number.isFinite(v) && v > 0 ? Math.min(Math.round(v), 7 * 24 * 60) : 0; }
+  if (opts.runAsked) settings.wsprBeaconRunAsked = true;   // the one-time "how long?" question has been answered
   saveSettings(settings);
   if (jtcatWsprScheduler) {
     if (opts.txPct != null) jtcatWsprScheduler.setTxPct(settings.wsprTxPct);

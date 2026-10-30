@@ -545,6 +545,20 @@
     <!-- WSPR pane (swaps in for the decode pane in WSPR mode) -->
     <div id="jp-wspr-pane" class="jp-wspr-pane hidden">
       <div class="jp-wspr-beacon">
+        <!-- Asked once, the first time Beacon TX is turned on (K2BDE 2026-10-30:
+             the old 30-minute watchdog stopped his overnight beacon). The answer
+             is the Run select, editable any time. -->
+        <div id="jp-wspr-run-ask" class="hidden" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:4px 0 6px;font-size:11px;color:var(--text-primary);">
+          <span><b>How long should the beacon run?</b> It transmits on its own until then.</span>
+          <select id="jp-wspr-run-ask-sel" class="jp-wspr-select">
+            <option value="0" selected>until I stop it</option>
+            <option value="60">1 h</option><option value="120">2 h</option><option value="240">4 h</option>
+            <option value="480">8 h</option><option value="720">12 h</option><option value="1440">24 h</option>
+          </select>
+          <button type="button" id="jp-wspr-run-ask-go" class="jp-btn" style="font-size:11px;padding:2px 8px;">Start beacon</button>
+          <button type="button" id="jp-wspr-run-ask-cancel" class="jp-btn" style="font-size:11px;padding:2px 8px;">Cancel</button>
+          <span style="color:var(--text-dim);">You can change this later next to Beacon TX.</span>
+        </div>
         <div class="jp-wspr-beacon-row">
           <label class="jp-wspr-tx" title="Beacon: transmit a low-power WSPR signal so distant stations spot you on wsprnet.org. Power is HARD-CAPPED at 1 W (QRPp). Attended only — verify actual output on a meter / dummy load.">
             <input type="checkbox" id="jp-wspr-tx-enable"> <b>Beacon TX</b>
@@ -561,6 +575,13 @@
               <option>17</option><option>20</option><option>23</option><option>27</option>
               <option selected>30</option>
             </select><span class="jp-wspr-num" title="30 dBm = 1 W max">dBm ≤1 W</span>
+          </label>
+          <label title="How long the beacon runs before it stands down on its own. Until I stop it = continuous (the default). You are responsible for the station while it transmits.">Run
+            <select id="jp-wspr-run" class="jp-wspr-select">
+              <option value="0" selected>until I stop it</option>
+              <option value="60">1 h</option><option value="120">2 h</option><option value="240">4 h</option>
+              <option value="480">8 h</option><option value="720">12 h</option><option value="1440">24 h</option>
+            </select>
           </label>
           <span class="jp-wspr-sep"></span>
           <label title="Upload your received spots to wsprnet.org — this is what plots your station on the global propagation map.">

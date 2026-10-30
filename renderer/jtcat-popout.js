@@ -3133,6 +3133,9 @@ function _applyPopoutTheme(payload) {
   var wsprTxPctEl = document.getElementById('jp-wspr-txpct');
   var wsprTxPctVal = document.getElementById('jp-wspr-txpct-val');
   var wsprDbmEl = document.getElementById('jp-wspr-dbm');
+  var wsprRunEl = document.getElementById('jp-wspr-run');          // how long the beacon runs (0 = until stopped)
+  var wsprRunAsked = false;                                        // the one-time question has been answered
+  var wsprRunAskVisible = function() { var a = document.getElementById('jp-wspr-run-ask'); return !!(a && !a.classList.contains('hidden')); };
   var wsprUploadEl = document.getElementById('jp-wspr-upload');
   var wsprSortBtn = document.getElementById('jp-wspr-sort');
   var wsprClearBtn = document.getElementById('jp-wspr-clear');
@@ -3235,6 +3238,9 @@ function _applyPopoutTheme(payload) {
     s = s || {};
     wsprDistUnit = s.distUnit === 'km' ? 'km' : 'mi';
     if (s.wsprTxPct != null) wsprTxPctEl.value = s.wsprTxPct;
+    if (wsprRunEl) wsprRunEl.value = String(Number(s.wsprBeaconRunMin) > 0 ? Math.round(Number(s.wsprBeaconRunMin)) : 0);
+    if (wsprRunEl && !Array.prototype.some.call(wsprRunEl.options, function(o) { return o.value === wsprRunEl.value; })) wsprRunEl.value = '0';
+    wsprRunAsked = !!s.wsprBeaconRunAsked;
     wsprTxPctVal.textContent = wsprTxPctEl.value + '%';
     // Power is capped at 30 dBm (1 W). Clamp a restored value and fall back to
     // 30 if it doesn't match an offered (<=1 W) option.
@@ -3257,12 +3263,42 @@ function _applyPopoutTheme(payload) {
     wsprUploadEl.addEventListener('change', function() {
       window.api.saveSettings({ wsprUpload: wsprUploadEl.checked });
     });
-    wsprTxEnable.addEventListener('change', function() {
-      if (window.api.jtcatWsprBeacon) window.api.jtcatWsprBeacon({
+    function wsprBeaconSend(extra) {
+      if (!window.api.jtcatWsprBeacon) return;
+      window.api.jtcatWsprBeacon(Object.assign({
         enabled: wsprTxEnable.checked,
         txPct: parseInt(wsprTxPctEl.value, 10),
         dBm: parseInt(wsprDbmEl.value, 10),
-      });
+        runMin: wsprRunEl ? parseInt(wsprRunEl.value, 10) || 0 : 0,
+      }, extra || {}));
+    }
+    var wsprRunAsk = document.getElementById('jp-wspr-run-ask');
+    var wsprRunAskSel = document.getElementById('jp-wspr-run-ask-sel');
+    wsprTxEnable.addEventListener('change', function() {
+      // First time on: ask how long it should run (K2BDE). The answer lands in
+      // the Run select, where it can be changed any time after.
+      if (wsprTxEnable.checked && !wsprRunAsked && wsprRunAsk) {
+        wsprTxEnable.checked = false;
+        if (wsprRunAskSel && wsprRunEl) wsprRunAskSel.value = wsprRunEl.value;
+        wsprRunAsk.classList.remove('hidden');
+        return;
+      }
+      wsprBeaconSend();
+    });
+    var wsprRunAskGo = document.getElementById('jp-wspr-run-ask-go');
+    var wsprRunAskCancel = document.getElementById('jp-wspr-run-ask-cancel');
+    if (wsprRunAskGo) wsprRunAskGo.addEventListener('click', function() {
+      if (wsprRunEl && wsprRunAskSel) wsprRunEl.value = wsprRunAskSel.value;
+      wsprRunAsked = true;
+      if (wsprRunAsk) wsprRunAsk.classList.add('hidden');
+      wsprTxEnable.checked = true;
+      wsprBeaconSend({ runAsked: true });
+    });
+    if (wsprRunAskCancel) wsprRunAskCancel.addEventListener('click', function() { if (wsprRunAsk) wsprRunAsk.classList.add('hidden'); });
+    if (wsprRunEl) wsprRunEl.addEventListener('change', function() {
+      // A new run time while armed re-arms the clock from now; while idle it is just saved.
+      if (window.api.jtcatWsprBeacon) window.api.jtcatWsprBeacon({ runMin: parseInt(wsprRunEl.value, 10) || 0, runAsked: true });
+      wsprRunAsked = true;
     });
     wsprSortBtn.addEventListener('click', function() {
       wsprSortByDx = !wsprSortByDx;
@@ -3499,6 +3535,8 @@ function _applyPopoutTheme(payload) {
     var wsprBeaconStatusEl = document.getElementById('jp-wspr-beacon-status');
     window.api.onJtcatWsprBeaconState(function(st) {
       if (wsprTxEnable) wsprTxEnable.checked = !!(st && st.enabled);
+      if (st && st.runAsked) wsprRunAsked = true;
+      if (st && st.runMin != null && wsprRunEl && !wsprRunAskVisible()) wsprRunEl.value = String(st.runMin);
       // Per-slot feedback. A beacon that says nothing during listen slots is
       // indistinguishable from a dead one (N7BBQ armed at 20%, watched 5
       // silent minutes — a 51% outcome — and reported TX broken).
