@@ -1171,6 +1171,8 @@ const dirvPlaceholder = document.getElementById('dirv-placeholder');
 const dirvSuggestSheet = document.getElementById('dirv-suggest-sheet');
 const dirvTabLandmarks = document.getElementById('dirv-tab-landmarks');
 const dirvLandmarksContainer = document.getElementById('dirv-landmarks-container');
+const dirvTabChannels = document.getElementById('dirv-tab-channels');
+const dirvChannelsContainer = document.getElementById('dirv-channels-container');
 const dirvCategoryFilter = document.getElementById('dirv-category-filter');
 let dirvActiveTab = 'nets'; // 'nets' | 'swl' | 'landmarks'
 let dirvAutoRefreshTimer = null;
@@ -19976,6 +19978,10 @@ function renderDirectoryView() {
     renderDirvLandmarks(search, bandFilter, dirvCategoryFilter ? dirvCategoryFilter.value : 'all');
     return;
   }
+  if (dirvActiveTab === 'channels') {
+    if (window.ChannelsView) window.ChannelsView.render(search);
+    return;
+  }
   if (dirvActiveTab === 'nets') {
     renderDirvNets(search, bandFilter, statusFilter);
     const table = dirvNetsContainer?.querySelector('.directory-view-table');
@@ -20275,6 +20281,7 @@ function lmkViaSdr(lm) { return !!(window.ListenSource && lmkSdrReach && window.
 if (window.api.onKiwiStatus) {
   window.api.onKiwiStatus((st) => {
     const reach = st && (st.available || st.connected) && Array.isArray(st.reach) ? st.reach : null;
+    if (window.ChannelsView) window.ChannelsView.setReach({ rig: st && Array.isArray(st.rigReach) ? st.rigReach : null, sdr: reach });
     if (JSON.stringify(reach) === JSON.stringify(lmkSdrReach)) return;
     lmkSdrReach = reach;
     if (typeof renderDirectoryView === 'function' && document.getElementById('dirv-landmarks-container') && !document.getElementById('dirv-landmarks-container').classList.contains('hidden')) renderDirectoryView();
@@ -20635,19 +20642,20 @@ function initDirvHeaderMenu(table) {
 // Directory view tab switching
 function setDirvTab(tab) {
   dirvActiveTab = tab;
-  const tabs = { nets: [dirvTabNets, dirvNetsContainer], swl: [dirvTabSwl, dirvSwlContainer], landmarks: [dirvTabLandmarks, dirvLandmarksContainer] };
+  const tabs = { nets: [dirvTabNets, dirvNetsContainer], swl: [dirvTabSwl, dirvSwlContainer], landmarks: [dirvTabLandmarks, dirvLandmarksContainer], channels: [dirvTabChannels, dirvChannelsContainer] };
   for (const [id, [btn, box]] of Object.entries(tabs)) {
     if (btn) btn.classList.toggle('active', id === tab);
     if (box) box.classList.toggle('hidden', id !== tab);
   }
   // Landmarks are mostly always on, so "On Air Now" says nothing there; the
   // tab filters by category instead.
-  if (dirvStatusFilter) dirvStatusFilter.classList.toggle('hidden', tab === 'landmarks');
+  if (dirvStatusFilter) dirvStatusFilter.classList.toggle('hidden', tab === 'landmarks' || tab === 'channels');
   if (dirvCategoryFilter) dirvCategoryFilter.classList.toggle('hidden', tab !== 'landmarks');
-  if (dirvSearch) dirvSearch.placeholder = tab === 'landmarks' ? 'Search landmarks...' : 'Search nets & broadcasts...';
+  if (dirvBandFilter) dirvBandFilter.classList.toggle('hidden', tab === 'channels');   // channels live off the ham bands; the tab has its own group filter
+  if (dirvSearch) dirvSearch.placeholder = tab === 'landmarks' ? 'Search landmarks...' : tab === 'channels' ? 'Search channels...' : 'Search nets & broadcasts...';
   const suggestNets = document.getElementById('dirv-suggest-nets');
   const suggestLmk = document.getElementById('dirv-suggest-landmarks');
-  if (suggestNets) suggestNets.classList.toggle('hidden', tab === 'landmarks');
+  if (suggestNets) suggestNets.classList.toggle('hidden', tab === 'landmarks' || tab === 'channels');
   if (suggestLmk) suggestLmk.classList.toggle('hidden', tab !== 'landmarks');
   if (dirvPlaceholder) dirvPlaceholder.classList.add('hidden');
   renderDirectoryView();
@@ -20655,6 +20663,12 @@ function setDirvTab(tab) {
 if (dirvTabNets) dirvTabNets.addEventListener('click', () => setDirvTab('nets'));
 if (dirvTabSwl) dirvTabSwl.addEventListener('click', () => setDirvTab('swl'));
 if (dirvTabLandmarks) dirvTabLandmarks.addEventListener('click', () => setDirvTab('landmarks'));
+if (dirvTabChannels) dirvTabChannels.addEventListener('click', () => setDirvTab('channels'));
+// Channels (renderer/channels-view.js): a click tunes through the one tune path,
+// so the SDR plays a frequency the radio cannot reach (lib/listen-source.js).
+if (window.ChannelsView) {
+  window.ChannelsView.init({ api: window.api, tune: (khz, mode) => window.api.tune(khz, mode), radioKhz: () => radioFreqKhz });
+}
 if (dirvCategoryFilter) dirvCategoryFilter.addEventListener('change', () => renderDirectoryView());
 {
   const discordLink = document.getElementById('dirv-suggest-discord');
@@ -20961,6 +20975,7 @@ window.api.onDirectoryData((data) => {
   directorySwl = data.swl || [];
   directoryLandmarks = Array.isArray(data.landmarks) ? data.landmarks : directoryLandmarks;
   directoryLandmarkCategories = Array.isArray(data.landmarkCategories) ? data.landmarkCategories : directoryLandmarkCategories;
+  if (window.ChannelsView && Array.isArray(data.channels)) window.ChannelsView.setList(data.channels);
   renderDirectory();
   renderDirectoryView();
 });

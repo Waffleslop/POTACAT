@@ -1,0 +1,34 @@
+/* Directory > Channels: the operator's saved frequency chart (lib/channels.js).
+   Theme variables only: this tab repaints with the app theme like Landmarks. */
+.chn { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.chn-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border-primary); background: var(--bg-secondary); font-size: 12px; color: var(--text-secondary); }
+.chn-bar .chn-spacer { flex: 1; }
+.chn-bar select { font-size: 12px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 2px 4px; }
+.chn-wrap { overflow: auto; flex: 1; min-height: 0; }
+.chn-table { table-layout: auto; width: 100%; }
+.chn-table th { white-space: nowrap; }
+.chn-table tbody tr.chn-group td { padding-top: 10px; font-weight: 700; color: var(--text-primary); border-bottom: 1px solid var(--border-primary); cursor: default; }
+.chn-table tbody tr.chn-group:hover { background: none; }
+.chn-table tbody tr.chn-row { cursor: pointer; }
+.chn-table tbody tr.chn-row.chn-tuned td:first-child { box-shadow: inset 3px 0 0 var(--accent-green); }
+.chn-table tbody tr.chn-row.chn-out { color: var(--text-dim); }
+.chn-table tbody tr.chn-row.chn-dragging { opacity: 0.4; }
+.chn-table tbody tr.chn-row.chn-drop-before td { box-shadow: inset 0 2px 0 var(--accent-blue); }
+.chn-table td.chn-name { font-weight: 600; color: var(--text-primary); }
+.chn-table td.chn-mhz { font-family: monospace; white-space: nowrap; }
+.chn-table td.chn-note { color: var(--text-secondary); max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chn-table td.chn-tools { white-space: nowrap; text-align: right; }
+.chn-grip { cursor: grab; color: var(--text-dim); padding: 0 6px; user-select: none; }
+.chn-btn { font-size: 11px; padding: 2px 8px; border-radius: 3px; border: 1px solid var(--border-primary); background: var(--bg-tertiary); color: var(--text-primary); cursor: pointer; }
+.chn-btn:hover { background: var(--bg-hover); }
+.chn-btn-tint { background: var(--accent-blue); border-color: var(--accent-blue); color: var(--on-accent-blue); font-weight: 600; }
+.chn-btn-danger { color: var(--accent-red); border-color: var(--accent-red); background: transparent; }
+.chn-sdr { display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.3px; color: var(--accent-blue); border: 1px solid var(--accent-blue); vertical-align: middle; }
+.chn-editor { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 6px 10px; padding: 8px 10px; background: var(--bg-tertiary); border-bottom: 1px solid var(--border-primary); font-size: 12px; }
+.chn-editor label { display: flex; flex-direction: column; gap: 2px; color: var(--text-secondary); font-size: 11px; }
+.chn-editor input, .chn-editor select { font-size: 12px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; padding: 3px 5px; }
+.chn-editor .chn-editor-note { grid-column: 1 / -1; }
+.chn-editor .chn-editor-actions { grid-column: 1 / -1; display: flex; gap: 6px; justify-content: flex-end; }
+.chn-empty { padding: 20px; color: var(--text-dim); text-align: center; }
+.chn-hidden-note td { color: var(--text-dim); font-size: 11px; padding-top: 8px; }
+.chn-status { font-size: 11px; color: var(--text-dim); }

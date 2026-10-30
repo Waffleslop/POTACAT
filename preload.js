@@ -407,6 +407,11 @@ contextBridge.exposeInMainWorld('api', {
   onWatchlistUpdated: (cb) => ipcRenderer.on('watchlist-updated', (_e, raw) => cb(raw)),
   // Directory (HF Nets & SWL Broadcasts)
   onDirectoryData: (cb) => ipcRenderer.on('directory-data', (_e, data) => cb(data)),
+  // Channels: the saved frequency chart (lib/channels.js). Edits go through main so ECHOCAT follows.
+  channelsGet: () => ipcRenderer.invoke('channels-get'),
+  channelsSave: (saved) => ipcRenderer.invoke('channels-save', saved),
+  channelsImportCsv: () => ipcRenderer.invoke('channels-import-csv'),
+  channelsExportCsv: () => ipcRenderer.invoke('channels-export-csv'),
   fetchDirectory: () => ipcRenderer.send('fetch-directory'),
   getDirectory: () => ipcRenderer.invoke('get-directory'),
   // Events system

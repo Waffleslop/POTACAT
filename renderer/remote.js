@@ -516,6 +516,7 @@
   let directoryNets = [];
   let directorySwl = [];
   let directoryLandmarks = [];        // the Landmarks tab (lib/landmarks.js)
+  let directoryChannels = [];         // the Channels tab: the shack's saved frequency chart (lib/channels.js)
   let directoryLandmarkCategories = [];
   let dirActiveTab = 'nets';          // 'nets' | 'swl' | 'landmarks'
 
@@ -2333,6 +2334,7 @@
         directoryNets = msg.nets || [];
         directorySwl = msg.swl || [];
         if (Array.isArray(msg.landmarks)) directoryLandmarks = msg.landmarks;
+        if (Array.isArray(msg.channels)) directoryChannels = msg.channels;
         if (Array.isArray(msg.landmarkCategories)) directoryLandmarkCategories = msg.landmarkCategories;
         // Show/hide Dir tab based on whether we have data
         var dirTabBtn = document.getElementById('dir-tab-btn');
@@ -11787,6 +11789,8 @@ var _paddleHoldTimer = { dit: null, dah: null };
     dirList.innerHTML = '';
     if (dirActiveTab === 'landmarks') {
       renderDirLandmarks(search);
+    } else if (dirActiveTab === 'channels') {
+      renderDirChannels(search);
     } else if (dirActiveTab === 'nets') {
       renderDirNets(search);
     } else {
@@ -11995,6 +11999,55 @@ var _paddleHoldTimer = { dit: null, dah: null };
       })(n, e.band);
       dirList.appendChild(card);
     }
+  }
+
+  // --- Channels: the shack's saved frequency chart (lib/channels.js). Edited on
+  // the desktop (Directory > Channels); a tap here tunes, and where the shack's
+  // radio cannot reach it the shack's SDR plays it (lib/listen-source.js).
+  function channelTuneMode(m) {
+    var u = String(m || 'FM').toUpperCase();
+    return (u === 'NFM' || u === 'WFM' || u === 'DIG' || u === 'DV') ? 'FM' : u;
+  }
+  function channelOffsetText(k) {
+    k = Number(k) || 0;
+    if (!k) return '';
+    var a = Math.abs(k), sign = k > 0 ? '+' : '-';
+    return a >= 1000 ? sign + (a / 1000).toFixed(a % 1000 ? 3 : 1).replace(/\.0$/, '') + ' MHz' : sign + a + ' kHz';
+  }
+  function renderDirChannels(search) {
+    if (!directoryChannels.length) {
+      dirList.innerHTML = '<div class="dir-empty">No channels yet. Add them on the desktop: Directory > Channels.</div>';
+      return;
+    }
+    var rows = directoryChannels.filter(function(c) {
+      if (!search) return true;
+      return [c.name, c.note, c.group, c.mode].some(function(v) { return String(v || '').toLowerCase().indexOf(search) >= 0; })
+        || String(c.khz).indexOf(search) >= 0 || (c.khz / 1000).toFixed(3).indexOf(search) >= 0;
+    });
+    var groups = [];
+    rows.forEach(function(c) { var g = c.group || 'Other'; if (groups.indexOf(g) < 0) groups.push(g); });
+    groups.forEach(function(g) {
+      var head = document.createElement('div');
+      head.className = 'lmk-group';
+      head.textContent = g;
+      dirList.appendChild(head);
+      rows.filter(function(c) { return (c.group || 'Other') === g; }).forEach(function(c) {
+        var card = document.createElement('div');
+        card.className = 'dir-card';
+        var mhz = (c.khz / 1000).toFixed(c.khz % 1 ? 5 : 4).replace(/0+$/, '').replace(/\.$/, '');
+        var off = channelOffsetText(c.offsetKhz);
+        card.innerHTML = '<div class="dir-card-row"><span class="dir-card-name"></span><span class="dir-card-freq"></span></div>'
+          + '<div class="dir-card-detail"></div>';
+        card.querySelector('.dir-card-name').textContent = c.name;
+        card.querySelector('.dir-card-freq').textContent = mhz + ' ' + (c.mode || 'FM') + (off ? ' ' + off : '') + (c.tone ? ' T' + c.tone : '');
+        card.querySelector('.dir-card-detail').textContent = c.note || '';
+        card.addEventListener('click', function() {
+          if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'tune', freqKhz: String(c.khz), mode: channelTuneMode(c.mode) }));
+        });
+        dirList.appendChild(card);
+      });
+    });
+    if (!rows.length) dirList.innerHTML = '<div class="dir-empty">Nothing matches.</div>';
   }
 
   function renderDirSwl(search) {

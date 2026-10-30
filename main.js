@@ -1875,6 +1875,15 @@ const landmarksFeed = new (require('./lib/landmarks-feed').LandmarksFeed)({
 });
 landmarksFeed.load();
 const LandmarksLib = require('./lib/landmarks');
+const Channels = require('./lib/channels');
+// The starter channel chart (data/channels.json: FRS, GMRS, MURS, marine,
+// aviation, interop, EMS — lists from KL4XQ and KC8DHX). The operator's copy
+// lives in settings.channels; Channels.reconcile seeds it and appends what a
+// newer catalog adds, never what they deleted.
+const CHANNELS_CATALOG = (() => {
+  try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'channels.json'), 'utf8')); }
+  catch (e) { console.warn('[Channels] starter catalog unreadable:', e.message); return { version: 1, channels: [] }; }
+})();
 let pskr = null;
 let pskrSpots = [];       // streaming PSKReporter FreeDV spots (FIFO, max 500)
 let pskrFlushTimer = null; // throttle timer for PSKReporter -> renderer updates
@@ -30837,7 +30846,7 @@ function createWindow() {
     // fetch (every 4 h) or a net-reminder edit refilled it: until then every
     // phone connected to a blank HF Nets / SWL tab. Seed each new server.
     onRemoteServer((rs) => {
-      rs.broadcastDirectory({ nets: directoryNets, swl: directorySwl, userNets: buildUserNetsForBroadcast(), ...landmarksPayload() });
+      rs.broadcastDirectory({ nets: directoryNets, swl: directorySwl, userNets: buildUserNetsForBroadcast(), ...landmarksPayload(), ...channelsPayload() });
     });
     // Auto-reopen pop-out map if it was open when the app last closed
     if (settings.mapPopoutOpen) {
@@ -31729,6 +31738,17 @@ async function fetchDirectory() {
   pushDirectoryToRenderer();
 }
 
+/** The operator's channel chart, reconciled with the starter catalog (persisted when that changed it). */
+function channelsSaved() {
+  const s = Channels.reconcile(settings.channels, CHANNELS_CATALOG);
+  if (JSON.stringify(s) !== JSON.stringify(settings.channels)) { settings.channels = s; saveSettings(settings); }
+  return s;
+}
+/** The Channels part of every directory push (window and ECHOCAT alike). */
+function channelsPayload() {
+  return { channels: channelsSaved().list };
+}
+
 /** The Landmarks part of every directory push (window and ECHOCAT alike). */
 function landmarksPayload() {
   const c = landmarksFeed.catalog();
@@ -31770,7 +31790,7 @@ function buildUserNetsForBroadcast() {
 
 function pushDirectoryToRenderer() {
   if (win && !win.isDestroyed()) {
-    win.webContents.send('directory-data', { nets: directoryNets, swl: directorySwl, ...landmarksPayload() });
+    win.webContents.send('directory-data', { nets: directoryNets, swl: directorySwl, ...landmarksPayload(), ...channelsPayload() });
   }
   // Also to ECHOCAT (always: the directory has no off switch). Not gated on
   // the server LISTENING: broadcastDirectory also stores the snapshot that every
@@ -34236,7 +34256,7 @@ function sdrCandidateFor(hz) {
 /** kiwi-status to every surface. connected = you hear the SDR; reach rides along for the Landmarks tab. */
 function broadcastKiwiStatus(connected, extra) {
   const reach = kiwiClient && kiwiClient.connected && kiwiClient.reach !== undefined ? kiwiClient.reach : null;
-  const msg = { connected: !!connected, host: kiwiLiveHost || undefined, kind: kiwiKind || undefined, reach: reach || undefined, ...(extra || {}) };
+  const msg = { connected: !!connected, host: kiwiLiveHost || undefined, kind: kiwiKind || undefined, reach: reach || undefined, rigReach: rigReachNow() || undefined, ...(extra || {}) };
   for (const wc of require('electron').webContents.getAllWebContents()) wc.send('kiwi-status', msg);
   if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) remoteServer.sendToClient({ type: 'kiwi-status', ...msg });
 }
@@ -34323,7 +34343,7 @@ function kiwiStatusHint() {
   const connected = !!(kiwiClient && kiwiClient.connected);
   let reach = connected && kiwiClient.reach !== undefined ? kiwiClient.reach : null;
   if (!reach) { const c = sdrCandidateFor(144e6) || sdrCandidateFor(14e6); if (c) reach = c.port === 8073 ? ListenSource.KIWI_REACH : ListenSource.RTL_TCP_ASSUMED; }
-  win.webContents.send('kiwi-status', { connected: listenSdr.live, host: kiwiLiveHost || undefined, kind: kiwiKind || undefined, available: !!reach, reach: reach || undefined });
+  win.webContents.send('kiwi-status', { connected: listenSdr.live, host: kiwiLiveHost || undefined, kind: kiwiKind || undefined, available: !!reach, reach: reach || undefined, rigReach: rigReachNow() || undefined });
 }
 
 app.whenReady().then(() => {
@@ -42490,7 +42510,54 @@ app.whenReady().then(() => {
   // --- Directory IPC ---
   ipcMain.on('fetch-directory', () => { fetchDirectory(); });
   ipcMain.handle('settings-save-status', () => { try { return settingsSaveStatusLine(); } catch { return '(unknown)'; } });
-  ipcMain.handle('get-directory', () => ({ nets: directoryNets, swl: directorySwl, ...landmarksPayload() }));
+  ipcMain.handle('get-directory', () => ({ nets: directoryNets, swl: directorySwl, ...landmarksPayload(), ...channelsPayload() }));
+
+  // --- Channels: the saved frequency chart (lib/channels.js) ---
+  ipcMain.handle('channels-get', () => channelsSaved());
+  ipcMain.handle('channels-save', (_e, saved) => {
+    const prev = channelsSaved();
+    const next = Channels.sanitizeSaved(saved);
+    next.seeded = prev.seeded;   // the catalog version is main's to track
+    settings.channels = next;
+    saveSettings(settings);
+    pushDirectoryToRenderer();
+    return next;
+  });
+  ipcMain.handle('channels-import-csv', async () => {
+    const r = await dialog.showOpenDialog(win, { title: 'Import a CHIRP CSV export', properties: ['openFile'], filters: [{ name: 'CHIRP CSV', extensions: ['csv'] }, { name: 'All files', extensions: ['*'] }] });
+    if (!r || r.canceled || !r.filePaths || !r.filePaths[0]) return { canceled: true };
+    const file = r.filePaths[0];
+    let text;
+    try {
+      const st = fs.statSync(file);
+      if (st.size > 5 * 1024 * 1024) return { error: 'That file is larger than 5 MB; a CHIRP export is a few hundred kB at most.' };
+      text = fs.readFileSync(file, 'utf8');
+    } catch (e) { return { error: 'Could not read the file: ' + e.message }; }
+    const group = path.basename(file).replace(/\.[^.]+$/, '').slice(0, 40) || 'Imported';
+    const parsed = Channels.parseChirpCsv(text, { group });
+    if (parsed.reason) return { error: parsed.reason };
+    const saved = channelsSaved();
+    const have = new Set(saved.list.map(c => `${c.khz}|${c.mode}|${c.name.toLowerCase()}`));
+    let added = 0, dupes = 0;
+    for (const c of parsed.channels) {
+      const k = `${c.khz}|${c.mode}|${c.name.toLowerCase()}`;
+      if (have.has(k)) { dupes++; continue; }
+      have.add(k); saved.list.push(c); added++;
+      if (saved.list.length >= Channels.LIST_MAX) break;
+    }
+    settings.channels = saved;
+    saveSettings(settings);
+    pushDirectoryToRenderer();
+    sendCatLog(`[Channels] imported ${added} channel${added === 1 ? '' : 's'} from a CHIRP file${dupes ? `, ${dupes} already in the chart` : ''}${parsed.skipped ? `, ${parsed.skipped} row${parsed.skipped === 1 ? '' : 's'} without a frequency skipped` : ''}`);
+    return { added, dupes, skipped: parsed.skipped, group };
+  });
+  ipcMain.handle('channels-export-csv', async () => {
+    const r = await dialog.showSaveDialog(win, { title: 'Export the channel chart as a CHIRP CSV', defaultPath: 'potacat-channels.csv', filters: [{ name: 'CSV', extensions: ['csv'] }] });
+    if (!r || r.canceled || !r.filePath) return { canceled: true };
+    try { fs.writeFileSync(r.filePath, Channels.toChirpCsv(channelsSaved().list), 'utf8'); }
+    catch (e) { return { error: 'Could not write the file: ' + e.message }; }
+    return { ok: true, count: channelsSaved().list.length };
+  });
 
   // --- Events IPC ---
   ipcMain.handle('get-active-events', () => {

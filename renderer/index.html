@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="../node_modules/leaflet/dist/leaflet.css">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="landmarks.css">
+  <link rel="stylesheet" href="channels.css">
 </head>
 <body>
   <div class="titlebar">
@@ -1129,6 +1130,7 @@
           <button id="dirv-tab-nets" class="directory-tab active" type="button">HF Nets</button>
           <button id="dirv-tab-swl" class="directory-tab" type="button">SWL Broadcasts</button>
           <button id="dirv-tab-landmarks" class="directory-tab" type="button" title="Time stations, beacons, weather and calling frequencies you can tune at any time">Landmarks</button>
+          <button id="dirv-tab-channels" class="directory-tab" type="button" title="Your saved frequency chart: FRS, GMRS, MURS, marine, aviation, interop and your own repeaters. Edit, reorder, delete, import a CHIRP file">Channels</button>
         </div>
         <input type="text" id="dirv-search" class="directory-search" placeholder="Search nets &amp; broadcasts...">
         <select id="dirv-band-filter" class="dirv-filter-select">
@@ -1209,6 +1211,28 @@
       </div>
       <!-- Landmarks (lib/landmarks.js): a table with a one-line "what it is"
            per row, and a station panel that explains the selected row. -->
+      <!-- Channels: the operator's saved frequency chart (lib/channels.js, renderer/channels.css).
+           Seeded from data/channels.json (lists from KL4XQ and KC8DHX), then theirs to edit,
+           reorder (drag the grip), delete, import from a CHIRP CSV and export. A click tunes;
+           where the radio cannot reach it the SDR plays it (lib/listen-source.js). -->
+      <div id="dirv-channels-container" class="chn hidden">
+        <div class="chn-bar">
+          <select id="chn-group-filter" aria-label="Group"><option value="all">All groups</option></select>
+          <button type="button" id="chn-add" class="chn-btn chn-btn-tint">+ Add channel</button>
+          <button type="button" id="chn-import" class="chn-btn" title="Import a CHIRP CSV export (File &gt; Export in CHIRP)">Import CHIRP CSV...</button>
+          <button type="button" id="chn-export" class="chn-btn" title="Save the chart as a CHIRP CSV file">Export CSV...</button>
+          <button type="button" id="chn-restore" class="chn-btn" title="Put back the starter channels you deleted">Restore starter channels</button>
+          <span class="chn-spacer"></span>
+          <span id="chn-status" class="chn-status"></span>
+        </div>
+        <div id="chn-editor" class="chn-editor hidden"></div>
+        <div class="chn-wrap">
+          <table class="directory-view-table chn-table">
+            <thead><tr><th></th><th>Name</th><th>MHz</th><th>Mode</th><th>Offset</th><th>Tone</th><th>Note</th><th></th></tr></thead>
+            <tbody id="chn-body"></tbody>
+          </table>
+        </div>
+      </div>
       <div id="dirv-landmarks-container" class="lmk hidden">
         <div id="lmk-hint" class="lmk-hint hidden" role="note">
           <span class="lmk-hint-text"><strong>New radio?</strong> Tune <strong>WWV on 10000 kHz</strong>. A tick every second means the radio, the antenna and the audio all work.</span>
@@ -5131,6 +5155,8 @@
   <script src="../lib/app-theme.js"></script>
   <script src="../lib/rig-bands.js"></script>
   <script src="../lib/listen-source.js"></script>
+  <script src="../lib/channels.js"></script>
+  <script src="channels-view.js"></script>
   <script src="../lib/landmarks.js"></script>
   <script src="../lib/spot-row.js"></script>
   <script src="../lib/cm108-ptt.js"></script>
