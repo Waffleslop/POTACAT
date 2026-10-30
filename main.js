@@ -3399,11 +3399,13 @@ function sendCatFrequency(hz) {
   jtcatRxGainFollowBand(hz);
   // And the worked-states / countries map tints follow the dial's band.
   workedOverlayFollowDial();
+  // The SDR is what you hear: the radio's own dial is tracked, not shown.
+  if (listenSdr.live && hz !== listenSdr.hz) { _currentFreqHz = hz; return; }
   if (win && !win.isDestroyed()) win.webContents.send('cat-frequency', hz);
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-frequency', hz);
   if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('cat-frequency', hz);
   if (scopePopoutWin && !scopePopoutWin.isDestroyed()) scopePopoutWin.webContents.send('cat-frequency', hz);
-  yaesuScopeNoteFrequency(hz); // the scope's axis is centred on the dial
+  yaesuScopeNoteFrequency(listenSdr.live && yaesuScopeState.source !== 'sdr' ? _currentFreqHz : hz); // the scope's axis is centred on the dial (a Flex pan cannot show the SDR's frequency)
   if (logPopoutWin && !logPopoutWin.isDestroyed()) logPopoutWin.webContents.send('cat-frequency', hz);
   // JS8 window: the dial readout + band picker follow the rig live. The
   // window shipped blind in v1.10.0 ("doesn't show the band I'm on" —
@@ -3425,7 +3427,7 @@ function sendCatFrequency(hz) {
   if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) {
     bandspreadPopoutWin.webContents.send('bandspread-popout-freq', hz / 1000);
   }
-  _currentFreqHz = hz;
+  if (!(listenSdr.live && hz === listenSdr.hz)) _currentFreqHz = hz;   // a listen-frequency fan-out never becomes the radio's dial
   sendVfoState();
   broadcastRemoteRadioStatus();
   sendN1mmRadioInfo();
@@ -17363,6 +17365,7 @@ const { computeSpectrumBins } = require('./lib/spectrum-fft');
 const { RxSpectrumRing } = require('./lib/rx-spectrum-ring');
 const FlexScope = require('./lib/flex-scope');
 const ScopeDigitalView = require('./lib/scope-digital-view');
+const ListenSource = require('./lib/listen-source');
 const FlexReadback = require('./lib/flex-readback');
 let _flexSliceKv = {};          // merged status of our slice, for the read-back
 let _flexSliceKvIndex = null;
@@ -25170,6 +25173,15 @@ function handleRemotePtt(state, opts = {}) {
     }
     return;
   }
+  // You cannot key a receiver: while the SDR is what you hear because the
+  // radio cannot reach that frequency, PTT is refused and says so.
+  if (state && listenSdr.live && listenSdr.auto) {
+    const why = `${ListenSource.fmtMhz(listenSdr.hz)} is on the SDR; ${getActiveRigModelName() || 'the radio'} cannot transmit there. Tune to a frequency the radio reaches first.`;
+    sendCatLog(`[PTT] refused — ${why}`);
+    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', why);
+    if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) remoteServer.sendToClient({ type: 'tune-blocked', reason: why });
+    return;
+  }
   const target = settings.catTarget;
   if (target && target.type === 'none') {
     // No CAT control, but the USB sound card keys the radio through its CM108
@@ -25460,7 +25472,7 @@ function _setCwTxLockout(durationMs) {
 function sendVfoState() {
   if (!vfoPopoutWin || vfoPopoutWin.isDestroyed()) return;
   vfoPopoutWin.webContents.send('vfo-radio-state', {
-    freq: _currentFreqHz || 0,
+    freq: displayFreqHz() || 0,
     mode: _currentMode || '',
     filterWidth: _currentFilterWidth || 0,
     nb: _currentNbState,
@@ -25512,7 +25524,7 @@ function broadcastRemoteRadioStatus() {
   const txPowerKnown = _currentTxPower > 0 || !!(_lastPowerReadback && _lastPowerReadback.at);
   const txp = ((typeof _txPowerSuppressBroadcast !== 'undefined' && now < _txPowerSuppressBroadcast) || !txPowerKnown) ? undefined : _currentTxPower;
   // Suppress stale mode during tune transition — phone has optimistic update, don't overwrite with old mode
-  let modeVal = (now < _modeSuppressUntil) ? undefined : (_currentMode || '');
+  let modeVal = (now < _modeSuppressUntil) ? undefined : (displayMode() || '');
   // When FreeDV engine is active, show the FreeDV codec mode instead of raw USB/LSB
   if (modeVal && freedvEngine && (modeVal === 'USB' || modeVal === 'LSB')) {
     modeVal = 'FREEDV-' + (freedvEngine.mode || 'RADEV1').toUpperCase();
@@ -25520,7 +25532,7 @@ function broadcastRemoteRadioStatus() {
   // Suppress stale freq during a phone tune transition — same rationale as mode
   // above. Omitting it (undefined → dropped from JSON) tells the phone "no change"
   // so its optimistic VFO holds instead of snapping back to the pre-poll freq.
-  const freqVal = (now < _freqSuppressUntil) ? undefined : (_currentFreqHz || 0);
+  const freqVal = (now < _freqSuppressUntil) ? undefined : (displayFreqHz() || 0);
   const status = {
     freq: freqVal,
     mode: modeVal,
@@ -30669,6 +30681,7 @@ function createWindow() {
 
   // Once the renderer is actually ready to listen, send current state
   win.webContents.on('did-finish-load', () => {
+    setTimeout(kiwiStatusHint, 500);   // the Landmarks tab learns what the SDR can hear
     logStartupStage('main window did-finish-load (renderer ready)');
     // Replay the pre-load log history: everything sendCatLog'd before this
     // point never reached the renderer (no window to send to), so without
@@ -33385,6 +33398,13 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
     }
   }
 
+  // Who hears this frequency (lib/listen-source.js): the radio, or the SDR
+  // where the radio cannot go. Then only the SDR moves and the radio stays.
+  {
+    const who = listenSdrArbitrate(freqHz, mode, origin);
+    if (who !== 'rig') return;
+  }
+
   // Auto-tune KiwiSDR WebSDR to follow
   if (kiwiActive && kiwiClient && kiwiClient.connected && freqHz > 100000) {
     const fKhz = freqHz / 1000;
@@ -34151,6 +34171,156 @@ app.on('open-url', (event, url) => {
 // KiwiSDR state (module scope for access from connectRemote and whenReady)
 let kiwiClient = null;
 let kiwiActive = false;
+
+// ═══ Who you hear: the radio, or the SDR where the radio cannot go ═══════════
+// (Casey 2026-10-30, lib/listen-source.js.) `listenSdr.live` = the SDR is what
+// every surface plays (kiwi-status connected:true on the wire, the signal the
+// VFO window, ECHOCAT Web and the phone already follow to mute the radio and
+// play the SDR). `auto` = POTACAT chose it because the tuned frequency is
+// outside the radio's receive range; `kiwiManual` = the operator picked the
+// SDR to listen through (local QRM on HF), which stays wherever the dial goes.
+// While live, the radio's own dial is tracked in _currentFreqHz but not
+// shown; the displayed frequency is the SDR's, and a tune back inside the
+// radio's range hands the displays and the audio straight back.
+const listenSdr = { live: false, auto: false, hz: 0, mode: '' };
+let kiwiManual = false;
+let kiwiLiveHost = '';
+let kiwiKind = '';
+let kiwiAutoPending = null;   // { hz, mode } waiting for an auto-connect to come up
+
+function displayFreqHz() { return listenSdr.live ? listenSdr.hz : _currentFreqHz; }
+function displayMode() { return listenSdr.live ? (listenSdr.mode || _currentMode) : _currentMode; }
+
+/** The active radio's receive ranges, or null with no radio to hear through. */
+function rigReachNow() {
+  const noCat = !!(settings.catTarget && settings.catTarget.type === 'none');
+  const linked = !!((cat && cat.connected) || (smartSdr && smartSdr.connected) || noCat);
+  if (!linked) return null;
+  let model = null;
+  try { model = getActiveRigModel(); } catch { /* no model */ }
+  if (model && Array.isArray(model.rxHz) && model.rxHz.length) return model.rxHz;
+  // No published range: the bands the rig is used on (lib/rig-bands.js).
+  try {
+    const rig = (settings.rigs || []).find(r => r && r.id === settings.activeRigId) || null;
+    const name = getActiveRigModelName();
+    const bands = RigBands.bandsForRig(rig, name, model);
+    const out = [];
+    for (const b of bands || []) { const e = BANDS[b]; if (e) out.push([Math.round(e.lower * 1e6), Math.round(e.upper * 1e6)]); }
+    return out.length ? out : [[30e3, 60e6]];
+  } catch { return [[30e3, 60e6]]; }
+}
+
+function listenSdrState() {
+  if (!kiwiClient || !kiwiClient.connected) return null;
+  return { connected: true, reach: kiwiClient.reach === undefined ? null : kiwiClient.reach, manual: kiwiManual };
+}
+
+/** The first SDR in Settings > Station > WebSDR that could hear hz, or null. */
+function sdrCandidateFor(hz) {
+  const list = Array.isArray(settings.kiwiSdrList) ? settings.kiwiSdrList : [];
+  for (const e of list) {
+    const clean = String((e && e.host) || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    if (!clean) continue;
+    const parts = clean.split(':');
+    const port = parseInt(parts[1], 10) || 8073;
+    const reach = port === 8073 ? ListenSource.KIWI_REACH : ListenSource.RTL_TCP_ASSUMED;   // a WebSDR.org port is tried as rtl_tcp first
+    if (ListenSource.covers(reach, hz)) return { host: parts[0], port, label: (e && e.label) || clean };
+  }
+  return null;
+}
+
+/** kiwi-status to every surface. connected = you hear the SDR; reach rides along for the Landmarks tab. */
+function broadcastKiwiStatus(connected, extra) {
+  const reach = kiwiClient && kiwiClient.connected && kiwiClient.reach !== undefined ? kiwiClient.reach : null;
+  const msg = { connected: !!connected, host: kiwiLiveHost || undefined, kind: kiwiKind || undefined, reach: reach || undefined, ...(extra || {}) };
+  for (const wc of require('electron').webContents.getAllWebContents()) wc.send('kiwi-status', msg);
+  if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) remoteServer.sendToClient({ type: 'kiwi-status', ...msg });
+}
+
+/** The SDR becomes what you hear. */
+function kiwiGoLive(auto) {
+  listenSdr.live = true;
+  listenSdr.auto = !!auto;
+  broadcastKiwiStatus(true);
+  if (remoteAudioWin && !remoteAudioWin.isDestroyed()) remoteAudioWin.webContents.send('kiwi-active', true);
+}
+
+/** Back to the radio: the SDR stays connected, idle, following the dial. */
+function kiwiGoIdle(why) {
+  if (!listenSdr.live) return;
+  listenSdr.live = false;
+  listenSdr.auto = false;
+  sendCatLog(`[WebSDR] Back to the radio${why ? ' — ' + why : ''}`);
+  broadcastKiwiStatus(false, { available: !!(kiwiClient && kiwiClient.connected) });
+  if (remoteAudioWin && !remoteAudioWin.isDestroyed()) remoteAudioWin.webContents.send('kiwi-active', false);
+  if (_currentFreqHz > 0) sendCatFrequency(_currentFreqHz);   // every readout snaps back to the radio
+}
+
+function sdrListenMode(mode, hz) {
+  const m = String(mode || listenSdr.mode || (hz > 30e6 ? 'FM' : (_currentMode || 'USB'))).toUpperCase();
+  return m === 'DIGU' || m === 'PKTUSB' || m === 'FT8' || m === 'FT4' || m === 'FT2' || m === 'WSPR' ? 'USB' : m === 'DIGL' || m === 'PKTLSB' ? 'LSB' : m === 'SSB' ? (hz >= 10e6 ? 'USB' : 'LSB') : m;
+}
+
+/**
+ * Called by tuneRadio before anything moves. Returns 'rig' (carry on), 'sdr'
+ * (the SDR took it, the radio stays) or 'none' (nothing can hear it, refused).
+ */
+function listenSdrArbitrate(hz, mode, origin) {
+  const rigReach = rigReachNow();
+  const sdr = listenSdrState();
+  const d = ListenSource.decide(hz, rigReach, sdr);
+  if (d.source === 'rig') {
+    if (listenSdr.live && listenSdr.auto) kiwiGoIdle(`${ListenSource.fmtMhz(hz)} is within the radio's range`);
+    return 'rig';
+  }
+  if (d.source === 'sdr') {
+    // The operator's own choice: the SDR follows the dial as it always has,
+    // and the radio tunes too (tuneRadio's own auto-tune moves the SDR).
+    if (d.reason === 'chosen') return 'rig';
+    const m = sdrListenMode(mode, hz);
+    listenSdr.hz = hz; listenSdr.mode = m;
+    kiwiClient.tune(hz / 1000, m.toLowerCase());
+    if (!listenSdr.live) {
+      sendCatLog(`[WebSDR] ${ListenSource.fmtMhz(hz)} ${m} is outside the radio's range: listening through ${kiwiLiveHost || 'the SDR'}; the radio stays on ${ListenSource.fmtMhz(_currentFreqHz || 0)}`);
+      kiwiGoLive(true);
+    }
+    sendCatFrequency(hz);   // the displays show what you hear (the radio's dial is kept, not shown)
+    return 'sdr';
+  }
+  // Nothing connected can hear it. An SDR in the list that could: bring it up and come back here.
+  if (!(kiwiClient && kiwiClient.connected)) {
+    const cand = sdrCandidateFor(hz);
+    if (cand) {
+      kiwiAutoPending = { hz, mode: sdrListenMode(mode, hz) };
+      sendCatLog(`[WebSDR] ${ListenSource.fmtMhz(hz)} is outside the radio's range: connecting ${cand.label} to listen through`);
+      require('electron').ipcMain.emit('kiwi-connect', { sender: { send: () => {} } }, { host: cand.host, port: cand.port, auto: true });
+      return 'sdr';
+    }
+  }
+  const rigName = getActiveRigModelName() || 'the radio';
+  const why = ListenSource.refusal(hz, d, rigName, kiwiLiveHost);
+  sendCatLog(`[tune] refused: ${why}`);
+  if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', why);
+  if (win && !win.isDestroyed()) win.webContents.send('app-notice', { text: why, kind: 'warn' });
+  if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) remoteServer.sendToClient({ type: 'tune-blocked', reason: why });
+  return 'none';
+}
+
+/** An auto-connected SDR came up: finish the tune that asked for it. */
+function listenSdrResume() {
+  const p = kiwiAutoPending;
+  kiwiAutoPending = null;
+  if (p && p.hz > 0) listenSdrArbitrate(p.hz, p.mode);
+}
+
+/** What the main window needs to know about the SDR at load: present, and its reach. */
+function kiwiStatusHint() {
+  if (!win || win.isDestroyed()) return;
+  const connected = !!(kiwiClient && kiwiClient.connected);
+  let reach = connected && kiwiClient.reach !== undefined ? kiwiClient.reach : null;
+  if (!reach) { const c = sdrCandidateFor(144e6) || sdrCandidateFor(14e6); if (c) reach = c.port === 8073 ? ListenSource.KIWI_REACH : ListenSource.RTL_TCP_ASSUMED; }
+  win.webContents.send('kiwi-status', { connected: listenSdr.live, host: kiwiLiveHost || undefined, kind: kiwiKind || undefined, available: !!reach, reach: reach || undefined });
+}
 
 app.whenReady().then(() => {
   logStartupStage('app.whenReady fired');
@@ -39770,7 +39940,7 @@ app.whenReady().then(() => {
   // kiwiClient and kiwiActive declared near top of whenReady for global access
 
   let kiwiConnectSeq = 0; // a newer kiwi-connect during the rtl_tcp probe wins
-  ipcMain.on('kiwi-connect', async (_e, { host: rawHost, port: rawPort, password }) => {
+  ipcMain.on('kiwi-connect', async (_e, { host: rawHost, port: rawPort, password, auto }) => {
     // Inline station password: "password@host:port" in the SDR field.
     // KiwiSDR sysops hand out passwords for full-length sessions on
     // preview-limited receivers (work item kiwi-preview-bump-too-busy);
@@ -39822,7 +39992,10 @@ app.whenReady().then(() => {
     kiwiClient.on('log', (msg) => sendCatLog(`[WebSDR] ${msg}`));
     kiwiClient.on('connected', () => {
       kiwiActive = true;
-      sendCatLog(`[WebSDR] Connected to ${kiwiFullHost}`);
+      kiwiManual = !auto;
+      kiwiLiveHost = kiwiFullHost;
+      kiwiKind = sdrKind;
+      sendCatLog(`[WebSDR] Connected to ${kiwiFullHost}${auto ? ' (for a frequency the radio cannot reach)' : ''}`);
       // Auto-tune to current rig frequency on connect.
       if (_currentFreqHz > 0 && _currentMode) {
         const mode = _currentMode.toLowerCase().replace('digu', 'usb').replace('digl', 'lsb').replace('pktusb', 'usb').replace('pktlsb', 'lsb');
@@ -39830,22 +40003,16 @@ app.whenReady().then(() => {
       }
       if (kiwiClient.setAgc) kiwiClient.setAgc(true);
       // `kind` tells a phone not to open a station web page for rtl_tcp
-      // (there is none): its audio comes over the WebRTC voice path.
-      for (const wc of require('electron').webContents.getAllWebContents()) {
-        wc.send('kiwi-status', { connected: true, host: kiwiFullHost, kind: sdrKind });
-      }
-      if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
-        remoteServer.sendToClient({ type: 'kiwi-status', connected: true, host: kiwiFullHost, kind: sdrKind });
-      }
-      // Tell the WebRTC bridge to swap the peer's audio track from rig audio
-      // to the Kiwi-fed MediaStreamDestination so mobile clients (which can't
-      // decode raw PCM) hear SDR audio over the existing voice path. (Gap 20a.)
-      if (remoteAudioWin && !remoteAudioWin.isDestroyed()) {
-        remoteAudioWin.webContents.send('kiwi-active', true);
-      }
+      // (there is none): its audio comes over the WebRTC voice path. The
+      // bridge swaps the peer's track to the SDR while it is live (Gap 20a).
+      // Chosen by the operator: live now. Brought up by a tune the radio
+      // cannot reach: the arbiter decides (listenSdrResume).
+      if (kiwiManual) kiwiGoLive(false);
+      else { broadcastKiwiStatus(false, { available: true }); listenSdrResume(); }
     });
     let _kiwiAudioCount = 0;
     kiwiClient.on('audio', (pcmFloat, sampleRate) => {
+      if (!listenSdr.live) return;   // idle: connected and following the dial, but not what you hear
       if (++_kiwiAudioCount === 1) sendCatLog(`[WebSDR] First audio packet: ${pcmFloat.length} samples @ ${sampleRate}Hz`);
       // Send the Float32Array directly to each recipient — Electron's
       // structured clone preserves TypedArrays. The previous
@@ -39890,6 +40057,9 @@ app.whenReady().then(() => {
     });
     kiwiClient.on('disconnected', () => {
       kiwiActive = false;
+      const wasLive = listenSdr.live;
+      listenSdr.live = false; listenSdr.auto = false; kiwiLiveHost = '';
+      if (wasLive && _currentFreqHz > 0) sendCatFrequency(_currentFreqHz);   // the readouts return to the radio
       sendCatLog('[WebSDR] Disconnected');
       for (const wc of require('electron').webContents.getAllWebContents()) {
         wc.send('kiwi-status', { connected: false });
@@ -39904,6 +40074,7 @@ app.whenReady().then(() => {
     });
     kiwiClient.on('error', (msg) => {
       sendCatLog(`[WebSDR] Error: ${msg}`);
+      listenSdr.live = false; listenSdr.auto = false;
       for (const wc of require('electron').webContents.getAllWebContents()) {
         wc.send('kiwi-status', { connected: false, error: msg });
       }
@@ -39941,6 +40112,10 @@ app.whenReady().then(() => {
   ipcMain.on('kiwi-disconnect', () => {
     if (kiwiClient) { kiwiClient.disconnect(); kiwiClient = null; }
     kiwiActive = false;
+    kiwiManual = false;
+    const wasLive = listenSdr.live;
+    listenSdr.live = false; listenSdr.auto = false; kiwiLiveHost = '';
+    if (wasLive && _currentFreqHz > 0) sendCatFrequency(_currentFreqHz);
   });
 
   ipcMain.on('kiwi-tune', (_e, { freqKhz, mode }) => {

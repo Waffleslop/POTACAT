@@ -3286,6 +3286,10 @@ window.api.onSmartSdrAudio((d) => {
     if (audioMonitorGain && audioMonitorActive && !audioMonitorMuted && !kiwiConnected) {
       audioMonitorGain.gain.value = monitorVolume;
     }
+    // One knob for whichever receiver you hear: while the SDR is live, it
+    // sets the SDR audio (Casey 2026-10-30: the second slider was the fault).
+    kiwiVolume = monitorVolume;
+    if (kiwiGainNode) kiwiGainNode.gain.value = kiwiVolume;
   });
 })();
 
@@ -3628,7 +3632,7 @@ window.api.onKiwiStatus((s) => {
   }
   updateKiwiButtonStates();
   document.getElementById('kiwi-rx-badge').style.display = s.connected ? '' : 'none';
-  document.getElementById('kiwi-volume-row').style.display = s.connected ? 'flex' : 'none';
+  document.getElementById('kiwi-volume-row').style.display = 'none'; // the monitor volume knob drives the SDR too
   // Mute local radio audio monitor when SDR active, restore when off
   if (s.connected) {
     if (audioMonitorGain) audioMonitorGain.gain.value = 0;
@@ -3677,10 +3681,12 @@ window.api.onKiwiAudio((d) => {
   const slider = document.getElementById('kiwi-volume');
   const label = document.getElementById('kiwi-volume-val');
   if (!slider) return;
-  const saved = parseInt(localStorage.getItem('kiwiVolume') || '80', 10);
+  // The SDR follows the monitor volume knob; this slider is kept hidden for
+  // older layouts and only mirrors it.
+  const saved = Math.round(monitorVolume * 100);
   slider.value = saved;
   label.textContent = saved + '%';
-  kiwiVolume = saved / 100;
+  kiwiVolume = monitorVolume;
   slider.addEventListener('input', () => {
     const pct = parseInt(slider.value, 10);
     label.textContent = pct + '%';

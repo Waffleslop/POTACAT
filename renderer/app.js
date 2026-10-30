@@ -20267,6 +20267,19 @@ let directoryLandmarks = [];
 let directoryLandmarkCategories = [];
 let lmkSelectedId = null;
 let lmkShowAll = false;     // show rows the active radio cannot tune (this session)
+// The listening SDR's reach ([[loHz, hiHz], ...], lib/listen-source.js): a
+// station the radio cannot tune but the SDR can hear is shown, tagged SDR,
+// and Tune plays it through the SDR (main.js listenSdrArbitrate).
+let lmkSdrReach = null;
+function lmkViaSdr(lm) { return !!(window.ListenSource && lmkSdrReach && window.ListenSource.covers(lmkSdrReach, Number(lm.khz) * 1000)); }
+if (window.api.onKiwiStatus) {
+  window.api.onKiwiStatus((st) => {
+    const reach = st && (st.available || st.connected) && Array.isArray(st.reach) ? st.reach : null;
+    if (JSON.stringify(reach) === JSON.stringify(lmkSdrReach)) return;
+    lmkSdrReach = reach;
+    if (typeof renderDirectoryView === 'function' && document.getElementById('dirv-landmarks-container') && !document.getElementById('dirv-landmarks-container').classList.contains('hidden')) renderDirectoryView();
+  });
+}
 let lmkTickTimer = null;
 const LMK_HINT_KEY = 'potacat-landmarks-hint-dismissed';
 const lmkBody = document.getElementById('lmk-body');
@@ -20290,7 +20303,7 @@ function renderDirvLandmarks(search, bandFilter, category) {
   const now = Date.now();
   if (lmkHint) lmkHint.classList.toggle('hidden', lmkHintDismissed() || !directoryLandmarks.some(l => l.id === 'wwv-10000'));
 
-  let rows = directoryLandmarks.map((lm, i) => ({ lm, i, band: L.bandLabel(lm.khz), cd: L.status(lm, now), ok: L.receivable(lm, rigBandsList) }));
+  let rows = directoryLandmarks.map((lm, i) => { const viaSdr = !L.receivable(lm, rigBandsList) && lmkViaSdr(lm); return { lm, i, band: L.bandLabel(lm.khz), cd: L.status(lm, now), ok: L.receivable(lm, rigBandsList) || viaSdr, viaSdr }; });
   if (search) {
     rows = rows.filter(r => [r.lm.name, r.lm.line, r.lm.region, r.lm.mode, r.lm.hear, r.lm.why].some(v => (v || '').toLowerCase().includes(search))
       || String(r.lm.khz).includes(search));
@@ -20341,7 +20354,7 @@ function renderDirvLandmarks(search, bandFilter, category) {
         + `<td class="lmk-name">${esc(lm.name)}</td>`
         + `<td>${lm.khz}</td>`
         + `<td>${esc(lm.mode)}</td>`
-        + `<td>${esc(r.band)}</td>`
+        + `<td>${esc(r.band)}${r.viaSdr ? '<span class="lmk-sdr" title="Outside the radio&#39;s bands; POTACAT plays it through your SDR">SDR</span>' : ''}</td>`
         + `<td class="lmk-line">${esc(lm.line)}${lm.ncdxf ? `<span class="lmk-now" data-khz="${lm.khz}"></span>` : ''}</td>`;
       const choose = () => {
         lmkSelectedId = lm.id;
@@ -20369,7 +20382,7 @@ function renderDirvLandmarks(search, bandFilter, category) {
   let sel = directoryLandmarks.find(l => l.id === lmkSelectedId)
     || directoryLandmarks.find(l => lmkIsTuned(l))
     || firstLive;
-  lmkRenderPanel(sel, sel ? L.receivable(sel, rigBandsList) : true);
+  lmkRenderPanel(sel, sel ? (L.receivable(sel, rigBandsList) || lmkViaSdr(sel)) : true);
   lmkUpdateLive();
 }
 

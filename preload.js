@@ -9,6 +9,9 @@ contextBridge.exposeInMainWorld('api', {
   // The active rig's bands (lib/rig-bands.js): {bands: string[]|null, all}.
   rigBandsGet: () => ipcRenderer.invoke('rig-bands-get'),
   onRigBands: (cb) => ipcRenderer.on('rig-bands', (_e, d) => cb(d)),
+  // The listening SDR: connected (you hear it), kind, and reach (what it can
+  // receive) — the Landmarks tab shows stations the SDR can hear (lib/listen-source.js).
+  onKiwiStatus: (cb) => ipcRenderer.on('kiwi-status', (_e, s) => cb(s)),
   rigBandsNative: (model) => ipcRenderer.invoke('rig-bands-native', model),
   platform: process.platform,
   openExternal: (url) => ipcRenderer.send('open-external', url),
