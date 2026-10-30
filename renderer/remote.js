@@ -6658,6 +6658,7 @@
     if (!m) return 'SSB';
     if (LOG_MODE_OPTIONS.indexOf(m) !== -1) return m;
     if (m === 'USB' || m === 'LSB') return 'SSB';
+    if (m === 'PSK') return 'PSK31';
     if (m === 'PKTUSB' || m === 'PKTLSB' || m === 'DIGU' || m === 'DIGL' ||
         m === 'USB-D' || m === 'LSB-D' || m === 'DATA' || m === 'DATAU' || m === 'DATAL') {
       return 'FT8';
