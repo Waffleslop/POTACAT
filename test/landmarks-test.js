@@ -209,9 +209,9 @@ test('feed: bundled copy at launch; a good fetch replaces it and is cached; a ba
 test('main sends the landmarks with every directory push, and the link gate allows only catalog URLs', () => {
   const m = R('main.js');
   assert.ok(m.includes("require('./lib/landmarks-feed')"));
-  assert.ok(/'directory-data', \{ nets: directoryNets, swl: directorySwl, \.\.\.landmarksPayload\(\) \}/.test(m), 'window push');
+  assert.ok(/'directory-data', \{ nets: directoryNets, swl: directorySwl, \.\.\.landmarksPayload\(\)(, \.\.\.channelsPayload\(\))? \}/.test(m), 'window push');
   assert.ok(/broadcastDirectory\(\{[\s\S]{0,200}\.\.\.landmarksPayload\(\)/.test(m), 'ECHOCAT push');
-  assert.ok(m.includes("ipcMain.handle('get-directory', () => ({ nets: directoryNets, swl: directorySwl, ...landmarksPayload() }))"));
+  assert.ok(m.includes("ipcMain.handle('get-directory', () => ({ nets: directoryNets, swl: directorySwl, ...landmarksPayload(), ...channelsPayload() }))"));
   assert.ok(m.includes('landmarksFeed.refresh()'), 'fetched with the directory');
   assert.ok(m.includes('landmarksFeed.urlAllowed(url)'), 'open-external gate');
 });

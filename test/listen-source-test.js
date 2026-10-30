@@ -102,7 +102,7 @@ check('while the SDR is live the radio\'s dial is tracked, not shown, and the st
   assert.ok(/undefined : \(displayMode\(\) \|\| ''\);/.test(main));
 });
 check('a Flex pan is never asked to centre on the SDR\'s frequency', () => {
-  assert.ok(/yaesuScopeNoteFrequency\(listenSdr\.live && yaesuScopeState\.source !== 'sdr' \? _currentFreqHz : hz\)/.test(main));
+  assert.ok(/if \(listenSdr\.live && hz === listenSdr\.hz && yaesuScopeState\.source !== 'sdr'\) \{ hz = _currentFreqHz;/.test(main), 'the gate lives in yaesuScopeNoteFrequency');
 });
 check('PTT is refused while the SDR is live for a frequency the radio cannot reach', () => {
   assert.ok(/if \(state && listenSdr\.live && listenSdr\.auto\) \{[\s\S]{0,600}return;\s+\}/.test(main));

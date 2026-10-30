@@ -28855,11 +28855,11 @@ function yaesuScopeSetStatus(status, diag) {
 /** Called from sendCatFrequency — the single frequency sink — so every QSY path centres the axis. */
 function yaesuScopeNoteFrequency(hz) {
   if (!(hz > 0)) return;
+  scopeOverlaySync();   // a band change moves the band plan (deduped by content)
   // The SDR is what you hear, on a frequency the radio cannot reach: only a
   // scope fed by that SDR can show it. A Flex pan, an FT-710 or an Icom
   // stays on the radio's own dial.
   if (listenSdr.live && hz === listenSdr.hz && yaesuScopeState.source !== 'sdr') { hz = _currentFreqHz; if (!(hz > 0)) return; }
-  scopeOverlaySync();   // a band change moves the band plan (deduped by content)
   // The Flex panadapter has its own centre (pan status) and the slice can sit
   // anywhere in it; only when the dial leaves the view is the pan recentred.
   if (flexScopeOn) {

@@ -20,7 +20,7 @@ console.log('directory echocat seed');
 test('every new ECHOCAT server is seeded with the directory', () => {
   // Unconditional since 2026-10-29: the bundled Landmarks catalog means there
   // is always something to send, even before the Google Sheet answers.
-  assert.ok(/onRemoteServer\(\(rs\) => \{\n\s*rs\.broadcastDirectory\(\{ nets: directoryNets, swl: directorySwl, userNets: buildUserNetsForBroadcast\(\), \.\.\.landmarksPayload\(\) \}\);/.test(src));
+  assert.ok(/onRemoteServer\(\(rs\) => \{\n\s*rs\.broadcastDirectory\(\{ nets: directoryNets, swl: directorySwl, userNets: buildUserNetsForBroadcast\(\), \.\.\.landmarksPayload\(\)(, \.\.\.channelsPayload\(\))? \}\);/.test(src));
 });
 
 test('the directory push is not gated on the server listening', () => {
