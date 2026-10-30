@@ -3652,10 +3652,21 @@ function rigPresetClearPending() {
  *  change arms a short settle timer — an Icom flips USB→USB-D for the length
  *  of a voice PTT and a tune passes through transient modes — and the preset
  *  goes on when the new family is still there at the end of it. */
+/** The mode the preset rules should see. An Icom reports USB with its DATA
+ *  flag separate (1A 06), so FT8 on a 7300 read back as plain USB and the
+ *  SSB rule fired 3 s after the FT8 one, 45 W back to 100 W (K4RVC
+ *  IC-7300MK2 over the LAN, 2026-10-28). The FT-710 says DATA-U itself. */
+function rigPresetModeFor(mode) {
+  const m = String(mode || '').toUpperCase();
+  if (m !== 'USB' && m !== 'LSB') return mode;
+  const st = cat && cat._codec && cat._codec.dataModeState;
+  return st && st.on ? m + '-D' : mode;
+}
+
 function rigPresetOnMode(mode) {
   _rigPresetLastBand = rigPresetBand();
   const d = RigPresets.decideModePreset({
-    mode, band: _rigPresetLastBand, prevFamily: _rigPresetFamily, prevMatchId: _rigPresetMatchId,
+    mode: rigPresetModeFor(mode), band: _rigPresetLastBand, prevFamily: _rigPresetFamily, prevMatchId: _rigPresetMatchId,
     transmitting: rigPresetTransmitting(), remote: isRemoteMode(),
     presets: settings.rigPresets, byMode: settings.rigPresetByMode, rules: settings.rigPresetRules, rigId: settings.activeRigId || null,
   });
@@ -3675,6 +3686,14 @@ function rigPresetOnMode(mode) {
   if (_rigPresetPending && _rigPresetPending.matchId !== d.matchId) rigPresetClearPending();
   _rigPresetFamily = d.family;
   _rigPresetMatchId = d.matchId;
+  // The first mode is the launch context and never applies a preset; note the
+  // preset its trigger names, or the next poll of the SAME mode read as a
+  // change and applied it (K4RVC: "launch POTACAT ... the radio gets set to
+  // 100 W" with the power he had set by hand).
+  if (d.reason === 'first' && d.family) {
+    const m = RigPresets.matchTrigger({ band: _rigPresetLastBand, family: d.family, rules: settings.rigPresetRules, byMode: settings.rigPresetByMode, rigId: settings.activeRigId || null });
+    _rigPresetMatchId = (m && m.presetId) || null;
+  }
 }
 
 /** Every dial change comes through here (sendCatFrequency): a band change can
@@ -3683,6 +3702,14 @@ function rigPresetOnMode(mode) {
 function rigPresetOnBand() {
   const band = rigPresetBand();
   if (!band || band === _rigPresetLastBand) return;
+  // The first band learned is still the launch context (the mode often
+  // arrives before the dial): note the trigger's preset, apply nothing.
+  if (!_rigPresetLastBand && _rigPresetFamily && !_rigPresetPending) {
+    _rigPresetLastBand = band;
+    const m = RigPresets.matchTrigger({ band, family: _rigPresetFamily, rules: settings.rigPresetRules, byMode: settings.rigPresetByMode, rigId: settings.activeRigId || null });
+    _rigPresetMatchId = (m && m.presetId) || null;
+    return;
+  }
   rigPresetOnMode(_currentMode);
 }
 
@@ -3731,7 +3758,7 @@ function rigPresetFlushPending() {
 function rigPresetOnEngineStart() {
   if (isRemoteMode()) return;
   if (_rigPresetPending) { rigPresetFlushPending(); return; }
-  if (RigPresets.modeFamily(_currentMode) !== 'digital') return; // the mode change will do it
+  if (RigPresets.modeFamily(rigPresetModeFor(_currentMode)) !== 'digital') return; // the mode change will do it
   const rigId = settings.activeRigId || null;
   const m = RigPresets.matchTrigger({ band: rigPresetBand(), family: 'digital', rules: settings.rigPresetRules, byMode: settings.rigPresetByMode, rigId });
   if (!m.presetId) return;
