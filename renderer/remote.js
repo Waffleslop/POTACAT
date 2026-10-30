@@ -1009,6 +1009,7 @@
       visible: (tab) => tab === 'ft8' && ft8BsOn && scopeAvailable() },
   ];
 
+  function ft8ScopeIsFlex() { return !!(rigCapabilities && rigCapabilities.nativeScope === 'flex'); }
   function scopeAvailable() {
     return !!(scopeServerOk && window.ScopeAxis && rigCapabilities && rigCapabilities.nativeScope);
   }
@@ -1031,7 +1032,11 @@
     const bsBtn = document.getElementById('ft8-bs-toggle');
     if (bsBtn) { bsBtn.classList.toggle('hidden', !show); bsBtn.classList.toggle('active', show && ft8BsOn); }
     const strip = document.getElementById('ft8-bandscope');
-    if (strip) strip.classList.toggle('hidden', !(show && ft8BsOn));
+    if (strip) {
+      strip.classList.toggle('hidden', !(show && ft8BsOn));
+      // A Flex: the radio's waterfall alone, no header or trace (as the desktop FT8 window).
+      strip.classList.toggle('ft8-bs-radio-wf', ft8ScopeIsFlex());
+    }
     if (!show && activeTab === 'scope') switchTab('spots');
     scopeSyncSubscription(activeTab);
   }
@@ -1407,6 +1412,9 @@
     ft8BsToggle.addEventListener('click', () => {
       ft8BsOn = !ft8BsOn;
       try { localStorage.setItem('echocat-ft8-bandscope', ft8BsOn ? '1' : '0'); } catch { /* private mode */ }
+      // On a Flex the radio's waterfall and the audio one are one choice (Casey 2026-10-30).
+      const wfBtn = document.getElementById('ft8-wf-toggle');
+      if (ft8BsOn && ft8ScopeIsFlex() && wfBtn && wfBtn.classList.contains('active')) wfBtn.click();
       scopeUpdateTabVisibility();
       if (ft8BsOn) { scopeSizeCanvases(); scopeDrawAll(); }
     });
@@ -8861,6 +8869,7 @@
   }
   ft8WfToggle.addEventListener('click', () => {
     ft8WfVisible = !ft8WfVisible;
+    if (ft8WfVisible && ft8BsOn && ft8ScopeIsFlex()) { const bs = document.getElementById('ft8-bs-toggle'); if (bs) bs.click(); }
     ft8Waterfall.classList.toggle('hidden', !ft8WfVisible);
     ft8WfToggle.classList.toggle('active', ft8WfVisible);
     if (ft8WfVisible) ft8WfSizeCanvas();

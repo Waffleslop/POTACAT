@@ -2322,6 +2322,7 @@ function _applyPopoutTheme(payload) {
     multiWfPanes = [];
     container.innerHTML = '';
 
+    bsApplyVisibility();   // multi-slice brings the audio waterfalls back on a Flex
     if (!multiActive || multiSliceConfigs.length === 0) {
       container.classList.add('hidden');
       if (singleWf) singleWf.style.display = '';
@@ -2735,21 +2736,42 @@ function _applyPopoutTheme(payload) {
   var bsOn = false;
   var bsAvailable = false;
   var bsLastWatch = null;
+  var bsClickShift = false;   // Shift held on the press that made this click
 
   function bsAxis() {
     var A = window.ScopeAxis; var s = bsState || {};
     return A.scopeAxis({ centerHz: A.axisCenterFor(s, bsDialHz), spanHz: s.spanHz || 0, anchor: s.anchor || 'center' });
   }
+  // A Flex's own waterfall REPLACES the audio waterfall (Casey 2026-10-30:
+  // "For Flex users, they should just see this new waterfall, not the old
+  // waterfall too ... the bandscope is just unnecessary for digital modes").
+  // Required, no checkbox. The audio waterfall stays until the radio's is
+  // live (starting, SmartSDR hosting the radio, an error) and in multi-slice
+  // (one pan cannot show four bands). Its analyser keeps running hidden: the
+  // RX-silent watchdog reads it, and that warning moves onto this waterfall,
+  // since a radio can draw signals perfectly while the decoder hears nothing.
+  function bsFlex() { return !!(bsAvailable && bsState && bsState.sourceKind === 'flex'); }
+  function bsRadioWf() { return bsFlex() && bsState.status === 'live' && !multiActive; }
+  function bsShowing() { return !!(bsAvailable && (bsOn || bsFlex())); }
   function bsSyncWatch() {
-    var want = !!(bsOn && bsAvailable);
+    var want = bsShowing();
     if (want === bsLastWatch) return;
     bsLastWatch = want;
     if (window.api.scopeWatch) window.api.scopeWatch(want);
   }
   function bsApplyVisibility() {
-    var show = bsOn && bsAvailable;
-    if (bsRow) bsRow.classList.toggle('hidden', !bsAvailable);
-    if (bsWrap) bsWrap.classList.toggle('hidden', !show);
+    var radioWf = bsRadioWf();
+    var show = radioWf || (bsOn && bsAvailable && !bsFlex());
+    if (bsRow) bsRow.classList.toggle('hidden', !bsAvailable || bsFlex());
+    if (bsWrap) {
+      bsWrap.classList.toggle('hidden', !show);
+      bsWrap.classList.toggle('jp-bs-radio-wf', radioWf);
+    }
+    var single = document.getElementById('jp-wf-single');
+    if (single) single.classList.toggle('jp-wf-replaced', radioWf);
+    var silent = document.getElementById('jp-wf-silent');
+    var silentHome = radioWf ? bsWrap : single;
+    if (silent && silentHome && silent.parentNode !== silentHome) silentHome.appendChild(silent);
     if (show && !bsWf && bsWfCanvas && typeof Waterfall !== 'undefined') {
       bsWf = new Waterfall(bsWfCanvas, { bins: 850, historyRows: 256, colormap: 'turbo', gamma: 0.6 });
       if (bsWf.supported) bsWf.onClick(function(frac) { bsTune(frac); });
@@ -2776,17 +2798,17 @@ function _applyPopoutTheme(payload) {
       var audio = Math.abs(abs - dialNow);
       audio = Math.round(Math.max(100, Math.min(3000, audio)) / 10) * 10;
       jpTxFreqHz = audio;
-      jpRxFreqHz = audio;
       if (txFreqLabel) txFreqLabel.textContent = txFreqText(audio);
       window.api.jtcatSetTxFreq(audio, true); // operator move — honored under Hold TX Freq, re-pins
-      window.api.jtcatSetRxFreq(audio);
+      // Shift+click: TX only (split), as on the audio waterfall; never in a transceive mode.
+      if (!(bsClickShift && !isKeyboardMode())) { jpRxFreqHz = audio; window.api.jtcatSetRxFreq(audio); }
       return;
     }
     var hz = window.ScopeAxis.snapTapHz(window.ScopeAxis.binToHz(ax, Math.max(0, Math.min(1, frac)) * 849), bsState && bsState.spanHz);
     window.api.tune((hz / 1000).toFixed(3), null);
   }
   function bsDraw() {
-    if (!bsTrace || !(bsOn && bsAvailable)) return;
+    if (!bsTrace || !bsShowing()) return;
     var A = window.ScopeAxis;
     var ax = bsAxis();
     var dpr = window.devicePixelRatio || 1;
@@ -2867,7 +2889,7 @@ function _applyPopoutTheme(payload) {
   }
   if (window.api.onScopeFrame) {
     window.api.onScopeFrame(function(f) {
-      if (!(bsOn && bsAvailable) || !f || !f.bins || f.bins.length !== 850) return;
+      if (!bsShowing() || !f || !f.bins || f.bins.length !== 850) return;
       var bins = (wfFloor > 0 && window.ScopeAxis) ? window.ScopeAxis.applyFloor(f.bins, wfFloor) : f.bins;
       bsLatest = bins;
       if (!bsSmooth) bsSmooth = new Float32Array(850);
@@ -2877,13 +2899,15 @@ function _applyPopoutTheme(payload) {
     });
   }
   if (window.api.onCatFrequency) {
-    window.api.onCatFrequency(function(hz) { if (hz > 0) { bsDialHz = hz; if (bsOn && bsAvailable) bsDraw(); } });
+    window.api.onCatFrequency(function(hz) { if (hz > 0) { bsDialHz = hz; if (bsShowing()) bsDraw(); } });
   }
   if (bsToggle) bsToggle.addEventListener('change', function() { bsSetOn(bsToggle.checked, true); });
+  if (bsWfCanvas) bsWfCanvas.addEventListener('mousedown', function(e) { bsClickShift = !!e.shiftKey; });
+  if (bsFreq) bsFreq.addEventListener('mousedown', function(e) { bsClickShift = !!e.shiftKey; });
   if (bsTrace) bsTrace.addEventListener('click', function(e) { var r = bsTrace.getBoundingClientRect(); if (r.width > 0) bsTune((e.clientX - r.left) / r.width); });
   if (bsFreq) bsFreq.addEventListener('click', function(e) { var r = bsFreq.getBoundingClientRect(); if (r.width > 0) bsTune((e.clientX - r.left) / r.width); });
   if (bsEnableBtn) bsEnableBtn.addEventListener('click', function() { if (window.api.scopeEnableOnRadio) window.api.scopeEnableOnRadio(); });
-  window.addEventListener('resize', function() { if (bsOn && bsAvailable) { if (bsWf && bsWf.supported) bsWf.resize(); bsDraw(); } });
+  window.addEventListener('resize', function() { if (bsShowing()) { if (bsWf && bsWf.supported) bsWf.resize(); bsDraw(); } });
 
   // ARRL Field Day mode toggle + exchange entry. Shared by the ⚙ row and the
   // bar chip (the chip delegates here). Turning FD OFF while Hunt: Field Day

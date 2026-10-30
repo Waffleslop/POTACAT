@@ -416,6 +416,11 @@
     #jp-wf-silent.show { display: flex; }
     #jp-wf-silent strong { color: #f0a500; font-size: 11px; font-weight: 700; letter-spacing: 0.3px; text-shadow: 0 1px 2px #000; }
     #jp-wf-silent span { color: #f0c060; font-size: 9px; opacity: 0.85; }
+    /* A Flex's own waterfall replaces the audio waterfall (jtcat-popout.js bsRadioWf):
+       no header, no trace, the frequency scale over a taller waterfall. */
+    #jp-wf-single.jp-wf-replaced { display: none !important; }
+    #jp-bandscope.jp-bs-radio-wf > div:first-child, #jp-bandscope.jp-bs-radio-wf #jp-bs-trace { display: none !important; }
+    #jp-bandscope.jp-bs-radio-wf #jp-bs-wf { height: 120px !important; }
 
     /* Station popup */
     .jp-station-popup .leaflet-popup-content-wrapper { background: var(--bg-secondary, #1a1a2e); color: var(--text-primary, #eee); border: 1px solid var(--border-primary, #333); border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }

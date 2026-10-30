@@ -28616,6 +28616,10 @@ function yaesuScopeStatePayload() {
     // Whether the active rig can do this at all — the JTCAT pop-out and the
     // web client show their band-scope controls only when it is true.
     available: yaesuScopeSynth || !!scopeSourceKind(),
+    // Which source the rig has, before it runs: a Flex's waterfall REPLACES
+    // the FT8 window's audio waterfall (Casey 2026-10-30), so the window has
+    // to know it is a Flex before the first frame.
+    sourceKind: yaesuScopeSynth ? 'synth' : scopeSourceKind(),
   };
 }
 
@@ -28638,6 +28642,7 @@ function yaesuScopeRemotePayload(extra) {
     centerOffsetHz: s.centerOffsetHz || 0, decodeWindow: s.decodeWindow || null,
     axis: YaesuScope.scopeAxis({ centerHz: s.centerHz + (s.centerOffsetHz || 0), spanHz: s.spanHz, anchor: s.anchor }),
     available: yaesuScopeSynth || !!scopeSourceKind(),
+    sourceKind: yaesuScopeSynth ? 'synth' : scopeSourceKind(),
     fps: settings.yaesuScopeFps || 20,
     synth: yaesuScopeSynth,
     spans: scopeSpans(),

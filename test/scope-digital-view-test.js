@@ -106,5 +106,41 @@ check('a click on the strip in the digital view sets the audio frequency, not th
   assert.ok(/decodeWindow/.test(fn) && /jtcatSetTxFreq\(audio, true\)/.test(fn));
 });
 
+console.log('One waterfall on a Flex (Casey 2026-10-30)');
+const html = fs.readFileSync(path.join(ROOT, 'renderer/jtcat-popout.html'), 'utf8');
+const web = fs.readFileSync(path.join(ROOT, 'renderer/remote.js'), 'utf8');
+const webCss = fs.readFileSync(path.join(ROOT, 'renderer/remote.css'), 'utf8');
+check('the FT8 window knows the source before the scope runs (sourceKind on scope-state, local and ECHOCAT)', () => {
+  const n = (main.match(/sourceKind: yaesuScopeSynth \? 'synth' : scopeSourceKind\(\)/g) || []).length;
+  assert.strictEqual(n, 2);
+});
+check('a live Flex scope replaces the audio waterfall; never in multi-slice; required (no checkbox)', () => {
+  assert.ok(/function bsRadioWf\(\) \{ return bsFlex\(\) && bsState\.status === 'live' && !multiActive; \}/.test(pop));
+  assert.ok(/single\.classList\.toggle\('jp-wf-replaced', radioWf\)/.test(pop));
+  assert.ok(/bsRow\.classList\.toggle\('hidden', !bsAvailable \|\| bsFlex\(\)\)/.test(pop));
+  assert.ok(/#jp-wf-single\.jp-wf-replaced \{ display: none !important; \}/.test(html));
+  assert.ok(/#jp-bandscope\.jp-bs-radio-wf #jp-bs-trace/.test(html), 'no trace');
+});
+check('a Flex watches its scope without the checkbox', () => {
+  assert.ok(/function bsShowing\(\) \{ return !!\(bsAvailable && \(bsOn \|\| bsFlex\(\)\)\); \}/.test(pop));
+  assert.ok(/function bsSyncWatch\(\) \{\s+var want = bsShowing\(\);/.test(pop));
+});
+check('the RX-silent warning moves onto the radio waterfall', () => {
+  assert.ok(/var silentHome = radioWf \? bsWrap : single;/.test(pop));
+});
+check('Shift+click sets TX only, as on the audio waterfall', () => {
+  assert.ok(/bsWfCanvas\.addEventListener\('mousedown', function\(e\) \{ bsClickShift = !!e\.shiftKey; \}\)/.test(pop));
+  assert.ok(/if \(!\(bsClickShift && !isKeyboardMode\(\)\)\) \{ jpRxFreqHz = audio; window\.api\.jtcatSetRxFreq\(audio\); \}/.test(pop));
+});
+check('multi-slice re-evaluates (the audio waterfalls come back)', () => {
+  assert.ok(/bsApplyVisibility\(\);   \/\/ multi-slice brings/.test(pop));
+});
+check('ECHOCAT Web: on a Flex, waterfall only, and BS / WF are one choice', () => {
+  assert.ok(/strip\.classList\.toggle\('ft8-bs-radio-wf', ft8ScopeIsFlex\(\)\)/.test(web));
+  assert.ok(/if \(ft8BsOn && ft8ScopeIsFlex\(\) && wfBtn && wfBtn\.classList\.contains\('active'\)\) wfBtn\.click\(\);/.test(web));
+  assert.ok(/if \(ft8WfVisible && ft8BsOn && ft8ScopeIsFlex\(\)\)/.test(web));
+  assert.ok(/#ft8-bandscope\.ft8-bs-radio-wf #ft8-bs-trace/.test(webCss));
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

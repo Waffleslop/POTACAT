@@ -4554,3 +4554,7 @@ body.popout-mode .popout-only { display: flex; }
 .dxe-badge { margin-left: 4px; padding: 0 4px; border-radius: 3px; font-size: 10px; font-weight: 700; color: #fff; background: #e94560; vertical-align: middle; }
 .dxe-badge.contest { background: #4fc3f7; color: #10131f; }
 .dx-badge { margin-left: 4px; padding: 0 4px; border-radius: 3px; font-size: 10px; font-weight: 700; color: #000; background: #ffd740; vertical-align: middle; }
+
+/* FT8 tab on a Flex: the radio's waterfall alone (remote.js ft8ScopeIsFlex). */
+#ft8-bandscope.ft8-bs-radio-wf > div:first-child, #ft8-bandscope.ft8-bs-radio-wf #ft8-bs-trace { display: none !important; }
+#ft8-bandscope.ft8-bs-radio-wf #ft8-bs-wf { height: 120px !important; }
