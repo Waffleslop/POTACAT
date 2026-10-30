@@ -3405,7 +3405,7 @@ function sendCatFrequency(hz) {
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-frequency', hz);
   if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('cat-frequency', hz);
   if (scopePopoutWin && !scopePopoutWin.isDestroyed()) scopePopoutWin.webContents.send('cat-frequency', hz);
-  yaesuScopeNoteFrequency(listenSdr.live && yaesuScopeState.source !== 'sdr' ? _currentFreqHz : hz); // the scope's axis is centred on the dial (a Flex pan cannot show the SDR's frequency)
+  yaesuScopeNoteFrequency(hz); // the scope's axis is centred on the dial
   if (logPopoutWin && !logPopoutWin.isDestroyed()) logPopoutWin.webContents.send('cat-frequency', hz);
   // JS8 window: the dial readout + band picker follow the rig live. The
   // window shipped blind in v1.10.0 ("doesn't show the band I'm on" —
@@ -28818,6 +28818,10 @@ function yaesuScopeSetStatus(status, diag) {
 /** Called from sendCatFrequency — the single frequency sink — so every QSY path centres the axis. */
 function yaesuScopeNoteFrequency(hz) {
   if (!(hz > 0)) return;
+  // The SDR is what you hear, on a frequency the radio cannot reach: only a
+  // scope fed by that SDR can show it. A Flex pan, an FT-710 or an Icom
+  // stays on the radio's own dial.
+  if (listenSdr.live && hz === listenSdr.hz && yaesuScopeState.source !== 'sdr') { hz = _currentFreqHz; if (!(hz > 0)) return; }
   scopeOverlaySync();   // a band change moves the band plan (deduped by content)
   // The Flex panadapter has its own centre (pan status) and the slice can sit
   // anywhere in it; only when the dial leaves the view is the pan recentred.

@@ -312,7 +312,7 @@ test('main.js: kiwi-connect probes any port but 8073, and a newer connect wins',
   assert.ok(/if \(seq !== kiwiConnectSeq\) return;/.test(h));
   assert.ok(/new RtlTcpAudio\.RtlTcpAudioClient\(\{ sdr: rtlTcpSdrSettingsFor\(host, port\) \}\)/.test(h));
   assert.ok(/kiwiClient\.attach\(scopeShare\.client, scopeShare\)/.test(h), 'shares a server the scope already holds');
-  assert.ok((h.match(/kind: sdrKind/g) || []).length >= 2, 'kiwi-status names the kind to windows and ECHOCAT');
+  assert.ok(/kiwiKind = sdrKind;/.test(h) && /kind: kiwiKind \|\| undefined/.test(MAIN), 'kiwi-status names the kind to windows and ECHOCAT (broadcastKiwiStatus)');
 });
 
 test('main.js: the band scope hands the server to and from a listener', () => {
