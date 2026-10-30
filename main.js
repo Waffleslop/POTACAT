@@ -30286,7 +30286,9 @@ function sendWrlUdp(qsoData, host, port) {
 function sendN3fjpTcp(qsoData, host, port) {
   return new Promise((resolve, reject) => {
     const net = require('net');
-    const record = buildAdifRecord(qsoData);
+    // N3FJP names the entity "USA" and fills DXCC from it; cty.dat's
+    // "United States" leaves its DXCC field blank (AE5JE 2026-10-29).
+    const record = require('./lib/n3fjp-pull').n3fjpCountry(buildAdifRecord(qsoData));
     const cmd = `<CMD><ADDADIFRECORD><VALUE>${record}</VALUE></CMD>\r\n`;
 
     let settled = false;
