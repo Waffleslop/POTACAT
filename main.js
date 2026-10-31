@@ -2250,8 +2250,36 @@ function atuWizardFinish(state) {
   const counts = Object.entries(s.counts).filter(([, n]) => n).map(([k, n]) => `${k} ${n}`).join(', ');
   sendCatLog(`[ATU wizard] ${state.phase}: ${s.green} of ${s.total} points match (${counts || 'nothing measured'})${saved ? ` — saved as ${saved}` : ''}`);
   const rig = atuWizardActiveRig();
-  atuWizardPush({ ...state, saved, trend: rig ? atuWizardTrend(rig.id) : [], advice: AtuWizard.adviceFor(state.points) });
+  const bands = !state.verify && state.phase === 'done' ? atuWizardApplyBands(rig, state.points) : null;
+  atuWizardPush({ ...state, saved, trend: rig ? atuWizardTrend(rig.id) : [], advice: AtuWizard.adviceFor(state.points), bands });
   try { if (win && !win.isDestroyed()) win.webContents.send('station-setup-changed'); } catch { /* no window */ }
+}
+
+/**
+ * A finished calibration updates the radio's band list: bands where every
+ * measured point failed are hidden from this rig (spots, pickers, ECHOCAT)
+ * until a later run matches there; bands that matched come back. The
+ * operator's own ticks in the rig editor are never touched — the verdict
+ * rides beside them on rig.atuBands and activeRigBands() applies it.
+ * Returns {noMatch, matched, hidden, restored} for the results page.
+ */
+function atuWizardApplyBands(rig, points) {
+  if (!rig) return null;
+  const v = AtuWizard.bandVerdicts(points);
+  const prev = (rig.atuBands && Array.isArray(rig.atuBands.noMatch)) ? rig.atuBands.noMatch : [];
+  const noMatch = [...new Set([...prev.filter(b => !v.matched.includes(b)), ...v.noMatch])]
+    .sort((a, b) => AtuWizard.BANDS.indexOf(a) - AtuWizard.BANDS.indexOf(b));
+  const hidden = noMatch.filter(b => !prev.includes(b));
+  const restored = prev.filter(b => !noMatch.includes(b));
+  rig.atuBands = { at: Date.now(), noMatch, matched: v.matched };
+  try { saveSettings(settings); } catch { /* next save carries it */ }
+  if (hidden.length) sendCatLog(`[ATU wizard] no tuner match on ${hidden.join(', ')} — hidden from this radio's bands and spots (the rig editor shows this; a later run that matches puts them back)`);
+  if (restored.length) sendCatLog(`[ATU wizard] ${restored.join(', ')} matched this time — back in this radio's bands`);
+  if (hidden.length || restored.length) {
+    rigBandsBroadcast(true);
+    try { if (win && !win.isDestroyed()) win.webContents.send('rig-atu-bands', { rigId: rig.id, atuBands: rig.atuBands }); } catch { /* no window */ }
+  }
+  return { ...v, noMatch, hidden, restored };
 }
 
 /** Stop a run from anywhere (quit, link drop, window closed). Safe when none is running. */
@@ -4967,7 +4995,17 @@ function activeRigBands() {
   let name = rig.model || '';
   // Icom CI-V rigs usually name their model in the connection form's picker.
   if (!getModel(name, null) && rig.catTarget && rig.catTarget.civModel) name = rig.catTarget.civModel;
-  return RigBands.bandsForRig(rig, name, getModel(name, null));
+  const base = RigBands.bandsForRig(rig, name, getModel(name, null));
+  // Bands the Tuner Memories run found no match on (rig.atuBands.noMatch, a
+  // Flex with an internal ATU) are hidden with the rest: an EFHW's 17 m and
+  // 12 m are not bands this station can transmit on, so their spots are not
+  // shown (Casey 2026-10-31). The operator's own ticks stay as they are; a
+  // later run that matches there puts the band back.
+  const noMatch = rig.atuBands && Array.isArray(rig.atuBands.noMatch) ? rig.atuBands.noMatch : [];
+  if (!noMatch.length) return base;
+  const all = base || RigBands.ALL_BANDS;
+  const out = all.filter(b => !noMatch.includes(b));
+  return out.length ? out : base;
 }
 
 let _rigBandsLastSent = '';
@@ -43246,7 +43284,7 @@ app.whenReady().then(() => {
     // keys keeps main's — otherwise the next rig edit would wipe them and the
     // checklist would nag about steps that already work.
     if (Array.isArray(newSettings.rigs) && Array.isArray(settings.rigs)) {
-      const SETUP_KEYS = ['setupPassed', 'setupSkipped', 'setupChecklistHidden', 'setupAnnounced', 'setupShareId', 'setupShared', 'setupMeasured', 'metersSeen', 'winlinkAudio', 'modemCable'];
+      const SETUP_KEYS = ['setupPassed', 'setupSkipped', 'setupChecklistHidden', 'setupAnnounced', 'setupShareId', 'setupShared', 'setupMeasured', 'metersSeen', 'winlinkAudio', 'modemCable', 'atuBands'];
       newSettings.rigs = newSettings.rigs.map((r) => {
         const cur = r && settings.rigs.find(x => x && x.id === r.id);
         if (!cur) return r;

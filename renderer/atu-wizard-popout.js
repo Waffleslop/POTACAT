@@ -234,8 +234,14 @@ function renderResults(s) {
   if (!s.advice && sum.done > 0) { adv.classList.add('show', 'ok'); adv.textContent = s.verify ? 'Every point recalled a memory or needs no tuner.' : 'Every measured point matches. The radio now recalls these on every band change.'; }
   const tr = $('res-trend');
   const flags = s.trend || [];
-  tr.classList.toggle('show', flags.length > 0);
-  tr.textContent = flags.length ? 'Since the previous run the antenna looks worse here (bypass SWR up by more than 0.5): ' + flags.map(f => `${f.band} ${fmtMhz(f.freqKhz)} MHz ${f.from.toFixed(1)} → ${f.to.toFixed(1)}`).join('; ') + '. An early sign of coax or antenna trouble.' : '';
+  const b = s.bands || null;
+  const bandLines = [];
+  if (b && b.hidden && b.hidden.length) bandLines.push(`No tuner match on ${b.hidden.join(', ')}: hidden from this radio's bands, so their spots are not shown. Run again to re-check; a match puts them back.`);
+  if (b && b.restored && b.restored.length) bandLines.push(`${b.restored.join(', ')} matched this time and are back in this radio's bands.`);
+  if (b && b.noMatch && b.noMatch.length && !(b.hidden && b.hidden.length)) bandLines.push(`Still hidden from this radio's bands (no tuner match): ${b.noMatch.join(', ')}.`);
+  if (flags.length) bandLines.push('Since the previous run the antenna looks worse here (bypass SWR up by more than 0.5): ' + flags.map(f => `${f.band} ${fmtMhz(f.freqKhz)} MHz ${f.from.toFixed(1)} → ${f.to.toFixed(1)}`).join('; ') + '. An early sign of coax or antenna trouble.');
+  tr.classList.toggle('show', bandLines.length > 0);
+  tr.textContent = bandLines.join(' ');
   const tb = $('res-table').querySelector('tbody'); tb.innerHTML = '';
   for (const p of s.points) tb.appendChild(pointRow(p, false));
   lastRunShown = s.saved || null;

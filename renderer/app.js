@@ -3207,11 +3207,19 @@ function renderRigBandsGrid() {
   if (!grid || !window.RigBands) return;
   grid.textContent = '';
   const native = rigBandsState.native ? new Set(rigBandsState.native) : null;
+  // Bands the Tuner Memories run found no match on (rig.atuBands.noMatch):
+  // hidden everywhere by main whatever the tick says, until a run matches.
+  const noMatch = new Set(rigBandsState.atuNoMatch || []);
   for (const b of window.RigBands.ALL_BANDS) {
     const lab = document.createElement('label');
     if (native && !native.has(b)) {
       lab.className = 'rig-band-extra';
       lab.title = 'Not a band this model covers on its own (a transverter or an option)';
+    }
+    if (noMatch.has(b)) {
+      lab.style.textDecoration = 'line-through';
+      lab.style.opacity = '0.6';
+      lab.title = 'The antenna tuner found no match here in the last Tuner Memories run — hidden until a run matches';
     }
     const cb = document.createElement('input');
     cb.type = 'checkbox';
@@ -3224,6 +3232,17 @@ function renderRigBandsGrid() {
     lab.appendChild(document.createTextNode(b));
     grid.appendChild(lab);
   }
+  let note = document.getElementById('rig-bands-atu-note');
+  if (!note) {
+    note = document.createElement('span');
+    note.id = 'rig-bands-atu-note';
+    note.className = 'help-text';
+    note.style.cssText = 'display:block;margin-top:4px;';
+    grid.insertAdjacentElement('afterend', note);
+  }
+  const nm = [...noMatch].filter(b => window.RigBands.ALL_BANDS.includes(b));
+  note.textContent = nm.length ? `Hidden by the last Tuner Memories run (no tuner match): ${nm.join(', ')}. The tick stays yours; run Tuner Memories again to re-check.` : '';
+  note.style.display = nm.length ? 'block' : 'none';
 }
 async function loadRigBandsForModel() {
   let native = null;
@@ -3235,6 +3254,7 @@ async function loadRigBandsForModel() {
 }
 async function initRigBandsForEditor(rig) {
   const saved = rig && window.RigBands ? window.RigBands.cleanBands(rig.bands) : null;
+  rigBandsState.atuNoMatch = rig && rig.atuBands && Array.isArray(rig.atuBands.noMatch) ? rig.atuBands.noMatch.slice() : [];
   rigBandsState.touched = !!saved;
   rigBandsState.selected = new Set(saved || []);
   await loadRigBandsForModel();
@@ -21867,6 +21887,17 @@ function applyRigBandsMain() {
 if (window.api && window.api.rigBandsGet) {
   window.api.rigBandsGet().then((d) => { rigBandsList = (d && d.bands) || null; applyRigBandsMain(); }).catch(() => {});
   window.api.onRigBands((d) => { rigBandsList = (d && d.bands) || null; applyRigBandsMain(); });
+  // The renderer's rig copy is what the editor saves whole: keep the tuner
+  // verdict current in it, and redraw the grid if that rig is being edited.
+  if (window.api.onRigAtuBands) window.api.onRigAtuBands((d) => {
+    if (!d || !d.rigId) return;
+    const rig = (currentRigs || []).find(r => r && r.id === d.rigId);
+    if (rig) rig.atuBands = d.atuBands;
+    if (typeof editingRigId !== 'undefined' && editingRigId === d.rigId) {
+      rigBandsState.atuNoMatch = d.atuBands && Array.isArray(d.atuBands.noMatch) ? d.atuBands.noMatch.slice() : [];
+      try { renderRigBandsGrid(); } catch { /* editor not open */ }
+    }
+  });
 }
 
 const HEATMAP_BANDS = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '4m', '2m', '70cm', '1.25m', '33cm', '23cm', '13cm', '9cm', '6cm', '3cm', '1.25cm'];

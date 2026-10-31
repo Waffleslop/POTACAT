@@ -126,6 +126,22 @@ t('advice names a whole failed band, else the count', () => {
   assert.ok(/1 point did not match/.test(W.adviceFor([{ band: '15m', result: 'FAILED' }, { band: '15m', result: 'TUNED' }])));
   assert.strictEqual(W.adviceFor([{ band: '15m', result: 'TUNED' }]), '');
 });
+t('band verdicts (K3SBP run 2): every 17 m and 12 m point failed → no match; a band with any pass is matched; skips and single points say nothing', () => {
+  const P = (band, result) => ({ band, result });
+  const pts = [
+    P('40m', 'RECALLED'), P('40m', 'SKIPPED'), P('40m', 'TUNED'),
+    P('17m', 'FAILED'), P('17m', 'FAILED'), P('17m', 'FAILED'),
+    P('12m', 'FAILED'), P('12m', 'TIMEOUT'),
+    P('15m', 'FAILED'), P('15m', 'TUNED'),
+    P('6m', 'FAILED'),                       // one measurement: not enough
+    P('80m', 'SKIPPED'), P('80m', 'SKIPPED'), // nothing measured
+    P('30m', null),                          // never reached
+  ];
+  const v = W.bandVerdicts(pts);
+  assert.deepStrictEqual(v.noMatch, ['17m', '12m']);
+  assert.deepStrictEqual(v.matched, ['40m', '15m']);
+});
+
 t('CSV has one header and one row per point', () => {
   const csv = W.csvFor({ points: [{ band: '20m', mode: 'CW', freqKhz: 14045, label: '', bypassSwr: 1.4, tunedSwr: 1.1, atuStatus: 'TUNE_SUCCESSFUL', result: 'TUNED', durationMs: 2400 }] });
   assert.strictEqual(csv.trim().split('\n').length, 2);
@@ -359,6 +375,12 @@ function fastHooks(log) {
     assert.ok(setup.includes("'atu-memories'"));
     assert.ok(main.includes("case 'open-atu-wizard'"));
     assert.ok(/atu:\s*atuWizardSetupLive\(rig\)/.test(main.slice(main.indexOf('function stationSetupLive'), main.indexOf('function stationSetupLive') + 4000)));
+  });
+  t('a finished calibration updates the rig band list: atuBands rides the rig, survives an editor save, filters activeRigBands', () => {
+    assert.ok(main.includes('atuWizardApplyBands(rig, state.points)'), 'applied on finish');
+    assert.ok(/SETUP_KEYS = \[[^\]]*'atuBands'/.test(main), 'carried forward past a stale rig-editor save');
+    const fn = main.slice(main.indexOf('function activeRigBands()'), main.indexOf('function activeRigBands()') + 1600);
+    assert.ok(/atuBands\.noMatch/.test(fn), 'activeRigBands hides the no-match bands');
   });
   t('remote mode lists the wizard as unavailable and the menu entry is rig-scoped', () => {
     const rf = require('../lib/remote-features');
