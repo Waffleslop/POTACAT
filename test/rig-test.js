@@ -740,6 +740,119 @@ test('CIV setFilterWidth 2400 SSB -> 1A 03 idx 28 (BCD 0x28)', () => {
   assert.ok(hex.includes('1a0328'), `Expected 1A 03 28, got: ${hex}`);
 });
 
+// --- Split, VFO and the other VFO over CI-V (WC5T IC-7300, 2026-10-31) ---
+// Frames FROM the radio are FE FE E0 94 <cmd> ... FD.
+const civFrom94 = (...bytes) => Buffer.from([0xFE, 0xFE, 0xE0, 0x94, ...bytes, 0xFD]);
+
+test('CIV getVfoSplit polls split (0F), and the other VFO (25 01) only once split is on', () => {
+  const { codec, writes } = captureWrites(CivCodec, IC7300_MODEL);
+  const splits = [];
+  codec.on('split', (on) => splits.push(on));
+  codec.getVfoSplit();
+  assert.deepStrictEqual(writes.map(w => w.slice(8, 10)), ['0f'], writes.join(','));
+  assert.ok(!writes.some(w => w.includes('2501')), 'no other-VFO read while split is unknown/off');
+  codec.onData(civFrom94(0x0F, 0x01));
+  assert.deepStrictEqual(splits, [true]);
+  codec.getVfoSplit();
+  assert.ok(writes.some(w => w.startsWith('fefe94e02501fd')), `expected 25 01 read, got ${writes.join(',')}`);
+  codec.onData(civFrom94(0x0F, 0x00));
+  assert.deepStrictEqual(splits, [true, false]);
+  codec.onData(civFrom94(0x0F, 0x00));            // a repeat is not re-emitted
+  assert.deepStrictEqual(splits, [true, false]);
+});
+
+test('CIV 25 01 reply is the other VFO frequency; 25 00 (selected) is left to the 03 poll', () => {
+  const { codec } = captureWrites(CivCodec, IC7300_MODEL);
+  const other = [], freq = [];
+  codec.on('frequencyOther', (hz) => other.push(hz));
+  codec.on('frequency', (hz) => freq.push(hz));
+  codec.onData(civFrom94(0x25, 0x01, ...codec._encodeFreqBCD(14205000)));
+  codec.onData(civFrom94(0x25, 0x00, ...codec._encodeFreqBCD(14074000)));
+  assert.deepStrictEqual(other, [14205000]);
+  assert.deepStrictEqual(freq, []);
+});
+
+test('CIV setFrequencyOther sends 25 01 <BCD> and never touches the dial (05)', () => {
+  const { codec, writes } = captureWrites(CivCodec, IC7300_MODEL);
+  assert.strictEqual(codec.setFrequencyOther(14205000), true);
+  assert.strictEqual(writes.length, 1);
+  const bcd = Buffer.from(codec._encodeFreqBCD(14205000)).toString('hex');
+  assert.strictEqual(writes[0], 'fefe94e02501' + bcd + 'fd');
+});
+
+test('CIV: three NAKs to 25 latch the other-VFO command off (older IC-7300 firmware), with one log line', () => {
+  const { codec, writes } = captureWrites(CivCodec, IC7300_MODEL);
+  const logs = [], errors = [];
+  codec.on('log', (l) => logs.push(l));
+  codec.on('error', (e) => errors.push(e));
+  codec.onData(civFrom94(0x0F, 0x01));             // split on → the poll asks 25 01
+  for (let i = 0; i < 3; i++) { codec.getVfoSplit(); codec.onData(civFrom94(0xFA)); }
+  assert.ok(logs.some(l => /25 01\) not supported/.test(l)), logs.join('\n'));
+  assert.strictEqual(errors.length, 0, 'the NAKs are explained, never raised as CI-V errors');
+  const before = writes.length;
+  codec.getVfoSplit();
+  assert.ok(!writes.slice(before).some(w => w.includes('2501')), 'not asked again');
+  assert.strictEqual(codec.setFrequencyOther(14205000), false);
+  assert.strictEqual(writes.length, before + 1, 'only the 0F poll went out');
+});
+
+test('CIV VFO letter follows the radio\'s ACK of 07, not the request; a NAK leaves it', () => {
+  const { codec, writes } = captureWrites(CivCodec, IC7300_MODEL);
+  const vfos = [];
+  codec.on('vfo', (v) => vfos.push(v));
+  codec.swapVfo();
+  assert.ok(writes[0].startsWith('fefe94e007b0'), writes[0]);
+  assert.deepStrictEqual(vfos, [], 'nothing reported before the ACK');
+  codec.onData(civFrom94(0xFB));
+  assert.deepStrictEqual(vfos, ['B']);
+  codec.setVfo('A');
+  assert.ok(writes[1].startsWith('fefe94e00700fd'), writes[1]);
+  codec.onData(civFrom94(0xFA));
+  assert.deepStrictEqual(vfos, ['B'], 'a refused VFO command changes nothing');
+  codec.setVfo('A');
+  codec.onData(civFrom94(0xFB));
+  assert.deepStrictEqual(vfos, ['B', 'A']);
+});
+
+test('rigctld setFrequencyOther is `I <hz>`; the `i` readback is polled while split is on', () => {
+  const { codec, writes } = captureWrites(RigctldCodec, { brand: 'Hamlib', protocol: 'rigctld', caps: {}, maxPower: 100 });
+  assert.strictEqual(codec.setFrequencyOther(14205000), true);
+  assert.ok(writes.includes('I 14205000\n'), writes.join('|'));
+  codec._splitOnLast = true;
+  const n = writes.length;
+  codec.getVfoSplit();
+  assert.ok(writes.slice(n).includes('i\n'), 'polls i while split is on');
+});
+
+test('Kenwood setFrequencyOther writes the OTHER VFO (FB on A, FA on B) and reads it back; Yaesu declines', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, TS590_MODEL);
+  assert.strictEqual(codec.setFrequencyOther(14205000), true);
+  assert.ok(writes[0].startsWith('FB') && writes[0].includes('14205000'), writes[0]);
+  assert.strictEqual(writes[1], 'FB;');
+  codec._rxVfo = 'B';
+  codec.setFrequencyOther(7074000);
+  assert.ok(writes[2].startsWith('FA') && writes[2].includes('7074000'), writes[2]);
+  assert.strictEqual(writes[3], 'FA;');
+  const y = captureWrites(KenwoodCodec, FT891_MODEL);
+  assert.strictEqual(y.codec.setFrequencyOther(14205000), false);
+  assert.strictEqual(y.writes.length, 0);
+});
+
+test('every Icom model that offers VFO A/B also offers split, and the wiring exists end to end', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  for (const [id, m] of Object.entries(RIG_MODELS)) {
+    if (m.brand !== 'Icom' || !m.caps || !m.caps.vfo) continue;
+    assert.strictEqual(m.caps.split, true, `${id} has vfo but no split`);
+  }
+  const fs = require('fs'), path = require('path');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const ctl = fs.readFileSync(path.join(__dirname, '..', 'lib', 'rig-controller.js'), 'utf8');
+  assert.ok(main.includes("case 'set-freq-other'"), 'dispatcher action');
+  assert.ok(main.includes('caps.splitFreq ='), 'capability');
+  assert.ok(ctl.includes('setFrequencyOther(hz)') && ctl.includes('get hasFrequencyOther()'), 'controller');
+  assert.ok(/this\._codec\.getVfoSplit\(\)/.test(ctl), 'the poll cycle asks the codec');
+});
+
 test('CIV setFilterWidth 500 CW -> idx 9; 50 CW -> idx 0', () => {
   const a = captureWrites(CivCodec, IC7300_MODEL);
   a.codec._lastMode = 'CW';

@@ -2941,6 +2941,10 @@ function getRigCapabilities(rigType) {
   // Tuner Memories (lib/atu-wizard.js): a Flex with an internal ATU only.
   // Every client gates its entry point on this, the rig-scoped UI rule.
   caps.atuWizard = atuWizardRigOk();
+  // The TX (other VFO) frequency can be SET on this rig: Icom 25 01, Kenwood
+  // FB/FA, rigctld I. Clients show the TX-frequency editor only where this is
+  // true, so a radio that lacks the command never gets a dead field.
+  caps.splitFreq = !!(caps.split && cat && cat.connected && cat.hasFrequencyOther);
   // The band scope's synthetic signal needs no radio, but every client gates
   // its scope controls on nativeScope — so with the switch on, any rig
   // reports one. That is how all three clients get bench-tested without an
@@ -40918,6 +40922,21 @@ app.whenReady().then(() => {
         // Same private-second-implementation drift the set-vfo case above was
         // folded into the dispatcher to kill.
         if (!sendCatSplit(on)) broadcastRigState(); // echo even on a no-op
+        break;
+      }
+      // The OTHER VFO's frequency — the TX side in split — set without
+      // moving the dial (WC5T IC-7300, 2026-10-31). Icom 25 01, Kenwood
+      // FB/FA, rigctld I. No optimistic echo: the readback (`frequencyOther`
+      // → sendCatFreqOther) is what every surface shows, and the sink clamps
+      // it to nothing while split is off. Offered where caps.splitFreq.
+      case 'set-freq-other': {
+        const hz = Math.round(Number(data.hz));
+        if (!Number.isFinite(hz) || hz < 10000) break;
+        if (flexSdr()) { _flexWarnOnce('A second TX frequency on a Flex is a second slice — use the Rig popover'); break; }
+        if (cat && cat.connected && typeof cat.setFrequencyOther === 'function') {
+          if (cat.setFrequencyOther(hz) === false) break;
+          sendCatLog(`[CAT] TX (other VFO) frequency set to ${(hz / 1e6).toFixed(6)} MHz${_currentSplit ? '' : ' — split is off, so it is not shown until split is on'}`);
+        }
         break;
       }
       case 'set-comp': {
