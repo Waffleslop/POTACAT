@@ -450,6 +450,7 @@ const { IambicKeyer } = require('./lib/keyer');
 const { WinKeyer } = require('./lib/winkeyer');
 const { parsePotaParksCSV, parsePotaActivationsCSV } = require('./lib/pota-parks');
 const { PotaSync } = require('./lib/pota-sync');
+const PotaHunterImport = require('./lib/pota-hunter-import');
 const { WsjtxClient, extractCallsigns, encodeHeartbeat, encodeStatus, encodeLoggedAdif, encodeQsoLogged, encodeDecode, decodeFromJtcat, parseBridgeInbound, replySlot } = require('./lib/wsjtx');
 const { PskrClient } = require('./lib/pskreporter');
 const PskrTx = require('./lib/pskreporter-tx');
@@ -35265,6 +35266,103 @@ app.whenReady().then(() => {
   // a stale renderer build calling them shouldn't error.
   ipcMain.handle('pota-sync-set-enabled', async () => potaSync.status());
   ipcMain.handle('pota-sync-set-interval', async () => potaSync.status());
+
+  // Pull the whole pota.app hunter log and fold it into the local log: a
+  // matching QSO gets the park refs it lacks, a contact the log doesn't have
+  // is added (lib/pota-hunter-import.js). One backup, one write, one journal
+  // batch, and a CSV of every decision for the operator to review.
+  let potaHunterImportRunning = false;
+  // { dryRun: true } downloads and plans the same way but changes nothing:
+  // no backup, no write, no journal; only the review CSV, marked as a dry run.
+  ipcMain.handle('pota-hunter-import', async (event, opts) => {
+    const dryRun = !!(opts && opts.dryRun);
+    if (potaHunterImportRunning) return { ok: false, error: 'A hunter log import is already running.' };
+    potaHunterImportRunning = true;
+    const parentWin = BrowserWindow.fromWebContents(event.sender) || win;
+    const progress = (p) => { try { if (!event.sender.isDestroyed()) event.sender.send('pota-hunter-import-progress', p); } catch {} };
+    try {
+      const { entries, count } = await potaSync.fetchHunterLog({ onProgress: progress });
+      const myCalls = [settings.myCallsign, potaSync.status().connectedAs].filter(Boolean);
+
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const logPath = qsoLogPath();
+      let backupPath = null;
+      let plan = null;
+      let changes = [];
+      if (dryRun) {
+        plan = PotaHunterImport.planHunterImport(QsoLog.readLog(logPath), entries, { myCalls });
+      } else {
+        if (fs.existsSync(logPath)) {
+          backupPath = `${logPath}.pre-pota-hunter-import-${stamp}.bak`;
+          fs.copyFileSync(logPath, backupPath);
+        }
+        ({ changes } = mutateQsoLog((qsos) => {
+          plan = PotaHunterImport.planHunterImport(qsos, entries, { myCalls });
+          if (!plan.updates.length && !plan.adds.length) return false;
+          return PotaHunterImport.applyHunterPlan(qsos, plan);
+        }));
+        if (!changes.length && backupPath) { try { fs.unlinkSync(backupPath); } catch {} backupPath = null; }
+      }
+
+      const reviewDir = path.join(app.getPath('userData'), 'pota-hunter-import');
+      fs.mkdirSync(reviewDir, { recursive: true });
+      const reviewPath = path.join(reviewDir, `hunter-import-${dryRun ? 'dry-run-' : ''}${stamp}.csv`);
+      fs.writeFileSync(reviewPath, PotaHunterImport.planToCsv(plan, { downloaded: entries.length, reported: count, dryRun }));
+
+      const result = {
+        ok: true,
+        dryRun,
+        downloaded: entries.length,
+        reported: count,
+        updated: plan.updates.length,
+        added: plan.adds.length,
+        unchanged: plan.unchanged.length,
+        skipped: plan.skipped.length,
+        reviewPath,
+        backupPath,
+      };
+      sendCatLog(`[pota-hunter-import]${dryRun ? ' DRY RUN, nothing changed:' : ''} ${entries.length} of ${count} entries downloaded: `
+        + `${result.updated} ${dryRun ? 'would be ' : ''}updated, ${result.added} ${dryRun ? 'would be ' : ''}added, `
+        + `${result.unchanged} unchanged, ${result.skipped} skipped. Review: ${reviewPath}`);
+
+      if (changes.length) {
+        loadWorkedQsos();
+        loadWorkedParks();
+        scanLogForEvents();
+        rebuildContestHistory();
+        if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) qsoPopoutWin.webContents.send('qso-popout-refresh');
+      }
+
+      const contacts = result.updated + result.added + result.unchanged;
+      const detail = [
+        `Hunter log entries downloaded: ${entries.length.toLocaleString()} (POTA.app reports ${count.toLocaleString()}).`,
+        `That is ${contacts.toLocaleString()} contacts: a 2-fer is one entry per park.`,
+        '',
+        `${result.updated.toLocaleString()} QSOs ${dryRun ? 'would be ' : ''}updated with park references.`,
+        `${result.added.toLocaleString()} QSOs ${dryRun ? 'would be ' : ''}added to your logbook.`,
+        `${result.unchanged.toLocaleString()} already had their park.`,
+      ];
+      if (result.skipped) detail.push(`${result.skipped.toLocaleString()} entries skipped (see the review log).`);
+      if (dryRun) detail.push('', 'Dry run: your logbook was not changed. Run Import hunter log to apply.');
+      if (backupPath) detail.push('', `Your log before the import was saved to:\n${backupPath}`);
+      const { response } = await dialog.showMessageBox(parentWin, {
+        type: 'info',
+        title: 'POTA.app Hunter Log Import',
+        message: dryRun ? 'Hunter log dry run complete' : 'Hunter log import complete',
+        detail: detail.join('\n'),
+        buttons: ['OK', 'Show review log'],
+        defaultId: 0,
+      });
+      if (response === 1) require('electron').shell.showItemInFolder(reviewPath);
+      return result;
+    } catch (err) {
+      const error = err && err.message ? err.message : String(err);
+      sendCatLog('[pota-hunter-import] failed: ' + error);
+      return { ok: false, error };
+    } finally {
+      potaHunterImportRunning = false;
+    }
+  });
 
   // Spot history (per-callsign list of recent prior spots) for the ⓘ popover
   // on the desktop spots table. All sources are served from local rolling

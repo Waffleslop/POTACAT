@@ -3877,6 +3877,12 @@
           <span>Last refresh: <strong id="pota-sync-last">never</strong></span>
         </div>
         <p id="pota-sync-error" class="hidden" style="color:var(--accent-gold);font-size:11px;margin-top:4px;"></p>
+        <div style="margin-top:8px;display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-secondary);">
+          <button type="button" id="pota-hunter-import-preview" class="btn btn-sm" title="Dry run: shows what the import would do without changing your log">Preview import</button>
+          <button type="button" id="pota-hunter-import" class="btn btn-sm">Import hunter log</button>
+          <span id="pota-hunter-import-status"></span>
+        </div>
+        <span class="help-text" style="display:block;margin-top:4px;">Downloads your whole POTA.app hunter log. QSOs already in your log get the park reference added; contacts missing from your log are added. Your log is backed up first, and a CSV of every change is saved for review. Preview import does a dry run: same download and CSV, nothing changed.</span>
       </div>
     </fieldset>
 
