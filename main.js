@@ -28619,6 +28619,11 @@ let yaesuScopeCatTimer = null;
 let yaesuScopeCatBusy = false;
 let yaesuScopeCatDeadCycles = 0;     // consecutive poll cycles with no reply to any scope read
 let yaesuScopeScuLanWeSet = false;   // POTACAT turned SCU-LAN10 on → it turns it back off
+// A stopped helper keeps the FT4222 until it exits (up to 1.5 s): a start in
+// that window waits for the exit, or the new helper opens a busy device and
+// streams nothing (Ride1226 2026-10-30, the phone's VFO/Pan tab switch).
+let yaesuScopeStopping = null;
+let yaesuScopeStartAfterExit = false;
 let yaesuScopeSynth = false;         // generated signal, no radio (pop-out gear menu)
 let yaesuScopeRemoteWants = false;   // an ECHOCAT client has its Scope view open
 let yaesuScopeJtcatWants = false;    // the JTCAT pop-out is showing the band scope strip
@@ -28896,6 +28901,12 @@ function startYaesuScope() {
   if (kind === 'sdr') { startSdrScope(); return; }
   if (kind === 'flex') { startFlexScope(); return; }
   if (kind === 'icom') { startIcomScope(); return; }
+  if (yaesuScopeStopping && yaesuScopeStopping.exitCode === null && yaesuScopeStopping.signalCode === null) {
+    if (!yaesuScopeStartAfterExit) sendCatLog('[Scope] waiting for the previous helper to release the radio');
+    yaesuScopeStartAfterExit = true;
+    yaesuScopeSetStatus('starting', null);
+    return;
+  }
   if (!synth && !yaesuScopeRigHasScope()) {
     yaesuScopeSetStatus('unavailable', { key: 'no-rig', severity: 'blocker',
       headline: 'The active rig has no USB band scope',
@@ -28974,24 +28985,38 @@ function startYaesuScope() {
 function stopYaesuScope(why) {
   if (isRemoteMode()) { remoteShackScopeSubscribe(false); return; }
   if (yaesuScopeRestartTimer) { clearTimeout(yaesuScopeRestartTimer); yaesuScopeRestartTimer = null; }
+  yaesuScopeStartAfterExit = false;
   if (sdrScopeClient) { stopSdrScope(why); return; }
   if (flexScopeOn) { stopFlexScope(why); return; }
   if (icomScopeOn || (yaesuScopeState.source === 'icom' && !yaesuScopeProc)) { stopIcomScope(why); return; }
   yaesuScopeStopCatPolling();
-  if (yaesuScopeScuLanWeSet) {
+  // SCU-LAN10 goes back off once the helper has let go, unless the scope was
+  // reopened meanwhile (a reopen would otherwise get a silent bridge). On quit
+  // it goes now: the CAT link closes right after this.
+  const scuLanOff = () => {
+    if (!yaesuScopeScuLanWeSet) return;
     yaesuScopeScuLanWeSet = false;
     if (cat && cat.connected && typeof cat.sendRaw === 'function') {
       cat.sendRaw('EX0301260;');
       sendCatLog('[Scope] SCU-LAN10 turned back off on the radio (POTACAT had turned it on)' + (why ? ' — ' + why : ''));
     }
-  }
+  };
   const proc = yaesuScopeProc;
+  if (!proc || why === 'app quit') scuLanOff();
   if (!proc) {
     if (yaesuScopeState.status !== 'stopped') yaesuScopeSetStatus('stopped', null);
     return;
   }
   yaesuScopeProc = null;
   yaesuScopeStream = null;
+  yaesuScopeStopping = proc;
+  proc.once('exit', () => {
+    if (yaesuScopeStopping === proc) yaesuScopeStopping = null;
+    if (!yaesuScopeStartAfterExit) { if (!yaesuScopeProc) scuLanOff(); return; }
+    yaesuScopeStartAfterExit = false;
+    if (yaesuScopeWanted()) startYaesuScope();
+    else if (yaesuScopeState.status === 'starting') yaesuScopeSetStatus('stopped', null);
+  });
   try { proc.stdin.end(); } catch { /* already gone */ }          // the helper's clean exit path
   setTimeout(() => { try { proc.kill(); } catch { /* exited */ } }, 1500);
   yaesuScopeSetStatus('stopped', null);

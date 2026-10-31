@@ -435,6 +435,15 @@ check('SCU-LAN10 is only ever CHANGED by the operator\'s button, and put back', 
   assert.ok(!/EX040101|EX040200/.test(mainSrc), 'the write-ups\' EX0401xx commands are MY CALL on this radio — never send them');
 });
 
+check('a start while the stopped helper still holds the FT4222 waits for its exit (Ride1226 tab switch)', () => {
+  const start = mainSrc.slice(mainSrc.indexOf('function startYaesuScope() {'), mainSrc.indexOf('function stopYaesuScope(why) {'));
+  assert.ok(/yaesuScopeStopping && yaesuScopeStopping\.exitCode === null[\s\S]{0,200}yaesuScopeStartAfterExit = true;[\s\S]{0,80}return;/.test(start), 'start must defer while the old helper lives');
+  assert.ok(start.indexOf('yaesuScopeStopping &&') < start.indexOf('spawn(helperPath'), 'the wait comes before the spawn');
+  const stop = mainSrc.slice(mainSrc.indexOf('function stopYaesuScope(why) {'), mainSrc.indexOf('function yaesuScopeOnFrame('));
+  assert.ok(stop.includes('yaesuScopeStopping = proc;') && stop.includes("proc.once('exit'"), 'stop records the exiting helper');
+  assert.ok(stop.includes("if (!proc || why === 'app quit') scuLanOff();"), 'SCU-LAN10 off at once on quit, after the exit otherwise');
+});
+
 check('the pop-out opener defines isMac locally (a ReferenceError here is a modal crash dialog)', () => {
   const i = mainSrc.indexOf('let openScopePopout = () => {');
   assert.ok(i > 0);
