@@ -2186,7 +2186,8 @@ function atuWizardRadio() {
   return {
     setMemoriesEnabled: (on) => { if (smartSdr) smartSdr.setAtuMemories(on); },
     setTunePower: (w) => { if (smartSdr) smartSdr.setTunePower(w); },
-    tune: (khz, mode) => { if (smartSdr) smartSdr.tuneSlice(slice(), khz / 1000, mode); },
+    // filterHz narrows the listen (a digital dial is heard in CW on the exact carrier frequency).
+    tune: (khz, mode, filterHz) => { if (smartSdr) smartSdr.tuneSlice(slice(), khz / 1000, mode, filterHz > 0 ? filterHz : undefined); },
     bypass: () => { if (smartSdr) smartSdr.setAtu(false); },
     startTune: () => { if (smartSdr) smartSdr.setAtu(true); },
     keyTune: (on) => { if (smartSdr) smartSdr.setTxTune(on); },

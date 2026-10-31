@@ -134,19 +134,25 @@ t('CSV has one header and one row per point', () => {
 
 // ─── the run against a fake Flex ───
 function fakeRadio(behaviour = {}) {
-  const r = { log: [], run: null, keyed: false, freqKhz: 0, mode: '', bypassed: false, tunePower: null, memories: null, signal: behaviour.signalDbm ?? -120 };
+  const r = { log: [], run: null, keyed: false, freqKhz: 0, mode: '', filter: 0, bypassed: false, retuned: false, tunePower: null, memories: null, signal: behaviour.signalDbm ?? -120 };
   const b = { swrBypass: () => 3.0, swrTuned: () => 1.2, tuneStatus: () => 'TUNE_SUCCESSFUL', recall: () => false, ...behaviour };
   const emitAtu = (status, usingMem) => setTimeout(() => r.run && r.run.noteAtuStatus({ status, atu_enabled: '1', memories_enabled: r.memories ? '1' : '0', using_mem: usingMem ? '1' : '0' }), 2);
   let swrTimer = null;
   r.setMemoriesEnabled = (on) => { r.memories = on; r.log.push(`mem ${on ? 1 : 0}`); emitAtu('TUNE_NOT_STARTED', false); };
   r.setTunePower = (w) => { r.tunePower = w; r.log.push(`tunepower ${w}`); };
-  r.tune = (khz, mode) => { r.freqKhz = khz; r.mode = mode; r.log.push(`tune ${khz} ${mode}`); emitAtu(b.recall(khz) ? 'TUNE_OK' : 'TUNE_NOT_STARTED', b.recall(khz)); };
+  r.tune = (khz, mode, filter) => { r.freqKhz = khz; r.mode = mode; r.filter = filter || 0; r.retuned = false; r.log.push(`tune ${khz} ${mode}`); emitAtu(b.recall(khz) ? 'TUNE_OK' : 'TUNE_NOT_STARTED', b.recall(khz)); };
   r.bypass = () => { r.bypassed = true; r.log.push('bypass'); };
-  r.startTune = () => { r.log.push('atu start'); r.bypassed = false; emitAtu('TUNE_IN_PROGRESS', false); setTimeout(() => emitAtu(b.tuneStatus(r.freqKhz), false), 15); };
+  r.startTune = () => {
+    r.log.push('atu start'); r.bypassed = false; r.retuned = true;
+    emitAtu('TUNE_IN_PROGRESS', false);
+    // The radio keys ITSELF for the sweep and the interlock says so.
+    setTimeout(() => r.run && r.run.noteInterlock({ state: 'TRANSMITTING' }), 5);
+    setTimeout(() => emitAtu(b.tuneStatus(r.freqKhz), false), 15);
+  };
   r.keyTune = (on) => {
     r.keyed = on; r.log.push(`key ${on ? 1 : 0}`);
     if (swrTimer) { clearInterval(swrTimer); swrTimer = null; }
-    const frame = () => { const swr = r.bypassed ? b.swrBypass(r.freqKhz) : b.swrTuned(r.freqKhz); r.run && r.run.noteSwr(swr, 9.5); };
+    const frame = () => { const swr = r.bypassed ? b.swrBypass(r.freqKhz) : b.swrTuned(r.freqKhz, r.retuned); r.run && r.run.noteSwr(swr, 9.5); };
     if (on) { frame(); swrTimer = setInterval(frame, 2); }
   };
   r.signalDbm = () => r.signal;
@@ -225,12 +231,12 @@ function fastHooks(log) {
     assert.strictEqual(st.points[0].result, 'TUNED');
   });
 
-  await ta('STOP unkeys at once and ends the run; pause holds the loop; another client keying pauses', async () => {
+  await ta('STOP unkeys at once and ends the run; pause holds the loop', async () => {
     const radio = fakeRadio(); const log = [];
     const run = new W.AtuWizardRun(radio, plan, { ...FAST, sampleMs: 300 }, fastHooks(log)); radio.run = run;
     const p = run.start();
     await new Promise(r => setTimeout(r, 90));
-    run.noteInterlock({ state: 'TRANSMITTING' });
+    run.pause('test');
     assert.strictEqual(run.phase, 'paused');
     assert.strictEqual(radio.keyed, false);
     run.resume();
@@ -258,6 +264,65 @@ function fastHooks(log) {
     const st = await run.start();
     assert.deepStrictEqual(st.points.map(p => p.result), ['RECALLED', 'NATIVE', 'RECALLED']);
     assert.ok(!radio.log.some(l => /^key|atu start|bypass/.test(l)), radio.log.join(','));
+  });
+
+  await ta('K3SBP run 1: the radio keying itself for OUR sweep is not "another client" (interlock ignored while sweeping)', async () => {
+    const radio = fakeRadio(); const log = [];
+    const run = new W.AtuWizardRun(radio, plan, FAST, fastHooks(log)); radio.run = run;
+    const st = await run.start();
+    assert.strictEqual(st.phase, 'done', log.join('\n'));
+    assert.ok(!log.some(l => /paused/.test(l)), 'never paused: ' + log.filter(l => /paused/.test(l)).join('; '));
+    assert.deepStrictEqual(st.points.map(p => p.result), ['TUNED', 'TUNED', 'TUNED']);
+  });
+
+  await ta('K3SBP run 1: a recalled memory with a bad SWR is re-tuned, not FAILED', async () => {
+    // Memory everywhere; stale at 14045 (reads 3.5:1 until the tuner runs again, then 1.3:1).
+    const radio = fakeRadio({ recall: () => true, swrTuned: (k, retuned) => (k === 14045 && !retuned ? 3.5 : 1.3) }); const log = [];
+    const run = new W.AtuWizardRun(radio, plan, FAST, fastHooks(log)); radio.run = run;
+    const st = await run.start();
+    assert.deepStrictEqual(st.points.map(p => p.result), ['RECALLED', 'TUNED', 'RECALLED'], JSON.stringify(st.points.map(p => [p.result, p.tunedSwr])));
+    assert.strictEqual(st.points[1].recalledSwr, 3.5);
+    assert.strictEqual(radio.log.filter(l => l === 'atu start').length, 1, 'only the stale point was re-tuned');
+    assert.ok(log.some(l => /re-tuning to replace it/.test(l)));
+  });
+
+  await ta('K3SBP run 1: a recalled point still listens first — busy means no carrier at all', async () => {
+    const radio = fakeRadio({ recall: () => true, signalDbm: -70 }); const log = [];
+    const run = new W.AtuWizardRun(radio, plan.slice(0, 1), FAST, fastHooks(log)); radio.run = run;
+    const st = await run.start();
+    assert.strictEqual(st.points[0].result, 'SKIPPED');
+    assert.ok(!radio.log.some(l => /^key 1/.test(l)), 'never keyed');
+  });
+
+  await ta('K3SBP run 1: a point interrupted by a real pause is measured again after Resume, not left blank', async () => {
+    const radio = fakeRadio(); const log = [];
+    const run = new W.AtuWizardRun(radio, plan, FAST, fastHooks(log)); radio.run = run;
+    const p = run.start();
+    // A pause during the LISTEN just waits and the point carries on; a pause
+    // in the middle of the ATU sweep (here: the slice moved under us) leaves
+    // the point without a result, and that is the one redone.
+    for (let i = 0; i < 400 && !run._sweeping; i++) await new Promise(r => setTimeout(r, 2));
+    assert.ok(run._sweeping, 'reached a sweep');
+    run.noteSliceMoved(7000000);
+    assert.strictEqual(run.phase, 'paused');
+    await new Promise(r => setTimeout(r, 30));   // the loop notices the pause before Resume
+    run.resume();
+    const st = await p;
+    assert.strictEqual(st.phase, 'done');
+    assert.ok(st.points.every(pt => pt.result), JSON.stringify(st.points.map(pt => pt.result)));
+    assert.ok(log.some(l => /interrupted — measuring it again/.test(l)), log.join('\n'));
+  });
+
+  await ta('a digital dial is listened to in CW with a 500 Hz filter; SSB stays wide', async () => {
+    const pts = W.buildPlan({ bands: ['20m'], modes: ['DIGITAL', 'SSB'], licenseClass: 'us_extra' }).points;
+    const radio = fakeRadio(); const log = [];
+    const seen = [];
+    const t = radio.tune; radio.tune = (khz, mode, filter) => { seen.push([khz, mode, filter]); t(khz, mode, filter); };
+    const run = new W.AtuWizardRun(radio, pts, FAST, fastHooks(log)); radio.run = run;
+    await run.start();
+    const ft8 = seen.find(x => x[0] === 14074), ssb = seen.find(x => x[0] === 14250);
+    assert.deepStrictEqual(ft8.slice(1), ['CW', 500]);
+    assert.deepStrictEqual(ssb.slice(1), ['USB', 0]);
   });
 
   await ta('dwell is never below 2 s and tune power never above 25 W', async () => {
