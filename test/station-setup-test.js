@@ -94,6 +94,33 @@ t('Flex (network audio): audio steps follow radio control, no device pickers', (
   assert.strictEqual(step(off, 'tx-test').state, 'blocked');
 });
 
+// --- antenna tuner memories (a Flex with an internal ATU; lib/atu-wizard.js) ---
+t('a Flex gets the tuner-memories step: recommended, optional until run, opens the wizard', () => {
+  const r = evalRig({ model: 'FLEX-8400/8600', radioType: 'flex', audioSource: 'smartsdr', input: '', output: '', live: { atu: { available: true, reason: '', lastRun: null } } });
+  const s = step(r, 'atu-memories');
+  assert.ok(s, 'step present');
+  assert.strictEqual(s.level, 'recommended');
+  assert.strictEqual(s.state, 'optional');
+  assert.ok(s.actions.some(a => a.id === 'open-atu-wizard'));
+  assert.ok(s.actions.some(a => a.id === 'skip' && a.step === 'atu-memories'));
+  assert.strictEqual(s.since, '1.13.9');
+  assert.ok(!ids(evalRig({ model: 'IC-7300' })).includes('atu-memories'), 'an Icom never sees it');
+});
+t('tuner memories: a finished run ticks it with the numbers; unavailable says why; skipped stays skipped', () => {
+  const done = step(evalRig({ model: 'FLEX-8400/8600', radioType: 'flex', audioSource: 'smartsdr', input: '', output: '', live: { atu: { available: true, lastRun: { at: Date.parse('2026-10-31T15:00:00Z'), total: 56, green: 54, problems: 2 } } } }), 'atu-memories');
+  assert.strictEqual(done.state, 'ok');
+  assert.ok(/2026-10-31/.test(done.detail) && /54 of 56/.test(done.detail) && /2 need a look/.test(done.detail));
+  assert.ok(done.actions.some(a => a.id === 'open-atu-wizard' && /results/i.test(a.label)));
+  const bound = step(evalRig({ model: 'FLEX-8400/8600', radioType: 'flex', audioSource: 'smartsdr', input: '', output: '', live: { atu: { available: false, reason: 'POTACAT is sharing the radio with SmartSDR (bound mode).' } } }), 'atu-memories');
+  assert.strictEqual(bound.state, 'optional');
+  assert.ok(/bound mode/.test(bound.detail));
+  const sk = step(evalRig({ model: 'FLEX-8400/8600', radioType: 'flex', audioSource: 'smartsdr', input: '', output: '', prefs: { skipped: ['atu-memories'] } }), 'atu-memories');
+  assert.strictEqual(sk.state, 'skipped');
+  // Recommended, never nagged: the launch prompt ignores it.
+  const r = evalRig({ model: 'FLEX-8400/8600', radioType: 'flex', audioSource: 'smartsdr', input: '', output: '', live: { atu: { available: true } } });
+  assert.strictEqual(r.summary.requiredNeverDone, r.steps.filter(s => s.level === 'required' && s.state !== 'ok' && s.state !== 'confirmed').length);
+});
+
 // --- step states ---
 t('identity: missing callsign or grid needs the operator, with an Open Settings button', () => {
   const r = evalRig({ model: 'IC-7300', live: { grid: '' } });

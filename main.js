@@ -388,6 +388,7 @@ const RtlTcpAudio = require('./lib/rtltcp-audio');
 const ScopeOverlay = require('./lib/scope-overlay');
 const { explainRigctldFailure } = require('./lib/rigctld-stderr');
 const RigFamily = require('./lib/rig-family');
+const AtuWizard = require('./lib/atu-wizard');
 const AppTheme = require('./lib/app-theme');
 const { stripSecrets, restoreSecrets } = require('./lib/settings-secrets');
 const { buildContestHistory } = require('./lib/contest-history');
@@ -2072,6 +2073,228 @@ let _atuSweeping = false;       // the radio's ATU is mid-sweep right now (atu s
 let _atuSweepSinceTrip = false; // a sweep has been seen since the latch was set
 let _swrClearOkRun = 0;         // in-limit frames in a row while latched (SWR_CLEAR_OK_FRAMES ends it)
 
+// ─── ATU Calibration Wizard (lib/atu-wizard.js; Casey 2026-10-31) ──────────
+// Fills a Flex's own tuner memories at every frequency the operator uses, so
+// a QSY recalls a match instead of running a tune cycle. The policy and the
+// run loop are the lib's; this is the radio adapter, the gates (Flex Direct,
+// the radio reports an ATU, nobody else owns the radio, not a remote shack),
+// the operator-state save/restore (readback-confirmed, the WSPR-cap lesson),
+// the SWR-guard hand-off and the run archive. Entry points: the Station
+// Setup step 'atu-memories' and More > Tuner Memories. ECHOCAT: handoff, no
+// wire, in v1.
+let atuWizardRun = null;             // the live AtuWizardRun (calibration or verification)
+let atuWizardWin = null;             // the pop-out window
+let _atuWizardSaved = null;          // the operator's state at run start {freqHz, mode, rfpower, tunePower, rigId, at}
+let _atuWizardRestorePending = null; // {rfpower, tunePower} until the radio reads them back
+let _atuWizardLastState = null;      // last pushed run state (re-sent to a reopened window)
+let _atuWizardLastRunFile = null;
+let _atuWizardRunBypass = null;      // bypass SWR by point id from the last calibration (the Verify pass judges NATIVE points on it)
+const ATU_WIZARD_RECOVERY_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
+
+function atuWizardActive() { return !!(atuWizardRun && atuWizardRun.active); }
+function atuWizardActiveRig() { return (settings.rigs || []).find(r => r && r.id === settings.activeRigId) || null; }
+
+/** The active rig is a Flex with an internal ATU (the caps/menu gate; no link needed). */
+function atuWizardRigOk() {
+  const rig = atuWizardActiveRig();
+  if (!rig || RigFamily.rigFamily(rig) !== 'flex') return false;
+  const model = getActiveRigModel();
+  return !!(model && model.protocol === 'smartsdr' && model.caps && model.caps.atu);
+}
+
+/** Can a run start right now? Every refusal names what to change. */
+function atuWizardAvailability() {
+  if (isRemoteMode()) return { ok: false, reason: RemoteFeatures.check('atuWizard').reason };
+  if (!atuWizardRigOk()) return { ok: false, reason: 'The active rig is not a Flex with an internal antenna tuner.' };
+  if (!smartSdr || !smartSdr.connected) return { ok: false, reason: 'The radio is not connected over the SmartSDR API.' };
+  if (smartSdr.mode !== 'self') return { ok: false, reason: 'POTACAT is sharing the radio with SmartSDR (bound mode). The wizard moves the TX slice, so it runs only in Flex Direct mode: close SmartSDR and let POTACAT reconnect.' };
+  if (!smartSdr.atuState || smartSdr.atuState.status == null) return { ok: false, reason: 'The radio has not reported an antenna tuner yet.' };
+  if (_swrTripped) return { ok: false, reason: 'The SWR guard has tripped. Run the ATU, change bands or override the guard first.' };
+  if (radioOwner !== 'none' && radioOwner !== 'atu-wizard') return { ok: false, reason: `The radio is in use by ${radioOwner}. Stop it first.` };
+  return { ok: true };
+}
+
+function atuWizardRunsDir(rigId) { return path.join(app.getPath('userData'), 'atu-runs', String(rigId || 'rig').replace(/[^\w.-]/g, '_')); }
+function atuWizardRecoveryFile() { return path.join(app.getPath('userData'), 'atu-wizard-recovery.json'); }
+
+function atuWizardListRuns(rigId) {
+  try {
+    const dir = atuWizardRunsDir(rigId);
+    if (!fs.existsSync(dir)) return [];
+    return fs.readdirSync(dir).filter(f => f.endsWith('.json')).sort().reverse().map(f => {
+      try {
+        const run = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+        const s = AtuWizard.summarize(run.points || []);
+        return { file: f, at: run.runAt, verify: !!run.verify, phase: run.phase, total: s.total, green: s.green, problems: s.problems, counts: s.counts, antennaPort: run.antennaPort || '' };
+      } catch { return null; }
+    }).filter(Boolean);
+  } catch { return []; }
+}
+function atuWizardReadRun(rigId, file) {
+  if (!/^[\w.-]+\.json$/.test(String(file || ''))) return null;
+  try { return JSON.parse(fs.readFileSync(path.join(atuWizardRunsDir(rigId), file), 'utf8')); } catch { return null; }
+}
+/** Bypass-SWR rises since the previous calibration (antenna or coax trouble, early). */
+function atuWizardTrend(rigId) {
+  const runs = atuWizardListRuns(rigId).filter(r => !r.verify);
+  if (runs.length < 2) return [];
+  return AtuWizard.trendFlags(atuWizardReadRun(rigId, runs[0].file), atuWizardReadRun(rigId, runs[1].file));
+}
+
+/** The Station Setup step's live record for a rig (null = not a Flex with an ATU). */
+function atuWizardSetupLive(rig) {
+  if (!rig) return null;
+  const model = rig.model ? (RIG_MODELS[rig.model] || null) : null;
+  if (!model || model.protocol !== 'smartsdr' || !(model.caps && model.caps.atu)) return null;
+  const runs = atuWizardListRuns(rig.id).filter(r => !r.verify && r.phase === 'done');
+  const last = runs[0] ? { at: runs[0].at, total: runs[0].total, green: runs[0].green, problems: runs[0].problems } : null;
+  const avail = rig.id === settings.activeRigId ? atuWizardAvailability() : { ok: false, reason: 'Make this radio the active rig first.' };
+  return { available: avail.ok, reason: avail.ok ? '' : avail.reason, lastRun: last };
+}
+
+function atuWizardSaveRun(state) {
+  const rig = atuWizardActiveRig();
+  if (!rig) return null;
+  const run = {
+    schema: 1, rigId: rig.id, rigName: rig.name || '', radio: { model: rig.model || '' },
+    antennaPort: (_flexSliceKv && _flexSliceKv.txant) || '',
+    runAt: new Date(state.startedAt || Date.now()).toISOString(), finishedAt: new Date(state.finishedAt || Date.now()).toISOString(),
+    verify: !!state.verify, phase: state.phase, stopReason: state.stopReason || '',
+    settings: { tunePowerW: state.settings.tunePowerW, swrThreshold: state.settings.swrThreshold, density: state.settings.density, licenseClass: settings.licenseClass || 'none', dwellMs: state.settings.dwellMs, pauseMs: state.settings.pauseMs },
+    points: state.points,
+  };
+  try {
+    const dir = atuWizardRunsDir(rig.id);
+    fs.mkdirSync(dir, { recursive: true });
+    const file = run.runAt.replace(/[:.]/g, '-') + (run.verify ? '-verify' : '') + '.json';
+    fs.writeFileSync(path.join(dir, file), JSON.stringify(run, null, 2));
+    const all = fs.readdirSync(dir).filter(f => f.endsWith('.json')).sort();   // keep the last 20 per rig
+    for (const f of all.slice(0, Math.max(0, all.length - 20))) { try { fs.unlinkSync(path.join(dir, f)); } catch { /* best effort */ } }
+    _atuWizardLastRunFile = file;
+    return file;
+  } catch (err) { sendCatLog(`[ATU wizard] could not save the run: ${err.message}`); return null; }
+}
+
+function atuWizardPush(state) {
+  _atuWizardLastState = state;
+  if (atuWizardWin && !atuWizardWin.isDestroyed()) atuWizardWin.webContents.send('atu-wizard-state', state);
+}
+
+/** The radio as the run loop sees it. `atu start` goes through setAtu so the SWR guard's episode opens as for any other tune. */
+function atuWizardRadio() {
+  const slice = () => (smartSdr && smartSdr.ourSliceIndex != null ? smartSdr.ourSliceIndex : getFlexSliceIndex());
+  return {
+    setMemoriesEnabled: (on) => { if (smartSdr) smartSdr.setAtuMemories(on); },
+    setTunePower: (w) => { if (smartSdr) smartSdr.setTunePower(w); },
+    tune: (khz, mode) => { if (smartSdr) smartSdr.tuneSlice(slice(), khz / 1000, mode); },
+    bypass: () => { if (smartSdr) smartSdr.setAtu(false); },
+    startTune: () => { if (smartSdr) smartSdr.setAtu(true); },
+    keyTune: (on) => { if (smartSdr) smartSdr.setTxTune(on); },
+    signalDbm: () => (Number.isFinite(_currentSmeterDbm) ? _currentSmeterDbm : null),
+  };
+}
+
+async function atuWizardStart(req = {}) {
+  const avail = atuWizardAvailability();
+  if (!avail.ok) return { ok: false, reason: avail.reason };
+  if (atuWizardActive()) return { ok: false, reason: 'A run is already in progress.' };
+  const points = Array.isArray(req.points) ? req.points.filter(p => p && Number.isFinite(p.freqKhz) && p.band && p.mode).map(p => ({ ...p })) : [];
+  if (!points.length) return { ok: false, reason: 'No test points selected.' };
+  // Every point is checked against the privilege table HERE, whatever the window sent.
+  const cls = settings.licenseClass || 'none';
+  for (const p of points) {
+    const v = AtuWizard.pointAllowed(p.freqKhz, p.mode, cls, AtuWizard.DEFAULTS.edgeMarginKhz);
+    if (!v.ok) return { ok: false, reason: `${(p.freqKhz / 1000).toFixed(4)} MHz ${p.mode}: ${v.reason}.` };
+    if (!p.sliceMode) p.sliceMode = AtuWizard.SLICE_MODE[p.mode] || 'USB';
+    if (!p.id) p.id = `${p.band}:${p.mode}:${p.freqKhz}`;
+  }
+  const verify = !!req.verify;
+  if (verify && _atuWizardRunBypass) for (const p of points) if (p.bypassSwr == null && _atuWizardRunBypass[p.id] != null) p.bypassSwr = _atuWizardRunBypass[p.id];
+  if (!acquireRadio('atu-wizard')) return { ok: false, reason: `The radio is in use by ${radioOwner}.` };
+  // What the operator had — put back on exit, and from the recovery file after a crash.
+  _atuWizardSaved = {
+    freqHz: _currentFreqHz || 0, mode: _currentMode || '',
+    rfpower: smartSdr && Number.isFinite(smartSdr._lastRfPower) ? smartSdr._lastRfPower : null,
+    tunePower: smartSdr && Number.isFinite(smartSdr.tunePower) ? smartSdr.tunePower : null,
+    rigId: settings.activeRigId, at: Date.now(),
+  };
+  try { fs.writeFileSync(atuWizardRecoveryFile(), JSON.stringify(_atuWizardSaved)); } catch { /* restore still runs from memory */ }
+  const run = new AtuWizard.AtuWizardRun(atuWizardRadio(), points, { ...(req.settings || {}), verify }, {
+    log: (line) => sendCatLog(`[ATU wizard] ${line}`),
+    onState: atuWizardPush,
+  });
+  atuWizardRun = run;
+  if (smartSdr && smartSdr.atuState) run.noteAtuStatus(smartSdr.atuState);
+  sendCatLog(`[ATU wizard] ${verify ? 'verification' : 'calibration'} started by the operator: ${points.length} points, tune power ${run.settings.tunePowerW} W, SWR threshold ${run.settings.swrThreshold}:1, license class ${cls}`);
+  run.start().then(atuWizardFinish).catch((err) => { sendCatLog(`[ATU wizard] run failed: ${err.message}`); atuWizardFinish(run.state()); });
+  return { ok: true };
+}
+
+function atuWizardFinish(state) {
+  if (!atuWizardRun) return;
+  atuWizardRun = null;
+  try { if (smartSdr && smartSdr.connected) smartSdr.setTxTune(false); } catch { /* radio gone */ }   // the carrier is never left up
+  if (!state.verify) {
+    _atuWizardRunBypass = {};
+    for (const p of state.points) if (Number.isFinite(p.bypassSwr)) _atuWizardRunBypass[p.id] = p.bypassSwr;
+  }
+  let saved = null;
+  if (state.summary.done > 0) saved = atuWizardSaveRun(state);
+  atuWizardRestoreOperatorState(`run ${state.phase}`);
+  releaseRadio('atu-wizard');
+  const s = state.summary;
+  const counts = Object.entries(s.counts).filter(([, n]) => n).map(([k, n]) => `${k} ${n}`).join(', ');
+  sendCatLog(`[ATU wizard] ${state.phase}: ${s.green} of ${s.total} points match (${counts || 'nothing measured'})${saved ? ` — saved as ${saved}` : ''}`);
+  const rig = atuWizardActiveRig();
+  atuWizardPush({ ...state, saved, trend: rig ? atuWizardTrend(rig.id) : [], advice: AtuWizard.adviceFor(state.points) });
+  try { if (win && !win.isDestroyed()) win.webContents.send('station-setup-changed'); } catch { /* no window */ }
+}
+
+/** Stop a run from anywhere (quit, link drop, window closed). Safe when none is running. */
+function atuWizardAbort(reason) {
+  if (atuWizardRun && atuWizardRun.active) atuWizardRun.stop(reason);
+}
+
+/** Put back the dial, mode, RF power and tune power the operator had. The recovery file stays until the radio reads them back. */
+function atuWizardRestoreOperatorState(why) {
+  const saved = _atuWizardSaved;
+  if (!saved) return;
+  if (!smartSdr || !smartSdr.connected) { sendCatLog(`[ATU wizard] the radio link is down — the operator's settings are restored at the next connection (${why})`); return; }
+  try {
+    const slice = smartSdr.ourSliceIndex != null ? smartSdr.ourSliceIndex : getFlexSliceIndex();
+    if (saved.freqHz > 0) smartSdr.tuneSlice(slice, saved.freqHz / 1e6, saved.mode || undefined);
+    if (Number.isFinite(saved.rfpower)) smartSdr.setTxPower(saved.rfpower);
+    if (Number.isFinite(saved.tunePower)) smartSdr.setTunePower(saved.tunePower);
+    _atuWizardRestorePending = { rfpower: saved.rfpower, tunePower: saved.tunePower, since: Date.now() };
+    sendCatLog(`[ATU wizard] restoring the operator's settings (${why}): ${saved.freqHz ? (saved.freqHz / 1e6).toFixed(4) + ' MHz ' : ''}${saved.mode || ''}${Number.isFinite(saved.rfpower) ? `, RF power ${saved.rfpower} W` : ''}${Number.isFinite(saved.tunePower) ? `, tune power ${saved.tunePower} W` : ''} — waiting for the radio to confirm`);
+    atuWizardOnTransmitStatus();   // the readback may already match
+  } catch (err) { sendCatLog(`[ATU wizard] restore failed: ${err.message}`); }
+}
+/** A transmit-status readback: the recovery file is cleared only when the radio SHOWS the restored values. */
+function atuWizardOnTransmitStatus() {
+  const p = _atuWizardRestorePending;
+  if (!p || !smartSdr) return;
+  const rfOk = !Number.isFinite(p.rfpower) || smartSdr._lastRfPower === p.rfpower;
+  const tpOk = !Number.isFinite(p.tunePower) || smartSdr.tunePower === p.tunePower;
+  if (!rfOk || !tpOk) return;
+  _atuWizardRestorePending = null;
+  _atuWizardSaved = null;
+  try { fs.unlinkSync(atuWizardRecoveryFile()); } catch { /* already gone */ }
+  sendCatLog('[ATU wizard] the radio confirmed the restored settings');
+}
+/** After a crash mid-run the recovery file still exists: restore once the radio is back. */
+function atuWizardRecoverOnConnect() {
+  if (atuWizardActive() || _atuWizardSaved) { atuWizardRestoreOperatorState('reconnected'); return; }
+  let saved = null;
+  try { if (fs.existsSync(atuWizardRecoveryFile())) saved = JSON.parse(fs.readFileSync(atuWizardRecoveryFile(), 'utf8')); } catch { saved = null; }
+  if (!saved) return;
+  if (!(Date.now() - (saved.at || 0) < ATU_WIZARD_RECOVERY_MAX_AGE_MS)) { try { fs.unlinkSync(atuWizardRecoveryFile()); } catch { /* gone */ } return; }
+  if (saved.rigId && saved.rigId !== settings.activeRigId) return;   // another rig is active; the file waits for its turn
+  sendCatLog('[ATU wizard] a previous run did not finish — restoring the settings it saved');
+  _atuWizardSaved = saved;
+  atuWizardRestoreOperatorState('recovery after an interrupted run');
+}
+
 function swrGuardBand() {
   return _currentFreqHz ? (freqToBand(_currentFreqHz / 1e6) || '') : '';
 }
@@ -2715,6 +2938,9 @@ function getRigCapabilities(rigType) {
   const caps = _rigCapabilitiesForType(rigType);
   const activeRig = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
   if (activeRig && activeRig.externalAtu === 'rf-sense') caps.atu = true;
+  // Tuner Memories (lib/atu-wizard.js): a Flex with an internal ATU only.
+  // Every client gates its entry point on this, the rig-scoped UI rule.
+  caps.atuWizard = atuWizardRigOk();
   // The band scope's synthetic signal needs no radio, but every client gates
   // its scope controls on nativeScope — so with the switch on, any rig
   // reports one. That is how all three clients get bench-tested without an
@@ -4863,6 +5089,7 @@ function stationSetupLive(rig) {
     txDeviceTest: r.txDeviceTest || null,
     txTest: r.txTest || null,
     scope,
+    atu: atuWizardSetupLive(rig),
   };
 }
 
@@ -17733,6 +17960,16 @@ function connectSmartSdr() {
     };
   }
   smartSdr.on('atu-status', onAtuStatus);
+  // ATU Calibration Wizard: the run reads the ATU status stream, the Flex
+  // interlock (another client keying = pause) and the slice moving under it;
+  // a dropped link ends the run, and the restored power settings are
+  // confirmed from the transmit-status readback, never from the command.
+  smartSdr.on('atu-status', (kv) => { if (atuWizardRun) atuWizardRun.noteAtuStatus(kv); });
+  smartSdr.on('interlock', (kv) => { if (atuWizardRun) atuWizardRun.noteInterlock(kv); });
+  smartSdr.on('frequency', (hz) => { if (atuWizardRun) atuWizardRun.noteSliceMoved(hz); });
+  smartSdr.on('transmit-status', () => atuWizardOnTransmitStatus());
+  smartSdr.on('slice-ready', () => { try { atuWizardRecoverOnConnect(); } catch (err) { sendCatLog(`[ATU wizard] recovery check failed: ${err.message}`); } });
+  smartSdr.on('disconnected', () => atuWizardAbort('the radio link dropped'));
   let _sdrErrorLogged = false;
   smartSdr.on('error', (err) => {
     console.error('SmartSDR:', err.message);
@@ -17928,7 +18165,13 @@ function connectSmartSdr() {
     // second ARDOP attempt on 2026-10-23 had three such bursts and the log
     // could not tell suppressed from ignored from disabled.
     const g = _flexTxRf && (_flexTxRf.guard || (_flexTxRf.guard = { over: 0, ok: 0, ignored: 0, suppressed: 0, off: 0, tripped: 0 }));
+    // The ATU wizard reads every frame itself (bypass SWR into an unmatched
+    // antenna is the measurement), keys for at most keyedMaxMs under its own
+    // watchdog, and refuses to start while the guard is tripped — so while it
+    // owns the radio the guard watches and does not trip.
+    if (atuWizardRun) atuWizardRun.noteSwr(swr, (Date.now() - _flexLastFwdAt < 500) ? _flexLastFwdW : null);
     if (settings.swrGuard === false) { if (g) g.off++; }
+    else if (atuWizardActive()) { if (g) g.suppressed++; }
     else if (_swrTripped) {
       if (g) g.tripped++;
       // A latch also ends on what the bridge MEASURES: a transmission keyed
@@ -25211,6 +25454,15 @@ function handleRemotePtt(state, opts = {}) {
     if (remoteServer && remoteServer.running) {
       remoteServer.sendToClient({ type: 'tune-blocked', reason: 'PTT blocked — SWR guard tripped. Run the ATU or change bands on the desktop.' });
     }
+    return;
+  }
+  // The ATU wizard is keying tune carriers across the bands: a PTT from any
+  // surface would land on whatever frequency it is measuring.
+  if (state && atuWizardActive()) {
+    const why = 'PTT refused — the tuner memory calibration is running. Stop it in the Tuner Memories window first.';
+    sendCatLog(`[PTT] ${why}`);
+    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', why);
+    if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'tune-blocked', reason: why });
     return;
   }
   // You cannot key a receiver: while the SDR is what you hear because the
@@ -38631,6 +38883,93 @@ app.whenReady().then(() => {
 
   ipcMain.on('scope-popout-open', () => openScopePopout());
 
+  // --- Tuner Memories pop-out: the ATU Calibration Wizard (lib/atu-wizard.js) ---
+  let openAtuWizardPopout = () => {
+    if (atuWizardWin && !atuWizardWin.isDestroyed()) { atuWizardWin.focus(); return; }
+    const isMac = process.platform === 'darwin';
+    atuWizardWin = new BrowserWindow({
+      minWidth: 560, minHeight: 420,
+      width: 920, height: 700,
+      title: 'POTACAT — Tuner Memories',
+      backgroundColor: getThemeWindowBg(),
+      show: false,
+      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }),
+      icon: getIconPath(),
+      webPreferences: {
+        preload: path.join(__dirname, 'preload-atu-wizard-popout.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+    const saved = settings.atuWizardPopoutBounds;
+    if (saved && saved.width > 400 && saved.height > 300 && isOnScreen(saved)) atuWizardWin.setBounds(clampToWorkArea(saved));
+    atuWizardWin.show();
+    atuWizardWin.setMenuBarVisibility(false);
+    atuWizardWin.loadFile(path.join(__dirname, 'renderer', 'atu-wizard-popout.html'), { query: themeQuery() });
+    atuWizardWin.on('close', () => {
+      if (atuWizardWin && !atuWizardWin.isDestroyed() && !atuWizardWin.isMaximized() && !atuWizardWin.isMinimized()) {
+        settings.atuWizardPopoutBounds = atuWizardWin.getBounds();
+        saveSettings(settings);
+      }
+    });
+    // Closing the window ends a run: a carrier nobody is watching is not a thing to leave keyed.
+    atuWizardWin.on('closed', () => { atuWizardWin = null; atuWizardAbort('the Tuner Memories window was closed'); });
+    atuWizardWin.webContents.on('did-finish-load', () => {
+      if (!atuWizardWin || atuWizardWin.isDestroyed()) return;
+      atuWizardWin.webContents.send('atu-wizard-popout-theme', themeQuery());
+      if (_atuWizardLastState) atuWizardWin.webContents.send('atu-wizard-state', _atuWizardLastState);
+    });
+    atuWizardWin.webContents.on('before-input-event', (_e, input) => {
+      if (input.key === 'F12' && input.type === 'keyDown') atuWizardWin.webContents.toggleDevTools();
+    });
+  };
+  ipcMain.on('atu-wizard-popout-open', () => openAtuWizardPopout());
+  ipcMain.on('atu-wizard-popout-minimize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.minimize(); });
+  ipcMain.on('atu-wizard-popout-maximize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) { if (w.isMaximized()) w.unmaximize(); else w.maximize(); } });
+  ipcMain.on('atu-wizard-popout-close', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.close(); });
+  ipcMain.handle('atu-wizard-get', () => {
+    const rig = atuWizardActiveRig();
+    const avail = atuWizardAvailability();
+    const bands = (activeRigBands() || AtuWizard.BANDS).filter(b => AtuWizard.BANDS.includes(b));
+    return {
+      available: avail.ok, reason: avail.ok ? '' : avail.reason,
+      rig: rig ? { id: rig.id, name: rig.name || '', model: rig.model || '' } : null,
+      connected: !!(smartSdr && smartSdr.connected), mode: smartSdr ? smartSdr.mode : null,
+      atu: smartSdr ? smartSdr.atuState || null : null,
+      licenseClass: settings.licenseClass || 'none', callsign: settings.myCallsign || '',
+      bands: bands.length ? bands : AtuWizard.BANDS, allBands: AtuWizard.BANDS,
+      antennaPort: (_flexSliceKv && _flexSliceKv.txant) || '',
+      defaults: AtuWizard.DEFAULTS, swrGuardMax: swrGuardMax(),
+      state: atuWizardRun ? atuWizardRun.state() : _atuWizardLastState,
+      runs: rig ? atuWizardListRuns(rig.id) : [],
+      trend: rig ? atuWizardTrend(rig.id) : [],
+    };
+  });
+  ipcMain.handle('atu-wizard-plan', (_e, req = {}) => {
+    const { points, dropped } = AtuWizard.buildPlan({ bands: req.bands, modes: req.modes, density: req.density, licenseClass: settings.licenseClass || 'none', custom: req.custom });
+    return { points, dropped, estimateMs: AtuWizard.estimateRunMs(points, { ...AtuWizard.DEFAULTS, ...(req.settings || {}) }) };
+  });
+  ipcMain.handle('atu-wizard-start', (_e, req) => atuWizardStart(req || {}));
+  ipcMain.on('atu-wizard-stop', () => { if (atuWizardRun) atuWizardRun.stop('stopped by the operator'); });
+  ipcMain.on('atu-wizard-pause', () => { if (atuWizardRun) atuWizardRun.pause('paused by the operator'); });
+  ipcMain.on('atu-wizard-resume', () => { if (atuWizardRun) atuWizardRun.resume(); });
+  ipcMain.on('atu-wizard-skip', () => { if (atuWizardRun) atuWizardRun.skip(); });
+  ipcMain.on('atu-wizard-busy', (_e, answer) => { if (atuWizardRun) atuWizardRun.answerBusy(answer); });
+  ipcMain.handle('atu-wizard-run-get', (_e, file) => { const rig = atuWizardActiveRig(); return rig ? atuWizardReadRun(rig.id, file) : null; });
+  ipcMain.handle('atu-wizard-export-csv', async (_e, file) => {
+    const rig = atuWizardActiveRig();
+    const run = rig && file ? atuWizardReadRun(rig.id, file) : (_atuWizardLastState ? { points: _atuWizardLastState.points } : null);
+    if (!run) return { ok: false, reason: 'No run to export.' };
+    const pick = await dialog.showSaveDialog(atuWizardWin || win, {
+      title: 'Save the tuner memory results',
+      defaultPath: `tuner-memories-${((rig && rig.name) || 'rig').replace(/[^\w.-]/g, '_')}-${new Date().toISOString().slice(0, 10)}.csv`,
+      filters: [{ name: 'CSV', extensions: ['csv'] }],
+    });
+    if (pick.canceled || !pick.filePath) return { ok: false, reason: 'cancelled' };
+    try { fs.writeFileSync(pick.filePath, AtuWizard.csvFor(run)); return { ok: true, path: pick.filePath }; }
+    catch (err) { return { ok: false, reason: err.message }; }
+  });
+
   // --- Station Setup checklist (lib/station-setup.js; state gathering above
   // stationSetupPayload). Registered here so 'open-scope' can reach
   // openScopePopout.
@@ -38711,6 +39050,7 @@ app.whenReady().then(() => {
         break;
       }
       case 'open-scope': openScopePopout(); break;
+      case 'open-atu-wizard': openAtuWizardPopout(); break;
       case 'open-ftdi-download': shell.openExternal('https://ftdichip.com/software-examples/ft4222h-software-examples/'); break;
       case 'open-ftdi-driver': shell.openExternal('https://ftdichip.com/drivers/d2xx-drivers/'); break;
       case 'locate-ft4222': {
@@ -46227,6 +46567,9 @@ function gracefulCleanup() {
   // radio before the SmartSDR/CAT/keyer connections close — otherwise the
   // radio can stay keyed with no audio (a silent-carrier FCC issue).
   try { handleRemotePtt(false); } catch {}
+  // A tuner-memory run keys tune carriers: stop it, drop the carrier and put
+  // the operator's power back while the SmartSDR socket is still open.
+  try { atuWizardAbort('app quit'); if (smartSdr && smartSdr.connected && _atuWizardSaved) smartSdr.setTxTune(false); } catch {}
   try { stopLoggerCat(); } catch {}
   try { stopModemBridge('quit'); } catch {}
   // A WSPR beacon armed at quit must give the radio its power back NOW, while

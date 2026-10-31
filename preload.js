@@ -525,6 +525,8 @@ contextBridge.exposeInMainWorld('api', {
   // Band Scope pop-out (the radio's own spectrum — FT-710 over USB)
   scopePopoutOpen: () => ipcRenderer.send('scope-popout-open'),
   scopePopoutTheme: (theme) => ipcRenderer.send('scope-popout-theme', theme),
+  // ATU Calibration Wizard window (a Flex with an internal ATU; lib/atu-wizard.js)
+  atuWizardOpen: () => ipcRenderer.send('atu-wizard-popout-open'),
   // Bandspread pop-out
   bandspreadPopoutOpen: () => ipcRenderer.send('bandspread-popout-open'),
   bandspreadPopoutClose: () => ipcRenderer.send('bandspread-popout-close'),

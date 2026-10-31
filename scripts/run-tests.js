@@ -151,6 +151,7 @@ const TESTS = [
   'test/launch-origin-test.js',
   'test/cloud-merge-dupe-test.js',
   'test/swr-guard-test.js',
+  'test/atu-wizard-test.js',         // Flex ATU Calibration Wizard: plan vs privileges, classifier, run loop on a fake Flex, wiring
   'test/ft8-worker-respawn-test.js',
   'test/rig-setup-notes-test.js',
   'test/prop-empty-state-test.js',

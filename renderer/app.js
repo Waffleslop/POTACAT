@@ -14010,6 +14010,7 @@ if (window.api.onOpenSettingsWinlink) window.api.onOpenSettingsWinlink(async () 
 bindClick(document.getElementById('view-js8call-btn'), () => { if (window.api.js8PopoutOpen) window.api.js8PopoutOpen(); });
 bindClick(document.getElementById('view-sstv-btn'), () => window.api.sstvPopoutOpen());
 bindClick(document.getElementById('view-scope-btn'), () => { if (window.api.scopePopoutOpen) window.api.scopePopoutOpen(); });
+bindClick(document.getElementById('view-atu-wizard-btn'), () => { if (window.api.atuWizardOpen) window.api.atuWizardOpen(); });
 bindClick(document.getElementById('view-bandspread-btn'), () => {
   if (window.api.bandspreadPopoutOpen) window.api.bandspreadPopoutOpen();
 });
@@ -24143,6 +24144,10 @@ function rigApplyCapabilities(caps) {
   // stream its own spectrum (FT-710 over USB). Rig-scoped like DAX/Flex.
   const scopeMenuBtn = document.getElementById('view-scope-btn');
   if (scopeMenuBtn) scopeMenuBtn.classList.toggle('hidden', !caps.nativeScope);
+  // Tuner Memories (the ATU Calibration Wizard) exists only for a Flex with
+  // an internal ATU; main decides (caps.atuWizard), the same rig-scoped rule.
+  const atuWizBtn = document.getElementById('view-atu-wizard-btn');
+  if (atuWizBtn) atuWizBtn.classList.toggle('hidden', !caps.atuWizard);
   // Same gate as the rig popover's button, from the same caps payload — a
   // rig with no tuner (internal or external) gets no dead ATU button.
   if (activatorAtuBtn) activatorAtuBtn.style.display = caps.atu ? '' : 'none';
