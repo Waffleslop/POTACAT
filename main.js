@@ -29475,6 +29475,7 @@ let icomScopeOff = null;          // removes them
 let icomScopeAsm = null;
 let icomScopeEntry = null;        // IcomScope.MODELS entry + name
 let icomScopeTimer = null;
+let icomScopeOffTimer = null;     // the delayed "scope off" a close schedules; a reopen cancels it
 let icomScopePhase = 'idle';      // idle | asking | waiting | live | blocked
 let icomScopeAskedAt = 0;         // when scope output was last requested
 let icomScopeOutputAsks = 0;
@@ -29713,6 +29714,10 @@ function startIcomScope() {
   const entry = icomScopeModel();
   if (!entry) return;
   const { target } = icomScopeCaptureTarget();
+  // A phone switching Pan -> VFO closes and reopens within ~60 ms (KI4NHS):
+  // the close's 300 ms "scope off" would land under the new session and blank
+  // it. Cancel it, and keep owning the switch so the next close turns it off.
+  if (icomScopeOffTimer) { clearTimeout(icomScopeOffTimer); icomScopeOffTimer = null; icomScopeWeSet.scope = true; }
   icomScopeEntry = entry;
   icomScopeOn = true;
   icomScopePhase = 'idle';
@@ -29752,7 +29757,15 @@ function stopIcomScope(why) {
       const put = [];
       if (icomScopeWeSet.output) { link.sendScope(IcomScope.write.output(false)); put.push('scope output off'); }
       // A short gap: two scope writes back to back is what a 7300 dropped once.
-      if (icomScopeWeSet.scope) { setTimeout(() => { try { link.sendScope(IcomScope.write.scopeOn(false)); } catch { /* link gone */ } }, 300); put.push('scope off'); }
+      if (icomScopeWeSet.scope) {
+        if (icomScopeOffTimer) clearTimeout(icomScopeOffTimer);
+        icomScopeOffTimer = setTimeout(() => {
+          icomScopeOffTimer = null;
+          if (icomScopeOn) return;   // reopened meanwhile (startIcomScope also cancels)
+          try { link.sendScope(IcomScope.write.scopeOn(false)); } catch { /* link gone */ }
+        }, 300);
+        put.push('scope off');
+      }
       sendCatLog(`[Scope] ${name}: put back as it was (${put.join(', ')})` + (why ? ' — ' + why : ''));
     } else {
       sendCatLog(`[Scope] ${name}: the radio is not connected, so its scope settings could not be put back` + (why ? ' — ' + why : ''));

@@ -317,7 +317,10 @@ check('main.js: the Icom source is wired into the one scope state', () => {
   // What POTACAT turned on, it turns off.
   const stop = body('stopIcomScope');
   assert.ok(/icomScopeWeSet\.output\) \{ link\.sendScope\(IcomScope\.write\.output\(false\)\)/.test(stop));
-  assert.ok(/icomScopeWeSet\.scope\) \{ setTimeout\(\(\) => \{ try \{ link\.sendScope\(IcomScope\.write\.scopeOn\(false\)\)/.test(stop));
+  assert.ok(/icomScopeOffTimer = setTimeout\(\(\) => \{[\s\S]*if \(icomScopeOn\) return;[\s\S]*link\.sendScope\(IcomScope\.write\.scopeOn\(false\)\)/.test(stop));
+  // A close followed at once by a reopen (phone tab switch) must not let the
+  // close's delayed "scope off" land under the new session (KI4NHS).
+  assert.ok(/if \(icomScopeOffTimer\) \{ clearTimeout\(icomScopeOffTimer\); icomScopeOffTimer = null; icomScopeWeSet\.scope = true; \}/.test(body('startIcomScope')));
   // The axis comes from each sweep's header; a Fixed window's centre never follows the dial.
   assert.ok(/if \(!\(icomScopeOn && yaesuScopeState\.anchor === 'fixed'\)\) yaesuScopeState\.centerHz = hz;/.test(main));
   // The mode line uses the radio's own word (SCROLL-C is drawn like Fixed, never called FIXED).
