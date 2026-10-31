@@ -2217,6 +2217,9 @@ async function atuWizardStart(req = {}) {
     freqHz: _currentFreqHz || 0, mode: _currentMode || '',
     rfpower: smartSdr && Number.isFinite(smartSdr._lastRfPower) ? smartSdr._lastRfPower : null,
     tunePower: smartSdr && Number.isFinite(smartSdr.tunePower) ? smartSdr.tunePower : null,
+    // The run narrows the CW filter for its listen; put the operator's back.
+    filterLo: _flexSliceKv && _flexSliceKv.filter_lo != null ? Number(_flexSliceKv.filter_lo) : null,
+    filterHi: _flexSliceKv && _flexSliceKv.filter_hi != null ? Number(_flexSliceKv.filter_hi) : null,
     rigId: settings.activeRigId, at: Date.now(),
   };
   try { fs.writeFileSync(atuWizardRecoveryFile(), JSON.stringify(_atuWizardSaved)); } catch { /* restore still runs from memory */ }
@@ -2264,6 +2267,9 @@ function atuWizardRestoreOperatorState(why) {
   try {
     const slice = smartSdr.ourSliceIndex != null ? smartSdr.ourSliceIndex : getFlexSliceIndex();
     if (saved.freqHz > 0) smartSdr.tuneSlice(slice, saved.freqHz / 1e6, saved.mode || undefined);
+    if (Number.isFinite(saved.filterLo) && Number.isFinite(saved.filterHi) && saved.filterHi > saved.filterLo) {
+      setTimeout(() => { try { if (smartSdr && smartSdr.connected) smartSdr.setSliceFilter(slice, saved.filterLo, saved.filterHi); } catch { /* radio gone */ } }, 250);
+    }
     if (Number.isFinite(saved.rfpower)) smartSdr.setTxPower(saved.rfpower);
     if (Number.isFinite(saved.tunePower)) smartSdr.setTunePower(saved.tunePower);
     _atuWizardRestorePending = { rfpower: saved.rfpower, tunePower: saved.tunePower, since: Date.now() };

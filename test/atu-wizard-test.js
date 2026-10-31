@@ -313,7 +313,7 @@ function fastHooks(log) {
     assert.ok(log.some(l => /interrupted — measuring it again/.test(l)), log.join('\n'));
   });
 
-  await ta('a digital dial is listened to in CW with a 500 Hz filter; SSB stays wide', async () => {
+  await ta('a digital dial is listened to in CW with a 200 Hz filter on the carrier (FT8 starts 200 Hz up); SSB stays wide', async () => {
     const pts = W.buildPlan({ bands: ['20m'], modes: ['DIGITAL', 'SSB'], licenseClass: 'us_extra' }).points;
     const radio = fakeRadio(); const log = [];
     const seen = [];
@@ -321,7 +321,7 @@ function fastHooks(log) {
     const run = new W.AtuWizardRun(radio, pts, FAST, fastHooks(log)); radio.run = run;
     await run.start();
     const ft8 = seen.find(x => x[0] === 14074), ssb = seen.find(x => x[0] === 14250);
-    assert.deepStrictEqual(ft8.slice(1), ['CW', 500]);
+    assert.deepStrictEqual(ft8.slice(1), ['CW', 200]);
     assert.deepStrictEqual(ssb.slice(1), ['USB', 0]);
   });
 
