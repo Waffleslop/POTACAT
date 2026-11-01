@@ -457,6 +457,7 @@ const { PskrClient } = require('./lib/pskreporter');
 const PskrTx = require('./lib/pskreporter-tx');
 const { Ft8Engine, freqsForMode } = require('./lib/ft8-engine');
 const { decideDialFollow } = require('./lib/jtcat-dial-follow');
+const { isWinlinkSessionFault } = require('./lib/winlink-fault');
 const { checkClockOffset, syncSystemClock, classifyClockOffset } = require('./lib/ntp');
 const StationClock = require('./lib/station-clock'); // FT8/FT4/FT2/WSPR/JTTY slot clock, correctable from an ECHOCAT device
 const JtcatParser = require('./renderer/jtcat-parser'); // shared FT8 message classifier (also a browser global in the renderers)
@@ -47211,6 +47212,16 @@ process.on('uncaughtException', (err) => {
     catch { console.warn('[net] swallowed unhandled network error:', msg); }
     return;
   }
+  // A throw from a Winlink session's own sockets and child processes ends
+  // that session with the error on screen, never the station (lib/winlink-fault.js).
+  try {
+    if (isWinlinkSessionFault(err, { sessionActive: winlinkSessionActive() })) {
+      sendCatLog(`[Winlink] ERROR inside the session, ended instead of crashing POTACAT: ${msg}`);
+      if (err && err.stack) sendCatLog('[Winlink] ' + String(err.stack).split(/\r?\n/).slice(0, 6).join(' | '));
+      winlinkAbortSession(`POTACAT hit an error in the Winlink session: ${msg}`);
+      return;
+    }
+  } catch { /* fall through to the crash dialog */ }
   // Pre-shutdown unexpected error. The old bare rethrow died with NO dialog
   // at all — a throw inside an uncaughtException listener skips Electron's
   // default dialog, which is how the ARRL 250 crash presented as "the window
