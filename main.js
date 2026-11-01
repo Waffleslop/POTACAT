@@ -25643,7 +25643,13 @@ function handleRemotePtt(state, opts = {}) {
   }
   // The operator's own licence class. opts.emission names what goes out when
   // the rig's mode does not (FT8 keyed in USB, SSTV keyed in USB-D).
-  if (state && ownTxPrivilegeRefused(opts.emission || (opts.forceDataMode ? 'DATA' : _currentMode), opts.freqHz)) return;
+  // What this key-down sends (DATA for FT8/SSTV/Winlink), for EVERY privilege
+  // check: the Guest Pass gate judged the radio's mode, so FT8 from a rig left
+  // in USB on 28.074 was refused to a Technician as phone (artificialjump's
+  // friend on NA4DQ's Guest Pass, 2026-10-29: "Out of band: 28.074 MHz allows
+  // CW/digital only on tech privileges").
+  const pttEmission = opts.emission || (opts.forceDataMode ? 'DATA' : null);
+  if (state && ownTxPrivilegeRefused(pttEmission || _currentMode, opts.freqHz)) return;
   // You cannot key a receiver: while the SDR is what you hear because the
   // radio cannot reach that frequency, PTT is refused and says so.
   if (state && listenSdr.live && listenSdr.auto) {
@@ -25813,14 +25819,14 @@ function handleRemotePtt(state, opts = {}) {
       // every release — including the failsafe paths, which all come
       // through here as handleRemotePtt(false).
       if (state) assertFlexTxDaxForTx();
-      const keyed = gatedSmartSdrTransmit(state);
+      const keyed = gatedSmartSdrTransmit(state, pttEmission);
       // Only a PTT that actually went to the radio opens an RF window; a
       // pass-blocked key-down must not later read "no RF during key-down".
       if (state && keyed) _flexTxRf = { startedAt: Date.now(), peakW: 0, maxSwr: 0, frames: 0 };
       if (!state) { restoreFlexTxDax(); logFlexTxRfSummary(); }
     } else if (cat && cat.connected) {
       if (state) sendCatLog('[PTT] SmartSDR API unavailable — falling back to TS-2000 TX; command (slice selection skipped)');
-      gatedSetTransmit(state);
+      gatedSetTransmit(state, pttEmission);
     } else if (state) {
       console.warn('[PTT] Cannot key TX — neither SmartSDR API nor CAT TCP is connected');
       sendCatLog('PTT FAILED: neither SmartSDR API nor CAT TCP is connected');
@@ -25839,9 +25845,9 @@ function handleRemotePtt(state, opts = {}) {
       }
       if (_civPttDelayMs > 0) {
         // Icom SSB-over-DATA: let the mode frame clear the bus before keying.
-        setTimeout(() => { if (cat && cat.connected) gatedSetTransmit(state); }, _civPttDelayMs);
+        setTimeout(() => { if (cat && cat.connected) gatedSetTransmit(state, pttEmission); }, _civPttDelayMs);
       } else {
-        gatedSetTransmit(state);
+        gatedSetTransmit(state, pttEmission);
       }
     } else if (state) {
       console.warn('[PTT] Cannot key TX — CAT not connected');
@@ -33855,9 +33861,9 @@ function sstvHaltTxNow() {
   }
 }
 
-function gatedSetTransmit(state) {
+function gatedSetTransmit(state, emission) {
   if (passEnforcement && state) {
-    const res = passEnforcement.interceptCatCommand({ type: 'tx_enable', freqHz: _currentFreqHz, mode: _currentMode });
+    const res = passEnforcement.interceptCatCommand({ type: 'tx_enable', freqHz: _currentFreqHz, mode: emission || _currentMode });
     if (!res.allowed) {
       sendCatLog(`[pass] TX blocked: ${res.userVisible}`);
       if (win && !win.isDestroyed()) {
@@ -33915,9 +33921,9 @@ function gatedSetTxPower(value, opts = {}) {
 // SmartSDR / Flex equivalents (#46b). Flex users would otherwise bypass
 // pass enforcement entirely since the cat.setTransmit / cat.setTxPower
 // wrappers don't apply to smartSdr.*. Same gate policy, different rig.
-function gatedSmartSdrTransmit(state) {
+function gatedSmartSdrTransmit(state, emission) {
   if (passEnforcement && state) {
-    const res = passEnforcement.interceptCatCommand({ type: 'tx_enable', freqHz: _currentFreqHz, mode: _currentMode });
+    const res = passEnforcement.interceptCatCommand({ type: 'tx_enable', freqHz: _currentFreqHz, mode: emission || _currentMode });
     if (!res.allowed) {
       sendCatLog(`[pass] TX blocked (Flex): ${res.userVisible}`);
       if (win && !win.isDestroyed()) {
