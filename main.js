@@ -367,6 +367,7 @@ const wsprBandhop = require('./lib/wspr/bandhop');
 const jtcatModehop = require('./lib/jtcat-modehop');
 const { WsprScheduler } = require('./lib/wspr/scheduler');
 const WsprPowerMemory = require('./lib/wspr-power-memory'); // pre-beacon RF power remember/restore decisions
+const Privileges = require('./lib/privileges');
 const SwrGuard = require('./lib/swr-guard'); // SWR-guard auto-tune + ATU result policy (pure)
 const { encodeWspr } = require('./lib/wspr/encode');
 const { loadCtyDat, resolveCallsign, resolveZones, getAllEntities } = require('./lib/cty');
@@ -9133,7 +9134,7 @@ function openMercuryClient() {
   // supplies the real actions. `mercuryTxActive` mirrors the bridge's keyed
   // state so disconnectMercury / the failsafe timer can see it.
   attachMercuryRadioBridge(mercuryClient, {
-    keyPtt: (on) => { mercuryTxActive = on; handleRemotePtt(on, on ? { audio: true } : {}); },
+    keyPtt: (on) => { mercuryTxActive = on; handleRemotePtt(on, on ? { audio: true, emission: 'DATA' } : {}); },
     acquire: () => acquireRadio('mercury'),
     release: () => releaseRadio('mercury'),
     abort: () => { try { mercuryClient.abort(); } catch {} },
@@ -9983,7 +9984,7 @@ async function startWinlinkShim() {
       winlinkTxActive = true;
       const icom = detectRigType() === 'icom' || (getActiveRigModel()?.brand === 'Icom');
       if (settings.audioSource === 'icom-network') icomNetworkVoiceTx(true, 'Winlink');
-      try { handleRemotePtt(true, { audio: true, forceDataMode: icom }); } catch (e) { winlinkLog(`PTT failed: ${e.message}`); }
+      try { handleRemotePtt(true, { audio: true, forceDataMode: icom, emission: 'DATA' }); } catch (e) { winlinkLog(`PTT failed: ${e.message}`); }
       armWinlinkTxFailsafe();
       winlinkSessionTouch();
       winlinkState.setSession({ ptt: true }); winlinkSessionPush();
@@ -17070,6 +17071,11 @@ function startJtcat(mode) {
       try { if (ft8Engine && ft8Engine._txActive) ft8Engine.txComplete(); } catch {}
       return;
     }
+    // The operator's licence class, before anything is keyed or played.
+    if (ownTxPrivilegeRefused('DATA')) {
+      try { if (ft8Engine && ft8Engine._txActive) ft8Engine.txComplete(); } catch {}
+      return;
+    }
     acquireRadio('jtcat'); // held for the duration of this transmission
     nudgePskrMapAfterTx(); // early PSKR-map pull so propagation shows this session
     const catState = cat ? `connected=${cat.connected}` : 'cat=null';
@@ -17124,7 +17130,7 @@ function startJtcat(mode) {
     jtcatNoteTxSent(data.message);
     jtcatNoteTxSlot(data.slot); // an Auto CQ keeps the slot we last transmitted in
     const networkStartDelayMs = jtcatNetworkTxStartDelayMs(modeForTx);
-    handleRemotePtt(true, { audio: true });
+    handleRemotePtt(true, { audio: true, emission: 'DATA' });
     armJtcatTxFailsafe(settings.audioSource === 'icom-network' ? 'Icom Network RS-BA1' : (settings.audioSource === 'smartsdr' ? 'SmartSDR Direct' : 'local audio'), data.samples, 12000, data.offsetMs || 0, networkStartDelayMs);
     if (win && !win.isDestroyed()) {
       // Carry the mode so the main-window TX badge reads the actual mode
@@ -17613,7 +17619,7 @@ function startJtcatTune(opts = {}) {
   // Audio is genuinely going to the rig USB CODEC, so audio:true triggers
   // SSB-over-DATA where appropriate (USB -> DIGU mute the rig mic during
   // the tone). The 90s timer auto-releases.
-  handleRemotePtt(true, { audio: true });
+  handleRemotePtt(true, { audio: true, emission: 'DATA' });
   // Route the tone the same way FT8 TX is routed: straight to dax_tx on the
   // SmartSDR-Direct path, then the Icom RS-BA1 network path, else the
   // renderer's Windows-DAX device path.
@@ -21120,6 +21126,8 @@ function sendCwTextViaDtrKey(text, wpm, dtrPins, opts) {
 function sendCwTextToRadio(text, opts) {
   // Timestamp the transmit so a CAT link loss in the next few seconds is
   // recognized as RF-into-USB rather than a generic cable fault.
+  // The one CW text sink: the operator's licence class applies to every surface.
+  if (text && ownTxPrivilegeRefused('CW')) return;
   if (text) _lastCwKeyMs = Date.now();
   if (text) text = expandCwGreeting(text);
   // A CW keystroke must never crash the app. Every backend below touches
@@ -25522,6 +25530,9 @@ function handleRemotePtt(state, opts = {}) {
     if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'tune-blocked', reason: why });
     return;
   }
+  // The operator's own licence class. opts.emission names what goes out when
+  // the rig's mode does not (FT8 keyed in USB, SSTV keyed in USB-D).
+  if (state && ownTxPrivilegeRefused(opts.emission || (opts.forceDataMode ? 'DATA' : _currentMode), opts.freqHz)) return;
   // You cannot key a receiver: while the SDR is what you hear because the
   // radio cannot reach that frequency, PTT is refused and says so.
   if (state && listenSdr.live && listenSdr.auto) {
@@ -33567,8 +33578,38 @@ function passTxBlocked(res) {
 }
 function passTxJustBlocked() { return Date.now() - _passTxBlockedAt < 500; }
 
+// The operator's OWN licence class, checked at every key-down (Guest Pass has
+// its own, above). A Technician's FT8 went out above 28.300 MHz on 10 m with
+// nothing in the way (K3SBP 2026-11-01); the class in Settings > Station only
+// filtered spots. Policy: lib/privileges.js txPrivilegeRefusal. `emission` is
+// what goes out (an Icom keyed for FT8 in plain USB is still sending data).
+// Returns true when the key-down must be refused, after saying why everywhere.
+let _ownTxRefusedLogAt = 0;
+let _ownTxRefusedLast = '';
+function ownTxPrivilegeRefused(emission, freqHz) {
+  const why = Privileges.txPrivilegeRefusal({
+    freqHz: freqHz != null ? freqHz : _currentFreqHz,
+    mode: emission || _currentMode,
+    licenseClass: settings.licenseClass,
+  });
+  if (!why) return false;
+  const now = Date.now();
+  if (why !== _ownTxRefusedLast || now - _ownTxRefusedLogAt > 10000) {
+    _ownTxRefusedLast = why; _ownTxRefusedLogAt = now;
+    sendCatLog(`[TX] Refused: ${why}`);
+    if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: why, warn: true, duration: 10000 });
+  }
+  if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', why);
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: why });
+  if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+    try { remoteServer.sendToClient({ type: 'tune-blocked', reason: why }); } catch {}
+  }
+  return true;
+}
+
 /** Every transmit path that is not a PTT asks this (CW text, the paddle). */
 function passTxAllowed(mode) {
+  if (ownTxPrivilegeRefused(mode || _currentMode)) return false;
   if (!passEnforcement || passEnforcement.getState() === 'idle') return true;
   const res = passEnforcement.interceptCatCommand({ type: 'tx_enable', freqHz: _currentFreqHz, mode: mode || _currentMode });
   if (res.allowed) return true;
@@ -38126,7 +38167,7 @@ app.whenReady().then(() => {
       // its factory DATA OFF MOD setting takes the mic, not USB, and the rig
       // keys with no audio (WB8IMY IC-7300, 2026-09-26). Receive stays in USB.
       const _sstvIcom = detectRigType() === 'icom' || (getActiveRigModel()?.brand === 'Icom');
-      handleRemotePtt(true, { audio: true, forceDataMode: _sstvIcom });
+      handleRemotePtt(true, { audio: true, forceDataMode: _sstvIcom, emission: 'SSTV' });
 
       // Optional CW ID — required by some regulators (UK/EU), good
       // practice everywhere. When settings.sstvCwId is true, append
@@ -45731,6 +45772,12 @@ app.whenReady().then(() => {
           if (engine._txActive) engine.txComplete();
           return;
         }
+        // The operator's licence class, on this slice's own dial.
+        if (ownTxPrivilegeRefused('DATA', s.freqKhz ? s.freqKhz * 1000 : undefined)) {
+          engine._txEnabled = false;
+          if (engine._txActive) engine.txComplete();
+          return;
+        }
         const catState = cat ? `connected=${cat.connected}` : 'cat=null';
         nudgePskrMapAfterTx(); // early PSKR-map pull (same as single-slice)
         // Per-TX try stamp — same contract as the single-slice tx-start
@@ -45741,7 +45788,7 @@ app.whenReady().then(() => {
         rigPresetFlushPending();
         console.log(`[JTCAT Multi] TX start on ${s.sliceId}/${s.band} — PTT on, message: ${data.message}, ${catState}`);
         sendCatLog(`FT8 TX (${s.band}): ${data.message} freq=${data.freq}Hz slot=${data.slot} ${catState}`);
-        handleRemotePtt(true);
+        handleRemotePtt(true, { emission: 'DATA', freqHz: s.freqKhz ? s.freqKhz * 1000 : undefined });
         if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
           jtcatPopoutWin.webContents.send('jtcat-tx-status', { state: 'tx', message: data.message, slot: data.slot, txFreq: engine._txFreq, sliceId: s.sliceId });
         }
