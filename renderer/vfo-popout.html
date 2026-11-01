@@ -732,6 +732,7 @@
 <script src="tx-eq-chain.js"></script>
 <script src="../lib/custom-cat-follow.js"></script>
 <script src="../lib/rig-bands.js"></script>
+<script src="../lib/freq-paste.js"></script>
 <script>
 // --- State ---
 let currentFreqHz = 0;
@@ -1644,6 +1645,22 @@ kpGo.addEventListener('click', () => {
   kpRender();
   updateDisplay();
   showPane('dial');
+});
+
+// Paste a frequency anywhere (or into the box) to fill type-to-tune; Enter
+// tunes as for typed digits (hoogskev 2026-10-31: the box took no paste).
+// lib/freq-paste.js reads "14.074", "14,074", "14074 kHz", "14.074.000".
+document.addEventListener('paste', (e) => {
+  const t = e.target;
+  if (t !== kpInput && t && (t.tagName === 'INPUT' && t.type !== 'checkbox' && t.type !== 'range' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+  if (sheetOpen()) return;
+  const text = (e.clipboardData && e.clipboardData.getData('text')) || '';
+  const khz = window.FreqPaste ? window.FreqPaste.parsePastedFreq(text) : 0;
+  if (!khz) return;
+  e.preventDefault();
+  showPane('keypad');
+  kpBuffer = fmtMhz(khz);
+  kpRender();
 });
 
 // Keyboard: typing digits anywhere opens type-to-tune (never while a text
