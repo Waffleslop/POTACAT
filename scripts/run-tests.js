@@ -116,6 +116,26 @@ const TESTS = [
   'test/dxpedition-dials-test.js',
   'test/renderer-global-api-test.js',
   'test/heard-grids-test.js',
+  // Run by CI's test.yml but missing here until 2026-11-02 (a CI-only failure slipped past the local suite):
+  'test/contest-history-test.js',
+  'test/cw-key-line-test.js',
+  'test/cw-paddle-availability-test.js',
+  'test/event-banner-pick-test.js',
+  'test/event-decode-match-test.js',
+  'test/event-geo-test.js',
+  'test/event-progress-test.js',
+  'test/event-registry-test.js',
+  'test/events-catalog-test.js',
+  'test/hunted-park-test.js',
+  'test/js8-audio-feed-test.js',
+  'test/log-comment-test.js',
+  'test/raw-cat-command-test.js',
+  'test/rigctld-stderr-test.js',
+  'test/sdr-list-sync-test.js',
+  'test/settings-secrets-test.js',
+  'test/sstv-e2e-test.js',
+  'test/sstv-feed-gate-test.js',
+  'test/wrl-packet-test.js',
   'test/jtcat-snr-floor-test.js', // Hunt does not call a CQ below the operator's signal floor (per band)
   'test/rx-spectrum-test.js', // the phone's VFO waterfall with no FT8 engine: Flex/Icom streams, the rig's sound card
   'test/yaesu-scope-test.js', // the FT-710's own scope: frame parser, axis, helper exit codes, remote payload guard (was CI-only)
