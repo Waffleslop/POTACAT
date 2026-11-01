@@ -6694,8 +6694,8 @@
   function openLogSheet(prefill) {
     const p = prefill || {};
     logCall.value = p.callsign || '';
-    webRenderWorkedMatrix(logCall, 'log-worked-matrix');
     reportTypedCall('log', logCall.value); // a value set in code counts too
+    webRenderWorkedMatrix(logCall, 'log-worked-matrix');
     logFreq.value = p.freqKhz || (currentFreqKhz ? String(Math.round(currentFreqKhz * 10) / 10) : '');
     // INVARIANT: passing freqKhz means "this frequency is NOT the dial's" —
     // a spot's, a decode's — so it is treated as the operator's choice and
@@ -7391,8 +7391,8 @@
     }
 
     qlCall.value = '';
-    webRenderWorkedMatrix(qlCall, 'ql-worked-matrix');
     reportTypedCall('ql', '');
+    webRenderWorkedMatrix(qlCall, 'ql-worked-matrix');
     qlCallInfo.classList.add('hidden');
     qlCallInfo.textContent = '';
     qlNotes.value = '';

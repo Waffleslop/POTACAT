@@ -71,7 +71,7 @@ test('ECHOCAT Web: inlined, drawn in the log sheet and the quick log', () => {
   assert.ok(html.includes('<!-- worked-matrix-js -->') && html.includes('id="ql-worked-matrix"') && html.includes('id="log-worked-matrix"'));
   const web = read('renderer/remote.js');
   assert.ok(/qlCall\.addEventListener\('input', \(\) => webRenderWorkedMatrix\(qlCall, 'ql-worked-matrix'\)\)/.test(web));
-  assert.ok(/logCall\.value = p\.callsign \|\| '';\s*webRenderWorkedMatrix\(logCall, 'log-worked-matrix'\);/.test(web));
+  assert.ok(/logCall\.value = p\.callsign \|\| '';\s*reportTypedCall\('log', logCall\.value\);[^\n]*\n\s*webRenderWorkedMatrix\(logCall, 'log-worked-matrix'\);/.test(web));
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
