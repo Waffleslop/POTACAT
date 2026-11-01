@@ -3701,8 +3701,10 @@ function jtcatQsoLive() {
   const live = (q) => !!(q && q.call && !['idle', 'done', 'cq'].includes(q.phase));
   return live(popoutJtcatQso) || live(remoteJtcatQso);
 }
+let _jtcatTuneEcho = false; // true while tuneRadio echoes its own frequency
 function jtcatDialFollow(hz) {
   try {
+    if (_jtcatTuneEcho) return; // a tune POTACAT made, not the radio's knob
     if (isRemoteMode() || !ft8Engine || !ft8Engine._running || !(_jtcatExpectedDialHz > 0)) return;
     if (jtcatManager && jtcatManager.sliceCount > 1) return;
     const mode = String(ft8Engine._mode || 'FT8').toUpperCase();
@@ -34556,7 +34558,12 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
   // unconfirmed tune therefore shows the target briefly and then reverts,
   // which is the same optimistic behavior the VFO pop-out already uses for
   // its own dial (_freqSuppressTarget).
-  sendCatFrequency(tuneFreqHz);
+  // POTACAT's own tune: the JTCAT dial-follow in sendCatFrequency must not
+  // read this echo as the operator turning the knob (every tune path updates
+  // the JTCAT anchor right AFTER tuneRadio returns, so the echo always sees
+  // the previous anchor and a band click would "follow" itself).
+  _jtcatTuneEcho = true;
+  try { sendCatFrequency(tuneFreqHz); } finally { _jtcatTuneEcho = false; }
   if (resolvedMode) sendCatMode(resolvedMode);
 
   // Set or clear XIT via SmartSDR API (works even when tuning via CAT).

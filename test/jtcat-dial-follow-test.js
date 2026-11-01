@@ -50,6 +50,13 @@ test('main: every frequency passes through the follow; the refusal names both ba
   assert.ok(/ipcMain\.on\('jtcat-follow-radio'/.test(main) && /remoteServer\.on\('jtcat-follow-radio'/.test(main), 'window and ECHOCAT can press it');
 });
 
+test('a tune POTACAT makes never follows itself (every tune path updates the anchor after tuneRadio returns)', () => {
+  const main = read('main.js');
+  assert.ok(/_jtcatTuneEcho = true;\s*try \{ sendCatFrequency\(tuneFreqHz\); \} finally \{ _jtcatTuneEcho = false; \}/.test(main), 'tuneRadio marks its echo');
+  const fn = main.slice(main.indexOf('function jtcatDialFollow(hz)'), main.indexOf('function jtcatFollowBand('));
+  assert.ok(/if \(_jtcatTuneEcho\) return;/.test(fn), 'and the follow ignores it');
+});
+
 test('wire, bridge and window', () => {
   const proto = read('lib/echocat-protocol.js');
   assert.ok(proto.includes("'jtcat-follow-radio': { dir: Dir.C2S") && proto.includes("'jtcat-band-follow': { dir: Dir.S2C"));
