@@ -6694,6 +6694,7 @@
   function openLogSheet(prefill) {
     const p = prefill || {};
     logCall.value = p.callsign || '';
+    webRenderWorkedMatrix(logCall, 'log-worked-matrix');
     reportTypedCall('log', logCall.value); // a value set in code counts too
     logFreq.value = p.freqKhz || (currentFreqKhz ? String(Math.round(currentFreqKhz * 10) / 10) : '');
     // INVARIANT: passing freqKhz means "this frequency is NOT the dial's" —
@@ -7293,6 +7294,22 @@
     }, 400);
   }
 
+  // The bands and modes already worked with the call being logged (#108,
+  // AE5JE): lib/worked-matrix.js over this device's worked-QSO list.
+  const wmTimers = {};
+  function webRenderWorkedMatrix(inputEl, elId) {
+    clearTimeout(wmTimers[elId]);
+    wmTimers[elId] = setTimeout(() => {
+      const el = document.getElementById(elId);
+      if (!el || typeof WorkedMatrix === 'undefined') return;
+      const cs = String((inputEl && inputEl.value) || '').split(',')[0].trim().toUpperCase();
+      if (cs.length < 3) { el.innerHTML = ''; return; }
+      const m = WorkedMatrix.buildWorkedMatrix(WorkedMatrix.entriesForCall(workedQsos, cs, JtcatParser.baseCall));
+      el.innerHTML = WorkedMatrix.workedMatrixHtml(m, { showEmpty: true, emptyText: 'Not worked before' });
+    }, 200);
+  }
+  qlCall.addEventListener('input', () => webRenderWorkedMatrix(qlCall, 'ql-worked-matrix'));
+  logCall.addEventListener('input', () => webRenderWorkedMatrix(logCall, 'log-worked-matrix'));
   qlCall.addEventListener('input', () => triggerCallLookup(qlCall, 'ql'));
   ltCall.addEventListener('input', () => triggerCallLookup(ltCall, 'lt'));
   logCall.addEventListener('input', () => triggerCallLookup(logCall, 'log'));
@@ -7374,6 +7391,7 @@
     }
 
     qlCall.value = '';
+    webRenderWorkedMatrix(qlCall, 'ql-worked-matrix');
     reportTypedCall('ql', '');
     qlCallInfo.classList.add('hidden');
     qlCallInfo.textContent = '';

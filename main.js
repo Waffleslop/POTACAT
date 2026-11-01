@@ -459,6 +459,7 @@ const { Ft8Engine, freqsForMode } = require('./lib/ft8-engine');
 const { decideDialFollow } = require('./lib/jtcat-dial-follow');
 const { isWinlinkSessionFault } = require('./lib/winlink-fault');
 const { createSpotSourceCache } = require('./lib/spot-source-cache');
+const WorkedMatrix = require('./lib/worked-matrix');
 const { checkClockOffset, syncSystemClock, classifyClockOffset } = require('./lib/ntp');
 const StationClock = require('./lib/station-clock'); // FT8/FT4/FT2/WSPR/JTTY slot clock, correctable from an ECHOCAT device
 const JtcatParser = require('./renderer/jtcat-parser'); // shared FT8 message classifier (also a browser global in the renderers)
@@ -43109,7 +43110,9 @@ app.whenReady().then(() => {
     } catch {}
     const all = lookupPastQsos(trimmed);
     const pastQsos = limit ? all.slice(0, limit) : all;
-    return { qrz: qrzInfo, pastQsos, totalQsos: all.length };
+    // The bands and modes already worked with this call (#108, AE5JE).
+    const workedMatrix = WorkedMatrix.buildWorkedMatrix(WorkedMatrix.entriesForCall(workedQsos, trimmed, JtcatParser.baseCall));
+    return { qrz: qrzInfo, pastQsos, totalQsos: all.length, workedMatrix };
   });
 
   // Export/Import settings

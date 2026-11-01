@@ -12779,6 +12779,23 @@ function placeLogDialog() {
 // "Quick Log only" guard kept the spotted op's name (Mac user, 2026-10-23; the
 // Ctrl+L pop-out already looked up on every edit). The name is callsign 1's,
 // so a comma list looks up its first call.
+// The bands and modes already worked with the call being logged (GitHub
+// #108, AE5JE): lib/worked-matrix.js over the same worked-QSO entries every
+// worked-before check reads. First call of a comma list.
+let logWorkedMatrixTimer = null;
+function renderLogWorkedMatrix() {
+  const el = document.getElementById('log-worked-matrix');
+  if (!el || !window.WorkedMatrix) return;
+  const cs = (logCallsign.value.split(',')[0] || '').trim().toUpperCase();
+  if (cs.length < 3) { el.innerHTML = ''; return; }
+  const m = window.WorkedMatrix.buildWorkedMatrix(window.WorkedMatrix.entriesForCall(workedQsos, cs, JtcatParser.baseCall));
+  el.innerHTML = window.WorkedMatrix.workedMatrixHtml(m, { showEmpty: true, emptyText: 'Not worked before' });
+}
+logCallsign.addEventListener('input', () => {
+  clearTimeout(logWorkedMatrixTimer);
+  logWorkedMatrixTimer = setTimeout(renderLogWorkedMatrix, 200);
+});
+
 logCallsign.addEventListener('input', () => {
   clearTimeout(quickLogLookupTimer);
   const cs = (logCallsign.value.split(',')[0] || '').trim().toUpperCase();
@@ -15213,6 +15230,7 @@ function openLogPopup(spot) {
 
   logComment.value = '';
 
+  renderLogWorkedMatrix();
   refreshLogAsOperators(); // Log as: back to the active operator on every open
   logDialog.showModal();
   placeLogDialog();
