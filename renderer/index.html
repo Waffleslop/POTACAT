@@ -2051,7 +2051,7 @@
             <button type="button" id="icom-test-btn">Test Connection</button>
             <span id="icom-test-result" style="font-size:12px;"></span>
           </div>
-          <span class="help-text" style="margin-top:6px;display:block;">For CW paddle keying via ECHOCAT, set your radio menu: SET > Connectors > USB SEND/Keying > USB Keying (CW) = DTR</span>
+          <span class="help-text" style="margin-top:6px;display:block;">For CW paddle keying via ECHOCAT, the radio's USB Keying (CW) menu must match POTACAT's CW keying line: <b>Setup instructions</b> in the rig editor names the exact setting for your model (RTS on the IC-7300 and IC-7300 MK II, DTR on most others).</span>
         </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="civ-tcp"> Raw CI-V TCP bridge</label>
         <div id="civ-tcp-config" class="radio-sub hidden">
@@ -2085,7 +2085,7 @@
             <button type="button" id="civ-tcp-test-btn">Test Connection</button>
             <span id="civ-tcp-test-result" style="font-size:12px;"></span>
           </div>
-          <span class="help-text" style="margin-top:6px;display:block;">For <code>ser2net</code>, use whatever TCP port you configured in <code>/etc/ser2net.yaml</code>. CW paddle keying works the same as direct USB CI-V — the codec sends the same CW key command (0x1C 0x01) over the TCP transport.</span>
+          <span class="help-text" style="margin-top:6px;display:block;">For <code>ser2net</code>, use whatever TCP port you configured in <code>/etc/ser2net.yaml</code>. CW text and macros work over the bridge (CI-V command 0x17). Paddle keying needs the USB serial key line (DTR/RTS), which a TCP bridge does not carry.</span>
         </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="icom-network"> Icom Network (UDP / RS-BA1) <span style="font-size:10px;color:var(--text-tertiary);">— CAT + RX/TX audio</span></label>
         <div id="icom-network-config" class="radio-sub hidden">
