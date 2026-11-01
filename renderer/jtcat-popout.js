@@ -607,8 +607,12 @@ function _applyPopoutTheme(payload) {
     var qrz = qrzCache[call];
     var nameLine = qrz && qrz.name ? '<div style="color:#aaa;font-size:11px;">' + esc(qrz.name) + '</div>' : '';
     var qsoBtn = isMe ? '' : '<button class="jp-popup-qso" data-call="' + esc(call) + '" data-grid="' + esc(grid) + '" style="margin-top:4px;padding:3px 10px;border-radius:4px;border:1px solid #4ecca3;background:#4ecca3;color:#000;font-size:11px;font-weight:600;cursor:pointer;">QSO</button>';
+    // The call is a QRZ link, as on the Spots map (kilrath8954 2026-10-31:
+    // the popup showed only the operator's name and grid).
+    var callHtml = isMe ? '<b style="color:#fff;">' + esc(call) + '</b>'
+      : '<a href="#" class="jp-popup-qrz" data-call="' + esc(call) + '" title="Open ' + esc(call) + ' on QRZ.com" style="color:#4fc3f7;font-weight:700;text-decoration:underline;cursor:pointer;">' + esc(call) + '</a>';
     return '<div style="font-family:monospace;font-size:12px;line-height:1.5;">' +
-      '<b style="color:#fff;">' + esc(call) + '</b> <span style="color:#666;">[' + esc(grid) + ']</span>' +
+      callHtml + ' <span style="color:#666;">[' + esc(grid) + ']</span>' +
       nameLine + qsoBtn + '</div>';
   }
 
@@ -660,6 +664,14 @@ function _applyPopoutTheme(payload) {
     marker.on('popupopen', function() {
       var el = marker.getPopup().getElement();
       if (!el) return;
+      var qrzA = el.querySelector('.jp-popup-qrz');
+      if (qrzA) {
+        qrzA.addEventListener('click', function(ev) {
+          ev.preventDefault();
+          var c = qrzA.dataset.call;
+          if (c && window.api.openExternal) window.api.openExternal('https://www.qrz.com/db/' + encodeURIComponent(JtcatParser.baseCall(c)));
+        });
+      }
       var btn = el.querySelector('.jp-popup-qso');
       if (btn) {
         btn.addEventListener('click', function() {
