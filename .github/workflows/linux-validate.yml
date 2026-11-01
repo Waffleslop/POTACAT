@@ -50,7 +50,7 @@ jobs:
 
       - name: Build hamlib from source
         env:
-          HAMLIB_VERSION: '4.7.1'
+          HAMLIB_VERSION: '4.7.2'
         run: |
           set -e
           curl -fsSL "https://github.com/Hamlib/Hamlib/archive/refs/tags/${HAMLIB_VERSION}.tar.gz" -o /tmp/hamlib.tar.gz
