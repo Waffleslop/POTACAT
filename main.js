@@ -30658,7 +30658,8 @@ function forwardToLogbook(qsoData, s = settings) {
 
 /**
  * Send a QSO via plain UDP ADIF packet.
- * Used by Log4OM 2 (port 2237), HRD Logbook (port 2333), and MacLoggerDX (port 9090).
+ * Used by Log4OM 2 (port 2237) and HRD Logbook (port 2333). MacLoggerDX and
+ * RUMlogNG get WSJT-X binary on 2237 instead (see WSJTX_BINARY_LOGGERS).
  */
 function sendUdpAdif(qsoData, host, port) {
   return new Promise((resolve, reject) => {

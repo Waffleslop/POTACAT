@@ -11606,6 +11606,7 @@ const SOURCE_LABELS = {
   // cluster spot labelled DX (G4BFG). DX is now the spot's isDx (lib/dx-rule.js).
   pota: 'POTA', sota: 'SOTA', dxc: 'Cluster', cwspots: 'CW',
   rbn: 'RBN', wwff: 'WWFF', llota: 'LLOTA', tiles: 'Tiles', gma: 'GMA', parc: 'PARC', pskr: 'FreeDV', net: 'NET',
+  wwbota: 'WWBOTA', freedv: 'FreeDV',
 };
 const CW_DIGI_MODES = new Set(['CW', 'FT8', 'FT4', 'FT2', 'RTTY', 'DIGI', 'JS8', 'PSK31', 'PSK']);
 const PHONE_MODES = new Set(['SSB', 'USB', 'LSB', 'FM', 'AM']);
