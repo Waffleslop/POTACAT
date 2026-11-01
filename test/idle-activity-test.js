@@ -129,7 +129,9 @@ test('main pushes activity on every lifecycle edge that changes it', () => {
   ]) {
     const at = MAIN.indexOf(anchor[0]);
     assert.ok(at > 0, anchor[0] + ' not found');
-    assert.ok(MAIN.slice(at, at + 2600).includes(anchor[1]),
+    // The whole function body (stopJtcat grew past a fixed 2600 characters).
+    const end = MAIN.indexOf('\n}\n', at);
+    assert.ok(MAIN.slice(at, Math.max(at + 2600, end)).includes(anchor[1]),
       anchor[0] + ' must reach ' + anchor[1]);
   }
 });

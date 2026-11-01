@@ -23,7 +23,7 @@ test('SSTV key-down declares audio and forces data mode on an Icom', () => {
   assert.ok(at > 0, 'encode-complete handler not found');
   const handler = src.slice(at, at + 3000);
   assert.ok(/const _sstvIcom = detectRigType\(\) === 'icom' \|\| \(getActiveRigModel\(\)\?\.brand === 'Icom'\);/.test(handler), 'Icom detection');
-  assert.ok(/handleRemotePtt\(true, \{ audio: true, forceDataMode: _sstvIcom \}\);/.test(handler), 'key-down options');
+  assert.ok(/handleRemotePtt\(true, \{ audio: true, forceDataMode: _sstvIcom, emission: 'SSTV' \}\);/.test(handler), 'key-down options (SSTV is judged where phone goes)');
   assert.ok(!/handleRemotePtt\(true\);/.test(handler), 'a bare key-down is back');
 });
 

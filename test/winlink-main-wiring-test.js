@@ -171,7 +171,7 @@ console.log('radio control');
 test('the shim binds loopback and keys through handleRemotePtt with audio', () => {
   const shim = fnBody(main, 'startWinlinkShim');
   assert.ok(/createRigctldServer\(/.test(shim) && /host: '127\.0\.0\.1'/.test(shim));
-  assert.ok(/handleRemotePtt\(true, \{ audio: true, forceDataMode: icom \}\)/.test(shim));
+  assert.ok(/handleRemotePtt\(true, \{ audio: true, forceDataMode: icom(, emission: 'DATA')? \}\)/.test(shim));
   assert.ok(/radioOwner !== 'winlink'/.test(shim), 'refuses outside a session');
   assert.ok(/_swrTripped/.test(shim), 'honours the SWR latch');
   assert.ok(/armWinlinkTxFailsafe\(\)/.test(shim), 'arms the failsafe on key-down');
