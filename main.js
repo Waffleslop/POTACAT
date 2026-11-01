@@ -2920,6 +2920,15 @@ function getActiveRigModel() {
   if (rigType === 'flrig') return flrigModel(explicit || getModel(null, 'flrig'));
   if (explicit) return explicit;
   const generic = getModel(modelName, rigType); // per-type fallback (or null)
+  // Other Rig (Hamlib) with no Radio Model picked: a model that names the
+  // same Hamlib number lends its run-time quirks (the G90's no polling in
+  // TX, #109). Panel caps stay generic.
+  if (rigType === 'rigctld' && generic) {
+    const ct = activeRig?.catTarget || settings.catTarget || null;
+    const hamlibId = Number(ct && ct.rigId);
+    const twin = hamlibId ? Object.values(RIG_MODELS).find((m) => m && m.hamlib && m.hamlib.rigId === hamlibId) : null;
+    if (twin && twin.pollDuringTx === false) return { ...generic, pollDuringTx: false };
+  }
   // Icom CI-V rigs are identified by CI-V address, so rigs[].model is usually
   // empty and we land on the conservative generic Icom caps — which assume a
   // 100 W radio. When catTarget.civModel names a known Icom ("IC-705",
