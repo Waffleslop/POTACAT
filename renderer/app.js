@@ -3534,8 +3534,8 @@ rigSaveBtn.addEventListener('click', () => { saveRigEditor(); });
 
 // --- Multi-select dropdowns ---
 // K3SBP 2026-05-14: removed the "Digital (all)" group preset from the mode
-// filter — replaced by the single combined "FT8/4/2" entry (value="FT")
-// which covers the most common digital-mode bucket. RTTY/PSK31/JS8 remain
+// filter. FT8, FT4 and FT2 are separate entries (jgedmond 2026-10-31); a
+// saved combined "FT" restores as all three (restoreFilters). RTTY/PSK31/JS8 remain
 // as individual entries and the iOS app's DIGITAL_MODE_GROUP preset is
 // separately maintained on that side.
 
@@ -4501,16 +4501,14 @@ function restoreFilters() {
       modeFilterEl.querySelectorAll('input:not([value="all"]):not([value="radio"])').forEach((cb) => { cb.checked = false; });
     } else if (data.modes) {
       const modeSet = new Set(data.modes);
-      // Migration: legacy saved state may have individual FT8/FT4/FT2 entries
-      // — those checkboxes no longer exist (replaced by the combined FT8/4/2
-      // meta-mode at value="FT"). K3SBP 2026-05-14. Without this migration a
-      // user who'd saved "FT8 only" would land on "All" after upgrading
-      // because none of their saved mode values match any checkbox.
-      if (modeSet.has('FT8') || modeSet.has('FT4') || modeSet.has('FT2')) {
-        modeSet.delete('FT8');
-        modeSet.delete('FT4');
-        modeSet.delete('FT2');
-        modeSet.add('FT');
+      // FT8, FT4 and FT2 are separate entries again (jgedmond 2026-10-31: an
+      // FT4 hunter wants FT4 without FT8). A saved combined "FT" (the single
+      // FT8/4/2 entry of 2026-05 to 2026-11) still means all three.
+      if (modeSet.has('FT')) {
+        modeSet.delete('FT');
+        modeSet.add('FT8');
+        modeSet.add('FT4');
+        modeSet.add('FT2');
       }
       modeSet.delete('unknown'); // unknown checkbox also removed
       modeFilterEl.querySelector('input[value="all"]').checked = false;
