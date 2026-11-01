@@ -461,6 +461,10 @@ const { isWinlinkSessionFault } = require('./lib/winlink-fault');
 const { createSpotSourceCache } = require('./lib/spot-source-cache');
 const WorkedMatrix = require('./lib/worked-matrix');
 const { jtcatDxpeditionDials } = require('./lib/dxpedition-dials');
+const { HeardGrids } = require('./lib/heard-grids');
+// The grid each station last said on the air (lib/heard-grids.js): fills a
+// QSO started from an RR73 or report, whose own text carries no grid.
+const jtcatHeardGrids = new HeardGrids();
 const { checkClockOffset, syncSystemClock, classifyClockOffset } = require('./lib/ntp');
 const StationClock = require('./lib/station-clock'); // FT8/FT4/FT2/WSPR/JTTY slot clock, correctable from an ECHOCAT device
 const JtcatParser = require('./renderer/jtcat-parser'); // shared FT8 message classifier (also a browser global in the renderers)
@@ -15905,6 +15909,9 @@ async function jtcatAutoLog(qso, opts) {
     sendCatLog(`[JTCAT] Auto-log skipped — no QSO data`);
     return;
   }
+  // A QSO built from a report or RR73 (compressed reply, a click on their
+  // RR73) has no grid of its own; the grid they said earlier on the air does.
+  if (!q.grid) { const g = jtcatHeardGrids.get(q.call); if (g) { q.grid = g; sendCatLog(`[JTCAT] ${q.call}: grid ${g} from their earlier decode`); } }
   // Prevent logging incomplete QSOs. Field Day exchanges a class+section
   // instead of a signal report, so for FD QSOs require the received exchange.
   if (q.fd) {
@@ -16797,6 +16804,7 @@ function startJtcat(mode) {
         if (gm && !(/^RR\d{2}$/i.test(gm[1]))) {
           r.grid = gm[1].toUpperCase();
           r.newGrid = !rosterWorkedGrids.has(r.grid);
+          jtcatHeardGrids.note(uc, r.grid);
         }
         workedOverlayEnrichDecode(r, uc, currentBand, data.mode || 'FT8');
         // Chase target highlight (renderer/cq-target.js). One rule for popout + phone.
@@ -24563,7 +24571,9 @@ function connectRemote() {
       const v = Math.round(snr || 0);
       return v >= 0 ? '+' + String(v).padStart(2, '0') : '-' + String(Math.abs(v)).padStart(2, '0');
     })();
-    const theirGrid = data.theirGrid || data.grid || '';
+    // A click on their RR73 or report carries no grid; the grid they said in
+    // an earlier decode (their CQ) stands in (lib/heard-grids.js).
+    const theirGrid = data.theirGrid || data.grid || jtcatHeardGrids.get(call) || '';
     const theirReport = data.theirReport || data.report;
     const sliceKey = sliceId || 'default';
 
@@ -39831,6 +39841,9 @@ app.whenReady().then(() => {
         if (action.theirReport != null) data.theirReport = action.theirReport;
       }
     }
+    // A click on their RR73 or report carries no grid; the grid they said in
+    // an earlier decode (their CQ) stands in (lib/heard-grids.js).
+    if (!data.theirGrid && !data.grid) { const g = jtcatHeardGrids.get(data.call); if (g) data.grid = g; }
     let nextStep = data.nextStep;
     if (!nextStep) {
       if (data.rr73) nextStep = 'send-73';
@@ -45995,6 +46008,7 @@ app.whenReady().then(() => {
             if (gm && !(/^RR\d{2}$/i.test(gm[1]))) {
               r.grid = gm[1].toUpperCase();
               r.newGrid = !rosterWorkedGrids.has(r.grid);
+              jtcatHeardGrids.note(uc, r.grid);
             }
             workedOverlayEnrichDecode(r, uc, currentBand, s.mode || 'FT8');
                         // CQ modifier (NA/EU/POTA/TEST...) for the watchlist tag highlighter.
