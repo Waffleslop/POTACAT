@@ -30,6 +30,15 @@ test('the Ten-Tec Jupiter and Argonaut V get DTR and RTS raised (their interface
   assert.ok(/args\.push\('--set-conf=dtr_state=ON,rts_state=ON'\);/.test(after));
 });
 
+test('Xiegu with no PTT port: DTR and RTS held low so a Digirig is not keyed on connect (bankonthat)', () => {
+  assert.ok(/const HAMLIB_LINES_LOW_RIG = \{ 3076: 'Xiegu X108G', 3087: 'Xiegu X6100', 3088: 'Xiegu G90', 3089: 'Xiegu X5105', 3091: 'Xiegu X6200' \};/.test(main));
+  const i = main.indexOf("if (target.dtrOff) args.push('--set-conf=dtr_state=OFF,rts_state=OFF');");
+  const after = main.slice(i, i + 1600);
+  assert.ok(/else if \(!target\.pttPort && HAMLIB_LINES_LOW_RIG\[Number\(target\.rigId\)\]\) \{\s*args\.push\('--set-conf=dtr_state=OFF,rts_state=OFF'\);/.test(after),
+    'only without a separate PTT port (with one, Hamlib drives the PTT line itself)');
+  assert.ok(after.indexOf('HAMLIB_LINES_LOW_RIG[') > after.indexOf('HAMLIB_LINES_POWER_RIG['), 'after the powered-lines rule');
+});
+
 test('the bundled Hamlib still numbers them so (a renumbered Hamlib would silently miss them)', () => {
   const exe = path.join(__dirname, '..', 'assets', 'hamlib', process.platform === 'win32' ? 'rigctld.exe' : 'rigctld');
   if (!fs.existsSync(exe)) { console.log('       (no bundled rigctld here — skipped)'); return; }
@@ -38,6 +47,8 @@ test('the bundled Hamlib still numbers them so (a renumbered Hamlib would silent
   assert.ok(/^\s*16007\s+Ten-Tec\s+TT-516 Argonaut V/m.test(out), 'Argonaut V is 16007');
   assert.ok(/^\s*4\s+FLRig/m.test(out), 'FLRig is 4');
   assert.ok(/^\s*2014\s+Kenwood\s+TS-2000/m.test(out), 'TS-2000 is 2014');
+  assert.ok(/^\s*3088\s+Xiegu\s+G90/m.test(out), 'G90 is 3088');
+  assert.ok(/^\s*3087\s+Xiegu\s+X6100/m.test(out), 'X6100 is 3087');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

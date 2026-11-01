@@ -3358,6 +3358,13 @@ async function waitForSerialPortFree(path, timeoutMs = 4000) {
 const HAMLIB_BRIDGE_MODELS = { 1: 'Dummy', 2: 'NET rigctl', 4: 'FLRig', 5: 'TRXManager', 6: 'TCI' };
 /** Hamlib models whose serial level converter draws its power from DTR/RTS. */
 const HAMLIB_LINES_POWER_RIG = { 16002: 'Ten-Tec TT-538 Jupiter', 16007: 'Ten-Tec TT-516 Argonaut V' };
+// Xiegu radios key on CAT and never need a raised handshake line, but the
+// interfaces owners put on that port do: a Digirig keys PTT on RTS and CW on
+// DTR of the same COM port. Hamlib leaves the lines "Unset", Windows raises
+// them on open, and the radio went into TX the moment POTACAT connected,
+// until a tune dropped it (bankonthat, G90 + Digirig, 2026-10-31). With no
+// separate PTT port, both lines are held low.
+const HAMLIB_LINES_LOW_RIG = { 3076: 'Xiegu X108G', 3087: 'Xiegu X6100', 3088: 'Xiegu G90', 3089: 'Xiegu X5105', 3091: 'Xiegu X6200' };
 let _hamlibRigList = null;
 /**
  * The Hamlib model id for the rig's Radio Model, by name against `rigctld -l`
@@ -3447,6 +3454,9 @@ function spawnRigctld(target, portOverride) {
       // POTACAT raises both unless the operator asked for DTR/RTS off.
       args.push('--set-conf=dtr_state=ON,rts_state=ON');
       sendCatLog(`[rigctld] ${HAMLIB_LINES_POWER_RIG[Number(target.rigId)]}: DTR and RTS raised to power its serial interface (ACLog's "Power Option = Both")`);
+    } else if (!target.pttPort && HAMLIB_LINES_LOW_RIG[Number(target.rigId)]) {
+      args.push('--set-conf=dtr_state=OFF,rts_state=OFF');
+      sendCatLog(`[rigctld] ${HAMLIB_LINES_LOW_RIG[Number(target.rigId)]}: DTR and RTS held low on the CAT port, so an interface that keys on them (Digirig) does not transmit when POTACAT connects. Transmit goes by CAT.`);
     }
     if (target.verbose) args.push('-vvvv');
 
