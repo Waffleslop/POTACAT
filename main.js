@@ -458,6 +458,7 @@ const PskrTx = require('./lib/pskreporter-tx');
 const { Ft8Engine, freqsForMode } = require('./lib/ft8-engine');
 const { decideDialFollow } = require('./lib/jtcat-dial-follow');
 const { isWinlinkSessionFault } = require('./lib/winlink-fault');
+const { createSpotSourceCache } = require('./lib/spot-source-cache');
 const { checkClockOffset, syncSystemClock, classifyClockOffset } = require('./lib/ntp');
 const StationClock = require('./lib/station-clock'); // FT8/FT4/FT2/WSPR/JTTY slot clock, correctable from an ECHOCAT device
 const JtcatParser = require('./renderer/jtcat-parser'); // shared FT8 message classifier (also a browser global in the renderers)
@@ -28121,6 +28122,8 @@ function sendMergedSpots() {
   }
 }
 
+const spotSourceCache = createSpotSourceCache({ log: (l) => sendCatLog(l) });
+
 async function refreshSpots() {
   try {
     // A source fetches if either the table side wants it (settings.enableX)
@@ -28139,15 +28142,19 @@ async function refreshSpots() {
     const enableGma = settings.enableGma === true || panadapterWantsSource('gma');
     const enableParc = settings.enableParc === true || panadapterWantsSource('parc'); // default OFF, opt-in (N3FMC)
 
+    // A failed fetch stands in with that source's last good list
+    // (lib/spot-source-cache.js): one failed POTA fetch used to empty every
+    // POTA row until the next good one (wayne 2026-10-31).
     const fetches = [];
-    if (enablePota) fetches.push(fetchPotaSpots().then(processPotaSpots));
-    if (enableSota) fetches.push(fetchSotaSpots().then(processSotaSpots));
-    if (enableWwff) fetches.push(fetchWwffSpots().then(processWwffSpots));
-    if (enableLlota) fetches.push(fetchLlotaSpots().then(processLlotaSpots));
-    if (enableWwbota) fetches.push(fetchWwbotaSpots().then(processWwbotaSpots));
+    const keep = (name, p) => spotSourceCache.wrap(name, p);
+    if (enablePota) fetches.push(keep('POTA', fetchPotaSpots().then(processPotaSpots)));
+    if (enableSota) fetches.push(keep('SOTA', fetchSotaSpots().then(processSotaSpots)));
+    if (enableWwff) fetches.push(keep('WWFF', fetchWwffSpots().then(processWwffSpots)));
+    if (enableLlota) fetches.push(keep('LLOTA', fetchLlotaSpots().then(processLlotaSpots)));
+    if (enableWwbota) fetches.push(keep('WWBOTA', fetchWwbotaSpots().then(processWwbotaSpots)));
     else wwbotaDisconnect(); // close the SSE stream when WWBOTA is off (idempotent)
-    if (enableGma) fetches.push(fetchGmaSpots().then(processGmaSpots));
-    if (enableParc) fetches.push(fetchParcSpots().then(processParcSpots));
+    if (enableGma) fetches.push(keep('GMA', fetchGmaSpots().then(processGmaSpots)));
+    if (enableParc) fetches.push(keep('PARC', fetchParcSpots().then(processParcSpots)));
     if (enableTiles) {
       // Tiles fetch with operator-friendly cadence + since-incremental
       // polling + 429 backoff. See TILES_POLL_MS comment block above
