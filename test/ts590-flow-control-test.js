@@ -41,9 +41,11 @@ for (const [k, m] of Object.entries(RIG_MODELS)) {
 }
 
 section('Models: the meter query this generation answers');
-for (const k of ['TS-590S/SG', 'TS-890S', 'TS-990S', 'TS-480']) {
+for (const k of ['TS-590S/SG', 'TS-990S', 'TS-480']) {
   assert(RIG_MODELS[k].smQuery === 'SM0;', `${k}: SM0; (SM; without P1 is a command error)`);
 }
+// The TS-890S guide (p. 61) reads with a bare SM; and answers SM + 4 digits.
+assert(RIG_MODELS['TS-890S'].smQuery === 'SM;', 'TS-890S: SM; (its own guide, p. 61)');
 
 section('Transport (lib/transport.js SerialTransport — the direct-serial path): the flag reaches the port and RTS stays asserted');
 {

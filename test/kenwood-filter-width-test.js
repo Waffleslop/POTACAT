@@ -152,5 +152,20 @@ test('a rig with no slope tables never polls DA', () => {
   assert.deepStrictEqual(k.out, []);
 });
 
+test('TS-890S reads its meter with SM; and answers four digits, S9 = 35 (guide p. 61)', () => {
+  const model = RIG_MODELS['TS-890S'];
+  assert.strictEqual(model.smQuery, 'SM;');
+  const out = [];
+  const c = new KenwoodCodec(model, (d) => out.push(String(d)));
+  c.getSmeter();
+  assert.ok(out.includes('SM;'), `sent ${out.join(' ')}`);
+  let s = null;
+  c.on('smeter', (v) => { s = v; });
+  c.onData('SM0035;');
+  assert.strictEqual(s, 120, 'S9 on the 0-70 scale is S9 on the wire scale');
+  c.onData('SM0070;');
+  assert.strictEqual(s, 240);
+});
+
 console.log(`\nKenwood filter width: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
