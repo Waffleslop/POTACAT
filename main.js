@@ -20398,6 +20398,14 @@ function connectCwKeyPort() {
   cwKeyPort = port;
   port._dtrFailed = false; // reset DTR fallback flag on fresh connection
   port.on('open', () => {
+    // Dropped (or replaced) while the open was in flight: key line down and
+    // close now, so this handle never holds the port (see disconnectCwKeyPort).
+    if (port._abandoned || cwKeyPort !== port) {
+      const closeNow = () => { try { port.close(); } catch {} };
+      try { port.set({ dtr: false, rts: false }, closeNow); } catch { closeNow(); }
+      sendCatLog(`[CW Key Port] Closed ${portPath} again at once — it was replaced while it was opening`);
+      return;
+    }
     // Force DTR low initially (key up), RTS low too. On Linux cdc_acm the
     // kernel raises DTR/RTS during open() and our drop runs ASYNC after —
     // there's a ~10–50ms window where the radio sees key-down. Worse, on
@@ -20511,12 +20519,14 @@ function connectCwKeyPort() {
   });
   port.on('close', () => {
     console.log(`[CW Key Port] Closed ${portPath}`);
-    cwKeyPort = null;
+    if (cwKeyPort === port) cwKeyPort = null;   // never clear a newer port's handle
   });
   port.open((err) => {
     if (err) {
-      console.log(`[CW Key Port] Open failed: ${err.message}`);
-      cwKeyPort = null;
+      // In the bug report, not just the console: "did not become ready" alone
+      // never said WHY (port held by another program, unplugged, renumbered).
+      sendCatLog(`[CW Key Port] Could not open ${portPath}: ${err.message}`);
+      if (cwKeyPort === port) cwKeyPort = null;
     }
   });
 }
@@ -20620,7 +20630,14 @@ function disconnectCwKeyPort() {
   if (!cwKeyPort) return;
   const port = cwKeyPort;
   cwKeyPort = null;
-  if (!port.isOpen) return;
+  // Still opening: there is nothing to close YET, but the open will complete.
+  // Mark it so the 'open' handler closes it at once. Without this the open
+  // landed on an orphaned handle that held the (exclusive, on Windows) port,
+  // and every later open failed: a settings save that changed the key port
+  // reopened it and then restarted ECHOCAT, whose disconnectRemote() dropped
+  // the half-open port (stein_12464 2026-11-01: "1 key up ... and after that
+  // it cannot open it again"; log: "Opened COM10" then "did not become ready").
+  if (!port.isOpen) { port._abandoned = true; return; }
   // Wait for the explicit pin-drop to land BEFORE closing — set() and close()
   // race on some Linux drivers and a fire-and-forget set followed by an
   // immediate close left DTR raised (DA2PK report). hupcl:true on the port
@@ -43830,6 +43847,18 @@ app.whenReady().then(() => {
             fetchWatchlistGroupUrl(i);
           }
         }
+      }
+    }
+    // The key port is stored per rig too (rig.cwKeyPort), and activating a rig
+    // copies that back over settings.cwKeyPort. A port picked in Settings >
+    // ECHOCAT (Remote CW Keyer) saved only the global, so the rig's old port
+    // came back ("it has reverted to COM9", stein_12464 2026-11-01). Keep the
+    // active rig's copy in step unless this save carries the rig list itself.
+    if (has('cwKeyPort') && !has('rigs') && Array.isArray(settings.rigs)) {
+      const activeRig = settings.rigs.find((r) => r && r.id === settings.activeRigId);
+      if (activeRig && (activeRig.cwKeyPort || '') !== (settings.cwKeyPort || '')) {
+        activeRig.cwKeyPort = settings.cwKeyPort || '';
+        saveSettings(settings);
       }
     }
     // Reconnect CW key port if it changed (works for both partial and full saves)
