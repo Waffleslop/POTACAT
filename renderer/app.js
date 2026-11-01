@@ -30655,7 +30655,7 @@ function renderJtcatQsoTracker() {
   }
   // For CQ mode, cq-reply is implicit (rx between cq and cq-report)
   // Map actual phase to display index
-  if (q.mode === 'cq' && q.phase === 'cq-report') currentIdx = 2;
+  if (q.mode === 'cq' && (q.phase === 'cq-report' || q.phase === 'cq-r-report')) currentIdx = 2;
   if (q.mode === 'cq' && q.phase === 'cq-rr73') currentIdx = 4;
   if (q.mode === 'cq' && q.phase === 'done') currentIdx = 5;
   if (q.mode === 'reply' && q.phase === 'r+report') currentIdx = 2;

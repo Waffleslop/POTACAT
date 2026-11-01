@@ -523,20 +523,52 @@ section('CQ mode — happy path');
   }
 
   // Compressed reply (no Step-2 grid) — partner sends `<MY> <THEM> <±NN>`.
-  // We ack with R+report and jump straight to cq-rr73 + log. Matches the
-  // KB2ELA-style decode that previously sat ignored for entire cycles
-  // because the grid-only matcher couldn't see it. K3SBP 2026-06-01.
+  // We ack with R+report and WAIT for their RR73/RRR/73 before logging: our
+  // R+report is half the exchange until they confirm it (droidbot2's log,
+  // 2026-11-01: logged at R+report, the other station never heard it).
+  // KB2ELA-style decode, K3SBP 2026-06-01.
   {
     const eng = makeEngine();
     const r = drive(baseQ(), [decode('K3SBP A1BCD -12', { db: -6, df: 1234 })], eng);
-    assertEq(r.q.phase, 'cq-rr73', 'cq → cq-rr73 on compressed (no-grid) reply');
+    assertEq(r.q.phase, 'cq-r-report', 'cq → cq-r-report on compressed (no-grid) reply');
     assertEq(r.q.call, 'A1BCD', 'captured their call from compressed reply');
     assertEq(r.q.grid, '', 'grid is empty — they skipped Step 2');
     assertEq(r.q.report, '-12', 'captured their report of us');
     assertEq(r.q.sentReport, '-06', 'computed our SNR report');
     assertEq(r.lastTx, 'A1BCD K3SBP R-06', 'TX is R+our-report, NOT plain report or RR73');
-    assertEq(r.doneCount, 1, 'logged immediately on compressed-reply advance');
+    assertEq(r.doneCount, 0, 'NOT logged at our R+report — they have not confirmed');
     assertEq(eng._lastRxFreq, 1234, 'RX freq tracked to their offset');
+  }
+  const compressedQ = () => Object.assign(baseQ(), {
+    phase: 'cq-r-report', call: 'A1BCD', grid: '', report: '-12', sentReport: '-06',
+    txMsg: 'A1BCD K3SBP R-06',
+  });
+  for (const ack of ['RR73', 'RRR', '73']) {
+    const r = drive(compressedQ(), [decode('K3SBP A1BCD ' + ack)], makeEngine());
+    assertEq(r.q.phase, 'cq-rr73', `cq-r-report → courtesy leg on their ${ack}`);
+    assertEq(r.lastTx, 'A1BCD K3SBP 73', `courtesy 73 after their ${ack}`);
+    assertEq(r.doneCount, 1, `logged on their ${ack}`);
+  }
+  {
+    const r = drive(compressedQ(), [decode('K3SBP A1BCD -12')], makeEngine());
+    assertEq(r.q.phase, 'cq-r-report', 'their report again = they missed our R+report; keep sending it');
+    assertEq(r.doneCount, 0, 'still not logged');
+    assert(r.q._heardThisCycle === true, 'heard flag set');
+  }
+  {
+    const r = drive(compressedQ(), [decode('W1XYZ A1BCD RR73')], makeEngine());
+    assertEq(r.doneCount, 0, 'their RR73 to someone else does not confirm ours');
+  }
+  {
+    // They vanish after exchanging reports: the retry cap's close-out logs.
+    const q = compressedQ();
+    assert(sm.canCloseoutQso(q) === true, 'compressed reply with reports both ways is close-out eligible');
+    let logged = 0; let tx = '';
+    assert(sm.closeoutStalledQso(q, (m) => { tx = m; }, () => { logged++; }) === true, 'close-out runs');
+    assertEq(logged, 1, 'close-out logs the compressed QSO');
+    assertEq(tx, 'A1BCD K3SBP 73', 'close-out sends a final 73');
+    assertEq(q.phase, 'cq-rr73', 'close-out uses the CQ ladder courtesy leg');
+    assert(sm.replaceLogsQso(compressedQ(), 'W9XYZ') === false, 'clicking away mid compressed reply does not log it');
   }
 
   // R+report should NOT be misclassified as a compressed reply — must

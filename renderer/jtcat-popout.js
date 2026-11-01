@@ -845,7 +845,7 @@ function _applyPopoutTheme(payload) {
     for (var i = 0; i < phases.length; i++) {
       if (phases[i].key === q.phase) { currentIdx = i; break; }
     }
-    if (q.mode === 'cq' && q.phase === 'cq-report') currentIdx = 2;
+    if (q.mode === 'cq' && (q.phase === 'cq-report' || q.phase === 'cq-r-report')) currentIdx = 2;
     if (q.mode === 'cq' && q.phase === 'cq-rr73') currentIdx = 4;
     if (q.mode === 'cq' && q.phase === 'done') currentIdx = 5;
     if (q.mode === 'reply' && q.phase === 'r+report') currentIdx = 2;

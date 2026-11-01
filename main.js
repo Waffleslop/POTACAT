@@ -25160,6 +25160,15 @@ function connectRemote() {
     const q = remoteJtcatQso;
     const myCall = q.myCall;
     const validCall = q.call && /^[A-Z0-9/]{2,}$/i.test(q.call);
+    if (q.mode === 'cq' && _jtcatStateMachine.canCloseoutQso(q)) {
+      // Compressed reply with reports both ways: Skip declares it done —
+      // log + one courtesy 73, the same closeout the retry cap uses.
+      _jtcatStateMachine.closeoutStalledQso(q,
+        (m) => { remoteJtcatSetTxMsg(m); },
+        async () => { await jtcatAutoLog(q); },
+        { log: sendCatLog });
+      return;
+    }
     if (q.mode === 'cq') {
       if (q.phase === 'cq' || q.phase === 'cq-report') {
         q.txMsg = validCall ? jtcatDirectedMsg(q.call, myCall, 'RR73') : '';
@@ -39925,6 +39934,14 @@ app.whenReady().then(() => {
     if (!eng) return;
     const myCall = q.myCall;
     const validCall = q.call && /^[A-Z0-9/]{2,}$/i.test(q.call);
+    if (q.mode === 'cq' && _jtcatStateMachine.canCloseoutQso(q)) {
+      _jtcatStateMachine.closeoutStalledQso(q,
+        (m) => { eng.setTxMessage(m); },
+        async () => { await jtcatAutoLog(q); },
+        { log: sendCatLog });
+      popoutBroadcastQso();
+      return;
+    }
     if (q.mode === 'cq') {
       if (q.phase === 'cq' || q.phase === 'cq-report') {
         q.txMsg = validCall ? jtcatDirectedMsg(q.call, myCall, 'RR73') : '';

@@ -8426,7 +8426,7 @@
       rows.push({ tx: true, text: 'CQ ' + myCall + ' ' + (q.myGrid || ''), done: true, active: q.phase === 'cq' });
       if (q.call) {
         rows.push({ tx: false, text: q.call + ' ' + myCall + ' ' + (q.grid || ''), directed: true, done: q.phase !== 'cq', active: false });
-        rows.push({ tx: true, text: q.call + ' ' + myCall + ' ' + (q.sentReport || '...'), done: ['cq-rr73', 'done'].includes(q.phase), active: q.phase === 'cq-report' });
+        rows.push({ tx: true, text: q.call + ' ' + myCall + ' ' + (q.sentReport || '...'), done: ['cq-rr73', 'done'].includes(q.phase), active: q.phase === 'cq-report' || q.phase === 'cq-r-report' });
       }
       if (q.report) {
         rows.push({ tx: false, text: q.call + ' ' + myCall + ' R' + q.report, directed: true, done: ['cq-rr73', 'done'].includes(q.phase), active: false });
