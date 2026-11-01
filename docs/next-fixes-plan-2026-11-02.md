@@ -1,5 +1,39 @@
 # Next fixes after 1.13.9 — plan (2026-11-01)
 
+## Status 2026-11-02 (built on master, local, not pushed or released)
+
+| Item | Commit | Note |
+|---|---|---|
+| 1.1 compressed reply logged early | 2af062d6 | new phase cq-r-report |
+| 1.2 DX entity from QRZ home address | b0619008 | confirmed in code: QRZ looked up by base call |
+| 1.3 G/C/D badges stay | 23c106ad | second cause: live roster read `grid`, records carry GRIDSQUARE |
+| 2.1 G90 + Digirig keyed on connect | 77f0cddd | Xiegu Hamlib models, no PTT port: DTR/RTS OFF |
+| 2.2a G90 polled during TX | ff7f7d89 | |
+| 2.2b Hamlib 4.7.2 | 1fdc542a | Windows binaries swapped; Linux/Mac CI pins; needs a release build |
+| 2.3 external tuner power restore | c945b937, 591b0173 | readback + 2 retries + reconcile marker |
+| 2.4 TS-890S SM; | e03c5cad | guide p. 61 confirmed |
+| 2.5 IC-7100 WFM | eff33ea7 | |
+| 2.6 FTX-1 NOAA | none | needs hoogskev's log |
+| 3.1 JTCAT band follows the dial (#115) | bf3bd633 | plus "Follow the radio" |
+| 3.2 bobve decodes stop | none | needs his log |
+| 4.1 Winlink crash | 26efd41f | session ends instead of crashing; specific cause needs his log |
+| 4.2 voice macros | 5f20fac2, 3e921c9e | Stop restarted the take; long takes never saved (desktop and web) |
+| 4.3 thedadnerd | none | fixed in 1.13.8 |
+| 4.4 GridTracker Status | fe139bd5 | dial held, QSO fields filled; compare with a WSJT-X capture |
+| 4.5 MSHV multi-stream | none | decoder already subtracts (3 passes); needs a WAV |
+| 5.1 HF Net button | ed9e5e0f | Directory > HF Nets action column |
+| 5.2 logger follows dial | 6849c68e | Log QSO form, the web log-sheet rule |
+| 5.3 VFO paste | 840e6a9d | lib/freq-paste.js |
+| 5.4 blank table | 25a32610 | last good list per source; POTA client rejects errors; render-by-diff not done |
+| 6.1 DXpedition dials | d571152d | Worker parse + desktop menu; Worker deploy needed |
+| 6.2 prefix labels | a8cd6bbc | F9 on every map |
+| 6.3 FT8/FT4/FT2 filters | 1de34bec | |
+| 6.4 QRZ link in map popup | a8ecf3de | |
+| 6.5 worked grid (#108) | 0f4853af | Log QSO, log pop-out, ECHOCAT Web |
+| found: JTCAT signal floor boxes | 951f8835 | snr-floor script never ran in the JTCAT window |
+
+Mobile handoff: potacat-app docs/desktop-handoffs/fix-series-2026-11-02.md.
+
 Sources: Discord #bug-reports and #feature-requests to 2026-11-01 19:00 UTC
 (discord agent's status read), open GitHub issues 108/109/111/115, and what
 the downloaded logs showed. Every cause below was read in the code; where a
