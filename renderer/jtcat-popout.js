@@ -2450,6 +2450,9 @@ function _applyPopoutTheme(payload) {
   haltTxBtn.addEventListener('click', function() {
     setTxOnState(false);
     window.api.jtcatCancelQso();
+    // The one halt in main: stops the tones, every PTT route, Run, Hunt and
+    // the WSPR beacon. Cancel alone left a message in flight on the air.
+    window.api.jtcatHaltTx();
     setTxMsgDisplay('--');
   });
 

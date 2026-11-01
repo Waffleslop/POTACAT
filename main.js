@@ -15188,6 +15188,7 @@ function armJtcatTxFailsafe(label, samples, sampleRate = 12000, offsetMs = 0, st
     _jtcatTxFailsafeTimer = null;
     clearJtcatIcomHardRelease();
     sendCatLog(`[JTCAT TX] FAILSAFE: forcing PTT off after ${timeoutMs} ms (${label || 'unknown TX path'})`);
+    if (win && !win.isDestroyed()) win.webContents.send('jtcat-tx-abort', 'failsafe');
     if (smartSdrAudio) { try { smartSdrAudio.cancelTx(); } catch {} }
     if (ft8Engine && ft8Engine._txActive) {
       try { ft8Engine.txComplete(); } catch {}
@@ -24460,7 +24461,7 @@ function connectRemote() {
   });
   remoteServer.on('jtcat-set-hound-mode', ({ enabled } = {}) => applyJtcatFlag('jtcatHoundMode', enabled, 'Hound mode'));
 
-  remoteServer.on('jtcat-halt-tx', jtcatHaltTxNow);
+  remoteServer.on('jtcat-halt-tx', () => jtcatHaltTxNow('Halt TX (ECHOCAT)'));
 
   remoteServer.on('jtcat-set-mode', ({ mode }) => {
     if (!ft8Engine) return;
@@ -33588,7 +33589,7 @@ function passLeaseStopTransmitters(reason) {
   step('Run', () => { if (!jtcatFullAutoCq) return false; stopFullAutoCq('pass-' + reason); return true; });
   step('Hunt', () => { if (jtcatAutoCqMode === 'off') return false; setJtcatHuntMode('off'); return true; });
   step('WSPR beacon', () => { if (!(wsprBeaconArmed() || jtcatWsprBeaconTimer)) return false; setWsprBeacon(false, { why: 'pass ' + reason }); return true; });
-  step('JTCAT TX', () => { const was = !!(ft8Engine && ft8Engine._txActive); jtcatHaltTxNow(); return was; });
+  step('JTCAT TX', () => { const was = jtcatAnyTxActive(); jtcatHaltTxNow('Guest Pass ' + reason); return was; });
   step('CW', () => {
     cancelAllCwSends();
     if (keyer) keyer.stop();
@@ -33607,25 +33608,81 @@ function passLeaseStopTransmitters(reason) {
   return stopped;
 }
 
-function jtcatHaltTxNow() {
+/**
+ * Stop whatever JTCAT is transmitting, NOW, and keep it stopped. The ONE halt:
+ * the JTCAT window's Halt TX, its PSK31/JTTY Stop, the phone's Halt, Guest Pass
+ * end and Cancel-mid-transmission all come here (test/halt-tx-test.js holds
+ * every entry point to it).
+ *
+ * Until 2026-11-01 there were three halts that did different things, and none
+ * stopped the tones themselves: on the sound-card route the main window plays
+ * the whole 13 s buffer, and nothing could cut it short. CAT PTT dropped, but a
+ * radio keyed by its audio (VOX, an interface that keys on audio) stayed on the
+ * air to the end of the message (droidbot2: "once a message starts, there is no
+ * way to stop it"). The pop-out's Halt also skipped the Flex DAX stream, the
+ * Icom network stream, the failsafe and the tune tone.
+ *
+ * Halt also stands down every AUTOMATIC transmitter (Run, Hunt, the WSPR
+ * beacon): otherwise the next decode re-arms TX and Halt has stopped one
+ * message, not the station. opts.keepAuto leaves them (a QSO cancelled
+ * mid-message stops that message only). Returns the names of what it stopped.
+ */
+function jtcatHaltTxNow(reason, opts = {}) {
+  const why = reason || 'Halt TX';
+  const stopped = [];
+  const wasTx = jtcatAnyTxActive() || !!jtcatTuneState.active;
   clearJtcatTxFailsafe();
   clearJtcatIcomHardRelease();
+  if (!opts.keepAuto) try { if (jtcatFullAutoCq) { stopFullAutoCq(why); stopped.push('Run'); } } catch (e) { console.error('[Halt] Run:', e); }
+  if (!opts.keepAuto) try { if (jtcatAutoCqMode !== 'off' || jtcatHuntFallbackMode) { setJtcatHuntMode('off'); stopped.push('Hunt'); } } catch (e) { console.error('[Halt] Hunt:', e); }
+  if (!opts.keepAuto) try { if (wsprBeaconArmed() || jtcatWsprBeaconTimer) { setWsprBeacon(false, { immediate: true, why }); stopped.push('WSPR beacon'); } } catch (e) { console.error('[Halt] WSPR:', e); }
+  const haltEngine = (eng) => {
+    if (!eng) return;
+    eng._txEnabled = false;
+    try { eng.setTxMessage(''); } catch {}
+    if (eng._txActive) { try { eng.txComplete(); } catch {} }
+  };
+  if (jtcatManager) {
+    for (const id of jtcatManager.sliceIds) {
+      haltEngine(jtcatManager.getEngine(id));
+      try { jtcatManager.releaseTx(id); } catch {}
+    }
+  }
+  if (ft8Engine) haltEngine(ft8Engine);
+  if (jtcatTuneState.active) { try { stopJtcatTune(); stopped.push('Tune'); } catch {} }
+  // The tones: every route that can be playing them.
+  if (win && !win.isDestroyed()) win.webContents.send('jtcat-tx-abort', why);
+  if (smartSdrAudio) { try { smartSdrAudio.cancelTx(); } catch {} }
+  if (popoutJtcatQso) { popoutJtcatQso = null; popoutBroadcastQso(); }
+  if (remoteJtcatQso) { remoteJtcatQso = null; remoteJtcatBroadcastQso(); }
+  // PTT, on every route. Icom network repeats its release; others get the one
+  // dispatcher release plus a direct CAT/API un-key in case the dispatcher's
+  // own state says nothing is keyed (the case that strands a radio).
+  if (settings.audioSource === 'icom-network') {
+    forceReleaseIcomNetworkTx('JTCAT halt');
+  } else {
+    if (_icomNetworkTransport) { try { _icomNetworkTransport.cancelTx(); } catch {} }
+    try { handleRemotePtt(false); } catch (e) { console.error('[Halt] PTT:', e); }
+    try { if (cat && cat.connected) gatedSetTransmit(false); } catch {}
+    try { if (detectRigType() === 'flex' && smartSdr && smartSdr.connected) gatedSmartSdrTransmit(false); } catch {}
+  }
+  releaseRadio('jtcat');
+  if (remoteServer) { try { remoteServer.broadcastJtcatTxStatus({ state: 'rx' }); } catch {} }
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-tx-status', { state: 'rx', txFreq: ft8Engine ? ft8Engine._txFreq : 0 });
+  if (win && !win.isDestroyed()) win.webContents.send('jtcat-tx-status', { state: 'rx' });
+  sendCatLog(`[JTCAT] ${why}: ${wasTx ? 'transmission stopped, PTT released' : 'PTT released'}${stopped.length ? `; also stopped ${stopped.join(', ')}` : ''}`);
+  return stopped;
+}
+
+function jtcatAnyTxActive() {
+  if (ft8Engine && ft8Engine._txActive) return true;
   if (jtcatManager) {
     for (const id of jtcatManager.sliceIds) {
       const eng = jtcatManager.getEngine(id);
-      if (eng) { eng._txEnabled = false; eng.setTxMessage(''); if (eng._txActive) eng.txComplete(); }
-      jtcatManager.releaseTx(id);
+      if (eng && eng._txActive) return true;
     }
-  } else if (ft8Engine) {
-    ft8Engine._txEnabled = false;
-    ft8Engine.setTxMessage('');
-    if (ft8Engine._txActive) ft8Engine.txComplete();
   }
-  remoteJtcatQso = null;
-  remoteJtcatBroadcastQso();
-  if (_icomNetworkTransport) { try { _icomNetworkTransport.cancelTx(); } catch {} }
-  if (smartSdrAudio) { try { smartSdrAudio.cancelTx(); } catch {} }
-  handleRemotePtt(false);
+  return false;
 }
 
 function sstvHaltTxNow() {
@@ -39758,12 +39815,16 @@ app.whenReady().then(() => {
     }
     popoutJtcatQso = null;
     const eng = (q && q.sliceId && jtcatManager) ? jtcatManager.getEngine(q.sliceId) : ft8Engine;
+    const wasTx = !!(eng && eng._txActive);
     if (eng) {
       eng._txEnabled = false;
       eng.setTxMessage('');
       eng.setTxSlot('auto');
       if (eng._txActive) eng.txComplete();
     }
+    // Cancelled while the message was going out: stop the tones and the radio
+    // too, not just the QSO (the halt's route-by-route stop).
+    if (wasTx) jtcatHaltTxNow('QSO cancelled mid-transmission', { keepAuto: true });
     popoutBroadcastQso();
     console.log('[JTCAT Popout] QSO cancelled');
   });
@@ -45160,38 +45221,7 @@ app.whenReady().then(() => {
     }
   });
   ipcMain.on('jtcat-enable-tx', (_e, enabled) => { if (ft8Engine) ft8Engine._txEnabled = enabled; });
-  ipcMain.on('jtcat-halt-tx', () => {
-    if (jtcatFullAutoCq) stopFullAutoCq('Halt TX');
-    clearJtcatTxFailsafe();
-    clearJtcatIcomHardRelease();
-    // Halt TX on ALL engines (multi-slice: any engine could be TX'ing)
-    if (jtcatManager) {
-      for (const id of jtcatManager.sliceIds) {
-        const eng = jtcatManager.getEngine(id);
-        if (eng) {
-          eng._txEnabled = false;
-          eng.setTxMessage('');
-          if (eng._txActive) eng.txComplete();
-        }
-        jtcatManager.releaseTx(id);
-      }
-    } else if (ft8Engine) {
-      ft8Engine._txEnabled = false;
-      if (ft8Engine._txActive) ft8Engine.txComplete();
-    }
-	    // Halt also kills any active tune
-	    if (jtcatTuneState.active) stopJtcatTune();
-	    if (smartSdrAudio) { try { smartSdrAudio.cancelTx(); } catch {} }
-    // Also clear QSO state
-    if (popoutJtcatQso) { popoutJtcatQso = null; popoutBroadcastQso(); }
-    if (remoteJtcatQso) { remoteJtcatQso = null; remoteJtcatBroadcastQso(); }
-	    if (settings.audioSource === 'icom-network') {
-	      forceReleaseIcomNetworkTx('JTCAT halt');
-	    } else {
-	      if (_icomNetworkTransport) { try { _icomNetworkTransport.cancelTx(); } catch {} }
-	      handleRemotePtt(false);
-	    }
-	  });
+  ipcMain.on('jtcat-halt-tx', () => { jtcatHaltTxNow('Halt TX (JTCAT window)'); });
 
   // KD2TJU: WSJT-X-style Tune button — keys PTT and plays a steady tone
   // through the rig USB CODEC for up to 90s, so the user can dial in TX

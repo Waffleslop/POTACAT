@@ -31273,6 +31273,9 @@ if (window.api.jtcatGetClock) {
 // --- JTCAT TX Audio Playback ---
 var jtcatTxAudioCtx = null;
 var jtcatTxPlaying = false;
+// The source now playing, so a halt can stop it mid-message (see jtcat-tx-abort).
+var jtcatTxActiveSource = null;
+var jtcatTxAbortFinish = null;
 
 // enumerateDevices() is slow on Chromium (often 500–1000 ms on first call,
 // especially when there are many devices). The safety budget between
@@ -31395,10 +31398,13 @@ async function playJtcatTxAudio(data) {
       if (txDone) return;
       txDone = true;
       jtcatTxPlaying = false;
+      if (jtcatTxActiveSource === source) { jtcatTxActiveSource = null; jtcatTxAbortFinish = null; }
       window.api.jtcatTxComplete();
       console.log('[JTCAT] TX audio playback complete');
     }
     source.onended = finishTx;
+    jtcatTxActiveSource = source;
+    jtcatTxAbortFinish = finishTx;
     // Pad with leading silence so the FT8 envelope starts at slot+500ms,
     // regardless of whether we fired at slot+0 (boundary TX) or slot+365ms
     // (an Immediate TX after a late phone click). The previous "skip into
@@ -31537,6 +31543,26 @@ async function playJtcatTxAudio(data) {
 
 window.api.onJtcatTxAudio(function(data) {
   playJtcatTxAudio(data);
+});
+
+// Halt: main dropped PTT and asks for the tones to stop now. Before this the
+// buffer played to its end whatever the operator pressed, and a radio keyed by
+// its audio (VOX, an interface that keys on audio) stayed on the air for the
+// rest of the 13 s (droidbot2 2026-10-31: "once a message starts, there is no
+// way to stop it").
+if (window.api.onJtcatTxAbort) window.api.onJtcatTxAbort(function(reason) {
+  var src = jtcatTxActiveSource;
+  var finish = jtcatTxAbortFinish;
+  jtcatTxActiveSource = null;
+  jtcatTxAbortFinish = null;
+  if (src) {
+    try { src.onended = null; src.stop(); } catch (e) { /* not started yet, or already ended */ }
+    try { src.disconnect(); } catch (e) {}
+    window.api.jtcatLog('[JTCAT TX] Audio stopped mid-message (' + (reason || 'halt') + ')');
+  }
+  if (finish) finish();
+  jtcatTxPlaying = false;
+  if (typeof stopJtcatTuneAudio === 'function') { try { stopJtcatTuneAudio(); } catch (e) {} }
 });
 
 // --- JTCAT Tune (steady-tone for power/ALC tuning) ---

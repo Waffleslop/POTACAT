@@ -619,6 +619,7 @@ contextBridge.exposeInMainWorld('api', {
   jtcatSyncClock: () => ipcRenderer.invoke('jtcat-sync-clock'),
   jtcatOpenTimeSettings: () => ipcRenderer.invoke('jtcat-open-time-settings'),
   onJtcatTxAudio: (cb) => ipcRenderer.on('jtcat-tx-audio', (_e, data) => cb(data)),
+  onJtcatTxAbort: (cb) => ipcRenderer.on('jtcat-tx-abort', (_e, reason) => cb(reason)),
   onJtcatSetTxGain: (cb) => ipcRenderer.on('jtcat-set-tx-gain', (_e, level) => cb(level)),
   onJtcatModeHopped: (cb) => ipcRenderer.on('jtcat-mode-hopped', (_e, d) => cb(d)),
   onJtcatSetRxGain: (cb) => ipcRenderer.on('jtcat-set-rx-gain', (_e, level) => cb(level)),
