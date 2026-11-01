@@ -43,7 +43,8 @@ section('#107 serial CAT test accepts an 8-digit FA reply');
 
 section('#106 "The audio interface keys it" on a CAT radio');
 {
-  const g = main.slice(main.indexOf('function gatedSetTransmit(state)'), main.indexOf('function gatedSetTxPower('));
+  // gatedSetTransmit(state, emission) since the Guest Pass gate judges what is sent.
+  const g = main.slice(main.indexOf('function gatedSetTransmit(state'), main.indexOf('function gatedSetTxPower('));
   const voxAt = g.indexOf("t.ptt === 'vox'");
   const catAt = g.indexOf('cat.setTransmit(state)');
   assert(voxAt > 0 && catAt > voxAt, 'gatedSetTransmit skips CAT TX when the interface keys');
