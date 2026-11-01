@@ -23050,8 +23050,6 @@ function effectiveVoiceMacroSlots(savedSlots, filled, labels, max) {
 let voicePlayingIdx = -1;
 let voicePlaybackSource = null;
 let voicePlaybackCtx = null;
-let voiceRecorder = null;
-let voiceRecordingIdx = -1;
 // Preview state — separate from playback so they can't collide. Preview
 // routes to the system default output and never PTTs the rig (K0OTC 2026-05-21).
 let voicePreviewIdx = -1;
@@ -23520,44 +23518,90 @@ async function renderVoiceMacroEditor() {
 // report: "When I play it I just hear a series of tones, not my voice."
 const VOICE_MACRO_DEVICE_KEY = 'pota-cat-voice-macro-input-device';
 
+// One recorder for every Rec button (lib/voice-recorder.js holds the rules).
+// A Rec button pressed while ANY take is open stops that take; it never
+// starts another. The old code stopped and then started a fresh take in the
+// same slot, which ran 30 s and overwrote the recording, usually with
+// silence (ride1226 2026-10-31: "no audio").
+let voiceRecUi = null; // { idx, btn, statusEl, idleText } of the open take
+function voiceRecSetButton(ui, text, color) {
+  if (!ui || !ui.btn) return;
+  ui.btn.textContent = text;
+  ui.btn.style.color = color || '';
+}
+function voiceRecStatus(ui, text, color) {
+  if (!ui || !ui.statusEl) return;
+  ui.statusEl.textContent = text;
+  if (ui.statusEl.style) ui.statusEl.style.color = color || '';
+}
+const voiceRecMeter = (stream) => {
+  const ctx = new AudioContext();
+  const src = ctx.createMediaStreamSource(stream);
+  const an = ctx.createAnalyser();
+  an.fftSize = 1024;
+  src.connect(an);
+  const buf = new Float32Array(an.fftSize);
+  return {
+    read() { an.getFloatTimeDomainData(buf); let p = 0; for (let i = 0; i < buf.length; i++) { const v = Math.abs(buf[i]); if (v > p) p = v; } return p; },
+    close() { try { src.disconnect(); } catch {} ctx.close().catch(() => {}); },
+  };
+};
+let voiceRecQuietSince = 0;
+const voiceRecorder = window.VoiceRecorder.createVoiceRecorder({
+  getUserMedia: (c) => navigator.mediaDevices.getUserMedia(c),
+  MediaRecorder: window.MediaRecorder,
+  maxMs: VOICE_MAX_DURATION * 1000,
+  levelMeter: voiceRecMeter,
+  onLevel(peak) {
+    const ui = voiceRecUi;
+    if (!ui) return;
+    const db = peak > 0 ? Math.round(20 * Math.log10(peak)) : -99;
+    if (peak < 0.003) { if (!voiceRecQuietSince) voiceRecQuietSince = Date.now(); } else voiceRecQuietSince = 0;
+    const silent = voiceRecQuietSince && Date.now() - voiceRecQuietSince > 2000;
+    voiceRecStatus(ui, silent ? 'Recording: no sound from the mic' : 'Recording ' + (db > -99 ? db + ' dB' : ''), '#e94560');
+  },
+  onState(state, info) {
+    const ui = voiceRecUi;
+    if (state === 'requesting') { voiceRecSetButton(ui, 'Stop', '#e94560'); voiceRecStatus(ui, 'Opening mic...', '#f0a500'); return; }
+    if (state === 'recording') { voiceRecQuietSince = 0; voiceRecSetButton(ui, 'Stop', '#e94560'); voiceRecStatus(ui, 'Recording...', '#e94560'); return; }
+    if (state === 'saving') { voiceRecSetButton(ui, ui && ui.idleText, ''); voiceRecStatus(ui, 'Saving...', '#f0a500'); return; }
+    if (state === 'error') {
+      voiceRecSetButton(ui, ui && ui.idleText, '');
+      voiceRecStatus(ui, 'Mic error: ' + info.message, '#e94560');
+      if (ui && ui.btn) ui.btn.title = 'Mic error: ' + info.message;
+      console.warn('[Voice macro] ' + info.message);
+      voiceRecUi = null;
+      return;
+    }
+    // idle: saved, cancelled, or stopped
+    voiceRecSetButton(ui, ui && ui.idleText, '');
+    if (info && info.cancelled) voiceRecStatus(ui, 'Cancelled', '');
+    voiceRecUi = null;
+  },
+  async onDone(blob, ms) {
+    const idx = voiceRecUi ? voiceRecUi.idx : -1;
+    if (idx < 0) return;
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    await window.api.voiceMacroSave(idx, window.VoiceRecorder.bytesToBase64(bytes));
+    renderVoiceMacroEditor();
+    updateVoiceMacroBar();
+  },
+});
+
 async function startVoiceRecording(idx, btn, statusEl) {
-  if (voiceRecorder) { voiceRecorder.stop(); voiceRecorder = null; }
-  try {
-    var savedDeviceId = '';
-    try { savedDeviceId = localStorage.getItem(VOICE_MACRO_DEVICE_KEY) || ''; } catch {}
-    var constraints = savedDeviceId
-      ? { audio: { deviceId: { exact: savedDeviceId } } }
-      : { audio: true };
-    var stream = await navigator.mediaDevices.getUserMedia(constraints);
-    voiceRecordingIdx = idx;
-    btn.textContent = 'Stop';
-    btn.style.color = '#e94560';
-    statusEl.textContent = 'Recording...';
-    statusEl.style.color = '#e94560';
-    var chunks = [];
-    voiceRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-    voiceRecorder.ondataavailable = function(e) { if (e.data.size > 0) chunks.push(e.data); };
-    voiceRecorder.onstop = function() {
-      stream.getTracks().forEach(t => t.stop());
-      var blob = new Blob(chunks, { type: 'audio/webm' });
-      // Convert to base64 and save via main process (shared with ECHOCAT)
-      var reader = new FileReader();
-      reader.onload = async function() {
-        var base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(reader.result)));
-        await window.api.voiceMacroSave(idx, base64);
-        renderVoiceMacroEditor();
-        updateVoiceMacroBar();
-      };
-      reader.readAsArrayBuffer(blob);
-      voiceRecorder = null;
-      voiceRecordingIdx = -1;
-    };
-    voiceRecorder.start();
-    setTimeout(function() { if (voiceRecorder && voiceRecordingIdx === idx) voiceRecorder.stop(); }, VOICE_MAX_DURATION * 1000);
-  } catch (err) {
-    statusEl.textContent = 'Mic error';
-    statusEl.style.color = '#e94560';
+  if (voiceRecorder.state === 'requesting' || voiceRecorder.state === 'recording') { voiceRecorder.stop(); return; }
+  var savedDeviceId = '';
+  try { savedDeviceId = localStorage.getItem(VOICE_MACRO_DEVICE_KEY) || ''; } catch {}
+  var deviceLabel = '';
+  if (savedDeviceId) {
+    try {
+      var devs = await navigator.mediaDevices.enumerateDevices();
+      var d = devs.find(function(x) { return x.deviceId === savedDeviceId; });
+      deviceLabel = d && d.label ? d.label : '';
+    } catch {}
   }
+  voiceRecUi = { idx: idx, btn: btn, statusEl: statusEl, idleText: btn ? btn.textContent : '' };
+  await voiceRecorder.start({ deviceId: savedDeviceId, deviceLabel: deviceLabel, mimeType: 'audio/webm' });
 }
 
 // Refresh when ECHOCAT syncs a macro
@@ -23579,19 +23623,14 @@ if (window.api.onCwMacrosUpdated) {
 // REC button on macro bar — cycles through slots
 if (voiceMacroRecBtn) {
   voiceMacroRecBtn.addEventListener('click', function() {
-    if (voiceRecorder) {
-      voiceRecorder.stop();
-      voiceMacroRecBtn.textContent = 'REC';
-      voiceMacroRecBtn.style.color = '';
-      return;
-    }
-    // Record into first empty slot (or slot 0 if all full).
+    if (voiceRecorder.state === 'requesting' || voiceRecorder.state === 'recording') { voiceRecorder.stop(); return; }
+    // Record into first empty slot (or slot 0 if all full). The bar button
+    // shows the state itself (REC / Stop); a mic error shows on its tooltip.
     window.api.voiceMacroList().then(function(filled) {
       var idx = 0;
       for (var i = 0; i < VOICE_MACRO_MAX; i++) { if (filled.indexOf(i) === -1) { idx = i; break; } }
-      startVoiceRecording(idx, voiceMacroRecBtn, { textContent: '', style: {} });
-      voiceMacroRecBtn.textContent = 'STOP';
-      voiceMacroRecBtn.style.color = '#e94560';
+      voiceMacroRecBtn.textContent = 'REC';
+      startVoiceRecording(idx, voiceMacroRecBtn, null);
     });
   });
 }
