@@ -123,5 +123,35 @@ check('one volume knob: the VFO monitor volume drives the SDR audio too', () => 
   assert.ok(/getElementById\('kiwi-volume-row'\)\.style\.display = 'none'/.test(vfo));
 });
 
+// ── A radio known only by its bands (no published rxHz) ──────────────────────
+const RigBands = require('../lib/rig-bands');
+const { BANDS } = require('../lib/bands');
+const rangesFor = (model) => (RigBands.bandsForRig(null, model, RIG_MODELS[model]) || [])
+  .map((b) => BANDS[b]).filter(Boolean).map((e) => [e.lower * 1e6, e.upper * 1e6]);
+check('FTX-1 (HF + 2 m + 70 cm, no published range) reaches NOAA weather 162.45 MHz and marine 156.8 MHz', () => {
+  assert.ok(!RIG_MODELS['FTX-1 Field'].rxHz, 'premise: no published range');
+  const reach = L.generalCoverage(rangesFor('FTX-1 Field'));
+  assert.ok(L.covers(reach, 162.45e6) && L.covers(reach, 156.8e6));
+  assert.strictEqual(L.decide(162.45e6, reach, null).source, 'rig');
+});
+check('an HF + 6 m radio still hands a 2 m click to the SDR', () => {
+  const reach = L.generalCoverage([[1.8e6, 2e6], [14e6, 14.35e6], [50e6, 54e6]]);
+  assert.ok(!L.covers(reach, 146.52e6));
+  assert.strictEqual(L.decide(146.52e6, reach, sdr).source, 'sdr');
+});
+check('an HF radio hears WWV on 10 MHz between its bands', () => {
+  assert.ok(L.covers(L.generalCoverage([[7e6, 7.3e6], [14e6, 14.35e6]]), 10e6));
+});
+check('no bands known: generalCoverage says nothing (main then never refuses)', () => {
+  assert.strictEqual(L.generalCoverage([]), null);
+  assert.strictEqual(L.generalCoverage(null), null);
+});
+check('main uses it for a rig known only by its bands; a published range still wins', () => {
+  const at = main.indexOf('function rigReachNow()');
+  const body = main.slice(at, main.indexOf('\n}', at));
+  assert.ok(/if \(model && Array\.isArray\(model\.rxHz\) && model\.rxHz\.length\) return model\.rxHz;/.test(body));
+  assert.ok(/return ListenSource\.generalCoverage\(out\) \|\| \[\[0, Infinity\]\];/.test(body));
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

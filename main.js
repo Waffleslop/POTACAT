@@ -34803,10 +34803,13 @@ function rigReachNow() {
     const bands = RigBands.bandsForRig(rig, name, model);
     const out = [];
     for (const b of bands || []) { const e = BANDS[b]; if (e) out.push([Math.round(e.lower * 1e6), Math.round(e.upper * 1e6)]); }
-    // Nothing known about this radio (a rigctld rig with no Radio Model picked
-    // lands here): never refuse. An HF-only guess refused 144.93 MHz on an
-    // FT-857D that had tuned 2m and 70cm fine until 1.13.8 (N5XHI 2026-10-31).
-    return out.length ? out : [[0, Infinity]];
+    // Known only by its bands: general coverage up to the top band (an FTX-1
+    // was refused NOAA 162.45 MHz between its 2 m and 70 cm bands, hoogskev
+    // 2026-11-01). Nothing known about this radio (a rigctld rig with no Radio
+    // Model picked lands here): never refuse. An HF-only guess refused
+    // 144.93 MHz on an FT-857D that had tuned 2m and 70cm fine until 1.13.8
+    // (N5XHI 2026-10-31).
+    return ListenSource.generalCoverage(out) || [[0, Infinity]];
   } catch { return [[0, Infinity]]; }
 }
 
