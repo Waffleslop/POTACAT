@@ -17950,6 +17950,13 @@ function stopJtcat() {
   if (jtcatManager) {
     jtcatManager.stopAll();
   }
+  // remote-server replays its last jtcat-tx-status to every client at connect.
+  // A stop mid-transmission (HALT, stopAll before tx-end fired) left that at
+  // 'tx', so every phone connecting hours later showed ON AIR on FT8 while the
+  // radio sat in SSTV RX (K3SBP 2026-11-01). The SSTV cancel path does the same.
+  if (remoteServer) {
+    try { remoteServer.broadcastJtcatTxStatus({ state: 'rx' }); } catch {}
+  }
   wsprSessionEnd();       // results stay serveable; next session starts fresh
   pushActivityState();    // the "now" feed follows every stop
   disconnectAprsGate();  // the gate listens for JS8 decodes; no engine, no gate
