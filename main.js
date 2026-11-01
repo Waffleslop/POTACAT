@@ -14026,6 +14026,13 @@ let jtcatFullAutoCqOwner = null;       // 'popout' | 'remote'
 let jtcatFullAutoCqModifier = '';      // CQ modifier carried across re-arms (POTA/DX/…)
 let jtcatFullAutoCqLastActivity = 0;   // ms epoch of last QSO/decode progress (watchdog)
 const JTCAT_FULL_AUTO_CQ_WATCHDOG_MS = 30 * 60 * 1000; // 30 min unattended cap
+// Transmit watchdog (WSJT-X's Tx watchdog): FT8/FT4/FT2 transmissions stop
+// after this long with no answer that moved a QSO on and nothing from the
+// operator (lloyd KO4L 2026-10-25: "POTACAT will not cease transmissions").
+// The per-phase tries cap ends a single QSO; this is the backstop no path can
+// skip, Hunt and Run included. ULTRACAT's Run/Hunt keep their own rules.
+const JTCAT_TX_WATCHDOG_MS = 6 * 60 * 1000;
+let _jtcatTxWatchArmedAt = 0;
 // Drained-band pause: Run works everyone it can, then used to keep calling CQ
 // into an empty band until the 30-minute watchdog killed it. It now stops
 // transmitting once nobody has answered for N CQs AND no unworked station is
@@ -15076,6 +15083,34 @@ function jtcatHuntFallbackResume(count) {
  */
 function jtcatNoteOperatorAtRadio() {
   jtcatFullAutoCqLastActivity = Date.now();
+}
+
+/**
+ * True when this key-down must be refused by the transmit watchdog. The clock
+ * is the attended-operator one above: the operator's own hands and QSO
+ * progress pet it, automatic re-calls do not. Keyboard modes (JTTY, PSK31,
+ * JS8) are one operator action per send and WSPR is a beacon, so only the
+ * slotted FT modes are watched.
+ */
+function jtcatTxWatchdogTripped(mode) {
+  const m = String(mode || '').toUpperCase();
+  if (m !== 'FT8' && m !== 'FT4' && m !== 'FT2') return false;
+  if (settings.ultracat && (jtcatFullAutoCq || jtcatAutoCqMode !== 'off')) return false;
+  const now = Date.now();
+  const last = Math.max(jtcatFullAutoCqLastActivity || 0, _jtcatTxWatchArmedAt || 0);
+  if (!last) { _jtcatTxWatchArmedAt = now; return false; }
+  return now - last > JTCAT_TX_WATCHDOG_MS;
+}
+
+function jtcatTxWatchdogStop() {
+  const mins = Math.round(JTCAT_TX_WATCHDOG_MS / 60000);
+  const why = `TX watchdog: ${mins} minutes of transmitting with no answer and nothing from the operator. TX stopped. Call CQ or reply again to carry on.`;
+  jtcatHaltTxNow('TX watchdog');
+  _jtcatTxWatchArmedAt = 0;
+  if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: why, warn: true, duration: 12000 });
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: why });
+  if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) remoteServer.broadcastJtcatQsoState({ phase: 'error', error: why });
+  sendCatLog('[JTCAT] ' + why);
 }
 
 function jtcatFullAutoCqWatchdog() {
@@ -17083,6 +17118,11 @@ function startJtcat(mode) {
     // The operator's licence class, before anything is keyed or played.
     if (ownTxPrivilegeRefused('DATA')) {
       try { if (ft8Engine && ft8Engine._txActive) ft8Engine.txComplete(); } catch {}
+      return;
+    }
+    if (jtcatTxWatchdogTripped(ft8Engine && ft8Engine._mode)) {
+      try { if (ft8Engine && ft8Engine._txActive) ft8Engine.txComplete(); } catch {}
+      jtcatTxWatchdogStop();
       return;
     }
     acquireRadio('jtcat'); // held for the duration of this transmission
@@ -24413,6 +24453,7 @@ function connectRemote() {
   });
 
   remoteServer.on('jtcat-enable-tx', ({ enabled }) => {
+    if (enabled) jtcatNoteOperatorAtRadio(); // turning TX on is the operator (transmit watchdog)
     if (ft8Engine) ft8Engine._txEnabled = enabled;
   });
 
@@ -45276,7 +45317,10 @@ app.whenReady().then(() => {
       ft8Engine.setApContext({ enabled: settings.jtcatApDecode, myCall: onAirCall() });
     }
   });
-  ipcMain.on('jtcat-enable-tx', (_e, enabled) => { if (ft8Engine) ft8Engine._txEnabled = enabled; });
+  ipcMain.on('jtcat-enable-tx', (_e, enabled) => {
+    if (enabled) jtcatNoteOperatorAtRadio(); // turning TX on is the operator (transmit watchdog)
+    if (ft8Engine) ft8Engine._txEnabled = enabled;
+  });
   ipcMain.on('jtcat-halt-tx', () => { jtcatHaltTxNow('Halt TX (JTCAT window)'); });
 
   // KD2TJU: WSJT-X-style Tune button — keys PTT and plays a steady tone
@@ -45791,6 +45835,12 @@ app.whenReady().then(() => {
         if (ownTxPrivilegeRefused('DATA', s.freqKhz ? s.freqKhz * 1000 : undefined)) {
           engine._txEnabled = false;
           if (engine._txActive) engine.txComplete();
+          return;
+        }
+        if (jtcatTxWatchdogTripped(engine._mode)) {
+          engine._txEnabled = false;
+          if (engine._txActive) engine.txComplete();
+          jtcatTxWatchdogStop();
           return;
         }
         const catState = cat ? `connected=${cat.connected}` : 'cat=null';

@@ -74,7 +74,10 @@ test('handleRemotePtt refuses a key-down outside the class', () => {
   assert.ok(/if \(state && ownTxPrivilegeRefused\(opts\.emission \|\| \(opts\.forceDataMode \? 'DATA' : _currentMode\), opts\.freqHz\)\) return;/.test(MAIN));
 });
 test('the JTCAT key-down is checked before anything is keyed or played, single and multi-slice', () => {
-  assert.ok(/if \(ownTxPrivilegeRefused\('DATA'\)\) \{\s*try \{ if \(ft8Engine && ft8Engine\._txActive\) ft8Engine\.txComplete\(\); \} catch \{\}\s*return;\s*\}\s*acquireRadio\('jtcat'\)/.test(MAIN));
+  const i = MAIN.indexOf("if (ownTxPrivilegeRefused('DATA')) {");
+  const a = MAIN.indexOf("acquireRadio('jtcat'); // held for the duration of this transmission");
+  assert.ok(i > 0 && a > i && a - i < 600, 'the check sits just before the radio is acquired');
+  assert.ok(/if \(ownTxPrivilegeRefused\('DATA'\)\) \{\s*try \{ if \(ft8Engine && ft8Engine\._txActive\) ft8Engine\.txComplete\(\); \} catch \{\}\s*return;/.test(MAIN));
   assert.ok(/if \(ownTxPrivilegeRefused\('DATA', s\.freqKhz \? s\.freqKhz \* 1000 : undefined\)\)/.test(MAIN));
 });
 test('data and image key-downs name their emission', () => {
