@@ -452,7 +452,7 @@ const { IambicKeyer } = require('./lib/keyer');
 const { WinKeyer } = require('./lib/winkeyer');
 const { parsePotaParksCSV, parsePotaActivationsCSV } = require('./lib/pota-parks');
 const { PotaSync } = require('./lib/pota-sync');
-const { WsjtxClient, extractCallsigns, encodeHeartbeat, encodeStatus, encodeLoggedAdif, encodeQsoLogged, encodeDecode, decodeFromJtcat, parseBridgeInbound, replySlot } = require('./lib/wsjtx');
+const { WsjtxClient, extractCallsigns, encodeHeartbeat, encodeStatus, bridgeStatusFields, encodeLoggedAdif, encodeQsoLogged, encodeDecode, decodeFromJtcat, parseBridgeInbound, replySlot } = require('./lib/wsjtx');
 const { PskrClient } = require('./lib/pskreporter');
 const PskrTx = require('./lib/pskreporter-tx');
 const { Ft8Engine, freqsForMode } = require('./lib/ft8-engine');
@@ -15869,6 +15869,13 @@ function remoteJtcatMyGrid() { return (settings.grid || '').toUpperCase().substr
 
 function remoteJtcatBroadcastQso() {
   if (remoteServer) remoteServer.broadcastJtcatQsoState(remoteJtcatQso || { phase: 'idle' });
+  wsjtxStatusOnQsoChange();
+}
+
+// WSJT-X sends a Status whenever its QSO state changes; GridTracker's roster
+// follows the QSO from those, not only from the 15 s heartbeat.
+function wsjtxStatusOnQsoChange() {
+  try { if (gridTrackerDecodesOn()) extraUdpBridge._sendStatus(); } catch { /* bridge not up yet */ }
 }
 
 async function remoteJtcatSetTxMsg(msg) {
@@ -15881,6 +15888,7 @@ function popoutBroadcastQso() {
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
     jtcatPopoutWin.webContents.send('jtcat-qso-state', popoutJtcatQso || { phase: 'idle' });
   }
+  wsjtxStatusOnQsoChange();
 }
 
 // call|band|mode -> ms of the last JTCAT auto-log (lib/jtcat-relog-guard.js).
@@ -29036,17 +29044,25 @@ function loadWorkedParks() {
 // What the bridges report as POTACAT's Status: the radio's dial, the JTCAT
 // mode while the engine runs (else the rig's mode, sidebands as SSB), and the
 // operator's call and grid.
+// Held between Statuses: the last real dial and the last QSO partner
+// (lib/wsjtx.js bridgeStatusFields says why each is held).
+const _wsjtxStatusMemo = { lastDialHz: 0, lastDx: null };
 function wsjtxBridgeStatus() {
   const rigMode = String(_currentMode || '').toUpperCase();
   const mode = ft8Engine ? String(ft8Engine._mode || 'FT8').toUpperCase()
     : (rigMode === 'USB' || rigMode === 'LSB') ? 'SSB' : rigMode;
-  return {
-    dialFreqHz: _currentFreqHz || 0,
+  const q = (popoutJtcatQso && popoutJtcatQso.call) ? popoutJtcatQso : remoteJtcatQso;
+  const eng = (q && q.sliceId && jtcatManager && jtcatManager.getEngine) ? (jtcatManager.getEngine(q.sliceId) || ft8Engine) : ft8Engine;
+  return bridgeStatusFields({
+    dialHz: _currentFreqHz || 0,
     mode,
     deCall: (settings && settings.myCallsign) || '',
     deGrid: String((settings && settings.grid) || '').slice(0, 6),
-    transmitting: !!(cat && cat._transmitting),
-  };
+    transmitting: !!((cat && cat._transmitting) || (eng && eng._txActive)),
+    qso: q || null,
+    engine: eng ? { txEnabled: !!eng._txEnabled, txDf: eng._txFreq || 0, rxDf: eng._rxFreq || 0 } : null,
+    now: Date.now(),
+  }, _wsjtxStatusMemo);
 }
 
 function createWsjtxUdpBridge(label) {
@@ -30695,9 +30711,10 @@ function gridTrackerSendDecodes(data) {
   if (gtDecodeCache.length > 600 || (gtDecodeCache[0] && gtDecodeCache[0].at < cutoff)) {
     gtDecodeCache = gtDecodeCache.filter((e) => e.at >= cutoff).slice(-600);
   }
-  const qso = popoutJtcatQso || remoteJtcatQso;
+  // DX Call / Tx Enabled come from wsjtxBridgeStatus (held for the whole
+  // QSO); an override here flipped DX Call to '' between periods.
   try {
-    extraUdpBridge.sendDecodes(out, { dxCall: (qso && qso.call) || '', txEnabled: !!(ft8Engine && ft8Engine._txEnabled) });
+    extraUdpBridge.sendDecodes(out, {});
   } catch (e) {
     sendCatLog(`[GridTracker] could not send decodes: ${e.message}`);
   }
