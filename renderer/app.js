@@ -2241,6 +2241,38 @@ function updateHeaders() {
 let hamlibFieldsLoaded = false;
 let allRigOptions = []; // cached rig list from listRigs()
 
+// One rule for every rig-editor port picker (Serial CAT, Icom, Hamlib, PTT).
+// A saved port that is not plugged in now stays IN THE LIST as
+// "COM9 (not found)" instead of being copied into the "or type COM port" box:
+// a typed port always wins on save, so picking COM10 from the list used to
+// save COM9 again (stein_12464, Discord 2026-11-01: "it has reverted to
+// COM9"; clearing the box was the only way out). Picking from the list also
+// clears anything typed, so the list choice is the one saved.
+function fillPortSelect(select, manual, ports, savedPath, opts = {}) {
+  if (!select) return;
+  select.innerHTML = opts.noneLabel ? `<option value="">${opts.noneLabel}</option>` : '';
+  if (manual) manual.value = '';
+  let found = false;
+  for (const p of ports || []) {
+    const opt = document.createElement('option');
+    opt.value = p.path;
+    opt.textContent = `${p.path} — ${p.friendlyName}`;
+    if (savedPath && savedPath === p.path) { opt.selected = true; found = true; }
+    select.appendChild(opt);
+  }
+  if (savedPath && !found) {
+    const opt = document.createElement('option');
+    opt.value = savedPath;
+    opt.textContent = `${savedPath} (not found — is the radio on and plugged in?)`;
+    opt.selected = true;
+    select.insertBefore(opt, select.firstChild && opts.noneLabel ? select.firstChild.nextSibling : select.firstChild);
+  }
+  if (manual && !select.dataset.portPickWired) {
+    select.dataset.portPickWired = '1';
+    select.addEventListener('change', () => { manual.value = ''; });
+  }
+}
+
 function getEffectivePort() {
   const manual = setRigPortManual.value.trim();
   return manual || setRigPort.value;
@@ -2473,22 +2505,7 @@ async function populateHamlibFields(savedTarget) {
 
   // Populate serial port dropdown
   const ports = await window.api.listPorts();
-  setRigPort.innerHTML = '';
-  setRigPortManual.value = '';
-  const detectedPaths = new Set();
-  for (const p of ports) {
-    detectedPaths.add(p.path);
-    const opt = document.createElement('option');
-    opt.value = p.path;
-    opt.textContent = `${p.path} — ${p.friendlyName}`;
-    if (savedTarget && savedTarget.serialPort === p.path) opt.selected = true;
-    setRigPort.appendChild(opt);
-  }
-
-  // If the saved port isn't in the detected list, put it in the manual input
-  if (savedTarget && savedTarget.serialPort && !detectedPaths.has(savedTarget.serialPort)) {
-    setRigPortManual.value = savedTarget.serialPort;
-  }
+  fillPortSelect(setRigPort, setRigPortManual, ports, savedTarget && savedTarget.serialPort);
 
   // Restore baud rate
   if (savedTarget && savedTarget.baudRate) {
@@ -2505,21 +2522,9 @@ async function populateHamlibFields(savedTarget) {
   // any saved value. If the saved port isn't enumerated (radio unplugged),
   // fall back to the manual text field so users don't lose their setting.
   if (setRigPttPort) {
-    setRigPttPort.innerHTML = '<option value="">-- none (PTT via CAT) --</option>';
     // Reuse the port list already fetched above for the CAT serial dropdown.
-    for (const p of ports) {
-      const opt = document.createElement('option');
-      opt.value = p.path;
-      opt.textContent = `${p.path} — ${p.friendlyName}`;
-      if (savedTarget && savedTarget.pttPort === p.path) opt.selected = true;
-      setRigPttPort.appendChild(opt);
-    }
-    const savedPtt = savedTarget && savedTarget.pttPort;
-    if (savedPtt && !detectedPaths.has(savedPtt) && setRigPttPortManual) {
-      setRigPttPortManual.value = savedPtt;
-    } else if (setRigPttPortManual) {
-      setRigPttPortManual.value = '';
-    }
+    fillPortSelect(setRigPttPort, setRigPttPortManual, ports, savedTarget && savedTarget.pttPort,
+      { noneLabel: '-- none (PTT via CAT) --' });
     // Restore PTT pin (DTR or RTS). Default DTR if nothing saved.
     if (setRigPttType) {
       const t = (savedTarget && savedTarget.pttType) || 'RTS';   // Digirig keys PTT on RTS (K5LEB 2026-10-21: DTR never keyed his IC-718)
@@ -2539,20 +2544,7 @@ async function loadIcomPorts(savedTarget) {
   const ports = await window.api.listPorts();
   const portSelect = document.getElementById('set-icom-port');
   const portManual = document.getElementById('set-icom-port-manual');
-  portSelect.innerHTML = '';
-  portManual.value = '';
-  const detectedPaths = new Set();
-  for (const p of ports) {
-    detectedPaths.add(p.path);
-    const opt = document.createElement('option');
-    opt.value = p.path;
-    opt.textContent = `${p.path} — ${p.friendlyName}`;
-    if (savedTarget && savedTarget.path === p.path) opt.selected = true;
-    portSelect.appendChild(opt);
-  }
-  if (savedTarget && savedTarget.path && !detectedPaths.has(savedTarget.path)) {
-    portManual.value = savedTarget.path;
-  }
+  fillPortSelect(portSelect, portManual, ports, savedTarget && savedTarget.path);
   if (savedTarget && savedTarget.baudRate) {
     document.getElementById('set-icom-baud').value = String(savedTarget.baudRate);
   }
@@ -2570,20 +2562,7 @@ let serialcatPortsLoaded = false;
 
 async function loadSerialcatPorts(savedTarget) {
   const ports = await window.api.listPorts();
-  setSerialcatPort.innerHTML = '';
-  setSerialcatPortManual.value = '';
-  const detectedPaths = new Set();
-  for (const p of ports) {
-    detectedPaths.add(p.path);
-    const opt = document.createElement('option');
-    opt.value = p.path;
-    opt.textContent = `${p.path} — ${p.friendlyName}`;
-    if (savedTarget && savedTarget.path === p.path) opt.selected = true;
-    setSerialcatPort.appendChild(opt);
-  }
-  if (savedTarget && savedTarget.path && !detectedPaths.has(savedTarget.path)) {
-    setSerialcatPortManual.value = savedTarget.path;
-  }
+  fillPortSelect(setSerialcatPort, setSerialcatPortManual, ports, savedTarget && savedTarget.path);
   if (savedTarget && savedTarget.baudRate) {
     setSerialcatBaud.value = String(savedTarget.baudRate);
   }
@@ -5202,6 +5181,36 @@ async function populateRotorEzPorts(savedPath) {
 }
 
 if (setRotorType) setRotorType.addEventListener('change', applyRotorTypeVisibility);
+// Typed port fields with a suggestion list (CW key port, WinKeyer, no-CAT PTT):
+// Chromium filters a datalist by what is already in the box, so a saved
+// "COM9" hid COM10 and every other port, and the arrow seemed dead until the
+// box was emptied (stein_12464, 2026-11-01). On a click, show the whole list;
+// if nothing new is picked, the saved value comes back.
+function showWholePortListOnClick(input) {
+  if (!input || input.dataset.wholeListWired) return;
+  input.dataset.wholeListWired = '1';
+  input.addEventListener('mousedown', () => {
+    if (!input.value || input.dataset.heldValue) return;
+    input.dataset.heldValue = input.value;
+    if (input.dataset.basePlaceholder === undefined) input.dataset.basePlaceholder = input.placeholder || '';
+    input.placeholder = input.value;
+    input.value = '';
+  });
+  const restore = () => {
+    const held = input.dataset.heldValue;
+    if (held === undefined) return;
+    delete input.dataset.heldValue;
+    if (input.dataset.basePlaceholder !== undefined) input.placeholder = input.dataset.basePlaceholder;
+    if (!input.value.trim()) input.value = held;
+  };
+  input.addEventListener('change', () => {
+    delete input.dataset.heldValue;
+    if (input.dataset.basePlaceholder !== undefined) input.placeholder = input.dataset.basePlaceholder;
+  });
+  input.addEventListener('blur', restore);
+}
+['set-cw-key-port', 'set-winkeyer-port', 'set-nocat-ptt-port'].forEach((id) => showWholePortListOnClick(document.getElementById(id)));
+
 // Antenna Genius checkbox toggles config visibility
 setEnableAg.addEventListener('change', () => {
   agConfig.classList.toggle('hidden', !setEnableAg.checked);
