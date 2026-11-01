@@ -478,7 +478,8 @@ test('FT-710: PSK is shown but never sent; a PSK width uses the DATA chart', () 
   // phone's log sheet defaults to PSK31 (both run from source).
   const toFilter = new Function(app.slice(app.indexOf('function radioModeToFilter'), app.indexOf('function spotAgeSecs')) + '; return radioModeToFilter;')();
   assert.strictEqual(toFilter('PSK'), 'DIGI');
-  const remote = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer', 'remote.js'), 'utf8');
+  // Line-ending neutral: a Windows checkout (core.autocrlf) has CRLF.
+  const remote = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer', 'remote.js'), 'utf8').replace(/\r\n/g, '\n');
   const aliasEnd = remote.indexOf('\n  }\n', remote.indexOf('function aliasModeForLogSheet')) + 4;
   const alias = new Function(remote.slice(remote.indexOf('const LOG_MODE_OPTIONS'), aliasEnd) + '; return aliasModeForLogSheet;')();
   assert.strictEqual(alias('PSK'), 'PSK31');
