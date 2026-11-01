@@ -123,6 +123,9 @@ contextBridge.exposeInMainWorld('api', {
   onJtcatIdleQsy: (cb) => ipcRenderer.on('jtcat-idle-qsy', (_e, data) => cb(data)),
   onJtcatBandFollow: (cb) => ipcRenderer.on('jtcat-band-follow', (_e, data) => cb(data)),
   jtcatFollowRadio: () => ipcRenderer.send('jtcat-follow-radio'),
+  // DXpedition FT8/FT4 dials for the band menu (main's copy of the feed)
+  jtcatDxpeditionsGet: () => ipcRenderer.invoke('jtcat-dxpeditions-get'),
+  onJtcatDxpeditions: (cb) => ipcRenderer.on('jtcat-dxpeditions', (_e, list) => cb(list)),
   onJtcatTuneState: (cb) => ipcRenderer.on('jtcat-tune-state', (_e, data) => cb(data)),
   onRestartPopoutAudio: (cb) => ipcRenderer.on('restart-popout-audio', () => cb()),
   // VITA-49 dax_rx frames forwarded from main when on "SmartSDR Direct" —

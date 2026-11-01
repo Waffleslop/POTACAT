@@ -199,6 +199,67 @@ export function parseModes(text) {
   return MODE_PATTERNS.filter(([, re]) => re.test(s)).map(([m]) => m);
 }
 
+// Hand-kept dials for an operation whose announcement says them unclearly:
+// CALL -> [{ mode: 'FT8' | 'FT4', khz, hound?, superFox? }]. Replaces the
+// parsed list for that call.
+export const FREQ_OVERRIDES = {};
+
+// ---------- Published FT8 / FT4 dials ----------
+// "FT8 on 14.090", "FT8 (F/H) 7.056, 10.131 & 14.090", "14090 kHz FT4",
+// "Fox/Hound on 18.095". A DXpedition announces its own dials, off the
+// standard watering holes, so POTACAT can tune there (level_death
+// 2026-10-31). A frequency counts only inside an amateur band from 160 m to
+// 6 m and only near an FT8/FT4 mention (same clause, within 60 characters).
+// Fox/Hound wording marks the entries hound: true.
+const FT_BAND_KHZ = [[1800, 2000], [3500, 4000], [5330, 5410], [7000, 7300], [10100, 10150], [14000, 14350],
+  [18068, 18168], [21000, 21450], [24890, 24990], [28000, 29700], [50000, 54000]];
+function ftKhz(token) {
+  const t = String(token).replace(/,/g, '.');
+  let khz = /\./.test(t) && parseFloat(t) < 100 ? parseFloat(t) * 1000 : parseFloat(t);
+  if (!(khz > 0)) return null;
+  khz = Math.round(khz * 10) / 10;
+  return FT_BAND_KHZ.some(([a, b]) => khz >= a && khz <= b) ? khz : null;
+}
+export function parseFreqs(text) {
+  const s = String(text || '');
+  const out = [];
+  const seen = new Set();
+  // Fox/Hound anywhere in the announcement applies to its FT8 dials.
+  // SuperFox is its own waveform (POTACAT's Hound mode is old-style only).
+  const superFox = /\bsuper\s*fox\b/i.test(s);
+  const houndText = superFox || /\bF\/H\b|\bfox\s*\/?\s*hound\b/i.test(s);
+  const modeRe = /\b(FT8|FT4|F\/H|fox\s*\/?\s*hound|super\s*fox)\b/gi;
+  let m;
+  while ((m = modeRe.exec(s))) {
+    const word = m[1].toUpperCase();
+    const mode = word === 'FT4' ? 'FT4' : 'FT8';
+    const hound = mode === 'FT8' && (houndText || /F\/H|FOX/.test(word));
+    // The clause around the mode word: up to 60 characters each side, cut
+    // at a sentence end or a different mode name.
+    const from = Math.max(0, m.index - 60);
+    let before = s.slice(from, m.index);
+    let after = s.slice(m.index + m[0].length, m.index + m[0].length + 60);
+    before = before.split(/[.;!?]\s|\b(?:CW|SSB|RTTY|FT8|FT4)\b/i).pop();
+    after = after.split(/[;!?]|\.\s|\b(?:CW|SSB|RTTY|FT8|FT4)\b/i)[0];
+    // "FT8 on 14.090" first; "14.090 FT8" only when nothing follows the word.
+    const found = [after, before].map((part) => [...part.matchAll(/\b(\d{1,2}[.,]\d{3}(?:\.\d)?|\d{4,5}(?:\.\d)?)\s*(?:k?hz|mhz)?\b/gi)].filter((f) => ftKhz(f[1])));
+    for (const part of found[0].length ? [after] : [before]) {
+      for (const f of part.matchAll(/\b(\d{1,2}[.,]\d{3}(?:\.\d)?|\d{4,5}(?:\.\d)?)\s*(?:k?hz|mhz)?\b/gi)) {
+        const khz = ftKhz(f[1]);
+        if (!khz) continue;
+        const key = `${mode}|${khz}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const e = { mode, khz };
+        if (hound) e.hound = true;
+        if (hound && superFox) e.superFox = true;
+        out.push(e);
+      }
+    }
+  }
+  return out.sort((a, b) => a.khz - b.khz || a.mode.localeCompare(b.mode));
+}
+
 const IOTA_RE = /\b(AF|AN|AS|EU|NA|OC|SA)-(\d{3})\b/g;
 export function parseIota(text) {
   return [...new Set([...String(text || '').matchAll(IOTA_RE)].map((m) => `${m[1]}-${m[2]}`))];
@@ -289,6 +350,7 @@ export function parseNg3kItem(rawDescription, link) {
     grid: parseGrid(notes),
     bands: parseBands(notes),
     modes: parseModes(notes),
+    freqs: parseFreqs(notes),
     operators,
     notes: notes || null,
   };
@@ -308,6 +370,7 @@ export function parseArticle(text, hrefs, publishedAt) {
     grid: parseGrid(text),
     bands: parseBands(text),
     modes: parseModes(text),
+    freqs: parseFreqs(text),
     operators: [],
     notes: null,
   };
@@ -406,6 +469,12 @@ export function combineDetails(call, d) {
   const ent = byName || byCall;
   const bands = list('bands');
   const modes = list('modes');
+  // Dials: NG3K's when it names any, else every article's, one per mode+kHz;
+  // a hand-kept entry in FREQ_OVERRIDES replaces both.
+  const ngFreqs = (d && d.ng3k && d.ng3k.freqs) || [];
+  const freqSeen = new Set();
+  const freqs = FREQ_OVERRIDES[call] || (ngFreqs.length ? ngFreqs : srcs.flatMap(([, v]) => v.freqs || []))
+    .filter((f) => { const k = f.mode + '|' + f.khz; if (freqSeen.has(k)) return false; freqSeen.add(k); return true; });
   const qsl = mergeQsl(srcs.map(([, v]) => v.qsl));
   const notes = first('notes');
   return {
@@ -424,6 +493,7 @@ export function combineDetails(call, d) {
     grid: first('grid'),
     bands,
     modes,
+    freqs,
     operators: list('operators'),
     notes,
   };

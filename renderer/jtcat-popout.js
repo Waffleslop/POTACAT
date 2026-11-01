@@ -3153,6 +3153,54 @@ function _applyPopoutTheme(payload) {
     new MutationObserver(bandSelectFollowActive).observe(bandSelect, { subtree: true, attributes: true, attributeFilter: ['class'] });
   }
 
+  // DXpeditions on the air with a published FT8/FT4 dial (level_death
+  // 2026-10-31; the feed's `freqs`, lib/dxpedition-dials.js). A group at the
+  // end of the band menu. Picking one switches to its mode, tunes its dial
+  // and marks its band; the menu then shows the band again. These options
+  // are NOT .jp-band-opt, so mode changes, rig bands and idle QSY never
+  // touch them, and the capture listener runs before the band handler.
+  function renderDxpeditionDials(list) {
+    if (!bandSelect) return;
+    var old = document.getElementById('jp-dxp-group');
+    if (old) old.remove();
+    if (!Array.isArray(list) || !list.length) return;
+    var g = document.createElement('optgroup');
+    g.id = 'jp-dxp-group';
+    g.label = 'DXpeditions';
+    list.forEach(function(d) {
+      var o = document.createElement('option');
+      o.className = 'jp-dxp-opt';
+      o.value = 'dxp:' + d.call + ':' + d.mode + ':' + d.khz;
+      o.dataset.call = d.call; o.dataset.mode = d.mode; o.dataset.freq = d.khz; o.dataset.band = d.band;
+      if (d.hound) o.dataset.hound = '1';
+      if (d.superFox) o.dataset.superfox = '1';
+      o.textContent = d.call + ' ' + d.mode + ' ' + (d.khz / 1000).toFixed(3) + (d.superFox ? ' SuperFox' : d.hound ? ' F/H' : '');
+      o.title = (d.entity ? d.entity + ': ' : '') + d.call + ' on ' + d.mode + ' ' + (d.khz / 1000).toFixed(3) + ' MHz' + (d.end ? ', until ' + d.end : '');
+      g.appendChild(o);
+    });
+    bandSelect.appendChild(g);
+  }
+  if (bandSelect) {
+    bandSelect.addEventListener('change', function(e) {
+      var opt = bandSelect.options[bandSelect.selectedIndex];
+      if (!opt || !opt.classList.contains('jp-dxp-opt')) return;
+      e.stopImmediatePropagation();
+      var mode = opt.dataset.mode, khz = parseFloat(opt.dataset.freq);
+      if (mode && modeSelect.value !== mode && Array.prototype.some.call(modeSelect.options, function(x) { return x.value === mode; })) {
+        modeSelect.value = mode;
+        modeSelect.dispatchEvent(new Event('change')); // retunes the band's own dial first; the tune below lands after it
+      }
+      window.api.tune(khz, mode || modeSelect.value);
+      document.querySelectorAll('.jp-band-opt').forEach(function(b) { b.classList.toggle('active', b.dataset.band === opt.dataset.band); });
+      bandSelectFollowActive();
+      var sub = opt.dataset.superfox ? 'They run SuperFox, which POTACAT\'s Hound mode does not decode. Use WSJT-X in SuperFox Hound mode for this one.'
+        : opt.dataset.hound ? (houndMode ? 'Fox/Hound: Hound is on.' : 'They run Fox/Hound: turn on Hound before you call.') : '';
+      showJtcatWarnToast('Tuned to ' + opt.dataset.call + ' on ' + (khz / 1000).toFixed(3) + ' MHz ' + (mode || ''), sub);
+    }, true);
+    if (window.api.onJtcatDxpeditions) window.api.onJtcatDxpeditions(renderDxpeditionDials);
+    if (window.api.jtcatDxpeditionsGet) window.api.jtcatDxpeditionsGet().then(renderDxpeditionDials).catch(function() {});
+  }
+
   // main.js hopped the FTx mode on us (settings.jtcatModeHop). The radio and
   // the engine have already moved — this is only the display catching up, so
   // nothing here re-tunes or re-saves: doing either would fight the QSY that

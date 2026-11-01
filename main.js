@@ -460,6 +460,7 @@ const { decideDialFollow } = require('./lib/jtcat-dial-follow');
 const { isWinlinkSessionFault } = require('./lib/winlink-fault');
 const { createSpotSourceCache } = require('./lib/spot-source-cache');
 const WorkedMatrix = require('./lib/worked-matrix');
+const { jtcatDxpeditionDials } = require('./lib/dxpedition-dials');
 const { checkClockOffset, syncSystemClock, classifyClockOffset } = require('./lib/ntp');
 const StationClock = require('./lib/station-clock'); // FT8/FT4/FT2/WSPR/JTTY slot clock, correctable from an ECHOCAT device
 const JtcatParser = require('./renderer/jtcat-parser'); // shared FT8 message classifier (also a browser global in the renderers)
@@ -31979,6 +31980,11 @@ function fetchDxpeditionActivity() {
   });
 }
 
+let _jtcatDxpDials = [];
+function sendJtcatDxpeditions() {
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-dxpeditions', _jtcatDxpDials);
+}
+
 async function fetchExpeditions() {
   const [clubLogResult, potacatResult] = await Promise.allSettled([
     fetchClubLogExpeditions(),
@@ -32069,6 +32075,12 @@ async function fetchExpeditions() {
 
   expeditionCallsigns = merged;
   expeditionMeta = meta;
+  // DXpedition FT8/FT4 dials for the JTCAT window's band menu (the feed's
+  // `freqs`, lib/dxpedition-dials.js).
+  if (potacatResult.status === 'fulfilled') {
+    _jtcatDxpDials = jtcatDxpeditionDials(potacatResult.value);
+    sendJtcatDxpeditions();
+  }
 
   if (win && !win.isDestroyed()) {
     const metadata = {};
@@ -40091,6 +40103,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.on('jtcat-follow-radio', () => { jtcatFollowRadioNow('the JTCAT window'); });
+  ipcMain.handle('jtcat-dxpeditions-get', () => _jtcatDxpDials);
 
   ipcMain.on('jtcat-popout-skip-phase', async () => {
     if (!popoutJtcatQso || popoutJtcatQso.phase === 'done' || popoutJtcatQso.phase === 'idle') return;

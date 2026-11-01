@@ -362,7 +362,9 @@ async function enrichFromArticles(records, env) {
   for (const r of records) {
     for (const src of Object.values(NEWS_HOSTS)) {
       const d = r._d[src];
-      if (!d || d.parsedFrom === 'article' || !d.articleLink) continue;
+      // An article parsed before `freqs` existed is read once more (within the
+      // budget) so the dials it announces reach the feed.
+      if (!d || (d.parsedFrom === 'article' && Array.isArray(d.freqs)) || !d.articleLink) continue;
       // articleFails, not the old articleTries: tries spent while every
       // direct fetch hit the captcha don't count against the article.
       if ((d.articleFails || 0) >= ARTICLE_MAX_TRIES || failedLinks.has(d.articleLink)) continue;

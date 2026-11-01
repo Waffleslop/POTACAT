@@ -90,6 +90,7 @@ Every record also carries these. Unknown is `null` (scalars) or `[]`
 | `grid` | `"MJ64me"` | |
 | `bands` | `["20m","15m","10m"]` | Ranges expanded ("160-6m"); 60m/4m only when named. "HF" alone yields nothing. |
 | `modes` | `["CW","SSB","FT8"]` | CW SSB FT8 FT4 RTTY PSK FM AM SSTV Q65 JT65 MSK144 SAT DIGI. |
+| `freqs` | `[{"mode":"FT8","khz":14090,"hound":true}]` | Published FT8/FT4 dials ("FT8 (F/H) on 14.090"), 160-6 m only, near an FT8/FT4 mention. `hound` when the announcement says Fox/Hound, `superFox` for SuperFox. `FREQ_OVERRIDES` in `details.js` replaces the parsed list for a call. POTACAT's JTCAT window lists them in its band menu. |
 | `operators` | `["DJ3JH"]` | From NG3K's "By ..." clause. |
 | `notes` | `"By DJ3JH fm Thulhagiri I ..."` | NG3K's free-text line. |
 

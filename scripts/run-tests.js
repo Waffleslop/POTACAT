@@ -113,6 +113,7 @@ const TESTS = [
   'test/jtcat-map-popup-test.js',
   'test/worked-matrix-test.js',
   'test/prefix-overlay-test.js',
+  'test/dxpedition-dials-test.js',
   'test/jtcat-snr-floor-test.js', // Hunt does not call a CQ below the operator's signal floor (per band)
   'test/rx-spectrum-test.js', // the phone's VFO waterfall with no FT8 engine: Flex/Icom streams, the rig's sound card
   'test/yaesu-scope-test.js', // the FT-710's own scope: frame parser, axis, helper exit codes, remote payload guard (was CI-only)
