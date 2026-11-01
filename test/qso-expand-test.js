@@ -153,5 +153,31 @@ test('a blank mode takes the radio\'s voice/CW mode; a data mode or no radio is 
   assert.ok(/if \(!fromRig\) \{[\s\S]*?return \{ success: false/.test(body), 'and refuses when it cannot');
 });
 
+
+test('the country is where the station operates: an away call keeps only QRZ\'s name (level_death)', () => {
+  const cty = require('../lib/cty');
+  const db = cty.loadCtyDat(path.join(__dirname, '..', 'assets', 'cty.dat'));
+  const entityFor = (c) => { const op = cty.resolveOperatingCall(c, db); return op && op.entity ? { name: op.entity.name, away: op.away } : null; };
+  // QRZ is asked about the BASE call, so it answers with the home station.
+  const qrzHome = { name: 'Mario Rossi', country: 'Italy', state: '', county: '', grid: 'JN45' };
+  const away = expandContact({ ...base, callsign: '6W/IK2HKT' }, { callInfo: () => qrzHome, entityFor });
+  assert.strictEqual(away[0].country, 'Senegal');
+  assert.strictEqual(away[0].name, 'Mario Rossi', 'QRZ name kept');
+  assert.strictEqual(away[0].gridsquare, '', 'never the home grid');
+  assert.strictEqual(expandContact({ ...base, callsign: 'IK2HKT/6W' }, { callInfo: () => qrzHome, entityFor })[0].country, 'Senegal');
+  assert.strictEqual(expandContact({ ...base, callsign: 'VP2V/GU4YOX' }, { callInfo: () => ({ country: 'Guernsey' }), entityFor })[0].country, 'British Virgin Islands');
+  const w1aw = { name: 'ARRL', country: 'United States', state: 'CT', county: 'Hartford', grid: 'FN31' };
+  const kh6 = expandContact({ ...base, callsign: 'W1AW/KH6' }, { callInfo: () => w1aw, entityFor })[0];
+  assert.deepStrictEqual([kh6.country, kh6.state, kh6.gridsquare], ['Hawaii', '', '']);
+  // At home (or /P, /4): QRZ's record is this station's, unchanged.
+  const home = expandContact({ ...base, callsign: 'W1AW/P' }, { callInfo: () => w1aw, entityFor })[0];
+  assert.deepStrictEqual([home.country, home.state, home.gridsquare], ['United States', 'CT', 'FN31']);
+  // No QRZ: the country still comes from the call.
+  assert.strictEqual(expandContact({ ...base, callsign: 'K3SBP' }, { entityFor })[0].country, 'United States');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const fn = main.indexOf('async function logContact(entry, opts)');
+  assert.ok(main.slice(fn, fn + 6000).includes('resolveOperatingCall(c, ctyDb)'), 'logContact hands cty.dat to expandContact');
+});
+
 console.log(`\nQSO expand: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

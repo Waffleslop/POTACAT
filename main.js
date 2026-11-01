@@ -370,7 +370,7 @@ const WsprPowerMemory = require('./lib/wspr-power-memory'); // pre-beacon RF pow
 const Privileges = require('./lib/privileges');
 const SwrGuard = require('./lib/swr-guard'); // SWR-guard auto-tune + ATU result policy (pure)
 const { encodeWspr } = require('./lib/wspr/encode');
-const { loadCtyDat, resolveCallsign, resolveZones, getAllEntities } = require('./lib/cty');
+const { loadCtyDat, resolveCallsign, resolveOperatingCall, resolveZones, getAllEntities } = require('./lib/cty');
 const CallZones = require('./lib/call-zones'); // CQ/ITU zones for spots + logbook rows (LZ3AW item 30)
 const DxRule = require('./lib/dx-rule'); // what counts as DX: another entity, or the operator's distance (G4BFG)
 const InstallDefaults = require('./lib/install-defaults'); // always-on features + the one-time defaults (Casey 2026-10-27)
@@ -13044,6 +13044,12 @@ async function logContact(entry, opts) {
   const records = QsoExpand.expandContact(e, {
     myRefs,
     callInfo: (c) => infos.get(c) || null,
+    entityFor: (c) => {
+      const op = ctyDb ? resolveOperatingCall(c, ctyDb) : null;
+      if (!op || !op.entity) return null;
+      if (op.away) sendCatLog(`[QSO] ${c}: operating from ${op.entity.name}${op.home ? ` (home ${op.home.name})` : ''} — country from the call, QRZ's home address not used`);
+      return { name: op.entity.name, away: op.away };
+    },
     parkInfo: (ref) => {
       const p = parkInfoFor(ref);
       return p ? { states: parkStatesFromLocation(p.locationDesc || ''), grid: p.grid || '' } : null;
