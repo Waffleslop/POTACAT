@@ -456,6 +456,7 @@ const { WsjtxClient, extractCallsigns, encodeHeartbeat, encodeStatus, encodeLogg
 const { PskrClient } = require('./lib/pskreporter');
 const PskrTx = require('./lib/pskreporter-tx');
 const { Ft8Engine, freqsForMode } = require('./lib/ft8-engine');
+const { decideDialFollow } = require('./lib/jtcat-dial-follow');
 const { checkClockOffset, syncSystemClock, classifyClockOffset } = require('./lib/ntp');
 const StationClock = require('./lib/station-clock'); // FT8/FT4/FT2/WSPR/JTTY slot clock, correctable from an ECHOCAT device
 const JtcatParser = require('./renderer/jtcat-parser'); // shared FT8 message classifier (also a browser global in the renderers)
@@ -3688,6 +3689,46 @@ function catModeHandler(md) {
   sendCatMode(md);
 }
 
+// JTCAT is anchored to a dial (the wrong-band TX guard). A dial the operator
+// turns onto a known digital dial for the engine's mode moves the anchor and
+// the window's band (lib/jtcat-dial-follow.js, GitHub #115). Not in a QSO,
+// not multi-slice (each slice has its own band), not while driving a shack.
+function jtcatQsoLive() {
+  const live = (q) => !!(q && q.call && !['idle', 'done', 'cq'].includes(q.phase));
+  return live(popoutJtcatQso) || live(remoteJtcatQso);
+}
+function jtcatDialFollow(hz) {
+  try {
+    if (isRemoteMode() || !ft8Engine || !ft8Engine._running || !(_jtcatExpectedDialHz > 0)) return;
+    if (jtcatManager && jtcatManager.sliceCount > 1) return;
+    const mode = String(ft8Engine._mode || 'FT8').toUpperCase();
+    if (!/^FT[842]$/.test(mode)) return;
+    const d = decideDialFollow({ dialHz: hz, anchorHz: _jtcatExpectedDialHz, freqs: freqsForMode(mode), qsoLive: jtcatQsoLive() });
+    if (d.action !== 'follow') return;
+    jtcatFollowBand(d.dialHz, d.band, `the radio moved to the ${mode} dial on ${d.band}`);
+  } catch { /* the guard still protects TX */ }
+}
+// Move the anchor to `dialHz` and tell the JTCAT window which band it is on.
+function jtcatFollowBand(dialHz, band, why) {
+  _jtcatExpectedDialHz = Math.round(dialHz);
+  const khz = _jtcatExpectedDialHz / 1000;
+  sendCatLog(`[JTCAT] Following the radio to ${(khz / 1000).toFixed(3)} MHz${band ? ` (${band})` : ''}: ${why}`);
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-band-follow', { band: band || '', freqKhz: khz });
+  try { if (remoteServer && remoteServer.running) remoteServer.sendJtcatBandFollow({ band: band || '', freqKhz: khz }); } catch { /* no client */ }
+}
+
+// "Follow the radio" on the wrong-band refusal: the operator says the radio
+// is where they mean to transmit, whatever the frequency.
+function jtcatFollowRadioNow(who) {
+  const dialLive = !!((cat && cat.connected) || (smartSdr && smartSdr.canTune && smartSdr.connected));
+  if (!dialLive || !(_currentFreqHz > 0) || !ft8Engine || !ft8Engine._running) {
+    sendCatLog('[JTCAT] Follow the radio: no live dial from the radio, nothing to follow');
+    return false;
+  }
+  jtcatFollowBand(_currentFreqHz, freqToBand(_currentFreqHz / 1e6) || '', `${who} pressed Follow the radio`);
+  return true;
+}
+
 function sendCatFrequency(hz) {
   if (hz > 0 && hz < 100000) {
     console.warn(`[CAT] Ignoring suspicious frequency: ${hz} Hz (below 100 kHz)`);
@@ -3710,6 +3751,9 @@ function sendCatFrequency(hz) {
   // Same reasoning, same sink: JTCAT's RX level is remembered per band, so a
   // band change restores the level that band was last run at.
   jtcatRxGainFollowBand(hz);
+  // JTCAT's band follows a dial turned onto another band's FT8/FT4/FT2
+  // watering hole (#115); anything else stays refused by the TX guard.
+  jtcatDialFollow(hz);
   // And the worked-states / countries map tints follow the dial's band.
   workedOverlayFollowDial();
   // The SDR is what you hear: the radio's own dial is tracked, not shown.
@@ -17179,13 +17223,14 @@ function startJtcat(mode) {
     const dialLive = !!((cat && cat.connected) || (smartSdr && smartSdr.canTune && smartSdr.connected));
     if (dialLive && _jtcatExpectedDialHz > 0 && _currentFreqHz > 0 &&
         Math.abs(_currentFreqHz - _jtcatExpectedDialHz) > 2500) {
-      const dialMsg = 'TX blocked — the radio is on ' + (_currentFreqHz / 1e6).toFixed(3) +
-        ' MHz but JTCAT is set to ' + (_jtcatExpectedDialHz / 1e6).toFixed(3) +
-        ' MHz. Something retuned the rig mid-session (a spot click, scan, or the radio itself). ' +
-        'Click a band button in the JTCAT window to re-sync and TX will resume.';
+      const bandOf = (hz) => { const b = freqToBand(hz / 1e6); return b ? ` (${b})` : ''; };
+      const dialMsg = 'TX blocked — the radio is on ' + (_currentFreqHz / 1e6).toFixed(3) + ' MHz' + bandOf(_currentFreqHz) +
+        ' but JTCAT is set to ' + (_jtcatExpectedDialHz / 1e6).toFixed(3) + ' MHz' + bandOf(_jtcatExpectedDialHz) +
+        '. Something retuned the rig mid-session (a spot click, scan, or the radio itself). ' +
+        'Press "Follow the radio" to transmit where the radio is, or pick a band in the JTCAT window.';
       sendCatLog('[JTCAT] ' + dialMsg);
       if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
-        jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: dialMsg });
+        jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: dialMsg, followRadio: true });
       }
       // ...and on the ECHOCAT device: a web/phone-owned session was refused in silence.
       if (remoteServer && remoteServer.hasClient()) remoteServer.broadcastJtcatQsoState({ phase: 'error', error: dialMsg });
@@ -25225,6 +25270,8 @@ function connectRemote() {
     remoteJtcatQso = null;
     remoteJtcatBroadcastQso();
   });
+
+  remoteServer.on('jtcat-follow-radio', () => { jtcatFollowRadioNow('the ECHOCAT device'); });
 
   remoteServer.on('jtcat-skip-phase', async () => {
     if (!remoteJtcatQso || remoteJtcatQso.phase === 'done' || remoteJtcatQso.phase === 'idle') return;
@@ -40009,6 +40056,8 @@ app.whenReady().then(() => {
       win.webContents.send('open-settings-watchlist');
     }
   });
+
+  ipcMain.on('jtcat-follow-radio', () => { jtcatFollowRadioNow('the JTCAT window'); });
 
   ipcMain.on('jtcat-popout-skip-phase', async () => {
     if (!popoutJtcatQso || popoutJtcatQso.phase === 'done' || popoutJtcatQso.phase === 'idle') return;

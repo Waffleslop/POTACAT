@@ -1547,6 +1547,19 @@ function _applyPopoutTheme(payload) {
       // distinguishes it from the green success toast. (K3SBP 2026-05-05:
       // the retry-limit was previously only logged to console.)
       showJtcatErrorToast(data.error || 'TX stopped');
+      // The wrong-band refusal: one press moves JTCAT to where the radio is.
+      if (data.followRadio && window.api.jtcatFollowRadio) {
+        var fb = document.createElement('button');
+        fb.className = 'jp-toast-action';
+        fb.textContent = 'Follow the radio';
+        fb.addEventListener('click', function(e) {
+          e.stopPropagation();
+          window.api.jtcatFollowRadio();
+          qsoToast.classList.remove('visible');
+          qsoToast.classList.remove('error');
+        });
+        qsoToast.appendChild(fb);
+      }
       renderQsoTracker();
       return;
     } else {
@@ -3060,6 +3073,27 @@ function _applyPopoutTheme(payload) {
       else if (data.key === 'jtcatHoldTxFreq') { holdTxFreq = !!data.enabled; reflectHoldTx(); }
     });
   }
+
+  // Main moved JTCAT to the band the radio is on (a dial turned onto another
+  // band's FT8/FT4/FT2 dial, or "Follow the radio"). The radio is already
+  // there: mark the band, never tune (GitHub #115).
+  if (window.api.onJtcatBandFollow) window.api.onJtcatBandFollow(function(d) {
+    if (!d) return;
+    var khz = Number(d.freqKhz) || 0;
+    var btn = (d.band && document.querySelector('.jp-band-opt[data-band="' + d.band + '"]')) || null;
+    document.querySelectorAll('.jp-band-opt').forEach(function(b) { b.classList.remove('active'); });
+    if (btn) btn.classList.add('active');
+    bandSelectFollowActive();
+    decodeLog = [];
+    bandActivity.innerHTML = '<div class="jp-empty">Following the radio to ' + esc(d.band || ((khz / 1000).toFixed(3) + ' MHz')) + '...</div>';
+    myActivity.innerHTML = '<div class="jp-empty">No activity yet</div>';
+    markerLayer.clearLayers();
+    arcLayer.clearLayers();
+    stations = {};
+    qsoArcs = {};
+    if (myCallsign && myGrid && map) registerStation(myCallsign, myGrid);
+    if (btn && khz) window.api.saveSettings({ jtcatLastBandFreq: parseFloat(btn.dataset.freq) || khz });
+  });
 
   // Band buttons
   function selectBand(btn, save) {
