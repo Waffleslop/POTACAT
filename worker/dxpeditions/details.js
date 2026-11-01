@@ -352,6 +352,36 @@ export function extractArticle(html) {
 
 const DETAIL_ORDER = ['ng3k', 'dx-world', 'dxnews'];
 
+// QSL across sources: the first named manager, and a route flag set when ANY
+// source names it. NG3K's field often carries only the manager while the
+// article says "QSL via LoTW" (7P8EA: via HB9CCS, LoTW only in DX-World's text).
+export function mergeQsl(list) {
+  const qs = (list || []).filter(Boolean);
+  if (!qs.length) return null;
+  const raw = [...new Set(qs.map((q) => q.raw).filter(Boolean))].join('; ').slice(0, 300);
+  return {
+    via: (qs.find((q) => q.via) || {}).via || null,
+    lotw: qs.some((q) => q.lotw),
+    oqrs: qs.some((q) => q.oqrs),
+    direct: qs.some((q) => q.direct),
+    buro: qs.some((q) => q.buro),
+    raw,
+  };
+}
+
+// Where to check the log. Club Log's search page answers for any call
+// (https://clublog.org/logsearch/<CALL>, verified 2026-11-01), so it is only
+// offered when a source says the operation uses Club Log (OQRS or uploads).
+// An operation's own online log cannot be told apart from its home page, so
+// there is no 'own' guess: null.
+export function logLinkFor(call, qsl, notes) {
+  const text = `${(qsl && qsl.raw) || ''} ${notes || ''}`;
+  if (call && /\bClub ?Log\b/i.test(text)) {
+    return { logUrl: `https://clublog.org/logsearch/${encodeURIComponent(String(call).toUpperCase())}`, logSource: 'clublog' };
+  }
+  return { logUrl: null, logSource: null };
+}
+
 // Public fields for one record from its per-source parses. Scalars: first
 // source in DETAIL_ORDER that has a value. Lists: NG3K's if non-empty,
 // else the union of the articles'. Dates come as a pair from one source.
@@ -376,6 +406,8 @@ export function combineDetails(call, d) {
   const ent = byName || byCall;
   const bands = list('bands');
   const modes = list('modes');
+  const qsl = mergeQsl(srcs.map(([, v]) => v.qsl));
+  const notes = first('notes');
   return {
     entity: ent ? ent.entity : ngName,
     dxcc: ent ? ent.dxcc : null,
@@ -383,7 +415,8 @@ export function combineDetails(call, d) {
     start,
     end,
     datesFrom,
-    qsl: first('qsl'),
+    qsl,
+    ...logLinkFor(call, qsl, notes),
     website: first('website'),
     qrz: first('qrz'),
     iota: list('iota'),
@@ -392,6 +425,6 @@ export function combineDetails(call, d) {
     bands,
     modes,
     operators: list('operators'),
-    notes: first('notes'),
+    notes,
   };
 }
