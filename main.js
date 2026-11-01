@@ -33791,7 +33791,13 @@ function gatedSetTxPower(value, opts = {}) {
     }
   }
   if (!cat || !cat.connected) return false;
-  if (opts.rigType === 'rigctld') cat.setTxPower(actual / 100);
+  // Watts all the way to the codec, which converts on the backend's own
+  // scale. Main used to divide by 100 for rigctld while the codec multiplied
+  // readbacks by the model's maxPower: on a KX3 (15 W model, 110 W to Hamlib
+  // with a KXPA100) a WSPR restore set 11 W (profdbe 2026-10-31), and the
+  // external-tuner path, which passed no rigType, sent "L RFPOWER 10".
+  if (typeof cat.setTxPowerWatts === 'function') cat.setTxPowerWatts(actual);
+  else if (opts.rigType === 'rigctld') cat.setTxPower(actual / 100);
   else cat.setTxPower(actual);
   return true;
 }
