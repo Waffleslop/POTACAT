@@ -15125,8 +15125,26 @@ function routeLogForSpot(spot) {
   });
 }
 
+// The Log QSO form follows the radio (hoogskev 2026-10-31: it kept the
+// frequency it opened with). The ECHOCAT Web rule (logSheetFollowRadio): a
+// form opened from a spot holds the spot's frequency until the radio arrives
+// within 500 Hz of it, then follows the dial; anything typed in the box wins.
+const logFreqFollow = { pinnedKhz: 0, typed: false };
+function logFreqFollowRadio(hz) {
+  if (!logDialog.open || logFreqFollow.typed || !(hz > 0)) return;
+  const khz = hz / 1000;
+  if (logFreqFollow.pinnedKhz && Math.abs(khz - logFreqFollow.pinnedKhz) < 0.5) logFreqFollow.pinnedKhz = 0;
+  if (!logFreqFollow.pinnedKhz) logFrequency.value = khz.toFixed(1);
+}
+logFrequency.addEventListener('input', () => { logFreqFollow.typed = true; });
+window.api.onCatFrequency((hz) => { logFreqFollowRadio(hz); });
+
 function openLogPopup(spot) {
   currentLogSpot = spot;
+  logFreqFollow.typed = false;
+  logFreqFollow.pinnedKhz = parseFloat(spot.frequency) || 0;
+  const nowKhz = radioFreqKhzExact || radioFreqKhz;
+  if (nowKhz && logFreqFollow.pinnedKhz && Math.abs(nowKhz - logFreqFollow.pinnedKhz) < 0.5) logFreqFollow.pinnedKhz = 0;
   logCallsign.value = spot.callsign || '';
   const logQrz = qrzData.get(JtcatParser.baseCall((spot.callsign || '').toUpperCase()));
   logOpName.value = logQrz ? [cleanQrzName(logQrz.nickname) || cleanQrzName(logQrz.fname), cleanQrzName(logQrz.name)].filter(Boolean).join(' ') : '';
