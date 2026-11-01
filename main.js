@@ -28564,6 +28564,7 @@ function workedOverlayState() {
   return {
     states: settings.workedOverlayStates === true,
     countries: settings.workedOverlayCountries === true,
+    prefixes: settings.workedOverlayPrefixes === true, // F9: DXCC prefix labels (artemisstiles)
     scope: o.scope, confirmedOnly: o.confirmedOnly, band: o.band, mode: o.mode,
   };
 }
@@ -28592,7 +28593,7 @@ function workedOverlayWebPayload() {
   const ents = ctyDb ? ctyDb.entities.map((e) => e.name) : Object.keys((workedRoster && workedRoster.entities) || {});
   for (const n of ents) { const s = WorkedRoster.status(workedRoster, 'entity', n, opts); if (s !== 'none') countries[n] = s; }
   return {
-    show: { states: st.states, countries: st.countries },
+    show: { states: st.states, countries: st.countries, prefixes: st.prefixes },
     scope: st.scope, band: st.band, mode: st.mode, confirmedOnly: st.confirmedOnly,
     states, countries,
     counts: {
@@ -28618,12 +28619,13 @@ function applyWorkedOverlayPatch(patch, origin) {
   let changed = false;
   if (typeof p.states === 'boolean' && settings.workedOverlayStates !== p.states) { settings.workedOverlayStates = p.states; changed = true; }
   if (typeof p.countries === 'boolean' && settings.workedOverlayCountries !== p.countries) { settings.workedOverlayCountries = p.countries; changed = true; }
+  if (typeof p.prefixes === 'boolean' && settings.workedOverlayPrefixes !== p.prefixes) { settings.workedOverlayPrefixes = p.prefixes; changed = true; }
   if (typeof p.scope === 'string' && WorkedRoster.SCOPES.includes(p.scope) && settings.workedOverlayScope !== p.scope) { settings.workedOverlayScope = p.scope; changed = true; }
   if (typeof p.confirmedOnly === 'boolean' && settings.workedOverlayConfirmedOnly !== p.confirmedOnly) { settings.workedOverlayConfirmedOnly = p.confirmedOnly; changed = true; }
   if (!changed) { broadcastWorkedOverlayState(true); return; }
   try { saveSettings(settings); } catch (err) { console.error('[Map] worked overlay settings save failed:', err.message); }
   const st = workedOverlayState();
-  sendCatLog(`[Map] Worked overlay: states ${st.states ? 'on' : 'off'}, countries ${st.countries ? 'on' : 'off'}, scope ${st.scope}${st.confirmedOnly ? ' (confirmed only)' : ''}${origin ? ' — ' + origin : ''}`);
+  sendCatLog(`[Map] Worked overlay: states ${st.states ? 'on' : 'off'}, countries ${st.countries ? 'on' : 'off'}, prefixes ${st.prefixes ? 'on' : 'off'}, scope ${st.scope}${st.confirmedOnly ? ' (confirmed only)' : ''}${origin ? ' — ' + origin : ''}`);
   broadcastWorkedOverlayState(true);
 }
 
@@ -28644,7 +28646,12 @@ function workedOverlayGeo() {
   const points = ents
     .filter((e) => !covered.has(e.name) && Number.isFinite(e.lat) && Number.isFinite(e.lon))
     .map((e) => ({ name: e.name, lat: e.lat, lon: e.lon }));
-  _workedOverlayGeo = { states, countries, points, entityNames: ents.map((e) => e.name) };
+  // Every DXCC entity's main prefix at cty.dat's position for it: the
+  // Prefixes labels (F9) on every map (artemisstiles 2026-10-31).
+  const prefixLabels = ents
+    .filter((e) => e.prefix && Number.isFinite(e.lat) && Number.isFinite(e.lon))
+    .map((e) => ({ p: e.prefix, n: e.name, lat: e.lat, lon: e.lon }));
+  _workedOverlayGeo = { states, countries, points, entityNames: ents.map((e) => e.name), prefixLabels };
   return _workedOverlayGeo;
 }
 

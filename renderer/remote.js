@@ -152,7 +152,7 @@
   };
   function workedOverlayReceive(msg) {
     workedOverlayLast = {
-      states: !!(msg.show && msg.show.states), countries: !!(msg.show && msg.show.countries),
+      states: !!(msg.show && msg.show.states), countries: !!(msg.show && msg.show.countries), prefixes: !!(msg.show && msg.show.prefixes),
       scope: msg.scope || 'band-mode', band: msg.band || '', mode: msg.mode || '', confirmedOnly: !!msg.confirmedOnly,
       stateMap: msg.states || {}, countryMap: msg.countries || {}, counts: msg.counts || null,
     };
