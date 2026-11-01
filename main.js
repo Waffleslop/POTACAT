@@ -5302,7 +5302,9 @@ const sleepMs = (ms) => new Promise(r => setTimeout(r, ms));
 // K3SBP's radio sat at 1 W for weeks after a restore that was sent, not seen).
 function stationSetupReconcilePower(watts) {
   const m = settings.setupTxPowerRestore;
-  if (!m || _stationSetupTxTest || _stationSetupTxBusy) return;
+  // Not while a low-power carrier is running on purpose (the test, or an
+  // external RF-sense tune): its own low readback is not a lost restore.
+  if (!m || _stationSetupTxTest || _stationSetupTxBusy || _externalAtuActive) return;
   if (m.rigId && m.rigId !== settings.activeRigId) return;
   if (watts > m.testWatts + 0.5) {
     delete settings.setupTxPowerRestore;
@@ -5314,7 +5316,7 @@ function stationSetupReconcilePower(watts) {
   if (_setupPowerRestoreAttempt >= 3 || now - (m.lastAttemptAt || 0) < 10000) return;
   _setupPowerRestoreAttempt++;
   m.lastAttemptAt = now;
-  sendCatLog(`[Setup] radio still at ${watts} W after a test transmit — setting it back to ${m.watts} W (attempt ${_setupPowerRestoreAttempt} of 3)`);
+  sendCatLog(`[Setup] radio still at ${watts} W after ${m.reason === 'external-atu' ? 'an external tuner carrier' : 'a test transmit'} — setting it back to ${m.watts} W (attempt ${_setupPowerRestoreAttempt} of 3)`);
   try { applyRigControl({ action: 'set-tx-power', value: m.watts }, 'setup'); } catch {}
 }
 
@@ -23559,8 +23561,19 @@ function connectRemote() {
     _externalAtuActive = true;
     _externalAtuCancel = false;
     const restoreMode = _currentMode || 'USB';
-    const restorePower = _currentTxPower > 0 ? _currentTxPower : (settings.defaultPower || 100);
+    const powerKnown = _currentTxPower > 0;
+    const restorePower = powerKnown ? _currentTxPower : (settings.defaultPower || 100);
     const carrierMode = EXTERNAL_ATU_CARRIER_MODE;
+    // Remembered BEFORE the power is lowered, the Station Setup test way: a
+    // restore the radio misses (it was still in its TX tail, or the app
+    // closed) is repaired by stationSetupReconcilePower on the next power
+    // report (GitHub #111, df1vb: the tune power stayed after tuning).
+    const lowering = restorePower > watts + 0.5;
+    if (lowering) {
+      settings.setupTxPowerRestore = { watts: restorePower, testWatts: watts, rigId: activeRig.id, at: Date.now(), reason: 'external-atu' };
+      _setupPowerRestoreAttempt = 0;
+      try { saveSettings(settings); } catch {}
+    }
     sendCatLog(`[ExtATU] Firing ${watts} W ${carrierMode} carrier for ${seconds}s (mode ${restoreMode} → ${carrierMode}, power ${restorePower}W → ${watts}W)`);
     if (win && !win.isDestroyed()) win.webContents.send('external-atu-start', { seconds });
     try {
@@ -23581,15 +23594,34 @@ function connectRemote() {
       try { gatedSetTransmit(false); } catch {}
       sendCatLog(`[ExtATU] ${err.message}`);
     } finally {
-      await new Promise(r => setTimeout(r, 200));
+      // Let the radio leave its TX tail before it is asked anything.
+      await new Promise(r => setTimeout(r, 500));
       try {
         if (cat.setModeOnly) cat.setModeOnly(restoreMode, _currentFreqHz);
         else if (cat.setMode) cat.setMode(restoreMode);
-        gatedSetTxPower(restorePower);
       } catch {}
+      // Restore the power and believe only the radio's readback; send again
+      // twice if it does not confirm.
+      let confirmed = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const sentAt = Date.now();
+        try { gatedSetTxPower(restorePower); } catch {}
+        if (!lowering) break;
+        confirmed = await waitForPowerReadback(sentAt, (w) => w > watts + 0.5, 2500);
+        if (confirmed != null) break;
+        if (attempt < 3) sendCatLog(`[ExtATU] no power readback yet after restoring ${restorePower} W — sending it again (${attempt + 1} of 3)`);
+      }
       _externalAtuActive = false;
       _externalAtuCancel = false;
-      sendCatLog('[ExtATU] Tune complete — restored mode and power');
+      if (lowering && confirmed != null) {
+        delete settings.setupTxPowerRestore;
+        try { saveSettings(settings); } catch {}
+        sendCatLog(`[ExtATU] Tune complete — mode ${restoreMode}, radio confirms ${confirmed} W`);
+      } else if (lowering) {
+        sendCatLog(`[ExtATU] Tune complete — mode restored; set power back to ${restorePower} W but the radio has not confirmed it${powerKnown ? '' : ' (the power before the tune was never read, so this is your Default power)'}. It is set again when the radio next reports its power.`);
+      } else {
+        sendCatLog('[ExtATU] Tune complete — restored mode and power');
+      }
       if (win && !win.isDestroyed()) win.webContents.send('external-atu-complete');
     }
     return true;
