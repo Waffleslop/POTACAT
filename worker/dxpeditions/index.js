@@ -22,6 +22,11 @@
 //
 // CORS: open (`*`). Output is public DXpedition info; no auth needed.
 
+import {
+  isBareCall, parseNg3kItem, parseArticle, extractArticle, combineDetails,
+} from './details.js';
+import { classifyOperations, findAliases } from './contests.js';
+
 const KV_KEY = 'feed:v1';
 const SCHEMA_VERSION = '1';
 const FEED_TTL_DAYS = 60; // drop records this many days after first seen
@@ -34,17 +39,16 @@ const BLOCKLIST = new Set([
   'ITU', 'WPX', 'ARRL', 'YOTA', 'OQRS', 'LOTW', 'EQSL', 'OPDX', 'TDDX',
 ]);
 
-// Bare callsign shapes:
-//   1) Letter[Letter|Digit] Digit [Letter]{1,4}    — K3SBP, M0CFW, DL2SBY, WF2A
-//   2) Digit Letter[Letter|Digit] [Digit] [Letter]{1,4}
-//      — 3G0Z, 3B9KW, 4U1ITU, 9V1AB
-const BARE_CALL_RE_1 = /^[A-Z][A-Z0-9]?\d[A-Z]{1,4}$/;
-const BARE_CALL_RE_2 = /^\d[A-Z][A-Z0-9]?\d?[A-Z]{1,4}$/;
-
-function isBareCall(s) {
-  if (!s || s.length < 3 || s.length > 8) return false;
-  return BARE_CALL_RE_1.test(s) || BARE_CALL_RE_2.test(s);
-}
+// Article pages fetched per cron run (new posts first, then backfill of
+// records stored before structured details existed). One fetch serves every
+// call in a multi-call post.
+const ARTICLE_FETCH_BUDGET = 30;
+const ARTICLE_MAX_TRIES = 3;
+// DX-World's host serves a captcha to Cloudflare egress for article pages
+// (only /feed/ gets through), so articles are fetched by the POTACAT Cloud
+// API from the droplet. Needs the ARTICLE_PROXY_TOKEN secret, which matches
+// DXP_ARTICLE_TOKEN in the droplet .env.
+const ARTICLE_PROXY = 'https://api.potacat.com/v1/dxpeditions/article';
 
 // ---------- Generic RSS parser ----------
 
@@ -55,7 +59,15 @@ async function fetchUrl(url) {
     redirect: 'follow',
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.text();
+  const body = await res.text();
+  // Bot walls answer 2xx with an HTML page (DX-World's host serves a
+  // SiteGround captcha with HTTP 202 to Cloudflare egress IPs). Without
+  // this check that parses as "0 items" and looks like a quiet news day.
+  if (!/<rss\b|<feed\b|<rdf:RDF\b/i.test(body.slice(0, 2000))) {
+    const ct = res.headers.get('content-type') || '?';
+    throw new Error(`non-RSS response (HTTP ${res.status}, ${ct.split(';')[0]})`);
+  }
+  return body;
 }
 
 // Tiny regex-based RSS parser. Avoids pulling a real XML parser into the
@@ -141,7 +153,9 @@ function extractCallsigns(title) {
 const SOURCES = [
   {
     name: 'dx-world',
-    url: 'https://dx-world.net/feed/',
+    // www. host: the bare domain intermittently serves a captcha to
+    // Cloudflare egress; www. returns the feed.
+    url: 'https://www.dx-world.net/feed/',
     extract: (item) => extractCallsigns(item.title),
   },
   {
@@ -177,20 +191,39 @@ function normalize(items, source, now) {
     const calls = source.extract(it);
     if (!calls.length) continue;
     const published = parseDate(it.pubDate) || now;
+    // NG3K items carry no pubDate; `now` above is only a first-seen stand-in
+    // and must not count as "newer" when merging (see headlineRank).
     // Trim down the description: strip HTML tags / collapse whitespace /
     // cap at ~800 chars so we don't store full blog posts (DX-World runs
     // 1-2KB of post body per item). Tooltips and inline note rendering
     // happen client-side; raw structured data is what we owe them.
     const description = compactDescription(it.description);
+    // Per-source structured parse. NG3K's description is fielded; news
+    // items get a first pass over the RSS excerpt, replaced by the full
+    // article once enrichFromArticles fetches it.
+    const detail = source.name === 'ng3k'
+      ? { ...parseNg3kItem(it.description, it.link), parsedFrom: 'feed' }
+      : {
+        ...parseArticle(description, [], new Date(published).toISOString()),
+        articleLink: it.link || '',
+        parsedFrom: 'excerpt',
+      };
+    // Bare calls split out of a slash form ("WE9G" from "3A/WE9G") exist
+    // for spot matching; aliasOf points at the form that says where.
+    const slashForms = calls.filter((c) => c.includes('/'));
     for (const call of calls) {
+      const aliasOf = call.includes('/') ? null : slashForms.find((f) => f.split('/').includes(call)) || null;
       out.push({
         call,
+        aliasOf,
         title: it.title,
         description,
         link: it.link || '',
         publishedAt: new Date(published).toISOString(),
         source: source.name,
+        titleSource: source.name,
         firstSeen: now,
+        _d: { [source.name]: detail },
       });
     }
   }
@@ -210,6 +243,16 @@ function parseDate(s) {
   if (!s) return null;
   const t = Date.parse(s);
   return Number.isFinite(t) ? t : null;
+}
+
+// Which record's headline (title/link/publishedAt) should a merged record
+// carry. NG3K is a calendar, not news, and has no pubDate, so its headline
+// only stands in when no news source covers the call. Records written
+// before titleSource existed are recognised by NG3K's " -- " title shape.
+function headlineRank(r) {
+  const src = r.titleSource || (/ -- /.test(r.title || '') ? 'ng3k' : 'news');
+  if (src === 'ng3k') return -1;
+  return Date.parse(r.publishedAt) || 0;
 }
 
 // Merge new records with existing KV state. Preserves firstSeen of records
@@ -234,36 +277,153 @@ function mergeWithExisting(existing, fresh, now) {
     // Merge source list; freshest publishedAt wins for the headline fields.
     const sources = new Set(String(prev.source || '').split(',').filter(Boolean));
     sources.add(r.source);
-    const prevPub = Date.parse(prev.publishedAt) || 0;
-    const currPub = Date.parse(r.publishedAt) || 0;
-    const newer = currPub > prevPub ? r : prev;
+    const rankPrev = headlineRank(prev);
+    const rankCurr = headlineRank(r);
+    // Two NG3K headlines: take the fresh one (its dates may have moved).
+    const newer = rankCurr > rankPrev || (rankCurr === -1 && rankPrev === -1) ? r : prev;
     byCall.set(r.call, {
       ...prev,
       title: newer.title,
-      // Prefer the fresh fetch's description: prev may be from an older
-      // schema version (no description) or a stale CDN cache. Falling
-      // back to prev only when this run's parse came up empty.
-      description: r.description || prev.description || '',
+      // Description travels with the headline so title and body describe
+      // the same story; fall back to whichever side has one.
+      description: newer.description || r.description || prev.description || '',
       link: newer.link,
       publishedAt: newer.publishedAt,
+      titleSource: newer.titleSource || (headlineRank(newer) === -1 ? 'ng3k' : ''),
+      _d: mergeDetails(prev._d, r._d),
+      aliasOf: r.aliasOf !== undefined ? r.aliasOf : (prev.aliasOf || null),
       source: [...sources].sort().join(','),
     });
   }
+  // Past the TTL a record survives only while its operation is still
+  // ahead or on the air (NG3K lists some months out).
   const cutoff = now - FEED_TTL_DAYS * 24 * 3600 * 1000;
+  const today = new Date(now).toISOString().slice(0, 10);
   return [...byCall.values()]
-    .filter((r) => r.firstSeen >= cutoff)
+    .filter((r) => {
+      if (r.firstSeen >= cutoff) return true;
+      const { end } = combineDetails(r.aliasOf || r.call, r._d);
+      return !!end && end >= today;
+    })
     .sort((a, b) => b.firstSeen - a.firstSeen);
+}
+
+// Per-source details: a fresh parse replaces the stored one, except that
+// a full-article parse of the same article beats a fresh excerpt parse.
+function mergeDetails(prev, fresh) {
+  const out = { ...(prev || {}) };
+  for (const [src, d] of Object.entries(fresh || {})) {
+    const p = out[src];
+    if (p && p.parsedFrom === 'article' && d.parsedFrom !== 'article' && p.articleLink === d.articleLink) continue;
+    out[src] = d;
+  }
+  return out;
+}
+
+// ---------- Articles ----------
+
+const NEWS_HOSTS = { 'dx-world.net': 'dx-world', 'dxnews.com': 'dxnews' };
+
+function newsSourceOf(link) {
+  try {
+    return NEWS_HOSTS[new URL(link).hostname.replace(/^www\./, '')] || null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchArticle(url, env) {
+  const token = env && env.ARTICLE_PROXY_TOKEN;
+  if (!token) throw new Error('ARTICLE_PROXY_TOKEN not set');
+  const res = await fetch(`${ARTICLE_PROXY}?url=${encodeURIComponent(url)}`, {
+    headers: { 'User-Agent': USER_AGENT, 'X-DXP-Token': token },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const html = await res.text();
+  if (!/entry-content|<article\b/i.test(html)) throw new Error('no article body (captcha?)');
+  return extractArticle(html);
+}
+
+// Replace excerpt parses with full-article parses, within the fetch
+// budget. Mutates records. Returns { fetched, failed }.
+async function enrichFromArticles(records, env) {
+  let budget = ARTICLE_FETCH_BUDGET;
+  let fetched = 0;
+  let failed = 0;
+  const cache = new Map();
+  const failedLinks = new Set(); // one failure per article per run, not per call
+  // Records stored before details existed: seed a slot from the headline
+  // link so they get backfilled too.
+  for (const r of records) {
+    r._d = r._d || {};
+    const src = newsSourceOf(r.link);
+    if (src && !r._d[src]) r._d[src] = { articleLink: r.link, parsedFrom: 'none' };
+  }
+  for (const r of records) {
+    for (const src of Object.values(NEWS_HOSTS)) {
+      const d = r._d[src];
+      if (!d || d.parsedFrom === 'article' || !d.articleLink) continue;
+      // articleFails, not the old articleTries: tries spent while every
+      // direct fetch hit the captcha don't count against the article.
+      if ((d.articleFails || 0) >= ARTICLE_MAX_TRIES || failedLinks.has(d.articleLink)) continue;
+      let parsed = cache.get(d.articleLink);
+      if (!parsed) {
+        if (budget <= 0) continue;
+        budget--;
+        try {
+          const { text, hrefs } = await fetchArticle(d.articleLink, env);
+          parsed = { ...parseArticle(text, hrefs, r.publishedAt), articleLink: d.articleLink, parsedFrom: 'article' };
+          fetched++;
+        } catch {
+          failed++;
+          failedLinks.add(d.articleLink);
+          r._d[src] = { ...d, articleFails: (d.articleFails || 0) + 1 };
+          continue;
+        }
+        cache.set(d.articleLink, parsed);
+      }
+      r._d[src] = parsed;
+    }
+  }
+  return { fetched, failed };
 }
 
 // ---------- Output ----------
 
+// Feed-wide labels, worked out over every record at output time so records
+// stored before a rule existed get it too:
+//   aliasOf  the stored value, else a bare home call that sits beside a slash
+//            call from the same announcement (K0CD beside FS/K0CD)
+//   kind     'contest' | 'dxpedition', with contest (name or null) and viaCall
+//            (the announcement that named this contest call). An alias takes
+//            its parent's label.
+// Rules are the desktop's (contests.js, vendored) so app and feed agree.
+function annotate(records) {
+  const aliases = findAliases(records);
+  const kinds = classifyOperations(records);
+  return (r) => {
+    const aliasOf = aliases.get(String(r.call).toUpperCase()) || r.aliasOf || null;
+    const k = kinds.get(String(aliasOf || r.call).toUpperCase()) || { kind: 'dxpedition', contest: null };
+    return { aliasOf, kind: k.kind, contest: k.contest || null, viaCall: k.viaCall || null };
+  };
+}
+
+// Public shape of a record: stored fields minus internals, plus the
+// feed-wide labels and the combined structured details.
+function publicRecord(r, label) {
+  const { _d, titleSource, ...rest } = r;
+  const l = label(r);
+  return { ...rest, ...l, ...combineDetails(l.aliasOf || r.call, _d) };
+}
+
 function toJson(state) {
+  const label = annotate(state.records);
   return JSON.stringify({
     version: SCHEMA_VERSION,
     generated: new Date(state.generatedAt || Date.now()).toISOString(),
     count: state.records.length,
     sources: state.sources || {},
-    records: state.records,
+    records: state.records.map((r) => publicRecord(r, label)),
   });
 }
 
@@ -279,9 +439,12 @@ function toXml(state) {
     '<?xml version="1.0" encoding="UTF-8"?>',
     `<dxpeditions version="${SCHEMA_VERSION}" generated="${esc(new Date(state.generatedAt || Date.now()).toISOString())}" count="${state.records.length}">`,
   ];
-  for (const r of state.records) {
+  const label = annotate(state.records);
+  for (const rec of state.records) {
+    const r = publicRecord(rec, label);
     lines.push(
-      `  <op call="${esc(r.call)}" published="${esc(r.publishedAt)}" firstSeen="${esc(new Date(r.firstSeen).toISOString())}" source="${esc(r.source)}">`,
+      `  <op call="${esc(r.call)}" published="${esc(r.publishedAt)}" firstSeen="${esc(new Date(r.firstSeen).toISOString())}" source="${esc(r.source)}"`
+        + ` entity="${esc(r.entity)}" dxcc="${esc(r.dxcc)}" kind="${esc(r.kind)}" contest="${esc(r.contest)}" viaCall="${esc(r.viaCall)}" aliasOf="${esc(r.aliasOf)}" start="${esc(r.start)}" end="${esc(r.end)}">`,
       `    <title>${esc(r.title)}</title>`,
       `    <link>${esc(r.link)}</link>`,
       '  </op>',
@@ -311,6 +474,8 @@ async function writeState(env, state) {
 
 // ---------- HTTP handler ----------
 
+const SPOTS_API = 'https://api.potacat.com/v1/dxpeditions/spots';
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET',
@@ -321,6 +486,17 @@ const worker = {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null, { headers: CORS });
     if (request.method !== 'GET') return new Response('Method Not Allowed', { status: 405 });
+
+    // Spot numbers live on the POTACAT Cloud API (its on-air collector);
+    // served here so the website has one host for everything DXpedition.
+    const spots = /^\/spots(\.json|\/[^/]+\.json)$/.exec(new URL(request.url).pathname);
+    if (spots) {
+      const res = await fetch(`${SPOTS_API}${spots[1]}`, { cf: { cacheTtl: 60, cacheEverything: true } });
+      return new Response(res.body, {
+        status: res.status,
+        headers: { ...CORS, 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'public, max-age=60' },
+      });
+    }
 
     const url = new URL(request.url);
     const state = await readState(env);
@@ -350,6 +526,8 @@ const worker = {
           lastFetchedAt: v.lastFetchedAt ? new Date(v.lastFetchedAt).toISOString() : null,
           lastError: v.lastError || null,
           lastCount: v.lastCount || 0,
+          lastOkAt: v.lastOkAt ? new Date(v.lastOkAt).toISOString() : null,
+          consecutiveFailures: v.consecutiveFailures || 0,
         };
       }
       return new Response(
@@ -387,9 +565,12 @@ const worker = {
       try {
         const xml = await fetchUrl(src.url);
         const items = parseRss(xml);
+        if (!items.length) throw new Error('feed parsed but held no items');
         const fresh = normalize(items, src, now);
         allFresh.push(...fresh);
-        sources[src.name] = { lastFetchedAt: now, lastError: '', lastCount: fresh.length };
+        sources[src.name] = {
+          lastFetchedAt: now, lastOkAt: now, lastError: '', lastCount: fresh.length, consecutiveFailures: 0,
+        };
         anyOk = true;
       } catch (err) {
         const prevSrc = sources[src.name] || {};
@@ -397,6 +578,8 @@ const worker = {
           lastFetchedAt: now,
           lastError: String(err && err.message ? err.message : err),
           lastCount: prevSrc.lastCount || 0,
+          lastOkAt: prevSrc.lastOkAt || 0,
+          consecutiveFailures: (prevSrc.consecutiveFailures || 0) + 1,
         };
       }
     }
@@ -410,12 +593,19 @@ const worker = {
       : '';
 
     const merged = anyOk ? mergeWithExisting(prev.records, allFresh, now) : (prev.records || []);
+    let articles = { fetched: 0, failed: 0 };
+    try {
+      articles = await enrichFromArticles(merged, env);
+    } catch (err) {
+      articles.error = String(err && err.message ? err.message : err);
+    }
     await writeState(env, {
       records: merged,
       generatedAt: anyOk ? now : (prev.generatedAt || 0),
       lastFetchedAt: now,
       lastError: topError,
       sources,
+      articles,
     });
   },
 
