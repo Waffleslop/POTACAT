@@ -302,4 +302,29 @@ test('a preamp ladder is a step in a preset, offered instead of the switch (N0KA
   assert.ok(/return !\(f\.notCap && caps\[f\.notCap\]\);/.test(app), 'and the same availability rule');
 });
 
+console.log('rig-presets: a stray USB reading while FT8 runs (jholler IC-7300)');
+test('a digital engine running holds the digital preset when the radio reports USB', () => {
+  const d = RP.decideModePreset({ ...base, mode: 'USB', prevFamily: 'digital', prevMatchId: 'dig', digitalEngine: true });
+  assert.strictEqual(d.reason, 'digital-engine');
+  assert.strictEqual(d.apply, null, 'the SSB preset (100 W) is not applied');
+  assert.strictEqual(d.family, 'digital', 'the family is not advanced');
+  assert.strictEqual(d.matchId, 'dig');
+});
+test('with the engine stopped, the same USB reading applies the SSB preset as before', () => {
+  const d = RP.decideModePreset({ ...base, mode: 'USB', prevFamily: 'digital', prevMatchId: 'dig', digitalEngine: false });
+  assert.strictEqual(d.reason, 'apply');
+  assert.strictEqual(d.apply.id, 'voice');
+});
+test('a digital engine never blocks moving INTO the digital preset', () => {
+  const d = RP.decideModePreset({ ...base, mode: 'USB-D', prevFamily: 'ssb', prevMatchId: 'voice', digitalEngine: true });
+  assert.strictEqual(d.reason, 'apply');
+  assert.strictEqual(d.apply.id, 'dig');
+});
+test('main passes the engine state and logs a held reading with the time since the last transmission', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.ok(/digitalEngine: !!ft8Engine,/.test(main));
+  assert.ok(/if \(d\.reason === 'digital-engine'\) \{[\s\S]{0,700}s after the last transmission[\s\S]{0,300}no SSB power was applied/.test(main));
+  assert.ok(/ft8Engine\.on\('tx-end', \(\) => \{\s*console\.log\('\[JTCAT\] TX end — PTT off'\);\s*_jtcatLastTxEndMs = Date\.now\(\);/.test(main));
+});
+
 console.log(`\nrig-presets: ${passed} passed`);

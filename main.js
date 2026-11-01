@@ -3913,6 +3913,9 @@ function applyRigPreset(idOrPreset, origin, why) {
   return true;
 }
 
+let _rigPresetHeldMode = '';
+let _jtcatLastTxEndMs = 0;
+
 function rigPresetTransmitting() {
   if (_remoteTxState) return true;
   if (cat && cat._transmitting) return true;
@@ -3944,9 +3947,22 @@ function rigPresetOnMode(mode) {
   _rigPresetLastBand = rigPresetBand();
   const d = RigPresets.decideModePreset({
     mode: rigPresetModeFor(mode), band: _rigPresetLastBand, prevFamily: _rigPresetFamily, prevMatchId: _rigPresetMatchId,
-    transmitting: rigPresetTransmitting(), remote: isRemoteMode(),
+    transmitting: rigPresetTransmitting(), remote: isRemoteMode(), digitalEngine: !!ft8Engine,
     presets: settings.rigPresets, byMode: settings.rigPresetByMode, rules: settings.rigPresetRules, rigId: settings.activeRigId || null,
   });
+  if (d.reason === 'digital-engine') {
+    // Say it once per stray reading, with how long after our last
+    // transmission it came: the line a bug report needs to name what moved
+    // the radio out of DATA mode.
+    const m = String(mode || '').toUpperCase();
+    if (m !== _rigPresetHeldMode) {
+      _rigPresetHeldMode = m;
+      const since = _jtcatLastTxEndMs ? `${((Date.now() - _jtcatLastTxEndMs) / 1000).toFixed(1)} s after the last transmission` : 'before any transmission';
+      sendCatLog(`[Rig preset] The radio reported ${m || 'a non-digital mode'} while ${ft8Engine && ft8Engine._mode || 'JTCAT'} is running (${since}). The digital preset stays; no SSB power was applied.`);
+    }
+    return;
+  }
+  _rigPresetHeldMode = '';
   if (d.reason === 'apply') {
     if (_rigPresetPending && _rigPresetPending.matchId === d.matchId) return; // already settling
     rigPresetClearPending();
@@ -17293,6 +17309,7 @@ function startJtcat(mode) {
 
 	  ft8Engine.on('tx-end', () => {
 	    console.log('[JTCAT] TX end — PTT off');
+	    _jtcatLastTxEndMs = Date.now();
 	    clearJtcatTxFailsafe();
 	    clearJtcatIcomHardRelease();
 	    // If Mercury owns the radio, this tx-end is unwinding a JTCAT TX the
