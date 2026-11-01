@@ -320,6 +320,171 @@ test('FT-991A: the command table shows the resolved commands, Split Off and the 
 });
 
 // =========================================================================
+// Indexed-width Yaesus: a tune's width is looked up for the mode the tune
+// sets. The width goes out 100-200 ms after the mode with polling stopped, so
+// the codec's last parsed mode was still the old one and a USB -> CW tune
+// indexed 500 Hz in the SSB chart (SH0102; = 100 Hz in CW on the FTDX
+// generation). Found on an FT-710, 2026-10-22.
+console.log('\n=== Indexed-width Yaesu: a tune\'s width follows the mode it sets ===');
+
+// Drive RigController.tune() with its timers fired in order, synchronously.
+function tuneWrites(model, fromMode, freqHz, mode, filterWidth) {
+  const { RigController } = require('../lib/rig-controller');
+  const { EventEmitter } = require('events');
+  const writes = [];
+  const t = new EventEmitter(); t.connect = () => {}; t.disconnect = () => {};
+  t.write = (d) => writes.push(String(d));
+  const codec = new KenwoodCodec(model, (d) => t.write(d));
+  codec._lastParsedMode = fromMode;
+  const rc = new RigController(model, t, codec);
+  rc.connected = true;
+  rc._lastParsedMode = fromMode;
+  rc._startPolling = () => {}; rc._stopPolling = () => {};
+  const timers = [];
+  const realSetTimeout = global.setTimeout;
+  global.setTimeout = (fn, ms) => { timers.push({ fn, ms }); return {}; };
+  try { rc.tune(freqHz, mode, { filterWidth }); } finally { global.setTimeout = realSetTimeout; }
+  timers.sort((a, b) => a.ms - b.ms).forEach((x) => x.fn());
+  return writes;
+}
+
+// What a width click sends while the radio reports `mode`.
+function widthClickWrites(model, mode, hz) {
+  const { codec, writes } = captureWrites(KenwoodCodec, model);
+  codec._lastParsedMode = mode;
+  codec.setFilterWidth(hz);
+  return writes;
+}
+
+test('Indexed Yaesu: a USB -> CW tune indexes its width in the CW chart, every model', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const indexed = Object.entries(RIG_MODELS)
+    .filter(([, m]) => m.protocol === 'kenwood' && m.caps && m.caps.filterType === 'indexed');
+  assert.ok(indexed.length > 0);
+  for (const [name, model] of indexed) {
+    const sh = tuneWrites(model, 'USB', 14030000, 'CW', 500).filter((w) => /^SH/.test(w));
+    assert.deepStrictEqual(sh, widthClickWrites(model, 'CW', 500), name);
+  }
+});
+
+test('Indexed Yaesu: an FT8 tune from USB uses the DATA chart (FT8 goes out as DATA-U)', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const model = RIG_MODELS['FTDX10'];
+  const sh = tuneWrites(model, 'USB', 14074000, 'FT8', 3000).filter((w) => /^SH/.test(w));
+  assert.deepStrictEqual(sh, widthClickWrites(model, 'DIGU', 3000));
+});
+
+test('Indexed Yaesu: a same-mode tune keeps indexing by the reported mode', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const model = RIG_MODELS['FTDX10'];
+  const sh = tuneWrites(model, 'CW', 14030000, 'CW', 500).filter((w) => /^SH/.test(w));
+  assert.deepStrictEqual(sh, widthClickWrites(model, 'CW', 500));
+});
+
+// =========================================================================
+// FT-710 against its CAT reference (2306-C) and the radio itself (W3MDT,
+// firmware MAIN 01-12, 2026-10-22/23/27; every value below was sent to the
+// radio and read back).
+console.log('\n=== KenwoodCodec (Yaesu FT-710) ===');
+
+test('FT-710: filter width is SH00nn from Table 3 (23 SSB widths, 21 for CW/DATA; RTTY uses the same 21)', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS['FT-710']);
+  codec._lastParsedMode = 'USB';
+  codec.setFilterWidth(300);    // 01
+  codec.setFilterWidth(2400);   // 13
+  codec.setFilterWidth(3000);   // 20 (19 = 2900 Hz on the FTDX chart)
+  codec.setFilterWidth(4000);   // 23
+  codec._lastParsedMode = 'CW';
+  codec.setFilterWidth(500);    // 10
+  codec.setFilterWidth(4000);   // 21
+  codec._lastParsedMode = 'DIGU';
+  codec.setFilterWidth(3000);   // 18 (16 = 2000 Hz on the FTDX chart)
+  codec._lastParsedMode = 'RTTY';
+  codec.setFilterWidth(500);    // 10
+  assert.deepStrictEqual(writes, ['SH0001;', 'SH0013;', 'SH0020;', 'SH0023;', 'SH0010;', 'SH0021;', 'SH0018;', 'SH0010;']);
+});
+
+test('FT-710: a USB -> CW tune sets the CW width in the CW chart', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const sh = tuneWrites(RIG_MODELS['FT-710'], 'USB', 14030000, 'CW', 500).filter((w) => /^SH/.test(w));
+  assert.deepStrictEqual(sh, ['SH0010;']);
+});
+
+test('FT-710: AGC OFF/FAST/MID/SLOW/AUTO are GT00-GT04, and AUTO is offered', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS['FT-710']);
+  for (const agc of ['off', 'fast', 'med', 'slow', 'auto']) codec.setAgc(agc);
+  assert.deepStrictEqual(writes, ['GT00;', 'GT01;', 'GT02;', 'GT03;', 'GT04;']);
+  assert.ok(RIG_MODELS['FT-710'].agcModes.includes('auto'));
+});
+
+test('FT-710: COMP on/off is PR01;/PR00; (the default PR1;/PR0; are reads there)', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS['FT-710']);
+  codec.setCompressor(true);
+  codec.setCompressor(false);
+  assert.deepStrictEqual(writes, ['PR01;', 'PR00;']);
+});
+
+test('FT-710: NB level is 0-10 (NL0000-NL0010); a 0-100 value clamps to 10', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const model = RIG_MODELS['FT-710'];
+  const { codec, writes } = captureWrites(KenwoodCodec, model);
+  for (const v of [0, 5, 10, 50]) codec.setNbLevel(v);
+  assert.deepStrictEqual(writes, ['NL0000;', 'NL0005;', 'NL0010;', 'NL0010;']);
+  assert.strictEqual(model.caps.nbLevel, true, 'NB level row shown');
+  assert.strictEqual(model.maxNbLevel, 10);
+});
+
+test('FT-710: TX power is 5-100 W (PC004; and PC101; are refused there)', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS['FT-710']);
+  for (const w of [3, 5, 100, 150]) codec.setTxPower(w);
+  assert.deepStrictEqual(writes, ['PC005;', 'PC005;', 'PC100;', 'PC100;']);
+});
+
+test('FT-710: MD0 answers 9/E/F read as RTTY, PSK and FM', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const { codec } = captureWrites(KenwoodCodec, RIG_MODELS['FT-710']);
+  const modes = [];
+  codec.on('mode', (m) => modes.push(m));
+  codec.onData('MD09;MD0E;MD0F;MD0C;MD03;');
+  assert.deepStrictEqual(modes, ['RTTY', 'PSK', 'FM', 'DIGU', 'CW']);
+});
+
+test('FT-710: the CW key note names the FT-710 PC KEYING menu, not the FT-891 one', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const notes = RIG_MODELS['FT-710'].notes.join('\n');
+  assert.ok(/CW SETTING -> MODE CW -> PC KEYING = DTR/.test(notes), notes);
+  assert.ok(!/USB Keying \(CW\)/.test(notes), 'USB Keying (CW) is an FT-891 menu');
+});
+
+test('FT-710: PSK is shown but never sent; a PSK width uses the DATA chart', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const model = RIG_MODELS['FT-710'];
+  const { codec, writes } = captureWrites(KenwoodCodec, model);
+  codec.onData('MD0E;');
+  assert.strictEqual(codec.resolveMode('PSK', 14070000), null, 'no set entry for PSK');
+  // A tune that re-sends the current mode (PSK) writes no MD.
+  assert.ok(!tuneWrites(model, 'PSK', 14070000, 'PSK', 0).some((w) => /^MD/.test(w)));
+  codec.setFilterWidth(500);
+  assert.deepStrictEqual(writes, ['SH0010;'], '500 Hz is index 10 in the DATA column (02 = 400 Hz in the SSB column)');
+  // The desktop offers the DIG width presets in PSK (source guard).
+  const app = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const presets = app.slice(app.indexOf('function rigGetFilterPresets'), app.indexOf('function rigBuildFilterPresets'));
+  assert.ok(/\[[^\]]*'PSK'[^\]]*\]\.includes\(m\)\) return RIG_FILTER_PRESETS\.DIG/.test(presets), presets);
+  // In PSK the desktop's spot filter shows digital spots, as in DATA, and the
+  // phone's log sheet defaults to PSK31 (both run from source).
+  const toFilter = new Function(app.slice(app.indexOf('function radioModeToFilter'), app.indexOf('function spotAgeSecs')) + '; return radioModeToFilter;')();
+  assert.strictEqual(toFilter('PSK'), 'DIGI');
+  const remote = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer', 'remote.js'), 'utf8');
+  const aliasEnd = remote.indexOf('\n  }\n', remote.indexOf('function aliasModeForLogSheet')) + 4;
+  const alias = new Function(remote.slice(remote.indexOf('const LOG_MODE_OPTIONS'), aliasEnd) + '; return aliasModeForLogSheet;')();
+  assert.strictEqual(alias('PSK'), 'PSK31');
+});
+
+// =========================================================================
 console.log('\n=== KenwoodCodec (Kenwood TS-590) ===');
 
 const TS590_MODEL = {
