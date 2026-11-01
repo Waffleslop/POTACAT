@@ -933,6 +933,7 @@ window.api.onRadioState((s) => {
     // Otherwise: still waiting for the rig to catch up — keep optimistic value.
   }
   if (s.mode && Date.now() > _modeSuppressUntil) currentMode = s.mode;
+  if (typeof s.wfm === 'boolean') vfoHasWfm = s.wfm;
   if (s.filterWidth != null) {
     currentFilterWidth = s.filterWidth;
     filterSlider.value = s.filterWidth || 2400;
@@ -1075,6 +1076,13 @@ if (window.api && window.api.rigBandsGet) {
 
 // --- Modes ---
 const MODES = ['USB', 'LSB', 'CW', 'AM', 'FM', 'FT8', 'FT4', 'RTTY', 'DIGU', 'DIGL', 'RADE'];
+// Wideband FM only on a radio that has it (IC-7100, IC-705: main's wfm flag).
+let vfoHasWfm = false;
+function pickerModes() {
+  if (!vfoHasWfm) return MODES;
+  const i = MODES.indexOf('FM');
+  return MODES.slice(0, i + 1).concat(['WFM'], MODES.slice(i + 1));
+}
 
 function updateModeHighlight() {
   // Updates popup picker if open
@@ -1107,7 +1115,7 @@ modeBadge.addEventListener('click', (e) => {
   picker.style.top = (br.bottom + 6) + 'px';
   picker.style.left = '12px';
   picker.style.right = '12px';
-  MODES.forEach(m => {
+  pickerModes().forEach(m => {
     const btn = document.createElement('button');
     btn.className = 'mode-btn' + (currentMode.toUpperCase() === m || (m === 'RADE' && currentMode.toUpperCase().includes('FREEDV')) ? ' active' : '');
     btn.textContent = m;

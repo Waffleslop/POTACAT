@@ -26056,7 +26056,19 @@ function sendVfoState() {
     // window's Rig button (shown only while CAT answers) hid Power On exactly
     // when it was needed (KQ5O FTDX101MP over a remote shack, 2026-10-26).
     power: vfoPowerAvailable(),
+    wfm: vfoWfmAvailable(),         // a Wideband FM button in the mode picker
   });
+}
+// The radio has a Wideband FM mode (IC-7100, IC-705): from the Radio Model,
+// or the Icom model picker, or the radio already reporting WFM.
+function vfoWfmAvailable() {
+  try {
+    if (String(_currentMode || '').toUpperCase() === 'WFM') return true;
+    const rig = (settings.rigs || []).find((r) => r.id === settings.activeRigId) || {};
+    const ct = rig.catTarget || settings.catTarget || {};
+    const m = RIG_MODELS[rig.model] || RIG_MODELS[ct.civModel] || null;
+    return !!(m && m.wfm);
+  } catch { return false; }
 }
 function vfoPowerAvailable() {
   try { return !!getRigCapabilities(detectRigType()).power; } catch { return false; }
