@@ -24368,12 +24368,17 @@ function connectRemote() {
       const hound = (!!settings.jtcatHoundMode || fox) && !jtcatFdContext();
       if (!jtcatReplySlot(targetEngine, call, slot, { hound, source: 'remote', retry: data, retryType: 'jtcat-reply' })) return;
     }
-    // If replacing an active QSO that had reports exchanged but wasn't logged yet, log it
-    if (remoteJtcatQso && remoteJtcatQso.call && remoteJtcatQso.report &&
-        remoteJtcatQso.phase !== '73' && remoteJtcatQso.phase !== 'done' &&
-        remoteJtcatQso.call.toUpperCase() !== (call || '').toUpperCase()) {
-      sendCatLog(`[JTCAT] Replacing active QSO with ${remoteJtcatQso.call} — auto-logging`);
-      await jtcatAutoLog(remoteJtcatQso);
+    // Clicking another station abandons the running QSO. Log it only if it was
+    // already complete (lib/jtcat-state-machine.js replaceLogsQso); an
+    // unfinished one is dropped and said so, never logged (level_death 10/31).
+    if (remoteJtcatQso && remoteJtcatQso.call && remoteJtcatQso.call.toUpperCase() !== (call || '').toUpperCase()
+        && remoteJtcatQso.phase !== '73' && remoteJtcatQso.phase !== 'done') {
+      if (_jtcatStateMachine.replaceLogsQso(remoteJtcatQso, call)) {
+        sendCatLog(`[JTCAT] Replacing the finished QSO with ${remoteJtcatQso.call} — logging it`);
+        await jtcatAutoLog(remoteJtcatQso);
+      } else if (!remoteJtcatQso._logged) {
+        sendCatLog(`[JTCAT] Left the QSO with ${remoteJtcatQso.call} unfinished (${remoteJtcatQso.phase}) — not logged`);
+      }
     }
     // Halt any active TX (e.g. CQ) so reply goes out on next boundary
     if (targetEngine._txActive) targetEngine.txComplete();
@@ -39538,12 +39543,17 @@ app.whenReady().then(() => {
       const hound = (!!settings.jtcatHoundMode || fox) && !jtcatFdContext();
       if (!jtcatReplySlot(replyEngine, data.call, data.slot, { hound, source: 'popout', retry: data, retryType: 'jtcat-popout-reply' })) return;
     }
-    // If replacing an active QSO that had reports exchanged but wasn't logged yet, log it
-    if (popoutJtcatQso && popoutJtcatQso.call && popoutJtcatQso.report &&
-        popoutJtcatQso.phase !== '73' && popoutJtcatQso.phase !== 'done' &&
-        popoutJtcatQso.call.toUpperCase() !== (data.call || '').toUpperCase()) {
-      sendCatLog(`[JTCAT] Replacing active QSO with ${popoutJtcatQso.call} — auto-logging`);
-      await jtcatAutoLog(popoutJtcatQso);
+    // Clicking another station abandons the running QSO. Log it only if it was
+    // already complete (lib/jtcat-state-machine.js replaceLogsQso); an
+    // unfinished one is dropped and said so, never logged (level_death 10/31).
+    if (popoutJtcatQso && popoutJtcatQso.call && popoutJtcatQso.call.toUpperCase() !== (data.call || '').toUpperCase()
+        && popoutJtcatQso.phase !== '73' && popoutJtcatQso.phase !== 'done') {
+      if (_jtcatStateMachine.replaceLogsQso(popoutJtcatQso, data.call)) {
+        sendCatLog(`[JTCAT] Replacing the finished QSO with ${popoutJtcatQso.call} — logging it`);
+        await jtcatAutoLog(popoutJtcatQso);
+      } else if (!popoutJtcatQso._logged) {
+        sendCatLog(`[JTCAT] Left the QSO with ${popoutJtcatQso.call} unfinished (${popoutJtcatQso.phase}) — not logged`);
+      }
     }
     // Halt any active TX (e.g. CQ) so reply goes out on next boundary
     if (replyEngine._txActive) replyEngine.txComplete();
