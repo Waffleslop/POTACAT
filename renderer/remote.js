@@ -11327,6 +11327,16 @@ var _paddleHoldTimer = { dit: null, dah: null };
   // desktop. Called on auth-ok so any recording the user made while
   // the WS was disconnected (and ft8Send silently dropped) finally
   // makes its way to the desktop's persistent storage.
+  // base64 in 32 KB slices: String.fromCharCode.apply over a whole recording
+  // throws past roughly 10-20 s of audio, so a long voice macro never reached
+  // the shack (the desktop fix: lib/voice-recorder.js bytesToBase64).
+  function voiceMacroB64(buf) {
+    var bytes = new Uint8Array(buf);
+    var bin = '';
+    for (var i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  }
+
   function reuploadLocalVoiceMacros() {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ssbCheckSlots(function (filled) {
@@ -11337,7 +11347,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
           var reader = new FileReader();
           reader.onload = function () {
             try {
-              var b64 = btoa(String.fromCharCode.apply(null, new Uint8Array(reader.result)));
+              var b64 = voiceMacroB64(reader.result);
               ft8Send({
                 type: 'voice-macro-sync',
                 idx: idx,
@@ -11669,7 +11679,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
                   // Sync to desktop
                   var syncReader = new FileReader();
                   syncReader.onload = function() {
-                    var base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(syncReader.result)));
+                    var base64 = voiceMacroB64(syncReader.result);
                     ft8Send({ type: 'voice-macro-sync', idx: idx, label: ssbMacroLabels[idx] || '', audio: base64 });
                   };
                   syncReader.readAsArrayBuffer(blob);

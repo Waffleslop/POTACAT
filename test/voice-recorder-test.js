@@ -123,6 +123,12 @@ test('app.js uses the module; a Rec press during a take stops it and never start
   assert.ok(html.indexOf('../lib/voice-recorder.js') > 0 && html.indexOf('../lib/voice-recorder.js') < html.indexOf('src="app.js"'), 'loaded before app.js');
 });
 
+test('ECHOCAT Web sends long voice macros to the shack (sliced base64, no whole-buffer apply)', () => {
+  const web = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote.js'), 'utf8');
+  assert.ok(!/btoa\(String\.fromCharCode\.apply\(null, new Uint8Array\(/.test(web), 'no whole-buffer conversion left');
+  assert.strictEqual((web.match(/voiceMacroB64\(/g) || []).length, 3, 'defined once, used at both sync sites');
+});
+
 chain.then(() => {
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
