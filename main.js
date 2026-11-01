@@ -539,7 +539,8 @@ const { fetchSpots: fetchParcSpots, setLogger: parcSetLogger } = require('./lib/
 parcSetLogger(sendCatLog); // PARC (Protected Area Radio Community) — N3FMC request 2026-08-17
 const { fetchNets: fetchDirectoryNets, fetchSwl: fetchDirectorySwl } = require('./lib/directory');
 const { QrzClient } = require('./lib/qrz');
-const { callsignToProgram, fetchParksForProgram, loadParksCache, saveParksCache, isCacheStale, searchParks: searchParksDb, nearbyParks: nearbyParksDb, getPark: getParkDb, buildParksMap } = require('./lib/pota-parks-db');
+const ParksDb = require('./lib/pota-parks-db');
+const { callsignToProgram, fetchParksForProgram, loadParksCache, saveParksCache, isCacheStale, searchParks: searchParksDb, nearbyParks: nearbyParksDb, getPark: getParkDb, buildParksMap } = ParksDb;
 
 // A hunted park's record for logging. The parks DB holds only the operator's
 // OWN program (a US hunter's copy has no CA-xxxx), so a park abroad came back
@@ -566,6 +567,10 @@ function spotParkState(ref, call) {
 function parkInfoFor(ref) {
   let db = null;
   try { db = getParkDb(parksMap, ref) || null; } catch { db = null; }
+  if (!db) {
+    const other = parksListForRef(ref);
+    if (other && other.map !== parksMap) { try { db = getParkDb(other.map, ref) || null; } catch { db = null; } }
+  }
   if (db && db.name) return db;
   const want = String(ref || '').trim().toUpperCase();
   if (!want) return db;
@@ -618,6 +623,9 @@ let parksArray = [];
 let parksMap = new Map();
 let parksDbPrefix = '';
 let parksDbLoading = false;
+const _parksLoads = new Map();   // program -> Promise of the load in flight
+const _parksOther = new Map();   // program -> { array, map }, insertion order = age
+const PARKS_OTHER_MAX = 5;
 
 // --- cty.dat database (loaded once at startup) ---
 let ctyDb = null;
@@ -46139,18 +46147,30 @@ app.whenReady().then(() => {
   ipcMain.handle('fetch-parks-db', async (_e, prefix) => {
     if (!prefix) return { success: false, error: 'No program prefix' };
     try {
-      await loadParksDbForCallsign(prefix === 'auto' ? (settings.myCallsign || '') : prefix);
+      if (prefix === 'auto') await loadParksDbForCallsign(settings.myCallsign || '');
+      else await loadParksDbForProgram(prefix);
       return { success: true, count: parksArray.length, prefix: parksDbPrefix };
     } catch (err) {
       return { success: false, error: err.message };
     }
   });
 
-  ipcMain.handle('search-parks', (_e, query) => {
+  ipcMain.handle('search-parks', async (_e, query) => {
+    // Typing another country's reference ("FI-00") searches that country.
+    const q = String(query || '');
+    const m = /^\s*([A-Z0-9]{1,4})-/i.exec(q);
+    if (m) {
+      await ensureParksForRef(m[1] + '-0');
+      const list = parksListForRef(m[1] + '-0');
+      if (list) return searchParksDb(list.array, query);
+    }
     return searchParksDb(parksArray, query);
   });
 
-  ipcMain.handle('get-park', (_e, ref) => {
+  ipcMain.handle('get-park', async (_e, ref) => {
+    // POTA's practice reference is a real place to test from, never in a list.
+    if (ParksDb.isTestRef(ref)) return { reference: String(ref).trim().toUpperCase(), name: 'POTA test park', test: true };
+    await ensureParksForRef(ref);
     // The DB, else the live spot — every log form's park lookup comes here.
     return parkInfoFor(ref);
   });
@@ -46792,40 +46812,83 @@ app.whenReady().then(() => {
 });
 
 // --- Parks DB loader ---
-async function loadParksDbForCallsign(callsign) {
-  const prefix = callsignToProgram(callsign);
-  if (!prefix || prefix === parksDbPrefix) return;
-  if (parksDbLoading) return;
-  parksDbLoading = true;
+// The park lists POTACAT looks references up in. POTA serves one list per
+// program, and the program is the ISO country code that starts every
+// reference (FI-0003 -> FI): lib/pota-parks-db.js programOfRef. The HOME list
+// (from the operator's callsign) is parksArray/parksMap, used by search,
+// nearby parks and every home-park lookup. A reference from another country
+// loads that country's list BESIDE it (_parksOther, the last five), so an
+// activator abroad finds their park (OG3E 2026-11-01: no parks at all) and a
+// hunter logging P2P with several countries never reloads the home list.
+// (_parksLoads / _parksOther / PARKS_OTHER_MAX are declared beside parksDbLoading,
+// so parkInfoFor can never meet them in their temporal dead zone.)
+
+/** Fetch (or read from cache) one program's parks. [] when nothing usable. */
+async function readParksProgram(prefix) {
+  const userDataPath = app.getPath('userData');
+  const cached = loadParksCache(userDataPath, prefix);
+  // An EMPTY cache is never trusted: the old program codes (OH, DL, ...)
+  // answered with zero parks, and that empty list was cached for 30 days.
+  if (cached && Array.isArray(cached.parks) && cached.parks.length && !isCacheStale(cached.updatedAt)) return cached.parks;
   try {
-    const userDataPath = app.getPath('userData');
-    const cached = loadParksCache(userDataPath, prefix);
-    if (cached && !isCacheStale(cached.updatedAt)) {
-      parksArray = cached.parks || [];
-      parksMap = buildParksMap(parksArray);
-      parksDbPrefix = prefix;
-      parksDbLoading = false;
-      return;
-    }
-    // Fetch fresh from API
     const parks = await fetchParksForProgram(prefix);
+    if (!Array.isArray(parks) || !parks.length) throw new Error(`POTA has no parks for program ${prefix}`);
     saveParksCache(userDataPath, prefix, parks);
-    parksArray = parks;
-    parksMap = buildParksMap(parksArray);
-    parksDbPrefix = prefix;
+    sendCatLog(`[ParksDB] Loaded ${parks.length} parks for ${prefix}`);
+    return parks;
   } catch (err) {
-    console.error('[ParksDB] Failed to load:', err.message);
-    // Fall back to stale cache if available
-    const userDataPath = app.getPath('userData');
-    const cached = loadParksCache(userDataPath, prefix);
-    if (cached) {
-      parksArray = cached.parks || [];
-      parksMap = buildParksMap(parksArray);
-      parksDbPrefix = prefix;
-    }
-  } finally {
-    parksDbLoading = false;
+    sendCatLog(`[ParksDB] Could not load parks for ${prefix}: ${err.message}`);
+    return (cached && Array.isArray(cached.parks)) ? cached.parks : [];
   }
+}
+
+/** Load a program; home = it becomes the operator's own list. */
+async function loadParksDbForProgram(program, { home = true } = {}) {
+  const prefix = String(program || '').toUpperCase();
+  if (!prefix) return;
+  if (home ? prefix === parksDbPrefix : (prefix === parksDbPrefix || _parksOther.has(prefix))) return;
+  const key = (home ? 'home:' : 'other:') + prefix;
+  if (_parksLoads.has(key)) return _parksLoads.get(key);
+  const job = (async () => {
+    if (home) parksDbLoading = true;
+    try {
+      const parks = await readParksProgram(prefix);
+      if (!parks.length) return;
+      if (home) {
+        parksArray = parks;
+        parksMap = buildParksMap(parksArray);
+        parksDbPrefix = prefix;
+        _parksOther.delete(prefix);
+      } else {
+        _parksOther.set(prefix, { array: parks, map: buildParksMap(parks) });
+        while (_parksOther.size > PARKS_OTHER_MAX) _parksOther.delete(_parksOther.keys().next().value);
+      }
+    } finally {
+      if (home) parksDbLoading = false;
+      _parksLoads.delete(key);
+    }
+  })();
+  _parksLoads.set(key, job);
+  return job;
+}
+
+async function loadParksDbForCallsign(callsign) {
+  return loadParksDbForProgram(callsignToProgram(callsign));
+}
+
+/** Have the list a reference belongs to at hand. Never throws. */
+async function ensureParksForRef(ref) {
+  if (ParksDb.isTestRef(ref)) return;
+  const program = ParksDb.programOfRef(ref);
+  if (!program || program === parksDbPrefix) return;
+  try { await loadParksDbForProgram(program, { home: false }); } catch { /* lookup falls back to spots */ }
+}
+
+/** The loaded list for a reference's program (home or another), or null. */
+function parksListForRef(ref) {
+  const program = ParksDb.programOfRef(ref);
+  if (!program || program === parksDbPrefix) return { array: parksArray, map: parksMap };
+  return _parksOther.get(program) || null;
 }
 
 let cleanupDone = false;
