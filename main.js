@@ -2466,9 +2466,20 @@ function noteAtuTuneStarted(opts) {
   episode.timer = setTimeout(() => {
     if (_atuTuneEpisode !== episode) return;
     _atuTuneEpisode = null;
+    setAtuSweeping(false);   // a radio gone quiet mid-sweep must not leave the phone's Tune lit
     if (!_swrTripped) return;
     swrGuardAnnounce(`the radio reported no ATU result within ${SwrGuard.ATU_RESULT_TIMEOUT_MS / 1000} s — TX stays disabled. Run the ATU again, change bands, or override the guard.`);
   }, SwrGuard.ATU_RESULT_TIMEOUT_MS);
+}
+
+// The sweep flag rides the ECHOCAT status snapshot as `atuTuning`, so every
+// edge is pushed at once: a Flex sweep lasts a few seconds and the phone
+// lights its Tune controls only while it runs.
+function setAtuSweeping(on) {
+  const v = !!on;
+  if (v === _atuSweeping) return;
+  _atuSweeping = v;
+  try { broadcastRemoteRadioStatus(); } catch { /* no remote server yet */ }
 }
 
 // The radio's answer to a tune POTACAT is waiting on (any starter: the SWR
@@ -2476,7 +2487,7 @@ function noteAtuTuneStarted(opts) {
 function onAtuStatus(kv) {
   if (kv.status == null) return;
   const kind = SwrGuard.classifyAtuStatus(kv.status);
-  _atuSweeping = kind === 'sweeping';
+  setAtuSweeping(kind === 'sweeping');
   if (_atuSweeping && _swrTripped) { _atuSweepSinceTrip = true; _swrClearOkRun = 0; }
   const episode = _atuTuneEpisode;
   if (!episode) {
@@ -18162,6 +18173,7 @@ function connectSmartSdr() {
   smartSdr.on('disconnected', () => {
     sendCatLog('SmartSDR API disconnected — rig controls (ATU/filter/gain) unavailable');
     _currentSmeterDbm = null;
+    setAtuSweeping(false);
     // Flex Direct: with no port-5002 CAT either, the radio is now uncontrollable.
     if (!cat || !cat.connected) sendCatStatus({ connected: false });
     // Recycle the audio client. This fires only on an UNEXPECTED drop (a kick —
@@ -18569,6 +18581,7 @@ function connectSmartSdr() {
 }
 
 function disconnectSmartSdr() {
+  setAtuSweeping(false);
   if (smartSdrPushTimer) {
     clearTimeout(smartSdrPushTimer);
     smartSdrPushTimer = null;
@@ -25983,6 +25996,9 @@ function broadcastRemoteRadioStatus() {
     rigType,
     nb: _currentNbState,
     atu: _currentAtuState,
+    // Only a Flex reports its sweep (`atu status`); other rigs omit the field so
+    // the phone keeps its 5 s press light (echocat atu-tuning-state.md).
+    atuTuning: (smartSdr && smartSdr.connected) ? !!_atuSweeping : undefined,
     vfo: _currentVfo,
     split: _currentSplit,
     filterWidth: _currentFilterWidth,
@@ -40961,7 +40977,13 @@ app.whenReady().then(() => {
           cat.startTune();
           armAtuKeepOn(rig);
         }
-        _currentAtuState = true;
+        // A tune is momentary. Where the radio reports its tuner state back
+        // (Flex `atu status`, rigctld TUNER) that readback owns the in-line
+        // light; claiming "on" before it answers lit the phone's ATU as a
+        // latched state (K3SBP 2026-11-01, echocat atu-tuning-state.md). Rigs
+        // with no readback keep the old optimistic light.
+        const atuReadback = flexSdr() || !!(cat && cat._codec instanceof RigctldCodec);
+        if (!atuReadback) _currentAtuState = true;
         broadcastRigState();
         break;
       }

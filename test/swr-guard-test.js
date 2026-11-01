@@ -220,7 +220,7 @@ check('a match fixed outside POTACAT ends the latch: measured in-limit transmit 
 check('a match fixed outside POTACAT ends the latch: an ATU match from SmartSDR after a sweep', () => {
   const at = mainSrc.indexOf('function onAtuStatus(');
   const body = mainSrc.slice(at, mainSrc.indexOf('\n}', at));
-  assert.ok(/_atuSweeping = kind === 'sweeping';/.test(body), 'the sweep state is tracked from every status');
+  assert.ok(/setAtuSweeping\(kind === 'sweeping'\);/.test(body), 'the sweep state is tracked from every status');
   assert.ok(/if \(!episode\) \{[\s\S]*kind === 'matched' && _swrTripped && _atuSweepSinceTrip\) clearSwrTrip\(/.test(body),
     'a match with no POTACAT episode clears only after a sweep seen since the trip');
 });
