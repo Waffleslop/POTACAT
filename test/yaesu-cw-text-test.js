@@ -62,7 +62,7 @@ test('FTX-1: KM5 then KYA; a long message waits for each memory to play', async 
   writes.length = 0;
   const text = 'A'.repeat(50) + 'B';
   r.sendCwText(text);
-  assert.deepStrictEqual(writes, ['KM5' + 'A'.repeat(50) + ';', 'KYA;'], 'only the first memory now');
+  assert.deepStrictEqual(writes.filter((w) => !/^BI/.test(w)), ['KM5' + 'A'.repeat(50) + ';', 'KYA;'], 'only the first memory now');
   assert.strictEqual(r._cwKmTimers.length, 1, 'the second chunk waits');
   r.stopCwText();
   assert.strictEqual(r._cwKmTimers.length, 0, 'stop drops the waiting chunk');
@@ -78,12 +78,13 @@ test('rigctld on an FTX-1 (W2XYZ): "b text" with no "T 1" before it', async () =
   r.disconnect();
 });
 
-test('BK-IN read as off: says once that the message goes to the sidetone only', async () => {
-  const { rig: r, codec, logs } = rig('FTX-1 Field');
+test('BK-IN read as off: turned on once for back-to-back messages, and said once', async () => {
+  const { rig: r, codec, writes, logs } = rig('FTX-1 Field');
   codec.emit('breakIn', false);
   r.sendCwText('E');
   r.sendCwText('E');
-  assert.strictEqual(logs.filter((l) => /BK-IN off/.test(l)).length, 1);
+  assert.strictEqual(logs.filter((l) => /turned BK-IN on/.test(l)).length, 1);
+  assert.strictEqual(writes.filter((w) => w === 'BI1;').length, 1, JSON.stringify(writes));
   r.disconnect();
 });
 
@@ -100,6 +101,108 @@ test('macOS cannot nap POTACAT while it times CW itself: the key port and the pa
   const dtr = main.indexOf('function sendCwTextViaDtrKey(');
   assert.ok(main.slice(dtr, dtr + 4000).includes('cwKeyingAwake(t + 2000)'), 'the key-port text path');
   assert.ok(/keyer\.on\('key', \(\{ down \}\) => \{\s*\/\/[^\n]*\n\s*cwKeyingAwake\(3000\);/.test(main), 'the paddle keyer');
+});
+
+// --- BK-IN and the stuck-transmit backstop (2026-11-01) --------------------
+// With BK-IN off the radio plays the text in the sidetone only (W2XYZ FTX-1F
+// on 1.13.8: "unable to send any CW"); a radio left keyed after a message
+// stayed on the air until Stop (kc9hekbrian FTDX10). BI; was never even read.
+
+test('FTDX10: keyer memory 5 played with KYA, like the FTDX101', async () => {
+  const { rig: r, writes } = rig('FTDX10');
+  r._breakIn = true;
+  r.sendCwText('TEST');
+  assert.deepStrictEqual(writes.slice(-2), ['KM5TEST;', 'KYA;']);
+  r.disconnect();
+});
+
+test('BK-IN known off: turned on before the text, back off after the message', async () => {
+  const { rig: r, writes, logs } = rig('FT-710');
+  r._cwWpm = 60;
+  r._breakIn = false;
+  r.sendCwText('E');
+  const bi1 = writes.indexOf('BI1;'), km = writes.findIndex((w) => /^KM/.test(w));
+  assert.ok(bi1 >= 0 && bi1 < km, 'BI1; before the text: ' + JSON.stringify(writes));
+  assert.ok(!writes.includes('BI0;'), 'not restored mid-message');
+  await sleep(5200);
+  assert.ok(writes.includes('BI0;'), 'BK-IN put back: ' + JSON.stringify(writes));
+  assert.ok(logs.some((l) => /BK-IN back off/.test(l)));
+  r.disconnect();
+});
+
+test('BK-IN unknown: asks, turns it on, and restores what the radio said', async () => {
+  const { rig: r, codec, writes } = rig('FTX-1 Field');
+  r._cwWpm = 60;
+  r.sendCwText('E');
+  assert.ok(writes.indexOf('BI;') >= 0 && writes.indexOf('BI;') < writes.indexOf('BI1;'), 'query, then on: ' + JSON.stringify(writes));
+  codec.emit('breakIn', false); // the reply to BI;: it was off
+  assert.strictEqual(r._breakIn, true, 'on now');
+  await sleep(5200);
+  assert.ok(writes.includes('BI0;'), 'put back off');
+  r.disconnect();
+});
+
+test('BK-IN unknown but the radio says it was on: left on', async () => {
+  const { rig: r, codec, writes } = rig('FTX-1 Field');
+  r._cwWpm = 60;
+  r.sendCwText('E');
+  codec.emit('breakIn', true);
+  await sleep(5200);
+  assert.ok(!writes.includes('BI0;'), 'never turned off: ' + JSON.stringify(writes));
+  r.disconnect();
+});
+
+test('BK-IN already on: no BI commands at all', async () => {
+  const { rig: r, writes } = rig('FT-710');
+  r._breakIn = true;
+  r.sendCwText('TEST');
+  assert.ok(!writes.some((w) => /^BI/.test(w)), JSON.stringify(writes));
+  r.disconnect();
+});
+
+test('a radio still in transmit 4 s after the message is sent to receive, and the operator is told', async () => {
+  const { rig: r, codec, writes } = rig('FTDX10');
+  const notices = [];
+  r.on('notice', (m) => notices.push(m));
+  r._cwWpm = 60;
+  r._breakIn = true;
+  r.sendCwText('E');
+  codec.emit('ptt', true); // the radio reports TX during the message
+  await sleep(6000);
+  assert.ok(writes.includes('TX0;'), 'RX sent: ' + JSON.stringify(writes));
+  assert.ok(notices.some((m) => /stayed in transmit after the CW message/.test(m)));
+  assert.strictEqual(r._transmitting, false);
+  r.disconnect();
+});
+
+test('the backstop leaves a PTT POTACAT itself is holding alone', async () => {
+  const { rig: r, codec, writes } = rig('FTDX10');
+  r._cwWpm = 60;
+  r._breakIn = true;
+  r.sendCwText('E');
+  codec.emit('ptt', true);
+  r._pttCommanded = true; // e.g. the phone's PTT pressed right after the macro
+  await sleep(6000);
+  assert.ok(!writes.includes('TX0;'), JSON.stringify(writes));
+  r.disconnect();
+});
+
+test('the radio returning to receive by itself cancels the backstop', async () => {
+  const { rig: r, codec, writes } = rig('FTDX10');
+  r._cwWpm = 60;
+  r._breakIn = true;
+  r.sendCwText('E');
+  codec.emit('ptt', true);
+  await sleep(1500);
+  codec.emit('ptt', false);
+  await sleep(4500);
+  assert.ok(!writes.includes('TX0;'), JSON.stringify(writes));
+  r.disconnect();
+});
+
+test('main shows the controller notice on screen and on the phone', async () => {
+  const main = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+  assert.ok(/controller\.on\('notice', \(msg\) => \{[\s\S]{0,400}send\('app-notice'[\s\S]{0,300}type: 'tune-blocked', reason: msg/.test(main));
 });
 
 Promise.all(pending).then(() => {

@@ -4232,6 +4232,15 @@ function bindRigStateEvents(controller) {
   controller.on('monLevel', sendCatMonLevel);
   controller.on('micGain', sendCatMicGain);
   controller.on('breakIn', sendCatBreakIn);
+  // Something the radio did that the operator must see, not only the log
+  // (lib/rig-controller.js: a radio left in transmit after a CW message).
+  controller.on('notice', (msg) => {
+    sendCatLog('[CAT] ' + msg);
+    if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: msg, warn: true, duration: 10000 });
+    if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+      try { remoteServer.sendToClient({ type: 'tune-blocked', reason: msg }); } catch {}
+    }
+  });
   controller.on('antennaPort', sendCatAntennaPort);
   controller.on('preampStep', sendCatPreampStep);
   controller.on('attStep', sendCatAttStep);
