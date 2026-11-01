@@ -1024,13 +1024,13 @@ function _applyPopoutTheme(payload) {
     // (No AP badge — see appendMyActivityRow. Decoder internals, not operator
     // information.)
     if (d.chaseMatch) badges += '<span class="jp-badge jp-badge-chase" title="Chase match — this station matches your chase target (' + esc(chaseTarget) + ')">◎</span>';
-    if (d.newDxcc) badges += '<span class="jp-badge jp-badge-dxcc" title="D: New DXCC on this band — you have not worked ' + esc(d.entity || 'this entity') + ' on this band yet">D</span>';
+    if (d.newDxcc) badges += '<span class="jp-badge jp-badge-dxcc" data-entity="' + esc(d.entity || '') + '" title="D: New DXCC on this band — you have not worked ' + esc(d.entity || 'this entity') + ' on this band yet">D</span>';
     // Wanted state (Worked All States): the state the grid puts them in (a
     // straddling grid shows every candidate with a ?), still needed on this
     // band and mode under the worked-overlay scope (main enriches d.state).
     if (d.wantedState && d.state && d.state.code) badges += '<span class="jp-badge jp-badge-state" title="' + esc(d.state.certain ? 'New state: ' + d.state.code + ' is one you still need on this band and mode' : (d.state.source === 'qrz' ? 'New state? QRZ lists ' + d.state.code + ' as their home state (no grid in the message), one you still need' : 'New state? Grid ' + (d.grid || '') + ' straddles ' + d.state.code + '; at least one of them is one you still need')) + '">' + esc(d.state.code) + (d.state.certain ? '' : '?') + '</span>';
-    if (d.newGrid) badges += '<span class="jp-badge jp-badge-grid" title="G: New grid — you have not worked grid ' + esc(d.grid || '?') + ' before">G</span>';
-    if (d.newCall) badges += '<span class="jp-badge jp-badge-call" title="C: New call — ' + esc(d.call || 'this station') + ' is not in your log yet">C</span>';
+    if (d.newGrid) badges += '<span class="jp-badge jp-badge-grid" data-grid="' + esc(d.grid || '') + '" title="G: New grid — you have not worked grid ' + esc(d.grid || '?') + ' before">G</span>';
+    if (d.newCall) badges += '<span class="jp-badge jp-badge-call" data-call="' + esc(d.call || '') + '" title="C: New call — ' + esc(d.call || 'this station') + ' is not in your log yet">C</span>';
     if (d.watched) badges += '<span class="jp-badge jp-badge-watch" title="W: Watchlist — ' + esc(d.call || 'this station') + ' matches your watchlist">W</span>';
     // Tracked-event station (Casey 2026-07-06): render as a NORMAL-looking
     // row with a [13C]-style badge alongside the letter badges — no tint
@@ -1195,6 +1195,20 @@ function _applyPopoutTheme(payload) {
   }
 
   // --- Event handlers ---
+  // A QSO was logged: decodes already drawn stop showing that station as a
+  // new call / grid / DXCC (the flags are stamped once, at decode time).
+  if (window.api.onJtcatWorkedUpdate) window.api.onJtcatWorkedUpdate(function(w) {
+    var n = 0;
+    for (var i = 0; i < decodeLog.length; i++) n += DecodeRow.clearWorkedFlags(decodeLog[i].results, w);
+    if (n) rebuildBandActivity();
+    // My Activity rows are not rebuilt from the log; drop their badges in place.
+    var call = String(w.call || '').toUpperCase(), grid = String(w.grid || '').toUpperCase().slice(0, 4);
+    myActivity.querySelectorAll('.jp-badge-call, .jp-badge-grid, .jp-badge-dxcc').forEach(function(b) {
+      if ((call && b.getAttribute('data-call') === call) || (grid && b.getAttribute('data-grid') === grid) ||
+          (w.entity && b.getAttribute('data-entity') === w.entity)) b.remove();
+    });
+  });
+
   window.api.onJtcatDecode(function(data) {
     // Keep our cached callsign current from the authoritative copy main stamps
     // on every batch, so classification never runs against a stale/empty call

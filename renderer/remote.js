@@ -2864,6 +2864,10 @@
         ft8HandleDecode(msg);
         break;
 
+      case 'jtcat-worked-update':
+        ft8HandleWorkedUpdate(msg);
+        break;
+
       case 'jtcat-decode-batch':
         if (msg.entries) {
           msg.entries.forEach(e => ft8HandleDecode(e));
@@ -8145,6 +8149,17 @@
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
   }
 
+  // A QSO was logged at the shack: decodes already shown stop calling that
+  // station a new call / grid / DXCC.
+  function ft8HandleWorkedUpdate(w) {
+    for (const entry of ft8DecodeLog) DecodeRow.clearWorkedFlags(entry && entry.results, w);
+    const call = String(w.call || '').toUpperCase(), grid = String(w.grid || '').toUpperCase().slice(0, 4);
+    document.querySelectorAll('.ft8-badge-call, .ft8-badge-grid, .ft8-badge-dxcc').forEach((b) => {
+      if ((call && b.getAttribute('data-call') === call) || (grid && b.getAttribute('data-grid') === grid) ||
+          (w.entity && b.getAttribute('data-entity') === w.entity)) b.remove();
+    });
+  }
+
   // --- Decode handling ---
   function ft8HandleDecode(data) {
     ft8DecodeLog.push(data);
@@ -8245,10 +8260,10 @@
         // Build needed badges + entity
         let badges = '';
         if (d.chaseMatch) badges += '<span class="ft8-badge ft8-badge-chase" title="Chase target: ' + esc(ft8ChaseTarget) + '">◎</span>';
-        if (d.newDxcc) badges += '<span class="ft8-badge ft8-badge-dxcc" title="New DXCC: ' + esc(d.entity || '') + '">D</span>';
+        if (d.newDxcc) badges += '<span class="ft8-badge ft8-badge-dxcc" data-entity="' + esc(d.entity || '') + '" title="New DXCC: ' + esc(d.entity || '') + '">D</span>';
         if (d.wantedState && d.state && d.state.code) badges += '<span class="ft8-badge ft8-badge-state" title="' + esc(d.state.certain ? 'New state: ' + d.state.code : 'New state? ' + d.state.code) + '">' + esc(d.state.code) + (d.state.certain ? '' : '?') + '</span>';
-        if (d.newGrid) badges += '<span class="ft8-badge ft8-badge-grid" title="New grid: ' + esc(d.grid || '') + '">G</span>';
-        if (d.newCall) badges += '<span class="ft8-badge ft8-badge-call" title="New call: ' + esc(d.call || '') + '">C</span>';
+        if (d.newGrid) badges += '<span class="ft8-badge ft8-badge-grid" data-grid="' + esc(d.grid || '') + '" title="New grid: ' + esc(d.grid || '') + '">G</span>';
+        if (d.newCall) badges += '<span class="ft8-badge ft8-badge-call" data-call="' + esc(d.call || '') + '" title="New call: ' + esc(d.call || '') + '">C</span>';
         if (d.watched) badges += '<span class="ft8-badge ft8-badge-watch" title="Watchlist">W</span>';
         if (d.call && donorCallsigns.has(d.call.toUpperCase())) badges += '<span class="ft8-badge ft8-badge-donor" title="POTACAT Supporter">\uD83D\uDC3E</span>';
         if (d.call && d.call.toUpperCase() === 'K3SBP') badges += '<span class="ft8-badge ft8-badge-donor" title="POTACAT Creator">\uD83D\uDC08\u200D\u2B1B</span>';

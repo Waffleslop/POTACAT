@@ -101,6 +101,7 @@ contextBridge.exposeInMainWorld('api', {
   jtcatSpectrum: (bins) => ipcRenderer.send('jtcat-spectrum', bins),
   // JTCAT events
   onJtcatDecode: (cb) => ipcRenderer.on('jtcat-decode', (_e, data) => cb(data)),
+  onJtcatWorkedUpdate: (cb) => ipcRenderer.on('jtcat-worked-update', (_e, data) => cb(data)),
   // GridTracker's double-click (WSJT-X Reply) and stop (Halt Tx), via main.
   onJtcatExternalReply: (cb) => ipcRenderer.on('jtcat-external-reply', (_e, d) => cb(d)),
   onJtcatExternalHalt: (cb) => ipcRenderer.on('jtcat-external-halt', () => cb()),

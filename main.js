@@ -12920,6 +12920,15 @@ function liveActivationMyRefs() {
   if (!(settings.activationActive || settings.appMode === 'activator') || !parkRefs.length) return [];
   return activationProgram.activationMyRefs(parkRefs, settings.activatorCrossRefs || []);
 }
+// A QSO was logged: the JTCAT window and ECHOCAT clear the C / G / D badges
+// on decodes already drawn for that station (the decode stamps them once).
+function jtcatWorkedUpdate(worked) {
+  const w = { call: String(worked.call || '').toUpperCase(), grid: worked.grid || '', entity: worked.entity || '', band: String(worked.band || '').toLowerCase() };
+  if (!w.call) return;
+  try { if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-worked-update', w); } catch { /* window closing */ }
+  try { if (remoteServer && remoteServer.running) remoteServer.sendJtcatWorkedUpdate(w); } catch { /* no client */ }
+}
+
 async function qrzStationInfo(call) {
   if (!qrz || !qrz.configured || !settings.enableQrz) return null;
   let q = null;
@@ -13378,16 +13387,20 @@ async function saveQsoRecord(qsoData, opts) {
     if (remoteServer && remoteServer.running) {
       remoteServer.sendWorkedQsos([...workedQsos.entries()]);
     }
-    // Update roster needed sets live
+    // Update roster needed sets live. A record's grid is GRIDSQUARE; this
+    // read `grid`, which no record carries, so a grid just worked stayed
+    // "new" on every later decode (level_death 2026-10-31).
     rosterWorkedCalls.add(call);
-    const grid = (qsoData.grid || '').toUpperCase().substring(0, 4);
+    const grid = (qsoData.gridsquare || qsoData.grid || '').toUpperCase().substring(0, 4);
     if (grid && /^[A-R]{2}\d{2}$/.test(grid)) rosterWorkedGrids.add(grid);
     const band = (qsoData.band || '').toLowerCase();
+    let workedEntity = '';
     if (band && ctyDb) {
       const entity = resolveCallsign(call, ctyDb);
-      if (entity) rosterWorkedDxcc.add(entity.name + '|' + band);
+      if (entity) { rosterWorkedDxcc.add(entity.name + '|' + band); workedEntity = entity.name; }
     }
     workedRosterAdd(call, entry);
+    jtcatWorkedUpdate({ call, grid, entity: workedEntity, band });
   }
 
   // Update worked parks set when a POTA/WWFF park is logged (live "new-to-me" update)
@@ -13813,6 +13826,7 @@ function connectWsjtx() {
       rosterWorkedCalls.add(call);
       const grid = (qso.dxGrid || '').toUpperCase().substring(0, 4);
       if (grid && /^[A-R]{2}\d{2}$/.test(grid)) rosterWorkedGrids.add(grid);
+      jtcatWorkedUpdate({ call, grid, entity: (ctyDb && resolveCallsign(call, ctyDb) || {}).name || '', band });
       if (band && ctyDb) {
         const entity = resolveCallsign(call, ctyDb);
         if (entity) rosterWorkedDxcc.add(entity.name + '|' + band);
