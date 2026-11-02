@@ -116,6 +116,7 @@ const TESTS = [
   'test/dxpedition-dials-test.js',
   'test/renderer-global-api-test.js',
   'test/heard-grids-test.js',
+  'test/idle-rx-watching-test.js',
   // Run by CI's test.yml but missing here until 2026-11-02 (a CI-only failure slipped past the local suite):
   'test/contest-history-test.js',
   'test/cw-key-line-test.js',

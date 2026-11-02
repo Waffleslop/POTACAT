@@ -33366,6 +33366,14 @@ function startAutoSstvTimer() {
     // shut down a CQ run). Petting the shared clock also keeps the idle
     // CAT-polling pause from starving the VFO poll during a session.
     if (autoSstvBlockedByJtcat()) lastActivityTime = Date.now();
+    // A connected ECHOCAT device is someone at the radio, even one only
+    // watching: W0TLP sat in his car with the phone on the rig and Idle Mode
+    // QSY'd it to the WSPR dial (2026-11-02). Same rule as the idle CAT-poll
+    // pause; the countdown starts again when the device leaves. A session
+    // already running is left alone (only markUserActive ends one).
+    let remoteWatching = false;
+    try { remoteWatching = !!(remoteServer && remoteServer.running && remoteServer.activeClientContext()); } catch {}
+    if (remoteWatching && !autoSstvActive) lastActivityTime = Date.now();
     const idle = Date.now() - lastActivityTime;
     if (!autoSstvActive && idle >= thresholdMs) {
       triggerAutoSstv();
@@ -34547,6 +34555,13 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
     nativeXit = 0;
   }
 
+  // Engine names with no entry in the CI-V, Kenwood/Yaesu or rigctld mode
+  // tables: the codec resolved them to nothing, so the frequency moved and
+  // the mode never did. Idle WSPR left W0TLP's radio on 14.0956 in LSB
+  // (2026-11-02). They are upper-sideband data, the same as FT8. Bare 'PSK'
+  // stays: it is the FT-710's own mode E read back, and a tune that re-sends
+  // it must leave that radio where it is (see the FT-710 model).
+  if (mode && /^(WSPR|JS8|JTTY|PSK\d+)$/i.test(String(mode))) mode = 'DIGU';
   const resolvedMode = (mode || '').toUpperCase() === 'SSB' ? (tuneFreqHz >= 10000000 ? 'USB' : 'LSB') : mode;
   // Suppress stale mode broadcasts to ECHOCAT for 2s — prevents flicker when
   // frequency-triggered status broadcasts include the OLD mode before polling catches up
