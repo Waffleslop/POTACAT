@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 // The JTCAT window for older eyes (Casey 2026-11-02): one band-and-mode button
-// and picker, buttons that are the actions, a Call button on CQ rows.
+// and picker, buttons that are the actions.
 // Run: node test/jtcat-picker-test.js
 const assert = require('assert');
 const fs = require('fs');
@@ -35,10 +35,6 @@ test('controls: the buttons are the actions', () => {
   assert.ok(html.includes('>Logbook</button>'));
   assert.ok(html.includes('whichever half is free'));
   assert.ok(js.includes("'<option value=\"\">everyone</option>'"));
-});
-test('a CQ row has a Call button that takes the double-click path', () => {
-  assert.ok(/if \(c\.isCq\) \{\s*var callBtn/.test(js));
-  assert.ok(/e\.stopPropagation\(\); onDecodeRowClick\(decode\)/.test(js));
 });
 test('every QSO step is outlined', () => {
   assert.ok(/\.jp-qso-step \{[^}]*border: 1px solid var\(--border-primary\)/.test(html));

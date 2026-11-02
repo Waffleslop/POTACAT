@@ -49,8 +49,6 @@
        appearing/disappearing never shifts layout. */
     .jp-row { display: flex; gap: 10px; padding: 3px 10px; cursor: pointer; align-items: baseline; border: 1.5px solid transparent; border-radius: 6px; }
     .jp-row:hover { background: var(--bg-hover); }
-    .jp-row-call { align-self: center; height: 30px; padding: 0 14px; margin-left: 6px; border-radius: 8px; border: none; background: var(--accent-green, #4ecca3); color: var(--on-accent-green, #000); font: 700 14px system-ui, sans-serif; cursor: pointer; flex-shrink: 0; }
-    .jp-row-call:hover { filter: brightness(1.1); }
     /* My Activity inlines the cycle time per row (no separator line) — see jp-my-activity. */
     /* Time / dB / DT / DF / country: secondary (not dim) and 12 px — LZ3AW 2026-10-16. */
     .jp-row .jp-time { min-width: 66px; text-align: right; color: var(--text-secondary); font-size: 14px; font-variant-numeric: tabular-nums; padding-right: 4px; border-right: 1px solid var(--border-primary); margin-right: 2px; }
@@ -373,7 +371,7 @@
     /* z-index 2000: Leaflet's map panes/controls (the attribution box) go up
        to 1000 and were floating over the popover at 900; the QSO toast (9999)
        stays above everything. */
-    .jp-options-pop { position: fixed; right: 12px; bottom: 176px; z-index: 2000; width: 620px; max-width: calc(100vw - 16px); max-height: calc(100vh - 200px); overflow-y: auto; background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,0.5); padding: 6px; }
+    .jp-options-pop { position: fixed; right: 12px; bottom: 120px; z-index: 2000; width: 620px; max-width: calc(100vw - 16px); max-height: calc(100vh - 200px); overflow-y: auto; background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,0.5); padding: 6px; }
     .jp-options-pop.hidden { display: none; }
     .jp-opt-section { font-size: 13px; font-weight: 900; text-transform: uppercase; letter-spacing: 1.2px; color: var(--text-dim, #888); padding: 12px 10px 4px; }
     .jp-opt-warn { margin: 4px 10px 6px; padding: 8px 12px; border-radius: 8px; background: rgba(255, 143, 69, 0.15); color: #ff8f45; font-size: 14px; font-weight: 600; }
@@ -449,27 +447,24 @@
     .jp-cycle-bar { height: 10px; border-radius: 5px; }
     /* Controls (2026-11-02): two rows, the buttons are the actions. */
     .jp-controls { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 12px; }
-    .jp-ctl-main { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 200px 150px 96px 96px; gap: 10px; align-items: stretch; }
-    .jp-cq-group { display: flex; gap: 10px; min-width: 0; }
-    .jp-cq-group .jp-cq-btn { flex: 1; min-width: 0; }
-    .jp-cq-group .jp-ultracat { width: 96px; flex-shrink: 0; }
-    .jp-btn.jp-big { height: 72px; border-radius: 10px; font-size: 20px; font-weight: 800; padding: 0 10px; }
-    .jp-btn.jp-big.jp-tune, .jp-btn.jp-big.jp-atu { font-size: 18px; }
+    .jp-ctl-main { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .jp-cq-group { display: flex; gap: 8px; }
+    .jp-btn.jp-big { height: 40px; border-radius: 8px; font-size: 15px; font-weight: 700; padding: 0 16px; }
     .jp-btn.jp-cq-btn.live { background: var(--accent-red, #e94560); color: var(--on-accent-red); border-color: #e94560; }
-    .jp-select.jp-big-select { height: 72px; border-radius: 10px; font-size: 16px; font-weight: 700; padding: 0 12px; min-width: 0; }
-    .jp-btn.jp-stop { height: 72px; border-radius: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 0 8px; background: transparent; color: var(--accent-red, #e94560); border: 1.5px solid var(--accent-red, #e94560); }
+    .jp-select.jp-big-select { height: 40px; border-radius: 8px; font-size: 15px; font-weight: 700; padding: 0 10px; }
+    .jp-btn.jp-stop { height: 40px; border-radius: 8px; display: inline-flex; align-items: center; gap: 8px; padding: 0 16px; background: transparent; color: var(--accent-red, #e94560); border: 1.5px solid var(--accent-red, #e94560); }
     .jp-btn.jp-stop:hover { background: rgba(233, 69, 96, 0.15); }
     .jp-btn.jp-stop.armed { background: var(--accent-red, #e94560); color: var(--on-accent-red); }
-    .jp-stop-word { font-size: 22px; font-weight: 900; letter-spacing: 1px; line-height: 1; }
-    .jp-stop-sub { font-size: 13px; font-weight: 600; opacity: 0.85; }
+    .jp-stop-word { font-size: 15px; font-weight: 800; }
+    .jp-stop-sub { font-size: 12px; font-weight: 600; opacity: 0.85; }
     .jp-ctl-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-    .jp-ctl-label { display: inline-flex; align-items: center; gap: 8px; font-size: 16px; color: var(--text-primary); }
-    .jp-ctl-row .jp-select { height: 44px; font-size: 16px; font-weight: 700; padding: 0 10px; border-radius: 8px; }
-    .jp-ctl-sends { font-size: 16px; color: var(--text-dim, #888); }
-    .jp-cq-preview { font-family: monospace; font-size: 17px; font-weight: 700; color: var(--text-primary); margin-left: 6px; }
+    .jp-ctl-label { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text-primary); }
+    .jp-ctl-row .jp-select { height: 36px; font-size: 14px; font-weight: 600; padding: 0 8px; border-radius: 8px; }
+    .jp-ctl-sends { font-size: 14px; color: var(--text-dim, #888); }
+    .jp-cq-preview { font-family: monospace; font-size: 15px; font-weight: 700; color: var(--text-primary); margin-left: 6px; }
     .jp-ctl-spacer { flex: 1; }
-    .jp-btn.jp-mid { height: 44px; padding: 0 14px; border-radius: 8px; font-size: 15px; font-weight: 700; }
-    .jp-ctl-row .jp-mode-chip { height: 44px; padding: 0 14px; border-radius: 8px; font-size: 15px; font-weight: 800; }
+    .jp-btn.jp-mid { height: 36px; padding: 0 12px; border-radius: 8px; font-size: 14px; font-weight: 600; }
+    .jp-ctl-row .jp-mode-chip { height: 36px; padding: 0 12px; border-radius: 8px; font-size: 14px; font-weight: 700; }
 
     /* Band and mode: the one toolbar button and its picker (2026-11-02). Sizes
        follow the phone's Digi picker (44 px chips, 64+ px band boxes) because
@@ -644,7 +639,7 @@
   <div class="jp-main">
     <div class="jp-decode-pane">
       <div class="jp-decode-section">
-        <div class="jp-decode-header">Band Activity <div style="display:flex;gap:4px;align-items:center;"><input type="text" id="jp-search" placeholder="Filter by call or word" title="One or more callsigns or words, separated by commas or spaces: a line shows if it contains any of them" spellcheck="false"><button id="jp-cq-filter" class="jtcat-filter-btn" title="Only CQs, 73s and calls to me">CQ &amp; 73</button><button id="jp-wanted-filter" class="jtcat-filter-btn" title="Show only needed DXCC/grid/call">Wanted</button><button id="jp-event-filter" class="jtcat-filter-btn" title="Show only tracked-event stations you still need (13 Colonies etc.)">Event</button><button id="jp-sort-signal" class="jtcat-filter-btn" title="Sort by signal strength">Strongest first</button><button id="jp-clear" class="jtcat-filter-btn" title="Clear all decodes">Clear</button></div></div>
+        <div class="jp-decode-header">Band Activity <div style="display:flex;gap:4px;align-items:center;"><input type="text" id="jp-search" placeholder="Filter by call or word" title="One or more callsigns or words, separated by commas or spaces: a line shows if it contains any of them" spellcheck="false"><button id="jp-cq-filter" class="jtcat-filter-btn" title="Only CQs, 73s and calls to me">CQ &amp; 73</button><button id="jp-wanted-filter" class="jtcat-filter-btn" title="Show only needed DXCC/grid/call">Wanted</button><button id="jp-event-filter" class="jtcat-filter-btn" title="Show only tracked-event stations you still need (13 Colonies etc.)">Event</button><button id="jp-sort-signal" class="jtcat-filter-btn" title="Sort by signal strength (strongest first)">dB</button><button id="jp-clear" class="jtcat-filter-btn" title="Clear all decodes">Clear</button></div></div>
         <div id="jp-band-activity" class="jp-decode-list">
           <div class="jp-empty">Waiting for decodes...</div>
         </div>
