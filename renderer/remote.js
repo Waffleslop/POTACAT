@@ -10908,7 +10908,7 @@
       } else if (isIOS) {
         bits.push('<b>iOS:</b> MIDI paddles aren\u2019t supported in mobile Safari. Use a Chromium browser on desktop or Android.');
       } else {
-        bits.push('<b>Desktop:</b> install <a href="https://potacat.com/tinymidi" target="_blank" rel="noopener" style="color:var(--pota);">TinyMIDI</a> (or your paddle\u2019s own helper app) so ECHOCAT can see the device. If your paddle disconnects after a few seconds, re-open this tab after pairing.');
+        bits.push('<b>Desktop:</b> install <a href="https://potacat.com/guides/remote-cw/" target="_blank" rel="noopener" style="color:var(--pota);">TinyMIDI</a> (or your paddle\u2019s own helper app) so ECHOCAT can see the device. If your paddle disconnects after a few seconds, re-open this tab after pairing.');
       }
     } else if (paddleType === 'tinymidi') {
       bits.push('<b>Keyboard mode:</b> paddle sends <code>[</code> (dit) and <code>]</code> (dah). Works in every browser — no MIDI required.');

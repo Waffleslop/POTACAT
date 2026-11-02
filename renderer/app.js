@@ -9238,7 +9238,7 @@ function _pairRenderState() {
   const entitled = loggedIn && _pairIsCloudEntitled(sub);
   const tunnelLive = !!(tunnel && tunnel.status === 'live' && tunnel.cloudHost);
 
-  const remoteInstructionsUrl = 'https://potacat.com/remote-instructions';
+  const remoteInstructionsUrl = 'https://potacat.com/guides/away-from-home/';
 
   if (entitled && tunnelLive) {
     _pairCurrentMode = 'cloud';
