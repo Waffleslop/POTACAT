@@ -95,6 +95,7 @@ function _applyPopoutTheme(payload) {
   window.api.getSettings().then(function(s) {
     myCallsign = onAirCallPushed || (s.myCallsign || '').toUpperCase();
     myGrid = (s.grid || '').toUpperCase().substring(0, 4);
+    updateCqPreview();
     applyUltracat(!!s.ultracat);
     chaseTarget = s.jtcatChaseTarget || '';
     reflectChaseTarget(chaseTarget);
@@ -275,6 +276,7 @@ function _applyPopoutTheme(payload) {
     } else if (!want && opt && sel.value !== 'fd') {
       opt.remove();
     }
+    reflectHuntUi();
   }
   function reflectFd() {
     if (fdToggle) fdToggle.classList.toggle('active', fdMode);
@@ -442,6 +444,12 @@ function _applyPopoutTheme(payload) {
     if (enableTxBtn) {
       enableTxBtn.classList.toggle('active', txEnabled);
       enableTxBtn.textContent = txEnabled ? 'TX On' : 'TX Off';
+    }
+    // STOP (Halt TX) shows the state now: red "TX is on" while armed.
+    if (haltTxBtn) {
+      haltTxBtn.classList.toggle('armed', txEnabled);
+      var sub = document.getElementById('jp-stop-sub');
+      if (sub) sub.textContent = txEnabled ? 'TX is on' : 'Halt TX';
     }
   }
   var haltTxBtn = document.getElementById('jp-halt-tx');
@@ -835,6 +843,7 @@ function _applyPopoutTheme(payload) {
   ];
 
   function renderQsoTracker() {
+    reflectCqButton();
     if (!qsoState || qsoState.phase === 'idle') {
       qsoTracker.classList.add('hidden');
       return;
@@ -1226,7 +1235,7 @@ function _applyPopoutTheme(payload) {
     // on every batch, so classification never runs against a stale/empty call
     // (the original "reply to my CQ → grid instead of report" trigger).
     // During a Guest Pass this is the pass's station call (main onAirCall).
-    if (data && data.myCall) { myCallsign = data.myCall.toUpperCase(); jttyMyCall = myCallsign; }
+    if (data && data.myCall) { myCallsign = data.myCall.toUpperCase(); jttyMyCall = myCallsign; updateCqPreview(); }
     renderDecodes(data);
     // NOTE: do NOT set "Sync: OK" here. Decodes arriving says nothing about
     // the PC clock — the real sync status comes from the NTP monitor via
@@ -1988,7 +1997,7 @@ function _applyPopoutTheme(payload) {
 
   (function buildChasePicker() {
     if (!chaseSelect) return;
-    var html = '<option value="">Chase: --</option>';
+    var html = '<option value="">everyone</option>';
     var lastCat = '';
     CHASE_QUICK.forEach(function(p) {
       if (p.category !== lastCat) {
@@ -1996,10 +2005,10 @@ function _applyPopoutTheme(payload) {
         html += '<optgroup label="' + esc(p.category) + '">';
         lastCat = p.category;
       }
-      html += '<option value="' + esc(p.tag) + '">' + esc(p.tag) + '</option>';
+      html += '<option value="' + esc(p.tag) + '">' + esc(p.label || p.tag) + '</option>';
     });
     if (lastCat) html += '</optgroup>';
-    html += '<option value="__custom">Custom (state/prefix)…</option>';
+    html += '<option value="__custom">a state or country…</option>';
     chaseSelect.innerHTML = html;
   })();
 
@@ -2007,6 +2016,7 @@ function _applyPopoutTheme(payload) {
   function reflectChaseTarget(tag) {
     if (!chaseSelect) return;
     tag = tag || '';
+    updateCqPreview(tag);
     if (!tag) { chaseSelect.value = ''; if (chaseCustom) chaseCustom.style.display = 'none'; return; }
     if (chaseQuickSet[tag]) {
       chaseSelect.value = tag;
@@ -2017,6 +2027,15 @@ function _applyPopoutTheme(payload) {
     }
   }
 
+  // "Sends CQ NA K3SBP FN20": the CQ as it will go out, from the same
+  // builder main uses (CqTarget.buildCqTxMsg).
+  function updateCqPreview(tag) {
+    var el = document.getElementById('jp-cq-preview');
+    if (!el) return;
+    var t = tag != null ? tag : (chaseTarget || '');
+    var call = myCallsign || '', grid = myGrid || '';
+    el.textContent = (call && window.CqTarget) ? window.CqTarget.buildCqTxMsg(call, grid, t) : ('CQ ' + (call || '(set your callsign)') + ' ' + grid).trim();
+  }
   // Validate + apply locally, then tell main (which persists + syncs the phone).
   function applyChaseTarget(rawTag) {
     var v = window.CqTarget ? window.CqTarget.validateTag(rawTag) : { ok: true, tag: (rawTag || '').toUpperCase() };
@@ -2484,6 +2503,14 @@ function _applyPopoutTheme(payload) {
     // Call CQ directed at the current chase target (CQ <tag> <call> <grid>).
     window.api.jtcatCallCq(chaseTarget);
   });
+  // "Call CQ" reads "Calling CQ" in red while a CQ of ours is on the air
+  // (renderQsoTracker calls this on every QSO state change).
+  function reflectCqButton() {
+    if (!cqBtn) return;
+    var live = !!(qsoState && qsoState.mode === 'cq' && qsoState.phase !== 'done' && qsoState.phase !== 'idle');
+    cqBtn.textContent = live ? 'Calling CQ' : 'Call CQ';
+    cqBtn.classList.toggle('live', live);
+  }
 
   enableTxBtn.addEventListener('click', function() {
     setTxOnState(!txEnabled);
@@ -2590,7 +2617,48 @@ function _applyPopoutTheme(payload) {
     ensureEventHuntOption(state.mode === 'event');
     autoCqSelect.value = state.mode || 'off';
     autoCqSelect.style.borderColor = state.mode !== 'off' ? 'var(--pota)' : '';
+    reflectHuntUi();
   });
+  // Hunt button + what-to-hunt select (2026-11-02). The hidden #jp-auto-cq
+  // select stays the one value main and the phone see; the button is on/off
+  // and the select remembers what to hunt while off (per window, like the
+  // filters). The seasonal fd/event options appear here as the select gets them.
+  var huntBtn = document.getElementById('jp-hunt-btn');
+  var huntTargetSel = document.getElementById('jp-hunt-target');
+  var HUNT_LABELS = { pota: 'POTA activators', sota: 'SOTA activators', all: 'anyone calling CQ', 'wanted-state': 'states I need', fd: 'Field Day stations', event: 'Event stations' };
+  var huntTarget = 'pota';
+  try { huntTarget = localStorage.getItem('jtcat-hunt-target') || 'pota'; } catch (e) {}
+  function reflectHuntUi() {
+    if (!huntBtn || !huntTargetSel || !autoCqSelect) return;
+    var mode = autoCqSelect.value || 'off';
+    var on = mode !== 'off';
+    if (on) huntTarget = mode;
+    var html = '';
+    Array.prototype.forEach.call(autoCqSelect.options, function(o) {
+      if (o.value === 'off') return;
+      html += '<option value="' + esc(o.value) + '"' + (o.title ? ' title="' + esc(o.title) + '"' : '') + '>' + esc(HUNT_LABELS[o.value] || o.textContent.replace(/^Hunt:\s*/, '')) + '</option>';
+    });
+    huntTargetSel.innerHTML = html;
+    if (!Array.prototype.some.call(huntTargetSel.options, function(o) { return o.value === huntTarget; })) {
+      huntTarget = huntTargetSel.options.length ? huntTargetSel.options[0].value : 'pota';
+    }
+    huntTargetSel.value = huntTarget;
+    huntBtn.textContent = on ? 'Hunting' : 'Hunt';
+    huntBtn.classList.toggle('active', on);
+    huntBtn.setAttribute('aria-pressed', String(on));
+  }
+  function setHunt(mode) {
+    autoCqSelect.value = mode;
+    autoCqSelect.dispatchEvent(new Event('change'));
+    reflectHuntUi();
+  }
+  if (huntBtn) huntBtn.addEventListener('click', function() { setHunt(autoCqSelect.value !== 'off' ? 'off' : huntTarget); });
+  if (huntTargetSel) huntTargetSel.addEventListener('change', function() {
+    huntTarget = huntTargetSel.value;
+    try { localStorage.setItem('jtcat-hunt-target', huntTarget); } catch (e) {}
+    if (autoCqSelect.value !== 'off') setHunt(huntTarget);
+  });
+  reflectHuntUi();
   // Seasonal gate for the Hunt: Field Day option — active from ~7 days before
   // ARRL FD weekend through its end (computed main-side from the contest
   // calendar). Failure just means no seasonal option; FD stays reachable in ⚙.
