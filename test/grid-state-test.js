@@ -98,7 +98,7 @@ test('wiring: both decode sites enrich, Hunt reads the same rule, both surfaces 
   const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
   assert.strictEqual((main.match(/^\s+workedOverlayEnrichDecode\(r, uc, currentBand, /gm) || []).length, 2, 'single- and multi-slice decode sites');
   assert.ok(/GridState\.huntMayAnswer\(d\.state, /.test(main));
-  assert.ok(/stateWanted,\s*\n\s*\}\);/.test(main), 'stateWanted reaches matchesHuntFilter');
+  assert.ok(/matchesHuntFilter\(d\.text, filterMode, \{[^}]*stateWanted,/.test(main), 'stateWanted reaches matchesHuntFilter');
   assert.ok(main.includes("require('./lib/grid-state')"));
   assert.ok(/qrz\.cached\(call\)/.test(main), 'cache first');
   const popHtml = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-popout.html'), 'utf8');
