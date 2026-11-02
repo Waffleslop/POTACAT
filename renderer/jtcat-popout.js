@@ -2621,9 +2621,9 @@ function _applyPopoutTheme(payload) {
   // filters). The seasonal fd/event options appear here as the select gets them.
   var huntBtn = document.getElementById('jp-hunt-btn');
   var huntTargetSel = document.getElementById('jp-hunt-target');
-  var HUNT_LABELS = { pota: 'POTA activators', sota: 'SOTA activators', all: 'anyone calling CQ', 'wanted-state': 'states I need', fd: 'Field Day stations', event: 'Event stations' };
-  var huntTarget = 'pota';
-  try { huntTarget = localStorage.getItem('jtcat-hunt-target') || 'pota'; } catch (e) {}
+  var HUNT_LABELS = { pota: 'POTA activators', sota: 'SOTA activators', all: 'Anyone calling CQ', 'wanted-state': 'States I need', fd: 'Field Day stations', event: 'Event stations' };
+  var huntTarget = 'all';
+  try { huntTarget = localStorage.getItem('jtcat-hunt-target') || 'all'; } catch (e) {}
   function reflectHuntUi() {
     if (!huntBtn || !huntTargetSel || !autoCqSelect) return;
     var mode = autoCqSelect.value || 'off';
@@ -2636,7 +2636,7 @@ function _applyPopoutTheme(payload) {
     });
     huntTargetSel.innerHTML = html;
     if (!Array.prototype.some.call(huntTargetSel.options, function(o) { return o.value === huntTarget; })) {
-      huntTarget = huntTargetSel.options.length ? huntTargetSel.options[0].value : 'pota';
+      huntTarget = huntTargetSel.options.length ? huntTargetSel.options[0].value : 'all';
     }
     huntTargetSel.value = huntTarget;
     huntBtn.textContent = on ? 'Hunting' : 'Hunt';
