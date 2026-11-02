@@ -1112,6 +1112,17 @@ function _applyPopoutTheme(payload) {
       badgesHtml: badges, entityHtml: entityStr,
     });
     row.addEventListener('dblclick', (function(decode) { return function() { onDecodeRowClick(decode); }; })(d));
+    // A station calling CQ gets a Call button on its row (Casey 2026-11-02):
+    // the double-click was the one thing nobody could discover. Same path.
+    if (c.isCq) {
+      var callBtn = document.createElement('button');
+      callBtn.type = 'button';
+      callBtn.className = 'jp-row-call';
+      callBtn.textContent = 'Call';
+      callBtn.title = 'Answer this station (the same as double-clicking the row)';
+      callBtn.addEventListener('click', (function(decode) { return function(e) { e.stopPropagation(); onDecodeRowClick(decode); }; })(d));
+      row.appendChild(callBtn);
+    }
     return row;
   }
 

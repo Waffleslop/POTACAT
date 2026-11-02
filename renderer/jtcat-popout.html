@@ -26,11 +26,17 @@
     /* Band Activity / My Activity divider (LZ3AW item 12), the horizontal twin of .jp-splitter. */
     .jp-hsplitter { height: 6px; cursor: row-resize; background: var(--bg-secondary); border-top: 1px solid var(--border-primary); border-bottom: 1px solid var(--border-primary); flex-shrink: 0; }
     .jp-hsplitter:hover, .jp-hsplitter.dragging { background: var(--accent-green, #4ecca3); }
-    .jp-decode-header { padding: 4px 8px; font-size: 11px; font-weight: bold; color: var(--text-secondary); background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
-    .jp-mini-btn { font-size: 9px; padding: 1px 6px; background: var(--bg-primary); color: var(--text-secondary); border: 1px solid var(--border-primary); border-radius: 3px; cursor: pointer; font-weight: normal; }
+    .jp-decode-header { padding: 6px 12px; font-size: 13px; font-weight: 900; letter-spacing: 1.2px; text-transform: uppercase; color: var(--text-dim, #888); background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; gap: 10px; }
+    .jp-decode-header .jtcat-filter-btn { font-size: 14px; font-weight: 700; height: 34px; padding: 0 12px; border-radius: 8px; letter-spacing: 0; text-transform: none; }
+    .jp-decode-header, .jp-decode-header .jtcat-filter-btn { white-space: nowrap; }
+    .jp-opt-label input[type="text"] { height: 40px; font-size: 16px; font-weight: 700; padding: 0 8px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-tertiary); color: var(--text-primary); }
+    .jp-opt-label #jp-hunt-min-db { width: 64px !important; text-align: center; }
+    .jp-opt-label #jp-hunt-min-db-band { width: 220px !important; }
+    .jp-decode-header #jp-search { width: 170px; height: 34px; font-size: 14px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border-primary); background: var(--bg-primary); color: var(--text-primary); }
+    .jp-mini-btn { font-size: 14px; font-weight: 700; height: 30px; padding: 0 12px; background: var(--bg-primary); color: var(--text-secondary); border: 1px solid var(--border-primary); border-radius: 8px; cursor: pointer; letter-spacing: 0; text-transform: none; }
     .jp-mini-btn:hover { color: var(--text-primary); border-color: var(--accent-blue); }
     .jp-decode-header span { font-weight: normal; color: var(--accent-blue); font-family: monospace; }
-    .jp-decode-list { flex: 1; overflow-y: auto; font-family: monospace; font-size: 12px; line-height: 1.6; padding: 2px 0; background: var(--bg-primary); }
+    .jp-decode-list { flex: 1; overflow-y: auto; font-family: monospace; font-size: 15px; line-height: 1.5; padding: 4px 0; background: var(--bg-primary); }
     .jp-map-pane { flex: 1; min-width: 0; display: flex; }
     .jp-map-pane.hidden { display: none; }
     .jp-map { flex: 1; width: 100%; height: 100%; }
@@ -41,14 +47,16 @@
     /* Constant border geometry (ft8-watchlist-stroke-parity spec): every row
        reserves the 1.5px stroke in transparent so a watchlist match
        appearing/disappearing never shifts layout. */
-    .jp-row { display: flex; gap: 6px; padding: 1px 8px; cursor: pointer; align-items: baseline; border: 1.5px solid transparent; border-radius: 6px; }
+    .jp-row { display: flex; gap: 10px; padding: 3px 10px; cursor: pointer; align-items: baseline; border: 1.5px solid transparent; border-radius: 6px; }
     .jp-row:hover { background: var(--bg-hover); }
+    .jp-row-call { align-self: center; height: 30px; padding: 0 14px; margin-left: 6px; border-radius: 8px; border: none; background: var(--accent-green, #4ecca3); color: var(--on-accent-green, #000); font: 700 14px system-ui, sans-serif; cursor: pointer; flex-shrink: 0; }
+    .jp-row-call:hover { filter: brightness(1.1); }
     /* My Activity inlines the cycle time per row (no separator line) — see jp-my-activity. */
     /* Time / dB / DT / DF / country: secondary (not dim) and 12 px — LZ3AW 2026-10-16. */
-    .jp-row .jp-time { min-width: 52px; text-align: right; color: var(--text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; padding-right: 4px; border-right: 1px solid var(--border-primary); margin-right: 2px; }
-    .jp-row .jp-db { min-width: 28px; text-align: right; color: var(--text-secondary); }
-    .jp-row .jp-dt { min-width: 30px; text-align: right; color: var(--text-secondary); font-size: 12px; }
-    .jp-row .jp-df { min-width: 36px; text-align: right; color: var(--text-secondary); }
+    .jp-row .jp-time { min-width: 66px; text-align: right; color: var(--text-secondary); font-size: 14px; font-variant-numeric: tabular-nums; padding-right: 4px; border-right: 1px solid var(--border-primary); margin-right: 2px; }
+    .jp-row .jp-db { min-width: 36px; text-align: right; color: var(--text-secondary); }
+    .jp-row .jp-dt { min-width: 42px; text-align: right; color: var(--text-secondary); font-size: 14px; }
+    .jp-row .jp-df { min-width: 48px; text-align: right; color: var(--text-secondary); }
     .jp-row .jp-msg { flex: 1; }
     .jp-row.jp-cq { background: rgba(0, 120, 0, 0.25); }
     .jp-row.jp-cq .jp-msg { color: var(--accent-green, #4ecca3); font-weight: bold; }
@@ -288,11 +296,11 @@
        Big tabular-num countdown + WSJT-X-style cycle progress bar, color-
        keyed RX (green) vs TX (red) so period phase reads from across the
        shack. The Sync indicator is status, not a control — it lives here. */
-    .jp-status-strip { display: flex; align-items: center; gap: 10px; padding: 3px 10px; background: var(--bg-secondary); border-top: 1px solid var(--border-primary); flex-shrink: 0; }
+    .jp-status-strip { display: flex; align-items: center; gap: 16px; padding: 8px 12px; background: var(--bg-secondary); border-top: 1px solid var(--border-primary); flex-shrink: 0; }
     .jp-cycle-bar { flex: 1; height: 8px; border-radius: 4px; background: var(--bg-primary); overflow: hidden; border: 1px solid var(--border-primary); }
     .jp-cycle-fill { height: 100%; width: 0%; background: var(--accent-green, #4ecca3); }
     .jp-cycle-fill.tx { background: var(--accent-red, #e94560); }
-    .jp-countdown-big { font-family: monospace; font-size: 16px; font-weight: 700; color: var(--text-primary); min-width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
+    .jp-countdown-big { font-family: monospace; font-size: 20px; font-weight: 700; color: var(--text-primary); min-width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
     .jp-btn { padding: 4px 12px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-tertiary); color: var(--text-primary); font-size: 12px; font-weight: 600; cursor: pointer; }
     .jp-btn:hover { background: var(--bg-hover); }
     .jp-btn.active { background: var(--accent-green, #4ecca3); color: var(--on-accent-green); border-color: var(--accent-green, #4ecca3); }
@@ -317,17 +325,17 @@
     @keyframes jp-tune-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
     /* S / SWR meters in the audio bar. Narrow on purpose — the bar already
        carries two sliders and has to survive a 600 px window. */
-    .jp-meter-group { display: flex; align-items: center; gap: 4px; flex-shrink: 0; margin-left: 8px; border-left: 1px solid var(--border-primary); padding-left: 8px; }
-    .jp-meter { width: 46px; height: 6px; background: var(--bg-tertiary, #0f1419); border: 1px solid var(--border-primary); border-radius: 3px; overflow: hidden; flex-shrink: 0; }
+    .jp-meter-group { display: flex; align-items: center; gap: 8px; flex-shrink: 0; margin-left: 12px; border-left: 1px solid var(--border-primary); padding-left: 12px; }
+    .jp-meter { width: 120px; height: 12px; background: var(--bg-tertiary, #0f1419); border: 1px solid var(--border-primary); border-radius: 3px; overflow: hidden; flex-shrink: 0; }
     .jp-meter-bar { display: block; height: 100%; width: 0; background: #4ecca3; transition: width 0.1s linear; }
-    .jp-meter-val { min-width: 30px; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-dim, #888); }
+    .jp-meter-val { min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-dim, #888); }
     /* Now lives in the QSO tracker header. flex 0 1 auto (not 1) so it
        shrinks to an ellipsis on a narrow window without eating the free
        space that pushes the × button to the far right. */
     /* Hidden while it only repeats the highlighted TX step (K3SBP 2026-10-18). */
     .jp-tx-msg.jp-tx-msg-dup { display: none; }
     .jp-qso-step.step-current.step-tx { cursor: text; }
-    .jp-tx-msg { flex: 0 1 auto; min-width: 0; font-size: 11px; font-family: monospace; color: var(--accent-blue); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
+    .jp-tx-msg { flex: 0 1 auto; min-width: 0; font-size: 16px; font-family: monospace; color: var(--accent-blue); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
     .jp-status { font-family: monospace; color: var(--text-dim); font-size: 11px; }
     /* PTT method chip — theme-token driven (no hardcoded hex). CAT = neutral
        informational state; VOX = caution (no CAT connected). */
@@ -365,31 +373,32 @@
     /* z-index 2000: Leaflet's map panes/controls (the attribution box) go up
        to 1000 and were floating over the popover at 900; the QSO toast (9999)
        stays above everything. */
-    .jp-options-pop { position: fixed; right: 8px; bottom: 72px; z-index: 2000; width: 380px; max-width: calc(100vw - 16px); max-height: 60vh; overflow-y: auto; background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,0.5); padding: 6px; }
+    .jp-options-pop { position: fixed; right: 12px; bottom: 176px; z-index: 2000; width: 620px; max-width: calc(100vw - 16px); max-height: calc(100vh - 200px); overflow-y: auto; background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,0.5); padding: 6px; }
     .jp-options-pop.hidden { display: none; }
-    .jp-opt-section { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-dim, #888); padding: 6px 8px 2px; }
-    .jp-opt-row { display: block; width: 100%; text-align: left; background: none; border: none; border-radius: 6px; padding: 6px 8px 6px 30px; cursor: pointer; position: relative; color: var(--text-primary); font-family: inherit; }
+    .jp-opt-section { font-size: 13px; font-weight: 900; text-transform: uppercase; letter-spacing: 1.2px; color: var(--text-dim, #888); padding: 12px 10px 4px; }
+    .jp-opt-warn { margin: 4px 10px 6px; padding: 8px 12px; border-radius: 8px; background: rgba(255, 143, 69, 0.15); color: #ff8f45; font-size: 14px; font-weight: 600; }
+    .jp-opt-row { display: block; width: 100%; text-align: left; background: none; border: none; border-radius: 6px; padding: 10px 12px 10px 44px; cursor: pointer; position: relative; color: var(--text-primary); font-family: inherit; }
     .jp-opt-row:hover { background: var(--bg-hover); }
-    .jp-opt-row::before { content: '\2610'; position: absolute; left: 9px; top: 5px; font-size: 14px; color: var(--text-dim, #888); }
+    .jp-opt-row::before { content: '\2610'; position: absolute; left: 12px; top: 8px; font-size: 22px; color: var(--text-dim, #888); }
     .jp-opt-row.active::before { content: '\2611'; color: var(--accent-green, #4ecca3); }
     .jp-opt-row.jp-opt-num-row { cursor: default; }
     .jp-opt-row.jp-opt-num-row::before { content: ''; }
-    .jp-opt-label { display: block; font-size: 12px; font-weight: 600; }
-    .jp-opt-label input[type="number"] { width: 44px; font-size: 11px; padding: 1px 3px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-tertiary); color: var(--text-primary); margin: 0 2px; }
-    .jp-opt-help { display: block; font-size: 10px; color: var(--text-dim, #888); margin-top: 2px; line-height: 1.35; }
+    .jp-opt-label { display: block; font-size: 16px; font-weight: 700; line-height: 1.4; }
+    .jp-opt-label input[type="number"] { width: 64px; height: 40px; text-align: center; font-size: 16px; font-weight: 700; padding: 0 4px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-tertiary); color: var(--text-primary); margin: 0 2px; }
+    .jp-opt-help { display: block; font-size: 14px; color: var(--text-dim, #888); margin-top: 4px; line-height: 1.4; }
 
     /* QSO Tracker */
-    .jp-qso-tracker { padding: 6px 10px; background: var(--bg-tertiary, #1a1a2e); border-top: 1px solid var(--border-primary); flex-shrink: 0; }
+    .jp-qso-tracker { padding: 10px 12px; background: var(--bg-tertiary, #1a1a2e); border-top: 1px solid var(--border-primary); flex-shrink: 0; }
     .jp-qso-tracker.hidden { display: none; }
-    .jp-qso-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-    .jp-qso-label { font-weight: 600; font-size: 13px; color: var(--text-primary); }
-    .jp-qso-skip { background: none; border: 1px solid #4fc3f7; color: #4fc3f7; border-radius: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer; line-height: 1; font-weight: 600; }
+    .jp-qso-header { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
+    .jp-qso-label { font-weight: 800; font-size: 18px; color: var(--text-primary); }
+    .jp-qso-skip { background: none; border: 1px solid #4fc3f7; color: #4fc3f7; border-radius: 8px; padding: 0 14px; height: 34px; font-size: 15px; cursor: pointer; line-height: 1; font-weight: 600; }
     .jp-qso-skip:hover { background: #4fc3f7; color: #000; }
-    .jp-qso-cancel { margin-left: auto; background: none; border: 1px solid #e94560; color: #e94560; border-radius: 4px; padding: 2px 8px; font-size: 14px; cursor: pointer; line-height: 1; }
+    .jp-qso-cancel { margin-left: auto; background: none; border: 1px solid #e94560; color: #e94560; border-radius: 8px; width: 36px; height: 36px; padding: 0; font-size: 20px; cursor: pointer; line-height: 1; }
     .jp-qso-cancel:hover { background: var(--accent-red, #e94560); color: var(--on-accent-red); }
     .jp-qso-steprow { display: flex; align-items: center; gap: 8px; }
-    .jp-qso-steps { display: flex; flex-wrap: wrap; gap: 2px; align-items: center; font-family: monospace; font-size: 11px; flex: 1 1 auto; min-width: 0; }
-    .jp-qso-step { display: flex; align-items: center; gap: 2px; padding: 3px 6px; border-radius: 3px; white-space: nowrap; background: var(--bg-secondary); color: var(--text-dim); border: 1px solid transparent; }
+    .jp-qso-steps { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-family: monospace; font-size: 15px; flex: 1 1 auto; min-width: 0; }
+    .jp-qso-step { display: flex; align-items: center; gap: 2px; height: 32px; padding: 0 10px; border-radius: 6px; white-space: nowrap; background: var(--bg-secondary); color: var(--text-dim); border: 1px solid var(--border-primary); }
     .jp-qso-step.step-done { color: var(--text-tertiary, #666); text-decoration: line-through; opacity: 0.6; }
     .jp-qso-step.step-current { font-weight: bold; }
     .jp-qso-step.step-current.step-tx { background: var(--accent-red, #e94560); color: var(--on-accent-red); border-color: #e94560; }
@@ -435,6 +444,9 @@
     @keyframes jtcat-arc-flow { from { stroke-dashoffset: 28; } to { stroke-dashoffset: 0; } }
     @keyframes jtcat-arc-flow-rev { from { stroke-dashoffset: 0; } to { stroke-dashoffset: 28; } }
 
+    .jtcat-toolbar .jtcat-filter-btn { height: 40px; padding: 0 14px; font-size: 15px; border-radius: 8px; }
+    .jtcat-toolbar .jtcat-cycle { font-size: 15px; }
+    .jp-cycle-bar { height: 10px; border-radius: 5px; }
     /* Controls (2026-11-02): two rows, the buttons are the actions. */
     .jp-controls { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 12px; }
     .jp-ctl-main { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 200px 150px 96px 96px; gap: 10px; align-items: stretch; }
@@ -558,11 +570,11 @@
       </select>
     </div>
     </div>
-    <span id="jp-radio-freq" style="font-size:12px;font-weight:bold;color:#4fc3f7;white-space:nowrap;font-family:monospace;" title="Radio frequency">—</span>
+    <span id="jp-radio-freq" style="font-size:15px;font-weight:bold;color:#4fc3f7;white-space:nowrap;font-family:monospace;" title="Radio frequency">—</span>
     <span id="jp-ptt-mode" class="jp-ptt-mode is-cat" title="PTT method" style="display:none;">PTT: CAT</span>
-    <span id="jp-tx-freq-label" style="font-size:12px;font-weight:bold;color:#ff4444;white-space:nowrap;cursor:pointer;" title="Click to set TX frequency">TX: 1500 Hz</span>
+    <span id="jp-tx-freq-label" style="font-size:15px;font-weight:bold;color:#ff4444;white-space:nowrap;cursor:pointer;" title="Click to set TX frequency">TX: 1500 Hz</span>
     <div class="jtcat-status">
-      <span id="jp-utc-clock" style="font-size:11px;font-family:monospace;color:#4fc3f7;white-space:nowrap;" title="UTC date & time"></span>
+      <span id="jp-utc-clock" style="font-size:15px;font-family:monospace;color:#4fc3f7;white-space:nowrap;" title="UTC date & time"></span>
       <span id="jp-cycle" class="jtcat-cycle">&mdash;</span>
     </div>
     <button id="jp-multi-btn" class="jtcat-filter-btn" title="Multi-slice: decode multiple bands simultaneously" style="margin-left:4px;">Multi</button>
@@ -632,7 +644,7 @@
   <div class="jp-main">
     <div class="jp-decode-pane">
       <div class="jp-decode-section">
-        <div class="jp-decode-header">Band Activity <div style="display:flex;gap:4px;align-items:center;"><input type="text" id="jp-search" placeholder="Filter..." title="One or more callsigns or words, separated by commas or spaces: a line shows if it contains any of them" style="width:70px;font-size:10px;padding:1px 4px;border:1px solid var(--border-primary);background:var(--bg-primary);color:var(--text-primary);border-radius:3px;" spellcheck="false"><button id="jp-cq-filter" class="jtcat-filter-btn" title="CQ/73 only">CQ/73</button><button id="jp-wanted-filter" class="jtcat-filter-btn" title="Show only needed DXCC/grid/call">Wanted</button><button id="jp-event-filter" class="jtcat-filter-btn" title="Show only tracked-event stations you still need (13 Colonies etc.)">Event</button><button id="jp-sort-signal" class="jtcat-filter-btn" title="Sort by signal strength (strongest first)">dB</button><button id="jp-clear" class="jtcat-filter-btn" title="Clear all decodes">Clear</button></div></div>
+        <div class="jp-decode-header">Band Activity <div style="display:flex;gap:4px;align-items:center;"><input type="text" id="jp-search" placeholder="Filter by call or word" title="One or more callsigns or words, separated by commas or spaces: a line shows if it contains any of them" spellcheck="false"><button id="jp-cq-filter" class="jtcat-filter-btn" title="Only CQs, 73s and calls to me">CQ &amp; 73</button><button id="jp-wanted-filter" class="jtcat-filter-btn" title="Show only needed DXCC/grid/call">Wanted</button><button id="jp-event-filter" class="jtcat-filter-btn" title="Show only tracked-event stations you still need (13 Colonies etc.)">Event</button><button id="jp-sort-signal" class="jtcat-filter-btn" title="Sort by signal strength">Strongest first</button><button id="jp-clear" class="jtcat-filter-btn" title="Clear all decodes">Clear</button></div></div>
         <div id="jp-band-activity" class="jp-decode-list">
           <div class="jp-empty">Waiting for decodes...</div>
         </div>
@@ -855,9 +867,9 @@
   </div>
 
   <!-- Audio controls -->
-  <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px 8px;padding:2px 10px;font-size:11px;color:var(--text-dim,#888);background:var(--bg-secondary);border-top:1px solid var(--border-primary);flex-shrink:0;">
+  <div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;padding:6px 12px;font-size:14px;color:var(--text-secondary);background:var(--bg-secondary);border-top:1px solid var(--border-primary);flex-shrink:0;">
     <span style="flex-shrink:0;">RX</span>
-    <input type="range" id="jp-rx-gain" min="0" max="300" value="100" style="width:70px;" title="RX Gain % — remembered per band, so changing band restores the level you last used there">
+    <input type="range" id="jp-rx-gain" min="0" max="300" value="100" style="width:110px;" title="RX Gain % — remembered per band, so changing band restores the level you last used there">
     <span id="jp-rx-gain-val" style="min-width:32px;text-align:right;">100%</span>
     <!-- TX Pwr is the RADIO's RF power setting, in watts — the same control as
          the Rig panel's TX Power slider, through the same set-tx-power path.
@@ -867,7 +879,7 @@
          to leave behind, invisible on Flex Direct). -->
     <span id="jp-rf-power-group" class="jp-meter-group hidden" title="Radio RF power (watts) — the radio's own TX power setting">
       <span style="flex-shrink:0;">TX Pwr</span>
-      <input type="range" id="jp-rf-power" min="0" max="100" step="1" value="0" style="width:80px;accent-color:#e94560;">
+      <input type="range" id="jp-rf-power" min="0" max="100" step="1" value="0" style="width:110px;accent-color:#e94560;">
       <select id="jp-rf-power-select" class="hidden" style="font-size:11px;background:var(--bg-tertiary,#0f1419);color:var(--text-primary);border:1px solid var(--border-primary);border-radius:3px;padding:0 2px;"></select>
       <span id="jp-rf-power-val" style="min-width:36px;text-align:right;font-variant-numeric:tabular-nums;">&mdash;</span>
     </span>
@@ -877,7 +889,7 @@
          sent at full scale — so it is dimmed there. -->
     <span id="jp-tx-drive-group" class="jp-meter-group" title="Audio drive % into the radio (logarithmic — fine control at the low end). Sets modulation level, not RF power; TX Pwr is the radio's power.">
       <span style="flex-shrink:0;">Drive</span>
-      <input type="range" id="jp-tx-gain" min="0" max="100" value="100" style="width:56px;">
+      <input type="range" id="jp-tx-gain" min="0" max="100" value="100" style="width:100px;">
       <span id="jp-tx-gain-val" style="min-width:32px;text-align:right;">100%</span>
     </span>
     <!-- Radio meters. S is live on RX; PWR and SWR are only measurable DURING
@@ -1034,43 +1046,43 @@
        wiring and settings round-trip are unchanged; only the presentation
        moved from cryptic bar toggles to labeled rows with helper text. -->
   <div id="jp-options-pop" class="jp-options-pop hidden">
-    <div class="jp-opt-section">QSO behavior</div>
+    <div class="jp-opt-section">Contacts</div>
     <button id="jp-answer-callers" class="jp-opt-row active">
-      <span class="jp-opt-label">Answer stations calling me</span>
+      <span class="jp-opt-label">Answer stations that call me</span>
       <span class="jp-opt-help">While Hunt is on and idle, reply to anyone calling your callsign directly — e.g. a station you gave up on that finishes its QSO and calls you back. Calls already in your log are skipped.</span>
     </button>
     <button id="jp-skip-tx1" class="jp-opt-row">
-      <span class="jp-opt-label">Skip grid — faster QSOs</span>
+      <span class="jp-opt-label">Faster contacts: send a report instead of my grid</span>
       <span class="jp-opt-help">Answer CQs with a signal report instead of your grid (WSJT-X "skip Tx1"). One full cycle shorter each way.</span>
     </button>
     <button id="jp-hold-tx" class="jp-opt-row">
-      <span class="jp-opt-label">Hold TX frequency</span>
+      <span class="jp-opt-label">Stay on my own audio frequency</span>
       <span class="jp-opt-help">Keep your TX audio offset fixed instead of moving to each station you work — hold a clear spot in the passband.</span>
     </button>
     <label class="jp-opt-row jp-opt-num-row">
-      <span class="jp-opt-label">Give up after <input id="jp-max-attempts" type="number" min="1" max="60" value="12"> tries</span>
+      <span class="jp-opt-label">Stop repeating a message after <input id="jp-max-attempts" type="number" min="1" max="60" value="12"> tries</span>
       <span class="jp-opt-help">Stop repeating an unanswered message after this many transmissions. If signal reports were exchanged both ways, the QSO is logged and a final 73 is sent first.</span>
     </label>
     <label class="jp-opt-row jp-opt-num-row">
-      <span class="jp-opt-label">Worked-before expires after <input id="jp-rework-days" type="number" min="0" max="3650" value="0"> days</span>
+      <span class="jp-opt-label">Call a station again after <input id="jp-rework-days" type="number" min="0" max="3650" value="0"> days</span>
       <span class="jp-opt-help">How long a logged contact keeps Hunt and Auto CQ from calling that station again on the same band and mode. 0 = forever. A station spotted as an activator is always fair game unless you already worked them at that park today — a new park or a new UTC day counts fresh, matching program rules.</span>
     </label>
     <label class="jp-opt-row jp-opt-num-row">
-      <span class="jp-opt-label">Hunt: don't call below <input id="jp-hunt-min-db" type="text" inputmode="numeric" maxlength="4" placeholder="off" style="width:44px;"> dB</span>
+      <span class="jp-opt-label">Do not call anyone weaker than <input id="jp-hunt-min-db" type="text" inputmode="numeric" maxlength="4" placeholder="off" style="width:44px;"> dB</span>
       <span class="jp-opt-help">Hunt only answers a CQ at least this strong, so it doesn't start contacts your station is unlikely to finish. Blank = call any signal. You can still double-click a weaker station to call it yourself.</span>
       <span class="jp-opt-label" style="margin-top:4px;">By band: <input id="jp-hunt-min-db-band" type="text" maxlength="120" placeholder="e.g. 20m -18, 6m -12" style="width:170px;"></span>
       <span class="jp-opt-help" id="jp-hunt-min-db-band-help">A band listed here uses its own level; any other band uses the one above.</span>
     </label>
     <label class="jp-opt-row jp-opt-num-row">
-      <span class="jp-opt-label">Don't log the same station again for <input id="jp-relog-min" type="number" min="0" max="120" value="15"> minutes</span>
+      <span class="jp-opt-label">Do not log the same station twice within <input id="jp-relog-min" type="number" min="0" max="120" value="15"> minutes</span>
       <span class="jp-opt-help">If a station repeats their report after you sent RR73, answering them again is the same contact, not a new one. Within this many minutes on the same band and mode, the RR73 still goes out but no second log entry is made. 0 = log every completed exchange.</span>
     </label>
     <button id="jp-hunt-spotted" class="jp-opt-row">
-      <span class="jp-opt-label">Hunt spotted activators calling plain CQ</span>
+      <span class="jp-opt-label">Hunt activators who call a plain CQ</span>
       <span class="jp-opt-help">POTA and SOTA hunt normally look for "CQ POTA" or "CQ SOTA" in the message, but most activators just call CQ. With this on, a station the live spot list places at a park or summit is hunted whenever you hear them call, whatever their CQ says — and the QSO still logs with their reference. Off = only an explicit CQ POTA / CQ SOTA counts.</span>
     </button>
     <button id="jp-mode-hop" class="jp-opt-row">
-      <span class="jp-opt-label">Switch FTx mode when this one goes quiet</span>
+      <span class="jp-opt-label">Try FT4 and FT2 on the same band when it goes quiet</span>
       <span class="jp-opt-help">While Hunt or Auto CQ is running, if nobody you could work has called for a few minutes, move between FT8, FT4 and FT2 on the band you are already on — 20m FT8 becomes 20m FT4, and so on. The band never changes, so the antenna and tuner are never asked to follow. Stations already worked on this band count as fresh contacts in another mode.</span>
     </button>
     <label class="jp-opt-row jp-opt-num-row">
@@ -1093,7 +1105,7 @@
       <span class="jp-opt-label">Edit watchlist colors (opens Settings)</span>
       <span class="jp-opt-help">Decodes matching your watchlist groups fill in each group's color. Edit the lists, colors, and CQ tags (NA, POTA...) in the main window's Settings - this opens them.</span>
     </button>
-    <div class="jp-opt-section">Display</div>
+    <div class="jp-opt-section">The picture</div>
     <label class="jp-opt-row jp-opt-num-row">
       <span class="jp-opt-label">Waterfall speed <input id="jp-wf-speed" type="number" min="1" max="60" step="1" value="60"> lines/sec</span>
       <span class="jp-opt-help" id="jp-wf-speed-help">How fast the waterfall scrolls.</span>
@@ -1106,13 +1118,14 @@
       <span class="jp-opt-label"><input type="checkbox" id="jp-bandscope-toggle"> Band scope strip</span>
       <span class="jp-opt-help">The radio's own spectrum above the audio waterfall — the FT-710 streams it over USB. Click it to tune. The floor above applies to it too.</span>
     </label>
-    <div class="jp-opt-section">Special modes</div>
+    <div class="jp-opt-section">Special events only</div>
+    <div class="jp-opt-warn">Leave these off for normal FT8 and POTA. Each one changes what goes on the air.</div>
     <button id="jp-fd-toggle" class="jp-opt-row">
-      <span class="jp-opt-label">Field Day</span>
+      <span class="jp-opt-label">ARRL Field Day</span>
       <span class="jp-opt-help">ARRL Field Day weekend: send CQ FD and exchange class + section (e.g. 2A EMA) instead of grid and report. During FD week this also appears in the Hunt menu; while on, an FD chip and the exchange box show in the bar.</span>
     </button>
     <button id="jp-hound-toggle" class="jp-opt-row">
-      <span class="jp-opt-label">Hound (DXpedition)</span>
+      <span class="jp-opt-label">DXpedition Hound</span>
       <span class="jp-opt-help">For working rare DXpeditions only — calls a "Fox" station running WSJT-X Fox/Hound split: you call above 1000 Hz, auto-QSY for the report, and no 73 is sent. Leave off for normal FT8 and POTA.</span>
     </button>
   </div>
