@@ -569,7 +569,7 @@ Modern rigs with a built-in USB codec often expose *two* audio streams and route
 **Icom (IC-705 / IC-7300 / IC-7610 / IC-9700)**
 - Menu → SET → Connectors → *USB AF/IF Output* → **AF** (not "IF"), and *AF Output Level* non-zero.
 - If you see two CODECs listed ("USB Audio CODEC" and "USB Audio CODEC 2"), pick the one whose name matches the rig in Windows' Sound panel while you're on voice USB — that's the main path.
-- On the IC-7610, *USB SEND* / *USB Keying* should be left untouched — those are TX paths.
+- *USB SEND* / *USB Keying* do not affect receive audio, so they are not part of this fix. For CW, *USB Keying (CW)* must match POTACAT's CW keying line (DTR by default); the rig editor's Setup instructions give the exact menu path.
 
 **Kenwood (TS-480 / TS-590 / TS-890 / TS-990)**
 - *Menu 75: USB Audio Input/Output Selection* → **USB** (not ACC2) so voice RX flows on the USB codec.
