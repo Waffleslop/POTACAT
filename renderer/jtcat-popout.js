@@ -445,12 +445,8 @@ function _applyPopoutTheme(payload) {
       enableTxBtn.classList.toggle('active', txEnabled);
       enableTxBtn.textContent = txEnabled ? 'TX On' : 'TX Off';
     }
-    // STOP (Halt TX) shows the state now: red "TX is on" while armed.
-    if (haltTxBtn) {
-      haltTxBtn.classList.toggle('armed', txEnabled);
-      var sub = document.getElementById('jp-stop-sub');
-      if (sub) sub.textContent = txEnabled ? 'TX is on' : 'Halt TX';
-    }
+    // HALT shows the state now: solid red while TX is on.
+    if (haltTxBtn) haltTxBtn.classList.toggle('armed', txEnabled);
   }
   var haltTxBtn = document.getElementById('jp-halt-tx');
   var tuneBtn = document.getElementById('jp-tune');
@@ -3226,14 +3222,13 @@ function _applyPopoutTheme(payload) {
   }
 
   // --- Band and mode picker (Casey 2026-11-02; the phone's Digi picker) ---
-  // The toolbar's one "20m FT8 14,074.0 kHz" button and the dialog it opens.
+  // The toolbar's one "20m FT8" button and the dialog it opens.
   // The hidden #jp-band / #jp-mode selects stay the sources of truth: the
   // picker only PICKS until Switch, then drives them exactly as the dropdowns
   // did (selectBand for a band, the mode select's change event for a mode).
   var bandModeBtn = document.getElementById('jp-bandmode');
   var bmBandEl = document.getElementById('jp-bm-band');
   var bmModeEl = document.getElementById('jp-bm-mode');
-  var bmDialEl = document.getElementById('jp-bm-dial');
   var pickerEl = document.getElementById('jp-picker');
   var pkModesEl = document.getElementById('jp-pk-modes');
   var pkBandsEl = document.getElementById('jp-pk-bands');
@@ -3241,25 +3236,24 @@ function _applyPopoutTheme(payload) {
   var pkHintEl = document.getElementById('jp-pk-hint');
   var PK_MODE_LABEL = { FT8: 'FT8', FT4: 'FT4', FT2: 'FT2', WSPR: 'WSPR', PSK31: 'PSK', JTTY: 'JTTY' };
   var pk = { mode: '', band: '' };
-  function pkFmtKhz(k) {
+  // Dials in MHz everywhere (14.074, 7.0475, 14.0956): three places, more
+  // only when the dial has them.
+  function pkFmtMhz(k) {
     var n = Number(k);
     if (!isFinite(n) || n <= 0) return '';
-    return n.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' kHz';
+    return (n / 1000).toLocaleString('en-US', { useGrouping: false, minimumFractionDigits: 3, maximumFractionDigits: 4 }) + ' MHz';
   }
   function pkActiveBand() {
     var a = document.querySelector('.jp-band-opt.active');
     return a ? a.dataset.band : (bandSelect ? bandSelect.value : '');
   }
   function pkModeLabel(m) { return PK_MODE_LABEL[m] || m; }
-  // The toolbar button follows the selects: band, mode and the band's dial for
-  // the current mode (data-freq, which updateBandFreqs keeps per mode).
+  // The toolbar button follows the selects: band and mode.
   function syncBandMode() {
     if (!bandModeBtn) return;
     var band = pkActiveBand();
-    var opt = document.querySelector('.jp-band-opt[data-band="' + band + '"]');
     if (bmBandEl) bmBandEl.textContent = band || '--';
     if (bmModeEl) bmModeEl.textContent = pkModeLabel(modeSelect.value);
-    if (bmDialEl) bmDialEl.textContent = opt ? pkFmtKhz(opt.dataset.freq) : '';
   }
   function pkIsOpen() { return !!pickerEl && !pickerEl.classList.contains('hidden'); }
   function pkRender() {
@@ -3306,8 +3300,8 @@ function _applyPopoutTheme(payload) {
         b.setAttribute('aria-label', band + ', no ' + pkModeLabel(pk.mode) + ' frequency');
         b.innerHTML = '<span class="jp-pk-band-name">' + esc(band) + '</span><span class="jp-pk-band-dial">No ' + esc(pkModeLabel(pk.mode)) + ' dial</span>';
       } else {
-        b.setAttribute('aria-label', band + ', ' + pkFmtKhz(khz).replace(' kHz', ' kilohertz'));
-        b.innerHTML = '<span class="jp-pk-band-name">' + esc(band) + '</span><span class="jp-pk-band-dial">' + esc(pkFmtKhz(khz)) + '</span>';
+        b.setAttribute('aria-label', band + ', ' + pkFmtMhz(khz).replace(' MHz', ' megahertz'));
+        b.innerHTML = '<span class="jp-pk-band-name">' + esc(band) + '</span><span class="jp-pk-band-dial">' + esc(pkFmtMhz(khz)) + '</span>';
         b.addEventListener('click', function() { pk.band = band; pkRender(); });
       }
       pkBandsEl.appendChild(b);
@@ -3322,7 +3316,7 @@ function _applyPopoutTheme(payload) {
     }
     if (pkHintEl) {
       pkHintEl.textContent = same ? 'Pick a band or mode to switch. Nothing changes until you press the button.'
-        : (dial ? 'Tunes the radio to ' + pkFmtKhz(dial) + ' and keeps decoding.' : 'Pick a band with a ' + pkModeLabel(pk.mode) + ' dial.');
+        : (dial ? 'Tunes the radio to ' + pkFmtMhz(dial) + ' and keeps decoding.' : 'Pick a band with a ' + pkModeLabel(pk.mode) + ' dial.');
     }
   }
   function isBandHidden(band) {

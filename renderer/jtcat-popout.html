@@ -451,12 +451,13 @@
     .jp-cq-group { display: flex; gap: 8px; }
     .jp-btn.jp-big { height: 40px; border-radius: 8px; font-size: 15px; font-weight: 700; padding: 0 16px; }
     .jp-btn.jp-cq-btn.live { background: var(--accent-red, #e94560); color: var(--on-accent-red); border-color: #e94560; }
-    .jp-select.jp-big-select { height: 40px; border-radius: 8px; font-size: 15px; font-weight: 700; padding: 0 10px; }
-    .jp-btn.jp-stop { height: 40px; border-radius: 8px; display: inline-flex; align-items: center; gap: 8px; padding: 0 16px; background: transparent; color: var(--accent-red, #e94560); border: 1.5px solid var(--accent-red, #e94560); }
+    .jp-hunt-box { display: inline-flex; align-items: center; gap: 4px; padding: 3px; border: 1px solid var(--border-primary); border-radius: 10px; background: var(--bg-secondary); }
+    .jp-hunt-box .jp-btn, .jp-hunt-box .jp-select { height: 34px; border-radius: 7px; font-size: 15px; font-weight: 700; }
+    .jp-hunt-box .jp-btn { padding: 0 14px; }
+    .jp-hunt-box .jp-select { padding: 0 8px; }
+    .jp-btn.jp-stop { font-size: 15px; font-weight: 800; letter-spacing: 0.5px; background: transparent; color: var(--accent-red, #e94560); border: 1.5px solid var(--accent-red, #e94560); }
     .jp-btn.jp-stop:hover { background: rgba(233, 69, 96, 0.15); }
     .jp-btn.jp-stop.armed { background: var(--accent-red, #e94560); color: var(--on-accent-red); }
-    .jp-stop-word { font-size: 15px; font-weight: 800; }
-    .jp-stop-sub { font-size: 12px; font-weight: 600; opacity: 0.85; }
     .jp-ctl-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
     .jp-ctl-label { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text-primary); }
     .jp-ctl-row .jp-select { height: 36px; font-size: 14px; font-weight: 600; padding: 0 8px; border-radius: 8px; }
@@ -474,7 +475,6 @@
     .jp-bandmode:hover { background: var(--bg-hover); }
     .jp-bandmode .jp-bm-band { font-size: 18px; font-weight: 800; }
     .jp-bandmode .jp-bm-mode { font-size: 18px; font-weight: 800; color: var(--accent-blue, #4fc3f7); }
-    .jp-bandmode .jp-bm-dial { font-size: 15px; font-weight: 600; color: var(--text-secondary); font-family: monospace; font-variant-numeric: tabular-nums; }
     .jp-bandmode .jp-bm-caret { color: var(--accent-blue, #4fc3f7); }
     .jp-picker { position: fixed; inset: 0; z-index: 3000; display: flex; align-items: flex-start; justify-content: center; padding-top: 56px; }
     .jp-picker.hidden { display: none; }
@@ -532,7 +532,6 @@
     <button type="button" id="jp-bandmode" class="jp-bandmode" title="Band and mode (press B)" aria-haspopup="dialog">
       <span id="jp-bm-band" class="jp-bm-band">20m</span>
       <span id="jp-bm-mode" class="jp-bm-mode">FT8</span>
-      <span id="jp-bm-dial" class="jp-bm-dial">14,074.0 kHz</span>
       <svg class="jp-bm-caret" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 5l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
     </button>
     <div class="jp-src-selects" hidden>
@@ -639,7 +638,7 @@
   <div class="jp-main">
     <div class="jp-decode-pane">
       <div class="jp-decode-section">
-        <div class="jp-decode-header">Band Activity <div style="display:flex;gap:4px;align-items:center;"><input type="text" id="jp-search" placeholder="Filter by call or word" title="One or more callsigns or words, separated by commas or spaces: a line shows if it contains any of them" spellcheck="false"><button id="jp-cq-filter" class="jtcat-filter-btn" title="Only CQs, 73s and calls to me">CQ &amp; 73</button><button id="jp-wanted-filter" class="jtcat-filter-btn" title="Show only needed DXCC/grid/call">Wanted</button><button id="jp-event-filter" class="jtcat-filter-btn" title="Show only tracked-event stations you still need (13 Colonies etc.)">Event</button><button id="jp-sort-signal" class="jtcat-filter-btn" title="Sort by signal strength (strongest first)">dB</button><button id="jp-clear" class="jtcat-filter-btn" title="Clear all decodes">Clear</button></div></div>
+        <div class="jp-decode-header">Band Activity <div style="display:flex;gap:4px;align-items:center;"><input type="text" id="jp-search" placeholder="Filter by call or word" title="One or more callsigns or words, separated by commas or spaces: a line shows if it contains any of them" spellcheck="false"><button id="jp-cq-filter" class="jtcat-filter-btn" title="Only CQs, 73s and calls to me">CQ &amp; 73</button><button id="jp-wanted-filter" class="jtcat-filter-btn" title="Show only needed DXCC/grid/call">Wanted</button><button id="jp-sort-signal" class="jtcat-filter-btn" title="Sort by signal strength (strongest first)">dB</button><button id="jp-event-filter" class="jtcat-filter-btn" title="Show only tracked-event stations you still need (13 Colonies etc.)">Event</button><button id="jp-clear" class="jtcat-filter-btn" title="Clear all decodes">Clear</button></div></div>
         <div id="jp-band-activity" class="jp-decode-list">
           <div class="jp-empty">Waiting for decodes...</div>
         </div>
@@ -966,40 +965,22 @@
        preferences moved to the ⚙ Options popover below; special modes
        (FD/Hound) surface as lit chips only while active, and Field Day also
        appears inside the Hunt menu during the FD window. -->
-  <!-- Controls — rebuilt 2026-11-02 (Casey, design in the JTCAT picker canvas):
-       the buttons ARE the actions, large enough for older eyes. Row one: Call
-       CQ (red while a CQ is on the air), Run (ULTRACAT, hidden until unlocked),
-       Hunt with what to hunt beside it, STOP (= Halt TX, red while TX is on),
-       Tune, ATU. Row two: who the CQ calls, which half of the cycle, what it
-       sends, then Logbook and Options. Element ids are unchanged so every
+  <!-- Controls — rebuilt 2026-11-02 (Casey): the buttons ARE the actions. Line
+       one is CQ and its settings: Call CQ (red while a CQ is on the air), Run
+       (ULTRACAT, hidden until unlocked), who it calls, which half of the cycle,
+       what it sends. Line two: Hunt and what to hunt in one box, HALT (red
+       while TX is on), Tune, ATU, then Logbook and Options. Element ids are unchanged so every
        handler, test and ECHOCAT path still finds them. -->
   <div class="jp-controls">
-    <div class="jp-ctl-main">
+    <div class="jp-ctl-row">
       <div class="jp-cq-group">
         <button id="jp-cq" class="jp-btn jp-big jp-cq-btn" title="Call CQ and work whoever answers. Pressing it turns TX on.">Call CQ</button>
         <!-- ULTRACAT — run mode, renamed from "Auto CQ" to end the CQ / Hunt /
              Auto CQ name collision (hidden until the π unlock) -->
         <button id="jp-full-auto-cq" class="jp-btn jp-big jp-ultracat ultracat-gated hidden" title="ULTRACAT run mode: call CQ, work each answerer, then call CQ again. Turns Hunt off while running. Attended operation only.">Run</button>
       </div>
-      <!-- Hunt = answer OTHERS' CQs. The button is on/off; the select beside it
-           is what to hunt. The hidden #jp-auto-cq select below stays the one
-           value main and the phone see (off / pota / sota / all / wanted-state,
-           plus the seasonal fd and event options JS appends); the two controls
-           drive it and follow it (reflectHuntUi in jtcat-popout.js). -->
-      <button id="jp-hunt-btn" class="jp-btn jp-big jp-hunt-btn" aria-pressed="false" title="Answer other stations' CQs for me, one contact at a time, and log each one. Pick what to hunt on the right.">Hunt</button>
-      <select id="jp-hunt-target" class="jp-select jp-big-select" title="What Hunt answers"></select>
-      <!-- STOP is Halt TX: the one halt in main (tones, every PTT route, Run,
-           Hunt, the WSPR beacon). Red while TX is on, outlined while it is not. -->
-      <button id="jp-halt-tx" class="jp-btn jp-halt jp-stop" title="Halt TX: stop transmitting now, everywhere"><span class="jp-stop-word">STOP</span><span id="jp-stop-sub" class="jp-stop-sub">Halt TX</span></button>
-      <button id="jp-tune" class="jp-btn jp-big jp-tune" title="WSJT-X-style 90s steady-tone tune (click again to stop early)">Tune</button>
-      <!-- Antenna tuner. Distinct from Tune: that one transmits a steady tone,
-           this runs the RADIO's ATU match cycle. Also the way to clear a
-           tripped SWR guard without leaving the popout. -->
-      <button id="jp-atu" class="jp-btn jp-big jp-atu" title="Run the radio's antenna tuner match cycle. (Tune is a steady-tone TX carrier — a different thing.)">ATU</button>
-    </div>
-    <div class="jp-ctl-row">
       <!-- TX state, kept for every path that arms/disarms through setTxOnState
-           (the STOP button shows the state now; this stays hidden). -->
+           (HALT shows the state now; this stays hidden). -->
       <button id="jp-enable-tx" class="jp-btn" hidden>TX Off</button>
       <!-- Chase target: what you call CQ to (CQ <tag> …) AND the entity whose
            decodes get highlighted. Populated from CqTarget.QUICK_PICKS; the last
@@ -1015,6 +996,31 @@
         <option value="odd">the second half (odd)</option>
       </select></label>
       <span class="jp-ctl-sends">Sends <span id="jp-cq-preview" class="jp-cq-preview">CQ</span></span>
+      <!-- Active-mode chips: visible ONLY while the mode is on, so the
+           off-switch stays reachable (house rule) without a permanent toggle
+           eating bar space. The switches themselves live in Options. -->
+      <button id="jp-fd-chip" class="jp-mode-chip hidden" title="Field Day mode is ON — exchanging class + section instead of grid/report. Click to turn off.">FD</button>
+      <input id="jp-fd-exch" type="text" maxlength="7" placeholder="2A EMA" title="Your Field Day exchange: transmitters+class then ARRL/RAC section (e.g. 2A EMA)" style="display:none;width:84px;height:44px;font-size:16px;font-weight:700;padding:0 8px;border-radius:8px;border:1px solid var(--border-primary);background:var(--bg-tertiary);color:var(--text-primary);text-transform:uppercase;">
+      <button id="jp-hound-chip" class="jp-mode-chip hidden" title="Hound (DXpedition) mode is ON — calling a Fox station above 1000 Hz. Click to turn off.">HOUND</button>
+    </div>
+    <div class="jp-ctl-main">
+      <!-- Hunt = answer OTHERS' CQs. The button is on/off; the select beside it
+           is what to hunt. The hidden #jp-auto-cq select below stays the one
+           value main and the phone see (off / pota / sota / all / wanted-state,
+           plus the seasonal fd and event options JS appends); the two controls
+           drive it and follow it (reflectHuntUi in jtcat-popout.js). -->
+      <div class="jp-hunt-box">
+        <button id="jp-hunt-btn" class="jp-btn jp-hunt-btn" aria-pressed="false" title="Answer other stations' CQs for me, one contact at a time, and log each one. Pick what to hunt on the right.">Hunt</button>
+        <select id="jp-hunt-target" class="jp-select" title="What Hunt answers"></select>
+      </div>
+      <!-- HALT: the one halt in main (tones, every PTT route, Run,
+           Hunt, the WSPR beacon). Solid red while TX is on, outlined while it is not. -->
+      <button id="jp-halt-tx" class="jp-btn jp-big jp-halt jp-stop" title="Halt TX: stop transmitting now, everywhere">HALT</button>
+      <button id="jp-tune" class="jp-btn jp-big jp-tune" title="WSJT-X-style 90s steady-tone tune (click again to stop early)">Tune</button>
+      <!-- Antenna tuner. Distinct from Tune: that one transmits a steady tone,
+           this runs the RADIO's ATU match cycle. Also the way to clear a
+           tripped SWR guard without leaving the popout. -->
+      <button id="jp-atu" class="jp-btn jp-big jp-atu" title="Run the radio's antenna tuner match cycle. (Tune is a steady-tone TX carrier — a different thing.)">ATU</button>
       <select id="jp-auto-cq" class="jp-select" hidden title="Hunt — automatically answer other stations' CQ calls and work them. Mutually exclusive with Run.">
         <option value="off">Hunt: Off</option>
         <option value="pota">Hunt: POTA</option>
@@ -1022,12 +1028,6 @@
         <option value="all">Hunt: All CQs</option>
         <option value="wanted-state" title="Answer CQs from US states and Canadian provinces you still need on this band and mode (Worked All States). Only when the grid settles the state, or every state a straddling grid could be is needed.">Hunt: Wanted states</option>
       </select>
-      <!-- Active-mode chips: visible ONLY while the mode is on, so the
-           off-switch stays reachable (house rule) without a permanent toggle
-           eating bar space. The switches themselves live in Options. -->
-      <button id="jp-fd-chip" class="jp-mode-chip hidden" title="Field Day mode is ON — exchanging class + section instead of grid/report. Click to turn off.">FD</button>
-      <input id="jp-fd-exch" type="text" maxlength="7" placeholder="2A EMA" title="Your Field Day exchange: transmitters+class then ARRL/RAC section (e.g. 2A EMA)" style="display:none;width:84px;height:44px;font-size:16px;font-weight:700;padding:0 8px;border-radius:8px;border:1px solid var(--border-primary);background:var(--bg-tertiary);color:var(--text-primary);text-transform:uppercase;">
-      <button id="jp-hound-chip" class="jp-mode-chip hidden" title="Hound (DXpedition) mode is ON — calling a Fox station above 1000 Hz. Click to turn off.">HOUND</button>
       <span class="jp-ctl-spacer"></span>
       <button id="jp-open-log" class="jp-btn jp-mid" title="Open the logbook">Logbook</button>
       <!-- Options — per-session preferences + special modes, with plain-
