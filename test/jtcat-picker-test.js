@@ -40,5 +40,26 @@ test('every QSO step is outlined', () => {
   assert.ok(/\.jp-qso-step \{[^}]*border: 1px solid var\(--border-primary\)/.test(html));
 });
 
+test('Hunt targets: each reads its one flag, and only from a CQ', () => {
+  const { matchesHuntFilter: m } = require('../lib/jtcat-state-machine');
+  for (const [mode, flag] of [['wanted-country', 'countryWanted'], ['dx', 'isDx'], ['chase', 'chaseMatch'], ['watchlist', 'watched']]) {
+    assert.strictEqual(m('CQ K2ABC FN20', mode, { [flag]: true }), true, mode);
+    assert.strictEqual(m('CQ K2ABC FN20', mode, { [flag]: false }), false, mode);
+    assert.strictEqual(m('CQ K2ABC FN20', mode), false, mode);
+    assert.strictEqual(m('W1AW K2ABC -10', mode, { [flag]: true }), false, mode + ' never a non-CQ');
+  }
+});
+test('Hunt targets reach every surface', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.ok(main.includes('chaseMatch: !settings.jtcatChaseTarget || !!d.chaseMatch'), 'Call = everyone hunts anyone');
+  const web = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote.html'), 'utf8');
+  for (const v of ['wanted-country', 'dx', 'chase', 'watchlist']) {
+    assert.ok(html.includes('<option value="' + v + '"'), 'popout ' + v);
+    assert.ok(web.includes('<option value="' + v + '"'), 'web ' + v);
+  }
+  const rs = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8');
+  assert.ok(rs.includes("'hunt-targets'"), 'capability');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

@@ -2621,7 +2621,7 @@ function _applyPopoutTheme(payload) {
   // filters). The seasonal fd/event options appear here as the select gets them.
   var huntBtn = document.getElementById('jp-hunt-btn');
   var huntTargetSel = document.getElementById('jp-hunt-target');
-  var HUNT_LABELS = { pota: 'POTA activators', sota: 'SOTA activators', all: 'Anyone calling CQ', 'wanted-state': 'States I need', fd: 'Field Day stations', event: 'Event stations' };
+  var HUNT_LABELS = { pota: 'POTA activators', sota: 'SOTA activators', all: 'Anyone calling CQ', 'wanted-country': 'New countries', dx: 'DX only (other continents)', chase: 'Same as Call', watchlist: 'Watchlist', 'wanted-state': 'States I need', fd: 'Field Day stations', event: 'Event stations' };
   var huntTarget = 'all';
   try { huntTarget = localStorage.getItem('jtcat-hunt-target') || 'all'; } catch (e) {}
   function reflectHuntUi() {

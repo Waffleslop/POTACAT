@@ -14595,12 +14595,27 @@ function jtcatHuntProgramMatch(d, filterMode) {
     const opts = workedOverlayOpts(band, mode);
     stateWanted = GridState.huntMayAnswer(d.state, (c) => WorkedRoster.isWanted(workedRoster, 'state', c, opts));
   }
+  // The station-based targets read the flags the decode already carries, so
+  // Hunt answers exactly what the badges and highlights show.
+  const home = filterMode === 'dx' ? jtcatHomeContinent() : '';
   const ok = _jtcatStateMachine.matchesHuntFilter(d.text, filterMode, {
     spottedSigs,
     spottedEnabled: jtcatHuntSpottedEnabled(),
     eventNeeded: !!(eventMatch && eventMatch.status !== 'worked'),
     stateWanted,
+    countryWanted: !!d.wantedCountry,
+    isDx: !!(home && d.continent && d.continent !== home),
+    chaseMatch: !settings.jtcatChaseTarget || !!d.chaseMatch,
+    watched: !!d.watched,
   });
+  if (ok && !_jtcatSpottedHuntLogged.has(d.call)) {
+    const why = { 'wanted-country': `${d.entity} is a country you still need`, dx: `${d.entity} is on another continent`,
+      chase: settings.jtcatChaseTarget ? `matches your Call target ${settings.jtcatChaseTarget}` : '', watchlist: 'is on your watchlist' }[filterMode];
+    if (why) {
+      _jtcatSpottedHuntLogged.add(d.call);
+      sendCatLog(`[JTCAT] Hunt: ${d.call} — ${why}; answering their CQ`);
+    }
+  }
   if (ok && stateWanted && !_jtcatSpottedHuntLogged.has(d.call)) {
     _jtcatSpottedHuntLogged.add(d.call);
     const where = d.state.candidates.length > 1 ? `in ${d.state.code} (grid ${d.grid} straddles, all still needed)` : `in ${d.state.code} (grid ${d.grid})`;
@@ -14778,6 +14793,11 @@ function applyChaseTarget(rawTag) {
 // Build the per-cycle chase context: the current target plus the cty-backed
 // helpers matchesDecode needs. Resolve the target prefix → entity ONCE here, not
 // per decode. Returns null when there's no target (caller skips flagging).
+function jtcatHomeContinent() {
+  if (!ctyDb || !settings.myCallsign) return '';
+  const me = resolveCallsign(settings.myCallsign, ctyDb);
+  return (me && me.continent) || '';
+}
 function buildChaseContext() {
   const target = settings.jtcatChaseTarget || '';
   if (!target) return null;
