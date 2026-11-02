@@ -102,6 +102,8 @@ function _applyPopoutTheme(payload) {
     if (maxAttemptsInput && typeof s.jtcatMaxQsoAttempts === 'number') {
       maxAttemptsInput.value = s.jtcatMaxQsoAttempts;
     }
+    logPrompt = s.jtcatLogPrompt === true;
+    if (logPromptToggle) logPromptToggle.classList.toggle('active', logPrompt);
     if (relogMinInput) {
       var rm = parseInt(s.jtcatRelogCooldownMin, 10);
       relogMinInput.value = (isFinite(rm) && rm >= 0) ? Math.min(rm, 120) : 15;
@@ -401,6 +403,8 @@ function _applyPopoutTheme(payload) {
     document.body.appendChild(slotToastEl);
     slotToastTimer = setTimeout(hideSlotToast, 12000);
   });
+  var logPromptToggle = document.getElementById('jp-log-prompt');
+  var logPrompt = false;
   var huntSpottedToggle = document.getElementById('jp-hunt-spotted');
   var huntSpotted = true;   // default on — see main.js jtcatHuntProgramMatch
   var skipTx1 = false;
@@ -3098,6 +3102,13 @@ function _applyPopoutTheme(payload) {
   // authority a hunter uses by hand; without this, POTA hunt hears an entire
   // activation and answers none of it because the message says "CQ" and not
   // "CQ POTA" (feature request 2026-09-02).
+  if (logPromptToggle) {
+    logPromptToggle.addEventListener('click', function() {
+      logPrompt = !logPrompt;
+      logPromptToggle.classList.toggle('active', logPrompt);
+      window.api.saveSettings({ jtcatLogPrompt: logPrompt });
+    });
+  }
   if (huntSpottedToggle) {
     huntSpottedToggle.addEventListener('click', function() {
       huntSpotted = !huntSpotted;

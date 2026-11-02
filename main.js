@@ -465,6 +465,8 @@ const { HeardGrids } = require('./lib/heard-grids');
 // The grid each station last said on the air (lib/heard-grids.js): fills a
 // QSO started from an RR73 or report, whose own text carries no grid.
 const jtcatHeardGrids = new HeardGrids();
+let _logPopoutQuiet = false; // the next log-popout-open leaves the keyboard alone
+let _appWindowsClosing = false; // the main window went: POTACAT is quitting
 const { checkClockOffset, syncSystemClock, classifyClockOffset } = require('./lib/ntp');
 const StationClock = require('./lib/station-clock'); // FT8/FT4/FT2/WSPR/JTTY slot clock, correctable from an ECHOCAT device
 const JtcatParser = require('./renderer/jtcat-parser'); // shared FT8 message classifier (also a browser global in the renderers)
@@ -2609,6 +2611,8 @@ let _currentSplit = false; // rig split state, readback-fed (IF; P12 / rigctld s
 let _currentFilterWidth = 0;
 
 const RelogGuard = require('./lib/jtcat-relog-guard');
+const { JtcatQsoClock } = require('./lib/jtcat-qso-clock');
+const LogReview = require('./lib/log-review');
 const JtcatTxSlot = require('./lib/jtcat-tx-slot');
 // The callsign being worked — CW-macro {call} on every surface. See
 // lib/typed-call.js for the rule (most recently changed non-empty field wins).
@@ -13013,6 +13017,7 @@ async function qrzStationInfo(call) {
   return {
     name: [cleanQrzName(q.nickname) || cleanQrzName(q.fname), cleanQrzName(q.name)].filter(Boolean).join(' '),
     country: q.country || '', state: q.state || '', county: q.county || '', grid: q.grid || '',
+    qth: q.addr2 || '', cqz: q.cqzone || '', ituz: q.ituzone || '',
   };
 }
 // An activation contact logged outside the Act screen (JTCAT, the WSJT-X
@@ -13133,7 +13138,12 @@ async function logContact(entry, opts) {
       const op = ctyDb ? resolveOperatingCall(c, ctyDb) : null;
       if (!op || !op.entity) return null;
       if (op.away) sendCatLog(`[QSO] ${c}: operating from ${op.entity.name}${op.home ? ` (home ${op.home.name})` : ''} — country from the call, QRZ's home address not used`);
-      return { name: op.entity.name, away: op.away };
+      const zones = op.away ? null : resolveZones(c, ctyDb);
+      return {
+        name: op.entity.name, away: op.away, cont: op.entity.continent || '',
+        cqz: (zones && zones.cqZone) || op.entity.cqZone || '',
+        ituz: (zones && zones.ituZone) || op.entity.ituZone || '',
+      };
     },
     parkInfo: (ref) => {
       const p = parkInfoFor(ref);
@@ -14077,6 +14087,7 @@ function jtcatIsWorkedCall(call, band, mode) {
   const c = (call || '').toUpperCase();
   if (!c) return false;
   if (jtcatSessionHas(c, band, mode)) return true;
+  if (jtcatLogReviews.holds(c, band, mode)) return true; // waiting in the Log QSO window
   return jtcatWorkedInfo(c, band, mode).blocking;
 }
 
@@ -15898,6 +15909,7 @@ function remoteJtcatMyCall() { return onAirCall(); }
 function remoteJtcatMyGrid() { return (settings.grid || '').toUpperCase().substring(0, 4); }
 
 function remoteJtcatBroadcastQso() {
+  if (remoteJtcatQso && remoteJtcatQso.call) _jtcatQsoClock.note(remoteJtcatQso.call, Date.now());
   if (remoteServer) remoteServer.broadcastJtcatQsoState(remoteJtcatQso || { phase: 'idle' });
   wsjtxStatusOnQsoChange();
 }
@@ -15915,6 +15927,7 @@ async function remoteJtcatSetTxMsg(msg) {
 }
 
 function popoutBroadcastQso() {
+  if (popoutJtcatQso && popoutJtcatQso.call) _jtcatQsoClock.note(popoutJtcatQso.call, Date.now());
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
     jtcatPopoutWin.webContents.send('jtcat-qso-state', popoutJtcatQso || { phase: 'idle' });
   }
@@ -15923,6 +15936,9 @@ function popoutBroadcastQso() {
 
 // call|band|mode -> ms of the last JTCAT auto-log (lib/jtcat-relog-guard.js).
 const _jtcatRecentLogs = new Map();
+const _jtcatQsoClock = new JtcatQsoClock(); // when each QSO under way began
+// Contacts waiting in the Log QSO window (settings.jtcatLogPrompt).
+const jtcatLogReviews = new LogReview.LogReviewQueue();
 
 async function jtcatAutoLog(qso, opts) {
   const q = qso || remoteJtcatQso;
@@ -15958,8 +15974,9 @@ async function jtcatAutoLog(qso, opts) {
   }
   sendCatLog(`[JTCAT] Auto-logging QSO: ${q.call} report=${q.report || 'none'} sent=${q.sentReport || 'none'}`);
   const now = new Date();
-  const qsoDate = now.toISOString().slice(0, 10).replace(/-/g, '');
-  const qsoTime = now.toISOString().slice(11, 16).replace(/:/g, '');
+  const started = new Date(_jtcatQsoClock.take(q.call, now.getTime()));
+  const dateOf = (d) => d.toISOString().slice(0, 10).replace(/-/g, '');
+  const timeOf = (d) => d.toISOString().slice(11, 19).replace(/:/g, '');
   // The radio's dial, else the dial the JTCAT window is set to. With no dial
   // from the radio (a no-CAT radio, or CAT not answering) the record went out
   // with frequency 0 and no band, and Wavelog refused it (KJ5NVM 2026-10-24,
@@ -15994,8 +16011,10 @@ async function jtcatAutoLog(qso, opts) {
     frequency: String(freqKhz),
     mode,
     band,
-    qsoDate,
-    timeOn: qsoTime,
+    qsoDate: dateOf(started),
+    timeOn: timeOf(started),
+    qsoDateOff: dateOf(now),
+    timeOff: timeOf(now),
     rstSent: q.sentReport || '',
     rstRcvd: q.report || '',
     gridsquare: q.grid || '',
@@ -16031,6 +16050,23 @@ async function jtcatAutoLog(qso, opts) {
     qsoData.comment = `JTCAT FD ${mode} ${q.myExch || ''}<-${q.theirExch}`.trim();
   }
 
+  // Only a QSO the operator ran from the JTCAT window: one run from a phone
+  // may have nobody at the shack to press Save.
+  if (opts && opts.fromWindow && settings.jtcatLogPrompt === true) {
+    // Marked now, not at Save: a repeated R-report or Run must not take this
+    // station for a new contact while the form waits.
+    RelogGuard.noteLogged(_jtcatRecentLogs, relogKeyStr, Date.now());
+    jtcatLogReviews.add(qsoData, { relogKey: relogKeyStr });
+    sendCatLog(`[JTCAT] ${qsoData.callsign}: waiting in the Log QSO window (${jtcatLogReviews.size} to review)`);
+    jtcatShowLogReview();
+    return;
+  }
+  await jtcatWriteLog(qsoData, relogKeyStr);
+}
+
+// The one write for a JTCAT contact, automatic or reviewed.
+async function jtcatWriteLog(qsoData, relogKeyStr) {
+  const call = qsoData.callsign;
   try {
     // One call: the activation's refs (if running), the hunted park(s), and
     // which copy is forwarded / re-spotted are all logContact's to decide —
@@ -16038,23 +16074,57 @@ async function jtcatAutoLog(qso, opts) {
     // logbook, QRZ and Club Log (logging parity audit 2026-10-19).
     const res = await logContact(qsoData, { origin: 'jtcat-engine' });
     if (!res.success) throw new Error(res.error || 'not logged');
-    announceActivationContact(qsoData, res.records, freqKhz);
+    announceActivationContact(qsoData, res.records, Number(qsoData.frequency) || 0);
 
-    console.log('[JTCAT] Auto-logged QSO:', q.call, 'OK');
+    console.log('[JTCAT] Auto-logged QSO:', call, 'OK');
     RelogGuard.noteLogged(_jtcatRecentLogs, relogKeyStr, Date.now());
     // Notify the popout window
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       jtcatPopoutWin.webContents.send('jtcat-qso-logged', {
-        callsign: q.call.toUpperCase(),
-        grid: q.grid || '',
-        band,
-        mode,
-        rstSent: q.sentReport || '',
-        rstRcvd: q.report || '',
+        callsign: String(call).toUpperCase(),
+        grid: qsoData.gridsquare || '',
+        band: qsoData.band,
+        mode: qsoData.mode,
+        rstSent: qsoData.rstSent || '',
+        rstRcvd: qsoData.rstRcvd || '',
       });
     }
+    return res;
   } catch (err) {
-    console.error('[JTCAT] Auto-log failed:', err.message);
+    sendCatLog(`[JTCAT] NOT LOGGED: ${call} — ${err.message}`);
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+      jtcatPopoutWin.webContents.send('jtcat-dupe-warning', { message: `${call} was not logged`, sub: err.message });
+    }
+    return { success: false, error: err.message };
+  }
+}
+
+// The contact at the head of the queue goes to the Log QSO window. Run and Hunt
+// keep the keyboard: the form comes up without taking focus.
+function jtcatShowLogReview() {
+  const item = jtcatLogReviews.current;
+  if (!item) return;
+  _logPopoutQuiet = !!(jtcatFullAutoCq || jtcatAutoCqMode !== 'off' || jtcatHuntFallbackMode);
+  ipcMain.emit('log-popout-open', null, { ...LogReview.prefillFor(item, jtcatLogReviews.waiting), power: _currentTxPower || undefined });
+  _logPopoutQuiet = false;
+}
+
+function jtcatCancelLogReview(id) {
+  const item = jtcatLogReviews.take(id);
+  if (!item) return;
+  _jtcatRecentLogs.delete(item.meta.relogKey);
+  const call = item.record.callsign;
+  sendCatLog(`[JTCAT] ${call}: not logged, the Log QSO window was closed without saving`);
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+    jtcatPopoutWin.webContents.send('jtcat-dupe-warning', { message: `${call} not logged`, sub: 'Closed without saving.' });
+  }
+}
+
+// Quitting with contacts still waiting: they go in as they stand.
+async function jtcatFlushLogReviews() {
+  for (const item of jtcatLogReviews.drain()) {
+    sendCatLog(`[JTCAT] ${item.record.callsign}: logged as it stands, POTACAT is closing`);
+    await jtcatWriteLog(item.record, item.meta.relogKey);
   }
 }
 
@@ -16086,7 +16156,10 @@ function advanceJtcatQso(q, results, setTxMsg, onDone) {
     const { band, mode } = jtcatCurrentBandMode(ft8Engine);
     deps.skipCall = (call) => jtcatIsWorkedCall(call, band, mode);
   }
-  return _jtcatStateMachine.advanceJtcatQso(q, results, setTxMsg, onDone, deps);
+  if (q && q.call) _jtcatQsoClock.note(q.call, Date.now());
+  const advanced = _jtcatStateMachine.advanceJtcatQso(q, results, setTxMsg, onDone, deps);
+  if (q && q.call && !q._logged) _jtcatQsoClock.note(q.call, Date.now());
+  return advanced;
 }
 
 // Server-side QSO state machine wrappers
@@ -16121,7 +16194,7 @@ function jtcatNoteTxSent(message) {
 }
 function popoutJtcatOnDone(qso) {
   return async () => {
-    await jtcatAutoLog(qso); // use captured ref, not global (global may be replaced by auto-CQ)
+    await jtcatAutoLog(qso, { fromWindow: true }); // use captured ref, not global (global may be replaced by auto-CQ)
     popoutBroadcastQso();
   };
 }
@@ -31398,6 +31471,7 @@ function createWindow() {
     settings.logPopoutOpen = !!(logPopoutWin && !logPopoutWin.isDestroyed());
     settings.conditionsPopoutOpen = !!(conditionsPopoutWin && !conditionsPopoutWin.isDestroyed());
     saveSettings(settings);
+    _appWindowsClosing = true; // the log window closing now declines nothing
     // Every other window, ENUMERATED rather than listed by name.
     //
     // Electron fires window-all-closed only when the LAST BrowserWindow is
@@ -36750,8 +36824,9 @@ app.whenReady().then(() => {
 
   // ── Ragchew log pop-out (Ctrl+L) ──────────────────────────────────────
   ipcMain.on('log-popout-open', (_e, prefill) => {
+    const quiet = _logPopoutQuiet;
     if (logPopoutWin && !logPopoutWin.isDestroyed()) {
-      logPopoutWin.focus();
+      if (quiet) { logPopoutWin.showInactive(); logPopoutWin.moveTop(); } else logPopoutWin.focus();
       // Re-send prefill so the open form picks up the latest CAT freq/mode
       // even if the user is reopening from a different state.
       if (prefill) logPopoutWin.webContents.send('log-popout-prefill', prefill);
@@ -36782,7 +36857,7 @@ app.whenReady().then(() => {
     if (saved && saved.width > 200 && saved.height > 150 && isOnScreen(saved)) {
       logPopoutWin.setBounds(clampToWorkArea(saved));
     }
-    logPopoutWin.show();
+    if (quiet) logPopoutWin.showInactive(); else logPopoutWin.show();
     logPopoutWin.setMenuBarVisibility(false);
     logPopoutWin.loadFile(path.join(__dirname, 'renderer', 'log-popout.html'), { query: themeQuery() });
 
@@ -36798,6 +36873,12 @@ app.whenReady().then(() => {
       logPopoutWin = null;
       setTypedCall('popout', ''); // a closed window is not holding a call
       if (win && !win.isDestroyed()) win.webContents.send('log-popout-status', false);
+      // Closing on a contact under review declines it; one the form never
+      // showed, or the next in line, comes straight back.
+      if (_appWindowsClosing) return;
+      const review = jtcatLogReviews.current;
+      if (review && review.shown) jtcatCancelLogReview(review.id);
+      jtcatShowLogReview();
     });
 
     logPopoutWin.webContents.on('did-finish-load', () => {
@@ -36850,6 +36931,25 @@ app.whenReady().then(() => {
   });
   ipcMain.on('log-popout-minimize', () => { if (logPopoutWin) logPopoutWin.minimize(); });
   ipcMain.on('log-popout-close', () => { if (logPopoutWin) logPopoutWin.close(); });
+
+  // A JTCAT contact under review (lib/log-review.js).
+  ipcMain.on('log-review-shown', (_e, id) => {
+    const item = jtcatLogReviews.find(id);
+    if (item) item.shown = true;
+  });
+  ipcMain.handle('log-review-save', async (_e, id, edits) => {
+    markUserActive();
+    const item = jtcatLogReviews.take(id);
+    if (!item) return { success: false, error: 'This contact is no longer waiting' };
+    const res = await jtcatWriteLog(LogReview.mergeEdits(item.record, edits), item.meta.relogKey);
+    if (res.success) jtcatShowLogReview();
+    else jtcatLogReviews.putBack(item);
+    return res;
+  });
+  ipcMain.on('log-review-cancel', (_e, id) => {
+    jtcatCancelLogReview(id);
+    jtcatShowLogReview();
+  });
 
   // Theme relay — fired by app.js whenever the user toggles light mode.
   ipcMain.on('log-popout-theme', (_e, theme) => {
@@ -39833,7 +39933,7 @@ app.whenReady().then(() => {
         && popoutJtcatQso.phase !== '73' && popoutJtcatQso.phase !== 'done') {
       if (_jtcatStateMachine.replaceLogsQso(popoutJtcatQso, data.call)) {
         sendCatLog(`[JTCAT] Replacing the finished QSO with ${popoutJtcatQso.call} — logging it`);
-        await jtcatAutoLog(popoutJtcatQso);
+        await jtcatAutoLog(popoutJtcatQso, { fromWindow: true });
       } else if (!popoutJtcatQso._logged) {
         sendCatLog(`[JTCAT] Left the QSO with ${popoutJtcatQso.call} unfinished (${popoutJtcatQso.phase}) — not logged`);
       }
@@ -39930,7 +40030,7 @@ app.whenReady().then(() => {
         sentReport: (sameCall ? popoutJtcatQso.sentReport : null) || ourRpt,
         myCall, myGrid, txRetries: 0, sliceId: replySliceId,
       };
-      if (!sameCall) await jtcatAutoLog(popoutJtcatQso);
+      if (!sameCall) await jtcatAutoLog(popoutJtcatQso, { fromWindow: true });
     } else if (nextStep === 'send-r-report') {
       // Their step 3 (plain signal report) → we send step 4 (R+ourReport).
       txMsg = jtcatDirectedMsg(data.call, myCall, 'R' + ourRpt);
@@ -40006,7 +40106,7 @@ app.whenReady().then(() => {
       replyEngine._txEnabled = true;
       await replyEngine.setTxMessage(txMsg);
       replyEngine.tryImmediateTx();
-      if (!sameCall) await jtcatAutoLog(popoutJtcatQso);
+      if (!sameCall) await jtcatAutoLog(popoutJtcatQso, { fromWindow: true });
     } else if (phase === 'reply') {
       // Fresh reply to a CQ — always rebuild popoutJtcatQso with the
       // new call. Previous code gated on phase!==phase, which silently
@@ -40179,7 +40279,7 @@ app.whenReady().then(() => {
     if (q.mode === 'cq' && _jtcatStateMachine.canCloseoutQso(q)) {
       _jtcatStateMachine.closeoutStalledQso(q,
         (m) => { eng.setTxMessage(m); },
-        async () => { await jtcatAutoLog(q); },
+        async () => { await jtcatAutoLog(q, { fromWindow: true }); },
         { log: sendCatLog });
       popoutBroadcastQso();
       return;
@@ -40219,7 +40319,7 @@ app.whenReady().then(() => {
         if (_jtcatStateMachine.canCloseoutQso(q)) {
           _jtcatStateMachine.closeoutStalledQso(q,
             (m) => { eng.setTxMessage(m); },
-            async () => { await jtcatAutoLog(q); },
+            async () => { await jtcatAutoLog(q, { fromWindow: true }); },
             { log: sendCatLog });
           popoutBroadcastQso();
           return;
@@ -47280,7 +47380,13 @@ function gracefulCleanup() {
   } catch {}
 }
 
-app.on('before-quit', () => {
+app.on('before-quit', (e) => {
+  if (jtcatLogReviews.size) {
+    // Written while the log, QRZ and the rig are all still up.
+    e.preventDefault();
+    Promise.race([jtcatFlushLogReviews(), new Promise((r) => setTimeout(r, 4000))]).finally(() => app.quit());
+    return;
+  }
   gracefulCleanup();
   // Shutdown watchdog: if quit stalls after cleanup (a pending async close, a
   // wedged device handle), the process lingers headless and the NEXT

@@ -43,6 +43,10 @@ const apiSurface = {
   saveQso: (qsoData) => ipcRenderer.invoke('save-qso', qsoData),
   // One contact as logged (comma lists welcome); main builds its records.
   logContact: (entry) => ipcRenderer.invoke('log-contact', entry),
+  // A JTCAT contact under review: main holds the record (lib/log-review.js).
+  logReviewSave: (id, edits) => ipcRenderer.invoke('log-review-save', id, edits),
+  logReviewCancel: (id) => ipcRenderer.send('log-review-cancel', id),
+  logReviewShown: (id) => ipcRenderer.send('log-review-shown', id),
   // Operators on this machine, for the "Log as" chooser (KD9WI)
   profilesList: () => ipcRenderer.invoke('profiles-list'),
 

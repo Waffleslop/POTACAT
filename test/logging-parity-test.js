@@ -43,7 +43,8 @@ test('desktop forms send ONE contact to logContact and never write records thems
 });
 
 test('main-side paths log through logContact: JTCAT, the WSJT-X bridge, ECHOCAT', () => {
-  assert.ok(/const res = await logContact\(qsoData, \{ origin: 'jtcat-engine' \}\);/.test(body(main, 'async function jtcatAutoLog(qso, opts) {')));
+  assert.ok(/await jtcatWriteLog\(qsoData, relogKeyStr\);/.test(body(main, 'async function jtcatAutoLog(qso, opts) {')));
+  assert.ok(/const res = await logContact\(qsoData, \{ origin: 'jtcat-engine' \}\);/.test(body(main, 'async function jtcatWriteLog(qsoData, relogKeyStr) {')));
   const wsx = main.slice(main.indexOf("wsjtx.on('logged-adif'"), main.indexOf("wsjtx.on('qso-logged'"));
   assert.ok(/await logContact\(qsoData, \{ origin: 'wsjtx-bridge' \}\);/.test(wsx));
   assert.ok(!/saveQsoRecord\(/.test(wsx), 'the bridge writes no record itself');

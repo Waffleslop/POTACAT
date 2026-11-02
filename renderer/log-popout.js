@@ -595,7 +595,10 @@ function _applyPopoutTheme(payload) {
       // One contact, as entered (comma lists of callsigns or refs welcome):
       // logContact turns it into its records, as every log form does.
       const calls = built.data.callsign.split(',').map((c) => c.trim()).filter(Boolean);
-      const result = await window.api.logContact(built.data);
+      const reviewed = reviewId;
+      const result = reviewed
+        ? await window.api.logReviewSave(reviewed, built.data)
+        : await window.api.logContact(built.data);
       if (result && result.success) {
         const call = calls.join(', ');
         showToast(`✓ Saved ${call}${logAsTail()}`);
@@ -604,6 +607,7 @@ function _applyPopoutTheme(payload) {
         // past-QSOs panel to include the freshly-saved QSO if user retypes
         // the callsign immediately.
         clearForm();
+        endReview();
       } else {
         const err = (result && result.error) || 'Save failed';
         showToast(err, 'error');
@@ -681,7 +685,11 @@ function _applyPopoutTheme(payload) {
 
   // Save / clear
   saveBtn.addEventListener('click', doSave);
-  clearBtn.addEventListener('click', () => clearForm());
+  clearBtn.addEventListener('click', () => {
+    if (reviewId) { const id = reviewId; clearForm(); endReview(); window.api.logReviewCancel(id); return; }
+    clearForm();
+    endReview();
+  });
 
   // Enter key on callsign field shifts focus to RST Rcvd (typical operating flow);
   // Enter on RST Rcvd saves.
@@ -731,7 +739,8 @@ function _applyPopoutTheme(payload) {
     clearForm({ skipFocus: true });
     callInput.value = String(p.callsign || '').toUpperCase();
     reportCall();
-    if (p.freqKhz) freqInput.value = String(Math.round(p.freqKhz));
+    // Not rounded: 40 m FT4 is 7047.5.
+    if (p.freqKhz) freqInput.value = String(Math.round(p.freqKhz * 1000) / 1000);
     if (p.mode) {
       const m = modeFamily(p.mode);
       if ([...modeSelect.options].some((o) => o.value === m)) modeSelect.value = m;
@@ -753,8 +762,10 @@ function _applyPopoutTheme(payload) {
     // way, extracted from the conversation itself. Honor them; the 599/59
     // default is only for prefills that carry none.
     const rst = defaultRstFor(modeSelect.value);
-    rstSentInput.value = p.rstSent || rst;
-    rstRcvdInput.value = p.rstRcvd || rst;
+    // Under review a blank stays blank: main defaults it by mode, as it does
+    // for the automatic log.
+    rstSentInput.value = p.review ? (p.rstSent || '') : (p.rstSent || rst);
+    rstRcvdInput.value = p.review ? (p.rstRcvd || '') : (p.rstRcvd || rst);
     // The EXCHANGE time, when the prefill knows it (JS8: the trailing
     // session's real times — logging happens after a ragchew, and the tap
     // time can be off by an hour or, on an old thread, days). The now
@@ -777,9 +788,49 @@ function _applyPopoutTheme(payload) {
     next.select();
   }
 
+  // A JTCAT contact to review before it is written (lib/log-review.js). It
+  // waits behind anything already in the form; main holds the record, so this
+  // window only ever carries the one id.
+  let reviewId = 0;
+  let reviewHeld = null;
+  const reviewBar = document.getElementById('lp-review');
+  function reviewText(p) {
+    return 'Review before saving' + (p.waiting ? ' · ' + p.waiting + ' more waiting' : '');
+  }
+  function showReview(p) {
+    reviewHeld = null;
+    reviewId = p.review;
+    applySpotPrefill(p);
+    respotCheckEl.checked = false; // the automatic log never re-spots
+    clearBtn.textContent = "Don't log";
+    reviewBar.textContent = reviewText(p);
+    reviewBar.hidden = false;
+    window.api.logReviewShown(p.review);
+  }
+  function endReview() {
+    reviewId = 0;
+    clearBtn.textContent = 'Clear';
+    reviewBar.hidden = true;
+    if (reviewHeld && !callInput.value.trim()) showReview(reviewHeld);
+  }
+  function offerReview(p) {
+    if (p.review === reviewId) { reviewBar.textContent = reviewText(p); return; }
+    if (reviewId || callInput.value.trim()) {
+      reviewHeld = p;
+      if (!reviewId) {
+        reviewBar.textContent = p.callsign + ' from JTCAT is waiting';
+        reviewBar.hidden = false;
+      }
+      return;
+    }
+    showReview(p);
+  }
+
   if (window.api.onPrefill) {
     window.api.onPrefill((p) => {
       if (!p) return;
+      if (p.review) { offerReview(p); return; }
+      if (reviewId) { showToast('Finish the JTCAT contact first', 'error'); return; }
       if (p.force) { applySpotPrefill(p); return; }
       if (p.freqKhz && !freqUserEdited) freqInput.value = String(Math.round(p.freqKhz));
       if (p.mode && !modeUserEdited) {

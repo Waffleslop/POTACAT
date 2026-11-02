@@ -291,6 +291,7 @@ const TESTS = [
   'test/spot-park-state-test.js', // a multi-state park's state from the activator's spot locationCode (N0KAH)
   'test/log-dialog-qrz-test.js',
   'test/logging-parity-test.js',
+  'test/log-review-test.js',
   'test/pskr-map-band-cap-test.js',
   'test/watchlist-sync-test.js',
   'test/echocat-oct19-asks-test.js',
