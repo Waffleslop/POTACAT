@@ -502,8 +502,10 @@
     .jp-pk-band:disabled { border: 1px dashed var(--border-primary); background: transparent; color: var(--text-dim, #888); cursor: not-allowed; }
     .jp-pk-band:disabled .jp-pk-band-dial { color: var(--text-dim, #888); }
     .jp-pk-apply { height: 56px; margin-top: 4px; border-radius: 14px; border: none; background: var(--accent-green, #4ecca3); color: var(--on-accent-green, #000); font-size: 18px; font-weight: 800; cursor: pointer; font-family: inherit; }
-    .jp-pk-apply:hover { filter: brightness(1.08); }
+    /* A global button:hover would paint this dark, which reads as unavailable. */
+    .jp-pk-apply:hover:not(:disabled) { background: var(--accent-green, #4ecca3); color: var(--on-accent-green, #000); filter: brightness(1.12); }
     .jp-pk-apply:disabled { background: var(--bg-tertiary); color: var(--text-dim, #888); cursor: default; filter: none; }
+    .jp-pk-apply:disabled:hover { background: var(--bg-tertiary); color: var(--text-dim, #888); }
     .jp-pk-hint { font-size: 14px; line-height: 1.4; color: var(--text-dim, #888); text-align: center; }
     .jp-pk-keys { font-size: 13px; color: var(--text-dim, #888); text-align: center; }
     .jp-pk-mode:focus-visible, .jp-pk-band:focus-visible, .jp-pk-apply:focus-visible { outline: 2px solid var(--accent-blue, #4fc3f7); outline-offset: 2px; }
