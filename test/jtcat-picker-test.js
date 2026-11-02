@@ -22,10 +22,20 @@ test('the band and mode selects stay in the DOM as the sources of truth', () => 
 });
 test('picker: taps only pick; Switch drives the selects; hidden bands stay out', () => {
   assert.ok(/if \(bo\.hidden && band !== curBand\) return;/.test(js), 'rig-bands filter');
-  const apply = js.slice(js.indexOf('function pkApply('), js.indexOf('function pkApply(') + 700);
+  const apply = js.slice(js.indexOf('function pkApply('), js.indexOf('function pkApply(') + 1100);
   assert.ok(/modeSelect\.dispatchEvent\(new Event\('change'\)\)/.test(apply) && /selectBand\(opt, true\)/.test(apply));
   const render = js.slice(js.indexOf('function pkRender('), js.indexOf('function pkOpen('));
   assert.ok(!/selectBand|window\.api\.tune/.test(render), 'a tap must not retune');
+});
+test('a voice or CW tune that stops the engine reaches the window, and the picker restarts it', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const stop = main.slice(main.indexOf('stopping FT8/FT4 engine'), main.indexOf('stopping FT8/FT4 engine') + 300);
+  assert.ok(stop.includes('jtcatWindowStopped()'), 'tune path tells the window');
+  assert.ok(/send\('jtcat-engine-stopped'\)/.test(main));
+  assert.ok(/var same = !engineStopped && /.test(js), 'Switch stays live while stopped');
+  const apply = js.slice(js.indexOf('function pkApply('), js.indexOf('function pkApply(') + 600);
+  assert.ok(apply.indexOf('jtcatStart(pk.mode)') < apply.indexOf('selectBand(opt, true)'), 'start before the tune, which sets the dial anchor');
+  assert.ok(/state === 'running'\) setEngineStopped\(false\)/.test(js), 'a start from a phone clears it');
 });
 test('the button follows paths that assign the mode with no change event', () => {
   assert.ok(/Object\.defineProperty\(modeSelect, 'value'/.test(js));

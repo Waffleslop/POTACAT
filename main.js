@@ -3846,6 +3846,7 @@ function sendCatMode(mode) {
   if (logPopoutWin && !logPopoutWin.isDestroyed()) logPopoutWin.webContents.send('cat-mode', mode);
   // The SSTV window compares it with where a picture was heard (reply bar).
   if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('cat-mode', mode);
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-mode', mode);
   _currentMode = mode; // keep real mode internally for CAT
   rigPresetOnMode(mode); // the one mode sink: a family change may apply a rig preset
   // Don't clear mode suppress — handleRemotePtt sets a long suppress during
@@ -18125,6 +18126,12 @@ function stopJs8Spectrum() {
   console.log('[JS8] waterfall spectrum loop stopped');
 }
 
+// The engine was stopped from outside the JTCAT window (a voice or CW tune, a
+// phone's Stop). The window stays open and starts it again from the picker.
+function jtcatWindowStopped() {
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-engine-stopped');
+}
+
 function stopJtcat() {
   if (ft8Engine && ft8Engine._mode === 'JS8') js8AudioFeed(false);
   clearJtcatTxFailsafe();
@@ -24424,6 +24431,7 @@ function connectRemote() {
     stopJtcat();
     remoteJtcatQso = null;
     if (win && !win.isDestroyed()) win.webContents.send('jtcat-stop-for-remote');
+    jtcatWindowStopped();
   });
 
   // Spot Target from the phone (docs/mobile-handoff-spot-target.md).
@@ -34248,6 +34256,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
       sendCatLog(`[JTCAT] QSY to ${mm} — stopping FT8/FT4 engine`);
       stopJtcat();
       if (win && !win.isDestroyed()) win.webContents.send('jtcat-stop-for-remote');
+      jtcatWindowStopped();
       if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
         remoteServer.broadcastJtcatStatus({ running: false });
       }

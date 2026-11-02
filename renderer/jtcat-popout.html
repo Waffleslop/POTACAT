@@ -473,6 +473,9 @@
        accent uses the --on-accent-* variables, never #fff (app-theme-test). */
     .jp-bandmode { height: 44px; display: inline-flex; align-items: center; gap: 10px; padding: 0 14px; border-radius: 8px; border: 1.5px solid var(--accent-blue, #4fc3f7); background: var(--bg-tertiary); color: var(--text-primary); cursor: pointer; font-family: inherit; flex-shrink: 0; }
     .jp-bandmode:hover { background: var(--bg-hover); }
+    .jp-bandmode.jp-stopped { border-color: var(--accent-orange, #f0a500); }
+    .jp-bandmode.jp-stopped .jp-bm-mode, .jp-bandmode.jp-stopped .jp-bm-caret { color: var(--accent-orange, #f0a500); }
+    .jp-engine-stopped #jp-cq, .jp-engine-stopped #jp-full-auto-cq, .jp-engine-stopped #jp-hunt-btn { opacity: 0.45; pointer-events: none; }
     .jp-bandmode .jp-bm-band { font-size: 18px; font-weight: 800; }
     .jp-bandmode .jp-bm-mode { font-size: 18px; font-weight: 800; color: var(--accent-blue, #4fc3f7); }
     .jp-bandmode .jp-bm-caret { color: var(--accent-blue, #4fc3f7); }

@@ -1288,6 +1288,7 @@ function _applyPopoutTheme(payload) {
 
   var lastClockState = null; // last offset the monitor reported (set in applyClock)
   window.api.onJtcatStatus(function(data) {
+    if (data && data.state === 'running') setEngineStopped(false);
     // Engine stopped. Clear the sync readout for an OK/unknown clock, BUT keep a
     // bad/warn banner up — the clock is still wrong and must be fixed before the
     // next run, so engine restarts (e.g. a SmartSDR/AetherSDR handoff cycling
@@ -1439,8 +1440,28 @@ function _applyPopoutTheme(payload) {
     window.api.onCatFrequency(function(hz) {
       if (!radioFreqEl || !hz) return;
       radioFreqEl.textContent = (hz / 1000000).toFixed(3) + ' MHz';
+      radioHz = hz;
+      syncBandMode();
     });
   }
+  if (window.api.onCatMode) window.api.onCatMode(function(m) { radioMode = String(m || ''); syncBandMode(); });
+
+  // Stopped from outside this window (a voice or CW spot tuned the radio away,
+  // a phone pressed Stop). The window stays open, says so, and the picker
+  // starts the engine again.
+  var engineStopped = false, radioHz = 0, radioMode = '';
+  function setEngineStopped(on) {
+    if (engineStopped === on) return;
+    engineStopped = on;
+    document.body.classList.toggle('jp-engine-stopped', on);
+    if (on) {
+      decodeLog = [];
+      bandActivity.innerHTML = '<div class="jp-empty">Stopped</div>';
+    }
+    syncBandMode();
+    if (pkIsOpen()) pkRender();
+  }
+  if (window.api.onJtcatEngineStopped) window.api.onJtcatEngineStopped(function() { setEngineStopped(true); });
 
   // PSK31 and JTTY are transceive keyboard modes: the audio frequency IS
   // both directions, the pane's own sync (pskSyncFreq / jttySyncFreq) owns
@@ -3252,8 +3273,27 @@ function _applyPopoutTheme(payload) {
   function syncBandMode() {
     if (!bandModeBtn) return;
     var band = pkActiveBand();
-    if (bmBandEl) bmBandEl.textContent = band || '--';
-    if (bmModeEl) bmModeEl.textContent = pkModeLabel(modeSelect.value);
+    bandModeBtn.classList.toggle('jp-stopped', engineStopped);
+    if (bmBandEl) bmBandEl.textContent = (engineStopped && pkRadioBand()) || band || '--';
+    if (bmModeEl) bmModeEl.textContent = engineStopped ? (radioMode || 'Stopped') : pkModeLabel(modeSelect.value);
+    // Running, but the radio is off JTCAT's dial: the distance at which main's
+    // pre-TX guard refuses to transmit.
+    var dial = document.querySelector('.jp-band-opt.active');
+    var off = !engineStopped && !multiActive && radioHz > 0 && dial && !(bandSelect && /^dxp:/.test(bandSelect.value)) &&
+      Math.abs(radioHz - parseFloat(dial.dataset.freq) * 1000) > 2500;
+    if (radioFreqEl) {
+      radioFreqEl.style.color = off ? 'var(--accent-orange, #f0a500)' : '#4fc3f7';
+      radioFreqEl.title = off ? 'Radio frequency: off the ' + pkModeLabel(modeSelect.value) + ' dial for ' + band : 'Radio frequency';
+    }
+  }
+  // The band the radio is on, by the nearest JTCAT dial.
+  function pkRadioBand() {
+    var best = '', bestD = Infinity;
+    document.querySelectorAll('.jp-band-opt').forEach(function(o) {
+      var d = Math.abs(parseFloat(o.dataset.freq) * 1000 - radioHz);
+      if (d < bestD) { bestD = d; best = o.dataset.band; }
+    });
+    return radioHz > 0 ? best : '';
   }
   function pkIsOpen() { return !!pickerEl && !pickerEl.classList.contains('hidden'); }
   function pkRender() {
@@ -3308,7 +3348,7 @@ function _applyPopoutTheme(payload) {
       shown++;
     });
     if (!shown) pkBandsEl.innerHTML = '<div class="jp-pk-hint">This radio has no ' + esc(pkModeLabel(pk.mode)) + ' bands.</div>';
-    var same = pk.mode === curMode && pk.band === curBand;
+    var same = !engineStopped && pk.mode === curMode && pk.band === curBand;
     var dial = table[pk.band];
     if (pkApplyBtn) {
       pkApplyBtn.disabled = same || !dial;
@@ -3316,7 +3356,7 @@ function _applyPopoutTheme(payload) {
     }
     if (pkHintEl) {
       pkHintEl.textContent = same ? 'Pick a band or mode to switch. Nothing changes until you press the button.'
-        : (dial ? 'Tunes the radio to ' + pkFmtMhz(dial) + ' and keeps decoding.' : 'Pick a band with a ' + pkModeLabel(pk.mode) + ' dial.');
+        : (dial ? 'Tunes the radio to ' + pkFmtMhz(dial) + (engineStopped ? ' and starts decoding.' : ' and keeps decoding.') : 'Pick a band with a ' + pkModeLabel(pk.mode) + ' dial.');
     }
   }
   function isBandHidden(band) {
@@ -3327,6 +3367,8 @@ function _applyPopoutTheme(payload) {
     if (!pickerEl) return;
     pk.mode = modeSelect.value;
     pk.band = pkActiveBand();
+    // Stopped: offer the band the radio went to, when this mode has a dial there.
+    if (engineStopped && bandTableFor(pk.mode)[pkRadioBand()] && !isBandHidden(pkRadioBand())) pk.band = pkRadioBand();
     pkRender();
     pickerEl.classList.remove('hidden');
     if (bandModeBtn) bandModeBtn.setAttribute('aria-expanded', 'true');
@@ -3343,15 +3385,21 @@ function _applyPopoutTheme(payload) {
   // the new mode, so the band is marked active first; a band-only change is
   // the same selectBand call the old dropdown made.
   function pkApply() {
-    var curMode = modeSelect.value, curBand = pkActiveBand();
+    var curMode = modeSelect.value, curBand = pkActiveBand(), wasStopped = engineStopped;
     var opt = document.querySelector('.jp-band-opt[data-band="' + pk.band + '"]');
     if (!opt || !bandTableFor(pk.mode)[pk.band]) return;
+    // Start before tuning: starting clears the dial anchor the tune then sets.
+    if (engineStopped) {
+      window.api.jtcatStart(pk.mode);
+      setEngineStopped(false);
+      if (pk.mode === curMode) selectBand(opt, true);
+    }
     if (pk.mode !== curMode) {
       document.querySelectorAll('.jp-band-opt').forEach(function(bo) { bo.classList.remove('active'); });
       opt.classList.add('active');
       modeSelect.value = pk.mode;
       modeSelect.dispatchEvent(new Event('change'));
-    } else if (pk.band !== curBand) {
+    } else if (pk.band !== curBand && !wasStopped) {
       selectBand(opt, true);
     }
     pkClose();

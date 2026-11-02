@@ -163,6 +163,8 @@ contextBridge.exposeInMainWorld('api', {
   onJtcatQsoLogged: (cb) => ipcRenderer.on('jtcat-qso-logged', (_e, data) => cb(data)),
   onCatStatus: (cb) => ipcRenderer.on('cat-status', (_e, s) => cb(s)),
   onCatFrequency: (cb) => ipcRenderer.on('cat-frequency', (_e, hz) => cb(hz)),
+  onCatMode: (cb) => ipcRenderer.on('cat-mode', (_e, mode) => cb(mode)),
+  onJtcatEngineStopped: (cb) => ipcRenderer.on('jtcat-engine-stopped', () => cb()),
   // QSO commands (relayed to main renderer)
   // CAT-log sink — the popout had NO jtcatLog until 2026-07-18, so every
   // `if (window.api.jtcatLog)` guard in jtcat-popout.js silently no-opped:
