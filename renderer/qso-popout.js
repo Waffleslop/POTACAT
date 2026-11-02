@@ -518,8 +518,11 @@ function renderHead() {
       e.stopPropagation();
       const startX = e.clientX;
       const startW = colWidth(c);
+      // While the table is stretched to the window, a saved pixel shows wider
+      // than a pixel: scale the drag so the grip stays under the mouse.
+      const stretch = Math.max(1, table.offsetWidth / totalColumnsWidth());
       const onMove = (ev) => {
-        const w = Math.max(28, Math.round(startW + (ev.clientX - startX)));
+        const w = Math.max(28, Math.round(startW + (ev.clientX - startX) / stretch));
         colPrefs.widths[c.key] = w;
         th.style.width = w + 'px';
         syncTableWidth();
@@ -547,12 +550,20 @@ function renderHead() {
 }
 
 /** table-layout is fixed, so the table needs a width of its own — otherwise
- *  the last column absorbs the slack and a resize looks like it did nothing. */
+ *  the last column absorbs the slack and a resize looks like it did nothing.
+ *  It is never narrower than the window: a fixed table wider than its columns
+ *  shares the extra among them in proportion, so a maximized Logbook fills
+ *  with content instead of black space (Casey 2026-11-02). Saved widths stay
+ *  as they are; a narrow window still scrolls sideways. */
 const ACTIONS_COL_PX = 64;
-function syncTableWidth() {
-  const total = visibleColumns().reduce((n, c) => n + colWidth(c), 0) + ACTIONS_COL_PX;
-  table.style.width = total + 'px';
+function totalColumnsWidth() {
+  return visibleColumns().reduce((n, c) => n + colWidth(c), 0) + ACTIONS_COL_PX;
 }
+function syncTableWidth() {
+  const body = document.querySelector('.qso-body');
+  table.style.width = Math.max(totalColumnsWidth(), body ? body.clientWidth : 0) + 'px';
+}
+new ResizeObserver(syncTableWidth).observe(document.querySelector('.qso-body'));
 
 // Right-click the header for the column picker — the same gesture the Spots
 // table uses, so there is one thing to learn.
