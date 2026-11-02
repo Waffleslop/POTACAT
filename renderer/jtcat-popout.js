@@ -1875,9 +1875,13 @@ function _applyPopoutTheme(payload) {
     window.api.onRigBands(function(d) { jpRigBands = (d && d.bands) || null; applyJpRigBands(); });
   }
 
+  // The dial table for a mode: band -> kHz. A band missing from it has no dial
+  // in that mode (6m has no FT2 frequency), which the picker shows greyed.
+  function bandTableFor(m) {
+    return m === 'WSPR' ? WSPR_BAND_FREQS : m === 'PSK31' ? PSK_BAND_FREQS : m === 'JTTY' ? JTTY_BAND_FREQS : m === 'JS8' ? JS8_BAND_FREQS : m === 'FT2' ? FT2_BAND_FREQS : m === 'FT4' ? FT4_BAND_FREQS : FT8_BAND_FREQS;
+  }
   function updateBandFreqs() {
-    var m = modeSelect.value;
-    var table = m === 'WSPR' ? WSPR_BAND_FREQS : m === 'PSK31' ? PSK_BAND_FREQS : m === 'JTTY' ? JTTY_BAND_FREQS : m === 'JS8' ? JS8_BAND_FREQS : m === 'FT2' ? FT2_BAND_FREQS : m === 'FT4' ? FT4_BAND_FREQS : FT8_BAND_FREQS;
+    var table = bandTableFor(modeSelect.value);
     document.querySelectorAll('.jp-band-opt').forEach(function(btn) {
       var band = btn.dataset.band;
       if (table[band]) btn.dataset.freq = table[band];
@@ -3152,6 +3156,188 @@ function _applyPopoutTheme(payload) {
     });
     new MutationObserver(bandSelectFollowActive).observe(bandSelect, { subtree: true, attributes: true, attributeFilter: ['class'] });
   }
+
+  // --- Band and mode picker (Casey 2026-11-02; the phone's Digi picker) ---
+  // The toolbar's one "20m FT8 14,074.0 kHz" button and the dialog it opens.
+  // The hidden #jp-band / #jp-mode selects stay the sources of truth: the
+  // picker only PICKS until Switch, then drives them exactly as the dropdowns
+  // did (selectBand for a band, the mode select's change event for a mode).
+  var bandModeBtn = document.getElementById('jp-bandmode');
+  var bmBandEl = document.getElementById('jp-bm-band');
+  var bmModeEl = document.getElementById('jp-bm-mode');
+  var bmDialEl = document.getElementById('jp-bm-dial');
+  var pickerEl = document.getElementById('jp-picker');
+  var pkModesEl = document.getElementById('jp-pk-modes');
+  var pkBandsEl = document.getElementById('jp-pk-bands');
+  var pkApplyBtn = document.getElementById('jp-pk-apply');
+  var pkHintEl = document.getElementById('jp-pk-hint');
+  var PK_MODE_LABEL = { FT8: 'FT8', FT4: 'FT4', FT2: 'FT2', WSPR: 'WSPR', PSK31: 'PSK', JTTY: 'JTTY' };
+  var pk = { mode: '', band: '' };
+  function pkFmtKhz(k) {
+    var n = Number(k);
+    if (!isFinite(n) || n <= 0) return '';
+    return n.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' kHz';
+  }
+  function pkActiveBand() {
+    var a = document.querySelector('.jp-band-opt.active');
+    return a ? a.dataset.band : (bandSelect ? bandSelect.value : '');
+  }
+  function pkModeLabel(m) { return PK_MODE_LABEL[m] || m; }
+  // The toolbar button follows the selects: band, mode and the band's dial for
+  // the current mode (data-freq, which updateBandFreqs keeps per mode).
+  function syncBandMode() {
+    if (!bandModeBtn) return;
+    var band = pkActiveBand();
+    var opt = document.querySelector('.jp-band-opt[data-band="' + band + '"]');
+    if (bmBandEl) bmBandEl.textContent = band || '--';
+    if (bmModeEl) bmModeEl.textContent = pkModeLabel(modeSelect.value);
+    if (bmDialEl) bmDialEl.textContent = opt ? pkFmtKhz(opt.dataset.freq) : '';
+  }
+  function pkIsOpen() { return !!pickerEl && !pickerEl.classList.contains('hidden'); }
+  function pkRender() {
+    if (!pkModesEl || !pkBandsEl) return;
+    var curMode = modeSelect.value, curBand = pkActiveBand();
+    var table = bandTableFor(pk.mode);
+    pkModesEl.innerHTML = '';
+    Array.prototype.forEach.call(modeSelect.options, function(o) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'jp-pk-mode' + (o.value === pk.mode ? ' on' : '');
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', String(o.value === pk.mode));
+      b.dataset.mode = o.value;
+      b.textContent = pkModeLabel(o.value);
+      if (o.title) b.title = o.title;
+      b.addEventListener('click', function() {
+        pk.mode = o.value;
+        // Keep the band if the new mode has a dial for it, else the first that does.
+        var t = bandTableFor(pk.mode);
+        if (!t[pk.band]) {
+          var first = '';
+          document.querySelectorAll('.jp-band-opt').forEach(function(bo) { if (!first && !bo.hidden && t[bo.dataset.band]) first = bo.dataset.band; });
+          pk.band = t['20m'] && !isBandHidden('20m') ? '20m' : (first || pk.band);
+        }
+        pkRender();
+      });
+      pkModesEl.appendChild(b);
+    });
+    pkBandsEl.innerHTML = '';
+    var shown = 0;
+    document.querySelectorAll('.jp-band-opt').forEach(function(bo) {
+      var band = bo.dataset.band;
+      if (bo.hidden && band !== curBand) return; // rig-bands: not a band this radio uses
+      var khz = table[band];
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'jp-pk-band' + (band === pk.band ? ' on' : '');
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', String(band === pk.band));
+      b.dataset.band = band;
+      if (!khz) {
+        b.disabled = true;
+        b.setAttribute('aria-label', band + ', no ' + pkModeLabel(pk.mode) + ' frequency');
+        b.innerHTML = '<span class="jp-pk-band-name">' + esc(band) + '</span><span class="jp-pk-band-dial">No ' + esc(pkModeLabel(pk.mode)) + ' dial</span>';
+      } else {
+        b.setAttribute('aria-label', band + ', ' + pkFmtKhz(khz).replace(' kHz', ' kilohertz'));
+        b.innerHTML = '<span class="jp-pk-band-name">' + esc(band) + '</span><span class="jp-pk-band-dial">' + esc(pkFmtKhz(khz)) + '</span>';
+        b.addEventListener('click', function() { pk.band = band; pkRender(); });
+      }
+      pkBandsEl.appendChild(b);
+      shown++;
+    });
+    if (!shown) pkBandsEl.innerHTML = '<div class="jp-pk-hint">This radio has no ' + esc(pkModeLabel(pk.mode)) + ' bands.</div>';
+    var same = pk.mode === curMode && pk.band === curBand;
+    var dial = table[pk.band];
+    if (pkApplyBtn) {
+      pkApplyBtn.disabled = same || !dial;
+      pkApplyBtn.textContent = same ? 'Running ' + pkModeLabel(curMode) + ' on ' + curBand : 'Switch to ' + pkModeLabel(pk.mode) + ' on ' + pk.band;
+    }
+    if (pkHintEl) {
+      pkHintEl.textContent = same ? 'Pick a band or mode to switch. Nothing changes until you press the button.'
+        : (dial ? 'Tunes the radio to ' + pkFmtKhz(dial) + ' and keeps decoding.' : 'Pick a band with a ' + pkModeLabel(pk.mode) + ' dial.');
+    }
+  }
+  function isBandHidden(band) {
+    var o = document.querySelector('.jp-band-opt[data-band="' + band + '"]');
+    return !o || o.hidden;
+  }
+  function pkOpen() {
+    if (!pickerEl) return;
+    pk.mode = modeSelect.value;
+    pk.band = pkActiveBand();
+    pkRender();
+    pickerEl.classList.remove('hidden');
+    if (bandModeBtn) bandModeBtn.setAttribute('aria-expanded', 'true');
+    var on = pkBandsEl.querySelector('.jp-pk-band.on') || pkModesEl.querySelector('.jp-pk-mode.on');
+    if (on) on.focus();
+  }
+  function pkClose() {
+    if (!pickerEl) return;
+    pickerEl.classList.add('hidden');
+    if (bandModeBtn) { bandModeBtn.setAttribute('aria-expanded', 'false'); bandModeBtn.focus(); }
+  }
+  // Switch: band and mode together. A mode change goes through the mode
+  // select's own change handler, which retunes to the ACTIVE band's dial for
+  // the new mode, so the band is marked active first; a band-only change is
+  // the same selectBand call the old dropdown made.
+  function pkApply() {
+    var curMode = modeSelect.value, curBand = pkActiveBand();
+    var opt = document.querySelector('.jp-band-opt[data-band="' + pk.band + '"]');
+    if (!opt || !bandTableFor(pk.mode)[pk.band]) return;
+    if (pk.mode !== curMode) {
+      document.querySelectorAll('.jp-band-opt').forEach(function(bo) { bo.classList.remove('active'); });
+      opt.classList.add('active');
+      modeSelect.value = pk.mode;
+      modeSelect.dispatchEvent(new Event('change'));
+    } else if (pk.band !== curBand) {
+      selectBand(opt, true);
+    }
+    pkClose();
+  }
+  if (bandModeBtn) bandModeBtn.addEventListener('click', function() { pkIsOpen() ? pkClose() : pkOpen(); });
+  var pkScrim = document.getElementById('jp-picker-scrim');
+  if (pkScrim) pkScrim.addEventListener('click', pkClose);
+  var pkDone = document.getElementById('jp-picker-done');
+  if (pkDone) pkDone.addEventListener('click', pkClose);
+  if (pkApplyBtn) pkApplyBtn.addEventListener('click', pkApply);
+  // B opens the picker (outside text fields); inside it Esc closes, Enter
+  // switches, and the arrow keys walk the group the focus is in (4 across).
+  document.addEventListener('keydown', function(e) {
+    var t = e.target;
+    var typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+    if (!pkIsOpen()) {
+      if ((e.key === 'b' || e.key === 'B') && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); pkOpen(); }
+      return;
+    }
+    if (e.key === 'Escape') { e.preventDefault(); pkClose(); return; }
+    if (e.key === 'Enter' && !(t && t.id === 'jp-picker-done')) { e.preventDefault(); if (pkApplyBtn && !pkApplyBtn.disabled) pkApply(); return; }
+    var dirs = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -4, ArrowDown: 4 };
+    if (!(e.key in dirs)) return;
+    var group = t && t.closest ? t.closest('.jp-pk-bands, .jp-pk-modes') : null;
+    if (!group) return;
+    e.preventDefault();
+    var items = Array.prototype.slice.call(group.querySelectorAll('button'));
+    var step = group === pkModesEl ? (dirs[e.key] < 0 ? -1 : 1) : dirs[e.key];
+    var i = items.indexOf(t), j = i + step;
+    if (j < 0 || j >= items.length) return;
+    items[j].focus();
+    if (!items[j].disabled) items[j].click();
+  });
+  // Follow every path that moves the selects, with or without a change event:
+  // the band's "active" class (observed), the mode select's value (a setter
+  // wrap, since mode hop and restore assign it directly), and rig-bands.
+  if (bandSelect) new MutationObserver(function() { syncBandMode(); if (pkIsOpen()) pkRender(); }).observe(bandSelect, { subtree: true, attributes: true, attributeFilter: ['class', 'data-freq', 'hidden'] });
+  (function() {
+    var d = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+    if (!d || !d.set) return;
+    Object.defineProperty(modeSelect, 'value', {
+      configurable: true,
+      get: function() { return d.get.call(this); },
+      set: function(v) { d.set.call(this, v); syncBandMode(); },
+    });
+  })();
+  modeSelect.addEventListener('change', syncBandMode);
+  syncBandMode();
 
   // DXpeditions on the air with a published FT8/FT4 dial (level_death
   // 2026-10-31; the feed's `freqs`, lib/dxpedition-dials.js). A group at the

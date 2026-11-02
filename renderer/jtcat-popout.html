@@ -70,7 +70,7 @@
     .jp-row.jp-new-park { background: rgba(78, 204, 163, 0.18); border-left: 3px solid #66ff99; padding-left: 5px; }
     .jp-row.jp-new-park .jp-msg { color: #8affc2; font-weight: 600; }
     .jp-badge { font-size: 9px; font-weight: 700; padding: 0 3px; border-radius: 2px; margin-right: 2px; line-height: 1.4; display: inline-block; vertical-align: baseline; }
-    .jp-badge-dxcc { background: var(--accent-red, #e94560); color: #fff; }
+    .jp-badge-dxcc { background: var(--accent-red, #e94560); color: var(--on-accent-red); }
     .jp-badge-state { background: #e040fb; color: #000; }
     .jp-badge-grid { background: #4fc3f7; color: #000; }
     .jp-badge-call { background: #f0a500; color: #000; }
@@ -111,11 +111,11 @@
     .jp-row.jp-wl-fill-g2, .jp-row.jp-cq.jp-wl-fill-g2, .jp-row.jp-wanted.jp-wl-fill-g2 { background: color-mix(in srgb, var(--jp-wl-color-2, #b388ff) 38%, transparent); border-left: 3px solid var(--jp-wl-color-2, #b388ff); }
     /* Directed-at-me is UNMISSABLE (WSJT-X "black bar" parity): solid accent
        band + bold; outranks every other treatment including watchlist fills. */
-    .jp-row.jp-directed { background: var(--accent-red, #e94560) !important; color: #fff; font-weight: 700; border-left: 6px solid #7a0f26; }
+    .jp-row.jp-directed { background: var(--accent-red, #e94560) !important; color: var(--on-accent-red); font-weight: 700; border-left: 6px solid #7a0f26; }
     .jp-row.jp-directed .jp-msg,
     .jp-row.jp-directed .jp-time, .jp-row.jp-directed .jp-db,
     .jp-row.jp-directed .jp-dt, .jp-row.jp-directed .jp-df,
-    .jp-row.jp-directed .jp-entity { color: #fff; }
+    .jp-row.jp-directed .jp-entity { color: var(--on-accent-red); }
     /* New DXCC pops (bright magenta tint) — data was always enriched, the
        styling just whispered. */
     .jp-row.jp-wanted.jp-new-dxcc { background: color-mix(in srgb, #ff00c8 24%, transparent); }
@@ -136,7 +136,7 @@
        (1.1:1). Light mode also gets the darker red (white 5.6:1), for
        operators working in full sun (Dusty Notes 2026-09-25). */
     [data-theme="light"] .jp-row.jp-directed { background: #c62828 !important; }
-    [data-theme="light"] .jp-row.jp-directed .jp-msg { color: #fff; }
+    [data-theme="light"] .jp-row.jp-directed .jp-msg { color: var(--on-accent-red); }
     [data-theme="light"] .jp-row.jp-chase .jp-msg { color: #8a6a00; }
     [data-theme="light"] .jp-row.jp-new-park .jp-msg { color: #0b7a4b; }
     /* WSPR distance + best-DX use the same pale yellow as chase — same
@@ -174,7 +174,7 @@
     .jp-wspr-chip:hover, .jp-mode-chip:hover { color: var(--text-secondary); }
     .jp-wspr-chip.on, .jp-mode-chip.on { background: var(--accent-green, #4ecca3); color: #000; border-color: var(--accent-green, #4ecca3); font-weight: 700; }
     .jp-wspr-chip.hopping, .jp-mode-chip.hopping { box-shadow: 0 0 0 2px #4fc3f7; }
-    .jp-wspr-next.tx { background: var(--accent-red, #e94560); color: #fff; animation: jp-tune-pulse 1s ease-in-out infinite; }
+    .jp-wspr-next.tx { background: var(--accent-red, #e94560); color: var(--on-accent-red); animation: jp-tune-pulse 1s ease-in-out infinite; }
     /* Spot table */
     .jp-wspr-thead, .jp-wspr-row { display: grid; grid-template-columns: 46px 26px 30px 68px 26px 60px 42px 1fr 30px 50px 30px; gap: 4px; padding: 1px 8px; font-family: monospace; font-size: 11px; align-items: baseline; }
     .jp-wspr-thead { color: var(--text-dim); font-weight: 700; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); padding-top: 3px; padding-bottom: 3px; flex-shrink: 0; }
@@ -295,14 +295,14 @@
     .jp-countdown-big { font-family: monospace; font-size: 16px; font-weight: 700; color: var(--text-primary); min-width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
     .jp-btn { padding: 4px 12px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-tertiary); color: var(--text-primary); font-size: 12px; font-weight: 600; cursor: pointer; }
     .jp-btn:hover { background: var(--bg-hover); }
-    .jp-btn.active { background: var(--accent-green, #4ecca3); color: #fff; border-color: var(--accent-green, #4ecca3); }
-    .jp-btn.jp-halt { background: var(--accent-red, #e94560); color: #fff; border-color: #e94560; }
+    .jp-btn.active { background: var(--accent-green, #4ecca3); color: var(--on-accent-green); border-color: var(--accent-green, #4ecca3); }
+    .jp-btn.jp-halt { background: var(--accent-red, #e94560); color: var(--on-accent-red); border-color: #e94560; }
     /* ATU — momentary. The pulse is a 5 s "I sent it" acknowledgement, not a
        readback: the radio doesn't report tune-in-progress over CAT. */
     .jp-btn.jp-atu.tuning { background: #f0a500; color: #000; border-color: #f0a500; animation: jp-tune-pulse 1s ease-in-out infinite; }
     .jp-btn.jp-tune { color: #f0a500; border-color: #f0a500; }
     .jp-btn.jp-tune:hover { background: #f0a500; color: #000; }
-    .jp-btn.jp-tune.active { background: var(--accent-red, #e94560); color: #fff; border-color: #e94560; animation: jp-tune-pulse 1s ease-in-out infinite; font-variant-numeric: tabular-nums; }
+    .jp-btn.jp-tune.active { background: var(--accent-red, #e94560); color: var(--on-accent-red); border-color: #e94560; animation: jp-tune-pulse 1s ease-in-out infinite; font-variant-numeric: tabular-nums; }
     /* ULTRACAT Full Auto CQ — Matrix-green identity, pulses while running.
        Its own near-black face: the green on the theme's button grey was 1.1:1
        on the light theme (Casey 2026-09-30: "hard for me to see"); on #0b1a0f
@@ -386,13 +386,13 @@
     .jp-qso-skip { background: none; border: 1px solid #4fc3f7; color: #4fc3f7; border-radius: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer; line-height: 1; font-weight: 600; }
     .jp-qso-skip:hover { background: #4fc3f7; color: #000; }
     .jp-qso-cancel { margin-left: auto; background: none; border: 1px solid #e94560; color: #e94560; border-radius: 4px; padding: 2px 8px; font-size: 14px; cursor: pointer; line-height: 1; }
-    .jp-qso-cancel:hover { background: var(--accent-red, #e94560); color: #fff; }
+    .jp-qso-cancel:hover { background: var(--accent-red, #e94560); color: var(--on-accent-red); }
     .jp-qso-steprow { display: flex; align-items: center; gap: 8px; }
     .jp-qso-steps { display: flex; flex-wrap: wrap; gap: 2px; align-items: center; font-family: monospace; font-size: 11px; flex: 1 1 auto; min-width: 0; }
     .jp-qso-step { display: flex; align-items: center; gap: 2px; padding: 3px 6px; border-radius: 3px; white-space: nowrap; background: var(--bg-secondary); color: var(--text-dim); border: 1px solid transparent; }
     .jp-qso-step.step-done { color: var(--text-tertiary, #666); text-decoration: line-through; opacity: 0.6; }
     .jp-qso-step.step-current { font-weight: bold; }
-    .jp-qso-step.step-current.step-tx { background: var(--accent-red, #e94560); color: #fff; border-color: #e94560; }
+    .jp-qso-step.step-current.step-tx { background: var(--accent-red, #e94560); color: var(--on-accent-red); border-color: #e94560; }
     .jp-qso-step.step-current.step-tx.step-pulsing { animation: qso-step-pulse 1s ease-in-out infinite; }
     .jp-qso-step.step-current.step-rx { background: var(--accent-green, #4ecca3); color: #000; border-color: var(--accent-green, #4ecca3); }
     @keyframes qso-step-pulse { 0%,100% { opacity: 1; box-shadow: 0 0 4px #e94560; } 50% { opacity: 0.6; box-shadow: 0 0 12px #e94560; } }
@@ -434,6 +434,48 @@
     .jtcat-arc-reverse { animation: jtcat-arc-flow-rev 1.5s linear infinite; }
     @keyframes jtcat-arc-flow { from { stroke-dashoffset: 28; } to { stroke-dashoffset: 0; } }
     @keyframes jtcat-arc-flow-rev { from { stroke-dashoffset: 0; } to { stroke-dashoffset: 28; } }
+
+    /* Band and mode: the one toolbar button and its picker (2026-11-02). Sizes
+       follow the phone's Digi picker (44 px chips, 64+ px band boxes) because
+       the old 10 px chips were unreadable for older operators. Text on an
+       accent uses the --on-accent-* variables, never #fff (app-theme-test). */
+    .jp-bandmode { height: 44px; display: inline-flex; align-items: center; gap: 10px; padding: 0 14px; border-radius: 8px; border: 1.5px solid var(--accent-blue, #4fc3f7); background: var(--bg-tertiary); color: var(--text-primary); cursor: pointer; font-family: inherit; flex-shrink: 0; }
+    .jp-bandmode:hover { background: var(--bg-hover); }
+    .jp-bandmode .jp-bm-band { font-size: 18px; font-weight: 800; }
+    .jp-bandmode .jp-bm-mode { font-size: 18px; font-weight: 800; color: var(--accent-blue, #4fc3f7); }
+    .jp-bandmode .jp-bm-dial { font-size: 15px; font-weight: 600; color: var(--text-secondary); font-family: monospace; font-variant-numeric: tabular-nums; }
+    .jp-bandmode .jp-bm-caret { color: var(--accent-blue, #4fc3f7); }
+    .jp-picker { position: fixed; inset: 0; z-index: 3000; display: flex; align-items: flex-start; justify-content: center; padding-top: 56px; }
+    .jp-picker.hidden { display: none; }
+    .jp-picker-scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.55); }
+    .jp-picker-panel { position: relative; width: 660px; max-width: calc(100vw - 32px); max-height: calc(100vh - 72px); overflow-y: auto; box-sizing: border-box; padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 18px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5); }
+    .jp-picker-head { display: flex; align-items: center; gap: 12px; }
+    .jp-picker-title { margin: 0; flex: 1; font-size: 22px; font-weight: 800; color: var(--text-primary); }
+    .jp-picker-done { height: 40px; padding: 0 14px; border-radius: 8px; border: none; background: transparent; color: var(--accent-blue, #4fc3f7); font-size: 16px; font-weight: 700; cursor: pointer; font-family: inherit; }
+    .jp-picker-done:hover { background: var(--bg-hover); }
+    .jp-picker-sec { font-size: 12px; font-weight: 900; letter-spacing: 1.2px; color: var(--text-dim, #888); }
+    .jp-picker-sec-row { display: flex; align-items: baseline; gap: 12px; }
+    .jp-picker-sec-row .jp-picker-sec { flex: 1; }
+    .jp-picker-note { font-size: 13px; color: var(--text-dim, #888); }
+    .jp-pk-modes { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+    .jp-pk-mode { height: 48px; border-radius: 8px; border: 1px solid var(--border-primary); background: var(--bg-tertiary); color: var(--text-primary); font-size: 17px; font-weight: 800; cursor: pointer; font-family: inherit; }
+    .jp-pk-mode:hover { background: var(--bg-hover); }
+    .jp-pk-mode.on { border: 2px solid var(--accent-blue, #4fc3f7); background: rgba(79, 195, 247, 0.12); color: var(--accent-blue, #4fc3f7); }
+    .jp-pk-bands { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+    .jp-pk-band { height: 72px; border-radius: 8px; border: 1px solid var(--border-primary); background: var(--bg-tertiary); color: var(--text-primary); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; cursor: pointer; font-family: inherit; }
+    .jp-pk-band:hover { background: var(--bg-hover); }
+    .jp-pk-band .jp-pk-band-name { font-size: 20px; font-weight: 800; line-height: 1; }
+    .jp-pk-band .jp-pk-band-dial { font-size: 14px; font-weight: 600; font-family: monospace; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+    .jp-pk-band.on { border: 2px solid var(--accent-blue, #4fc3f7); background: rgba(79, 195, 247, 0.12); color: var(--accent-blue, #4fc3f7); }
+    .jp-pk-band.on .jp-pk-band-dial { color: var(--accent-blue, #4fc3f7); }
+    .jp-pk-band:disabled { border: 1px dashed var(--border-primary); background: transparent; color: var(--text-dim, #888); cursor: not-allowed; }
+    .jp-pk-band:disabled .jp-pk-band-dial { color: var(--text-dim, #888); }
+    .jp-pk-apply { height: 56px; margin-top: 4px; border-radius: 14px; border: none; background: var(--accent-green, #4ecca3); color: var(--on-accent-green); font-size: 18px; font-weight: 800; cursor: pointer; font-family: inherit; }
+    .jp-pk-apply:hover { filter: brightness(1.08); }
+    .jp-pk-apply:disabled { background: var(--bg-tertiary); color: var(--text-dim, #888); cursor: default; filter: none; }
+    .jp-pk-hint { font-size: 14px; line-height: 1.4; color: var(--text-dim, #888); text-align: center; }
+    .jp-pk-keys { font-size: 13px; color: var(--text-dim, #888); text-align: center; }
+    .jp-pk-mode:focus-visible, .jp-pk-band:focus-visible, .jp-pk-apply:focus-visible { outline: 2px solid var(--accent-blue, #4fc3f7); outline-offset: 2px; }
   </style>
 </head>
 <body>
@@ -450,9 +492,19 @@
 
   <!-- Toolbar -->
   <div class="jtcat-toolbar">
-    <!-- Band: a dropdown (K3SBP 2026-10-18 — the button row took the whole
-         toolbar). Each option carries data-band / data-freq and the "active"
-         class exactly as the buttons did, so every band path is unchanged. -->
+    <!-- Band and mode: ONE button (Casey 2026-11-02 — the dropdown and the mode
+         chips were too small for older eyes; design: the phone's Digi picker).
+         It opens #jp-picker. The two selects below stay in the DOM, hidden, as
+         the sources of truth every band and mode path reads and writes (the
+         .jp-band-opt "active" class, bandSelectFollowActive, applyJpRigBands,
+         the mode select's value); the picker drives them. -->
+    <button type="button" id="jp-bandmode" class="jp-bandmode" title="Band and mode (press B)" aria-haspopup="dialog">
+      <span id="jp-bm-band" class="jp-bm-band">20m</span>
+      <span id="jp-bm-mode" class="jp-bm-mode">FT8</span>
+      <span id="jp-bm-dial" class="jp-bm-dial">14,074.0 kHz</span>
+      <svg class="jp-bm-caret" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 5l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+    </button>
+    <div class="jp-src-selects" hidden>
     <div class="jtcat-mode-select">
       <select id="jp-band" title="Band (tunes the radio to this mode's frequency on the band)">
         <option class="jp-band-opt" value="160m" data-band="160m" data-freq="1840">160m</option>
@@ -481,6 +533,7 @@
         <option value="JTTY" title="JTTY (WSJT-X 3.2) — keyboard and contest mode, 127 Hz wide, no timed sequences. Beta.">JTTY</option>
       </select>
     </div>
+    </div>
     <span id="jp-radio-freq" style="font-size:12px;font-weight:bold;color:#4fc3f7;white-space:nowrap;font-family:monospace;" title="Radio frequency">—</span>
     <span id="jp-ptt-mode" class="jp-ptt-mode is-cat" title="PTT method" style="display:none;">PTT: CAT</span>
     <span id="jp-tx-freq-label" style="font-size:12px;font-weight:bold;color:#ff4444;white-space:nowrap;cursor:pointer;" title="Click to set TX frequency">TX: 1500 Hz</span>
@@ -494,6 +547,31 @@
       <button id="jp-map-toggle" class="jtcat-filter-btn active" title="Toggle map">Map</button>
       <button id="jp-map-popout" class="jtcat-filter-btn" title="Pop out map">&#x2197;</button>
       <button id="jp-worked-toggle" class="jtcat-filter-btn active" title="Show or hide the Worked box on the map (states and countries worked and confirmed). The tints and F6 / F7 / F8 keep working either way.">Worked</button>
+    </div>
+  </div>
+
+  <!-- Band and mode picker (opened by #jp-bandmode or the B key). Mode chips
+       over a four-wide grid of band boxes, each box the band and its dial for
+       the picked mode; one button that says what will happen. Only the bands
+       ticked for this radio appear (rig-bands); a band with no dial for the
+       picked mode is greyed. Taps only pick — nothing retunes until Switch. -->
+  <div id="jp-picker" class="jp-picker hidden" role="dialog" aria-modal="true" aria-label="Band and mode">
+    <div id="jp-picker-scrim" class="jp-picker-scrim"></div>
+    <div class="jp-picker-panel">
+      <div class="jp-picker-head">
+        <h2 class="jp-picker-title">Band and mode</h2>
+        <button type="button" id="jp-picker-done" class="jp-picker-done">Done</button>
+      </div>
+      <div class="jp-picker-sec">MODE</div>
+      <div id="jp-pk-modes" class="jp-pk-modes" role="radiogroup" aria-label="Mode"></div>
+      <div class="jp-picker-sec-row">
+        <span class="jp-picker-sec">BAND</span>
+        <span class="jp-picker-note">Only the bands ticked for this radio (Settings &rarr; My Rigs)</span>
+      </div>
+      <div id="jp-pk-bands" class="jp-pk-bands" role="radiogroup" aria-label="Band"></div>
+      <button type="button" id="jp-pk-apply" class="jp-pk-apply" disabled>Running FT8 on 20m</button>
+      <div id="jp-pk-hint" class="jp-pk-hint">Pick a band or mode to switch.</div>
+      <div class="jp-pk-keys">Arrow keys move &middot; Enter switches &middot; Esc closes</div>
     </div>
   </div>
 
