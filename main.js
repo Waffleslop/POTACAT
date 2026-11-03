@@ -16297,7 +16297,9 @@ async function jtcatAutoLog(qso, opts) {
     rstSent: q.sentReport || '',
     rstRcvd: q.report || '',
     gridsquare: q.grid || '',
-    comment: 'JTCAT ' + mode,
+    // dcxweaver 2026-11-03: "JTCAT FT8" in every COMMENT is optional
+    // (settings.jtcatLogComment, default on). Off = COMMENT left empty.
+    comment: settings.jtcatLogComment !== false ? 'JTCAT ' + mode : '',
   };
 
   // Hunted park (KB2UXB 2026-07-09): SSB spot-click logging carries the
@@ -16326,7 +16328,8 @@ async function jtcatAutoLog(qso, opts) {
     qsoData.arrlSect = q.theirSection || '';
     qsoData.srxString = q.theirExch || '';
     qsoData.stxString = q.myExch || '';
-    qsoData.comment = `JTCAT FD ${mode} ${q.myExch || ''}<-${q.theirExch}`.trim();
+    // The exchange is in CLASS/ARRL_SECT/SRX_STRING/STX_STRING either way.
+    if (settings.jtcatLogComment !== false) qsoData.comment = `JTCAT FD ${mode} ${q.myExch || ''}<-${q.theirExch}`.trim();
   }
 
   // Only a QSO the operator ran from the JTCAT window: one run from a phone

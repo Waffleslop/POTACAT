@@ -1284,6 +1284,7 @@ const adifImportResult = document.getElementById('adif-import-result');
 const setDefaultPower = document.getElementById('set-default-power');
 const setSendToLogbook = document.getElementById('set-send-to-logbook');
 const setLogCommentTags = document.getElementById('set-log-comment-tags');
+const setJtcatLogComment = document.getElementById('set-jtcat-log-comment');
 const logbookConfig = document.getElementById('logbook-config');
 const setLogbookType = document.getElementById('set-logbook-type');
 const logbookInstructions = document.getElementById('logbook-instructions');
@@ -16937,6 +16938,7 @@ async function openSettingsDialog(tab) {
   if (setDxRespotTemplate) setDxRespotTemplate.value = s.dxRespotTemplate || '';
   renderRespotPresetRows(Array.isArray(s.respotPresets) ? s.respotPresets : []);
   if (setLogCommentTags) setLogCommentTags.checked = s.logCommentTags !== false; // default ON
+  if (setJtcatLogComment) setJtcatLogComment.checked = s.jtcatLogComment !== false; // default ON
   setNotifyPopup.checked = s.notifyPopup !== false;
   setNotifySound.checked = s.notifySound !== false;
   setNotifyTimeout.value = s.notifyTimeout || 10;
@@ -18131,6 +18133,7 @@ settingsSave.addEventListener('click', async () => {
     enableBannerLogger: setEnableBannerLogger.checked,
     n1mmRst: n1mmRstEnabled,
     logCommentTags: logCommentTagsEnabled,
+    jtcatLogComment: setJtcatLogComment ? setJtcatLogComment.checked : true,
     adifLogPath: adifLogPath,
     defaultPower: defaultPowerVal,
     sendToLogbook: sendToLogbook,
