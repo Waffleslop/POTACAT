@@ -5649,7 +5649,35 @@ function _applyPopoutTheme(payload) {
   jpWheelAndType(jpTxGain, jpTxGainVal);
   jpWheelAndType(jpRfRange, jpRfVal, { select: jpRfSelect });
 
+  // The watch outlives a rebuild (its back-off counts rebuilds); the timer
+  // does not.
+  var _popoutStallWatch = null;
+  var _popoutStallTimer = null;
+  function popoutArmStallWatch(track) {
+    var now = Date.now();
+    if (_popoutStallWatch) _popoutStallWatch.started(now);
+    else _popoutStallWatch = new window.CaptureStall.CaptureStallWatch(now);
+    if (_popoutStallTimer) clearInterval(_popoutStallTimer);
+    _popoutStallTimer = setInterval(function () {
+      if (!_popoutStallWatch || !popoutAudioCtx) return;
+      var d = _popoutStallWatch.tick(Date.now(), {
+        ctxState: popoutAudioCtx.state,
+        trackMuted: !!(track && track.muted),
+        trackEnded: !!(track && track.readyState === 'ended'),
+      });
+      if (d.action === 'resume') {
+        popoutAudioCtx.resume().catch(function () {});
+      } else if (d.action === 'restart' && _lastAudioArgs) {
+        var msg = '[JTCAT popout] Audio capture stalled (' + d.reason + ') — restarting capture';
+        console.warn(msg);
+        if (window.api.jtcatLog) window.api.jtcatLog(msg);
+        startPopoutAudio(_lastAudioArgs.deviceId, _lastAudioArgs.audioSource);
+      }
+    }, 5000);
+  }
+
   function stopPopoutAudio() {
+    if (_popoutStallTimer) { clearInterval(_popoutStallTimer); _popoutStallTimer = null; }
     if (popoutAudioProcessor) { popoutAudioProcessor.disconnect(); popoutAudioProcessor = null; }
     popoutAnalyser = null;
     // No analyser means no RX-silent verdict — drop any overlay.
@@ -5814,6 +5842,7 @@ function _applyPopoutTheme(payload) {
           processorOptions: { dsRatio: dsRatio },
         });
         workletNode.port.onmessage = function(e) {
+          if (_popoutStallWatch) _popoutStallWatch.noteSamples(e.data, Date.now());
           window.api.jtcatAudio(e.data);
         };
         popoutRxGainNode.connect(workletNode);
@@ -5869,6 +5898,7 @@ function _applyPopoutTheme(payload) {
             } else {
               samples = Array.from(rawSamples);
             }
+            if (_popoutStallWatch) _popoutStallWatch.noteSamples(samples, Date.now());
             window.api.jtcatAudio(samples);
           } catch (err) {
             console.error('[JTCAT popout] Audio processor error:', err.message || err);
@@ -5885,6 +5915,11 @@ function _applyPopoutTheme(payload) {
       setWfSilentOverlay(false);
       // Start local waterfall rendering loop
       popoutWaterfallLoop();
+      // Capture-stall watchdog (kc8zp_ryan 2026-11-03, lib/capture-stall.js):
+      // sound-card capture only; the SmartSDR / Icom-network feed is main's.
+      if (window.CaptureStall && audioSource !== 'smartsdr' && audioSource !== 'icom-network') {
+        popoutArmStallWatch(popoutAudioStream && popoutAudioStream.getAudioTracks()[0]);
+      }
       // Start finished — disarm the stall watchdog and restore the overlay
       // to its normal RX-silent role.
       _audioStartStage = null;

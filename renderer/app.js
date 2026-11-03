@@ -29731,6 +29731,7 @@ async function startJtcatAudio() {
         processorOptions: { dsRatio: dsRatio },
       });
       workletNode.port.onmessage = function(e) {
+        if (_jtcatStallWatch) _jtcatStallWatch.noteSamples(e.data, Date.now());
         window.api.jtcatAudio(e.data);
       };
       jtcatRxGainNode.connect(workletNode);
@@ -29786,6 +29787,7 @@ async function startJtcatAudio() {
           } else {
             samples = Array.from(rawSamples);
           }
+          if (_jtcatStallWatch) _jtcatStallWatch.noteSamples(samples, Date.now());
           window.api.jtcatAudio(samples);
         } catch (err) {
           console.error('[JTCAT] Audio processor error:', err.message || err);
@@ -29824,6 +29826,16 @@ async function startJtcatAudio() {
       audioTrack.addEventListener('unmute', function() {
         if (window.api.jtcatLog) window.api.jtcatLog('[JTCAT] Audio track unmuted');
       });
+    }
+
+    // Capture-stall watchdog (kc8zp_ryan 2026-11-03): 'ended' above is the
+    // only event that restarts capture, and an OS that mutes the track,
+    // suspends the AudioContext or stops delivering after idle fires none of
+    // it. lib/capture-stall.js decides; this resumes or rebuilds. Sound-card
+    // capture only: the SmartSDR / Icom-network feed comes from main, and a
+    // rebuild here cannot restart it.
+    if (window.CaptureStall && !(s.audioSource === 'smartsdr' || s.audioSource === 'icom-network')) {
+      jtcatArmStallWatch(audioTrack);
     }
 
     // Start waterfall rendering loop
@@ -29994,7 +30006,36 @@ window.api.onJtcatSetTxGain(function(level) {
   setJtcatTxGainPct(gainToTxPwr(jtcatTxGainLevel), false);
 });
 
+// The watch outlives a rebuild (its back-off counts rebuilds); the timer
+// does not.
+var _jtcatStallWatch = null;
+var _jtcatStallTimer = null;
+function jtcatArmStallWatch(track) {
+  var now = Date.now();
+  if (_jtcatStallWatch) _jtcatStallWatch.started(now);
+  else _jtcatStallWatch = new window.CaptureStall.CaptureStallWatch(now);
+  if (_jtcatStallTimer) clearInterval(_jtcatStallTimer);
+  _jtcatStallTimer = setInterval(function() {
+    if (!_jtcatStallWatch || !jtcatAudioCtx) return;
+    var d = _jtcatStallWatch.tick(Date.now(), {
+      ctxState: jtcatAudioCtx.state,
+      trackMuted: !!(track && track.muted),
+      trackEnded: !!(track && track.readyState === 'ended'),
+    });
+    if (d.action === 'resume') {
+      jtcatAudioCtx.resume().catch(function() {});
+    } else if (d.action === 'restart' && (jtcatRunning || jtcatRemoteActive)) {
+      var msg = '[JTCAT] Audio capture stalled (' + d.reason + ') — restarting capture';
+      console.warn(msg);
+      if (window.api.jtcatLog) window.api.jtcatLog(msg);
+      stopJtcatAudio();
+      startJtcatAudio();
+    }
+  }, 5000);
+}
+
 function stopJtcatAudio() {
+  if (_jtcatStallTimer) { clearInterval(_jtcatStallTimer); _jtcatStallTimer = null; }
   if (window.api.setJtcatIpAudioReady) window.api.setJtcatIpAudioReady(false);
   if (jtcatMeterAnim) { cancelAnimationFrame(jtcatMeterAnim); jtcatMeterAnim = null; }
   if (waterfallAnimFrame) {
