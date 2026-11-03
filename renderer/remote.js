@@ -3003,9 +3003,13 @@
         }
         sstvPhoneUpdateSendBtn();
         break;
+      case 'sstv-rx-ended':
+        sstvPhoneEndRx();
+        break;
       case 'sstv-rx-progress': {
         var pct = Math.round((msg.progress || 0) * 100);
         sstvPhoneRxActive = true;
+        sstvPhoneArmRxStale();
         if (sstvPhoneStatus) {
           sstvPhoneStatus.textContent = 'Receiving ' + pct + '%';
           sstvPhoneStatus.style.color = 'var(--pota)';
@@ -14014,6 +14018,26 @@ var _paddleHoldTimer = { dit: null, dah: null };
   }
 
   // --- Send ---
+  // A decode that ends with no picture used to leave the page on "Receiving"
+  // with SEND disabled for good (boblk9tc). The shack now says so
+  // (sstv-rx-ended); an older shack never does, so progress that stops for
+  // SSTV_RX_STALE_MS ends it here too. Progress arrives every 10 lines, a few
+  // seconds apart even in the slowest modes.
+  var SSTV_RX_STALE_MS = 20000;
+  var sstvPhoneRxStaleTimer = null;
+  function sstvPhoneArmRxStale() {
+    if (sstvPhoneRxStaleTimer) clearTimeout(sstvPhoneRxStaleTimer);
+    sstvPhoneRxStaleTimer = setTimeout(function () { sstvPhoneRxStaleTimer = null; sstvPhoneEndRx(); }, SSTV_RX_STALE_MS);
+  }
+  function sstvPhoneEndRx() {
+    if (sstvPhoneRxStaleTimer) { clearTimeout(sstvPhoneRxStaleTimer); sstvPhoneRxStaleTimer = null; }
+    if (!sstvPhoneRxActive) return;
+    sstvPhoneRxActive = false;
+    if (sstvPhoneStatus) { sstvPhoneStatus.textContent = 'Ready'; sstvPhoneStatus.style.color = 'var(--text-dim)'; }
+    if (sstvPhoneDecodeStatus) sstvPhoneDecodeStatus.style.display = 'none';
+    sstvPhoneUpdateSendBtn();
+  }
+
   function sstvPhoneUpdateSendBtn() {
     if (!sstvSendBtn) return;
     if (sstvPhoneRxActive) {

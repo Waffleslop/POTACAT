@@ -39163,6 +39163,7 @@ app.whenReady().then(() => {
       _sstvLastActivityMs = Date.now();
       _sstvDecode = null;
       pushActivityState();
+      if (remoteServer) remoteServer.broadcastSstvRxEnded({ reason: 'lock-lost' });
       if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
         sstvPopoutWin.webContents.send('sstv-rx-lock-lost', data);
       }
@@ -39186,6 +39187,7 @@ app.whenReady().then(() => {
         sendCatLog(`[SSTV] ${data.detail}`);
         _sstvDecode = null;
         pushActivityState();
+        if (remoteServer) remoteServer.broadcastSstvRxEnded({ reason: 'discarded' });
       }
     });
 
