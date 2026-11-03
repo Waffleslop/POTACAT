@@ -168,6 +168,15 @@
  	CloseSoundCard();
  }
  
+@@ -1859,7 +1895,7 @@
+ 		// txwfu = NULL;
+ 	// }
+ 
+-	if (strcmp(PlaybackDevice, "NOSOUND") != 0)
++	if (strcmp(PlaybackDevice, "NOSOUND") != 0 && !sa_active())  // POTACAT: socket capture is never reopened (the failed ALSA open overran strFault[100]: macOS SIGABRT)
+ 		OpenSoundCapture(SavedCaptureDevice, SavedCaptureRate, strFault);
+ 	StartCapture();
+ 
 --- a/src/common/TCPHostInterface.c
 +++ b/src/common/TCPHostInterface.c
 @@ -490,7 +490,7 @@

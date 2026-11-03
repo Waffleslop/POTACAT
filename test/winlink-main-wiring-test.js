@@ -124,6 +124,14 @@ test('the macOS modem builds: ardopcf against the ALSA stand-in, Dire Wolf with 
   const stub = read('helpers/alsa-stub/alsa/asoundlib.h');
   for (const sym of ['snd_pcm_open', 'snd_pcm_readi', 'snd_pcm_writei', 'snd_card_next', 'snd_pcm_hw_params_set_rate', 'snd_strerror']) assert.ok(stub.includes(sym + '('), sym);
   assert.ok(!/snd_pcm_open[\s\S]{0,200}return 0;/.test(stub), 'opening a device always fails cleanly');
+  // macOS arm64 ardopcf SIGABRT on the first ARQ connect request (2026-11-02):
+  // SoundFlush reopened capture after the frame, the stub's long failure text
+  // overran its strFault[100], and __stack_chk_fail aborted the modem.
+  const errText = (stub.match(/snd_strerror\(int errnum\) \{[^}]*return "([^"]*)"/) || [])[1];
+  assert.ok(errText && errText.length <= 30, 'the stub error text fits ardopcf\'s 100-byte buffers with a device name beside it');
+  const ap = read('third_party/ardopcf/potacat-socket-audio.patch');
+  assert.ok(/\+\tif \(strcmp\(PlaybackDevice, "NOSOUND"\) != 0 && !sa_active\(\)\)[^\n]*\n \t\tOpenSoundCapture\(SavedCaptureDevice, SavedCaptureRate, strFault\);/.test(ap), 'SoundFlush never reopens capture under socket audio');
+  assert.ok(/!sa_active\(\)\)  \/\/ POTACAT: socket capture is never reopened/.test(read('scripts/gen-ardopcf-patch.py')), 'and the generator makes the same edit');
   const rel = read('.github/workflows/release.yml');
   assert.strictEqual((rel.match(/bash scripts\/build-winlink-helpers\.sh pat ardop direwolf/g) || []).length, 4, 'all four non-Windows release jobs build both modems (Windows builds them in two steps)');
   assert.ok(/brew install portaudio hidapi/.test(rel), 'the mac jobs install what Dire Wolf\'s CMake requires');

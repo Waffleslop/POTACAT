@@ -59,7 +59,7 @@ typedef enum _snd_pcm_state { SND_PCM_STATE_OPEN = 0, SND_PCM_STATE_PREPARED = 2
 #define snd_pcm_format_mask_alloca(ptr) do { *(ptr) = (snd_pcm_format_mask_t *) alloca(64); memset(*(ptr), 0, 64); } while (0)
 #define snd_ctl_card_info_alloca(ptr)   do { *(ptr) = (snd_ctl_card_info_t *) alloca(64); memset(*(ptr), 0, 64); } while (0)
 
-static inline const char *snd_strerror(int errnum) { (void) errnum; return "ALSA is not available on macOS (POTACAT uses the socket audio device)"; }
+static inline const char *snd_strerror(int errnum) { (void) errnum; return "no ALSA (socket audio)"; } /* short: ardopcf formats it into 100-byte stack buffers */
 
 /* Cards and devices: there are none. */
 static inline int snd_card_next(int *card) { if (card) *card = -1; return 0; }

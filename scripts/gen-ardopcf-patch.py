@@ -165,6 +165,16 @@ al_orig, al_new = edit('ALSASound.c', [
 		return;
 	}
 """),
+    # SoundFlush reopens capture after every transmitted frame. Under socket
+    # audio there is nothing to reopen, and on macOS the ALSA stub's failure
+    # text overran SoundFlush's strFault[100]: __stack_chk_fail, SIGABRT on
+    # the first ARQ connect request (IC-7300, macOS arm64, 2026-11-02).
+    ("""	if (strcmp(PlaybackDevice, "NOSOUND") != 0)
+		OpenSoundCapture(SavedCaptureDevice, SavedCaptureRate, strFault);
+""",
+     """	if (strcmp(PlaybackDevice, "NOSOUND") != 0 && !sa_active())  // POTACAT: socket capture is never reopened (the failed ALSA open overran strFault[100]: macOS SIGABRT)
+		OpenSoundCapture(SavedCaptureDevice, SavedCaptureRate, strFault);
+"""),
     ("""void StopCapture()
 {
 	Capturing = FALSE;
