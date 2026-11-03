@@ -36051,8 +36051,9 @@ app.whenReady().then(() => {
 
   // Pull the whole pota.app hunter log and fold it into the local log: a
   // matching QSO with no park gets pota.app's park refs, a matching QSO whose
-  // park disagrees is left alone and reported as a CONFLICT, a contact the
-  // log doesn't have is added (lib/pota-hunter-import.js). One backup, one
+  // park disagrees is left alone and reported as a CONFLICT, an activator's
+  // repeated row or a contact already in the log is a DUPLICATE (not added),
+  // and a contact the log doesn't have is added (lib/pota-hunter-import.js). One backup, one
   // write, one journal batch, and a CSV of every decision for the operator
   // to review.
   let potaHunterImportRunning = false;
@@ -36102,13 +36103,14 @@ app.whenReady().then(() => {
         added: plan.adds.length,
         unchanged: plan.unchanged.length,
         conflicts: plan.conflicts.length,
+        duplicates: plan.duplicates.length,
         skipped: plan.skipped.length,
         reviewPath,
         backupPath,
       };
       sendCatLog(`[pota-hunter-import]${dryRun ? ' DRY RUN, nothing changed:' : ''} ${entries.length} of ${count} entries downloaded: `
         + `${result.updated} ${dryRun ? 'would be ' : ''}updated, ${result.added} ${dryRun ? 'would be ' : ''}added, `
-        + `${result.unchanged} unchanged, ${result.conflicts} park conflicts (not changed), ${result.skipped} skipped. Review: ${reviewPath}`);
+        + `${result.unchanged} unchanged, ${result.conflicts} park conflicts (not changed), ${result.duplicates} duplicates (not added),${result.skipped} skipped. Review: ${reviewPath}`);
 
       if (changes.length) {
         loadWorkedQsos();
@@ -36118,7 +36120,7 @@ app.whenReady().then(() => {
         if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) qsoPopoutWin.webContents.send('qso-popout-refresh');
       }
 
-      const contacts = result.updated + result.added + result.unchanged + result.conflicts;
+      const contacts = result.updated + result.added + result.unchanged + result.conflicts + result.duplicates;
       const detail = [
         `Hunter log entries downloaded: ${entries.length.toLocaleString()} (POTA.app reports ${count.toLocaleString()}).`,
         `That is ${contacts.toLocaleString()} contacts: a 2-fer is one entry per park.`,
@@ -36130,6 +36132,10 @@ app.whenReady().then(() => {
       if (result.conflicts) {
         detail.push(`${result.conflicts.toLocaleString()} QSOs have a park that differs from POTA.app's. `
           + 'They were left as they are: check them in the review log (CONFLICT rows).');
+      }
+      if (result.duplicates) {
+        detail.push(`${result.duplicates.toLocaleString()} duplicates not added: the activator logged the contact twice, `
+          + 'or it is already in your log (DUPLICATE rows in the review log).');
       }
       if (result.skipped) detail.push(`${result.skipped.toLocaleString()} entries skipped (see the review log).`);
       if (dryRun) detail.push('', 'Dry run: your logbook was not changed. Run Import hunter log to apply.');
