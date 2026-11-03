@@ -23,22 +23,40 @@ test('CW is never the tune carrier', () => {
   assert.ok(!/setModeOnly\('CW'/.test(fn) && !/setMode\('CW'\)/.test(fn), 'no CW mode set in the tune');
 });
 test('mode and power are still restored', () => {
-  assert.ok(/setModeOnly\(restoreMode, _currentFreqHz\)/.test(fn) && /gatedSetTxPower\(restorePower\)/.test(fn));
+  assert.ok(/setModeOnly\(restoreSetMode, _currentFreqHz\)/.test(fn) &&/gatedSetTxPower\(restorePower\)/.test(fn));
 });
 
 // GitHub #111 (df1vb): the tune power stayed after tuning. Runs the REAL
 // tune function in a sandbox against a fake radio that ignores the first
 // power restore (it is still in its TX tail), then answers.
-async function runTune({ ignoreRestores, powerBefore = 100 }) {
+// The fake radio also reports its mode: an Icom (dataFlag) keeps DATA as a
+// separate flag, so FT8 reads back as USB with dataModeState.on.
+async function runTune({ ignoreRestores, powerBefore = 100, modeBefore = 'USB', dataFlag = false, dataBefore = false, ignoreModeRestores = 0 }) {
   const vm = require('vm');
   const wfr = main.slice(main.indexOf('async function waitForPowerReadback('), main.indexOf('/**', main.indexOf('async function waitForPowerReadback(')));
-  const log = [], powers = [];
-  let restoresSeen = 0;
+  const wmr = main.slice(main.indexOf('async function waitForModeReadback('), main.indexOf('\n}\n', main.indexOf('async function waitForModeReadback(')) + 3);
+  const log = [], powers = [], modes = [];
+  let restoresSeen = 0, modeRestoresSeen = 0;
+  const DATA_PARSE = { DIGU: ['USB', true], DIGL: ['LSB', true], DIGFM: ['FM', true], DIGAM: ['AM', true] };
+  const codec = { dataModeState: dataFlag ? { on: dataBefore } : null };
   const ctx = {
     console, Date, Promise, setTimeout, clearTimeout,
+    ExtAtuRestore: require('../lib/ext-atu-restore'),
+    _lastModeReadback: null,
     settings: { activeRigId: 'r1', rigs: [{ id: 'r1', externalAtu: 'rf-sense', externalAtuWatts: 10, externalAtuSeconds: 1 }] },
-    cat: { connected: true, setModeOnly() {} },
-    _currentMode: 'USB', _currentTxPower: powerBefore, _currentFreqHz: 14074000,
+    cat: {
+      connected: true, _codec: codec,
+      setModeOnly(m) {
+        modes.push(m);
+        if (m !== 'AM') { modeRestoresSeen++; if (modeRestoresSeen <= ignoreModeRestores) return; }
+        const [base, data] = dataFlag ? (DATA_PARSE[m] || [m, false]) : [m, false];
+        setTimeout(() => {
+          if (dataFlag) codec.dataModeState = { on: data };
+          ctx._lastModeReadback = { mode: base, at: Date.now() };
+        }, 60);
+      },
+    },
+    _currentMode: modeBefore, _currentTxPower: powerBefore, _currentFreqHz: 14074000,
     EXTERNAL_ATU_CARRIER_MODE: 'AM', _externalAtuActive: false, _externalAtuCancel: false,
     _setupPowerRestoreAttempt: 0, _lastPowerReadback: null, win: null,
     sendCatLog: (l) => log.push(l), saveSettings() {}, gatedSetTransmit() {},
@@ -51,9 +69,9 @@ async function runTune({ ignoreRestores, powerBefore = 100 }) {
     },
   };
   vm.createContext(ctx);
-  vm.runInContext(wfr + '\nvar runExternalAtuTune;\n' + fn, ctx);
+  vm.runInContext(wfr + '\n' + wmr + '\nvar runExternalAtuTune;\n' + fn, ctx);
   await ctx.runExternalAtuTune();
-  return { log, powers, ctx };
+  return { log, powers, modes, ctx };
 }
 (async () => {
   const a = await runTune({ ignoreRestores: 1 });
@@ -68,6 +86,35 @@ async function runTune({ ignoreRestores, powerBefore = 100 }) {
     const m = b.ctx.settings.setupTxPowerRestore;
     assert.ok(m && m.watts === 100 && m.testWatts === 10 && m.reason === 'external-atu');
     assert.ok(b.log.some((l) => /has not confirmed it/.test(l)));
+  });
+  // bobve (IC-7300 + LDG over Cloud, 2026-11-03): the radio stayed in AM.
+  const c = await runTune({ ignoreRestores: 0, ignoreModeRestores: 1 });
+  test('a lost mode restore is sent again until the radio reports the mode', () => {
+    assert.deepStrictEqual(c.modes, ['AM', 'USB', 'USB']);
+    assert.ok(c.log.some((l) => /sending the mode again \(2 of 3\)/.test(l)), c.log.join('\n'));
+    assert.ok(c.log.some((l) => /mode USB confirmed/.test(l)), c.log.join('\n'));
+  });
+  const d = await runTune({ ignoreRestores: 0, dataFlag: true, dataBefore: true });
+  test('an Icom in USB with DATA on is restored with DATA (DIGU), not plain USB', () => {
+    assert.deepStrictEqual(d.modes, ['AM', 'DIGU']);
+    assert.ok(d.log.some((l) => /mode USB \(DATA on\) confirmed/.test(l)), d.log.join('\n'));
+  });
+  const e = await runTune({ ignoreRestores: 0, dataFlag: true, dataBefore: false });
+  test('plain USB on an Icom stays plain USB', () => assert.deepStrictEqual(e.modes, ['AM', 'USB']));
+  const g = await runTune({ ignoreRestores: 0, ignoreModeRestores: 99 });
+  test('a radio that never reports the mode gets three tries and the log says so', () => {
+    assert.deepStrictEqual(g.modes, ['AM', 'USB', 'USB', 'USB']);
+    assert.ok(g.log.some((l) => /has not confirmed it \(last report/.test(l)), g.log.join('\n'));
+  });
+  test('restore names: DATA flag on maps to the DATA name, otherwise unchanged', () => {
+    const R = require('../lib/ext-atu-restore');
+    assert.strictEqual(R.restoreModeName('USB', true), 'DIGU');
+    assert.strictEqual(R.restoreModeName('LSB', true), 'DIGL');
+    assert.strictEqual(R.restoreModeName('USB', false), 'USB');
+    assert.strictEqual(R.restoreModeName('DATA-U', true), 'DATA-U');
+    assert.ok(R.modeConfirmed('usb', 'USB', null, false));
+    assert.ok(!R.modeConfirmed('USB', 'USB', { on: false }, true), 'USB without DATA is not a confirmed USB-D');
+    assert.ok(!R.modeConfirmed('AM', 'USB', null, false));
   });
   test('the reconcile on the next power report leaves a running tune alone', () => {
     const rec = main.slice(main.indexOf('function stationSetupReconcilePower('), main.indexOf('function stationSetupReconcilePower(') + 600);

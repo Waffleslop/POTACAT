@@ -2024,6 +2024,18 @@ const CONDITIONS_MIN_W = 360;
 const CONDITIONS_MIN_H = 280;
 // The RF-sense tuner's carrier mode — AM, never CW (see runExternalAtuTune).
 const EXTERNAL_ATU_CARRIER_MODE = 'AM';
+const ExtAtuRestore = require('./lib/ext-atu-restore');
+// The radio's last mode report ({ mode, at }), set in sendCatMode: what the
+// external tune's mode restore believes, never the command it sent.
+let _lastModeReadback = null;
+async function waitForModeReadback(sinceTs, predicate, timeoutMs) {
+  const end = Date.now() + timeoutMs;
+  while (Date.now() < end) {
+    if (_lastModeReadback && _lastModeReadback.at > sinceTs && predicate(_lastModeReadback.mode)) return _lastModeReadback.mode;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return null;
+}
 // --- External ATU (LDG Z-100plus, MFJ, other RF-sensing tuners) ---
 // Module scope, not inside connectRemote(): it closes over nothing of the
 // remote server, and assigned there the ATU button did nothing at all until
@@ -2055,6 +2067,11 @@ runExternalAtuTune = async function () {
   _externalAtuActive = true;
   _externalAtuCancel = false;
   const restoreMode = _currentMode || 'USB';
+  // An Icom keeps DATA as a separate flag (USB + DATA1 for FT8): capture it
+  // and restore the DATA name, or a plain USB set turns DATA off (bobve).
+  const dataBefore = cat._codec && cat._codec.dataModeState;
+  const restoreData = !!(dataBefore && dataBefore.on);
+  const restoreSetMode = ExtAtuRestore.restoreModeName(restoreMode, restoreData);
   const powerKnown = _currentTxPower > 0;
   const restorePower = powerKnown ? _currentTxPower : (settings.defaultPower || 100);
   const carrierMode = EXTERNAL_ATU_CARRIER_MODE;
@@ -2090,10 +2107,23 @@ runExternalAtuTune = async function () {
   } finally {
     // Let the radio leave its TX tail before it is asked anything.
     await new Promise(r => setTimeout(r, 500));
-    try {
-      if (cat.setModeOnly) cat.setModeOnly(restoreMode, _currentFreqHz);
-      else if (cat.setMode) cat.setMode(restoreMode);
-    } catch {}
+    // Put the mode back and believe only the radio's report (one lost CI-V
+    // frame in the TX tail left an IC-7300 in AM, bobve 2026-11-03); send
+    // again twice if it does not confirm, DATA included.
+    let modeConfirmed = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const sentAt = Date.now();
+      try {
+        if (cat.setModeOnly) cat.setModeOnly(restoreSetMode, _currentFreqHz);
+        else if (cat.setMode) cat.setMode(restoreSetMode);
+      } catch {}
+      modeConfirmed = await waitForModeReadback(sentAt, (m) => ExtAtuRestore.modeConfirmed(m, restoreMode, cat._codec && cat._codec.dataModeState, restoreData), 3000);
+      if (modeConfirmed != null) break;
+      if (attempt < 3) sendCatLog(`[ExtATU] the radio has not reported ${restoreMode}${restoreData ? ' with DATA on' : ''} yet — sending the mode again (${attempt + 1} of 3)`);
+    }
+    const modeText = modeConfirmed != null
+      ? `mode ${restoreMode}${restoreData ? ' (DATA on)' : ''} confirmed`
+      : `mode set back to ${restoreMode}${restoreData ? ' with DATA on' : ''} but the radio has not confirmed it (last report: ${_currentMode || 'none'})`;
     // Restore the power and believe only the radio's readback; send again
     // twice if it does not confirm.
     let confirmed = null;
@@ -2110,11 +2140,11 @@ runExternalAtuTune = async function () {
     if (lowering && confirmed != null) {
       delete settings.setupTxPowerRestore;
       try { saveSettings(settings); } catch {}
-      sendCatLog(`[ExtATU] Tune complete — mode ${restoreMode}, radio confirms ${confirmed} W`);
+      sendCatLog(`[ExtATU] Tune complete — ${modeText}; radio confirms ${confirmed} W`);
     } else if (lowering) {
-      sendCatLog(`[ExtATU] Tune complete — mode restored; set power back to ${restorePower} W but the radio has not confirmed it${powerKnown ? '' : ' (the power before the tune was never read, so this is your Default power)'}. It is set again when the radio next reports its power.`);
+      sendCatLog(`[ExtATU] Tune complete — ${modeText}; set power back to ${restorePower} W but the radio has not confirmed it${powerKnown ? '' : ' (the power before the tune was never read, so this is your Default power)'}. It is set again when the radio next reports its power.`);
     } else {
-      sendCatLog('[ExtATU] Tune complete — restored mode and power');
+      sendCatLog(`[ExtATU] Tune complete — ${modeText}; power restored`);
     }
     if (win && !win.isDestroyed()) win.webContents.send('external-atu-complete');
   }
@@ -3949,6 +3979,7 @@ function sendCatMode(mode) {
   if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('cat-mode', mode);
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-mode', mode);
   _currentMode = mode; // keep real mode internally for CAT
+  _lastModeReadback = { mode, at: Date.now() };
   rigPresetOnMode(mode); // the one mode sink: a family change may apply a rig preset
   // Don't clear mode suppress — handleRemotePtt sets a long suppress during
   // SSB-over-DATA transitions to prevent ECHOCAT from seeing transient DATA modes
