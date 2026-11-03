@@ -429,6 +429,7 @@ const QsoLog = require('./lib/qso-log');
 const StationCounty = require('./lib/station-county');
 const JtcatSnrFloor = require('./lib/jtcat-snr-floor');
 const OriginHealth = require('./lib/origin-health');
+const RemoteAccess = require('./lib/remote-access'); // ECHOCAT access: off | cloud | lan (the door itself)
 const { planImport, findDuplicateGroups } = require('./lib/qso-match');
 const { SmartSdrClient, setColorblindMode: setSmartSdrColorblind } = require('./lib/smartsdr');
 const { SmartSdrAudio } = require('./lib/smartsdr-audio');
@@ -800,6 +801,7 @@ const GLOBAL_KEYS = new Set([
   'echocatPort',       // ECHOCAT server port
   'echocatToken',      // ECHOCAT legacy single shared token (machine)
   'enableEchoCat',     // ECHOCAT server enable (machine-level)
+  'remoteAccess',      // ECHOCAT access off | cloud | lan — the listener is this machine's (lib/remote-access.js)
   'cloudDeviceId',     // stable machine UUID for cloud device registration
                        // (must be global so both operators' phones find the same shack)
   'launchAtStartup',   // OS login item — machine-scoped by nature
@@ -1002,12 +1004,23 @@ function loadSettingsFromDisk() {
   // when it has a myCallsign. We do this lazily on first save rather than
   // here so the migration writes happen at a deterministic point with the
   // app already initialized.
-  if (!global.activeProfile) return global;
+  if (!global.activeProfile) return _normalizeLoadedSettings(global);
   _noteSettingsMtime(profileSettingsPath(global.activeProfile));
   const profile = _readJsonSafe(profileSettingsPath(global.activeProfile), {});
   // Profile values lose to global values on key collision — global is
   // always authoritative for machine-scoped fields.
-  return Object.assign({}, profile, global);
+  return _normalizeLoadedSettings(Object.assign({}, profile, global));
+}
+
+// What every loaded settings object carries before anything reads it.
+// ECHOCAT access (lib/remote-access.js): remoteAccess is the setting,
+// enableRemote the derived boolean its eleven readers key off — normalised
+// here so nothing reads a stale or missing flag; persisted at startup.
+function _normalizeLoadedSettings(s) {
+  const ra = RemoteAccess.normalizeRemoteAccess(s);
+  s.remoteAccess = ra.access;
+  s.enableRemote = ra.enableRemote;
+  return s;
 }
 
 function _splitSettings(s) {
@@ -5000,8 +5013,9 @@ function gatherDesktopRawDiagnostic() {
       // listening" here explains a 502 without anyone inferring it.
       localServer: (() => {
         try {
-          if (!settings.enableRemote) return { enabled: false, listening: false, https: null, port: settings.remotePort || 7300, bindFailed: false, tlsFailed: false, lastError: '' };
-          return Object.assign({ enabled: true }, remoteServer ? remoteServer.serverState() : { listening: false });
+          const access = RemoteAccess.normalizeRemoteAccess(settings).access;
+          if (!settings.enableRemote || access === 'off') return { enabled: false, access: 'off', listening: false, https: null, port: settings.remotePort || 7300, bindFailed: false, tlsFailed: false, lastError: '' };
+          return Object.assign({ enabled: true, access }, remoteServer ? remoteServer.serverState() : { listening: false });
         } catch { return null; }
       })(),
     },
@@ -22584,7 +22598,7 @@ async function probeOriginForTunnel() {
   let server;
   if (!settings.enableRemote || !remoteServer) {
     server = { listening: false, https: null, port, bindFailed: false, tlsFailed: false,
-      lastError: 'ECHOCAT is switched off, so the Cloud Tunnel has nothing to forward to. Turn ECHOCAT on in Settings > ECHOCAT.' };
+      lastError: 'ECHOCAT access is Off, so the Cloud address and Guest Pass are unavailable — the Cloud Tunnel has nothing to forward to. Choose "Cloud only" or "Local network and Cloud" in Settings > ECHOCAT.' };
   } else {
     server = remoteServer.serverState();
   }
@@ -22873,7 +22887,15 @@ function buildPaddleKeyRig() {
 
 function connectRemote() {
   disconnectRemote();
-  if (!settings.enableRemote) return;
+  // The door (lib/remote-access.js): Off starts no listener at all; Cloud
+  // only binds loopback for cloudflared's https://localhost:7300 ingress;
+  // Local network and Cloud is the always-on 0.0.0.0 of before.
+  const remoteAccess = RemoteAccess.normalizeRemoteAccess(settings).access;
+  if (!settings.enableRemote || remoteAccess === 'off') {
+    sendCatLog('[Echo CAT] Access: ' + RemoteAccess.describeRemoteAccess('off'));
+    return;
+  }
+  sendCatLog('[Echo CAT] Access: ' + RemoteAccess.describeRemoteAccess(remoteAccess));
 
   remoteServer = new RemoteServer();
   for (const hook of _remoteServerHooks) {
@@ -25872,6 +25894,10 @@ function connectRemote() {
 
   remoteServer.start(port, token, {
     requireToken,
+    // Where the listener binds and whether mDNS advertises it (the access
+    // setting; a change restarts the server through the save-settings path).
+    host: RemoteAccess.listenHostFor(remoteAccess),
+    mdns: RemoteAccess.mdnsFor(remoteAccess),
     pttSafetyTimeout: settings.remotePttTimeout || 180,
     rendererPath: path.join(app.getAppPath(), 'renderer'),
     certDir: app.getPath('userData'),
@@ -25949,6 +25975,9 @@ function connectRemote() {
       partial.enableDxeSources = merged;
     }
     if (partial && 'enableDxe' in partial) partial.enableDxe = partial.enableDxe !== false;
+    // The door is set at the desktop only: a device cannot open or close the
+    // listener it is talking through (lib/remote-access.js).
+    if (partial) { delete partial.remoteAccess; delete partial.enableRemote; }
     Object.assign(settings, partial);
     saveSettings(settings);
     afterSstvSettingsSaved(partial);
@@ -35793,14 +35822,17 @@ app.whenReady().then(() => {
   createWindow();
   logStartupStage('createWindow returned (BrowserWindow constructed)');
   if (HEADLESS) {
-    // Force ECHOCAT on in headless mode — that's the whole point
-    if (!settings.enableRemote) {
+    // Headless serves ECHOCAT or it serves nothing — Off becomes Local
+    // network and Cloud (a chosen Cloud only is kept: the tunnel is a
+    // perfectly good way to reach a headless Pi).
+    if (RemoteAccess.normalizeRemoteAccess(settings).access === 'off') {
+      settings.remoteAccess = 'lan';
       settings.enableRemote = true;
       saveSettings(settings);
     }
     const port = settings.remotePort || 7300;
     console.log('[POTACAT] Running in headless mode — no GUI.');
-    console.log(`[POTACAT] ECHOCAT enabled on port ${port}`);
+    console.log(`[POTACAT] ECHOCAT enabled on port ${port} — access: ${RemoteAccess.describeRemoteAccess(settings.remoteAccess)}`);
     // Print URLs after a short delay to allow network interfaces to be ready
     setTimeout(() => {
       const ips = RemoteServer.getLocalIPs();
@@ -35826,16 +35858,21 @@ app.whenReady().then(() => {
   connectTci();
   connectAntennaGenius();
   connectTunerGenius();
-  // ECHOCAT is always-on — the enable toggle was removed 2026-06-02. The gate
-  // below (and headless above) reads `enableRemote`, which is PROFILE-scoped,
-  // so an upgraded/multi-op-migrated profile can come up without the flag and
-  // then the server never starts — with no Settings toggle to switch it back
-  // on. Force it true here so always-on actually holds in the GUI, mirroring
-  // headless + the renderer (which always saves enableRemote:true on save).
-  // (KE6ZC v1.8.15: "ECHOCAT server is not running and I can't find a way to
-  // enable it.")
-  if (!settings.enableRemote) { settings.enableRemote = true; saveSettings(settings); }
-  if (settings.enableRemote) connectRemote();
+  // ECHOCAT access (lib/remote-access.js). Until 2026-11-03 this block forced
+  // enableRemote TRUE at every start — the cure for KE6ZC's v1.8.15 profile
+  // that came up with the flag MISSING and no toggle to put it back — which
+  // also meant a saved `false` could never hold: there was no Off. Now a
+  // missing setting becomes 'lan' (the same cure), a saved Off stays Off,
+  // and the derived boolean is persisted for every reader.
+  {
+    const ra = RemoteAccess.normalizeRemoteAccess(settings);
+    if (ra.changed || settings.remoteAccess !== ra.access) {
+      settings.remoteAccess = ra.access;
+      settings.enableRemote = ra.enableRemote;
+      saveSettings(settings);
+    }
+  }
+  connectRemote(); // says which access is in force, and starts nothing when Off
   logStartupStage('all connect* dispatched (most async, actual connections may still be pending)');
   if (settings.enableCwKeyer) connectKeyer();
   if (settings.enableWsjtx) connectWsjtx();
@@ -36146,8 +36183,9 @@ function cloudShackNotice(text, kind) {
   });
 
   ipcMain.handle('echocat-server-state-get', () => {
-    if (!settings.enableRemote) return { enabled: false, listening: false, https: null, port: settings.remotePort || 7300, bindFailed: false, tlsFailed: false, lastError: '' };
-    return Object.assign({ enabled: true }, remoteServer ? remoteServer.serverState() : (_echocatServerState || { listening: false }));
+    const access = RemoteAccess.normalizeRemoteAccess(settings).access;
+    if (!settings.enableRemote || access === 'off') return { enabled: false, access: 'off', listening: false, https: null, port: settings.remotePort || 7300, bindFailed: false, tlsFailed: false, lastError: '' };
+    return Object.assign({ enabled: true, access }, remoteServer ? remoteServer.serverState() : (_echocatServerState || { listening: false }));
   });
 
   // The in-app Cloud prompt (lib/cloud-billing-ui.js decideCloudPrompt): main
@@ -44408,7 +44446,12 @@ function cloudShackNotice(text, kind) {
     const pskrMapChanged = (has('enablePskrMap') && newSettings.enablePskrMap !== settings.enablePskrMap) ||
       (has('myCallsign') && newSettings.myCallsign !== settings.myCallsign);
 
+    // ECHOCAT access: remoteAccess is the setting, enableRemote derived from
+    // it (lib/remote-access.js) — a surface that only sends the boolean cannot
+    // open or close the door. A change restarts the listener below.
+    if (has('remoteAccess') || has('enableRemote')) RemoteAccess.reconcileRemoteAccessPatch(newSettings, settings);
     const remoteChanged = (has('enableRemote') && newSettings.enableRemote !== settings.enableRemote) ||
+      (has('remoteAccess') && newSettings.remoteAccess !== settings.remoteAccess) ||
       (has('remotePort') && newSettings.remotePort !== settings.remotePort) ||
       (has('remoteToken') && newSettings.remoteToken !== settings.remoteToken) ||
       (has('remoteRequireToken') && newSettings.remoteRequireToken !== settings.remoteRequireToken) ||

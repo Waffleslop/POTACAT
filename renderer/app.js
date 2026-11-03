@@ -1445,6 +1445,19 @@ const cwMacroEditorEl = document.getElementById('cw-macro-editor');
 const setEnableRemote = null;
 const remoteConfig = null;
 const setRemotePort = document.getElementById('set-remote-port');
+// ECHOCAT access: lan | cloud | off (settings.remoteAccess, lib/remote-access.js).
+const setRemoteAccess = document.getElementById('set-remote-access');
+const remoteAccessHelp = document.getElementById('remote-access-help');
+const REMOTE_ACCESS_HELP = {
+  lan: 'Phones, browsers and other POTACATs on your Wi-Fi or Tailscale reach this computer directly (port 7300), and so does the POTACAT Cloud address when the tunnel is on.',
+  cloud: 'Only the POTACAT Cloud address can reach this computer; the port is closed to your Wi-Fi and Tailscale. Phones on your Wi-Fi connect through the Cloud address. Guest Pass and the Remote Launcher keep working.',
+  off: 'No phone, web or Cloud access. The Cloud address and Guest Pass are unavailable while this is off.',
+};
+function updateRemoteAccessHelp() {
+  if (!setRemoteAccess || !remoteAccessHelp) return;
+  remoteAccessHelp.textContent = REMOTE_ACCESS_HELP[setRemoteAccess.value] || REMOTE_ACCESS_HELP.lan;
+}
+if (setRemoteAccess) setRemoteAccess.addEventListener('change', updateRemoteAccessHelp);
 const setRemoteRequireToken = document.getElementById('set-remote-require-token');
 const setAllowPairRequests = document.getElementById('set-allow-pair-requests');
 const setEchocatMultiClient = document.getElementById('set-echocat-multi-client');
@@ -8787,10 +8800,15 @@ async function _renderSummaryEchocat() {
   try { devices = await window.api.echocatListPairedDevices(); } catch {}
   // Browser web-access info — the free, no-app, no-cloud path. The
   // server is always-on; we just need the LAN address(es) + token.
+  let access = 'lan';
   try {
     const s = await window.api.getSettings();
     const ips = await window.api.getLocalIPs();
     const port = s.remotePort || 7300;
+    // ECHOCAT access (lib/remote-access.js): Off = no listener at all, so
+    // no address is real; Cloud only = the port is closed to the LAN and
+    // Tailscale, only the Cloud address reaches it.
+    access = ['off', 'cloud', 'lan'].includes(s.remoteAccess) ? s.remoteAccess : (s.enableRemote === false ? 'off' : 'lan');
     // Prefer real-LAN addresses for the browser-on-same-WiFi case;
     // Tailscale (100.x) is the remote path the card's pill already
     // covers, so it shouldn't headline the "open in a browser" block.
@@ -8831,6 +8849,8 @@ async function _renderSummaryEchocat() {
       cloudUrl,
     };
   } catch {}
+  if (access === 'off') web = { access: 'off' };
+  else if (web) { web.access = access; if (access === 'cloud') { web.addresses = []; web.tailscaleUrl = ''; web.tailscaleCertValid = false; } }
   const html = _buildEchocatCardHTML(tunnel, tail, devices, web);
   for (const host of hosts) host.innerHTML = html;
 }
@@ -8858,12 +8878,22 @@ function _buildEchocatWebHTML(web) {
     ? urlRow('Anywhere (POTACAT Cloud)', web.cloudUrl, true, { open: true })
       + '<div class="echo-web-extra">Sign in with your POTACAT Cloud account in the browser. No certificate warning.</div>'
     : '';
+  // ECHOCAT access Off: no listener, so no link is real (Settings > ECHOCAT).
+  if (web && web.access === 'off') {
+    return '<div class="echo-web">'
+      + '<div class="echo-web-head"><span class="echo-web-title">Open in a browser</span></div>'
+      + '<div class="echo-web-empty">ECHOCAT access is Off: no phone, web or Cloud access, and the Cloud address and Guest Pass are unavailable. Choose "Cloud only" or "Local network and Cloud" under Settings &gt; ECHOCAT.</div>'
+      + '</div>';
+  }
   if (!web || !Array.isArray(web.addresses) || web.addresses.length === 0) {
+    const empty = (web && web.access === 'cloud')
+      ? 'Cloud only: the port is closed to your Wi-Fi and Tailscale, so there is no local link. Phones and browsers connect through the Cloud address' + (hasCloud ? ' above.' : ' once the Cloud Tunnel is on.')
+      : 'No local network detected — connect this computer to your WiFi/LAN to get a browser link.';
     return '<div class="echo-web">'
       + '<div class="echo-web-head"><span class="echo-web-title">Open in a browser</span>'
       + '<span class="echo-web-tag">no app needed</span></div>'
       + cloudBlock
-      + '<div class="echo-web-empty">No local network detected — connect this computer to your WiFi/LAN to get a browser link.</div>'
+      + '<div class="echo-web-empty">' + empty + '</div>'
       + '</div>';
   }
   const primary = 'https://' + web.addresses[0] + ':' + web.port;
@@ -8940,6 +8970,16 @@ function _buildEchocatCardHTML(tunnel, tail, devices, web) {
   }
   if (pillCls === '' && !detail) {
     detail = 'Available only on the local network. Enable POTACAT Cloud Tunnel or connect to your tailnet for remote access.';
+  }
+  // ECHOCAT access (lib/remote-access.js) overrides the reachability story:
+  // Off = nothing listens; Cloud only = the LAN and tailnet see a closed port.
+  const access = web && web.access;
+  if (access === 'off') {
+    pillTxt = 'Off'; pillCls = 'warn';
+    detail = 'ECHOCAT access is Off — no phone, web or Cloud access. The Cloud address and Guest Pass are unavailable until you choose another access level under Settings > ECHOCAT.';
+  } else if (access === 'cloud') {
+    if (pillTxt === 'LAN only' || pillTxt === 'Tailscale') { pillTxt = 'Cloud only'; pillCls = tunnelState === 'live' ? 'ok' : 'warn'; }
+    detail = 'Cloud only: reachable through the POTACAT Cloud address; the port is closed to your Wi-Fi and Tailscale.' + (tunnelState === 'live' ? '' : ' Turn on the Cloud Tunnel or nothing can reach this computer.');
   }
   // Tunnel toggle button text — reflects user-intent (enabled) not the
   // momentary status, so it doesn't flicker mid-startup.
@@ -16575,7 +16615,14 @@ async function refreshEchoCatInfo() {
     const token = s.remoteToken || '';
     const ips = await window.api.getLocalIPs();
     const best = ips.find(ip => ip.tailscale) || ips[0];
-    if (best) {
+    // ECHOCAT access (lib/remote-access.js): a local address is only real
+    // under "Local network and Cloud".
+    const access = ['off', 'cloud', 'lan'].includes(s.remoteAccess) ? s.remoteAccess : (s.enableRemote === false ? 'off' : 'lan');
+    if (access === 'off') {
+      echoCatUrl.textContent = 'ECHOCAT access is Off (Settings > ECHOCAT)';
+    } else if (access === 'cloud') {
+      echoCatUrl.textContent = 'Cloud only — reach this computer through its POTACAT Cloud address';
+    } else if (best) {
       echoCatUrl.innerHTML = `<span class="echo-cat-ip">https://${best.address}:${port}</span>`;
     } else {
       echoCatUrl.textContent = 'No network found';
@@ -17347,9 +17394,12 @@ async function openSettingsDialog(tab) {
       });
     }
   }
-  // ECHOCAT — toggle removed; server is always-on. Just sync the
-  // local visibility flag (true) and populate the per-tab fields.
-  enableRemote = true;
+  // ECHOCAT access (lib/remote-access.js): lan (default) | cloud | off. The
+  // connection chip follows it; the three-way control replaced the always-on
+  // comment 2026-11-03.
+  const remoteAccess = ['off', 'cloud', 'lan'].includes(s.remoteAccess) ? s.remoteAccess : (s.enableRemote === false ? 'off' : 'lan');
+  enableRemote = remoteAccess !== 'off';
+  if (setRemoteAccess) { setRemoteAccess.value = remoteAccess; updateRemoteAccessHelp(); }
   setRemotePort.value = s.remotePort || 7300;
   // Unset = NO token, the same default the server has always used. Settings
   // used to read unset as "required", so the first Settings save on a fresh
@@ -17914,9 +17964,10 @@ settingsSave.addEventListener('click', async () => {
   const tciHostVal = setTciHost.value.trim() || '127.0.0.1';
   const tciPortVal = parseInt(setTciPort.value, 10) || 50001;
   const tciMaxAgeVal = parseInt(setTciMaxAge.value, 10) || 0;
-  // ECHOCAT — always-on; always save enableRemote: true to keep
-  // legacy server-side checks happy even when the toggle UI is gone.
-  const remoteEnabled = true;
+  // ECHOCAT access (lib/remote-access.js): remoteAccess is the setting;
+  // enableRemote is saved as the derived boolean for its legacy readers.
+  const remoteAccessVal = (setRemoteAccess && ['off', 'cloud', 'lan'].includes(setRemoteAccess.value)) ? setRemoteAccess.value : 'lan';
+  const remoteEnabled = remoteAccessVal !== 'off';
   const remotePortVal = parseInt(setRemotePort.value, 10) || 7300;
   const remoteRequireTokenVal = setRemoteRequireToken.checked;
   const allowPairRequestsVal = setAllowPairRequests ? setAllowPairRequests.checked : true;
@@ -18224,6 +18275,7 @@ settingsSave.addEventListener('click', async () => {
     cwMacros: cwMacrosVal,
     hotkeys: hotkeyBindings,
     enableRemote: remoteEnabled,
+    remoteAccess: remoteAccessVal,
     remotePort: remotePortVal,
     remoteRequireToken: remoteRequireTokenVal,
     allowPairRequests: allowPairRequestsVal,

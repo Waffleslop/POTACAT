@@ -3477,6 +3477,22 @@
       <div class="summary-card" data-summary-card="cloud" style="margin-bottom:12px;"></div>
       <div class="summary-card" data-summary-card="echocat" style="margin-bottom:14px;"></div>
 
+      <!-- ECHOCAT access (settings.remoteAccess: lan | cloud | off,
+           lib/remote-access.js). The door itself: until 2026-11-03 the
+           listener could not be closed and always bound every interface. -->
+      <div class="pair-section" id="remote-access-section">
+        <strong>Who can reach this computer</strong>
+        <span class="help-text" style="display:block;margin:2px 0 6px;">Where ECHOCAT listens for phones, browsers and the POTACAT Cloud. Nothing changes unless you choose one.</span>
+        <label style="display:block;">Access:
+          <select id="set-remote-access" style="min-width:240px;">
+            <option value="lan">Local network and Cloud</option>
+            <option value="cloud">Cloud only</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
+        <span class="help-text" id="remote-access-help" style="display:block;margin-top:4px;"></span>
+      </div>
+
       <!-- ECHOCAT access password (settings.remoteRequireToken / remoteToken —
            "token" on the wire and in the app's older copy). Off at install. -->
       <div class="pair-section" id="remote-password-section">
