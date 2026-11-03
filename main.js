@@ -45465,6 +45465,16 @@ app.whenReady().then(() => {
       sendCatLog(`[rigctld] ${serialPort} is still busy 4 s after the live rigctld exited — another program may hold it`);
     }
 
+    // Whether the OS lists the port: Hamlib on Windows calls a port another
+    // program holds "No such file or directory" (NO4D, Jupiter on COM3).
+    let portListed;
+    try {
+      const want = String(serialPort || '').trim().toLowerCase();
+      const ports = await require('serialport').SerialPort.list();
+      portListed = ports.some((p) => String(p.path || '').toLowerCase() === want);
+    } catch { portListed = undefined; }
+    const explain = (fallback) => explainRigctldFailure(rigctldStderr, fallback, { portListed });
+
     try {
       testProc = await spawnRigctld({ rigId, serialPort, baudRate, dtrOff, verbose: true }, '4533');
       rigctldTestProc = testProc; // reapable by killRigctld()/gracefulCleanup
@@ -45475,7 +45485,7 @@ app.whenReady().then(() => {
       // Check if rigctld already exited (bad config, serial port issue, etc.)
       if (testProc.exitCode !== null) {
         const lastLine = rigctldStderr.trim().split('\n').pop() || `rigctld exited with code ${testProc.exitCode}`;
-        return { success: false, error: explainRigctldFailure(rigctldStderr, lastLine) };
+        return { success: false, error: explain(lastLine) };
       }
 
       const freq = await new Promise((resolve, reject) => {
@@ -45483,7 +45493,7 @@ app.whenReady().then(() => {
           sock.destroy();
           const lines = rigctldStderr.trim().split('\n').filter(Boolean);
           const hint = lines.slice(-3).join(' | ');
-          reject(new Error(explainRigctldFailure(rigctldStderr, hint ? `Timed out — rigctld: ${hint}` : 'Timed out waiting for rigctld response')));
+          reject(new Error(explain(hint ? `Timed out — rigctld: ${hint}` : 'Timed out waiting for rigctld response')));
         }, 5000);
 
         const sock = net.createConnection({ host: '127.0.0.1', port: 4533 }, () => {
@@ -45512,7 +45522,7 @@ app.whenReady().then(() => {
           clearTimeout(timeout);
           // Surface rigctld's stderr if available — it has the real error
           const lastLine = rigctldStderr.trim().split('\n').pop();
-          reject(new Error(explainRigctldFailure(rigctldStderr, lastLine || `Connection failed: ${err.message}`)));
+          reject(new Error(explain(lastLine || `Connection failed: ${err.message}`)));
         });
       });
 

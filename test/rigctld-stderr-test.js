@@ -42,6 +42,16 @@ check('a genuinely missing port is named as missing', () => {
   assert.ok(/COM9 does not exist/.test(s), s);
 });
 
+check('NO4D: a port the system lists is never called missing; another program is named', () => {
+  const t = "rig_set_conf: rig_pathname='COM3'\nserial_open: Unable to open COM3 - No such file or directory";
+  const s = explainRigctldFailure(t, 'x', { portListed: true });
+  assert.ok(!/does not exist/.test(s) && /COM3 is on this computer/.test(s) && /World Radio League/.test(s), s);
+  assert.ok(/COM3 does not exist/.test(explainRigctldFailure(t, 'x', { portListed: false })), 'not listed: missing');
+  const main = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+  const h = main.slice(main.indexOf("ipcMain.handle('test-hamlib'"), main.indexOf("ipcMain.handle('test-hamlib'") + 5000);
+  assert.ok(/portListed = ports\.some/.test(h) && !/explainRigctldFailure\(rigctldStderr, (lastLine|hint)/.test(h), 'Test Connection passes it everywhere');
+});
+
 check('a silent radio points at baud rate and power', () => {
   const s = explainRigctldFailure("rig_pathname='COM3'\nread_string: Timed out", 'x');
   assert.ok(/did not answer/.test(s) && /baud/.test(s), s);
