@@ -3868,7 +3868,7 @@ function sendCatFrequency(hz) {
   // And the worked-states / countries map tints follow the dial's band.
   workedOverlayFollowDial();
   // The SDR is what you hear: the radio's own dial is tracked, not shown.
-  if (listenSdr.live && hz !== listenSdr.hz) { _currentFreqHz = hz; return; }
+  if (sdrHoldsDial() && hz !== listenSdr.hz) { _currentFreqHz = hz; return; }
   if (win && !win.isDestroyed()) win.webContents.send('cat-frequency', hz);
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-frequency', hz);
   if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('cat-frequency', hz);
@@ -3895,7 +3895,7 @@ function sendCatFrequency(hz) {
   if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) {
     bandspreadPopoutWin.webContents.send('bandspread-popout-freq', hz / 1000);
   }
-  if (!(listenSdr.live && hz === listenSdr.hz)) _currentFreqHz = hz;   // a listen-frequency fan-out never becomes the radio's dial
+  if (!(sdrHoldsDial() && hz === listenSdr.hz)) _currentFreqHz = hz;   // a listen-frequency fan-out never becomes the radio's dial
   sendVfoState();
   broadcastRemoteRadioStatus();
   sendN1mmRadioInfo();
@@ -29734,7 +29734,7 @@ function yaesuScopeNoteFrequency(hz) {
   // The SDR is what you hear, on a frequency the radio cannot reach: only a
   // scope fed by that SDR can show it. A Flex pan, an FT-710 or an Icom
   // stays on the radio's own dial.
-  if (listenSdr.live && hz === listenSdr.hz && yaesuScopeState.source !== 'sdr') { hz = _currentFreqHz; if (!(hz > 0)) return; }
+  if (sdrHoldsDial() && hz === listenSdr.hz && yaesuScopeState.source !== 'sdr') { hz = _currentFreqHz; if (!(hz > 0)) return; }
   // The Flex panadapter has its own centre (pan status) and the slice can sit
   // anywhere in it; only when the dial leaves the view is the pan recentred.
   if (flexScopeOn) {
@@ -35309,8 +35309,15 @@ let kiwiLiveHost = '';
 let kiwiKind = '';
 let kiwiAutoPending = null;   // { hz, mode } waiting for an auto-connect to come up
 
-function displayFreqHz() { return listenSdr.live ? listenSdr.hz : _currentFreqHz; }
-function displayMode() { return listenSdr.live ? (listenSdr.mode || _currentMode) : _currentMode; }
+// The SDR holds the readouts only when it took over a frequency the radio
+// cannot reach (auto): the radio's dial is elsewhere. An SDR the operator
+// CHOSE follows the radio's dial, so the dial is what every readout shows.
+// Keyed on live alone, a chosen SDR (live, listenSdr.hz never set) froze the
+// VFO window on the frequency before the next spot click (df1vb IC-7100 +
+// WebSDR, GitHub #117).
+function sdrHoldsDial() { return !!(listenSdr.live && listenSdr.auto); }
+function displayFreqHz() { return sdrHoldsDial() ? listenSdr.hz : _currentFreqHz; }
+function displayMode() { return sdrHoldsDial() ? (listenSdr.mode || _currentMode) : _currentMode; }
 
 /** The active radio's receive ranges, or null with no radio to hear through. */
 function rigReachNow() {

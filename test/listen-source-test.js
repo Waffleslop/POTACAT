@@ -94,15 +94,27 @@ check('the SDR speaks only while live; its idle connection is kept', () => {
   assert.ok(!/disconnect\(\)/.test(idle), 'idle never disconnects');
   assert.ok(/sendCatFrequency\(_currentFreqHz\)/.test(idle), 'the readouts return to the radio');
 });
-check('while the SDR is live the radio\'s dial is tracked, not shown, and the status says what you hear', () => {
-  assert.ok(/if \(listenSdr\.live && hz !== listenSdr\.hz\) \{ _currentFreqHz = hz; return; \}/.test(main));
-  assert.ok(/if \(!\(listenSdr\.live && hz === listenSdr\.hz\)\) _currentFreqHz = hz;/.test(main));
+check('while the SDR holds a frequency the radio cannot reach, the radio\'s dial is tracked, not shown, and the status says what you hear', () => {
+  assert.ok(/function sdrHoldsDial\(\) \{ return !!\(listenSdr\.live && listenSdr\.auto\); \}/.test(main));
+  assert.ok(/if \(sdrHoldsDial\(\) && hz !== listenSdr\.hz\) \{ _currentFreqHz = hz; return; \}/.test(main));
+  assert.ok(/if \(!\(sdrHoldsDial\(\) && hz === listenSdr\.hz\)\) _currentFreqHz = hz;/.test(main));
   assert.ok(/freq: displayFreqHz\(\) \|\| 0,/.test(main));
   assert.ok(/undefined : \(displayFreqHz\(\) \|\| 0\);/.test(main));
   assert.ok(/undefined : \(displayMode\(\) \|\| ''\);/.test(main));
 });
 check('a Flex pan is never asked to centre on the SDR\'s frequency', () => {
-  assert.ok(/if \(listenSdr\.live && hz === listenSdr\.hz && yaesuScopeState\.source !== 'sdr'\) \{ hz = _currentFreqHz;/.test(main), 'the gate lives in yaesuScopeNoteFrequency');
+  assert.ok(/if \(sdrHoldsDial\(\) && hz === listenSdr\.hz && yaesuScopeState\.source !== 'sdr'\) \{ hz = _currentFreqHz;/.test(main), 'the gate lives in yaesuScopeNoteFrequency');
+});
+// GitHub #117 (df1vb IC-7100 + WebSDR): a CHOSEN SDR is live with
+// listenSdr.hz never set; keyed on live alone, every readout froze.
+check('an SDR the operator chose follows the dial: the readouts show the radio', () => {
+  const src = main.slice(main.indexOf('function sdrHoldsDial()'), main.indexOf('function displayMode()'));
+  const fns = src + main.slice(main.indexOf('function displayMode()'), main.indexOf('\n', main.indexOf('function displayMode()')));
+  const run = (live, auto, hz) => new Function('listenSdr', '_currentFreqHz', '_currentMode',
+    fns + '\nreturn [displayFreqHz(), displayMode()];')({ live, auto, hz, mode: 'FM' }, 14285000, 'USB');
+  assert.deepStrictEqual(run(true, false, 0), [14285000, 'USB'], 'chosen SDR: the dial');
+  assert.deepStrictEqual(run(true, true, 162550000), [162550000, 'FM'], 'SDR took over: what you hear');
+  assert.deepStrictEqual(run(false, false, 0), [14285000, 'USB'], 'no SDR: the dial');
 });
 check('PTT is refused while the SDR is live for a frequency the radio cannot reach', () => {
   assert.ok(/if \(state && listenSdr\.live && listenSdr\.auto\) \{[\s\S]{0,600}return;\s+\}/.test(main));
@@ -120,7 +132,9 @@ check('the main window learns the SDR\'s reach, and Landmarks shows what it can 
 });
 check('one volume knob: the VFO monitor volume drives the SDR audio too', () => {
   assert.ok(/kiwiVolume = monitorVolume;\s+if \(kiwiGainNode\) kiwiGainNode\.gain\.value = kiwiVolume;/.test(vfo));
-  assert.ok(/getElementById\('kiwi-volume-row'\)\.style\.display = 'none'/.test(vfo));
+  // The SDR card's own slider is shown only while VOL is off screen (#118,
+  // test/vfo-sdr-volume-test.js) and moves the same value.
+  assert.ok(/function syncSdrVolumeRow\(\)/.test(vfo));
 });
 
 // ── A radio known only by its bands (no published rxHz) ──────────────────────
