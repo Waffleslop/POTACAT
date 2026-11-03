@@ -2006,6 +2006,8 @@
           <label style="margin-top:6px;">Transmit (PTT):
             <select id="set-serialcat-ptt">
               <option value="cat" selected>Over CAT</option>
+              <option value="rts">RTS on the CAT port</option>
+              <option value="dtr">DTR on the CAT port</option>
               <option value="vox">The audio interface keys it (SignaLink, the radio's VOX)</option>
             </select>
           </label>
@@ -2049,6 +2051,15 @@
               <option value="115200" selected>115200</option>
             </select>
           </label>
+          <label style="margin-top:6px;">Transmit (PTT):
+            <select id="set-icom-ptt">
+              <option value="cat" selected>Over CI-V</option>
+              <option value="rts">RTS on the CAT port</option>
+              <option value="dtr">DTR on the CAT port</option>
+              <option value="vox">The audio interface keys it (SignaLink, the radio's VOX)</option>
+            </select>
+          </label>
+          <span class="help-text" style="margin-top:2px;display:block;">The IC-706MKIIG has no CI-V transmit command: choose <b>RTS on the CAT port</b> (or DTR) when the interface on that port keys the radio, as WSJT-X's PTT method RTS does.</span>
           <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
             <button type="button" id="icom-test-btn">Test Connection</button>
             <span id="icom-test-result" style="font-size:12px;"></span>

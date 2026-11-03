@@ -50,8 +50,9 @@ section('#106 "The audio interface keys it" on a CAT radio');
   assert(voxAt > 0 && catAt > voxAt, 'gatedSetTransmit skips CAT TX when the interface keys');
   assert(/t\.type !== 'none'/.test(g), 'the no-CAT radio type keeps its own PTT routes');
   assert(/id="set-serialcat-ptt"/.test(html), 'Serial CAT editor has the Transmit (PTT) choice');
-  assert(/set-serialcat-ptt'\) \|\| \{\}\)\.value === 'vox'\) \? \{ ptt: 'vox' \}/.test(app), 'the editor saves ptt:vox on the serial target');
-  assert(/savedTarget\.ptt === 'vox' \? 'vox' : 'cat'/.test(app), 'the editor loads it back');
+  // (RTS / DTR on the CAT port joined vox in one helper: test/ptt-cat-line-test.js)
+  assert(/\.\.\.pttChoiceField\('set-serialcat-ptt'\)/.test(app) && /v === 'vox' \|\| v === 'rts' \|\| v === 'dtr' \? \{ ptt: v \}/.test(app), 'the editor saves ptt:vox on the serial target');
+  assert(/p === 'vox' \|\| p === 'rts' \|\| p === 'dtr' \? p : 'cat'/.test(app) && /pttSel\.value = savedPttChoice\(savedTarget\)/.test(app), 'the editor loads it back');
 }
 
 section('#103 Auto RTS: a silent Yaesu is tried with RTS/CTS for the session');

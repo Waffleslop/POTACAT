@@ -2548,6 +2548,8 @@ async function loadIcomPorts(savedTarget) {
   if (savedTarget && savedTarget.baudRate) {
     document.getElementById('set-icom-baud').value = String(savedTarget.baudRate);
   }
+  const icomPtt = document.getElementById('set-icom-ptt');
+  if (icomPtt) icomPtt.value = savedPttChoice(savedTarget);
   if (savedTarget && savedTarget.civAddress) {
     const modelSelect = document.getElementById('set-icom-model');
     const addrHex = '0x' + savedTarget.civAddress.toString(16).toUpperCase();
@@ -2559,6 +2561,17 @@ async function loadIcomPorts(savedTarget) {
 }
 
 let serialcatPortsLoaded = false;
+
+// Transmit (PTT) on a serial CAT radio: over CAT, a line of the CAT port, or
+// the audio interface. Saved as catTarget.ptt, absent for "over CAT".
+function savedPttChoice(target) {
+  const p = target && target.ptt;
+  return p === 'vox' || p === 'rts' || p === 'dtr' ? p : 'cat';
+}
+function pttChoiceField(selectId) {
+  const v = (document.getElementById(selectId) || {}).value;
+  return v === 'vox' || v === 'rts' || v === 'dtr' ? { ptt: v } : {};
+}
 
 async function loadSerialcatPorts(savedTarget) {
   const ports = await window.api.listPorts();
@@ -2573,7 +2586,7 @@ async function loadSerialcatPorts(savedTarget) {
     hsSel.value = hs === 'none' || hs === 'hardware' ? hs : 'auto';
   }
   const pttSel = document.getElementById('set-serialcat-ptt');
-  if (pttSel) pttSel.value = savedTarget && savedTarget.ptt === 'vox' ? 'vox' : 'cat';
+  if (pttSel) pttSel.value = savedPttChoice(savedTarget);
   serialcatPortsLoaded = true;
 }
 
@@ -3019,7 +3032,7 @@ function buildCatTargetFromForm() {
       baudRate: parseInt(setSerialcatBaud.value, 10) || 9600,
       dtrOff: setSerialcatDtrOff.checked,
       serialHandshake: (document.getElementById('set-serialcat-handshake') || {}).value || 'auto',
-      ...(((document.getElementById('set-serialcat-ptt') || {}).value === 'vox') ? { ptt: 'vox' } : {}),
+      ...pttChoiceField('set-serialcat-ptt'),
     };
   } else if (radioType === 'icom') {
     const modelSelect = document.getElementById('set-icom-model');
@@ -3029,6 +3042,7 @@ function buildCatTargetFromForm() {
       baudRate: parseInt(document.getElementById('set-icom-baud').value, 10) || 115200,
       civAddress: parseInt(modelSelect.value, 16),
       civModel: modelSelect.options[modelSelect.selectedIndex].text,
+      ...pttChoiceField('set-icom-ptt'),
     };
   } else if (radioType === 'civ-tcp') {
     const modelSelect = document.getElementById('set-civ-tcp-model');

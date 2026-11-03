@@ -34220,6 +34220,24 @@ function gatedSetTransmit(state, emission) {
     sendCatLog(`[PTT] ${state ? 'TX' : 'RX'} — not keyed over CAT; the audio interface (VOX / SignaLink) keys the radio`);
     return true;
   }
+  // "RTS / DTR on the CAT port": the interface keys the radio on a line of the
+  // port CAT already holds (IC-706MKIIG, which has no CI-V transmit command).
+  if (t && (t.type === 'serial' || t.type === 'icom') && (t.ptt === 'rts' || t.ptt === 'dtr')) {
+    const line = t.ptt.toUpperCase();
+    if (!cat || !cat.connected || typeof cat.setTransmitLine !== 'function') {
+      if (state) sendCatLog(`[PTT] FAILED: ${line} on the CAT port needs the radio connected`);
+      return false;
+    }
+    if (t.ptt === 'rts' && cat._transport && cat._transport._hardwareHandshake) {
+      if (state) sendCatLog('[PTT] FAILED: RTS is the flow-control line on this connection (RTS line = RTS/CTS flow control), so it cannot also key the radio. Set RTS line to Held low, or key on DTR.');
+      return false;
+    }
+    cat.setTransmitLine(t.ptt, state, (err) => {
+      if (err) sendCatLog(`[PTT] FAILED: ${line} on ${t.path || 'the CAT port'}: ${err.message}`);
+      else sendCatLog(`[PTT] ${state ? 'TX' : 'RX'} — ${line} ${state ? 'raised' : 'dropped'} on the CAT port`);
+    });
+    return true;
+  }
   if (cat && cat.connected) cat.setTransmit(state);
   return true;
 }
