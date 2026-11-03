@@ -37,7 +37,7 @@ test('premise: judged as USB (the radio\'s mode), FT8 on 28.074 is refused to a 
   assert.ok(/allows CW\/digital only on tech/.test(r.userVisible), r.userVisible);
 });
 test('judged as what is sent (DATA), it is allowed', () => {
-  assert.strictEqual(techPass().interceptCatCommand({ type: 'tx_enable', freqHz: 28074000, mode: 'DATA' }).allowed, true);
+  assert.strictEqual(techPass().interceptCatCommand({ type: 'tx_enable', freqHz: 28074000, mode: 'DATA', currentWatts: 20, powerAgeMs: 0 }).allowed, true);
 });
 test('the gate still refuses real phone where a Technician has none (USB on 28.074)', () => {
   assert.strictEqual(techPass().interceptCatCommand({ type: 'tx_enable', freqHz: 28074000, mode: 'USB' }).allowed, false);

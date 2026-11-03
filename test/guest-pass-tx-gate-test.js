@@ -92,5 +92,96 @@ test('every TX gate hands the pass the effective TX frequency and the split flag
   }
 });
 
+console.log('\nC. the power cap at key-down');
+test('the radio reports under the cap, freshly: allowed', () => {
+  const pe = pass();
+  assert.strictEqual(pe.interceptCatCommand({ type: 'tx_enable', freqHz: 28400000, mode: 'USB', currentWatts: 25, powerAgeMs: 4000 }).allowed, true, 'at the cap');
+  assert.strictEqual(pe.interceptCatCommand({ type: 'tx_enable', freqHz: 28400000, mode: 'USB', currentWatts: 5, powerAgeMs: 59000 }).allowed, true, 'inside the stale window');
+});
+test('the radio reports ABOVE the cap: refused, and power-over-cap tells main to re-clamp', () => {
+  const pe = pass();
+  const events = [];
+  pe.on('power-over-cap', (e) => events.push(e));
+  const r = pe.interceptCatCommand({ type: 'tx_enable', freqHz: 28400000, mode: 'USB', currentWatts: 100, powerAgeMs: 0 });
+  assert.strictEqual(r.allowed, false);
+  assert.strictEqual(r.reason, 'over_power');
+  assert.ok(/at 100 W/.test(r.userVisible) && /capped at 25 W/.test(r.userVisible), r.userVisible);
+  assert.deepStrictEqual(events, [{ watts: 100, max: 25 }]);
+  // …and the next press, after the re-clamp was read back, keys.
+  assert.strictEqual(pe.interceptCatCommand({ type: 'tx_enable', freqHz: 28400000, mode: 'USB', currentWatts: 25, powerAgeMs: 0 }).allowed, true);
+  assert.strictEqual(events.length, 1, 'no event for an allowed key-down');
+});
+test('no power report (0 / missing): refused with the no-power-CAT reason', () => {
+  const pe = pass();
+  for (const cmd of [{ currentWatts: 0, powerAgeMs: 0 }, {}, { currentWatts: undefined, powerAgeMs: 0 }, { currentWatts: 10 }]) {
+    const r = pe.interceptCatCommand({ type: 'tx_enable', freqHz: 28400000, mode: 'USB', ...cmd });
+    assert.strictEqual(r.allowed, false, JSON.stringify(cmd));
+    assert.strictEqual(r.reason, 'tx_disabled_no_power_cat', JSON.stringify(cmd));
+    assert.ok(/25 W cap/.test(r.userVisible), r.userVisible);
+  }
+});
+test('a stale power report is no report: older than the window (60 s default) is refused', () => {
+  const pe = pass();
+  assert.strictEqual(pe.interceptCatCommand({ type: 'tx_enable', freqHz: 28400000, mode: 'USB', currentWatts: 5, powerAgeMs: 60001 }).reason, 'tx_disabled_no_power_cat');
+  assert.strictEqual(pe.interceptCatCommand({ type: 'tx_enable', freqHz: 28400000, mode: 'USB', currentWatts: 5, powerAgeMs: Infinity }).reason, 'tx_disabled_no_power_cat');
+  const strict = pass({ opts: { powerStaleMs: 5000 } });
+  assert.strictEqual(strict.interceptCatCommand({ type: 'tx_enable', freqHz: 28400000, mode: 'USB', currentWatts: 5, powerAgeMs: 5001 }).reason, 'tx_disabled_no_power_cat');
+  assert.strictEqual(strict.interceptCatCommand({ type: 'tx_enable', freqHz: 28400000, mode: 'USB', currentWatts: 5, powerAgeMs: 4999 }).allowed, true);
+});
+test('a pass with no cap does not need a power report (the readable rule still applies)', () => {
+  const pe = pass({ pass: { max_power_w: null } });
+  assert.strictEqual(pe.interceptCatCommand({ type: 'tx_enable', freqHz: 28400000, mode: 'USB' }).allowed, true);
+  const unreadable = pass({ pass: { max_power_w: null }, opts: { rigPowerReadable: () => false } });
+  assert.strictEqual(unreadable.interceptCatCommand({ type: 'tx_enable', freqHz: 28400000, mode: 'USB' }).reason, 'tx_disabled_no_power_cat');
+});
+test('a rig that cannot report power is refused before any power value is read', () => {
+  const pe = pass({ opts: { rigPowerReadable: () => false } });
+  const r = pe.interceptCatCommand({ type: 'tx_enable', freqHz: 28400000, mode: 'USB', currentWatts: 5, powerAgeMs: 0 });
+  assert.strictEqual(r.reason, 'tx_disabled_no_power_cat');
+  assert.ok(/does not expose TX power over CAT/.test(r.userVisible));
+});
+test('the order of the rules: callsign, split, band, mode, then power', () => {
+  const noCall = pass({ pass: { guest_callsign: '' } });
+  assert.strictEqual(noCall.interceptCatCommand({ type: 'tx_enable', freqHz: 14200000, split: true, mode: 'USB', currentWatts: 100, powerAgeMs: 0 }).reason, 'no_callsign');
+  const pe = pass({ pass: { allowed_modes: ['CW'] } });
+  assert.strictEqual(pe.interceptCatCommand({ type: 'tx_enable', freqHz: null, split: true, mode: 'USB', currentWatts: 100, powerAgeMs: 0 }).reason, 'tx_freq_unknown');
+  assert.strictEqual(pe.interceptCatCommand({ type: 'tx_enable', freqHz: 14200000, mode: 'USB', currentWatts: 100, powerAgeMs: 0 }).reason, 'out_of_band');
+  assert.strictEqual(pe.interceptCatCommand({ type: 'tx_enable', freqHz: 28400000, mode: 'USB', currentWatts: 100, powerAgeMs: 0 }).reason, 'mode_not_allowed');
+  assert.strictEqual(pe.interceptCatCommand({ type: 'tx_enable', freqHz: 7040000, mode: 'CW', currentWatts: 100, powerAgeMs: 0 }).reason, 'over_power');
+});
+
+console.log('\nmain.js wiring (C)');
+test('every tx_enable gate hands the pass the radio\'s reported power (passPowerState)', () => {
+  const gates = mainSrc.match(/interceptCatCommand\(\{ type: 'tx_enable'[^}]*\}\)/g) || [];
+  assert.strictEqual(gates.length, 3, 'passTxAllowed, gatedSetTransmit, gatedSmartSdrTransmit');
+  for (const g of gates) assert.ok(/\.\.\.passPowerState\(\) \}\)$/.test(g), g);
+  const i = mainSrc.indexOf('function passPowerState() {');
+  const body = mainSrc.slice(i, mainSrc.indexOf('\n}', i));
+  assert.ok(/const rb = _lastPowerReadback;/.test(body), 'the radio\'s own report, never _currentTxPower (optimistic)');
+  assert.ok(/return \{ currentWatts: 0, powerAgeMs: Infinity \};/.test(body), 'no report = unknown');
+  assert.ok(/flexLive \? 0 : Date\.now\(\) - rb\.at/.test(body), 'a Flex pushes on change: current while the link is up');
+});
+test('rigPowerReadable is a real answer, not a constant', () => {
+  assert.ok(!/rigPowerReadable: \(\) => true/.test(mainSrc), 'the constant is gone');
+  assert.ok(/rigPowerReadable: \(\) => passRigPowerReadable\(\),/.test(mainSrc));
+  const i = mainSrc.indexOf('function passRigPowerReadable() {');
+  const body = mainSrc.slice(i, mainSrc.indexOf('\n}', i));
+  assert.ok(/if \(!caps\.txpower\) return false;/.test(body), 'the capability table');
+  assert.ok(/if \(rigType === 'flex'\) return !!\(smartSdr && smartSdr\.connected\);/.test(body), 'a Flex needs the API link');
+  assert.ok(/return !!\(cat && cat\.connected\);/.test(body), 'a CAT rig needs its link');
+});
+test('the cap is set at the radio when the lease begins and the owner\'s power comes back when it ends', () => {
+  const b = mainSrc.slice(mainSrc.indexOf('function passLeaseBegin() {'), mainSrc.indexOf('function passLeaseEnd() {'));
+  assert.ok(/passLease\.ownerPower = \(_lastPowerReadback && _lastPowerReadback\.watts > 0\) \? _lastPowerReadback\.watts : null;/.test(b), 'remembers the radio\'s report');
+  assert.ok(/if \(cap > 0\) passApplyPowerCap\(cap, 'lease start'\);/.test(b), 'applies the cap');
+  const e = mainSrc.slice(mainSrc.indexOf('function passLeaseEnd() {'), mainSrc.indexOf('function passLeaseReconnectReporters() {'));
+  assert.ok(/if \(was && was\.ownerPower > 0 && was\.ownerPower !== _currentTxPower\) \{\s*\n\s*if \(setRadioTxPowerRaw\(was\.ownerPower\)\)/.test(e), 'restores raw (the gate is in ended)');
+  assert.ok(/passEnforcement\.on\('power-over-cap', \(\{ watts, max \}\) => passApplyPowerCap\(max,/.test(mainSrc), 'a key-down above the cap re-clamps');
+  const raw = mainSrc.slice(mainSrc.indexOf('function setRadioTxPowerRaw(watts) {'), mainSrc.indexOf('function passApplyPowerCap('));
+  assert.ok(/if \(rigType === 'flex'\) \{\s*\n\s*if \(!smartSdr \|\| !smartSdr\.connected\) return false;/.test(raw), 'a Flex is set over the API or not at all');
+  assert.ok(/else if \(rigType === 'rigctld'\) cat\.setTxPower\(w \/ 100\);/.test(raw), 'rigctld fraction, like gatedSetTxPower');
+  assert.ok(!/interceptCatCommand/.test(raw), 'raw means raw');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

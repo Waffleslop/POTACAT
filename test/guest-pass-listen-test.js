@@ -36,10 +36,14 @@ test('…but may not TRANSMIT there: the key-down is refused with the out-of-ban
   assert.ok(/Out of band/.test(r.userVisible) && /tech/.test(r.userVisible), r.userVisible);
 });
 
+// The radio's power as it reports it, under the cap and fresh — the key-down
+// also checks that (test/guest-pass-tx-gate-test.js).
+const POWER_OK = { currentWatts: 50, powerAgeMs: 0 };
+
 test('inside the class, TX is allowed: 10 m phone and 40 m CW for a Technician', () => {
   const pe = tech();
-  assert.strictEqual(pe.interceptCatCommand({ type: 'tx_enable', freqHz: 28400000, mode: 'USB' }).allowed, true);
-  assert.strictEqual(pe.interceptCatCommand({ type: 'tx_enable', freqHz: 7040000, mode: 'CW' }).allowed, true);
+  assert.strictEqual(pe.interceptCatCommand({ type: 'tx_enable', freqHz: 28400000, mode: 'USB', ...POWER_OK }).allowed, true);
+  assert.strictEqual(pe.interceptCatCommand({ type: 'tx_enable', freqHz: 7040000, mode: 'CW', ...POWER_OK }).allowed, true);
 });
 
 test('the pass\'s own mode list is a transmit rule too', () => {
@@ -48,12 +52,13 @@ test('the pass\'s own mode list is a transmit rule too', () => {
   const r = pe.interceptCatCommand({ type: 'tx_enable', freqHz: 28400000, mode: 'USB' });
   assert.strictEqual(r.allowed, false);
   assert.strictEqual(r.reason, 'mode_not_allowed');
-  assert.strictEqual(pe.interceptCatCommand({ type: 'tx_enable', freqHz: 7040000, mode: 'CW' }).allowed, true);
+  assert.strictEqual(pe.interceptCatCommand({ type: 'tx_enable', freqHz: 7040000, mode: 'CW', ...POWER_OK }).allowed, true);
 });
 
-test('a TX gate with no dial known falls back to the power-readable rule only', () => {
+test('a TX gate with no dial known falls back to the power rules only', () => {
   const pe = tech();
-  assert.strictEqual(pe.interceptCatCommand({ type: 'tx_enable' }).allowed, true);
+  assert.strictEqual(pe.interceptCatCommand({ type: 'tx_enable', ...POWER_OK }).allowed, true);
+  assert.strictEqual(pe.interceptCatCommand({ type: 'tx_enable' }).reason, 'tx_disabled_no_power_cat', 'and with no power report there is no TX');
 });
 
 test('wiring: both TX gates hand the live dial and mode to the pass, and a refusal reaches the guest\'s device', () => {

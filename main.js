@@ -4578,6 +4578,64 @@ function effectiveTxFreqHz() {
   return _currentFreqOther > 0 ? _currentFreqOther : null;
 }
 
+// What the radio last SAID its RF power is, for the Guest Pass key-down check
+// (lib/pass-enforcement.js tx_enable: over the cap = refused + re-clamp, not
+// known = refused). _lastPowerReadback is the radio's own report, never the
+// value we asked for. A polled CAT rig's report ages (every 5th poll cycle);
+// a Flex pushes rfpower on every change and nothing in between, so its last
+// report is current for as long as the API link is up.
+function passPowerState() {
+  const rb = _lastPowerReadback;
+  if (!rb || !(rb.watts > 0)) return { currentWatts: 0, powerAgeMs: Infinity };
+  const flexLive = detectRigType() === 'flex' && smartSdr && smartSdr.connected;
+  return { currentWatts: rb.watts, powerAgeMs: flexLive ? 0 : Date.now() - rb.at };
+}
+
+// Can the connected radio report its RF power at all? The pass refuses every
+// key-down otherwise (the concept doc's rule, enforced since 2026-11-03; it
+// was wired as `() => true`). A Flex over the CAT shim with no SmartSDR API
+// cannot; a CAT rig whose capability table has no txpower cannot.
+function passRigPowerReadable() {
+  const rigType = detectRigType();
+  const caps = getRigCapabilities(rigType) || {};
+  if (!caps.txpower) return false;
+  if (rigType === 'flex') return !!(smartSdr && smartSdr.connected);
+  return !!(cat && cat.connected);
+}
+
+// Set the radio's RF power with NO pass gate — for the pass's own cap (the
+// gate would allow it anyway) and for giving the owner's level back at the
+// end, when interceptCatCommand is in 'ended' and refuses everything.
+function setRadioTxPowerRaw(watts) {
+  const w = Number(watts);
+  if (!(w > 0)) return false;
+  const rigType = detectRigType();
+  if (rigType === 'flex') {
+    if (!smartSdr || !smartSdr.connected) return false;
+    smartSdr.setTxPower(w);
+  } else if (cat && cat.connected) {
+    if (typeof cat.setTxPowerWatts === 'function') cat.setTxPowerWatts(w);
+    else if (rigType === 'rigctld') cat.setTxPower(w / 100);
+    else cat.setTxPower(w);
+  } else {
+    return false;
+  }
+  _currentTxPower = w;
+  broadcastRigState();
+  return true;
+}
+
+// The pass's cap, applied at the radio: at lease start (a radio the owner
+// left at 100 W must be at or below the cap before the first key-down) and
+// whenever a key-down finds the radio above it ('power-over-cap').
+function passApplyPowerCap(max, why) {
+  const cap = Number(max) || 0;
+  if (!(cap > 0)) return false;
+  if (setRadioTxPowerRaw(cap)) { sendCatLog(`[pass] RF power set to ${cap} W — the pass's cap (${why})`); return true; }
+  sendCatLog(`[pass] could not set the ${cap} W cap (${why}): no radio link — every key-down is refused until the radio reports its power`);
+  return false;
+}
+
 function sendCatSmeter(val, dbm) {
   if (typeof val === 'number' && Number.isFinite(val)) noteMeterSeen('smeter');
   // A radio that reports the S-meter in dBm (the Flex) passes it too; it is
@@ -20586,6 +20644,13 @@ function passLeaseBegin() {
   // back at the end.
   passLease.txDrive = currentTxDrive();
   passLease.txEq = { enabled: !!settings.txEqEnabled, preset: settings.txEqPreset || 'ragchew', customParams: settings.txEqCustomParams || undefined };
+  // The power cap is set at the radio NOW, not only clamped on request: a
+  // radio the owner left at 100 W keyed at 100 W under a 5 W pass (finding
+  // 6). The owner's level — the radio's own last report — comes back at the
+  // end. Every key-down re-checks the report (passPowerState).
+  const cap = Number(passEnforcement.getSessionStatus().maxPowerW) || 0;
+  passLease.ownerPower = (_lastPowerReadback && _lastPowerReadback.watts > 0) ? _lastPowerReadback.watts : null;
+  if (cap > 0) passApplyPowerCap(cap, 'lease start');
   if (remoteServer && remoteServer.setLeaseCall) remoteServer.setLeaseCall(who.call || null);
   js8PushThreads();
 }
@@ -20595,6 +20660,11 @@ function passLeaseEnd() {
   if (remoteServer && remoteServer.setLeaseCall) remoteServer.setLeaseCall(null);
   if (was && was.js8Threads) js8Threads = was.js8Threads;
   if (was && was.txDrive != null && was.txDrive !== currentTxDrive()) { try { ipcMain.emit('tx-drive-set', null, was.txDrive); } catch {} }
+  // The owner's RF power, the way it was before the pass capped it. Raw: the
+  // pass is in 'ended' here and the gated setter would refuse.
+  if (was && was.ownerPower > 0 && was.ownerPower !== _currentTxPower) {
+    if (setRadioTxPowerRaw(was.ownerPower)) sendCatLog(`[pass] RF power back to ${was.ownerPower} W (the owner's level before the pass)`);
+  }
   if (was && was.txEq && (was.txEq.enabled !== !!settings.txEqEnabled || was.txEq.preset !== (settings.txEqPreset || 'ragchew'))) { try { ipcMain.emit('tx-eq-set', null, was.txEq); } catch {} }
   js8PushThreads();
   js8Station.call = host;
@@ -34274,7 +34344,7 @@ function ownTxPrivilegeRefused(emission, freqHz) {
 function passTxAllowed(mode) {
   if (ownTxPrivilegeRefused(mode || _currentMode)) return false;
   if (!passEnforcement || passEnforcement.getState() === 'idle') return true;
-  const res = passEnforcement.interceptCatCommand({ type: 'tx_enable', freqHz: effectiveTxFreqHz(), split: _currentSplit, mode: mode || _currentMode });
+  const res = passEnforcement.interceptCatCommand({ type: 'tx_enable', freqHz: effectiveTxFreqHz(), split: _currentSplit, mode: mode || _currentMode, ...passPowerState() });
   if (res.allowed) return true;
   if (!passTxJustBlocked()) sendCatLog(`[pass] ${mode || 'TX'} blocked: ${res.userVisible}`);
   passTxBlocked(res);
@@ -34401,7 +34471,7 @@ function sstvHaltTxNow() {
 
 function gatedSetTransmit(state, emission) {
   if (passEnforcement && state) {
-    const res = passEnforcement.interceptCatCommand({ type: 'tx_enable', freqHz: effectiveTxFreqHz(), split: _currentSplit, mode: emission || _currentMode });
+    const res = passEnforcement.interceptCatCommand({ type: 'tx_enable', freqHz: effectiveTxFreqHz(), split: _currentSplit, mode: emission || _currentMode, ...passPowerState() });
     if (!res.allowed) {
       sendCatLog(`[pass] TX blocked: ${res.userVisible}`);
       if (win && !win.isDestroyed()) {
@@ -34479,7 +34549,7 @@ function gatedSetTxPower(value, opts = {}) {
 // wrappers don't apply to smartSdr.*. Same gate policy, different rig.
 function gatedSmartSdrTransmit(state, emission) {
   if (passEnforcement && state) {
-    const res = passEnforcement.interceptCatCommand({ type: 'tx_enable', freqHz: effectiveTxFreqHz(), split: _currentSplit, mode: emission || _currentMode });
+    const res = passEnforcement.interceptCatCommand({ type: 'tx_enable', freqHz: effectiveTxFreqHz(), split: _currentSplit, mode: emission || _currentMode, ...passPowerState() });
     if (!res.allowed) {
       sendCatLog(`[pass] TX blocked (Flex): ${res.userVisible}`);
       if (win && !win.isDestroyed()) {
@@ -36206,11 +36276,15 @@ function cloudShackNotice(text, kind) {
     initPassQsoOutbox();
     passEnforcement = new PassEnforcement({
       log: (msg) => sendCatLog(msg),
-      // Power readability heuristic: rigctld + most CIV/Kenwood codecs
-      // expose TX power. Conservative default: true. Refined per-rig
-      // later if needed.
-      rigPowerReadable: () => true,
+      // Whether the connected radio reports its RF power (capability table +
+      // a live link). Was `() => true` until 2026-11-03, which made the
+      // concept doc's "no CAT-readable power → no TX" a dead letter; the
+      // key-down also needs a fresh report (passPowerState).
+      rigPowerReadable: () => passRigPowerReadable(),
     });
+    // A key-down found the radio above the pass's cap: put it at the cap so
+    // the guest's next press keys (lib/pass-enforcement.js tx_enable).
+    passEnforcement.on('power-over-cap', ({ watts, max }) => passApplyPowerCap(max, `the radio was at ${watts} W`));
     passEnforcement.on('state-change', (state) => {
       if (state === 'paused') scopeGuestRestoreOwner('the owner took the radio');
       if (win && !win.isDestroyed()) {
