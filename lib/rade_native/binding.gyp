@@ -27,7 +27,9 @@
         "IS_BUILDING_RADE_API=1",
         "RADE_EXPORT=",
         "RADE_PYTHON_FREE=1",
-        "_USE_MATH_DEFINES"
+        "_USE_MATH_DEFINES",
+        # glibc math.h hides M_PI under strict -std=c11 without a feature macro
+        "_DEFAULT_SOURCE"
       ],
       "conditions": [
         ["OS=='win'", {
