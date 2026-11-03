@@ -2024,6 +2024,103 @@ const CONDITIONS_MIN_W = 360;
 const CONDITIONS_MIN_H = 280;
 // The RF-sense tuner's carrier mode — AM, never CW (see runExternalAtuTune).
 const EXTERNAL_ATU_CARRIER_MODE = 'AM';
+// --- External ATU (LDG Z-100plus, MFJ, other RF-sensing tuners) ---
+// Module scope, not inside connectRemote(): it closes over nothing of the
+// remote server, and assigned there the ATU button did nothing at all until
+// ECHOCAT was switched on (and every ECHOCAT restart added another cancel
+// listener). GitHub #111.
+// These tuners have no CAT — they sense carrier on the feedline and match
+// autonomously. We emit a low-power carrier so the tuner has something to
+// detect, then restore the rig's previous mode and power.
+// The carrier is AM, not CW (N8JMS FTDX10, 2026-10-26: "sending a low power
+// CW carrier for 4 seconds, but my power meter shows no power output"). A
+// CAT transmit in CW keys the transmitter with the KEY UP — Yaesu/Kenwood
+// TX1;/TX; and Icom 1C 00 make no RF in CW (G5HOW FTDX10, KM4CFT IC-7300,
+// the paddle notes in buildPaddleKeyRig) — so the CW carrier never existed
+// over CAT. AM transmits its carrier with no key and no audio on every
+// brand; it was the operator's own workaround. Radios cap the AM carrier
+// (25 W on an FTDX10/IC-7300), which is also this tune's ceiling.
+runExternalAtuTune = async function () {
+  if (_externalAtuActive) return true; // already running
+  const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
+  if (!activeRig || activeRig.externalAtu !== 'rf-sense') return false;
+  if (!cat || !cat.connected) {
+    sendCatLog('[ExtATU] CAT not connected — cannot trigger external tuner');
+    return true;
+  }
+  // Floor 1 W (was 5): low-power RF-sense tuners such as the AT-100M Pro
+  // want 2-5 W (GitHub #90). The radio still enforces its own minimum.
+  const watts = Math.max(1, Math.min(25, parseInt(activeRig.externalAtuWatts, 10) || 10));
+  const seconds = Math.max(1, Math.min(15, parseFloat(activeRig.externalAtuSeconds) || 4));
+  _externalAtuActive = true;
+  _externalAtuCancel = false;
+  const restoreMode = _currentMode || 'USB';
+  const powerKnown = _currentTxPower > 0;
+  const restorePower = powerKnown ? _currentTxPower : (settings.defaultPower || 100);
+  const carrierMode = EXTERNAL_ATU_CARRIER_MODE;
+  // Remembered BEFORE the power is lowered, the Station Setup test way: a
+  // restore the radio misses (it was still in its TX tail, or the app
+  // closed) is repaired by stationSetupReconcilePower on the next power
+  // report (GitHub #111, df1vb: the tune power stayed after tuning).
+  const lowering = restorePower > watts + 0.5;
+  if (lowering) {
+    settings.setupTxPowerRestore = { watts: restorePower, testWatts: watts, rigId: activeRig.id, at: Date.now(), reason: 'external-atu' };
+    _setupPowerRestoreAttempt = 0;
+    try { saveSettings(settings); } catch {}
+  }
+  sendCatLog(`[ExtATU] Firing ${watts} W ${carrierMode} carrier for ${seconds}s (mode ${restoreMode} → ${carrierMode}, power ${restorePower}W → ${watts}W)`);
+  if (win && !win.isDestroyed()) win.webContents.send('external-atu-start', { seconds });
+  try {
+    if (cat.setModeOnly) cat.setModeOnly(carrierMode, _currentFreqHz);
+    else if (cat.setMode) cat.setMode(carrierMode);
+    gatedSetTxPower(watts);
+    await new Promise(r => setTimeout(r, 300));
+    if (_externalAtuCancel) throw new Error('cancelled');
+    gatedSetTransmit(true);
+    // Wait in ~250ms slices so cancel can interrupt mid-burst
+    const endAt = Date.now() + seconds * 1000;
+    while (Date.now() < endAt) {
+      if (_externalAtuCancel) break;
+      await new Promise(r => setTimeout(r, 250));
+    }
+    gatedSetTransmit(false);
+  } catch (err) {
+    try { gatedSetTransmit(false); } catch {}
+    sendCatLog(`[ExtATU] ${err.message}`);
+  } finally {
+    // Let the radio leave its TX tail before it is asked anything.
+    await new Promise(r => setTimeout(r, 500));
+    try {
+      if (cat.setModeOnly) cat.setModeOnly(restoreMode, _currentFreqHz);
+      else if (cat.setMode) cat.setMode(restoreMode);
+    } catch {}
+    // Restore the power and believe only the radio's readback; send again
+    // twice if it does not confirm.
+    let confirmed = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const sentAt = Date.now();
+      try { gatedSetTxPower(restorePower); } catch {}
+      if (!lowering) break;
+      confirmed = await waitForPowerReadback(sentAt, (w) => w > watts + 0.5, 2500);
+      if (confirmed != null) break;
+      if (attempt < 3) sendCatLog(`[ExtATU] no power readback yet after restoring ${restorePower} W — sending it again (${attempt + 1} of 3)`);
+    }
+    _externalAtuActive = false;
+    _externalAtuCancel = false;
+    if (lowering && confirmed != null) {
+      delete settings.setupTxPowerRestore;
+      try { saveSettings(settings); } catch {}
+      sendCatLog(`[ExtATU] Tune complete — mode ${restoreMode}, radio confirms ${confirmed} W`);
+    } else if (lowering) {
+      sendCatLog(`[ExtATU] Tune complete — mode restored; set power back to ${restorePower} W but the radio has not confirmed it${powerKnown ? '' : ' (the power before the tune was never read, so this is your Default power)'}. It is set again when the radio next reports its power.`);
+    } else {
+      sendCatLog('[ExtATU] Tune complete — restored mode and power');
+    }
+    if (win && !win.isDestroyed()) win.webContents.send('external-atu-complete');
+  }
+  return true;
+}
+ipcMain.on('external-atu-cancel', () => { _externalAtuCancel = true; });
 // THE single rig-control dispatcher. Both transports — desktop IPC
 // (ipcMain.handle 'rig-control') and the ECHOCAT phone (remoteServer.on
 // 'rig-control') — route through this one function so a control added once
@@ -4041,6 +4138,10 @@ function rigPresetModeFor(mode) {
 }
 
 function rigPresetOnMode(mode) {
+  // The RF-sense tune's AM carrier is our own mode flip, reversed when the
+  // tune ends: never an operator mode change, so no preset (an AM or SSB
+  // preset's power landing after the tune's restore undid it, GitHub #111).
+  if (_externalAtuActive) return;
   _rigPresetLastBand = rigPresetBand();
   const d = RigPresets.decideModePreset({
     mode: rigPresetModeFor(mode), band: _rigPresetLastBand, prevFamily: _rigPresetFamily, prevMatchId: _rigPresetMatchId,
@@ -23825,101 +23926,8 @@ function connectRemote() {
     }
   });
 
-  // --- External ATU (LDG Z-100plus, MFJ, other RF-sensing tuners) ---
-  // These tuners have no CAT — they sense carrier on the feedline and match
-  // autonomously. We emit a low-power carrier so the tuner has something to
-  // detect, then restore the rig's previous mode and power.
-  // The carrier is AM, not CW (N8JMS FTDX10, 2026-10-26: "sending a low power
-  // CW carrier for 4 seconds, but my power meter shows no power output"). A
-  // CAT transmit in CW keys the transmitter with the KEY UP — Yaesu/Kenwood
-  // TX1;/TX; and Icom 1C 00 make no RF in CW (G5HOW FTDX10, KM4CFT IC-7300,
-  // the paddle notes in buildPaddleKeyRig) — so the CW carrier never existed
-  // over CAT. AM transmits its carrier with no key and no audio on every
-  // brand; it was the operator's own workaround. Radios cap the AM carrier
-  // (25 W on an FTDX10/IC-7300), which is also this tune's ceiling.
-  _externalAtuActive = false;
-  _externalAtuCancel = false;
-  runExternalAtuTune = async function () {
-    if (_externalAtuActive) return true; // already running
-    const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
-    if (!activeRig || activeRig.externalAtu !== 'rf-sense') return false;
-    if (!cat || !cat.connected) {
-      sendCatLog('[ExtATU] CAT not connected — cannot trigger external tuner');
-      return true;
-    }
-    // Floor 1 W (was 5): low-power RF-sense tuners such as the AT-100M Pro
-    // want 2-5 W (GitHub #90). The radio still enforces its own minimum.
-    const watts = Math.max(1, Math.min(25, parseInt(activeRig.externalAtuWatts, 10) || 10));
-    const seconds = Math.max(1, Math.min(15, parseFloat(activeRig.externalAtuSeconds) || 4));
-    _externalAtuActive = true;
-    _externalAtuCancel = false;
-    const restoreMode = _currentMode || 'USB';
-    const powerKnown = _currentTxPower > 0;
-    const restorePower = powerKnown ? _currentTxPower : (settings.defaultPower || 100);
-    const carrierMode = EXTERNAL_ATU_CARRIER_MODE;
-    // Remembered BEFORE the power is lowered, the Station Setup test way: a
-    // restore the radio misses (it was still in its TX tail, or the app
-    // closed) is repaired by stationSetupReconcilePower on the next power
-    // report (GitHub #111, df1vb: the tune power stayed after tuning).
-    const lowering = restorePower > watts + 0.5;
-    if (lowering) {
-      settings.setupTxPowerRestore = { watts: restorePower, testWatts: watts, rigId: activeRig.id, at: Date.now(), reason: 'external-atu' };
-      _setupPowerRestoreAttempt = 0;
-      try { saveSettings(settings); } catch {}
-    }
-    sendCatLog(`[ExtATU] Firing ${watts} W ${carrierMode} carrier for ${seconds}s (mode ${restoreMode} → ${carrierMode}, power ${restorePower}W → ${watts}W)`);
-    if (win && !win.isDestroyed()) win.webContents.send('external-atu-start', { seconds });
-    try {
-      if (cat.setModeOnly) cat.setModeOnly(carrierMode, _currentFreqHz);
-      else if (cat.setMode) cat.setMode(carrierMode);
-      gatedSetTxPower(watts);
-      await new Promise(r => setTimeout(r, 300));
-      if (_externalAtuCancel) throw new Error('cancelled');
-      gatedSetTransmit(true);
-      // Wait in ~250ms slices so cancel can interrupt mid-burst
-      const endAt = Date.now() + seconds * 1000;
-      while (Date.now() < endAt) {
-        if (_externalAtuCancel) break;
-        await new Promise(r => setTimeout(r, 250));
-      }
-      gatedSetTransmit(false);
-    } catch (err) {
-      try { gatedSetTransmit(false); } catch {}
-      sendCatLog(`[ExtATU] ${err.message}`);
-    } finally {
-      // Let the radio leave its TX tail before it is asked anything.
-      await new Promise(r => setTimeout(r, 500));
-      try {
-        if (cat.setModeOnly) cat.setModeOnly(restoreMode, _currentFreqHz);
-        else if (cat.setMode) cat.setMode(restoreMode);
-      } catch {}
-      // Restore the power and believe only the radio's readback; send again
-      // twice if it does not confirm.
-      let confirmed = null;
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        const sentAt = Date.now();
-        try { gatedSetTxPower(restorePower); } catch {}
-        if (!lowering) break;
-        confirmed = await waitForPowerReadback(sentAt, (w) => w > watts + 0.5, 2500);
-        if (confirmed != null) break;
-        if (attempt < 3) sendCatLog(`[ExtATU] no power readback yet after restoring ${restorePower} W — sending it again (${attempt + 1} of 3)`);
-      }
-      _externalAtuActive = false;
-      _externalAtuCancel = false;
-      if (lowering && confirmed != null) {
-        delete settings.setupTxPowerRestore;
-        try { saveSettings(settings); } catch {}
-        sendCatLog(`[ExtATU] Tune complete — mode ${restoreMode}, radio confirms ${confirmed} W`);
-      } else if (lowering) {
-        sendCatLog(`[ExtATU] Tune complete — mode restored; set power back to ${restorePower} W but the radio has not confirmed it${powerKnown ? '' : ' (the power before the tune was never read, so this is your Default power)'}. It is set again when the radio next reports its power.`);
-      } else {
-        sendCatLog('[ExtATU] Tune complete — restored mode and power');
-      }
-      if (win && !win.isDestroyed()) win.webContents.send('external-atu-complete');
-    }
-    return true;
-  }
-  ipcMain.on('external-atu-cancel', () => { _externalAtuCancel = true; });
+  // The external RF-sense tuner routine (runExternalAtuTune) lives at module
+  // scope: here it existed only once ECHOCAT had started (GitHub #111).
 
   // TX EQ + compressor — mobile read/write. Reuses the in-process
   // tx-eq-set IPC pathway so the persist + broadcast logic stays in one

@@ -73,6 +73,20 @@ async function runTune({ ignoreRestores, powerBefore = 100 }) {
     const rec = main.slice(main.indexOf('function stationSetupReconcilePower('), main.indexOf('function stationSetupReconcilePower(') + 600);
     assert.ok(/_stationSetupTxBusy \|\| _externalAtuActive\) return;/.test(rec));
   });
+  // GitHub #111 again (df1vb IC-7100, after 1.13.9): the routine was assigned
+  // inside connectRemote(), so with ECHOCAT off the ATU button ran the
+  // `async () => false` stub, and each ECHOCAT restart added a cancel listener.
+  test('the tune routine is assigned at module scope, never inside connectRemote()', () => {
+    const cr = main.indexOf('\nfunction connectRemote()');
+    assert.ok(cr > 0 && fnStart > 0);
+    assert.ok(fnStart < cr, 'runExternalAtuTune must be assigned before (outside) connectRemote()');
+    assert.ok(/^runExternalAtuTune = async function/m.test(main), 'assigned at column 0 (module scope)');
+    assert.strictEqual(main.split("ipcMain.on('external-atu-cancel'").length - 1, 1, 'one cancel listener');
+  });
+  test('the tune\'s own AM flip never fires a rig preset', () => {
+    const rp = main.slice(main.indexOf('function rigPresetOnMode('), main.indexOf('function rigPresetOnMode(') + 400);
+    assert.ok(/\{\s*(\/\/[^\n]*\n\s*)*if \(_externalAtuActive\) return;/.test(rp), 'first statement returns while the tune runs');
+  });
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();
