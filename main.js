@@ -10604,12 +10604,16 @@ async function spawnDirewolf() {
     // phone session failed with "never opened its AGW port" with no Dire
     // Wolf line in sight, 2026-10-23) must not be declared dead while it is
     // listening. Probed every half second until something settles it.
+    // The probe never throws: from 1.13.2 to 1.13.9 it called an undefined
+    // `net`, every tick was an uncaught ReferenceError that ended POTACAT,
+    // and a Dire Wolf that printed nothing could never be found ready.
+    let lastProbe = null;
     probeTimer = setInterval(() => {
       if (settled) { clearInterval(probeTimer); return; }
-      const sock = net.connect({ host: '127.0.0.1', port: _winlinkAgwPort() });
-      sock.once('connect', () => { sock.destroy(); ready('AGW port ' + _winlinkAgwPort() + ' is accepting'); });
-      sock.once('error', () => { sock.destroy(); });
-      sock.setTimeout(400, () => sock.destroy());
+      DirewolfProcess.probeAgwPort({ port: _winlinkAgwPort() }).then((r) => {
+        if (r.ok) ready('AGW port ' + _winlinkAgwPort() + ' is accepting');
+        else lastProbe = r;
+      });
     }, 500);
     const onLine = (chunk) => {
       for (const line of chunk.toString().split(/\r?\n/).filter(Boolean)) {
@@ -10640,8 +10644,7 @@ async function spawnDirewolf() {
       if (!settled) { settled = true; clearInterval(probeTimer); reject(new Error(`Dire Wolf exited (code ${code})` + (lastLines.length ? ` — it last said: ${lastLines.join(' | ')}` : ' before printing anything'))); return; }
       if (winlinkSessionActive() && winlinkState.session.mode === 'packet') winlinkAbortSession('Dire Wolf stopped');
     });
-    setTimeout(() => fail(`Dire Wolf never opened its AGW port ${_winlinkAgwPort()} in 15 s` +
-      (lastLines.length ? ` — it last said: ${lastLines.join(' | ')}` : ' and printed nothing (the log has its spawn line; is direwolf.exe being blocked by antivirus or another program?)')), 15000);
+    setTimeout(() => fail(DirewolfProcess.agwTimeoutMessage({ port: _winlinkAgwPort(), seconds: 15, lastLines, lastProbe })), 15000);
   });
 }
 

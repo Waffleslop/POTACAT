@@ -75,8 +75,11 @@ test('both modems take their audio from POTACAT at their own rate; neither picks
   const dw = fnBody(main, 'spawnDirewolf');
   assert.ok(/winlinkModemAudioReady\(\{ modemRate: DirewolfProcess\.DIREWOLF_RATE, modemName: 'direwolf' \}\)/.test(dw), 'Dire Wolf at its ARATE');
   // Readiness = the AGW port accepting OR the ready line; a timeout names what Dire Wolf last printed.
-  assert.ok(/net\.connect\(\{ host: '127\.0\.0\.1', port: _winlinkAgwPort\(\) \}\)/.test(dw) && /ready\('AGW port '/.test(dw), 'the AGW port is probed, not only the stdout line');
-  assert.ok(/it last said: \$\{lastLines\.join/.test(dw), 'a Dire Wolf failure quotes its last lines');
+  // (This guard once pinned `net.connect(...)` — an undefined name in main.js, so
+  // the probe threw every tick and ended POTACAT; test/direwolf-agw-probe-test.js
+  // drives the real probe now.)
+  assert.ok(/DirewolfProcess\.probeAgwPort\(\{ port: _winlinkAgwPort\(\) \}\)/.test(dw) && /ready\('AGW port '/.test(dw), 'the AGW port is probed, not only the stdout line');
+  assert.ok(/DirewolfProcess\.agwTimeoutMessage\(\{[^}]*lastLines/.test(dw), 'a Dire Wolf failure quotes its last lines');
   assert.ok(/audioPort: winlinkAudio\.port/.test(dw), 'Dire Wolf gets the socket, not device names');
   for (const fn of ['spawnArdop', 'spawnArdopSocket', 'spawnDirewolf']) {
     const b = fnBody(main, fn);

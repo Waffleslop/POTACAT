@@ -104,6 +104,7 @@ const TESTS = [
   'test/wfm-mode-test.js',
   'test/jtcat-dial-follow-test.js',
   'test/winlink-fault-test.js',
+  'test/direwolf-agw-probe-test.js',
   'test/voice-recorder-test.js',
   'test/hf-net-row-test.js',
   'test/log-freq-follow-test.js',
