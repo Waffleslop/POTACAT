@@ -11544,8 +11544,15 @@ async function winlinkGateways(mode, band) {
   // Winlink lists Mercury-capable gateways under VARA (Mercury speaks VARA's
   // TNC protocol); the operator's own tagged list rides on top.
   const patMode = mode === 'ardop' ? 'ardop' : mode === 'packet' ? 'packet' : mode === 'varafm' ? 'varafm' : 'varahf';
+  // An HF list with prediction on waits for Pat to rank every gateway (the
+  // VARA HF list is the longest); everything else answers in seconds.
+  const predicting = !WinlinkModes.isFmMode(mode) && settings.winlinkPrediction !== false;
+  const timeoutMs = predicting ? WINLINK_PREDICTED_LIST_MS : 30000;
+  const t0 = Date.now();
   try {
-    let list = await winlinkRmslistSafe({ mode: patMode, band });
+    let list = await winlinkRmslistSafe({ mode: patMode, band, timeoutMs });
+    const secs = Math.round((Date.now() - t0) / 1000);
+    if (secs >= 20) winlinkLog(`gateway list (${mode}): Pat took ${secs} s to rank ${list.length} gateways by propagation`);
     if (mode === 'mercury') {
       const tagged = new Set((settings.winlinkMercuryGateways || []).map((c) => String(c).toUpperCase()));
       list = list.map((g) => ({ ...g, mercury: tagged.has(g.call) }));
@@ -11560,9 +11567,15 @@ async function winlinkGateways(mode, band) {
     const tell = `gateways (${mode}${band ? ', ' + band : ''}): ${list.length} listed, ${predicted ? list.filter((g) => g.quality != null).length + ' with a propagation prediction' : 'nearest first' + (hf && settings.winlinkPrediction !== false && list.length ? ' — no prediction came back (VOACAP service unreachable?)' : '')}`;
     if (tell !== _winlinkGatewaysLogged) { _winlinkGatewaysLogged = tell; winlinkLog(tell); }
     return { ok: true, mode, band: band || '', list, predicted, note };
-  } catch (e) { return { ok: false, error: e.message }; }
+  } catch (e) {
+    // Said in the log: a list that never arrives was invisible in every bug
+    // report (i5ekx: VARA HF, "it no longer downloads the list of gateways").
+    winlinkLog(`gateway list (${mode}) failed after ${Math.round((Date.now() - t0) / 1000)} s: ${e.message}${predicting ? ' (Pat ranks every gateway by propagation first; Settings > Winlink can turn the ranking off)' : ''}`);
+    return { ok: false, error: e.message };
+  }
 }
 let _winlinkGatewaysLogged = '';
+const WINLINK_PREDICTED_LIST_MS = 120000;
 
 function winlinkAcceptNotice() {
   if (!settings.winlinkNoticeAcceptedAt) {
