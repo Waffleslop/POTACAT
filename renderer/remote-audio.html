@@ -56,6 +56,11 @@ window.api.onStartAudio(async (config) => {
     // Clean up any previous session
     if (pc) { pc.close(); pc = null; }
     if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+    tearDownRxLevelGraph();
+    tearDownStandIn();
+    // Seed the receive level from the bridge config so the first frame already
+    // goes out at the operator's level (same reason as txDrive below).
+    if (config.rxLevelDb != null) _rxLevelDb = Number(config.rxLevelDb) || 0;
     // The CW sidetone mix graph was built on the OLD stream. Left up, mixActive
     // stayed true, the next sidetone skipped replaceTrack and mixed into a
     // graph the new sender no longer carried — and rigSenderTrack() handed a
@@ -138,6 +143,12 @@ window.api.onStartAudio(async (config) => {
         window.api.sendAudioStatus({
           warning: 'No radio audio input is configured; used the input of the radio\'s sound card (the same device as its output). Set it in Settings > My Rigs > Audio to make this explicit.',
         });
+      } else if (config.daxTxDirect) {
+        // No input configured on a route whose receive audio comes from main
+        // (SmartSDR direct / Icom Network): never open a device for the
+        // placeholder — see silentStandInStream.
+        localStream = silentStandInStream();
+        window.api.sendAudioStatus({ captureLabel: 'none — receive audio comes from the radio over the network' });
       } else {
         localStream = await navigator.mediaDevices.getUserMedia({ audio: baseAudio });
         window.api.sendAudioStatus({
@@ -150,8 +161,12 @@ window.api.onStartAudio(async (config) => {
     // would have answered N2FSM's report in a single message.
     try {
       const t = localStream.getAudioTracks()[0];
-      if (t) window.api.sendAudioStatus({ captureLabel: t.label || '(unnamed device)' });
+      if (t && !_standInUsed) window.api.sendAudioStatus({ captureLabel: t.label || '(unnamed device)' });
     } catch {}
+    // Receive level: the gain stage sits on the captured stream, so every later
+    // consumer (sender, CW mix, health monitor) sees the levelled audio. The
+    // direct routes apply it on smartGain instead (their capture is a placeholder).
+    if (!config.daxTxDirect) localStream = wrapRxLevel(localStream);
 
     // ICE servers: prefer the Cloudflare TURN relay creds the desktop minted
     // (config.iceServers) so a CGNAT phone gets a relayed path; else fall back
@@ -450,6 +465,82 @@ let _txEqState = { enabled: false, preset: 'ragchew' };
 //     .setSinkId to the radio's input), full 0-200 range. Only if that graph
 //     cannot be built does it fall back to the <audio> element's .volume,
 //     which HTML caps at 1.0: above 100% we then clamp and say so.
+// Shack-side RECEIVE level: dB (-20..+20, 0 = unity) on the radio's audio
+// before it reaches the device — the receive twin of _txDrivePct below. A
+// fixed-level line out (a TS-480's ACC2 jack into a RigBlaster, WB3EGD
+// 2026-10-28) ignores the radio's AF knob, so the phone sat at -47 dBFS with
+// nothing on the radio able to raise it. The local-capture path gets a gain
+// stage wrapped around the captured stream (wrapRxLevel); the SmartSDR direct
+// and Icom Network paths apply it on smartGain, which already carries TX-mute.
+let _rxLevelDb = 0;
+let _rxCtx = null, _rxSource = null, _rxGain = null, _rxDest = null, _rxRawStream = null;
+function _rxLevelLinear() {
+  const db = Math.max(-20, Math.min(20, Number(_rxLevelDb) || 0));
+  return Math.pow(10, db / 20);
+}
+function _applyRxLevel() {
+  const g = _rxLevelLinear();
+  if (_rxGain) _rxGain.gain.value = g;
+  if (smartGain) smartGain.gain.value = kiwiTxMuted ? 0 : g;
+}
+window.api.onRxLevelUpdate((db) => {
+  _rxLevelDb = Number(db) || 0;
+  _applyRxLevel();
+});
+// Wrap the captured rig stream in a gain stage. The stream handed back is the
+// one every later path sees (the WebRTC sender, the CW sidetone mix, the
+// health monitor, FreeDV/TX mute), so the level applies on all of them. The
+// raw capture is kept so stop() reaches the device. Falls back to the raw
+// stream when the graph cannot be built (no audio track).
+function wrapRxLevel(raw) {
+  tearDownRxLevelGraph();
+  try {
+    _rxCtx = new AudioContext();
+    _rxSource = _rxCtx.createMediaStreamSource(raw);
+    _rxGain = _rxCtx.createGain();
+    _rxDest = _rxCtx.createMediaStreamDestination();
+    _rxSource.connect(_rxGain);
+    _rxGain.connect(_rxDest);
+    _rxRawStream = raw;
+    _applyRxLevel();
+    if (_rxCtx.state === 'suspended') _rxCtx.resume().catch(() => {});
+    return _rxDest.stream;
+  } catch (e) {
+    tearDownRxLevelGraph();
+    return raw;
+  }
+}
+function tearDownRxLevelGraph() {
+  if (_rxSource) { try { _rxSource.disconnect(); } catch {} _rxSource = null; }
+  if (_rxGain) { try { _rxGain.disconnect(); } catch {} _rxGain = null; }
+  if (_rxDest) { try { _rxDest.disconnect(); } catch {} _rxDest = null; }
+  if (_rxCtx) { _rxCtx.close().catch(() => {}); _rxCtx = null; }
+  if (_rxRawStream) { try { _rxRawStream.getTracks().forEach(t => t.stop()); } catch {} _rxRawStream = null; }
+}
+// A silent stand-in for the receive capture on the SmartSDR direct / Icom
+// Network routes, where the real receive audio arrives from main and is swapped
+// onto the sender on its first frame (onSmartSdrAudioFrame). The capture was
+// only ever a placeholder there, and on a PC with NO recording device at all
+// getUserMedia threw NotFoundError "Requested device not found" and the bridge
+// never started (W5ORC, FLEX-8600 on Flex Direct, 2026-10-27).
+let _standInCtx = null;
+let _standInUsed = false;
+function silentStandInStream() {
+  tearDownStandIn();
+  _standInCtx = new AudioContext();
+  const dest = _standInCtx.createMediaStreamDestination();
+  const src = _standInCtx.createConstantSource();
+  src.offset.value = 0;
+  src.connect(dest);
+  src.start();
+  _standInUsed = true;
+  return dest.stream;
+}
+function tearDownStandIn() {
+  _standInUsed = false;
+  if (_standInCtx) { _standInCtx.close().catch(() => {}); _standInCtx = null; }
+}
+
 let _txDrivePct = 100;
 let _txDriveGain = null;   // GainNode on the DAX path (null on the sink route)
 function _applyTxDrive() {
@@ -752,6 +843,8 @@ window.api.onStopAudio(() => {
     localStream.getTracks().forEach(t => t.stop());
     localStream = null;
   }
+  tearDownRxLevelGraph();
+  tearDownStandIn();
   tearDownKiwiGraph();
   tearDownLocalMixGraph();
   stopDaxTxTap();
@@ -893,7 +986,7 @@ window.api.onTxState((state) => {
   }
   // SmartSDR-direct path needs the same TX-mute so the mobile listener
   // doesn't hear their own TX echoed back through the Flex receiver.
-  if (smartGain) smartGain.gain.value = kiwiTxMuted ? 0 : 1;
+  if (smartGain) smartGain.gain.value = kiwiTxMuted ? 0 : _rxLevelLinear();
   // Stamp the TX→RX transition so the audio-health detector can apply
   // its post-TX grace window. Without this, the detector would resume
   // counting silent samples the instant PTT released and false-fire on
@@ -927,7 +1020,7 @@ function ensureSmartTrack() {
   if (!smartCtx) smartCtx = new AudioContext();
   if (!smartGain) {
     smartGain = smartCtx.createGain();
-    smartGain.gain.value = kiwiTxMuted ? 0 : 1; // share TX-mute state
+    smartGain.gain.value = kiwiTxMuted ? 0 : _rxLevelLinear(); // share TX-mute state; receive level rides here on the direct routes
   }
   if (!smartDest) {
     smartDest = smartCtx.createMediaStreamDestination();

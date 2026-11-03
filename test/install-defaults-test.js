@@ -1,7 +1,8 @@
 'use strict';
 /**
- * "Just works" defaults (Casey 2026-10-27): logging, solar indices, band
- * activity and PSKReporter Propagation have no switch; SOTA/WWFF/LLOTA and a
+ * "Just works" defaults (Casey 2026-10-27): logging, solar indices and
+ * PSKReporter Propagation have no switch; the band activity heatmap is a
+ * choice again, off by default and turned off once (Casey 2026-10-29); SOTA/WWFF/LLOTA and a
  * randomly picked DX cluster node are on once per profile; a node POTACAT
  * picked is swapped for another when it dies. lib/install-defaults.js +
  * main.js/renderer wiring.
@@ -26,7 +27,7 @@ const PRESETS = [
 
 console.log('always on:');
 check('an old saved false cannot hide them', () => {
-  const s = D.applyAlwaysOn({ enableLogging: false, enableSolar: false, enableBandActivity: false, enablePskrMap: false });
+  const s = D.applyAlwaysOn({ enableLogging: false, enableSolar: false, enablePskrMap: false });
   for (const k of D.ALWAYS_ON) assert.strictEqual(s[k], true, k);
 });
 
@@ -43,6 +44,26 @@ check('a fresh profile gets SOTA/WWFF/LLOTA and a random cluster node', () => {
   assert.strictEqual(s.clusterNodes[0].auto, true);
   assert.strictEqual(s.installDefaultsRev, D.DEFAULTS_REV);
   assert.ok(changed.length >= 4);
+});
+check('the band activity heatmap is not forced on', () => {
+  assert.ok(!D.ALWAYS_ON.includes('enableBandActivity'));
+  assert.strictEqual(D.applyAlwaysOn({ enableBandActivity: false }).enableBandActivity, false);
+});
+check('a fresh profile has the heatmap off', () => {
+  const s = {};
+  D.applyDefaultsOnce(s, PRESETS, () => 0);
+  assert.strictEqual(s.enableBandActivity, false);
+});
+check('a 1.13.6/1.13.7 profile (revision 1, forced true) is turned off once, and nothing else moves', () => {
+  const s = { installDefaultsRev: 1, enableBandActivity: true, enableSota: false, clusterNodes: [], enableCluster: false };
+  assert.deepStrictEqual(D.applyDefaultsOnce(s, PRESETS, () => 0), ['enableBandActivity off']);
+  assert.strictEqual(s.enableBandActivity, false);
+  assert.strictEqual(s.enableSota, false, 'revision 1 is not re-run');
+  assert.strictEqual(s.enableCluster, false);
+  assert.strictEqual(s.installDefaultsRev, 2);
+  s.enableBandActivity = true;                        // the operator ticks it again
+  assert.deepStrictEqual(D.applyDefaultsOnce(s, PRESETS, () => 0), []);
+  assert.strictEqual(s.enableBandActivity, true);
 });
 check('the pick spreads across the whole list', () => {
   const seen = new Set();
@@ -97,13 +118,19 @@ check('startup applies the one-time defaults with the real preset list', () => {
   assert.ok(/InstallDefaults\.replaceDeadAutoNode\(settings\.clusterNodes, node\.id, CLUSTER_PRESETS\)/.test(main));
 });
 check('no checkbox can switch them off', () => {
-  for (const id of ['set-enable-logging', 'set-enable-solar', 'set-enable-band-activity', 'set-enable-pskr-map', 'set-enable-rbn']) {
+  for (const id of ['set-enable-logging', 'set-enable-solar', 'set-enable-pskr-map', 'set-enable-rbn']) {
     assert.ok(!html.includes('id="' + id + '"'), id + ' is back');
   }
   assert.ok(!/id="logging-config" class="radio-sub hidden"/.test(html), 'the logging options are hidden');
   assert.ok(/enableLogging = true;/.test(app));
   assert.ok(/enableSolar = true;/.test(app));
-  assert.ok(/enableBandActivity = true;/.test(app));
+});
+check('the heatmap has its checkbox back, unticked, and the renderer reads it', () => {
+  assert.ok(html.includes('<input type="checkbox" id="set-enable-band-activity"> Band Activity Heatmap'));
+  assert.ok(/enableBandActivity = settings\.enableBandActivity === true;/.test(app));
+  assert.ok(/setEnableBandActivity\.checked = s\.enableBandActivity === true;/.test(app));
+  assert.ok(/const bandActivityEnabled = setEnableBandActivity\.checked;/.test(app));
+  assert.ok(!/enableBandActivity = true;/.test(app));
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

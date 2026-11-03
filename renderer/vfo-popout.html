@@ -732,6 +732,7 @@
 <script src="tx-eq-chain.js"></script>
 <script src="../lib/custom-cat-follow.js"></script>
 <script src="../lib/rig-bands.js"></script>
+<script src="../lib/freq-paste.js"></script>
 <script>
 // --- State ---
 let currentFreqHz = 0;
@@ -933,6 +934,7 @@ window.api.onRadioState((s) => {
     // Otherwise: still waiting for the rig to catch up — keep optimistic value.
   }
   if (s.mode && Date.now() > _modeSuppressUntil) currentMode = s.mode;
+  if (typeof s.wfm === 'boolean') vfoHasWfm = s.wfm;
   if (s.filterWidth != null) {
     currentFilterWidth = s.filterWidth;
     filterSlider.value = s.filterWidth || 2400;
@@ -1075,6 +1077,13 @@ if (window.api && window.api.rigBandsGet) {
 
 // --- Modes ---
 const MODES = ['USB', 'LSB', 'CW', 'AM', 'FM', 'FT8', 'FT4', 'RTTY', 'DIGU', 'DIGL', 'RADE'];
+// Wideband FM only on a radio that has it (IC-7100, IC-705: main's wfm flag).
+let vfoHasWfm = false;
+function pickerModes() {
+  if (!vfoHasWfm) return MODES;
+  const i = MODES.indexOf('FM');
+  return MODES.slice(0, i + 1).concat(['WFM'], MODES.slice(i + 1));
+}
 
 function updateModeHighlight() {
   // Updates popup picker if open
@@ -1107,7 +1116,7 @@ modeBadge.addEventListener('click', (e) => {
   picker.style.top = (br.bottom + 6) + 'px';
   picker.style.left = '12px';
   picker.style.right = '12px';
-  MODES.forEach(m => {
+  pickerModes().forEach(m => {
     const btn = document.createElement('button');
     btn.className = 'mode-btn' + (currentMode.toUpperCase() === m || (m === 'RADE' && currentMode.toUpperCase().includes('FREEDV')) ? ' active' : '');
     btn.textContent = m;
@@ -1382,7 +1391,21 @@ STEPS.forEach((s, i) => {
   if (i === stepIdx) opt.selected = true;
   stepSelect.appendChild(opt);
 });
-stepSelect.addEventListener('change', () => { stepIdx = parseInt(stepSelect.value); });
+// The step is ONE value shared with the Band Scope and ECHOCAT devices
+// (settings.tuneStepHz, main's applyTuneStep): a change here is sent to main,
+// and a change anywhere else arrives on onTuneStep.
+function applyStepHz(hz) {
+  const i = STEPS.findIndex((s) => s.hz === Number(hz));
+  if (i < 0) return;
+  stepIdx = i;
+  stepSelect.value = String(i);
+}
+stepSelect.addEventListener('change', () => {
+  stepIdx = parseInt(stepSelect.value);
+  if (window.api.setTuneStep) window.api.setTuneStep(STEPS[stepIdx].hz);
+});
+if (window.api.onTuneStep) window.api.onTuneStep(applyStepHz);
+if (window.api.tuneStepGet) window.api.tuneStepGet().then(applyStepHz).catch(() => {});
 
 // --- VFO Dial (canvas) ---
 const canvas = document.getElementById('vfo-dial');
@@ -1622,6 +1645,22 @@ kpGo.addEventListener('click', () => {
   kpRender();
   updateDisplay();
   showPane('dial');
+});
+
+// Paste a frequency anywhere (or into the box) to fill type-to-tune; Enter
+// tunes as for typed digits (hoogskev 2026-10-31: the box took no paste).
+// lib/freq-paste.js reads "14.074", "14,074", "14074 kHz", "14.074.000".
+document.addEventListener('paste', (e) => {
+  const t = e.target;
+  if (t !== kpInput && t && (t.tagName === 'INPUT' && t.type !== 'checkbox' && t.type !== 'range' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+  if (sheetOpen()) return;
+  const text = (e.clipboardData && e.clipboardData.getData('text')) || '';
+  const khz = window.FreqPaste ? window.FreqPaste.parsePastedFreq(text) : 0;
+  if (!khz) return;
+  e.preventDefault();
+  showPane('keypad');
+  kpBuffer = fmtMhz(khz);
+  kpRender();
 });
 
 // Keyboard: typing digits anywhere opens type-to-tune (never while a text
@@ -3272,6 +3311,10 @@ window.api.onSmartSdrAudio((d) => {
     if (audioMonitorGain && audioMonitorActive && !audioMonitorMuted && !kiwiConnected) {
       audioMonitorGain.gain.value = monitorVolume;
     }
+    // One knob for whichever receiver you hear: while the SDR is live, it
+    // sets the SDR audio (Casey 2026-10-30: the second slider was the fault).
+    kiwiVolume = monitorVolume;
+    if (kiwiGainNode) kiwiGainNode.gain.value = kiwiVolume;
   });
 })();
 
@@ -3547,14 +3590,20 @@ function placeKiwiDropdown(dd, anchor) {
   const below = window.innerHeight - r.bottom - M - 4;
   const above = r.top - M - 4;
   const up = below < 160 && above > below;
-  dd.style.maxHeight = Math.max(80, up ? above : below) + 'px';
+  // border-box, so the padding counts inside the height we allow: with a
+  // long list the menu otherwise ran past the top of the window and the
+  // first SDRs could not be clicked (K3SBP, Windows).
+  dd.style.boxSizing = 'border-box';
+  dd.style.overflowY = 'auto';
+  dd.style.maxHeight = Math.max(80, Math.min(up ? above : below, window.innerHeight - 2 * M)) + 'px';
   dd.style.minWidth = r.width + 'px';
   dd.style.maxWidth = (window.innerWidth - 2 * M) + 'px';
   dd.style.visibility = 'hidden';
   document.body.appendChild(dd);
   const w = dd.offsetWidth, h = dd.offsetHeight;
   dd.style.left = Math.max(M, Math.min(r.left, window.innerWidth - w - M)) + 'px';
-  dd.style.top = (up ? r.top - 4 - h : r.bottom + 4) + 'px';
+  const top = up ? r.top - 4 - h : r.bottom + 4;
+  dd.style.top = Math.max(M, Math.min(top, window.innerHeight - h - M)) + 'px';
   dd.style.visibility = '';
 }
 
@@ -3608,7 +3657,7 @@ window.api.onKiwiStatus((s) => {
   }
   updateKiwiButtonStates();
   document.getElementById('kiwi-rx-badge').style.display = s.connected ? '' : 'none';
-  document.getElementById('kiwi-volume-row').style.display = s.connected ? 'flex' : 'none';
+  document.getElementById('kiwi-volume-row').style.display = 'none'; // the monitor volume knob drives the SDR too
   // Mute local radio audio monitor when SDR active, restore when off
   if (s.connected) {
     if (audioMonitorGain) audioMonitorGain.gain.value = 0;
@@ -3657,10 +3706,12 @@ window.api.onKiwiAudio((d) => {
   const slider = document.getElementById('kiwi-volume');
   const label = document.getElementById('kiwi-volume-val');
   if (!slider) return;
-  const saved = parseInt(localStorage.getItem('kiwiVolume') || '80', 10);
+  // The SDR follows the monitor volume knob; this slider is kept hidden for
+  // older layouts and only mirrors it.
+  const saved = Math.round(monitorVolume * 100);
   slider.value = saved;
   label.textContent = saved + '%';
-  kiwiVolume = saved / 100;
+  kiwiVolume = monitorVolume;
   slider.addEventListener('input', () => {
     const pct = parseInt(slider.value, 10);
     label.textContent = pct + '%';

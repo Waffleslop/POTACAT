@@ -146,6 +146,7 @@
     var note = '';
     if (m.id === 'mercury') note = 'Experimental: few gateways run Mercury yet.';
     if (m.id === 'vara' || m.id === 'varafm') note = 'Your own ' + (m.id === 'varafm' ? 'VARA FM' : 'VARA HF') + ', with its PTT set to VOX — POTACAT starts it if needed and keys the radio.';
+    if (m.note) note = m.note;   // a radio mode that runs with a caveat: no CAT control, the operator sets the dial (NA4DQ)
     if (m.id === 'telnet') {
       // Say WHY the radio modes are greyed — a tooltip on a disabled option
       // is invisible on most systems. One line per distinct reason.

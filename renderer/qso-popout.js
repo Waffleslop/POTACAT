@@ -87,7 +87,8 @@ const ALL_COLUMNS = [
   { key: 'TX_PWR', label: 'Pwr', sort: 'TX_PWR', field: 'TX_PWR', w: 46, get: (q) => q.TX_PWR || '' },
   { key: 'RST_SENT', label: 'RST S', field: 'RST_SENT', w: 48, get: (q) => q.RST_SENT || '' },
   { key: 'RST_RCVD', label: 'RST R', field: 'RST_RCVD', w: 48, get: (q) => q.RST_RCVD || '' },
-  { key: 'SIG_INFO', label: 'Park', sort: 'SIG_INFO', field: 'SIG_INFO', w: 86, get: (q) => q.SIG_INFO || '' },
+  // POTA_REF alone: a log imported from QLog before the import filled SIG_INFO (KC9FOZ).
+  { key: 'SIG_INFO', label: 'Park', sort: 'SIG_INFO', field: 'SIG_INFO', w: 86, get: (q) => q.SIG_INFO || q.POTA_REF || '' },
   // THEIR park is SIG_INFO; MY park — the reference being activated — is
   // MY_SIG_INFO (MY_POTA_REF on older logs). An activator's own log has
   // SIG_INFO empty on every ordinary QSO, so without this column their own
@@ -279,7 +280,7 @@ function render() {
   // Text search
   if (search) {
     filtered = filtered.filter(q => {
-      const hay = [q.CALL, q.SIG_INFO, q.COMMENT, q.MODE, q.BAND].join(' ').toLowerCase();
+      const hay = [q.CALL, q.SIG_INFO || q.POTA_REF, q.COMMENT, q.MODE, q.BAND].join(' ').toLowerCase();
       return hay.includes(search);
     });
   }

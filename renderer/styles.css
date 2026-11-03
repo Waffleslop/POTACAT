@@ -1,3 +1,5 @@
+@import url("tokens.css");
+@import url("ds-bridge.css");
 /* ── POTACAT theme variables ──────────────────────────────────────────
  *
  * Token vocabulary (mobile-aligned, 2026-06-07 step-1 consolidation):
@@ -2036,6 +2038,12 @@ thead th {
   width: 100%;
   background: var(--bg-primary);
   min-height: 0;
+  /* Leaflet's controls sit at z-index 800-1000; keep them inside the map so
+     the attribution never draws over a panel above it (POTA Stats, the
+     event board; KQ4SUB). */
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
 }
 
 .dark-tiles {
@@ -7499,6 +7507,10 @@ a.settings-echocat-badge-link:hover {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* The buttons on the right (Spot, Export ADIF, Logbook, Settings) wrap to a
+     second row instead of leaving the window at full screen with a large text
+     size (WD3D 2026-10-29: "the buttons disappear when you go full screen"). */
+  flex-wrap: wrap;
   padding: 8px 12px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-primary);
@@ -8785,7 +8797,11 @@ body.activator-rbn-on #rbn-view {
 .dirv-power-col { width: 60px; }
 .dirv-region-col { width: 110px; }
 .dirv-notes-col { min-width: 120px; max-width: 300px; }
-.dirv-action-col { width: 60px; text-align: center; }
+/* Fits "+ Add" and "Remove" whole; the table clips every other cell with an
+   ellipsis, which cut the Remove button in half (hoogskev 2026-10-31). */
+.dirv-action-col { width: 84px; text-align: center; }
+.directory-view-table tbody td.dirv-action-col { overflow: visible; text-overflow: clip; }
+.dirv-action-col .dir-add-btn, .dirv-action-col .dir-remove-btn { white-space: nowrap; }
 
 .dirv-status-badge {
   display: inline-block;

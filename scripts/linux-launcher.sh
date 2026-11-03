@@ -20,8 +20,13 @@
 # (unit-tested spec) — keep the two in sync.
 
 set -u
-NAME=$(basename "$0")
-DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+# Follow symlinks first: the .deb/.rpm put /usr/bin/<name> -> /opt/<product>/<name>,
+# and a plain dirname "$0" from a terminal launch would look for
+# /usr/bin/<name>.bin, which does not exist (the menu entry uses the /opt path).
+SELF=$(readlink -f -- "$0" 2>/dev/null) || SELF=""
+[ -n "$SELF" ] || SELF="$0"
+NAME=$(basename "$SELF")
+DIR=$(CDPATH= cd -- "$(dirname -- "$SELF")" && pwd)
 BIN="$DIR/$NAME.bin"
 
 # Operator already chose — pass through untouched.

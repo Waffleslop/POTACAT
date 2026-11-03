@@ -21,19 +21,33 @@ const BINS = A.BINS;
 const $ = (id) => document.getElementById(id);
 const traceCanvas = $('sc-trace');
 const spotsCanvas = $('sc-spots');
+const freqCanvas = $('sc-freq');
 const wfCanvas = $('sc-wf');
 
 // ─── State ─────────────────────────────────────────────────────────────────
 let state = { status: 'stopped', kind: 0, spanHz: 0, anchor: 'center', speed: null, scuLan: null, diag: null };
 let centerHz = 0;
 let axis = A.scopeAxis({ centerHz: 0, spanHz: 0 });
-let latest = null;            // Uint8Array(850), newest frame
+let latest = null;            // Uint8Array(850), newest RAW frame (before the level window)
+// Averaging and peak hold run on the RAW levels, so the cursor readout reads
+// the source's own value; the level window is applied when drawing.
 let smooth = new Float32Array(BINS);
 let peak = new Float32Array(BINS);
 let spots = [];
 let showSpots = true;
 let peakHold = false;
-let floor = (() => { try { return Number(localStorage.getItem('scope-floor')) || 0; } catch { return 0; } })();
+const V = window.ScopeView;
+const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch { return d; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, String(v)); } catch { /* private mode */ } };
+// Reference level + range (plan item 4): the window of levels the trace shows.
+// The bottom IS the old Floor ('scope-floor', same key), so a saved floor
+// carries over unchanged; the top is new and starts at full scale.
+let range = V.clampRange(Number(lsGet('scope-floor', 0)) || 0, Number(lsGet('scope-top', 255)) || 255);
+let avgMode = V.AVERAGING[lsGet('scope-avg', 'light')] ? lsGet('scope-avg', 'light') : 'light';
+let peakDecay = V.PEAK_DECAY[lsGet('scope-peak-decay', 'slow')] != null ? lsGet('scope-peak-decay', 'slow') : 'slow';
+let showSUnits = lsGet('scope-sunits', '0') === '1';
+// Licence-privilege shading (plan item 10): on by default (Casey 10/28).
+let showPrivileges = lsGet('scope-privileges', '1') !== '0';
 let drawPending = false;
 
 // ─── Waterfall ─────────────────────────────────────────────────────────────
@@ -48,12 +62,10 @@ $('sc-colormap').value = savedColormap;
 
 // ─── Axis + labels ─────────────────────────────────────────────────────────
 function recomputeAxis() {
-  axis = A.scopeAxis({ centerHz, spanHz: state.spanHz, anchor: state.anchor });
-  $('sc-ax-lo').textContent = axis.known || (centerHz && state.spanHz) ? A.formatHz(axis.startHz) : '—';
-  $('sc-ax-c').textContent = centerHz ? A.formatHz(centerHz) : '—';
-  $('sc-ax-hi').textContent = axis.known || (centerHz && state.spanHz) ? A.formatHz(axis.endHz) : '—';
+  axis = A.scopeAxis({ centerHz: A.axisCenterFor(state, centerHz), spanHz: state.spanHz, anchor: state.anchor });
   const rxBin = centerHz ? A.hzToBin(axis, centerHz) : null;
-  wf.setMarkers(rxBin == null ? [] : [{ pos: rxBin / (BINS - 1), color: '#e94560', kind: 'rx' }]);
+  const marks = rxBin == null ? [] : [{ pos: rxBin / (BINS - 1), color: '#e94560', kind: 'rx' }];
+  wf.setMarkers(marks.concat(V.passbandMarkers(state.passband, centerHz, axis)));
   scheduleDraw();
 }
 
@@ -64,10 +76,11 @@ function applyState(s) {
   pill.className = 'sc-pill ' + (state.status || 'stopped');
   pill.textContent = ({ stopped: 'Stopped', starting: 'Starting', live: 'Live', blocked: 'Blocked', error: 'Error', unavailable: 'Unavailable' })[state.status] || state.status;
   $('sc-synth-badge').style.display = state.kind === 1 ? '' : 'none';
-  // An SDR source (lib/sdr-scope.js) and a Flex panadapter (lib/flex-scope.js)
-  // have no sweep speed and no SCU-LAN10: those rows are the FT-710's.
+  // An SDR source (lib/sdr-scope.js), a Flex panadapter (lib/flex-scope.js)
+  // and an Icom (lib/icom-scope.js) have no sweep speed and no SCU-LAN10:
+  // those rows are the FT-710's.
   const sdr = state.source === 'sdr' && state.kind !== 1;
-  const notYaesu = (state.source === 'sdr' || state.source === 'flex') && state.kind !== 1;
+  const notYaesu = (state.source === 'sdr' || state.source === 'flex' || state.source === 'icom') && state.kind !== 1;
   $('sc-sdr-badge').style.display = sdr ? '' : 'none';
   $('sc-speed-wrap').style.display = notYaesu ? 'none' : '';
   $('sc-sculan-wrap').style.display = notYaesu ? 'none' : '';
@@ -76,13 +89,19 @@ function applyState(s) {
   const spans = Array.isArray(state.spans) ? state.spans : [];
   $('sc-zoom-out').classList.toggle('hidden', spans.length < 2);
   $('sc-zoom-in').classList.toggle('hidden', spans.length < 2);
-  $('sc-mode').textContent = state.anchor ? ScopeAxis.anchorLabel(state.anchor) : '—';
+  $('sc-mode').textContent = state.modeLabel || (state.anchor ? ScopeAxis.anchorLabel(state.anchor) : '—');
   $('sc-speed').textContent = state.speed || '—';
   $('sc-sculan').textContent = state.scuLan === '1' ? 'ON' : state.scuLan === '0' ? 'OFF' : '—';
   const needEnable = state.scuLan === '0' || (state.diag && state.diag.key === 'silent');
   $('sc-enable').style.display = needEnable && state.kind !== 1 ? '' : 'none';
+  // The button says what it does on this radio (an Icom: its scope; the FT-710: SCU-LAN10).
+  const enableText = state.enableLabel || 'Enable SCU-LAN10 on the radio';
+  $('sc-enable').textContent = enableText;
+  $('sc-diag-enable').textContent = enableText;
+  $('sc-enable').title = state.enableTitle || 'Sends EX0301261; to the radio. POTACAT turns it back off when the scope closes.';
   $('sc-synth').checked = !!state.synth;
   if (s && s.fps) $('sc-fps').value = String(s.fps);
+  $('sc-sunits-row').classList.toggle('hidden', !(state.levelScale && state.levelScale.unit === 'dBm'));
 
   const diag = $('sc-diag');
   if (state.diag && state.status !== 'live') {
@@ -109,73 +128,22 @@ function sizeCanvas(c) {
 function scheduleDraw() {
   if (drawPending) return;
   drawPending = true;
-  requestAnimationFrame(() => { drawPending = false; drawTrace(); drawSpots(); });
+  requestAnimationFrame(() => { drawPending = false; drawTrace(); drawFreq(); drawSpots(); });
 }
 
 function drawTrace() {
   const { w, h, dpr } = sizeCanvas(traceCanvas);
-  const ctx = traceCanvas.getContext('2d');
-  ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, w, h);
+  // The one trace painter (lib/scope-view.js); ECHOCAT Web draws with it too.
+  ScopeView.drawTrace(traceCanvas.getContext('2d'),
+    { bins: latest ? V.applyRange(smooth, range.lo, range.hi) : null, peak: peakHold ? V.applyRange(peak, range.lo, range.hi) : null },
+    { w, h, dpr, axis, dialHz: centerHz, spanHz: state.spanHz, anchor: state.anchor, peakHold,
+      scale: V.displayScale(state.levelScale, range.lo, range.hi), gutter: true, sUnits: showSUnits,
+      overlay: { passband: state.passband, txHz: state.txHz, bandPlan: state.bandPlan, privileges: showPrivileges } });
+}
 
-  // Grid: ten divisions, brighter at the centre where the dial sits.
-  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-  ctx.lineWidth = 1;
-  for (let i = 1; i < 10; i++) {
-    const x = Math.round(i * w / 10) + 0.5;
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
-  }
-  for (let i = 1; i < 4; i++) {
-    const y = Math.round(i * h / 4) + 0.5;
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
-  }
-
-  if (latest) {
-    const toY = (v) => h - (v / 255) * (h - 6 * dpr) - 3 * dpr;
-    if (peakHold) {
-      ctx.strokeStyle = 'rgba(240,165,0,0.55)';
-      ctx.lineWidth = 1 * dpr;
-      ctx.beginPath();
-      for (let i = 0; i < BINS; i++) {
-        const x = i * (w - 1) / (BINS - 1);
-        if (i === 0) ctx.moveTo(x, toY(peak[i])); else ctx.lineTo(x, toY(peak[i]));
-      }
-      ctx.stroke();
-    }
-    const grad = ctx.createLinearGradient(0, 0, 0, h);
-    grad.addColorStop(0, 'rgba(79,195,247,0.55)');
-    grad.addColorStop(1, 'rgba(79,195,247,0.05)');
-    ctx.beginPath();
-    ctx.moveTo(0, h);
-    for (let i = 0; i < BINS; i++) ctx.lineTo(i * (w - 1) / (BINS - 1), toY(smooth[i]));
-    ctx.lineTo(w, h);
-    ctx.closePath();
-    ctx.fillStyle = grad;
-    ctx.fill();
-    ctx.strokeStyle = '#4fc3f7';
-    ctx.lineWidth = 1.2 * dpr;
-    ctx.beginPath();
-    for (let i = 0; i < BINS; i++) {
-      const x = i * (w - 1) / (BINS - 1);
-      if (i === 0) ctx.moveTo(x, toY(smooth[i])); else ctx.lineTo(x, toY(smooth[i]));
-    }
-    ctx.stroke();
-  }
-
-  // Dial marker.
-  const rxBin = centerHz ? A.hzToBin(axis, centerHz) : null;
-  if (rxBin != null) {
-    const x = Math.round(rxBin * (w - 1) / (BINS - 1)) + 0.5;
-    ctx.strokeStyle = '#e94560';
-    ctx.lineWidth = 1.5 * dpr;
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
-  }
-
-  if (!axis.known && state.spanHz && state.anchor !== 'center' && state.anchor !== 'pan') {
-    ctx.fillStyle = 'rgba(240,165,0,0.9)';
-    ctx.font = `${11 * dpr}px sans-serif`;
-    ctx.fillText(`${state.anchor.toUpperCase()} mode — the radio does not report this window's edges; axis assumed around the dial`, 8 * dpr, 14 * dpr);
-  }
+function drawFreq() {
+  const { w, h, dpr } = sizeCanvas(freqCanvas);
+  ScopeView.drawFreqScale(freqCanvas.getContext('2d'), { w, h, dpr, axis, dialHz: centerHz });
 }
 
 const SPOT_COLORS = { pota: '#4ecca3', sota: '#f0a500', wwff: '#7ec8e3', dxc: '#e040fb', rbn: '#ff8a65', pskr: '#b39ddb', net: '#ffd54f' };
@@ -224,20 +192,36 @@ function drawSpots() {
 window.api.onScopeFrame((f) => {
   const raw = f && f.bins;
   if (!raw || raw.length !== BINS) return;
-  const bins = A.applyFloor(raw, floor);   // display floor, shared maths with the web client
-  latest = bins;
-  for (let i = 0; i < BINS; i++) {
-    smooth[i] = smooth[i] * 0.45 + bins[i] * 0.55;
-    peak[i] = Math.max(peak[i] - 0.6, bins[i]);
-  }
-  if (wf.supported) wf.pushFrame(bins);
+  latest = raw;
+  V.smoothInto(smooth, raw, V.AVERAGING[avgMode]);
+  V.peakInto(peak, raw, V.PEAK_DECAY[peakDecay]);
+  // The waterfall gets the level window too, as it got the floor (Phase 5
+  // gives it its own Auto black level).
+  if (wf.supported) wf.pushFrame(V.applyRange(raw, range.lo, range.hi));
   scheduleDraw();
+  if (readoutAt) showReadout(readoutAt.el, readoutAt.x, readoutAt.y);
 });
 
 window.api.onScopeState(applyState);
-window.api.onCatFrequency((hz) => { if (hz > 0) { centerHz = hz; recomputeAxis(); } });
+// The dial is shown where the operator put it the moment a drag, wheel or key
+// tunes (the VFO window's _freqSuppressTarget pattern): a readback from just
+// before the tune is ignored until the radio arrives within 25 Hz, or 1.5 s pass.
+let dialTarget = { hz: 0, until: 0 };
+window.api.onCatFrequency((hz) => {
+  if (!(hz > 0)) return;
+  if (dialTarget.hz && Date.now() < dialTarget.until) {
+    if (Math.abs(hz - dialTarget.hz) > 25) return;
+    dialTarget = { hz: 0, until: 0 };
+  }
+  centerHz = hz; recomputeAxis();
+});
 window.api.onSpots((list) => { spots = Array.isArray(list) ? list : []; scheduleDraw(); });
 window.api.onPopoutTheme(_applyPopoutTheme);
+// The tuning step shared with the VFO window and ECHOCAT (settings.tuneStepHz).
+// Held here for the scope's wheel tuning (docs/scope-improvements-plan.md item 12a).
+let tuneStepHz = 1000;
+if (window.api.onTuneStep) window.api.onTuneStep((hz) => { if (hz > 0) tuneStepHz = hz; });
+if (window.api.tuneStepGet) window.api.tuneStepGet().then((hz) => { if (hz > 0) tuneStepHz = hz; }).catch(() => {});
 
 // ─── Interaction ───────────────────────────────────────────────────────────
 function tuneToFraction(frac) {
@@ -245,11 +229,167 @@ function tuneToFraction(frac) {
   const hz = A.snapTapHz(A.binToHz(axis, Math.max(0, Math.min(1, frac)) * (BINS - 1)), state.spanHz);
   window.api.tune((hz / 1000).toFixed(3), null);
 }
-wf.onClick(tuneToFraction);
+// ─── Level window: drag the level scale (left edge) to move it, wheel to widen ──
+// A drag that starts in the gutter never tunes; neither does a click that moved.
+let gutterDrag = null;     // { y0, range0 }
+let suppressClick = false;
+function inGutter(e) {
+  const r = traceCanvas.getBoundingClientRect();
+  return e.clientX - r.left <= V.GUTTER_PX;
+}
+function setRange(next, from) {
+  range = V.clampRange(next.lo, next.hi);
+  lsSet('scope-floor', range.lo);
+  lsSet('scope-top', range.hi);
+  if (from !== 'floor') floorEl.value = String(Math.min(Number(floorEl.max), range.lo));
+  if (from !== 'bottom') $('sc-bottom').value = String(range.lo);
+  if (from !== 'top') $('sc-top').value = String(range.hi);
+  scheduleDraw();
+}
+// ─── Phase 4: tune with the mouse, wheel and keys (plan items 11-13) ────────
+// Every gesture ends in window.api.tune — the one tune path.
+function tuneDial(hz) {
+  if (!(hz > 0)) return;
+  dialTarget = { hz, until: Date.now() + 1500 };
+  centerHz = hz;
+  recomputeAxis();
+  window.api.tune((hz / 1000).toFixed(3), null);
+}
+const liveTune = V.throttleLast(tuneDial, 66);   // ~15 tunes a second while the passband is dragged
+function passbandCssPx(el) {
+  const pb = V.passbandHz(state.passband, centerHz);
+  const r = el.getBoundingClientRect();
+  const k = V.hzPerPx(axis, r.width);
+  if (!pb || !k) return null;
+  return { x0: (pb.loHz - axis.startHz) / k, x1: (pb.hiHz - axis.startHz) / k };
+}
+let tuneDrag = null;       // { el, kind, x0, dial0, moved, pointerId }
+function slidePreview(dx) {
+  const t = dx ? `translateX(${dx}px)` : '';
+  traceCanvas.style.transform = t;
+  wfCanvas.style.transform = t;
+}
+function startTuneDrag(el, e) {
+  if (e.button !== 0 || !axis.known || !centerHz) return false;
+  const r = el.getBoundingClientRect();
+  const kind = V.dragKind(axis, e.clientX - r.left, el === traceCanvas ? passbandCssPx(el) : null);
+  if (kind === 'none') return false;
+  tuneDrag = { el, kind, x0: e.clientX, dial0: centerHz, width: r.width, moved: false };
+  try { el.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+  return true;
+}
+function moveTuneDrag(e) {
+  if (!tuneDrag) return;
+  const dx = e.clientX - tuneDrag.x0;
+  if (!tuneDrag.moved && Math.abs(dx) < 4) return;
+  tuneDrag.moved = true;
+  suppressClick = true;
+  if (tuneDrag.kind === 'passband') liveTune.push(V.dragDialHz('passband', tuneDrag.dial0, dx, axis, tuneDrag.width));
+  else slidePreview(dx);   // CENTER: the trace slides; the radio tunes on release
+}
+function endTuneDrag(e) {
+  const d = tuneDrag;
+  if (!d) return;
+  tuneDrag = null;
+  try { d.el.releasePointerCapture(e.pointerId); } catch { /* released */ }
+  if (!d.moved) return;
+  if (d.kind === 'passband') { liveTune.flush(); return; }
+  slidePreview(0);
+  if (e.type !== 'pointercancel') tuneDial(V.dragDialHz('pan', d.dial0, e.clientX - d.x0, axis, d.width));
+}
+function wheelTune(e) {
+  e.preventDefault();
+  if (e.ctrlKey || e.metaKey) { zoomStep(e.deltaY > 0 ? +1 : -1); return; }
+  if (!axis.known || !centerHz) return;
+  const step = V.wheelStepHz(tuneStepHz, e.deltaY, e.shiftKey);
+  if (step) tuneDial(centerHz + step);
+}
+// The waterfall: the same drag (pan only — no passband handle there) and wheel.
+let wfSuppressClick = false;
+wf.onClick((frac) => { if (wfSuppressClick) { wfSuppressClick = false; return; } tuneToFraction(frac); });
+wfCanvas.addEventListener('pointerdown', (e) => { wfSuppressClick = false; startTuneDrag(wfCanvas, e); });
+wfCanvas.addEventListener('pointermove', (e) => { moveTuneDrag(e); if (tuneDrag && tuneDrag.moved) wfSuppressClick = true; });
+wfCanvas.addEventListener('pointerup', endTuneDrag);
+wfCanvas.addEventListener('pointercancel', endTuneDrag);
+wfCanvas.addEventListener('wheel', wheelTune, { passive: false });
+
+traceCanvas.addEventListener('pointermove', (e) => {
+  traceCanvas.classList.toggle('in-gutter', !!gutterDrag || inGutter(e));
+  moveTuneDrag(e);
+  if (!gutterDrag) return;
+  const r = traceCanvas.getBoundingClientRect();
+  const plotH = Math.max(1, r.height - 6);
+  const d = (e.clientY - gutterDrag.y0) * (gutterDrag.range0.hi - gutterDrag.range0.lo) / plotH;
+  if (Math.abs(e.clientY - gutterDrag.y0) > 2) suppressClick = true;
+  // Dragging down moves the trace down: the window slides up the levels.
+  setRange(V.shiftRange(gutterDrag.range0, d));
+});
+traceCanvas.addEventListener('pointerdown', (e) => {
+  suppressClick = false;
+  if (e.button === 0 && !inGutter(e)) { startTuneDrag(traceCanvas, e); return; }
+  if (e.button !== 0 || !inGutter(e)) return;
+  gutterDrag = { y0: e.clientY, range0: { ...range } };
+  suppressClick = true;
+  try { traceCanvas.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+});
+const endGutterDrag = (e) => {
+  endTuneDrag(e);
+  if (gutterDrag) { gutterDrag = null; try { traceCanvas.releasePointerCapture(e.pointerId); } catch { /* released */ } }
+};
+traceCanvas.addEventListener('pointerup', endGutterDrag);
+traceCanvas.addEventListener('pointercancel', endGutterDrag);
+traceCanvas.addEventListener('wheel', (e) => {
+  if (!inGutter(e)) { wheelTune(e); return; }   // over the trace: tune (Ctrl = zoom)
+  e.preventDefault();
+  setRange(V.zoomRange(range, e.deltaY > 0 ? 1.12 : 1 / 1.12));
+}, { passive: false });
 traceCanvas.addEventListener('click', (e) => {
+  if (suppressClick) { suppressClick = false; return; }
   const r = traceCanvas.getBoundingClientRect();
   if (r.width > 0) tuneToFraction((e.clientX - r.left) / r.width);
 });
+freqCanvas.addEventListener('click', (e) => {
+  const r = freqCanvas.getBoundingClientRect();
+  if (r.width > 0) tuneToFraction((e.clientX - r.left) / r.width);
+});
+
+// ─── Cursor readout: frequency + level under the pointer (plan item 3) ──────
+const readoutEl = $('sc-readout');
+let readoutAt = null;      // { el, x, y } while the pointer is over a scope surface
+function showReadout(el, clientX, clientY) {
+  const r = el.getBoundingClientRect();
+  if (!(r.width > 0) || !axis.hzPerBin) { readoutEl.classList.remove('show'); return; }
+  const frac = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+  const hz = A.binToHz(axis, frac * (BINS - 1));
+  let text = V.formatReadout(hz, latest ? V.levelAt(smooth, frac) : null, state.levelScale, state.spanHz);
+  if (!axis.known) text += ' (axis assumed)';
+  readoutEl.textContent = text;
+  readoutEl.classList.add('show');
+  const stage = readoutEl.parentElement.getBoundingClientRect();
+  const w = readoutEl.offsetWidth;
+  let x = clientX - stage.left + 12;
+  if (x + w > stage.width - 4) x = clientX - stage.left - w - 12;
+  readoutEl.style.left = Math.max(4, x) + 'px';
+  readoutEl.style.top = Math.max(2, clientY - stage.top - 26) + 'px';
+}
+function hideReadout() { readoutAt = null; readoutEl.classList.remove('show'); }
+let holdTimer = null;
+for (const el of [traceCanvas, wfCanvas]) {
+  el.addEventListener('pointermove', (e) => {
+    if (e.pointerType === 'touch' && !readoutAt) return;   // touch: only after a hold
+    if (el === traceCanvas && (gutterDrag || inGutter(e))) { hideReadout(); return; }
+    readoutAt = { el, x: e.clientX, y: e.clientY };
+    showReadout(el, e.clientX, e.clientY);
+  });
+  el.addEventListener('pointerleave', hideReadout);
+  el.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'touch') return;
+    clearTimeout(holdTimer);
+    const x = e.clientX, y = e.clientY;
+    holdTimer = setTimeout(() => { readoutAt = { el, x, y }; showReadout(el, x, y); }, 400);
+  });
+  el.addEventListener('pointerup', () => clearTimeout(holdTimer));
+}
 spotsCanvas.addEventListener('click', (e) => {
   const r = spotsCanvas.getBoundingClientRect();
   const x = e.clientX - r.left;
@@ -260,6 +400,14 @@ spotsCanvas.addEventListener('click', (e) => {
   } else if (r.width > 0) {
     tuneToFraction(x / r.width);
   }
+});
+// Double-click a spot label: its frequency AND its mode (plan item 12d).
+spotsCanvas.addEventListener('dblclick', (e) => {
+  const r = spotsCanvas.getBoundingClientRect();
+  const x = e.clientX - r.left;
+  const hit = spotHits.find((h) => x >= h.x0 && x <= h.x1);
+  const hz = hit && spotHz(hit.spot);
+  if (hz) window.api.tune((hz / 1000).toFixed(3), hit.spot.mode || null);
 });
 
 $('sc-enable').addEventListener('click', () => window.api.enableOnRadio());
@@ -281,12 +429,27 @@ $('sc-colormap').addEventListener('change', (e) => {
 });
 $('sc-fps').addEventListener('change', (e) => window.api.setFps(Number(e.target.value)));
 const floorEl = $('sc-floor');
-floorEl.value = String(floor);
-floorEl.addEventListener('input', (e) => {
-  floor = Number(e.target.value) || 0;
-  try { localStorage.setItem('scope-floor', String(floor)); } catch { /* private mode */ }
-});
-$('sc-peak').addEventListener('change', (e) => { peakHold = e.target.checked; if (!peakHold) peak.fill(0); scheduleDraw(); });
+// Floor (toolbar) and Bottom (gear) are the same value: the window's bottom.
+floorEl.addEventListener('input', (e) => setRange({ lo: Number(e.target.value) || 0, hi: range.hi }, 'floor'));
+$('sc-bottom').addEventListener('input', (e) => setRange({ lo: Number(e.target.value) || 0, hi: range.hi }, 'bottom'));
+$('sc-top').addEventListener('input', (e) => setRange({ lo: range.lo, hi: Number(e.target.value) || 255 }, 'top'));
+$('sc-range-reset').addEventListener('click', () => setRange({ lo: 0, hi: 255 }));
+setRange(range);
+$('sc-avg').value = avgMode;
+$('sc-avg').addEventListener('change', (e) => { avgMode = V.AVERAGING[e.target.value] ? e.target.value : 'light'; lsSet('scope-avg', avgMode); });
+$('sc-peak-decay').value = peakDecay;
+$('sc-peak-decay').addEventListener('change', (e) => { peakDecay = V.PEAK_DECAY[e.target.value] != null ? e.target.value : 'slow'; lsSet('scope-peak-decay', peakDecay); });
+$('sc-privileges').checked = showPrivileges;
+$('sc-privileges').addEventListener('change', (e) => { showPrivileges = e.target.checked; lsSet('scope-privileges', showPrivileges ? '1' : '0'); scheduleDraw(); });
+$('sc-sunits').checked = showSUnits;
+$('sc-sunits').addEventListener('change', (e) => { showSUnits = e.target.checked; lsSet('scope-sunits', showSUnits ? '1' : '0'); scheduleDraw(); });
+function applyPeakUi() {
+  $('sc-peak-clear').style.display = peakHold ? '' : 'none';
+  $('sc-peak-decay-row').classList.toggle('hidden', !peakHold);
+}
+$('sc-peak').addEventListener('change', (e) => { peakHold = e.target.checked; if (!peakHold) peak.fill(0); applyPeakUi(); scheduleDraw(); });
+$('sc-peak-clear').addEventListener('click', () => { peak.fill(0); scheduleDraw(); });
+applyPeakUi();
 $('sc-synth').addEventListener('change', (e) => window.api.setSynth(e.target.checked));
 
 // ─── Window chrome ─────────────────────────────────────────────────────────
@@ -296,6 +459,18 @@ $('max-btn').addEventListener('click', () => window.api.maximize());
 $('close-btn').addEventListener('click', () => window.api.close());
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { gearPop.classList.remove('show'); return; }
+  // Keys (plan item 13): Left/Right step the dial by the synced step (Shift
+  // = ten), PageUp narrower / PageDown wider. Not while typing in a field.
+  const typing = e.target && /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName);
+  if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && axis.known && centerHz) {
+      e.preventDefault();
+      tuneDial(centerHz + (e.key === 'ArrowRight' ? 1 : -1) * tuneStepHz * (e.shiftKey ? 10 : 1));
+      return;
+    }
+    if (e.key === 'PageUp') { e.preventDefault(); zoomStep(-1); return; }
+    if (e.key === 'PageDown') { e.preventDefault(); zoomStep(+1); return; }
+  }
   if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) window.api.setZoom(Math.min(2, window.api.getZoom() + 0.1));
   if ((e.ctrlKey || e.metaKey) && e.key === '-') window.api.setZoom(Math.max(0.6, window.api.getZoom() - 0.1));
   if ((e.ctrlKey || e.metaKey) && e.key === '0') window.api.setZoom(1);
@@ -305,12 +480,8 @@ applyState(state);
 
 // Zoom: step through scope-state.spans from the one nearest the current span.
 function zoomStep(dir) {
-  const spans = Array.isArray(state.spans) ? state.spans : [];
-  if (spans.length < 2) return;
-  let i = 0;
-  for (let k = 0; k < spans.length; k++) if (Math.abs(spans[k] - state.spanHz) < Math.abs(spans[i] - state.spanHz)) i = k;
-  const next = spans[Math.max(0, Math.min(spans.length - 1, i + dir))];
-  if (next && next !== state.spanHz) window.api.setSpan(next);
+  const next = V.zoomSpan(state.spans, state.spanHz, dir);
+  if (next) window.api.setSpan(next);
 }
 $('sc-zoom-out').addEventListener('click', () => zoomStep(+1)); // wider
 $('sc-zoom-in').addEventListener('click', () => zoomStep(-1));  // narrower

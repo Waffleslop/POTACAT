@@ -9,6 +9,11 @@ contextBridge.exposeInMainWorld('api', {
   // The active rig's bands (lib/rig-bands.js): {bands: string[]|null, all}.
   rigBandsGet: () => ipcRenderer.invoke('rig-bands-get'),
   onRigBands: (cb) => ipcRenderer.on('rig-bands', (_e, d) => cb(d)),
+  // A Tuner Memories run changed a rig's no-match bands (rig.atuBands)
+  onRigAtuBands: (cb) => ipcRenderer.on('rig-atu-bands', (_e, d) => cb(d)),
+  // The listening SDR: connected (you hear it), kind, and reach (what it can
+  // receive) — the Landmarks tab shows stations the SDR can hear (lib/listen-source.js).
+  onKiwiStatus: (cb) => ipcRenderer.on('kiwi-status', (_e, s) => cb(s)),
   rigBandsNative: (model) => ipcRenderer.invoke('rig-bands-native', model),
   platform: process.platform,
   openExternal: (url) => ipcRenderer.send('open-external', url),
@@ -404,6 +409,11 @@ contextBridge.exposeInMainWorld('api', {
   onWatchlistUpdated: (cb) => ipcRenderer.on('watchlist-updated', (_e, raw) => cb(raw)),
   // Directory (HF Nets & SWL Broadcasts)
   onDirectoryData: (cb) => ipcRenderer.on('directory-data', (_e, data) => cb(data)),
+  // Channels: the saved frequency chart (lib/channels.js). Edits go through main so ECHOCAT follows.
+  channelsGet: () => ipcRenderer.invoke('channels-get'),
+  channelsSave: (saved) => ipcRenderer.invoke('channels-save', saved),
+  channelsImportCsv: () => ipcRenderer.invoke('channels-import-csv'),
+  channelsExportCsv: () => ipcRenderer.invoke('channels-export-csv'),
   fetchDirectory: () => ipcRenderer.send('fetch-directory'),
   getDirectory: () => ipcRenderer.invoke('get-directory'),
   // Events system
@@ -517,6 +527,8 @@ contextBridge.exposeInMainWorld('api', {
   // Band Scope pop-out (the radio's own spectrum — FT-710 over USB)
   scopePopoutOpen: () => ipcRenderer.send('scope-popout-open'),
   scopePopoutTheme: (theme) => ipcRenderer.send('scope-popout-theme', theme),
+  // ATU Calibration Wizard window (a Flex with an internal ATU; lib/atu-wizard.js)
+  atuWizardOpen: () => ipcRenderer.send('atu-wizard-popout-open'),
   // Bandspread pop-out
   bandspreadPopoutOpen: () => ipcRenderer.send('bandspread-popout-open'),
   bandspreadPopoutClose: () => ipcRenderer.send('bandspread-popout-close'),
@@ -607,6 +619,7 @@ contextBridge.exposeInMainWorld('api', {
   jtcatSyncClock: () => ipcRenderer.invoke('jtcat-sync-clock'),
   jtcatOpenTimeSettings: () => ipcRenderer.invoke('jtcat-open-time-settings'),
   onJtcatTxAudio: (cb) => ipcRenderer.on('jtcat-tx-audio', (_e, data) => cb(data)),
+  onJtcatTxAbort: (cb) => ipcRenderer.on('jtcat-tx-abort', (_e, reason) => cb(reason)),
   onJtcatSetTxGain: (cb) => ipcRenderer.on('jtcat-set-tx-gain', (_e, level) => cb(level)),
   onJtcatModeHopped: (cb) => ipcRenderer.on('jtcat-mode-hopped', (_e, d) => cb(d)),
   onJtcatSetRxGain: (cb) => ipcRenderer.on('jtcat-set-rx-gain', (_e, level) => cb(level)),

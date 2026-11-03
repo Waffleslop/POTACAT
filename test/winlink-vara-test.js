@@ -109,7 +109,8 @@ function fnBody(src, name) {
     const icomCable = M.winlinkModesFor({ ...base, rigFamily: 'icom-network', audioSource: 'icom-network', varaHf: { enabled: true, port: 8301, cable: true } });
     assert.ok(icomCable[4].available);
     assert.ok(!M.winlinkModesFor({ ...base, remote: true, varaHf: { enabled: true, port: 8301, cable: true } })[4].available, 'never from a laptop driving a shack');
-    assert.ok(!M.winlinkModesFor({ ...base, rigFamily: 'none', varaHf: { enabled: true, port: 8301, cable: true } })[4].available, 'needs CAT');
+    const noCatVara = M.winlinkModesFor({ ...base, rigFamily: 'none', varaHf: { enabled: true, port: 8301, cable: true } })[4];
+    assert.ok(noCatVara.available && /No CAT control/.test(noCatVara.note), 'a no-CAT radio runs VARA too; the operator sets the dial (NA4DQ)');
   });
   await test('port clashes are named: VARA HF vs Mercury, VARA FM vs VARA HF', () => {
     const base = { rigFamily: 'serial', audioSource: 'dax', platform: 'win32', mercuryEnabled: true, mercuryPort: 8300, ardopSocketAudio: true };

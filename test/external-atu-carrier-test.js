@@ -25,5 +25,54 @@ test('CW is never the tune carrier', () => {
 test('mode and power are still restored', () => {
   assert.ok(/setModeOnly\(restoreMode, _currentFreqHz\)/.test(fn) && /gatedSetTxPower\(restorePower\)/.test(fn));
 });
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+
+// GitHub #111 (df1vb): the tune power stayed after tuning. Runs the REAL
+// tune function in a sandbox against a fake radio that ignores the first
+// power restore (it is still in its TX tail), then answers.
+async function runTune({ ignoreRestores, powerBefore = 100 }) {
+  const vm = require('vm');
+  const wfr = main.slice(main.indexOf('async function waitForPowerReadback('), main.indexOf('/**', main.indexOf('async function waitForPowerReadback(')));
+  const log = [], powers = [];
+  let restoresSeen = 0;
+  const ctx = {
+    console, Date, Promise, setTimeout, clearTimeout,
+    settings: { activeRigId: 'r1', rigs: [{ id: 'r1', externalAtu: 'rf-sense', externalAtuWatts: 10, externalAtuSeconds: 1 }] },
+    cat: { connected: true, setModeOnly() {} },
+    _currentMode: 'USB', _currentTxPower: powerBefore, _currentFreqHz: 14074000,
+    EXTERNAL_ATU_CARRIER_MODE: 'AM', _externalAtuActive: false, _externalAtuCancel: false,
+    _setupPowerRestoreAttempt: 0, _lastPowerReadback: null, win: null,
+    sendCatLog: (l) => log.push(l), saveSettings() {}, gatedSetTransmit() {},
+    sleepMs: (ms) => new Promise((r) => setTimeout(r, ms)),
+    gatedSetTxPower: (w) => {
+      powers.push(w);
+      if (w === 10) { setTimeout(() => { ctx._lastPowerReadback = { watts: 10, at: Date.now() }; }, 50); return; }
+      restoresSeen++;
+      if (restoresSeen > ignoreRestores) setTimeout(() => { ctx._lastPowerReadback = { watts: w, at: Date.now() }; }, 100);
+    },
+  };
+  vm.createContext(ctx);
+  vm.runInContext(wfr + '\nvar runExternalAtuTune;\n' + fn, ctx);
+  await ctx.runExternalAtuTune();
+  return { log, powers, ctx };
+}
+(async () => {
+  const a = await runTune({ ignoreRestores: 1 });
+  test('a radio that misses the first restore is sent it again, and confirms', () => {
+    assert.deepStrictEqual(a.powers, [10, 100, 100]);
+    assert.ok(a.log.some((l) => /radio confirms 100 W/.test(l)), a.log.join('\n'));
+    assert.ok(!a.ctx.settings.setupTxPowerRestore, 'the restore marker is cleared by the readback');
+  });
+  const b = await runTune({ ignoreRestores: 99 });
+  test('a radio that never confirms keeps the marker for the next power report to repair', () => {
+    assert.deepStrictEqual(b.powers, [10, 100, 100, 100], 'three restore attempts, no more');
+    const m = b.ctx.settings.setupTxPowerRestore;
+    assert.ok(m && m.watts === 100 && m.testWatts === 10 && m.reason === 'external-atu');
+    assert.ok(b.log.some((l) => /has not confirmed it/.test(l)));
+  });
+  test('the reconcile on the next power report leaves a running tune alone', () => {
+    const rec = main.slice(main.indexOf('function stationSetupReconcilePower('), main.indexOf('function stationSetupReconcilePower(') + 600);
+    assert.ok(/_stationSetupTxBusy \|\| _externalAtuActive\) return;/.test(rec));
+  });
+  console.log(`\n${passed} passed, ${failed} failed`);
+  process.exit(failed ? 1 : 0);
+})();

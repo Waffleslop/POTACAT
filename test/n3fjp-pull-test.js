@@ -112,6 +112,13 @@ test('requestList: N3FJP closed is an error, not a hang', async () => {
   await assert.rejects(P.requestList('127.0.0.1', port, P.listCommand(), { timeoutMs: 2000 }), /N3FJP/);
 });
 
+test('the record N3FJP gets says USA, so its DXCC fills in (AE5JE)', () => {
+  assert.strictEqual(P.n3fjpCountry('<CALL:5>W1ABC<COUNTRY:13>United States<MODE:3>FT8<EOR>'), '<CALL:5>W1ABC<COUNTRY:3>USA<MODE:3>FT8<EOR>');
+  assert.strictEqual(P.n3fjpCountry('<COUNTRY:6>Canada<EOR>'), '<COUNTRY:6>Canada<EOR>');
+  assert.strictEqual(P.n3fjpCountry('<COUNTRY:24>United States of America<EOR>'), '<COUNTRY:3>USA<EOR>');
+  assert.strictEqual(P.n3fjpCountry(''), '');
+});
+
 test('main.js wiring: queue shared with the forward, pull gated on the setting', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
   assert.ok(main.includes("return n3fjpQueue(() => sendN3fjpTcp(qsoData, host, port || 1100));"));

@@ -306,7 +306,7 @@ function bodyOf(name) {
 test('main: any rig with an SDR source advertises a scope', () => {
   assert.ok(/if \(!caps\.nativeScope && sdrScopeSettingsForActiveRig\(\)\.enabled\) caps\.nativeScope = 'sdr';/.test(bodyOf('getRigCapabilities')));
   const k = bodyOf('scopeSourceKind');
-  assert.ok(/sdr\.enabled && \(sdr\.preferSdr \|\| \(!native && !flex\)\)/.test(k), 'the radio\'s own scope (FT-710, Flex Direct pan) wins unless the SDR is preferred');
+  assert.ok(/sdr\.enabled && \(sdr\.preferSdr \|\| \(!native && !icom && !flex\)\)/.test(k), 'the radio\'s own scope (FT-710, Icom, Flex Direct pan) wins unless the SDR is preferred');
   assert.ok(/available: yaesuScopeSynth \|\| !!scopeSourceKind\(\)/.test(bodyOf('yaesuScopeStatePayload')));
   assert.ok(/available: yaesuScopeSynth \|\| !!scopeSourceKind\(\)/.test(bodyOf('yaesuScopeRemotePayload')));
   assert.ok(/source: s\.source/.test(bodyOf('yaesuScopeRemotePayload')), 'ECHOCAT learns the source (explicit field list)');

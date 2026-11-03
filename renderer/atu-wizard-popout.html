@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <script src="popout-theme-boot.js"></script>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline';">
+  <title>POTACAT — Tuner Memories</title>
+  <script src="popout-theme-bootstrap.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg-primary); color: var(--text-primary); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12px; }
+    body { display: flex; flex-direction: column; }
+    .aw-titlebar { display: flex; align-items: center; padding: 0 8px; height: 32px; background: var(--bg-header); border-bottom: 1px solid var(--border-primary); -webkit-app-region: drag; flex-shrink: 0; user-select: none; }
+    .aw-titlebar-title { font-size: 12px; font-weight: 700; flex: 1; }
+    .aw-titlebar-btn { -webkit-app-region: no-drag; background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 16px; padding: 2px 8px; line-height: 1; }
+    .aw-titlebar-btn:hover { color: var(--text-primary); background: var(--bg-hover); border-radius: 3px; }
+    .aw-titlebar-btn.close:hover { background: var(--accent-red, #e94560); color: #fff; }
+    body.platform-darwin .aw-titlebar { padding-left: 76px; }
+    body.platform-darwin .aw-titlebar-btn { display: none; }
+
+    .aw-steps { display: flex; gap: 4px; padding: 6px 12px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); flex-shrink: 0; }
+    .aw-step { padding: 3px 10px; border-radius: 10px; font-size: 11px; color: var(--text-secondary); border: 1px solid var(--border-primary); }
+    .aw-step.on { color: var(--text-primary); border-color: #4fc3f7; font-weight: 700; }
+    .aw-step.done { color: #4ecca3; }
+
+    .aw-main { flex: 1; overflow: auto; padding: 12px 14px; }
+    .aw-page { display: none; }
+    .aw-page.show { display: block; }
+    h2 { font-size: 15px; margin: 0 0 8px; }
+    p { margin: 4px 0 8px; color: var(--text-secondary); line-height: 1.4; }
+    p.strong { color: var(--text-primary); }
+    .aw-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+    .aw-pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 10px; font-weight: 700; font-size: 11px; background: var(--bg-input); color: var(--text-secondary); border: 1px solid var(--border-primary); }
+    .aw-pill::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #888; }
+    .aw-pill.ok::before { background: #4ecca3; box-shadow: 0 0 6px #4ecca3; }
+    .aw-pill.warn::before { background: #f0a500; }
+    .aw-pill.bad::before { background: var(--accent-red, #e94560); }
+    .aw-btn { background: var(--bg-input); border: 1px solid var(--border-primary); color: var(--text-primary); border-radius: 4px; padding: 5px 12px; cursor: pointer; font-size: 12px; }
+    .aw-btn:hover { background: var(--bg-hover); }
+    .aw-btn:disabled { opacity: .5; cursor: default; }
+    .aw-btn.accent { background: var(--accent-red, #e94560); border-color: #e94560; color: #fff; font-weight: 700; }
+    .aw-btn.go { background: #4ecca3; border-color: #4ecca3; color: #1a1a2e; font-weight: 700; }
+    .aw-btn.stop { background: var(--accent-red, #e94560); border-color: #e94560; color: #fff; font-weight: 800; font-size: 13px; padding: 7px 18px; letter-spacing: .5px; }
+    label.aw-check { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; user-select: none; }
+    .aw-grid { display: grid; grid-template-columns: auto repeat(3, auto); gap: 4px 14px; align-items: center; margin: 6px 0 10px; }
+    .aw-grid .hd { color: var(--text-secondary); font-size: 11px; font-weight: 700; }
+    .aw-settings { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px 16px; margin: 8px 0 12px; }
+    .aw-settings label { display: flex; flex-direction: column; gap: 3px; color: var(--text-secondary); font-size: 11px; }
+    .aw-settings input, .aw-settings select { background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 4px; padding: 4px 6px; font-size: 12px; }
+    table.aw-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; }
+    .aw-table th { text-align: left; color: var(--text-secondary); font-weight: 700; font-size: 11px; padding: 4px 6px; border-bottom: 1px solid var(--border-primary); position: sticky; top: 0; background: var(--bg-primary); }
+    .aw-table td { padding: 3px 6px; border-bottom: 1px solid var(--border-primary); font-variant-numeric: tabular-nums; }
+    .aw-table tr.now td { background: var(--bg-hover); }
+    .aw-table tr.dim td { color: var(--text-secondary); }
+    .res { font-weight: 700; }
+    .res.green { color: #4ecca3; } .res.amber { color: #f0a500; } .res.red { color: var(--accent-red, #e94560); } .res.grey { color: var(--text-secondary); }
+    .aw-progress { height: 8px; background: var(--bg-input); border: 1px solid var(--border-primary); border-radius: 4px; overflow: hidden; margin: 6px 0; }
+    .aw-progress > div { height: 100%; background: #4fc3f7; width: 0; transition: width .3s; }
+    .aw-banner { padding: 8px 12px; border-left: 4px solid #f0a500; background: var(--bg-secondary); margin: 8px 0; display: none; }
+    .aw-banner.show { display: block; }
+    .aw-banner.bad { border-left-color: var(--accent-red, #e94560); }
+    .aw-banner.ok { border-left-color: #4ecca3; }
+    .aw-summary { display: flex; gap: 14px; flex-wrap: wrap; margin: 6px 0 10px; }
+    .aw-summary .n { font-size: 20px; font-weight: 800; }
+    .aw-summary .l { font-size: 11px; color: var(--text-secondary); }
+    .aw-footer { display: flex; gap: 8px; align-items: center; padding: 8px 14px; border-top: 1px solid var(--border-primary); background: var(--bg-secondary); flex-shrink: 0; }
+    .aw-spacer { flex: 1; }
+    .aw-call { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 700; color: var(--text-primary); }
+    .aw-runs li { margin: 2px 0; }
+    .aw-runs a { color: #4fc3f7; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="aw-titlebar">
+    <span class="aw-titlebar-title">Tuner Memories</span>
+    <button class="aw-titlebar-btn" id="aw-min" title="Minimize">&#x2013;</button>
+    <button class="aw-titlebar-btn" id="aw-max" title="Maximize">&#x25A1;</button>
+    <button class="aw-titlebar-btn close" id="aw-close" title="Close">&#x2715;</button>
+  </div>
+  <div class="aw-steps">
+    <span class="aw-step" data-step="preflight">1 Before you start</span>
+    <span class="aw-step" data-step="plan">2 Bands and settings</span>
+    <span class="aw-step" data-step="review">3 Review</span>
+    <span class="aw-step" data-step="run">4 Run</span>
+    <span class="aw-step" data-step="results">5 Results</span>
+  </div>
+  <div class="aw-main">
+    <!-- 1. Preflight -->
+    <section class="aw-page" id="page-preflight">
+      <h2>Fill the radio's antenna tuner memories</h2>
+      <p>POTACAT tunes to every frequency you use, reads the SWR, lets the radio's tuner find a match and stores it in the radio. Afterwards a band change recalls the match instead of running a tune cycle. The radio transmits a low-power carrier for about a second at each point.</p>
+      <div class="aw-row" id="pf-pills"></div>
+      <div class="aw-banner" id="pf-reason"></div>
+      <p class="strong">Check these before you continue:</p>
+      <label class="aw-check"><input type="checkbox" id="pf-antenna"> The antenna is connected to the radio's antenna port and it is safe to transmit on it</label><br>
+      <label class="aw-check"><input type="checkbox" id="pf-amp"> No amplifier is inline, or it is in standby</label>
+      <p id="pf-call"></p>
+    </section>
+
+    <!-- 2. Plan -->
+    <section class="aw-page" id="page-plan">
+      <h2>Bands and modes</h2>
+      <p>Tick the bands and modes you use. The plan keeps 3 kHz inside every edge of your license class and never transmits outside it.</p>
+      <div class="aw-grid" id="plan-grid"></div>
+      <h2>Settings</h2>
+      <div class="aw-settings">
+        <label>Tune power (W, max 25)<input type="number" id="s-power" min="1" max="25" step="1"></label>
+        <label>SWR that counts as matched<input type="number" id="s-swr" min="1.1" max="5" step="0.1"></label>
+        <label>Points per band<select id="s-density"><option value="normal">Normal (the usual spots)</option><option value="dense">Dense (every 10-50 kHz)</option></select></label>
+        <label>Listen before transmitting (s)<input type="number" id="s-dwell" min="2" max="30" step="1"></label>
+        <label>Rest between points (s)<input type="number" id="s-pause" min="0" max="30" step="1"></label>
+        <label>If a frequency is busy<select id="s-busy"><option value="skip">Skip it</option><option value="shift">Move up 2 kHz</option><option value="ask">Ask me</option></select></label>
+        <label>License class<input type="text" id="s-class" readonly title="Change it in Settings"></label>
+      </div>
+      <h2>Your own frequencies</h2>
+      <p>Add a net or a favourite spot (MHz). It is checked against your privileges like every other point.</p>
+      <div class="aw-row">
+        <select id="c-band"></select>
+        <select id="c-mode"><option value="SSB">SSB</option><option value="CW">CW</option><option value="DIGITAL">Digital</option></select>
+        <input type="number" id="c-mhz" step="0.0005" placeholder="7.188" style="width:110px">
+        <input type="text" id="c-label" placeholder="label" style="width:120px">
+        <button class="aw-btn" id="c-add">Add</button>
+      </div>
+      <ul id="c-list"></ul>
+    </section>
+
+    <!-- 3. Review -->
+    <section class="aw-page" id="page-review">
+      <h2>Review the plan</h2>
+      <p id="rv-summary"></p>
+      <div class="aw-banner" id="rv-dropped"></div>
+      <table class="aw-table" id="rv-table"><thead><tr><th></th><th>Band</th><th>Mode</th><th>MHz</th><th>Label</th></tr></thead><tbody></tbody></table>
+    </section>
+
+    <!-- 4. Run -->
+    <section class="aw-page" id="page-run">
+      <h2 id="run-title">Running</h2>
+      <p id="run-line"></p>
+      <div class="aw-progress"><div id="run-bar"></div></div>
+      <div class="aw-banner" id="run-banner"></div>
+      <div class="aw-banner" id="run-busy">
+        <b>The frequency is busy</b> (<span id="run-busy-dbm"></span>). What should POTACAT do?
+        <div class="aw-row"><button class="aw-btn" id="busy-skip">Skip this point</button><button class="aw-btn" id="busy-shift">Move up 2 kHz</button><button class="aw-btn" id="busy-go">Transmit anyway</button></div>
+      </div>
+      <table class="aw-table" id="run-table"><thead><tr><th>Band</th><th>Mode</th><th>MHz</th><th>Bypass SWR</th><th>Tuned SWR</th><th>Tuner</th><th>Result</th></tr></thead><tbody></tbody></table>
+    </section>
+
+    <!-- 5. Results -->
+    <section class="aw-page" id="page-results">
+      <h2 id="res-title">Results</h2>
+      <div class="aw-summary" id="res-summary"></div>
+      <div class="aw-banner" id="res-advice"></div>
+      <div class="aw-banner" id="res-trend"></div>
+      <table class="aw-table" id="res-table"><thead><tr><th>Band</th><th>Mode</th><th>MHz</th><th>Bypass SWR</th><th>Tuned SWR</th><th>Tuner</th><th>Result</th></tr></thead><tbody></tbody></table>
+      <h2 style="margin-top:14px">Previous runs</h2>
+      <ul class="aw-runs" id="res-runs"></ul>
+    </section>
+  </div>
+  <div class="aw-footer">
+    <button class="aw-btn" id="f-back">Back</button>
+    <span class="aw-spacer"></span>
+    <span id="f-note" style="color:var(--text-secondary)"></span>
+    <button class="aw-btn" id="f-pause">Pause</button>
+    <button class="aw-btn" id="f-skip">Skip point</button>
+    <button class="aw-btn stop" id="f-stop">STOP</button>
+    <button class="aw-btn" id="f-verify">Run verification pass</button>
+    <button class="aw-btn" id="f-csv">Export CSV</button>
+    <button class="aw-btn go" id="f-next">Next</button>
+  </div>
+  <script src="atu-wizard-popout.js"></script>
+</body>
+</html>

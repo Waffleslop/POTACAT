@@ -1,0 +1,1456 @@
+{
+ "version": 1,
+ "about": "Starter channel chart: FRS, GMRS, MURS, marine VHF, aviation, public-safety and federal interop, EMS. From lists shared by KL4XQ and KC8DHX. Edit, reorder or delete any of it in Directory > Channels.",
+ "channels": [
+  {
+   "id": "air-guard",
+   "name": "Air Guard 121.5",
+   "khz": 121500.0,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Aviation",
+   "note": "International aeronautical emergency frequency, monitored by every tower and most aircraft. Listen; never transmit."
+  },
+  {
+   "id": "air-a2a-12275",
+   "name": "Air-to-air 122.75",
+   "khz": 122750.0,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Aviation",
+   "note": "Fixed-wing air-to-air chat"
+  },
+  {
+   "id": "air-a2a-12345",
+   "name": "Air-to-air 123.45",
+   "khz": 123450.0,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Aviation",
+   "note": "The unofficial air-to-air chat frequency; also flight test"
+  },
+  {
+   "id": "air-helo-123025",
+   "name": "Helicopter air-to-air",
+   "khz": 123025.0,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Aviation",
+   "note": "Helicopter air-to-air"
+  },
+  {
+   "id": "air-ctaf-1228",
+   "name": "CTAF / UNICOM 122.8",
+   "khz": 122800.0,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Aviation",
+   "note": "The commonest untowered-field frequency: pilots announce position and intentions"
+  },
+  {
+   "id": "air-multicom-1229",
+   "name": "MULTICOM 122.9",
+   "khz": 122900.0,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Aviation",
+   "note": "Fields with no UNICOM; also air-to-ground for search and ag flying"
+  },
+  {
+   "id": "air-unicom-1230",
+   "name": "UNICOM 123.0",
+   "khz": 123000.0,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Aviation",
+   "note": "Untowered fields with a UNICOM operator"
+  },
+  {
+   "id": "air-unicom-12295",
+   "name": "UNICOM 122.95",
+   "khz": 122950.0,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Aviation",
+   "note": "UNICOM at towered airports (fuel, services)"
+  },
+  {
+   "id": "air-sar-1231",
+   "name": "SAR 123.1",
+   "khz": 123100.0,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Aviation",
+   "note": "Search and rescue on-scene coordination"
+  },
+  {
+   "id": "air-fss-1222",
+   "name": "Flight Service 122.2",
+   "khz": 122200.0,
+   "mode": "AM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Aviation",
+   "note": "Flight Service Station common frequency"
+  },
+  {
+   "id": "frs-gmrs-1",
+   "name": "FRS/GMRS 1",
+   "khz": 462562.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "FRS 2 W / GMRS 5 W, shared"
+  },
+  {
+   "id": "frs-gmrs-2",
+   "name": "FRS/GMRS 2",
+   "khz": 462587.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "FRS 2 W / GMRS 5 W, shared"
+  },
+  {
+   "id": "frs-gmrs-3",
+   "name": "FRS/GMRS 3",
+   "khz": 462612.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "FRS 2 W / GMRS 5 W, shared"
+  },
+  {
+   "id": "frs-gmrs-4",
+   "name": "FRS/GMRS 4",
+   "khz": 462637.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "FRS 2 W / GMRS 5 W, shared"
+  },
+  {
+   "id": "frs-gmrs-5",
+   "name": "FRS/GMRS 5",
+   "khz": 462662.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "FRS 2 W / GMRS 5 W, shared"
+  },
+  {
+   "id": "frs-gmrs-6",
+   "name": "FRS/GMRS 6",
+   "khz": 462687.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "FRS 2 W / GMRS 5 W, shared"
+  },
+  {
+   "id": "frs-gmrs-7",
+   "name": "FRS/GMRS 7",
+   "khz": 462712.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "FRS 2 W / GMRS 5 W, shared"
+  },
+  {
+   "id": "frs-gmrs-8",
+   "name": "FRS/GMRS 8",
+   "khz": 467562.5,
+   "mode": "NFM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "FRS and GMRS, 0.5 W, narrow FM only"
+  },
+  {
+   "id": "frs-gmrs-9",
+   "name": "FRS/GMRS 9",
+   "khz": 467587.5,
+   "mode": "NFM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "FRS and GMRS, 0.5 W, narrow FM only"
+  },
+  {
+   "id": "frs-gmrs-10",
+   "name": "FRS/GMRS 10",
+   "khz": 467612.5,
+   "mode": "NFM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "FRS and GMRS, 0.5 W, narrow FM only"
+  },
+  {
+   "id": "frs-gmrs-11",
+   "name": "FRS/GMRS 11",
+   "khz": 467637.5,
+   "mode": "NFM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "FRS and GMRS, 0.5 W, narrow FM only"
+  },
+  {
+   "id": "frs-gmrs-12",
+   "name": "FRS/GMRS 12",
+   "khz": 467662.5,
+   "mode": "NFM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "FRS and GMRS, 0.5 W, narrow FM only"
+  },
+  {
+   "id": "frs-gmrs-13",
+   "name": "FRS/GMRS 13",
+   "khz": 467687.5,
+   "mode": "NFM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "FRS and GMRS, 0.5 W, narrow FM only"
+  },
+  {
+   "id": "frs-gmrs-14",
+   "name": "FRS/GMRS 14",
+   "khz": 467712.5,
+   "mode": "NFM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "FRS and GMRS, 0.5 W, narrow FM only"
+  },
+  {
+   "id": "frs-gmrs-15",
+   "name": "FRS/GMRS 15",
+   "khz": 462550.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "FRS 2 W / GMRS 50 W, shared"
+  },
+  {
+   "id": "frs-gmrs-16",
+   "name": "FRS/GMRS 16",
+   "khz": 462575.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "FRS 2 W / GMRS 50 W, shared"
+  },
+  {
+   "id": "frs-gmrs-17",
+   "name": "FRS/GMRS 17",
+   "khz": 462600.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "FRS 2 W / GMRS 50 W, shared"
+  },
+  {
+   "id": "frs-gmrs-18",
+   "name": "FRS/GMRS 18",
+   "khz": 462625.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "FRS 2 W / GMRS 50 W, shared"
+  },
+  {
+   "id": "frs-gmrs-19",
+   "name": "FRS/GMRS 19",
+   "khz": 462650.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "FRS 2 W / GMRS 50 W, shared"
+  },
+  {
+   "id": "frs-gmrs-20",
+   "name": "FRS/GMRS 20",
+   "khz": 462675.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "FRS 2 W / GMRS 50 W, shared"
+  },
+  {
+   "id": "frs-gmrs-21",
+   "name": "FRS/GMRS 21",
+   "khz": 462700.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "FRS 2 W / GMRS 50 W, shared"
+  },
+  {
+   "id": "frs-gmrs-22",
+   "name": "FRS/GMRS 22",
+   "khz": 462725.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "FRS 2 W / GMRS 50 W, shared"
+  },
+  {
+   "id": "gmrs-rpt-15",
+   "name": "GMRS repeater 15R (550)",
+   "khz": 462550.0,
+   "mode": "FM",
+   "offsetKhz": 5000,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "GMRS repeater output; input +5 MHz (467 MHz). Needs a GMRS licence to transmit."
+  },
+  {
+   "id": "gmrs-rpt-16",
+   "name": "GMRS repeater 16R (575)",
+   "khz": 462575.0,
+   "mode": "FM",
+   "offsetKhz": 5000,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "GMRS repeater output; input +5 MHz (467 MHz). Needs a GMRS licence to transmit."
+  },
+  {
+   "id": "gmrs-rpt-17",
+   "name": "GMRS repeater 17R (600)",
+   "khz": 462600.0,
+   "mode": "FM",
+   "offsetKhz": 5000,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "GMRS repeater output; input +5 MHz (467 MHz). Needs a GMRS licence to transmit."
+  },
+  {
+   "id": "gmrs-rpt-18",
+   "name": "GMRS repeater 18R (625)",
+   "khz": 462625.0,
+   "mode": "FM",
+   "offsetKhz": 5000,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "GMRS repeater output; input +5 MHz (467 MHz). Needs a GMRS licence to transmit."
+  },
+  {
+   "id": "gmrs-rpt-19",
+   "name": "GMRS repeater 19R (650)",
+   "khz": 462650.0,
+   "mode": "FM",
+   "offsetKhz": 5000,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "GMRS repeater output; input +5 MHz (467 MHz). Needs a GMRS licence to transmit."
+  },
+  {
+   "id": "gmrs-rpt-20",
+   "name": "GMRS repeater 20R (675)",
+   "khz": 462675.0,
+   "mode": "FM",
+   "offsetKhz": 5000,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "GMRS repeater output; input +5 MHz (467 MHz). Needs a GMRS licence to transmit."
+  },
+  {
+   "id": "gmrs-rpt-21",
+   "name": "GMRS repeater 21R (700)",
+   "khz": 462700.0,
+   "mode": "FM",
+   "offsetKhz": 5000,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "GMRS repeater output; input +5 MHz (467 MHz). Needs a GMRS licence to transmit."
+  },
+  {
+   "id": "gmrs-rpt-22",
+   "name": "GMRS repeater 22R (725)",
+   "khz": 462725.0,
+   "mode": "FM",
+   "offsetKhz": 5000,
+   "tone": "",
+   "group": "FRS / GMRS",
+   "note": "GMRS repeater output; input +5 MHz (467 MHz). Needs a GMRS licence to transmit."
+  },
+  {
+   "id": "murs-1",
+   "name": "MURS 1",
+   "khz": 151820.0,
+   "mode": "NFM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "MURS",
+   "note": "Licence-free, 2 W, narrow FM"
+  },
+  {
+   "id": "murs-2",
+   "name": "MURS 2",
+   "khz": 151880.0,
+   "mode": "NFM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "MURS",
+   "note": "Licence-free, 2 W, narrow FM"
+  },
+  {
+   "id": "murs-3",
+   "name": "MURS 3",
+   "khz": 151940.0,
+   "mode": "NFM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "MURS",
+   "note": "Licence-free, 2 W, narrow FM"
+  },
+  {
+   "id": "murs-4",
+   "name": "MURS 4 (Blue Dot)",
+   "khz": 154570.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "MURS",
+   "note": "Licence-free, 2 W; the old business 'Blue Dot' channel, busy in stores"
+  },
+  {
+   "id": "murs-5",
+   "name": "MURS 5 (Green Dot)",
+   "khz": 154600.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "MURS",
+   "note": "Licence-free, 2 W; the old business 'Green Dot' channel"
+  },
+  {
+   "id": "marine-01a",
+   "name": "Marine 01A",
+   "khz": 156050.0,
+   "mode": "FM",
+   "offsetKhz": -4600,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Port operations and commercial; VTS in selected areas"
+  },
+  {
+   "id": "marine-05a",
+   "name": "Marine 05A",
+   "khz": 156250.0,
+   "mode": "FM",
+   "offsetKhz": -4600,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Port operations; VTS in Seattle"
+  },
+  {
+   "id": "marine-06",
+   "name": "Marine 06",
+   "khz": 156300.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Intership safety"
+  },
+  {
+   "id": "marine-07a",
+   "name": "Marine 07A",
+   "khz": 156350.0,
+   "mode": "FM",
+   "offsetKhz": -4600,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Commercial"
+  },
+  {
+   "id": "marine-08",
+   "name": "Marine 08",
+   "khz": 156400.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Commercial, intership only"
+  },
+  {
+   "id": "marine-09",
+   "name": "Marine 09",
+   "khz": 156450.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Boater calling; commercial and non-commercial"
+  },
+  {
+   "id": "marine-10",
+   "name": "Marine 10",
+   "khz": 156500.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Commercial"
+  },
+  {
+   "id": "marine-11",
+   "name": "Marine 11",
+   "khz": 156550.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Commercial; VTS in selected areas"
+  },
+  {
+   "id": "marine-12",
+   "name": "Marine 12",
+   "khz": 156600.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Port operations; VTS in selected areas"
+  },
+  {
+   "id": "marine-13",
+   "name": "Marine 13",
+   "khz": 156650.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Intership navigation safety (bridge-to-bridge). Ships over 20 m keep a listening watch here in US waters"
+  },
+  {
+   "id": "marine-14",
+   "name": "Marine 14",
+   "khz": 156700.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Port operations; VTS in selected areas"
+  },
+  {
+   "id": "marine-15",
+   "name": "Marine 15",
+   "khz": 156750.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Environmental, receive only; Class C EPIRBs"
+  },
+  {
+   "id": "marine-16",
+   "name": "Marine 16",
+   "khz": 156800.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "International distress, safety and calling. Ships required to carry a radio, the USCG and most coast stations keep a listening watch here"
+  },
+  {
+   "id": "marine-17",
+   "name": "Marine 17",
+   "khz": 156850.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "State control"
+  },
+  {
+   "id": "marine-18a",
+   "name": "Marine 18A",
+   "khz": 156900.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Commercial"
+  },
+  {
+   "id": "marine-19a",
+   "name": "Marine 19A",
+   "khz": 156950.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Commercial"
+  },
+  {
+   "id": "marine-20",
+   "name": "Marine 20",
+   "khz": 157000.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Port operations (duplex)"
+  },
+  {
+   "id": "marine-21a",
+   "name": "Marine 21A",
+   "khz": 157050.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Port operations"
+  },
+  {
+   "id": "marine-22a",
+   "name": "Marine 22A",
+   "khz": 157100.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Coast Guard liaison and Maritime Safety Information broadcasts, announced on 16"
+  },
+  {
+   "id": "marine-23a",
+   "name": "Marine 23A",
+   "khz": 157150.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "US Government only"
+  },
+  {
+   "id": "marine-24",
+   "name": "Marine 24",
+   "khz": 157200.0,
+   "mode": "FM",
+   "offsetKhz": -4600,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Public correspondence (marine operator)"
+  },
+  {
+   "id": "marine-25",
+   "name": "Marine 25",
+   "khz": 157250.0,
+   "mode": "FM",
+   "offsetKhz": -4600,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Public correspondence (marine operator)"
+  },
+  {
+   "id": "marine-26",
+   "name": "Marine 26",
+   "khz": 157300.0,
+   "mode": "FM",
+   "offsetKhz": -4600,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Public correspondence (marine operator)"
+  },
+  {
+   "id": "marine-27",
+   "name": "Marine 27",
+   "khz": 157350.0,
+   "mode": "FM",
+   "offsetKhz": -4600,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Public correspondence (marine operator)"
+  },
+  {
+   "id": "marine-28",
+   "name": "Marine 28",
+   "khz": 157400.0,
+   "mode": "FM",
+   "offsetKhz": -4600,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Public correspondence (marine operator)"
+  },
+  {
+   "id": "marine-63a",
+   "name": "Marine 63A",
+   "khz": 156175.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Port operations and commercial; VTS in selected areas"
+  },
+  {
+   "id": "marine-65a",
+   "name": "Marine 65A",
+   "khz": 156275.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Port operations"
+  },
+  {
+   "id": "marine-66a",
+   "name": "Marine 66A",
+   "khz": 156325.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Port operations"
+  },
+  {
+   "id": "marine-67",
+   "name": "Marine 67",
+   "khz": 156375.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Commercial; bridge-to-bridge on the lower Mississippi, intership only"
+  },
+  {
+   "id": "marine-68",
+   "name": "Marine 68",
+   "khz": 156425.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Non-commercial working channel"
+  },
+  {
+   "id": "marine-69",
+   "name": "Marine 69",
+   "khz": 156475.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Non-commercial"
+  },
+  {
+   "id": "marine-70",
+   "name": "Marine 70",
+   "khz": 156525.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Digital Selective Calling; no voice"
+  },
+  {
+   "id": "marine-71",
+   "name": "Marine 71",
+   "khz": 156575.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Non-commercial"
+  },
+  {
+   "id": "marine-72",
+   "name": "Marine 72",
+   "khz": 156625.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Non-commercial, intership only"
+  },
+  {
+   "id": "marine-73",
+   "name": "Marine 73",
+   "khz": 156675.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Port operations"
+  },
+  {
+   "id": "marine-74",
+   "name": "Marine 74",
+   "khz": 156725.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Port operations"
+  },
+  {
+   "id": "marine-77",
+   "name": "Marine 77",
+   "khz": 156875.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Port operations"
+  },
+  {
+   "id": "marine-78a",
+   "name": "Marine 78A",
+   "khz": 156925.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Non-commercial"
+  },
+  {
+   "id": "marine-79a",
+   "name": "Marine 79A",
+   "khz": 156975.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Commercial"
+  },
+  {
+   "id": "marine-80a",
+   "name": "Marine 80A",
+   "khz": 157025.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Commercial"
+  },
+  {
+   "id": "marine-81a",
+   "name": "Marine 81A",
+   "khz": 157075.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "US Government only; environmental protection operations"
+  },
+  {
+   "id": "marine-82a",
+   "name": "Marine 82A",
+   "khz": 157125.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "US Government only"
+  },
+  {
+   "id": "marine-83a",
+   "name": "Marine 83A",
+   "khz": 157175.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "US Government only"
+  },
+  {
+   "id": "marine-84",
+   "name": "Marine 84",
+   "khz": 157225.0,
+   "mode": "FM",
+   "offsetKhz": -4600,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Public correspondence (marine operator)"
+  },
+  {
+   "id": "marine-85",
+   "name": "Marine 85",
+   "khz": 157275.0,
+   "mode": "FM",
+   "offsetKhz": -4600,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Public correspondence (marine operator)"
+  },
+  {
+   "id": "marine-86",
+   "name": "Marine 86",
+   "khz": 157325.0,
+   "mode": "FM",
+   "offsetKhz": -4600,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Public correspondence (marine operator)"
+  },
+  {
+   "id": "marine-87",
+   "name": "Marine 87",
+   "khz": 157375.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Public correspondence (marine operator)"
+  },
+  {
+   "id": "marine-88",
+   "name": "Marine 88",
+   "khz": 157425.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Marine VHF",
+   "note": "Public correspondence in selected areas"
+  },
+  {
+   "id": "interop-vcall10",
+   "name": "VCALL10",
+   "khz": 155752.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Interop (public safety)",
+   "note": "National VHF calling channel for public safety"
+  },
+  {
+   "id": "interop-vtac11",
+   "name": "VTAC11",
+   "khz": 151137.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Interop (public safety)",
+   "note": "VHF tactical"
+  },
+  {
+   "id": "interop-vtac12",
+   "name": "VTAC12",
+   "khz": 154452.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Interop (public safety)",
+   "note": "VHF tactical"
+  },
+  {
+   "id": "interop-vtac13",
+   "name": "VTAC13",
+   "khz": 158737.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Interop (public safety)",
+   "note": "VHF tactical"
+  },
+  {
+   "id": "interop-vtac14",
+   "name": "VTAC14",
+   "khz": 159472.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Interop (public safety)",
+   "note": "VHF tactical"
+  },
+  {
+   "id": "interop-vtac17",
+   "name": "VTAC17",
+   "khz": 161850.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Interop (public safety)",
+   "note": "VHF tactical"
+  },
+  {
+   "id": "interop-vfire21",
+   "name": "VFIRE21",
+   "khz": 154280.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Interop (public safety)",
+   "note": "Fire mutual aid"
+  },
+  {
+   "id": "interop-vfire22",
+   "name": "VFIRE22",
+   "khz": 154265.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Interop (public safety)",
+   "note": "Fire mutual aid"
+  },
+  {
+   "id": "interop-vfire23",
+   "name": "VFIRE23",
+   "khz": 154295.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Interop (public safety)",
+   "note": "Fire mutual aid"
+  },
+  {
+   "id": "interop-vfire24",
+   "name": "VFIRE24",
+   "khz": 154272.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Interop (public safety)",
+   "note": "Fire mutual aid"
+  },
+  {
+   "id": "interop-vfire25",
+   "name": "VFIRE25",
+   "khz": 154287.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Interop (public safety)",
+   "note": "Fire mutual aid"
+  },
+  {
+   "id": "interop-vfire26",
+   "name": "VFIRE26",
+   "khz": 154302.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Interop (public safety)",
+   "note": "Fire mutual aid"
+  },
+  {
+   "id": "interop-vmed28",
+   "name": "VMED28",
+   "khz": 155340.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Interop (public safety)",
+   "note": "EMS mutual aid"
+  },
+  {
+   "id": "interop-vmed29",
+   "name": "VMED29",
+   "khz": 155347.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Interop (public safety)",
+   "note": "EMS mutual aid"
+  },
+  {
+   "id": "interop-vlaw31",
+   "name": "VLAW31",
+   "khz": 155475.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Interop (public safety)",
+   "note": "Law enforcement mutual aid"
+  },
+  {
+   "id": "interop-vlaw32",
+   "name": "VLAW32",
+   "khz": 155482.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Interop (public safety)",
+   "note": "Law enforcement mutual aid"
+  },
+  {
+   "id": "interop-vsar16",
+   "name": "VSAR16",
+   "khz": 155160.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Interop (public safety)",
+   "note": "Search and rescue mutual aid"
+  },
+  {
+   "id": "interop-ucall40",
+   "name": "UCALL40",
+   "khz": 453212.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Interop (public safety)",
+   "note": "National UHF calling channel for public safety"
+  },
+  {
+   "id": "interop-utac41",
+   "name": "UTAC41",
+   "khz": 453462.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Interop (public safety)",
+   "note": "UHF tactical"
+  },
+  {
+   "id": "interop-utac42",
+   "name": "UTAC42",
+   "khz": 453712.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Interop (public safety)",
+   "note": "UHF tactical"
+  },
+  {
+   "id": "interop-utac43",
+   "name": "UTAC43",
+   "khz": 453862.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Interop (public safety)",
+   "note": "UHF tactical"
+  },
+  {
+   "id": "fed-ir1",
+   "name": "IR 1",
+   "khz": 170012.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Federal interop",
+   "note": "Federal incident response / law enforcement interoperability (NTIA)"
+  },
+  {
+   "id": "fed-ir2",
+   "name": "IR 2",
+   "khz": 170412.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Federal interop",
+   "note": "Federal incident response / law enforcement interoperability (NTIA)"
+  },
+  {
+   "id": "fed-ir3",
+   "name": "IR 3",
+   "khz": 170687.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Federal interop",
+   "note": "Federal incident response / law enforcement interoperability (NTIA)"
+  },
+  {
+   "id": "fed-ir4",
+   "name": "IR 4",
+   "khz": 173037.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Federal interop",
+   "note": "Federal incident response / law enforcement interoperability (NTIA)"
+  },
+  {
+   "id": "fed-nc1",
+   "name": "NC 1",
+   "khz": 169537.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Federal interop",
+   "note": "Federal incident response / law enforcement interoperability (NTIA)"
+  },
+  {
+   "id": "fed-le1",
+   "name": "LE 1",
+   "khz": 167087.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Federal interop",
+   "note": "Federal incident response / law enforcement interoperability (NTIA)"
+  },
+  {
+   "id": "fed-le2",
+   "name": "LE 2",
+   "khz": 167250.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Federal interop",
+   "note": "Federal incident response / law enforcement interoperability (NTIA)"
+  },
+  {
+   "id": "fed-le3",
+   "name": "LE 3",
+   "khz": 167750.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Federal interop",
+   "note": "Federal incident response / law enforcement interoperability (NTIA)"
+  },
+  {
+   "id": "fed-le4",
+   "name": "LE 4",
+   "khz": 168112.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Federal interop",
+   "note": "Federal incident response / law enforcement interoperability (NTIA)"
+  },
+  {
+   "id": "fed-le5",
+   "name": "LE 5",
+   "khz": 168462.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Federal interop",
+   "note": "Federal incident response / law enforcement interoperability (NTIA)"
+  },
+  {
+   "id": "fed-ir10",
+   "name": "IR 10",
+   "khz": 410437.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Federal interop",
+   "note": "Federal incident response / law enforcement interoperability (NTIA)"
+  },
+  {
+   "id": "fed-ir11",
+   "name": "IR 11",
+   "khz": 410637.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Federal interop",
+   "note": "Federal incident response / law enforcement interoperability (NTIA)"
+  },
+  {
+   "id": "fed-ir12",
+   "name": "IR 12",
+   "khz": 410837.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Federal interop",
+   "note": "Federal incident response / law enforcement interoperability (NTIA)"
+  },
+  {
+   "id": "fed-nc2",
+   "name": "NC 2",
+   "khz": 410237.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Federal interop",
+   "note": "Federal incident response / law enforcement interoperability (NTIA)"
+  },
+  {
+   "id": "fed-le10",
+   "name": "LE 10",
+   "khz": 409987.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Federal interop",
+   "note": "Federal incident response / law enforcement interoperability (NTIA)"
+  },
+  {
+   "id": "fed-le11",
+   "name": "LE 11",
+   "khz": 410187.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Federal interop",
+   "note": "Federal incident response / law enforcement interoperability (NTIA)"
+  },
+  {
+   "id": "fed-le12",
+   "name": "LE 12",
+   "khz": 410612.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Federal interop",
+   "note": "Federal incident response / law enforcement interoperability (NTIA)"
+  },
+  {
+   "id": "fed-leb",
+   "name": "LE B",
+   "khz": 414037.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Federal interop",
+   "note": "Federal incident response / law enforcement interoperability (NTIA)"
+  },
+  {
+   "id": "fed-le13",
+   "name": "LE 13",
+   "khz": 414062.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Federal interop",
+   "note": "Federal incident response / law enforcement interoperability (NTIA)"
+  },
+  {
+   "id": "fed-le14",
+   "name": "LE 14",
+   "khz": 414312.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Federal interop",
+   "note": "Federal incident response / law enforcement interoperability (NTIA)"
+  },
+  {
+   "id": "fed-le15",
+   "name": "LE 15",
+   "khz": 414337.5,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "Federal interop",
+   "note": "Federal incident response / law enforcement interoperability (NTIA)"
+  },
+  {
+   "id": "ems-med-1",
+   "name": "Med-1",
+   "khz": 463000.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "EMS (Med channels)",
+   "note": "Hospital / ambulance UHF Med channel; 6.25 kHz sub-channels sit either side"
+  },
+  {
+   "id": "ems-med-2",
+   "name": "Med-2",
+   "khz": 463025.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "EMS (Med channels)",
+   "note": "Hospital / ambulance UHF Med channel; 6.25 kHz sub-channels sit either side"
+  },
+  {
+   "id": "ems-med-3",
+   "name": "Med-3",
+   "khz": 463050.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "EMS (Med channels)",
+   "note": "Hospital / ambulance UHF Med channel; 6.25 kHz sub-channels sit either side"
+  },
+  {
+   "id": "ems-med-4",
+   "name": "Med-4",
+   "khz": 463075.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "EMS (Med channels)",
+   "note": "Hospital / ambulance UHF Med channel; 6.25 kHz sub-channels sit either side"
+  },
+  {
+   "id": "ems-med-5",
+   "name": "Med-5",
+   "khz": 463100.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "EMS (Med channels)",
+   "note": "Hospital / ambulance UHF Med channel; 6.25 kHz sub-channels sit either side"
+  },
+  {
+   "id": "ems-med-6",
+   "name": "Med-6",
+   "khz": 463125.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "EMS (Med channels)",
+   "note": "Hospital / ambulance UHF Med channel; 6.25 kHz sub-channels sit either side"
+  },
+  {
+   "id": "ems-med-7",
+   "name": "Med-7",
+   "khz": 463150.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "EMS (Med channels)",
+   "note": "Hospital / ambulance UHF Med channel; 6.25 kHz sub-channels sit either side"
+  },
+  {
+   "id": "ems-med-8",
+   "name": "Med-8",
+   "khz": 463175.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "EMS (Med channels)",
+   "note": "Hospital / ambulance UHF Med channel; 6.25 kHz sub-channels sit either side"
+  },
+  {
+   "id": "ems-med-9",
+   "name": "Med-9",
+   "khz": 462950.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "EMS (Med channels)",
+   "note": "Hospital / ambulance UHF Med channel; 6.25 kHz sub-channels sit either side"
+  },
+  {
+   "id": "ems-med-10",
+   "name": "Med-10",
+   "khz": 462975.0,
+   "mode": "FM",
+   "offsetKhz": 0,
+   "tone": "",
+   "group": "EMS (Med channels)",
+   "note": "Hospital / ambulance UHF Med channel; 6.25 kHz sub-channels sit either side"
+  }
+ ]
+}

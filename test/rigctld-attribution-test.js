@@ -125,8 +125,10 @@ test('a working backend is never latched off', () => {
   for (let i = 0; i < 5; i++) {
     writes.length = 0;
     codec.getVfoSplit();
-    assert.deepStrictEqual(writes, ['v\n', 's\n']);
-    codec.onData('VFOB\n1\nVFOA\n');
+    // Once split reads ON, the cycle also asks `i` for the TX frequency
+    // (22f41b06, Icom split / VFO B); none of the three is ever latched off.
+    assert.deepStrictEqual(writes, i === 0 ? ['v\n', 's\n'] : ['v\n', 's\n', 'i\n']);
+    codec.onData(i === 0 ? 'VFOB\n1\nVFOA\n' : 'VFOB\n1\nVFOA\n14075000\n');
   }
 });
 

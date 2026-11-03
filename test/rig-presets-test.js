@@ -278,6 +278,53 @@ test('NB and NR levels (N0KAH, FTX-1): the radio\'s own steps, sent after the sw
   assert.ok(/nbLevel: _currentNbLevel,/.test(main) && /dnrLevel: _currentDnrLevel,/.test(main), '"Use current" reads them from the rig state');
   const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
   assert.ok(/const top = f\.maxCap && caps\[f\.maxCap\] != null \? caps\[f\.maxCap\] : f\.max;/.test(app) && /ctl\.max = top;/.test(app), 'the editor caps the input at the radio\'s top step');
+  const fn = main.indexOf('function rigPresetCaps()');
+  const body = main.slice(fn, main.indexOf('\n}\n', fn));
+  assert.ok(/out\[f\.maxCap\] = caps\[f\.maxCap\]/.test(body), 'rigPresetCaps passes maxNbLevel/maxDnrLevel, or the editor shows 0-100 / 0-15 (N0KAH)');
+});
+
+test('a preamp ladder is a step in a preset, offered instead of the switch (N0KAH, FTX-1)', () => {
+  const ladder = [{ v: 0, label: 'IPO' }, { v: 1, label: 'AMP1' }, { v: 2, label: 'AMP2' }];
+  const ladderCaps = { preamp: true, preampSteps: ladder };
+  assert.strictEqual(RP.fieldAvailable(RP.FIELD_BY_KEY.preamp, ladderCaps), false, 'no on/off switch on a ladder rig');
+  assert.strictEqual(RP.fieldAvailable(RP.FIELD_BY_KEY.preampStep, ladderCaps), true);
+  assert.strictEqual(RP.fieldAvailable(RP.FIELD_BY_KEY.preamp, { preamp: true }), true, 'a single-stage rig keeps the switch');
+  assert.strictEqual(RP.fieldAvailable(RP.FIELD_BY_KEY.preampStep, { preamp: true }), false);
+  const [p] = RP.sanitizePresets([{ name: 'HF DX', preampStep: '2' }]);
+  assert.strictEqual(p.preampStep, 2);
+  assert.deepStrictEqual(RP.presetCommands(p, ladderCaps), [{ action: 'set-preamp', value: 2, field: 'preampStep' }]);
+  assert.strictEqual(RP.describePreset(p, ladderCaps).text, 'Preamp AMP2');
+  assert.strictEqual(RP.sanitizePresets([{ name: 'x', preampStep: 'AMP2' }])[0].preampStep, undefined, 'junk is dropped');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.ok(/f\.kind === 'step' && Array\.isArray\(caps\[f\.cap\]\)\) out\[f\.cap\] = caps\[f\.cap\]\.map/.test(main), 'rigPresetCaps carries the ladder');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  assert.ok(/f\.kind === 'step'\) \{\s*ctl = document\.createElement\('select'\);/.test(app), 'the editor offers the steps');
+  assert.ok(/return !\(f\.notCap && caps\[f\.notCap\]\);/.test(app), 'and the same availability rule');
+});
+
+console.log('rig-presets: a stray USB reading while FT8 runs (jholler IC-7300)');
+test('a digital engine running holds the digital preset when the radio reports USB', () => {
+  const d = RP.decideModePreset({ ...base, mode: 'USB', prevFamily: 'digital', prevMatchId: 'dig', digitalEngine: true });
+  assert.strictEqual(d.reason, 'digital-engine');
+  assert.strictEqual(d.apply, null, 'the SSB preset (100 W) is not applied');
+  assert.strictEqual(d.family, 'digital', 'the family is not advanced');
+  assert.strictEqual(d.matchId, 'dig');
+});
+test('with the engine stopped, the same USB reading applies the SSB preset as before', () => {
+  const d = RP.decideModePreset({ ...base, mode: 'USB', prevFamily: 'digital', prevMatchId: 'dig', digitalEngine: false });
+  assert.strictEqual(d.reason, 'apply');
+  assert.strictEqual(d.apply.id, 'voice');
+});
+test('a digital engine never blocks moving INTO the digital preset', () => {
+  const d = RP.decideModePreset({ ...base, mode: 'USB-D', prevFamily: 'ssb', prevMatchId: 'voice', digitalEngine: true });
+  assert.strictEqual(d.reason, 'apply');
+  assert.strictEqual(d.apply.id, 'dig');
+});
+test('main passes the engine state and logs a held reading with the time since the last transmission', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.ok(/digitalEngine: !!ft8Engine,/.test(main));
+  assert.ok(/if \(d\.reason === 'digital-engine'\) \{[\s\S]{0,700}s after the last transmission[\s\S]{0,300}no SSB power was applied/.test(main));
+  assert.ok(/ft8Engine\.on\('tx-end', \(\) => \{\s*console\.log\('\[JTCAT\] TX end — PTT off'\);\s*_jtcatLastTxEndMs = Date\.now\(\);/.test(main));
 });
 
 console.log(`\nrig-presets: ${passed} passed`);

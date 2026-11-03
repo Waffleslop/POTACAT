@@ -72,5 +72,34 @@ test('every bridge sends a Status with each heartbeat and before each QSO', () =
   assert.ok(/function wsjtxBridgeStatus\(\)/.test(src));
 });
 
+// _hawk71_ (map blanked and recentred) and jgedmond (roster lost a QSO
+// POTACAT started), 2026-10-30/31: the Status sent dial 0 whenever the radio's
+// dial was momentarily unknown, and never carried the QSO in progress.
+const { bridgeStatusFields } = require('../lib/wsjtx');
+test('the dial is never sent as 0; the last real dial is held', () => {
+  const memo = {};
+  assert.strictEqual(bridgeStatusFields({ dialHz: 14074000, now: 1 }, memo).dialFreqHz, 14074000);
+  assert.strictEqual(bridgeStatusFields({ dialHz: 0, now: 2 }, memo).dialFreqHz, 14074000);
+});
+test('a QSO POTACAT started fills DX Call / Grid / Report / Tx Enabled, held through the QSO and a minute after', () => {
+  const memo = {};
+  const q = { call: 'k1abc', grid: 'FN42aa', sentReport: '-07', phase: 'reply' };
+  const st = bridgeStatusFields({ dialHz: 14074000, qso: q, engine: { txEnabled: true, txDf: 1200, rxDf: 1180 }, now: 1000 }, memo);
+  assert.deepStrictEqual([st.dxCall, st.dxGrid, st.report, st.txEnabled, st.txDf, st.rxDf], ['K1ABC', 'FN42', '-07', true, 1200, 1180]);
+  const r = reader(encodeStatus('POTACAT', st));
+  r.u32(); r.u32(); r.u32(); r.utf8(); r.u64(); r.utf8();
+  assert.strictEqual(r.utf8(), 'K1ABC', 'DX Call on the wire');
+  assert.strictEqual(bridgeStatusFields({ dialHz: 14074000, qso: { ...q, phase: 'done' }, now: 30000 }, memo).dxCall, 'K1ABC', 'held just after the QSO');
+  assert.strictEqual(bridgeStatusFields({ dialHz: 14074000, qso: null, now: 70000 }, memo).dxCall, '', 'cleared a minute later');
+  assert.strictEqual(bridgeStatusFields({ dialHz: 14074000, qso: { call: 'W9XYZ', phase: 'cq' }, now: 80000 }, {}).dxCall, '', 'a CQ shell is not a QSO');
+});
+test('main: every Status goes through bridgeStatusFields, QSO changes send one, decodes no longer override DX Call', () => {
+  const fn = src.slice(src.indexOf('function wsjtxBridgeStatus()'), src.indexOf('function wsjtxBridgeStatus()') + 1500);
+  assert.ok(/return bridgeStatusFields\(\{/.test(fn) && /_wsjtxStatusMemo\)/.test(fn));
+  assert.ok(/function popoutBroadcastQso\(\) \{[\s\S]{0,300}wsjtxStatusOnQsoChange\(\);/.test(src));
+  assert.ok(/function remoteJtcatBroadcastQso\(\) \{[\s\S]{0,200}wsjtxStatusOnQsoChange\(\);/.test(src));
+  assert.ok(/extraUdpBridge\.sendDecodes\(out, \{\}\)/.test(src));
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

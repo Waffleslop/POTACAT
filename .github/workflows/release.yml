@@ -103,16 +103,22 @@ jobs:
 
   # macOS Apple Silicon (arm64).
   build-macos-arm64:
-    # PINNED, and it must stay pinned. macos-latest rolled forward between
-    # v1.10.14 (2026-09-02, green) and v1.10.15 (2026-09-09), and on the newer
-    # image electron-builder's codesign step dies with
+    # PINNED, and it must stay pinned until electron-builder is upgraded.
+    # macos-latest rolled forward to macOS 26 between v1.10.14 (2026-09-02,
+    # green) and v1.10.15 (2026-09-09), and there electron-builder's codesign
+    # step dies with
     #   security: SecKeychainUnlock: The user name or passphrase you entered is not correct
-    # — with the SAME secrets that build-macos-x64 signs with successfully on
-    # macos-14. Two consecutive reruns failed identically, so it is the image,
-    # not the documented one-arch keychain flake. Same lesson as windows-2022
+    # The cause is an electron-builder bug, not our secrets: app-builder-lib's
+    # macCodeSign.js passes the .p12 import password to
+    # `security set-key-partition-list -k` instead of the temp keychain's own
+    # password. macOS 14 and 15 tolerate it; macOS 26 refuses it.
+    # (electron-builder issue #10066, fixed by PR #10101 in 26.16.1; we pin
+    # 26.8.1.) build-macos-x64 signs fine with the same secrets on macOS 15.
+    # macos-14 was retired by GitHub on 2026-11-02, so this is macos-15, an
+    # M-series host: still a native arm64 build. Moving to macos-26/-latest
+    # needs electron-builder >= 26.16.1 first. Same lesson as windows-2022
     # above: a -latest runner is a dependency that changes without a commit.
-    # macos-14 is an M-series host, so this is still a native arm64 build.
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -235,7 +241,7 @@ jobs:
 
   # macOS Intel (x86_64) build — CROSS-COMPILED from an Apple Silicon host.
   # GitHub retired the Intel runners (macos-13 was the last bare-label Intel
-  # image); despite this job's old comment, `macos-14` is ARM64. A plain
+  # image); the plain `macos-14`/`macos-15` labels are ARM64. A plain
   # `node-gyp rebuild` here therefore produced arm64 .node files inside the
   # x64 DMG — an Intel Mac can't load them, so ft8_native silently fell back
   # to the slow WASM decoder (N3VD 2026-07-10, late-start TX every cycle).
@@ -363,7 +369,7 @@ jobs:
             libasound2-dev
       - name: Build hamlib from source
         env:
-          HAMLIB_VERSION: '4.7.1'
+          HAMLIB_VERSION: '4.7.2'
         run: |
           set -e
           curl -fsSL "https://github.com/Hamlib/Hamlib/archive/refs/tags/${HAMLIB_VERSION}.tar.gz" -o /tmp/hamlib.tar.gz
@@ -508,7 +514,7 @@ jobs:
             libasound2-dev
       - name: Build hamlib from source
         env:
-          HAMLIB_VERSION: '4.7.1'
+          HAMLIB_VERSION: '4.7.2'
         run: |
           set -e
           curl -fsSL "https://github.com/Hamlib/Hamlib/archive/refs/tags/${HAMLIB_VERSION}.tar.gz" -o /tmp/hamlib.tar.gz

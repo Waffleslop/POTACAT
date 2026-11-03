@@ -138,6 +138,13 @@ t('every JTCAT tx-start logs the RF power and warns at the cap in a non-WSPR mod
   assert.ok(main.includes('jtcatNoteTxPowerForMode(modeForTx, data.message, data.freq'));
   assert.ok(main.includes("mode === 'WSPR'"), 'WSPR itself must not warn about its own cap');
 });
+t('the beacon cap goes through gatedSetTxPower (rigctld takes a fraction: a bare 1 was full power, WZ1H)', () => {
+  const fn = main.indexOf('function wsprForcePowerCap()');
+  const end = main.indexOf('\n}\n', fn);
+  const body = main.slice(fn, end);
+  assert.ok(body.includes('gatedSetTxPower(JTCAT_WSPR_MAX_WATTS, { rigType: detectRigType() })'));
+  assert.ok(!body.includes('cat.setTxPower(JTCAT_WSPR_MAX_WATTS)'), 'raw cat.setTxPower(1) is L RFPOWER 1.000 on rigctld');
+});
 
 console.log(`\nWSPR power memory: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

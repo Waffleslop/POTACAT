@@ -101,6 +101,7 @@ contextBridge.exposeInMainWorld('api', {
   jtcatSpectrum: (bins) => ipcRenderer.send('jtcat-spectrum', bins),
   // JTCAT events
   onJtcatDecode: (cb) => ipcRenderer.on('jtcat-decode', (_e, data) => cb(data)),
+  onJtcatWorkedUpdate: (cb) => ipcRenderer.on('jtcat-worked-update', (_e, data) => cb(data)),
   // GridTracker's double-click (WSJT-X Reply) and stop (Halt Tx), via main.
   onJtcatExternalReply: (cb) => ipcRenderer.on('jtcat-external-reply', (_e, d) => cb(d)),
   onJtcatExternalHalt: (cb) => ipcRenderer.on('jtcat-external-halt', () => cb()),
@@ -120,6 +121,11 @@ contextBridge.exposeInMainWorld('api', {
   onJtcatTxStatus: (cb) => ipcRenderer.on('jtcat-tx-status', (_e, data) => cb(data)),
   onJtcatTxFreqSet: (cb) => ipcRenderer.on('jtcat-tx-freq-set', (_e, data) => cb(data)),
   onJtcatIdleQsy: (cb) => ipcRenderer.on('jtcat-idle-qsy', (_e, data) => cb(data)),
+  onJtcatBandFollow: (cb) => ipcRenderer.on('jtcat-band-follow', (_e, data) => cb(data)),
+  jtcatFollowRadio: () => ipcRenderer.send('jtcat-follow-radio'),
+  // DXpedition FT8/FT4 dials for the band menu (main's copy of the feed)
+  jtcatDxpeditionsGet: () => ipcRenderer.invoke('jtcat-dxpeditions-get'),
+  onJtcatDxpeditions: (cb) => ipcRenderer.on('jtcat-dxpeditions', (_e, list) => cb(list)),
   onJtcatTuneState: (cb) => ipcRenderer.on('jtcat-tune-state', (_e, data) => cb(data)),
   onRestartPopoutAudio: (cb) => ipcRenderer.on('restart-popout-audio', () => cb()),
   // VITA-49 dax_rx frames forwarded from main when on "SmartSDR Direct" —

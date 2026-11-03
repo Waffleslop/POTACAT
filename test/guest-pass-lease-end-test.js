@@ -101,7 +101,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('passLeaseStopTransmitters covers Run, Hunt, WSPR, JTCAT TX, CW, SSTV, Mercury and PTT', () => {
     const i = main.indexOf('function passLeaseStopTransmitters(');
     const b = main.slice(i, main.indexOf('\nfunction jtcatHaltTxNow', i));
-    for (const needle of ['stopFullAutoCq(', "setJtcatHuntMode('off')", 'setWsprBeacon(false', 'jtcatHaltTxNow()', 'cancelAllCwSends()', 'keyer.stop()', 'smartSdr.cwStop()', 'sstvHaltTxNow()', 'mercuryClient.abort()', 'handleRemotePtt(false)', 'gatedSetTransmit(false)', 'gatedSmartSdrTransmit(false)']) {
+    for (const needle of ['stopFullAutoCq(', "setJtcatHuntMode('off')", 'setWsprBeacon(false', 'jtcatHaltTxNow(', 'cancelAllCwSends()', 'keyer.stop()', 'smartSdr.cwStop()', 'sstvHaltTxNow()', 'mercuryClient.abort()', 'handleRemotePtt(false)', 'gatedSetTransmit(false)', 'gatedSmartSdrTransmit(false)']) {
       assert.ok(b.includes(needle), 'missing ' + needle);
     }
   });

@@ -607,8 +607,12 @@ function _applyPopoutTheme(payload) {
     var qrz = qrzCache[call];
     var nameLine = qrz && qrz.name ? '<div style="color:#aaa;font-size:11px;">' + esc(qrz.name) + '</div>' : '';
     var qsoBtn = isMe ? '' : '<button class="jp-popup-qso" data-call="' + esc(call) + '" data-grid="' + esc(grid) + '" style="margin-top:4px;padding:3px 10px;border-radius:4px;border:1px solid #4ecca3;background:#4ecca3;color:#000;font-size:11px;font-weight:600;cursor:pointer;">QSO</button>';
+    // The call is a QRZ link, as on the Spots map (kilrath8954 2026-10-31:
+    // the popup showed only the operator's name and grid).
+    var callHtml = isMe ? '<b style="color:#fff;">' + esc(call) + '</b>'
+      : '<a href="#" class="jp-popup-qrz" data-call="' + esc(call) + '" title="Open ' + esc(call) + ' on QRZ.com" style="color:#4fc3f7;font-weight:700;text-decoration:underline;cursor:pointer;">' + esc(call) + '</a>';
     return '<div style="font-family:monospace;font-size:12px;line-height:1.5;">' +
-      '<b style="color:#fff;">' + esc(call) + '</b> <span style="color:#666;">[' + esc(grid) + ']</span>' +
+      callHtml + ' <span style="color:#666;">[' + esc(grid) + ']</span>' +
       nameLine + qsoBtn + '</div>';
   }
 
@@ -660,6 +664,14 @@ function _applyPopoutTheme(payload) {
     marker.on('popupopen', function() {
       var el = marker.getPopup().getElement();
       if (!el) return;
+      var qrzA = el.querySelector('.jp-popup-qrz');
+      if (qrzA) {
+        qrzA.addEventListener('click', function(ev) {
+          ev.preventDefault();
+          var c = qrzA.dataset.call;
+          if (c && window.api.openExternal) window.api.openExternal('https://www.qrz.com/db/' + encodeURIComponent(JtcatParser.baseCall(c)));
+        });
+      }
       var btn = el.querySelector('.jp-popup-qso');
       if (btn) {
         btn.addEventListener('click', function() {
@@ -845,7 +857,7 @@ function _applyPopoutTheme(payload) {
     for (var i = 0; i < phases.length; i++) {
       if (phases[i].key === q.phase) { currentIdx = i; break; }
     }
-    if (q.mode === 'cq' && q.phase === 'cq-report') currentIdx = 2;
+    if (q.mode === 'cq' && (q.phase === 'cq-report' || q.phase === 'cq-r-report')) currentIdx = 2;
     if (q.mode === 'cq' && q.phase === 'cq-rr73') currentIdx = 4;
     if (q.mode === 'cq' && q.phase === 'done') currentIdx = 5;
     if (q.mode === 'reply' && q.phase === 'r+report') currentIdx = 2;
@@ -1024,13 +1036,13 @@ function _applyPopoutTheme(payload) {
     // (No AP badge — see appendMyActivityRow. Decoder internals, not operator
     // information.)
     if (d.chaseMatch) badges += '<span class="jp-badge jp-badge-chase" title="Chase match — this station matches your chase target (' + esc(chaseTarget) + ')">◎</span>';
-    if (d.newDxcc) badges += '<span class="jp-badge jp-badge-dxcc" title="D: New DXCC on this band — you have not worked ' + esc(d.entity || 'this entity') + ' on this band yet">D</span>';
+    if (d.newDxcc) badges += '<span class="jp-badge jp-badge-dxcc" data-entity="' + esc(d.entity || '') + '" title="D: New DXCC on this band — you have not worked ' + esc(d.entity || 'this entity') + ' on this band yet">D</span>';
     // Wanted state (Worked All States): the state the grid puts them in (a
     // straddling grid shows every candidate with a ?), still needed on this
     // band and mode under the worked-overlay scope (main enriches d.state).
     if (d.wantedState && d.state && d.state.code) badges += '<span class="jp-badge jp-badge-state" title="' + esc(d.state.certain ? 'New state: ' + d.state.code + ' is one you still need on this band and mode' : (d.state.source === 'qrz' ? 'New state? QRZ lists ' + d.state.code + ' as their home state (no grid in the message), one you still need' : 'New state? Grid ' + (d.grid || '') + ' straddles ' + d.state.code + '; at least one of them is one you still need')) + '">' + esc(d.state.code) + (d.state.certain ? '' : '?') + '</span>';
-    if (d.newGrid) badges += '<span class="jp-badge jp-badge-grid" title="G: New grid — you have not worked grid ' + esc(d.grid || '?') + ' before">G</span>';
-    if (d.newCall) badges += '<span class="jp-badge jp-badge-call" title="C: New call — ' + esc(d.call || 'this station') + ' is not in your log yet">C</span>';
+    if (d.newGrid) badges += '<span class="jp-badge jp-badge-grid" data-grid="' + esc(d.grid || '') + '" title="G: New grid — you have not worked grid ' + esc(d.grid || '?') + ' before">G</span>';
+    if (d.newCall) badges += '<span class="jp-badge jp-badge-call" data-call="' + esc(d.call || '') + '" title="C: New call — ' + esc(d.call || 'this station') + ' is not in your log yet">C</span>';
     if (d.watched) badges += '<span class="jp-badge jp-badge-watch" title="W: Watchlist — ' + esc(d.call || 'this station') + ' matches your watchlist">W</span>';
     // Tracked-event station (Casey 2026-07-06): render as a NORMAL-looking
     // row with a [13C]-style badge alongside the letter badges — no tint
@@ -1195,6 +1207,20 @@ function _applyPopoutTheme(payload) {
   }
 
   // --- Event handlers ---
+  // A QSO was logged: decodes already drawn stop showing that station as a
+  // new call / grid / DXCC (the flags are stamped once, at decode time).
+  if (window.api.onJtcatWorkedUpdate) window.api.onJtcatWorkedUpdate(function(w) {
+    var n = 0;
+    for (var i = 0; i < decodeLog.length; i++) n += DecodeRow.clearWorkedFlags(decodeLog[i].results, w);
+    if (n) rebuildBandActivity();
+    // My Activity rows are not rebuilt from the log; drop their badges in place.
+    var call = String(w.call || '').toUpperCase(), grid = String(w.grid || '').toUpperCase().slice(0, 4);
+    myActivity.querySelectorAll('.jp-badge-call, .jp-badge-grid, .jp-badge-dxcc').forEach(function(b) {
+      if ((call && b.getAttribute('data-call') === call) || (grid && b.getAttribute('data-grid') === grid) ||
+          (w.entity && b.getAttribute('data-entity') === w.entity)) b.remove();
+    });
+  });
+
   window.api.onJtcatDecode(function(data) {
     // Keep our cached callsign current from the authoritative copy main stamps
     // on every batch, so classification never runs against a stale/empty call
@@ -1533,6 +1559,19 @@ function _applyPopoutTheme(payload) {
       // distinguishes it from the green success toast. (K3SBP 2026-05-05:
       // the retry-limit was previously only logged to console.)
       showJtcatErrorToast(data.error || 'TX stopped');
+      // The wrong-band refusal: one press moves JTCAT to where the radio is.
+      if (data.followRadio && window.api.jtcatFollowRadio) {
+        var fb = document.createElement('button');
+        fb.className = 'jp-toast-action';
+        fb.textContent = 'Follow the radio';
+        fb.addEventListener('click', function(e) {
+          e.stopPropagation();
+          window.api.jtcatFollowRadio();
+          qsoToast.classList.remove('visible');
+          qsoToast.classList.remove('error');
+        });
+        qsoToast.appendChild(fb);
+      }
       renderQsoTracker();
       return;
     } else {
@@ -2322,6 +2361,7 @@ function _applyPopoutTheme(payload) {
     multiWfPanes = [];
     container.innerHTML = '';
 
+    bsApplyVisibility();   // multi-slice brings the audio waterfalls back on a Flex
     if (!multiActive || multiSliceConfigs.length === 0) {
       container.classList.add('hidden');
       if (singleWf) singleWf.style.display = '';
@@ -2449,6 +2489,9 @@ function _applyPopoutTheme(payload) {
   haltTxBtn.addEventListener('click', function() {
     setTxOnState(false);
     window.api.jtcatCancelQso();
+    // The one halt in main: stops the tones, every PTT route, Run, Hunt and
+    // the WSPR beacon. Cancel alone left a message in flight on the air.
+    window.api.jtcatHaltTx();
     setTxMsgDisplay('--');
   });
 
@@ -2725,6 +2768,7 @@ function _applyPopoutTheme(payload) {
   var bsToggle = document.getElementById('jp-bandscope-toggle');
   var bsTrace = document.getElementById('jp-bs-trace');
   var bsWfCanvas = document.getElementById('jp-bs-wf');
+  var bsFreq = document.getElementById('jp-bs-freq');
   var bsEnableBtn = document.getElementById('jp-bs-enable');
   var bsWf = null;
   var bsState = null;
@@ -2734,21 +2778,42 @@ function _applyPopoutTheme(payload) {
   var bsOn = false;
   var bsAvailable = false;
   var bsLastWatch = null;
+  var bsClickShift = false;   // Shift held on the press that made this click
 
   function bsAxis() {
     var A = window.ScopeAxis; var s = bsState || {};
-    return A.scopeAxis({ centerHz: bsDialHz || s.centerHz || 0, spanHz: s.spanHz || 0, anchor: s.anchor || 'center' });
+    return A.scopeAxis({ centerHz: A.axisCenterFor(s, bsDialHz), spanHz: s.spanHz || 0, anchor: s.anchor || 'center' });
   }
+  // A Flex's own waterfall REPLACES the audio waterfall (Casey 2026-10-30:
+  // "For Flex users, they should just see this new waterfall, not the old
+  // waterfall too ... the bandscope is just unnecessary for digital modes").
+  // Required, no checkbox. The audio waterfall stays until the radio's is
+  // live (starting, SmartSDR hosting the radio, an error) and in multi-slice
+  // (one pan cannot show four bands). Its analyser keeps running hidden: the
+  // RX-silent watchdog reads it, and that warning moves onto this waterfall,
+  // since a radio can draw signals perfectly while the decoder hears nothing.
+  function bsFlex() { return !!(bsAvailable && bsState && bsState.sourceKind === 'flex'); }
+  function bsRadioWf() { return bsFlex() && bsState.status === 'live' && !multiActive; }
+  function bsShowing() { return !!(bsAvailable && (bsOn || bsFlex())); }
   function bsSyncWatch() {
-    var want = !!(bsOn && bsAvailable);
+    var want = bsShowing();
     if (want === bsLastWatch) return;
     bsLastWatch = want;
     if (window.api.scopeWatch) window.api.scopeWatch(want);
   }
   function bsApplyVisibility() {
-    var show = bsOn && bsAvailable;
-    if (bsRow) bsRow.classList.toggle('hidden', !bsAvailable);
-    if (bsWrap) bsWrap.classList.toggle('hidden', !show);
+    var radioWf = bsRadioWf();
+    var show = radioWf || (bsOn && bsAvailable && !bsFlex());
+    if (bsRow) bsRow.classList.toggle('hidden', !bsAvailable || bsFlex());
+    if (bsWrap) {
+      bsWrap.classList.toggle('hidden', !show);
+      bsWrap.classList.toggle('jp-bs-radio-wf', radioWf);
+    }
+    var single = document.getElementById('jp-wf-single');
+    if (single) single.classList.toggle('jp-wf-replaced', radioWf);
+    var silent = document.getElementById('jp-wf-silent');
+    var silentHome = radioWf ? bsWrap : single;
+    if (silent && silentHome && silent.parentNode !== silentHome) silentHome.appendChild(silent);
     if (show && !bsWf && bsWfCanvas && typeof Waterfall !== 'undefined') {
       bsWf = new Waterfall(bsWfCanvas, { bins: 850, historyRows: 256, colormap: 'turbo', gamma: 0.6 });
       if (bsWf.supported) bsWf.onClick(function(frac) { bsTune(frac); });
@@ -2765,11 +2830,27 @@ function _applyPopoutTheme(payload) {
   function bsTune(frac) {
     var ax = bsAxis();
     if (!ax.known) return;
+    // The digital view (main: lib/scope-digital-view.js): a click picks the
+    // AUDIO frequency, like a click on the audio waterfall below. Retuning
+    // the radio here would pull the whole passband off the watering hole.
+    var dw = bsState && bsState.decodeWindow;
+    var dialNow = bsDialHz || (bsState && bsState.centerHz) || 0;
+    if (dw && dialNow) {
+      var abs = window.ScopeAxis.binToHz(ax, Math.max(0, Math.min(1, frac)) * 849);
+      var audio = Math.abs(abs - dialNow);
+      audio = Math.round(Math.max(100, Math.min(3000, audio)) / 10) * 10;
+      jpTxFreqHz = audio;
+      if (txFreqLabel) txFreqLabel.textContent = txFreqText(audio);
+      window.api.jtcatSetTxFreq(audio, true); // operator move — honored under Hold TX Freq, re-pins
+      // Shift+click: TX only (split), as on the audio waterfall; never in a transceive mode.
+      if (!(bsClickShift && !isKeyboardMode())) { jpRxFreqHz = audio; window.api.jtcatSetRxFreq(audio); }
+      return;
+    }
     var hz = window.ScopeAxis.snapTapHz(window.ScopeAxis.binToHz(ax, Math.max(0, Math.min(1, frac)) * 849), bsState && bsState.spanHz);
     window.api.tune((hz / 1000).toFixed(3), null);
   }
   function bsDraw() {
-    if (!bsTrace || !(bsOn && bsAvailable)) return;
+    if (!bsTrace || !bsShowing()) return;
     var A = window.ScopeAxis;
     var ax = bsAxis();
     var dpr = window.devicePixelRatio || 1;
@@ -2787,11 +2868,41 @@ function _applyPopoutTheme(payload) {
     var dial = bsDialHz || (bsState && bsState.centerHz) || 0;   // no dial yet (no radio): main's centre
     var rxBin = dial ? A.hzToBin(ax, dial) : null;
     if (rxBin != null) { var mx = Math.round(rxBin * (w - 1) / 849) + 0.5; ctx.strokeStyle = '#e94560'; ctx.lineWidth = 1.5 * dpr; ctx.beginPath(); ctx.moveTo(mx, 0); ctx.lineTo(mx, h); ctx.stroke(); }
-    if (bsWf && bsWf.supported) bsWf.setMarkers(rxBin == null ? [] : [{ pos: rxBin / 849, color: '#e94560', kind: 'rx' }]);
-    var lo = document.getElementById('jp-bs-lo'), c = document.getElementById('jp-bs-c'), hi = document.getElementById('jp-bs-hi');
-    if (lo) lo.textContent = ax.hzPerBin ? A.formatHz(ax.startHz) : '';
-    if (c) c.textContent = dial ? A.formatHz(dial) : '';
-    if (hi) hi.textContent = ax.hzPerBin ? A.formatHz(ax.endHz) : '';
+    // Passband + band edges (lib/scope-view.js): shading only, no labels — the strip is short.
+    var st = bsState || {};
+    if (window.ScopeView) window.ScopeView.drawOverlay(ctx, { w: w, h: h, dpr: dpr, axis: ax, dialHz: dial, passband: st.passband, txHz: st.txHz, bandPlan: st.bandPlan, labels: false, flag: false });
+    // The digital view: the decode window shaded and its edges marked, and
+    // the TX audio frequency in red (the dial line sits off-screen to the left).
+    var dwin = st.decodeWindow;
+    if (dwin && dial) {
+      var wl = A.hzToBin(ax, dial + dwin.lo), wh = A.hzToBin(ax, dial + dwin.hi);
+      var b0 = wl == null ? 0 : wl, b1 = wh == null ? 849 : wh;
+      var x0 = Math.min(b0, b1) * (w - 1) / 849, x1 = Math.max(b0, b1) * (w - 1) / 849;
+      ctx.fillStyle = 'rgba(79,195,247,0.10)'; ctx.fillRect(x0, 0, Math.max(1, x1 - x0), h);
+      ctx.strokeStyle = 'rgba(79,195,247,0.6)'; ctx.lineWidth = 1 * dpr; ctx.setLineDash([3 * dpr, 3 * dpr]);
+      ctx.beginPath();
+      if (wl != null) { ctx.moveTo(x0 + 0.5, 0); ctx.lineTo(x0 + 0.5, h); }
+      if (wh != null) { ctx.moveTo(x1 - 0.5, 0); ctx.lineTo(x1 - 0.5, h); }
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+    var marks = rxBin == null ? [] : [{ pos: rxBin / 849, color: '#e94560', kind: 'rx' }];
+    if (dwin && dial && jpTxFreqHz) {
+      var txBin = A.hzToBin(ax, dial + (dwin.lo < 0 ? -jpTxFreqHz : jpTxFreqHz));
+      if (txBin != null) {
+        var tx = Math.round(txBin * (w - 1) / 849) + 0.5;
+        ctx.strokeStyle = '#ff2222'; ctx.lineWidth = 1 * dpr; ctx.beginPath(); ctx.moveTo(tx, 0); ctx.lineTo(tx, h); ctx.stroke();
+        marks.push({ pos: txBin / 849, color: '#ff2222', kind: 'tx' });
+      }
+    }
+    if (window.ScopeView) marks = marks.concat(window.ScopeView.passbandMarkers(st.passband, dial, ax));
+    if (bsWf && bsWf.supported) bsWf.setMarkers(marks);
+    // The frequency scale strip: the same painter as the Band Scope window
+    // and ECHOCAT Web (lib/scope-view.js), so the ticks agree everywhere.
+    if (bsFreq && window.ScopeView) {
+      var fw = Math.max(1, Math.round(bsFreq.clientWidth * dpr)), fh = Math.max(1, Math.round(bsFreq.clientHeight * dpr));
+      if (bsFreq.width !== fw || bsFreq.height !== fh) { bsFreq.width = fw; bsFreq.height = fh; }
+      window.ScopeView.drawFreqScale(bsFreq.getContext('2d'), { w: fw, h: fh, dpr: dpr, axis: ax, dialHz: dial });
+    }
   }
   if (window.api.onScopeState) {
     window.api.onScopeState(function(s) {
@@ -2808,16 +2919,19 @@ function _applyPopoutTheme(payload) {
       var spanEl = document.getElementById('jp-bs-span');
       if (spanEl) spanEl.textContent = s && s.spanHz ? 'Span ' + window.ScopeAxis.formatSpan(s.spanHz) : '';
       var modeEl = document.getElementById('jp-bs-mode');
-      if (modeEl) modeEl.textContent = s && s.anchor ? (window.ScopeAxis ? window.ScopeAxis.anchorLabel(s.anchor) : String(s.anchor).toUpperCase()) : '';
+      if (modeEl) modeEl.textContent = (s && s.modeLabel) || (s && s.anchor ? (window.ScopeAxis ? window.ScopeAxis.anchorLabel(s.anchor) : String(s.anchor).toUpperCase()) : '');
       var needEnable = !!(s && s.kind !== 1 && (s.scuLan === '0' || (s.diag && s.diag.key === 'silent')));
-      if (bsEnableBtn) bsEnableBtn.classList.toggle('hidden', !needEnable);
+      if (bsEnableBtn) {
+        bsEnableBtn.classList.toggle('hidden', !needEnable);
+        bsEnableBtn.textContent = (s && s.enableLabel) || 'Enable SCU-LAN10';
+      }
       bsApplyVisibility();
       bsDraw();
     });
   }
   if (window.api.onScopeFrame) {
     window.api.onScopeFrame(function(f) {
-      if (!(bsOn && bsAvailable) || !f || !f.bins || f.bins.length !== 850) return;
+      if (!bsShowing() || !f || !f.bins || f.bins.length !== 850) return;
       var bins = (wfFloor > 0 && window.ScopeAxis) ? window.ScopeAxis.applyFloor(f.bins, wfFloor) : f.bins;
       bsLatest = bins;
       if (!bsSmooth) bsSmooth = new Float32Array(850);
@@ -2827,12 +2941,15 @@ function _applyPopoutTheme(payload) {
     });
   }
   if (window.api.onCatFrequency) {
-    window.api.onCatFrequency(function(hz) { if (hz > 0) { bsDialHz = hz; if (bsOn && bsAvailable) bsDraw(); } });
+    window.api.onCatFrequency(function(hz) { if (hz > 0) { bsDialHz = hz; if (bsShowing()) bsDraw(); } });
   }
   if (bsToggle) bsToggle.addEventListener('change', function() { bsSetOn(bsToggle.checked, true); });
+  if (bsWfCanvas) bsWfCanvas.addEventListener('mousedown', function(e) { bsClickShift = !!e.shiftKey; });
+  if (bsFreq) bsFreq.addEventListener('mousedown', function(e) { bsClickShift = !!e.shiftKey; });
   if (bsTrace) bsTrace.addEventListener('click', function(e) { var r = bsTrace.getBoundingClientRect(); if (r.width > 0) bsTune((e.clientX - r.left) / r.width); });
+  if (bsFreq) bsFreq.addEventListener('click', function(e) { var r = bsFreq.getBoundingClientRect(); if (r.width > 0) bsTune((e.clientX - r.left) / r.width); });
   if (bsEnableBtn) bsEnableBtn.addEventListener('click', function() { if (window.api.scopeEnableOnRadio) window.api.scopeEnableOnRadio(); });
-  window.addEventListener('resize', function() { if (bsOn && bsAvailable) { if (bsWf && bsWf.supported) bsWf.resize(); bsDraw(); } });
+  window.addEventListener('resize', function() { if (bsShowing()) { if (bsWf && bsWf.supported) bsWf.resize(); bsDraw(); } });
 
   // ARRL Field Day mode toggle + exchange entry. Shared by the ⚙ row and the
   // bar chip (the chip delegates here). Turning FD OFF while Hunt: Field Day
@@ -2969,6 +3086,27 @@ function _applyPopoutTheme(payload) {
     });
   }
 
+  // Main moved JTCAT to the band the radio is on (a dial turned onto another
+  // band's FT8/FT4/FT2 dial, or "Follow the radio"). The radio is already
+  // there: mark the band, never tune (GitHub #115).
+  if (window.api.onJtcatBandFollow) window.api.onJtcatBandFollow(function(d) {
+    if (!d) return;
+    var khz = Number(d.freqKhz) || 0;
+    var btn = (d.band && document.querySelector('.jp-band-opt[data-band="' + d.band + '"]')) || null;
+    document.querySelectorAll('.jp-band-opt').forEach(function(b) { b.classList.remove('active'); });
+    if (btn) btn.classList.add('active');
+    bandSelectFollowActive();
+    decodeLog = [];
+    bandActivity.innerHTML = '<div class="jp-empty">Following the radio to ' + esc(d.band || ((khz / 1000).toFixed(3) + ' MHz')) + '...</div>';
+    myActivity.innerHTML = '<div class="jp-empty">No activity yet</div>';
+    markerLayer.clearLayers();
+    arcLayer.clearLayers();
+    stations = {};
+    qsoArcs = {};
+    if (myCallsign && myGrid && map) registerStation(myCallsign, myGrid);
+    if (btn && khz) window.api.saveSettings({ jtcatLastBandFreq: parseFloat(btn.dataset.freq) || khz });
+  });
+
   // Band buttons
   function selectBand(btn, save) {
     var freq = parseFloat(btn.dataset.freq);
@@ -3015,6 +3153,54 @@ function _applyPopoutTheme(payload) {
     new MutationObserver(bandSelectFollowActive).observe(bandSelect, { subtree: true, attributes: true, attributeFilter: ['class'] });
   }
 
+  // DXpeditions on the air with a published FT8/FT4 dial (level_death
+  // 2026-10-31; the feed's `freqs`, lib/dxpedition-dials.js). A group at the
+  // end of the band menu. Picking one switches to its mode, tunes its dial
+  // and marks its band; the menu then shows the band again. These options
+  // are NOT .jp-band-opt, so mode changes, rig bands and idle QSY never
+  // touch them, and the capture listener runs before the band handler.
+  function renderDxpeditionDials(list) {
+    if (!bandSelect) return;
+    var old = document.getElementById('jp-dxp-group');
+    if (old) old.remove();
+    if (!Array.isArray(list) || !list.length) return;
+    var g = document.createElement('optgroup');
+    g.id = 'jp-dxp-group';
+    g.label = 'DXpeditions';
+    list.forEach(function(d) {
+      var o = document.createElement('option');
+      o.className = 'jp-dxp-opt';
+      o.value = 'dxp:' + d.call + ':' + d.mode + ':' + d.khz;
+      o.dataset.call = d.call; o.dataset.mode = d.mode; o.dataset.freq = d.khz; o.dataset.band = d.band;
+      if (d.hound) o.dataset.hound = '1';
+      if (d.superFox) o.dataset.superfox = '1';
+      o.textContent = d.call + ' ' + d.mode + ' ' + (d.khz / 1000).toFixed(3) + (d.superFox ? ' SuperFox' : d.hound ? ' F/H' : '');
+      o.title = (d.entity ? d.entity + ': ' : '') + d.call + ' on ' + d.mode + ' ' + (d.khz / 1000).toFixed(3) + ' MHz' + (d.end ? ', until ' + d.end : '');
+      g.appendChild(o);
+    });
+    bandSelect.appendChild(g);
+  }
+  if (bandSelect) {
+    bandSelect.addEventListener('change', function(e) {
+      var opt = bandSelect.options[bandSelect.selectedIndex];
+      if (!opt || !opt.classList.contains('jp-dxp-opt')) return;
+      e.stopImmediatePropagation();
+      var mode = opt.dataset.mode, khz = parseFloat(opt.dataset.freq);
+      if (mode && modeSelect.value !== mode && Array.prototype.some.call(modeSelect.options, function(x) { return x.value === mode; })) {
+        modeSelect.value = mode;
+        modeSelect.dispatchEvent(new Event('change')); // retunes the band's own dial first; the tune below lands after it
+      }
+      window.api.tune(khz, mode || modeSelect.value);
+      document.querySelectorAll('.jp-band-opt').forEach(function(b) { b.classList.toggle('active', b.dataset.band === opt.dataset.band); });
+      bandSelectFollowActive();
+      var sub = opt.dataset.superfox ? 'They run SuperFox, which POTACAT\'s Hound mode does not decode. Use WSJT-X in SuperFox Hound mode for this one.'
+        : opt.dataset.hound ? (houndMode ? 'Fox/Hound: Hound is on.' : 'They run Fox/Hound: turn on Hound before you call.') : '';
+      showJtcatWarnToast('Tuned to ' + opt.dataset.call + ' on ' + (khz / 1000).toFixed(3) + ' MHz ' + (mode || ''), sub);
+    }, true);
+    if (window.api.onJtcatDxpeditions) window.api.onJtcatDxpeditions(renderDxpeditionDials);
+    if (window.api.jtcatDxpeditionsGet) window.api.jtcatDxpeditionsGet().then(renderDxpeditionDials).catch(function() {});
+  }
+
   // main.js hopped the FTx mode on us (settings.jtcatModeHop). The radio and
   // the engine have already moved — this is only the display catching up, so
   // nothing here re-tunes or re-saves: doing either would fight the QSY that
@@ -3058,6 +3244,9 @@ function _applyPopoutTheme(payload) {
   var wsprTxPctEl = document.getElementById('jp-wspr-txpct');
   var wsprTxPctVal = document.getElementById('jp-wspr-txpct-val');
   var wsprDbmEl = document.getElementById('jp-wspr-dbm');
+  var wsprRunEl = document.getElementById('jp-wspr-run');          // how long the beacon runs (0 = until stopped)
+  var wsprRunAsked = false;                                        // the one-time question has been answered
+  var wsprRunAskVisible = function() { var a = document.getElementById('jp-wspr-run-ask'); return !!(a && !a.classList.contains('hidden')); };
   var wsprUploadEl = document.getElementById('jp-wspr-upload');
   var wsprSortBtn = document.getElementById('jp-wspr-sort');
   var wsprClearBtn = document.getElementById('jp-wspr-clear');
@@ -3160,6 +3349,9 @@ function _applyPopoutTheme(payload) {
     s = s || {};
     wsprDistUnit = s.distUnit === 'km' ? 'km' : 'mi';
     if (s.wsprTxPct != null) wsprTxPctEl.value = s.wsprTxPct;
+    if (wsprRunEl) wsprRunEl.value = String(Number(s.wsprBeaconRunMin) > 0 ? Math.round(Number(s.wsprBeaconRunMin)) : 0);
+    if (wsprRunEl && !Array.prototype.some.call(wsprRunEl.options, function(o) { return o.value === wsprRunEl.value; })) wsprRunEl.value = '0';
+    wsprRunAsked = !!s.wsprBeaconRunAsked;
     wsprTxPctVal.textContent = wsprTxPctEl.value + '%';
     // Power is capped at 30 dBm (1 W). Clamp a restored value and fall back to
     // 30 if it doesn't match an offered (<=1 W) option.
@@ -3182,12 +3374,42 @@ function _applyPopoutTheme(payload) {
     wsprUploadEl.addEventListener('change', function() {
       window.api.saveSettings({ wsprUpload: wsprUploadEl.checked });
     });
-    wsprTxEnable.addEventListener('change', function() {
-      if (window.api.jtcatWsprBeacon) window.api.jtcatWsprBeacon({
+    function wsprBeaconSend(extra) {
+      if (!window.api.jtcatWsprBeacon) return;
+      window.api.jtcatWsprBeacon(Object.assign({
         enabled: wsprTxEnable.checked,
         txPct: parseInt(wsprTxPctEl.value, 10),
         dBm: parseInt(wsprDbmEl.value, 10),
-      });
+        runMin: wsprRunEl ? parseInt(wsprRunEl.value, 10) || 0 : 0,
+      }, extra || {}));
+    }
+    var wsprRunAsk = document.getElementById('jp-wspr-run-ask');
+    var wsprRunAskSel = document.getElementById('jp-wspr-run-ask-sel');
+    wsprTxEnable.addEventListener('change', function() {
+      // First time on: ask how long it should run (K2BDE). The answer lands in
+      // the Run select, where it can be changed any time after.
+      if (wsprTxEnable.checked && !wsprRunAsked && wsprRunAsk) {
+        wsprTxEnable.checked = false;
+        if (wsprRunAskSel && wsprRunEl) wsprRunAskSel.value = wsprRunEl.value;
+        wsprRunAsk.classList.remove('hidden');
+        return;
+      }
+      wsprBeaconSend();
+    });
+    var wsprRunAskGo = document.getElementById('jp-wspr-run-ask-go');
+    var wsprRunAskCancel = document.getElementById('jp-wspr-run-ask-cancel');
+    if (wsprRunAskGo) wsprRunAskGo.addEventListener('click', function() {
+      if (wsprRunEl && wsprRunAskSel) wsprRunEl.value = wsprRunAskSel.value;
+      wsprRunAsked = true;
+      if (wsprRunAsk) wsprRunAsk.classList.add('hidden');
+      wsprTxEnable.checked = true;
+      wsprBeaconSend({ runAsked: true });
+    });
+    if (wsprRunAskCancel) wsprRunAskCancel.addEventListener('click', function() { if (wsprRunAsk) wsprRunAsk.classList.add('hidden'); });
+    if (wsprRunEl) wsprRunEl.addEventListener('change', function() {
+      // A new run time while armed re-arms the clock from now; while idle it is just saved.
+      if (window.api.jtcatWsprBeacon) window.api.jtcatWsprBeacon({ runMin: parseInt(wsprRunEl.value, 10) || 0, runAsked: true });
+      wsprRunAsked = true;
     });
     wsprSortBtn.addEventListener('click', function() {
       wsprSortByDx = !wsprSortByDx;
@@ -3424,6 +3646,8 @@ function _applyPopoutTheme(payload) {
     var wsprBeaconStatusEl = document.getElementById('jp-wspr-beacon-status');
     window.api.onJtcatWsprBeaconState(function(st) {
       if (wsprTxEnable) wsprTxEnable.checked = !!(st && st.enabled);
+      if (st && st.runAsked) wsprRunAsked = true;
+      if (st && st.runMin != null && wsprRunEl && !wsprRunAskVisible()) wsprRunEl.value = String(st.runMin);
       // Per-slot feedback. A beacon that says nothing during listen slots is
       // indistinguishable from a dead one (N7BBQ armed at 20%, watched 5
       // silent minutes — a 51% outcome — and reported TX broken).

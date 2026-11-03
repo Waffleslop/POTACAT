@@ -85,6 +85,17 @@ out vec4 fragColor;
 uniform vec4 u_color;
 void main() { fragColor = u_color; }`;
 
+  // A marker colour as the shader wants it: [r,g,b,a] 0..1. Callers pass
+  // either that or a CSS hex ('#e94560'); a hex string indexed as an array
+  // gave the shader '#', 'e', '9' — a dark line instead of the dial's red.
+  function markerRgba(color) {
+    if (Array.isArray(color)) return color;
+    const m = typeof color === 'string' && /^#([0-9a-f]{6})$/i.exec(color);
+    if (!m) return [1, 1, 1, 1];
+    const n = parseInt(m[1], 16);
+    return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255, 1];
+  }
+
   function compile(gl, type, src) {
     const s = gl.createShader(type);
     gl.shaderSource(s, src);
@@ -273,7 +284,7 @@ void main() { fragColor = u_color; }`;
         for (const m of this._markers) {
           const x = (m.pos || 0) * 2 - 1;
           gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([x, -1, x, 1]), gl.DYNAMIC_DRAW);
-          const c = m.color || [1, 1, 1, 1];
+          const c = markerRgba(m.color);
           gl.uniform4f(this._uLineColor, c[0], c[1], c[2], c[3] == null ? 1 : c[3]);
           gl.drawArrays(gl.LINES, 0, 2);
         }

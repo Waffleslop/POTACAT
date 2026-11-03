@@ -226,5 +226,120 @@ check('Settings > My Rigs shows the button for the three CI-V connection types',
   assert.ok(/\['icom', 'civ-tcp', 'icom-network'\]\.includes\(getSelectedRadioType\(\)\)/.test(app));
 });
 
+// Real radios (test/fixtures/icom-scope/), recorded with the 1.13.6 button.
+const RECORDINGS = [
+  { file: 'kw4fm-ic7300-center-7063-200k.txt', who: 'KW4FM IC-7300', mode: 'center', sweeps: 118, centerHz: 7063000, spanHz: 200000, frames: 1307, maxLevel: 121 },
+  { file: 'ic7300-center-14252-100k.txt', who: 'IC-7300 on 20 m', mode: 'center', sweeps: 122, centerHz: 14252000, spanHz: 100000, frames: 1347, maxLevel: 79 },
+  // The radio's 27 15 said 25000: the HALF span (a 50 kHz window).
+  { file: 'nj2dx-ic7300-center-14036-50k.txt', who: 'NJ2DX IC-7300', mode: 'center', sweeps: 122, centerHz: 14036000, spanHz: 50000, frames: 1348, maxLevel: 115 },
+  // Fixed mode: division 1 carries the window's two edges, not a centre and half-span.
+  { file: 'w0egr-ic7300-fixed-14000-14350.txt', who: 'W0EGR IC-7300 (Fixed)', mode: 'fixed', sweeps: 122, centerHz: 14175000, spanHz: 350000, lowHz: 14000000, highHz: 14350000, frames: 1347, maxLevel: 124 },
+  // Scroll-C: edges in the header like Fixed (the window jumps when the dial leaves it).
+  { file: 'ic7300-scrollc-7075-200k.txt', who: 'IC-7300 (Scroll-C)', mode: 'scroll-c', anchor: 'fixed', sweeps: 122, centerHz: 7075000, spanHz: 200000, lowHz: 6975000, highHz: 7175000, frames: 1348, maxLevel: 110 },
+];
+for (const r of RECORDINGS) {
+  check(`${r.who} recording: ${r.sweeps} whole sweeps, ${r.mode} ${r.centerHz / 1e6} MHz, ${r.spanHz / 1000} kHz wide, nothing dropped`, () => {
+    const text = fs.readFileSync(path.join(__dirname, 'fixtures/icom-scope', r.file), 'utf8');
+    const asm = new S.SweepAssembler();
+    const sweeps = [];
+    asm.on('sweep', (s) => sweeps.push(s));
+    for (const c of S.parseCapture(text)) {
+      const f = c.frame;
+      if (c.dir === 'rx' && f[4] === 0x27 && f[5] === 0x00) asm.feed(S.parseScopeFrame(f.subarray(6, f.length - 1)));
+    }
+    const sum = S.summarizeSweeps(sweeps);
+    assert.strictEqual(sum.sweeps, r.sweeps);
+    assert.deepStrictEqual(sum.points, [475]);
+    assert.strictEqual(sum.mode, r.mode);
+    if (r.lowHz) {
+      assert.strictEqual(sweeps[0].header.lowHz, r.lowHz);
+      assert.strictEqual(sweeps[0].header.highHz, r.highHz);
+    }
+    assert.strictEqual(sum.centerHz, r.centerHz);
+    assert.strictEqual(sum.spanHz, r.spanHz);
+    assert.strictEqual(sum.maxLevel, r.maxLevel);
+    assert.ok(sum.maxLevel <= 160, 'levels stay on the 0..160 scale');
+    assert.strictEqual(asm.dropped, 0);
+    assert.deepStrictEqual(S.axisFor(sweeps[0].header), { anchor: r.anchor || r.mode, centerHz: r.centerHz, spanHz: r.spanHz });
+    // The capture's own summary line agrees with what the parser reads back.
+    assert.ok(text.includes(`# result: ${r.frames} data frames, ${r.sweeps} sweeps, points=475 maxLevel=${r.maxLevel} dropped=0`));
+  });
+}
+
+// ─── The live source (plan step 3) ──────────────────────────────────────────
+const A = require('../lib/scope-axis');
+check('a Fixed window is a KNOWN axis at its own centre; every other anchor is drawn around the dial', () => {
+  const fixed = { anchor: 'fixed', centerHz: 14175000, spanHz: 350000 };
+  assert.strictEqual(A.axisCenterFor(fixed, 14074000), 14175000);
+  assert.strictEqual(A.scopeAxis({ ...fixed, centerHz: A.axisCenterFor(fixed, 14074000) }).known, true);
+  assert.strictEqual(A.anchorLabel('fixed'), 'FIXED');
+  // The FT-710's FIX stays assumed: its edges are not readable over CAT.
+  assert.strictEqual(A.scopeAxis({ anchor: 'fix', centerHz: 14074000, spanHz: 10000 }).known, false);
+  assert.strictEqual(A.axisCenterFor({ anchor: 'center', centerHz: 14070000 }, 14074000), 14074000);
+  assert.strictEqual(A.axisCenterFor({ anchor: 'center', centerHz: 14070000 }, 0), 14070000);
+  // W0EGR's sweep: the dial at 14.074 lands 74 kHz into the 350 kHz window (21 %, bin 179.5).
+  const ax = A.scopeAxis({ centerHz: 14175000, spanHz: 350000, anchor: 'fixed' });
+  assert.strictEqual(A.hzToBin(ax, 14074000), (74000 / 350000) * 849);
+});
+check('every surface centres its axis with axisCenterFor', () => {
+  for (const f of ['renderer/scope-popout.js', 'renderer/remote.js', 'renderer/jtcat-popout.js', 'renderer/bandspread-popout.js']) {
+    assert.ok(/axisCenterFor\(/.test(fs.readFileSync(path.join(ROOT, f), 'utf8')), f);
+  }
+});
+check('Station Setup: Hamlib in between, a slow baud, then live', () => {
+  const St = require('../lib/station-setup');
+  const run = (radioType, scope) => St.evaluateChecklist({
+    rig: { id: 'r', name: '7300', model: 'IC-7300', radioType, active: true }, modelInfo: { brand: 'Icom' },
+    live: { callsign: 'K3SBP', grid: 'FN20', catConnected: true, freqHz: 14074000, scope: { icom: true, model: 'IC-7300', ...scope } }, platform: 'win32',
+  }).steps.find((s) => s.id === 'icom-band-scope');
+  const ham = run('hamlib', { overCiv: false });
+  assert.strictEqual(ham.state, 'needs');
+  assert.ok(/Other Rig \(Hamlib\)/.test(ham.detail) && /"Icom \(CI-V\)"/.test(ham.instructions[0].steps[0]));
+  const slow = run('icom', { overCiv: true, baudTooSlow: true, baud: 19200 });
+  assert.strictEqual(slow.state, 'needs');
+  assert.ok(/CI-V USB Baud Rate, choose 115200/.test(slow.instructions[0].steps[0]));
+  assert.strictEqual(run('icom', { overCiv: true, status: 'live' }).state, 'ok');
+});
+check('main.js: the Icom source is wired into the one scope state', () => {
+  assert.ok(/if \(!caps\.nativeScope && icomScopeModel\(\)\) caps\.nativeScope = 'icom';/.test(main));
+  assert.ok(/if \(icom\) return 'icom';/.test(main), 'scopeSourceKind knows icom');
+  assert.ok(/if \(kind === 'icom'\) \{ startIcomScope\(\); return; \}/.test(main));
+  assert.ok(/icomScopeOn \|\| \(yaesuScopeState\.source === 'icom' && !yaesuScopeProc\)\) \{ stopIcomScope\(why\); return; \}/.test(main));
+  const body = (name) => main.slice(main.indexOf(`function ${name}(`), main.indexOf('\n}\n', main.indexOf(`function ${name}(`)));
+  // Below 57600 baud nothing is sent at all.
+  const start = body('startIcomScope');
+  assert.ok(/icomScopeBaudTooSlow\(target\)\)[\s\S]*icomScopeSetBlocked\('baud'/.test(start));
+  assert.ok(start.indexOf("icomScopeSetBlocked('baud'") < start.indexOf('setInterval(icomScopeTick'));
+  // A switched-off scope gets a moment before the output request; silence is asked again.
+  const up = body('icomScopeBringUp');
+  assert.ok(/write\.scopeOn\(true\)[\s\S]*icomScopeWeSet\.scope = true[\s\S]*await sleepMs\(800\)[\s\S]*write\.output\(true\)/.test(up));
+  assert.ok(/icomScopeOutputAsks < 3[\s\S]*write\.output\(true\)/.test(body('icomScopeTick')));
+  // What POTACAT turned on, it turns off.
+  const stop = body('stopIcomScope');
+  assert.ok(/icomScopeWeSet\.output\) \{ link\.sendScope\(IcomScope\.write\.output\(false\)\)/.test(stop));
+  assert.ok(/icomScopeOffTimer = setTimeout\(\(\) => \{[\s\S]*if \(icomScopeOn\) return;[\s\S]*link\.sendScope\(IcomScope\.write\.scopeOn\(false\)\)/.test(stop));
+  // A close followed at once by a reopen (phone tab switch) must not let the
+  // close's delayed "scope off" land under the new session (KI4NHS).
+  assert.ok(/if \(icomScopeOffTimer\) \{ clearTimeout\(icomScopeOffTimer\); icomScopeOffTimer = null; icomScopeWeSet\.scope = true; \}/.test(body('startIcomScope')));
+  // The axis comes from each sweep's header; a Fixed window's centre never follows the dial.
+  assert.ok(/if \(!\(icomScopeOn && yaesuScopeState\.anchor === 'fixed'\)\) yaesuScopeState\.centerHz = hz;/.test(main));
+  // The mode line uses the radio's own word (SCROLL-C is drawn like Fixed, never called FIXED).
+  assert.ok(/st\.modeLabel = String\(s\.header\.modeName \|\| ''\)\.toUpperCase\(\) \|\| null;/.test(main));
+  assert.ok(/modeLabel: s\.modeLabel \|\| null/.test(main), 'the remote payload carries it');
+  for (const f of ['renderer/scope-popout.js', 'renderer/remote.js', 'renderer/jtcat-popout.js']) {
+    assert.ok(/modeLabel\)? \|\| \(/.test(fs.readFileSync(path.join(ROOT, f), 'utf8')), f + ' shows modeLabel first');
+  }
+  // Levels are the radio's own scale, never claimed as dBm.
+  assert.ok(/s\.source === 'icom' && icomScopeEntry\) return \{ unit: 'radio'/.test(main));
+  // A guest's zoom and mode are put back.
+  assert.ok(/if \(r\.source === 'icom'\) \{/.test(body('scopeGuestRestoreOwner')));
+  // The recording refuses to run under a live scope (it turns the output off when it ends).
+  assert.ok(/if \(icomScopeOn\) return \{ ok: false, message: 'The band scope is open/.test(main));
+});
+check('main.js never writes the waveform (27 00) or the Fixed edge table (27 1E)', () => {
+  assert.ok(!/sendScope\(\[\s*0x00\b/.test(main) && !/SUB\.DATA/.test(main));
+  assert.ok(!/0x1E/i.test(main.slice(main.indexOf('// ═══ An Icom\'s own scope over CI-V'), main.indexOf('function startSdrScope('))));
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
