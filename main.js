@@ -25937,17 +25937,22 @@ function handleRemotePtt(state, opts = {}) {
       const gpio = Number.isInteger(target.gpio) ? target.gpio : 3;
       if (win && !win.isDestroyed()) win.webContents.send('cm108-ptt', { state: !!state, gpio });
       else sendCatLog('[PTT] FAILED: the sound-card PTT needs the POTACAT window, which is not open');
-      return;
-    }
-    // A serial line on the interface's own port (Digirig Mobile: RTS to the
-    // radio's PTT pin — the FTM-510D's DATA jack PKS, 2026-10-23).
-    if (target.ptt === 'serial') {
+    } else if (target.ptt === 'serial') {
+      // A serial line on the interface's own port (Digirig Mobile: RTS to the
+      // radio's PTT pin — the FTM-510D's DATA jack PKS, 2026-10-23).
       nocatSerialPtt(!!state, target);
-      return;
+    } else {
+      // Otherwise the radio's VOX keys on the audio that follows. Not a
+      // failure, so not "PTT FAILED" — one quiet line per edge.
+      sendCatLog(`[PTT] ${state ? 'TX' : 'RX'} — no CAT control, the radio's VOX keys on the audio`);
     }
-    // Otherwise the radio's VOX keys on the audio that follows. Not a
-    // failure, so not "PTT FAILED" — one quiet line per edge.
-    sendCatLog(`[PTT] ${state ? 'TX' : 'RX'} — no CAT control, the radio's VOX keys on the audio`);
+    // The TX state is published here too: the ECHOCAT bridge passes the
+    // phone's voice to the radio only while it says "transmitting", so a
+    // no-CAT radio keyed and sent silence (KS9B, Digirig Lite + UV-5X3: the
+    // tune tone went out, his voice never did). A VOX radio needs the audio
+    // to key at all.
+    _remoteTxState = !!state;
+    _broadcastEffectiveTxState();
     return;
   }
   // "Is this a Flex" for PTT means "can the SmartSDR API key it", NOT "is the

@@ -129,7 +129,7 @@ test('FTM-510D (2026-10-23): a no-CAT 2 m / 70 cm mobile keyed through its DATA 
   assert.ok(app.includes("if (pttDl) pttDl.appendChild(opt.cloneNode(true));"), 'the port list is the same one the CW Key Port offers');
   // main: the dispatcher's third path, lines dropped at open, closed on rig change and quit.
   const main = read('main.js');
-  assert.ok(/if \(target\.ptt === 'serial'\) \{\r?\n      nocatSerialPtt\(!!state, target\);\r?\n      return;\r?\n    \}/.test(main), 'handleRemotePtt routes to the serial line');
+  assert.ok(/else if \(target\.ptt === 'serial'\) \{[^}]*nocatSerialPtt\(!!state, target\);\r?\n    \}/.test(main), 'handleRemotePtt routes to the serial line');
   assert.ok(main.includes("function nocatSerialPtt(state, target)") && main.includes("port.set({ dtr: false, rts: false }, () => {"), 'both lines dropped at open');
   assert.ok(main.includes("hupcl: true"), 'lines drop on close');
   assert.ok((main.match(/closeNocatPttPort\(\);/g) || []).length >= 3, 'closed on a rig change (both branches) and at quit');
@@ -201,6 +201,18 @@ test('a squelched FM / no-CAT radio is never reported as a dead audio link (KS9B
 test('FT8 auto-log with no dial from the radio uses the JTCAT band dial, never frequency 0 (KJ5NVM)', () => {
   const main = read('main.js').replace(/\r\n/g, '\n');
   assert.ok(/const dialHz = _currentFreqHz > 0 \? _currentFreqHz : \(_jtcatExpectedDialHz > 0 \? _jtcatExpectedDialHz : 0\);\n[\s\S]{0,400}const freqKhz = dialHz \? dialHz \/ 1000 : 0;/.test(main));
+});
+
+test('KS9B: a no-CAT key-down publishes the TX state, or the ECHOCAT bridge never passes the voice', () => {
+  const main = read('main.js').replace(/\r\n/g, '\n');
+  const at = main.indexOf("  if (target && target.type === 'none') {\n    // No CAT control, but the USB sound card keys");
+  assert.ok(at > 0, 'the no-CAT branch of handleRemotePtt');
+  const branch = main.slice(at, main.indexOf('\n  }\n', at));
+  assert.strictEqual((branch.match(/\breturn;/g) || []).length, 1, 'one exit, after the state is published');
+  assert.ok(/_remoteTxState = !!state;\n\s*_broadcastEffectiveTxState\(\);\n\s*return;$/.test(branch), 'cm108, serial and VOX all publish it');
+  // The bridge's gate follows that broadcast.
+  const bridge = read('renderer/remote-audio.html');
+  assert.ok(/_sinkTxGate\.gain\.value = kiwiTxMuted \? 1 : 0/.test(bridge));
 });
 
 console.log(`\nNo CAT control: ${passed} passed, ${failed} failed`);
