@@ -34898,7 +34898,10 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
   // stays: it is the FT-710's own mode E read back, and a tune that re-sends
   // it must leave that radio where it is (see the FT-710 model).
   if (mode && /^(WSPR|JS8|JTTY|PSK\d+)$/i.test(String(mode))) mode = 'DIGU';
-  const resolvedMode = (mode || '').toUpperCase() === 'SSB' ? (tuneFreqHz >= 10000000 ? 'USB' : 'LSB') : mode;
+  // SSB follows the band plan, 60 m included (USB there by rule): a bare
+  // 10 MHz split sent a 60 m SSB spot to the radio as LSB. The codecs had the
+  // 60 m rule all along, but they never saw SSB: this line resolved it first.
+  const resolvedMode = (mode || '').toUpperCase() === 'SSB' ? require('./lib/rig-utils').ssbSideband(tuneFreqHz) : mode;
   // Suppress stale mode broadcasts to ECHOCAT for 2s — prevents flicker when
   // frequency-triggered status broadcasts include the OLD mode before polling catches up
   if (mode) _modeSuppressUntil = Date.now() + 2000;

@@ -184,6 +184,7 @@ const TESTS = [
   'test/sstv-rx-ended-test.js', // boblk9tc: a decode that ends with no picture leaves Receiving on ECHOCAT
   'test/cloud-tunnel-claim-test.js', // KQ5O: one shack per Cloud address; Off keeps it for the others
   'test/icom-ptt-memory-mode-test.js', // nj7n_nate: no frequency re-send around an Icom PTT mode swap (memory mode)
+  'test/ssb-sideband-tune-test.js', // a 60 m SSB spot tunes USB
   'test/vfo-sdr-volume-test.js', // #118 df1vb: the SDR Volume row stands in when the VOL knob is hidden
   'test/wspr-power-memory-test.js',
   'test/js8-native-test.js',
