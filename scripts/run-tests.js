@@ -180,6 +180,7 @@ const TESTS = [
   'test/modem-bridge-test.js',
   'test/wspr-daily-test.js',
   'test/wspr-spot-time-test.js', // W5JSS: wsprnet time = the 2-minute window start, not the decode finish
+  'test/wsprd-depth-test.js', // N5IRU: a slow PC steps wsprd's search down instead of timing out every window
   'test/vfo-sdr-volume-test.js', // #118 df1vb: the SDR Volume row stands in when the VOL knob is hidden
   'test/wspr-power-memory-test.js',
   'test/js8-native-test.js',
