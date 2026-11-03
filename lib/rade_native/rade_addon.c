@@ -9,6 +9,11 @@
  *   open()               → handle
  *   close(handle)
  *   tx(handle, Int16Array speech_in)  → Int16Array modem_out (8kHz mono)
+ *     speech_in is one nSpeech (10 ms) frame. rade_tx() encodes the features
+ *     of a whole modem frame (nFeatures, 12 speech frames), so modem_out is
+ *     empty until the 12th frame, then one nModem (120 ms) modem frame.
+ *   txEoo(handle)        → Int16Array end-of-over modem frame, sent after the
+ *     last tx(); speech frames not yet encoded are dropped.
  *   rx(handle, Int16Array modem_in)   → { speech: Int16Array, sync: int, snr: int }
  *   getNin(handle)       → int
  *   getInfo(handle)      → { speechRate, modemRate, nSpeech, nModem }
@@ -65,6 +70,9 @@ struct rade_handle {
   int n_features;
   int nin_max;
   int n_tx_out;
+  int n_tx_eoo_out;
+  float *tx_features;         /* n_features: the speech frames of the next modem frame */
+  int tx_frames;              /* speech frames collected in tx_features */
   int fargan_initialized;     /* 1 after first fargan_cont call */
   /* Hilbert transform delay line for streaming real→IQ */
   float hilbert_delay[HILBERT_NTAPS];
@@ -114,6 +122,16 @@ static napi_value Open(napi_env env, napi_callback_info info) {
   handles[slot].n_features = rade_n_features_in_out(r);
   handles[slot].nin_max = rade_nin_max(r);
   handles[slot].n_tx_out = rade_n_tx_out(r);
+  handles[slot].n_tx_eoo_out = rade_n_tx_eoo_out(r);
+  handles[slot].tx_features = (float *)calloc(handles[slot].n_features, sizeof(float));
+  if (!handles[slot].tx_features) {
+    rade_close(r);
+    lpcnet_encoder_destroy(enc);
+    free(fargan);
+    memset(&handles[slot], 0, sizeof(struct rade_handle));
+    napi_throw_error(env, NULL, "Out of memory opening RADE");
+    return NULL;
+  }
 
   napi_value result;
   napi_create_int32(env, slot, &result);
@@ -136,6 +154,7 @@ static napi_value Close(napi_env env, napi_callback_info info) {
   rade_close(handles[slot].r);
   if (handles[slot].encoder) lpcnet_encoder_destroy(handles[slot].encoder);
   if (handles[slot].fargan) free(handles[slot].fargan);
+  free(handles[slot].tx_features);
   memset(&handles[slot], 0, sizeof(struct rade_handle));
 
   napi_value undef;
@@ -165,6 +184,23 @@ static napi_value GetNin(napi_env env, napi_callback_info info) {
   return result;
 }
 
+/* Complex OFDM to real 8kHz audio (take real part, scale to Int16) */
+static napi_value modem_to_int16(napi_env env, const RADE_COMP *tx_out, int n) {
+  napi_value out_buf, out_arr;
+  void *out_data;
+  napi_create_arraybuffer(env, n * sizeof(short), &out_data, &out_buf);
+  napi_create_typedarray(env, napi_int16_array, n, out_buf, 0, &out_arr);
+  short *modem_out = (short *)out_data;
+
+  for (int i = 0; i < n; i++) {
+    float val = tx_out[i].real * 32768.0f;
+    if (val > 32767.0f) val = 32767.0f;
+    if (val < -32767.0f) val = -32767.0f;
+    modem_out[i] = (short)val;
+  }
+  return out_arr;
+}
+
 /* tx(handle, Int16Array speech_16k) → Int16Array modem_8k */
 static napi_value Tx(napi_env env, napi_callback_info info) {
   size_t argc = 2;
@@ -190,32 +226,46 @@ static napi_value Tx(napi_env env, napi_callback_info info) {
     napi_throw_error(env, NULL, "speech must be Int16Array");
     return NULL;
   }
+  if (length != LPCNET_FRAME_SIZE) {
+    napi_throw_error(env, NULL, "speech must be one nSpeech frame");
+    return NULL;
+  }
   short *pcm = (short *)data;
 
-  /* Extract features from speech using LPCNet encoder */
-  float features[NB_TOTAL_FEATURES];
+  /* Extract this frame's features into the modem frame being collected */
+  float *features = &h->tx_features[h->tx_frames * NB_TOTAL_FEATURES];
   lpcnet_compute_single_frame_features(h->encoder, pcm, features, h->arch);
+  h->tx_frames++;
+  if (h->tx_frames * NB_TOTAL_FEATURES < h->n_features) return modem_to_int16(env, NULL, 0);
+  h->tx_frames = 0;
 
-  /* Encode features to OFDM modem signal */
-  int n_tx = h->n_tx_out;
-  RADE_COMP *tx_out = (RADE_COMP *)calloc(n_tx, sizeof(RADE_COMP));
-  int n_written = rade_tx(h->r, tx_out, features);
-
-  /* Convert complex OFDM to real 8kHz audio (take real part, scale to Int16) */
-  napi_value out_buf, out_arr;
-  void *out_data;
-  napi_create_arraybuffer(env, n_written * sizeof(short), &out_data, &out_buf);
-  napi_create_typedarray(env, napi_int16_array, n_written, out_buf, 0, &out_arr);
-  short *modem_out = (short *)out_data;
-
-  for (int i = 0; i < n_written; i++) {
-    float val = tx_out[i].real * 32768.0f;
-    if (val > 32767.0f) val = 32767.0f;
-    if (val < -32767.0f) val = -32767.0f;
-    modem_out[i] = (short)val;
-  }
-
+  /* Encode the modem frame's features to OFDM modem signal */
+  RADE_COMP *tx_out = (RADE_COMP *)calloc(h->n_tx_out, sizeof(RADE_COMP));
+  int n_written = rade_tx(h->r, tx_out, h->tx_features);
+  napi_value out_arr = modem_to_int16(env, tx_out, n_written);
   free(tx_out);
+  return out_arr;
+}
+
+/* txEoo(handle) → Int16Array modem_8k */
+static napi_value TxEoo(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value args[1];
+  napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+
+  int32_t slot;
+  napi_get_value_int32(env, args[0], &slot);
+  if (slot < 0 || slot >= MAX_HANDLES || !handles[slot].r) {
+    napi_throw_error(env, NULL, "Invalid RADE handle");
+    return NULL;
+  }
+  struct rade_handle *h = &handles[slot];
+
+  h->tx_frames = 0;
+  RADE_COMP *eoo_out = (RADE_COMP *)calloc(h->n_tx_eoo_out, sizeof(RADE_COMP));
+  int n_written = rade_tx_eoo(h->r, eoo_out);
+  napi_value out_arr = modem_to_int16(env, eoo_out, n_written);
+  free(eoo_out);
   return out_arr;
 }
 
@@ -367,6 +417,9 @@ static napi_value Init(napi_env env, napi_value exports) {
 
   napi_create_function(env, "tx", NAPI_AUTO_LENGTH, Tx, NULL, &fn);
   napi_set_named_property(env, exports, "tx", fn);
+
+  napi_create_function(env, "txEoo", NAPI_AUTO_LENGTH, TxEoo, NULL, &fn);
+  napi_set_named_property(env, exports, "txEoo", fn);
 
   napi_create_function(env, "rx", NAPI_AUTO_LENGTH, Rx, NULL, &fn);
   napi_set_named_property(env, exports, "rx", fn);
