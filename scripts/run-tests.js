@@ -542,6 +542,7 @@ const TESTS = [
   'test/rigctld-data-fm-test.js', // #259: DIGFM/DIGAM have rigctld tokens (PKTFM/PKTAM), so a packet key-down on FM sends the DATA mode
   'test/launcher-cert-der-test.js', // Remote Launcher cert: minimal DER serial; a saved cert that doesn't parse is regenerated
   'test/pota-hunter-import-test.js',
+  'test/pota-sync-hunter-fetch-test.js', // the hunter log download always settles: timeout, size and entry caps
 ];
 
 const root = path.join(__dirname, '..');
