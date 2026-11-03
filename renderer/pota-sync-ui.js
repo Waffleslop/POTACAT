@@ -155,6 +155,8 @@
   const hunterImportBtn = document.getElementById('pota-hunter-import');
   const hunterPreviewBtn = document.getElementById('pota-hunter-import-preview');
   const hunterImportStatus = document.getElementById('pota-hunter-import-status');
+  // Off by default and not remembered: adding contacts is a per-run choice.
+  const hunterAddMissing = document.getElementById('pota-hunter-import-add');
   if (hunterImportBtn && window.api.potaHunterImport) {
     if (window.api.onPotaHunterImportProgress) {
       window.api.onPotaHunterImportProgress((p) => {
@@ -166,9 +168,11 @@
     const runHunterImport = async (dryRun) => {
       hunterImportBtn.disabled = true;
       if (hunterPreviewBtn) hunterPreviewBtn.disabled = true;
+      if (hunterAddMissing) hunterAddMissing.disabled = true;
       hunterImportStatus.textContent = 'Downloading…';
       try {
-        const res = await window.api.potaHunterImport({ dryRun });
+        const addMissing = !!(hunterAddMissing && hunterAddMissing.checked);
+        const res = await window.api.potaHunterImport({ dryRun, addMissing });
         if (!res || !res.ok) {
           hunterImportStatus.textContent = '';
           alert('POTA.app hunter log ' + (dryRun ? 'preview' : 'import') + ' failed: ' + ((res && res.error) || 'unknown error'));
@@ -177,7 +181,8 @@
         // The full summary is in main's dialog; keep the counts on screen.
         const would = res.dryRun ? 'would be ' : '';
         hunterImportStatus.textContent = (res.dryRun ? 'Preview: ' : '') +
-          `${res.downloaded.toLocaleString()} downloaded · ${res.updated.toLocaleString()} ${would}updated · ${res.added.toLocaleString()} ${would}added` +
+          `${res.downloaded.toLocaleString()} downloaded · ${res.updated.toLocaleString()} ${would}updated · ` +
+          (res.addMissing ? `${res.added.toLocaleString()} ${would}added` : `${(res.notAdded || 0).toLocaleString()} missing (not added)`) +
           (res.conflicts ? ` · ${res.conflicts.toLocaleString()} park conflicts (not changed)` : '');
       } catch (err) {
         hunterImportStatus.textContent = '';
@@ -185,6 +190,7 @@
       } finally {
         hunterImportBtn.disabled = false;
         if (hunterPreviewBtn) hunterPreviewBtn.disabled = false;
+        if (hunterAddMissing) hunterAddMissing.disabled = false;
       }
     };
     hunterImportBtn.addEventListener('click', () => runHunterImport(false));

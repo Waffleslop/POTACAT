@@ -36053,14 +36053,18 @@ app.whenReady().then(() => {
   // matching QSO with no park gets pota.app's park refs, a matching QSO whose
   // park disagrees is left alone and reported as a CONFLICT, an activator's
   // repeated row or a contact already in the log is a DUPLICATE (not added),
-  // and a contact the log doesn't have is added (lib/pota-hunter-import.js). One backup, one
+  // and a contact the log doesn't have is added only when the operator ticks
+  // "Also add contacts missing from my log" (lib/pota-hunter-import.js). One backup, one
   // write, one journal batch, and a CSV of every decision for the operator
   // to review.
   let potaHunterImportRunning = false;
   // { dryRun: true } downloads and plans the same way but changes nothing:
   // no backup, no write, no journal; only the review CSV, marked as a dry run.
+  // { addMissing: true } (the Settings checkbox, off by default) also adds
+  // contacts the log doesn't have; without it they are only reported.
   ipcMain.handle('pota-hunter-import', async (event, opts) => {
     const dryRun = !!(opts && opts.dryRun);
+    const addMissing = !!(opts && opts.addMissing === true);
     if (potaHunterImportRunning) return { ok: false, error: 'A hunter log import is already running.' };
     potaHunterImportRunning = true;
     const parentWin = BrowserWindow.fromWebContents(event.sender) || win;
@@ -36075,14 +36079,14 @@ app.whenReady().then(() => {
       let plan = null;
       let changes = [];
       if (dryRun) {
-        plan = PotaHunterImport.planHunterImport(QsoLog.readLog(logPath), entries, { myCalls });
+        plan = PotaHunterImport.planHunterImport(QsoLog.readLog(logPath), entries, { myCalls, addMissing });
       } else {
         if (fs.existsSync(logPath)) {
           backupPath = `${logPath}.pre-pota-hunter-import-${stamp}.bak`;
           fs.copyFileSync(logPath, backupPath);
         }
         ({ changes } = mutateQsoLog((qsos) => {
-          plan = PotaHunterImport.planHunterImport(qsos, entries, { myCalls });
+          plan = PotaHunterImport.planHunterImport(qsos, entries, { myCalls, addMissing });
           if (!plan.updates.length && !plan.adds.length) return false;
           return PotaHunterImport.applyHunterPlan(qsos, plan);
         }));
@@ -36097,10 +36101,12 @@ app.whenReady().then(() => {
       const result = {
         ok: true,
         dryRun,
+        addMissing,
         downloaded: entries.length,
         reported: count,
         updated: plan.updates.length,
         added: plan.adds.length,
+        notAdded: plan.notAdded.length,
         unchanged: plan.unchanged.length,
         conflicts: plan.conflicts.length,
         duplicates: plan.duplicates.length,
@@ -36110,7 +36116,9 @@ app.whenReady().then(() => {
       };
       sendCatLog(`[pota-hunter-import]${dryRun ? ' DRY RUN, nothing changed:' : ''} ${entries.length} of ${count} entries downloaded: `
         + `${result.updated} ${dryRun ? 'would be ' : ''}updated, ${result.added} ${dryRun ? 'would be ' : ''}added, `
-        + `${result.unchanged} unchanged, ${result.conflicts} park conflicts (not changed), ${result.duplicates} duplicates (not added),${result.skipped} skipped. Review: ${reviewPath}`);
+        + `${result.notAdded} not added (adding is off), ${result.unchanged} unchanged, `
+        + `${result.conflicts} park conflicts (not changed), ${result.duplicates} duplicates (not added), `
+        + `${result.skipped} skipped. Review: ${reviewPath}`);
 
       if (changes.length) {
         loadWorkedQsos();
@@ -36120,13 +36128,16 @@ app.whenReady().then(() => {
         if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) qsoPopoutWin.webContents.send('qso-popout-refresh');
       }
 
-      const contacts = result.updated + result.added + result.unchanged + result.conflicts + result.duplicates;
+      const contacts = result.updated + result.added + result.notAdded + result.unchanged + result.conflicts + result.duplicates;
       const detail = [
         `Hunter log entries downloaded: ${entries.length.toLocaleString()} (POTA.app reports ${count.toLocaleString()}).`,
         `That is ${contacts.toLocaleString()} contacts: a 2-fer is one entry per park.`,
         '',
         `${result.updated.toLocaleString()} QSOs ${dryRun ? 'would be ' : ''}updated with park references.`,
-        `${result.added.toLocaleString()} QSOs ${dryRun ? 'would be ' : ''}added to your logbook.`,
+        addMissing
+          ? `${result.added.toLocaleString()} QSOs ${dryRun ? 'would be ' : ''}added to your logbook.`
+          : `${result.notAdded.toLocaleString()} contacts are in POTA.app but not in your log. They were not added: `
+            + 'tick "Also add contacts missing from my log" to add them (NOT_ADDED rows in the review log).',
         `${result.unchanged.toLocaleString()} already had their park.`,
       ];
       if (result.conflicts) {
@@ -36137,7 +36148,10 @@ app.whenReady().then(() => {
         detail.push(`${result.duplicates.toLocaleString()} duplicates not added: the activator logged the contact twice, `
           + 'or it is already in your log (DUPLICATE rows in the review log).');
       }
-      if (result.skipped) detail.push(`${result.skipped.toLocaleString()} entries skipped (see the review log).`);
+      if (result.skipped) {
+        detail.push(`${result.skipped.toLocaleString()} skipped: unreadable entries, or contacts POTA.app gives no usable mode for `
+          + '(only DATA), which are never added (SKIPPED rows in the review log).');
+      }
       if (dryRun) detail.push('', 'Dry run: your logbook was not changed. Run Import hunter log to apply.');
       if (backupPath) detail.push('', `Your log before the import was saved to:\n${backupPath}`);
       const { response } = await dialog.showMessageBox(parentWin, {

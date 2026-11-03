@@ -32,7 +32,11 @@ const local = (over) => ({
   CALL: 'K1ABC', QSO_DATE: '20260501', TIME_ON: '142300', BAND: '20m', MODE: 'SSB', ...over,
 });
 
-// One plan covering every outcome, shared by the tests below.
+// Adding contacts is opt-in (addMissing, off by default); tests of what an
+// add looks like pass it.
+const ADD = { addMissing: true };
+
+// One plan covering every outcome, shared by the tests below (adding on).
 function scenario() {
   const qsos = [
     local(), // matches, no park yet
@@ -50,7 +54,7 @@ function scenario() {
     entry({ station_callsign: 'W2XYZ', qsoDateTime: '2026-05-01T15:05:00', band: '40M', reference: 'US-0001' }), // wrong band
     entry({ qsoDateTime: '2026-05-01T18:00:00', reference: 'US-1234' }), // outside the window
   ];
-  return { qsos, entries, plan: H.planHunterImport(qsos, entries, { myCalls: ['N0ME'] }) };
+  return { qsos, entries, plan: H.planHunterImport(qsos, entries, { myCalls: ['N0ME'], addMissing: true }) };
 }
 
 console.log('POTA.app hunter log import');
@@ -148,7 +152,7 @@ test('not a dupe: another band, another mode class, or outside the window of the
     entry({ qsoDateTime: '2026-05-01T14:24:00', band: '40M' }),
     entry({ qsoDateTime: '2026-05-01T14:25:00', mode: 'CW' }),
     entry({ qsoDateTime: '2026-05-01T14:40:00' }), // 17 min after the local QSO
-  ]);
+  ], ADD);
   assert.strictEqual(plan.updates.length, 1);
   assert.strictEqual(plan.duplicates.length, 0);
   assert.deepStrictEqual(plan.adds.map((a) => [a.record.BAND, a.record.MODE, a.record.TIME_ON]),
@@ -158,7 +162,7 @@ test('no local QSO: two rows a minute apart add one QSO, the second is a DUPLICA
   const plan = H.planHunterImport([], [
     entry({ qsoDateTime: '2026-05-01T14:22:00' }),
     entry({ qsoDateTime: '2026-05-01T14:23:00' }),
-  ]);
+  ], ADD);
   assert.deepStrictEqual(plan.adds.map((a) => a.record.TIME_ON), ['142200'], 'the earlier row is kept');
   assert.deepStrictEqual(plan.duplicates.map((d) => d.kind), ['repeat']);
 });
@@ -166,7 +170,7 @@ test('no local QSO: rows past planImport\'s 3 minutes are separate contacts', ()
   const plan = H.planHunterImport([], [
     entry({ qsoDateTime: '2026-05-01T14:22:00' }),
     entry({ qsoDateTime: '2026-05-01T14:26:00' }),
-  ]);
+  ], ADD);
   assert.strictEqual(plan.adds.length, 2);
   assert.strictEqual(plan.duplicates.length, 0);
 });
@@ -315,17 +319,114 @@ test('main: conflicts are counted and reported, never applied', () => {
   assert.ok(!/addParkRefs/.test(read('lib', 'pota-hunter-import.js')), 'the append-a-park helper is gone');
 });
 
+// Modes on added records, and adding as an opt-in (K3SBP review). LoTW and QRZ
+// reject a MODE ADIF doesn't define; added records come from the activator's
+// log with no frequency or reports, so adding is the operator's choice.
+const addOne = (over, opts = ADD) => H.planHunterImport([], [entry({ station_callsign: 'W9ADD', ...over })], opts);
+test('adding is off by default: a missing contact is NOT_ADDED, nothing appended', () => {
+  const qsos = [];
+  const plan = H.planHunterImport(qsos, [entry({ station_callsign: 'W9ADD' })]);
+  assert.strictEqual(plan.adds.length, 0);
+  assert.deepStrictEqual(plan.notAdded.map((n) => n.contact.call), ['W9ADD']);
+  H.applyHunterPlan(qsos, plan);
+  assert.strictEqual(qsos.length, 0);
+  const off = H.planHunterImport([], [entry({ station_callsign: 'W9ADD' })], { addMissing: 'yes' });
+  assert.strictEqual(off.adds.length, 0, 'only addMissing === true adds');
+});
+test('adding off still fills parks, and dupes/skips are reported the same either way', () => {
+  const entries = [entry({ qsoDateTime: '2026-05-01T14:22:00' }), entry({ qsoDateTime: '2026-05-01T14:23:00' }),
+    entry({ station_callsign: 'W9DAT', mode: 'DATA' })];
+  const off = H.planHunterImport([local()], entries);
+  const on = H.planHunterImport([local()], entries, ADD);
+  for (const p of [off, on]) {
+    assert.strictEqual(p.updates.length, 1, 'the park is filled');
+    assert.strictEqual(p.duplicates.length, 1);
+    assert.strictEqual(p.skipped.length, 1);
+  }
+});
+test('DATA with no local match is never added, even with adding on: SKIPPED', () => {
+  const plan = addOne({ mode: 'DATA' });
+  assert.strictEqual(plan.adds.length, 0);
+  assert.strictEqual(plan.notAdded.length, 0);
+  assert.deepStrictEqual(plan.skipped.map((s) => [s.contact.call, s.reason]),
+    [['W9ADD', 'pota.app gives only DATA, not the digital mode: not added']]);
+  assert.strictEqual(addOne({ mode: '' }).skipped[0].reason, 'pota.app gives no mode: not added');
+});
+test('DATA still matches a local FT8 to fill its park', () => {
+  const plan = H.planHunterImport([local({ MODE: 'FT8' })], [entry({ mode: 'DATA' })], ADD);
+  assert.strictEqual(plan.updates.length, 1);
+  assert.strictEqual(plan.skipped.length, 0);
+});
+test('added modes are ADIF: FT4 -> MFSK/FT4, PSK31 -> PSK/PSK31, JS8 -> MFSK/JS8, FT8/CW/SSB as-is', () => {
+  const ms = (mode) => { const r = addOne({ mode }).adds[0].record; return [r.MODE, r.SUBMODE]; };
+  assert.deepStrictEqual(ms('FT4'), ['MFSK', 'FT4']);
+  assert.deepStrictEqual(ms('ft4'), ['MFSK', 'FT4'], 'case-insensitive');
+  assert.deepStrictEqual(ms('PSK31'), ['PSK', 'PSK31'], 'via adifModeSubmode');
+  assert.deepStrictEqual(ms('JS8'), ['MFSK', 'JS8'], 'via adifModeSubmode');
+  assert.deepStrictEqual(ms('FT8'), ['FT8', undefined]);
+  assert.deepStrictEqual(ms('CW'), ['CW', undefined]);
+  assert.deepStrictEqual(ms('SSB'), ['SSB', undefined]);
+  assert.ok(/adifModeSubmode\(m\)/.test(read('lib', 'pota-hunter-import.js')), 'uses lib/adif-writer.js adifModeSubmode');
+});
+test('PHONE is added as SSB on HF and 6 m, FM on 2 m and up, and says it was inferred', () => {
+  const phone = (band) => addOne({ mode: 'PHONE', band }).adds[0];
+  assert.strictEqual(phone('20M').record.MODE, 'SSB');
+  assert.strictEqual(phone('6M').record.MODE, 'SSB');
+  assert.strictEqual(phone('2M').record.MODE, 'FM');
+  assert.strictEqual(phone('70CM').record.MODE, 'FM');
+  assert.strictEqual(phone('20M').modeInferred, true);
+  assert.strictEqual(addOne({ mode: 'SSB' }).adds[0].modeInferred, false);
+});
+test('an added FT4 record is the same contact as a logged MFSK/FT4 one (planImport)', () => {
+  const plan = H.planHunterImport([], [
+    entry({ station_callsign: 'W9FT', mode: 'FT4', qsoDateTime: '2026-05-01T14:20:00' }),
+    entry({ station_callsign: 'W9FT', mode: 'FT4', qsoDateTime: '2026-05-01T14:21:00' }),
+  ], ADD);
+  assert.strictEqual(plan.adds.length, 1);
+  assert.deepStrictEqual(plan.duplicates.map((d) => d.kind), ['repeat']);
+});
+test('review CSV: NOT_ADDED, ADDED and SKIPPED rows say what the mode is or why', () => {
+  const entries = [entry({ station_callsign: 'W9FT', mode: 'FT4' }), entry({ station_callsign: 'W9PH', mode: 'PHONE', band: '2M' }),
+    entry({ station_callsign: 'W9DAT', mode: 'DATA' })];
+  const off = H.planToCsv(H.planHunterImport([], entries)).trim().split('\r\n');
+  assert.ok(off.includes('SUMMARY,not added (adding is off),,,,,,,,,,,2'));
+  const ft4 = off.find((l) => l.startsWith('NOT_ADDED,W9FT,'));
+  assert.ok(ft4.includes('would be logged as MFSK/FT4'), ft4);
+  assert.ok(ft4.includes('tick ""Also add contacts missing from my log"" to add it'), ft4);
+  assert.ok(off.find((l) => l.startsWith('NOT_ADDED,W9PH,')).includes('pota.app says PHONE: FM inferred from the band'));
+  const skip = off.find((l) => l.startsWith('SKIPPED,W9DAT,'));
+  assert.ok(skip.startsWith('SKIPPED,W9DAT,20260501,142000,20m,DATA,US-1234,'), skip);
+  assert.ok(skip.endsWith(',"pota.app gives only DATA, not the digital mode: not added"'), skip); // quoted: has a comma
+  const on = H.planToCsv(H.planHunterImport([], entries, ADD));
+  assert.ok(/ADDED,W9FT,[^\r\n]*logged as MFSK\/FT4/.test(on));
+  assert.ok(!on.includes('NOT_ADDED,'));
+});
+test('main + Settings: the add checkbox is off by default and reaches the planner', () => {
+  const html = read('renderer', 'index.html');
+  const box = (html.match(/<input[^>]*id="pota-hunter-import-add"[^>]*>/) || [])[0];
+  assert.ok(box, 'the checkbox exists');
+  assert.ok(!/\bchecked\b/.test(box), 'unchecked by default');
+  const ui = read('renderer', 'pota-sync-ui.js');
+  assert.ok(ui.includes('const addMissing = !!(hunterAddMissing && hunterAddMissing.checked);'));
+  const main = read('main.js');
+  const start = main.indexOf("ipcMain.handle('pota-hunter-import'");
+  const h = main.slice(start, main.indexOf('ipcMain.handle(', start + 10));
+  assert.ok(h.includes('const addMissing = !!(opts && opts.addMissing === true);'));
+  assert.strictEqual((h.match(/\{ myCalls, addMissing \}/g) || []).length, 2, 'dry run and import plan the same way');
+});
+
 test('review CSV: summary counts first, then one row per decision', () => {
   const { qsos, entries, plan } = scenario();
   H.applyHunterPlan(qsos, plan);
   const lines = H.planToCsv(plan, { downloaded: entries.length, reported: 9 }).trim().split('\r\n');
   assert.ok(lines[0].startsWith('action,call,qso_date,time_on,'));
-  assert.deepStrictEqual(lines.slice(1, 10), [
+  assert.deepStrictEqual(lines.slice(1, 11), [
     'SUMMARY,mode,,,,,,,,,,,import',
     'SUMMARY,entries downloaded,,,,,,,,,,,8',
     'SUMMARY,entries pota.app reports,,,,,,,,,,,9',
     'SUMMARY,updated,,,,,,,,,,,3',
     'SUMMARY,added,,,,,,,,,,,3',
+    'SUMMARY,not added (adding is off),,,,,,,,,,,0',
     'SUMMARY,unchanged,,,,,,,,,,,1',
     'SUMMARY,conflicts,,,,,,,,,,,0',
     'SUMMARY,duplicates,,,,,,,,,,,0',
@@ -350,7 +451,7 @@ test('through mutateLog on a real file: journaled, versioned, uuid in the review
     let plan;
     const journaled = [];
     const { changes } = mutateLog(logPath, (qsos) => {
-      plan = H.planHunterImport(qsos, [entry(), entry({ station_callsign: 'W5NEW', reference: 'US-5555' })]);
+      plan = H.planHunterImport(qsos, [entry(), entry({ station_callsign: 'W5NEW', reference: 'US-5555' })], ADD);
       return H.applyHunterPlan(qsos, plan);
     }, { sink: (c) => journaled.push(...c) });
     assert.deepStrictEqual(changes.map((c) => c.action), ['update', 'create']);
@@ -401,7 +502,7 @@ test('preload + Settings: Import and Preview reach the handler', () => {
   assert.ok(html.includes('id="pota-hunter-import"'));
   assert.ok(html.includes('id="pota-hunter-import-preview"'));
   const ui = read('renderer', 'pota-sync-ui.js');
-  assert.ok(ui.includes('window.api.potaHunterImport({ dryRun })'));
+  assert.ok(ui.includes('window.api.potaHunterImport({ dryRun, addMissing })'));
   assert.ok(ui.includes("hunterImportBtn.addEventListener('click', () => runHunterImport(false));"));
   assert.ok(ui.includes("hunterPreviewBtn.addEventListener('click', () => runHunterImport(true));"));
 });
