@@ -44,7 +44,48 @@ test('no class, no frequency or an unknown mode never refuses', () => {
   assert.strictEqual(refuse(14074000, 'DATA', undefined), null);
   assert.strictEqual(refuse(0, 'DATA', 'us_technician'), null);
   assert.strictEqual(refuse(28450000, 'XYZ', 'us_technician'), null);
-  assert.strictEqual(refuse(14074000, 'DATA', 'us_advanced'), null, 'a class with no table must not refuse');
+  assert.strictEqual(refuse(14074000, 'XYZ', 'us_advanced'), null);
+});
+
+// 2026-11-03: the tables ended at 6 m, so FT8 on 2 m was refused for every
+// class ("tune within your privileges" on 144.174).
+test('2 m, 1.25 m, 70 cm, 33 cm, 23 cm: every US class may transmit', () => {
+  for (const cls of ['us_technician', 'us_general', 'us_advanced', 'us_extra']) {
+    assert.strictEqual(refuse(144174000, 'DATA', cls), null, '2 m FT8 ' + cls);
+    assert.strictEqual(refuse(146520000, 'FM', cls), null, '2 m FM ' + cls);
+    assert.strictEqual(refuse(223500000, 'FM', cls), null, '1.25 m ' + cls);
+    assert.strictEqual(refuse(432065000, 'DATA', cls), null, '70 cm ' + cls);
+    assert.strictEqual(refuse(903100000, 'USB', cls), null, '33 cm ' + cls);
+    assert.strictEqual(refuse(1296100000, 'CW', cls), null, '23 cm ' + cls);
+  }
+  assert.strictEqual(refuse(144174000, 'DATA', 'ca_basic'), null);
+  assert.strictEqual(refuse(432065000, 'DATA', 'ca_honours'), null);
+});
+test('the bottom 100 kHz of 6 m and 2 m is CW only', () => {
+  assert.ok(refuse(144050000, 'DATA', 'us_extra'));
+  assert.ok(refuse(50050000, 'USB', 'us_general'));
+  assert.strictEqual(refuse(144050000, 'CW', 'us_technician'), null);
+  assert.strictEqual(refuse(50313000, 'DATA', 'us_technician'), null);
+});
+test('60 m: General and up on the channels and 5351.5-5366.5, never Technician', () => {
+  assert.strictEqual(refuse(5357000, 'DATA', 'us_general'), null);
+  assert.strictEqual(refuse(5332000, 'USB', 'us_extra'), null);
+  assert.ok(refuse(5357000, 'DATA', 'us_technician'));
+  assert.ok(refuse(5340000, 'DATA', 'us_extra'), 'between channels');
+});
+test('Technician: CW only on 80, 40 and 15 m; US Advanced has its own table', () => {
+  assert.strictEqual(refuse(7030000, 'CW', 'us_technician'), null);
+  assert.ok(refuse(7074000, 'DATA', 'us_technician'));
+  assert.strictEqual(refuse(14074000, 'DATA', 'us_advanced'), null);
+  assert.ok(refuse(14160000, 'USB', 'us_advanced'));
+  assert.strictEqual(refuse(14200000, 'USB', 'us_advanced'), null);
+});
+test('renderer/bandspread-popout.js carries the same tables', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'bandspread-popout.js'), 'utf8');
+  const m = src.match(/const PRIVILEGE_MAP = (\{[\s\S]*?\r?\n\};)/);
+  assert.ok(m, 'table found');
+  const copy = Function('return ' + m[1].replace(/;$/, ''))();
+  assert.deepStrictEqual(copy, P.PRIVILEGE_MAP);
 });
 
 test('rig data-mode names are data: USB-D, USB-D2, DIGU, PKT-U, DATA-U', () => {

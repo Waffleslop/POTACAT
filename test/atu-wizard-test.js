@@ -23,10 +23,12 @@ const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
 console.log('ATU wizard — plan');
 const HF = ['40m', '30m', '20m', '17m', '15m', '12m', '10m'];
 
-t('the Normal plan for 40-10 m under Extra is the handoff table: 56 points (FT2 on every band the app dials)', () => {
+// 55, not 56: 17 m data ends at 18.110 MHz (phone above it, FCC 97.305), so the
+// 17 m FT2 dial (18.108) sits inside the 3 kHz edge margin and is dropped.
+t('the Normal plan for 40-10 m under Extra is the handoff table: 55 points (FT2 on every band the app dials but 17 m)', () => {
   const { points, dropped } = W.buildPlan({ bands: HF, licenseClass: 'us_extra' });
-  assert.strictEqual(points.length, 56, JSON.stringify(points.map(p => p.freqKhz)));
-  assert.strictEqual(dropped.length, 0, JSON.stringify(dropped));
+  assert.strictEqual(points.length, 55, JSON.stringify(points.map(p => p.freqKhz)));
+  assert.deepStrictEqual(dropped.map(d => d.band + ' ' + d.freqKhz + ' ' + d.label), ['17m 18108 FT2'], JSON.stringify(dropped));
   const khz = points.map(p => p.freqKhz);
   for (const k of [7025, 7047.5, 7052, 7074, 7090, 10136, 14074, 14080, 14084, 14090, 28600]) assert.ok(khz.includes(k), `${k} missing`);
   assert.ok(!points.some(p => p.band === '30m' && p.mode === 'SSB'), '30 m has no SSB');
