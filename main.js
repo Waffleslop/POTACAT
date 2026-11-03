@@ -7448,6 +7448,85 @@ function armSerialHandshakeFallback(rigCat, target) {
 // (radio off, wrong baud) the trial ends and Auto is left as it was.
 const SERIAL_HS_NOANSWER_MS = 12000;
 const _serialHsTrial = new Map(); // port path -> 'hardware' (trying) | 'done'
+// One Test Connection probe of a direct-serial CAT radio: open the port with
+// the given line settings, ask for the frequency, close. `portError` marks a
+// port that would not open (no retry with other settings helps that).
+function probeSerialCat({ portPath, baudRate, dtrOff, rtscts, stopBits, legacy }) {
+  const { SerialPort } = require('serialport');
+  return new Promise((resolve) => {
+    let settled = false;
+    let buf = '';
+    let bytes = Buffer.alloc(0);
+    const port = new SerialPort({
+      path: portPath,
+      baudRate: baudRate || (legacy ? 4800 : 9600),
+      dataBits: 8, stopBits: stopBits === 2 ? 2 : 1, parity: 'none',
+      autoOpen: false,
+      rtscts: !!rtscts, hupcl: false,
+    });
+    const done = (r) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      try { port.close(); } catch { /* ignore */ }
+      resolve(r);
+    };
+
+    let allData = ''; // capture everything for diagnostics
+
+    const timeout = setTimeout(() => {
+      const hint = legacy
+        ? 'No reply to the frequency read. Check the radio\'s CAT RATE menu matches the baud rate here, and the cable.'
+        : allData
+          ? `Received data but no valid FA frequency response: ${JSON.stringify(allData.slice(0, 120))}. Check the radio's CAT baud rate and serial settings.`
+          : 'No response from radio. Check baud rate and cable.';
+      done({ success: false, error: hint });
+    }, 5000);
+
+    // Yaesu legacy "read frequency and mode": 00 00 00 00 03, five bytes back
+    // (four BCD bytes of 10 Hz, then the mode).
+    const legacyRead = Buffer.from([0x00, 0x00, 0x00, 0x00, 0x03]);
+    port.on('open', () => {
+      if (dtrOff) {
+        try { port.set({ dtr: false, rts: !!rtscts }); } catch { /* ignore */ }
+      }
+      const q = () => port.write(legacy ? legacyRead : 'FA;');
+      // Send frequency query immediately, and again after 1s in case startup data interfered
+      setTimeout(q, 100);
+      setTimeout(() => { if (!settled) q(); }, 1200);
+    });
+
+    port.on('data', (chunk) => {
+      if (legacy) {
+        bytes = Buffer.concat([bytes, chunk]);
+        if (bytes.length < 5) return;
+        const digits = bytes.slice(0, 4).toString('hex');
+        if (!/^\d{8}$/.test(digits)) { done({ success: false, error: `The radio replied, but not with a frequency (${bytes.slice(0, 5).toString('hex')}). Check the radio model.` }); return; }
+        done({ success: true, frequency: (parseInt(digits, 10) * 10 / 1e6).toFixed(6) });
+        return;
+      }
+      const text = chunk.toString();
+      allData += text;
+      buf += text;
+      console.log('[serial-cat-test] rx:', JSON.stringify(text));
+      // A startup banner may not be semicolon-terminated, so scan the whole
+      // stream instead of assuming FA starts a delimited message. Eight
+      // digits is the FT-450/FT-2000/FTDX3000/FTDX5000 generation (#107:
+      // "FA28074000;" was reported as no valid reply).
+      const faMatch = /FA(\d{8,11});/.exec(buf);
+      if (!faMatch) return;
+      const hz = parseInt(faMatch[1], 10);
+      done({ success: true, frequency: (hz / 1e6).toFixed(6) });
+    });
+
+    port.on('error', (err) => done({ success: false, error: err.message }));
+
+    port.open((err) => {
+      if (err) done({ success: false, error: err.message, portError: true });
+    });
+  });
+}
+
 function armSerialHandshakeNoAnswerTrial(rigCat, transport, target, hs) {
   const path = target && target.path;
   if (!path) return;
@@ -45054,7 +45133,16 @@ app.whenReady().then(() => {
   handleCatTest('test-serial-cat', 'serial CAT test', async (_e, config) => {
     if (config && config.portPath) config.portPath = normalizeSerialPath(config.portPath);
     const { portPath, baudRate, dtrOff } = config;
-    const { SerialPort } = require('serialport');
+    // The test opens the port the way the live link will: the rig's RTS line
+    // choice (or the model's default) and the model's stop bits. It used to
+    // open every radio with flow control off, so a radio whose CAT RTS menu
+    // is on never answered the test while the live link worked (W7OSG
+    // FTDX101, 1.13.9: "test connection reports that the rig failed to
+    // respond ... everything works fine"). The legacy FT-817/818/857/897
+    // protocol gets its own 5-byte read; it never answers "FA;".
+    const model = getModel(config.model) || null;
+    const legacy = !!(model && model.protocol === 'yaesu-legacy');
+    const hs = resolveSerialHandshake(model, { serialHandshake: config.serialHandshake });
 
     // Temporarily disconnect live CAT + kill rigctld to release the serial port
     if (cat) {
@@ -45066,74 +45154,19 @@ app.whenReady().then(() => {
     // Wait for OS to fully release the serial port
     await new Promise((r) => setTimeout(r, 500));
 
-    return new Promise((resolve) => {
-      let settled = false;
-      let buf = '';
-      const port = new SerialPort({
-        path: portPath,
-        baudRate: baudRate || 9600,
-        dataBits: 8, stopBits: 1, parity: 'none',
-        autoOpen: false,
-        rtscts: false, hupcl: false,
-      });
-
-      let allData = ''; // capture everything for diagnostics
-
-      const timeout = setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          try { port.close(); } catch { /* ignore */ }
-          const hint = allData
-            ? `Received data but no valid FA frequency response: ${JSON.stringify(allData.slice(0, 120))}. Check the radio's CAT baud rate and serial settings.`
-            : 'No response from radio. Check baud rate and cable.';
-          resolve({ success: false, error: hint });
-        }
-      }, 5000);
-
-      port.on('open', () => {
-        if (dtrOff) {
-          try { port.set({ dtr: false, rts: false }); } catch { /* ignore */ }
-        }
-        // Send frequency query immediately, and again after 1s in case startup data interfered
-        setTimeout(() => port.write('FA;'), 100);
-        setTimeout(() => { if (!settled) port.write('FA;'); }, 1200);
-      });
-
-      port.on('data', (chunk) => {
-        const text = chunk.toString();
-        allData += text;
-        buf += text;
-        console.log('[serial-cat-test] rx:', JSON.stringify(text));
-        // A startup banner may not be semicolon-terminated, so scan the whole
-        // stream instead of assuming FA starts a delimited message. Eight
-        // digits is the FT-450/FT-2000/FTDX3000/FTDX5000 generation (#107:
-        // "FA28074000;" was reported as no valid reply).
-        const faMatch = /FA(\d{8,11});/.exec(buf);
-        if (!faMatch || settled) return;
-        settled = true;
-        clearTimeout(timeout);
-        try { port.close(); } catch { /* ignore */ }
-        const hz = parseInt(faMatch[1], 10);
-        const freqMHz = (hz / 1e6).toFixed(6);
-        resolve({ success: true, frequency: freqMHz });
-      });
-
-      port.on('error', (err) => {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timeout);
-          resolve({ success: false, error: err.message });
-        }
-      });
-
-      port.open((err) => {
-        if (err && !settled) {
-          settled = true;
-          clearTimeout(timeout);
-          resolve({ success: false, error: err.message });
-        }
-      });
-    });
+    const first = await probeSerialCat({ portPath, baudRate, dtrOff, rtscts: hs.handshake === 'hardware', stopBits: (model && model.serialStopBits) || 1, legacy });
+    if (first.success || first.portError) return first;
+    // On Auto, a Kenwood-protocol Yaesu that does not answer with RTS low is
+    // tried with RTS/CTS, as the live connect does (#103).
+    if (hs.source === 'model' && hs.handshake !== 'hardware' && !legacy && model && model.brand === 'Yaesu') {
+      await new Promise((r) => setTimeout(r, 300));
+      const second = await probeSerialCat({ portPath, baudRate, dtrOff, rtscts: true, stopBits: model.serialStopBits || 1, legacy });
+      if (second.success) {
+        second.note = 'it answered with RTS/CTS flow control: the radio\'s CAT RTS menu is on. POTACAT keeps it on for this radio once connected; or set RTS line to RTS/CTS flow control.';
+        return second;
+      }
+    }
+    return first;
   });
 
   handleCatTest('test-icom-civ', 'Icom CI-V test', async (_e, config) => {

@@ -107,6 +107,7 @@ const TESTS = [
   'test/direwolf-agw-probe-test.js',
   'test/ptt-cat-line-test.js',
   'test/rigctld-link-hints-test.js',
+  'test/serial-cat-test-connection-test.js',
   'test/voice-recorder-test.js',
   'test/hf-net-row-test.js',
   'test/log-freq-follow-test.js',

@@ -9960,9 +9960,13 @@ serialcatTestBtn.addEventListener('click', async () => {
   serialcatTestResult.className = '';
 
   try {
-    const result = await window.api.testSerialCat({ portPath, baudRate, dtrOff });
+    // The live link's line settings and the radio model, so the test opens the
+    // port the same way (RTS/CTS; the FT-817/818/857/897 binary protocol).
+    const serialHandshake = (document.getElementById('set-serialcat-handshake') || {}).value || 'auto';
+    const model = rigModelSelect ? rigModelSelect.value : '';
+    const result = await window.api.testSerialCat({ portPath, baudRate, dtrOff, serialHandshake, model });
     if (result.success) {
-      serialcatTestResult.textContent = `Connected! Freq: ${result.frequency} MHz`;
+      serialcatTestResult.textContent = `Connected! Freq: ${result.frequency} MHz` + (result.note ? ` (${result.note})` : '');
       serialcatTestResult.className = 'hamlib-test-success';
     } else {
       serialcatTestResult.textContent = `Failed: ${result.error}`;
