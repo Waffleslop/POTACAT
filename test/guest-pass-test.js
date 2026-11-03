@@ -165,7 +165,7 @@ async function passEnforcementRevokeTests() {
       eq(pe.endPassIfCode('OTTER-NEWT-MOSAIC-ROOSTER'), true, 'same code (any case) ends the session');
       eq(ended.map((i) => [i.reason, i.code]), [['revoked', 'otter-newt-mosaic-rooster']], "'ended' carries reason=revoked + the code");
       eq(pe.endPassIfCode('otter-newt-mosaic-rooster'), false, 'idempotent once ended');
-      await sleep(0);
+      await new Promise((r) => setImmediate(r)); // endPass settles to idle on setImmediate; a 0 ms timer can run first
       eq(pe.getState(), 'idle', 'settles to idle');
       eq(pe.endPassIfCode('otter-newt-mosaic-rooster'), false, 'idle: nothing to end');
     }
@@ -191,7 +191,7 @@ async function passEnforcementRevokeTests() {
       cloud = () => resp(404, { error: 'not_found' });
       await sleep(50);
       eq(ended.map((i) => i.reason), ['revoked'], '404 → ended once, reason=revoked');
-      await sleep(0);
+      await new Promise((r) => setImmediate(r)); // endPass settles to idle on setImmediate; a 0 ms timer can run first
       eq(pe.getState(), 'idle', 'settles to idle after the poll-driven end');
       const after = calls;
       await sleep(60);
@@ -211,7 +211,7 @@ async function passEnforcementRevokeTests() {
       await sleep(50);
       eq(pe.getSessionStatus().remainingSeconds <= 5, true, 'a shorter expires_at is adopted');
       pe.endPass('owner_override');
-      await sleep(0);
+      await new Promise((r) => setImmediate(r)); // endPass settles to idle on setImmediate; a 0 ms timer can run first
     }
   } finally {
     global.fetch = realFetch;
