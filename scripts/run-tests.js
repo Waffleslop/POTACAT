@@ -179,6 +179,7 @@ const TESTS = [
   'test/modem-audio-server-test.js',
   'test/modem-bridge-test.js',
   'test/wspr-daily-test.js',
+  'test/wspr-spot-time-test.js', // W5JSS: wsprnet time = the 2-minute window start, not the decode finish
   'test/wspr-power-memory-test.js',
   'test/js8-native-test.js',
   'test/js8-varicode-test.js',

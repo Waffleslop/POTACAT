@@ -17421,12 +17421,15 @@ function startJtcat(mode) {
   // wsprnet.org (the propagation map that gives WSPR its value).
   ft8Engine.on('wspr-spots', async (data) => {
     const spots = data.spots || [];
-    const now = new Date();
+    // Every time on a WSPR spot is the START of the 2-minute window it was
+    // heard in, never the moment the decode finished (W5JSS: a :06
+    // transmission was reported to wsprnet at :08 or :09).
+    const windowStart = new Date(wsprnet.wsprWindowStartMs(data.periodStartMs, Date.now()));
     const p2 = (n) => String(n).padStart(2, '0');
-    const nowHHMM = p2(now.getUTCHours()) + p2(now.getUTCMinutes());
+    const windowHHMM = p2(windowStart.getUTCHours()) + p2(windowStart.getUTCMinutes());
     const home = settings.grid ? gridToLatLon(settings.grid) : null;
     for (const s of spots) {
-      if (!s.timeUtc) s.timeUtc = nowHHMM; // wsprd gave filename stem, not a time
+      if (!s.timeUtc) s.timeUtc = windowHHMM; // wsprd gave filename stem, not a time
       if (s.call && ctyDb) {
         const entity = resolveCallsign(String(s.call).toUpperCase(), ctyDb);
         s.entity = entity ? entity.name : '';
@@ -17462,7 +17465,7 @@ function startJtcat(mode) {
     // Upload to wsprnet.org if enabled (keyed by our call + grid).
     if (settings.wsprUpload && onAirCall() && settings.grid && spots.length) {
       try {
-        const { dateYYMMDD, timeHHMM } = wsprnet.utcStamp(now);
+        const { dateYYMMDD, timeHHMM } = wsprnet.utcStamp(windowStart);
         const res = await wsprnet.uploadSpots(
           spots,
           { call: onAirCall(), grid: settings.grid },
