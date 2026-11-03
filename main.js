@@ -36057,6 +36057,10 @@ app.whenReady().then(() => {
   // "Also add contacts missing from my log" (lib/pota-hunter-import.js). One backup, one
   // write, one journal batch, and a CSV of every decision for the operator
   // to review.
+  // Cleared in the finally below. The download always settles (each pota.app
+  // request times out after 25 s, replies are size-capped, the download is
+  // entry-capped: lib/pota-sync.js), so a hung request fails the import with
+  // a message instead of leaving the buttons "already running".
   let potaHunterImportRunning = false;
   // { dryRun: true } downloads and plans the same way but changes nothing:
   // no backup, no write, no journal; only the review CSV, marked as a dry run.
