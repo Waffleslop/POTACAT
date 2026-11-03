@@ -8064,7 +8064,10 @@ async function connectCat() {
       sendCatLog(`[CAT] RTS/CTS flow control on (${hs.source === 'rig' ? 'set on this rig' : hs.source === 'trial' ? 'trying it: the radio did not answer with RTS held low' : 'the radio model default'}) — RTS stays asserted. If the radio transmits as soon as POTACAT connects, set My Rigs > RTS line to "Held low".`);
       if (hs.source !== 'rig') armSerialHandshakeFallback(cat, target);
     }
-    if (hs.source !== 'rig' && model.brand === 'Yaesu') armSerialHandshakeNoAnswerTrial(cat, transport, target, hs);
+    // The RTS/CTS trial is for the Kenwood-style Yaesus' CAT RTS menu. The
+    // FT-817/818/857/897 legacy protocol has no handshake, and asserting RTS
+    // there can key an interface wired to it (KL4XQ's FT-818 got the trial).
+    if (hs.source !== 'rig' && model.brand === 'Yaesu' && model.protocol !== 'yaesu-legacy') armSerialHandshakeNoAnswerTrial(cat, transport, target, hs);
     transport.connect({ path: target.path, baudRate: target.baudRate || 9600, dtrOff: target.dtrOff, connectDelay: model.connectDelay, serialHandshake: hs.handshake, stopBits: model.serialStopBits });
   }
 
