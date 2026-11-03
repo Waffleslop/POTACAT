@@ -510,15 +510,28 @@ function armAtuKeepOn(rig) {
 // activeRigId must name the rig catTarget connects to (lib/active-rig.js,
 // SP5GB 1.11.7: "None" in the editor while COM15 kept connecting). Run at
 // load and before every connect; adopt-only, logged once per repair.
+function describeTargetShort(t) {
+  if (!t) return 'none';
+  return t.path || (t.host ? `${t.host}:${t.port || ''}` : (t.type || '?'));
+}
 function healActiveRigNow(where) {
   const r = healActiveRig(settings);
-  if (r.changed) {
+  if (r.reason === 'target-followed-rig') {
+    sendCatLog(`[CAT] the connection target (${describeTargetShort(r.staleTarget)}) belonged to no rig in My Rigs; connecting "${r.rig.name || r.rig.model || 'rig'}" on its own port, ${describeTargetShort(r.rig.catTarget)} (${where})`);
+    try { saveSettings(settings); } catch {}
+  } else if (r.reason === 'other-rig') {
+    if (_healOtherRigLogged !== r.otherRig.id + '|' + r.rig.id) {
+      _healOtherRigLogged = r.otherRig.id + '|' + r.rig.id;
+      sendCatLog(`[CAT] the selected rig is "${r.rig.name || r.rig.model || 'rig'}" (${describeTargetShort(r.rig.catTarget)}) but the connection is set to "${r.otherRig.name || r.otherRig.model || 'another rig'}" (${describeTargetShort(r.otherRig.catTarget)}). Pick the radio again in the CAT menu to connect the one you mean.`);
+    }
+  } else if (r.changed) {
     sendCatLog(`[CAT] activeRigId named no rig (${r.staleId || 'unset'}); adopted "${r.rig.name || r.rig.model || 'rig'}" because its connection target is the one in use (${where})`);
     try { saveSettings(settings); } catch {}
   }
   healRigAudioMirrorNow(where);
   return r;
 }
+let _healOtherRigLogged = '';
 // The capture paths read settings.remoteAudioInput; the rig holds the truth.
 // An empty mirror opened the Mac's built-in mic for ECHOCAT and FT8 (KF0WWL).
 function healRigAudioMirrorNow(where) {

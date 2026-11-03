@@ -44,7 +44,16 @@ test('healActiveRig adopts the rig whose target is in use, never clears, never t
   assert.strictEqual(s.activeRigId, 'b');
   assert.strictEqual(s.catTarget.path, 'com15', 'target untouched');
   const ok = healActiveRig({ rigs, activeRigId: 'a', catTarget: serial('COM15') });
-  assert.strictEqual(ok.reason, 'ok', 'a valid id is never second-guessed, even against a different target');
+  assert.strictEqual(ok.reason, 'other-rig', 'a valid id is never second-guessed against another rig\'s target: said, not changed');
+  assert.strictEqual(ok.changed, false);
+  // nj7n_nate (IC-705 on a Pi, 1.13.2): the target was a port no rig in My
+  // Rigs had, so every connect opened a port with no radio behind it.
+  const orphan = { rigs, activeRigId: 'a', catTarget: serial('/dev/ttyACM1') };
+  const o = healActiveRig(orphan);
+  assert.deepStrictEqual({ changed: o.changed, reason: o.reason }, { changed: true, reason: 'target-followed-rig' });
+  assert.strictEqual(orphan.catTarget, rigs.find((r) => r.id === 'a').catTarget, 'the active rig\'s own target');
+  assert.strictEqual(o.staleTarget.path, '/dev/ttyACM1');
+  assert.strictEqual(healActiveRig({ rigs, activeRigId: 'a', catTarget: null }).reason, 'ok', 'no target (None) is left alone');
   const un = healActiveRig({ rigs, activeRigId: 'gone', catTarget: serial('COM9') });
   assert.deepStrictEqual({ changed: un.changed, reason: un.reason }, { changed: false, reason: 'unmatched' });
   assert.strictEqual(healActiveRig({ rigs: [], activeRigId: 'x', catTarget: serial('COM1') }).reason, 'no-rigs');
