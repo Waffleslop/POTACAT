@@ -3,7 +3,8 @@
 // Importing the operator's POTA.app hunter log (2026-10-27). pota.app knows the
 // park for contacts the local log holds without one, and contacts the local log
 // never got: a matching QSO with no park gains the park reference(s), one with
-// a different park is a CONFLICT and left alone, a missing one is added, a 2-fer (one pota.app row per park) is one contact, the log is backed
+// a different park is a CONFLICT and left alone, an activator's repeated row or
+// a contact already in the log is a DUPLICATE, a missing one is added, a 2-fer (one pota.app row per park) is one contact, the log is backed
 // up before the write, and a review CSV accounts for every row.
 // Run: node test/pota-hunter-import-test.js
 const assert = require('assert');
@@ -110,13 +111,109 @@ test('an added contact is a complete POTA record', () => {
     SIG: 'POTA', SIG_INFO: 'US-5555', POTA_REF: 'US-5555', STATION_CALLSIGN: 'N0ME',
   });
 });
-test('a local QSO is matched once, closest first', () => {
+// Activator dupes (K3SBP review): an activator who logged the operator twice
+// gives two pota.app rows for one contact. The second must not become a QSO.
+test('a local QSO is matched once, closest first; the other row is a DUPLICATE, not an add', () => {
   const plan = H.planHunterImport([local()], [
     entry({ qsoDateTime: '2026-05-01T14:22:00', reference: 'US-1111' }),
     entry({ qsoDateTime: '2026-05-01T14:25:00', reference: 'US-2222' }),
   ]);
   assert.deepStrictEqual(plan.updates.map((u) => u.refs), [['US-1111']]);
-  assert.deepStrictEqual(plan.adds.map((a) => a.record.POTA_REF), ['US-2222']);
+  assert.strictEqual(plan.adds.length, 0, 'never added, even naming another park');
+  assert.deepStrictEqual(plan.duplicates.map((d) => [d.kind, d.contact.refs.join()]), [['activator-dupe', 'US-2222']]);
+});
+test('activator logged me twice a minute apart: one update, one DUPLICATE, nothing appended', () => {
+  const qsos = [local()];
+  const plan = H.planHunterImport(qsos, [
+    entry({ qsoDateTime: '2026-05-01T14:22:00' }),
+    entry({ qsoDateTime: '2026-05-01T14:23:00' }),
+  ]);
+  assert.strictEqual(plan.updates.length, 1);
+  assert.strictEqual(plan.duplicates.length, 1);
+  assert.strictEqual(plan.duplicates[0].qso, qsos[0], 'names the QSO the other row matched');
+  H.applyHunterPlan(qsos, plan);
+  assert.strictEqual(qsos.length, 1);
+});
+test('activator dupe: also when the matched QSO already had the park, or conflicts', () => {
+  const had = H.planHunterImport([local({ POTA_REF: 'US-1234' })],
+    [entry({ qsoDateTime: '2026-05-01T14:22:00' }), entry({ qsoDateTime: '2026-05-01T14:30:00' })]);
+  assert.deepStrictEqual([had.unchanged.length, had.duplicates.length, had.adds.length], [1, 1, 0]);
+  const conflict = H.planHunterImport([local({ POTA_REF: 'US-1243' })],
+    [entry({ qsoDateTime: '2026-05-01T14:22:00' }), entry({ qsoDateTime: '2026-05-01T14:30:00' })]);
+  assert.deepStrictEqual([conflict.conflicts.length, conflict.duplicates.length, conflict.adds.length], [1, 1, 0]);
+});
+test('not a dupe: another band, another mode class, or outside the window of the matched QSO', () => {
+  const plan = H.planHunterImport([local()], [
+    entry({ qsoDateTime: '2026-05-01T14:22:00' }), // matches
+    entry({ qsoDateTime: '2026-05-01T14:24:00', band: '40M' }),
+    entry({ qsoDateTime: '2026-05-01T14:25:00', mode: 'CW' }),
+    entry({ qsoDateTime: '2026-05-01T14:40:00' }), // 17 min after the local QSO
+  ]);
+  assert.strictEqual(plan.updates.length, 1);
+  assert.strictEqual(plan.duplicates.length, 0);
+  assert.deepStrictEqual(plan.adds.map((a) => [a.record.BAND, a.record.MODE, a.record.TIME_ON]),
+    [['40m', 'SSB', '142400'], ['20m', 'CW', '142500'], ['20m', 'SSB', '144000']]);
+});
+test('no local QSO: two rows a minute apart add one QSO, the second is a DUPLICATE (planImport)', () => {
+  const plan = H.planHunterImport([], [
+    entry({ qsoDateTime: '2026-05-01T14:22:00' }),
+    entry({ qsoDateTime: '2026-05-01T14:23:00' }),
+  ]);
+  assert.deepStrictEqual(plan.adds.map((a) => a.record.TIME_ON), ['142200'], 'the earlier row is kept');
+  assert.deepStrictEqual(plan.duplicates.map((d) => d.kind), ['repeat']);
+});
+test('no local QSO: rows past planImport\'s 3 minutes are separate contacts', () => {
+  const plan = H.planHunterImport([], [
+    entry({ qsoDateTime: '2026-05-01T14:22:00' }),
+    entry({ qsoDateTime: '2026-05-01T14:26:00' }),
+  ]);
+  assert.strictEqual(plan.adds.length, 2);
+  assert.strictEqual(plan.duplicates.length, 0);
+});
+test('every add has passed planImport against the log (the importQsoRecords check)', () => {
+  const { qsos, plan } = scenario();
+  const { planImport } = require('../lib/qso-match');
+  const again = planImport(qsos, plan.adds.map((a) => a.record));
+  assert.strictEqual(again.skipped, 0, 'nothing left for planImport to drop');
+  assert.strictEqual(again.fresh.length, plan.adds.length);
+  assert.ok(/planImport\(qsos \|\| \[\], candidates\.map/.test(read('lib', 'pota-hunter-import.js')),
+    'the planner runs adds through planImport');
+});
+test('review CSV: DUPLICATE rows say why, and an activator dupe names the matched QSO', () => {
+  const qsos = [local({ TIME_ON: '142300', APP_POTACAT_UUID: 'u-9' })];
+  const dupe = H.planHunterImport(qsos,
+    [entry({ qsoDateTime: '2026-05-01T14:22:00' }), entry({ qsoDateTime: '2026-05-01T14:24:00' })]);
+  H.applyHunterPlan(qsos, dupe); // a real import: the matched QSO now holds the park
+  const lines = H.planToCsv(dupe).trim().split('\r\n');
+  assert.ok(lines.includes('SUMMARY,duplicates,,,,,,,,,,,1'));
+  const row = lines.find((l) => l.startsWith('DUPLICATE,'));
+  assert.ok(row.startsWith('DUPLICATE,K1ABC,20260501,142400,20m,SSB,US-1234,Some Park,142300,1.0,US-1234,u-9,'), row);
+  assert.ok(row.includes('the activator logged this contact twice'), row);
+  const repeat = H.planToCsv(H.planHunterImport([], [entry(), entry({ qsoDateTime: '2026-05-01T14:21:00' })]));
+  assert.ok(repeat.includes('not added: repeats an earlier pota.app row'));
+});
+test('through mutateLog: an activator dupe is never written', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'potacat-hunter-dupe-'));
+  try {
+    const logPath = path.join(dir, 'log.adi');
+    appendRawQsos(logPath, [local({ APP_POTACAT_UUID: '33333333-3333-4333-8333-333333333333', APP_POTACAT_VERSION: '1' })]);
+    let plan;
+    const { changes } = mutateLog(logPath, (qsos) => {
+      plan = H.planHunterImport(qsos, [entry({ qsoDateTime: '2026-05-01T14:22:00' }), entry({ qsoDateTime: '2026-05-01T14:23:00' })]);
+      return H.applyHunterPlan(qsos, plan);
+    });
+    assert.deepStrictEqual(changes.map((c) => c.action), ['update'], 'one update, no create');
+    assert.strictEqual(readLog(logPath).length, 1);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+test('main: duplicates are counted and reported', () => {
+  const main = read('main.js');
+  const start = main.indexOf("ipcMain.handle('pota-hunter-import'");
+  const h = main.slice(start, main.indexOf('ipcMain.handle(', start + 10));
+  assert.ok(h.includes('duplicates: plan.duplicates.length'));
+  assert.ok(h.includes('duplicates not added: the activator logged the contact twice'));
 });
 // Park conflicts (K3SBP review): the import only ever FILLS an empty park.
 // Appending pota.app's ref to a record logged with another park would invent
@@ -223,7 +320,7 @@ test('review CSV: summary counts first, then one row per decision', () => {
   H.applyHunterPlan(qsos, plan);
   const lines = H.planToCsv(plan, { downloaded: entries.length, reported: 9 }).trim().split('\r\n');
   assert.ok(lines[0].startsWith('action,call,qso_date,time_on,'));
-  assert.deepStrictEqual(lines.slice(1, 9), [
+  assert.deepStrictEqual(lines.slice(1, 10), [
     'SUMMARY,mode,,,,,,,,,,,import',
     'SUMMARY,entries downloaded,,,,,,,,,,,8',
     'SUMMARY,entries pota.app reports,,,,,,,,,,,9',
@@ -231,6 +328,7 @@ test('review CSV: summary counts first, then one row per decision', () => {
     'SUMMARY,added,,,,,,,,,,,3',
     'SUMMARY,unchanged,,,,,,,,,,,1',
     'SUMMARY,conflicts,,,,,,,,,,,0',
+    'SUMMARY,duplicates,,,,,,,,,,,0',
     'SUMMARY,skipped,,,,,,,,,,,0',
   ]);
   const count = (a) => lines.filter((l) => l.startsWith(a + ',')).length;
