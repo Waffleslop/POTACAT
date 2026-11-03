@@ -948,6 +948,36 @@ const setFlrigHost = document.getElementById('set-flrig-host');
 const setFlrigPort = document.getElementById('set-flrig-port');
 const flrigTestBtn = document.getElementById('flrig-test-btn');
 const flrigTestResult = document.getElementById('flrig-test-result');
+// DXLab Commander: host/port/decimal plus one text box per sequence slot
+// (lib/commander-sequences.js owns the slot table; the boxes are built from it).
+const dxlabCommanderConfig = document.getElementById('dxlab-commander-config');
+const setDxlabCommanderHost = document.getElementById('set-dxlab-commander-host');
+const setDxlabCommanderPort = document.getElementById('set-dxlab-commander-port');
+const setDxlabCommanderDecimal = document.getElementById('set-dxlab-commander-decimal');
+const commanderSequenceInputs = {};
+(function buildCommanderSequenceFields() {
+  const box = document.getElementById('dxlab-commander-sequences');
+  if (!box || !window.CommanderSequences) return;
+  for (const slot of window.CommanderSequences.SEQUENCE_SLOTS) {
+    const label = document.createElement('label');
+    label.style.cssText = 'display:block;margin-top:3px;';
+    label.append(slot.label + ': ');
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'sequence name or #3';
+    input.style.width = '170px';
+    // Plain ASCII only (ADIF lengths count bytes): say so as it is typed,
+    // since a name that is not is dropped when the rig is saved.
+    input.addEventListener('input', () => {
+      const ok = window.CommanderSequences.isAscii(input.value.trim());
+      input.style.outline = ok ? '' : '1px solid var(--accent-red, #e05252)';
+      input.title = ok ? '' : 'Commander sequence names must be plain ASCII letters, digits and punctuation';
+    });
+    label.appendChild(input);
+    box.appendChild(label);
+    commanderSequenceInputs[slot.key] = input;
+  }
+})();
 const setTcpcatHost = document.getElementById('set-tcpcat-host');
 const setTcpcatPort = document.getElementById('set-tcpcat-port');
 const k4networkConfig = document.getElementById('k4network-config');
@@ -2350,11 +2380,12 @@ function updateRadioSubPanels() {
   hamlibConfig.classList.toggle('hidden', type !== 'hamlib');
   rigctldnetConfig.classList.toggle('hidden', type !== 'rigctldnet');
   if (flrigConfig) flrigConfig.classList.toggle('hidden', type !== 'flrig');
+  if (dxlabCommanderConfig) dxlabCommanderConfig.classList.toggle('hidden', type !== 'dxlab-commander');
   const nocatConfig = document.getElementById('nocat-config');
   if (nocatConfig) nocatConfig.classList.toggle('hidden', type !== 'nocat');
   // Voice in DATA mode runs in the rig controller: serial, Icom, Hamlib and flrig links.
   const voiceAsDataRow = document.getElementById('rig-voice-as-data');
-  if (voiceAsDataRow) voiceAsDataRow.classList.toggle('hidden', !['serialcat', 'icom', 'civ-tcp', 'icom-network', 'hamlib', 'rigctldnet', 'flrig'].includes(type));
+  if (voiceAsDataRow) voiceAsDataRow.classList.toggle('hidden', !['serialcat', 'icom', 'civ-tcp', 'icom-network', 'hamlib', 'rigctldnet', 'flrig', 'dxlab-commander'].includes(type));
   // Voice streamed over the LAN goes only to an Icom Network radio.
   const lanVoiceSsbRow = document.getElementById('rig-lan-voice-ssb');
   if (lanVoiceSsbRow) lanVoiceSsbRow.classList.toggle('hidden', type !== 'icom-network');
@@ -2461,6 +2492,14 @@ async function populateRadioSection(currentTarget) {
     setRadioType('flrig');
     if (setFlrigHost) setFlrigHost.value = currentTarget.host || '127.0.0.1';
     if (setFlrigPort) setFlrigPort.value = currentTarget.port || 12345;
+  } else if (currentTarget.type === 'dxlab-commander') {
+    setRadioType('dxlab-commander');
+    setDxlabCommanderHost.value = currentTarget.host || '127.0.0.1';
+    setDxlabCommanderPort.value = currentTarget.port || window.CommanderSequences.DEFAULT_PORT;
+    setDxlabCommanderDecimal.value = currentTarget.decimal === ',' ? ',' : '.';
+    for (const [key, input] of Object.entries(commanderSequenceInputs)) {
+      input.value = (currentTarget.sequences && currentTarget.sequences[key]) || '';
+    }
   } else {
     setRadioType('flex');
   }
@@ -2656,11 +2695,12 @@ if (rigModelSelect) rigModelSelect.addEventListener('change', async () => {
     if (!setRigName.value.trim()) setRigName.value = modelName;
     return;
   }
-  // A radio reached through another program (flrig, a remote rigctld) keeps
-  // that connection: the model picked here only supplies bands and limits.
-  const shared = ['flrig', 'rigctldnet'].includes(getSelectedRadioType());
+  // A radio reached through another program (flrig, DXLab Commander, a remote
+  // rigctld) keeps that connection: the model picked here only supplies bands
+  // and limits.
+  const shared = ['flrig', 'dxlab-commander', 'rigctldnet'].includes(getSelectedRadioType());
   if (noCat) setRadioType('nocat');           // Pebble HF and friends: nothing to connect to
-  else if (shared) { /* keep flrig / rigctld Network */ }
+  else if (shared) { /* keep flrig / DXLab Commander / rigctld Network */ }
   else if (brand === 'FlexRadio') setRadioType('flex');
   else if (brand === 'Icom') setRadioType('icom');
   else setRadioType('serialcat');
@@ -2910,6 +2950,9 @@ function describeRigTarget(target) {
   if (target.type === 'flrig') {
     return `flrig on ${target.host || '127.0.0.1'}:${target.port || 12345}`;
   }
+  if (target.type === 'dxlab-commander') {
+    return `DXLab Commander on ${target.host || '127.0.0.1'}:${target.port || window.CommanderSequences.DEFAULT_PORT}`;
+  }
   return 'Unknown';
 }
 
@@ -3097,6 +3140,16 @@ function buildCatTargetFromForm() {
       type: 'flrig',
       host: (setFlrigHost && setFlrigHost.value.trim()) || '127.0.0.1',
       port: parseInt(setFlrigPort && setFlrigPort.value, 10) || 12345,
+    };
+  } else if (radioType === 'dxlab-commander') {
+    const typed = {};
+    for (const [key, input] of Object.entries(commanderSequenceInputs)) typed[key] = input.value;
+    return {
+      type: 'dxlab-commander',
+      host: setDxlabCommanderHost.value.trim() || '127.0.0.1',
+      port: parseInt(setDxlabCommanderPort.value, 10) || window.CommanderSequences.DEFAULT_PORT,
+      decimal: setDxlabCommanderDecimal.value === ',' ? ',' : '.',
+      sequences: window.CommanderSequences.cleanSequences(typed),
     };
   } else if (radioType === 'nocat') {
     // No CAT control: VOX-keyed kits (Pebble HF, uSDX builds), or a handheld
@@ -9920,29 +9973,41 @@ hamlibTestBtn.addEventListener('click', async () => {
   }
 });
 
-// flrig test connection: one probe of flrig's XML-RPC server (main: test-flrig).
-if (flrigTestBtn) flrigTestBtn.addEventListener('click', async () => {
-  const host = (setFlrigHost && setFlrigHost.value.trim()) || '127.0.0.1';
-  const port = parseInt(setFlrigPort && setFlrigPort.value, 10) || 12345;
-  flrigTestBtn.disabled = true;
-  flrigTestResult.textContent = 'Testing...';
-  flrigTestResult.className = '';
-  try {
-    const result = await window.api.testFlrig({ host, port });
-    if (result && result.success) {
-      flrigTestResult.textContent = result.message || 'Connected!';
-      flrigTestResult.className = 'hamlib-test-success';
-    } else {
-      flrigTestResult.textContent = `Failed: ${(result && result.error) || 'no reply'}`;
-      flrigTestResult.className = 'hamlib-test-fail';
+// Test Connection for a radio held by another program (flrig, DXLab
+// Commander): one probe on its own socket in main, the live link untouched.
+function wireSharedRadioTest(btn, resultEl, readTarget, probe) {
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    resultEl.textContent = 'Testing...';
+    resultEl.className = '';
+    try {
+      const result = await probe(readTarget());
+      if (result && result.success) {
+        resultEl.textContent = result.message || 'Connected!';
+        resultEl.className = 'hamlib-test-success';
+      } else {
+        resultEl.textContent = `Failed: ${(result && result.error) || 'no reply'}`;
+        resultEl.className = 'hamlib-test-fail';
+      }
+    } catch (err) {
+      resultEl.textContent = `Error: ${err.message}`;
+      resultEl.className = 'hamlib-test-fail';
+    } finally {
+      btn.disabled = false;
     }
-  } catch (err) {
-    flrigTestResult.textContent = `Error: ${err.message}`;
-    flrigTestResult.className = 'hamlib-test-fail';
-  } finally {
-    flrigTestBtn.disabled = false;
-  }
-});
+  });
+}
+// flrig: one probe of flrig's XML-RPC server (main: test-flrig).
+wireSharedRadioTest(flrigTestBtn, flrigTestResult, () => ({
+  host: (setFlrigHost && setFlrigHost.value.trim()) || '127.0.0.1',
+  port: parseInt(setFlrigPort && setFlrigPort.value, 10) || 12345,
+}), (t) => window.api.testFlrig(t));
+// DXLab Commander: CmdGetFreq + CmdSendMode (main: test-commander).
+wireSharedRadioTest(document.getElementById('dxlab-commander-test-btn'), document.getElementById('dxlab-commander-test-result'), () => ({
+  host: setDxlabCommanderHost.value.trim() || '127.0.0.1',
+  port: parseInt(setDxlabCommanderPort.value, 10) || window.CommanderSequences.DEFAULT_PORT,
+}), (t) => window.api.testCommander(t));
 
 // Serial CAT test connection
 serialcatTestBtn.addEventListener('click', async () => {
@@ -25866,6 +25931,7 @@ function updateWelcomeRadioSubPanels() {
   document.getElementById('welcome-rigctldnet-config').classList.toggle('hidden', type !== 'rigctldnet');
   const wFlrig = document.getElementById('welcome-flrig-config');
   if (wFlrig) wFlrig.classList.toggle('hidden', type !== 'flrig');
+  document.getElementById('welcome-dxlab-commander-config').classList.toggle('hidden', type !== 'dxlab-commander');
   const wNocat = document.getElementById('welcome-nocat-config');
   if (wNocat) wNocat.classList.toggle('hidden', type !== 'nocat');
   if (type === 'serialcat' && !welcomeSerialcatLoaded) {
@@ -25973,6 +26039,12 @@ function buildWelcomeCatTarget() {
       type: 'flrig',
       host: document.getElementById('welcome-flrig-host').value.trim() || '127.0.0.1',
       port: parseInt(document.getElementById('welcome-flrig-port').value, 10) || 12345,
+    };
+  } else if (type === 'dxlab-commander') {
+    return {
+      type: 'dxlab-commander',
+      host: document.getElementById('welcome-dxlab-commander-host').value.trim() || '127.0.0.1',
+      port: parseInt(document.getElementById('welcome-dxlab-commander-port').value, 10) || window.CommanderSequences.DEFAULT_PORT,
     };
   } else if (type === 'nocat') {
     return { type: 'none' }; // No CAT control (VOX) — see buildCatTargetFromForm

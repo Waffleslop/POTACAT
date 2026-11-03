@@ -49,6 +49,12 @@ expect({ transportType: 'flrig', paddleKey: false, protocol: 'flrig', hasKeyPort
 expect({ transportType: 'flrig', paddleKey: false, protocol: 'flrig', hasKeyPort: true },
   true, null, 'flrig WITH key port configured');
 
+console.log('DXLab Commander keys only PTT (CmdTX), so a paddle is the bare-PTT case:');
+expect({ transportType: 'dxlab-commander', paddleKey: false, protocol: 'commander', hasKeyPort: false },
+  false, 'txrx-ptt-only', 'DXLab Commander, no key port');
+expect({ transportType: 'dxlab-commander', paddleKey: false, protocol: 'commander', hasKeyPort: true },
+  true, null, 'DXLab Commander WITH key port configured');
+
 console.log('Real key-line routes stay available:');
 // Icom's real key route is 'dtr' (or CW text 0x17); 'txrx' isn't flagged dead
 // because Icom never routes paddles through it. (0x1C 0x01 is the ATU, not a key.)

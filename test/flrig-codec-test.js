@@ -427,9 +427,9 @@ function rig(port, { model } = {}) {
     assert.ok(/type: 'flrig',\s+host: \(setFlrigHost && setFlrigHost\.value\.trim\(\)\) \|\| '127\.0\.0\.1',\s+port: parseInt\(setFlrigPort && setFlrigPort\.value, 10\) \|\| 12345/.test(app), 'editor builds the target');
     assert.ok(/type: 'flrig',\s+host: document\.getElementById\('welcome-flrig-host'\)/.test(app), 'wizard builds the target');
     assert.ok(/currentTarget\.type === 'flrig'\) \{\s+setRadioType\('flrig'\)/.test(app), 'editor reopens it');
-    assert.ok(/\['serialcat', 'icom', 'civ-tcp', 'icom-network', 'hamlib', 'rigctldnet', 'flrig'\]\.includes\(type\)/.test(app), 'Voice in DATA mode row');
-    assert.ok(/window\.api\.testFlrig\(\{ host, port \}\)/.test(app));
-    assert.ok(/const shared = \['flrig', 'rigctldnet'\]\.includes\(getSelectedRadioType\(\)\);/.test(app), 'picking a model keeps the flrig connection');
+    assert.ok(/\['serialcat', 'icom', 'civ-tcp', 'icom-network', 'hamlib', 'rigctldnet', 'flrig'[^\]]*\]\.includes\(type\)/.test(app), 'Voice in DATA mode row');
+    assert.ok(/window\.api\.testFlrig\(/.test(app), 'the Test Connection button calls test-flrig');
+    assert.ok(/const shared = \[[^\]]*'flrig'[^\]]*\]\.includes\(getSelectedRadioType\(\)\);/.test(app), 'picking a model keeps the flrig connection');
   });
   await test('libs: rig family, setup-note radio type, setup-share wording, port presence, generic caps, test runner', () => {
     const RF = require('../lib/rig-family');
