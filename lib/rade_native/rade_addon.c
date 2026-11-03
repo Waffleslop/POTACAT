@@ -14,7 +14,8 @@
  *     empty until the 12th frame, then one nModem (120 ms) modem frame.
  *   txEoo(handle)        → Int16Array end-of-over modem frame, sent after the
  *     last tx(); speech frames not yet encoded are dropped.
- *   rx(handle, Int16Array modem_in)   → { speech: Int16Array, sync: int, snr: int }
+ *   rx(handle, Int16Array modem_in)   → { speech: Int16Array, sync: int, snr: int, eoo: bool }
+ *     eoo is true for the end-of-over frame.
  *   getNin(handle)       → int
  *   getInfo(handle)      → { speechRate, modemRate, nSpeech, nModem }
  */
@@ -73,6 +74,7 @@ struct rade_handle {
   int n_tx_eoo_out;
   float *tx_features;         /* n_features: the speech frames of the next modem frame */
   int tx_frames;              /* speech frames collected in tx_features */
+  float *eoo_bits;            /* rade_n_eoo_bits(): rade_rx() fills them on an end-of-over frame */
   int fargan_initialized;     /* 1 after first fargan_cont call */
   /* Hilbert transform delay line for streaming real→IQ */
   float hilbert_delay[HILBERT_NTAPS];
@@ -124,7 +126,10 @@ static napi_value Open(napi_env env, napi_callback_info info) {
   handles[slot].n_tx_out = rade_n_tx_out(r);
   handles[slot].n_tx_eoo_out = rade_n_tx_eoo_out(r);
   handles[slot].tx_features = (float *)calloc(handles[slot].n_features, sizeof(float));
-  if (!handles[slot].tx_features) {
+  handles[slot].eoo_bits = (float *)calloc(rade_n_eoo_bits(r), sizeof(float));
+  if (!handles[slot].tx_features || !handles[slot].eoo_bits) {
+    free(handles[slot].tx_features);
+    free(handles[slot].eoo_bits);
     rade_close(r);
     lpcnet_encoder_destroy(enc);
     free(fargan);
@@ -155,6 +160,7 @@ static napi_value Close(napi_env env, napi_callback_info info) {
   if (handles[slot].encoder) lpcnet_encoder_destroy(handles[slot].encoder);
   if (handles[slot].fargan) free(handles[slot].fargan);
   free(handles[slot].tx_features);
+  free(handles[slot].eoo_bits);
   memset(&handles[slot], 0, sizeof(struct rade_handle));
 
   napi_value undef;
@@ -322,8 +328,7 @@ static napi_value Rx(napi_env env, napi_callback_info info) {
   int n_features = h->n_features;
   float *features_out = (float *)calloc(n_features, sizeof(float));
   int has_eoo = 0;
-  float eoo_bits[8] = {0};
-  int n_out = rade_rx(h->r, features_out, &has_eoo, eoo_bits, rx_in);
+  int n_out = rade_rx(h->r, features_out, &has_eoo, h->eoo_bits, rx_in);
 
   /* Get sync and SNR */
   int sync_state = rade_sync(h->r);
@@ -363,11 +368,13 @@ static napi_value Rx(napi_env env, napi_callback_info info) {
   napi_create_object(env, &result);
   napi_set_named_property(env, result, "speech", speech_arr);
 
-  napi_value v_sync, v_snr;
+  napi_value v_sync, v_snr, v_eoo;
   napi_create_int32(env, sync_state, &v_sync);
   napi_create_int32(env, snr_dB, &v_snr);
+  napi_get_boolean(env, has_eoo != 0, &v_eoo);
   napi_set_named_property(env, result, "sync", v_sync);
   napi_set_named_property(env, result, "snr", v_snr);
+  napi_set_named_property(env, result, "eoo", v_eoo);
 
   return result;
 }
