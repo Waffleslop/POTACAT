@@ -194,6 +194,7 @@ const TESTS = [
   'test/vfo-sdr-volume-test.js', // #118 df1vb: the SDR Volume row stands in when the VOL knob is hidden
   'test/wspr-power-memory-test.js',
   'test/js8-native-test.js',
+  'test/rade-native-test.js',
   'test/js8-varicode-test.js',
   'test/js8-qso-test.js',
   'test/js8-rx-assembler-test.js',
