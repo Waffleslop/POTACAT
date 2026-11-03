@@ -11,12 +11,12 @@
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg-primary); color: var(--text-primary); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12px; }
     body { display: flex; flex-direction: column; }
 
-    .sc-titlebar { display: flex; align-items: center; padding: 0 8px; height: 32px; background: var(--bg-header); border-bottom: 1px solid var(--border-primary); -webkit-app-region: drag; flex-shrink: 0; user-select: none; }
-    .sc-titlebar-title { font-size: 12px; font-weight: 700; color: var(--text-primary); flex: 1; }
+    .sc-titlebar { display: flex; align-items: center; padding: 0 8px; height: var(--titlebar-h); background: var(--bg-header); border-bottom: 1px solid var(--border-primary); -webkit-app-region: drag; flex-shrink: 0; user-select: none; }
+    .sc-titlebar-title { font-size: var(--titlebar-font-size); font-weight: var(--titlebar-font-weight); letter-spacing: var(--titlebar-letter-spacing); color: var(--titlebar-color); flex: 1; }
     .sc-titlebar-btn { -webkit-app-region: no-drag; background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 16px; padding: 2px 8px; line-height: 1; }
     .sc-titlebar-btn:hover { color: var(--text-primary); background: var(--bg-hover); border-radius: 3px; }
-    .sc-titlebar-btn.close:hover { background: var(--accent-red, #e94560); color: #fff; }
-    body.platform-darwin .sc-titlebar { padding-left: 76px; }
+    .sc-titlebar-btn.close:hover { background: var(--accent-red, #e94560); color: var(--on-accent-red); }
+    body.platform-darwin .sc-titlebar { padding-left: 80px; }
     body.platform-darwin .sc-titlebar-btn { display: none; }
 
     .sc-toolbar { display: flex; align-items: center; gap: 10px; padding: 5px 10px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); flex-shrink: 0; flex-wrap: wrap; }
@@ -32,7 +32,7 @@
     .sc-spacer { flex: 1; }
     .sc-btn { background: var(--bg-input); border: 1px solid var(--border-primary); color: var(--text-primary); border-radius: 4px; padding: 3px 9px; cursor: pointer; font-size: 11px; }
     .sc-btn:hover { background: var(--bg-hover); }
-    .sc-btn.accent { background: var(--accent-red, #e94560); border-color: #e94560; color: #fff; font-weight: 700; }
+    .sc-btn.accent { background: var(--accent-red, #e94560); border-color: #e94560; color: var(--on-accent-red); font-weight: 700; }
     .sc-btn.toggle.on { border-color: #4fc3f7; color: #4fc3f7; }
     label.sc-check { display: inline-flex; align-items: center; gap: 4px; color: var(--text-secondary); cursor: pointer; user-select: none; }
 
@@ -45,10 +45,15 @@
     .sc-diag .sc-actions { margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap; }
 
     .sc-stage { flex: 1; min-height: 0; display: flex; flex-direction: column; background: #000; position: relative; }
-    #sc-trace { width: 100%; height: 140px; display: block; flex-shrink: 0; cursor: crosshair; }
-    #sc-spots { width: 100%; height: 22px; display: block; flex-shrink: 0; background: #06060e; cursor: pointer; }
+    /* SmartSDR's proportions (Casey 2026-10-28): the panadapter takes about
+       three quarters, the waterfall the rest, the frequency scale between them
+       is the divider (drag it; double-click resets). Spots are drawn inside
+       the trace, stacked up from its bottom edge. The height is set by
+       scope-popout.js from the saved split. */
+    #sc-trace { width: 100%; height: 300px; display: block; flex-shrink: 0; cursor: crosshair; }
+    #sc-trace.on-spot { cursor: pointer; }
     #sc-wf { width: 100%; flex: 1; min-height: 80px; display: block; cursor: crosshair; }
-    #sc-freq { width: 100%; height: 20px; display: block; flex-shrink: 0; background: #0b0b16; cursor: crosshair; }
+    #sc-freq { width: 100%; height: 20px; display: block; flex-shrink: 0; background: #0b0b16; cursor: row-resize; }
     #sc-trace.in-gutter { cursor: ns-resize; }
     .sc-readout { position: absolute; z-index: 4; pointer-events: none; display: none; padding: 2px 6px; border-radius: 3px; background: rgba(10,10,20,0.9); border: 1px solid rgba(79,195,247,0.5); color: #e0e6ee; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; white-space: nowrap; }
     .sc-readout.show { display: block; }
@@ -118,7 +123,6 @@
   <div class="sc-stage">
     <canvas id="sc-trace"></canvas>
     <canvas id="sc-freq"></canvas>
-    <canvas id="sc-spots"></canvas>
     <div class="sc-readout" id="sc-readout"></div>
     <canvas id="sc-wf"></canvas>
     <div class="sc-unsupported" id="sc-unsupported">WebGL2 is not available in this window — the waterfall cannot be drawn.</div>

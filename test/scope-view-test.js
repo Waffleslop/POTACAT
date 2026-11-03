@@ -485,13 +485,35 @@ test('throttleLast: at most one send per interval, the last value always sent', 
   t = 80; th.push(4); th.flush();
   assert.deepStrictEqual(sent, [1, 3, 4], 'release always lands where the drag stopped');
 });
+test('spot lanes: lowest free lane, centred on the frequency, "+N" counts the rest', () => {
+  const r = V.spotLanes([{ x: 100, w: 50 }, { x: 110, w: 50 }, { x: 120, w: 50 }, { x: 130, w: 50 }, { x: 300, w: 40 }, { x: 125, w: 50 }], { width: 500, maxLanes: 3 });
+  assert.deepStrictEqual(r.placed.map((p) => [p.i, p.lane]), [[0, 0], [1, 1], [2, 2], [4, 0]]);
+  assert.strictEqual(r.placed[3].x0, 280, 'centred on its frequency');
+  assert.strictEqual(r.overflow.length, 1);
+  assert.deepStrictEqual(r.overflow[0].hidden.sort(), [3, 5]);
+  assert.strictEqual(r.overflow[0].lane, 3, 'the chip sits above the top lane');
+});
+test('spot lanes: labels stay clear of the level scale and the right edge', () => {
+  const r = V.spotLanes([{ x: 5, w: 40 }, { x: 498, w: 40 }], { width: 500, minX: 34, maxLanes: 2 });
+  assert.strictEqual(r.placed[0].x0, 34);
+  assert.strictEqual(r.placed[1].x1, 500);
+});
+test('scope window: spots are drawn in the trace, the split follows SmartSDR (three quarters panadapter)', () => {
+  const pj = read('renderer/scope-popout.js');
+  const ph = read('renderer/scope-popout.html');
+  assert.ok(!/id="sc-spots"/.test(ph) && !/spotsCanvas/.test(pj), 'no separate spot strip');
+  assert.ok(/drawSpots\(traceCanvas\.getContext\('2d'\), w, h, dpr\);/.test(pj));
+  assert.ok(/V\.spotLanes\(/.test(pj));
+  assert.ok(/const SPLIT_DEFAULT = 0\.75;/.test(pj) && /lsSet\('scope-split'/.test(pj));
+});
 test('surfaces wire the gestures to the one tune path', () => {
   const pj = read('renderer/scope-popout.js');
   assert.ok(/function tuneDial\(hz\) \{[\s\S]*?window\.api\.tune\(/.test(pj), 'pop-out tunes through window.api.tune');
   assert.ok(/V\.throttleLast\(tuneDial, 66\)/.test(pj), '~15 sends a second');
   assert.ok(/V\.wheelStepHz\(tuneStepHz/.test(pj), 'wheel uses the synced step');
   assert.ok(/e\.key === 'PageUp'[\s\S]*?zoomStep\(-1\)/.test(pj) && /ArrowRight/.test(pj), 'keys');
-  assert.ok(/spotsCanvas\.addEventListener\('dblclick'/.test(pj), 'double-click a spot');
+  // Spots live in the trace now (SmartSDR's layout): a click on a label tunes to the spot and its mode.
+  assert.ok(/if \(p\.spot\) tuneSpot\(p\.spot\);/.test(pj) && /function tuneSpot\(s\) \{[\s\S]*?window\.api\.tune\([^;]*s\.mode/.test(pj), 'a spot label tunes to the spot with its mode');
   assert.ok(/Math\.abs\(hz - dialTarget\.hz\) > 25\) return;/.test(pj), 'optimistic dial');
   const wj = read('renderer/remote.js');
   assert.ok(/function scopeTuneDial\(hz\) \{[\s\S]*?sendToServer\(\{ type: 'tune'/.test(wj), 'web tunes through the tune message');

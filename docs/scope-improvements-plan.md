@@ -98,14 +98,14 @@ All tuning goes through the existing tune path, using the VFO window's optimisti
 
 ## Phase 5: the waterfall
 
-14. **Draggable divider** between trace and waterfall. The split is kept per surface on the device (localStorage, like the colour map). A double-click resets it.
+14. **Draggable divider** between trace and waterfall. The split is kept per surface on the device (localStorage, like the colour map). A double-click resets it. **Built in the pop-out (2026-10-28), following SmartSDR (Casey sent a SmartSDR screenshot):** the panadapter takes 75% by default and the frequency scale between trace and waterfall IS the divider: drag it, double-click to reset, a click without a drag still tunes (`scope-split` in localStorage).
 15. **Auto black level.** `waterfall.js` already auto-ranges (a slow noise floor and a fast-attack peak). This makes it a visible **Auto** toggle, on by default. When it is off, the waterfall's black and white points are the reference and range from item 4, so the trace and waterfall agree.
 16. **Time scale.** A thin gutter on the left of the waterfall with UTC labels every 10, 30 or 60 s (chosen so they're at least about 40 px apart), plus faint lines across. Row timestamps are kept in a JS ring beside the texture ring. On FT8 bands an optional 15 s slot line shows period boundaries.
 17. **Waterfall speed**, independent of the trace refresh rate. Choices from 1 to 30 lines per second, with frames *averaged* into a line rather than dropped, as the JTCAT waterfall's `jtcatWaterfallSpeed` does. The trace keeps the source's full frame rate. Default: one line per frame, which is today's look.
 
 ## Phase 6: overlays
 
-18. **Spots in lanes.** Today a label that would overlap is skipped and only its tick is drawn. Instead, labels stack into up to three lanes (the Spots strip grows to fit), then show "+N" for the rest. Hovering shows the spot (call, ref, mode, age), and the colours stay the source colours.
+18. **Spots in lanes.** Today a label that would overlap is skipped and only its tick is drawn. Instead, labels stack into up to three lanes (the Spots strip grows to fit), then show "+N" for the rest. Hovering shows the spot (call, ref, mode, age), and the colours stay the source colours. **Changed and built in the pop-out (2026-10-28), following SmartSDR:** there is no Spots strip. Labels are drawn INSIDE the trace, stacked up from its bottom edge (`ScopeView.spotLanes`, lowest free lane, centred on the frequency, clear of the level scale), up to four lanes and never more than about 40% of the trace, with "+N" above a pile-up (hover lists the hidden calls). Every spot keeps a tick at its exact frequency on the bottom edge. A click on a label tunes to the spot and its mode (this replaces 12d's double-click). ECHOCAT Web and the phone still draw the strip: Phase 7.
 19. **Other Flex slices.** On Flex Direct, each other slice on the pan is drawn as a lettered marker (A-D) with its passband outlined (not filled). Our own slice stays filled. Clicking another slice's marker does nothing. The list comes from the slice status `lib/smartsdr.js` already parses.
 20. **TX highlight.** While we transmit, the passband turns the TX colour, a quick check that the radio is on the frequency you think.
 

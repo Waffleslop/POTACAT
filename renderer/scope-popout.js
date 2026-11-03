@@ -1,7 +1,7 @@
 // Band Scope pop-out — the FT-710's own spectrum, read over USB.
 //
 // main.js supervises the helper, talks CAT and streams decoded frames here;
-// this window draws them: a spectrum trace, a spot strip, and the shared
+// this window draws them: a spectrum trace with the spots in it, and the shared
 // WebGL waterfall (renderer/waterfall.js). Axis maths is lib/scope-axis.js,
 // the same code main and the ECHOCAT web client use, so click-to-tune lands
 // where the label says. It asks main for exactly four things: enable
@@ -20,7 +20,6 @@ const BINS = A.BINS;
 
 const $ = (id) => document.getElementById(id);
 const traceCanvas = $('sc-trace');
-const spotsCanvas = $('sc-spots');
 const freqCanvas = $('sc-freq');
 const wfCanvas = $('sc-wf');
 
@@ -128,7 +127,7 @@ function sizeCanvas(c) {
 function scheduleDraw() {
   if (drawPending) return;
   drawPending = true;
-  requestAnimationFrame(() => { drawPending = false; drawTrace(); drawFreq(); drawSpots(); });
+  requestAnimationFrame(() => { drawPending = false; drawTrace(); drawFreq(); });
 }
 
 function drawTrace() {
@@ -139,6 +138,7 @@ function drawTrace() {
     { w, h, dpr, axis, dialHz: centerHz, spanHz: state.spanHz, anchor: state.anchor, peakHold,
       scale: V.displayScale(state.levelScale, range.lo, range.hi), gutter: true, sUnits: showSUnits,
       overlay: { passband: state.passband, txHz: state.txHz, bandPlan: state.bandPlan, privileges: showPrivileges } });
+  drawSpots(traceCanvas.getContext('2d'), w, h, dpr);
 }
 
 function drawFreq() {
@@ -147,45 +147,96 @@ function drawFreq() {
 }
 
 const SPOT_COLORS = { pota: '#4ecca3', sota: '#f0a500', wwff: '#7ec8e3', dxc: '#e040fb', rbn: '#ff8a65', pskr: '#b39ddb', net: '#ffd54f' };
-let spotHits = [];   // [{x0, x1, spot}] in CSS px for click hit-testing
+let spotHits = [];   // [{x0, x1, y0, y1, spot}] in CSS px over the trace
+let spotChips = [];  // [{x0, x1, y0, y1, spots}]: the "+N" chips
 
 function spotHz(s) {
   const k = parseFloat(s.frequency);
   return Number.isFinite(k) ? Math.round(k * 1000) : null;
 }
 
-function drawSpots() {
-  const { w, h, dpr } = sizeCanvas(spotsCanvas);
-  const ctx = spotsCanvas.getContext('2d');
-  ctx.fillStyle = '#06060e';
-  ctx.fillRect(0, 0, w, h);
+// SmartSDR's spots (Casey 2026-10-28): labels inside the panadapter, stacked
+// up from its bottom edge in lanes (lib/scope-view.js spotLanes), "+N" above a
+// pile-up. Every spot keeps a short tick at its exact frequency on the bottom
+// edge, shown or not. A label never sits in the level scale on the left.
+const SPOT_LABEL_PX = 15, SPOT_LANE_PX = 17;
+function drawSpots(ctx, w, h, dpr) {
   spotHits = [];
+  spotChips = [];
   if (!showSpots || !axis.known) return;
-  ctx.font = `${10 * dpr}px sans-serif`;
+  ctx.font = `600 ${11 * dpr}px ${getComputedStyle(document.body).fontFamily}`;
   ctx.textBaseline = 'middle';
-  const placed = [];
   const inWindow = spots
     .map((s) => ({ s, hz: spotHz(s) }))
-    .filter((e) => e.hz != null && A.hzToBin(axis, e.hz) != null)
-    .sort((a, b) => a.hz - b.hz);
-  for (const { s, hz } of inWindow) {
-    const x = A.hzToBin(axis, hz) * (w - 1) / (BINS - 1);
-    const label = s.callsign || '';
-    const tw = ctx.measureText(label).width + 8 * dpr;
-    let x0 = Math.max(0, Math.min(w - tw, x - tw / 2));
-    // One row: skip a label that would sit on top of another; the tick still marks it.
-    const collides = placed.some((p) => x0 < p.x1 + 2 * dpr && x0 + tw > p.x0 - 2 * dpr);
-    const color = SPOT_COLORS[s.source] || '#4fc3f7';
-    ctx.fillStyle = color;
-    ctx.fillRect(Math.round(x), 0, Math.max(1, Math.round(dpr)), h);
-    if (collides) continue;
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    ctx.fillRect(x0, 2 * dpr, tw, h - 4 * dpr);
-    ctx.fillStyle = color;
-    ctx.fillText(label, x0 + 4 * dpr, h / 2);
-    placed.push({ x0, x1: x0 + tw });
-    spotHits.push({ x0: x0 / dpr, x1: (x0 + tw) / dpr, spot: s });
+    .filter((e) => e.hz != null && A.hzToBin(axis, e.hz) != null);
+  const xs = inWindow.map((e) => A.hzToBin(axis, e.hz) * (w - 1) / (BINS - 1));
+  // Up to four lanes, never more than about 40% of the trace's height.
+  const maxLanes = Math.max(1, Math.min(4, Math.floor((h * 0.4) / (SPOT_LANE_PX * dpr)) - 1));
+  const lay = V.spotLanes(inWindow.map((e, i) => ({ x: xs[i], w: ctx.measureText(e.s.callsign || '').width + 8 * dpr })),
+    { width: w, minX: V.GUTTER_PX * dpr, maxLanes, gap: 3 * dpr });
+  const color = (s) => SPOT_COLORS[s.source] || '#4fc3f7';
+  const boxH = SPOT_LABEL_PX * dpr;
+  const laneTop = (lane) => h - 5 * dpr - boxH - lane * SPOT_LANE_PX * dpr;
+  inWindow.forEach((e, i) => {
+    ctx.fillStyle = color(e.s);
+    ctx.fillRect(Math.round(xs[i]), h - 4 * dpr, Math.max(1, Math.round(dpr)), 4 * dpr);
+  });
+  for (const p of lay.placed) {
+    const s = inWindow[p.i].s;
+    const y0 = laneTop(p.lane);
+    ctx.fillStyle = 'rgba(0,0,0,0.62)';
+    ctx.fillRect(p.x0, y0, p.x1 - p.x0, boxH);
+    ctx.fillStyle = color(s);
+    ctx.fillText(s.callsign || '', p.x0 + 4 * dpr, y0 + boxH / 2 + 0.5 * dpr);
+    spotHits.push({ x0: p.x0 / dpr, x1: p.x1 / dpr, y0: y0 / dpr, y1: (y0 + boxH) / dpr, spot: s });
   }
+  for (const c of lay.overflow) {
+    const text = '+' + c.hidden.length;
+    const tw = ctx.measureText(text).width + 8 * dpr;
+    const x0 = Math.max(V.GUTTER_PX * dpr, Math.min(w - tw, (c.x0 + c.x1) / 2 - tw / 2));
+    const y0 = laneTop(c.lane);
+    ctx.fillStyle = 'rgba(0,0,0,0.62)';
+    ctx.fillRect(x0, y0, tw, boxH);
+    ctx.fillStyle = '#e0e6ee';
+    ctx.fillText(text, x0 + 4 * dpr, y0 + boxH / 2 + 0.5 * dpr);
+    spotChips.push({ x0: x0 / dpr, x1: (x0 + tw) / dpr, y0: y0 / dpr, y1: (y0 + boxH) / dpr, spots: c.hidden.map((i) => inWindow[i].s) });
+  }
+}
+/** The spot label or "+N" chip under a pointer event on the trace, if any. */
+function spotAt(e) {
+  const r = traceCanvas.getBoundingClientRect();
+  const x = e.clientX - r.left, y = e.clientY - r.top;
+  const inBox = (b) => x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1;
+  const hit = spotHits.find(inBox);
+  if (hit) return { spot: hit.spot };
+  const chip = spotChips.find(inBox);
+  return chip ? { chip } : null;
+}
+function spotText(s) {
+  const ref = s.reference || s.ref || '';
+  const t = s.spotTime ? Date.parse(/Z$|[+-]dd:?dd$/.test(String(s.spotTime)) ? s.spotTime : s.spotTime + 'Z') : NaN;
+  const mins = Number.isFinite(t) ? Math.round((Date.now() - t) / 60000) : null;
+  const hz = spotHz(s);
+  return [s.callsign, ref, s.mode, hz ? (hz / 1e6).toFixed(4) + ' MHz' : '', mins != null && mins >= 0 ? mins + ' min ago' : '']
+    .filter(Boolean).join(' · ');
+}
+function tuneSpot(s) {
+  const hz = spotHz(s);
+  if (hz) window.api.tune((hz / 1000).toFixed(3), s.mode || null);
+}
+
+// ─── Split: the panadapter / waterfall proportion ───────────────────────────
+// SmartSDR keeps about three quarters for the panadapter. The frequency scale
+// between them is the divider; the split is this device's (localStorage).
+const SPLIT_DEFAULT = 0.75;
+let split = Math.max(0.2, Math.min(0.9, Number(lsGet('scope-split', SPLIT_DEFAULT)) || SPLIT_DEFAULT));
+function applySplit() {
+  const free = traceCanvas.parentElement.clientHeight - freqCanvas.offsetHeight;
+  if (!(free > 0)) return;
+  const h = Math.round(Math.max(80, Math.min(free - 60, free * split)));
+  if (traceCanvas.style.height !== h + 'px') traceCanvas.style.height = h + 'px';
+  wf.resize();
+  scheduleDraw();
 }
 
 // ─── Frames ────────────────────────────────────────────────────────────────
@@ -324,8 +375,11 @@ traceCanvas.addEventListener('pointermove', (e) => {
   // Dragging down moves the trace down: the window slides up the levels.
   setRange(V.shiftRange(gutterDrag.range0, d));
 });
+let spotPress = null;
 traceCanvas.addEventListener('pointerdown', (e) => {
   suppressClick = false;
+  spotPress = e.button === 0 ? spotAt(e) : null;
+  if (spotPress) return;
   if (e.button === 0 && !inGutter(e)) { startTuneDrag(traceCanvas, e); return; }
   if (e.button !== 0 || !inGutter(e)) return;
   gutterDrag = { y0: e.clientY, range0: { ...range } };
@@ -344,11 +398,43 @@ traceCanvas.addEventListener('wheel', (e) => {
   setRange(V.zoomRange(range, e.deltaY > 0 ? 1.12 : 1 / 1.12));
 }, { passive: false });
 traceCanvas.addEventListener('click', (e) => {
+  if (spotPress) {
+    const p = spotPress;
+    spotPress = null;
+    // A label tunes to the spot with its mode; a "+N" chip only lists (hover).
+    if (p.spot) tuneSpot(p.spot);
+    return;
+  }
   if (suppressClick) { suppressClick = false; return; }
   const r = traceCanvas.getBoundingClientRect();
   if (r.width > 0) tuneToFraction((e.clientX - r.left) / r.width);
 });
+let splitDrag = null;     // { y0, h0, moved }
+let splitClickEaten = false;
+freqCanvas.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
+  splitDrag = { y0: e.clientY, h0: traceCanvas.offsetHeight, moved: false };
+  try { freqCanvas.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+});
+freqCanvas.addEventListener('pointermove', (e) => {
+  if (!splitDrag) return;
+  const dy = e.clientY - splitDrag.y0;
+  if (!splitDrag.moved && Math.abs(dy) < 3) return;
+  splitDrag.moved = true;
+  const free = traceCanvas.parentElement.clientHeight - freqCanvas.offsetHeight;
+  if (free > 0) { split = Math.max(0.2, Math.min(0.9, (splitDrag.h0 + dy) / free)); applySplit(); }
+});
+const endSplitDrag = (e) => {
+  if (!splitDrag) return;
+  if (splitDrag.moved) { lsSet('scope-split', split.toFixed(3)); splitClickEaten = true; }
+  splitDrag = null;
+  try { freqCanvas.releasePointerCapture(e.pointerId); } catch { /* released */ }
+};
+freqCanvas.addEventListener('pointerup', endSplitDrag);
+freqCanvas.addEventListener('pointercancel', endSplitDrag);
+freqCanvas.addEventListener('dblclick', () => { split = SPLIT_DEFAULT; lsSet('scope-split', split); applySplit(); });
 freqCanvas.addEventListener('click', (e) => {
+  if (splitClickEaten) { splitClickEaten = false; return; }
   const r = freqCanvas.getBoundingClientRect();
   if (r.width > 0) tuneToFraction((e.clientX - r.left) / r.width);
 });
@@ -372,12 +458,26 @@ function showReadout(el, clientX, clientY) {
   readoutEl.style.left = Math.max(4, x) + 'px';
   readoutEl.style.top = Math.max(2, clientY - stage.top - 26) + 'px';
 }
+function showSpotReadout(hit, clientX, clientY) {
+  readoutEl.textContent = hit.spot ? spotText(hit.spot)
+    : hit.chip.spots.length + ' more: ' + hit.chip.spots.map((s) => s.callsign).filter(Boolean).join(', ');
+  readoutEl.classList.add('show');
+  const stage = readoutEl.parentElement.getBoundingClientRect();
+  const w = readoutEl.offsetWidth;
+  let x = clientX - stage.left + 12;
+  if (x + w > stage.width - 4) x = clientX - stage.left - w - 12;
+  readoutEl.style.left = Math.max(4, x) + 'px';
+  readoutEl.style.top = Math.max(2, clientY - stage.top - 26) + 'px';
+}
 function hideReadout() { readoutAt = null; readoutEl.classList.remove('show'); }
 let holdTimer = null;
 for (const el of [traceCanvas, wfCanvas]) {
   el.addEventListener('pointermove', (e) => {
     if (e.pointerType === 'touch' && !readoutAt) return;   // touch: only after a hold
     if (el === traceCanvas && (gutterDrag || inGutter(e))) { hideReadout(); return; }
+    const onSpot = el === traceCanvas && !tuneDrag ? spotAt(e) : null;
+    if (el === traceCanvas) traceCanvas.classList.toggle('on-spot', !!onSpot);
+    if (onSpot) { readoutAt = null; showSpotReadout(onSpot, e.clientX, e.clientY); return; }
     readoutAt = { el, x: e.clientX, y: e.clientY };
     showReadout(el, e.clientX, e.clientY);
   });
@@ -390,26 +490,6 @@ for (const el of [traceCanvas, wfCanvas]) {
   });
   el.addEventListener('pointerup', () => clearTimeout(holdTimer));
 }
-spotsCanvas.addEventListener('click', (e) => {
-  const r = spotsCanvas.getBoundingClientRect();
-  const x = e.clientX - r.left;
-  const hit = spotHits.find((h) => x >= h.x0 && x <= h.x1);
-  if (hit) {
-    const hz = spotHz(hit.spot);
-    if (hz) window.api.tune((hz / 1000).toFixed(3), hit.spot.mode || null);
-  } else if (r.width > 0) {
-    tuneToFraction(x / r.width);
-  }
-});
-// Double-click a spot label: its frequency AND its mode (plan item 12d).
-spotsCanvas.addEventListener('dblclick', (e) => {
-  const r = spotsCanvas.getBoundingClientRect();
-  const x = e.clientX - r.left;
-  const hit = spotHits.find((h) => x >= h.x0 && x <= h.x1);
-  const hz = hit && spotHz(hit.spot);
-  if (hz) window.api.tune((hz / 1000).toFixed(3), hit.spot.mode || null);
-});
-
 $('sc-enable').addEventListener('click', () => window.api.enableOnRadio());
 $('sc-diag-enable').addEventListener('click', () => window.api.enableOnRadio());
 $('sc-retry').addEventListener('click', () => window.api.restart());
@@ -475,8 +555,9 @@ document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === '-') window.api.setZoom(Math.max(0.6, window.api.getZoom() - 0.1));
   if ((e.ctrlKey || e.metaKey) && e.key === '0') window.api.setZoom(1);
 });
-window.addEventListener('resize', () => { wf.resize(); scheduleDraw(); });
+window.addEventListener('resize', applySplit);
 applyState(state);
+applySplit();
 
 // Zoom: step through scope-state.spans from the one nearest the current span.
 function zoomStep(dir) {
