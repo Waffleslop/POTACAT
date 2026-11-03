@@ -52,15 +52,33 @@ function dispatcherActions() {
 }
 
 console.log('the sets');
-test('every demux message type is classified exactly once (allowed or denied)', () => {
+test('every demux message type is classified exactly once (allowed, refused inside, or denied)', () => {
   const cases = demuxCases();
   assert.ok(cases.size > 200, 'found the demux (' + cases.size + ' cases)');
-  const neither = [...cases].filter(t => !A.GUEST_TYPES.has(t) && !A.GUEST_DENIED_TYPES.has(t));
+  const sets = [A.GUEST_TYPES, A.GUEST_REFUSED_INSIDE, A.GUEST_DENIED_TYPES];
+  const neither = [...cases].filter(t => !sets.some(s => s.has(t)));
   assert.deepStrictEqual(neither, [], 'unclassified: ' + neither.join(', ') + ' — decide, in lib/guest-pass-authority.js');
-  const both = [...A.GUEST_TYPES].filter(t => A.GUEST_DENIED_TYPES.has(t));
-  assert.deepStrictEqual(both, [], 'in both sets: ' + both.join(', '));
-  const stale = [...A.GUEST_TYPES, ...A.GUEST_DENIED_TYPES].filter(t => !cases.has(t));
+  const all = sets.flatMap(s => [...s]);
+  const dup = all.filter((t, i) => all.indexOf(t) !== i);
+  assert.deepStrictEqual(dup, [], 'in more than one set: ' + dup.join(', '));
+  const stale = all.filter(t => !cases.has(t));
   assert.deepStrictEqual(stale, [], 'not a demux case: ' + stale.join(', '));
+});
+test('every type refused INSIDE its case still carries that guest check (a dropped check is a failing test, not an open door)', () => {
+  const start = rsSrc.indexOf('switch (msg.type) {');
+  const body = rsSrc.slice(start, rsSrc.indexOf('setPassValidator(fn)', start));
+  // A label's block runs to the next label; fall-through labels (only
+  // whitespace/comments between them, the winlink chain) share one block.
+  const labels = [...body.matchAll(/^      case '([^']+)':/gm)];
+  const onlyGap = (s) => /^\s*(\/\/[^\n]*\s*)*$/.test(s);
+  for (const t of A.GUEST_REFUSED_INSIDE) {
+    const at = labels.findIndex(m => m[1] === t);
+    assert.ok(at >= 0, t);
+    let j = at + 1;
+    while (j < labels.length && onlyGap(body.slice(labels[j - 1].index + labels[j - 1][0].length, labels[j].index))) j++;
+    const block = body.slice(labels[at].index, j < labels.length ? labels[j].index : body.length);
+    assert.ok(/ws\._passSession|this\._guestLocked\(ws\)/.test(block), t + ' has no guest check in its case');
+  }
 });
 test('every rig-control action is classified exactly once', () => {
   const actions = dispatcherActions();
@@ -83,14 +101,21 @@ test('what the pass promises stays allowed: operate the station', () => {
   }
 });
 test('what the pass does not confer is denied: the owner\'s log, accounts, settings, station', () => {
-  for (const t of ['get-all-qsos', 'update-qso', 'delete-qso', 'award-table-get', 'get-past-activations',
-    'cloud-login', 'cloud-register', 'cloud-logout', 'cloud-sync-now', 'cloud-bulk-upload', 'cloud-stripe-checkout',
-    'save-settings', 'save-custom-cat-buttons', 'save-cw-macros', 'save-echo-pref', 'watchlist-edit', 'set-cluster-node',
-    'switch-rig', 'rig-reconnect', 'unpair-self', 'set-audio-device', 'set-atu', 'atu-tune', 'swr-guard-override',
-    'set-enable-split', 'set-enable-atu', 'apply-rig-preset', 'rig-presets-update', 'vfo-profiles-update',
-    'winlink-list', 'winlink-compose', 'winlink-connect', 'kiwi-connect', 'kiwi-tune', 'set-freedv',
-    'voice-macro-sync', 'voice-macro-delete', 'request-diagnostic', 'clock-apply', 'set-activator-park', 'jtcat-set-pref']) {
+  for (const t of ['get-all-qsos', 'update-qso', 'delete-qso', 'get-past-activations', 'get-activation-map-data',
+    'cloud-login', 'cloud-register', 'cloud-logout', 'cloud-sync-now', 'cloud-bulk-upload', 'cloud-get-status',
+    'save-custom-cat-buttons', 'save-cw-macros', 'save-echo-pref', 'set-refresh-interval',
+    'switch-rig', 'rig-reconnect', 'unpair-self', 'set-audio-device', 'set-atu', 'atu-tune',
+    'set-enable-split', 'set-enable-atu', 'vfo-profiles-update', 'apply-vfo-profile',
+    'kiwi-connect', 'kiwi-tune', 'set-freedv', 'toggle-rotor', 'tgxl-select-antenna',
+    'voice-macro-sync', 'voice-macro-delete', 'set-activator-park', 'set-park-county', 'jtcat-set-pref']) {
     assert.strictEqual(A.isGuestAllowed(t), false, t + ' must be denied');
+  }
+  // Refused inside the case with a typed reply the phone already shows: these
+  // pass the wall (and the case's own check is held by the test above).
+  for (const t of ['request-diagnostic', 'award-table-get', 'winlink-list', 'winlink-compose', 'winlink-connect',
+    'apply-rig-preset', 'rig-presets-update', 'worked-overlay-set', 'cloud-stripe-checkout', 'cloud-stripe-portal',
+    'tx-eq-save-rig-default', 'swr-guard-override', 'watchlist-edit', 'set-cluster-node', 'set-idle-rx', 'save-settings', 'clock-apply']) {
+    assert.ok(A.GUEST_REFUSED_INSIDE.has(t) && A.isGuestAllowed(t), t + ' is refused inside its case');
   }
   assert.strictEqual(A.isGuestAllowed('no-such-type'), false, 'unknown = denied');
   assert.strictEqual(A.isGuestAllowed(undefined), false);
@@ -134,7 +159,7 @@ test('a guest\'s denied type is refused out loud and never emitted', () => {
   const rs = serverWith(ws);
   rs._handleMessage(ws, { type: 'get-all-qsos', reqId: 'r1' }, null);
   rs._handleMessage(ws, { type: 'cloud-sync-now' }, null);
-  rs._handleMessage(ws, { type: 'save-settings', settings: { myCallsign: 'EVIL' } }, null);
+  rs._handleMessage(ws, { type: 'save-cw-macros', macros: [] }, null);
   assert.deepStrictEqual(rs.emitted.map(e => e.ev), [], 'nothing emitted');
   assert.strictEqual(ws.sent.length, 3);
   assert.deepStrictEqual(ws.sent[0], { type: 'refused', reason: 'guest-pass', of: 'get-all-qsos', text: A.guestRefusedText('get-all-qsos'), reqId: 'r1' });
@@ -142,6 +167,22 @@ test('a guest\'s denied type is refused out loud and never emitted', () => {
   assert.strictEqual(ws.sent[1].reqId, undefined, 'no reqId when the request carried none');
   assert.ok(protocol.validate(ws.sent[0], protocol.Dir.S2C).ok, 'refused is a registered S2C message');
   assert.deepStrictEqual(rs.logs.filter(l => /Guest Pass: .* refused/.test(l)).length, 3);
+});
+test('a type refused inside its case keeps the typed reply the phone displays — no `refused`, nothing emitted', () => {
+  const ws = fakeWs({ guest: true });
+  const rs = serverWith(ws);
+  rs._handleMessage(ws, { type: 'request-diagnostic', requestId: 'g1' }, null);
+  rs._handleMessage(ws, { type: 'winlink-list', box: 'inbox', reqId: 'w1' }, null);
+  rs._handleMessage(ws, { type: 'award-table-get', reqId: 'a1' }, null);
+  rs._handleMessage(ws, { type: 'save-settings', settings: { myCallsign: 'EVIL' } }, null);
+  rs._handleMessage(ws, { type: 'watchlist-edit', add: ['W1AW'] }, null);
+  assert.deepStrictEqual(rs.emitted.map(e => e.ev), [], 'nothing reached main');
+  assert.deepStrictEqual(ws.sent.map(m => m.type), ['diagnostic-snapshot', 'winlink-refused', 'award-table-refused', 'settings-update', 'watchlist-result']);
+  assert.strictEqual(ws.sent[0].error, 'not-authorized');
+  assert.strictEqual(ws.sent[0].requestId, 'g1');
+  assert.strictEqual(ws.sent[1].reqId, 'w1');
+  assert.strictEqual(ws.sent[4].ok, false);
+  assert.deepStrictEqual(ws.sent.filter(m => m.type === 'refused'), []);
 });
 test('the log is rate-limited per type per socket; the device is told every time', () => {
   const ws = fakeWs({ guest: true });

@@ -62,8 +62,10 @@ check('dispatcher actions and registry are in exact parity', () => {
 
 check('there is no second rig-control switch (drift trap)', () => {
   // The ECHOCAT transport must delegate, not re-implement.
-  assert(/remoteServer\.on\('rig-control',\s*\(data\)\s*=>\s*applyRigControl\(data, 'echocat'\)\)/.test(src),
-    "ECHOCAT rig-control must delegate to applyRigControl(data, 'echocat'), not contain its own switch");
+  // (meta = { guest } rides along so the dispatcher can refuse raw CAT to a
+  // Guest Pass — test/guest-pass-authority-test.js.)
+  assert(/remoteServer\.on\('rig-control',\s*\(data, meta\)\s*=>\s*applyRigControl\(data, 'echocat', meta\)\)/.test(src),
+    "ECHOCAT rig-control must delegate to applyRigControl(data, 'echocat', meta), not contain its own switch");
 });
 
 if (failures) {
