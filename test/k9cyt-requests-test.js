@@ -67,13 +67,19 @@ test('old entries are pruned past the longest window', () => {
 
 test('main.js: the guard sits in jtcatAutoLog before the record is built, and remembers only a saved QSO', () => {
   const src = R('main.js');
-  const fn = src.slice(src.indexOf('async function jtcatAutoLog('), src.indexOf('async function jtcatAutoLog(') + 12000);
+  const fn = src.slice(src.indexOf('async function jtcatAutoLog('), src.indexOf('async function jtcatWriteLog('));
   const check = fn.indexOf('RelogGuard.checkRelog(');
   const build = fn.indexOf('const qsoData = {');
-  const note = fn.indexOf('RelogGuard.noteLogged(');
-  const ok = fn.indexOf("console.log('[JTCAT] Auto-logged QSO:'");
   assert.ok(check > 0 && check < build, 'check before qsoData');
-  assert.ok(note > ok, 'noteLogged after the save succeeded');
+  // The save itself lives in jtcatWriteLog since the review-before-save
+  // window (AE5JE, bdccf96c): a saved QSO is remembered after the write
+  // succeeds there; a contact waiting in the review form is remembered when
+  // it is queued, so Run does not re-work the station while the form waits.
+  const w = src.slice(src.indexOf('async function jtcatWriteLog('), src.indexOf('async function jtcatWriteLog(') + 3000);
+  const ok = w.indexOf("console.log('[JTCAT] Auto-logged QSO:'");
+  const note = w.indexOf('RelogGuard.noteLogged(', ok);
+  assert.ok(ok > 0 && note > ok, 'noteLogged after the save succeeded');
+  assert.ok(/RelogGuard\.noteLogged\(_jtcatRecentLogs, relogKeyStr, Date\.now\(\)\);\s*jtcatLogReviews\.add\(/.test(fn), 'a contact queued for review is remembered at enqueue');
 });
 
 test('pop-out: the window is a gear-menu field saved as jtcatRelogCooldownMin', () => {
