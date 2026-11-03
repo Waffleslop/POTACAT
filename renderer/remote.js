@@ -2062,6 +2062,13 @@
         showToast(msg.reason || 'Tune blocked by license restrictions', 4000);
         break;
 
+      // The shack will not act on that message for this client — on a Guest
+      // Pass, anything outside the pass (lib/guest-pass-authority.js). Said
+      // out loud, never a silent dead control.
+      case 'refused':
+        showToast(msg.text || ('Not available on a Guest Pass: ' + (msg.of || 'that control')), 4000, true);
+        break;
+
       case 'cloud-shack-notice':
         // Another shack shares (or took) the account's Cloud address.
         showToast(msg.text || 'Another shack is on your Cloud address.', 8000);

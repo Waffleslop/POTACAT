@@ -24071,7 +24071,9 @@ function connectRemote() {
   // desktop IPC (applyRigControl). There is intentionally NO second switch here
   // — that duplication is what let the phone path silently drift out of date
   // (NR/Comp/ANF/VOX were missing). One dispatcher, two transports.
-  remoteServer.on('rig-control', (data) => applyRigControl(data, 'echocat'));
+  // meta.guest = a Guest Pass sent it (the demux's action allowlist already
+  // refused what a guest may not do; the dispatcher refuses raw CAT again).
+  remoteServer.on('rig-control', (data, meta) => applyRigControl(data, 'echocat', meta));
 
   // Phone subscribes / unsubscribes / mutes a special event. The phone half of
   // the desktop's per-event toggle, extended with per-device mute. Only the
@@ -41639,7 +41641,7 @@ function cloudShackNotice(text, kind) {
   // Single dispatcher (see the module-level `let applyRigControl` above for
   // why). `source` is 'desktop' (IPC) or 'echocat' (phone) — used only for
   // logging; the actual command path is identical for both.
-  applyRigControl = function (data, source = 'desktop') {
+  applyRigControl = function (data, source = 'desktop', meta = null) {
     if (!data || !data.action) return;
     const flexSdr = () => smartSdr && smartSdr.connected;
     const rigType = detectRigType();
@@ -42183,6 +42185,11 @@ function cloudShackNotice(text, kind) {
         break;
       }
       case 'send-custom-cat': {
+        // A raw string is the whole pass gate in one message (callsign, band,
+        // mode, power — none of it consulted). The demux's action allowlist
+        // refuses it first; this is the second layer, because this one keys
+        // the radio (adversarial review finding 3, 2026-11-03).
+        if (meta && meta.guest) { sendCatLog('[pass] raw CAT refused for a guest'); break; }
         const cmd = data.command;
         if (!cmd || typeof cmd !== 'string') break;
         console.log('[Rig] Custom CAT command:', cmd);
