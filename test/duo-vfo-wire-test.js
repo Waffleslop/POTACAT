@@ -106,7 +106,8 @@ test('atu-tune and rig-control atu-tune reach the same dispatcher action', () =>
   send({ type: 'atu-tune' });
   send({ type: 'rig-control', data: { action: 'atu-tune' } });
   assert.deepStrictEqual(got.map(d => d.action), ['atu-tune', 'atu-tune']);
-  assert.ok(/remoteServer\.on\('rig-control', \(data\) => applyRigControl\(data, 'echocat'\)\)/.test(main),
+  // (meta = { guest } rides along since 2026-11-03 — test/guest-pass-authority-test.js)
+  assert.ok(/remoteServer\.on\('rig-control', \(data, meta\) => applyRigControl\(data, 'echocat', meta\)\)/.test(main),
     'main hands rig-control to applyRigControl');
   assert.ok(/case 'atu-tune': \{/.test(main), 'applyRigControl has an atu-tune case');
 });
