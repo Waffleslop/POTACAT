@@ -6,7 +6,9 @@
  * Speech goes into tx() in 10 ms frames and the modem audio comes back
  * through rx() in getNin() chunks, the way the worker feeds them, on one
  * handle (the RADE API is single-context). What has to hold: one 120 ms
- * modem frame per 120 ms of speech, then an end-of-over frame.
+ * modem frame per 120 ms of speech, a receiver that locks, and an
+ * end-of-over frame that is received without writing past a buffer (that
+ * took the whole app down on air, 2026-11-03).
  *
  * Skips (with a loud line) when the addon isn't built: npm run build-rade.
  *
@@ -58,6 +60,8 @@ for (let f = 0; f < nFrames; f++) {
 }
 const speechModemSamples = modem.length;
 const eooFrame = rade.txEoo(handle);
+for (let i = 0; i < eooFrame.length; i++) modem.push(eooFrame[i]);
+for (let i = 0; i < info.modemRate; i++) modem.push(0);
 
 const modemFrames = txLengths.filter((n) => n > 0);
 const framesPerModemFrame = nFrames / Math.max(1, modemFrames.length);
@@ -80,6 +84,23 @@ test('txEoo() returns the end-of-over frame', () => {
 
 test('tx() refuses a speech frame that is not nSpeech samples', () => {
   assert.throws(() => rade.tx(handle, new Int16Array(info.nSpeech - 1)));
+});
+
+let pos = 0, firstSync = -1, sawEoo = false;
+while (pos + rade.getNin(handle) <= modem.length) {
+  const nin = rade.getNin(handle);
+  const r = rade.rx(handle, Int16Array.from(modem.slice(pos, pos + nin)));
+  pos += nin;
+  if (r.sync && firstSync < 0) firstSync = pos / info.modemRate;
+  if (r.eoo) sawEoo = true;
+}
+
+test('the receiver locks within a second', () => {
+  assert.ok(firstSync >= 0 && firstSync < 1, `first sync at ${firstSync} s`);
+});
+
+test('the end-of-over frame is received and reported', () => {
+  assert.ok(sawEoo, 'rx() never reported eoo');
 });
 
 rade.close(handle);
