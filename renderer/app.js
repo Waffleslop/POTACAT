@@ -26983,6 +26983,7 @@ let freedvAudioCtx = null;
 let freedvAudioStream = null;
 let freedvProcessor = null;
 let freedvRxPlaybackCtx = null;
+let freedvRxPlaybackTime = 0;  // freedvRxPlaybackCtx time the next decoded chunk starts at
 let freedvTxOutputCtx = null;
 let freedvMicStream = null;
 let freedvMicCtx = null;
@@ -27134,6 +27135,7 @@ window.api.onFreedvRxSpeech(async (data) => {
     if (!freedvRxPlaybackCtx || freedvRxPlaybackCtx.state === 'closed' || freedvRxPlaybackCtx.sampleRate !== rate) {
       if (freedvRxPlaybackCtx && freedvRxPlaybackCtx.state !== 'closed') freedvRxPlaybackCtx.close().catch(() => {});
       freedvRxPlaybackCtx = new AudioContext({ sampleRate: rate });
+      freedvRxPlaybackTime = 0;
     }
     const samples = new Int16Array(data.samples);
     const floats = new Float32Array(samples.length);
@@ -27143,7 +27145,13 @@ window.api.onFreedvRxSpeech(async (data) => {
     const source = freedvRxPlaybackCtx.createBufferSource();
     source.buffer = buffer;
     source.connect(freedvRxPlaybackCtx.destination);
-    source.start();
+    // Back to back: decoding runs in bursts (RADE's 120 ms frames span 80 ms
+    // audio blocks), so a chunk started on arrival overlaps the last one or
+    // leaves a gap. After a gap, start again 50 ms out to absorb the jitter.
+    const now = freedvRxPlaybackCtx.currentTime;
+    if (freedvRxPlaybackTime < now) freedvRxPlaybackTime = now + 0.05;
+    source.start(freedvRxPlaybackTime);
+    freedvRxPlaybackTime += buffer.duration;
   } catch {}
 });
 
