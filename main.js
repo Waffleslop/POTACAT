@@ -7731,14 +7731,33 @@ async function connectCat() {
     cat = new RigController(model, transport, codec);
     cat._debug = true;
     cat.on('log', sendCatLog);
+    // rigctld that cannot open the radio's port (another program holds it, or
+    // the radio does not answer at this baud) still accepts POTACAT, then drops
+    // it a few seconds later with nothing said. WX4MWA's TS-2000 log was that
+    // every 6 s for minutes, under "USB/serial dropped?". Two such drops in a
+    // row, with no reply from the radio, are named once per spawn.
+    const rigctldWatch = { upAt: 0, heard: false, silentDrops: 0, said: false };
+    const rigctldHeard = () => { rigctldWatch.heard = true; rigctldWatch.silentDrops = 0; };
     cat.on('status', (s) => {
       if (!s.connected && rigctldStderr) {
         const lastLine = rigctldStderr.trim().split('\n').pop();
         if (lastLine) s.error = lastLine;
       }
       sendCatLog(`rigctld status: connected=${s.connected}${s.error ? ' error=' + s.error : ''}`);
+      if (s.connected) { rigctldWatch.upAt = Date.now(); rigctldWatch.heard = false; }
+      else if (rigctldWatch.upAt) {
+        const lived = Date.now() - rigctldWatch.upAt;
+        rigctldWatch.upAt = 0;
+        if (!rigctldWatch.heard && lived < 15000 && ++rigctldWatch.silentDrops >= 2 && !rigctldWatch.said) {
+          rigctldWatch.said = true;
+          sendCatLog(`[rigctld] rigctld keeps dropping POTACAT without one reply from the radio: it cannot talk to ${target.serialPort || 'the radio'} at ${target.baudRate || 9600} baud. ` +
+            'Usually another program has the port open (WSJT-X, a logger, flrig, the radio maker\'s software) — close it — or the baud rate does not match the radio\'s CAT menu.');
+        }
+      }
       sendCatStatus(s);
     });
+    cat.on('frequency', rigctldHeard);
+    cat.on('mode', rigctldHeard);
     cat.on('frequency', catFrequencyHandler);
     cat.on('mode', catModeHandler);
     cat.on('nb', sendCatNb);
@@ -7760,6 +7779,14 @@ async function connectCat() {
     cat.on('status', (s) => {
       sendCatLog(`rigctld-net status: connected=${s.connected}${s.error ? ' error=' + s.error : ''}`);
       sendCatStatus(s);
+    });
+    // WX4MWA typed his Hamlib model (2014) into the Port box and got
+    // ECONNREFUSED every 16 s with nothing else said.
+    let refusedSaid = false;
+    transport.on('error', (err) => {
+      if (refusedSaid || !/ECONNREFUSED/.test(String(err && err.message))) return;
+      refusedSaid = true;
+      sendCatLog(`[rigctld] Nothing is listening on ${target.host || '127.0.0.1'}:${target.port || 4532}. "rigctld Network" connects to a rigctld you started yourself, which listens on port 4532 unless told otherwise (the Port is not the Hamlib model number). For POTACAT to start rigctld for the radio, choose "Other Rig (Hamlib)" instead.`);
     });
     cat.on('ptt-unavailable', () => {
       if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: `The rigctld server at ${target.host || '127.0.0.1'}:${target.port || 4532} cannot key the radio (no PTT). Transmit from POTACAT will not work over this link.`, warn: true, duration: 12000 });
