@@ -186,11 +186,29 @@
 ; Helpers POTACAT starts from <INSTDIR>\resources (cloudflared, rigctld, rotctld,
 ; Pat, ardopcf, Dire Wolf) are not POTACAT.exe, so nothing else stops them; a
 ; survivor keeps its own file locked and the old files cannot be removed. Only
-; processes running FROM this install's resources folder are touched.
+; processes running FROM this install's folder are touched.
 !macro _StopHelpers
-  nsExec::Exec `powershell -NoProfile -NonInteractive -Command "Get-CimInstance Win32_Process | Where-Object { $$_.ExecutablePath -and $$_.ExecutablePath -like '$INSTDIR\resources\*' } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue }"`
+  ; Name what is still running from the install folder before and after, so a
+  ; "cannot be closed" report shows the process (wv8t 2026-11-02: nothing named
+  ; POTACAT running, still refused). electron-builder's own check counts ANY
+  ; process whose path is under the install folder, not only POTACAT.exe.
+  nsExec::ExecToStack `powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_Process | Where-Object { $$_.ExecutablePath -and $$_.ExecutablePath -like '$INSTDIR\*' } | ForEach-Object { $$_.Name + ' pid ' + $$_.ProcessId }) -join ', '"`
   Pop $R4
-  !insertmacro _LogWrite "StopHelpers: ended any helper left running from $INSTDIR\resources rc=$R4"
+  Pop $R5
+  !insertmacro _LogWrite "StopHelpers: running from $INSTDIR before: [$R5] rc=$R4"
+  ; The whole install folder, not only resources: electron-builder's check, and
+  ; the old version's uninstaller that runs the same check silently, count
+  ; every process there. Never this installer or uninstaller itself, which runs
+  ; from the install folder when Windows refuses the temp copy.
+  System::Call 'kernel32::GetCurrentProcessId() i .R6'
+  nsExec::Exec `powershell -NoProfile -NonInteractive -Command "Get-CimInstance Win32_Process | Where-Object { $$_.ExecutablePath -and $$_.ExecutablePath -like '$INSTDIR\*' -and $$_.ProcessId -ne $R6 } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue }"`
+  Pop $R4
+  !insertmacro _LogWrite "StopHelpers: ended anything left running from $INSTDIR rc=$R4"
+  Sleep 500
+  nsExec::ExecToStack `powershell -NoProfile -NonInteractive -Command "(Get-CimInstance Win32_Process | Where-Object { $$_.ExecutablePath -and $$_.ExecutablePath -like '$INSTDIR\*' } | ForEach-Object { $$_.Name + ' pid ' + $$_.ProcessId }) -join ', '"`
+  Pop $R4
+  Pop $R5
+  !insertmacro _LogWrite "StopHelpers: still running from $INSTDIR after: [$R5] rc=$R4"
 !macroend
 
 ; customInit runs in the installer's .onInit, BEFORE installSection's
@@ -202,6 +220,9 @@
 !macro customInit
   !insertmacro _LogWrite "=== POTACAT Installer ==="
   !insertmacro _LogWrite "customInit: Install dir = $INSTDIR"
+  ; The old uninstaller moves every file into the temp folder; the drive of each
+  ; is the first thing to check when that move fails.
+  !insertmacro _LogWrite "customInit: Temp dir = $TEMP"
   !insertmacro _KillLauncher
   !insertmacro _CloseGuiGracefully
   !insertmacro _StopHelpers
@@ -222,6 +243,28 @@
   !insertmacro _KillLauncher
   !insertmacro _CloseGuiGracefully
   !insertmacro _StopHelpers
+!macroend
+
+; electron-builder's own result handling after it runs the OLD uninstaller,
+; unchanged except that the outcome goes into potacat-install.log: the old
+; uninstaller runs silently, so "cannot be closed" then "Failed to uninstall
+; old application files" left no trace of which step failed.
+!macro customUnInstallCheck
+  !define /redef _UCID ${__COUNTER__}
+  IfErrors 0 uc_ran_${_UCID}
+    !insertmacro _LogWrite "UninstallOld: no old uninstaller to run"
+    DetailPrint `Uninstall was not successful. Not able to launch uninstaller!`
+    Goto uc_done_${_UCID}
+  uc_ran_${_UCID}:
+  StrCmp $R0 "0" uc_ok_${_UCID}
+    !insertmacro _LogWrite "UninstallOld: the old uninstaller failed with code $R0 - a file in $INSTDIR was busy or something was still running from it"
+    MessageBox MB_OK|MB_ICONEXCLAMATION "$(uninstallFailed): $R0"
+    DetailPrint `Uninstall was not successful. Uninstaller error code: $R0.`
+    SetErrorLevel 2
+    Quit
+  uc_ok_${_UCID}:
+    !insertmacro _LogWrite "UninstallOld: old version removed"
+  uc_done_${_UCID}:
 !macroend
 
 !macro customInstall
