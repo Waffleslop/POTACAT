@@ -26244,8 +26244,12 @@ function handleRemotePtt(state, opts = {}) {
       // Change mode only — don't retune frequency (avoids 0Hz bug when freq unknown).
       // Pass current freq so setModeOnly can re-anchor the VFO after the mode
       // change (Yaesu drifts by the filter-width diff on every mode swap).
+      // An Icom never moves the dial on a mode change, and a frequency set
+      // takes it out of MEMORY mode into the VFO with the VFO's duplex (an
+      // IC-705 repeater memory with - offset keyed with + offset, nj7n_nate):
+      // no re-anchor there.
       if (cat && cat.connected) {
-        if (cat.setModeOnly) cat.setModeOnly(dataMode, _ssbFreqBeforePtt);
+        if (cat.setModeOnly) cat.setModeOnly(dataMode, _ssbFreqBeforePtt, { noAnchor: _icomData });
         else if (_ssbFreqBeforePtt) cat.tune(_ssbFreqBeforePtt, dataMode);
       }
       // Stagger the upcoming PTT key-down on Icom so its CI-V PTT frame
@@ -26330,7 +26334,9 @@ function handleRemotePtt(state, opts = {}) {
     // Suppress mode broadcasts during restore so ECHOCAT doesn't flicker
     _modeSuppressUntil = Date.now() + 2000;
     if (cat && cat.connected) {
-      if (cat.setModeOnly) cat.setModeOnly(restoreMode, restoreFreq);
+      const _restoreRig = getActiveRigModel();
+      const _restoreIcom = !!(_restoreRig && _restoreRig.brand === 'Icom');
+      if (cat.setModeOnly) cat.setModeOnly(restoreMode, restoreFreq, { noAnchor: _restoreIcom });
       else if (restoreFreq) cat.tune(restoreFreq, restoreMode);
     }
   }
