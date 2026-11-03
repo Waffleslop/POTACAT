@@ -1,0 +1,96 @@
+/*
+ * The bridge from the desktop's classic palette to the ECHOCAT design system
+ * (docs/design-system-plan.md Phase 3).
+ *
+ * When a design-system theme is chosen (Settings > Display > Theme), main
+ * stamps data-ds="<token column>" on <html> in every window, and these rules
+ * point the desktop's existing variables (styles.css :root) at the theme's
+ * roles. Every window that already draws with var(--...) repaints at once,
+ * before any window is converted to the component sheet. With no data-ds the
+ * classic themes are untouched.
+ *
+ * Specificity: :root[data-ds] (0,2,0) beats the classic [data-theme="light"]
+ * and [data-dark-variant] blocks (0,1,0) wherever this file sits; the WCAG
+ * light block (0,2,0, later in styles.css) still wins, on purpose.
+ *
+ * The one judgement call is the classic red: --accent-red does four jobs
+ * (brand, on air, stop, selected). Until each use is sorted (Phase 4) it maps
+ * to air-ink, the phone's same migration crutch: red keeps meaning "on the air
+ * or stop", which is what the controls that matter use it for.
+ *
+ * Imported at the top of styles.css after tokens.css. Reads only --ds-*.
+ */
+
+:root[data-ds] {
+  /* Surfaces */
+  --bg-primary: var(--ds-bg);
+  --bg-secondary: var(--ds-surface);
+  --bg-tertiary: var(--ds-fill);
+  --bg-hover: color-mix(in srgb, var(--ds-fill), var(--ds-ink) 8%);
+  --bg-input: var(--ds-fill);
+  --bg-panel: var(--ds-surface);
+
+  /* Edges */
+  --border-primary: var(--ds-line);
+  --border-secondary: color-mix(in srgb, var(--ds-line), var(--ds-ink) 18%);
+
+  /* Text */
+  --text-primary: var(--ds-ink);
+  --text-secondary: var(--ds-ink-muted);
+  --text-tertiary: var(--ds-ink-muted);
+  --text-dim: var(--ds-ink-muted);
+  --text-dimmer: color-mix(in srgb, var(--ds-ink-muted), var(--ds-bg) 25%);
+
+  /* Accents */
+  --accent-red: var(--ds-air-ink);
+  --accent-blue: var(--ds-tint);
+  --accent-green: var(--ds-ok);
+  --accent-green-btn: var(--ds-ok);
+  --tx-active: var(--ds-air);
+
+  /* Effects */
+  --backdrop: var(--ds-scrim);
+  --tint-green: var(--ds-ok-subtle);
+  --tint-red: var(--ds-danger-subtle);
+  --tint-yellow: var(--ds-warn-subtle);
+  --tint-orange: var(--ds-warn-subtle);
+  --scrollbar-thumb: var(--ds-line);
+  --scrollbar-track: var(--ds-bg);
+
+  /* Aliases that the classic file pins to literals */
+  --warn: var(--ds-warn);
+  --bad: var(--ds-danger);
+  --accent-gold: var(--ds-brand);
+  --accent-subtle: var(--ds-air-subtle);
+  --info-subtle: var(--ds-tint-subtle);
+  --ok-subtle: var(--ds-ok-subtle);
+  --warn-subtle: var(--ds-warn-subtle);
+  --bad-subtle: var(--ds-danger-subtle);
+
+  /* Conditions severity */
+  --cond-good: var(--ds-ok);
+  --cond-warn: var(--ds-warn);
+  --cond-bad: var(--ds-danger);
+  --cond-good-bg: var(--ds-ok-subtle);
+  --cond-warn-bg: var(--ds-warn-subtle);
+  --cond-bad-bg: var(--ds-danger-subtle);
+  --cond-good-border: var(--ds-ok);
+  --cond-warn-border: var(--ds-warn);
+  --cond-bad-border: var(--ds-danger);
+  --cond-warn-fill: var(--ds-warn);
+
+  /* Logbook columns: the key field and the park follow the roles */
+  --log-call: var(--ds-brand);
+  --log-park: var(--ds-ok);
+  --log-notes: var(--ds-ink-muted);
+  --log-region: var(--ds-ink);
+}
+
+/* Acid Burn is mono throughout: its identity on the phone, the same here. */
+:root[data-ds="acid"] body,
+:root[data-ds="acid"] button,
+:root[data-ds="acid"] input,
+:root[data-ds="acid"] select,
+:root[data-ds="acid"] textarea {
+  font-family: var(--ds-font-mono);
+}

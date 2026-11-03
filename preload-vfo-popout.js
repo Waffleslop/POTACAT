@@ -1,7 +1,14 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
+  // The active rig's bands (lib/rig-bands.js): {bands: string[]|null, all}.
+  rigBandsGet: () => ipcRenderer.invoke('rig-bands-get'),
+  onRigBands: (cb) => ipcRenderer.on('rig-bands', (_e, d) => cb(d)),
   platform: process.platform,
+  // The tuning step, synced with the Band Scope and every ECHOCAT device.
+  tuneStepGet: () => ipcRenderer.invoke('tune-step-get'),
+  setTuneStep: (hz) => ipcRenderer.send('tune-step-set', Number(hz)),
+  onTuneStep: (cb) => ipcRenderer.on('tune-step', (_e, hz) => cb(hz)),
   tune: (frequency, mode, bearing) => ipcRenderer.send('tune', { frequency, mode, bearing }),
   setVfoLock: (locked) => ipcRenderer.send('vfo-set-lock', locked),
   onVfoLockState: (cb) => ipcRenderer.on('vfo-lock-state', (_e, locked) => cb(locked)),
@@ -76,6 +83,8 @@ contextBridge.exposeInMainWorld('api', {
     setInterval(flush, 250);
   },
   onTheme: (cb) => ipcRenderer.on('vfo-popout-theme', (_e, theme) => cb(theme)),
+  // Voice macro labels or recordings changed (Settings, a recording, the phone).
+  onVoiceMacrosChanged: (cb) => ipcRenderer.on('voice-macros-changed', () => cb()),
   // Live profile-list updates pushed by main when ECHOCAT phone (or another
   // window) edits settings.vfoProfiles. Fires after a save() or delete on
   // the phone-side widget; lets the popout re-render without a manual reload.

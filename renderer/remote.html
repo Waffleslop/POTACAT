@@ -13,13 +13,17 @@
   <!-- cq-target-js -->
   <!-- jtcat-parser-js -->
   <!-- scope-axis-js -->
+  <!-- scope-view-js -->
   <!-- cloud-billing-ui-js -->
   <!-- custom-cat-follow-js -->
   <!-- jtty-macros-js -->
   <!-- spot-row-js -->
   <!-- decode-row-js -->
   <!-- worked-roster-js -->
+  <!-- worked-matrix-js -->
   <!-- worked-overlay-js -->
+  <!-- rig-bands-js -->
+  <!-- landmarks-js -->
   <script>if(localStorage.getItem('echocat-theme')==='light'){document.documentElement.setAttribute('data-theme','light');document.querySelector('meta[name="theme-color"]').content='#e8eaed'}</script>
 </head>
 <body>
@@ -428,6 +432,14 @@
           <div class="so-slider-wrap">
             <input type="range" id="rc-tx-drive" class="so-slider" min="0" max="200" value="100">
             <span id="rc-tx-drive-val" class="so-slider-val">100%</span>
+          </div>
+        </div>
+
+        <div class="so-row hidden" id="so-rx-level-row" title="Shack-side receive level — the level of the radio's audio POTACAT sends to this device, in dB, set on the desktop and shared by every client. Raise it for a radio whose line output ignores its volume knob.">
+          <label class="so-label">RX Level</label>
+          <div class="so-slider-wrap">
+            <input type="range" id="rc-rx-level" class="so-slider" min="-20" max="20" value="0">
+            <span id="rc-rx-level-val" class="so-slider-val">0 dB</span>
           </div>
         </div>
 
@@ -844,7 +856,7 @@
         <div class="so-section-label">Cloud Sync</div>
         <div id="echo-cloud-login" class="hidden">
           <div class="so-row"><label class="so-label" style="flex:1;">Callsign<input type="text" id="echo-cloud-callsign" placeholder="K3SBP" style="text-transform:uppercase;width:100%;margin-top:2px;"></label></div>
-          <div class="so-row"><label class="so-label" style="flex:1;">Email<input type="email" id="echo-cloud-email" placeholder="your@email.com" style="width:100%;margin-top:2px;"></label></div>
+          <div class="so-row"><label class="so-label" style="flex:1;">Email or callsign<input type="text" id="echo-cloud-email" placeholder="Email or callsign" autocapitalize="off" autocomplete="username" spellcheck="false" style="width:100%;margin-top:2px;"></label></div>
           <div class="so-row"><label class="so-label" style="flex:1;">Password<input type="password" id="echo-cloud-password" placeholder="Min 8 characters" style="width:100%;margin-top:2px;"></label></div>
           <div class="so-row" style="gap:6px;">
             <button type="button" id="echo-cloud-register-btn" class="so-step-btn" style="flex:1;padding:6px;">Start Free Trial</button>
@@ -958,6 +970,8 @@
         <button class="rc-dropdown-btn" type="button">Band: <span class="rc-dd-text">All</span></button>
         <div class="rc-dropdown-menu">
           <label class="rc-dropdown-item"><input type="checkbox" value="all" checked> All</label>
+          <label class="rc-dropdown-item"><input type="checkbox" value="2200m"> 2200m</label>
+          <label class="rc-dropdown-item"><input type="checkbox" value="630m"> 630m</label>
           <label class="rc-dropdown-item"><input type="checkbox" value="160m"> 160m</label>
           <label class="rc-dropdown-item"><input type="checkbox" value="80m"> 80m</label>
           <label class="rc-dropdown-item"><input type="checkbox" value="60m"> 60m</label>
@@ -975,6 +989,11 @@
           <label class="rc-dropdown-item"><input type="checkbox" value="1.25m"> 1.25m</label>
           <label class="rc-dropdown-item"><input type="checkbox" value="33cm"> 33cm</label>
           <label class="rc-dropdown-item"><input type="checkbox" value="23cm"> 23cm</label>
+          <label class="rc-dropdown-item"><input type="checkbox" value="13cm"> 13cm</label>
+          <label class="rc-dropdown-item"><input type="checkbox" value="9cm"> 9cm</label>
+          <label class="rc-dropdown-item"><input type="checkbox" value="6cm"> 6cm</label>
+          <label class="rc-dropdown-item"><input type="checkbox" value="3cm"> 3cm</label>
+          <label class="rc-dropdown-item"><input type="checkbox" value="1.25cm"> 1.25cm</label>
         </div>
       </div>
 
@@ -987,6 +1006,7 @@
           <label class="rc-dropdown-item"><input type="checkbox" value="SSB"> SSB</label>
           <label class="rc-dropdown-item"><input type="checkbox" value="FT8"> FT8</label>
           <label class="rc-dropdown-item"><input type="checkbox" value="FT4"> FT4</label>
+          <label class="rc-dropdown-item"><input type="checkbox" value="FT2"> FT2</label>
           <label class="rc-dropdown-item"><input type="checkbox" value="JS8"> JS8</label>
           <label class="rc-dropdown-item"><input type="checkbox" value="FM"> FM</label>
           <label class="rc-dropdown-item"><input type="checkbox" value="RTTY"> RTTY</label>
@@ -1033,6 +1053,7 @@
           <div class="rc-spots-divider"></div>
           <label class="rc-spots-toggle rc-new-only-row" style="display:none"><input type="checkbox" id="rc-new-only"> <span style="color:#66ff99">NEW parks only</span></label>
           <label class="rc-spots-toggle rc-hide-worked-row" style="display:none"><input type="checkbox" id="rc-hide-worked"> Hide worked</label>
+          <label class="rc-spots-toggle" title="Only stations that count as DX: a different country from the shack's, or farther than the DX distance set on the desktop."><input type="checkbox" id="rc-dx-only"> DX only</label>
         </div>
       </div>
 
@@ -1212,6 +1233,7 @@
           <button type="button" id="ql-log-btn" class="ql-log-btn">LOG</button>
         </div>
         <div id="ql-call-info" class="ql-call-info hidden"></div>
+        <div id="ql-worked-matrix" class="wm-wrap"></div>
         <div class="ql-row ql-row-small">
           <input type="text" id="ql-freq" inputmode="decimal" placeholder="kHz" class="ql-freq">
           <select id="ql-mode" class="ql-mode">
@@ -1252,10 +1274,10 @@
       <div class="lb-filter-bar" id="lb-filter-bar">
         <select id="lb-filter-band" title="Band">
           <option value="">All bands</option>
-          <option>160m</option><option>80m</option><option>60m</option><option>40m</option>
+          <option>2200m</option><option>630m</option><option>160m</option><option>80m</option><option>60m</option><option>40m</option>
           <option>30m</option><option>20m</option><option>17m</option><option>15m</option>
           <option>12m</option><option>10m</option><option>6m</option><option>2m</option><option>70cm</option>
-          <option>1.25m</option><option>33cm</option><option>23cm</option>
+          <option>1.25m</option><option>33cm</option><option>23cm</option><option>13cm</option><option>9cm</option><option>6cm</option><option>3cm</option><option>1.25cm</option>
         </select>
         <select id="lb-filter-mode" title="Mode">
           <option value="">All modes</option>
@@ -1495,14 +1517,15 @@
            (FT-710 over USB). The BS button toggles it; shown only when the
            shack advertises scope and the rig declares nativeScope. -->
       <div id="ft8-bandscope" class="hidden" style="background:#000;border-bottom:1px solid var(--border);flex-shrink:0;">
-        <div style="display:flex;gap:6px;align-items:center;padding:2px 8px;font-size:10px;color:var(--text-dim);background:var(--bg-header);"><span style="font-weight:700;color:var(--text)">Band Scope</span><span id="ft8-bs-status"></span><span id="ft8-bs-span"></span><span style="flex:1"></span><span id="ft8-bs-lo" style="font-family:monospace"></span><span id="ft8-bs-c" style="font-family:monospace;color:#e94560;font-weight:700"></span><span id="ft8-bs-hi" style="font-family:monospace"></span></div>
+        <div style="display:flex;gap:6px;align-items:center;padding:2px 8px;font-size:10px;color:var(--text-dim);background:var(--bg-header);"><span style="font-weight:700;color:var(--text)">Band Scope</span><span id="ft8-bs-status"></span><span id="ft8-bs-span"></span></div>
         <canvas id="ft8-bs-trace" width="320" height="50" style="width:100%;height:50px;display:block;background:#000;"></canvas>
+        <canvas id="ft8-bs-freq" width="320" height="18" style="width:100%;height:18px;display:block;background:#0b0b16;"></canvas>
         <canvas id="ft8-bs-wf" width="320" height="90" style="width:100%;height:90px;display:block;background:#000;image-rendering:pixelated;"></canvas>
       </div>
       <canvas id="ft8-waterfall" class="ft8-waterfall hidden" width="320" height="100"></canvas>
       <div id="ft8-control-bar">
         <button type="button" id="ft8-tx-btn" class="ft8-ctrl-btn ft8-tx-btn">TX</button>
-        <button type="button" id="ft8-slot-btn" class="ft8-ctrl-btn ft8-slot-btn">Auto</button>
+        <button type="button" id="ft8-slot-btn" class="ft8-ctrl-btn ft8-slot-btn">Slot: Auto</button>
         <button type="button" id="ft8-cq-btn" class="ft8-ctrl-btn ft8-cq-btn">CQ</button>
         <select id="ft8-chase" class="ft8-ctrl-btn" style="font-size:11px;padding:2px;width:auto;" title="Chase target — directs your CQ and highlights matching decodes"></select>
         <input id="ft8-chase-custom" type="text" maxlength="4" placeholder="JA/FL" title="US state code or DXCC prefix — ≤4 letters" style="display:none;width:42px;font-size:11px;padding:2px 3px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);border-radius:3px;text-transform:uppercase;">
@@ -1547,6 +1570,8 @@
         <div class="dir-tabs">
           <button class="dir-tab active" data-dtab="nets">HF Nets</button>
           <button class="dir-tab" data-dtab="swl">SWL</button>
+          <button class="dir-tab" data-dtab="landmarks">Landmarks</button>
+          <button class="dir-tab" data-dtab="channels">Channels</button>
         </div>
         <input type="text" id="dir-search" placeholder="Search..." class="dir-search">
       </div>
@@ -1705,14 +1730,28 @@
         <span id="scope-phone-synth" class="hidden" style="padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;background:#f0a500;color:#1a1a2e;">SYNTHETIC</span>
         <span id="scope-phone-span" style="font-family:monospace;color:var(--text)"></span>
         <span id="scope-phone-mode" style="color:var(--text-dim)"></span>
-        <label style="display:inline-flex;align-items:center;gap:4px;color:var(--text-dim)" title="Noise floor: levels below this are drawn black">Floor <input type="range" id="scope-phone-floor" min="0" max="200" value="0" style="width:90px"></label>
+        <label style="display:inline-flex;align-items:center;gap:4px;color:var(--text-dim)" title="Noise floor: levels below this are drawn black (the bottom of the level window)">Floor <input type="range" id="scope-phone-floor" min="0" max="200" value="0" style="width:90px"></label>
         <span style="flex:1"></span>
+        <button type="button" id="scope-phone-peak-clear" class="hidden" style="padding:3px 8px;font-size:11px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);border-radius:4px;">Clear peaks</button>
+        <button type="button" id="scope-phone-display-btn" style="padding:3px 8px;font-size:11px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);border-radius:4px;" title="Level window, averaging, peak hold">Display</button>
         <button type="button" id="scope-phone-enable" class="hidden" style="padding:3px 8px;font-size:11px;font-weight:700;border:1px solid #e94560;background:var(--accent, #e94560);color:#fff;border-radius:4px;">Enable SCU-LAN10</button>
       </div>
+      <div id="scope-phone-display" class="hidden" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;padding:6px 10px;font-size:12px;color:var(--text-dim);background:var(--bg-card);border-bottom:1px solid var(--border);flex-shrink:0;">
+        <label style="display:inline-flex;align-items:center;gap:4px" title="The top of the trace. Drag the level scale at the left edge to move the window.">Top <input type="range" id="scope-phone-top" min="16" max="255" value="255" style="width:90px"></label>
+        <label style="display:inline-flex;align-items:center;gap:4px">Averaging <select id="scope-phone-avg"><option value="off">Off</option><option value="light">Light</option><option value="medium">Medium</option><option value="heavy">Heavy</option></select></label>
+        <label style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" id="scope-phone-peak"> Peak hold</label>
+        <label id="scope-phone-peak-decay-wrap" class="hidden" style="display:inline-flex;align-items:center;gap:4px">Decay <select id="scope-phone-peak-decay"><option value="fast">Fast</option><option value="slow">Slow</option><option value="hold">Hold</option></select></label>
+        <label style="display:inline-flex;align-items:center;gap:4px" title="Hatch the parts of the band your licence class may not use"><input type="checkbox" id="scope-phone-privileges"> Privileges</label>
+        <label id="scope-phone-sunits-wrap" class="hidden" style="display:inline-flex;align-items:center;gap:4px"><input type="checkbox" id="scope-phone-sunits"> S-units</label>
+        <button type="button" id="scope-phone-range-reset" style="padding:2px 8px;font-size:11px;border:1px solid var(--border);background:var(--bg-header);color:var(--text);border-radius:4px;">Reset levels</button>
+      </div>
       <div id="scope-phone-diag" class="hidden" style="padding:8px 10px;font-size:12px;border-bottom:1px solid var(--border);border-left:4px solid #e94560;background:var(--bg-card);"></div>
-      <canvas id="scope-phone-trace" width="320" height="80" style="width:100%;height:80px;display:block;background:#000;"></canvas>
-      <canvas id="scope-phone-wf" width="320" height="240" style="width:100%;flex:1;min-height:120px;display:block;background:#000;image-rendering:pixelated;"></canvas>
-      <div id="scope-phone-axis" style="display:flex;justify-content:space-between;font-family:monospace;font-size:11px;padding:3px 8px;color:var(--text-dim);background:var(--bg-header);border-top:1px solid var(--border);flex-shrink:0;"><span id="scope-phone-ax-lo">—</span><span id="scope-phone-ax-c" style="color:#e94560;font-weight:700">—</span><span id="scope-phone-ax-hi">—</span></div>
+      <div style="position:relative;display:flex;flex-direction:column;flex:1;min-height:0;">
+        <canvas id="scope-phone-trace" width="320" height="110" style="width:100%;height:110px;display:block;background:#000;touch-action:pan-y;"></canvas>
+        <canvas id="scope-phone-freq" width="320" height="20" style="width:100%;height:20px;display:block;background:#0b0b16;"></canvas>
+        <canvas id="scope-phone-wf" width="320" height="240" style="width:100%;flex:1;min-height:120px;display:block;background:#000;image-rendering:pixelated;touch-action:pan-y;"></canvas>
+        <div id="scope-phone-readout" style="position:absolute;z-index:4;pointer-events:none;display:none;padding:2px 6px;border-radius:3px;background:rgba(10,10,20,0.9);border:1px solid rgba(79,195,247,0.5);color:#e0e6ee;font-family:monospace;font-size:11px;white-space:nowrap;"></div>
+      </div>
     </div>
     <div id="mail-view" class="hidden" style="display:none;flex-direction:column;flex:1;min-height:0;">
       <div id="mail-acct" class="hidden" style="padding:10px;border-bottom:1px solid var(--accent-blue,#4fc3f7);font-size:13px;display:flex;flex-direction:column;gap:6px;">
@@ -1790,6 +1829,7 @@
           <label for="log-call">Callsign</label>
           <input type="text" id="log-call" autocapitalize="characters" autocorrect="off" spellcheck="false">
           <div id="log-call-info" class="ql-call-info hidden"></div>
+          <div id="log-worked-matrix" class="wm-wrap"></div>
         </div>
         <div id="log-ref-section" class="log-field hidden">
           <label for="log-ref-input">Reference</label>

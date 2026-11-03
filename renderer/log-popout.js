@@ -336,6 +336,13 @@ function _applyPopoutTheme(payload) {
     }
   }
 
+  /** The bands and modes already worked with this call (#108, AE5JE). */
+  function renderWorkedMatrix(matrix) {
+    const el = document.getElementById('lp-worked-matrix');
+    if (!el || !window.WorkedMatrix) return;
+    el.innerHTML = matrix ? window.WorkedMatrix.workedMatrixHtml(matrix, { showEmpty: true, emptyText: 'Not worked before' }) : '';
+  }
+
   /** Debounced callsign lookup — fires combined QRZ + past-QSO query. */
   function scheduleLookup() {
     const raw = callInput.value.trim().toUpperCase();
@@ -348,6 +355,7 @@ function _applyPopoutTheme(payload) {
       // Empty state — clear identity / past QSOs immediately, no IPC needed.
       updateIdentity(null, raw);
       renderPastQsos([], 0, '');
+      renderWorkedMatrix(null);
       lastLookupCall = '';
       return;
     }
@@ -362,6 +370,7 @@ function _applyPopoutTheme(payload) {
         if (raw !== callInput.value.trim().toUpperCase()) return;
         updateIdentity(result.qrz, raw);
         renderPastQsos(result.pastQsos, result.totalQsos, raw);
+        renderWorkedMatrix(result.workedMatrix);
       } catch (err) {
         console.warn('[log-popout] callsign lookup failed:', err);
       }

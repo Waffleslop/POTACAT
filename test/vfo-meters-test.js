@@ -71,7 +71,9 @@ test('a No-CAT (VOX) rig never shows a meter', () => {
 
 test('main: real readings mark meters; synthetic values never do', () => {
   for (const [fn, key] of [['sendCatSmeter', 'smeter'], ['sendCatSwr', 'swr'], ['sendCatAlc', 'alc']]) {
-    const body = main.slice(main.indexOf(`function ${fn}(val) {`), main.indexOf(`function ${fn}(val) {`) + 200);
+    const at = main.search(new RegExp(`function ${fn}\\(val(, dbm)?\\) \\{`));
+    assert.ok(at >= 0, fn + ' found');
+    const body = main.slice(at, at + 200);
     assert.ok(body.includes(`noteMeterSeen('${key}')`), fn);
   }
   const fwd = main.slice(main.indexOf('function sendCatFwdPower(watts) {'), main.indexOf('function sendCatPower('));

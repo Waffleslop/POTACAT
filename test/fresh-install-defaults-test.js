@@ -34,8 +34,13 @@ test('the welcome screen starts on Light (its value is what Continue saves on a 
   assert.ok(/<input type="checkbox" id="welcome-light-mode" checked>/.test(html));
 });
 
+// Every window's theme comes from lib/app-theme.js since the design-system
+// themes (d70afbd3), so the fallback is checked there, by behaviour.
 test('existing installs keep their look: the read-side fallback is still navy', () => {
-  assert.ok(/settings\.darkVariant \|\| 'navy'/.test(main));
+  const AppTheme = require('../lib/app-theme');
+  assert.strictEqual(AppTheme.resolveAppTheme({}).variant, 'navy');
+  assert.strictEqual(AppTheme.resolveAppTheme({ lightMode: false }).variant, 'navy');
+  assert.ok(/AppTheme\.resolveAppTheme\(settings\)/.test(main), 'main resolves the theme through lib/app-theme.js');
 });
 
 // Telemetry (Casey 2026-10-01): on for NEW installs, shown as a ticked box on

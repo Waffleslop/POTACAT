@@ -43,7 +43,7 @@ test('no listener or one-time setter is attached to remoteServer outside connect
 
 test('pairing, Guest Pass and VFO lock are wired through onRemoteServer', () => {
   assert.ok(/onRemoteServer\(\(rs\) => \{\n\s*rs\.on\('pair-request'/.test(src), 'pair-request');
-  assert.ok(/onRemoteServer\(\(rs\) => \{\n\s*rs\.setPassValidator\(/.test(src), 'pass validator');
+  assert.ok(/onRemoteServer\(\(rs\) => \{\n(\s*\/\/[^\n]*\n|\s*if \(rs\.setLeaseCall\)[^\n]*\n)*\s*rs\.setPassValidator\(/.test(src), 'pass validator');
   assert.ok(/rs\.setPassAuthCallback\(/.test(src), 'pass auth callback');
   assert.ok(/rs\.on\('vfo-set-lock'/.test(src), 'vfo lock');
 });

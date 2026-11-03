@@ -1,3 +1,5 @@
+@import url("tokens.css");
+@import url("ds-bridge.css");
 /* ── POTACAT theme variables ──────────────────────────────────────────
  *
  * Token vocabulary (mobile-aligned, 2026-06-07 step-1 consolidation):
@@ -2036,6 +2038,12 @@ thead th {
   width: 100%;
   background: var(--bg-primary);
   min-height: 0;
+  /* Leaflet's controls sit at z-index 800-1000; keep them inside the map so
+     the attribution never draws over a panel above it (POTA Stats, the
+     event board; KQ4SUB). */
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
 }
 
 .dark-tiles {
@@ -5620,8 +5628,12 @@ a.settings-echocat-badge-link:hover {
   color: var(--accent-red);
 }
 
-/* DXCC Tracker */
-#dxcc-view {
+/* DXCC Tracker — and Worked All States, which reuses its markup. Without the
+   flex column + height the table container is never bounded, so its
+   overflow:auto never scrolls (N0KAH 2026-10-26: the WAS table could only be
+   seen whole on a big monitor). */
+#dxcc-view,
+#was-view {
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -5781,6 +5793,7 @@ a.settings-echocat-badge-link:hover {
 .was-backfill-status { font-size: 11px; color: var(--text-secondary); }
 #was-count.was-count-confirmed { color: #4ecca3; }
 .ref-state-pill { background: #e040fb; color: #000; font-size: 9px; font-weight: bold; padding: 1px 3px; border-radius: 3px; margin-left: 4px; }
+.ref-dx-pill { background: #ffd740; color: #000; font-size: 9px; font-weight: bold; padding: 1px 3px; border-radius: 3px; margin-left: 4px; }
 #was-placeholder { text-align: center; padding: 16px 20px; color: var(--text-tertiary); font-size: 12px; }
 
 .dxcc-unworked {
@@ -7494,6 +7507,10 @@ a.settings-echocat-badge-link:hover {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* The buttons on the right (Spot, Export ADIF, Logbook, Settings) wrap to a
+     second row instead of leaving the window at full screen with a large text
+     size (WD3D 2026-10-29: "the buttons disappear when you go full screen"). */
+  flex-wrap: wrap;
   padding: 8px 12px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-primary);
@@ -8192,8 +8209,7 @@ body.activator-spots-on #parks-stats-toggle,
 body.activator-spots-on #cat-log-toggle,
 body.activator-spots-on #cat-status,
 body.activator-spots-on #wsjtx-status,
-body.activator-spots-on #cw-keyer-status,
-body.activator-spots-on .solar-pill {
+body.activator-spots-on #cw-keyer-status {
   display: none !important;
 }
 
@@ -8781,7 +8797,11 @@ body.activator-rbn-on #rbn-view {
 .dirv-power-col { width: 60px; }
 .dirv-region-col { width: 110px; }
 .dirv-notes-col { min-width: 120px; max-width: 300px; }
-.dirv-action-col { width: 60px; text-align: center; }
+/* Fits "+ Add" and "Remove" whole; the table clips every other cell with an
+   ellipsis, which cut the Remove button in half (hoogskev 2026-10-31). */
+.dirv-action-col { width: 84px; text-align: center; }
+.directory-view-table tbody td.dirv-action-col { overflow: visible; text-overflow: clip; }
+.dirv-action-col .dir-add-btn, .dirv-action-col .dir-remove-btn { white-space: nowrap; }
 
 .dirv-status-badge {
   display: inline-block;
@@ -10366,6 +10386,12 @@ main.banner-logger-active #event-progress-overlay {
 .gp-list-error { color: var(--accent-red); }
 
 /* Owner banner — slightly more polished than the inline block */
+/* The activation bar's county picker (lib/station-county.js). Unset = dimmed
+   so a park with no county chosen yet reads as "still to do". */
+#activator-county-wrap { display: inline-flex; gap: 4px; align-items: center; margin-left: 6px; }
+#activator-county-wrap.hidden { display: none; }
+#activator-county.county-unset { opacity: 0.6; }
+
 #gp-owner-banner {
   background: linear-gradient(180deg, var(--accent-blue) 0%, color-mix(in srgb, var(--accent-blue) 80%, #000) 100%);
   border-bottom: 2px solid var(--accent-blue);
@@ -10375,7 +10401,6 @@ main.banner-logger-active #event-progress-overlay {
   align-items: center;
   gap: 12px;
   font-size: 13px;
-  cursor: pointer;
 }
 #gp-owner-banner.gp-banner-expiring {
   background: linear-gradient(180deg, var(--accent-red) 0%, color-mix(in srgb, var(--accent-red) 80%, #000) 100%);
@@ -10387,10 +10412,23 @@ main.banner-logger-active #event-progress-overlay {
 #gp-owner-banner .gp-revoke-link {
   margin-left: 6px;
   text-decoration: underline;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
 }
 
 /* Rig editor: setup instructions (lib/rig-setup-notes.js) */
 .rig-setup-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 2px 0 10px; }
+/* Bands this radio is used on (rig editor, lib/rig-bands.js) */
+.rig-bands-box { margin: 4px 0 10px; padding: 6px 8px; border: 1px solid var(--border-primary, #2a3a5e); border-radius: 4px; }
+.rig-bands-title { font-weight: 600; margin-bottom: 2px; }
+.rig-bands-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 2px 8px; }
+#rig-bands-grid label { display: flex; flex-direction: row; justify-content: flex-start; align-items: center; gap: 4px; font-size: 12px; margin: 0; padding: 0; white-space: nowrap; width: auto; }
+#rig-bands-grid label input[type="checkbox"] { width: auto; margin: 0; flex: 0 0 auto; }
+#rig-bands-grid label.rig-band-extra { opacity: 0.75; }
 .rig-setup-btn {
   font-size: 12px; font-weight: 600; padding: 5px 12px; border-radius: 4px; cursor: pointer;
   background: var(--bg-tertiary); color: var(--accent-blue); border: 1px solid var(--accent-blue);
@@ -10630,3 +10668,21 @@ main.banner-logger-active #event-progress-overlay {
   color: var(--text-dim, var(--text-tertiary));
   white-space: normal;
 }
+
+/* Rig presets: the editor's include-tick rows, band rules and chips (Rig menu tab + Settings > Profiles) */
+.rig-preset-field { align-items: center; }
+.rig-preset-field input[type=checkbox] { width: auto; margin: 0 4px 0 0; }
+.rig-preset-field label { min-width: 150px; }
+.rig-preset-rules { display: flex; flex-direction: column; gap: 3px; font-size: 11px; }
+.rig-preset-rule { display: flex; align-items: center; gap: 6px; padding: 2px 6px; border-radius: 4px; background: var(--bg-primary); }
+.rig-preset-rule > span { flex: 1; }
+.rig-preset-rule button, .rig-preset-rule-line button { background: transparent; border: 1px solid var(--border-secondary); color: var(--text-secondary); border-radius: 3px; cursor: pointer; font-size: 10px; padding: 0 5px; }
+.rig-preset-rule button:disabled { opacity: .35; cursor: default; }
+.rig-preset-rule-add { border: 1px dashed var(--border-secondary); border-radius: 4px; padding: 4px 6px; margin-top: 2px; }
+.rig-preset-chips { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; margin: 2px 0; }
+.rig-preset-chips-label { font-size: 10px; color: var(--text-tertiary); min-width: 36px; }
+.rig-preset-chip { background: var(--bg-primary); border: 1px solid var(--border-secondary); color: var(--text-secondary); border-radius: 10px; padding: 1px 7px; font-size: 10px; cursor: pointer; }
+.rig-preset-chip.on { background: var(--accent-blue, #4fc3f7); color: #10202a; border-color: transparent; }
+.rig-preset-rule-line { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
+.settings-preset-root { max-width: 560px; }
+.settings-preset-root .rig-preset-item { font-size: 12px; }

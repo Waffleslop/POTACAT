@@ -21,6 +21,8 @@ function test(name, fn) {
 console.log('Bands everywhere');
 const ALL = Object.keys(BANDS);
 const NEW = ['1.25m', '33cm', '23cm'];
+// 2026-10-24: LF/MF and the microwave bands (Casey: "add the rest of the bands").
+const NEWER = ['2200m', '630m', '13cm', '9cm', '6cm', '3cm', '1.25cm'];
 
 test('lib/bands.js: the three bands above 70cm, and the classifier places their calling frequencies', () => {
   for (const b of NEW) assert.ok(BANDS[b], b);
@@ -42,9 +44,9 @@ test('every hand-written band list in the renderer and main carries the full set
     'app.js HEATMAP_BANDS': app.match(/const HEATMAP_BANDS = \[(.*?)\]/)[1],
     'app.js sortedBands': app.match(/const sortedBands = \[(.*?)\]/)[1],
     'app.js BAND_RANGES': app.slice(app.indexOf('const BAND_RANGES = ['), app.indexOf('function freqKhzToBand')),
-    'app.js bandFromKhz': app.slice(app.indexOf("if (khz >= 420000 && khz <= 450000) return '70cm';") - 1200, app.indexOf("if (khz >= 420000 && khz <= 450000) return '70cm';") + 300),
-    'vfo-popout BANDS': vfo.slice(vfo.indexOf("{ label: '160m'"), vfo.indexOf('function freqToBand(hz)')),
-    'vfo-popout classifier': vfo.slice(vfo.indexOf('function freqToBand(hz)'), vfo.indexOf('function freqToBand(hz)') + 2200),
+    'app.js bandFromKhz': app.slice(app.indexOf('function freqToBandActivator(khz)'), app.indexOf('// --- Multi-Park Dialog ---')),
+    'vfo-popout BANDS': vfo.slice(vfo.indexOf('// --- Bands ---'), vfo.indexOf('function freqToBand(hz)')),
+    'vfo-popout classifier': vfo.slice(vfo.indexOf('function freqToBand(hz)'), vfo.indexOf('function buildBandGrid(container)')),
   };
   for (const [name, text] of Object.entries(lists)) {
     for (const b of ALL) assert.ok(text.includes(`'${b}'`), `${name} lacks ${b}`);
@@ -61,7 +63,7 @@ test('every hand-written band list in the renderer and main carries the full set
 
 test('every band picker in the HTML offers the new bands', () => {
   const html = R('renderer/index.html'), web = R('renderer/remote.html');
-  for (const b of NEW) {
+  for (const b of NEW.concat(NEWER)) {
     assert.strictEqual((html.match(new RegExp(`value="${b.replace('.', '\\.')}"`, 'g')) || []).length, 3, `index.html pickers (2 spot filters + log form) for ${b}`);
     assert.ok(html.includes(`<th class="dxcc-band-col">${b}</th>`), `DXCC column ${b}`);
     assert.ok(web.includes(`value="${b}"`) && web.includes(`<option>${b}</option>`), `remote.html pickers for ${b}`);

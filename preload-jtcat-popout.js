@@ -1,6 +1,9 @@
 const { contextBridge, ipcRenderer, webFrame } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
+  // The active rig's bands (lib/rig-bands.js): {bands: string[]|null, all}.
+  rigBandsGet: () => ipcRenderer.invoke('rig-bands-get'),
+  onRigBands: (cb) => ipcRenderer.on('rig-bands', (_e, d) => cb(d)),
   // Driving a remote shack: its FT8 engine's spectrum (0..3000 Hz, 0..255 bins).
   onJtcatRemoteSpectrum: (cb) => ipcRenderer.on('jtcat-remote-spectrum', (_e, bins) => cb(bins)),
   // Mode hopping (the window called these without the preload having them).
@@ -78,6 +81,9 @@ contextBridge.exposeInMainWorld('api', {
   // engine setter and echoes state to the phone (jtcat-hold-tx-state).
   jtcatSetHoldTxFreq: (enabled) => ipcRenderer.send('jtcat-set-hold-tx-freq', !!enabled),
   jtcatSetTxSlot: (slot) => ipcRenderer.send('jtcat-set-tx-slot', slot),
+  jtcatTxSlotGet: () => ipcRenderer.invoke('jtcat-tx-slot-get'),
+  onJtcatTxSlotState: (cb) => ipcRenderer.on('jtcat-tx-slot-state', (_e, data) => cb(data)),
+  onJtcatSlotRefused: (cb) => ipcRenderer.on('jtcat-slot-refused', (_e, data) => cb(data)),
   // TX power — synced through main (settings.jtcatTxGain) the same way as RX
   // gain below since 2026-09-09: report our slider, receive everyone else's.
   jtcatSetTxGain: (level) => ipcRenderer.send('jtcat-set-tx-gain', level),
@@ -95,6 +101,10 @@ contextBridge.exposeInMainWorld('api', {
   jtcatSpectrum: (bins) => ipcRenderer.send('jtcat-spectrum', bins),
   // JTCAT events
   onJtcatDecode: (cb) => ipcRenderer.on('jtcat-decode', (_e, data) => cb(data)),
+  onJtcatWorkedUpdate: (cb) => ipcRenderer.on('jtcat-worked-update', (_e, data) => cb(data)),
+  // GridTracker's double-click (WSJT-X Reply) and stop (Halt Tx), via main.
+  onJtcatExternalReply: (cb) => ipcRenderer.on('jtcat-external-reply', (_e, d) => cb(d)),
+  onJtcatExternalHalt: (cb) => ipcRenderer.on('jtcat-external-halt', () => cb()),
   onJtcatWsprSpots: (cb) => ipcRenderer.on('jtcat-wspr-spots', (_e, data) => cb(data)),
   onJtcatWsprHeard: (cb) => ipcRenderer.on('jtcat-wspr-heard', (_e, data) => cb(data)),
   onJtcatWsprHopBand: (cb) => ipcRenderer.on('jtcat-wspr-hop-band', (_e, data) => cb(data)),
@@ -111,6 +121,11 @@ contextBridge.exposeInMainWorld('api', {
   onJtcatTxStatus: (cb) => ipcRenderer.on('jtcat-tx-status', (_e, data) => cb(data)),
   onJtcatTxFreqSet: (cb) => ipcRenderer.on('jtcat-tx-freq-set', (_e, data) => cb(data)),
   onJtcatIdleQsy: (cb) => ipcRenderer.on('jtcat-idle-qsy', (_e, data) => cb(data)),
+  onJtcatBandFollow: (cb) => ipcRenderer.on('jtcat-band-follow', (_e, data) => cb(data)),
+  jtcatFollowRadio: () => ipcRenderer.send('jtcat-follow-radio'),
+  // DXpedition FT8/FT4 dials for the band menu (main's copy of the feed)
+  jtcatDxpeditionsGet: () => ipcRenderer.invoke('jtcat-dxpeditions-get'),
+  onJtcatDxpeditions: (cb) => ipcRenderer.on('jtcat-dxpeditions', (_e, list) => cb(list)),
   onJtcatTuneState: (cb) => ipcRenderer.on('jtcat-tune-state', (_e, data) => cb(data)),
   onRestartPopoutAudio: (cb) => ipcRenderer.on('restart-popout-audio', () => cb()),
   // VITA-49 dax_rx frames forwarded from main when on "SmartSDR Direct" —
@@ -170,6 +185,7 @@ contextBridge.exposeInMainWorld('api', {
   onJtcatChaseTarget: (cb) => ipcRenderer.on('jtcat-chase-target', (_e, data) => cb(data)),
   // ULTRACAT (tier-2 easter egg) — Full Auto CQ run mode
   onJtcatUltracat: (cb) => ipcRenderer.on('jtcat-ultracat', (_e, on) => cb(on)),
+  onJtcatOnAirCall: (cb) => ipcRenderer.on('jtcat-on-air-call', (_e, call) => cb(call)),
   jtcatSetFullAutoCq: (on) => ipcRenderer.send('jtcat-popout-full-auto-cq', on),
   onJtcatFullAutoCqState: (cb) => ipcRenderer.on('jtcat-full-auto-cq-state', (_e, data) => cb(data)),
   // Map popout
@@ -215,5 +231,6 @@ contextBridge.exposeInMainWorld('api', {
   workedOverlayGet: () => ipcRenderer.invoke('worked-overlay-get'),
   workedOverlaySet: (patch) => ipcRenderer.send('worked-overlay-set', patch),
   workedOverlayGeo: () => ipcRenderer.invoke('worked-overlay-geo'),
+  workedSync: (kind) => ipcRenderer.invoke('worked-sync', kind),
   onWorkedOverlayState: (cb) => ipcRenderer.on('worked-overlay-state', (_e, s) => cb(s)),
 });

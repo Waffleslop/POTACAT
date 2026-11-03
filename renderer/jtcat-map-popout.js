@@ -7,9 +7,17 @@
     document.getElementById('tb-max').addEventListener('click', function() { window.api.maximize(); });
     document.getElementById('tb-close').addEventListener('click', function() { window.api.close(); });
 
-    // Theme
-    window.api.onPopoutTheme(function(theme) {
-      document.documentElement.setAttribute('data-theme', theme);
+    // Theme: main sends the {theme, variant} payload (the JTCAT window's
+    // form) right after this window loads and on every change. Writing that
+    // object straight into data-theme gave "[object Object]" — no theme at
+    // all, over the correct first paint the bootstrap had made (K3SBP
+    // 2026-10-23: the pop-out ignored light mode and the dark variant).
+    window.api.onPopoutTheme(function(payload) {
+      var theme = typeof payload === 'string' ? payload : ((payload && payload.theme) || 'dark');
+      var variant = (payload && typeof payload === 'object' && payload.variant) || 'navy';
+      document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
+      if (theme !== 'light' && variant !== 'navy') document.documentElement.setAttribute('data-dark-variant', variant);
+      else document.documentElement.removeAttribute('data-dark-variant');
     });
 
     // State
@@ -39,6 +47,14 @@
     if (window.WorkedOverlay) {
       var workedOverlayCtl = WorkedOverlay.attach(L, map, window.api);
       document.addEventListener('keydown', function (e) { workedOverlayCtl.onKey(e); });
+      // "Worked" in the title bar: the same machine-wide box preference as the JTCAT window's button.
+      var workedBtn = document.getElementById('tb-worked');
+      if (workedBtn) {
+        var paintWorkedBtn = function (on) { workedBtn.style.color = on ? 'var(--accent-blue, #4fc3f7)' : ''; workedBtn.style.opacity = on ? '1' : '.6'; };
+        paintWorkedBtn(workedOverlayCtl.legendVisible);
+        workedOverlayCtl.onLegendVisible = paintWorkedBtn;
+        workedBtn.addEventListener('click', function () { workedOverlayCtl.setLegendVisible(!workedOverlayCtl.legendVisible); });
+      }
     }
 
     function gridToLatLon(grid) {
@@ -63,7 +79,14 @@
       var bounds = gridToBounds(myGrid);
       if (!bounds) return;
       homeMarker = L.rectangle(bounds, { fillColor: '#e94560', fillOpacity: 0.35, color: '#e94560', weight: 2 }).addTo(map).bindTooltip(myCallsign || 'Home', { permanent: false });
-      map.setView(gridToLatLon(myGrid), 4);
+      var pos = gridToLatLon(myGrid);
+      map.setView(pos, 4);
+      // Our own station, so a QSO arc has an end to start from. The JTCAT
+      // window does this (registerStation(myCallsign, myGrid)); this window
+      // only drew the rectangle, so every arc to or from us returned early in
+      // drawQsoArc (TacticalIndex 2026-10-26: "popping the JTCAT map out, it
+      // doesn't have the transmission routes").
+      if (myCallsign) stations[myCallsign] = { marker: homeMarker, grid: myGrid, lat: pos.lat, lon: pos.lon, lastSeen: Date.now() };
     }
 
     function registerStation(call, grid) {
@@ -134,9 +157,16 @@
       var text = (d.text || '').toUpperCase();
       var parts = text.split(/\s+/);
       if (text.startsWith('CQ ')) {
-        var idx = 1;
-        if (parts.length > 3 && parts[1].length <= 4 && !/[0-9]/.test(parts[1])) idx = 2;
-        var call = parts[idx] || '', grid = parts[idx + 1] || '';
+        // The shared parser (CQ POTA / CQ DX / <hashed> calls), as the JTCAT window.
+        var call, grid;
+        if (window.JtcatParser && JtcatParser.parseCq) {
+          var pc = JtcatParser.parseCq(text);
+          call = pc.call; grid = pc.grid;
+        } else {
+          var idx = 1;
+          if (parts.length > 3 && parts[1].length <= 4 && !/[0-9]/.test(parts[1])) idx = 2;
+          call = parts[idx] || ''; grid = parts[idx + 1] || '';
+        }
         registerStation(call, grid);
         var stn = stations[call];
         if (stn) stn.marker.setStyle({ fillColor: '#4ecca3', color: '#4ecca3' });
@@ -155,6 +185,7 @@
         if (qsoArcs[k].lastSeen < now - 45000) { arcLayer.removeLayer(qsoArcs[k].arc); delete qsoArcs[k]; }
       });
       Object.keys(stations).forEach(function(c) {
+        if (c === myCallsign) return; // never expire our own station
         if (stations[c].lastSeen < now - 180000) { markerLayer.removeLayer(stations[c].marker); delete stations[c]; }
       });
     }
@@ -167,6 +198,14 @@
 
     window.api.onJtcatQsoState(function(data) {
       qsoState = (!data || data.phase === 'idle') ? null : data;
+      // The arc to the QSO partner, direction by phase — as the JTCAT window:
+      // an RX phase means we just heard them (them -> us), else us -> them.
+      if (qsoState && qsoState.call && myCallsign) {
+        if (qsoState.grid) registerStation(qsoState.call, qsoState.grid);
+        var rxPhases = { 'cq-reply': 1, 'cq-r+rpt': 1, 'rpt-rx': 1, 'rr73-rx': 1 };
+        if (rxPhases[qsoState.phase]) drawQsoArc(qsoState.call, myCallsign);
+        else drawQsoArc(myCallsign, qsoState.call);
+      }
     });
 
     window.api.onJtcatTxStatus(function(data) {

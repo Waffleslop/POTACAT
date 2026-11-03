@@ -3,6 +3,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('api', {
   onStartAudio: (cb) => ipcRenderer.on('remote-audio-start', (_e, config) => cb(config)),
   onStopAudio: (cb) => ipcRenderer.on('remote-audio-stop', () => cb()),
+  // The phone's VFO waterfall without an FT8 engine (rx-spectrum).
+  onRxSpectrumWant: (cb) => ipcRenderer.on('rx-spectrum-want', (_e, o) => cb(o)),
+  sendRxSpectrumPcm: (frame) => ipcRenderer.send('rx-spectrum-pcm', frame),
+  sendRxSpectrumError: (why) => ipcRenderer.send('rx-spectrum-error', why),
   onSignal: (cb) => ipcRenderer.on('remote-audio-signal', (_e, data) => cb(data)),
   sendSignal: (data) => ipcRenderer.send('remote-audio-send-signal', data),
   sendAudioStatus: (status) => ipcRenderer.send('remote-audio-status', status),
@@ -70,4 +74,6 @@ contextBridge.exposeInMainWorld('api', {
   onTxEqUpdate: (cb) => ipcRenderer.on('tx-eq-update', (_e, eqConfig) => cb(eqConfig)),
   // Shack-side TX drive percent (0-200) — live changes from any surface.
   onTxDriveUpdate: (cb) => ipcRenderer.on('tx-drive-update', (_e, pct) => cb(pct)),
+  // Shack-side receive level in dB (-20..+20) — the receive twin of TX drive.
+  onRxLevelUpdate: (cb) => ipcRenderer.on('rx-level-update', (_e, db) => cb(db)),
 });

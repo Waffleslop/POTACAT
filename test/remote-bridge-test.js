@@ -92,7 +92,7 @@ test('JS8: the window is filled from the shack, open starts there, close stops t
   assert.deepStrictEqual(B.IN['js8-heard']({ list: [{ call: 'K1ABC' }] }), [['js8call-heard', [{ call: 'K1ABC' }]]]);
   assert.ok(/_autoRxDeferLogged = false;\n\s+\/\/ Driving a remote shack: idle receive is the shack's own setting\.\n\s+if \(isRemoteMode\(\)\) return;/.test(main), "this PC's idle receive never drives the shack");
   const srv = R('lib/remote-server.js');
-  assert.ok(/_js8ActivityGuestSafe/.test(srv) && /case 'js8-set-offset':\n\s+if \(ws\._passSession\)/.test(srv), 'guest privacy and owner-only controls');
+  assert.ok(/_js8ActivityGuestSafe/.test(srv) && /case 'js8-set-offset':\n\s+if \(this\._guestLocked\(ws\)\)/.test(srv) && /case 'js8-set-mail-opts':\n\s+if \(ws\._passSession\)/.test(srv), 'guest privacy, lease-only operation, owner-only settings');
   assert.ok(/ft8Engine\._audioBuffer \|\| ft8Engine\._specBuffer/.test(main), "the shack's spectrum loop reads a JS8 engine too");
 });
 

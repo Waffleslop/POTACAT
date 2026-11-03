@@ -74,6 +74,9 @@ test('both modems take their audio from POTACAT at their own rate; neither picks
   assert.ok(/winlinkModemAudioReady\(\{ modemRate: ModemAudioServerMod\.MODEM_RATE, modemName: 'ardop' \}\)/.test(ardop), 'ardopcf at 12 kHz');
   const dw = fnBody(main, 'spawnDirewolf');
   assert.ok(/winlinkModemAudioReady\(\{ modemRate: DirewolfProcess\.DIREWOLF_RATE, modemName: 'direwolf' \}\)/.test(dw), 'Dire Wolf at its ARATE');
+  // Readiness = the AGW port accepting OR the ready line; a timeout names what Dire Wolf last printed.
+  assert.ok(/net\.connect\(\{ host: '127\.0\.0\.1', port: _winlinkAgwPort\(\) \}\)/.test(dw) && /ready\('AGW port '/.test(dw), 'the AGW port is probed, not only the stdout line');
+  assert.ok(/it last said: \$\{lastLines\.join/.test(dw), 'a Dire Wolf failure quotes its last lines');
   assert.ok(/audioPort: winlinkAudio\.port/.test(dw), 'Dire Wolf gets the socket, not device names');
   for (const fn of ['spawnArdop', 'spawnArdopSocket', 'spawnDirewolf']) {
     const b = fnBody(main, fn);
@@ -168,7 +171,7 @@ console.log('radio control');
 test('the shim binds loopback and keys through handleRemotePtt with audio', () => {
   const shim = fnBody(main, 'startWinlinkShim');
   assert.ok(/createRigctldServer\(/.test(shim) && /host: '127\.0\.0\.1'/.test(shim));
-  assert.ok(/handleRemotePtt\(true, \{ audio: true, forceDataMode: icom \}\)/.test(shim));
+  assert.ok(/handleRemotePtt\(true, \{ audio: true, forceDataMode: icom(, emission: 'DATA')? \}\)/.test(shim));
   assert.ok(/radioOwner !== 'winlink'/.test(shim), 'refuses outside a session');
   assert.ok(/_swrTripped/.test(shim), 'honours the SWR latch');
   assert.ok(/armWinlinkTxFailsafe\(\)/.test(shim), 'arms the failsafe on key-down');
@@ -254,7 +257,14 @@ test('winlink-watch subscribes a device; the shack computes bins and the Busy ve
   assert.ok(/broadcastWinlinkSpectrum\(frame\)[\s\S]*?bufferedAmount > 8192\) continue/.test(server), 'frames are dropped, never queued');
   assert.ok(/_onClientGone\(ws\) \{\n\s*const watchedWinlink = !!ws\._winlinkWatch;/.test(server), 'a vanished watcher is recounted');
   assert.ok(/rs\.on\('winlink-watch', \(\{ count \} = \{\}\) => winlinkSetRemoteWatch\(count\)\);/.test(main), 'wired inside onRemoteServer');
-  assert.ok(/function winlinkSpectrumPublish\(mags\)[\s\S]*?WinlinkSpectrum\.busyVerdict\(mags, band\.lo, band\.hi, _winlinkBusySt, now\)[\s\S]*?broadcastWinlinkSpectrum\(\{ bins: WinlinkSpectrum\.wireBins\(mags\), busy: v\.busy/.test(main), 'the verdict is decided on the shack');
+  assert.ok(/function winlinkSpectrumPublish\(mags\)[\s\S]*?WinlinkSpectrum\.markerBand\(mode, winlinkModemBw\(\)\)[\s\S]*?const v = _winlinkBusy\.update\(mags, now\);[\s\S]*?broadcastWinlinkSpectrum\(\{ bins: WinlinkSpectrum\.wireBins\(mags\), busy: v\.busy/.test(main), 'the verdict is decided on the shack, by the shared BusyDetector');
+  assert.ok(/modemBw: winlinkModemBw\(\),/.test(main), 'the mail window gets every modem\'s bandwidth');
+  const popHtml = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'winlink-popout.html'), 'utf8');
+  const popJs = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'winlink-popout.js'), 'utf8');
+  assert.ok(popHtml.includes('<script src="../lib/winlink-spectrum.js"></script>'), 'the mail window loads the shared rule');
+  assert.ok(/new WinlinkSpectrum\.BusyDetector\(/.test(popJs) && /WinlinkSpectrum\.markerBand\(mode, /.test(popJs), 'the mail window uses the shared rule for both the badge and the markers');
+  assert.ok(/if \(key === wfMarkersKey\) return;/.test(popJs), 'an unchanged band never resets the badge (every state push passes through wfMarkers)');
+  assert.ok(!/centre/.test(popJs) && !/centre/.test(popHtml) && !/centre/.test(fs.readFileSync(path.join(__dirname, '..', 'lib', 'winlink-spectrum.js'), 'utf8')), 'center, not centre (Casey 2026-10-23)');
   assert.ok(/if \(_winlinkRemoteWatchers > 0\) winlinkSpecAcc\(\)\.push\(pcm, sampleRate\);/.test(main), 'fed from the socket routes only while watched');
   assert.ok(/winlink-spectrum-mags[\s\S]*?winlinkSocketAudioRoute\(\)\) return;/.test(main), 'the window relays only on a sound-device rig');
 });
@@ -405,6 +415,18 @@ test('the gateway reply says how it is ordered, on every surface', () => {
   assert.ok(/api\.potacat\.com/.test(html.slice(html.indexOf('set-winlink-prediction'), html.indexOf('set-winlink-prediction') + 900)), 'the copy says where the grid goes');
   const app = read('renderer/app.js');
   assert.ok(/winlinkPrediction: setWinlinkPrediction \? setWinlinkPrediction\.checked : true,/.test(app));
+});
+
+test('the recovery email of an existing account is shown and changed in Settings (K9ONR)', () => {
+  const html = read('renderer/index.html');
+  assert.ok(/id="winlink-recovery-box"/.test(html) && /id="winlink-recovery-change"/.test(html));
+  assert.ok(/ipcMain\.handle\('winlink-recovery-email-get', \(\) => winlinkRecoveryEmailGet\(\)\)/.test(main));
+  assert.ok(/ipcMain\.handle\('winlink-recovery-email-set', \(_e, email\) => winlinkRecoveryEmailSet\(email\)\)/.test(main));
+  const app = read('renderer/app.js');
+  assert.ok(/if \(r\.exists\) showWinlinkRecovery\(\)/.test(app), 'shown once the account is found');
+  assert.ok(/window\.api\.winlinkRecoveryEmailSet\(email\)/.test(app));
+  const client = read('lib/winlink-client.js');
+  assert.ok(/'\/api\/winlink-account\/password-recovery-email'/.test(client), 'Pat 1.0.0 route (api/api.go)');
 });
 
 // The summary LAST. Until 2026-10-23 it sat above the later sections, so a

@@ -440,16 +440,20 @@
 
   // Checks that cost nothing and transmit nothing run by themselves on open,
   // once, so the operator sees real answers instead of question marks.
-  async function autoChecks() {
+  // `all` (Check everything again) runs them whatever their last answer was:
+  // limited to unanswered steps, the button did nothing once every check had
+  // passed (a user report, 2026-10-26). The test transmit is never automatic.
+  async function autoChecks(all) {
     if (!current || !current.steps) return;
     const once = (k) => { const key = rigId + ':' + k; if (autoRan.has(key)) return false; autoRan.add(key); return true; };
     const by = (id) => current.steps.find(x => x.id === id);
+    const due = (st) => !!st && (all || st.state === 'unknown');
     const tx = by('tx-audio');
-    if (tx && tx.state === 'unknown' && tx.actions.some(a => a.id === 'tx-device-test') && once('tx')) await runLocalCheck('tx-audio', 'txDeviceTest');
+    if (due(tx) && tx.actions.some(a => a.id === 'tx-device-test') && once('tx')) await runLocalCheck('tx-audio', 'txDeviceTest');
     const rx = by('rx-audio');
-    if (rx && rx.state === 'unknown' && rx.actions.some(a => a.id === 'rx-test') && once('rx')) await runLocalCheck('rx-audio', 'rxTest');
+    if (due(rx) && rx.actions.some(a => a.id === 'rx-test') && once('rx')) await runLocalCheck('rx-audio', 'rxTest');
     const clk = by('clock');
-    if (clk && clk.state === 'unknown' && once('clock')) {
+    if (due(clk) && once('clock')) {
       busy.clock = 'checking…';
       render();
       try { current = await window.api.stationSetupAction({ rigId, action: 'check-clock' }); } catch {}
@@ -477,10 +481,21 @@
   $('ss-close').addEventListener('click', () => dlg.close());
   $('ss-done').addEventListener('click', () => dlg.close());
   $('ss-recheck').addEventListener('click', async () => {
+    const btn = $('ss-recheck');
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = 'Checking…';
     autoRan = new Set();
     showMessage('');
-    await refresh();
-    autoChecks();
+    try {
+      await refresh();
+      await autoChecks(true);
+      await refresh();
+      showMessage('Checked again just now.');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Check everything again';
+    }
   });
   $('ss-hide').addEventListener('click', async () => {
     const hidden = current && current.prefs && current.prefs.hidden;

@@ -89,13 +89,14 @@ test('all three auth paths hydrate via the shared helpers', () => {
   // once), so the counts are: helper internals (1 each) + the Guest Pass
   // path's DELIBERATE subset (activity + JS8 inbox only — guests must not
   // receive the owner's worked history / logbook feeds). Both full-trust
-  // paths must call the shared helper.
+  // paths must call the shared helper, and so does an owner device that
+  // waited while a guest held the rig (_admitWaitingOwner).
   const js8Calls = (src.match(/this\._sendJs8Hydration\(ws\)/g) || []).length;
   const actCalls = (src.match(/this\._sendActivityHydration\(ws\)/g) || []).length;
   const fullHydrations = (src.match(/this\._hydrateClient\(ws\)/g) || []).length;
   assert.strictEqual(js8Calls, 2, 'JS8 hydration: shared helper + Guest Pass subset');
   assert.strictEqual(actCalls, 2, 'activity hydration: shared helper + Guest Pass subset');
-  assert.strictEqual(fullHydrations, 2, 'both full-trust auth paths use _hydrateClient');
+  assert.strictEqual(fullHydrations, 3, 'both full-trust auth paths and a waiting owner device use _hydrateClient');
 });
 
 test('hydration sends activity-state before the content feeds', () => {
@@ -128,7 +129,9 @@ test('main pushes activity on every lifecycle edge that changes it', () => {
   ]) {
     const at = MAIN.indexOf(anchor[0]);
     assert.ok(at > 0, anchor[0] + ' not found');
-    assert.ok(MAIN.slice(at, at + 2600).includes(anchor[1]),
+    // The whole function body (stopJtcat grew past a fixed 2600 characters).
+    const end = MAIN.indexOf('\n}\n', at);
+    assert.ok(MAIN.slice(at, Math.max(at + 2600, end)).includes(anchor[1]),
       anchor[0] + ' must reach ' + anchor[1]);
   }
 });

@@ -77,5 +77,28 @@ test('stamp: confirms with band cross-check, backfills sent, counts already/unma
   assert.strictEqual(res2.alreadyConfirmed, 1);
 });
 
+test('the other station\'s certified STATE / county / grid ride the confirmation into a log that lacks them, never over what was typed', () => {
+  const detail = REPORT.replace('<DXCC:3>291\n<eor>', '<DXCC:3>291\n<STATE:2>nj\n<CNTY:9>NJ,Bergen\n<GRIDSQUARE:4>FN20\n<COUNTRY:13>UNITED STATES\n<CQZ:1>5\n<eor>');
+  const qsos = [
+    { CALL: 'N2BJ', BAND: '20m', QSO_DATE: '20260814', TIME_ON: '152000', GRIDSQUARE: 'FN21ab' },
+  ];
+  const res = stampLotwConfirmations(qsos, parseLotwAdif(detail), lotwKey);
+  assert.strictEqual(res.confirmed, 1);
+  assert.strictEqual(res.detailed, 1);
+  assert.strictEqual(qsos[0].STATE, 'NJ', 'state filled, upper-cased');
+  assert.strictEqual(qsos[0].CNTY, 'NJ,Bergen');
+  assert.strictEqual(qsos[0].GRIDSQUARE, 'FN21ab', 'the operator\'s grid is kept');
+  assert.strictEqual(qsos[0].COUNTRY, 'UNITED STATES');
+  assert.strictEqual(qsos[0].DXCC, '291');
+  // an already-confirmed QSO still gains the detail on a later full pull
+  const res2 = stampLotwConfirmations([{ CALL: 'N2BJ', BAND: '20m', QSO_DATE: '20260814', TIME_ON: '152000', LOTW_QSL_RCVD: 'Y' }], parseLotwAdif(detail), lotwKey);
+  assert.strictEqual(res2.confirmed, 0);
+  assert.strictEqual(res2.alreadyConfirmed, 1);
+  assert.strictEqual(res2.detailed, 1);
+  // a record with no detail changes nothing
+  const res3 = stampLotwConfirmations([{ CALL: 'N2BJ', BAND: '20m', QSO_DATE: '20260814', TIME_ON: '152000', LOTW_QSL_RCVD: 'Y', DXCC: '291' }], parseLotwAdif(REPORT), lotwKey);
+  assert.strictEqual(res3.detailed, 0);
+});
+
 console.log(`\nLoTW report: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

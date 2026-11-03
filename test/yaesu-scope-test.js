@@ -200,7 +200,9 @@ section('Mobile handoff follow-ups (2026-09-21)');
 
 check('1. the remote scope-state is an explicit field list — never helperPath', () => {
   const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf-8');
-  const fn = mainSrc.slice(mainSrc.indexOf('function yaesuScopeRemotePayload'), mainSrc.indexOf('function yaesuScopeBroadcastState'));
+  // The function body only: the helpers after it talk about frames in their comments.
+  const start = mainSrc.indexOf('function yaesuScopeRemotePayload');
+  const fn = start < 0 ? '' : mainSrc.slice(start, mainSrc.indexOf('\n}', start) + 2);
   assert.ok(fn.length > 0, 'yaesuScopeRemotePayload missing');
   assert.ok(!/\.\.\.yaesuScopeState\b/.test(fn) && !/helperPath|frames|misaligned/.test(fn), 'remote payload must not spread the local state');
   assert.ok(mainSrc.includes('remoteServer.broadcastScopeState(yaesuScopeRemotePayload())'), 'broadcast must use the remote payload');
@@ -227,7 +229,8 @@ check('3. a Guest Pass cannot turn SCU-LAN10 on, and is told why', () => {
   // payload substitutes it whenever the honest card would ask for Enable,
   // so a QSY re-broadcast cannot un-say it (mobile review, 2026-09-21).
   const pay = mainSrc.slice(mainSrc.indexOf('function yaesuScopeRemotePayload'), mainSrc.indexOf('function yaesuScopeBroadcastState'));
-  assert.ok(/yaesuScopeRemoteIsGuest && asksForEnable\) \? YAESU_SCOPE_GUEST_DIAG : s\.diag/.test(pay), 'remote payload must substitute the guest diag for a guest session');
+  // One card per source: an Icom guest is told about the radio's scope, an FT-710 guest about SCU-LAN10.
+  assert.ok(/yaesuScopeRemoteIsGuest && asksForEnable\) \? \(s\.source === 'icom' \? ICOM_SCOPE_GUEST_DIAG : YAESU_SCOPE_GUEST_DIAG\) : s\.diag/.test(pay), 'remote payload must substitute the guest diag for a guest session');
   assert.ok(serverSrc.includes("this.emit('scope-subscribe', { on: !!msg.on, guest: !!ws._passSession })"), 'subscribe must carry the guest flag');
   const d = mainSrc.indexOf("remoteServer.on('client-disconnected'");
   assert.ok(mainSrc.slice(d, d + 1000).includes('yaesuScopeRemoteIsGuest = false'), 'guest flag must clear on disconnect');
@@ -255,7 +258,22 @@ check('SS mode reply → anchor, including the hex A for W/F FIX NORMAL', () => 
   assert.strictEqual(S.modeFromCode('7').anchor, 'cursor');
   assert.strictEqual(S.modeFromCode('A').anchor, 'fix');
   assert.strictEqual(S.modeFromCode('a').anchor, 'fix');
-  assert.strictEqual(S.modeFromCode('5'), null, '5 is unassigned in the manual');
+  assert.strictEqual(S.modeFromCode('C'), null, 'C is neither set nor answered');
+});
+
+check('SS mode reply: the EXPAND answers 5/8/B (FT-710, 2026-10-22/27)', () => {
+  // The radio answers 5/8/B for the modes set with 3/6/9; 8 and B used to
+  // decode to nothing, leaving the anchor at center and click-to-tune on.
+  for (const [code, anchor, setWith] of [['5', 'center', '3'], ['8', 'cursor', '6'], ['B', 'fix', '9']]) {
+    const m = S.modeFromCode(S.parseSsReply('SS06' + code + '0000').p3);
+    assert.deepStrictEqual({ anchor: m.anchor, display: m.display, expand: m.expand }, { anchor, display: 'W/F', expand: true }, code);
+    // Set with 3/6/9, which decode to the same mode.
+    assert.strictEqual(m.setWith, setWith, code);
+    const set = S.modeFromCode(m.setWith);
+    assert.deepStrictEqual({ anchor: set.anchor, display: set.display, expand: set.expand }, { anchor, display: 'W/F', expand: true }, setWith);
+  }
+  assert.strictEqual(S.scopeAxis({ centerHz: 14074000, spanHz: 10000, anchor: S.modeFromCode('8').anchor }).known, false);
+  assert.strictEqual(S.scopeAxis({ centerHz: 14074000, spanHz: 10000, anchor: S.modeFromCode('B').anchor }).known, false);
 });
 
 check('SS speed reply → STOP is recognised', () => {
@@ -275,6 +293,17 @@ check('replies that are not SS are refused', () => {
   assert.strictEqual(S.parseSsReply(null), null);
 });
 
+check('SS sets carry P4-P7 as 0000; the FT-710 refuses the short SS056; (2026-10-29)', () => {
+  assert.strictEqual(S.write.span('6'), 'SS0560000;');
+  assert.strictEqual(S.write.mode('3'), 'SS0630000;');
+  for (const code of Object.keys(S.SPAN_HZ_BY_CODE)) {
+    assert.deepStrictEqual(S.parseSsReply(S.write.span(code)), { p2: 5, p3: code, rest: '0000' }, code);
+  }
+  for (const code of Object.keys(S.MODE_BY_CODE)) {
+    assert.deepStrictEqual(S.parseSsReply(S.write.mode(code)), { p2: 6, p3: code, rest: '0000' }, code);
+  }
+});
+
 section('Axis');
 
 check('CENTER mode: VFO ± span/2, first bin at the low edge, last at the high edge', () => {
@@ -290,6 +319,15 @@ check('CENTER mode: VFO ± span/2, first bin at the low edge, last at the high e
 check('CURSOR and FIX modes are assumed, not known', () => {
   assert.strictEqual(S.scopeAxis({ centerHz: 14074000, spanHz: 10000, anchor: 'cursor' }).known, false);
   assert.strictEqual(S.scopeAxis({ centerHz: 14074000, spanHz: 10000, anchor: 'fix' }).known, false);
+});
+
+check('PAN (a panadapter that reports its own centre and span) is known; one label for every screen', () => {
+  assert.strictEqual(S.scopeAxis({ centerHz: 14100000, spanHz: 200000, anchor: 'pan' }).known, true);
+  assert.strictEqual(S.scopeAxis({ centerHz: 0, spanHz: 200000, anchor: 'pan' }).known, false, 'no centre reported yet');
+  const A = require('../lib/scope-axis');
+  assert.strictEqual(A.anchorLabel('pan'), 'PANADAPTER');
+  assert.strictEqual(A.anchorLabel('fix'), 'FIX (axis assumed)');
+  assert.strictEqual(A.anchorLabel('center'), 'CENTER');
 });
 
 check('a frequency outside the window maps to null', () => {
@@ -421,6 +459,15 @@ check('SCU-LAN10 is only ever CHANGED by the operator\'s button, and put back', 
   assert.strictEqual((mainSrc.match(/sendRaw\('EX0301261;'\)/g) || []).length, 1, 'exactly one place turns SCU-LAN10 on');
   assert.ok(mainSrc.includes("cat.sendRaw('EX0301260;')"), 'and one place turns it back off');
   assert.ok(!/EX040101|EX040200/.test(mainSrc), 'the write-ups\' EX0401xx commands are MY CALL on this radio — never send them');
+});
+
+check('a start while the stopped helper still holds the FT4222 waits for its exit (Ride1226 tab switch)', () => {
+  const start = mainSrc.slice(mainSrc.indexOf('function startYaesuScope() {'), mainSrc.indexOf('function stopYaesuScope(why) {'));
+  assert.ok(/yaesuScopeStopping && yaesuScopeStopping\.exitCode === null[\s\S]{0,200}yaesuScopeStartAfterExit = true;[\s\S]{0,80}return;/.test(start), 'start must defer while the old helper lives');
+  assert.ok(start.indexOf('yaesuScopeStopping &&') < start.indexOf('spawn(helperPath'), 'the wait comes before the spawn');
+  const stop = mainSrc.slice(mainSrc.indexOf('function stopYaesuScope(why) {'), mainSrc.indexOf('function yaesuScopeOnFrame('));
+  assert.ok(stop.includes('yaesuScopeStopping = proc;') && stop.includes("proc.once('exit'"), 'stop records the exiting helper');
+  assert.ok(stop.includes("if (!proc || why === 'app quit') scuLanOff();"), 'SCU-LAN10 off at once on quit, after the exit otherwise');
 });
 
 check('the pop-out opener defines isMac locally (a ReferenceError here is a modal crash dialog)', () => {

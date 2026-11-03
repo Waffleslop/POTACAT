@@ -320,6 +320,172 @@ test('FT-991A: the command table shows the resolved commands, Split Off and the 
 });
 
 // =========================================================================
+// Indexed-width Yaesus: a tune's width is looked up for the mode the tune
+// sets. The width goes out 100-200 ms after the mode with polling stopped, so
+// the codec's last parsed mode was still the old one and a USB -> CW tune
+// indexed 500 Hz in the SSB chart (SH0102; = 100 Hz in CW on the FTDX
+// generation). Found on an FT-710, 2026-10-22.
+console.log('\n=== Indexed-width Yaesu: a tune\'s width follows the mode it sets ===');
+
+// Drive RigController.tune() with its timers fired in order, synchronously.
+function tuneWrites(model, fromMode, freqHz, mode, filterWidth) {
+  const { RigController } = require('../lib/rig-controller');
+  const { EventEmitter } = require('events');
+  const writes = [];
+  const t = new EventEmitter(); t.connect = () => {}; t.disconnect = () => {};
+  t.write = (d) => writes.push(String(d));
+  const codec = new KenwoodCodec(model, (d) => t.write(d));
+  codec._lastParsedMode = fromMode;
+  const rc = new RigController(model, t, codec);
+  rc.connected = true;
+  rc._lastParsedMode = fromMode;
+  rc._startPolling = () => {}; rc._stopPolling = () => {};
+  const timers = [];
+  const realSetTimeout = global.setTimeout;
+  global.setTimeout = (fn, ms) => { timers.push({ fn, ms }); return {}; };
+  try { rc.tune(freqHz, mode, { filterWidth }); } finally { global.setTimeout = realSetTimeout; }
+  timers.sort((a, b) => a.ms - b.ms).forEach((x) => x.fn());
+  return writes;
+}
+
+// What a width click sends while the radio reports `mode`.
+function widthClickWrites(model, mode, hz) {
+  const { codec, writes } = captureWrites(KenwoodCodec, model);
+  codec._lastParsedMode = mode;
+  codec.setFilterWidth(hz);
+  return writes;
+}
+
+test('Indexed Yaesu: a USB -> CW tune indexes its width in the CW chart, every model', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const indexed = Object.entries(RIG_MODELS)
+    .filter(([, m]) => m.protocol === 'kenwood' && m.caps && m.caps.filterType === 'indexed');
+  assert.ok(indexed.length > 0);
+  for (const [name, model] of indexed) {
+    const sh = tuneWrites(model, 'USB', 14030000, 'CW', 500).filter((w) => /^SH/.test(w));
+    assert.deepStrictEqual(sh, widthClickWrites(model, 'CW', 500), name);
+  }
+});
+
+test('Indexed Yaesu: an FT8 tune from USB uses the DATA chart (FT8 goes out as DATA-U)', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const model = RIG_MODELS['FTDX10'];
+  const sh = tuneWrites(model, 'USB', 14074000, 'FT8', 3000).filter((w) => /^SH/.test(w));
+  assert.deepStrictEqual(sh, widthClickWrites(model, 'DIGU', 3000));
+});
+
+test('Indexed Yaesu: a same-mode tune keeps indexing by the reported mode', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const model = RIG_MODELS['FTDX10'];
+  const sh = tuneWrites(model, 'CW', 14030000, 'CW', 500).filter((w) => /^SH/.test(w));
+  assert.deepStrictEqual(sh, widthClickWrites(model, 'CW', 500));
+});
+
+// =========================================================================
+// FT-710 against its CAT reference (2306-C) and the radio itself (W3MDT,
+// firmware MAIN 01-12, 2026-10-22/23/27; every value below was sent to the
+// radio and read back).
+console.log('\n=== KenwoodCodec (Yaesu FT-710) ===');
+
+test('FT-710: filter width is SH00nn from Table 3 (23 SSB widths, 21 for CW/DATA; RTTY uses the same 21)', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS['FT-710']);
+  codec._lastParsedMode = 'USB';
+  codec.setFilterWidth(300);    // 01
+  codec.setFilterWidth(2400);   // 13
+  codec.setFilterWidth(3000);   // 20 (19 = 2900 Hz on the FTDX chart)
+  codec.setFilterWidth(4000);   // 23
+  codec._lastParsedMode = 'CW';
+  codec.setFilterWidth(500);    // 10
+  codec.setFilterWidth(4000);   // 21
+  codec._lastParsedMode = 'DIGU';
+  codec.setFilterWidth(3000);   // 18 (16 = 2000 Hz on the FTDX chart)
+  codec._lastParsedMode = 'RTTY';
+  codec.setFilterWidth(500);    // 10
+  assert.deepStrictEqual(writes, ['SH0001;', 'SH0013;', 'SH0020;', 'SH0023;', 'SH0010;', 'SH0021;', 'SH0018;', 'SH0010;']);
+});
+
+test('FT-710: a USB -> CW tune sets the CW width in the CW chart', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const sh = tuneWrites(RIG_MODELS['FT-710'], 'USB', 14030000, 'CW', 500).filter((w) => /^SH/.test(w));
+  assert.deepStrictEqual(sh, ['SH0010;']);
+});
+
+test('FT-710: AGC OFF/FAST/MID/SLOW/AUTO are GT00-GT04, and AUTO is offered', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS['FT-710']);
+  for (const agc of ['off', 'fast', 'med', 'slow', 'auto']) codec.setAgc(agc);
+  assert.deepStrictEqual(writes, ['GT00;', 'GT01;', 'GT02;', 'GT03;', 'GT04;']);
+  assert.ok(RIG_MODELS['FT-710'].agcModes.includes('auto'));
+});
+
+test('FT-710: COMP on/off is PR01;/PR00; (the default PR1;/PR0; are reads there)', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS['FT-710']);
+  codec.setCompressor(true);
+  codec.setCompressor(false);
+  assert.deepStrictEqual(writes, ['PR01;', 'PR00;']);
+});
+
+test('FT-710: NB level is 0-10 (NL0000-NL0010); a 0-100 value clamps to 10', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const model = RIG_MODELS['FT-710'];
+  const { codec, writes } = captureWrites(KenwoodCodec, model);
+  for (const v of [0, 5, 10, 50]) codec.setNbLevel(v);
+  assert.deepStrictEqual(writes, ['NL0000;', 'NL0005;', 'NL0010;', 'NL0010;']);
+  assert.strictEqual(model.caps.nbLevel, true, 'NB level row shown');
+  assert.strictEqual(model.maxNbLevel, 10);
+});
+
+test('FT-710: TX power is 5-100 W (PC004; and PC101; are refused there)', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS['FT-710']);
+  for (const w of [3, 5, 100, 150]) codec.setTxPower(w);
+  assert.deepStrictEqual(writes, ['PC005;', 'PC005;', 'PC100;', 'PC100;']);
+});
+
+test('FT-710: MD0 answers 9/E/F read as RTTY, PSK and FM', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const { codec } = captureWrites(KenwoodCodec, RIG_MODELS['FT-710']);
+  const modes = [];
+  codec.on('mode', (m) => modes.push(m));
+  codec.onData('MD09;MD0E;MD0F;MD0C;MD03;');
+  assert.deepStrictEqual(modes, ['RTTY', 'PSK', 'FM', 'DIGU', 'CW']);
+});
+
+test('FT-710: the CW key note names the FT-710 PC KEYING menu, not the FT-891 one', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const notes = RIG_MODELS['FT-710'].notes.join('\n');
+  assert.ok(/CW SETTING -> MODE CW -> PC KEYING = DTR/.test(notes), notes);
+  assert.ok(!/USB Keying \(CW\)/.test(notes), 'USB Keying (CW) is an FT-891 menu');
+});
+
+test('FT-710: PSK is shown but never sent; a PSK width uses the DATA chart', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  const model = RIG_MODELS['FT-710'];
+  const { codec, writes } = captureWrites(KenwoodCodec, model);
+  codec.onData('MD0E;');
+  assert.strictEqual(codec.resolveMode('PSK', 14070000), null, 'no set entry for PSK');
+  // A tune that re-sends the current mode (PSK) writes no MD.
+  assert.ok(!tuneWrites(model, 'PSK', 14070000, 'PSK', 0).some((w) => /^MD/.test(w)));
+  codec.setFilterWidth(500);
+  assert.deepStrictEqual(writes, ['SH0010;'], '500 Hz is index 10 in the DATA column (02 = 400 Hz in the SSB column)');
+  // The desktop offers the DIG width presets in PSK (source guard).
+  const app = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const presets = app.slice(app.indexOf('function rigGetFilterPresets'), app.indexOf('function rigBuildFilterPresets'));
+  assert.ok(/\[[^\]]*'PSK'[^\]]*\]\.includes\(m\)\) return RIG_FILTER_PRESETS\.DIG/.test(presets), presets);
+  // In PSK the desktop's spot filter shows digital spots, as in DATA, and the
+  // phone's log sheet defaults to PSK31 (both run from source).
+  const toFilter = new Function(app.slice(app.indexOf('function radioModeToFilter'), app.indexOf('function spotAgeSecs')) + '; return radioModeToFilter;')();
+  assert.strictEqual(toFilter('PSK'), 'DIGI');
+  // Line-ending neutral: a Windows checkout (core.autocrlf) has CRLF.
+  const remote = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer', 'remote.js'), 'utf8').replace(/\r\n/g, '\n');
+  const aliasEnd = remote.indexOf('\n  }\n', remote.indexOf('function aliasModeForLogSheet')) + 4;
+  const alias = new Function(remote.slice(remote.indexOf('const LOG_MODE_OPTIONS'), aliasEnd) + '; return aliasModeForLogSheet;')();
+  assert.strictEqual(alias('PSK'), 'PSK31');
+});
+
+// =========================================================================
 console.log('\n=== KenwoodCodec (Kenwood TS-590) ===');
 
 const TS590_MODEL = {
@@ -738,6 +904,119 @@ test('CIV setFilterWidth 2400 SSB -> 1A 03 idx 28 (BCD 0x28)', () => {
   codec.setFilterWidth(2400);
   const hex = writes[0];
   assert.ok(hex.includes('1a0328'), `Expected 1A 03 28, got: ${hex}`);
+});
+
+// --- Split, VFO and the other VFO over CI-V (WC5T IC-7300, 2026-10-31) ---
+// Frames FROM the radio are FE FE E0 94 <cmd> ... FD.
+const civFrom94 = (...bytes) => Buffer.from([0xFE, 0xFE, 0xE0, 0x94, ...bytes, 0xFD]);
+
+test('CIV getVfoSplit polls split (0F), and the other VFO (25 01) only once split is on', () => {
+  const { codec, writes } = captureWrites(CivCodec, IC7300_MODEL);
+  const splits = [];
+  codec.on('split', (on) => splits.push(on));
+  codec.getVfoSplit();
+  assert.deepStrictEqual(writes.map(w => w.slice(8, 10)), ['0f'], writes.join(','));
+  assert.ok(!writes.some(w => w.includes('2501')), 'no other-VFO read while split is unknown/off');
+  codec.onData(civFrom94(0x0F, 0x01));
+  assert.deepStrictEqual(splits, [true]);
+  codec.getVfoSplit();
+  assert.ok(writes.some(w => w.startsWith('fefe94e02501fd')), `expected 25 01 read, got ${writes.join(',')}`);
+  codec.onData(civFrom94(0x0F, 0x00));
+  assert.deepStrictEqual(splits, [true, false]);
+  codec.onData(civFrom94(0x0F, 0x00));            // a repeat is not re-emitted
+  assert.deepStrictEqual(splits, [true, false]);
+});
+
+test('CIV 25 01 reply is the other VFO frequency; 25 00 (selected) is left to the 03 poll', () => {
+  const { codec } = captureWrites(CivCodec, IC7300_MODEL);
+  const other = [], freq = [];
+  codec.on('frequencyOther', (hz) => other.push(hz));
+  codec.on('frequency', (hz) => freq.push(hz));
+  codec.onData(civFrom94(0x25, 0x01, ...codec._encodeFreqBCD(14205000)));
+  codec.onData(civFrom94(0x25, 0x00, ...codec._encodeFreqBCD(14074000)));
+  assert.deepStrictEqual(other, [14205000]);
+  assert.deepStrictEqual(freq, []);
+});
+
+test('CIV setFrequencyOther sends 25 01 <BCD> and never touches the dial (05)', () => {
+  const { codec, writes } = captureWrites(CivCodec, IC7300_MODEL);
+  assert.strictEqual(codec.setFrequencyOther(14205000), true);
+  assert.strictEqual(writes.length, 1);
+  const bcd = Buffer.from(codec._encodeFreqBCD(14205000)).toString('hex');
+  assert.strictEqual(writes[0], 'fefe94e02501' + bcd + 'fd');
+});
+
+test('CIV: three NAKs to 25 latch the other-VFO command off (older IC-7300 firmware), with one log line', () => {
+  const { codec, writes } = captureWrites(CivCodec, IC7300_MODEL);
+  const logs = [], errors = [];
+  codec.on('log', (l) => logs.push(l));
+  codec.on('error', (e) => errors.push(e));
+  codec.onData(civFrom94(0x0F, 0x01));             // split on → the poll asks 25 01
+  for (let i = 0; i < 3; i++) { codec.getVfoSplit(); codec.onData(civFrom94(0xFA)); }
+  assert.ok(logs.some(l => /25 01\) not supported/.test(l)), logs.join('\n'));
+  assert.strictEqual(errors.length, 0, 'the NAKs are explained, never raised as CI-V errors');
+  const before = writes.length;
+  codec.getVfoSplit();
+  assert.ok(!writes.slice(before).some(w => w.includes('2501')), 'not asked again');
+  assert.strictEqual(codec.setFrequencyOther(14205000), false);
+  assert.strictEqual(writes.length, before + 1, 'only the 0F poll went out');
+});
+
+test('CIV VFO letter follows the radio\'s ACK of 07, not the request; a NAK leaves it', () => {
+  const { codec, writes } = captureWrites(CivCodec, IC7300_MODEL);
+  const vfos = [];
+  codec.on('vfo', (v) => vfos.push(v));
+  codec.swapVfo();
+  assert.ok(writes[0].startsWith('fefe94e007b0'), writes[0]);
+  assert.deepStrictEqual(vfos, [], 'nothing reported before the ACK');
+  codec.onData(civFrom94(0xFB));
+  assert.deepStrictEqual(vfos, ['B']);
+  codec.setVfo('A');
+  assert.ok(writes[1].startsWith('fefe94e00700fd'), writes[1]);
+  codec.onData(civFrom94(0xFA));
+  assert.deepStrictEqual(vfos, ['B'], 'a refused VFO command changes nothing');
+  codec.setVfo('A');
+  codec.onData(civFrom94(0xFB));
+  assert.deepStrictEqual(vfos, ['B', 'A']);
+});
+
+test('rigctld setFrequencyOther is `I <hz>`; the `i` readback is polled while split is on', () => {
+  const { codec, writes } = captureWrites(RigctldCodec, { brand: 'Hamlib', protocol: 'rigctld', caps: {}, maxPower: 100 });
+  assert.strictEqual(codec.setFrequencyOther(14205000), true);
+  assert.ok(writes.includes('I 14205000\n'), writes.join('|'));
+  codec._splitOnLast = true;
+  const n = writes.length;
+  codec.getVfoSplit();
+  assert.ok(writes.slice(n).includes('i\n'), 'polls i while split is on');
+});
+
+test('Kenwood setFrequencyOther writes the OTHER VFO (FB on A, FA on B) and reads it back; Yaesu declines', () => {
+  const { codec, writes } = captureWrites(KenwoodCodec, TS590_MODEL);
+  assert.strictEqual(codec.setFrequencyOther(14205000), true);
+  assert.ok(writes[0].startsWith('FB') && writes[0].includes('14205000'), writes[0]);
+  assert.strictEqual(writes[1], 'FB;');
+  codec._rxVfo = 'B';
+  codec.setFrequencyOther(7074000);
+  assert.ok(writes[2].startsWith('FA') && writes[2].includes('7074000'), writes[2]);
+  assert.strictEqual(writes[3], 'FA;');
+  const y = captureWrites(KenwoodCodec, FT891_MODEL);
+  assert.strictEqual(y.codec.setFrequencyOther(14205000), false);
+  assert.strictEqual(y.writes.length, 0);
+});
+
+test('every Icom model that offers VFO A/B also offers split, and the wiring exists end to end', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  for (const [id, m] of Object.entries(RIG_MODELS)) {
+    if (m.brand !== 'Icom' || !m.caps || !m.caps.vfo) continue;
+    assert.strictEqual(m.caps.split, true, `${id} has vfo but no split`);
+  }
+  const fs = require('fs'), path = require('path');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const ctl = fs.readFileSync(path.join(__dirname, '..', 'lib', 'rig-controller.js'), 'utf8');
+  assert.ok(main.includes("case 'set-freq-other'"), 'dispatcher action');
+  assert.ok(main.includes('caps.splitFreq ='), 'capability');
+  assert.ok(ctl.includes('setFrequencyOther(hz)') && ctl.includes('get hasFrequencyOther()'), 'controller');
+  assert.ok(/this\._codec\.getVfoSplit\(\)/.test(ctl), 'the poll cycle asks the codec');
 });
 
 test('CIV setFilterWidth 500 CW -> idx 9; 50 CW -> idx 0', () => {
@@ -1173,6 +1452,22 @@ const FTX1_OPTIMA_MODEL = Object.assign({}, FTX1_FIELD_MODEL, {
     setAntennaPort: 'EX030704{val};',
     getAntennaPort: 'EX030704;',
   }),
+});
+
+// Preamp (N0KAH 2026-10-28): IPO/AMP1/AMP2 on HF/50 via PA0, on/off on VHF
+// (PA1) and UHF (PA2), chosen by the dial the radio last reported.
+test('FTX-1: preamp steps land on the band the dial is on (PA0 / PA1 / PA2)', () => {
+  const { RIG_MODELS } = require('../lib/rig-models');
+  for (const id of ['FTX-1 Field', 'FTX-1 Optima']) {
+    assert.ok(Array.isArray(RIG_MODELS[id].preampSteps) && RIG_MODELS[id].preampSteps.length === 3, id + ' has the ladder');
+    const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS[id]);
+    codec._lastFreqHz = 14074000; codec.setPreamp(2);
+    codec._lastFreqHz = 50313000; codec.setPreamp(1);
+    codec._lastFreqHz = 146520000; codec.setPreamp(2);
+    codec._lastFreqHz = 446000000; codec.setPreamp(0);
+    codec._lastFreqHz = 7074000; codec.setPreamp(true);
+    assert.deepStrictEqual(writes.slice(-5), ['PA02;', 'PA01;', 'PA11;', 'PA20;', 'PA01;'], id);
+  }
 });
 
 // Power: model-prefixed PC set/read (PC1xxx Field, PC2xxx Optima). Field
@@ -1985,18 +2280,19 @@ test('kenwood getVfoSplit polls IF;', () => {
   assert.strictEqual(writes[0], 'IF;');
 });
 
-test('Yaesu is gated out: getVfoSplit no-ops, IF-shaped input emits nothing, FA polling unchanged', () => {
+test('Yaesu is gated out of IF;: VS; is its readback, an IF-shaped frame emits nothing', () => {
   const { codec, writes } = captureWrites(KenwoodCodec, FT891_MODEL);
   let emitted = false;
   codec.on('vfo', () => { emitted = true; });
   codec.on('split', () => { emitted = true; });
-  codec.getVfoSplit();
+  codec.getVfoSplit();          // VS; (#100), never IF;
   codec.onData(Buffer.from(kenwoodIf({ vfo: '1', split: '1' })));
-  codec.setVfo('B');           // VS1; write still works (no readback yet)
-  codec.getFrequency();        // must stay FA; — no _rxVfo flip without readback
   assert.strictEqual(emitted, false);
   assert.ok(!writes.includes('IF;'));
-  assert.strictEqual(writes[writes.length - 1], 'FA;');
+  assert.ok(writes.includes('VS;'));
+  codec.setVfo('B');            // VS1; + optimistic retarget, confirmed by VS;
+  codec.getFrequency();
+  assert.strictEqual(writes[writes.length - 1], 'FB;');
 });
 
 test('rigctld v/s parse: VFOB is consumed, never a phantom mode', () => {
@@ -2984,6 +3280,80 @@ console.log('\n=== CivCodec: a lost DATA frame is noticed and re-sent (IK4IDF IC
     codec.on('log', (l) => logs.push(l));
     codec.onData(reply([0x26, 0x00, 0x01, 0x01, 0x02]));
     assert.ok(!logs.some(l => /unhandled CI-V frame cmd=0x26/.test(l)));
+  });
+}
+
+// Yaesu VS; readback (#100, FT-710): with the radio on VFO B, a tune must
+// write FB and the dial must poll FB — VS1 is the only way POTACAT learns it.
+console.log('\n=== Yaesu VFO readback (VS;) ===');
+{
+  const { RIG_MODELS } = require('../lib/rig-models');
+  test('FT-710 on VFO B: VS1 retargets tune and poll to FB', () => {
+    const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS['FT-710']);
+    let vfo = null; codec.on('vfo', (v) => { vfo = v; });
+    codec.getVfoSplit();
+    assert.ok(writes.includes('VS;'), 'polls VS;');
+    codec.onData(Buffer.from('VS1;'));
+    assert.strictEqual(vfo, 'B');
+    writes.length = 0;
+    codec.setFrequency(14074000);
+    assert.ok(writes[0].startsWith('FB'), 'tune writes FB, got ' + writes[0]);
+    writes.length = 0;
+    codec.getFrequency();
+    assert.deepStrictEqual(writes, ['FB;']);
+    codec.onData(Buffer.from('VS0;'));
+    writes.length = 0;
+    codec.setFrequency(14074000);
+    assert.ok(writes[0].startsWith('FA'), 'back on A writes FA');
+  });
+  test('A Yaesu that never answers VS; stops being asked', () => {
+    const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS['FT-710']);
+    const logs = []; codec.on('log', (l) => logs.push(l));
+    for (let i = 0; i < 10; i++) codec.getVfoSplit();
+    assert.strictEqual(writes.filter((w) => w === 'VS;').length, 5);
+    assert.ok(logs.some((l) => /does not answer VS;/.test(l)));
+    codec.setFrequency(14074000);
+    assert.ok(writes[writes.length - 1].startsWith('FA'));
+  });
+  test('FT-991A (no VFO select) never polls VS;', () => {
+    const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS['FT-991/991A']);
+    codec.getVfoSplit();
+    assert.ok(!writes.includes('VS;'));
+  });
+  test('Yaesu setVfo(B) retargets at once and confirms with VS;', () => {
+    const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS['FTDX10']);
+    codec.setVfo('B');
+    assert.deepStrictEqual(writes, ['VS1;', 'VS;', 'FB;']);
+    codec.onData(Buffer.from('VS0;')); // queued before the switch: stale, ignored
+    writes.length = 0;
+    codec.setFrequency(7074000);
+    assert.ok(writes[0].startsWith('FB'));
+  });
+}
+
+// CI-V forward power (#102, IC-7200): 15 11 is read while transmitting and
+// reported in watts on Icom's scale; a radio that NAKs it is asked no more.
+console.log('\n=== CI-V RF power meter (15 11) ===');
+{
+  const { RIG_MODELS } = require('../lib/rig-models');
+  test('IC-7200: 15 11 asked, 0143 = 50 W, 0213 = 100 W', () => {
+    const { codec, writes } = captureWrites(CivCodec, RIG_MODELS['IC-7200']);
+    const watts = []; codec.on('powerMeter', (w) => watts.push(w));
+    codec.getPowerMeter();
+    assert.strictEqual(writes[writes.length - 1], 'fefe76e01511fd');
+    const frame = (hi, lo) => Buffer.from([0xFE, 0xFE, 0xE0, 0x76, 0x15, 0x11, hi, lo, 0xFD]);
+    codec.onData(frame(0x01, 0x43));
+    codec.onData(frame(0x02, 0x13));
+    codec.onData(frame(0x00, 0x00));
+    assert.deepStrictEqual(watts, [50, 100, 0]);
+  });
+  test('A radio that NAKs 15 11 three times is not asked again', () => {
+    const { codec, writes } = captureWrites(CivCodec, RIG_MODELS['IC-7200']);
+    const nak = Buffer.from([0xFE, 0xFE, 0xE0, 0x76, 0xFA, 0xFD]);
+    for (let i = 0; i < 3; i++) { codec.getPowerMeter(); codec.onData(nak); }
+    const n = writes.length;
+    codec.getPowerMeter();
+    assert.strictEqual(writes.length, n);
   });
 }
 

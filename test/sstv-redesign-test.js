@@ -181,14 +181,17 @@ test('a guest picture must be allowed by the pass', () => {
   const pe = Object.create(PassEnforcement.prototype);
   pe._state = 'active';
   pe._expiresAtMs = Date.now() + 3600e3;
+  // A lease guest transmits under their own verified call; with none, no picture goes out.
   pe._pass = { privilege_class: 'us_extra', allowed_modes: [] };
+  assert.strictEqual(pe.interceptCatCommand({ type: 'sstv_tx', freqHz: 14230000 }).reason, 'no_callsign', 'no verified call = no transmit');
+  pe._pass.guest_callsign = 'K3SBP';
   assert.strictEqual(pe.interceptCatCommand({ type: 'sstv_tx', freqHz: 14230000 }).allowed, true, 'no mode list = all modes');
   pe._pass.allowed_modes = ['FT8', 'CW'];
   const no = pe.interceptCatCommand({ type: 'sstv_tx', freqHz: 14230000 });
   assert.strictEqual(no.allowed, false); assert.ok(/SSTV is not permitted/.test(no.userVisible));
   pe._pass.allowed_modes = ['PHONE'];
   assert.strictEqual(pe.interceptCatCommand({ type: 'sstv_tx', freqHz: 14230000 }).allowed, true, 'image goes where phone does');
-  pe._pass = { privilege_class: 'us_technician', allowed_modes: [] };
+  pe._pass = { privilege_class: 'us_technician', allowed_modes: [], guest_callsign: 'K3SBP' };
   assert.strictEqual(pe.interceptCatCommand({ type: 'sstv_tx', freqHz: 14230000 }).allowed, false, 'a Technician has no 20 m phone');
   const main = R('main.js');
   assert.ok(/remoteServer\.on\('sstv-photo', \(\{ image, mode, guest \}\)[\s\S]{0,300}interceptCatCommand\(\{ type: 'sstv_tx'/.test(main));

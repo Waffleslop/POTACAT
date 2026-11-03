@@ -1,6 +1,9 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
+  // The active rig's bands (lib/rig-bands.js): {bands: string[]|null, all}.
+  rigBandsGet: () => ipcRenderer.invoke('rig-bands-get'),
+  onRigBands: (cb) => ipcRenderer.on('rig-bands', (_e, d) => cb(d)),
   platform: process.platform,
   onSpotsData: (cb) => ipcRenderer.on('spots-popout-data', (_e, data) => cb(data)),
   onTheme: (cb) => ipcRenderer.on('spots-popout-theme', (_e, theme) => cb(theme)),

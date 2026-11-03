@@ -68,7 +68,7 @@ console.log('a park outside the operator\'s own program still gets its name (N0K
   check(/String\(x\.reference \|\| ''\)\.trim\(\)\.toUpperCase\(\) === want/.test(f),
     'then the live spot for exactly that park (an n-fer spot\'s name is its first park\'s)');
   check(/grid: hasPos \? latLonToGrid\(sp\.lat, sp\.lon\) : ''/.test(f), 'a grid from the spot\'s coordinates');
-  check(/ipcMain\.handle\('get-park', \(_e, ref\) => \{[\s\S]{0,120}return parkInfoFor\(ref\);/.test(main), 'every log form\'s park lookup gets the fallback');
+  check(/ipcMain\.handle\('get-park', (?:async )?\(_e, ref\) => \{[\s\S]{0,500}return parkInfoFor\(ref\);/.test(main), 'every log form\'s park lookup gets the fallback');
   check(/const p = parkInfoFor\(ref\);/.test(main.slice(main.indexOf('async function logContact('))), 'logContact (every log path, ECHOCAT included) too');
 }
 

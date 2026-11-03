@@ -7,6 +7,8 @@
   <script src="popout-theme-bootstrap.js"></script>
   <link rel="stylesheet" href="../node_modules/leaflet/dist/leaflet.css">
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="landmarks.css">
+  <link rel="stylesheet" href="channels.css">
 </head>
 <body>
   <div class="titlebar">
@@ -20,15 +22,23 @@
   <!-- Owner-facing Guest Pass banner.
        Shown ONLY when a guest is currently controlling this rig via a
        redeemed pass. Reads from window.api.passEnforcementGetState()
-       on load and onPassEnforcementState/Expiring/Ended events. Click
-       the strip to revoke. -->
-  <div id="gp-owner-banner" class="hidden" title="Click to revoke guest access immediately">
+       on load and onPassEnforcementState/Expiring/Ended events. Take over
+       pauses the guest and gives you the radio; Give it back resumes them. -->
+  <div id="gp-owner-banner" class="hidden">
     <span aria-hidden="true">&#x1F511;</span>
     <div style="flex:1;line-height:1.3;">
-      <strong><span id="gp-owner-callsign">&hellip;</span></strong>
-      <span> is controlling this rig. Their access expires </span>
-      <strong><span id="gp-owner-expires">&hellip;</span></strong><span>.</span>
-      <span class="gp-revoke-link">Revoke access</span>
+      <span id="gp-owner-lent">
+        <span>Your radio is lent to </span><strong><span id="gp-owner-callsign">&hellip;</span></strong>
+        <span id="gp-owner-onair"> and is on the air as <strong><span id="gp-owner-onair-call"></span></strong></span>
+        <span id="gp-owner-nocall" class="hidden"> (no verified callsign: listen only)</span><span>.</span>
+      </span>
+      <span id="gp-owner-paused" class="hidden">
+        <span>You have your radio back. </span><strong><span id="gp-owner-paused-call"></span></strong><span>'s pass is paused.</span>
+      </span>
+      <span> Ends in </span><strong><span id="gp-owner-expires">&hellip;</span></strong><span>.</span>
+      <button type="button" id="gp-owner-takeover" class="gp-revoke-link">Take over</button>
+      <button type="button" id="gp-owner-giveback" class="gp-revoke-link hidden">Give it back</button>
+      <button type="button" id="gp-owner-end" class="gp-revoke-link">End now</button>
     </div>
   </div>
   <!-- POTACAT Cloud billing banner: grace / payment problem / expired, and
@@ -60,6 +70,8 @@
         <div class="multi-dropdown-menu">
           <label class="multi-dropdown-item"><input type="checkbox" value="all" checked> All</label>
           <label class="multi-dropdown-item"><input type="checkbox" value="radio"> Radio</label>
+          <label class="multi-dropdown-item"><input type="checkbox" value="2200m"> 2200m</label>
+          <label class="multi-dropdown-item"><input type="checkbox" value="630m"> 630m</label>
           <label class="multi-dropdown-item"><input type="checkbox" value="160m"> 160m</label>
           <label class="multi-dropdown-item"><input type="checkbox" value="80m"> 80m</label>
           <label class="multi-dropdown-item"><input type="checkbox" value="60m"> 60m</label>
@@ -77,6 +89,11 @@
           <label class="multi-dropdown-item"><input type="checkbox" value="1.25m"> 1.25m</label>
           <label class="multi-dropdown-item"><input type="checkbox" value="33cm"> 33cm</label>
           <label class="multi-dropdown-item"><input type="checkbox" value="23cm"> 23cm</label>
+          <label class="multi-dropdown-item"><input type="checkbox" value="13cm"> 13cm</label>
+          <label class="multi-dropdown-item"><input type="checkbox" value="9cm"> 9cm</label>
+          <label class="multi-dropdown-item"><input type="checkbox" value="6cm"> 6cm</label>
+          <label class="multi-dropdown-item"><input type="checkbox" value="3cm"> 3cm</label>
+          <label class="multi-dropdown-item"><input type="checkbox" value="1.25cm"> 1.25cm</label>
         </div>
       </div>
       <div class="band-buttons hidden" id="band-buttons"></div>
@@ -87,7 +104,9 @@
           <label class="multi-dropdown-item"><input type="checkbox" value="radio"> Radio</label>
           <label class="multi-dropdown-item"><input type="checkbox" value="SSB"> SSB</label>
           <label class="multi-dropdown-item"><input type="checkbox" value="CW"> CW</label>
-          <label class="multi-dropdown-item"><input type="checkbox" value="FT"> FT8/4/2</label>
+          <label class="multi-dropdown-item"><input type="checkbox" value="FT8"> FT8</label>
+          <label class="multi-dropdown-item"><input type="checkbox" value="FT4"> FT4</label>
+          <label class="multi-dropdown-item"><input type="checkbox" value="FT2"> FT2</label>
           <label class="multi-dropdown-item"><input type="checkbox" value="FM"> FM</label>
           <label class="multi-dropdown-item"><input type="checkbox" value="FREEDV"> FreeDV</label>
           <label class="multi-dropdown-item"><input type="checkbox" value="JS8"> JS8</label>
@@ -98,7 +117,7 @@
       <!-- Callsign filter (lib/call-filter.js): prefixes or calls, comma-separated, * wildcard. Device-local. -->
       <input type="search" id="call-filter" placeholder="Calls: LZ, SP9ABC" title="Show only these callsigns or prefixes — comma-separated, * and ? wildcards. Empty = all." autocomplete="off" autocapitalize="characters" spellcheck="false" style="width:130px;font-size:12px;padding:3px 6px;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border-primary);border-radius:4px;">
       <div class="multi-dropdown" id="spots-dropdown">
-        <button class="multi-dropdown-btn" type="button" id="spots-btn">Spots</button>
+        <button class="multi-dropdown-btn" type="button" id="spots-btn">Spots &#x25BE;</button>
         <div class="spots-dropdown-panel">
           <!-- Top-level category list. Each category reveals a flyout submenu
                on hover/focus. IDs on inner checkboxes are preserved so all
@@ -139,6 +158,7 @@
               <label class="spots-toggle" id="spots-strict-atno-label" title="Mark parks NEW unless they're in your imported POTA hunter CSV. Local-only QSOs that haven't reached pota.app won't suppress the NEW flag (K0OTC)."><input type="checkbox" id="spots-strict-atno"> Strict ATNO (POTA-credited only)</label>
               <label class="spots-toggle" title="Hide spots your license class can't operate (and any truly out-of-band frequencies). Needs your License Class set in Settings → Operator — if it's None, nothing is hidden."><input type="checkbox" id="spots-hide-oob"> Hide out-of-privilege</label>
               <label class="spots-toggle"><input type="checkbox" id="spots-hide-qrt" checked> Hide QRT spots</label>
+              <label class="spots-toggle" id="spots-dx-only-label" title="Only stations that count as DX: a different country from yours, or farther than your DX distance (Settings)."><input type="checkbox" id="spots-dx-only"> DX only</label>
               <label class="spots-toggle"><input type="checkbox" id="spots-show-hidden"> Show hidden spots <span id="spots-hidden-count" class="spots-hidden-badge hidden">0</span></label>
             </div>
           </div>
@@ -200,6 +220,8 @@
             <!-- Shown only for a rig whose capabilities declare nativeScope
                  (the FT-710's scope over USB) — see rigApplyCapabilities. -->
             <button class="view-menu-item hidden" id="view-scope-btn" title="The radio's own band scope, read over its USB cable">Band Scope &#x2197;</button>
+            <!-- Flex with an internal ATU only (caps.atuWizard from main) -->
+            <button class="view-menu-item hidden" id="view-atu-wizard-btn" title="Fill the radio's antenna tuner memories for every band and mode you use">Tuner Memories &#x2197;</button>
             <button class="view-menu-item" id="view-bandspread-btn">Bandspread</button>
             <button class="view-menu-item" id="view-rbn-btn">Propagation</button>
             <button class="view-menu-item" id="view-contests-btn">Contests</button>
@@ -438,28 +460,10 @@
           <button class="rig-btn" id="rig-custom-add" style="margin-top:4px;font-size:11px;padding:2px 8px;">+ Add</button>
         </div>
         <div id="rig-tab-presets" class="rig-tab-panel hidden">
-          <!-- Rig presets (lib/rig-presets.js): list (tap = apply), the
-               mode-family assignments, and an inline editor. Rendered by
-               rigPresetsRender() in app.js from the main process payload. -->
-          <div id="rig-preset-caps-note" class="rig-preset-note hidden"></div>
-          <div id="rig-preset-list" class="rig-preset-list"></div>
-          <div class="rig-preset-actions">
-            <button class="rig-btn" id="rig-preset-new" style="font-size:11px;padding:2px 8px;">+ New preset</button>
-          </div>
-          <div id="rig-preset-editor" class="rig-preset-editor hidden">
-            <div class="rig-popover-row"><label>Name</label><input type="text" id="rig-preset-name" maxlength="40" placeholder="e.g. FT8" style="flex:1;"></div>
-            <div class="rig-popover-row" id="rig-preset-txpower-row"><label>TX power</label><input type="number" id="rig-preset-txpower" min="0" max="2000" step="1" placeholder="leave as is" style="width:90px;"><span>W</span></div>
-            <div class="rig-popover-row" id="rig-preset-rfgain-row"><label>RF gain</label><input type="number" id="rig-preset-rfgain" min="0" max="100" step="1" placeholder="leave as is" style="width:90px;"><span>%</span></div>
-            <div class="rig-popover-row" id="rig-preset-afgain-row"><label>AF gain</label><input type="number" id="rig-preset-afgain" min="0" max="100" step="1" placeholder="leave as is" style="width:90px;"><span>%</span></div>
-            <div class="rig-preset-actions">
-              <button class="rig-btn" id="rig-preset-use-current" title="Fill the fields with the radio's current levels">Use current</button>
-              <button class="rig-btn" id="rig-preset-save">Save</button>
-              <button class="rig-btn" id="rig-preset-cancel">Cancel</button>
-            </div>
-            <div class="rig-preset-note">A blank field leaves that level alone. AF gain is the radio's speaker level: 0 silences the shack for FT8.</div>
-          </div>
-          <div class="rig-preset-note" style="margin-top:8px;">Apply by itself when the mode changes to:</div>
-          <div id="rig-preset-bymode" class="rig-preset-bymode"></div>
+          <!-- Rig presets (lib/rig-presets.js): list (tap = apply), the editor,
+               the mode-family assignments and the band rules. Mounted by
+               rigPresetsMount() in app.js — the same editor as Settings > Profiles. -->
+          <div id="rig-preset-root" class="rig-preset-root"></div>
         </div>
         <div id="rig-tab-commands" class="rig-tab-panel hidden">
           <div id="rig-cmd-header" style="font-size:10px;color:var(--text-tertiary);margin-bottom:4px;"></div>
@@ -468,9 +472,6 @@
         </div>
       </div>
       <span id="freedv-sync-indicator" class="status hidden" style="width:10px;height:10px;border-radius:50%;padding:0;min-width:10px;" title="FreeDV"></span>
-      <span id="sfi-status" class="status solar-pill hidden">SFI —</span>
-      <span id="k-status" class="status solar-pill hidden">K —</span>
-      <span id="a-status" class="status solar-pill hidden">A —</span>
       <button id="parks-stats-toggle" class="status parks-stats-btn hidden" title="Toggle POTA stats panel">POTA Stats</button>
       <button id="cat-log-toggle" class="status cat-log-btn hidden" title="Toggle CAT log panel">Verbose Log</button>
       <span id="spot-count"></span>
@@ -521,10 +522,16 @@
       <button id="activator-back" class="activator-back-btn" title="Switch to Hunter mode">&larr; Hunter</button>
       <div class="activator-toolbar-sep"></div>
       <div class="activator-park-input-wrap">
-        <input type="text" id="activator-park-ref" placeholder="Park ref (e.g. K-1234 or K-1234, K-5678)" maxlength="60" spellcheck="false" autocomplete="off">
+        <input type="text" id="activator-park-ref" placeholder="Park ref (e.g. US-1234, or FI-0003, FI-0004 for a two-fer)" maxlength="60" spellcheck="false" autocomplete="off">
         <div id="activator-park-dropdown" class="activator-dropdown hidden"></div>
       </div>
       <span id="activator-park-name" class="activator-park-name"></span>
+      <!-- This park's county, asked once and remembered per park (the
+           operator's own MY_CNTY on every contact from here). -->
+      <span id="activator-county-wrap" class="hidden" title="The county you are operating from in this park. Remembered for the park; sent to LoTW and your other loggers.">
+        <select id="activator-county-state" class="hidden" style="width:58px;"></select>
+        <select id="activator-county" style="max-width:150px;"><option value="">County…</option></select>
+      </span>
       <input type="text" id="activator-grid" class="activator-grid" placeholder="Grid" maxlength="6" spellcheck="false" autocomplete="off" title="Park grid square (editable)">
       <!-- The callsign used over the air for this activation (G8LIY/P, GM8LIY):
            logged as STATION_CALLSIGN on the activation's QSOs; OPERATOR stays
@@ -569,6 +576,7 @@
       <span id="activator-timer" class="activator-timer" title="Activation duration">--:--</span>
       <span id="activator-utc" class="activator-utc"></span>
       <button id="activator-spot-btn" class="activator-export-btn" title="Spot yourself on POTA" style="background:#4ecca3;color:#000;">Spot</button>
+      <button id="activator-spot-winlink-btn" class="activator-export-btn hidden" title="Spot yourself on POTA by Winlink email, for when there is no internet: opens Winlink Mail with the spot filled in">Spot by Winlink</button>
       <button id="activator-export" class="activator-export-btn" title="Export activation ADIF">Export ADIF</button>
       <button id="activator-logbook-btn" class="activator-export-btn" title="View/Edit Logbook (F2)">Logbook</button>
       <button id="activator-settings-btn" class="activator-export-btn" title="Open Settings">Settings</button>
@@ -975,6 +983,8 @@
         <label class="dxcc-filter-label">Band:
           <select id="dxcc-band-select">
             <option value="all">All Bands</option>
+            <option value="2200m">2200m</option>
+            <option value="630m">630m</option>
             <option value="160m">160m</option>
             <option value="80m">80m</option>
             <option value="60m">60m</option>
@@ -992,6 +1002,11 @@
             <option value="1.25m">1.25m</option>
             <option value="33cm">33cm</option>
             <option value="23cm">23cm</option>
+            <option value="13cm">13cm</option>
+            <option value="9cm">9cm</option>
+            <option value="6cm">6cm</option>
+            <option value="3cm">3cm</option>
+            <option value="1.25cm">1.25cm</option>
           </select>
         </label>
         <label class="dxcc-filter-label">Mode:
@@ -1014,6 +1029,8 @@
             <tr>
               <th class="dxcc-entity-col">Entity</th>
               <th class="dxcc-cont-col">Cont</th>
+              <th class="dxcc-band-col">2200m</th>
+              <th class="dxcc-band-col">630m</th>
               <th class="dxcc-band-col">160m</th>
               <th class="dxcc-band-col">80m</th>
               <th class="dxcc-band-col">60m</th>
@@ -1031,6 +1048,11 @@
               <th class="dxcc-band-col">1.25m</th>
               <th class="dxcc-band-col">33cm</th>
               <th class="dxcc-band-col">23cm</th>
+              <th class="dxcc-band-col">13cm</th>
+              <th class="dxcc-band-col">9cm</th>
+              <th class="dxcc-band-col">6cm</th>
+              <th class="dxcc-band-col">3cm</th>
+              <th class="dxcc-band-col">1.25cm</th>
             </tr>
           </thead>
           <tbody id="dxcc-matrix-body"></tbody>
@@ -1075,23 +1097,30 @@
           <thead>
             <tr>
               <th class="dxcc-entity-col">State</th>
-              <th class="dxcc-band-col">160m</th>
-              <th class="dxcc-band-col">80m</th>
-              <th class="dxcc-band-col">60m</th>
-              <th class="dxcc-band-col">40m</th>
-              <th class="dxcc-band-col">30m</th>
-              <th class="dxcc-band-col">20m</th>
-              <th class="dxcc-band-col">17m</th>
-              <th class="dxcc-band-col">15m</th>
-              <th class="dxcc-band-col">12m</th>
-              <th class="dxcc-band-col">10m</th>
-              <th class="dxcc-band-col">6m</th>
-              <th class="dxcc-band-col">4m</th>
-              <th class="dxcc-band-col">2m</th>
-              <th class="dxcc-band-col">70cm</th>
-              <th class="dxcc-band-col">1.25m</th>
-              <th class="dxcc-band-col">33cm</th>
-              <th class="dxcc-band-col">23cm</th>
+              <th class="dxcc-band-col was-band-col">2200m</th>
+              <th class="dxcc-band-col was-band-col">630m</th>
+              <th class="dxcc-band-col was-band-col">160m</th>
+              <th class="dxcc-band-col was-band-col">80m</th>
+              <th class="dxcc-band-col was-band-col">60m</th>
+              <th class="dxcc-band-col was-band-col">40m</th>
+              <th class="dxcc-band-col was-band-col">30m</th>
+              <th class="dxcc-band-col was-band-col">20m</th>
+              <th class="dxcc-band-col was-band-col">17m</th>
+              <th class="dxcc-band-col was-band-col">15m</th>
+              <th class="dxcc-band-col was-band-col">12m</th>
+              <th class="dxcc-band-col was-band-col">10m</th>
+              <th class="dxcc-band-col was-band-col">6m</th>
+              <th class="dxcc-band-col was-band-col">4m</th>
+              <th class="dxcc-band-col was-band-col">2m</th>
+              <th class="dxcc-band-col was-band-col">70cm</th>
+              <th class="dxcc-band-col was-band-col">1.25m</th>
+              <th class="dxcc-band-col was-band-col">33cm</th>
+              <th class="dxcc-band-col was-band-col">23cm</th>
+              <th class="dxcc-band-col was-band-col">13cm</th>
+              <th class="dxcc-band-col was-band-col">9cm</th>
+              <th class="dxcc-band-col was-band-col">6cm</th>
+              <th class="dxcc-band-col was-band-col">3cm</th>
+              <th class="dxcc-band-col was-band-col">1.25cm</th>
             </tr>
           </thead>
           <tbody id="was-matrix-body"></tbody>
@@ -1104,6 +1133,8 @@
         <div class="directory-tabs">
           <button id="dirv-tab-nets" class="directory-tab active" type="button">HF Nets</button>
           <button id="dirv-tab-swl" class="directory-tab" type="button">SWL Broadcasts</button>
+          <button id="dirv-tab-landmarks" class="directory-tab" type="button" title="Time stations, beacons, weather and calling frequencies you can tune at any time">Landmarks</button>
+          <button id="dirv-tab-channels" class="directory-tab" type="button" title="Your saved frequency chart: FRS, GMRS, MURS, marine, aviation, interop and your own repeaters. Edit, reorder, delete, import a CHIRP file">Channels</button>
         </div>
         <input type="text" id="dirv-search" class="directory-search" placeholder="Search nets &amp; broadcasts...">
         <select id="dirv-band-filter" class="dirv-filter-select">
@@ -1128,6 +1159,14 @@
           <option value="all">All</option>
           <option value="live">On Air Now</option>
           <option value="today">Scheduled Today</option>
+        </select>
+        <select id="dirv-category-filter" class="dirv-filter-select hidden" aria-label="Category">
+          <option value="all">All categories</option>
+          <option value="time">Time signals</option>
+          <option value="beacon">Beacons</option>
+          <option value="weather">Weather</option>
+          <option value="calling">Calling frequencies</option>
+          <option value="oddity">Oddities</option>
         </select>
         <button id="dirv-refresh-btn" type="button" class="directory-refresh" title="Refresh from Google Sheets">&#x21BB;</button>
         <span id="dirv-count" class="dirv-count"></span>
@@ -1174,9 +1213,59 @@
           <tbody id="dirv-swl-body"></tbody>
         </table>
       </div>
+      <!-- Landmarks (lib/landmarks.js): a table with a one-line "what it is"
+           per row, and a station panel that explains the selected row. -->
+      <!-- Channels: the operator's saved frequency chart (lib/channels.js, renderer/channels.css).
+           Seeded from data/channels.json (lists from KL4XQ and KC8DHX), then theirs to edit,
+           reorder (drag the grip), delete, import from a CHIRP CSV and export. A click tunes;
+           where the radio cannot reach it the SDR plays it (lib/listen-source.js). -->
+      <div id="dirv-channels-container" class="chn hidden">
+        <div class="chn-bar">
+          <select id="chn-group-filter" aria-label="Group"><option value="all">All groups</option></select>
+          <button type="button" id="chn-add" class="chn-btn chn-btn-tint">+ Add channel</button>
+          <button type="button" id="chn-import" class="chn-btn" title="Import a CHIRP CSV export (File &gt; Export in CHIRP)">Import CHIRP CSV...</button>
+          <button type="button" id="chn-export" class="chn-btn" title="Save the chart as a CHIRP CSV file">Export CSV...</button>
+          <button type="button" id="chn-restore" class="chn-btn" title="Put back the starter channels you deleted">Restore starter channels</button>
+          <span class="chn-spacer"></span>
+          <span id="chn-status" class="chn-status"></span>
+        </div>
+        <div id="chn-editor" class="chn-editor hidden"></div>
+        <div class="chn-wrap">
+          <table class="directory-view-table chn-table">
+            <thead><tr><th></th><th>Name</th><th>MHz</th><th>Mode</th><th>Offset</th><th>Tone</th><th>Note</th><th></th></tr></thead>
+            <tbody id="chn-body"></tbody>
+          </table>
+        </div>
+      </div>
+      <div id="dirv-landmarks-container" class="lmk hidden">
+        <div id="lmk-hint" class="lmk-hint hidden" role="note">
+          <span class="lmk-hint-text"><strong>New radio?</strong> Tune <strong>WWV on 10000 kHz</strong>. A tick every second means the radio, the antenna and the audio all work.</span>
+          <button type="button" id="lmk-hint-tune" class="lmk-btn lmk-btn-tint">Tune WWV</button>
+          <button type="button" id="lmk-hint-close" class="lmk-btn lmk-btn-plain">Got it</button>
+        </div>
+        <div class="lmk-split">
+          <div class="lmk-table-wrap">
+            <table class="directory-view-table lmk-table">
+              <thead>
+                <tr>
+                  <th class="lmk-col-status">Status</th>
+                  <th class="lmk-col-name">Name</th>
+                  <th class="lmk-col-freq">Freq (kHz)</th>
+                  <th class="lmk-col-mode">Mode</th>
+                  <th class="lmk-col-band">Band</th>
+                  <th class="lmk-col-line">What it is</th>
+                </tr>
+              </thead>
+              <tbody id="lmk-body"></tbody>
+            </table>
+          </div>
+          <aside id="lmk-panel" class="lmk-panel" aria-live="polite" aria-label="About this station"></aside>
+        </div>
+      </div>
       <div id="dirv-placeholder" class="hidden">Loading directory data...</div>
       <div class="dirv-footer">
-        <span class="dir-suggest-link">Want a net or SWL station added? <a href="#" id="dirv-suggest-sheet">Leave a comment on the Google Sheet</a></span>
+        <span class="dir-suggest-link" id="dirv-suggest-nets">Want a net or SWL station added? <a href="#" id="dirv-suggest-sheet">Leave a comment on the Google Sheet</a></span>
+        <span class="dir-suggest-link hidden" id="dirv-suggest-landmarks">Know a signal worth adding? <a href="#" id="dirv-suggest-discord">Suggest it on Discord</a></span>
         <span class="dirv-hint">Click a row to tune your radio</span>
       </div>
     </div>
@@ -1219,6 +1308,8 @@
           <button class="multi-dropdown-btn" type="button">Band: <span class="multi-dropdown-text">All</span></button>
           <div class="multi-dropdown-menu">
             <label class="multi-dropdown-item"><input type="checkbox" value="all" checked> All</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="2200m"> 2200m</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="630m"> 630m</label>
             <label class="multi-dropdown-item"><input type="checkbox" value="160m"> 160m</label>
             <label class="multi-dropdown-item"><input type="checkbox" value="80m"> 80m</label>
             <label class="multi-dropdown-item"><input type="checkbox" value="60m"> 60m</label>
@@ -1236,6 +1327,11 @@
             <label class="multi-dropdown-item"><input type="checkbox" value="1.25m"> 1.25m</label>
             <label class="multi-dropdown-item"><input type="checkbox" value="33cm"> 33cm</label>
             <label class="multi-dropdown-item"><input type="checkbox" value="23cm"> 23cm</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="13cm"> 13cm</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="9cm"> 9cm</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="6cm"> 6cm</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="3cm"> 3cm</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="1.25cm"> 1.25cm</label>
           </div>
         </div>
         <div class="multi-dropdown" id="prop-mode-filter">
@@ -1341,6 +1437,7 @@
         <button type="button" class="settings-tab active" data-tab="summary">Summary</button>
         <button type="button" class="settings-tab" data-tab="station">Station</button>
         <button type="button" class="settings-tab" data-tab="radio">Radio</button>
+        <button type="button" class="settings-tab" data-tab="profiles">Profiles</button>
         <button type="button" class="settings-tab" data-tab="spots">Spots</button>
         <button type="button" class="settings-tab" data-tab="tuning">Tuning</button>
         <button type="button" class="settings-tab" data-tab="logging">Logging</button>
@@ -1578,6 +1675,15 @@
       <label>Owner callsign (optional): <input type="text" id="set-owner-callsign" maxlength="12" placeholder="same as My Callsign"></label>
       <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">ADIF OWNER_CALLSIGN — the station licensee, when that is not you. Left blank, nothing is written.</span>
       <label>QTH Grid Square: <input type="text" id="set-grid" maxlength="6"></label>
+      <!-- The operator's own state and county (ADIF MY_STATE / MY_CNTY;
+           lib/station-county.js). AE5JE 2026-10-27. -->
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <label>Home state: <select id="set-home-state" style="width:70px;"><option value="">—</option></select></label>
+        <label>Home county: <select id="set-home-county" style="width:190px;"><option value="">—</option></select></label>
+        <button type="button" id="home-county-qrz">Fill from QRZ</button>
+        <span class="help-text" id="home-county-status"></span>
+      </div>
+      <span class="help-text" style="display:block;margin-bottom:6px;">Written on contacts made from your home grid square and sent to LoTW and your other loggers. Contacts with another grid get no county rather than the wrong one. On an activation, POTACAT uses the county you choose for that park.</span>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-qrz"> QRZ.com Callsign Lookup</label>
       <div id="qrz-config" class="radio-sub hidden">
         <span class="help-text" style="font-size:12px;">Looks up operator first names from QRZ.com and shows them in the Operator column. Uses the QRZ XML API — a free QRZ account works.</span>
@@ -1640,8 +1746,10 @@
         </select>
       </label>
       <span class="help-text" style="margin-left:24px;display:block;">Auto matches the band's voice convention. Override if your rig needs a specific sideband for FreeDV regardless of band &mdash; e.g. FTDX3000 operators who prefer wide USB on 40m.</span>
+      <div id="jtcat-use-data-mode-row">
       <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-jtcat-use-data-mode" checked> Switch radio to DATA mode (PKTUSB) for FT8 / FT4 (JTCAT)</label>
-      <span class="help-text" style="margin-left:24px;display:block;">Uncheck for older Yaesu rigs (FTDX3000, FT-950, etc.) where DATA / Packet-USB caps IF bandwidth too narrow for FT8/FT4. Off keeps the radio in plain USB; route the USB CODEC audio at the rig. Same fix as the FreeDV option above. (AB9AI)</span>
+      <span class="help-text" style="margin-left:24px;display:block;">Leave this on. Turn it off only if your radio clips FT8 in DATA mode (older Yaesu such as the FTDX3000 or FT-950). Off keeps the radio in plain USB; route the USB CODEC audio at the radio.</span>
+      </div>
       <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-enable-auto-sstv"> Idle Mode</label>
       <span class="help-text" style="margin-left:12px;display:block;">
         When this station is idle for the defined time, POTACAT opens your chosen program — WSPR, PSK31, JTTY, SSTV, or JS8 (heartbeat net, auto-replies, mailbox, and APRS gateway keep running while you are away).
@@ -1720,6 +1828,15 @@
           </select>
         </label>
         <span class="help-text" style="margin-bottom:8px;display:block;">Selecting your model enables model-specific features: CW keying, ATU commands, CI-V address, filter control, and power limits.</span>
+        <!-- Bands this radio is used on (lib/rig-bands.js): pre-ticked with the
+             model's own bands; a transverter band can be added. Unticked bands
+             are hidden on every surface (spots, map, FT8, JTTY, SSTV, band buttons). -->
+        <div id="rig-bands-box" class="rig-bands-box">
+          <div class="rig-bands-title">Check all bands you can use with this radio</div>
+          <span id="rig-bands-help" class="help-text" style="display:block;margin-bottom:4px;">Ticked with the bands this model covers. Add a band you reach with a transverter, or untick one you never use. Unticked bands are hidden everywhere in POTACAT: spots, map, FT8, JTTY, SSTV and the band buttons.</span>
+          <div id="rig-bands-grid" class="rig-bands-grid"></div>
+          <button type="button" id="rig-bands-reset" class="rig-btn" style="margin-top:4px;font-size:11px;padding:2px 8px;">Use this model's bands</button>
+        </div>
         <!-- Rig setup notes (lib/rig-setup-notes.js): radio menu settings other
              operators needed before POTACAT could drive the radio. -->
         <div class="rig-setup-row">
@@ -1727,6 +1844,12 @@
           <span id="rig-setup-summary" class="help-text"></span>
         </div>
         <div id="rig-setup-panel" class="rig-setup-panel hidden"></div>
+        <!-- Icom band scope (docs/icom-band-scope-plan.md): 30 s of what the
+             radio sends, so the scope can be built against a real radio. -->
+        <div id="icom-scope-capture-row" class="rig-setup-row hidden">
+          <button type="button" id="icom-scope-capture-btn" class="rig-btn">Record band scope data (30 s)</button>
+          <span id="icom-scope-capture-result" class="help-text">Helps POTACAT add this radio's band scope. Records the Icom POTACAT is connected to now, then puts the radio's scope settings back.</span>
+        </div>
         <label>CW keying line (USB CW over CAT port):
           <select id="set-cw-key-line" style="width:150px;">
             <option value="auto">Auto (model default)</option>
@@ -1758,6 +1881,10 @@
           </label>
           <label style="margin-top:4px;display:block;">TX audio out (to radio):
             <select id="rig-remote-audio-output" style="width:100%;margin-top:2px;"><option value="">-- system default --</option></select>
+          </label>
+          <label style="margin-top:6px;display:block;" id="rig-rx-level-row">Receive level to ECHOCAT devices: <span id="rig-rx-level-val">0 dB</span>
+            <input type="range" id="rig-rx-level" min="-20" max="20" step="1" value="0" style="width:100%;margin-top:2px;">
+            <span class="help-text" style="display:block;">Gain on the radio's audio before it goes to the phone or browser (0 dB = as captured). Raise it when the radio's line output ignores its volume knob, such as a fixed-level ACC jack into a sound-card interface. The TX Drive slider on the device is the transmit twin; JTCAT's own RX gain is separate.</span>
           </label>
           <span class="help-text" id="rig-audio-devices-hint" style="margin-top:4px;display:block;">Soundcard devices for this rig &mdash; used for JTCAT FT8/FT4 receive &amp; transmit, SSTV, and ECHOCAT remote audio.<br>
             <b>Only hearing audio in DIGU / DIGL (USB-Data / LSB-Data)?</b> Your rig is probably routing RX to a separate USB audio stream for DATA modes. Pick the <i>main</i> USB Audio codec (not the "data" variant), and/or change your rig's menu so RX flows to the main USB audio in voice modes too &mdash; Yaesu: <code>USB Audio Mode</code> = AUTO, Icom: <code>USB AF Output</code> = AF, Kenwood: <code>Menu 75</code>. See docs/radio-setup-guide.md.</span>
@@ -1875,7 +2002,14 @@
               <option value="hardware">RTS/CTS flow control</option>
             </select>
           </label>
-          <span class="help-text" style="margin-top:2px;display:block;">Auto uses RTS/CTS flow control for the Kenwood TS-590 and TS-990 and holds RTS low for every other radio. Choose <b>Held low</b> if the radio transmits as soon as POTACAT connects: some radios that copy the TS-590's commands (FX4CR) key PTT on RTS.</span>
+          <span class="help-text" style="margin-top:2px;display:block;">Auto uses RTS/CTS flow control for the Kenwood TS-590, TS-990 and TS-2000 and holds RTS low for every other radio. A Yaesu that does not answer with RTS held low (its CAT RTS menu is on) is tried with RTS/CTS, and kept on it if it answers. Choose <b>Held low</b> if the radio transmits as soon as POTACAT connects: some radios that copy the TS-590's commands (FX4CR) key PTT on RTS.</span>
+          <label style="margin-top:6px;">Transmit (PTT):
+            <select id="set-serialcat-ptt">
+              <option value="cat" selected>Over CAT</option>
+              <option value="vox">The audio interface keys it (SignaLink, the radio's VOX)</option>
+            </select>
+          </label>
+          <span class="help-text" style="margin-top:2px;display:block;">CAT still tunes and changes mode. Choose <b>The audio interface keys it</b> when a SignaLink or similar on the radio's data jack (TS-2000 ACC2) does the keying: over CAT some radios transmit from the front microphone, so the interface's audio never goes out.</span>
           <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
             <button type="button" id="serialcat-test-btn">Test Connection</button>
             <span id="serialcat-test-result" style="font-size:12px;"></span>
@@ -1893,6 +2027,7 @@
               <option value="0xB2">IC-7760</option>
               <option value="0x88">IC-7100</option>
               <option value="0x76">IC-7200</option>
+              <option value="0x80">IC-7410</option>
               <option value="0x7A">IC-7600</option>
               <option value="0x8E">IC-7851</option>
               <option value="0xA2">IC-9700</option>
@@ -1918,7 +2053,7 @@
             <button type="button" id="icom-test-btn">Test Connection</button>
             <span id="icom-test-result" style="font-size:12px;"></span>
           </div>
-          <span class="help-text" style="margin-top:6px;display:block;">For CW paddle keying via ECHOCAT, set your radio menu: SET > Connectors > USB SEND/Keying > USB Keying (CW) = DTR</span>
+          <span class="help-text" style="margin-top:6px;display:block;">For CW paddle keying via ECHOCAT, the radio's USB Keying (CW) menu must match POTACAT's CW keying line: <b>Setup instructions</b> in the rig editor names the exact setting for your model (RTS on the IC-7300 and IC-7300 MK II, DTR on most others).</span>
         </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="civ-tcp"> Raw CI-V TCP bridge</label>
         <div id="civ-tcp-config" class="radio-sub hidden">
@@ -1933,6 +2068,7 @@
               <option value="0xB2">IC-7760</option>
               <option value="0x88">IC-7100</option>
               <option value="0x76">IC-7200</option>
+              <option value="0x80">IC-7410</option>
               <option value="0x7A">IC-7600</option>
               <option value="0x8E">IC-7851</option>
               <option value="0xA2">IC-9700</option>
@@ -1951,7 +2087,7 @@
             <button type="button" id="civ-tcp-test-btn">Test Connection</button>
             <span id="civ-tcp-test-result" style="font-size:12px;"></span>
           </div>
-          <span class="help-text" style="margin-top:6px;display:block;">For <code>ser2net</code>, use whatever TCP port you configured in <code>/etc/ser2net.yaml</code>. CW paddle keying works the same as direct USB CI-V — the codec sends the same CW key command (0x1C 0x01) over the TCP transport.</span>
+          <span class="help-text" style="margin-top:6px;display:block;">For <code>ser2net</code>, use whatever TCP port you configured in <code>/etc/ser2net.yaml</code>. CW text and macros work over the bridge (CI-V command 0x17). Paddle keying needs the USB serial key line (DTR/RTS), which a TCP bridge does not carry.</span>
         </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="icom-network"> Icom Network (UDP / RS-BA1) <span style="font-size:10px;color:var(--text-tertiary);">— CAT + RX/TX audio</span></label>
         <div id="icom-network-config" class="radio-sub hidden">
@@ -2034,14 +2170,14 @@
               <select id="set-rig-ptt-port" style="flex:1;"><option value="">-- none (PTT via CAT) --</option></select>
               <input type="text" id="set-rig-ptt-port-manual" placeholder="or type COM port" style="width:120px;">
               <select id="set-rig-ptt-type" style="width:70px;" title="Pin used for PTT">
+                <option value="RTS" selected>RTS</option>
                 <option value="DTR">DTR</option>
-                <option value="RTS">RTS</option>
               </select>
             </div>
           </label>
           <span class="help-text" style="margin-top:2px;display:block;">For DigiRig / SignaLink / similar interfaces that key PTT via DTR or RTS.<br>
-          <strong>Two-port adapters</strong> (full-size DigiRig): pick the SECOND COM port (the one without CI-V data); usually DTR.<br>
-          <strong>Single-port adapters</strong> (DigiRig Mobile): pick the SAME port as CAT above; pin depends on the model — try DTR first, switch to RTS if PTT doesn't key.<br>
+          <strong>Two-port adapters</strong> (full-size DigiRig, or a Digirig Mobile beside a separate CAT cable): pick the port without CI-V data. A Digirig keys PTT on <b>RTS</b>; its DTR line is for CW.<br>
+          <strong>Single-port adapters</strong>: pick the SAME port as CAT above. Digirig = RTS; some SignaLink and home-made cables key on DTR — switch if PTT does not key.<br>
           Leave blank for rigs that PTT over CAT (most modern Yaesu / Icom).</span>
           <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
             <button type="button" id="hamlib-test-btn">Test Connection</button>
@@ -2053,6 +2189,16 @@
           <span class="help-text">Connect to a remote rigctld server (e.g. on another machine)</span>
           <label>Host: <input type="text" id="set-rigctldnet-host" placeholder="192.168.1.100" value="127.0.0.1"></label>
           <label>Port: <input type="number" id="set-rigctldnet-port" min="1" max="65535" value="4532"></label>
+        </div>
+        <label class="radio-label"><input type="radio" name="radio-type" value="flrig"> FLRig (a shared radio)</label>
+        <div id="flrig-config" class="radio-sub hidden">
+          <span class="help-text" style="font-size:12px;">flrig holds the radio and POTACAT is one of its clients, beside your logger or fldigi. POTACAT tunes, changes mode, keys PTT, reads the S-meter, SWR and power, and sets RF power through flrig. Filter width, CW keying and the radio's menus stay in flrig. Pick your Radio Model above for the right bands and power limits. In flrig, Config &gt; Setup &gt; Xcvr sets the server port (12345). <a href="https://sourceforge.net/projects/fldigi/files/flrig/" data-external="1">Download flrig</a>.</span>
+          <label>Host: <input type="text" id="set-flrig-host" placeholder="127.0.0.1" value="127.0.0.1"></label>
+          <label>Port: <input type="number" id="set-flrig-port" min="1" max="65535" value="12345"></label>
+          <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
+            <button type="button" id="flrig-test-btn">Test Connection</button>
+            <span id="flrig-test-result" style="font-size:12px;"></span>
+          </div>
         </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="dxlab-commander"> DXLab Commander</label>
         <div id="dxlab-commander-config" class="radio-sub hidden">
@@ -2110,12 +2256,20 @@
               <label style="margin-left:8px;">Carrier duration (s):
                 <input type="number" id="set-external-atu-seconds" min="1" max="15" step="0.5" value="4" style="width:60px;">
               </label>
-              <span class="help-text" style="margin-top:4px;display:block;">Tune button emits a low-power CW carrier so the RF-sensing tuner can match. Rig restores to its previous mode and power afterwards. 1 to 25 W; your radio may not go below its own minimum (5 W on many rigs).</span>
+              <span class="help-text" style="margin-top:4px;display:block;">Tune button emits a low-power carrier (in AM, which needs no key or audio) so the RF-sensing tuner can match. Rig restores to its previous mode and power afterwards. 1 to 25 W; your radio may not go below its own minimum (5 W on many rigs).</span>
             </div>
             <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-atu-keep-on"> Keep the tuner on after a tune cycle</label>
             <span class="help-text" style="margin-left:24px;display:block;">For a Yaesu with a tuner on its TUNER jack (FT-710 + mAT-30): the radio runs the tune, then switches the tuner off. With this on, POTACAT watches the cycle and sends AC001; the moment the radio reports the tuner off, so it stays online.</span>
           </div>
         </details>
+        <div id="rig-voice-as-data" style="margin-top:8px;">
+          <label class="checkbox-label"><input type="checkbox" id="set-voice-as-data"> Voice in DATA mode (USB-D / LSB-D)</label>
+          <span class="help-text" style="display:block;margin:2px 0 0 24px;">For radios whose data port is silent in USB and LSB, such as the Xiegu G90: POTACAT puts the radio in USB-D or LSB-D for voice, so receive audio reaches your sound card interface and ECHOCAT. Contacts are still logged as SSB. The radio's own microphone is off in these modes, so voice has to come in through the data port.</span>
+        </div>
+        <div id="rig-lan-voice-ssb" class="hidden" style="margin-top:8px;">
+          <label class="checkbox-label"><input type="checkbox" id="set-lan-voice-ssb"> Voice over the LAN stays in USB / LSB</label>
+          <span class="help-text" style="display:block;margin:2px 0 0 24px;">Tick this when the radio's DATA OFF MOD menu is set to LAN. The radio then takes voice from the network in plain USB and LSB, with its speech compressor and SSB transmit filter. Leave it off at the radio's factory setting: LAN audio only reaches the transmitter in DATA mode, so POTACAT switches to USB-D for each transmission.</span>
+        </div>
         <details id="rig-sdr-scope" style="margin-top:8px;">
           <summary>Band scope from an SDR</summary>
           <div style="margin-top:6px;">
@@ -2279,11 +2433,6 @@
           <span class="help-text" style="display:inline;margin-left:4px;">(0 = no limit)</span>
         </div>
       </div>
-      <label class="checkbox-label"><input type="checkbox" id="set-enable-rbn"> Reverse Beacon Network</label>
-      <div id="rbn-config" class="radio-sub hidden">
-        <span class="help-text" style="font-size:12px;">Shows where your CQ calls are being heard by RBN skimmers worldwide. Appears in the Propagation view.</span>
-        <span class="help-text" style="display:block;margin-top:4px;">RBN spots only appear while POTACAT is open — historical spots are not retrieved.</span>
-      </div>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-wsjtx"> WSJT-X Integration</label>
       <div id="wsjtx-config" class="radio-sub hidden">
         <span class="help-text" style="font-size:12px;">Connect to WSJT-X via UDP. POTA activators are highlighted in the decode window and decodes appear in POTACAT.</span>
@@ -2298,11 +2447,6 @@
       <label class="checkbox-label"><input type="checkbox" id="set-enable-pskr"> FreeDV (PSKReporter)</label>
       <div id="pskr-config" class="radio-sub hidden">
         <span class="help-text" style="margin-left:12px;display:block;">Live FreeDV reception reports from PSKReporter. Shows who is hearing FreeDV signals worldwide.</span>
-      </div>
-      <label class="checkbox-label"><input type="checkbox" id="set-enable-pskr-map"> PSKReporter Propagation</label>
-      <div id="pskr-map-config" class="radio-sub hidden">
-        <span class="help-text" style="margin-left:12px;display:block;">Shows where your FT8/FT4/CW transmissions are being received worldwide. Appears in the Propagation view alongside RBN.</span>
-        <span class="help-text" style="display:block;margin-top:4px;">Polls every 5 minutes (PSKReporter rate limit). Spots appear after the first poll completes. Requires your callsign above.</span>
       </div>
       <label class="checkbox-label"><input type="checkbox" id="set-pskr-upload"> Report my JTCAT decodes to PSKReporter</label>
       <div id="pskr-upload-config" class="radio-sub hidden">
@@ -2336,6 +2480,13 @@
       <label>Max Distance (0 = no limit):
         <input type="number" id="set-max-dist" min="0" max="25000" step="50" value="0">
         <span class="help-text" id="set-max-dist-unit">miles</span>
+      </label>
+      <label title="Which spots get the DX mark and pass the DX only filter. Blank: any station in a different country (DXCC entity) from yours.">DX means farther than (blank = a different country):
+        <span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          HF <input type="number" id="set-dx-dist-hf" min="0" max="9999" step="50" placeholder="—" style="width:70px;">
+          6 m and up <input type="number" id="set-dx-dist-vhf" min="0" max="9999" step="10" placeholder="—" style="width:70px;">
+          <span class="help-text set-dx-dist-unit">miles</span>
+        </span>
       </label>
       <label class="checkbox-label" title="Hide spots your license class can't operate, plus any truly out-of-band frequencies."><input type="checkbox" id="set-hide-out-of-band"> Hide spots outside my license privileges</label>
       <span class="help-text" style="display:block;margin:-2px 0 6px;">Uses your <strong>License Class</strong> (Settings → Operator). If that's set to None, nothing is hidden.</span>
@@ -2617,13 +2768,18 @@
         <span class="help-text" style="display:block;margin-top:4px;">Default N1MM+ broadcast port is 12060. Check your device/software documentation for the correct port.</span>
       </div>
     </fieldset>
+    <!-- Profiles: rig presets (lib/rig-presets.js), the same editor as the Rig menu's Presets tab -->
+    <fieldset class="source-toggles" data-settings-tab="profiles">
+      <legend>Profiles</legend>
+      <span class="help-text" style="display:block;margin-bottom:6px;">A rig profile is a named set of radio settings for the active rig: TX power, gains, the RX filter, noise blanker, noise reduction, notch, compressor, VOX, preamp, attenuator, AGC. Tick only what the profile should set; everything else is left as it is. Tap one to apply it, or let the triggers apply it: a profile per mode (all SSB on one, all digital on another), and band rules on top for finer control (20 m SSB this, 40 m SSB that). Profiles also live in the Rig menu's Presets tab, the VFO window and ECHOCAT.</span>
+      <div id="settings-preset-root" class="rig-preset-root settings-preset-root"></div>
+    </fieldset>
     <!-- 7. Logging -->
     <fieldset class="source-toggles" data-settings-tab="logging">
       <legend>Logging</legend>
-      <label class="checkbox-label"><input type="checkbox" id="set-enable-logging"> Enable QSO Logging</label>
-      <label class="checkbox-label" style="margin-left:12px;"><input type="checkbox" id="set-enable-banner-logger"> Bottom Banner Logger</label>
-      <span class="help-text" style="margin-left:24px;display:block;">Persistent logging bar below the spot table for rapid QSO entry</span>
-      <div id="logging-config" class="radio-sub hidden">
+      <label class="checkbox-label"><input type="checkbox" id="set-enable-banner-logger"> Bottom Banner Logger</label>
+      <span class="help-text" style="margin-left:12px;display:block;">Persistent logging bar below the spot table for rapid QSO entry</span>
+      <div id="logging-config" class="radio-sub">
         <label>ADIF Log File:
           <div style="display:flex;gap:6px;margin-top:4px;">
             <input type="text" id="set-adif-log-path" readonly style="flex:1;">
@@ -2671,6 +2827,10 @@
             </label>
             <div id="logbook-help" class="help-text" style="margin-top:4px;"></div>
           </div>
+          <div id="logbook-n3fjp-config" class="hidden" style="margin-top:6px;">
+            <label class="checkbox-label"><input type="checkbox" id="set-n3fjp-pull"> Also bring in contacts I log in N3FJP on its own</label>
+            <div class="help-text" style="margin-top:4px;line-height:1.5;">While N3FJP is open, POTACAT reads its log through the same API every 5 minutes and adds any contact it doesn't have, so it reaches your POTACAT log and POTACAT Cloud. The first time it reads the whole N3FJP log. Contacts already in your log are skipped, the same as Import Log.</div>
+          </div>
           <div id="logbook-log4om-config" class="hidden" style="margin-top:6px;">
             <label class="checkbox-label"><input type="checkbox" id="set-log4om-wsjtx-binary"> Use WSJT-X binary protocol (required for QRZ/Clublog propagation)</label>
             <div class="help-text" style="margin-top:4px;line-height:1.5;">Log4OM treats plain ADIF UDP as a batch import and will not propagate those QSOs to QRZ/Clublog. Enable this to send QSOs in WSJT-X binary format instead — Log4OM will then propagate them like a manually-logged QSO. In Log4OM, change the UDP Inbound entry's Type from "ADIF-MESSAGE" to "WSJT-X" (same port).</div>
@@ -2705,6 +2865,8 @@
               </select>
             </label>
             <div class="help-text" style="margin-top:4px;line-height:1.5;">For GridTracker: enable WSJT-X binary, point at the host/port GridTracker is listening on (default 2237). For older ADIF-only tools: switch the format to Plain ADIF.</div>
+            <label class="checkbox-label" style="margin-top:6px;"><input type="checkbox" id="set-extra-udp-decodes" checked> Send FT8/FT4 decodes too, and answer the station I double-click in GridTracker</label>
+            <div class="help-text" style="line-height:1.5;">WSJT-X binary only. GridTracker's call roster fills from the JTCAT window, and a double-click there answers that station in JTCAT, the same as a double-click in the decode list.</div>
           </div>
         </div>
         <div style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px;">
@@ -2858,9 +3020,9 @@
         </div>
       </div>
       <div style="margin-top:8px;border-top:1px solid var(--border-primary);padding-top:8px;">
-        <label class="checkbox-label"><input type="checkbox" id="set-enable-directory"> Community HF Nets &amp; SWL Broadcast Directory</label>
-        <span class="help-text" style="margin-left:12px;display:block;">Browse and add nets from a community-managed directory. Shows a Directory tab in the main view bar.</span>
-        <div id="dir-controls" class="hidden" style="margin-top:6px;">
+        <span class="settings-subheading" style="display:block;font-weight:bold;">Community HF Nets &amp; SWL Broadcast Directory</span>
+        <span class="help-text" style="display:block;">Browse and add nets from a community-managed directory (More &gt; SWL/HF Net Directory).</span>
+        <div id="dir-controls" style="margin-top:6px;">
           <button type="button" id="dir-browse-btn" class="settings-add-btn">Open Directory View</button>
         </div>
       </div>
@@ -2921,6 +3083,16 @@
     <!-- 8. Display (trimmed — bearing moved to Antenna, SmartSDR absorbed) -->
     <fieldset class="source-toggles" data-settings-tab="display">
       <legend>Display</legend>
+      <label for="set-app-theme" style="display:block;margin-bottom:6px;">Theme:
+        <select id="set-app-theme">
+          <option value="classic">Classic (the light and dark modes below)</option>
+          <option value="potacat-dark">POTACAT Dark</option>
+          <option value="midnight">Midnight</option>
+          <option value="acid-burn">Acid Burn</option>
+          <option value="potacat-light">POTACAT Light</option>
+        </select>
+      </label>
+      <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">The four named themes are the same ones as the ECHOCAT app, colour for colour. Preview: windows are still being moved onto them, so a few controls keep their old look. Classic keeps the light, dark and variant choices below.</span>
       <label class="switch-label">
         <span>Dark Mode</span>
         <div class="switch">
@@ -2948,12 +3120,10 @@
       <label class="checkbox-label"><input type="checkbox" id="set-colorblind"> Colorblind mode (deuteranopia)</label>
       <label class="checkbox-label"><input type="checkbox" id="set-wcag-mode"> High contrast (WCAG AA)</label>
       <label class="checkbox-label"><input type="checkbox" id="set-color-rows" checked> Color table rows by spot source</label>
-      <label class="checkbox-label"><input type="checkbox" id="set-enable-solar"> Solar Propagation</label>
-      <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Shows SFI, K, and A indices in the status bar</span>
       <label class="checkbox-label"><input type="checkbox" id="set-show-meter" checked> Show S-Meter / SWR overlay</label>
       <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Floating meter box on the table view showing signal strength and SWR. Draggable.</span>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-band-activity"> Band Activity Heatmap</label>
-      <span class="help-text" style="margin-left:12px;display:block;">Displayed on the Map view only</span>
+      <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">A strip under the Spots map: spots in the last hour by band and continent</span>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-split-view" checked> Enable split view</label>
       <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Show Table and Map side by side. When off, only one view is shown at a time.</span>
       <div id="split-orientation-config">
@@ -3101,6 +3271,17 @@
           <label>Recovery email (optional): <input type="text" id="set-winlink-recovery" style="width:200px;"></label>
           <button type="button" id="winlink-register-btn">Create my Winlink account</button>
         </div>
+        <!-- An existing account's password-recovery address (Pat 1.0 account
+             API; K9ONR asked 2026-10-27). Shown after Check my account. -->
+        <div id="winlink-recovery-box" class="hidden" style="margin-top:6px;padding:7px 9px;border:1px solid var(--border-primary);border-radius:4px;">
+          <span class="help-text" style="display:block;margin-bottom:4px;">Winlink sends a forgotten password to this address.</span>
+          <span>Recovery email: <strong id="winlink-recovery-current">&hellip;</strong></span>
+          <div style="margin-top:4px;">
+            <input type="text" id="set-winlink-recovery-new" style="width:200px;" placeholder="new address" autocomplete="off">
+            <button type="button" id="winlink-recovery-change">Change</button>
+            <span class="help-text" id="winlink-recovery-status" style="margin-left:6px;"></span>
+          </div>
+        </div>
         <label class="checkbox-label" style="margin-top:8px;">
           <input type="checkbox" id="set-winlink-autocheck"> Check mail over the internet every
           <input type="number" id="set-winlink-autocheck-min" min="10" max="240" value="30" style="width:55px;"> minutes
@@ -3191,6 +3372,7 @@
     <fieldset class="source-toggles collapsible" data-settings-tab="station">
       <legend>WebSDR</legend>
       <span class="help-text">Listen through a remote receiver (KiwiSDR or WebSDR.org) while transmitting on your local radio. Useful for local QRM. Click <b>Browse</b> to pick from a curated list, or type a host manually. Port 8073 = KiwiSDR, other ports = WebSDR.org.</span>
+      <span class="help-text" style="display:block;margin-top:4px;">An <b>rtl_tcp</b> server works here too: an RTL-SDR running rtl_tcp, or an SDRplay running rsp_tcp, on this PC or a Pi by your antenna (for example <b>192.168.1.50:1234</b>). POTACAT recognises it when it connects and does the receiving itself. It sends about 4 Mbit/s, so use it on your own network. If that SDR is also your band scope (Settings &gt; My Rigs &gt; Band scope from an SDR), its gain and direct sampling settings are used, and listening shares the scope's connection.</span>
       <div style="display:flex;gap:6px;margin-top:8px;align-items:center;">
         <label style="flex:1;">Label: <input type="text" id="set-kiwi-label-1" placeholder="K3FEF" style="width:100%;max-width:80px;"></label>
         <label style="flex:3;">Host: <input type="text" id="set-kiwi-host-1" placeholder="host:port (e.g. k3fef.com:8073)" style="width:100%;max-width:260px;"></label>
@@ -3439,6 +3621,11 @@
             <strong>Remote Launcher <span id="launcher-status-pill" class="help-text" style="font-weight:normal;margin-left:6px;color:#888;">checking&hellip;</span></strong>
             <span class="help-text" style="display:block;">Starts a tiny background server (port 7301) so the phone app can start/restart POTACAT when it crashes or you close it accidentally. Auto-launches at login.</span>
             <span id="launcher-status-detail" class="help-text" style="display:block;color:#888;font-size:11px;"></span>
+            <label id="launcher-via-cloud-row" class="hidden" style="display:flex;align-items:center;gap:6px;margin-top:6px;">
+              <input type="checkbox" id="launcher-via-cloud" checked>
+              <span>Restart from anywhere through your Cloud Tunnel</span>
+            </label>
+            <span id="launcher-cloud-line" class="help-text hidden" style="display:block;font-size:11px;"></span>
           </div>
           <div style="display:flex;gap:6px;">
             <button type="button" id="launcher-install-btn" style="padding:4px 12px;">Install</button>
@@ -3951,7 +4138,7 @@
          If a file goes missing, the <img> degrades to its alt text. -->
     <div class="settings-footer">
       <div class="settings-footer-cols">
-        <div class="settings-footer-left">
+        <div class="settings-footer-left" id="settings-echocat-download">
           <div class="settings-echocat-title">Download ECHOCAT on your phone and tablet</div>
           <div class="settings-echocat-badges">
             <a class="settings-echocat-badge-link" data-external="1"
@@ -4036,7 +4223,7 @@
            _shareRigUpdateReachNotice() based on cloud-tunnel +
            Tailscale state. -->
       <div id="share-rig-reach-notice" class="share-rig-notice"></div>
-      <p class="share-rig-intro">Generate a time-boxed access pass for someone else. POTACAT enforces the privilege class, power cap, and expiry on this end — out-of-band tunes are blocked, TX power is clamped, the session auto-ends when the timer runs out.</p>
+      <p class="share-rig-intro">Lend your radio to another ham for a while. They sign in to POTACAT Cloud with their own callsign and operate as themselves: their call goes on the air and their QSOs go to their logbook, not yours. POTACAT keeps them inside the class, power and modes you allow, and hands the radio back when the time is up.</p>
 
       <div class="share-rig-section">
         <div class="share-rig-section-title">When?</div>
@@ -4116,13 +4303,11 @@
       </div>
 
       <div class="share-rig-section">
-        <div class="share-rig-section-title">§97.119 callsigns</div>
-        <div class="share-rig-grid">
-          <label>Station callsign <input type="text" id="share-rig-station" autocomplete="off" spellcheck="false"></label>
-          <label>Operator callsign <input type="text" id="share-rig-operator" placeholder="(left blank → guest's call)" autocomplete="off" spellcheck="false"></label>
-          <label>Control operator <input type="text" id="share-rig-control" autocomplete="off" spellcheck="false"></label>
+        <div class="share-rig-section-title">Who is this pass for?</div>
+        <div class="share-rig-row">
+          <label>Their callsign <input type="text" id="share-rig-for" placeholder="e.g. K3SBP" autocomplete="off" spellcheck="false" maxlength="15" style="width:120px;"></label>
         </div>
-        <span class="help-text">POTACAT writes whatever you set into the QSO's ADIF — see <a href="https://www.ecfr.gov/current/title-47/chapter-I/subchapter-D/part-97/subpart-B/section-97.119" id="share-rig-97119-link" data-external="1" class="share-rig-extlink">&sect;97.119</a>. We don't interpret the rule for you.</span>
+        <span class="help-text">Only this callsign's POTACAT Cloud account can use the pass. While it runs, the radio identifies as this call on every mode (FT8, CW, SSTV, Winlink, JS8) and every contact is logged under it. Your call appears nowhere on the air; the guest's log keeps a private note that the station is yours. Leave blank to let anyone with the link use it under their own account's callsign.</span>
       </div>
 
       <div class="share-rig-section">
@@ -4131,7 +4316,7 @@
           <input type="checkbox" id="share-rig-allow-anonymous">
           <span>
             <span class="share-rig-anon-title">Allow without a POTACAT Cloud sign-in</span>
-            <span class="share-rig-anon-sub">By default, your friend needs a free POTACAT Cloud account to redeem. Tick this for one-off guests who can't sign up (Field Day visitor, club net rotation, etc.). <b>Weaker §97.119 audit trail</b> — the QSO log will show the placeholder name you set above as the operator.</span>
+            <span class="share-rig-anon-sub">Normally your guest signs in with a free POTACAT Cloud account, which is how POTACAT knows the callsign to put on the air. Tick this for a one-off guest who cannot sign up (a Field Day visitor, a club net). <b>Without a sign-in there is no verified callsign, so they can listen and log but not transmit.</b></span>
           </span>
         </label>
       </div>
@@ -4159,6 +4344,7 @@
 
       <div class="share-rig-summary">
         <div><strong>Code:</strong> <span id="share-rig-result-code" class="share-rig-code"></span></div>
+        <div><strong>For:</strong> <span id="share-rig-result-for"></span></div>
         <div><strong>Expires:</strong> <span id="share-rig-result-expires"></span></div>
         <div><strong>Privileges:</strong> <span id="share-rig-result-priv"></span></div>
       </div>
@@ -4371,6 +4557,7 @@
         <input type="text" id="log-op-name" readonly tabindex="-1" style="color:#b0bec5;background:transparent;border-color:#333;">
       </label>
     </div>
+    <div id="log-worked-matrix" class="log-worked-matrix"></div><!-- lib/worked-matrix.js: bands/modes already worked with this call (#108) -->
     <div id="log-type-picker" class="log-type-chips">
       <button type="button" class="log-type-chip" data-type="dx">DX</button>
       <button type="button" class="log-type-chip" data-type="pota">POTA</button>
@@ -4622,6 +4809,18 @@
     <div class="ss-card-buttons">
       <button type="button" id="cloud-prompt-start" class="ss-btn ss-btn-primary">Start free trial</button>
       <button type="button" id="cloud-prompt-later" class="ss-btn">Not now</button>
+      <button type="button" id="cloud-prompt-never" class="ss-btn cp-never hidden">Don't suggest Cloud again</button>
+    </div>
+  </div>
+  <!-- Signed in, contacts on this PC, none in the cloud after the sign-in
+       catch-up: the first upload did not finish (lib/cloud-billing-ui.js
+       decideUploadCard). Never for an empty local log. -->
+  <div id="cloud-upload-card" class="station-setup-card cloud-prompt-card hidden" role="status">
+    <div class="cp-title">Your log has not reached POTACAT Cloud.</div>
+    <div id="cloud-upload-text" class="ss-card-text"></div>
+    <div class="ss-card-buttons">
+      <button type="button" id="cloud-upload-now" class="ss-btn ss-btn-primary">Upload now</button>
+      <button type="button" id="cloud-upload-later" class="ss-btn">Not now</button>
     </div>
   </div>
   <dialog id="whats-new-dialog">
@@ -4890,6 +5089,7 @@
               <option value="0xB2">IC-7760</option>
               <option value="0x88">IC-7100</option>
               <option value="0x76">IC-7200</option>
+              <option value="0x80">IC-7410</option>
               <option value="0x7A">IC-7600</option>
               <option value="0x8E">IC-7851</option>
               <option value="0xA2">IC-9700</option>
@@ -4945,6 +5145,12 @@
           <label>Host: <input type="text" id="welcome-rigctldnet-host" placeholder="192.168.1.100" value="127.0.0.1"></label>
           <label>Port: <input type="number" id="welcome-rigctldnet-port" min="1" max="65535" value="4532"></label>
         </div>
+        <label class="radio-label"><input type="radio" name="welcome-radio-type" value="flrig"> FLRig (a shared radio)</label>
+        <div id="welcome-flrig-config" class="radio-sub hidden">
+          <span class="help-text">flrig holds the radio and POTACAT shares it with your other programs. Give flrig's address and server port (Config &gt; Setup &gt; Xcvr in flrig; 12345 by default).</span>
+          <label>Host: <input type="text" id="welcome-flrig-host" placeholder="127.0.0.1" value="127.0.0.1"></label>
+          <label>Port: <input type="number" id="welcome-flrig-port" min="1" max="65535" value="12345"></label>
+        </div>
         <label class="radio-label"><input type="radio" name="welcome-radio-type" value="dxlab-commander"> DXLab Commander</label>
         <div id="welcome-dxlab-commander-config" class="radio-sub hidden">
           <span class="help-text">Control the radio through DXLab Commander's TCP port (Commander's Base Port + 2, default 52002). Commander must be running. Add command sequences later in Settings &gt; My Rigs.</span>
@@ -4975,6 +5181,12 @@
 
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>
   <script src="../lib/rig-family.js"></script>
+  <script src="../lib/app-theme.js"></script>
+  <script src="../lib/rig-bands.js"></script>
+  <script src="../lib/listen-source.js"></script>
+  <script src="../lib/channels.js"></script>
+  <script src="channels-view.js"></script>
+  <script src="../lib/landmarks.js"></script>
   <script src="../lib/commander-sequences.js"></script>
   <script src="../lib/spot-row.js"></script>
   <script src="../lib/cm108-ptt.js"></script>
@@ -4982,8 +5194,13 @@
   <script src="../lib/cloud-billing-ui.js"></script>
   <script src="../lib/custom-cat-follow.js"></script>
   <script src="../lib/rig-gain-steps.js"></script>
+  <script src="../lib/voice-recorder.js"></script>
+  <script src="../lib/worked-matrix.js"></script>
   <script src="../lib/spot-mute-rules.js"></script>
   <script src="../lib/call-filter.js"></script>
+  <script src="../lib/dx-rule.js"></script>
+  <script src="../lib/audio-device-heal.js"></script>
+  <script src="../lib/log-freq.js"></script>
   <script src="../lib/release-notes-format.js"></script>
   <script src="../lib/watchlist-groups.js"></script>
   <script src="../lib/activation-program.js"></script>

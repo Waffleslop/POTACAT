@@ -2008,6 +2008,7 @@ function renderMultiSlices() {
     const freqSel = document.createElement('select');
     freqSel.className = 'multi-freq';
     freqSel.innerHTML = SSTV_FREQS_OPTIONS;
+    applySstvRigBands(freqSel);
     freqSel.value = cfg.freqKhz;
     freqSel.addEventListener('change', () => {
       cfg.freqKhz = parseInt(freqSel.value);
@@ -3095,6 +3096,26 @@ const bandsEl = document.getElementById('bands');
     bandsEl.appendChild(b);
   }
 })();
+
+// Bands this radio is used on (rig editor; main.js rig-bands): the band
+// buttons and the frequency list hide the others, here and in multi-band.
+var sstvRigBands = null; // var: the multi-band builder may run before this line
+function applySstvRigBands(root) {
+  if (!window.RigBands) return;
+  const RB = window.RigBands;
+  RB.applyToElements(bandsEl, '.band', sstvRigBands, (el) => el.dataset.band + 'm');
+  for (const scope of [root || document]) {
+    scope.querySelectorAll('optgroup').forEach((g) => {
+      const ok = RB.allowed(sstvRigBands, g.label);
+      g.hidden = !ok;
+      g.querySelectorAll('option').forEach((o) => { o.hidden = !ok; o.disabled = !ok; });
+    });
+  }
+}
+if (window.api && window.api.rigBandsGet) {
+  window.api.rigBandsGet().then((d) => { sstvRigBands = (d && d.bands) || null; applySstvRigBands(); }).catch(() => {});
+  window.api.onRigBands((d) => { sstvRigBands = (d && d.bands) || null; applySstvRigBands(); });
+}
 function showFreq(khz, mode) {
   const k = Number(khz);
   if (!Number.isFinite(k) || k <= 0) return;

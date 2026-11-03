@@ -4,6 +4,9 @@
 const { contextBridge, ipcRenderer, webFrame } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
+  // The active rig's bands (lib/rig-bands.js): {bands: string[]|null, all}.
+  rigBandsGet: () => ipcRenderer.invoke('rig-bands-get'),
+  onRigBands: (cb) => ipcRenderer.on('rig-bands', (_e, d) => cb(d)),
   platform: process.platform,
 
   // Mailbox (invoke → {ok, ...})
@@ -14,6 +17,9 @@ contextBridge.exposeInMainWorld('api', {
   pickAttachments: () => ipcRenderer.invoke('winlink-pick-attachments'),
   send: (msg) => ipcRenderer.invoke('winlink-cmd-send', msg),
   posreport: (o) => ipcRenderer.invoke('winlink-cmd-posreport', o),
+  // POTA self-spot by email (spot@pota.tdod.org), filled from the live activation.
+  potaSpotTemplate: (o) => ipcRenderer.invoke('winlink-pota-spot-template', o || {}),
+  onComposePrefill: (cb) => ipcRenderer.on('winlink-compose-prefill', (_e, m) => cb(m || {})),
 
   // Sessions — Connect is the only way a radio session starts.
   connect: (o) => ipcRenderer.invoke('winlink-cmd-connect', o),

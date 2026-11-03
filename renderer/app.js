@@ -134,6 +134,8 @@ let potaAgeLimit = false;
 let sotaMaxAgeMin = 30;  // SOTA max spot age in minutes
 let dxcMaxAgeMin = 15;   // DX cluster max spot age in minutes — DX spots aren't re-posted like POTA
 let maxDistMi = 0;       // max distance in miles (0 = no limit)
+let dxDistanceHf = 0;    // DX distance in MILES, HF (0 = a different DXCC entity)
+let dxDistanceVhf = 0;   // DX distance in MILES, 6 m and up
 let scanDwell = 7;       // seconds per frequency during scan
 let enablePota = true;
 let enableSota = false;
@@ -385,6 +387,7 @@ let hideWorkedParks = false;
 let hideWorkedCallRef = false; // strict: hide only when CALL + REF + UTC-date + BAND + MODE all match a logged QSO
 let prioritizeNewParks = false; // sort unworked-park spots to the top of the table
 let hideQrt = true; // hide spots with QRT in comments (default on)
+let dxOnly = false; // only spots main stamped isDx (lib/dx-rule.js)
 let spotMuteRules = []; // "hide {continent} on {band}" rules — lib/spot-mute-rules.js (N7BBQ)
 let showBearing = false;
 let respotDefault = true; // default: re-spot on POTA after logging
@@ -781,6 +784,7 @@ const spotsStrictAtno = document.getElementById('spots-strict-atno');
 const spotsStrictAtnoLabel = document.getElementById('spots-strict-atno-label');
 const spotsHideOob = document.getElementById('spots-hide-oob');
 const spotsHideQrt = document.getElementById('spots-hide-qrt');
+const spotsDxOnly = document.getElementById('spots-dx-only');
 const spotsShowHidden = document.getElementById('spots-show-hidden');
 const quickShowMeter = document.getElementById('quick-show-meter');
 const spotsHiddenCount = document.getElementById('spots-hidden-count');
@@ -925,6 +929,7 @@ const setTgxlLabel3 = document.getElementById('set-tgxl-label-3');
 const tgxlAntButtons = document.getElementById('tgxl-ant-buttons');
 const setVerboseLog = document.getElementById('set-verbose-log');
 const setLightIcon = document.getElementById('set-light-icon');
+const setEnableBandActivity = document.getElementById('set-enable-band-activity');
 const setEnableSplitView = document.getElementById('set-enable-split-view');
 const splitOrientationConfig = document.getElementById('split-orientation-config');
 const continentFilterEl = document.getElementById('continent-filter');
@@ -937,6 +942,12 @@ const icomConfig = document.getElementById('icom-config');
 const rigctldnetConfig = document.getElementById('rigctldnet-config');
 const setRigctldnetHost = document.getElementById('set-rigctldnet-host');
 const setRigctldnetPort = document.getElementById('set-rigctldnet-port');
+// FLRig (a shared radio): flrig holds the radio, POTACAT is one of its clients.
+const flrigConfig = document.getElementById('flrig-config');
+const setFlrigHost = document.getElementById('set-flrig-host');
+const setFlrigPort = document.getElementById('set-flrig-port');
+const flrigTestBtn = document.getElementById('flrig-test-btn');
+const flrigTestResult = document.getElementById('flrig-test-result');
 // DXLab Commander: host/port/decimal plus one text box per sequence slot
 // (lib/commander-sequences.js owns the slot table; the boxes are built from it).
 const dxlabCommanderConfig = document.getElementById('dxlab-commander-config');
@@ -1051,7 +1062,6 @@ const dxccAwardLabelEl = document.getElementById('dxcc-award-label');
 const dxccChallengeEl = document.getElementById('dxcc-challenge');
 const setEnableCluster = document.getElementById('set-enable-cluster');
 const setEnableCwSpots = document.getElementById('set-enable-cwspots');
-const setEnableRbn = document.getElementById('set-enable-rbn');
 const setEnableWsjtx = document.getElementById('set-enable-wsjtx');
 const wsjtxConfig = document.getElementById('wsjtx-config');
 const setWsjtxPort = document.getElementById('set-wsjtx-port');
@@ -1060,8 +1070,6 @@ const setWsjtxAutoLog = document.getElementById('set-wsjtx-auto-log');
 const wsjtxStatusEl = document.getElementById('wsjtx-status');
 const setEnablePskr = document.getElementById('set-enable-pskr');
 const pskrConfig = document.getElementById('pskr-config');
-const setEnablePskrMap = document.getElementById('set-enable-pskr-map');
-const pskrMapConfig = document.getElementById('pskr-map-config');
 const connPskrMap = document.getElementById('conn-pskr-map');
 const setPskrUpload = document.getElementById('set-pskr-upload');
 const pskrUploadConfig = document.getElementById('pskr-upload-config');
@@ -1093,7 +1101,6 @@ const netSaveBtn = document.getElementById('net-save-btn');
 const netCancelBtn = document.getElementById('net-cancel-btn');
 const setShowBeacons = document.getElementById('set-show-beacons');
 const setShowDxBar = document.getElementById('set-show-dx-bar');
-const rbnConfig = document.getElementById('rbn-config');
 // Settings connection pills
 const connBar = document.getElementById('settings-conn-status');
 const connCluster = document.getElementById('conn-cluster');
@@ -1149,7 +1156,6 @@ const rbnTableBody = document.getElementById('rbn-table-body');
 const rbnDistHeader = document.getElementById('rbn-dist-header');
 const rbnBandFilterEl = document.getElementById('rbn-band-filter');
 // Directory browser (inside Settings > Net Reminders)
-const setEnableDirectory = document.getElementById('set-enable-directory');
 const dirControls = document.getElementById('dir-controls');
 const dirBrowseBtn = document.getElementById('dir-browse-btn');
 const dirBrowser = document.getElementById('dir-browser');
@@ -1186,7 +1192,12 @@ const dirvNetsBody = document.getElementById('dirv-nets-body');
 const dirvSwlBody = document.getElementById('dirv-swl-body');
 const dirvPlaceholder = document.getElementById('dirv-placeholder');
 const dirvSuggestSheet = document.getElementById('dirv-suggest-sheet');
-let dirvActiveTab = 'nets';
+const dirvTabLandmarks = document.getElementById('dirv-tab-landmarks');
+const dirvLandmarksContainer = document.getElementById('dirv-landmarks-container');
+const dirvTabChannels = document.getElementById('dirv-tab-channels');
+const dirvChannelsContainer = document.getElementById('dirv-channels-container');
+const dirvCategoryFilter = document.getElementById('dirv-category-filter');
+let dirvActiveTab = 'nets'; // 'nets' | 'swl' | 'landmarks'
 let dirvAutoRefreshTimer = null;
 const rbnMaxAgeInput = document.getElementById('rbn-max-age');
 const rbnAgeUnitSelect = document.getElementById('rbn-age-unit');
@@ -1283,19 +1294,12 @@ const clublogUploadBtn = document.getElementById('clublog-upload-btn');
 const clublogUploadResult = document.getElementById('clublog-upload-result');
 const distHeader = document.getElementById('dist-header');
 const utcClockEl = document.getElementById('utc-clock');
-const sfiStatusEl = document.getElementById('sfi-status');
-const kStatusEl = document.getElementById('k-status');
-const aStatusEl = document.getElementById('a-status');
 const setColorblind = document.getElementById('set-colorblind');
 const setWcagMode = document.getElementById('set-wcag-mode');
 const setColorRows = document.getElementById('set-color-rows');
-const setEnableSolar = document.getElementById('set-enable-solar');
-const setEnableBandActivity = document.getElementById('set-enable-band-activity');
 const setShowBearing = document.getElementById('set-show-bearing');
-const setEnableLogging = document.getElementById('set-enable-logging');
 const setEnableBannerLogger = document.getElementById('set-enable-banner-logger');
 const setN1mmRst = document.getElementById('set-n1mm-rst');
-const loggingConfig = document.getElementById('logging-config');
 const setAdifLogPath = document.getElementById('set-adif-log-path');
 const adifLogBrowseBtn = document.getElementById('adif-log-browse-btn');
 const adifImportBtn = document.getElementById('adif-import-btn');
@@ -1313,6 +1317,7 @@ const logbookHelp = document.getElementById('logbook-help');
 const logbookWavelogConfig = document.getElementById('logbook-wavelog-config');
 const logbookLog4omConfig = document.getElementById('logbook-log4om-config');
 const setLog4omWsjtxBinary = document.getElementById('set-log4om-wsjtx-binary');
+const setN3fjpPull = document.getElementById('set-n3fjp-pull');
 const setWavelogUrl = document.getElementById('set-wavelog-url');
 const setWavelogApiKey = document.getElementById('set-wavelog-api-key');
 const setWavelogStationId = document.getElementById('set-wavelog-station-id');
@@ -1321,6 +1326,7 @@ const extraUdpConfig = document.getElementById('extra-udp-config');
 const setExtraUdpHost = document.getElementById('set-extra-udp-host');
 const setExtraUdpPort = document.getElementById('set-extra-udp-port');
 const setExtraUdpFormat = document.getElementById('set-extra-udp-format');
+const setExtraUdpDecodes = document.getElementById('set-extra-udp-decodes');
 if (setExtraUdp) {
   setExtraUdp.addEventListener('change', () => {
     extraUdpConfig.classList.toggle('hidden', !setExtraUdp.checked);
@@ -1469,6 +1475,23 @@ const setRemoteToken = document.getElementById('set-remote-token');
 const remoteRegenToken = document.getElementById('remote-regen-token');
 const rigRemoteAudioInput = document.getElementById('rig-remote-audio-input');
 const rigRemoteAudioOutput = document.getElementById('rig-remote-audio-output');
+// Per-rig receive level to ECHOCAT devices (dB, -20..+20): the receive twin of
+// the shack-side TX drive, saved as rig.rxLevelDb and applied by main through
+// its one rx-level-set choke point (WB3EGD 2026-10-28, TS-480 ACC2 line out).
+const rigRxLevel = document.getElementById('rig-rx-level');
+const rigRxLevelVal = document.getElementById('rig-rx-level-val');
+function fmtRxLevelDb(v) { v = Math.round(Number(v) || 0); return (v > 0 ? '+' : '') + v + ' dB'; }
+function setRigRxLevelField(v) {
+  if (!rigRxLevel) return;
+  const n = Math.max(-20, Math.min(20, Math.round(Number(v) || 0)));
+  rigRxLevel.value = String(n);
+  if (rigRxLevelVal) rigRxLevelVal.textContent = fmtRxLevelDb(n);
+}
+function readRigRxLevelField() {
+  if (!rigRxLevel) return 0;
+  return Math.max(-20, Math.min(20, Math.round(Number(rigRxLevel.value) || 0)));
+}
+if (rigRxLevel) rigRxLevel.addEventListener('input', () => { if (rigRxLevelVal) rigRxLevelVal.textContent = fmtRxLevelDb(rigRxLevel.value); });
 const remoteAudioSummary = document.getElementById('remote-audio-summary');
 const setRemotePttTimeout = document.getElementById('set-remote-ptt-timeout');
 const setSsbOverData = document.getElementById('set-ssb-over-data');
@@ -1885,7 +1908,7 @@ document.addEventListener('keydown', (e) => {
 // A state token (`US-NJ`, bare `NJ`, `CA-ON`) is a STATE rule: it matches
 // every park spot whose location names that state (N0KAH 2026-10-06).
 // Mirrored in main.js for the desktop notifications.
-const WATCH_BANDS = new Set(['160m','80m','60m','40m','30m','20m','17m','15m','12m','10m','6m','4m','2m','70cm','1.25m','33cm','23cm']);
+const WATCH_BANDS = new Set(['2200m','630m','160m','80m','60m','40m','30m','20m','17m','15m','12m','10m','6m','4m','2m','70cm','1.25m','33cm','23cm','13cm','9cm','6cm','3cm','1.25cm']);
 function parseWatchlist(str) {
   if (!str) return [];
   const rules = [];
@@ -1935,10 +1958,25 @@ function watchlistHasCallsign(rules, callsign) {
 // sites (welcome screen, quick light toggle) working without a thread
 // of plumbing. Updated when settings load OR the variant radio changes.
 let _currentDarkVariant = 'navy';
+// settings.appTheme: 'classic' (the light/dark/variant choices) or a
+// design-system theme shared with the phone (lib/app-theme.js). While one is
+// chosen it decides light vs dark and data-ds on <html>.
+let _currentAppTheme = 'classic';
+function _resolvedAppTheme(light) {
+  if (!window.AppTheme) return { theme: light ? 'light' : 'dark', variant: _currentDarkVariant || 'navy', ds: null };
+  return window.AppTheme.resolveAppTheme({ appTheme: _currentAppTheme, lightMode: !!light, darkVariant: _currentDarkVariant });
+}
 
 function applyTheme(light, darkVariant) {
-  document.documentElement.setAttribute('data-theme', light ? 'light' : 'dark');
   if (darkVariant !== undefined) _currentDarkVariant = darkVariant;
+  const _r = _resolvedAppTheme(light);
+  if (_r.ds) {
+    window.AppTheme.applyToDocument(document, _r);
+    if (typeof rerenderRbn === 'function') rerenderRbn();
+    return;
+  }
+  document.documentElement.removeAttribute('data-ds');
+  document.documentElement.setAttribute('data-theme', light ? 'light' : 'dark');
   // data-dark-variant is only set when in dark mode AND non-default.
   // Removing it when light or navy keeps the attribute set minimal and
   // means the CSS [data-dark-variant="charcoal"] block can be a single
@@ -1948,6 +1986,8 @@ function applyTheme(light, darkVariant) {
   } else {
     document.documentElement.removeAttribute('data-dark-variant');
   }
+  // The Propagation map's dots and arcs are styled for the theme at draw time.
+  if (typeof rerenderRbn === 'function') rerenderRbn();
 }
 
 async function loadPrefs() {
@@ -1976,6 +2016,7 @@ async function loadPrefs() {
       quickShowMeter.checked = meterBoxVisible;
     }
   }
+  _currentAppTheme = settings.appTheme || 'classic';
   applyTheme(settings.lightMode === true, settings.darkVariant || 'navy');
   applyColorblindMode(settings.colorblindMode === true);
   applyWcagMode(settings.wcagMode === true);
@@ -2021,7 +2062,7 @@ async function loadPrefs() {
       enableDxeSources[k] = settings.enableDxeSources[k] !== false;
     }
   }
-  enableSolar = settings.enableSolar === true;   // default false
+  enableSolar = true; // always on (lib/install-defaults.js ALWAYS_ON)
   // PSTRotator — show quick-toggle when rotor is configured
   rotorConfigured = !!settings.enableRotor;
   // Checked = the antenna actually turns on every QSY; Manual mode never does.
@@ -2030,10 +2071,9 @@ async function loadPrefs() {
   quickRotorDivider.classList.toggle('hidden', !rotorConfigured);
   // Color rows — default true (on)
   spotsTable.classList.toggle('no-source-tint', settings.colorRows === false);
-  enableBandActivity = settings.enableBandActivity === true; // default false
-  updateSolarVisibility();
+  enableBandActivity = settings.enableBandActivity === true; // default off (Casey 2026-10-29)
   qrzFullName = settings.qrzFullName === true;
-  enableLogging = settings.enableLogging === true;
+  enableLogging = true; // always on; cloud sync is the choice
   enableBannerLogger = settings.enableBannerLogger === true;
   // Sync custom CAT buttons from settings.json (authoritative source for ECHOCAT sync)
   if (settings.customCatButtons && Array.isArray(settings.customCatButtons)) {
@@ -2052,6 +2092,7 @@ async function loadPrefs() {
   licenseClass = settings.licenseClass || 'none';
   hideOutOfBand = settings.hideOutOfBand === true;
   hideWorked = settings.hideWorked === true;
+  dxOnly = settings.dxOnly === true;
   hideWorkedParks = settings.hideWorkedParks === true;
   hideWorkedCallRef = settings.hideWorkedCallRef === true;
   prioritizeNewParks = settings.prioritizeNewParks === true;
@@ -2102,6 +2143,9 @@ async function loadPrefs() {
   if (mercuryBtn) mercuryBtn.classList.toggle('hidden', !settings.enableMercury);
   var winlinkBtn = document.getElementById('view-winlink-btn');
   if (winlinkBtn) winlinkBtn.classList.remove('hidden'); // Winlink is always available
+  // Spot by Winlink: offered once the operator has used Winlink (notice accepted).
+  var spotWlBtn = document.getElementById('activator-spot-winlink-btn');
+  if (spotWlBtn) spotWlBtn.classList.toggle('hidden', !settings.winlinkNoticeAcceptedAt);
   updateDxccButton();
   // Pi access — JTCAT button visibility on startup
   if (jtcatBtn) jtcatBtn.classList.remove('hidden');
@@ -2170,6 +2214,8 @@ async function loadPrefs() {
   sotaMaxAgeMin = parseInt(settings.sotaMaxAge, 10) || 30;
   dxcMaxAgeMin = parseInt(settings.dxcMaxAge, 10) || 15;
   maxDistMi = parseInt(settings.maxDist, 10) || 0;
+  dxDistanceHf = Number(settings.dxDistanceHf) || 0;
+  dxDistanceVhf = Number(settings.dxDistanceVhf) || 0;
   updateHeaders();
 
   // Restore view state
@@ -2187,13 +2233,13 @@ async function loadPrefs() {
         setView('table');
         window.api.jtcatPopoutOpen();
       } else
-      if (viewState.lastView === 'rbn' && (enableRbn || enablePskrMap)) {
+      if (viewState.lastView === 'rbn') {
         setView('rbn');
       } else if (viewState.lastView === 'dxcc' && enableDxcc) {
         setView('dxcc');
       } else if (viewState.lastView === 'was') {
         setView('was');
-      } else if (viewState.lastView === 'directory' && settings.enableDirectory) {
+      } else if (viewState.lastView === 'directory') {
         setView('directory');
       } else {
         showTable = viewState.showTable !== false;
@@ -2217,6 +2263,38 @@ function updateHeaders() {
 // --- Radio config (inside Settings) ---
 let hamlibFieldsLoaded = false;
 let allRigOptions = []; // cached rig list from listRigs()
+
+// One rule for every rig-editor port picker (Serial CAT, Icom, Hamlib, PTT).
+// A saved port that is not plugged in now stays IN THE LIST as
+// "COM9 (not found)" instead of being copied into the "or type COM port" box:
+// a typed port always wins on save, so picking COM10 from the list used to
+// save COM9 again (stein_12464, Discord 2026-11-01: "it has reverted to
+// COM9"; clearing the box was the only way out). Picking from the list also
+// clears anything typed, so the list choice is the one saved.
+function fillPortSelect(select, manual, ports, savedPath, opts = {}) {
+  if (!select) return;
+  select.innerHTML = opts.noneLabel ? `<option value="">${opts.noneLabel}</option>` : '';
+  if (manual) manual.value = '';
+  let found = false;
+  for (const p of ports || []) {
+    const opt = document.createElement('option');
+    opt.value = p.path;
+    opt.textContent = `${p.path} — ${p.friendlyName}`;
+    if (savedPath && savedPath === p.path) { opt.selected = true; found = true; }
+    select.appendChild(opt);
+  }
+  if (savedPath && !found) {
+    const opt = document.createElement('option');
+    opt.value = savedPath;
+    opt.textContent = `${savedPath} (not found — is the radio on and plugged in?)`;
+    opt.selected = true;
+    select.insertBefore(opt, select.firstChild && opts.noneLabel ? select.firstChild.nextSibling : select.firstChild);
+  }
+  if (manual && !select.dataset.portPickWired) {
+    select.dataset.portPickWired = '1';
+    select.addEventListener('change', () => { manual.value = ''; });
+  }
+}
 
 function getEffectivePort() {
   const manual = setRigPortManual.value.trim();
@@ -2293,9 +2371,16 @@ function updateRadioSubPanels() {
   if (icomNetworkConfig) icomNetworkConfig.classList.toggle('hidden', type !== 'icom-network');
   hamlibConfig.classList.toggle('hidden', type !== 'hamlib');
   rigctldnetConfig.classList.toggle('hidden', type !== 'rigctldnet');
+  if (flrigConfig) flrigConfig.classList.toggle('hidden', type !== 'flrig');
   if (dxlabCommanderConfig) dxlabCommanderConfig.classList.toggle('hidden', type !== 'dxlab-commander');
   const nocatConfig = document.getElementById('nocat-config');
   if (nocatConfig) nocatConfig.classList.toggle('hidden', type !== 'nocat');
+  // Voice in DATA mode runs in the rig controller: serial, Icom, Hamlib and flrig links.
+  const voiceAsDataRow = document.getElementById('rig-voice-as-data');
+  if (voiceAsDataRow) voiceAsDataRow.classList.toggle('hidden', !['serialcat', 'icom', 'civ-tcp', 'icom-network', 'hamlib', 'rigctldnet', 'flrig'].includes(type));
+  // Voice streamed over the LAN goes only to an Icom Network radio.
+  const lanVoiceSsbRow = document.getElementById('rig-lan-voice-ssb');
+  if (lanVoiceSsbRow) lanVoiceSsbRow.classList.toggle('hidden', type !== 'icom-network');
   if (type === 'serialcat' && !serialcatPortsLoaded) {
     loadSerialcatPorts();
   }
@@ -2395,6 +2480,10 @@ async function populateRadioSection(currentTarget) {
     setRadioType('rigctldnet');
     setRigctldnetHost.value = currentTarget.host || '127.0.0.1';
     setRigctldnetPort.value = currentTarget.port || 4532;
+  } else if (currentTarget.type === 'flrig') {
+    setRadioType('flrig');
+    if (setFlrigHost) setFlrigHost.value = currentTarget.host || '127.0.0.1';
+    if (setFlrigPort) setFlrigPort.value = currentTarget.port || 12345;
   } else if (currentTarget.type === 'dxlab-commander') {
     setRadioType('dxlab-commander');
     setDxlabCommanderHost.value = currentTarget.host || '127.0.0.1';
@@ -2448,22 +2537,7 @@ async function populateHamlibFields(savedTarget) {
 
   // Populate serial port dropdown
   const ports = await window.api.listPorts();
-  setRigPort.innerHTML = '';
-  setRigPortManual.value = '';
-  const detectedPaths = new Set();
-  for (const p of ports) {
-    detectedPaths.add(p.path);
-    const opt = document.createElement('option');
-    opt.value = p.path;
-    opt.textContent = `${p.path} — ${p.friendlyName}`;
-    if (savedTarget && savedTarget.serialPort === p.path) opt.selected = true;
-    setRigPort.appendChild(opt);
-  }
-
-  // If the saved port isn't in the detected list, put it in the manual input
-  if (savedTarget && savedTarget.serialPort && !detectedPaths.has(savedTarget.serialPort)) {
-    setRigPortManual.value = savedTarget.serialPort;
-  }
+  fillPortSelect(setRigPort, setRigPortManual, ports, savedTarget && savedTarget.serialPort);
 
   // Restore baud rate
   if (savedTarget && savedTarget.baudRate) {
@@ -2480,24 +2554,12 @@ async function populateHamlibFields(savedTarget) {
   // any saved value. If the saved port isn't enumerated (radio unplugged),
   // fall back to the manual text field so users don't lose their setting.
   if (setRigPttPort) {
-    setRigPttPort.innerHTML = '<option value="">-- none (PTT via CAT) --</option>';
     // Reuse the port list already fetched above for the CAT serial dropdown.
-    for (const p of ports) {
-      const opt = document.createElement('option');
-      opt.value = p.path;
-      opt.textContent = `${p.path} — ${p.friendlyName}`;
-      if (savedTarget && savedTarget.pttPort === p.path) opt.selected = true;
-      setRigPttPort.appendChild(opt);
-    }
-    const savedPtt = savedTarget && savedTarget.pttPort;
-    if (savedPtt && !detectedPaths.has(savedPtt) && setRigPttPortManual) {
-      setRigPttPortManual.value = savedPtt;
-    } else if (setRigPttPortManual) {
-      setRigPttPortManual.value = '';
-    }
+    fillPortSelect(setRigPttPort, setRigPttPortManual, ports, savedTarget && savedTarget.pttPort,
+      { noneLabel: '-- none (PTT via CAT) --' });
     // Restore PTT pin (DTR or RTS). Default DTR if nothing saved.
     if (setRigPttType) {
-      const t = (savedTarget && savedTarget.pttType) || 'DTR';
+      const t = (savedTarget && savedTarget.pttType) || 'RTS';   // Digirig keys PTT on RTS (K5LEB 2026-10-21: DTR never keyed his IC-718)
       setRigPttType.value = (t.toUpperCase() === 'RTS') ? 'RTS' : 'DTR';
     }
   }
@@ -2514,20 +2576,7 @@ async function loadIcomPorts(savedTarget) {
   const ports = await window.api.listPorts();
   const portSelect = document.getElementById('set-icom-port');
   const portManual = document.getElementById('set-icom-port-manual');
-  portSelect.innerHTML = '';
-  portManual.value = '';
-  const detectedPaths = new Set();
-  for (const p of ports) {
-    detectedPaths.add(p.path);
-    const opt = document.createElement('option');
-    opt.value = p.path;
-    opt.textContent = `${p.path} — ${p.friendlyName}`;
-    if (savedTarget && savedTarget.path === p.path) opt.selected = true;
-    portSelect.appendChild(opt);
-  }
-  if (savedTarget && savedTarget.path && !detectedPaths.has(savedTarget.path)) {
-    portManual.value = savedTarget.path;
-  }
+  fillPortSelect(portSelect, portManual, ports, savedTarget && savedTarget.path);
   if (savedTarget && savedTarget.baudRate) {
     document.getElementById('set-icom-baud').value = String(savedTarget.baudRate);
   }
@@ -2545,20 +2594,7 @@ let serialcatPortsLoaded = false;
 
 async function loadSerialcatPorts(savedTarget) {
   const ports = await window.api.listPorts();
-  setSerialcatPort.innerHTML = '';
-  setSerialcatPortManual.value = '';
-  const detectedPaths = new Set();
-  for (const p of ports) {
-    detectedPaths.add(p.path);
-    const opt = document.createElement('option');
-    opt.value = p.path;
-    opt.textContent = `${p.path} — ${p.friendlyName}`;
-    if (savedTarget && savedTarget.path === p.path) opt.selected = true;
-    setSerialcatPort.appendChild(opt);
-  }
-  if (savedTarget && savedTarget.path && !detectedPaths.has(savedTarget.path)) {
-    setSerialcatPortManual.value = savedTarget.path;
-  }
+  fillPortSelect(setSerialcatPort, setSerialcatPortManual, ports, savedTarget && savedTarget.path);
   if (savedTarget && savedTarget.baudRate) {
     setSerialcatBaud.value = String(savedTarget.baudRate);
   }
@@ -2568,6 +2604,8 @@ async function loadSerialcatPorts(savedTarget) {
     const hs = savedTarget && savedTarget.serialHandshake;
     hsSel.value = hs === 'none' || hs === 'hardware' ? hs : 'auto';
   }
+  const pttSel = document.getElementById('set-serialcat-ptt');
+  if (pttSel) pttSel.value = savedTarget && savedTarget.ptt === 'vox' ? 'vox' : 'cat';
   serialcatPortsLoaded = true;
 }
 
@@ -2616,7 +2654,7 @@ async function populateRigModelDropdown() {
   }
 }
 
-if (rigModelSelect) rigModelSelect.addEventListener('change', () => {
+if (rigModelSelect) rigModelSelect.addEventListener('change', async () => {
   const modelName = rigModelSelect.value;
   if (!modelName) return;
   let brand = null;
@@ -2626,7 +2664,21 @@ if (rigModelSelect) rigModelSelect.addEventListener('change', () => {
   if (!brand) return;
   const groupOf = rigModelData.find((g) => g.brand === brand);
   const noCat = !!(groupOf && Array.isArray(groupOf.noCat) && groupOf.noCat.includes(modelName));
+  const hamlib = groupOf && groupOf.hamlib && groupOf.hamlib[modelName];
+  if (hamlib) {
+    // Xiegu G90: Other Rig (Hamlib) with its Hamlib model and baud rate.
+    setRadioType('hamlib');
+    hamlibFieldsLoaded = true;
+    await populateHamlibFields({ rigId: hamlib.rigId, baudRate: hamlib.baudRate });
+    updateRadioSubPanels();
+    if (!setRigName.value.trim()) setRigName.value = modelName;
+    return;
+  }
+  // A radio reached through another program (flrig, a remote rigctld) keeps
+  // that connection: the model picked here only supplies bands and limits.
+  const shared = ['flrig', 'rigctldnet'].includes(getSelectedRadioType());
   if (noCat) setRadioType('nocat');           // Pebble HF and friends: nothing to connect to
+  else if (shared) { /* keep flrig / rigctld Network */ }
   else if (brand === 'FlexRadio') setRadioType('flex');
   else if (brand === 'Icom') setRadioType('icom');
   else setRadioType('serialcat');
@@ -2664,7 +2716,36 @@ function setRigSetupPanelOpen(open) {
   rigSetupBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
 
+// Icom band scope recording (main.js icomScopeCapture): offered for the
+// three CI-V connection types only.
+const icomScopeCaptureRow = document.getElementById('icom-scope-capture-row');
+const icomScopeCaptureBtn = document.getElementById('icom-scope-capture-btn');
+const icomScopeCaptureResult = document.getElementById('icom-scope-capture-result');
+function refreshIcomScopeCaptureRow() {
+  if (!icomScopeCaptureRow) return;
+  const civ = ['icom', 'civ-tcp', 'icom-network'].includes(getSelectedRadioType());
+  icomScopeCaptureRow.classList.toggle('hidden', !civ || !window.api.icomScopeCapture);
+}
+if (icomScopeCaptureBtn) {
+  icomScopeCaptureBtn.addEventListener('click', async () => {
+    icomScopeCaptureBtn.disabled = true;
+    const label = icomScopeCaptureBtn.textContent;
+    icomScopeCaptureBtn.textContent = 'Recording (30 s)...';
+    icomScopeCaptureResult.textContent = 'Leave the radio on the band you use. The file opens in its folder when it is done.';
+    try {
+      const r = await window.api.icomScopeCapture();
+      icomScopeCaptureResult.textContent = (r && r.message) || 'Nothing was recorded.';
+    } catch (err) {
+      icomScopeCaptureResult.textContent = 'The recording failed: ' + (err && err.message ? err.message : err);
+    } finally {
+      icomScopeCaptureBtn.disabled = false;
+      icomScopeCaptureBtn.textContent = label;
+    }
+  });
+}
+
 async function refreshRigSetupNotes() {
+  refreshIcomScopeCaptureRow();
   if (!rigSetupBtn || !window.api.getRigSetupNotes) return;
   const seq = ++rigSetupSeq;
   let notes = [];
@@ -2844,6 +2925,9 @@ function describeRigTarget(target) {
   if (target.type === 'rigctldnet') {
     return `rigctld on ${target.host || '127.0.0.1'}:${target.port || 4532}`;
   }
+  if (target.type === 'flrig') {
+    return `flrig on ${target.host || '127.0.0.1'}:${target.port || 12345}`;
+  }
   if (target.type === 'dxlab-commander') {
     return `DXLab Commander on ${target.host || '127.0.0.1'}:${target.port || window.CommanderSequences.DEFAULT_PORT}`;
   }
@@ -2970,6 +3054,7 @@ function buildCatTargetFromForm() {
       baudRate: parseInt(setSerialcatBaud.value, 10) || 9600,
       dtrOff: setSerialcatDtrOff.checked,
       serialHandshake: (document.getElementById('set-serialcat-handshake') || {}).value || 'auto',
+      ...(((document.getElementById('set-serialcat-ptt') || {}).value === 'vox') ? { ptt: 'vox' } : {}),
     };
   } else if (radioType === 'icom') {
     const modelSelect = document.getElementById('set-icom-model');
@@ -3010,7 +3095,7 @@ function buildCatTargetFromForm() {
     // string means "no separate PTT port — let rigctld PTT via CAT".
     const pttManual = (setRigPttPortManual && setRigPttPortManual.value || '').trim();
     const pttPort = pttManual || (setRigPttPort && setRigPttPort.value) || '';
-    const pttType = (setRigPttType && setRigPttType.value) || 'DTR';
+    const pttType = (setRigPttType && setRigPttType.value) || 'RTS';
     return {
       type: 'rigctld',
       rigId: parseInt(setRigModel.value, 10),
@@ -3026,6 +3111,12 @@ function buildCatTargetFromForm() {
       type: 'rigctldnet',
       host: setRigctldnetHost.value.trim() || '127.0.0.1',
       port: parseInt(setRigctldnetPort.value, 10) || 4532,
+    };
+  } else if (radioType === 'flrig') {
+    return {
+      type: 'flrig',
+      host: (setFlrigHost && setFlrigHost.value.trim()) || '127.0.0.1',
+      port: parseInt(setFlrigPort && setFlrigPort.value, 10) || 12345,
     };
   } else if (radioType === 'dxlab-commander') {
     const typed = {};
@@ -3124,9 +3215,90 @@ function readSdrScopeForm() {
   if (rigModelSelect) rigModelSelect.addEventListener('change', syncSdrScopeForm);
 }
 
+// ── Bands this radio is used on (lib/rig-bands.js) ──────────────────────
+// Pre-ticked with the model's own bands; the operator can add a band (a
+// transverter) or untick one. Saved as rig.bands only once touched, so an
+// untouched rig keeps following its model's list (and unknown models stay
+// unrestricted). main.js activeRigBands() is the one reader.
+const rigBandsState = { selected: new Set(), touched: false, native: null };
+function rigEditorModelName() {
+  const m = rigModelSelect ? rigModelSelect.value : '';
+  if (m) return m;
+  try { const t = buildCatTargetFromForm(); return (t && t.civModel) || ''; } catch { return ''; }
+}
+function renderRigBandsGrid() {
+  const grid = document.getElementById('rig-bands-grid');
+  if (!grid || !window.RigBands) return;
+  grid.textContent = '';
+  const native = rigBandsState.native ? new Set(rigBandsState.native) : null;
+  // Bands the Tuner Memories run found no match on (rig.atuBands.noMatch):
+  // hidden everywhere by main whatever the tick says, until a run matches.
+  const noMatch = new Set(rigBandsState.atuNoMatch || []);
+  for (const b of window.RigBands.ALL_BANDS) {
+    const lab = document.createElement('label');
+    if (native && !native.has(b)) {
+      lab.className = 'rig-band-extra';
+      lab.title = 'Not a band this model covers on its own (a transverter or an option)';
+    }
+    if (noMatch.has(b)) {
+      lab.style.textDecoration = 'line-through';
+      lab.style.opacity = '0.6';
+      lab.title = 'The antenna tuner found no match here in the last Tuner Memories run — hidden until a run matches';
+    }
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = rigBandsState.selected.has(b);
+    cb.addEventListener('change', () => {
+      rigBandsState.touched = true;
+      if (cb.checked) rigBandsState.selected.add(b); else rigBandsState.selected.delete(b);
+    });
+    lab.appendChild(cb);
+    lab.appendChild(document.createTextNode(b));
+    grid.appendChild(lab);
+  }
+  let note = document.getElementById('rig-bands-atu-note');
+  if (!note) {
+    note = document.createElement('span');
+    note.id = 'rig-bands-atu-note';
+    note.className = 'help-text';
+    note.style.cssText = 'display:block;margin-top:4px;';
+    grid.insertAdjacentElement('afterend', note);
+  }
+  const nm = [...noMatch].filter(b => window.RigBands.ALL_BANDS.includes(b));
+  note.textContent = nm.length ? `Hidden by the last Tuner Memories run (no tuner match): ${nm.join(', ')}. The tick stays yours; run Tuner Memories again to re-check.` : '';
+  note.style.display = nm.length ? 'block' : 'none';
+}
+async function loadRigBandsForModel() {
+  let native = null;
+  try { const r = await window.api.rigBandsNative(rigEditorModelName()); native = r && Array.isArray(r.bands) ? r.bands : null; } catch { /* older main */ }
+  rigBandsState.native = native;
+  // An unknown model is not restricted: every band ticked until the operator says otherwise.
+  if (!rigBandsState.touched) rigBandsState.selected = new Set(native || (window.RigBands ? window.RigBands.ALL_BANDS : []));
+  renderRigBandsGrid();
+}
+async function initRigBandsForEditor(rig) {
+  const saved = rig && window.RigBands ? window.RigBands.cleanBands(rig.bands) : null;
+  rigBandsState.atuNoMatch = rig && rig.atuBands && Array.isArray(rig.atuBands.noMatch) ? rig.atuBands.noMatch.slice() : [];
+  rigBandsState.touched = !!saved;
+  rigBandsState.selected = new Set(saved || []);
+  await loadRigBandsForModel();
+}
+/** rig.bands to save: the operator's ticks once touched, else undefined (follow the model). */
+function rigBandsToSave() {
+  if (!rigBandsState.touched || !window.RigBands) return undefined;
+  const list = window.RigBands.ALL_BANDS.filter((b) => rigBandsState.selected.has(b));
+  return list.length ? list : undefined;
+}
+if (rigModelSelect) rigModelSelect.addEventListener('change', () => { loadRigBandsForModel(); });
+{
+  const reset = document.getElementById('rig-bands-reset');
+  if (reset) reset.addEventListener('click', () => { rigBandsState.touched = false; loadRigBandsForModel(); });
+}
+
 async function openRigEditor(mode, rigId) {
   rigEditorMode = mode;
   editingRigId = rigId || null;
+  setRigRxLevelField(0); // a new rig starts at unity; edit mode restores the rig's own below
   hamlibFieldsLoaded = false;
   serialcatPortsLoaded = false;
   icomPortsLoaded = false;
@@ -3149,6 +3321,7 @@ async function openRigEditor(mode, rigId) {
         syncRigAudioDeviceBypass();
       }
       await populateRigAudioDevices(rig.remoteAudioInput, rig.remoteAudioOutput);
+      setRigRxLevelField(rig.rxLevelDb);
       // Restore per-rig CW key port
       if (setCwKeyPort && rig.cwKeyPort) setCwKeyPort.value = rig.cwKeyPort;
       // Restore per-rig CW keying line (DTR/RTS override; default 'auto')
@@ -3167,6 +3340,10 @@ async function openRigEditor(mode, rigId) {
       if (extAtuSecsEl) extAtuSecsEl.value = rig.externalAtuSeconds || 4;
       const atuKeepOnEl = document.getElementById('set-atu-keep-on');
       if (atuKeepOnEl) atuKeepOnEl.checked = !!rig.atuKeepOn;
+      const voiceAsDataEl = document.getElementById('set-voice-as-data');
+      if (voiceAsDataEl) voiceAsDataEl.checked = !!rig.voiceAsData;
+      const lanVoiceSsbEl = document.getElementById('set-lan-voice-ssb');
+      if (lanVoiceSsbEl) lanVoiceSsbEl.checked = !!rig.lanVoiceInSsb;
       // Per-rig Flex band→antenna map. Always rebuilt so editing a
       // different rig doesn't show the previous rig's selections.
       buildFlexBandAntennaMap(rig.flexBandAntennaMap || {});
@@ -3185,6 +3362,7 @@ async function openRigEditor(mode, rigId) {
     updateRadioSubPanels();
     buildFlexBandAntennaMap({});
     fillSdrScopeForm(null);
+    { const v = document.getElementById('set-voice-as-data'); if (v) v.checked = false; }
     await populateRigAudioDevices('', '');
   }
 
@@ -3195,6 +3373,7 @@ async function openRigEditor(mode, rigId) {
   rigSetupAutoOpened = false;
   setRigSetupPanelOpen(false);
   refreshRigSetupNotes();
+  await initRigBandsForEditor(mode === 'edit' ? currentRigs.find(r => r.id === rigId) : null);
 
   rigEditor.classList.remove('hidden');
   rigAddBtn.classList.add('hidden');
@@ -3210,6 +3389,7 @@ function closeRigEditor() {
   rigAddBtn.classList.remove('hidden');
   hamlibTestResult.textContent = '';
   hamlibTestResult.className = '';
+  if (flrigTestResult) { flrigTestResult.textContent = ''; flrigTestResult.className = ''; }
 }
 
 async function deleteRig(rigId) {
@@ -3283,6 +3463,7 @@ async function saveRigEditor() {
 
   const rigAudioIn = rigRemoteAudioInput.value || '';
   const rigAudioOut = rigRemoteAudioOutput.value || '';
+  const rigRxLevelDb = readRigRxLevelField();
   // Per-rig audio source. The select only ever holds options valid for the
   // selected radio type (rebuildAudioSourceOptions), so this is always legal.
   const rigAudioSource = setAudioSource ? setAudioSource.value : 'dax';
@@ -3301,6 +3482,10 @@ async function saveRigEditor() {
   const rigExternalAtuSeconds = extAtuSecsEl ? Math.max(1, Math.min(15, parseFloat(extAtuSecsEl.value) || 4)) : 4;
   const atuKeepOnEl = document.getElementById('set-atu-keep-on');
   const rigAtuKeepOn = !!(atuKeepOnEl && atuKeepOnEl.checked);
+  const voiceAsDataEl = document.getElementById('set-voice-as-data');
+  const rigVoiceAsData = !!(voiceAsDataEl && voiceAsDataEl.checked);
+  const lanVoiceSsbEl = document.getElementById('set-lan-voice-ssb');
+  const rigLanVoiceInSsb = !!(lanVoiceSsbEl && lanVoiceSsbEl.checked);
 
   // Per-rig Flex per-band antenna map (skipped silently for non-Flex
   // rigs — empty map serializes as `{}`, no runtime impact).
@@ -3314,6 +3499,7 @@ async function saveRigEditor() {
       rig.catTarget = catTarget;
       rig.remoteAudioInput = rigAudioIn;
       rig.remoteAudioOutput = rigAudioOut;
+      rig.rxLevelDb = rigRxLevelDb;
       rig.audioSource = rigAudioSource;
       rig.cwKeyPort = rigCwKeyPortVal;
       rig.cwKeyLine = rigCwKeyLineVal;
@@ -3325,9 +3511,12 @@ async function saveRigEditor() {
       rig.externalAtuWatts = rigExternalAtuWatts;
       rig.externalAtuSeconds = rigExternalAtuSeconds;
       rig.atuKeepOn = rigAtuKeepOn;
+      if (rigVoiceAsData) rig.voiceAsData = true; else delete rig.voiceAsData;
+      if (rigLanVoiceInSsb) rig.lanVoiceInSsb = true; else delete rig.lanVoiceInSsb;
       rig.flexBandAntennaMap = flexBandAntennaMap;
       if (rigSdrScope) rig.sdrScope = rigSdrScope;
       rig.setupDone = [...rigSetupDone];
+      { const rb = rigBandsToSave(); if (rb) rig.bands = rb; else delete rig.bands; }
     }
   } else {
     const newRig = {
@@ -3337,6 +3526,7 @@ async function saveRigEditor() {
       catTarget,
       remoteAudioInput: rigAudioIn,
       remoteAudioOutput: rigAudioOut,
+      rxLevelDb: rigRxLevelDb,
       audioSource: rigAudioSource,
       cwKeyPort: rigCwKeyPortVal,
       cwKeyLine: rigCwKeyLineVal,
@@ -3348,9 +3538,12 @@ async function saveRigEditor() {
       externalAtuWatts: rigExternalAtuWatts,
       externalAtuSeconds: rigExternalAtuSeconds,
       atuKeepOn: rigAtuKeepOn,
+      ...(rigVoiceAsData ? { voiceAsData: true } : {}),
+      ...(rigLanVoiceInSsb ? { lanVoiceInSsb: true } : {}),
       flexBandAntennaMap,
       ...(rigSdrScope ? { sdrScope: rigSdrScope } : {}),
       setupDone: [...rigSetupDone],
+      ...(rigBandsToSave() ? { bands: rigBandsToSave() } : {}),
     };
     currentRigs.push(newRig);
     _stationSetupOpenAfterSave = newRig.id;
@@ -3364,6 +3557,9 @@ async function saveRigEditor() {
   // nothing in the editor said so. A {rigs}-only save is partial, so main's
   // save handler persists WITHOUT touching the CAT connection.
   const _ssSave = window.api.saveSettings({ rigs: currentRigs });
+  // Learn the names of the devices just picked, so a later ID change can be
+  // followed (lib/audio-device-heal.js).
+  Promise.resolve(_ssSave).then(() => healRigAudioDevicesNow('rig editor'));
   // A radio was just added: open its Station Setup checklist so the operator
   // is walked through the rest instead of left to find it.
   if (_stationSetupOpenAfterSave && typeof window.openStationSetup === 'function') {
@@ -3383,8 +3579,8 @@ rigSaveBtn.addEventListener('click', () => { saveRigEditor(); });
 
 // --- Multi-select dropdowns ---
 // K3SBP 2026-05-14: removed the "Digital (all)" group preset from the mode
-// filter — replaced by the single combined "FT8/4/2" entry (value="FT")
-// which covers the most common digital-mode bucket. RTTY/PSK31/JS8 remain
+// filter. FT8, FT4 and FT2 are separate entries (jgedmond 2026-10-31); a
+// saved combined "FT" restores as all three (restoreFilters). RTTY/PSK31/JS8 remain
 // as individual entries and the iOS app's DIGITAL_MODE_GROUP preset is
 // separately maintained on that side.
 
@@ -3504,14 +3700,14 @@ initMultiDropdown(propModeFilterEl, 'Mode', rerenderRbn);
 // --- Band QSY buttons (shown when Radio band filter is active) ---
 const BAND_QSY_FREQS = {
   // SSB calling frequencies (kHz) — used for SSB/phone modes
-  ssb: { '160m': 1900, '80m': 3860, '60m': 5357, '40m': 7200, '30m': 10130, '20m': 14260, '17m': 18130, '15m': 21300, '12m': 24960, '10m': 28400, '6m': 50125, '4m': 70200, '2m': 144200, '70cm': 432100, '1.25m': 222100, '33cm': 903100, '23cm': 1296100 },
+  ssb: { '2200m': 137, '630m': 475, '160m': 1900, '80m': 3860, '60m': 5357, '40m': 7200, '30m': 10130, '20m': 14260, '17m': 18130, '15m': 21300, '12m': 24960, '10m': 28400, '6m': 50125, '4m': 70200, '2m': 144200, '70cm': 432100, '1.25m': 222100, '33cm': 903100, '23cm': 1296100, '13cm': 2304100, '9cm': 3400100, '6cm': 5760100, '3cm': 10368100, '1.25cm': 24048100 },
   // CW calling frequencies
-  cw: { '160m': 1820, '80m': 3530, '60m': 5332, '40m': 7030, '30m': 10110, '20m': 14030, '17m': 18080, '15m': 21030, '12m': 24900, '10m': 28030, '6m': 50090, '4m': 70100, '2m': 144050, '70cm': 432050, '1.25m': 222100, '33cm': 903100, '23cm': 1296100 },
+  cw: { '2200m': 136, '630m': 474, '160m': 1820, '80m': 3530, '60m': 5332, '40m': 7030, '30m': 10110, '20m': 14030, '17m': 18080, '15m': 21030, '12m': 24900, '10m': 28030, '6m': 50090, '4m': 70100, '2m': 144050, '70cm': 432050, '1.25m': 222100, '33cm': 903100, '23cm': 1296100, '13cm': 2304100, '9cm': 3400100, '6cm': 5760100, '3cm': 10368100, '1.25cm': 24048100 },
   // Digital/FT8 frequencies (above 2m: WSJT-X defaults; 33cm has none, so the weak-signal calling frequency)
-  digi: { '160m': 1840, '80m': 3573, '60m': 5357, '40m': 7074, '30m': 10136, '20m': 14074, '17m': 18100, '15m': 21074, '12m': 24915, '10m': 28074, '6m': 50313, '4m': 70154, '2m': 144174, '70cm': 432065, '1.25m': 222065, '33cm': 903100, '23cm': 1296174 },
+  digi: { '2200m': 136, '630m': 474.2, '160m': 1840, '80m': 3573, '60m': 5357, '40m': 7074, '30m': 10136, '20m': 14074, '17m': 18100, '15m': 21074, '12m': 24915, '10m': 28074, '6m': 50313, '4m': 70154, '2m': 144174, '70cm': 432065, '1.25m': 222065, '33cm': 903100, '23cm': 1296174, '13cm': 2304100, '9cm': 3400100, '6cm': 5760100, '3cm': 10368100, '1.25cm': 24048100 },
 };
-const BAND_QSY_ORDER = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '4m', '2m', '70cm', '1.25m', '33cm', '23cm'];
-const BAND_QSY_LABELS = { '160m': '160', '80m': '80', '60m': '60', '40m': '40', '30m': '30', '20m': '20', '17m': '17', '15m': '15', '12m': '12', '10m': '10', '6m': '6', '4m': '4', '2m': '2', '70cm': '70cm', '1.25m': '222', '33cm': '33cm', '23cm': '23cm' };
+const BAND_QSY_ORDER = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '4m', '2m', '70cm', '1.25m', '33cm', '23cm', '13cm', '9cm', '6cm', '3cm', '1.25cm'];
+const BAND_QSY_LABELS = { '2200m': '2200', '630m': '630', '160m': '160', '80m': '80', '60m': '60', '40m': '40', '30m': '30', '20m': '20', '17m': '17', '15m': '15', '12m': '12', '10m': '10', '6m': '6', '4m': '4', '2m': '2', '70cm': '70cm', '1.25m': '222', '33cm': '33cm', '23cm': '23cm', '13cm': '13cm', '9cm': '9cm', '6cm': '6cm', '3cm': '3cm', '1.25cm': '24G' };
 const bandButtonsEl = document.getElementById('band-buttons');
 
 function buildBandButtons() {
@@ -3523,6 +3719,7 @@ function buildBandButtons() {
     btn.title = `QSY to ${band}`;
     bandButtonsEl.appendChild(btn);
   }
+  if (typeof applyRigBandsMain === 'function') applyRigBandsMain();
 }
 buildBandButtons();
 
@@ -3644,16 +3841,12 @@ function updateSettingsConnBar() {
 }
 
 function updateRbnButton() {
-  const propEnabled = enableRbn || enablePskrMap;
-  if (propEnabled) {
-    viewRbnBtn.classList.remove('hidden');
-  } else {
-    viewRbnBtn.classList.add('hidden');
-    if (currentView === 'rbn') setView('table');
-  }
-  // Update source toggle visibility based on which sources are enabled
-  propShowRbnEl.closest('label').classList.toggle('hidden', !enableRbn);
-  propShowPskrEl.closest('label').classList.toggle('hidden', !enablePskrMap);
+  // Propagation (RBN + PSKReporter "where am I heard") is always on: main
+  // collects both whenever a callsign is set, so there is nothing to enable
+  // (Casey 2026-10-27: "always working for everyone").
+  viewRbnBtn.classList.remove('hidden');
+  propShowRbnEl.closest('label').classList.remove('hidden');
+  propShowPskrEl.closest('label').classList.remove('hidden');
   // Also update the activator toolbar RBN button (safe even before DOM ref is set)
   if (typeof updateActivatorRbnButton === 'function') updateActivatorRbnButton();
 }
@@ -4107,7 +4300,10 @@ async function saveBannerQso() {
     try {
       const parkData = await window.api.getPark(potaRef);
       const states = parkData ? parkStatesFromLocationLocal(parkData.locationDesc) : [];
-      if (states.length > 1) parkState = await promptParkState(potaRef, parkData.locationDesc);
+      // Their spot's locationCode says where they are; ask only when it doesn't.
+      const fromSpot = states.length > 1 && window.api.spotParkState ? await window.api.spotParkState(potaRef, callsigns[0]) : '';
+      if (fromSpot) parkState = fromSpot;
+      else if (states.length > 1) parkState = await promptParkState(potaRef, parkData.locationDesc);
     } catch {}
   }
 
@@ -4350,16 +4546,14 @@ function restoreFilters() {
       modeFilterEl.querySelectorAll('input:not([value="all"]):not([value="radio"])').forEach((cb) => { cb.checked = false; });
     } else if (data.modes) {
       const modeSet = new Set(data.modes);
-      // Migration: legacy saved state may have individual FT8/FT4/FT2 entries
-      // — those checkboxes no longer exist (replaced by the combined FT8/4/2
-      // meta-mode at value="FT"). K3SBP 2026-05-14. Without this migration a
-      // user who'd saved "FT8 only" would land on "All" after upgrading
-      // because none of their saved mode values match any checkbox.
-      if (modeSet.has('FT8') || modeSet.has('FT4') || modeSet.has('FT2')) {
-        modeSet.delete('FT8');
-        modeSet.delete('FT4');
-        modeSet.delete('FT2');
-        modeSet.add('FT');
+      // FT8, FT4 and FT2 are separate entries again (jgedmond 2026-10-31: an
+      // FT4 hunter wants FT4 without FT8). A saved combined "FT" (the single
+      // FT8/4/2 entry of 2026-05 to 2026-11) still means all three.
+      if (modeSet.has('FT')) {
+        modeSet.delete('FT');
+        modeSet.add('FT8');
+        modeSet.add('FT4');
+        modeSet.add('FT2');
       }
       modeSet.delete('unknown'); // unknown checkbox also removed
       modeFilterEl.querySelector('input[value="all"]').checked = false;
@@ -4887,11 +5081,6 @@ clusterAddBtn.addEventListener('click', () => {
   clusterCustomFields.classList.add('hidden');
 });
 
-// RBN checkbox toggles RBN config visibility
-setEnableRbn.addEventListener('change', () => {
-  rbnConfig.classList.toggle('hidden', !setEnableRbn.checked);
-});
-
 // WSJT-X checkbox toggles config visibility + warns about the CAT handover
 // before letting the user check the box (same confirm the CAT popover uses).
 setEnableWsjtx.addEventListener('change', () => {
@@ -4905,9 +5094,6 @@ setEnableWsjtx.addEventListener('change', () => {
 
 setEnablePskr.addEventListener('change', () => {
   pskrConfig.classList.toggle('hidden', !setEnablePskr.checked);
-});
-setEnablePskrMap.addEventListener('change', () => {
-  pskrMapConfig.classList.toggle('hidden', !setEnablePskrMap.checked);
 });
 if (setPskrUpload) {
   setPskrUpload.addEventListener('change', () => {
@@ -5038,6 +5224,36 @@ async function populateRotorEzPorts(savedPath) {
 }
 
 if (setRotorType) setRotorType.addEventListener('change', applyRotorTypeVisibility);
+// Typed port fields with a suggestion list (CW key port, WinKeyer, no-CAT PTT):
+// Chromium filters a datalist by what is already in the box, so a saved
+// "COM9" hid COM10 and every other port, and the arrow seemed dead until the
+// box was emptied (stein_12464, 2026-11-01). On a click, show the whole list;
+// if nothing new is picked, the saved value comes back.
+function showWholePortListOnClick(input) {
+  if (!input || input.dataset.wholeListWired) return;
+  input.dataset.wholeListWired = '1';
+  input.addEventListener('mousedown', () => {
+    if (!input.value || input.dataset.heldValue) return;
+    input.dataset.heldValue = input.value;
+    if (input.dataset.basePlaceholder === undefined) input.dataset.basePlaceholder = input.placeholder || '';
+    input.placeholder = input.value;
+    input.value = '';
+  });
+  const restore = () => {
+    const held = input.dataset.heldValue;
+    if (held === undefined) return;
+    delete input.dataset.heldValue;
+    if (input.dataset.basePlaceholder !== undefined) input.placeholder = input.dataset.basePlaceholder;
+    if (!input.value.trim()) input.value = held;
+  };
+  input.addEventListener('change', () => {
+    delete input.dataset.heldValue;
+    if (input.dataset.basePlaceholder !== undefined) input.placeholder = input.dataset.basePlaceholder;
+  });
+  input.addEventListener('blur', restore);
+}
+['set-cw-key-port', 'set-winkeyer-port', 'set-nocat-ptt-port'].forEach((id) => showWholePortListOnClick(document.getElementById(id)));
+
 // Antenna Genius checkbox toggles config visibility
 setEnableAg.addEventListener('change', () => {
   agConfig.classList.toggle('hidden', !setEnableAg.checked);
@@ -5325,6 +5541,33 @@ if (setMercuryEnable) {
       if (!r || !r.ok) { acctStatus.textContent = (r && r.error) || 'Could not check'; return; }
       acctStatus.textContent = r.exists ? `${r.callsign} has a Winlink account.` : `${r.callsign} has no Winlink account yet.`;
       regBox.classList.toggle('hidden', !!r.exists);
+      if (r.exists) showWinlinkRecovery(); else if (recBox) recBox.classList.add('hidden');
+    });
+    // An existing account's recovery address: read through Pat with the
+    // saved password, changed in place.
+    const recBox = document.getElementById('winlink-recovery-box');
+    const recCurrent = document.getElementById('winlink-recovery-current');
+    const recStatus = document.getElementById('winlink-recovery-status');
+    async function showWinlinkRecovery() {
+      if (!recBox || !window.api.winlinkRecoveryEmailGet) return;
+      recBox.classList.remove('hidden');
+      recCurrent.textContent = '…';
+      recStatus.textContent = '';
+      const r = await window.api.winlinkRecoveryEmailGet();
+      if (r && r.ok) recCurrent.textContent = r.email || 'none set';
+      else { recCurrent.textContent = 'unknown'; recStatus.textContent = (r && r.error) || 'Could not read it (is your Winlink password saved?)'; }
+    }
+    const recChange = document.getElementById('winlink-recovery-change');
+    if (recChange) recChange.addEventListener('click', async () => {
+      const input = document.getElementById('set-winlink-recovery-new');
+      const email = input.value.trim();
+      if (!email) { recStatus.textContent = 'Type the new address first'; return; }
+      recChange.disabled = true;
+      recStatus.textContent = 'Saving…';
+      const r = await window.api.winlinkRecoveryEmailSet(email);
+      recChange.disabled = false;
+      if (r && r.ok) { recCurrent.textContent = email; input.value = ''; recStatus.textContent = 'Changed.'; }
+      else recStatus.textContent = (r && r.error) || 'Could not change it';
     });
     const regBtn = document.getElementById('winlink-register-btn');
     if (regBtn) regBtn.addEventListener('click', async () => {
@@ -5698,6 +5941,7 @@ function _gpFmtRemaining(seconds) {
   const cardOffer = document.getElementById('cloud-prompt-offer');
   const startBtn = document.getElementById('cloud-prompt-start');
   const laterBtn = document.getElementById('cloud-prompt-later');
+  const neverBtn = document.getElementById('cloud-prompt-never');
   let promptShown = false;
   let promptTries = 0;
 
@@ -5711,12 +5955,16 @@ function _gpFmtRemaining(seconds) {
     const settingsDlg = document.getElementById('settings-dialog');
     const otherCardVisible = (ssCard && !ssCard.classList.contains('hidden'))
       || (whatsNew && whatsNew.open) || (settingsDlg && settingsDlg.open);
-    const d = Billing.decideCloudPrompt({ ...inputs, otherCardVisible, shownThisLaunch: promptShown });
+    // Typing anywhere (a callsign, a log form, a macro): never over it.
+    const a = document.activeElement;
+    const typing = !!(a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT' || a.isContentEditable));
+    const d = Billing.decideCloudPrompt({ ...inputs, otherCardVisible, typing, shownThisLaunch: promptShown });
     if (d.show) {
       promptShown = true;
       const copy = Billing.promptCopy(d.qsos);
       if (cardText) cardText.textContent = copy.body;
       if (cardOffer) cardOffer.textContent = copy.offer;
+      if (neverBtn) neverBtn.classList.toggle('hidden', !d.offerNever);
       card.classList.remove('hidden');
       return;
     }
@@ -5726,15 +5974,19 @@ function _gpFmtRemaining(seconds) {
   function hidePrompt() { if (card) card.classList.add('hidden'); }
   if (startBtn) startBtn.addEventListener('click', () => {
     hidePrompt();
-    if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register', autoUpload: true });
+    if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register', autoUpload: true, entry: 'cloud-prompt' });
   });
   if (laterBtn) laterBtn.addEventListener('click', () => {
     hidePrompt();
     if (window.api.cloudPromptSnooze) window.api.cloudPromptSnooze().catch(() => {});
   });
-  // After the Station Setup launch card (12 s) and What's New have had
-  // their turn; the decision re-checks that nothing else is on screen.
-  setTimeout(promptCheck, 25000);
+  if (neverBtn) neverBtn.addEventListener('click', () => {
+    hidePrompt();
+    if (window.api.cloudPromptNever) window.api.cloudPromptNever().catch(() => {});
+  });
+  // Never in the first two minutes: they opened POTACAT to do something.
+  // The decision re-checks that nothing else is on screen.
+  setTimeout(promptCheck, (Billing && Billing.PROMPT_LAUNCH_DELAY_MS) || 120000);
 })();
 
 let _gpOwnerBannerTimer = null;
@@ -5752,7 +6004,26 @@ function _gpUpdateOwnerBanner(status) {
   }
   const callEl = document.getElementById('gp-owner-callsign');
   const expEl = document.getElementById('gp-owner-expires');
-  if (callEl) callEl.textContent = (status.operatorCallsign || status.controlOperatorCallsign || 'Guest').toString().toUpperCase();
+  // The lease: who has the radio, and the call it is on the air as (the
+  // guest's own; '' = an unverified guest who may only listen).
+  const onAir = String(status.onAirCallsign || '').toUpperCase().trim();
+  const guest = String(status.guestCallsign || status.operatorCallsign || onAir || 'a guest').toUpperCase();
+  if (callEl) callEl.textContent = guest;
+  // Paused: the owner took the radio back; the pass keeps counting down.
+  const paused = status.state === 'paused';
+  const showEl = (id, on) => { const el = document.getElementById(id); if (el) el.classList.toggle('hidden', !on); };
+  showEl('gp-owner-lent', !paused);
+  showEl('gp-owner-paused', paused);
+  showEl('gp-owner-takeover', !paused);
+  showEl('gp-owner-giveback', paused);
+  const pausedCallEl = document.getElementById('gp-owner-paused-call');
+  if (pausedCallEl) pausedCallEl.textContent = guest;
+  const onAirEl = document.getElementById('gp-owner-onair');
+  const onAirCallEl = document.getElementById('gp-owner-onair-call');
+  const noCallEl = document.getElementById('gp-owner-nocall');
+  if (onAirCallEl) onAirCallEl.textContent = onAir;
+  if (onAirEl) onAirEl.classList.toggle('hidden', !onAir);
+  if (noCallEl) noCallEl.classList.toggle('hidden', !!onAir);
   _gpOwnerBannerExpiresAtMs = status.expiresAt ? new Date(status.expiresAt).getTime() : 0;
   const tick = () => {
     if (!_gpOwnerBannerExpiresAtMs) {
@@ -5769,9 +6040,20 @@ function _gpUpdateOwnerBanner(status) {
   banner.classList.remove('hidden');
 }
 
+async function _gpTakeOverFromOwnerBanner() {
+  if (!window.api || !window.api.passTakeOver) return;
+  try { await window.api.passTakeOver(); } catch (err) { console.error('[Guest Pass] take over failed:', err); }
+}
+async function _gpGiveBackFromOwnerBanner() {
+  if (!window.api || !window.api.passGiveBack) return;
+  try { await window.api.passGiveBack(); } catch (err) { console.error('[Guest Pass] give back failed:', err); }
+}
+
 async function _gpRevokeFromOwnerBanner() {
   if (!window.api || !window.api.passEnforcementEnd) return;
-  const ok = confirm('End this guest\'s access to your rig?');
+  // Ends this session only: the pass stays valid until it expires or is
+  // revoked in Share My Rig, so the guest can come back.
+  const ok = confirm('End this guest\'s session now? They can reconnect while the pass lasts. To stop that, revoke the pass in Share My Rig.');
   if (!ok) return;
   try {
     await window.api.passEnforcementEnd('owner_override');
@@ -5783,8 +6065,10 @@ async function _gpRevokeFromOwnerBanner() {
 
 // Initialize banner + listeners as soon as the renderer is ready.
 (function _gpInitOwnerBanner() {
-  const banner = document.getElementById('gp-owner-banner');
-  if (banner) banner.addEventListener('click', _gpRevokeFromOwnerBanner);
+  const bind = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); };
+  bind('gp-owner-takeover', _gpTakeOverFromOwnerBanner);
+  bind('gp-owner-giveback', _gpGiveBackFromOwnerBanner);
+  bind('gp-owner-end', _gpRevokeFromOwnerBanner);
   if (window.api && window.api.passEnforcementGetState) {
     window.api.passEnforcementGetState().then(_gpUpdateOwnerBanner).catch(() => {});
   }
@@ -6251,11 +6535,48 @@ async function refreshLauncherStatus() {
     if (launcherInstallBtn)   launcherInstallBtn.classList.toggle('hidden', installed);
     if (launcherStartBtn)     launcherStartBtn.classList.toggle('hidden', !(installed && !running));
     if (launcherUninstallBtn) launcherUninstallBtn.classList.toggle('hidden', !installed);
+    renderLauncherCloud(s);
   } catch (err) {
     launcherStatusPill.textContent = 'status unavailable';
     launcherStatusPill.style.color = '#888';
   }
 }
+// Restart from anywhere: the launcher's own connector on the Cloud Tunnel.
+function launcherCloudText(s) {
+  if (!s.viaCloud) return { text: 'Restart from anywhere is off: the phone can restart POTACAT on your network and over Tailscale only.', color: '#888' };
+  if (!s.tunnelOn) return { text: 'Turn on the Cloud Tunnel (Cloud tab) to restart POTACAT from outside your network.', color: '#888' };
+  if (!s.running) return { text: 'Start the launcher to restart POTACAT from anywhere.', color: '#f0a500' };
+  switch (s.cloud) {
+    case 'replica-up': return { text: 'Reachable from anywhere through ' + s.cloudHost + ', even while POTACAT is closed.', color: '#4ecca3' };
+    case 'replica-starting': return { text: 'Connecting the launcher to your Cloud Tunnel…', color: '#f0a500' };
+    case 'no-cloudflared': return { text: 'The launcher could not find cloudflared, so it cannot reach the Cloud Tunnel.', color: '#e94560' };
+    case null: case undefined: return { text: 'Restart the launcher (Uninstall, then Install) to pick up restart from anywhere.', color: '#f0a500' };
+    default: return { text: 'Waiting for the launcher to connect to your Cloud Tunnel.', color: '#f0a500' };
+  }
+}
+function renderLauncherCloud(s) {
+  const row = document.getElementById('launcher-via-cloud-row');
+  const box = document.getElementById('launcher-via-cloud');
+  const line = document.getElementById('launcher-cloud-line');
+  if (!row || !box || !line) return;
+  const show = !!s.installed;
+  row.classList.toggle('hidden', !show);
+  line.classList.toggle('hidden', !show);
+  if (!show) return;
+  box.checked = s.viaCloud !== false;
+  const t = launcherCloudText(s);
+  line.textContent = t.text;
+  line.style.color = t.color;
+}
+(function bindLauncherViaCloud() {
+  const box = document.getElementById('launcher-via-cloud');
+  if (!box || !window.api.launcherSetViaCloud) return;
+  box.addEventListener('change', async () => {
+    try { renderLauncherCloud(await window.api.launcherSetViaCloud(box.checked)); } catch {}
+    // The launcher reads its config every 5 s; look again once it has.
+    setTimeout(refreshLauncherStatus, 7000);
+  });
+})();
 if (launcherInstallBtn) {
   launcherInstallBtn.addEventListener('click', async () => {
     launcherInstallBtn.disabled = true;
@@ -6766,7 +7087,6 @@ function _shareRigOpen() {
   if (!dlg) return;
   // Reset to form view, pre-fill callsigns from current settings.
   _shareRigShowFormView();
-  _shareRigPrefillCallsigns();
   _shareRigUpdateClassDetail();
   _shareRigUpdateReachNotice();
   _shareRigResetWhenSection();
@@ -6893,17 +7213,6 @@ function _shareRigShowResultView() {
   document.getElementById('share-rig-result-view').classList.remove('hidden');
 }
 
-async function _shareRigPrefillCallsigns() {
-  try {
-    const s = await window.api.getSettings();
-    const my = (s && s.myCallsign) ? String(s.myCallsign).toUpperCase() : '';
-    const station = document.getElementById('share-rig-station');
-    const control = document.getElementById('share-rig-control');
-    if (station && !station.value && my) station.value = my;
-    if (control && !control.value && my) control.value = my;
-  } catch {}
-}
-
 function _shareRigUpdateClassDetail() {
   const sel = document.getElementById('share-rig-class');
   const detail = document.getElementById('share-rig-class-detail');
@@ -6931,9 +7240,14 @@ async function _shareRigIssue() {
   const btn = document.getElementById('share-rig-issue');
   const watts = _shareRigSelectedWatts();
   const cls = document.getElementById('share-rig-class').value || 'general';
-  const station = (document.getElementById('share-rig-station').value || '').toUpperCase().trim() || null;
-  const operator = (document.getElementById('share-rig-operator').value || '').toUpperCase().trim() || null;
-  const control = (document.getElementById('share-rig-control').value || '').toUpperCase().trim() || null;
+  // Who the pass is for. The cloud lets only that account redeem it, and the
+  // call goes on the air; blank = anyone with the link, under their own
+  // account's call. The same value rides the legacy station_callsign field
+  // so a shack on an older build identifies the same way.
+  const forCall = (document.getElementById('share-rig-for').value || '').toUpperCase().replace(/[^A-Z0-9/]/g, '').slice(0, 15) || null;
+  const station = forCall;
+  const operator = forCall;
+  const control = null;
 
   // Body branches on When? mode. The "starts now" branch keeps the
   // legacy duration_seconds shape — backwards compatible with every
@@ -6998,12 +7312,13 @@ async function _shareRigIssue() {
           && res.billing.state !== 'none' && res.billing.state !== 'trial_expired') {
         window.api.cloudOpenBillingAction(res.billing).catch(() => {});
       } else if (res && res.error === 'subscription_required' && typeof window.openCloudSignup === 'function') {
-        window.openCloudSignup({});
+        window.openCloudSignup({ entry: 'share-rig' });
       }
       return;
     }
     _shareRigShowResultView();
     document.getElementById('share-rig-result-code').textContent = res.code || '';
+    document.getElementById('share-rig-result-for').textContent = forCall || 'Anyone with the link, under their own callsign';
     document.getElementById('share-rig-result-url').textContent = res.share_url || '';
     // Surface whether the recipient will need to sign in or not. The
     // copy here is the source of truth — the operator just made this
@@ -7203,7 +7518,7 @@ function _esc(s) {
     if (!a) return;
     e.preventDefault();
     // Signed out → the free-trial form; signed in → the subscribe section.
-    if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register' });
+    if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register', entry: 'notice' });
   });
 
   const issueBtn = document.getElementById('share-rig-issue');
@@ -8823,7 +9138,7 @@ function _wireSummaryCardActionsOnce() {
       if (act === 'cloud-signup') {
         // Signed out: the in-app create-account form (free trial), not a
         // payment page. Signed in without access: the subscribe section.
-        if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register' });
+        if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register', entry: 'summary' });
       }
       else if (act === 'cloud-manage') {
         const r = await window.api.cloudOpenManage();
@@ -8858,7 +9173,7 @@ function _wireSummaryCardActionsOnce() {
           };
           alert(map[r.error] || ('Could not turn on the tunnel: ' + r.error));
           // The wall: the fix is the subscribe section, one click away.
-          if (r.error === 'entitlement-required' && typeof window.openCloudSignup === 'function') window.openCloudSignup({});
+          if (r.error === 'entitlement-required' && typeof window.openCloudSignup === 'function') window.openCloudSignup({ entry: 'tunnel' });
           if (r.error === 'auth-required' && typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'signin' });
         }
       }
@@ -9061,7 +9376,7 @@ function _pairRenderState() {
         return;
       }
       // Jump the Settings dialog to the Cloud tab's create-account form.
-      if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register' });
+      if (typeof window.openCloudSignup === 'function') window.openCloudSignup({ mode: 'register', entry: 'pairing' });
       else {
         const cloudTab = document.querySelector('.settings-tab[data-tab="cloud"]');
         if (cloudTab) cloudTab.click();
@@ -9426,10 +9741,6 @@ function readCwMacroEditor() {
   return macros.length ? macros : null;
 }
 
-// Logging checkbox toggles logging config visibility
-setEnableLogging.addEventListener('change', () => {
-  loggingConfig.classList.toggle('hidden', !setEnableLogging.checked);
-});
 
 // Send to Logbook checkbox toggles logbook dropdown visibility
 setSendToLogbook.addEventListener('change', () => {
@@ -9458,6 +9769,7 @@ function updateLogbookPortConfig() {
   const type = setLogbookType.value;
   const defaults = LOGBOOK_DEFAULTS[type];
   logbookLog4omConfig.classList.toggle('hidden', type !== 'log4om');
+  { const n3 = document.getElementById('logbook-n3fjp-config'); if (n3) n3.classList.toggle('hidden', type !== 'n3fjp'); }
   if (defaults && defaults.fileWatch) {
     logbookInstructions.innerHTML = defaults.instructions;
     logbookInstructions.classList.remove('hidden');
@@ -9635,6 +9947,30 @@ hamlibTestBtn.addEventListener('click', async () => {
     hamlibTestResult.className = 'hamlib-test-fail';
   } finally {
     hamlibTestBtn.disabled = false;
+  }
+});
+
+// flrig test connection: one probe of flrig's XML-RPC server (main: test-flrig).
+if (flrigTestBtn) flrigTestBtn.addEventListener('click', async () => {
+  const host = (setFlrigHost && setFlrigHost.value.trim()) || '127.0.0.1';
+  const port = parseInt(setFlrigPort && setFlrigPort.value, 10) || 12345;
+  flrigTestBtn.disabled = true;
+  flrigTestResult.textContent = 'Testing...';
+  flrigTestResult.className = '';
+  try {
+    const result = await window.api.testFlrig({ host, port });
+    if (result && result.success) {
+      flrigTestResult.textContent = result.message || 'Connected!';
+      flrigTestResult.className = 'hamlib-test-success';
+    } else {
+      flrigTestResult.textContent = `Failed: ${(result && result.error) || 'no reply'}`;
+      flrigTestResult.className = 'hamlib-test-fail';
+    }
+  } catch (err) {
+    flrigTestResult.textContent = `Error: ${err.message}`;
+    flrigTestResult.className = 'hamlib-test-fail';
+  } finally {
+    flrigTestBtn.disabled = false;
   }
 });
 
@@ -9829,8 +10165,8 @@ function radioModeToFilter(catMode) {
   if (m === 'FT8') return 'FT8';
   if (m === 'FT4') return 'FT4';
   if (m === 'FREEDV') return 'FREEDV';
-  // DATA modes (DIGU/PKTUSB/DIGL/PKTLSB) -> show all digital spots
-  if (m === 'DIGU' || m === 'PKTUSB' || m === 'DIGL' || m === 'PKTLSB') return 'DIGI';
+  // DATA modes (DIGU/PKTUSB/DIGL/PKTLSB) and PSK -> show all digital spots
+  if (m === 'DIGU' || m === 'PKTUSB' || m === 'DIGL' || m === 'PKTLSB' || m === 'PSK') return 'DIGI';
   return null;
 }
 
@@ -10095,6 +10431,7 @@ function getFiltered() {
     if (hideWorkedCallRef && isWorkedSpotStrict(s)) return false;
     if (hideWorkedParks && s.source === 'pota' && s.reference && workedParksSet.has(s.reference)) return false;
     if (hideQrt && s.comments && s.comments.toLowerCase().includes('qrt')) return false;
+    if (dxOnly && !s.isDx) return false;
     if (!showHiddenSpots && isSpotHidden(s.callsign, s.frequency, s.band)) return false;
     if (maxDistMi > 0 && s.distance != null) {
       // maxDistMi is stored in the user's chosen unit; s.distance is always in miles
@@ -10612,12 +10949,14 @@ const RBN_BAND_COLORS_NORMAL = {
   '30m': '#00cccc', '20m': '#4488ff', '17m': '#8844ff', '15m': '#cc44ff',
   '12m': '#ff44cc', '10m': '#ff4488', '6m': '#e0e0e0', '4m': '#b0e0e6', '2m': '#88ff88', '70cm': '#ffaa44',
   '1.25m': '#c8a2ff', '33cm': '#ffd59e', '23cm': '#9ef5e0',
+  '13cm': '#ffb3c6', '9cm': '#d4a5ff', '6cm': '#a5d8ff', '3cm': '#ffe08a', '1.25cm': '#b5f5a5', '2200m': '#8d6e63', '630m': '#a1887f',
 };
 const RBN_BAND_COLORS_CB = {
   '160m': '#ffa726', '80m': '#ffca28', '60m': '#fff176', '40m': '#4fc3f7',
   '30m': '#00cccc', '20m': '#4488ff', '17m': '#8844ff', '15m': '#cc44ff',
   '12m': '#ff44cc', '10m': '#ff4488', '6m': '#e0e0e0', '4m': '#b0e0e6', '2m': '#88ff88', '70cm': '#ffaa44',
   '1.25m': '#c8a2ff', '33cm': '#ffd59e', '23cm': '#9ef5e0',
+  '13cm': '#ffb3c6', '9cm': '#d4a5ff', '6cm': '#a5d8ff', '3cm': '#ffe08a', '1.25cm': '#b5f5a5', '2200m': '#8d6e63', '630m': '#a1887f',
 };
 
 let SOURCE_COLORS_ACTIVE = { ...SOURCE_COLORS_NORMAL };
@@ -11315,8 +11654,11 @@ const PRIVILEGE_RANGES = {
 };
 
 const SOURCE_LABELS = {
-  pota: 'POTA', sota: 'SOTA', dxc: 'DX', cwspots: 'CW',
+  // 'dxc' is the DX CLUSTER feed, not DX: a German operator saw a Bulgarian
+  // cluster spot labelled DX (G4BFG). DX is now the spot's isDx (lib/dx-rule.js).
+  pota: 'POTA', sota: 'SOTA', dxc: 'Cluster', cwspots: 'CW',
   rbn: 'RBN', wwff: 'WWFF', llota: 'LLOTA', tiles: 'Tiles', gma: 'GMA', parc: 'PARC', pskr: 'FreeDV', net: 'NET',
+  wwbota: 'WWBOTA', freedv: 'FreeDV',
 };
 const CW_DIGI_MODES = new Set(['CW', 'FT8', 'FT4', 'FT2', 'RTTY', 'DIGI', 'JS8', 'PSK31', 'PSK']);
 const PHONE_MODES = new Set(['SSB', 'USB', 'LSB', 'FM', 'AM']);
@@ -12482,6 +12824,23 @@ function placeLogDialog() {
 // "Quick Log only" guard kept the spotted op's name (Mac user, 2026-10-23; the
 // Ctrl+L pop-out already looked up on every edit). The name is callsign 1's,
 // so a comma list looks up its first call.
+// The bands and modes already worked with the call being logged (GitHub
+// #108, AE5JE): lib/worked-matrix.js over the same worked-QSO entries every
+// worked-before check reads. First call of a comma list.
+let logWorkedMatrixTimer = null;
+function renderLogWorkedMatrix() {
+  const el = document.getElementById('log-worked-matrix');
+  if (!el || !window.WorkedMatrix) return;
+  const cs = (logCallsign.value.split(',')[0] || '').trim().toUpperCase();
+  if (cs.length < 3) { el.innerHTML = ''; return; }
+  const m = window.WorkedMatrix.buildWorkedMatrix(window.WorkedMatrix.entriesForCall(workedQsos, cs, JtcatParser.baseCall));
+  el.innerHTML = window.WorkedMatrix.workedMatrixHtml(m, { showEmpty: true, emptyText: 'Not worked before' });
+}
+logCallsign.addEventListener('input', () => {
+  clearTimeout(logWorkedMatrixTimer);
+  logWorkedMatrixTimer = setTimeout(renderLogWorkedMatrix, 200);
+});
+
 logCallsign.addEventListener('input', () => {
   clearTimeout(quickLogLookupTimer);
   const cs = (logCallsign.value.split(',')[0] || '').trim().toUpperCase();
@@ -13668,14 +14027,6 @@ if (viewDirectoryBtn) viewDirectoryBtn.addEventListener('click', () => {
   }
   setView('directory');
 });
-// Show Directory button at startup if enabled (without waiting for Settings dialog)
-(async () => {
-  const s = await window.api.getSettings();
-  if (s.enableDirectory) {
-    setEnableDirectory.checked = true;
-    updateDirectoryButton();
-  }
-})();
 // "More" views dropdown toggle
 const viewsDropdown = document.getElementById('views-dropdown');
 if (viewsDropdown) {
@@ -13749,6 +14100,7 @@ if (window.api.onOpenSettingsWinlink) window.api.onOpenSettingsWinlink(async () 
 bindClick(document.getElementById('view-js8call-btn'), () => { if (window.api.js8PopoutOpen) window.api.js8PopoutOpen(); });
 bindClick(document.getElementById('view-sstv-btn'), () => window.api.sstvPopoutOpen());
 bindClick(document.getElementById('view-scope-btn'), () => { if (window.api.scopePopoutOpen) window.api.scopePopoutOpen(); });
+bindClick(document.getElementById('view-atu-wizard-btn'), () => { if (window.api.atuWizardOpen) window.api.atuWizardOpen(); });
 bindClick(document.getElementById('view-bandspread-btn'), () => {
   if (window.api.bandspreadPopoutOpen) window.api.bandspreadPopoutOpen();
 });
@@ -13877,7 +14229,7 @@ splitSplitterEl.addEventListener('mousedown', (e) => {
 });
 
 // --- DXCC Matrix Rendering ---
-const DXCC_BANDS = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '4m', '2m', '70cm', '1.25m', '33cm', '23cm'];
+const DXCC_BANDS = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '4m', '2m', '70cm', '1.25m', '33cm', '23cm', '13cm', '9cm', '6cm', '3cm', '1.25cm'];
 
 function isEntityConfirmedOnBand(ent, band, modeFilter) {
   const modes = ent.confirmed[band];
@@ -14427,7 +14779,7 @@ function render() {
         { val: s.wpm != null ? String(s.wpm) : '', col: 'wpm' },
         { val: refDisplay, wwff: !!s.wwffReference, newPark: isNewPark, wantedStates, col: 'reference' },
         { val: parkDisplay, col: 'parkName' },
-        { val: s.locationDesc, col: 'locationDesc' },
+        { val: s.locationDesc, dx: !!s.isDx, col: 'locationDesc' },
         { val: (s.lat != null && s.lon != null) ? latLonToGridLocal(s.lat, s.lon).slice(0, 4) : '', col: 'grid' },
         { val: s.cqZone != null ? String(s.cqZone) : '', col: 'cqz' },
         { val: s.ituZone != null ? String(s.ituZone) : '', col: 'ituz' },
@@ -14488,6 +14840,13 @@ function render() {
           nb.className = 'ref-new-pill';
           nb.style.cssText = `background:${SOURCE_COLORS_ACTIVE.pota};color:#000;font-size:9px;font-weight:bold;padding:1px 3px;border-radius:3px;margin-left:4px;`;
           td.appendChild(nb);
+        }
+        if (cell.dx) {
+          const db = document.createElement('span');
+          db.textContent = 'DX';
+          db.className = 'ref-dx-pill';
+          db.title = window.DxRule ? DxRule.describeRule(parseFloat(s.frequency), { hfMi: dxDistanceHf, vhfMi: dxDistanceVhf }) : 'DX';
+          td.appendChild(db);
         }
         if (cell.wantedStates && cell.wantedStates.length) {
           const sb = document.createElement('span');
@@ -14696,11 +15055,13 @@ const CW_DIGI_MODES_SET = new Set(['CW', 'FT8', 'FT4', 'FT2', 'RTTY', 'DIGI', 'J
 
 // Band lookup for ADIF (frequency in kHz -> band string)
 const BAND_RANGES = [
+  [135.7, 137.8, '2200m'], [472, 479, '630m'],
   [1800, 2000, '160m'], [3500, 4000, '80m'], [5330, 5410, '60m'],
   [7000, 7300, '40m'], [10100, 10150, '30m'], [14000, 14350, '20m'],
   [18068, 18168, '17m'], [21000, 21450, '15m'], [24890, 24990, '12m'],
   [28000, 29700, '10m'], [50000, 54000, '6m'], [70000, 70500, '4m'], [144000, 148000, '2m'],
   [420000, 450000, '70cm'], [222000, 225000, '1.25m'], [902000, 928000, '33cm'], [1240000, 1300000, '23cm'],
+  [2300000, 2450000, '13cm'], [3300000, 3500000, '9cm'], [5650000, 5925000, '6cm'], [10000000, 10500000, '3cm'], [24000000, 24250000, '1.25cm'],
 ];
 
 function freqKhzToBand(khz) {
@@ -14824,8 +15185,26 @@ function routeLogForSpot(spot) {
   });
 }
 
+// The Log QSO form follows the radio (hoogskev 2026-10-31: it kept the
+// frequency it opened with). The ECHOCAT Web rule (logSheetFollowRadio): a
+// form opened from a spot holds the spot's frequency until the radio arrives
+// within 500 Hz of it, then follows the dial; anything typed in the box wins.
+const logFreqFollow = { pinnedKhz: 0, typed: false };
+function logFreqFollowRadio(hz) {
+  if (!logDialog.open || logFreqFollow.typed || !(hz > 0)) return;
+  const khz = hz / 1000;
+  if (logFreqFollow.pinnedKhz && Math.abs(khz - logFreqFollow.pinnedKhz) < 0.5) logFreqFollow.pinnedKhz = 0;
+  if (!logFreqFollow.pinnedKhz) logFrequency.value = khz.toFixed(1);
+}
+logFrequency.addEventListener('input', () => { logFreqFollow.typed = true; });
+window.api.onCatFrequency((hz) => { logFreqFollowRadio(hz); });
+
 function openLogPopup(spot) {
   currentLogSpot = spot;
+  logFreqFollow.typed = false;
+  logFreqFollow.pinnedKhz = parseFloat(spot.frequency) || 0;
+  const nowKhz = radioFreqKhzExact || radioFreqKhz;
+  if (nowKhz && logFreqFollow.pinnedKhz && Math.abs(nowKhz - logFreqFollow.pinnedKhz) < 0.5) logFreqFollow.pinnedKhz = 0;
   logCallsign.value = spot.callsign || '';
   const logQrz = qrzData.get(JtcatParser.baseCall((spot.callsign || '').toUpperCase()));
   logOpName.value = logQrz ? [cleanQrzName(logQrz.nickname) || cleanQrzName(logQrz.fname), cleanQrzName(logQrz.name)].filter(Boolean).join(' ') : '';
@@ -14896,6 +15275,7 @@ function openLogPopup(spot) {
 
   logComment.value = '';
 
+  renderLogWorkedMatrix();
   refreshLogAsOperators(); // Log as: back to the active operator on every open
   logDialog.showModal();
   placeLogDialog();
@@ -15188,7 +15568,10 @@ logSaveBtn.addEventListener('click', async () => {
       try {
         const parkData = await window.api.getPark(potaRef);
         const states = parkData ? parkStatesFromLocationLocal(parkData.locationDesc) : [];
-        if (states.length > 1) parkState = await promptParkState(potaRef, parkData.locationDesc);
+        // Their spot's locationCode says where they are; ask only when it doesn't.
+        const fromSpot = states.length > 1 && window.api.spotParkState ? await window.api.spotParkState(potaRef, callsigns[0]) : '';
+        if (fromSpot) parkState = fromSpot;
+        else if (states.length > 1) parkState = await promptParkState(potaRef, parkData.locationDesc);
       } catch {}
     }
     const allRefs = sigInfo ? [sigInfo, ...addlParks].join(',') : '';
@@ -15336,7 +15719,7 @@ function showLogToast(message, opts) {
 }
 
 // --- External ATU tune progress modal ---
-// Shown while POTACAT emits a low-power CW carrier for an RF-sensing tuner
+// Shown while POTACAT emits a low-power AM carrier for an RF-sensing tuner
 // (LDG Z-100plus, MFJ, etc.). Stop button aborts the TX cycle early.
 (function setupExternalAtuModal() {
   let modal = null;
@@ -15353,7 +15736,7 @@ function showLogToast(message, opts) {
       '<div style="font-size:28px;margin-bottom:10px;">📡</div>',
       '<div style="font-size:15px;font-weight:700;margin-bottom:8px;">Tuning external ATU</div>',
       '<div id="ext-atu-countdown" style="font-size:28px;font-family:monospace;margin-bottom:6px;color:#e94560;">' + remaining.toFixed(1) + 's</div>',
-      '<div style="font-size:12px;color:#ccc;margin-bottom:16px;">Low-power CW carrier out — the tuner\'s relays will click as it matches.</div>',
+      '<div style="font-size:12px;color:#ccc;margin-bottom:16px;">Low-power carrier out (AM) — the tuner\'s relays will click as it matches.</div>',
       '<button type="button" id="ext-atu-stop" style="padding:8px 18px;background:#c24150;color:#fff;border:none;border-radius:4px;font-weight:700;cursor:pointer;">Stop</button>',
     ].join('');
     modal.appendChild(card);
@@ -15623,6 +16006,7 @@ function syncSpotsPanel() {
   spotsStrictAtno.checked = strictAtno;
   spotsHideOob.checked = hideOutOfBand;
   spotsHideQrt.checked = hideQrt;
+  if (spotsDxOnly) spotsDxOnly.checked = dxOnly;
   spotsShowHidden.checked = showHiddenSpots;
   quickShowMeter.checked = meterBoxVisible;
   const hCount = hiddenSpotCount();
@@ -15691,6 +16075,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   strictAtno = spotsStrictAtno.checked;
   hideOutOfBand = spotsHideOob.checked;
   hideQrt = spotsHideQrt.checked;
+  if (spotsDxOnly) dxOnly = spotsDxOnly.checked;
   showHiddenSpots = spotsShowHidden.checked;
   enableDxcc = spotsDxcc.checked;
 
@@ -15705,7 +16090,6 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   if (setEnableParc) setEnableParc.checked = enableParc;
   setEnableCluster.checked = enableCluster;
   setEnableCwSpots.checked = enableCwSpots;
-  setEnableRbn.checked = enableRbn;
   setEnablePskr.checked = enablePskr;
   setHideWorked.checked = hideWorked;
   setHideWorkedParks.checked = hideWorkedParks;
@@ -15723,7 +16107,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
     enableCluster, enableCwSpots, enableRbn, enablePskr, enableDxe,
     enableDxeSources: { ...enableDxeSources },
     hideWorked, hideWorkedParks, hideWorkedCallRef, prioritizeNewParks, strictAtno, hideOutOfBand,
-    enableDxcc,
+    enableDxcc, dxOnly,
   });
 
   render();
@@ -16060,19 +16444,13 @@ function _updateThemeToggleLabel() {
 // popouts read both fields, set data-theme + data-dark-variant on
 // their <html>. Receivers also accept plain string for backward
 // compat (older popout builds that haven't been updated yet).
-function _popoutThemePayload() {
-  return {
-    theme: setLightMode.checked ? 'light' : 'dark',
-    variant: _currentDarkVariant || 'navy',
-  };
-}
-
-quickLightMode.addEventListener('change', async () => {
-  const light = quickLightMode.checked;
-  applyTheme(light);
-  setLightMode.checked = light;
-  _updateThemeToggleLabel();
-  const p = _popoutThemePayload();
+/**
+ * Every pop-out window follows a theme change, whichever control made it (the
+ * menu's quick toggle or Settings). The Settings path used to miss the VFO,
+ * Log, pairing and Band Scope windows, which stayed in the old theme until a
+ * restart (a user, 2026-10-28). One list, both paths.
+ */
+function broadcastPopoutTheme(p) {
   if (popoutOpen) window.api.sendPopoutTheme(p);
   if (qsoPopoutOpen) window.api.sendQsoPopoutTheme(p);
   window.api.logPopoutTheme(p);
@@ -16086,7 +16464,28 @@ quickLightMode.addEventListener('change', async () => {
   window.api.vfoPopoutTheme(p);
   if (window.api.conditionsPopoutTheme) window.api.conditionsPopoutTheme(p);
   window.api.sendBandspreadPopoutTheme(p);
-  await window.api.saveSettings({ lightMode: light });
+}
+
+function _popoutThemePayload() {
+  const r = _resolvedAppTheme(setLightMode.checked);
+  const p = { theme: r.theme, variant: r.variant };
+  if (r.ds) p.ds = r.ds;
+  return p;
+}
+
+quickLightMode.addEventListener('change', async () => {
+  const light = quickLightMode.checked;
+  // With a design-system theme chosen, the quick toggle moves between its
+  // light and dark themes (POTACAT Light / the chosen dark one).
+  const _wasAppTheme = _currentAppTheme;
+  if (window.AppTheme) _currentAppTheme = window.AppTheme.toggledAppTheme(_currentAppTheme, light);
+  applyTheme(light);
+  setLightMode.checked = light;
+  _updateThemeToggleLabel();
+  broadcastPopoutTheme(_popoutThemePayload());
+  const _quickSave = { lightMode: light };
+  if (_currentAppTheme !== _wasAppTheme) _quickSave.appTheme = _currentAppTheme;
+  await window.api.saveSettings(_quickSave);
 });
 
 // More dropdown → "Activator mode" entry. Behaves like the other
@@ -16248,6 +16647,7 @@ quickAudioInput.addEventListener('change', async () => {
   if (activeRig) {
     activeRig.remoteAudioInput = quickAudioInput.value;
     await window.api.saveSettings({ rigs, remoteAudioInput: quickAudioInput.value });
+    healRigAudioDevicesNow('audio menu');
   } else {
     await window.api.saveSettings({ remoteAudioInput: quickAudioInput.value });
   }
@@ -16260,6 +16660,7 @@ quickAudioOutput.addEventListener('change', async () => {
   if (activeRig) {
     activeRig.remoteAudioOutput = quickAudioOutput.value;
     await window.api.saveSettings({ rigs, remoteAudioOutput: quickAudioOutput.value });
+    healRigAudioDevicesNow('audio menu');
   } else {
     await window.api.saveSettings({ remoteAudioOutput: quickAudioOutput.value });
   }
@@ -16508,11 +16909,25 @@ async function openSettingsDialog(tab) {
   if (tab) _openSettingsTab = tab;
   const s = await window.api.getSettings();
   setGrid.value = s.grid || '';
+  // The owner already has the ECHOCAT app: no download badges.
+  { const dl = document.getElementById('settings-echocat-download'); if (dl) dl.classList.toggle('hidden', s.echocatAppConnected === true); }
+  homeCountyLoad(s);
   setDistUnit.value = s.distUnit || 'mi';
   setMaxAge.value = s.maxAgeMin || 5;
   if (setPotaAgeLimit) setPotaAgeLimit.checked = s.potaAgeLimit === true;
   setMaxDist.value = s.maxDist || 0;
   setMaxDistUnit.textContent = (s.distUnit || 'mi') === 'km' ? 'km' : 'miles';
+  // DX distances are stored in MILES (main applies them to spot.distance);
+  // shown and typed in the operator's unit.
+  {
+    const km = (s.distUnit || 'mi') === 'km';
+    const show = (mi) => (Number(mi) > 0 ? String(Math.round(km ? mi * MI_TO_KM : mi)) : '');
+    const hf = document.getElementById('set-dx-dist-hf');
+    const vhf = document.getElementById('set-dx-dist-vhf');
+    if (hf) hf.value = show(s.dxDistanceHf);
+    if (vhf) vhf.value = show(s.dxDistanceVhf);
+    document.querySelectorAll('.set-dx-dist-unit').forEach((el) => { el.textContent = km ? 'km' : 'miles'; });
+  }
   setSotaMaxAge.value = s.sotaMaxAge || 30;
   setDxcMaxAge.value = s.dxcMaxAge || 15;
   setRefreshInterval.value = s.refreshInterval || 30;
@@ -16689,7 +17104,6 @@ async function openSettingsDialog(tab) {
   if (cwClubsDiv && cwSpotsPreset) {
     cwClubsDiv.style.display = cwSpotsPreset.value === 'rbn.telegraphy.de:7000' ? '' : 'none';
   }
-  setEnableRbn.checked = s.enableRbn === true;
   setMyCallsign.value = s.myCallsign || '';
   if (setOwnerCallsign) setOwnerCallsign.value = s.ownerCallsign || '';
   // Load cluster nodes (migrate legacy if needed)
@@ -16727,14 +17141,10 @@ async function openSettingsDialog(tab) {
   renderNetList(currentNetReminders);
   netEditor.classList.add('hidden');
   netAddBtn.classList.remove('hidden');
-  // Directory opt-in
-  setEnableDirectory.checked = s.enableDirectory === true;
-  dirControls.classList.toggle('hidden', !s.enableDirectory);
   updateDirectoryButton();
   if (dirBrowser) dirBrowser.classList.add('hidden');
   if (dirBrowseBtn) dirBrowseBtn.classList.remove('hidden');
   clusterConfig.classList.toggle('hidden', !s.enableCluster);
-  rbnConfig.classList.toggle('hidden', !s.enableRbn);
   setEnableWsjtx.checked = s.enableWsjtx === true;
   setWsjtxPort.value = s.wsjtxPort || 2237;
   setWsjtxHighlight.checked = s.wsjtxHighlight !== false;
@@ -16742,14 +17152,11 @@ async function openSettingsDialog(tab) {
   wsjtxConfig.classList.toggle('hidden', !s.enableWsjtx);
   setEnablePskr.checked = s.enablePskr === true;
   pskrConfig.classList.toggle('hidden', !s.enablePskr);
-  setEnablePskrMap.checked = s.enablePskrMap === true;
-  pskrMapConfig.classList.toggle('hidden', !s.enablePskrMap);
   if (setPskrUpload) {
     setPskrUpload.checked = s.pskrUpload === true;
     pskrUploadConfig.classList.toggle('hidden', !s.pskrUpload);
     if (setPskrAntenna) setPskrAntenna.value = s.pskrAntenna || '';
   }
-  setEnableLogging.checked = s.enableLogging === true;
   setEnableBannerLogger.checked = s.enableBannerLogger === true;
   setN1mmRst.checked = s.n1mmRst === true;
   if (s.adifLogPath) {
@@ -16763,21 +17170,21 @@ async function openSettingsDialog(tab) {
   setLogbookHost.value = s.logbookHost || '127.0.0.1';
   setLogbookPort.value = s.logbookPort || '';
   setLog4omWsjtxBinary.checked = s.log4omWsjtxBinary === true;
+  if (setN3fjpPull) setN3fjpPull.checked = s.n3fjpPull === true;
   setWavelogUrl.value = s.wavelogUrl || '';
   setWavelogApiKey.value = s.wavelogApiKey || '';
   setWavelogStationId.value = s.wavelogStationId || '';
   setExtraUdp.checked = s.extraUdpEnabled === true;
+  if (setExtraUdpDecodes) setExtraUdpDecodes.checked = s.extraUdpDecodes !== false;
   setExtraUdpHost.value = s.extraUdpHost || '127.0.0.1';
   setExtraUdpPort.value = s.extraUdpPort || 2237;
   setExtraUdpFormat.value = s.extraUdpFormat || 'wsjtx';
   extraUdpConfig.classList.toggle('hidden', !setExtraUdp.checked);
-  loggingConfig.classList.toggle('hidden', !s.enableLogging);
   logbookConfig.classList.toggle('hidden', !s.sendToLogbook);
   updateLogbookPortConfig();
   setColorblind.checked = s.colorblindMode === true;
   setWcagMode.checked = s.wcagMode === true;
   setColorRows.checked = s.colorRows !== false; // default true
-  setEnableSolar.checked = s.enableSolar === true;
   // Reconcile meter-box visibility: settings.json is authoritative (durable
   // across app updates). Fall back to localStorage only when settings.json
   // has no value yet (fresh install / pre-fix version).
@@ -16797,6 +17204,10 @@ async function openSettingsDialog(tab) {
   setEnableFreedv.checked = s.enableFreedv === true;
   document.getElementById('set-freedv-use-data-mode').checked = s.freedvUseDataMode !== false; // default true
   document.getElementById('set-jtcat-use-data-mode').checked = s.jtcatUseDataMode !== false; // default true
+  // A Flex tunes through SmartSDR, where this setting never applies: hidden
+  // there, shown for every other radio (phone parity, potacat-app c3c9e9e).
+  const jtcatDataModeRow = document.getElementById('jtcat-use-data-mode-row');
+  if (jtcatDataModeRow) jtcatDataModeRow.classList.toggle('hidden', window.RigFamily.isFlex((s.rigs || []).find(r => r.id === s.activeRigId)));
   document.getElementById('set-freedv-force-sideband').value = s.freedvForceSideband || '';
   document.getElementById('set-enable-auto-sstv').checked = s.enableAutoSstv === true;
   document.getElementById('set-auto-sstv-min').value = s.autoSstvInactivityMin || 90;
@@ -17052,6 +17463,7 @@ async function openSettingsDialog(tab) {
   setDisableAutoUpdate.checked = s.disableAutoUpdate === true;
   setEnableTelemetry.checked = s.enableTelemetry === true;
   setLightMode.checked = s.lightMode === true;
+  { const _at = document.getElementById('set-app-theme'); if (_at) _at.value = s.appTheme || 'classic'; }
   // Mirror the dark sub-variant radio. Default 'navy' for legacy users
   // who don't have the field yet; setting persists in settings.json.
   const _dvVal = s.darkVariant || 'navy';
@@ -17371,6 +17783,14 @@ settingsSave.addEventListener('click', async () => {
   const respotPresetsVal = collectRespotPresets();
   const maxAgeVal = parseInt(setMaxAge.value, 10) || 5;
   const maxDistVal = parseInt(setMaxDist.value, 10) || 0;
+  const dxDistMi = (id) => {
+    const el = document.getElementById(id);
+    const n = el ? parseFloat(el.value) : NaN;
+    if (!(n > 0)) return 0;
+    return Math.round(setDistUnit.value === 'km' ? n / MI_TO_KM : n);
+  };
+  const dxDistanceHfVal = dxDistMi('set-dx-dist-hf');
+  const dxDistanceVhfVal = dxDistMi('set-dx-dist-vhf');
   const sotaMaxAgeVal = parseInt(setSotaMaxAge.value, 10) || 30;
   const dxcMaxAgeVal = parseInt(setDxcMaxAge.value, 10) || 15;
   const refreshIntervalVal = Math.max(15, parseInt(setRefreshInterval.value, 10) || 30);
@@ -17412,9 +17832,10 @@ settingsSave.addEventListener('click', async () => {
   respotPresets = respotPresetsVal.slice();
   let clusterEnabled = setEnableCluster.checked;
   let cwSpotsEnabled = setEnableCwSpots.checked;
-  let rbnEnabled = setEnableRbn.checked;
+  // RBN spots in the spot list: the Spots menu's RBN toggle (Propagation
+  // itself is always on and has no setting).
+  let rbnEnabled = enableRbn;
   const pskrEnabled = setEnablePskr.checked;
-  const pskrMapEnabled = setEnablePskrMap.checked;
 
   // DX Cluster and RBN require a callsign
   if (clusterEnabled && !myCallsign) {
@@ -17427,17 +17848,8 @@ settingsSave.addEventListener('click', async () => {
     setEnableCwSpots.checked = false;
     alert('CW Spots requires a callsign. Please enter your callsign above.');
   }
-  if (rbnEnabled && !myCallsign) {
-    rbnEnabled = false;
-    setEnableRbn.checked = false;
-    alert('RBN requires a callsign. Please enter your callsign above.');
-  }
-  let pskrMapEnabledVal = pskrMapEnabled;
-  if (pskrMapEnabledVal && !myCallsign) {
-    pskrMapEnabledVal = false;
-    setEnablePskrMap.checked = false;
-    alert('PSKReporter Map requires a callsign. Please enter your callsign above.');
-  }
+  if (rbnEnabled && !myCallsign) rbnEnabled = false;
+  const pskrMapEnabledVal = true; // always on; kept in settings for older readers
   const clusterNodes = currentClusterNodes;
   const showBeaconsEnabled = setShowBeacons.checked;
   const showDxBarEnabled = setShowDxBar.checked;
@@ -17459,7 +17871,7 @@ settingsSave.addEventListener('click', async () => {
   const colorblindEnabled = setColorblind.checked;
   const wcagEnabled = setWcagMode.checked;
   const colorRowsEnabled = setColorRows.checked;
-  const solarEnabled = setEnableSolar.checked;
+  const solarEnabled = true; // always on (lib/install-defaults.js ALWAYS_ON)
   // Sync meter visibility from Settings Display checkbox — persist to both
   // localStorage (fast path on next start) and settings.json (durable across
   // app updates; localStorage can reset when Electron bumps session partition).
@@ -17520,6 +17932,7 @@ settingsSave.addEventListener('click', async () => {
   const disableAutoUpdate = setDisableAutoUpdate.checked;
   const telemetryEnabled = setEnableTelemetry.checked;
   const lightModeEnabled = setLightMode.checked;
+  const appThemeVal = (document.getElementById('set-app-theme') || {}).value || 'classic';
   // Dark sub-variant — radio "navy" vs "charcoal". Reads the checked
   // radio; falls back to current value so missing UI doesn't reset it.
   const darkVariantRadio = document.querySelector('input[name="set-dark-variant"]:checked');
@@ -17570,7 +17983,7 @@ settingsSave.addEventListener('click', async () => {
   const cwMacrosVal = readCwMacroEditor();
   const potaParksPath = setPotaParksPath.value.trim() || '';
   const hideWorkedParksEnabled = setHideWorkedParks.checked;
-  const loggingEnabled = setEnableLogging.checked;
+  const loggingEnabled = true; // always on; cloud sync is the choice
   const n1mmRstEnabled = setN1mmRst.checked;
   const adifLogPath = setAdifLogPath.value.trim() || '';
   const defaultPowerVal = parseInt(setDefaultPower.value, 10) || 100;
@@ -17607,10 +18020,14 @@ settingsSave.addEventListener('click', async () => {
     // alone; the CAT pill's None is the explicit disconnect.
     ...(rigTarget ? { catTarget: rigTarget } : {}),
     grid: setGrid.value.trim() || 'FN20jb',
+    homeState: (document.getElementById('set-home-state') || {}).value || '',
+    homeCounty: (document.getElementById('set-home-county') || {}).value || '',
     distUnit: setDistUnit.value,
     maxAgeMin: maxAgeVal,
     potaAgeLimit: !!(setPotaAgeLimit && setPotaAgeLimit.checked),
     maxDist: maxDistVal,
+    dxDistanceHf: dxDistanceHfVal,
+    dxDistanceVhf: dxDistanceVhfVal,
     sotaMaxAge: sotaMaxAgeVal,
     dxcMaxAge: dxcMaxAgeVal,
     refreshInterval: refreshIntervalVal,
@@ -17668,7 +18085,6 @@ settingsSave.addEventListener('click', async () => {
     clusterSpotterCqZones: clusterSpotterCqZonesStr,
     clusterSpotterItuZones: clusterSpotterItuZonesStr,
     netReminders: currentNetReminders,
-    enableDirectory: setEnableDirectory.checked,
     showBeacons: showBeaconsEnabled,
     showDxBar: showDxBarEnabled,
     enableClusterTerminal: clusterTerminalEnabled,
@@ -17755,10 +18171,12 @@ settingsSave.addEventListener('click', async () => {
     logbookHost: logbookHostVal,
     logbookPort: logbookPortVal,
     log4omWsjtxBinary: setLog4omWsjtxBinary.checked,
+    n3fjpPull: !!(setN3fjpPull && setN3fjpPull.checked),
     wavelogUrl: setWavelogUrl.value.trim(),
     wavelogApiKey: setWavelogApiKey.value.trim(),
     wavelogStationId: setWavelogStationId.value.trim(),
     extraUdpEnabled: setExtraUdp.checked,
+    extraUdpDecodes: setExtraUdpDecodes ? setExtraUdpDecodes.checked : true,
     extraUdpHost: setExtraUdpHost.value.trim() || '127.0.0.1',
     extraUdpPort: parseInt(setExtraUdpPort.value, 10) || 2237,
     extraUdpFormat: setExtraUdpFormat.value || 'wsjtx',
@@ -17766,6 +18184,7 @@ settingsSave.addEventListener('click', async () => {
     enableTelemetry: telemetryEnabled,
     lightMode: lightModeEnabled,
     darkVariant: darkVariantVal,
+    appTheme: appThemeVal,
     panadapterSyncTable: setPanadapterSyncTable.checked,
     panadapterPota:      setPanadapterPota.checked,
     panadapterSota:      setPanadapterSota.checked,
@@ -17868,6 +18287,8 @@ settingsSave.addEventListener('click', async () => {
   maxAgeMin = maxAgeVal;
   potaAgeLimit = !!(setPotaAgeLimit && setPotaAgeLimit.checked);
   maxDistMi = maxDistVal;
+  dxDistanceHf = dxDistanceHfVal;
+  dxDistanceVhf = dxDistanceVhfVal;
   sotaMaxAgeMin = sotaMaxAgeVal;
   dxcMaxAgeMin = dxcMaxAgeVal;
   scanDwell = dwellVal;
@@ -17926,7 +18347,6 @@ settingsSave.addEventListener('click', async () => {
   window.api.sendColorblindMode(colorblindEnabled);
   window.api.sendWcagMode(wcagEnabled);
   enableSolar = solarEnabled;
-  updateSolarVisibility();
   enableBandActivity = bandActivityEnabled;
   updateBandActivityVisibility();
   showBearing = showBearingEnabled;
@@ -17947,17 +18367,9 @@ settingsSave.addEventListener('click', async () => {
   defaultPower = defaultPowerVal;
   updateLoggingVisibility();
   updateBannerLoggerVisibility();
+  _currentAppTheme = appThemeVal;
   applyTheme(lightModeEnabled, darkVariantVal);
-  const _popoutTheme = { theme: lightModeEnabled ? 'light' : 'dark', variant: darkVariantVal };
-  if (popoutOpen) window.api.sendPopoutTheme(_popoutTheme);
-  if (qsoPopoutOpen) window.api.sendQsoPopoutTheme(_popoutTheme);
-  if (actmapPopoutOpen) window.api.actmapPopoutTheme(_popoutTheme);
-  if (spotsPopoutOpen) window.api.sendSpotsPopoutTheme(_popoutTheme);
-  if (clusterPopoutOpen) window.api.sendClusterPopoutTheme(_popoutTheme);
-  if (jtcatPopoutOpen) window.api.jtcatPopoutTheme(_popoutTheme);
-  window.api.sstvPopoutTheme(_popoutTheme);
-  if (window.api.conditionsPopoutTheme) window.api.conditionsPopoutTheme(_popoutTheme);
-  window.api.sendBandspreadPopoutTheme(_popoutTheme);
+  broadcastPopoutTheme(_popoutThemePayload());
   enableDxcc = dxccEnabled;
   licenseClass = licenseClassVal;
   hideOutOfBand = hideOob;
@@ -19672,6 +20084,14 @@ function renderDirectoryView() {
   const bandFilter = dirvBandFilter ? dirvBandFilter.value : 'all';
   const statusFilter = dirvStatusFilter ? dirvStatusFilter.value : 'all';
 
+  if (dirvActiveTab === 'landmarks') {
+    renderDirvLandmarks(search, bandFilter, dirvCategoryFilter ? dirvCategoryFilter.value : 'all');
+    return;
+  }
+  if (dirvActiveTab === 'channels') {
+    if (window.ChannelsView) window.ChannelsView.render(search);
+    return;
+  }
   if (dirvActiveTab === 'nets') {
     renderDirvNets(search, bandFilter, statusFilter);
     const table = dirvNetsContainer?.querySelector('.directory-view-table');
@@ -19955,15 +20375,232 @@ function renderDirvSwl(search, bandFilter, statusFilter) {
   }
 }
 
+// ── Landmarks (lib/landmarks.js) ─────────────────────────────────────────
+// Signals to dial into at any time. Each row has a one-line "what it is";
+// the station panel beside the table explains the selected row in four
+// parts. A click selects the row and tunes, as on the other two tabs.
+let directoryLandmarks = [];
+let directoryLandmarkCategories = [];
+let lmkSelectedId = null;
+let lmkShowAll = false;     // show rows the active radio cannot tune (this session)
+// The listening SDR's reach ([[loHz, hiHz], ...], lib/listen-source.js): a
+// station the radio cannot tune but the SDR can hear is shown, tagged SDR,
+// and Tune plays it through the SDR (main.js listenSdrArbitrate).
+let lmkSdrReach = null;
+function lmkViaSdr(lm) { return !!(window.ListenSource && lmkSdrReach && window.ListenSource.covers(lmkSdrReach, Number(lm.khz) * 1000)); }
+if (window.api.onKiwiStatus) {
+  window.api.onKiwiStatus((st) => {
+    const reach = st && (st.available || st.connected) && Array.isArray(st.reach) ? st.reach : null;
+    if (window.ChannelsView) window.ChannelsView.setReach({ rig: st && Array.isArray(st.rigReach) ? st.rigReach : null, sdr: reach });
+    if (JSON.stringify(reach) === JSON.stringify(lmkSdrReach)) return;
+    lmkSdrReach = reach;
+    if (typeof renderDirectoryView === 'function' && document.getElementById('dirv-landmarks-container') && !document.getElementById('dirv-landmarks-container').classList.contains('hidden')) renderDirectoryView();
+  });
+}
+let lmkTickTimer = null;
+const LMK_HINT_KEY = 'potacat-landmarks-hint-dismissed';
+const lmkBody = document.getElementById('lmk-body');
+const lmkPanel = document.getElementById('lmk-panel');
+const lmkHint = document.getElementById('lmk-hint');
+
+function lmkTune(lm) {
+  if (!lm || !lm.khz) return;
+  window.api.tune(String(lm.khz), lm.mode);
+}
+function lmkIsTuned(lm) {
+  return radioFreqKhz !== null && Math.abs(Number(lm.khz) - radioFreqKhz) < 0.5;
+}
+function lmkHintDismissed() {
+  try { return localStorage.getItem(LMK_HINT_KEY) === '1'; } catch { return false; }
+}
+
+function renderDirvLandmarks(search, bandFilter, category) {
+  if (!lmkBody || !window.Landmarks) return;
+  const L = window.Landmarks;
+  const now = Date.now();
+  if (lmkHint) lmkHint.classList.toggle('hidden', lmkHintDismissed() || !directoryLandmarks.some(l => l.id === 'wwv-10000'));
+
+  let rows = directoryLandmarks.map((lm, i) => { const viaSdr = !L.receivable(lm, rigBandsList) && lmkViaSdr(lm); return { lm, i, band: L.bandLabel(lm.khz), cd: L.status(lm, now), ok: L.receivable(lm, rigBandsList) || viaSdr, viaSdr }; });
+  if (search) {
+    rows = rows.filter(r => [r.lm.name, r.lm.line, r.lm.region, r.lm.mode, r.lm.hear, r.lm.why].some(v => (v || '').toLowerCase().includes(search))
+      || String(r.lm.khz).includes(search));
+  }
+  if (bandFilter !== 'all') rows = rows.filter(r => r.band === bandFilter);
+  if (category && category !== 'all') rows = rows.filter(r => r.lm.category === category);
+  const hidden = rows.filter(r => !r.ok);
+  const shown = lmkShowAll ? rows : rows.filter(r => r.ok);
+
+  if (dirvCount) {
+    dirvCount.textContent = `${shown.length} landmark${shown.length !== 1 ? 's' : ''}`
+      + (hidden.length && !lmkShowAll ? ` · ${hidden.length} this radio cannot tune` : '');
+  }
+
+  lmkBody.innerHTML = '';
+  if (!directoryLandmarks.length) {
+    lmkBody.innerHTML = '<tr class="lmk-hidden-note"><td colspan="6">Loading landmarks...</td></tr>';
+    lmkRenderPanel(null, false);
+    return;
+  }
+  const order = directoryLandmarkCategories.length ? directoryLandmarkCategories : L.CATEGORY_IDS.map(id => ({ id, label: id, reason: '' }));
+  let firstLive = null;
+  for (const cat of order) {
+    const inCat = shown.filter(r => r.lm.category === cat.id);
+    if (!inCat.length) continue;
+    // Within a group: live first, then by when it is next on, then in the
+    // catalog's own order (curated: the most useful station first).
+    inCat.sort((a, b) => (a.cd.sortKey - b.cd.sortKey) || (a.i - b.i));
+    const g = document.createElement('tr');
+    g.className = 'lmk-group';
+    g.innerHTML = `<td colspan="6">${esc(cat.label)}${cat.reason ? `<span class="lmk-group-reason">${esc(cat.reason)}</span>` : ''}</td>`;
+    lmkBody.appendChild(g);
+    for (const r of inCat) {
+      const { lm, cd } = r;
+      if (!firstLive && cd.status === 'live' && r.ok) firstLive = lm;
+      const tr = document.createElement('tr');
+      tr.className = 'lmk-row'
+        + (cd.status === 'live' ? ' lmk-live' : '')
+        + (lm.id === lmkSelectedId ? ' lmk-selected' : '')
+        + (lmkIsTuned(lm) ? ' lmk-tuned' : '')
+        + (r.ok ? '' : ' lmk-out');
+      tr.tabIndex = 0;
+      tr.dataset.id = lm.id;
+      const badge = cd.status === 'none'
+        ? '<span class="lmk-badge none">—</span>'
+        : `<span class="lmk-badge ${cd.status}" title="${esc(cd.label)}">${cd.status === 'live' ? 'Live' : cd.status === 'soon' ? 'Soon' : cd.status === 'today' ? 'Today' : 'Later'}</span>`;
+      tr.innerHTML = `<td>${badge}</td>`
+        + `<td class="lmk-name">${esc(lm.name)}</td>`
+        + `<td>${lm.khz}</td>`
+        + `<td>${esc(lm.mode)}</td>`
+        + `<td>${esc(r.band)}${r.viaSdr ? '<span class="lmk-sdr" title="Outside the radio&#39;s bands; POTACAT plays it through your SDR">SDR</span>' : ''}</td>`
+        + `<td class="lmk-line">${esc(lm.line)}${lm.ncdxf ? `<span class="lmk-now" data-khz="${lm.khz}"></span>` : ''}</td>`;
+      const choose = () => {
+        lmkSelectedId = lm.id;
+        lmkTune(lm);
+        renderDirectoryView();
+      };
+      tr.addEventListener('click', choose);
+      tr.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); choose(); } });
+      lmkBody.appendChild(tr);
+    }
+  }
+  if (hidden.length) {
+    const tr = document.createElement('tr');
+    tr.className = 'lmk-hidden-note';
+    const names = hidden.slice(0, 4).map(r => r.lm.name).filter((v, i, a) => a.indexOf(v) === i).join(', ');
+    tr.innerHTML = lmkShowAll
+      ? `<td colspan="6">Rows in grey are outside the bands this radio is set up for. <button type="button" class="lmk-show-all">Hide them</button></td>`
+      : `<td colspan="6">${hidden.length} landmark${hidden.length !== 1 ? 's are' : ' is'} hidden because this radio is not set up for ${hidden.length !== 1 ? 'their bands' : 'its band'}${names ? ` (${esc(names)}${hidden.length > 4 ? ', ...' : ''})` : ''}. <button type="button" class="lmk-show-all">Show anyway</button></td>`;
+    tr.querySelector('.lmk-show-all').addEventListener('click', () => { lmkShowAll = !lmkShowAll; renderDirectoryView(); });
+    lmkBody.appendChild(tr);
+  }
+
+  // The panel follows the selection; with none, the tuned landmark, else the
+  // first one on the air, so the panel is never empty on first open.
+  let sel = directoryLandmarks.find(l => l.id === lmkSelectedId)
+    || directoryLandmarks.find(l => lmkIsTuned(l))
+    || firstLive;
+  lmkRenderPanel(sel, sel ? (L.receivable(sel, rigBandsList) || lmkViaSdr(sel)) : true);
+  lmkUpdateLive();
+}
+
+function lmkRenderPanel(lm, ok) {
+  if (!lmkPanel) return;
+  if (!lm) {
+    lmkPanel.innerHTML = '<p class="lmk-panel-empty">Click a landmark to tune it and read about it here.</p>';
+    return;
+  }
+  const L = window.Landmarks;
+  const cat = directoryLandmarkCategories.find(c => c.id === lm.category);
+  const cd = L.status(lm, Date.now());
+  const meta = [cat ? cat.label : '', L.bandLabel(lm.khz), cd.label, lm.region].filter(Boolean).join(' · ');
+  const sec = (title, text, cls) => text ? `<section class="lmk-sec${cls ? ' ' + cls : ''}"><h4>${title}</h4><p>${esc(text)}</p></section>` : '';
+  lmkPanel.innerHTML = `
+    <div class="lmk-p-head">
+      <h3 class="lmk-p-name">${esc(lm.name)}</h3>
+      <span class="lmk-p-freq">${lm.khz} kHz ${esc(lm.mode)}</span>
+      <span class="lmk-p-meta">${esc(meta)}</span>
+    </div>
+    ${lm.ncdxf ? `<div class="lmk-beacon" data-khz="${lm.khz}">
+      <span class="lmk-beacon-label">On the air now</span>
+      <span class="lmk-beacon-now"></span>
+      <div class="lmk-beacon-track"><div class="lmk-beacon-fill"></div></div>
+      <span class="lmk-beacon-next"></span>
+    </div>` : ''}
+    <p class="lmk-p-lead">${esc(lm.line)}</p>
+    ${ok ? '' : '<p class="lmk-p-note">This radio is not set up for this frequency. If it does receive it, add the band in Settings &gt; My Rigs, or listen on a KiwiSDR from the VFO window’s SDR menu.</p>'}
+    ${sec('What you’ll hear', lm.hear)}
+    ${sec('Why it matters', lm.why)}
+    ${sec('Try this', lm.try, 'lmk-try')}
+    <div class="lmk-p-actions">
+      <button type="button" class="lmk-btn lmk-btn-tint" id="lmk-panel-tune">Tune ${lm.khz} kHz</button>
+      ${lm.url ? '<button type="button" class="lmk-link" id="lmk-panel-link">Station page</button>' : ''}
+    </div>`;
+  const tuneBtn = document.getElementById('lmk-panel-tune');
+  if (tuneBtn) tuneBtn.addEventListener('click', () => lmkTune(lm));
+  const link = document.getElementById('lmk-panel-link');
+  if (link) link.addEventListener('click', () => window.api.openExternal(lm.url));
+}
+
+/** Once a second: the NCDXF beacon on the air, in the rows and the panel. */
+function lmkUpdateLive() {
+  const L = window.Landmarks;
+  if (!L || dirvActiveTab !== 'landmarks') return;
+  const now = Date.now();
+  document.querySelectorAll('#lmk-body .lmk-now').forEach((el) => {
+    const b = L.beaconAt(el.dataset.khz, now);
+    el.textContent = b ? `· now ${b.now.call}` : '';
+  });
+  const box = lmkPanel && lmkPanel.querySelector('.lmk-beacon');
+  if (!box) return;
+  const b = L.beaconAt(box.dataset.khz, now);
+  if (!b) return;
+  const me = (typeof grid === 'string' && grid) ? gridToLatLonLocal(grid) : null;
+  let dist = '';
+  if (me) {
+    const km = L.distanceKm(me.lat, me.lon, b.now.lat, b.now.lon);
+    const v = distUnit === 'km' ? km : km * 0.621371;
+    dist = ` · about ${Math.round(v / 50) * 50 || Math.round(v)} ${distUnit === 'km' ? 'km' : 'mi'} away`;
+  }
+  box.querySelector('.lmk-beacon-now').innerHTML = `${esc(b.now.call)} <span class="lmk-beacon-place">${esc(b.now.place)}${esc(dist)}</span>`;
+  box.querySelector('.lmk-beacon-fill').style.width = `${Math.min(100, (b.secondsInto / 10) * 100)}%`;
+  box.querySelector('.lmk-beacon-next').textContent = `Next: ${b.next.call}, ${b.next.place}, in ${Math.ceil(b.secondsLeft)} s · then ${b.after.call}`;
+}
+function lmkStartTick() {
+  lmkStopTick();
+  lmkTickTimer = setInterval(() => {
+    if (currentView === 'directory' && dirvActiveTab === 'landmarks') lmkUpdateLive();
+  }, 1000);
+}
+function lmkStopTick() {
+  if (lmkTickTimer) { clearInterval(lmkTickTimer); lmkTickTimer = null; }
+}
+{
+  const tuneBtn = document.getElementById('lmk-hint-tune');
+  const closeBtn = document.getElementById('lmk-hint-close');
+  const dismiss = () => {
+    try { localStorage.setItem(LMK_HINT_KEY, '1'); } catch { /* private storage: shows again next launch */ }
+    if (lmkHint) lmkHint.classList.add('hidden');
+  };
+  if (tuneBtn) tuneBtn.addEventListener('click', () => {
+    const wwv = directoryLandmarks.find(l => l.id === 'wwv-10000');
+    if (wwv) { lmkSelectedId = wwv.id; lmkTune(wwv); }
+    dismiss();
+    renderDirectoryView();
+  });
+  if (closeBtn) closeBtn.addEventListener('click', dismiss);
+}
+
 // Auto-refresh countdowns every 30s while directory view is open
 function startDirvAutoRefresh() {
   stopDirvAutoRefresh();
   dirvAutoRefreshTimer = setInterval(() => {
     if (currentView === 'directory') renderDirectoryView();
   }, 30000);
+  lmkStartTick();
 }
 function stopDirvAutoRefresh() {
   if (dirvAutoRefreshTimer) { clearInterval(dirvAutoRefreshTimer); dirvAutoRefreshTimer = null; }
+  lmkStopTick();
 }
 
 // --- Directory View: Column Resize & Visibility ---
@@ -20113,22 +20750,40 @@ function initDirvHeaderMenu(table) {
 }
 
 // Directory view tab switching
-if (dirvTabNets) dirvTabNets.addEventListener('click', () => {
-  dirvActiveTab = 'nets';
-  dirvTabNets.classList.add('active');
-  dirvTabSwl.classList.remove('active');
-  dirvNetsContainer.classList.remove('hidden');
-  dirvSwlContainer.classList.add('hidden');
+function setDirvTab(tab) {
+  dirvActiveTab = tab;
+  const tabs = { nets: [dirvTabNets, dirvNetsContainer], swl: [dirvTabSwl, dirvSwlContainer], landmarks: [dirvTabLandmarks, dirvLandmarksContainer], channels: [dirvTabChannels, dirvChannelsContainer] };
+  for (const [id, [btn, box]] of Object.entries(tabs)) {
+    if (btn) btn.classList.toggle('active', id === tab);
+    if (box) box.classList.toggle('hidden', id !== tab);
+  }
+  // Landmarks are mostly always on, so "On Air Now" says nothing there; the
+  // tab filters by category instead.
+  if (dirvStatusFilter) dirvStatusFilter.classList.toggle('hidden', tab === 'landmarks' || tab === 'channels');
+  if (dirvCategoryFilter) dirvCategoryFilter.classList.toggle('hidden', tab !== 'landmarks');
+  if (dirvBandFilter) dirvBandFilter.classList.toggle('hidden', tab === 'channels');   // channels live off the ham bands; the tab has its own group filter
+  if (dirvSearch) dirvSearch.placeholder = tab === 'landmarks' ? 'Search landmarks...' : tab === 'channels' ? 'Search channels...' : 'Search nets & broadcasts...';
+  const suggestNets = document.getElementById('dirv-suggest-nets');
+  const suggestLmk = document.getElementById('dirv-suggest-landmarks');
+  if (suggestNets) suggestNets.classList.toggle('hidden', tab === 'landmarks' || tab === 'channels');
+  if (suggestLmk) suggestLmk.classList.toggle('hidden', tab !== 'landmarks');
+  if (dirvPlaceholder) dirvPlaceholder.classList.add('hidden');
   renderDirectoryView();
-});
-if (dirvTabSwl) dirvTabSwl.addEventListener('click', () => {
-  dirvActiveTab = 'swl';
-  dirvTabSwl.classList.add('active');
-  dirvTabNets.classList.remove('active');
-  dirvSwlContainer.classList.remove('hidden');
-  dirvNetsContainer.classList.add('hidden');
-  renderDirectoryView();
-});
+}
+if (dirvTabNets) dirvTabNets.addEventListener('click', () => setDirvTab('nets'));
+if (dirvTabSwl) dirvTabSwl.addEventListener('click', () => setDirvTab('swl'));
+if (dirvTabLandmarks) dirvTabLandmarks.addEventListener('click', () => setDirvTab('landmarks'));
+if (dirvTabChannels) dirvTabChannels.addEventListener('click', () => setDirvTab('channels'));
+// Channels (renderer/channels-view.js): a click tunes through the one tune path,
+// so the SDR plays a frequency the radio cannot reach (lib/listen-source.js).
+if (window.ChannelsView) {
+  window.ChannelsView.init({ api: window.api, tune: (khz, mode) => window.api.tune(khz, mode), radioKhz: () => radioFreqKhz });
+}
+if (dirvCategoryFilter) dirvCategoryFilter.addEventListener('change', () => renderDirectoryView());
+{
+  const discordLink = document.getElementById('dirv-suggest-discord');
+  if (discordLink) discordLink.addEventListener('click', (e) => { e.preventDefault(); window.api.openExternal('https://potacat.com/discord'); });
+}
 
 // Directory view filters
 if (dirvSearch) dirvSearch.addEventListener('input', () => renderDirectoryView());
@@ -20142,10 +20797,8 @@ if (dirvSuggestSheet) dirvSuggestSheet.addEventListener('click', (e) => {
 
 function updateDirectoryButton() {
   if (!viewDirectoryBtn) return;
-  // Show when directory is enabled, OR user has custom net reminders
-  const show = setEnableDirectory?.checked || (currentNetReminders && currentNetReminders.length > 0);
-  viewDirectoryBtn.classList.toggle('hidden', !show);
-  if (!show && currentView === 'directory') setView('table');
+  // The directory is always on (Casey 2026-10-26): its menu entry always shows.
+  viewDirectoryBtn.classList.remove('hidden');
 }
 
 function renderDirectory() {
@@ -20412,15 +21065,6 @@ if (dirSearchInput) dirSearchInput.addEventListener('input', () => { renderDirec
 // Directory refresh button
 if (dirRefreshBtn) dirRefreshBtn.addEventListener('click', () => { window.api.fetchDirectory(); });
 
-// Directory opt-in checkbox
-if (setEnableDirectory) setEnableDirectory.addEventListener('change', () => {
-  const on = setEnableDirectory.checked;
-  dirControls.classList.toggle('hidden', !on);
-  if (!on && dirBrowser) {
-    dirBrowser.classList.add('hidden');
-    dirBrowseBtn.classList.remove('hidden');
-  }
-});
 
 // Browse / close directory browser — now opens the full Directory View
 if (dirBrowseBtn) dirBrowseBtn.addEventListener('click', () => {
@@ -20439,6 +21083,9 @@ if (dirCloseBtn) dirCloseBtn.addEventListener('click', () => {
 window.api.onDirectoryData((data) => {
   directoryNets = data.nets || [];
   directorySwl = data.swl || [];
+  directoryLandmarks = Array.isArray(data.landmarks) ? data.landmarks : directoryLandmarks;
+  directoryLandmarkCategories = Array.isArray(data.landmarkCategories) ? data.landmarkCategories : directoryLandmarkCategories;
+  if (window.ChannelsView && Array.isArray(data.channels)) window.ChannelsView.setList(data.channels);
   renderDirectory();
   renderDirectoryView();
 });
@@ -21068,6 +21715,12 @@ catLogClearBtn.addEventListener('click', () => {
     // Winlink: Pat's state, the shim, the session — only when it is on.
     let winlinkLine = '';
     try { if (window.api.winlinkDiag) winlinkLine = await window.api.winlinkDiag(); } catch {}
+    // Whether settings are reaching disk (AE5JE + Bitdefender: a blocked save
+    // keeps changes for the session only, and every launch "forgot").
+    let launcherLine = '';
+    try { if (window.api.launcherDiag) launcherLine = await window.api.launcherDiag(); } catch {}
+    let settingsSaved = '(unknown)';
+    try { if (window.api.settingsSaveStatus) settingsSaved = await window.api.settingsSaveStatus(); } catch {}
     const md = {
       version: window._appVersion || s.appVersion || 'unknown',
       platform: window.api.platform,
@@ -21079,6 +21732,8 @@ catLogClearBtn.addEventListener('click', () => {
       stationSetup,
       echocatServer,
       winlink: winlinkLine,
+      launcher: launcherLine,
+      settingsSaved,
     };
     // Complete-from-launch log: main reads startup.log + session.log (both
     // capture everything since process start, including the pre-window lines
@@ -21139,6 +21794,8 @@ catLogClearBtn.addEventListener('click', () => {
       '**Station Setup:** ' + md.stationSetup,
       '**ECHOCAT server:** ' + md.echocatServer,
       ...(md.winlink ? ['**Winlink:** ' + md.winlink] : []),
+      ...(md.launcher ? ['**Launcher:** ' + md.launcher] : []),
+      '**Settings saved:** ' + md.settingsSaved,
       '',
       '### What I tried to do',
       '<!-- fill in: the steps you took -->',
@@ -21288,43 +21945,51 @@ catLogClearBtn.addEventListener('click', () => {
   });
 })();
 
-// --- Solar data listener ---
-function updateSolarVisibility() {
-  const method = enableSolar ? 'remove' : 'add';
-  sfiStatusEl.classList[method]('hidden');
-  kStatusEl.classList[method]('hidden');
-  aStatusEl.classList[method]('hidden');
-}
-
-window.api.onSolarData((payload) => {
-  const { sfi, kIndex, aIndex } = payload || {};
-  const hidden = enableSolar ? '' : ' hidden';
-
-  if (sfi != null) {
-    const sfiClass = sfi >= 100 ? 'connected' : sfi >= 70 ? 'warn' : 'disconnected';
-    sfiStatusEl.textContent = `SFI ${sfi}`;
-    sfiStatusEl.className = `status solar-pill ${sfiClass}${hidden}`;
-  }
-  if (kIndex != null) {
-    const kClass = kIndex <= 2 ? 'connected' : kIndex <= 4 ? 'warn' : 'disconnected';
-    kStatusEl.textContent = `K ${kIndex}`;
-    kStatusEl.className = `status solar-pill ${kClass}${hidden}`;
-  }
-  if (aIndex != null) {
-    const aClass = aIndex <= 7 ? 'connected' : aIndex <= 20 ? 'warn' : 'disconnected';
-    aStatusEl.textContent = `A ${aIndex}`;
-    aStatusEl.className = `status solar-pill ${aClass}${hidden}`;
-  }
-  // Note: the full Conditions panel lives in conditions-popout.html and
-  // subscribes to its own solar-data IPC — no in-window render here.
-});
-
-// Conditions popout owns its own render — see renderer/conditions-popout.js.
+// Solar conditions (SFI, K, A) live in the Conditions window only
+// (renderer/conditions-popout.js); the top bar no longer shows them
+// (Casey 2026-10-27).
 
 
 
 // --- Band Activity Heatmap ---
-const HEATMAP_BANDS = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '4m', '2m', '70cm', '1.25m', '33cm', '23cm'];
+// ── Bands this radio is used on (main.js activeRigBands, lib/rig-bands.js) ──
+// null = not restricted. Every band picker and band button in this window
+// hides the others; the spot list itself is already filtered in main.
+var rigBandsList = null; // var, not let: renderBandActivity may run before this line
+function applyRigBandsMain() {
+  if (!window.RigBands) return;
+  const RB = window.RigBands;
+  RB.applyToElements(document, '#band-filter .multi-dropdown-item', rigBandsList);
+  RB.applyToElements(document, '#rbn-band-filter .multi-dropdown-item', rigBandsList);
+  RB.applyToElements(document, '#band-buttons button', rigBandsList);
+  RB.applyToElements(document, '.jtcat-band-btn', rigBandsList);
+  for (const id of ['dirv-band-filter', 'set-idle-psk-band', 'set-idle-wspr-band', 'welcome-idle-psk-band', 'welcome-idle-wspr-band']) {
+    const sel = document.getElementById(id);
+    if (!sel) continue;
+    RB.applyToElements(sel, 'option', rigBandsList);
+    RB.fixSelect(sel);
+  }
+  try { renderBandActivity(); } catch { /* not built yet */ }
+  // The Landmarks tab hides what this radio cannot tune.
+  try { if (currentView === 'directory' && dirvActiveTab === 'landmarks') renderDirectoryView(); } catch { /* not built yet */ }
+}
+if (window.api && window.api.rigBandsGet) {
+  window.api.rigBandsGet().then((d) => { rigBandsList = (d && d.bands) || null; applyRigBandsMain(); }).catch(() => {});
+  window.api.onRigBands((d) => { rigBandsList = (d && d.bands) || null; applyRigBandsMain(); });
+  // The renderer's rig copy is what the editor saves whole: keep the tuner
+  // verdict current in it, and redraw the grid if that rig is being edited.
+  if (window.api.onRigAtuBands) window.api.onRigAtuBands((d) => {
+    if (!d || !d.rigId) return;
+    const rig = (currentRigs || []).find(r => r && r.id === d.rigId);
+    if (rig) rig.atuBands = d.atuBands;
+    if (typeof editingRigId !== 'undefined' && editingRigId === d.rigId) {
+      rigBandsState.atuNoMatch = d.atuBands && Array.isArray(d.atuBands.noMatch) ? d.atuBands.noMatch.slice() : [];
+      try { renderRigBandsGrid(); } catch { /* editor not open */ }
+    }
+  });
+}
+
+const HEATMAP_BANDS = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '4m', '2m', '70cm', '1.25m', '33cm', '23cm', '13cm', '9cm', '6cm', '3cm', '1.25cm'];
 const HEATMAP_CONTINENTS = ['EU', 'NA', 'SA', 'AS', 'AF', 'OC'];
 
 function updateBandActivityVisibility() {
@@ -21359,13 +22024,15 @@ function renderBandActivity() {
     counts[key] = (counts[key] || 0) + 1;
   }
 
-  // Build grid: columns = header + bands, rows = header + continents
-  const cols = HEATMAP_BANDS.length + 1; // +1 for row labels
+  // Build grid: columns = header + bands, rows = header + continents.
+  // Only bands this radio is used on (rig editor, lib/rig-bands.js).
+  const HEATMAP_BANDS_RIG = window.RigBands ? window.RigBands.filterByBand(HEATMAP_BANDS, rigBandsList) : HEATMAP_BANDS;
+  const cols = HEATMAP_BANDS_RIG.length + 1; // +1 for row labels
   bandActivityBar.innerHTML = '';
 
   const grid = document.createElement('div');
   grid.className = 'band-activity-grid';
-  grid.style.gridTemplateColumns = `auto repeat(${HEATMAP_BANDS.length}, 1fr)`;
+  grid.style.gridTemplateColumns = `auto repeat(${HEATMAP_BANDS_RIG.length}, 1fr)`;
 
   // Header row: empty corner + band labels
   const corner = document.createElement('div');
@@ -21373,7 +22040,7 @@ function renderBandActivity() {
   corner.textContent = '';
   grid.appendChild(corner);
 
-  for (const band of HEATMAP_BANDS) {
+  for (const band of HEATMAP_BANDS_RIG) {
     const hdr = document.createElement('div');
     hdr.className = 'band-activity-header';
     hdr.textContent = band;
@@ -21387,7 +22054,7 @@ function renderBandActivity() {
     label.textContent = cont;
     grid.appendChild(label);
 
-    for (const band of HEATMAP_BANDS) {
+    for (const band of HEATMAP_BANDS_RIG) {
       const count = counts[`${band}|${cont}`] || 0;
       const cell = document.createElement('div');
       cell.className = 'band-activity-cell';
@@ -21476,6 +22143,11 @@ async function updateRbnHomeMarker() {
   );
 
   rbnMap.setView([pos.lat, pos.lon], rbnMap.getZoom());
+  // The arcs need the home position, and this reads it asynchronously — the
+  // first render of the markers ran before it was known, so the view opened
+  // with dots and no arcs until the next batch of reports arrived (K3SBP
+  // 2026-10-23). Draw them now that it is.
+  if (rbnMarkerLayer && (currentView === 'rbn' || activatorRbnVisible)) renderRbnMarkers();
 }
 
 function updateRbnNightOverlay() {
@@ -21574,6 +22246,10 @@ function renderRbnMarkers() {
   _rbnRenderedKey = rbnSpotsKey(filtered);
   const unit = distUnit === 'km' ? 'km' : 'mi';
   const activeBands = new Set();
+  // Light theme: the band colours sit on pale tiles, and under the night
+  // shade they go murky — a dark outline keeps every dot readable (K3SBP
+  // 2026-10-23, green dots lost in his own night).
+  const lightTheme = document.documentElement.getAttribute('data-theme') === 'light';
 
   // Draw arcs first (underneath markers)
   if (rbnHomePos) {
@@ -21585,8 +22261,8 @@ function renderRbnMarkers() {
         const offsetPoints = arcPoints.map(([lat, lon]) => [lat, lon + offset]);
         L.polyline(offsetPoints, {
           color: color,
-          weight: 1.5,
-          opacity: 0.45,
+          weight: lightTheme ? 2 : 1.5,
+          opacity: lightTheme ? 0.6 : 0.45,
           interactive: false,
         }).addTo(rbnMarkerLayer);
       }
@@ -21617,10 +22293,10 @@ function renderRbnMarkers() {
       L.circleMarker([s.lat, s.lon + offset], {
         radius: 7,
         fillColor: color,
-        color: color,
-        weight: 1,
+        color: lightTheme ? '#1a1a2e' : color,
+        weight: lightTheme ? 1.5 : 1,
         opacity: 0.9,
-        fillOpacity: 0.7,
+        fillOpacity: lightTheme ? 0.9 : 0.7,
       }).bindPopup(popupContent).addTo(rbnMarkerLayer);
     }
   }
@@ -21631,7 +22307,7 @@ function renderRbnMarkers() {
 
 function renderRbnLegend(activeBands) {
   rbnLegendEl.innerHTML = '';
-  const sortedBands = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '4m', '2m', '70cm', '1.25m', '33cm', '23cm'];
+  const sortedBands = ['2200m', '630m', '160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '4m', '2m', '70cm', '1.25m', '33cm', '23cm', '13cm', '9cm', '6cm', '3cm', '1.25cm'];
   for (const band of sortedBands) {
     if (!activeBands.has(band)) continue;
     const item = document.createElement('span');
@@ -22453,8 +23129,6 @@ function effectiveVoiceMacroSlots(savedSlots, filled, labels, max) {
 let voicePlayingIdx = -1;
 let voicePlaybackSource = null;
 let voicePlaybackCtx = null;
-let voiceRecorder = null;
-let voiceRecordingIdx = -1;
 // Preview state — separate from playback so they can't collide. Preview
 // routes to the system default output and never PTTs the rig (K0OTC 2026-05-21).
 let voicePreviewIdx = -1;
@@ -22530,9 +23204,18 @@ async function updateVoiceMacroBar() {
 async function playVoiceMacro(idx, btn) {
   // Remote shack: its macro, played into its radio (hotkeys land here too).
   if (remoteShack && remoteShack.remote) { window.api.remoteVoiceMacroPlay(idx); return; }
-  if (voicePlayingIdx >= 0) stopVoicePlayback();
   var base64 = await window.api.voiceMacroLoad(idx);
   if (!base64) return;
+  playVoiceAudio(base64, { idx: idx, btn: btn, label: voiceMacroLabels[idx] || ('V' + (idx + 1)) });
+}
+
+// VOICE_DEVICE_IDX marks a recording a device sent (a guest's own macro on a
+// lent rig): played once like a slot, never stored.
+var VOICE_DEVICE_IDX = -2;
+var voicePlayingLabel = '';
+async function playVoiceAudio(base64, opts) {
+  var idx = opts.idx, btn = opts.btn || null;
+  if (voicePlayingIdx !== -1) stopVoicePlayback();
   var binary = atob(base64);
   var bytes = new Uint8Array(binary.length);
   for (var j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
@@ -22560,6 +23243,7 @@ async function playVoiceMacro(idx, btn) {
   }
   voicePlaybackCtx.decodeAudioData(bytes.buffer, function(audioBuffer) {
     voicePlayingIdx = idx;
+    voicePlayingLabel = opts.label || '';
     if (btn) btn.classList.add('active');
     voicePlaybackSource = voicePlaybackCtx.createBufferSource();
     voicePlaybackSource.buffer = audioBuffer;
@@ -22580,10 +23264,15 @@ async function playVoiceMacro(idx, btn) {
     voicePlaybackSource.start(0);
     if (monitor) { try { monitor.start(0); } catch (e) {} }
     voicePlaybackSource.onended = function() { stopVoicePlayback(); };
+    if (window.api.voiceMacroPlaying) window.api.voiceMacroPlaying({ playing: true, label: voicePlayingLabel });
+  }, function(err) {
+    console.warn('[Voice] Could not decode the recording:', err && err.message);
+    stopVoicePlayback();
   });
 }
 
 function stopVoicePlayback() {
+  var wasPlaying = voicePlayingIdx !== -1;
   if (voicePlaybackSource) { try { voicePlaybackSource.stop(); } catch(e) {} voicePlaybackSource = null; }
   if (voicePlaybackCtx) { voicePlaybackCtx.close().catch(function(){}); voicePlaybackCtx = null; }
   if (voiceMonitorSource) { try { voiceMonitorSource.stop(); } catch (e) {} voiceMonitorSource = null; }
@@ -22591,6 +23280,8 @@ function stopVoicePlayback() {
   window.api.voiceMacroPtt(false);
   voicePlayingIdx = -1;
   if (voiceMacroBtns) voiceMacroBtns.querySelectorAll('button.active').forEach(b => b.classList.remove('active'));
+  if (wasPlaying && window.api.voiceMacroPlaying) window.api.voiceMacroPlaying({ playing: false, label: voicePlayingLabel });
+  voicePlayingLabel = '';
 }
 
 // Local-only preview — plays the macro through the system default output so
@@ -22713,6 +23404,16 @@ window.api.onPlayVoiceMacro((idx) => {
   const btn = voiceMacroBtns ? voiceMacroBtns.querySelector(`button[data-idx="${idx}"]`) : null;
   playVoiceMacro(idx, btn);
 });
+// A device's own recording (a guest's macro on a lent rig), and a device's Stop.
+if (window.api.onPlayVoiceMacroAudio) {
+  window.api.onPlayVoiceMacroAudio((info) => {
+    if (!info || typeof info.audio !== 'string' || !info.audio) return;
+    playVoiceAudio(info.audio, { idx: VOICE_DEVICE_IDX, btn: null, label: info.label || '' });
+  });
+}
+if (window.api.onStopVoiceMacro) {
+  window.api.onStopVoiceMacro(() => { if (voicePlayingIdx !== -1) stopVoicePlayback(); });
+}
 
 // Voice macro recording UI in Settings
 async function renderVoiceMacroEditor() {
@@ -22896,44 +23597,90 @@ async function renderVoiceMacroEditor() {
 // report: "When I play it I just hear a series of tones, not my voice."
 const VOICE_MACRO_DEVICE_KEY = 'pota-cat-voice-macro-input-device';
 
+// One recorder for every Rec button (lib/voice-recorder.js holds the rules).
+// A Rec button pressed while ANY take is open stops that take; it never
+// starts another. The old code stopped and then started a fresh take in the
+// same slot, which ran 30 s and overwrote the recording, usually with
+// silence (ride1226 2026-10-31: "no audio").
+let voiceRecUi = null; // { idx, btn, statusEl, idleText } of the open take
+function voiceRecSetButton(ui, text, color) {
+  if (!ui || !ui.btn) return;
+  ui.btn.textContent = text;
+  ui.btn.style.color = color || '';
+}
+function voiceRecStatus(ui, text, color) {
+  if (!ui || !ui.statusEl) return;
+  ui.statusEl.textContent = text;
+  if (ui.statusEl.style) ui.statusEl.style.color = color || '';
+}
+const voiceRecMeter = (stream) => {
+  const ctx = new AudioContext();
+  const src = ctx.createMediaStreamSource(stream);
+  const an = ctx.createAnalyser();
+  an.fftSize = 1024;
+  src.connect(an);
+  const buf = new Float32Array(an.fftSize);
+  return {
+    read() { an.getFloatTimeDomainData(buf); let p = 0; for (let i = 0; i < buf.length; i++) { const v = Math.abs(buf[i]); if (v > p) p = v; } return p; },
+    close() { try { src.disconnect(); } catch {} ctx.close().catch(() => {}); },
+  };
+};
+let voiceRecQuietSince = 0;
+const voiceRecorder = window.VoiceRecorder.createVoiceRecorder({
+  getUserMedia: (c) => navigator.mediaDevices.getUserMedia(c),
+  MediaRecorder: window.MediaRecorder,
+  maxMs: VOICE_MAX_DURATION * 1000,
+  levelMeter: voiceRecMeter,
+  onLevel(peak) {
+    const ui = voiceRecUi;
+    if (!ui) return;
+    const db = peak > 0 ? Math.round(20 * Math.log10(peak)) : -99;
+    if (peak < 0.003) { if (!voiceRecQuietSince) voiceRecQuietSince = Date.now(); } else voiceRecQuietSince = 0;
+    const silent = voiceRecQuietSince && Date.now() - voiceRecQuietSince > 2000;
+    voiceRecStatus(ui, silent ? 'Recording: no sound from the mic' : 'Recording ' + (db > -99 ? db + ' dB' : ''), '#e94560');
+  },
+  onState(state, info) {
+    const ui = voiceRecUi;
+    if (state === 'requesting') { voiceRecSetButton(ui, 'Stop', '#e94560'); voiceRecStatus(ui, 'Opening mic...', '#f0a500'); return; }
+    if (state === 'recording') { voiceRecQuietSince = 0; voiceRecSetButton(ui, 'Stop', '#e94560'); voiceRecStatus(ui, 'Recording...', '#e94560'); return; }
+    if (state === 'saving') { voiceRecSetButton(ui, ui && ui.idleText, ''); voiceRecStatus(ui, 'Saving...', '#f0a500'); return; }
+    if (state === 'error') {
+      voiceRecSetButton(ui, ui && ui.idleText, '');
+      voiceRecStatus(ui, 'Mic error: ' + info.message, '#e94560');
+      if (ui && ui.btn) ui.btn.title = 'Mic error: ' + info.message;
+      console.warn('[Voice macro] ' + info.message);
+      voiceRecUi = null;
+      return;
+    }
+    // idle: saved, cancelled, or stopped
+    voiceRecSetButton(ui, ui && ui.idleText, '');
+    if (info && info.cancelled) voiceRecStatus(ui, 'Cancelled', '');
+    voiceRecUi = null;
+  },
+  async onDone(blob, ms) {
+    const idx = voiceRecUi ? voiceRecUi.idx : -1;
+    if (idx < 0) return;
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    await window.api.voiceMacroSave(idx, window.VoiceRecorder.bytesToBase64(bytes));
+    renderVoiceMacroEditor();
+    updateVoiceMacroBar();
+  },
+});
+
 async function startVoiceRecording(idx, btn, statusEl) {
-  if (voiceRecorder) { voiceRecorder.stop(); voiceRecorder = null; }
-  try {
-    var savedDeviceId = '';
-    try { savedDeviceId = localStorage.getItem(VOICE_MACRO_DEVICE_KEY) || ''; } catch {}
-    var constraints = savedDeviceId
-      ? { audio: { deviceId: { exact: savedDeviceId } } }
-      : { audio: true };
-    var stream = await navigator.mediaDevices.getUserMedia(constraints);
-    voiceRecordingIdx = idx;
-    btn.textContent = 'Stop';
-    btn.style.color = '#e94560';
-    statusEl.textContent = 'Recording...';
-    statusEl.style.color = '#e94560';
-    var chunks = [];
-    voiceRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-    voiceRecorder.ondataavailable = function(e) { if (e.data.size > 0) chunks.push(e.data); };
-    voiceRecorder.onstop = function() {
-      stream.getTracks().forEach(t => t.stop());
-      var blob = new Blob(chunks, { type: 'audio/webm' });
-      // Convert to base64 and save via main process (shared with ECHOCAT)
-      var reader = new FileReader();
-      reader.onload = async function() {
-        var base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(reader.result)));
-        await window.api.voiceMacroSave(idx, base64);
-        renderVoiceMacroEditor();
-        updateVoiceMacroBar();
-      };
-      reader.readAsArrayBuffer(blob);
-      voiceRecorder = null;
-      voiceRecordingIdx = -1;
-    };
-    voiceRecorder.start();
-    setTimeout(function() { if (voiceRecorder && voiceRecordingIdx === idx) voiceRecorder.stop(); }, VOICE_MAX_DURATION * 1000);
-  } catch (err) {
-    statusEl.textContent = 'Mic error';
-    statusEl.style.color = '#e94560';
+  if (voiceRecorder.state === 'requesting' || voiceRecorder.state === 'recording') { voiceRecorder.stop(); return; }
+  var savedDeviceId = '';
+  try { savedDeviceId = localStorage.getItem(VOICE_MACRO_DEVICE_KEY) || ''; } catch {}
+  var deviceLabel = '';
+  if (savedDeviceId) {
+    try {
+      var devs = await navigator.mediaDevices.enumerateDevices();
+      var d = devs.find(function(x) { return x.deviceId === savedDeviceId; });
+      deviceLabel = d && d.label ? d.label : '';
+    } catch {}
   }
+  voiceRecUi = { idx: idx, btn: btn, statusEl: statusEl, idleText: btn ? btn.textContent : '' };
+  await voiceRecorder.start({ deviceId: savedDeviceId, deviceLabel: deviceLabel, mimeType: 'audio/webm' });
 }
 
 // Refresh when ECHOCAT syncs a macro
@@ -22955,19 +23702,14 @@ if (window.api.onCwMacrosUpdated) {
 // REC button on macro bar — cycles through slots
 if (voiceMacroRecBtn) {
   voiceMacroRecBtn.addEventListener('click', function() {
-    if (voiceRecorder) {
-      voiceRecorder.stop();
-      voiceMacroRecBtn.textContent = 'REC';
-      voiceMacroRecBtn.style.color = '';
-      return;
-    }
-    // Record into first empty slot (or slot 0 if all full).
+    if (voiceRecorder.state === 'requesting' || voiceRecorder.state === 'recording') { voiceRecorder.stop(); return; }
+    // Record into first empty slot (or slot 0 if all full). The bar button
+    // shows the state itself (REC / Stop); a mic error shows on its tooltip.
     window.api.voiceMacroList().then(function(filled) {
       var idx = 0;
       for (var i = 0; i < VOICE_MACRO_MAX; i++) { if (filled.indexOf(i) === -1) { idx = i; break; } }
-      startVoiceRecording(idx, voiceMacroRecBtn, { textContent: '', style: {} });
-      voiceMacroRecBtn.textContent = 'STOP';
-      voiceMacroRecBtn.style.color = '#e94560';
+      voiceMacroRecBtn.textContent = 'REC';
+      startVoiceRecording(idx, voiceMacroRecBtn, null);
     });
   });
 }
@@ -23426,7 +24168,7 @@ function rigPopulatePowerChoices(caps) {
 function rigGetFilterPresets(mode) {
   const m = (mode || '').toUpperCase();
   if (m === 'CW') return RIG_FILTER_PRESETS.CW;
-  if (['FT8','FT4','FT2','DIGU','DIGL','RTTY','PKTUSB','PKTLSB'].includes(m)) return RIG_FILTER_PRESETS.DIG;
+  if (['FT8','FT4','FT2','DIGU','DIGL','RTTY','PKTUSB','PKTLSB','PSK'].includes(m)) return RIG_FILTER_PRESETS.DIG;
   return RIG_FILTER_PRESETS.SSB;
 }
 
@@ -23561,6 +24303,10 @@ function rigApplyCapabilities(caps) {
   // stream its own spectrum (FT-710 over USB). Rig-scoped like DAX/Flex.
   const scopeMenuBtn = document.getElementById('view-scope-btn');
   if (scopeMenuBtn) scopeMenuBtn.classList.toggle('hidden', !caps.nativeScope);
+  // Tuner Memories (the ATU Calibration Wizard) exists only for a Flex with
+  // an internal ATU; main decides (caps.atuWizard), the same rig-scoped rule.
+  const atuWizBtn = document.getElementById('view-atu-wizard-btn');
+  if (atuWizBtn) atuWizBtn.classList.toggle('hidden', !caps.atuWizard);
   // Same gate as the rig popover's button, from the same caps payload — a
   // rig with no tuner (internal or external) gets no dead ATU button.
   if (activatorAtuBtn) activatorAtuBtn.style.display = caps.atu ? '' : 'none';
@@ -23707,7 +24453,9 @@ function positionRigPopover() {
   // scrollbar (overflow-y in CSS) instead of controls clipped off-screen.
   const maxH = Math.max(120, window.innerHeight - rect.bottom - 16);
   rigPopover.style.maxHeight = maxH + 'px';
-  // Align right edge to anchor right, clamped to parent
+  // Never wider than the bar it sits in; then align right edge to anchor right,
+  // clamped to parent.
+  rigPopover.style.maxWidth = Math.max(280, barRect.width - 8) + 'px';
   const popW = rigPopover.offsetWidth || 280;
   let left = rect.right - barRect.left - popW;
   if (left < 0) left = 0;
@@ -23718,6 +24466,17 @@ function positionRigPopover() {
 // Keep the height cap honest if the window is resized while the popover is
 // open (it repositions on every open anyway).
 window.addEventListener('resize', () => { if (rigPopoverOpen) positionRigPopover(); });
+// A tab that is wider than the one it was opened on (Presets fills in after
+// it loads) ran off the right edge until the window was resized (K8IKO):
+// re-place it whenever its size changes.
+if (typeof ResizeObserver === 'function') {
+  let _rigPopoverW = 0;
+  new ResizeObserver(() => {
+    if (!rigPopoverOpen) return;
+    const w = rigPopover.offsetWidth;
+    if (w !== _rigPopoverW) { _rigPopoverW = w; positionRigPopover(); }
+  }).observe(rigPopover);
+}
 
 function openRigPopover() {
   positionRigPopover();
@@ -24127,36 +24886,78 @@ rigTabBtns.forEach(btn => {
 });
 
 // --- Rig presets (lib/rig-presets.js) ---
-// Named TX power / RF gain / AF gain sets for the ACTIVE rig. Main owns the
-// list (settings.rigPresets, per rig) and the family map; this tab renders
-// the payload it sends, applies by id, and saves whole lists back. The same
-// payload drives the VFO window, ECHOCAT Web and the app.
+// A named set of rig settings for the ACTIVE rig — levels, the RX filter,
+// the NB/NR/notch/comp/VOX/preamp/att switches, AGC — each one INCLUDED or
+// left alone, applied by a tap or by the triggers: the five family selects
+// ("all SSB → Hunting, all digital → FT8") and, for the nuanced, band + mode
+// rules ("20 m SSB → Hunting 20", first match wins, the family select is the
+// fallback). Main owns the lists (settings.rigPresets / rigPresetByMode /
+// rigPresetRules, per rig). ONE editor, mounted in the Rig menu's Presets tab
+// and in Settings > Profiles (rigPresetsMount); the same payload drives the
+// VFO window, ECHOCAT Web and the app.
 const rigTabPresets = document.getElementById('rig-tab-presets');
-const rigPresetListEl = document.getElementById('rig-preset-list');
-const rigPresetByModeEl = document.getElementById('rig-preset-bymode');
-const rigPresetEditor = document.getElementById('rig-preset-editor');
-const rigPresetCapsNote = document.getElementById('rig-preset-caps-note');
-let rigPresetsData = { presets: [], byMode: {}, caps: {}, details: {}, families: [], familyLabels: {} };
-let rigPresetEditingId = null; // null = new
+let rigPresetsData = { presets: [], byMode: {}, rules: [], caps: {}, details: {}, families: [], familyLabels: {}, bands: [], fields: [] };
+const rigPresetMounts = []; // one per surface: { root, parts, editingId }
 
 function rigPresetsLoad() {
   if (!window.api.rigPresetsGet) return;
-  window.api.rigPresetsGet().then((p) => { if (p) { rigPresetsData = p; rigPresetsRender(); } }).catch(() => {});
+  window.api.rigPresetsGet().then((p) => { if (p) { rigPresetsData = p; rigPresetsRenderAll(); } }).catch(() => {});
 }
-if (window.api.onRigPresetsChanged) window.api.onRigPresetsChanged((p) => { if (p) { rigPresetsData = p; rigPresetsRender(); } });
+if (window.api.onRigPresetsChanged) window.api.onRigPresetsChanged((p) => { if (p) { rigPresetsData = p; rigPresetsRenderAll(); } });
 
-function rigPresetsRender() {
+function rigPresetsSave(data) {
+  if (!window.api.rigPresetsSave) return;
+  window.api.rigPresetsSave(data).then((p) => { if (p) { rigPresetsData = p; rigPresetsRenderAll(); } }).catch(() => {});
+}
+function rigPresetsRenderAll() { for (const m of rigPresetMounts) rigPresetsRenderInto(m); }
+
+/** Mount the editor into `root` (empty container). Re-renders on every payload. */
+function rigPresetsMount(root) {
+  if (!root) return null;
+  const m = { root, editingId: null, parts: {} };
+  root.innerHTML = '';
+  const mk = (cls) => { const d = document.createElement('div'); d.className = cls; root.appendChild(d); return d; };
+  m.parts.note = mk('rig-preset-note hidden');
+  m.parts.list = mk('rig-preset-list');
+  const actions = mk('rig-preset-actions');
+  const newBtn = document.createElement('button'); newBtn.className = 'rig-btn'; newBtn.style.cssText = 'font-size:11px;padding:2px 8px;'; newBtn.textContent = '+ New preset';
+  newBtn.addEventListener('click', (e) => { e.stopPropagation(); rigPresetOpenEditor(m, null); });
+  actions.appendChild(newBtn);
+  m.parts.editor = mk('rig-preset-editor hidden');
+  const h1 = mk('rig-preset-note'); h1.style.marginTop = '8px'; h1.textContent = 'Apply by itself when the mode changes to:';
+  m.parts.byMode = mk('rig-preset-bymode');
+  const h2 = mk('rig-preset-note'); h2.style.marginTop = '8px'; h2.textContent = 'Band rules (checked first, top to bottom; the mode list above is the fallback):';
+  m.parts.rules = mk('rig-preset-rules');
+  // Keystrokes and clicks inside the editor must not reach the popover's close/keyboard handlers.
+  root.addEventListener('click', (e) => e.stopPropagation());
+  root.addEventListener('keydown', (e) => e.stopPropagation());
+  rigPresetMounts.push(m);
+  rigPresetsRenderInto(m);
+  return m;
+}
+
+// The same rule as lib/rig-presets.js fieldAvailable: a ladder rig gets the
+// preamp STEP field instead of the on/off switch (N0KAH, FTX-1).
+function rigPresetFieldAvailable(f, caps) {
+  if (!caps || !caps[f.cap]) return false;
+  if (f.kind === 'step' && !(Array.isArray(caps[f.cap]) && caps[f.cap].length >= 2)) return false;
+  return !(f.notCap && caps[f.notCap]);
+}
+
+function rigPresetsRenderInto(m) {
   const d = rigPresetsData;
   const caps = d.caps || {};
-  const anyCap = !!(caps.txpower || caps.rfgain || caps.afgain);
-  rigPresetCapsNote.classList.toggle('hidden', anyCap);
-  rigPresetCapsNote.textContent = anyCap ? '' : 'This radio reports no adjustable TX power, RF gain or AF gain, so a preset has nothing to set here. Presets are kept per rig.';
+  const fields = d.fields || [];
+  const anyCap = fields.some((f) => rigPresetFieldAvailable(f, caps));
+  m.parts.note.classList.toggle('hidden', anyCap);
+  m.parts.note.textContent = anyCap ? '' : 'This radio reports nothing a preset could set (no adjustable power, gains, filter or switches over CAT). Presets are kept per rig.';
   // List
-  rigPresetListEl.innerHTML = '';
+  const list = m.parts.list;
+  list.innerHTML = '';
   if (!d.presets.length) {
     const e = document.createElement('div'); e.className = 'rig-preset-note';
     e.textContent = 'No presets for this rig yet. Set the radio the way you want it for a mode, then + New preset and Use current.';
-    rigPresetListEl.appendChild(e);
+    list.appendChild(e);
   }
   for (const p of d.presets) {
     const det = (d.details && d.details[p.id]) || { text: '', skipped: [] };
@@ -24167,81 +24968,178 @@ function rigPresetsRender() {
     const detail = document.createElement('span'); detail.className = 'rig-preset-detail'; detail.textContent = det.text || '(nothing set)';
     row.appendChild(name); row.appendChild(detail);
     if (det.skipped && det.skipped.length) {
-      const sk = document.createElement('span'); sk.className = 'rig-preset-skipped'; sk.textContent = det.skipped.join(' ');
+      const sk = document.createElement('span'); sk.className = 'rig-preset-skipped'; sk.textContent = det.skipped.join(' · ');
       sk.title = 'Not available on this radio'; row.appendChild(sk);
     }
     const edit = document.createElement('button'); edit.innerHTML = '&#x270E;'; edit.title = 'Edit';
-    edit.addEventListener('click', (e) => { e.stopPropagation(); rigPresetOpenEditor(p); });
+    edit.addEventListener('click', (e) => { e.stopPropagation(); rigPresetOpenEditor(m, p); });
     const del = document.createElement('button'); del.className = 'rig-preset-del'; del.innerHTML = '&times;'; del.title = 'Delete';
     del.addEventListener('click', (e) => {
       e.stopPropagation();
-      rigPresetsSave({ presets: d.presets.filter(x => x.id !== p.id), byMode: d.byMode });
+      rigPresetsSave({ presets: d.presets.filter(x => x.id !== p.id), byMode: d.byMode, rules: (d.rules || []).filter(r => r.presetId !== p.id) });
     });
     row.appendChild(edit); row.appendChild(del);
     row.addEventListener('click', () => { window.api.rigPresetsApply(p.id); });
-    rigPresetListEl.appendChild(row);
+    list.appendChild(row);
   }
-  // Family assignments
-  rigPresetByModeEl.innerHTML = '';
+  // Family assignments (the simple form)
+  const bm = m.parts.byMode;
+  bm.innerHTML = '';
   for (const fam of (d.families || [])) {
     const lab = document.createElement('span'); lab.textContent = (d.familyLabels && d.familyLabels[fam]) || fam;
     const sel = document.createElement('select');
     const none = document.createElement('option'); none.value = ''; none.textContent = '— leave the radio as it is'; sel.appendChild(none);
-    for (const p of d.presets) {
-      const o = document.createElement('option'); o.value = p.id; o.textContent = p.name; sel.appendChild(o);
-    }
+    for (const p of d.presets) { const o = document.createElement('option'); o.value = p.id; o.textContent = p.name; sel.appendChild(o); }
     sel.value = (d.byMode && d.byMode[fam]) || '';
     sel.addEventListener('change', () => {
       const byMode = { ...(d.byMode || {}) };
       if (sel.value) byMode[fam] = sel.value; else delete byMode[fam];
-      rigPresetsSave({ presets: d.presets, byMode });
+      rigPresetsSave({ presets: d.presets, byMode, rules: d.rules });
     });
-    rigPresetByModeEl.appendChild(lab); rigPresetByModeEl.appendChild(sel);
+    bm.appendChild(lab); bm.appendChild(sel);
   }
-  // Editor fields the radio cannot take are hidden (never a wrong number sent).
-  document.getElementById('rig-preset-txpower-row').style.display = caps.txpower ? '' : 'none';
-  document.getElementById('rig-preset-rfgain-row').style.display = caps.rfgain ? '' : 'none';
-  document.getElementById('rig-preset-afgain-row').style.display = caps.afgain ? '' : 'none';
+  rigPresetsRenderRules(m);
 }
 
-function rigPresetsSave(data) {
-  if (!window.api.rigPresetsSave) return;
-  window.api.rigPresetsSave(data).then((p) => { if (p) { rigPresetsData = p; rigPresetsRender(); } }).catch(() => {});
+/** The band + mode rules: existing ones as lines with a remove button, then one row to add a rule. */
+function rigPresetsRenderRules(m) {
+  const d = rigPresetsData;
+  const box = m.parts.rules;
+  box.innerHTML = '';
+  const rules = d.rules || [];
+  if (!d.presets.length) { const e = document.createElement('div'); e.className = 'rig-preset-note'; e.textContent = 'Make a preset first.'; box.appendChild(e); return; }
+  rules.forEach((r, i) => {
+    const row = document.createElement('div'); row.className = 'rig-preset-rule';
+    const txt = document.createElement('span'); txt.textContent = (d.ruleTexts && d.ruleTexts[i]) || '';
+    const up = document.createElement('button'); up.innerHTML = '&#x25B2;'; up.title = 'Check this rule earlier'; up.disabled = i === 0;
+    up.addEventListener('click', (e) => { e.stopPropagation(); const next = rules.slice(); [next[i - 1], next[i]] = [next[i], next[i - 1]]; rigPresetsSave({ presets: d.presets, byMode: d.byMode, rules: next }); });
+    const del = document.createElement('button'); del.className = 'rig-preset-del'; del.innerHTML = '&times;'; del.title = 'Remove this rule';
+    del.addEventListener('click', (e) => { e.stopPropagation(); rigPresetsSave({ presets: d.presets, byMode: d.byMode, rules: rules.filter((_, j) => j !== i) }); });
+    row.appendChild(txt); row.appendChild(up); row.appendChild(del);
+    box.appendChild(row);
+  });
+  // Add a rule: band chips (none = any band), mode chips (none = any mode), preset, Add.
+  const add = document.createElement('div'); add.className = 'rig-preset-rule-add';
+  const chosen = { bands: new Set(), families: new Set() };
+  const chipRow = (label, items, labelOf, set) => {
+    const wrap = document.createElement('div'); wrap.className = 'rig-preset-chips';
+    const l = document.createElement('span'); l.className = 'rig-preset-chips-label'; l.textContent = label; wrap.appendChild(l);
+    for (const it of items) {
+      const c = document.createElement('button'); c.type = 'button'; c.className = 'rig-preset-chip'; c.textContent = labelOf(it);
+      c.addEventListener('click', (e) => { e.stopPropagation(); if (set.has(it)) set.delete(it); else set.add(it); c.classList.toggle('on', set.has(it)); });
+      wrap.appendChild(c);
+    }
+    return wrap;
+  };
+  add.appendChild(chipRow('Band', d.bands || [], (b) => b, chosen.bands));
+  add.appendChild(chipRow('Mode', d.families || [], (f) => ({ ssb: 'SSB', cw: 'CW', digital: 'Digital', fm: 'FM', am: 'AM' })[f] || f, chosen.families));
+  const line = document.createElement('div'); line.className = 'rig-preset-rule-line';
+  const arrow = document.createElement('span'); arrow.textContent = 'apply';
+  const sel = document.createElement('select');
+  for (const p of d.presets) { const o = document.createElement('option'); o.value = p.id; o.textContent = p.name; sel.appendChild(o); }
+  const btn = document.createElement('button'); btn.className = 'rig-btn'; btn.style.cssText = 'font-size:11px;padding:2px 8px;'; btn.textContent = '+ Add rule';
+  const hint = document.createElement('span'); hint.className = 'rig-preset-note'; hint.textContent = 'No band picked = any band; no mode picked = any mode.';
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!chosen.bands.size && !chosen.families.size) { hint.textContent = 'Pick at least a band or a mode (any band + any mode is what the list above is for).'; return; }
+    const rule = { bands: [...chosen.bands], families: [...chosen.families], presetId: sel.value };
+    rigPresetsSave({ presets: d.presets, byMode: d.byMode, rules: rules.concat([rule]) });
+  });
+  line.appendChild(arrow); line.appendChild(sel); line.appendChild(btn);
+  add.appendChild(line); add.appendChild(hint);
+  box.appendChild(add);
 }
 
-function rigPresetOpenEditor(p) {
-  rigPresetEditingId = p ? p.id : null;
-  document.getElementById('rig-preset-name').value = p ? p.name : '';
-  document.getElementById('rig-preset-txpower').value = p && p.txPower != null ? p.txPower : '';
-  document.getElementById('rig-preset-rfgain').value = p && p.rfGain != null ? p.rfGain : '';
-  document.getElementById('rig-preset-afgain').value = p && p.afGain != null ? p.afGain : '';
-  rigPresetEditor.classList.remove('hidden');
-  document.getElementById('rig-preset-name').focus();
+/** The editor: one row per field the radio takes — an "include" tick, the label, the control. */
+function rigPresetOpenEditor(m, p) {
+  const d = rigPresetsData;
+  const caps = d.caps || {};
+  m.editingId = p ? p.id : null;
+  const ed = m.parts.editor;
+  ed.innerHTML = '';
+  const nameRow = document.createElement('div'); nameRow.className = 'rig-popover-row';
+  const nameLab = document.createElement('label'); nameLab.textContent = 'Name';
+  const nameIn = document.createElement('input'); nameIn.type = 'text'; nameIn.maxLength = 40; nameIn.placeholder = 'e.g. FT8'; nameIn.style.flex = '1'; nameIn.value = p ? p.name : '';
+  nameRow.appendChild(nameLab); nameRow.appendChild(nameIn); ed.appendChild(nameRow);
+  const controls = {}; // key → { inc, ctl, f }
+  const groups = [['tx', 'Transmit'], ['rx', 'Receive']];
+  for (const [g, title] of groups) {
+    const fs = (d.fields || []).filter((f) => f.group === g && rigPresetFieldAvailable(f, caps));
+    if (!fs.length) continue;
+    const h = document.createElement('div'); h.className = 'rig-preset-note'; h.textContent = title; ed.appendChild(h);
+    for (const f of fs) {
+      const row = document.createElement('div'); row.className = 'rig-popover-row rig-preset-field';
+      const inc = document.createElement('input'); inc.type = 'checkbox'; inc.title = 'Include this setting in the preset (unticked = left as it is)';
+      // A level in the radio's own steps shows its range (FTX-1 NB 0-10).
+      const top = f.maxCap && caps[f.maxCap] != null ? caps[f.maxCap] : f.max;
+      const lab = document.createElement('label'); lab.textContent = f.label + (f.unit ? ' (' + f.unit + ')' : f.maxCap ? ' (' + f.min + '-' + top + ')' : '');
+      let ctl;
+      if (f.kind === 'switch') {
+        ctl = document.createElement('select');
+        for (const [v, t] of [['on', 'On'], ['off', 'Off']]) { const o = document.createElement('option'); o.value = v; o.textContent = t; ctl.appendChild(o); }
+      } else if (f.kind === 'step') {
+        ctl = document.createElement('select');
+        for (const st of caps[f.cap]) { const o = document.createElement('option'); o.value = String(st.v); o.textContent = st.label; ctl.appendChild(o); }
+      } else if (f.kind === 'choice') {
+        ctl = document.createElement('select');
+        const opts = (f.key === 'agc' && Array.isArray(caps.agcModes) && caps.agcModes.length) ? caps.agcModes : f.options;
+        for (const v of opts) { const o = document.createElement('option'); o.value = v; o.textContent = v; ctl.appendChild(o); }
+      } else {
+        ctl = document.createElement('input'); ctl.type = 'number'; ctl.min = f.min; ctl.max = top; ctl.step = f.kind === 'width' ? 50 : 1; ctl.style.width = '80px';
+      }
+      const has = p && p[f.key] !== undefined && p[f.key] !== null;
+      inc.checked = !!has;
+      if (has) ctl.value = f.kind === 'switch' ? (p[f.key] ? 'on' : 'off') : String(p[f.key]);
+      ctl.disabled = !inc.checked;
+      inc.addEventListener('change', () => { ctl.disabled = !inc.checked; });
+      ctl.addEventListener('input', () => { if (!inc.checked) { inc.checked = true; ctl.disabled = false; } });
+      row.appendChild(inc); row.appendChild(lab); row.appendChild(ctl); ed.appendChild(row);
+      controls[f.key] = { inc, ctl, f };
+    }
+  }
+  const actions = document.createElement('div'); actions.className = 'rig-preset-actions';
+  const useBtn = document.createElement('button'); useBtn.className = 'rig-btn'; useBtn.textContent = 'Use current'; useBtn.title = 'Fill every field with the radio\'s current setting and include it';
+  useBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const s = customRigState || {};
+    for (const k of Object.keys(controls)) {
+      const { inc, ctl, f } = controls[k];
+      const v = s[k];
+      if (v === undefined || v === null || (k === 'txPower' && !(v > 0))) continue;
+      if (f.kind === 'switch') ctl.value = v ? 'on' : 'off';
+      else ctl.value = String(v);
+      inc.checked = true; ctl.disabled = false;
+    }
+  });
+  const saveBtn = document.createElement('button'); saveBtn.className = 'rig-btn'; saveBtn.textContent = 'Save';
+  saveBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const name = nameIn.value.trim();
+    if (!name) { nameIn.focus(); return; }
+    const edited = { id: m.editingId || undefined, name };
+    for (const k of Object.keys(controls)) {
+      const { inc, ctl, f } = controls[k];
+      if (!inc.checked || ctl.value === '') { edited[k] = null; continue; } // null = drop the field on this save
+      edited[k] = f.kind === 'switch' ? ctl.value === 'on' : (f.kind === 'choice' ? ctl.value : Number(ctl.value));
+    }
+    const list = d.presets.slice();
+    const i = list.findIndex(x => x.id === m.editingId);
+    if (i >= 0) list[i] = { ...list[i], ...edited }; else list.push(edited);
+    ed.classList.add('hidden');
+    rigPresetsSave({ presets: list, byMode: d.byMode, rules: d.rules });
+  });
+  const cancel = document.createElement('button'); cancel.className = 'rig-btn'; cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', (e) => { e.stopPropagation(); ed.classList.add('hidden'); });
+  actions.appendChild(useBtn); actions.appendChild(saveBtn); actions.appendChild(cancel); ed.appendChild(actions);
+  const note = document.createElement('div'); note.className = 'rig-preset-note';
+  note.textContent = 'Only ticked settings are sent; the rest of the radio is left as it is. AF gain is the speaker level: 0 silences the shack for FT8.';
+  ed.appendChild(note);
+  ed.classList.remove('hidden');
+  nameIn.focus();
 }
-document.getElementById('rig-preset-new').addEventListener('click', (e) => { e.stopPropagation(); rigPresetOpenEditor(null); });
-document.getElementById('rig-preset-cancel').addEventListener('click', (e) => { e.stopPropagation(); rigPresetEditor.classList.add('hidden'); });
-document.getElementById('rig-preset-use-current').addEventListener('click', (e) => {
-  e.stopPropagation();
-  const s = customRigState || {};
-  if (s.txPower > 0) document.getElementById('rig-preset-txpower').value = s.txPower;
-  if (s.rfGain != null) document.getElementById('rig-preset-rfgain').value = s.rfGain;
-  if (s.afGain != null) document.getElementById('rig-preset-afgain').value = s.afGain;
-});
-document.getElementById('rig-preset-save').addEventListener('click', (e) => {
-  e.stopPropagation();
-  const name = document.getElementById('rig-preset-name').value.trim();
-  if (!name) { document.getElementById('rig-preset-name').focus(); return; }
-  const num = (id) => { const v = document.getElementById(id).value; return v === '' ? undefined : Number(v); };
-  const edited = { id: rigPresetEditingId || undefined, name, txPower: num('rig-preset-txpower'), rfGain: num('rig-preset-rfgain'), afGain: num('rig-preset-afgain') };
-  const list = rigPresetsData.presets.slice();
-  const i = list.findIndex(x => x.id === rigPresetEditingId);
-  if (i >= 0) list[i] = { ...list[i], ...edited }; else list.push(edited);
-  rigPresetEditor.classList.add('hidden');
-  rigPresetsSave({ presets: list, byMode: rigPresetsData.byMode });
-});
-// Keystrokes inside the editor must not reach the popover's close/keyboard handlers.
-rigPresetEditor.addEventListener('click', (e) => e.stopPropagation());
-rigPresetEditor.addEventListener('keydown', (e) => e.stopPropagation());
+rigPresetsMount(document.getElementById('rig-preset-root'));
+rigPresetsMount(document.getElementById('settings-preset-root'));
+rigPresetsLoad(); // both surfaces start from main's payload; every change is pushed after that
 
 // --- Custom CAT Buttons ---
 const rigCustomSlotsContainer = document.getElementById('rig-custom-slots');
@@ -24992,6 +25890,8 @@ function updateWelcomeRadioSubPanels() {
   document.getElementById('welcome-icom-config').classList.toggle('hidden', type !== 'icom');
   document.getElementById('welcome-hamlib-config').classList.toggle('hidden', type !== 'hamlib');
   document.getElementById('welcome-rigctldnet-config').classList.toggle('hidden', type !== 'rigctldnet');
+  const wFlrig = document.getElementById('welcome-flrig-config');
+  if (wFlrig) wFlrig.classList.toggle('hidden', type !== 'flrig');
   document.getElementById('welcome-dxlab-commander-config').classList.toggle('hidden', type !== 'dxlab-commander');
   const wNocat = document.getElementById('welcome-nocat-config');
   if (wNocat) wNocat.classList.toggle('hidden', type !== 'nocat');
@@ -25094,6 +25994,12 @@ function buildWelcomeCatTarget() {
       type: 'rigctldnet',
       host: document.getElementById('welcome-rigctldnet-host').value.trim() || '127.0.0.1',
       port: parseInt(document.getElementById('welcome-rigctldnet-port').value, 10) || 4532,
+    };
+  } else if (type === 'flrig') {
+    return {
+      type: 'flrig',
+      host: document.getElementById('welcome-flrig-host').value.trim() || '127.0.0.1',
+      port: parseInt(document.getElementById('welcome-flrig-port').value, 10) || 12345,
     };
   } else if (type === 'dxlab-commander') {
     return {
@@ -25915,12 +26821,8 @@ const activatorRbnBtn = document.getElementById('activator-rbn-btn');
 let activatorRbnVisible = false;
 
 function updateActivatorRbnButton() {
-  if (enableRbn) {
-    activatorRbnBtn.classList.remove('hidden');
-  } else {
-    activatorRbnBtn.classList.add('hidden');
-    if (activatorRbnVisible) toggleActivatorRbn();
-  }
+  // Always offered, like the Propagation view (see updateRbnButton).
+  activatorRbnBtn.classList.remove('hidden');
 }
 
 function applyActivatorRbnLayout() {
@@ -27156,7 +28058,111 @@ function updateParkExtraBadge() {
     badge.classList.add('hidden');
   }
   updateCrossRefToggle();
+  refreshActivatorCounty();
 }
+
+// ── The operator's own county (lib/station-county.js; AE5JE 2026-10-27) ──
+let _countyList = null;
+async function countyList() {
+  if (_countyList) return _countyList;
+  try { _countyList = (await window.api.countyList()) || {}; } catch { _countyList = {}; }
+  return _countyList;
+}
+function fillCountySelect(sel, rows, value, blankLabel) {
+  if (!sel) return;
+  sel.innerHTML = '';
+  const o0 = document.createElement('option');
+  o0.value = ''; o0.textContent = blankLabel || '—';
+  sel.appendChild(o0);
+  for (const r of rows || []) {
+    const o = document.createElement('option');
+    o.value = r[0]; o.textContent = r[1] || r[0];
+    sel.appendChild(o);
+  }
+  sel.value = value || '';
+}
+function fillStateSelect(sel, states, value) {
+  if (!sel) return;
+  sel.innerHTML = '';
+  const o0 = document.createElement('option');
+  o0.value = ''; o0.textContent = '—';
+  sel.appendChild(o0);
+  for (const st of states) {
+    const o = document.createElement('option');
+    o.value = st; o.textContent = st;
+    sel.appendChild(o);
+  }
+  sel.value = value || '';
+}
+async function homeCountyLoad(s) {
+  const list = await countyList();
+  const stSel = document.getElementById('set-home-state');
+  const cSel = document.getElementById('set-home-county');
+  if (!stSel || !cSel) return;
+  fillStateSelect(stSel, Object.keys(list).sort(), s.homeState || '');
+  fillCountySelect(cSel, list[stSel.value] || [], s.homeCounty || '');
+}
+(function bindHomeCounty() {
+  const stSel = document.getElementById('set-home-state');
+  const cSel = document.getElementById('set-home-county');
+  const btn = document.getElementById('home-county-qrz');
+  const status = document.getElementById('home-county-status');
+  if (stSel) stSel.addEventListener('change', async () => {
+    fillCountySelect(cSel, (await countyList())[stSel.value] || [], '');
+  });
+  if (btn) btn.addEventListener('click', async () => {
+    status.textContent = 'Looking up…';
+    const r = await window.api.homeCountyFromQrz();
+    if (!r || !r.ok) { status.textContent = (r && r.error) || 'Could not look it up'; return; }
+    const list = await countyList();
+    stSel.value = r.state;
+    fillCountySelect(cSel, list[r.state] || [], r.county || '');
+    status.textContent = r.county ? `${r.county}, ${r.state} (from QRZ). Save to keep it.` : `${r.state} from QRZ; QRZ's county "${r.qrzCounty}" is not one LoTW knows: pick it from the list.`;
+  });
+})();
+
+// The activation bar: this park's county, remembered per park.
+let _activatorCountyRef = '';
+async function refreshActivatorCounty() {
+  const wrap = document.getElementById('activator-county-wrap');
+  const stSel = document.getElementById('activator-county-state');
+  const cSel = document.getElementById('activator-county');
+  if (!wrap || !stSel || !cSel || !window.api.parkCountyGet) return;
+  const ref = (activatorParkRefs && activatorParkRefs[0] && activatorParkRefs[0].ref) || '';
+  _activatorCountyRef = ref;
+  if (!ref) { wrap.classList.add('hidden'); return; }
+  const info = await window.api.parkCountyGet(ref);
+  if (_activatorCountyRef !== ref) return; // the park changed while we asked
+  if (!info || !info.us) { wrap.classList.add('hidden'); return; }
+  const list = await countyList();
+  const states = (info.states && info.states.length ? info.states : Object.keys(list)).filter((st) => list[st]);
+  const state = (info.choice && info.choice.state) || (states.length === 1 ? states[0] : '');
+  // A park in one state needs no state picker; a park across states asks
+  // which side the operator is on, as the log form already does.
+  stSel.classList.toggle('hidden', states.length === 1);
+  fillStateSelect(stSel, states, state);
+  fillCountySelect(cSel, list[state] || [], (info.choice && info.choice.county) || '', 'County…');
+  cSel.classList.toggle('county-unset', !(info.choice && info.choice.county));
+  wrap.classList.remove('hidden');
+}
+if (window.api.onParkCountyChanged) window.api.onParkCountyChanged(() => refreshActivatorCounty());
+if (window.api.onEchocatAppConnected) window.api.onEchocatAppConnected(() => {
+  const dl = document.getElementById('settings-echocat-download');
+  if (dl) dl.classList.add('hidden');
+});
+(function bindActivatorCounty() {
+  const stSel = document.getElementById('activator-county-state');
+  const cSel = document.getElementById('activator-county');
+  if (stSel) stSel.addEventListener('change', async () => {
+    fillCountySelect(cSel, (await countyList())[stSel.value] || [], '', 'County…');
+  });
+  if (cSel) cSel.addEventListener('change', async () => {
+    const st = stSel.value || (stSel.options[1] && stSel.options[1].value) || '';
+    const r = await window.api.parkCountySet({ ref: _activatorCountyRef, state: st, county: cSel.value });
+    if (r && !r.ok) showLogToast(r.error || 'County not saved', { warn: true, duration: 5000 });
+    cSel.classList.toggle('county-unset', !cSel.value);
+  });
+})();
 
 /** Update hunter park input display and extra badge */
 function updateHunterParkDisplay() {
@@ -27231,16 +28237,29 @@ async function activatorLogContact() {
   const rawCallsign = activatorCallsignInput.value.trim().toUpperCase();
   if (!rawCallsign) return;
 
-  // If hunter park input has a value but hunterParkRefs is empty (user typed directly
-  // without selecting from dropdown), parse the input as a park reference
+  // Their park(s) as typed. A comma list is an n-fer (WD3D 2026-10-26: "US-1234,
+  // US-5678" for a 2-fer logged NO park, silently — the box only ever read one
+  // reference). A reference that is not one is refused, never dropped.
   const hunterInput = document.getElementById('activator-hunter-park');
-  if (hunterInput && hunterInput.value.trim() && hunterParkRefs.length === 0) {
-    const typed = hunterInput.value.trim().toUpperCase();
-    // Accept POTA/WWFF-shaped refs (K-1234, US-1234, KFF-1234), SOTA summits
-    // (W4C/CM-001), and WWBOTA bunkers (B/US-1234); tag the real program so
-    // the ADIF SIG is right (summit-to-park typed by hand used to log SIG=POTA)
-    if (/^[A-Z]{1,4}-\d{3,5}$/.test(typed) || /^[A-Z0-9]{1,4}\/[A-Z]{2}-\d{3}$/.test(typed) || /^B\/[A-Z]{1,3}-\d{3,5}$/.test(typed)) {
-      hunterParkRefs = [{ ref: typed, name: '', program: inferParkProgram(typed) }];
+  if (hunterInput && hunterInput.value.trim()) {
+    const parsed = parseHunterParkInput(hunterInput.value);
+    if (parsed.bad.length) {
+      hunterInput.style.outline = '1px solid #e94560';
+      hunterInput.focus();
+      showLogToast(`Not logged: "${parsed.bad[0]}" is not a park or summit reference. Separate their parks with commas, e.g. US-1234, US-5678.`, { warn: true, duration: 7000 });
+      return;
+    }
+    hunterInput.style.outline = '';
+    if (parsed.refs.length > 1 || hunterParkRefs.length === 0) {
+      // The typed list, plus anything behind the +N badge, names kept.
+      const known = new Map(hunterParkRefs.map(p => [p.ref, p]));
+      const merged = [];
+      for (const ref of [...parsed.refs, ...hunterParkRefs.slice(1).map(p => p.ref)]) {
+        if (merged.some(p => p.ref === ref) || merged.length >= MAX_N_FER) continue;
+        const k = known.get(ref);
+        merged.push({ ref, name: (k && k.name) || '', program: (k && k.program) || inferParkProgram(ref) });
+      }
+      hunterParkRefs = merged;
     }
   }
   if (!primaryParkRef()) {
@@ -27260,8 +28279,8 @@ async function activatorLogContact() {
   const stateVal = activatorStateInput ? activatorStateInput.value.trim().toUpperCase() : '';
 
   // Frequency: prefer the input field (may have been manually entered), fall back to CAT
-  const inputMhz = parseFloat(activatorFreqInput.value);
-  const freqKhz = inputMhz > 0 ? Math.round(inputMhz * 1000) : (activatorFreqKhz || radioFreqKhz || 0);
+  const typedKhz = readActivatorFreqKhz();
+  const freqKhz = typedKhz > 0 ? Math.round(typedKhz) : (activatorFreqKhz || radioFreqKhz || 0);
   const freqMhz = freqKhz ? (freqKhz / 1000).toFixed(3) : '';
   const band = freqToBandActivator(freqKhz) || '';
   // No radio reading and nothing typed: a contact with no frequency has no
@@ -27546,21 +28565,33 @@ if (activatorExportBtn) {
 }
 
 // --- Self-spot button ---
+// The self-spot target. While away on a P2P excursion the radio — and
+// therefore activatorFreqKhz and the mode select — is on the OTHER activator's
+// frequency. Spotting that would send every POTA hunter piling onto somebody
+// else's QSO. Always self-spot the calling frequency.
+function activatorSpotTarget() {
+  const away = !!activatorHomeFreqHz;
+  const freq = away ? Math.round(activatorHomeFreqHz / 1000) : activatorFreqKhz;
+  const mode = (away && activatorHomeMode)
+    ? activatorHomeMode
+    : (document.getElementById('activator-mode').value || _currentMode || 'SSB');
+  return { away, freq, mode };
+}
+const activatorSpotWinlinkBtn = document.getElementById('activator-spot-winlink-btn');
+if (activatorSpotWinlinkBtn) {
+  activatorSpotWinlinkBtn.addEventListener('click', () => {
+    if (!primaryParkRef()) { showLogToast('Set a park reference first', { warn: true }); return; }
+    const { freq, mode } = activatorSpotTarget();
+    if (window.api.winlinkPotaSpotOpen) window.api.winlinkPotaSpotOpen({ freqKhz: freq || 0, mode });
+  });
+}
 if (activatorSpotBtn) {
   activatorSpotBtn.addEventListener('click', async () => {
     const ref = primaryParkRef();
     if (!ref) { showLogToast('Set a park reference first', { warn: true }); return; }
     if (!myCallsign) { showLogToast('Set your callsign in Settings first', { warn: true }); return; }
-    // While away on a P2P excursion the radio — and therefore
-    // activatorFreqKhz and the mode select — is on the OTHER activator's
-    // frequency. Spotting that would send every POTA hunter piling onto
-    // somebody else's QSO. Always self-spot the calling frequency.
-    const away = !!activatorHomeFreqHz;
-    const freq = away ? Math.round(activatorHomeFreqHz / 1000) : activatorFreqKhz;
+    const { away, freq, mode } = activatorSpotTarget();
     if (!freq) { showLogToast('No frequency — tune your radio first', { warn: true }); return; }
-    const mode = (away && activatorHomeMode)
-      ? activatorHomeMode
-      : (document.getElementById('activator-mode').value || _currentMode || 'SSB');
     try {
       const result = await window.api.quickRespot({
         callsign: myCallsign,
@@ -27955,6 +28986,28 @@ function updateActivatorBandLabel(khz) {
 }
 
 /** Fill activator QSO form from a clicked spot (hunt while activating) */
+/** The P2P references a spot carries, primary program first, one entry per park. */
+function hunterParkRefsFromSpot(s) {
+  const PROGRAMS = { pota: 'POTA', wwff: 'WWFF', sota: 'SOTA', llota: 'LLOTA', wwbota: 'WWBOTA' };
+  const out = [];
+  const seen = new Set();
+  const push = (refs, program, name) => {
+    for (const r of String(refs || '').split(',').map(x => x.trim()).filter(Boolean)) {
+      const key = program + '|' + r.toUpperCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ ref: r, name: out.length === 0 ? (name || '') : '', program });
+    }
+  };
+  const primary = PROGRAMS[s.source];
+  if (primary) push(s.reference, primary, s.parkName);
+  for (const [type, program] of Object.entries(PROGRAMS)) {
+    if (program === primary) continue;
+    push(s[type + 'Reference'], program, '');
+  }
+  return out;
+}
+
 function fillActivatorFromSpot(s) {
   // FIRST statement, deliberately: this inherits the activationActive gate
   // from both call sites (spot-row click and the map popup's Tune button),
@@ -27972,14 +29025,12 @@ function fillActivatorFromSpot(s) {
   // Fill hunter park ref for any program with a P2P-creditable reference,
   // carrying the real program so the ADIF SIG isn't hardcoded POTA
   // (summit-to-park / WWFF P2P used to log SIG=POTA — wrong credit)
-  const spotProgram = { pota: 'POTA', wwff: 'WWFF', sota: 'SOTA', llota: 'LLOTA', wwbota: 'WWBOTA' }[s.source];
-  if (s.reference && spotProgram) {
-    hunterParkRefs = [{ ref: s.reference, name: s.parkName || '', program: spotProgram }];
-    updateHunterParkDisplay();
-  } else {
-    hunterParkRefs = [];
-    updateHunterParkDisplay();
-  }
+  // Every reference the spot carries: a two-fer's comma list in the primary
+  // field, and the other programs' own fields (an n-fer). WD3D 2026-10-29:
+  // "Right now it will only populate 1 park in the P2P log entry" — the
+  // operator had to type the second park by hand to get both credits.
+  hunterParkRefs = hunterParkRefsFromSpot(s);
+  updateHunterParkDisplay();
   resetActivatorRst();
   // QRZ lookup for op name and state
   if (s.callsign) {
@@ -28091,10 +29142,30 @@ function updateActivatorHomeUi() {
   }
 }
 
+/**
+ * The Activation panel's frequency box, in kHz (0 = empty or unreadable).
+ * The box says MHz, but operators type kHz too: "7182" was read as 7182 MHz,
+ * logged with no band and refused by POTA.app (a 1.11 activator, 2026-10-25).
+ * Read through lib/log-freq.js, the rule every log path uses: MHz, kHz or Hz,
+ * whichever lands in an amateur band. A readable value is shown back in MHz.
+ */
+function readActivatorFreqKhz() {
+  const raw = activatorFreqInput.value;
+  if (!raw || !raw.trim()) return 0;
+  const f = window.LogFreq ? window.LogFreq.parseLogFreq(raw) : null;
+  if (f && f.kind === 'ok') {
+    const shown = (f.khz / 1000).toFixed(3);
+    if (activatorFreqInput.value !== shown && document.activeElement !== activatorFreqInput) activatorFreqInput.value = shown;
+    return f.khz;
+  }
+  const mhz = parseFloat(raw);
+  return mhz > 0 ? mhz * 1000 : 0;
+}
+
 function tuneActivatorFreq() {
-  const mhz = parseFloat(activatorFreqInput.value);
-  if (!mhz || mhz <= 0) return;
-  const khz = Math.round(mhz * 1000);
+  const typedKhz = readActivatorFreqKhz();
+  if (!typedKhz) return;
+  const khz = Math.round(typedKhz);
   if (khz === activatorFreqKhz) return; // already there
   // The operator typed a frequency and committed it — that is them declaring
   // a new calling QRG, so stop offering to drag them back to the old one.
@@ -28140,6 +29211,8 @@ if (activatorCallsignInput) {
 
 /** Simple freq -> band for activator. Input in kHz. */
 function freqToBandActivator(khz) {
+  if (khz >= 135.7 && khz <= 137.8) return '2200m';
+  if (khz >= 472 && khz <= 479) return '630m';
   if (khz >= 1800 && khz <= 2000) return '160m';
   if (khz >= 3500 && khz <= 4000) return '80m';
   if (khz >= 5330 && khz <= 5410) return '60m';
@@ -28157,6 +29230,11 @@ function freqToBandActivator(khz) {
   if (khz >= 420000 && khz <= 450000) return '70cm';
   if (khz >= 902000 && khz <= 928000) return '33cm';
   if (khz >= 1240000 && khz <= 1300000) return '23cm';
+  if (khz >= 2300000 && khz <= 2450000) return '13cm';
+  if (khz >= 3300000 && khz <= 3500000) return '9cm';
+  if (khz >= 5650000 && khz <= 5925000) return '6cm';
+  if (khz >= 10000000 && khz <= 10500000) return '3cm';
+  if (khz >= 24000000 && khz <= 24250000) return '1.25cm';
   return '';
 }
 
@@ -28329,6 +29407,21 @@ if (hunterParkExtraBadge) {
   hunterParkExtraBadge.addEventListener('click', () => openMultiparkDialog('hunter'));
 }
 
+/** The "their park" box: one reference or a comma list (an n-fer). Accepts
+ *  POTA/WWFF-shaped refs (K-1234, US-1234, KFF-1234), SOTA summits (W4C/CM-001)
+ *  and WWBOTA bunkers (B/US-1234); the program is tagged from the shape so the
+ *  ADIF SIG is right (summit-to-park typed by hand used to log SIG=POTA).
+ *  @returns {{refs: string[], bad: string[]}} */
+function parseHunterParkInput(text) {
+  const refs = [], bad = [];
+  for (const tok of String(text || '').toUpperCase().split(/[,;\s]+/).filter(Boolean)) {
+    const ok = /^[A-Z]{1,4}-\d{3,5}$/.test(tok) || /^[A-Z0-9]{1,4}\/[A-Z]{2}-\d{3}$/.test(tok) || /^B\/[A-Z]{1,3}-\d{3,5}$/.test(tok);
+    if (!ok) bad.push(tok);
+    else if (!refs.includes(tok)) refs.push(tok);
+  }
+  return { refs, bad };
+}
+
 // --- Hunter Park Autocomplete ---
 const hunterParkInput = document.getElementById('activator-hunter-park');
 const hunterParkDropdown = document.getElementById('activator-hunter-dropdown');
@@ -28337,8 +29430,13 @@ let hunterParkSearchTimeout = null;
 if (hunterParkInput) {
   hunterParkInput.addEventListener('input', () => {
     clearTimeout(hunterParkSearchTimeout);
-    const query = hunterParkInput.value.trim();
-    if (query.length < 2) { hunterParkDropdown.classList.add('hidden'); hunterParkRefs = []; return; }
+    hunterParkInput.style.outline = '';
+    // In a comma list, search for the reference being typed (the last one).
+    const full = hunterParkInput.value;
+    const cut = full.lastIndexOf(',');
+    const head = cut >= 0 ? full.slice(0, cut + 1) + ' ' : '';
+    const query = (cut >= 0 ? full.slice(cut + 1) : full).trim();
+    if (query.length < 2) { hunterParkDropdown.classList.add('hidden'); if (cut < 0) hunterParkRefs = []; return; }
     hunterParkSearchTimeout = setTimeout(async () => {
       const results = await window.api.searchParks(query);
       if (!results || !results.length) { hunterParkDropdown.classList.add('hidden'); return; }
@@ -28349,9 +29447,17 @@ if (hunterParkInput) {
         item.innerHTML = `<span class="activator-dropdown-ref">${park.reference}</span><span class="activator-dropdown-name">${park.name || ''}</span><span class="activator-dropdown-loc">${park.locationDesc || ''}</span>`;
         item.addEventListener('mousedown', (e) => {
           e.preventDefault();
-          hunterParkRefs = [{ ref: park.reference, name: park.name || '', program: inferParkProgram(park.reference) }];
-          hunterParkInput.value = park.reference;
+          const picked = { ref: park.reference, name: park.name || '', program: inferParkProgram(park.reference) };
           hunterParkDropdown.classList.add('hidden');
+          if (head) {
+            // Completing the next park of a comma list: keep the list as typed.
+            hunterParkInput.value = head + park.reference;
+            const prior = parseHunterParkInput(head).refs;
+            hunterParkRefs = [...hunterParkRefs.filter(p => prior.includes(p.ref)), picked];
+            return;
+          }
+          hunterParkRefs = [picked];
+          hunterParkInput.value = park.reference;
           updateHunterParkDisplay();
         });
         hunterParkDropdown.appendChild(item);
@@ -28388,7 +29494,43 @@ if (hunterParkInput) {
 loadPrefs().then(() => {
   render();
   checkFirstRun();
+  // A saved audio device whose ID changed since the last run (USB port,
+  // driver update, security software resetting POTACAT's storage — AE5JE
+  // + Bitdefender) is followed by its name before anything opens it.
+  healRigAudioDevicesNow('launch');
 });
+
+// Follow each rig's saved audio devices by NAME when their IDs change, and
+// learn the names while the IDs work (lib/audio-device-heal.js). Runs at
+// launch, on every device plug/unplug, and after a device is picked here.
+const _audioHealSaid = new Set();
+let _audioHealBusy = false;
+async function healRigAudioDevicesNow(why) {
+  if (_audioHealBusy || !window.AudioDeviceHeal || !navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+  _audioHealBusy = true;
+  try {
+    const s = await window.api.getSettings();
+    if (!Array.isArray(s.rigs) || !s.rigs.length) return;
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const r = AudioDeviceHeal.healRigAudioDevices(s.rigs, devices);
+    for (const note of r.notes) {
+      if (_audioHealSaid.has(note)) continue;
+      _audioHealSaid.add(note);
+      try { window.api.jtcatLog(note + ` (${why})`); } catch {}
+    }
+    if (!r.changed) return;
+    // The renderer's rig copy is what the editor saves whole: keep it current
+    // or the next editor save puts the dead IDs back.
+    if (Array.isArray(currentRigs) && currentRigs.length) {
+      currentRigs = currentRigs.map((rig) => r.rigs.find((x) => x && rig && x.id === rig.id) || rig);
+    }
+    await window.api.saveSettings({ rigs: r.rigs });
+  } catch { /* enumerateDevices refused: nothing to follow */ }
+  finally { _audioHealBusy = false; }
+}
+if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+  navigator.mediaDevices.addEventListener('devicechange', () => setTimeout(() => healRigAudioDevicesNow('device change'), 1500));
+}
 // Fetch active events on startup
 window.api.getActiveEvents().then((events) => {
   console.log('[Events] loaded', events.length, 'events:', events.map(e => e.id));
@@ -29638,7 +30780,7 @@ function renderJtcatQsoTracker() {
   }
   // For CQ mode, cq-reply is implicit (rx between cq and cq-report)
   // Map actual phase to display index
-  if (q.mode === 'cq' && q.phase === 'cq-report') currentIdx = 2;
+  if (q.mode === 'cq' && (q.phase === 'cq-report' || q.phase === 'cq-r-report')) currentIdx = 2;
   if (q.mode === 'cq' && q.phase === 'cq-rr73') currentIdx = 4;
   if (q.mode === 'cq' && q.phase === 'done') currentIdx = 5;
   if (q.mode === 'reply' && q.phase === 'r+report') currentIdx = 2;
@@ -30266,6 +31408,9 @@ if (window.api.jtcatGetClock) {
 // --- JTCAT TX Audio Playback ---
 var jtcatTxAudioCtx = null;
 var jtcatTxPlaying = false;
+// The source now playing, so a halt can stop it mid-message (see jtcat-tx-abort).
+var jtcatTxActiveSource = null;
+var jtcatTxAbortFinish = null;
 
 // enumerateDevices() is slow on Chromium (often 500–1000 ms on first call,
 // especially when there are many devices). The safety budget between
@@ -30388,10 +31533,13 @@ async function playJtcatTxAudio(data) {
       if (txDone) return;
       txDone = true;
       jtcatTxPlaying = false;
+      if (jtcatTxActiveSource === source) { jtcatTxActiveSource = null; jtcatTxAbortFinish = null; }
       window.api.jtcatTxComplete();
       console.log('[JTCAT] TX audio playback complete');
     }
     source.onended = finishTx;
+    jtcatTxActiveSource = source;
+    jtcatTxAbortFinish = finishTx;
     // Pad with leading silence so the FT8 envelope starts at slot+500ms,
     // regardless of whether we fired at slot+0 (boundary TX) or slot+365ms
     // (an Immediate TX after a late phone click). The previous "skip into
@@ -30530,6 +31678,26 @@ async function playJtcatTxAudio(data) {
 
 window.api.onJtcatTxAudio(function(data) {
   playJtcatTxAudio(data);
+});
+
+// Halt: main dropped PTT and asks for the tones to stop now. Before this the
+// buffer played to its end whatever the operator pressed, and a radio keyed by
+// its audio (VOX, an interface that keys on audio) stayed on the air for the
+// rest of the 13 s (droidbot2 2026-10-31: "once a message starts, there is no
+// way to stop it").
+if (window.api.onJtcatTxAbort) window.api.onJtcatTxAbort(function(reason) {
+  var src = jtcatTxActiveSource;
+  var finish = jtcatTxAbortFinish;
+  jtcatTxActiveSource = null;
+  jtcatTxAbortFinish = null;
+  if (src) {
+    try { src.onended = null; src.stop(); } catch (e) { /* not started yet, or already ended */ }
+    try { src.disconnect(); } catch (e) {}
+    window.api.jtcatLog('[JTCAT TX] Audio stopped mid-message (' + (reason || 'halt') + ')');
+  }
+  if (finish) finish();
+  jtcatTxPlaying = false;
+  if (typeof stopJtcatTuneAudio === 'function') { try { stopJtcatTuneAudio(); } catch (e) {} }
 });
 
 // --- JTCAT Tune (steady-tone for power/ALC tuning) ---
@@ -30854,6 +32022,13 @@ function firstEmptyKiwiHost() {
   const btn = document.getElementById('kiwi-add-row-btn');
   if (btn) btn.addEventListener('click', () => {
     const h = firstEmptyKiwiHost();
-    if (h) h.focus();
+    if (!h) return;
+    h.focus();
+    // Open the directory picker for that slot — focusing an empty box looked
+    // like nothing happening (AA5MP 2026-10-28), while the phone's Add SDR
+    // opens its browser straight away. Same behaviour here now.
+    const slot = parseInt(String(h.id).replace('set-kiwi-host-', ''), 10) || 1;
+    const browse = document.querySelector('.kiwi-browse-btn[data-slot="' + slot + '"]');
+    if (browse) browse.click();
   });
 })();

@@ -17,6 +17,9 @@
     var theme = p.get('theme') === 'light' ? 'light' : 'dark';
     var variant = p.get('variant') || 'navy';
     document.documentElement.setAttribute('data-theme', theme);
+    // A design-system theme (lib/app-theme.js): data-ds = its token column.
+    var ds = p.get('ds');
+    if (ds && /^[a-z]+$/.test(ds)) document.documentElement.setAttribute('data-ds', ds);
     if (theme === 'dark' && variant !== 'navy') {
       document.documentElement.setAttribute('data-dark-variant', variant);
     }

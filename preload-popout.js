@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('api', {
   workedOverlayGet: () => ipcRenderer.invoke('worked-overlay-get'),
   workedOverlaySet: (patch) => ipcRenderer.send('worked-overlay-set', patch),
   workedOverlayGeo: () => ipcRenderer.invoke('worked-overlay-geo'),
+  workedSync: (kind) => ipcRenderer.invoke('worked-sync', kind),
   onWorkedOverlayState: (cb) => ipcRenderer.on('worked-overlay-state', (_e, s) => cb(s)),
   openLogDialog: (spot) => ipcRenderer.send('popout-open-log', spot),
   minimize: () => ipcRenderer.send('popout-minimize'),

@@ -342,6 +342,15 @@
     /* Selects share the .jp-btn scale so the bar reads as one family
        (Casey 2026-07-16: Chase vs Hunt looked like different UIs). */
     .jp-select { font-size: 12px; font-weight: 600; padding: 4px 6px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-tertiary); color: var(--text-primary); cursor: pointer; }
+    .jp-select.jp-slot-locked { border-color: #4fc3f7; color: #4fc3f7; }
+    /* WSPR map legend (jtcat-popout.js wsprLegendControl): the SNR colour steps */
+    .jp-wspr-legend { background: var(--bg-secondary, #16213e); color: var(--text-primary, #e0e0e0); border: 1px solid var(--border-primary, #2a3a5e); border-radius: 4px; padding: 5px 8px; font-size: 11px; line-height: 1.5; max-width: 190px; box-shadow: 0 2px 8px rgba(0,0,0,0.35); }
+    .jp-wspr-legend-title { font-weight: 700; margin-bottom: 2px; }
+    .jp-wspr-legend-row { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+    .jp-wspr-legend-dot { width: 9px; height: 9px; border-radius: 50%; border: 1px solid #fff; flex: 0 0 auto; }
+    .jp-wspr-legend-note { margin-top: 3px; opacity: 0.75; white-space: normal; }
+    .jp-slot-toast { position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%); z-index: 9999; display: flex; gap: 10px; align-items: center; max-width: 92vw; padding: 8px 12px; border-radius: 6px; background: var(--bg-secondary, #16213e); border: 1px solid #4fc3f7; color: var(--text-primary); font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,0.4); }
+    .jp-slot-toast button { font-size: 12px; padding: 3px 8px; border-radius: 4px; border: 1px solid #4fc3f7; background: transparent; color: #4fc3f7; cursor: pointer; white-space: nowrap; }
     /* AUTO group — visually binds Hunt + Run (the two mutually-exclusive
        automatic-operation modes) so their association is legible. */
     .jp-auto-group { display: flex; align-items: center; gap: 6px; padding: 2px 6px; border: 1px dashed var(--border-primary); border-radius: 6px; flex-shrink: 0; }
@@ -393,6 +402,7 @@
     .jp-qso-toast { position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%); background: #d4edda; color: #1a1a1a; padding: 10px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; z-index: 9999; box-shadow: 0 4px 16px rgba(0,0,0,0.4); opacity: 0; pointer-events: none; transition: opacity 0.3s ease; }
     .jp-qso-toast.visible { opacity: 1; pointer-events: auto; }
     .jp-qso-toast .jp-toast-sub { font-weight: normal; font-size: 11px; opacity: 0.8; margin-top: 2px; }
+    .jp-qso-toast .jp-toast-action { display: block; margin: 6px auto 0; padding: 3px 10px; font: inherit; font-size: 12px; cursor: pointer; border-radius: 4px; border: 1px solid currentColor; background: transparent; color: inherit; }
     /* Amber/red variant for "TX stopped" / retry-limit events. Same shape
        as the success toast, just visually distinct so it doesn't get
        confused with a logged-QSO confirmation. K3SBP 2026-05-05. */
@@ -407,6 +417,11 @@
     #jp-wf-silent.show { display: flex; }
     #jp-wf-silent strong { color: #f0a500; font-size: 11px; font-weight: 700; letter-spacing: 0.3px; text-shadow: 0 1px 2px #000; }
     #jp-wf-silent span { color: #f0c060; font-size: 9px; opacity: 0.85; }
+    /* A Flex's own waterfall replaces the audio waterfall (jtcat-popout.js bsRadioWf):
+       no header, no trace, the frequency scale over a taller waterfall. */
+    #jp-wf-single.jp-wf-replaced { display: none !important; }
+    #jp-bandscope.jp-bs-radio-wf > div:first-child, #jp-bandscope.jp-bs-radio-wf #jp-bs-trace { display: none !important; }
+    #jp-bandscope.jp-bs-radio-wf #jp-bs-wf { height: 120px !important; }
 
     /* Station popup */
     .jp-station-popup .leaflet-popup-content-wrapper { background: var(--bg-secondary, #1a1a2e); color: var(--text-primary, #eee); border: 1px solid var(--border-primary, #333); border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
@@ -478,6 +493,7 @@
       <button id="jp-activation-btn" class="jtcat-filter-btn" title="Open the activation log and map" hidden>Activation</button>
       <button id="jp-map-toggle" class="jtcat-filter-btn active" title="Toggle map">Map</button>
       <button id="jp-map-popout" class="jtcat-filter-btn" title="Pop out map">&#x2197;</button>
+      <button id="jp-worked-toggle" class="jtcat-filter-btn active" title="Show or hide the Worked box on the map (states and countries worked and confirmed). The tints and F6 / F7 / F8 keep working either way.">Worked</button>
     </div>
   </div>
 
@@ -530,6 +546,20 @@
     <!-- WSPR pane (swaps in for the decode pane in WSPR mode) -->
     <div id="jp-wspr-pane" class="jp-wspr-pane hidden">
       <div class="jp-wspr-beacon">
+        <!-- Asked once, the first time Beacon TX is turned on (K2BDE 2026-10-30:
+             the old 30-minute watchdog stopped his overnight beacon). The answer
+             is the Run select, editable any time. -->
+        <div id="jp-wspr-run-ask" class="hidden" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:4px 0 6px;font-size:11px;color:var(--text-primary);">
+          <span><b>How long should the beacon run?</b> It transmits on its own until then.</span>
+          <select id="jp-wspr-run-ask-sel" class="jp-wspr-select">
+            <option value="0" selected>until I stop it</option>
+            <option value="60">1 h</option><option value="120">2 h</option><option value="240">4 h</option>
+            <option value="480">8 h</option><option value="720">12 h</option><option value="1440">24 h</option>
+          </select>
+          <button type="button" id="jp-wspr-run-ask-go" class="jp-btn" style="font-size:11px;padding:2px 8px;">Start beacon</button>
+          <button type="button" id="jp-wspr-run-ask-cancel" class="jp-btn" style="font-size:11px;padding:2px 8px;">Cancel</button>
+          <span style="color:var(--text-dim);">You can change this later next to Beacon TX.</span>
+        </div>
         <div class="jp-wspr-beacon-row">
           <label class="jp-wspr-tx" title="Beacon: transmit a low-power WSPR signal so distant stations spot you on wsprnet.org. Power is HARD-CAPPED at 1 W (QRPp). Attended only — verify actual output on a meter / dummy load.">
             <input type="checkbox" id="jp-wspr-tx-enable"> <b>Beacon TX</b>
@@ -546,6 +576,13 @@
               <option>17</option><option>20</option><option>23</option><option>27</option>
               <option selected>30</option>
             </select><span class="jp-wspr-num" title="30 dBm = 1 W max">dBm ≤1 W</span>
+          </label>
+          <label title="How long the beacon runs before it stands down on its own. Until I stop it = continuous (the default). You are responsible for the station while it transmits.">Run
+            <select id="jp-wspr-run" class="jp-wspr-select">
+              <option value="0" selected>until I stop it</option>
+              <option value="60">1 h</option><option value="120">2 h</option><option value="240">4 h</option>
+              <option value="480">8 h</option><option value="720">12 h</option><option value="1440">24 h</option>
+            </select>
           </label>
           <span class="jp-wspr-sep"></span>
           <label title="Upload your received spots to wsprnet.org — this is what plots your station on the global propagation map.">
@@ -773,11 +810,9 @@
       <span id="jp-bs-mode"></span>
       <span style="flex:1"></span>
       <button type="button" id="jp-bs-enable" class="hidden" title="Turns SCU-LAN10 on in the radio menu (EX0301261;). POTACAT turns it back off when the scope stops." style="font-size:10px;padding:1px 6px;border:1px solid #e94560;background:var(--accent-red, #e94560);color:#fff;border-radius:3px;cursor:pointer;">Enable SCU-LAN10</button>
-      <span id="jp-bs-lo" style="font-family:monospace"></span>
-      <span id="jp-bs-c" style="font-family:monospace;color:#e94560;font-weight:700"></span>
-      <span id="jp-bs-hi" style="font-family:monospace"></span>
     </div>
     <canvas id="jp-bs-trace" style="width:100%;height:56px;display:block;cursor:crosshair;"></canvas>
+    <canvas id="jp-bs-freq" style="width:100%;height:18px;display:block;cursor:crosshair;background:#0b0b16;"></canvas>
     <canvas id="jp-bs-wf" style="width:100%;height:96px;display:block;cursor:crosshair;"></canvas>
   </div>
 
@@ -830,6 +865,13 @@
     <button id="jp-halt-tx" class="jp-btn jp-halt">Halt TX</button>
     <span class="jp-ctl-sep"></span>
     <button id="jp-cq" class="jp-btn">CQ</button>
+    <!-- TX slot lock (lib/jtcat-tx-slot.js): Auto, or every CQ and reply in
+         1st (even) / 2nd (odd). Saved per profile; same control on ECHOCAT. -->
+    <select id="jp-tx-slot" class="jp-select" title="TX slot. Auto: replies go opposite the station, and a new CQ stays in the slot you last transmitted in. 1st / 2nd: every CQ and reply stays in that slot; stations in it are not called.">
+      <option value="auto">Slot: Auto</option>
+      <option value="even">Slot: 1st (even)</option>
+      <option value="odd">Slot: 2nd (odd)</option>
+    </select>
     <!-- Chase target: what you call CQ to (CQ <tag> …) AND the entity whose
          decodes get highlighted. Populated from CqTarget.QUICK_PICKS; "Custom…"
          reveals the input for a US state (FL) or DXCC prefix (JA). -->
@@ -898,6 +940,12 @@
     <label class="jp-opt-row jp-opt-num-row">
       <span class="jp-opt-label">Worked-before expires after <input id="jp-rework-days" type="number" min="0" max="3650" value="0"> days</span>
       <span class="jp-opt-help">How long a logged contact keeps Hunt and Auto CQ from calling that station again on the same band and mode. 0 = forever. A station spotted as an activator is always fair game unless you already worked them at that park today — a new park or a new UTC day counts fresh, matching program rules.</span>
+    </label>
+    <label class="jp-opt-row jp-opt-num-row">
+      <span class="jp-opt-label">Hunt: don't call below <input id="jp-hunt-min-db" type="text" inputmode="numeric" maxlength="4" placeholder="off" style="width:44px;"> dB</span>
+      <span class="jp-opt-help">Hunt only answers a CQ at least this strong, so it doesn't start contacts your station is unlikely to finish. Blank = call any signal. You can still double-click a weaker station to call it yourself.</span>
+      <span class="jp-opt-label" style="margin-top:4px;">By band: <input id="jp-hunt-min-db-band" type="text" maxlength="120" placeholder="e.g. 20m -18, 6m -12" style="width:170px;"></span>
+      <span class="jp-opt-help" id="jp-hunt-min-db-band-help">A band listed here uses its own level; any other band uses the one above.</span>
     </label>
     <label class="jp-opt-row jp-opt-num-row">
       <span class="jp-opt-label">Don't log the same station again for <input id="jp-relog-min" type="number" min="0" max="120" value="15"> minutes</span>
@@ -969,11 +1017,14 @@
 
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>
   <script src="../lib/rig-family.js"></script>
+  <script src="../lib/rig-bands.js"></script>
+  <script src="../lib/jtcat-snr-floor.js"></script>
   <script src="../lib/watchlist-groups.js"></script>
   <script src="jtcat-parser.js"></script>
   <script src="cq-target.js"></script>
   <script src="../lib/wspr/stats.js"></script>
   <script src="../lib/scope-axis.js"></script>
+  <script src="../lib/scope-view.js"></script>
   <script src="../lib/jtty-macros.js"></script>
   <script src="../lib/decode-row.js"></script>
   <script src="../lib/worked-roster.js"></script>

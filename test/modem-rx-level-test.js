@@ -6,7 +6,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { RxLeveler } = require('../lib/modem-rx-level');
+const { RxLeveler, TxLeveler } = require('../lib/modem-rx-level');
 
 let pass = 0, fail = 0;
 function test(name, fn) {
@@ -77,6 +77,41 @@ test('levels() reads dBFS and silence is -90', () => {
   assert.strictEqual(l.levels().inDb, -20);
 });
 
+test('TX: a modem playing at -7 dBFS is raised toward full scale over a second or two, never past +18 dB', () => {
+  const l = new TxLeveler();
+  let t = 0;
+  const first = tone(0.45); l.process(first, t);
+  assert.strictEqual(l.gain, 1, 'the very first chunk goes out as played');
+  for (let i = 0; i < 40; i++) { t += 20; l.process(tone(0.45), t); } // 0.8 s of audio
+  assert.ok(l.gainDb > 3 && l.gainDb < 6.1, 'rising at ~6 dB/s: ' + l.gainDb);
+  for (let i = 0; i < 100; i++) { t += 20; l.process(tone(0.45), t); }
+  assert.ok(Math.abs(l.gain * 0.45 - 0.8) < 0.02, 'settled with peaks at the target: ' + (l.gain * 0.45));
+  assert.strictEqual(l.cuts, 0);
+  const q = new TxLeveler();
+  let t2 = 0;
+  for (let i = 0; i < 400; i++) { t2 += 20; q.process(tone(0.02), t2); } // very quiet, 8 s
+  assert.ok(q.gain === 1, 'silence is never raised: ' + q.gain);
+  for (let i = 0; i < 400; i++) { t2 += 20; q.process(tone(0.06), t2); }
+  assert.ok(Math.abs(q.gain - 8) < 0.01, 'capped at maxGain: ' + q.gain);
+});
+
+test('TX: a peak that would clip cuts the gain at once; a seeded gain is applied from the first chunk', () => {
+  const l = new TxLeveler({ gain: 2 });
+  const a = tone(0.3);
+  l.process(a, 0);
+  assert.ok(Math.abs(maxAbs(a) - 0.6) < 0.01, 'seeded gain applied at once: ' + maxAbs(a));
+  const b = tone(0.7);
+  l.process(b, 20);
+  assert.ok(maxAbs(b) <= 0.81, 'cut before it clipped: ' + maxAbs(b));
+  assert.strictEqual(l.cuts, 1);
+  assert.ok(Math.abs(l.gain - 0.8 / 0.7) < 0.01);
+  const u = new TxLeveler({ gain: 1 });
+  const c = tone(1.0);
+  u.process(c, 0);
+  assert.ok(maxAbs(c) <= 1.0 && u.gain === 1, 'never below unity: a hot modem is left alone');
+  assert.deepStrictEqual(u.levels(), { inDb: 0, outDb: 0, boostDb: 0 });
+});
+
 test('wiring: the session chain is tokened, VARA launches once, Pat is asked before a new call, the cable feed is levelled', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
   assert.ok(main.includes('const seq = ++_winlinkSessionSeq;'));
@@ -88,6 +123,9 @@ test('wiring: the session chain is tokened, VARA launches once, Pat is asked bef
   assert.ok(/_cableRxLeveler = null; \/\/ the next session starts at unity/.test(main));
   assert.ok(/winlinkStartSessionMeter\(\)/.test(main) && /setSession\(\{ audio: winlinkAudioLevels\(\) \}\)/.test(main));
   assert.ok(/telling Pat to hang up/.test(main), 'a stray PTT after Stop re-sends the disconnect');
+  assert.ok(/function winlinkDispatchTx\(mono24k\) \{\r?\n  mono24k = winlinkLevelModemTx\(mono24k\);/.test(main), 'every modem transmit route goes through the TX leveler');
+  assert.ok(/winlinkRememberModemTxGain\(\);/.test(main) && /'winlinkModemTxGain',/.test(main), 'the learned gain is kept per modem, machine-scoped');
+  assert.ok(/boostDb/.test(fs.readFileSync(path.join(__dirname, '..', 'renderer', 'winlink-popout.js'), 'utf8')), 'the Mail window shows the boost');
   const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'winlink-popout.html'), 'utf8');
   const js = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'winlink-popout.js'), 'utf8');
   assert.ok(html.includes('id="wl-audio"') && js.includes("$('wl-audio')") && js.includes('au.toModemDb'));

@@ -23,7 +23,7 @@ console.log('Local paddle routes like the ECHOCAT paddle');
 test('one router, built outside connectRemote so it exists with ECHOCAT off', () => {
   assert.ok(/^let paddleKeyRig = null;/m.test(main), 'module-level handle');
   assert.ok(/^function buildPaddleKeyRig\(\) \{\n  if \(paddleKeyRig\) return paddleKeyRig;/m.test(main), 'builder, idempotent');
-  assert.ok(/paddleKeyRig = \(\{ down \}\) => \{\n\s*\/\/ A paddle keys the rig outside the controller's own PTT path/.test(main), 'the router body is the old ECHOCAT callback');
+  assert.ok(/paddleKeyRig = \(\{ down \}\) => \{\n\s*if \(down && !passTxAllowed\('CW'\)\) return;[^\n]*\n\s*\/\/ A paddle keys the rig outside the controller's own PTT path/.test(main), 'the router body is the old ECHOCAT callback, behind the pass gate');
   assert.ok(main.indexOf('function buildPaddleKeyRig()') < main.indexOf('function connectRemote()'), 'defined at module scope, before connectRemote');
   assert.ok(/\n  remoteServer\.setCwKeyerOutput\(buildPaddleKeyRig\(\)\);/.test(main), 'ECHOCAT subscribes to the same router');
   assert.strictEqual((main.match(/remoteServer\.setCwKeyerOutput\(/g) || []).length, 1);

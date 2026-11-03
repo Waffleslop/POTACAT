@@ -11,11 +11,16 @@ contextBridge.exposeInMainWorld('api', {
   onSpots: (cb) => ipcRenderer.on('spots', (_e, spots) => cb(spots)),
   onCatFrequency: (cb) => ipcRenderer.on('cat-frequency', (_e, hz) => cb(hz)),
   onPopoutTheme: (cb) => ipcRenderer.on('scope-popout-theme', (_e, theme) => cb(theme)),
+  // The tuning step, synced with the VFO window and every ECHOCAT device.
+  tuneStepGet: () => ipcRenderer.invoke('tune-step-get'),
+  setTuneStep: (hz) => ipcRenderer.send('tune-step-set', Number(hz)),
+  onTuneStep: (cb) => ipcRenderer.on('tune-step', (_e, hz) => cb(hz)),
   // Asks
   enableOnRadio: () => ipcRenderer.send('scope-enable-on-radio'),
   restart: () => ipcRenderer.send('scope-restart'),
   setSynth: (on) => ipcRenderer.send('scope-set-synth', !!on),
   setFps: (fps) => ipcRenderer.send('scope-set-fps', Number(fps)),
+  setSpan: (hz) => ipcRenderer.send('scope-span', Number(hz)),
   tune: (frequency, mode) => ipcRenderer.send('tune', { frequency, mode }),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   // Window controls

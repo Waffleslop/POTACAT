@@ -152,7 +152,7 @@
   };
   function workedOverlayReceive(msg) {
     workedOverlayLast = {
-      states: !!(msg.show && msg.show.states), countries: !!(msg.show && msg.show.countries),
+      states: !!(msg.show && msg.show.states), countries: !!(msg.show && msg.show.countries), prefixes: !!(msg.show && msg.show.prefixes),
       scope: msg.scope || 'band-mode', band: msg.band || '', mode: msg.mode || '', confirmedOnly: !!msg.confirmedOnly,
       stateMap: msg.states || {}, countryMap: msg.countries || {}, counts: msg.counts || null,
     };
@@ -426,6 +426,7 @@
   let _mapHomeGrid = null;
   let currentFreqKhz = 0;
   let currentMode = '';
+  let currentNoCat = false; // status.noCat: a "No CAT control (VOX)" rig, keyed by its sound card
   let tunedFreqKhz = '';
 
   // Spot column visibility — persisted in localStorage
@@ -514,7 +515,10 @@
   let rotorEnabled = false;
   let directoryNets = [];
   let directorySwl = [];
-  let dirActiveTab = 'nets';
+  let directoryLandmarks = [];        // the Landmarks tab (lib/landmarks.js)
+  let directoryChannels = [];         // the Channels tab: the shack's saved frequency chart (lib/channels.js)
+  let directoryLandmarkCategories = [];
+  let dirActiveTab = 'nets';          // 'nets' | 'swl' | 'landmarks'
 
   // --- Colorblind mode ---
   const CB_COLORS = {
@@ -558,6 +562,7 @@
   let searchDebounce = null;
   let workedParksSet = new Set();  // park refs from CSV for new-to-me filter
   let showNewOnly = false;
+  let dxOnly = false; // only spots the shack stamped isDx (lib/dx-rule.js)
   let workedQsos = new Map();     // callsign -> [{date, ref, band, mode}]
   let wqChunkAccum = [];          // in-flight chunked worked-qsos accumulator
   let hideWorked = false;
@@ -976,20 +981,36 @@
   let scopeState = null;
   let scopeLatest = null;
   let scopeSubscribedSent = false;
-  let scopeFloor = (() => { try { return Number(localStorage.getItem('echocat-scope-floor')) || 0; } catch { return 0; } })();
+  let scopeTuneStepHz = 1000;   // the shack's synced tuning step (S2C tune-step)
+  const scopeLsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch { return d; } };
+  const scopeLsSet = (k, v) => { try { localStorage.setItem(k, String(v)); } catch { /* private mode */ } };
+  // Level window (plan item 4): the bottom IS the old Floor ('echocat-scope-floor',
+  // same key, so a saved floor carries over); the top starts at full scale.
+  let scopeRange = { lo: Number(scopeLsGet('echocat-scope-floor', 0)) || 0, hi: Number(scopeLsGet('echocat-scope-top', 255)) || 255 };
+  let scopeAvg = scopeLsGet('echocat-scope-avg', 'light');
+  let scopePeakOn = scopeLsGet('echocat-scope-peak', '0') === '1';
+  let scopePeakDecay = scopeLsGet('echocat-scope-peak-decay', 'slow');
+  let scopeSUnits = scopeLsGet('echocat-scope-sunits', '0') === '1';
+  // Licence-privilege shading: on by default (Casey 10/28).
+  let scopePrivileges = scopeLsGet('echocat-scope-privileges', '1') !== '0';
+  // Averaging + peak hold run on the RAW levels (the readout reads them).
+  let scopeSmooth = null, scopePeak = null;
   let ft8BsOn = (() => { try { return localStorage.getItem('echocat-ft8-bandscope') === '1'; } catch { return false; } })();
 
   // Two places draw the same stream: the Scope tab, and a strip above the FT8
   // tab's audio waterfall. One frame handler, one state handler, N surfaces.
+  // `full` = the Scope tab: level gutter, readout, peak hold; the FT8 strip
+  // gets the frequency scale only.
   const scopeSurfaces = [
-    { trace: document.getElementById('scope-phone-trace'), wf: document.getElementById('scope-phone-wf'),
-      lo: 'scope-phone-ax-lo', c: 'scope-phone-ax-c', hi: 'scope-phone-ax-hi', status: 'scope-phone-status', span: 'scope-phone-span',
+    { trace: document.getElementById('scope-phone-trace'), wf: document.getElementById('scope-phone-wf'), freq: document.getElementById('scope-phone-freq'),
+      status: 'scope-phone-status', span: 'scope-phone-span', full: true,
       visible: (tab) => tab === 'scope' },
-    { trace: document.getElementById('ft8-bs-trace'), wf: document.getElementById('ft8-bs-wf'),
-      lo: 'ft8-bs-lo', c: 'ft8-bs-c', hi: 'ft8-bs-hi', status: 'ft8-bs-status', span: 'ft8-bs-span',
+    { trace: document.getElementById('ft8-bs-trace'), wf: document.getElementById('ft8-bs-wf'), freq: document.getElementById('ft8-bs-freq'),
+      status: 'ft8-bs-status', span: 'ft8-bs-span', full: false,
       visible: (tab) => tab === 'ft8' && ft8BsOn && scopeAvailable() },
   ];
 
+  function ft8ScopeIsFlex() { return !!(rigCapabilities && rigCapabilities.nativeScope === 'flex'); }
   function scopeAvailable() {
     return !!(scopeServerOk && window.ScopeAxis && rigCapabilities && rigCapabilities.nativeScope);
   }
@@ -1012,22 +1033,36 @@
     const bsBtn = document.getElementById('ft8-bs-toggle');
     if (bsBtn) { bsBtn.classList.toggle('hidden', !show); bsBtn.classList.toggle('active', show && ft8BsOn); }
     const strip = document.getElementById('ft8-bandscope');
-    if (strip) strip.classList.toggle('hidden', !(show && ft8BsOn));
+    if (strip) {
+      strip.classList.toggle('hidden', !(show && ft8BsOn));
+      // A Flex: the radio's waterfall alone, no header or trace (as the desktop FT8 window).
+      strip.classList.toggle('ft8-bs-radio-wf', ft8ScopeIsFlex());
+    }
     if (!show && activeTab === 'scope') switchTab('spots');
     scopeSyncSubscription(activeTab);
+  }
+  // The dial the scope draws around: where a drag, wheel or pinch just put
+  // it until the radio's readback arrives within 25 Hz (or 1.5 s pass) — the
+  // VFO window's optimistic pattern, so an old readback never snaps it back.
+  let scopeDialTarget = { hz: 0, until: 0 };
+  function scopeDialHz() {
+    const live = Math.round((currentFreqKhz || 0) * 1000);
+    if (scopeDialTarget.hz && Date.now() < scopeDialTarget.until && Math.abs(live - scopeDialTarget.hz) > 25) return scopeDialTarget.hz;
+    scopeDialTarget = { hz: 0, until: 0 };
+    return live;
   }
   function scopeAxisNow() {
     const A = window.ScopeAxis;
     const st = scopeState || {};
-    const centerHz = Math.round((currentFreqKhz || 0) * 1000) || (st.centerHz || 0);
+    const centerHz = A.axisCenterFor(st, scopeDialHz());
     return A.scopeAxis({ centerHz, spanHz: st.spanHz || 0, anchor: st.anchor || 'center', bins: scopeLatest ? scopeLatest.length : 256 });
   }
   function scopeSizeCanvases() {
     for (const sf of scopeSurfaces) {
-      for (const c of [sf.trace, sf.wf]) {
+      for (const c of [sf.trace, sf.wf, sf.freq]) {
         if (!c) continue;
         const w = Math.max(160, Math.floor(c.clientWidth || 320));
-        const h = Math.max(40, Math.floor(c.clientHeight || c.height));
+        const h = Math.max(c === sf.freq ? 12 : 40, Math.floor(c.clientHeight || c.height));
         if (c.width !== w) c.width = w;
         if (c.height !== h) c.height = h;
       }
@@ -1048,10 +1083,15 @@
     const synthEl = document.getElementById('scope-phone-synth');
     if (synthEl) synthEl.classList.toggle('hidden', !(st && st.kind === 1));
     const modeEl = document.getElementById('scope-phone-mode');
-    if (modeEl) modeEl.textContent = st && st.anchor ? st.anchor.toUpperCase() + (st.anchor !== 'center' ? ' (axis assumed)' : '') : '';
+    if (modeEl) modeEl.textContent = (st && st.modeLabel) || (st && st.anchor ? ScopeAxis.anchorLabel(st.anchor) : '');
+    const suWrap = document.getElementById('scope-phone-sunits-wrap');
+    if (suWrap) suWrap.classList.toggle('hidden', !(st && st.levelScale && st.levelScale.unit === 'dBm'));
     const needEnable = !!(st && st.kind !== 1 && (st.scuLan === '0' || (st.diag && st.diag.key === 'silent')));
     const enableEl = document.getElementById('scope-phone-enable');
-    if (enableEl) enableEl.classList.toggle('hidden', !needEnable);
+    if (enableEl) {
+      enableEl.classList.toggle('hidden', !needEnable);
+      enableEl.textContent = (st && st.enableLabel) || 'Enable SCU-LAN10';
+    }
     const diag = document.getElementById('scope-phone-diag');
     if (diag) {
       if (st && st.diag && status !== 'live') {
@@ -1087,8 +1127,14 @@
   }
   function scopeRenderFrame(rawBins) {
     if (!rawBins || !rawBins.length) return;
-    const bins = window.ScopeAxis ? window.ScopeAxis.applyFloor(rawBins, scopeFloor) : rawBins;
-    scopeLatest = bins;
+    const V = window.ScopeView;
+    scopeLatest = rawBins;
+    if (V) {
+      if (!scopeSmooth || scopeSmooth.length !== rawBins.length) { scopeSmooth = Float32Array.from(rawBins); scopePeak = new Float32Array(rawBins.length); }
+      V.smoothInto(scopeSmooth, rawBins, V.AVERAGING[scopeAvg] || V.AVERAGING.light);
+      V.peakInto(scopePeak, rawBins, V.PEAK_DECAY[scopePeakDecay] != null ? V.PEAK_DECAY[scopePeakDecay] : V.PEAK_DECAY.slow);
+    }
+    const bins = V ? V.applyRange(rawBins, scopeRange.lo, scopeRange.hi) : rawBins;
     let any = false;
     for (const sf of scopeSurfaces) {
       if (!sf.visible(activeTab) || !sf.wf) continue;
@@ -1096,49 +1142,155 @@
       any = true;
     }
     if (any) scopeDrawAll();
+    if (scopeReadoutAt) scopeShowReadout(scopeReadoutAt.el, scopeReadoutAt.x, scopeReadoutAt.y);
   }
-  function scopeDrawTrace(canvas, axis, centerHz) {
-    const A = window.ScopeAxis;
-    const ctx = canvas.getContext('2d');
-    const w = canvas.width, h = canvas.height;
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, w, h);
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-    ctx.lineWidth = 1;
-    for (let i = 1; i < 10; i++) { const x = Math.round(i * w / 10) + 0.5; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
-    const bins = scopeLatest;
-    if (bins && bins.length > 1) {
-      ctx.strokeStyle = '#4fc3f7';
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      for (let i = 0; i < bins.length; i++) {
-        const x = i * (w - 1) / (bins.length - 1);
-        const y = h - 2 - (bins[i] / 255) * (h - 4);
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      }
-      ctx.stroke();
-    }
-    const rxBin = centerHz && axis.hzPerBin ? A.hzToBin(axis, centerHz) : null;
-    if (rxBin != null) {
-      const x = Math.round(rxBin * (w - 1) / (axis.bins - 1)) + 0.5;
-      ctx.strokeStyle = '#e94560';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
-    }
+  // The one trace painter (lib/scope-view.js, inlined) — the desktop Band
+  // Scope window draws with the same function. The page shows the mode line
+  // itself, so the painter's "axis assumed" notice stays off here.
+  function scopeDrawTrace(sf, axis, centerHz) {
+    const st = scopeState || {};
+    const V = window.ScopeView;
+    const canvas = sf.trace;
+    const shown = scopeSmooth ? V.applyRange(scopeSmooth, scopeRange.lo, scopeRange.hi) : null;
+    const peak = sf.full && scopePeakOn && scopePeak ? V.applyRange(scopePeak, scopeRange.lo, scopeRange.hi) : null;
+    window.ScopeView.drawTrace(canvas.getContext('2d'), { bins: shown, peak },
+      { w: canvas.width, h: canvas.height, dpr: 1, axis, dialHz: centerHz, spanHz: st.spanHz, anchor: st.anchor, notice: false,
+        peakHold: !!peak, scale: V.displayScale(st.levelScale, scopeRange.lo, scopeRange.hi), gutter: sf.full, sUnits: sf.full && scopeSUnits,
+        // Phase 3: passband, split TX, band plan. The FT8 strip draws edges
+        // and shading only (labels:false — it is too short for them).
+        overlay: { passband: st.passband, txHz: st.txHz, bandPlan: st.bandPlan, privileges: scopePrivileges, labels: sf.full, flag: sf.full } });
   }
   function scopeDrawAll() {
     const A = window.ScopeAxis;
-    if (!A) return;
+    if (!A || !window.ScopeView) return;
     const axis = scopeAxisNow();
-    const centerHz = Math.round((currentFreqKhz || 0) * 1000);
+    const centerHz = scopeDialHz();
     for (const sf of scopeSurfaces) {
       if (!sf.visible(activeTab) || !sf.trace) continue;
-      const lo = document.getElementById(sf.lo), c = document.getElementById(sf.c), hi = document.getElementById(sf.hi);
-      if (lo) lo.textContent = axis.hzPerBin ? A.formatHz(axis.startHz) : '—';
-      if (c) c.textContent = centerHz ? A.formatHz(centerHz) : '—';
-      if (hi) hi.textContent = axis.hzPerBin ? A.formatHz(axis.endHz) : '—';
-      scopeDrawTrace(sf.trace, axis, centerHz);
+      scopeDrawTrace(sf, axis, centerHz);
+      if (sf.freq) window.ScopeView.drawFreqScale(sf.freq.getContext('2d'), { w: sf.freq.width, h: sf.freq.height, dpr: 1, axis, dialHz: centerHz });
     }
+  }
+  function scopeSetRange(next, from) {
+    scopeRange = window.ScopeView.clampRange(next.lo, next.hi);
+    scopeLsSet('echocat-scope-floor', scopeRange.lo);
+    scopeLsSet('echocat-scope-top', scopeRange.hi);
+    const f = document.getElementById('scope-phone-floor');
+    if (f && from !== 'floor') f.value = String(Math.min(Number(f.max), scopeRange.lo));
+    const t = document.getElementById('scope-phone-top');
+    if (t && from !== 'top') t.value = String(scopeRange.hi);
+    scopeDrawAll();
+  }
+  // Cursor readout on the Scope tab: hover, or touch and hold (plan item 3).
+  const scopeReadoutEl = document.getElementById('scope-phone-readout');
+  let scopeReadoutAt = null;
+  function scopeShowReadout(el, clientX, clientY) {
+    const V = window.ScopeView;
+    const axis = scopeAxisNow();
+    const r = el.getBoundingClientRect();
+    if (!scopeReadoutEl || !V || !(r.width > 0) || !axis.hzPerBin) { if (scopeReadoutEl) scopeReadoutEl.style.display = 'none'; return; }
+    const frac = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+    const st = scopeState || {};
+    let text = V.formatReadout(window.ScopeAxis.binToHz(axis, frac * (axis.bins - 1)), scopeSmooth ? V.levelAt(scopeSmooth, frac) : null, st.levelScale, st.spanHz);
+    if (!axis.known) text += ' (axis assumed)';
+    scopeReadoutEl.textContent = text;
+    scopeReadoutEl.style.display = 'block';
+    const box = scopeReadoutEl.parentElement.getBoundingClientRect();
+    const w = scopeReadoutEl.offsetWidth;
+    let x = clientX - box.left + 12;
+    if (x + w > box.width - 4) x = clientX - box.left - w - 12;
+    scopeReadoutEl.style.left = Math.max(4, x) + 'px';
+    scopeReadoutEl.style.top = Math.max(2, clientY - box.top - 30) + 'px';
+  }
+  function scopeHideReadout() { scopeReadoutAt = null; if (scopeReadoutEl) scopeReadoutEl.style.display = 'none'; }
+  function scopeTuneDial(hz) {
+    if (!(hz > 0)) return;
+    scopeDialTarget = { hz, until: Date.now() + 1500 };
+    sendToServer({ type: 'tune', freqKhz: (hz / 1000).toFixed(3), mode: '' });
+    scopeDrawAll();
+  }
+  const scopeLiveTune = window.ScopeView ? window.ScopeView.throttleLast(scopeTuneDial, 66) : null;
+  function scopeZoom(dir) {
+    const st = scopeState || {};
+    const next = window.ScopeView.zoomSpan(st.spans, st.spanHz, dir);
+    if (next) sendToServer({ type: 'scope-span', spanHz: next });
+  }
+  function scopeWireTuneGestures(el, withPassband) {
+    const V = window.ScopeView;
+    let drag = null;          // { kind, x0, y0, dial0, width, moved, decided }
+    const touches = new Map();
+    let pinch = null;         // { d0 }
+    const slide = (dx) => { const t = dx ? 'translateX(' + dx + 'px)' : ''; for (const sf2 of scopeSurfaces) if (sf2.full) { if (sf2.trace) sf2.trace.style.transform = t; if (sf2.wf) sf2.wf.style.transform = t; } };
+    const pbPx = () => {
+      const axis = scopeAxisNow();
+      const pb = V.passbandHz((scopeState || {}).passband, scopeDialHz());
+      const k = V.hzPerPx(axis, el.getBoundingClientRect().width);
+      return pb && k ? { x0: (pb.loHz - axis.startHz) / k, x1: (pb.hiHz - axis.startHz) / k } : null;
+    };
+    el.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'touch') {
+        touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (touches.size === 2) {
+          const [a, b] = [...touches.values()];
+          pinch = { d0: Math.hypot(a.x - b.x, a.y - b.y) };
+          drag = null; slide(0);
+          return;
+        }
+      }
+      if (e.button !== 0 || (withPassband && scopeInGutter(el, e))) return;
+      const axis = scopeAxisNow();
+      const r = el.getBoundingClientRect();
+      const kind = V.dragKind(axis, e.clientX - r.left, withPassband ? pbPx() : null);
+      if (kind === 'none' || !scopeDialHz()) return;
+      drag = { kind, x0: e.clientX, y0: e.clientY, dial0: scopeDialHz(), width: r.width, moved: false, touch: e.pointerType === 'touch' };
+    });
+    el.addEventListener('pointermove', (e) => {
+      if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinch && touches.size === 2) {
+        const [a, b] = [...touches.values()];
+        const step = V.pinchStep(pinch.d0, Math.hypot(a.x - b.x, a.y - b.y));
+        if (step) { scopeZoom(step); pinch.d0 = Math.hypot(a.x - b.x, a.y - b.y); }
+        scopeSuppressClick = true;
+        return;
+      }
+      if (!drag) return;
+      const dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
+      if (!drag.moved) {
+        if (drag.touch ? !V.touchIsHorizontal(dx, dy, 12) : Math.abs(dx) < 4) {
+          if (drag.touch && Math.abs(dy) > 12) drag = null;   // the page is scrolling
+          return;
+        }
+        drag.moved = true;
+        scopeSuppressClick = true;
+        clearTimeout(scopeHoldTimer);
+        try { el.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+      }
+      const axis = scopeAxisNow();
+      if (drag.kind === 'passband') scopeLiveTune.push(V.dragDialHz('passband', drag.dial0, dx, axis, drag.width));
+      else slide(dx);
+    });
+    const end = (e) => {
+      touches.delete(e.pointerId);
+      if (touches.size < 2) pinch = null;
+      const d = drag;
+      drag = null;
+      if (!d || !d.moved) return;
+      try { el.releasePointerCapture(e.pointerId); } catch { /* released */ }
+      if (d.kind === 'passband') { scopeLiveTune.flush(); return; }
+      const axis = scopeAxisNow();
+      slide(0);
+      if (e.type !== 'pointercancel') scopeTuneDial(V.dragDialHz('pan', d.dial0, e.clientX - d.x0, axis, d.width));
+    };
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
+    el.addEventListener('wheel', (e) => {
+      if (withPassband && scopeInGutter(el, e)) return;   // the level window's own wheel
+      e.preventDefault();
+      if (e.ctrlKey || e.metaKey) { scopeZoom(e.deltaY > 0 ? +1 : -1); return; }
+      if (!scopeAxisNow().known || !scopeDialHz()) return;
+      const step = V.wheelStepHz(scopeTuneStepHz, e.deltaY, e.shiftKey);
+      if (step) scopeTuneDial(scopeDialHz() + step);
+    }, { passive: false });
   }
   function scopeTuneAt(clientX, el) {
     const axis = scopeAxisNow();
@@ -1149,17 +1301,111 @@
     const hz = window.ScopeAxis.snapTapHz(window.ScopeAxis.binToHz(axis, frac * (axis.bins - 1)), scopeState && scopeState.spanHz);
     sendToServer({ type: 'tune', freqKhz: (hz / 1000).toFixed(3), mode: '' });
   }
+  // A drag on the Scope tab's level scale (left edge) moves the level window
+  // and never tunes; the wheel there widens or narrows it.
+  let scopeGutterDrag = null;
+  let scopeSuppressClick = false;
+  let scopeHoldTimer = null;
+  const scopeInGutter = (el, e) => e.clientX - el.getBoundingClientRect().left <= window.ScopeView.GUTTER_PX;
   for (const sf of scopeSurfaces) {
-    for (const c of [sf.trace, sf.wf]) if (c) c.addEventListener('click', (e) => scopeTuneAt(e.clientX, c));
+    for (const c of [sf.trace, sf.wf, sf.freq]) if (c) c.addEventListener('click', (e) => {
+      if (scopeSuppressClick) { scopeSuppressClick = false; return; }
+      scopeTuneAt(e.clientX, c);
+    });
+    if (!sf.full || !window.ScopeView) continue;
+    const tr = sf.trace;
+    tr.addEventListener('pointerdown', (e) => {
+      scopeSuppressClick = false;
+      if (!scopeInGutter(tr, e)) return;
+      scopeGutterDrag = { y0: e.clientY, range0: { lo: scopeRange.lo, hi: scopeRange.hi } };
+      scopeSuppressClick = true;
+      try { tr.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+    });
+    tr.addEventListener('pointermove', (e) => {
+      tr.style.cursor = scopeGutterDrag || scopeInGutter(tr, e) ? 'ns-resize' : 'crosshair';
+      if (!scopeGutterDrag) return;
+      const plotH = Math.max(1, tr.getBoundingClientRect().height - 6);
+      const d = (e.clientY - scopeGutterDrag.y0) * (scopeGutterDrag.range0.hi - scopeGutterDrag.range0.lo) / plotH;
+      scopeSetRange(window.ScopeView.shiftRange(scopeGutterDrag.range0, d));
+    });
+    const endDrag = (e) => { if (scopeGutterDrag) { scopeGutterDrag = null; try { tr.releasePointerCapture(e.pointerId); } catch { /* released */ } } };
+    tr.addEventListener('pointerup', endDrag);
+    tr.addEventListener('pointercancel', endDrag);
+    tr.addEventListener('wheel', (e) => {
+      if (!scopeInGutter(tr, e)) return;
+      e.preventDefault();
+      scopeSetRange(window.ScopeView.zoomRange(scopeRange, e.deltaY > 0 ? 1.12 : 1 / 1.12));
+    }, { passive: false });
+    // Phase 4 (plan items 11, 12, 12e): drag the passband to tune, drag
+    // elsewhere to slide the spectrum and tune on release, wheel steps the
+    // dial (Ctrl = zoom), pinch zooms. Touch: a sideways drag past 12 px is a
+    // scope gesture, an up/down one scrolls the page (touch-action: pan-y).
+    for (const el of [tr, sf.wf]) scopeWireTuneGestures(el, el === tr);
+    for (const el of [sf.trace, sf.wf]) {
+      el.addEventListener('pointermove', (e) => {
+        if (e.pointerType === 'touch' && !scopeReadoutAt) { clearTimeout(scopeHoldTimer); return; }
+        if (el === tr && (scopeGutterDrag || scopeInGutter(tr, e))) { scopeHideReadout(); return; }
+        scopeReadoutAt = { el, x: e.clientX, y: e.clientY };
+        scopeShowReadout(el, e.clientX, e.clientY);
+      });
+      el.addEventListener('pointerleave', scopeHideReadout);
+      el.addEventListener('pointerdown', (e) => {
+        if (e.pointerType !== 'touch') return;
+        clearTimeout(scopeHoldTimer);
+        const x = e.clientX, y = e.clientY;
+        // A hold shows the readout; lifting after it does not tune.
+        scopeHoldTimer = setTimeout(() => { scopeReadoutAt = { el, x, y }; scopeSuppressClick = true; scopeShowReadout(el, x, y); }, 400);
+      });
+      el.addEventListener('pointerup', (e) => { clearTimeout(scopeHoldTimer); if (e.pointerType === 'touch' && scopeReadoutAt) setTimeout(scopeHideReadout, 1500); });
+    }
   }
   const scopeFloorEl = document.getElementById('scope-phone-floor');
-  if (scopeFloorEl) {
-    scopeFloorEl.value = String(scopeFloor);
-    scopeFloorEl.addEventListener('input', (e) => {
-      scopeFloor = Number(e.target.value) || 0;
-      try { localStorage.setItem('echocat-scope-floor', String(scopeFloor)); } catch { /* private mode */ }
-    });
+  if (scopeFloorEl) scopeFloorEl.addEventListener('input', (e) => scopeSetRange({ lo: Number(e.target.value) || 0, hi: scopeRange.hi }, 'floor'));
+  const scopeTopEl = document.getElementById('scope-phone-top');
+  if (scopeTopEl) scopeTopEl.addEventListener('input', (e) => scopeSetRange({ lo: scopeRange.lo, hi: Number(e.target.value) || 255 }, 'top'));
+  const scopeRangeResetEl = document.getElementById('scope-phone-range-reset');
+  if (scopeRangeResetEl) scopeRangeResetEl.addEventListener('click', () => scopeSetRange({ lo: 0, hi: 255 }));
+  const scopeDisplayBtn = document.getElementById('scope-phone-display-btn');
+  if (scopeDisplayBtn) scopeDisplayBtn.addEventListener('click', () => {
+    const p = document.getElementById('scope-phone-display');
+    if (p) p.classList.toggle('hidden');
+    scopeSizeCanvases(); scopeDrawAll();
+  });
+  const scopeAvgEl = document.getElementById('scope-phone-avg');
+  if (scopeAvgEl) {
+    scopeAvgEl.value = scopeAvg;
+    scopeAvgEl.addEventListener('change', (e) => { scopeAvg = e.target.value; scopeLsSet('echocat-scope-avg', scopeAvg); });
   }
+  function scopeApplyPeakUi() {
+    const clr = document.getElementById('scope-phone-peak-clear');
+    if (clr) clr.classList.toggle('hidden', !scopePeakOn);
+    const dw = document.getElementById('scope-phone-peak-decay-wrap');
+    if (dw) dw.classList.toggle('hidden', !scopePeakOn);
+  }
+  const scopePeakEl = document.getElementById('scope-phone-peak');
+  if (scopePeakEl) {
+    scopePeakEl.checked = scopePeakOn;
+    scopePeakEl.addEventListener('change', (e) => { scopePeakOn = e.target.checked; scopeLsSet('echocat-scope-peak', scopePeakOn ? '1' : '0'); if (!scopePeakOn && scopePeak) scopePeak.fill(0); scopeApplyPeakUi(); scopeDrawAll(); });
+  }
+  const scopePeakDecayEl = document.getElementById('scope-phone-peak-decay');
+  if (scopePeakDecayEl) {
+    scopePeakDecayEl.value = scopePeakDecay;
+    scopePeakDecayEl.addEventListener('change', (e) => { scopePeakDecay = e.target.value; scopeLsSet('echocat-scope-peak-decay', scopePeakDecay); });
+  }
+  const scopePeakClearEl = document.getElementById('scope-phone-peak-clear');
+  if (scopePeakClearEl) scopePeakClearEl.addEventListener('click', () => { if (scopePeak) scopePeak.fill(0); scopeDrawAll(); });
+  const scopeSUnitsEl = document.getElementById('scope-phone-sunits');
+  if (scopeSUnitsEl) {
+    scopeSUnitsEl.checked = scopeSUnits;
+    scopeSUnitsEl.addEventListener('change', (e) => { scopeSUnits = e.target.checked; scopeLsSet('echocat-scope-sunits', scopeSUnits ? '1' : '0'); scopeDrawAll(); });
+  }
+  const scopePrivilegesEl = document.getElementById('scope-phone-privileges');
+  if (scopePrivilegesEl) {
+    scopePrivilegesEl.checked = scopePrivileges;
+    scopePrivilegesEl.addEventListener('change', (e) => { scopePrivileges = e.target.checked; scopeLsSet('echocat-scope-privileges', scopePrivileges ? '1' : '0'); scopeDrawAll(); });
+  }
+  scopeApplyPeakUi();
+  if (window.ScopeView) scopeSetRange(scopeRange);
   const scopeEnableBtn = document.getElementById('scope-phone-enable');
   if (scopeEnableBtn) scopeEnableBtn.addEventListener('click', () => sendToServer({ type: 'scope-enable-radio' }));
   const ft8BsToggle = document.getElementById('ft8-bs-toggle');
@@ -1167,6 +1413,9 @@
     ft8BsToggle.addEventListener('click', () => {
       ft8BsOn = !ft8BsOn;
       try { localStorage.setItem('echocat-ft8-bandscope', ft8BsOn ? '1' : '0'); } catch { /* private mode */ }
+      // On a Flex the radio's waterfall and the audio one are one choice (Casey 2026-10-30).
+      const wfBtn = document.getElementById('ft8-wf-toggle');
+      if (ft8BsOn && ft8ScopeIsFlex() && wfBtn && wfBtn.classList.contains('active')) wfBtn.click();
       scopeUpdateTabVisibility();
       if (ft8BsOn) { scopeSizeCanvases(); scopeDrawAll(); }
     });
@@ -1906,6 +2155,23 @@
 
       // Shack-side TX drive — desktop is authoritative. Sent at connect and on
       // every change from any surface. Don't clobber the slider mid-drag.
+      case 'tune-step':
+        // The shack's tuning step (VFO + scope, one value); kept for the
+        // scope's wheel/step tuning (docs/scope-improvements-plan.md 12a).
+        if (Number(msg.hz) > 0) scopeTuneStepHz = Number(msg.hz);
+        break;
+      case 'rx-level-state': {
+        var rlRow = document.getElementById('so-rx-level-row');
+        var rlEl = document.getElementById('rc-rx-level');
+        var rlVal = document.getElementById('rc-rx-level-val');
+        if (rlRow) rlRow.classList.remove('hidden'); // desktop supports it
+        var rlDb = Math.round(Number(msg.value));
+        if (rlEl && isFinite(rlDb) && document.activeElement !== rlEl) {
+          rlEl.value = rlDb;
+          if (rlVal) rlVal.textContent = (rlDb > 0 ? '+' : '') + rlDb + ' dB';
+        }
+        break;
+      }
       case 'tx-drive-state': {
         var tdRow = document.getElementById('so-tx-drive-row');
         var tdEl = document.getElementById('rc-tx-drive');
@@ -2067,9 +2333,12 @@
       case 'directory':
         directoryNets = msg.nets || [];
         directorySwl = msg.swl || [];
+        if (Array.isArray(msg.landmarks)) directoryLandmarks = msg.landmarks;
+        if (Array.isArray(msg.channels)) directoryChannels = msg.channels;
+        if (Array.isArray(msg.landmarkCategories)) directoryLandmarkCategories = msg.landmarkCategories;
         // Show/hide Dir tab based on whether we have data
         var dirTabBtn = document.getElementById('dir-tab-btn');
-        if (dirTabBtn) dirTabBtn.classList.toggle('hidden', !directoryNets.length && !directorySwl.length);
+        if (dirTabBtn) dirTabBtn.classList.toggle('hidden', !directoryNets.length && !directorySwl.length && !directoryLandmarks.length);
         if (activeTab === 'dir') renderDirectoryTab();
         break;
 
@@ -2520,6 +2789,17 @@
         break;
 
       // --- JTCAT (FT8/FT4) ---
+      case 'rig-bands':
+        // The shack's active rig is used on these bands only (null = all).
+        webRigBands = Array.isArray(msg.bands) ? msg.bands : null;
+        applyWebRigBands();
+        break;
+      case 'jtcat-tx-slot-state':
+        if (typeof reflectFt8TxSlot === 'function') reflectFt8TxSlot(msg.lock);
+        break;
+      case 'jtcat-slot-refused':
+        if (typeof showFt8SlotRefused === 'function') showFt8SlotRefused(msg);
+        break;
       case 'jtcat-rx-gain-state': {
         // Desktop-authoritative synced RX gain — sent at connect and whenever
         // any surface moves it. Our own drags aren't echoed back (the desktop
@@ -2582,6 +2862,10 @@
 
       case 'jtcat-decode':
         ft8HandleDecode(msg);
+        break;
+
+      case 'jtcat-worked-update':
+        ft8HandleWorkedUpdate(msg);
         break;
 
       case 'jtcat-decode-batch':
@@ -2783,6 +3067,7 @@
         }
       }
     }
+    if (typeof s.noCat === 'boolean' && s.noCat !== currentNoCat) { currentNoCat = s.noCat; updateSsbPanelVisibility(); }
     if (s.mode) {
       currentMode = s.mode;
       quickLogFollowRadio();
@@ -2979,7 +3264,7 @@
   }
 
   // Map spot mode to filter category
-  var KNOWN_MODES = new Set(['CW', 'SSB', 'FT8', 'FT4', 'JS8', 'FM', 'RTTY', 'PSK31', 'JTTY', 'FREEDV']);
+  var KNOWN_MODES = new Set(['CW', 'SSB', 'FT8', 'FT4', 'FT2', 'JS8', 'FM', 'RTTY', 'PSK31', 'JTTY', 'FREEDV']);
   function spotModeCategory(mode) {
     // Distinguish "no mode listed" (some POTA activators only spot a
     // freq) from "mode listed but exotic" (AM, etc.). Lets users untick
@@ -3041,6 +3326,7 @@
       if (spotMatchesMuteRule(s)) return false;
       if (showNewOnly && !isNewPark(s)) return false;
       if (hideWorked && isWorkedSpot(s)) return false;
+      if (dxOnly && !s.isDx) return false;
       // Hidden on the desktop's list: every spot of the call, this kHz, or
       // this band (the row's H button; lifts when they QSY to another band).
       if (isSpotHiddenByList(s.callsign, s.frequency, s.band)) return false;
@@ -3592,6 +3878,11 @@
       renderSpots();
       if (activeTab === 'map') renderMapSpots();
       sendFilters();
+    } else if (cb.id === 'rc-dx-only') {
+      dxOnly = cb.checked;
+      renderSpots();
+      if (activeTab === 'map') renderMapSpots();
+      sendFilters();
     }
   });
 
@@ -3622,6 +3913,7 @@
         sort: spotSort,
         newOnly: showNewOnly,
         hideWorked: hideWorked,
+        dxOnly: dxOnly,
       }
     }));
   }
@@ -3658,6 +3950,11 @@
       hideWorked = f.hideWorked;
       const cb = document.getElementById('rc-hide-worked');
       if (cb) cb.checked = f.hideWorked;
+    }
+    if (f.dxOnly != null) {
+      dxOnly = !!f.dxOnly;
+      const cb = document.getElementById('rc-dx-only');
+      if (cb) cb.checked = dxOnly;
     }
     // Per-band region mutes — desktop-owned (settings.spotMuteRules), merged
     // into this payload at send. Applied here, displayed under the region
@@ -5519,6 +5816,23 @@
     });
   }
 
+  // Shack-side receive level — the receive twin of the TX drive slider above:
+  // dB on the radio's audio before it reaches this device. Same send-on-release
+  // and echo rules; the row is revealed by rx-level-state.
+  var rcRxLevel = document.getElementById('rc-rx-level');
+  var rcRxLevelVal = document.getElementById('rc-rx-level-val');
+  if (rcRxLevel) {
+    rcRxLevel.addEventListener('input', function() {
+      var d = parseInt(rcRxLevel.value, 10) || 0;
+      if (rcRxLevelVal) rcRxLevelVal.textContent = (d > 0 ? '+' : '') + d + ' dB';
+    });
+    rcRxLevel.addEventListener('change', function() {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'set-rx-level', value: parseInt(rcRxLevel.value, 10) || 0 }));
+      }
+    });
+  }
+
   // RX clipping telemetry — when samples hit ±full-scale the ADC is pinning
   // and POTACAT's sliders can't rescue the signal. Throttled to one toast per
   // 5 minutes so it stays informative rather than nagging.
@@ -6350,6 +6664,7 @@
     if (!m) return 'SSB';
     if (LOG_MODE_OPTIONS.indexOf(m) !== -1) return m;
     if (m === 'USB' || m === 'LSB') return 'SSB';
+    if (m === 'PSK') return 'PSK31';
     if (m === 'PKTUSB' || m === 'PKTLSB' || m === 'DIGU' || m === 'DIGL' ||
         m === 'USB-D' || m === 'LSB-D' || m === 'DATA' || m === 'DATAU' || m === 'DATAL') {
       return 'FT8';
@@ -6380,6 +6695,7 @@
     const p = prefill || {};
     logCall.value = p.callsign || '';
     reportTypedCall('log', logCall.value); // a value set in code counts too
+    webRenderWorkedMatrix(logCall, 'log-worked-matrix');
     logFreq.value = p.freqKhz || (currentFreqKhz ? String(Math.round(currentFreqKhz * 10) / 10) : '');
     // INVARIANT: passing freqKhz means "this frequency is NOT the dial's" —
     // a spot's, a decode's — so it is treated as the operator's choice and
@@ -6978,6 +7294,22 @@
     }, 400);
   }
 
+  // The bands and modes already worked with the call being logged (#108,
+  // AE5JE): lib/worked-matrix.js over this device's worked-QSO list.
+  const wmTimers = {};
+  function webRenderWorkedMatrix(inputEl, elId) {
+    clearTimeout(wmTimers[elId]);
+    wmTimers[elId] = setTimeout(() => {
+      const el = document.getElementById(elId);
+      if (!el || typeof WorkedMatrix === 'undefined') return;
+      const cs = String((inputEl && inputEl.value) || '').split(',')[0].trim().toUpperCase();
+      if (cs.length < 3) { el.innerHTML = ''; return; }
+      const m = WorkedMatrix.buildWorkedMatrix(WorkedMatrix.entriesForCall(workedQsos, cs, JtcatParser.baseCall));
+      el.innerHTML = WorkedMatrix.workedMatrixHtml(m, { showEmpty: true, emptyText: 'Not worked before' });
+    }, 200);
+  }
+  qlCall.addEventListener('input', () => webRenderWorkedMatrix(qlCall, 'ql-worked-matrix'));
+  logCall.addEventListener('input', () => webRenderWorkedMatrix(logCall, 'log-worked-matrix'));
   qlCall.addEventListener('input', () => triggerCallLookup(qlCall, 'ql'));
   ltCall.addEventListener('input', () => triggerCallLookup(ltCall, 'lt'));
   logCall.addEventListener('input', () => triggerCallLookup(logCall, 'log'));
@@ -7060,6 +7392,7 @@
 
     qlCall.value = '';
     reportTypedCall('ql', '');
+    webRenderWorkedMatrix(qlCall, 'ql-worked-matrix');
     qlCallInfo.classList.add('hidden');
     qlCallInfo.textContent = '';
     qlNotes.value = '';
@@ -7834,6 +8167,17 @@
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
   }
 
+  // A QSO was logged at the shack: decodes already shown stop calling that
+  // station a new call / grid / DXCC.
+  function ft8HandleWorkedUpdate(w) {
+    for (const entry of ft8DecodeLog) DecodeRow.clearWorkedFlags(entry && entry.results, w);
+    const call = String(w.call || '').toUpperCase(), grid = String(w.grid || '').toUpperCase().slice(0, 4);
+    document.querySelectorAll('.ft8-badge-call, .ft8-badge-grid, .ft8-badge-dxcc').forEach((b) => {
+      if ((call && b.getAttribute('data-call') === call) || (grid && b.getAttribute('data-grid') === grid) ||
+          (w.entity && b.getAttribute('data-entity') === w.entity)) b.remove();
+    });
+  }
+
   // --- Decode handling ---
   function ft8HandleDecode(data) {
     ft8DecodeLog.push(data);
@@ -7934,10 +8278,10 @@
         // Build needed badges + entity
         let badges = '';
         if (d.chaseMatch) badges += '<span class="ft8-badge ft8-badge-chase" title="Chase target: ' + esc(ft8ChaseTarget) + '">◎</span>';
-        if (d.newDxcc) badges += '<span class="ft8-badge ft8-badge-dxcc" title="New DXCC: ' + esc(d.entity || '') + '">D</span>';
+        if (d.newDxcc) badges += '<span class="ft8-badge ft8-badge-dxcc" data-entity="' + esc(d.entity || '') + '" title="New DXCC: ' + esc(d.entity || '') + '">D</span>';
         if (d.wantedState && d.state && d.state.code) badges += '<span class="ft8-badge ft8-badge-state" title="' + esc(d.state.certain ? 'New state: ' + d.state.code : 'New state? ' + d.state.code) + '">' + esc(d.state.code) + (d.state.certain ? '' : '?') + '</span>';
-        if (d.newGrid) badges += '<span class="ft8-badge ft8-badge-grid" title="New grid: ' + esc(d.grid || '') + '">G</span>';
-        if (d.newCall) badges += '<span class="ft8-badge ft8-badge-call" title="New call: ' + esc(d.call || '') + '">C</span>';
+        if (d.newGrid) badges += '<span class="ft8-badge ft8-badge-grid" data-grid="' + esc(d.grid || '') + '" title="New grid: ' + esc(d.grid || '') + '">G</span>';
+        if (d.newCall) badges += '<span class="ft8-badge ft8-badge-call" data-call="' + esc(d.call || '') + '" title="New call: ' + esc(d.call || '') + '">C</span>';
         if (d.watched) badges += '<span class="ft8-badge ft8-badge-watch" title="Watchlist">W</span>';
         if (d.call && donorCallsigns.has(d.call.toUpperCase())) badges += '<span class="ft8-badge ft8-badge-donor" title="POTACAT Supporter">\uD83D\uDC3E</span>';
         if (d.call && d.call.toUpperCase() === 'K3SBP') badges += '<span class="ft8-badge ft8-badge-donor" title="POTACAT Creator">\uD83D\uDC08\u200D\u2B1B</span>';
@@ -8115,7 +8459,7 @@
       rows.push({ tx: true, text: 'CQ ' + myCall + ' ' + (q.myGrid || ''), done: true, active: q.phase === 'cq' });
       if (q.call) {
         rows.push({ tx: false, text: q.call + ' ' + myCall + ' ' + (q.grid || ''), directed: true, done: q.phase !== 'cq', active: false });
-        rows.push({ tx: true, text: q.call + ' ' + myCall + ' ' + (q.sentReport || '...'), done: ['cq-rr73', 'done'].includes(q.phase), active: q.phase === 'cq-report' });
+        rows.push({ tx: true, text: q.call + ' ' + myCall + ' ' + (q.sentReport || '...'), done: ['cq-rr73', 'done'].includes(q.phase), active: q.phase === 'cq-report' || q.phase === 'cq-r-report' });
       }
       if (q.report) {
         rows.push({ tx: false, text: q.call + ' ' + myCall + ' R' + q.report, directed: true, done: ['cq-rr73', 'done'].includes(q.phase), active: false });
@@ -8212,14 +8556,85 @@
     }
   });
 
-  // Slot cycle: auto -> even -> odd -> auto
+  // Bands the shack's rig is used on (S2C rig-bands, lib/rig-bands.js inlined):
+  // every band button and band picker on this page hides the others. The
+  // spot list itself is filtered on the shack.
+  var webRigBands = null;
+  function applyWebRigBands() {
+    var RB = window.RigBands;
+    if (!RB) return;
+    RB.applyToElements(document, '.vf-band', webRigBands);
+    RB.applyToElements(document, '#rc-band-filter .rc-dropdown-item', webRigBands);
+    var mailSel = document.getElementById('mail-band');
+    if (mailSel) { RB.applyToElements(mailSel, 'option', webRigBands); RB.fixSelect(mailSel); }
+    var ft8Sel = document.getElementById('ft8-band-select');
+    if (ft8Sel) {
+      var cur = ft8Sel.value;
+      RB.applyToElements(ft8Sel, 'option', webRigBands, function (o) { return o.value === cur ? '' : o.value; });
+    }
+    var sstvSel = document.getElementById('sstv-freq-phone');
+    if (sstvSel) {
+      sstvSel.querySelectorAll('optgroup').forEach(function (g) {
+        var ok = RB.allowed(webRigBands, g.label);
+        g.hidden = !ok;
+        g.querySelectorAll('option').forEach(function (o) { o.hidden = !ok; o.disabled = !ok; });
+      });
+    }
+    // The Landmarks tab hides what the shack's radio cannot tune.
+    if (activeTab === 'dir' && dirActiveTab === 'landmarks') renderDirectoryTab();
+  }
+
+  // TX slot LOCK: Auto -> 1st (even) -> 2nd (odd) -> Auto. The desktop
+  // persists it and echoes jtcat-tx-slot-state to every client (main.js
+  // applyJtcatTxSlotLock), so this button always shows the shack's lock.
+  function reflectFt8TxSlot(lock) {
+    ft8TxSlot = (lock === 'even' || lock === 'odd') ? lock : 'auto';
+    ft8SlotBtn.textContent = ft8TxSlot === 'auto' ? 'Slot: Auto' : ft8TxSlot === 'even' ? 'Slot: 1st' : 'Slot: 2nd';
+    ft8SlotBtn.classList.toggle('locked', ft8TxSlot !== 'auto');
+    ft8SlotBtn.title = ft8TxSlot === 'auto'
+      ? 'TX slot: Auto. Replies go opposite the station; a new CQ stays in the slot you last transmitted in. Tap to lock.'
+      : 'TX slot locked to ' + (ft8TxSlot === 'even' ? '1st (even)' : '2nd (odd)') + ': every CQ and reply stays there. Tap to change.';
+  }
   ft8SlotBtn.addEventListener('click', () => {
-    if (ft8TxSlot === 'auto') ft8TxSlot = 'even';
-    else if (ft8TxSlot === 'even') ft8TxSlot = 'odd';
-    else ft8TxSlot = 'auto';
-    ft8SlotBtn.textContent = ft8TxSlot === 'auto' ? 'Auto' : ft8TxSlot === 'even' ? 'Even' : 'Odd';
-    ft8Send({ type: 'jtcat-set-tx-slot', slot: ft8TxSlot });
+    const next = ft8TxSlot === 'auto' ? 'even' : ft8TxSlot === 'even' ? 'odd' : 'auto';
+    reflectFt8TxSlot(next);
+    ft8Send({ type: 'jtcat-set-tx-slot', slot: next });
   });
+  reflectFt8TxSlot('auto');
+  // A tap on a station in the locked slot was refused by the shack: say why,
+  // and offer to unlock and send the same reply again.
+  let ft8SlotToast = null;
+  function hideFt8SlotToast() {
+    if (ft8SlotToast) { ft8SlotToast.remove(); ft8SlotToast = null; }
+  }
+  function showFt8SlotRefused(r) {
+    hideFt8SlotToast();
+    const el = document.createElement('div');
+    el.className = 'ft8-slot-toast';
+    const msgEl = document.createElement('span');
+    msgEl.textContent = (r && r.text) || 'That station transmits in the slot you locked.';
+    el.appendChild(msgEl);
+    if (r && r.retry && r.retryType) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = 'Unlock and call';
+      b.addEventListener('click', () => {
+        hideFt8SlotToast();
+        reflectFt8TxSlot('auto');
+        ft8Send({ type: 'jtcat-set-tx-slot', slot: 'auto' });
+        ft8Send(Object.assign({}, r.retry, { type: r.retryType }));
+      });
+      el.appendChild(b);
+    }
+    const keep = document.createElement('button');
+    keep.type = 'button';
+    keep.textContent = 'Keep locked';
+    keep.addEventListener('click', hideFt8SlotToast);
+    el.appendChild(keep);
+    document.body.appendChild(el);
+    ft8SlotToast = el;
+    setTimeout(() => { if (ft8SlotToast === el) hideFt8SlotToast(); }, 12000);
+  }
 
   // CQ button
   ft8CqBtn.addEventListener('click', () => {
@@ -8490,6 +8905,7 @@
   }
   ft8WfToggle.addEventListener('click', () => {
     ft8WfVisible = !ft8WfVisible;
+    if (ft8WfVisible && ft8BsOn && ft8ScopeIsFlex()) { const bs = document.getElementById('ft8-bs-toggle'); if (bs) bs.click(); }
     ft8Waterfall.classList.toggle('hidden', !ft8WfVisible);
     ft8WfToggle.classList.toggle('active', ft8WfVisible);
     if (ft8WfVisible) ft8WfSizeCanvas();
@@ -10929,6 +11345,16 @@ var _paddleHoldTimer = { dit: null, dah: null };
   // desktop. Called on auth-ok so any recording the user made while
   // the WS was disconnected (and ft8Send silently dropped) finally
   // makes its way to the desktop's persistent storage.
+  // base64 in 32 KB slices: String.fromCharCode.apply over a whole recording
+  // throws past roughly 10-20 s of audio, so a long voice macro never reached
+  // the shack (the desktop fix: lib/voice-recorder.js bytesToBase64).
+  function voiceMacroB64(buf) {
+    var bytes = new Uint8Array(buf);
+    var bin = '';
+    for (var i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  }
+
   function reuploadLocalVoiceMacros() {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ssbCheckSlots(function (filled) {
@@ -10939,7 +11365,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
           var reader = new FileReader();
           reader.onload = function () {
             try {
-              var b64 = btoa(String.fromCharCode.apply(null, new Uint8Array(reader.result)));
+              var b64 = voiceMacroB64(reader.result);
               ft8Send({
                 type: 'voice-macro-sync',
                 idx: idx,
@@ -10990,9 +11416,15 @@ var _paddleHoldTimer = { dit: null, dah: null };
            m === 'USB-D' || m === 'LSB-D' || m.indexOf('FREEDV') === 0;
   }
 
+  // A "No CAT control (VOX)" rig never reports a mode: the sound card keys it,
+  // so voice is the default whenever no digital engine is running (Digirig
+  // Lite + CM108 tester, 2026-10-24: Live / Vol / Scan and no PTT on the web).
+  function voiceByDefault() {
+    return !!currentNoCat && !currentMode && !ft8Running;
+  }
   function updateSsbPanelVisibility() {
     var voiceTabs = { spots: 1, map: 1, log: 1, activate: 1 };
-    var show = isVoiceMode(currentMode) && !!voiceTabs[activeTab] && audioEnabled;
+    var show = (isVoiceMode(currentMode) || voiceByDefault()) && !!voiceTabs[activeTab] && audioEnabled;
     ssbPanel.classList.toggle('hidden', !show);
   }
 
@@ -11265,7 +11697,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
                   // Sync to desktop
                   var syncReader = new FileReader();
                   syncReader.onload = function() {
-                    var base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(syncReader.result)));
+                    var base64 = voiceMacroB64(syncReader.result);
                     ft8Send({ type: 'voice-macro-sync', idx: idx, label: ssbMacroLabels[idx] || '', audio: base64 });
                   };
                   syncReader.readAsArrayBuffer(blob);
@@ -11399,11 +11831,148 @@ var _paddleHoldTimer = { dit: null, dah: null };
     if (!dirList) return;
     var search = (dirSearch ? dirSearch.value : '').toLowerCase().trim();
     dirList.innerHTML = '';
-    if (dirActiveTab === 'nets') {
+    if (dirActiveTab === 'landmarks') {
+      renderDirLandmarks(search);
+    } else if (dirActiveTab === 'channels') {
+      renderDirChannels(search);
+    } else if (dirActiveTab === 'nets') {
       renderDirNets(search);
     } else {
       renderDirSwl(search);
     }
+  }
+
+  // --- Landmarks (lib/landmarks.js, inlined into this page) ---
+  // Signals to dial into at any time. A card shows the one-line "what it is";
+  // a tap opens it in place with What you'll hear / Why it matters / Try this
+  // and a Tune button, so the text is read before the radio moves.
+  var lmkOpenId = null;
+  var lmkShowAll = false;
+  var lmkTickTimer = null;
+  var LMK_HINT_KEY = 'echocat-landmarks-hint-dismissed';
+  function lmkHintDismissed() { try { return localStorage.getItem(LMK_HINT_KEY) === '1'; } catch (e) { return false; } }
+  function lmkTune(lm) {
+    if (!lm || !lm.khz) return;
+    if (vfoLocked) { showToast('VFO Locked — Unlock VFO to change frequency', 2000); return; }
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'tune', freqKhz: String(lm.khz), mode: lm.mode }));
+    }
+  }
+  function renderDirLandmarks(search) {
+    var L = window.Landmarks;
+    if (!L) return;
+    if (!directoryLandmarks.length) {
+      dirList.innerHTML = '<div class="dir-empty">Waiting for landmarks from POTACAT</div>';
+      return;
+    }
+    var now = Date.now();
+    var rows = directoryLandmarks.map(function(lm, i) {
+      return { lm: lm, i: i, band: L.bandLabel(lm.khz), cd: L.status(lm, now), ok: L.receivable(lm, webRigBands) };
+    });
+    if (search) {
+      rows = rows.filter(function(r) {
+        return [r.lm.name, r.lm.line, r.lm.region, r.lm.mode].some(function(v) { return (v || '').toLowerCase().indexOf(search) >= 0; })
+          || String(r.lm.khz).indexOf(search) >= 0;
+      });
+    }
+    var hidden = rows.filter(function(r) { return !r.ok; });
+    var shown = lmkShowAll ? rows : rows.filter(function(r) { return r.ok; });
+
+    if (!lmkHintDismissed() && !search && directoryLandmarks.some(function(l) { return l.id === 'wwv-10000'; })) {
+      var hint = document.createElement('div');
+      hint.className = 'lmk-hint';
+      hint.innerHTML = '<p><b>New radio?</b> Tune <b>WWV on 10000 kHz</b>. A tick every second means the radio, the antenna and the audio all work.</p>'
+        + '<div class="lmk-actions"><button type="button" class="lmk-btn lmk-btn-tint" data-act="tune">Tune WWV</button>'
+        + '<button type="button" class="lmk-btn lmk-btn-plain" data-act="close">Got it</button></div>';
+      hint.addEventListener('click', function(ev) {
+        var act = ev.target && ev.target.dataset ? ev.target.dataset.act : '';
+        if (!act) return;
+        if (act === 'tune') {
+          var wwv = directoryLandmarks.filter(function(l) { return l.id === 'wwv-10000'; })[0];
+          if (wwv) { lmkOpenId = wwv.id; lmkTune(wwv); }
+        }
+        try { localStorage.setItem(LMK_HINT_KEY, '1'); } catch (e) { /* shows again next time */ }
+        renderDirectoryTab();
+      });
+      dirList.appendChild(hint);
+    }
+
+    var cats = directoryLandmarkCategories.length ? directoryLandmarkCategories
+      : L.CATEGORY_IDS.map(function(id) { return { id: id, label: id, reason: '' }; });
+    cats.forEach(function(cat) {
+      var inCat = shown.filter(function(r) { return r.lm.category === cat.id; });
+      if (!inCat.length) return;
+      // Live first, then by when it is next on, then in the catalog's own
+      // (curated) order: the most useful station first.
+      inCat.sort(function(a, b) { return (a.cd.sortKey - b.cd.sortKey) || (a.i - b.i); });
+      var head = document.createElement('div');
+      head.className = 'lmk-group';
+      head.innerHTML = esc(cat.label) + (cat.reason ? '<span>' + esc(cat.reason) + '</span>' : '');
+      dirList.appendChild(head);
+      inCat.forEach(function(r) {
+        var lm = r.lm, cd = r.cd;
+        var open = lm.id === lmkOpenId;
+        var tuned = currentFreqKhz && Math.abs(Number(lm.khz) - currentFreqKhz) < 0.5;
+        var card = document.createElement('div');
+        card.className = 'dir-card lmk-card' + (cd.status === 'live' ? ' dir-live' : cd.status === 'soon' ? ' dir-soon' : '')
+          + (tuned ? ' tuned' : '') + (open ? ' open' : '') + (r.ok ? '' : ' lmk-out');
+        var statusHtml = cd.label ? '<span class="dir-card-status ' + cd.status + '">' + esc(cd.label) + '</span>' : '';
+        var html = '<div class="dir-card-row"><span class="dir-card-name">' + esc(lm.name) + '</span>' + statusHtml + '</div>'
+          + '<div class="dir-card-detail"><span class="dir-card-freq">' + lm.khz + ' kHz</span> ' + esc(lm.mode) + ' · ' + esc(r.band) + '</div>'
+          + '<div class="lmk-line">' + esc(lm.line) + (lm.ncdxf ? '<span class="lmk-now" data-khz="' + lm.khz + '"></span>' : '') + '</div>';
+        if (open) {
+          html += '<div class="lmk-detail">'
+            + (lm.ncdxf ? '<div class="lmk-beacon" data-khz="' + lm.khz + '"><span class="lmk-beacon-now"></span>'
+              + '<div class="lmk-beacon-track"><div class="lmk-beacon-fill"></div></div><span class="lmk-beacon-next"></span></div>' : '')
+            + (r.ok ? '' : '<p class="lmk-note">The radio at the shack is not set up for this frequency.</p>')
+            + (lm.hear ? '<div class="lmk-sec"><b>What you’ll hear</b><p>' + esc(lm.hear) + '</p></div>' : '')
+            + (lm.why ? '<div class="lmk-sec"><b>Why it matters</b><p>' + esc(lm.why) + '</p></div>' : '')
+            + (lm.try ? '<div class="lmk-sec lmk-try"><b>Try this</b><p>' + esc(lm.try) + '</p></div>' : '')
+            + '<div class="lmk-actions"><button type="button" class="lmk-btn lmk-btn-tint" data-act="tune">Tune ' + lm.khz + ' kHz</button>'
+            + (lm.region ? '<span class="lmk-region">' + esc(lm.region) + '</span>' : '') + '</div>'
+            + '</div>';
+        }
+        card.innerHTML = html;
+        card.addEventListener('click', function(ev) {
+          if (ev.target && ev.target.dataset && ev.target.dataset.act === 'tune') { ev.stopPropagation(); lmkTune(lm); return; }
+          lmkOpenId = open ? null : lm.id;
+          renderDirectoryTab();
+        });
+        dirList.appendChild(card);
+      });
+    });
+    if (hidden.length) {
+      var note = document.createElement('div');
+      note.className = 'lmk-hidden-note';
+      note.innerHTML = (lmkShowAll
+        ? 'Greyed cards are outside the bands the radio at the shack is set up for. '
+        : hidden.length + (hidden.length === 1 ? ' landmark is' : ' landmarks are') + ' hidden: the radio at the shack is not set up for '
+          + (hidden.length === 1 ? 'its band' : 'their bands') + '. ')
+        + '<button type="button" class="lmk-btn lmk-btn-plain">' + (lmkShowAll ? 'Hide them' : 'Show anyway') + '</button>';
+      note.querySelector('button').addEventListener('click', function() { lmkShowAll = !lmkShowAll; renderDirectoryTab(); });
+      dirList.appendChild(note);
+    }
+    lmkUpdateLive();
+    if (!lmkTickTimer) lmkTickTimer = setInterval(function() {
+      if (activeTab !== 'dir' || dirActiveTab !== 'landmarks') { clearInterval(lmkTickTimer); lmkTickTimer = null; return; }
+      lmkUpdateLive();
+    }, 1000);
+  }
+  function lmkUpdateLive() {
+    var L = window.Landmarks;
+    if (!L || !dirList) return;
+    var now = Date.now();
+    dirList.querySelectorAll('.lmk-now').forEach(function(el) {
+      var b = L.beaconAt(el.dataset.khz, now);
+      el.textContent = b ? ' · now ' + b.now.call : '';
+    });
+    dirList.querySelectorAll('.lmk-beacon').forEach(function(box) {
+      var b = L.beaconAt(box.dataset.khz, now);
+      if (!b) return;
+      box.querySelector('.lmk-beacon-now').innerHTML = esc(b.now.call) + ' <span>' + esc(b.now.place) + '</span>';
+      box.querySelector('.lmk-beacon-fill').style.width = Math.min(100, (b.secondsInto / 10) * 100) + '%';
+      box.querySelector('.lmk-beacon-next').textContent = 'Next: ' + b.next.call + ', ' + b.next.place + ', in ' + Math.ceil(b.secondsLeft) + ' s';
+    });
   }
 
   function renderDirNets(search) {
@@ -11474,6 +12043,55 @@ var _paddleHoldTimer = { dit: null, dah: null };
       })(n, e.band);
       dirList.appendChild(card);
     }
+  }
+
+  // --- Channels: the shack's saved frequency chart (lib/channels.js). Edited on
+  // the desktop (Directory > Channels); a tap here tunes, and where the shack's
+  // radio cannot reach it the shack's SDR plays it (lib/listen-source.js).
+  function channelTuneMode(m) {
+    var u = String(m || 'FM').toUpperCase();
+    return (u === 'NFM' || u === 'WFM' || u === 'DIG' || u === 'DV') ? 'FM' : u;
+  }
+  function channelOffsetText(k) {
+    k = Number(k) || 0;
+    if (!k) return '';
+    var a = Math.abs(k), sign = k > 0 ? '+' : '-';
+    return a >= 1000 ? sign + (a / 1000).toFixed(a % 1000 ? 3 : 1).replace(/\.0$/, '') + ' MHz' : sign + a + ' kHz';
+  }
+  function renderDirChannels(search) {
+    if (!directoryChannels.length) {
+      dirList.innerHTML = '<div class="dir-empty">No channels yet. Add them on the desktop: Directory > Channels.</div>';
+      return;
+    }
+    var rows = directoryChannels.filter(function(c) {
+      if (!search) return true;
+      return [c.name, c.note, c.group, c.mode].some(function(v) { return String(v || '').toLowerCase().indexOf(search) >= 0; })
+        || String(c.khz).indexOf(search) >= 0 || (c.khz / 1000).toFixed(3).indexOf(search) >= 0;
+    });
+    var groups = [];
+    rows.forEach(function(c) { var g = c.group || 'Other'; if (groups.indexOf(g) < 0) groups.push(g); });
+    groups.forEach(function(g) {
+      var head = document.createElement('div');
+      head.className = 'lmk-group';
+      head.textContent = g;
+      dirList.appendChild(head);
+      rows.filter(function(c) { return (c.group || 'Other') === g; }).forEach(function(c) {
+        var card = document.createElement('div');
+        card.className = 'dir-card';
+        var mhz = (c.khz / 1000).toFixed(c.khz % 1 ? 5 : 4).replace(/0+$/, '').replace(/\.$/, '');
+        var off = channelOffsetText(c.offsetKhz);
+        card.innerHTML = '<div class="dir-card-row"><span class="dir-card-name"></span><span class="dir-card-freq"></span></div>'
+          + '<div class="dir-card-detail"></div>';
+        card.querySelector('.dir-card-name').textContent = c.name;
+        card.querySelector('.dir-card-freq').textContent = mhz + ' ' + (c.mode || 'FM') + (off ? ' ' + off : '') + (c.tone ? ' T' + c.tone : '');
+        card.querySelector('.dir-card-detail').textContent = c.note || '';
+        card.addEventListener('click', function() {
+          if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'tune', freqKhz: String(c.khz), mode: channelTuneMode(c.mode) }));
+        });
+        dirList.appendChild(card);
+      });
+    });
+    if (!rows.length) dirList.innerHTML = '<div class="dir-empty">Nothing matches.</div>';
   }
 
   function renderDirSwl(search) {
@@ -11843,7 +12461,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
     echoCloudSigninBtn.addEventListener('click', function() {
       const email = echoCloudEmail ? echoCloudEmail.value.trim() : '';
       const pass = echoCloudPassword ? echoCloudPassword.value : '';
-      if (!email || !pass) return echoCloudShowError('Enter email and password');
+      if (!email || !pass) return echoCloudShowError('Enter your email or callsign, and your password');
       ws.send(JSON.stringify({ type: 'cloud-login', email: email, password: pass }));
     });
   }

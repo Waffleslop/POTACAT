@@ -169,12 +169,15 @@ test('a guest auth gets the JS8 hydration trio, state first', () => {
   // and drive the helper itself for content + order.
   const src = require('fs').readFileSync(
     require('path').join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8');
+  // The pass hydration is one helper (_hydratePassClient), used at pass auth
+  // and again when a paused guest gets the radio back.
   const at = src.indexOf('Guest Pass authenticated:');
   assert.ok(at > 0);
-  const before = src.slice(Math.max(0, at - 1600), at);
-  assert.ok(before.includes("type: 'status'"), 'anchored at the pass-auth status push');
-  assert.ok(before.includes('_sendJs8Hydration(ws)'),
-    'guest auth must hydrate JS8 via the shared helper');
+  assert.ok(src.slice(Math.max(0, at - 1600), at).includes('this._hydratePassClient(ws)'), 'pass auth hydrates through the helper');
+  const h = src.slice(src.indexOf('  _hydratePassClient(ws) {'), src.indexOf('  _hydratePassClient(ws) {') + 900);
+  assert.ok(h.includes("type: 'status'"), 'anchored at the pass status push');
+  assert.ok(h.indexOf("type: 'status'") < h.indexOf('_sendJs8Hydration(ws)'),
+    'guest auth must hydrate JS8 via the shared helper, after status');
 
   const rs = new RemoteServer();
   const ws = fakeWs();

@@ -37,6 +37,7 @@ eq(familyFromCatTarget({ type: 'civ-tcp', host: 'pi' }), 'icom', 'raw CI-V TCP b
 eq(familyFromCatTarget({ type: 'icom-network', host: 'ic705' }), 'icom-network', 'RS-BA1 UDP');
 eq(familyFromCatTarget({ type: 'rigctld', rigId: 1035 }), 'hamlib', 'hamlib rigctld');
 eq(familyFromCatTarget({ type: 'rigctldnet', host: 'pi' }), 'rigctld', 'rigctld network');
+eq(familyFromCatTarget({ type: 'flrig', host: '127.0.0.1', port: 12345 }), 'flrig', 'flrig (a shared radio)');
 eq(familyFromCatTarget({ type: 'somethingnew' }), 'generic', 'unknown type → generic, never Flex');
 
 console.log('rigFamily (rig profile shape):');
@@ -60,6 +61,7 @@ eq(familyFromRadioType('k4network'), 'k4', 'k4network');
 eq(familyFromRadioType('serialcat'), 'serial', 'serialcat');
 eq(familyFromRadioType('icom'), 'icom', 'icom');
 eq(familyFromRadioType('civ-tcp'), 'icom', 'civ-tcp');
+eq(familyFromRadioType('flrig'), 'flrig', 'flrig');
 eq(familyFromRadioType('icom-network'), 'icom-network', 'icom-network');
 eq(familyFromRadioType('hamlib'), 'hamlib', 'hamlib');
 eq(familyFromRadioType('rigctldnet'), 'rigctld', 'rigctldnet');

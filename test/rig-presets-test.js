@@ -172,4 +172,159 @@ test('the JTCAT flush applies although the engine already flagged TX (PTT is not
   assert.ok(j > 0 && /!force && rigPresetTransmitting\(\)/.test(mainSrc.slice(j, j + 800)));
 });
 
+console.log('rig-presets: fields beyond levels (2026-10-24)');
+test('switches, AGC and the RX filter sanitize to their kinds; junk is dropped, absent means left alone', () => {
+  const [p] = RP.sanitizePresets([{ name: 'Digi', nb: 'off', nr: false, comp: 0, anf: 'maybe', agc: 'FAST', filterWidth: '3000', vox: 'on', preamp: true, att: 'x', txPower: 60 }]);
+  assert.strictEqual(p.nb, false); assert.strictEqual(p.nr, false); assert.strictEqual(p.comp, false);
+  assert.strictEqual(p.anf, undefined, 'junk switch dropped');
+  assert.strictEqual(p.agc, 'fast'); assert.strictEqual(p.filterWidth, 3000); assert.strictEqual(p.vox, true); assert.strictEqual(p.preamp, true);
+  assert.strictEqual(p.att, undefined);
+  assert.strictEqual(RP.sanitizePresets([{ name: 'x', filterWidth: 10 }])[0].filterWidth, undefined, 'a width under 50 Hz is not a filter');
+});
+test('one dispatcher command per included setting the rig takes; a switch rides as a boolean, AGC as its word', () => {
+  const p = { name: 'Digi', txPower: 60, nb: false, nr: false, comp: false, agc: 'fast', filterWidth: 3000, vox: true };
+  const cmds = RP.presetCommands(p, { txpower: true, nb: true, nr: true, comp: false, agc: true, filter: true, vox: true });
+  assert.deepStrictEqual(cmds.map(c => [c.action, c.value]), [['set-tx-power', 60], ['set-filter-width', 3000], ['set-nb', false], ['set-nr', false], ['set-agc', 'fast'], ['set-vox', true]]);
+  const d = RP.describePreset(p, { txpower: true, nb: true, nr: true, agc: true, filter: true, vox: true });
+  assert.strictEqual(d.text, '60 W · Filter 3 kHz · NB off · NR off · AGC fast · VOX on');
+  assert.deepStrictEqual(d.skipped, ['Comp off']);
+});
+test('a snapshot takes every reported setting the radio has, in its kind', () => {
+  const p = RP.snapshotPreset('Now', { txPower: 50, nb: true, nr: 0, agc: 'slow', filterWidth: 2400, afGain: 30, comp: 'on' });
+  assert.deepStrictEqual({ txPower: p.txPower, nb: p.nb, nr: p.nr, agc: p.agc, filterWidth: p.filterWidth, afGain: p.afGain, comp: p.comp }, { txPower: 50, nb: true, nr: false, agc: 'slow', filterWidth: 2400, afGain: 30, comp: true });
+});
+
+console.log('rig-presets: band + mode rules');
+const presets2 = [{ id: 'hunt', name: 'Hunting' }, { id: 'h20', name: 'Hunting 20' }, { id: 'dig', name: 'FT8' }];
+test('rules sanitize: known bands and families only, a preset that exists, never "any band + any mode"', () => {
+  const r = RP.sanitizeRules({ '*': [
+    { bands: ['20M', '99m'], families: ['SSB'], presetId: 'h20' },
+    { bands: [], families: [], presetId: 'hunt' },
+    { bands: ['40m'], families: [], presetId: 'gone' },
+    { bands: ['40m'], presetId: 'hunt' },
+  ] }, presets2);
+  assert.deepStrictEqual(r['*'], [{ bands: ['20m'], families: ['ssb'], presetId: 'h20' }, { bands: ['40m'], families: [], presetId: 'hunt' }]);
+});
+test('the first matching rule wins; the family select is the fallback; no match = nothing', () => {
+  const rules = { '*': [{ bands: ['20m'], families: ['ssb'], presetId: 'h20' }, { bands: ['40m'], families: [], presetId: 'hunt' }] };
+  const byMode = { '*': { ssb: 'hunt', digital: 'dig' } };
+  assert.deepStrictEqual(RP.matchTrigger({ band: '20m', family: 'ssb', rules, byMode }).presetId, 'h20');
+  assert.deepStrictEqual(RP.matchTrigger({ band: '40m', family: 'cw', rules, byMode }).presetId, 'hunt', 'any-mode band rule');
+  assert.deepStrictEqual(RP.matchTrigger({ band: '17m', family: 'ssb', rules, byMode }).presetId, 'hunt', 'fallback to the family');
+  assert.strictEqual(RP.matchTrigger({ band: '17m', family: 'cw', rules, byMode }).presetId, null);
+  assert.strictEqual(RP.matchTrigger({ band: '', family: 'ssb', rules, byMode }).presetId, 'hunt', 'unknown band skips band rules');
+});
+test('a band change under a band rule applies; the same preset on another band does not re-apply', () => {
+  const rules = { '*': [{ bands: ['20m'], families: ['ssb'], presetId: 'h20' }] };
+  const byMode = { '*': { ssb: 'hunt' } };
+  const common = { presets: presets2, byMode, rules, mode: 'USB', prevFamily: 'ssb' };
+  // 40 m SSB (Hunting) → 20 m SSB: the match changes to Hunting 20
+  let d = RP.decideModePreset({ ...common, band: '20m', prevMatchId: 'hunt' });
+  assert.strictEqual(d.reason, 'apply'); assert.strictEqual(d.apply.id, 'h20'); assert.strictEqual(d.via, 'rule');
+  // 20 m → 17 m SSB: back to the family's Hunting
+  d = RP.decideModePreset({ ...common, band: '17m', prevMatchId: 'h20' });
+  assert.strictEqual(d.reason, 'apply'); assert.strictEqual(d.apply.id, 'hunt'); assert.strictEqual(d.via, 'family');
+  // 17 m → 40 m SSB: Hunting again, nothing to do
+  assert.strictEqual(RP.decideModePreset({ ...common, band: '40m', prevMatchId: 'hunt' }).reason, 'same');
+  // the first dial of the session is never an occasion
+  assert.strictEqual(RP.decideModePreset({ ...common, band: '20m', prevFamily: null }).reason, 'first');
+});
+test('wiring: band changes reach the decision from the one frequency sink; rules are a machine-global setting; two surfaces mount the one editor', () => {
+  const i = mainSrc.indexOf('function sendCatFrequency(hz)');
+  assert.ok(/rigPresetOnBand\(\)/.test(mainSrc.slice(i, i + 3000)), 'sendCatFrequency calls rigPresetOnBand');
+  assert.ok(/'rigPresetRules'/.test(mainSrc.slice(mainSrc.indexOf('const GLOBAL_KEYS = new Set(['), mainSrc.indexOf(']);', mainSrc.indexOf('const GLOBAL_KEYS = new Set([')))));
+  assert.ok(/prevMatchId: _rigPresetMatchId/.test(mainSrc) && /rules: settings\.rigPresetRules/.test(mainSrc));
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  assert.ok(/rigPresetsMount\(document\.getElementById\('rig-preset-root'\)\);/.test(app) && /rigPresetsMount\(document\.getElementById\('settings-preset-root'\)\);/.test(app));
+  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  assert.ok(html.includes('data-tab="profiles">Profiles</button>') && html.includes('data-settings-tab="profiles"') && html.includes('id="settings-preset-root"'));
+  const proto = require('../lib/echocat-protocol');
+  assert.ok(proto.isKnownType('rig-presets'));
+});
+
+test('Monitor (K8IKO): MON on/off and level are preset fields, sent only to a rig that takes them', () => {
+  const p = RP.sanitizePresets([{ name: 'FT8', mon: false, monLevel: 40 }])[0];
+  assert.strictEqual(p.mon, false);
+  assert.strictEqual(p.monLevel, 40);
+  assert.deepStrictEqual(RP.presetCommands(p, { mon: true, monLevel: true }), [
+    { action: 'set-mon', value: false, field: 'mon' },
+    { action: 'set-mon-level', value: 40, field: 'monLevel' },
+  ]);
+  assert.deepStrictEqual(RP.presetCommands(p, { mon: false, monLevel: false }), []);
+  assert.strictEqual(RP.describePreset(p, { mon: true, monLevel: true }).text, 'MON off · MON 40%');
+  assert.deepStrictEqual(RP.describePreset(p, {}).skipped, ['MON off', 'MON 40%']);
+  assert.strictEqual(RP.sanitizePresets([{ name: 'x', monLevel: 150 }])[0].monLevel, undefined);
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.ok(/case 'set-mon': \{/.test(main) && /case 'set-mon-level': \{/.test(main), 'the dispatcher verbs the fields name');
+});
+
+test('NB and NR levels (N0KAH, FTX-1): the radio\'s own steps, sent after the switch, never undoing an off', () => {
+  const ftx1 = { nb: true, nbLevel: true, nr: true, nrLevel: false, dnrLevel: true, maxNbLevel: 10, maxDnrLevel: 10 };
+  const p = RP.sanitizePresets([{ name: 'Noisy', nb: true, nbLevel: 6, nr: true, dnrLevel: 4, nrLevel: 50 }])[0];
+  assert.deepStrictEqual(RP.presetCommands(p, ftx1), [
+    { action: 'set-nb', value: true, field: 'nb' },
+    { action: 'set-nb-level', value: 6, field: 'nbLevel' },
+    { action: 'set-nr', value: true, field: 'nr' },
+    { action: 'set-dnr-level', value: 4, field: 'dnrLevel' },
+  ], 'the FTX-1 takes DNR, not the percent NR level');
+  assert.strictEqual(RP.describePreset(p, ftx1).text, 'NB on · NB 6 · NR on · DNR 4');
+  const off = RP.sanitizePresets([{ name: 'Quiet', nb: false, nbLevel: 6, nr: false, dnrLevel: 4 }])[0];
+  assert.deepStrictEqual(RP.presetCommands(off, ftx1).map((c) => c.action), ['set-nb', 'set-nr'], 'an off switch is not turned back on by its level');
+  const snap = RP.snapshotPreset('Now', { nbLevel: 3, dnrLevel: 7 });
+  assert.strictEqual(snap.nbLevel, 3);
+  assert.strictEqual(snap.dnrLevel, 7);
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.ok(/case 'set-nb-level': \{/.test(main) && /case 'set-dnr-level': \{/.test(main) && /case 'set-nr-level': \{/.test(main));
+  assert.ok(/nbLevel: _currentNbLevel,/.test(main) && /dnrLevel: _currentDnrLevel,/.test(main), '"Use current" reads them from the rig state');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  assert.ok(/const top = f\.maxCap && caps\[f\.maxCap\] != null \? caps\[f\.maxCap\] : f\.max;/.test(app) && /ctl\.max = top;/.test(app), 'the editor caps the input at the radio\'s top step');
+  const fn = main.indexOf('function rigPresetCaps()');
+  const body = main.slice(fn, main.indexOf('\n}\n', fn));
+  assert.ok(/out\[f\.maxCap\] = caps\[f\.maxCap\]/.test(body), 'rigPresetCaps passes maxNbLevel/maxDnrLevel, or the editor shows 0-100 / 0-15 (N0KAH)');
+});
+
+test('a preamp ladder is a step in a preset, offered instead of the switch (N0KAH, FTX-1)', () => {
+  const ladder = [{ v: 0, label: 'IPO' }, { v: 1, label: 'AMP1' }, { v: 2, label: 'AMP2' }];
+  const ladderCaps = { preamp: true, preampSteps: ladder };
+  assert.strictEqual(RP.fieldAvailable(RP.FIELD_BY_KEY.preamp, ladderCaps), false, 'no on/off switch on a ladder rig');
+  assert.strictEqual(RP.fieldAvailable(RP.FIELD_BY_KEY.preampStep, ladderCaps), true);
+  assert.strictEqual(RP.fieldAvailable(RP.FIELD_BY_KEY.preamp, { preamp: true }), true, 'a single-stage rig keeps the switch');
+  assert.strictEqual(RP.fieldAvailable(RP.FIELD_BY_KEY.preampStep, { preamp: true }), false);
+  const [p] = RP.sanitizePresets([{ name: 'HF DX', preampStep: '2' }]);
+  assert.strictEqual(p.preampStep, 2);
+  assert.deepStrictEqual(RP.presetCommands(p, ladderCaps), [{ action: 'set-preamp', value: 2, field: 'preampStep' }]);
+  assert.strictEqual(RP.describePreset(p, ladderCaps).text, 'Preamp AMP2');
+  assert.strictEqual(RP.sanitizePresets([{ name: 'x', preampStep: 'AMP2' }])[0].preampStep, undefined, 'junk is dropped');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.ok(/f\.kind === 'step' && Array\.isArray\(caps\[f\.cap\]\)\) out\[f\.cap\] = caps\[f\.cap\]\.map/.test(main), 'rigPresetCaps carries the ladder');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  assert.ok(/f\.kind === 'step'\) \{\s*ctl = document\.createElement\('select'\);/.test(app), 'the editor offers the steps');
+  assert.ok(/return !\(f\.notCap && caps\[f\.notCap\]\);/.test(app), 'and the same availability rule');
+});
+
+console.log('rig-presets: a stray USB reading while FT8 runs (jholler IC-7300)');
+test('a digital engine running holds the digital preset when the radio reports USB', () => {
+  const d = RP.decideModePreset({ ...base, mode: 'USB', prevFamily: 'digital', prevMatchId: 'dig', digitalEngine: true });
+  assert.strictEqual(d.reason, 'digital-engine');
+  assert.strictEqual(d.apply, null, 'the SSB preset (100 W) is not applied');
+  assert.strictEqual(d.family, 'digital', 'the family is not advanced');
+  assert.strictEqual(d.matchId, 'dig');
+});
+test('with the engine stopped, the same USB reading applies the SSB preset as before', () => {
+  const d = RP.decideModePreset({ ...base, mode: 'USB', prevFamily: 'digital', prevMatchId: 'dig', digitalEngine: false });
+  assert.strictEqual(d.reason, 'apply');
+  assert.strictEqual(d.apply.id, 'voice');
+});
+test('a digital engine never blocks moving INTO the digital preset', () => {
+  const d = RP.decideModePreset({ ...base, mode: 'USB-D', prevFamily: 'ssb', prevMatchId: 'voice', digitalEngine: true });
+  assert.strictEqual(d.reason, 'apply');
+  assert.strictEqual(d.apply.id, 'dig');
+});
+test('main passes the engine state and logs a held reading with the time since the last transmission', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.ok(/digitalEngine: !!ft8Engine,/.test(main));
+  assert.ok(/if \(d\.reason === 'digital-engine'\) \{[\s\S]{0,700}s after the last transmission[\s\S]{0,300}no SSB power was applied/.test(main));
+  assert.ok(/ft8Engine\.on\('tx-end', \(\) => \{\s*console\.log\('\[JTCAT\] TX end — PTT off'\);\s*_jtcatLastTxEndMs = Date\.now\(\);/.test(main));
+});
+
 console.log(`\nrig-presets: ${passed} passed`);

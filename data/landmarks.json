@@ -1,0 +1,187 @@
+{
+  "schema": 1,
+  "updated": "2026-10-29",
+  "categories": [
+    { "id": "time", "label": "Time signals", "reason": "on all day, every day; the first thing to try on a new radio" },
+    { "id": "beacon", "label": "Beacons", "reason": "tell you which bands are open, and to where" },
+    { "id": "weather", "label": "Weather", "reason": "forecasts read around the clock; listen only" },
+    { "id": "calling", "label": "Calling frequencies", "reason": "where people listen for a call" },
+    { "id": "oddity", "label": "Oddities", "reason": "famous signals worth hearing once" }
+  ],
+  "landmarks": [
+    {
+      "id": "wwv-10000", "name": "WWV / WWVH", "khz": 10000, "mode": "AM", "category": "time", "hours": "24h",
+      "region": "Colorado and Hawaii",
+      "line": "The loudest of the set in daylight",
+      "hear": "A tick every second, a tone most minutes, and a voice giving the UTC time just before each minute. A man's voice is WWV in Colorado; a woman's voice is WWVH in Hawaii.",
+      "why": "It runs all day from two sites on several frequencies, so it is the standard check that a radio hears anything at all. One of them is almost always readable somewhere in North America.",
+      "try": "Compare the announced time with the clock at the top of POTACAT. If they are more than a second apart, FT8 will decode poorly; Station Setup checks the clock.",
+      "url": "https://www.nist.gov/pml/time-and-frequency-division/time-distribution/radio-station-wwv"
+    },
+    { "id": "wwv-2500", "name": "WWV / WWVH", "khz": 2500, "mode": "AM", "category": "time", "hours": "24h", "region": "Colorado and Hawaii", "line": "The night-time frequency, best after dark", "helpFrom": "wwv-10000" },
+    { "id": "wwv-5000", "name": "WWV / WWVH", "khz": 5000, "mode": "AM", "category": "time", "hours": "24h", "region": "Colorado and Hawaii", "line": "Good at night and in the early morning", "helpFrom": "wwv-10000" },
+    { "id": "wwv-15000", "name": "WWV / WWVH", "khz": 15000, "mode": "AM", "category": "time", "hours": "24h", "region": "Colorado and Hawaii", "line": "Daytime, longer distances", "helpFrom": "wwv-10000" },
+    { "id": "wwv-20000", "name": "WWV", "khz": 20000, "mode": "AM", "category": "time", "hours": "24h", "region": "Colorado", "line": "Daytime only, and only when the high bands are open", "helpFrom": "wwv-10000" },
+    {
+      "id": "chu-7850", "name": "CHU", "khz": 7850, "mode": "AM", "category": "time", "hours": "24h",
+      "region": "Ottawa, Canada",
+      "line": "Canada's time signal, strong in the east at night",
+      "hear": "A tick every second, a voice announcing the time in English and French each minute, and a short burst of data tones between seconds 31 and 39.",
+      "why": "Canada's official time signal, on three frequencies. 7850 sits just above the 40 m band and is strong across eastern North America after dark.",
+      "try": "On a quiet evening, tune 7850 and then 3330. Which one is louder tells you how far the signal is travelling tonight."
+    },
+    { "id": "chu-3330", "name": "CHU", "khz": 3330, "mode": "AM", "category": "time", "hours": "24h", "region": "Ottawa, Canada", "line": "Canada's time signal, the night-time frequency", "helpFrom": "chu-7850" },
+    { "id": "chu-14670", "name": "CHU", "khz": 14670, "mode": "AM", "category": "time", "hours": "24h", "region": "Ottawa, Canada", "line": "Canada's time signal, the daytime frequency", "helpFrom": "chu-7850" },
+    {
+      "id": "rwm-9996", "name": "RWM", "khz": 9996, "mode": "CW", "category": "time", "hours": "24h",
+      "region": "Moscow, Russia",
+      "line": "Russia's time signal. A real DX catch",
+      "hear": "Short carrier pulses, one per second, with a longer pulse at each minute, and a Morse ident now and then. No voice.",
+      "why": "Russia's time signal from near Moscow. Hearing it in North America means the path across the Atlantic and Europe is open on that band.",
+      "try": "Use a narrow CW filter and listen for the once-a-second pulses under the noise. Then try 4996 after dark."
+    },
+    { "id": "rwm-4996", "name": "RWM", "khz": 4996, "mode": "CW", "category": "time", "hours": "24h", "region": "Moscow, Russia", "line": "Russia's time signal, the night-time frequency", "helpFrom": "rwm-9996" },
+    {
+      "id": "wwvb-60", "name": "WWVB", "khz": 60, "mode": "CW", "category": "time", "hours": "24h",
+      "region": "Colorado",
+      "line": "The signal that sets radio-controlled clocks",
+      "hear": "No voice and no ticks you would recognise. The carrier drops in strength at the start of every second, which sounds like a slow, steady beat in CW mode.",
+      "why": "It sets the radio-controlled clocks and watches across North America from Fort Collins, Colorado. Hearing it on a ham radio shows how far down your receiver really goes.",
+      "try": "It is easiest at night with a long wire antenna. Watch the S-meter dip once a second rather than listening for a tone."
+    },
+    {
+      "id": "dcf77-77", "name": "DCF77", "khz": 77.5, "mode": "CW", "category": "time", "hours": "24h",
+      "region": "Mainflingen, Germany",
+      "line": "Germany's clock signal. Very hard from the Americas",
+      "hear": "A carrier that drops in strength at the start of each second, like WWVB. No voice.",
+      "why": "It sets the radio-controlled clocks of Europe. From North America it takes a quiet winter night and a large antenna, which makes it a prize.",
+      "try": "Listen on a European KiwiSDR from the SDR menu first, so you know what you are looking for."
+    },
+    {
+      "id": "ncdxf-14100", "name": "NCDXF / IARU beacons", "khz": 14100, "mode": "CW", "category": "beacon", "hours": "24h", "ncdxf": true,
+      "region": "Worldwide",
+      "line": "18 beacons around the world take turns",
+      "hear": "A callsign in Morse, then four one-second dashes, each ten times weaker than the one before: 100 W, 10 W, 1 W and a tenth of a watt.",
+      "why": "Eighteen beacons on five continents share this frequency, ten seconds each, every three minutes. Each dash you hear is a path that is open right now, and the weakest dash you can hear shows how much margin it has.",
+      "try": "Stay for three minutes and note which beacons come through. Then try 28200: if any beacon is there, 10 m is open and worth a CQ.",
+      "url": "https://www.ncdxf.org/beacon/"
+    },
+    { "id": "ncdxf-18110", "name": "NCDXF / IARU beacons", "khz": 18110, "mode": "CW", "category": "beacon", "hours": "24h", "ncdxf": true, "region": "Worldwide", "line": "The same beacons on 17 m, one turn later", "helpFrom": "ncdxf-14100" },
+    { "id": "ncdxf-21150", "name": "NCDXF / IARU beacons", "khz": 21150, "mode": "CW", "category": "beacon", "hours": "24h", "ncdxf": true, "region": "Worldwide", "line": "The same beacons on 15 m", "helpFrom": "ncdxf-14100" },
+    { "id": "ncdxf-24930", "name": "NCDXF / IARU beacons", "khz": 24930, "mode": "CW", "category": "beacon", "hours": "24h", "ncdxf": true, "region": "Worldwide", "line": "The same beacons on 12 m", "helpFrom": "ncdxf-14100" },
+    { "id": "ncdxf-28200", "name": "NCDXF / IARU beacons", "khz": 28200, "mode": "CW", "category": "beacon", "hours": "24h", "ncdxf": true, "region": "Worldwide", "line": "If you hear these, 10 m is open", "helpFrom": "ncdxf-14100" },
+    {
+      "id": "noaa-wx1", "name": "NOAA Weather Radio WX1", "khz": 162550, "mode": "FM", "category": "weather", "hours": "24h",
+      "region": "United States",
+      "line": "Forecasts and warnings, read around the clock",
+      "hear": "A computer voice reading the forecast, current conditions and any warnings for the area around the transmitter, on a loop.",
+      "why": "More than a thousand transmitters cover the US on seven channels. In a storm it is the fastest way to hear warnings, and it is a handy check of a 2 m antenna.",
+      "try": "Click through the seven channels. The strongest one is your local transmitter; a weaker one is usually the next county over.",
+      "url": "https://www.weather.gov/nwr/"
+    },
+    { "id": "noaa-wx2", "name": "NOAA Weather Radio WX2", "khz": 162400, "mode": "FM", "category": "weather", "hours": "24h", "region": "United States", "line": "Weather channel 2", "helpFrom": "noaa-wx1" },
+    { "id": "noaa-wx3", "name": "NOAA Weather Radio WX3", "khz": 162475, "mode": "FM", "category": "weather", "hours": "24h", "region": "United States", "line": "Weather channel 3", "helpFrom": "noaa-wx1" },
+    { "id": "noaa-wx4", "name": "NOAA Weather Radio WX4", "khz": 162425, "mode": "FM", "category": "weather", "hours": "24h", "region": "United States", "line": "Weather channel 4", "helpFrom": "noaa-wx1" },
+    { "id": "noaa-wx5", "name": "NOAA Weather Radio WX5", "khz": 162450, "mode": "FM", "category": "weather", "hours": "24h", "region": "United States", "line": "Weather channel 5", "helpFrom": "noaa-wx1" },
+    { "id": "noaa-wx6", "name": "NOAA Weather Radio WX6", "khz": 162500, "mode": "FM", "category": "weather", "hours": "24h", "region": "United States", "line": "Weather channel 6", "helpFrom": "noaa-wx1" },
+    { "id": "noaa-wx7", "name": "NOAA Weather Radio WX7", "khz": 162525, "mode": "FM", "category": "weather", "hours": "24h", "region": "United States", "line": "Weather channel 7", "helpFrom": "noaa-wx1" },
+    {
+      "id": "volmet-shannon-5505", "name": "Shannon VOLMET", "khz": 5505, "mode": "USB", "category": "weather", "hours": "24h",
+      "region": "Ireland",
+      "line": "Airport weather for aircraft over the Atlantic",
+      "hear": "A recorded voice reading the weather at European airports in a fixed order: wind, visibility, cloud, temperature and pressure.",
+      "why": "It runs around the clock from Ireland for aircraft crossing the Atlantic. Clear copy in North America means the path to Europe is open.",
+      "try": "The lower frequencies work at night and the higher ones by day. Try all four and note which one is readable now."
+    },
+    { "id": "volmet-shannon-3413", "name": "Shannon VOLMET", "khz": 3413, "mode": "USB", "category": "weather", "hours": "24h", "region": "Ireland", "line": "Airport weather, the night-time frequency", "helpFrom": "volmet-shannon-5505" },
+    { "id": "volmet-shannon-8957", "name": "Shannon VOLMET", "khz": 8957, "mode": "USB", "category": "weather", "hours": "24h", "region": "Ireland", "line": "Airport weather, good morning and evening", "helpFrom": "volmet-shannon-5505" },
+    { "id": "volmet-shannon-13264", "name": "Shannon VOLMET", "khz": 13264, "mode": "USB", "category": "weather", "hours": "24h", "region": "Ireland", "line": "Airport weather, the daytime frequency", "helpFrom": "volmet-shannon-5505" },
+    {
+      "id": "call-146520", "name": "2 m national simplex", "khz": 146520, "mode": "FM", "category": "calling", "hours": "",
+      "region": "United States",
+      "line": "Call here, then move to another frequency",
+      "hear": "Silence most of the time, then someone calling a callsign or saying they are monitoring.",
+      "why": "It is the national FM simplex calling frequency in the US. Every 2 m radio can reach it, so it is where a traveller or a new ham calls first.",
+      "try": "Leave it on while you work. When someone calls, answer, then agree on another frequency and move off."
+    },
+    { "id": "call-446000", "name": "70 cm national simplex", "khz": 446000, "mode": "FM", "category": "calling", "hours": "", "region": "United States", "line": "The 70 cm FM calling frequency", "helpFrom": "call-146520" },
+    { "id": "call-223500", "name": "1.25 m national simplex", "khz": 223500, "mode": "FM", "category": "calling", "hours": "", "region": "United States", "line": "The 1.25 m FM calling frequency", "helpFrom": "call-146520" },
+    { "id": "call-52525", "name": "6 m FM simplex", "khz": 52525, "mode": "FM", "category": "calling", "hours": "", "region": "United States", "line": "The 6 m FM calling frequency", "helpFrom": "call-146520" },
+    {
+      "id": "call-144200", "name": "2 m SSB calling", "khz": 144200, "mode": "USB", "category": "calling", "hours": "",
+      "region": "North America",
+      "line": "Where weak-signal VHF stations meet",
+      "hear": "Mostly quiet. During contests and band openings, SSB and CW stations calling CQ, often from a few hundred miles away.",
+      "why": "The 2 m SSB calling frequency. Weak-signal work on VHF uses sideband and horizontal antennas, and stations meet here before moving up the band.",
+      "try": "During a VHF contest or on a Sunday morning, point a horizontal antenna toward the nearest city and listen here."
+    },
+    { "id": "call-432100", "name": "70 cm SSB calling", "khz": 432100, "mode": "USB", "category": "calling", "hours": "", "region": "North America", "line": "Where weak-signal UHF stations meet", "helpFrom": "call-144200" },
+    {
+      "id": "call-50125", "name": "6 m SSB calling", "khz": 50125, "mode": "USB", "category": "calling", "hours": "",
+      "region": "North America",
+      "line": "Check here when 6 m opens in summer",
+      "hear": "Usually nothing. When the band opens, stations from hundreds of miles away, sometimes for only a few minutes.",
+      "why": "The 6 m SSB calling frequency. Summer sporadic-E openings show up here first.",
+      "try": "From May to August, check here around midday and early evening. If you hear anyone at all, the band is open."
+    },
+    {
+      "id": "qrp-14060", "name": "20 m QRP CW", "khz": 14060, "mode": "CW", "category": "calling", "hours": "",
+      "region": "Worldwide",
+      "line": "Low-power CW, often from a park or a summit",
+      "hear": "Morse from stations running a few watts, many of them portable.",
+      "why": "The QRP CW calling frequency on 20 m. Activators running a small radio from a park or a hilltop often sit near it.",
+      "try": "Listen around 14060 on a weekend afternoon. The weak signal you can barely copy may be five watts and a wire in a tree."
+    },
+    { "id": "qrp-7030", "name": "40 m QRP CW", "khz": 7030, "mode": "CW", "category": "calling", "hours": "", "region": "Worldwide", "line": "Low-power CW on 40 m", "helpFrom": "qrp-14060" },
+    {
+      "id": "qrp-14285", "name": "20 m QRP SSB", "khz": 14285, "mode": "USB", "category": "calling", "hours": "",
+      "region": "North America",
+      "line": "Low-power voice contacts",
+      "hear": "Voice stations running low power, calling CQ QRP.",
+      "why": "The QRP SSB calling frequency on 20 m. Low-power stations meet here so they are not lost among the big signals.",
+      "try": "If you run a portable radio, call here and say you are QRP. Stations listening will expect a weak signal."
+    },
+    {
+      "id": "marine-16", "name": "Marine channel 16", "khz": 156800, "mode": "FM", "category": "calling", "hours": "24h",
+      "region": "Coasts and the Great Lakes",
+      "line": "Distress and calling on the water. Listen only",
+      "hear": "Coast Guard broadcasts and boats hailing each other before moving to a working channel.",
+      "why": "Channel 16 is the distress and calling channel for boats. Hams may listen, but may not transmit there.",
+      "try": "Near a coast or the Great Lakes, listen for a Coast Guard broadcast; it names the channel it is about to move to."
+    },
+    {
+      "id": "air-121500", "name": "Aviation emergency", "khz": 121500, "mode": "AM", "category": "calling", "hours": "24h",
+      "region": "Worldwide",
+      "line": "The aircraft guard frequency. Listen only",
+      "hear": "Usually silence. Now and then a pilot asked to check in, or the sweeping tone of an emergency beacon.",
+      "why": "121.5 MHz is the aviation emergency frequency, monitored by air traffic control and many aircraft. Hams may listen, but may not transmit there.",
+      "try": ""
+    },
+    {
+      "id": "cb-19", "name": "CB channel 19", "khz": 27185, "mode": "AM", "category": "calling", "hours": "24h",
+      "region": "United States",
+      "line": "Truck drivers on the highway. Listen only",
+      "hear": "Truck drivers talking about traffic, weather and the road ahead.",
+      "why": "The busiest CB channel on US highways. A ham radio may receive it, but may not transmit there.",
+      "try": "Near an interstate, tune it for a live traffic report."
+    },
+    { "id": "cb-9", "name": "CB channel 9", "khz": 27065, "mode": "AM", "category": "calling", "hours": "24h", "region": "United States", "line": "The CB emergency channel. Listen only", "helpFrom": "cb-19" },
+    {
+      "id": "buzzer-4625", "name": "The Buzzer (UVB-76)", "khz": 4625, "mode": "USB", "category": "oddity", "hours": "24h",
+      "region": "Russia",
+      "line": "A Russian buzz every two seconds since the 1970s",
+      "hear": "A short buzz, about 25 a minute, day and night. A few times a month a voice reads out words and numbers.",
+      "why": "Nobody outside Russia knows what it is for. It is the most listened-to mystery on shortwave, and hearing it from the Americas takes a good antenna and a good night.",
+      "try": "Try after dark with the noise blanker off. If it is too weak here, open a European KiwiSDR from the SDR menu and hear what you are missing."
+    },
+    {
+      "id": "saq-17", "name": "SAQ Grimeton", "khz": 17.2, "mode": "CW", "category": "oddity", "hours": "",
+      "region": "Sweden",
+      "line": "A 1924 alternator transmitter, on the air a few times a year",
+      "hear": "Slow, hand-sent Morse from the only working alternator transmitter left in the world.",
+      "why": "Grimeton in Sweden is a UNESCO World Heritage site. It goes on the air a few times a year, including Alexanderson Day in summer and Christmas Eve.",
+      "try": "Most HF radios cannot tune 17.2 kHz. On the day, listen through a European KiwiSDR, and send a reception report for a QSL card.",
+      "url": "https://alexander.n.se/en/"
+    }
+  ]
+}

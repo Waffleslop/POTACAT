@@ -31,8 +31,8 @@ fetch() { # url sha256 dest
 }
 
 # --- Hamlib: rigctld + rotctld, static (no libhamlib/libusb dylibs to ship) ---
-HAMLIB_VER=4.7.0
-HAMLIB_SHA=24542b09cb2432458ba239b2ba8f5b7fb67cde64df6553f150e6eb8475a87a23
+HAMLIB_VER=4.7.2
+HAMLIB_SHA=ae1fcf2dbc80ea0786ea8f047b09399c3f7737d1930442f61a031708ed33e88f
 fetch "https://github.com/Hamlib/Hamlib/releases/download/${HAMLIB_VER}/hamlib-${HAMLIB_VER}.tar.gz" "$HAMLIB_SHA" "$WORK/hamlib.tar.gz"
 tar xzf "$WORK/hamlib.tar.gz" -C "$WORK"
 (

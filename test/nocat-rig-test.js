@@ -129,7 +129,7 @@ test('FTM-510D (2026-10-23): a no-CAT 2 m / 70 cm mobile keyed through its DATA 
   assert.ok(app.includes("if (pttDl) pttDl.appendChild(opt.cloneNode(true));"), 'the port list is the same one the CW Key Port offers');
   // main: the dispatcher's third path, lines dropped at open, closed on rig change and quit.
   const main = read('main.js');
-  assert.ok(main.includes("if (target.ptt === 'serial') {\n      nocatSerialPtt(!!state, target);\n      return;\n    }"), 'handleRemotePtt routes to the serial line');
+  assert.ok(/if \(target\.ptt === 'serial'\) \{\r?\n      nocatSerialPtt\(!!state, target\);\r?\n      return;\r?\n    \}/.test(main), 'handleRemotePtt routes to the serial line');
   assert.ok(main.includes("function nocatSerialPtt(state, target)") && main.includes("port.set({ dtr: false, rts: false }, () => {"), 'both lines dropped at open');
   assert.ok(main.includes("hupcl: true"), 'lines drop on close');
   assert.ok((main.match(/closeNocatPttPort\(\);/g) || []).length >= 3, 'closed on a rig change (both branches) and at quit');
@@ -188,6 +188,19 @@ test('the wrong-band TX guard trusts only a live dial, and a dropped rig takes i
   assert.ok(main.includes("if (dialLive && _jtcatExpectedDialHz > 0 && _currentFreqHz > 0 &&"), 'guard gated on it');
   // connectCat clears the previous rig's frequency before the next rig speaks.
   assert.ok(/cat\.disconnect\(\);\s*_icomNetworkTransport = null;[\s\S]{0,300}_currentFreqHz = 0;/.test(main), 'dial cleared on teardown');
+});
+
+test('a squelched FM / no-CAT radio is never reported as a dead audio link (KS9B, 2 m handheld)', () => {
+  const main = read('main.js').replace(/\r\n/g, '\n');
+  assert.ok(/function audioSilenceIsSquelch\(\) \{\n\s*const t = settings\.catTarget \|\| \{\};\n\s*if \(t\.type === 'none'\) return true;\n\s*return \/FM\/\.test\(/.test(main), 'no CAT or FM');
+  const at = main.indexOf("ipcMain.on('remote-audio-health'");
+  const body = main.slice(at, at + 1500);
+  assert.ok(body.indexOf('audioSilenceIsSquelch()') > 0 && body.indexOf('audioSilenceIsSquelch()') < body.indexOf("type: 'audio-health', ok: false"), 'checked before the phone is told');
+});
+
+test('FT8 auto-log with no dial from the radio uses the JTCAT band dial, never frequency 0 (KJ5NVM)', () => {
+  const main = read('main.js').replace(/\r\n/g, '\n');
+  assert.ok(/const dialHz = _currentFreqHz > 0 \? _currentFreqHz : \(_jtcatExpectedDialHz > 0 \? _jtcatExpectedDialHz : 0\);\n[\s\S]{0,400}const freqKhz = dialHz \? dialHz \/ 1000 : 0;/.test(main));
 });
 
 console.log(`\nNo CAT control: ${passed} passed, ${failed} failed`);

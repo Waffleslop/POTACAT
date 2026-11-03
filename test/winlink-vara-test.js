@@ -109,7 +109,8 @@ function fnBody(src, name) {
     const icomCable = M.winlinkModesFor({ ...base, rigFamily: 'icom-network', audioSource: 'icom-network', varaHf: { enabled: true, port: 8301, cable: true } });
     assert.ok(icomCable[4].available);
     assert.ok(!M.winlinkModesFor({ ...base, remote: true, varaHf: { enabled: true, port: 8301, cable: true } })[4].available, 'never from a laptop driving a shack');
-    assert.ok(!M.winlinkModesFor({ ...base, rigFamily: 'none', varaHf: { enabled: true, port: 8301, cable: true } })[4].available, 'needs CAT');
+    const noCatVara = M.winlinkModesFor({ ...base, rigFamily: 'none', varaHf: { enabled: true, port: 8301, cable: true } })[4];
+    assert.ok(noCatVara.available && /No CAT control/.test(noCatVara.note), 'a no-CAT radio runs VARA too; the operator sets the dial (NA4DQ)');
   });
   await test('port clashes are named: VARA HF vs Mercury, VARA FM vs VARA HF', () => {
     const base = { rigFamily: 'serial', audioSource: 'dax', platform: 'win32', mercuryEnabled: true, mercuryPort: 8300, ardopSocketAudio: true };
@@ -142,6 +143,13 @@ function fnBody(src, name) {
     assert.ok(/mode === 'varafm' \? 'varafm' : 'varahf'/.test(fnBody(main, 'winlinkGateways')), 'the gateway list asks Pat for varafm');
     assert.ok(/varaFmAddr: `127\.0\.0\.1:\$\{_winlinkVaraFmPort\(\)\}`/.test(fnBody(main, 'writePatConfig')));
     assert.ok(/if \(mode === 'varafm'\) return `VARA FM is not answering/.test(fnBody(main, 'winlinkTransportDownText')));
+  });
+  await test('a VARA whose port Pat holds from the last session is reused, not refused (W7RTA)', () => {
+    const s = fnBody(main, 'winlinkVaraReady');
+    const reuse = s.indexOf("_patHoldsVara[kind] === patProc && await varaProcessRunning(kind)");
+    assert.ok(reuse > 0, 'reuse check');
+    assert.ok(reuse < s.indexOf('is open on the shack PC but is not answering'), 'before the not-answering refusal');
+    assert.ok(/_patHoldsVara\[kind\] = patProc;[^\n]*\n\s*winlinkLog\(`\$\{name\} ready on/.test(s), 'marked when Pat is handed VARA');
   });
   await test('VARA\'s transmit audio reaches the radio only while it has PTT, through the one TX dispatch; the radio reaches VARA through the cable playback', () => {
     const rx = main.slice(main.indexOf("ipcMain.on('modem-bridge-cable-rx'"), main.indexOf("ipcMain.on('modem-bridge-cable-status'"));
@@ -292,6 +300,14 @@ function fnBody(src, name) {
     assert.strictEqual(saved.ok, true);
     assert.deepStrictEqual([saved.toVara.name, saved.fromVara.name, saved.vara.inputName, saved.vara.outputName], ['CABLE', 'Hi-Fi Cable', 'CABLE Output (VB-Audio Virtual ', 'Hi-Fi Cable Input (VB-Audio Hi-']);
     assert.ok(/Click Set up VARA for me once/.test(S.planCablesFromSaved({ inputId: 'x' }).advice));
+    // A plan saved with the two ids and labels but without VARA's names (an
+    // earlier shape) is still configured: the names come from the labels.
+    const old = S.planCablesFromSaved({ inputId: 'hifi-out', outputId: 'cab-in', inputLabel: 'Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)', outputLabel: 'CABLE Input (VB-Audio Virtual Cable)' });
+    assert.strictEqual(old.ok, true, 'ids + labels are a configured cable route');
+    assert.strictEqual(old.vara.inputName, 'CABLE Output (VB-Audio Virtual ');
+    assert.strictEqual(old.vara.outputName, 'Hi-Fi Cable Input (VB-Audio Hi-');
+    assert.strictEqual(old.vara.fromListing, false);
+    assert.strictEqual(S.planCablesFromSaved({ inputId: 'a', outputId: 'b' }).ok, false, 'no labels, no names: not configured');
   });
   await test('VARA\'s log names the device it could not open', () => {
     assert.strictEqual(S.varaLogDeviceProblem('2026-10-23 12:00:00    WARNING: VARA is not connected to any App via TCP Port 8300\n'), '');

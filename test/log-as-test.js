@@ -102,7 +102,7 @@ test('saveQsoRecord resolves logAs first and reads identity, logbook and uploads
     assert.ok(!new RegExp('\\bsettings\\.' + k + '\\b').test(saveBody), 'settings.' + k + ' must be ops.' + k + ' inside saveQsoRecord');
   }
   assert.ok(/forwardToLogbook\(qsoData, ops\)/.test(saveBody) && /sendToQrzLogbook\(qsoData, ops\)/.test(saveBody));
-  assert.ok(/activationStationFillFor\(qsoData, ops\)/.test(saveBody));
+  assert.ok(/stationLocationFillFor\(qsoData, ops\)/.test(saveBody), 'station fill (activation + own county) reads the operator being logged for');
 });
 test('the record is the other operator\'s: OPERATOR and STATION_CALLSIGN forced, journaled under their account', () => {
   assert.ok(/if \(logAs\) \{\n\s*qsoData\.operator = logAs\.call;\n\s*qsoData\.stationCallsign = logAs\.call;/.test(saveBody));

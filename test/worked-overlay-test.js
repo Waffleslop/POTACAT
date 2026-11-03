@@ -126,6 +126,22 @@ test('buildLayer draws states and countries under a pane, circles only for worke
 test('wiring: every map window attaches the overlay and its keys, main owns the state and follows the dial', () => {
   const main = rd('main.js');
   assert.ok(main.includes("ipcMain.handle('worked-overlay-get'") && main.includes("ipcMain.handle('worked-overlay-geo'") && main.includes("ipcMain.on('worked-overlay-set'"));
+  // The legend's Update from LoTW / QRZ buttons run the SAME code as the Settings button and the WAS view's button.
+  assert.ok(main.includes("ipcMain.handle('worked-sync'") && main.includes('async function lotwDownloadConfirmations(') && main.includes('async function wasBackfillStates('), 'worked-sync shares the LoTW and QRZ code paths');
+  assert.ok(/lotwDownloadConfirmations\(\{\}\)/.test(main) && /await wasBackfillStates\(\)/.test(main));
+  const ov = fs.readFileSync(path.join(__dirname, '..', 'lib', 'worked-overlay.js'), 'utf8');
+  assert.ok(/createLegend\(L, [\s\S]{0,200}?!o\.web && api\.workedSync/.test(ov), 'the legend offers sync only where the api has it (never on ECHOCAT Web)');
+  // The box can be hidden: "Worked" beside Map in the FT8 window, one machine-wide preference every map window reads.
+  assert.ok(/ctl\.setLegendVisible = function/.test(ov) && /function legendHidden\(\)/.test(ov), 'the overlay owns the legend visibility');
+  const jpHtml = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-popout.html'), 'utf8');
+  const jpJs = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-popout.js'), 'utf8');
+  assert.ok(jpHtml.includes('id="jp-worked-toggle"') && jpHtml.indexOf('id="jp-worked-toggle"') > jpHtml.indexOf('id="jp-map-toggle"'), 'Worked sits beside Map');
+  assert.ok(/workedOverlayCtl\.setLegendVisible\(!workedOverlayCtl\.legendVisible\)/.test(jpJs), 'the button flips the box through the overlay');
+  // The FT8 map pop-out: a Worked button of its own, and the theme payload read as {theme, variant}, never written raw into data-theme.
+  const mpHtml = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-map-popout.html'), 'utf8');
+  const mpJs = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-map-popout.js'), 'utf8');
+  assert.ok(mpHtml.includes('id="tb-worked"') && /workedOverlayCtl\.setLegendVisible\(!workedOverlayCtl\.legendVisible\)/.test(mpJs), 'the map pop-out has its own Worked button');
+  assert.ok(!/setAttribute\('data-theme', theme\)/.test(mpJs) && /payload\.theme/.test(mpJs), 'the map pop-out reads the {theme, variant} payload (it wrote "[object Object]" into data-theme until 2026-10-23)');
   assert.ok(/function sendCatFrequency[\s\S]{0,2500}workedOverlayFollowDial\(\);/.test(main), 'frequency sink re-pushes');
   assert.ok(/function sendCatMode[\s\S]{0,1500}workedOverlayFollowDial\(\);/.test(main), 'mode sink re-pushes');
   assert.ok(/for \(const w of workedOverlayWindows\(\)\) w\.webContents\.send\('worked-roster'/.test(main), 'the roster reaches every map window');
@@ -146,7 +162,7 @@ test('wiring: every map window attaches the overlay and its keys, main owns the 
   assert.ok(/\/\^F\[678\]\$\/\.test\(e\.key\)/.test(rd('renderer/app.js')), 'F6/F7/F8 in the main keydown');
   for (const pre of ['preload.js', 'preload-popout.js', 'preload-jtcat-popout.js']) {
     const p = rd(pre);
-    for (const k of ['workedOverlayGet', 'workedOverlaySet', 'workedOverlayGeo', 'onWorkedOverlayState', 'getWorkedRoster', 'onWorkedRoster']) assert.ok(p.includes(k + ':'), pre + ' lacks ' + k);
+    for (const k of ['workedOverlayGet', 'workedOverlaySet', 'workedOverlayGeo', 'onWorkedOverlayState', 'getWorkedRoster', 'onWorkedRoster', 'workedSync']) assert.ok(p.includes(k + ':'), pre + ' lacks ' + k);
   }
 });
 

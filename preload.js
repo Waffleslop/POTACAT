@@ -6,6 +6,15 @@ const { contextBridge, ipcRenderer, shell, webFrame } = require('electron');
 // that needs those has to live in main and reach the renderer via IPC.
 
 contextBridge.exposeInMainWorld('api', {
+  // The active rig's bands (lib/rig-bands.js): {bands: string[]|null, all}.
+  rigBandsGet: () => ipcRenderer.invoke('rig-bands-get'),
+  onRigBands: (cb) => ipcRenderer.on('rig-bands', (_e, d) => cb(d)),
+  // A Tuner Memories run changed a rig's no-match bands (rig.atuBands)
+  onRigAtuBands: (cb) => ipcRenderer.on('rig-atu-bands', (_e, d) => cb(d)),
+  // The listening SDR: connected (you hear it), kind, and reach (what it can
+  // receive) — the Landmarks tab shows stations the SDR can hear (lib/listen-source.js).
+  onKiwiStatus: (cb) => ipcRenderer.on('kiwi-status', (_e, s) => cb(s)),
+  rigBandsNative: (model) => ipcRenderer.invoke('rig-bands-native', model),
   platform: process.platform,
   openExternal: (url) => ipcRenderer.send('open-external', url),
   pairRedeemUrl: (url) => ipcRenderer.invoke('pair-redeem-url', url),
@@ -155,6 +164,8 @@ contextBridge.exposeInMainWorld('api', {
   // dance previously buried in scripts/launcher-install.js as a UI button.
   launcherInstall: () => ipcRenderer.invoke('launcher-install'),
   launcherUninstall: () => ipcRenderer.invoke('launcher-uninstall'),
+  launcherSetViaCloud: (on) => ipcRenderer.invoke('launcher-set-via-cloud', on),
+  launcherDiag: () => ipcRenderer.invoke('launcher-diag'),
   launcherStatus: () => ipcRenderer.invoke('launcher-status'),
   launcherStart: () => ipcRenderer.invoke('launcher-start'),
   // --- ALSA bridge (Linux-only; resolves false / [] on Win+Mac) ----------
@@ -199,6 +210,8 @@ contextBridge.exposeInMainWorld('api', {
   passEnforcementGetState: () => ipcRenderer.invoke('pass-enforcement-get-state'),
   passEnforcementLoad: (code) => ipcRenderer.invoke('pass-enforcement-load', code),
   passEnforcementEnd: (reason) => ipcRenderer.invoke('pass-enforcement-end', reason),
+  passTakeOver: () => ipcRenderer.invoke('pass-take-over'),
+  passGiveBack: () => ipcRenderer.invoke('pass-give-back'),
   onPassEnforcementState: (cb) => {
     const handler = (_e, status) => cb(status);
     ipcRenderer.on('pass-enforcement-state', handler);
@@ -243,6 +256,7 @@ contextBridge.exposeInMainWorld('api', {
   getSettings: () => ipcRenderer.invoke('get-settings'),
   getRigModels: () => ipcRenderer.invoke('get-rig-models'),
   getRigSetupNotes: (q) => ipcRenderer.invoke('get-rig-setup-notes', q),
+  icomScopeCapture: () => ipcRenderer.invoke('icom-scope-capture'),
   stationSetupGet: (rigId) => ipcRenderer.invoke('station-setup-get', rigId),
   stationSetupReport: (q) => ipcRenderer.invoke('station-setup-report', q),
   stationSetupAction: (q) => ipcRenderer.invoke('station-setup-action', q),
@@ -263,6 +277,7 @@ contextBridge.exposeInMainWorld('api', {
   rotctldListModels: () => ipcRenderer.invoke('rotctld-list-models'),
   listRigs: () => ipcRenderer.invoke('list-rigs'),
   testHamlib: (config) => ipcRenderer.invoke('test-hamlib', config),
+  testFlrig: (config) => ipcRenderer.invoke('test-flrig', config),
   testSerialCat: (config) => ipcRenderer.invoke('test-serial-cat', config),
   testIcomCiv: (config) => ipcRenderer.invoke('test-icom-civ', config),
   testCivTcp: (config) => ipcRenderer.invoke('test-civ-tcp', config),
@@ -296,6 +311,7 @@ contextBridge.exposeInMainWorld('api', {
   workedOverlayGet: () => ipcRenderer.invoke('worked-overlay-get'),
   workedOverlaySet: (patch) => ipcRenderer.send('worked-overlay-set', patch),
   workedOverlayGeo: () => ipcRenderer.invoke('worked-overlay-geo'),
+  workedSync: (kind) => ipcRenderer.invoke('worked-sync', kind),
   onWorkedOverlayState: (cb) => ipcRenderer.on('worked-overlay-state', (_e, s) => cb(s)),
   onClusterStatus: (cb) => ipcRenderer.on('cluster-status', (_e, s) => cb(s)),
   // Spots Source menu: saved cluster nodes on/off (main is the one writer).
@@ -393,6 +409,11 @@ contextBridge.exposeInMainWorld('api', {
   onWatchlistUpdated: (cb) => ipcRenderer.on('watchlist-updated', (_e, raw) => cb(raw)),
   // Directory (HF Nets & SWL Broadcasts)
   onDirectoryData: (cb) => ipcRenderer.on('directory-data', (_e, data) => cb(data)),
+  // Channels: the saved frequency chart (lib/channels.js). Edits go through main so ECHOCAT follows.
+  channelsGet: () => ipcRenderer.invoke('channels-get'),
+  channelsSave: (saved) => ipcRenderer.invoke('channels-save', saved),
+  channelsImportCsv: () => ipcRenderer.invoke('channels-import-csv'),
+  channelsExportCsv: () => ipcRenderer.invoke('channels-export-csv'),
   fetchDirectory: () => ipcRenderer.send('fetch-directory'),
   getDirectory: () => ipcRenderer.invoke('get-directory'),
   // Events system
@@ -474,13 +495,24 @@ contextBridge.exposeInMainWorld('api', {
   mercuryListDevices: () => ipcRenderer.invoke('mercury-list-devices'),
   // Winlink (Pat) — the mail window, Settings helpers, the bug-report line.
   winlinkPopoutOpen: () => ipcRenderer.send('winlink-popout-open'),
+  winlinkPotaSpotOpen: (o) => ipcRenderer.send('winlink-pota-spot-open', o || {}),
   winlinkDiag: () => ipcRenderer.invoke('winlink-diag'),
+  settingsSaveStatus: () => ipcRenderer.invoke('settings-save-status'),
   winlinkListArdopDevices: () => ipcRenderer.invoke('winlink-list-ardop-devices'),
   winlinkAccountCheck: (call) => ipcRenderer.invoke('winlink-account-check', call),
   winlinkVaraFind: (kind) => ipcRenderer.invoke('winlink-vara-find', { kind }),
   winlinkVaraSetup: (kind, devices, labels) => ipcRenderer.invoke('winlink-vara-setup', { kind, devices, ...(labels || {}) }),
   winlinkAudioRig: () => ipcRenderer.invoke('winlink-audio-rig'),
   winlinkRegister: (o) => ipcRenderer.invoke('winlink-register', o),
+  winlinkRecoveryEmailGet: () => ipcRenderer.invoke('winlink-recovery-email-get'),
+  countyList: () => ipcRenderer.invoke('county-list'),
+  spotParkState: (ref, call) => ipcRenderer.invoke('spot-park-state', ref, call),
+  parkCountyGet: (ref) => ipcRenderer.invoke('park-county-get', ref),
+  parkCountySet: (o) => ipcRenderer.invoke('park-county-set', o),
+  homeCountyFromQrz: () => ipcRenderer.invoke('home-county-from-qrz'),
+  onEchocatAppConnected: (cb) => ipcRenderer.on('echocat-app-connected', () => cb()),
+  onParkCountyChanged: (cb) => ipcRenderer.on('park-county-changed', (_e, d) => cb(d)),
+  winlinkRecoveryEmailSet: (email) => ipcRenderer.invoke('winlink-recovery-email-set', email),
   onWinlinkState: (cb) => ipcRenderer.on('winlink-state', (_e, s) => cb(s)),
   jtcatSetUltracat: (on) => ipcRenderer.send('jtcat-set-ultracat', on),
   jtcatPopoutTheme: (theme) => ipcRenderer.send('jtcat-popout-theme', theme),
@@ -495,6 +527,8 @@ contextBridge.exposeInMainWorld('api', {
   // Band Scope pop-out (the radio's own spectrum — FT-710 over USB)
   scopePopoutOpen: () => ipcRenderer.send('scope-popout-open'),
   scopePopoutTheme: (theme) => ipcRenderer.send('scope-popout-theme', theme),
+  // ATU Calibration Wizard window (a Flex with an internal ATU; lib/atu-wizard.js)
+  atuWizardOpen: () => ipcRenderer.send('atu-wizard-popout-open'),
   // Bandspread pop-out
   bandspreadPopoutOpen: () => ipcRenderer.send('bandspread-popout-open'),
   bandspreadPopoutClose: () => ipcRenderer.send('bandspread-popout-close'),
@@ -524,6 +558,9 @@ contextBridge.exposeInMainWorld('api', {
   // Phone-tapped macro slot — main relays here so the renderer's playback
   // chain (which owns the audio path) handles it the same as a local click.
   onPlayVoiceMacro: (cb) => ipcRenderer.on('play-voice-macro', (_e, idx) => cb(idx)),
+  onPlayVoiceMacroAudio: (cb) => ipcRenderer.on('play-voice-macro-audio', (_e, info) => cb(info)),
+  onStopVoiceMacro: (cb) => ipcRenderer.on('stop-voice-macro', () => cb()),
+  voiceMacroPlaying: (info) => ipcRenderer.send('voice-macro-playing', info),
   cwCancel: () => ipcRenderer.send('cw-cancel'),
   onCwEcho: (cb) => ipcRenderer.on('cw-echo', (_e, data) => cb(data)),
   onWinkeyerBusy: (cb) => ipcRenderer.on('winkeyer-busy', (_e, busy) => cb(busy)),
@@ -582,6 +619,7 @@ contextBridge.exposeInMainWorld('api', {
   jtcatSyncClock: () => ipcRenderer.invoke('jtcat-sync-clock'),
   jtcatOpenTimeSettings: () => ipcRenderer.invoke('jtcat-open-time-settings'),
   onJtcatTxAudio: (cb) => ipcRenderer.on('jtcat-tx-audio', (_e, data) => cb(data)),
+  onJtcatTxAbort: (cb) => ipcRenderer.on('jtcat-tx-abort', (_e, reason) => cb(reason)),
   onJtcatSetTxGain: (cb) => ipcRenderer.on('jtcat-set-tx-gain', (_e, level) => cb(level)),
   onJtcatModeHopped: (cb) => ipcRenderer.on('jtcat-mode-hopped', (_e, d) => cb(d)),
   onJtcatSetRxGain: (cb) => ipcRenderer.on('jtcat-set-rx-gain', (_e, level) => cb(level)),
@@ -680,7 +718,7 @@ contextBridge.exposeInMainWorld('api', {
   qrzDebugDump: () => ipcRenderer.invoke('qrz-debug-dump'),
   cloudGoogleSignIn: () => ipcRenderer.invoke('cloud-google-signin'),
   cloudLogin: (email, password) => ipcRenderer.invoke('cloud-login', email, password),
-  cloudRegister: (email, password, callsign) => ipcRenderer.invoke('cloud-register', email, password, callsign),
+  cloudRegister: (email, password, callsign, opts) => ipcRenderer.invoke('cloud-register', email, password, callsign, opts || {}),
   cloudSetCallsign: (callsign) => ipcRenderer.invoke('cloud-set-callsign', callsign),
   cloudLogout: () => ipcRenderer.invoke('cloud-logout'),
   cloudGetStatus: () => ipcRenderer.invoke('cloud-get-status'),
@@ -705,6 +743,9 @@ contextBridge.exposeInMainWorld('api', {
   // inputs, the renderer decides and draws, main persists the snooze.
   cloudPromptGet: () => ipcRenderer.invoke('cloud-prompt-get'),
   cloudPromptSnooze: () => ipcRenderer.invoke('cloud-prompt-snooze'),
+  cloudPromptNever: () => ipcRenderer.invoke('cloud-prompt-never'),
+  cloudUploadCardGet: () => ipcRenderer.invoke('cloud-upload-card-get'),
+  cloudUploadCardSnooze: () => ipcRenderer.invoke('cloud-upload-card-snooze'),
   cloudGetSettings: () => ipcRenderer.invoke('cloud-get-settings'),
   cloudPutSettings: (data) => ipcRenderer.invoke('cloud-put-settings', data),
   onCloudSyncStatus: (cb) => ipcRenderer.on('cloud-sync-status', (_e, data) => cb(data)),

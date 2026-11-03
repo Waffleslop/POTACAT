@@ -3,8 +3,15 @@
 // Runs as a Windows startup task (Startup folder VBS).
 // Zero npm dependencies — uses only Node.js built-ins.
 //
-// Auth: uses your callsign from POTACAT settings as the passphrase (case-insensitive).
-//       Or set launcherPassphrase in settings.json to override.
+// Auth: an ECHOCAT paired-device token (Bearer) from anywhere; your callsign
+//       (or launcherPassphrase in settings.json) from the LAN or tailnet only.
+//
+// Restart from anywhere (docs/remote-launcher-anywhere-scope.md, Casey
+// 2026-10-27): when POTACAT writes the Cloud Tunnel's token into
+// launcher-config.json, the launcher runs its own cloudflared connector on the
+// same tunnel (a "replica"), so <call>.potacat.com/launcher/* still answers
+// while POTACAT is down. Through the tunnel only a device token is accepted,
+// the HTML page is 404, and rate limits key on cf-connecting-ip.
 //
 // Usage:  node scripts/launcher.js [--port PORT] [--no-tls]
 // Config: %APPDATA%/potacat/launcher-config.json (port, https)
@@ -24,6 +31,7 @@ const IS_WIN = process.platform === 'win32';
 const IS_MAC = process.platform === 'darwin';
 
 function getConfigDir() {
+  if (process.env.POTACAT_LAUNCHER_DIR) return process.env.POTACAT_LAUNCHER_DIR; // tests
   if (IS_WIN) return path.join(process.env.APPDATA || '', 'potacat');
   if (IS_MAC) return path.join(os.homedir(), 'Library', 'Application Support', 'potacat');
   // Linux is case-sensitive, and app.setName('POTACAT') puts the real
@@ -95,7 +103,7 @@ function removePidFile() {
 function loadConfig() {
   try {
     const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
-    config = { ...config, ...JSON.parse(raw) };
+    config = { ...config, cloud: null, ...JSON.parse(raw) };
   } catch {
     // Config is optional — defaults are fine
     console.log(`[Launcher] No launcher-config.json found, using defaults (port ${DEFAULT_PORT})`);
@@ -469,25 +477,191 @@ setInterval(() => {
     if (filtered.length === 0) rateLimitMap.delete(ip);
     else rateLimitMap.set(ip, filtered);
   }
-}, 300000);
+}, 300000).unref();
 
-// --- Auth (callsign-based) ---
-function checkAuth(req) {
-  const passphrase = getPassphrase();
-  if (!passphrase) return false; // No callsign configured = locked out
-
-  // Check Authorization header: Bearer <callsign>
-  const authHeader = req.headers['authorization'];
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const val = authHeader.slice(7).trim();
-    if (val.toUpperCase() === passphrase.toUpperCase()) return true;
-  }
-  // Check query param: ?p=<callsign>
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  const p = url.searchParams.get('p');
-  if (p && p.toUpperCase() === passphrase.toUpperCase()) return true;
-  return false;
+// --- Who is asking ---
+// Through the Cloud Tunnel every request arrives from 127.0.0.1 (cloudflared),
+// so the socket address says nothing. Cloudflare stamps cf-connecting-ip on
+// every proxied request, and the tunnel's hostname is <call>.potacat.com;
+// either one marks a request as coming from the internet.
+function isTunnelRequest(headers) {
+  if (headers['cf-connecting-ip'] || headers['cf-ray']) return true;
+  const host = String(headers.host || '').toLowerCase().replace(/:\d+$/, '');
+  return host === 'potacat.com' || host.endsWith('.potacat.com');
 }
+
+/** The rate-limit key: the caller's real address. */
+function clientKey(req, tunnel) {
+  if (tunnel) return 'cf:' + String(req.headers['cf-connecting-ip'] || 'unknown').trim();
+  return req.socket.remoteAddress || '';
+}
+
+/** /launcher/status → /status. The cloud routes <call>.potacat.com/launcher/*
+ *  here and cloudflared does not rewrite paths. */
+function routeOf(pathname) {
+  if (pathname === '/launcher' || pathname === '/launcher/') return '/';
+  if (pathname.startsWith('/launcher/')) return pathname.slice('/launcher'.length);
+  return pathname;
+}
+
+/** Every ECHOCAT paired device, from the global settings file and every
+ *  operator profile (main.js loadAllProfilePairedDevices reads the same set:
+ *  a device paired under another operator is still the station's). */
+function readPairedDevices(configDir) {
+  const out = [];
+  const seen = new Set();
+  const take = (file) => {
+    let s;
+    try { s = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return; }
+    for (const d of (Array.isArray(s && s.pairedDevices) ? s.pairedDevices : [])) {
+      if (!d || typeof d.token !== 'string' || !d.token || seen.has(d.token)) continue;
+      seen.add(d.token);
+      out.push(d);
+    }
+  };
+  take(path.join(configDir, 'settings.json'));
+  let profiles = [];
+  try { profiles = fs.readdirSync(path.join(configDir, 'profiles')); } catch {}
+  for (const p of profiles) take(path.join(configDir, 'profiles', p, 'settings.json'));
+  return out;
+}
+
+/** Constant-time comparison of two secrets of any length. */
+function sameSecret(a, b) {
+  const ha = crypto.createHash('sha256').update(String(a)).digest();
+  const hb = crypto.createHash('sha256').update(String(b)).digest();
+  return crypto.timingSafeEqual(ha, hb);
+}
+
+/** A live paired device with this token (expiry honoured as ECHOCAT does). */
+function deviceForToken(token, devices, now) {
+  if (!token) return null;
+  let found = null;
+  for (const d of devices) { if (sameSecret(token, d.token)) found = d; }
+  if (!found) return null;
+  if (found.expiresAt != null && Number(found.expiresAt) <= now) return null;
+  return found;
+}
+
+/**
+ * Pure: may this request act? 'device' (a paired ECHOCAT device, from
+ * anywhere), 'callsign' (the passphrase, LAN/tailnet only) or null.
+ */
+function authorize({ bearer, query, tunnel, devices, passphrase, now }) {
+  if (bearer && deviceForToken(bearer, devices, now)) return 'device';
+  if (tunnel || !passphrase) return null;
+  const pass = String(passphrase).toUpperCase();
+  if (bearer && String(bearer).toUpperCase() === pass) return 'callsign';
+  if (query && String(query).toUpperCase() === pass) return 'callsign';
+  return null;
+}
+
+function checkAuth(req, tunnel) {
+  const authHeader = req.headers['authorization'] || '';
+  const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+  let query = '';
+  try { query = new URL(req.url, 'http://launcher.local').searchParams.get('p') || ''; } catch {}
+  return authorize({ bearer, query, tunnel, devices: readPairedDevices(CONFIG_DIR), passphrase: getPassphrase(), now: Date.now() });
+}
+
+// --- The Cloud Tunnel replica ---
+// POTACAT writes { cloud: { tunnelToken, cloudHost, cloudflaredPath } } into
+// launcher-config.json when the tunnel is provisioned and "Restart from
+// anywhere" is on, and removes it otherwise. The launcher runs one more
+// cloudflared connector on that tunnel; Cloudflare balances requests across
+// connectors and the ingress rules belong to the tunnel, so with POTACAT up
+// nothing changes and with POTACAT down /launcher/* still reaches us.
+const REPLICA_BACKOFF_MS = [2000, 5000, 15000, 30000, 60000];
+class CloudReplica {
+  constructor(opts = {}) {
+    this._spawn = opts.spawn || spawn;
+    this._log = opts.log || ((m) => console.log(m));
+    this._backoff = opts.backoffMs || REPLICA_BACKOFF_MS;
+    this._want = null;        // { tunnelToken, cloudflaredPath } or null
+    this._child = null;
+    this._tries = 0;
+    this._timer = null;
+    this.state = 'replica-off';
+    this.lastError = '';
+  }
+  /** Apply a config's cloud block (null = off). Restarts only on a change. */
+  apply(cloud) {
+    const next = cloud && cloud.tunnelToken && cloud.enabled !== false
+      ? { tunnelToken: String(cloud.tunnelToken), cloudflaredPath: cloud.cloudflaredPath || 'cloudflared' }
+      : null;
+    if (!next) {
+      // Off: no tunnel token, or turned off in POTACAT's Settings.
+      const was = !!this._want;
+      this._want = null;
+      this._stopChild();
+      this.state = cloud && cloud.enabled === false ? 'disabled' : 'replica-off';
+      if (was) this._log('[Launcher] Cloud Tunnel replica off');
+      return;
+    }
+    const w = this._want;
+    if (w && w.tunnelToken === next.tunnelToken && w.cloudflaredPath === next.cloudflaredPath) return;
+    this._want = next;
+    this._tries = 0;
+    this._stopChild();
+    this._start();
+  }
+  _start() {
+    if (!this._want || this._child) return;
+    const { tunnelToken, cloudflaredPath } = this._want;
+    this.state = 'replica-starting';
+    let child;
+    try {
+      // The token travels in the environment, never on the command line
+      // (a process list would show it). cloudflared reads TUNNEL_TOKEN.
+      child = this._spawn(cloudflaredPath, ['tunnel', '--no-autoupdate', 'run', '--protocol', 'http2'], {
+        stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true,
+        env: { ...process.env, TUNNEL_TOKEN: tunnelToken },
+      });
+    } catch (err) {
+      return this._failed(err && err.code === 'ENOENT' ? 'no-cloudflared' : 'spawn', err && err.message);
+    }
+    this._child = child;
+    this._log(`[Launcher] Cloud Tunnel replica starting (${path.basename(cloudflaredPath)})`);
+    if (child.stderr) {
+      child.stderr.on('data', (buf) => {
+        const s = String(buf);
+        if (/Registered tunnel connection|Connection [0-9a-f-]+ registered/i.test(s) && this._child === child) {
+          if (this.state !== 'replica-up') this._log('[Launcher] Cloud Tunnel replica up: restart from anywhere works');
+          this.state = 'replica-up';
+          this._tries = 0;
+        }
+      });
+    }
+    child.on('error', (err) => {
+      if (this._child !== child) return;
+      this._child = null;
+      this._failed(err && err.code === 'ENOENT' ? 'no-cloudflared' : 'spawn', err && err.message);
+    });
+    child.on('exit', (code) => {
+      if (this._child !== child) return;
+      this._child = null;
+      this._failed('exit', `cloudflared exited (${code})`);
+    });
+  }
+  _failed(kind, msg) {
+    this.lastError = msg || kind;
+    this.state = kind === 'no-cloudflared' ? 'no-cloudflared' : 'replica-starting';
+    if (!this._want) { this.state = 'replica-off'; return; }
+    const wait = this._backoff[Math.min(this._tries, this._backoff.length - 1)];
+    this._tries++;
+    if (this._tries === 1 || this._tries % 5 === 0) this._log(`[Launcher] Cloud Tunnel replica: ${this.lastError}; retrying in ${Math.round(wait / 1000)} s`);
+    clearTimeout(this._timer);
+    this._timer = setTimeout(() => { this._timer = null; this._start(); }, wait);
+    if (this._timer.unref) this._timer.unref();
+  }
+  _stopChild() {
+    clearTimeout(this._timer); this._timer = null;
+    const c = this._child; this._child = null;
+    if (c) { try { c.kill(); } catch {} }
+  }
+  stop() { this._want = null; this._stopChild(); this.state = 'replica-off'; }
+}
+const cloudReplica = new CloudReplica();
 
 // --- Local IPs ---
 function getLocalIPs() {
@@ -590,6 +764,28 @@ function generateTlsCert() {
   fs.writeFileSync(keyPath, privateKey);
   console.log(`[Launcher] Generated TLS cert (SAN: ${ipAddresses.join(', ')})`);
   return { cert: certPem, key: privateKey };
+}
+
+// --- One port, both protocols ---
+// The Cloud Tunnel reaches the launcher over plain HTTP on 7301 (cloudflared
+// cannot know which a station runs), while a launcher that found the
+// Tailscale certificate serves HTTPS there for iOS. A TLS connection opens
+// with a handshake record (first byte 0x16); anything else is HTTP. So the
+// port answers both, and neither path depends on how the other is set up.
+function createDualServer(tls, handler) {
+  const httpsServer = https.createServer(tls, handler);
+  const httpServer = http.createServer(handler);
+  const server = net.createServer((socket) => {
+    socket.once('data', (buf) => {
+      socket.pause();
+      socket.unshift(buf);
+      (buf[0] === 0x16 ? httpsServer : httpServer).emit('connection', socket);
+      process.nextTick(() => socket.resume());
+    });
+    socket.on('error', () => {});
+  });
+  server.on('close', () => { httpsServer.close(); httpServer.close(); });
+  return server;
 }
 
 // --- Format uptime ---
@@ -773,9 +969,10 @@ function toast(msg, err) {
 
 // --- HTTP handler ---
 async function handleRequest(req, res) {
-  const ip = req.socket.remoteAddress || '';
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  const pathname = url.pathname;
+  const tunnel = isTunnelRequest(req.headers);
+  const ip = clientKey(req, tunnel);
+  let pathname;
+  try { pathname = routeOf(new URL(req.url, 'http://launcher.local').pathname); } catch { pathname = '/'; }
   const isStatusGet = pathname === '/status' && req.method === 'GET';
 
   const rateLimited = () => {
@@ -791,6 +988,14 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // Through the tunnel nothing anonymous answers: no page (it is a LAN
+  // convenience), and the same constant 401 for every API path below.
+  if (tunnel && pathname === '/') {
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Not found' }));
+    return;
+  }
+
   // Status page — serves HTML, auth handled client-side
   if (pathname === '/' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'text/html' });
@@ -799,7 +1004,8 @@ async function handleRequest(req, res) {
   }
 
   // All API endpoints require auth
-  if (!checkAuth(req)) {
+  const who = checkAuth(req, tunnel);
+  if (!who) {
     // An unauthed /status attempt consumes the STRICT bucket — this is the
     // passphrase brute-force surface, and it stays as limited as it ever was.
     if (isStatusGet && !checkRateLimit(ip, 'action', RATE_LIMIT_MAX)) {
@@ -823,8 +1029,12 @@ async function handleRequest(req, res) {
     let uptime = null;
     if (running && startedAt) uptime = formatUptime(Date.now() - startedAt);
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ running, pid, echocat, uptime }));
+    res.end(JSON.stringify({ running, pid, echocat, uptime, cloud: cloudReplica.state }));
     return;
+  }
+
+  if (req.method === 'POST' && ['/start', '/restart', '/stop'].includes(pathname)) {
+    console.log(`[Launcher] ${pathname.slice(1)} requested by ${who === 'device' ? 'a paired device' : 'callsign'} via ${tunnel ? 'the Cloud Tunnel' : 'the local network'}`);
   }
 
   if (pathname === '/start' && req.method === 'POST') {
@@ -853,67 +1063,84 @@ async function handleRequest(req, res) {
 }
 
 // --- Main ---
-loadConfig();
-parseArgs();
+// The launcher runs when executed; required (tests), it only exports.
+function main() {
+  loadConfig();
+  parseArgs();
 
-const passphrase = getPassphrase();
-if (!passphrase) {
-  console.error('[Launcher] No callsign found in POTACAT settings.');
-  console.error('[Launcher] Set your callsign in POTACAT Settings > General, or add "launcherPassphrase" to settings.json.');
-  process.exit(1);
-}
-
-let server;
-let _usingHttps = false;
-const _tsCert = loadTailscaleCert();
-if (_tsCert) {
-  // Trusted Tailscale cert available — always prefer it. This is the only
-  // HTTPS mode iOS can actually reach (self-signed is rejected, plaintext
-  // HTTP is blocked by ATS).
-  server = https.createServer({ cert: _tsCert.cert, key: _tsCert.key }, handleRequest);
-  _usingHttps = true;
-  console.log('[Launcher] Serving HTTPS with the Tailscale cert (iOS-trusted)');
-} else if (config.https) {
-  const tls = generateTlsCert();
-  if (tls) {
-    server = https.createServer({ cert: tls.cert, key: tls.key }, handleRequest);
-    _usingHttps = true;
-    console.log('[Launcher] No Tailscale cert — serving HTTPS with a self-signed cert (browser-only; iOS will reject)');
-  } else {
-    console.warn('[Launcher] TLS cert generation failed, falling back to HTTP');
-    server = http.createServer(handleRequest);
-  }
-} else {
-  console.log('[Launcher] No Tailscale cert and https=false — serving plaintext HTTP (LAN/browser only; iOS ATS will block)');
-  server = http.createServer(handleRequest);
-}
-
-server.on('error', (err) => {
-  if (err.code === 'EADDRINUSE') {
-    console.log(`[Launcher] Port ${config.port} already in use — another launcher is running. Exiting.`);
-    process.exit(0); // exit cleanly, not a crash
-  } else {
-    console.error('[Launcher] Server error:', err.message);
+  const passphrase = getPassphrase();
+  if (!passphrase) {
+    console.error('[Launcher] No callsign found in POTACAT settings.');
+    console.error('[Launcher] Set your callsign in POTACAT Settings > General, or add "launcherPassphrase" to settings.json.');
     process.exit(1);
   }
-});
 
-server.listen(config.port, '0.0.0.0', () => {
-  writePidFile(); // only the instance that won the port advertises itself
-  const proto = _usingHttps ? 'https' : 'http';
-  const ips = getLocalIPs();
-  console.log(`[Launcher] POTACAT Remote Launcher running on port ${config.port}`);
-  console.log(`[Launcher] Passphrase: your callsign (${passphrase})`);
-  console.log(`[Launcher] Local:     ${proto}://127.0.0.1:${config.port}/`);
-  for (const ip of ips) {
-    const label = ip.startsWith('100.') ? ' (Tailscale)' : '';
-    console.log(`[Launcher] Network:   ${proto}://${ip}:${config.port}/${label}`);
+  // The Cloud Tunnel replica follows the config POTACAT writes. Polled rather
+  // than fs.watch: an atomic replace (write + rename) is missed by fs.watch on
+  // some platforms, and a five-second delay is nothing here.
+  cloudReplica.apply(config.cloud || null);
+  fs.watchFile(CONFIG_PATH, { interval: 5000 }, () => {
+    loadConfig();
+    cloudReplica.apply(config.cloud || null);
+  });
+
+  let server;
+  let _usingHttps = false;
+  const _tsCert = loadTailscaleCert();
+  if (_tsCert) {
+    // Trusted Tailscale cert available — always prefer it. This is the only
+    // HTTPS mode iOS can actually reach (self-signed is rejected, plaintext
+    // HTTP is blocked by ATS).
+    server = createDualServer({ cert: _tsCert.cert, key: _tsCert.key }, handleRequest);
+    _usingHttps = true;
+    console.log('[Launcher] Serving HTTPS with the Tailscale cert (iOS-trusted), and HTTP on the same port for the Cloud Tunnel');
+  } else if (config.https) {
+    const tls = generateTlsCert();
+    if (tls) {
+      server = createDualServer({ cert: tls.cert, key: tls.key }, handleRequest);
+      _usingHttps = true;
+      console.log('[Launcher] No Tailscale cert — serving HTTPS with a self-signed cert (browser-only; iOS will reject)');
+    } else {
+      console.warn('[Launcher] TLS cert generation failed, falling back to HTTP');
+      server = http.createServer(handleRequest);
+    }
+  } else {
+    console.log('[Launcher] No Tailscale cert and https=false — serving plaintext HTTP (LAN/browser only; iOS ATS will block)');
+    server = http.createServer(handleRequest);
   }
-  const exePath = findPotacatPath();
-  console.log(`[Launcher] POTACAT:   ${exePath || 'NOT FOUND — set potacatPath in config'}`);
-  console.log(`[Launcher] Running:   ${isRunning() ? 'YES' : 'NO'}`);
-});
 
-process.on('exit', removePidFile);
-process.on('SIGINT', () => { console.log('\n[Launcher] Shutting down'); server.close(); process.exit(0); });
-process.on('SIGTERM', () => { server.close(); process.exit(0); });
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.log(`[Launcher] Port ${config.port} already in use — another launcher is running. Exiting.`);
+      process.exit(0); // exit cleanly, not a crash
+    } else {
+      console.error('[Launcher] Server error:', err.message);
+      process.exit(1);
+    }
+  });
+
+  server.listen(config.port, '0.0.0.0', () => {
+    writePidFile(); // only the instance that won the port advertises itself
+    const proto = _usingHttps ? 'https' : 'http';
+    const ips = getLocalIPs();
+    console.log(`[Launcher] POTACAT Remote Launcher running on port ${config.port}`);
+    console.log(`[Launcher] Passphrase: your callsign (${passphrase})`);
+    console.log(`[Launcher] Local:     ${proto}://127.0.0.1:${config.port}/`);
+    for (const ip of ips) {
+      const label = ip.startsWith('100.') ? ' (Tailscale)' : '';
+      console.log(`[Launcher] Network:   ${proto}://${ip}:${config.port}/${label}`);
+    }
+    const exePath = findPotacatPath();
+    console.log(`[Launcher] POTACAT:   ${exePath || 'NOT FOUND — set potacatPath in config'}`);
+    console.log(`[Launcher] Running:   ${isRunning() ? 'YES' : 'NO'}`);
+  });
+
+  process.on('exit', () => { removePidFile(); cloudReplica.stop(); });
+  process.on('SIGINT', () => { console.log('\n[Launcher] Shutting down'); server.close(); process.exit(0); });
+  process.on('SIGTERM', () => { server.close(); process.exit(0); });
+}
+
+// Run directly (node launcher.js, the extracted copy) it starts at once;
+// POTACAT.exe --launcher requires it and calls main(); tests only require it.
+if (require.main === module) main();
+module.exports = { main, createDualServer, generateTlsCert, isTunnelRequest, clientKey, routeOf, readPairedDevices, deviceForToken, authorize, sameSecret, CloudReplica, handleRequest };

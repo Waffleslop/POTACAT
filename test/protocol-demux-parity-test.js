@@ -93,8 +93,6 @@ const KNOWN_DRIFT = new Set([
  *  these, and `validate()` can't check them. */
 const KNOWN_UNDECLARED = new Set([
   'rig-reconnect',
-  'tx-eq-get',
-  'tx-eq-set',
   'jtcat-set-skip-tx1',
   'jtcat-set-hound-mode',
   // jtcat-psk-send graduated to the registry 2026-08-20 (schema captured

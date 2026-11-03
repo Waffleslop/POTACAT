@@ -23,12 +23,20 @@ test('SSTV key-down declares audio and forces data mode on an Icom', () => {
   assert.ok(at > 0, 'encode-complete handler not found');
   const handler = src.slice(at, at + 3000);
   assert.ok(/const _sstvIcom = detectRigType\(\) === 'icom' \|\| \(getActiveRigModel\(\)\?\.brand === 'Icom'\);/.test(handler), 'Icom detection');
-  assert.ok(/handleRemotePtt\(true, \{ audio: true, forceDataMode: _sstvIcom \}\);/.test(handler), 'key-down options');
+  assert.ok(/handleRemotePtt\(true, \{ audio: true, forceDataMode: _sstvIcom, emission: 'SSTV' \}\);/.test(handler), 'key-down options (SSTV is judged where phone goes)');
   assert.ok(!/handleRemotePtt\(true\);/.test(handler), 'a bare key-down is back');
 });
 
 test('handleRemotePtt honours forceDataMode even with SSB-over-DATA off or JTCAT loaded', () => {
-  assert.ok(/const forceData = !!opts\.forceDataMode;\n\s*if \(state && \(settings\.ssbOverData \|\| forceData\) && audioActive && \(!ft8Engine \|\| forceData\)\) \{/.test(src));
+  assert.ok(/const forceData = !!opts\.forceDataMode;/.test(src));
+  assert.ok(/if \(state && \(settings\.ssbOverData \|\| forceData\) && !yaesuVoice && !voiceInData && audioActive && \(!ft8Engine \|\| forceData\)\) \{/.test(src));
+});
+
+test('voice on a Yaesu never goes to DATA-U (K3SBP FT-710 voice macros)', () => {
+  assert.ok(/const yaesuVoice = !forceData && !!\(_pttRig && _pttRig\.brand === 'Yaesu'\) &&\n\s*!\(typeof freedvEngine !== 'undefined' && freedvEngine\);/.test(src), 'yaesuVoice rule');
+  const at = src.indexOf('const yaesuVoice');
+  const sw = src.indexOf('&& !yaesuVoice && !voiceInData && audioActive');
+  assert.ok(at > 0 && sw > at, 'the rule is decided before the mode switch');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

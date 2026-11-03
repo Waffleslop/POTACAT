@@ -94,6 +94,33 @@ t('Flex (network audio): audio steps follow radio control, no device pickers', (
   assert.strictEqual(step(off, 'tx-test').state, 'blocked');
 });
 
+// --- antenna tuner memories (a Flex with an internal ATU; lib/atu-wizard.js) ---
+t('a Flex gets the tuner-memories step: recommended, optional until run, opens the wizard', () => {
+  const r = evalRig({ model: 'FLEX-8400/8600', radioType: 'flex', audioSource: 'smartsdr', input: '', output: '', live: { atu: { available: true, reason: '', lastRun: null } } });
+  const s = step(r, 'atu-memories');
+  assert.ok(s, 'step present');
+  assert.strictEqual(s.level, 'recommended');
+  assert.strictEqual(s.state, 'optional');
+  assert.ok(s.actions.some(a => a.id === 'open-atu-wizard'));
+  assert.ok(s.actions.some(a => a.id === 'skip' && a.step === 'atu-memories'));
+  assert.strictEqual(s.since, '1.13.9');
+  assert.ok(!ids(evalRig({ model: 'IC-7300' })).includes('atu-memories'), 'an Icom never sees it');
+});
+t('tuner memories: a finished run ticks it with the numbers; unavailable says why; skipped stays skipped', () => {
+  const done = step(evalRig({ model: 'FLEX-8400/8600', radioType: 'flex', audioSource: 'smartsdr', input: '', output: '', live: { atu: { available: true, lastRun: { at: Date.parse('2026-10-31T15:00:00Z'), total: 56, green: 54, problems: 2 } } } }), 'atu-memories');
+  assert.strictEqual(done.state, 'ok');
+  assert.ok(/2026-10-31/.test(done.detail) && /54 of 56/.test(done.detail) && /2 need a look/.test(done.detail));
+  assert.ok(done.actions.some(a => a.id === 'open-atu-wizard' && /results/i.test(a.label)));
+  const bound = step(evalRig({ model: 'FLEX-8400/8600', radioType: 'flex', audioSource: 'smartsdr', input: '', output: '', live: { atu: { available: false, reason: 'POTACAT is sharing the radio with SmartSDR (bound mode).' } } }), 'atu-memories');
+  assert.strictEqual(bound.state, 'optional');
+  assert.ok(/bound mode/.test(bound.detail));
+  const sk = step(evalRig({ model: 'FLEX-8400/8600', radioType: 'flex', audioSource: 'smartsdr', input: '', output: '', prefs: { skipped: ['atu-memories'] } }), 'atu-memories');
+  assert.strictEqual(sk.state, 'skipped');
+  // Recommended, never nagged: the launch prompt ignores it.
+  const r = evalRig({ model: 'FLEX-8400/8600', radioType: 'flex', audioSource: 'smartsdr', input: '', output: '', live: { atu: { available: true } } });
+  assert.strictEqual(r.summary.requiredNeverDone, r.steps.filter(s => s.level === 'required' && s.state !== 'ok' && s.state !== 'confirmed').length);
+});
+
 // --- step states ---
 t('identity: missing callsign or grid needs the operator, with an Open Settings button', () => {
   const r = evalRig({ model: 'IC-7300', live: { grid: '' } });
@@ -256,7 +283,7 @@ t('peMachine tells the 64-bit LibFT4222 from the 32-bit one', () => {
 t('main.js: settings saves keep setup progress; test-transmit restore trusts only a readback; scope finds our FTDI copy', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\s+/g, ' ');
   const has = (snip) => assert.ok(main.includes(snip.replace(/\s+/g, ' ')), 'main.js missing: ' + snip);
-  has("const SETUP_KEYS = ['setupPassed', 'setupSkipped', 'setupChecklistHidden', 'setupAnnounced', 'setupShareId', 'setupShared', 'setupMeasured', 'metersSeen', 'winlinkAudio'];");
+  has("const SETUP_KEYS = ['setupPassed', 'setupSkipped', 'setupChecklistHidden', 'setupAnnounced', 'setupShareId', 'setupShared', 'setupMeasured', 'metersSeen', 'winlinkAudio', 'modemCable', 'atuBands'];");
   has('_lastPowerReadback = { watts: Number(watts) || 0, at: Date.now() }; if (!isRemoteMode()) stationSetupReconcilePower(Number(watts) || 0);');
   has('const back = await waitForPowerReadback(sentAt, (w) => w > testW + 0.5, 6000);');
   has("if (process.platform === 'win32') pre('PATH', ';');");
@@ -282,8 +309,8 @@ t('renderer: window, entry points, launch card, bug-report line', () => {
 // after the drop and set the radio back to 100 W mid-test.
 t('the power-restore safety stays out of a test that is still running', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
-  const rec = main.slice(main.indexOf('function stationSetupReconcilePower('), main.indexOf('function stationSetupReconcilePower(') + 300);
-  assert.ok(/if \(!m \|\| _stationSetupTxTest \|\| _stationSetupTxBusy\) return;/.test(rec));
+  const rec = main.slice(main.indexOf('function stationSetupReconcilePower('), main.indexOf('function stationSetupReconcilePower(') + 700);
+  assert.ok(/if \(!m \|\| _stationSetupTxTest \|\| _stationSetupTxBusy( \|\| _externalAtuActive)?\) return;/.test(rec));
   const run = main.slice(main.indexOf('async function runStationSetupTxTest('), main.indexOf('async function _runStationSetupTxTest('));
   assert.ok(/_stationSetupTxBusy = true;\s*try \{ return await _runStationSetupTxTest\(rigId, opts\); \}\s*finally \{ _stationSetupTxBusy = false; \}/.test(run),
     'held from before the power drop until the restore is confirmed');

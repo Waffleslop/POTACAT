@@ -159,7 +159,9 @@ function createsSent(sent) { return sent.filter((s) => /\|slice create/.test(s))
     check(src.includes("smartSdr.on('slice-created'") && src.includes("smartSdr.on('slice-create-failed'") && src.includes("smartSdr.on('slice-lost'"), 'main logs create / refusal / loss');
     const guiReady = src.slice(src.indexOf("smartSdr.on('gui-ready'"), src.indexOf("smartSdr.on('gui-mode'"));
     check(!/sendCatStatus\(\{ connected: true \}\)/.test(guiReady), 'gui-ready no longer claims the link is up (registration cannot tune; the slice can)');
-    const sliceReady = src.slice(src.indexOf("smartSdr.on('slice-ready'"), src.indexOf("smartSdr.on('slice-mute'"));
+    // The handler that takes ({ index }); the ATU wizard's recovery hook is a
+    // second, earlier 'slice-ready' listener.
+    const sliceReady = src.slice(src.indexOf("smartSdr.on('slice-ready', ({ index })"), src.indexOf("smartSdr.on('slice-mute'"));
     const selfBranch = sliceReady.slice(0, sliceReady.indexOf('} else {'));
     check(/sendCatStatus\(\{ connected: true \}\)/.test(selfBranch), 'the self-host slice-ready branch lights the link pill');
     check(src.includes('rememberFlexSlice({ hz })') && src.includes('rememberFlexSlice({ mode: md })'), 'the self-hosted slice dial is remembered for the next launch');

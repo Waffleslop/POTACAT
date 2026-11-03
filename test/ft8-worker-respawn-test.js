@@ -194,6 +194,30 @@ function makeEngine() {
     e2._running = false;
   }
 
+  section('the watchdog judges only a request left unanswered (W4DLG: no audio = no decode asked)');
+  {
+    spawned.length = 0;
+    const e = makeEngine();
+    spawned[0].emit('message', { type: 'ready', native: true });
+    let respawns = 0;
+    e._respawnWorker = () => { respawns++; };
+    const boundary = () => { try { e._onCycleBoundary(); } catch { /* the decode path after the watchdog needs more stubs */ } };
+    // A worker that answered a minute ago and has been asked nothing since.
+    e._lastWorkerResponseMs = Date.now() - 60000;
+    ok(e._workerAwaitSince === 0, 'nothing owed after ready');
+    boundary();
+    ok(respawns === 0, 'an idle worker (no audio, so no decode posted) is NOT respawned');
+    // Now a request goes unanswered for longer than 2.5 cycles.
+    e._workerAwaitSince = Date.now() - 60000;
+    boundary();
+    ok(respawns === 1, 'a request unanswered past 2.5 cycles IS respawned');
+    // Any answer clears what was owed.
+    e._workerAwaitSince = Date.now() - 60000;
+    spawned[0].emit('message', { type: 'decode-result', id: 1, results: [] });
+    ok(e._workerAwaitSince === 0, 'a reply clears the owed request');
+    e._running = false;
+  }
+
   quiet(false);
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

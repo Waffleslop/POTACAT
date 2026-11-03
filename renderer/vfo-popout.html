@@ -309,6 +309,18 @@
     .pane { display: none; flex-direction: column; gap: 10px; }
     .pane.active { display: flex; }
 
+    /* --- Profiles under the dial: a drop-down, closed unless open (a long
+       list took the screen; a user 2026-10-28) --- */
+    #sec-profiles-inline { position: relative; }
+    .profile-drop-btn { display: flex; align-items: center; gap: 6px; width: 100%; padding: 7px 10px; background: var(--s2); color: inherit; border: 1px solid var(--s3); border-radius: 8px; font: inherit; cursor: pointer; text-align: left; }
+    .profile-drop-btn:hover { background: var(--s3); }
+    .profile-drop-btn .caret { margin-left: auto; color: var(--t3); transition: transform .12s; }
+    .profile-drop-btn[aria-expanded="true"] .caret { transform: rotate(180deg); }
+    #profile-drop-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .profile-drop-panel { position: absolute; left: 0; right: 0; top: calc(100% + 2px); z-index: 50; max-height: 55vh; overflow-y: auto; padding: 6px; background: var(--s1, #16213e); border: 1px solid var(--s3); border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,.35); }
+    .profile-drop-panel[hidden] { display: none; }
+    .profile-drop-panel.up { top: auto; bottom: calc(100% + 2px); }
+
     /* --- Profiles --- */
     .profile-list { display: flex; flex-direction: column; gap: 4px; }
     .profile-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--s2); border-radius: 8px; cursor: pointer; }
@@ -493,9 +505,13 @@
         </div>
       </div>
       <div class="section vfo-section" id="sec-profiles-inline" style="display:none">
-        <div class="lbl">Profiles</div>
-        <div class="profile-list" id="profile-list-inline"></div>
-        <div class="profile-list" id="rig-preset-list-inline" style="margin-top:6px;"></div>
+        <button type="button" class="profile-drop-btn" id="profile-drop-btn" aria-expanded="false" aria-controls="profile-drop-panel">
+          <span id="profile-drop-label">Profiles</span><span class="caret">&#x25BE;</span>
+        </button>
+        <div class="profile-drop-panel" id="profile-drop-panel" hidden>
+          <div class="profile-list" id="profile-list-inline"></div>
+          <div class="profile-list" id="rig-preset-list-inline" style="margin-top:6px;"></div>
+        </div>
       </div>
 
       <div class="card tool-card widget-section" id="widget-cw-controls">
@@ -518,6 +534,15 @@
       </div>
       <div class="card tool-card widget-section" id="widget-voice">
         <div class="macro-row"><span class="macro-label">Voice</span><div id="voice-macro-row" style="display:contents"></div></div>
+      </div>
+      <!-- Radio power: always the last block, below the ordered ones, for a
+           radio whose model can be switched over CAT (vfo-radio-state.power). -->
+      <div class="card tool-card" id="sec-power" style="display:none">
+        <div class="ptt-log-row">
+          <span class="macro-label">Radio</span>
+          <button class="tog" id="vfo-power-on" title="Switch the radio on">Power On</button>
+          <button class="tog" id="vfo-power-off" title="Switch the radio off. Press twice: the first press asks.">Power Off</button>
+        </div>
       </div>
       <div class="card tool-card widget-section" id="widget-kiwi">
         <div class="ptt-log-row" id="kiwi-btn-row"></div>
@@ -706,6 +731,8 @@
      both audio sources apply identical DSP. -->
 <script src="tx-eq-chain.js"></script>
 <script src="../lib/custom-cat-follow.js"></script>
+<script src="../lib/rig-bands.js"></script>
+<script src="../lib/freq-paste.js"></script>
 <script>
 // --- State ---
 let currentFreqHz = 0;
@@ -736,6 +763,7 @@ let currentAfGain = null;  // 0–100, the last AF level main SENT (set-only); n
 let profiles = [];
 let profileDragFrom = null; // index of the profile being dragged (drag-to-reorder)
 let vfoHiddenBands = []; // band labels to hide, e.g. ['160m', '2m', '70cm']
+let vfoRigBands = null; // the active rig's bands (null = not restricted), main.js rig-bands
 let vfoLocked = false;
 
 const ICONS = {
@@ -906,6 +934,7 @@ window.api.onRadioState((s) => {
     // Otherwise: still waiting for the rig to catch up — keep optimistic value.
   }
   if (s.mode && Date.now() > _modeSuppressUntil) currentMode = s.mode;
+  if (typeof s.wfm === 'boolean') vfoHasWfm = s.wfm;
   if (s.filterWidth != null) {
     currentFilterWidth = s.filterWidth;
     filterSlider.value = s.filterWidth || 2400;
@@ -920,6 +949,7 @@ window.api.onRadioState((s) => {
     nbOn = s.nb;
     document.querySelectorAll('.nb-toggle').forEach(b => b.classList.toggle('on', nbOn));
   }
+  if (s.power != null) document.getElementById('sec-power').style.display = s.power ? '' : 'none';
   if (s.atu != null) {
     atuOn = s.atu;
     document.querySelectorAll('.atu-toggle').forEach(b => b.classList.toggle('on', atuOn));
@@ -949,6 +979,8 @@ window.api.onRadioState((s) => {
 
 // --- Bands ---
 const BANDS = [
+  { label: '2200m', freq: 136 },
+  { label: '630m', freq: 474 },
   { label: '160m', freq: 1800 },
   { label: '80m', freq: 3500 },
   { label: '60m', freq: 5332 },
@@ -966,11 +998,18 @@ const BANDS = [
   { label: '70cm', freq: 420000 },
   { label: '33cm', freq: 902000 },
   { label: '23cm', freq: 1240000 },
+  { label: '13cm', freq: 2304000 },
+  { label: '9cm', freq: 3400000 },
+  { label: '6cm', freq: 5760000 },
+  { label: '3cm', freq: 10368000 },
+  { label: '1.25cm', freq: 24048000 },
 ];
 
 function freqToBand(hz) {
   const khz = hz / 1000;
   for (const b of BANDS) {
+    if (b.label === '2200m' && khz >= 135.7 && khz <= 137.8) return b.label;
+    if (b.label === '630m' && khz >= 472 && khz <= 479) return b.label;
     if (b.label === '160m' && khz >= 1800 && khz <= 2000) return b.label;
     if (b.label === '80m' && khz >= 3500 && khz <= 4000) return b.label;
     if (b.label === '60m' && khz >= 5300 && khz <= 5500) return b.label;
@@ -988,6 +1027,11 @@ function freqToBand(hz) {
     if (b.label === '70cm' && khz >= 420000 && khz <= 450000) return b.label;
     if (b.label === '33cm' && khz >= 902000 && khz <= 928000) return b.label;
     if (b.label === '23cm' && khz >= 1240000 && khz <= 1300000) return b.label;
+    if (b.label === '13cm' && khz >= 2300000 && khz <= 2450000) return b.label;
+    if (b.label === '9cm' && khz >= 3300000 && khz <= 3500000) return b.label;
+    if (b.label === '6cm' && khz >= 5650000 && khz <= 5925000) return b.label;
+    if (b.label === '3cm' && khz >= 10000000 && khz <= 10500000) return b.label;
+    if (b.label === '1.25cm' && khz >= 24000000 && khz <= 24250000) return b.label;
   }
   return null;
 }
@@ -996,6 +1040,8 @@ function buildBandGrid(container) {
   container.innerHTML = '';
   for (const b of BANDS) {
     if (vfoHiddenBands.includes(b.label)) continue;
+    // Only bands this radio is used on (rig editor, lib/rig-bands.js).
+    if (window.RigBands && !window.RigBands.allowed(vfoRigBands, b.label)) continue;
     const btn = document.createElement('button');
     btn.className = 'tog band-btn';
     btn.textContent = b.label;
@@ -1023,9 +1069,21 @@ function updateBandHighlight() {
 
 buildBandGrid(document.getElementById('band-grid-dial'));
 // band-grid-mode removed (Mode tab eliminated)
+// The band buttons follow the active rig's bands, now and as they change.
+if (window.api && window.api.rigBandsGet) {
+  window.api.rigBandsGet().then((d) => { vfoRigBands = (d && d.bands) || null; rebuildAllBandGrids(); }).catch(() => {});
+  window.api.onRigBands((d) => { vfoRigBands = (d && d.bands) || null; rebuildAllBandGrids(); });
+}
 
 // --- Modes ---
 const MODES = ['USB', 'LSB', 'CW', 'AM', 'FM', 'FT8', 'FT4', 'RTTY', 'DIGU', 'DIGL', 'RADE'];
+// Wideband FM only on a radio that has it (IC-7100, IC-705: main's wfm flag).
+let vfoHasWfm = false;
+function pickerModes() {
+  if (!vfoHasWfm) return MODES;
+  const i = MODES.indexOf('FM');
+  return MODES.slice(0, i + 1).concat(['WFM'], MODES.slice(i + 1));
+}
 
 function updateModeHighlight() {
   // Updates popup picker if open
@@ -1058,7 +1116,7 @@ modeBadge.addEventListener('click', (e) => {
   picker.style.top = (br.bottom + 6) + 'px';
   picker.style.left = '12px';
   picker.style.right = '12px';
-  MODES.forEach(m => {
+  pickerModes().forEach(m => {
     const btn = document.createElement('button');
     btn.className = 'mode-btn' + (currentMode.toUpperCase() === m || (m === 'RADE' && currentMode.toUpperCase().includes('FREEDV')) ? ' active' : '');
     btn.textContent = m;
@@ -1134,6 +1192,29 @@ filterSlider.addEventListener('change', () => {
 
 // --- NB / ATU toggles ---
 let nbOn = false, atuOn = false;
+
+// Radio power (bottom of the dial pane). Power On needs no link: the radio is
+// off, so it cannot answer. Power Off asks once: the first press turns the
+// button into "Press again to power off" for 4 s (no browser dialog — it
+// would block the window).
+(function wirePowerButtons() {
+  const on = document.getElementById('vfo-power-on');
+  const off = document.getElementById('vfo-power-off');
+  if (!on || !off) return;
+  let armTimer = null;
+  const disarm = () => { clearTimeout(armTimer); armTimer = null; off.textContent = 'Power Off'; off.classList.remove('on'); };
+  on.addEventListener('click', () => { disarm(); window.api.rigControl({ action: 'power-on' }); });
+  off.addEventListener('click', () => {
+    if (!armTimer) {
+      off.textContent = 'Press again to power off';
+      off.classList.add('on');
+      armTimer = setTimeout(disarm, 4000);
+      return;
+    }
+    disarm();
+    window.api.rigControl({ action: 'power-off' });
+  });
+})();
 
 function buildRigToggles() {
   document.querySelectorAll('.rig-toggles-shared').forEach(row => {
@@ -1310,7 +1391,21 @@ STEPS.forEach((s, i) => {
   if (i === stepIdx) opt.selected = true;
   stepSelect.appendChild(opt);
 });
-stepSelect.addEventListener('change', () => { stepIdx = parseInt(stepSelect.value); });
+// The step is ONE value shared with the Band Scope and ECHOCAT devices
+// (settings.tuneStepHz, main's applyTuneStep): a change here is sent to main,
+// and a change anywhere else arrives on onTuneStep.
+function applyStepHz(hz) {
+  const i = STEPS.findIndex((s) => s.hz === Number(hz));
+  if (i < 0) return;
+  stepIdx = i;
+  stepSelect.value = String(i);
+}
+stepSelect.addEventListener('change', () => {
+  stepIdx = parseInt(stepSelect.value);
+  if (window.api.setTuneStep) window.api.setTuneStep(STEPS[stepIdx].hz);
+});
+if (window.api.onTuneStep) window.api.onTuneStep(applyStepHz);
+if (window.api.tuneStepGet) window.api.tuneStepGet().then(applyStepHz).catch(() => {});
 
 // --- VFO Dial (canvas) ---
 const canvas = document.getElementById('vfo-dial');
@@ -1552,6 +1647,22 @@ kpGo.addEventListener('click', () => {
   showPane('dial');
 });
 
+// Paste a frequency anywhere (or into the box) to fill type-to-tune; Enter
+// tunes as for typed digits (hoogskev 2026-10-31: the box took no paste).
+// lib/freq-paste.js reads "14.074", "14,074", "14074 kHz", "14.074.000".
+document.addEventListener('paste', (e) => {
+  const t = e.target;
+  if (t !== kpInput && t && (t.tagName === 'INPUT' && t.type !== 'checkbox' && t.type !== 'range' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+  if (sheetOpen()) return;
+  const text = (e.clipboardData && e.clipboardData.getData('text')) || '';
+  const khz = window.FreqPaste ? window.FreqPaste.parsePastedFreq(text) : 0;
+  if (!khz) return;
+  e.preventDefault();
+  showPane('keypad');
+  kpBuffer = fmtMhz(khz);
+  kpRender();
+});
+
 // Keyboard: typing digits anywhere opens type-to-tune (never while a text
 // field has focus: CW text, profile names).
 document.addEventListener('keydown', (e) => {
@@ -1697,9 +1808,48 @@ function beginRenameProfile(item, nameEl, profile, index) {
   input.addEventListener('blur', () => finish(true));
 }
 
+// The drop-down: closed by default; a pick, a click outside or Esc closes it.
+// The button names the profile last applied from it, else "Profiles (N)".
+let _inlineProfileName = '';
+function profileDropLabel() {
+  const el = document.getElementById('profile-drop-label');
+  if (el) el.textContent = _inlineProfileName || (profiles.length ? `Profiles (${profiles.length})` : 'Profiles');
+}
+function profileDropOpen(open) {
+  const btn = document.getElementById('profile-drop-btn');
+  const panel = document.getElementById('profile-drop-panel');
+  if (!btn || !panel) return;
+  panel.hidden = !open;
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (!open) return;
+  // Open toward the room: the section usually sits at the bottom of the
+  // window, where a drop-down would run off the edge.
+  const r = btn.getBoundingClientRect();
+  const below = window.innerHeight - r.bottom - 10;
+  const above = r.top - 10;
+  const want = Math.min(panel.scrollHeight, 420);
+  const up = below < want && above > below;
+  panel.classList.toggle('up', up);
+  panel.style.maxHeight = Math.max(120, up ? above : below) + 'px';
+}
+(function bindProfileDrop() {
+  const btn = document.getElementById('profile-drop-btn');
+  const panel = document.getElementById('profile-drop-panel');
+  if (!btn || !panel) return;
+  btn.addEventListener('click', () => profileDropOpen(panel.hidden));
+  // A pick (a profile or a rig preset) closes it, after the item's own handler.
+  panel.addEventListener('click', (e) => { if (e.target.closest('.profile-item')) setTimeout(() => profileDropOpen(false), 0); });
+  document.addEventListener('mousedown', (e) => {
+    if (!panel.hidden && !panel.contains(e.target) && !btn.contains(e.target)) profileDropOpen(false);
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !panel.hidden) profileDropOpen(false); });
+})();
+
 function renderInlineProfiles() {
   const list = document.getElementById('profile-list-inline');
   if (!list) return;
+  if (_inlineProfileName && !profiles.some((p) => p.name === _inlineProfileName)) _inlineProfileName = '';
+  profileDropLabel();
   if (profiles.length === 0) {
     list.innerHTML = '<div class="profile-empty">No profiles saved.</div>';
     return;
@@ -1713,7 +1863,7 @@ function renderInlineProfiles() {
       <span class="profile-name">${esc(p.name)}</span>
       <span class="profile-detail">${freqMhz} MHz ${p.mode || ''}${p.filterWidth ? ' BW:' + p.filterWidth : ''}${p.txPower != null ? ' ' + p.txPower + 'W' : ''}</span>
     `;
-    item.addEventListener('click', () => applyProfile(p));
+    item.addEventListener('click', () => { applyProfile(p); _inlineProfileName = p.name; profileDropLabel(); });
     list.appendChild(item);
   });
 }
@@ -1890,6 +2040,9 @@ function applyOrder() {
     const el = b && document.getElementById(b.el);
     if (el) pane.appendChild(el);
   }
+  // Radio power stays below every ordered block.
+  const power = document.getElementById('sec-power');
+  if (power) pane.appendChild(power);
 }
 
 function orderBlockShown(b) {
@@ -2173,6 +2326,8 @@ function buildBandCheckboxes() {
   const container = document.getElementById('band-checkboxes');
   container.innerHTML = '';
   BANDS.forEach(b => {
+    // A band this radio is not used on is not offered (rig editor sets those).
+    if (window.RigBands && !window.RigBands.allowed(vfoRigBands, b.label)) return;
     const lbl = document.createElement('label');
     const cb = document.createElement('input');
     cb.type = 'checkbox';
@@ -2830,6 +2985,7 @@ loadCwMacros().catch(e => console.error('[VFO] loadCwMacros error:', e));
 
 // --- Voice Macros ---
 let voicePlayingIdx = -1;
+let voiceMacrosStale = false;   // a change arrived mid-playback
 let voicePlaybackSource = null;
 let voicePlaybackCtx = null;
 
@@ -2920,9 +3076,20 @@ function stopVoicePlayback() {
   voicePlayingIdx = -1;
   document.querySelectorAll('.voice-macro-btn.active').forEach(b => b.classList.remove('active'));
   releaseTxMeter();
+  if (voiceMacrosStale) {
+    voiceMacrosStale = false;
+    loadVoiceMacros().catch(e => console.error('[VFO] loadVoiceMacros error:', e));
+  }
 }
 
 loadVoiceMacros().catch(e => console.error('[VFO] loadVoiceMacros error:', e));
+// A rename or new recording in Settings (or from the phone) redraws the bar.
+// Not while one plays (the redraw would orphan its button's highlight):
+// then it redraws when the playback stops.
+if (window.api.onVoiceMacrosChanged) window.api.onVoiceMacrosChanged(() => {
+  if (voicePlayingIdx >= 0) { voiceMacrosStale = true; return; }
+  loadVoiceMacros().catch(e => console.error('[VFO] loadVoiceMacros error:', e));
+});
 
 // --- CW Speed / Text Controls ---
 const vfoCwWpm = document.getElementById('vfo-cw-wpm');
@@ -3144,6 +3311,10 @@ window.api.onSmartSdrAudio((d) => {
     if (audioMonitorGain && audioMonitorActive && !audioMonitorMuted && !kiwiConnected) {
       audioMonitorGain.gain.value = monitorVolume;
     }
+    // One knob for whichever receiver you hear: while the SDR is live, it
+    // sets the SDR audio (Casey 2026-10-30: the second slider was the fault).
+    kiwiVolume = monitorVolume;
+    if (kiwiGainNode) kiwiGainNode.gain.value = kiwiVolume;
   });
 })();
 
@@ -3419,14 +3590,20 @@ function placeKiwiDropdown(dd, anchor) {
   const below = window.innerHeight - r.bottom - M - 4;
   const above = r.top - M - 4;
   const up = below < 160 && above > below;
-  dd.style.maxHeight = Math.max(80, up ? above : below) + 'px';
+  // border-box, so the padding counts inside the height we allow: with a
+  // long list the menu otherwise ran past the top of the window and the
+  // first SDRs could not be clicked (K3SBP, Windows).
+  dd.style.boxSizing = 'border-box';
+  dd.style.overflowY = 'auto';
+  dd.style.maxHeight = Math.max(80, Math.min(up ? above : below, window.innerHeight - 2 * M)) + 'px';
   dd.style.minWidth = r.width + 'px';
   dd.style.maxWidth = (window.innerWidth - 2 * M) + 'px';
   dd.style.visibility = 'hidden';
   document.body.appendChild(dd);
   const w = dd.offsetWidth, h = dd.offsetHeight;
   dd.style.left = Math.max(M, Math.min(r.left, window.innerWidth - w - M)) + 'px';
-  dd.style.top = (up ? r.top - 4 - h : r.bottom + 4) + 'px';
+  const top = up ? r.top - 4 - h : r.bottom + 4;
+  dd.style.top = Math.max(M, Math.min(top, window.innerHeight - h - M)) + 'px';
   dd.style.visibility = '';
 }
 
@@ -3480,7 +3657,7 @@ window.api.onKiwiStatus((s) => {
   }
   updateKiwiButtonStates();
   document.getElementById('kiwi-rx-badge').style.display = s.connected ? '' : 'none';
-  document.getElementById('kiwi-volume-row').style.display = s.connected ? 'flex' : 'none';
+  document.getElementById('kiwi-volume-row').style.display = 'none'; // the monitor volume knob drives the SDR too
   // Mute local radio audio monitor when SDR active, restore when off
   if (s.connected) {
     if (audioMonitorGain) audioMonitorGain.gain.value = 0;
@@ -3529,10 +3706,12 @@ window.api.onKiwiAudio((d) => {
   const slider = document.getElementById('kiwi-volume');
   const label = document.getElementById('kiwi-volume-val');
   if (!slider) return;
-  const saved = parseInt(localStorage.getItem('kiwiVolume') || '80', 10);
+  // The SDR follows the monitor volume knob; this slider is kept hidden for
+  // older layouts and only mirrors it.
+  const saved = Math.round(monitorVolume * 100);
   slider.value = saved;
   label.textContent = saved + '%';
-  kiwiVolume = saved / 100;
+  kiwiVolume = monitorVolume;
   slider.addEventListener('input', () => {
     const pct = parseInt(slider.value, 10);
     label.textContent = pct + '%';
