@@ -193,6 +193,7 @@ contextBridge.exposeInMainWorld('api', {
   cloudTunnelGetState: () => ipcRenderer.invoke('cloud-tunnel-get-state'),
   cloudTunnelEnable: () => ipcRenderer.invoke('cloud-tunnel-enable'),
   cloudTunnelDisable: () => ipcRenderer.invoke('cloud-tunnel-disable'),
+  cloudTunnelRemoveAddress: () => ipcRenderer.invoke('cloud-tunnel-remove-address'),
   cloudTunnelDiagnostics: () => ipcRenderer.invoke('cloud-tunnel-diagnostics'),
   // ECHOCAT listener state (bind / TLS outcome) — the tunnel origin.
   echocatServerStateGet: () => ipcRenderer.invoke('echocat-server-state-get'),

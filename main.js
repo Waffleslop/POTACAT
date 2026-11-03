@@ -35854,8 +35854,10 @@ app.whenReady().then(() => {
       label = '🌐 LAN only';
     } else if (state.status === 'live' && state.origin && state.origin.state !== 'ok' && state.origin.state !== 'pending') {
       label = '🌐 Cloud up · POTACAT not answering';
+    } else if (state.status === 'held') {
+      label = '🌐 Cloud · another shack has the address';
     } else if (state.status === 'live') {
-      label = `🌐 Cloud · ${state.cloudHost || '(unknown host)'}`;
+      label = `🌐 Cloud · ${state.cloudHost || '(unknown host)'}${state.others ? ' (another shack too)' : ''}`;
     } else {
       label = '🌐 Cloud · reconnecting…';
     }
@@ -35889,7 +35891,33 @@ app.whenReady().then(() => {
     }
   }
 
-  // --- POTACAT Cloud (CF tunnel manager) ---
+  // One shack per Cloud address: the question, and the notices on every surface.
+const TunnelClaim = require('./lib/tunnel-claim');
+let _cloudConflictAsking = false;
+async function cloudTunnelAskConflict(c) {
+  if (!cloudTunnel || _cloudConflictAsking) return;
+  const d = TunnelClaim.conflictDialog(c.connectors, c.unclaimed, cloudTunnel.getState().cloudHost);
+  // Headless (a Pi shack) has nobody to ask: hold, and say how to choose.
+  if (!win || win.isDestroyed()) {
+    sendCatLog(`[cloud-tunnel] ${d.message} This shack's Cloud Tunnel is held; open POTACAT on this computer, or turn the tunnel off on the other one, to choose.`);
+    await cloudTunnel.resolveConflict('cancel');
+    return;
+  }
+  _cloudConflictAsking = true;
+  try {
+    const r = await dialog.showMessageBox(win, { type: 'question', title: d.title, message: d.message, detail: d.detail, buttons: d.buttons, defaultId: d.defaultId, cancelId: d.cancelId, noLink: true });
+    await cloudTunnel.resolveConflict(d.choices[r.response] || 'cancel');
+  } finally {
+    _cloudConflictAsking = false;
+  }
+}
+function cloudShackNotice(text, kind) {
+  sendCatLog('[cloud-tunnel] ' + text);
+  if (win && !win.isDestroyed()) win.webContents.send('app-notice', { text, kind: 'warn' });
+  if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) remoteServer.sendToClient({ type: 'cloud-shack-notice', kind, text });
+}
+
+// --- POTACAT Cloud (CF tunnel manager) ---
   // Owns the cloudflared child process (#35), 5-min health-check (#38),
   // and the tray indicator state (#36). Shares JWT auth with cloudIpc's
   // CloudSyncClient — never rolls its own auth path.
@@ -35903,7 +35931,21 @@ app.whenReady().then(() => {
       log: (msg) => sendCatLog(msg),
       safeStorage,
       probeOrigin: () => probeOriginForTunnel(),
+      // Who this desktop is when it claims the account's one Cloud address
+      // (lib/tunnel-claim.js): the id it registers in the devices directory,
+      // the computer's name, and the radio, so the other shack can say
+      // "KQ5O-MAC (FT-710)".
+      getDeviceInfo: () => {
+        if (!settings.cloudDeviceId) { settings.cloudDeviceId = require('crypto').randomUUID(); saveSettings(settings); }
+        const rig = (settings.rigs || []).find((r) => r && r.id === settings.activeRigId);
+        return { deviceId: settings.cloudDeviceId, name: require('os').hostname() || 'POTACAT', rigModel: (rig && (rig.model || rig.name)) || '' };
+      },
     });
+    // One shack per Cloud address (KQ5O, 2026-11-03): another desktop on the
+    // same account already holds it. Never start both silently: ask.
+    cloudTunnel.on('conflict', (c) => { cloudTunnelAskConflict(c).catch((e) => sendCatLog('[cloud-tunnel] conflict prompt failed: ' + (e.message || e))); });
+    cloudTunnel.on('superseded', (s) => cloudShackNotice(TunnelClaim.supersededNotice(s && s.by), 'superseded'));
+    cloudTunnel.on('others', (o) => { if (o) cloudShackNotice(TunnelClaim.sharedNotice(o.connectors, o.unclaimed), 'shared'); });
     cloudTunnel.on('change', (state) => {
       if (win && !win.isDestroyed()) win.webContents.send('cloud-tunnel-state', state);
       refreshCloudTray(state);
@@ -36072,6 +36114,30 @@ app.whenReady().then(() => {
       // code = the cloud's machine code (e.g. 'no_callsign') so the
       // renderer can route to the fix instead of only printing msg.
       return { error: msg, code: err.code || null };
+    }
+  });
+
+  // "Remove my Cloud address" (Casey 2026-11-03): the one action that deletes
+  // the account's address while other shacks are on it. Confirmed here,
+  // naming the shacks that lose it; Off (cloud-tunnel-disable) never does.
+  ipcMain.handle('cloud-tunnel-remove-address', async () => {
+    if (!cloudTunnel) return { error: 'cloud-tunnel module not initialized' };
+    const o = await cloudTunnel.otherShacks();
+    const who = (o.connectors.length || o.unclaimed) ? TunnelClaim.describeOthers(o.connectors, o.unclaimed) : '';
+    const host = cloudTunnel.getState().cloudHost || 'your Cloud address';
+    const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, {
+      type: 'warning', title: 'Remove my Cloud address', noLink: true,
+      message: `Remove ${host}?`,
+      detail: (who ? `${who} ${o.connectors.length + (o.unclaimed ? 1 : 0) > 1 ? 'are' : 'is'} using this address right now and will lose it too. ` : '')
+        + 'Your phone and browser will not reach any shack through POTACAT Cloud until a shack turns its Cloud Tunnel on again, which creates the address anew.',
+      buttons: ['Remove the address', 'Cancel'], defaultId: 1, cancelId: 1,
+    });
+    if (r.response !== 0) return { ok: false, cancelled: true };
+    try {
+      const state = await cloudTunnel.removeAddress();
+      return { ok: true, state };
+    } catch (err) {
+      return { error: err.message || String(err) };
     }
   });
 

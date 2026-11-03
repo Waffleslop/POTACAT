@@ -1336,6 +1336,20 @@
   const ctHost = document.getElementById('cloud-tunnel-host');
   const ctEnableBtn = document.getElementById('cloud-tunnel-enable-btn');
   const ctDisableBtn = document.getElementById('cloud-tunnel-disable-btn');
+  // "Remove my Cloud address" (Casey 2026-11-03): Disable turns the tunnel off
+  // on THIS computer and leaves the address to any other shack on it; this is
+  // the one control that deletes the address. Built here beside Disable; main
+  // confirms it, naming the shacks that would lose the address.
+  let ctRemoveBtn = null;
+  if (ctDisableBtn && ctDisableBtn.parentNode) {
+    ctRemoveBtn = document.createElement('button');
+    ctRemoveBtn.type = 'button';
+    ctRemoveBtn.id = 'cloud-tunnel-remove-btn';
+    ctRemoveBtn.className = 'btn hidden';
+    ctRemoveBtn.textContent = 'Remove my Cloud address';
+    ctRemoveBtn.title = 'Deletes your <callsign>.potacat.com address for every shack on it. Disable only turns it off on this computer.';
+    ctDisableBtn.parentNode.insertBefore(ctRemoveBtn, ctDisableBtn.nextSibling);
+  }
   const ctError = document.getElementById('cloud-tunnel-error');
   const ctDegraded = document.getElementById('cloud-tunnel-degraded');
   const ctDegradedText = document.getElementById('cloud-tunnel-degraded-text');
@@ -1425,6 +1439,11 @@
       // Nominally up but cloudflared can't refresh DNS — amber, not
       // green: the tunnel is failing and the user needs to act.
       label = 'DNS trouble'; pillClass = 'status connecting';
+    } else if (state.status === 'held') {
+      // Another shack is on the account's one Cloud address (lib/tunnel-claim.js).
+      label = 'Another shack has the address'; pillClass = 'status connecting';
+    } else if (state.status === 'live' && state.others) {
+      label = 'Live · another shack too'; pillClass = 'status connecting';
     } else if (state.status === 'live') {
       label = 'Live'; pillClass = 'status connected';
     } else if (state.status === 'error') {
@@ -1455,6 +1474,7 @@
     if (ctBannerHost) ctBannerHost.textContent = hostText ? 'https://' + hostText : '';
     if (ctEnableBtn) ctEnableBtn.classList.toggle('hidden', !!state.enabled);
     if (ctDisableBtn) ctDisableBtn.classList.toggle('hidden', !state.enabled);
+    if (ctRemoveBtn) ctRemoveBtn.classList.toggle('hidden', !state.enabled);
     if (ctOrigin) {
       if (originBad) {
         if (ctOriginTitle) ctOriginTitle.textContent = '⚠ ' + (state.origin.label || 'Cloud up · POTACAT not answering');
@@ -1563,19 +1583,41 @@
   if (ctDisableBtn) {
     ctDisableBtn.addEventListener('click', async () => {
       if (!window.api || !window.api.cloudTunnelDisable) return;
-      if (!confirm('Disable POTACAT Cloud? The tunnel will be revoked; the LAN connection still works.')) return;
+      if (!confirm('Turn POTACAT Cloud off on this computer? The LAN connection still works. If another shack is on your Cloud address, it keeps it.')) return;
       ctDisableBtn.disabled = true;
       ctDisableBtn.textContent = 'Disabling…';
       try {
         const res = await window.api.cloudTunnelDisable();
-        if (res && res.ok) renderTunnelState(res.state);
-        else if (res && res.error && ctError) {
+        if (res && res.ok) {
+          renderTunnelState(res.state);
+          if (res.state && res.state.keptFor && ctError) {
+            ctError.textContent = 'Off on this computer. Your Cloud address stays with ' + res.state.keptFor + '.';
+            ctError.classList.remove('hidden');
+          }
+        } else if (res && res.error && ctError) {
           ctError.textContent = res.error;
           ctError.classList.remove('hidden');
         }
       } finally {
         ctDisableBtn.disabled = false;
         ctDisableBtn.textContent = 'Disable';
+      }
+    });
+  }
+
+  if (ctRemoveBtn) {
+    ctRemoveBtn.addEventListener('click', async () => {
+      if (!window.api || !window.api.cloudTunnelRemoveAddress) return;
+      ctRemoveBtn.disabled = true;
+      try {
+        const res = await window.api.cloudTunnelRemoveAddress(); // main asks first
+        if (res && res.ok) renderTunnelState(res.state);
+        else if (res && res.error && ctError) {
+          ctError.textContent = res.error;
+          ctError.classList.remove('hidden');
+        }
+      } finally {
+        ctRemoveBtn.disabled = false;
       }
     });
   }

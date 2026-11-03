@@ -2062,6 +2062,11 @@
         showToast(msg.reason || 'Tune blocked by license restrictions', 4000);
         break;
 
+      case 'cloud-shack-notice':
+        // Another shack shares (or took) the account's Cloud address.
+        showToast(msg.text || 'Another shack is on your Cloud address.', 8000);
+        break;
+
       case 'vfo-lock-state':
         vfoLocked = !!msg.locked;
         updateVfoLockUi();
