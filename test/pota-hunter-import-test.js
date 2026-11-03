@@ -2,8 +2,8 @@
 'use strict';
 // Importing the operator's POTA.app hunter log (2026-10-27). pota.app knows the
 // park for contacts the local log holds without one, and contacts the local log
-// never got: a matching QSO gains the park reference(s), a missing one is
-// added, a 2-fer (one pota.app row per park) is one contact, the log is backed
+// never got: a matching QSO with no park gains the park reference(s), one with
+// a different park is a CONFLICT and left alone, a missing one is added, a 2-fer (one pota.app row per park) is one contact, the log is backed
 // up before the write, and a review CSV accounts for every row.
 // Run: node test/pota-hunter-import-test.js
 const assert = require('assert');
@@ -118,18 +118,119 @@ test('a local QSO is matched once, closest first', () => {
   assert.deepStrictEqual(plan.updates.map((u) => u.refs), [['US-1111']]);
   assert.deepStrictEqual(plan.adds.map((a) => a.record.POTA_REF), ['US-2222']);
 });
+// Park conflicts (K3SBP review): the import only ever FILLS an empty park.
+// Appending pota.app's ref to a record logged with another park would invent
+// a 2-fer (US-1243 + US-1234) and credit a park never worked.
+test('conflict: a record logged with a different park is not changed', () => {
+  const qsos = [local({ SIG: 'POTA', SIG_INFO: 'US-1243', POTA_REF: 'US-1243' })];
+  const before = JSON.stringify(qsos);
+  const plan = H.planHunterImport(qsos, [entry({ reference: 'US-1234' })]);
+  assert.strictEqual(plan.updates.length, 0, 'no update');
+  assert.strictEqual(plan.adds.length, 0, 'the contact matched: not an add');
+  assert.strictEqual(plan.conflicts.length, 1);
+  assert.deepStrictEqual(plan.conflicts[0].localRefs, ['US-1243']);
+  assert.deepStrictEqual(plan.conflicts[0].contact.refs, ['US-1234']);
+  H.applyHunterPlan(qsos, plan);
+  assert.strictEqual(JSON.stringify(qsos), before, 'record byte-for-byte unchanged, never US-1243,US-1234');
+});
+test('conflict: a park only in SIG_INFO (no POTA_REF) counts as a park', () => {
+  const qsos = [local({ SIG: 'POTA', SIG_INFO: 'US-1243' })];
+  const plan = H.planHunterImport(qsos, [entry({ reference: 'US-1234' })]);
+  assert.strictEqual(plan.conflicts.length, 1);
+  H.applyHunterPlan(qsos, plan);
+  assert.strictEqual(qsos[0].SIG_INFO, 'US-1243');
+  assert.strictEqual(qsos[0].POTA_REF, undefined, 'POTA_REF not added');
+});
+test('conflict: a record holding one park of a pota.app 2-fer is not extended', () => {
+  const qsos = [local({ SIG: 'POTA', SIG_INFO: 'US-1234', POTA_REF: 'US-1234' })];
+  const plan = H.planHunterImport(qsos, [entry({ reference: 'US-1234' }), entry({ reference: 'US-5678' })]);
+  assert.strictEqual(plan.conflicts.length, 1);
+  assert.strictEqual(plan.updates.length, 0);
+  H.applyHunterPlan(qsos, plan);
+  assert.strictEqual(qsos[0].POTA_REF, 'US-1234');
+});
+test('no conflict: a record holding every pota.app park (in any order, or more) is unchanged', () => {
+  const plan = H.planHunterImport(
+    [local({ SIG: 'POTA', SIG_INFO: 'US-5678,US-1234', POTA_REF: 'US-5678,US-1234' })],
+    [entry({ reference: 'US-1234' }), entry({ reference: 'US-5678' })]);
+  assert.strictEqual(plan.unchanged.length, 1);
+  assert.strictEqual(plan.conflicts.length, 0);
+  const superset = H.planHunterImport([local({ POTA_REF: 'US-1234,US-9999' })], [entry({ reference: 'US-1234' })]);
+  assert.strictEqual(superset.unchanged.length, 1, 'the local log knows more parks than pota.app: left alone');
+});
+test('a SOTA record with no park still gets the park filled (POTA_REF only)', () => {
+  const qsos = [local({ SIG: 'SOTA', SIG_INFO: 'W3/PT-001' })];
+  const plan = H.planHunterImport(qsos, [entry({ reference: 'US-1234' })]);
+  assert.strictEqual(plan.updates.length, 1);
+  assert.strictEqual(plan.conflicts.length, 0, 'a summit is not a park conflict');
+});
+test('fillParkRefs never writes to a record that already has a park', () => {
+  const q = local({ POTA_REF: 'US-1243' });
+  assert.deepStrictEqual(H.fillParkRefs(q, ['US-1234']), []);
+  assert.strictEqual(q.POTA_REF, 'US-1243');
+  assert.strictEqual(q.SIG_INFO, undefined);
+  const empty = local();
+  assert.deepStrictEqual(H.fillParkRefs(empty, ['US-1234', 'US-5678']), ['US-1234', 'US-5678']);
+  assert.strictEqual(empty.SIG_INFO, 'US-1234,US-5678');
+});
+test('review CSV: a conflict row shows both parks and the record\'s own, unchanged', () => {
+  const plan = H.planHunterImport(
+    [local({ SIG: 'POTA', SIG_INFO: 'US-1243', POTA_REF: 'US-1243', APP_POTACAT_UUID: 'u-1' })],
+    [entry({ reference: 'US-1234' })]);
+  const lines = H.planToCsv(plan).trim().split('\r\n');
+  assert.ok(lines.includes('SUMMARY,conflicts,,,,,,,,,,,1'));
+  const line = lines.find((l) => l.startsWith('CONFLICT,'));
+  const note = '"not changed: your log has US-1243, pota.app has US-1234"'; // quoted: it holds a comma
+  assert.ok(line.endsWith(',' + note), line);
+  const row = line.slice(0, -note.length - 1).split(',');
+  assert.strictEqual(row[1], 'K1ABC');
+  assert.strictEqual(row[6], 'US-1234', 'parks column: what pota.app has');
+  assert.strictEqual(row[10], 'US-1243', 'local_parks_after: the record\'s park, unchanged');
+  assert.strictEqual(row[11], 'u-1');
+});
+test('through mutateLog: a conflict-only import writes nothing', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'potacat-hunter-conflict-'));
+  try {
+    const logPath = path.join(dir, 'log.adi');
+    appendRawQsos(logPath, [local({ SIG: 'POTA', SIG_INFO: 'US-1243', POTA_REF: 'US-1243',
+      APP_POTACAT_UUID: '22222222-2222-4222-8222-222222222222', APP_POTACAT_VERSION: '1' })]);
+    const before = fs.readFileSync(logPath, 'utf8');
+    let plan;
+    const { changes } = mutateLog(logPath, (qsos) => {
+      plan = H.planHunterImport(qsos, [entry({ reference: 'US-1234' })]);
+      if (!plan.updates.length && !plan.adds.length) return false; // as main.js does
+      return H.applyHunterPlan(qsos, plan);
+    });
+    assert.strictEqual(plan.conflicts.length, 1);
+    assert.strictEqual(changes.length, 0, 'nothing journaled');
+    assert.strictEqual(fs.readFileSync(logPath, 'utf8'), before, 'log file untouched');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+test('main: conflicts are counted and reported, never applied', () => {
+  const main = read('main.js');
+  const start = main.indexOf("ipcMain.handle('pota-hunter-import'");
+  const h = main.slice(start, main.indexOf('ipcMain.handle(', start + 10));
+  assert.ok(h.includes('conflicts: plan.conflicts.length'), 'result carries the conflict count');
+  assert.ok(h.includes('if (!plan.updates.length && !plan.adds.length) return false;'), 'conflicts alone never trigger a write');
+  assert.ok(/QSOs have a park that differs from POTA\.app's/.test(h), 'the dialog tells the operator');
+  assert.ok(!/addParkRefs/.test(read('lib', 'pota-hunter-import.js')), 'the append-a-park helper is gone');
+});
+
 test('review CSV: summary counts first, then one row per decision', () => {
   const { qsos, entries, plan } = scenario();
   H.applyHunterPlan(qsos, plan);
   const lines = H.planToCsv(plan, { downloaded: entries.length, reported: 9 }).trim().split('\r\n');
   assert.ok(lines[0].startsWith('action,call,qso_date,time_on,'));
-  assert.deepStrictEqual(lines.slice(1, 8), [
+  assert.deepStrictEqual(lines.slice(1, 9), [
     'SUMMARY,mode,,,,,,,,,,,import',
     'SUMMARY,entries downloaded,,,,,,,,,,,8',
     'SUMMARY,entries pota.app reports,,,,,,,,,,,9',
     'SUMMARY,updated,,,,,,,,,,,3',
     'SUMMARY,added,,,,,,,,,,,3',
     'SUMMARY,unchanged,,,,,,,,,,,1',
+    'SUMMARY,conflicts,,,,,,,,,,,0',
     'SUMMARY,skipped,,,,,,,,,,,0',
   ]);
   const count = (a) => lines.filter((l) => l.startsWith(a + ',')).length;

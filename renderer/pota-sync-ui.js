@@ -177,7 +177,8 @@
         // The full summary is in main's dialog; keep the counts on screen.
         const would = res.dryRun ? 'would be ' : '';
         hunterImportStatus.textContent = (res.dryRun ? 'Preview: ' : '') +
-          `${res.downloaded.toLocaleString()} downloaded · ${res.updated.toLocaleString()} ${would}updated · ${res.added.toLocaleString()} ${would}added`;
+          `${res.downloaded.toLocaleString()} downloaded · ${res.updated.toLocaleString()} ${would}updated · ${res.added.toLocaleString()} ${would}added` +
+          (res.conflicts ? ` · ${res.conflicts.toLocaleString()} park conflicts (not changed)` : '');
       } catch (err) {
         hunterImportStatus.textContent = '';
         alert('POTA.app hunter log ' + (dryRun ? 'preview' : 'import') + ' failed: ' + (err && err.message ? err.message : String(err)));
