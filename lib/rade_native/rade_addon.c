@@ -39,6 +39,9 @@
 
 #define MAX_HANDLES 2
 
+/* fargan_cont() reads five feature frames (fargan.c) */
+#define FARGAN_WARMUP_FRAMES 5
+
 /* Hilbert transform for real → analytic signal conversion (streaming) */
 #define HILBERT_NTAPS  127
 #define HILBERT_DELAY  ((HILBERT_NTAPS - 1) / 2)  /* 63 samples */
@@ -75,7 +78,6 @@ struct rade_handle {
   float *tx_features;         /* n_features: the speech frames of the next modem frame */
   int tx_frames;              /* speech frames collected in tx_features */
   float *eoo_bits;            /* rade_n_eoo_bits(): rade_rx() fills them on an end-of-over frame */
-  int fargan_initialized;     /* 1 after first fargan_cont call */
   /* Hilbert transform delay line for streaming real→IQ */
   float hilbert_delay[HILBERT_NTAPS];
   int hilbert_pos;            /* circular write position */
@@ -116,6 +118,11 @@ static napi_value Open(napi_env env, napi_callback_info info) {
   LPCNetEncState *enc = lpcnet_encoder_create();
   FARGANState *fargan = (FARGANState *)calloc(1, sizeof(FARGANState));
   fargan_init(fargan);
+  /* Warmed up once from silence, as freedv-gui does when RADE starts
+     (freedv_interface.cpp), so every received frame can be synthesized */
+  float warmup_pcm[FARGAN_CONT_SAMPLES] = {0};
+  float warmup_features[FARGAN_WARMUP_FRAMES * NB_FEATURES] = {0};
+  fargan_cont(fargan, warmup_pcm, warmup_features);
 
   handles[slot].r = r;
   handles[slot].encoder = enc;
@@ -334,31 +341,17 @@ static napi_value Rx(napi_env env, napi_callback_info info) {
   int sync_state = rade_sync(h->r);
   int snr_dB = rade_snrdB_3k_est(h->r);
 
-  /* Synthesize speech from features using FARGAN (if we got valid output) */
-  napi_value speech_arr;
-  if (n_out > 0 && sync_state) {
-    /* FARGAN synthesizes one frame of 16kHz audio from features */
-    short pcm_out[LPCNET_FRAME_SIZE];
-    if (!h->fargan_initialized) {
-      /* First frame: initialize FARGAN continuation state with silence + features */
-      float silence[LPCNET_FRAME_SIZE];
-      memset(silence, 0, sizeof(silence));
-      fargan_cont(h->fargan, silence, features_out);
-      h->fargan_initialized = 1;
-    }
-    fargan_synthesize_int(h->fargan, pcm_out, features_out);
-
-    napi_value speech_buf;
-    void *speech_data;
-    napi_create_arraybuffer(env, LPCNET_FRAME_SIZE * sizeof(short), &speech_data, &speech_buf);
-    napi_create_typedarray(env, napi_int16_array, LPCNET_FRAME_SIZE, speech_buf, 0, &speech_arr);
-    memcpy(speech_data, pcm_out, LPCNET_FRAME_SIZE * sizeof(short));
-  } else {
-    napi_value speech_buf;
-    void *speech_data;
-    napi_create_arraybuffer(env, 0, &speech_data, &speech_buf);
-    napi_create_typedarray(env, napi_int16_array, 0, speech_buf, 0, &speech_arr);
+  /* Synthesize every 10 ms frame of the features with FARGAN */
+  int n_frames = n_out > 0 ? n_out / NB_TOTAL_FEATURES : 0;
+  size_t n_pcm = (size_t)n_frames * LPCNET_FRAME_SIZE;
+  napi_value speech_buf, speech_arr;
+  void *speech_data;
+  napi_create_arraybuffer(env, n_pcm * sizeof(short), &speech_data, &speech_buf);
+  short *pcm_out = (short *)speech_data;
+  for (int f = 0; f < n_frames; f++) {
+    fargan_synthesize_int(h->fargan, &pcm_out[f * LPCNET_FRAME_SIZE], &features_out[f * NB_TOTAL_FEATURES]);
   }
+  napi_create_typedarray(env, napi_int16_array, n_pcm, speech_buf, 0, &speech_arr);
 
   free(rx_in);
   free(features_out);
