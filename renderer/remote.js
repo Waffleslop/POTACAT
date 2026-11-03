@@ -8922,7 +8922,7 @@
   });
   window.addEventListener('resize', () => { if (ft8WfVisible) ft8WfSizeCanvas(); });
 
-  // Erase button
+  // Clear button (clears the decode list)
   ft8EraseBtn.addEventListener('click', () => {
     ft8DecodeLog = [];
     ft8DecodeLogEl.innerHTML = '<div class="ft8-empty">Cleared</div>';
