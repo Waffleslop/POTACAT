@@ -4013,7 +4013,10 @@
           <button type="button" id="pota-hunter-import" class="btn btn-sm">Import hunter log</button>
           <span id="pota-hunter-import-status"></span>
         </div>
-        <span class="help-text" style="display:block;margin-top:4px;">Downloads your whole POTA.app hunter log. QSOs already in your log that have no park get POTA.app's park reference; a QSO whose park differs from POTA.app's is never changed and is listed as a conflict in the review CSV. Contacts missing from your log are added, except a contact the activator logged twice or one already in your log: those are listed as duplicates and not added. Your log is backed up first, and a CSV of every change is saved for review. Preview import does a dry run: same download and CSV, nothing changed.</span>
+        <label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11px;color:var(--text-secondary);" title="Off by default. Added contacts come from the activator's log: no frequency or signal reports.">
+          <input type="checkbox" id="pota-hunter-import-add"> Also add contacts missing from my log
+        </label>
+        <span class="help-text" style="display:block;margin-top:4px;">Downloads your whole POTA.app hunter log. QSOs already in your log that have no park get POTA.app's park reference; a QSO whose park differs from POTA.app's is never changed and is listed as a conflict in the review CSV. Contacts missing from your log are only listed, unless you tick "Also add contacts missing from my log": they come from the activator's log, with no frequency or signal reports. Even then, a contact the activator logged twice or one already in your log is a duplicate and not added, and one POTA.app records only as DATA (no mode LoTW or QRZ accept) is skipped. Your log is backed up first, and a CSV of every change is saved for review. Preview import does a dry run: same download and CSV, nothing changed.</span>
       </div>
     </fieldset>
 
