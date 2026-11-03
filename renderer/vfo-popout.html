@@ -2162,6 +2162,21 @@ function applyMeterRows() {
   any = any || txPeakSeen;
   const block = document.getElementById('widget-smeter');
   if (block) block.classList.toggle('visible', !!vfoWidgets.smeter && any);
+  syncSdrVolumeRow();
+}
+
+// The SDR's volume is the VOL knob (one knob for whichever receiver you
+// hear), but VOL sits in the meter block, which is off by default and gone
+// when the radio reports no meters. So while an SDR plays and VOL is not on
+// screen, the SDR card shows its own Volume slider, the same value
+// (df1vb, GitHub #118: the SDR volume vanished in 1.13.8).
+function syncSdrVolumeRow() {
+  const row = document.getElementById('kiwi-volume-row');
+  if (!row) return;
+  let connected = false;
+  try { connected = !!kiwiConnected; } catch { connected = false; } // before its declaration runs
+  const volShown = !!document.getElementById('widget-smeter')?.classList.contains('visible');
+  row.style.display = connected && !volShown ? 'flex' : 'none';
 }
 
 function applyWidgets() {
@@ -3315,6 +3330,10 @@ window.api.onSmartSdrAudio((d) => {
     // sets the SDR audio (Casey 2026-10-30: the second slider was the fault).
     kiwiVolume = monitorVolume;
     if (kiwiGainNode) kiwiGainNode.gain.value = kiwiVolume;
+    const ks = document.getElementById('kiwi-volume');
+    const kl = document.getElementById('kiwi-volume-val');
+    if (ks) ks.value = p;
+    if (kl) kl.textContent = p + '%';
   });
 })();
 
@@ -3657,7 +3676,7 @@ window.api.onKiwiStatus((s) => {
   }
   updateKiwiButtonStates();
   document.getElementById('kiwi-rx-badge').style.display = s.connected ? '' : 'none';
-  document.getElementById('kiwi-volume-row').style.display = 'none'; // the monitor volume knob drives the SDR too
+  syncSdrVolumeRow(); // VOL drives the SDR; this row stands in when VOL is hidden
   // Mute local radio audio monitor when SDR active, restore when off
   if (s.connected) {
     if (audioMonitorGain) audioMonitorGain.gain.value = 0;
@@ -3706,18 +3725,23 @@ window.api.onKiwiAudio((d) => {
   const slider = document.getElementById('kiwi-volume');
   const label = document.getElementById('kiwi-volume-val');
   if (!slider) return;
-  // The SDR follows the monitor volume knob; this slider is kept hidden for
-  // older layouts and only mirrors it.
+  // The SDR follows the monitor volume knob. This slider is shown only when
+  // that knob is not on screen (syncSdrVolumeRow) and moves the same value.
   const saved = Math.round(monitorVolume * 100);
   slider.value = saved;
   label.textContent = saved + '%';
   kiwiVolume = monitorVolume;
   slider.addEventListener('input', () => {
-    const pct = parseInt(slider.value, 10);
+    const pct = parseInt(slider.value, 10) || 0;
     label.textContent = pct + '%';
-    kiwiVolume = pct / 100;
-    localStorage.setItem('kiwiVolume', String(pct));
+    monitorVolume = pct / 100;
+    kiwiVolume = monitorVolume;
+    localStorage.setItem('vfoMonitorVolume', String(pct));
     if (kiwiGainNode) kiwiGainNode.gain.value = kiwiVolume;
+    const vs = document.getElementById('vol-slider');
+    const vl = document.getElementById('vol-text');
+    if (vs) vs.value = pct;
+    if (vl) vl.textContent = pct + '%';
   });
 })();
 
