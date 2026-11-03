@@ -348,7 +348,7 @@ const { FlrigCodec, flrigModel } = require('./lib/codecs/flrig-codec');
 const { FlrigTransport, probeFlrig } = require('./lib/flrig-transport');
 const { CivCodec } = require('./lib/codecs/civ-codec');
 const IcomScope = require('./lib/icom-scope');
-const { CommanderCodec } = require('./lib/codecs/commander-codec');
+const { CommanderCodec, commanderModel, probeCommander } = require('./lib/codecs/commander-codec');
 const CommanderSequences = require('./lib/commander-sequences');
 const { getTuneQuirks, resolveSerialHandshake } = require('./lib/rig-models');
 const { gridToLatLon, latLonToGrid, haversineDistanceMiles, bearing } = require('./lib/grid');
@@ -2924,21 +2924,17 @@ function getActiveRigModel() {
   const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
   const modelName = activeRig?.model || null;
   const rigType = detectRigType();
-  // DXLab Commander has one fixed model. Its panel controls are exactly the
-  // ones the operator mapped to a Commander command sequence, and the codec
-  // needs the same sequences and decimal style, so both ride on the model.
-  if (rigType === 'commander') {
-    const base = getModel(null, 'commander');
-    const t = (activeRig && activeRig.catTarget) || settings.catTarget || {};
-    const sequences = CommanderSequences.cleanSequences(t.sequences);
-    return {
-      ...base,
-      caps: { ...base.caps, ...CommanderSequences.capsFromSequences(sequences) },
-      commander: { decimal: t.decimal === ',' ? ',' : '.', sequences },
-    };
-  }
   // An explicit rigs[].model that names a known entry wins outright.
   const explicit = modelName ? getModel(modelName, null) : null;
+  // DXLab Commander holds the radio, like flrig: the picked Radio Model lends
+  // its bands, power range and presets, and the controls are Commander's plus
+  // the ones mapped to Commander command sequences. The codec needs the same
+  // sequences and decimal style, so they ride on the model
+  // (lib/codecs/commander-codec.js commanderModel).
+  if (rigType === 'commander') {
+    const t = (activeRig && activeRig.catTarget) || settings.catTarget || {};
+    return commanderModel(explicit, { sequences: t.sequences, decimal: t.decimal });
+  }
   // flrig holds the radio: the picked Radio Model supplies bands, power limits
   // and presets; the protocol and caps are the flrig codec's, whatever brand
   // the model is (lib/codecs/flrig-codec.js flrigModel).
@@ -7799,11 +7795,10 @@ async function connectCat() {
 
   } else if (target.type === 'dxlab-commander') {
     // DXLab Commander's TCP command port (Base Port + 2, 52002 by default).
-    // getActiveRigModel() already folded this rig's decimal style and command
-    // sequences into the model, and the sequences into its panel caps.
+    // getActiveRigModel() already returned commanderModel(picked model): this
+    // rig's decimal style and command sequences, and the sequences in its caps.
     transport = new TcpTransport();
-    const model = rigModel || getModel(null, 'commander');
-    model.tune = getTuneQuirks(model);
+    const model = rigModel || commanderModel(null);
     codec = new CommanderCodec(model, (data) => transport.write(data));
     cat = new RigController(model, transport, codec);
     cat._debug = true;
@@ -33760,6 +33755,9 @@ function describeTargetForMigration(target) {
   if (target.type === 'flrig') {
     return `flrig on ${target.host || '127.0.0.1'}:${target.port || 12345}`;
   }
+  if (target.type === 'dxlab-commander') {
+    return `DXLab Commander on ${target.host || '127.0.0.1'}:${target.port || CommanderSequences.DEFAULT_PORT}`;
+  }
   return 'Radio';
 }
 
@@ -45261,6 +45259,23 @@ app.whenReady().then(() => {
       : 'no transceiver online in flrig yet (Config > Setup > Transceiver, then Init)';
     return { success: true, version: r.version, xcvr: r.xcvr, frequency: r.freqHz, mode: r.mode, modes: r.modes,
       message: `Connected! flrig ${r.version}: ${radio}` };
+  });
+
+  // Rig editor "Test Connection" for a DXLab Commander rig: one CmdGetFreq +
+  // CmdSendMode on a separate socket, no live connection touched. Each of the
+  // three outcomes gets its own words: nothing on the port, Commander with no
+  // radio (.000), or the radio's frequency and mode.
+  ipcMain.handle('test-commander', async (_e, config) => {
+    const c = config || {};
+    const { host, port } = resolveCatHostPort({ host: c.host, port: c.port }, CommanderSequences.DEFAULT_PORT, 'DXLab Commander test');
+    const r = await probeCommander({ host, port });
+    if (!r.ok) return { success: false, error: r.error };
+    if (r.noRadio) {
+      return { success: false, commander: true,
+        error: 'DXLab Commander answered, but it has no radio (frequency .000). Check that Commander is connected to your transceiver.' };
+    }
+    return { success: true, frequency: r.freqHz, mode: r.mode,
+      message: `Connected! DXLab Commander: ${(r.freqHz / 1e6).toFixed(6)} MHz ${r.mode || '(mode not reported)'}` };
   });
 
   ipcMain.handle('test-hamlib', async (_e, config) => {

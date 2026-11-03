@@ -2212,6 +2212,10 @@
             </select>
           </label>
           <span class="help-text">Match the Windows number format on the computer running Commander. It only matters for a frequency with a fraction of a kHz, such as a spot at 14074.5.</span>
+          <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
+            <button type="button" id="dxlab-commander-test-btn">Test Connection</button>
+            <span id="dxlab-commander-test-result" style="font-size:12px;"></span>
+          </div>
           <details style="margin-top:6px;">
             <summary>Commander command sequences (optional)</summary>
             <span class="help-text" style="display:block;margin:4px 0;">Commander's TCP interface has no commands for these controls, but it can run a command sequence you build in its Command Sequences window. Enter a sequence's name (or #3 for Commander's third sequence) and the matching control appears in POTACAT. A toggle needs both its on and off sequence.</span>

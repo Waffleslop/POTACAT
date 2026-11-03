@@ -966,6 +966,13 @@ const commanderSequenceInputs = {};
     input.type = 'text';
     input.placeholder = 'sequence name or #3';
     input.style.width = '170px';
+    // Plain ASCII only (ADIF lengths count bytes): say so as it is typed,
+    // since a name that is not is dropped when the rig is saved.
+    input.addEventListener('input', () => {
+      const ok = window.CommanderSequences.isAscii(input.value.trim());
+      input.style.outline = ok ? '' : '1px solid var(--accent-red, #e05252)';
+      input.title = ok ? '' : 'Commander sequence names must be plain ASCII letters, digits and punctuation';
+    });
     label.appendChild(input);
     box.appendChild(label);
     commanderSequenceInputs[slot.key] = input;
@@ -2377,7 +2384,7 @@ function updateRadioSubPanels() {
   if (nocatConfig) nocatConfig.classList.toggle('hidden', type !== 'nocat');
   // Voice in DATA mode runs in the rig controller: serial, Icom, Hamlib and flrig links.
   const voiceAsDataRow = document.getElementById('rig-voice-as-data');
-  if (voiceAsDataRow) voiceAsDataRow.classList.toggle('hidden', !['serialcat', 'icom', 'civ-tcp', 'icom-network', 'hamlib', 'rigctldnet', 'flrig'].includes(type));
+  if (voiceAsDataRow) voiceAsDataRow.classList.toggle('hidden', !['serialcat', 'icom', 'civ-tcp', 'icom-network', 'hamlib', 'rigctldnet', 'flrig', 'dxlab-commander'].includes(type));
   // Voice streamed over the LAN goes only to an Icom Network radio.
   const lanVoiceSsbRow = document.getElementById('rig-lan-voice-ssb');
   if (lanVoiceSsbRow) lanVoiceSsbRow.classList.toggle('hidden', type !== 'icom-network');
@@ -2674,11 +2681,12 @@ if (rigModelSelect) rigModelSelect.addEventListener('change', async () => {
     if (!setRigName.value.trim()) setRigName.value = modelName;
     return;
   }
-  // A radio reached through another program (flrig, a remote rigctld) keeps
-  // that connection: the model picked here only supplies bands and limits.
-  const shared = ['flrig', 'rigctldnet'].includes(getSelectedRadioType());
+  // A radio reached through another program (flrig, DXLab Commander, a remote
+  // rigctld) keeps that connection: the model picked here only supplies bands
+  // and limits.
+  const shared = ['flrig', 'dxlab-commander', 'rigctldnet'].includes(getSelectedRadioType());
   if (noCat) setRadioType('nocat');           // Pebble HF and friends: nothing to connect to
-  else if (shared) { /* keep flrig / rigctld Network */ }
+  else if (shared) { /* keep flrig / DXLab Commander / rigctld Network */ }
   else if (brand === 'FlexRadio') setRadioType('flex');
   else if (brand === 'Icom') setRadioType('icom');
   else setRadioType('serialcat');
@@ -9950,29 +9958,41 @@ hamlibTestBtn.addEventListener('click', async () => {
   }
 });
 
-// flrig test connection: one probe of flrig's XML-RPC server (main: test-flrig).
-if (flrigTestBtn) flrigTestBtn.addEventListener('click', async () => {
-  const host = (setFlrigHost && setFlrigHost.value.trim()) || '127.0.0.1';
-  const port = parseInt(setFlrigPort && setFlrigPort.value, 10) || 12345;
-  flrigTestBtn.disabled = true;
-  flrigTestResult.textContent = 'Testing...';
-  flrigTestResult.className = '';
-  try {
-    const result = await window.api.testFlrig({ host, port });
-    if (result && result.success) {
-      flrigTestResult.textContent = result.message || 'Connected!';
-      flrigTestResult.className = 'hamlib-test-success';
-    } else {
-      flrigTestResult.textContent = `Failed: ${(result && result.error) || 'no reply'}`;
-      flrigTestResult.className = 'hamlib-test-fail';
+// Test Connection for a radio held by another program (flrig, DXLab
+// Commander): one probe on its own socket in main, the live link untouched.
+function wireSharedRadioTest(btn, resultEl, readTarget, probe) {
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    resultEl.textContent = 'Testing...';
+    resultEl.className = '';
+    try {
+      const result = await probe(readTarget());
+      if (result && result.success) {
+        resultEl.textContent = result.message || 'Connected!';
+        resultEl.className = 'hamlib-test-success';
+      } else {
+        resultEl.textContent = `Failed: ${(result && result.error) || 'no reply'}`;
+        resultEl.className = 'hamlib-test-fail';
+      }
+    } catch (err) {
+      resultEl.textContent = `Error: ${err.message}`;
+      resultEl.className = 'hamlib-test-fail';
+    } finally {
+      btn.disabled = false;
     }
-  } catch (err) {
-    flrigTestResult.textContent = `Error: ${err.message}`;
-    flrigTestResult.className = 'hamlib-test-fail';
-  } finally {
-    flrigTestBtn.disabled = false;
-  }
-});
+  });
+}
+// flrig: one probe of flrig's XML-RPC server (main: test-flrig).
+wireSharedRadioTest(flrigTestBtn, flrigTestResult, () => ({
+  host: (setFlrigHost && setFlrigHost.value.trim()) || '127.0.0.1',
+  port: parseInt(setFlrigPort && setFlrigPort.value, 10) || 12345,
+}), (t) => window.api.testFlrig(t));
+// DXLab Commander: CmdGetFreq + CmdSendMode (main: test-commander).
+wireSharedRadioTest(document.getElementById('dxlab-commander-test-btn'), document.getElementById('dxlab-commander-test-result'), () => ({
+  host: setDxlabCommanderHost.value.trim() || '127.0.0.1',
+  port: parseInt(setDxlabCommanderPort.value, 10) || window.CommanderSequences.DEFAULT_PORT,
+}), (t) => window.api.testCommander(t));
 
 // Serial CAT test connection
 serialcatTestBtn.addEventListener('click', async () => {
