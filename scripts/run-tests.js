@@ -51,6 +51,7 @@ const TESTS = [
   'test/guest-pass-lease-end-test.js', // the end of a pass stops every transmitter and closes the guest socket
   'test/guest-pass-hopping-test.js', // guests hop between rigs; the owner takes over and hands back
   'test/guest-pass-authority-test.js', // a Guest Pass is default-deny: the allowlist wall in the demux + the rig-control action wall
+  'test/guest-pass-tx-gate-test.js', // the TX gate judges the effective TX frequency (split) and the radio's reported power against the cap
   'test/pass-qso-outbox-test.js', // a guest's contacts reach the GUEST's cloud logbook, sent by the shack
   'test/propagation-always-on-test.js', // RBN + PSKReporter Propagation has no switch
   'test/install-defaults-test.js', // logging/solar/band activity always on; SOTA/WWFF/LLOTA + a random cluster node once

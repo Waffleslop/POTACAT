@@ -60,7 +60,9 @@ test('wiring: both TX gates hand the live dial and mode to the pass, and a refus
   const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
   // The live dial, and what the key-down sends (emission) before the radio's
   // mode (test/guest-pass-emission-test.js: FT8 from a rig left in USB).
-  const n = (main.match(/interceptCatCommand\(\{ type: 'tx_enable', freqHz: _currentFreqHz, mode: emission \|\| _currentMode \}\)/g) || []).length;
+  // The frequency the radio will TRANSMIT on (effectiveTxFreqHz: the other VFO
+  // in split), never the dial (test/guest-pass-tx-gate-test.js).
+  const n = (main.match(/interceptCatCommand\(\{ type: 'tx_enable', freqHz: effectiveTxFreqHz\(\), split: _currentSplit, mode: emission \|\| _currentMode/g) || []).length;
   assert.strictEqual(n, 2, 'gatedSetTransmit and gatedSmartSdrTransmit');
   assert.strictEqual((main.match(/passTxBlocked\(res\);/g) || []).length, 3, 'both gates and passTxAllowed (CW text, the paddle) tell the device');
   assert.ok(/sendToPassSessions\(\{ type: 'tune-blocked', reason: res\.userVisible \}\)/.test(main), 'as a tune-blocked alert the app already shows');

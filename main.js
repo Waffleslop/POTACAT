@@ -4566,6 +4566,18 @@ function sendCatFreqOther(hz) {
   if (remoteServer && remoteServer.running) remoteServer.sendFreqOther(v);
 }
 
+// The frequency the radio will TRANSMIT on: the other VFO when split is on,
+// the dial otherwise. null = split is on but the TX VFO has not been read
+// back yet. Every Guest Pass TX gate (tx_enable, sstv_tx) is authorised on
+// THIS, never on the dial: a Technician pass with RX on 28.400 and the other
+// VFO on 14.200 in split was keyed on 20 m phone (adversarial review of
+// 1.13.9, finding 7). Both inputs are readback-fed (sendCatSplit /
+// sendCatFreqOther), so this is the radio, not a request.
+function effectiveTxFreqHz() {
+  if (!_currentSplit) return _currentFreqHz;
+  return _currentFreqOther > 0 ? _currentFreqOther : null;
+}
+
 function sendCatSmeter(val, dbm) {
   if (typeof val === 'number' && Number.isFinite(val)) noteMeterSeen('smeter');
   // A radio that reports the S-meter in dBm (the Flex) passes it too; it is
@@ -25351,7 +25363,7 @@ function connectRemote() {
   // SSTV from ECHOCAT phone — receive photo, encode, transmit
   remoteServer.on('sstv-photo', ({ image, mode, guest }) => {
     if (guest && passEnforcement) {
-      const res = passEnforcement.interceptCatCommand({ type: 'sstv_tx', freqHz: _currentFreqHz });
+      const res = passEnforcement.interceptCatCommand({ type: 'sstv_tx', freqHz: effectiveTxFreqHz(), split: _currentSplit });
       if (!res.allowed) {
         sendCatLog(`[pass] SSTV picture from guest ${guest.call || guest.code} refused: ${res.userVisible}`);
         remoteServer.broadcastSstvTxStatus({ state: 'rx', error: res.userVisible });
@@ -34262,7 +34274,7 @@ function ownTxPrivilegeRefused(emission, freqHz) {
 function passTxAllowed(mode) {
   if (ownTxPrivilegeRefused(mode || _currentMode)) return false;
   if (!passEnforcement || passEnforcement.getState() === 'idle') return true;
-  const res = passEnforcement.interceptCatCommand({ type: 'tx_enable', freqHz: _currentFreqHz, mode: mode || _currentMode });
+  const res = passEnforcement.interceptCatCommand({ type: 'tx_enable', freqHz: effectiveTxFreqHz(), split: _currentSplit, mode: mode || _currentMode });
   if (res.allowed) return true;
   if (!passTxJustBlocked()) sendCatLog(`[pass] ${mode || 'TX'} blocked: ${res.userVisible}`);
   passTxBlocked(res);
@@ -34389,7 +34401,7 @@ function sstvHaltTxNow() {
 
 function gatedSetTransmit(state, emission) {
   if (passEnforcement && state) {
-    const res = passEnforcement.interceptCatCommand({ type: 'tx_enable', freqHz: _currentFreqHz, mode: emission || _currentMode });
+    const res = passEnforcement.interceptCatCommand({ type: 'tx_enable', freqHz: effectiveTxFreqHz(), split: _currentSplit, mode: emission || _currentMode });
     if (!res.allowed) {
       sendCatLog(`[pass] TX blocked: ${res.userVisible}`);
       if (win && !win.isDestroyed()) {
@@ -34467,7 +34479,7 @@ function gatedSetTxPower(value, opts = {}) {
 // wrappers don't apply to smartSdr.*. Same gate policy, different rig.
 function gatedSmartSdrTransmit(state, emission) {
   if (passEnforcement && state) {
-    const res = passEnforcement.interceptCatCommand({ type: 'tx_enable', freqHz: _currentFreqHz, mode: emission || _currentMode });
+    const res = passEnforcement.interceptCatCommand({ type: 'tx_enable', freqHz: effectiveTxFreqHz(), split: _currentSplit, mode: emission || _currentMode });
     if (!res.allowed) {
       sendCatLog(`[pass] TX blocked (Flex): ${res.userVisible}`);
       if (win && !win.isDestroyed()) {
