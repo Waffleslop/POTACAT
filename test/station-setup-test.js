@@ -207,6 +207,11 @@ t('band scope: installed but never run -> open the scope; live -> ok; helper dia
   assert.ok(ready.actions.some(a => a.id === 'open-scope'));
   assert.match(ready.detail, /03-01-26 SCU-LAN10/);
   assert.strictEqual(step(evalRig({ model: 'FT-710', live: { scope: { libraryFound: true, d2xxFound: true, status: 'live' } } }), 'band-scope').state, 'ok');
+  // W0TLP: the file is on disk, the helper could not load it. Never "installed, open the scope".
+  const noLoad = step(evalRig({ model: 'FT-710', live: { scope: { libraryFound: true, d2xxFound: true, status: 'blocked', diagKey: 'no-library', diagHeadline: 'LibFT4222 is on this computer but would not load' } } }), 'band-scope');
+  assert.strictEqual(noLoad.state, 'needs');
+  assert.ok(/would not load/.test(noLoad.detail));
+  assert.ok(noLoad.actions.some(a => a.id === 'locate-ft4222'));
   const diag = step(evalRig({ model: 'FT-710', live: { scope: { libraryFound: true, d2xxFound: true, status: 'blocked', diagKey: 'no-device', diagHeadline: 'No FT4222 device found on USB', diagAction: 'Turn the radio on.' } } }), 'band-scope');
   assert.strictEqual(diag.state, 'needs');
   assert.strictEqual(diag.detail, 'No FT4222 device found on USB');

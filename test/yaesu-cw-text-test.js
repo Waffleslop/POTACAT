@@ -11,6 +11,8 @@ const { EventEmitter } = require('events');
 const { RigController } = require('../lib/rig-controller');
 const { KenwoodCodec } = require('../lib/codecs/kenwood-codec');
 const { RigctldCodec } = require('../lib/codecs/rigctld-codec');
+const { CivCodec } = require('../lib/codecs/civ-codec');
+const { cwAirtimeMs } = require('../lib/cw-airtime');
 const { RIG_MODELS } = require('../lib/rig-models');
 
 let passed = 0, failed = 0;
@@ -167,8 +169,9 @@ test('a radio still in transmit 4 s after the message is sent to receive, and th
   r._cwWpm = 60;
   r._breakIn = true;
   r.sendCwText('E');
-  codec.emit('ptt', true); // the radio reports TX during the message
+  const polls = setInterval(() => { if (!writes.includes('TX0;')) codec.emit('ptt', true); }, 500); // TX at every poll
   await sleep(6000);
+  clearInterval(polls);
   assert.ok(writes.includes('TX0;'), 'RX sent: ' + JSON.stringify(writes));
   assert.ok(notices.some((m) => /stayed in transmit after the CW message/.test(m)));
   assert.strictEqual(r._transmitting, false);
@@ -198,6 +201,100 @@ test('the radio returning to receive by itself cancels the backstop', async () =
   await sleep(4500);
   assert.ok(!writes.includes('TX0;'), JSON.stringify(writes));
   r.disconnect();
+});
+
+test('the backstop needs a fresh readback: a TX report from seconds ago proves nothing', async () => {
+  const { rig: r, codec, writes } = rig('FTDX10');
+  r._cwWpm = 60;
+  r._breakIn = true;
+  r.sendCwText('E');
+  codec.emit('ptt', true); // once, then the radio goes quiet
+  await sleep(6000);
+  assert.ok(!writes.includes('TX0;'), JSON.stringify(writes));
+  r.disconnect();
+});
+
+test('#120: an Icom still reporting TX past the estimate is left alone, with no warning', async () => {
+  const { rig: r, codec } = rig('IC-7610', CivCodec);
+  const notices = [];
+  let rxSent = 0;
+  const realSet = codec.setTransmit.bind(codec);
+  r.on('notice', (m) => notices.push(m));
+  r._cwWpm = 60;
+  r.sendCwText('E');
+  await sleep(100);
+  codec.setTransmit = (on) => { if (!on) rxSent++; realSet(on); };
+  const polls = setInterval(() => codec.emit('ptt', true), 500);
+  await sleep(6000);
+  clearInterval(polls);
+  assert.strictEqual(rxSent, 0, 'no RX in the middle of a message');
+  assert.deepStrictEqual(notices, []);
+  r.disconnect();
+});
+
+test('a Yaesu message then an Icom-path message does not keep the watch armed', async () => {
+  const { rig: r, codec } = rig('TS-480');
+  const notices = [];
+  r.on('notice', (m) => notices.push(m));
+  r._cwStuckWatch = true;
+  r._cwWpm = 60;
+  r.sendCwText('E');
+  const polls = setInterval(() => codec.emit('ptt', true), 500);
+  await sleep(5800);
+  clearInterval(polls);
+  assert.deepStrictEqual(notices, []);
+  r.disconnect();
+});
+
+test('Stop ends the TX state at once, on a radio that sends no readback', async () => {
+  const { rig: r, codec } = rig('TS-480');
+  const states = [];
+  r.on('ptt', (on) => states.push(on));
+  r._cwWpm = 20;
+  r.sendCwText('CQ CQ CQ DE K3SBP K');
+  await sleep(100);
+  assert.strictEqual(r._transmitting, true);
+  r.stopCwText();
+  assert.strictEqual(r._transmitting, false, 'TX indicator cleared');
+  assert.strictEqual(states[states.length - 1], false);
+  r.disconnect();
+});
+
+test('Stop also ends the TX banner, which runs on its own estimate', () => {
+  const main = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+  const stop = main.slice(main.indexOf('function cancelAllCwSends'), main.indexOf('function cancelAllCwSends') + 2600);
+  assert.ok(/_cwTxLockoutUntilMs = 0; _broadcastEffectiveTxState\(\)/.test(stop));
+});
+
+test('airtime is real Morse timing, and the hold covers digits the old figure did not', () => {
+  assert.strictEqual(cwAirtimeMs('PARIS', 20), Math.ceil(43 * 60)); // 50 dits with the trailing word gap
+  assert.strictEqual(cwAirtimeMs('', 20), 0);
+  const digits = '599 5NN 0000 1234 7890';
+  assert.ok(cwAirtimeMs(digits, 20) > digits.length * 600, 'the old figure was short here');
+  const { rig: r } = rig('TS-480');
+  r._holdTxForCw(digits);
+  assert.ok(r._cwHoldUntil - Date.now() >= cwAirtimeMs(digits, 20));
+  r.disconnect();
+});
+
+test('ECHOCAT: an unchanged speed sends the radio no speed command ahead of the macro', () => {
+  const main = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+  assert.ok(/!\(wpm === settings\.cwWpm && \(!cat \|\| cat\._cwWpm === wpm\)\)\) applyCwWpm\(wpm, 'remote'\)/.test(main));
+});
+
+test('N8JMS: a frequency event keeps the selected spot, and a map Tune finds its own call', () => {
+  const app = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  assert.ok(/const onSpot = onPicked \? lastTunedSpot : allSpots\.find/.test(app));
+  assert.ok(/s\.callsign === btn\.dataset\.call/.test(app));
+  assert.ok(/class="tune-btn" data-call=/.test(app));
+});
+
+test('#116: one rbn.telegraphy.de connection, and only commands the server has', () => {
+  const main = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+  const fn = main.slice(main.indexOf('function connectCwSpots'), main.indexOf('function disconnectCwSpots'));
+  assert.ok(!/set\/clubs \$\{/.test(fn), 'no per-club command');
+  assert.ok(!/forEach/.test(fn) && !/ssid/i.test(fn.replace(/SSID/g, '')), 'no per-club login');
+  assert.ok(/\['set\/clubs', 'set\/nodupes'\]/.test(fn));
 });
 
 test('main shows the controller notice on screen and on the phone', async () => {

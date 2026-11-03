@@ -4350,6 +4350,7 @@ function bindRigStateEvents(controller) {
   controller.on('notice', (msg) => {
     sendCatLog('[CAT] ' + msg);
     if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: msg, warn: true, duration: 10000 });
+    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', msg);
     if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
       try { remoteServer.sendToClient({ type: 'tune-blocked', reason: msg }); } catch {}
     }
@@ -5214,7 +5215,18 @@ function ft4222SearchDirs() {
 function findFt4222() {
   const dirs = ft4222SearchDirs();
   const has = (name) => dirs.some(d => { try { return fs.existsSync(path.join(d, name)); } catch { return false; } });
-  const libraryFound = ft4222LibraryNames().some(has);
+  // The helper is 64-bit: a 32-bit LibFT4222.dll on the PATH is a file it
+  // cannot load, so it does not count as installed.
+  const usable = (name) => dirs.some(d => {
+    try {
+      const p = path.join(d, name);
+      if (!fs.existsSync(p)) return false;
+      if (process.platform !== 'win32') return true;
+      const fd = fs.openSync(p, 'r');
+      try { const b = Buffer.alloc(4096); fs.readSync(fd, b, 0, 4096, 0); return StationSetup.peMachine(b) !== 'x86'; } finally { fs.closeSync(fd); }
+    } catch { return false; }
+  });
+  const libraryFound = ft4222LibraryNames().some(usable);
   // ftd2xx.dll is FTDI's D2XX driver (Windows only; libft4222 bundles it on Unix).
   const d2xxFound = process.platform !== 'win32' || has('ftd2xx.dll');
   return { libraryFound, d2xxFound };
@@ -5567,7 +5579,10 @@ async function _runStationSetupTxTest(rigId, { keepPower = false } = {}) {
   // K3SBP's 8600 all but removed at 6 W (TX filter 0-3100; FT8 at 820 and
   // 1290 Hz made 4 W at the same setting, 2026-09-25). The test asks "does
   // this radio transmit", not "at the operator's FT8 offset".
-  startJtcatTune({ toneHz: STATION_SETUP_TEST_TONE_HZ });
+  // Judged by the mode the radio is in: a tone in LSB on a phone segment is
+  // inside a phone privilege, where a data emission would not be (W0TLP
+  // 2026-11-02). Still refused where the class has no phone there.
+  startJtcatTune({ toneHz: STATION_SETUP_TEST_TONE_HZ, emission: /^(USB|LSB|SSB)$/.test(modeNow) ? modeNow : 'DATA' });
   const keyed = jtcatTuneState.active;
   if (keyed) {
     await sleepMs(3000);
@@ -8500,23 +8515,17 @@ function connectCwSpots() {
   }
   const host = settings.cwSpotsHost || 'rbn.telegraphy.de';
   const port = settings.cwSpotsPort || 7000;
-  const clubs = settings.cwSpotsClubs || [];
   const myPos = gridToLatLon(settings.grid);
   const myEntity = ctyDb ? resolveCallsign(settings.myCallsign, ctyDb) : null;
   const isMainServer = host === 'rbn.telegraphy.de';
 
-  // Per-club connections: one per checked club so we can tag spots with the club name.
-  // rbn.telegraphy.de supports SSIDs (K3SBP-1, -2) for multiple filter sets.
-  // If no clubs selected or non-main server, use single connection for all.
-  const clubList = (isMainServer && clubs.length > 0) ? clubs : [null];
-
-  clubList.forEach((club, i) => {
+  // One connection. The server has `set/clubs` (the filter the operator set on
+  // its website, per login) and `set/raw`, and no per-club command: one login
+  // per club got the same stream N times and loaded the server (DJ1YFK, #116).
+  {
     const client = new DxClusterClient();
-    const clubTag = club || 'CW';
-    const ssid = club ? `-${i + 1}` : '';
-    const postLogin = isMainServer
-      ? [club ? `set/clubs ${club.toLowerCase()}` : 'set/clubs', 'set/nodupes']
-      : [];
+    const clubTag = 'CW';
+    const postLogin = isMainServer ? ['set/clubs', 'set/nodupes'] : [];
 
     client.on('spot', (raw) => {
       // Filter by max WPM if configured
@@ -8542,12 +8551,12 @@ function connectCwSpots() {
       }
     });
     client.on('status', (s) => {
-      sendCatLog(`[CW Spots${club ? ' ' + club : ''}] ${s.connected ? 'Connected to' : 'Disconnected from'} ${host}:${port}`);
+      sendCatLog(`[CW Spots] ${s.connected ? 'Connected to' : 'Disconnected from'} ${host}:${port}`);
       if (win && !win.isDestroyed()) win.webContents.send('cw-spots-status', s);
     });
-    client.connect({ host, port, callsign: settings.myCallsign + ssid, postLogin });
+    client.connect({ host, port, callsign: settings.myCallsign, postLogin });
     cwSpotsClients.set(clubTag, client);
-  });
+  }
 }
 
 function disconnectCwSpots() {
@@ -17907,7 +17916,7 @@ function startJtcatTune(opts = {}) {
   // Audio is genuinely going to the rig USB CODEC, so audio:true triggers
   // SSB-over-DATA where appropriate (USB -> DIGU mute the rig mic during
   // the tone). The 90s timer auto-releases.
-  handleRemotePtt(true, { audio: true, emission: 'DATA' });
+  handleRemotePtt(true, { audio: true, emission: opts.emission || 'DATA' });
   // Route the tone the same way FT8 TX is routed: straight to dax_tx on the
   // SmartSDR-Direct path, then the Icom RS-BA1 network path, else the
   // renderer's Windows-DAX device path.
@@ -21687,6 +21696,9 @@ function cancelAllCwSends() {
   //    a half-sent character doesn't strand the rig in TX. One choke point for
   //    every de-key path. Quiet (no reason) — cancel is a normal action.
   dropCwKeyLine();
+  // The TX banner runs on this estimate, so Stop has to end it too.
+  if (_cwTxLockoutTimer) { clearTimeout(_cwTxLockoutTimer); _cwTxLockoutTimer = null; }
+  if (_cwTxLockoutUntilMs) { _cwTxLockoutUntilMs = 0; _broadcastEffectiveTxState(); }
   // 6. Serial CAT — CatClient (CI-V) has stopCwText (0x17 0xFF); the
   //    newer RigController has a unified stopCwText (clears its KY drop
   //    timer + drops PTT, which aborts Kenwood KY buffer and Yaesu auto-
@@ -23105,7 +23117,9 @@ function connectRemote() {
     // Honor the WPM the phone sends inline with the macro so a bare cw-text
     // (no preceding cw-config) still keys at the right speed — and it flows
     // through the one authoritative writer, keeping settings.cwWpm current.
-    if (typeof wpm === 'number') applyCwWpm(wpm, 'remote');
+    // Only a real change: this ran before every message, so the radio got a
+    // speed command just ahead of each macro that the VFO window never sends.
+    if (typeof wpm === 'number' && !(wpm === settings.cwWpm && (!cat || cat._cwWpm === wpm))) applyCwWpm(wpm, 'remote');
     sendCwTextToRadio(expandRemoteCwText(text), { live: !!live, fromRemote: true });
   });
 
@@ -29642,8 +29656,10 @@ function startYaesuScope() {
   if (!helperPath) {
     sendCatLog('[Scope] helper binary not found — see helpers/yaesu-scope/BUILD.md');
     yaesuScopeSetStatus('error', { key: 'no-helper', severity: 'error',
-      headline: 'The scope helper is not in this build',
-      detail: 'yaesu-scope is missing from resources/bin. In a dev checkout, build it: helpers/yaesu-scope/BUILD.md.' });
+      headline: app.isPackaged ? 'The scope helper is missing from POTACAT' : 'The scope helper is not in this build',
+      detail: app.isPackaged
+        ? 'POTACAT installs yaesu-scope in its resources/bin folder and it is not there now. Antivirus is the usual cause: look in its quarantine, restore the file and add an exception, or reinstall POTACAT.'
+        : 'yaesu-scope is missing from resources/bin. In a dev checkout, build it: helpers/yaesu-scope/BUILD.md.' });
     return;
   }
   const args = YaesuScope.helperArgs({ fps: settings.yaesuScopeFps || 20, synth });
@@ -29690,8 +29706,16 @@ function startYaesuScope() {
     yaesuScopeProc = null;
     yaesuScopeStream = null;
     yaesuScopeStopCatPolling();
-    const d = YaesuScope.describeHelperExit(code, { signal });
+    let d = YaesuScope.describeHelperExit(code, { signal });
     if (d.severity === 'info') { yaesuScopeSetStatus('stopped', null); return; }
+    // Exit 2 covers three different faults; the helper's own words say which.
+    if (d.key === 'no-library' && /ftd2xx\.dll not found/.test(yaesuScopeStderr)) {
+      d = { ...d, headline: 'The FTDI D2XX driver could not be loaded', action: 'Install the D2XX setup executable from ftdichip.com, then reopen the Band Scope.' };
+    } else if (d.key === 'no-library' && /missing entry points|cannot enumerate/.test(yaesuScopeStderr)) {
+      d = { ...d, headline: 'This FTDI library is the wrong version', action: 'Download the current LibFT4222 from ftdichip.com, and press Find the file for me in Station Setup.' };
+    } else if (d.key === 'no-library' && findFt4222().libraryFound) {
+      d = { ...d, headline: 'LibFT4222 is on this computer but would not load', action: 'Press Find the file for me in Station Setup and choose LibFT4222-64.dll from the amd64 folder.' };
+    }
     sendCatLog('[Scope] helper exited: ' + d.headline + (d.detail ? ' — ' + d.detail : ''));
     yaesuScopeSetStatus(d.severity === 'blocker' ? 'blocked' : 'error', d);
     if (YaesuScope.helperExitIsTransient(code) && yaesuScopeWanted() && yaesuScopeRestarts < 5) {

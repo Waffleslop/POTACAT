@@ -11712,7 +11712,7 @@ function updateMapMarkers(filtered) {
       ${opLine}${parseFloat(s.frequency).toFixed(1)} kHz &middot; ${s.mode}<br>
       <b>${s.reference}</b> ${s.parkName}${wwffRefLine}<br>
       ${distStr}<br>
-      <button class="tune-btn" data-freq="${s.frequency}" data-mode="${s.mode}" data-bearing="${s.bearing != null ? s.bearing : ''}" data-lat="${s.lat != null ? s.lat : ''}" data-lon="${s.lon != null ? s.lon : ''}" data-source="${s.source || ''}">Tune</button>${logBtnHtml}
+      <button class="tune-btn" data-call="${s.callsign || ''}" data-freq="${s.frequency}" data-mode="${s.mode}" data-bearing="${s.bearing != null ? s.bearing : ''}" data-lat="${s.lat != null ? s.lat : ''}" data-lon="${s.lon != null ? s.lon : ''}" data-source="${s.source || ''}">Tune</button>${logBtnHtml}
     `;
 
     // Pin color matches source: POTA green, SOTA orange, DXC purple, etc.
@@ -11748,7 +11748,7 @@ function bindPopupClickHandlers(mapInstance) {
         const lat = parseFloat(btn.dataset.lat), lon = parseFloat(btn.dataset.lon);
         if (!isNaN(lat) && !isNaN(lon)) showTuneArc(lat, lon, btn.dataset.freq, btn.dataset.source);
         // Find matching spot in allSpots for quick respot
-        const match = allSpots.find(s => s.frequency === btn.dataset.freq && s.callsign && s.mode === btn.dataset.mode);
+        const match = allSpots.find(s => s.frequency === btn.dataset.freq && s.callsign === btn.dataset.call && s.mode === btn.dataset.mode);
         if (match) { lastTunedSpot = match; prefillDxCommand(match); notifyVfoTunedSpot(match); }
         // Activator mode: fill QSO form from spot
         if (appMode === 'activator' && activationActive && match) {
@@ -17046,11 +17046,6 @@ async function openSettingsDialog(tab) {
     }
   }
   if (cwSpotsConfig) cwSpotsConfig.classList.toggle('hidden', !s.enableCwSpots);
-  // Restore club checkboxes
-  const savedClubs = s.cwSpotsClubs || [];
-  document.querySelectorAll('#cwspots-clubs input[data-club]').forEach(cb => {
-    cb.checked = savedClubs.includes(cb.dataset.club);
-  });
   // Restore max WPM
   const cwMaxWpmEl = document.getElementById('set-cwspots-max-wpm');
   if (cwMaxWpmEl) cwMaxWpmEl.value = s.cwSpotsMaxWpm || 0;
@@ -18022,7 +18017,6 @@ settingsSave.addEventListener('click', async () => {
     enableCwSpots: cwSpotsEnabled,
     cwSpotsHost: (() => { const p = document.getElementById('set-cwspots-preset'); if (!p || p.value === 'custom') return (document.getElementById('set-cwspots-host') || {}).value || 'rbn.telegraphy.de'; return p.value.split(':')[0]; })(),
     cwSpotsPort: (() => { const p = document.getElementById('set-cwspots-preset'); if (!p || p.value === 'custom') return parseInt((document.getElementById('set-cwspots-port') || {}).value, 10) || 7000; return parseInt(p.value.split(':')[1], 10) || 7000; })(),
-    cwSpotsClubs: [...document.querySelectorAll('#cwspots-clubs input[data-club]:checked')].map(cb => cb.dataset.club),
     cwSpotsMaxWpm: parseInt((document.getElementById('set-cwspots-max-wpm') || {}).value, 10) || 0,
     enableRbn: rbnEnabled,
     enableWsjtx: wsjtxEnabled,
@@ -21306,7 +21300,11 @@ window.api.onCatFrequency((hz) => {
   // the VFO popout's tuned-spot info; the actual pin still updates on
   // user-initiated click/tune (line 5478). And we still un-pin when the
   // rig moves AWAY from a previously-pinned freq.
-  const onSpot = allSpots.find(s => Math.abs(parseFloat(s.frequency) - exactKhz) < 0.5);
+  // The operator's own pick stays while the radio is on it: the first spot in
+  // the list at this frequency can be someone else, and the VFO card's first
+  // operator fills {op_firstname} (N8JMS 2026-11-02: Joe selected, Michael keyed).
+  const onPicked = lastTunedSpot && Math.abs(parseFloat(lastTunedSpot.frequency) - exactKhz) < 0.5;
+  const onSpot = onPicked ? lastTunedSpot : allSpots.find(s => Math.abs(parseFloat(s.frequency) - exactKhz) < 0.5);
   if (onSpot) {
     notifyVfoTunedSpot(onSpot);
   } else if (lastTunedSpot && Math.abs(parseFloat(lastTunedSpot.frequency) - exactKhz) >= 0.5) {
