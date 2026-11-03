@@ -3,7 +3,7 @@
  * from assets/design/tokens.json (the ECHOCAT design system). Do not edit
  * by hand: change the token file and regenerate.
  *
- * Themes (data-ds on <html>): night = POTACAT Dark (potacat-dark), dark = Midnight (midnight), acid = Acid Burn (acid-burn), light = POTACAT Light (potacat-light).
+ * Themes (data-ds on <html>): night = POTACAT Dark (potacat-dark), dark = Midnight (midnight), acid = Acid Burn (acid-burn), miami = Miami Nights (miami-nights), light = POTACAT Light (potacat-light), sof = She's On Frequency (shes-on-frequency).
  * :root carries the default, POTACAT Dark.
  */
 
@@ -395,6 +395,93 @@
   color-scheme: dark;
 }
 
+[data-ds="miami"] {
+  --ds-bg: #0b0620;
+  --ds-surface: #160d33;
+  --ds-fill: #211548;
+  --ds-line: #35246b;
+  --ds-line-subtle: #211548;
+  --ds-ink: #f4effc;
+  --ds-ink-muted: #b4a6dc;
+  --ds-brand: #ff6ad5;
+  --ds-brand-subtle: #3d1046;
+  --ds-on-brand: #0b0620;
+  --ds-tint: #36f0f6;
+  --ds-tint-subtle: #0a3340;
+  --ds-on-tint: #0b0620;
+  --ds-ok: #3ee6a8;
+  --ds-ok-subtle: #0b3328;
+  --ds-on-ok: #0b0620;
+  --ds-warn: #ffa43d;
+  --ds-warn-subtle: #3d2210;
+  --ds-on-warn: #0b0620;
+  --ds-danger: #ff5a6e;
+  --ds-danger-subtle: #3d0f22;
+  --ds-on-danger: #0b0620;
+  --ds-air: #d8304a;
+  --ds-air-subtle: #3d0f22;
+  --ds-on-air: #ffffff;
+  --ds-air-deep: #6e1226;
+  --ds-air-ink: #ff6e85;
+  --ds-control: #1a0f3d;
+  --ds-control-line: #3a2878;
+  --ds-on-control: #f4effc;
+  --ds-band: #f28cff;
+  --ds-scrim: rgba(5,0,20,0.55);
+  --ds-shadow-ink: #000000;
+  --ds-meter-s: #36f0f6;
+  --ds-meter-swr: #3ee6a8;
+  --ds-meter-track: #211548;
+  --ds-source-pota: #4ecca3;
+  --ds-source-sota: #f0a500;
+  --ds-source-wwff: #26a69a;
+  --ds-source-llota: #42a5f5;
+  --ds-source-wwbota: #78909c;
+  --ds-source-tiles: #ab47bc;
+  --ds-source-dxc: #e040fb;
+  --ds-source-pskr: #ff6b6b;
+  --ds-source-rbn: #4fc3f7;
+  --ds-source-net: #ffd740;
+  --ds-mode-voice: #8ee6ff;
+  --ds-mode-voice-subtle: #0b3652;
+  --ds-mode-cw: #ffaee6;
+  --ds-mode-cw-subtle: #4a1245;
+  --ds-mode-digital: #d4bcff;
+  --ds-mode-digital-subtle: #3a1c78;
+  --ds-watch-1: #ff8a80;
+  --ds-watch-2: #90caf9;
+  --ds-watch-3: #ce93d8;
+  --ds-watch-4: #f48fb1;
+  --ds-watch-5: #ffcc80;
+  --ds-band-160m: #ff4444;
+  --ds-band-80m: #ff8c00;
+  --ds-band-60m: #ffd700;
+  --ds-band-40m: #4ecca3;
+  --ds-band-30m: #00cccc;
+  --ds-band-20m: #4488ff;
+  --ds-band-17m: #8844ff;
+  --ds-band-15m: #cc44ff;
+  --ds-band-12m: #ff44cc;
+  --ds-band-10m: #ff4488;
+  --ds-band-6m: #e0e0e0;
+  --ds-band-4m: #b0e0e6;
+  --ds-band-2m: #88ff88;
+  --ds-band-70cm: #ffaa44;
+  --ds-band-1-25m: #c8a2ff;
+  --ds-band-33cm: #ffd59e;
+  --ds-band-23cm: #9ef5e0;
+  --ds-band-13cm: #ffb3c6;
+  --ds-band-9cm: #d4a5ff;
+  --ds-band-6cm: #a5d8ff;
+  --ds-band-3cm: #ffe08a;
+  --ds-band-1-25cm: #b5f5a5;
+  --ds-band-2200m: #8d6e63;
+  --ds-band-630m: #a1887f;
+  --ds-shadow-card: none;
+  --ds-shadow-sheet: none;
+  color-scheme: dark;
+}
+
 [data-ds="light"] {
   --ds-bg: #f4f5f7;
   --ds-surface: #ffffff;
@@ -448,6 +535,93 @@
   --ds-mode-cw-subtle: #d1fae5;
   --ds-mode-digital: #6d28d9;
   --ds-mode-digital-subtle: #ede9fe;
+  --ds-watch-1: #ff7066;
+  --ds-watch-2: #82b1ff;
+  --ds-watch-3: #b388ff;
+  --ds-watch-4: #ec407a;
+  --ds-watch-5: #ffa726;
+  --ds-band-160m: #ff4444;
+  --ds-band-80m: #ff8c00;
+  --ds-band-60m: #ffd700;
+  --ds-band-40m: #4ecca3;
+  --ds-band-30m: #00cccc;
+  --ds-band-20m: #4488ff;
+  --ds-band-17m: #8844ff;
+  --ds-band-15m: #cc44ff;
+  --ds-band-12m: #ff44cc;
+  --ds-band-10m: #ff4488;
+  --ds-band-6m: #e0e0e0;
+  --ds-band-4m: #b0e0e6;
+  --ds-band-2m: #88ff88;
+  --ds-band-70cm: #ffaa44;
+  --ds-band-1-25m: #c8a2ff;
+  --ds-band-33cm: #ffd59e;
+  --ds-band-23cm: #9ef5e0;
+  --ds-band-13cm: #ffb3c6;
+  --ds-band-9cm: #d4a5ff;
+  --ds-band-6cm: #a5d8ff;
+  --ds-band-3cm: #ffe08a;
+  --ds-band-1-25cm: #b5f5a5;
+  --ds-band-2200m: #8d6e63;
+  --ds-band-630m: #a1887f;
+  --ds-shadow-card: 0 1px 4px rgba(15,23,42,0.06);
+  --ds-shadow-sheet: 0 -2px 16px rgba(15,23,42,0.12);
+  color-scheme: light;
+}
+
+[data-ds="sof"] {
+  --ds-bg: #f6f1e7;
+  --ds-surface: #fffcf6;
+  --ds-fill: #efe6d6;
+  --ds-line: #cbbb9f;
+  --ds-line-subtle: #e6dccb;
+  --ds-ink: #0f2a2c;
+  --ds-ink-muted: #3f4d48;
+  --ds-brand: #8a3a10;
+  --ds-brand-subtle: #f9dfcc;
+  --ds-on-brand: #ffffff;
+  --ds-tint: #155a55;
+  --ds-tint-subtle: #d9ede9;
+  --ds-on-tint: #ffffff;
+  --ds-ok: #1e5c34;
+  --ds-ok-subtle: #d2e9d8;
+  --ds-on-ok: #ffffff;
+  --ds-warn: #6f4800;
+  --ds-warn-subtle: #f8e7bb;
+  --ds-on-warn: #ffffff;
+  --ds-danger: #921f18;
+  --ds-danger-subtle: #fadfdc;
+  --ds-on-danger: #ffffff;
+  --ds-air: #c0392b;
+  --ds-air-subtle: #fbe1dc;
+  --ds-on-air: #ffffff;
+  --ds-air-deep: #6b1a12;
+  --ds-air-ink: #a52d1e;
+  --ds-control: #1f3f41;
+  --ds-control-line: #2f5658;
+  --ds-on-control: #f3ece0;
+  --ds-band: #6f4700;
+  --ds-scrim: rgba(23,59,61,0.45);
+  --ds-shadow-ink: #173b3d;
+  --ds-meter-s: #155a55;
+  --ds-meter-swr: #1e5c34;
+  --ds-meter-track: #efe6d6;
+  --ds-source-pota: #4ecca3;
+  --ds-source-sota: #f0a500;
+  --ds-source-wwff: #26a69a;
+  --ds-source-llota: #42a5f5;
+  --ds-source-wwbota: #78909c;
+  --ds-source-tiles: #ab47bc;
+  --ds-source-dxc: #e040fb;
+  --ds-source-pskr: #ff6b6b;
+  --ds-source-rbn: #4fc3f7;
+  --ds-source-net: #ffd740;
+  --ds-mode-voice: #15545c;
+  --ds-mode-voice-subtle: #d7ecee;
+  --ds-mode-cw: #863a12;
+  --ds-mode-cw-subtle: #fbe4d6;
+  --ds-mode-digital: #614705;
+  --ds-mode-digital-subtle: #f6ebcc;
   --ds-watch-1: #ff7066;
   --ds-watch-2: #82b1ff;
   --ds-watch-3: #b388ff;

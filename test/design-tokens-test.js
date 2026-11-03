@@ -84,7 +84,7 @@ test('every desktop theme has a block, ids match the phone, Acid Burn is mono', 
     assert.ok(cols.includes(th.column), th.id + ' names a column the file lacks');
     assert.ok(css.includes(`[data-ds="${th.column}"] {`), th.id + ' block');
   }
-  assert.deepStrictEqual(gen.THEMES.map((x) => x.id), ['potacat-dark', 'midnight', 'acid-burn', 'potacat-light']);
+  assert.deepStrictEqual(gen.THEMES.map((x) => x.id), ['potacat-dark', 'midnight', 'acid-burn', 'miami-nights', 'potacat-light', 'shes-on-frequency']);
   const acid = css.slice(css.indexOf('[data-ds="acid"] {'));
   assert.ok(/--ds-font-body: var\(--ds-font-mono\);/.test(acid.slice(0, acid.indexOf('}'))));
 });

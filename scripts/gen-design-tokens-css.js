@@ -28,7 +28,9 @@ const THEMES = [
   { id: 'potacat-dark', column: 'night', scheme: 'dark', name: 'POTACAT Dark' },
   { id: 'midnight', column: 'dark', scheme: 'dark', name: 'Midnight' },
   { id: 'acid-burn', column: 'acid', scheme: 'dark', name: 'Acid Burn', font: 'mono' },
+  { id: 'miami-nights', column: 'miami', scheme: 'dark', name: 'Miami Nights' },
   { id: 'potacat-light', column: 'light', scheme: 'light', name: 'POTACAT Light' },
+  { id: 'shes-on-frequency', column: 'sof', scheme: 'light', name: "She's On Frequency" },
 ];
 const DEFAULT_COLUMN = 'night';
 // Digits that line up in a column (the phone's generator marks the same four).

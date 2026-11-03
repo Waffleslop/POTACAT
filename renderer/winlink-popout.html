@@ -12,12 +12,12 @@
     body { display: flex; flex-direction: column; }
     button, select, input, textarea { font: inherit; }
 
-    .wl-titlebar { -webkit-app-region: drag; display: flex; align-items: center; gap: 8px; padding: 4px 8px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); font-size: 12px; flex-shrink: 0; }
-    .wl-title { font-weight: 700; color: var(--accent-blue, #4fc3f7); }
+    .wl-titlebar { -webkit-app-region: drag; display: flex; align-items: center; gap: 8px; box-sizing: border-box; height: var(--titlebar-h); padding: 0 8px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); font-size: 12px; flex-shrink: 0; }
+    .wl-title { font-size: var(--titlebar-font-size); font-weight: var(--titlebar-font-weight); letter-spacing: var(--titlebar-letter-spacing); color: var(--titlebar-color); }
     .wl-spacer { flex: 1; }
     .wl-winbtn { -webkit-app-region: no-drag; width: 26px; height: 20px; border: none; background: transparent; color: var(--text-secondary); cursor: pointer; border-radius: 3px; }
     .wl-winbtn:hover { background: var(--bg-hover); }
-    .wl-winbtn.close:hover { background: var(--accent-red, #e94560); color: #fff; }
+    .wl-winbtn.close:hover { background: var(--accent-red, #e94560); color: var(--on-accent-red); }
     .platform-darwin .wl-titlebar { padding-left: 80px; }
     .platform-darwin .wl-winbtn { display: none; }
 
@@ -64,7 +64,7 @@
     .wl-state.connected { color: var(--accent-green, #4ecca3); }
     .wl-state.error { color: #e94560; }
     .wl-ptt { padding: 0 6px; border-radius: 3px; font-weight: 700; font-size: 11px; }
-    .wl-ptt.on { background: var(--accent-red, #e94560); color: #fff; }
+    .wl-ptt.on { background: var(--accent-red, #e94560); color: var(--on-accent-red); }
     .wl-audio { font-size: 11px; opacity: 0.8; font-family: Consolas, "Courier New", monospace; white-space: nowrap; }
     .wl-audio.hot { color: var(--accent-red, #e94560); opacity: 1; font-weight: 700; }
     .wl-bar { flex: 0 0 120px; height: 6px; background: var(--bg-tertiary, #2a2a40); border-radius: 3px; overflow: hidden; }

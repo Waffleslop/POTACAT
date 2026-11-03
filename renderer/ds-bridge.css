@@ -48,6 +48,12 @@
   --accent-green-btn: var(--ds-ok);
   --tx-active: var(--ds-air);
 
+  /* Text on a filled accent (styles.css --on-*) */
+  --on-accent-red: var(--ds-on-danger);
+  --on-accent-blue: var(--ds-on-tint);
+  --on-accent-green: var(--ds-on-ok);
+  --on-tx-active: var(--ds-on-air);
+
   /* Effects */
   --backdrop: var(--ds-scrim);
   --tint-green: var(--ds-ok-subtle);

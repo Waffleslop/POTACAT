@@ -122,6 +122,20 @@
   --text: var(--text-primary);
   --text-muted: var(--text-secondary);
   --accent: var(--accent-red);
+  /* Text on a filled accent. White in the classic themes; ds-bridge.css
+     points each at the design theme's "on" colour (Acid Burn's green and
+     cyan need black). */
+  --on-accent-red: #fff;
+  --on-accent-blue: #fff;
+  --on-accent-green: #fff;
+  --on-tx-active: #fff;
+  /* One window title bar for every window (custom bars in Log, Winlink,
+     Mercury, Scope and SSTV read these too; the VFO window copies them). */
+  --titlebar-h: 32px;
+  --titlebar-font-size: 12px;
+  --titlebar-font-weight: 700;
+  --titlebar-letter-spacing: 0.3px;
+  --titlebar-color: var(--text-secondary);
   --info: var(--accent-blue);
   --link: var(--accent-blue);
   --ok: var(--accent-green);
@@ -339,7 +353,7 @@
 }
 .learn-btn { font-size:11px; padding:2px 8px; background:var(--bg-tertiary); color:var(--accent-blue); border:1px solid var(--accent-blue); border-radius:3px; cursor:pointer; }
 .learn-btn:hover { background:var(--accent-blue); color:var(--bg-primary); }
-.learn-btn.learning { background:var(--accent-red); border-color:var(--accent-red); color:#fff; animation: pulse 1s infinite; }
+.learn-btn.learning { background:var(--accent-red); border-color:var(--accent-red); color: var(--on-accent-red); animation: pulse 1s infinite; }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
 @keyframes tx-blink { 0%,100%{opacity:1} 50%{opacity:0.5} }
 
@@ -363,7 +377,7 @@ body {
 /* Custom titlebar */
 .titlebar {
   background: var(--bg-secondary);
-  height: 32px;
+  height: var(--titlebar-h);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -375,10 +389,10 @@ body {
 }
 
 .titlebar-title {
-  font-size: 13px;
-  font-weight: bold;
-  color: var(--accent-blue);
-  letter-spacing: 0.5px;
+  font-size: var(--titlebar-font-size);
+  font-weight: var(--titlebar-font-weight);
+  color: var(--titlebar-color);
+  letter-spacing: var(--titlebar-letter-spacing);
 }
 
 .titlebar-controls {
@@ -391,7 +405,7 @@ body {
   border: none;
   color: var(--text-secondary);
   width: 46px;
-  height: 32px;
+  height: var(--titlebar-h);
   font-size: 13px;
   cursor: pointer;
   display: flex;
@@ -408,7 +422,7 @@ body {
 
 .titlebar-close:hover {
   background: var(--accent-red);
-  color: #fff;
+  color: var(--on-accent-red);
 }
 
 .platform-darwin .titlebar {
@@ -1032,7 +1046,7 @@ button:hover {
   cursor: pointer;
 }
 #voice-macro-hear.active { background: var(--accent-green, #4ecca3); border-color: var(--accent-green, #4ecca3); color: #0b1a14; }
-.cw-macro-esc:hover { background: var(--accent-red); color: #fff; }
+.cw-macro-esc:hover { background: var(--accent-red); color: var(--on-accent-red); }
 
 .status.disconnected {
   background: var(--tint-red);
@@ -1161,7 +1175,7 @@ button:hover {
 
 .event-badge-inline {
   background: var(--tx-active);
-  color: #fff;
+  color: var(--on-tx-active);
   font-size: 10px;
   font-weight: 700;
   padding: 2px 5px;
@@ -1181,7 +1195,7 @@ button:hover {
 
 .event-action-btn {
   background: var(--tx-active);
-  color: #fff;
+  color: var(--on-tx-active);
   border: none;
   border-radius: 3px;
   padding: 2px 10px;
@@ -1447,7 +1461,7 @@ button:hover {
   padding: 1px 3px;
   border-radius: 3px;
   background: var(--tx-active);
-  color: #fff;
+  color: var(--on-tx-active);
   vertical-align: middle;
   cursor: default;
 }
@@ -1630,7 +1644,7 @@ a.park-link:hover {
 /* Scan */
 .scan-active {
   background: var(--accent-red) !important;
-  color: #fff !important;
+  color: var(--on-accent-red) !important;
   border-color: var(--accent-red) !important;
 }
 
@@ -1905,7 +1919,7 @@ th.col-drop-right { border-right: 2px solid var(--accent-blue) !important; }
 .spots-hidden-badge {
   font-size: 10px;
   background: var(--accent-red);
-  color: #fff;
+  color: var(--on-accent-red);
   border-radius: 8px;
   padding: 0 5px;
   margin-left: 4px;
@@ -2020,7 +2034,7 @@ thead th {
 
 .popout-btn.popout-active {
   background: var(--accent-blue);
-  color: #fff;
+  color: var(--on-accent-blue);
   border-color: var(--accent-blue);
   box-shadow: 0 0 6px rgba(79, 195, 247, 0.5);
 }
@@ -2077,7 +2091,7 @@ thead th {
 #map .leaflet-popup-content .tune-btn,
 .leaflet-popup-content .tune-btn {
   background: var(--accent-red);
-  color: #fff;
+  color: var(--on-accent-red);
   border: none;
   padding: 3px 10px;
   border-radius: 3px;
@@ -2747,7 +2761,7 @@ dialog {
 .share-rig-preset:hover { background: var(--bg-hover); color: var(--text-primary); }
 .share-rig-preset.active {
   background: var(--accent-blue);
-  color: #fff;
+  color: var(--on-accent-blue);
   border-color: var(--accent-blue);
 }
 .share-rig-row {
@@ -2940,7 +2954,7 @@ dialog {
 }
 .share-rig-link-actions button.primary {
   background: var(--accent-blue);
-  color: #fff;
+  color: var(--on-accent-blue);
   border-color: var(--accent-blue);
 }
 .share-rig-link-actions button:hover {
@@ -3120,7 +3134,7 @@ dialog {
 }
 .pair-device-qr-actions button.primary {
   background: var(--accent-blue);
-  color: #fff;
+  color: var(--on-accent-blue);
   border-color: var(--accent-blue);
 }
 .pair-device-qr-actions button:hover { background: var(--bg-hover); }
@@ -3193,7 +3207,7 @@ dialog {
 .pair-link-preset:hover { background: var(--bg-hover); color: var(--text-primary); }
 .pair-link-preset.active {
   background: var(--accent-blue);
-  color: #fff;
+  color: var(--on-accent-blue);
   border-color: var(--accent-blue);
 }
 .pair-link-trust {
@@ -3293,7 +3307,7 @@ dialog {
 }
 .pair-link-actions button.primary {
   background: var(--accent-blue);
-  color: #fff;
+  color: var(--on-accent-blue);
   border-color: var(--accent-blue);
 }
 .pair-link-actions button:hover { background: var(--bg-hover); }
@@ -3389,7 +3403,7 @@ dialog {
   font-family: inherit;
 }
 .remote-radios-action:hover { background: var(--bg-hover); }
-.remote-radios-action.primary { background: var(--accent-blue); color: #fff; border-color: var(--accent-blue); }
+.remote-radios-action.primary { background: var(--accent-blue); color: var(--on-accent-blue); border-color: var(--accent-blue); }
 .remote-radios-action.primary:hover { background: color-mix(in srgb, var(--accent-blue) 80%, #fff); }
 .remote-radios-action.danger { color: var(--accent-red); border-color: var(--accent-red); }
 .remote-radios-action.danger:hover { background: color-mix(in srgb, var(--accent-red) 12%, transparent); }
@@ -3442,7 +3456,7 @@ dialog {
 .remote-radios-list .rr-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
 .remote-radios-list .rr-actions button { font-size: 11px; padding: 3px 10px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-secondary); border-radius: 3px; cursor: pointer; font-family: inherit; }
 .remote-radios-list .rr-actions button:hover { background: var(--bg-hover); }
-.remote-radios-list .rr-actions button.primary { background: var(--accent-blue); color: #fff; border-color: var(--accent-blue); }
+.remote-radios-list .rr-actions button.primary { background: var(--accent-blue); color: var(--on-accent-blue); border-color: var(--accent-blue); }
 .remote-radios-list .rr-actions button.primary:hover { background: color-mix(in srgb, var(--accent-blue) 80%, #fff); }
 .remote-radios-list .rr-actions button.danger { color: var(--accent-red); border-color: var(--accent-red); }
 .remote-radios-list .rr-actions button.danger:hover { background: color-mix(in srgb, var(--accent-red) 12%, transparent); }
@@ -3500,7 +3514,7 @@ dialog {
 }
 .log-error-dialog .dialog-buttons button.primary {
   background: var(--accent-blue);
-  color: #fff;
+  color: var(--on-accent-blue);
   border: 1px solid var(--accent-blue);
   border-radius: 4px;
   padding: 8px 16px;
@@ -3545,7 +3559,7 @@ dialog {
   cursor: pointer;
   font-family: inherit;
 }
-.displaced-banner-actions button.primary { background: var(--accent-blue); color: #fff; border-color: var(--accent-blue); }
+.displaced-banner-actions button.primary { background: var(--accent-blue); color: var(--on-accent-blue); border-color: var(--accent-blue); }
 .displaced-banner-actions button:hover { background: var(--bg-hover); }
 
 /* Manage Operators dialog */
@@ -3674,7 +3688,7 @@ dialog {
 }
 .summary-card-actions .primary {
   background: var(--accent-blue);
-  color: #fff;
+  color: var(--on-accent-blue);
   border-color: var(--accent-blue);
 }
 .summary-card-actions .primary:hover {
@@ -5475,7 +5489,7 @@ a.settings-echocat-badge-link:hover {
   font-size: 12px;
   padding: 4px 12px;
   background: var(--accent-blue);
-  color: #fff;
+  color: var(--on-accent-blue);
   border: 1px solid var(--accent-blue);
   border-radius: 4px;
   cursor: pointer;
@@ -6985,7 +6999,7 @@ a.settings-echocat-badge-link:hover {
 
 .rig-btn-danger:hover {
   background: var(--accent-red);
-  color: #fff;
+  color: var(--on-accent-red);
   border-color: var(--accent-red);
 }
 
@@ -7553,7 +7567,7 @@ a.settings-echocat-badge-link:hover {
 .activator-stop-btn {
   background: var(--accent-red);
   border: none;
-  color: #fff;
+  color: var(--on-accent-red);
   padding: 4px 14px;
   border-radius: 4px;
   cursor: pointer;
@@ -7607,7 +7621,7 @@ a.settings-echocat-badge-link:hover {
 .activator-park-extra {
   display: inline-block;
   background: var(--accent-green);
-  color: #fff;
+  color: var(--on-accent-green);
   font-size: 11px;
   font-weight: 700;
   padding: 1px 5px;
@@ -7911,8 +7925,8 @@ a.settings-echocat-badge-link:hover {
   font-weight: 600;
   margin-left: auto;
 }
-.act-hist-delete-btn:hover { background: var(--accent-red); color: #fff; }
-.act-hist-delete-btn.confirm { background: var(--accent-red); color: #fff; animation: pulse-red 0.8s ease-in-out infinite; }
+.act-hist-delete-btn:hover { background: var(--accent-red); color: var(--on-accent-red); }
+.act-hist-delete-btn.confirm { background: var(--accent-red); color: var(--on-accent-red); animation: pulse-red 0.8s ease-in-out infinite; }
 @keyframes pulse-red { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
 /* History detail table */
 .act-hist-table {
@@ -8489,7 +8503,7 @@ body.activator-rbn-on #rbn-view {
 .directory-tab:last-child { border-radius: 0 4px 4px 0; border-left: none; }
 .directory-tab.active {
   background: var(--accent-blue, var(--accent-blue));
-  color: #fff;
+  color: var(--on-accent-blue);
   border-color: var(--accent-blue, var(--accent-blue));
 }
 .directory-search {
@@ -8944,7 +8958,7 @@ body.activator-rbn-on #rbn-view {
 .jtcat-band-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 .jtcat-band-btn.active {
   background: var(--accent-green, var(--accent-green));
-  color: #fff;
+  color: var(--on-accent-green);
   border-color: var(--accent-green, var(--accent-green));
   font-weight: 700;
 }
@@ -9139,7 +9153,7 @@ body.activator-rbn-on #rbn-view {
 }
 .jtcat-filter-btn.active {
   background: var(--accent-green, var(--accent-green));
-  color: #fff;
+  color: var(--on-accent-green);
   border-color: var(--accent-green, var(--accent-green));
 }
 
@@ -9249,15 +9263,15 @@ body.activator-rbn-on #rbn-view {
 }
 .jtcat-btn:hover { background: var(--bg-hover); }
 .jtcat-btn.active { background: var(--accent-green); color: #000; border-color: var(--accent-green); }
-.jtcat-btn.jtcat-transmitting { background: var(--accent-red); color: #fff; border-color: var(--accent-red); animation: jtcat-tx-pulse 1s ease-in-out infinite; }
+.jtcat-btn.jtcat-transmitting { background: var(--accent-red); color: var(--on-accent-red); border-color: var(--accent-red); animation: jtcat-tx-pulse 1s ease-in-out infinite; }
 @keyframes jtcat-tx-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
 
 .jtcat-halt-btn { color: var(--accent-red); border-color: var(--accent-red); }
-.jtcat-halt-btn:hover { background: var(--accent-red); color: #fff; }
+.jtcat-halt-btn:hover { background: var(--accent-red); color: var(--on-accent-red); }
 
 .jtcat-tune-btn { color: var(--accent-orange, var(--source-sota)); border-color: var(--accent-orange, var(--source-sota)); }
 .jtcat-tune-btn:hover { background: var(--accent-orange, var(--source-sota)); color: #000; }
-.jtcat-tune-btn.active { background: var(--accent-red); color: #fff; border-color: var(--accent-red); animation: jtcat-tx-pulse 1s ease-in-out infinite; font-variant-numeric: tabular-nums; }
+.jtcat-tune-btn.active { background: var(--accent-red); color: var(--on-accent-red); border-color: var(--accent-red); animation: jtcat-tx-pulse 1s ease-in-out infinite; font-variant-numeric: tabular-nums; }
 
 .jtcat-tx-message {
   display: flex;
@@ -9327,7 +9341,7 @@ body.activator-rbn-on #rbn-view {
 }
 .jtcat-qso-step.step-current {
   background: var(--accent-blue);
-  color: #fff;
+  color: var(--on-accent-blue);
   border-color: var(--accent-blue);
   font-weight: bold;
 }
@@ -9460,7 +9474,7 @@ main.banner-logger-active #event-progress-overlay {
   padding: calc(2px * var(--bl-scale, 1)) calc(6px * var(--bl-scale, 1));
   border-radius: 3px;
   background: var(--accent-red, var(--accent-red));
-  color: #fff;
+  color: var(--on-accent-red);
   cursor: help;
   user-select: none;
 }
@@ -9974,7 +9988,7 @@ main.banner-logger-active #event-progress-overlay {
 }
 .contest-pill-live {
   background: var(--accent-red);
-  color: #fff;
+  color: var(--on-accent-red);
   animation: contest-live-blink 2s ease-in-out infinite;
 }
 @keyframes contest-live-blink {
@@ -10434,7 +10448,7 @@ main.banner-logger-active #event-progress-overlay {
   background: var(--bg-tertiary); color: var(--accent-blue); border: 1px solid var(--accent-blue);
 }
 .rig-setup-btn:hover { background: var(--bg-hover); }
-.rig-setup-btn.needs-action { color: #fff; background: var(--accent-red); border-color: var(--accent-red); }
+.rig-setup-btn.needs-action { color: var(--on-accent-red); background: var(--accent-red); border-color: var(--accent-red); }
 .rig-setup-btn.needs-action:hover { filter: brightness(1.1); }
 .rig-setup-btn.empty { color: var(--text-tertiary); border-color: var(--border-secondary); font-weight: 400; }
 .rig-setup-panel { background: var(--bg-panel); border: 1px solid var(--border-secondary); border-radius: 4px; padding: 8px 10px; margin: 0 0 12px; }

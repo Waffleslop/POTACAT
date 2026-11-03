@@ -49,6 +49,9 @@ test('the quick toggle moves between a design theme\'s light and dark, and leave
   assert.strictEqual(AppTheme.toggledAppTheme('potacat-light', false), 'potacat-dark');
   assert.strictEqual(AppTheme.toggledAppTheme('midnight', false), 'midnight');
   assert.strictEqual(AppTheme.toggledAppTheme('classic', true), 'classic');
+  assert.strictEqual(AppTheme.toggledAppTheme('shes-on-frequency', true), 'shes-on-frequency', 'a light design theme stays itself');
+  assert.strictEqual(AppTheme.toggledAppTheme('shes-on-frequency', false), 'potacat-dark');
+  assert.strictEqual(AppTheme.toggledAppTheme('miami-nights', false), 'miami-nights');
 });
 
 test('applyToDocument sets and clears the three attributes', () => {
@@ -89,6 +92,47 @@ test('main window: the Theme picker is saved, loaded and applied through the sha
   assert.ok(/window\.AppTheme\.resolveAppTheme\(/.test(a));
   assert.ok(/id="set-app-theme"/.test(read('renderer/index.html')));
   assert.ok(/<script src="\.\.\/lib\/app-theme\.js"><\/script>/.test(read('renderer/index.html')));
+});
+
+test('no rule puts white text on a themed accent (Acid Burn green and cyan need black): the --on-* variables', () => {
+  const bad = [];
+  for (const f of fs.readdirSync(path.join(root, 'renderer')).filter((x) => /\.(css|html)$/.test(x) && !/^remote\./.test(x))) {
+    let src = read('renderer/' + f);
+    if (f.endsWith('.html')) src = (src.match(/<style[^>]*>[\s\S]*?<\/style>/g) || []).join('\n');
+    src = src.replace(/\/\*[\s\S]*?\*\//g, '');
+    for (const m of src.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (/background(?:-color)?:\s*var\(--(accent-red|accent-blue|accent-green|accent-green-btn|accent|tx-active|red|ptt|ptt-on)\b/.test(m[2])
+        && /(^|[;\s])color:\s*(#fff\b|#ffffff\b|white\b)/i.test(m[2])) bad.push(f + ': ' + m[1].trim());
+    }
+  }
+  assert.deepStrictEqual(bad, []);
+  const b = read('renderer/ds-bridge.css');
+  for (const v of ['--on-accent-red', '--on-accent-blue', '--on-accent-green', '--on-tx-active']) assert.ok(b.includes(v + ':'), v);
+});
+
+test('one window title: every title bar reads the shared --titlebar-* values', () => {
+  assert.ok(/\.titlebar-title \{\n  font-size: var\(--titlebar-font-size\);/.test(read('renderer/styles.css')));
+  for (const [f, sel] of [['log-popout.html', '.lp-titlebar {'], ['winlink-popout.html', '.wl-title {'], ['mercury-popout.html', '.mq-title {'], ['scope-popout.html', '.sc-titlebar-title {'], ['sstv-popout.html', '.sstv-titlebar-title {'], ['atu-wizard-popout.html', '.aw-titlebar-title {']]) {
+    const src = read('renderer/' + f);
+    const i = src.indexOf(sel);
+    assert.ok(i >= 0 && src.slice(i, src.indexOf('}', i)).includes('var(--titlebar-font-size)'), f);
+  }
+  // A bar sized by padding alone came out 29 px, and the macOS traffic lights
+  // (y 6-22) sat on Winlink's "Send via" row (N0KAH, 1.13.6).
+  for (const [f, sel] of [['log-popout.html', '.lp-titlebar {'], ['winlink-popout.html', '.wl-titlebar {'], ['mercury-popout.html', '.mq-titlebar {'], ['scope-popout.html', '.sc-titlebar {'], ['sstv-popout.html', '.sstv-titlebar {'], ['atu-wizard-popout.html', '.aw-titlebar {']]) {
+    const src = read('renderer/' + f);
+    const i = src.indexOf(sel);
+    assert.ok(/height: var\(--titlebar-h\)/.test(src.slice(i, src.indexOf('}', i))), f + ' bar height');
+  }
+});
+
+test('the VFO window (self-styled) follows a design theme: data-ds at boot, its own token block, the dial re-reads on change', () => {
+  const boot = read('renderer/popout-theme-boot.js');
+  assert.ok(/ds: q\.get\('ds'\)/.test(boot) && /setAttribute\('data-ds'/.test(boot));
+  const v = read('renderer/vfo-popout.html');
+  assert.ok(v.includes('<link rel="stylesheet" href="tokens.css">'));
+  assert.ok(/:root\[data-ds\] \{[\s\S]*?--g: var\(--ds-bg\)/.test(v));
+  assert.ok(/new MutationObserver\(\(\) => \{ readKnobColors\(\); drawVfoDial\(\); \}\)/.test(v));
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

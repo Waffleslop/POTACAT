@@ -24,14 +24,18 @@
   function normalize(p) {
     if (typeof p === 'string') return { theme: p === 'light' ? 'light' : 'dark', variant: 'navy' };
     p = p || {};
-    return { theme: p.theme === 'light' ? 'light' : 'dark', variant: p.variant || 'navy' };
+    return { theme: p.theme === 'light' ? 'light' : 'dark', variant: p.variant || 'navy', ds: p.ds };
   }
 
   function applyPopoutTheme(p) {
     var t = normalize(p);
     var el = document.documentElement;
     el.setAttribute('data-theme', t.theme);
-    if (t.theme === 'dark' && t.variant && t.variant !== 'navy') {
+    // A design-system theme (lib/app-theme.js) stamps data-ds = its token
+    // column; a payload without the key (string form) leaves it alone.
+    if (t.ds && /^[a-z]+$/.test(t.ds)) el.setAttribute('data-ds', t.ds);
+    else if (t.ds !== undefined) el.removeAttribute('data-ds');
+    if (t.theme === 'dark' && t.variant && t.variant !== 'navy' && !t.ds) {
       el.setAttribute('data-dark-variant', t.variant);
     } else {
       el.removeAttribute('data-dark-variant');
@@ -43,7 +47,7 @@
   // Apply from the loadFile query synchronously, before first paint.
   try {
     var q = new URLSearchParams(window.location.search || '');
-    applyPopoutTheme({ theme: q.get('theme'), variant: q.get('variant') });
+    applyPopoutTheme({ theme: q.get('theme'), variant: q.get('variant'), ds: q.get('ds') });
   } catch (e) {
     // No query / parse failure → leave the stylesheet's default (dark).
   }

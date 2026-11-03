@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <script src="popout-theme-boot.js"></script>
+  <link rel="stylesheet" href="tokens.css">
   <title>VFO</title>
   <style>
     /* Three themes, matching styles.css: navy (default), charcoal, light.
@@ -14,7 +15,7 @@
       --t: #e0e0e0; --t2: #b4b4c8; --t3: #8e8ea8;
       --blue: #4fc3f7; --green: #4ecca3; --red: #e94560; --gold: #ffd740; --amber: #f0a500;
       --on-blue: #0d1b2a; --green-tint: rgba(78,204,163,.16); --red-tint: #3a1828; --red-text: #ffc7d1;
-      --ptt: #c8334f; --ptt-on: #e94560; --log-bg: rgba(78,204,163,.16);
+      --ptt: #c8334f; --ptt-on: #e94560; --on-red: #fff; --on-ptt: #fff; --log-bg: rgba(78,204,163,.16);
       --knob-housing-a: #404058; --knob-housing-b: #2a2a3a; --knob-housing-c: #1a1a28; --knob-base: #222233;
       --knob-a: #4a4a62; --knob-b: #353548; --knob-c: #28283a;
       --knob-ridge: rgba(255,255,255,0.1); --knob-bevel: rgba(255,255,255,0.08);
@@ -55,6 +56,26 @@
       --sheet-shadow: 0 -8px 30px rgba(20,30,60,.18);
       --bg-hover: #d0d4da; --border: #c0c4cc; --text-dimmer: #8a8a9a;
     }
+    /* A design-system theme (Settings > Display > Theme, lib/app-theme.js):
+       this window is self-styled, so it points its own short tokens at the
+       theme's roles here, as ds-bridge.css does for every styles.css window. */
+    :root[data-ds] {
+      --g: var(--ds-bg); --s: var(--ds-surface); --s2: var(--ds-fill);
+      --s3: color-mix(in srgb, var(--ds-fill), var(--ds-ink) 10%); --in: var(--ds-control); --line: var(--ds-line-subtle);
+      --t: var(--ds-ink); --t2: var(--ds-ink-muted); --t3: var(--ds-ink-muted);
+      --blue: var(--ds-tint); --green: var(--ds-ok); --red: var(--ds-air-ink); --gold: var(--ds-brand); --amber: var(--ds-warn);
+      --on-blue: var(--ds-on-tint); --on-red: var(--ds-on-danger); --on-ptt: var(--ds-on-air);
+      --green-tint: var(--ds-ok-subtle); --red-tint: var(--ds-danger-subtle); --red-text: var(--ds-danger);
+      --ptt: var(--ds-air-deep); --ptt-on: var(--ds-air); --log-bg: var(--ds-ok-subtle);
+      --knob-housing-a: color-mix(in srgb, var(--ds-fill), var(--ds-ink) 18%); --knob-housing-b: var(--ds-fill); --knob-housing-c: var(--ds-surface); --knob-base: var(--ds-bg);
+      --knob-a: color-mix(in srgb, var(--ds-fill), var(--ds-ink) 14%); --knob-b: color-mix(in srgb, var(--ds-fill), var(--ds-ink) 6%); --knob-c: var(--ds-fill);
+      --knob-ridge: color-mix(in srgb, var(--ds-ink) 14%, transparent); --knob-bevel: color-mix(in srgb, var(--ds-ink) 10%, transparent);
+      --knob-dimple-a: var(--ds-surface); --knob-dimple-b: var(--ds-fill);
+      --card-shadow: var(--ds-shadow-card); --sheet-shadow: var(--ds-shadow-sheet);
+      --bg-hover: color-mix(in srgb, var(--ds-fill), var(--ds-ink) 8%); --border: var(--ds-line); --text-dimmer: color-mix(in srgb, var(--ds-ink-muted), var(--ds-bg) 25%);
+    }
+    /* Acid Burn is mono throughout, as on the phone and in every other window. */
+    :root[data-ds="acid"] body, :root[data-ds="acid"] button, :root[data-ds="acid"] input, :root[data-ds="acid"] select { font-family: var(--ds-font-mono); }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
@@ -72,10 +93,11 @@
 
     /* --- Title bar (frameless) --- */
     .titlebar {
-      display: flex; align-items: center; gap: 2px; height: 36px; flex: none;
+      display: flex; align-items: center; gap: 2px; height: 32px; flex: none;
       padding: 0 6px 0 14px; -webkit-app-region: drag;
     }
-    .titlebar-title { font-size: 12px; font-weight: 600; letter-spacing: .08em; color: var(--t3); flex: 1; }
+    /* Same title as every other window (styles.css --titlebar-*). */
+    .titlebar-title { font-size: 12px; font-weight: 700; letter-spacing: 0.3px; color: var(--t2); flex: 1; }
     .titlebar-btns { -webkit-app-region: no-drag; display: flex; gap: 2px; }
     /* macOS: the system traffic lights replace minimize/close (popout-theme-boot.js). */
     .platform-darwin .titlebar { padding-left: 80px; }
@@ -87,7 +109,7 @@
     }
     .ib:hover { background: var(--s2); color: var(--t); }
     .ib.on { color: var(--blue); }
-    .ib.close-btn:hover { background: var(--red); color: #fff; }
+    .ib.close-btn:hover { background: var(--red); color: var(--on-red); }
     .ib svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
     /* --- Layout --- */
@@ -103,7 +125,7 @@
     .chip.vfoab { background: var(--s3); color: var(--t); }
     .chip.split { background: var(--amber); color: #111; font-weight: 600; }
     .chip.sdr { background: var(--green); color: #111; font-weight: 600; }
-    .chip.tx { background: var(--ptt-on); color: #fff; font-weight: 600; }
+    .chip.tx { background: var(--ptt-on); color: var(--on-ptt); font-weight: 600; }
     select.chip { appearance: none; -webkit-appearance: none; font-family: inherit; outline: none; }
     select.chip option { background: var(--s); color: var(--t); }
     .lbl { font-size: 10px; font-weight: 600; line-height: 1; letter-spacing: .12em; color: var(--t3); text-transform: uppercase; }
@@ -131,7 +153,7 @@
     .freq-unit { font-size: 12px; color: var(--t3); }
     .audio-btn.active { color: var(--green); }
     .audio-btn.muted { color: var(--red); }
-    .vfo-lock-btn.locked { background: var(--red); color: #fff; animation: lock-pulse 1.5s ease-in-out infinite; }
+    .vfo-lock-btn.locked { background: var(--red); color: var(--on-red); animation: lock-pulse 1.5s ease-in-out infinite; }
     @keyframes lock-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
 
     /* Meters (inside the header card) */
@@ -153,7 +175,7 @@
     .swr-alert-text { font-size: 13px; line-height: 1.5; }
     .swr-alert-btns { display: flex; gap: 8px; }
     .swr-alert-btns button { height: 44px; border: 0; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; }
-    #swr-tune-btn { flex: 1; background: var(--ptt-on); color: #fff; }
+    #swr-tune-btn { flex: 1; background: var(--ptt-on); color: var(--on-ptt); }
     #swr-override-btn { padding: 0 16px; background: transparent; color: var(--red-text); font-weight: 500; font-size: 13px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red-text) 40%, transparent); }
 
     /* --- Knob + activator card --- */
@@ -172,7 +194,7 @@
     .op-ref-row { display: flex; align-items: center; gap: 6px; margin-top: 4px; min-width: 0; }
     .op-ref-row .chip { padding: 4px 6px; }
     .op-ref { color: var(--green); font-weight: 600; font-size: 13px; font-family: 'Cascadia Mono', Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .op-dupe { display: inline-block; background: var(--red); color: #fff; font-weight: 700; font-size: 11px; letter-spacing: .06em; padding: 3px 7px; border-radius: 5px; cursor: help; align-self: flex-start; }
+    .op-dupe { display: inline-block; background: var(--red); color: var(--on-red); font-weight: 700; font-size: 11px; letter-spacing: .06em; padding: 3px 7px; border-radius: 5px; cursor: help; align-self: flex-start; }
     /* HF Net card */
     .op-net-name { color: var(--gold); font-weight: 600; font-size: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .op-net-badge { align-self: flex-start; background: var(--gold); color: #000; font-weight: 700; font-size: 11px; letter-spacing: .08em; padding: 3px 8px; border-radius: 999px; }
@@ -240,7 +262,7 @@
     .cw-macro-btn:hover, .voice-macro-btn:hover { background: var(--s3); }
     .voice-macro-btn.active { background: var(--blue); color: var(--on-blue); }
     .voice-macro-btn.empty { opacity: 0.35; cursor: default; }
-    .voice-stop-btn, .cw-cancel-btn { border: 0; background: var(--red); color: #fff; padding: 7px 10px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: 600; }
+    .voice-stop-btn, .cw-cancel-btn { border: 0; background: var(--red); color: var(--on-red); padding: 7px 10px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: 600; }
     .ptt-log-row { display: flex; gap: 6px; align-items: center; }
     .sdr-btn-vfo { border: 0; padding: 9px 12px; font-size: 13px; font-weight: 600; background: var(--s2); color: var(--gold); border-radius: 8px; cursor: pointer; }
     .sdr-btn-vfo:hover { background: var(--s3); }
@@ -266,7 +288,7 @@
     .bar { flex: none; padding: 12px; background: var(--s); display: flex; gap: 8px; border-top: 1px solid var(--line); }
     .bar.widget-section.visible { display: flex; }
     .ptt-btn {
-      flex: 1; height: 52px; border: 0; border-radius: 12px; background: var(--ptt); color: #fff;
+      flex: 1; height: 52px; border: 0; border-radius: 12px; background: var(--ptt); color: var(--on-ptt);
       font-size: 16px; font-weight: 600; letter-spacing: .08em; cursor: pointer;
       display: flex; align-items: center; justify-content: center; gap: 8px;
     }
@@ -381,7 +403,7 @@
     /* --- Toast + mode picker --- */
     .vfo-lock-toast {
       position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: calc(100% - 40px);
-      background: var(--red); color: #fff; padding: 12px 18px; border-radius: 10px; text-align: center;
+      background: var(--red); color: var(--on-red); padding: 12px 18px; border-radius: 10px; text-align: center;
       font-size: 14px; font-weight: 600; z-index: 9999; pointer-events: none;
       box-shadow: 0 6px 24px rgba(0,0,0,.4); opacity: 0; transition: opacity 0.2s;
     }
@@ -1424,15 +1446,25 @@ sizeDialCanvas();
 let knobColors = null;
 function readKnobColors() {
   const cs = getComputedStyle(document.documentElement);
-  const v = (n) => cs.getPropertyValue(n).trim();
+  // A design theme writes some of these as color-mix(), which a canvas
+  // gradient refuses; a probe element turns each into the rgb it computes to.
+  const probe = document.createElement('i');
+  probe.style.display = 'none';
+  document.body.appendChild(probe);
+  const v = (n) => { probe.style.color = ''; probe.style.color = cs.getPropertyValue(n).trim(); return getComputedStyle(probe).color; };
   knobColors = {
     base: v('--knob-base'), ha: v('--knob-housing-a'), hb: v('--knob-housing-b'), hc: v('--knob-housing-c'),
     bevel: v('--knob-bevel'), mark: v('--green'),
     ka: v('--knob-a'), kb: v('--knob-b'), kc: v('--knob-c'),
     ridge: v('--knob-ridge'), da: v('--knob-dimple-a'), db: v('--knob-dimple-b'),
   };
+  probe.remove();
 }
 readKnobColors();
+// A theme change from Settings arrives as attributes on <html> (main's
+// broadcastAppTheme), not through onTheme, so the dial follows those too.
+new MutationObserver(() => { readKnobColors(); drawVfoDial(); })
+  .observe(document.documentElement, { attributes: true, attributeFilter: ['data-ds', 'data-theme', 'data-dark-variant'] });
 let vfoAngle = 0, vfoAccum = 0;
 const STEP_ANGLE = Math.PI / 6; // 30 deg per step
 
