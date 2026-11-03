@@ -25757,13 +25757,16 @@ window.api.onFreedvAutoStop(() => {
 // RX speech playback — decoded voice through speakers
 window.api.onFreedvRxSpeech(async (data) => {
   try {
-    if (!freedvRxPlaybackCtx || freedvRxPlaybackCtx.state === 'closed') {
-      freedvRxPlaybackCtx = new AudioContext({ sampleRate: 8000 });
+    // The codec's speech rate: 8 kHz, but 16 kHz (wideband) for RADE.
+    const rate = data.rate || 8000;
+    if (!freedvRxPlaybackCtx || freedvRxPlaybackCtx.state === 'closed' || freedvRxPlaybackCtx.sampleRate !== rate) {
+      if (freedvRxPlaybackCtx && freedvRxPlaybackCtx.state !== 'closed') freedvRxPlaybackCtx.close().catch(() => {});
+      freedvRxPlaybackCtx = new AudioContext({ sampleRate: rate });
     }
     const samples = new Int16Array(data.samples);
     const floats = new Float32Array(samples.length);
     for (let i = 0; i < samples.length; i++) floats[i] = samples[i] / 32768;
-    const buffer = freedvRxPlaybackCtx.createBuffer(1, floats.length, 8000);
+    const buffer = freedvRxPlaybackCtx.createBuffer(1, floats.length, rate);
     buffer.getChannelData(0).set(floats);
     const source = freedvRxPlaybackCtx.createBufferSource();
     source.buffer = buffer;

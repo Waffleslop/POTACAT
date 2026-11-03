@@ -195,6 +195,7 @@ const TESTS = [
   'test/wspr-power-memory-test.js',
   'test/js8-native-test.js',
   'test/rade-native-test.js',
+  'test/freedv-playback-test.js',
   'test/js8-varicode-test.js',
   'test/js8-qso-test.js',
   'test/js8-rx-assembler-test.js',
