@@ -36164,7 +36164,7 @@ app.whenReady().then(() => {
       }
       if (result.skipped) {
         detail.push(`${result.skipped.toLocaleString()} skipped: unreadable entries, or contacts POTA.app gives no usable mode for `
-          + '(only DATA), which are never added (SKIPPED rows in the review log).');
+          + '(only DATA, with no digital mode logged), which are never added (SKIPPED rows in the review log).');
       }
       if (dryRun) detail.push('', 'Dry run: your logbook was not changed. Run Import hunter log to apply.');
       if (backupPath) detail.push('', `Your log before the import was saved to:\n${backupPath}`);
