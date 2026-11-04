@@ -7857,12 +7857,16 @@ async function connectCat() {
     resetIcomNetworkRxPacer('CAT reconnect');
     cat.removeAllListeners();
     cat.disconnect();
+    const _oldCatClosed = cat._closedPromise;
     _icomNetworkTransport = null;
     // The dial belonged to the rig we just dropped; the next one reports its
     // own. Left in place it posed as the new rig's frequency (N4FFF 2026-10-04).
     _currentFreqHz = 0;
-    // Brief delay to let serial port fully release before reconnecting
-    // (prevents "Resource busy" on macOS when switching rigs)
+    // Wait for the OS to give the old serial port back before opening one
+    // (KK6EZA IC-705: "Opening COM6: Access denied" for 2.5 min after a
+    // reconnect). The close callback, capped at 3 s; then the old 300 ms
+    // settle ("Resource busy" on macOS when switching rigs).
+    if (_oldCatClosed) await Promise.race([_oldCatClosed, new Promise(r => setTimeout(r, 3000))]);
     await new Promise(r => setTimeout(r, 300));
   }
   // Determine paddle-availability proactively for the new rig so auth-ok carries
