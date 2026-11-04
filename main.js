@@ -16473,7 +16473,10 @@ async function jtcatAutoLog(qso, opts) {
     return;
   }
   const qsoData = {
-    callsign: q.call.toUpperCase(),
+    // q.logCall: a hound reply calls the fox's BASE call on the air (WSJT-X
+    // rule), but the contact is with the call the fox sent: 6W/IK2HKT is
+    // Senegal, IK2HKT is Italy (level_death 2026-11-04).
+    callsign: String(q.logCall || q.call).toUpperCase(),
     frequency: String(freqKhz),
     mode,
     band,
@@ -25064,6 +25067,7 @@ function connectRemote() {
     const foxClick = !!(data.text && (JtcatParser.inferReplyStep({ text: data.text }, myCall) || {}).fox);
     const houndReply = (!!settings.jtcatHoundMode || foxClick) && !jtcatFdContext();
     if (foxClick && !settings.jtcatHoundMode) sendCatLog('[JTCAT] Calling a DXpedition Fox (compound message) as a Hound: above 1000 Hz, its base call, no 73');
+    const houndFullCall = (houndReply && call) ? String(call).replace(/[<>]/g, '') : '';
     if (houndReply && call) call = JtcatParser.normalizeCall(call) || call;
     let replyTxFreq = df;
     if (houndReply && replyTxFreq < 1000) replyTxFreq = 1000 + Math.floor(Math.random() * 2000);
@@ -25122,7 +25126,7 @@ function connectRemote() {
       txMsg = jtcatDirectedMsg(call, myCall, 'R' + ourRpt);
       phase = 'r+report';
       remoteJtcatQso = { mode: 'reply', call, grid: theirGrid, phase, txMsg, report: theirReport, sentReport: ourRpt, myCall, myGrid, txRetries: 0, sliceId: sliceKey };
-      if (houndReply) remoteJtcatQso.hound = true;
+      if (houndReply) { remoteJtcatQso.hound = true; if (houndFullCall && houndFullCall !== remoteJtcatQso.call) remoteJtcatQso.logCall = houndFullCall; }
     } else if (nextStep === 'send-report') {
       // CQ SIDE: they answered our CQ with their grid → we send a signal report.
       // CQ-mode phase 'cq-report' so the SM advances (their R-report → cq-rr73 +
@@ -25153,7 +25157,7 @@ function connectRemote() {
     } else if (phase === 'reply') {
       // Fresh reply with our grid (or report, in Skip Grid) — new QSO entry.
       remoteJtcatQso = { mode: 'reply', call, grid: theirGrid, phase: 'reply', txMsg, report: null, sentReport: remoteReplySentRpt, myCall, myGrid, txRetries: 0, sliceId: sliceKey };
-      if (houndReply) remoteJtcatQso.hound = true;
+      if (houndReply) { remoteJtcatQso.hound = true; if (houndFullCall && houndFullCall !== remoteJtcatQso.call) remoteJtcatQso.logCall = houndFullCall; }
       await remoteJtcatSetTxMsg(txMsg);
       targetEngine._txEnabled = true;
       targetEngine.tryImmediateTx();
@@ -40572,6 +40576,7 @@ function cloudShackNotice(text, kind) {
     // Hounds call the fox's BASE call (KH7Z, not KH1/KH7Z) — WSJT-X rule. The
     // base call is standard c28, so our Tx1 keeps its grid; fox dual messages
     // still match because <KH1/KH7Z> contains the base as a substring.
+    const houndFullCall = (houndReply && data.call) ? String(data.call).replace(/[<>]/g, '') : '';
     if (houndReply && data.call) data.call = JtcatParser.normalizeCall(data.call) || data.call;
 
     let txMsg, phase;
@@ -40617,7 +40622,7 @@ function cloudShackNotice(text, kind) {
         sentReport: ourRpt,
         myCall, myGrid, txRetries: 0, sliceId: replySliceId,
       };
-      if (houndReply) popoutJtcatQso.hound = true;
+      if (houndReply) { popoutJtcatQso.hound = true; if (houndFullCall && houndFullCall !== popoutJtcatQso.call) popoutJtcatQso.logCall = houndFullCall; }
     } else if (nextStep === 'send-report') {
       // They answered OUR CQ with their grid (their step 2) → we're the CQ SIDE
       // sending a signal report (step 3). Use CQ-mode phase 'cq-report' so the
@@ -40691,7 +40696,7 @@ function cloudShackNotice(text, kind) {
       popoutJtcatQso = { mode: 'reply', call: data.call, grid: data.grid, phase, txMsg, report: null, sentReport: skipSentRpt, myCall, myGrid, txRetries: 0, sliceId: replySliceId };
       const fdCtx = jtcatFdContext();
       if (fdCtx) { popoutJtcatQso.fd = true; popoutJtcatQso.myExch = fdCtx.myExch; }
-      if (houndReply) popoutJtcatQso.hound = true;
+      if (houndReply) { popoutJtcatQso.hound = true; if (houndFullCall && houndFullCall !== popoutJtcatQso.call) popoutJtcatQso.logCall = houndFullCall; }
       replyEngine._txEnabled = true;
       await replyEngine.setTxMessage(txMsg);
       replyEngine.tryImmediateTx();
