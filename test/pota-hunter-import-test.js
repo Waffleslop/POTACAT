@@ -5,7 +5,8 @@
 // never got: a matching QSO with no park gains the park reference(s), one with
 // a different park is a CONFLICT and left alone, an activator's repeated row or
 // a contact already in the log is a DUPLICATE, a missing one is added only when
-// the operator opts in (with an ADIF mode; DATA-only contacts never), a 2-fer
+// the operator opts in (in the activator's logged mode when it is an ADIF one;
+// DATA with no digital mode logged never), a 2-fer
 // (one pota.app row per park) is one contact, the log is backed up before the
 // write, and a review CSV accounts for every row, with formulas written as text.
 // Run: node test/pota-hunter-import-test.js
@@ -455,6 +456,54 @@ test('PHONE is added as SSB on HF and 6 m, FM on 2 m and up, and says it was inf
   assert.strictEqual(phone('20M').modeInferred, true);
   assert.strictEqual(addOne({ mode: 'SSB' }).adds[0].modeInferred, false);
 });
+// pota.app's `mode` is only CW / PHONE / DATA; `loggedMode` is the mode the
+// activator logged, and is the record's mode when it is an ADIF one.
+test('loggedMode: a DATA row is added in the mode the activator logged', () => {
+  const ms = (loggedMode) => { const r = addOne({ mode: 'DATA', loggedMode }).adds[0].record; return [r.MODE, r.SUBMODE]; };
+  assert.deepStrictEqual(ms('FT8'), ['FT8', undefined]);
+  assert.deepStrictEqual(ms('FT4'), ['MFSK', 'FT4']);
+  assert.deepStrictEqual(ms('MFSK'), ['MFSK', undefined]);
+  assert.deepStrictEqual(ms('PKT'), ['PKT', undefined]);
+  assert.deepStrictEqual(ms('JS8'), ['MFSK', 'JS8'], 'via adifModeSubmode');
+  assert.deepStrictEqual(ms('psk31'), ['PSK', 'PSK31'], 'case-insensitive, via adifModeSubmode');
+  assert.deepStrictEqual(ms('RTTY'), ['RTTY', undefined]);
+});
+test('loggedMode: DATA logged as no ADIF digital mode (DIG, empty, a phone mode) is still not added', () => {
+  const reason = (loggedMode) => {
+    const p = addOne({ mode: 'DATA', loggedMode });
+    assert.strictEqual(p.adds.length, 0, `DATA/${loggedMode} not added`);
+    return p.skipped[0].reason;
+  };
+  assert.strictEqual(reason('DIG'), 'pota.app gives only DATA, and the logged mode DIG is not an ADIF digital mode: not added');
+  assert.strictEqual(reason('SSB'), 'pota.app gives only DATA, and the logged mode SSB is not an ADIF digital mode: not added');
+  assert.strictEqual(reason(''), 'pota.app gives only DATA, not the digital mode: not added');
+  assert.strictEqual(reason('DATA'), 'pota.app gives only DATA, not the digital mode: not added');
+});
+test('loggedMode: PHONE takes the logged SSB / FM (not a guess from the band); USB is SSB/USB', () => {
+  const add = (over) => addOne({ mode: 'PHONE', ...over }).adds[0];
+  const ssb2m = add({ band: '2M', loggedMode: 'SSB' });
+  assert.strictEqual(ssb2m.record.MODE, 'SSB', 'SSB on 2 m, as logged');
+  assert.strictEqual(ssb2m.modeInferred, false);
+  assert.strictEqual(add({ band: '10M', loggedMode: 'FM' }).record.MODE, 'FM');
+  const usb = add({ loggedMode: 'USB' }).record;
+  assert.deepStrictEqual([usb.MODE, usb.SUBMODE], ['SSB', 'USB']);
+  // a logged mode of another kind is not trusted: back to the band
+  const odd = add({ band: '20M', loggedMode: 'FT8' });
+  assert.deepStrictEqual([odd.record.MODE, odd.modeInferred], ['SSB', true]);
+  assert.strictEqual(addOne({ mode: 'CW', loggedMode: 'CW' }).adds[0].record.MODE, 'CW');
+  assert.strictEqual(addOne({ mode: 'CW', loggedMode: 'SSB' }).adds[0].record.MODE, 'CW', 'CW stays CW');
+});
+test('loggedMode: the review CSV keeps pota.app\'s word and notes the logged mode', () => {
+  const csv = H.planToCsv(addOne({ station_callsign: 'W9FT8', mode: 'DATA', loggedMode: 'FT4' }), {});
+  const row = csv.split('\r\n').find((l) => l.startsWith('ADDED,'));
+  assert.ok(row.startsWith('ADDED,W9FT8,20260501,142000,20m,DATA,US-1234,'), row);
+  assert.ok(row.endsWith('not in local log; logged as MFSK/FT4'), row);
+});
+test('loggedMode does not change matching: a DATA row logged as FT8 still matches a local FT4 QSO', () => {
+  const plan = H.planHunterImport([local({ MODE: 'MFSK', SUBMODE: 'FT4' })], [entry({ mode: 'DATA', loggedMode: 'FT8' })], ADD);
+  assert.strictEqual(plan.updates.length, 1);
+  assert.strictEqual(plan.adds.length, 0);
+});
 test('an added FT4 record is the same contact as a logged MFSK/FT4 one (planImport)', () => {
   const plan = H.planHunterImport([], [
     entry({ station_callsign: 'W9FT', mode: 'FT4', qsoDateTime: '2026-05-01T14:20:00' }),
@@ -738,17 +787,27 @@ test('fixture: the row with no station_callsign takes the operator\'s call', () 
   assert.strictEqual(c.call, row.operator_callsign);
   assert.strictEqual(c.callFromOperator, true);
 });
-test('fixture: against an empty log, adding on: adds, the repeated row, DATA skipped', () => {
+test('fixture: against an empty log, adding on: adds in the logged mode, the repeated row, DIG skipped', () => {
   const plan = H.planHunterImport([], FIXTURE.entries, { ...FX_CALLS, ...ADD });
-  assert.strictEqual(plan.adds.length, 12);
+  assert.strictEqual(plan.adds.length, 17);
   assert.deepStrictEqual(plan.duplicates.map((d) => [d.contact.qsoDate, d.contact.timeOn, d.kind]), [['20220219', '184002', 'repeat']]);
-  assert.strictEqual(plan.skipped.length, 6);
-  assert.ok(plan.skipped.every((s) => s.contact && s.contact.mode === 'DATA'));
-  const modes = Object.fromEntries(plan.adds.map((a) => [`${a.contact.qsoDate} ${a.contact.band}`, a.record.MODE]));
+  // DATA logged as DIG: not an ADIF mode, so the one contact still not added
+  assert.deepStrictEqual(plan.skipped.map((s) => [s.contact.qsoDate, s.reason]),
+    [['20220601', 'pota.app gives only DATA, and the logged mode DIG is not an ADIF digital mode: not added']]);
+  const mode = (a) => (a.record.SUBMODE ? `${a.record.MODE}/${a.record.SUBMODE}` : a.record.MODE);
+  const modes = Object.fromEntries(plan.adds.map((a) => [`${a.contact.qsoDate} ${a.contact.band}`, mode(a)]));
+  // pota.app's DATA rows, as the activator logged them
+  assert.strictEqual(modes['20210925 40m'], 'FT8');
+  assert.strictEqual(modes['20220113 3cm'], 'FT8');
+  assert.strictEqual(modes['20211124 80m'], 'MFSK');
+  assert.strictEqual(modes['20220722 20m'], 'MFSK/FT4');
+  assert.strictEqual(modes['20231215 70cm'], 'PKT');
+  // PHONE rows: the logged SSB / FM, not a guess from the band
   assert.strictEqual(modes['20230722 2m'], 'FM');
   assert.strictEqual(modes['20231201 70cm'], 'FM');
   assert.strictEqual(modes['20211013 40m'], 'SSB');
   assert.strictEqual(modes['20020614 15m'], 'CW');
+  assert.ok(plan.adds.every((a) => !a.modeInferred), 'every fixture row gives its logged mode');
   const twoFer = plan.adds.find((a) => a.contact.qsoDate === '20220730');
   assert.strictEqual(twoFer.record.POTA_REF, 'US-1960,US-4239');
   assert.ok(plan.adds.every((a) => a.record.STATION_CALLSIGN === 'Q0HNT'));
