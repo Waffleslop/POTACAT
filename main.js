@@ -348,6 +348,8 @@ const { FlrigCodec, flrigModel } = require('./lib/codecs/flrig-codec');
 const { FlrigTransport, probeFlrig } = require('./lib/flrig-transport');
 const { CivCodec } = require('./lib/codecs/civ-codec');
 const IcomScope = require('./lib/icom-scope');
+const { CommanderCodec, commanderModel, probeCommander } = require('./lib/codecs/commander-codec');
+const CommanderSequences = require('./lib/commander-sequences');
 const { getTuneQuirks, resolveSerialHandshake } = require('./lib/rig-models');
 const { gridToLatLon, latLonToGrid, haversineDistanceMiles, bearing } = require('./lib/grid');
 const ActivationMapData = require('./lib/activation-map-data');
@@ -3027,6 +3029,7 @@ function detectRigType() {
   if (target.type === 'icom' || target.type === 'civ-tcp' || target.type === 'icom-network') return 'icom';
   if (target.type === 'rigctld' || target.type === 'rigctldnet') return 'rigctld';
   if (target.type === 'flrig') return 'flrig';
+  if (target.type === 'dxlab-commander') return 'commander';
   if (target.type === 'tcp') {
     // NOT every TCP CAT target is a Flex. SmartSDR's CAT shim is localhost-only
     // on 5002-5005; a Hermes Lite 2 behind Thetis or Zeus is a TS-2000 emulator
@@ -3080,6 +3083,15 @@ function getActiveRigModel() {
   const rigType = detectRigType();
   // An explicit rigs[].model that names a known entry wins outright.
   const explicit = modelName ? getModel(modelName, null) : null;
+  // DXLab Commander holds the radio, like flrig: the picked Radio Model lends
+  // its bands, power range and presets, and the controls are Commander's plus
+  // the ones mapped to Commander command sequences. The codec needs the same
+  // sequences and decimal style, so they ride on the model
+  // (lib/codecs/commander-codec.js commanderModel).
+  if (rigType === 'commander') {
+    const t = (activeRig && activeRig.catTarget) || settings.catTarget || {};
+    return commanderModel(explicit, { sequences: t.sequences, decimal: t.decimal });
+  }
   // flrig holds the radio: the picked Radio Model supplies bands, power limits
   // and presets; the protocol and caps are the flrig codec's, whatever brand
   // the model is (lib/codecs/flrig-codec.js flrigModel).
@@ -3228,7 +3240,7 @@ function _rigCapabilitiesForType(rigType) {
     // CI-V 0x14 03, Hamlib L SQL, Flex slice squelch). Clients gate it to FM
     // mode. See lib/rig-controls.js 'set-squelch'. An unsupported SQ just
     // returns a harmless rejection.
-    caps.squelch = true;
+    caps.squelch = model.protocol !== 'commander'; // Commander's TCP interface has no squelch command
     // VFO/split — readback-backed on Kenwood serial (IF;) and rigctld (v/s),
     // so those get the split control + trustworthy indicator. Yaesu keeps
     // vfo (VS;/SV; writes work; indicator optimistic) but not split until
@@ -8134,6 +8146,26 @@ async function connectCat() {
     cat.on('swr', sendCatSwr);
     const { host, port } = resolveCatHostPort(target, 12345, 'flrig');
     sendCatLog(`Connecting to flrig on ${host}:${port}`);
+    transport.connect({ host, port });
+
+  } else if (target.type === 'dxlab-commander') {
+    // DXLab Commander's TCP command port (Base Port + 2, 52002 by default).
+    // getActiveRigModel() already returned commanderModel(picked model): this
+    // rig's decimal style and command sequences, and the sequences in its caps.
+    transport = new TcpTransport();
+    const model = rigModel || commanderModel(null);
+    codec = new CommanderCodec(model, (data) => transport.write(data));
+    cat = new RigController(model, transport, codec);
+    cat._debug = true;
+    cat.on('log', sendCatLog);
+    cat.on('status', (s) => {
+      sendCatLog(`DXLab Commander status: connected=${s.connected}${s.error ? ' error=' + s.error : ''}`);
+      sendCatStatus(s);
+    });
+    cat.on('frequency', catFrequencyHandler);
+    cat.on('mode', catModeHandler);
+    const { host, port } = resolveCatHostPort(target, CommanderSequences.DEFAULT_PORT, 'DXLab Commander');
+    sendCatLog(`Connecting to DXLab Commander on ${host}:${port}`);
     transport.connect({ host, port });
 
   } else if (target.type === 'icom') {
@@ -34164,6 +34196,9 @@ function describeTargetForMigration(target) {
   if (target.type === 'flrig') {
     return `flrig on ${target.host || '127.0.0.1'}:${target.port || 12345}`;
   }
+  if (target.type === 'dxlab-commander') {
+    return `DXLab Commander on ${target.host || '127.0.0.1'}:${target.port || CommanderSequences.DEFAULT_PORT}`;
+  }
   return 'Radio';
 }
 
@@ -45772,6 +45807,23 @@ function cloudShackNotice(text, kind) {
       : 'no transceiver online in flrig yet (Config > Setup > Transceiver, then Init)';
     return { success: true, version: r.version, xcvr: r.xcvr, frequency: r.freqHz, mode: r.mode, modes: r.modes,
       message: `Connected! flrig ${r.version}: ${radio}` };
+  });
+
+  // Rig editor "Test Connection" for a DXLab Commander rig: one CmdGetFreq +
+  // CmdSendMode on a separate socket, no live connection touched. Each of the
+  // three outcomes gets its own words: nothing on the port, Commander with no
+  // radio (.000), or the radio's frequency and mode.
+  ipcMain.handle('test-commander', async (_e, config) => {
+    const c = config || {};
+    const { host, port } = resolveCatHostPort({ host: c.host, port: c.port }, CommanderSequences.DEFAULT_PORT, 'DXLab Commander test');
+    const r = await probeCommander({ host, port });
+    if (!r.ok) return { success: false, error: r.error };
+    if (r.noRadio) {
+      return { success: false, commander: true,
+        error: 'DXLab Commander answered, but it has no radio (frequency .000). Check that Commander is connected to your transceiver.' };
+    }
+    return { success: true, frequency: r.freqHz, mode: r.mode,
+      message: `Connected! DXLab Commander: ${(r.freqHz / 1e6).toFixed(6)} MHz ${r.mode || '(mode not reported)'}` };
   });
 
   ipcMain.handle('test-hamlib', async (_e, config) => {

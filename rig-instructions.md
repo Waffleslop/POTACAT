@@ -71,6 +71,23 @@ Tested radio configurations for POTACAT. If your rig isn't listed, try **Serial 
 
 ---
 
+## DXLab Commander
+
+- **Connection:** DXLab Commander
+- **Host:** `127.0.0.1` (Commander on the same PC) or the IP of the PC running Commander
+- **Port:** `52002`
+- **Notes:**
+  - Commander must be running and controlling your radio. POTACAT talks to Commander, not to the radio.
+  - Commander listens for TCP commands on its **Base Port + 2**. In Commander, click **Net Serv** (Configuration → General → Radio) to see the Base Port; the default 52000 gives 52002. After changing the Base Port, click Restart in that window and set the same port plus 2 in POTACAT.
+  - **Test Connection** asks Commander for the frequency and mode and says which case it hit: nothing listening on the port, Commander answered but has no radio (`.000`), or the radio's frequency and mode.
+  - Commander's TCP interface covers frequency, mode, split (including the split TX frequency, sent only while split is on), PTT and CW text. Those all work. A CW paddle over Commander can only key PTT, so use CW text, or set a CW Key Port.
+  - It has no commands for noise blanker, noise reduction, auto-notch, compressor, ATU tune or radio power. To use them from POTACAT, build a command sequence for each in Commander's Command Sequences window, then enter its name (or `#3` for Commander's third sequence) under **Commander command sequences** in the rig settings. A control with an on and an off (Power included) needs both. Controls without a sequence stay hidden. Sequence names and CW text must be plain ASCII.
+  - Pick your radio under **Radio Model** to give POTACAT its bands and power range; the connection stays DXLab Commander.
+  - Custom CAT buttons send Commander's own message format, for example `<command:10>CmdSetFreq<parameters:17><xcvrfreq:5>21230`. A miscounted length is caught before sending, and the CAT log shows the correctly framed message.
+  - **Decimal point:** only matters for a frequency with a fraction of a kHz (for example 14074.5). Set it to match the Windows number format on the computer running Commander.
+
+---
+
 ## General Tips
 
 - **Test Connection** button is the fastest way to verify your settings. It queries the radio's frequency and reports success or failure.
