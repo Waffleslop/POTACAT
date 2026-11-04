@@ -435,6 +435,10 @@ test('main + Settings: the add checkbox is off by default and reaches the planne
   const box = (html.match(/<input[^>]*id="pota-hunter-import-add"[^>]*>/) || [])[0];
   assert.ok(box, 'the checkbox exists');
   assert.ok(!/\bchecked\b/.test(box), 'unchecked by default');
+  // `dialog input { width: 100% }` stretches a bare checkbox across the panel,
+  // so the box drew far off to the right of its words. .checkbox-label resets it.
+  const label = (html.match(/<label[^>]*>\s*<input[^>]*id="pota-hunter-import-add"/) || [])[0] || '';
+  assert.ok(/class="checkbox-label"/.test(label), 'the checkbox sits beside its words (class="checkbox-label")');
   const ui = read('renderer', 'pota-sync-ui.js');
   assert.ok(ui.includes('const addMissing = !!(hunterAddMissing && hunterAddMissing.checked);'));
   const main = read('main.js');
