@@ -2648,6 +2648,19 @@ async function loadSerialcatPorts(savedTarget) {
 let rigEditorMode = null; // null | 'add' | 'edit'
 let editingRigId = null;
 let currentRigs = []; // local copy of settings.rigs
+
+// A passing Test checks the EDITOR's port, not the saved radio's, and four
+// operators read "Connected!" as done while the saved rig had no port and the
+// live link kept failing (KK6EZA, arys64/KO6BAH, NJ2DX). Say so on the result.
+function rigTestSavedNote(portPath) {
+  const norm = (p) => String(p || '').trim().toUpperCase();
+  const rig = editingRigId ? currentRigs.find(r => r && r.id === editingRigId) : null;
+  if (!rig) return ' This radio is not saved yet: press Save to keep these settings.';
+  const t = rig.catTarget || {};
+  const saved = t.path || t.serialPort || '';
+  if (norm(saved) === norm(portPath)) return '';
+  return ` ${portPath} is not saved on this radio yet (${saved ? 'it is saved with ' + saved : 'no port is saved'}): press Save to use it.`;
+}
 // The ARDOP device picks belong to the ACTIVE rig (a different radio has a
 // different sound card); stamped onto it at Save.
 // Stamped IN PLACE on currentRigs: the rig editor saves currentRigs as is,
@@ -10001,7 +10014,7 @@ hamlibTestBtn.addEventListener('click', async () => {
     const result = await window.api.testHamlib({ rigId, serialPort, baudRate, dtrOff });
     if (result.success) {
       const freqMHz = (parseInt(result.frequency, 10) / 1e6).toFixed(6);
-      hamlibTestResult.textContent = `Connected! Freq: ${freqMHz} MHz`;
+      hamlibTestResult.textContent = `Connected! Freq: ${freqMHz} MHz` + rigTestSavedNote(serialPort);
       hamlibTestResult.className = 'hamlib-test-success';
     } else {
       hamlibTestResult.textContent = `Failed: ${result.error}`;
@@ -10074,7 +10087,7 @@ serialcatTestBtn.addEventListener('click', async () => {
     const model = rigModelSelect ? rigModelSelect.value : '';
     const result = await window.api.testSerialCat({ portPath, baudRate, dtrOff, serialHandshake, model });
     if (result.success) {
-      serialcatTestResult.textContent = `Connected! Freq: ${result.frequency} MHz` + (result.note ? ` (${result.note})` : '');
+      serialcatTestResult.textContent = `Connected! Freq: ${result.frequency} MHz` + (result.note ? ` (${result.note})` : '') + rigTestSavedNote(portPath);
       serialcatTestResult.className = 'hamlib-test-success';
     } else {
       serialcatTestResult.textContent = `Failed: ${result.error}`;
@@ -10110,7 +10123,7 @@ document.getElementById('icom-test-btn').addEventListener('click', async () => {
   try {
     const result = await window.api.testIcomCiv({ portPath, baudRate, civAddress });
     if (result.success) {
-      resultEl.textContent = `Connected! Freq: ${result.frequency} MHz`;
+      resultEl.textContent = `Connected! Freq: ${result.frequency} MHz` + rigTestSavedNote(portPath);
       resultEl.className = 'hamlib-test-success';
     } else {
       resultEl.textContent = `Failed: ${result.error}`;
