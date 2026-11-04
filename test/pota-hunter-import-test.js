@@ -106,6 +106,56 @@ test('the activator side is checked against the operator\'s calls, /P and all', 
   const portable = H.groupHunterEntries([entry({ station_callsign: 'N0ME/P', worked_callsign: 'K1ABC' })], { myCalls: ['N0ME'] });
   assert.strictEqual(portable.contacts[0].call, 'K1ABC');
 });
+test('a row with no station callsign uses the operator callsign', () => {
+  const { contacts, skipped } = H.groupHunterEntries([entry({ station_callsign: '', operator_callsign: 'k2op' })], { myCalls: ['N0ME'] });
+  assert.strictEqual(skipped.length, 0, 'not skipped');
+  assert.strictEqual(contacts[0].call, 'K2OP');
+  assert.strictEqual(contacts[0].myCall, 'N0ME');
+  assert.strictEqual(contacts[0].callFromOperator, true);
+  // a row that has station_callsign is not marked
+  assert.ok(!H.groupHunterEntries([entry()]).contacts[0].callFromOperator);
+});
+test('a row with neither station nor operator callsign is skipped', () => {
+  const { contacts, skipped } = H.groupHunterEntries([entry({ station_callsign: '', operator_callsign: '' }),
+    entry({ station_callsign: undefined, operator_callsign: '  ' })]);
+  assert.strictEqual(contacts.length, 0);
+  assert.deepStrictEqual(skipped.map((s) => s.reason), ['no activator callsign (station or operator)', 'no activator callsign (station or operator)']);
+});
+test('operator fallback: the operator\'s own call as operator still swaps sides', () => {
+  // station missing, operator is the operator's own call, worked is the activator
+  const { contacts } = H.groupHunterEntries([entry({ station_callsign: '', operator_callsign: 'N0ME', worked_callsign: 'K1ABC' })],
+    { myCalls: ['N0ME'] });
+  assert.strictEqual(contacts[0].call, 'K1ABC');
+  assert.strictEqual(contacts[0].myCall, 'N0ME');
+  assert.ok(!contacts[0].callFromOperator, 'the activator call came from worked_callsign, not the operator');
+});
+test('operator fallback: a 2-fer whose second row lacks station_callsign is still one contact', () => {
+  const { contacts } = H.groupHunterEntries([entry(),
+    entry({ station_callsign: '', operator_callsign: 'K1ABC', reference: 'US-5678', name: 'Other Park' })]);
+  assert.strictEqual(contacts.length, 1);
+  assert.deepStrictEqual(contacts[0].refs, ['US-1234', 'US-5678']);
+  assert.strictEqual(contacts[0].callFromOperator, true);
+});
+test('operator fallback: the call matches, fills and is added as CALL, and the CSV says so', () => {
+  const row = (over) => entry({ station_callsign: '', operator_callsign: 'K1ABC', ...over });
+  // matches a local QSO with no park: updated
+  const upd = H.planHunterImport([local()], [row()], { myCalls: ['N0ME'] });
+  assert.strictEqual(upd.updates.length, 1);
+  assert.strictEqual(upd.updates[0].qso.CALL, 'K1ABC');
+  // missing from the log: added with the operator's call as CALL
+  const add = H.planHunterImport([], [row()], { myCalls: ['N0ME'], ...ADD });
+  assert.strictEqual(add.adds.length, 1);
+  assert.strictEqual(add.adds[0].record.CALL, 'K1ABC');
+  assert.strictEqual(add.adds[0].record.STATION_CALLSIGN, 'N0ME');
+  const NOTE = "pota.app gives no station callsign: K1ABC is the operator's";
+  for (const [label, plan] of [['UPDATED', upd], ['ADDED', add]]) {
+    const line = H.planToCsv(plan, {}).split('\r\n').find((l) => l.startsWith(label + ','));
+    assert.ok(line && line.includes(NOTE), `${label} row notes the operator call: ${line}`);
+  }
+  // a normal row carries no such note
+  const plain = H.planToCsv(H.planHunterImport([local()], [entry()], { myCalls: ['N0ME'] }), {});
+  assert.ok(!plain.includes('no station callsign'));
+});
 test('rows with no park or an unreadable date are skipped with a reason', () => {
   const { contacts, skipped } = H.groupHunterEntries([entry({ reference: '' }), entry({ qsoDateTime: 'x' })]);
   assert.strictEqual(contacts.length, 0);
