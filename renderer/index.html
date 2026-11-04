@@ -3903,6 +3903,15 @@
           <span>Last refresh: <strong id="pota-sync-last">never</strong></span>
         </div>
         <p id="pota-sync-error" class="hidden" style="color:var(--accent-gold);font-size:11px;margin-top:4px;"></p>
+        <div style="margin-top:8px;display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-secondary);">
+          <button type="button" id="pota-hunter-import-preview" class="btn btn-sm" title="Dry run: shows what the import would do without changing your log">Preview import</button>
+          <button type="button" id="pota-hunter-import" class="btn btn-sm">Import hunter log</button>
+          <span id="pota-hunter-import-status"></span>
+        </div>
+        <label class="checkbox-label" style="margin-top:6px;font-size:11px;color:var(--text-secondary);" title="Off by default. Added contacts come from the activator's log: no frequency or signal reports.">
+          <input type="checkbox" id="pota-hunter-import-add"> Also add contacts missing from my log
+        </label>
+        <span class="help-text" style="display:block;margin-top:4px;">Downloads your whole POTA.app hunter log. QSOs already in your log that have no park get POTA.app's park reference; a QSO whose park differs from POTA.app's is never changed and is listed as a conflict in the review CSV. Contacts missing from your log are only listed, unless you tick "Also add contacts missing from my log": they come from the activator's log, with no frequency or signal reports. Even then, a contact the activator logged twice or one already in your log is a duplicate and not added. An added contact gets the mode the activator logged; one POTA.app records only as DATA, with no digital mode logged (no mode LoTW or QRZ accept), is skipped. Your log is backed up first, and a CSV of every change is saved for review. Preview import does a dry run: same download and CSV, nothing changed. If POTA.app stops answering (25 seconds per page), the download stops with a message and nothing is changed; try again later.</span>
       </div>
     </fieldset>
 

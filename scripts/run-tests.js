@@ -378,6 +378,8 @@ const TESTS = [
   'test/g90-hamlib-model-test.js',
   'test/voice-data-mode-test.js',
   'test/n3fjp-pull-test.js',
+  'test/pota-hunter-import-test.js',
+  'test/pota-sync-hunter-fetch-test.js', // the hunter log download always settles: timeout, size and entry caps
 ];
 
 const root = path.join(__dirname, '..');

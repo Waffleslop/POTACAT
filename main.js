@@ -455,6 +455,7 @@ const { IambicKeyer } = require('./lib/keyer');
 const { WinKeyer } = require('./lib/winkeyer');
 const { parsePotaParksCSV, parsePotaActivationsCSV } = require('./lib/pota-parks');
 const { PotaSync } = require('./lib/pota-sync');
+const PotaHunterImport = require('./lib/pota-hunter-import');
 const { WsjtxClient, extractCallsigns, encodeHeartbeat, encodeStatus, bridgeStatusFields, encodeLoggedAdif, encodeQsoLogged, encodeDecode, decodeFromJtcat, parseBridgeInbound, replySlot } = require('./lib/wsjtx');
 const { PskrClient } = require('./lib/pskreporter');
 const PskrTx = require('./lib/pskreporter-tx');
@@ -36638,6 +36639,144 @@ function cloudShackNotice(text, kind) {
   // a stale renderer build calling them shouldn't error.
   ipcMain.handle('pota-sync-set-enabled', async () => potaSync.status());
   ipcMain.handle('pota-sync-set-interval', async () => potaSync.status());
+
+  // Pull the whole pota.app hunter log and fold it into the local log: a
+  // matching QSO with no park gets pota.app's park refs, a matching QSO whose
+  // park disagrees is left alone and reported as a CONFLICT, an activator's
+  // repeated row or a contact already in the log is a DUPLICATE (not added),
+  // and a contact the log doesn't have is added only when the operator ticks
+  // "Also add contacts missing from my log" (lib/pota-hunter-import.js). One
+  // backup, one write, one journal batch, and a CSV of every decision for the
+  // operator to review.
+  // Cleared in the finally below. The download always settles (each pota.app
+  // request times out after 25 s, replies are size-capped, the download is
+  // entry-capped: lib/pota-sync.js), so a hung request fails the import with
+  // a message instead of leaving the buttons "already running".
+  let potaHunterImportRunning = false;
+  // { dryRun: true } downloads and plans the same way but changes nothing:
+  // no backup, no write, no journal; only the review CSV, marked as a dry run.
+  // { addMissing: true } (the Settings checkbox, off by default) also adds
+  // contacts the log doesn't have; without it they are only reported.
+  ipcMain.handle('pota-hunter-import', async (event, opts) => {
+    const dryRun = !!(opts && opts.dryRun);
+    const addMissing = !!(opts && opts.addMissing === true);
+    if (potaHunterImportRunning) return { ok: false, error: 'A hunter log import is already running.' };
+    potaHunterImportRunning = true;
+    const parentWin = BrowserWindow.fromWebContents(event.sender) || win;
+    const progress = (p) => { try { if (!event.sender.isDestroyed()) event.sender.send('pota-hunter-import-progress', p); } catch {} };
+    try {
+      const { entries, count } = await potaSync.fetchHunterLog({ onProgress: progress });
+      // The pota.app sign-in's call only when it is one: connectedAs can be the
+      // 'POTA.app user' placeholder (PotaSync.connectedCallsign).
+      const myCalls = [settings.myCallsign, potaSync.connectedCallsign()].filter(Boolean);
+
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const logPath = qsoLogPath();
+      let backupPath = null;
+      let plan = null;
+      let changes = [];
+      if (dryRun) {
+        plan = PotaHunterImport.planHunterImport(QsoLog.readLog(logPath), entries, { myCalls, addMissing });
+      } else {
+        if (fs.existsSync(logPath)) {
+          backupPath = `${logPath}.pre-pota-hunter-import-${stamp}.bak`;
+          fs.copyFileSync(logPath, backupPath);
+        }
+        ({ changes } = mutateQsoLog((qsos) => {
+          plan = PotaHunterImport.planHunterImport(qsos, entries, { myCalls, addMissing });
+          if (!plan.updates.length && !plan.adds.length) return false;
+          return PotaHunterImport.applyHunterPlan(qsos, plan);
+        }));
+        if (!changes.length && backupPath) { try { fs.unlinkSync(backupPath); } catch {} backupPath = null; }
+      }
+
+      const reviewDir = path.join(app.getPath('userData'), 'pota-hunter-import');
+      fs.mkdirSync(reviewDir, { recursive: true });
+      const reviewPath = path.join(reviewDir, `hunter-import-${dryRun ? 'dry-run-' : ''}${stamp}.csv`);
+      // count 0: pota.app gave no total (lib/pota-sync.js fetchHunterLog).
+      const reportedText = count ? count.toLocaleString() : 'no total';
+      fs.writeFileSync(reviewPath, PotaHunterImport.planToCsv(plan, { downloaded: entries.length, reported: count || 'not given', dryRun }));
+
+      const result = {
+        ok: true,
+        dryRun,
+        addMissing,
+        downloaded: entries.length,
+        reported: count,
+        updated: plan.updates.length,
+        added: plan.adds.length,
+        notAdded: plan.notAdded.length,
+        unchanged: plan.unchanged.length,
+        conflicts: plan.conflicts.length,
+        duplicates: plan.duplicates.length,
+        skipped: plan.skipped.length,
+        // Of those, whole contacts (DATA with no local match), not unreadable rows.
+        skippedContacts: plan.skipped.filter((s) => s.contact).length,
+        reviewPath,
+        backupPath,
+      };
+      sendCatLog(`[pota-hunter-import]${dryRun ? ' DRY RUN, nothing changed:' : ''} ${entries.length} entries downloaded (POTA.app reports ${reportedText}): `
+        + `${result.updated} ${dryRun ? 'would be ' : ''}updated, ${result.added} ${dryRun ? 'would be ' : ''}added, `
+        + (addMissing ? '' : `${result.notAdded} not added (adding is off), `)
+        + `${result.unchanged} unchanged, `
+        + `${result.conflicts} park conflicts (not changed), ${result.duplicates} duplicates (not added), `
+        + `${result.skipped} skipped. Review: ${reviewPath}`);
+
+      if (changes.length) {
+        loadWorkedQsos();
+        loadWorkedParks();
+        scanLogForEvents();
+        rebuildContestHistory();
+        if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) qsoPopoutWin.webContents.send('qso-popout-refresh');
+      }
+
+      const contacts = result.updated + result.added + result.notAdded + result.unchanged + result.conflicts
+        + result.duplicates + result.skippedContacts;
+      const detail = [
+        `Hunter log entries downloaded: ${entries.length.toLocaleString()} (POTA.app reports ${reportedText}).`,
+        `That is ${contacts.toLocaleString()} contacts: a 2-fer is one entry per park.`,
+        '',
+        `${result.updated.toLocaleString()} QSOs ${dryRun ? 'would be ' : ''}updated with park references.`,
+      ];
+      if (addMissing) {
+        detail.push(`${result.added.toLocaleString()} QSOs ${dryRun ? 'would be ' : ''}added to your logbook.`);
+      } else if (result.notAdded) {
+        detail.push(`${result.notAdded.toLocaleString()} contacts are in POTA.app but not in your log. They were not added: `
+          + 'tick "Also add contacts missing from my log" to add them (NOT_ADDED rows in the review log).');
+      }
+      detail.push(`${result.unchanged.toLocaleString()} already had their park.`);
+      if (result.conflicts) {
+        detail.push(`${result.conflicts.toLocaleString()} QSOs have a park that differs from POTA.app's. `
+          + 'They were left as they are: check them in the review log (CONFLICT rows).');
+      }
+      if (result.duplicates) {
+        detail.push(`${result.duplicates.toLocaleString()} duplicates not added: the activator logged the contact twice, `
+          + 'or it is already in your log (DUPLICATE rows in the review log).');
+      }
+      if (result.skipped) {
+        detail.push(`${result.skipped.toLocaleString()} skipped: unreadable entries, or contacts POTA.app gives no usable mode for `
+          + '(only DATA, with no digital mode logged), which are never added (SKIPPED rows in the review log).');
+      }
+      if (dryRun) detail.push('', 'Dry run: your logbook was not changed. Run Import hunter log to apply.');
+      if (backupPath) detail.push('', `Your log before the import was saved to:\n${backupPath}`);
+      const { response } = await dialog.showMessageBox(parentWin, {
+        type: 'info',
+        title: 'POTA.app Hunter Log Import',
+        message: dryRun ? 'Hunter log dry run complete' : 'Hunter log import complete',
+        detail: detail.join('\n'),
+        buttons: ['OK', 'Show review log'],
+        defaultId: 0,
+      });
+      if (response === 1) require('electron').shell.showItemInFolder(reviewPath);
+      return result;
+    } catch (err) {
+      const error = err && err.message ? err.message : String(err);
+      sendCatLog('[pota-hunter-import] failed: ' + error);
+      return { ok: false, error };
+    } finally {
+      potaHunterImportRunning = false;
+    }
+  });
 
   // Spot history (per-callsign list of recent prior spots) for the ⓘ popover
   // on the desktop spots table. All sources are served from local rolling
