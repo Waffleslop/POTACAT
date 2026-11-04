@@ -80,6 +80,12 @@ test('Technician: CW only on 80, 40 and 15 m; US Advanced has its own table', ()
   assert.ok(refuse(14160000, 'USB', 'us_advanced'));
   assert.strictEqual(refuse(14200000, 'USB', 'us_advanced'), null);
 });
+test('renderer/app.js (the spot filter) carries the same tables', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const m = src.match(/const PRIVILEGE_RANGES = (\{[\s\S]*?\r?\n\};)/);
+  assert.ok(m, 'table found');
+  assert.deepStrictEqual(Function('return ' + m[1].replace(/;$/, ''))(), P.PRIVILEGE_MAP);
+});
 test('renderer/bandspread-popout.js carries the same tables', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'bandspread-popout.js'), 'utf8');
   const m = src.match(/const PRIVILEGE_MAP = (\{[\s\S]*?\r?\n\};)/);
