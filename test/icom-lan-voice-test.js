@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
-const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8').replace(/\r\n/g, '\n'); // a Windows checkout is CRLF
 const app = fs.readFileSync(path.join(ROOT, 'renderer/app.js'), 'utf8');
 const html = fs.readFileSync(path.join(ROOT, 'renderer/index.html'), 'utf8');
 
