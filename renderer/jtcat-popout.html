@@ -141,10 +141,14 @@
        it dark red on red (1.7:1) and the time/dt/df columns stayed grey
        (1.1:1). Light mode also gets the darker red (white 5.6:1), for
        operators working in full sun (Dusty Notes 2026-09-25). */
-    [data-theme="light"] .jp-row.jp-directed { background: #c62828 !important; }
-    [data-theme="light"] .jp-row.jp-directed .jp-msg { color: var(--on-accent-red); }
     [data-theme="light"] .jp-row.jp-chase .jp-msg { color: #8a6a00; }
     [data-theme="light"] .jp-row.jp-new-park .jp-msg { color: #0b7a4b; }
+    /* A reply to us from a chased station or one at a park carries both
+       classes; the directed rule must come AFTER chase/new-park or their
+       dark-gold/green ink lands on the red band (K3SBP 2026-11-04). */
+    [data-theme="light"] .jp-row.jp-directed { background: #c62828 !important; }
+    [data-theme="light"] .jp-row.jp-directed .jp-msg,
+    .jp-row.jp-directed.jp-jtty-growing .jp-msg { color: var(--on-accent-red); }
     /* WSPR distance + best-DX use the same pale yellow as chase — same
        dark-gold substitute in light mode (unreadable otherwise, Casey
        2026-08-14). */
