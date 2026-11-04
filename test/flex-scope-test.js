@@ -56,6 +56,22 @@ check('whole frames come out as 850 levels; the junk after the resize is dropped
   const median = sorted[425];
   assert.ok(median > 30 && median < 120, 'median level ' + median);
 });
+check('a noise floor just under min_dbm is the bottom row, not a dropped frame (K3SBP 10 m, FT8 view)', () => {
+  const asm = new F.PanFrameAssembler();
+  const frames = [];
+  asm.on('frame', (f) => frames.push(f));
+  const pkt = (start, num, vals) => ({ streamId: 0x40000000, start, num, total: 850, frame: 7, bins: Uint16Array.from(vals) });
+  const a = new Array(670).fill(262); a[300] = 120;   // floor 7 px past the bottom, one FT8 signal
+  asm.feed(pkt(0, 670, a));
+  asm.feed(pkt(670, 180, new Array(180).fill(258)));
+  assert.strictEqual(frames.length, 1, 'the frame is kept');
+  assert.strictEqual(asm.dropped, 0);
+  assert.strictEqual(frames[0].wf1[0], 0, 'below the scale = level 0');
+  assert.ok(frames[0].wf1[300] > 100, 'the signal stands above it');
+  // Resize junk is still dropped.
+  asm.feed({ streamId: 0x40000000, start: 0, num: 850, total: 850, frame: 8, bins: new Uint16Array(850).fill(65000) });
+  assert.strictEqual(asm.dropped, 1);
+});
 check('a pixel row maps to a level: top = strongest', () => {
   assert.strictEqual(F.levelFromPixel(0), 255);
   assert.strictEqual(F.levelFromPixel(255), 0);
