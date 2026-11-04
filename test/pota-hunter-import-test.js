@@ -65,6 +65,32 @@ test('qsoDateTime is read as UTC in the forms pota.app may send', () => {
   assert.strictEqual(H.parseQsoDateTime('2026-05-01T14:20:00.000Z').millis, Date.UTC(2026, 4, 1, 14, 20), 'fraction + Z');
   assert.strictEqual(H.parseQsoDateTime('May 1'), null);
 });
+test('qsoDateTime is UTC whatever the computer\'s time zone is', () => {
+  // Every platform: the parser builds the time with Date.UTC and never reads
+  // a string or parts through local time (new Date(...)).
+  const lib = read('lib', 'pota-hunter-import.js');
+  const body = lib.slice(lib.indexOf('function parseQsoDateTime('), lib.indexOf('function localBand('));
+  assert.ok(/Date\.UTC\(/.test(body), 'uses Date.UTC');
+  assert.ok(!/new Date\(|Date\.parse\(/.test(body), 'never parses through local time');
+  // Where the platform honours TZ (Linux/macOS; Windows Node ignores it), run
+  // the parser in other zones and compare.
+  const { spawnSync } = require('child_process');
+  const probe = "const H=require(" + JSON.stringify(path.join(__dirname, '..', 'lib', 'pota-hunter-import')) + ");"
+    + "process.stdout.write(JSON.stringify({ off: new Date(Date.UTC(2026,0,15,12)).getTimezoneOffset(),"
+    + " r: ['2026-05-01T23:30:00','2026-12-31 23:59','2026-03-08T02:30:00'].map(H.parseQsoDateTime) }))";
+  const runs = ['UTC', 'Pacific/Auckland', 'America/Los_Angeles'].map((TZ) => {
+    const r = spawnSync(process.execPath, ['-e', probe], { encoding: 'utf8', env: { ...process.env, TZ } });
+    assert.strictEqual(r.status, 0, r.stderr);
+    return JSON.parse(r.stdout);
+  });
+  const tzHonoured = new Set(runs.map((x) => x.off)).size === 3;
+  if (tzHonoured) {
+    assert.deepStrictEqual(runs[1].r, runs[0].r, 'Auckland = UTC');
+    assert.deepStrictEqual(runs[2].r, runs[0].r, 'Los Angeles = UTC (2026-03-08 02:30 does not exist there: DST)');
+  }
+  assert.deepStrictEqual(runs[0].r[0], { qsoDate: '20260501', timeOn: '233000', millis: Date.UTC(2026, 4, 1, 23, 30) },
+    'late-evening UTC stays on its UTC date');
+});
 test('a 2-fer (one row per park) is one contact with both refs', () => {
   const { contacts } = H.groupHunterEntries([entry(), entry({ reference: 'US-5678', name: 'Other Park' })]);
   assert.strictEqual(contacts.length, 1);

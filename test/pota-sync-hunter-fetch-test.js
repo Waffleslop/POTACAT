@@ -167,6 +167,39 @@ test('fetchHunterLog: a normal log still downloads page by page', async () => {
   assert.ok(/page=1&size=100/.test(urls[0]) && /page=2&size=100/.test(urls[1]));
 });
 
+// The 'POTA.app user' placeholder is a display label, not a call (K3SBP
+// review): it must not reach the hunter import's own-call check.
+const withConnectedAs = (v) => {
+  const s = new PotaSync({ settings: { potaSync: { connectedAt: 1, connectedAs: v } }, logger: () => {} });
+  return s;
+};
+test('connectedCallsign: the placeholder and other non-calls are not a callsign', async () => {
+  for (const v of ['POTA.app user', '', null, undefined, '   ', 'not a call', 'K1ABC <x>']) {
+    assert.strictEqual(withConnectedAs(v).connectedCallsign(), '', JSON.stringify(v));
+  }
+  assert.strictEqual(new PotaSync({ settings: {}, logger: () => {} }).connectedCallsign(), '', 'never connected');
+});
+test('connectedCallsign: a real call comes back upper-cased and trimmed', async () => {
+  assert.strictEqual(withConnectedAs('K1ABC').connectedCallsign(), 'K1ABC');
+  assert.strictEqual(withConnectedAs(' ve3/k1abc ').connectedCallsign(), 'VE3/K1ABC');
+  assert.strictEqual(withConnectedAs('K1ABC/P').connectedCallsign(), 'K1ABC/P');
+});
+test('pull() still refuses the placeholder, through the same rule, without a request', async () => {
+  const before = made.length;
+  const r = await withConnectedAs('POTA.app user').pull();
+  assert.strictEqual(r.ok, false);
+  assert.ok(/Could not read your callsign/.test(r.error), r.error);
+  assert.strictEqual(made.length, before, 'no network request made');
+  assert.ok(/const callsign = this\.connectedCallsign\(\);/.test(fs.readFileSync(path.join(__dirname, '..', 'lib', 'pota-sync.js'), 'utf8')));
+});
+test('main: the hunter import\'s own calls use connectedCallsign, not the display label', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const start = main.indexOf("ipcMain.handle('pota-hunter-import'");
+  const h = main.slice(start, main.indexOf('ipcMain.handle(', start + 10));
+  assert.ok(h.includes('const myCalls = [settings.myCallsign, potaSync.connectedCallsign()].filter(Boolean);'));
+  assert.ok(!h.includes('status().connectedAs'), 'the raw connectedAs is not used');
+});
+
 test('main: the import always clears its running flag, so a failed download frees the buttons', async () => {
   const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
   const start = main.indexOf("ipcMain.handle('pota-hunter-import'");
