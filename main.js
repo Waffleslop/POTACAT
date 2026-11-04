@@ -29734,6 +29734,10 @@ function createWsjtxUdpBridge(label) {
             parseInt(d.slice(0, 4), 10), parseInt(d.slice(4, 6), 10) - 1, parseInt(d.slice(6, 8), 10),
             parseInt(t.slice(0, 2), 10), parseInt(t.slice(2, 4), 10), t.length >= 6 ? parseInt(t.slice(4, 6), 10) : 0
           ));
+          if (!Number.isFinite(dateTimeOff.getTime())) {
+            sendCatLog(`[${this.label}] QSO date "${d} ${t}" could not be read — sent with the current time instead (a logger shows an invalid one as 30/12/1899)`);
+            dateTimeOff = new Date();
+          }
         }
 
         // A Status on the QSO's own band and mode first, so the receiver has
