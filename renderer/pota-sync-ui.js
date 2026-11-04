@@ -160,8 +160,10 @@
   if (hunterImportBtn && window.api.potaHunterImport) {
     if (window.api.onPotaHunterImportProgress) {
       window.api.onPotaHunterImportProgress((p) => {
-        if (hunterImportStatus) hunterImportStatus.textContent =
-          `Downloading… ${p.fetched.toLocaleString()} of ${p.count.toLocaleString()} entries`;
+        // count 0: pota.app did not say how many.
+        if (hunterImportStatus) hunterImportStatus.textContent = p.count
+          ? `Downloading… ${p.fetched.toLocaleString()} of ${p.count.toLocaleString()} entries`
+          : `Downloading… ${p.fetched.toLocaleString()} entries`;
       });
     }
     // dryRun: the Preview button. Same download and review CSV, log untouched.
