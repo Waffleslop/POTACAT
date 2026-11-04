@@ -951,9 +951,22 @@ function migrateLegacyCloudTunnelConfig(settingsObj) {
   }
 }
 
+// Settings files (lib/settings-file.js): an unreadable file is restored from
+// its .bak, kept as .corrupt-<stamp> once, and said in the log once — never
+// silently read as "no settings" and then overwritten (lloyd_ko4l, n8jms).
+const SettingsFile = require('./lib/settings-file');
+const _settingsReadNoted = new Set();
 function _readJsonSafe(p, fallback) {
-  try { return JSON.parse(fs.readFileSync(p, 'utf-8')); }
-  catch { return fallback; }
+  const first = !_settingsReadNoted.has(p);
+  const r = SettingsFile.readSettingsFile(p, { keepCorrupt: first });
+  if (r.status !== 'ok' && r.status !== 'missing' && first) {
+    _settingsReadNoted.add(p);
+    const line = SettingsFile.describeRead(path.basename(p), r);
+    console.warn(line);
+    // The log panel may not exist yet at launch: say it as soon as it does.
+    setTimeout(() => { try { sendCatLog(line); } catch { /* no log yet */ } }, 0);
+  }
+  return r.data != null ? r.data : fallback;
 }
 // What happened to each settings file this session, for the bug report's
 // "Settings saved" line (lib/settings-save-status.js). A failed save keeps the
@@ -971,7 +984,10 @@ function _writeJsonAtomic(p, obj) {
   _noteSettingsMtime(p);
   try { fs.mkdirSync(path.dirname(p), { recursive: true }); } catch {}
   try {
-    fs.writeFileSync(p, JSON.stringify(obj, null, 2));
+    // A temp file renamed over the old one, with an hourly .bak of the last
+    // good file (lib/settings-file.js): a POTACAT closed mid-write used to
+    // leave a truncated file that the next launch read as a fresh install.
+    SettingsFile.writeSettingsFile(p, obj);
     _settingsWriteStatus.set(p, { at: Date.now(), ok: true });
   } catch (err) {
     const msg = String((err && err.message) || err).replace(require('os').homedir(), '~');
