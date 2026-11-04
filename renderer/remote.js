@@ -2101,6 +2101,11 @@
         showToast(msg.text || ('Not available on a Guest Pass: ' + (msg.of || 'that control')), 4000, true);
         break;
 
+      case 'voice-tx-hint':
+        // The shack measured 0 W / no ALC on a voice over: the radio got no audio.
+        showToast(msg.text || 'The radio keyed with no power out: it is not getting voice audio.', 12000);
+        break;
+
       case 'cloud-shack-notice':
         // Another shack shares (or took) the account's Cloud address.
         showToast(msg.text || 'Another shack is on your Cloud address.', 8000);

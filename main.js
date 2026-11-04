@@ -2245,6 +2245,28 @@ let _fwdPowerClearTimer = null;
 // log line rather than 260. Null whenever a Flex PTT is not down.
 let _flexTransmitKv = null; // merged Flex 'transmit' status fields (lo/hi TX filter, rfpower, dax, ...)
 let _flexTxRf = null;   // { startedAt, peakW, maxSwr, frames }
+// One voice key-down's meters (lib/voice-tx-check.js): opened by
+// handleRemotePtt for a voice PTT on a CAT radio, fed by sendCatFwdPower and
+// sendCatAlc, judged at key-up. A hint shows once per rig + kind per session.
+let _voiceTxCheck = null;
+const _voiceTxHinted = new Set();
+const { decideVoiceTxHint } = require('./lib/voice-tx-check');
+function voiceTxCheckEnd() {
+  const c = _voiceTxCheck;
+  _voiceTxCheck = null;
+  if (!c) return;
+  const model = getActiveRigModel() || {};
+  const d = decideVoiceTxHint({ keyedMs: Date.now() - c.startedAt, fwdEvents: c.fwdEvents, peakW: c.peakW,
+    alcEvents: c.alcEvents, peakAlc: c.peakAlc, mode: c.mode || _currentMode, brand: model.brand });
+  if (!d) return;
+  const k = (settings.activeRigId || '') + '|' + d.key;
+  if (_voiceTxHinted.has(k)) return;
+  _voiceTxHinted.add(k);
+  sendCatLog('[PTT] ' + d.hint);
+  if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: d.hint, duration: 15000 });
+  if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', d.hint);
+  if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'voice-tx-hint', key: d.key, text: d.hint });
+}
 // ─── SWR guard (K3SBP 2026-07-17) ───────────────────────────────────────────
 // The Flex protects ITSELF from a bad match by folding back power — it never
 // refuses to key (K3SBP measured a real 46:1 pre-ATU while the 8600 happily
@@ -4450,6 +4472,10 @@ function sendCatFwdPower(watts) {
     _stationSetupTxTest.fwdEvents++;
     if (w > _stationSetupTxTest.peakW) _stationSetupTxTest.peakW = w;
   }
+  if (_voiceTxCheck) {
+    _voiceTxCheck.fwdEvents++;
+    if (w > _voiceTxCheck.peakW) _voiceTxCheck.peakW = w;
+  }
   const push = (v) => {
     if (win && !win.isDestroyed()) win.webContents.send('cat-fwd-power', v);
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-fwd-power', v);
@@ -4713,6 +4739,10 @@ function sendCatSwr(val) {
 
 function sendCatAlc(val) {
   if (typeof val === 'number' && Number.isFinite(val)) noteMeterSeen('alc');
+  if (_voiceTxCheck && typeof val === 'number' && Number.isFinite(val)) {
+    _voiceTxCheck.alcEvents++;
+    if (val > _voiceTxCheck.peakAlc) _voiceTxCheck.peakAlc = val;
+  }
   if (win && !win.isDestroyed()) win.webContents.send('cat-alc', val);
   if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-alc', val);
   _currentAlc = val;
@@ -26332,6 +26362,13 @@ function handleRemotePtt(state, opts = {}) {
   const flexApiOwnsRadio = !!(smartSdr && smartSdr.canTune &&
     (smartSdr.mode === 'self' || !cat || !cat.connected));
   const isFlexRig = detectRigType() === 'flex' || flexApiOwnsRadio;
+  // Voice key-downs on a CAT radio are measured for the 0 W / no-ALC hint
+  // (lib/voice-tx-check.js). Data routes pass an emission (DATA, SSTV); voice
+  // passes none, Icom LAN voice included. A Flex reports through its own path.
+  if (!state) voiceTxCheckEnd();
+  else if (!isFlexRig && cat && cat.connected && !opts.emission && !(settings.catTarget && settings.catTarget.type === 'none')) {
+    _voiceTxCheck = { startedAt: Date.now(), fwdEvents: 0, peakW: 0, alcEvents: 0, peakAlc: 0, mode: _currentMode };
+  }
 
   // SSB-over-DATA only makes sense when audio is being sent to the rig
   // through the USB CODEC (voice macro, ECHOCAT audio bridge, FT8 modem,
@@ -26431,6 +26468,7 @@ function handleRemotePtt(state, opts = {}) {
       if (cat && cat.connected) {
         // anchorNow: mode, frequency, THEN the key-down below (GitHub #113 item 1).
         if (cat.setModeOnly) cat.setModeOnly(dataMode, _ssbFreqBeforePtt, { noAnchor: _icomData, anchorNow: true });
+        if (_voiceTxCheck) _voiceTxCheck.mode = dataMode;   // the hint names DATA MOD, not DATA OFF MOD
         else if (_ssbFreqBeforePtt) cat.tune(_ssbFreqBeforePtt, dataMode);
       }
       // Stagger the upcoming PTT key-down on Icom so its CI-V PTT frame
