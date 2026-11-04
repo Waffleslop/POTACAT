@@ -40814,7 +40814,9 @@ function cloudShackNotice(text, kind) {
     const progress = (p) => { try { if (!event.sender.isDestroyed()) event.sender.send('pota-hunter-import-progress', p); } catch {} };
     try {
       const { entries, count } = await potaSync.fetchHunterLog({ onProgress: progress });
-      const myCalls = [settings.myCallsign, potaSync.status().connectedAs].filter(Boolean);
+      // The pota.app sign-in's call only when it is one: connectedAs can be the
+      // 'POTA.app user' placeholder (PotaSync.connectedCallsign).
+      const myCalls = [settings.myCallsign, potaSync.connectedCallsign()].filter(Boolean);
 
       const stamp = new Date().toISOString().replace(/[:.]/g, '-');
       const logPath = qsoLogPath();
