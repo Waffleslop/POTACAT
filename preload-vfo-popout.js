@@ -16,7 +16,7 @@ contextBridge.exposeInMainWorld('api', {
   onSwrGuardState: (cb) => ipcRenderer.on('vfo-swr-guard-state', (_e, st) => cb(st)),
   swrGuardOverride: () => ipcRenderer.send('swr-guard-override'),
   setMode: (mode) => ipcRenderer.send('vfo-set-mode', mode),
-  setFilterWidth: (hz) => ipcRenderer.send('vfo-set-filter-width', hz),
+  setFilterWidth: (hz, mode) => ipcRenderer.send('vfo-set-filter-width', hz, mode),
   // rig-control is registered with ipcMain.handle (main.js), so it must be
   // invoked, not sent — a bare .send has no listener and is silently dropped,
   // which is why the popout's ATU / NB / custom-CAT buttons did nothing. Match

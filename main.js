@@ -23625,7 +23625,8 @@ function connectRemote() {
     if (cat && cat.connected) {
       cat.tune(freqHz, profile.mode || _currentMode);
       if (profile.filterWidth && cat.setFilterWidth) {
-        cat.setFilterWidth(profile.filterWidth);
+        // For the profile's mode, not the one the radio last reported (#113 item 4).
+        cat.setFilterWidth(profile.filterWidth, profile.mode || _currentMode);
       }
     }
     // TX power — through the one rig-control dispatcher (handles flex + gating +
@@ -30083,6 +30084,11 @@ function startYaesuScope() {
     } else if (d.key === 'no-library' && findFt4222().libraryFound) {
       d = { ...d, headline: 'LibFT4222 is on this computer but would not load', action: 'Press Find the file for me in Station Setup and choose LibFT4222-64.dll from the amd64 folder.' };
     }
+    // With SCU-LAN10 OFF the FT-710's FT4222 is not on USB at all (GitHub
+    // #113 item 7, mdeltito), so "no FT4222 device" is the menu, not a driver:
+    // show the SCU-LAN10 card with its Enable button. The read may land just
+    // after the exit; yaesuScopeReadRadio makes the same swap then.
+    if (d.key === 'no-device' && yaesuScopeState.scuLan === '0') d = YaesuScope.describeHelperExit(5);
     sendCatLog('[Scope] helper exited: ' + d.headline + (d.detail ? ' — ' + d.detail : ''));
     yaesuScopeSetStatus(d.severity === 'blocker' ? 'blocked' : 'error', d);
     if (YaesuScope.helperExitIsTransient(code) && yaesuScopeWanted() && yaesuScopeRestarts < 5) {
@@ -30212,6 +30218,11 @@ async function yaesuScopeReadRadio() {
     if (ss00 && ss00.p2 === 0) yaesuScopeState.speed = YaesuScope.speedFromCode(ss00.p3);
     const ex = YaesuScope.parseExReply(await ask('EX030126;'));
     if (ex && ex.menu === '030126') yaesuScopeState.scuLan = ex.value === '1' ? '1' : '0';
+    // The helper's "no device" exit came before this read (#113 item 7).
+    if (yaesuScopeState.scuLan === '0' && yaesuScopeState.diag && yaesuScopeState.diag.key === 'no-device' && !yaesuScopeProc) {
+      sendCatLog('[Scope] SCU-LAN10 is OFF, which takes the scope bridge off USB: that is why no FT4222 device was found');
+      yaesuScopeSetStatus('blocked', YaesuScope.describeHelperExit(5));
+    }
     if (before !== snapshot()) {
       sendCatLog('[Scope] radio: span ' + YaesuScope.formatSpan(yaesuScopeState.spanHz) + ', ' + String(yaesuScopeState.anchor).toUpperCase()
         + ' mode, sweep ' + (yaesuScopeState.speed || '?') + ', SCU-LAN10 '
@@ -38182,14 +38193,15 @@ function cloudShackNotice(text, kind) {
     _lastTuneFreq = 0; // reset rate limiter
     tuneRadio(_currentFreqHz / 1000, mode);
   });
-  ipcMain.on('vfo-set-filter-width', (_e, hz) => {
+  ipcMain.on('vfo-set-filter-width', (_e, hz, mode) => {
     if (isRemoteMode()) {
       if (!isRemoteLinked()) { refuseRemoteNotLinked(_e.sender); return; }
       remoteClient.sendRaw({ type: 'set-filter', width: Number(hz) || 0 });
       _currentFilterWidth = hz;
       return;
     }
-    if (cat && cat.connected) cat.setFilterWidth(hz);
+    // mode: a VFO profile's, sent with its width (#113 item 4); else the radio's.
+    if (cat && cat.connected) cat.setFilterWidth(hz, mode || undefined);
     _currentFilterWidth = hz;
   });
 

@@ -167,5 +167,19 @@ test('TS-890S reads its meter with SM; and answers four digits, S9 = 35 (guide p
   assert.strictEqual(s, 240);
 });
 
+// GitHub #113 item 5 (mdeltito): a USB -> CW tune with a 500 Hz width sent the
+// SSB slope pair, then (with the mode passed) FW0001; from the SSB slot table.
+test('TS-480 cross-mode tune: the width goes out for the TUNED mode (FW0500;, as a CW click)', () => {
+  const out = [];
+  const c = new KenwoodCodec(RIG_MODELS['TS-480'], (d) => out.push(String(d)));
+  c._lastParsedMode = 'USB';
+  c.setFilterWidth(500, 'CW');
+  assert.deepStrictEqual(out, ['FW0500;']);
+  out.length = 0;
+  c._lastParsedMode = 'CW';
+  c.setFilterWidth(500);
+  assert.deepStrictEqual(out, ['FW0500;'], 'the same as a width click in CW');
+});
+
 console.log(`\nKenwood filter width: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

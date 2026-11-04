@@ -1912,7 +1912,7 @@ function applyProfile(p) {
   }
   if (p.filterWidth) {
     currentFilterWidth = p.filterWidth;
-    window.api.setFilterWidth(p.filterWidth);
+    window.api.setFilterWidth(p.filterWidth, p.mode);   // the profile's mode (#113 item 4)
     filterSlider.value = p.filterWidth;
     filterVal.textContent = p.filterWidth >= 1000
       ? (p.filterWidth / 1000).toFixed(1) + ' kHz'
