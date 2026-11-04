@@ -36054,9 +36054,9 @@ app.whenReady().then(() => {
   // park disagrees is left alone and reported as a CONFLICT, an activator's
   // repeated row or a contact already in the log is a DUPLICATE (not added),
   // and a contact the log doesn't have is added only when the operator ticks
-  // "Also add contacts missing from my log" (lib/pota-hunter-import.js). One backup, one
-  // write, one journal batch, and a CSV of every decision for the operator
-  // to review.
+  // "Also add contacts missing from my log" (lib/pota-hunter-import.js). One
+  // backup, one write, one journal batch, and a CSV of every decision for the
+  // operator to review.
   // Cleared in the finally below. The download always settles (each pota.app
   // request times out after 25 s, replies are size-capped, the download is
   // entry-capped: lib/pota-sync.js), so a hung request fails the import with
@@ -36119,12 +36119,15 @@ app.whenReady().then(() => {
         conflicts: plan.conflicts.length,
         duplicates: plan.duplicates.length,
         skipped: plan.skipped.length,
+        // Of those, whole contacts (DATA with no local match), not unreadable rows.
+        skippedContacts: plan.skipped.filter((s) => s.contact).length,
         reviewPath,
         backupPath,
       };
       sendCatLog(`[pota-hunter-import]${dryRun ? ' DRY RUN, nothing changed:' : ''} ${entries.length} entries downloaded (POTA.app reports ${reportedText}): `
         + `${result.updated} ${dryRun ? 'would be ' : ''}updated, ${result.added} ${dryRun ? 'would be ' : ''}added, `
-        + `${result.notAdded} not added (adding is off), ${result.unchanged} unchanged, `
+        + (addMissing ? '' : `${result.notAdded} not added (adding is off), `)
+        + `${result.unchanged} unchanged, `
         + `${result.conflicts} park conflicts (not changed), ${result.duplicates} duplicates (not added), `
         + `${result.skipped} skipped. Review: ${reviewPath}`);
 
@@ -36136,18 +36139,21 @@ app.whenReady().then(() => {
         if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) qsoPopoutWin.webContents.send('qso-popout-refresh');
       }
 
-      const contacts = result.updated + result.added + result.notAdded + result.unchanged + result.conflicts + result.duplicates;
+      const contacts = result.updated + result.added + result.notAdded + result.unchanged + result.conflicts
+        + result.duplicates + result.skippedContacts;
       const detail = [
         `Hunter log entries downloaded: ${entries.length.toLocaleString()} (POTA.app reports ${reportedText}).`,
         `That is ${contacts.toLocaleString()} contacts: a 2-fer is one entry per park.`,
         '',
         `${result.updated.toLocaleString()} QSOs ${dryRun ? 'would be ' : ''}updated with park references.`,
-        addMissing
-          ? `${result.added.toLocaleString()} QSOs ${dryRun ? 'would be ' : ''}added to your logbook.`
-          : `${result.notAdded.toLocaleString()} contacts are in POTA.app but not in your log. They were not added: `
-            + 'tick "Also add contacts missing from my log" to add them (NOT_ADDED rows in the review log).',
-        `${result.unchanged.toLocaleString()} already had their park.`,
       ];
+      if (addMissing) {
+        detail.push(`${result.added.toLocaleString()} QSOs ${dryRun ? 'would be ' : ''}added to your logbook.`);
+      } else if (result.notAdded) {
+        detail.push(`${result.notAdded.toLocaleString()} contacts are in POTA.app but not in your log. They were not added: `
+          + 'tick "Also add contacts missing from my log" to add them (NOT_ADDED rows in the review log).');
+      }
+      detail.push(`${result.unchanged.toLocaleString()} already had their park.`);
       if (result.conflicts) {
         detail.push(`${result.conflicts.toLocaleString()} QSOs have a park that differs from POTA.app's. `
           + 'They were left as they are: check them in the review log (CONFLICT rows).');

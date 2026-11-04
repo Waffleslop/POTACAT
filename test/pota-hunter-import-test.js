@@ -4,8 +4,10 @@
 // park for contacts the local log holds without one, and contacts the local log
 // never got: a matching QSO with no park gains the park reference(s), one with
 // a different park is a CONFLICT and left alone, an activator's repeated row or
-// a contact already in the log is a DUPLICATE, a missing one is added, a 2-fer (one pota.app row per park) is one contact, the log is backed
-// up before the write, and a review CSV accounts for every row.
+// a contact already in the log is a DUPLICATE, a missing one is added only when
+// the operator opts in (with an ADIF mode; DATA-only contacts never), a 2-fer
+// (one pota.app row per park) is one contact, the log is backed up before the
+// write, and a review CSV accounts for every row, with formulas written as text.
 // Run: node test/pota-hunter-import-test.js
 const assert = require('assert');
 const fs = require('fs');
@@ -415,7 +417,8 @@ test('review CSV: NOT_ADDED, ADDED and SKIPPED rows say what the mode is or why'
   const entries = [entry({ station_callsign: 'W9FT', mode: 'FT4' }), entry({ station_callsign: 'W9PH', mode: 'PHONE', band: '2M' }),
     entry({ station_callsign: 'W9DAT', mode: 'DATA' })];
   const off = H.planToCsv(H.planHunterImport([], entries)).trim().split('\r\n');
-  assert.ok(off.includes('SUMMARY,not added (adding is off),,,,,,,,,,,2'));
+  assert.ok(off.includes('SUMMARY,adding missing contacts,,,,,,,,,,,off'));
+  assert.ok(off.includes('SUMMARY,not added,,,,,,,,,,,2'));
   const ft4 = off.find((l) => l.startsWith('NOT_ADDED,W9FT,'));
   assert.ok(ft4.includes('would be logged as MFSK/FT4'), ft4);
   assert.ok(ft4.includes('tick ""Also add contacts missing from my log"" to add it'), ft4);
@@ -492,18 +495,54 @@ test('review CSV: hostile pota.app text never starts a cell as a formula', () =>
   assert.ok(cells.includes("'-1+1"), 'the raw unreadable date too');
 });
 
+// Review follow-ups (2026-11-03).
+test('USB and LSB are added as SSB with the sideband as SUBMODE', () => {
+  const ms = (mode) => { const r = addOne({ mode }).adds[0].record; return [r.MODE, r.SUBMODE]; };
+  assert.deepStrictEqual(ms('USB'), ['SSB', 'USB']);
+  assert.deepStrictEqual(ms('lsb'), ['SSB', 'LSB']);
+  const twin = H.planHunterImport([], [entry({ station_callsign: 'W9SB', mode: 'USB' }),
+    entry({ station_callsign: 'W9SB', mode: 'USB', qsoDateTime: '2026-05-01T14:21:00' })], ADD);
+  assert.deepStrictEqual([twin.adds.length, twin.duplicates.length], [1, 1], 'SSB/USB records still dedupe');
+});
+test('the plan says whether adding was on, and the CSV says so instead of "adding is off"', () => {
+  assert.strictEqual(H.planHunterImport([], []).addMissing, false);
+  assert.strictEqual(H.planHunterImport([], [], ADD).addMissing, true);
+  const on = H.planToCsv(H.planHunterImport([], [entry()], ADD));
+  assert.ok(on.includes('SUMMARY,adding missing contacts,,,,,,,,,,,on'));
+  assert.ok(!on.includes('adding is off'));
+});
+test('dry run CSV: an UPDATED row shows the parks the import would write', () => {
+  const qsos = [local()];
+  const plan = H.planHunterImport(qsos, [entry({ reference: 'US-1234' }), entry({ reference: 'US-5678' })]);
+  const row = H.planToCsv(plan).split('\r\n').find((l) => l.startsWith('UPDATED,'));
+  assert.ok(row.includes(',US-1234 US-5678,,added US-1234 US-5678'), row); // planned, not applied
+  assert.strictEqual(qsos[0].POTA_REF, undefined, 'the dry run changed nothing');
+  H.applyHunterPlan(qsos, plan);
+  assert.strictEqual(H.planToCsv(plan).split('\r\n').find((l) => l.startsWith('UPDATED,')), row, 'same row after the import');
+});
+test('main: the dialog counts DATA-only contacts, drops an empty not-added line, and the log names adding only when off', () => {
+  const main = read('main.js');
+  const start = main.indexOf("ipcMain.handle('pota-hunter-import'");
+  const h = main.slice(start, main.indexOf('ipcMain.handle(', start + 10));
+  assert.ok(h.includes('skippedContacts: plan.skipped.filter((s) => s.contact).length'));
+  assert.ok(/\+ result\.duplicates \+ result\.skippedContacts;/.test(h), 'DATA-only contacts are in the total');
+  assert.ok(/\} else if \(result\.notAdded\) \{/.test(h), 'no "0 contacts are in POTA.app..." line');
+  assert.ok(h.includes("+ (addMissing ? '' : `${result.notAdded} not added (adding is off), `)"));
+});
+
 test('review CSV: summary counts first, then one row per decision', () => {
   const { qsos, entries, plan } = scenario();
   H.applyHunterPlan(qsos, plan);
   const lines = H.planToCsv(plan, { downloaded: entries.length, reported: 9 }).trim().split('\r\n');
   assert.ok(lines[0].startsWith('action,call,qso_date,time_on,'));
-  assert.deepStrictEqual(lines.slice(1, 11), [
+  assert.deepStrictEqual(lines.slice(1, 12), [
     'SUMMARY,mode,,,,,,,,,,,import',
     'SUMMARY,entries downloaded,,,,,,,,,,,8',
     'SUMMARY,entries pota.app reports,,,,,,,,,,,9',
+    'SUMMARY,adding missing contacts,,,,,,,,,,,on',
     'SUMMARY,updated,,,,,,,,,,,3',
     'SUMMARY,added,,,,,,,,,,,3',
-    'SUMMARY,not added (adding is off),,,,,,,,,,,0',
+    'SUMMARY,not added,,,,,,,,,,,0',
     'SUMMARY,unchanged,,,,,,,,,,,1',
     'SUMMARY,conflicts,,,,,,,,,,,0',
     'SUMMARY,duplicates,,,,,,,,,,,0',
