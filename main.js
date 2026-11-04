@@ -36102,7 +36102,9 @@ app.whenReady().then(() => {
       const reviewDir = path.join(app.getPath('userData'), 'pota-hunter-import');
       fs.mkdirSync(reviewDir, { recursive: true });
       const reviewPath = path.join(reviewDir, `hunter-import-${dryRun ? 'dry-run-' : ''}${stamp}.csv`);
-      fs.writeFileSync(reviewPath, PotaHunterImport.planToCsv(plan, { downloaded: entries.length, reported: count, dryRun }));
+      // count 0: pota.app gave no total (lib/pota-sync.js fetchHunterLog).
+      const reportedText = count ? count.toLocaleString() : 'no total';
+      fs.writeFileSync(reviewPath, PotaHunterImport.planToCsv(plan, { downloaded: entries.length, reported: count || 'not given', dryRun }));
 
       const result = {
         ok: true,
@@ -36120,7 +36122,7 @@ app.whenReady().then(() => {
         reviewPath,
         backupPath,
       };
-      sendCatLog(`[pota-hunter-import]${dryRun ? ' DRY RUN, nothing changed:' : ''} ${entries.length} of ${count} entries downloaded: `
+      sendCatLog(`[pota-hunter-import]${dryRun ? ' DRY RUN, nothing changed:' : ''} ${entries.length} entries downloaded (POTA.app reports ${reportedText}): `
         + `${result.updated} ${dryRun ? 'would be ' : ''}updated, ${result.added} ${dryRun ? 'would be ' : ''}added, `
         + `${result.notAdded} not added (adding is off), ${result.unchanged} unchanged, `
         + `${result.conflicts} park conflicts (not changed), ${result.duplicates} duplicates (not added), `
@@ -36136,7 +36138,7 @@ app.whenReady().then(() => {
 
       const contacts = result.updated + result.added + result.notAdded + result.unchanged + result.conflicts + result.duplicates;
       const detail = [
-        `Hunter log entries downloaded: ${entries.length.toLocaleString()} (POTA.app reports ${count.toLocaleString()}).`,
+        `Hunter log entries downloaded: ${entries.length.toLocaleString()} (POTA.app reports ${reportedText}).`,
         `That is ${contacts.toLocaleString()} contacts: a 2-fer is one entry per park.`,
         '',
         `${result.updated.toLocaleString()} QSOs ${dryRun ? 'would be ' : ''}updated with park references.`,

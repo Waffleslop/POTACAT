@@ -4,7 +4,8 @@
 // request that hangs used to leave the import's running flag set, so both
 // buttons said "already running" until a restart. _getJson now aborts on a
 // timeout and on an oversized reply, settles exactly once, and the whole
-// download is capped. Runs lib/pota-sync.js against a stubbed electron `net`.
+// download is capped. A reply with no usable count still downloads every
+// page. Runs lib/pota-sync.js against a stubbed electron `net`.
 // Run: node test/pota-sync-hunter-fetch-test.js
 const assert = require('assert');
 const fs = require('fs');
@@ -165,6 +166,62 @@ test('fetchHunterLog: a normal log still downloads page by page', async () => {
     global.setTimeout = realSetTimeout;
   }
   assert.ok(/page=1&size=100/.test(urls[0]) && /page=2&size=100/.test(urls[1]));
+});
+
+// A missing count must not end the download after page 1 (review, 2026-11-03):
+// Number(undefined) || 0 read as "0 entries", and 100 >= 0 stopped the loop.
+const pagedServer = (count, total) => {
+  const s = newSync();
+  const calls = { pages: 0, progress: [] };
+  s._getJson = async () => {
+    calls.pages++;
+    const left = total - (calls.pages - 1) * 100;
+    return { status: 200, json: { count, entries: Array.from({ length: Math.max(0, Math.min(100, left)) }, () => ({})) } };
+  };
+  return { s, calls };
+};
+const fastPages = async (fn) => {
+  const realSetTimeout = global.setTimeout;
+  global.setTimeout = (f) => setImmediate(f);
+  try { return await fn(); } finally { global.setTimeout = realSetTimeout; }
+};
+test('fetchHunterLog: no count, a zero count or a non-numeric one still downloads every page', async () => {
+  for (const count of [undefined, null, 0, '', 'abc', -5]) {
+    const { s, calls } = pagedServer(count, 250);
+    const r = await fastPages(() => s.fetchHunterLog({ onProgress: (p) => calls.progress.push(p) }));
+    assert.strictEqual(r.entries.length, 250, `count=${JSON.stringify(count)}`);
+    assert.strictEqual(calls.pages, 3, 'stopped on the short third page');
+    assert.strictEqual(r.count, 0, 'an unknown total is reported as 0');
+    assert.deepStrictEqual(calls.progress.map((p) => p.count), [0, 0, 0]);
+  }
+});
+test('fetchHunterLog: no count and an exact multiple of the page size ends on the empty page', async () => {
+  const { s, calls } = pagedServer(undefined, 200);
+  const r = await fastPages(() => s.fetchHunterLog());
+  assert.strictEqual(r.entries.length, 200);
+  assert.strictEqual(calls.pages, 3, 'pages of 100, 100, then 0');
+});
+test('fetchHunterLog: a known count still stops on reaching it (no extra request)', async () => {
+  const { s, calls } = pagedServer(200, 200);
+  const r = await fastPages(() => s.fetchHunterLog());
+  assert.strictEqual(r.entries.length, 200);
+  assert.strictEqual(r.count, 200);
+  assert.strictEqual(calls.pages, 2);
+});
+test('fetchHunterLog: a known count stays bounded by its page guard if the server ignores `page`', async () => {
+  const s = newSync();
+  let pages = 0;
+  s._getJson = async () => { pages++; return { status: 200, json: { count: 150, entries: Array.from({ length: 100 }, () => ({})) } }; };
+  const r = await fastPages(() => s.fetchHunterLog());
+  assert.strictEqual(pages, 2, 'reached the count after two full pages');
+  assert.strictEqual(r.entries.length, 200);
+});
+test('Settings + main: an unknown total reads as such, never "of 0"', async () => {
+  const ui = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'pota-sync-ui.js'), 'utf8');
+  assert.ok(ui.includes('`Downloading… ${p.fetched.toLocaleString()} entries`'));
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.ok(main.includes("const reportedText = count ? count.toLocaleString() : 'no total';"));
+  assert.ok(!main.includes('(POTA.app reports ${count.toLocaleString()})'));
 });
 
 // The 'POTA.app user' placeholder is a display label, not a call (K3SBP
