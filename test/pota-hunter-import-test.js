@@ -415,6 +415,57 @@ test('main + Settings: the add checkbox is off by default and reaches the planne
   assert.strictEqual((h.match(/\{ myCalls, addMissing \}/g) || []).length, 2, 'dry run and import plan the same way');
 });
 
+// CSV formula injection (K3SBP review): park names and calls come from other
+// people's uploads; a cell starting = + - @ runs as a formula in Excel.
+test('csvCell: formula-looking cells get a leading quote', () => {
+  assert.strictEqual(H.csvCell('=1+1'), "'=1+1");
+  assert.strictEqual(H.csvCell('+1'), "'+1");
+  assert.strictEqual(H.csvCell('-2'), "'-2");
+  assert.strictEqual(H.csvCell('@SUM(A1)'), "'@SUM(A1)");
+  assert.strictEqual(H.csvCell('\tcmd'), "'\tcmd", 'leading tab');
+  assert.strictEqual(H.csvCell('\r=x'), "\"'\r=x\"", 'leading CR (quoted: it holds a CR)');
+  assert.strictEqual(H.csvCell('  =1+1'), "'  =1+1", 'spaces before = (Excel ignores them)');
+});
+test('csvCell: a guarded cell is still quoted for commas and double quotes', () => {
+  assert.strictEqual(H.csvCell('=HYPERLINK("http://x","click")'), '"\'=HYPERLINK(""http://x"",""click"")"');
+});
+test('csvCell: ordinary values are unchanged', () => {
+  for (const v of ['K1ABC', 'K1ABC/P', 'US-1234', 'US-1234 US-5678', '20260501', '142300', '1.0', '20m',
+    'Some Park', 'not added: already in your log', '', 'dry run: nothing was changed']) {
+    assert.strictEqual(H.csvCell(v), v);
+  }
+  assert.strictEqual(H.csvCell(null), '');
+  assert.strictEqual(H.csvCell(3), '3');
+  assert.strictEqual(H.csvCell('a, b'), '"a, b"', 'normal comma quoting still works');
+});
+test('review CSV: hostile pota.app text never starts a cell as a formula', () => {
+  const hostile = '=HYPERLINK("http://evil.example","Park")';
+  const entries = [
+    entry({ name: hostile }), // matches the local QSO: UPDATED row
+    entry({ station_callsign: 'W9NEW', name: '@SUM(1+1)*cmd|" /C calc"!A0' }), // NOT_ADDED row
+    entry({ station_callsign: 'W9DAT', mode: 'DATA', name: '+cmd' }), // SKIPPED (contact) row
+    entry({ station_callsign: 'W9BAD', qsoDateTime: '-1+1', name: ' =1' }), // SKIPPED (entry) row
+  ];
+  const csv = H.planToCsv(H.planHunterImport([local()], entries));
+  // Parse properly (cells can hold quoted commas) and check every cell.
+  const cells = [];
+  for (const line of csv.trim().split('\r\n')) {
+    const re = /("(?:[^"]|"")*"|[^,]*)(,|$)/g;
+    let m;
+    while ((m = re.exec(line)) && m[0] !== '') {
+      let c = m[1];
+      if (c.startsWith('"')) c = c.slice(1, -1).replace(/""/g, '"');
+      cells.push(c);
+      if (!m[2]) break;
+    }
+  }
+  assert.ok(cells.length > 50, 'parsed the cells');
+  const bad = cells.filter((c) => /^(?:[\t\r]|\s*[=+\-@])/.test(c));
+  assert.deepStrictEqual(bad, [], 'no cell starts like a formula');
+  assert.ok(cells.includes("'" + hostile), 'the park name is kept, as text');
+  assert.ok(cells.includes("'-1+1"), 'the raw unreadable date too');
+});
+
 test('review CSV: summary counts first, then one row per decision', () => {
   const { qsos, entries, plan } = scenario();
   H.applyHunterPlan(qsos, plan);
