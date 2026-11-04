@@ -373,7 +373,16 @@ const WsprPowerMemory = require('./lib/wspr-power-memory'); // pre-beacon RF pow
 const Privileges = require('./lib/privileges');
 const SwrGuard = require('./lib/swr-guard'); // SWR-guard auto-tune + ATU result policy (pure)
 const { encodeWspr } = require('./lib/wspr/encode');
-const { loadCtyDat, resolveCallsign, resolveOperatingCall, resolveZones, getAllEntities } = require('./lib/cty');
+const { loadCtyDat, resolveCallsign: resolveCallsignByPrefix, resolveOperatingCall, resolveZones, getAllEntities } = require('./lib/cty');
+// Every entity lookup in this file is where the station OPERATES: a plain
+// call resolves exactly as before, and a portable one the way every logger
+// reads it. Prefix-only resolution put W1AW/KL7 in the United States (and so
+// in CT, from QRZ's address) and a decode from KH8/W1AW in the wrong country
+// (jgedmond, tactical_index 2026-10/11).
+function resolveCallsign(call, db) {
+  const op = resolveOperatingCall(call, db);
+  return op ? op.entity : resolveCallsignByPrefix(call, db);
+}
 const CallZones = require('./lib/call-zones'); // CQ/ITU zones for spots + logbook rows (LZ3AW item 30)
 const DxRule = require('./lib/dx-rule'); // what counts as DX: another entity, or the operator's distance (G4BFG)
 const InstallDefaults = require('./lib/install-defaults'); // always-on features + the one-time defaults (Casey 2026-10-27)
@@ -13482,7 +13491,9 @@ async function qrzStationInfo(call) {
   if (!q) return null;
   return {
     name: [cleanQrzName(q.nickname) || cleanQrzName(q.fname), cleanQrzName(q.name)].filter(Boolean).join(' '),
-    country: q.country || '', state: q.state || '', county: q.county || '', grid: q.grid || '',
+    // The DXCC entity (<land>), not the mailing country: KL7 and KH8 calls
+    // were logged as United States (jgedmond, ClubLog flagged them).
+    country: q.land || q.country || '', state: q.state || '', county: q.county || '', grid: q.grid || '',
     qth: q.addr2 || '', cqz: q.cqzone || '', ituz: q.ituzone || '',
   };
 }
