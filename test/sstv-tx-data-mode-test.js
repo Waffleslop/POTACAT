@@ -29,7 +29,8 @@ test('SSTV key-down declares audio and forces data mode on an Icom', () => {
 
 test('handleRemotePtt honours forceDataMode even with SSB-over-DATA off or JTCAT loaded', () => {
   assert.ok(/const forceData = !!opts\.forceDataMode;/.test(src));
-  assert.ok(/if \(state && \(settings\.ssbOverData \|\| forceData\) && !yaesuVoice && !voiceInData && audioActive && \(!ft8Engine \|\| forceData\)\) \{/.test(src));
+  // `&& !opts.noDataSwap`: only Station Setup's voice test sets it (never SSTV).
+  assert.ok(/if \(state && \(settings\.ssbOverData \|\| forceData\) && !opts\.noDataSwap && !yaesuVoice && !voiceInData && audioActive && \(!ft8Engine \|\| forceData\)\) \{/.test(src));
 });
 
 test('voice on a Yaesu never goes to DATA-U (K3SBP FT-710 voice macros)', () => {
