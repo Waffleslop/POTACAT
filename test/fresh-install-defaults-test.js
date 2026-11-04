@@ -31,7 +31,8 @@ test('the first-run welcome screen shows WSPR before any setting is read', () =>
 });
 
 test('the welcome screen starts on Light (its value is what Continue saves on a first run)', () => {
-  assert.ok(/<input type="checkbox" id="welcome-light-mode" checked>/.test(html));
+  // Hidden since Change Theme (the Welcome dropdown drives it), still checked.
+  assert.ok(/<input type="checkbox" id="welcome-light-mode" checked[ >]/.test(html));
 });
 
 // Every window's theme comes from lib/app-theme.js since the design-system

@@ -28,7 +28,8 @@ check('one function sends the theme to every pop-out the main window can theme',
   for (const s of senders) assert.ok(fn.includes('window.api.' + s + '('), s + ' is in broadcastPopoutTheme');
 });
 check('both the quick toggle and Settings > Save use it, and nothing sends window by window', () => {
-  assert.strictEqual((app.match(/broadcastPopoutTheme\(/g) || []).length, 3, 'the definition + two callers');
+  // Callers: the quick toggle (hidden, driven by Change Theme), Settings > Save, Change Theme itself.
+  assert.strictEqual((app.match(/broadcastPopoutTheme\(/g) || []).length, 4, 'the definition + three callers');
   const outside = app.replace(fn, '');
   assert.ok(!/window\.api\.\w*[Pp]opoutTheme\(/.test(outside.replace(/function _popoutThemePayload[\s\S]*?\n\}/, '')), 'no stray per-window sends');
 });

@@ -1448,9 +1448,12 @@
              sidebar above Report a Bug. Labeled "Light Mode" when on,
              "Dark Mode" when off so the current state is obvious
              without having to flip and see what changes. -->
-        <label class="settings-tab-theme-toggle" title="Toggle dark / light theme">
-          <span class="switch"><input type="checkbox" id="quick-light-mode"><span class="switch-slider"></span></span>
-          <span class="settings-tab-theme-label" id="quick-light-mode-label">Dark Mode</span>
+        <label class="settings-tab-theme-toggle settings-tab-theme-pick" title="Change the theme of every window">
+          <span class="settings-tab-theme-label">Change Theme</span>
+          <select id="quick-theme" class="settings-tab-theme-select"></select>
+          <!-- The old on/off switch, kept hidden: the dropdown drives it. -->
+          <input type="checkbox" id="quick-light-mode" hidden style="display:none">
+          <span id="quick-light-mode-label" hidden></span>
         </label>
         <!-- Action button styled like a tab, sits at the bottom of
              the sidebar nav. Doesn't switch tabs — fires the
@@ -3069,34 +3072,18 @@
     <!-- 8. Display (trimmed — bearing moved to Antenna, SmartSDR absorbed) -->
     <fieldset class="source-toggles" data-settings-tab="display">
       <legend>Display</legend>
-      <label for="set-app-theme" style="display:block;margin-bottom:6px;">Theme:
-        <select id="set-app-theme">
-          <option value="classic">Classic (the light and dark modes below)</option>
-          <option value="potacat-dark">POTACAT Dark</option>
-          <option value="midnight">Midnight</option>
-          <option value="acid-burn">Acid Burn</option>
-          <option value="miami-nights">Miami Nights</option>
-          <option value="potacat-light">POTACAT Light</option>
-          <option value="shes-on-frequency">She&#39;s On Frequency</option>
-        </select>
+      <label for="set-app-theme" style="display:block;margin-bottom:6px;">Change Theme:
+        <select id="set-app-theme"></select>
       </label>
-      <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">The named themes are the same ones as the ECHOCAT app, colour for colour. Preview: windows are still being moved onto them, so a few controls keep their old look. Classic keeps the light, dark and variant choices below.</span>
+      <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Changes every window at once. The Classic themes are POTACAT's original look; the others are the same as the ECHOCAT app, colour for colour (a few controls still keep their old look while windows move onto them).</span>
       <label for="set-waterfall-palette" style="display:block;margin-bottom:6px;">Waterfall colours:
         <select id="set-waterfall-palette"></select>
       </label>
       <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">The colours of every waterfall and band scope: the FT8 window, the Band Scope, SSTV and Winlink. The palettes are the ECHOCAT app's. Standard keeps each window's usual colours. Changes at once.</span>
-      <label class="switch-label">
-        <span>Dark Mode</span>
-        <div class="switch">
-          <input type="checkbox" id="set-light-mode">
-          <span class="switch-slider"></span>
-        </div>
-        <span>Light Mode</span>
-      </label>
-      <!-- Dark sub-variant. Only meaningful in dark mode; left visible
-           in light mode so the chooser doesn't appear/disappear (less
-           jumpy). Casey 2026-06-07. -->
-      <div id="set-dark-variant-group" class="dark-variant-group">
+      <!-- The old Dark/Light switch and Navy/Charcoal radios, kept hidden:
+           Change Theme above drives them, and the Settings save reads them. -->
+      <input type="checkbox" id="set-light-mode" hidden style="display:none">
+      <div id="set-dark-variant-group" class="dark-variant-group" hidden style="display:none">
         <span class="dark-variant-label">Dark variant:</span>
         <label class="radio-inline"><input type="radio" name="set-dark-variant" value="navy" checked> Navy</label>
         <label class="radio-inline"><input type="radio" name="set-dark-variant" value="charcoal"> Charcoal</label>
@@ -4860,13 +4847,11 @@
     <p class="welcome-text">Here are some quick settings to get you up and running. There are many more inside the Settings menu.</p>
 
     <div class="welcome-section-label">Display</div>
-    <label class="switch-label welcome-theme-switch">
-      <span>Dark Mode</span>
-      <div class="switch">
-        <input type="checkbox" id="welcome-light-mode" checked>
-        <span class="switch-slider"></span>
-      </div>
-      <span>Light Mode</span>
+    <label class="welcome-field" for="welcome-theme" style="display:block;">
+      <span style="font-size:13px;color:var(--text-secondary);">Change Theme</span>
+      <select id="welcome-theme" style="display:block;margin-top:4px;"></select>
+      <!-- The old switch, kept hidden: the dropdown drives it, the Welcome save reads it. -->
+      <input type="checkbox" id="welcome-light-mode" checked hidden style="display:none">
     </label>
     <div class="welcome-field">
       <span style="font-size:13px;color:var(--text-secondary);">Change Font Size</span>

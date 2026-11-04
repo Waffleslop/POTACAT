@@ -2425,6 +2425,24 @@ dialog {
 .settings-tab-theme-toggle:hover {
   color: var(--text-secondary);
 }
+/* Change Theme dropdown (replaced the Dark/Light switch, Casey 2026-11-04):
+   label over a full-width select so long names fit the narrow sidebar. */
+.settings-tab-theme-toggle.settings-tab-theme-pick {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  cursor: default;
+}
+.settings-tab-theme-select {
+  width: 100%;
+  min-width: 0;
+  font-size: 11px;
+  padding: 3px 4px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+}
 .summary-cards {
   display: flex;
   flex-direction: column;

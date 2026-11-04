@@ -2039,6 +2039,7 @@ async function loadPrefs() {
   }
   _currentAppTheme = settings.appTheme || 'classic';
   applyTheme(settings.lightMode === true, settings.darkVariant || 'navy');
+  syncThemePickers();
   applyColorblindMode(settings.colorblindMode === true);
   applyWcagMode(settings.wcagMode === true);
   grid = settings.grid || '';
@@ -6968,6 +6969,7 @@ function refreshSummaryCard() {
     quickLightMode.checked = document.documentElement.getAttribute('data-theme') === 'light';
     if (typeof _updateThemeToggleLabel === 'function') _updateThemeToggleLabel();
   }
+  if (typeof syncThemePickers === 'function') syncThemePickers();
   // PSTRotator quick toggle: only visible when a rotor has been
   // configured under Settings → Tuning. quickRotorLabel was
   // gated on this in the old dropdown's open path.
@@ -16569,6 +16571,65 @@ quickLightMode.addEventListener('change', async () => {
   await window.api.saveSettings(_quickSave);
 });
 
+// Change Theme: ONE dropdown in the Settings sidebar and the same one in
+// Settings > Display (Casey 2026-11-04: a dropdown, not a light/dark on/off).
+// Every look is an entry (lib/app-theme.js THEME_CHOICES); picking one
+// paints every window and saves at once.
+function _themeChoiceNow() {
+  if (!window.AppTheme || !window.AppTheme.choiceFor) return 'classic-navy';
+  return window.AppTheme.choiceFor({
+    appTheme: _currentAppTheme,
+    lightMode: document.documentElement.getAttribute('data-theme') === 'light',
+    darkVariant: _currentDarkVariant,
+  });
+}
+function syncThemePickers() {
+  if (!window.AppTheme || !window.AppTheme.THEME_CHOICES) return;
+  const now = _themeChoiceNow();
+  for (const id of ['quick-theme', 'set-app-theme', 'welcome-theme']) {
+    const sel = document.getElementById(id);
+    if (!sel) continue;
+    if (sel.options.length !== window.AppTheme.THEME_CHOICES.length) {
+      sel.innerHTML = '';
+      for (const c of window.AppTheme.THEME_CHOICES) {
+        const o = document.createElement('option');
+        o.value = c.id; o.textContent = c.name;
+        sel.appendChild(o);
+      }
+    }
+    // The Welcome screen shows what its Continue will save (a first run
+    // starts on Light, test/fresh-install-defaults-test.js), not the window.
+    if (id === 'welcome-theme') {
+      const w = document.getElementById('welcome-light-mode');
+      sel.value = w ? window.AppTheme.choiceFor({ appTheme: _currentAppTheme, lightMode: w.checked, darkVariant: _currentDarkVariant }) : now;
+    } else {
+      sel.value = now;
+    }
+  }
+}
+async function applyThemeChoice(id) {
+  if (!window.AppTheme || !window.AppTheme.settingsForChoice) return;
+  const s = window.AppTheme.settingsForChoice(id);
+  _currentAppTheme = s.appTheme;
+  if (s.darkVariant) {
+    const r = document.querySelector(`input[name="set-dark-variant"][value="${s.darkVariant}"]`);
+    if (r) r.checked = true;
+  }
+  setLightMode.checked = s.lightMode === true;
+  applyTheme(s.lightMode === true, s.darkVariant);
+  if (quickLightMode) quickLightMode.checked = document.documentElement.getAttribute('data-theme') === 'light';
+  { const w = document.getElementById('welcome-light-mode'); if (w) w.checked = s.lightMode === true; }
+  _updateThemeToggleLabel();
+  broadcastPopoutTheme(_popoutThemePayload());
+  syncThemePickers();
+  await window.api.saveSettings(s);
+}
+for (const id of ['quick-theme', 'set-app-theme', 'welcome-theme']) {
+  const sel = document.getElementById(id);
+  if (sel) sel.addEventListener('change', () => applyThemeChoice(sel.value));
+}
+syncThemePickers();
+
 // More dropdown → "Activator mode" entry. Behaves like the other
 // view-menu-item buttons: one click enters Activator mode. Exiting
 // is via the "Back to Hunter" button inside the Activator UI
@@ -17550,13 +17611,13 @@ async function openSettingsDialog(tab) {
   setDisableAutoUpdate.checked = s.disableAutoUpdate === true;
   setEnableTelemetry.checked = s.enableTelemetry === true;
   setLightMode.checked = s.lightMode === true;
-  { const _at = document.getElementById('set-app-theme'); if (_at) _at.value = s.appTheme || 'classic'; }
   { const _wp = document.getElementById('set-waterfall-palette'); if (_wp && window.WaterfallPalettes) _wp.value = window.WaterfallPalettes.normalize(s.waterfallPalette); }
   // Mirror the dark sub-variant radio. Default 'navy' for legacy users
   // who don't have the field yet; setting persists in settings.json.
   const _dvVal = s.darkVariant || 'navy';
   const _dvRadio = document.querySelector(`input[name="set-dark-variant"][value="${_dvVal}"]`);
   if (_dvRadio) _dvRadio.checked = true;
+  syncThemePickers();
   hamlibTestResult.textContent = '';
   hamlibTestResult.className = '';
   renderRigList(s.rigs || [], s.activeRigId || null);
@@ -18020,7 +18081,9 @@ settingsSave.addEventListener('click', async () => {
   const disableAutoUpdate = setDisableAutoUpdate.checked;
   const telemetryEnabled = setEnableTelemetry.checked;
   const lightModeEnabled = setLightMode.checked;
-  const appThemeVal = (document.getElementById('set-app-theme') || {}).value || 'classic';
+  // Change Theme (applyThemeChoice) keeps _currentAppTheme and the hidden
+  // light/variant inputs in step, so Save writes what is on screen.
+  const appThemeVal = _currentAppTheme || 'classic';
   // Dark sub-variant — radio "navy" vs "charcoal". Reads the checked
   // radio; falls back to current value so missing UI doesn't reset it.
   const darkVariantRadio = document.querySelector('input[name="set-dark-variant"]:checked');
@@ -26632,6 +26695,7 @@ async function checkFirstRun(force = false) {
       if (welcomeQrzUser) welcomeQrzUser.value = s.qrzUsername || '';
       if (welcomeQrzPass) welcomeQrzPass.value = s.qrzPassword || '';
       welcomeLightMode.checked = s.lightMode === true;
+      syncThemePickers();
       // Show existing active rig if any
       const rigs = s.rigs || [];
       const activeRig = rigs.find(r => r.id === s.activeRigId) || rigs[0];

@@ -135,5 +135,38 @@ test('the VFO window (self-styled) follows a design theme: data-ds at boot, its 
   assert.ok(/new MutationObserver\(\(\) => \{ readKnobColors\(\); drawVfoDial\(\); \}\)/.test(v));
 });
 
+test('Change Theme: every look is one dropdown entry, and a choice round-trips through the settings', () => {
+  const ids = AppTheme.THEME_CHOICES.map(c => c.id);
+  assert.deepStrictEqual(ids.slice(0, 3), ['classic-navy', 'classic-charcoal', 'classic-light']);
+  for (const t of AppTheme.APP_THEMES.filter(t => t.column)) assert.ok(ids.includes(t.id), t.id + ' is in the dropdown');
+  for (const id of ids) {
+    const s = AppTheme.settingsForChoice(id);
+    assert.strictEqual(AppTheme.choiceFor(Object.assign({ darkVariant: 'navy' }, s)), id, id + ' round trip');
+    const r = AppTheme.resolveAppTheme(Object.assign({ darkVariant: 'navy' }, s));
+    if (id === 'classic-light') assert.strictEqual(r.theme, 'light');
+    if (id === 'classic-charcoal') assert.strictEqual(r.variant, 'charcoal');
+  }
+  // Old settings land on the right entry.
+  assert.strictEqual(AppTheme.choiceFor({}), 'classic-navy');
+  assert.strictEqual(AppTheme.choiceFor({ lightMode: true }), 'classic-light');
+  assert.strictEqual(AppTheme.choiceFor({ darkVariant: 'charcoal' }), 'classic-charcoal');
+  assert.strictEqual(AppTheme.choiceFor({ appTheme: 'midnight', lightMode: true }), 'midnight');
+  assert.strictEqual(AppTheme.choiceFor({ appTheme: 'nope', lightMode: true }), 'classic-light');
+  assert.deepStrictEqual(AppTheme.settingsForChoice('nope'), AppTheme.settingsForChoice('classic-navy'));
+});
+
+test('Change Theme: no on/off theme switch is left on screen (sidebar, Display, Welcome)', () => {
+  const html = read('renderer/index.html');
+  for (const id of ['quick-theme', 'set-app-theme', 'welcome-theme']) assert.ok(html.includes('<select id="' + id + '"'), id);
+  for (const id of ['quick-light-mode', 'set-light-mode', 'welcome-light-mode']) {
+    assert.ok(new RegExp('<input type="checkbox" id="' + id + '"( checked)? hidden style="display:none">').test(html), id + ' must stay hidden (the dropdown drives it)');
+  }
+  assert.ok(html.includes('id="set-dark-variant-group" class="dark-variant-group" hidden style="display:none"'), 'Navy/Charcoal radios hidden');
+  assert.ok(!html.includes('<span>Dark Mode</span>'), 'no Dark Mode / Light Mode switch label');
+  const app = read('renderer/app.js');
+  assert.ok(app.includes("const appThemeVal = _currentAppTheme || 'classic';"), 'Settings save takes the theme the dropdown chose');
+  assert.ok(app.includes("for (const id of ['quick-theme', 'set-app-theme', 'welcome-theme'])"));
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
