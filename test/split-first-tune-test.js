@@ -58,6 +58,33 @@ function rig() {
     await settle();
     assert.deepStrictEqual(codec.calls, [false]);
   });
+  console.log('mode, frequency, then key (#113 item 1):');
+  await t('the PTT path re-sends the frequency right after the mode, before the key-down', async () => {
+    const { cat, codec } = rig();
+    const order = [];
+    codec.setMode = (m) => order.push('mode ' + m);
+    codec.setFrequency = (hz) => order.push('freq ' + hz);
+    codec.setTransmit = (on) => order.push('tx ' + on);
+    cat.setModeOnly('PKTUSB', 14250000, { anchorNow: true });
+    cat.setTransmit(true);
+    assert.deepStrictEqual(order, ['mode PKTUSB', 'freq 14250000', 'tx true']);
+    await settle();
+    assert.deepStrictEqual(order, ['mode PKTUSB', 'freq 14250000', 'tx true'], 'no second frequency write during TX');
+  });
+  await t('without anchorNow (the key-up restore) the re-anchor still waits 200 ms', async () => {
+    const { cat, codec } = rig();
+    const order = [];
+    codec.setMode = (m) => order.push('mode ' + m);
+    codec.setFrequency = (hz) => order.push('freq ' + hz);
+    cat.setModeOnly('USB', 14250000);
+    assert.deepStrictEqual(order, ['mode USB']);
+    await settle();
+    assert.deepStrictEqual(order, ['mode USB', 'freq 14250000']);
+  });
+  await t('main.js keys SSB-over-DATA with anchorNow', () => {
+    const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+    assert.ok(/cat\.setModeOnly\(dataMode, _ssbFreqBeforePtt, \{ noAnchor: _icomData, anchorNow: true \}\)/.test(src));
+  });
   console.log('\nsplit on tune: ' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 })();

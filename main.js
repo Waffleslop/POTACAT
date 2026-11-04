@@ -26419,7 +26419,8 @@ function handleRemotePtt(state, opts = {}) {
       // IC-705 repeater memory with - offset keyed with + offset, nj7n_nate):
       // no re-anchor there.
       if (cat && cat.connected) {
-        if (cat.setModeOnly) cat.setModeOnly(dataMode, _ssbFreqBeforePtt, { noAnchor: _icomData });
+        // anchorNow: mode, frequency, THEN the key-down below (GitHub #113 item 1).
+        if (cat.setModeOnly) cat.setModeOnly(dataMode, _ssbFreqBeforePtt, { noAnchor: _icomData, anchorNow: true });
         else if (_ssbFreqBeforePtt) cat.tune(_ssbFreqBeforePtt, dataMode);
       }
       // Stagger the upcoming PTT key-down on Icom so its CI-V PTT frame
