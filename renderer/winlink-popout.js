@@ -369,6 +369,14 @@
   var WF_HOP = 512;                        // a new line every 21 ms (~47/s) before averaging
   var wf = null, wfMode = 'none', wfAcc = new Float32Array(WF_N), wfAccLen = 0, wfRate = 24000;
   var wfSpeed = 60, wfShown = true, wfHidden = false;
+  // Waterfall colours: the machine's palette (lib/waterfall-palettes.js).
+  var wlWfPal = { id: 'auto', o: {} };
+  if (window.WaterfallPalettes) {
+    WaterfallPalettes.follow(window.api, function (id, o) {
+      wlWfPal = { id: id, o: o };
+      if (wf && wf.supported) wf.setPalette(id, o);
+    });
+  }
   var wfRemote = false; // an ECHOCAT device is watching through the shack
   var wfAvg = new Float32Array(WF_BINS), wfAvgN = 0, wfLastLineMs = 0;
   // Busy: a signal in the modem's band that stands above the noise. The rule
@@ -486,7 +494,7 @@
       $('wl-wf').classList.remove('show');
     } else {
       if (!wf) {
-        try { wf = new Waterfall($('wl-wf-canvas'), { bins: WF_BINS, historyRows: 256, gamma: 0.6, crop: true }); } catch (e) { wf = null; }
+        try { wf = new Waterfall($('wl-wf-canvas'), { bins: WF_BINS, historyRows: 256, gamma: 0.6, crop: true, palette: wlWfPal.id, paletteOpts: wlWfPal.o }); } catch (e) { wf = null; }
         if (!wf || !wf.supported) { $('wl-wf').classList.remove('show'); return; }
       }
       $('wl-wf').classList.add('show');

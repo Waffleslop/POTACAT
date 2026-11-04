@@ -17551,6 +17551,7 @@ async function openSettingsDialog(tab) {
   setEnableTelemetry.checked = s.enableTelemetry === true;
   setLightMode.checked = s.lightMode === true;
   { const _at = document.getElementById('set-app-theme'); if (_at) _at.value = s.appTheme || 'classic'; }
+  { const _wp = document.getElementById('set-waterfall-palette'); if (_wp && window.WaterfallPalettes) _wp.value = window.WaterfallPalettes.normalize(s.waterfallPalette); }
   // Mirror the dark sub-variant radio. Default 'navy' for legacy users
   // who don't have the field yet; setting persists in settings.json.
   const _dvVal = s.darkVariant || 'navy';
@@ -32165,4 +32166,15 @@ function firstEmptyKiwiHost() {
     const browse = document.querySelector('.kiwi-browse-btn[data-slot="' + slot + '"]');
     if (browse) browse.click();
   });
+})();
+
+// Settings > Display > Waterfall colours (lib/waterfall-palettes.js): applied
+// at once, not on Save, and kept in step with the same choice made in the
+// FT8 window or the Band Scope.
+(function () {
+  const sel = document.getElementById('set-waterfall-palette');
+  if (!sel || !window.WaterfallPalettes || !window.api.setWaterfallPalette) return;
+  window.WaterfallPalettes.fillSelect(sel, 'auto');
+  sel.addEventListener('change', () => window.api.setWaterfallPalette(sel.value));
+  window.WaterfallPalettes.follow(window.api, (id) => { sel.value = id; });
 })();

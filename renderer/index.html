@@ -3081,6 +3081,10 @@
         </select>
       </label>
       <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">The named themes are the same ones as the ECHOCAT app, colour for colour. Preview: windows are still being moved onto them, so a few controls keep their old look. Classic keeps the light, dark and variant choices below.</span>
+      <label for="set-waterfall-palette" style="display:block;margin-bottom:6px;">Waterfall colours:
+        <select id="set-waterfall-palette"></select>
+      </label>
+      <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">The colours of every waterfall and band scope: the FT8 window, the Band Scope, SSTV and Winlink. The palettes are the ECHOCAT app's. Standard keeps each window's usual colours. Changes at once.</span>
       <label class="switch-label">
         <span>Dark Mode</span>
         <div class="switch">
@@ -5185,6 +5189,7 @@
 
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>
   <script src="../lib/rig-family.js"></script>
+  <script src="../lib/waterfall-palettes.js"></script>
   <script src="../lib/app-theme.js"></script>
   <script src="../lib/rig-bands.js"></script>
   <script src="../lib/listen-source.js"></script>

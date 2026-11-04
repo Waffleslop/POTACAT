@@ -92,6 +92,7 @@ const { app, BrowserWindow, ipcMain, Menu, dialog, Notification, screen, nativeI
 // no fixed Node). Installed before any module that fetches is loaded.
 require('./lib/fetch-policy').installNoBrotliFetch(globalThis);
 const RemoteBridge = require('./lib/remote-bridge');
+const WaterfallPalettes = require('./lib/waterfall-palettes');
 {
   const _ipcOn = ipcMain.on.bind(ipcMain);
   ipcMain.on = (channel, fn) => _ipcOn(channel, RemoteBridge.OUT[channel]
@@ -796,6 +797,7 @@ const GLOBAL_KEYS = new Set([
   'jtcatWaterfallSpeed', // waterfall lines/sec — display property of this screen
   'jtcatWaterfallFloor', // waterfall display noise floor (0..200) — same nature
   'jtcatShowBandScope',  // band-scope strip in the JTCAT pop-out (FT-710) — display
+  'waterfallPalette',  // waterfall / band scope colours (lib/waterfall-palettes.js) — display
                        // (same reasoning as lightMode/darkVariant above)
   'wsprPreCapPower',   // {watts, rigId, at}: the RF power the WSPR beacon found on the
                        // radio before capping it at 1 W — the radio is this machine's
@@ -1353,6 +1355,26 @@ app.on('browser-window-created', (_e, w) => {
 // settings.jtcatRxGainByBand, and changing band restores that band's level.
 // settings.jtcatRxGain stays the live/last value — it's what every surface
 // hydrates from at connect, and it's the fallback for a band never set.
+// Waterfall palette (lib/waterfall-palettes.js): ONE machine setting for
+// every waterfall window (JTCAT, band scope pop-out, SSTV, Winlink). 'auto'
+// = each window's usual colours. Every window hears a change at once.
+function waterfallPaletteBroadcast() {
+  const id = WaterfallPalettes.normalize(settings.waterfallPalette);
+  for (const wc of require('electron').webContents.getAllWebContents()) {
+    try { wc.send('waterfall-palette', id); } catch { /* closing */ }
+  }
+}
+function applyWaterfallPalette(id) {
+  const next = WaterfallPalettes.normalize(id);
+  if (WaterfallPalettes.normalize(settings.waterfallPalette) !== next) {
+    settings.waterfallPalette = next;
+    try { saveSettings(settings); } catch { /* logged by saveSettings */ }
+    sendCatLog(`[Display] Waterfall palette: ${next}`);
+  }
+  waterfallPaletteBroadcast();
+  return next;
+}
+
 let _jtcatRxGainSaveTimer = null;
 let _jtcatRxGainBand = '';   // band whose level is currently loaded
 function applyJtcatRxGain(value, origin) {
@@ -44359,6 +44381,8 @@ function cloudShackNotice(text, kind) {
     }
   });
 
+  ipcMain.handle('get-waterfall-palette', () => WaterfallPalettes.normalize(settings.waterfallPalette));
+  ipcMain.handle('set-waterfall-palette', (_e, id) => applyWaterfallPalette(id));
   ipcMain.handle('save-settings', (_e, newSettings) => {
     setTimeout(scopeOverlaySync, 0);   // the licence class shades the scope
     // Same self-drive exemption as the tune handler: the idle-RX popout
@@ -44366,6 +44390,10 @@ function cloudShackNotice(text, kind) {
     markUserActive({ selfDriven: isIdleRxSelfAction(_e.sender) });
     const sdrScopeBefore = sdrScopeSettingsForActiveRig(); // compared after the save (sdrScopeSettingsChanged)
     for (const f of normalizeSettingsSerialPaths(newSettings)) sendCatLog(`[CAT] ${f.key} "${f.from}" saved as ${f.to}`);
+    // The waterfall palette has ONE writer, set-waterfall-palette: a window
+    // that saves back the settings copy it loaded earlier must not put an
+    // old palette back under a choice made since.
+    delete newSettings.waterfallPalette;
     stampSstvTemplatesPatch(newSettings);
     setImmediate(() => afterSstvSettingsSaved(newSettings));
     // An always-on feature has no off: a stale window's false never lands.

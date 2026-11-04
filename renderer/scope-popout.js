@@ -57,7 +57,16 @@ const savedColormap = (() => { try { return localStorage.getItem('scope-colormap
 const WF_HISTORY_ROWS = Math.min(2160, Math.max(512, Math.ceil((window.screen && window.screen.height) || 1080)));
 const wf = new Waterfall(wfCanvas, { bins: BINS, historyRows: WF_HISTORY_ROWS, colormap: savedColormap, gamma: 0.6, crop: true });
 if (!wf.supported) $('sc-unsupported').style.display = 'flex';
-$('sc-colormap').value = savedColormap;
+// Colours: the machine's waterfall palette (lib/waterfall-palettes.js).
+// 'Standard' keeps this window's own map (Turbo, or the Classic picked here
+// before palettes existed); a palette also colours the trace.
+let traceColor = null;
+WaterfallPalettes.fillSelect($('sc-colormap'), 'auto');
+WaterfallPalettes.follow(window.api, (id, o) => {
+  $('sc-colormap').value = id;
+  traceColor = wf.setPalette(id, o);
+  scheduleDraw();
+});
 
 // ─── Axis + labels ─────────────────────────────────────────────────────────
 function recomputeAxis() {
@@ -136,7 +145,7 @@ function drawTrace() {
   ScopeView.drawTrace(traceCanvas.getContext('2d'),
     { bins: latest ? V.applyRange(smooth, range.lo, range.hi) : null, peak: peakHold ? V.applyRange(peak, range.lo, range.hi) : null },
     { w, h, dpr, axis, dialHz: centerHz, spanHz: state.spanHz, anchor: state.anchor, peakHold,
-      scale: V.displayScale(state.levelScale, range.lo, range.hi), gutter: true, sUnits: showSUnits,
+      scale: V.displayScale(state.levelScale, range.lo, range.hi), gutter: true, sUnits: showSUnits, traceColor,
       overlay: { passband: state.passband, txHz: state.txHz, bandPlan: state.bandPlan, privileges: showPrivileges } });
   drawSpots(traceCanvas.getContext('2d'), w, h, dpr);
 }
@@ -504,8 +513,7 @@ const gearPop = $('sc-gear-pop');
 $('sc-gear-btn').addEventListener('click', (e) => { e.stopPropagation(); gearPop.classList.toggle('show'); });
 document.addEventListener('click', (e) => { if (!gearPop.contains(e.target)) gearPop.classList.remove('show'); });
 $('sc-colormap').addEventListener('change', (e) => {
-  wf.setColormap(e.target.value);
-  try { localStorage.setItem('scope-colormap', e.target.value); } catch { /* private mode */ }
+  window.api.setWaterfallPalette(e.target.value);   // every waterfall window follows
 });
 $('sc-fps').addEventListener('change', (e) => window.api.setFps(Number(e.target.value)));
 const floorEl = $('sc-floor');

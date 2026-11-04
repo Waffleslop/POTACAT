@@ -161,6 +161,7 @@ const TESTS = [
   'test/icom-scope-test.js', // an Icom's own band scope over CI-V: parser, codec events, the owner's 30 s recording
   'test/adif-import-refs-test.js', // POTA_REF-only logs (QLog) get SIG/SIG_INFO on import; the Logbook shows them (KC9FOZ)
   'test/icom-lan-voice-test.js', // voice over an Icom's LAN: DATA mode, or USB/LSB when DATA OFF MOD = LAN (EA1BZN)
+  'test/waterfall-palettes-test.js', // waterfall / band scope palettes = the ECHOCAT app's, wired into every waterfall
   'test/scope-view-test.js', // the scope's shared ticks + trace painter (every surface), the synced tuning step
   'test/scope-overlay-test.js', // the scope's passband, split TX marker and band plan (Phase 3)
   'test/flex-readback-test.js', // a Flex's controls read back from the radio's own status (real 8600 capture)

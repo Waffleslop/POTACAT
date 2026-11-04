@@ -35,7 +35,8 @@ in vec2 v_uv;
 out vec4 fragColor;
 uniform sampler2D u_tex;
 uniform float u_rowOffset;
-uniform int u_colormap;
+uniform int u_colormap;   // 0 classic, 1 turbo, 2 = u_lut (a chosen palette)
+uniform sampler2D u_lut;  // 256x1 RGB, lib/waterfall-palettes.js
 // Crop mode (opts.crop): one history row per CSS pixel row, newest at the
 // top, so a shorter window shows LESS history instead of squeezing all of it
 // (Scott 2026-09-25: "if I make the window smaller, I just lose the bottom
@@ -71,7 +72,8 @@ void main() {
     tv = fract(v_uv.y + u_rowOffset);
   }
   float m = texture(u_tex, vec2(v_uv.x, tv)).r;
-  vec3 c = (u_colormap == 1) ? cmTurbo(m) : cmClassic(m);
+  vec3 c = (u_colormap == 2) ? texture(u_lut, vec2((floor(clamp(m, 0.0, 1.0) * 255.0) + 0.5) / 256.0, 0.5)).rgb
+          : (u_colormap == 1) ? cmTurbo(m) : cmClassic(m);
   fragColor = vec4(c, 1.0);
 }`;
 
@@ -138,6 +140,8 @@ void main() { fragColor = u_color; }`;
       this.crop = !!opts.crop;
       this.gamma = opts.gamma || 0.5;
       this._cmIndex = opts.colormap === 'turbo' ? 1 : 0;
+      this._baseCm = this._cmIndex;   // what 'auto' (Standard) returns to
+      this._paletteId = 'auto';
       this._markers = [];
       this._clickCb = null;
 
@@ -173,6 +177,7 @@ void main() { fragColor = u_color; }`;
         this._ro = new ResizeObserver(() => this.resize());
         this._ro.observe(canvas);
       }
+      if (opts.palette) this.setPalette(opts.palette, opts.paletteOpts);
       this.resize();
     }
 
@@ -200,6 +205,17 @@ void main() { fragColor = u_color; }`;
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT); // wraps the ring
+
+      // Palette table: 256 x 1 RGB, NEAREST so each level is one entry.
+      this._lutTex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, this._lutTex);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB8, 256, 1, 0, gl.RGB, gl.UNSIGNED_BYTE, new Uint8Array(768));
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      this._uLut = gl.getUniformLocation(this._wfProg, 'u_lut');
 
       this._uTex = gl.getUniformLocation(this._wfProg, 'u_tex');
       this._uRowOffset = gl.getUniformLocation(this._wfProg, 'u_rowOffset');
@@ -267,6 +283,10 @@ void main() { fragColor = u_color; }`;
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this._tex);
       gl.uniform1i(this._uTex, 0);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, this._lutTex);
+      gl.uniform1i(this._uLut, 1);
+      gl.activeTexture(gl.TEXTURE0);
       gl.uniform1i(this._uColormap, this._cmIndex);
       gl.uniform1f(this._uRowOffset, this._writeRow / this.historyRows);
       gl.uniform1i(this._uCrop, this.crop ? 1 : 0);
@@ -299,7 +319,32 @@ void main() { fragColor = u_color; }`;
 
     setColormap(name) {
       this._cmIndex = name === 'turbo' ? 1 : 0;
+      this._baseCm = this._cmIndex;
+      this._paletteId = 'auto';
       this._render();
+    }
+
+    /** Draw with a lib/waterfall-palettes.js palette; 'auto' (or unknown)
+     *  goes back to this window's own map. opts.light picks a palette's
+     *  light-theme variant (Tidepool). Returns the palette's trace colour
+     *  (CSS hex) or null for 'auto'. */
+    setPalette(id, opts) {
+      const P = global.WaterfallPalettes;
+      const lut = P ? P.lutRgb(id, opts) : null;
+      if (!lut || !this.gl) {
+        this._paletteId = 'auto';
+        this._cmIndex = this._baseCm;
+        this._render();
+        return null;
+      }
+      const gl = this.gl;
+      gl.bindTexture(gl.TEXTURE_2D, this._lutTex);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 256, 1, gl.RGB, gl.UNSIGNED_BYTE, lut);
+      this._paletteId = P.normalize(id);
+      this._cmIndex = 2;
+      this._render();
+      return P.trace(id, opts);
     }
 
     /** Register a click-to-tune callback. cb receives the click x as 0..1. */
@@ -333,6 +378,7 @@ void main() { fragColor = u_color; }`;
       const gl = this.gl;
       if (gl) {
         gl.deleteTexture(this._tex);
+        if (this._lutTex) gl.deleteTexture(this._lutTex);
         gl.deleteBuffer(this._quad);
         gl.deleteBuffer(this._lineBuf);
         gl.deleteProgram(this._wfProg);

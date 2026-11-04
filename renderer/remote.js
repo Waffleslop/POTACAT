@@ -988,6 +988,33 @@
   // same key, so a saved floor carries over); the top starts at full scale.
   let scopeRange = { lo: Number(scopeLsGet('echocat-scope-floor', 0)) || 0, hi: Number(scopeLsGet('echocat-scope-top', 255)) || 255 };
   let scopeAvg = scopeLsGet('echocat-scope-avg', 'light');
+  // Waterfall colours (lib/waterfall-palettes.js, inlined): per device, like
+  // the app's own setting. 'auto' = the page's usual ramp (null table).
+  const WFP = window.WaterfallPalettes;
+  let wfPalId = WFP ? WFP.normalize(scopeLsGet('echocat-waterfall-palette', 'auto')) : 'auto';
+  let wfPalLut = null, wfPalTrace = null;
+  function wfPalApply() {
+    const light = WFP ? WFP.isLightDocument(document) : false;
+    wfPalLut = WFP ? WFP.lutRgb(wfPalId, { light }) : null;
+    wfPalTrace = WFP ? WFP.trace(wfPalId, { light }) : null;
+  }
+  wfPalApply();
+  if (typeof MutationObserver !== 'undefined') {
+    new MutationObserver(() => { wfPalApply(); if (typeof scopeDrawAll === 'function') scopeDrawAll(); })
+      .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  }
+  {
+    const sel = document.getElementById('echo-wf-palette');
+    if (sel && WFP) {
+      WFP.fillSelect(sel, wfPalId);
+      sel.addEventListener('change', () => {
+        wfPalId = WFP.normalize(sel.value);
+        scopeLsSet('echocat-waterfall-palette', wfPalId);
+        wfPalApply();
+        scopeDrawAll();
+      });
+    }
+  }
   let scopePeakOn = scopeLsGet('echocat-scope-peak', '0') === '1';
   let scopePeakDecay = scopeLsGet('echocat-scope-peak-decay', 'slow');
   let scopeSUnits = scopeLsGet('echocat-scope-sunits', '0') === '1';
@@ -1117,6 +1144,11 @@
     const step = bins.length / w;
     for (let x = 0; x < w; x++) {
       const v = bins[Math.min(bins.length - 1, Math.floor(x * step))] || 0;
+      if (wfPalLut) {
+        const li = (v <= 0 ? 0 : v >= 255 ? 255 : v | 0) * 3;
+        row.data[x * 4] = wfPalLut[li]; row.data[x * 4 + 1] = wfPalLut[li + 1]; row.data[x * 4 + 2] = wfPalLut[li + 2]; row.data[x * 4 + 3] = 255;
+        continue;
+      }
       // Same colour ramp as the FT8 strip.
       const r = v > 170 ? 255 : v > 85 ? (v - 85) * 3 : 0;
       const g = v > 170 ? 255 - (v - 170) * 3 : v > 85 ? 255 : v * 3;
@@ -1155,7 +1187,7 @@
     const peak = sf.full && scopePeakOn && scopePeak ? V.applyRange(scopePeak, scopeRange.lo, scopeRange.hi) : null;
     window.ScopeView.drawTrace(canvas.getContext('2d'), { bins: shown, peak },
       { w: canvas.width, h: canvas.height, dpr: 1, axis, dialHz: centerHz, spanHz: st.spanHz, anchor: st.anchor, notice: false,
-        peakHold: !!peak, scale: V.displayScale(st.levelScale, scopeRange.lo, scopeRange.hi), gutter: sf.full, sUnits: sf.full && scopeSUnits,
+        peakHold: !!peak, scale: V.displayScale(st.levelScale, scopeRange.lo, scopeRange.hi), gutter: sf.full, sUnits: sf.full && scopeSUnits, traceColor: wfPalTrace,
         // Phase 3: passband, split TX, band plan. The FT8 strip draws edges
         // and shading only (labels:false — it is too short for them).
         overlay: { passband: st.passband, txHz: st.txHz, bandPlan: st.bandPlan, privileges: scopePrivileges, labels: sf.full, flag: sf.full } });
@@ -8543,10 +8575,16 @@
     for (let x = 0; x < w; x++) {
       const idx = Math.floor(x * step);
       const val = bins[idx] || 0;
-      // Map 0-255 to color (blue->cyan->yellow->red)
-      const r = val > 170 ? 255 : val > 85 ? (val - 85) * 3 : 0;
-      const g = val > 170 ? 255 - (val - 170) * 3 : val > 85 ? 255 : val * 3;
-      const b = val > 85 ? 0 : 255 - val * 3;
+      // Map 0-255 to color (blue->cyan->yellow->red), or the chosen palette
+      let r, g, b;
+      if (wfPalLut) {
+        const li = (val <= 0 ? 0 : val >= 255 ? 255 : val | 0) * 3;
+        r = wfPalLut[li]; g = wfPalLut[li + 1]; b = wfPalLut[li + 2];
+      } else {
+        r = val > 170 ? 255 : val > 85 ? (val - 85) * 3 : 0;
+        g = val > 170 ? 255 - (val - 170) * 3 : val > 85 ? 255 : val * 3;
+        b = val > 85 ? 0 : 255 - val * 3;
+      }
       ctx.fillStyle = 'rgb(' + r + ',' + g + ',' + b + ')';
       ctx.fillRect(x, 0, 1, 1);
     }

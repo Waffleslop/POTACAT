@@ -4,6 +4,10 @@ const { contextBridge, ipcRenderer, webFrame } = require('electron');
 // process main.js supervises. This window only draws and asks; every decision
 // (spawn, CAT handshake, restore) is main's.
 contextBridge.exposeInMainWorld('api', {
+  // Waterfall palette (lib/waterfall-palettes.js), one setting for every waterfall window.
+  getWaterfallPalette: () => ipcRenderer.invoke('get-waterfall-palette'),
+  setWaterfallPalette: (id) => ipcRenderer.invoke('set-waterfall-palette', id),
+  onWaterfallPalette: (cb) => ipcRenderer.on('waterfall-palette', (_e, id) => cb(id)),
   platform: process.platform,
   // Stream + state from main
   onScopeFrame: (cb) => ipcRenderer.on('scope-frame', (_e, f) => cb(f)),

@@ -2550,6 +2550,15 @@ if (window.api.onSstvRemoteWfBins) {
   });
 }
 
+// Waterfall colours: the machine's palette (lib/waterfall-palettes.js).
+let sstvWfPal = { id: 'auto', o: {} };
+if (window.WaterfallPalettes) {
+  WaterfallPalettes.follow(window.api, (id, o) => {
+    sstvWfPal = { id, o };
+    if (sstvWaterfall && sstvWaterfall.supported) sstvWaterfall.setPalette(id, o);
+  });
+}
+
 function drawWaterfallLine(mags) {
   if (!sstvWaterfall) {
     sstvWaterfall = new Waterfall(wfCanvas, {
@@ -2557,6 +2566,8 @@ function drawWaterfallLine(mags) {
       historyRows: 256,
       colormap: 'classic',
       gamma: 0.4,
+      palette: sstvWfPal.id,
+      paletteOpts: sstvWfPal.o,
     });
     if (!sstvWaterfall.supported) {
       console.warn('[SSTV] WebGL2 unavailable — waterfall disabled');

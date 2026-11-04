@@ -4,6 +4,10 @@
 const { contextBridge, ipcRenderer, webFrame } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
+  // Waterfall palette (lib/waterfall-palettes.js), one setting for every waterfall window.
+  getWaterfallPalette: () => ipcRenderer.invoke('get-waterfall-palette'),
+  setWaterfallPalette: (id) => ipcRenderer.invoke('set-waterfall-palette', id),
+  onWaterfallPalette: (cb) => ipcRenderer.on('waterfall-palette', (_e, id) => cb(id)),
   // The active rig's bands (lib/rig-bands.js): {bands: string[]|null, all}.
   rigBandsGet: () => ipcRenderer.invoke('rig-bands-get'),
   onRigBands: (cb) => ipcRenderer.on('rig-bands', (_e, d) => cb(d)),

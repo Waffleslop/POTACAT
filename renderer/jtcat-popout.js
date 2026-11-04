@@ -248,6 +248,21 @@ function _applyPopoutTheme(payload) {
   var runPauseInput = document.getElementById('jp-run-pause-after');
   var wfSpeedInput = document.getElementById('jp-wf-speed');
   var wfFloorInput = document.getElementById('jp-wf-floor');
+  // Waterfall colours (lib/waterfall-palettes.js): one machine setting for
+  // every waterfall. 'auto' = this window's usual maps (null table).
+  var wfPalId = 'auto', wfPalOpts = {}, wfPalLut = null, wfPalTrace = null;
+  var wfPalSelect = document.getElementById('jp-wf-palette');
+  if (window.WaterfallPalettes) {
+    WaterfallPalettes.fillSelect(wfPalSelect, 'auto');
+    if (wfPalSelect) wfPalSelect.addEventListener('change', function() { window.api.setWaterfallPalette(wfPalSelect.value); });
+    WaterfallPalettes.follow(window.api, function(id, o) {
+      wfPalId = id; wfPalOpts = o;
+      wfPalLut = WaterfallPalettes.lutRgb(id, o);
+      wfPalTrace = WaterfallPalettes.trace(id, o);
+      if (wfPalSelect) wfPalSelect.value = id;
+      if (typeof bsWf !== 'undefined' && bsWf && bsWf.supported) bsWf.setPalette(id, o);
+    });
+  }
   var wfFloorVal = document.getElementById('jp-wf-floor-val');
   var wfFloor = 0;   // display noise floor, 0..200 (ScopeAxis.applyFloor — shared with the Band Scope)
   var wfSpeedHelp = document.getElementById('jp-wf-speed-help');
@@ -2503,7 +2518,8 @@ function _applyPopoutTheme(payload) {
           var val = bins[binIdx];
           // Color: dark blue -> cyan -> yellow -> red
           var r, g, b;
-          if (val < 85) { r = 0; g = 0; b = Math.floor(val * 2); }
+          if (wfPalLut) { var li = (val <= 0 ? 0 : val >= 255 ? 255 : val | 0) * 3; r = wfPalLut[li]; g = wfPalLut[li + 1]; b = wfPalLut[li + 2]; }
+          else if (val < 85) { r = 0; g = 0; b = Math.floor(val * 2); }
           else if (val < 170) { r = 0; g = Math.floor((val - 85) * 3); b = 170; }
           else { r = Math.floor((val - 170) * 3); g = 255; b = 170 - Math.floor((val - 170) * 2); }
           p.ctx.fillStyle = 'rgb(' + r + ',' + g + ',' + b + ')';
@@ -2908,7 +2924,7 @@ function _applyPopoutTheme(payload) {
     var silentHome = radioWf ? bsWrap : single;
     if (silent && silentHome && silent.parentNode !== silentHome) silentHome.appendChild(silent);
     if (show && !bsWf && bsWfCanvas && typeof Waterfall !== 'undefined') {
-      bsWf = new Waterfall(bsWfCanvas, { bins: 850, historyRows: 256, colormap: 'turbo', gamma: 0.6 });
+      bsWf = new Waterfall(bsWfCanvas, { bins: 850, historyRows: 256, colormap: 'turbo', gamma: 0.6, palette: wfPalId, paletteOpts: wfPalOpts });
       if (bsWf.supported) bsWf.onClick(function(frac) { bsTune(frac); });
     }
     if (show && bsWf && bsWf.supported) bsWf.resize();
@@ -2954,7 +2970,7 @@ function _applyPopoutTheme(payload) {
     ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1;
     for (var i = 1; i < 10; i++) { var gx = Math.round(i * w / 10) + 0.5; ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, h); ctx.stroke(); }
     if (bsSmooth) {
-      ctx.strokeStyle = '#4fc3f7'; ctx.lineWidth = 1.2 * dpr; ctx.beginPath();
+      ctx.strokeStyle = wfPalTrace || '#4fc3f7'; ctx.lineWidth = 1.2 * dpr; ctx.beginPath();
       for (var b = 0; b < 850; b++) { var x = b * (w - 1) / 849; var y = h - 2 * dpr - (bsSmooth[b] / 255) * (h - 4 * dpr); if (b === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); }
       ctx.stroke();
     }
@@ -6277,7 +6293,8 @@ function _applyPopoutTheme(payload) {
           var val = wfAccum[binIdx] * invCount;
           var norm = val / 255;
           var r, g, b;
-          if (norm < 0.2) { r = 0; g = 0; b = Math.floor(norm * 5 * 140); }
+          if (wfPalLut) { var li = (val <= 0 ? 0 : val >= 255 ? 255 : val | 0) * 3; r = wfPalLut[li]; g = wfPalLut[li + 1]; b = wfPalLut[li + 2]; }
+          else if (norm < 0.2) { r = 0; g = 0; b = Math.floor(norm * 5 * 140); }
           else if (norm < 0.4) { var t = (norm - 0.2) * 5; r = 0; g = Math.floor(t * 255); b = 140 + Math.floor(t * 115); }
           else if (norm < 0.6) { var t = (norm - 0.4) * 5; r = Math.floor(t * 255); g = 255; b = Math.floor((1 - t) * 255); }
           else if (norm < 0.8) { var t = (norm - 0.6) * 5; r = 255; g = Math.floor((1 - t) * 255); b = 0; }

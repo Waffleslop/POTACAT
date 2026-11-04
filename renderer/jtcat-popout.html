@@ -1126,6 +1126,10 @@
       <span class="jp-opt-label">Waterfall floor <input id="jp-wf-floor" type="range" min="0" max="200" step="1" value="0" style="width:120px;vertical-align:middle;"> <span id="jp-wf-floor-val">0</span></span>
       <span class="jp-opt-help">Noise floor for the picture: levels below it are drawn black so signals stand out. Display only — decoding is untouched. Same control as the Band Scope.</span>
     </label>
+    <label class="jp-opt-row jp-opt-num-row">
+      <span class="jp-opt-label">Waterfall colours <select id="jp-wf-palette"></select></span>
+      <span class="jp-opt-help">The colours of every waterfall and band scope, the same palettes as the ECHOCAT app. Standard keeps each window's usual colours. Also in Settings &gt; Display.</span>
+    </label>
     <label class="jp-opt-row hidden" id="jp-bandscope-row">
       <span class="jp-opt-label"><input type="checkbox" id="jp-bandscope-toggle"> Band scope strip</span>
       <span class="jp-opt-help">The radio's own spectrum above the audio waterfall — the FT-710 streams it over USB. Click it to tune. The floor above applies to it too.</span>
@@ -1170,6 +1174,7 @@
   <script src="../lib/worked-overlay.js"></script>
   <script src="../lib/jtty-chats.js"></script>
   <script src="../lib/capture-stall.js"></script>
+  <script src="../lib/waterfall-palettes.js"></script>
   <script src="waterfall.js"></script>
   <script src="jtcat-popout.js"></script>
 </body>

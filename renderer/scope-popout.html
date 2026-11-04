@@ -94,7 +94,7 @@
     <div class="sc-gear">
       <button class="sc-btn" id="sc-gear-btn" title="Display settings">&#x2699;</button>
       <div class="sc-pop" id="sc-gear-pop">
-        <div class="row"><span>Colour map</span><select id="sc-colormap"><option value="turbo">Turbo</option><option value="classic">Classic</option></select></div>
+        <div class="row"><span>Colours</span><select id="sc-colormap" title="Waterfall palette, the same in every waterfall window (Settings &gt; Display)"></select></div>
         <div class="row"><span>Frames per second</span><select id="sc-fps"><option value="10">10</option><option value="20">20</option><option value="30">30</option></select></div>
         <div class="row"><span>Averaging</span><select id="sc-avg"><option value="off">Off</option><option value="light">Light</option><option value="medium">Medium</option><option value="heavy">Heavy</option></select></div>
         <div class="row" title="The top of the trace. Drag the level scale at the left edge to move the whole window; the mouse wheel there widens or narrows it."><span>Top</span><input type="range" id="sc-top" min="16" max="255" value="255"></div>
@@ -130,6 +130,7 @@
 
   <script src="../lib/scope-axis.js"></script>
   <script src="../lib/scope-view.js"></script>
+  <script src="../lib/waterfall-palettes.js"></script>
   <script src="waterfall.js"></script>
   <script src="scope-popout.js"></script>
 </body>
