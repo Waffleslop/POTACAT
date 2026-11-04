@@ -311,6 +311,10 @@ check('cloud tab: start-at-login is OFFERED after enabling the tunnel, never app
   for (const id of ['cloud-tunnel-startup', 'cloud-tunnel-startup-launch', 'cloud-tunnel-startup-launcher']) assert.ok(html.includes(`id="${id}"`), id);
   assert.ok(!html.includes('id="cloud-tunnel-startup-not-now"'), 'no Not now');
 });
+check('Linux start-at-login runs the AppImage or a distro package launcher before a bare Electron', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.ok(/const execPath = process\.env\.APPIMAGE \|\| process\.env\.POTACAT_EXEC \|\| process\.execPath;/.test(main));
+});
 
 (async () => {
   for (const run of queue) await run();
