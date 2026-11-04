@@ -60,7 +60,7 @@ console.log('Icom PTT mode swap and memory mode');
   }
   test('main.js: an Icom swap and its restore both skip the re-anchor', () => {
     const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
-    assert.ok(/cat\.setModeOnly\(dataMode, _ssbFreqBeforePtt, \{ noAnchor: _icomData \}\)/.test(main), 'the swap');
+    assert.ok(/cat\.setModeOnly\(dataMode, _ssbFreqBeforePtt, \{ noAnchor: _icomData(, anchorNow: true)? \}\)/.test(main), 'the swap');
     assert.ok(/cat\.setModeOnly\(restoreMode, restoreFreq, \{ noAnchor: _restoreIcom \}\)/.test(main), 'the restore');
   });
   console.log(`\n${passed} passed, ${failed} failed`);
