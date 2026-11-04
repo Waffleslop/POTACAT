@@ -13,6 +13,19 @@ const fs = require('fs');
 const net = require('net');
 const path = require('path');
 const { EventEmitter } = require('events');
+// The CI test job installs no npm packages. transport.js requires serialport
+// at load time, and this test only uses its TCP transport, so a stand-in
+// module answers when the real one is not installed.
+(function standInSerialport() {
+  const Module = require('module');
+  try { require.resolve('serialport'); return; } catch {}
+  const orig = Module._resolveFilename;
+  Module._resolveFilename = function (request, ...rest) {
+    if (request === 'serialport') return 'serialport-stand-in';
+    return orig.call(this, request, ...rest);
+  };
+  require.cache['serialport-stand-in'] = { id: 'serialport-stand-in', filename: 'serialport-stand-in', loaded: true, exports: { SerialPort: class SerialPort {} } };
+})();
 const { RigController } = require('../lib/rig-controller');
 const { TcpTransport } = require('../lib/transport');
 const {
