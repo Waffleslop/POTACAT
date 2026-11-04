@@ -21136,9 +21136,13 @@ function connectCwKeyPort() {
               }
               try { port.close(); } catch {}
             } else if (!ioctlErr) {
+              // No one radio's menu here (GitHub #113 item 6: this named the
+              // FT-891's path for every radio). The rig's own setup note, when
+              // it has one, says where that menu is.
               sendCatLog(`[CW Key Port] Could not pull DTR/RTS low (${err.message}). ` +
-                `If the radio is keying continuously, set OPERATION SETTING -> ` +
-                `CAT/LINEAR/TUNER -> USB Keying (CW) = OFF on the radio until this is resolved.`);
+                `If the radio is keying continuously, turn off its keying-from-USB menu ` +
+                `(PC KEYING or USB Keying (CW), under the radio's CW or CAT settings) until this is resolved` +
+                `${activeRigSetupPointer('CW') || '.'}`);
             }
           } else {
             console.log(`[CW Key Port] ${label} DTR/RTS dropped`);
