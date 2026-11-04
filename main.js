@@ -351,7 +351,7 @@ const { CivCodec } = require('./lib/codecs/civ-codec');
 const IcomScope = require('./lib/icom-scope');
 const { CommanderCodec, commanderModel, probeCommander } = require('./lib/codecs/commander-codec');
 const CommanderSequences = require('./lib/commander-sequences');
-const { getTuneQuirks, resolveSerialHandshake } = require('./lib/rig-models');
+const { getTuneQuirks, resolveSerialHandshake, holdSerialLinesLow } = require('./lib/rig-models');
 const { gridToLatLon, latLonToGrid, haversineDistanceMiles, bearing } = require('./lib/grid');
 const ActivationMapData = require('./lib/activation-map-data');
 const LogFreq = require('./lib/log-freq');
@@ -8430,7 +8430,8 @@ async function connectCat() {
     // FT-817/818/857/897 legacy protocol has no handshake, and asserting RTS
     // there can key an interface wired to it (KL4XQ's FT-818 got the trial).
     if (hs.source !== 'rig' && model.brand === 'Yaesu' && model.protocol !== 'yaesu-legacy') armSerialHandshakeNoAnswerTrial(cat, transport, target, hs);
-    transport.connect({ path: target.path, baudRate: target.baudRate || 9600, dtrOff: target.dtrOff, connectDelay: model.connectDelay, serialHandshake: hs.handshake, stopBits: model.serialStopBits });
+    // Lines low at open on every Yaesu (holdSerialLinesLow): Windows raises DTR/RTS on open.
+    transport.connect({ path: target.path, baudRate: target.baudRate || 9600, dtrOff: holdSerialLinesLow(model, target), connectDelay: model.connectDelay, serialHandshake: hs.handshake, stopBits: model.serialStopBits });
   }
 
   bindRigStateEvents(cat);
@@ -45491,7 +45492,7 @@ function cloudShackNotice(text, kind) {
 
   handleCatTest('test-serial-cat', 'serial CAT test', async (_e, config) => {
     if (config && config.portPath) config.portPath = normalizeSerialPath(config.portPath);
-    const { portPath, baudRate, dtrOff } = config;
+    const { portPath, baudRate } = config;
     // The test opens the port the way the live link will: the rig's RTS line
     // choice (or the model's default) and the model's stop bits. It used to
     // open every radio with flow control off, so a radio whose CAT RTS menu
@@ -45502,6 +45503,8 @@ function cloudShackNotice(text, kind) {
     const model = getModel(config.model) || null;
     const legacy = !!(model && model.protocol === 'yaesu-legacy');
     const hs = resolveSerialHandshake(model, { serialHandshake: config.serialHandshake });
+    // And with the lines the live link holds low (every Yaesu: Test keyed the radio once, stein).
+    const dtrOff = holdSerialLinesLow(model, { dtrOff: config.dtrOff });
 
     // Temporarily disconnect live CAT + kill rigctld to release the serial port
     if (cat) {
