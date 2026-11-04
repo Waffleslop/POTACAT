@@ -411,6 +411,7 @@
       case 'tx-test':
       case 'tx-test-current-power':
       case 'tune-tone':
+      case 'voice-test':
         confirmTx = { step: st.id, action: a.id };
         return render();
       case 'open-settings':

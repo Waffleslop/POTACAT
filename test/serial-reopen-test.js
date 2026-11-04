@@ -58,7 +58,7 @@ function fakePort(closeMs) {
   });
   await t('connectCat waits for the old port\'s close before opening the next', () => {
     const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
-    assert.ok(/cat\.disconnect\(\);\n    const _oldCatClosed = cat\._closedPromise;/.test(main));
+    assert.ok(main.includes('cat.disconnect();\n    _icomNetworkTransport = null;\n    const _oldCatClosed = cat._closedPromise;'));
     assert.ok(main.includes('if (_oldCatClosed) await Promise.race([_oldCatClosed, new Promise(r => setTimeout(r, 3000))]);'));
   });
   console.log('\nserial reopen: ' + pass + ' passed, ' + fail + ' failed');

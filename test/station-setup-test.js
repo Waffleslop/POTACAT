@@ -44,7 +44,7 @@ t('every phase-1 radio exists in RIG_MODELS under the name the checklist is keye
 
 t('IC-7300 (Icom CI-V): basics + clock + CW keying from the confirmed Icom note; no band scope', () => {
   const r = evalRig({ model: 'IC-7300', radioType: 'icom' });
-  assert.deepStrictEqual(ids(r), ['station-identity', 'radio-control', 'rx-audio', 'tx-audio', 'tx-test', 'clock', 'cw-keying']);
+  assert.deepStrictEqual(ids(r), ['station-identity', 'radio-control', 'rx-audio', 'tx-audio', 'tx-test', 'voice-tx', 'clock', 'cw-keying']);
   assert.ok(step(r, 'cw-keying').instructions.some(b => /USB Keying \(CW\)/.test(b.steps.join(' '))));
   assert.strictEqual(r.summary.complete, true);
 });
@@ -324,10 +324,10 @@ t('the power-restore safety stays out of a test that is still running', () => {
 // An audio tone cannot modulate a radio in CW: it keys and radiates nothing.
 t('the test transmit refuses in CW mode, before touching power or PTT, and logs the mode', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
-  const run = main.slice(main.indexOf('async function _runStationSetupTxTest('), main.indexOf('async function _runStationSetupTxTest(') + 4000);
+  const run = main.slice(main.indexOf('async function _runStationSetupTxTest('), main.indexOf('async function _runStationSetupTxTest(') + 5500);
   const cw = run.indexOf("if (/^CW/.test(modeNow))");
   assert.ok(cw > 0 && cw < run.indexOf("action: 'set-tx-power'") && cw < run.indexOf('startJtcatTune('));
-  assert.ok(/\[Setup\] test transmit: radio mode/.test(run));
+  assert.ok(run.includes("sendCatLog(`[Setup] test transmit${voice ? ' (voice)' : ''}: radio mode"), 'logs the mode');
 });
 
 // K3SBP 2026-09-25: typed a status label (FLEX) in the rig editor, pressed
@@ -337,6 +337,25 @@ t('Settings Save commits an open rig editor first', () => {
   const save = app.slice(app.indexOf("settingsSave.addEventListener('click'"), app.indexOf("settingsSave.addEventListener('click'") + 700);
   assert.ok(/if \(rigEditorMode\) \{\s*const committed = await saveRigEditor\(\);\s*if \(!committed\) return;/.test(save));
   assert.ok(/rigSaveBtn\.addEventListener\('click', \(\) => \{ saveRigEditor\(\); \}\);/.test(app));
+});
+
+// Voice transmit (1.13.11): "FT8 works, voice is silent" is a radio menu the
+// data test never touches (KD9OUT, KD9WJY, thecoffeepotcodger, KJ5CHK).
+t('voice transmit: waits for the data test, then offers the voice tone; 0 W names the radio menu', () => {
+  assert.strictEqual(step(evalRig({ model: 'FT-710', live: { txTest: null } }), 'voice-tx').state, 'blocked', 'before the transmit test passes');
+  const ready = step(evalRig({ model: 'FT-710', live: { txTest: { result: 'ok', watts: 5 } } }), 'voice-tx');
+  assert.strictEqual(ready.state, 'unknown');
+  assert.deepStrictEqual(ready.actions.map(a => a.id), ['voice-test']);
+  assert.strictEqual(ready.level, 'recommended');
+  const silent = step(evalRig({ model: 'FT-710', live: { txTest: { result: 'ok' }, voiceTest: { result: 'no-power', hint: 'On the radio set SSB MOD SOURCE to REAR' } } }), 'voice-tx');
+  assert.strictEqual(silent.state, 'needs');
+  assert.ok(silent.instructions[0].steps[0].includes('SSB MOD SOURCE'));
+  assert.strictEqual(step(evalRig({ model: 'FT-710', live: { txTest: { result: 'ok' }, voiceTest: { result: 'ok', watts: 5 } } }), 'voice-tx').state, 'ok');
+  assert.strictEqual(step(evalRig({ model: 'FLEX-6600', audioSource: 'smartsdr' }), 'voice-tx'), undefined, 'a Flex is not offered it');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(main.includes("case 'voice-test': await runStationSetupTxTest(rigId, { voice: true }); break;"));
+  assert.ok(main.includes("noDataSwap: voice });"), 'the voice tone never swaps to DATA');
+  assert.ok(main.includes('&& !opts.noDataSwap && !yaesuVoice'), 'handleRemotePtt honours it');
 });
 
 console.log(`Station Setup: ${pass} passed, ${fail} failed`);

@@ -5565,6 +5565,7 @@ function stationSetupLive(rig) {
     rxTest: r.rxTest || null,
     txDeviceTest: r.txDeviceTest || null,
     txTest: r.txTest || null,
+    voiceTest: r.voiceTest || null,
     scope,
     atu: atuWizardSetupLive(rig),
   };
@@ -5823,12 +5824,16 @@ async function runStationSetupTxTest(rigId, opts) {
   finally { _stationSetupTxBusy = false; }
 }
 
-async function _runStationSetupTxTest(rigId, { keepPower = false } = {}) {
+async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false } = {}) {
   const rig = stationSetupRigById(rigId);
   const r = stationSetupResultsFor(rig ? rig.id : '');
-  const done = (t) => { r.txTest = { ...t, at: Date.now() }; stationSetupNotify(); return r.txTest; };
+  // voice: the same tone through the radio's VOICE input — plain USB/LSB, no
+  // DATA swap — because "FT8 works, voice is silent" is a different radio menu
+  // (KD9OUT/KD9WJY/thecoffeepotcodger FT-710 SSB MOD SOURCE, KJ5CHK IC-7300 MK II).
+  const slot = voice ? 'voiceTest' : 'txTest';
+  const done = (t) => { r[slot] = { ...t, at: Date.now() }; stationSetupNotify(); return r[slot]; };
   if (!rig || rig.id !== settings.activeRigId) return done({ result: 'error', message: 'Switch to this radio first, then test.' });
-  if (_stationSetupTxTest) return r.txTest || null;
+  if (_stationSetupTxTest) return r[slot] || null;
   const live = stationSetupLive(rig);
   if (!live.catConnected) return done({ result: 'error', message: 'Radio control is not working yet.' });
   if (_swrTripped) return done({ result: 'error', message: 'Transmit is blocked by the SWR guard. Run the antenna tuner or change bands, then test again.' });
@@ -5841,7 +5846,10 @@ async function _runStationSetupTxTest(rigId, { keepPower = false } = {}) {
   if (/^CW/.test(modeNow)) {
     return done({ result: 'error', message: 'The radio is in CW mode. The test sends an audio tone, which needs USB, LSB or a DATA mode (DIGU on a Flex). Switch the radio to USB, then test again.' });
   }
-  sendCatLog(`[Setup] test transmit: radio mode ${modeNow || 'unknown'}`);
+  if (voice && !/^(USB|LSB)$/.test(modeNow)) {
+    return done({ result: 'error', message: `The voice test needs the radio in USB or LSB (it is in ${modeNow || 'an unknown mode'}). Switch the radio to USB, then test again.` });
+  }
+  sendCatLog(`[Setup] test transmit${voice ? ' (voice)' : ''}: radio mode ${modeNow || 'unknown'}`);
 
   const info = RIG_MODELS[rig.model] || {};
   const testW = Math.min(5, Number(info.maxPower) || 100);
@@ -5875,7 +5883,7 @@ async function _runStationSetupTxTest(rigId, { keepPower = false } = {}) {
   // Judged by the mode the radio is in: a tone in LSB on a phone segment is
   // inside a phone privilege, where a data emission would not be (W0TLP
   // 2026-11-02). Still refused where the class has no phone there.
-  startJtcatTune({ toneHz: STATION_SETUP_TEST_TONE_HZ, emission: /^(USB|LSB|SSB)$/.test(modeNow) ? modeNow : 'DATA' });
+  startJtcatTune({ toneHz: STATION_SETUP_TEST_TONE_HZ, emission: /^(USB|LSB|SSB)$/.test(modeNow) ? modeNow : 'DATA', noDataSwap: voice });
   const keyed = jtcatTuneState.active;
   if (keyed) {
     await sleepMs(3000);
@@ -5919,8 +5927,14 @@ async function _runStationSetupTxTest(rigId, { keepPower = false } = {}) {
   else if (watts < 0.5) result = 'no-power';
   else if (swr >= 3) result = 'swr-high';
   else result = 'ok';
-  sendCatLog(`[Setup] test transmit result: ${result}${watts ? `, ${watts} W` : ''}${swr ? `, SWR ${swr}` : ''}`);
-  return done({ result, watts, swr, restored, restoreNote });
+  sendCatLog(`[Setup] ${voice ? 'voice' : 'test'} transmit result: ${result}${watts ? `, ${watts} W` : ''}${swr ? `, SWR ${swr}` : ''}`);
+  // A silent voice path names the radio's input menu (lib/voice-tx-check.js).
+  let hint = null;
+  if (voice && result === 'no-power') {
+    const d = decideVoiceTxHint({ keyedMs: 3000, fwdEvents: meas.fwdEvents, peakW: 0, alcEvents: 0, peakAlc: 0, mode: modeNow, brand: info.brand });
+    hint = d ? d.hint : null;
+  }
+  return done({ result, watts, swr, restored, restoreNote, hint });
 }
 
 function getIcomNetworkDataModSpec(target, rigModel, liveCivAddr = null) {
@@ -7887,8 +7901,8 @@ async function connectCat() {
     resetIcomNetworkRxPacer('CAT reconnect');
     cat.removeAllListeners();
     cat.disconnect();
-    const _oldCatClosed = cat._closedPromise;
     _icomNetworkTransport = null;
+    const _oldCatClosed = cat._closedPromise;
     // The dial belonged to the rig we just dropped; the next one reports its
     // own. Left in place it posed as the new rig's frequency (N4FFF 2026-10-04).
     _currentFreqHz = 0;
@@ -18365,7 +18379,9 @@ function startJtcatTune(opts = {}) {
   // Audio is genuinely going to the rig USB CODEC, so audio:true triggers
   // SSB-over-DATA where appropriate (USB -> DIGU mute the rig mic during
   // the tone). The 90s timer auto-releases.
-  handleRemotePtt(true, { audio: true, emission: opts.emission || 'DATA' });
+  // opts.noDataSwap: Station Setup's voice test keys in plain USB/LSB, the
+  // way a voice over does (the radio's SSB audio input, not its DATA one).
+  handleRemotePtt(true, { audio: true, emission: opts.emission || 'DATA', noDataSwap: !!opts.noDataSwap });
   // Route the tone the same way FT8 TX is routed: straight to dax_tx on the
   // SmartSDR-Direct path, then the Icom RS-BA1 network path, else the
   // renderer's Windows-DAX device path.
@@ -26418,7 +26434,7 @@ function handleRemotePtt(state, opts = {}) {
   // A rig with Voice in DATA mode is in USB-D/LSB-D already (GitHub #24).
   const _voiceRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
   const voiceInData = !forceData && !!(_voiceRig && _voiceRig.voiceAsData);
-  if (state && (settings.ssbOverData || forceData) && !yaesuVoice && !voiceInData && audioActive && (!ft8Engine || forceData)) {
+  if (state && (settings.ssbOverData || forceData) && !opts.noDataSwap && !yaesuVoice && !voiceInData && audioActive && (!ft8Engine || forceData)) {
     // Switch to DATA mode before TX to prevent local mic bleed
     // Skip when JTCAT is active — it manages its own DATA mode
     const curMode = (_currentMode || '').toUpperCase();
@@ -40216,6 +40232,7 @@ function cloudShackNotice(text, kind) {
       case 'recheck': break;
       case 'tx-test': await runStationSetupTxTest(rigId); break;
       case 'tx-test-current-power': await runStationSetupTxTest(rigId, { keepPower: true }); break;
+      case 'voice-test': await runStationSetupTxTest(rigId, { voice: true }); break;
       case 'tune-tone': {
         // A no-CAT (VOX) radio: nothing to read back, so the test is the tone
         // itself — 3 s at 1500 Hz down the same route FT8 uses — and the
