@@ -4678,31 +4678,39 @@ function updateQrzLogbookVisibility() {
   }
 }
 
+// The QRZ status line in Settings > Logging, from the same result on load
+// and on Recheck. `result.text` is main's one plain sentence
+// (lib/qrz.js describeQrzLogin): a login that worked on an account with no
+// XML Data subscription is amber and says the login is fine, never the red
+// "No active QRZ XML subscription" that K0DHW read as "no account".
+function showQrzLoginStatus(result) {
+  if (!result) return;
+  if (result.error) {
+    qrzSubStatus.textContent = result.text || result.error;
+    qrzSubStatus.style.color = '#e94560';
+    setQrzLogbook.disabled = true;
+  } else if (result.subscriber) {
+    qrzSubStatus.textContent = result.text || `XML Subscriber \u2014 expires ${result.expiry}`;
+    qrzSubStatus.style.color = '#4ecca3';
+    setQrzLogbook.disabled = false;
+  } else {
+    qrzSubStatus.textContent = result.text || (result.expiry && result.expiry !== 'non-subscriber'
+      ? `QRZ XML subscription expired (${result.expiry})`
+      : 'No active QRZ XML subscription');
+    qrzSubStatus.style.color = '#f0a500';
+    setQrzLogbook.disabled = true;
+    setQrzLogbook.checked = false;
+    qrzLogbookConfig.classList.add('hidden');
+  }
+}
+
 // Recheck subscription button
 qrzRecheckBtn.addEventListener('click', async () => {
   qrzSubStatus.textContent = 'Checking...';
   qrzSubStatus.style.color = '';
   qrzRecheckBtn.disabled = true;
   try {
-    const result = await window.api.qrzCheckSub(true);
-    if (result.error) {
-      qrzSubStatus.textContent = result.error;
-      qrzSubStatus.style.color = '#e94560';
-      setQrzLogbook.disabled = true;
-    } else if (result.subscriber) {
-      qrzSubStatus.textContent = `XML Subscriber \u2014 expires ${result.expiry}`;
-      qrzSubStatus.style.color = '#4ecca3';
-      setQrzLogbook.disabled = false;
-    } else {
-      const msg = result.expiry && result.expiry !== 'non-subscriber'
-        ? `QRZ XML subscription expired (${result.expiry})`
-        : 'No active QRZ XML subscription';
-      qrzSubStatus.textContent = msg;
-      qrzSubStatus.style.color = '#e94560';
-      setQrzLogbook.disabled = true;
-      setQrzLogbook.checked = false;
-      qrzLogbookConfig.classList.add('hidden');
-    }
+    showQrzLoginStatus(await window.api.qrzCheckSub(true));
   } catch {
     qrzSubStatus.textContent = 'Check failed';
     qrzSubStatus.style.color = '#e94560';
@@ -17211,25 +17219,7 @@ async function openSettingsDialog(tab) {
   updateQrzLogbookVisibility();
   // Auto-check subscription status on load if QRZ is enabled with credentials
   if (s.enableQrz && s.qrzUsername && s.qrzPassword) {
-    window.api.qrzCheckSub().then(result => {
-      if (result.subscriber) {
-        qrzSubStatus.textContent = `XML Subscriber \u2014 expires ${result.expiry}`;
-        qrzSubStatus.style.color = '#4ecca3';
-        setQrzLogbook.disabled = false;
-      } else if (result.error) {
-        qrzSubStatus.textContent = result.error;
-        qrzSubStatus.style.color = '#e94560';
-      } else {
-        const msg = result.expiry && result.expiry !== 'non-subscriber'
-          ? `QRZ XML subscription expired (${result.expiry})`
-          : 'No active QRZ XML subscription';
-        qrzSubStatus.textContent = msg;
-        qrzSubStatus.style.color = '#e94560';
-        setQrzLogbook.disabled = true;
-        setQrzLogbook.checked = false;
-        qrzLogbookConfig.classList.add('hidden');
-      }
-    }).catch(() => {});
+    window.api.qrzCheckSub().then(showQrzLoginStatus).catch(() => {});
   }
   setEnableCluster.checked = s.enableCluster === true;
   setShowBeacons.checked = s.showBeacons === true;

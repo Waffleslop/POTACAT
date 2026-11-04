@@ -47057,15 +47057,21 @@ function cloudShackNotice(text, kind) {
       return { subscriber: false, expiry: '', error: 'QRZ not configured' };
     }
     // Use cached subscription info if available (unless force recheck)
+    // `text`: one plain sentence for the status line (describeQrzLogin) —
+    // "signed in, no XML subscription" read as "no account" (K0DHW 2026-11-04).
+    const { describeQrzLogin } = require('./lib/qrz');
+    const username = settings.qrzUsername || '';
     if (!force && qrz.subscriptionExpiry) {
-      return { subscriber: qrz.isSubscriber, expiry: qrz.subscriptionExpiry };
+      return { subscriber: qrz.isSubscriber, expiry: qrz.subscriptionExpiry,
+        text: describeQrzLogin({ loggedIn: true, subExp: qrz.subscriptionExpiry, username }).text };
     }
     try {
       qrz._sessionKey = null;
       await qrz.login();
-      return { subscriber: qrz.isSubscriber, expiry: qrz.subscriptionExpiry };
+      return { subscriber: qrz.isSubscriber, expiry: qrz.subscriptionExpiry,
+        text: describeQrzLogin({ loggedIn: true, subExp: qrz.subscriptionExpiry, username }).text };
     } catch (err) {
-      return { subscriber: false, expiry: '', error: err.message };
+      return { subscriber: false, expiry: '', error: err.message, text: describeQrzLogin({ loggedIn: false, error: err.message, username }).text };
     }
   });
 
