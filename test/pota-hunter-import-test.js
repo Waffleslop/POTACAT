@@ -677,5 +677,93 @@ test('preload + Settings: Import and Preview reach the handler', () => {
   assert.ok(ui.includes("hunterPreviewBtn.addEventListener('click', () => runHunterImport(true));"));
 });
 
+// --- A real pota.app page ---------------------------------------------------
+// test/fixtures/pota-hunter-logbook-page.json: 20 rows of a real
+// api.pota.app/user/logbook?hunterOnly=1 reply (2026-11-03), every field as
+// pota.app sent it except the callsigns (Q-prefixed made-up ones; no station
+// can hold a Q call) and pota.app's own ids (qsoId, userId, jobId, p2pMatch),
+// which would link a row back to the real one. The hunter is Q0HNT. Picked
+// to cover CW / PHONE / DATA, a 2-fer, an activator's repeated row, a row
+// with no station_callsign, slashed calls, FM on 2m and 70cm and the 3cm band.
+const FIXTURE = JSON.parse(read('test', 'fixtures', 'pota-hunter-logbook-page.json'));
+const FX_CALLS = { myCalls: ['Q0HNT'] };
+const fxRow = (date, ref) => FIXTURE.entries.find((e) => e.qsoDateTime === date && (!ref || e.reference === ref));
+
+test('fixture: anonymised: every callsign in it is a made-up Q call', () => {
+  for (const e of FIXTURE.entries) {
+    for (const k of ['station_callsign', 'operator_callsign', 'worked_callsign']) {
+      const v = e[k];
+      assert.ok(v === '' || /^Q\d[A-Z]{3}(\/[A-Z0-9]+)?$/.test(v), `${k} ${v}`);
+    }
+  }
+});
+test('fixture: the reply\'s shape is what fetchHunterLog reads', () => {
+  assert.strictEqual(typeof FIXTURE.count, 'number');
+  assert.strictEqual(FIXTURE.count, FIXTURE.entries.length);
+  assert.strictEqual(FIXTURE.entries.length, 20);
+  for (const e of FIXTURE.entries) {
+    for (const k of ['qsoDateTime', 'station_callsign', 'operator_callsign', 'worked_callsign', 'band', 'mode', 'reference', 'name', 'loggedMode']) {
+      assert.strictEqual(typeof e[k], 'string', `${k} is a string`);
+    }
+  }
+});
+test('fixture: pota.app\'s formats: zone-less UTC date/time, upper-case bands, CW/PHONE/DATA', () => {
+  for (const e of FIXTURE.entries) {
+    assert.ok(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(e.qsoDateTime), e.qsoDateTime);
+    assert.ok(/^\d+(M|CM)$/.test(e.band), e.band);
+    assert.ok(['CW', 'PHONE', 'DATA'].includes(e.mode), e.mode);
+    assert.ok(H.parseQsoDateTime(e.qsoDateTime), `reads ${e.qsoDateTime}`);
+  }
+  const t = H.parseQsoDateTime(fxRow('2022-02-27T18:43:00').qsoDateTime);
+  assert.deepStrictEqual([t.qsoDate, t.timeOn, t.millis], ['20220227', '184300', Date.UTC(2022, 1, 27, 18, 43, 0)]);
+  const { contacts } = H.groupHunterEntries(FIXTURE.entries, FX_CALLS);
+  // 15M -> 15m, 70CM -> 70cm, 3CM -> 3cm: ADIF's band names
+  assert.deepStrictEqual([...new Set(contacts.map((c) => c.band))].sort(),
+    ['15m', '20m', '2m', '30m', '3cm', '40m', '70cm', '80m']);
+});
+test('fixture: 20 rows group into 19 contacts: the 2-fer is one, nothing unreadable', () => {
+  const { contacts, skipped } = H.groupHunterEntries(FIXTURE.entries, FX_CALLS);
+  assert.strictEqual(skipped.length, 0);
+  assert.strictEqual(contacts.length, 19);
+  const twoFer = contacts.find((c) => c.qsoDate === '20220730');
+  assert.deepStrictEqual(twoFer.refs, ['US-1960', 'US-4239']);
+  assert.ok(contacts.every((c) => c.call !== 'Q0HNT' && c.myCall === 'Q0HNT'), 'the activator is the call, the hunter myCall');
+  assert.ok(contacts.some((c) => c.call === 'Q7AHA/VE3'), 'a slashed call is kept whole');
+});
+test('fixture: the row with no station_callsign takes the operator\'s call', () => {
+  const row = fxRow('2022-02-27T18:43:00');
+  assert.strictEqual(row.station_callsign, '');
+  const { contacts } = H.groupHunterEntries(FIXTURE.entries, FX_CALLS);
+  const c = contacts.find((x) => x.qsoDate === '20220227');
+  assert.strictEqual(c.call, row.operator_callsign);
+  assert.strictEqual(c.callFromOperator, true);
+});
+test('fixture: against an empty log, adding on: adds, the repeated row, DATA skipped', () => {
+  const plan = H.planHunterImport([], FIXTURE.entries, { ...FX_CALLS, ...ADD });
+  assert.strictEqual(plan.adds.length, 12);
+  assert.deepStrictEqual(plan.duplicates.map((d) => [d.contact.qsoDate, d.contact.timeOn, d.kind]), [['20220219', '184002', 'repeat']]);
+  assert.strictEqual(plan.skipped.length, 6);
+  assert.ok(plan.skipped.every((s) => s.contact && s.contact.mode === 'DATA'));
+  const modes = Object.fromEntries(plan.adds.map((a) => [`${a.contact.qsoDate} ${a.contact.band}`, a.record.MODE]));
+  assert.strictEqual(modes['20230722 2m'], 'FM');
+  assert.strictEqual(modes['20231201 70cm'], 'FM');
+  assert.strictEqual(modes['20211013 40m'], 'SSB');
+  assert.strictEqual(modes['20020614 15m'], 'CW');
+  const twoFer = plan.adds.find((a) => a.contact.qsoDate === '20220730');
+  assert.strictEqual(twoFer.record.POTA_REF, 'US-1960,US-4239');
+  assert.ok(plan.adds.every((a) => a.record.STATION_CALLSIGN === 'Q0HNT'));
+});
+test('fixture: matching local QSOs with no park are filled, a DATA row matches a local FT8 one', () => {
+  const qsos = [
+    local({ CALL: 'Q5AFA', QSO_DATE: '20210925', TIME_ON: '222000', BAND: '40m', MODE: 'FT8' }), // DATA row, 1 min off
+    local({ CALL: 'Q6AQA', QSO_DATE: '20220730', TIME_ON: '230700', BAND: '20m', MODE: 'CW' }), // the 2-fer
+    local({ CALL: 'Q3ANA', QSO_DATE: '20220227', TIME_ON: '184400', BAND: '20m', MODE: 'SSB' }), // no station_callsign
+  ];
+  const plan = H.planHunterImport(qsos, FIXTURE.entries, FX_CALLS);
+  const filled = Object.fromEntries(plan.updates.map((u) => [u.qso.CALL, u.refs.join(',')]));
+  assert.deepStrictEqual(filled, { Q5AFA: 'US-1361', Q6AQA: 'US-1960,US-4239', Q3ANA: 'US-3370' });
+  assert.strictEqual(plan.adds.length, 0, 'adding is off by default');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
