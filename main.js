@@ -2105,6 +2105,7 @@ const CONDITIONS_MIN_H = 280;
 // The RF-sense tuner's carrier mode — AM, never CW (see runExternalAtuTune).
 const EXTERNAL_ATU_CARRIER_MODE = 'AM';
 const ExtAtuRestore = require('./lib/ext-atu-restore');
+const PowerRestore = require('./lib/power-restore');
 // The radio's last mode report ({ mode, at }), set in sendCatMode: what the
 // external tune's mode restore believes, never the command it sent.
 let _lastModeReadback = null;
@@ -2152,20 +2153,29 @@ runExternalAtuTune = async function () {
   const dataBefore = cat._codec && cat._codec.dataModeState;
   const restoreData = !!(dataBefore && dataBefore.on);
   const restoreSetMode = ExtAtuRestore.restoreModeName(restoreMode, restoreData);
-  const powerKnown = _currentTxPower > 0;
-  const restorePower = powerKnown ? _currentTxPower : (settings.defaultPower || 100);
+  // The power to put back is the one the RADIO reported. Never read: ask it
+  // once; still unknown: nothing is restored (1.13.10 "restored" the Default
+  // power, 100 W, and the operator's knob was fought back to it — GitHub
+  // #111, nocodegeneralwitha7300).
+  if (!(_currentTxPower > 0) && cat._codec && typeof cat._codec.getPower === 'function') {
+    const askedAt = Date.now();
+    try { cat._codec.getPower(); } catch {}
+    await waitForPowerReadback(askedAt, (w) => w > 0, 1500);
+  }
+  const restorePower = PowerRestore.restoreTarget(_currentTxPower);
+  const powerKnown = restorePower != null;
   const carrierMode = EXTERNAL_ATU_CARRIER_MODE;
   // Remembered BEFORE the power is lowered, the Station Setup test way: a
   // restore the radio misses (it was still in its TX tail, or the app
   // closed) is repaired by stationSetupReconcilePower on the next power
   // report (GitHub #111, df1vb: the tune power stayed after tuning).
-  const lowering = restorePower > watts + 0.5;
+  const lowering = restorePower != null && restorePower > watts + 0.5;
   if (lowering) {
     settings.setupTxPowerRestore = { watts: restorePower, testWatts: watts, rigId: activeRig.id, at: Date.now(), reason: 'external-atu' };
     _setupPowerRestoreAttempt = 0;
     try { saveSettings(settings); } catch {}
   }
-  sendCatLog(`[ExtATU] Firing ${watts} W ${carrierMode} carrier for ${seconds}s (mode ${restoreMode} → ${carrierMode}, power ${restorePower}W → ${watts}W)`);
+  sendCatLog(`[ExtATU] Firing ${watts} W ${carrierMode} carrier for ${seconds}s (mode ${restoreMode} → ${carrierMode}, power ${powerKnown ? restorePower + 'W' : 'never reported by the radio'} → ${watts}W)`);
   if (win && !win.isDestroyed()) win.webContents.send('external-atu-start', { seconds });
   try {
     if (cat.setModeOnly) cat.setModeOnly(carrierMode, _currentFreqHz);
@@ -2187,6 +2197,7 @@ runExternalAtuTune = async function () {
   } finally {
     // Let the radio leave its TX tail before it is asked anything.
     await new Promise(r => setTimeout(r, 500));
+    const carrierEndedAt = Date.now();
     // Put the mode back and believe only the radio's report (one lost CI-V
     // frame in the TX tail left an IC-7300 in AM, bobve 2026-11-03); send
     // again twice if it does not confirm, DATA included.
@@ -2197,7 +2208,13 @@ runExternalAtuTune = async function () {
         if (cat.setModeOnly) cat.setModeOnly(restoreSetMode, _currentFreqHz);
         else if (cat.setMode) cat.setMode(restoreSetMode);
       } catch {}
-      modeConfirmed = await waitForModeReadback(sentAt, (m) => ExtAtuRestore.modeConfirmed(m, restoreMode, cat._codec && cat._codec.dataModeState, restoreData), 3000);
+      // Ask the radio for its mode instead of waiting for the next poll (an
+      // IC-7100 over the network went three attempts with no report, df1vb
+      // #111), and accept any report since the carrier ended, not only one
+      // after this attempt: the first attempt's answer can land just before
+      // the second is sent.
+      setTimeout(() => { try { if (cat && cat._codec && typeof cat._codec.getMode === 'function') cat._codec.getMode(); } catch {} }, 300);
+      modeConfirmed = await waitForModeReadback(attempt === 1 ? sentAt : carrierEndedAt, (m) => ExtAtuRestore.modeConfirmed(m, restoreMode, cat._codec && cat._codec.dataModeState, restoreData), 3000);
       if (modeConfirmed != null) break;
       if (attempt < 3) sendCatLog(`[ExtATU] the radio has not reported ${restoreMode}${restoreData ? ' with DATA on' : ''} yet — sending the mode again (${attempt + 1} of 3)`);
     }
@@ -2207,7 +2224,7 @@ runExternalAtuTune = async function () {
     // Restore the power and believe only the radio's readback; send again
     // twice if it does not confirm.
     let confirmed = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= 3 && restorePower != null; attempt++) {
       const sentAt = Date.now();
       try { gatedSetTxPower(restorePower); } catch {}
       if (!lowering) break;
@@ -2222,7 +2239,9 @@ runExternalAtuTune = async function () {
       try { saveSettings(settings); } catch {}
       sendCatLog(`[ExtATU] Tune complete — ${modeText}; radio confirms ${confirmed} W`);
     } else if (lowering) {
-      sendCatLog(`[ExtATU] Tune complete — ${modeText}; set power back to ${restorePower} W but the radio has not confirmed it${powerKnown ? '' : ' (the power before the tune was never read, so this is your Default power)'}. It is set again when the radio next reports its power.`);
+      sendCatLog(`[ExtATU] Tune complete — ${modeText}; set power back to ${restorePower} W but the radio has not confirmed it. It is set again if the radio next reports the tune power within two minutes.`);
+    } else if (!powerKnown) {
+      sendCatLog(`[ExtATU] Tune complete — ${modeText}; power left at ${watts} W: the radio never reported its power before the tune, so POTACAT does not guess one. Set your power on the radio or in POTACAT.`);
     } else {
       sendCatLog(`[ExtATU] Tune complete — ${modeText}; power restored`);
     }
@@ -5760,18 +5779,23 @@ const sleepMs = (ms) => new Promise(r => setTimeout(r, ms));
 // K3SBP's radio sat at 1 W for weeks after a restore that was sent, not seen).
 function stationSetupReconcilePower(watts) {
   const m = settings.setupTxPowerRestore;
-  // Not while a low-power carrier is running on purpose (the test, or an
-  // external RF-sense tune): its own low readback is not a lost restore.
-  if (!m || _stationSetupTxTest || _stationSetupTxBusy || _externalAtuActive) return;
-  if (m.rigId && m.rigId !== settings.activeRigId) return;
-  if (watts > m.testWatts + 0.5) {
+  // lib/power-restore.js: put it back only while the radio still sits at the
+  // tune/test power; a different low power is the operator's (the 1.13.10
+  // knob fight), and an external-tuner marker expires with its window.
+  // Not while a low-power carrier is running on purpose.
+  const now = Date.now();
+  const d = PowerRestore.decideReconcile(m, watts, {
+    now, activeRigId: settings.activeRigId, attempts: _setupPowerRestoreAttempt,
+    carrierRunning: !!(_stationSetupTxTest || _stationSetupTxBusy || _externalAtuActive),
+  });
+  if (d.action === 'clear') {
+    if (d.why === 'operator') sendCatLog(`[Setup] the power is now ${watts} W, set by the operator — POTACAT will not put back the ${m.watts} W from before the ${m.reason === 'external-atu' ? 'tuner carrier' : 'test transmit'}`);
     delete settings.setupTxPowerRestore;
     _setupPowerRestoreAttempt = 0;
     try { saveSettings(settings); } catch {}
     return;
   }
-  const now = Date.now();
-  if (_setupPowerRestoreAttempt >= 3 || now - (m.lastAttemptAt || 0) < 10000) return;
+  if (d.action !== 'restore') return;
   _setupPowerRestoreAttempt++;
   m.lastAttemptAt = now;
   sendCatLog(`[Setup] radio still at ${watts} W after ${m.reason === 'external-atu' ? 'an external tuner carrier' : 'a test transmit'} — setting it back to ${m.watts} W (attempt ${_setupPowerRestoreAttempt} of 3)`);
@@ -42831,6 +42855,12 @@ function cloudShackNotice(text, kind) {
         _currentTxPower = value;
         // The operator has taken the level over — a WSPR restore must not undo it.
         if (!wsprBeaconArmed()) wsprForgetPreCapPower();
+        // ...nor a tuner/test restore (the 1.13.10 knob fight, GitHub #111).
+        if (source !== 'setup' && settings.setupTxPowerRestore) {
+          delete settings.setupTxPowerRestore;
+          _setupPowerRestoreAttempt = 0;
+          try { saveSettings(settings); } catch {}
+        }
         broadcastRigState();
         break;
       }

@@ -42,6 +42,7 @@ async function runTune({ ignoreRestores, powerBefore = 100, modeBefore = 'USB', 
   const ctx = {
     console, Date, Promise, setTimeout, clearTimeout,
     ExtAtuRestore: require('../lib/ext-atu-restore'),
+    PowerRestore: require('../lib/power-restore'),
     _lastModeReadback: null,
     settings: { activeRigId: 'r1', rigs: [{ id: 'r1', externalAtu: 'rf-sense', externalAtuWatts: 10, externalAtuSeconds: 1 }] },
     cat: {
@@ -101,6 +102,15 @@ async function runTune({ ignoreRestores, powerBefore = 100, modeBefore = 'USB', 
   });
   const e = await runTune({ ignoreRestores: 0, dataFlag: true, dataBefore: false });
   test('plain USB on an Icom stays plain USB', () => assert.deepStrictEqual(e.modes, ['AM', 'USB']));
+  // GitHub #111 / nocodegeneralwitha7300: a power the radio never reported
+  // was "restored" as the Default power, 100 W, and kept as a marker.
+  const n = await runTune({ ignoreRestores: 0, powerBefore: 0 });
+  test('a power the radio never reported is not restored as 100 W: the tune power stays, no marker, and the log says why', () => {
+    assert.deepStrictEqual(n.powers, [10], 'only the tune power was ever sent');
+    assert.ok(!n.ctx.settings.setupTxPowerRestore, 'no restore marker');
+    assert.ok(n.log.some((l) => /power left at 10 W: the radio never reported its power before the tune, so POTACAT does not guess one/.test(l)), n.log.join('\n'));
+    assert.ok(n.log.some((l) => /power never reported by the radio → 10W/.test(l)), n.log.join('\n'));
+  });
   const g = await runTune({ ignoreRestores: 0, ignoreModeRestores: 99 });
   test('a radio that never reports the mode gets three tries and the log says so', () => {
     assert.deepStrictEqual(g.modes, ['AM', 'USB', 'USB', 'USB']);
@@ -117,8 +127,8 @@ async function runTune({ ignoreRestores, powerBefore = 100, modeBefore = 'USB', 
     assert.ok(!R.modeConfirmed('AM', 'USB', null, false));
   });
   test('the reconcile on the next power report leaves a running tune alone', () => {
-    const rec = main.slice(main.indexOf('function stationSetupReconcilePower('), main.indexOf('function stationSetupReconcilePower(') + 600);
-    assert.ok(/_stationSetupTxBusy \|\| _externalAtuActive\) return;/.test(rec));
+    const rec = main.slice(main.indexOf('function stationSetupReconcilePower('), main.indexOf('function stationSetupReconcilePower(') + 900);
+    assert.ok(/carrierRunning: !!\(_stationSetupTxTest \|\| _stationSetupTxBusy \|\| _externalAtuActive\)/.test(rec));
   });
   // GitHub #111 again (df1vb IC-7100, after 1.13.9): the routine was assigned
   // inside connectRemote(), so with ECHOCAT off the ATU button ran the

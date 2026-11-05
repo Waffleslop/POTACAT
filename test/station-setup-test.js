@@ -314,8 +314,8 @@ t('renderer: window, entry points, launch card, bug-report line', () => {
 // after the drop and set the radio back to 100 W mid-test.
 t('the power-restore safety stays out of a test that is still running', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
-  const rec = main.slice(main.indexOf('function stationSetupReconcilePower('), main.indexOf('function stationSetupReconcilePower(') + 700);
-  assert.ok(/if \(!m \|\| _stationSetupTxTest \|\| _stationSetupTxBusy( \|\| _externalAtuActive)?\) return;/.test(rec));
+  const rec = main.slice(main.indexOf('function stationSetupReconcilePower('), main.indexOf('function stationSetupReconcilePower(') + 900);
+  assert.ok(/carrierRunning: !!\(_stationSetupTxTest \|\| _stationSetupTxBusy \|\| _externalAtuActive\)/.test(rec));
   const run = main.slice(main.indexOf('async function runStationSetupTxTest('), main.indexOf('async function _runStationSetupTxTest('));
   assert.ok(/_stationSetupTxBusy = true;\s*try \{ return await _runStationSetupTxTest\(rigId, opts\); \}\s*finally \{ _stationSetupTxBusy = false; \}/.test(run),
     'held from before the power drop until the restore is confirmed');
