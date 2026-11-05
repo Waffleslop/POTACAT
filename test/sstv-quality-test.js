@@ -155,32 +155,32 @@ function decodeOne(modeKey, opts) {
 const BASELINES = [
   // Clean (drift = 0)
   { mode: 'martin1',  drift: 0,    baseline: 44.4 },
-  { mode: 'scottie1', drift: 0,    baseline: 40.8 },
+  { mode: 'scottie1', drift: 0,    baseline: 38.3 }, // 40.8 before exact scans: bar edges of OUR encoder ~2.5 dB softer (20.7-sample pixels, not 21), every drifted cell +9-13 dB, real Scottie 1 now decodes (2026-11-05)
   { mode: 'scottie2', drift: 0,    baseline: 31.4 },
   { mode: 'robot36',  drift: 0,    baseline: 25.8 }, // 25.0 before the 150 ms spec line (2026-11-05)
   { mode: 'robot72',  drift: 0,    baseline: 28.9 },
   // Drift ±500 ppm
   { mode: 'martin1',  drift:  500, baseline: 26.6 },
   { mode: 'martin1',  drift: -500, baseline: 28.8 },
-  { mode: 'scottie1', drift:  500, baseline: 28.7 },
-  { mode: 'scottie1', drift: -500, baseline: 24.6 },
-  { mode: 'scottie2', drift:  500, baseline: 22.1 },
-  { mode: 'scottie2', drift: -500, baseline: 24.0 },
+  { mode: 'scottie1', drift:  500, baseline: 38.9 }, // 28.7 before exact scans (2026-11-05)
+  { mode: 'scottie1', drift: -500, baseline: 29.5 }, // 24.6 before exact scans (2026-11-05)
+  { mode: 'scottie2', drift:  500, baseline: 30.7 }, // 22.1 before exact scans (2026-11-05)
+  { mode: 'scottie2', drift: -500, baseline: 27.3 }, // 24 before exact scans (2026-11-05)
   { mode: 'robot36',  drift:  500, baseline: 19.7 },
   { mode: 'robot36',  drift: -500, baseline: 20.5 },
-  { mode: 'robot72',  drift:  500, baseline: 20.4 },
+  { mode: 'robot72',  drift:  500, baseline: 27.8 }, // 20.4 before exact scans (2026-11-05)
   // Drift ±1000 ppm (Phase 1 two-pass closed Martin/Scottie)
   { mode: 'martin1',  drift: 1000, baseline: 25.4 },
-  { mode: 'scottie1', drift: 1000, baseline: 25.1 },
-  { mode: 'scottie2', drift: 1000, baseline: 26.9 },
+  { mode: 'scottie1', drift: 1000, baseline: 38.4 }, // 25.1 before exact scans (2026-11-05)
+  { mode: 'scottie2', drift: 1000, baseline: 31.1 }, // 26.9 before exact scans (2026-11-05)
   { mode: 'robot36',  drift: 1000, baseline: 21.5 },
-  { mode: 'robot72',  drift: 1000, baseline: 21.6 },
+  { mode: 'robot72',  drift: 1000, baseline: 26.3 }, // 21.6 before exact scans (2026-11-05)
   // Drift ±2000 ppm (severe; expected to be marginal)
   { mode: 'martin1',  drift:  2000, baseline: 31.4 },
-  { mode: 'scottie1', drift:  2000, baseline: 27.1 },
+  { mode: 'scottie1', drift:  2000, baseline: 37.9 }, // 27.1 before exact scans (2026-11-05)
   { mode: 'scottie1', drift: -2000, baseline: 29.8 },
-  { mode: 'scottie2', drift:  2000, baseline: 25.5 },
-  { mode: 'scottie2', drift: -2000, baseline: 25.4 },
+  { mode: 'scottie2', drift:  2000, baseline: 31.3 }, // 25.5 before exact scans (2026-11-05)
+  { mode: 'scottie2', drift: -2000, baseline: 27.5 }, // 25.4 before exact scans (2026-11-05)
   // PD modes (new in this commit — encoder existed, decoder added
   // 2026-05-31). PSNRs are low because PD's averaged-chroma
   // line-pair structure inherently loses some information; the
@@ -194,7 +194,7 @@ const BASELINES = [
   { mode: 'pd90',  drift: 0, baseline: 13.4 },
   { mode: 'pd120', drift: 0, baseline: 11.8 },
   { mode: 'pd160', drift: 0, baseline: 13.8 },
-  { mode: 'pd180', drift: 0, baseline: 14.2 },
+  { mode: 'pd180', drift: 0, baseline: 14.9 }, // 14.2 before exact scans (2026-11-05)
   { mode: 'pd240', drift: 0, baseline: 14.9 },
   // Additional modes (added 2026-05-31). Martin M2/M3/M4, Scottie
   // DX, Robot 24 — reuse existing decoders, just new entries.
@@ -202,7 +202,7 @@ const BASELINES = [
   { mode: 'martin3',   drift: 0, baseline: 50.0 },  // small image, encode round-trips perfectly
   { mode: 'martin4',   drift: 0, baseline: 41.2 },
   { mode: 'scottieDx', drift: 0, baseline: 50.0 },  // slow scan, near-perfect
-  { mode: 'robot24',   drift: 0, baseline: 24.3 },
+  { mode: 'robot24',   drift: 0, baseline: 25.2 }, // 24.3 before exact scans (2026-11-05)
 
   // Noise robustness cells (added 2026-05-31). Deterministic
   // Gaussian noise injected after encode at the specified SNR (seed=1).
@@ -220,10 +220,10 @@ const BASELINES = [
   // future sync-detection fix should raise this floor.
   { mode: 'martin1',  drift: 0, snrDb: 30, baseline: 41.9 },
   { mode: 'martin1',  drift: 0, snrDb: 20, baseline: 35.3 },
-  { mode: 'scottie1', drift: 0, snrDb: 30, baseline: 40.7 },
+  { mode: 'scottie1', drift: 0, snrDb: 30, baseline: 37.7 }, // 40.7 before exact scans: bar edges of OUR encoder ~2.5 dB softer (20.7-sample pixels, not 21), every drifted cell +9-13 dB, real Scottie 1 now decodes (2026-11-05)
   { mode: 'scottie1', drift: 0, snrDb: 20, baseline: 34.6 },
   { mode: 'scottie2', drift: 0, snrDb: 30, baseline: 31.3 },
-  { mode: 'scottie2', drift: 0, snrDb: 20, baseline: 29.1 },
+  { mode: 'scottie2', drift: 0, snrDb: 20, baseline: 29.5 }, // 29.1 before exact scans (2026-11-05)
   { mode: 'scottie2', drift: 0, snrDb: 10, baseline: 22.6 },
   // robot36 @ 30dB SNR seed=1 — lifted 2026-05-31 from 15.4 → 24.9 dB
   // by gating late-trigger slant updates on a "drift detected" flag
@@ -236,9 +236,9 @@ const BASELINES = [
   { mode: 'robot36',  drift: 0, snrDb: 10, baseline: 19.7 },
   { mode: 'robot72',  drift: 0, snrDb: 30, baseline: 28.4 },
   { mode: 'robot72',  drift: 0, snrDb: 20, baseline: 26.5 },
-  { mode: 'pd180',    drift: 0, snrDb: 30, baseline: 14.2 },
-  { mode: 'pd180',    drift: 0, snrDb: 20, baseline: 14.1 },
-  { mode: 'pd180',    drift: 0, snrDb: 10, baseline: 13.0 },
+  { mode: 'pd180',    drift: 0, snrDb: 30, baseline: 14.9 }, // 14.2 before exact scans (2026-11-05)
+  { mode: 'pd180',    drift: 0, snrDb: 20, baseline: 14.7 }, // 14.1 before exact scans (2026-11-05)
+  { mode: 'pd180',    drift: 0, snrDb: 10, baseline: 13.4 }, // 13 before exact scans (2026-11-05)
 ];
 
 function fmtDrift(d) {
