@@ -26519,6 +26519,65 @@ function txNoteRadioPtt(controller, on) {
   sendCatLog(TxLimitLib.unsolicitedTxReport({ lines, handshake: !!tr._hardwareHandshake, pttRoute: pttRouteLabel(), mode: _currentMode, freqHz: _currentFreqHz }));
 }
 
+// --- SSB-over-DATA: key only once the radio reports DATA; restore, confirmed
+// (lib/ptt-mode-swap.js; k8iko IC-7410 lost ~0.5 s of every over, 9y4dg was
+// left in DIGI LSB after a release). ---
+const PttModeSwap = require('./lib/ptt-mode-swap');
+let _pttKeySeq = 0; // every key-down and release bumps it; a pending key-down or restore checks it
+const PTT_DATA_CONFIRM_MS = 800;
+const PTT_RESTORE_CONFIRM_MS = 1500;
+/** The radio's last mode report for a confirm. An Icom (1A 06) and a Kenwood
+ *  with DA report DATA as its own flag, read back by the codec (_dataReportAt);
+ *  every other radio names the mode (USB-D, PKTUSB, DATA-U). */
+function pttModeReport() {
+  const codec = cat && cat._codec;
+  if (codec && codec._dataReportAt) return { mode: _currentMode, data: !!codec._dataOn, at: codec._dataReportAt };
+  return _lastModeReadback ? { mode: _lastModeReadback.mode, data: PttModeSwap.isDataModeName(_lastModeReadback.mode), at: _lastModeReadback.at } : null;
+}
+function pttAskMode() {
+  if (!cat || !cat.connected || !cat._codec) return;
+  const codec = cat._codec;
+  if (typeof codec.askDataState === 'function') codec.askDataState();
+  else if (typeof codec.getMode === 'function') codec.getMode();
+}
+/** Key once the radio reports a DATA mode (or after the timeout, logged). */
+function pttKeyAfterDataMode(since, minWaitMs, emission) {
+  const seq = _pttKeySeq;
+  return PttModeSwap.confirmMode({
+    read: pttModeReport, ask: pttAskMode, since,
+    accept: (_m, r) => !!r.data,
+    timeoutMs: PTT_DATA_CONFIRM_MS, stepMs: 100, minWaitMs,
+    cancelled: () => seq !== _pttKeySeq,
+  }).then((r) => {
+    if (r.cancelled) { sendCatLog('[PTT] released before the radio reported the DATA mode — not keyed'); return false; }
+    if (r.ok) sendCatLog(`[PTT] the radio reports DATA mode after ${r.waitedMs} ms — keying`);
+    else sendCatLog(`[PTT] the radio did not report a DATA mode within ${r.waitedMs} ms (${r.mode ? 'last report ' + r.mode : 'no report'}) — keying anyway`);
+    if (cat && cat.connected) gatedSetTransmit(true, emission);
+    return true;
+  });
+}
+/** After a release: confirm the voice mode came back; one re-send if not. */
+function pttConfirmRestore(restoreMode, restoreFreq, noAnchor, since) {
+  const seq = _pttKeySeq;
+  // DATA off, and on a radio that names its modes, the voice mode itself.
+  const want = (_m, r) => !r.data && (cat && cat._codec && cat._codec._dataReportAt ? true : PttModeSwap.voiceModeMatches(restoreMode, r.mode));
+  const once = (from) => PttModeSwap.confirmMode({
+    read: pttModeReport, ask: pttAskMode, since: from, accept: want,
+    timeoutMs: PTT_RESTORE_CONFIRM_MS, stepMs: 150, cancelled: () => seq !== _pttKeySeq,
+  });
+  return once(since).then((r) => {
+    if (r.ok || r.cancelled) return r;
+    sendCatLog(`[PTT] the radio still reports ${r.mode || 'no mode'}${r.data ? ' (DATA)' : ''} after the restore — sending ${restoreMode} again`);
+    const again = Date.now();
+    if (cat && cat.connected && cat.setModeOnly) cat.setModeOnly(restoreMode, restoreFreq, { noAnchor });
+    return once(again).then((r2) => {
+      if (!r2.ok && !r2.cancelled) sendCatLog(`[PTT] WARNING: the radio did not return to ${restoreMode} after release (it reports ${r2.mode || 'nothing'}${r2.data ? ' DATA' : ''}). Set the mode on the radio.`);
+      else if (r2.ok) sendCatLog(`[PTT] ${restoreMode} restored on the second try`);
+      return r2;
+    });
+  });
+}
+
 function handleRemotePtt(state, opts = {}) {
   pushActivityState();   // busy.tx edges reach the activity feed (debounced)
   // Driving a remote shack: every PTT source on this desktop (the VFO
@@ -26651,6 +26710,7 @@ function handleRemotePtt(state, opts = {}) {
   // beat when we just switched mode. Icom only — 0 (immediate) otherwise.
   // (K1MRE IC-7300 over CP2102 on RPi, 2026-06-18.)
   let _civPttDelayMs = 0;
+  let _dataSwapSince = 0; // set when this key-down switched to DATA: key only once the radio reports it
   // opts.forceDataMode: the caller knows this transmission's audio only
   // reaches the rig in DATA mode (SSTV on an Icom, whose factory DATA OFF MOD
   // is MIC,ACC — plain USB keys with silence; WB8IMY IC-7300, 2026-09-26),
@@ -26719,6 +26779,7 @@ function handleRemotePtt(state, opts = {}) {
       // IC-705 repeater memory with - offset keyed with + offset, nj7n_nate):
       // no re-anchor there.
       if (cat && cat.connected) {
+        _dataSwapSince = Date.now();
         // anchorNow: mode, frequency, THEN the key-down below (GitHub #113 item 1).
         if (cat.setModeOnly) cat.setModeOnly(dataMode, _ssbFreqBeforePtt, { noAnchor: _icomData, anchorNow: true });
         if (_voiceTxCheck) _voiceTxCheck.mode = dataMode;   // the hint names DATA MOD, not DATA OFF MOD
@@ -26770,9 +26831,12 @@ function handleRemotePtt(state, opts = {}) {
       if (state && cat.pttUnavailable) {
         sendCatLog('PTT FAILED: this rigctld server has no PTT (it answered RPRT -11 to "T") — the radio will not key. Let POTACAT hold the radio, or run flrig.');
       }
-      if (_civPttDelayMs > 0) {
-        // Icom SSB-over-DATA: let the mode frame clear the bus before keying.
-        setTimeout(() => { if (cat && cat.connected) gatedSetTransmit(state, pttEmission); }, _civPttDelayMs);
+      _pttKeySeq++;
+      if (state && _dataSwapSince) {
+        // SSB-over-DATA: key only once the radio reports the DATA mode, so it
+        // never changes mode while keyed (k8iko IC-7410: ~0.5 s clipped off
+        // every over). An Icom still waits at least the old 120 ms bus gap.
+        pttKeyAfterDataMode(_dataSwapSince, _civPttDelayMs, pttEmission);
       } else {
         gatedSetTransmit(state, pttEmission);
       }
@@ -26808,8 +26872,11 @@ function handleRemotePtt(state, opts = {}) {
     if (cat && cat.connected) {
       const _restoreRig = getActiveRigModel();
       const _restoreIcom = !!(_restoreRig && _restoreRig.brand === 'Icom');
+      const restoreSince = Date.now();
       if (cat.setModeOnly) cat.setModeOnly(restoreMode, restoreFreq, { noAnchor: _restoreIcom });
       else if (restoreFreq) cat.tune(restoreFreq, restoreMode);
+      // Confirm it took (9y4dg: left in DIGI LSB after a release at 0 W).
+      pttConfirmRestore(restoreMode, restoreFreq, _restoreIcom, restoreSince).catch(() => {});
     }
   }
 

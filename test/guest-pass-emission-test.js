@@ -52,7 +52,11 @@ test('handleRemotePtt hands its emission to both transmit gates', () => {
   const body = MAIN.slice(at, MAIN.indexOf('\n}\n', at));
   assert.ok(/const pttEmission = opts\.emission \|\| \(opts\.forceDataMode \? 'DATA' : null\);/.test(body));
   assert.ok(/gatedSmartSdrTransmit\(state, pttEmission\)/.test(body), 'Flex');
-  assert.strictEqual((body.match(/gatedSetTransmit\(state, pttEmission\)/g) || []).length, 3, 'CAT (Flex fallback, Icom delay, plain)');
+  assert.strictEqual((body.match(/gatedSetTransmit\(state, pttEmission\)/g) || []).length, 2, 'CAT (Flex fallback, plain)');
+  // SSB-over-DATA keys after the radio reports DATA, still with the emission.
+  assert.ok(/pttKeyAfterDataMode\(_dataSwapSince, _civPttDelayMs, pttEmission\)/.test(body), 'CAT after the DATA confirm');
+  const k = MAIN.indexOf('function pttKeyAfterDataMode(');
+  assert.ok(/gatedSetTransmit\(true, emission\)/.test(MAIN.slice(k, MAIN.indexOf('\n}\n', k))), 'the confirm keys with the emission');
   assert.ok(!/gatedSetTransmit\(state\)/.test(body) && !/gatedSmartSdrTransmit\(state\)/.test(body), 'no key-down without the emission');
 });
 test('the gates check the emission first, the radio\'s mode only when none was given', () => {
