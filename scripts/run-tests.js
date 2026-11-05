@@ -191,6 +191,7 @@ const TESTS = [
   'test/winlink-main-wiring-test.js',
   'test/winlink-vara-test.js',
   'test/rigctld-shim-hamlib-test.js',
+  'test/rigctld-died-test.js',
   'test/modem-audio-server-test.js',
   'test/modem-bridge-test.js',
   'test/wspr-daily-test.js',

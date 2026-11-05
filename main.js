@@ -3553,6 +3553,34 @@ function listRigs(rigctldPath) {
 // appears to still have the radio (jbkerkhoff's K3, 2026-09-03).
 let rigctldTestProc = null;
 
+// The rigctld POTACAT started stopped by itself while in use (LA8JKA 11-02:
+// it vanished the moment ECHOCAT connected, twice, and POTACAT then retried
+// a port nobody listened on for good, with no line saying why). Say so, and
+// start it again — at most 3 times in 10 minutes, so a rigctld that dies on
+// every start does not become a restart loop.
+let _rigctldRespawns = [];
+function rigctldDiedOnItsOwn(code, signal) {
+  const how = signal ? `signal ${signal}` : `exit code ${code}`;
+  const now = Date.now();
+  _rigctldRespawns = _rigctldRespawns.filter((t) => now - t < 10 * 60 * 1000);
+  const target = settings.catTarget;
+  if (!target || target.type !== 'rigctld') {
+    sendCatLog(`[rigctld] rigctld stopped by itself (${how})`);
+    return;
+  }
+  if (_rigctldRespawns.length >= 3) {
+    sendCatLog(`[rigctld] rigctld stopped by itself again (${how}) — 3 restarts in 10 minutes, not restarting; reconnect from the rig menu`);
+    return;
+  }
+  _rigctldRespawns.push(now);
+  sendCatLog(`[rigctld] rigctld stopped by itself (${how}) while POTACAT was using it — starting it again`);
+  setTimeout(() => {
+    const t = settings.catTarget;
+    if (!t || t.type !== 'rigctld' || rigctldProc) return; // changed or already back
+    connectCatSafe('rigctld restart');
+  }, 2000);
+}
+
 function killRigctld() {
   if (rigctldProc) {
     try { rigctldProc.kill(); } catch { /* ignore */ }
@@ -3746,8 +3774,11 @@ function spawnRigctld(target, portOverride) {
       if (!settled) { settled = true; reject(err); }
     });
 
-    proc.on('exit', (code) => {
+    proc.on('exit', (code, signal) => {
+      // Still the live one = nobody asked it to stop (killRigctld nulls it first).
+      const diedOnItsOwn = settled && !portOverride && rigctldProc === proc;
       if (!portOverride && rigctldProc === proc) rigctldProc = null;
+      if (diedOnItsOwn) rigctldDiedOnItsOwn(code, signal);
       // Early exit (before the 500ms init window) means something went wrong
       if (!settled) {
         settled = true;
@@ -23678,7 +23709,13 @@ function connectRemote() {
   // sync every surface) instead of a transient keyer poke. Keyer MODE stays
   // owned by remote-server's iambic keyer (this handler only carries WPM).
   remoteServer.on('cw-config', ({ wpm }) => {
-    if (typeof wpm === 'number') applyCwWpm(wpm, 'remote');
+    // Every phone sends its speed on connect. An unchanged speed sends the
+    // radio nothing (the cw-text rule below): LA8JKA's rigctld stopped within
+    // half a second of each ECHOCAT connect, and this was the one command the
+    // connect sent that the VFO window never does.
+    if (typeof wpm !== 'number') return;
+    if (wpm === settings.cwWpm && (!cat || cat._cwWpm === wpm)) return;
+    applyCwWpm(wpm, 'remote');
   });
 
   // CW text macros/freeform from phone — route to radio
