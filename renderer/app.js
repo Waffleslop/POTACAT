@@ -25540,7 +25540,7 @@ function createCustomSlot(i) {
   if (type === 'slider') cmdInput.title = 'Use {v} for the value, {v3} to zero-pad to 3 digits (e.g. SQ0{v3}; ), {bcd} for an Icom level as two bytes (FE FE 94 E0 14 02 {bcd} FD sends 255 as 02 55). No placeholder = value appended.';
   // K8IKO had no way to tell whether his Icom frame was typed wrongly or
   // POTACAT was mishandling it. Name both accepted forms.
-  else cmdInput.title = 'Text commands as your manual prints them (FA014074000; ). Icom CI-V as hex bytes (FE FE 80 E0 12 00 FD).';
+  else cmdInput.title = 'Text commands as your manual prints them (FA014074000; ). Icom CI-V as hex bytes (FE FE 80 E0 12 00 FD). Over Hamlib (rigctld): start with + or \\ to send a rigctld command as-is (+V VFOB, \\set_vfo VFOB).';
   cmdInput.addEventListener('change', () => {
     if (customCatButtons[i]) customCatButtons[i].command = cmdInput.value.trim();
     saveCustomButtons();
