@@ -157,7 +157,7 @@ const BASELINES = [
   { mode: 'martin1',  drift: 0,    baseline: 44.4 },
   { mode: 'scottie1', drift: 0,    baseline: 40.8 },
   { mode: 'scottie2', drift: 0,    baseline: 31.4 },
-  { mode: 'robot36',  drift: 0,    baseline: 25.0 },
+  { mode: 'robot36',  drift: 0,    baseline: 25.8 }, // 25.0 before the 150 ms spec line (2026-11-05)
   { mode: 'robot72',  drift: 0,    baseline: 28.9 },
   // Drift ±500 ppm
   { mode: 'martin1',  drift:  500, baseline: 26.6 },
@@ -166,14 +166,14 @@ const BASELINES = [
   { mode: 'scottie1', drift: -500, baseline: 24.6 },
   { mode: 'scottie2', drift:  500, baseline: 22.1 },
   { mode: 'scottie2', drift: -500, baseline: 24.0 },
-  { mode: 'robot36',  drift:  500, baseline: 18.9 },
-  { mode: 'robot36',  drift: -500, baseline: 19.3 },
+  { mode: 'robot36',  drift:  500, baseline: 19.7 },
+  { mode: 'robot36',  drift: -500, baseline: 20.5 },
   { mode: 'robot72',  drift:  500, baseline: 20.4 },
   // Drift ±1000 ppm (Phase 1 two-pass closed Martin/Scottie)
   { mode: 'martin1',  drift: 1000, baseline: 25.4 },
   { mode: 'scottie1', drift: 1000, baseline: 25.1 },
   { mode: 'scottie2', drift: 1000, baseline: 26.9 },
-  { mode: 'robot36',  drift: 1000, baseline: 20.9 },
+  { mode: 'robot36',  drift: 1000, baseline: 21.5 },
   { mode: 'robot72',  drift: 1000, baseline: 21.6 },
   // Drift ±2000 ppm (severe; expected to be marginal)
   { mode: 'martin1',  drift:  2000, baseline: 31.4 },
@@ -231,9 +231,9 @@ const BASELINES = [
   // seed=1 noise was tricking the late regressor into applying fake
   // slope; YCbCr modes have noisy enough per-line sync that late
   // triggers were over-correcting on it.
-  { mode: 'robot36',  drift: 0, snrDb: 30, baseline: 24.9 },
-  { mode: 'robot36',  drift: 0, snrDb: 20, baseline: 24.3 },
-  { mode: 'robot36',  drift: 0, snrDb: 10, baseline: 19.6 },
+  { mode: 'robot36',  drift: 0, snrDb: 30, baseline: 25.6 },
+  { mode: 'robot36',  drift: 0, snrDb: 20, baseline: 24.7 },
+  { mode: 'robot36',  drift: 0, snrDb: 10, baseline: 19.7 },
   { mode: 'robot72',  drift: 0, snrDb: 30, baseline: 28.4 },
   { mode: 'robot72',  drift: 0, snrDb: 20, baseline: 26.5 },
   { mode: 'pd180',    drift: 0, snrDb: 30, baseline: 14.2 },
