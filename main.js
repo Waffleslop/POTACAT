@@ -9948,6 +9948,18 @@ function _winlinkVaraFmPort() {
   const n = parseInt(settings.winlinkVaraFmPort, 10);
   return n > 0 && n < 65536 ? n : WinlinkPat.PAT_DEFAULTS.varaFmPort;
 }
+/** POTACAT's own serial ports (CAT, separate PTT, CW key): VARA must never name one. */
+function winlinkPotacatComPorts() {
+  const rig = winlinkActiveRig();
+  const out = [];
+  for (const t of [settings.catTarget, rig && rig.catTarget]) {
+    if (!t) continue;
+    for (const k of ['path', 'serialPort', 'pttPort']) if (t[k]) out.push(String(t[k]));
+  }
+  if (settings.cwKeyPort) out.push(String(settings.cwKeyPort));
+  return [...new Set(out.map((p) => VaraSetup.comPortName(p)).filter(Boolean))];
+}
+
 /** The operator turned this VARA on (the old hidden `winlinkShowVara` switch counts as VARA HF on). */
 function _winlinkVaraEnabled(kind) {
   if (kind === 'fm') return settings.enableVaraFm === true;
@@ -9984,6 +9996,15 @@ async function winlinkVaraConfigure({ kind: k, devices, inputLabel, outputLabel,
     const a = await winlinkAutoAudio({ inputLabel, outputLabel });
     plan = VaraSetup.planDirect({ capture: a && a.ok && a.capture, playback: a && a.ok && a.playback });
     if (!plan.ok) return { ok: false, step: 'devices', error: (a && a.error ? a.error + '. ' : '') + plan.advice };
+    // VARA's names come from a LIVE MME listing, saved labels included: a
+    // renderer label is not the name VARA compares (n5xhi 2026-11-04).
+    let mme = null;
+    try { if (findArdop().found) { const l = await listArdopDevices(); if (l && l.ok) mme = l.devices; } } catch { mme = null; }
+    const avoid = (rig && rig.varaMissingNames && rig.varaMissingNames[kind]) || null;
+    const names = VaraSetup.resolveDirectNames({ capture: plan.capture, playback: plan.playback, mme, avoid });
+    if (!names.ok) { winlinkLog(`${name}: sound devices not written — ${names.advice}`); return { ok: false, step: 'devices', error: names.advice }; }
+    for (const s of names.substituted) winlinkLog(`${name}: VARA reported "${s.from}" missing last time — using the next closest ${s.side === 'input' ? 'recording' : 'playback'} device it lists, "${s.to}"`);
+    plan.vara = { inputName: names.inputName, outputName: names.outputName, fromListing: true };
   } else {
     if (Array.isArray(devices) && devices.length) {
       // VARA's names come from the same kind of listing VARA uses (MME, via
@@ -10004,7 +10025,9 @@ async function winlinkVaraConfigure({ kind: k, devices, inputLabel, outputLabel,
   const iniPath = path.join(path.dirname(bin.path), kind === 'fm' ? 'VARAFM.ini' : 'VARA.ini');
   let iniText = '';
   try { iniText = fs.readFileSync(iniPath, 'utf8'); } catch { iniText = ''; }
-  const patched = VaraSetup.planVaraIniPatch(iniText, { inputName: plan.vara.inputName, outputName: plan.vara.outputName, port });
+  // POTACAT's own CAT/PTT/key ports are blanked wherever VARA's file names
+  // them: a VARA holding one fights rigctld for it (n5xhi's VARA FM on COM8).
+  const patched = VaraSetup.planVaraIniPatch(iniText, { inputName: plan.vara.inputName, outputName: plan.vara.outputName, port, freePorts: winlinkPotacatComPorts() });
   if (patched.changes.length) {
     try {
       if (iniText) fs.copyFileSync(iniPath, iniPath + '.potacat-' + new Date().toISOString().replace(/[:.]/g, '-') + '.bak');
@@ -10012,7 +10035,7 @@ async function winlinkVaraConfigure({ kind: k, devices, inputLabel, outputLabel,
     } catch (e) {
       return { ok: false, step: 'ini', error: `Could not write ${iniPath}: ${e.message}. Set VARA's SoundCard to ${plan.vara.inputName} / ${plan.vara.outputName} and PTT to VOX by hand.` };
     }
-    winlinkLog(`${name} configured for ${rig && rig.name ? rig.name : 'the radio'} (${route}: ${why}) — wrote ${iniPath}: ${patched.changes.map((c) => c.section + '.' + c.key + '=' + c.to).join(', ')}`);
+    winlinkLog(`${name} configured for ${rig && rig.name ? rig.name : 'the radio'} (${route}: ${why}) — wrote ${iniPath}: ${patched.changes.map((c) => c.section + '.' + c.key + '=' + c.to + (c.to === '' && c.from ? ' (was ' + c.from + ', POTACAT\'s port)' : '')).join(', ')}`);
   } else if (!quiet) {
     winlinkLog(`${name} already matches ${rig && rig.name ? rig.name : 'the radio'} (${route})`);
   }
@@ -10062,7 +10085,30 @@ async function winlinkVaraSetup({ kind: k, devices, inputLabel, outputLabel } = 
       const buf = Buffer.alloc(len);
       fs.readSync(fd, buf, 0, len, st.size - len);
       fs.closeSync(fd);
-      problem = VaraSetup.varaLogDeviceProblem(buf.toString('utf8'), launchedAt);
+      const tail = buf.toString('utf8');
+      problem = VaraSetup.varaLogDeviceProblem(tail, launchedAt);
+      const portProblem = VaraSetup.varaLogPortProblem(tail, launchedAt);
+      if (portProblem) problem = problem ? problem + ' ' + portProblem : portProblem;
+      // Direct route: remember the names VARA refused, so the next setup (with
+      // VARA closed) writes the next closest name it lists — one retry, logged.
+      const miss = VaraSetup.varaLogMissingSides(tail, launchedAt);
+      const rig = winlinkActiveRig();
+      if (c.route === 'direct' && rig && (miss.input || miss.output)) {
+        const prev = (rig.varaMissingNames && rig.varaMissingNames[kind]) || { input: [], output: [] };
+        const tried = (prev.input || []).length + (prev.output || []).length;
+        const next = {
+          input: miss.input ? [...new Set([...(prev.input || []), plan.vara.inputName])] : (prev.input || []),
+          output: miss.output ? [...new Set([...(prev.output || []), plan.vara.outputName])] : (prev.output || []),
+        };
+        if (!tried) {
+          rig.varaMissingNames = { ...(rig.varaMissingNames || {}), [kind]: next };
+          saveSettings(settings);
+          problem += ` POTACAT will try the next closest device name ${name} lists: close ${name}, then click Set up again.`;
+        }
+      } else if (rig && rig.varaMissingNames && rig.varaMissingNames[kind] && !problem) {
+        delete rig.varaMissingNames[kind];
+        saveSettings(settings);
+      }
     }
   } catch { /* no log yet: nothing to report */ }
   if (problem) { winlinkLog(`${name} setup: ${problem}`); return { ok: false, step: 'devices', error: problem, cable: plan.potacat || null }; }
@@ -10138,6 +10184,16 @@ async function winlinkVaraReady(mode, { configured } = {}) {
       if (launched && launched.child && launched.child.exitCode === null && Date.now() - launched.at < VARA_LAUNCH_WAIT_MS) {
         winlinkLog(`${name}: still starting (launched ${Math.round((Date.now() - launched.at) / 1000)} s ago) — waiting for its port`);
       } else {
+        // Never start a VARA whose settings name POTACAT's CAT/PTT port: it
+        // takes the port from rigctld and keys the radio itself (n5xhi).
+        let iniNow = '';
+        try { iniNow = fs.readFileSync(path.join(path.dirname(bin.path), kind === 'fm' ? 'VARAFM.ini' : 'VARA.ini'), 'utf8'); } catch { iniNow = ''; }
+        const clash = VaraSetup.describePortConflicts(name, VaraSetup.varaIniPortConflicts(iniNow, winlinkPotacatComPorts()));
+        if (clash) {
+          winlinkLog(clash);
+          _winlinkSessionErrorKind = 'vara-not-configured';
+          throw new Error(clash);
+        }
         winlinkLog(`${name}: nothing on 127.0.0.1:${port} — starting ${bin.path}`);
         try {
           const child = spawn(bin.path, [], { ...VaraProcess.varaSpawnOptions(), cwd: path.dirname(bin.path) });

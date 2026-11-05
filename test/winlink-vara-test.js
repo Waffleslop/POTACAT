@@ -340,7 +340,7 @@ function fnBody(src, name) {
     assert.ok(/winlinkVaraConfigure\(\{ kind, quiet: true \}\)\.then/.test(main), 'a rig switch re-syncs a closed VARA');
     assert.ok(!/PTT set to None/.test(main), 'VARA has no None: VOX');
     assert.ok(/fs\.copyFileSync\(iniPath, iniPath \+ '\.potacat-'/.test(fn), 'backup before the write');
-    assert.ok(/VaraSetup\.planVaraIniPatch\(iniText, \{ inputName: plan\.vara\.inputName, outputName: plan\.vara\.outputName, port \}\)/.test(fn));
+    assert.ok(/VaraSetup\.planVaraIniPatch\(iniText, \{ inputName: plan\.vara\.inputName, outputName: plan\.vara\.outputName, port, freePorts: winlinkPotacatComPorts\(\) \}\)/.test(fn), 'POTACAT\'s own ports are freed in VARA\'s file');
     assert.ok(/rig\.modemCable = \{ inputId: plan\.potacat\.inputId, outputId: plan\.potacat\.outputId, inputLabel: plan\.potacat\.inputLabel, outputLabel: plan\.potacat\.outputLabel, varaInputName: plan\.vara\.inputName, varaOutputName: plan\.vara\.outputName \}/.test(fn), 'POTACAT\'s side and VARA\'s names saved on the rig for later syncs');
     assert.ok(/const l = await listArdopDevices\(\); if \(l && l\.ok\) mme = l\.devices;/.test(fn) && /VaraSetup\.planCables\(devices, \{ mme \}\)/.test(fn), 'VARA\'s names come from the MME listing');
     assert.ok(/VaraSetup\.varaLogDeviceProblem\(/.test(fnBody(main, 'winlinkVaraSetup')), 'VARA\'s log is the verdict');
@@ -349,6 +349,68 @@ function fnBody(src, name) {
     assert.ok(/window\.api\.winlinkVaraSetup\(kind, devs, labels\)/.test(read('renderer/app.js')), 'the button hands over the rig\'s device labels');
     assert.ok(!/kill\(|taskkill/.test(fn + fnBody(main, 'winlinkVaraSetup')), 'POTACAT never closes VARA');
     assert.ok(/A radio with a USB sound card needs no cable/.test(html), 'the copy says the radio decides');
+  });
+
+  // n5xhi 2026-11-04: FT-857 on rigctld (-r COM8 --ptt-file=COM9), RigExpert
+  // TI-3000, VARA FM 4.4.0. VARAFM.ini kept COM8 with Via=1 and VARA FM took
+  // the CAT port; both device names were a saved renderer label.
+  const N5XHI_INI = '[Soundcard]\r\nInput Device Name=RigExpert (RigExpert TI-3000)\r\nOutput Device Name=RigExpert (RigExpert TI-3000)\r\n[PTT]\r\nRig=52\r\nPTTPort=COM8\r\nCATPort=COM8\r\nBaud=4800\r\nVia=1\r\n[Setup]\r\nTCP Command Port=8310\r\n';
+  const N5XHI_MME = {
+    capture: [{ id: '0', name: 'Microphone (Realtek(R) Audio)' }, { id: '1', name: 'Microphone (RigExpert TI-3000)' }],
+    playback: [{ id: '0', name: 'Speakers (Realtek(R) Audio)' }, { id: '1', name: 'Speakers (RigExpert TI-3000)' }],
+  };
+  await test('n5xhi: every value naming POTACAT\'s CAT/PTT port is blanked, and a VARA that still names one is refused', () => {
+    assert.strictEqual(S.comPortName('\\\\.\\com08'), 'COM8');
+    assert.strictEqual(S.comPortName('COM'), '');
+    const hits = S.varaIniPortConflicts(N5XHI_INI, ['COM8', 'COM9']);
+    assert.deepStrictEqual(hits.map((h) => h.section + '.' + h.key), ['PTT.PTTPort', 'PTT.CATPort']);
+    assert.deepStrictEqual(S.varaIniPortConflicts(N5XHI_INI, ['COM3']), [], 'another port is the operator\'s business');
+    assert.deepStrictEqual(S.varaIniPortConflicts(N5XHI_INI, []), []);
+    const r = S.planVaraIniPatch(N5XHI_INI, { inputName: 'Microphone (RigExpert TI-3000)', outputName: 'Speakers (RigExpert TI-3000)', port: 8310, freePorts: ['COM8', 'COM9'] });
+    assert.ok(r.text.includes('\r\nPTTPort=\r\nCATPort=\r\n'), 'both blanked, CRLF kept: ' + JSON.stringify(r.text));
+    assert.ok(r.text.includes('Baud=4800') && r.text.includes('Rig=52'), 'nothing else touched');
+    assert.deepStrictEqual(r.changes.filter((c) => c.to === '').map((c) => [c.key, c.from]), [['PTTPort', 'COM8'], ['CATPort', 'COM8']]);
+    assert.deepStrictEqual(S.varaIniPortConflicts(r.text, ['COM8', 'COM9']), [], 'nothing left to refuse');
+    assert.strictEqual(S.planVaraIniPatch(r.text, { inputName: 'Microphone (RigExpert TI-3000)', outputName: 'Speakers (RigExpert TI-3000)', port: 8310, freePorts: ['COM8'] }).changes.length, 0, 'idempotent');
+    // A key VARA FM may use that VARA HF does not: found by value, any section.
+    assert.strictEqual(S.varaIniPortConflicts('[CAT]\nRadio Port=COM9\n', ['COM9'])[0].key, 'Radio Port');
+    const msg = S.describePortConflicts('VARA FM', hits);
+    assert.ok(/^VARA FM was not started: its settings still name COM8/.test(msg) && /PTT\.PTTPort=COM8/.test(msg) && /PTT to VOX with no COM port/.test(msg), msg);
+    assert.strictEqual(S.describePortConflicts('VARA FM', []), '');
+    assert.ok(/tried to open COM8/.test(S.varaLogPortProblem('2026-11-04 12:23:25    Unable to open radio serial port COM8. May be in use by another application.')));
+    assert.strictEqual(S.varaLogPortProblem('2026-11-04 12:23:25    VARA FM ready'), '');
+  });
+  await test('n5xhi: the direct route\'s names come from the live MME listing, a saved label is never written as-is', () => {
+    const r = S.resolveDirectNames({ capture: 'RigExpert (RigExpert TI-3000)', playback: 'RigExpert (RigExpert TI-3000)', mme: N5XHI_MME });
+    assert.strictEqual(r.ok, true);
+    assert.deepStrictEqual([r.inputName, r.outputName], ['Microphone (RigExpert TI-3000)', 'Speakers (RigExpert TI-3000)']);
+    assert.deepStrictEqual(r.substituted, []);
+    const none = S.resolveDirectNames({ capture: 'RigExpert (RigExpert TI-3000)', playback: 'x', mme: null });
+    assert.strictEqual(none.ok, false);
+    assert.ok(/did not write a guess/.test(none.advice), 'no listing: no guess');
+    const nomatch = S.resolveDirectNames({ capture: 'Yaesu SCU-17', playback: 'Speakers (RigExpert TI-3000)', mme: N5XHI_MME });
+    assert.strictEqual(nomatch.ok, false);
+    assert.ok(/Yaesu SCU-17/.test(nomatch.advice));
+    // VARA said the first name was missing: the next closest listed name, once.
+    const mme2 = { capture: N5XHI_MME.capture.concat([{ id: '2', name: 'Line (RigExpert TI-3000)' }]), playback: N5XHI_MME.playback };
+    const retry = S.resolveDirectNames({ capture: 'RigExpert (RigExpert TI-3000)', playback: 'RigExpert (RigExpert TI-3000)', mme: mme2, avoid: { input: ['Microphone (RigExpert TI-3000)'] } });
+    assert.strictEqual(retry.ok, true);
+    assert.strictEqual(retry.inputName, 'Line (RigExpert TI-3000)');
+    assert.deepStrictEqual(retry.substituted, [{ side: 'input', from: 'Microphone (RigExpert TI-3000)', to: 'Line (RigExpert TI-3000)' }]);
+    assert.deepStrictEqual(S.varaLogMissingSides('2026-11-04 12:23:30    Soundcard Input Device missing in action !\n', 0), { input: true, output: false });
+  });
+  await test('n5xhi wiring: listing always, POTACAT\'s ports known, the launch refused on a clash, the retry remembered', () => {
+    const fn = fnBody(main, 'winlinkVaraConfigure');
+    assert.ok(/VaraSetup\.resolveDirectNames\(\{ capture: plan\.capture, playback: plan\.playback, mme, avoid \}\)/.test(fn), 'saved labels go through the listing too');
+    assert.ok(/if \(!names\.ok\) \{ winlinkLog\(/.test(fn), 'no listing or no match = nothing written, said in the log');
+    const ports = fnBody(main, 'winlinkPotacatComPorts');
+    assert.ok(/'path', 'serialPort', 'pttPort'/.test(ports) && /settings\.cwKeyPort/.test(ports));
+    const ready = fnBody(main, 'winlinkVaraReady');
+    const clash = ready.indexOf('VaraSetup.varaIniPortConflicts(iniNow, winlinkPotacatComPorts())');
+    assert.ok(clash > 0 && clash < ready.indexOf('spawn(bin.path'), 'checked before VARA is started');
+    assert.ok(/winlinkLog\(clash\);/.test(ready));
+    const setup = fnBody(main, 'winlinkVaraSetup');
+    assert.ok(/VaraSetup\.varaLogPortProblem\(tail, launchedAt\)/.test(setup) && /rig\.varaMissingNames = /.test(setup));
   });
 
   console.log(`\n${pass} passed, ${fail} failed`);
