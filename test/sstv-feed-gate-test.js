@@ -92,6 +92,22 @@ section('rendererAudioDecision — Icom RS-BA1');
   eq(rendererAudioDecision(s).accept, true, 'icom source without CAT connection → renderer fallback');
 }
 
+section('rendererAudioDecision — Yaesu SCU-LAN10');
+{
+  const s = { ...base(), audioSource: 'yaesu-lan', yaesuLanConnected: true, lastYaesuLanFeedMs: FRESH };
+  eq(rendererAudioDecision(s), { accept: false, reason: 'yaesu-lan-live' }, 'live SCU-LAN10 stream outranks renderer');
+}
+{
+  const s = { ...base(), audioSource: 'yaesu-lan', yaesuLanConnected: true, lastYaesuLanFeedMs: STALE };
+  eq(rendererAudioDecision(s).accept, true, 'SCU-LAN10 connected but silent → renderer fallback');
+}
+{
+  const s = { ...base(), audioSource: 'dax', yaesuLanConnected: true, lastYaesuLanFeedMs: FRESH };
+  eq(rendererAudioDecision(s).accept, true, 'SCU-LAN10 for CAT only, sound card for audio → renderer');
+}
+eq(streamAudioDecision({ engineRunning: true, feedPaused: false, audioSource: 'yaesu-lan', path: 'yaesu-lan' }), { accept: true, reason: 'yaesu-lan' }, 'SCU-LAN10 frame feeds when it is the source');
+eq(streamAudioDecision({ engineRunning: true, feedPaused: false, audioSource: 'dax', path: 'yaesu-lan' }).accept, false, 'SCU-LAN10 frame ignored when the sound card is the source');
+
 section('streamAudioDecision');
 eq(streamAudioDecision({ engineRunning: false, feedPaused: false, audioSource: 'smartsdr', path: 'smartsdr' }).accept,
   false, 'engine off rejects stream frames');

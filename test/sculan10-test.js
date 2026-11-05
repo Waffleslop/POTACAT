@@ -366,6 +366,29 @@ test('disconnect stops everything: no reconnect, no more packets', async () => {
   } finally { u.close(); }
 });
 
+test('end to end: RigController and the Yaesu codec over the transport read the dial, and connect sends PTT off', async () => {
+  const { RigController } = require('../lib/rig-controller');
+  const { KenwoodCodec } = require('../lib/codecs/kenwood-codec');
+  const { getModel } = require('../lib/rig-models');
+  const u = await fakeUnit();
+  const t = new Sculan10Transport();
+  const model = { ...getModel('FTDX10') };
+  model.tune = model.tune || {};
+  const codec = new KenwoodCodec(model, (d) => t.write(d));
+  const ctl = new RigController(model, t, codec);
+  const freqs = [];
+  ctl.on('frequency', (hz) => freqs.push(hz));
+  ctl.on('log', () => {});
+  t.on('log', () => {});
+  t.on('error', () => {});
+  try {
+    t.connect({ host: '127.0.0.1', basePort: u.base, ...FAST });
+    assert.ok(await until(() => freqs.includes(14074000), 6000), 'the dial reached the controller: ' + JSON.stringify(u.catSeen.slice(0, 8).map((x) => x.text)));
+    assert.ok(u.catSeen.some((x) => /^TX0;?$/.test(x.text)), 'connect safety: PTT off went to the radio');
+    assert.ok(ctl.connected);
+  } finally { ctl.disconnect(); u.close(); }
+});
+
 test('no address: a clear error, nothing sent', () => {
   const t = new Sculan10Transport();
   const errs = [];

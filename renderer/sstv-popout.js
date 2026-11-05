@@ -1792,7 +1792,7 @@ async function startRxAudio() {
   // Direct radio streams (Flex SmartSDR, Icom network) feed the decoder from
   // main; this capture is only their fallback, so the device notices below
   // would be noise for those stations.
-  const directStream = settings && ['smartsdr', 'icom-network'].includes(settings.audioSource);
+  const directStream = settings && ['smartsdr', 'icom-network', 'yaesu-lan'].includes(settings.audioSource);
   const pick = window.SstvAudioDevice.resolveSstvAudio({
     sstvId: audioInputSelect.value || '', rigId: settings.remoteAudioInput || '',
     devices: _sstvAudioDevices.inputs, kind: 'input',

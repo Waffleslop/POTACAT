@@ -5759,7 +5759,9 @@ function _applyPopoutTheme(payload) {
     _audioStartStage = 'settle';
     await new Promise(function(r) { setTimeout(r, 300); });
     try {
-      if (audioSource === 'smartsdr') {
+      // Yaesu SCU-LAN10 audio arrives the same way: main forwards it as
+      // 'jtcat-vita49-audio' frames at 24 kHz (handleYaesuLanAudioFrame).
+      if (audioSource === 'smartsdr' || audioSource === 'yaesu-lan') {
         _audioStartStage = 'ctx-create';
         // SmartSDR Direct: audio is the VITA-49 dax_rx stream that main
         // forwards as 'jtcat-vita49-audio' frames. A single AudioWorkletNode
@@ -5944,7 +5946,7 @@ function _applyPopoutTheme(payload) {
       popoutWaterfallLoop();
       // Capture-stall watchdog (kc8zp_ryan 2026-11-03, lib/capture-stall.js):
       // sound-card capture only; the SmartSDR / Icom-network feed is main's.
-      if (window.CaptureStall && audioSource !== 'smartsdr' && audioSource !== 'icom-network') {
+      if (window.CaptureStall && audioSource !== 'smartsdr' && audioSource !== 'icom-network' && audioSource !== 'yaesu-lan') {
         popoutArmStallWatch(popoutAudioStream && popoutAudioStream.getAudioTracks()[0]);
       }
       // Start finished — disarm the stall watchdog and restore the overlay
@@ -5962,7 +5964,7 @@ function _applyPopoutTheme(payload) {
         // and the label is the only way a bug report shows which one fed the
         // decoder. KB2UXB 2026-08-03.
         var capLabel = '';
-        if (audioSource !== 'smartsdr') {
+        if (audioSource !== 'smartsdr' && audioSource !== 'yaesu-lan') {
           try {
             var capTrack = popoutAudioStream && popoutAudioStream.getAudioTracks()[0];
             if (capTrack && capTrack.label) capLabel = ' [' + capTrack.label + ']';
@@ -5970,7 +5972,8 @@ function _applyPopoutTheme(payload) {
         }
         window.api.jtcatLog('[JTCAT popout] Audio started: ' +
           (audioSource === 'smartsdr' ? 'SmartSDR Direct (VITA-49)' :
-           audioSource === 'icom-network' ? 'Icom network' : 'device capture') +
+           audioSource === 'icom-network' ? 'Icom network' :
+           audioSource === 'yaesu-lan' ? 'Yaesu LAN (SCU-LAN10)' : 'device capture') +
           capLabel + ' @ ' + nativeRate + ' Hz — waterfall live');
       }
     } catch (err) {

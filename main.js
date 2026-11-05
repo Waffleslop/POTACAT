@@ -341,6 +341,8 @@ const WatchlistGroups = require('./lib/watchlist-groups'); // state tokens in th
 const { normalizeSerialPath, normalizeSettingsSerialPaths } = require('./lib/serial-path'); // "COM Port 10" -> COM10 (KF0TDB)
 const { TcpTransport, SerialTransport, calloutTwin } = require('./lib/transport');
 const { RsBa1Transport } = require('./lib/rsba1-transport');
+const { Sculan10Transport } = require('./lib/sculan10-transport');
+const Sculan10 = require('./lib/sculan10-protocol');
 const { KenwoodCodec } = require('./lib/codecs/kenwood-codec');
 const { YaesuLegacyCodec } = require('./lib/codecs/yaesu-legacy-codec');
 const { RigctldCodec } = require('./lib/codecs/rigctld-codec');
@@ -8381,6 +8383,49 @@ async function connectCat() {
     sendCatLog(`Connecting to Icom CI-V over TCP on ${host}:${port}`);
     transport.connect({ host, port });
 
+  } else if (target.type === 'yaesu-lan') {
+    // Yaesu SCU-LAN10 over UDP (EXPERIMENTAL: written from the spec, tested
+    // by owners; lib/sculan10-transport.js). The transport carries Yaesu CAT
+    // ASCII, so the same Kenwood-style codec a USB-connected Yaesu uses
+    // attaches unchanged. RX audio comes over the LAN when audioSource is
+    // 'yaesu-lan'; TX audio is not in the spec yet, so handleRemotePtt
+    // refuses a key-down that would send a silent carrier.
+    transport = new Sculan10Transport();
+    const model = rigModel || { brand: 'Yaesu', protocol: 'kenwood', caps: {}, cw: {} };
+    model.tune = getTuneQuirks(model);
+    codec = new KenwoodCodec(model, (data) => transport.write(data));
+    cat = new RigController(model, transport, codec);
+    cat._debug = true;
+    cat.on('log', sendCatLog);
+    cat.on('status', sendCatStatus);
+    cat.on('frequency', catFrequencyHandler);
+    cat.on('mode', catModeHandler);
+    cat.on('power', sendCatPower);
+    cat.on('powerMeter', sendCatFwdPower);
+    cat.on('nb', sendCatNb);
+    cat.on('smeter', sendCatSmeter);
+    cat.on('swr', sendCatSwr);
+    cat.on('alc', sendCatAlc);
+    transport.on('log', sendCatLog);
+    transport.on('audio-frame', handleYaesuLanAudioFrame);
+    // target.port is the BASE port (CTRL); CAT/AUDIO/SCOPE are +1..+3. A
+    // blank address stays blank (the transport says so) rather than
+    // falling back to 127.0.0.1.
+    const _ylHp = target.host ? resolveCatHostPort(target, target.port || 50000, 'Yaesu LAN') : { host: '', port: Number(target.port) || 50000 };
+    const rxAudio = settings.audioSource === 'yaesu-lan';
+    const modelName = getActiveRigModelName();
+    if (modelName && !Sculan10.MODELS.includes(modelName)) {
+      sendCatLog(`[SCU-LAN10] WARNING: ${modelName} is not one of the radios the SCU-LAN10 spec covers (${Sculan10.MODELS.join(', ')}). Connecting anyway.`);
+    }
+    _yaesuLanAudioFrames = 0;
+    _yaesuLanResamplers = null;
+    sendCatLog(`Connecting to the Yaesu SCU-LAN10 (experimental) at ${_ylHp.host}, UDP ports ${_ylHp.port}-${_ylHp.port + 3}${modelName ? `, ${modelName}` : ''}${rxAudio ? ', RX audio over the LAN' : ', RX audio from the sound card on this computer'}; transmit audio over the LAN is not supported yet. POTACAT ${app.getVersion()}.`);
+    transport.connect({
+      host: _ylHp.host,
+      basePort: _ylHp.port,
+      username: target.username || '',
+      password: target.password || '',
+    });
   } else if (target.type === 'icom-network') {
     // Icom RS-BA1 protocol over UDP. Works with:
     //   - wfserver (wfview's headless GPLv3 server) bridging a USB-attached
@@ -20404,6 +20449,63 @@ function _getK4OpusEncoder() {
   return _k4OpusEncoderMono;
 }
 
+// ---------------------------------------------------------------------------
+// Yaesu SCU-LAN10 RX audio (experimental): 16 kHz mono (channel 0, the
+// speaker) from lib/sculan10-transport.js, fed the way the K4 path feeds:
+// the ECHOCAT bridge at 16 kHz, JTCAT at 12 kHz, SSTV at 48 kHz. Linear
+// interpolation is enough here: the radio's IF filter has already removed
+// everything above ~3 kHz, so nothing folds back into the FT8 passband.
+// ---------------------------------------------------------------------------
+let _yaesuLanAudioFrames = 0;
+let _yaesuLanResamplers = null;
+let _lastYaesuLanFeedMs = 0;     // JTCAT freshness (the renderer capture yields to it)
+let _lastSstvYaesuLanFeedMs = 0; // SSTV freshness for lib/sstv-feed-gate.js
+function yaesuLanAudioActive() {
+  return settings.audioSource === 'yaesu-lan' && !!(settings.catTarget && settings.catTarget.type === 'yaesu-lan') && !!(cat && cat.connected);
+}
+function handleYaesuLanAudioFrame(frame) {
+  if (!frame || !frame.pcm || !frame.pcm.length) return;
+  if (settings.audioSource !== 'yaesu-lan') return; // RX audio from this computer's sound card instead
+  const rate = frame.sampleRate || 16000;
+  const pcm = frame.pcm;
+  _yaesuLanAudioFrames++;
+  if (!_yaesuLanResamplers || _yaesuLanResamplers.rate !== rate) {
+    const { StreamingResampler } = require('./lib/mercury-audio-bridge');
+    _yaesuLanResamplers = { rate, to12k: new StreamingResampler(rate, 12000), to24k: new StreamingResampler(rate, 24000), to48k: new StreamingResampler(rate, 48000) };
+  }
+  // 1) ECHOCAT bridge: any sample rate (frame.sampleRate).
+  if (remoteAudioWin) audioSafeSend(remoteAudioWin.webContents, 'smartsdr-audio-frame', { pcm, sampleRate: rate });
+  // 2) The JTCAT windows' waterfalls: 24 kHz frames, the SmartSDR Direct
+  //    shape (the windows treat 'yaesu-lan' like 'smartsdr'). Not to a
+  //    minimized main window (Chromium throttles it; see the VITA-49 path).
+  const ui24k = _yaesuLanResamplers.to24k.process(pcm);
+  if (ui24k.length) {
+    const uiFrame = { pcm: ui24k, sampleRate: 24000 };
+    if (win && !win.isDestroyed() && !win.isMinimized()) audioSafeSend(win.webContents, 'jtcat-vita49-audio', uiFrame);
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) audioSafeSend(jtcatPopoutWin.webContents, 'jtcat-vita49-audio', uiFrame);
+  }
+  // 3) JTCAT decoding: 12 kHz mono.
+  const mono12k = _yaesuLanResamplers.to12k.process(pcm);
+  if (jtcatManager && jtcatManager.running && mono12k.length) {
+    jtcatManager.feedAudio('default', mono12k);
+    _lastYaesuLanFeedMs = Date.now();
+  }
+  // 4) SSTV: 48 kHz. The pop-out gets its copy BEFORE feedAudio, which
+  //    transfers (detaches) the buffer to the worker.
+  const sstvGate = SstvFeedGate.streamAudioDecision({ engineRunning: !!sstvEngine, feedPaused: _sstvFeedPaused, audioSource: settings.audioSource, path: 'yaesu-lan' });
+  if (sstvGate.accept) {
+    const out = _yaesuLanResamplers.to48k.process(pcm);
+    if (out.length) {
+      if (sstvPopoutWin) audioSafeSend(sstvPopoutWin.webContents, 'sstv-vita49-audio', { pcm: out, sampleRate: 48000 });
+      _lastSstvYaesuLanFeedMs = Date.now();
+      sstvEngine.feedAudio(out);
+    }
+  }
+  if (_yaesuLanAudioFrames === 1 || _yaesuLanAudioFrames % 3000 === 0) {
+    sendCatLog(`[SCU-LAN10] RX audio frame #${_yaesuLanAudioFrames}: ${pcm.length} samples @ ${rate} Hz, peak ${peakFloat32(pcm).toFixed(4)}`);
+  }
+}
+
 function handleK4AudioFrame(frame) {
   if (!frame || !frame.data || !frame.data.length) return;
   // We asked for EM3 (Opus Float). RAW modes (EM0/EM1) shouldn't arrive
@@ -25688,6 +25790,14 @@ function connectRemote() {
     if (freedvEngine) freedvEngine.setMode(mode);
   });
   remoteServer.on('freedv-set-tx', ({ enabled }) => {
+    // FreeDV keys around handleRemotePtt, so it needs the SCU-LAN10 check
+    // itself: its modem audio has no way to the radio over the LAN yet.
+    if (enabled && yaesuLanTxRefusal()) {
+      const why = yaesuLanTxRefusal();
+      sendCatLog(`[FreeDV] TX refused — ${why}`);
+      if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'tune-blocked', reason: why });
+      return;
+    }
     if (freedvEngine) freedvEngine.setTxEnabled(enabled);
     // PTT via CAT
     if (enabled) {
@@ -26616,6 +26726,15 @@ function pttConfirmRestore(restoreMode, restoreFreq, noAnchor, since) {
   });
 }
 
+// The words for a key-down refused because the SCU-LAN10 has no transmit
+// audio path yet; null when transmitting is fine.
+let _yaesuLanTxNoticeAt = 0;
+function yaesuLanTxRefusal() {
+  const t = settings.catTarget;
+  if (!t || t.type !== 'yaesu-lan' || settings.audioSource !== 'yaesu-lan') return null;
+  return "transmit audio over the Yaesu LAN (SCU-LAN10) is not supported yet, so the radio would send a silent carrier. To transmit, set Audio Source to the radio's USB sound card on this computer (CAT stays on the LAN), or use the radio's own microphone.";
+}
+
 function handleRemotePtt(state, opts = {}) {
   pushActivityState();   // busy.tx edges reach the activity feed (debounced)
   // Driving a remote shack: every PTT source on this desktop (the VFO
@@ -26662,6 +26781,23 @@ function handleRemotePtt(state, opts = {}) {
     sendCatLog(`[PTT] refused — ${why}`);
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', why);
     if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) remoteServer.sendToClient({ type: 'tune-blocked', reason: why });
+    return;
+  }
+  // Yaesu SCU-LAN10 (experimental): the spec has not decoded transmit audio,
+  // so keying with the LAN as the audio source puts a SILENT carrier on the
+  // air. Refused, said where the press happened, and JTCAT stops trying.
+  // With Audio Source set to the radio's USB sound card on this computer
+  // (CAT still over the LAN), the audio has a way out and PTT works.
+  if (state && yaesuLanTxRefusal()) {
+    const why = yaesuLanTxRefusal();
+    sendCatLog(`[PTT] refused — ${why}`);
+    try { if (jtcatAnyTxActive() || jtcatTuneState.active) jtcatHaltTxNow('no transmit audio over the Yaesu LAN'); } catch {}
+    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', why);
+    if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'tune-blocked', reason: why });
+    if (win && !win.isDestroyed() && Date.now() - _yaesuLanTxNoticeAt > 60000) {
+      _yaesuLanTxNoticeAt = Date.now();
+      win.webContents.send('app-notice', { message: why, warn: true, duration: 15000 });
+    }
     return;
   }
   const target = settings.catTarget;
@@ -40145,6 +40281,8 @@ function cloudShackNotice(text, kind) {
     lastK4FeedMs: _lastSstvK4FeedMs,
     icomConnected: !!(settings.catTarget && settings.catTarget.type === 'icom-network' && cat && cat.connected),
     lastIcomFeedMs: _lastSstvIcomFeedMs,
+    yaesuLanConnected: !!(settings.catTarget && settings.catTarget.type === 'yaesu-lan' && cat && cat.connected),
+    lastYaesuLanFeedMs: _lastSstvYaesuLanFeedMs,
     now: Date.now(),
   });
 
@@ -46188,6 +46326,45 @@ function cloudShackNotice(text, kind) {
     });
   });
 
+  // Yaesu SCU-LAN10 (experimental): log in, ask ID; and FA;, report what
+  // came back. The log lines it gathers are what a tester sends us; the
+  // transport never logs the password.
+  handleCatTest('test-yaesu-lan', 'Yaesu LAN test', async (_e, config) => {
+    const { host, port, username, password } = config || {};
+    if (!String(host || '').trim()) return { success: false, error: 'Enter the SCU-LAN10 address first (factory default 192.168.49.1).' };
+    if (cat) { cat.disconnect(); cat = null; await new Promise((r) => setTimeout(r, 300)); }
+    const t = new Sculan10Transport();
+    const logs = [];
+    t.on('log', (m) => { logs.push(m); sendCatLog(m); });
+    try {
+      const result = await new Promise((resolve) => {
+        const got = {};
+        const finish = (r) => { clearTimeout(timer); resolve(r); };
+        const timer = setTimeout(() => finish(got.sessionId != null
+          ? { success: true, sessionId: got.sessionId, id: got.id || null, frequency: got.frequency || null, note: 'Logged in, but the radio did not answer ID; or FA; within 3 s.' }
+          : { success: false, error: 'No answer within 8 s.' }), 8000);
+        t.on('error', (err) => finish({ success: false, error: String(err.message || err).replace(/^SCU-LAN10: /, '') }));
+        t.on('connect', () => {
+          got.sessionId = t.sessionId;
+          t.write('ID;FA;');
+          setTimeout(() => finish({ success: true, sessionId: got.sessionId, id: got.id || null, frequency: got.frequency || null }), 3000);
+        });
+        t.on('data', (buf) => {
+          const text = buf.toString('latin1');
+          let m;
+          if ((m = text.match(/^ID(\d{4});?$/))) got.id = m[1];
+          if ((m = text.match(/^FA(\d{9,11});?$/))) got.frequency = (parseInt(m[1], 10) / 1e6).toFixed(6);
+          if (got.id && got.frequency) finish({ success: true, sessionId: got.sessionId, id: got.id, frequency: got.frequency });
+        });
+        t.connect({ host: String(host).trim(), basePort: Number(port) || 50000, username, password, loginTimeoutMs: 5000 });
+      });
+      const radio = { '0670': 'FTDX10', '0681': 'FTDX101D', '0682': 'FTDX101MP' }[result.id] || null;
+      return { ...result, radio, logs: logs.slice(-30) };
+    } finally {
+      t.disconnect();
+    }
+  });
+
   handleCatTest('test-icom-network', 'Icom network test', async (_e, config) => {
     const { host, controlPort, civPort, username, password, civAddress } = config || {};
 
@@ -47085,6 +47262,9 @@ function cloudShackNotice(text, kind) {
     if (settings.catTarget && settings.catTarget.type === 'k4-network' && cat && cat.connected) return;
     // Icom Network RX audio follows the same main-process feed pattern.
     if (settings.audioSource === 'icom-network' && settings.catTarget && settings.catTarget.type === 'icom-network' && cat && cat.connected) return;
+    // Yaesu SCU-LAN10 RX audio, while it is actually arriving: a stream that
+    // goes quiet hands back to the sound card within 3 s (the SSTV lesson).
+    if (yaesuLanAudioActive() && Date.now() - _lastYaesuLanFeedMs < 3000) return;
     _jtcatAudioDiag++;
     // Ensure buf is a proper array — IPC serialization on macOS can produce
     // objects that Float32Array constructor interprets as length instead of data

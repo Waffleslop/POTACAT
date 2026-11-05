@@ -2146,6 +2146,27 @@
           </div>
           <span class="help-text" style="margin-top:6px;display:block;">CAT plus RS-BA1 receive/transmit audio. With Audio source set to Icom Network audio, POTACAT receives radio audio over UDP for JTCAT/SSTV decoding and can send JTCAT FT8/FT4 audio directly over the radio's RS-BA1 TX stream. Network TX gain scales the IP audio drive before it reaches the radio; use it with the JTCAT TX Pwr slider and the radio's LAN MOD gain to get clean output with little or no ALC.</span>
         </div>
+        <label class="radio-label"><input type="radio" name="radio-type" value="yaesu-lan"> Yaesu LAN (SCU-LAN10), experimental <span style="font-size:10px;color:var(--text-tertiary);">— CAT + receive audio</span></label>
+        <div id="yaesu-lan-config" class="radio-sub hidden">
+          <span class="help-text" style="font-size:12px;">For the FTDX10, FT-710 and FTDX101D/MP with a Yaesu SCU-LAN10. Pick the radio in Radio Model above. One program at a time: close PCC-LAN10 first. For use away from home, reach the unit through Tailscale or a VPN, because the link is not really encrypted. Transmit audio over the LAN is not supported yet. New and untested on real units: please send a bug report from Help after you try it.</span>
+          <label>Address:
+            <input type="text" id="set-yaesu-lan-host" placeholder="192.168.49.1" value="192.168.49.1">
+          </label>
+          <label>Base port:
+            <input type="number" id="set-yaesu-lan-port" min="1" max="65535" value="50000">
+          </label>
+          <label>User:
+            <input type="text" id="set-yaesu-lan-username" autocomplete="off" spellcheck="false" placeholder="defaultuser">
+          </label>
+          <label>Password:
+            <input type="password" id="set-yaesu-lan-password" autocomplete="off" placeholder="defaultuser">
+          </label>
+          <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
+            <button type="button" id="yaesu-lan-test-btn">Test Connection</button>
+            <span id="yaesu-lan-test-result" style="font-size:12px;"></span>
+          </div>
+          <span class="help-text" style="margin-top:6px;display:block;">The base port is the first of four UDP ports (CAT, audio and scope follow it). Blank user and password use the unit's factory login. With Audio source set to Yaesu LAN audio, JTCAT and SSTV decode the radio's audio over the network; to transmit FT8, SSTV or voice from POTACAT, set Audio source to the radio's USB sound card on this computer instead.</span>
+        </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="hamlib"> Other Rig (Hamlib)</label>
         <div id="hamlib-config" class="radio-sub hidden">
           <label>Rig Model:

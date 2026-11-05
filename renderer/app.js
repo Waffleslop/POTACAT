@@ -2347,6 +2347,7 @@ function getEffectiveSerialcatPort() {
 // the same trap that broke K3SBP's Flex TX (see syncRigAudioDeviceBypass).
 const AUDIO_SOURCE_HELP = {
   flex: 'Flex Direct streams receive and transmit audio straight to the radio (VITA-49) — no DAX program and no audio device setup. Pick Local audio device only if you deliberately run the DAX program.',
+  'yaesu-lan': "Yaesu LAN audio decodes the radio's receive audio over the SCU-LAN10 for JTCAT and SSTV. It is receive only for now: POTACAT will not key the radio with this source, because the carrier would be silent. To transmit from POTACAT, pick the local audio device (the radio's USB sound card on this computer).",
   'icom-network': "Icom Network audio uses the radio's RS-BA1 UDP stream for JTCAT/SSTV receive audio and sends JTCAT FT8/FT4 plus SSTV transmit audio directly over the network — no soundcard needed.",
 };
 function rebuildAudioSourceOptions() {
@@ -2391,6 +2392,8 @@ function updateRadioSubPanels() {
   if (civTcpConfig) civTcpConfig.classList.toggle('hidden', type !== 'civ-tcp');
   const icomNetworkConfig = document.getElementById('icom-network-config');
   if (icomNetworkConfig) icomNetworkConfig.classList.toggle('hidden', type !== 'icom-network');
+  const yaesuLanConfig = document.getElementById('yaesu-lan-config');
+  if (yaesuLanConfig) yaesuLanConfig.classList.toggle('hidden', type !== 'yaesu-lan');
   hamlibConfig.classList.toggle('hidden', type !== 'hamlib');
   rigctldnetConfig.classList.toggle('hidden', type !== 'rigctldnet');
   if (flrigConfig) flrigConfig.classList.toggle('hidden', type !== 'flrig');
@@ -2399,7 +2402,7 @@ function updateRadioSubPanels() {
   if (nocatConfig) nocatConfig.classList.toggle('hidden', type !== 'nocat');
   // Voice in DATA mode runs in the rig controller: serial, Icom, Hamlib and flrig links.
   const voiceAsDataRow = document.getElementById('rig-voice-as-data');
-  if (voiceAsDataRow) voiceAsDataRow.classList.toggle('hidden', !['serialcat', 'icom', 'civ-tcp', 'icom-network', 'hamlib', 'rigctldnet', 'flrig', 'dxlab-commander'].includes(type));
+  if (voiceAsDataRow) voiceAsDataRow.classList.toggle('hidden', !['serialcat', 'icom', 'civ-tcp', 'icom-network', 'hamlib', 'rigctldnet', 'flrig', 'dxlab-commander', 'yaesu-lan'].includes(type));
   // Voice streamed over the LAN goes only to an Icom Network radio.
   const lanVoiceSsbRow = document.getElementById('rig-lan-voice-ssb');
   if (lanVoiceSsbRow) lanVoiceSsbRow.classList.toggle('hidden', type !== 'icom-network');
@@ -2494,6 +2497,12 @@ async function populateRadioSection(currentTarget) {
       const hex = '0x' + currentTarget.civAddress.toString(16).toUpperCase();
       inModelSelect.value = hex;
     }
+  } else if (currentTarget.type === 'yaesu-lan') {
+    setRadioType('yaesu-lan');
+    document.getElementById('set-yaesu-lan-host').value = currentTarget.host || '';
+    document.getElementById('set-yaesu-lan-port').value = currentTarget.port || 50000;
+    document.getElementById('set-yaesu-lan-username').value = currentTarget.username || '';
+    document.getElementById('set-yaesu-lan-password').value = currentTarget.password || '';
   } else if (currentTarget.type === 'rigctld') {
     setRadioType('hamlib');
     hamlibFieldsLoaded = true;
@@ -2732,6 +2741,7 @@ if (rigModelSelect) rigModelSelect.addEventListener('change', async () => {
   const shared = ['flrig', 'dxlab-commander', 'rigctldnet'].includes(getSelectedRadioType());
   if (noCat) setRadioType('nocat');           // Pebble HF and friends: nothing to connect to
   else if (shared) { /* keep flrig / DXLab Commander / rigctld Network */ }
+  else if (brand === 'Yaesu' && getSelectedRadioType() === 'yaesu-lan') { /* keep the SCU-LAN10 connection */ }
   else if (brand === 'FlexRadio') setRadioType('flex');
   else if (brand === 'Icom') setRadioType('icom');
   else setRadioType('serialcat');
@@ -3144,6 +3154,8 @@ function buildCatTargetFromForm() {
       civAddress: parseInt(inModelSelect.value, 16),
       civModel: inModelSelect.options[inModelSelect.selectedIndex].text,
     };
+  } else if (radioType === 'yaesu-lan') {
+    return yaesuLanTargetFromForm();
   } else if (radioType === 'hamlib') {
     // PTT Port: dropdown selection wins, fall back to manual text. Empty
     // string means "no separate PTT port — let rigctld PTT via CAT".
@@ -3502,6 +3514,12 @@ async function saveRigEditor() {
   const rigCatLabelVal = (document.getElementById('set-rig-cat-label')?.value || '').trim().toUpperCase().slice(0, 4);
   const catTarget = buildCatTargetFromForm();
   const model = rigModelSelect ? rigModelSelect.value || null : null;
+
+  // The SCU-LAN10 spec covers three radios; anything else has no SCU-LAN10.
+  if (catTarget && catTarget.type === 'yaesu-lan' && !YAESU_LAN_MODELS.includes(model || '')) {
+    alert('Yaesu LAN (SCU-LAN10) works with the FTDX10, FT-710 and FTDX101D/MP. Pick one of those in Radio Model, or choose another connection type.');
+    return false;
+  }
 
   // Same-port CAT+PTT is correct for single-port adapters (DigiRig
   // Mobile etc.) and incorrect for full-size DigiRig (two virtual
@@ -9613,7 +9631,7 @@ async function populateRigAudioDevices(restoreIn, restoreOut) {
 // configure here = nothing to break.
 function syncRigAudioDeviceBypass() {
   const src = setAudioSource ? setAudioSource.value : 'dax';
-  const bypassed = (src === 'smartsdr' || src === 'icom-network');
+  const bypassed = (src === 'smartsdr' || src === 'icom-network' || src === 'yaesu-lan');
   const hint = document.getElementById('rig-audio-devices-hint');
   const note = document.getElementById('rig-audio-devices-bypass');
   const inLabel = rigRemoteAudioInput ? rigRemoteAudioInput.closest('label') : null;
@@ -10187,6 +10205,47 @@ document.getElementById('civ-tcp-test-btn')?.addEventListener('click', async () 
 });
 
 // Icom Network / RS-BA1 test connection
+// --- Yaesu LAN (SCU-LAN10), experimental ---
+const YAESU_LAN_MODELS = ['FTDX10', 'FT-710', 'FTDX101D/MP'];
+function yaesuLanTargetFromForm() {
+  return {
+    type: 'yaesu-lan',
+    host: (document.getElementById('set-yaesu-lan-host').value || '').trim(),
+    port: parseInt(document.getElementById('set-yaesu-lan-port').value, 10) || 50000,
+    username: document.getElementById('set-yaesu-lan-username').value || '',
+    password: document.getElementById('set-yaesu-lan-password').value || '',
+  };
+}
+document.getElementById('yaesu-lan-test-btn')?.addEventListener('click', async () => {
+  const resultEl = document.getElementById('yaesu-lan-test-result');
+  const btn = document.getElementById('yaesu-lan-test-btn');
+  const t = yaesuLanTargetFromForm();
+  if (!t.host) { resultEl.textContent = 'Enter the SCU-LAN10 address first'; resultEl.className = 'hamlib-test-fail'; return; }
+  btn.disabled = true;
+  resultEl.textContent = 'Logging in...';
+  resultEl.className = '';
+  resultEl.title = '';
+  try {
+    const r = await window.api.testYaesuLan(t);
+    if (r.success) {
+      const sid = r.sessionId != null ? ' Session 0x' + Number(r.sessionId).toString(16).toUpperCase().padStart(2, '0') + '.' : '';
+      const radio = r.radio ? ' ' + r.radio + '.' : (r.id ? ' Radio ID ' + r.id + '.' : '');
+      const freq = r.frequency ? ' Freq: ' + r.frequency + ' MHz.' : '';
+      resultEl.textContent = 'Logged in!' + sid + radio + freq + (r.note ? ' ' + r.note : '');
+      resultEl.className = 'hamlib-test-success';
+    } else {
+      resultEl.textContent = 'Failed: ' + r.error;
+      resultEl.className = 'hamlib-test-fail';
+    }
+    resultEl.title = Array.isArray(r.logs) ? r.logs.join('\n') : '';
+  } catch (err) {
+    resultEl.textContent = 'Failed: ' + (err && err.message ? err.message : err);
+    resultEl.className = 'hamlib-test-fail';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 document.getElementById('icom-network-test-btn')?.addEventListener('click', async () => {
   const inModelSelect = document.getElementById('set-icom-network-model');
   const civPortVal = parseInt(document.getElementById('set-icom-network-civ-port').value, 10);
@@ -29844,8 +29903,8 @@ async function startJtcatAudio() {
   try {
     var s = await window.api.getSettings();
 
-    if (s.audioSource === 'smartsdr' || s.audioSource === 'icom-network') {
-      // SmartSDR Direct / Icom Network: JTCAT audio is the PCM stream that
+    if (s.audioSource === 'smartsdr' || s.audioSource === 'icom-network' || s.audioSource === 'yaesu-lan') {
+      // SmartSDR Direct / Icom Network / Yaesu LAN: JTCAT audio is the PCM stream that
       // main forwards as 'jtcat-vita49-audio' frames — not a Windows
       // audio device. Build a synthetic MediaStream from those frames so
       // everything below this point (createMediaStreamSource, gain,
@@ -30091,7 +30150,7 @@ async function startJtcatAudio() {
     // it. lib/capture-stall.js decides; this resumes or rebuilds. Sound-card
     // capture only: the SmartSDR / Icom-network feed comes from main, and a
     // rebuild here cannot restart it.
-    if (window.CaptureStall && !(s.audioSource === 'smartsdr' || s.audioSource === 'icom-network')) {
+    if (window.CaptureStall && !(s.audioSource === 'smartsdr' || s.audioSource === 'icom-network' || s.audioSource === 'yaesu-lan')) {
       jtcatArmStallWatch(audioTrack);
     }
 

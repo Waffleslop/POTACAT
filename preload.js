@@ -288,6 +288,7 @@ contextBridge.exposeInMainWorld('api', {
   testIcomCiv: (config) => ipcRenderer.invoke('test-icom-civ', config),
   testCivTcp: (config) => ipcRenderer.invoke('test-civ-tcp', config),
   testIcomNetwork: (config) => ipcRenderer.invoke('test-icom-network', config),
+  testYaesuLan: (config) => ipcRenderer.invoke('test-yaesu-lan', config),
   connectCat: (target) => ipcRenderer.send('connect-cat', target),
   onCatFrequency: (cb) => ipcRenderer.on('cat-frequency', (_e, hz) => cb(hz)),
   onCatMode: (cb) => ipcRenderer.on('cat-mode', (_e, mode) => cb(mode)),
