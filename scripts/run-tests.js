@@ -412,6 +412,7 @@ const TESTS = [
   'test/activator-log-once-test.js', // the Activator log saves once per press, and a slow QRZ never holds up a save (.eddiejames duplicates)
   'test/serial-hs-trial-test.js', // the RTS/CTS no-answer trial covers Kenwood too (jcoreyc TS-480), never the legacy Yaesu protocol
   'test/idle-wspr-band-test.js', // idle-RX WSPR uses only the rig's bands and offers 2 m (artificialjumpprotection IC-7100)
+  'test/park-db-check-test.js', // activator: only POTA refs are checked against the parks list (og3e WWFF/SOTA flagged as typos), and the warning never overflows
 ];
 
 const root = path.join(__dirname, '..');

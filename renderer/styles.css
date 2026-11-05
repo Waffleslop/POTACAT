@@ -8088,6 +8088,10 @@ a.settings-echocat-badge-link:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 300px;
+  /* Shrinks in the toolbar instead of running under the grid box (og3e, Mac):
+     a flex item will not shrink below its text without min-width 0. */
+  flex: 0 1 auto;
+  min-width: 0;
 }
 /* Park ref not found in the local parks DB — warn, never block */
 .activator-park-name.park-unknown {

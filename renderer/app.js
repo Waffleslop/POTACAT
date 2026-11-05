@@ -28307,6 +28307,10 @@ function finalizeCommaSeparatedParks() {
   // unknown ref must never block starting the activation.
   const lookups = activatorParkRefs.map((park, idx) => {
     if (park.name) { park.unknown = false; return Promise.resolve(); }
+    // Only POTA's park lists are loaded, so a WWFF, SOTA or other program's
+    // reference is never "not in the parks DB" (og3e: OHFF-0001 and a SOTA
+    // summit were flagged as typos).
+    const checkable = ParkDbCheck.checkable(park);
     return window.api.getPark(park.ref).then(p => {
       if (p) {
         park.name = p.name || '';
@@ -28320,17 +28324,20 @@ function finalizeCommaSeparatedParks() {
         }
         updateParkExtraBadge();
       } else {
-        park.unknown = true;
+        park.unknown = checkable;
       }
     }).catch(() => {});
   });
   Promise.all(lookups).then(() => {
     const unknown = activatorParkRefs.filter(p => p.unknown).map(p => p.ref);
     if (unknown.length > 0) {
-      activatorParkNameEl.textContent = `⚠ Not in parks DB: ${unknown.join(', ')} — check for typos`;
+      const msg = `⚠ Not in parks DB: ${unknown.join(', ')} — check for typos`;
+      activatorParkNameEl.textContent = msg;
+      activatorParkNameEl.title = msg; // the full text when the toolbar is narrow
       activatorParkNameEl.classList.add('park-unknown');
     } else {
       activatorParkNameEl.classList.remove('park-unknown');
+      activatorParkNameEl.title = '';
     }
   });
 
