@@ -404,6 +404,7 @@ const TESTS = [
   'test/sstv-spec-timing-test.js', // Scottie, PD and Robot 72 send and read the spec line: exact scans, Robot 72's porch before each chroma
   'test/vfo-typed-freq-uhf-test.js', // 432100 and 1296100 typed in the VFO window are 70 cm and 23 cm, not 0.43 and 1.3 MHz (davidcappello IC-9700)
   'test/swr-rest-on-rx-test.js', // SWR and ALC go back to rest on receive (davidcappello IC-9700); the Icom SWR scale is Hamlib's
+  'test/sculan10-test.js', // Yaesu SCU-LAN10 (experimental): wire protocol against the spec's reference values, the transport against a fake unit (login, setup, keepalives, CAT de-dup, RX audio, login timeout, password never logged)
 ];
 
 const root = path.join(__dirname, '..');
