@@ -166,6 +166,21 @@ check('main uses it for a rig known only by its bands; a published range still w
   assert.ok(/if \(model && Array\.isArray\(model\.rxHz\) && model\.rxHz\.length\) return model\.rxHz;/.test(body));
   assert.ok(/return ListenSource\.generalCoverage\(out\) \|\| \[\[0, Infinity\]\];/.test(body));
 });
+check('main has BANDS in scope (hoogskev 11-01: the loop threw a ReferenceError, so every rig fell to the catch)', () => {
+  assert.ok(/const \{[^}]*BANDS[^}]*\} = require\('\.\/lib\/bands'\)/.test(main), 'BANDS imported from lib/bands');
+  // Run the loop body as main does, with the real table: an FTX-1's bands reach 70 cm.
+  const { BANDS } = require('../lib/bands');
+  const out = [];
+  for (const b of ['160m', '20m', '6m', '2m', '70cm']) { const e = BANDS[b]; if (e) out.push([Math.round(e.lower * 1e6), Math.round(e.upper * 1e6)]); }
+  const reach = L.generalCoverage(out);
+  assert.ok(L.covers(reach, 162.55e6), 'NOAA between 2 m and 70 cm');
+  assert.ok(!L.covers(reach, 1.2e9), 'not above the top band');
+});
+
+check('the VFO knob and wheel never step from an unknown dial of 0 (hoogskev 0.017.200)', () => {
+  const vfo = fs.readFileSync(path.join(ROOT, 'renderer/vfo-popout.html'), 'utf8');
+  assert.strictEqual((vfo.match(/if \(vfoLocked \|\| !currentFreqHz\) return;/g) || []).length, 2);
+});
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

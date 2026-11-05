@@ -1524,7 +1524,9 @@ function getAngle(e) {
 }
 
 function processDelta(delta) {
-  if (vfoLocked) return;
+  // No dial known yet (the window shows dashes): a step from 0 would send the
+  // radio to a few kHz (hoogskev's FTX-1 went to 0.017.200).
+  if (vfoLocked || !currentFreqHz) return;
   vfoAngle += delta;
   vfoAccum += delta;
   while (Math.abs(vfoAccum) >= STEP_ANGLE) {
@@ -1568,7 +1570,7 @@ window.addEventListener('mouseup', () => {
 // Mouse wheel — works on both VFO knob and frequency display
 function handleFreqWheel(e) {
   e.preventDefault();
-  if (vfoLocked) return;
+  if (vfoLocked || !currentFreqHz) return; // no dial known yet: never step from 0
   const dir = e.deltaY > 0 ? 1 : -1;
   const stepHz = STEPS[stepIdx].hz * dir;
   currentFreqHz = Math.max(0, currentFreqHz + stepHz);
