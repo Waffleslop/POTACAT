@@ -23575,9 +23575,11 @@ function connectRemote() {
     // nothing here needs to be sticky — and a flag left true would let a
     // helper (and the radio's SCU-LAN10) run for a client that has gone, or
     // start for the next one that never asked (mobile handoff, follow-up 2).
-    if (yaesuScopeRemoteWants) {
+    if (yaesuScopeRemoteWants || yaesuScopeRemoteDigital) {
       yaesuScopeRemoteWants = false;
+      yaesuScopeRemoteDigital = false;
       if (!yaesuScopeWanted()) { try { stopYaesuScope('ECHOCAT client disconnected'); } catch { /* not running */ } }
+      else { try { flexDigitalViewSync(); } catch { /* no Flex scope */ } }
     }
     yaesuScopeRemoteIsGuest = false;
     if (win && !win.isDestroyed()) {
@@ -25034,8 +25036,17 @@ function connectRemote() {
   remoteServer.on('scope-subscribe', ({ on, guest }) => {
     yaesuScopeRemoteWants = !!on;
     yaesuScopeRemoteIsGuest = !!on && !!guest;
+    if (!on) yaesuScopeRemoteDigital = false;
     if (on) { yaesuScopeRestarts = 0; startYaesuScope(); yaesuScopeBroadcastState(); }
     else if (!yaesuScopeWanted()) stopYaesuScope('ECHOCAT scope view closed');
+    else flexDigitalViewSync();
+  });
+  // The phone's FT8 tab (or its Pan in a digital mode) asks for the digital
+  // view on a Flex pan; its Pan outside FT8 keeps the operator's own zoom.
+  remoteServer.on('scope-digital-view', ({ on } = {}) => {
+    if (yaesuScopeRemoteDigital === !!on) return;
+    yaesuScopeRemoteDigital = !!on;
+    flexDigitalViewSync();
   });
   remoteServer.on('scope-span', ({ spanHz, guest } = {}) => { setScopeSpan(spanHz, 'ECHOCAT device', { guest }); });
   remoteServer.on('scope-anchor', ({ anchor, guest } = {}) => { setScopeAnchor(anchor, 'ECHOCAT device', { guest }); });
@@ -29882,6 +29893,7 @@ let yaesuScopeStopping = null;
 let yaesuScopeStartAfterExit = false;
 let yaesuScopeSynth = false;         // generated signal, no radio (pop-out gear menu)
 let yaesuScopeRemoteWants = false;   // an ECHOCAT client has its Scope view open
+let yaesuScopeRemoteDigital = false; // C2S scope-digital-view: the client shows FT8 / a digital Pan
 let yaesuScopeJtcatWants = false;    // the JTCAT pop-out is showing the band scope strip
 let yaesuScopeBandspreadWants = false;   // the Bandspread window draws the scope trace behind its spots
 let yaesuScopeRemoteIsGuest = false; // ...and that client holds a Guest Pass (may watch, never change the radio)
@@ -30717,7 +30729,13 @@ function startFlexScope() {
  */
 let flexDigitalViewKey = '';
 function flexDigitalViewWanted() {
-  if (!flexScopeOn || !yaesuScopeJtcatWants || !jtcatPopoutWin || jtcatPopoutWin.isDestroyed() || !ft8Engine) return null;
+  if (!flexScopeOn || !ft8Engine) return null;
+  // The desktop's FT8 strip, or an ECHOCAT device showing FT8 (C2S
+  // scope-digital-view) while the engine runs.
+  const strip = yaesuScopeJtcatWants && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed();
+  const device = yaesuScopeRemoteDigital && yaesuScopeRemoteWants && ft8Engine._running
+    && remoteServer && remoteServer.running && remoteServer.hasClient();
+  if (!strip && !device) return null;
   const id = smartSdr && (smartSdr.panScopeId || smartSdr.ourPanId);
   const g = (id && flexPanGeometry[id]) || {};
   return ScopeDigitalView.digitalView({ mode: ft8Engine._mode, rigMode: _currentMode, minSpanHz: g.minSpanHz });

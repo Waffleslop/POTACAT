@@ -68,7 +68,7 @@ check('scope-state tells each device its own pace', () => {
 console.log('The wire');
 const rs = fs.readFileSync(path.join(ROOT, 'lib/remote-server.js'), 'utf8');
 check('capabilities scope-bins and scope-anchor; subscribe carries bins; anchor registered', () => {
-  assert.ok(/capabilities: \[[\s\S]*'scope-bins',[\s\S]*'scope-anchor'\]/.test(rs));
+  assert.ok(/capabilities: \[[\s\S]*'scope-bins',[\s\S]*'scope-anchor',/.test(rs));
   assert.ok(proto.MESSAGES['scope-subscribe'].fields.bins);
   assert.ok(proto.MESSAGES['scope-anchor']);
   assert.ok(/ws\._scopeBins = Number\.isFinite\(b\) && b > 0 \? Math\.max\(32, Math\.min\(1024, b\)\) : 256;/.test(rs));

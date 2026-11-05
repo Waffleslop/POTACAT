@@ -95,6 +95,19 @@ check('the view is only for the JTCAT strip, and the operator zoom comes back', 
   assert.ok(/settings\.flexScopeSpanHz/.test(sync), 'restores the saved zoom');
   assert.ok(!/saveSettings/.test(sync), 'never saves the digital view as the operator zoom');
 });
+check('an ECHOCAT device showing FT8 gets the digital view too (C2S scope-digital-view)', () => {
+  const fn = /function flexDigitalViewWanted\(\) \{[\s\S]*?\n\}/.exec(main)[0];
+  assert.ok(/yaesuScopeRemoteDigital && yaesuScopeRemoteWants && ft8Engine\._running/.test(fn), 'device + subscribed + engine running');
+  assert.ok(/remoteServer\.on\('scope-digital-view'[\s\S]{0,200}flexDigitalViewSync\(\)/.test(main));
+  const disc = /remoteServer\.on\('client-disconnected'[\s\S]{0,900}/.exec(main)[0];
+  assert.ok(/yaesuScopeRemoteDigital = false/.test(disc), 'ends with the socket');
+  const rs = fs.readFileSync(path.join(ROOT, 'lib/remote-server.js'), 'utf8');
+  assert.ok(/'scope-digital-view'\]/.test(rs), 'hello capability');
+  assert.ok(/case 'scope-digital-view':[\s\S]{0,300}this\.emit\('scope-digital-view'/.test(rs));
+  const proto = require('../lib/echocat-protocol.js');
+  const reg = proto.MESSAGES || proto.messages || proto.PROTOCOL || proto;
+  assert.ok(JSON.stringify(Object.keys(reg)).includes('scope-digital-view') || fs.readFileSync(path.join(ROOT, 'lib/echocat-protocol.js'), 'utf8').includes("'scope-digital-view': { dir: Dir.C2S"));
+});
 check('the dial recentres the pan with the offset', () => {
   assert.ok(/flexScopeQueueCenter\(hz \+ \(yaesuScopeState\.centerOffsetHz \|\| 0\)\)/.test(main));
 });
