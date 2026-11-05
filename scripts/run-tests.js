@@ -397,6 +397,7 @@ const TESTS = [
   'test/g90-hamlib-model-test.js',
   'test/voice-data-mode-test.js',
   'test/n3fjp-pull-test.js',
+  'test/tx-limit-test.js', // one stuck-TX limit over every key-down POTACAT starts; a radio keyed without us is logged
 ];
 
 const root = path.join(__dirname, '..');

@@ -4620,6 +4620,7 @@ function bindRigStateEvents(controller) {
   controller.on('monLevel', sendCatMonLevel);
   controller.on('micGain', sendCatMicGain);
   controller.on('breakIn', sendCatBreakIn);
+  controller.on('ptt', (on) => txNoteRadioPtt(controller, on));
   // Something the radio did that the operator must see, not only the log
   // (lib/rig-controller.js: a radio left in transmit after a CW message).
   controller.on('notice', (msg) => {
@@ -9770,7 +9771,7 @@ function openMercuryClient() {
   // supplies the real actions. `mercuryTxActive` mirrors the bridge's keyed
   // state so disconnectMercury / the failsafe timer can see it.
   attachMercuryRadioBridge(mercuryClient, {
-    keyPtt: (on) => { mercuryTxActive = on; handleRemotePtt(on, on ? { audio: true, emission: 'DATA' } : {}); },
+    keyPtt: (on) => { mercuryTxActive = on; handleRemotePtt(on, on ? { audio: true, emission: 'DATA', txKind: 'winlink' } : {}); },
     acquire: () => acquireRadio('mercury'),
     release: () => releaseRadio('mercury'),
     abort: () => { try { mercuryClient.abort(); } catch {} },
@@ -10676,7 +10677,7 @@ async function startWinlinkShim() {
       winlinkTxActive = true;
       const icom = detectRigType() === 'icom' || (getActiveRigModel()?.brand === 'Icom');
       if (settings.audioSource === 'icom-network') icomNetworkVoiceTx(true, 'Winlink');
-      try { handleRemotePtt(true, { audio: true, forceDataMode: icom, emission: 'DATA' }); } catch (e) { winlinkLog(`PTT failed: ${e.message}`); }
+      try { handleRemotePtt(true, { audio: true, forceDataMode: icom, emission: 'DATA', txKind: 'winlink' }); } catch (e) { winlinkLog(`PTT failed: ${e.message}`); }
       armWinlinkTxFailsafe();
       winlinkSessionTouch();
       winlinkState.setSession({ ptt: true }); winlinkSessionPush();
@@ -18016,7 +18017,7 @@ function startJtcat(mode) {
     jtcatNoteTxSent(data.message);
     jtcatNoteTxSlot(data.slot); // an Auto CQ keeps the slot we last transmitted in
     const networkStartDelayMs = jtcatNetworkTxStartDelayMs(modeForTx);
-    handleRemotePtt(true, { audio: true, emission: 'DATA' });
+    handleRemotePtt(true, { audio: true, emission: 'DATA', txKind: jtcatTxKind() });
     armJtcatTxFailsafe(settings.audioSource === 'icom-network' ? 'Icom Network RS-BA1' : (settings.audioSource === 'smartsdr' ? 'SmartSDR Direct' : 'local audio'), data.samples, 12000, data.offsetMs || 0, networkStartDelayMs);
     if (win && !win.isDestroyed()) {
       // Carry the mode so the main-window TX badge reads the actual mode
@@ -18508,7 +18509,7 @@ function startJtcatTune(opts = {}) {
   // the tone). The 90s timer auto-releases.
   // opts.noDataSwap: Station Setup's voice test keys in plain USB/LSB, the
   // way a voice over does (the radio's SSB audio input, not its DATA one).
-  handleRemotePtt(true, { audio: true, emission: opts.emission || 'DATA', noDataSwap: !!opts.noDataSwap });
+  handleRemotePtt(true, { audio: true, emission: opts.emission || 'DATA', noDataSwap: !!opts.noDataSwap, txKind: 'tune' });
   // Route the tone the same way FT8 TX is routed: straight to dax_tx on the
   // SmartSDR-Direct path, then the Icom RS-BA1 network path, else the
   // renderer's Windows-DAX device path.
@@ -25674,6 +25675,7 @@ function connectRemote() {
     } else {
       if (cat && cat.connected) gatedSetTransmit(false);
     }
+    txLimitNote(!!enabled, { txKind: 'voice' }); // FreeDV keys around the dispatcher
   });
   remoteServer.on('freedv-set-squelch', ({ enabled, threshold }) => {
     if (freedvEngine) freedvEngine.setSquelch(enabled, threshold);
@@ -26434,6 +26436,89 @@ function jtcatNoteTxPowerForMode(mode, message, freqHz, engineHz) {
   }
 }
 
+// --- The stuck-TX limit (lib/tx-limit.js) ---------------------------------
+// One timer over every key-down POTACAT asserts, sized per kind (FT8 30 s ...
+// voice 10 min, WSPR exempt). jcoreyc's FT-710 sat keyed at 0 W in DATA-U
+// until POTACAT was closed; nothing but per-feature timers existed.
+const TxLimitLib = require('./lib/tx-limit');
+let _txLimit = null;
+function txLimit() {
+  if (!_txLimit) _txLimit = new TxLimitLib.TxLimit({ onTrip: (t) => txLimitTrip(t) });
+  return _txLimit;
+}
+/** What kind of transmission the JTCAT engine is keying (FT8/FT4/JS8/WSPR...). */
+function jtcatTxKind() {
+  return TxLimitLib.kindForJtcatMode(ft8Engine ? ft8Engine._mode : 'FT8');
+}
+/** Arm on a key-down, disarm on a release. opts.txKind names the source; voice by default. */
+function txLimitNote(state, opts = {}) {
+  try {
+    if (state) txLimit().arm(opts.txKind || 'voice');
+    else txLimit().disarm();
+  } catch (e) { console.error('[TX LIMIT]', e); }
+}
+/** How POTACAT keys this radio, in words, for the log. */
+function pttRouteLabel() {
+  const t = settings.catTarget || {};
+  if (t.type === 'none') return t.ptt === 'cm108' ? 'sound-card GPIO' : t.ptt === 'serial' ? `${t.pttLine === 'dtr' ? 'DTR' : 'RTS'} on ${t.pttPort || 'the PTT port'}` : 'VOX';
+  if (t.ptt === 'vox') return 'the audio interface (VOX)';
+  if (t.ptt === 'rts' || t.ptt === 'dtr') return `${t.ptt.toUpperCase()} on the CAT port`;
+  if (settings.audioSource === 'icom-network') return 'Icom network';
+  return 'CAT';
+}
+// The limit tripped: stop the audio, then unkey by every route POTACAT has,
+// whatever its own state says is keyed, and say so where the operator looks.
+function txLimitTrip(t) {
+  sendCatLog(`[TX LIMIT] ${t.message} Held ${Math.round(t.heldMs / 1000)} s; PTT route: ${pttRouteLabel()}.`);
+  // The audio first, so nothing re-keys a VOX radio or an interface that keys on audio.
+  try { if (jtcatAnyTxActive() || jtcatTuneState.active) jtcatHaltTxNow('stuck-TX limit'); } catch (e) { console.error('[TX LIMIT] JTCAT:', e); }
+  try { if (jtcatTuneState.active) stopJtcatTune(); } catch {}
+  try { sstvHaltTxNow(); } catch {}
+  try { if (win && !win.isDestroyed()) win.webContents.send('stop-voice-macro'); } catch {}
+  try { if (mercuryClient) mercuryClient.abort(); } catch {}
+  try { if (typeof freedvEngine !== 'undefined' && freedvEngine) freedvEngine.setTxEnabled(false); } catch {}
+  try { if (remoteServer && remoteServer._pttActive) remoteServer.forcePttRelease(); } catch {}
+  // PTT: the dispatcher's release, then each route directly.
+  try { handleRemotePtt(false); } catch (e) { console.error('[TX LIMIT] release:', e); }
+  try { if (cat && cat.connected) cat.setTransmit(false); } catch {}              // CAT TX0 / T 0 / 1C 00 00
+  const ct = settings.catTarget || {};
+  try {
+    // The keying line POTACAT drives on the CAT port. Under RTS/CTS flow
+    // control RTS is the handshake (the transport keeps it up whatever is asked).
+    if (cat && cat.connected && cat._transport && typeof cat._transport.setPin === 'function' && (ct.ptt === 'rts' || ct.ptt === 'dtr')) {
+      cat._transport.setPin({ [ct.ptt]: false });
+    }
+  } catch {}
+  try { if (ct.type === 'none' && ct.ptt === 'serial') nocatSerialPtt(false, ct); } catch {}
+  try { if (ct.type === 'none' && ct.ptt === 'cm108' && win && !win.isDestroyed()) win.webContents.send('cm108-ptt', { state: false, gpio: Number.isInteger(ct.gpio) ? ct.gpio : 3 }); } catch {}
+  try { if (smartSdr && smartSdr.connected) gatedSmartSdrTransmit(false); } catch {}
+  try { if (settings.audioSource === 'icom-network') forceReleaseIcomNetworkTx('stuck-TX limit'); } catch {}
+  const msg = t.message;
+  if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: msg, warn: true, duration: 20000 });
+  if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', msg);
+  try { if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'tune-blocked', reason: msg }); } catch {}
+}
+// The radio reports TX and POTACAT asserted no PTT: logged loudly with the
+// keying lines' state (the next jcoreyc case leaves evidence). Not unkeyed —
+// the operator may be on the hand mic.
+let _txUnsolicitedSince = 0;
+function txNoteRadioPtt(controller, on) {
+  if (controller !== cat) return;
+  if (!on) {
+    if (_txUnsolicitedSince) sendCatLog(`[TX] the radio is back on receive after ${Math.round((Date.now() - _txUnsolicitedSince) / 1000)} s of transmit POTACAT did not start`);
+    _txUnsolicitedSince = 0;
+    return;
+  }
+  if (_txUnsolicitedSince) return;
+  // Ours: a PTT POTACAT asserted, a CW envelope, the external-ATU carrier, a test transmit, the radio's own ATU tune.
+  if (_isEffectivelyTransmitting() || controller._pttCommanded || controller._cwHoldTimer || _externalAtuActive || _stationSetupTxTest || _stationSetupTxBusy) return;
+  if (_atuTuneEpisode) return;
+  _txUnsolicitedSince = Date.now();
+  const tr = controller._transport || {};
+  const lines = tr._lastPinState ? { dtr: tr._lastPinState.dtr, rts: tr._lastPinState.rts } : (typeof tr.setPin === 'function' ? {} : null);
+  sendCatLog(TxLimitLib.unsolicitedTxReport({ lines, handshake: !!tr._hardwareHandshake, pttRoute: pttRouteLabel(), mode: _currentMode, freqHz: _currentFreqHz }));
+}
+
 function handleRemotePtt(state, opts = {}) {
   pushActivityState();   // busy.tx edges reach the activity feed (debounced)
   // Driving a remote shack: every PTT source on this desktop (the VFO
@@ -26505,6 +26590,7 @@ function handleRemotePtt(state, opts = {}) {
     // no-CAT radio keyed and sent silence (KS9B, Digirig Lite + UV-5X3: the
     // tune tone went out, his voice never did). A VOX radio needs the audio
     // to key at all.
+    txLimitNote(state, opts);
     _remoteTxState = !!state;
     _broadcastEffectiveTxState();
     return;
@@ -26727,6 +26813,7 @@ function handleRemotePtt(state, opts = {}) {
     }
   }
 
+  txLimitNote(state, opts);
   _remoteTxState = state;
   _broadcastEffectiveTxState();
 }
@@ -39431,7 +39518,7 @@ function cloudShackNotice(text, kind) {
       // its factory DATA OFF MOD setting takes the mic, not USB, and the rig
       // keys with no audio (WB8IMY IC-7300, 2026-09-26). Receive stays in USB.
       const _sstvIcom = detectRigType() === 'icom' || (getActiveRigModel()?.brand === 'Icom');
-      handleRemotePtt(true, { audio: true, forceDataMode: _sstvIcom, emission: 'SSTV' });
+      handleRemotePtt(true, { audio: true, forceDataMode: _sstvIcom, emission: 'SSTV', txKind: 'sstv' });
 
       // Optional CW ID — required by some regulators (UK/EU), good
       // practice everywhere. When settings.sstvCwId is true, append
@@ -47108,7 +47195,7 @@ function cloudShackNotice(text, kind) {
         rigPresetFlushPending();
         console.log(`[JTCAT Multi] TX start on ${s.sliceId}/${s.band} — PTT on, message: ${data.message}, ${catState}`);
         sendCatLog(`FT8 TX (${s.band}): ${data.message} freq=${data.freq}Hz slot=${data.slot} ${catState}`);
-        handleRemotePtt(true, { emission: 'DATA', freqHz: s.freqKhz ? s.freqKhz * 1000 : undefined });
+        handleRemotePtt(true, { emission: 'DATA', freqHz: s.freqKhz ? s.freqKhz * 1000 : undefined, txKind: jtcatTxKind() });
         if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
           jtcatPopoutWin.webContents.send('jtcat-tx-status', { state: 'tx', message: data.message, slot: data.slot, txFreq: engine._txFreq, sliceId: s.sliceId });
         }
