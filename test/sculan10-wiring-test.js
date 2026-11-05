@@ -77,6 +77,7 @@ test('connectCat builds the transport with the Yaesu codec, only for a yaesu-lan
   assert.ok(/codec = new KenwoodCodec\(model, \(data\) => transport\.write\(data\)\);/.test(b));
   assert.ok(/transport\.on\('audio-frame', handleYaesuLanAudioFrame\);/.test(b));
   assert.ok(/transport\.on\('log', sendCatLog\);/.test(b));
+  assert.ok(/if \(target\.type === 'yaesu-lan'\) return 'yaesu';/.test(bodyOf(main, 'function detectRigType() {', '\n}')), 'every Yaesu-specific rule applies to it');
   assert.ok(!/password[^,]*\$\{/.test(b.replace(/password: target\.password \|\| ''/, '')), 'the password is never in a log template');
   assert.ok(/transport\.connect\(\{[\s\S]*?password: target\.password \|\| '',[\s\S]*?\}\);/.test(b));
 });

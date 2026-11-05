@@ -3099,6 +3099,7 @@ function detectRigType() {
   const target = settings.catTarget;
   if (!target) return 'unknown';
   if (target.type === 'icom' || target.type === 'civ-tcp' || target.type === 'icom-network') return 'icom';
+  if (target.type === 'yaesu-lan') return 'yaesu'; // SCU-LAN10: Yaesu CAT ASCII over UDP
   if (target.type === 'rigctld' || target.type === 'rigctldnet') return 'rigctld';
   if (target.type === 'flrig') return 'flrig';
   if (target.type === 'dxlab-commander') return 'commander';
