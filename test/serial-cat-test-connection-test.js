@@ -65,7 +65,7 @@ function liftProbe(radio) {
     const h = main.slice(main.indexOf("handleCatTest('test-serial-cat'"), main.indexOf("handleCatTest('test-icom-civ'"));
     assert.ok(/resolveSerialHandshake\(model, \{ serialHandshake: config\.serialHandshake \}\)/.test(h));
     assert.ok(/rtscts: hs\.handshake === 'hardware'/.test(h));
-    assert.ok(/hs\.source === 'model' && hs\.handshake !== 'hardware' && !legacy && model && model\.brand === 'Yaesu'/.test(h));
+    assert.ok(/hs\.source === 'model' && hs\.handshake !== 'hardware' && !legacy && SerialHsTrial\.trialApplies\(model\)/.test(h));
     const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
     assert.ok(/testSerialCat\(\{ portPath, baudRate, dtrOff, serialHandshake, model \}\)/.test(app));
   });

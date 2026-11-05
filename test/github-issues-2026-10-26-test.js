@@ -58,7 +58,7 @@ section('#106 "The audio interface keys it" on a CAT radio');
 section('#103 Auto RTS: a silent Yaesu is tried with RTS/CTS for the session');
 {
   assert(/function armSerialHandshakeNoAnswerTrial\(/.test(main), 'trial exists');
-  assert(/model\.brand === 'Yaesu' && model\.protocol !== 'yaesu-legacy'\) armSerialHandshakeNoAnswerTrial\(cat, transport, target, hs\)/.test(main), 'armed on the direct-serial connect for Yaesu on Auto, never the legacy 5-byte protocol (KL4XQ FT-818)');
+  assert(/if \(hs\.source !== 'rig' && SerialHsTrial\.trialApplies\(model\)\) armSerialHandshakeNoAnswerTrial\(cat, transport, target, hs\)/.test(main), 'armed on the direct-serial connect on Auto, by lib/serial-hs-trial.js (Yaesu and Kenwood, never the legacy 5-byte protocol, KL4XQ FT-818)');
   const fn = main.slice(main.indexOf('function armSerialHandshakeNoAnswerTrial('), main.indexOf('async function connectCat()'));
   const saveAt = fn.indexOf("serialHandshake = 'hardware'");
   const onFreq = fn.indexOf("rigCat.once('frequency'");

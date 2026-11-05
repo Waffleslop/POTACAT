@@ -2107,6 +2107,7 @@ const EXTERNAL_ATU_CARRIER_MODE = 'AM';
 const ExtAtuRestore = require('./lib/ext-atu-restore');
 const PowerRestore = require('./lib/power-restore');
 const { withTimeout } = require('./lib/with-timeout');
+const SerialHsTrial = require('./lib/serial-hs-trial');
 // The radio's last mode report ({ mode, at }), set in sendCatMode: what the
 // external tune's mode restore believes, never the command it sent.
 let _lastModeReadback = null;
@@ -7989,7 +7990,7 @@ function armSerialHandshakeNoAnswerTrial(rigCat, transport, target, hs) {
         sendCatLog(`[CAT] No answer on ${path} with RTS/CTS flow control either — back to RTS held low. Check the radio is on, and its CAT baud rate matches.`);
       } else {
         _serialHsTrial.set(path, 'hardware');
-        sendCatLog(`[CAT] No answer on ${path} in ${SERIAL_HS_NOANSWER_MS / 1000} s with RTS held low — trying RTS/CTS flow control (a Yaesu whose CAT RTS menu is on waits for RTS).`);
+        sendCatLog(`[CAT] No answer on ${path} in ${SERIAL_HS_NOANSWER_MS / 1000} s with RTS held low — trying RTS/CTS flow control (a Yaesu whose CAT RTS menu is on, or a Kenwood whose COM port uses RTS/CTS, waits for RTS).`);
       }
       setTimeout(() => connectCatSafe('rts-trial'), 300);
     }, SERIAL_HS_NOANSWER_MS);
@@ -8661,7 +8662,11 @@ async function connectCat() {
     // The RTS/CTS trial is for the Kenwood-style Yaesus' CAT RTS menu. The
     // FT-817/818/857/897 legacy protocol has no handshake, and asserting RTS
     // there can key an interface wired to it (KL4XQ's FT-818 got the trial).
-    if (hs.source !== 'rig' && model.brand === 'Yaesu' && model.protocol !== 'yaesu-legacy') armSerialHandshakeNoAnswerTrial(cat, transport, target, hs);
+    // Kenwood too (jcoreyc TS-480, 2026-11-05: commands reached the radio and
+    // nothing came back with RTS held low). Hamlib lists the TS-480 with no
+    // flow control, so it is not made a model default; the trial finds the
+    // radios that wait for RTS and saves it on that rig.
+    if (hs.source !== 'rig' && SerialHsTrial.trialApplies(model)) armSerialHandshakeNoAnswerTrial(cat, transport, target, hs);
     // Lines low at open on every Yaesu (holdSerialLinesLow): Windows raises DTR/RTS on open.
     transport.connect({ path: target.path, baudRate: target.baudRate || 9600, dtrOff: holdSerialLinesLow(model, target), connectDelay: model.connectDelay, serialHandshake: hs.handshake, stopBits: model.serialStopBits });
   }
@@ -46429,11 +46434,13 @@ function cloudShackNotice(text, kind) {
     if (first.success || first.portError) return first;
     // On Auto, a Kenwood-protocol Yaesu that does not answer with RTS low is
     // tried with RTS/CTS, as the live connect does (#103).
-    if (hs.source === 'model' && hs.handshake !== 'hardware' && !legacy && model && model.brand === 'Yaesu') {
+    if (hs.source === 'model' && hs.handshake !== 'hardware' && !legacy && SerialHsTrial.trialApplies(model)) {
       await new Promise((r) => setTimeout(r, 300));
       const second = await probeSerialCat({ portPath, baudRate, dtrOff, rtscts: true, stopBits: model.serialStopBits || 1, legacy });
       if (second.success) {
-        second.note = 'it answered with RTS/CTS flow control: the radio\'s CAT RTS menu is on. POTACAT keeps it on for this radio once connected; or set RTS line to RTS/CTS flow control.';
+        second.note = model.brand === 'Kenwood'
+          ? 'it answered with RTS/CTS flow control. POTACAT keeps it on for this radio once connected; or set RTS line to RTS/CTS flow control.'
+          : 'it answered with RTS/CTS flow control: the radio\'s CAT RTS menu is on. POTACAT keeps it on for this radio once connected; or set RTS line to RTS/CTS flow control.';
         return second;
       }
     }

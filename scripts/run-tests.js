@@ -410,6 +410,7 @@ const TESTS = [
   'test/rig-full-power-test.js', // a radio's real full power (rig.fullPowerW): W5LEE's 5 W Hermes Lite behind deskHPSDR's 100 W TS-2000 emulation, slider, PC command, readback and log in real watts
   'test/power-restore-test.js', // the external-tuner / test restore: never a 100 W guess, never against the operator's own knob (GitHub #111, 1.13.10 regression)
   'test/activator-log-once-test.js', // the Activator log saves once per press, and a slow QRZ never holds up a save (.eddiejames duplicates)
+  'test/serial-hs-trial-test.js', // the RTS/CTS no-answer trial covers Kenwood too (jcoreyc TS-480), never the legacy Yaesu protocol
 ];
 
 const root = path.join(__dirname, '..');
