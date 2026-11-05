@@ -755,6 +755,7 @@
 <script src="../lib/custom-cat-follow.js"></script>
 <script src="../lib/rig-bands.js"></script>
 <script src="../lib/freq-paste.js"></script>
+<script src="../lib/mono-upmix.js"></script>
 <script>
 // --- State ---
 let currentFreqHz = 0;
@@ -3243,7 +3244,10 @@ async function startAudioMonitor() {
     const source = audioMonitorCtx.createMediaStreamSource(audioMonitorStream);
     audioMonitorGain = audioMonitorCtx.createGain();
     audioMonitorGain.gain.value = audioMonitorMuted ? 0 : monitorVolume;
-    source.connect(audioMonitorGain);
+    // Both ears: macOS can return the mono capture as two channels with only
+    // the left one filled (hoogskev, FTX-1). lib/mono-upmix.js.
+    const monoSource = window.MonoUpmix ? window.MonoUpmix.monoToBothSides(audioMonitorCtx, source) : source;
+    monoSource.connect(audioMonitorGain);
     audioMonitorGain.connect(audioMonitorCtx.destination);
     audioMonitorActive = true;
     updateAudioBtn();
