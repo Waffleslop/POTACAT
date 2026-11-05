@@ -351,6 +351,7 @@ const { FlrigCodec, flrigModel } = require('./lib/codecs/flrig-codec');
 const { FlrigTransport, probeFlrig } = require('./lib/flrig-transport');
 const { CivCodec } = require('./lib/codecs/civ-codec');
 const IcomScope = require('./lib/icom-scope');
+const Sculan10Scope = require('./lib/sculan10-scope');
 const { CommanderCodec, commanderModel, probeCommander } = require('./lib/codecs/commander-codec');
 const CommanderSequences = require('./lib/commander-sequences');
 const { getTuneQuirks, resolveSerialHandshake, holdSerialLinesLow } = require('./lib/rig-models');
@@ -3264,6 +3265,13 @@ function getRigCapabilities(rigType) {
   // its scope controls on nativeScope — so with the switch on, any rig
   // reports one. That is how all three clients get bench-tested without an
   // FT-710 in the room (mobile handoff, follow-up 4).
+  // SCU-LAN10: the scope is the unit's SCOPE channel, never the FT-710's USB
+  // bridge (whose helper would look for an FT4222 on this computer), and it
+  // is offered only while frames are arriving.
+  if (settings.catTarget && settings.catTarget.type === 'yaesu-lan') {
+    if (caps.nativeScope === 'yaesu-ft4222') delete caps.nativeScope;
+    if (sculanScopeAvailable()) caps.nativeScope = 'yaesu-lan';
+  }
   if (yaesuScopeSynth && !caps.nativeScope) caps.nativeScope = 'synthetic';
   // A band scope from a separate SDR (lib/sdr-scope.js) gives ANY rig one —
   // the same flag, so the More menu, ECHOCAT Web and the app light up.
@@ -8409,6 +8417,8 @@ async function connectCat() {
     cat.on('alc', sendCatAlc);
     transport.on('log', sendCatLog);
     transport.on('audio-frame', handleYaesuLanAudioFrame);
+    transport.on('scope-frame', sculanScopeOnTransportFrame);
+    sculanScopeConnectionReset();
     // target.port is the BASE port (CTRL); CAT/AUDIO/SCOPE are +1..+3. A
     // blank address stays blank (the transport says so) rather than
     // falling back to 127.0.0.1.
@@ -30483,7 +30493,7 @@ function scopeOverlaySync() {
 function scopeSourceFrameMs() {
   // An Icom sweeps at its own pace (about 4 a second on a 7300 at 115200): measured, not set.
   if (yaesuScopeState.source === 'icom') return icomScopeGapMs || 250;
-  const fps = yaesuScopeState.source === 'flex' ? 15 : yaesuScopeState.source === 'sdr' ? 12 : (settings.yaesuScopeFps || 20);
+  const fps = yaesuScopeState.source === 'flex' ? 15 : yaesuScopeState.source === 'sdr' ? 12 : yaesuScopeState.source === 'sculan10' ? 25 : (settings.yaesuScopeFps || 20);
   return 1000 / fps;
 }
 
@@ -30559,6 +30569,7 @@ function startYaesuScope() {
   if (kind === 'sdr') { startSdrScope(); return; }
   if (kind === 'flex') { startFlexScope(); return; }
   if (kind === 'icom') { startIcomScope(); return; }
+  if (kind === 'sculan10') { startSculanScope(); return; }
   if (yaesuScopeStopping && yaesuScopeStopping.exitCode === null && yaesuScopeStopping.signalCode === null) {
     if (!yaesuScopeStartAfterExit) sendCatLog('[Scope] waiting for the previous helper to release the radio');
     yaesuScopeStartAfterExit = true;
@@ -30661,6 +30672,7 @@ function stopYaesuScope(why) {
   yaesuScopeStartAfterExit = false;
   if (sdrScopeClient) { stopSdrScope(why); return; }
   if (flexScopeOn) { stopFlexScope(why); return; }
+  if (sculanScopeOn) { stopSculanScope(why); return; }
   if (icomScopeOn || (yaesuScopeState.source === 'icom' && !yaesuScopeProc)) { stopIcomScope(why); return; }
   yaesuScopeStopCatPolling();
   // SCU-LAN10 goes back off once the helper has let go, unless the scope was
@@ -30702,7 +30714,8 @@ function yaesuScopeOnFrame(f) {
   if (yaesuScopeState.status !== 'live') {
     yaesuScopeRestarts = 0;
     sendCatLog('[Scope] frames flowing (' + (f.kind === 1 ? 'synthetic signal' : yaesuScopeState.source === 'sdr' ? 'SDR' : yaesuScopeState.source === 'flex' ? 'Flex panadapter'
-      : yaesuScopeState.source === 'icom' ? ((icomScopeEntry && icomScopeEntry.name) || 'Icom') + ' scope over CI-V' : 'live radio') + ')');
+      : yaesuScopeState.source === 'icom' ? ((icomScopeEntry && icomScopeEntry.name) || 'Icom') + ' scope over CI-V'
+      : yaesuScopeState.source === 'sculan10' ? 'SCU-LAN10 scope over the LAN' : 'live radio') + ')');
     yaesuScopeSetStatus('live', null);
   }
   if (scopePopoutWin && !scopePopoutWin.isDestroyed()) {
@@ -30842,7 +30855,9 @@ function scopeSourceKind() {
   const native = yaesuScopeRigHasScope();
   const icom = !!icomScopeModel();
   const flex = flexScopeAvailable();
-  if (sdr.enabled && (sdr.preferSdr || (!native && !icom && !flex))) return 'sdr';
+  const sculan = sculanScopeAvailable();
+  if (sdr.enabled && (sdr.preferSdr || (!native && !icom && !flex && !sculan))) return 'sdr';
+  if (sculan) return 'sculan10';
   if (native) return 'yaesu';
   if (icom) return 'icom';
   return flex ? 'flex' : null;
@@ -31420,6 +31435,149 @@ function icomScopeOnSweep(s) {
   if (changed) yaesuScopeBroadcastState();
   const levels = s.empty ? new Uint8Array(0) : s.levels;
   yaesuScopeOnFrame(IcomScope.toScopeFrame(levels, { levelMax: icomScopeEntry.levelMax, seq: ++icomScopeSeq }));
+}
+
+// ═══ Yaesu SCU-LAN10 band scope (lib/sculan10-scope.js), EXPERIMENTAL ════════
+// The unit streams the radio's scope on its SCOPE channel (about 25 frames a
+// second) whenever a session is up. It is a scope source like the FT-710's
+// USB bridge, the Flex pan, an Icom and an SDR: same state, same fan-out to
+// the Band Scope window, the JTCAT strip, ECHOCAT and a remote POTACAT. It is
+// offered only on a yaesu-lan rig while frames are actually arriving, and
+// decodes only what the spec marks verified (inverted bytes, the boundary
+// marker, the marker/2 rule). The span comes from the radio's SS05 reply;
+// unread, the axis stays unknown and click-to-tune declines.
+let sculanScopeOn = false;
+let sculanScopeLastFrameAt = 0;
+let sculanScopeLiveTimer = null;
+const sculanScopeTracker = new Sculan10Scope.MarkerTracker();
+let sculanScopeSeq = 0;
+let sculanScopeFirstLogged = false;   // per connection
+let sculanScopeLastEnd = null;
+let sculanScopeCatTimer = null;
+let sculanScopeCatBusy = false;
+let sculanScopeCatDead = 0;
+
+function sculanScopeAvailable() {
+  return !!(settings.catTarget && settings.catTarget.type === 'yaesu-lan' && cat && cat.connected
+    && Date.now() - sculanScopeLastFrameAt < 3000);
+}
+
+/** A new SCU-LAN10 connection: the first frame is logged (and saved) again. */
+function sculanScopeConnectionReset() {
+  sculanScopeFirstLogged = false;
+  sculanScopeLastFrameAt = 0;
+  sculanScopeTracker.reset();
+  sculanScopeLastEnd = null;
+}
+
+function sculanScopeOnTransportFrame(f) {
+  if (!f || !f.body || !f.body.length) return;
+  const wasAvailable = sculanScopeAvailable();
+  sculanScopeLastFrameAt = Date.now();
+  if (!sculanScopeFirstLogged) {
+    sculanScopeFirstLogged = true;
+    try {
+      sendCatLog('[SCU-LAN10] first scope frame: ' + Sculan10Scope.describeFrame(f.body));
+      // One raw frame on disk, so an owner can send it and the decoding can
+      // be checked against a real radio (too big for the log, whose
+      // redaction drops long blobs).
+      const framePath = path.join(app.getPath('userData'), 'sculan10-scope-frame.bin');
+      fs.writeFileSync(framePath, Buffer.from(f.body));
+      sendCatLog(`[SCU-LAN10] saved one raw scope frame (${f.body.length} bytes) to ${framePath}: attach that file to a report so the scope can be checked against your radio`);
+    } catch (e) { sendCatLog('[SCU-LAN10] could not save the raw scope frame: ' + (e && e.message ? e.message : e)); }
+  }
+  if (!wasAvailable) {
+    sendCatLog('[Scope] SCU-LAN10 scope frames are arriving: the band scope is available');
+    try { broadcastRigState(); } catch { /* no rig yet */ }
+    yaesuScopeBroadcastState();
+  }
+  if (sculanScopeLiveTimer) clearTimeout(sculanScopeLiveTimer);
+  sculanScopeLiveTimer = setTimeout(sculanScopeQuiet, 3100);
+  if (!sculanScopeOn) return;
+  const d = Sculan10Scope.decodeScopeFrame(f.body, sculanScopeTracker);
+  if (d.end !== sculanScopeLastEnd) {
+    sendCatLog(`[Scope] SCU-LAN10: spectrum ends at byte ${d.end} (${d.method}), ${d.usable} usable bins`);
+    sculanScopeLastEnd = d.end;
+  }
+  yaesuScopeOnFrame(Sculan10Scope.toScopeFrame(d.levels, { seq: ++sculanScopeSeq }));
+}
+
+/** No scope frame for 3 s: the scope is no longer offered, and a running one says why. */
+function sculanScopeQuiet() {
+  sculanScopeLiveTimer = null;
+  if (sculanScopeAvailable()) return;
+  sendCatLog('[Scope] no SCU-LAN10 scope frames for 3 s');
+  try { broadcastRigState(); } catch { /* no rig */ }
+  if (!sculanScopeOn) { yaesuScopeBroadcastState(); return; }
+  if (!(settings.catTarget && settings.catTarget.type === 'yaesu-lan')) {
+    stopSculanScope('the active rig is no longer the SCU-LAN10');
+    if (yaesuScopeWanted()) startYaesuScope();
+    return;
+  }
+  yaesuScopeSetStatus('error', { key: 'sculan10-silent', severity: 'error',
+    headline: 'No scope frames from the SCU-LAN10',
+    detail: 'The LAN connection is ' + (cat && cat.connected ? 'up, but the unit stopped sending the scope.' : 'down; POTACAT is reconnecting.') + ' The picture comes back by itself when frames arrive.' });
+}
+
+function startSculanScope() {
+  if (sculanScopeOn) return;
+  sculanScopeOn = true;
+  sculanScopeTracker.reset();
+  sculanScopeLastEnd = null;
+  sculanScopeCatDead = 0;
+  Object.assign(yaesuScopeState, {
+    source: 'sculan10', kind: 0, spanCode: null, spanHz: 0, anchor: 'center', modeCode: null, modeLabel: null, speed: null, scuLan: null,
+    frames: 0, misaligned: 0, helperPath: '', catReads: null,
+    centerHz: _currentFreqHz || yaesuScopeState.centerHz || 0,
+  });
+  sendCatLog('[Scope] Yaesu SCU-LAN10 band scope over the LAN (experimental)');
+  yaesuScopeSetStatus('starting', null);
+  sculanScopeReadRadio();
+  sculanScopeCatTimer = setInterval(sculanScopeReadRadio, 2000);
+}
+
+function stopSculanScope(why) {
+  const was = sculanScopeOn;
+  sculanScopeOn = false;
+  if (sculanScopeCatTimer) { clearInterval(sculanScopeCatTimer); sculanScopeCatTimer = null; }
+  if (was) sendCatLog('[Scope] SCU-LAN10 band scope stopped' + (why ? ' — ' + why : ''));
+  if (yaesuScopeState.status !== 'stopped') yaesuScopeSetStatus('stopped', null);
+}
+
+/**
+ * The span, mode and sweep from the radio (SS05 / SS06 / SS00, the FT-710 CAT
+ * reference's codes; the FTDX10 and FTDX101 are assumed to answer the same
+ * and an owner's first report confirms it). Never an EX menu read or write:
+ * menu numbers differ between these radios.
+ */
+async function sculanScopeReadRadio() {
+  if (!sculanScopeOn || !cat || !cat.connected || typeof cat.queryRaw !== 'function' || sculanScopeCatBusy) return;
+  sculanScopeCatBusy = true;
+  try {
+    let answered = 0;
+    const st = yaesuScopeState;
+    const before = JSON.stringify([st.spanHz, st.anchor, st.speed]);
+    const ask = (cmd) => cat.queryRaw(cmd, { timeoutMs: 1200 }).then((r) => { answered++; return r; }, () => null);
+    const ss05 = YaesuScope.parseSsReply(await ask('SS05;'));
+    if (ss05 && ss05.p2 === 5) { st.spanCode = ss05.p3; st.spanHz = YaesuScope.spanHzFromCode(ss05.p3) || 0; }
+    const ss06 = YaesuScope.parseSsReply(await ask('SS06;'));
+    if (ss06 && ss06.p2 === 6) { const m = YaesuScope.modeFromCode(ss06.p3); if (m) { st.modeCode = m.code; st.anchor = m.anchor; } }
+    const ss00 = YaesuScope.parseSsReply(await ask('SS00;'));
+    if (ss00 && ss00.p2 === 0) st.speed = YaesuScope.speedFromCode(ss00.p3);
+    if (before !== JSON.stringify([st.spanHz, st.anchor, st.speed])) {
+      sendCatLog('[Scope] SCU-LAN10 radio: span ' + (st.spanHz ? YaesuScope.formatSpan(st.spanHz) : 'unknown') + ', ' + String(st.anchor).toUpperCase() + ' mode, sweep ' + (st.speed || '?'));
+      yaesuScopeBroadcastState();
+    }
+    sculanScopeCatDead = answered ? 0 : sculanScopeCatDead + 1;
+    if (sculanScopeCatDead >= 3) {
+      if (sculanScopeCatTimer) { clearInterval(sculanScopeCatTimer); sculanScopeCatTimer = null; }
+      st.catReads = 'unanswered';
+      sendCatLog('[Scope] the radio answers none of the scope reads (SS05/SS06/SS00) over the SCU-LAN10: the span stays unknown, so the scale has no frequencies and click-to-tune is off. The picture still draws. Please mention this in a report, with your radio model.');
+      yaesuScopeBroadcastState();
+    }
+  } finally {
+    sculanScopeCatBusy = false;
+  }
 }
 
 function startIcomScope() {

@@ -91,7 +91,9 @@ function applyState(s) {
   const notYaesu = (state.source === 'sdr' || state.source === 'flex' || state.source === 'icom') && state.kind !== 1;
   $('sc-sdr-badge').style.display = sdr ? '' : 'none';
   $('sc-speed-wrap').style.display = notYaesu ? 'none' : '';
-  $('sc-sculan-wrap').style.display = notYaesu ? 'none' : '';
+  // Over the SCU-LAN10 itself (source 'sculan10') the unit is plainly on:
+  // that row is the FT-710 USB bridge's menu, so it is hidden there too.
+  $('sc-sculan-wrap').style.display = (notYaesu || state.source === 'sculan10') ? 'none' : '';
   $('sc-span').textContent = A.formatSpan(state.spanHz);
   // Zoom: only when the source offers steps (the Flex panadapter today).
   const spans = Array.isArray(state.spans) ? state.spans : [];

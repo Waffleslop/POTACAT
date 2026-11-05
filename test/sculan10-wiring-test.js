@@ -126,5 +126,33 @@ test('Test Connection logs in and asks ID; and FA;, through its own handler', ()
   assert.ok(/t\.disconnect\(\);/.test(t), 'the test session is always closed');
 });
 
+test('band scope: a source of its own, offered only on a yaesu-lan rig while frames arrive, never the FT-710 USB helper', () => {
+  const avail = bodyOf(main, 'function sculanScopeAvailable() {', '\n}');
+  assert.ok(/settings\.catTarget\.type === 'yaesu-lan' && cat && cat\.connected/.test(avail));
+  assert.ok(/Date\.now\(\) - sculanScopeLastFrameAt < 3000/.test(avail), 'only while frames arrive');
+  const caps = bodyOf(main, 'function getRigCapabilities(rigType) {', '\nfunction ');
+  assert.ok(/if \(caps\.nativeScope === 'yaesu-ft4222'\) delete caps\.nativeScope;\n\s*if \(sculanScopeAvailable\(\)\) caps\.nativeScope = 'yaesu-lan';/.test(caps),
+    'an FT-710 on the LAN never spawns the USB bridge helper, and the scope shows only with frames');
+  const kind = bodyOf(main, 'function scopeSourceKind() {', '\n}');
+  assert.ok(kind.indexOf("if (sculan) return 'sculan10';") > 0 && kind.indexOf("if (sculan) return 'sculan10';") < kind.indexOf("if (native) return 'yaesu';"));
+  assert.ok(/\(!native && !icom && !flex && !sculan\)\)\) return 'sdr';/.test(kind), 'the radio\'s own scope wins over an SDR unless preferSdr');
+  assert.ok(/if \(kind === 'sculan10'\) \{ startSculanScope\(\); return; \}/.test(main));
+  assert.ok(/if \(sculanScopeOn\) \{ stopSculanScope\(why\); return; \}/.test(main));
+  const b = bodyOf(main, "} else if (target.type === 'yaesu-lan') {", "} else if (target.type === 'icom-network') {");
+  assert.ok(/transport\.on\('scope-frame', sculanScopeOnTransportFrame\);/.test(b));
+});
+
+test('band scope: frames go through the shared fan-out, and testers get the first frame described and saved', () => {
+  const h = bodyOf(main, 'function sculanScopeOnTransportFrame(f) {', '\n}\n');
+  assert.ok(/Sculan10Scope\.describeFrame\(f\.body\)/.test(h), 'first frame: size and boundary marker logged');
+  assert.ok(/'sculan10-scope-frame\.bin'/.test(h), 'one raw frame saved for an owner to send');
+  assert.ok(/Sculan10Scope\.decodeScopeFrame\(f\.body, sculanScopeTracker\)/.test(h));
+  assert.ok(/yaesuScopeOnFrame\(Sculan10Scope\.toScopeFrame\(d\.levels/.test(h), 'the same fan-out as every other source');
+  assert.ok(/broadcastRigState\(\)/.test(h), 'clients learn the scope appeared');
+  const rd = bodyOf(main, 'async function sculanScopeReadRadio() {', '\n}\n');
+  for (const c of ['SS05;', 'SS06;', 'SS00;']) assert.ok(rd.includes(`'${c}'`), c);
+  assert.ok(!/EX0|sendRaw/.test(rd), 'never an EX menu read or a raw write: menu numbers differ between these radios');
+});
+
 console.log(`\nSCU-LAN10 wiring: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

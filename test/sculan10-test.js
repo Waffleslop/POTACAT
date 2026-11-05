@@ -208,7 +208,15 @@ async function fakeUnit({ user = 'defaultuser', pass = 'defaultuser', sid = 0x22
   });
   const audioInit = portInit('audio', audio, P.CHANNEL.AUDIO);
   on('audio', audio, (p, rinfo) => { if (audioInit(p, rinfo)) u.audioPeer = rinfo; });
-  on('scope', scope, portInit('scope', scope, P.CHANNEL.SCOPE));
+  const scopeInit = portInit('scope', scope, P.CHANNEL.SCOPE);
+  on('scope', scope, (p, rinfo) => { if (scopeInit(p, rinfo)) u.scopePeer = rinfo; });
+  // One scope frame (a 4096-byte body) to the client; dropFirst skips a
+  // packet sequence number first, as a frame lost on the network would.
+  u.sendScope = (body, { dropFirst = false } = {}) => {
+    if (!u.scopePeer) return;
+    if (dropFirst) seq.scope = (seq.scope + 1) & 0xFF;
+    reply('scope', scope, u.scopePeer, P.CHANNEL.SCOPE, P.MSG.DATA_IN, body);
+  };
   u.sendAudio = (frameSeq, left) => { if (u.audioPeer) reply('audio', audio, u.audioPeer, P.CHANNEL.AUDIO, P.MSG.DATA_IN, audioBody(frameSeq, left)); };
   u.sendCat = (text, respSeq) => {
     // unsolicited: to the CAT peer the client last used
@@ -387,6 +395,33 @@ test('end to end: RigController and the Yaesu codec over the transport read the 
     assert.ok(u.catSeen.some((x) => /^TX0;?$/.test(x.text)), 'connect safety: PTT off went to the radio');
     assert.ok(ctl.connected);
   } finally { ctl.disconnect(); u.close(); }
+});
+
+test('scope end to end: a spec-shaped frame through the SCOPE channel decodes to the line it was built from; rate and drops are in the stats', async () => {
+  const Scope = require('../lib/sculan10-scope');
+  const u = await fakeUnit();
+  const c = client();
+  const scopeFrames = [];
+  c.t.on('scope-frame', (f) => scopeFrames.push(f));
+  try {
+    c.t.connect({ host: '127.0.0.1', basePort: u.base, ...FAST });
+    assert.ok(await until(() => c.connects === 1 && u.scopePeer));
+    const levels = new Uint8Array(850);
+    for (let i = 0; i < 850; i++) levels[i] = 30 + (i % 7);
+    levels[300] = 240; levels[301] = 250; levels[302] = 240;   // a signal
+    const body = Scope.buildSpecFrame(levels);
+    u.sendScope(body); u.sendScope(body); u.sendScope(body, { dropFirst: true });
+    assert.ok(await until(() => scopeFrames.length === 3), 'frames arrived: ' + scopeFrames.length);
+    assert.strictEqual(scopeFrames[0].body.length, 4096);
+    const tracker = new Scope.MarkerTracker();
+    const d = Scope.decodeScopeFrame(scopeFrames[0].body, tracker);
+    assert.strictEqual(d.end, 1700);
+    assert.deepStrictEqual(Array.from(d.levels), Array.from(levels), 'every bin survives the wire and the XOR');
+    const f = Scope.toScopeFrame(d.levels, { seq: 1 });
+    assert.strictEqual(f.wf1[301], 250, 'the signal is where it was');
+    c.t._logStats('test');
+    assert.ok(c.logs.some((l) => /scope frames 3( \([\d.]+\/s\))?, lost 1;/.test(l)), c.logs.filter((l) => /stats/.test(l)).join('\n'));
+  } finally { c.t.disconnect(); u.close(); }
 });
 
 test('no address: a clear error, nothing sent', () => {
