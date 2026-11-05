@@ -4625,6 +4625,7 @@ function bindRigStateEvents(controller) {
   controller.on('micGain', sendCatMicGain);
   controller.on('breakIn', sendCatBreakIn);
   controller.on('ptt', (on) => txNoteRadioPtt(controller, on));
+  controller.on('ptt', (on) => { if (!on && controller === cat) txMetersRestOnRx(); });
   // Something the radio did that the operator must see, not only the log
   // (lib/rig-controller.js: a radio left in transmit after a CW message).
   controller.on('notice', (msg) => {
@@ -4797,6 +4798,15 @@ function sendCatSwr(val) {
   if (winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) winlinkPopoutWin.webContents.send('cat-swr', val);
   _currentSwr = val;
   if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'swr', value: val });
+}
+
+// The SWR and ALC meters read only while transmitting, so on receive their
+// last TX value used to stay on every display (davidcappello IC-9700: "SWR
+// stays at the last TX value"). Back on receive they read rest: SWR 1.0
+// (wire 0), ALC 0.
+function txMetersRestOnRx() {
+  if (_currentSwr) sendCatSwr(0);
+  if (_currentAlc) sendCatAlc(0);
 }
 
 function sendCatAlc(val) {
@@ -26885,6 +26895,9 @@ function handleRemotePtt(state, opts = {}) {
   }
 
   txLimitNote(state, opts);
+  // A late reply from the last TX poll can still land after this; the next
+  // release or the radio's own RX report rests it again.
+  if (!state) setTimeout(() => { if (!_remoteTxState && !(cat && cat._transmitting)) txMetersRestOnRx(); }, 600);
   _remoteTxState = state;
   _broadcastEffectiveTxState();
 }
