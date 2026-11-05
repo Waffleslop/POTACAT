@@ -98,6 +98,35 @@ test('codecs report the DATA flag read back from the radio (Icom 1A 06, Kenwood 
   assert.ok(/this\._dataReportAt = Date\.now\(\);/.test(kw) && /askDataState\(\)/.test(kw));
 });
 
+test('a normal Icom keys at its 120 ms minimum, not on the next 100 ms step', async () => {
+  // The radio answers 1A 06 about 30 ms after it is asked.
+  const h = harness([{ atMs: 1030, mode: 'USB', data: true }]);
+  const r = await S.confirmMode({ ...h.o, since: 1000, accept: (_m, x) => !!x.data, timeoutMs: 800, stepMs: 25, askEveryMs: 100, minWaitMs: 120 });
+  assert.strictEqual(r.ok, true);
+  assert.ok(r.waitedMs >= 120 && r.waitedMs <= 140, 'keyed ' + r.waitedMs + ' ms after the swap');
+});
+
+test('the fast read loop asks the radio only every askEveryMs', async () => {
+  const h = harness([]);
+  await S.confirmMode({ ...h.o, since: 1000, accept: () => false, timeoutMs: 800, stepMs: 25, askEveryMs: 100 });
+  assert.ok(h.asks.length >= 8 && h.asks.length <= 9, h.asks.length + ' asks in 800 ms');
+});
+
+test('main: the key-down confirm reads every 25 ms and asks every 100 ms', () => {
+  assert.ok(/const PTT_DATA_CONFIRM_STEP_MS = 25;/.test(main));
+  assert.ok(/stepMs: PTT_DATA_CONFIRM_STEP_MS, askEveryMs: PTT_DATA_CONFIRM_ASK_MS/.test(main));
+});
+
+test('main: SSTV starts its audio after PTT really went out, not on a fixed 200 ms', () => {
+  const i = main.indexOf("emission: 'SSTV', txKind: 'sstv'");
+  const body = main.slice(i, i + 9000);
+  assert.ok(/_pttKeyPending = pending;/.test(main), 'a waiting key-down is recorded');
+  assert.ok(/const _sstvStartAudio = \(fn\) => pttKeyGate\(\)\.then\(\(keyed\) => \{/.test(body));
+  assert.ok(/Math\.max\(delay - \(Date\.now\(\) - _sstvKeyCalledAt\), SSTV_AUDIO_AFTER_KEY_MS\)/.test(body));
+  assert.ok(/_sstvStartAudio\(\(\) => \{/.test(body));
+  assert.ok(!/\n      \}, delay\);/.test(body), 'no fixed setTimeout(..., delay) left');
+});
+
 (async () => {
   for (const [name, fn] of queue) {
     try { await fn(); pass++; console.log('  ok  ' + name); }

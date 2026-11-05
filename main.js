@@ -26547,6 +26547,22 @@ function txNoteRadioPtt(controller, on) {
 const PttModeSwap = require('./lib/ptt-mode-swap');
 let _pttKeySeq = 0; // every key-down and release bumps it; a pending key-down or restore checks it
 const PTT_DATA_CONFIRM_MS = 800;
+// Read the radio's report every 25 ms (ask it every 100 ms), so a normal Icom,
+// which answers 1A 06 in a few tens of ms, keys at its 120 ms bus-gap minimum
+// instead of on the next 100 ms step (~200 ms).
+const PTT_DATA_CONFIRM_STEP_MS = 25;
+// SSTV audio starts at least this long after PTT really went out (the old
+// Icom path keyed at 120 ms and played at 200 ms: 80 ms of relay settle).
+const SSTV_AUDIO_AFTER_KEY_MS = 80;
+const PTT_DATA_CONFIRM_ASK_MS = 100;
+// A key-down waiting for the DATA confirm: resolves true when it keys, false
+// when a release cancelled it. null when no key-down is waiting.
+let _pttKeyPending = null;
+/** Resolves when this key-down's PTT has actually gone out (true) or was
+ *  cancelled (false). Immediate for every key-down that did not wait. */
+function pttKeyGate() {
+  return _pttKeyPending || Promise.resolve(true);
+}
 const PTT_RESTORE_CONFIRM_MS = 1500;
 /** The radio's last mode report for a confirm. An Icom (1A 06) and a Kenwood
  *  with DA report DATA as its own flag, read back by the codec (_dataReportAt);
@@ -26568,7 +26584,7 @@ function pttKeyAfterDataMode(since, minWaitMs, emission) {
   return PttModeSwap.confirmMode({
     read: pttModeReport, ask: pttAskMode, since,
     accept: (_m, r) => !!r.data,
-    timeoutMs: PTT_DATA_CONFIRM_MS, stepMs: 100, minWaitMs,
+    timeoutMs: PTT_DATA_CONFIRM_MS, stepMs: PTT_DATA_CONFIRM_STEP_MS, askEveryMs: PTT_DATA_CONFIRM_ASK_MS, minWaitMs,
     cancelled: () => seq !== _pttKeySeq,
   }).then((r) => {
     if (r.cancelled) { sendCatLog('[PTT] released before the radio reported the DATA mode — not keyed'); return false; }
@@ -26858,7 +26874,10 @@ function handleRemotePtt(state, opts = {}) {
         // SSB-over-DATA: key only once the radio reports the DATA mode, so it
         // never changes mode while keyed (k8iko IC-7410: ~0.5 s clipped off
         // every over). An Icom still waits at least the old 120 ms bus gap.
-        pttKeyAfterDataMode(_dataSwapSince, _civPttDelayMs, pttEmission);
+        const pending = pttKeyAfterDataMode(_dataSwapSince, _civPttDelayMs, pttEmission)
+          .catch(() => false)
+          .then((keyed) => { if (_pttKeyPending === pending) _pttKeyPending = null; return keyed; });
+        _pttKeyPending = pending;
       } else {
         gatedSetTransmit(state, pttEmission);
       }
@@ -39650,8 +39669,24 @@ function cloudShackNotice(text, kind) {
       // K3SBP 2026-05-28.
       const useDaxTx = settings.audioSource === 'smartsdr' && smartSdrAudio && smartSdrAudio.txReady;
       const useIcomNetworkTx = settings.audioSource === 'icom-network' && ICOM_NETWORK_TX_AUDIO_ENABLED && _icomNetworkTransport && _icomNetworkTransport.txReady;
+      // Start the audio once the radio is really keyed: no sooner than the
+      // old fixed delay after the key-down call (1500 ms while the pop-out
+      // is still opening, else 200 ms), and no sooner than 80 ms after PTT
+      // actually went out. An SSB-over-DATA key-down waits for the radio to
+      // report DATA (up to 800 ms); a fixed 200 ms clipped the VIS header
+      // on a radio that confirmed slowly.
       const delay = (!sstvPopoutWin || sstvPopoutWin.isDestroyed()) ? 1500 : 200;
-      setTimeout(() => {
+      const _sstvKeyCalledAt = Date.now();
+      const _sstvStartAudio = (fn) => pttKeyGate().then((keyed) => {
+        if (!keyed) {
+          sendCatLog('[SSTV] PTT was released before the radio keyed — picture not sent');
+          if (remoteServer) remoteServer.broadcastSstvTxStatus({ state: autoSstvActive ? 'auto-rx' : 'rx' });
+          return;
+        }
+        const wait = Math.max(delay - (Date.now() - _sstvKeyCalledAt), SSTV_AUDIO_AFTER_KEY_MS);
+        setTimeout(fn, wait);
+      });
+      _sstvStartAudio(() => {
         if (useDaxTx) {
           // Downsample 48 kHz SSTV audio → 12 kHz mono (decimate by 4 with a
           // box average — SSTV tones are ≤2300 Hz, far below 6 kHz Nyquist).
@@ -39744,7 +39779,7 @@ function cloudShackNotice(text, kind) {
           // Failsafe: release PTT if popout never opened
           handleRemotePtt(false);
         }
-      }, delay);
+      });
       // Notify ECHOCAT with duration so phone can show progress
       if (remoteServer) {
         remoteServer.broadcastSstvTxStatus({ state: 'tx', durationSec: outDurSec });
