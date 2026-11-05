@@ -648,12 +648,14 @@ test('rigctld setMode FT8, no filter caps -> M PKTUSB 0 (fixed-filter rigs rejec
   assert.strictEqual(writes[0], 'M PKTUSB 0\n');
 });
 
-// A mode change keeps the radio's own width (-1): a width goes out only when
-// the operator's Filter Width or a rig preset asks (jarhd FTDX10, 2026-11-05).
-test('rigctld setMode FT8, filter-capable -> M PKTUSB -1 (the radio keeps its width)', () => {
+// A voice/CW mode change keeps the radio's own width (-1): a width goes out
+// only when the operator's Filter Width or a rig preset asks (jarhd FTDX10,
+// 2026-11-05). A change INTO a digital mode is the exception: 3000, because
+// FT8 needs ~3 kHz and some backends bring DATA up at 500 Hz.
+test('rigctld setMode FT8, filter-capable -> M PKTUSB 3000 (digital needs ~3 kHz)', () => {
   const { codec, writes } = captureWrites(RigctldCodec, RIGCTLD_FILTER_MODEL);
   codec.setMode('FT8', 14074000);
-  assert.strictEqual(writes[0], 'M PKTUSB -1\n');
+  assert.strictEqual(writes[0], 'M PKTUSB 3000\n');
 });
 
 test('rigctld setMode CW, filter-capable -> M CW -1, never a forced 500', () => {
