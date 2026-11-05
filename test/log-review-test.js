@@ -155,5 +155,12 @@ test('wiring: only the window prompts, a phone never does, and a held call count
   assert.ok(!/freqInput\.value = String\(Math\.round\(p\.freqKhz\)\);\s+if \(p\.mode\) \{\s+const m = modeFamily\(p\.mode\);\s+if \(\[\.\.\.modeSelect\.options\]\.some\(\(o\) => o\.value === m\)\) modeSelect\.value = m;\s+\}\s+\/\/ What this prefill/.test(R('renderer/log-popout.js')), 'a prefill keeps 7047.5');
 });
 
+test('the window a review opened closes after the last Save; one the operator had open stays (jgedmond)', () => {
+  const m = R('main.js');
+  assert.ok(/if \(!logPopoutWin \|\| logPopoutWin\.isDestroyed\(\)\) _logPopoutForReview = true;/.test(m));
+  assert.ok(/if \(jtcatLogReviews\.current\) jtcatShowLogReview\(\);[\s\S]{0,200}_logPopoutForReview && logPopoutWin/.test(m));
+  assert.ok(/logPopoutWin = null;\s+_logPopoutForReview = false;/.test(m));
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -16689,9 +16689,14 @@ async function jtcatWriteLog(qsoData, relogKeyStr) {
 
 // The contact at the head of the queue goes to the Log QSO window. Run and Hunt
 // keep the keyboard: the form comes up without taking focus.
+// The Log QSO window was opened BY a review (not already open on the
+// operator's screen): it closes once the last waiting contact is saved
+// (jgedmond 11-04: it stayed open after Save QSO).
+let _logPopoutForReview = false;
 function jtcatShowLogReview() {
   const item = jtcatLogReviews.current;
   if (!item) return;
+  if (!logPopoutWin || logPopoutWin.isDestroyed()) _logPopoutForReview = true;
   _logPopoutQuiet = !!(jtcatFullAutoCq || jtcatAutoCqMode !== 'off' || jtcatHuntFallbackMode);
   ipcMain.emit('log-popout-open', null, { ...LogReview.prefillFor(item, jtcatLogReviews.waiting), power: _currentTxPower || undefined });
   _logPopoutQuiet = false;
@@ -37589,6 +37594,7 @@ function cloudShackNotice(text, kind) {
     });
     logPopoutWin.on('closed', () => {
       logPopoutWin = null;
+      _logPopoutForReview = false;
       setTypedCall('popout', ''); // a closed window is not holding a call
       if (win && !win.isDestroyed()) win.webContents.send('log-popout-status', false);
       // Closing on a contact under review declines it; one the form never
@@ -37660,8 +37666,14 @@ function cloudShackNotice(text, kind) {
     const item = jtcatLogReviews.take(id);
     if (!item) return { success: false, error: 'This contact is no longer waiting' };
     const res = await jtcatWriteLog(LogReview.mergeEdits(item.record, edits), item.meta.relogKey);
-    if (res.success) jtcatShowLogReview();
-    else jtcatLogReviews.putBack(item);
+    if (res.success) {
+      if (jtcatLogReviews.current) jtcatShowLogReview(); // the next waiting contact
+      else if (_logPopoutForReview && logPopoutWin && !logPopoutWin.isDestroyed()) {
+        // Closed after the renderer has its reply (and the Saved toast).
+        const w = logPopoutWin;
+        setTimeout(() => { if (!w.isDestroyed() && !jtcatLogReviews.current) w.close(); }, 1200);
+      }
+    } else jtcatLogReviews.putBack(item);
     return res;
   });
   ipcMain.on('log-review-cancel', (_e, id) => {
