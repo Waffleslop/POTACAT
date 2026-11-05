@@ -95,7 +95,7 @@ test('the marker is locked after three frames, so a strong signal between 500 an
 test('before any lock, a full-scale signal copied into the doubled half is not taken for the marker: the reference block after it decides', () => {
   const strong = S.buildSpecFrame(line(850, { 10: 255 }));    // its copy is raw 0 at byte 860
   assert.strictEqual(S.findSpectrumEnd(strong).end, 860, 'the spec rule alone stops at the copy');
-  assert.strictEqual(S.findConfirmedMarker(strong), 1700);
+  assert.deepStrictEqual(S.findConfirmedMarker(strong), { end: 1700, method: 'marker+reference' });
   const t = new S.MarkerTracker();
   for (let i = 0; i < 3; i++) {
     const d = S.decodeScopeFrame(strong, t);
@@ -106,12 +106,41 @@ test('before any lock, a full-scale signal copied into the doubled half is not t
   assert.ok(/the spec's first-byte rule alone would stop at byte 860/.test(S.describeFrame(strong)), 'and the log says so');
 });
 
-test('no reference block after any candidate: the first-byte rule from the spec, unchanged', () => {
+test('no reference block after any candidate: a byte of exactly 1 is the marker', () => {
   const raw = Buffer.alloc(4096, 100); raw[1800] = 1;
-  assert.strictEqual(S.findConfirmedMarker(raw), null);
+  assert.deepStrictEqual(S.findConfirmedMarker(raw), { end: 1800, method: 'marker' });
   const d = S.decodeScopeFrame(raw, new S.MarkerTracker());
   assert.strictEqual(d.end, 1800);
   assert.strictEqual(d.method, 'marker');
+});
+
+test('only 0s, no 1 and no reference block: the first-byte rule from the spec, unchanged', () => {
+  const raw = Buffer.alloc(4096, 100); raw[1750] = 0;
+  assert.strictEqual(S.findConfirmedMarker(raw), null);
+  assert.strictEqual(S.decodeScopeFrame(raw, new S.MarkerTracker()).end, 1750);
+});
+
+// Raw frames written byte by byte from the spec's value table, not with the
+// module's own builder: 0 = strongest signal, 1 = reserved (the marker),
+// 200-240 = the noise floor.
+test('review: a full-scale signal (raw 0) above byte 500 followed by a noise floor near 230 is not the marker; the reserved 1 is', () => {
+  const raw = Buffer.alloc(4096, 0);
+  for (let i = 0; i < 1700; i++) raw[i] = 228 + (i % 5);      // noise floor 228-232: averages above 225
+  raw[860] = 0;                                                // a full-scale signal in the doubled half
+  raw[1700] = 1;                                               // the marker
+  for (let i = 1701; i < 2101; i++) raw[i] = 233;               // the reference block the spec observed
+  assert.strictEqual(S.findSpectrumEnd(raw).end, 860, 'the first-byte rule alone stops at the signal');
+  const d = S.decodeScopeFrame(raw, new S.MarkerTracker());
+  assert.strictEqual(d.end, 1700);
+  assert.strictEqual(d.usable, 850);
+  assert.strictEqual(d.levels[0], 255 - 228, 'inverted: noise reads low');
+});
+
+test('review: a reserved 1 beats an earlier 0 even with no reference block anywhere', () => {
+  const raw = Buffer.alloc(4096, 210);
+  raw[900] = 0; raw[1720] = 1;
+  assert.deepStrictEqual(S.findConfirmedMarker(raw), { end: 1720, method: 'marker' });
+  assert.strictEqual(S.decodeScopeFrame(raw, new S.MarkerTracker()).usable, 860);
 });
 
 test('a span change moves the marker: the old lock no longer reads <= 1 and the search runs again', () => {

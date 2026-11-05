@@ -125,7 +125,55 @@ test('RX audio: 24-byte inner header, 160 stereo frames at 16 kHz, channel 0 is 
   assert.ok(a.pcm.every((x) => x === 0.5), 'channel 0 only, scaled to [-1, 1]');
 });
 
+// ---- the spec's wire format, written again here from SPEC.md -------------
+// Independent of lib/sculan10-protocol.js on purpose (the review: a fake unit
+// built from the module's own code would pass a misreading on both sides).
+// Transcribed from the spec's "Reference Code" (build_gtable, build_header,
+// frame_packet, decrypt_body) and checked against its literal init packets.
+const SPEC = {
+  CTRL: 0xFC, CAT: 0xFD, AUDIO: 0xFE, SCOPE: 0xFA,
+  SETUP: 0x01, AUTH: 0x03, KEEPALIVE: 0x05, PORT_INIT: 0x06, DATA: 0x07,
+  SETUP_ACK: 0x81, AUTH_RESP: 0x83, KEEPALIVE_ACK: 0x85, PORT_INIT_ACK: 0x86, DATA_IN: 0x87,
+};
+const SPEC_NAME = { 0xFC: 'ctrl', 0xFD: 'cat', 0xFE: 'audio', 0xFA: 'scope' };
+const SPEC_GTABLE = (() => { const o = [0, 0xFF, 0xFE, 5]; const t = []; for (let i = 0; i < 8192; i++) t.push((4 * Math.floor(i / 4) + 6 + o[i % 4]) & 0xFF); return t; })();
+function specBuild(seq, channel, msgType, plaintext, key = Math.floor(Math.random() * 256)) {
+  const n = plaintext.length;
+  const header = [seq, key ^ seq ^ 0xFC, key ^ channel, key ^ 0x03, key ^ msgType, key, key ^ (n & 0xFF), key ^ (0x07 ^ ((n >> 8) & 0xFF))];
+  const enc = Array.from(plaintext, (b, i) => b ^ key ^ SPEC_GTABLE[i]);
+  const payload = [...header, ...enc];
+  const length = payload.length + 2;
+  return Buffer.from([0x5A, 0x5A, length & 0xFF, length >> 8, 0x00, 0x01, ...payload]);
+}
+function specParse(buf) {
+  if (buf.length < 14 || buf[0] !== 0x5A || buf[1] !== 0x5A) return null;
+  const h = buf.subarray(6, 14);
+  const key = h[5];
+  const n = (h[6] ^ key) | (((h[7] ^ key) ^ 0x07) << 8);
+  const body = Buffer.from(Array.from(buf.subarray(14, 14 + n), (b, i) => b ^ key ^ SPEC_GTABLE[i]));
+  return { seq: h[0], key, channel: h[2] ^ key, msgType: h[4] ^ key, body };
+}
+
+test('the independent spec encoder reproduces the five literal init packets of the spec', () => {
+  const literal = ['5a5a0e00000101a0a15e585d595a5b585956', '5a5a0e000001024042bdbbbebab9b8bbbab5', '5a5a0e00000103e0e31c1a1f1b18191a1b14',
+    '5a5a0e0000010480847b7d787c7f7e7d7c73', '5a5a0e000001052025dadcd9dddedfdcddd2'];
+  for (const hex of literal) {
+    const p = specParse(Buffer.from(hex, 'hex'));
+    assert.strictEqual(specBuild(p.seq, p.channel, p.msgType, p.body, p.key).toString('hex'), hex);
+    assert.strictEqual(p.channel, SPEC.CTRL);
+    assert.strictEqual(p.msgType, SPEC.KEEPALIVE);
+  }
+  // and the module agrees with it, byte for byte, on a CAT packet and a login
+  const cat = Buffer.from('FA;');
+  assert.ok(P.buildPacket({ seq: 9, channel: P.CHANNEL.CAT, msgType: P.MSG.DATA, body: cat, key: 0x41 }).equals(specBuild(9, SPEC.CAT, SPEC.DATA, cat, 0x41)));
+  const auth = specParse(P.buildAuthPacket('defaultuser', 'defaultuser'));
+  assert.strictEqual(auth.key, 0x3A); assert.strictEqual(auth.seq, 6); assert.strictEqual(auth.msgType, SPEC.AUTH);
+  assert.strictEqual(auth.body.length, 68);
+  assert.strictEqual(auth.body.subarray(2, 13).toString('ascii'), 'defaultuser');
+});
+
 // ---- a fake SCU-LAN10, from the spec's phases -------------------------------
+// It speaks through specBuild / specParse above, never the module's codec.
 
 async function bindConsecutive() {
   for (let tries = 0; tries < 40; tries++) {
@@ -143,18 +191,20 @@ async function bindConsecutive() {
   throw new Error('no 4 consecutive free UDP ports');
 }
 
-async function fakeUnit({ user = 'defaultuser', pass = 'defaultuser', sid = 0x22, catDoubleReply = true } = {}) {
+async function fakeUnit({ user = 'defaultuser', pass = 'defaultuser', sid = 0x22, catDoubleReply = true, setupAcks = true, dropEachSession = false } = {}) {
   const { base, socks } = await bindConsecutive();
   const [ctrl, cat, audio, scope] = socks;
   const u = { base, ctrl, cat, audio, scope, sid, silent: false, events: [], catSeen: [], keepalives: { ctrl: 0, cat: 0, audio: 0, scope: 0 }, logins: 0, audioPeer: null, respSeq: 0, lastCmdSeq: null };
   const seq = { ctrl: 0, cat: 0, audio: 0, scope: 0 };
   const reply = (name, sock, rinfo, channel, msgType, body) => {
     seq[name] = (seq[name] + 1) & 0xFF;
-    sock.send(P.buildPacket({ seq: seq[name], channel, msgType, body }), rinfo.port, rinfo.address);
+    sock.send(specBuild(seq[name], channel, msgType, body), rinfo.port, rinfo.address);
   };
   const on = (name, sock, handler) => sock.on('message', (msg, rinfo) => {
-    const p = P.parsePacket(msg);
+    const p = specParse(msg);
     if (!p) { u.events.push(`${name}:bad`); return; }
+    // A new login always gets through: the unit hands itself to whoever logs in.
+    if (p.msgType === SPEC.AUTH) u.silent = false;
     if (p.msgType === P.MSG.KEEPALIVE) {
       u.keepalives[name]++;
       if (u.silent) return;
@@ -177,15 +227,17 @@ async function fakeUnit({ user = 'defaultuser', pass = 'defaultuser', sid = 0x22
     }
     if (p.msgType === P.MSG.SETUP) {
       assert.strictEqual(p.body[0], u.sid, 'setup echoes the session id');
-      u.events.push(`setup:${P.CHANNEL_NAME[p.channel]}:${p.body[4].toString(16)}`);
-      reply('ctrl', ctrl, rinfo, P.CHANNEL.CTRL, P.MSG.SETUP_ACK, Buffer.alloc(4));
+      u.events.push(`setup:${SPEC_NAME[p.channel]}:${p.body[4].toString(16)}`);
+      if (setupAcks) reply('ctrl', ctrl, rinfo, P.CHANNEL.CTRL, P.MSG.SETUP_ACK, Buffer.alloc(4));
     }
   });
   const portInit = (name, sock, channel) => (p, rinfo) => {
     if (p.msgType !== P.MSG.PORT_INIT) return false;
     assert.strictEqual(p.body[0], u.sid, `${name} init echoes the session id`);
     u.events.push(`init:${name}`);
-    reply(name, sock, rinfo, channel, P.MSG.PORT_INIT_ACK, Buffer.alloc(4));
+    if (setupAcks) reply(name, sock, rinfo, channel, P.MSG.PORT_INIT_ACK, Buffer.alloc(4));
+    // A second program logging in elsewhere: this session goes quiet once set up.
+    if (dropEachSession && name === 'scope') setTimeout(() => { u.silent = true; }, 50);
     return true;
   };
   const catInit = portInit('cat', cat, P.CHANNEL.CAT);
@@ -422,6 +474,181 @@ test('scope end to end: a spec-shaped frame through the SCOPE channel decodes to
     c.t._logStats('test');
     assert.ok(c.logs.some((l) => /scope frames 3( \([\d.]+\/s\))?, lost 1;/.test(l)), c.logs.filter((l) => /stats/.test(l)).join('\n'));
   } finally { c.t.disconnect(); u.close(); }
+});
+
+// ---- the independent review's findings (2026-11-05) -------------------------
+
+// Fake sockets for the storm tests: every send fails, asynchronously, the way
+// a dgram send to an unreachable or invalid address does.
+function failingSockets() {
+  const made = [];
+  const createSocket = () => {
+    const ee = new (require('events'))();
+    ee.closed = false;
+    ee.bind = () => {};
+    ee.close = () => { ee.closed = true; };
+    ee.send = (_buf, _port, _host, cb) => setImmediate(() => cb(Object.assign(new Error('send EACCES'), { code: 'EACCES' })));
+    made.push(ee);
+    return ee;
+  };
+  return { made, createSocket };
+}
+
+test('review 1 (critical): a send error fails its session ONCE: one retry pending, no storm, nothing left after disconnect', async () => {
+  const f = failingSockets();
+  const t = new Sculan10Transport({ createSocket: f.createSocket });
+  let starts = 0, errors = 0;
+  t.on('log', (m) => { if (/connecting to/.test(m)) starts++; });
+  t.on('error', () => { errors++; });
+  t.connect({ host: '10.1.2.3', basePort: 50000, reconnectMinMs: 200, reconnectMaxMs: 400, loginTimeoutMs: 1500 });
+  await sleep(2000);
+  // 0, 200, 600, 1000, 1400, 1800 ms: about six sessions in two seconds. The
+  // old code had thousands (each of the six sends scheduled its own retry).
+  assert.ok(starts >= 3 && starts <= 8, 'sessions in 2 s: ' + starts);
+  assert.ok(errors <= starts, `one error per session (${errors} errors, ${starts} sessions)`);
+  t.disconnect();
+  const after = starts;
+  await sleep(700);
+  assert.strictEqual(starts, after, 'no session starts after disconnect');
+  assert.ok(f.made.every((s) => s.closed), 'every socket closed');
+});
+
+test('review 1: a name that does not resolve is one error per session, from one lookup', async () => {
+  let lookups = 0, sockets = 0;
+  const t = new Sculan10Transport({
+    lookup: (_h, cb) => { lookups++; setImmediate(() => cb(Object.assign(new Error('ENOTFOUND'), { code: 'ENOTFOUND' }))); },
+    createSocket: () => { sockets++; throw new Error('no socket should be opened'); },
+  });
+  const errs = [];
+  t.on('error', (e) => errs.push(e));
+  t.on('log', () => {});
+  t.connect({ host: 'no-such-unit.invalid', basePort: 50000, reconnectMinMs: 200, reconnectMaxMs: 400 });
+  await sleep(1300);
+  t.disconnect();
+  assert.strictEqual(sockets, 0, 'no sockets for an address that does not resolve');
+  assert.strictEqual(errs.length, lookups, 'one error per lookup');
+  assert.ok(lookups >= 2 && lookups <= 6, 'lookups: ' + lookups);
+  assert.strictEqual(errs[0].code, 'SCULAN10_DNS');
+  assert.ok(/does not resolve to an IPv4 address/.test(errs[0].message));
+});
+
+test('review 1: an address or port that can never work is refused before any packet, said once, never retried', async () => {
+  for (const [opts, code] of [
+    [{ host: '::1' }, 'SCULAN10_BAD_ADDRESS'],
+    [{ host: '192.168.49.1:50000' }, 'SCULAN10_BAD_ADDRESS'],
+    [{ host: '255.255.255.255' }, 'SCULAN10_BAD_ADDRESS'],
+    [{ host: '192.168.49.1', basePort: 65533 }, 'SCULAN10_BAD_PORT'],
+    [{ host: '192.168.49.1', basePort: 70000 }, 'SCULAN10_BAD_PORT'],
+  ]) {
+    let sockets = 0;
+    const t = new Sculan10Transport({ createSocket: () => { sockets++; throw new Error('none'); } });
+    const errs = [];
+    t.on('error', (e) => errs.push(e));
+    t.on('log', () => {});
+    t.connect({ basePort: 50000, reconnectMinMs: 50, ...opts });
+    await sleep(150);
+    assert.strictEqual(errs.length, 1, JSON.stringify(opts));
+    assert.strictEqual(errs[0].code, code, JSON.stringify(opts));
+    assert.strictEqual(sockets, 0);
+    t.disconnect();
+  }
+});
+
+test('review 4: a unit that answers the login but nothing else is not announced as connected', async () => {
+  const u = await fakeUnit({ setupAcks: false });
+  const c = client();
+  try {
+    c.t.connect({ host: '127.0.0.1', basePort: u.base, ...FAST, dataWaitMs: 200, reconnectMinMs: 5000, reconnectMaxMs: 5000 });
+    assert.ok(await until(() => c.errors.some((e) => e.code === 'SCULAN10_NO_SETUP'), 3000), c.logs.join('\n'));
+    assert.strictEqual(c.connects, 0, 'never "connected"');
+    assert.strictEqual(c.closes, 0);
+  } finally { c.t.disconnect(); u.close(); }
+});
+
+test('review 4: the retry backoff grows across short sessions and starts over only after a stable one', async () => {
+  const u = await fakeUnit({ dropEachSession: true });
+  const c = client();
+  try {
+    c.t.connect({ host: '127.0.0.1', basePort: u.base, ...FAST, inUseLimit: 99, stableMs: 60000 });
+    assert.ok(await until(() => c.connects >= 3, 8000), 'reconnected: ' + c.logs.filter((l) => /reconnect #/.test(l)).join(' | '));
+    assert.ok(c.logs.some((l) => /reconnect #2 /.test(l)), 'the second loss is retry #2, not #1 again: ' + c.logs.filter((l) => /reconnect #/.test(l)).join(' | '));
+  } finally { c.t.disconnect(); u.close(); }
+});
+
+test('review 5: lost within a minute of logging in, three times running: another program has the unit, so POTACAT stops', async () => {
+  const u = await fakeUnit({ dropEachSession: true });
+  const c = client();
+  try {
+    c.t.connect({ host: '127.0.0.1', basePort: u.base, ...FAST, inUseLimit: 3 });
+    assert.ok(await until(() => c.errors.some((e) => e.code === 'SCULAN10_IN_USE'), 10000), c.logs.join('\n'));
+    const e = c.errors.find((x) => x.code === 'SCULAN10_IN_USE');
+    assert.ok(/Another program \(PCC-LAN10, FT-Control or a second POTACAT\) is probably using it/.test(e.message));
+    assert.ok(/POTACAT stopped trying/.test(e.message));
+    const logins = u.logins;
+    assert.strictEqual(logins, 3);
+    await sleep(800);
+    assert.strictEqual(u.logins, logins, 'no more logins: no tug-of-war');
+  } finally { c.t.disconnect(); u.close(); }
+});
+
+test('review 6: an RX sample rate off the wire that no PCM stream has is not believed (16 kHz instead)', () => {
+  // Bytes laid out by hand from the spec's RX audio table, rate field = 1.
+  const body = Buffer.alloc(24 + 640);
+  body[0] = 7; body[1] = 0x00; body[2] = 0x01; body[3] = 0x02;
+  body.writeUInt32LE(1, 4);
+  body.writeUInt16LE(640, 22);
+  const a = P.parseRxAudio(body);
+  assert.strictEqual(a.sampleRate, 16000);
+  assert.strictEqual(a.rateTrusted, false);
+  assert.strictEqual(a.pcm.length, 160);
+  body.writeUInt32LE(48000, 4);
+  assert.strictEqual(P.parseRxAudio(body).sampleRate, 48000, 'a real rate is kept');
+  body.writeUInt32LE(0x3E80, 4);
+  assert.strictEqual(P.parseRxAudio(body).sampleRate, 16000);
+});
+
+test('review 3: transport log lines are not printed twice (RigController leaves them to main)', () => {
+  const { RigController } = require('../lib/rig-controller');
+  const { KenwoodCodec } = require('../lib/codecs/kenwood-codec');
+  const t = new Sculan10Transport();
+  assert.strictEqual(t.routesOwnLog, true);
+  const model = { brand: 'Yaesu', protocol: 'kenwood', caps: {}, cw: {}, tune: {} };
+  const ctl = new RigController(model, t, new KenwoodCodec(model, () => {}));
+  ctl._debug = true;
+  const fromController = [];
+  ctl.on('log', (m) => fromController.push(m));
+  t.on('log', () => {});
+  t._log('phase 1: test line');
+  assert.strictEqual(fromController.length, 0);
+});
+
+test('low: a packet of an unknown type is logged once per channel, not dropped silently', async () => {
+  const u = await fakeUnit();
+  const c = client();
+  try {
+    c.t.connect({ host: '127.0.0.1', basePort: u.base, ...FAST });
+    assert.ok(await until(() => c.connects === 1));
+    const peer = u._catPeer;
+    for (let i = 0; i < 3; i++) u.cat.send(specBuild(200 + i, SPEC.CAT, 0x99, Buffer.from([1, 2, 3])), peer.port, peer.address);
+    assert.ok(await until(() => c.logs.some((l) => /CAT: a packet of unknown type 0x99/.test(l))));
+    await sleep(100);
+    assert.strictEqual(c.logs.filter((l) => /unknown type 0x99/.test(l)).length, 1);
+  } finally { c.t.disconnect(); u.close(); }
+});
+
+test('low: a user or password the unit cannot take is refused with what is wrong, never the value', () => {
+  const long = 'p'.repeat(40);
+  const accented = 'pässwörd';
+  for (const [user, pass, want] of [['defaultuser', long, /password is 40 characters long; the SCU-LAN10 takes at most 32/], ['defaultuser', accented, /password has a character the SCU-LAN10 cannot take/], ['ü', 'x', /user has a character/]]) {
+    const t = new Sculan10Transport({ createSocket: () => { throw new Error('none'); } });
+    const errs = [];
+    t.on('error', (e) => errs.push(e));
+    t.connect({ host: '192.168.49.1', username: user, password: pass });
+    assert.strictEqual(errs[0].code, 'SCULAN10_BAD_LOGIN');
+    assert.ok(want.test(errs[0].message), errs[0].message);
+    assert.ok(!errs[0].message.includes(pass) && !errs[0].message.includes(long), 'the value is not in the message');
+  }
+  assert.strictEqual(P.loginFieldProblem('x'.repeat(32), 'password'), null, '32 is fine');
 });
 
 test('no address: a clear error, nothing sent', () => {
