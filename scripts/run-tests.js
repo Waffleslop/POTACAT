@@ -415,6 +415,7 @@ const TESTS = [
   'test/park-db-check-test.js', // activator: only POTA refs are checked against the parks list (og3e WWFF/SOTA flagged as typos), and the warning never overflows
   'test/rigctld-passthrough-test.js', // custom CAT over rigctld: a + or \ command goes to rigctld as typed (electricfalcon)
   'test/mono-upmix-test.js', // the VFO monitor plays radio audio in both ears (hoogskev, macOS left-channel only)
+  'test/setup-test-freq-test.js', // Station Setup test transmit: at the dial if the licence allows, else at the band's FT8 dial and back, else refused with why (w0tlp)
 ];
 
 const root = path.join(__dirname, '..');

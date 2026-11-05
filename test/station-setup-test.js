@@ -324,7 +324,7 @@ t('the power-restore safety stays out of a test that is still running', () => {
 // An audio tone cannot modulate a radio in CW: it keys and radiates nothing.
 t('the test transmit refuses in CW mode, before touching power or PTT, and logs the mode', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
-  const run = main.slice(main.indexOf('async function _runStationSetupTxTest('), main.indexOf('async function _runStationSetupTxTest(') + 5500);
+  const run = main.slice(main.indexOf('async function _runStationSetupTxTest('), main.indexOf('async function _runStationSetupTxTest(') + 9000);
   const cw = run.indexOf("if (/^CW/.test(modeNow))");
   assert.ok(cw > 0 && cw < run.indexOf("action: 'set-tx-power'") && cw < run.indexOf('startJtcatTune('));
   assert.ok(run.includes("sendCatLog(`[Setup] test transmit${voice ? ' (voice)' : ''}: radio mode"), 'logs the mode');

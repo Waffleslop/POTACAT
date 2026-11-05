@@ -2109,6 +2109,7 @@ const PowerRestore = require('./lib/power-restore');
 const { withTimeout } = require('./lib/with-timeout');
 const SerialHsTrial = require('./lib/serial-hs-trial');
 const IdleWsprBand = require('./lib/idle-wspr-band');
+const SetupTestFreq = require('./lib/setup-test-freq');
 // The radio's last mode report ({ mode, at }), set in sendCatMode: what the
 // external tune's mode restore believes, never the command it sent.
 let _lastModeReadback = null;
@@ -5934,6 +5935,16 @@ async function waitForPowerReadback(sinceTs, predicate, timeoutMs) {
 // lowering is over: the 5 W readback arrived first, read as "a restore that
 // never landed", and set the radio back to 100 W mid-test (K3SBP's 8600,
 // 2026-09-25, 80 ms after the drop).
+/** Resolve true once test() holds (checked every 100 ms), false after timeoutMs. */
+async function waitForCondition(test, timeoutMs) {
+  const end = Date.now() + timeoutMs;
+  while (Date.now() < end) {
+    try { if (test()) return true; } catch { /* keep waiting */ }
+    await sleepMs(100);
+  }
+  try { return !!test(); } catch { return false; }
+}
+
 async function runStationSetupTxTest(rigId, opts) {
   if (_stationSetupTxBusy) {
     const rig = stationSetupRigById(rigId);
@@ -5971,6 +5982,31 @@ async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false 
   }
   sendCatLog(`[Setup] test transmit${voice ? ' (voice)' : ''}: radio mode ${modeNow || 'unknown'}`);
 
+  // Where the tone may go (lib/setup-test-freq.js, w0tlp: refused in LSB).
+  // Outside the operator's privileges at the dial: move to the band's FT8
+  // dial for the test and come back; no such frequency: say why, key nothing.
+  const plan = SetupTestFreq.planTestFrequency({ freqHz: _currentFreqHz, mode: modeNow, licenseClass: settings.licenseClass });
+  if (plan.action === 'refuse') {
+    sendCatLog(`[Setup] test transmit: not keyed — ${plan.why}`);
+    return done({ result: 'error', message: plan.why });
+  }
+  let movedFromHz = 0;
+  if (plan.action === 'move') {
+    if (voice) {
+      // The voice test is a phone emission by definition: it cannot move to
+      // a data frequency.
+      return done({ result: 'error', message: `${plan.why} The voice test needs a phone frequency your licence allows. Tune to one, then test again.` });
+    }
+    movedFromHz = _currentFreqHz;
+    sendCatLog(`[Setup] test transmit: ${(movedFromHz / 1e6).toFixed(4)} MHz is outside your privileges for this test — moving to the FT8 dial ${(plan.dialHz / 1e6).toFixed(3)} MHz, then back`);
+    tuneRadio(plan.dialHz / 1000, undefined, undefined, { origin: 'Station Setup test transmit' });
+    const arrived = await waitForCondition(() => Math.abs((_currentFreqHz || 0) - plan.dialHz) < 100, 4000);
+    if (!arrived) {
+      tuneRadio(movedFromHz / 1000, undefined, undefined, { origin: 'Station Setup test transmit (back)' });
+      return done({ result: 'error', message: `${plan.why} POTACAT tried to move to ${(plan.dialHz / 1e6).toFixed(3)} MHz for the test, but the radio did not report arriving there, so nothing was keyed.` });
+    }
+  }
+
   const info = RIG_MODELS[rig.model] || {};
   const testW = Math.min(5, Number(info.maxPower) || 100);
   const prevW = Number(_currentTxPower) || 0;
@@ -6003,7 +6039,7 @@ async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false 
   // Judged by the mode the radio is in: a tone in LSB on a phone segment is
   // inside a phone privilege, where a data emission would not be (W0TLP
   // 2026-11-02). Still refused where the class has no phone there.
-  startJtcatTune({ toneHz: STATION_SETUP_TEST_TONE_HZ, emission: /^(USB|LSB|SSB)$/.test(modeNow) ? modeNow : 'DATA', noDataSwap: voice });
+  startJtcatTune({ toneHz: STATION_SETUP_TEST_TONE_HZ, emission: plan.emission, noDataSwap: voice });
   const keyed = jtcatTuneState.active;
   if (keyed) {
     await sleepMs(3000);
@@ -6014,6 +6050,13 @@ async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false 
   clearInterval(swrPoll);
   const meas = _stationSetupTxTest;
   _stationSetupTxTest = null;
+
+  // Back to where the operator was, if the test moved (believed only from the radio).
+  if (movedFromHz) {
+    tuneRadio(movedFromHz / 1000, undefined, undefined, { origin: 'Station Setup test transmit (back)' });
+    const back = await waitForCondition(() => Math.abs((_currentFreqHz || 0) - movedFromHz) < 100, 4000);
+    sendCatLog(back ? `[Setup] test transmit: back on ${(movedFromHz / 1e6).toFixed(4)} MHz` : `[Setup] test transmit: sent the radio back to ${(movedFromHz / 1e6).toFixed(4)} MHz, but it has not reported arriving — check the dial`);
+  }
 
   // Restore, then believe only the radio.
   let restored = true, restoreNote = '';
