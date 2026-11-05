@@ -129,6 +129,41 @@ test('main.js wiring: queue shared with the forward, pull gated on the setting',
   assert.ok(html.includes('id="set-n3fjp-pull"'));
 });
 
+// jgedmond 2026-11-02: a ClubLog "B" showed as a paper QSL, and a later
+// confirmation never reached a contact already brought in.
+const base = { fldCall: 'K1ABC', fldDateStr: '2026/10/01', fldTimeOnStr: '12:00', fldBand: '20', fldMode: 'FT8' };
+test('Conf By letters go to their own service field; QSL_RCVD only for a card', () => {
+  let r = P.toAdifRecord({ ...base, fldQSLR: 'Y', fldQSLConfByR: 'L' });
+  assert.strictEqual(r.LOTW_QSL_RCVD, 'Y'); assert.ok(!('QSL_RCVD' in r), 'not a paper card');
+  r = P.toAdifRecord({ ...base, fldQSLR: 'Y', fldQSLConfByR: 'B' });
+  assert.ok(!('QSL_RCVD' in r) && r.APP_N3FJP_QSL_CONF_BY_R === 'B', 'ClubLog kept as its letter, never P');
+  r = P.toAdifRecord({ ...base, fldQSLS: 'Y', fldQSLConfByS: 'B' });
+  assert.strictEqual(r.CLUBLOG_QSO_UPLOAD_STATUS, 'Y'); assert.ok(!('QSL_SENT' in r));
+  assert.ok(!Object.keys(r).some((k) => /_VIA$/.test(k)), "N3FJP's B is not ADIF's bureau");
+  r = P.toAdifRecord({ ...base, fldQSLR: 'Y' });
+  assert.strictEqual(r.QSL_RCVD, 'Y', 'no letter: as before');
+  r = P.toAdifRecord({ ...base, fldQSLR: 'Y', fldQSLConfByR: 'LP' });
+  assert.ok(r.LOTW_QSL_RCVD === 'Y' && r.QSL_RCVD === 'Y', 'an unknown letter may be the card');
+});
+test('confirmationPatch: an N3FJP contact mirrors N3FJP, a POTACAT contact is only upgraded', () => {
+  const fromN3 = { CALL: 'K1ABC', APP_POTACAT_IMPORTED_FROM: 'N3FJP', QSL_RCVD: 'Y' };
+  const now = P.toAdifRecord({ ...base, fldQSLR: 'Y', fldQSLConfByR: 'B' });
+  const p1 = P.confirmationPatch(fromN3, now);
+  assert.strictEqual(p1.QSL_RCVD, '', 'the old wrong paper mark is cleared');
+  assert.strictEqual(p1.APP_N3FJP_QSL_CONF_BY_R, 'B');
+  const own = { CALL: 'K1ABC', LOTW_QSL_RCVD: 'Y', QSL_SENT: 'Y' };
+  const p2 = P.confirmationPatch(own, P.toAdifRecord({ ...base, fldQSLS: 'Y', fldQSLConfByS: 'B' }));
+  assert.deepStrictEqual(p2, { CLUBLOG_QSO_UPLOAD_STATUS: 'Y' }, 'adds the Y, never removes');
+  assert.strictEqual(P.confirmationPatch(now, now), null);
+});
+test('the pull writes confirmation updates through mutateLog and re-reads the whole log daily', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const fn = main.slice(main.indexOf('function n3fjpUpdateConfirmations('), main.indexOf('async function n3fjpPull('));
+  assert.ok(/QsoLog\.mutateLog\(qsoLogPath\(\)/.test(fn) && /confirmationPatch\(q, m\)/.test(fn));
+  assert.ok(/const daily = !full && Date\.now\(\) - \(settings\.n3fjpPullConfirmAt \|\| 0\) > 24 \* 3600 \* 1000;/.test(main));
+  assert.ok(/n3fjpUpdateConfirmations\(records\)/.test(main));
+});
+
 (async () => {
   console.log('n3fjp-pull');
   for (const run of pending) await run();

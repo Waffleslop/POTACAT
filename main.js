@@ -31729,14 +31729,46 @@ let _n3fjpPullUnreadable = false; // a reply with nothing readable: stop for thi
 function n3fjpPullWanted() {
   return !!(settings && settings.n3fjpPull && settings.sendToLogbook && settings.logbookType === 'n3fjp');
 }
+/**
+ * Confirmations on contacts the log already holds, from N3FJP's copy of the
+ * same contacts (lib/n3fjp-pull.js confirmationPatch). The import skips a
+ * known contact, so without this a later LoTW/ClubLog/eQSL confirmation never
+ * showed (jgedmond 2026-11-02). One mutateLog write, journaled to the cloud.
+ */
+function n3fjpUpdateConfirmations(records) {
+  const { ContactIndex } = require('./lib/qso-match');
+  const index = new ContactIndex(records);
+  let n = 0;
+  try {
+    QsoLog.mutateLog(qsoLogPath(), (qsos) => {
+      for (const q of qsos) {
+        const m = index.findMatch(q);
+        const patch = m && N3fjpPull.confirmationPatch(q, m);
+        if (!patch) continue;
+        for (const [k, v] of Object.entries(patch)) { if (v === '') delete q[k]; else q[k] = v; }
+        n++;
+      }
+      return n ? qsos : false;
+    }, { sink: qsoLogSink });
+  } catch (err) {
+    sendCatLog(`[N3FJP] Could not update confirmations: ${err.message}`);
+    return 0;
+  }
+  if (n) sendCatLog(`[N3FJP] Updated confirmations on ${n} contact(s) from N3FJP`);
+  return n;
+}
+
 async function n3fjpPull(reason) {
   if (!n3fjpPullWanted() || _n3fjpPullRunning || _n3fjpPullUnreadable || !app.isReady()) return null;
   _n3fjpPullRunning = true;
   const host = settings.logbookHost || '127.0.0.1';
   const port = parseInt(settings.logbookPort, 10) || 1100;
   const full = !settings.n3fjpPullFullDone;
+  // Once a day the whole N3FJP log, so a confirmation that arrives weeks
+  // after the contact (outside the latest 200) still reaches this log.
+  const daily = !full && Date.now() - (settings.n3fjpPullConfirmAt || 0) > 24 * 3600 * 1000;
   try {
-    const reply = await n3fjpQueue(() => N3fjpPull.requestList(host, port, N3fjpPull.listCommand({ recent: full ? 0 : N3FJP_PULL_RECENT })));
+    const reply = await n3fjpQueue(() => N3fjpPull.requestList(host, port, N3fjpPull.listCommand({ recent: (full || daily) ? 0 : N3FJP_PULL_RECENT })));
     _n3fjpPullUnreachableLogged = false;
     const { records, dropped } = N3fjpPull.parseListReply(reply);
     if (!_n3fjpPullSampleLogged || (!records.length && reply.trim())) {
@@ -31752,11 +31784,13 @@ async function n3fjpPull(reason) {
     }
     for (const r of records) r.APP_POTACAT_IMPORTED_FROM = 'N3FJP';
     const { imported, skipped } = importQsoRecords(records);
+    const confirmed = skipped ? n3fjpUpdateConfirmations(records) : 0;
+    if (full || daily) { settings.n3fjpPullConfirmAt = Date.now(); saveSettings(settings); }
     if (full && (records.length || !reply.trim())) {
       settings.n3fjpPullFullDone = true;
       saveSettings(settings);
     }
-    if (imported > 0) {
+    if (imported > 0 || confirmed > 0) {
       loadWorkedQsos();
       loadWorkedParks();
       scanLogForEvents();
