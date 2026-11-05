@@ -36,6 +36,15 @@ function fakePort(closeMs) {
     assert.strictEqual(recentOwnClose('COM6').closed, true);
     assert.strictEqual(recentOwnClose('COM7'), null);
   });
+  await t('a close that never finished stays ours past the 15 s window (tactical_index)', async () => {
+    const tr = new SerialTransport();
+    tr._target = { path: 'COM10' };
+    tr._port = { isOpen: true, path: 'COM10', set() {}, close() { /* never calls back */ } };
+    tr.disconnect();
+    assert.strictEqual(recentOwnClose('COM10').closed, false);
+    assert.strictEqual(recentOwnClose('COM10', -1).closed, false, 'outside the window, still ours');
+    assert.strictEqual(recentOwnClose('COM6', -1), null, 'a finished close outside the window is not');
+  });
   await t('nothing open: disconnect resolves at once', async () => {
     const tr = new SerialTransport();
     await tr.disconnect();

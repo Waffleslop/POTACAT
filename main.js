@@ -8523,7 +8523,9 @@ async function connectCat() {
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
     cat.on('alc', sendCatAlc);
-    sendCatLog(`Connecting to ${model.brand || 'radio'} on ${target.path}`);
+    // Baud and framing on the open line: a silent radio is most often a CAT
+    // RATE mismatch, and the log never said the rate (tactical_index FT-450D).
+    sendCatLog(`Connecting to ${model.brand || 'radio'} on ${target.path} at ${target.baudRate || 9600} baud, ${model.serialStopBits === 2 ? '8N2' : '8N1'}`);
     let hs = resolveSerialHandshake(model, target);
     if (hs.source === 'model' && _serialHsTrial.get(target.path) === 'hardware') hs = { handshake: 'hardware', source: 'trial' };
     if (hs.handshake === 'hardware') {
