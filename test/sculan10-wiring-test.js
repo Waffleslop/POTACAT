@@ -154,5 +154,58 @@ test('band scope: frames go through the shared fan-out, and testers get the firs
   assert.ok(!/EX0|sendRaw/.test(rd), 'never an EX menu read or a raw write: menu numbers differ between these radios');
 });
 
+// ---- the independent review's findings (2026-11-05) -------------------------
+
+test('review 2 (high): a CAT key-down from any path is refused at gatedSetTransmit too; the external-ATU carrier stays allowed', () => {
+  const g = bodyOf(main, 'function gatedSetTransmit(state, emission) {', '\n}\n');
+  const gate = g.indexOf('if (state && yaesuLanTxRefusal() && !_externalAtuActive) {');
+  assert.ok(gate > 0 && gate < g.indexOf('if (passEnforcement && state)'), 'first thing it checks');
+  assert.ok(/return false;/.test(g.slice(gate, gate + 600)));
+  // the radio's own ATU (RigController.startTune) never keys through here
+  const st = bodyOf(read('lib/rig-controller.js'), '  startTune() {', '\n  }\n');
+  assert.ok(!/gatedSetTransmit|setTransmit\(true/.test(st));
+});
+
+test('review 2 (high): a custom CAT string holding TX1; or TX2; is refused; TX0; and reads pass', () => {
+  const m = main.match(/const RAW_CAT_KEYDOWN_RE = (\/.*\/i);/);
+  assert.ok(m, 'the pattern exists');
+  const re = eval(m[1]); // eslint-disable-line no-eval
+  for (const s of ['TX1;', 'TX2;', 'tx1;', 'FA014074000;TX1;', 'MD0C;TX2', ' TX1 ;']) assert.ok(re.test(s), 'keys: ' + s);
+  for (const s of ['TX0;', 'TX;', 'FA;', 'EX0301261;', 'KYTX1 TEST;']) assert.ok(!re.test(s), 'passes: ' + s);
+  const c = bodyOf(main, "case 'send-custom-cat': {", 'break;\n      }');
+  assert.ok(/if \(yaesuLanTxRefusal\(\) && RAW_CAT_KEYDOWN_RE\.test\(cmd\)\) \{[\s\S]*?break;/.test(c));
+  assert.ok(c.indexOf('RAW_CAT_KEYDOWN_RE') < c.indexOf('cat.sendRaw(cmd)'), 'before the send');
+});
+
+test('review low: the Winlink shim and logger CAT report a refused key-down, never a false success', () => {
+  const w = bodyOf(main, '    setPtt: (on) => {', 'handleRemotePtt(true,');
+  assert.ok(/if \(yaesuLanTxRefusal\(\)\) \{ winlinkLog\(.*\); return false; \}/.test(w));
+  assert.ok(w.indexOf('yaesuLanTxRefusal()') < w.indexOf('winlinkTxActive = true'), 'refused before it is marked active');
+  const l = bodyOf(main, "} else if (typeof a.ptt === 'boolean') {", 'handleRemotePtt(a.ptt);');
+  assert.ok(/if \(a\.ptt && yaesuLanTxRefusal\(\)\) \{[\s\S]*?_loggerCatPtt = false;[\s\S]*?return;/.test(l));
+});
+
+test('review 7: a scope window opened before the first frame starts the LAN scope when frames arrive', () => {
+  const h = bodyOf(main, 'function sculanScopeOnTransportFrame(f) {', '\n}\n');
+  assert.ok(/if \(yaesuScopeWanted\(\) && !sculanScopeOn\) \{\s*stopYaesuScope\([^)]*\);\s*yaesuScopeRestarts = 0;\s*startYaesuScope\(\);/.test(h));
+});
+
+test('review low: a yaesu-lan rig with no audio source saved gets the family default, not the previous rig\'s', () => {
+  const b = bodyOf(main, "} else if (target.type === 'yaesu-lan') {", "} else if (target.type === 'icom-network') {");
+  assert.ok(/activeRig\.catTarget\.type === 'yaesu-lan' && !activeRig\.audioSource\)/.test(b));
+  assert.ok(/settings\.audioSource = def;/.test(b));
+  assert.strictEqual(RigFamily.defaultAudioSourceFor('yaesu-lan'), 'yaesu-lan');
+  assert.ok(b.indexOf('settings.audioSource = def;') < b.indexOf('transport.connect('), 'decided before connecting');
+});
+
+test('review low: the rig editor refuses a login the unit cannot take, by the same rule as the protocol module', () => {
+  const src = bodyOf(app, 'function yaesuLanLoginProblem(value, what) {', '\n}\n') + '\n}';
+  const fn = new Function(src + '\nreturn yaesuLanLoginProblem;')(); // eslint-disable-line no-new-func
+  for (const v of ['defaultuser', 'x'.repeat(32), 'x'.repeat(33), 'pässwörd', 'with space', '\u{1F600}', '']) {
+    assert.strictEqual(fn(v, 'password') === null, P.loginFieldProblem(v, 'password') === null, JSON.stringify(v));
+  }
+  assert.ok(/yaesuLanLoginProblem\(catTarget\.username, 'user'\) \|\| yaesuLanLoginProblem\(catTarget\.password, 'password'\)/.test(app));
+});
+
 console.log(`\nSCU-LAN10 wiring: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

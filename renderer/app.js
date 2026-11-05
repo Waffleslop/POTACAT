@@ -3520,6 +3520,13 @@ async function saveRigEditor() {
     alert('Yaesu LAN (SCU-LAN10) works with the FTDX10, FT-710 and FTDX101D/MP. Pick one of those in Radio Model, or choose another connection type.');
     return false;
   }
+  // The unit takes plain ASCII, at most 32 characters (lib/sculan10-protocol.js
+  // loginFieldProblem); anything else would be cut or changed silently and
+  // the login would fail with no reply. Never shows the value.
+  if (catTarget && catTarget.type === 'yaesu-lan') {
+    const bad = yaesuLanLoginProblem(catTarget.username, 'user') || yaesuLanLoginProblem(catTarget.password, 'password');
+    if (bad) { alert('Yaesu LAN (SCU-LAN10): ' + bad); return false; }
+  }
 
   // Same-port CAT+PTT is correct for single-port adapters (DigiRig
   // Mobile etc.) and incorrect for full-size DigiRig (two virtual
@@ -10207,6 +10214,14 @@ document.getElementById('civ-tcp-test-btn')?.addEventListener('click', async () 
 // Icom Network / RS-BA1 test connection
 // --- Yaesu LAN (SCU-LAN10), experimental ---
 const YAESU_LAN_MODELS = ['FTDX10', 'FT-710', 'FTDX101D/MP'];
+// The same rule as lib/sculan10-protocol.js loginFieldProblem (pinned by
+// test/sculan10-wiring-test.js): at most 32 characters, printable ASCII.
+function yaesuLanLoginProblem(value, what) {
+  const v = String(value == null ? '' : value);
+  if (v.length > 32) return 'the ' + what + ' is ' + v.length + ' characters long; the SCU-LAN10 takes at most 32.';
+  if (/[^\x20-\x7E]/.test(v)) return 'the ' + what + ' has a character the SCU-LAN10 cannot take: plain letters, digits and keyboard symbols only.';
+  return null;
+}
 function yaesuLanTargetFromForm() {
   return {
     type: 'yaesu-lan',

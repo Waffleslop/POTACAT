@@ -6393,6 +6393,13 @@ function loggerCatAction(a) {
     _lastTuneFreq = 0;
     tuneRadio(_currentFreqHz / 1000, a.setMode, undefined, { origin: 'N1MM+ / logger CAT' });
   } else if (typeof a.ptt === 'boolean') {
+    if (a.ptt && yaesuLanTxRefusal()) {
+      // Refused (no transmit audio over the SCU-LAN10): the logger must not
+      // be told the radio is transmitting.
+      _loggerCatPtt = false;
+      sendCatLog(`[PTT] logger CAT TX refused — ${yaesuLanTxRefusal()}`);
+      return;
+    }
     _loggerCatPtt = a.ptt;
     handleRemotePtt(a.ptt);
   } else if (a.cw) {
@@ -8423,14 +8430,24 @@ async function connectCat() {
     // blank address stays blank (the transport says so) rather than
     // falling back to 127.0.0.1.
     const _ylHp = target.host ? resolveCatHostPort(target, target.port || 50000, 'Yaesu LAN') : { host: '', port: Number(target.port) || 50000 };
-    const rxAudio = settings.audioSource === 'yaesu-lan';
     const modelName = getActiveRigModelName();
     if (modelName && !Sculan10.MODELS.includes(modelName)) {
       sendCatLog(`[SCU-LAN10] WARNING: ${modelName} is not one of the radios the SCU-LAN10 spec covers (${Sculan10.MODELS.join(', ')}). Connecting anyway.`);
     }
     _yaesuLanAudioFrames = 0;
     _yaesuLanResamplers = null;
-    sendCatLog(`Connecting to the Yaesu SCU-LAN10 (experimental) at ${_ylHp.host}, UDP ports ${_ylHp.port}-${_ylHp.port + 3}${modelName ? `, ${modelName}` : ''}${rxAudio ? ', RX audio over the LAN' : ', RX audio from the sound card on this computer'}; transmit audio over the LAN is not supported yet. POTACAT ${app.getVersion()}.`);
+    {
+      // No audio source stored on this rig (a hand-edited or imported rig):
+      // it gets the family default, never the previous rig's source.
+      const activeRig = (settings.rigs || []).find((r) => r && r.id === settings.activeRigId);
+      if (activeRig && activeRig.catTarget && activeRig.catTarget.type === 'yaesu-lan' && !activeRig.audioSource) {
+        const def = RigFamily.defaultAudioSourceFor('yaesu-lan');
+        if (settings.audioSource !== def) sendCatLog(`[SCU-LAN10] this rig has no audio source saved; using ${def === 'yaesu-lan' ? 'Yaesu LAN audio (receive only)' : def} instead of the previous rig's "${settings.audioSource || 'none'}". Pick one in Settings > My Rigs.`);
+        activeRig.audioSource = def;
+        settings.audioSource = def;
+      }
+    }
+    sendCatLog(`Connecting to the Yaesu SCU-LAN10 (experimental) at ${_ylHp.host}, UDP ports ${_ylHp.port}-${_ylHp.port + 3}${modelName ? `, ${modelName}` : ''}${settings.audioSource === 'yaesu-lan' ? ', RX audio over the LAN' : ', RX audio from the sound card on this computer'}; transmit audio over the LAN is not supported yet. POTACAT ${app.getVersion()}.`);
     transport.connect({
       host: _ylHp.host,
       basePort: _ylHp.port,
@@ -10737,6 +10754,7 @@ async function startWinlinkShim() {
         return false;
       }
       if (_swrTripped) { winlinkLog('refused Pat\'s PTT — the SWR guard has tripped'); return false; }
+      if (yaesuLanTxRefusal()) { winlinkLog('refused Pat\'s PTT — ' + yaesuLanTxRefusal()); return false; }
       if (_winlinkUnkeyTimer) {
         // Keyed again inside the drain hold: stay keyed, nothing to re-assert.
         // Known gap (batch 4 review): handleRemotePtt is not called here, so the
@@ -26740,6 +26758,9 @@ function pttConfirmRestore(restoreMode, restoreFreq, noAnchor, since) {
 // The words for a key-down refused because the SCU-LAN10 has no transmit
 // audio path yet; null when transmitting is fine.
 let _yaesuLanTxNoticeAt = 0;
+// A raw Yaesu/Kenwood key-down anywhere in a custom CAT string: TX1; or TX2;
+// (TX0; is receive and always passes).
+const RAW_CAT_KEYDOWN_RE = /(^|;)\s*TX[12]\s*(;|$)/i;
 function yaesuLanTxRefusal() {
   const t = settings.catTarget;
   if (!t || t.type !== 'yaesu-lan' || settings.audioSource !== 'yaesu-lan') return null;
@@ -31489,7 +31510,15 @@ function sculanScopeOnTransportFrame(f) {
   if (!wasAvailable) {
     sendCatLog('[Scope] SCU-LAN10 scope frames are arriving: the band scope is available');
     try { broadcastRigState(); } catch { /* no rig yet */ }
-    yaesuScopeBroadcastState();
+    // A scope window opened before the first frame got "no scope" (or an
+    // SDR): now that the LAN scope exists, start it there.
+    if (yaesuScopeWanted() && !sculanScopeOn) {
+      stopYaesuScope('SCU-LAN10 scope frames arrived');
+      yaesuScopeRestarts = 0;
+      startYaesuScope();
+    } else {
+      yaesuScopeBroadcastState();
+    }
   }
   if (sculanScopeLiveTimer) clearTimeout(sculanScopeLiveTimer);
   sculanScopeLiveTimer = setTimeout(sculanScopeQuiet, 3100);
@@ -35322,6 +35351,17 @@ function sstvHaltTxNow() {
 }
 
 function gatedSetTransmit(state, emission) {
+  // SCU-LAN10 with the LAN as the audio source: no transmit audio exists, so
+  // a CAT key-down from ANY path here would be a silent carrier. The
+  // external-ATU tune carrier (an AM/CW carrier on purpose) stays allowed;
+  // the radio's own ATU (cat.startTune) never comes through here.
+  if (state && yaesuLanTxRefusal() && !_externalAtuActive) {
+    const why = yaesuLanTxRefusal();
+    sendCatLog(`[PTT] CAT transmit refused — ${why}`);
+    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', why);
+    if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'tune-blocked', reason: why });
+    return false;
+  }
   if (passEnforcement && state) {
     const res = passEnforcement.interceptCatCommand({ type: 'tx_enable', freqHz: effectiveTxFreqHz(), split: _currentSplit, mode: emission || _currentMode, ...passPowerState() });
     if (!res.allowed) {
@@ -43183,6 +43223,16 @@ function cloudShackNotice(text, kind) {
         if (meta && meta.guest) { sendCatLog('[pass] raw CAT refused for a guest'); break; }
         const cmd = data.command;
         if (!cmd || typeof cmd !== 'string') break;
+        // A custom button holding TX1; / TX2; keys the radio around every PTT
+        // path: with the SCU-LAN10 as the audio source that is a silent carrier.
+        if (yaesuLanTxRefusal() && RAW_CAT_KEYDOWN_RE.test(cmd)) {
+          const why = yaesuLanTxRefusal();
+          sendCatLog(`[PTT] custom CAT "${cmd}" refused — ${why}`);
+          if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', why);
+          if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'tune-blocked', reason: why });
+          if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: why, warn: true, duration: 15000 });
+          break;
+        }
         console.log('[Rig] Custom CAT command:', cmd);
         if (flexSdr()) {
           smartSdr._send(cmd);

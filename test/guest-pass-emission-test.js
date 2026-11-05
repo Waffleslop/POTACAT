@@ -63,7 +63,7 @@ test('the gates check the emission first, the radio\'s mode only when none was g
   for (const fn of ['gatedSetTransmit', 'gatedSmartSdrTransmit']) {
     const at = MAIN.indexOf(`function ${fn}(state, emission)`);
     assert.ok(at > 0, fn);
-    assert.ok(/mode: emission \|\| _currentMode/.test(MAIN.slice(at, at + 300)), fn);
+    assert.ok(/mode: emission \|\| _currentMode/.test(MAIN.slice(at, at + 1500)), fn);
   }
 });
 
