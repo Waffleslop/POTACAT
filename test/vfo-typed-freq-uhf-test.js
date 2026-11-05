@@ -32,6 +32,21 @@ test('HF typed in Hz is still Hz', () => {
   assert.strictEqual(typedToKhz('7074000'), 7074);
 });
 
+test('short-wave typed in Hz never lands on a microwave band', () => {
+  assert.strictEqual(typedToKhz('10000000'), 10000, 'WWV 10 MHz, not 10 GHz');
+  assert.strictEqual(typedToKhz('5900000'), 5900, '49 m broadcast, not 5.9 GHz');
+  assert.strictEqual(typedToKhz('3400000'), 3400, 'not 3.4 GHz');
+  assert.strictEqual(typedToKhz('2300000'), 2300, 'not 2.3 GHz');
+  assert.strictEqual(typedToKhz('915000'), 915, 'AM broadcast, not 33 cm');
+  assert.strictEqual(parsePastedFreq('10000000'), 10000);
+});
+
+test('2 m, 1.25 m, 70 cm and 23 cm typed in kHz go to kHz', () => {
+  assert.strictEqual(typedToKhz('432100'), 432100);
+  assert.strictEqual(typedToKhz('1296100'), 1296100);
+  assert.strictEqual(typedToKhz('223500'), 223500);
+});
+
 test('the rest of the keypad rule is unchanged', () => {
   assert.strictEqual(typedToKhz('14074'), 14074);
   assert.strictEqual(typedToKhz('144200'), 144200);
