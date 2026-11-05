@@ -30,7 +30,7 @@ test('desktop forms send ONE contact to logContact and never write records thems
   const surfaces = {
     'Log QSO dialog': body(app, "logSaveBtn.addEventListener('click', async () => {"),
     'bottom bar': body(app, 'async function saveBannerQso() {'),
-    'activation logger': body(app, 'async function activatorLogContact() {'),
+    'activation logger': body(app, 'async function activatorLogContactNow() {'),
     'Log QSO window': body(R('renderer/log-popout.js'), 'async function doSave() {'),
     'Logbook New QSO': body(R('renderer/qso-popout.js'), "document.getElementById('qso-new-save').addEventListener('click', async () => {"),
   };

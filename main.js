@@ -2106,6 +2106,7 @@ const CONDITIONS_MIN_H = 280;
 const EXTERNAL_ATU_CARRIER_MODE = 'AM';
 const ExtAtuRestore = require('./lib/ext-atu-restore');
 const PowerRestore = require('./lib/power-restore');
+const { withTimeout } = require('./lib/with-timeout');
 // The radio's last mode report ({ mode, at }), set in sendCatMode: what the
 // external tune's mode restore believes, never the command it sent.
 let _lastModeReadback = null;
@@ -13786,12 +13787,22 @@ function logOkSavedFields(r) {
   return out;
 }
 
+const QRZ_LOG_WAIT_MS = 2500;
 async function logContact(entry, opts) {
   opts = opts || {};
   if (!entry || !String(entry.callsign || '').trim()) return { success: false, error: 'Missing callsign', records: [] };
   const calls = QsoExpand.splitList(entry.callsign);
   const infos = new Map();
-  await Promise.all(calls.map(async (c) => { infos.set(c, await qrzStationInfo(c)); }));
+  // QRZ fills names and places, but it must never hold up the save: a slow
+  // QRZ held the Activator log button for seconds and a second press saved
+  // the contact twice (.eddiejames, 2026-11-05). Past QRZ_LOG_WAIT_MS the
+  // contact is saved without QRZ's fields; the late answer still fills QRZ's
+  // cache for the next contact.
+  await Promise.all(calls.map(async (c) => {
+    infos.set(c, await withTimeout(qrzStationInfo(c), QRZ_LOG_WAIT_MS, {
+      onTimeout: () => sendCatLog(`[QRZ] no answer for ${c} within ${QRZ_LOG_WAIT_MS / 1000} s — logged without QRZ's name and location`),
+    }));
+  }));
   const myRefs = entry.mySig && entry.mySigInfo
     ? [{ sig: String(entry.mySig).toUpperCase(), ref: entry.mySigInfo }]
     : (entry.activation === false ? [] : liveActivationMyRefs());

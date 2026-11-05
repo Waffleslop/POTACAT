@@ -28544,7 +28544,23 @@ if (crossRefLlota) crossRefLlota.addEventListener('blur', rebuildCrossRefs);
 if (crossRefWwbota) crossRefWwbota.addEventListener('blur', rebuildCrossRefs);
 
 // --- Quick Log ---
+// One log at a time. The callsign box clears only after the save returns, so
+// a second press (or Enter) during a slow save logged the same contact again:
+// .eddiejames saw three saves land at once, as duplicates, mid-pileup.
+let _activatorLogBusy = false;
 async function activatorLogContact() {
+  if (_activatorLogBusy) return;
+  _activatorLogBusy = true;
+  if (activatorLogBtn) activatorLogBtn.disabled = true;
+  try {
+    return await activatorLogContactNow();
+  } finally {
+    _activatorLogBusy = false;
+    if (activatorLogBtn) activatorLogBtn.disabled = false;
+  }
+}
+
+async function activatorLogContactNow() {
   if (!activationActive) return; // must have an active activation
   const rawCallsign = activatorCallsignInput.value.trim().toUpperCase();
   if (!rawCallsign) return;
