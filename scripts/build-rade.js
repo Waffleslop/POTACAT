@@ -76,6 +76,8 @@ function buildOpus() {
     '-DBUILD_SHARED_LIBS=OFF',
     '-DBUILD_TESTING=OFF',
     '-DBUILD_PROGRAMS=OFF',
+    // The static library is linked into the shared rade_native.node.
+    '-DCMAKE_POSITION_INDEPENDENT_CODE=ON',
   ];
 
   // Windows: specify x64 architecture
