@@ -159,7 +159,7 @@ test('the window a review opened closes after the last Save; one the operator ha
   const m = R('main.js');
   assert.ok(/if \(!logPopoutWin \|\| logPopoutWin\.isDestroyed\(\)\) _logPopoutForReview = true;/.test(m));
   assert.ok(/if \(jtcatLogReviews\.current\) jtcatShowLogReview\(\);[\s\S]{0,200}_logPopoutForReview && logPopoutWin/.test(m));
-  assert.ok(/logPopoutWin = null;\s+_logPopoutForReview = false;/.test(m));
+  assert.ok(/logPopoutWin = null;[\s\S]{0,120}_logPopoutForReview = false;/.test(m));
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

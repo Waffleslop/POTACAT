@@ -37646,8 +37646,8 @@ function cloudShackNotice(text, kind) {
     });
     logPopoutWin.on('closed', () => {
       logPopoutWin = null;
-      _logPopoutForReview = false;
       setTypedCall('popout', ''); // a closed window is not holding a call
+      _logPopoutForReview = false;
       if (win && !win.isDestroyed()) win.webContents.send('log-popout-status', false);
       // Closing on a contact under review declines it; one the form never
       // showed, or the next in line, comes straight back.
