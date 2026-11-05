@@ -3960,6 +3960,10 @@ function sendCatStatus(s) {
 // 'frequency'/'mode' events instead. Every other mode/rig uses cat normally.
 function catFrequencyHandler(hz) {
   if (smartSdr && smartSdr.mode === 'self') return;
+  // Not while transmitting, on any radio: a read during TX is the TX
+  // frequency (kg6odijohn, IC-7100 repeater memory: POTACAT acted on the
+  // offset). The controller drops them too; this is the net for every path.
+  if (_remoteTxState || (cat && cat._transmitting)) return;
   sendCatFrequency(hz);
 }
 function catModeHandler(md) {
