@@ -402,6 +402,7 @@ const TESTS = [
   'test/tx-no-freq-poll-test.js', // no frequency/mode poll while PTT is asserted; a frequency read during TX is ignored (kg6odijohn)
   'test/filter-width-untouched-test.js', // a spot click leaves the filter width alone: a width only from Filter Width settings or a rig preset
   'test/sstv-spec-timing-test.js', // Scottie, PD and Robot 72 send and read the spec line: exact scans, Robot 72's porch before each chroma
+  'test/vfo-typed-freq-uhf-test.js', // 432100 and 1296100 typed in the VFO window are 70 cm and 23 cm, not 0.43 and 1.3 MHz (davidcappello IC-9700)
 ];
 
 const root = path.join(__dirname, '..');

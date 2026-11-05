@@ -1588,17 +1588,12 @@ let kpBuffer = '';
 
 const kpGo = document.getElementById('kp-go');
 // What the typed text means, in kHz, or 0 when it means nothing yet.
+// A point means MHz; bare digits are kHz above 300, MHz up to 300, and Hz
+// above 300000 unless that is no amateur band and the kHz reading is one
+// (432100 = 70 cm, 1296100 = 23 cm on an IC-9700; davidcappello). One rule,
+// lib/freq-paste.js, for typing and pasting.
 function kpTargetKhz(buf) {
-  const val = parseFloat(buf);
-  if (isNaN(val) || val <= 0) return 0;
-  // If the input has a decimal point, treat as MHz (user was explicit)
-  // Otherwise: > 300 = kHz, > 300000 = Hz, else MHz
-  let mhz;
-  if (buf.includes('.')) mhz = val;
-  else if (val > 300000) mhz = val / 1000000;
-  else if (val > 300) mhz = val / 1000;
-  else mhz = val;
-  return mhz * 1000;
+  return window.FreqPaste ? window.FreqPaste.typedToKhz(buf) : 0;
 }
 function fmtMhz(khz) {
   return (khz / 1000).toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
@@ -1657,21 +1652,8 @@ document.getElementById('kp-cancel').addEventListener('click', () => showPane('d
 
 kpGo.addEventListener('click', () => {
   if (vfoLocked) { window.api.setVfoLock(true); return; }
-  const val = parseFloat(kpBuffer);
-  if (isNaN(val) || val <= 0) return;
-  // If the input has a decimal point, treat as MHz (user was explicit)
-  // Otherwise: > 300 = kHz, > 300000 = Hz, else MHz
-  let mhz;
-  if (kpBuffer.includes('.')) {
-    mhz = val;
-  } else if (val > 300000) {
-    mhz = val / 1000000;
-  } else if (val > 300) {
-    mhz = val / 1000;
-  } else {
-    mhz = val;
-  }
-  const khz = mhz * 1000;
+  const khz = kpTargetKhz(kpBuffer);
+  if (!khz) return;
   tuneFromPopout(khz);
   currentFreqHz = khz * 1000;
   kpRememberRecent(khz);
