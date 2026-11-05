@@ -15462,9 +15462,9 @@ function jtcatNoteTxSlot(slot) {
 function jtcatCqSlot(engine) {
   const eng = engine || ft8Engine;
   const periodMs = 1000 * (eng && typeof eng._cycleSec === 'function' ? eng._cycleSec() : 15);
-  // Fire in the CURRENT slot when early enough for late-start truncation (up
-  // to 7 s, WSJT-X waveform-truncation parity), else the next boundary.
-  const lateCapMs = (eng && eng._lateStartTxMs > 0 && eng._mode === 'FT8') ? Math.min(eng._lateStartTxMs, 7000) : 500;
+  // Fire in the CURRENT slot when early enough for late-start truncation (FT8
+  // up to 7 s, FT4 2.5 s, WSJT-X waveform-truncation parity), else the next boundary.
+  const lateCapMs = (eng && typeof eng.lateStartCapMs === 'function' && eng.lateStartCapMs()) || 500;
   const d = JtcatTxSlot.decideCqSlot({ lock: jtcatTxSlotLock(), lastTx: _jtcatLastTx, nowMs: StationClock.now(), periodMs, lateCapMs });
   if (eng) eng.setTxSlot(d.slot);
   return d.slot;
