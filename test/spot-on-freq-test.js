@@ -27,7 +27,7 @@ function extract(name) {
 }
 const reLine = app.match(/const DIGITAL_MODE_RE = [^\n]+/)[0];
 // eslint-disable-next-line no-new-func
-const onFreqKind = new Function(`${reLine}\n${extract('spotRefSet')}\n${extract('onFreqKind')}\nreturn onFreqKind;`)();
+const onFreqKind = new Function(`${reLine}\n${extract('spotRefSet')}\n${extract('onFreqKind')}\n${extract('spotBaseCall')}\nreturn onFreqKind;`)();
 
 console.log('spot on-freq');
 
@@ -48,13 +48,20 @@ test('digital modes share one dial: never split', () => {
   assert.strictEqual(onFreqKind({ reference: 'US-1', mode: 'FT4' }, { reference: 'US-2', mode: 'SSB' }), 'freq');
 });
 
-test('nothing to compare (no tuned spot, or a spot without a park) stays the plain group', () => {
+test('nothing to compare (no tuned spot, or no park and no call) stays the plain group', () => {
   assert.strictEqual(onFreqKind({ reference: 'US-1', mode: 'SSB' }, null), 'freq');
   assert.strictEqual(onFreqKind({ reference: '', mode: 'SSB' }, { reference: 'US-2', mode: 'SSB' }), 'freq');
 });
 
+test('a spot without a park (DX cluster) is told apart by station (hoogskev 10-08)', () => {
+  const tuned = { callsign: 'K1ABC', reference: 'US-1234', mode: 'SSB' };
+  assert.strictEqual(onFreqKind({ callsign: 'DL1XYZ', reference: '', mode: 'SSB' }, tuned), 'other-station');
+  assert.strictEqual(onFreqKind({ callsign: 'K1ABC/P', reference: '', mode: 'SSB' }, tuned), 'same-station');
+  assert.strictEqual(onFreqKind({ callsign: 'K1ABC', reference: '', mode: 'FT8' }, { callsign: 'W2X', mode: 'FT8' }), 'freq', 'digital still never split');
+});
+
 test('the table uses it and the other-park row has its own style', () => {
-  assert.ok(/tr\.classList\.add\(kind === 'other-park' \? 'on-freq-other' : 'on-freq'\);/.test(app));
+  assert.ok(/tr\.classList\.add\(kind === 'other-park' \|\| kind === 'other-station' \? 'on-freq-other' : 'on-freq'\);/.test(app));
   assert.ok(/\.on-freq-other td\.log-col,/.test(css));
   assert.ok(/table:not\(\.logging-enabled\) \.on-freq td:nth-child\(1 of :not\(\.log-col\)\)/.test(css),
     'with the Log column hidden the bar moves to the first visible cell');

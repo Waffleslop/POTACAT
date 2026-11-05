@@ -44740,6 +44740,14 @@ function cloudShackNotice(text, kind) {
     const potaParksPathChanged = has('potaParksPath') && newSettings.potaParksPath !== settings.potaParksPath;
     const potaActivationsPathChanged = has('potaActivationsPath') && newSettings.potaActivationsPath !== settings.potaActivationsPath;
 
+    // A panadapter gate that CHANGED, not one merely present: the full Settings
+    // Save always sends them all, so every Save reconnected the cluster, which
+    // empties clusterSpots — DX spots vanished from the table (hoogskev 10-08).
+    const panadapterChanged = ['panadapterSyncTable', 'panadapterPota', 'panadapterSota', 'panadapterWwff', 'panadapterLlota',
+      'panadapterCluster', 'panadapterRbn', 'panadapterCwSpots', 'panadapterPskr', 'panadapterWsjtx',
+      'panadapterGma', 'panadapterParc'] // gma was missing once (its toggle never re-gated fetches)
+      .some((k) => has(k) && JSON.stringify(newSettings[k]) !== JSON.stringify(settings[k]));
+
     const clusterChanged = (has('enableCluster') && newSettings.enableCluster !== settings.enableCluster) ||
       (has('myCallsign') && newSettings.myCallsign !== settings.myCallsign) ||
       (has('clusterNodes') && JSON.stringify(newSettings.clusterNodes) !== JSON.stringify(settings.clusterNodes));
@@ -45058,11 +45066,7 @@ function cloudShackNotice(text, kind) {
     // calling connect* — those functions now consult both table and
     // panadapter sides via panadapterWantsSource(). Polled sources
     // (POTA/SOTA/WWFF/LLOTA) pick up the new gate on the next refreshSpots.
-    const panadapterChanged = has('panadapterSyncTable') || has('panadapterPota') ||
-      has('panadapterSota') || has('panadapterWwff') || has('panadapterLlota') ||
-      has('panadapterCluster') || has('panadapterRbn') || has('panadapterCwSpots') ||
-      has('panadapterPskr') || has('panadapterWsjtx') ||
-      has('panadapterGma') || has('panadapterParc'); // gma was missing (its toggle never re-gated fetches)
+    // Decided before the merge below (by here `settings` holds the new values).
     if (panadapterChanged) {
       // connectX() and disconnectX() are idempotent — they tear down before
       // (re)gating, so calling them when the gate is now false is the safe

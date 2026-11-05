@@ -617,6 +617,11 @@ header {
 .spots-category:focus-within > .spots-submenu {
   display: block;
 }
+/* A submenu held open by focus (a ticked checkbox) yields to the row being
+   hovered, or two submenus drew over each other (hoogskev 10-24). */
+.spots-dropdown-panel:hover .spots-category:not(:hover) > .spots-submenu {
+  display: none;
+}
 
 .multi-dropdown.open .spots-dropdown-panel,
 .multi-dropdown.open .settings-dropdown-panel {
@@ -6191,8 +6196,12 @@ a.settings-echocat-badge-link:hover {
 /* Log dialog */
 #log-dialog {
   min-width: 340px;
-  max-width: 400px;
+  /* 400 px squeezed the worked-band grid (11 band columns, #108) and broke
+     the form (hoogskev 11-03); the grid scrolls if it still does not fit. */
+  width: min(500px, 96vw);
+  max-width: 500px;
 }
+.log-worked-matrix { overflow-x: auto; }
 
 .log-dialog-header {
   display: flex;
@@ -10059,6 +10068,11 @@ main.banner-logger-active #event-progress-overlay {
 .contests-drawer,
 .displaced-banner,
 .cat-popover {
+  -webkit-app-region: no-drag;
+}
+/* A dialog whose top reaches the titlebar strip (a short or zoomed window)
+   lost its X to the drag region (nj2dx, Station Setup). */
+dialog[open] {
   -webkit-app-region: no-drag;
 }
 .contests-drawer-close {

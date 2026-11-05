@@ -10318,9 +10318,23 @@ function onFreqKind(spot, tuned) {
   if (!tuned || !spot) return 'freq';
   if (DIGITAL_MODE_RE.test(spot.mode || '') || DIGITAL_MODE_RE.test(tuned.mode || '')) return 'freq';
   const a = spotRefSet(spot.reference), b = spotRefSet(tuned.reference);
-  if (!a.size || !b.size) return 'freq';
+  if (!a.size || !b.size) {
+    // A DX cluster spot carries no park: compare the stations instead, or a
+    // different station on the frequency read as the same group whenever
+    // POTA and cluster spots mixed (hoogskev 10-08).
+    const ca = spotBaseCall(spot.callsign), cb = spotBaseCall(tuned.callsign);
+    if (!ca || !cb) return 'freq';
+    return ca === cb ? 'same-station' : 'other-station';
+  }
   for (const r of a) if (b.has(r)) return 'same-park';
   return 'other-park';
+}
+// W1AW/P, VE3/W1AW and W1AW all name W1AW: the longest part with a digit.
+function spotBaseCall(call) {
+  const parts = String(call || '').toUpperCase().split('/').filter(Boolean);
+  const withDigit = parts.filter((p) => /\d/.test(p));
+  const pool = withDigit.length ? withDigit : parts;
+  return pool.sort((x, y) => y.length - x.length)[0] || '';
 }
 
 function hasWorkedOnBandMode(spot) {
@@ -12155,6 +12169,14 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'Space' && !e.target.matches('input, select, textarea')) {
     e.preventDefault();
     if (scanning) { stopScan(); } else { startScan(); }
+    return;
+  }
+  // Arrow Up/Down in the Directory: step through the open tab's rows, each
+  // step a click so the tab's own select-and-tune runs (hoogskev 11-02).
+  if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && currentView === 'directory'
+      && !e.target.matches('input, select, textarea') && !document.querySelector('dialog[open]')) {
+    e.preventDefault();
+    directoryArrowStep(e.key === 'ArrowDown' ? 1 : -1);
     return;
   }
   // Arrow Up/Down — navigate spots in table view
@@ -14588,12 +14610,16 @@ function render() {
         // apart — a second activation sharing the frequency, or a stale spot.
         // Digital modes share one dial, so there it stays the quiet group.
         const kind = onFreqKind(s, lastTunedSpot);
-        tr.classList.add(kind === 'other-park' ? 'on-freq-other' : 'on-freq');
+        tr.classList.add(kind === 'other-park' || kind === 'other-station' ? 'on-freq-other' : 'on-freq');
         const freqNote = kind === 'same-park'
           ? 'Same frequency and park as the spot you tuned: another operator at this activation'
           : kind === 'other-park'
             ? 'On your frequency, but a different park than the spot you tuned: a separate activation, or an old spot'
-            : 'On your radio\'s frequency';
+            : kind === 'same-station'
+              ? 'The same station as the spot you tuned, spotted again'
+              : kind === 'other-station'
+                ? 'On your frequency, but a different station than the spot you tuned'
+                : 'On your radio\'s frequency';
         tr.title = tr.title ? `${tr.title}\n${freqNote}` : freqNote;
       }
       if (isSkipped) {
@@ -20914,6 +20940,29 @@ function initDirvHeaderMenu(table) {
   if (thead) thead.addEventListener('contextmenu', (e) => showDirvColMenu(e, table));
 }
 
+// Arrow-key row stepping for every Directory tab (Nets, SWL, Landmarks,
+// Channels). The index is remembered per tab because Nets/SWL show a row as
+// tuned only once the radio echoes the frequency back.
+let _dirKeyNav = { tab: null, idx: -1 };
+function directoryRows() {
+  const body = dirvActiveTab === 'nets' ? dirvNetsBody : dirvActiveTab === 'swl' ? dirvSwlBody
+    : dirvActiveTab === 'landmarks' ? document.getElementById('lmk-body') : document.getElementById('chn-body');
+  if (!body) return [];
+  const sel = dirvActiveTab === 'landmarks' ? 'tr.lmk-row' : dirvActiveTab === 'channels' ? 'tr.chn-row' : 'tr';
+  return Array.from(body.querySelectorAll(sel)).filter((r) => r.offsetParent !== null);
+}
+function directoryArrowStep(step) {
+  const rows = directoryRows();
+  if (!rows.length) return;
+  let idx = _dirKeyNav.tab === dirvActiveTab ? _dirKeyNav.idx : -1;
+  if (idx < 0 || idx >= rows.length) idx = rows.findIndex((r) => r.matches('.lmk-selected, .dirv-tuned, .chn-tuned'));
+  idx = idx < 0 ? (step > 0 ? 0 : rows.length - 1) : Math.max(0, Math.min(rows.length - 1, idx + step));
+  _dirKeyNav = { tab: dirvActiveTab, idx };
+  rows[idx].click();
+  const row = directoryRows()[idx]; // Landmarks and Channels re-render on click
+  if (row) row.scrollIntoView({ block: 'nearest' });
+}
+
 // Directory view tab switching
 function setDirvTab(tab) {
   dirvActiveTab = tab;
@@ -21583,6 +21632,7 @@ window.addEventListener('resize', () => {
   _floatingBoxResizeTimer = setTimeout(() => {
     clampFloatingBox(document.getElementById('meter-box'), 'meterBoxPos');
     clampFloatingBox(document.getElementById('cw-macro-bar'), 'cwMacroBoxPos');
+    clampFloatingBox(document.getElementById('voice-macro-bar'), 'voiceMacroBoxPos');
   }, 50);
 });
 
@@ -23226,10 +23276,12 @@ let voiceMacroBoxVisible = localStorage.getItem('voiceMacroBoxVisible') === 'tru
   if (saved) {
     try {
       const pos = JSON.parse(saved);
-      voiceMacroBar.style.left = pos.left + 'px';
-      voiceMacroBar.style.top = pos.top + 'px';
-      voiceMacroBar.style.right = 'auto';
-      voiceMacroBar.style.bottom = 'auto';
+      if (pos && Number.isFinite(pos.left) && Number.isFinite(pos.top)) { // a saved NaN came back as "nullpx"
+        voiceMacroBar.style.left = pos.left + 'px';
+        voiceMacroBar.style.top = pos.top + 'px';
+        voiceMacroBar.style.right = 'auto';
+        voiceMacroBar.style.bottom = 'auto';
+      }
     } catch {}
   }
   voiceMacroBar.addEventListener('mousedown', (e) => {
@@ -23255,10 +23307,8 @@ let voiceMacroBoxVisible = localStorage.getItem('voiceMacroBoxVisible') === 'tru
     if (!dragging) return;
     dragging = false;
     voiceMacroBar.classList.remove('dragging');
-    localStorage.setItem('voiceMacroBoxPos', JSON.stringify({
-      left: parseInt(voiceMacroBar.style.left, 10),
-      top: parseInt(voiceMacroBar.style.top, 10),
-    }));
+    const left = parseInt(voiceMacroBar.style.left, 10), top = parseInt(voiceMacroBar.style.top, 10);
+    if (Number.isFinite(left) && Number.isFinite(top)) localStorage.setItem('voiceMacroBoxPos', JSON.stringify({ left, top }));
   });
 })();
 // Voice macros: up to VOICE_MACRO_MAX slots. The editor shows a number of
@@ -23323,6 +23373,10 @@ if (window.api.onRemoteVoiceMacros) {
 async function updateVoiceMacroBar() {
   if (!voiceMacroBar) return;
   voiceMacroBar.classList.toggle('hidden', !voiceMacroBoxVisible);
+  // Shown: pull it back into the window. A position saved in a bigger window
+  // left it shown but out of sight (andrewmorkunas, Linux; the clamp only ran
+  // for the meter and CW boxes, and does nothing while a box is hidden).
+  if (voiceMacroBoxVisible) requestAnimationFrame(() => clampFloatingBox(voiceMacroBar, 'voiceMacroBoxPos'));
   if (quickShowVoiceMacros) quickShowVoiceMacros.checked = voiceMacroBoxVisible;
   if (!voiceMacroBoxVisible) return;
   if (remoteShack && remoteShack.remote) {

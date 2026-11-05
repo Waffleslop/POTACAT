@@ -1701,7 +1701,9 @@ document.addEventListener('paste', (e) => {
 // field has focus: CW text, profile names).
 document.addEventListener('keydown', (e) => {
   const t = e.target;
-  if (t && (t.tagName === 'INPUT' && t.type !== 'checkbox' && t.type !== 'range' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+  // The "Type a frequency" box (readonly) is ours to type into: clicking it
+  // focused an INPUT and every digit was dropped (hoogskev 10-29 / 11-02).
+  if (t !== kpInput && t && (t.tagName === 'INPUT' && t.type !== 'checkbox' && t.type !== 'range' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
   if (e.key === 'Escape') {
     if (sheetOpen()) { openSheet(false); return; }
     showPane('dial');

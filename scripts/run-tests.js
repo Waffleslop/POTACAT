@@ -197,6 +197,7 @@ const TESTS = [
   'test/web-ft8-running-test.js',
   'test/jtcat-band-pick-test.js',
   'test/sstv-robot36-spec-test.js',
+  'test/ui-batch-2026-11-05-test.js',
   'test/modem-audio-server-test.js',
   'test/modem-bridge-test.js',
   'test/wspr-daily-test.js',
