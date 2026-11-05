@@ -404,6 +404,7 @@ const RtlTcpAudio = require('./lib/rtltcp-audio');
 const ScopeOverlay = require('./lib/scope-overlay');
 const { explainRigctldFailure } = require('./lib/rigctld-stderr');
 const RigFamily = require('./lib/rig-family');
+const RigFullPower = require('./lib/rig-full-power');
 const AtuWizard = require('./lib/atu-wizard');
 const AppTheme = require('./lib/app-theme');
 const { stripSecrets, restoreSecrets } = require('./lib/settings-secrets');
@@ -3151,7 +3152,16 @@ function noCatBandNote(mhz) {
 }
 
 /** Get the active rig's model entry from rig-models.js, or null */
+// The active rig's model, with the rig's own full power applied when set
+// (lib/rig-full-power.js, W5LEE's 5 W Hermes Lite behind deskHPSDR's 100 W
+// TS-2000 emulation). One wrapper, so every return path below gets it: the
+// codecs, the power sliders, the caps and the logged TX power agree.
 function getActiveRigModel() {
+  const activeRig = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
+  return RigFullPower.applyFullPower(_activeRigModelBase(), activeRig);
+}
+
+function _activeRigModelBase() {
   const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
   const modelName = activeRig?.model || null;
   const rigType = detectRigType();

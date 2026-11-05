@@ -1508,6 +1508,16 @@ function setRigRxLevelField(v) {
   rigRxLevel.value = String(n);
   if (rigRxLevelVal) rigRxLevelVal.textContent = fmtRxLevelDb(n);
 }
+// Full power (W), rig.fullPowerW (lib/rig-full-power.js): blank = the model's.
+function readRigFullPowerField() {
+  const el = document.getElementById('set-rig-full-power');
+  const v = el ? parseFloat(el.value) : NaN;
+  return Number.isFinite(v) && v > 0 && v <= 2000 ? Math.round(v * 10) / 10 : null;
+}
+function setRigFullPowerField(v) {
+  const el = document.getElementById('set-rig-full-power');
+  if (el) el.value = Number(v) > 0 ? String(v) : '';
+}
 function readRigRxLevelField() {
   if (!rigRxLevel) return 0;
   return Math.max(-20, Math.min(20, Math.round(Number(rigRxLevel.value) || 0)));
@@ -3393,6 +3403,7 @@ async function openRigEditor(mode, rigId) {
       }
       await populateRigAudioDevices(rig.remoteAudioInput, rig.remoteAudioOutput);
       setRigRxLevelField(rig.rxLevelDb);
+      setRigFullPowerField(rig.fullPowerW);
       // Restore per-rig CW key port
       if (setCwKeyPort && rig.cwKeyPort) setCwKeyPort.value = rig.cwKeyPort;
       // Restore per-rig CW keying line (DTR/RTS override; default 'auto')
@@ -3427,6 +3438,7 @@ async function openRigEditor(mode, rigId) {
     if (rigModelSelect) rigModelSelect.value = '';
     if (setCwKeyLine) setCwKeyLine.value = 'auto';
     if (setRadioNr) setRadioNr.value = '1';
+    setRigFullPowerField(null);
     const fh = document.getElementById('set-flex-api-host');
     if (fh) fh.value = '';
     setRadioType('flex');
@@ -3584,6 +3596,7 @@ async function saveRigEditor() {
       rig.remoteAudioInput = rigAudioIn;
       rig.remoteAudioOutput = rigAudioOut;
       rig.rxLevelDb = rigRxLevelDb;
+      rig.fullPowerW = readRigFullPowerField();
       rig.audioSource = rigAudioSource;
       rig.cwKeyPort = rigCwKeyPortVal;
       rig.cwKeyLine = rigCwKeyLineVal;
@@ -3611,6 +3624,7 @@ async function saveRigEditor() {
       remoteAudioInput: rigAudioIn,
       remoteAudioOutput: rigAudioOut,
       rxLevelDb: rigRxLevelDb,
+      fullPowerW: readRigFullPowerField(),
       audioSource: rigAudioSource,
       cwKeyPort: rigCwKeyPortVal,
       cwKeyLine: rigCwKeyLineVal,

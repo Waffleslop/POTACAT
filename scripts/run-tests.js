@@ -407,6 +407,7 @@ const TESTS = [
   'test/sculan10-test.js', // Yaesu SCU-LAN10 (experimental): wire protocol against the spec's reference values, the transport against a fake unit (login, setup, keepalives, CAT de-dup, RX audio, login timeout, password never logged)
   'test/sculan10-wiring-test.js', // SCU-LAN10 in POTACAT: a visible rig-editor choice, Yaesu codec over the transport, RX audio to JTCAT/SSTV/ECHOCAT, a key-down with LAN audio refused (never a silent carrier)
   'test/sculan10-scope-test.js', // SCU-LAN10 band scope: spec-shaped frames, inverted amplitude, boundary marker and marker/2, the marker lock, 850-point resampling, bin-to-frequency
+  'test/rig-full-power-test.js', // a radio's real full power (rig.fullPowerW): W5LEE's 5 W Hermes Lite behind deskHPSDR's 100 W TS-2000 emulation, slider, PC command, readback and log in real watts
 ];
 
 const root = path.join(__dirname, '..');
