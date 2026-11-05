@@ -42442,11 +42442,10 @@ function cloudShackNotice(text, kind) {
           cat.setFilterWidth(width);
         }
         _currentFilterWidth = width;
-        // Update the per-mode setting so rig panel changes persist across tunes
-        const cm = (_currentMode || '').toUpperCase();
-        if (cm === 'CW') settings.cwFilterWidth = width;
-        else if (cm === 'USB' || cm === 'LSB' || cm === 'SSB') settings.ssbFilterWidth = width;
-        else if (cm === 'DIGU' || cm === 'DIGL' || cm === 'PKTUSB' || cm === 'PKTLSB' || cm === 'FT8' || cm === 'FT4') settings.digitalFilterWidth = width;
+        // A width set on the rig panel is for now, on the radio. It used to be
+        // copied into the per-mode Filter Width setting, so one 500 Hz click in
+        // CW forced 500 Hz on every later CW spot click (jarhd FTDX10). Only
+        // Settings > Filter Width (or a rig preset) makes a width a tune's.
         broadcastRigState();
         break;
       }

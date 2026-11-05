@@ -400,6 +400,7 @@ const TESTS = [
   'test/tx-limit-test.js', // one stuck-TX limit over every key-down POTACAT starts; a radio keyed without us is logged
   'test/ptt-data-mode-order-test.js', // SSB-over-DATA keys only once the radio reports DATA; the voice mode is restored after unkey and confirmed
   'test/tx-no-freq-poll-test.js', // no frequency/mode poll while PTT is asserted; a frequency read during TX is ignored (kg6odijohn)
+  'test/filter-width-untouched-test.js', // a spot click leaves the filter width alone: a width only from Filter Width settings or a rig preset
 ];
 
 const root = path.join(__dirname, '..');

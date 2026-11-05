@@ -44,18 +44,22 @@ test('the known width survives the flip for the next same-mode resend', () => {
   assert.strictEqual(writes[writes.length - 1], 'M LSB 3000');
 });
 
-test('a real mode change still gets the mode default', () => {
+// A real mode change used to get the mode's default width (CW 500, SSB 2400).
+// Since 2026-11-05 it keeps the radio's own width too: a spot click sends a
+// width only when the operator's Filter Width or a rig preset asks (jarhd
+// FTDX10 CW forced to 500 Hz).
+test('a real mode change keeps the radio\'s width as well (no forced default)', () => {
   const { c, writes } = codec();
   c.setMode('USB', 14245000);
   c._lastKnownWidth = 3000;
   c.setMode('CW', 14030000);
-  assert.ok(/^M CW \d+$/.test(writes[writes.length - 1]) && !/-1$/.test(writes[writes.length - 1]), writes[writes.length - 1]);
+  assert.strictEqual(writes[writes.length - 1], 'M CW -1');
 });
 
-test('the first mode of a session still gets a real passband', () => {
+test('the first mode of a session keeps the radio\'s width', () => {
   const { c, writes } = codec();
   c.setMode('LSB', 7227000);
-  assert.ok(/^M LSB \d+$/.test(writes[0]), writes[0]);
+  assert.strictEqual(writes[0], 'M LSB -1');
 });
 
 test('a rig without filter control keeps sending 0', () => {
