@@ -29879,15 +29879,11 @@ function createWsjtxUdpBridge(label) {
         const statusMode = String(qsoData.mode || '').toUpperCase();
         this._sendStatus(freqHz > 0 ? { dialFreqHz: freqHz, mode: statusMode } : null);
 
-        // LOGGED_ADIF (type 12) first — carries POTA_REF, SIG_INFO, and other
-        // program-specific fields. Then QSO_LOGGED (type 5) for apps that
-        // only listen for the structured message.
-        const adifBuf = encodeLoggedAdif(this.id, adifText);
-        this.socket.send(adifBuf, 0, adifBuf.length, this.port, this.host, (err) => {
-          if (err) sendCatLog(`[${this.label}] LOGGED_ADIF send error: ${err.message}`);
-          else sendCatLog(`[${this.label}] LOGGED_ADIF (type 12) sent (${adifBuf.length} bytes)`);
-        });
-
+        // QSO_LOGGED (type 5) first, then LOGGED_ADIF (type 12): WSJT-X's
+        // order. GridTracker logs a type 5 three seconds later unless a type 12
+        // follows it, so the reverse order logged — and POTA-spotted — every
+        // contact twice (jgedmond 2026-10-28, since JTCAT decodes reach GT2).
+        // The type 12 carries POTA_REF, SIG_INFO and the program fields.
         const qsoMsg = encodeQsoLogged(this.id, {
           dateTimeOff,
           dateTimeOn: dateTimeOff,
@@ -29907,11 +29903,17 @@ function createWsjtxUdpBridge(label) {
           exchangeReceived: qsoData.sigInfo || '',
         });
         this.socket.send(qsoMsg, 0, qsoMsg.length, this.port, this.host, (err) => {
+          if (err) sendCatLog(`[${this.label}] QSO_LOGGED send error: ${err.message}`);
+          else sendCatLog(`[${this.label}] QSO_LOGGED (type 5) sent (${qsoMsg.length} bytes)`);
+        });
+
+        const adifBuf = encodeLoggedAdif(this.id, adifText);
+        this.socket.send(adifBuf, 0, adifBuf.length, this.port, this.host, (err) => {
           if (err) {
-            sendCatLog(`[${this.label}] QSO_LOGGED send error: ${err.message}`);
+            sendCatLog(`[${this.label}] LOGGED_ADIF send error: ${err.message}`);
             reject(err);
           } else {
-            sendCatLog(`[${this.label}] QSO_LOGGED (type 5) sent (${qsoMsg.length} bytes)`);
+            sendCatLog(`[${this.label}] LOGGED_ADIF (type 12) sent (${adifBuf.length} bytes)`);
             resolve();
           }
         });

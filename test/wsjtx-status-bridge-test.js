@@ -68,7 +68,8 @@ test('every bridge sends a Status with each heartbeat and before each QSO', () =
   assert.ok(/_sendHeartbeat\(\) \{[\s\S]{0,300}this\._sendStatus\(\);/.test(body), 'heartbeat sends status');
   const st = body.indexOf('this._sendStatus(freqHz > 0');
   const adif = body.indexOf('encodeLoggedAdif(this.id');
-  assert.ok(st > 0 && adif > st, 'status goes out before the QSO');
+  const q5 = body.indexOf('encodeQsoLogged(this.id');
+  assert.ok(st > 0 && q5 > st && adif > q5, 'status, then type 5, then type 12 (WSJT-X order; GridTracker double-logs the reverse, jgedmond)');
   assert.ok(/function wsjtxBridgeStatus\(\)/.test(src));
 });
 
