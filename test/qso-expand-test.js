@@ -2,7 +2,7 @@
 // lib/qso-expand.js — the one definition of the records a logged contact
 // becomes (logging parity audit 2026-10-19). Run: node test/qso-expand-test.js
 const assert = require('assert');
-const { expandContact, defaultRst, utcParts, logModeFromRig } = require('../lib/qso-expand');
+const { expandContact, defaultRst, utcParts, logModeFromRig, qrzCountyFor } = require('../lib/qso-expand');
 const fs = require('fs');
 const path = require('path');
 
@@ -177,6 +177,22 @@ test('the country is where the station operates: an away call keeps only QRZ\'s 
   const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
   const fn = main.indexOf('async function logContact(entry, opts)');
   assert.ok(main.slice(fn, fn + 6000).includes('resolveOperatingCall(c, ctyDb)'), 'logContact hands cty.dat to expandContact');
+});
+
+// jgedmond (N3FJP, 2026-11-04): a KH8 contact put "American Samoa" in N3FJP's
+// County Rec. ADIF CNTY is "ST,County" for the US entities only.
+test('CNTY: QRZ county only for the US entities, never the entity name itself', () => {
+  const kh8 = { name: 'Sam', country: 'American Samoa', state: 'AS', county: 'American Samoa', grid: 'AH45' };
+  const r = expandContact({ ...base, callsign: 'KH8XX' }, { callInfo: () => kh8, entityFor: () => ({ name: 'American Samoa' }) });
+  assert.strictEqual(r[0].county, '', 'no CNTY for American Samoa');
+  assert.strictEqual(qrzCountyFor({ state: 'MA', county: 'Middlesex' }, 'United States'), 'MA,Middlesex');
+  assert.strictEqual(qrzCountyFor({ state: 'AK', county: 'Anchorage' }, 'Alaska'), 'AK,Anchorage');
+  assert.strictEqual(qrzCountyFor({ state: 'HI', county: 'Honolulu' }, 'Hawaii'), 'HI,Honolulu');
+  assert.strictEqual(qrzCountyFor({ state: 'ON', county: 'York' }, 'Canada'), '', 'not Canada');
+  assert.strictEqual(qrzCountyFor({ state: 'XX', county: 'Alaska' }, 'Alaska'), '', 'never the entity name');
+  // What the operator typed is theirs.
+  const typed = expandContact({ ...base, callsign: 'KH8XX', county: 'AS,Tutuila' }, { callInfo: () => kh8, entityFor: () => ({ name: 'American Samoa' }) });
+  assert.strictEqual(typed[0].county, 'AS,Tutuila');
 });
 
 console.log(`\nQSO expand: ${passed} passed, ${failed} failed`);
