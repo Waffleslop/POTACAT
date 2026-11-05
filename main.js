@@ -2108,6 +2108,7 @@ const ExtAtuRestore = require('./lib/ext-atu-restore');
 const PowerRestore = require('./lib/power-restore');
 const { withTimeout } = require('./lib/with-timeout');
 const SerialHsTrial = require('./lib/serial-hs-trial');
+const IdleWsprBand = require('./lib/idle-wspr-band');
 // The radio's last mode report ({ mode, at }), set in sendCatMode: what the
 // external tune's mode restore believes, never the command it sent.
 let _lastModeReadback = null;
@@ -16263,7 +16264,8 @@ async function maybeFetchWsprHeard(force) {
 // dial. No-op unless hopping is on, in WSPR mode, with >=2 bands.
 function maybeHopBand() {
   if (!jtcatWsprHopEnabled || !ft8Engine || ft8Engine._mode !== 'WSPR') return;
-  const bands = jtcatWsprHopBands;
+  // Never to a band this radio is not used on (lib/rig-bands.js).
+  const bands = IdleWsprBand.hopBandsForRig(jtcatWsprHopBands, activeRigBands());
   if (!Array.isArray(bands) || bands.length < 2) return;
   const curSlot = wsprBandhop.slotNumber(Date.now());
   if (!wsprBandhop.bandChangesNext(curSlot, bands, jtcatWsprHopDwell)) return; // dwell — stay put
@@ -21230,7 +21232,7 @@ function updateRemoteSettings() {
     idleRxMode: IDLE_RX_MODES.includes(settings.idleRxMode) ? settings.idleRxMode : 'sstv',
     // The rest of Idle Mode, so a mobile device can show and set all of it
     // (capability 'idle-mode'), with the desktop window's own defaults.
-    idleWsprBand: IDLE_WSPR_BANDS.includes(settings.idleWsprBand) ? settings.idleWsprBand : '20m',
+    idleWsprBand: IdleWsprBand.pickIdleWsprBand(settings.idleWsprBand, activeRigBands()) || '20m',
     idleWsprBandHop: settings.idleWsprBandHop === true,
     idlePskBand: Object.prototype.hasOwnProperty.call(PSK_IDLE_DIALS, settings.idlePskBand) ? settings.idlePskBand : '20m',
     enableAtu: !!settings.enableAtu,
@@ -34595,7 +34597,8 @@ const PSK_IDLE_DIALS = {
 // pop-out's own JTTY dials (JTTY_BAND_FREQS — never 14080, FT4's dial).
 const JTTY_IDLE_DIALS = { '20m': 14090, '40m': 7090 };
 const IDLE_RX_MODES = ['sstv', 'wspr', 'psk31', 'js8', 'jtty'];
-const IDLE_WSPR_BANDS = ['40m', '30m', '20m', '17m', '15m', '10m'];
+// lib/idle-wspr-band.js: 40 m to 10 m and 2 m, only the bands this radio is used on.
+const { IDLE_WSPR_BANDS } = IdleWsprBand;
 const IDLE_TIMEOUT_MIN = 5, IDLE_TIMEOUT_MAX = 1440;
 
 // ONE writer for Idle Mode from outside the Settings window (ECHOCAT). Each
@@ -34781,7 +34784,11 @@ function triggerAutoSstv() {
     autoIdlePrevJtcatMode = settings.jtcatLastMode || 'FT8';
     autoIdleJtcatOpenedPopout = !(jtcatPopoutWin && !jtcatPopoutWin.isDestroyed());
     if (idleMode === 'wspr') {
-      const band = settings.idleWsprBand || '20m';
+      // A band this radio is used on (artificialjumpprotection's IC-7100 had
+      // 20 m turned off and was sent there anyway).
+      const saved = settings.idleWsprBand || '20m';
+      const band = IdleWsprBand.pickIdleWsprBand(saved, activeRigBands()) || saved;
+      if (band !== saved) sendCatLog(`[Auto-RX] WSPR: ${saved} is not one of this radio's bands — listening on ${band} instead (Settings > My Rigs sets the bands)`);
       const dialMhz = wsprBands.dialForBand(band) || 14.0956;
       settings.jtcatLastMode = 'WSPR';
       settings.wsprHopEnabled = settings.idleWsprBandHop === true;

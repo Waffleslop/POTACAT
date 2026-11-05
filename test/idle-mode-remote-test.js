@@ -38,13 +38,15 @@ function handler(src, on, ev) {
 }
 
 // applyIdleModeChange run for real against a fake settings object.
+// IDLE_WSPR_BANDS lives in lib/idle-wspr-band.js (the rig's bands decide, 2 m included).
+assert.ok(/const \{ IDLE_WSPR_BANDS \} = IdleWsprBand;/.test(MAIN), 'main takes the idle WSPR bands from lib/idle-wspr-band.js');
 const PSK = MAIN.match(/const PSK_IDLE_DIALS = \{[\s\S]*?\};/);
 assert.ok(PSK, 'PSK_IDLE_DIALS');
 // eslint-disable-next-line no-new-func
 const makeApply = new Function('settings', 'calls', `
   ${PSK[0]}
   ${constLine('IDLE_RX_MODES')}
-  ${constLine('IDLE_WSPR_BANDS')}
+  const IDLE_WSPR_BANDS = ${JSON.stringify(require('../lib/idle-wspr-band').IDLE_WSPR_BANDS)};
   ${constLine('IDLE_TIMEOUT_MIN')}
   let autoSstvActive = calls.active;
   const saveSettings = () => calls.push('save');

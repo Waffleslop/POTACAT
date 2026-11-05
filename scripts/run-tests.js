@@ -411,6 +411,7 @@ const TESTS = [
   'test/power-restore-test.js', // the external-tuner / test restore: never a 100 W guess, never against the operator's own knob (GitHub #111, 1.13.10 regression)
   'test/activator-log-once-test.js', // the Activator log saves once per press, and a slow QRZ never holds up a save (.eddiejames duplicates)
   'test/serial-hs-trial-test.js', // the RTS/CTS no-answer trial covers Kenwood too (jcoreyc TS-480), never the legacy Yaesu protocol
+  'test/idle-wspr-band-test.js', // idle-RX WSPR uses only the rig's bands and offers 2 m (artificialjumpprotection IC-7100)
 ];
 
 const root = path.join(__dirname, '..');
