@@ -84,5 +84,12 @@ test('a tune sends the per-mode setting only, and nothing inside the same mode f
   assert.ok(/filterWidth = settings\.cwFilterWidth \|\| 0;/.test(body));
 });
 
+test('a width from Settings > Filter Width is named in the log when a tune sends it', () => {
+  const i = main.indexOf('let filterWidth = 0;');
+  const body = main.slice(i, main.indexOf('// FreeDV: auto-start/stop engine', i));
+  assert.ok(i > 0);
+  assert.ok(/if \(filterWidth > 0\) \{[\s\S]*sendCatLog\(`\[Tune\] \$\{fwName\} width \$\{filterWidth\} Hz from Settings > Filter Width/.test(body), body.slice(-600));
+});
+
 console.log(`\nfilter width untouched: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

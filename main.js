@@ -35292,6 +35292,14 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
   } else if (m === 'AM') {
     filterWidth = 0; // AM uses radio default
   }
+  // Say where a forced width came from. Until 1.13.11 a width picked on the
+  // rig panel was silently saved here (jarhd: CW forced to 500 Hz on every
+  // spot click), so an operator may have one they never chose; the log line
+  // names the setting that holds it.
+  if (filterWidth > 0) {
+    const fwName = m === 'CW' ? 'CW' : (m === 'SSB' || m === 'USB' || m === 'LSB') ? 'SSB' : 'Digital';
+    sendCatLog(`[Tune] ${fwName} width ${filterWidth} Hz from Settings > Filter Width (clear it there to keep the radio's own width)`);
+  }
 
   // FreeDV: auto-start/stop engine based on spot mode
   const isFreedvMode = m.startsWith('FREEDV') || m === 'DV';
