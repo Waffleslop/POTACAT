@@ -10683,6 +10683,12 @@ async function startWinlinkShim() {
       if (_swrTripped) { winlinkLog('refused Pat\'s PTT — the SWR guard has tripped'); return false; }
       if (_winlinkUnkeyTimer) {
         // Keyed again inside the drain hold: stay keyed, nothing to re-assert.
+        // Known gap (batch 4 review): handleRemotePtt is not called here, so the
+        // stuck-TX limit (lib/tx-limit.js, Winlink 2 min) keeps the first
+        // frame's start and counts back-to-back frames re-keyed within the
+        // 120-250 ms hold as one over. ARQ turnarounds are normally longer than
+        // the hold, so a real session should not reach it; if one ever trips
+        // mid-transfer, re-arm the limit here.
         clearTimeout(_winlinkUnkeyTimer); _winlinkUnkeyTimer = null;
         armWinlinkTxFailsafe();
         winlinkSessionTouch();
@@ -26457,7 +26463,9 @@ function jtcatNoteTxPowerForMode(mode, message, freqHz, engineHz) {
 const TxLimitLib = require('./lib/tx-limit');
 let _txLimit = null;
 function txLimit() {
-  if (!_txLimit) _txLimit = new TxLimitLib.TxLimit({ onTrip: (t) => txLimitTrip(t) });
+  // isKeyed reads _remoteTxState BEFORE handleRemotePtt updates it, so it says
+  // whether PTT was already asserted when this key-down arrived.
+  if (!_txLimit) _txLimit = new TxLimitLib.TxLimit({ onTrip: (t) => txLimitTrip(t), isKeyed: () => !!_remoteTxState });
   return _txLimit;
 }
 /** What kind of transmission the JTCAT engine is keying (FT8/FT4/JS8/WSPR...). */

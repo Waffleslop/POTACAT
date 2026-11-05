@@ -71,6 +71,25 @@ test('a release disarms; a re-assert of the same PTT keeps the original start', 
   assert.strictEqual(trips.length, 1, 'the re-assert did not restart the clock');
 });
 
+test('a same-kind arm after a missed release restarts the clock; only a still-keyed re-assert keeps it', () => {
+  const c = fakeClock(); const trips = []; let keyed = false;
+  const l = new T.TxLimit({ onTrip: (t) => trips.push(t), setTimer: c.setTimer, clearTimer: c.clearTimer, now: c.now, isKeyed: () => keyed });
+  // First FT8 over; its release never reached disarm().
+  l.arm('ft8'); keyed = true; c.advance(13000); keyed = false;
+  // The next over 12 s later: PTT was not asserted, so this is a new over.
+  c.advance(12000); l.arm('ft8'); keyed = true; c.advance(13000);
+  assert.strictEqual(trips.length, 0, 'the second over is not tripped 30 s after the first began');
+  // A re-assert while still keyed keeps that over's start.
+  l.arm('ft8'); c.advance(17500);
+  assert.strictEqual(trips.length, 1, 'a still-keyed re-assert did not restart the clock');
+  assert.ok(Math.abs(trips[0].heldMs - 30500) < 1, String(trips[0].heldMs));
+});
+
+test('main tells the limit whether PTT was already asserted', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.ok(/new TxLimitLib\.TxLimit\(\{[^}]*isKeyed: \(\) => !!_remoteTxState/.test(src));
+});
+
 test('WSPR is exempt', () => {
   const c = fakeClock(); const trips = [];
   const l = new T.TxLimit({ onTrip: (t) => trips.push(t), setTimer: c.setTimer, clearTimer: c.clearTimer, now: c.now });
