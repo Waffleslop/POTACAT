@@ -2883,8 +2883,12 @@
       }
 
       case 'jtcat-status':
-        ft8Running = msg.running !== false;
-        ft8Mode = msg.mode || ft8Mode;
+        // Running only when the desktop says so: the engine's own status is
+        // { state: 'stopped' } with no `running` key, which read as running and
+        // the FT8 tab never sent jtcat-start after an idle stop (kc8zp 11-03:
+        // the Cloud FT8 view stayed stale until the phone app woke it).
+        ft8Running = msg.running === true || msg.state === 'running';
+        if (ft8Running) ft8Mode = msg.mode || ft8Mode;
         ft8ModeSelect.value = ft8Mode;
         ft8SyncStatus.textContent = 'Sync: ' + (msg.sync || '--');
         applyDigitalPanes(); // host-driven mode change (popout/phone) swaps panes too
