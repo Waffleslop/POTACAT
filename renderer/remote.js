@@ -917,7 +917,7 @@
   const WSPR_BAND_FREQS = {
     '160m': 1836.6, '80m': 3568.6, '60m': 5287.2, '40m': 7038.6, '30m': 10138.7,
     '20m': 14095.6, '17m': 18104.6, '15m': 21094.6, '12m': 24924.6, '10m': 28124.6,
-    '6m': 50293.0,
+    '6m': 50293.0, '2m': 144489.0,
   };
   // JTTY USB dial frequencies (kHz) — the WSJT team's preliminary list for
   // 3.2.0-rc1 (14090 = main meeting place; 14080 is FT4's). Mirrors the

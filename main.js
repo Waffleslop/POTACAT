@@ -26036,6 +26036,12 @@ function connectRemote() {
     if (ft8Engine && ft8Engine._mode === 'WSPR' && band) {
       const mhz = wsprBands.dialForBand(band);
       if (mhz) ft8Engine.setWsprDial(mhz);
+      // The web page sends a WSPR band with no freqKhz: the dial is the host's
+      // to choose, so it is the host's to tune (it never was, on any band).
+      if (mhz && !freqKhz) {
+        tuneRadio(mhz * 1000, 'DIGU');
+        _jtcatExpectedDialHz = Math.round(mhz * 1e6);
+      }
     }
   });
 

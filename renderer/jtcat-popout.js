@@ -1874,7 +1874,7 @@ function _applyPopoutTheme(payload) {
   var WSPR_BAND_FREQS = {
     '160m': 1836.6, '80m': 3568.6, '60m': 5287.2, '40m': 7038.6, '30m': 10138.7,
     '20m': 14095.6, '17m': 18104.6, '15m': 21094.6, '12m': 24924.6, '10m': 28124.6,
-    '6m': 50293.0,
+    '6m': 50293.0, '2m': 144489.0,
   };
   // PSK31 USB dial frequencies (kHz) — the conventional PSK watering holes.
   // Activity sits 0.5–2.5 kHz above the dial; the default 1500 Hz audio
@@ -1929,7 +1929,9 @@ function _applyPopoutTheme(payload) {
     var table = bandTableFor(modeSelect.value);
     document.querySelectorAll('.jp-band-opt').forEach(function(btn) {
       var band = btn.dataset.band;
-      if (table[band]) btn.dataset.freq = table[band];
+      // No dial in this mode: no stale dial from the last mode either (2 m
+      // WSPR tuned the FT8 dial, 144.174, artificialjumpprotection 11-03).
+      btn.dataset.freq = table[band] || '';
     });
   }
 
@@ -3226,6 +3228,15 @@ function _applyPopoutTheme(payload) {
   // Band buttons
   function selectBand(btn, save) {
     var freq = parseFloat(btn.dataset.freq);
+    if (!(freq > 0)) { showJtcatErrorToast('No ' + modeSelect.value + ' dial on ' + btn.dataset.band); return; }
+    // A stopped engine (a voice/CW spot QSY stops it) is started first, or the
+    // radio moves and "Switching to 17m..." waits for decodes that can never
+    // come (bobve 10-30; an FT8 spot click and the mode select both land
+    // here). Start before tuning: starting clears the dial anchor the tune sets.
+    if (engineStopped) {
+      window.api.jtcatStart(modeSelect.value);
+      setEngineStopped(false);
+    }
     window.api.tune(freq, modeSelect.value);
     // WSPR: tell the decoder which dial we're on (MHz) so it reports absolute
     // spot frequencies and picks the band.
