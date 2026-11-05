@@ -2203,12 +2203,25 @@
           <span class="help-text">Connect to a remote rigctld server (e.g. on another machine)</span>
           <label>Host: <input type="text" id="set-rigctldnet-host" placeholder="192.168.1.100" value="127.0.0.1"></label>
           <label>Port: <input type="number" id="set-rigctldnet-port" min="1" max="65535" value="4532"></label>
+          <label style="margin-top:6px;">Transmit (PTT):
+            <select id="set-rigctldnet-ptt">
+              <option value="cat" selected>Over CAT</option>
+              <option value="vox">The audio interface keys it (SignaLink, the radio's VOX)</option>
+            </select>
+          </label>
         </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="flrig"> FLRig (a shared radio)</label>
         <div id="flrig-config" class="radio-sub hidden">
           <span class="help-text" style="font-size:12px;">flrig holds the radio and POTACAT is one of its clients, beside your logger or fldigi. POTACAT tunes, changes mode, keys PTT, reads the S-meter, SWR and power, and sets RF power through flrig. Filter width, CW keying and the radio's menus stay in flrig. Pick your Radio Model above for the right bands and power limits. In flrig, Config &gt; Setup &gt; Xcvr sets the server port (12345). <a href="https://sourceforge.net/projects/fldigi/files/flrig/" data-external="1">Download flrig</a>.</span>
           <label>Host: <input type="text" id="set-flrig-host" placeholder="127.0.0.1" value="127.0.0.1"></label>
           <label>Port: <input type="number" id="set-flrig-port" min="1" max="65535" value="12345"></label>
+          <label style="margin-top:6px;">Transmit (PTT):
+            <select id="set-flrig-ptt">
+              <option value="cat" selected>Over CAT</option>
+              <option value="vox">The audio interface keys it (SignaLink, the radio's VOX)</option>
+            </select>
+          </label>
+          <span class="help-text" style="margin-top:2px;display:block;">Choose <b>The audio interface keys it</b> when a SignaLink or similar on the radio's data jack (TS-2000 ACC2) does the keying: over CAT some radios transmit from the front microphone, so the interface's audio never goes out.</span>
           <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
             <button type="button" id="flrig-test-btn">Test Connection</button>
             <span id="flrig-test-result" style="font-size:12px;"></span>

@@ -2502,10 +2502,14 @@ async function populateRadioSection(currentTarget) {
     setRadioType('rigctldnet');
     setRigctldnetHost.value = currentTarget.host || '127.0.0.1';
     setRigctldnetPort.value = currentTarget.port || 4532;
+    const netPtt = document.getElementById('set-rigctldnet-ptt');
+    if (netPtt) netPtt.value = savedPttChoice(currentTarget) === 'vox' ? 'vox' : 'cat';
   } else if (currentTarget.type === 'flrig') {
     setRadioType('flrig');
     if (setFlrigHost) setFlrigHost.value = currentTarget.host || '127.0.0.1';
     if (setFlrigPort) setFlrigPort.value = currentTarget.port || 12345;
+    const flrigPtt = document.getElementById('set-flrig-ptt');
+    if (flrigPtt) flrigPtt.value = savedPttChoice(currentTarget) === 'vox' ? 'vox' : 'cat';
   } else if (currentTarget.type === 'dxlab-commander') {
     setRadioType('dxlab-commander');
     setDxlabCommanderHost.value = currentTarget.host || '127.0.0.1';
@@ -3161,12 +3165,17 @@ function buildCatTargetFromForm() {
       type: 'rigctldnet',
       host: setRigctldnetHost.value.trim() || '127.0.0.1',
       port: parseInt(setRigctldnetPort.value, 10) || 4532,
+      ...pttChoiceField('set-rigctldnet-ptt'),
     };
   } else if (radioType === 'flrig') {
+    // Transmit (PTT) here is over CAT or the audio interface only: flrig or
+    // the remote rigctld holds the port, so its lines are not ours to drive.
+    // WX4MWA's TS-2000 + SignaLink on flrig keyed the front mic over CAT.
     return {
       type: 'flrig',
       host: (setFlrigHost && setFlrigHost.value.trim()) || '127.0.0.1',
       port: parseInt(setFlrigPort && setFlrigPort.value, 10) || 12345,
+      ...pttChoiceField('set-flrig-ptt'),
     };
   } else if (radioType === 'dxlab-commander') {
     const typed = {};
