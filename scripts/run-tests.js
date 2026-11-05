@@ -95,6 +95,7 @@ const TESTS = [
   'test/halt-tx-test.js',
   'test/own-licence-tx-test.js',
   'test/rigctld-power-scale-test.js',
+  'test/rigctld-kenwood-power-test.js', // a TS-590/TS-2000 behind Hamlib keeps its power: raw PC, never Hamlib's PC000/PC255 probe
   'test/jtcat-tx-watchdog-test.js',
   'test/jtcat-replace-log-test.js',
   'test/port-picker-test.js',

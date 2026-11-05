@@ -8174,7 +8174,9 @@ async function connectCat() {
     // the model's native protocol. The sandwich handles band-recall mode reversion
     // AND CW pitch offset (confirmed needed by W3AVP on FT-710 via rigctld).
     model.tune = model.tune || { modeBeforeFreq: true, modeAfterFreq: true, freqAfterMode: true, alwaysResendMode: false, daCommand: false };
-    codec = new RigctldCodec(model, (data) => transport.write(data));
+    // The Hamlib model number decides how TX power is read and set: on a
+    // TS-590/TS-2000 Hamlib's own power level writes PC000/PC255 to the radio.
+    codec = new RigctldCodec(model, (data) => transport.write(data), { hamlibRigId: target.rigId });
     cat = new RigController(model, transport, codec);
     cat._debug = true;
     cat.on('log', sendCatLog);
