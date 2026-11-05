@@ -469,6 +469,7 @@ const { WsjtxClient, extractCallsigns, encodeHeartbeat, encodeStatus, bridgeStat
 const { PskrClient } = require('./lib/pskreporter');
 const PskrTx = require('./lib/pskreporter-tx');
 const { Ft8Engine, freqsForMode } = require('./lib/ft8-engine');
+const DialSnap = require('./lib/dial-snap');
 const { decideDialFollow } = require('./lib/jtcat-dial-follow');
 const { isWinlinkSessionFault } = require('./lib/winlink-fault');
 const { createSpotSourceCache } = require('./lib/spot-source-cache');
@@ -34900,6 +34901,15 @@ function gatedSmartSdrTxPower(value) {
 
 function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
   let freqHz = Math.round(parseFloat(freqKhz) * 1000); // kHz -> Hz
+  // An FT8/FT4/FT2 spot names the signal (dial + audio offset): tune the
+  // mode's dial when the spot is in its passband (lib/dial-snap.js).
+  {
+    const dial = DialSnap.snapToDial(freqHz, mode, freqsForMode);
+    if (dial) {
+      sendCatLog(`[tune] ${String(mode).toUpperCase()} spot at ${(freqHz / 1000).toFixed(1)} kHz is in the ${(dial / 1000).toFixed(1)} kHz dial's passband — tuning the dial`);
+      freqHz = dial;
+    }
+  }
 
   // --- Sanity / out-of-band guard (added 2026-06-29 after a stray tune drove
   //     the rig to 33 MHz). Hard-reject impossible values; for a plausible but
