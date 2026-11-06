@@ -1494,7 +1494,12 @@ function applyJtcatTxGain(value, origin) {
     // Sliders stream input events; log the settled value once.
     const who = origin === 'remote' ? 'ECHOCAT client' : origin === 'popout' ? 'JTCAT window' : origin === 'main' ? 'main window' : String(origin || 'unknown');
     const pct = jtcatTxGainPct(v);
-    sendCatLog(`[JTCAT] TX power set to ${pct}% by the ${who}` + (pct <= JTCAT_TX_SILENT_PCT ? ' — WARNING: effectively silent, the radio will key with no audio (0 W)' : ''));
+    // This is the FT8 AUDIO level, not RF watts. During a Guest Pass the RF
+    // power stays at the pass's cap, set at the radio; say so, because the
+    // line read as "100 % power" while a 25 W pass ran (NA4DQ 2026-11-05).
+    const passCap = passEnforcement && passEnforcement.getState() !== 'idle' ? Number((passEnforcement.getSessionStatus() || {}).maxPowerW) || 0 : 0;
+    sendCatLog(`[JTCAT] TX power set to ${pct}% by the ${who}` + (pct <= JTCAT_TX_SILENT_PCT ? ' — WARNING: effectively silent, the radio will key with no audio (0 W)' : '')
+      + (passCap > 0 ? ` (the FT8 audio level; the radio's RF power stays capped at the pass's ${passCap} W)` : ''));
   }, 1200);
   if (origin !== 'main' && win && !win.isDestroyed()) win.webContents.send('jtcat-set-tx-gain', v);
   if (origin !== 'popout' && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-set-tx-gain', v);
@@ -4809,10 +4814,63 @@ function setRadioTxPowerRaw(watts) {
 // The pass's cap, applied at the radio: at lease start (a radio the owner
 // left at 100 W must be at or below the cap before the first key-down) and
 // whenever a key-down finds the radio above it ('power-over-cap').
+// Ask the radio to read its RF power back soon: the pass's key-down check
+// trusts only a REPORTED level, and a polled rig reports it every few
+// seconds at best. Throttled, CAT rigs only (a Flex pushes rfpower itself).
+let _passPowerAskAt = 0;
+function passAskRadioPower(delayMs) {
+  const now = Date.now();
+  if (now - _passPowerAskAt < 2000) return false;
+  _passPowerAskAt = now;
+  setTimeout(() => {
+    try { if (cat && cat.connected && typeof cat.readPower === 'function') cat.readPower(); } catch { /* link gone */ }
+  }, delayMs || 0);
+  return true;
+}
+
+// The owner's half of a "no power reading" refusal: once a minute, what to
+// fix. The guest's half is res.userVisible, sent as tune-blocked.
+let _passNoPowerOwnerNoteAt = 0;
+function passNoPowerOwnerNote() {
+  const now = Date.now();
+  if (now - _passNoPowerOwnerNoteAt < 60000) return false;
+  _passNoPowerOwnerNoteAt = now;
+  const rb = _lastPowerReadback;
+  const seen = rb && rb.watts > 0 ? `its last report was ${Math.round((now - rb.at) / 1000)} s ago` : 'it has never reported it this session';
+  sendCatLog(`[pass] Owner: the guest's transmissions are refused because the radio is not reporting its RF power over CAT (${seen}). `
+    + 'Check that Settings > My Rigs names this radio\'s exact model (and CI-V address on an Icom), and that this log shows "rig reports mode" after connecting.');
+  if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: 'Guest Pass: your radio is not reporting its power, so the guest cannot transmit. See the log for the fix.', warn: true, duration: 15000 });
+  return true;
+}
+
+// The shack refused something this desktop asked for (a Guest Pass key-down,
+// a tune outside the pass). It used to reach only the main window, so a
+// guest working FT8 in the JTCAT window saw TX simply not happen and their
+// log said nothing (KF0WWL, 2026-11-05). Now: the log (once per reason per
+// 30 s), the main window, the VFO window and the JTCAT window.
+let _remoteRefusedLast = '';
+let _remoteRefusedAt = 0;
+function remoteShackRefused(reason) {
+  const why = String(reason || '').trim();
+  if (!why) return;
+  const now = Date.now();
+  if (why !== _remoteRefusedLast || now - _remoteRefusedAt > 30000) {
+    _remoteRefusedLast = why; _remoteRefusedAt = now;
+    sendCatLog(`[Remote] The shack refused: ${why}`);
+  }
+  if (win && !win.isDestroyed()) win.webContents.send('tune-blocked', why);
+  if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', why);
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: why });
+}
+
 function passApplyPowerCap(max, why) {
   const cap = Number(max) || 0;
   if (!(cap > 0)) return false;
-  if (setRadioTxPowerRaw(cap)) { sendCatLog(`[pass] RF power set to ${cap} W — the pass's cap (${why})`); return true; }
+  if (setRadioTxPowerRaw(cap)) {
+    sendCatLog(`[pass] RF power set to ${cap} W — the pass's cap (${why})`);
+    passAskRadioPower(600);
+    return true;
+  }
   sendCatLog(`[pass] could not set the ${cap} W cap (${why}): no radio link — every key-down is refused until the radio reports its power`);
   return false;
 }
@@ -7575,9 +7633,7 @@ function ensureRemoteClient() {
   remoteClient.on('spots', (data) => {
     if (win && !win.isDestroyed()) win.webContents.send('spots', data);
   });
-  remoteClient.on('tune-blocked', ({ reason }) => {
-    if (win && !win.isDestroyed()) win.webContents.send('tune-blocked', reason);
-  });
+  remoteClient.on('tune-blocked', ({ reason }) => remoteShackRefused(reason));
   // Phase 2 audio leg: relay the shack's WebRTC offer/ICE + TURN iceServers
   // to the hidden answerer window (remote-audio-client.html), which builds
   // the peer, answers, and plays the rig audio. No-op until the user starts
@@ -35455,6 +35511,10 @@ let _freqSuppressUntil = 0;
 let _passTxBlockedAt = 0;
 function passTxBlocked(res) {
   _passTxBlockedAt = Date.now();
+  if (res && res.reason === 'tx_disabled_no_power_cat') {
+    passAskRadioPower(0);      // so the next slot may find a fresh report
+    passNoPowerOwnerNote();
+  }
   if (remoteServer && remoteServer.running) {
     try { remoteServer.sendToPassSessions({ type: 'tune-blocked', reason: res.userVisible }); } catch { /* older server */ }
   }

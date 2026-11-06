@@ -425,6 +425,7 @@ const TESTS = [
   'test/jtcat-hunt-cq-dx-test.js', // Hunt: never answer a CQ DX from our own continent, nor a CQ NA/EU aimed elsewhere
   'test/jtcat-hunt-echocat-test.js', // Hunt filters over ECHOCAT: jtcat-hunt-filters (Guest Pass refused), hunt-filters cap, web Filters sheet
   'test/civ-pacing-test.js', // one CI-V command in flight: an Icom abandons a reply when the next command arrives (NA4DQ IC-7300 Guest Pass)
+  'test/guest-pass-no-power-test.js', // Guest Pass with no power report: plain refusal to the guest's windows, owner fix line, power read after the cap (NA4DQ/KF0WWL)
 ];
 
 const root = path.join(__dirname, '..');
