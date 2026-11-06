@@ -426,6 +426,7 @@ const TESTS = [
   'test/jtcat-hunt-echocat-test.js', // Hunt filters over ECHOCAT: jtcat-hunt-filters (Guest Pass refused), hunt-filters cap, web Filters sheet
   'test/civ-pacing-test.js', // one CI-V command in flight: an Icom abandons a reply when the next command arrives (NA4DQ IC-7300 Guest Pass)
   'test/guest-pass-no-power-test.js', // Guest Pass with no power report: plain refusal to the guest's windows, owner fix line, power read after the cap (NA4DQ/KF0WWL)
+  'test/civ-pacing-adaptive-test.js', // CI-V pacing engages only on an Icom seen dropping replies; Auto / Always / Never per rig
 ];
 
 const root = path.join(__dirname, '..');

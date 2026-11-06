@@ -2489,6 +2489,7 @@ async function populateRadioSection(currentTarget) {
     setRadioType('civ-tcp');
     document.getElementById('set-civ-tcp-host').value = currentTarget.host || '127.0.0.1';
     document.getElementById('set-civ-tcp-port').value = currentTarget.port || 50001;
+    setCivPaceChoice('set-civ-tcp-civ-pace', currentTarget.civPace);
     const modelSelect = document.getElementById('set-civ-tcp-model');
     if (modelSelect && currentTarget.civAddress != null) {
       const hex = '0x' + currentTarget.civAddress.toString(16).toUpperCase();
@@ -2612,6 +2613,17 @@ async function populateHamlibFields(savedTarget) {
 
 let icomPortsLoaded = false;
 
+// CI-V pacing (Advanced): 'auto' (default), 'always', 'never'.
+function civPaceChoice(id) {
+  const el = document.getElementById(id);
+  const v = el ? el.value : 'auto';
+  return v === 'always' || v === 'never' ? v : 'auto';
+}
+function setCivPaceChoice(id, v) {
+  const el = document.getElementById(id);
+  if (el) el.value = v === 'always' || v === 'never' ? v : 'auto';
+}
+
 function getEffectiveIcomPort() {
   const manual = document.getElementById('set-icom-port-manual').value.trim();
   return manual || document.getElementById('set-icom-port').value;
@@ -2627,6 +2639,7 @@ async function loadIcomPorts(savedTarget) {
   }
   const icomPtt = document.getElementById('set-icom-ptt');
   if (icomPtt) icomPtt.value = savedPttChoice(savedTarget);
+  setCivPaceChoice('set-icom-civ-pace', savedTarget && savedTarget.civPace);
   if (savedTarget && savedTarget.civAddress) {
     const modelSelect = document.getElementById('set-icom-model');
     const addrHex = '0x' + savedTarget.civAddress.toString(16).toUpperCase();
@@ -3137,6 +3150,7 @@ function buildCatTargetFromForm() {
       baudRate: parseInt(document.getElementById('set-icom-baud').value, 10) || 115200,
       civAddress: parseInt(modelSelect.value, 16),
       civModel: modelSelect.options[modelSelect.selectedIndex].text,
+      civPace: civPaceChoice('set-icom-civ-pace'),
       ...pttChoiceField('set-icom-ptt'),
     };
   } else if (radioType === 'civ-tcp') {
@@ -3148,6 +3162,7 @@ function buildCatTargetFromForm() {
       civAddr: parseInt(modelSelect.value, 16),
       civAddress: parseInt(modelSelect.value, 16),
       civModel: modelSelect.options[modelSelect.selectedIndex].text,
+      civPace: civPaceChoice('set-civ-tcp-civ-pace'),
     };
   } else if (radioType === 'icom-network') {
     const inModelSelect = document.getElementById('set-icom-network-model');

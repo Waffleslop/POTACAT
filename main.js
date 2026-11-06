@@ -4863,6 +4863,22 @@ function remoteShackRefused(reason) {
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: why });
 }
 
+// CI-V pacing per rig. The rig editor's choice wins ('always' / 'never');
+// otherwise a rig found dropping replies earlier THIS SESSION starts paced,
+// and any other starts 'auto' (old timing, detection armed). Not persisted:
+// an owner who changes the radio's CI-V settings or firmware gets a fresh
+// check at the next start, which costs about ten seconds.
+const _civPacedRigs = new Set();
+function civPaceFor(target) {
+  const o = target && target.civPace;
+  if (o === 'always' || o === 'never') return o;
+  return _civPacedRigs.has(String(settings.activeRigId || '')) ? 'always' : 'auto';
+}
+function civPaceRemember(codec) {
+  const rigId = String(settings.activeRigId || '');
+  codec.on('pacing', () => { _civPacedRigs.add(rigId); });
+}
+
 function passApplyPowerCap(max, why) {
   const cap = Number(max) || 0;
   if (!(cap > 0)) return false;
@@ -8471,9 +8487,11 @@ async function connectCat() {
     transport = new SerialTransport();
     const model = rigModel || { brand: 'Icom', protocol: 'civ', civAddr: 0x94, caps: {}, cw: {} };
     model.tune = getTuneQuirks(model);
-    // One CI-V command in flight (CivPacer): back-to-back frames made the
-    // radio abandon every reply but the last (NA4DQ IC-7300, 2026-11-05).
-    codec = new CivCodec(model, (data) => transport.write(data), { pace: true });
+    // CI-V pacing (CivPacer): 'auto' keeps the old burst timing and switches
+    // to one command at a time only on a radio seen dropping replies (NA4DQ
+    // IC-7300, 2026-11-05); the rig editor can force it either way.
+    codec = new CivCodec(model, (data) => transport.write(data), { pace: civPaceFor(target) });
+    civPaceRemember(codec);
     cat = new RigController(model, transport, codec);
     cat._debug = true;
     cat.on('log', sendCatLog);
@@ -8516,7 +8534,8 @@ async function connectCat() {
     transport = new TcpTransport();
     const model = rigModel || { brand: 'Icom', protocol: 'civ', civAddr: target.civAddr || 0x94, caps: {}, cw: {} };
     model.tune = getTuneQuirks(model);
-    codec = new CivCodec(model, (data) => transport.write(data), { pace: true }); // a real CI-V bus behind the bridge
+    codec = new CivCodec(model, (data) => transport.write(data), { pace: civPaceFor(target) }); // a real CI-V bus behind the bridge
+    civPaceRemember(codec);
     cat = new RigController(model, transport, codec);
     cat._debug = true;
     cat.on('log', sendCatLog);
