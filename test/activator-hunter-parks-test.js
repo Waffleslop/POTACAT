@@ -18,7 +18,7 @@ function test(name, fn) {
 }
 const fnSrc = (src.match(/function parseHunterParkInput[\s\S]*?\n\}\n/) || [])[0];
 const parse = new Function(fnSrc + ';return parseHunterParkInput;')();
-const logFn = (src.match(/async function activatorLogContact\(\)[\s\S]*?\n\}\n/) || [''])[0];
+const logFn = (src.match(/async function activatorLogContactNow\(\)[\s\S]*?\n\}\n/) || [''])[0];
 
 console.log('Activator: their parks');
 test('a comma list is every park, upper-cased, deduped', () => {
