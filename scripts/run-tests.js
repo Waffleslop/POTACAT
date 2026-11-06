@@ -438,6 +438,7 @@ const TESTS = [
   'test/qrz-late-backfill-test.js', // a late QRZ answer fills the saved record's empty fields
   'test/hunt-polish-test.js', // Hunt says who it is working; web Filters with Hunt off and for a guest; the list saved on every change; the review window closes on decline
   'test/tx-review-low-test.js', // drop detector paused in TX; Winlink re-key restarts the TX limit; full power on rigctld raw PC; multi-slice TX kind
+  'test/lan-review-test.js', // VFO speaker plays LAN audio; a reopened port clears POTACAT's old close; FT-710 named; LAN scope text; LAN transport window and strangers
 ];
 
 const root = path.join(__dirname, '..');

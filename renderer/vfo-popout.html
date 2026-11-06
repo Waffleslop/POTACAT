@@ -3214,7 +3214,9 @@ async function startAudioMonitor() {
   if (audioMonitorCtx) return;
   try {
     const s = await window.api.getSettings();
-    if (s.audioSource === 'smartsdr' || s.audioSource === 'icom-network') {
+    // The SCU-LAN10's receive audio is network packets too: without it here
+    // the button lit up and played the room microphone (review of the LAN work).
+    if (s.audioSource === 'smartsdr' || s.audioSource === 'icom-network' || s.audioSource === 'yaesu-lan') {
       // Icom Network is the same: its RX audio arrives as packets, and the
       // capture branch below opened this computer's MIC (feedback, no radio).
       // SmartSDR Direct: the Windows DAX RX device is silent (no DAX program

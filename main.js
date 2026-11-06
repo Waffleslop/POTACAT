@@ -20965,6 +20965,9 @@ function handleYaesuLanAudioFrame(frame) {
   }
   // 1) ECHOCAT bridge: any sample rate (frame.sampleRate).
   if (remoteAudioWin) audioSafeSend(remoteAudioWin.webContents, 'smartsdr-audio-frame', { pcm, sampleRate: rate });
+  // 1b) The VFO window's speaker plays the frames directly (onSmartSdrAudio
+  //     honours sampleRate), as on Icom Network.
+  if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) audioSafeSend(vfoPopoutWin.webContents, 'smartsdr-audio-frame', { pcm, sampleRate: rate });
   // 2) The JTCAT windows' waterfalls: 24 kHz frames, the SmartSDR Direct
   //    shape (the windows treat 'yaesu-lan' like 'smartsdr'). Not to a
   //    minimized main window (Chromium throttles it; see the VITA-49 path).
@@ -31114,9 +31117,13 @@ function startYaesuScope() {
     return;
   }
   if (!synth && !yaesuScopeRigHasScope()) {
-    yaesuScopeSetStatus('unavailable', { key: 'no-rig', severity: 'blocker',
+    const onLan = settings.catTarget && settings.catTarget.type === 'yaesu-lan';
+    yaesuScopeSetStatus('unavailable', onLan ? { key: 'no-rig', severity: 'notice',
+      headline: 'Waiting for the radio\'s scope over the LAN',
+      detail: 'The SCU-LAN10 sends the radio\'s band scope once it is connected and streaming. If nothing arrives, check the rig is connected (Settings > My Rigs) and that the radio\'s scope is on.' }
+      : { key: 'no-rig', severity: 'blocker',
       headline: 'The active rig has no USB band scope',
-      detail: 'POTACAT reads the scope the FT-710 streams over its USB cable, or a separate SDR through rtl_tcp (Settings > My Rigs > Band scope from an SDR). Or try the synthetic signal from the gear menu.' });
+      detail: 'POTACAT reads the scope the FT-710 streams over its USB cable, an SCU-LAN10 over the network, or a separate SDR through rtl_tcp (Settings > My Rigs > Band scope from an SDR). Or try the synthetic signal from the gear menu.' });
     return;
   }
   const helperPath = findYaesuScopeHelper();
@@ -47108,7 +47115,7 @@ function cloudShackNotice(text, kind) {
         });
         t.connect({ host: String(host).trim(), basePort: Number(port) || 50000, username, password, loginTimeoutMs: 5000 });
       });
-      const radio = { '0670': 'FTDX10', '0681': 'FTDX101D', '0682': 'FTDX101MP' }[result.id] || null;
+      const radio = { '0670': 'FTDX10', '0681': 'FTDX101D', '0682': 'FTDX101MP', '0800': 'FT-710' }[result.id] || null;
       return { ...result, radio, logs: logs.slice(-30) };
     } finally {
       t.disconnect();
