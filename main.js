@@ -15784,6 +15784,18 @@ function jtcatHuntStatusPush(candidates, best, priority) {
     try { remoteServer.sendToClient({ type: 'jtcat-hunt-status', ...status }); } catch { /* no client */ }
   }
 }
+// During a QSO the picker does not run, so the line said "answering K4POT
+// next" for the whole QSO (review of the hunt filters). It says who is being
+// worked instead, and the normal line returns with the next pick.
+function jtcatHuntStatusWorking(call) {
+  if (!call) return;
+  const status = { working: call, text: `Hunt: working ${call}` };
+  _jtcatHuntStatusLast = status;
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-hunt-status', status);
+  if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+    try { remoteServer.sendToClient({ type: 'jtcat-hunt-status', ...status }); } catch { /* no client */ }
+  }
+}
 function jtcatHuntStatusClear() {
   if (!_jtcatHuntStatusLast) return;
   _jtcatHuntStatusLast = null;
@@ -17215,6 +17227,21 @@ function jtcatShowLogReview() {
   _logPopoutQuiet = false;
 }
 
+// The Log window a review opened closes after the last waiting contact is
+// saved OR declined, 1.2 s later (after the reply and its toast), unless the
+// operator types in it meanwhile (log-popout-typing cancels).
+let _logReviewCloseTimer = null;
+function logReviewCloseSoon() {
+  if (!_logPopoutForReview || !logPopoutWin || logPopoutWin.isDestroyed()) return false;
+  const w = logPopoutWin;
+  if (_logReviewCloseTimer) clearTimeout(_logReviewCloseTimer);
+  _logReviewCloseTimer = setTimeout(() => {
+    _logReviewCloseTimer = null;
+    if (!w.isDestroyed() && !jtcatLogReviews.current) w.close();
+  }, 1200);
+  return true;
+}
+
 function jtcatCancelLogReview(id) {
   const item = jtcatLogReviews.take(id);
   if (!item) return;
@@ -17395,6 +17422,7 @@ async function jtcatTryAnswerDirectCaller(results, myCall, myGrid) {
   }
   // Engaged — set the reply message + late-start this cycle, exactly like the
   // CQ-hunt answer path so the report goes out on the next opposite slot.
+  jtcatHuntStatusWorking(senderCall);
   if (q.txMsg) {
     await ft8Engine.setTxMessage(q.txMsg);
     if (typeof ft8Engine.tryImmediateTx === 'function') ft8Engine.tryImmediateTx();
@@ -18261,6 +18289,7 @@ function startJtcat(mode) {
 
         if (best) {
           jtcatSessionMark(best.call);
+          jtcatHuntStatusWorking(best.call);
           const evNote = evRank(best) ? ' [event-needed]' : '';
           console.log(`[JTCAT Auto-CQ] Responding to ${best.call} (${best.grid}) SNR ${best.db}dB${evNote}`);
 
@@ -38762,17 +38791,19 @@ function cloudShackNotice(text, kind) {
     const res = await jtcatWriteLog(LogReview.mergeEdits(item.record, edits), item.meta.relogKey);
     if (res.success) {
       if (jtcatLogReviews.current) jtcatShowLogReview(); // the next waiting contact
-      else if (_logPopoutForReview && logPopoutWin && !logPopoutWin.isDestroyed()) {
-        // Closed after the renderer has its reply (and the Saved toast).
-        const w = logPopoutWin;
-        setTimeout(() => { if (!w.isDestroyed() && !jtcatLogReviews.current) w.close(); }, 1200);
-      }
+      else logReviewCloseSoon();
     } else jtcatLogReviews.putBack(item);
     return res;
   });
   ipcMain.on('log-review-cancel', (_e, id) => {
     jtcatCancelLogReview(id);
-    jtcatShowLogReview();
+    if (jtcatLogReviews.current) jtcatShowLogReview();
+    else logReviewCloseSoon();   // declining the last contact closes it too
+  });
+  // A keystroke in the Log window: the operator is typing a contact of their
+  // own, so a pending close must not take the window away from under them.
+  ipcMain.on('log-popout-typing', () => {
+    if (_logReviewCloseTimer) { clearTimeout(_logReviewCloseTimer); _logReviewCloseTimer = null; }
   });
 
   // Theme relay — fired by app.js whenever the user toggles light mode.

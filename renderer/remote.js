@@ -8771,7 +8771,9 @@
     const hide = document.getElementById('ft8-hf-hide');
     let st = { huntMode: 'off', targets: ['pota'], priority: 'strongest', filters: {} };
     const send = (patch) => ft8Send(Object.assign({ type: 'jtcat-hunt-filters' }, patch));
-    const ticked = () => (st.huntMode === 'custom' ? st.targets : (st.huntMode && st.huntMode !== 'off' ? [st.huntMode] : st.targets.slice(0, 1)));
+    // Hunt off: the saved Custom list, like the phone (a second tick made
+    // while off was saved, then vanished on the next redraw).
+    const ticked = () => (st.huntMode === 'custom' || !st.huntMode || st.huntMode === 'off' ? st.targets : [st.huntMode]);
     function renderTargets() {
       const t = ticked();
       let html = '';
@@ -8801,6 +8803,9 @@
     }
     window.__ft8HuntFiltersState = function (msg) {
       if (!Array.isArray(msg.targets)) return; // an older shack: no Filters
+      // A Guest Pass cannot change the owner's filters (the shack refuses
+      // jtcat-hunt-filters for a pass), so a guest gets no button.
+      if (window.__echoGuestPass) { btn.classList.add('hidden'); setOpen(false); return; }
       btn.classList.remove('hidden');
       st = { huntMode: msg.huntMode || msg.mode || 'off', targets: msg.targets.length ? msg.targets.slice() : ['pota'], priority: msg.priority || 'strongest', filters: msg.filters || {} };
       render();
@@ -8817,7 +8822,7 @@
     targetsEl.addEventListener('change', (e) => {
       const set = Array.prototype.filter.call(targetsEl.querySelectorAll('input[data-target]'), (i) => i.checked).map((i) => i.getAttribute('data-target'));
       if (!set.length) { e.target.checked = true; return; }
-      if (set.length > 1) send({ targets: set });
+      send({ targets: set });
       const next = set.length === 1 ? set[0] : 'custom';
       if (st.huntMode !== 'off' && st.huntMode !== next) ft8Send({ type: 'jtcat-auto-cq-mode', mode: next });
     });

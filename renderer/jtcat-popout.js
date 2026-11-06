@@ -2745,10 +2745,10 @@ function _applyPopoutTheme(payload) {
     Array.prototype.forEach.call(box.querySelectorAll('input[data-target]'), function (i) { if (i.checked) set.push(i.getAttribute('data-target')); });
     if (!set.length) { e.target.checked = true; return; }
     var next = set.length === 1 ? set[0] : 'custom';
-    if (set.length > 1) {
-      huntTargets = set;
-      window.api.saveSettings({ jtcatHuntTargets: set.join(',') });
-    }
+    // Saved on every change, down to one target too, so "Custom (N)" and the
+    // phone never keep a list the operator has since unticked.
+    huntTargets = set;
+    window.api.saveSettings({ jtcatHuntTargets: set.join(',') });
     huntTarget = next;
     try { localStorage.setItem('jtcat-hunt-target', huntTarget); } catch (err) {}
     if (autoCqSelect.value !== 'off' && autoCqSelect.value !== next) setHunt(next);

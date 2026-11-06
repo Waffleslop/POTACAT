@@ -683,6 +683,14 @@ function _applyPopoutTheme(payload) {
   freqInput.addEventListener('input', () => { freqUserEdited = true; });
   modeSelect.addEventListener('change', () => { modeUserEdited = true; });
 
+  // Typing here cancels a pending close after a review (main logReviewCloseSoon).
+  let _typingSentAt = 0;
+  document.addEventListener('keydown', () => {
+    if (!window.api.noteTyping || Date.now() - _typingSentAt < 500) return;
+    _typingSentAt = Date.now();
+    window.api.noteTyping();
+  }, true);
+
   // Save / clear
   saveBtn.addEventListener('click', doSave);
   clearBtn.addEventListener('click', () => {

@@ -436,6 +436,7 @@ const TESTS = [
   'test/rts-trial-keyed-test.js', // the RTS/CTS trial never saves a setting that keys the radio; a shorter no-answer wait
   'test/ptt-quiet-paths-test.js', // no 800 ms DATA wait on a radio that cannot confirm; hand-mic overs are not warnings; the voice hint needs our audio
   'test/qrz-late-backfill-test.js', // a late QRZ answer fills the saved record's empty fields
+  'test/hunt-polish-test.js', // Hunt says who it is working; web Filters with Hunt off and for a guest; the list saved on every change; the review window closes on decline
 ];
 
 const root = path.join(__dirname, '..');

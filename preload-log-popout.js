@@ -46,6 +46,7 @@ const apiSurface = {
   // A JTCAT contact under review: main holds the record (lib/log-review.js).
   logReviewSave: (id, edits) => ipcRenderer.invoke('log-review-save', id, edits),
   logReviewCancel: (id) => ipcRenderer.send('log-review-cancel', id),
+  noteTyping: () => ipcRenderer.send('log-popout-typing'),
   logReviewShown: (id) => ipcRenderer.send('log-review-shown', id),
   // Operators on this machine, for the "Log as" chooser (KD9WI)
   profilesList: () => ipcRenderer.invoke('profiles-list'),

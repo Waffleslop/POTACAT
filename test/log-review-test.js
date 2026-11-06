@@ -159,7 +159,8 @@ test('wiring: only the window prompts, a phone never does, and a held call count
 test('the window a review opened closes after the last Save; one the operator had open stays (jgedmond)', () => {
   const m = R('main.js');
   assert.ok(/if \(!logPopoutWin \|\| logPopoutWin\.isDestroyed\(\)\) _logPopoutForReview = true;/.test(m));
-  assert.ok(/if \(jtcatLogReviews\.current\) jtcatShowLogReview\(\);[\s\S]{0,200}_logPopoutForReview && logPopoutWin/.test(m));
+  assert.ok(/if \(jtcatLogReviews\.current\) jtcatShowLogReview\(\);[\s\S]{0,200}logReviewCloseSoon\(\)/.test(m));
+  assert.ok(/function logReviewCloseSoon\(\) \{\s*if \(!_logPopoutForReview \|\| !logPopoutWin/.test(m), 'only a window the review opened');
   assert.ok(/logPopoutWin = null;[\s\S]{0,120}_logPopoutForReview = false;/.test(m));
 });
 
