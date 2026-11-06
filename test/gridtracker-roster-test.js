@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * GridTracker as JTCAT's call roster (AE5JE 2026-10-28): POTACAT sends each
  * FT8/FT4 decode to the Extra UDP destination as a WSJT-X DECODE, and
@@ -98,7 +99,7 @@ check('over a real socket: GridTracker answers the port the decodes came from', 
 }));
 
 console.log('Wiring');
-const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+const main = readSrc(path.join(ROOT, 'main.js'));
 const fnOf = (name, len = 2500) => main.slice(main.indexOf('function ' + name + '('), main.indexOf('function ' + name + '(') + len);
 check('every FT8/FT4 decode batch goes to the Extra UDP bridge, after a Status, unless turned off', () => {
   assert.ok(/pskrQueueDecodes\(data\);\s*\r?\n\s*\/\/ GridTracker[^\n]*\r?\n\s*gridTrackerSendDecodes\(data\);/.test(main));
@@ -112,13 +113,13 @@ check('the bridge listens on its own socket; a reply becomes a JTCAT double-clic
   const inb = fnOf('gridTrackerInbound');
   assert.ok(/jtcatPopoutWin\.webContents\.send\('jtcat-external-reply', d\)/.test(inb) && /webContents\.send\('jtcat-external-halt'\)/.test(inb));
   assert.ok(/open the JTCAT window/.test(inb), 'with no JTCAT window it says what to do');
-  const pop = fs.readFileSync(path.join(ROOT, 'renderer/jtcat-popout.js'), 'utf8');
+  const pop = readSrc(path.join(ROOT, 'renderer/jtcat-popout.js'));
   assert.ok(/onJtcatExternalReply\(function\(d\) \{ onDecodeRowClick\(d\); \}\)/.test(pop));
   assert.ok(/onJtcatExternalHalt\(function\(\) \{ haltTxBtn\.click\(\); \}\)/.test(pop));
 });
 check('Settings: on by default, saved and loaded', () => {
-  const html = fs.readFileSync(path.join(ROOT, 'renderer/index.html'), 'utf8');
-  const app = fs.readFileSync(path.join(ROOT, 'renderer/app.js'), 'utf8');
+  const html = readSrc(path.join(ROOT, 'renderer/index.html'));
+  const app = readSrc(path.join(ROOT, 'renderer/app.js'));
   assert.ok(/id="set-extra-udp-decodes" checked/.test(html));
   assert.ok(/setExtraUdpDecodes\.checked = s\.extraUdpDecodes !== false;/.test(app) && /extraUdpDecodes: setExtraUdpDecodes \? setExtraUdpDecodes\.checked : true,/.test(app));
 });

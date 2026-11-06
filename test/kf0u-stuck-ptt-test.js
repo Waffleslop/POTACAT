@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // KF0U's FT-710 keyed at 0 W for hours (1.11.5/1.11.6, 2026-10-17..20),
 // released only by closing the browser or POTACAT — and no log of it survived:
 //   1. session.log kept ONE previous run; a manual restart + the updater's
@@ -15,7 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const { BUG_REPORT_MARKER, selectReportLines, sessionLogRotationMoves } = require('../lib/bug-report-log');
 
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

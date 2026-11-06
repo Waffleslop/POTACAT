@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // electricfalcon (2026-11-03, a Pi running rigctld): a custom CAT button could
 // only send radio CAT, wrapped in rigctld's `w`, so rigctld's own commands
 // (set the VFO, the split) could not be sent. A command starting with + or \
@@ -48,7 +49,7 @@ test('the prefix is only a command when a letter follows', () => {
 });
 
 test('the custom CAT help names the prefix', () => {
-  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  const html = readSrc(path.join(__dirname, '..', 'renderer', 'index.html'));
   const custom = html.slice(html.indexOf('id="rig-tab-custom"'), html.indexOf('id="rig-tab-presets"'));
   assert.ok(/<code>\+V VFOB<\/code>/.test(custom) && /<code>\\set_vfo VFOB<\/code>/.test(custom));
 });

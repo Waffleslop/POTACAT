@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // What POTACAT hands the bundled rigctld (main.js spawnRigctld), pinned by
 // two field reports of 2026-10-23/24. Run: node test/rigctld-spawn-test.js
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const main = readSrc(path.join(__dirname, '..', 'main.js'));
 
 let pass = 0, fail = 0;
 function test(name, fn) {

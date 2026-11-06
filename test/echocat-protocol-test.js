@@ -9,6 +9,7 @@
 //
 // Run: node test/echocat-protocol-test.js
 'use strict';
+const { readSrc } = require('./_src');
 
 const P = require('../lib/echocat-protocol');
 const { RemoteClient } = require('../lib/remote-client');
@@ -164,7 +165,7 @@ console.log('\n=== jtcat-reply demux forwarding (grid-instead-of-report regressi
 {
   const fs = require('fs');
   const path = require('path');
-  const serverSrc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8');
+  const serverSrc = readSrc(path.join(__dirname, '..', 'lib', 'remote-server.js'));
   const caseStart = serverSrc.indexOf("case 'jtcat-reply':");
   const caseEnd = serverSrc.indexOf('break;', caseStart);
   const caseBlock = caseStart >= 0 ? serverSrc.slice(caseStart, caseEnd) : '';
@@ -174,7 +175,7 @@ console.log('\n=== jtcat-reply demux forwarding (grid-instead-of-report regressi
       `demux forwards msg.${field} (stripping it re-opens the grid-instead-of-report bug)`);
   }
 
-  const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const mainSrc = readSrc(path.join(__dirname, '..', 'main.js'));
   const handlerStart = mainSrc.indexOf("remoteServer.on('jtcat-reply'");
   const handlerSlice = handlerStart >= 0 ? mainSrc.slice(handlerStart, handlerStart + 4000) : '';
   check(/inferReplyStep/.test(handlerSlice),

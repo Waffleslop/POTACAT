@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // The Log QSO form follows the radio (hoogskev 2026-10-31: the logger kept
 // the frequency it opened with). Same rule as ECHOCAT Web's log sheet: held
 // at the spot until the radio arrives within 500 Hz, then follows the dial;
@@ -10,7 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

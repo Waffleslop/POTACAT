@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * The VFO window's voice macro bar follows every change to the labels and
  * recordings (N0KAH 2026-10-28: a macro renamed in Settings kept its old name
@@ -15,9 +16,9 @@ function check(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + e.message); }
 }
-const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
-const preload = fs.readFileSync(path.join(ROOT, 'preload-vfo-popout.js'), 'utf8');
-const html = fs.readFileSync(path.join(ROOT, 'renderer/vfo-popout.html'), 'utf8');
+const main = readSrc(path.join(ROOT, 'main.js'));
+const preload = readSrc(path.join(ROOT, 'preload-vfo-popout.js'));
+const html = readSrc(path.join(ROOT, 'renderer/vfo-popout.html'));
 
 const handler = (name) => {
   const i = main.indexOf("ipcMain.handle('" + name + "'");

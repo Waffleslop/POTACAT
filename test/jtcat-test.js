@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
 'use strict';
+const { readSrc } = require('./_src');
 //
 // JTCAT regression suite — drives the QSO state machine, decode
 // classifier, and FT8 engine mode-handling against synthetic decode
@@ -439,7 +440,7 @@ section('Skip — a station that never answered is abandoned, not advanced (KB2U
   assert(sm.skipAbandonsQso(q({ phase: 'r+report', report: '-07', sentReport: '-10' })) === false, 'reports both ways → W8ATE closeout keeps working');
   assert(sm.skipAbandonsQso(q({ fd: true })) === false, 'Field Day keeps its own ladder');
   assert(sm.skipAbandonsQso(q({ mode: 'cq', phase: 'cq' })) === false, 'CQ side unchanged');
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   for (const h of ["remoteServer.on('jtcat-skip-phase'", "ipcMain.on('jtcat-popout-skip-phase'"]) {
     const at = main.indexOf(h);
     const body = main.slice(at, at + 2500);
@@ -898,7 +899,7 @@ section('Courtesy leg — ends when the 73/RR73 has actually been transmitted');
   {
     const fs = require('fs');
     const path = require('path');
-    const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+    const MAIN = readSrc(path.join(__dirname, '..', 'main.js'));
     const single = MAIN.indexOf('ft8Engine._lastTxPeriodKey = jtcatPeriodUtc(modeForTx);');
     assert(single > 0 && MAIN.indexOf('jtcatNoteTxSent(data.message);', single) - single < 200,
       'single-slice tx-start stamps the courtesy message beside the try stamp');

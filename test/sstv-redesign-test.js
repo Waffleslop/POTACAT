@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // The SSTV window redesign (Casey 2026-09-29): starters with per-station
 // looks, the style-pack interpreter, two-click replies, the SWR trip reaching
 // the SSTV window, and a guest's picture gated by the pass.
@@ -14,7 +15,7 @@ function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.stack || e.message).split('\n').slice(0, 3).join('\n       ')); }
 }
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 
 // A canvas stand-in that records what is drawn and keeps a numeric sanity
 // check on every coordinate (NaN is the classic silent recipe bug).
@@ -55,7 +56,7 @@ test('four fonts, none of them Oswald (too condensed to read)', () => {
     assert.ok(fs.existsSync(path.join(__dirname, '..', 'renderer', 'fonts', f + '.woff2')), f + ' bundled');
   }
   for (const l of ['bungee', 'archivoblack', 'russoone', 'rubik', 'rye']) {
-    assert.ok(/SIL OPEN FONT LICENSE/i.test(fs.readFileSync(path.join(__dirname, '..', 'renderer', 'fonts', 'OFL-' + l + '.txt'), 'utf8')), l + ' licence');
+    assert.ok(/SIL OPEN FONT LICENSE/i.test(readSrc(path.join(__dirname, '..', 'renderer', 'fonts', 'OFL-' + l + '.txt'))), l + ' licence');
   }
 });
 

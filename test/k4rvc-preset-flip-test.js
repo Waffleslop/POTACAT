@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * K4RVC, IC-7300MK2 over the LAN, 2026-10-28: "When I switch/launch into
  * JTCAT, the pwr does switch to 45w, but very quickly goes back to 100w", and
@@ -52,7 +53,7 @@ check('launch: the first mode applies nothing, and once its trigger is noted a s
 });
 
 console.log('main.js wiring');
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const main = readSrc(path.join(__dirname, '..', 'main.js'));
 check('the rules see the mode with the Icom DATA flag folded in (rigPresetModeFor)', () => {
   assert.ok(/function rigPresetModeFor\(mode\)/.test(main));
   assert.ok(/cat\._codec\.dataModeState/.test(main));

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * The operator's own state and county on each contact (MY_STATE / MY_CNTY),
  * for LoTW and other loggers (AE5JE 2026-10-27). Not one pair of fields
@@ -27,7 +28,7 @@ check('every state, with LoTW\'s spellings', () => {
   assert.strictEqual(SC.knownCounty(COUNTIES, 'va', 'fairfax'), 'Fairfax');
   assert.ok(COUNTIES.LA.length > 60, 'Louisiana parishes');
   assert.strictEqual(SC.knownCounty(COUNTIES, 'VA', 'Nowhere'), '');
-  const lic = fs.readFileSync(path.join(ROOT, 'assets/geo/LICENSE'), 'utf8');
+  const lic = readSrc(path.join(ROOT, 'assets/geo/LICENSE'));
   assert.ok(/American Radio Relay League/.test(lic) && /us-counties\.json/.test(lic), 'TQSL notice travels with the data');
 });
 
@@ -47,7 +48,7 @@ check('a forwarded home contact carries the home grid; activations, set grids an
   assert.strictEqual(SC.forwardHomeGrid({ mySigInfo: 'US-1234' }, home), '', 'never on an activation');
   assert.strictEqual(SC.forwardHomeGrid({ mySotaRef: 'W4V/SH-001' }, home), '');
   assert.strictEqual(SC.forwardHomeGrid({}, { grid: 'nonsense' }), '');
-  const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+  const main = readSrc(path.join(ROOT, 'main.js'));
   const fn = main.indexOf('function forwardToLogbook(qsoData, s = settings)');
   assert.ok(main.slice(fn, fn + 600).includes('StationCounty.forwardHomeGrid(qsoData'), 'the forward fills it');
   const save = main.indexOf('function stationLocationFillFor(');
@@ -99,9 +100,9 @@ check('an activation batch is signed with its county, one batch per county', () 
 });
 
 console.log('Wiring');
-const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
-const app = fs.readFileSync(path.join(ROOT, 'renderer/app.js'), 'utf8');
-const html = fs.readFileSync(path.join(ROOT, 'renderer/index.html'), 'utf8');
+const main = readSrc(path.join(ROOT, 'main.js'));
+const app = readSrc(path.join(ROOT, 'renderer/app.js'));
+const html = readSrc(path.join(ROOT, 'renderer/index.html'));
 check('every log path and the LoTW upload fill through stationLocationFillFor', () => {
   assert.ok(/Object\.assign\(qsoData, stationLocationFillFor\(qsoData, ops\)\);/.test(main), 'saveQsoRecord, with the operator\'s own settings (Log as)');
   assert.ok(/return \{ MY_GRIDSQUARE: f\.myGridsquare, MY_STATE: f\.myState, MY_CNTY: f\.myCounty \};/.test(main), 'LoTW fill');
@@ -121,7 +122,7 @@ check('Settings > Station has the home fields; the activation bar asks the park 
 });
 
 check('a device chooses the park county too, and sees the choice and the list', () => {
-  const rs = fs.readFileSync(path.join(ROOT, 'lib/remote-server.js'), 'utf8');
+  const rs = readSrc(path.join(ROOT, 'lib/remote-server.js'));
   assert.ok(/capabilities: \[[\s\S]*'park-county'/.test(rs), 'capability');
   assert.ok(/county: msg\.county && typeof msg\.county === 'object'/.test(rs));
   assert.ok(/const r = setParkCounty\(refs\[0\], county\.state, county\.county, 'ECHOCAT device'\);/.test(main));

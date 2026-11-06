@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // LZ3AW round 11 (TS-480, ECHOCAT Web), 2026-09-29, on 1.10.27:
 //   "SWR is ok now. Unfortunately power meter still is not dynamic, it's
 //    looking like it's not in real time." / "S-meter on WEB and POTACAT shows
@@ -19,7 +20,7 @@ const { createPeakHold } = require('../lib/meter-peak-hold');
 let passed = 0, failed = 0;
 const cases = [];
 function test(name, fn) { cases.push([name, fn]); }
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 const TS480 = RIG_MODELS['TS-480'];
 function ts480() {
   const writes = [], watts = [], smeter = [], logs = [];

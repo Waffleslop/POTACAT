@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 // The dim "worked today on another band/mode" checkmark (Casey 2026-10-23).
 const assert = require('assert');
 const fs = require('fs');
@@ -12,8 +13,8 @@ assert.deepStrictEqual(S.workedElsewhereToday(e, '40M', 'CW', t), ['20M SSB'], '
 assert.deepStrictEqual(S.workedElsewhereToday(undefined, '40M', 'CW', t), []);
 assert.ok(/worked-check other/.test(S.spotRowHtml({ callsign: 'K1ABC', frequency: '7200', mode: 'SSB', source: 'pota' }, { workedOther: 'x' }, {})));
 assert.ok(!/worked-check other/.test(S.spotRowHtml({ callsign: 'K1ABC', frequency: '7200', mode: 'SSB', source: 'pota' }, { workedEver: true, workedOther: 'x' }, {})), 'the real check wins');
-const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
-const web = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote.js'), 'utf8');
+const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
+const web = readSrc(path.join(__dirname, '..', 'renderer', 'remote.js'));
 assert.ok(/SpotRow\.workedElsewhereToday\(/.test(app) && /tr\.classList\.add\('worked-other'\)/.test(app), 'desktop table');
 assert.ok(/SpotRow\.workedElsewhereToday\(/.test(web) && /workedEver, workedOther, isSkipped/.test(web), 'web table');
 console.log('Worked elsewhere: 8 passed, 0 failed');

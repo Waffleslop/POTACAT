@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * The desktop VFO window's pieces on the ECHOCAT wire, for a device VFO pane
  * (iPhone Duo, potacat-app docs/desktop-handoffs/duo-vfo-pane.md, 2026-10-26):
@@ -31,8 +32,8 @@ function rig(opts) {
   rs._client = ws;
   return { rs, ws, sent, send: (m) => rs._handleMessage(ws, m, {}) };
 }
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-const server = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8');
+const main = readSrc(path.join(__dirname, '..', 'main.js'));
+const server = readSrc(path.join(__dirname, '..', 'lib', 'remote-server.js'));
 
 console.log('Duo VFO pane over ECHOCAT');
 

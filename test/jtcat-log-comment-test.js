@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // dcxweaver 2026-11-03: the "JTCAT FT8" COMMENT on every JTCAT contact is a
 // setting (settings.jtcatLogComment, Settings > Logging), default ON so
 // nothing changes for anyone who never touches it.
@@ -7,7 +8,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8').replace(/\r\n/g, '\n');
+const read = (p) => readSrc(path.join(__dirname, '..', p)).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

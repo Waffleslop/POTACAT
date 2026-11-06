@@ -1,11 +1,12 @@
 'use strict';
+const { readSrc } = require('./_src');
 // Saving a QSO must not re-parse the whole log while no ECHOCAT device is
 // connected (IK4IDF 2026-10-17: 124k QSOs, the parse held the main process
 // ~1 s after every save and the courtesy 73 missed its slot).
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
-const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+const MAIN = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
 
 const start = MAIN.indexOf('async function saveQsoRecord(');
 assert.ok(start > 0, 'saveQsoRecord');

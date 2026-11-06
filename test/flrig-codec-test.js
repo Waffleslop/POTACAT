@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * FLRig (a shared radio): lib/xmlrpc.js, lib/flrig-transport.js and
  * lib/codecs/flrig-codec.js, driven through the REAL RigController against a
@@ -405,7 +406,7 @@ function rig(port, { model } = {}) {
 
   console.log('\n=== wiring (main.js, renderer, libs) ===');
   await test('main.js: the flrig connect branch, detectRigType, the model merge, the test IPC and the link allowlist', () => {
-    const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+    const main = readSrc(path.join(__dirname, '..', 'main.js'));
     assert.ok(/\} else if \(target\.type === 'flrig'\) \{[\s\S]{0,1600}transport = new FlrigTransport\(\);[\s\S]{0,400}codec = new FlrigCodec\(model, \(data\) => transport\.write\(data\)\);[\s\S]{0,400}cat = new RigController\(model, transport, codec\);/.test(main), 'connectCat branch');
     assert.ok(/cat\.on\('powerMeter', sendCatFwdPower\);[\s\S]{0,300}resolveCatHostPort\(target, 12345, 'flrig'\)/.test(main), 'wattmeter wired, host:port paste handled, default 12345');
     assert.ok(/if \(target\.type === 'flrig'\) return 'flrig';/.test(main), 'detectRigType');
@@ -414,16 +415,16 @@ function rig(port, { model } = {}) {
     assert.ok(/ipcMain\.handle\('test-flrig'/.test(main) && /probeFlrig\(\{ host, port \}\)/.test(main), 'Test Connection IPC');
     assert.ok(/'https:\/\/sourceforge\.net\/projects\/fldigi\/'/.test(main), 'download link allowed');
     assert.ok(/rigType === 'flrig';\n\}/.test(main) || /\|\| rigType === 'flrig'/.test(main), 'AF gain offered');
-    const pre = fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8');
+    const pre = readSrc(path.join(__dirname, '..', 'preload.js'));
     assert.ok(/testFlrig: \(config\) => ipcRenderer\.invoke\('test-flrig', config\)/.test(pre));
   });
   await test('renderer: radio type in the editor and the wizard, host/port, Test Connection, target builders, voice-as-data row', () => {
-    const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+    const html = readSrc(path.join(__dirname, '..', 'renderer', 'index.html'));
     assert.ok(/name="radio-type" value="flrig"> FLRig \(a shared radio\)/.test(html));
     assert.ok(/id="set-flrig-host"/.test(html) && /id="set-flrig-port"[^>]*value="12345"/.test(html) && /id="flrig-test-btn"/.test(html));
     assert.ok(/name="welcome-radio-type" value="flrig"/.test(html) && /id="welcome-flrig-host"/.test(html));
     assert.ok(/href="https:\/\/sourceforge\.net\/projects\/fldigi\/files\/flrig\/" data-external="1"/.test(html));
-    const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+    const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
     assert.ok(/type: 'flrig',\s+host: \(setFlrigHost && setFlrigHost\.value\.trim\(\)\) \|\| '127\.0\.0\.1',\s+port: parseInt\(setFlrigPort && setFlrigPort\.value, 10\) \|\| 12345/.test(app), 'editor builds the target');
     assert.ok(/type: 'flrig',\s+host: document\.getElementById\('welcome-flrig-host'\)/.test(app), 'wizard builds the target');
     assert.ok(/currentTarget\.type === 'flrig'\) \{\s+setRadioType\('flrig'\)/.test(app), 'editor reopens it');
@@ -436,17 +437,17 @@ function rig(port, { model } = {}) {
     assert.strictEqual(RF.familyFromCatTarget({ type: 'flrig', host: '127.0.0.1', port: 12345 }), 'flrig');
     assert.strictEqual(RF.familyFromRadioType('flrig'), 'flrig');
     assert.deepStrictEqual(RF.audioSourcesFor('flrig').map((o) => o.value), ['dax'], 'a local sound card, no DAX wording');
-    const notes = fs.readFileSync(path.join(__dirname, '..', 'lib', 'rig-setup-notes.js'), 'utf8');
+    const notes = readSrc(path.join(__dirname, '..', 'lib', 'rig-setup-notes.js'));
     assert.ok(/rigctldnet: 'rigctldnet', flrig: 'flrig',/.test(notes));
     const share = require('../lib/setup-share');
-    const srcShare = fs.readFileSync(path.join(__dirname, '..', 'lib', 'setup-share.js'), 'utf8');
+    const srcShare = readSrc(path.join(__dirname, '..', 'lib', 'setup-share.js'));
     assert.ok(/flrig: 'flrig \(a shared radio\)'/.test(srcShare));
     void share;
     const P = require('../lib/serial-port-presence');
     assert.strictEqual(P.portOfTarget({ type: 'flrig', host: '127.0.0.1', port: 12345 }), '', 'no serial port to wait for');
     const { getModel } = require('../lib/rig-models');
     assert.strictEqual(getModel(null, 'flrig').protocol, 'flrig');
-    const runner = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'run-tests.js'), 'utf8');
+    const runner = readSrc(path.join(__dirname, '..', 'scripts', 'run-tests.js'));
     assert.ok(runner.includes("'test/flrig-codec-test.js'"), 'in the npm test chain');
   });
 

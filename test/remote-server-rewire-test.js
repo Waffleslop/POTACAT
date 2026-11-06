@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // connectRemote() removes every listener from the old RemoteServer and builds
 // a new one. Anything main.js wires onto the server must therefore live
 // inside connectRemote() or go through onRemoteServer(), which re-runs on
@@ -16,7 +17,7 @@ function test(name, fn) {
   try { fn(); pass++; console.log('  ok  ' + name); }
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
-const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+const src = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
 const lines = src.split('\n');
 const start = lines.findIndex((l) => /^function connectRemote\(\) \{/.test(l));
 const end = lines.findIndex((l) => /^function disconnectRemote\(\) \{/.test(l));

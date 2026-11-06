@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // The FT8/FT4/FT2 transmit watchdog (lloyd KO4L 2026-10-25: "POTACAT will not
 // cease transmissions after x number of connection attempts"). WSJT-X stops
 // after a few minutes of transmitting with no progress; POTACAT now does too,
@@ -18,7 +19,7 @@ function test(name, fn) {
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
 
-const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const MAIN = readSrc(path.join(__dirname, '..', 'main.js'));
 function extract(header) {
   const i = MAIN.indexOf(header);
   assert.ok(i >= 0, 'missing ' + header);

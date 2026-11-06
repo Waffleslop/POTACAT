@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * JS8 over ECHOCAT — the server half of the phone data path.
  *
@@ -167,8 +168,8 @@ test('a guest auth gets the JS8 hydration trio, state first', () => {
   // quiet band). Hydration now flows through the SHARED helper so every
   // auth path gets it by construction — assert the guest path calls it,
   // and drive the helper itself for content + order.
-  const src = require('fs').readFileSync(
-    require('path').join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8');
+  const src = readSrc(
+    require('path').join(__dirname, '..', 'lib', 'remote-server.js'));
   // The pass hydration is one helper (_hydratePassClient), used at pass auth
   // and again when a paused guest gets the radio back.
   const at = src.indexOf('Guest Pass authenticated:');

@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 // A page whose session ends for good — another device took the rig, the
 // device was revoked, the web sign-in ended — must end its audio call too.
 // WebRTC is peer to peer and outlives the WebSocket, so a kicked tab kept its
@@ -7,7 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
-const JS = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote.js'), 'utf8').replace(/\r\n/g, '\n');
+const JS = readSrc(path.join(__dirname, '..', 'renderer', 'remote.js')).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

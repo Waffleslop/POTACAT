@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * A Guest Pass guest's contacts reach the GUEST's cloud logbook, sent by the
  * shack through the pass session's own route (lib/pass-qso-outbox.js; cloud
@@ -168,7 +169,7 @@ function outbox(fetch, opts = {}) {
   });
 
   console.log('main.js wiring');
-  const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+  const main = readSrc(path.join(ROOT, 'main.js'));
   await check('a guest contact goes to the guest\'s logbook before any capability check, and never to the owner\'s file', async () => {
     const i = main.indexOf('if (isClientDriven && shouldForwardClientDriven())');
     const b = main.slice(i, i + 1500);

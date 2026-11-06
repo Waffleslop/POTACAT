@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 // Voice in DATA mode (GitHub #24, Xiegu G90): rig.voiceAsData sends voice
 // USB/LSB as DIGU/DIGL and reads the DATA report back as the voice mode.
 const assert = require('assert');
@@ -110,9 +111,9 @@ test('turning it off stops the read-back translation', () => {
 
 console.log('voice-data-mode: wiring');
 const root = path.join(__dirname, '..');
-const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
-const app = fs.readFileSync(path.join(root, 'renderer', 'app.js'), 'utf8');
-const html = fs.readFileSync(path.join(root, 'renderer', 'index.html'), 'utf8');
+const main = readSrc(path.join(root, 'main.js'));
+const app = readSrc(path.join(root, 'renderer', 'app.js'));
+const html = readSrc(path.join(root, 'renderer', 'index.html'));
 test('main applies rig.voiceAsData on connect', () => {
   assert.ok(/cat\.setVoiceAsData\(!!\(vRig && vRig\.voiceAsData\)\)/.test(main));
 });

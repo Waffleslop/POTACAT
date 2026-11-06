@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Worked roster (lib/worked-roster.js): states + DXCC entities worked and
 // confirmed by band and mode, the data under the Worked All States view and
 // the map overlays (docs/worked-states-countries-plan.md). Plus the wiring
@@ -158,7 +159,7 @@ test('parseWorkedQsos carries STATE and the DXCC tracker\'s confirmation rule, o
 });
 
 test('wiring: main.js builds the roster from workedQsos, adds live, serves and pushes it', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(main.includes("require('./lib/worked-roster')"));
   assert.ok(/workedRoster = WorkedRoster\.build\(workedQsos, rosterEntityOf\)/.test(main));
   assert.strictEqual((main.match(/^\s+workedRosterAdd\(call, entry\);/gm) || []).length, 2, 'both live-add sites (log save + WSJT-X bridge)');
@@ -175,16 +176,16 @@ test('wiring: main.js builds the roster from workedQsos, adds live, serves and p
 });
 
 test('wiring: renderer loads the roster module and the view, preload exposes the channels', () => {
-  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  const html = readSrc(path.join(__dirname, '..', 'renderer', 'index.html'));
   assert.ok(html.includes('<script src="../lib/worked-roster.js"></script>'));
   assert.ok(html.includes('<script src="was-view.js"></script>'));
   assert.ok(html.includes('id="was-view"') && html.includes('id="view-was-btn"') && html.includes('id="was-backfill-btn"'));
-  const pre = fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8');
+  const pre = readSrc(path.join(__dirname, '..', 'preload.js'));
   for (const k of ['onWorkedRoster', 'getWorkedRoster', 'wasBackfillStates']) assert.ok(pre.includes(k + ':'), k);
-  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
   assert.ok(app.includes("view === 'was'") && app.includes("currentView === 'was'"));
   assert.ok(app.includes("viewState.lastView === 'was'"), 'the view is restored at launch like the others');
-  const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
+  const css = readSrc(path.join(__dirname, '..', 'renderer', 'styles.css'));
   assert.ok(css.includes('.was-worked') && css.includes('#4fc3f7'), 'worked = POTACAT blue');
   assert.ok(css.includes('.was-confirmed') && css.includes('#4ecca3'), 'confirmed = POTA green');
   assert.ok(!/was-[a-z-]*\{[^}]*#f(fd|ff)?[0-9a-f]*00/i.test(css), 'no GridTracker yellow');

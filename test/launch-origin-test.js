@@ -15,6 +15,7 @@
 // Run: node test/launch-origin-test.js
 
 'use strict';
+const { readSrc } = require('./_src');
 
 const assert = require('assert');
 const fs = require('fs');
@@ -266,7 +267,7 @@ check('snapshot: connection.localServer and cloudTunnel.origin are present; sect
 
 // ── Source guards on main.js ──────────────────────────────────────────────
 check('main.js: listens for server-state, probes the CONFIGURED port, and feeds the tunnel manager', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const src = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(/remoteServer\.on\('server-state', onEchocatServerState\)/.test(src), 'server-state wired');
   const fn = src.slice(src.indexOf('async function probeOriginForTunnel'), src.indexOf('function connectRemote()'));
   assert.ok(/settings\.remotePort \|\| 7300/.test(fn), 'probe uses settings.remotePort');
@@ -277,25 +278,25 @@ check('main.js: listens for server-state, probes the CONFIGURED port, and feeds 
 });
 
 check('renderer: the cloud link is withheld unless the origin is ok', () => {
-  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
   assert.ok(/tunnel\.cloudHost && originOk\)/.test(app), 'app.js cloudUrl gate');
-  const ui = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'cloud-ui.js'), 'utf8');
+  const ui = readSrc(path.join(__dirname, '..', 'renderer', 'cloud-ui.js'));
   assert.ok(/if \(hostText && linkable\)/.test(ui), 'cloud-ui link gate');
-  assert.ok(/cloud-tunnel-origin/.test(fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8')), 'origin notice markup');
+  assert.ok(/cloud-tunnel-origin/.test(readSrc(path.join(__dirname, '..', 'renderer', 'index.html'))), 'origin notice markup');
 });
 
 // ── §5: login items are opt-in, offered where they matter ──────────────────
 check('launcher: the login item is installed only on an explicit opt-in, and Install/Uninstall are that opt-in', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  const src = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
   assert.ok(/if \(app\.isPackaged && settings\.enableLauncher === true\) \{/.test(src), 'boot gate is === true');
   assert.ok(!/app\.isPackaged && settings\.enableLauncher !== false/.test(src), 'the silent default is gone');
   assert.ok(/ipcMain\.handle\('launcher-install', async \(\) => \{\n\s+const r = await _installLauncher\(\);\n\s+if \(r && r\.ok && settings\.enableLauncher !== true\) \{ settings\.enableLauncher = true;/.test(src));
   assert.ok(/ipcMain\.handle\('launcher-uninstall', async \(\) => \{\n\s+const r = await _uninstallLauncher\(\);\n\s+if \(r && r\.ok && settings\.enableLauncher !== false\) \{ settings\.enableLauncher = false;/.test(src));
-  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
   assert.ok(!/enableLauncher: launcherEnabled/.test(app), 'Settings save no longer writes enableLauncher from a checkbox that does not exist');
 });
 check('cloud tab: start-at-login is OFFERED after enabling the tunnel, never applied silently', () => {
-  const ui = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'cloud-ui.js'), 'utf8').replace(/\r\n/g, '\n');
+  const ui = readSrc(path.join(__dirname, '..', 'renderer', 'cloud-ui.js')).replace(/\r\n/g, '\n');
   assert.ok(/async function refreshStartupOffer\(state\)/.test(ui));
   // 2026-10-20: the "Turn on / Not now" offer became two state-reflecting
   // checkboxes (Casey: nobody picks Not now). The opt-in rule is unchanged:
@@ -306,8 +307,8 @@ check('cloud tab: start-at-login is OFFERED after enabling the tunnel, never app
   assert.ok(/refreshStartupOffer\(state\)\.catch\(\(\) => \{\}\);\n\s+\}/.test(ui), 'evaluated on every tunnel state render');
   assert.ok(/ctStartupLaunch\.addEventListener\('change', async \(\) => \{\n\s*const on = ctStartupLaunch\.checked;[\s\S]*?await window\.api\.saveSettings\(\{ launchAtStartup: on \}\);/.test(ui), 'the tick sets the login item through the normal settings path');
   assert.ok(/on \? await window\.api\.launcherInstall\(\) : await window\.api\.launcherUninstall\(\)/.test(ui), 'the launcher has its own tick, installed only when ticked');
-  assert.ok(!/launchAtStartup: true/.test(fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/applyLaunchAtStartup\(true\)/g, '')), 'main never flips launchAtStartup on its own');
-  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  assert.ok(!/launchAtStartup: true/.test(readSrc(path.join(__dirname, '..', 'main.js')).replace(/applyLaunchAtStartup\(true\)/g, '')), 'main never flips launchAtStartup on its own');
+  const html = readSrc(path.join(__dirname, '..', 'renderer', 'index.html'));
   for (const id of ['cloud-tunnel-startup', 'cloud-tunnel-startup-launch', 'cloud-tunnel-startup-launcher']) assert.ok(html.includes(`id="${id}"`), id);
   assert.ok(!html.includes('id="cloud-tunnel-startup-not-now"'), 'no Not now');
 });

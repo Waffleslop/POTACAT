@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * WD3D's activation thread (Discord 2026-10-29): the toolbar buttons (Spot,
  * Export ADIF, Logbook, Settings) left the window at full screen with a large
@@ -16,8 +17,8 @@ function check(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + e.message); }
 }
-const app = fs.readFileSync(path.join(ROOT, 'renderer/app.js'), 'utf8');
-const css = fs.readFileSync(path.join(ROOT, 'renderer/styles.css'), 'utf8');
+const app = readSrc(path.join(ROOT, 'renderer/app.js'));
+const css = readSrc(path.join(ROOT, 'renderer/styles.css'));
 
 // Lift the pure helper out of app.js and run it as written.
 const start = app.indexOf('function hunterParkRefsFromSpot(s) {');

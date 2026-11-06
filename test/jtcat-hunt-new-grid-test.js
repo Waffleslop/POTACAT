@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Hunt filters, piece 2 (docs/plan-jtcat-hunt-priorities.md): a "New grids"
 // Hunt target, and the Wanted view filter split into New DXCC and New grid
 // (level_death 2026-11-04: show only new grids or new DX entities).
@@ -15,7 +16,7 @@ function test(name, fn) {
   try { fn(); pass++; console.log('  ok  ' + name); }
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.stack || e.message)); }
 }
-const read = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+const read = (f) => readSrc(path.join(__dirname, '..', f));
 
 test('Hunt: New grids answers a CQ from a grid not yet worked on this band and mode, and nothing else', () => {
   assert.strictEqual(sm.matchesHuntFilter('CQ DL2ABC JO62', 'new-grid', { gridWanted: true }), true);

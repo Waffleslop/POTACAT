@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // SSTV style packs: the pure-data format, the signed feed, and the store that
 // installs, claims and syncs them (lib/sstv-pack-validate.js, lib/sstv-packs.js).
 // Run: node test/sstv-packs-test.js
@@ -17,7 +18,7 @@ const cases = [];
 function test(name, fn) { cases.push([name, fn]); }
 const ROOT = path.join(__dirname, '..');
 const HALLOWEEN_DIR = path.join(ROOT, 'data', 'sstv-packs', 'halloween');
-const halloween = () => JSON.parse(fs.readFileSync(path.join(HALLOWEEN_DIR, 'pack.json'), 'utf8'));
+const halloween = () => JSON.parse(readSrc(path.join(HALLOWEEN_DIR, 'pack.json')));
 const errsOf = (p) => validatePack(p).errors.join(' | ');
 
 // A test signing key, and a signer that builds the feed the way the publish step does.
@@ -150,7 +151,7 @@ test('the key in the app verifies what the repo\'s signer produces (when the key
   const { buildFeed } = require('../scripts/sign-sstv-packs');
   const out = tmpDir();
   buildFeed({ srcDir: path.join(ROOT, 'data', 'sstv-packs'), outDir: out, privateKeyPem: fs.readFileSync(keyFile) });
-  const wire = JSON.parse(fs.readFileSync(path.join(out, 'feeds', 'sstv-packs.json'), 'utf8'));
+  const wire = JSON.parse(readSrc(path.join(out, 'feeds', 'sstv-packs.json')));
   assert.ok(verifyIndex(wire).packs.some((e) => e.id === 'halloween'), 'the built-in public key accepts it');
 });
 
@@ -269,11 +270,11 @@ test('claims: set active, unclaim clears active, and pairing merges as a union',
 test('pairing: the claims message is registered both ways and guests are shut out', () => {
   const d = P.MESSAGES['sstv-pack-claims'];
   assert.ok(d && d.dir === P.Dir.BOTH && d.feature === 'sstv');
-  const rs = fs.readFileSync(path.join(ROOT, 'lib', 'remote-server.js'), 'utf8').replace(/\r\n/g, '\n');
+  const rs = readSrc(path.join(ROOT, 'lib', 'remote-server.js')).replace(/\r\n/g, '\n');
   const demux = rs.slice(rs.indexOf("case 'sstv-pack-claims':"), rs.indexOf("case 'sstv-pack-claims':") + 300);
   assert.ok(/if \(ws\._passSession\) break;/.test(demux), 'a guest\'s claims never merge');
   assert.ok(/sendSstvPackClaims\(payload\) \{\s*if \(!payload \|\| !this\._client \|\| this\._client\._passSession\) return;/.test(rs), 'and a guest is not sent the owner\'s');
-  const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  const main = readSrc(path.join(ROOT, 'main.js')).replace(/\r\n/g, '\n');
   assert.ok(/onRemoteServer\(\(rs\) => \{\s*\/\/ The app learns the desktop's claims at connect and sends its own\.\s*rs\.on\('client-connected'/.test(main), 'wired through onRemoteServer');
   for (const ch of ['sstv-packs-list', 'sstv-pack-get', 'sstv-pack-claim', 'sstv-pack-unclaim', 'sstv-pack-set-active']) {
     assert.ok(main.includes(`ipcMain.handle('${ch}'`), ch);

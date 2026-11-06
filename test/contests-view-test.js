@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Contests view (2026-09-26 rework): titled "Contests", one aligned row per
 // contest, "Later" split by month, and a Modes filter where a contest shows
 // when ANY of its modes is ticked. Run: node test/contests-view-test.js
@@ -13,8 +14,8 @@ function test(name, fn) {
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
 const root = path.join(__dirname, '..');
-const app = fs.readFileSync(path.join(root, 'renderer', 'app.js'), 'utf8');
-const html = fs.readFileSync(path.join(root, 'renderer', 'index.html'), 'utf8');
+const app = readSrc(path.join(root, 'renderer', 'app.js'));
+const html = readSrc(path.join(root, 'renderer', 'index.html'));
 
 function extract(name) {
   const start = app.indexOf('function ' + name + '(');
@@ -57,7 +58,7 @@ test('the view is titled Contests and has the Modes filter', () => {
 
 test('the drawer (and other panels fixed over the titlebar) opt out of the drag region', () => {
   // macOS: the close X sat inside the titlebar's drag region and ignored clicks.
-  const css = fs.readFileSync(path.join(root, 'renderer', 'styles.css'), 'utf8').replace(/\r\n/g, '\n');
+  const css = readSrc(path.join(root, 'renderer', 'styles.css')).replace(/\r\n/g, '\n');
   assert.ok(/\.contests-drawer,\n\.displaced-banner,\n\.cat-popover \{\n  -webkit-app-region: no-drag;/.test(css));
 });
 

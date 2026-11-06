@@ -6,6 +6,7 @@
 // Run: node test/bug-report-log-test.js
 
 'use strict';
+const { readSrc } = require('./_src');
 
 const { BUG_REPORT_MARKER, selectReportLines, maskHomeDir } = require('../lib/bug-report-log');
 
@@ -127,8 +128,8 @@ console.log('=== maskHomeDir: usernames never reach the paste ===');
   const path = require('path');
   // LF-normalised: a Windows checkout has CRLF, and the function-end search
   // below looks for a bare newline.
-  const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
-  const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const MAIN = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
+  const APP = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
 
   // The marker must be REMOVED at startup: its absence is what a crash
   // leaves behind. A marker that lived across the run would prove nothing.

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * The band scope's tight view for a digital mode (Casey 2026-10-30): the Flex
  * pan zooms to the mode's decode window and centres on it while the JTCAT
@@ -75,15 +76,15 @@ check('no offset: unchanged (the dial is the centre)', () => {
 
 console.log('The radio');
 check('the pan status min_bw is read (real 8600 status: 1230 Hz)', () => {
-  const line = fs.readFileSync(path.join(__dirname, 'fixtures/flex-pan/8600-status.txt'), 'utf8')
+  const line = readSrc(path.join(__dirname, 'fixtures/flex-pan/8600-status.txt'))
     .split(/\r?\n/).find((l) => /\|display pan 0x[0-9A-F]+ .*min_bw=/i.test(l));
   assert.ok(line, 'a pan status line with min_bw');
   assert.strictEqual(F.parsePanGeometry(line).minSpanHz, 1230);
 });
 
 console.log('Wiring');
-const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
-const pop = fs.readFileSync(path.join(ROOT, 'renderer/jtcat-popout.js'), 'utf8');
+const main = readSrc(path.join(ROOT, 'main.js'));
+const pop = readSrc(path.join(ROOT, 'renderer/jtcat-popout.js'));
 check('main checks the view on every pan frame and when the strip shows or hides', () => {
   assert.ok(/smartSdr\.on\('pan-frame', \(f\) => \{ if \(flexScopeOn\) \{ flexDigitalViewSync\(\);/.test(main));
   assert.ok(/'jtcat-scope-watch'[\s\S]{0,400}flexDigitalViewSync\(\)/.test(main));
@@ -101,12 +102,12 @@ check('an ECHOCAT device showing FT8 gets the digital view too (C2S scope-digita
   assert.ok(/remoteServer\.on\('scope-digital-view'[\s\S]{0,200}flexDigitalViewSync\(\)/.test(main));
   const disc = /remoteServer\.on\('client-disconnected'[\s\S]{0,900}/.exec(main)[0];
   assert.ok(/yaesuScopeRemoteDigital = false/.test(disc), 'ends with the socket');
-  const rs = fs.readFileSync(path.join(ROOT, 'lib/remote-server.js'), 'utf8');
+  const rs = readSrc(path.join(ROOT, 'lib/remote-server.js'));
   assert.ok(/'scope-digital-view'\]/.test(rs), 'hello capability');
   assert.ok(/case 'scope-digital-view':[\s\S]{0,300}this\.emit\('scope-digital-view'/.test(rs));
   const proto = require('../lib/echocat-protocol.js');
   const reg = proto.MESSAGES || proto.messages || proto.PROTOCOL || proto;
-  assert.ok(JSON.stringify(Object.keys(reg)).includes('scope-digital-view') || fs.readFileSync(path.join(ROOT, 'lib/echocat-protocol.js'), 'utf8').includes("'scope-digital-view': { dir: Dir.C2S"));
+  assert.ok(JSON.stringify(Object.keys(reg)).includes('scope-digital-view') || readSrc(path.join(ROOT, 'lib/echocat-protocol.js')).includes("'scope-digital-view': { dir: Dir.C2S"));
 });
 check('the dial recentres the pan with the offset', () => {
   assert.ok(/flexScopeQueueCenter\(hz \+ \(yaesuScopeState\.centerOffsetHz \|\| 0\)\)/.test(main));
@@ -120,9 +121,9 @@ check('a click on the strip in the digital view sets the audio frequency, not th
 });
 
 console.log('One waterfall on a Flex (Casey 2026-10-30)');
-const html = fs.readFileSync(path.join(ROOT, 'renderer/jtcat-popout.html'), 'utf8');
-const web = fs.readFileSync(path.join(ROOT, 'renderer/remote.js'), 'utf8');
-const webCss = fs.readFileSync(path.join(ROOT, 'renderer/remote.css'), 'utf8');
+const html = readSrc(path.join(ROOT, 'renderer/jtcat-popout.html'));
+const web = readSrc(path.join(ROOT, 'renderer/remote.js'));
+const webCss = readSrc(path.join(ROOT, 'renderer/remote.css'));
 check('the FT8 window knows the source before the scope runs (sourceKind on scope-state, local and ECHOCAT)', () => {
   const n = (main.match(/sourceKind: yaesuScopeSynth \? 'synth' : scopeSourceKind\(\)/g) || []).length;
   assert.strictEqual(n, 2);

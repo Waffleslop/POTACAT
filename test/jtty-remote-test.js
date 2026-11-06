@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * JTTY over ECHOCAT (Phase 6 of docs/jtty-integration-plan.md): the four
  * messages are registered, the hello advertises 'jtty', the demux emits an
@@ -43,7 +44,7 @@ test('the four JTTY messages are registered with the right direction', () => {
 });
 
 test('the server hello advertises the jtty capability', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8').replace(/\r\n/g, '\n');
+  const src = readSrc(path.join(__dirname, '..', 'lib', 'remote-server.js')).replace(/\r\n/g, '\n');
   const m = src.match(/capabilities: \[([\s\S]*?)\],\n\s*rigModel:/);
   assert.ok(m, 'hello capability list found');
   assert.ok(/'jtty'/.test(m[1]), 'jtty advertised');
@@ -117,7 +118,7 @@ test('a new engine epoch empties the recent rows — ids restart at 1 per engine
   rs.broadcastJtcatJttyRx([{ id: 1, text: 'X', complete: true }]); // no epoch given: keeps the current one
   assert.strictEqual(rs._jtcatJttyEpoch, 3000);
   assert.ok(protocol.validate({ type: 'jtcat-jtty-rx', updates: [], epoch: 3000 }, protocol.Dir.S2C).ok, 'epoch is registered');
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(main.includes('remoteServer.clearJtcatJttyRecent(jtcatJttyEpoch);'), 'main clears the buffer when a JTTY engine starts');
   assert.ok(main.includes('remoteServer.broadcastJtcatJttyRx(batch, jtcatJttyEpoch);'), 'main sends the epoch with every batch');
   assert.ok(main.includes("jtcatFdExch: settings.jtcatFdExch || '',"), 'the Field Day exchange is in the settings blob');
@@ -126,22 +127,22 @@ test('a new engine epoch empties the recent rows — ids restart at 1 per engine
   assert.ok(/has\('jtcatFdExch'\) \|\| has\('jttyMacros'\) \|\| has\('jttyTemplates'\) \|\| has\('jttyFt8Macros'\) \|\| has\('jttyMacroStyle'\) \|\| has\('jttyProfile'\) \|\| has\('jttySerial'\) \|\| has\('pskMacros'\)[^{]*\)\s*\{\s*updateRemoteSettings\(\);/.test(main), 'desktop save pushes settings-update for the JTTY/PSK seeds');
   assert.ok(/const jttyKeys = \['jttySerial', 'jttyMacros', 'jttyFt8Macros', 'jttyMacroStyle', 'jttyProfile', 'jtcatFdExch', 'pskMacros'\];[\s\S]{0,200}updateRemoteSettings\(\);/.test(main), 'remote save pushes settings-update for the JTTY/PSK seeds');
   for (const [name, file] of [['web', 'renderer/remote.js'], ['pop-out', 'renderer/jtcat-popout.js']]) {
-    const src = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+    const src = readSrc(path.join(__dirname, '..', file));
     assert.ok(/epoch && (msg|batch)\.epoch !== jttyEpoch\) \{ jttyClearRows\(\);/.test(src), name + ' clears its rows on a new epoch');
   }
 });
 
 test('the recent rows are replayed on connect, and main / web wiring is in place (static)', () => {
   const root = path.join(__dirname, '..');
-  const rs = fs.readFileSync(path.join(root, 'lib', 'remote-server.js'), 'utf8').replace(/\r\n/g, '\n');
+  const rs = readSrc(path.join(root, 'lib', 'remote-server.js')).replace(/\r\n/g, '\n');
   assert.ok(rs.includes("this._sendTo(ws, { type: 'jtcat-jtty-rx', updates: this._jtcatJttyRecent.slice(), replay: true, epoch: this._jtcatJttyEpoch || undefined });"), 'hydration replay carries the epoch');
-  const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
+  const main = readSrc(path.join(root, 'main.js'));
   assert.ok(main.includes('remoteServer.broadcastJtcatJttyRx(batch, jtcatJttyEpoch);'), 'RX batches reach remote clients, with the epoch');
   assert.ok(main.includes("remoteServer.on('jtcat-jtty-send',") && main.includes("ipcMain.emit('jtcat-jtty-send', null, { text, profile });"), 'remote Send is the IPC handler');
   assert.ok(main.includes("remoteServer.on('jtcat-jtty-set-profile',"), 'remote profile twin');
   assert.ok(main.includes('remoteServer.broadcastJtcatJttyRefused(data);'), 'refusals reach remote clients');
   assert.ok(main.includes("jttyProfile: settings.jttyProfile || 'unknown',") && main.includes('jttyTemplates: Array.isArray(settings.jttyTemplates)'), 'settings blob seeds the web pane');
-  const web = fs.readFileSync(path.join(root, 'renderer', 'remote.js'), 'utf8');
+  const web = readSrc(path.join(root, 'renderer', 'remote.js'));
   for (const s of ["case 'jtcat-jtty-rx':", "case 'jtcat-jtty-refused':", 'function jttyHandleRx(', 'function jttySend(', "ft8Send({ type: 'jtcat-jtty-send', text, profile: jttyPackProfile() });",
     "ft8Send({ type: 'jtcat-jtty-set-profile', profile: jttyProfile() });", "ft8Mode === 'JTTY' ? JTTY_BAND_FREQS", "if (ft8Mode === 'JTTY') jttyOnTxStatus(msg);"]) {
     assert.ok(web.includes(s), 'remote.js ' + s);
@@ -158,7 +159,7 @@ test('the recent rows are replayed on connect, and main / web wiring is in place
   assert.ok(web.includes("'jttyMacroStyle', 'jttySerial', 'jttyProfile', 'jtcatFdExch'].some((k) => k in msg.settings)) {") && web.includes("if (typeof jttyOnSettings === 'function') jttyOnSettings(msg.settings);"), 'settings-update refreshes the JTTY pane');
   assert.ok(rs.includes("'jtty-macros.js'") && rs.includes("'<!-- jtty-macros-js -->'"), 'remote-server inlines lib/jtty-macros.js');
   assert.ok(/'20m': 14090/.test(web) && !/JTTY_BAND_FREQS = \{[^}]*14080/.test(web), 'web dials match (14090, never FT4\'s 14080)');
-  const html = fs.readFileSync(path.join(root, 'renderer', 'remote.html'), 'utf8');
+  const html = readSrc(path.join(root, 'renderer', 'remote.html'));
   assert.ok(html.includes('<!-- jtty-macros-js -->'), 'web page has the inline placeholder');
   for (const id of ['jtty-style', 'jtty-rpt', 'jtty-pane', 'jtty-list', 'jtty-tx', 'jtty-note', 'jtty-profile', 'jtty-his', 'jtty-exch', 'jtty-serial', 'jtty-queued', 'jtty-templates', 'jtty-send', 'jtty-stop', 'jtty-log', 'jtty-clear']) {
     assert.ok(html.includes(`id="${id}"`), 'remote.html ' + id);
@@ -170,13 +171,13 @@ test('the recent rows are replayed on connect, and main / web wiring is in place
 // Mobile review 2026-10-18 (potacat-app docs/desktop-handoffs/jtcat-jtty-2026-10-18-mobile-review.md).
 test('mobile review: capabilities, FT8-style packing, a JTTY spectrum, the JTTY frequency restored by main', () => {
   const root = path.join(__dirname, '..');
-  const rs = fs.readFileSync(path.join(root, 'lib', 'remote-server.js'), 'utf8').replace(/\r\n/g, '\n');
+  const rs = readSrc(path.join(root, 'lib', 'remote-server.js')).replace(/\r\n/g, '\n');
   const caps = rs.match(/capabilities: \[([\s\S]*?)\],\n\s*rigModel:/)[1];
   assert.ok(/'jtcat-fox-call'/.test(caps), 'the app gates the Fox tap on jtcat-fox-call');
   assert.ok(/'jtty-ft8-style'/.test(caps), 'and the style selector on jtty-ft8-style');
   // FT8 style hides the profile picker, so it never packs under a contest profile.
-  const pop = fs.readFileSync(path.join(root, 'renderer', 'jtcat-popout.js'), 'utf8');
-  const web = fs.readFileSync(path.join(root, 'renderer', 'remote.js'), 'utf8');
+  const pop = readSrc(path.join(root, 'renderer', 'jtcat-popout.js'));
+  const web = readSrc(path.join(root, 'renderer', 'remote.js'));
   assert.ok(/function jttyPackProfile\(\) \{[\s\S]{0,200}if \(jttyStyle === 'ft8'\) return 'unknown';/.test(pop), 'pop-out FT8 style packs as Unknown');
   assert.ok(/function jttyPackProfile\(\) \{\s*if \(jttyStyle\(\) === 'ft8'\) return 'unknown';/.test(web), 'web FT8 style packs as Unknown');
   // The engine keeps the RX audio main's in-process spectrum reads — with the
@@ -194,7 +195,7 @@ test('mobile review: capabilities, FT8-style packing, a JTTY spectrum, the JTTY 
   for (let i = 1; i < bins.length; i++) if (bins[i] > bins[peak]) peak = i;
   assert.ok(Math.abs(peak * 3000 / 160 - 1500) < 40, '1500 Hz tone lands at 1500 Hz in the 0-3000 Hz bins (bin ' + peak + ')');
   // main restores jttyAudioFreq itself and never pins JTTY to FT8's held offset.
-  const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
+  const main = readSrc(path.join(root, 'main.js'));
   assert.ok(main.includes("ft8Engine._mode !== 'PSK31' && ft8Engine._mode !== 'JTTY') {"), 'FT8 hold offset is not applied to JTTY');
   assert.ok(/if \(ft8Engine\._mode === 'JTTY'\) \{\s*const jttyHz = parseInt\(settings\.jttyAudioFreq, 10\);/.test(main), 'startJtcat restores jttyAudioFreq');
   assert.ok(main.includes("if (eng._mode === 'JTTY') settings.jttyAudioFreq = eng._txFreq;"), 'an operator JTTY move (pop-out or mobile) is remembered under jttyAudioFreq');

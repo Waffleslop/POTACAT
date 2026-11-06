@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * Rig layer test — verifies codecs produce correct commands and parse responses.
  * Run: node test/rig-test.js
@@ -471,7 +472,7 @@ test('FT-710: PSK is shown but never sent; a PSK width uses the DATA chart', () 
   codec.setFilterWidth(500);
   assert.deepStrictEqual(writes, ['SH0010;'], '500 Hz is index 10 in the DATA column (02 = 400 Hz in the SSB column)');
   // The desktop offers the DIG width presets in PSK (source guard).
-  const app = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const app = readSrc(require('path').join(__dirname, '..', 'renderer', 'app.js'));
   const presets = app.slice(app.indexOf('function rigGetFilterPresets'), app.indexOf('function rigBuildFilterPresets'));
   assert.ok(/\[[^\]]*'PSK'[^\]]*\]\.includes\(m\)\) return RIG_FILTER_PRESETS\.DIG/.test(presets), presets);
   // In PSK the desktop's spot filter shows digital spots, as in DATA, and the
@@ -479,7 +480,7 @@ test('FT-710: PSK is shown but never sent; a PSK width uses the DATA chart', () 
   const toFilter = new Function(app.slice(app.indexOf('function radioModeToFilter'), app.indexOf('function spotAgeSecs')) + '; return radioModeToFilter;')();
   assert.strictEqual(toFilter('PSK'), 'DIGI');
   // Line-ending neutral: a Windows checkout (core.autocrlf) has CRLF.
-  const remote = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer', 'remote.js'), 'utf8').replace(/\r\n/g, '\n');
+  const remote = readSrc(require('path').join(__dirname, '..', 'renderer', 'remote.js')).replace(/\r\n/g, '\n');
   const aliasEnd = remote.indexOf('\n  }\n', remote.indexOf('function aliasModeForLogSheet')) + 4;
   const alias = new Function(remote.slice(remote.indexOf('const LOG_MODE_OPTIONS'), aliasEnd) + '; return aliasModeForLogSheet;')();
   assert.strictEqual(alias('PSK'), 'PSK31');
@@ -1015,8 +1016,8 @@ test('every Icom model that offers VFO A/B also offers split, and the wiring exi
     assert.strictEqual(m.caps.split, true, `${id} has vfo but no split`);
   }
   const fs = require('fs'), path = require('path');
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-  const ctl = fs.readFileSync(path.join(__dirname, '..', 'lib', 'rig-controller.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
+  const ctl = readSrc(path.join(__dirname, '..', 'lib', 'rig-controller.js'));
   assert.ok(main.includes("case 'set-freq-other'"), 'dispatcher action');
   assert.ok(main.includes('caps.splitFreq ='), 'capability');
   assert.ok(ctl.includes('setFrequencyOther(hz)') && ctl.includes('get hasFrequencyOther()'), 'controller');
@@ -1218,11 +1219,11 @@ test('CIV: the DATA mode line is logged on change only', () => {
 });
 
 test('CIV: the controller polls DATA mode on the slow cycle, after the other readbacks', () => {
-  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'rig-controller.js'), 'utf8');
+  const src = readSrc(require('path').join(__dirname, '..', 'lib', 'rig-controller.js'));
   const atu = src.indexOf('this._codec.getAtuEnabled()');
   const dm = src.indexOf('this._codec.getDataMode()');
   assert.ok(atu > 0 && dm > atu, 'getDataMode() is polled, and last in the burst');
-  const civ = require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'codecs', 'civ-codec.js'), 'utf8');
+  const civ = readSrc(require('path').join(__dirname, '..', 'lib', 'codecs', 'civ-codec.js'));
   assert.ok(!/_sendCmd\(0x1A, 0x06, \[0x0[01]\]\)/.test(civ), 'no one-byte 1A 06 form survives in the codec');
 });
 
@@ -3119,14 +3120,14 @@ test('RigController forwards frequency meta to its listeners', () => {
 });
 
 test('RS-BA1 transport surfaces the radio-reported CI-V address as radio-info', () => {
-  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'rsba1-transport.js'), 'utf8');
+  const src = readSrc(require('path').join(__dirname, '..', 'lib', 'rsba1-transport.js'));
   assert.ok(src.includes("this.emit('radio-info', this.radioInfo)"), 'ControlStream must emit radio-info from Capabilities');
   assert.ok(src.includes("this.control.on('radio-info'"), 'RsBa1Transport must forward it');
   assert.ok(/get radioInfo\(\)/.test(src), 'RsBa1Transport must expose radioInfo');
 });
 
 test('main.js adopts the reported address and probes it first (source-text guard)', () => {
-  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+  const src = readSrc(require('path').join(__dirname, '..', 'main.js'));
   assert.ok(src.includes("transport.on('radio-info', (info) => {"), 'live path listens for radio-info');
   assert.ok(src.includes('networkCodec.setRadioAddress(reported)'), 'live path re-addresses the codec');
   assert.ok(src.includes('probeAddrs = uniq([reported, ...probeAddrs])'), 'test probe puts the reported address first');

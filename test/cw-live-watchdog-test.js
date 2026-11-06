@@ -16,6 +16,7 @@
 // Run: node test/cw-live-watchdog-test.js
 
 'use strict';
+const { readSrc } = require('./_src');
 
 const assert = require('assert');
 const fs = require('fs');
@@ -158,10 +159,10 @@ test('setTransmit(false) cancels the envelope', () => {
 
 console.log('\n=== renderers: Enter in live mode never re-sends the line ===');
 test('desktop and web clear the box and reset the live cursor instead of calling Send', () => {
-  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
   const kd = app.slice(app.indexOf("cwMacroInput.addEventListener('keydown'"), app.indexOf("cwMacroInput.addEventListener('keydown'") + 900);
   assert.ok(/if \(cwLiveMode\) \{[\s\S]{0,400}cwLiveSent = 0;[\s\S]{0,200}return;[\s\S]{0,100}\}\s*cwMacroSendBtn\.click\(\)/.test(kd), 'desktop Enter');
-  const web = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote.js'), 'utf8');
+  const web = readSrc(path.join(__dirname, '..', 'renderer', 'remote.js'));
   const send = web.slice(web.indexOf("cwTextSend.addEventListener('click'"), web.indexOf("cwTextSend.addEventListener('click'") + 700);
   assert.ok(/if \(cwLiveMode\) \{[\s\S]{0,700}cwLiveSent = 0;[\s\S]{0,50}return;/.test(send), 'web Send/Enter');
 });

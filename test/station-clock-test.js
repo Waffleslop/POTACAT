@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Shack clock from an ECHOCAT device (2026-10-25): the decision, the corrected
 // clock, a real probe round trip through the WS demux, and the wiring that
 // makes every slotted mode read the corrected clock.
@@ -19,7 +20,7 @@ function test(name, fn) {
   });
 }
 const root = path.join(__dirname, '..');
-const read = (p) => fs.readFileSync(path.join(root, p), 'utf8').replace(/\r\n/g, '\n');
+const read = (p) => readSrc(path.join(root, p)).replace(/\r\n/g, '\n');
 
 test('the handoff fixture: shack 1865 ms fast, round trip 70 ms', () => {
   const t0 = 1000, t1 = 2900, t2 = 2910, t3 = 1080;

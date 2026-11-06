@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // nj7n_nate (IC-705 on a Pi, ECHOCAT): two repeater memories with a NEGATIVE
 // offset keyed fine from the hand mic, but every ECHOCAT PTT went out with a
 // POSITIVE offset. With SSB-over-DATA on, the PTT swaps FM to FM-D (so the
@@ -59,7 +60,7 @@ console.log('Icom PTT mode swap and memory mode');
     flush(rig);
   }
   test('main.js: an Icom swap and its restore both skip the re-anchor', () => {
-    const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+    const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
     assert.ok(/cat\.setModeOnly\(dataMode, _ssbFreqBeforePtt, \{ noAnchor: _icomData(, anchorNow: true)? \}\)/.test(main), 'the swap');
     assert.ok(/cat\.setModeOnly\(restoreMode, restoreFreq, \{ noAnchor: _restoreIcom \}\)/.test(main), 'the restore');
   });

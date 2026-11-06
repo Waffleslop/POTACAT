@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
 'use strict';
+const { readSrc } = require('./_src');
 //
 // GitHub issues reviewed 2026-10-26:
 //  #107 FT-450 Test Connection: "FA28074000;" (8 digits) reported as no valid reply.
@@ -23,7 +24,7 @@ function assert(cond, msg) {
   console.log(`  ✗ ${msg}`);
 }
 function section(name) { console.log(`\n=== ${name} ===`); }
-const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
+const read = (p) => readSrc(path.join(__dirname, '..', p));
 const main = read('main.js');
 const html = read('renderer/index.html');
 const app = read('renderer/app.js');

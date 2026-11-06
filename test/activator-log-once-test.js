@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // .eddiejames (#pota-activations, 2026-11-05): over a 150-QSO activation the
 // Activator Log button "just sat there"; pressed again, three contacts saved
 // at once, as duplicates. logContact waited for QRZ before saving, and the
@@ -14,7 +15,7 @@ const { withTimeout } = require('../lib/with-timeout');
 let pass = 0, fail = 0;
 const queue = [];
 function test(name, fn) { queue.push([name, fn]); }
-const read = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+const read = (f) => readSrc(path.join(__dirname, '..', f));
 
 test('withTimeout: a fast answer comes through; a slow one gives the fallback at the deadline; a failure never rejects', async () => {
   assert.strictEqual(await withTimeout(Promise.resolve('qrz'), 200), 'qrz');

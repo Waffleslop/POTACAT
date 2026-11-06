@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Hunt filters, piece 4 (docs/plan-jtcat-hunt-priorities.md): Hunt: Custom
 // answers a station matching ANY ticked target (kilrath8954: POTA + new
 // countries + watchlist at once), and the Hunt minimum dB moves from Options
@@ -18,7 +19,7 @@ function test(name, fn) {
   try { fn(); pass++; console.log('  ok  ' + name); }
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.stack || e.message)); }
 }
-const read = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+const read = (f) => readSrc(path.join(__dirname, '..', f));
 const main = read('main.js');
 const html = read('renderer/jtcat-popout.html');
 const pop = read('renderer/jtcat-popout.js');

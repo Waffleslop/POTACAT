@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // The VFO window's "Type a frequency" box takes a paste (hoogskev
 // 2026-10-31). lib/freq-paste.js reads what people copy; the window fills
 // type-to-tune with it and Enter tunes, as for typed digits.
@@ -27,7 +28,7 @@ test('not a frequency', () => {
   for (const t of ['', 'hello', 'K3SBP', '14.074 W', '-7.1', null]) assert.strictEqual(parsePastedFreq(t), 0, JSON.stringify(t));
 });
 test('the VFO window listens for paste, fills the keypad, and leaves tuning to Enter', () => {
-  const vfo = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'vfo-popout.html'), 'utf8');
+  const vfo = readSrc(path.join(__dirname, '..', 'renderer', 'vfo-popout.html'));
   assert.ok(vfo.includes('<script src="../lib/freq-paste.js"></script>'));
   const h = vfo.slice(vfo.indexOf("document.addEventListener('paste'"), vfo.indexOf("document.addEventListener('paste'") + 900);
   assert.ok(/window\.FreqPaste\.parsePastedFreq\(text\)/.test(h));

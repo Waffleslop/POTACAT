@@ -2,6 +2,7 @@
 // on the allowlist, the preview names everything that does, and delivery
 // keeps what it could not send.
 'use strict';
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -211,8 +212,8 @@ t('app.channel follows the version', () => {
 });
 
 // --- wiring guards ----------------------------------------------------------
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-const rend = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'station-setup.js'), 'utf8');
+const main = readSrc(path.join(__dirname, '..', 'main.js'));
+const rend = readSrc(path.join(__dirname, '..', 'renderer', 'station-setup.js'));
 
 t('main: preview and send build the same payload; the POST carries only it', () => {
   const pre = main.slice(main.indexOf("ipcMain.handle('station-setup-share-preview'"), main.indexOf("ipcMain.handle('station-setup-share-send'"));

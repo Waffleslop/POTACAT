@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // The activator quick log's "their park" box takes a comma list (an n-fer).
 // WD3D 2026-10-26: "US-1234, US-5678" for a 2-fer logged the QSO with NO park,
 // silently — the box only ever read one reference. Now every reference becomes
@@ -9,7 +10,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const src = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+const src = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
 
 let passed = 0, failed = 0;
 function test(name, fn) {

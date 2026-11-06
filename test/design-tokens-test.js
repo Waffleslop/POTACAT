@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // The desktop's design tokens (docs/design-system-plan.md Phase 1).
 // 1. assets/design/tokens.json is the phone's file, byte for byte, when the
 //    potacat-app checkout sits beside this one (skipped in CI, where it does not).
@@ -60,7 +61,7 @@ test('assets/design/tokens.json is the phone\'s token file, unchanged', () => {
 
 test('renderer/tokens.css is current (regenerate with node scripts/gen-design-tokens-css.js)', () => {
   const want = gen.generate(t).replace(/\r\n/g, '\n');
-  const have = fs.readFileSync(gen.OUT, 'utf8').replace(/\r\n/g, '\n');
+  const have = readSrc(gen.OUT).replace(/\r\n/g, '\n');
   assert.ok(have === want, 'renderer/tokens.css is stale');
 });
 
@@ -78,7 +79,7 @@ for (const col of Object.keys(colors)) {
 }
 
 test('every desktop theme has a block, ids match the phone, Acid Burn is mono', () => {
-  const css = fs.readFileSync(gen.OUT, 'utf8');
+  const css = readSrc(gen.OUT);
   const cols = t.color.themes.map((x) => x.id);
   for (const th of gen.THEMES) {
     assert.ok(cols.includes(th.column), th.id + ' names a column the file lacks');
@@ -90,7 +91,7 @@ test('every desktop theme has a block, ids match the phone, Acid Burn is mono', 
 });
 
 test('band colours (one per band, data colours) and the fixed icon sizes are emitted', () => {
-  const css = fs.readFileSync(gen.OUT, 'utf8');
+  const css = readSrc(gen.OUT);
   for (const b of ['160m', '80m', '40m', '20m', '6m', '2m', '70cm', '1-25m', '1-25cm', '2200m', '630m']) {
     assert.ok(new RegExp('--ds-band-' + b + ': #[0-9a-f]{6};', 'i').test(css), 'band-' + b);
   }
@@ -98,7 +99,7 @@ test('band colours (one per band, data colours) and the fixed icon sizes are emi
 });
 
 test('type: 21 styles, each sized by --ds-font-scale, tabular numerals, chrome pins the scale', () => {
-  const css = fs.readFileSync(gen.OUT, 'utf8');
+  const css = readSrc(gen.OUT);
   const n = t.type.groups.reduce((a, g) => a + g.styles.length, 0);
   assert.strictEqual(n, 21);
   assert.strictEqual((css.match(/^\.ds-[a-z-]+ \{ font-family/gm) || []).length, 21);
@@ -107,11 +108,11 @@ test('type: 21 styles, each sized by --ds-font-scale, tabular numerals, chrome p
 });
 
 test('ds.css reads only tokens: no hex, rgb() or white-text literals, every variable defined', () => {
-  const css = fs.readFileSync(path.join(root, 'renderer', 'ds.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const css = readSrc(path.join(root, 'renderer', 'ds.css')).replace(/\/\*[\s\S]*?\*\//g, '');
   assert.ok(!/#[0-9a-f]{3,8}\b/i.test(css), 'a hex colour in ds.css');
   assert.ok(!/\brgba?\(/i.test(css), 'an rgb() colour in ds.css');
   assert.ok(!/color:\s*(white|#fff)/i.test(css), 'white text in ds.css');
-  const defined = new Set((fs.readFileSync(gen.OUT, 'utf8') + css).match(/--ds-[a-z0-9-]+(?=\s*:)/g));
+  const defined = new Set((readSrc(gen.OUT) + css).match(/--ds-[a-z0-9-]+(?=\s*:)/g));
   for (const v of (css.match(/var\((--ds-[a-z0-9-]+)/g) || []).map((x) => x.slice(4))) assert.ok(defined.has(v), v + ' is used but never defined');
 });
 

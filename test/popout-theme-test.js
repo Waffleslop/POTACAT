@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * Every pop-out follows a theme change, whichever control made it. A user
  * (2026-10-28): "I had just changed the table to dark mode and the VFO didn't
@@ -11,8 +12,8 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
-const preload = fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8');
+const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
+const preload = readSrc(path.join(__dirname, '..', 'preload.js'));
 let passed = 0, failed = 0;
 function check(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

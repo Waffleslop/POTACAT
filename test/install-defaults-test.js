@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * "Just works" defaults (Casey 2026-10-27): logging, solar indices and
  * PSKReporter Propagation have no switch; the band activity heatmap is a
@@ -106,9 +107,9 @@ check('a node the operator chose is never replaced', () => {
 });
 
 console.log('wiring:');
-const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
-const app = fs.readFileSync(path.join(ROOT, 'renderer/app.js'), 'utf8');
-const html = fs.readFileSync(path.join(ROOT, 'renderer/index.html'), 'utf8');
+const main = readSrc(path.join(ROOT, 'main.js'));
+const app = readSrc(path.join(ROOT, 'renderer/app.js'));
+const html = readSrc(path.join(ROOT, 'renderer/index.html'));
 check('every settings load and save forces the always-on features', () => {
   assert.ok(/return InstallDefaults\.applyAlwaysOn\(loadSettingsFromDisk\(\)\)/.test(main));
   assert.ok(/for \(const k of InstallDefaults\.ALWAYS_ON\) if \(k in newSettings\) newSettings\[k\] = true;/.test(main));

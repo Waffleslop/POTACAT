@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Hunt filters, piece 6 (docs/plan-jtcat-hunt-priorities.md): the CQ DX /
 // CQ <continent> rule, no setting (Casey 2026-11-05). Hunt never answers a
 // CQ DX from a station on our own continent, nor a CQ NA/EU/... aimed at a
@@ -19,7 +20,7 @@ function test(name, fn) {
   try { fn(); pass++; console.log('  ok  ' + name); }
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.stack || e.message)); }
 }
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const main = readSrc(path.join(__dirname, '..', 'main.js'));
 
 function workable(home, results) {
   const src = main.slice(main.indexOf('function jtcatWorkableCallers('), main.indexOf('let _jtcatFloorNoteAt'));

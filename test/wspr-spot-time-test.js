@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // WSPR spot time = the START of the 2-minute window (W5JSS 2026-10-21: a :06
 // transmission was reported to wsprnet at :08 or :09, the moment the decode
 // finished). Run: node test/wspr-spot-time-test.js
@@ -54,7 +55,7 @@ test('the engine carries the window the job was posted for, not the arrival time
   assert.strictEqual(params.date, '261021');
 });
 
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const main = readSrc(path.join(__dirname, '..', 'main.js'));
 const h = main.slice(main.indexOf("ft8Engine.on('wspr-spots'"), main.indexOf("ft8Engine.on('silent'"));
 test('main stamps the spots and the upload from the window start', () => {
   assert.ok(/wsprnet\.wsprWindowStartMs\(data\.periodStartMs, Date\.now\(\)\)/.test(h));

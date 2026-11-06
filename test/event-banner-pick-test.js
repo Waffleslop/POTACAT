@@ -14,10 +14,11 @@
 // extract the pure functions' source and eval them — same approach as
 // test/voice-macros-test.js — so we test the REAL shipped code.
 
+const { readSrc } = require('./_src');
 const fs = require('fs');
 const path = require('path');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+const src = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
 
 function grab(re, name) {
   const m = src.match(re);

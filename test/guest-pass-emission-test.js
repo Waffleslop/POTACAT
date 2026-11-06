@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * The Guest Pass transmit gate judges WHAT IS SENT, not the radio's mode
  * (artificialjump's friend, a Technician on NA4DQ's Guest Pass, Discord
@@ -46,7 +47,7 @@ test('and DATA outside every Technician HF segment is still refused (14.074)', (
   assert.strictEqual(techPass().interceptCatCommand({ type: 'tx_enable', freqHz: 14074000, mode: 'DATA' }).allowed, false);
 });
 
-const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+const MAIN = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
 test('handleRemotePtt hands its emission to both transmit gates', () => {
   const at = MAIN.indexOf('function handleRemotePtt(');
   const body = MAIN.slice(at, MAIN.indexOf('\n}\n', at));

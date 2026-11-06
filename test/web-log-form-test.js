@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Web log form + CW macro {call} (LZ3AW 2026-08-29).
 //
 // Three defects, all "the form doesn't follow what the operator is doing":
@@ -28,14 +29,14 @@ function test(name, fn) {
 }
 
 const P = (...f) => path.join(__dirname, '..', ...f);
-const REMOTE = fs.readFileSync(P('renderer', 'remote.js'), 'utf8');
-const REMOTE_HTML = fs.readFileSync(P('renderer', 'remote.html'), 'utf8');
-const APP = fs.readFileSync(P('renderer', 'app.js'), 'utf8');
-const REMOTE_CSS = fs.readFileSync(P('renderer', 'remote.css'), 'utf8');
-const PRELOAD = fs.readFileSync(P('preload.js'), 'utf8');
-const PRELOAD_POPOUT = fs.readFileSync(P('preload-log-popout.js'), 'utf8');
-const POPOUT_JS = fs.readFileSync(P('renderer', 'log-popout.js'), 'utf8');
-const MAIN = fs.readFileSync(P('main.js'), 'utf8');
+const REMOTE = readSrc(P('renderer', 'remote.js'));
+const REMOTE_HTML = readSrc(P('renderer', 'remote.html'));
+const APP = readSrc(P('renderer', 'app.js'));
+const REMOTE_CSS = readSrc(P('renderer', 'remote.css'));
+const PRELOAD = readSrc(P('preload.js'));
+const PRELOAD_POPOUT = readSrc(P('preload-log-popout.js'));
+const POPOUT_JS = readSrc(P('renderer', 'log-popout.js'));
+const MAIN = readSrc(P('main.js'));
 
 // --- 1. The open log sheet follows the radio -------------------------------
 

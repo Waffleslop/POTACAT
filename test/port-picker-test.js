@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * Rig-editor port pickers (stein_12464, Discord 2026-11-01): the COM port was
  * renumbered COM9 -> COM10; picking COM10 saved COM9 again, because the
@@ -20,7 +21,7 @@ function test(name, fn) {
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
 
-const APP = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+const APP = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
 function bodyOf(name) {
   const start = APP.indexOf('function ' + name + '(');
   assert.ok(start >= 0, name + ' not found');

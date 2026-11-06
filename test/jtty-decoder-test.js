@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // JTTY receiver (lib/jtty/decoder.js), Phase 2 of docs/jtty-integration-plan.md.
 // Acceptance: WSJT-X's own sample recording decodes to the text WSJT-X shows
 // (test/fixtures/jtty/README.md); our encoder's output decodes clean and in
@@ -129,7 +130,7 @@ test('the WSJT-X sample recording decodes to what WSJT-X shows', () => {
 
 test('on sjtty\'s -16 dB files the decoder makes rjtty\'s decisions, file by file', () => {
   const dir = path.join(__dirname, 'fixtures', 'jtty', 'sjtty-16dB');
-  const v = JSON.parse(fs.readFileSync(path.join(dir, 'verdicts.json'), 'utf8'));
+  const v = JSON.parse(readSrc(path.join(dir, 'verdicts.json')));
   for (const [file, rjttyDecoded] of Object.entries(v.verdicts)) {
     const d = new JttyDecoder({ qsoFreq: v.f0, qsoTol: 50 });
     const ours = completes(d.decodeAll(readWav(path.join(dir, file)))).some((u) => u.text === v.message);

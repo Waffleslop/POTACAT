@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * Listening through an rtl_tcp server (lib/rtltcp-demod.js, lib/rtltcp-audio.js):
  * the demodulator on generated IQ at all three rates, the probe, the client
@@ -294,7 +295,7 @@ test('the worker gives the same audio as the inline path', async () => {
 
 // ─── main.js wiring ──────────────────────────────────────────────────────────
 
-const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const MAIN = readSrc(path.join(__dirname, '..', 'main.js'));
 function bodyOf(name) {
   const start = MAIN.indexOf('function ' + name + '(');
   assert.ok(start >= 0, name + ' exists');
@@ -324,7 +325,7 @@ test('main.js: the band scope hands the server to and from a listener', () => {
 
 test('the protocol registers kiwi-status kind', () => {
   const P = require('../lib/echocat-protocol');
-  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'echocat-protocol.js'), 'utf8');
+  const src = readSrc(path.join(__dirname, '..', 'lib', 'echocat-protocol.js'));
   assert.ok(/'kiwi-status':[^\n]*kind: f\.optString/.test(src));
   assert.ok(P);
 });

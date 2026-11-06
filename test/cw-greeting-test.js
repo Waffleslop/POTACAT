@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 // {greeting} CW token (LZ3AW 2026-10-16 item 10): GM / GA / GE by the other
 // station's local (solar) time, expanded once in main's sendCwTextToRadio so
 // every surface agrees. Run: node test/cw-greeting-test.js
@@ -40,7 +41,7 @@ test('expandGreeting replaces every token, any case; hasGreeting keeps no state'
   assert.ok(G.hasGreeting('{greeting}') && G.hasGreeting('{greeting}'), 'a global regex must not leak lastIndex');
 });
 test('main expands it once, in sendCwTextToRadio, from the worked call\'s position', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
   const at0 = main.indexOf('function sendCwTextToRadio(text, opts) {');
   assert.ok(/if \(text\) text = expandCwGreeting\(text\);/.test(main.slice(at0, at0 + 400)));
   const fn = main.slice(main.indexOf('function expandCwGreeting(text) {'), main.indexOf('function setTypedCall('));
@@ -49,7 +50,7 @@ test('main expands it once, in sendCwTextToRadio, from the worked call\'s positi
   assert.ok(!/await|qrz\.lookup\(/.test(fn), 'never waits on the network');
 });
 test('the token is documented where the CW variables are listed', () => {
-  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  const html = readSrc(path.join(__dirname, '..', 'renderer', 'index.html'));
   assert.ok(/\{greeting\} \(GM \/ GA \/ GE by their local time\)/.test(html));
 });
 console.log(`\nCW greeting: ${passed} passed, ${failed} failed`);

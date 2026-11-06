@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
 'use strict';
+const { readSrc } = require('./_src');
 //
 // lib/raw-cat-command.js — custom CAT buttons carrying raw bytes.
 //
@@ -109,9 +110,9 @@ check('a two-byte pair is still bytes', () => {
 
 section('Source guards');
 
-const rigctldSrc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'codecs', 'rigctld-codec.js'), 'utf-8');
-const catSrc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'cat.js'), 'utf-8');
-const civSrc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'codecs', 'civ-codec.js'), 'utf-8');
+const rigctldSrc = readSrc(path.join(__dirname, '..', 'lib', 'codecs', 'rigctld-codec.js'));
+const catSrc = readSrc(path.join(__dirname, '..', 'lib', 'cat.js'));
+const civSrc = readSrc(path.join(__dirname, '..', 'lib', 'codecs', 'civ-codec.js'));
 
 check('the rigctld codec builds its w argument through this module', () => {
   assert.ok(rigctldSrc.includes("require('../raw-cat-command')"), 'module not required');

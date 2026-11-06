@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // "Is it possible to import our activation report file from pota.app and have
 // the activation status populated? AZ just added two new parks and they
 // didn't stand out." (activator, Discord 2026-10-20). The pota.app Activations
@@ -12,7 +13,7 @@ const os = require('os');
 const path = require('path');
 const { parsePotaActivationsCSV } = require('../lib/pota-parks');
 
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

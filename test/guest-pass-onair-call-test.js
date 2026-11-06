@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * Guest Pass: the pass decides the on-air call (Casey 2026-10-27).
  *
@@ -90,7 +91,7 @@ check('the owner\'s own devices are untouched', () => {
   assert.strictEqual(rs._remoteSettings.myCallsign, 'W7RTA', 'the shared blob is never mutated');
 });
 check('pass auth-ok carries the on-air call at the top level', () => {
-  const src = fs.readFileSync(path.join(ROOT, 'lib/remote-server.js'), 'utf8');
+  const src = readSrc(path.join(ROOT, 'lib/remote-server.js'));
   const i = src.indexOf('async _authenticatePass(');
   const body = src.slice(i, src.indexOf('passSession: {', i));
   assert.ok(/stationCallsign:\s*String\(this\._passOnAirCall\(ws\) \|\| ''\)/.test(body), "auth-ok stationCallsign must be _passOnAirCall(ws), '' when listen-only (never null)");
@@ -98,7 +99,7 @@ check('pass auth-ok carries the on-air call at the top level', () => {
 });
 
 console.log('main.js transmit paths:');
-const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+const main = readSrc(path.join(ROOT, 'main.js'));
 function fnBody(name) {
   const re = new RegExp('(?:async\\s+)?function ' + name + '\\s*\\(');
   const m = re.exec(main);
@@ -166,10 +167,10 @@ check('the validated session carries the guest call into PassEnforcement', () =>
   e.adoptSession({ guest_callsign: 'K3SBP', guest_user_id: 'u1' });
   assert.strictEqual(e.onAirCallsign('W7RTA'), 'K3SBP');
   assert.strictEqual(e.getSessionStatus().onAirCallsign, 'K3SBP');
-  const pe = fs.readFileSync(path.join(ROOT, 'lib/pass-enforcement.js'), 'utf8');
+  const pe = readSrc(path.join(ROOT, 'lib/pass-enforcement.js'));
   assert.ok(/async loadPass\(code, session\)/.test(pe) && /this\.adoptSession\(session\);/.test(pe));
   assert.ok(/loadPass\(code, session\)/.test(main), 'main hands the validated session over');
-  const rsrc = fs.readFileSync(path.join(ROOT, 'lib/remote-server.js'), 'utf8');
+  const rsrc = readSrc(path.join(ROOT, 'lib/remote-server.js'));
   assert.ok(/this\._onPassAuth\(profile\.code, msg\.sessionId, profile\)/.test(rsrc));
 });
 check('everything that identifies or reports the station reads onAirCall()', () => {
@@ -205,8 +206,8 @@ check('a forwarded guest QSO names the guest as operator and keeps the licensee 
   assert.ok(/qsoData\.stationLicensee = /.test(b));
 });
 check('Share My Rig asks one callsign question, and no box is pre-filled with the owner', () => {
-  const html = fs.readFileSync(path.join(ROOT, 'renderer/index.html'), 'utf8');
-  const app = fs.readFileSync(path.join(ROOT, 'renderer/app.js'), 'utf8');
+  const html = readSrc(path.join(ROOT, 'renderer/index.html'));
+  const app = readSrc(path.join(ROOT, 'renderer/app.js'));
   assert.ok(/Who is this pass for\?/.test(html));
   assert.ok(/id="share-rig-for"/.test(html));
   for (const id of ['share-rig-station', 'share-rig-operator', 'share-rig-control']) assert.ok(!html.includes('id="' + id + '"'), id);

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // w0tlp (Station Setup, 2026-11-02): the test transmit was refused as out of
 // band with the radio in LSB. Now: test at the dial when the licence allows
 // it, else move to the band's FT8 dial and come back, else say why.
@@ -47,7 +48,7 @@ test('no licence class set: never refused, tested at the dial', () => {
 });
 
 test('main: the test plans first, moves and confirms arrival, keys with the plan\'s emission, and comes back', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   const f = main.slice(main.indexOf('async function _runStationSetupTxTest('), main.indexOf('function getIcomNetworkDataModSpec('));
   const plan = f.indexOf('SetupTestFreq.planTestFrequency(');
   assert.ok(plan > 0 && plan < f.indexOf("applyRigControl({ action: 'set-tx-power', value: testW }, 'setup')"), 'decided before the power is touched');

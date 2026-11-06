@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // OH7DSQ (FT-950 + SignaLink, ECHOCAT app, 2026-09): "After I stop
 // transmitting, it takes too long for the radio's receive audio to start
 // coming through on my phone ... the first words of the responding station
@@ -18,7 +19,7 @@ function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 
 console.log('OH7DSQ RX after TX');
 

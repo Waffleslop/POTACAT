@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Fresh install, setup screen, "Sign in to POTACAT Cloud" → "Sign-in failed:
 // Google Client ID not configured" (2026-10-21). The button called Google
 // sign-in, which needs settings.cloudGoogleClientId / GOOGLE_CLIENT_ID —
@@ -9,7 +10,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
@@ -35,9 +36,9 @@ test('the form exists and Enter submits', () => {
     const m = html.match(new RegExp(`<input[^>]*id="${id}"[^>]*>`));
     assert.ok(m && /type="text"/.test(m[0]) && /placeholder="Email or callsign"/.test(m[0]), `${id} takes a callsign`);
   }
-  const ipc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'cloud-ipc.js'), 'utf8');
+  const ipc = readSrc(path.join(__dirname, '..', 'lib', 'cloud-ipc.js'));
   assert.ok(/return \{ error: err\.message, code: err\.code \|\| undefined \};/.test(ipc), 'cloud-login hands the error code to the renderer');
-  const ui = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'cloud-ui.js'), 'utf8');
+  const ui = readSrc(path.join(__dirname, '..', 'renderer', 'cloud-ui.js'));
   assert.ok(/result\.code === 'no_account' && email\.includes\('@'\)/.test(ui), 'no account under an email → try the callsign');
   assert.ok(/user\?\.emailIsRelay && accountCallsign\) \? 'signed in with Apple'/.test(ui), 'relay address is never shown as the account name');
   assert.ok(/msg = res\.message \|\| "No POTACAT Cloud account uses that email or callsign/.test(ui), 'forgot-password 404 shows the server message');

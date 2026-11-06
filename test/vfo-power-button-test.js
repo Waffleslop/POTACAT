@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Radio power on/off at the bottom of the VFO window (KQ5O 2026-10-26: an
 // FTDX101MP driven from a laptop over a remote shack had no Power On anywhere —
 // the main window's Rig button shows only while CAT answers, and a switched-off
@@ -8,8 +9,8 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'vfo-popout.html'), 'utf8');
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const html = readSrc(path.join(__dirname, '..', 'renderer', 'vfo-popout.html'));
+const main = readSrc(path.join(__dirname, '..', 'main.js'));
 
 let passed = 0, failed = 0;
 function test(name, fn) {

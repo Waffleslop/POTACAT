@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // POTA names an activation file CALL@PARK-YYYYMMDD.adi with the ACTIVATION's
 // UTC date. All three export paths took the date from new Date(), so an
 // export made the next morning was named for the wrong day (website session
@@ -30,7 +31,7 @@ test('no dated QSO falls back to now', () => {
   assert.strictEqual(activationFileDate([], nextMorning), '20261022');
 });
 test('no activation export in main.js dates its file from new Date()', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   for (const ch of ["'export-activation-adif'", "'upload-activation-to-pota'", "'export-activation-adif-perpark'"]) {
     const start = main.indexOf('ipcMain.handle(' + ch);
     assert.ok(start > 0, ch + ' found');

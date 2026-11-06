@@ -4,6 +4,7 @@
 // DTR/RTS on connect" ticked. Every Yaesu now drops them at open, live link
 // and Test Connection alike.
 'use strict';
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -14,7 +15,7 @@ function t(name, fn) {
   try { fn(); pass++; console.log('  ok  ' + name); }
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e && e.message)); }
 }
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
 
 console.log('serial lines at open:');
 t('every Yaesu holds DTR/RTS low at open, ticked or not', () => {
@@ -35,7 +36,7 @@ t('the live Serial CAT connect and Test Connection both use it', () => {
   assert.ok(main.includes('const dtrOff = holdSerialLinesLow(model, { dtrOff: config.dtrOff });'), 'test-serial-cat');
 });
 t('under RTS/CTS flow control only DTR drops (the radio needs RTS to answer)', () => {
-  const tr = fs.readFileSync(path.join(__dirname, '..', 'lib', 'transport.js'), 'utf8');
+  const tr = readSrc(path.join(__dirname, '..', 'lib', 'transport.js'));
   assert.ok(/hardware \? \{ dtr: false, rts: true \} : \{ dtr: false, rts: false \}/.test(tr));
   assert.ok(/port\.set\(\{ dtr: false, rts: !!rtscts \}\)/.test(main), 'the probe keeps RTS under flow control too');
 });

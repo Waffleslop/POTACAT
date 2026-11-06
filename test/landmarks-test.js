@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // The Directory's Landmarks tab (Casey 2026-10-29): the catalog, its rules,
 // the NCDXF beacon clock, and the wiring on every surface.
 // Run: node test/landmarks-test.js
@@ -11,7 +12,7 @@ const http = require('http');
 const L = require('../lib/landmarks');
 const { LandmarksFeed } = require('../lib/landmarks-feed');
 
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 const CATALOG = JSON.parse(R('data/landmarks.json'));
 let passed = 0, failed = 0;
 const pending = [];

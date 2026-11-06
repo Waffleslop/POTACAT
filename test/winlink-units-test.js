@@ -4,6 +4,7 @@
 // (HTTP + /ws — ping/pong and prompt answers).
 // Run: node test/winlink-units-test.js
 'use strict';
+const { readSrc } = require('./_src');
 
 const assert = require('assert');
 const net = require('net');
@@ -160,7 +161,7 @@ async function test(name, fn) {
   });
   await test('a real Windows listing (31-char names): each DAX channel resolves to ITS index', () => {
     const fs = require('fs');
-    const d = A.parseArdopDeviceList(fs.readFileSync(require('path').join(__dirname, 'fixtures/winlink/ardopcf-list-windows.txt'), 'utf8'));
+    const d = A.parseArdopDeviceList(readSrc(require('path').join(__dirname, 'fixtures/winlink/ardopcf-list-windows.txt')));
     assert.ok(d.capture.length >= 20 && d.playback.length >= 10, `${d.capture.length} capture, ${d.playback.length} playback`);
     const byName = (n) => d.capture.find((x) => x.name.startsWith(n)).id;
     assert.strictEqual(A.matchArdopDevice('DAX Audio RX 1 (FlexRadio Systems DAX Audio)', d.capture).id, byName('DAX Audio RX 1 '));
@@ -187,7 +188,7 @@ async function test(name, fn) {
   });
   await test('a real DAXv2 station (39 capture / 14 playback, old names lingering): picks DAX RX 1 / DAX TX', () => {
     const fs = require('fs');
-    const d = A.parseArdopDeviceList(fs.readFileSync(require('path').join(__dirname, 'fixtures/winlink/ardopcf-list-windows-daxv2.txt'), 'utf8'));
+    const d = A.parseArdopDeviceList(readSrc(require('path').join(__dirname, 'fixtures/winlink/ardopcf-list-windows-daxv2.txt')));
     assert.deepStrictEqual([d.capture.length, d.playback.length], [39, 14]);
     const p = A.proposeArdopDevices({ devices: d, family: 'flex' });
     assert.deepStrictEqual([p.capture.name, p.playback.name, p.why], ['DAX RX 1 (FlexRadio DAX)', 'DAX TX (FlexRadio DAX)', 'flex-dax']);
@@ -239,7 +240,7 @@ async function test(name, fn) {
     assert.strictEqual(D.classifyDirewolfLine('[0.3] W1ABC-10>K3SBP:(UA res, f=1)'), 'frame');
     assert.strictEqual(D.classifyDirewolfLine('[0L] K3SBP>W1ABC-10:(SABME cmd, p=1)'), 'frame');
     assert.strictEqual(D.classifyDirewolfLine('Dire Wolf version 1.7'), 'log');
-    const mainSrc = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+    const mainSrc = readSrc(require('path').join(__dirname, '..', 'main.js'));
     assert.ok(/kind === 'heard' \|\| kind === 'frame'/.test(mainSrc), 'heard frames bypass the 40-line startup cap');
     assert.ok(/mode === 'packet' && _direwolfHeard === 0/.test(mainSrc), 'a packet failure with nothing decoded says so');
     assert.strictEqual(D.classifyDirewolfLine('"XYZ" doesn\'t match any of the input devices.'), 'device-error');

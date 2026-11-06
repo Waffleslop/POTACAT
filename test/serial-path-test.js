@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // KF0TDB (FT-991A, Windows), twice in two days: the port was saved as
 // "COM Port 9", then "COM Port 10", typed into the box beside the port list,
 // and every connect failed with "Opening COM Port 10: File not found".
@@ -9,7 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const { normalizeSerialPath: n, normalizeSettingsSerialPaths } = require('../lib/serial-path');
 
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

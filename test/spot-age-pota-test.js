@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // POTA spots follow pota.app's own expiry (N4FFF 2026-09-27: ECHOCAT showed
 // 6 activators, pota.app 12). The POTA feed drops a spot when it expires, so
 // a 5-minute Max Spot Age hid about half the active activators — on the
@@ -14,7 +15,7 @@ function test(name, fn) {
   try { fn(); passed++; console.log('  ✓ ' + name); }
   catch (e) { failed++; console.log('  ✗ FAIL: ' + name + '\n      ' + (e.stack || e.message)); }
 }
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 const main = R('main.js');
 const app = R('renderer/app.js');
 

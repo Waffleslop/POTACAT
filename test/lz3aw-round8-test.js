@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // LZ3AW round 8 (on 1.10.24): "big paddle improvement, but quite a few
 // mistakes". The ECHOCAT hold keepalive (a held contact re-sent every 400 ms)
 // reached the keyer as a fresh press; mid-element that set the latch and the
@@ -16,7 +17,7 @@ let passed = 0, failed = 0;
 const cases = [];
 function test(name, fn) { cases.push([name, fn]); }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 
 function keyerAt(wpm) {
   const k = new IambicKeyer();

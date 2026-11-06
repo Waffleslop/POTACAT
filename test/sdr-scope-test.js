@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * Band scope from a separate SDR (lib/sdr-scope.js): the rtl_tcp protocol
  * against a FAKE server, the spectrum maths, and the main.js wiring.
@@ -294,7 +295,7 @@ test('client: the server dropping the connection is recovered', async () => {
 
 // ─── main.js wiring (source guards) ──────────────────────────────────────────
 
-const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const MAIN = readSrc(path.join(__dirname, '..', 'main.js'));
 function bodyOf(name) {
   const start = MAIN.indexOf('function ' + name + '(');
   assert.ok(start >= 0, name + ' not found');
@@ -325,14 +326,14 @@ test('main: start/stop/follow route through the one scope state', () => {
 });
 
 test('renderer: the rig editor saves rig.sdrScope and the pop-out labels the source', () => {
-  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
   assert.ok(/rig\.sdrScope = rigSdrScope/.test(app));
   assert.ok(/fillSdrScopeForm\(rig\.sdrScope\)/.test(app));
-  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  const html = readSrc(path.join(__dirname, '..', 'renderer', 'index.html'));
   for (const id of ['set-sdr-scope-enabled', 'set-sdr-scope-host', 'set-sdr-scope-port', 'set-sdr-scope-rate', 'set-sdr-scope-gain', 'set-sdr-scope-direct', 'set-sdr-scope-ppm', 'set-sdr-scope-offset', 'set-sdr-scope-prefer']) {
     assert.ok(html.includes('id="' + id + '"'), id);
   }
-  const pop = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'scope-popout.js'), 'utf8');
+  const pop = readSrc(path.join(__dirname, '..', 'renderer', 'scope-popout.js'));
   assert.ok(/state\.source === 'sdr'/.test(pop));
 });
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
 'use strict';
+const { readSrc } = require('./_src');
 // DXLab Commander as a rig type. Commander's TCP interface ("Commander TCPIP
 // Messages", dxlabsuite.com) is ADIF-framed and narrow: frequency, mode, split,
 // PTT and CW text, plus `seqname`/`seqindex` to run a command sequence the
@@ -42,7 +43,7 @@ let passed = 0, failed = 0;
 const queue = [];
 function test(name, fn) { queue.push({ name, fn }); }
 const root = path.join(__dirname, '..');
-const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
+const read = (p) => readSrc(path.join(root, p));
 
 function codec(commander) {
   const writes = [];

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Reviewing a JTCAT contact before it is written (lib/log-review.js), when a
 // QSO began (lib/jtcat-qso-clock.js) and the fields the record gained.
 // Run: node test/log-review-test.js
@@ -16,7 +17,7 @@ function test(name, fn) {
   try { fn(); pass++; console.log('  ok  ' + name); }
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+const R = (f) => readSrc(path.join(__dirname, '..', f));
 
 const held = () => ({
   callsign: 'K1ABC', frequency: '7047.5', mode: 'FT4', band: '40m',

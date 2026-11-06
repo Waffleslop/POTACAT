@@ -8,11 +8,12 @@
 // it to "[object Object]"). Mirrors the main window's applyTheme().
 // Run: node test/popout-theme-boot-test.js
 'use strict';
+const { readSrc } = require('./_src');
 
 const fs = require('fs');
 const path = require('path');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'popout-theme-boot.js'), 'utf8');
+const src = readSrc(path.join(__dirname, '..', 'renderer', 'popout-theme-boot.js'));
 
 // Execute the boot IIFE with injected window/document/URLSearchParams.
 // Returns { attrs (set on <html>), win (carries applyPopoutTheme) }.

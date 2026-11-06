@@ -1,6 +1,7 @@
 // Unit tests for lib/winlink-pat.js — Pat launch decisions and wire parsers.
 // Run: node test/winlink-pat-test.js
 'use strict';
+const { readSrc } = require('./_src');
 
 const assert = require('assert');
 const W = require('../lib/winlink-pat');
@@ -234,14 +235,14 @@ test('a gateway list Pat cannot parse is recognised; other failures are not (Mer
   assert.ok(W.isCorruptCacheError('unexpected end of JSON input'));
   assert.ok(W.isCorruptCacheError('json: cannot unmarshal string into Go value of type cmsapi.GatewayStatus'));
   for (const m of ['Pat is not running', 'gateway list: 502 Bad Gateway', 'gateway list: Pat did not answer within 30 s', '']) assert.ok(!W.isCorruptCacheError(m), m);
-  const main = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  const main = readSrc(require('path').join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
   assert.ok(/let list = await winlinkRmslistSafe\(\{ mode: patMode, band, timeoutMs \}\);/.test(main), 'every gateway list goes through the safe path');
   // i5ekx (VARA HF list never arrived, ARDOP's did): Pat ranks every gateway
   // before it answers, so an HF list with prediction waits 120 s, and a
   // failed list is in the log.
   assert.ok(/const timeoutMs = predicting \? WINLINK_PREDICTED_LIST_MS : 30000;/.test(main) && /const WINLINK_PREDICTED_LIST_MS = 120000;/.test(main), 'prediction gets 120 s');
   assert.ok(/winlinkLog\(`gateway list \(\$\{mode\}\) failed after/.test(main), 'a failed list is logged');
-  const client = require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'winlink-client.js'), 'utf8');
+  const client = readSrc(require('path').join(__dirname, '..', 'lib', 'winlink-client.js'));
   assert.ok(/timeoutMs: timeoutMs \|\| 30000/.test(client), 'the client takes the timeout');
   assert.ok(/if \(!WinlinkPat\.isCorruptCacheError\(e && e\.message\)\) throw e;[\s\S]{0,200}patClient\.rmslist\(\{ \.\.\.opts, forceDownload: true \}\)/.test(main), 'one re-download on a damaged cache');
   assert.ok(/const p = _winlinkRmslistChain\.then\(run, run\);/.test(main), 'one request at a time');

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Separate FT8 / FT4 / FT2 spot filters (jgedmond 2026-10-31): the desktop
 // had one combined "FT8/4/2" entry, so an FT4 hunter could not hide FT8.
 // A saved combined selection still means all three. The web list gains FT2.
@@ -7,7 +8,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
+const read = (p) => readSrc(path.join(__dirname, '..', p));
 
 let passed = 0, failed = 0;
 function test(name, fn) {

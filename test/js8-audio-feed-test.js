@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
 'use strict';
+const { readSrc } = require('./_src');
 //
 // JS8 must have someone capturing audio for it.
 //
@@ -17,7 +18,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf-8');
+const mainSrc = readSrc(path.join(__dirname, '..', 'main.js'));
 let pass = 0; let fail = 0; const failures = [];
 function check(msg, fn) {
   try { fn(); pass++; } catch (err) { fail++; failures.push(msg); console.log(`  ✗ ${msg}\n      ${err.message}`); }

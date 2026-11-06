@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // SWR and ALC read only while transmitting, so on receive the last TX value
 // stayed on every display (davidcappello, IC-9700 over LAN: "SWR stays at the
 // last TX value"). Back on receive they rest: SWR 1.0 (wire 0) and ALC 0.
@@ -15,7 +16,7 @@ function test(name, fn) {
   try { fn(); pass++; console.log('  ok  ' + name); }
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.stack || e.message)); }
 }
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const main = readSrc(path.join(__dirname, '..', 'main.js'));
 
 // Run the real txMetersRestOnRx against fakes.
 function restFn() {
@@ -47,7 +48,7 @@ test('it runs on POTACAT\'s own release and when the radio reports receive', () 
 });
 
 test('Icom SWR scale: 0 = 1.0, 48 = 1.5, 80 = 2.0, 120 = 3.0 (wire = (ratio - 1) x 60)', () => {
-  const civ = fs.readFileSync(path.join(__dirname, '..', 'lib', 'codecs', 'civ-codec.js'), 'utf8');
+  const civ = readSrc(path.join(__dirname, '..', 'lib', 'codecs', 'civ-codec.js'));
   assert.ok(/const ICOM_SWR_CAL = \[\[0, 1\.0\], \[48, 1\.5\], \[80, 2\.0\], \[120, 3\.0\], \[240, 6\.0\], \[255, 6\.25\]\];/.test(civ));
   assert.ok(/this\._sendCmd\(0x15, 0x12\)/.test(civ));
 });

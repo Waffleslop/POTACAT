@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * The FT-710 on the phone's Pan tab (Casey 2026-10-28, via the phone
  * session): zoom through the radio's own SS05 span, CENTER on request
@@ -66,7 +67,7 @@ check('scope-state tells each device its own pace', () => {
 });
 
 console.log('The wire');
-const rs = fs.readFileSync(path.join(ROOT, 'lib/remote-server.js'), 'utf8');
+const rs = readSrc(path.join(ROOT, 'lib/remote-server.js'));
 check('capabilities scope-bins and scope-anchor; subscribe carries bins; anchor registered', () => {
   assert.ok(/capabilities: \[[\s\S]*'scope-bins',[\s\S]*'scope-anchor',/.test(rs));
   assert.ok(proto.MESSAGES['scope-subscribe'].fields.bins);
@@ -77,7 +78,7 @@ check('capabilities scope-bins and scope-anchor; subscribe carries bins; anchor 
 });
 
 console.log('main.js');
-const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+const main = readSrc(path.join(ROOT, 'main.js'));
 const fnOf = (name, len = 2000) => main.slice(main.indexOf('function ' + name + '('), main.indexOf('function ' + name + '(') + len);
 check('FT-710 zoom: the ten SS05 spans only when the CAT link answers the scope reads (never via rigctld)', () => {
   const w = fnOf('yaesuScopeCatWritable', 500);

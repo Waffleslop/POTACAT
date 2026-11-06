@@ -13,11 +13,12 @@
 //
 // Run: node test/voice-macros-test.js
 'use strict';
+const { readSrc } = require('./_src');
 
 const fs = require('fs');
 const path = require('path');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+const src = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
 
 // Pull the function body out of app.js by name. The function is self-contained
 // (no closure deps), so evaluating its text gives us the exact shipped logic.
@@ -68,7 +69,7 @@ function labelsAt(idx, val) {
 
 console.log('=== main.js: a phone save or delete reaches every client (Casey 2026-10-25) ===');
 {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
   const sync = main.slice(main.indexOf("remoteServer.on('voice-macro-sync'"), main.indexOf("remoteServer.on('voice-macro-delete'"));
   eq(/remoteServer\.sendToClient\(\{ type: 'voice-macro-sync', idx, label: l, audio: [^}]*hash: voiceMacroHash\(idx\) \}\)/.test(sync), true, 'a phone upload is echoed as voice-macro-sync with the hash (the uploader\'s confirmation)');
   const del = main.slice(main.indexOf("remoteServer.on('voice-macro-delete'"), main.indexOf("remoteServer.on('voice-macro-play'"));

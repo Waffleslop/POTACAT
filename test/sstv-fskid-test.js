@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // SSTV FSK ID (lib/sstv-fskid.js): the callsign MMSSTV/QSSTV send after a
 // picture, decoded so the SSTV window can fill "their call" for a reply.
 // Format and sources are at the top of the module (MMSSTV OutputFSKID /
@@ -189,7 +190,7 @@ test('callsign check', () => {
 });
 
 test('wiring: the engine runs the decoder on RX audio and main forwards it (source guards)', () => {
-  const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+  const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
   const eng = R('lib/sstv-engine.js');
   const feed = eng.slice(eng.indexOf('feedAudio(samples) {'), eng.indexOf('feedAudio(samples) {') + 1200);
   assert.ok(/_fskId\.push\(/.test(feed) && /this\.emit\('fskid'/.test(feed), 'engine decodes FSK ID in feedAudio');

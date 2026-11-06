@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // The received-SSTV gallery (lib/sstv-gallery.js) and the ECHOCAT handlers in
 // main.js (potacat-meta sstv-echocat-gallery-referenceerror-desktop and
 // sstv-gallery-sort-and-size-desktop, 2026-09-30).
@@ -121,7 +122,7 @@ test('a picture name from a client is a bare .png, never a path', () => {
 });
 
 // ---- main.js wiring ------------------------------------------------------------
-const MAIN = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+const MAIN = readSrc(path.join(ROOT, 'main.js')).replace(/\r\n/g, '\n');
 function handlerBody(marker) {
   const i = MAIN.indexOf(marker);
   assert.ok(i >= 0, 'missing ' + marker);
@@ -156,7 +157,7 @@ test('protocol: thumbs, the full-picture request, and the capability', () => {
   assert.ok(MESSAGES['sstv-get-gallery'].fields.thumbs);
   assert.ok(MESSAGES['sstv-gallery'].fields.error);
   assert.ok(MESSAGES['sstv-get-gallery-image'] && MESSAGES['sstv-gallery-image']);
-  const rs = fs.readFileSync(path.join(ROOT, 'lib', 'remote-server.js'), 'utf8');
+  const rs = readSrc(path.join(ROOT, 'lib', 'remote-server.js'));
   // Presence in the hello capability list, not position — JTTY's 'jtty' was
   // appended after it (2026-10-04) and the old /'sstv-gallery-thumbs'\]/ went red.
   const capList = (rs.match(/capabilities: \[[\s\S]*?\],\s*rigModel/) || [''])[0];
@@ -188,7 +189,7 @@ test('main takes the frequency when the picture STARTS and sends it everywhere',
   assert.ok((img.match(/freqHz: data\.freqHz/g) || []).length >= 2, 'to the SSTV window and to ECHOCAT');
   const save = MAIN.slice(MAIN.indexOf('async function saveSstvImage('), MAIN.indexOf('async function saveSstvImage(') + 3000);
   assert.ok(/const heardHz = data\.freqHz !== undefined/.test(save) && /freqHz: heardHz \|\| null/.test(save) && /rigMode:/.test(save), 'saved as heard, with the mode');
-  const multi = fs.readFileSync(path.join(ROOT, 'lib', 'sstv-manager.js'), 'utf8');
+  const multi = readSrc(path.join(ROOT, 'lib', 'sstv-manager.js'));
   assert.ok(/freqHz: freqKhz > 0 \? Math\.round\(freqKhz \* 1000\)/.test(multi), 'each Flex slice tags its own frequency');
 });
 
@@ -206,7 +207,7 @@ test('ECHOCAT sstv-rx-image carries freqHz, rigMode and filename (and is cached 
 });
 
 test('the reply bar shows where they were heard, and offers to go back when the dial is elsewhere', () => {
-  const js = fs.readFileSync(path.join(ROOT, 'renderer', 'sstv-popout.js'), 'utf8');
+  const js = readSrc(path.join(ROOT, 'renderer', 'sstv-popout.js'));
   assert.ok(/freqHz: entryQrgHz\(entry\), rigMode: entry\.rigMode/.test(js));
   assert.ok(/Math\.abs\(_dialHz - hz\) > 500/.test(js) && /'Go to ' \+ fmtQrg\(hz\)/.test(js));
   assert.ok(/const offSide = !!have && have !== want;/.test(js), 'the wrong sideband is not "on"');
@@ -226,8 +227,8 @@ test('the reply bar shows where they were heard, and offers to go back when the 
   assert.ok(/tuneToFreq\(String\(khz\), mode\)/.test(js));
   assert.ok(/sstvLogContact\(\{ call: replySession\.call, rsvSent: replySession\.rsv, freqHz: replySession\.freqHz/.test(js), 'Log uses the heard frequency');
   assert.ok(/const hz = Number\(freqHz\) > 0 \? Number\(freqHz\) : _currentFreqHz;/.test(MAIN));
-  assert.ok(/id="rb-qrg"/.test(fs.readFileSync(path.join(ROOT, 'renderer', 'sstv-popout.html'), 'utf8')));
-  assert.ok(/msg\.freqHz \? ' ' \+ \(Math\.round\(msg\.freqHz \/ 1000\)/.test(fs.readFileSync(path.join(ROOT, 'renderer', 'remote.js'), 'utf8')), 'the web client shows it too');
+  assert.ok(/id="rb-qrg"/.test(readSrc(path.join(ROOT, 'renderer', 'sstv-popout.html'))));
+  assert.ok(/msg\.freqHz \? ' ' \+ \(Math\.round\(msg\.freqHz \/ 1000\)/.test(readSrc(path.join(ROOT, 'renderer', 'remote.js'))), 'the web client shows it too');
 });
 
 (async () => {

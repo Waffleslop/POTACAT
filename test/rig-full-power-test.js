@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // A radio's real full power (rig.fullPowerW), W5LEE 2026-11-05: a 5 W Hermes
 // Lite clone on deskHPSDR, whose network CAT emulates a 100 W TS-2000. The
 // TX Pwr slider ran to 100 "W", 7 W sent PC007 = 7 % of 5 W, and QSOs were
@@ -86,11 +87,11 @@ test('nonsense values are ignored', () => {
 });
 
 test('main uses it for every model it hands out, and the rig editor saves it', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(/function getActiveRigModel\(\) \{\n  const activeRig = \(settings\.rigs \|\| \[\]\)\.find\(r => r && r\.id === settings\.activeRigId\);\n  return RigFullPower\.applyFullPower\(_activeRigModelBase\(\), activeRig\);/.test(main), 'one wrapper over every return path');
-  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
   assert.ok(/fullPowerW: readRigFullPowerField\(\)/.test(app), 'saved on the rig');
-  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  const html = readSrc(path.join(__dirname, '..', 'renderer', 'index.html'));
   assert.ok(/id="set-rig-full-power"/.test(html), 'a field in the rig editor');
 });
 

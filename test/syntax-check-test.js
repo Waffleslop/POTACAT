@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 // Every source file must parse. The rest of the suite reads main.js as TEXT
 // (source guards), so a syntax error there passed all 250 tests and showed up
 // only as the "JavaScript error in the main process" dialog at launch
@@ -30,7 +31,7 @@ const files = [
 
 let failed = 0, checked = 0;
 for (const file of files) {
-  const src = fs.readFileSync(file, 'utf8');
+  const src = readSrc(file);
   if (/^\s*(import|export)\s[^(]/m.test(src)) continue; // ES modules: not CommonJS or page scripts
   try {
     new vm.Script(Module.wrap(src.replace(/^#!.*/, '')), { filename: file });

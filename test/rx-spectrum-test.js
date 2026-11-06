@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * The phone's VFO waterfall with no FT8/JS8 engine running (cap 'rx-spectrum';
  * Casey's go 2026-10-28, first case a Flex 8600 on Flex Direct,
@@ -51,7 +52,7 @@ check('a 1 kHz tone from a 24 kHz Flex stream peaks at the 1 kHz bin', () => {
 });
 
 console.log('Wiring');
-const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+const main = readSrc(path.join(ROOT, 'main.js'));
 check('Flex Direct and Icom Network feed the ring while a phone watches', () => {
   assert.ok(/smartSdrAudio\.on\('audio-frame'[\s\S]{0,200}if \(_mobileWantsSpectrum\) rxSpecRing\.push\(pcm, sampleRate\);/.test(main));
   assert.ok(/if \(_mobileWantsSpectrum && !meta\.lossFill\) rxSpecRing\.push\(pcm, sampleRate\);/.test(main));
@@ -63,7 +64,7 @@ check('the engine wins while it runs; the RX ring otherwise; frames say which', 
   assert.ok(/broadcastJtcatSpectrum\(out, source\)/.test(loop));
 });
 check('a sound-card radio: the audio window captures the CHOSEN input only, spectrum only', () => {
-  const html = fs.readFileSync(path.join(ROOT, 'renderer/remote-audio.html'), 'utf8');
+  const html = readSrc(path.join(ROOT, 'renderer/remote-audio.html'));
   const block = html.slice(html.indexOf('onRxSpectrumWant'), html.indexOf('window.api.onStartAudio'));
   assert.ok(/deviceId: \{ exact: o\.inputDeviceId \}/.test(block), 'never the default input');
   assert.ok(/if \(!o \|\| !o\.on \|\| !o\.inputDeviceId\) return;/.test(block), 'no device chosen: no capture');
@@ -72,7 +73,7 @@ check('a sound-card radio: the audio window captures the CHOSEN input only, spec
   assert.ok(/!rxSpectrumEngineLive\(\)/.test(sync) && /!socketAudio/.test(sync), 'only when the engine is idle and there is no Flex/Icom stream');
 });
 check('capability and wire', () => {
-  const rs = fs.readFileSync(path.join(ROOT, 'lib/remote-server.js'), 'utf8');
+  const rs = readSrc(path.join(ROOT, 'lib/remote-server.js'));
   assert.ok(/capabilities: \[[\s\S]*'rx-spectrum'/.test(rs));
   assert.ok(/type: 'jtcat-spectrum', bins, source: source \|\| 'engine'/.test(rs));
   const proto = require('../lib/echocat-protocol');

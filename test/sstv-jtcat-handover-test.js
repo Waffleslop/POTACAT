@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // SSTV and JTCAT cannot share the radio's audio input. Starting JTCAT has
 // closed SSTV since 2026-05; opening SSTV now closes JTCAT too (K3SBP
 // 2026-09-30: "I had FT8 opened, then opened SSTV. JTCAT pop out should have
@@ -10,7 +11,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+const MAIN = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

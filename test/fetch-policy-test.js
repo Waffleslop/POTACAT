@@ -4,6 +4,7 @@
 // https: URLs (plain http gets "gzip, deflate" already), and every host
 // POTACAT fetches is https.
 'use strict';
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const https = require('https');
 const fs = require('fs');
@@ -67,7 +68,7 @@ async function test(name, fn) {
 
   console.log('wiring');
   await test('main.js installs it before any module that fetches is loaded', () => {
-    const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+    const main = readSrc(path.join(__dirname, '..', 'main.js'));
     const at = main.indexOf("require('./lib/fetch-policy').installNoBrotliFetch(globalThis);");
     assert.ok(at > 0, 'installed in main.js');
     const firstLibRequire = main.search(/require\('\.\/lib\/(?!fetch-policy)/);

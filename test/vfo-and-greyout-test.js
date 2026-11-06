@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // 2026-10-01 Discord round:
 //  KC1SSY  "Sometimes after contact doesn't gray out." The grey-out compared
 //          the spot's raw mode with the logged mode, which is normalized
@@ -13,7 +14,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

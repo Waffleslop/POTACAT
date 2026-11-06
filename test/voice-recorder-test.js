@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Voice macro recorder (ride1226 2026-10-31: cut-off recordings, no audio,
 // a button that did nothing). lib/voice-recorder.js against a fake mic and a
 // fake MediaRecorder; app.js wiring by source.
@@ -114,17 +115,17 @@ test('a take with no audio says so instead of saving silence', async () => {
 });
 
 test('app.js uses the module; a Rec press during a take stops it and never starts another', () => {
-  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
   assert.ok(app.includes('window.VoiceRecorder.createVoiceRecorder('));
   assert.ok(!/String\.fromCharCode\.apply\(null, new Uint8Array\(reader\.result\)\)/.test(app), 'the old base64 is gone');
   const fn = app.slice(app.indexOf('async function startVoiceRecording('), app.indexOf('async function startVoiceRecording(') + 400);
   assert.ok(/voiceRecorder\.state === 'requesting' \|\| voiceRecorder\.state === 'recording'\) \{ voiceRecorder\.stop\(\); return; \}/.test(fn));
-  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  const html = readSrc(path.join(__dirname, '..', 'renderer', 'index.html'));
   assert.ok(html.indexOf('../lib/voice-recorder.js') > 0 && html.indexOf('../lib/voice-recorder.js') < html.indexOf('src="app.js"'), 'loaded before app.js');
 });
 
 test('ECHOCAT Web sends long voice macros to the shack (sliced base64, no whole-buffer apply)', () => {
-  const web = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote.js'), 'utf8');
+  const web = readSrc(path.join(__dirname, '..', 'renderer', 'remote.js'));
   assert.ok(!/btoa\(String\.fromCharCode\.apply\(null, new Uint8Array\(/.test(web), 'no whole-buffer conversion left');
   assert.strictEqual((web.match(/voiceMacroB64\(/g) || []).length, 3, 'defined once, used at both sync sites');
 });

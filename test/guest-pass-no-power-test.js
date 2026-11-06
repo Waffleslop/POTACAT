@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Guest Pass with a radio that is not reporting its RF power (NA4DQ's IC-7300
 // lent to KF0WWL, 2026-11-05). The rule stays: no power report, no transmit.
 // What changes: the guest is told in plain words in the window they are using,
@@ -17,7 +18,7 @@ const { RigController } = require('../lib/rig-controller');
 let pass = 0, fail = 0;
 const queue = [];
 function test(name, fn) { queue.push([name, fn]); }
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const main = readSrc(path.join(__dirname, '..', 'main.js'));
 const slice = (from, to) => main.slice(main.indexOf(from), main.indexOf(to));
 
 test('the guest reads a plain refusal that names the limit and says the owner knows', () => {

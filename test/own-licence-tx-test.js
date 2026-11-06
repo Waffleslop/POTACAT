@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // The operator's own licence class refuses a transmission outside it
 // (K3SBP 2026-11-01: a Technician's FT8 went out on 10 m above 28.300 MHz;
 // the class in Settings > Station only filtered spots). Listening is never
@@ -81,13 +82,13 @@ test('Technician: CW only on 80, 40 and 15 m; US Advanced has its own table', ()
   assert.strictEqual(refuse(14200000, 'USB', 'us_advanced'), null);
 });
 test('renderer/app.js (the spot filter) carries the same tables', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const src = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
   const m = src.match(/const PRIVILEGE_RANGES = (\{[\s\S]*?\r?\n\};)/);
   assert.ok(m, 'table found');
   assert.deepStrictEqual(Function('return ' + m[1].replace(/;$/, ''))(), P.PRIVILEGE_MAP);
 });
 test('renderer/bandspread-popout.js carries the same tables', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'bandspread-popout.js'), 'utf8');
+  const src = readSrc(path.join(__dirname, '..', 'renderer', 'bandspread-popout.js'));
   const m = src.match(/const PRIVILEGE_MAP = (\{[\s\S]*?\r?\n\};)/);
   assert.ok(m, 'table found');
   const copy = Function('return ' + m[1].replace(/;$/, ''))();
@@ -116,7 +117,7 @@ test('an Icom USB-D key-down is no longer an unknown mode to the Guest Pass', ()
 });
 
 // Wiring: every key-down passes the check.
-const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const MAIN = readSrc(path.join(__dirname, '..', 'main.js'));
 test('handleRemotePtt refuses a key-down outside the class', () => {
   assert.ok(/const pttEmission = opts\.emission \|\| \(opts\.forceDataMode \? 'DATA' : null\);/.test(MAIN));
   assert.ok(/if \(state && ownTxPrivilegeRefused\(pttEmission \|\| _currentMode, opts\.freqHz\)\) return;/.test(MAIN));

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // LZ3AW 2026-10-01: "extra dot and sometimes extra dash", heard in his OWN
 // browser sidetone, the same in iambic A and B. A paddle contact that
 // bounces as it closes (down, up, down within a few ms) pressed again while
@@ -12,7 +13,7 @@ const fs = require('fs');
 const path = require('path');
 const { IambicKeyer } = require('../lib/keyer');
 
-const web = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote.js'), 'utf8');
+const web = readSrc(path.join(__dirname, '..', 'renderer', 'remote.js'));
 const webSrc = web.slice(web.indexOf('  function createLocalCwKeyer(onKey) {'), web.indexOf('  // Phone-side sidetone is driven by the local keyer'));
 // eslint-disable-next-line no-new-func
 const createWebKeyer = new Function(webSrc + '; return createLocalCwKeyer;')();
@@ -80,7 +81,7 @@ cases.push(['cw-diag: the web keyer reports each timer and element when the diag
   k.paddleDit(true); await sleep(40); k.paddleDit(false); await sleep(300); k.stop();
   assert.ok(notes.filter((n) => n[0] === 'timer').length >= 2, 'tone end and space end not measured: ' + JSON.stringify(notes));
   assert.ok(notes.every((n) => n[1] >= -5), 'a timer reported as early');
-  const web2 = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote.js'), 'utf8');
+  const web2 = readSrc(path.join(__dirname, '..', 'renderer', 'remote.js'));
   assert.ok(/cwDiagNote\('ahead', schedulePaddleElement\(durMs\)\)/.test(web2), 'the sound lead is not measured');
   assert.ok(/noteCwInputLag\(e\);/.test(web2) && /noteCwInputLag\(msg\);/.test(web2), 'keyboard and MIDI input lag not measured');
 }]);

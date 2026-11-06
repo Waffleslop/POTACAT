@@ -3,6 +3,7 @@
 // new port 300 ms after starting to close the old one, without waiting for the
 // OS release, and the log blamed "another program" for POTACAT's own handle.
 'use strict';
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -66,7 +67,7 @@ function fakePort(closeMs) {
     assert.ok(!logs.some(l => /open in another program/.test(l)));
   });
   await t('connectCat waits for the old port\'s close before opening the next', () => {
-    const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+    const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
     assert.ok(main.includes('cat.disconnect();\n    _icomNetworkTransport = null;\n    const _oldCatClosed = cat._closedPromise;'));
     assert.ok(main.includes('if (_oldCatClosed) await Promise.race([_oldCatClosed, new Promise(r => setTimeout(r, 3000))]);'));
   });

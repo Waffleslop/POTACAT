@@ -3,6 +3,7 @@
 // subscription read "No active QRZ XML subscription" in red; a rejected
 // password showed QRZ's raw text. One plain sentence per situation.
 'use strict';
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -30,11 +31,11 @@ t('wrong password, unknown user, network: three different sentences', () => {
   assert.ok(/Could not reach QRZ/.test(describeQrzLogin({ loggedIn: false, error: 'QRZ login network error: getaddrinfo ENOTFOUND xmldata.qrz.com' }).text));
 });
 t('both status paths in Settings use the one function, amber for a working login', () => {
-  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8').replace(/\r\n/g, '\n');
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js')).replace(/\r\n/g, '\n');
   assert.ok(app.includes('window.api.qrzCheckSub().then(showQrzLoginStatus)'), 'on load');
   assert.ok(app.includes('showQrzLoginStatus(await window.api.qrzCheckSub(true));'), 'Recheck');
   assert.ok(/qrzSubStatus\.style\.color = '#f0a500';/.test(app));
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(main.includes("text: describeQrzLogin({ loggedIn: false, error: err.message, username }).text"));
 });
 console.log('\nQRZ login message: ' + pass + ' passed, ' + fail + ' failed');

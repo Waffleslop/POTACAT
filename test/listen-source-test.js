@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * Who you hear: the radio, or the SDR where the radio cannot go (Casey
  * 2026-10-30: "I may be making a QSO on HF via my Flex, then want to check
@@ -77,10 +78,10 @@ check('the refusal names the frequency, the radio and the way out', () => {
 });
 
 console.log('Wiring');
-const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
-const app = fs.readFileSync(path.join(ROOT, 'renderer/app.js'), 'utf8');
-const vfo = fs.readFileSync(path.join(ROOT, 'renderer/vfo-popout.html'), 'utf8');
-const preload = fs.readFileSync(path.join(ROOT, 'preload.js'), 'utf8');
+const main = readSrc(path.join(ROOT, 'main.js'));
+const app = readSrc(path.join(ROOT, 'renderer/app.js'));
+const vfo = readSrc(path.join(ROOT, 'renderer/vfo-popout.html'));
+const preload = readSrc(path.join(ROOT, 'preload.js'));
 check('tuneRadio asks the arbiter before anything moves; only the radio case carries on', () => {
   const i = main.indexOf("const who = listenSdrArbitrate(freqHz, mode, origin);");
   const j = main.indexOf('// Auto-tune KiwiSDR WebSDR to follow');
@@ -128,7 +129,7 @@ check('the main window learns the SDR\'s reach, and Landmarks shows what it can 
   assert.ok(/setTimeout\(kiwiStatusHint, 500\)/.test(main));
   assert.ok(/function lmkViaSdr\(lm\)/.test(app) && /ok: L\.receivable\(lm, rigBandsList\) \|\| viaSdr, viaSdr/.test(app));
   assert.ok(/class="lmk-sdr"/.test(app));
-  assert.ok(/<script src="\.\.\/lib\/listen-source\.js"><\/script>/.test(fs.readFileSync(path.join(ROOT, 'renderer/index.html'), 'utf8')));
+  assert.ok(/<script src="\.\.\/lib\/listen-source\.js"><\/script>/.test(readSrc(path.join(ROOT, 'renderer/index.html'))));
 });
 check('one volume knob: the VFO monitor volume drives the SDR audio too', () => {
   assert.ok(/kiwiVolume = monitorVolume;\s+if \(kiwiGainNode\) kiwiGainNode\.gain\.value = kiwiVolume;/.test(vfo));
@@ -178,7 +179,7 @@ check('main has BANDS in scope (hoogskev 11-01: the loop threw a ReferenceError,
 });
 
 check('the VFO knob and wheel never step from an unknown dial of 0 (hoogskev 0.017.200)', () => {
-  const vfo = fs.readFileSync(path.join(ROOT, 'renderer/vfo-popout.html'), 'utf8');
+  const vfo = readSrc(path.join(ROOT, 'renderer/vfo-popout.html'));
   assert.strictEqual((vfo.match(/if \(vfoLocked \|\| !currentFreqHz\) return;/g) || []).length, 2);
 });
 

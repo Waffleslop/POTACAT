@@ -3,6 +3,7 @@
 // split the operator had set on the radio. POTACAT now sends split off only
 // to undo a split it turned on itself.
 'use strict';
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const { EventEmitter } = require('events');
 const { RigController } = require('../lib/rig-controller');
@@ -82,7 +83,7 @@ function rig() {
     assert.deepStrictEqual(order, ['mode USB', 'freq 14250000']);
   });
   await t('main.js keys SSB-over-DATA with anchorNow', () => {
-    const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+    const src = readSrc(require('path').join(__dirname, '..', 'main.js'));
     assert.ok(/cat\.setModeOnly\(dataMode, _ssbFreqBeforePtt, \{ noAnchor: _icomData, anchorNow: true \}\)/.test(src));
   });
   console.log('\nsplit on tune: ' + pass + ' passed, ' + fail + ' failed');

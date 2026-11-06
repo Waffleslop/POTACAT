@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * LZ3AW round 14 (ECHOCAT Web): FT8 tab band follows a tapped spot and the
  * tab comes back to its own dial; Logbook filter bar; Prop view (RBN +
@@ -18,7 +19,7 @@ function test(name, fn) {
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.message || e).split('\n')[0]); }
 }
 const root = path.join(__dirname, '..');
-const R = (f) => fs.readFileSync(path.join(root, f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(root, f)).replace(/\r\n/g, '\n');
 const web = R('renderer/remote.js');
 const html = R('renderer/remote.html');
 const server = R('lib/remote-server.js');
@@ -150,7 +151,7 @@ test('DXE: web Spots menu toggles save the desktop settings and badge spots', ()
   assert.ok(/case 'expedition-callsigns':/.test(web));
   assert.ok(/dxeState\.enable = msg\.settings\.enableDxe === true;/.test(web));
   // The badge markup moved into lib/spot-row.js (2026-10-22); the page hands it the kind.
-  assert.ok(/class="dxe-badge/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'spot-row.js'), 'utf8')));
+  assert.ok(/class="dxe-badge/.test(readSrc(require('path').join(__dirname, '..', 'lib', 'spot-row.js'))));
   assert.ok(/dxe: dxe === 'contest' \? 'contest' : dxe \? 'dxpedition' : ''/.test(web), 'the page passes the expedition kind to SpotRow');
   assert.ok(/dxeKind\(a\.callsign, dxeState\) === 'dxpedition'/.test(body(web, 'function getFilteredSpots(')), 'DXpeditions sort first');
 });

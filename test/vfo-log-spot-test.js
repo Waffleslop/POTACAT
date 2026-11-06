@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
 'use strict';
+const { readSrc } = require('./_src');
 //
 // VFO window LOG button. Run: node test/vfo-log-spot-test.js
 //
@@ -18,7 +19,7 @@ function check(name, fn) {
   catch (e) { fail++; console.log(`FAIL  ${name}\n      ${e.message}`); }
 }
 
-const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
 
 check('every card update records the spot the card shows', () => {
   const at = app.indexOf('function notifyVfoTunedSpot(spot) {');

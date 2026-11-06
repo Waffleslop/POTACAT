@@ -2,10 +2,11 @@
 // port; a passing Test on a rig whose saved port is blank or different looked
 // like "done" (KK6EZA IC-705 1.13.9, arys64/KO6BAH FTDX10, NJ2DX IC-7300).
 'use strict';
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8').replace(/\r\n/g, '\n');
+const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js')).replace(/\r\n/g, '\n');
 
 let pass = 0, fail = 0;
 function t(name, fn) {

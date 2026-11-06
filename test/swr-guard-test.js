@@ -11,6 +11,7 @@
 // does), no auto-tune beyond what an ATU can match, one failed auto-tune per
 // band per session.
 
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -107,8 +108,8 @@ check('beyond-atu is decided before the rate limit and the band memory (the log 
 });
 
 console.log('\nmain.js wiring (source-text guards):');
-const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-const sdrSrc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'smartsdr.js'), 'utf8');
+const mainSrc = readSrc(path.join(__dirname, '..', 'main.js'));
+const sdrSrc = readSrc(path.join(__dirname, '..', 'lib', 'smartsdr.js'));
 check('main.js requires lib/swr-guard', () => assert.ok(/require\('\.\/lib\/swr-guard'\)/.test(mainSrc)));
 check('the Flex setAtu wrapper opens a result-awaiting episode', () => {
   assert.ok(mainSrc.includes("noteAtuTuneStarted({ awaitResult: true, auto: !!(opts && opts.auto) })"));

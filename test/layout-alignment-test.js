@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 // Rendered row-alignment test (2026-10-22). Two layout bugs reached users in
 // 1.11.7–1.13.0 while every test passed, because no test looked at a page:
 //   - a CW speed added a SECOND grid cell to some spot rows, shifting every
@@ -29,11 +30,11 @@ function test(name, fn) {
 // ---------------------------------------------------------------------------
 // 1. The pages must use the shared builders — a fork is a row the test cannot see.
 // ---------------------------------------------------------------------------
-const web = fs.readFileSync(path.join(ROOT, 'renderer', 'remote.js'), 'utf8');
-const webHtml = fs.readFileSync(path.join(ROOT, 'renderer', 'remote.html'), 'utf8');
-const pop = fs.readFileSync(path.join(ROOT, 'renderer', 'jtcat-popout.js'), 'utf8');
-const popHtml = fs.readFileSync(path.join(ROOT, 'renderer', 'jtcat-popout.html'), 'utf8');
-const server = fs.readFileSync(path.join(ROOT, 'lib', 'remote-server.js'), 'utf8');
+const web = readSrc(path.join(ROOT, 'renderer', 'remote.js'));
+const webHtml = readSrc(path.join(ROOT, 'renderer', 'remote.html'));
+const pop = readSrc(path.join(ROOT, 'renderer', 'jtcat-popout.js'));
+const popHtml = readSrc(path.join(ROOT, 'renderer', 'jtcat-popout.html'));
+const server = readSrc(path.join(ROOT, 'lib', 'remote-server.js'));
 
 test('ECHOCAT Web builds spot rows and decode rows only through the shared modules', () => {
   assert.ok(/SpotRow\.spotRowHtml\(/.test(web), 'renderSpots uses SpotRow.spotRowHtml');
@@ -56,7 +57,7 @@ test('the server serves the page with both modules inlined (no placeholder left)
   // Rebuild the inline the way remote-server does, on the real files.
   let html = webHtml;
   for (const [mark, file] of [['spot-row-js', 'spot-row.js'], ['decode-row-js', 'decode-row.js']]) {
-    const js = fs.readFileSync(path.join(ROOT, 'lib', file), 'utf8');
+    const js = readSrc(path.join(ROOT, 'lib', file));
     html = html.replace('<!-- ' + mark + ' -->', () => '<script>\n' + js + '\n</script>');
   }
   assert.ok(!/<!-- (spot|decode)-row-js -->/.test(html));

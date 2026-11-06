@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * Hunt's signal floor (a POTACAT user 2026-10-27): don't automatically call a
  * CQ weaker than the station can work, optionally per band.
@@ -47,7 +48,7 @@ check('at or above the floor is called; below is not; no reading is not held aga
 });
 
 console.log('Wiring');
-const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+const main = readSrc(path.join(ROOT, 'main.js'));
 check('the floor is in the ONE workable check Hunt, fallback, mode hop and Run share', () => {
   const fn = main.slice(main.indexOf('function jtcatWorkableCallers('), main.indexOf('function jtcatRunWorkableCount('));
   assert.ok(/const floor = JtcatSnrFloor\.floorFor\(settings, dupeBandMode\.band\);/.test(fn));
@@ -57,12 +58,12 @@ check('Hunt says why it stayed quiet', () => {
   assert.ok(/\[JTCAT Hunt\] Not calling \$\{candidates\.belowFloor\} CQ/.test(main));
 });
 check('the window and a remote shack carry both settings', () => {
-  const bridge = fs.readFileSync(path.join(ROOT, 'lib/remote-bridge.js'), 'utf8');
+  const bridge = readSrc(path.join(ROOT, 'lib/remote-bridge.js'));
   assert.ok(/jtcatHuntMinDb: 'string'/.test(bridge) && /jtcatHuntMinDbByBand: 'string'/.test(bridge));
-  const html = fs.readFileSync(path.join(ROOT, 'renderer/jtcat-popout.html'), 'utf8');
+  const html = readSrc(path.join(ROOT, 'renderer/jtcat-popout.html'));
   assert.ok(/id="jp-hunt-min-db"/.test(html) && /id="jp-hunt-min-db-band"/.test(html));
   assert.ok(/<script src="\.\.\/lib\/jtcat-snr-floor\.js"><\/script>/.test(html));
-  const pop = fs.readFileSync(path.join(ROOT, 'renderer/jtcat-popout.js'), 'utf8');
+  const pop = readSrc(path.join(ROOT, 'renderer/jtcat-popout.js'));
   assert.ok(/saveSettings\(\{ jtcatHuntMinDb:/.test(pop) && /saveSettings\(\{ jtcatHuntMinDbByBand: text \}\)/.test(pop));
 });
 

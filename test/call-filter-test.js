@@ -2,6 +2,7 @@
 // Run: node test/call-filter-test.js
 
 'use strict';
+const { readSrc } = require('./_src');
 
 const assert = require('assert');
 const fs = require('fs');
@@ -13,7 +14,7 @@ function test(name, fn) {
   try { fn(); passed++; console.log('  ✓ ' + name); }
   catch (err) { failed++; console.log('  ✗ FAIL: ' + name + '\n      ' + (err.stack || err.message)); }
 }
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', 'renderer', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', 'renderer', f)).replace(/\r\n/g, '\n');
 
 test('empty filter matches everything', () => {
   assert.deepStrictEqual(parseCallFilter(''), []);
@@ -47,7 +48,7 @@ test('web: field, the check in getFilteredSpots, and a VERBATIM copy of the matc
   const html = R('remote.html'), web = R('remote.js');
   assert.ok(/id="rc-call-filter"/.test(html));
   assert.ok(/if \(callFilter\.length && !callMatchesFilter\(s\.callsign, callFilter\)\) return false;/.test(web));
-  const lib = fs.readFileSync(path.join(__dirname, '..', 'lib', 'call-filter.js'), 'utf8').replace(/\r\n/g, '\n');
+  const lib = readSrc(path.join(__dirname, '..', 'lib', 'call-filter.js')).replace(/\r\n/g, '\n');
   const body = (src, name) => { const i = src.indexOf(`function ${name}(`); return src.slice(i, src.indexOf('\n  }\n', i)).replace(/\s+/g, ' '); };
   for (const fn of ['parseCallFilter', 'callMatchesFilter']) assert.strictEqual(body(web, fn), body(lib, fn), fn + ' drifted from lib/call-filter.js');
   assert.ok(/localStorage\.setItem\('echocat-call-filter', callFilterEl\.value\)/.test(web));

@@ -4,6 +4,7 @@
 // Run: node test/lz3aw-batch-b-test.js
 
 'use strict';
+const { readSrc } = require('./_src');
 
 const assert = require('assert');
 const fs = require('fs');
@@ -18,7 +19,7 @@ function test(name, fn) {
   catch (err) { failed++; console.log('  ✗ FAIL: ' + name + '\n      ' + (err.stack || err.message)); }
 }
 const ROOT = path.join(__dirname, '..');
-const src = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8').replace(/\r\n/g, '\n');
+const src = (f) => readSrc(path.join(ROOT, f)).replace(/\r\n/g, '\n');
 
 // ---------------------------------------------------------------- zones
 console.log('zones (cty.dat):');

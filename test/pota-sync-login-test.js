@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 // POTA.app sign-in (NA4DQ 2026-10-18, macOS): pota.app moved from hash routes
 // to paths and signs in from a "Sign In" button (Cognito, back to "/"), so
 // POTACAT's `#/user/login` opened "It Seems This Page Went QRT", and the
@@ -7,7 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
-const SRC = fs.readFileSync(path.join(__dirname, '..', 'lib', 'pota-sync.js'), 'utf8').replace(/\r\n/g, '\n');
+const SRC = readSrc(path.join(__dirname, '..', 'lib', 'pota-sync.js')).replace(/\r\n/g, '\n');
 
 let passed = 0, failed = 0;
 function test(name, fn) {

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // potacat-meta work/open/sstv-decoder-state-desktop.md (2026-09-28):
 // the ECHOCAT app's explicit Stop RX ({type:'sstv-stop', reason:'user'}) was
 // always ignored, because sstv-open opens the desktop SSTV window and a stop
@@ -19,7 +20,7 @@ function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 const MAIN = R('main.js');
 const RS = R('lib/remote-server.js');
 

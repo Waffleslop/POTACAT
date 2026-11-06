@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * rigctld response attribution — an RPRT answers ONE command, so it may cancel
  * only that command's pending read.
@@ -237,10 +238,10 @@ test('a server that rejects `T` is named once as unable to key (KM4CFT, a logger
   // Wiring: the controller carries the flag and main's key-down names it.
   const fs = require('fs');
   const path = require('path');
-  const rc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'rig-controller.js'), 'utf8');
+  const rc = readSrc(path.join(__dirname, '..', 'lib', 'rig-controller.js'));
   assert.ok(/this\._codec\.on\('ptt-unavailable', \(\) => \{ this\.pttUnavailable = true;/.test(rc));
   assert.ok(/this\.pttUnavailable = false;/.test(rc), 'cleared on connect');
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(/if \(state && cat\.pttUnavailable\) \{\s*sendCatLog\('PTT FAILED: this rigctld server has no PTT/.test(main));
   assert.ok(/cat\.on\('ptt-unavailable'/.test(main), 'the rigctld Network branch raises a notice');
   void events;

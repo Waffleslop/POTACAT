@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // The JTCAT map popup names the station as a QRZ link (kilrath8954
 // 2026-10-31: it showed only the operator's name and grid; the Spots map
 // already linked the call).
@@ -9,7 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const pop = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-popout.js'), 'utf8');
+const pop = readSrc(path.join(__dirname, '..', 'renderer', 'jtcat-popout.js'));
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

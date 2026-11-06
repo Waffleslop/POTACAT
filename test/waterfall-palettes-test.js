@@ -6,6 +6,7 @@
 // 2026-11-04). If the app changes a palette, change it here AND in the lib.
 
 'use strict';
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -17,7 +18,7 @@ function t(name, fn) {
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e && e.message)); }
 }
 const root = path.join(__dirname, '..');
-const read = (f) => fs.readFileSync(path.join(root, f), 'utf8');
+const read = (f) => readSrc(path.join(root, f));
 const even = (h) => h.map((x, i) => [i / (h.length - 1), x]);
 
 const PHONE = {

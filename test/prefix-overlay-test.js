@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // DXCC prefix labels on the maps (artemisstiles 2026-10-31): a "Prefixes"
 // box (F9) in the worked-overlay legend on every map window and ECHOCAT
 // Web, each entity's main prefix at cty.dat's position, from zoom 3.
@@ -9,7 +10,7 @@ const fs = require('fs');
 const path = require('path');
 global.WorkedRoster = require('../lib/worked-roster');
 const WO = require('../lib/worked-overlay');
-const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
+const read = (p) => readSrc(path.join(__dirname, '..', p));
 
 let passed = 0, failed = 0;
 function test(name, fn) {

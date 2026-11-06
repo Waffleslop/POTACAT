@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Native FT8 decoder guards (issue #87).
 //
 // 1. The callsign hash table must never fill. ft8_lib saves every callsign it
@@ -30,7 +31,7 @@ function test(name, fn) {
 
 const ROOT = path.join(__dirname, '..');
 const ADDON = process.env.FT8_NATIVE_ADDON || path.join(ROOT, 'lib', 'ft8_native', 'build', 'Release', 'ft8_native.node');
-const SRC = fs.readFileSync(path.join(ROOT, 'lib', 'ft8_native', 'ft8_addon.c'), 'utf8');
+const SRC = readSrc(path.join(ROOT, 'lib', 'ft8_native', 'ft8_addon.c'));
 
 console.log('ft8 native decoder');
 
@@ -191,15 +192,15 @@ if (!fs.existsSync(ADDON)) {
 }
 
 test('the worker seeds our own call on every FT8 and FT4 decode (source guard)', () => {
-  const worker = fs.readFileSync(path.join(ROOT, 'lib', 'ft8-worker.js'), 'utf8');
-  const engine = fs.readFileSync(path.join(ROOT, 'lib', 'ft8-engine.js'), 'utf8');
+  const worker = readSrc(path.join(ROOT, 'lib', 'ft8-worker.js'));
+  const engine = readSrc(path.join(ROOT, 'lib', 'ft8-engine.js'));
   assert.ok(/nativeDecode\(samples, 'FT8', [^)]*msg\.seedCall/.test(worker), 'FT8 decode passes seedCall');
   assert.ok(/nativeDecode\(samples, 'FT4', [^)]*msg\.seedCall/.test(worker), 'FT4 decode passes seedCall');
   assert.ok(/seedCall: this\._apMyCall,/.test(engine), 'the engine sends it whether AP is on or not');
 });
 
 test('the worker keeps the native SNR (fixSNR is the WASM fallback only)', () => {
-  const worker = fs.readFileSync(path.join(ROOT, 'lib', 'ft8-worker.js'), 'utf8');
+  const worker = readSrc(path.join(ROOT, 'lib', 'ft8-worker.js'));
   const nativeFt8 = worker.slice(worker.indexOf("nativeDecode(samples, 'FT8'"), worker.indexOf('WASM decode:'));
   assert.ok(!/fixSNR\(rawResults/.test(nativeFt8.split('} else if (decode)')[0]), 'native FT8 results must not be re-estimated');
 });

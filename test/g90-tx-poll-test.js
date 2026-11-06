@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // GitHub #109 (edenundo): the bundled rigctld died with "stack smashing
 // detected" during G90 FT8 transmit. The G90 answers no CAT while keyed, so
 // every poll in an over was a Hamlib timeout. The G90 model now sends no CAT
@@ -65,7 +66,7 @@ test('a real RigController + rigctld codec writes nothing during an over and res
 });
 
 test('Other Rig (Hamlib) 3088 with no Radio Model borrows the quirk', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   const fn = main.slice(main.indexOf('function getActiveRigModel()'), main.indexOf('function getActiveRigModel()') + 2500);
   assert.ok(/m\.hamlib && m\.hamlib\.rigId === hamlibId/.test(fn), 'matched by Hamlib number');
   assert.ok(/twin\.pollDuringTx === false\) return \{ \.\.\.generic, pollDuringTx: false \}/.test(fn), 'only the quirk is borrowed');

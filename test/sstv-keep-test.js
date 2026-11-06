@@ -1,10 +1,11 @@
 'use strict';
+const { readSrc } = require('./_src');
 // A weak SSTV decode can look perfect (the gate judges sync pulses, not the
 // picture), so the operator can Keep it (Barbara in Maine, 2026-10-23).
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
-const rd = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+const rd = (f) => readSrc(path.join(__dirname, '..', f));
 const html = rd('renderer/sstv-popout.html'), js = rd('renderer/sstv-popout.js'), pre = rd('preload-sstv-popout.js'), main = rd('main.js');
 assert.ok(/id="rx-keep-btn"/.test(html), 'Keep button on the RX picture');
 assert.ok(/keepBtn\.style\.display = \(data\.weak && !data\.saved\) \? '' : 'none';/.test(js), 'shown only for an unsaved weak decode');

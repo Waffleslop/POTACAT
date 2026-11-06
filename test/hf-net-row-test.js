@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Directory > HF Nets: the "Remove" button was cut in half (hoogskev
 // 2026-10-31). Every table cell clips with an ellipsis and the action column
 // was 60 px, narrower than the button. The column now fits both buttons
@@ -9,7 +10,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
+const css = readSrc(path.join(__dirname, '..', 'renderer', 'styles.css'));
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

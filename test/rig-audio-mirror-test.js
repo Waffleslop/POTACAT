@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 // KF0WWL 2026-10-23: an empty settings.remoteAudioInput made the ECHOCAT bridge
 // and the JTCAT window open the Mac's built-in mic while the rig held the CODEC.
 const fs = require('fs');
@@ -20,10 +21,10 @@ t('no active rig: untouched', () => {
   const s = { activeRigId: 'zz', rigs: [{ id: 'a', remoteAudioInput: 'c' }], remoteAudioInput: '' };
   assert.ok(!healRigAudioMirror(s).changed);
 });
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
-const jt = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-popout.js'), 'utf8');
-const br = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote-audio.html'), 'utf8');
+const main = readSrc(path.join(__dirname, '..', 'main.js'));
+const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
+const jt = readSrc(path.join(__dirname, '..', 'renderer', 'jtcat-popout.js'));
+const br = readSrc(path.join(__dirname, '..', 'renderer', 'remote-audio.html'));
 t('wired at startup/connect and on every settings save', () => {
   assert.ok(/healRigAudioMirrorNow\(where\);/.test(main));
   assert.ok(/healRigAudioMirror\(settings\);\r?\n\s*saveSettings\(settings\);/.test(main));

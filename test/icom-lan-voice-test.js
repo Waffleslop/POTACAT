@@ -3,14 +3,15 @@
 // IC-7300MK2, 2026-10-28: forced DATA cost the voice its compressor, and the
 // log blamed SSB-over-DATA, which was off).
 'use strict';
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
-const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8').replace(/\r\n/g, '\n'); // a Windows checkout is CRLF
-const app = fs.readFileSync(path.join(ROOT, 'renderer/app.js'), 'utf8');
-const html = fs.readFileSync(path.join(ROOT, 'renderer/index.html'), 'utf8');
+const main = readSrc(path.join(ROOT, 'main.js')).replace(/\r\n/g, '\n'); // a Windows checkout is CRLF
+const app = readSrc(path.join(ROOT, 'renderer/app.js'));
+const html = readSrc(path.join(ROOT, 'renderer/index.html'));
 
 let passed = 0, failed = 0;
 function check(name, fn) {

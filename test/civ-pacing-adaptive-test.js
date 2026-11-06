@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Adaptive CI-V pacing (Casey 2026-11-06, after reviewing 1feed09b): an Icom
 // that works today keeps its old burst timing; only a radio seen DROPPING
 // replies (answers frequency or DATA mode, never the mode or a wanted power
@@ -140,11 +141,11 @@ test('a reconnect watches again; a rig found dropping starts paced for the rest 
   codec.rearmPacingDetection();                 // the cable came back
   assert.strictEqual(codec.pacingCheck(20000), false, 'the window starts again');
   assert.strictEqual(codec.pacingCheck(25000), false, 'and needs a reply on the new link');
-  const ctl = fs.readFileSync(path.join(__dirname, '..', 'lib', 'rig-controller.js'), 'utf8').replace(/\r\n/g, '\n');
+  const ctl = readSrc(path.join(__dirname, '..', 'lib', 'rig-controller.js')).replace(/\r\n/g, '\n');
   assert.ok(/this\._transport\.on\('connect', \(\) => \{[\s\S]{0,700}this\._codec\.rearmPacingDetection\(\)/.test(ctl), 'the controller re-arms on every connect');
   assert.ok(/if \(typeof this\._codec\.pacingCheck === 'function'\) this\._codec\.pacingCheck\(\);\n\s+this\._checkModeSilence\(\);/.test(ctl), 'checked each tick, before the mode-silence note');
   // main: the per-rig memory and the editor's override.
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   const src = main.slice(main.indexOf('const _civPacedRigs = new Set();'), main.indexOf('function passApplyPowerCap('));
   const ctx = { settings: { activeRigId: 'r1' }, String };
   vm.createContext(ctx);
@@ -162,8 +163,8 @@ test('a reconnect watches again; a rig found dropping starts paced for the rest 
 });
 
 test('the Icom and CI-V TCP rig editors carry the setting under Advanced', () => {
-  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
-  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const html = readSrc(path.join(__dirname, '..', 'renderer', 'index.html'));
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
   for (const id of ['set-icom-civ-pace', 'set-civ-tcp-civ-pace']) {
     assert.ok(new RegExp('<summary>Advanced</summary>\\s*<label[^>]*>CI-V pacing:\\s*<select id="' + id + '">').test(html), id);
     assert.ok(app.includes("civPace: civPaceChoice('" + id + "')"), id + ' saved');

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Desktop-to-desktop Phase B: the JTCAT pop-out drives the SHACK's FT8 engine
 // through lib/remote-bridge.js. The table is the whole contract; this test
 // keeps it complete (every pop-out channel mapped or deliberately local),
@@ -16,7 +17,7 @@ function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 const preload = R('preload-jtcat-popout.js');
 const main = R('main.js');
 const popout = R('renderer/jtcat-popout.js');

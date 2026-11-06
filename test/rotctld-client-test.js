@@ -3,6 +3,7 @@
 // the bundled Hamlib rotctld is present — the real thing driving the Dummy
 // rotor.
 'use strict';
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const net = require('net');
 const fs = require('fs');
@@ -218,7 +219,7 @@ function waitFor(emitter, ev, ms = 5000) {
   // --- wiring guards (the pieces that fail silently if one is missing) ---
   await t('main.js wires rotctld at startup, on settings save, on quit, and on every bearing', () => {
     // Whitespace-insensitive so CRLF checkouts and reindents don't break it.
-    const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\s+/g, ' ');
+    const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\s+/g, ' ');
     const has = (snippet) => assert.ok(main.includes(snippet.replace(/\s+/g, ' ')), 'main.js is missing: ' + snippet);
     has("if (settings.rotorType === 'rotctld') { syncRotctld(); if (rotctldClient) rotctldClient.rotate(azimuth);");
     has("'rotctldPort', 'rotctldHost', 'rotctldConf', 'rotctldPath'].some(has)) { syncRotctld(); }");
@@ -229,8 +230,8 @@ function waitFor(emitter, ev, ms = 5000) {
   await t('release builds ship rotctld beside rigctld on macOS and Linux; Windows has it in assets', () => {
     // The Intel mac job's helpers are built by a script it runs (Intel Homebrew
     // under Rosetta, 2026-10-22), so read that beside the workflow.
-    const yml = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'release.yml'), 'utf8')
-      + fs.readFileSync(path.join(__dirname, '..', 'scripts', 'build-mac-x64-helpers.sh'), 'utf8');
+    const yml = readSrc(path.join(__dirname, '..', '.github', 'workflows', 'release.yml'))
+      + readSrc(path.join(__dirname, '..', 'scripts', 'build-mac-x64-helpers.sh'));
     const count = (snippet) => yml.split(snippet).length - 1;
     assert.strictEqual(count('cp "$HAMLIB_PREFIX/bin/rotctld" assets/hamlib/rotctld')
       + count('cp "$WORK/hamlib-out/bin/rotctld" assets/hamlib/rotctld'), 2, 'macOS jobs copy rotctld (arm64 from Homebrew, x64 from source)');

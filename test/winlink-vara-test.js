@@ -7,6 +7,7 @@
 // while it has PTT through Pat and the shim.
 // Run: node test/winlink-vara-test.js
 'use strict';
+const { readSrc } = require('./_src');
 
 const assert = require('assert');
 const fs = require('fs');
@@ -17,7 +18,7 @@ const M = require('../lib/winlink-modes');
 const W = require('../lib/winlink-pat');
 
 const ROOT = path.join(__dirname, '..');
-const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8').replace(/\r\n/g, '\n');
+const read = (f) => readSrc(path.join(ROOT, f)).replace(/\r\n/g, '\n');
 const main = read('main.js');
 
 let pass = 0, fail = 0;

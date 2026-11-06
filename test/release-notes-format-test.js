@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // What's New rendering (lib/release-notes-format.js). The 1.10.23 notes
 // showed `\*` and `<sub>` as literal text in the dialog. Run:
 // node test/release-notes-format-test.js
@@ -26,7 +27,7 @@ test('the 1.10.23 opening renders: bold, literal asterisk, real <sub>', () => {
 });
 
 test('the shipped v1.10.23 notes leave no markdown or escaped tags on screen', () => {
-  const md = fs.readFileSync(path.join(__dirname, '..', 'release-notes', 'v1.10.23.md'), 'utf8');
+  const md = readSrc(path.join(__dirname, '..', 'release-notes', 'v1.10.23.md'));
   const html = f(md);
   const shown = text(html);
   assert.ok(!/\\[*_<>]/.test(shown), 'backslash escape visible');
@@ -62,8 +63,8 @@ test('CRLF bodies (GitHub API) still form paragraphs and lists', () => {
 
 test('the renderer loads the module and app.js delegates to it', () => {
   const root = path.join(__dirname, '..');
-  const index = fs.readFileSync(path.join(root, 'renderer', 'index.html'), 'utf8');
-  const app = fs.readFileSync(path.join(root, 'renderer', 'app.js'), 'utf8');
+  const index = readSrc(path.join(root, 'renderer', 'index.html'));
+  const app = readSrc(path.join(root, 'renderer', 'app.js'));
   assert.ok(index.includes('<script src="../lib/release-notes-format.js"></script>'));
   assert.ok(/window\.ReleaseNotesFormat\.formatReleaseNotes\(md\)/.test(app));
 });

@@ -4,6 +4,7 @@
 // interface keys on RTS, as WSJT-X is set up).
 // Run: node test/ptt-cat-line-test.js
 'use strict';
+const { readSrc } = require('./_src');
 
 const assert = require('assert');
 const fs = require('fs');
@@ -18,7 +19,7 @@ function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
   catch (err) { failed++; console.log('  FAIL ' + name + '\n       ' + (err.stack || err.message)); }
 }
-const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8').replace(/\r\n/g, '\n');
+const read = (p) => readSrc(path.join(__dirname, '..', p)).replace(/\r\n/g, '\n');
 
 function rig706() {
   const transport = new EventEmitter();

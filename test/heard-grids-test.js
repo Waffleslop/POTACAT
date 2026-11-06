@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // A QSO started by clicking a station's RR73 or report logs with the grid
 // they said earlier on the air (Casey via the echocat session, 2026-11-02).
 // Run: node test/heard-grids-test.js
@@ -35,7 +36,7 @@ test('forgets after the TTL and caps its size', () => {
   assert.strictEqual(h.get('C1C'), '');
 });
 test('main: every decoded grid is noted; both reply handlers and the auto-log fill a missing grid', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.strictEqual((main.match(/jtcatHeardGrids\.note\(uc, r\.grid\);/g) || []).length, 2, 'single-slice and multi-slice decode sites');
   assert.ok(/const theirGrid = data\.theirGrid \|\| data\.grid \|\| jtcatHeardGrids\.get\(call\) \|\| '';/.test(main), 'ECHOCAT reply');
   assert.ok(/if \(!data\.theirGrid && !data\.grid\) \{ const g = jtcatHeardGrids\.get\(data\.call\); if \(g\) data\.grid = g; \}/.test(main), 'JTCAT window reply');

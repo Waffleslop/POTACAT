@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // FTX_MAX_MESSAGE_LENGTH must cover the LONGEST line any decoder can emit.
 //
 // SP9LOP, Ubuntu 26.04, 2026-08-29: two segfaults in ft8_native.node, both a
@@ -27,9 +28,9 @@ function test(name, fn) {
 }
 
 const NAT = (...f) => path.join(__dirname, '..', 'lib', 'ft8_native', ...f);
-const HDR = fs.readFileSync(NAT('ft8_lib', 'ft8', 'message.h'), 'utf8');
-const MSG = fs.readFileSync(NAT('ft8_lib', 'ft8', 'message.c'), 'utf8');
-const ADDON = fs.readFileSync(NAT('ft8_addon.c'), 'utf8');
+const HDR = readSrc(NAT('ft8_lib', 'ft8', 'message.h'));
+const MSG = readSrc(NAT('ft8_lib', 'ft8', 'message.c'));
+const ADDON = readSrc(NAT('ft8_addon.c'));
 
 function macroValue() {
   const m = HDR.match(/#define\s+FTX_MAX_MESSAGE_LENGTH\s+(\d+)/);

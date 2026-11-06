@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
 'use strict';
+const { readSrc } = require('./_src');
 //
 // TS-590S/SG "CAT not staying open" (N7UVH, issue #95, 2026-10-05): the
 // TS-590 and TS-990 COM/USB ports use RTS/CTS hardware flow control (Hamlib's
@@ -26,7 +27,7 @@ function assert(cond, msg) {
   console.log(`  ✗ ${msg}`);
 }
 function section(name) { console.log(`\n=== ${name} ===`); }
-const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
+const read = (p) => readSrc(path.join(__dirname, '..', p));
 
 section('Models: Hamlib parity for the serial handshake');
 assert(RIG_MODELS['TS-590S/SG'].serialHandshake === 'hardware', 'TS-590S/SG: hardware (rigctld -m 2037 --show-conf: Hardware)');

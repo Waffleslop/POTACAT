@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Yaesu SCU-LAN10 (experimental): how the transport is wired into POTACAT.
 // The rules that matter on the air are pinned here:
 //   - it is a normal, visible choice in the rig editor (Casey: "turn it on by
@@ -16,7 +17,7 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
-const read = (f) => fs.readFileSync(path.join(root, f), 'utf8');
+const read = (f) => readSrc(path.join(root, f));
 const main = read('main.js');
 const app = read('renderer/app.js');
 const html = read('renderer/index.html');

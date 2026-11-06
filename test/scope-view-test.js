@@ -3,6 +3,7 @@
 // geometry + trace painter) and the synced tuning step's wiring.
 // Plan: docs/scope-improvements-plan.md Phase 0 + Decision 2.
 'use strict';
+const { readSrc } = require('./_src');
 
 const assert = require('assert');
 const fs = require('fs');
@@ -15,7 +16,7 @@ function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e && e.stack || e)); }
 }
-const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
+const read = (p) => readSrc(path.join(__dirname, '..', p));
 
 function isNice(step) {
   const p = Math.pow(10, Math.floor(Math.log10(step) + 1e-9));

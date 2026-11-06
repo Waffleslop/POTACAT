@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Spots on the radio's frequency: same park as the tuned spot = another
 // operator at that activation; a different park on a voice/CW frequency is
 // marked apart (N0KAH 2026-09-26: US-13168 and US-4583 both on 7278.0 SSB
@@ -13,8 +14,8 @@ function test(name, fn) {
   try { fn(); pass++; console.log('  ok  ' + name); }
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
-const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8').replace(/\r\n/g, '\n');
-const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
+const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js')).replace(/\r\n/g, '\n');
+const css = readSrc(path.join(__dirname, '..', 'renderer', 'styles.css'));
 function extract(name) {
   const start = app.indexOf('function ' + name + '(');
   assert.ok(start >= 0, name + ' missing');

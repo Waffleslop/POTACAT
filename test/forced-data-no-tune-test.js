@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Transmit-safety review of d7500aac (HIGH): an else-if was hung on the
 // voice-hint line, so every forced-DATA key-down (SSTV/Winlink on an Icom,
 // Mercury: no voice check) ran cat.tune() after setModeOnly(). tune() re-sent
@@ -17,7 +18,7 @@ function test(name, fn) {
   try { fn(); pass++; console.log('  ok  ' + name); }
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.stack || e.message)); }
 }
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
 
 // The key-down's mode block: from "if (cat && cat.connected) {" holding the
 // setModeOnly call, to its closing brace.

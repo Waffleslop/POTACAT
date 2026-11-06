@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // LZ3AW round 13 (wishlist 2026-10-16), the first batch of small, clear items:
 //   3  web VFO pane: Live button on the CW typing field (shares the CW tab's mode)
 //   8  web Log tab: date/time stamped with now and kept current until edited
@@ -16,7 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const P = require('../lib/echocat-protocol');
 
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

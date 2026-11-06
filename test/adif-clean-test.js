@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // A NUL in a logged value broke cloud sync for one client, once a minute,
 // for a week (cloud log "Push error: unsupported Unicode escape sequence",
 // 2,402 times to 2026-10-20): Postgres jsonb refuses \u0000, the whole push
@@ -14,7 +15,7 @@ const path = require('path');
 const { cleanText, cleanAdifFields } = require('../lib/adif-clean');
 const { buildAdifFields } = require('../lib/adif-writer');
 
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

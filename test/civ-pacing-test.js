@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // One CI-V command in flight (lib/codecs/civ-codec.js CivPacer).
 //
 // NA4DQ's IC-7300 on a Mac (2026-11-05, Guest Pass FT8 never keyed): the poll
@@ -134,7 +135,7 @@ test('the radio\'s own unasked frames (scope stream, transceive) do not count as
 });
 
 test('the serial and CI-V-over-TCP Icom links ask for pacing per rig; Icom Network is not paced', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   const serial = main.slice(main.indexOf("} else if (target.type === 'icom') {"), main.indexOf("} else if (target.type === 'icom') {") + 900);
   assert.ok(/new CivCodec\(model, \(data\) => transport\.write\(data\), \{ pace: civPaceFor\(target\) \}\);/.test(serial));
   assert.ok(/codec = new CivCodec\(model, \(data\) => transport\.write\(data\), \{ pace: civPaceFor\(target\) \}\); \/\/ a real CI-V bus behind the bridge/.test(main));

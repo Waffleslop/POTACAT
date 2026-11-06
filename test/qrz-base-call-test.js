@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 // A compound callsign looks up and links the STATION's own call on QRZ
 // (N0KAH 2026-10-14: "M/NT6B" opened qrz.com/db/M — every caller took the
 // text before the first "/").
@@ -6,7 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
 const { baseCall } = require('../renderer/jtcat-parser');
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

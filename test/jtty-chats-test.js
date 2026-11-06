@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // JTTY chats (lib/jtty-chats.js): which rows make up a conversation, the
 // auto "THEIR MY" prefix, bubble text, unread and idle, and the open/close
 // state. The cases are the ECHOCAT app's (__tests__/jttyChats.test.ts) so
@@ -176,7 +177,7 @@ test('unread is from the last view; leaving reads; logged chats close together',
 console.log('\nthe JTCAT window');
 const fs = require('fs');
 const path = require('path');
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 
 test('the pane has the tabs, the chat view, the prefix, the count and Quick; the module is loaded', () => {
   const html = R('renderer/jtcat-popout.html');

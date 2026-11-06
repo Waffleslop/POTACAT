@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // KM0JPR (IC-7300 over its USB CODEC, ECHOCAT iOS), 2026-09-27: "I'm still
 // getting weak TX to the radio via Echocat on iPhone" — ALC and power well
 // below the stock mic. On a USB CODEC rig the bridge played the phone's mic
@@ -18,8 +19,8 @@ async function test(name, fn) {
   try { await fn(); passed++; console.log('  ok  ' + name); }
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
-const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote-audio.html'), 'utf8').replace(/\r\n/g, '\n');
-const eqSrc = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'tx-eq-chain.js'), 'utf8');
+const html = readSrc(path.join(__dirname, '..', 'renderer', 'remote-audio.html')).replace(/\r\n/g, '\n');
+const eqSrc = readSrc(path.join(__dirname, '..', 'renderer', 'tx-eq-chain.js'));
 
 function slice(from, to) {
   const a = html.indexOf(from), b = html.indexOf(to, a + 1);

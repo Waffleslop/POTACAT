@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Hunt filters, piece 7 (docs/plan-jtcat-hunt-priorities.md): ECHOCAT. A
 // device edits the filters with C2S jtcat-hunt-filters (Guest Pass refused),
 // the shack advertises `hunt-filters`, jtcat-auto-cq-state carries the whole
@@ -22,7 +23,7 @@ function test(name, fn) {
   try { fn(); pass++; console.log('  ok  ' + name); }
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.stack || e.message)); }
 }
-const read = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+const read = (f) => readSrc(path.join(__dirname, '..', f));
 const main = read('main.js');
 const server = read('lib/remote-server.js');
 const web = read('renderer/remote.js');

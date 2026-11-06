@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // "Log as" another operator (KD9WI 2026-10-16: two hams sharing one shack PC,
 // taking turns on the radio, each QSO into its own operator's logbook and
 // QRZ without switching operators). Policy is lib/log-as.js; main.js writes
@@ -13,7 +14,7 @@ const LogAs = require('../lib/log-as');
 const { ownerIdFor } = require('../lib/cloud-ipc');
 const P = require('../lib/echocat-protocol');
 
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

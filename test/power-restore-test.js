@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // The 1.13.10 regression (GitHub #111 df1vb IC-7100, nocodegeneralwitha7300
 // IC-7300): the external-tuner carrier "restored" a never-read power as
 // 100 W, and the leftover marker turned the operator's knob back to 100 W.
@@ -56,7 +57,7 @@ test('nothing while the carrier runs, on another rig, or inside the retry gap', 
   assert.strictEqual(R.decideReconcile(null, 10, st()).action, 'none');
 });
 
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const main = readSrc(path.join(__dirname, '..', 'main.js'));
 test('main: the tune never falls back to the Default power, and marks a restore only when the power was read', () => {
   const t = main.slice(main.indexOf('runExternalAtuTune = async function () {'), main.indexOf("ipcMain.on('external-atu-cancel'"));
   assert.ok(!/settings\.defaultPower \|\| 100/.test(t), 'no 100 W fallback');

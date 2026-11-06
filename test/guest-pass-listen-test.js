@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // A Guest Pass restricts TRANSMIT, never listening (a shack owner's
 // Technician who wants to hear a 20 m POTA QSO, 2026-10-24).
 // Run: node test/guest-pass-listen-test.js
@@ -62,7 +63,7 @@ test('a TX gate with no dial known falls back to the power rules only', () => {
 });
 
 test('wiring: both TX gates hand the live dial and mode to the pass, and a refusal reaches the guest\'s device', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   // The live dial, and what the key-down sends (emission) before the radio's
   // mode (test/guest-pass-emission-test.js: FT8 from a rig left in USB).
   // The frequency the radio will TRANSMIT on (effectiveTxFreqHz: the other VFO
@@ -72,7 +73,7 @@ test('wiring: both TX gates hand the live dial and mode to the pass, and a refus
   assert.strictEqual((main.match(/passTxBlocked\(res\);/g) || []).length, 3, 'both gates and passTxAllowed (CW text, the paddle) tell the device');
   assert.ok(/sendToPassSessions\(\{ type: 'tune-blocked', reason: res\.userVisible \}\)/.test(main), 'as a tune-blocked alert the app already shows');
   assert.ok(/const applied = !!state && !passTxJustBlocked\(\);/.test(main), 'ptt-applied says false for a refused press');
-  const srv = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8');
+  const srv = readSrc(path.join(__dirname, '..', 'lib', 'remote-server.js'));
   assert.ok(/sendToPassSessions\(msg\) \{/.test(srv));
   assert.ok(/if \(rest\.hideOutOfBand\) rest\.hideOutOfBand = false;/.test(srv), 'a guest never inherits the owner\'s out-of-band hiding');
 });

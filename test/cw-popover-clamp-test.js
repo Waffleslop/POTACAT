@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // N6UGP (1.11.8, macOS): the CW popover (Sidetone Vol / WPM) opened clipped
 // off the right edge of the window and followed the edge as the window grew.
 // Cause: CSS `right: 0` AND a JS `left` on the same absolutely positioned
@@ -10,7 +11,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

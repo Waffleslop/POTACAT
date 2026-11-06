@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // LoTW per-QSO sent-flag stamping. The stderr sample is verbatim from the
 // first real K3SBP upload (2026-08-13). Run: node test/lotw-flags-test.js
 const assert = require('assert');
@@ -125,7 +126,7 @@ test('skips group by reason and detail without line numbers', () => {
 });
 
 test('main.js reports grouped real skips and the true total', () => {
-  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+  const src = readSrc(require('path').join(__dirname, '..', 'main.js'));
   assert.ok(src.includes('const skips = skipSummary.real;'));
   // The total counts every batch's TQSL skips plus held-back activations.
   assert.ok(src.includes('r.skippedTotal = notUploaded.length;'));

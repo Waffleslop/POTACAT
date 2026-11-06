@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Xiegu G90 speaks CI-V, so the rig picker sets it up through Hamlib (3088,
 // 19200 baud), the way potacat.com/remote/xiegu-g90/ says. It was 'kenwood'
 // under Serial CAT, which could never drive it. Run: node test/g90-hamlib-model-test.js
@@ -28,7 +29,7 @@ test('the model list carries the Hamlib setup for the picker', () => {
 });
 
 test('the rig editor picks Other Rig (Hamlib) and fills model + baud', () => {
-  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
   assert.ok(/const hamlib = groupOf && groupOf\.hamlib && groupOf\.hamlib\[modelName\];/.test(app));
   assert.ok(/setRadioType\('hamlib'\);\s*hamlibFieldsLoaded = true;\s*await populateHamlibFields\(\{ rigId: hamlib\.rigId, baudRate: hamlib\.baudRate \}\);/.test(app));
 });

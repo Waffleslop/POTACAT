@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * Every classic <script> on a page shares ONE top-level scope. A name declared
  * with const/let/class in two of them is a SyntaxError that stops the second
@@ -65,7 +66,7 @@ function classicScripts(html, htmlPath) {
 const pages = fs.readdirSync(RENDERER).filter((f) => f.endsWith('.html'));
 for (const page of pages) {
   const htmlPath = path.join(RENDERER, page);
-  const scripts = classicScripts(fs.readFileSync(htmlPath, 'utf8'), htmlPath);
+  const scripts = classicScripts(readSrc(htmlPath), htmlPath);
   if (scripts.length < 2) continue;
   check(`${page}: no top-level name is declared twice across its ${scripts.length} scripts`, () => {
     const seen = new Map(); // name -> {kind, file}
@@ -73,7 +74,7 @@ for (const page of pages) {
     for (const file of scripts) {
       const rel = path.relative(ROOT, file).replace(/\\/g, '/');
       const mine = new Set();
-      for (const d of topLevelNames(fs.readFileSync(file, 'utf8'))) {
+      for (const d of topLevelNames(readSrc(file))) {
         if (mine.has(d.name)) continue; // a file's own duplicates are its own parse error
         mine.add(d.name);
         const prev = seen.get(d.name);
@@ -90,7 +91,7 @@ for (const page of pages) {
 
 check('the two files that collided keep their own export names', () => {
   for (const f of ['lib/dx-rule.js', 'lib/audio-device-heal.js']) {
-    const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    const src = readSrc(path.join(ROOT, f));
     assert.ok(!/^const api\b/m.test(src), f + ' must not declare a top-level `api`');
   }
   assert.strictEqual(typeof require('../lib/audio-device-heal').healRigAudioDevices, 'function');

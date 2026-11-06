@@ -3,6 +3,7 @@
 // and nothing refilled it until the next 4-hour fetch, so phones connected to
 // a blank Directory tab (Android report 2026-10-24).
 // Run: node test/directory-echocat-seed-test.js
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -12,8 +13,8 @@ function test(name, fn) {
   try { fn(); pass++; console.log('  ok  ' + name); }
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
-const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
-const rs = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8').replace(/\r\n/g, '\n');
+const src = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
+const rs = readSrc(path.join(__dirname, '..', 'lib', 'remote-server.js')).replace(/\r\n/g, '\n');
 
 console.log('directory echocat seed');
 
@@ -34,8 +35,8 @@ test('the directory push is not gated on the server listening', () => {
 // desktop menu show it while phones were never sent it (3 operators' Dir tabs
 // stuck on "Waiting for directory data").
 test('the directory has no off switch anywhere', () => {
-  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
-  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
+  const html = readSrc(path.join(__dirname, '..', 'renderer', 'index.html'));
   for (const [name, text] of [['main.js', src], ['app.js', app], ['index.html', html]]) {
     assert.ok(!/enableDirectory|set-enable-directory/.test(text), name + ' still reads the old setting');
   }

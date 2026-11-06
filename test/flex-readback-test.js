@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * A Flex's controls read back from the radio (Casey 2026-10-28, via the phone
  * session): every rig-state field the phone and the VFO window show comes
@@ -18,7 +19,7 @@ function check(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + e.message); }
 }
-const lines = fs.readFileSync(path.join(__dirname, 'fixtures/flex-pan/8600-status.txt'), 'utf8').split(/\r?\n/).filter(Boolean);
+const lines = readSrc(path.join(__dirname, 'fixtures/flex-pan/8600-status.txt')).split(/\r?\n/).filter(Boolean);
 const kvOf = (re) => {
   const kv = {};
   for (const l of lines.filter((x) => re.test(x))) {
@@ -83,7 +84,7 @@ check('every slice line goes out with its keys; pan RF gain rides pan-status', (
 });
 
 console.log('main.js wiring');
-const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+const main = readSrc(path.join(ROOT, 'main.js'));
 check('slice, transmit, pan and ATU each feed applyFlexReadback; a change broadcasts', () => {
   assert.ok(/smartSdr\.on\('slice-status'[\s\S]{0,400}applyFlexReadback\(FlexReadback\.sliceReadback\(_flexSliceKv\)\)/.test(main));
   assert.ok(/applyFlexReadback\(FlexReadback\.transmitReadback\(_flexTransmitKv\)\)/.test(main));

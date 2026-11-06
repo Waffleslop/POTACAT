@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * artificialjumpprotection 11-03: 2 m WSPR tuned the FT8 dial (the JTCAT
  * window's WSPR table had no 2 m, and the old mode's dial stayed on the
@@ -11,9 +12,9 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const ROOT = path.join(__dirname, '..');
-const pop = fs.readFileSync(path.join(ROOT, 'renderer/jtcat-popout.js'), 'utf8');
-const web = fs.readFileSync(path.join(ROOT, 'renderer/remote.js'), 'utf8');
-const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+const pop = readSrc(path.join(ROOT, 'renderer/jtcat-popout.js'));
+const web = readSrc(path.join(ROOT, 'renderer/remote.js'));
+const main = readSrc(path.join(ROOT, 'main.js'));
 const wsprBands = require('../lib/wspr/bands');
 let passed = 0, failed = 0;
 function check(name, fn) {

@@ -3,11 +3,12 @@
 // on the air (WSJT-X DXpedition rule, kept), but the contact is with the call
 // the fox sent: 6W/ is Senegal, IK2HKT is Italy.
 'use strict';
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const P = require('../renderer/jtcat-parser.js');
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
 
 let pass = 0, fail = 0;
 function t(name, fn) {

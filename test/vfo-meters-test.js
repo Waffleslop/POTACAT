@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * VFO view shows only the meters the radio reports (Casey 2026-10-07: "if the
  * radio connected lacks SWR, ALC, Power or S Meter values (because we can't
@@ -21,8 +22,8 @@ function test(name, fn) {
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.message || e).split('\n')[0]); }
 }
 const root = path.join(__dirname, '..');
-const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
-const vfo = fs.readFileSync(path.join(root, 'renderer', 'vfo-popout.html'), 'utf8');
+const main = readSrc(path.join(root, 'main.js'));
+const vfo = readSrc(path.join(root, 'renderer', 'vfo-popout.html'));
 
 // Lift main's block (METER_KEYS .. vfoMetersAvailable) and run it on stubs.
 function load(settings) {

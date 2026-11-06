@@ -2,6 +2,7 @@
 // and that it can be seen at most twice. Plus the wiring guards that keep it
 // out of an operator's way.
 'use strict';
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -88,8 +89,8 @@ test('store links are the ones the stores publish', () => {
 });
 
 // --- wiring ------------------------------------------------------------------
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
-const card = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'echocat-review.js'), 'utf8');
+const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
+const card = readSrc(path.join(__dirname, '..', 'renderer', 'echocat-review.js'));
 
 test('main: every calm-moment gate is checked', () => {
   const c = main.slice(main.indexOf('function reviewAskCalm('), main.indexOf('function reviewAskTick('));
@@ -109,10 +110,10 @@ test('card: no incentives, no gating, never stacks on another notice', () => {
 
 test('an owner\'s phone app hides the Settings download badges, never a Guest Pass device', () => {
   const root = require('path').join(__dirname, '..');
-  const main = fs.readFileSync(require('path').join(root, 'main.js'), 'utf8');
-  const rs = fs.readFileSync(require('path').join(root, 'lib/remote-server.js'), 'utf8');
-  const html = fs.readFileSync(require('path').join(root, 'renderer/index.html'), 'utf8');
-  const app = fs.readFileSync(require('path').join(root, 'renderer/app.js'), 'utf8');
+  const main = readSrc(require('path').join(root, 'main.js'));
+  const rs = readSrc(require('path').join(root, 'lib/remote-server.js'));
+  const html = readSrc(require('path').join(root, 'renderer/index.html'));
+  const app = readSrc(require('path').join(root, 'renderer/app.js'));
   assert.ok(/owner: !!ws\._authenticated && !ws\._passSession/.test(rs), 'hello says whether the device is the owner\'s');
   assert.ok(/if \(owner\) noteOwnerPhoneApp\(platform\);/.test(main), 'a LAN owner device (auths before hello)');
   assert.ok(/if \(!pass\) noteOwnerPhoneApp\(platform\);/.test(main), 'an owner device that auths after hello; never a pass');

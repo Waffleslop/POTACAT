@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Hunt filters, piece 5 (docs/plan-jtcat-hunt-priorities.md): "Never answer"
 // (calls and PREFIX*, permanent until removed, right-click a decode to add)
 // and auto-skip (a call whose QSO gave up is skipped 30 min on that band and
@@ -17,7 +18,7 @@ function test(name, fn) {
   try { fn(); pass++; console.log('  ok  ' + name); }
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.stack || e.message)); }
 }
-const read = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+const read = (f) => readSrc(path.join(__dirname, '..', f));
 const main = read('main.js');
 const html = read('renderer/jtcat-popout.html');
 const pop = read('renderer/jtcat-popout.js');

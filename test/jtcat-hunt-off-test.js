@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // "Hunt: Off" is the finish-this-QSO-then-stop control (N2FSM 2026-08-31).
 //
 // Asked how to let the current QSO complete without starting another, an
@@ -20,7 +21,7 @@ function test(name, fn) {
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
 
-const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const MAIN = readSrc(path.join(__dirname, '..', 'main.js'));
 
 test('nothing NEW starts while hunt is off', () => {
   // The caller-selection block — CQ hunting AND answering a direct caller —
@@ -147,7 +148,7 @@ test('choosing a Hunt mode restates whether the carousel can turn', () => {
 });
 
 test('the rotation chips no longer share a class with the Field Day chip', () => {
-  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-popout.html'), 'utf8');
+  const html = readSrc(path.join(__dirname, '..', 'renderer', 'jtcat-popout.html'));
   // The later `.jp-mode-chip {` rule painted the rotation chips' OFF state
   // Field-Day orange. Only the shared base + `.on` rule may target the class.
   const bare = html.match(/^\s*\.jp-mode-chip\s*\{/gm) || [];

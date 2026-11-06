@@ -3,6 +3,7 @@
 // thrown away (KC8ZPI 2026-10-24). The bridges now send one with every
 // heartbeat and right before each QSO.
 // Run: node test/wsjtx-status-bridge-test.js
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -60,7 +61,7 @@ test('the heartbeat is unchanged', () => {
   assert.strictEqual(r.u32(), MSG.HEARTBEAT);
 });
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+const src = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
 test('every bridge sends a Status with each heartbeat and before each QSO', () => {
   const at = src.indexOf('function createWsjtxUdpBridge(label)');
   assert.ok(at > 0);

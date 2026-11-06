@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Chunked worked-qsos. The 256 KB cap protects iOS sockets, but for an active
 // logger it meant the worked history was SKIPPED ENTIRELY — and a client with
 // an empty history cannot mark a single spot, which is why LZ3AW's worked
@@ -140,7 +141,7 @@ test('GUEST PASS still never receives the owner\'s worked history', () => {
   // (the guest hydration path never calls this), and the guest-pass suite
   // pins it. Assert the source still routes worked-qsos only through the
   // full-trust hydration, so a guest advertising the capability gains nothing.
-  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8');
+  const src = readSrc(path.join(__dirname, '..', 'lib', 'remote-server.js'));
   const guestHydrate = src.indexOf('_hydrateGuest');
   if (guestHydrate !== -1) {
     const slice = src.slice(guestHydrate, guestHydrate + 4000);
@@ -178,7 +179,7 @@ test('a hello with no chunk capability after a skip changes nothing', () => {
 });
 
 test('the web client hides the "today only" banner when the full history arrives', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote.js'), 'utf8');
+  const src = readSrc(path.join(__dirname, '..', 'renderer', 'remote.js'));
   const h = src.slice(src.indexOf("case 'worked-qsos': {"), src.indexOf("case 'worked-today': {"));
   assert.ok(/spot-worked-note[\s\S]{0,80}classList\.add\('hidden'\)/.test(h), 'banner never hidden');
 });

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
 'use strict';
+const { readSrc } = require('./_src');
 //
 // VFO window PTT race + SWR notice. Run: node test/vfo-ptt-race-test.js
 //
@@ -22,7 +23,7 @@ function check(name, fn) {
   catch (e) { fail++; console.log(`FAIL  ${name}\n      ${e.message}`); }
 }
 
-const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'vfo-popout.html'), 'utf8');
+const html = readSrc(path.join(__dirname, '..', 'renderer', 'vfo-popout.html'));
 const start = html.slice(html.indexOf('async function pttStart() {'), html.indexOf('function pttStop() {'));
 const stop = html.slice(html.indexOf('function pttStop() {'), html.indexOf('function pttStop() {') + 400);
 
@@ -61,7 +62,7 @@ check('the worklet drops chunks from an abandoned press', () => {
 });
 
 check('SWR guard trip and refused PTT reach the VFO window', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   const ann = main.slice(main.indexOf('function swrGuardAnnounce('), main.indexOf('function swrGuardMax('));
   assert.ok(/vfoPopoutWin\.webContents\.send\('tune-blocked', msg\)/.test(ann), 'announce');
   const ptt = main.slice(main.indexOf('function handleRemotePtt('), main.indexOf('function handleRemotePtt(') + 1200);

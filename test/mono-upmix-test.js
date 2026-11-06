@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // hoogskev (FTX-1, macOS, 2026-11-05): the VFO window's radio monitor played
 // in the left channel only. The capture comes back as two channels with only
 // channel 0 filled; channel 0 is now taken and up-mixed to both sides.
@@ -47,7 +48,7 @@ test('the node handed on is forced to one channel, so the destination plays it i
 });
 
 test('the VFO window\'s capture monitor goes through it', () => {
-  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'vfo-popout.html'), 'utf8');
+  const html = readSrc(path.join(__dirname, '..', 'renderer', 'vfo-popout.html'));
   assert.ok(/<script src="\.\.\/lib\/mono-upmix\.js"><\/script>/.test(html));
   const fn = html.slice(html.indexOf('async function startAudioMonitor() {'), html.indexOf('} catch (e) {', html.indexOf('async function startAudioMonitor() {')));
   assert.ok(/window\.MonoUpmix\.monoToBothSides\(audioMonitorCtx, source\)/.test(fn));

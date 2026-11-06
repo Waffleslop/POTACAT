@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // CW text from a device keeps {call} etc. unexpanded (the mobile app never
 // expanded them); main.js fills them (N4RDX 2026-10-11).
 // Run: node test/cw-remote-expand-test.js
@@ -36,7 +37,7 @@ test('a {call} with nothing to fill is removed and reported, never keyed as brac
 });
 
 test('main.js expands device CW text before keying it', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const src = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(src.includes('sendCwTextToRadio(expandRemoteCwText(text), { live: !!live, fromRemote: true });'));
   assert.ok(src.includes('typedCalls.current() || (tuned && tuned.callsign)'));
 });

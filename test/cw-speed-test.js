@@ -1,11 +1,12 @@
 'use strict';
+const { readSrc } = require('./_src');
 // CW speed on spots that carry none (POTA/SOTA/WWFF), from skimmer readings.
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
 const { CwSpeedCache, wpmFromComment } = require('../lib/cw-speed');
 const { RbnClient } = require('../lib/rbn');
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

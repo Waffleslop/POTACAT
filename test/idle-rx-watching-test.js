@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // W0TLP 2026-11-02: Idle Mode QSY'd his radio to 14.0956 in LSB while he
 // watched it from his phone. A connected ECHOCAT device holds off Idle Mode,
 // and the engine-only mode names reach the radio as a data mode.
@@ -14,7 +15,7 @@ function test(name, fn) {
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
 
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const main = readSrc(path.join(__dirname, '..', 'main.js'));
 
 test('the Idle Mode tick treats a connected ECHOCAT device as someone at the radio', () => {
   const start = main.indexOf('function startAutoSstvTimer(');
@@ -37,9 +38,9 @@ test('tuneRadio maps WSPR, JS8, JTTY and PSK31 to DIGU before the CAT tune', () 
 test('every mapped name lands on a mode the CI-V, Kenwood/Yaesu and rigctld codecs can set', () => {
   for (const m of ['WSPR', 'JS8', 'JTTY', 'PSK31', 'wspr']) assert.strictEqual(mapMode(m), 'DIGU', m);
   for (const m of ['FT8', 'USB', 'LSB', 'CW', 'PSK', 'DIGU', '']) assert.strictEqual(mapMode(m), m, 'unchanged: ' + m);
-  const civ = fs.readFileSync(path.join(__dirname, '..', 'lib', 'codecs', 'civ-codec.js'), 'utf8');
-  const ken = fs.readFileSync(path.join(__dirname, '..', 'lib', 'codecs', 'kenwood-codec.js'), 'utf8');
-  const rig = fs.readFileSync(path.join(__dirname, '..', 'lib', 'codecs', 'rigctld-codec.js'), 'utf8');
+  const civ = readSrc(path.join(__dirname, '..', 'lib', 'codecs', 'civ-codec.js'));
+  const ken = readSrc(path.join(__dirname, '..', 'lib', 'codecs', 'kenwood-codec.js'));
+  const rig = readSrc(path.join(__dirname, '..', 'lib', 'codecs', 'rigctld-codec.js'));
   assert.ok(/'DIGU':\s*\{ civMode: 0x01, dataMode: true \}/.test(civ), 'CI-V has DIGU');
   assert.strictEqual((ken.match(/'DIGU':\s*\{ md:/g) || []).length, 2, 'Kenwood and Yaesu tables have DIGU');
   assert.ok(/'DIGU': 'PKTUSB'/.test(rig), 'rigctld has DIGU');

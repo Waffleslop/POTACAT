@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // kc8zp_ryan 2026-11-03: after the rig sat idle, FT8 in ECHOCAT Web stopped
 // decoding while its progress bar kept moving; opening FT8 on the phone fixed
 // it. Capture restarted only on the track's 'ended' event, and an OS that
@@ -106,7 +107,7 @@ test("an ended track is left to the renderer's own 'ended' restart", () => {
 });
 
 test('wiring: the main window and the JTCAT window both run it on sound-card capture', () => {
-  const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8').replace(/\r\n/g, '\n');
+  const read = (p) => readSrc(path.join(__dirname, '..', p)).replace(/\r\n/g, '\n');
   const app = read('renderer/app.js'), pop = read('renderer/jtcat-popout.js');
   assert.ok(/<script src="\.\.\/lib\/capture-stall\.js"><\/script>/.test(read('renderer/index.html')), 'index.html loads it');
   assert.ok(/<script src="\.\.\/lib\/capture-stall\.js"><\/script>/.test(read('renderer/jtcat-popout.html')), 'jtcat-popout.html loads it');

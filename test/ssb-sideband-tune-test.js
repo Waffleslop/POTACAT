@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // A spot's SSB becomes LSB or USB by the band plan in tuneRadio, before any
 // codec sees it, and 60 m is USB by rule: the bare 10 MHz split there sent a
 // 60 m SSB spot to the radio as LSB.
@@ -24,7 +25,7 @@ test('the band plan: 160/80/40 LSB, 60 m USB, 20 m and up USB', () => {
   assert.strictEqual(ssbSideband(28400000), 'USB');
 });
 test('tuneRadio resolves SSB with that rule, not a bare 10 MHz split', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(/const resolvedMode = \(mode \|\| ''\)\.toUpperCase\(\) === 'SSB' \? require\('\.\/lib\/rig-utils'\)\.ssbSideband\(tuneFreqHz\) : mode;/.test(main));
   assert.ok(!/const resolvedMode = \(mode \|\| ''\)\.toUpperCase\(\) === 'SSB' \? \(tuneFreqHz >= 10000000/.test(main));
 });

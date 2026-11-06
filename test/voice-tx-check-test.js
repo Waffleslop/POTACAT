@@ -2,6 +2,7 @@
 // thecoffeepotcodger FT-710; KJ5CHK IC-7300 MK II): a voice over with 0 W and
 // no ALC gets one hint naming the radio's audio-input menu.
 'use strict';
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -33,13 +34,13 @@ t('a radio with a wattmeter and no ALC reading still gets the hint on 0 W', () =
   assert.ok(decideVoiceTxHint({ ...silent, brand: 'Kenwood', alcEvents: 0 }));
 });
 t('main.js: voice key-downs on a CAT radio are measured and judged at key-up; data routes are not', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
   assert.ok(/if \(!state\) voiceTxCheckEnd\(\);\n(\s*\/\/[^\n]*\n)*\s*else if \(!isFlexRig && cat && cat\.connected && !opts\.emission/.test(main));
   assert.ok(/if \(_voiceTxCheck\) \{\n    _voiceTxCheck\.fwdEvents\+\+;/.test(main), 'power feeds it');
   assert.ok(/_voiceTxCheck\.alcEvents\+\+;/.test(main), 'ALC feeds it');
   assert.ok(main.includes("remoteServer.sendToClient({ type: 'voice-tx-hint', key: d.key, text: d.hint })"));
   const P = require('../lib/echocat-protocol');
-  assert.ok(JSON.stringify(P).includes('voice-tx-hint') || fs.readFileSync(path.join(__dirname, '..', 'lib', 'echocat-protocol.js'), 'utf8').includes("'voice-tx-hint'"));
+  assert.ok(JSON.stringify(P).includes('voice-tx-hint') || readSrc(path.join(__dirname, '..', 'lib', 'echocat-protocol.js')).includes("'voice-tx-hint'"));
 });
 console.log('\nvoice TX check: ' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

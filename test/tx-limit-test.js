@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // The stuck-TX limit covers every key-down POTACAT starts (jcoreyc FT-710:
 // keyed at 0 W in DATA-U with no ECHOCAT open until POTACAT was closed).
 // lib/tx-limit.js holds the limits and the timer; main.js arms it in
@@ -86,7 +87,7 @@ test('a same-kind arm after a missed release restarts the clock; only a still-ke
 });
 
 test('main tells the limit whether PTT was already asserted', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const src = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(/new TxLimitLib\.TxLimit\(\{[^}]*isKeyed: \(\) => !!_remoteTxState/.test(src));
 });
 
@@ -102,7 +103,7 @@ test('an unsolicited TX report names the PTT lines', () => {
   assert.ok(/did not key it/.test(s) && /DTR low, RTS HIGH/.test(s) && /14\.0740 MHz/.test(s), s);
 });
 
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const main = readSrc(path.join(__dirname, '..', 'main.js'));
 test('main arms the limit for every PTT POTACAT asserts and disarms it on release', () => {
   const i = main.indexOf('function handleRemotePtt(state, opts = {}) {');
   const body = main.slice(i, main.indexOf('\nfunction _isEffectivelyTransmitting', i));

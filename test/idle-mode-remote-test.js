@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 // Idle Mode over ECHOCAT (capability 'idle-mode', K3SBP 2026-10-19): one
 // per-field setter (set-idle-rx), an echo after every set, owner-only, and
 // JTTY as an idle program that follows the sun (20 m day / 40 m night) with a
@@ -8,10 +9,10 @@ const path = require('path');
 const assert = require('assert');
 
 const root = path.join(__dirname, '..');
-const MAIN = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
-const RS = fs.readFileSync(path.join(root, 'lib', 'remote-server.js'), 'utf8');
-const POP = fs.readFileSync(path.join(root, 'renderer', 'jtcat-popout.js'), 'utf8');
-const WEB = fs.readFileSync(path.join(root, 'renderer', 'remote.js'), 'utf8');
+const MAIN = readSrc(path.join(root, 'main.js'));
+const RS = readSrc(path.join(root, 'lib', 'remote-server.js'));
+const POP = readSrc(path.join(root, 'renderer', 'jtcat-popout.js'));
+const WEB = readSrc(path.join(root, 'renderer', 'remote.js'));
 const { MESSAGES } = require('../lib/echocat-protocol.js');
 
 let pass = 0, fail = 0;

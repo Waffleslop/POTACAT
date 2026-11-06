@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // SSTV help and reports (Casey 2026-09-30: pictures saying "UR P4"/"UR P5"
 // confuse newcomers). lib/sstv-help.js, the reply bar's report box, the
 // {RPT} placeholder, and the calling-frequency sidebands.
@@ -11,7 +12,7 @@ const H = require('../lib/sstv-help');
 const T = require('../lib/sstv-templates');
 
 const ROOT = path.join(__dirname, '..');
-const R = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(ROOT, f)).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

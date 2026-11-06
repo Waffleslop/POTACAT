@@ -1,6 +1,7 @@
 // An empty Propagation table says WHY it is empty (lib/prop-empty-state.js).
 // K3SBP 2026-09-23: a blank table during a PSKReporter HTTP 526 outage looked
 // exactly like "nobody heard you".
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -57,7 +58,7 @@ t('RBN reconnecting is said; PSKReporter hidden drops its sentence', () => {
 
 t('both surfaces load the module and render the empty row', () => {
   const root = path.join(__dirname, '..');
-  const read = (f) => fs.readFileSync(path.join(root, f), 'utf8');
+  const read = (f) => readSrc(path.join(root, f));
   assert.match(read('renderer/index.html'), /lib\/prop-empty-state\.js/);
   assert.match(read('renderer/prop-popout.html'), /lib\/prop-empty-state\.js/);
   assert.match(read('renderer/app.js'), /sorted\.length === 0\) \{ renderRbnEmptyRow\(\)/);
@@ -69,7 +70,7 @@ t('marker layers are featureGroups (the night overlay calls bringToFront)', () =
   // A layerGroup has no bringToFront: the throw aborted initRbnMap / initMap on
   // the first open, so the table never rendered and the age tick never armed.
   const root = path.join(__dirname, '..');
-  const read = (f) => fs.readFileSync(path.join(root, f), 'utf8');
+  const read = (f) => readSrc(path.join(root, f));
   assert.match(read('renderer/app.js'), /rbnMarkerLayer = L\.featureGroup\(\)/);
   assert.match(read('renderer/prop-popout.js'), /markerLayer = L\.featureGroup\(\)/);
 });

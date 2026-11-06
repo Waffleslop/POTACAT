@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Design-system themes on the desktop (docs/design-system-plan.md Phase 3):
 // lib/app-theme.js decides the attributes, every window gets them at load
 // (themeQuery -> popout-theme-bootstrap.js) and on change (broadcastAppTheme),
@@ -16,7 +17,7 @@ function test(name, fn) {
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
 const root = path.join(__dirname, '..');
-const read = (p) => fs.readFileSync(path.join(root, p), 'utf8').replace(/\r\n/g, '\n');
+const read = (p) => readSrc(path.join(root, p)).replace(/\r\n/g, '\n');
 
 console.log('app theme');
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // AE5JE 2026-10-26 (Bitdefender): audio devices and window positions forgot
 // themselves every launch. Two fixes:
 //  - lib/audio-device-heal.js: a saved device whose ID changed is followed by
@@ -12,7 +13,7 @@ const fs = require('fs');
 const path = require('path');
 const H = require('../lib/audio-device-heal');
 const S = require('../lib/settings-save-status');
-const read = (...p) => fs.readFileSync(path.join(__dirname, '..', ...p), 'utf8');
+const read = (...p) => readSrc(path.join(__dirname, '..', ...p));
 
 let passed = 0, failed = 0;
 function test(name, fn) {

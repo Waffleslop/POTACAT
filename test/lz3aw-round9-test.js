@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // LZ3AW round 9 (on 1.10.25): "Paddle on WEB - now, when apply dot or dash i
 // hear one of them and the radio stucks on TX continuously, transmitting dots
 // or dashes, but without local side tone. I need to press STOP button to
@@ -24,7 +25,7 @@ let passed = 0, failed = 0;
 const cases = [];
 function test(name, fn) { cases.push([name, fn]); }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 
 function server() {
   const rs = new RemoteServer();

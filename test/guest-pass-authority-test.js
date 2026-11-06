@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // A Guest Pass is default-deny (adversarial review of 1.13.9, 2026-11-03;
 // potacat-meta work/in-progress/guest-pass-authority-fixes.md, part A).
 //   - lib/guest-pass-authority.js: the pure sets; every demux case label is in
@@ -25,9 +26,9 @@ function test(name, fn) {
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e && e.message)); }
 }
 const root = path.join(__dirname, '..');
-const rsSrc = fs.readFileSync(path.join(root, 'lib', 'remote-server.js'), 'utf8');
-const mainSrc = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
-const webSrc = fs.readFileSync(path.join(root, 'renderer', 'remote.js'), 'utf8');
+const rsSrc = readSrc(path.join(root, 'lib', 'remote-server.js'));
+const mainSrc = readSrc(path.join(root, 'main.js'));
+const webSrc = readSrc(path.join(root, 'renderer', 'remote.js'));
 
 // Every `case '<type>':` label of the C2S demux (switch (msg.type) … the
 // Guest Pass auth section that follows the handler).

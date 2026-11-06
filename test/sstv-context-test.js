@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // The SSTV window's template context ({MYCALL} {GRID} {PARK} {NAME} {RIG},
 // the typed call) comes from main's sstv-context handler, which called the
 // RENDERER's primaryParkRef()/primaryParkName(): a ReferenceError on every
@@ -9,7 +10,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
 const at = main.indexOf("ipcMain.handle('sstv-context', () => {");
 assert.ok(at > 0, 'handler found');
 const body = main.slice(at, main.indexOf('\n  });\n', at)).replace(/\/\/.*$/gm, '');

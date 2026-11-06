@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 // The PSKReporter map keeps its reports PER BAND, so a busy band can never
 // evict another band's reports (K3SBP 2026-10-19: "40m reports but not 20m"
 // while 104 stations were hearing him on 20m — one shared cap of 500 plus a
@@ -6,7 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
 const i = main.indexOf("pskrMap.on('spot', (raw) => {");
 const block = main.slice(i, i + 4000);
 assert.ok(/const PSKR_MAP_PER_BAND_CAP = 500;/.test(main));

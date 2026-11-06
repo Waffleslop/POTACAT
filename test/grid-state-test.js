@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // A decode's state from its grid (lib/grid-state.js + assets/geo/grid-states.json)
 // and the Hunt: Wanted states rule. Run: node test/grid-state-test.js
 const assert = require('assert');
@@ -15,7 +16,7 @@ function test(name, fn) {
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
 
-const TABLE = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'assets', 'geo', 'grid-states.json'), 'utf8'));
+const TABLE = JSON.parse(readSrc(path.join(__dirname, '..', 'assets', 'geo', 'grid-states.json')));
 
 test('the table names every US state and Canadian province; the big ones have CERTAIN grids', () => {
   const all = new Set();
@@ -95,25 +96,25 @@ test('matchesHuntFilter wanted-state: a CQ with stateWanted, nothing else', () =
 });
 
 test('wiring: both decode sites enrich, Hunt reads the same rule, both surfaces offer the option and draw the badge, assets ship', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.strictEqual((main.match(/^\s+workedOverlayEnrichDecode\(r, uc, currentBand, /gm) || []).length, 2, 'single- and multi-slice decode sites');
   assert.ok(/GridState\.huntMayAnswer\(d\.state, /.test(main));
   assert.ok(/matchesHuntFilter\(d\.text, filterMode, \{[^}]*stateWanted,/.test(main), 'stateWanted reaches matchesHuntFilter');
   assert.ok(main.includes("require('./lib/grid-state')"));
   assert.ok(/qrz\.cached\(call\)/.test(main), 'cache first');
-  const popHtml = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-popout.html'), 'utf8');
-  const popJs = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-popout.js'), 'utf8');
-  const remHtml = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote.html'), 'utf8');
-  const remJs = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote.js'), 'utf8');
+  const popHtml = readSrc(path.join(__dirname, '..', 'renderer', 'jtcat-popout.html'));
+  const popJs = readSrc(path.join(__dirname, '..', 'renderer', 'jtcat-popout.js'));
+  const remHtml = readSrc(path.join(__dirname, '..', 'renderer', 'remote.html'));
+  const remJs = readSrc(path.join(__dirname, '..', 'renderer', 'remote.js'));
   assert.ok(popHtml.includes('<option value="wanted-state"') && remHtml.includes('<option value="wanted-state"'));
   assert.ok(popHtml.includes('.jp-badge-state') && popJs.includes('jp-badge-state') && popJs.includes('d.wantedState'));
-  assert.ok(fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote.css'), 'utf8').includes('.ft8-badge-state') && remJs.includes('ft8-badge-state') && remJs.includes('d.wantedState'));
-  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  assert.ok(readSrc(path.join(__dirname, '..', 'renderer', 'remote.css')).includes('.ft8-badge-state') && remJs.includes('ft8-badge-state') && remJs.includes('d.wantedState'));
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
   assert.ok(app.includes('function spotWantedStates(') && app.includes('ref-state-pill'));
-  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  const pkg = JSON.parse(readSrc(path.join(__dirname, '..', 'package.json')));
   assert.ok(pkg.build.files.includes('assets/geo/**/*'), 'geo assets are packaged');
   for (const f of ['countries.json', 'states.json', 'grid-states.json', 'LICENSE']) assert.ok(fs.existsSync(path.join(__dirname, '..', 'assets', 'geo', f)), f);
-  const states = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'assets', 'geo', 'states.json'), 'utf8'));
+  const states = JSON.parse(readSrc(path.join(__dirname, '..', 'assets', 'geo', 'states.json')));
   const codes = new Set(states.features.map((f) => f.properties.cc + '-' + f.properties.code));
   for (const s of WR.US_STATES) assert.ok(codes.has('US-' + s.code), 'polygon for ' + s.code);
   for (const s of WR.CA_PROVINCES) assert.ok(codes.has('CA-' + s.code), 'polygon for ' + s.code);

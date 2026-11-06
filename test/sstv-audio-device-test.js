@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // SSTV listens to, and transmits through, the RADIO's audio device (My Rigs >
 // Audio), like FT8 and ECHOCAT. It used to default to the computer's default
 // device, so on a USB-codec or SignaLink station it decoded the laptop mic
@@ -16,7 +17,7 @@ function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 const DEVICES = [
   { deviceId: 'mic', label: 'Laptop Microphone' },
   { deviceId: 'codec', label: 'USB Audio CODEC' },

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // The phone's activation recap asks the desktop to place contacts; the reply
 // now carries what the LOG says (state, grid, band), never a call-area guess
 // as a state (NA4DQ 2026-10-24). Run: node test/activation-map-data-test.js
@@ -44,7 +45,7 @@ test('multi-park refs: a comma list in MY_SIG_INFO matches its park', () => {
 });
 
 test('wiring: the reply places by a logged grid first and never takes a state from the call area', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
   const at = main.indexOf("remoteServer.on('get-activation-map-data'");
   const h = main.slice(at, main.indexOf("remoteServer.on('get-all-qsos'", at));
   assert.ok(/ActivationMapData\.logDetailsFor\(parseAllRawQsos\(logPath\)/.test(h));

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Hidden and skipped spots, one desktop-owned list for every surface (K8IKO
 // 2026-10-01: "If I hide or skip a station on any device, sync that status
 // across all POTACAT/ECHOCAT devices"). Wire contract: potacat-app
@@ -13,7 +14,7 @@ const S = require('../lib/spot-hides');
 const { RemoteServer } = require('../lib/remote-server');
 const P = require('../lib/echocat-protocol');
 
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

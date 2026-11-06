@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // KF0TDB 2026-10-02 (FT-991A): Test Connection passed, then every click said
 // "Radio not connected - check the USB/serial link (Settings > My Rigs)".
 // Each test disconnects the live link to free the port and never put it back.
@@ -8,7 +9,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

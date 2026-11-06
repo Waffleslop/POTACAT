@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 // Rig presets (lib/rig-presets.js): named TX power / RF gain / AF gain sets,
 // applied by a tap or when the rig's mode moves into an assigned family.
 const assert = require('assert');
@@ -128,7 +129,7 @@ test('a preset saved for another rig is not applied on this one', () => {
 });
 
 console.log('rig-presets: main.js wiring guards');
-const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const mainSrc = readSrc(path.join(__dirname, '..', 'main.js'));
 test('sendCatMode hands every mode to the preset decision (the one mode sink)', () => {
   const i = mainSrc.indexOf('function sendCatMode(mode)');
   assert.ok(i > 0);
@@ -156,7 +157,7 @@ test('rigPresets and rigPresetByMode are machine-global settings', () => {
 });
 test('presets reach every client at connect and on change', () => {
   assert.ok(/remoteServer\.sendRigPresets\(/.test(mainSrc));
-  const srv = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8');
+  const srv = readSrc(path.join(__dirname, '..', 'lib', 'remote-server.js'));
   assert.ok(/case 'apply-rig-preset'/.test(srv) && /case 'rig-presets-update'/.test(srv));
   assert.ok(/'rig-presets'/.test(srv.slice(srv.indexOf('capabilities: ['), srv.indexOf('capabilities: [') + 4000)), 'hello advertises rig-presets');
   const proto = require('../lib/echocat-protocol');
@@ -234,9 +235,9 @@ test('wiring: band changes reach the decision from the one frequency sink; rules
   assert.ok(/rigPresetOnBand\(\)/.test(mainSrc.slice(i, i + 3000)), 'sendCatFrequency calls rigPresetOnBand');
   assert.ok(/'rigPresetRules'/.test(mainSrc.slice(mainSrc.indexOf('const GLOBAL_KEYS = new Set(['), mainSrc.indexOf(']);', mainSrc.indexOf('const GLOBAL_KEYS = new Set([')))));
   assert.ok(/prevMatchId: _rigPresetMatchId/.test(mainSrc) && /rules: settings\.rigPresetRules/.test(mainSrc));
-  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
   assert.ok(/rigPresetsMount\(document\.getElementById\('rig-preset-root'\)\);/.test(app) && /rigPresetsMount\(document\.getElementById\('settings-preset-root'\)\);/.test(app));
-  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  const html = readSrc(path.join(__dirname, '..', 'renderer', 'index.html'));
   assert.ok(html.includes('data-tab="profiles">Profiles</button>') && html.includes('data-settings-tab="profiles"') && html.includes('id="settings-preset-root"'));
   const proto = require('../lib/echocat-protocol');
   assert.ok(proto.isKnownType('rig-presets'));
@@ -254,7 +255,7 @@ test('Monitor (K8IKO): MON on/off and level are preset fields, sent only to a ri
   assert.strictEqual(RP.describePreset(p, { mon: true, monLevel: true }).text, 'MON off · MON 40%');
   assert.deepStrictEqual(RP.describePreset(p, {}).skipped, ['MON off', 'MON 40%']);
   assert.strictEqual(RP.sanitizePresets([{ name: 'x', monLevel: 150 }])[0].monLevel, undefined);
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(/case 'set-mon': \{/.test(main) && /case 'set-mon-level': \{/.test(main), 'the dispatcher verbs the fields name');
 });
 
@@ -273,10 +274,10 @@ test('NB and NR levels (N0KAH, FTX-1): the radio\'s own steps, sent after the sw
   const snap = RP.snapshotPreset('Now', { nbLevel: 3, dnrLevel: 7 });
   assert.strictEqual(snap.nbLevel, 3);
   assert.strictEqual(snap.dnrLevel, 7);
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(/case 'set-nb-level': \{/.test(main) && /case 'set-dnr-level': \{/.test(main) && /case 'set-nr-level': \{/.test(main));
   assert.ok(/nbLevel: _currentNbLevel,/.test(main) && /dnrLevel: _currentDnrLevel,/.test(main), '"Use current" reads them from the rig state');
-  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
   assert.ok(/const top = f\.maxCap && caps\[f\.maxCap\] != null \? caps\[f\.maxCap\] : f\.max;/.test(app) && /ctl\.max = top;/.test(app), 'the editor caps the input at the radio\'s top step');
   const fn = main.indexOf('function rigPresetCaps()');
   const body = main.slice(fn, main.indexOf('\n}\n', fn));
@@ -295,9 +296,9 @@ test('a preamp ladder is a step in a preset, offered instead of the switch (N0KA
   assert.deepStrictEqual(RP.presetCommands(p, ladderCaps), [{ action: 'set-preamp', value: 2, field: 'preampStep' }]);
   assert.strictEqual(RP.describePreset(p, ladderCaps).text, 'Preamp AMP2');
   assert.strictEqual(RP.sanitizePresets([{ name: 'x', preampStep: 'AMP2' }])[0].preampStep, undefined, 'junk is dropped');
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(/f\.kind === 'step' && Array\.isArray\(caps\[f\.cap\]\)\) out\[f\.cap\] = caps\[f\.cap\]\.map/.test(main), 'rigPresetCaps carries the ladder');
-  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
   assert.ok(/f\.kind === 'step'\) \{\s*ctl = document\.createElement\('select'\);/.test(app), 'the editor offers the steps');
   assert.ok(/return !\(f\.notCap && caps\[f\.notCap\]\);/.test(app), 'and the same availability rule');
 });
@@ -321,7 +322,7 @@ test('a digital engine never blocks moving INTO the digital preset', () => {
   assert.strictEqual(d.apply.id, 'dig');
 });
 test('main passes the engine state and logs a held reading with the time since the last transmission', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(/digitalEngine: !!ft8Engine,/.test(main));
   assert.ok(/if \(d\.reason === 'digital-engine'\) \{[\s\S]{0,700}s after the last transmission[\s\S]{0,300}no SSB power was applied/.test(main));
   assert.ok(/ft8Engine\.on\('tx-end', \(\) => \{\s*console\.log\('\[JTCAT\] TX end — PTT off'\);\s*_jtcatLastTxEndMs = Date\.now\(\);/.test(main));

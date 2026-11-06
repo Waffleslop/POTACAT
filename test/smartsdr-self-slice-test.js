@@ -9,6 +9,7 @@
 // replies and status lines are fed through `_handleLine`.
 // Run: node test/smartsdr-self-slice-test.js
 'use strict';
+const { readSrc } = require('./_src');
 
 const assert = require('assert');
 const fs = require('fs');
@@ -154,7 +155,7 @@ function createsSent(sent) { return sent.filter((s) => /\|slice create/.test(s))
 
   console.log('main.js wiring (source guards)');
   {
-    const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+    const src = readSrc(path.join(__dirname, '..', 'main.js'));
     check(src.includes('smartSdr.setSliceSupplier(flexSelfSliceWanted)'), 'main supplies the dial for a self-created slice');
     check(src.includes("smartSdr.on('slice-created'") && src.includes("smartSdr.on('slice-create-failed'") && src.includes("smartSdr.on('slice-lost'"), 'main logs create / refusal / loss');
     const guiReady = src.slice(src.indexOf("smartSdr.on('gui-ready'"), src.indexOf("smartSdr.on('gui-mode'"));

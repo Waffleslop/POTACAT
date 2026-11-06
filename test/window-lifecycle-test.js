@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * POTACAT has to actually exit when you close it.
  *
@@ -26,7 +27,7 @@ const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
 
-const SRC = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const SRC = readSrc(path.join(__dirname, '..', 'main.js'));
 
 let pass = 0, fail = 0;
 function test(name, fn) {

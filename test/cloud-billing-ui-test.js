@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
 'use strict';
+const { readSrc } = require('./_src');
 //
 // lib/cloud-billing-ui.js — Stripe checkout, billing notices and the Cloud
 // prompt (2026-10-14; cloud handoffs BILLING_UX + CLOUD_PROMPT).
@@ -24,7 +25,7 @@ function assertEq(actual, expected, msg) {
   assert(JSON.stringify(actual) === JSON.stringify(expected), `${msg} (expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)})`);
 }
 function section(name) { console.log(`\n=== ${name} ===`); }
-const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
+const read = (p) => readSrc(path.join(__dirname, '..', p));
 
 const NOW = Date.parse('2026-10-14T12:00:00Z');
 const day = 86400000;
@@ -189,8 +190,8 @@ section('Where a sign-up started');
 {
   const fs = require('fs');
   const path = require('path');
-  const ipc = fs.readFileSync(path.join(__dirname, '../lib/cloud-ipc.js'), 'utf8');
-  const app = fs.readFileSync(path.join(__dirname, '../renderer/app.js'), 'utf8');
+  const ipc = readSrc(path.join(__dirname, '../lib/cloud-ipc.js'));
+  const app = readSrc(path.join(__dirname, '../renderer/app.js'));
   const m = /const SIGNUP_ENTRIES = \[([^\]]*)\]/.exec(ipc);
   assert(m, 'the vocabulary is declared');
   const known = m[1].split(',').map((x) => x.trim().replace(/'/g, ''));

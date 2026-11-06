@@ -5,6 +5,7 @@
 // 8010. Drives the probe against a silent listener the way main.js does.
 // Run: node test/direwolf-agw-probe-test.js
 'use strict';
+const { readSrc } = require('./_src');
 
 const assert = require('assert');
 const fs = require('fs');
@@ -101,7 +102,7 @@ function waitLikeMain(port, { seconds = 15 } = {}) {
   });
 
   await test('main.js: spawnDirewolf probes through the module, and no bare net.* without a local require', () => {
-    const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+    const main = readSrc(path.join(__dirname, '..', 'main.js'));
     const i = main.indexOf('async function spawnDirewolf(');
     const body = main.slice(i, main.indexOf('\nfunction killArdop', i));
     assert.ok(/DirewolfProcess\.probeAgwPort\(/.test(body));

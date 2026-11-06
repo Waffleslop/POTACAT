@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // One shack per POTACAT Cloud address (KQ5O, three shacks on kq5o.potacat.com,
 // 2026-11-03). The real CloudTunnelManager and the real CloudSyncClient against
 // a fake cloudlog over HTTP, with a fake cloudflared, so the 409 / 404 / body
@@ -245,14 +246,14 @@ test('Off as the last shack removes the address, and "Remove my Cloud address" f
 });
 
 test('wiring: main asks with three buttons, notices reach the window and ECHOCAT, Remove is confirmed', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
   assert.ok(/cloudTunnel\.on\('conflict', \(c\) => \{ cloudTunnelAskConflict\(c\)/.test(main));
   assert.ok(/dialog\.showMessageBox\(win, \{ type: 'question', title: d\.title[\s\S]{0,300}resolveConflict\(d\.choices\[r\.response\] \|\| 'cancel'\)/.test(main));
   assert.ok(/remoteServer\.sendToClient\(\{ type: 'cloud-shack-notice', kind, text \}\)/.test(main));
   assert.ok(/ipcMain\.handle\('cloud-tunnel-remove-address'[\s\S]{0,1500}buttons: \['Remove the address', 'Cancel'\][\s\S]{0,300}removeAddress\(\)/.test(main));
-  const P = fs.readFileSync(path.join(__dirname, '..', 'lib', 'echocat-protocol.js'), 'utf8');
+  const P = readSrc(path.join(__dirname, '..', 'lib', 'echocat-protocol.js'));
   assert.ok(/'cloud-shack-notice': \{ dir: Dir\.S2C, feature: 'cloud'/.test(P));
-  const web = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote.js'), 'utf8');
+  const web = readSrc(path.join(__dirname, '..', 'renderer', 'remote.js'));
   assert.ok(/case 'cloud-shack-notice':\s*\/\/[^\n]*\n\s*showToast\(msg\.text/.test(web));
 });
 

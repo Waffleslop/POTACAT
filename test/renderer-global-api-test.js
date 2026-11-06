@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Every window's preload exposes `window.api` through contextBridge, a
 // global no classic script may redeclare: lib/jtcat-snr-floor.js had a
 // top-level `const api`, a SyntaxError in the JTCAT window that dropped the
@@ -14,13 +15,13 @@ const renderer = path.join(__dirname, '..', 'renderer');
 let checked = 0;
 const bad = [];
 for (const html of fs.readdirSync(renderer).filter((f) => f.endsWith('.html'))) {
-  const src = fs.readFileSync(path.join(renderer, html), 'utf8');
+  const src = readSrc(path.join(renderer, html));
   for (const m of src.matchAll(/<script src="([^"]+\.js)"/g)) {
     if (/node_modules/.test(m[1])) continue;
     const file = path.join(renderer, m[1]);
     if (!fs.existsSync(file)) continue;
     checked++;
-    const js = fs.readFileSync(file, 'utf8');
+    const js = readSrc(file);
     // Column 0 only: a declaration inside a function or an IIFE is scoped.
     if (/^(?:const|let|class)\s+api\b/m.test(js)) bad.push(`${html} -> ${m[1]}`);
   }

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // The JTCAT map pop-out draws the QSO arcs the JTCAT window's inline map does
 // (TacticalIndex 2026-10-26: the pop-out had no "transmission routes"). It
 // never registered our own station, so every arc to or from us returned early.
@@ -49,7 +50,7 @@ function harness() {
   };
   sandbox.window.window = sandbox.window;
   vm.createContext(sandbox);
-  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-map-popout.js'), 'utf8'), sandbox);
+  vm.runInContext(readSrc(path.join(__dirname, '..', 'renderer', 'jtcat-map-popout.js')), sandbox);
   return { h, polylines };
 }
 
@@ -71,7 +72,7 @@ function harness() {
     assert.strictEqual(polylines.length, 1);
   });
   await test('the pop-out loads the shared CQ parser', () => {
-    const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-map-popout.html'), 'utf8');
+    const html = readSrc(path.join(__dirname, '..', 'renderer', 'jtcat-map-popout.html'));
     assert.ok(/<script src="jtcat-parser\.js"><\/script>\s*\n\s*<script src="jtcat-map-popout\.js">/.test(html));
   });
   console.log(`\n${passed} passed, ${failed} failed`);

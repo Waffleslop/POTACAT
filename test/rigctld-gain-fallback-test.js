@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Preamp/ATT writes on a rigctld server that names no ladder in dump_caps
 // (GitHub #82, GoNoGoTest: IC-7300 through wfview). wfview takes preamp as
 // its own step numbers (0/1/2) and ATT as 20; it RPRT-rejects hamlib's dB
@@ -84,10 +85,10 @@ test('a real hamlib IC-7300 (10 dB accepted) is unchanged', () => {
 // GitHub #85: a spot click in the same mode family re-sent the width POTACAT
 // last read back; an FTDX-1200 rejected "2450" and landed on 2500 every time.
 test('a same-family tune sends no filter width (the operator\'s stays)', () => {
-  const main = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  const main = readSrc(require('path').join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
   assert.ok(/  if \(sameCategory\) \{[\s\S]{0,700}?filterWidth = 0;\n  \} else if \(m === 'CW'\) \{/.test(main));
   assert.ok(!/if \(sameCategory && _currentFilterWidth > 0\)/.test(main));
-  const rc = require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'rig-controller.js'), 'utf8');
+  const rc = readSrc(require('path').join(__dirname, '..', 'lib', 'rig-controller.js'));
   assert.ok(/if \(filterWidth > 0\) \{/.test(rc), 'a zero width sends nothing');
 });
 

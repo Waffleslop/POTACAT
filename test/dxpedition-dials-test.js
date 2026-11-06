@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // DXpedition FT8/FT4 dials in JTCAT (level_death 2026-10-31): the feed
 // Worker parses the dials an announcement gives, the desktop offers the
 // ones on the air today in the JTCAT window's band menu.
@@ -9,7 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const { jtcatDxpeditionDials } = require('../lib/dxpedition-dials');
-const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
+const read = (p) => readSrc(path.join(__dirname, '..', p));
 
 let passed = 0, failed = 0;
 let chain = Promise.resolve();

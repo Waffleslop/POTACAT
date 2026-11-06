@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // GitHub #118 (df1vb, 1.13.8/1.13.9): the SDR's volume became the VOL knob,
 // which lives in the meter block, off by default. The SDR card's own Volume
 // slider must stand in whenever an SDR plays and VOL is not on screen.
@@ -7,7 +8,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'vfo-popout.html'), 'utf8');
+const html = readSrc(path.join(__dirname, '..', 'renderer', 'vfo-popout.html'));
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

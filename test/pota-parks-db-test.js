@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * Which country's park list answers a lookup (OG3E, Discord 2026-11-01:
  * Activator mode "cant find any parks", then even K-TEST failed).
@@ -55,7 +56,7 @@ test('K-TEST and US-TEST are the practice park, not a lookup', () => {
   assert.ok(!P.isTestRef('FI-0003') && !P.isTestRef('TEST'));
 });
 
-const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const MAIN = readSrc(path.join(__dirname, '..', 'main.js'));
 test('get-park answers the practice park and loads the reference\'s own country first', () => {
   const at = MAIN.indexOf("ipcMain.handle('get-park'");
   const body = MAIN.slice(at, at + 600);

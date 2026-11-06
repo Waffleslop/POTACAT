@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // ECHOCAT Web: the radio's MIC GAIN as a slider (K6RBJ: "a Mic Gain slider
 // for ECHOCAT ... I could dump my custom commands"). The app had it; the web
 // client did not. Run: node test/echocat-web-micgain-test.js
@@ -13,9 +14,9 @@ function test(name, fn) {
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
 const root = path.join(__dirname, '..');
-const html = fs.readFileSync(path.join(root, 'renderer', 'remote.html'), 'utf8');
-const js = fs.readFileSync(path.join(root, 'renderer', 'remote.js'), 'utf8');
-const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
+const html = readSrc(path.join(root, 'renderer', 'remote.html'));
+const js = readSrc(path.join(root, 'renderer', 'remote.js'));
+const main = readSrc(path.join(root, 'main.js'));
 
 console.log('echocat web mic gain');
 

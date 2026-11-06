@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 // The JTCAT pop-out's map splitter must size the PSK31 and JTTY panes too
 // (Chris / W7RTA 2026-10-17: in PSK31 or JTTY the map covered almost the
 // whole window and dragging the splitter barely moved it). The keyboard panes
@@ -7,8 +8,8 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
-const JS = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-popout.js'), 'utf8').replace(/\r\n/g, '\n');
-const HTML = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-popout.html'), 'utf8').replace(/\r\n/g, '\n');
+const JS = readSrc(path.join(__dirname, '..', 'renderer', 'jtcat-popout.js')).replace(/\r\n/g, '\n');
+const HTML = readSrc(path.join(__dirname, '..', 'renderer', 'jtcat-popout.html')).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // A throw from a Winlink session's sockets or child processes ends that
 // session with the error on screen instead of POTACAT's crash dialog
 // (artificialjump, packet Send/Receive, 2026-10-31).
@@ -31,7 +32,7 @@ test('a throw from anywhere else is not swallowed during a session', () => {
   assert.ok(!isWinlinkSessionFault(null, { sessionActive: true }));
 });
 test('main.js ends the session in its uncaughtException handler, before the crash dialog', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   const at = main.indexOf('_lateExceptionHandlerActive = true;');
   const h = main.slice(at, main.indexOf("app.on('window-all-closed'", at));
   const guard = h.indexOf('isWinlinkSessionFault(err, { sessionActive: winlinkSessionActive() })');

@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 // The in-window Log dialog looks up QRZ whenever the callsign is edited —
 // including over a spot's prefilled call (a multi-op activation is spotted
 // under one call; the op actually worked has their own name). The old guard
@@ -6,7 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
-const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
 const at = app.indexOf("logCallsign.addEventListener('input', () => {");
 assert.ok(at > 0, 'handler found');
 const body = app.slice(at, app.indexOf('}, 500);', at));

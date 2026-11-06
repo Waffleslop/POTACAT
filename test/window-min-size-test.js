@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Every visible window has a minimum size (N0KAH 2026-10-24: the SSTV, VFO and
 // main windows could be shrunk to bare window controls on a Mac). Hidden helper
 // windows and offscreen renders are exempt.
@@ -7,7 +8,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const main = readSrc(path.join(__dirname, '..', 'main.js'));
 
 let passed = 0, failed = 0;
 function test(name, fn) {

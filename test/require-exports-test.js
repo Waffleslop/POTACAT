@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Every name main.js destructures out of a lib module must actually be
 // exported by that module.
 //
@@ -20,7 +21,7 @@ const ENTRY = ['main.js', 'preload.js'];
 let checked = 0, fail = 0;
 
 for (const entry of ENTRY) {
-  const src = fs.readFileSync(path.join(root, entry), 'utf8');
+  const src = readSrc(path.join(root, entry));
   const re = /^\s*const \{([^}]*)\} = require\('(\.\/lib\/[^']+)'\);/gm;
   let m;
   while ((m = re.exec(src))) {

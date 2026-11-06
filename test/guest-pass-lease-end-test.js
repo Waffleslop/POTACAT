@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * A Guest Pass ends HARD (docs/share-my-rig-lease-plan.md, phase A; Casey
  * 2026-10-27). Until now the end of a pass sent `pass-ended` and nothing
@@ -89,8 +90,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   });
 
   console.log('main.js wiring');
-  const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
-  const rsSrc = fs.readFileSync(path.join(ROOT, 'lib/remote-server.js'), 'utf8');
+  const main = readSrc(path.join(ROOT, 'main.js'));
+  const rsSrc = readSrc(path.join(ROOT, 'lib/remote-server.js'));
   check('the ended handler stops every transmitter before the guest is told', () => {
     const i = main.indexOf("passEnforcement.on('ended'");
     const b = main.slice(i, i + 1200);

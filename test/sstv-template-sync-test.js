@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // SSTV templates follow the account across machines (GET/PUT /v1/sstv/templates,
 // potacat-cloudlog CLOUD_TO_DESKTOP_HANDOFF_2026-09-29_SSTV_TEMPLATES.md):
 // identity stamping, the merge rule every client shares, size checks, the
@@ -11,7 +12,7 @@ const path = require('path');
 require('./ws-stub-if-missing');
 const S = require('../lib/sstv-template-sync');
 
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 const cases = [];
 function test(name, fn) { cases.push([name, fn]); }
 let idN = 0;

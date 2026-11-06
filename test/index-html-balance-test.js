@@ -1,11 +1,12 @@
 'use strict';
+const { readSrc } = require('./_src');
 // renderer/index.html must stay tag-balanced: one stray </div> in the Winlink
 // Settings block (10423e6e) collapsed the whole Settings dialog — the sidebar
 // vanished and the WebSDR fieldset sat where the menu belongs (K3SBP 2026-10-23).
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
-const src = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+const src = readSrc(path.join(__dirname, '..', 'renderer', 'index.html'));
 const TAGS = new Set(['div', 'fieldset', 'details', 'section', 'label', 'span', 'select', 'form', 'table', 'ul', 'ol']);
 const stack = [];
 const bad = [];

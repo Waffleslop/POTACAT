@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // The daily N3FJP re-read re-imported contacts the operator had deleted in
 // POTACAT (review of the 1.13.11 chain). A delete of an N3FJP-imported contact
 // is now remembered (lib/n3fjp-deleted.js, from the log sink every delete
@@ -18,7 +19,7 @@ function test(name, fn) {
   try { fn(); pass++; console.log('  ok  ' + name); }
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.stack || e.message)); }
 }
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
 const n3 = (call, extra) => Object.assign({ CALL: call, QSO_DATE: '20261025', TIME_ON: '120000', BAND: '20m', MODE: 'FT8', APP_POTACAT_IMPORTED_FROM: 'N3FJP' }, extra || {});
 
 test('a deleted N3FJP import is remembered from a real log delete, and the next pull leaves it out', () => {

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // og3e (activator mode, Mac, 2026-11-04): WWFF and SOTA references showed
 // "Not in parks DB … check for typos", and the text ran under the grid box.
 // Only POTA's park lists are loaded, so only POTA references are checked.
@@ -15,7 +16,7 @@ function test(name, fn) {
   try { fn(); pass++; console.log('  ok  ' + name); }
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.stack || e.message)); }
 }
-const read = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+const read = (f) => readSrc(path.join(__dirname, '..', f));
 
 test('og3e\'s WWFF and SOTA references are never judged against the parks list; a POTA one still is', () => {
   const refs = normalizeParkRefs([{ ref: 'OHFF-0001', name: '' }, { ref: 'OH/KS-001', name: '' }, { ref: 'US-1234', name: '' }]);

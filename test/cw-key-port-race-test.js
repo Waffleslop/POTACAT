@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * CW Key Port replaced while it is opening (stein_12464, Discord 2026-11-01).
  * A settings save that changed the key port reopened it (connectCwKeyPort,
@@ -24,7 +25,7 @@ function test(name, fn) {
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
 
-const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const MAIN = readSrc(path.join(__dirname, '..', 'main.js'));
 function bodyOf(name) {
   const start = MAIN.indexOf('function ' + name + '(');
   assert.ok(start >= 0, name + ' not found');

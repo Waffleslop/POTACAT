@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // A spot click leaves the filter width alone (jarhd FTDX10 CW forced to
 // 500 Hz, k8iko, WF4I #99). Rule: a tune sends a width only when a rig preset
 // or the operator's own per-mode Filter Width setting asks for one; a mode
@@ -69,7 +70,7 @@ test('an explicit width (Filter Width setting / rig preset) still goes out', () 
   assert.ok(writes.some((w) => /^M CW 400\n$/.test(w)), writes.join(''));
 });
 
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const main = readSrc(path.join(__dirname, '..', 'main.js'));
 test('a width set on the rig panel is not saved as the per-mode Filter Width', () => {
   const i = main.indexOf("case 'set-filter-width': {");
   const body = main.slice(i, main.indexOf('break;\n      }', i));

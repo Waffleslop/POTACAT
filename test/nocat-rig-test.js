@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * "No CAT control (VOX)" radio type — N4FFF's Pebble HF, 2026-10-04: a uSDX
  * kit with no CAT port, VOX-keyed, that POTACAT could only be told about by
@@ -29,7 +30,7 @@ function test(name, fn) {
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.message || e).split('\n')[0]); }
 }
 const root = path.join(__dirname, '..');
-const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
+const read = (p) => readSrc(path.join(root, p));
 console.log('No CAT control (VOX) rig type');
 
 test('the type maps consistently: radio "nocat" <-> catTarget {type:"none"} <-> family "none"', () => {

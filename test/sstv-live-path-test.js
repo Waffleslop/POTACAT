@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // SSTV live receive path around the decoder (Casey 2026-09-28: "I think our
 // RX is broken"). Found by tracing capture -> engine -> gallery:
 //  - The mobile app's SSTV screen sends sstv-stop when it closes; the desktop
@@ -20,7 +21,7 @@ const { SstvEngine } = require('../lib/sstv-engine');
 let passed = 0, failed = 0;
 const cases = [];
 function test(name, fn) { cases.push([name, fn]); }
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 const MAIN = R('main.js');
 
 console.log('SSTV live path');

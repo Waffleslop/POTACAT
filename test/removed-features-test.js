@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * Features Casey has retired stay retired. A removed integration tends to
  * creep back through a settings-blob key, a welcome-screen checkbox or a
@@ -28,7 +29,7 @@ console.log('Removed features stay removed');
 
 test('FT8 Battle Royale is gone from the app, the welcome screen, Settings and the wire', () => {
   for (const f of FILES) {
-    const src = fs.readFileSync(path.join(root, f), 'utf8');
+    const src = readSrc(path.join(root, f));
     const m = src.match(/battle\s*royale|ft8br/i);
     assert.ok(!m, `${f} still mentions it: "${m && m[0]}"`);
   }

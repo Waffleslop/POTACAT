@@ -2,6 +2,7 @@
 // in the first set, every step state, the launch prompt and the "new for your
 // radio" card — plus guards on the main/renderer wiring that fails silently.
 'use strict';
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -286,7 +287,7 @@ t('peMachine tells the 64-bit LibFT4222 from the 32-bit one', () => {
 
 // --- wiring guards ---
 t('main.js: settings saves keep setup progress; test-transmit restore trusts only a readback; scope finds our FTDI copy', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\s+/g, ' ');
+  const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\s+/g, ' ');
   const has = (snip) => assert.ok(main.includes(snip.replace(/\s+/g, ' ')), 'main.js missing: ' + snip);
   has("const SETUP_KEYS = ['setupPassed', 'setupSkipped', 'setupChecklistHidden', 'setupAnnounced', 'setupShareId', 'setupShared', 'setupMeasured', 'metersSeen', 'winlinkAudio', 'modemCable', 'atuBands'];");
   has('_lastPowerReadback = { watts: Number(watts) || 0, at: Date.now() }; if (!isRemoteMode()) stationSetupReconcilePower(Number(watts) || 0);');
@@ -296,16 +297,16 @@ t('main.js: settings saves keep setup progress; test-transmit restore trusts onl
   has("_stationSetupLaunchLastVersion = settings.lastVersion || null;");
   for (const ch of ['station-setup-get', 'station-setup-report', 'station-setup-action']) has(`ipcMain.handle('${ch}'`);
   // The only transmit paths are operator actions: never an automatic check.
-  assert.ok(!/autoChecks[^}]*tx-test/.test(fs.readFileSync(path.join(__dirname, '..', 'renderer', 'station-setup.js'), 'utf8')), 'tx-test must never be an automatic check');
+  assert.ok(!/autoChecks[^}]*tx-test/.test(readSrc(path.join(__dirname, '..', 'renderer', 'station-setup.js'))), 'tx-test must never be an automatic check');
 });
 
 t('renderer: window, entry points, launch card, bug-report line', () => {
-  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  const html = readSrc(path.join(__dirname, '..', 'renderer', 'index.html'));
   for (const id of ['station-setup-dialog', 'station-setup-card', 'view-station-setup-btn', 'settings-station-setup-btn']) assert.ok(html.includes(`id="${id}"`), id);
   assert.ok(html.includes('<script src="station-setup.js"></script>'));
-  const pre = fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8');
+  const pre = readSrc(path.join(__dirname, '..', 'preload.js'));
   for (const fn of ['stationSetupGet', 'stationSetupReport', 'stationSetupAction', 'onStationSetupChanged']) assert.ok(pre.includes(fn + ':'), fn);
-  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
   assert.ok(app.includes("'**Station Setup:** ' + md.stationSetup"));
   assert.ok(app.includes('window.openStationSetup(newId)'), 'Add Rig opens the checklist');
 });
@@ -313,7 +314,7 @@ t('renderer: window, entry points, launch card, bug-report line', () => {
 // K3SBP's 8600, 2026-09-25: the restore safety saw the 5 W readback 80 ms
 // after the drop and set the radio back to 100 W mid-test.
 t('the power-restore safety stays out of a test that is still running', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
   const rec = main.slice(main.indexOf('function stationSetupReconcilePower('), main.indexOf('function stationSetupReconcilePower(') + 900);
   assert.ok(/carrierRunning: !!\(_stationSetupTxTest \|\| _stationSetupTxBusy \|\| _externalAtuActive\)/.test(rec));
   const run = main.slice(main.indexOf('async function runStationSetupTxTest('), main.indexOf('async function _runStationSetupTxTest('));
@@ -323,7 +324,7 @@ t('the power-restore safety stays out of a test that is still running', () => {
 
 // An audio tone cannot modulate a radio in CW: it keys and radiates nothing.
 t('the test transmit refuses in CW mode, before touching power or PTT, and logs the mode', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
   const run = main.slice(main.indexOf('async function _runStationSetupTxTest('), main.indexOf('async function _runStationSetupTxTest(') + 9000);
   const cw = run.indexOf("if (/^CW/.test(modeNow))");
   assert.ok(cw > 0 && cw < run.indexOf("action: 'set-tx-power'") && cw < run.indexOf('startJtcatTune('));
@@ -333,7 +334,7 @@ t('the test transmit refuses in CW mode, before touching power or PTT, and logs 
 // K3SBP 2026-09-25: typed a status label (FLEX) in the rig editor, pressed
 // the main Settings Save, and the edit was dropped without a word.
 t('Settings Save commits an open rig editor first', () => {
-  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8').replace(/\r\n/g, '\n');
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js')).replace(/\r\n/g, '\n');
   const save = app.slice(app.indexOf("settingsSave.addEventListener('click'"), app.indexOf("settingsSave.addEventListener('click'") + 700);
   assert.ok(/if \(rigEditorMode\) \{\s*const committed = await saveRigEditor\(\);\s*if \(!committed\) return;/.test(save));
   assert.ok(/rigSaveBtn\.addEventListener\('click', \(\) => \{ saveRigEditor\(\); \}\);/.test(app));
@@ -352,7 +353,7 @@ t('voice transmit: waits for the data test, then offers the voice tone; 0 W name
   assert.ok(silent.instructions[0].steps[0].includes('SSB MOD SOURCE'));
   assert.strictEqual(step(evalRig({ model: 'FT-710', live: { txTest: { result: 'ok' }, voiceTest: { result: 'ok', watts: 5 } } }), 'voice-tx').state, 'ok');
   assert.strictEqual(step(evalRig({ model: 'FLEX-6600', audioSource: 'smartsdr' }), 'voice-tx'), undefined, 'a Flex is not offered it');
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
   assert.ok(main.includes("case 'voice-test': await runStationSetupTxTest(rigId, { voice: true }); break;"));
   assert.ok(main.includes("noDataSwap: voice });"), 'the voice tone never swaps to DATA');
   assert.ok(main.includes('&& !opts.noDataSwap && !yaesuVoice'), 'handleRemotePtt honours it');

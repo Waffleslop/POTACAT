@@ -5,13 +5,14 @@
 // with its own 5-byte command (they never answer "FA;").
 // Run: node test/serial-cat-test-connection-test.js
 'use strict';
+const { readSrc } = require('./_src');
 
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const { EventEmitter } = require('events');
 
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 async function test(name, fn) {
   try { await fn(); passed++; console.log('  ok  ' + name); }
@@ -66,7 +67,7 @@ function liftProbe(radio) {
     assert.ok(/resolveSerialHandshake\(model, \{ serialHandshake: config\.serialHandshake \}\)/.test(h));
     assert.ok(/rtscts: hs\.handshake === 'hardware'/.test(h));
     assert.ok(/hs\.source === 'model' && hs\.handshake !== 'hardware' && !legacy && SerialHsTrial\.trialApplies\(model\)/.test(h));
-    const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+    const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
     assert.ok(/testSerialCat\(\{ portPath, baudRate, dtrOff, serialHandshake, model \}\)/.test(app));
   });
 

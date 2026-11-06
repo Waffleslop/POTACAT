@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // The WSPR map legend explains the SNR dot colours from the SAME table that
 // colours the dots (a user remembered a legend; there was none, 2026-10-24).
 // Run: node test/wspr-legend-test.js
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const js = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-popout.js'), 'utf8').replace(/\r\n/g, '\n');
-const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-popout.html'), 'utf8');
+const js = readSrc(path.join(__dirname, '..', 'renderer', 'jtcat-popout.js')).replace(/\r\n/g, '\n');
+const html = readSrc(path.join(__dirname, '..', 'renderer', 'jtcat-popout.html'));
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

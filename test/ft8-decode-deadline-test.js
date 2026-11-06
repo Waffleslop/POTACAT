@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // AB1EX (FT-710, 1.10.24/25), 2026-09-27: "Auto sequencing repeats or hangs
 // in an unpredictable fashion ... repeating last message vs moving on", and
 // "ignoring FT8 no reply attempt limit"; 1.10.13 was fine. His log: the
@@ -26,8 +27,8 @@ function test(name, fn) {
 }
 const ROOT = path.join(__dirname, '..');
 const ADDON = path.join(ROOT, 'lib', 'ft8_native', 'build', 'Release', 'ft8_native.node');
-const MAIN = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
-const WORKER = fs.readFileSync(path.join(ROOT, 'lib', 'ft8-worker.js'), 'utf8');
+const MAIN = readSrc(path.join(ROOT, 'main.js'));
+const WORKER = readSrc(path.join(ROOT, 'lib', 'ft8-worker.js'));
 
 console.log('FT8 decode deadline');
 

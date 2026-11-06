@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 // Every log surface logs a contact the same way: it sends what the operator
 // entered to logContact (main.js), and lib/qso-expand.js decides the records.
 // Surfaces that built their own records drifted apart — the Log QSO window
@@ -10,7 +11,7 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 const main = R('main.js');
 const app = R('renderer/app.js');
 let passed = 0, failed = 0;

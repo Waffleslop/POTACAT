@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // The level control on the radio audio a soundcard modem hears
 // (lib/modem-rx-level.js) + the session guards built the same day (K3SBP
 // VARA HF on a Flex, 2026-10-23). Run: node test/modem-rx-level-test.js
@@ -113,7 +114,7 @@ test('TX: a peak that would clip cuts the gain at once; a seeded gain is applied
 });
 
 test('wiring: the session chain is tokened, VARA launches once, Pat is asked before a new call, the cable feed is levelled', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(main.includes('const seq = ++_winlinkSessionSeq;'));
   assert.ok((main.match(/if \(!live\(\)\) throw cancelled\(\);/g) || []).length >= 5, 'a liveness check after every await');
   assert.ok(/if \(e && e\.cancelled\) \{ winlinkLog\(`attempt #\$\{seq\} ended after it was stopped/.test(main), 'a cancelled chain never ends a later session');
@@ -125,9 +126,9 @@ test('wiring: the session chain is tokened, VARA launches once, Pat is asked bef
   assert.ok(/telling Pat to hang up/.test(main), 'a stray PTT after Stop re-sends the disconnect');
   assert.ok(/function winlinkDispatchTx\(mono24k\) \{\r?\n  mono24k = winlinkLevelModemTx\(mono24k\);/.test(main), 'every modem transmit route goes through the TX leveler');
   assert.ok(/winlinkRememberModemTxGain\(\);/.test(main) && /'winlinkModemTxGain',/.test(main), 'the learned gain is kept per modem, machine-scoped');
-  assert.ok(/boostDb/.test(fs.readFileSync(path.join(__dirname, '..', 'renderer', 'winlink-popout.js'), 'utf8')), 'the Mail window shows the boost');
-  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'winlink-popout.html'), 'utf8');
-  const js = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'winlink-popout.js'), 'utf8');
+  assert.ok(/boostDb/.test(readSrc(path.join(__dirname, '..', 'renderer', 'winlink-popout.js'))), 'the Mail window shows the boost');
+  const html = readSrc(path.join(__dirname, '..', 'renderer', 'winlink-popout.html'));
+  const js = readSrc(path.join(__dirname, '..', 'renderer', 'winlink-popout.js'));
   assert.ok(html.includes('id="wl-audio"') && js.includes("$('wl-audio')") && js.includes('au.toModemDb'));
 });
 

@@ -5,6 +5,7 @@
 // Run: node test/yaesu-cw-text-test.js
 
 'use strict';
+const { readSrc } = require('./_src');
 
 const assert = require('assert');
 const { EventEmitter } = require('events');
@@ -98,7 +99,7 @@ test('a non-Yaesu ky1 rig keeps its old path (X6100 still keys first)', async ()
 });
 
 test('macOS cannot nap POTACAT while it times CW itself: the key port and the paddle keyer hold it awake (N8JMS)', async () => {
-  const main = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(require('path').join(__dirname, '..', 'main.js'));
   assert.ok(/function cwKeyingAwake\(ms\)[\s\S]{0,300}powerSaveBlocker\.start\('prevent-app-suspension'\)/.test(main));
   const dtr = main.indexOf('function sendCwTextViaDtrKey(');
   assert.ok(main.slice(dtr, dtr + 4000).includes('cwKeyingAwake(t + 2000)'), 'the key-port text path');
@@ -261,7 +262,7 @@ test('Stop ends the TX state at once, on a radio that sends no readback', async 
 });
 
 test('Stop also ends the TX banner, which runs on its own estimate', () => {
-  const main = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(require('path').join(__dirname, '..', 'main.js'));
   const stop = main.slice(main.indexOf('function cancelAllCwSends'), main.indexOf('function cancelAllCwSends') + 2600);
   assert.ok(/_cwTxLockoutUntilMs = 0; _broadcastEffectiveTxState\(\)/.test(stop));
 });
@@ -278,19 +279,19 @@ test('airtime is real Morse timing, and the hold covers digits the old figure di
 });
 
 test('ECHOCAT: an unchanged speed sends the radio no speed command ahead of the macro', () => {
-  const main = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(require('path').join(__dirname, '..', 'main.js'));
   assert.ok(/!\(wpm === settings\.cwWpm && \(!cat \|\| cat\._cwWpm === wpm\)\)\) applyCwWpm\(wpm, 'remote'\)/.test(main));
 });
 
 test('N8JMS: a frequency event keeps the selected spot, and a map Tune finds its own call', () => {
-  const app = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const app = readSrc(require('path').join(__dirname, '..', 'renderer', 'app.js'));
   assert.ok(/const onSpot = onPicked \? lastTunedSpot : allSpots\.find/.test(app));
   assert.ok(/s\.callsign === btn\.dataset\.call/.test(app));
   assert.ok(/class="tune-btn" data-call=/.test(app));
 });
 
 test('#116: one rbn.telegraphy.de connection, and only commands the server has', () => {
-  const main = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(require('path').join(__dirname, '..', 'main.js'));
   const fn = main.slice(main.indexOf('function connectCwSpots'), main.indexOf('function disconnectCwSpots'));
   assert.ok(!/set\/clubs \$\{/.test(fn), 'no per-club command');
   assert.ok(!/forEach/.test(fn) && !/ssid/i.test(fn.replace(/SSID/g, '')), 'no per-club login');
@@ -298,7 +299,7 @@ test('#116: one rbn.telegraphy.de connection, and only commands the server has',
 });
 
 test('main shows the controller notice on screen and on the phone', async () => {
-  const main = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(require('path').join(__dirname, '..', 'main.js'));
   assert.ok(/controller\.on\('notice', \(msg\) => \{[\s\S]{0,400}send\('app-notice'[\s\S]{0,300}type: 'tune-blocked', reason: msg/.test(main));
 });
 

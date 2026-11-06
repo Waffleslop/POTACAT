@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // IC-9700 (2026-10-20): 1.2 GHz was in no band picker — and, worse,
 // lib/bands.js did not know 23cm, so a 1296 MHz QSO logged with NO BAND
 // (LoTW/QRZ uploads without one, worked-before never matching, per-band RX
@@ -12,7 +13,7 @@ const fs = require('fs');
 const path = require('path');
 const { BANDS, freqToBand } = require('../lib/bands');
 
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

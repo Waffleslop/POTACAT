@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Rig setup notes (lib/rig-setup-notes.js) — the "Setup instructions" button
 // in the rig editor.
 //
@@ -21,9 +22,9 @@ function test(name, fn) {
 }
 
 const ROOT = path.join(__dirname, '..');
-const HTML = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8');
-const APP = fs.readFileSync(path.join(ROOT, 'renderer', 'app.js'), 'utf8');
-const MAIN = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+const HTML = readSrc(path.join(ROOT, 'renderer', 'index.html'));
+const APP = readSrc(path.join(ROOT, 'renderer', 'app.js'));
+const MAIN = readSrc(path.join(ROOT, 'main.js'));
 const RADIO_TYPES = [...HTML.matchAll(/name="radio-type" value="([^"]+)"/g)].map((m) => m[1]);
 const BRANDS = new Set(Object.values(RIG_MODELS).map((m) => m.brand));
 const PLATFORMS = ['win32', 'darwin', 'linux'];
@@ -163,7 +164,7 @@ test('the dialout command carries the real username when known, the shell\'s $US
   const without = pick(resolveSetupNotes({ radioType: 'serialcat', platform: 'linux' }));
   assert.ok(without.steps[0].includes('sudo usermod -aG dialout "$USER"'), without.steps[0]);
   assert.ok(!pick(resolveSetupNotes({ radioType: 'serialcat', platform: 'win32' })), 'not on Windows');
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(/linuxUser: \(\(\) => \{ try \{ return require\('os'\)\.userInfo\(\)\.username; \} catch \{ return ''; \} \}\)\(\),/.test(main), 'main passes the login name');
 });
 

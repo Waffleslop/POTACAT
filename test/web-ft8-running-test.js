@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // kc8zp 2026-11-03: the engine's { state: 'stopped' } status has no `running`
 // key, and the web page read it as running, so opening its FT8 tab after an
 // idle stop never sent jtcat-start (the phone app always sends it).
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const web = fs.readFileSync(path.join(__dirname, '..', 'renderer/remote.js'), 'utf8');
-const eng = fs.readFileSync(path.join(__dirname, '..', 'lib/ft8-engine.js'), 'utf8');
+const web = readSrc(path.join(__dirname, '..', 'renderer/remote.js'));
+const eng = readSrc(path.join(__dirname, '..', 'lib/ft8-engine.js'));
 let passed = 0, failed = 0;
 function check(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

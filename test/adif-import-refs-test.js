@@ -2,6 +2,7 @@
 // import fills SIG / SIG_INFO, and the Logbook shows POTA_REF for logs
 // imported before that (KC9FOZ, 2026-10-22: imported parks showed blank).
 'use strict';
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -38,10 +39,10 @@ check('SOTA_REF and WWFF_REF are read the same way', () => {
   assert.strictEqual(fillSigFromProgramRefs({ WWFF_REF: 'KFF-0001' }).SIG_INFO, 'KFF-0001');
 });
 check('every import goes through it, and the Logbook falls back to POTA_REF', () => {
-  const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+  const main = readSrc(path.join(ROOT, 'main.js'));
   const fn = main.slice(main.indexOf('function importQsoRecords('), main.indexOf('function importQsoRecords(') + 700);
   assert.ok(/records = records\.map\(fillSigFromProgramRefs\);[\s\S]*planImport\(existing, records\)/.test(fn));
-  const pop = fs.readFileSync(path.join(ROOT, 'renderer/qso-popout.js'), 'utf8');
+  const pop = readSrc(path.join(ROOT, 'renderer/qso-popout.js'));
   assert.ok(/label: 'Park'[^\n]*get: \(q\) => q\.SIG_INFO \|\| q\.POTA_REF \|\| ''/.test(pop));
   assert.ok(/q\.SIG_INFO \|\| q\.POTA_REF, q\.COMMENT/.test(pop), 'search finds it too');
 });

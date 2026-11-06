@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // WAS / DXCC tables for ECHOCAT, built with the desktop views' own rules
 // (Casey 2026-10-24, phone parity). Run: node test/award-tables-test.js
 const assert = require('assert');
@@ -8,7 +9,7 @@ const path = require('path');
 const AT = require('../lib/award-tables');
 const WR = require('../lib/worked-roster');
 
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

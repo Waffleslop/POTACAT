@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // KF0HOG (FT-710 + mAT-30, 2026-10-20): the radio runs the tune on AC003;
 // and then switches the external tuner OFF; he had to press TUNE on the
 // radio every time. Per-rig "Keep the tuner on after a tune cycle": watch
@@ -10,7 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const { parseAcReply, decideAtuKeepOn, ATU_KEEP_ON_TIMEOUT_MS } = require('../lib/atu-keep-on');
 
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

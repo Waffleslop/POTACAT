@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Transmit-safety review of 2397429c and the RTS/CTS trial (MEDIUM): every
 // Yaesu now opens with its lines low, so a stock radio whose CAT RTS menu is
 // on answers nothing and gets the RTS/CTS trial. RTS is also a PTT line: on a
@@ -17,7 +18,7 @@ const { EventEmitter } = require('events');
 let pass = 0, fail = 0;
 const queue = [];
 function test(name, fn) { queue.push([name, fn]); }
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function load() {

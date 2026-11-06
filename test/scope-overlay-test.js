@@ -4,6 +4,7 @@
 // (lib/scope-overlay.js), the band plan (edges, privileges, dials), their
 // geometry in lib/scope-view.js, and main.js's wiring.
 'use strict';
+const { readSrc } = require('./_src');
 
 const assert = require('assert');
 const fs = require('fs');
@@ -17,7 +18,7 @@ function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e && e.stack || e)); }
 }
-const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
+const read = (p) => readSrc(path.join(__dirname, '..', p));
 
 console.log('Passband');
 test('USB with a reported width: dial+100 .. dial+100+width, reported', () => {

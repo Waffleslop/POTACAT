@@ -7,6 +7,7 @@
 // Run: node test/lz3aw-web-parity-test.js
 
 'use strict';
+const { readSrc } = require('./_src');
 
 const assert = require('assert');
 const fs = require('fs');
@@ -20,9 +21,9 @@ function test(name, fn) {
   catch (err) { failed++; console.log('  ✗ FAIL: ' + name + '\n      ' + (err.stack || err.message)); }
 }
 // Line endings vary per file (main.js and remote.js are CRLF); the guards are written for LF.
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', 'renderer', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', 'renderer', f)).replace(/\r\n/g, '\n');
 const app = R('app.js'), web = R('remote.js'), vfo = R('vfo-popout.html');
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
 
 console.log('=== #14 worked mark = call + BAND + MODE ===');
 test('normalizeMode: USB/LSB are SSB; a family MODE with a SUBMODE is the submode', () => {
@@ -135,7 +136,7 @@ test('protocol + server: typed-call is registered both ways, demuxed, and hydrat
   const reg = proto.MESSAGES || proto.REGISTRY || proto.messages || proto;
   const entry = (reg && reg['typed-call']) || (proto.get && proto.get('typed-call'));
   assert.ok(entry, 'registry entry');
-  const srv = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8').replace(/\r\n/g, '\n');
+  const srv = readSrc(path.join(__dirname, '..', 'lib', 'remote-server.js')).replace(/\r\n/g, '\n');
   assert.ok(/case 'typed-call':\n[\s\S]{0,300}this\.emit\('typed-call', \{ call: String\(msg\.call \|\| ''\), source: String\(msg\.source \|\| ''\) \}\);/.test(srv));
   assert.ok(/sendTypedCall\(call\) \{\n\s+this\._typedCall = String\(call \|\| ''\);/.test(srv));
   assert.ok(/if \(this\._typedCall\) this\._sendTo\(ws, \{ type: 'typed-call', call: this\._typedCall \}\);/.test(srv), 'hydrated');
@@ -163,8 +164,8 @@ test('desktop: every call field reports with its source; the expander prefers th
 test('log pop-out: reports on code-set values as well as typing; preloads carry the source', () => {
   const lp = R('log-popout.js');
   assert.ok((lp.match(/reportCall\(\);/g) || []).length >= 3, 'clearForm + both prefills report');
-  assert.ok(/ipcRenderer\.send\('log-popout-callsign', call, 'popout'\)/.test(fs.readFileSync(path.join(__dirname, '..', 'preload-log-popout.js'), 'utf8')));
-  assert.ok(/reportLogCallsign: \(call, source\) => ipcRenderer\.send\('log-popout-callsign', call, source\)/.test(fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8')));
+  assert.ok(/ipcRenderer\.send\('log-popout-callsign', call, 'popout'\)/.test(readSrc(path.join(__dirname, '..', 'preload-log-popout.js'))));
+  assert.ok(/reportLogCallsign: \(call, source\) => ipcRenderer\.send\('log-popout-callsign', call, source\)/.test(readSrc(path.join(__dirname, '..', 'preload.js'))));
   assert.ok(/text\.replace\(\/\\\{call\\\}\/gi, cwTypedCall \|\| cwTunedCall \|\| ''\)/.test(vfo), 'VFO pop-out free text expands {call}');
 });
 

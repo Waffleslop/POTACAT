@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * The 2026-11-05 UI batch from the Discord bug review (section E). Source
  * guards: each is a one-line cause that would be easy to undo by accident.
@@ -7,7 +8,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 const css = R('renderer/styles.css');
 const app = R('renderer/app.js');
 const main = R('main.js');

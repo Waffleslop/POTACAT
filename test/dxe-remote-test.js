@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * DXpedition spot flags reach ECHOCAT (potacat-meta dxe-flags-to-remote, filed by the
  * app session 2026-10-07). The phone needs enableDxe + enableDxeSources to badge
@@ -17,8 +18,8 @@ function test(name, fn) {
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.message || e).split('\n')[0]); }
 }
 const root = path.join(__dirname, '..');
-const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8').replace(/\r\n/g, '\n');
-const app = fs.readFileSync(path.join(root, 'renderer', 'app.js'), 'utf8').replace(/\r\n/g, '\n');
+const main = readSrc(path.join(root, 'main.js')).replace(/\r\n/g, '\n');
+const app = readSrc(path.join(root, 'renderer', 'app.js')).replace(/\r\n/g, '\n');
 
 console.log('DXpedition spot flags to ECHOCAT');
 
@@ -43,7 +44,7 @@ test('a phone change merges sources, refreshes the desktop window, and echoes to
   assert.ok(/if \(partial && 'enableDxe' in partial\) partial\.enableDxe = partial\.enableDxe !== false;/.test(main), "the phone's Turn on can switch the master back on");
   assert.ok(/if \(dxeChanged\) pushDxeSettingsToWindow\(\);/.test(main));
   assert.ok(/if \(sdrSync \|\| dxeChanged \|\| jttyKeys/.test(main));
-  assert.ok(/onDxeSettings: \(cb\) => ipcRenderer\.on\('dxe-settings'/.test(fs.readFileSync(path.join(root, 'preload.js'), 'utf8')));
+  assert.ok(/onDxeSettings: \(cb\) => ipcRenderer\.on\('dxe-settings'/.test(readSrc(path.join(root, 'preload.js'))));
   assert.ok(/window\.api\.onDxeSettings\(\(d\) => \{[\s\S]{0,400}syncSpotsPanel\(\)[\s\S]{0,120}render\(\)/.test(app), 'the window applies it live');
 });
 

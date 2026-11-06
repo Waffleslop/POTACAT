@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // A false park-to-park on the desktop side (the phone's 82b8724; review of the
 // merged 1.13.11 chain, 2026-11-06). A contact logged as General after a POTA
 // spot or a POTA contact must not carry that park.
@@ -18,7 +19,7 @@ function test(name, fn) {
   try { fn(); pass++; console.log('  ok  ' + name); }
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.stack || e.message)); }
 }
-const read = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const read = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 const web = read('renderer/remote.js');
 const app = read('renderer/app.js');
 

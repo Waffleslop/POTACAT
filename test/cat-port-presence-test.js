@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // A radio whose serial port is gone, and "None" meaning none (G90 owner,
 // 2026-10-24). Run: node test/cat-port-presence-test.js
 const assert = require('assert');
@@ -34,7 +35,7 @@ test('listed: case-insensitive on Windows, cu/tty twins on macOS', () => {
 });
 
 test('wiring: connectCat waits for a missing port, a lost link checks it, None is remembered', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(/if \(devPort && !\(await serialPortPresent\(devPort\)\)\) \{[\s\S]{0,200}startCatPortWatch\(devPort\);/.test(main), 'no spawn, no open: wait for the port');
   assert.ok(main.indexOf('const devPort = SerialPortPresence.portOfTarget(target);') < main.indexOf("if (target.type === 'rigctld') {\n    // Spawn rigctld process first") || /const devPort = SerialPortPresence\.portOfTarget\(target\);/.test(main), 'the gate sits before the transports');
   assert.ok(/catPortGoneCheck\(\)\.catch/.test(main), 'a link loss checks whether the port went');
@@ -48,12 +49,12 @@ test('Windows: a port serialport does not list but SERIALCOMM records is present
   assert.deepStrictEqual(listed, ['COM1', 'COM3']);
   assert.ok(P.portListed('com3', listed, 'win32'));
   assert.deepStrictEqual(P.parseSerialCommRegistry(''), []);
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
   assert.ok(/if \(SerialPortPresence\.portListed\(port, list\)\) return true;[\s\S]{0,300}if \(process\.platform === 'win32'\) return SerialPortPresence\.portListed\(port, await windowsSerialCommPorts\(\)\);/.test(main), 'the registry is asked before a port is called missing');
 });
 
 test('Linux/macOS: a /dev path that exists is present before any list is consulted (KM4CFT, /dev/serial/by-id symlink)', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
   const fn = main.slice(main.indexOf('async function serialPortPresent('), main.indexOf('function windowsSerialCommPorts('));
   const exists = fn.indexOf("if (process.platform !== 'win32' && fs.existsSync(port)) return true;");
   assert.ok(exists > 0, 'the filesystem is asked');

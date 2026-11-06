@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Desktop pieces of the Cloud API Phase 2 reply (potacat-cloudlog
 // CLOUD_TO_DESKTOP_HANDOFF_2026-10-20_PUBLIC_API_PHASE2_REPLY.md):
 //   §3 Embeddable Widgets consent toggle (GET/PUT /v1/embed-settings),
@@ -10,7 +11,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

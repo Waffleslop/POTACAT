@@ -2,6 +2,7 @@
 // Regression for KE4EST (tags out of COMMENT) and the phone-path double-tag.
 // Run: node test/log-comment-test.js
 'use strict';
+const { readSrc } = require('./_src');
 
 const assert = require('assert');
 const { stripSigTag, appendTag, ensureSigTag } = require('../lib/log-comment');
@@ -58,7 +59,7 @@ console.log('a park outside the operator\'s own program still gets its name (N0K
 {
   // The park DB holds only the operator's own program, so saveQsoRecord falls
   // back to the live spot for exactly that park (source guard on main.js).
-  const main = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  const main = readSrc(require('path').join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
   const i = main.indexOf('if (logCommentTags) {');
   const block = main.slice(i, main.indexOf('qsoData.comment = appendTag(stripped, parkTag);', i));
   check(/const park = parkInfoFor\(parkRef\);/.test(block), 'the notes tag uses parkInfoFor');

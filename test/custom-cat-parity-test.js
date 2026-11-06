@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Custom CAT slots: desktop (renderer/app.js) vs web (renderer/remote.js).
 //
 // The web client rendered EVERY slot as a plain button firing `command`, so a
@@ -26,7 +27,7 @@ function test(name, fn) {
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
 
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', 'renderer', f), 'utf8');
+const R = (f) => readSrc(path.join(__dirname, '..', 'renderer', f));
 const APP = R('app.js');
 const REMOTE = R('remote.js');
 // Third copy (2026-09-19): the desktop VFO pop-out draws slider slots too, so
@@ -120,7 +121,7 @@ test('the desktop type vocabulary is exactly what the web accepts', () => {
 // (lib/custom-cat-follow.js) for all three surfaces, and each surface asks it
 // both what to show and which command a click sends.
 const Follow = require('../lib/custom-cat-follow.js');
-const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const MAIN = readSrc(path.join(__dirname, '..', 'main.js'));
 
 test('follow: radio state wins, last-sent is the fallback, the click moves AWAY from the radio', () => {
   const slot = { follows: 'split' };
@@ -138,7 +139,7 @@ test('follow: every surface loads the one list and uses it for paint AND click',
   assert.ok(/<script src="\.\.\/lib\/custom-cat-follow\.js"><\/script>/.test(R('index.html')), 'desktop loads it');
   assert.ok(/<script src="\.\.\/lib\/custom-cat-follow\.js"><\/script>/.test(VFO), 'VFO pop-out loads it');
   assert.ok(/<!-- custom-cat-follow-js -->/.test(R('remote.html')), 'web page placeholder');
-  assert.ok(/html\.replace\('<!-- custom-cat-follow-js -->'/.test(fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8')), 'server inlines it');
+  assert.ok(/html\.replace\('<!-- custom-cat-follow-js -->'/.test(readSrc(path.join(__dirname, '..', 'lib', 'remote-server.js'))), 'server inlines it');
   for (const [name, src] of [['desktop', APP], ['web', REMOTE], ['VFO', VFO]]) {
     assert.ok(/CustomCatFollow\.toggleView\(/.test(src), name + ' paints from toggleView');
     assert.ok(/nextCommand === 'on'/.test(src), name + ' clicks by nextCommand');

@@ -14,6 +14,7 @@
 // future change wants to loosen them, it needs a better reason than decode
 // tolerance, because decode tolerance is exactly what made this invisible.
 'use strict';
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const { classifyClockOffset, CLOCK_OK_MS, CLOCK_BAD_MS, pickOffset } = require('../lib/ntp');
 
@@ -78,7 +79,7 @@ t('junk offsets are treated as no offset, never as an alarm', () => {
 console.log('\nclock monitor wiring (main.js)');
 const fs = require('fs');
 const path = require('path');
-const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const MAIN = readSrc(path.join(__dirname, '..', 'main.js'));
 
 function fnBody(name) {
   const at = MAIN.indexOf('function ' + name + '(');
@@ -159,13 +160,13 @@ t('failed servers are skipped; none answering is null', () => {
 });
 
 t('the query stamps t1 at the send, after DNS (slow DNS read as a slow clock)', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'ntp.js'), 'utf8');
+  const src = readSrc(path.join(__dirname, '..', 'lib', 'ntp.js'));
   assert.ok(/dns\.lookup\(server/.test(src), 'no DNS lookup before the query');
   assert.ok(/t1 = Date\.now\(\);\s*socket\.send\(packet, 0, 48, NTP_PORT, address/.test(src), 't1 is not stamped at the send to the resolved address');
 });
 
 t('a warning line carries every server reading', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const src = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(/Readings: \$\{jtcatLastClock\.readings\}/.test(src));
 });
 
@@ -209,7 +210,7 @@ t('no step without a measurement, for zero, or for an absurd reading', () => {
 });
 
 t('the Fix result is judged by the re-measure, on every surface (source guard)', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const src = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(/ipcMain\.handle\('jtcat-sync-clock', async \(\) => await runClockFix\(\)\);/.test(src));
   assert.ok(/case 'sync-clock': \{\s*const \{ sync: res \} = await runClockFix\(\);/.test(src));
   assert.ok(/if \(sync\.success && clock\.level !== 'ok' && Number\.isFinite\(clock\.offsetMs\)\) \{\s*sync\.success = false;/.test(src));

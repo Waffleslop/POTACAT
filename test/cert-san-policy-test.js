@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Cert-pin Phase 1 + 2a (work item cert-pin-spki-migration).
 // Pure policy cases + an INTEGRATION pass over the real getOrCreateTlsCert:
 // the SPKI must survive a cert reissue (persisted keypair) and must change
@@ -96,7 +97,7 @@ try {
   });
 
   test('REISSUE keeps the SPKI, changes the fingerprint (Phase 2a core)', () => {
-    const before = fs.readFileSync(path.join(dir, 'remote-cert.pem'), 'utf8');
+    const before = readSrc(path.join(dir, 'remote-cert.pem'));
     // Force a genuine reissue: delete only the cert, keep the key.
     fs.unlinkSync(path.join(dir, 'remote-cert.pem'));
     const t = getOrCreateTlsCert(dir, {});
@@ -105,7 +106,7 @@ try {
   });
 
   test('REGRESSION GUARD: a real key reset changes the SPKI', () => {
-    const before = fs.readFileSync(path.join(dir, 'remote-cert.pem'), 'utf8');
+    const before = readSrc(path.join(dir, 'remote-cert.pem'));
     fs.unlinkSync(path.join(dir, 'remote-cert.pem'));
     fs.unlinkSync(path.join(dir, 'remote-key.pem'));
     const t = getOrCreateTlsCert(dir, {});
@@ -116,7 +117,7 @@ try {
   test('requiredSan opt keeps a covering cert cached across a fake extra interface', () => {
     // The cert on disk covers required; pass a required set it satisfies and
     // confirm the same PEM comes back untouched (no silent reissue).
-    const before = fs.readFileSync(path.join(dir, 'remote-cert.pem'), 'utf8');
+    const before = readSrc(path.join(dir, 'remote-cert.pem'));
     const x509 = new crypto.X509Certificate(before);
     const req = { ips: new Set(['127.0.0.1']), dns: new Set() };
     const t = getOrCreateTlsCert(dir, { requiredSan: req });

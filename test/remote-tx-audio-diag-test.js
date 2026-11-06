@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // KI7LIK (IC-7300 on Linux, 2026-10-20): "able to PTT but it doesn't seem to
 // be modulating." His log showed the [PTT] mode swaps and nothing about the
 // audio: the bridge logged the RX capture device but never the device the
@@ -9,7 +10,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

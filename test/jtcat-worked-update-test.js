@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // A QSO just logged clears the C / G / D badges on decodes already drawn
 // (level_death 2026-10-31: "the G stays after I log them"). Two causes: the
 // live roster update read qsoData.grid (records carry GRIDSQUARE), so the grid
@@ -12,7 +13,7 @@ const DecodeRow = require('../lib/decode-row');
 
 let pass = 0, fail = 0;
 function ok(cond, msg) { if (cond) { pass++; console.log('  ok  ' + msg); } else { fail++; console.log('  FAIL ' + msg); } }
-const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
+const read = (p) => readSrc(path.join(__dirname, '..', p));
 
 console.log('clearWorkedFlags');
 {

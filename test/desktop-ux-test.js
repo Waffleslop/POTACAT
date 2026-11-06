@@ -7,6 +7,7 @@
 // Run: node test/desktop-ux-test.js
 
 'use strict';
+const { readSrc } = require('./_src');
 
 const assert = require('assert');
 const fs = require('fs');
@@ -17,7 +18,7 @@ function test(name, fn) {
   try { fn(); passed++; console.log('  ✓ ' + name); }
   catch (err) { failed++; console.log('  ✗ FAIL: ' + name + '\n      ' + (err.stack || err.message)); }
 }
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 const app = R('renderer/app.js'), html = R('renderer/index.html'), main = R('main.js'), preload = R('preload.js');
 
 test('Hunt: an exclusive view is switched to the table before the split opens; map is left alone', () => {

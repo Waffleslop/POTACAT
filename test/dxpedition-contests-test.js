@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * DXpeditions in the Contests view (Casey 2026-10-07: "add to the Contest page
  * the DXpeditions that are live and upcoming ... make it visible if they have
@@ -22,7 +23,7 @@ function test(name, fn) {
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.message || e).split('\n')[0]); }
 }
 const root = path.join(__dirname, '..');
-const read = (f) => fs.readFileSync(path.join(root, f), 'utf8');
+const read = (f) => readSrc(path.join(root, f));
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = Date.UTC(2026, 9, 31, 12, 0, 0); // 31 Oct 2026
 

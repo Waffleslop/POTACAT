@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // KG5EIU (IC-9700 over Icom Network, 1.12.0, 2026-10-22): his bug report was
 // ~30 lines a second of RS-BA1 keepalives ("<- control type 0x0", "length
 // mismatch: header=0 actual=21"), with every control line printed twice, and
@@ -18,7 +19,7 @@ function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 
 function controllerOver(routesOwnLog) {
   const transport = new EventEmitter();

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // artificialjumpprotection (IC-7100, no HF antenna, 2026-11-05): idle-RX WSPR
 // went to 20 m with 20 m turned off in the rig's bands, and 2 m was not on
 // offer though the WSPR table has its dial (144.489).
@@ -44,11 +45,11 @@ test('the WSPR hop skips bands the radio is not used on', () => {
 });
 
 test('main uses it for the idle start, the settings it hands out and the hop; both dropdowns offer 2 m', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(/const band = IdleWsprBand\.pickIdleWsprBand\(saved, activeRigBands\(\)\) \|\| saved;/.test(main));
   assert.ok(/idleWsprBand: IdleWsprBand\.pickIdleWsprBand\(settings\.idleWsprBand, activeRigBands\(\)\)/.test(main));
   assert.ok(/const bands = IdleWsprBand\.hopBandsForRig\(jtcatWsprHopBands, activeRigBands\(\)\);/.test(main));
-  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  const html = readSrc(path.join(__dirname, '..', 'renderer', 'index.html'));
   const settingsSel = html.slice(html.indexOf('id="set-idle-wspr-band"'), html.indexOf('</select>', html.indexOf('id="set-idle-wspr-band"')));
   const welcomeSel = html.slice(html.indexOf('id="welcome-idle-wspr-band"'), html.indexOf('</select>', html.indexOf('id="welcome-idle-wspr-band"')));
   assert.ok(/value="2m"/.test(settingsSel) && /value="2m"/.test(welcomeSel));

@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 // ECHOCAT asks 2026-10-19: log-ok records name whose logbook each copy went
 // into; status carries rigPowered from real evidence; parkState per park.
 const fs = require('fs');
@@ -6,7 +7,7 @@ const path = require('path');
 const assert = require('assert');
 const { parkStateFor, expandContact } = require('../lib/qso-expand');
 const RigController = require('../lib/rig-controller').RigController || require('../lib/rig-controller');
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

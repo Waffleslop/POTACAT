@@ -4,6 +4,7 @@
 // the RS-BA1 voice stream and fed it nothing, FM voice keyed in USB-D, and
 // band clicks never moved the radio (MAIN cannot take the band SUB is on).
 'use strict';
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -29,7 +30,7 @@ function codecFor(model) {
 }
 
 const ROOT = path.join(__dirname, '..');
-const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8').replace(/\r\n/g, '\n');
+const read = (f) => readSrc(path.join(ROOT, f)).replace(/\r\n/g, '\n');
 
 (async () => {
   console.log('civ-codec');

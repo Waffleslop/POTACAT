@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // ECHOCAT Web local sidetone (LZ3AW 2026-09-26: "the sidetone does not
 // produce correct dot and dash, they sound choppy" on paddle and live typing,
 // fine on macros). Paddle elements are now scheduled on the audio clock at
@@ -14,7 +15,7 @@ function test(name, fn) {
   try { fn(); pass++; console.log('  ok  ' + name); }
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
-const src = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote.js'), 'utf8').replace(/\r\n/g, '\n');
+const src = readSrc(path.join(__dirname, '..', 'renderer', 'remote.js')).replace(/\r\n/g, '\n');
 function extract(name) {
   const start = src.indexOf('function ' + name + '(');
   assert.ok(start >= 0, name + ' missing');

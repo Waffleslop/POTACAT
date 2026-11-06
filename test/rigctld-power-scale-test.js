@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // rigctld TX power is converted on HAMLIB's scale, both ways (profdbe KX3 +
 // KXPA100 and frank9425 G90, 2026-10-24/31: "WSPR changes my KX3 power
 // settings to 11 watts").
@@ -98,9 +99,9 @@ test('a band change asks again; a QSY inside the band does not', () => {
 });
 
 test('main hands the controller watts; the controller never throttles a power write away', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(/if \(typeof cat\.setTxPowerWatts === 'function'\) cat\.setTxPowerWatts\(actual\);/.test(main));
-  const rc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'rig-controller.js'), 'utf8');
+  const rc = readSrc(path.join(__dirname, '..', 'lib', 'rig-controller.js'));
   const i = rc.indexOf('  setTxPowerWatts(watts) {');
   assert.ok(i > 0 && !/_lastPcTime && now - this\._lastPcTime/.test(rc.slice(i, i + 500)), 'setTxPowerWatts throttled');
 });

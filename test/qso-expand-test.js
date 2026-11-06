@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 // lib/qso-expand.js — the one definition of the records a logged contact
 // becomes (logging parity audit 2026-10-19). Run: node test/qso-expand-test.js
 const assert = require('assert');
@@ -146,7 +147,7 @@ test('a blank mode takes the radio\'s voice/CW mode; a data mode or no radio is 
   assert.strictEqual(logModeFromRig('FMN'), 'FM');
   assert.strictEqual(logModeFromRig('AM'), 'AM');
   for (const m of ['USB-D', 'DIGU', 'PKTUSB', 'DATA-U', 'RTTY', '', null]) assert.strictEqual(logModeFromRig(m), '', String(m));
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   const fn = main.indexOf('async function logContact(entry, opts)');
   const body = main.slice(fn, fn + 3000);
   assert.ok(body.includes('QsoExpand.logModeFromRig(_currentMode)'), 'logContact fills a blank mode from the radio');
@@ -174,7 +175,7 @@ test('the country is where the station operates: an away call keeps only QRZ\'s 
   assert.deepStrictEqual([home.country, home.state, home.gridsquare], ['United States', 'CT', 'FN31']);
   // No QRZ: the country still comes from the call.
   assert.strictEqual(expandContact({ ...base, callsign: 'K3SBP' }, { entityFor })[0].country, 'United States');
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   const fn = main.indexOf('async function logContact(entry, opts)');
   assert.ok(main.slice(fn, fn + 6000).includes('resolveOperatingCall(c, ctyDb)'), 'logContact hands cty.dat to expandContact');
 });

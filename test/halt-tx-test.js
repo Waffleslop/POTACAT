@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Halt TX stops the transmission, on every surface (droidbot2 2026-10-31:
 // "Halt TX does NOT stop PTT ... once a message starts, there is no way to stop
 // it").
@@ -22,7 +23,7 @@ function test(name, fn) {
 }
 
 const root = path.join(__dirname, '..');
-const read = (f) => fs.readFileSync(path.join(root, f), 'utf8');
+const read = (f) => readSrc(path.join(root, f));
 const MAIN = read('main.js');
 const APP = read('renderer/app.js');
 const PRELOAD = read('preload.js');

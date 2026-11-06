@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // TX slot lock for FT8/FT4/FT2 (Casey 2026-10-24). Run: node test/jtcat-tx-slot-test.js
 const assert = require('assert');
 const fs = require('fs');
@@ -106,12 +107,12 @@ test('manager: the lock reaches every slice, including ones started later', () =
   m._engines.set('a', { engine: { setSlotLock: (l) => calls.push(['a', l]) }, config: {} });
   m.setSlotLock('even');
   assert.deepStrictEqual(calls, [['a', 'even']]);
-  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'jtcat-manager.js'), 'utf8');
+  const src = readSrc(path.join(__dirname, '..', 'lib', 'jtcat-manager.js'));
   assert.ok(/if \(this\._slotLock && typeof engine\.setSlotLock === 'function'\) engine\.setSlotLock\(this\._slotLock\);\s*engine\.start\(\);/.test(src));
 });
 
 test('wiring: every CQ and reply in main.js goes through the slot rules', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
   // no path picks a slot on its own any more
   assert.ok(!/setTxSlot\(theirSlot === 'even'/.test(main), 'a reply picks its slot by hand');
   assert.ok(!/setTxSlot\(targetSlot === 'even'/.test(main), 'a reply picks its slot by hand');
@@ -133,13 +134,13 @@ test('wire: registry, capability, and both clients', () => {
   const proto = require('../lib/echocat-protocol');
   const M = proto.MESSAGES || proto.messages || proto;
   assert.ok(M['jtcat-tx-slot-state'] && M['jtcat-slot-refused'] && M['jtcat-set-tx-slot']);
-  const rs = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8');
+  const rs = readSrc(path.join(__dirname, '..', 'lib', 'remote-server.js'));
   assert.ok(rs.includes("'tx-slot-lock'") && rs.includes('broadcastJtcatTxSlotState'));
-  const web = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote.js'), 'utf8');
+  const web = readSrc(path.join(__dirname, '..', 'renderer', 'remote.js'));
   assert.ok(web.includes("case 'jtcat-tx-slot-state'") && web.includes("case 'jtcat-slot-refused'") && web.includes('Unlock and call'));
-  const pop = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-popout.js'), 'utf8');
+  const pop = readSrc(path.join(__dirname, '..', 'renderer', 'jtcat-popout.js'));
   assert.ok(pop.includes('onJtcatTxSlotState') && pop.includes('Unlock and call'));
-  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-popout.html'), 'utf8');
+  const html = readSrc(path.join(__dirname, '..', 'renderer', 'jtcat-popout.html'));
   assert.ok(html.includes('id="jp-tx-slot"'));
 });
 

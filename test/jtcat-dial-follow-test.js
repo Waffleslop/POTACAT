@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // GitHub #115 (ianturo): turning the radio from 40 m FT8 to 20 m FT8 kept
 // decodes flowing while every transmission was refused "wrong band". A dial
 // on the mode's published dial now re-anchors JTCAT and its band follows;
@@ -16,7 +17,7 @@ function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
-const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
+const read = (p) => readSrc(path.join(__dirname, '..', p));
 const FT8 = freqsForMode('FT8');
 
 test('a dial turned onto 10 m FT8 follows', () => {

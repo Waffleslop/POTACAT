@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Bands each radio is used on (Casey 2026-10-24): native per model, the
 // operator can add or remove bands in the rig editor, and a band the radio
 // is not configured for is seen nowhere. Run: node test/rig-bands-test.js
@@ -10,7 +11,7 @@ const RB = require('../lib/rig-bands');
 const { RIG_MODELS } = require('../lib/rig-models');
 const { BANDS, freqToBand } = require('../lib/bands');
 
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

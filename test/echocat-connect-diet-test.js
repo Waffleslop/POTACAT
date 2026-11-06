@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // What an ECHOCAT connect costs (Casey's BUG-K3SBP-20261024-0CD289, desktop
 // half): meters are gated, nothing in the connect burst goes out twice, voice
 // macro audio moves only on request, and the diagnostic names Flex Direct.
@@ -13,7 +14,7 @@ function test(name, fn) {
   try { fn(); pass++; console.log('  ok  ' + name); }
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
-const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
+const read = (p) => readSrc(path.join(__dirname, '..', p));
 const main = read('main.js');
 const server = read('lib/remote-server.js');
 const proto = read('lib/echocat-protocol.js');

@@ -6,6 +6,7 @@
 // being wired. (This is the regression that silently broke NR/Comp/ANF/VOX on
 // the phone before the unification.)
 
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -32,7 +33,7 @@ check('registry entries are well-formed', () => {
 });
 
 // Pull the action `case` labels out of the single dispatcher in main.js.
-const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const src = readSrc(path.join(__dirname, '..', 'main.js'));
 const start = src.indexOf('applyRigControl = function');
 const end = src.indexOf("ipcMain.handle('rig-control'", start);
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // A Linux shack on Tailscale whose `tailscale` command POTACAT could not run
 // published NO tailnet leg: the pairing QR, the /api/pair reply and auth-ok
 // carried the LAN address only, so an iPhone paired at home never reached the
@@ -17,7 +18,7 @@ function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 console.log('Tailscale detection without the CLI');
 
 test('the tailnet address comes from the interfaces: 100.64/10 only, never loopback or a LAN 100.x', () => {

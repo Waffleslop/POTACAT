@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // "Vail adapter + POTACAT to key a QMX+? Typed text will TX. Macros will TX.
 // Vail connected to iPhone running ECHOCAT will TX. No TX locally with
 // POTACAT. Tried Keyboard and MIDI modes both." (Discord 2026-10-20)
@@ -12,7 +13,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

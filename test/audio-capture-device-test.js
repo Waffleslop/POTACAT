@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // ECHOCAT audio bridge: the capture device is the operator's choice, never a
 // substitute (N2FSM 2026-08-28, IC-7300).
 //
@@ -25,8 +26,8 @@ function test(name, fn) {
 }
 
 const P = (...f) => path.join(__dirname, '..', ...f);
-const BRIDGE = fs.readFileSync(P('renderer', 'remote-audio.html'), 'utf8');
-const MAIN = fs.readFileSync(P('main.js'), 'utf8');
+const BRIDGE = readSrc(P('renderer', 'remote-audio.html'));
+const MAIN = readSrc(P('main.js'));
 
 // The capture block: from the configured-device branch to the end of the
 // else branch. Everything asserted below lives in that window.
@@ -109,8 +110,8 @@ test('label, warning and error all reach the CAT log (not just console)', () => 
 // tones out of the PC speakers, and the only evidence a line in a log nobody
 // had opened. Three weeks, IC-7300, while WSJT-X worked first try.
 const { describeJtcatTxAudioFault } = require('../lib/jtcat-tx-audio-fault');
-const APP = fs.readFileSync(P('renderer', 'app.js'), 'utf8');
-const PRELOAD = fs.readFileSync(P('preload.js'), 'utf8');
+const APP = readSrc(P('renderer', 'app.js'));
+const PRELOAD = readSrc(P('preload.js'));
 
 function txRouteBlock() {
   const start = APP.indexOf('async function playJtcatTxAudio(');
@@ -184,7 +185,7 @@ test('JTCAT Tune: a CONFIGURED output that fails setSinkId refuses and unkeys, n
   assert.ok(/indexOf\('alsa:'\) !== 0/.test(body), 'raw ALSA keeps its fallback (KF1G)');
   const catchAll = body.slice(body.lastIndexOf('catch (err)'));
   assert.ok(/jtcatTuneAudioFailed/.test(catchAll), 'any tune audio failure unkeys the radio');
-  const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const MAIN = readSrc(path.join(__dirname, '..', 'main.js'));
   const h = MAIN.slice(MAIN.indexOf("ipcMain.on('jtcat-tune-audio-failed'"), MAIN.indexOf("ipcMain.on('jtcat-tune-toggle'"));
   assert.ok(/stopJtcatTune\(\)/.test(h), 'main must unkey on the renderer\'s report');
   assert.ok(describeJtcatTxAudioFault({ context: 'tune', name: 'NotFoundError' }).startsWith('Tune refused:'));
@@ -212,7 +213,7 @@ test('Voice macro monitor: default output only, never a second copy into the rig
   assert.ok(/voiceMonitorCtx = new AudioContext\(\);/.test(body) && !/voiceMonitorCtx\.setSinkId/.test(body), 'plays on the default output');
   const stop = APP.slice(APP.indexOf('function stopVoicePlayback('), APP.indexOf('function stopVoicePlayback(') + 800);
   assert.ok(/voiceMonitorSource\.stop\(\)/.test(stop) && /voiceMonitorCtx\.close\(\)/.test(stop));
-  const WEB = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote.js'), 'utf8');
+  const WEB = readSrc(path.join(__dirname, '..', 'renderer', 'remote.js'));
   const play = WEB.slice(WEB.indexOf('function playSsbMacro('), WEB.indexOf('function stopSsbPlayback('));
   assert.ok(/if \(ssbMonitorOn\) \{[\s\S]{0,200}ssbPlaybackSource\.connect\(ssbMonitorGain\);\s*ssbMonitorGain\.connect\(ctx\.destination\);/.test(play), 'web: same source, sample-locked');
   const wstop = WEB.slice(WEB.indexOf('function stopSsbPlayback('), WEB.indexOf('function stopSsbPlayback(') + 400);

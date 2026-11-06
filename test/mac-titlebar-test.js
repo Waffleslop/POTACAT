@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // N0KAH 2026-10-01: on a Mac the Log and VFO pop-outs showed the system
 // traffic lights AND our own minimize/maximize/close buttons, with the title
 // under the traffic lights. Every pop-out opens with titleBarStyle
@@ -12,7 +13,7 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
-const R = (f) => fs.readFileSync(path.join(root, f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(root, f)).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

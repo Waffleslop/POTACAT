@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
 'use strict';
+const { readSrc } = require('./_src');
 //
 // lib/rigctld-stderr.js — what rigctld's stderr means to an operator.
 //
@@ -47,7 +48,7 @@ check('NO4D: a port the system lists is never called missing; another program is
   const s = explainRigctldFailure(t, 'x', { portListed: true });
   assert.ok(!/does not exist/.test(s) && /COM3 is on this computer/.test(s) && /World Radio League/.test(s), s);
   assert.ok(/COM3 does not exist/.test(explainRigctldFailure(t, 'x', { portListed: false })), 'not listed: missing');
-  const main = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(require('path').join(__dirname, '..', 'main.js'));
   const h = main.slice(main.indexOf("ipcMain.handle('test-hamlib'"), main.indexOf("ipcMain.handle('test-hamlib'") + 5000);
   assert.ok(/portListed = ports\.some/.test(h) && !/explainRigctldFailure\(rigctldStderr, (lastLine|hint)/.test(h), 'Test Connection passes it everywhere');
 });

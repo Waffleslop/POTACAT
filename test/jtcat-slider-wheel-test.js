@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // K4RVC (first FT8 day, 2026-10-20): "for TX Pwr and Drive trying to drag
 // that setting with the mouse is making large changes ... use the scroll
 // wheel ... and/or type in a value." The JTCAT pop-out's level sliders are
@@ -10,7 +11,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

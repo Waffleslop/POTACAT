@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * The phone's CQ target reaches main (K3SBP 2026-10-18: a phone set to
  * Target: DX called a bare CQ). The relay emitted 'jtcat-call-cq' with no
@@ -53,14 +54,14 @@ test('jtcat-set-chase-target reaches main', () => {
 });
 
 test('main falls back to the chase target only when the modifier is missing', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const src = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(/remoteServer\.on\('jtcat-call-cq', async \(\{ modifier \} = \{\}\)/.test(src));
   assert.ok(src.includes("modifier != null ? modifier : (settings.jtcatChaseTarget || '')"));
   assert.ok(/remoteServer\.on\('jtcat-set-chase-target', \(\{ tag \} = \{\}\) => \{\s*applyChaseTarget\(tag\)/.test(src));
 });
 
 test('every registered C2S type has a case in the demux', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8');
+  const src = readSrc(path.join(__dirname, '..', 'lib', 'remote-server.js'));
   // Not top-level messages: auth, pass-leave, pass-take-over and
   // owner-presence are handled before the demux (they come from sockets that
   // may not be admitted: a paused guest, an owner device waiting), and

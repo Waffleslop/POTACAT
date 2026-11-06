@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // ATU Calibration Wizard (lib/atu-wizard.js): the plan builder against the
 // privilege table, the point classifier, the run loop against a fake Flex,
 // and guards on the main.js / smartsdr.js / station-setup wiring.
@@ -18,7 +19,7 @@ async function ta(name, fn) {
   try { await fn(); pass++; console.log('  ok ' + name); }
   catch (err) { fail++; console.log('  FAIL ' + name + '\n    ' + (err && err.stack || err)); }
 }
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+const R = (f) => readSrc(path.join(__dirname, '..', f));
 
 console.log('ATU wizard — plan');
 const HF = ['40m', '30m', '20m', '17m', '15m', '12m', '10m'];

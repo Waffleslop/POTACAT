@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
 'use strict';
+const { readSrc } = require('./_src');
 //
 // lib/yaesu-scope.js — the FT-710's band scope over USB, everything that is
 // pure: frame bytes, the helper's stdout stream, the CAT replies that give
@@ -199,7 +200,7 @@ check('the step follows the span: 10 / 50 / 100 / 500 Hz', () => {
 section('Mobile handoff follow-ups (2026-09-21)');
 
 check('1. the remote scope-state is an explicit field list — never helperPath', () => {
-  const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf-8');
+  const mainSrc = readSrc(path.join(__dirname, '..', 'main.js'));
   // The function body only: the helpers after it talk about frames in their comments.
   const start = mainSrc.indexOf('function yaesuScopeRemotePayload');
   const fn = start < 0 ? '' : mainSrc.slice(start, mainSrc.indexOf('\n}', start) + 2);
@@ -210,7 +211,7 @@ check('1. the remote scope-state is an explicit field list — never helperPath'
 });
 
 check('2. a client disconnect clears the remote subscription and stops an unwatched helper', () => {
-  const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf-8');
+  const mainSrc = readSrc(path.join(__dirname, '..', 'main.js'));
   const i = mainSrc.indexOf("remoteServer.on('client-disconnected'");
   assert.ok(i > 0);
   const body = mainSrc.slice(i, i + 900);
@@ -219,8 +220,8 @@ check('2. a client disconnect clears the remote subscription and stops an unwatc
 });
 
 check('3. a Guest Pass cannot turn SCU-LAN10 on, and is told why', () => {
-  const serverSrc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf-8');
-  const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf-8');
+  const serverSrc = readSrc(path.join(__dirname, '..', 'lib', 'remote-server.js'));
+  const mainSrc = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(serverSrc.includes("this.emit('scope-enable-radio', { guest: !!ws._passSession })"));
   const i = mainSrc.indexOf("remoteServer.on('scope-enable-radio'");
   const body = mainSrc.slice(i, i + 1400);
@@ -237,7 +238,7 @@ check('3. a Guest Pass cannot turn SCU-LAN10 on, and is told why', () => {
 });
 
 check('4. the synthetic signal advertises nativeScope on any rig and re-broadcasts rig state', () => {
-  const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf-8');
+  const mainSrc = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(mainSrc.includes("if (yaesuScopeSynth && !caps.nativeScope) caps.nativeScope = 'synthetic';"));
   const i = mainSrc.indexOf("ipcMain.on('scope-set-synth'");
   assert.ok(mainSrc.slice(i, i + 700).includes('broadcastRigState()'), 'rig state not re-broadcast when the switch flips');
@@ -402,7 +403,7 @@ check('fps is clamped and synth is opt-in', () => {
 
 section('Source guards');
 
-const helperSrc = fs.readFileSync(path.join(__dirname, '..', 'helpers', 'yaesu-scope', 'yaesu-scope.c'), 'utf-8');
+const helperSrc = readSrc(path.join(__dirname, '..', 'helpers', 'yaesu-scope', 'yaesu-scope.c'));
 
 check('the helper opens the bridge by FTDI description "FT4222 A"', () => {
   assert.ok(helperSrc.includes('"FT4222 A"'));
@@ -433,12 +434,12 @@ check('the helper uses the SPI setup the FT-710 bridge is known to accept', () =
 
 section('Wiring guards (main, server, protocol, packaging)');
 
-const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf-8');
-const serverSrc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf-8');
-const protoSrc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'echocat-protocol.js'), 'utf-8');
-const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
-const releaseYml = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'release.yml'), 'utf-8');
-const modelsSrc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'rig-models.js'), 'utf-8');
+const mainSrc = readSrc(path.join(__dirname, '..', 'main.js'));
+const serverSrc = readSrc(path.join(__dirname, '..', 'lib', 'remote-server.js'));
+const protoSrc = readSrc(path.join(__dirname, '..', 'lib', 'echocat-protocol.js'));
+const pkg = JSON.parse(readSrc(path.join(__dirname, '..', 'package.json')));
+const releaseYml = readSrc(path.join(__dirname, '..', '.github', 'workflows', 'release.yml'));
+const modelsSrc = readSrc(path.join(__dirname, '..', 'lib', 'rig-models.js'));
 
 check('main.js decodes frames through lib/yaesu-scope.js and centres the axis from the ONE frequency sink', () => {
   assert.ok(mainSrc.includes("require('./lib/yaesu-scope')"));

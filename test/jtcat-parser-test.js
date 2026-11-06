@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
 'use strict';
+const { readSrc } = require('./_src');
 //
 // Shared FT8 message-parser regression suite (renderer/jtcat-parser.js).
 // Covers the bugs fixed 2026-06-10:
@@ -217,8 +218,8 @@ section('CQ modifier reaches the QSO tracker (K3SBP 2026-10-18: "CQ DX" showed a
 {
   const fs = require('fs');
   const path = require('path');
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-  const pop = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-popout.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
+  const pop = readSrc(path.join(__dirname, '..', 'renderer', 'jtcat-popout.js'));
   eq((main.match(/phase: 'cq', txMsg, cqMsg: txMsg,/g) || []).length, 3, 'every CQ QSO (pop-out, Run, ECHOCAT) carries the CQ as sent');
   eq(pop.includes("return q.cqMsg || ('CQ ' + q.myCall + ' ' + q.myGrid);"), true, 'the tracker shows it');
 }

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // SSTV transmit reaches the rig through its USB audio, so the key-down must
 // say it carries audio (SSB-over-DATA) and, on an Icom, must switch to
 // USB-D/LSB-D for the transmission: the IC-7300's factory DATA OFF MOD is
@@ -14,7 +15,7 @@ function test(name, fn) {
   try { fn(); pass++; console.log('  ok  ' + name); }
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
-const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+const src = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
 
 console.log('sstv tx data mode');
 

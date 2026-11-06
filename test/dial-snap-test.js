@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // level_death 2026-11-04: an FT8 spot at 7075 should tune 7074.
 const assert = require('assert');
 const fs = require('fs');
@@ -33,7 +34,7 @@ check('adjacent dials never steal each other (17 m FT8 18100 / FT4 18104, 20 m F
   assert.strictEqual(snapToDial(14085000, 'FT2', freqsForMode), 14084000);
 });
 check('tuneRadio applies it before anything moves, and says so', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   const fn = main.slice(main.indexOf('function tuneRadio('), main.indexOf('function tuneRadio(') + 1500);
   assert.ok(/DialSnap\.snapToDial\(freqHz, mode, freqsForMode\)/.test(fn));
 });

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
 'use strict';
+const { readSrc } = require('./_src');
 //
 // DAX TX stream claim. Run: node test/smartsdr-dax-tx-claim-test.js
 //
@@ -84,12 +85,12 @@ check('no stream of our own (released for JS8Call) claims nothing', () => {
 });
 
 check('the audio connection subscribes to stream status', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'smartsdr-audio.js'), 'utf8');
+  const src = readSrc(path.join(__dirname, '..', 'lib', 'smartsdr-audio.js'));
   assert.ok(src.includes("send('sub audio_stream all')"));
 });
 
 check('main claims at key-down and hands back at key-up', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   const assertFn = main.slice(main.indexOf('function assertFlexTxDaxForTx()'), main.indexOf('function restoreFlexTxDax()'));
   assert.ok(assertFn.indexOf('claimTxStream()') > 0, 'assert claims');
   assert.ok(assertFn.indexOf('claimTxStream()') < assertFn.indexOf('if (prior === true) return;'), 'claim runs even when dax=1 already');

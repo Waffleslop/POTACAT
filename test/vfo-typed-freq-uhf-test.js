@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Typing a UHF or 23 cm frequency in kHz in the VFO window (davidcappello,
 // IC-9700 over LAN). Bare digits above 300000 were always read as Hz, so
 // 432100 tuned 0.4321 MHz and 1296100 tuned 1.2961 MHz, which the radio
@@ -58,7 +59,7 @@ test('the rest of the keypad rule is unchanged', () => {
 });
 
 test('the VFO window types, previews and tunes with that one rule', () => {
-  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'vfo-popout.html'), 'utf8');
+  const html = readSrc(path.join(__dirname, '..', 'renderer', 'vfo-popout.html'));
   assert.ok(/function kpTargetKhz\(buf\) \{\n  return window\.FreqPaste \? window\.FreqPaste\.typedToKhz\(buf\) : 0;\n\}/.test(html));
   const go = html.slice(html.indexOf("kpGo.addEventListener('click'"), html.indexOf("kpGo.addEventListener('click'") + 600);
   assert.ok(/const khz = kpTargetKhz\(kpBuffer\);/.test(go), go);

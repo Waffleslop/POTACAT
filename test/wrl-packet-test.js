@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
 'use strict';
+const { readSrc } = require('./_src');
 //
 // lib/wrl-packet.js — the N1MM ContactInfo packet POTACAT sends to World Radio
 // League's Cat Control.
@@ -231,7 +232,7 @@ check('a numeric frequency/report does not abort the datagram either', () => {
 
 section('Source guards');
 
-const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf-8');
+const mainSrc = readSrc(path.join(__dirname, '..', 'main.js'));
 
 check('main.js builds the WRL packet through lib/wrl-packet.js', () => {
   assert.ok(mainSrc.includes("require('./lib/wrl-packet')"), 'the module is not required');
@@ -248,7 +249,7 @@ check('saveQsoRecord normalizes a supplied txPower to a String', () => {
     'a caller-supplied txPower is no longer coerced in saveQsoRecord');
 });
 
-const popoutSrc = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'log-popout.js'), 'utf-8');
+const popoutSrc = readSrc(path.join(__dirname, '..', 'renderer', 'log-popout.js'));
 check('the Log QSO pop-out no longer emits a bare Number txPower', () => {
   assert.ok(!/txPower:\s*powerInput\.value\s*\?\s*Number\(/.test(popoutSrc),
     'log-popout.js still sends txPower as a Number');

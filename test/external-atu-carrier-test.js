@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // RF-sense external tuner carrier (N8JMS FTDX10, 2026-10-26): the tune put the
 // radio in CW and sent a CAT transmit — key up, so no RF. It is AM now.
 // Run: node test/external-atu-carrier-test.js
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const main = readSrc(path.join(__dirname, '..', 'main.js'));
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

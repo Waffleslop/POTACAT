@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // The JTCAT window for older eyes (Casey 2026-11-02): one band-and-mode button
 // and picker, buttons that are the actions.
 // Run: node test/jtcat-picker-test.js
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-popout.html'), 'utf8');
-const js = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-popout.js'), 'utf8');
+const html = readSrc(path.join(__dirname, '..', 'renderer', 'jtcat-popout.html'));
+const js = readSrc(path.join(__dirname, '..', 'renderer', 'jtcat-popout.js'));
 
 let passed = 0, failed = 0;
 function test(name, fn) {
@@ -28,7 +29,7 @@ test('picker: taps only pick; Switch drives the selects; hidden bands stay out',
   assert.ok(!/selectBand|window\.api\.tune/.test(render), 'a tap must not retune');
 });
 test('a voice or CW tune that stops the engine reaches the window, and the picker restarts it', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   const stop = main.slice(main.indexOf('stopping FT8/FT4 engine'), main.indexOf('stopping FT8/FT4 engine') + 300);
   assert.ok(stop.includes('jtcatWindowStopped()'), 'tune path tells the window');
   assert.ok(/send\('jtcat-engine-stopped'\)/.test(main));
@@ -60,14 +61,14 @@ test('Hunt targets: each reads its one flag, and only from a CQ', () => {
   }
 });
 test('Hunt targets reach every surface', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(main.includes('chaseMatch: !settings.jtcatChaseTarget || !!d.chaseMatch'), 'Call = everyone hunts anyone');
-  const web = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote.html'), 'utf8');
+  const web = readSrc(path.join(__dirname, '..', 'renderer', 'remote.html'));
   for (const v of ['wanted-country', 'dx', 'chase', 'watchlist']) {
     assert.ok(html.includes('<option value="' + v + '"'), 'popout ' + v);
     assert.ok(web.includes('<option value="' + v + '"'), 'web ' + v);
   }
-  const rs = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8');
+  const rs = readSrc(path.join(__dirname, '..', 'lib', 'remote-server.js'));
   assert.ok(rs.includes("'hunt-targets'"), 'capability');
 });
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // K9CYT's three requests (Discord 2026-10-04):
 //  1. JTCAT logged a second QSO when he answered a repeated R-report with
 //     another RR73 — lib/jtcat-relog-guard.js + jtcatAutoLog in main.js.
@@ -13,7 +14,7 @@ const path = require('path');
 const G = require('../lib/jtcat-relog-guard');
 const V = require('../lib/js8-varicode');
 
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

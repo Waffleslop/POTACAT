@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // SP5GB (1.11.7, six rigs): activeRigId named no rig while catTarget still
 // pointed at COM15 — "None" in the editor, "Connecting to Kenwood on COM15"
 // in the log, every model lookup falling through to the generic table, and
@@ -12,7 +13,7 @@ const fs = require('fs');
 const path = require('path');
 const { sameTarget, findRigByTarget, healActiveRig } = require('../lib/active-rig');
 
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

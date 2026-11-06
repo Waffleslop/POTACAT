@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // LZ3AW round 7 (TS-480, 2026-09-26): "when the radio is on CW, when I click
 // another call on CW, the radio goes there but with an SSB filter" and "the
 // VFO pane's filter field shows the right value on SSB but not on CW". In CW
@@ -77,7 +78,7 @@ test('AM maps the slot value to its width', () => {
 });
 
 test('a same-family (CW->CW) tune sends no width', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
   assert.ok(/  if \(sameCategory\) \{[\s\S]{0,700}?filterWidth = 0;\n  \} else if \(m === 'CW'\) \{/.test(main));
 });
 
@@ -94,7 +95,7 @@ test('the TS-480 codec cannot key with TA, so the controller says so', () => {
 });
 
 test('the paddle takes the TA route only when the codec supports it', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(/paddleMethod === 'ta' && cwCaps\.taKey && typeof cat\.supportsCwKeyTa === 'function' && cat\.supportsCwKeyTa\(\)/.test(main));
 });
 

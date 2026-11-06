@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * The WSPR beacon runs as long as the operator says (K2BDE 2026-10-30: a 1 W
  * overnight beacon was stopped by the old 30-minute watchdog). Default:
@@ -17,10 +18,10 @@ function check(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + e.message); }
 }
-const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
-const pop = fs.readFileSync(path.join(ROOT, 'renderer/jtcat-popout.js'), 'utf8');
-const html = fs.readFileSync(path.join(ROOT, 'renderer/jtcat-popout.html'), 'utf8');
-const rs = fs.readFileSync(path.join(ROOT, 'lib/remote-server.js'), 'utf8');
+const main = readSrc(path.join(ROOT, 'main.js'));
+const pop = readSrc(path.join(ROOT, 'renderer/jtcat-popout.js'));
+const html = readSrc(path.join(ROOT, 'renderer/jtcat-popout.html'));
+const rs = readSrc(path.join(ROOT, 'lib/remote-server.js'));
 
 console.log('WSPR beacon run time');
 check('the 30-minute watchdog is gone from the beacon; the run time comes from the setting, 0 = until stopped', () => {
@@ -50,8 +51,8 @@ check('the pop-out: a Run select next to Beacon TX, asked once the first time it
 });
 
 console.log('Digirig PTT pin (K5LEB)');
-const app = fs.readFileSync(path.join(ROOT, 'renderer/app.js'), 'utf8');
-const index = fs.readFileSync(path.join(ROOT, 'renderer/index.html'), 'utf8');
+const app = readSrc(path.join(ROOT, 'renderer/app.js'));
+const index = readSrc(path.join(ROOT, 'renderer/index.html'));
 check('a PTT port keys on RTS unless the operator says DTR', () => {
   assert.ok(/const pttType = \(target\.pttType \|\| 'RTS'\)\.toUpperCase\(\);/.test(main));
   assert.ok(/\(savedTarget && savedTarget\.pttType\) \|\| 'RTS'/.test(app));

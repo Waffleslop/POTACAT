@@ -12,6 +12,7 @@
 //      later reply paired with the wrong question and kept doing so. Replies
 //      are now read by the TX state the controller reports.
 'use strict';
+const { readSrc } = require('./_src');
 
 const assert = require('assert');
 const { EventEmitter } = require('events');
@@ -121,7 +122,7 @@ test('a codec nobody gives a hint keeps the old question-order rule', () => {
 console.log('=== #3 settings push size ===');
 
 test('old full-size SSTV template photos are shrunk at start-up (880 KB settings-update)', () => {
-  const main = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  const main = readSrc(require('path').join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
   const i = main.indexOf('Photo templates saved before 1.11.0 held the camera original');
   assert.ok(i > 0);
   const b = main.slice(i, i + 1600);

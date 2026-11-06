@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 // TS-2000 CAT over TCP for N1MM+ (NK8Q 2026-10-23): replies POTACAT's own
 // Kenwood codec parses, and a real socket round trip.
 const assert = require('assert');
@@ -45,7 +46,7 @@ const st = { freqHz: 14074000, mode: 'DIGU', ptt: false, smeter: 120, powerW: 60
   assert.strictEqual(got, 'FA00014074000;MD2;');
   assert.deepStrictEqual(actions, [{ setFreqHz: 21074000 }, { ptt: true }]);
   ok('a real TCP client gets replies in order and its sets reach POTACAT');
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(/createTs2000Server\([\s\S]{0,1200}?\{ host: '127\.0\.0\.1', port \}\)/.test(main), 'loopback only');
   assert.ok(/if \(_loggerCatPtt && !_loggerCatClients\) \{ _loggerCatPtt = false; handleRemotePtt\(false\);/.test(main), 'a dropped logger releases PTT');
   assert.ok(/try \{ stopLoggerCat\(\); \} catch \{\}/.test(main), 'stopped at quit');

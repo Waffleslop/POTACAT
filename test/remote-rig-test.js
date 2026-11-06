@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Desktop-to-desktop, Phase A1/A2 (docs/remote-desktop-parity-spec.md).
 // A laptop driving a remote shack showed every rig control dark: the shack's
 // status snapshot carries the whole radio, the laptop read five fields of it
@@ -16,7 +17,7 @@ function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
 function fnBody(src, header) {
   const a = src.indexOf(header);
   assert.ok(a >= 0, 'found ' + header);
@@ -147,12 +148,12 @@ test('every PTT source keys the shack in remote mode; the shack\'s release reach
   const msg = handlerBody(main, "remoteClient.on('message', (msg) => {");
   assert.ok(/case 'ptt-timeout':\n\s+case 'ptt-force-rx':/.test(msg) && /remote-client-ptt-released/.test(msg));
   assert.ok(/case 'vfo-lock-state':/.test(msg));
-  const preload = fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8');
-  const vfoPreload = fs.readFileSync(path.join(__dirname, '..', 'preload-vfo-popout.js'), 'utf8');
+  const preload = readSrc(path.join(__dirname, '..', 'preload.js'));
+  const vfoPreload = readSrc(path.join(__dirname, '..', 'preload-vfo-popout.js'));
   assert.ok(/onRemoteClientPttReleased/.test(preload) && /onRemotePttReleased/.test(vfoPreload));
-  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
   assert.ok(/onRemoteClientPttReleased\(\(\) => \{ ptt\.up\(\); \}\)/.test(app));
-  const vfo = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'vfo-popout.html'), 'utf8');
+  const vfo = readSrc(path.join(__dirname, '..', 'renderer', 'vfo-popout.html'));
   assert.ok(/onRemotePttReleased\(\(info\) => \{\n\s+pttStop\(\);/.test(vfo));
 });
 
@@ -169,9 +170,9 @@ test('the shack\'s rig list and round trip reach the chip and the CAT popover', 
   assert.ok(/case 'tx-drive-state':/.test(msg), 'the shack\'s TX drive echo');
   const sw = main.slice(main.indexOf("ipcMain.handle('remote-shack-switch-rig'"));
   assert.ok(/remoteClient\.sendRaw\(\{ type: 'switch-rig', rigId: String\(rigId\) \}\)/.test(sw.slice(0, 600)));
-  const rc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-client.js'), 'utf8');
+  const rc = readSrc(path.join(__dirname, '..', 'lib', 'remote-client.js'));
   assert.ok(/this\.emit\('rtt', rtt\)/.test(rc) && /rttMs: this\._rttMs/.test(rc));
-  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8').replace(/\r\n/g, '\n');
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js')).replace(/\r\n/g, '\n');
   assert.ok(/if \(remoteShack && remoteShack\.remote\) \{\n\s+renderRemoteShackRigs\(remoteShack\);/.test(app), 'CAT popover lists the shack\'s rigs');
   assert.ok(/window\.api\.remoteShackSwitchRig\(rig\.id\)/.test(app));
   assert.ok(/connectionTargetsActivate\(null\)/.test(app.slice(app.indexOf('function renderRemoteShackRigs'))), 'a way back to this PC\'s radio');
@@ -196,7 +197,7 @@ test('TX drive in remote mode is the shack\'s, never this PC\'s rig setting', ()
 
 test('remote-features: every unavailable entry point exists and has a reason', () => {
   const RF = require('../lib/remote-features');
-  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  const html = readSrc(path.join(__dirname, '..', 'renderer', 'index.html'));
   for (const { id, reason, name } of RF.unavailableElements()) {
     assert.ok(html.includes(`id="${id}"`), `${name}: #${id} is in index.html`);
     assert.ok(reason && reason.length > 20, `${name} has a reason`);
@@ -232,7 +233,7 @@ test('main refuses an unavailable feature with the same text, at its entry IPC',
 });
 
 test('the renderer greys unavailable entry points and answers a click with the reason', () => {
-  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8').replace(/\r\n/g, '\n');
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js')).replace(/\r\n/g, '\n');
   const g = app.slice(app.indexOf('function applyRemoteFeatureGating(on) {'), app.indexOf('// Remote mode: the radios on offer are the SHACK\'s.'));
   assert.ok(/RemoteFeatures\.unavailableElements\(\)/.test(g) && /data-remote-unavailable/.test(g));
   assert.ok(/e\.stopImmediatePropagation\(\);\n\s+showLogToast\(el\.getAttribute\('data-remote-unavailable'\)/.test(g));
@@ -240,9 +241,9 @@ test('the renderer greys unavailable entry points and answers a click with the r
 });
 
 test('shack audio: chosen devices are applied, refused out loud, never swapped', () => {
-  const ans = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote-audio-answerer.js'), 'utf8');
+  const ans = readSrc(path.join(__dirname, '..', 'renderer', 'remote-audio-answerer.js'));
   assert.ok(/if \(this\._micDeviceId\) audio\.deviceId = \{ exact: this\._micDeviceId \};/.test(ans), 'exact mic, no fallback');
-  const shell = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote-audio-client.html'), 'utf8').replace(/\r\n/g, '\n');
+  const shell = readSrc(path.join(__dirname, '..', 'renderer', 'remote-audio-client.html')).replace(/\r\n/g, '\n');
   assert.ok(/catch \(e\) \{\n\s+el\.muted = true;\n\s+window\.api\.state\(\{ sinkError:/.test(shell), 'an output that will not open mutes, it does not fall back');
   assert.ok(/a\.setMicDeviceId\(cfg\.inputId\); a\.start\(\);/.test(shell), 'the mic is chosen before capture');
   assert.ok(/peak > 1e-4/.test(shell) && /now - silentSince > 10000/.test(shell), 'digital silence for 10 s is reported');
@@ -256,7 +257,7 @@ test('shack audio: chosen devices are applied, refused out loud, never swapped',
 test('hold-a-key PTT: off by default, never while typing, released on keyup and blur', () => {
   const prefs = fnBody(main, 'function remoteShackAudioPrefs() {');
   assert.ok(/pttKey: REMOTE_SHACK_PTT_KEYS\.includes\(a\.pttKey\) \? a\.pttKey : ''/.test(prefs));
-  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8').replace(/\r\n/g, '\n');
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js')).replace(/\r\n/g, '\n');
   assert.ok(/e\.repeat \|\| e\.ctrlKey \|\| e\.altKey \|\| e\.metaKey\) return;\n\s+if \(typingIn\(document\.activeElement\)\) return;/.test(app));
   assert.ok(/window\.addEventListener\('blur', \(\) => \{ if \(_pttKeyHeld\) \{ _pttKeyHeld = false; ptt\.up\(\); \} \}\);/.test(app));
 });
@@ -291,7 +292,7 @@ test('Remove unpairs at the shack when linked, and gives the radio back to this 
   rs.revokeDevice = (id) => { revoked = id; return true; };
   const ws = { readyState: 1, _authenticated: true, _pairedDevice: { id: 'dev-7', name: 'laptop' } };
   rs._client = ws;
-  const srv = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8');
+  const srv = readSrc(path.join(__dirname, '..', 'lib', 'remote-server.js'));
   assert.ok(/case 'unpair-self': \{\n\s+const dev = ws\._pairedDevice;[\s\S]{0,300}this\.revokeDevice\(dev\.id\);/.test(srv.replace(/\r\n/g, '\n')));
 });
 
@@ -301,7 +302,7 @@ test('Re-pair: one click for an account-linked shack, a clear instruction otherw
   assert.ok(/norm\(s\.fingerprint\) === norm\(old\.fingerprint\)/.test(rp), 'the same shack, by fingerprint first');
   const st = handlerBody(main, "ipcMain.handle('connection-targets-get-status', () => {");
   assert.ok(/state: 'auth-fail'/.test(st), 'a refused pairing survives a list refresh');
-  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
   assert.ok(/data-act="rr-repair"/.test(app) && /act === 'rr-repair'\) return _remoteRadiosRepair\(id, btn\)/.test(app));
   assert.ok(!/Pair another desktop/.test(app), 'the copy names the real button');
 });
@@ -322,7 +323,7 @@ test('CW: text, cancel, speed and the paddle key the SHACK, gated on its Remote 
   assert.ok(/if \(down\) return;/.test(edge), 'a refused press never keys; a release always goes');
   const conn = handlerBody(main, "remoteClient.on('connected', (info) => {");
   assert.ok(/remoteShackCw = \{ enabled: !!info\.cwAvailable, paddle: !!info\.cwPaddleAvailable/.test(conn));
-  const rc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-client.js'), 'utf8');
+  const rc = readSrc(path.join(__dirname, '..', 'lib', 'remote-client.js'));
   assert.ok(/cwAvailable: !!msg\.cwAvailable/.test(rc) && /vfoLocked: !!msg\.vfoLocked/.test(rc));
 });
 
@@ -333,7 +334,7 @@ test('voice macros: the shack\'s, played into its radio', () => {
   assert.ok(/type: 'voice-macro-play', idx: i/.test(play));
   const list = handlerBody(main, "ipcMain.handle('voice-macro-list', () => {");
   assert.ok(/if \(isRemoteMode\(\)\) return remoteShackVoice\.filled/.test(list));
-  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
   assert.ok(/if \(remoteShack && remoteShack\.remote\) \{ window\.api\.remoteVoiceMacroPlay\(idx\); return; \}/.test(app));
   const RF = require('../lib/remote-features');
   assert.strictEqual(RF.check('cw').ok, true);
@@ -369,7 +370,7 @@ test('an activation on the laptop is the shack\'s too (its engines log with the 
 });
 
 test('an n-fer started on a device reaches the shack as every park; Remove waits for the shack\'s answer', () => {
-  const srv = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8');
+  const srv = readSrc(path.join(__dirname, '..', 'lib', 'remote-server.js'));
   assert.ok(/parkRefs: Array\.isArray\(msg\.parkRefs\)/.test(srv), 'the demux passes parkRefs');
   const at = main.indexOf("remoteServer.on('set-activator-park', async (");
   const h = main.slice(at, at + 2000);
@@ -383,7 +384,7 @@ test('an n-fer started on a device reaches the shack as every park; Remove waits
 });
 
 test('ending an activation is sent only to a shack that advertises activation-end', () => {
-  const srv = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8');
+  const srv = readSrc(path.join(__dirname, '..', 'lib', 'remote-server.js'));
   assert.ok(/'activation-end',/.test(srv), 'this shack advertises it');
   const push = fnBody(main, 'function pushActivationToRemoteShack() {');
   assert.ok(/if \(!active && !caps\.includes\('activation-end'\)\) return;/.test(push), 'an older shack is not told to end (it would stay in activator mode with no park)');

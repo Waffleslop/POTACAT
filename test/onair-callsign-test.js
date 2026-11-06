@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // G8LIY (2026-10-20): "STATION_CALLSIGN = the callsign used over the air
 // (G8LIY, G8LIY/P, GM8LIY); OPERATOR = the logging person; OWNER_CALLSIGN =
 // the station owner." POTACAT wrote both OPERATOR and STATION_CALLSIGN as the
@@ -13,7 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const { buildAdifFields } = require('../lib/adif-writer');
 
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

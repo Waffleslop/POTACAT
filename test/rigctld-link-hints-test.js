@@ -7,13 +7,14 @@
 //    that the Port is not the Hamlib model number (he had typed 2014).
 // Run: node test/rigctld-link-hints-test.js
 'use strict';
+const { readSrc } = require('./_src');
 
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const { EventEmitter } = require('events');
 
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
@@ -64,7 +65,7 @@ test('rigctld Network: a refused port says nothing listens there, once', () => {
   assert.ok(/transport\.on\('error', \(err\) => \{\n\s*if \(refusedSaid \|\| !\/ECONNREFUSED\//.test(main));
   assert.ok(/the Port is not the Hamlib model number/.test(main));
   assert.ok(/choose "Other Rig \(Hamlib\)" instead/.test(main));
-  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  const html = readSrc(path.join(__dirname, '..', 'renderer', 'index.html'));
   assert.ok(html.includes('value="rigctldnet"> rigctld Network') && html.includes('value="hamlib"> Other Rig (Hamlib)'), 'the labels the hint names');
 });
 

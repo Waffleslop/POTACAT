@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * Clicking another station abandons the running QSO. It is logged only if it
  * was already complete (their R-report in, our RR73 out). level_death and
@@ -46,7 +47,7 @@ test('no QSO, or no call: nothing to log', () => {
   assert.strictEqual(replaceLogsQso({ phase: 'cq-rr73' }, 'K1ABC'), false);
 });
 
-const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const MAIN = readSrc(path.join(__dirname, '..', 'main.js'));
 test('both reply paths (window and ECHOCAT/phone) use the shared rule', () => {
   assert.ok(/_jtcatStateMachine\.replaceLogsQso\(popoutJtcatQso, data\.call\)/.test(MAIN), 'window path');
   assert.ok(/_jtcatStateMachine\.replaceLogsQso\(remoteJtcatQso, call\)/.test(MAIN), 'ECHOCAT path');

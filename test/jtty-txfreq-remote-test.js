@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 // A TX frequency set from ECHOCAT must reach the JTCAT pop-out, whose JTTY and
 // PSK31 panes otherwise push their own stale copy back to the engine on every
 // mode change and save it on every Send (K3SBP 2026-10-19: every JTTY
@@ -8,9 +9,9 @@ const path = require('path');
 const assert = require('assert');
 
 const root = path.join(__dirname, '..');
-const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
-const pop = fs.readFileSync(path.join(root, 'renderer', 'jtcat-popout.js'), 'utf8');
-const pre = fs.readFileSync(path.join(root, 'preload-jtcat-popout.js'), 'utf8');
+const main = readSrc(path.join(root, 'main.js'));
+const pop = readSrc(path.join(root, 'renderer', 'jtcat-popout.js'));
+const pre = readSrc(path.join(root, 'preload-jtcat-popout.js'));
 
 let pass = 0, fail = 0;
 function t(name, fn) {

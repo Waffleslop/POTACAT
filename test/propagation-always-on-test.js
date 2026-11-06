@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * Propagation (RBN + PSKReporter "where am I heard") is always on (Casey
  * 2026-10-27: "always working for everyone ... just work without having to
@@ -12,9 +13,9 @@ const path = require('path');
 const assert = require('assert');
 
 const ROOT = path.join(__dirname, '..');
-const app = fs.readFileSync(path.join(ROOT, 'renderer/app.js'), 'utf8');
-const html = fs.readFileSync(path.join(ROOT, 'renderer/index.html'), 'utf8');
-const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+const app = readSrc(path.join(ROOT, 'renderer/app.js'));
+const html = readSrc(path.join(ROOT, 'renderer/index.html'));
+const main = readSrc(path.join(ROOT, 'main.js'));
 
 let passed = 0;
 let failed = 0;

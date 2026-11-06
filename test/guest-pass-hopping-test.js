@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * Guest Pass hopping and take-over (Casey 2026-10-27): guests move between
  * rigs on a pass that lasts its whole window, and the owner can take the
@@ -347,7 +348,7 @@ async function owner(port) {
   });
 
   console.log('main.js wiring');
-  const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+  const main = readSrc(path.join(ROOT, 'main.js'));
   check('a device recording asks the pass before it reaches the player, and is never written to disk', () => {
     const i = main.indexOf("remoteServer.on('voice-macro-play-audio'");
     const b = main.slice(i, i + 900);
@@ -357,7 +358,7 @@ async function owner(port) {
     assert.ok(main.includes("remoteServer.on('voice-macro-stop'"));
   });
   check('the renderer plays slots and device recordings through one player that reports what is on the air', () => {
-    const app = fs.readFileSync(path.join(ROOT, 'renderer/app.js'), 'utf8');
+    const app = readSrc(path.join(ROOT, 'renderer/app.js'));
     assert.ok(/async function playVoiceAudio\(/.test(app));
     assert.ok(/playVoiceAudio\(base64, \{ idx: idx/.test(app), 'slots use it');
     assert.ok(/onPlayVoiceMacroAudio\([\s\S]{0,200}playVoiceAudio\(info\.audio/.test(app), 'device recordings use it');

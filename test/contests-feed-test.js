@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // lib/contests-feed.js — the desktop half of docs/contests-feed.md.
 // Run: node test/contests-feed-test.js
 const assert = require('assert');
@@ -146,12 +147,12 @@ test('an entry whose occurrences ran out falls back to the local resolver', asyn
 });
 
 test('main.js reads contests only through the feed; the row Rules link uses the contest allowlist', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   const bare = main.split('\n').filter((l) => /getAllContests\(\)/.test(l) && !/bundled: \(\) => contestsDb\.getAllContests\(\)/.test(l));
   assert.deepStrictEqual(bare, [], 'bundled catalog read directly:\n' + bare.join('\n'));
   assert.ok(/const resolved = contestsFeed\.resolvedAt\(now\);/.test(main));
   assert.ok(/setInterval\(\(\) => \{ contestsFeed\.refresh\(\)/.test(main));
-  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
   assert.ok(/window\.api\.openContestUrl\(url\); \/\/ the contest-catalog allowlist/.test(app));
   assert.ok(/window\.api\.onContestsUpdated\(/.test(app));
 });

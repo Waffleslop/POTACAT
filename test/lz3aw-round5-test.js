@@ -25,6 +25,7 @@
 // Run: node test/lz3aw-round5-test.js
 
 'use strict';
+const { readSrc } = require('./_src');
 
 const assert = require('assert');
 const fs = require('fs');
@@ -47,7 +48,7 @@ async function atest(name, fn) {
   try { await fn(); passed++; console.log('  ✓ ' + name); }
   catch (err) { failed++; console.log('  ✗ FAIL: ' + name + '\n      ' + (err.stack || err.message)); }
 }
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const TS480 = RIG_MODELS['TS-480'];

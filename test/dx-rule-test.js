@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // What counts as DX (G4BFG + K3SBP, 2026-10-26): a different DXCC entity by
 // default; optionally farther than the operator's distance, one for HF and one
 // for 6 m and up. "DX" used to mean "came from the DX Cluster".
@@ -8,7 +9,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const R = require('../lib/dx-rule');
-const read = (...p) => fs.readFileSync(path.join(__dirname, '..', ...p), 'utf8');
+const read = (...p) => readSrc(path.join(__dirname, '..', ...p));
 
 let passed = 0, failed = 0;
 function test(name, fn) {

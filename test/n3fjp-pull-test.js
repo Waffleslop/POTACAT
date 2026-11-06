@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 // Bringing in contacts logged in N3FJP on its own (W6ING 2026-10-25).
 // N3FJP's API help page shows the LIST command but not its reply, so the
 // parser is held to several plausible shapes and to dropping, never guessing.
@@ -120,12 +121,12 @@ test('the record N3FJP gets says USA, so its DXCC fills in (AE5JE)', () => {
 });
 
 test('main.js wiring: queue shared with the forward, pull gated on the setting', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(main.includes("return n3fjpQueue(() => sendN3fjpTcp(qsoData, host, port || 1100));"));
   assert.ok(/n3fjpQueue\(\(\) => N3fjpPull\.requestList\(/.test(main));
   assert.ok(/settings\.n3fjpPull && settings\.sendToLogbook && settings\.logbookType === 'n3fjp'/.test(main));
   assert.ok(/importQsoRecords\(records\)/.test(main));
-  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  const html = readSrc(path.join(__dirname, '..', 'renderer', 'index.html'));
   assert.ok(html.includes('id="set-n3fjp-pull"'));
 });
 
@@ -159,7 +160,7 @@ test('confirmationPatch: an N3FJP contact mirrors N3FJP, a POTACAT contact is on
   assert.strictEqual(P.confirmationPatch(now, now), null);
 });
 test('the pull writes confirmation updates through mutateLog and re-reads the whole log daily', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   const fn = main.slice(main.indexOf('function n3fjpUpdateConfirmations('), main.indexOf('async function n3fjpPull('));
   assert.ok(/QsoLog\.mutateLog\(qsoLogPath\(\)/.test(fn) && /confirmationPatch\(q, m\)/.test(fn));
   assert.ok(/const daily = !full && Date\.now\(\) - \(settings\.n3fjpPullConfirmAt \|\| 0\) > 24 \* 3600 \* 1000;/.test(main));

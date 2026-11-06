@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * The idle-activity feed — "open the app into what the station is doing."
  *
@@ -45,7 +46,7 @@ test('activity-state and wspr-session are registered S2C', () => {
 });
 
 test('the hello capability list gains activity', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8');
+  const src = readSrc(path.join(__dirname, '..', 'lib', 'remote-server.js'));
   assert.ok(/capabilities: \[[^\]]*'activity'/.test(src),
     "the server hello must advertise 'activity'");
 });
@@ -83,7 +84,7 @@ test('all three auth paths hydrate via the shared helpers', () => {
   // Inline per-path copies are how the Guest Pass JS8 gap happened — the
   // helpers exist so a new feed reaches every path by construction. Count
   // the call sites: legacy token, hello, and pass auth.
-  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8');
+  const src = readSrc(path.join(__dirname, '..', 'lib', 'remote-server.js'));
   // 2026-08-20: the no-token and token paths consolidated onto ONE
   // _hydrateClient(ws) helper (which carries the activity + JS8 calls
   // once), so the counts are: helper internals (1 each) + the Guest Pass
@@ -114,7 +115,7 @@ test('hydration sends activity-state before the content feeds', () => {
 
 // ── main.js wiring (static, same idiom as the JS8 wiring test) ──────────────
 
-const MAIN = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const MAIN = readSrc(path.join(__dirname, '..', 'main.js'));
 
 test('main pushes activity on every lifecycle edge that changes it', () => {
   // The compute is cheap and debounced; what matters is coverage — a

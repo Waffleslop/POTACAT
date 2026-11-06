@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 //
 // SSTV lock supervision + VIS validation (WB8IMY 2026-09-26).
 //
@@ -402,30 +403,30 @@ check('the VIS log line names the mode and VIS code — never "0xpd160"', () => 
   assert.match(line, /PD-160 \(VIS 98\)/);
   assert.match(sstvRxVisLogLine({ mode: 'martin1', modeName: 'Martin M1', auto: true }), /No VIS heard — joined Martin M1/);
   assert.match(sstvRxVisLogLine({ mode: 'scottie1', modeName: 'Scottie S1', visCode: 60, midLock: true }), /New VIS during a decode: Scottie S1/);
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(!/VIS detected: \$\{data\.modeName\} \(mode 0x/.test(main), 'main.js still hex-formats the mode key');
   assert.ok(/sendCatLog\(sstvRxVisLogLine\(data\)\)/.test(main));
 });
 check('main.js: a stopped engine is restarted, and a lost lock clears the decode state', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(/if \(sstvEngine\) \{\s*[\s\S]{0,600}?if \(!sstvEngine\.running\) \{\s*sstvEngine\.start\(\);/.test(main), 'startSstv must restart a stopped engine');
   assert.ok(/sstvEngine\.on\('rx-lock-lost'[\s\S]{0,400}?_sstvDecode = null;/.test(main));
   assert.ok(/sstvManager\.on\('rx-lock-lost'/.test(main));
 });
 check('engine + manager forward rx-lock-lost; engine re-applies the sample rate to a fresh worker', () => {
-  const eng = fs.readFileSync(path.join(__dirname, '..', 'lib', 'sstv-engine.js'), 'utf8');
+  const eng = readSrc(path.join(__dirname, '..', 'lib', 'sstv-engine.js'));
   assert.ok(/case 'rx-lock-lost':[\s\S]{0,300}?this\._decoding = false;[\s\S]{0,300}?this\.emit\('rx-lock-lost'/.test(eng));
   assert.ok(/case 'ready':[\s\S]{0,500}?type: 'set-sample-rate', sampleRate: this\._sampleRate/.test(eng));
-  const mgr = fs.readFileSync(path.join(__dirname, '..', 'lib', 'sstv-manager.js'), 'utf8');
+  const mgr = readSrc(path.join(__dirname, '..', 'lib', 'sstv-manager.js'));
   assert.ok(/engine\.on\('rx-lock-lost'/.test(mgr));
 });
 check('pop-out: canvas sized from the decoder\'s mode, PD row pairs drawn, lock-lost handled', () => {
-  const pop = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'sstv-popout.js'), 'utf8');
+  const pop = readSrc(path.join(__dirname, '..', 'renderer', 'sstv-popout.js'));
   assert.ok(/function rxResFor\(data\) \{\s*if \(data && data\.width > 0 && data\.height > 0\)/.test(pop));
   assert.ok(!/const res = MODE_RES\[data\.mode\];/.test(pop), 'rx-vis must not size the canvas from the TX table alone');
   assert.ok(/new ImageData\(rgba, w, rgba\.length \/ \(4 \* w\)\)/.test(pop), 'a PD rx-line is two rows');
   assert.ok(/onSstvRxLockLost/.test(pop));
-  const pre = fs.readFileSync(path.join(__dirname, '..', 'preload-sstv-popout.js'), 'utf8');
+  const pre = readSrc(path.join(__dirname, '..', 'preload-sstv-popout.js'));
   assert.ok(/onSstvRxLockLost: \(cb\) => ipcRenderer\.on\('sstv-rx-lock-lost'/.test(pre));
 });
 

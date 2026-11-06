@@ -8,13 +8,14 @@
 //   - the password is a registered secret; shutdown unkeys before CAT goes.
 // Run: node test/winlink-main-wiring-test.js
 'use strict';
+const { readSrc } = require('./_src');
 
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
-const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8').replace(/\r\n/g, '\n');
+const read = (f) => readSrc(path.join(ROOT, f)).replace(/\r\n/g, '\n');
 const main = read('main.js');
 const server = read('lib/remote-server.js');
 
@@ -270,12 +271,12 @@ test('winlink-watch subscribes a device; the shack computes bins and the Busy ve
   assert.ok(/rs\.on\('winlink-watch', \(\{ count \} = \{\}\) => winlinkSetRemoteWatch\(count\)\);/.test(main), 'wired inside onRemoteServer');
   assert.ok(/function winlinkSpectrumPublish\(mags\)[\s\S]*?WinlinkSpectrum\.markerBand\(mode, winlinkModemBw\(\)\)[\s\S]*?const v = _winlinkBusy\.update\(mags, now\);[\s\S]*?broadcastWinlinkSpectrum\(\{ bins: WinlinkSpectrum\.wireBins\(mags\), busy: v\.busy/.test(main), 'the verdict is decided on the shack, by the shared BusyDetector');
   assert.ok(/modemBw: winlinkModemBw\(\),/.test(main), 'the mail window gets every modem\'s bandwidth');
-  const popHtml = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'winlink-popout.html'), 'utf8');
-  const popJs = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'winlink-popout.js'), 'utf8');
+  const popHtml = readSrc(path.join(__dirname, '..', 'renderer', 'winlink-popout.html'));
+  const popJs = readSrc(path.join(__dirname, '..', 'renderer', 'winlink-popout.js'));
   assert.ok(popHtml.includes('<script src="../lib/winlink-spectrum.js"></script>'), 'the mail window loads the shared rule');
   assert.ok(/new WinlinkSpectrum\.BusyDetector\(/.test(popJs) && /WinlinkSpectrum\.markerBand\(mode, /.test(popJs), 'the mail window uses the shared rule for both the badge and the markers');
   assert.ok(/if \(key === wfMarkersKey\) return;/.test(popJs), 'an unchanged band never resets the badge (every state push passes through wfMarkers)');
-  assert.ok(!/centre/.test(popJs) && !/centre/.test(popHtml) && !/centre/.test(fs.readFileSync(path.join(__dirname, '..', 'lib', 'winlink-spectrum.js'), 'utf8')), 'center, not centre (Casey 2026-10-23)');
+  assert.ok(!/centre/.test(popJs) && !/centre/.test(popHtml) && !/centre/.test(readSrc(path.join(__dirname, '..', 'lib', 'winlink-spectrum.js'))), 'center, not centre (Casey 2026-10-23)');
   assert.ok(/if \(_winlinkRemoteWatchers > 0\) winlinkSpecAcc\(\)\.push\(pcm, sampleRate\);/.test(main), 'fed from the socket routes only while watched');
   assert.ok(/winlink-spectrum-mags[\s\S]*?winlinkSocketAudioRoute\(\)\) return;/.test(main), 'the window relays only on a sound-device rig');
 });

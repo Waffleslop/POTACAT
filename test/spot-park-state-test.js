@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * A park spanning several states: the activator's own spot says which one
  * (POTA spot locationCode, "US-UT"), so POTACAT stops asking (N0KAH
@@ -44,8 +45,8 @@ check('the picked state lands in the record\'s STATE', () => {
 });
 
 console.log('Wiring');
-const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
-const app = fs.readFileSync(path.join(ROOT, 'renderer/app.js'), 'utf8');
+const main = readSrc(path.join(ROOT, 'main.js'));
+const app = readSrc(path.join(ROOT, 'renderer/app.js'));
 check('POTA spots keep locationCode', () => {
   assert.ok(/locationCode: \/\^\[A-Z\]\{2\}-\[A-Z0-9\]\{1,3\}\$\/i\.test\(String\(s\.locationCode/.test(main));
 });

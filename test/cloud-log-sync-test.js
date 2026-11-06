@@ -11,6 +11,7 @@
 //
 // Runs the real modules; electron is stubbed for cloud-ipc.
 
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
@@ -129,7 +130,7 @@ check('repairFieldNames: rewrites once with a backup, collapses identical re-app
   writeLog(file, [{ CALL: 'K1ABC', QSO_DATE: '20260101' }, PSEUDO, PSEUDO, { ...PSEUDO, COMMENT: 'differs' }, PSEUDO]);
   assert.deepStrictEqual(QsoLog.repairFieldNames(file), { repaired: 4, collapsed: 2 });
   assert.strictEqual(parseAllRawQsos(file).length, 3, 'identical copies collapsed, the differing one kept');
-  const text = fs.readFileSync(file, 'utf8');
+  const text = readSrc(file);
   assert.ok(!/<CALLSIGN:/i.test(text) && /<CALL:5>W3BOO/.test(text) && /<FREQ:8>7\.074000/.test(text));
   assert.strictEqual(fs.readdirSync(dir).filter((f) => f.includes('.pre-field-repair-')).length, 1);
   const mtime = fs.statSync(file).mtimeMs;
@@ -157,11 +158,11 @@ check('mutateLog: an edit bumps the version BEFORE the write, so file and journa
 
 check('mutateLog: no change means no write and no journal entry; false aborts', () => {
   const file = seededLog([A]);
-  const before = fs.readFileSync(file, 'utf8');
+  const before = readSrc(file);
   const sink = recordingSink();
   assert.strictEqual(QsoLog.mutateLog(file, () => {}, { sink }).changes.length, 0);
   assert.strictEqual(QsoLog.mutateLog(file, (q) => { q[0].COMMENT = 'x'; return false; }, { sink }).changes.length, 0);
-  assert.strictEqual(fs.readFileSync(file, 'utf8'), before);
+  assert.strictEqual(readSrc(file), before);
   assert.strictEqual(sink.calls.length, 0);
 });
 
@@ -275,7 +276,7 @@ check('SyncJournal: an unreadable file is set aside, never silently overwritten'
   assert.strictEqual(j.length, 0);
   const aside = fs.readdirSync(dir).filter((f) => f.startsWith('sync-journal.json.corrupt-'));
   assert.strictEqual(aside.length, 1);
-  assert.strictEqual(fs.readFileSync(path.join(dir, aside[0]), 'utf8'), '[{"uuid":');
+  assert.strictEqual(readSrc(path.join(dir, aside[0])), '[{"uuid":');
   assert.ok(logged[0].includes('unreadable'));
 });
 
@@ -395,7 +396,7 @@ check('pull merge: pseudo-named rows from the server land with real names', () =
   env.cloud.getSyncCallbacks().onPulled([{ uuid: UP, version: 1, adifFields: PSEUDO }]);
   const got = parseAllRawQsos(env.logPath).find((q) => q.APP_POTACAT_UUID === UP);
   assert.ok(got && got.CALL === 'W3BOO');
-  assert.ok(!/<CALLSIGN:/i.test(fs.readFileSync(env.logPath, 'utf8')));
+  assert.ok(!/<CALLSIGN:/i.test(readSrc(env.logPath)));
 });
 
 check('uploadFullLog: retires uploaded creates, keeps pending edits and deletes', async () => {
@@ -566,17 +567,17 @@ check('checkMissing: batches at 5000 and lower-cases the answer', async () => {
 });
 
 check('wiring: sign-in schedules the catch-up (never on sign-out); boot runs it once; status is owner-scoped', () => {
-  const ipc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'cloud-ipc.js'), 'utf8');
+  const ipc = readSrc(path.join(__dirname, '..', 'lib', 'cloud-ipc.js'));
   assert.ok(/if \(reason !== 'signout'\) \{[\s\S]{0,200}reconcileWithCloud\(reason\)/.test(ipc));
   assert.ok(/sync\.startInterval\(interval, myJournal\(\), getSyncCallbacks\(\)\)/.test(ipc), 'background sync uses the owner view');
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(/cloudIpc\.reconcileWithCloud\('boot'\)/.test(main));
   assert.ok(/cloudIpc\.pendingStatus\(\)/.test(main) && !/cloudIpc\.journal\.length/.test(main), 'ECHOCAT status counts only this account');
 });
 
 // ── source guards on main.js ──────────────────────────────────────────────
 check('main.js: every log write goes through lib/qso-log.js', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const src = readSrc(path.join(__dirname, '..', 'main.js'));
   for (const banned of ['rewriteAdifFile(', 'appendRawQso(', 'appendQso(', 'appendImportedQso(', 'journalCreate(', 'journalUpdate(', 'journalDelete(']) {
     assert.ok(!src.includes(banned), `main.js still calls ${banned}`);
   }

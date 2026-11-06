@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // boblk9tc (ECHOCAT Web, 2026-10-29): "When I get a partial decode it stays
 // locked on receive, I am not able to get the send tab." Progress set the page
 // to Receiving with SEND disabled, and only a finished picture cleared it. A
@@ -9,7 +10,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8').replace(/\r\n/g, '\n');
+const read = (p) => readSrc(path.join(__dirname, '..', p)).replace(/\r\n/g, '\n');
 
 let passed = 0, failed = 0;
 const queue = [];

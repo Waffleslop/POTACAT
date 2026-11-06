@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // The worked grid in the log windows (GitHub #108, AE5JE): the bands and
 // modes already worked with the call being logged, in the Log QSO window,
 // the log pop-out and ECHOCAT Web.
@@ -9,7 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const WM = require('../lib/worked-matrix');
 const JtcatParser = require('../renderer/jtcat-parser');
-const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
+const read = (p) => readSrc(path.join(__dirname, '..', p));
 
 let passed = 0, failed = 0;
 function test(name, fn) {

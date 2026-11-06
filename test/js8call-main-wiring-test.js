@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * Static scan of main.js's JS8 wiring (native era).
  *
@@ -21,7 +22,7 @@ const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
 
-const RAW = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const RAW = readSrc(path.join(__dirname, '..', 'main.js'));
 
 /** Comments and string literals blanked to spaces, byte offsets preserved. */
 function blankNonCode(src) {

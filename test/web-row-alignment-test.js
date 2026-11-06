@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 // ECHOCAT Web / JTCAT row alignment (2026-10-22 user reports after 1.13.0):
 // 1. FT4 rows showed "+10.9874995727539" — the native decoder's float SNR
 //    reached the screen unrounded (only the FT8 path rounded), and the long
@@ -8,7 +9,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
+const read = (p) => readSrc(path.join(__dirname, '..', p));
 
 let passed = 0;
 function test(name, fn) { fn(); passed++; console.log('  ok  ' + name); }

@@ -1,5 +1,6 @@
 // POTA self-spot by Winlink email (potaspot.tdod.org, W7RTA 2026-10-24).
 // Run: node test/pota-email-spot-test.js
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -10,7 +11,7 @@ function test(name, fn) {
   try { fn(); pass++; console.log('  ok  ' + name); }
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
-const read = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const read = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 
 console.log('pota email spot');
 

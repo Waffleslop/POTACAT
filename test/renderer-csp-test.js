@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * A renderer must not declare a script CSP it then violates.
  *
@@ -39,7 +40,7 @@ function inlineBlocks(html) {
 }
 
 for (const file of fs.readdirSync(DIR).filter((f) => f.endsWith('.html'))) {
-  const html = fs.readFileSync(path.join(DIR, file), 'utf8');
+  const html = readSrc(path.join(DIR, file));
   const meta = html.match(/http-equiv=["']Content-Security-Policy["'][^>]*content=["']([^"']+)["']/i);
   if (!meta) { pass++; continue; }                       // no CSP: nothing to contradict
   const policy = scriptPolicy(meta[1]);

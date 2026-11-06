@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // ECHOCAT gets every re-spot template and the saved re-spot messages, and a
 // desktop edit reaches a connected device at once (K8IKO 2026-10-02; mobile
 // half: potacat-meta work/open/respot-templates-mobile.md).
@@ -7,7 +8,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+const src = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
@@ -39,7 +40,7 @@ test('a phone-sent comment gets OM, not a blank, when no first name is known', (
 });
 
 test('both desktop re-spot dialogs use the WWBOTA template for a WWBOTA target', () => {
-  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
   const hits = app.split(": targets.includes('wwbota') ? 'wwbota'").length - 1;
   assert.strictEqual(hits, 2, 'openQuickRespot and updateLogRespot');
 });

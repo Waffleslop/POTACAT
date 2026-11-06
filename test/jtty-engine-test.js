@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * JttyEngine (lib/jtty-engine.js) — Phase 3 of docs/jtty-integration-plan.md.
  *
@@ -258,9 +259,9 @@ function onAir(pcm, leadSec, tailSec) {
 
   await test('main.js / preload / manager wiring (static)', () => {
     const root = path.join(__dirname, '..');
-    const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
-    const mgr = fs.readFileSync(path.join(root, 'lib', 'jtcat-manager.js'), 'utf8');
-    const pre = fs.readFileSync(path.join(root, 'preload-jtcat-popout.js'), 'utf8');
+    const main = readSrc(path.join(root, 'main.js'));
+    const mgr = readSrc(path.join(root, 'lib', 'jtcat-manager.js'));
+    const pre = readSrc(path.join(root, 'preload-jtcat-popout.js'));
     // Both family switches rebuild the slice for JTTY (Ft8Engine.setMode coerces unknown modes to FT8).
     const fam = main.match(/const familyOf = \(m\) => \(([^\n]+)\);/g) || [];
     assert.ok(fam.length >= 2, 'two familyOf sites: ' + fam.length);
@@ -303,15 +304,15 @@ function onAir(pcm, leadSec, tailSec) {
     assert.strictEqual(sameContact(f, buildAdifFields({ callsign: 'K1ABC', mode: 'JTTY', frequency: 14082, qsoDate: '20261004', timeOn: '1201' })), true);
     // Every log form offers JTTY and gives it a 599 report.
     const root = path.join(__dirname, '..');
-    assert.ok(fs.readFileSync(path.join(root, 'renderer', 'log-popout.html'), 'utf8').includes('<option value="JTTY">JTTY</option>'), 'Log QSO window');
-    assert.ok(/CW_DIGI_MODES = new Set\(\[[^\]]*'JTTY'/.test(fs.readFileSync(path.join(root, 'renderer', 'log-popout.js'), 'utf8')), 'Log QSO window RST');
-    assert.strictEqual((fs.readFileSync(path.join(root, 'renderer', 'index.html'), 'utf8').match(/<option value="JTTY">JTTY<\/option>/g) || []).length, 3, 'main window mode selects');
-    assert.ok(/CW_DIGI_MODES_SET = new Set\(\[[^\]]*'JTTY'/.test(fs.readFileSync(path.join(root, 'renderer', 'app.js'), 'utf8')), 'main window RST');
-    const remote = fs.readFileSync(path.join(root, 'renderer', 'remote.js'), 'utf8');
+    assert.ok(readSrc(path.join(root, 'renderer', 'log-popout.html')).includes('<option value="JTTY">JTTY</option>'), 'Log QSO window');
+    assert.ok(/CW_DIGI_MODES = new Set\(\[[^\]]*'JTTY'/.test(readSrc(path.join(root, 'renderer', 'log-popout.js'))), 'Log QSO window RST');
+    assert.strictEqual((readSrc(path.join(root, 'renderer', 'index.html')).match(/<option value="JTTY">JTTY<\/option>/g) || []).length, 3, 'main window mode selects');
+    assert.ok(/CW_DIGI_MODES_SET = new Set\(\[[^\]]*'JTTY'/.test(readSrc(path.join(root, 'renderer', 'app.js'))), 'main window RST');
+    const remote = readSrc(path.join(root, 'renderer', 'remote.js'));
     assert.ok(/KNOWN_MODES = new Set\(\[[^\]]*'JTTY'/.test(remote) && /LOG_MODE_OPTIONS = \[[^\]]*'JTTY'/.test(remote), 'ECHOCAT Web log form');
-    const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
+    const main = readSrc(path.join(root, 'main.js'));
     assert.ok(main.includes("String(q.SUBMODE || '').toUpperCase() === 'JTTY'") && main.includes('_lotwJttyNoticed = true'), 'LoTW upload names the missing submode once');
-    assert.ok(fs.readFileSync(path.join(root, 'renderer', 'jtcat-popout.js'), 'utf8').includes("callsign: his, mode: 'JTTY'"), 'pane Log button prefills the QSO');
+    assert.ok(readSrc(path.join(root, 'renderer', 'jtcat-popout.js')).includes("callsign: his, mode: 'JTTY'"), 'pane Log button prefills the QSO');
   });
 
   await test('macro model: WSJT-X\'s eight on F1-F8, legacy migration, unique hotkeys, both token spellings', () => {
@@ -438,15 +439,15 @@ function onAir(pcm, leadSec, tailSec) {
     assert.strictEqual(JM.clearestSpot(flat, 10, { prefer: 3000 }).hz, JM.TONE_MAX, 'never past the engine\'s 2700 Hz lowest tone');
     assert.strictEqual(JM.clearestSpot(flat, 10, { prefer: 100 }).hz, JM.TONE_MIN, 'never under 200 Hz');
     assert.strictEqual(JM.clearestSpot([], 10, {}), null, 'no data, no answer');
-    const { F0_MIN, F0_MAX } = (() => { const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'jtty-engine.js'), 'utf8');
+    const { F0_MIN, F0_MAX } = (() => { const src = readSrc(path.join(__dirname, '..', 'lib', 'jtty-engine.js'));
       return { F0_MIN: Number(/const F0_MIN = (\d+)/.exec(src)[1]), F0_MAX: Number(/const F0_MAX = (\d+)/.exec(src)[1]) }; })();
     assert.strictEqual(JM.TONE_MIN, F0_MIN, 'tone limits match the engine');
     assert.strictEqual(JM.TONE_MAX, F0_MAX, 'tone limits match the engine');
     // Wiring: both panes follow on a row click, honour Hold, and measure for Clear spot.
-    const pop = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-popout.js'), 'utf8');
-    const popHtml = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'jtcat-popout.html'), 'utf8');
-    const web = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote.js'), 'utf8');
-    const webHtml = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'remote.html'), 'utf8');
+    const pop = readSrc(path.join(__dirname, '..', 'renderer', 'jtcat-popout.js'));
+    const popHtml = readSrc(path.join(__dirname, '..', 'renderer', 'jtcat-popout.html'));
+    const web = readSrc(path.join(__dirname, '..', 'renderer', 'remote.js'));
+    const webHtml = readSrc(path.join(__dirname, '..', 'renderer', 'remote.html'));
     assert.ok(pop.includes('JttyMacros.shouldFollowStation(text, jttyMyCall, holdTxFreq)'), 'pop-out row click follows by the rule, under the shared Hold TX');
     assert.ok(pop.includes("if (modeSelect.value === 'JTTY' && !transmitting) jttyFeedLevels(freqData, passbandBins);"), 'pop-out measures RX only, never our TX');
     assert.ok(pop.includes('JttyMacros.clearestSpot(jttyOcc, jttyOccHzPerBin, { prefer: jpTxFreqHz })'), 'pop-out Clear spot');
@@ -459,8 +460,8 @@ function onAir(pcm, leadSec, tailSec) {
 
   await test('JTCAT pop-out: the JTTY pane (static)', () => {
     const root = path.join(__dirname, '..');
-    const html = fs.readFileSync(path.join(root, 'renderer', 'jtcat-popout.html'), 'utf8');
-    const js = fs.readFileSync(path.join(root, 'renderer', 'jtcat-popout.js'), 'utf8');
+    const html = readSrc(path.join(root, 'renderer', 'jtcat-popout.html'));
+    const js = readSrc(path.join(root, 'renderer', 'jtcat-popout.js'));
     assert.ok(/<option value="JTTY"[^>]*>JTTY<\/option>/.test(html), 'JTTY is in the mode select, not hidden');
     for (const id of ['jp-jtty-pane', 'jp-jtty-list', 'jp-jtty-tx', 'jp-jtty-frames', 'jp-jtty-profile', 'jp-jtty-his', 'jp-jtty-exch',
       'jp-jtty-serial', 'jp-jtty-serial-up', 'jp-jtty-serial-dn', 'jp-jtty-queued', 'jp-jtty-templates', 'jp-jtty-send', 'jp-jtty-stop',
@@ -482,7 +483,7 @@ function onAir(pcm, leadSec, tailSec) {
     assert.ok(/var JTTY_BAND_FREQS = \{[\s\S]*?'40m': 7090[\s\S]*?'20m': 14090[\s\S]*?\};/.test(js), 'WSJT-X preliminary JTTY dials');
     assert.ok(!/JTTY_BAND_FREQS = \{[^}]*14080/.test(js), 'never FT4\'s dial');
     // Gender-neutral copy on every surface.
-    for (const [name, src] of [['pop-out html', html], ['pop-out js', js], ['web html', fs.readFileSync(path.join(root, 'renderer', 'remote.html'), 'utf8')], ['web js', fs.readFileSync(path.join(root, 'renderer', 'remote.js'), 'utf8')]]) {
+    for (const [name, src] of [['pop-out html', html], ['pop-out js', js], ['web html', readSrc(path.join(root, 'renderer', 'remote.html'))], ['web js', readSrc(path.join(root, 'renderer', 'remote.js'))]]) {
       assert.ok(!/\bhis call\b/i.test(src), name + ' says "their call"');
     }
     assert.ok(js.includes("m === 'JTTY' ? JTTY_BAND_FREQS"), 'band buttons follow the mode');
@@ -507,11 +508,11 @@ function onAir(pcm, leadSec, tailSec) {
     assert.ok(js.includes("document.querySelectorAll('.jp-tune')") && js.includes("document.querySelectorAll('.jp-atu')"), 'one handler drives every Tune / ATU button');
     assert.ok(!js.includes("var tuneBtn = document.getElementById('jp-tune');") || !js.includes('tuneBtn.addEventListener'), 'no single-button tune wiring left');
     // Reachable from the More menu, and an open window switches rather than staying in FT8.
-    const index = fs.readFileSync(path.join(root, 'renderer', 'index.html'), 'utf8');
-    const app = fs.readFileSync(path.join(root, 'renderer', 'app.js'), 'utf8');
-    const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
-    const preload = fs.readFileSync(path.join(root, 'preload.js'), 'utf8');
-    const prePop = fs.readFileSync(path.join(root, 'preload-jtcat-popout.js'), 'utf8');
+    const index = readSrc(path.join(root, 'renderer', 'index.html'));
+    const app = readSrc(path.join(root, 'renderer', 'app.js'));
+    const main = readSrc(path.join(root, 'main.js'));
+    const preload = readSrc(path.join(root, 'preload.js'));
+    const prePop = readSrc(path.join(root, 'preload-jtcat-popout.js'));
     assert.ok(index.includes('id="view-jtty-btn"'), 'More menu entry');
     assert.ok(/view-jtty-btn'\), \(\) => \{\s*window\.api\.saveSettings\(\{ jtcatLastMode: 'JTTY' \}\);\s*window\.api\.jtcatPopoutOpen\('JTTY'\);/.test(app), 'menu saves the mode AND passes it');
     assert.ok(preload.includes("jtcatPopoutOpen: (mode) => ipcRenderer.send('jtcat-popout-open', mode)"), 'preload passes the mode');

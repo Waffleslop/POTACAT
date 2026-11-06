@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Activation window + shareable image (NO4D 2026-09-25; Casey: IG/FB/TikTok
 // image with safe zones). Source guards on the parts that are easy to break
 // and hard to notice. Run: node test/activation-share-test.js
@@ -13,7 +14,7 @@ function test(name, fn) {
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
 const root = path.join(__dirname, '..');
-const read = (p) => fs.readFileSync(path.join(root, p), 'utf8').replace(/\r\n/g, '\n');
+const read = (p) => readSrc(path.join(root, p)).replace(/\r\n/g, '\n');
 const main = read('main.js');
 const share = read('renderer/actmap-share.html');
 const shareJs = read('renderer/actmap-share.js');

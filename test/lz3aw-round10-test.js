@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // LZ3AW round 10 (TS-480, CW Key Port on COM4, ECHOCAT Web, 400 km from the
 // radio), 2026-09-29, on 1.10.26:
 //   1. "SWR meter doesn't read below 1.3:1, when it is 1:1, not showing."
@@ -24,7 +25,7 @@ let passed = 0, failed = 0;
 const cases = [];
 function test(name, fn) { cases.push([name, fn]); }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 const TS480 = RIG_MODELS['TS-480'];
 
 function ts480() {

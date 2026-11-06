@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // A logged frequency read in any unit, and the repair for records saved with
 // MHz typed into the kHz box (NA4DQ 2026-10-24). Cases mirror potacat-app
 // __tests__/logFreq.test.ts (5e2431c) so the phone and desktop agree.
@@ -102,7 +103,7 @@ test('repair through mutateLog rewrites FREQ/BAND and journals an update', () =>
 });
 
 test('wiring: logContact reads the typed frequency; log-qso hands it over raw; the repair runs at log load', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
   const lc = main.slice(main.indexOf('async function logContact('), main.indexOf('const records = QsoExpand.expandContact(e,'));
   assert.ok(/LogFreq\.parseLogFreq\(e\.frequency\)/.test(lc) && /e\.frequency = '';\n\s*e\.band = '';/.test(lc), 'a value in no band is saved blank');
   assert.ok(!/kept as typed/.test(lc), 'no keep-as-typed exception: the table covers 2200 m to 1.25 cm, so nothing is saved without a BAND');
@@ -127,9 +128,9 @@ test('repair: kHz typed into the Activation panel MHz box (FREQ 7182, no BAND)',
 
 test('wiring: the Activation panel reads its box through LogFreq and the repair tries both mistakes', () => {
   const root = path.join(__dirname, '..');
-  const app = fs.readFileSync(path.join(root, 'renderer', 'app.js'), 'utf8');
-  const html = fs.readFileSync(path.join(root, 'renderer', 'index.html'), 'utf8');
-  const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
+  const app = readSrc(path.join(root, 'renderer', 'app.js'));
+  const html = readSrc(path.join(root, 'renderer', 'index.html'));
+  const main = readSrc(path.join(root, 'main.js'));
   assert.ok(html.includes('<script src="../lib/log-freq.js"></script>'));
   assert.ok(/window\.LogFreq\.parseLogFreq\(raw\)/.test(app));
   assert.ok(!/parseFloat\(activatorFreqInput\.value\)/.test(app), 'no MHz-only read of the box is left');

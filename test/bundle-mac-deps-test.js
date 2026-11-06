@@ -7,6 +7,7 @@
 // died at launch on every user's Mac. This test is the gate's memory: if the
 // bundling ever regresses, these two shapes must still be rejected.
 'use strict';
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -129,11 +130,11 @@ t('a helper built for the wrong CPU fails the build (KL4XQ: arm64 rigctld in the
 
 t('the Intel job builds its helpers on an Intel runner (source guard)', () => {
   const root = path.join(__dirname, '..');
-  const wf = fs.readFileSync(path.join(root, '.github/workflows/release.yml'), 'utf8').replace(/\r\n/g, '\n');
+  const wf = readSrc(path.join(root, '.github/workflows/release.yml')).replace(/\r\n/g, '\n');
   const x64 = wf.slice(wf.indexOf('build-macos-x64:'), wf.indexOf('  build-linux:'));
   assert.ok(/scripts\/build-mac-x64-helpers\.sh/.test(x64), 'the x64 job runs the shared helper script');
   assert.ok(!/^\s+brew install (hamlib|fftw)/m.test(x64), 'the ARM Homebrew must not build Intel helpers again');
-  const sh = fs.readFileSync(path.join(root, 'scripts/build-mac-x64-helpers.sh'), 'utf8');
+  const sh = readSrc(path.join(root, 'scripts/build-mac-x64-helpers.sh'));
   assert.ok(/runs-on: macos-15-intel/.test(x64), 'the Intel DMG is built on an Intel runner');
   assert.ok(/--expect-arch=x86_64/.test(sh) && /shasum -a 256 -c/.test(sh), 'helpers are arch-checked and their sources checksummed');
 });

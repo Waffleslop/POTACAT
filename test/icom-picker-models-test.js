@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 // Every Icom CI-V model POTACAT knows must be pickable where a CI-V radio is
 // chosen (KD2E 2026-10-11: "No Icom IC-7000 ... it is not listed". The model
 // entry had existed since 2026-08-25, but the Radio Model pickers never
@@ -9,7 +10,7 @@ const path = require('path');
 const assert = require('assert');
 const m = require('../lib/rig-models.js');
 const RIG = m.RIG_MODELS || m;
-const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+const html = readSrc(path.join(__dirname, '..', 'renderer', 'index.html'));
 
 function pickerOptions(id) {
   const i = html.indexOf('id="' + id + '"');

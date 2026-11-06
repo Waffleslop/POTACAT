@@ -3,6 +3,7 @@
 // dir inside the base call's dir, and the Summary dropdown couldn't switch
 // in either direction).
 
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
@@ -58,13 +59,13 @@ check('nested LZ3AW/P moves to encoded top level with paths rewritten', () => {
   assert(fs.existsSync(path.join(dest, 'potacat_qso_log.adi')), 'log moved with the dir');
   assert(!fs.existsSync(nested), 'nested dir gone');
 
-  const s = JSON.parse(fs.readFileSync(path.join(dest, 'settings.json'), 'utf-8'));
+  const s = JSON.parse(readSrc(path.join(dest, 'settings.json')));
   assert.strictEqual(s.myCallsign, 'LZ3AW/P', 'callsign untouched');
   assert.strictEqual(s.adifLogPath, path.join(dest, 'potacat_qso_log.adi'), 'adifLogPath rewritten');
   assert.strictEqual(s.grid, 'KN22', 'other fields untouched');
 
   // Parent profile untouched
-  const parent = JSON.parse(fs.readFileSync(path.join(tmp, 'LZ3AW', 'settings.json'), 'utf-8'));
+  const parent = JSON.parse(readSrc(path.join(tmp, 'LZ3AW', 'settings.json')));
   assert.strictEqual(parent.myCallsign, 'LZ3AW');
   fs.rmSync(tmp, { recursive: true, force: true });
 });
@@ -103,7 +104,7 @@ check('conflict: existing encoded dir is not clobbered', () => {
   const { moved, skipped } = migrateNestedSlashProfiles(tmp);
   assert.strictEqual(moved.length, 0);
   assert.strictEqual(skipped.length, 1);
-  const kept = JSON.parse(fs.readFileSync(path.join(tmp, 'LZ3AW_P', 'settings.json'), 'utf-8'));
+  const kept = JSON.parse(readSrc(path.join(tmp, 'LZ3AW_P', 'settings.json')));
   assert.strictEqual(kept.marker, 'existing', 'pre-existing dir survives');
   assert(fs.existsSync(path.join(tmp, 'LZ3AW', 'P', 'settings.json')), 'nested left in place for manual resolution');
   fs.rmSync(tmp, { recursive: true, force: true });

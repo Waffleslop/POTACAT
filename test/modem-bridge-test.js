@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 // The modem audio bridge window (docs/modem-audio-bridge-plan.md phase 1):
 // spawns Electron on test/modem-bridge/harness.js with Chromium's fake audio
 // device, the REAL bridge page and preload, and a REAL modem audio server.
@@ -28,7 +29,7 @@ if (!fs.existsSync(out)) {
   console.log('modem bridge: ' + (required ? 'FAIL' : 'SKIP') + ' (harness produced no result; exit ' + res.status + ')\n' + (res.stderr || '').slice(-1500));
   process.exit(required ? 1 : 0);
 }
-const r = JSON.parse(fs.readFileSync(out, 'utf8'));
+const r = JSON.parse(readSrc(out));
 let pass = 0, fail = 0;
 const t = (name, fn) => { try { fn(); pass++; console.log('  ok  ' + name); } catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + e.message); } };
 

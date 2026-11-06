@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Shack-side RECEIVE level (WB3EGD, TS-480 + RigBlaster Advantage, 2026-10-28):
 // the RigBlaster takes receive audio from the TS-480's rear ACC2 jack, a
 // fixed-level line out that ignores the AF knob, so the phone sat at -47 dBFS
@@ -20,7 +21,7 @@ async function test(name, fn) {
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
 const root = path.join(__dirname, '..');
-const read = (p) => fs.readFileSync(path.join(root, p), 'utf8').replace(/\r\n/g, '\n');
+const read = (p) => readSrc(path.join(root, p)).replace(/\r\n/g, '\n');
 const html = read('renderer/remote-audio.html');
 
 function slice(src, from, to) {

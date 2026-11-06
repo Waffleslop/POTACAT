@@ -9,6 +9,7 @@
 //   4  custom slider in the VFO pane: radio moved, slider did not
 //   5  web Spots menu: second tap threw, then every filter was dead
 'use strict';
+const { readSrc } = require('./_src');
 
 const assert = require('assert');
 const fs = require('fs');
@@ -24,7 +25,7 @@ function test(name, fn) {
   try { fn(); passed++; console.log('  ✓ ' + name); }
   catch (err) { failed++; console.log('  ✗ FAIL: ' + name + '\n      ' + (err.stack || err.message)); }
 }
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 
 function rig480() {
   const TS480 = RIG_MODELS['TS-480'];

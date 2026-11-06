@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * An Icom's own band scope over CI-V (docs/icom-band-scope-plan.md), step 1:
  * the parser, the codec events, and the 30 s recording an owner sends us.
@@ -206,8 +207,8 @@ check('the summary names sweeps, points, the level reached, mode and span', () =
 });
 
 console.log('Wiring');
-const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
-const rc = fs.readFileSync(path.join(ROOT, 'lib/rig-controller.js'), 'utf8');
+const main = readSrc(path.join(ROOT, 'main.js'));
+const rc = readSrc(path.join(ROOT, 'lib/rig-controller.js'));
 check('RigController passes the scope events on, and a waveform frame counts as a live read', () => {
   assert.ok(/this\._codec\.on\('scope-data', \(payload, frame\) => \{ this\._noteReadOk\(\); this\.emit\('scope-data', payload, frame\); \}\);/.test(rc));
   assert.ok(/this\._codec\.on\('scope-nak'/.test(rc) && /sendScope\(bytes\) \{/.test(rc));
@@ -220,8 +221,8 @@ check('the recording: Icom CI-V links only, puts back what it turned on, in a fi
   assert.ok(/ipcMain\.handle\('icom-scope-capture', \(\) => icomScopeCapture\(30\)\);/.test(main));
 });
 check('Settings > My Rigs shows the button for the three CI-V connection types', () => {
-  const html = fs.readFileSync(path.join(ROOT, 'renderer/index.html'), 'utf8');
-  const app = fs.readFileSync(path.join(ROOT, 'renderer/app.js'), 'utf8');
+  const html = readSrc(path.join(ROOT, 'renderer/index.html'));
+  const app = readSrc(path.join(ROOT, 'renderer/app.js'));
   assert.ok(/id="icom-scope-capture-btn"[^>]*>Record band scope data \(30 s\)</.test(html));
   assert.ok(/\['icom', 'civ-tcp', 'icom-network'\]\.includes\(getSelectedRadioType\(\)\)/.test(app));
 });
@@ -239,7 +240,7 @@ const RECORDINGS = [
 ];
 for (const r of RECORDINGS) {
   check(`${r.who} recording: ${r.sweeps} whole sweeps, ${r.mode} ${r.centerHz / 1e6} MHz, ${r.spanHz / 1000} kHz wide, nothing dropped`, () => {
-    const text = fs.readFileSync(path.join(__dirname, 'fixtures/icom-scope', r.file), 'utf8');
+    const text = readSrc(path.join(__dirname, 'fixtures/icom-scope', r.file));
     const asm = new S.SweepAssembler();
     const sweeps = [];
     asm.on('sweep', (s) => sweeps.push(s));
@@ -283,7 +284,7 @@ check('a Fixed window is a KNOWN axis at its own centre; every other anchor is d
 });
 check('every surface centres its axis with axisCenterFor', () => {
   for (const f of ['renderer/scope-popout.js', 'renderer/remote.js', 'renderer/jtcat-popout.js', 'renderer/bandspread-popout.js']) {
-    assert.ok(/axisCenterFor\(/.test(fs.readFileSync(path.join(ROOT, f), 'utf8')), f);
+    assert.ok(/axisCenterFor\(/.test(readSrc(path.join(ROOT, f))), f);
   }
 });
 check('Station Setup: Hamlib in between, a slow baud, then live', () => {
@@ -327,7 +328,7 @@ check('main.js: the Icom source is wired into the one scope state', () => {
   assert.ok(/st\.modeLabel = String\(s\.header\.modeName \|\| ''\)\.toUpperCase\(\) \|\| null;/.test(main));
   assert.ok(/modeLabel: s\.modeLabel \|\| null/.test(main), 'the remote payload carries it');
   for (const f of ['renderer/scope-popout.js', 'renderer/remote.js', 'renderer/jtcat-popout.js']) {
-    assert.ok(/modeLabel\)? \|\| \(/.test(fs.readFileSync(path.join(ROOT, f), 'utf8')), f + ' shows modeLabel first');
+    assert.ok(/modeLabel\)? \|\| \(/.test(readSrc(path.join(ROOT, f))), f + ' shows modeLabel first');
   }
   // Levels are the radio's own scale, never claimed as dBm.
   assert.ok(/s\.source === 'icom' && icomScopeEntry\) return \{ unit: 'radio'/.test(main));

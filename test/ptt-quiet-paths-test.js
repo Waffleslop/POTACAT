@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Transmit-safety review, medium items on main's PTT path:
 //  5. A radio that cannot report its DATA state waited 800 ms on every over
 //     ("keying anyway"), so a Winlink/Mercury frame already playing lost its
@@ -18,7 +19,7 @@ const vm = require('vm');
 let pass = 0, fail = 0;
 const queue = [];
 function test(name, fn) { queue.push([name, fn]); }
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
 const slice = (a, b) => main.slice(main.indexOf(a), main.indexOf(b, main.indexOf(a)));
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 

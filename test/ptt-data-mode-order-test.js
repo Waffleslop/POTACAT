@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // SSB-over-DATA keys only once the radio reports the DATA mode, and puts the
 // voice mode back only after unkeying, confirmed (k8iko IC-7410: ~0.5 s off
 // the start of every over; 9y4dg: left in DIGI LSB after a release).
@@ -73,7 +74,7 @@ test('the restore matches the voice mode itself, never its DATA form', () => {
   assert.ok(S.voiceModeMatches('FM', 'FM'));
 });
 
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const main = readSrc(path.join(__dirname, '..', 'main.js'));
 test('main: an SSB-over-DATA key-down goes through the confirm, not straight to the radio', () => {
   const i = main.indexOf('function handleRemotePtt(state, opts = {}) {');
   const body = main.slice(i, main.indexOf('\nfunction _isEffectivelyTransmitting', i));
@@ -92,8 +93,8 @@ test('main: on release the unkey goes out before the restore, and the restore is
 });
 
 test('codecs report the DATA flag read back from the radio (Icom 1A 06, Kenwood DA)', () => {
-  const civ = fs.readFileSync(path.join(__dirname, '..', 'lib', 'codecs', 'civ-codec.js'), 'utf8');
-  const kw = fs.readFileSync(path.join(__dirname, '..', 'lib', 'codecs', 'kenwood-codec.js'), 'utf8');
+  const civ = readSrc(path.join(__dirname, '..', 'lib', 'codecs', 'civ-codec.js'));
+  const kw = readSrc(path.join(__dirname, '..', 'lib', 'codecs', 'kenwood-codec.js'));
   assert.ok(/this\._dataReportAt = Date\.now\(\);/.test(civ) && /askDataState\(\)/.test(civ));
   assert.ok(/this\._dataReportAt = Date\.now\(\);/.test(kw) && /askDataState\(\)/.test(kw));
 });

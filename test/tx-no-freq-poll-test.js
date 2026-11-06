@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // No frequency/mode poll while PTT is asserted, and no frequency read acted on
 // during TX (kg6odijohn, IC-7100 on a repeater memory: the poll during TX read
 // the offset TX frequency and POTACAT acted on it). The meter reads that need
@@ -83,7 +84,7 @@ test('a frequency that arrives during TX is ignored; on receive it is used again
 });
 
 test('main ignores a CAT frequency read while POTACAT or the radio transmits', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   const i = main.indexOf('function catFrequencyHandler(hz) {');
   const body = main.slice(i, main.indexOf('\n}\n', i));
   assert.ok(/if \(_remoteTxState \|\| \(cat && cat\._transmitting\)\) return;/.test(body), body);

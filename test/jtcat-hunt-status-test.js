@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // Hunt filters, piece 1 (docs/plan-jtcat-hunt-priorities.md): the status line
 // that says why Hunt is quiet, and "Hide decodes below N dB" (nj2dx: only see
 // stations a compromise antenna can work). Display only: Hunt's own minimum
@@ -15,7 +16,7 @@ function test(name, fn) {
   try { fn(); pass++; console.log('  ok  ' + name); }
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.stack || e.message)); }
 }
-const read = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+const read = (f) => readSrc(path.join(__dirname, '..', f));
 const main = read('main.js');
 const pop = read('renderer/jtcat-popout.js');
 const html = read('renderer/jtcat-popout.html');

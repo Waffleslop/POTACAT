@@ -3,6 +3,7 @@
 // file; a POTACAT closed mid-write left a truncated file, the next launch read
 // it as a fresh install, and the next save replaced everything.
 'use strict';
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
@@ -23,8 +24,8 @@ t('a write lands whole through a temp file, and keeps a .bak of the last good fi
   SF.writeSettingsFile(p, { myCallsign: 'K3SBP' }, { now: 1000 });
   assert.ok(!fs.existsSync(p + '.bak'), 'nothing to back up the first time');
   SF.writeSettingsFile(p, { myCallsign: 'K3SBP', grid: 'FN20' }, { now: 2000 });
-  assert.deepStrictEqual(JSON.parse(fs.readFileSync(p + '.bak', 'utf8')), { myCallsign: 'K3SBP' });
-  assert.deepStrictEqual(JSON.parse(fs.readFileSync(p, 'utf8')), { myCallsign: 'K3SBP', grid: 'FN20' });
+  assert.deepStrictEqual(JSON.parse(readSrc(p + '.bak')), { myCallsign: 'K3SBP' });
+  assert.deepStrictEqual(JSON.parse(readSrc(p)), { myCallsign: 'K3SBP', grid: 'FN20' });
   assert.ok(!fs.existsSync(p + '.tmp'));
 });
 t('the .bak is refreshed at most once an hour, and never from a broken file', () => {
@@ -32,10 +33,10 @@ t('the .bak is refreshed at most once an hour, and never from a broken file', ()
   SF.writeSettingsFile(p, { v: 1 }, { now: 0 });
   SF.writeSettingsFile(p, { v: 2 }, { now: SF.BACKUP_EVERY_MS });     // backs up v1
   SF.writeSettingsFile(p, { v: 3 }, { now: SF.BACKUP_EVERY_MS + 5 }); // too soon: still v1
-  assert.strictEqual(JSON.parse(fs.readFileSync(p + '.bak', 'utf8')).v, 1);
+  assert.strictEqual(JSON.parse(readSrc(p + '.bak')).v, 1);
   fs.writeFileSync(p, '{"v": 3, "trunc');
   SF.writeSettingsFile(p, { v: 4 }, { now: SF.BACKUP_EVERY_MS * 3 });
-  assert.strictEqual(JSON.parse(fs.readFileSync(p + '.bak', 'utf8')).v, 1, 'a truncated file is never the backup');
+  assert.strictEqual(JSON.parse(readSrc(p + '.bak')).v, 1, 'a truncated file is never the backup');
 });
 t('a truncated file is restored from the .bak, kept as .corrupt, and said', () => {
   const p = f('c.json');
@@ -63,7 +64,7 @@ t('a missing file with a .bak beside it is the lost file, restored', () => {
   assert.strictEqual(SF.readSettingsFile(f('none.json')).status, 'missing', 'a real fresh install');
 });
 t('main.js reads and writes every settings file through it', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
   assert.ok(main.includes('const r = SettingsFile.readSettingsFile(p, { keepCorrupt: first });'));
   assert.ok(main.includes('SettingsFile.writeSettingsFile(p, obj);'));
   assert.ok(!/function _writeJsonAtomic[\s\S]{0,400}fs\.writeFileSync\(p, JSON\.stringify/.test(main), 'no direct write over the live file');

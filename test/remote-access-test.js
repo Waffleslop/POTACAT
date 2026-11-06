@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // ECHOCAT access — the door itself (adversarial review of 1.13.9, finding 1;
 // potacat-meta work/in-progress/guest-pass-authority-fixes.md part E).
 //   - lib/remote-access.js: migration of the three legacy states, the
@@ -35,10 +36,10 @@ async function testAsync(name, fn) {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const root = path.join(__dirname, '..');
-const mainSrc = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
-const rsSrc = fs.readFileSync(path.join(root, 'lib', 'remote-server.js'), 'utf8');
-const appSrc = fs.readFileSync(path.join(root, 'renderer', 'app.js'), 'utf8');
-const htmlSrc = fs.readFileSync(path.join(root, 'renderer', 'index.html'), 'utf8');
+const mainSrc = readSrc(path.join(root, 'main.js'));
+const rsSrc = readSrc(path.join(root, 'lib', 'remote-server.js'));
+const appSrc = readSrc(path.join(root, 'renderer', 'app.js'));
+const htmlSrc = readSrc(path.join(root, 'renderer', 'index.html'));
 
 console.log('lib/remote-access.js');
 test('migration: enableRemote false → off; missing or true → lan; a saved level wins', () => {

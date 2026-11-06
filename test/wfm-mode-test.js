@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // IC-7100 Wideband FM VFO preset saved as FM (kg6odijohn, 2026-10-31). The
 // radio REPORTED CI-V mode 06 as WFM, but the codec had no entry to SET it,
 // so a preset in WFM tuned in whatever mode the radio was in.
@@ -39,10 +40,10 @@ test('the radios that have it say so; the VFO window shows WFM only there', () =
   assert.strictEqual(RIG_MODELS['IC-7100'].wfm, true);
   assert.strictEqual(RIG_MODELS['IC-705'].wfm, true);
   assert.ok(!RIG_MODELS['IC-7300'].wfm, 'the IC-7300 has no WFM');
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(/wfm: vfoWfmAvailable\(\),/.test(main), 'sent with the VFO state');
   assert.ok(/RIG_MODELS\[rig\.model\] \|\| RIG_MODELS\[ct\.civModel\]/.test(main), 'from the Radio Model or the Icom model picker');
-  const vfo = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'vfo-popout.html'), 'utf8');
+  const vfo = readSrc(path.join(__dirname, '..', 'renderer', 'vfo-popout.html'));
   assert.ok(/if \(typeof s\.wfm === 'boolean'\) vfoHasWfm = s\.wfm;/.test(vfo));
   assert.ok(/pickerModes\(\)\.forEach/.test(vfo), 'the picker uses the rig-scoped list');
 });

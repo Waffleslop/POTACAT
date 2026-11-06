@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
 'use strict';
+const { readSrc } = require('./_src');
 //
 // Per-activation LoTW upload. Run: node test/lotw-split-test.js
 //
@@ -113,7 +114,7 @@ check('batch ADIF round-trips the filled fields', () => {
 });
 
 check('main signs each activation with its own args and never the home location', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   const h = main.slice(main.indexOf("ipcMain.handle('lotw-upload'"), main.indexOf('function runLotwBatch('));
   assert.ok(h.includes('splitForLotw(allQsos'), 'handler splits the log');
   assert.ok(h.includes('buildActivationTqslArgs({ call: b.call'), 'activations use the update-mode args');

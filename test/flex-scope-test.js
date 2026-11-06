@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * The Flex's own panadapter as POTACAT's band scope (Flex Direct only;
  * Casey 2026-10-28), against a REAL FLEX-8600 v4 capture
@@ -17,7 +18,7 @@ function check(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + e.message); }
 }
-const capture = fs.readFileSync(path.join(__dirname, 'fixtures/flex-pan/8600-capture.txt'), 'utf8').split(/\r?\n/);
+const capture = readSrc(path.join(__dirname, 'fixtures/flex-pan/8600-capture.txt')).split(/\r?\n/);
 const packets = (stream) => capture
   .filter((l) => l.includes(`UDP stream=${stream} class=0x8003`))
   .map((l) => Buffer.from(/hex=([0-9a-f]+)/.exec(l)[1], 'hex'));
@@ -130,12 +131,12 @@ check('the slice\'s AGC is read back, on change only, into the rig state (Casey 
   c._handleLine('S1A2B|slice 0 agc_mode=med');
   c._handleLine('S1A2B|slice 0 agc_mode=FAST');
   assert.deepStrictEqual(ev, [{ index: 0, mode: 'med' }, { index: 0, mode: 'fast' }]);
-  const m = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+  const m = readSrc(path.join(ROOT, 'main.js'));
   assert.ok(/smartSdr\.on\('slice-agc'[\s\S]{0,300}_currentAgcMode = mode;\s*\r?\n\s*broadcastRigState\(\);/.test(m));
 });
 
 console.log('main.js wiring');
-const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+const main = readSrc(path.join(ROOT, 'main.js'));
 check('the source is chosen only in Flex Direct; a radio\'s own scope wins over an SDR unless preferred', () => {
   assert.ok(/return !!\(smartSdr && smartSdr\.connected && smartSdr\.mode === 'self'\);/.test(main));
   // An Icom's own scope counts as the radio's own, like the FT-710's.
@@ -161,7 +162,7 @@ check('zoom: the steps, the command, remembered per source, on the wire', () => 
   const set = main.slice(main.indexOf('function setScopeSpan('), main.indexOf('function setScopeSpan(') + 2000);
   assert.ok(/settings\.flexScopeSpanHz = span;/.test(set) && /smartSdr\.setPanBandwidth\(span\)/.test(set));
   assert.ok(/spans: scopeSpans\(\),/.test(main), 'scope-state carries the steps');
-  const rs = fs.readFileSync(path.join(ROOT, 'lib/remote-server.js'), 'utf8');
+  const rs = readSrc(path.join(ROOT, 'lib/remote-server.js'));
   assert.ok(/capabilities: \[[\s\S]*'scope-span'/.test(rs) && /case 'scope-span':/.test(rs));
   assert.ok(require('../lib/echocat-protocol').MESSAGES['scope-span']);
 });
@@ -174,7 +175,7 @@ check('a calibrated scale for the phone: the pan\'s dBm range, the frame spacing
   const cal = main.slice(main.indexOf('function scopeCalibration('), main.indexOf('function scopeRemoteFrameMs('));
   assert.ok(/s\.source !== 'flex'/.test(cal), 'only the Flex pan is calibrated');
   assert.ok(/\.\.\.scopeCalibration\(\),\s*frameMs: scopeRemoteFrameMs\(false\),\s*frameMsCloud: scopeRemoteFrameMs\(true\),/.test(main));
-  assert.ok(/this\.emit\('smeter', scaled, Math\.round\(dbm \* 10\) \/ 10\);/.test(fs.readFileSync(path.join(ROOT, 'lib/smartsdr.js'), 'utf8')));
+  assert.ok(/this\.emit\('smeter', scaled, Math\.round\(dbm \* 10\) \/ 10\);/.test(readSrc(path.join(ROOT, 'lib/smartsdr.js'))));
   assert.ok(/\.\.\.\(_currentSmeterDbm != null \? \{ smeterDbm: _currentSmeterDbm \} : \{\}\),/.test(main));
 });
 

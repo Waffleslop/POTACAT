@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // What the ECHOCAT app needs from the desktop to draw SSTV packs and templates
 // (potacat-meta sstv-packs-mobile-readiness-desktop, 2026-09-29): hello
 // capabilities to gate on, a TTF beside every WOFF2 (React Native / Skia cannot
@@ -15,9 +16,9 @@ const { validatePack, FONT_FILE_LIMITS, packFileNames } = require('../lib/sstv-p
 const { SstvPackStore, sha256 } = require('../lib/sstv-packs');
 
 const ROOT = path.join(__dirname, '..');
-const R = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
+const R = (f) => readSrc(path.join(ROOT, f));
 const HALLOWEEN_DIR = path.join(ROOT, 'data', 'sstv-packs', 'halloween');
-const halloween = () => JSON.parse(fs.readFileSync(path.join(HALLOWEEN_DIR, 'pack.json'), 'utf8'));
+const halloween = () => JSON.parse(readSrc(path.join(HALLOWEEN_DIR, 'pack.json')));
 const errsOf = (p) => validatePack(p).errors.join(' | ');
 
 const cases = [];
@@ -91,7 +92,7 @@ test('the signer lists the TTF in the index with its own size and sha256', () =>
   const { buildFeed } = require('../scripts/sign-sstv-packs');
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'sstv-ready-feed-'));
   buildFeed({ srcDir: path.join(ROOT, 'data', 'sstv-packs'), outDir: out, privateKeyPem: privateKey.export({ type: 'pkcs8', format: 'pem' }), verifyKey: PUB });
-  const wire = JSON.parse(fs.readFileSync(path.join(out, 'feeds', 'sstv-packs.json'), 'utf8'));
+  const wire = JSON.parse(readSrc(path.join(out, 'feeds', 'sstv-packs.json')));
   const e = JSON.parse(wire.index).packs.find((x) => x.id === 'halloween');
   const f = e.files.find((x) => x.name === 'Rye-Regular.ttf');
   const bytes = fs.readFileSync(path.join(HALLOWEEN_DIR, 'Rye-Regular.ttf'));

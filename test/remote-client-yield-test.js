@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * W0EGR 2026-10-30: a headless shack PC, an office PC driving it, and ECHOCAT
  * on a phone. "When the button is clicked in Echocat it switches for a second
@@ -18,8 +19,8 @@ function check(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + e.message); }
 }
-const src = fs.readFileSync(path.join(ROOT, 'lib/remote-client.js'), 'utf8');
-const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+const src = readSrc(path.join(ROOT, 'lib/remote-client.js'));
+const main = readSrc(path.join(ROOT, 'main.js'));
 
 console.log('A kicked desktop yields');
 check('"kicked" sets the yield, and the socket-close handler does not reconnect while yielded', () => {

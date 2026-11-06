@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // A failed POTA fetch no longer empties the POTA rows (wayne 2026-10-31: the
 // table blanked, then showed WWFF, then POTA came back).
 // Run: node test/spot-source-cache-test.js
@@ -46,7 +47,7 @@ test('sources are kept apart', async () => {
 
 test('the POTA client rejects an error status and a non-list body', async () => {
   const pota = require('../lib/pota');
-  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'pota.js'), 'utf8');
+  const src = readSrc(path.join(__dirname, '..', 'lib', 'pota.js'));
   assert.ok(/reject\(new Error\('POTA HTTP ' \+ res\.statusCode\)\)/.test(src));
   assert.ok(/if \(!Array\.isArray\(json\)\) \{ reject\(/.test(src));
   assert.ok(/req\.setTimeout\(15000/.test(src));
@@ -54,7 +55,7 @@ test('the POTA client rejects an error status and a non-list body', async () => 
 });
 
 test('refreshSpots wraps every program source', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
   for (const s of ['POTA', 'SOTA', 'WWFF', 'LLOTA', 'WWBOTA', 'GMA', 'PARC']) {
     assert.ok(new RegExp(`keep\\('${s}', fetch\\w+Spots\\(\\)\\.then\\(process\\w+Spots\\)\\)`).test(main), s);
   }

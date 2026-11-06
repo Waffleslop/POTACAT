@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 // WSPR pre-beacon power memory — lib/wspr-power-memory.js.
 //
 // Regression guard for K3SBP 2026-09-10: the WSPR beacon capped an 8600M at
@@ -102,7 +103,7 @@ t('a garbage readback is ignored', () => {
 });
 
 console.log('main.js wiring (source-text guards)');
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const main = readSrc(path.join(__dirname, '..', 'main.js'));
 t('wsprPreCapPower is a GLOBAL_KEY (it describes this machine\'s radio, not a profile)', () => {
   assert.ok(/^\s*'wsprPreCapPower',/m.test(main), 'missing from GLOBAL_KEYS');
 });

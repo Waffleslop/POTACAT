@@ -1,4 +1,5 @@
 'use strict';
+const { readSrc } = require('./_src');
 // Watchlist sync between the desktop and ECHOCAT devices (2026-10-19): the
 // blob carries settings.watchlist raw; a device edits it by add/remove
 // operations so two edits at once never overwrite each other; owner only.
@@ -7,7 +8,7 @@ const path = require('path');
 const assert = require('assert');
 const { applyWatchlistEdit, validEntry } = require('../lib/watchlist-edit');
 const P = require('../lib/echocat-protocol');
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 let passed = 0, failed = 0;
 function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }

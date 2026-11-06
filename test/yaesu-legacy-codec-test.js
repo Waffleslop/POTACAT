@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // FT-817/818/857/897 legacy 5-byte binary CAT (KL4XQ FT-818, 2026-10-21:
 // those radios were on the text codec, so mode never arrived, tunes did
 // nothing and the link was declared down every few minutes).
@@ -19,7 +20,7 @@ let passed = 0, failed = 0;
 const queue = [];
 function test(name, fn) { queue.push([name, fn]); }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const R = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8').replace(/\r\n/g, '\n');
+const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 
 /** A radio on the other end of the serial line. */
 class FakeFT817 {

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // JTCAT's session memory ("attempted/worked this session") must be band- and
 // mode-aware like the log check behind it. N2FSM 2026-09-26: after working
 // stations on FT8 earlier in a session, Hunt on 20m FT4 skipped them ("green,
@@ -14,7 +15,7 @@ function test(name, fn) {
   try { fn(); pass++; console.log('  ok  ' + name); }
   catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
 }
-const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+const src = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
 
 function extract(name) {
   const start = src.indexOf('function ' + name + '(');

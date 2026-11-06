@@ -3,6 +3,7 @@
 // potacat-app docs/desktop-asks/ft8-watchlist-stroke-parity.md.
 // Run: node test/watchlist-groups-test.js
 'use strict';
+const { readSrc } = require('./_src');
 
 const assert = require('assert');
 const { parseCallsignList, buildGroupLookup, matchDecode, matchSpot, stateTokenOf, spotStates } = require('../lib/watchlist-groups');
@@ -106,7 +107,7 @@ console.log('groups are loaded at startup (renderer/app.js):');
 {
   const fs = require('fs');
   const path = require('path');
-  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
   const body = (name) => {
     const start = app.indexOf('function ' + name + '(');
     let d = 0, i = app.indexOf('{', start);

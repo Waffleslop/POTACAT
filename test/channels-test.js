@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * Channels: the saved frequency chart (Casey 2026-10-30; lists from KL4XQ and
  * KC8DHX). The starter catalog, the operator's edits, CHIRP CSV both ways,
@@ -16,7 +17,7 @@ function check(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + e.message); }
 }
-const catalog = JSON.parse(fs.readFileSync(path.join(ROOT, 'data/channels.json'), 'utf8'));
+const catalog = JSON.parse(readSrc(path.join(ROOT, 'data/channels.json')));
 
 console.log('The starter catalog (data/channels.json)');
 check('every entry is usable, ids unique, every entry grouped, modes known', () => {
@@ -136,14 +137,14 @@ check('export round-trips through CHIRP\'s columns', () => {
 });
 
 console.log('Wiring');
-const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
-const html = fs.readFileSync(path.join(ROOT, 'renderer/index.html'), 'utf8');
-const app = fs.readFileSync(path.join(ROOT, 'renderer/app.js'), 'utf8');
-const view = fs.readFileSync(path.join(ROOT, 'renderer/channels-view.js'), 'utf8');
-const preload = fs.readFileSync(path.join(ROOT, 'preload.js'), 'utf8');
-const rs = fs.readFileSync(path.join(ROOT, 'lib/remote-server.js'), 'utf8');
-const web = fs.readFileSync(path.join(ROOT, 'renderer/remote.js'), 'utf8');
-const webHtml = fs.readFileSync(path.join(ROOT, 'renderer/remote.html'), 'utf8');
+const main = readSrc(path.join(ROOT, 'main.js'));
+const html = readSrc(path.join(ROOT, 'renderer/index.html'));
+const app = readSrc(path.join(ROOT, 'renderer/app.js'));
+const view = readSrc(path.join(ROOT, 'renderer/channels-view.js'));
+const preload = readSrc(path.join(ROOT, 'preload.js'));
+const rs = readSrc(path.join(ROOT, 'lib/remote-server.js'));
+const web = readSrc(path.join(ROOT, 'renderer/remote.js'));
+const webHtml = readSrc(path.join(ROOT, 'renderer/remote.html'));
 check('the tab sits beside Landmarks in the Directory, with its own group filter, Add, Import, Export and Restore', () => {
   assert.ok(/id="dirv-tab-channels"/.test(html) && /id="dirv-channels-container"/.test(html));
   for (const id of ['chn-group-filter', 'chn-add', 'chn-import', 'chn-export', 'chn-restore', 'chn-body', 'chn-editor']) assert.ok(html.includes(`id="${id}"`), id);
@@ -170,7 +171,7 @@ check('ECHOCAT Web has the tab and tunes from it', () => {
   assert.ok(/type: 'tune', freqKhz: String\(c\.khz\), mode: channelTuneMode\(c\.mode\)/.test(web));
 });
 check('channels.css uses theme variables only', () => {
-  const css = fs.readFileSync(path.join(ROOT, 'renderer/channels.css'), 'utf8');
+  const css = readSrc(path.join(ROOT, 'renderer/channels.css'));
   assert.ok(!/#[0-9a-f]{3,8}\b/i.test(css), 'hex colour in channels.css');
 });
 

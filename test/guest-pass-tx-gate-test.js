@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // The Guest Pass TX gate authorises what the radio will actually do
 // (adversarial review of 1.13.9, findings 6 and 7; potacat-meta
 // work/in-progress/guest-pass-authority-fixes.md parts B and C):
@@ -23,7 +24,7 @@ function test(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
   catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e && e.message)); }
 }
-const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const mainSrc = readSrc(path.join(__dirname, '..', 'main.js'));
 
 function pass(over = {}) {
   const pe = new PassEnforcement({ revalidateMs: 0, rigPowerReadable: () => true, ...(over.opts || {}) });

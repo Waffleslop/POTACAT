@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 // N5IRU (Windows, 1.13.7): "wsprd ETIMEDOUT" every WSPR cycle. The deep
 // search ran past the 60 s limit on his PC each window, so WSPR never decoded.
 // A slow or timed-out run now steps the search down: deep -> normal -> quick.
@@ -69,8 +70,8 @@ test('timing out at every depth ends on quick and says what to check', () => {
 test('the worker relays the notice and the engine logs it', () => {
   const fs = require('fs');
   const path = require('path');
-  const w = fs.readFileSync(path.join(__dirname, '..', 'lib', 'ft8-worker.js'), 'utf8');
-  const e = fs.readFileSync(path.join(__dirname, '..', 'lib', 'ft8-engine.js'), 'utf8');
+  const w = readSrc(path.join(__dirname, '..', 'lib', 'ft8-worker.js'));
+  const e = readSrc(path.join(__dirname, '..', 'lib', 'ft8-engine.js'));
   assert.ok(/type: 'wspr-result'[^\n]*notice: out\.notice \|\| null/.test(w));
   assert.ok(/if \(msg\.notice\) this\.emit\('log', `WSPR: \$\{msg\.notice\}`\);/.test(e));
 });

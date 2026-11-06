@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * Restart POTACAT from anywhere (docs/remote-launcher-anywhere-scope.md;
  * Casey 2026-10-27: option A, on by default). The Remote Launcher accepts an
@@ -213,10 +214,10 @@ function request(port, { method = 'GET', p = '/', headers = {} } = {}) {
   });
 
   console.log('main.js wiring');
-  const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+  const main = readSrc(path.join(ROOT, 'main.js'));
   await check('POTACAT --launcher calls main() (requiring the script no longer starts it)', () => {
     assert.ok(/const launcher = require\(launcherScript\);\s*\r?\n\s*if \(launcher && typeof launcher\.main === 'function'\) launcher\.main\(\);/.test(main));
-    const src = fs.readFileSync(path.join(ROOT, 'scripts/launcher.js'), 'utf8');
+    const src = readSrc(path.join(ROOT, 'scripts/launcher.js'));
     assert.ok(/if \(require\.main === module\) main\(\);/.test(src));
   });
   await check('the launcher\'s copy of the token follows the tunnel, the launcher and the setting', () => {

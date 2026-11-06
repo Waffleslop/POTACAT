@@ -7,6 +7,7 @@
 // Run: node test/cloud-export-test.js
 
 'use strict';
+const { readSrc } = require('./_src');
 
 const http = require('http');
 const fs = require('fs');
@@ -99,7 +100,7 @@ function makeClient(port, opts = {}) {
     const client = makeClient(port);
     const out = await client.downloadAdif(dest);
     check(out === dest, 'downloadAdif resolves with the destination path');
-    check(fs.readFileSync(dest, 'utf8') === ADIF_BODY, 'streamed chunks reassemble byte-for-byte');
+    check(readSrc(dest) === ADIF_BODY, 'streamed chunks reassemble byte-for-byte');
     check(!fs.existsSync(dest + '.download'), 'no .download temp file left behind');
     check(behavior.refreshCalls === 0, 'valid token does not trigger a refresh');
   }
@@ -118,7 +119,7 @@ function makeClient(port, opts = {}) {
       'retry re-sends the export request with the fresh token');
     check(persisted && persisted.a === 'FRESH-TOKEN' && persisted.r === 'FRESH-REFRESH',
       'refreshed tokens are persisted via onTokenRefresh');
-    check(fs.readFileSync(dest, 'utf8') === ADIF_BODY, 'file is complete after the retry');
+    check(readSrc(dest) === ADIF_BODY, 'file is complete after the retry');
   }
 
   // ── interrupted stream → no truncated file at dest ───────────────

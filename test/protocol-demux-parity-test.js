@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * Protocol registry ⇄ demux parity.
  *
@@ -157,7 +158,7 @@ function msgFieldsIn(body) {
   return out;
 }
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'remote-server.js'), 'utf8');
+const src = readSrc(path.join(__dirname, '..', 'lib', 'remote-server.js'));
 const blocks = parseCaseBlocks(extractDemux(src));
 
 console.log('\n=== protocol registry ⇄ C2S demux parity ===');

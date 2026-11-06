@@ -4,13 +4,14 @@
 // its DXCC entity (<land>), and main.js resolved a portable call by its
 // prefix alone (W1AW/KL7 -> United States -> QRZ's CT).
 'use strict';
+const { readSrc } = require('./_src');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const { loadCtyDat, resolveCallsign, resolveOperatingCall } = require('../lib/cty');
 const db = loadCtyDat(path.join(__dirname, '..', 'assets', 'cty.dat'));
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
-const qrzSrc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'qrz.js'), 'utf8');
+const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
+const qrzSrc = readSrc(path.join(__dirname, '..', 'lib', 'qrz.js'));
 
 let pass = 0, fail = 0;
 function t(name, fn) {

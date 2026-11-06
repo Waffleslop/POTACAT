@@ -12,6 +12,7 @@
 // Run: node test/activation-log-test.js
 
 'use strict';
+const { readSrc } = require('./_src');
 
 const fs = require('fs');
 const os = require('os');
@@ -228,7 +229,7 @@ console.log('\nNo POTA hardcode remains in the log-building paths');
   // and it is what enforces landing the renderer and main halves together:
   // half-landed, SSB logs the right program while FT8 and the phone log POTA.
   for (const rel of ['../renderer/app.js', '../main.js']) {
-    const src = fs.readFileSync(path.join(__dirname, rel), 'utf-8');
+    const src = readSrc(path.join(__dirname, rel));
     check(!/mySig:\s*'POTA'/.test(src),
       rel.replace('../', '') + " has no hardcoded mySig: 'POTA'");
     // The assignment spelling slipped past the pattern above for months (the
@@ -275,12 +276,12 @@ console.log('\nNo POTA hardcode remains in the log-building paths');
 
   // Wiring: every save and every activation export passes through the fill,
   // and the Act screen refuses a contact with no frequency.
-  const main = fs.readFileSync(path.join(__dirname, '../main.js'), 'utf-8');
+  const main = readSrc(path.join(__dirname, '../main.js'));
   const save = main.slice(main.indexOf('async function saveQsoRecord('), main.indexOf('async function saveQsoRecord(') + 9000);
   check(/stationLocationFillFor\(qsoData, ops\)/.test(save) && /function stationLocationFillFor\(rec, s = settings\) \{[\s\S]{0,120}activationStationFillFor\(rec, s\)/.test(main), 'saveQsoRecord fills activation station fields (from the operator being logged for)');
   const exportCalls = main.match(/writeActivationAdifRaw\([^)]*\)/g) || [];
   check(exportCalls.length >= 3 && exportCalls.every(c => /fillActivationExport\(/.test(c)), 'every activation export is filled (' + exportCalls.length + ')');
-  const app = fs.readFileSync(path.join(__dirname, '../renderer/app.js'), 'utf-8');
+  const app = readSrc(path.join(__dirname, '../renderer/app.js'));
   const act = app.slice(app.indexOf('async function activatorLogContact('), app.indexOf('async function activatorLogContact(') + 9000);
   check(/if \(!freqKhz\) \{[\s\S]{0,400}activatorFreqInput\.focus\(\);\s*return;/.test(act), 'Act screen asks for the frequency instead of logging none');
 }

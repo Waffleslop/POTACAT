@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { readSrc } = require('./_src');
 /**
  * LA8JKA 2026-11-02: the rigctld POTACAT started stopped the moment ECHOCAT
  * connected, and POTACAT retried a dead port for good with no line saying so.
@@ -9,8 +10,8 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-const codec = fs.readFileSync(path.join(__dirname, '..', 'lib/codecs/rigctld-codec.js'), 'utf8');
+const main = readSrc(path.join(__dirname, '..', 'main.js'));
+const codec = readSrc(path.join(__dirname, '..', 'lib/codecs/rigctld-codec.js'));
 let passed = 0, failed = 0;
 function check(name, fn) {
   try { fn(); passed++; console.log('  ok  ' + name); }
