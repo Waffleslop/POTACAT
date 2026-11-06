@@ -400,6 +400,16 @@
     .jp-hunt-filters-pop input[type="text"] { height: 30px; box-sizing: border-box; border-radius: 6px; border: 1px solid var(--border-primary); background: var(--bg-primary); color: var(--text-primary); font: 700 14px monospace; padding: 0 6px; }
     .jp-hunt-filters-pop #jp-hunt-min-db { width: 64px; text-align: center; }
     .jp-hunt-filters-pop #jp-hunt-min-db-band { width: 200px; }
+    .jp-hf-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+    .jp-hf-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; border-radius: 14px; background: var(--bg-secondary); border: 1px solid var(--border-primary); font: 700 13px monospace; color: var(--text-primary); }
+    .jp-hf-chip button { border: 0; background: transparent; color: var(--text-dim, #888); font-size: 15px; line-height: 1; cursor: pointer; padding: 2px 6px; border-radius: 10px; }
+    .jp-hf-chip button:hover { color: var(--accent-red, #e94560); }
+    .jp-hunt-filters-pop #jp-ignore-add { width: 140px; text-transform: uppercase; }
+    .jp-hunt-filters-pop #jp-auto-skip-min { width: 56px; }
+    .jp-row-menu { position: fixed; z-index: 60; background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 8px; padding: 4px; box-shadow: 0 6px 18px rgba(0,0,0,.4); }
+    .jp-row-menu[hidden] { display: none; }
+    .jp-row-menu button { display: block; width: 100%; text-align: left; border: 0; background: transparent; color: var(--text-primary); font-size: 14px; padding: 7px 12px; border-radius: 6px; cursor: pointer; }
+    .jp-row-menu button:hover, .jp-row-menu button:focus-visible { background: var(--bg-primary); }
     .jp-hf-foot { font-size: 12px; color: var(--text-dim, #888); line-height: 1.4; }
     .jp-hunt-status { padding: 6px 12px; font-size: 14px; color: var(--text-secondary, #a0a0c0); background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); }
     .jp-hunt-status b { color: var(--accent-green, #4ecca3); }
@@ -1085,6 +1095,9 @@
        answers next (main jtcatHuntStatusPush). -->
   <div id="jp-hunt-status" class="jp-hunt-status" hidden aria-live="polite"></div>
 
+  <!-- Right-click a decode: Never answer its station. -->
+  <div id="jp-row-menu" class="jp-row-menu" role="menu" hidden><button type="button" role="menuitem" id="jp-row-menu-ignore"></button></div>
+
   <!-- Hunt filters popover (plan docs/plan-jtcat-hunt-priorities.md). -->
   <div id="jp-hunt-filters-pop" class="jp-options-pop jp-hunt-filters-pop hidden" role="dialog" aria-label="Hunt filters">
     <div class="jp-hf-title">Hunt filters</div>
@@ -1097,6 +1110,16 @@
       <div class="jp-hf-line"><input id="jp-hunt-min-db" type="text" inputmode="numeric" maxlength="4" placeholder="off" aria-label="Don't answer below, dB"> dB on every band</div>
       <div class="jp-hf-line" style="margin-top:6px;">By band: <input id="jp-hunt-min-db-band" type="text" maxlength="120" placeholder="e.g. 20m -18, 6m -12" aria-label="Don't answer below, by band"></div>
       <div class="jp-hf-foot" id="jp-hunt-min-db-band-help">Hunt only answers a CQ at least this strong. Blank = any signal. A band listed here uses its own level. You can still double-click a weaker station.</div>
+    </div>
+    <div>
+      <div class="jp-hf-sec">Skip</div>
+      <label class="jp-hf-line"><input type="checkbox" id="jp-auto-skip-on" checked> Skip a call for <input type="number" id="jp-auto-skip-min" min="1" max="240" step="1" value="30" aria-label="Skip minutes"> min after a QSO gives up</label>
+    </div>
+    <div>
+      <div class="jp-hf-sec">Never answer</div>
+      <div class="jp-hf-line"><input type="text" id="jp-ignore-add" maxlength="13" placeholder="K1ABC or VE3*" aria-label="Add a call or prefix to never answer"> <button type="button" id="jp-ignore-add-btn" class="jp-btn">Add</button></div>
+      <div id="jp-ignore-list" class="jp-hf-chips" aria-label="Calls Hunt never answers"></div>
+      <div class="jp-hf-foot">Right-click a decode to add its station. A prefix ending in * covers every call that starts with it.</div>
     </div>
     <div>
       <div class="jp-hf-sec">What you see</div>

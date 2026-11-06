@@ -1167,6 +1167,7 @@ function _applyPopoutTheme(payload) {
       badgesHtml: badges, entityHtml: entityStr,
     });
     row.addEventListener('dblclick', (function(decode) { return function() { onDecodeRowClick(decode); }; })(d));
+    row.addEventListener('contextmenu', (function(decode) { return function(e) { openRowMenu(e, decode); }; })(d));
     return row;
   }
 
@@ -3278,8 +3279,102 @@ function _applyPopoutTheme(payload) {
     if (!priorityInputs) return;
     for (var i = 0; i < priorityInputs.length; i++) priorityInputs[i].checked = priorityInputs[i].value === huntPriority;
   }
+  // Never answer + auto-skip (settings.jtcatIgnoreCalls / jtcatAutoSkipMin).
+  var ignoreCalls = [];
+  var autoSkipMin = 30;
+  var ignoreListEl = document.getElementById('jp-ignore-list');
+  var ignoreAddInput = document.getElementById('jp-ignore-add');
+  var autoSkipOn = document.getElementById('jp-auto-skip-on');
+  var autoSkipInput = document.getElementById('jp-auto-skip-min');
+  function normIgnore(v) {
+    v = String(v || '').trim().toUpperCase();
+    return /^[A-Z0-9\/]{1,12}\*?$/.test(v) && /[A-Z0-9]/.test(v) ? v : '';
+  }
+  function parseIgnore(v) {
+    var out = [];
+    String(v || '').split(',').forEach(function (e) { e = normIgnore(e); if (e && out.indexOf(e) < 0) out.push(e); });
+    return out;
+  }
+  function renderIgnoreList() {
+    if (!ignoreListEl) return;
+    ignoreListEl.innerHTML = ignoreCalls.map(function (c) {
+      return '<span class="jp-hf-chip">' + esc(c) + '<button type="button" data-unignore="' + esc(c) + '" aria-label="Answer ' + esc(c) + ' again" title="Remove">&times;</button></span>';
+    }).join('');
+  }
+  function saveIgnore() {
+    window.api.saveSettings({ jtcatIgnoreCalls: ignoreCalls.join(',') });
+    renderIgnoreList();
+    huntFiltersReflectDot();
+  }
+  function addIgnore(v) {
+    var e = normIgnore(v);
+    if (!e || ignoreCalls.indexOf(e) >= 0) return false;
+    ignoreCalls.push(e);
+    saveIgnore();
+    return true;
+  }
+  function removeIgnore(v) {
+    var i = ignoreCalls.indexOf(v);
+    if (i < 0) return;
+    ignoreCalls.splice(i, 1);
+    saveIgnore();
+  }
+  if (ignoreListEl) ignoreListEl.addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('[data-unignore]');
+    if (b) removeIgnore(b.getAttribute('data-unignore'));
+  });
+  function addFromInput() {
+    if (!ignoreAddInput) return;
+    if (addIgnore(ignoreAddInput.value)) ignoreAddInput.value = '';
+    else ignoreAddInput.style.borderColor = 'var(--accent-red, #e94560)';
+  }
+  if (ignoreAddInput) {
+    ignoreAddInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); addFromInput(); } });
+    ignoreAddInput.addEventListener('input', function () { ignoreAddInput.style.borderColor = ''; });
+  }
+  var ignoreAddBtn = document.getElementById('jp-ignore-add-btn');
+  if (ignoreAddBtn) ignoreAddBtn.addEventListener('click', addFromInput);
+  function saveAutoSkip() {
+    var v = autoSkipInput ? parseInt(autoSkipInput.value, 10) : NaN;
+    if (isFinite(v)) autoSkipMin = Math.max(1, Math.min(240, v));
+    var on = !autoSkipOn || autoSkipOn.checked;
+    window.api.saveSettings({ jtcatAutoSkipMin: on ? autoSkipMin : 0 });
+    huntFiltersReflectDot();
+  }
+  if (autoSkipOn) autoSkipOn.addEventListener('change', saveAutoSkip);
+  if (autoSkipInput) autoSkipInput.addEventListener('change', function () { if (autoSkipOn) autoSkipOn.checked = true; saveAutoSkip(); });
+  // The station a decode came from: the CQ's caller, else the second call.
+  function senderCallOf(text) {
+    var up = String(text || '').toUpperCase();
+    if (JtcatParser.isCqText(up)) { var pc = JtcatParser.parseCq(up); return pc && pc.call ? pc.call : ''; }
+    var t = up.replace(/[<>]/g, '').trim().split(/\s+/);
+    return t.length >= 2 && JtcatParser.looksLikeCallsign(t[1]) ? t[1] : '';
+  }
+  var rowMenu = document.getElementById('jp-row-menu');
+  var rowMenuBtn = document.getElementById('jp-row-menu-ignore');
+  var rowMenuCall = '';
+  function closeRowMenu() { if (rowMenu) rowMenu.hidden = true; rowMenuCall = ''; }
+  function openRowMenu(e, d) {
+    var call = senderCallOf(d && d.text);
+    if (!call || !rowMenu || !rowMenuBtn || call === (myCallsign || '').toUpperCase()) return;
+    e.preventDefault();
+    rowMenuCall = call;
+    rowMenuBtn.textContent = ignoreCalls.indexOf(call) >= 0 ? 'Answer ' + call + ' again' : 'Never answer ' + call;
+    rowMenu.hidden = false;
+    rowMenu.style.left = Math.min(e.clientX, window.innerWidth - rowMenu.offsetWidth - 8) + 'px';
+    rowMenu.style.top = Math.min(e.clientY, window.innerHeight - rowMenu.offsetHeight - 8) + 'px';
+    rowMenuBtn.focus();
+  }
+  if (rowMenuBtn) rowMenuBtn.addEventListener('click', function () {
+    if (!rowMenuCall) return;
+    if (ignoreCalls.indexOf(rowMenuCall) >= 0) removeIgnore(rowMenuCall);
+    else addIgnore(rowMenuCall);
+    closeRowMenu();
+  });
+  document.addEventListener('mousedown', function (e) { if (rowMenu && !rowMenu.hidden && !rowMenu.contains(e.target)) closeRowMenu(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && rowMenu && !rowMenu.hidden) closeRowMenu(); });
   function huntFiltersReflectDot() {
-    if (hfDot) hfDot.hidden = hideBelowDb == null && huntPriority === 'strongest';
+    if (hfDot) hfDot.hidden = hideBelowDb == null && huntPriority === 'strongest' && !ignoreCalls.length && autoSkipMin > 0 && (!autoSkipOn || autoSkipOn.checked);
   }
   for (var pi = 0; pi < priorityInputs.length; pi++) {
     priorityInputs[pi].addEventListener('change', function (e) {
@@ -3295,6 +3390,13 @@ function _applyPopoutTheme(payload) {
     if (hideBelowOn) hideBelowOn.checked = hideBelowDb != null;
     if (hideBelowInput && hideBelowDb != null) hideBelowInput.value = String(hideBelowDb);
     huntPriority = ['strongest', 'farthest', 'needed'].indexOf(s && s.jtcatHuntPriority) >= 0 ? s.jtcatHuntPriority : 'strongest';
+    ignoreCalls = parseIgnore(s && s.jtcatIgnoreCalls);
+    renderIgnoreList();
+    var sk = (s && s.jtcatAutoSkipMin != null && s.jtcatAutoSkipMin !== '') ? parseInt(s.jtcatAutoSkipMin, 10) : 30;
+    if (!isFinite(sk)) sk = 30;
+    if (autoSkipOn) autoSkipOn.checked = sk > 0;
+    if (sk > 0) autoSkipMin = sk;
+    if (autoSkipInput) autoSkipInput.value = String(autoSkipMin);
     var saved = parseHuntTargets(s && s.jtcatHuntTargets);
     if (saved.length) { huntTargets = saved; reflectHuntUi(); }
     reflectHuntPriority();

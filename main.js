@@ -15365,6 +15365,24 @@ function jtcatHuntTargets() {
   const list = Array.isArray(raw) ? raw : String(raw || '').split(',');
   return HuntFilters.targetsForMode('custom', list.map((t) => String(t).trim()));
 }
+// "Never answer" (Hunt filters): calls and PREFIX* entries, permanent until
+// removed, per profile (settings.jtcatIgnoreCalls, comma string). Hunt, Run
+// and "answer stations that call me" all pass them by; a double-click still
+// calls anyone, like a worked-before dupe.
+function jtcatIgnoreList() {
+  return HuntFilters.normalizeIgnoreList(String(settings.jtcatIgnoreCalls || '').split(','));
+}
+// Auto-skip: a call whose QSO gave up at the tries cap is skipped for
+// settings.jtcatAutoSkipMin minutes on that band and mode (default 30, 0 =
+// off), this session only. Without it Hunt walks straight back into the
+// station that could not hear us.
+const jtcatAutoSkip = new HuntFilters.AutoSkip();
+function jtcatAutoSkipMin() {
+  const raw = settings.jtcatAutoSkipMin;
+  if (raw == null || raw === '') return HuntFilters.DEFAULT_AUTO_SKIP_MIN;
+  const n = Number(raw);
+  return Number.isFinite(n) ? Math.max(0, Math.min(240, Math.round(n))) : HuntFilters.DEFAULT_AUTO_SKIP_MIN;
+}
 function jtcatHuntProgramMatch(d, filterMode) {
   if (filterMode !== 'custom') return jtcatHuntProgramMatchOne(d, filterMode);
   return jtcatHuntTargets().some((t) => jtcatHuntProgramMatchOne(d, t));
@@ -15470,7 +15488,9 @@ function jtcatWorkableCallers(results, myCall, opts) {
   // Why each CQ was or was not workable, for the Hunt status line
   // (lib/jtcat-hunt-filters.js quietReasonText): nobody should have to
   // wonder why Hunt is quiet.
-  const reasons = { heard: 0, notTarget: 0, worked: 0, ownSlot: 0, below: 0 };
+  const reasons = { heard: 0, ignored: 0, notTarget: 0, worked: 0, skipped: 0, ownSlot: 0, below: 0 };
+  const ignore = jtcatIgnoreList();
+  const skipMin = jtcatAutoSkipMin();
   const out = (results || [])
     // Any CQ at all, then parse, THEN apply the program filter — the
     // spotted-activator half of that filter needs the callsign, which only
@@ -15480,9 +15500,11 @@ function jtcatWorkableCallers(results, myCall, opts) {
     .filter((d) => {
       if (!d.call || d.call === myCall) return false;
       reasons.heard++;
+      if (HuntFilters.isIgnored(d.call, ignore)) { reasons.ignored++; return false; }
       if (!jtcatHuntProgramMatch(d, filterMode)) { reasons.notTarget++; return false; }
       if (jtcatSessionHas(d.call, dupeBandMode.band, dupeBandMode.mode)) { reasons.worked++; return false; }
       if (isWorked(d.call)) { reasons.worked++; return false; }
+      if (jtcatAutoSkip.has(d.call, dupeBandMode.band, dupeBandMode.mode, skipMin)) { reasons.skipped++; return false; }
       // Under a TX slot lock, a station calling CQ in our own slot is not workable.
       if (!JtcatTxSlot.workableUnderLock(jtcatTxSlotLock(), d.slot)) { reasons.ownSlot++; return false; }
       if (!JtcatSnrFloor.passes(d.db, floor)) { belowFloor++; reasons.below++; return false; }
@@ -15571,6 +15593,7 @@ function jtcatHuntStatusPush(candidates, best, priority) {
   const r = (candidates && candidates.reasons) || {};
   const status = {
     heard: r.heard || 0, below: r.below || 0, worked: r.worked || 0, ownSlot: r.ownSlot || 0, notTarget: r.notTarget || 0,
+    ignored: r.ignored || 0, skipped: r.skipped || 0,
     floor: candidates ? candidates.floor : null,
     next: best ? { call: best.call, why: HuntFilters.nextWhy(best, priority) } : null,
     priority: HuntFilters.normalizePriority(priority),
@@ -15593,7 +15616,7 @@ function jtcatHuntStatusClear() {
 
 // Settings that change what Hunt answers or shows; a save of any of them
 // re-sends jtcat-auto-cq-state so every surface's Filters panel follows.
-const JTCAT_HUNT_FILTER_KEYS = ['jtcatHuntTargets', 'jtcatHuntPriority', 'jtcatHideBelowDb', 'jtcatHuntMinDb', 'jtcatHuntMinDbByBand'];
+const JTCAT_HUNT_FILTER_KEYS = ['jtcatHuntTargets', 'jtcatHuntPriority', 'jtcatHideBelowDb', 'jtcatHuntMinDb', 'jtcatHuntMinDbByBand', 'jtcatIgnoreCalls', 'jtcatAutoSkipMin'];
 function broadcastAutoCqState() {
   if (jtcatAutoCqMode === 'off' && !jtcatHuntFallbackMode) jtcatHuntStatusClear();
   const state = jtcatAutoCqStatePayload();
@@ -17000,7 +17023,7 @@ function advanceJtcatQso(q, results, setTxMsg, onDone) {
   // forever, so it can never reach the "drained" state the pause depends on.
   if (jtcatFullAutoCq && q && q.mode === 'cq') {
     const { band, mode } = jtcatCurrentBandMode(ft8Engine);
-    deps.skipCall = (call) => jtcatIsWorkedCall(call, band, mode);
+    deps.skipCall = (call) => jtcatIsWorkedCall(call, band, mode) || HuntFilters.isIgnored(call, jtcatIgnoreList());
   }
   if (q && q.call) _jtcatQsoClock.note(q.call, Date.now());
   const advanced = _jtcatStateMachine.advanceJtcatQso(q, results, setTxMsg, onDone, deps);
@@ -17093,7 +17116,8 @@ async function jtcatTryAnswerDirectCaller(results, myCall, myGrid) {
       parts[0] === myCall &&
       parts[1] !== myCall &&
       JtcatParser.looksLikeCallsign(parts[1]) &&
-      !(workedQsos && workedQsos.has(parts[1])))
+      !(workedQsos && workedQsos.has(parts[1])) &&
+      !HuntFilters.isIgnored(parts[1], jtcatIgnoreList()))
     // A caller in our own locked slot can't be worked without moving.
     .filter(({ d }) => JtcatTxSlot.workableUnderLock(jtcatTxSlotLock(), d.slot));
   if (!callers.length) return false;
@@ -17252,6 +17276,12 @@ function jtcatHandleRetryStall(o) {
     // bug report, or the log just jumps to the next station with no reason
     // (N2FSM 2026-09-14, KI7SKT -> W0CTX).
     sendCatLog('[JTCAT] ' + msg);
+    // Hunt must not walk straight back into a station that could not hear us.
+    if (qso.call && qso.phase !== 'cq' && jtcatAutoSkipMin() > 0) {
+      const bm = jtcatCurrentBandMode(o.engine || ft8Engine);
+      jtcatAutoSkip.note(qso.call, bm.band, bm.mode);
+      sendCatLog(`[JTCAT] Hunt skips ${qso.call} for ${jtcatAutoSkipMin()} min on ${bm.band || 'this band'} ${bm.mode || ''}`.trimEnd());
+    }
     const eng = o.engine;
     if (eng) {
       eng._txEnabled = false;

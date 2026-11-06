@@ -421,6 +421,7 @@ const TESTS = [
   'test/jtcat-hunt-new-grid-test.js', // Hunt: New grids target, Wanted split into New DXCC / New grid (level_death)
   'test/jtcat-hunt-priority-test.js', // Hunt: Who goes first (Strongest default, Farthest, Needed first)
   'test/jtcat-hunt-custom-test.js', // Hunt: Custom (ANY of the ticked targets), Hunt minimum dB in the Filters panel
+  'test/jtcat-hunt-ignore-test.js', // Hunt: Never answer (right-click a decode) and 30-min auto-skip after a failed QSO
 ];
 
 const root = path.join(__dirname, '..');

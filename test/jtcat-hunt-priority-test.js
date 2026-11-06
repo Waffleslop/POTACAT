@@ -49,7 +49,7 @@ test('the Filters panel offers the three choices and saves the one picked', () =
   for (const v of ['strongest', 'farthest', 'needed']) assert.ok(new RegExp('name="jp-hunt-priority" value="' + v + '"').test(html), v);
   const pop = read('renderer/jtcat-popout.js');
   assert.ok(/window\.api\.saveSettings\(\{ jtcatHuntPriority: huntPriority \}\);/.test(pop));
-  assert.ok(/hfDot\.hidden = hideBelowDb == null && huntPriority === 'strongest';/.test(pop), 'the dot shows for a non-default priority');
+  assert.ok(/hfDot\.hidden = hideBelowDb == null && huntPriority === 'strongest'[;\s&]/.test(pop), 'the dot shows for a non-default priority');
 });
 
 console.log(`\nHunt priority: ${pass} passed, ${fail} failed`);

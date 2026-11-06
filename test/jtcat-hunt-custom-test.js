@@ -60,7 +60,7 @@ test('the state tells an older phone the first target, and a new one the whole c
 });
 
 test('a saved filter change re-sends the state, here and from a laptop driving the shack', () => {
-  assert.ok(/const JTCAT_HUNT_FILTER_KEYS = \['jtcatHuntTargets', 'jtcatHuntPriority', 'jtcatHideBelowDb', 'jtcatHuntMinDb', 'jtcatHuntMinDbByBand'\];/.test(main));
+  assert.ok(/const JTCAT_HUNT_FILTER_KEYS = \['jtcatHuntTargets', 'jtcatHuntPriority', 'jtcatHideBelowDb', 'jtcatHuntMinDb', 'jtcatHuntMinDbByBand'[^\]]*\];/.test(main));
   assert.ok(/if \(newSettings && JTCAT_HUNT_FILTER_KEYS\.some\(\(k\) => k in newSettings\)\) setImmediate\(broadcastAutoCqState\);/.test(main));
   assert.ok(/if \(JTCAT_HUNT_FILTER_KEYS\.includes\(key\)\) broadcastAutoCqState\(\);/.test(main));
   assert.strictEqual(RemoteBridge.JTCAT_PREFS.jtcatHuntTargets, 'string');
