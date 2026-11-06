@@ -52,6 +52,23 @@ test('transmit: no frequency, mode or VFO poll; the PTT and SWR/ALC reads stay',
   assert.ok(calls.includes('getPtt') && calls.includes('getSwr'), 'meters and PTT still read: ' + calls.join(','));
 });
 
+// The fake above has getPtt, which hid the Kenwood case: a codec whose TX
+// report rides on the status poll (IF; P8) must still be asked during TX
+// (transmit-safety review; test/kenwood-tx-latch-test.js runs the real codec).
+test('transmit: a codec with no PTT read of its own is asked for its TX state', () => {
+  const { rc, codec, calls } = rig();
+  delete codec.getPtt;
+  codec.pollPttDuringTx = () => calls.push('pollPttDuringTx');
+  rc.setTransmit(true);
+  calls.length = 0;
+  tick(rc);
+  assert.ok(calls.includes('pollPttDuringTx'), calls.join(','));
+  rc.setTransmit(false);
+  calls.length = 0;
+  tick(rc);
+  assert.ok(!calls.includes('pollPttDuringTx'), 'not on receive (the VFO/split poll carries it): ' + calls.join(','));
+});
+
 test('a frequency that arrives during TX is ignored; on receive it is used again', () => {
   const { rc, codec } = rig();
   const seen = [];
