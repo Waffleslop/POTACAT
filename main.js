@@ -15488,7 +15488,11 @@ function jtcatWorkableCallers(results, myCall, opts) {
   // Why each CQ was or was not workable, for the Hunt status line
   // (lib/jtcat-hunt-filters.js quietReasonText): nobody should have to
   // wonder why Hunt is quiet.
-  const reasons = { heard: 0, ignored: 0, notTarget: 0, worked: 0, skipped: 0, ownSlot: 0, below: 0 };
+  const reasons = { heard: 0, ignored: 0, notTarget: 0, notForUs: 0, worked: 0, skipped: 0, ownSlot: 0, below: 0 };
+  // The CQ DX / CQ <continent> rule (no setting, Casey 2026-11-05): a CQ DX
+  // is not for a station on the caller's own continent, and a CQ NA is only
+  // for North America. Unknown continents answer as before.
+  const homeCont = jtcatHomeContinent();
   const ignore = jtcatIgnoreList();
   const skipMin = jtcatAutoSkipMin();
   const out = (results || [])
@@ -15502,6 +15506,7 @@ function jtcatWorkableCallers(results, myCall, opts) {
       reasons.heard++;
       if (HuntFilters.isIgnored(d.call, ignore)) { reasons.ignored++; return false; }
       if (!jtcatHuntProgramMatch(d, filterMode)) { reasons.notTarget++; return false; }
+      if (!HuntFilters.cqAimedAtUs(d.text, d.continent, homeCont)) { reasons.notForUs++; return false; }
       if (jtcatSessionHas(d.call, dupeBandMode.band, dupeBandMode.mode)) { reasons.worked++; return false; }
       if (isWorked(d.call)) { reasons.worked++; return false; }
       if (jtcatAutoSkip.has(d.call, dupeBandMode.band, dupeBandMode.mode, skipMin)) { reasons.skipped++; return false; }
@@ -15593,7 +15598,7 @@ function jtcatHuntStatusPush(candidates, best, priority) {
   const r = (candidates && candidates.reasons) || {};
   const status = {
     heard: r.heard || 0, below: r.below || 0, worked: r.worked || 0, ownSlot: r.ownSlot || 0, notTarget: r.notTarget || 0,
-    ignored: r.ignored || 0, skipped: r.skipped || 0,
+    ignored: r.ignored || 0, skipped: r.skipped || 0, notForUs: r.notForUs || 0,
     floor: candidates ? candidates.floor : null,
     next: best ? { call: best.call, why: HuntFilters.nextWhy(best, priority) } : null,
     priority: HuntFilters.normalizePriority(priority),

@@ -22,7 +22,7 @@ const html = read('renderer/jtcat-popout.html');
 
 test('every CQ is counted under the first reason it was not workable', () => {
   const f = main.slice(main.indexOf('function jtcatWorkableCallers('), main.indexOf('let _jtcatFloorNoteAt'));
-  assert.ok(/const reasons = \{ heard: 0, [^}]*notTarget: 0, worked: 0, [^}]*ownSlot: 0, below: 0[^}]*\};/.test(f));
+  assert.ok(/const reasons = \{ heard: 0, [^}]*notTarget: 0, [^}]*worked: 0, [^}]*ownSlot: 0, below: 0[^}]*\};/.test(f));
   for (const r of ['heard++', 'notTarget++', 'worked++', 'ownSlot++', 'below++']) assert.ok(f.includes('reasons.' + r), r);
   assert.ok(/out\.reasons = reasons;/.test(f));
 });
