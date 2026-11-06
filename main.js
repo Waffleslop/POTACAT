@@ -15391,12 +15391,13 @@ function jtcatHuntProgramMatch(d, filterMode) {
     eventNeeded: !!(eventMatch && eventMatch.status !== 'worked'),
     stateWanted,
     countryWanted: !!d.wantedCountry,
+    gridWanted: !!d.newGrid,
     isDx: !!(home && d.continent && d.continent !== home),
     chaseMatch: !settings.jtcatChaseTarget || !!d.chaseMatch,
     watched: !!d.watched,
   });
   if (ok && !_jtcatSpottedHuntLogged.has(d.call)) {
-    const why = { 'wanted-country': `${d.entity} is a country you still need`, dx: `${d.entity} is on another continent`,
+    const why = { 'wanted-country': `${d.entity} is a country you still need`, 'new-grid': `${d.grid} is a grid you still need here`, dx: `${d.entity} is on another continent`,
       chase: settings.jtcatChaseTarget ? `matches your Call target ${settings.jtcatChaseTarget}` : '', watchlist: 'is on your watchlist' }[filterMode];
     if (why) {
       _jtcatSpottedHuntLogged.add(d.call);

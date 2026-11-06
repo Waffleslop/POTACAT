@@ -35,7 +35,26 @@ function _applyPopoutTheme(payload) {
   // --- State ---
   var decodeLog = [];
   var cqFilter = false;
-  var wantedFilter = false;
+  // The Wanted view filter cycles: '' off, 'wanted' (any new DXCC, grid,
+  // call or state, as before), 'dxcc' (new DXCC only), 'grid' (new grid only)
+  // — level_death: show only new grids or new DX entities.
+  var wantedFilter = '';
+  var WANTED_CYCLE = ['', 'wanted', 'dxcc', 'grid'];
+  var WANTED_LABELS = { '': 'Wanted', wanted: 'Wanted', dxcc: 'New DXCC', grid: 'New grid' };
+  function wantedMatches(c) {
+    if (wantedFilter === 'dxcc') return !!c.d.newDxcc;
+    if (wantedFilter === 'grid') return !!c.d.newGrid;
+    return !!c.isWanted;
+  }
+  function reflectWantedBtn() {
+    if (!wantedFilterBtn) return;
+    wantedFilterBtn.classList.toggle('active', !!wantedFilter);
+    wantedFilterBtn.textContent = WANTED_LABELS[wantedFilter] || 'Wanted';
+    wantedFilterBtn.title = wantedFilter === 'dxcc' ? 'Showing only new DXCC entities. Click for new grids.'
+      : wantedFilter === 'grid' ? 'Showing only new grids. Click to show everything.'
+      : wantedFilter ? 'Showing needed DXCC, grids, calls and states. Click for new DXCC only.'
+      : 'Show only needed DXCC/grid/call. Click again for new DXCC only, then new grids only.';
+  }
   var chaseFilter = false;
   var chaseTarget = '';   // current chase tag ('' = none); shared with phone
   var sortBySignal = false;
@@ -1056,7 +1075,7 @@ function _applyPopoutTheme(payload) {
   function decodeVisible(c) {
     if (hiddenByLevel(c)) return false;
     if (cqFilter && !c.isCq && !c.is73 && !c.isDirected) return false;
-    if (wantedFilter && !c.isWanted && !c.isDirected && !c.is73) return false;
+    if (wantedFilter && !wantedMatches(c) && !c.isDirected && !c.is73) return false;
     if (chaseFilter && !c.d.chaseMatch && !c.isDirected && !c.is73) return false;
     // Event filter (events-roadmap #4): only tracked-event stations still
     // useful (needed / new band-mode slot); worked ones are mid-sweep noise.
@@ -2016,12 +2035,13 @@ function _applyPopoutTheme(payload) {
     try { saved = JSON.parse(localStorage.getItem(FILTER_LS_KEY) || 'null'); } catch (e) { saved = null; }
     if (!saved) return;
     cqFilter = !!saved.cq;
-    wantedFilter = !!saved.wanted;
+    // An older save is true/false; true is the full Wanted filter.
+    wantedFilter = saved.wanted === true ? 'wanted' : (WANTED_CYCLE.indexOf(saved.wanted) > 0 ? saved.wanted : '');
     chaseFilter = !!saved.chase;
     eventFilter = !!saved.event;
     sortBySignal = !!saved.sort;
     cqFilterBtn.classList.toggle('active', cqFilter);
-    wantedFilterBtn.classList.toggle('active', wantedFilter);
+    reflectWantedBtn();
     if (chaseFilterBtn) chaseFilterBtn.classList.toggle('active', chaseFilter);
     if (eventFilterBtn) eventFilterBtn.classList.toggle('active', eventFilter);
   }
@@ -2034,8 +2054,8 @@ function _applyPopoutTheme(payload) {
   });
 
   wantedFilterBtn.addEventListener('click', function() {
-    wantedFilter = !wantedFilter;
-    wantedFilterBtn.classList.toggle('active', wantedFilter);
+    wantedFilter = WANTED_CYCLE[(WANTED_CYCLE.indexOf(wantedFilter) + 1) % WANTED_CYCLE.length];
+    reflectWantedBtn();
     saveFilters();
     rebuildBandActivity();
   });
@@ -2687,7 +2707,7 @@ function _applyPopoutTheme(payload) {
   // filters). The seasonal fd/event options appear here as the select gets them.
   var huntBtn = document.getElementById('jp-hunt-btn');
   var huntTargetSel = document.getElementById('jp-hunt-target');
-  var HUNT_LABELS = { pota: 'POTA activators', sota: 'SOTA activators', all: 'Anyone calling CQ', 'wanted-country': 'New countries', dx: 'DX only (other continents)', chase: 'Same as Call', watchlist: 'Watchlist', 'wanted-state': 'States I need', fd: 'Field Day stations', event: 'Event stations' };
+  var HUNT_LABELS = { pota: 'POTA activators', sota: 'SOTA activators', all: 'Anyone calling CQ', 'wanted-country': 'New countries', 'new-grid': 'New grids', dx: 'DX only (other continents)', chase: 'Same as Call', watchlist: 'Watchlist', 'wanted-state': 'States I need', fd: 'Field Day stations', event: 'Event stations' };
   var huntTarget = 'all';
   try { huntTarget = localStorage.getItem('jtcat-hunt-target') || 'all'; } catch (e) {}
   function reflectHuntUi() {
