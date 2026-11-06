@@ -434,6 +434,7 @@ const TESTS = [
   'test/civ-pacing-ptt-order-test.js', // CI-V pacing never sends TX OFF before TX ON; the newest key state wins
   'test/forced-data-no-tune-test.js', // a forced-DATA key-down sets the mode only; never a frequency write (Icom repeater memories)
   'test/rts-trial-keyed-test.js', // the RTS/CTS trial never saves a setting that keys the radio; a shorter no-answer wait
+  'test/ptt-quiet-paths-test.js', // no 800 ms DATA wait on a radio that cannot confirm; hand-mic overs are not warnings; the voice hint needs our audio
 ];
 
 const root = path.join(__dirname, '..');

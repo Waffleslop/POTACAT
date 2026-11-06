@@ -27038,6 +27038,7 @@ function txLimitTrip(t) {
 // keying lines' state (the next jcoreyc case leaves evidence). Not unkeyed —
 // the operator may be on the hand mic.
 let _txUnsolicitedSince = 0;
+let _txUnsolicitedInfoSaid = false;
 function txNoteRadioPtt(controller, on) {
   if (controller !== cat) return;
   if (!on) {
@@ -27052,7 +27053,16 @@ function txNoteRadioPtt(controller, on) {
   _txUnsolicitedSince = Date.now();
   const tr = controller._transport || {};
   const lines = tr._lastPinState ? { dtr: tr._lastPinState.dtr, rts: tr._lastPinState.rts } : (typeof tr.setPin === 'function' ? {} : null);
-  sendCatLog(TxLimitLib.unsolicitedTxReport({ lines, handshake: !!tr._hardwareHandshake, pttRoute: pttRouteLabel(), mode: _currentMode, freqHz: _currentFreqHz }));
+  // A WARNING only when a line POTACAT holds is HIGH (that line may be what
+  // keys the radio). Otherwise it is the hand mic or a footswitch: one plain
+  // line per session, not a warning on every over (transmit-safety review).
+  const lineHigh = !!(lines && (lines.dtr === true || lines.rts === true || tr._hardwareHandshake));
+  if (lineHigh) {
+    sendCatLog(TxLimitLib.unsolicitedTxReport({ lines, handshake: !!tr._hardwareHandshake, pttRoute: pttRouteLabel(), mode: _currentMode, freqHz: _currentFreqHz }));
+  } else if (!_txUnsolicitedInfoSaid) {
+    _txUnsolicitedInfoSaid = true;
+    sendCatLog('[TX] The radio transmitted without POTACAT keying it (the microphone or a footswitch); the CAT port lines POTACAT holds are low. Said once per session.');
+  }
 }
 
 // --- SSB-over-DATA: key only once the radio reports DATA; restore, confirmed
@@ -27093,8 +27103,26 @@ function pttAskMode() {
   else if (typeof codec.getMode === 'function') codec.getMode();
 }
 /** Key once the radio reports a DATA mode (or after the timeout, logged). */
+// A radio that cannot report its DATA state (an Icom whose 1A 06 is latched
+// off, a TS-480/TS-2000 with no DA): the 800 ms wait bought nothing but a late
+// start on every over, which a Winlink or Mercury frame already playing lost.
+// Skipped for the latched codec; after the first timeout on a link, every
+// later key-down there keys at the bus-gap minimum (transmit-safety review).
+let _pttDataNoConfirmCat = null;
+function pttDataConfirmable() {
+  const codec = cat && cat._codec;
+  if (codec && codec._dataModeUnsupported) return false;
+  return !(cat && _pttDataNoConfirmCat === cat);
+}
 function pttKeyAfterDataMode(since, minWaitMs, emission) {
   const seq = _pttKeySeq;
+  if (!pttDataConfirmable()) {
+    return new Promise((resolve) => setTimeout(() => {
+      if (seq !== _pttKeySeq) { resolve(false); return; }
+      if (cat && cat.connected) gatedSetTransmit(true, emission);
+      resolve(true);
+    }, Math.max(0, minWaitMs || 0)));
+  }
   return PttModeSwap.confirmMode({
     read: pttModeReport, ask: pttAskMode, since,
     accept: (_m, r) => !!r.data,
@@ -27103,7 +27131,10 @@ function pttKeyAfterDataMode(since, minWaitMs, emission) {
   }).then((r) => {
     if (r.cancelled) { sendCatLog('[PTT] released before the radio reported the DATA mode — not keyed'); return false; }
     if (r.ok) sendCatLog(`[PTT] the radio reports DATA mode after ${r.waitedMs} ms — keying`);
-    else sendCatLog(`[PTT] the radio did not report a DATA mode within ${r.waitedMs} ms (${r.mode ? 'last report ' + r.mode : 'no report'}) — keying anyway`);
+    else {
+      sendCatLog(`[PTT] the radio did not report a DATA mode within ${r.waitedMs} ms (${r.mode ? 'last report ' + r.mode : 'no report'}) — keying anyway. Later overs on this connection key without waiting for it.`);
+      _pttDataNoConfirmCat = cat;
+    }
     if (cat && cat.connected) gatedSetTransmit(true, emission);
     return true;
   });
@@ -27140,6 +27171,16 @@ function yaesuLanTxRefusal() {
   const t = settings.catTarget;
   if (!t || t.type !== 'yaesu-lan' || settings.audioSource !== 'yaesu-lan') return null;
   return "transmit audio over the Yaesu LAN (SCU-LAN10) is not supported yet, so the radio would send a silent carrier. To transmit, set Audio Source to the radio's USB sound card on this computer (CAT stays on the LAN), or use the radio's own microphone.";
+}
+
+/** Is POTACAT sending the audio for this key-down? opts.audio when the caller
+ *  says; otherwise the known audio paths (ECHOCAT bridge window, FreeDV). */
+function pttAudioActive(opts = {}) {
+  return (opts.audio === true) ||
+    (opts.audio === undefined && !!(
+      (remoteAudioWin && !remoteAudioWin.isDestroyed()) ||
+      (typeof freedvEngine !== 'undefined' && freedvEngine)
+    ));
 }
 
 function handleRemotePtt(state, opts = {}) {
@@ -27259,7 +27300,10 @@ function handleRemotePtt(state, opts = {}) {
   // (lib/voice-tx-check.js). Data routes pass an emission (DATA, SSTV); voice
   // passes none, Icom LAN voice included. A Flex reports through its own path.
   if (!state) voiceTxCheckEnd();
-  else if (!isFlexRig && cat && cat.connected && !opts.emission && !(settings.catTarget && settings.catTarget.type === 'none')) {
+  // Only when POTACAT sends the audio (a voice macro, ECHOCAT, FreeDV): a
+  // naked PTT with the hand mic has no audio of ours, and the hint would tell
+  // a hand-mic user to set SSB MOD SOURCE to USB (transmit-safety review).
+  else if (!isFlexRig && cat && cat.connected && !opts.emission && pttAudioActive(opts) && !(settings.catTarget && settings.catTarget.type === 'none')) {
     _voiceTxCheck = { startedAt: Date.now(), fwdEvents: 0, peakW: 0, alcEvents: 0, peakAlc: 0, mode: _currentMode };
   }
 
@@ -27276,11 +27320,7 @@ function handleRemotePtt(state, opts = {}) {
   // playing, ECHOCAT audio bridge alive, FreeDV engine running) so
   // that legacy callers / older paths don't lose the auto-switch
   // behavior they depended on.
-  const audioActive = (opts.audio === true) ||
-    (opts.audio === undefined && (
-      (remoteAudioWin && !remoteAudioWin.isDestroyed()) ||
-      (typeof freedvEngine !== 'undefined' && freedvEngine)
-    ));
+  const audioActive = pttAudioActive(opts);
 
   // When SSB-over-DATA issues a mode change immediately before keying, the
   // PTT frame and the mode frame are written back-to-back. On Icom CI-V's

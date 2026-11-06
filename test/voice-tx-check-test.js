@@ -34,7 +34,7 @@ t('a radio with a wattmeter and no ALC reading still gets the hint on 0 W', () =
 });
 t('main.js: voice key-downs on a CAT radio are measured and judged at key-up; data routes are not', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
-  assert.ok(main.includes("if (!state) voiceTxCheckEnd();\n  else if (!isFlexRig && cat && cat.connected && !opts.emission"));
+  assert.ok(/if \(!state\) voiceTxCheckEnd\(\);\n(\s*\/\/[^\n]*\n)*\s*else if \(!isFlexRig && cat && cat\.connected && !opts\.emission/.test(main));
   assert.ok(/if \(_voiceTxCheck\) \{\n    _voiceTxCheck\.fwdEvents\+\+;/.test(main), 'power feeds it');
   assert.ok(/_voiceTxCheck\.alcEvents\+\+;/.test(main), 'ALC feeds it');
   assert.ok(main.includes("remoteServer.sendToClient({ type: 'voice-tx-hint', key: d.key, text: d.hint })"));
