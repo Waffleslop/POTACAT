@@ -53,7 +53,7 @@ test('every saved port is repaired, and each fix is reported', () => {
 test('main repairs saved settings at startup, on every save, and in Test Connection', () => {
   const main = R('main.js');
   assert.ok(/settings = loadSettings\(\);\n[\s\S]{0,300}normalizeSettingsSerialPaths\(settings\)/.test(main), 'not at startup');
-  const save = main.slice(main.indexOf("ipcMain.handle('save-settings'"), main.indexOf("ipcMain.handle('save-settings'") + 600);
+  const save = main.slice(main.indexOf("ipcMain.handle('save-settings'"), main.indexOf("ipcMain.handle('save-settings'") + 900);
   assert.ok(/normalizeSettingsSerialPaths\(newSettings\)/.test(save), 'not on save');
   assert.strictEqual((main.match(/config\.portPath = normalizeSerialPath\(config\.portPath\)/g) || []).length, 2, 'not in both serial tests');
 });

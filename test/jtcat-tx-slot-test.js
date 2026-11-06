@@ -121,7 +121,7 @@ test('wiring: every CQ and reply in main.js goes through the slot rules', () => 
   assert.ok(/jtcatReplySlot\(replyEngine, data\.call, data\.slot, \{ hound, source: 'popout'/.test(main));
   assert.ok(/jtcatReplySlot\(targetEngine, call, slot, \{ hound, source: 'remote'/.test(main));
   assert.ok(/jtcatReplySlot\(ft8Engine, best\.call, best\.slot\)/.test(main) && /jtcatReplySlot\(ft8Engine, senderCall, caller\.slot\)/.test(main));
-  assert.ok(/if \(!JtcatTxSlot\.workableUnderLock\(jtcatTxSlotLock\(\), d\.slot\)\) return false;/.test(main), 'Hunt filters the locked slot');
+  assert.ok(/if \(!JtcatTxSlot\.workableUnderLock\(jtcatTxSlotLock\(\), d\.slot\)\) (\{ reasons\.ownSlot\+\+; )?return false;/.test(main), 'Hunt filters the locked slot');
   assert.ok(/ipcMain\.on\('jtcat-set-tx-slot', \(_e, slot\) => \{ applyJtcatTxSlotLock\(slot, 'popout'\); \}\);/.test(main));
   assert.ok(/applyJtcatTxSlotLock\(slot, 'remote'\);/.test(main));
   assert.strictEqual((main.match(/jtcatNoteTxSlot\(data\.slot\)/g) || []).length, 2, 'single- and multi-slice tx-start');

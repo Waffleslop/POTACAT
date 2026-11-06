@@ -61,7 +61,7 @@ test('nothing in main.js reads or writes the session set by bare callsign', () =
   const direct = src.split('\n').filter((l) => /jtcatAutoCqWorkedSession\.(add|has)\(/.test(l) && !/jtcatSessionKey\(/.test(l));
   assert.deepStrictEqual(direct, [], direct.join('\n'));
   assert.ok(/if \(jtcatSessionHas\(c, band, mode\)\) return true;/.test(src), 'jtcatIsWorkedCall uses the keyed check');
-  assert.ok(/if \(jtcatSessionHas\(d\.call, dupeBandMode\.band, dupeBandMode\.mode\)\) return false;/.test(src), 'Hunt candidates use the keyed check');
+  assert.ok(/if \(jtcatSessionHas\(d\.call, dupeBandMode\.band, dupeBandMode\.mode\)\) (\{ reasons\.worked\+\+; )?return false;/.test(src), 'Hunt candidates use the keyed check');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);
