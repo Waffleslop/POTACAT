@@ -2116,6 +2116,7 @@ const SerialHsTrial = require('./lib/serial-hs-trial');
 const IdleWsprBand = require('./lib/idle-wspr-band');
 const SetupTestFreq = require('./lib/setup-test-freq');
 const HuntFilters = require('./lib/jtcat-hunt-filters');
+const N3fjpDeleted = require('./lib/n3fjp-deleted');
 // The radio's last mode report ({ mode, at }), set in sendCatMode: what the
 // external tune's mode restore believes, never the command it sent.
 let _lastModeReadback = null;
@@ -29823,6 +29824,12 @@ function qsoLogPath() {
 
 function qsoLogSink(changes) {
   if (cloudIpc) cloudIpc.recordLogChanges(changes);
+  // A contact the N3FJP pull brought in and the operator deleted stays
+  // deleted: the daily re-read skips it (lib/n3fjp-deleted.js).
+  try {
+    const next = N3fjpDeleted.noteDeleted(settings.n3fjpDeletedKeys, changes);
+    if (next) { settings.n3fjpDeletedKeys = next; saveSettings(settings); }
+  } catch (e) { console.error('[N3FJP] deleted list:', e.message); }
 }
 // "Log as" another operator: journal the change under THEIR cloud account. It
 // parks until they sign in on this machine; if they never have (owner null)
@@ -32646,9 +32653,13 @@ async function n3fjpPull(reason) {
       return { imported: 0, skipped: 0, dropped };
     }
     for (const r of records) r.APP_POTACAT_IMPORTED_FROM = 'N3FJP';
-    const { imported, skipped } = importQsoRecords(records);
-    const confirmed = skipped ? n3fjpUpdateConfirmations(records) : 0;
-    if (full || daily) { settings.n3fjpPullConfirmAt = Date.now(); saveSettings(settings); }
+    // Contacts deleted here after an earlier pull are not brought back.
+    const { records: wanted, left: keptDeleted } = N3fjpDeleted.withoutDeleted(records, settings.n3fjpDeletedKeys);
+    const { imported, skipped } = importQsoRecords(wanted);
+    const confirmed = skipped ? n3fjpUpdateConfirmations(wanted) : 0;
+    if (keptDeleted && (full || daily)) sendCatLog(`[N3FJP] ${keptDeleted} contact(s) you deleted here were not brought back`);
+    // An empty reply is not a re-read: the next pull tries again.
+    if ((full || daily) && records.length) { settings.n3fjpPullConfirmAt = Date.now(); saveSettings(settings); }
     if (full && (records.length || !reply.trim())) {
       settings.n3fjpPullFullDone = true;
       saveSettings(settings);

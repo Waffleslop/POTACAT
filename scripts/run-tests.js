@@ -429,6 +429,7 @@ const TESTS = [
   'test/civ-pacing-adaptive-test.js', // CI-V pacing engages only on an Icom seen dropping replies; Auto / Always / Never per rig
   'test/log-false-p2p-test.js', // no false park-to-park: a General contact after a POTA spot or contact carries no park (web sheet, desktop banner)
   'test/n3fjp-confirm-keep-test.js', // N3FJP pull never deletes a confirmation; eQSL and ClubLog count as confirmed
+  'test/n3fjp-deleted-test.js', // a contact deleted after an N3FJP pull is not brought back by the daily re-read
 ];
 
 const root = path.join(__dirname, '..');
