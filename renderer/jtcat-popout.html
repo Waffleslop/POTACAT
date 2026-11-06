@@ -394,6 +394,12 @@
     .jp-hf-seg input { position: absolute; opacity: 0; pointer-events: none; }
     .jp-hf-seg label:has(input:checked) { background: var(--accent-blue, #4fc3f7); color: #10202c; }
     .jp-hf-seg label:has(input:focus-visible) { outline: 2px solid var(--accent-blue, #4fc3f7); outline-offset: -2px; }
+    .jp-hf-targets { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+    .jp-hf-targets label { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text-primary); cursor: pointer; }
+    .jp-hf-targets input { width: 18px; height: 18px; accent-color: var(--accent-green, #4ecca3); margin: 0; }
+    .jp-hunt-filters-pop input[type="text"] { height: 30px; box-sizing: border-box; border-radius: 6px; border: 1px solid var(--border-primary); background: var(--bg-primary); color: var(--text-primary); font: 700 14px monospace; padding: 0 6px; }
+    .jp-hunt-filters-pop #jp-hunt-min-db { width: 64px; text-align: center; }
+    .jp-hunt-filters-pop #jp-hunt-min-db-band { width: 200px; }
     .jp-hf-foot { font-size: 12px; color: var(--text-dim, #888); line-height: 1.4; }
     .jp-hunt-status { padding: 6px 12px; font-size: 14px; color: var(--text-secondary, #a0a0c0); background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); }
     .jp-hunt-status b { color: var(--accent-green, #4ecca3); }
@@ -1057,6 +1063,7 @@
       <select id="jp-auto-cq" class="jp-select" hidden title="Hunt — automatically answer other stations' CQ calls and work them. Mutually exclusive with Run.">
         <option value="off">Hunt: Off</option>
         <option value="all">Hunt: All CQs</option>
+        <option value="custom" title="Answer CQs that match any of the targets ticked under Filters.">Hunt: Custom</option>
         <option value="wanted-country" title="Answer CQs from countries you still need, under the same scope as the map's Worked box.">Hunt: New countries</option>
         <option value="new-grid" title="Answer CQs from grids you have not worked on this band and mode.">Hunt: New grids</option>
         <option value="dx" title="Answer CQs from stations on another continent.">Hunt: DX only</option>
@@ -1081,6 +1088,16 @@
   <!-- Hunt filters popover (plan docs/plan-jtcat-hunt-priorities.md). -->
   <div id="jp-hunt-filters-pop" class="jp-options-pop jp-hunt-filters-pop hidden" role="dialog" aria-label="Hunt filters">
     <div class="jp-hf-title">Hunt filters</div>
+    <div>
+      <div class="jp-hf-sec">Answer stations matching any of</div>
+      <div id="jp-hunt-targets" class="jp-hf-targets" role="group" aria-label="Hunt targets"></div>
+    </div>
+    <div>
+      <div class="jp-hf-sec">Don't answer below</div>
+      <div class="jp-hf-line"><input id="jp-hunt-min-db" type="text" inputmode="numeric" maxlength="4" placeholder="off" aria-label="Don't answer below, dB"> dB on every band</div>
+      <div class="jp-hf-line" style="margin-top:6px;">By band: <input id="jp-hunt-min-db-band" type="text" maxlength="120" placeholder="e.g. 20m -18, 6m -12" aria-label="Don't answer below, by band"></div>
+      <div class="jp-hf-foot" id="jp-hunt-min-db-band-help">Hunt only answers a CQ at least this strong. Blank = any signal. A band listed here uses its own level. You can still double-click a weaker station.</div>
+    </div>
     <div>
       <div class="jp-hf-sec">What you see</div>
       <div class="jp-hf-line">
@@ -1125,12 +1142,6 @@
     <label class="jp-opt-row jp-opt-num-row">
       <span class="jp-opt-label">Call a station again after <input id="jp-rework-days" type="number" min="0" max="3650" value="0"> days</span>
       <span class="jp-opt-help">How long a logged contact keeps Hunt and Auto CQ from calling that station again on the same band and mode. 0 = forever. A station spotted as an activator is always fair game unless you already worked them at that park today — a new park or a new UTC day counts fresh, matching program rules.</span>
-    </label>
-    <label class="jp-opt-row jp-opt-num-row">
-      <span class="jp-opt-label">Do not call anyone weaker than <input id="jp-hunt-min-db" type="text" inputmode="numeric" maxlength="4" placeholder="off" style="width:44px;"> dB</span>
-      <span class="jp-opt-help">Hunt only answers a CQ at least this strong, so it doesn't start contacts your station is unlikely to finish. Blank = call any signal. You can still double-click a weaker station to call it yourself.</span>
-      <span class="jp-opt-label" style="margin-top:4px;">By band: <input id="jp-hunt-min-db-band" type="text" maxlength="120" placeholder="e.g. 20m -18, 6m -12" style="width:170px;"></span>
-      <span class="jp-opt-help" id="jp-hunt-min-db-band-help">A band listed here uses its own level; any other band uses the one above.</span>
     </label>
     <label class="jp-opt-row jp-opt-num-row">
       <span class="jp-opt-label">Do not log the same station twice within <input id="jp-relog-min" type="number" min="0" max="120" value="15"> minutes</span>

@@ -15357,7 +15357,19 @@ const _jtcatSpottedHuntLogged = new Set();
  * reasonable follow-up, but it is a change in operating behaviour and should
  * be asked for, not assumed.
  */
+// Hunt: Custom (Hunt filters) answers a station matching ANY ticked target.
+// The list is settings.jtcatHuntTargets, a comma string so it rides the
+// per-profile jtcat-set-pref table; an empty list means POTA, never nothing.
+function jtcatHuntTargets() {
+  const raw = settings.jtcatHuntTargets;
+  const list = Array.isArray(raw) ? raw : String(raw || '').split(',');
+  return HuntFilters.targetsForMode('custom', list.map((t) => String(t).trim()));
+}
 function jtcatHuntProgramMatch(d, filterMode) {
+  if (filterMode !== 'custom') return jtcatHuntProgramMatchOne(d, filterMode);
+  return jtcatHuntTargets().some((t) => jtcatHuntProgramMatchOne(d, t));
+}
+function jtcatHuntProgramMatchOne(d, filterMode) {
   const hunted = (filterMode === 'pota' || filterMode === 'sota')
     ? jtcatSpottedActivator(d.call) : null;
   const spottedSigs = hunted ? hunted.refs.map((r) => r.sig) : [];
@@ -15535,8 +15547,16 @@ function jtcatAutoCqStatePayload() {
   // choice; `fallback` tells clients Run is covering for it right now.
   // `eventHunt` says whether "Hunt: Event stations" is on offer and for which
   // events, so every surface renders the option from the one answer.
+  // Hunt: Custom: `mode` carries the first ticked target, so an older phone
+  // that knows no "custom" shows something true; `huntMode` is the real
+  // choice, `targets` the Custom list and `priority` who goes first.
+  const chosen = jtcatHuntFallbackMode || jtcatAutoCqMode;
+  const targets = jtcatHuntTargets();
   return {
-    mode: jtcatHuntFallbackMode || jtcatAutoCqMode,
+    mode: chosen === 'custom' ? targets[0] : chosen,
+    huntMode: chosen,
+    targets,
+    priority: HuntFilters.normalizePriority(settings.jtcatHuntPriority),
     fallback: !!jtcatHuntFallbackMode,
     workedCount: jtcatAutoCqWorkedSession.size,
     eventHunt: jtcatEventHuntAvailability(),
@@ -15571,6 +15591,9 @@ function jtcatHuntStatusClear() {
   }
 }
 
+// Settings that change what Hunt answers or shows; a save of any of them
+// re-sends jtcat-auto-cq-state so every surface's Filters panel follows.
+const JTCAT_HUNT_FILTER_KEYS = ['jtcatHuntTargets', 'jtcatHuntPriority', 'jtcatHideBelowDb', 'jtcatHuntMinDb', 'jtcatHuntMinDbByBand'];
 function broadcastAutoCqState() {
   if (jtcatAutoCqMode === 'off' && !jtcatHuntFallbackMode) jtcatHuntStatusClear();
   const state = jtcatAutoCqStatePayload();
@@ -25663,6 +25686,7 @@ function connectRemote() {
     settings[key] = v;
     saveSettings(settings);
     sendCatLog(`[JTCAT] ${key} = ${JSON.stringify(v)} (remote)`);
+    if (JTCAT_HUNT_FILTER_KEYS.includes(key)) broadcastAutoCqState();
   });
   // A remote JTCAT window's action that has no wire message of its own runs
   // through this shack's handler of the same name (RELAY_CHANNELS only).
@@ -45398,6 +45422,8 @@ function cloudShackNotice(text, kind) {
   ipcMain.handle('set-waterfall-palette', (_e, id) => applyWaterfallPalette(id));
   ipcMain.handle('save-settings', (_e, newSettings) => {
     setTimeout(scopeOverlaySync, 0);   // the licence class shades the scope
+    // A Hunt filter change reaches every surface's picker and Filters panel.
+    if (newSettings && JTCAT_HUNT_FILTER_KEYS.some((k) => k in newSettings)) setImmediate(broadcastAutoCqState);
     // Same self-drive exemption as the tune handler: the idle-RX popout
     // persists its own state (band, mode, gain) as it starts up.
     markUserActive({ selfDriven: isIdleRxSelfAction(_e.sender) });

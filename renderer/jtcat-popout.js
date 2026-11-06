@@ -2696,9 +2696,13 @@ function _applyPopoutTheme(payload) {
     // Same for 'event': the offer rides this message, and a mode set from a
     // mobile device must be representable whether or not the offer is open.
     if (state.eventHunt) eventHunt = state.eventHunt;
-    ensureEventHuntOption(state.mode === 'event');
-    autoCqSelect.value = state.mode || 'off';
-    autoCqSelect.style.borderColor = state.mode !== 'off' ? 'var(--pota)' : '';
+    // huntMode is the real choice ('custom' included); mode is what an older
+    // phone sees. targets = the Custom list.
+    var chosen = state.huntMode || state.mode || 'off';
+    if (Array.isArray(state.targets) && state.targets.length) huntTargets = state.targets.slice();
+    ensureEventHuntOption(chosen === 'event' || huntTargets.indexOf('event') >= 0);
+    autoCqSelect.value = chosen;
+    autoCqSelect.style.borderColor = chosen !== 'off' ? 'var(--pota)' : '';
     reflectHuntUi();
   });
   // Hunt button + what-to-hunt select (2026-11-02). The hidden #jp-auto-cq
@@ -2710,6 +2714,46 @@ function _applyPopoutTheme(payload) {
   var HUNT_LABELS = { pota: 'POTA activators', sota: 'SOTA activators', all: 'Anyone calling CQ', 'wanted-country': 'New countries', 'new-grid': 'New grids', dx: 'DX only (other continents)', chase: 'Same as Call', watchlist: 'Watchlist', 'wanted-state': 'States I need', fd: 'Field Day stations', event: 'Event stations' };
   var huntTarget = 'all';
   try { huntTarget = localStorage.getItem('jtcat-hunt-target') || 'all'; } catch (e) {}
+  // Hunt: Custom answers any ticked target (settings.jtcatHuntTargets).
+  var huntTargets = ['pota'];
+  function parseHuntTargets(v) {
+    var list = Array.isArray(v) ? v : String(v || '').split(',');
+    var out = [];
+    list.forEach(function (t) { t = String(t).trim(); if (t && t !== 'custom' && t !== 'off' && out.indexOf(t) < 0) out.push(t); });
+    return out;
+  }
+  // The ticked boxes: Custom's list, or the one target picked.
+  function tickedTargets() { return huntTarget === 'custom' ? huntTargets : [huntTarget]; }
+  function renderTargetBoxes() {
+    var box = document.getElementById('jp-hunt-targets');
+    if (!box || !autoCqSelect) return;
+    var ticked = tickedTargets();
+    var html = '';
+    Array.prototype.forEach.call(autoCqSelect.options, function (o) {
+      if (o.value === 'off' || o.value === 'custom' || o.value === 'fd') return;
+      html += '<label><input type="checkbox" data-target="' + esc(o.value) + '"' + (ticked.indexOf(o.value) >= 0 ? ' checked' : '') + '> '
+        + esc(HUNT_LABELS[o.value] || o.textContent.replace(/^Hunt:\s*/, '')) + '</label>';
+    });
+    box.innerHTML = html;
+  }
+  // Ticking a second box makes Hunt Custom; down to one box it is that target
+  // again. The last box cannot be unticked: Hunt always answers something.
+  function onTargetBoxChange(e) {
+    var box = document.getElementById('jp-hunt-targets');
+    var set = [];
+    Array.prototype.forEach.call(box.querySelectorAll('input[data-target]'), function (i) { if (i.checked) set.push(i.getAttribute('data-target')); });
+    if (!set.length) { e.target.checked = true; return; }
+    var next = set.length === 1 ? set[0] : 'custom';
+    if (set.length > 1) {
+      huntTargets = set;
+      window.api.saveSettings({ jtcatHuntTargets: set.join(',') });
+    }
+    huntTarget = next;
+    try { localStorage.setItem('jtcat-hunt-target', huntTarget); } catch (err) {}
+    if (autoCqSelect.value !== 'off' && autoCqSelect.value !== next) setHunt(next);
+    else reflectHuntUi();
+  }
+  (function () { var b = document.getElementById('jp-hunt-targets'); if (b) b.addEventListener('change', onTargetBoxChange); })();
   function reflectHuntUi() {
     if (!huntBtn || !huntTargetSel || !autoCqSelect) return;
     var mode = autoCqSelect.value || 'off';
@@ -2718,13 +2762,15 @@ function _applyPopoutTheme(payload) {
     var html = '';
     Array.prototype.forEach.call(autoCqSelect.options, function(o) {
       if (o.value === 'off') return;
-      html += '<option value="' + esc(o.value) + '"' + (o.title ? ' title="' + esc(o.title) + '"' : '') + '>' + esc(HUNT_LABELS[o.value] || o.textContent.replace(/^Hunt:\s*/, '')) + '</option>';
+      var label = o.value === 'custom' ? 'Custom (' + huntTargets.length + ')' : (HUNT_LABELS[o.value] || o.textContent.replace(/^Hunt:\s*/, ''));
+      html += '<option value="' + esc(o.value) + '"' + (o.title ? ' title="' + esc(o.title) + '"' : '') + '>' + esc(label) + '</option>';
     });
     huntTargetSel.innerHTML = html;
     if (!Array.prototype.some.call(huntTargetSel.options, function(o) { return o.value === huntTarget; })) {
       huntTarget = huntTargetSel.options.length ? huntTargetSel.options[0].value : 'all';
     }
     huntTargetSel.value = huntTarget;
+    renderTargetBoxes();
     huntBtn.textContent = on ? 'Hunting' : 'Hunt';
     huntBtn.classList.toggle('active', on);
     huntBtn.setAttribute('aria-pressed', String(on));
@@ -3249,6 +3295,8 @@ function _applyPopoutTheme(payload) {
     if (hideBelowOn) hideBelowOn.checked = hideBelowDb != null;
     if (hideBelowInput && hideBelowDb != null) hideBelowInput.value = String(hideBelowDb);
     huntPriority = ['strongest', 'farthest', 'needed'].indexOf(s && s.jtcatHuntPriority) >= 0 ? s.jtcatHuntPriority : 'strongest';
+    var saved = parseHuntTargets(s && s.jtcatHuntTargets);
+    if (saved.length) { huntTargets = saved; reflectHuntUi(); }
     reflectHuntPriority();
     huntFiltersReflectDot();
     rebuildBandActivity();

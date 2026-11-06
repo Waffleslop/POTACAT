@@ -51,7 +51,7 @@ const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
 check('the floor is in the ONE workable check Hunt, fallback, mode hop and Run share', () => {
   const fn = main.slice(main.indexOf('function jtcatWorkableCallers('), main.indexOf('function jtcatRunWorkableCount('));
   assert.ok(/const floor = JtcatSnrFloor\.floorFor\(settings, dupeBandMode\.band\);/.test(fn));
-  assert.ok(/if \(!JtcatSnrFloor\.passes\(d\.db, floor\)\) \{ belowFloor\+\+; return false; \}/.test(fn));
+  assert.ok(/if \(!JtcatSnrFloor\.passes\(d\.db, floor\)\) \{ belowFloor\+\+; (reasons\.below\+\+; )?return false; \}/.test(fn));
 });
 check('Hunt says why it stayed quiet', () => {
   assert.ok(/\[JTCAT Hunt\] Not calling \$\{candidates\.belowFloor\} CQ/.test(main));
