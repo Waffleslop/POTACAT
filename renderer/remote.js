@@ -885,6 +885,7 @@
   let ft8UserScrolled = false; // true when user has scrolled up in decode log
   let ft8CqFilter = false;     // CQ-only filter
   let ft8WantedFilter = false; // Wanted-only filter (new DXCC/grid/call)
+  let ft8HideBelowDb = null;   // Hunt filters: hide decodes below this dB (null = off)
   let ft8ChaseFilter = false;  // Chase-only filter (matches the chase target)
   let ft8ChaseTarget = '';     // chase tag ('' = none); shared with the desktop
   let ft8SortSignal = false;   // Sort decodes by signal strength
@@ -3012,10 +3013,23 @@
             evOpt.title = 'Hunt: answer CQs from stations you still need for '
               + (names.length ? names.join(', ') : 'a tracked event');
           }
-          ft8AutoCqSelect.value = msg.mode || 'off';
-          ft8AutoCqSelect.style.borderColor = msg.mode !== 'off' ? 'var(--pota)' : '';
+          // huntMode is the real choice ('custom' included); mode is what an
+          // older client sees (the first ticked target).
+          const chosenHunt = msg.huntMode || msg.mode || 'off';
+          ft8AutoCqSelect.value = chosenHunt;
+          ft8AutoCqSelect.style.borderColor = chosenHunt !== 'off' ? 'var(--pota)' : '';
+          if (typeof window.__ft8HuntFiltersState === 'function') window.__ft8HuntFiltersState(msg);
         }
         break;
+
+      case 'jtcat-hunt-status': {
+        const hs = document.getElementById('ft8-hunt-status');
+        if (hs) {
+          if (msg.off || !msg.text) { hs.classList.add('hidden'); hs.textContent = ''; }
+          else { hs.classList.remove('hidden'); hs.textContent = msg.text; }
+        }
+        break;
+      }
 
       case 'jtcat-chase-target':
         // Desktop (or another client) changed the shared chase target.
@@ -8327,6 +8341,8 @@
         const isWanted = d.newDxcc || d.newCall || d.newGrid || d.wantedState;
 
         // Apply CQ filter — always show CQ, 73, directed-at-me, hunted, and QSO partner
+        // Hunt filters: hide decodes below N dB (display only; never a call to me).
+        if (ft8HideBelowDb != null && !isDirected && !isQsoPartner && typeof d.db === 'number' && d.db < ft8HideBelowDb) return;
         if (ft8CqFilter && !isCq && !is73 && !isDirected && !isHunt && !isQsoPartner) return;
         if (ft8WantedFilter && !isWanted && !isDirected && !is73 && !isHunt && !isQsoPartner) return;
         if (ft8ChaseFilter && !d.chaseMatch && !isDirected && !is73 && !isHunt && !isQsoPartner) return;
@@ -8723,6 +8739,105 @@
       ft8Send({ type: 'jtcat-enable-tx', enabled: true });
     }
   });
+
+  // --- Hunt filters sheet (docs/plan-jtcat-hunt-priorities.md) ---
+  // The shack owns every value: each control sends jtcat-hunt-filters and the
+  // sheet redraws from the jtcat-auto-cq-state that comes back. The Filters
+  // button appears only when the shack sends `targets` (a desktop that knows
+  // the filters).
+  (function huntFiltersSheet() {
+    const btn = document.getElementById('ft8-hunt-filters-btn');
+    const sheet = document.getElementById('ft8-hunt-filters');
+    if (!btn || !sheet) return;
+    const dot = document.getElementById('ft8-hunt-filters-dot');
+    const targetsEl = document.getElementById('ft8-hf-targets');
+    const minDb = document.getElementById('ft8-hf-min-db');
+    const minDbBand = document.getElementById('ft8-hf-min-db-band');
+    const skipOn = document.getElementById('ft8-hf-skip-on');
+    const skipMin = document.getElementById('ft8-hf-skip-min');
+    const ignoreAdd = document.getElementById('ft8-hf-ignore-add');
+    const ignoreBtn = document.getElementById('ft8-hf-ignore-btn');
+    const ignoreEl = document.getElementById('ft8-hf-ignore');
+    const hideOn = document.getElementById('ft8-hf-hide-on');
+    const hide = document.getElementById('ft8-hf-hide');
+    let st = { huntMode: 'off', targets: ['pota'], priority: 'strongest', filters: {} };
+    const send = (patch) => ft8Send(Object.assign({ type: 'jtcat-hunt-filters' }, patch));
+    const ticked = () => (st.huntMode === 'custom' ? st.targets : (st.huntMode && st.huntMode !== 'off' ? [st.huntMode] : st.targets.slice(0, 1)));
+    function renderTargets() {
+      const t = ticked();
+      let html = '';
+      Array.prototype.forEach.call(ft8AutoCqSelect.options, (o) => {
+        if (o.value === 'off' || o.value === 'custom' || o.value === 'fd') return;
+        html += '<label><input type="checkbox" data-target="' + esc(o.value) + '"' + (t.indexOf(o.value) >= 0 ? ' checked' : '') + '> ' + esc((o.textContent || '')) + '</label>';
+      });
+      targetsEl.innerHTML = html;
+    }
+    function render() {
+      const f = st.filters || {};
+      renderTargets();
+      sheet.querySelectorAll('input[name="ft8-hf-priority"]').forEach((i) => { i.checked = i.value === (st.priority || 'strongest'); });
+      if (document.activeElement !== minDb) minDb.value = f.minDb == null ? '' : String(f.minDb);
+      if (document.activeElement !== minDbBand) minDbBand.value = f.minDbByBand || '';
+      const sk = typeof f.autoSkipMin === 'number' ? f.autoSkipMin : 30;
+      skipOn.checked = sk > 0;
+      if (sk > 0 && document.activeElement !== skipMin) skipMin.value = String(sk);
+      const ig = Array.isArray(f.ignoreCalls) ? f.ignoreCalls : [];
+      ignoreEl.innerHTML = ig.map((c) => '<span class="ft8-hf-chip">' + esc(c) + '<button type="button" data-unignore="' + esc(c) + '" aria-label="Answer ' + esc(c) + ' again">&times;</button></span>').join('');
+      hideOn.checked = f.hideBelowDb != null;
+      if (f.hideBelowDb != null && document.activeElement !== hide) hide.value = String(f.hideBelowDb);
+      ft8HideBelowDb = f.hideBelowDb != null ? f.hideBelowDb : null;
+      const customOpt = ft8AutoCqSelect.querySelector('option[value="custom"]');
+      if (customOpt) customOpt.textContent = 'Custom (' + st.targets.length + ')';
+      dot.classList.toggle('hidden', !((st.priority && st.priority !== 'strongest') || ig.length || sk === 0 || f.hideBelowDb != null));
+    }
+    window.__ft8HuntFiltersState = function (msg) {
+      if (!Array.isArray(msg.targets)) return; // an older shack: no Filters
+      btn.classList.remove('hidden');
+      st = { huntMode: msg.huntMode || msg.mode || 'off', targets: msg.targets.length ? msg.targets.slice() : ['pota'], priority: msg.priority || 'strongest', filters: msg.filters || {} };
+      render();
+    };
+    function setOpen(open) {
+      sheet.classList.toggle('hidden', !open);
+      btn.setAttribute('aria-expanded', String(!!open));
+    }
+    btn.addEventListener('click', () => setOpen(sheet.classList.contains('hidden')));
+    document.getElementById('ft8-hf-close').addEventListener('click', () => setOpen(false));
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !sheet.classList.contains('hidden')) setOpen(false); });
+    // Ticking a second target makes Hunt Custom; down to one it is that
+    // target again. The last box stays ticked.
+    targetsEl.addEventListener('change', (e) => {
+      const set = Array.prototype.filter.call(targetsEl.querySelectorAll('input[data-target]'), (i) => i.checked).map((i) => i.getAttribute('data-target'));
+      if (!set.length) { e.target.checked = true; return; }
+      if (set.length > 1) send({ targets: set });
+      const next = set.length === 1 ? set[0] : 'custom';
+      if (st.huntMode !== 'off' && st.huntMode !== next) ft8Send({ type: 'jtcat-auto-cq-mode', mode: next });
+    });
+    sheet.querySelectorAll('input[name="ft8-hf-priority"]').forEach((i) => i.addEventListener('change', () => { if (i.checked) send({ priority: i.value }); }));
+    minDb.addEventListener('change', () => send({ minDb: minDb.value.trim() }));
+    minDbBand.addEventListener('change', () => send({ minDbByBand: minDbBand.value }));
+    const sendSkip = () => send({ autoSkipMin: skipOn.checked ? (parseInt(skipMin.value, 10) || 30) : 0 });
+    skipOn.addEventListener('change', sendSkip);
+    skipMin.addEventListener('change', () => { skipOn.checked = true; sendSkip(); });
+    const igList = () => ((st.filters && st.filters.ignoreCalls) || []).slice();
+    function addIgnore() {
+      const v = ignoreAdd.value.trim().toUpperCase();
+      if (!/^[A-Z0-9/]{1,12}\*?$/.test(v)) { ignoreAdd.style.borderColor = 'var(--accent, #e94560)'; return; }
+      const l = igList();
+      if (l.indexOf(v) < 0) l.push(v);
+      send({ ignoreCalls: l });
+      ignoreAdd.value = '';
+    }
+    ignoreBtn.addEventListener('click', addIgnore);
+    ignoreAdd.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addIgnore(); } });
+    ignoreAdd.addEventListener('input', () => { ignoreAdd.style.borderColor = ''; });
+    ignoreEl.addEventListener('click', (e) => {
+      const b = e.target.closest && e.target.closest('[data-unignore]');
+      if (b) send({ ignoreCalls: igList().filter((c) => c !== b.getAttribute('data-unignore')) });
+    });
+    const sendHide = () => send({ hideBelowDb: hideOn.checked ? hide.value : null });
+    hideOn.addEventListener('change', sendHide);
+    hide.addEventListener('change', () => { hideOn.checked = true; sendHide(); });
+  })();
 
   // LOG button
   ft8LogBtn.addEventListener('click', () => {

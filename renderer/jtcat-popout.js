@@ -3422,6 +3422,18 @@ function _applyPopoutTheme(payload) {
     });
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !hfPop.classList.contains('hidden')) setHuntFiltersOpen(false); });
   }
+  // A device changed the filters: reload the panel from the saved keys.
+  if (window.api.onJtcatHuntFiltersSaved) {
+    window.api.onJtcatHuntFiltersSaved(function (s) {
+      if (!s) return;
+      if (huntMinDbInput) {
+        var f = window.JtcatSnrFloor ? window.JtcatSnrFloor.parseDefault(s.jtcatHuntMinDb) : null;
+        huntMinDbInput.value = f == null ? '' : String(f);
+      }
+      if (huntMinDbBandInput) huntMinDbBandInput.value = s.jtcatHuntMinDbByBand || '';
+      huntFiltersApplySettings(s);
+    });
+  }
   // The status line: main sends it each period while Hunt runs.
   var huntStatusEl = document.getElementById('jp-hunt-status');
   if (window.api.onJtcatHuntStatus && huntStatusEl) {

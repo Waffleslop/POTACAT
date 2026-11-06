@@ -1541,6 +1541,7 @@
           <option value="pota">POTA</option>
           <option value="sota">SOTA</option>
           <option value="all">All</option>
+          <option value="custom" title="Answer CQs that match any target ticked under Filters">Custom</option>
           <option value="wanted-country">New countries</option>
           <option value="new-grid">New grids</option>
           <option value="dx">DX only</option>
@@ -1548,12 +1549,36 @@
           <option value="watchlist">Watchlist</option>
           <option value="wanted-state" title="Answer CQs from states you still need on this band and mode (Worked All States)">States</option>
         </select>
+        <button type="button" id="ft8-hunt-filters-btn" class="ft8-ctrl-btn ft8-hf-btn hidden" aria-expanded="false" aria-controls="ft8-hunt-filters" title="Hunt filters: which stations Hunt answers, and which decodes you see">Filters<span id="ft8-hunt-filters-dot" class="ft8-hf-dot hidden"></span></button>
         <span id="ft8-tx-msg" class="ft8-tx-msg">--</span>
         <button type="button" id="ft8-log-btn" class="ft8-ctrl-btn ft8-log-btn">LOG</button>
         <button type="button" id="ft8-wf-toggle" class="ft8-ctrl-btn ft8-wf-btn" title="Toggle waterfall">WF</button>
         <button type="button" id="ft8-bs-toggle" class="ft8-ctrl-btn ft8-wf-btn hidden" title="Band scope — the radio's own spectrum (FT-710)">BS</button>
       </div>
+      <div id="ft8-hunt-status" class="ft8-hunt-status hidden" aria-live="polite"></div>
       <div id="ft8-qso-exchange" class="ft8-qso-exchange hidden"></div>
+      <div id="ft8-hunt-filters" class="ft8-hf-sheet hidden" role="dialog" aria-label="Hunt filters">
+        <div class="ft8-hf-head"><span>Hunt filters</span><button type="button" id="ft8-hf-close" class="ft8-ctrl-btn" aria-label="Close">&times;</button></div>
+        <div class="ft8-hf-sec">Answer stations matching any of</div>
+        <div id="ft8-hf-targets" class="ft8-hf-targets"></div>
+        <div class="ft8-hf-sec">Who goes first</div>
+        <div id="ft8-hf-priority" class="ft8-hf-seg" role="radiogroup" aria-label="Who Hunt answers first">
+          <label><input type="radio" name="ft8-hf-priority" value="strongest"> Strongest</label>
+          <label><input type="radio" name="ft8-hf-priority" value="farthest"> Farthest</label>
+          <label><input type="radio" name="ft8-hf-priority" value="needed"> Needed first</label>
+        </div>
+        <div class="ft8-hf-sec">Don't answer below</div>
+        <div class="ft8-hf-line"><input id="ft8-hf-min-db" type="text" inputmode="numeric" maxlength="4" placeholder="off" aria-label="Don't answer below, dB"> dB on every band</div>
+        <div class="ft8-hf-line">By band: <input id="ft8-hf-min-db-band" type="text" maxlength="120" placeholder="20m -18, 6m -12" aria-label="Don't answer below, by band"></div>
+        <div class="ft8-hf-sec">Skip</div>
+        <label class="ft8-hf-line"><input type="checkbox" id="ft8-hf-skip-on"> Skip a call for <input id="ft8-hf-skip-min" type="number" min="1" max="240" value="30" aria-label="Skip minutes"> min after a QSO gives up</label>
+        <div class="ft8-hf-sec">Never answer</div>
+        <div class="ft8-hf-line"><input id="ft8-hf-ignore-add" type="text" maxlength="13" placeholder="K1ABC or VE3*" aria-label="Add a call or prefix to never answer"> <button type="button" id="ft8-hf-ignore-btn" class="ft8-ctrl-btn">Add</button></div>
+        <div id="ft8-hf-ignore" class="ft8-hf-chips"></div>
+        <div class="ft8-hf-sec">What you see</div>
+        <label class="ft8-hf-line"><input type="checkbox" id="ft8-hf-hide-on"> Hide decodes below <input id="ft8-hf-hide" type="number" min="-30" max="20" value="-15" aria-label="Hide decodes below, dB"> dB</label>
+        <div class="ft8-hf-foot">Hiding a decode only changes what you see. A station calling you is never hidden.</div>
+      </div>
     </div>
 
     <!-- Directory view (HF Nets & SWL) -->

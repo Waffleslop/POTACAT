@@ -423,6 +423,7 @@ const TESTS = [
   'test/jtcat-hunt-custom-test.js', // Hunt: Custom (ANY of the ticked targets), Hunt minimum dB in the Filters panel
   'test/jtcat-hunt-ignore-test.js', // Hunt: Never answer (right-click a decode) and 30-min auto-skip after a failed QSO
   'test/jtcat-hunt-cq-dx-test.js', // Hunt: never answer a CQ DX from our own continent, nor a CQ NA/EU aimed elsewhere
+  'test/jtcat-hunt-echocat-test.js', // Hunt filters over ECHOCAT: jtcat-hunt-filters (Guest Pass refused), hunt-filters cap, web Filters sheet
 ];
 
 const root = path.join(__dirname, '..');

@@ -15584,6 +15584,7 @@ function jtcatAutoCqStatePayload() {
     huntMode: chosen,
     targets,
     priority: HuntFilters.normalizePriority(settings.jtcatHuntPriority),
+    filters: jtcatHuntFiltersState(),
     fallback: !!jtcatHuntFallbackMode,
     workedCount: jtcatAutoCqWorkedSession.size,
     eventHunt: jtcatEventHuntAvailability(),
@@ -15622,6 +15623,64 @@ function jtcatHuntStatusClear() {
 // Settings that change what Hunt answers or shows; a save of any of them
 // re-sends jtcat-auto-cq-state so every surface's Filters panel follows.
 const JTCAT_HUNT_FILTER_KEYS = ['jtcatHuntTargets', 'jtcatHuntPriority', 'jtcatHideBelowDb', 'jtcatHuntMinDb', 'jtcatHuntMinDbByBand', 'jtcatIgnoreCalls', 'jtcatAutoSkipMin'];
+// The Filters panel's other fields, as every surface shows them.
+function jtcatHuntFiltersState() {
+  const hide = JtcatSnrFloor.parseDefault(settings.jtcatHideBelowDb);
+  return {
+    hideBelowDb: hide,
+    ignoreCalls: jtcatIgnoreList(),
+    autoSkipMin: jtcatAutoSkipMin(),
+    minDb: JtcatSnrFloor.parseDefault(settings.jtcatHuntMinDb),
+    minDbByBand: JtcatSnrFloor.formatByBand(JtcatSnrFloor.parseByBand(settings.jtcatHuntMinDbByBand).map),
+  };
+}
+// ONE setter for a Hunt filter change from a device (C2S jtcat-hunt-filters).
+// Every field is optional; each is cleaned the way the FT8 window cleans it.
+// The FT8 window saves the same keys through save-settings.
+function applyJtcatHuntFilters(p, origin) {
+  if (!p || typeof p !== 'object') return false;
+  const changed = [];
+  const list = (v) => (Array.isArray(v) ? v : String(v == null ? '' : v).split(','));
+  if (p.targets !== undefined) {
+    const t = HuntFilters.normalizeTargets(list(p.targets).map((x) => String(x).trim()));
+    if (t.length) { settings.jtcatHuntTargets = t.join(','); changed.push('targets'); }
+  }
+  if (p.priority !== undefined) { settings.jtcatHuntPriority = HuntFilters.normalizePriority(p.priority); changed.push('priority'); }
+  if (p.hideBelowDb !== undefined) {
+    const v = JtcatSnrFloor.parseDefault(p.hideBelowDb);
+    settings.jtcatHideBelowDb = v == null ? '' : String(v);
+    changed.push('hide below');
+  }
+  if (p.ignoreCalls !== undefined) {
+    settings.jtcatIgnoreCalls = HuntFilters.normalizeIgnoreList(list(p.ignoreCalls)).join(',');
+    changed.push('never answer');
+  }
+  if (p.autoSkipMin !== undefined) {
+    const n = Number(p.autoSkipMin);
+    if (Number.isFinite(n)) { settings.jtcatAutoSkipMin = Math.max(0, Math.min(240, Math.round(n))); changed.push('skip'); }
+  }
+  if (p.minDb !== undefined) {
+    const v = JtcatSnrFloor.parseDefault(p.minDb);
+    settings.jtcatHuntMinDb = v == null ? '' : String(v);
+    changed.push('minimum dB');
+  }
+  if (p.minDbByBand !== undefined) {
+    settings.jtcatHuntMinDbByBand = JtcatSnrFloor.formatByBand(JtcatSnrFloor.parseByBand(p.minDbByBand).map);
+    changed.push('minimum dB by band');
+  }
+  if (!changed.length) return false;
+  saveSettings(settings);
+  sendCatLog(`[JTCAT] Hunt filters changed (${changed.join(', ')}) by ${origin === 'remote' ? 'an ECHOCAT device' : 'this PC'}`);
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-hunt-filters-saved', jtcatHuntFiltersSettings());
+  broadcastAutoCqState();
+  return true;
+}
+// The saved keys, for the FT8 window to reload its panel after a device edit.
+function jtcatHuntFiltersSettings() {
+  const out = {};
+  for (const k of JTCAT_HUNT_FILTER_KEYS) out[k] = settings[k];
+  return out;
+}
 function broadcastAutoCqState() {
   if (jtcatAutoCqMode === 'off' && !jtcatHuntFallbackMode) jtcatHuntStatusClear();
   const state = jtcatAutoCqStatePayload();
@@ -25723,6 +25782,8 @@ function connectRemote() {
     sendCatLog(`[JTCAT] ${key} = ${JSON.stringify(v)} (remote)`);
     if (JTCAT_HUNT_FILTER_KEYS.includes(key)) broadcastAutoCqState();
   });
+  // Hunt filters from a device (Guest Pass refused in remote-server).
+  remoteServer.on('jtcat-hunt-filters', (msg = {}) => applyJtcatHuntFilters(msg, 'remote'));
   // A remote JTCAT window's action that has no wire message of its own runs
   // through this shack's handler of the same name (RELAY_CHANNELS only).
   remoteServer.on('jtcat-relay', ({ channel, args } = {}) => {
