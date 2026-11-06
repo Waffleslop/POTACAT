@@ -8415,7 +8415,9 @@ async function connectCat() {
     transport = new SerialTransport();
     const model = rigModel || { brand: 'Icom', protocol: 'civ', civAddr: 0x94, caps: {}, cw: {} };
     model.tune = getTuneQuirks(model);
-    codec = new CivCodec(model, (data) => transport.write(data));
+    // One CI-V command in flight (CivPacer): back-to-back frames made the
+    // radio abandon every reply but the last (NA4DQ IC-7300, 2026-11-05).
+    codec = new CivCodec(model, (data) => transport.write(data), { pace: true });
     cat = new RigController(model, transport, codec);
     cat._debug = true;
     cat.on('log', sendCatLog);
@@ -8458,7 +8460,7 @@ async function connectCat() {
     transport = new TcpTransport();
     const model = rigModel || { brand: 'Icom', protocol: 'civ', civAddr: target.civAddr || 0x94, caps: {}, cw: {} };
     model.tune = getTuneQuirks(model);
-    codec = new CivCodec(model, (data) => transport.write(data));
+    codec = new CivCodec(model, (data) => transport.write(data), { pace: true }); // a real CI-V bus behind the bridge
     cat = new RigController(model, transport, codec);
     cat._debug = true;
     cat.on('log', sendCatLog);

@@ -424,6 +424,7 @@ const TESTS = [
   'test/jtcat-hunt-ignore-test.js', // Hunt: Never answer (right-click a decode) and 30-min auto-skip after a failed QSO
   'test/jtcat-hunt-cq-dx-test.js', // Hunt: never answer a CQ DX from our own continent, nor a CQ NA/EU aimed elsewhere
   'test/jtcat-hunt-echocat-test.js', // Hunt filters over ECHOCAT: jtcat-hunt-filters (Guest Pass refused), hunt-filters cap, web Filters sheet
+  'test/civ-pacing-test.js', // one CI-V command in flight: an Icom abandons a reply when the next command arrives (NA4DQ IC-7300 Guest Pass)
 ];
 
 const root = path.join(__dirname, '..');
