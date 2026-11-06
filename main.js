@@ -4794,8 +4794,15 @@ function passRigPowerReadable() {
 // gate would allow it anyway) and for giving the owner's level back at the
 // end, when interceptCatCommand is in 'ended' and refuses everything.
 function setRadioTxPowerRaw(watts) {
-  const w = Number(watts);
+  let w = Number(watts);
   if (!(w > 0)) return false;
+  // Never above what this radio makes (its model, with the rig's Full power
+  // (W) applied): a 25 W Guest Pass cap on a 5 W Hermes Lite set "25 W" as
+  // the current power until the readback, so a contact logged in between
+  // carried 25 W, and the log said 25 W was set (pre-release check, 1.14.0).
+  let max = 0;
+  try { const m = getActiveRigModel(); max = m && Number(m.maxPower) > 0 ? Number(m.maxPower) : 0; } catch { max = 0; }
+  if (max && w > max) w = max;
   const rigType = detectRigType();
   if (rigType === 'flex') {
     if (!smartSdr || !smartSdr.connected) return false;
@@ -4809,7 +4816,7 @@ function setRadioTxPowerRaw(watts) {
   }
   _currentTxPower = w;
   broadcastRigState();
-  return true;
+  return w;
 }
 
 // The pass's cap, applied at the radio: at lease start (a radio the owner
@@ -4883,8 +4890,12 @@ function civPaceRemember(codec) {
 function passApplyPowerCap(max, why) {
   const cap = Number(max) || 0;
   if (!(cap > 0)) return false;
-  if (setRadioTxPowerRaw(cap)) {
-    sendCatLog(`[pass] RF power set to ${cap} W — the pass's cap (${why})`);
+  const done = setRadioTxPowerRaw(cap);
+  if (done) {
+    const set = typeof done === 'number' ? done : cap;
+    sendCatLog(set < cap
+      ? `[pass] RF power set to ${set} W, this radio's full power; the pass allows up to ${cap} W (${why})`
+      : `[pass] RF power set to ${cap} W — the pass's cap (${why})`);
     passAskRadioPower(600);
     return true;
   }
