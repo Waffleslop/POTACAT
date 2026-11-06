@@ -61,9 +61,13 @@ section('#103 Auto RTS: a silent Yaesu is tried with RTS/CTS for the session');
   assert(/function armSerialHandshakeNoAnswerTrial\(/.test(main), 'trial exists');
   assert(/if \(hs\.source !== 'rig' && SerialHsTrial\.trialApplies\(model\)\) armSerialHandshakeNoAnswerTrial\(cat, transport, target, hs\)/.test(main), 'armed on the direct-serial connect on Auto, by lib/serial-hs-trial.js (Yaesu and Kenwood, never the legacy 5-byte protocol, KL4XQ FT-818)');
   const fn = main.slice(main.indexOf('function armSerialHandshakeNoAnswerTrial('), main.indexOf('async function connectCat()'));
-  const saveAt = fn.indexOf("serialHandshake = 'hardware'");
+  // The save lives in serialHandshakeTrialSave; it is CALLED only from the
+  // radio-answered handler (after the 2 s keyed-watch, ab8a6716).
+  const saveAt = fn.indexOf('serialHandshakeTrialSave(path);');
   const onFreq = fn.indexOf("rigCat.once('frequency'");
   assert(onFreq > 0 && saveAt > onFreq && saveAt < fn.indexOf("transport.once('connect'"), 'RTS/CTS is saved only after the radio answered on it');
+  const saveFn = fn.slice(fn.indexOf('function serialHandshakeTrialSave('));
+  assert(/serialHandshake = 'hardware'/.test(saveFn), 'and the save is that function');
   assert(/_serialHsTrial\.set\(path, 'done'\)/.test(fn), 'a trial that fails ends, never loops');
   assert(/hs\.source === 'model' && _serialHsTrial\.get\(target\.path\) === 'hardware'/.test(main), 'only Auto (model default) is overridden by the trial — a choice on the rig never is');
 }
