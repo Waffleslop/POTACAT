@@ -6715,6 +6715,11 @@
   document.getElementById('log-type-picker').addEventListener('click', (e) => {
     const chip = e.target.closest('.log-type-chip');
     if (!chip) return;
+    // The operator chose the program: a spot's prefilled program and park
+    // no longer apply. Kept, a General contact after a POTA spot went out
+    // as POTA at that park, a false park-to-park (the phone's 82b8724).
+    logSig.value = '';
+    logSigInfo.value = '';
     selectLogType(chip.dataset.type);
   });
 
@@ -6862,14 +6867,18 @@
     if (ws && ws.readyState === WebSocket.OPEN) {
       // Determine sig/sigInfo from type picker + ref input (comma-separated for two-fer)
       const typeToSig = { pota: 'POTA', sota: 'SOTA', wwff: 'WWFF', llota: 'LLOTA', wwbota: 'WWBOTA' };
-      const sig = typeToSig[logSelectedType] || logSig.value || '';
+      // The hidden spot program counts only while no type is chosen (a
+      // program with no chip, such as a WWBOTA spot); never for General.
+      const sig = typeToSig[logSelectedType] || (!logSelectedType ? logSig.value || '' : '');
       const rawRef = logRefInput.value.trim().toUpperCase();
       const logRefs = rawRef.split(',').map(function (r) { return r.trim(); }).filter(Boolean);
       const typedRef = logRefs[0] || '';
       // Every ref (a two-fer is a comma list); the desktop writes one record
       // each, each with its own POTA_REF (this sheet sent "US-1,US-2" as the
       // POTA_REF of both records).
-      const sigInfo = (logSelectedType && logSelectedType !== 'dx' && typedRef) ? logRefs.join(',') : logSigInfo.value || '';
+      const sigInfo = logSelectedType === 'dx' ? ''
+        : typedRef ? logRefs.join(',')
+        : (!logSelectedType ? logSigInfo.value || '' : '');
 
       const logSheetComment = logNotes.value.trim();
       const baseData = {

@@ -4080,6 +4080,9 @@ blType.addEventListener('change', () => {
   const type = blType.value;
   const needsRef = type === 'pota' || type === 'sota' || type === 'wwff' || type === 'llota' || type === 'wwbota';
   blRef.classList.toggle('hidden', !needsRef);
+  // A hidden reference is not part of the contact: a General contact logged
+  // after a POTA one carried the old park (a false park-to-park).
+  if (!needsRef) blRef.value = '';
   blRef.placeholder = type === 'pota' ? '1234 or 1234, 5678' : type === 'sota' ? 'W4C/CM-001' : type === 'wwff' ? 'KFF-1234' : type === 'llota' ? 'LLCL-0001' : type === 'wwbota' ? 'B/G-2392' : 'Ref';
   if (needsRef) blRef.focus();
   updateBlRespotVisibility();
@@ -4431,7 +4434,9 @@ async function saveBannerQso() {
       frequency: String(freqKhz),
       mode, qsoDate, timeOn, rstSent, rstRcvd, band,
       // No txPower: main fills the radio's live power, else the default.
-      sig, sigInfo: allRefs.filter(Boolean).join(','), potaRef, sotaRef, wwffRef, llotaRef, wwbotaRef,
+      // A park goes with a program only: no sig, no park (main records
+      // sigInfo in the worked-parks list).
+      sig, sigInfo: sig ? allRefs.filter(Boolean).join(',') : '', potaRef, sotaRef, wwffRef, llotaRef, wwbotaRef,
       parkState,
       comment: notes,
       respot: wantsRespot && type === 'pota',
