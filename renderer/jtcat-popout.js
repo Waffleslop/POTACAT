@@ -123,6 +123,8 @@ function _applyPopoutTheme(payload) {
     }
     logPrompt = s.jtcatLogPrompt === true;
     if (logPromptToggle) logPromptToggle.classList.toggle('active', logPrompt);
+    fakeIt = s.jtcatFakeIt === true;
+    if (fakeItToggle) fakeItToggle.classList.toggle('active', fakeIt);
     if (relogMinInput) {
       var rm = parseInt(s.jtcatRelogCooldownMin, 10);
       relogMinInput.value = (isFinite(rm) && rm >= 0) ? Math.min(rm, 120) : 15;
@@ -440,6 +442,8 @@ function _applyPopoutTheme(payload) {
   });
   var logPromptToggle = document.getElementById('jp-log-prompt');
   var logPrompt = false;
+  var fakeItToggle = document.getElementById('jp-fake-it');
+  var fakeIt = false;   // split operation "Fake It" (main.js fakeItShiftForTx)
   var huntSpottedToggle = document.getElementById('jp-hunt-spotted');
   var huntSpotted = true;   // default on — see main.js jtcatHuntProgramMatch
   var skipTx1 = false;
@@ -3217,6 +3221,13 @@ function _applyPopoutTheme(payload) {
       window.api.saveSettings({ jtcatLogPrompt: logPrompt });
     });
   }
+  if (fakeItToggle) {
+    fakeItToggle.addEventListener('click', function() {
+      fakeIt = !fakeIt;
+      fakeItToggle.classList.toggle('active', fakeIt);
+      window.api.saveSettings({ jtcatFakeIt: fakeIt });
+    });
+  }
   if (huntSpottedToggle) {
     huntSpottedToggle.addEventListener('click', function() {
       huntSpotted = !huntSpotted;
@@ -3472,6 +3483,7 @@ function _applyPopoutTheme(payload) {
     window.api.onJtcatFlagState(function(data) {
       if (!data) return;
       if (data.key === 'jtcatSkipTx1') { skipTx1 = !!data.enabled; reflectSkipTx1(); }
+      if (data.key === 'jtcatFakeIt') { fakeIt = !!data.enabled; if (fakeItToggle) fakeItToggle.classList.toggle('active', fakeIt); }
       else if (data.key === 'jtcatHoundMode') { houndMode = !!data.enabled; reflectHound(); }
       else if (data.key === 'jtcatHoldTxFreq') { holdTxFreq = !!data.enabled; reflectHoldTx(); }
     });

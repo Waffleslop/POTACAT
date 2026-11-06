@@ -1158,6 +1158,10 @@
       <span class="jp-opt-label">Stay on my own audio frequency</span>
       <span class="jp-opt-help">Keep your TX audio offset fixed instead of moving to each station you work — hold a clear spot in the passband.</span>
     </button>
+    <button id="jp-fake-it" class="jp-opt-row">
+      <span class="jp-opt-label">Keep my transmit tone in the middle of the radio's filter (split, "Fake It")</span>
+      <span class="jp-opt-help">For each transmission POTACAT moves the radio's dial in 500 Hz steps so your tone goes out between 1500 and 2000 Hz, then puts the dial back. Your signal lands on the same frequency, and an offset near the edge of the passband (below 500 Hz or above 2500 Hz) is no longer cut by the radio's filter. Same as WSJT-X Split Operation "Fake It". FT8, FT4 and FT2 on one band; the radio needs CAT control.</span>
+    </button>
     <label class="jp-opt-row jp-opt-num-row">
       <span class="jp-opt-label">Stop repeating a message after <input id="jp-max-attempts" type="number" min="1" max="60" value="12"> tries</span>
       <span class="jp-opt-help">Stop repeating an unanswered message after this many transmissions. If signal reports were exchanged both ways, the QSO is logged and a final 73 is sent first.</span>
