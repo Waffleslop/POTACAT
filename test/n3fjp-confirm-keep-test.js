@@ -15,6 +15,7 @@ const os = require('os');
 const path = require('path');
 const P = require('../lib/n3fjp-pull');
 const Adif = require('../lib/adif');
+const { readSrc } = require('./_src');
 
 let pass = 0, fail = 0;
 function test(name, fn) {
@@ -66,6 +67,19 @@ test('the worked roster and the confirmed-only reader count eQSL and ClubLog con
   assert.ok(!get('K1CCC').confirmed);
   const confirmed = Adif.parseAdifFile(file).map((q) => q.call || q.CALL);
   assert.strictEqual(confirmed.length, 2);
+});
+
+test('a pull with no confirmation in it skips the whole-log pass, and could not have changed anything', () => {
+  assert.strictEqual(P.mayChangeConfirmations([P.toAdifRecord(base)]), false);
+  assert.strictEqual(P.mayChangeConfirmations([P.toAdifRecord({ ...base, fldQSLR: 'Y', fldQSLConfByR: 'L' })]), true);
+  // The skip is safe because the patch is additive: with no confirmation
+  // field incoming, no existing record of any kind gets a patch.
+  const plain = P.toAdifRecord(base);
+  for (const have of [{ ...N3, QSL_RCVD: 'Y' }, { ...N3, LOTW_QSL_RCVD: 'Y' }, { CALL: 'K1ABC', QSL_SENT: 'Y' }, { ...N3 }]) {
+    assert.strictEqual(P.confirmationPatch(have, plain), null, JSON.stringify(have));
+  }
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
+  assert.ok(/function n3fjpUpdateConfirmations\(records\) \{[\s\S]{0,200}if \(!N3fjpPull\.mayChangeConfirmations\(records\)\) return 0;/.test(main));
 });
 
 console.log(`\nN3FJP keeps confirmations; one confirmed rule: ${pass} passed, ${fail} failed`);

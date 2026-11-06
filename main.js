@@ -32794,6 +32794,9 @@ function n3fjpPullWanted() {
  * showed (jgedmond 2026-11-02). One mutateLog write, journaled to the cloud.
  */
 function n3fjpUpdateConfirmations(records) {
+  // No confirmation anywhere in this pull: nothing can change (the patch is
+  // additive), so the whole-log pass is skipped.
+  if (!N3fjpPull.mayChangeConfirmations(records)) return 0;
   const { ContactIndex } = require('./lib/qso-match');
   const index = new ContactIndex(records);
   let n = 0;
