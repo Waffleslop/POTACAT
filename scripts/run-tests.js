@@ -435,6 +435,7 @@ const TESTS = [
   'test/forced-data-no-tune-test.js', // a forced-DATA key-down sets the mode only; never a frequency write (Icom repeater memories)
   'test/rts-trial-keyed-test.js', // the RTS/CTS trial never saves a setting that keys the radio; a shorter no-answer wait
   'test/ptt-quiet-paths-test.js', // no 800 ms DATA wait on a radio that cannot confirm; hand-mic overs are not warnings; the voice hint needs our audio
+  'test/qrz-late-backfill-test.js', // a late QRZ answer fills the saved record's empty fields
 ];
 
 const root = path.join(__dirname, '..');

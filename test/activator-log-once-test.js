@@ -33,7 +33,7 @@ test('logContact caps the QRZ wait, so a slow QRZ never holds up the save', () =
   const m = main.match(/const QRZ_LOG_WAIT_MS = (\d+);/);
   assert.ok(m && Number(m[1]) <= 3000, 'a cap of 3 s or less');
   const lc = main.slice(main.indexOf('async function logContact(entry, opts) {'), main.indexOf('const myRefs = entry.mySig'));
-  assert.ok(/await withTimeout\(qrzStationInfo\(c\), QRZ_LOG_WAIT_MS,/.test(lc));
+  assert.ok(/const lookup = qrzStationInfo\(c\);\s*infos\.set\(c, await withTimeout\(lookup, QRZ_LOG_WAIT_MS,/.test(lc));
   assert.ok(!/infos\.set\(c, await qrzStationInfo\(c\)\)/.test(lc), 'no uncapped wait left');
 });
 

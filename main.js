@@ -13959,11 +13959,17 @@ async function logContact(entry, opts) {
   // QRZ fills names and places, but it must never hold up the save: a slow
   // QRZ held the Activator log button for seconds and a second press saved
   // the contact twice (.eddiejames, 2026-11-05). Past QRZ_LOG_WAIT_MS the
-  // contact is saved without QRZ's fields; the late answer still fills QRZ's
-  // cache for the next contact.
+  // contact is saved without QRZ's fields, and the late answer fills the
+  // fields those records left empty (qrzBackfillLate), so a slow QRZ never
+  // leaves a permanent hole where a name and grid used to be.
+  const late = new Map();
   await Promise.all(calls.map(async (c) => {
-    infos.set(c, await withTimeout(qrzStationInfo(c), QRZ_LOG_WAIT_MS, {
-      onTimeout: () => sendCatLog(`[QRZ] no answer for ${c} within ${QRZ_LOG_WAIT_MS / 1000} s — logged without QRZ's name and location`),
+    const lookup = qrzStationInfo(c);
+    infos.set(c, await withTimeout(lookup, QRZ_LOG_WAIT_MS, {
+      onTimeout: () => {
+        late.set(c, lookup);
+        sendCatLog(`[QRZ] no answer for ${c} within ${QRZ_LOG_WAIT_MS / 1000} s — logged now; QRZ's name and location are added when it answers`);
+      },
     }));
   }));
   const myRefs = entry.mySig && entry.mySigInfo
@@ -14019,13 +14025,13 @@ async function logContact(entry, opts) {
       sendCatLog(`[QSO] ${firstCall}: state from their spot (${picks.join(', ')})`);
     }
   }
-  const records = QsoExpand.expandContact(e, {
+  const expandOpts = (quiet) => ({
     myRefs,
     callInfo: (c) => infos.get(c) || null,
     entityFor: (c) => {
       const op = ctyDb ? resolveOperatingCall(c, ctyDb) : null;
       if (!op || !op.entity) return null;
-      if (op.away) sendCatLog(`[QSO] ${c}: operating from ${op.entity.name}${op.home ? ` (home ${op.home.name})` : ''} — country from the call, QRZ's home address not used`);
+      if (op.away && !quiet) sendCatLog(`[QSO] ${c}: operating from ${op.entity.name}${op.home ? ` (home ${op.home.name})` : ''} — country from the call, QRZ's home address not used`);
       const zones = op.away ? null : resolveZones(c, ctyDb);
       return {
         name: op.entity.name, away: op.away, cont: op.entity.continent || '',
@@ -14038,6 +14044,7 @@ async function logContact(entry, opts) {
       return p ? { states: parkStatesFromLocation(p.locationDesc || ''), grid: p.grid || '' } : null;
     },
   });
+  const records = QsoExpand.expandContact(e, expandOpts(false));
   const written = [];
   let first = null, failure = null;
   // Several operators ("Log as: both") are split HERE, not inside
@@ -14056,6 +14063,13 @@ async function logContact(entry, opts) {
       } else if (!failure) failure = r;
     }
   }
+  for (const [c, lookup] of late) {
+    lookup.then((info) => {
+      if (!info) return;
+      infos.set(c, info);
+      qrzBackfillLate(c, QsoExpand.expandContact(e, expandOpts(true)), written, activeCall);
+    }).catch(() => {});
+  }
   return {
     ...(first || {}),
     success: written.length > 0,
@@ -14063,6 +14077,52 @@ async function logContact(entry, opts) {
     records: written,
     calls,
   };
+}
+
+// QRZ answered after the contact was saved without it (logContact's 2.5 s
+// cap): the same expansion, now with QRZ's answer, says what those records
+// would have carried; each written record in the active log gets the fields
+// it left EMPTY, never a value the operator typed or the park supplied.
+// Records pair up by order (expandContact is deterministic for one entry).
+function qrzBackfillLate(call, redone, written, activeCall) {
+  const mine = written.filter((q) => q.callsign === call && q.bookOf === activeCall && q.uuid);
+  const again = redone.filter((r) => r.callsign === call);
+  const patches = new Map();
+  mine.forEach((q, i) => {
+    const r = again[i];
+    if (!r) return;
+    const have = buildAdifFields(q);
+    const want = buildAdifFields(r);
+    const patch = {};
+    for (const [k, v] of Object.entries(want)) {
+      if (/^APP_POTACAT_(UUID|VERSION)$/.test(k)) continue;
+      if (v == null || String(v) === '') continue;
+      if (have[k] == null || String(have[k]) === '') patch[k] = v;
+    }
+    if (Object.keys(patch).length) patches.set(q.uuid, patch);
+  });
+  if (!patches.size) return 0;
+  let filled = 0;
+  const fields = new Set();
+  try {
+    mutateQsoLog((qsos) => {
+      for (const rec of qsos) {
+        const p = patches.get(rec.APP_POTACAT_UUID);
+        if (!p) continue;
+        for (const [k, v] of Object.entries(p)) { if (rec[k] == null || String(rec[k]) === '') { rec[k] = v; fields.add(k); } }
+        filled++;
+      }
+      return qsos;
+    });
+  } catch (err) {
+    sendCatLog(`[QRZ] could not add the late answer for ${call} to the log: ${err.message}`);
+    return 0;
+  }
+  if (filled) {
+    sendCatLog(`[QRZ] ${call} answered late: added ${[...fields].join(', ')} to ${filled} logged record(s)`);
+    if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) qsoPopoutWin.webContents.send('qso-popout-refresh');
+  }
+  return filled;
 }
 
 async function saveQsoRecord(qsoData, opts) {
