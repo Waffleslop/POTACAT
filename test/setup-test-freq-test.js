@@ -21,13 +21,27 @@ test('a tone in LSB inside the phone privileges is tested right there', () => {
   assert.deepStrictEqual(planTestFrequency({ freqHz: 3900000, mode: 'LSB', licenseClass: 'us_general' }), { action: 'here', emission: 'LSB' });
 });
 
-test('outside the phone privileges at the dial: move to the band\'s FT8 dial as a data emission', () => {
-  const p = planTestFrequency({ freqHz: 14160000, mode: 'USB', licenseClass: 'us_general' });
+test('outside the phone privileges at the dial: move to a clear data frequency, never into the FT8 passband', () => {
+  const p = planTestFrequency({ freqHz: 14160000, mode: 'USB', licenseClass: 'us_general', extraDialsKhz: [14078] });
   assert.strictEqual(p.action, 'move');
-  assert.strictEqual(p.dialHz, 14074000);
   assert.strictEqual(p.emission, 'DATA');
   assert.ok(/outside US General privileges/.test(p.why));
-  assert.strictEqual(planTestFrequency({ freqHz: 3700000, mode: 'LSB', licenseClass: 'us_general' }).dialHz, 3573000);
+  assert.strictEqual(p.rfHz, 14087500, 'just above FT2 at 14.084 + 3.5 kHz');
+  assert.strictEqual(p.dialHz, p.rfHz - 1000, 'USB: the tone is above the dial');
+  const lsb = planTestFrequency({ freqHz: 3700000, mode: 'LSB', licenseClass: 'us_general', extraDialsKhz: [3578] });
+  assert.strictEqual(lsb.dialHz, lsb.rfHz + 1000, 'LSB: the tone is below the dial');
+});
+
+test('the tone is at least 3.5 kHz from every FT8, FT4, FT2, JS8 and WSPR dial, and outside their passbands', () => {
+  const { digitalDialsHz, CLEAR_HZ } = require('../lib/setup-test-freq');
+  for (const [band, freqHz, js8] of [['20m', 14160000, 14078], ['40m', 7200000, 7078], ['80m', 3700000, 3578], ['10m', 28400000, 28078]]) {
+    const p = planTestFrequency({ freqHz, mode: 'USB', licenseClass: 'us_general', extraDialsKhz: [js8] });
+    if (p.action !== 'move') continue;
+    for (const d of digitalDialsHz(band, [js8])) {
+      assert.ok(Math.abs(p.rfHz - d) >= CLEAR_HZ, `${band}: ${p.rfHz} vs dial ${d}`);
+      assert.ok(!(p.rfHz >= d && p.rfHz <= d + 3000), `${band}: inside the passband of ${d}`);
+    }
+  }
 });
 
 test('no frequency on the band the licence allows: refused, with the reason, nothing keyed', () => {

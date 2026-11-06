@@ -143,7 +143,7 @@ test('a reconnect watches again; a rig found dropping starts paced for the rest 
   assert.strictEqual(codec.pacingCheck(25000), false, 'and needs a reply on the new link');
   const ctl = readSrc(path.join(__dirname, '..', 'lib', 'rig-controller.js')).replace(/\r\n/g, '\n');
   assert.ok(/this\._transport\.on\('connect', \(\) => \{[\s\S]{0,700}this\._codec\.rearmPacingDetection\(\)/.test(ctl), 'the controller re-arms on every connect');
-  assert.ok(/if \(typeof this\._codec\.pacingCheck === 'function'\) this\._codec\.pacingCheck\(\);\n\s+this\._checkModeSilence\(\);/.test(ctl), 'checked each tick, before the mode-silence note');
+  assert.ok(/if \(typeof this\._codec\.pacingCheck === 'function'\) this\._codec\.pacingCheck\(Date\.now\(\), \{ paused: !!this\._transmitting \}\);\n\s+this\._checkModeSilence\(\);/.test(ctl), 'checked each tick, before the mode-silence note, paused while transmitting');
   // main: the per-rig memory and the editor's override.
   const main = readSrc(path.join(__dirname, '..', 'main.js'));
   const src = main.slice(main.indexOf('const _civPacedRigs = new Set();'), main.indexOf('function passApplyPowerCap('));

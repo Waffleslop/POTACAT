@@ -6061,7 +6061,9 @@ async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false 
   // Where the tone may go (lib/setup-test-freq.js, w0tlp: refused in LSB).
   // Outside the operator's privileges at the dial: move to the band's FT8
   // dial for the test and come back; no such frequency: say why, key nothing.
-  const plan = SetupTestFreq.planTestFrequency({ freqHz: _currentFreqHz, mode: modeNow, licenseClass: settings.licenseClass });
+  const testBand = freqToBand(_currentFreqHz / 1e6);
+  const plan = SetupTestFreq.planTestFrequency({ freqHz: _currentFreqHz, mode: modeNow, licenseClass: settings.licenseClass,
+    extraDialsKhz: testBand && JS8_DIAL_KHZ[testBand] ? [JS8_DIAL_KHZ[testBand]] : [] });
   if (plan.action === 'refuse') {
     sendCatLog(`[Setup] test transmit: not keyed — ${plan.why}`);
     return done({ result: 'error', message: plan.why });
@@ -6074,7 +6076,7 @@ async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false 
       return done({ result: 'error', message: `${plan.why} The voice test needs a phone frequency your licence allows. Tune to one, then test again.` });
     }
     movedFromHz = _currentFreqHz;
-    sendCatLog(`[Setup] test transmit: ${(movedFromHz / 1e6).toFixed(4)} MHz is outside your privileges for this test — moving to the FT8 dial ${(plan.dialHz / 1e6).toFixed(3)} MHz, then back`);
+    sendCatLog(`[Setup] test transmit: ${(movedFromHz / 1e6).toFixed(4)} MHz is outside your privileges for this test — moving to ${(plan.dialHz / 1e6).toFixed(4)} MHz (the tone at ${(plan.rfHz / 1e6).toFixed(4)} MHz, at least ${SetupTestFreq.CLEAR_HZ / 1000} kHz clear of the FT8, FT4, FT2, JS8 and WSPR frequencies on this band), then back`);
     tuneRadio(plan.dialHz / 1000, undefined, undefined, { origin: 'Station Setup test transmit' });
     const arrived = await waitForCondition(() => Math.abs((_currentFreqHz || 0) - plan.dialHz) < 100, 4000);
     if (!arrived) {
@@ -10955,13 +10957,11 @@ async function startWinlinkShim() {
       if (yaesuLanTxRefusal()) { winlinkLog('refused Pat\'s PTT — ' + yaesuLanTxRefusal()); return false; }
       if (_winlinkUnkeyTimer) {
         // Keyed again inside the drain hold: stay keyed, nothing to re-assert.
-        // Known gap (batch 4 review): handleRemotePtt is not called here, so the
-        // stuck-TX limit (lib/tx-limit.js, Winlink 2 min) keeps the first
-        // frame's start and counts back-to-back frames re-keyed within the
-        // 120-250 ms hold as one over. ARQ turnarounds are normally longer than
-        // the hold, so a real session should not reach it; if one ever trips
-        // mid-transfer, re-arm the limit here.
+        // handleRemotePtt is not called here, so the stuck-TX limit is
+        // restarted by hand: each re-keyed frame is a new over, not one long
+        // one (transmit-safety review).
         clearTimeout(_winlinkUnkeyTimer); _winlinkUnkeyTimer = null;
+        try { txLimit().disarm(); txLimit().arm('winlink'); } catch (e) { console.error('[TX LIMIT]', e); }
         armWinlinkTxFailsafe();
         winlinkSessionTouch();
         return true;
@@ -27072,8 +27072,9 @@ function txLimit() {
   return _txLimit;
 }
 /** What kind of transmission the JTCAT engine is keying (FT8/FT4/JS8/WSPR...). */
-function jtcatTxKind() {
-  return TxLimitLib.kindForJtcatMode(ft8Engine ? ft8Engine._mode : 'FT8');
+function jtcatTxKind(engine) {
+  const eng = engine || ft8Engine;
+  return TxLimitLib.kindForJtcatMode(eng ? eng._mode : 'FT8');
 }
 /** Arm on a key-down, disarm on a release. opts.txKind names the source; voice by default. */
 function txLimitNote(state, opts = {}) {
@@ -48258,7 +48259,7 @@ function cloudShackNotice(text, kind) {
         rigPresetFlushPending();
         console.log(`[JTCAT Multi] TX start on ${s.sliceId}/${s.band} — PTT on, message: ${data.message}, ${catState}`);
         sendCatLog(`FT8 TX (${s.band}): ${data.message} freq=${data.freq}Hz slot=${data.slot} ${catState}`);
-        handleRemotePtt(true, { emission: 'DATA', freqHz: s.freqKhz ? s.freqKhz * 1000 : undefined, txKind: jtcatTxKind() });
+        handleRemotePtt(true, { emission: 'DATA', freqHz: s.freqKhz ? s.freqKhz * 1000 : undefined, txKind: jtcatTxKind(engine) });
         if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
           jtcatPopoutWin.webContents.send('jtcat-tx-status', { state: 'tx', message: data.message, slot: data.slot, txFreq: engine._txFreq, sliceId: s.sliceId });
         }
