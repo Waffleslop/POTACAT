@@ -377,6 +377,23 @@
        stays above everything. */
     .jp-options-pop { position: fixed; right: 12px; bottom: 120px; z-index: 2000; width: 620px; max-width: calc(100vw - 16px); max-height: calc(100vh - 200px); overflow-y: auto; background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,0.5); padding: 6px; }
     .jp-options-pop.hidden { display: none; }
+    /* Hunt filters (plan docs/plan-jtcat-hunt-priorities.md; the Hunt filters mockup). */
+    .jp-hunt-filters-btn { display: inline-flex; align-items: center; gap: 8px; }
+    .jp-hunt-filters-btn[aria-expanded="true"] { border-color: var(--accent-blue, #4fc3f7); }
+    .jp-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-orange, #f0a500); display: inline-block; }
+    .jp-dot[hidden] { display: none; }
+    .jp-hunt-filters-pop { right: auto; left: 12px; top: 120px; bottom: auto; width: 440px; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+    .jp-hf-title { font-size: 17px; font-weight: 800; color: var(--text-primary); display: flex; align-items: center; gap: 8px; }
+    .jp-hf-sec { font-size: 11px; font-weight: 900; letter-spacing: 1.2px; text-transform: uppercase; color: var(--text-dim, #888); margin-bottom: 6px; }
+    .jp-hf-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 14px; color: var(--text-primary); }
+    .jp-hf-line input[type="number"] { width: 64px; height: 30px; box-sizing: border-box; border-radius: 6px; border: 1px solid var(--border-primary); background: var(--bg-primary); color: var(--text-primary); font: 700 14px monospace; text-align: center; }
+    .jp-hf-line input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent-green, #4ecca3); margin: 0; }
+    .jp-hf-foot { font-size: 12px; color: var(--text-dim, #888); line-height: 1.4; }
+    .jp-hunt-status { padding: 6px 12px; font-size: 14px; color: var(--text-secondary, #a0a0c0); background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); }
+    .jp-hunt-status b { color: var(--accent-green, #4ecca3); }
+    .jp-hunt-status[hidden] { display: none; }
+    .jp-hidden-note { margin-left: 10px; text-transform: none; letter-spacing: 0; font-weight: 600; font-size: 13px; color: var(--accent-orange, #f0a500); }
+    .jp-hidden-note[hidden] { display: none; }
     .jp-opt-section { font-size: 13px; font-weight: 900; text-transform: uppercase; letter-spacing: 1.2px; color: var(--text-dim, #888); padding: 12px 10px 4px; }
     .jp-opt-warn { margin: 4px 10px 6px; padding: 8px 12px; border-radius: 8px; background: rgba(255, 143, 69, 0.15); color: #ff8f45; font-size: 14px; font-weight: 600; }
     .jp-opt-row { display: block; width: 100%; text-align: left; background: none; border: none; border-radius: 6px; padding: 10px 12px 10px 44px; cursor: pointer; position: relative; color: var(--text-primary); font-family: inherit; }
@@ -647,7 +664,7 @@
   <div class="jp-main">
     <div class="jp-decode-pane">
       <div class="jp-decode-section">
-        <div class="jp-decode-header">Band Activity <div style="display:flex;gap:4px;align-items:center;"><input type="text" id="jp-search" placeholder="Filter by call or word" title="One or more callsigns or words, separated by commas or spaces: a line shows if it contains any of them" spellcheck="false"><button id="jp-cq-filter" class="jtcat-filter-btn" title="Only CQs, 73s and calls to me">CQ &amp; 73</button><button id="jp-wanted-filter" class="jtcat-filter-btn" title="Show only needed DXCC/grid/call">Wanted</button><button id="jp-sort-signal" class="jtcat-filter-btn" title="Sort by signal strength (strongest first)">dB</button><button id="jp-event-filter" class="jtcat-filter-btn" title="Show only tracked-event stations you still need (13 Colonies etc.)">Event</button><button id="jp-clear" class="jtcat-filter-btn" title="Clear all decodes">Clear</button></div></div>
+        <div class="jp-decode-header"><span>Band Activity<span id="jp-hidden-note" class="jp-hidden-note" hidden></span></span> <div style="display:flex;gap:4px;align-items:center;"><input type="text" id="jp-search" placeholder="Filter by call or word" title="One or more callsigns or words, separated by commas or spaces: a line shows if it contains any of them" spellcheck="false"><button id="jp-cq-filter" class="jtcat-filter-btn" title="Only CQs, 73s and calls to me">CQ &amp; 73</button><button id="jp-wanted-filter" class="jtcat-filter-btn" title="Show only needed DXCC/grid/call">Wanted</button><button id="jp-sort-signal" class="jtcat-filter-btn" title="Sort by signal strength (strongest first)">dB</button><button id="jp-event-filter" class="jtcat-filter-btn" title="Show only tracked-event stations you still need (13 Colonies etc.)">Event</button><button id="jp-clear" class="jtcat-filter-btn" title="Clear all decodes">Clear</button></div></div>
         <div id="jp-band-activity" class="jp-decode-list">
           <div class="jp-empty">Waiting for decodes...</div>
         </div>
@@ -1021,6 +1038,7 @@
       <div class="jp-hunt-box">
         <button id="jp-hunt-btn" class="jp-btn jp-hunt-btn" aria-pressed="false" title="Answer other stations' CQs for me, one contact at a time, and log each one. Pick what to hunt on the right.">Hunt</button>
         <select id="jp-hunt-target" class="jp-select" title="What Hunt answers"></select>
+        <button type="button" id="jp-hunt-filters-btn" class="jp-btn jp-hunt-filters-btn" aria-expanded="false" aria-controls="jp-hunt-filters-pop" title="Hunt filters: which decodes you see, and which stations Hunt answers">Filters <span id="jp-hunt-filters-dot" class="jp-dot" hidden></span></button>
       </div>
       <!-- HALT: the one halt in main (tones, every PTT route, Run,
            Hunt, the WSPR beacon). Solid red while TX is on, outlined while it is not. -->
@@ -1047,6 +1065,24 @@
            English helper text (popover markup after the bar) -->
       <button id="jp-options-btn" class="jp-btn jp-mid" title="QSO options — answer callers, skip grid, hold TX frequency, retry limit, Field Day, Hound">Options&hellip;</button>
     </div>
+  </div>
+
+  <!-- Hunt status: what was heard and why Hunt answered nobody, or who it
+       answers next (main jtcatHuntStatusPush). -->
+  <div id="jp-hunt-status" class="jp-hunt-status" hidden aria-live="polite"></div>
+
+  <!-- Hunt filters popover (plan docs/plan-jtcat-hunt-priorities.md). -->
+  <div id="jp-hunt-filters-pop" class="jp-options-pop jp-hunt-filters-pop hidden" role="dialog" aria-label="Hunt filters">
+    <div class="jp-hf-title">Hunt filters</div>
+    <div>
+      <div class="jp-hf-sec">What you see</div>
+      <div class="jp-hf-line">
+        <label class="jp-hf-line"><input type="checkbox" id="jp-hide-below-on"> Hide decodes below</label>
+        <input type="number" id="jp-hide-below" min="-30" max="20" step="1" value="-15" aria-label="Hide decodes below, dB">
+        <span>dB</span>
+      </div>
+    </div>
+    <div class="jp-hf-foot">Hiding a decode only changes what you see. A station calling you is never hidden.</div>
   </div>
 
   <!-- ⚙ Options popover — closed by outside click / Esc / the ⚙ button.

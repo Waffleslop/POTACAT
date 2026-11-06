@@ -2110,6 +2110,7 @@ const { withTimeout } = require('./lib/with-timeout');
 const SerialHsTrial = require('./lib/serial-hs-trial');
 const IdleWsprBand = require('./lib/idle-wspr-band');
 const SetupTestFreq = require('./lib/setup-test-freq');
+const HuntFilters = require('./lib/jtcat-hunt-filters');
 // The radio's last mode report ({ mode, at }), set in sendCatMode: what the
 // external tune's mode restore believes, never the command it sent.
 let _lastModeReadback = null;
@@ -15453,6 +15454,10 @@ function jtcatWorkableCallers(results, myCall, opts) {
   // CQ too weak for this station to complete is not workable.
   const floor = JtcatSnrFloor.floorFor(settings, dupeBandMode.band);
   let belowFloor = 0;
+  // Why each CQ was or was not workable, for the Hunt status line
+  // (lib/jtcat-hunt-filters.js quietReasonText): nobody should have to
+  // wonder why Hunt is quiet.
+  const reasons = { heard: 0, notTarget: 0, worked: 0, ownSlot: 0, below: 0 };
   const out = (results || [])
     // Any CQ at all, then parse, THEN apply the program filter — the
     // spotted-activator half of that filter needs the callsign, which only
@@ -15461,16 +15466,18 @@ function jtcatWorkableCallers(results, myCall, opts) {
     .map((d) => ({ ...d, ...parseCqMessage(d.text) }))
     .filter((d) => {
       if (!d.call || d.call === myCall) return false;
-      if (!jtcatHuntProgramMatch(d, filterMode)) return false;
-      if (jtcatSessionHas(d.call, dupeBandMode.band, dupeBandMode.mode)) return false;
-      if (isWorked(d.call)) return false;
+      reasons.heard++;
+      if (!jtcatHuntProgramMatch(d, filterMode)) { reasons.notTarget++; return false; }
+      if (jtcatSessionHas(d.call, dupeBandMode.band, dupeBandMode.mode)) { reasons.worked++; return false; }
+      if (isWorked(d.call)) { reasons.worked++; return false; }
       // Under a TX slot lock, a station calling CQ in our own slot is not workable.
-      if (!JtcatTxSlot.workableUnderLock(jtcatTxSlotLock(), d.slot)) return false;
-      if (!JtcatSnrFloor.passes(d.db, floor)) { belowFloor++; return false; }
+      if (!JtcatTxSlot.workableUnderLock(jtcatTxSlotLock(), d.slot)) { reasons.ownSlot++; return false; }
+      if (!JtcatSnrFloor.passes(d.db, floor)) { belowFloor++; reasons.below++; return false; }
       return true;
     });
   out.belowFloor = belowFloor;
   out.floor = floor;
+  out.reasons = reasons;
   return out;
 }
 
@@ -15535,7 +15542,35 @@ function jtcatAutoCqStatePayload() {
   };
 }
 
+// The Hunt status line (plan docs/plan-jtcat-hunt-priorities.md): what was
+// heard this period, why nobody was answered, or who is answered next. To the
+// FT8 window and every ECHOCAT client; {off:true} when Hunt stops.
+let _jtcatHuntStatusLast = null;
+function jtcatHuntStatusPush(candidates, best) {
+  const r = (candidates && candidates.reasons) || {};
+  const status = {
+    heard: r.heard || 0, below: r.below || 0, worked: r.worked || 0, ownSlot: r.ownSlot || 0, notTarget: r.notTarget || 0,
+    floor: candidates ? candidates.floor : null,
+    next: best ? { call: best.call, why: HuntFilters.nextWhy(best, 'strongest') } : null,
+  };
+  status.text = HuntFilters.quietReasonText(status);
+  _jtcatHuntStatusLast = status;
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-hunt-status', status);
+  if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+    try { remoteServer.sendToClient({ type: 'jtcat-hunt-status', ...status }); } catch { /* no client */ }
+  }
+}
+function jtcatHuntStatusClear() {
+  if (!_jtcatHuntStatusLast) return;
+  _jtcatHuntStatusLast = null;
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-hunt-status', { off: true });
+  if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
+    try { remoteServer.sendToClient({ type: 'jtcat-hunt-status', off: true }); } catch { /* no client */ }
+  }
+}
+
 function broadcastAutoCqState() {
+  if (jtcatAutoCqMode === 'off' && !jtcatHuntFallbackMode) jtcatHuntStatusClear();
   const state = jtcatAutoCqStatePayload();
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
     jtcatPopoutWin.webContents.send('jtcat-auto-cq-state', state);
@@ -17921,6 +17956,7 @@ function startJtcat(mode) {
         const evRank = (d) => (d.eventMatch && d.eventMatch.status !== 'worked') ? 1 : 0;
         candidates.sort((a, b) => (evRank(b) - evRank(a)) || (b.db - a.db));
         const best = candidates[0];
+        if (!answeredCaller) jtcatHuntStatusPush(candidates, best);
 
         if (best) {
           jtcatSessionMark(best.call);

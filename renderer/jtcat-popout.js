@@ -116,6 +116,7 @@ function _applyPopoutTheme(payload) {
       huntMinDbInput.value = f == null ? '' : String(f);
     }
     if (huntMinDbBandInput) huntMinDbBandInput.value = s.jtcatHuntMinDbByBand || '';
+    huntFiltersApplySettings(s);
     if (runPauseInput && typeof s.jtcatRunPauseAfter === 'number') {
       runPauseInput.value = s.jtcatRunPauseAfter;
     }
@@ -1033,7 +1034,27 @@ function _applyPopoutTheme(payload) {
   // Current CQ/73 / Wanted / Chase / search filter state. Directed decodes
   // (and 73s) always pass so the operator never loses a reply to their own
   // CQ behind a filter — matches the mobile app + in-window view.
+  // Hide decodes below N dB (Hunt filters; nj2dx: a compromise antenna).
+  // Display only: Hunt's own minimum is separate. A call to me is never hidden.
+  var hideBelowDb = null;
+  function hiddenByLevel(c) {
+    return hideBelowDb != null && !c.isDirected && typeof c.d.db === 'number' && c.d.db < hideBelowDb;
+  }
+  function updateHiddenNote() {
+    var note = document.getElementById('jp-hidden-note');
+    if (!note) return;
+    var n = 0;
+    if (hideBelowDb != null) {
+      for (var i = 0; i < decodeLog.length; i++) {
+        var rs = decodeLog[i].results || [];
+        for (var j = 0; j < rs.length; j++) if (hiddenByLevel(classifyDecode(rs[j]))) n++;
+      }
+    }
+    note.hidden = !n;
+    note.textContent = n ? n + ' hidden below ' + hideBelowDb + ' dB' : '';
+  }
   function decodeVisible(c) {
+    if (hiddenByLevel(c)) return false;
     if (cqFilter && !c.isCq && !c.is73 && !c.isDirected) return false;
     if (wantedFilter && !c.isWanted && !c.isDirected && !c.is73) return false;
     if (chaseFilter && !c.d.chaseMatch && !c.isDirected && !c.is73) return false;
@@ -1143,7 +1164,7 @@ function _applyPopoutTheme(payload) {
     });
     // A filter that hides every decode in this cycle should hide its separator
     // too, so the log doesn't fill with empty timestamps.
-    if (rows.length === 0 && (cqFilter || wantedFilter || chaseFilter || searchFilter)) return 0;
+    if (rows.length === 0 && (cqFilter || wantedFilter || chaseFilter || searchFilter || hideBelowDb != null)) return 0;
     var sep = document.createElement('div');
     sep.className = 'jp-cycle-sep';
     sep.textContent = time + ' UTC';
@@ -1159,6 +1180,7 @@ function _applyPopoutTheme(payload) {
   // left untouched (their content isn't filter-dependent: directed decodes
   // always pass, and the map shows all CQ/QSO geometry).
   function rebuildBandActivity() {
+    updateHiddenNote();
     var wasAtBottom = bandActivity.scrollTop + bandActivity.clientHeight >= bandActivity.scrollHeight - 20;
     bandActivity.innerHTML = '';
     var shown = 0;
@@ -1198,6 +1220,7 @@ function _applyPopoutTheme(payload) {
     // the rebuild path). Live decodes stay an efficient append; only toggles
     // pay for a full rebuild.
     appendBandCycle(time, results);
+    updateHiddenNote();
 
     // My Activity + map plot — driven off the same filter so a hidden decode
     // doesn't leak into the map / My Activity (faithful to the original single
@@ -3171,6 +3194,58 @@ function _applyPopoutTheme(payload) {
   // ⚙ Options popover — hosts the per-session preferences + special modes
   // (bottom-bar rework 2026-07-16). Toggles on the ⚙ button; closes on
   // outside click or Esc. Rows inside keep their own click handlers.
+  // --- Hunt filters popover (plan docs/plan-jtcat-hunt-priorities.md) ---
+  var hfBtn = document.getElementById('jp-hunt-filters-btn');
+  var hfPop = document.getElementById('jp-hunt-filters-pop');
+  var hfDot = document.getElementById('jp-hunt-filters-dot');
+  var hideBelowOn = document.getElementById('jp-hide-below-on');
+  var hideBelowInput = document.getElementById('jp-hide-below');
+  function setHuntFiltersOpen(open) {
+    if (!hfPop) return;
+    hfPop.classList.toggle('hidden', !open);
+    if (hfBtn) hfBtn.setAttribute('aria-expanded', String(!!open));
+  }
+  // The dot shows whenever any filter differs from today's behaviour.
+  function huntFiltersReflectDot() {
+    if (hfDot) hfDot.hidden = hideBelowDb == null;
+  }
+  function huntFiltersApplySettings(s) {
+    var v = (s && s.jtcatHideBelowDb != null && s.jtcatHideBelowDb !== '') ? parseInt(s.jtcatHideBelowDb, 10) : NaN;
+    hideBelowDb = isFinite(v) ? v : null;
+    if (hideBelowOn) hideBelowOn.checked = hideBelowDb != null;
+    if (hideBelowInput && hideBelowDb != null) hideBelowInput.value = String(hideBelowDb);
+    huntFiltersReflectDot();
+    rebuildBandActivity();
+  }
+  function saveHideBelow() {
+    var on = hideBelowOn && hideBelowOn.checked;
+    var v = hideBelowInput ? parseInt(hideBelowInput.value, 10) : NaN;
+    hideBelowDb = on && isFinite(v) ? Math.max(-30, Math.min(20, v)) : null;
+    window.api.saveSettings({ jtcatHideBelowDb: hideBelowDb == null ? '' : String(hideBelowDb) });
+    huntFiltersReflectDot();
+    rebuildBandActivity();
+  }
+  if (hideBelowOn) hideBelowOn.addEventListener('change', saveHideBelow);
+  if (hideBelowInput) hideBelowInput.addEventListener('change', function () { if (hideBelowOn && !hideBelowOn.checked) hideBelowOn.checked = true; saveHideBelow(); });
+  if (hfBtn && hfPop) {
+    hfBtn.addEventListener('click', function (e) { e.stopPropagation(); setHuntFiltersOpen(hfPop.classList.contains('hidden')); });
+    document.addEventListener('mousedown', function (e) {
+      if (hfPop.classList.contains('hidden')) return;
+      if (hfPop.contains(e.target) || hfBtn.contains(e.target)) return;
+      setHuntFiltersOpen(false);
+    });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !hfPop.classList.contains('hidden')) setHuntFiltersOpen(false); });
+  }
+  // The status line: main sends it each period while Hunt runs.
+  var huntStatusEl = document.getElementById('jp-hunt-status');
+  if (window.api.onJtcatHuntStatus && huntStatusEl) {
+    window.api.onJtcatHuntStatus(function (st) {
+      if (!st || st.off || !st.text) { huntStatusEl.hidden = true; huntStatusEl.textContent = ''; return; }
+      huntStatusEl.hidden = false;
+      huntStatusEl.textContent = st.text;
+    });
+  }
+
   var optionsBtn = document.getElementById('jp-options-btn');
   var optionsPop = document.getElementById('jp-options-pop');
   function setOptionsPopOpen(open) {
