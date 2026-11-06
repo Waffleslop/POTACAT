@@ -7997,7 +7997,13 @@ function armSerialHandshakeFallback(rigCat, target) {
 // frequency reply in SERIAL_HS_NOANSWER_MS, try RTS/CTS for THIS SESSION; only
 // a radio that then answers is saved as RTS/CTS on the rig. If neither answers
 // (radio off, wrong baud) the trial ends and Auto is left as it was.
-const SERIAL_HS_NOANSWER_MS = 12000;
+// 6 s: a radio that answers at all answers its first FA; within a second or
+// two, and 12 s was a visible pause on the first connect of a stock Yaesu
+// with CAT RTS on (transmit-safety review of 2397429c).
+const SERIAL_HS_NOANSWER_MS = 6000;
+// After the radio first answers WITH RTS raised, how long to watch for it
+// reporting transmit: a radio whose PTT SELECT is RTS keys on that line.
+const SERIAL_HS_KEY_WATCH_MS = 2000;
 const _serialHsTrial = new Map(); // port path -> 'hardware' (trying) | 'done'
 // One Test Connection probe of a direct-serial CAT radio: open the port with
 // the given line settings, ask for the frequency, close. `portError` marks a
@@ -8082,23 +8088,26 @@ function armSerialHandshakeNoAnswerTrial(rigCat, transport, target, hs) {
   const path = target && target.path;
   if (!path) return;
   const trial = _serialHsTrial.get(path);
-  if (hs.source === 'model' && trial === 'done') return;
+  if (hs.source === 'model' && (trial === 'done' || trial === 'keyed')) return;
   let answered = false;
   let timer = null;
   rigCat.once('frequency', () => {
     answered = true;
     if (timer) clearTimeout(timer);
     if (hs.source !== 'trial') return;
-    _serialHsTrial.set(path, 'done');
-    for (const r of settings.rigs || []) {
-      if (r && r.catTarget && r.catTarget.type === 'serial' && r.catTarget.path === path) r.catTarget.serialHandshake = 'hardware';
-    }
-    if (settings.catTarget && settings.catTarget.type === 'serial' && settings.catTarget.path === path) settings.catTarget.serialHandshake = 'hardware';
-    saveSettings(settings);
-    sendCatLog(`[CAT] The radio answers with RTS/CTS flow control on ${path} (its CAT RTS menu is on) — saved on this rig as RTS line "RTS/CTS flow control".`);
-    if (win && !win.isDestroyed()) {
-      win.webContents.send('app-notice', { message: 'The radio only answers with RTS/CTS flow control — POTACAT now uses it for this rig', duration: 10000 });
-    }
+    // The radio answers with RTS up. Before saving that, watch for it
+    // reporting transmit: RTS is also a PTT line, and a radio whose PTT
+    // SELECT (or keying menu) is RTS was keyed by this very trial, then saved
+    // as RTS/CTS, keyed at every connect (transmit-safety review).
+    let keyed = !!rigCat._transmitting;
+    const onPtt = (on) => { if (on) keyed = true; };
+    rigCat.on('ptt', onPtt);
+    setTimeout(() => {
+      rigCat.removeListener('ptt', onPtt);
+      if (cat !== rigCat) return;
+      if (keyed || rigCat._transmitting) { serialHandshakeTrialKeyed(rigCat, path); return; }
+      serialHandshakeTrialSave(path);
+    }, SERIAL_HS_KEY_WATCH_MS);
   });
   transport.once('connect', () => {
     timer = setTimeout(() => {
@@ -8113,6 +8122,32 @@ function armSerialHandshakeNoAnswerTrial(rigCat, transport, target, hs) {
       setTimeout(() => connectCatSafe('rts-trial'), 300);
     }, SERIAL_HS_NOANSWER_MS);
   });
+}
+
+// The trial's radio keyed when RTS went up: never save RTS/CTS for it. Lines
+// go back down (that unkeys a radio keyed BY the line) and the operator is
+// told which of two radio settings to change.
+function serialHandshakeTrialKeyed(rigCat, path) {
+  _serialHsTrial.set(path, 'keyed');
+  try { rigCat.setTransmit(false); } catch { /* the line drop below unkeys it */ }
+  const msg = `The radio went into transmit when POTACAT raised RTS on ${path}, so RTS/CTS flow control was not saved and RTS is held low again. `
+    + 'The radio uses RTS both for CAT and as a PTT line: in the radio menu, move PTT (PTT SELECT / keying) off RTS, or turn the CAT RTS setting off.';
+  sendCatLog('[CAT] ' + msg);
+  if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: msg, warn: true, duration: 20000 });
+  setTimeout(() => connectCatSafe('rts-trial-keyed'), 300);
+}
+
+function serialHandshakeTrialSave(path) {
+  _serialHsTrial.set(path, 'done');
+  for (const r of settings.rigs || []) {
+    if (r && r.catTarget && r.catTarget.type === 'serial' && r.catTarget.path === path) r.catTarget.serialHandshake = 'hardware';
+  }
+  if (settings.catTarget && settings.catTarget.type === 'serial' && settings.catTarget.path === path) settings.catTarget.serialHandshake = 'hardware';
+  saveSettings(settings);
+  sendCatLog(`[CAT] The radio answers with RTS/CTS flow control on ${path} (its CAT RTS menu is on) — saved on this rig as RTS line "RTS/CTS flow control".`);
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('app-notice', { message: 'The radio only answers with RTS/CTS flow control — POTACAT now uses it for this rig', duration: 10000 });
+  }
 }
 
 async function connectCat() {

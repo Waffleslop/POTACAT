@@ -433,6 +433,7 @@ const TESTS = [
   'test/kenwood-tx-latch-test.js', // a Kenwood is not latched in transmit after a hand-mic over (IF; P8 asked during TX)
   'test/civ-pacing-ptt-order-test.js', // CI-V pacing never sends TX OFF before TX ON; the newest key state wins
   'test/forced-data-no-tune-test.js', // a forced-DATA key-down sets the mode only; never a frequency write (Icom repeater memories)
+  'test/rts-trial-keyed-test.js', // the RTS/CTS trial never saves a setting that keys the radio; a shorter no-answer wait
 ];
 
 const root = path.join(__dirname, '..');
