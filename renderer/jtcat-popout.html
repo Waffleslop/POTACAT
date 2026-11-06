@@ -388,6 +388,12 @@
     .jp-hf-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 14px; color: var(--text-primary); }
     .jp-hf-line input[type="number"] { width: 64px; height: 30px; box-sizing: border-box; border-radius: 6px; border: 1px solid var(--border-primary); background: var(--bg-primary); color: var(--text-primary); font: 700 14px monospace; text-align: center; }
     .jp-hf-line input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent-green, #4ecca3); margin: 0; }
+    .jp-hf-seg { display: flex; border: 1px solid var(--border-primary); border-radius: 8px; overflow: hidden; }
+    .jp-hf-seg label { flex: 1; text-align: center; padding: 7px 4px; font-size: 13px; font-weight: 700; cursor: pointer; color: var(--text-secondary, #a0a0c0); }
+    .jp-hf-seg label + label { border-left: 1px solid var(--border-primary); }
+    .jp-hf-seg input { position: absolute; opacity: 0; pointer-events: none; }
+    .jp-hf-seg label:has(input:checked) { background: var(--accent-blue, #4fc3f7); color: #10202c; }
+    .jp-hf-seg label:has(input:focus-visible) { outline: 2px solid var(--accent-blue, #4fc3f7); outline-offset: -2px; }
     .jp-hf-foot { font-size: 12px; color: var(--text-dim, #888); line-height: 1.4; }
     .jp-hunt-status { padding: 6px 12px; font-size: 14px; color: var(--text-secondary, #a0a0c0); background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); }
     .jp-hunt-status b { color: var(--accent-green, #4ecca3); }
@@ -1081,6 +1087,14 @@
         <label class="jp-hf-line"><input type="checkbox" id="jp-hide-below-on"> Hide decodes below</label>
         <input type="number" id="jp-hide-below" min="-30" max="20" step="1" value="-15" aria-label="Hide decodes below, dB">
         <span>dB</span>
+      </div>
+    </div>
+    <div>
+      <div class="jp-hf-sec">Who goes first</div>
+      <div class="jp-hf-seg" id="jp-hunt-priority" role="radiogroup" aria-label="Who Hunt answers first">
+        <label title="The loudest station calling, as before"><input type="radio" name="jp-hunt-priority" value="strongest"> Strongest</label>
+        <label title="The station farthest from you, by its grid"><input type="radio" name="jp-hunt-priority" value="farthest"> Farthest</label>
+        <label title="A new country first, then a new grid"><input type="radio" name="jp-hunt-priority" value="needed"> Needed first</label>
       </div>
     </div>
     <div class="jp-hf-foot">Hiding a decode only changes what you see. A station calling you is never hidden.</div>

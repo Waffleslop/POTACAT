@@ -3226,14 +3226,30 @@ function _applyPopoutTheme(payload) {
     if (hfBtn) hfBtn.setAttribute('aria-expanded', String(!!open));
   }
   // The dot shows whenever any filter differs from today's behaviour.
+  var huntPriority = 'strongest';
+  var priorityInputs = document.querySelectorAll('input[name="jp-hunt-priority"]');
+  function reflectHuntPriority() {
+    if (!priorityInputs) return;
+    for (var i = 0; i < priorityInputs.length; i++) priorityInputs[i].checked = priorityInputs[i].value === huntPriority;
+  }
   function huntFiltersReflectDot() {
-    if (hfDot) hfDot.hidden = hideBelowDb == null;
+    if (hfDot) hfDot.hidden = hideBelowDb == null && huntPriority === 'strongest';
+  }
+  for (var pi = 0; pi < priorityInputs.length; pi++) {
+    priorityInputs[pi].addEventListener('change', function (e) {
+      if (!e.target.checked) return;
+      huntPriority = e.target.value;
+      window.api.saveSettings({ jtcatHuntPriority: huntPriority });
+      huntFiltersReflectDot();
+    });
   }
   function huntFiltersApplySettings(s) {
     var v = (s && s.jtcatHideBelowDb != null && s.jtcatHideBelowDb !== '') ? parseInt(s.jtcatHideBelowDb, 10) : NaN;
     hideBelowDb = isFinite(v) ? v : null;
     if (hideBelowOn) hideBelowOn.checked = hideBelowDb != null;
     if (hideBelowInput && hideBelowDb != null) hideBelowInput.value = String(hideBelowDb);
+    huntPriority = ['strongest', 'farthest', 'needed'].indexOf(s && s.jtcatHuntPriority) >= 0 ? s.jtcatHuntPriority : 'strongest';
+    reflectHuntPriority();
     huntFiltersReflectDot();
     rebuildBandActivity();
   }

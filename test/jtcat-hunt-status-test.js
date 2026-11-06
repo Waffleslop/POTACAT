@@ -28,7 +28,7 @@ test('every CQ is counted under the first reason it was not workable', () => {
 });
 
 test('the status goes out each period Hunt picks, and is cleared when Hunt stops', () => {
-  assert.ok(/if \(!answeredCaller\) jtcatHuntStatusPush\(candidates, best\);/.test(main));
+  assert.ok(/if \(!answeredCaller\) jtcatHuntStatusPush\(candidates, best(, huntPriority)?\);/.test(main));
   const push = main.slice(main.indexOf('function jtcatHuntStatusPush('), main.indexOf('function jtcatHuntStatusClear('));
   assert.ok(/status\.text = HuntFilters\.quietReasonText\(status\);/.test(push));
   assert.ok(/'jtcat-hunt-status'/.test(push) && /type: 'jtcat-hunt-status'/.test(push), 'window and ECHOCAT');

@@ -419,6 +419,7 @@ const TESTS = [
   'test/jtcat-hunt-filters-test.js', // Hunt filters (plan-jtcat-hunt-priorities): targets ANY, priority, Never answer, auto-skip, CQ DX/continent rule, quiet-reason text
   'test/jtcat-hunt-status-test.js', // Hunt status line (why Hunt is quiet) and Hide decodes below (nj2dx)
   'test/jtcat-hunt-new-grid-test.js', // Hunt: New grids target, Wanted split into New DXCC / New grid (level_death)
+  'test/jtcat-hunt-priority-test.js', // Hunt: Who goes first (Strongest default, Farthest, Needed first)
 ];
 
 const root = path.join(__dirname, '..');

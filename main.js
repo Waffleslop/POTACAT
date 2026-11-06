@@ -15547,12 +15547,13 @@ function jtcatAutoCqStatePayload() {
 // heard this period, why nobody was answered, or who is answered next. To the
 // FT8 window and every ECHOCAT client; {off:true} when Hunt stops.
 let _jtcatHuntStatusLast = null;
-function jtcatHuntStatusPush(candidates, best) {
+function jtcatHuntStatusPush(candidates, best, priority) {
   const r = (candidates && candidates.reasons) || {};
   const status = {
     heard: r.heard || 0, below: r.below || 0, worked: r.worked || 0, ownSlot: r.ownSlot || 0, notTarget: r.notTarget || 0,
     floor: candidates ? candidates.floor : null,
-    next: best ? { call: best.call, why: HuntFilters.nextWhy(best, 'strongest') } : null,
+    next: best ? { call: best.call, why: HuntFilters.nextWhy(best, priority) } : null,
+    priority: HuntFilters.normalizePriority(priority),
   };
   status.text = HuntFilters.quietReasonText(status);
   _jtcatHuntStatusLast = status;
@@ -17955,9 +17956,18 @@ function startJtcat(mode) {
         // over a stronger generic caller. SNR remains the tiebreak within
         // each tier, preserving the original behavior when no event is live.
         const evRank = (d) => (d.eventMatch && d.eventMatch.status !== 'worked') ? 1 : 0;
-        candidates.sort((a, b) => (evRank(b) - evRank(a)) || (b.db - a.db));
-        const best = candidates[0];
-        if (!answeredCaller) jtcatHuntStatusPush(candidates, best);
+        // Then the operator's "Who goes first" (Hunt filters): Strongest is
+        // the old SNR order; Farthest and Needed first come from
+        // lib/jtcat-hunt-filters.js rankCallers, which keeps the event tier.
+        const huntPriority = HuntFilters.normalizePriority(settings.jtcatHuntPriority);
+        if (huntPriority === 'farthest') {
+          for (const c of candidates) {
+            if (!Number.isFinite(c.distanceKm)) { const km = HuntFilters.distanceKm(c.grid, myGrid); if (km != null) c.distanceKm = km; }
+          }
+        }
+        const ranked = HuntFilters.rankCallers(candidates, { priority: huntPriority, myGrid });
+        const best = ranked[0];
+        if (!answeredCaller) jtcatHuntStatusPush(candidates, best, huntPriority);
 
         if (best) {
           jtcatSessionMark(best.call);
