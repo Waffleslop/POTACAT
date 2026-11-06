@@ -18,7 +18,10 @@ function test(name, fn) {
 }
 const fnSrc = (src.match(/function parseHunterParkInput[\s\S]*?\n\}\n/) || [])[0];
 const parse = new Function(fnSrc + ';return parseHunterParkInput;')();
-const logFn = (src.match(/async function activatorLogContactNow\(\)[\s\S]*?\n\}\n/) || [''])[0];
+// The form is read at press time (activatorReadEntry) and saved from that
+// snapshot (activatorLogContactNow(s)); both halves together are the log path.
+const logFn = ((src.match(/function activatorReadEntry\(\)[\s\S]*?\n\}\n/) || [''])[0])
+  + ((src.match(/async function activatorLogContactNow\(s\)[\s\S]*?\n\}\n/) || [''])[0]);
 
 console.log('Activator: their parks');
 test('a comma list is every park, upper-cased, deduped', () => {
@@ -35,7 +38,7 @@ test('the log path refuses on a bad token and builds hunterParkRefs from the lis
   assert.ok(/parseHunterParkInput\(hunterInput\.value\)/.test(logFn), 'the typed box is parsed at log time');
   assert.ok(/if \(parsed\.bad\.length\) \{[\s\S]{0,400}return;/.test(logFn), 'a bad token stops the log');
   assert.ok(/parsed\.refs\.length > 1 \|\| hunterParkRefs\.length === 0/.test(logFn), 'a list replaces a single dropdown pick');
-  assert.ok(/hunted: hunterParkRefs\.map/.test(logFn), 'every park reaches logContact as hunted');
+  assert.ok(/hunted: hunterParkRefs\.slice\(\)/.test(logFn) && /hunted: s\.hunted\.map/.test(logFn), 'every park reaches logContact as hunted, from the press-time snapshot');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

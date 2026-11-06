@@ -281,7 +281,7 @@ console.log('\nNo POTA hardcode remains in the log-building paths');
   const exportCalls = main.match(/writeActivationAdifRaw\([^)]*\)/g) || [];
   check(exportCalls.length >= 3 && exportCalls.every(c => /fillActivationExport\(/.test(c)), 'every activation export is filled (' + exportCalls.length + ')');
   const app = fs.readFileSync(path.join(__dirname, '../renderer/app.js'), 'utf-8');
-  const act = app.slice(app.indexOf('async function activatorLogContact('), app.indexOf('async function activatorLogContact(') + 4000);
+  const act = app.slice(app.indexOf('async function activatorLogContact('), app.indexOf('async function activatorLogContact(') + 9000);
   check(/if \(!freqKhz\) \{[\s\S]{0,400}activatorFreqInput\.focus\(\);\s*return;/.test(act), 'Act screen asks for the frequency instead of logging none');
 }
 // ───────────────────────────────────────────────────────────────────────────

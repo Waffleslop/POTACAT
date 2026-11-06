@@ -28574,20 +28574,42 @@ if (crossRefWwbota) crossRefWwbota.addEventListener('blur', rebuildCrossRefs);
 // One log at a time. The callsign box clears only after the save returns, so
 // a second press (or Enter) during a slow save logged the same contact again:
 // .eddiejames saw three saves land at once, as duplicates, mid-pileup.
+// Saves run one at a time, IN ORDER, each from the form as it was when Log
+// was pressed (review of the 1.13.11 chain). The one-save guard dropped a
+// press made while a save was running and the save then emptied the box, so
+// a contact typed during a slow save was lost without a word. A pileup must
+// never lose a contact: the press is queued, and the box is emptied only if
+// it still holds that contact's call. A second press of the SAME contact
+// while it waits (the double-press eddiejames saw) is not queued twice.
 let _activatorLogBusy = false;
+const _activatorLogQueue = [];
+let _activatorLogInFlight = null;
 async function activatorLogContact() {
-  if (_activatorLogBusy) return;
+  const snap = activatorReadEntry();
+  if (!snap) return;
+  if ((_activatorLogInFlight && _activatorLogInFlight.key === snap.key) || _activatorLogQueue.some((q) => q.key === snap.key)) return;
+  _activatorLogQueue.push(snap);
+  if (_activatorLogBusy) {
+    showLogToast(`${snap.callsigns.join(', ')} will be logged right after the contact being saved now`, { duration: 3000 });
+    return;
+  }
   _activatorLogBusy = true;
-  if (activatorLogBtn) activatorLogBtn.disabled = true;
   try {
-    return await activatorLogContactNow();
+    while (_activatorLogQueue.length) {
+      _activatorLogInFlight = _activatorLogQueue.shift();
+      try { await activatorLogContactNow(_activatorLogInFlight); } catch (e) { console.error('[Activator] save:', e); }
+    }
   } finally {
+    _activatorLogInFlight = null;
     _activatorLogBusy = false;
-    if (activatorLogBtn) activatorLogBtn.disabled = false;
   }
 }
 
-async function activatorLogContactNow() {
+/**
+ * The contact as typed, at the moment Log was pressed, or null when the form
+ * is not ready (the field to fix gets the focus, as before).
+ */
+function activatorReadEntry() {
   if (!activationActive) return; // must have an active activation
   const rawCallsign = activatorCallsignInput.value.trim().toUpperCase();
   if (!rawCallsign) return;
@@ -28658,6 +28680,16 @@ async function activatorLogContactNow() {
 
   const myParks = activatorParkRefs;                              // always >= 1
 
+  const key = [rawCallsign, mode, band, hunterParkRefs.map((p) => p.ref).join(',')].join('|');
+  return {
+    key, rawCallsign, callsigns, mode, rstSent, rstRcvd, stateVal, freqKhz, freqMhz, band,
+    qsoDate, timeOn, timeUtc, myParks, hunted: hunterParkRefs.slice(),
+  };
+}
+
+/** Save one contact read by activatorReadEntry. */
+async function activatorLogContactNow(s) {
+  const { rawCallsign, callsigns, mode, rstSent, rstRcvd, stateVal, freqKhz, freqMhz, band, qsoDate, timeOn, timeUtc, myParks } = s;
   // One contact, every callsign: logContact writes callsign × hunter park ×
   // MY park records (this activation's refs, read live by main), forwards
   // each callsign once, logs a park-to-park contact at the HUNTER's park
@@ -28670,7 +28702,7 @@ async function activatorLogContactNow() {
       mode, band, qsoDate, timeOn, rstSent, rstRcvd,
       state: stateVal, // what the operator typed/kept for callsign 1 (a park contact uses the park's)
       myGridsquare: activatorParkGrid || '',
-      hunted: hunterParkRefs.map((p) => ({ sig: p.program || 'POTA', ref: p.ref })),
+      hunted: s.hunted.map((p) => ({ sig: p.program || 'POTA', ref: p.ref })),
     });
   } catch (err) {
     res = { success: false, error: err.message };
@@ -28712,7 +28744,7 @@ async function activatorLogContactNow() {
       state: primary.state || '',
       name: opName,
       myParks: [...myParks.map(p => p.ref), ...activatorCrossRefs.map(xr => xr.ref)],
-      theirParks: hunterParkRefs.map(p => p.ref),
+      theirParks: s.hunted.map(p => p.ref),
       qsoData: allQsoData[0], // backward compat
       qsoDataList: allQsoData, // all cross-product records for export
     };
@@ -28748,7 +28780,8 @@ async function activatorLogContactNow() {
   updateActivatorCounter();
   renderActivatorLog();
 
-  clearActivatorEntry();
+  // Only this contact's own entry is cleared: a call typed meanwhile stays.
+  if (activatorCallsignInput.value.trim().toUpperCase() === rawCallsign) clearActivatorEntry();
 }
 
 /**

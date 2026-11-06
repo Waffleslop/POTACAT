@@ -36,28 +36,56 @@ test('logContact caps the QRZ wait, so a slow QRZ never holds up the save', () =
   assert.ok(!/infos\.set\(c, await qrzStationInfo\(c\)\)/.test(lc), 'no uncapped wait left');
 });
 
-test('the Activator log runs one save at a time: a second press during a slow save does nothing', async () => {
-  const app = read('renderer/app.js');
+// The press-time queue (review of the 1.13.11 chain): the guard used to DROP
+// a press made during a save, and the save then emptied the box, so a contact
+// typed meanwhile was lost. Now each press is read at press time and saved in
+// order; only a repeat of the SAME contact is not queued twice.
+function loadQueue(app, entries, saved) {
   const start = app.indexOf('let _activatorLogBusy = false;');
-  const end = app.indexOf('async function activatorLogContactNow() {');
+  const end = app.indexOf('function activatorReadEntry() {');
   assert.ok(start > 0 && end > start);
-  let saves = 0;
-  const btn = { disabled: false };
   const ctx = {
-    activatorLogBtn: btn,
-    activatorLogContactNow: async () => { saves++; await new Promise((r) => setTimeout(r, 150)); },
+    console, toasts: [],
+    showLogToast: (m) => ctx.toasts.push(m),
+    activatorReadEntry: () => entries.shift() || null,
+    activatorLogContactNow: async (s) => { saved.push(s.rawCallsign); await new Promise((r) => setTimeout(r, 120)); },
   };
   vm.createContext(ctx);
   vm.runInContext(app.slice(start, end) + '\nthis.activatorLogContact = activatorLogContact;', ctx);
+  return ctx;
+}
+const entry = (call) => ({ key: call + '|SSB|20m|', rawCallsign: call, callsigns: [call] });
+
+test('the Activator log saves one contact per press: repeat presses of the same contact save it once', async () => {
+  const saved = [];
+  const ctx = loadQueue(read('renderer/app.js'), [entry('K1ABC'), entry('K1ABC'), entry('K1ABC'), entry('W2DEF')], saved);
   const first = ctx.activatorLogContact();
-  assert.strictEqual(btn.disabled, true, 'the button is disabled while saving');
   await ctx.activatorLogContact();           // the second press, mid-save
   await ctx.activatorLogContact();           // and a third (Enter)
   await first;
-  assert.strictEqual(saves, 1, 'one save, not three');
-  assert.strictEqual(btn.disabled, false, 'and the button comes back');
+  assert.deepStrictEqual(saved, ['K1ABC'], 'one save, not three');
   await ctx.activatorLogContact();
-  assert.strictEqual(saves, 2, 'the next contact logs normally');
+  assert.deepStrictEqual(saved, ['K1ABC', 'W2DEF'], 'the next contact logs normally');
+});
+
+test('a contact typed and logged during a slow save is saved after it, in order, and never lost', async () => {
+  const saved = [];
+  const ctx = loadQueue(read('renderer/app.js'), [entry('K1ABC'), entry('W2DEF'), entry('N3GHI')], saved);
+  const first = ctx.activatorLogContact();
+  await ctx.activatorLogContact();           // W2DEF pressed while K1ABC saves
+  await ctx.activatorLogContact();           // and N3GHI
+  await first;
+  assert.deepStrictEqual(saved, ['K1ABC', 'W2DEF', 'N3GHI']);
+  assert.strictEqual(ctx.toasts.length, 2, 'each queued contact says it will be logged next');
+});
+
+test('the save empties the entry row only when it still holds that contact\'s call', () => {
+  const app = read('renderer/app.js');
+  const save = app.slice(app.indexOf('async function activatorLogContactNow(s) {'), app.indexOf('function clearActivatorEntry() {'));
+  assert.ok(/if \(activatorCallsignInput\.value\.trim\(\)\.toUpperCase\(\) === rawCallsign\) clearActivatorEntry\(\);/.test(save));
+  assert.ok(!/\n  clearActivatorEntry\(\);\n/.test(save), 'no unconditional clear');
+  const readFn = app.slice(app.indexOf('function activatorReadEntry() {'), app.indexOf('async function activatorLogContactNow(s) {'));
+  assert.ok(/const timeOn = /.test(readFn) && /hunted: hunterParkRefs\.slice\(\)/.test(readFn), 'time and parks are taken at press time');
 });
 
 (async () => {
