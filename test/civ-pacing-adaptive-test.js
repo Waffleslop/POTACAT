@@ -140,7 +140,7 @@ test('a reconnect watches again; a rig found dropping starts paced for the rest 
   codec.rearmPacingDetection();                 // the cable came back
   assert.strictEqual(codec.pacingCheck(20000), false, 'the window starts again');
   assert.strictEqual(codec.pacingCheck(25000), false, 'and needs a reply on the new link');
-  const ctl = fs.readFileSync(path.join(__dirname, '..', 'lib', 'rig-controller.js'), 'utf8');
+  const ctl = fs.readFileSync(path.join(__dirname, '..', 'lib', 'rig-controller.js'), 'utf8').replace(/\r\n/g, '\n');
   assert.ok(/this\._transport\.on\('connect', \(\) => \{[\s\S]{0,700}this\._codec\.rearmPacingDetection\(\)/.test(ctl), 'the controller re-arms on every connect');
   assert.ok(/if \(typeof this\._codec\.pacingCheck === 'function'\) this\._codec\.pacingCheck\(\);\n\s+this\._checkModeSilence\(\);/.test(ctl), 'checked each tick, before the mode-silence note');
   // main: the per-rig memory and the editor's override.
