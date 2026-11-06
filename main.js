@@ -27328,8 +27328,13 @@ function handleRemotePtt(state, opts = {}) {
         _dataSwapSince = Date.now();
         // anchorNow: mode, frequency, THEN the key-down below (GitHub #113 item 1).
         if (cat.setModeOnly) cat.setModeOnly(dataMode, _ssbFreqBeforePtt, { noAnchor: _icomData, anchorNow: true });
-        if (_voiceTxCheck) _voiceTxCheck.mode = dataMode;   // the hint names DATA MOD, not DATA OFF MOD
         else if (_ssbFreqBeforePtt) cat.tune(_ssbFreqBeforePtt, dataMode);
+        // Below the pair, never between: an else-if hung on this line ran
+        // cat.tune() after setModeOnly whenever _voiceTxCheck was null (every
+        // forced-DATA key-down: SSTV/Winlink on an Icom, Mercury). tune()
+        // re-sent the mode while keyed and wrote the frequency, taking an
+        // IC-705/IC-7100 out of a repeater memory (transmit-safety review).
+        if (_voiceTxCheck) _voiceTxCheck.mode = dataMode;   // the hint names DATA MOD, not DATA OFF MOD
       }
       // Stagger the upcoming PTT key-down on Icom so its CI-V PTT frame
       // doesn't collide with the mode frame just written above.
