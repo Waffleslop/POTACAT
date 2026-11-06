@@ -153,7 +153,9 @@ test('confirmationPatch: an N3FJP contact mirrors N3FJP, a POTACAT contact is on
   assert.strictEqual(p1.APP_N3FJP_QSL_CONF_BY_R, 'B');
   const own = { CALL: 'K1ABC', LOTW_QSL_RCVD: 'Y', QSL_SENT: 'Y' };
   const p2 = P.confirmationPatch(own, P.toAdifRecord({ ...base, fldQSLS: 'Y', fldQSLConfByS: 'B' }));
-  assert.deepStrictEqual(p2, { CLUBLOG_QSO_UPLOAD_STATUS: 'Y' }, 'adds the Y, never removes');
+  // The Conf By letters ride along too, so a ClubLog confirmation counts
+  // (lib/adif.js isConfirmedRecord reads the received-side B).
+  assert.deepStrictEqual(p2, { CLUBLOG_QSO_UPLOAD_STATUS: 'Y', APP_N3FJP_QSL_CONF_BY_S: 'B' }, 'adds the Y and the letter, never removes');
   assert.strictEqual(P.confirmationPatch(now, now), null);
 });
 test('the pull writes confirmation updates through mutateLog and re-reads the whole log daily', () => {
