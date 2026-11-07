@@ -132,6 +132,27 @@ test('forwardToLogbook and sendToQrzLogbook take the operator\'s settings', () =
   assert.ok(/async function sendToQrzLogbook\(qsoData, s = settings\) \{\n\s*const apiKey = s\.qrzApiKey;/.test(main));
 });
 
+// #142: the online loggers read the operator being logged for, and Club Log
+// never blocks the save.
+test('Club Log: the gate reads `ops`, and the QSO is queued in the outbox, not awaited', () => {
+  assert.ok(/if \(ops\.clublogEnable && ops\.clublogRealtime !== false && !qsoData\.skipLogbookForward\n\s*&& ops\.clublogEmail && ops\.clublogPassword\)/.test(saveBody), 'gate reads ops');
+  assert.ok(!/settings\.clublog/.test(saveBody), 'no settings.clublog* inside saveQsoRecord');
+  assert.ok(/clublogOutbox\.add\(/.test(saveBody), 'queued');
+  assert.ok(!/await sendQsoToClublog\(/.test(saveBody), 'not awaited');
+  assert.ok(/callsign: ops\.clublogCallsign \|\| ops\.myCallsign/.test(saveBody));
+});
+test('Wavelog and WRL take the operator\'s settings from forwardToLogbook', () => {
+  assert.ok(/return sendWavelogHttp\(qsoData, s\);/.test(main));
+  assert.ok(/return sendWrlUdp\(qsoData, host, port \|\| 12060, s\);/.test(main));
+  const wl = main.slice(main.indexOf('function sendWavelogHttp('), main.indexOf('async function sendToQrzLogbook('));
+  assert.ok(/^function sendWavelogHttp\(qsoData, s = settings\) \{/.test(wl));
+  assert.ok(/\Ws\.wavelogUrl\b/.test(wl) && /\Ws\.wavelogApiKey\b/.test(wl) && /\Ws\.wavelogStationId\b/.test(wl), 's.wavelog*');
+  assert.ok(!/settings\.wavelog/.test(wl), 'no settings.wavelog* in sendWavelogHttp');
+  const wrl = main.slice(main.indexOf('function sendWrlUdp('), main.indexOf('function sendWrlUdp(') + 1500);
+  assert.ok(/^function sendWrlUdp\(qsoData, host, port, s = settings\) \{/.test(wrl));
+  assert.ok(/myCallsign: s\.myCallsign,\n\s*myGrid: s\.grid,/.test(wrl));
+});
+
 // --- Surfaces ---
 test('desktop Log QSO dialog: chooser, re-read on open, sent as logAs, named on the button and toast', () => {
   const app = R('renderer/app.js');

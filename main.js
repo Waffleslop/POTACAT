@@ -441,6 +441,7 @@ const ModemAudioServerMod = require('./lib/modem-audio-server');
 const { ModemAudioServer } = ModemAudioServerMod;
 const { buildAdifFields, buildAdifRecord, sqliteQsoToAdifFields, ADIF_HEADER, adifField } = require('./lib/adif-writer');
 const { PassQsoOutbox } = require('./lib/pass-qso-outbox');
+const { ClublogOutbox } = require('./lib/clublog-outbox');
 const QsoLog = require('./lib/qso-log');
 const StationCounty = require('./lib/station-county');
 const JtcatSnrFloor = require('./lib/jtcat-snr-floor');
@@ -13752,6 +13753,26 @@ function initPassQsoOutbox() {
   passQsoOutbox.start();
 }
 
+// Realtime Club Log uploads (#142, lib/clublog-outbox.js): queued per
+// operator account, sent in the background, resumed after a restart. The
+// file holds Application Passwords like the profile settings file does and
+// is not part of Settings > Export.
+let clublogOutbox = null;
+function initClublogOutbox() {
+  if (clublogOutbox) return;
+  clublogOutbox = new ClublogOutbox({
+    file: path.join(app.getPath('userData'), 'clublog-outbox.json'),
+    post: postToClublog,
+    getApiKey: getClublogApiKey,
+    log: sendCatLog,
+  });
+  clublogOutbox.start();
+}
+// The active operator's Club Log login, as the realtime gate reads it.
+function clublogCredsOf(s) {
+  return { email: s.clublogEmail, password: s.clublogPassword, callsign: s.clublogCallsign || s.myCallsign };
+}
+
 // Fill the station side of an activation record from the park DB. Used by
 // saveQsoRecord and every activation export (the export writes the renderer's
 // copies, which never saw what saveQsoRecord stamped). Fills blanks only.
@@ -14690,12 +14711,25 @@ async function saveQsoRecord(qsoData, opts) {
     }
   }
 
-  // Send the QSO to Club Log if enabled — a parallel path like SOTA
-  // above, never a gate on logging. skipLogbookForward: multi-park
-  // activations log one record per park but it's one physical QSO.
-  if (settings.clublogEnable && settings.clublogRealtime !== false && !qsoData.skipLogbookForward
-      && settings.clublogEmail && settings.clublogPassword) {
-    await sendQsoToClublog(qsoData);
+  // Send the QSO to Club Log if enabled — never a gate on logging.
+  // skipLogbookForward: multi-park activations log one record per park but
+  // it's one physical QSO. #142: the account is the logged operator's (`ops`;
+  // a "Log as" operator without Club Log set up uploads nowhere), and the
+  // contact is queued (lib/clublog-outbox.js), so Save never waits on Club Log
+  // and a refused login pauses that account instead of failing every QSO.
+  if (ops.clublogEnable && ops.clublogRealtime !== false && !qsoData.skipLogbookForward
+      && ops.clublogEmail && ops.clublogPassword) {
+    try {
+      initClublogOutbox();
+      clublogOutbox.add({
+        creds: { email: ops.clublogEmail, password: ops.clublogPassword, callsign: ops.clublogCallsign || ops.myCallsign },
+        adif: buildAdifRecord(qsoData),
+        uuid: qsoData.uuid || require('crypto').randomUUID(),
+        call: qsoData.callsign,
+      });
+    } catch (e) {
+      sendCatLog(`[ClubLog] Error: ${e.message}`);
+    }
   }
 
   const didRespot = (qsoData.respot && qsoData.sig === 'POTA') || qsoData.wwffRespot || qsoData.llotaRespot || qsoData.dxcRespot;
@@ -32676,10 +32710,10 @@ function forwardToLogbook(qsoData, s = settings) {
     return sendDxkeeperTcp(qsoData, host, port || 52001);
   }
   if (type === 'wavelog') {
-    return sendWavelogHttp(qsoData);
+    return sendWavelogHttp(qsoData, s);
   }
   if (type === 'wrl') {
-    return sendWrlUdp(qsoData, host, port || 12060);
+    return sendWrlUdp(qsoData, host, port || 12060, s);
   }
   return Promise.resolve();
 }
@@ -32709,7 +32743,7 @@ function sendUdpAdif(qsoData, host, port) {
  * Send a QSO to World Radio League via N1MM-compatible ContactInfo UDP.
  * WRL Cat Control listens for these and forwards to the WRL cloud logbook.
  */
-function sendWrlUdp(qsoData, host, port) {
+function sendWrlUdp(qsoData, host, port, s = settings) {
   return new Promise((resolve, reject) => {
     const dgram = require('dgram');
     // The packet build lives in lib/wrl-packet.js (pure + tested). Every
@@ -32719,8 +32753,8 @@ function sendWrlUdp(qsoData, host, port) {
     // so a pop-out QSO died with `str.replace is not a function` while
     // "Resend to Logbook" on the same contact worked (W9TEF 2026-09-19).
     const xml = buildWrlContactInfo(qsoData, {
-      myCallsign: settings.myCallsign,
-      myGrid: settings.grid,
+      myCallsign: s.myCallsign,
+      myGrid: s.grid,
     });
 
     const message = Buffer.from(xml, 'utf-8');
@@ -32920,13 +32954,13 @@ function sendDxkeeperTcp(qsoData, host, port) {
  * Send a QSO to Wavelog via HTTP POST.
  * POST {url}/index.php/api/qso with JSON body { key, station_profile_id, type: 'adif', string: adifRecord }
  */
-function sendWavelogHttp(qsoData) {
+function sendWavelogHttp(qsoData, s = settings) {
   return new Promise((resolve, reject) => {
-    let baseUrl = (settings.wavelogUrl || '').trim().replace(/\/+$/, '');
+    let baseUrl = (s.wavelogUrl || '').trim().replace(/\/+$/, '');
     if (!baseUrl) return reject(new Error('Wavelog URL not configured'));
-    const apiKey = settings.wavelogApiKey;
+    const apiKey = s.wavelogApiKey;
     if (!apiKey) return reject(new Error('Wavelog API key not configured'));
-    const stationId = settings.wavelogStationId || '1';
+    const stationId = s.wavelogStationId || '1';
 
     const record = buildAdifRecord(qsoData);
     const body = JSON.stringify({
@@ -33750,27 +33784,7 @@ function postToClublog(url, contentType, body) {
   });
 }
 
-// Realtime per-QSO push — called from the QSO fan-out next to the SOTA
-// uploader. Never throws; a Club Log hiccup must not break logging.
-async function sendQsoToClublog(qsoData) {
-  try {
-    const { CLUBLOG_REALTIME_URL, buildRealtimeForm, mapClublogResponse } = require('./lib/clublog');
-    const api = await getClublogApiKey();
-    if (!api) { sendCatLog('[ClubLog] QSO not sent — application API key unavailable.'); return; }
-    const form = buildRealtimeForm({
-      email: settings.clublogEmail,
-      password: settings.clublogPassword,
-      callsign: settings.clublogCallsign || settings.myCallsign,
-      api,
-      adif: buildAdifRecord(qsoData),
-    });
-    const res = await postToClublog(CLUBLOG_REALTIME_URL, 'application/x-www-form-urlencoded', form);
-    const r = mapClublogResponse(res.status, res.body, 'realtime');
-    sendCatLog(`[ClubLog] ${r.ok ? (r.dupe ? 'Dupe (already there)' : 'QSO sent') : 'FAILED'}: ${qsoData.callsign} — ${r.message}`);
-  } catch (e) {
-    sendCatLog(`[ClubLog] Error: ${e.message}`);
-  }
-}
+// Realtime per-QSO uploads: lib/clublog-outbox.js (initClublogOutbox), #142.
 
 function fetchClubLogExpeditions() {
   return new Promise((resolve) => {
@@ -37751,6 +37765,7 @@ function cloudShackNotice(text, kind) {
   // helpers defined below.
   try {
     initPassQsoOutbox();
+    try { initClublogOutbox(); } catch (e) { sendCatLog(`[ClubLog] upload queue not started: ${e.message}`); }
     passEnforcement = new PassEnforcement({
       log: (msg) => sendCatLog(msg),
       // Whether the connected radio reports its RF power (capability table +
@@ -42706,6 +42721,9 @@ function cloudShackNotice(text, kind) {
     const r = mapClublogResponse(res.status, res.body, 'bulk');
     sendCatLog(`[ClubLog] ${r.ok ? 'OK' : 'FAILED'} (HTTP ${res.status}): ${r.message}`);
     if (r.ok) { settings.lastClublogUploadAt = Date.now(); saveSettings(settings); }
+    // #142: the same login as the realtime queue — a 200 lifts a paused
+    // account (and sends what it held), a 403 pauses it.
+    try { if (clublogOutbox) clublogOutbox.noteBulkResult({ email, password, callsign }, r); } catch {}
     return r;
   });
 
@@ -46560,6 +46578,12 @@ function cloudShackNotice(text, kind) {
       startIdlePauseTimer();
     }
 
+    // #142: the operator saved their Club Log login — a paused account whose
+    // credentials changed is lifted and its held contacts go with the new ones.
+    if (clublogOutbox && (has('clublogEmail') || has('clublogPassword') || has('clublogCallsign'))) {
+      try { clublogOutbox.updateCredentials(clublogCredsOf(settings)); } catch {}
+    }
+
     rigBandsBroadcast(); // rig.bands edited, or a different rig active
     return settings;
   });
@@ -49283,6 +49307,7 @@ function gracefulCleanup() {
   // A tuner-memory run keys tune carriers: stop it, drop the carrier and put
   // the operator's power back while the SmartSDR socket is still open.
   try { atuWizardAbort('app quit'); if (smartSdr && smartSdr.connected && _atuWizardSaved) smartSdr.setTxTune(false); } catch {}
+  try { if (clublogOutbox) clublogOutbox.stop(); } catch {} // queue is on disk; resumed on next start
   try { stopLoggerCat(); } catch {}
   try { stopModemBridge('quit'); } catch {}
   // A WSPR beacon armed at quit must give the radio its power back NOW, while

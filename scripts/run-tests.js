@@ -55,6 +55,8 @@ const TESTS = [
   'test/revoke-device-test.js', // revoking a device closes EVERY socket of that device; a socket whose pairing is gone is closed on its next message
   'test/remote-access-test.js', // ECHOCAT access off | cloud | lan: migration, the loopback bind for Cloud only, Off starts no listener
   'test/pass-qso-outbox-test.js', // a guest's contacts reach the GUEST's cloud logbook, sent by the shack
+  'test/clublog-test.js', // Club Log form/multipart bytes, response map, credentialKey
+  'test/clublog-outbox-test.js', // #142: realtime Club Log uploads queue per operator; a 403 pauses that account
   'test/propagation-always-on-test.js', // RBN + PSKReporter Propagation has no switch
   'test/install-defaults-test.js', // logging/solar/band activity always on; SOTA/WWFF/LLOTA + a random cluster node once
   'test/pair-request-tunnel-gate-test.js',
