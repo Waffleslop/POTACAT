@@ -34882,7 +34882,43 @@ function macUpdateBlocker() {
   return null;
 }
 
+// --- Manual check feedback (GitHub #186) ---
+// A manual check (Settings > Check for Updates, F5) must ALWAYS end in a
+// visible message: it used to close Settings and show at most a 2 s toast,
+// and the GitHub fallback swallowed every failure. One pending manual check at
+// a time; each updater outcome, the fallback, and a watchdog resolve it.
+const updateFeedback = require('./lib/update-feedback');
+const MANUAL_CHECK_TIMEOUT_MS = 45000;
+let manualUpdateCheck = null; // { timer, canAutoInstall } while a manual check is pending
+
+function sendUpdateCheckStatus(outcome, info) {
+  const msg = updateFeedback.manualCheckMessage(outcome, Object.assign({ currentVersion: app.getVersion() }, info));
+  try { sendCatLog('[update] manual check: ' + outcome + ' - ' + msg.text); } catch {}
+  if (win && !win.isDestroyed()) win.webContents.send('update-check-status', Object.assign({ outcome }, msg));
+}
+
+function startManualCheck(canAutoInstall) {
+  if (manualUpdateCheck) clearTimeout(manualUpdateCheck.timer);
+  const timer = setTimeout(() => {
+    reportManualCheck('error', { message: 'No answer from the update server after ' + Math.round(MANUAL_CHECK_TIMEOUT_MS / 1000) + ' seconds.' });
+  }, MANUAL_CHECK_TIMEOUT_MS);
+  if (typeof timer.unref === 'function') timer.unref();
+  manualUpdateCheck = { timer, canAutoInstall };
+  sendUpdateCheckStatus('checking', {});
+}
+
+/** Resolve the pending manual check, if any. Returns true if one was pending. */
+function reportManualCheck(outcome, info) {
+  if (!manualUpdateCheck) return false;
+  clearTimeout(manualUpdateCheck.timer);
+  const canAutoInstall = manualUpdateCheck.canAutoInstall;
+  manualUpdateCheck = null;
+  sendUpdateCheckStatus(outcome, Object.assign({ canAutoInstall }, info));
+  return true;
+}
+
 autoUpdater.on('update-available', (info) => {
+  reportManualCheck('available', { latestVersion: info && info.version });
   if (win && !win.isDestroyed()) {
     win.webContents.send('update-available', {
       version: info.version,
@@ -34908,7 +34944,10 @@ autoUpdater.on('update-downloaded', () => {
   }
 });
 
-autoUpdater.on('update-not-available', () => {
+autoUpdater.on('update-not-available', (info) => {
+  // A manual check gets the version-naming message; the launch check keeps
+  // its short "You're up to date!" toast.
+  if (reportManualCheck('up-to-date', { latestVersion: info && info.version })) return;
   if (win && !win.isDestroyed()) {
     win.webContents.send('update-up-to-date');
   }
@@ -34917,6 +34956,7 @@ autoUpdater.on('update-not-available', () => {
 autoUpdater.on('error', (err) => {
   console.error('autoUpdater error:', err);
   try { sendCatLog('[update] error: ' + (err && err.message || err)); } catch {}
+  if (reportManualCheck('error', { message: updateFeedback.describeUpdateError(err) })) return;
   if (win && !win.isDestroyed()) {
     win.webContents.send('update-error', err?.message || String(err));
   }
@@ -34968,9 +35008,13 @@ ipcMain.on('install-update', async () => {
     if (win && !win.isDestroyed()) win.webContents.send('update-error', 'The update could not be applied: ' + (err && err.message || err));
   }
 });
-ipcMain.on('check-for-updates', () => { checkForUpdates(); });
+ipcMain.on('check-for-updates', () => { checkForUpdates({ manual: true }); });
 
-// Fallback for portable builds where electron-updater is inactive
+// Fallback where electron-updater is not used (unpackaged/dev runs, unsigned
+// macOS builds): ask the GitHub API for the latest release and offer the
+// download link. Failures used to be silently ignored, and a rate-limited 403
+// read as "up to date" (#186); now a manual check always hears the outcome,
+// while the launch check stays quiet on errors.
 function checkForUpdatesManual() {
   const https = require('https');
   const currentVersion = require('./package.json').version;
@@ -34984,21 +35028,27 @@ function checkForUpdatesManual() {
     let body = '';
     res.on('data', (chunk) => { body += chunk; });
     res.on('end', () => {
-      try {
-        const data = JSON.parse(body);
-        const latestTag = (data.tag_name || '').replace(/^v/, '');
-        if (latestTag && isNewerVersion(currentVersion, latestTag)) {
-          const releaseUrl = data.html_url || `https://github.com/Waffleslop/POTACAT/releases/tag/${data.tag_name}`;
-          if (win && !win.isDestroyed()) {
-            win.webContents.send('update-available', { version: latestTag, url: releaseUrl, headline: data.name || '' });
-          }
-        } else if (win && !win.isDestroyed()) {
+      const r = updateFeedback.interpretLatestRelease({ statusCode: res.statusCode, body, currentVersion });
+      if (r.outcome === 'available') {
+        reportManualCheck('available', { latestVersion: r.version });
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('update-available', { version: r.version, url: r.url, headline: r.headline });
+        }
+      } else if (r.outcome === 'up-to-date') {
+        if (!reportManualCheck('up-to-date', { latestVersion: r.version }) && win && !win.isDestroyed()) {
           win.webContents.send('update-up-to-date');
         }
-      } catch { /* silently ignore parse errors */ }
+      } else {
+        sendCatLog('[update] GitHub release check failed: HTTP ' + res.statusCode + ' - ' + r.message);
+        reportManualCheck('error', { message: r.message });
+      }
     });
   });
-  req.on('error', () => { /* silently ignore — no internet is fine */ });
+  req.on('timeout', () => { req.destroy(Object.assign(new Error('timed out'), { code: 'ETIMEDOUT' })); });
+  req.on('error', (err) => {
+    sendCatLog('[update] GitHub release check failed: ' + (err && err.message || err));
+    reportManualCheck('error', { message: updateFeedback.describeUpdateError(err) });
+  });
 }
 
 function isNewerVersion(current, latest) {
@@ -35056,7 +35106,8 @@ function macBuildIsSigned() {
   return _macSignedCache;
 }
 
-function checkForUpdates() {
+function checkForUpdates(opts) {
+  const manual = !!(opts && opts.manual);
   // macOS auto-update requires a Developer ID signature + notarization —
   // Squirrel.Mac rejects the update swap otherwise (an ad-hoc DMG gave a
   // "Downloading… → Upgrade" flash with no actual update; WZ1H v1.5.23,
@@ -35066,7 +35117,10 @@ function checkForUpdates() {
   const macOsAutoUpdateUnsupported = process.platform === 'darwin' && !macBuildIsSigned();
   if (autoUpdater.isUpdaterActive() && !macOsAutoUpdateUnsupported) {
     // Installed build — use electron-updater
-    sendCatLog('[update] checking via electron-updater (installed, Developer ID-signed build)');
+    sendCatLog('[update] checking via electron-updater (installed, Developer ID-signed build)' + (manual ? ' - manual' : ''));
+    if (manual) startManualCheck(true);
+    // Rejections also emit 'error', which reports the manual check; the
+    // .catch only keeps an unhandled rejection out of the log.
     autoUpdater.checkForUpdates().catch(() => {});
     if (win && !win.isDestroyed()) {
       win.webContents.send('updater-active', true);
@@ -35082,6 +35136,7 @@ function checkForUpdates() {
     if (win && !win.isDestroyed()) {
       win.webContents.send('updater-active', false);
     }
+    if (manual) startManualCheck(false);
     checkForUpdatesManual();
   }
 }

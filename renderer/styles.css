@@ -6368,6 +6368,10 @@ a.settings-echocat-badge-link:hover {
   animation: log-toast-fade-long 8s ease-in-out forwards;
 }
 
+.log-toast.long {
+  animation: log-toast-fade-long 8s ease-in-out forwards;
+}
+
 .log-toast.sticky {
   animation: log-toast-enter 0.3s ease-out forwards;
   cursor: pointer;
