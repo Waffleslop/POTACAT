@@ -31040,6 +31040,7 @@ let yaesuScopeBandspreadWants = false;   // the Bandspread window draws the scop
 let yaesuScopeRemoteIsGuest = false; // ...and that client holds a Guest Pass (may watch, never change the radio)
 let yaesuScopeRadioBackAt = 0;       // the radio last powered on / its CAT link came back (#126)
 let yaesuScopeRadioBackTimer = null;
+let yaesuScopeStallKills = 0;        // watchdog kills, cleared after a healthy minute (stallKillsAfterHealthy)
 const YAESU_SCOPE_GUEST_DIAG = {
   key: 'guest', severity: 'blocker',
   headline: 'SCU-LAN10 is off, and a Guest Pass cannot change it',
@@ -31322,6 +31323,16 @@ function yaesuScopeNoteRadioBack(why) {
   }, 4000);
 }
 
+/** The radio is keyed by any path POTACAT tracks: desktop / ECHOCAT / FT8
+ *  PTT and CW text (_isEffectivelyTransmitting), the rig's own TX report
+ *  (cat._transmitting) and an external-ATU tune carrier. The stall watchdog
+ *  never judges scope silence while this is true (#126 review). */
+function yaesuScopeTxNow() {
+  try {
+    return !!(_isEffectivelyTransmitting() || (cat && cat._transmitting) || _externalAtuActive);
+  } catch { return false; }
+}
+
 function startYaesuScope() {
   // Driving a remote shack: the scope is the SHACK's (its FT-710 bridge or its
   // SDR). Subscribe while a window here watches; its frames and state are
@@ -31396,6 +31407,9 @@ function startYaesuScope() {
   proc._lastFrameAt = 0;   // any frame, aligned or not (helperStallReason)
   proc._fatalAt = 0;       // when it printed its read-failure line
   proc._stalled = false;   // killed by the watchdog below -> handled as exit 6
+  proc._streamingSince = 0; // start of the current unbroken run of frames
+  proc._wasTx = false;
+  proc._lastTxEndAt = 0;
   sendCatLog('[Scope] helper pid ' + proc.pid + ' started');
   yaesuScopeState.helperPath = helperPath;
   yaesuScopeState.source = 'radio';
@@ -31404,7 +31418,13 @@ function startYaesuScope() {
   yaesuScopeState.misaligned = 0;
   const stream = new YaesuScope.YaesuScopeStream();
   yaesuScopeStream = stream;
-  stream.on('frame', (f) => { proc._lastFrameAt = Date.now(); if (yaesuScopeProc === proc) yaesuScopeOnFrame(f); });
+  stream.on('frame', (f) => {
+    const t = Date.now();
+    // A gap longer than the stall window breaks the run of healthy frames.
+    if (!proc._streamingSince || t - proc._lastFrameAt > YaesuScope.HELPER_STALL.silentMs) proc._streamingSince = t;
+    proc._lastFrameAt = t;
+    if (yaesuScopeProc === proc) yaesuScopeOnFrame(f);
+  });
   proc.stdout.on('data', (chunk) => stream.feed(chunk));
   proc.stderr.on('data', (chunk) => {
     const text = chunk.toString();
@@ -31419,10 +31439,16 @@ function startYaesuScope() {
   // is then a transient read error and the retry path below restarts it.
   const watch = setInterval(() => {
     if (yaesuScopeProc !== proc || proc.exitCode !== null || proc.signalCode !== null) { clearInterval(watch); return; }
-    const why = YaesuScope.helperStallReason({ now: Date.now(), lastFrameAt: proc._lastFrameAt, fatalAt: proc._fatalAt });
+    const now = Date.now();
+    const tx = yaesuScopeTxNow();
+    if (proc._wasTx && !tx) proc._lastTxEndAt = now;   // key-up: the silence clock restarts here
+    proc._wasTx = tx;
+    yaesuScopeStallKills = YaesuScope.stallKillsAfterHealthy({ kills: yaesuScopeStallKills, streamingSince: proc._streamingSince, now });
+    const why = YaesuScope.helperStallReason({ now, lastFrameAt: proc._lastFrameAt, fatalAt: proc._fatalAt, transmitting: tx, lastTxEndAt: proc._lastTxEndAt });
     if (!why) return;
     clearInterval(watch);
     proc._stalled = true;
+    yaesuScopeStallKills++;
     sendCatLog('[Scope] helper pid ' + proc.pid + ' stalled (' + why + ') — killing it so the scope can restart');
     try { proc.kill('SIGKILL'); } catch { /* already gone */ }
   }, 2000);
@@ -31459,9 +31485,12 @@ function startYaesuScope() {
     sendCatLog('[Scope] helper exited: ' + d.headline + (d.detail ? ' — ' + d.detail : ''));
     yaesuScopeSetStatus(d.severity === 'blocker' ? 'blocked' : 'error', d);
     const sinceRadioBackMs = yaesuScopeRadioBackAt ? Date.now() - yaesuScopeRadioBackAt : null;
-    if (YaesuScope.helperExitShouldRetry(code, { sinceRadioBackMs }) && yaesuScopeWanted() && yaesuScopeRestarts < 5) {
-      yaesuScopeRestarts++;
-      sendCatLog('[Scope] retrying in 3 s (' + yaesuScopeRestarts + '/5)');
+    // A watchdog kill spends its own budget (cleared after a healthy minute),
+    // so occasional stalls over a long session never exhaust the retries.
+    const budgetOk = proc._stalled ? yaesuScopeStallKills <= 5 : yaesuScopeRestarts < 5;
+    if (YaesuScope.helperExitShouldRetry(code, { sinceRadioBackMs }) && yaesuScopeWanted() && budgetOk) {
+      if (!proc._stalled) yaesuScopeRestarts++;
+      sendCatLog('[Scope] retrying in 3 s (' + (proc._stalled ? 'stall ' + yaesuScopeStallKills : yaesuScopeRestarts) + '/5)');
       yaesuScopeRestartTimer = setTimeout(() => {
         yaesuScopeRestartTimer = null;
         if (yaesuScopeWanted()) startYaesuScope();

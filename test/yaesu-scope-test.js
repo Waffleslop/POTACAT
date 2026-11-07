@@ -562,6 +562,40 @@ check('#126: the scope restarts when the radio comes back (power-on, link restor
   assert.ok(mainSrc.slice(restored, restored + 400).includes('yaesuScopeNoteRadioBack('), 'link restored does not tell the scope');
 });
 
+check('#126: no silence verdict while transmitting — the FT-710 may pause its scope in TX', () => {
+  const live = { lastFrameAt: T('03:08:43.700'), fatalAt: 0 };
+  assert.strictEqual(S.helperStallReason({ ...live, now: T('03:09:30.000'), transmitting: true }), null, 'a long over or tune is not a stall');
+  // The fatal-line rule is not TX-gated: a helper that said the bridge is gone is gone.
+  assert.ok(S.helperStallReason({ lastFrameAt: T('03:08:43.700'), fatalAt: T('03:08:44.425'), now: T('03:08:48.000'), transmitting: true }));
+});
+
+check('#126: no silence verdict within the post-TX grace, and the 15 s clock restarts at TX end', () => {
+  const lastFrameAt = T('03:08:00.000');
+  const lastTxEndAt = T('03:09:00.000');           // a 60 s over, frames paused throughout
+  assert.strictEqual(S.helperStallReason({ now: T('03:09:03.000'), lastFrameAt, lastTxEndAt }), null, 'inside the 5 s grace');
+  assert.strictEqual(S.helperStallReason({ now: T('03:09:10.000'), lastFrameAt, lastTxEndAt }), null, '10 s after TX end: clock restarted at key-up');
+  assert.ok(S.helperStallReason({ now: T('03:09:16.000'), lastFrameAt, lastTxEndAt }), '16 s after key-up with still no frame');
+});
+
+check('#126: the watchdog-kill budget resets after a healthy minute of streaming', () => {
+  assert.strictEqual(typeof S.stallKillsAfterHealthy, 'function');
+  assert.strictEqual(S.stallKillsAfterHealthy({ kills: 3, streamingSince: T('03:00:00.000'), now: T('03:00:30.000') }), 3, '30 s is not long enough');
+  assert.strictEqual(S.stallKillsAfterHealthy({ kills: 3, streamingSince: T('03:00:00.000'), now: T('03:01:00.000') }), 0, 'a healthy minute clears it');
+  assert.strictEqual(S.stallKillsAfterHealthy({ kills: 3, streamingSince: 0, now: T('03:01:00.000') }), 3, 'not streaming: nothing to reset');
+});
+
+check('#126: main.js feeds TX state into the watchdog and keeps a separate kill budget', () => {
+  const start = mainSrc.slice(mainSrc.indexOf('function startYaesuScope()'), mainSrc.indexOf('function stopYaesuScope('));
+  assert.ok(/transmitting:\s*\w+/.test(start) && start.includes('lastTxEndAt'), 'helperStallReason gets no TX input');
+  assert.ok(start.includes('yaesuScopeTxNow()'), 'the watchdog does not read the TX state');
+  assert.ok(start.includes('YaesuScope.stallKillsAfterHealthy('), 'kill budget never resets');
+  assert.ok(/yaesuScopeStallKills\s*</.test(start), 'stall restarts are not bounded by their own budget');
+  const at = mainSrc.indexOf('function yaesuScopeTxNow(');
+  assert.ok(at > 0, 'yaesuScopeTxNow missing');
+  const tx = mainSrc.slice(at, at + 400);
+  assert.ok(tx.includes('_isEffectivelyTransmitting()') && tx.includes('cat._transmitting'), 'TX state must cover desktop/ECHOCAT PTT, CW and the rig-reported TX');
+});
+
 check('#126: every stop and every silent start says why in the log', () => {
   const stop = mainSrc.slice(mainSrc.indexOf('function stopYaesuScope('), mainSrc.indexOf('function yaesuScopeOnFrame('));
   assert.ok(/sendCatLog\('\[Scope\] stop/.test(stop), 'stopYaesuScope logs nothing about why');
