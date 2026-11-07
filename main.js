@@ -10484,9 +10484,15 @@ async function winlinkVaraConfigure({ kind: k, devices, inputLabel, outputLabel,
   const iniPath = path.join(path.dirname(bin.path), kind === 'fm' ? 'VARAFM.ini' : 'VARA.ini');
   let iniText = '';
   try { iniText = fs.readFileSync(iniPath, 'utf8'); } catch { iniText = ''; }
-  // POTACAT's own CAT/PTT/key ports are blanked wherever VARA's file names
-  // them: a VARA holding one fights rigctld for it (n5xhi's VARA FM on COM8).
-  const patched = VaraSetup.planVaraIniPatch(iniText, { inputName: plan.vara.inputName, outputName: plan.vara.outputName, port, freePorts: winlinkPotacatComPorts() });
+  // Port lines are never rewritten: VARA FM read a blanked one as COM0 and
+  // put up a box nobody can click from ECHOCAT (#183). A line naming one of
+  // POTACAT's own ports is reported here and the launch is refused with
+  // advice (winlinkVaraReady); VARA FM's PTT option is the operator's.
+  const patched = VaraSetup.planVaraIniPatch(iniText, { inputName: plan.vara.inputName, outputName: plan.vara.outputName, port, ownPorts: winlinkPotacatComPorts(), pttVia: VaraSetup.varaPttViaFor(kind) });
+  const portClash = VaraSetup.describePortConflicts(name, patched.conflicts);
+  if (portClash) winlinkLog(portClash.replace(/^.*? was not started: /, `${name}: `));
+  const noPort = VaraSetup.describeNoPort(name, VaraSetup.varaIniNoPortValues(patched.text));
+  if (noPort) winlinkLog(noPort);
   if (patched.changes.length) {
     try {
       if (iniText) fs.copyFileSync(iniPath, iniPath + '.potacat-' + new Date().toISOString().replace(/[:.]/g, '-') + '.bak');
@@ -10494,7 +10500,7 @@ async function winlinkVaraConfigure({ kind: k, devices, inputLabel, outputLabel,
     } catch (e) {
       return { ok: false, step: 'ini', error: `Could not write ${iniPath}: ${e.message}. Set VARA's SoundCard to ${plan.vara.inputName} / ${plan.vara.outputName} and PTT to VOX by hand.` };
     }
-    winlinkLog(`${name} configured for ${rig && rig.name ? rig.name : 'the radio'} (${route}: ${why}) — wrote ${iniPath}: ${patched.changes.map((c) => c.section + '.' + c.key + '=' + c.to + (c.to === '' && c.from ? ' (was ' + c.from + ', POTACAT\'s port)' : '')).join(', ')}`);
+    winlinkLog(`${name} configured for ${rig && rig.name ? rig.name : 'the radio'} (${route}: ${why}) — wrote ${iniPath}: ${patched.changes.map((c) => c.section + '.' + c.key + '=' + c.to).join(', ')}`);
   } else if (!quiet) {
     winlinkLog(`${name} already matches ${rig && rig.name ? rig.name : 'the radio'} (${route})`);
   }
