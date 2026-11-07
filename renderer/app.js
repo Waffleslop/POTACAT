@@ -12264,8 +12264,7 @@ document.addEventListener('keydown', (e) => {
   // F5 — Check for updates
   if (e.key === 'F5' && bareFKey && !e.shiftKey && !e.target.matches('input, select, textarea')) {
     e.preventDefault();
-    window.api.checkForUpdates();
-    showLogToast('Checking for updates...', { duration: 2000 });
+    window.api.checkForUpdates(); // main replies with update-check-status toasts
     return;
   }
   // F11 — Welcome screen
@@ -15949,14 +15948,19 @@ function showLogToast(message, opts) {
   const existing = document.querySelector('.log-toast');
   if (existing) existing.remove();
   const toast = document.createElement('div');
-  toast.className = 'log-toast' + (opts && opts.warn ? ' warn' : '') + (opts && opts.sticky ? ' sticky' : '');
+  toast.className = 'log-toast' + (opts && opts.warn ? ' warn' : '') + (opts && opts.sticky ? ' sticky' : '') +
+    (opts && opts.long && !(opts.warn || opts.sticky) ? ' long' : '');
   toast.textContent = message;
   if (opts && opts.sticky) {
     const dismiss = document.createElement('span');
     dismiss.className = 'log-toast-dismiss';
     dismiss.textContent = '\u00d7';
     toast.appendChild(dismiss);
-    toast.addEventListener('click', () => toast.remove());
+    toast.addEventListener('click', (ev) => {
+      // opts.onClick acts on a click on the text; the x only dismisses.
+      if (opts.onClick && ev.target !== dismiss) opts.onClick();
+      toast.remove();
+    });
   }
   document.body.appendChild(toast);
   if (!(opts && opts.sticky)) {
@@ -18863,6 +18867,20 @@ window.api.onUpdateAvailable((data) => {
 
 window.api.onUpdateUpToDate(() => {
   showLogToast('You\'re up to date!', { duration: 3000 });
+});
+
+// Manual check (Settings > Check for Updates, F5): the main process sends
+// checking -> up to date / available / error, and every step is shown
+// (GitHub #186 - the link used to just close Settings with nothing visible).
+window.api.onUpdateCheckStatus((s) => {
+  if (!s || !s.text) return;
+  showLogToast(s.text, {
+    warn: !!s.warn,
+    sticky: !!s.sticky,
+    long: !s.sticky && s.durationMs > 2200,
+    duration: s.durationMs || undefined,
+    onClick: s.openUrl ? () => window.api.openExternal(s.openUrl) : null,
+  });
 });
 
 window.api.onDownloadProgress(({ percent }) => {
