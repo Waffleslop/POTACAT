@@ -35,7 +35,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22' # same as release.yml; the suite needs ws and serialport from the lockfile
+      - name: npm ci (the suite requires ws, serialport and the other runtime deps)
+        run: npm ci --no-audit --no-fund
       - name: Run the whole npm test suite (scripts/run-tests.js)
         run: node scripts/run-tests.js
       - name: Validate SSTV style packs in data/sstv-packs
