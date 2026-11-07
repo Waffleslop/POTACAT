@@ -756,6 +756,7 @@
 <script src="../lib/rig-bands.js"></script>
 <script src="../lib/freq-paste.js"></script>
 <script src="../lib/mono-upmix.js"></script>
+<script src="../lib/vfo-ptt-mic.js"></script>
 <script>
 // --- State ---
 let currentFreqHz = 0;
@@ -2628,14 +2629,20 @@ async function pttStart() {
     if (stream) { try { stream.getTracks().forEach(t => t.stop()); } catch {} }
     if (ctx) { ctx.close().catch(() => {}); }
   };
+  // What this press did with the PC mic, for the one log line and notice
+  // the probe sends after the key-down (#170).
+  let stage = 'settings', settingsNow = null, failure = null, txPath = 'usb';
   {
     try {
       const s = await window.api.getSettings();
       if (stale()) return;
+      settingsNow = s;
+      stage = 'mic';
       const micConstraints = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
       if (pttMicDeviceId) micConstraints.deviceId = { exact: pttMicDeviceId };
       stream = await navigator.mediaDevices.getUserMedia({ audio: micConstraints });
       if (stale()) { abandon(); return; }
+      stage = 'graph';
 
       // Same rule the audio bridge uses to decide between VITA-49 direct
       // and the legacy DAX/CODEC sink path. Computed here from settings
@@ -2648,6 +2655,7 @@ async function pttStart() {
         (s.audioSource === 'icom-network');
 
       if (isDaxTxDirect && window.api.daxTxChunk) {
+        txPath = 'direct';
         // Direct path: mic → EQ → AudioWorklet → dax-tx-chunk IPC. Use a
         // 24 kHz context so the worklet's downsample logic matches the
         // bridge's. AudioWorklet module is shared with the bridge.
@@ -2676,8 +2684,10 @@ async function pttStart() {
         if (ctx.state === 'suspended') await ctx.resume();
         if (stale()) { abandon(); return; }
         if (s.remoteAudioOutput && ctx.setSinkId) {
+          stage = 'output';
           await ctx.setSinkId(s.remoteAudioOutput);
           if (stale()) { abandon(); return; }
+          stage = 'graph';
         }
         pttMicStream = stream;
         pttMicCtx = ctx;
@@ -2689,7 +2699,11 @@ async function pttStart() {
       }
     } catch (e) {
       console.error('[VFO] Mic PTT failed:', e.message);
-      if (stale()) { abandon(); return; }
+      // Close what this press opened: when setSinkId threw, the mic stayed
+      // open (unpublished, so pttStop never found it) until the window closed.
+      abandon();
+      if (stale()) return;
+      failure = { stage, error: (e && e.message) || String(e), errorName: (e && e.name) || '' };
     }
   }
   // Start the VU meter loop. Polls pre + post taps every 50 ms and
@@ -2703,6 +2717,7 @@ async function pttStart() {
   // hitting PTT in USB flipped the rig to PKTUSB, killing the rig mic and
   // shifting the dial by the filter-width diff. (2026-05.)
   window.api.nakedPtt(true);
+  vfoPttMicProbe(gen, settingsNow, stream, failure, txPath);
 }
 function pttStop() {
   if (!pttDown) return;
@@ -2732,6 +2747,58 @@ function pttStop() {
   if (pttDaxCtx) { pttDaxCtx.close().catch(() => {}); pttDaxCtx = null; }
   if (pttMicCtx) { pttMicCtx.close().catch(() => {}); pttMicCtx = null; }
   releaseTxMeter();
+}
+// #170 (KD9OUT, FT-710): PTT keyed the radio with no modulation and nothing
+// said which microphone the window had opened. One log line per press names
+// the input, the output it plays to and the level; a problem also shows a
+// notice here (once per problem and device per window). Reads the TX meter's
+// source analyser (attachTxMeter): nothing new in the transmit graph.
+const _vfoPttMicNoticed = new Set();
+function vfoPttMicProbe(gen, s, stream, failure, txPath) {
+  if (!s || s.remoteShack || !window.VfoPttMic || !window.api.vfoPttMicReport) return;
+  const t0 = performance.now();
+  const analyser = failure ? null : _txMeterAnalyser;
+  const buf = analyser ? new Float32Array(analyser.fftSize) : null;
+  let peak = 0, sampled = false;
+  const timer = setInterval(() => {
+    const heldMs = performance.now() - t0;
+    if (gen === pttGen && heldMs < 1500) {
+      if (!analyser) return;
+      try { analyser.getFloatTimeDomainData(buf); } catch { return; }
+      sampled = true;
+      for (let i = 0; i < buf.length; i++) { const v = Math.abs(buf[i]); if (v > peak) peak = v; }
+      return;
+    }
+    clearInterval(timer);
+    vfoPttMicReportNow(s, stream, failure, txPath, heldMs, sampled ? (peak > 0 ? 20 * Math.log10(peak) : -120) : null);
+  }, 100);
+}
+async function vfoPttMicReportNow(s, stream, failure, txPath, heldMs, peakDbfs) {
+  const track = stream && stream.getAudioTracks ? stream.getAudioTracks()[0] : null;
+  let devices = [];
+  try { devices = await navigator.mediaDevices.enumerateDevices(); } catch {}
+  const labelOf = (kind, id) => { const d = id && devices.find(x => x.kind === kind && x.deviceId === id); return d ? d.label : ''; };
+  const report = {
+    path: txPath,
+    micChosen: pttMicDeviceId || '',
+    inputId: (track && track.getSettings && track.getSettings().deviceId) || '',
+    inputLabel: (track && track.label) || labelOf('audioinput', pttMicDeviceId),
+    rigInputId: s.remoteAudioInput || '',
+    rigInputLabel: labelOf('audioinput', s.remoteAudioInput),
+    outputId: s.remoteAudioOutput || '',
+    outputLabel: labelOf('audiooutput', s.remoteAudioOutput),
+    peakDbfs, heldMs: Math.round(heldMs),
+    ...(failure || {}),
+  };
+  window.api.vfoPttMicReport(report);
+  const a = window.VfoPttMic.assess(report);
+  const key = a.problem + '|' + report.inputLabel + '|' + report.outputId;
+  if (!a.notice || _vfoPttMicNoticed.has(key)) return;
+  _vfoPttMicNoticed.add(key);
+  vfoLockToast.textContent = a.notice;
+  vfoLockToast.classList.add('show');
+  clearTimeout(_lockToastTimer);
+  _lockToastTimer = setTimeout(() => vfoLockToast.classList.remove('show'), 10000);
 }
 
 // --- TX EQ widget (Phase 1) ---
