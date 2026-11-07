@@ -6857,8 +6857,9 @@ async function echocatRefreshTailscaleStatus() {
     return;
   }
   if (!s.loggedIn) {
-    echocatTsStatus.innerHTML =
-      'Tailscale is installed but not signed in. Open the Tailscale app and sign in.';
+    // Main names the state (#132): signed in but turned off, awaiting
+    // approval, or really not signed in.
+    echocatTsStatus.textContent = s.notReady || 'Tailscale is installed but not signed in. Open the Tailscale app and sign in.';
     return;
   }
   if (!s.magicDNS) {
@@ -9110,7 +9111,7 @@ function _buildEchocatCardHTML(tunnel, tail, devices, web) {
       ? 'Available remotely via Tailscale (' + tail.hostname + ').'
       : 'Available remotely via Tailscale (tailnet connected; MagicDNS off, use the device IP).';
   } else if (pillCls === '' && tail && tail.installed && !tail.loggedIn) {
-    detail = 'Tailscale is installed but not connected. Sign in to your tailnet, or enable POTACAT Cloud Tunnel.';
+    detail = (tail.notReady || 'Tailscale is installed but not signed in.') + ' Or enable POTACAT Cloud Tunnel.';
   }
   if (pillCls === '' && !detail) {
     detail = 'Available only on the local network. Enable POTACAT Cloud Tunnel or connect to your tailnet for remote access.';

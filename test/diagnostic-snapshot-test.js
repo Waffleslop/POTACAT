@@ -242,6 +242,48 @@ console.log('\n=== reconnect counter + push-log exclusions ===');
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+console.log('\n=== tailscale section: daemon state and the probe (GitHub #132) ===');
+
+{
+  // "Installed but not signed in" on a Mac that WAS signed in could not be
+  // told apart from the real thing in a bug report: the section carried only
+  // installed/connected/hostname. Now it names the daemon state and which
+  // binary answered, with every candidate's answer — additive fields.
+  const raw = {
+    tailscale: {
+      installed: true, connected: false, hostname: null, peerCount: null,
+      backendState: 'NeedsLogin', state: 'needs-login',
+      probe: {
+        binary: '/opt/homebrew/bin/tailscale', error: '',
+        candidates: [
+          { path: '/Applications/Tailscale.app/Contents/MacOS/Tailscale', backendState: null, error: 'Tailscale CLI is not available in the App Store build' },
+          { path: '/opt/homebrew/bin/tailscale', backendState: 'NeedsLogin', error: '' },
+          { path: '/Users/casey/bin/tailscale', backendState: null, error: 'not found' },
+        ],
+      },
+    },
+  };
+  const s = assembleSections(raw, { redact: false });
+  eq(s.tailscale.backendState, 'NeedsLogin', 'tailscale.backendState');
+  eq(s.tailscale.state, 'needs-login', 'tailscale.state');
+  eq(s.tailscale.binary, '/opt/homebrew/bin/tailscale', 'tailscale.binary = the one that answered');
+  eq(s.tailscale.candidates.length, 3, 'every candidate is listed');
+  eq(s.tailscale.candidates[0].error, 'Tailscale CLI is not available in the App Store build', 'a candidate error is kept');
+  eq(s.tailscale.candidates[1].backendState, 'NeedsLogin', 'a candidate state is kept');
+  eq(Object.keys(s.tailscale).sort(), ['backendState', 'binary', 'candidates', 'connected', 'hostname', 'installed', 'peerCount', 'probeError', 'state'], 'old fields still present');
+
+  const r = assembleSections(raw, { redact: true });
+  eq(r.tailscale.candidates[2].path, '/Users/<redacted>/bin/tailscale', 'redact masks a home directory in a candidate path');
+  eq(r.tailscale.candidates[1].path, '/opt/homebrew/bin/tailscale', 'system paths are untouched');
+  eq(assembleSections({ tailscale: { probe: { binary: 'C:\\Users\\casey\\tailscale.exe', candidates: [] } } }, { redact: true }).tailscale.binary,
+    'C:\\Users\\<redacted>\\tailscale.exe', 'Windows home directories too');
+
+  const empty = assembleSections({}, {}).tailscale;
+  eq([empty.backendState, empty.state, empty.binary, empty.candidates, empty.probeError], [null, null, null, [], ''], 'defaults when main gathered nothing');
+  eq(assembleSections({ tailscale: { installed: true, connected: true, hostname: 'x.ts.net' } }, {}).tailscale.candidates, [], 'an old-shape raw still ships');
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 console.log('\n' + '='.repeat(50));
 console.log(`Results: ${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
