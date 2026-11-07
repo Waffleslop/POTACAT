@@ -117,7 +117,8 @@ test('wiring: the main window and the JTCAT window both run it on sound-card cap
   assert.ok(/jtcatArmStallWatch\(audioTrack\)/.test(app));
   assert.ok(/popoutArmStallWatch\(/.test(pop));
   // The timer stops with the capture, so a stopped capture is never rebuilt.
-  assert.ok(/function stopJtcatAudio\(\) \{\n  if \(_jtcatStallTimer\) \{ clearInterval\(_jtcatStallTimer\)/.test(app));
+  // (#133: stopJtcatAudio cancels a pending start, then this teardown runs.)
+  assert.ok(/function _teardownJtcatCapture\(\) \{\n  if \(_jtcatStallTimer\) \{ clearInterval\(_jtcatStallTimer\)/.test(app));
   assert.ok(/function stopPopoutAudio\(\) \{\n    if \(_popoutStallTimer\) \{ clearInterval\(_popoutStallTimer\)/.test(pop));
   // Not on the feeds main supplies.
   assert.ok(/!\(s\.audioSource === 'smartsdr' \|\| s\.audioSource === 'icom-network' \|\| s\.audioSource === 'yaesu-lan'\)/.test(app));
