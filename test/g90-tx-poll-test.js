@@ -12,7 +12,7 @@ const path = require('path');
 const { EventEmitter } = require('events');
 const { RigController } = require('../lib/rig-controller');
 const { RigctldCodec } = require('../lib/codecs/rigctld-codec');
-const { RIG_MODELS } = require('../lib/rig-models');
+const { RIG_MODELS, GENERIC_CAPS } = require('../lib/rig-models');
 
 let passed = 0, failed = 0;
 function test(name, fn) {
@@ -61,6 +61,45 @@ test('a real RigController + rigctld codec writes nothing during an over and res
     r._transmitting = false;
     advance(2_000);
     assert.ok(writes.length > before, 'polling resumes after TX');
+    r._stopPolling();
+  });
+});
+
+test('R2: no poll in the first 400 ms after an over ends (the G90 is still unkeying)', () => {
+  withFakeTimers((advance) => {
+    const transport = new EventEmitter();
+    transport.connect = () => {}; transport.disconnect = () => {}; transport.write = () => {};
+    const writes = [];
+    const r = new RigController(G90, transport, new RigctldCodec(G90, (d) => writes.push(String(d))));
+    r.connected = true; r._target = { host: '127.0.0.1', port: 4532 }; r._lastReadOkMs = Date.now();
+    r._startPolling();
+    r._transmitting = true;
+    advance(15_200); // ticks every 500 ms; the over ends 200 ms after one
+    r._transmitting = false;
+    const before = writes.length;
+    advance(300); // the tick 300 ms after key-up
+    assert.strictEqual(writes.length, before, `polled ${writes.slice(before).join(' | ')} while the radio unkeys`);
+    advance(500); // 800 ms after key-up
+    assert.ok(writes.length > before, 'polling (and the PTT read) resumes right after the grace');
+    r._stopPolling();
+  });
+});
+
+test('R2: a radio that answers CAT in TX keeps polling straight after an over', () => {
+  withFakeTimers((advance) => {
+    const transport = new EventEmitter();
+    transport.connect = () => {}; transport.disconnect = () => {}; transport.write = () => {};
+    const writes = [];
+    const model = GENERIC_CAPS.rigctld;
+    const r = new RigController(model, transport, new RigctldCodec(model, (d) => writes.push(String(d))));
+    r.connected = true; r._target = { host: '127.0.0.1', port: 4532 }; r._lastReadOkMs = Date.now();
+    r._startPolling();
+    r._transmitting = true;
+    advance(15_200);
+    r._transmitting = false;
+    const before = writes.length;
+    advance(300);
+    assert.ok(writes.length > before, 'no grace for a model without pollDuringTx:false');
     r._stopPolling();
   });
 });

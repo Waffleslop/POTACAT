@@ -3620,12 +3620,19 @@ function rigctldDiedOnItsOwn(code, signal) {
     sendCatLog(`[rigctld] rigctld stopped by itself (${how})`);
     return;
   }
-  if (_rigctldRespawns.length >= 3) {
+  // A release still owed to the radio (#109 R3): rigctld is the only way to
+  // send it, so this restart is not counted against the cap (still 2 s apart).
+  const releaseOwed = !!(_pttReleasePending || _remoteTxState);
+  if (_rigctldRespawns.length >= 3 && !releaseOwed) {
     sendCatLog(`[rigctld] rigctld stopped by itself again (${how}) — 3 restarts in 10 minutes, not restarting; reconnect from the rig menu`);
     return;
   }
-  _rigctldRespawns.push(now);
-  sendCatLog(`[rigctld] rigctld stopped by itself (${how}) while POTACAT was using it — starting it again`);
+  if (releaseOwed) {
+    sendCatLog(`[rigctld] rigctld stopped by itself (${how}) with a PTT release waiting — starting it again so the radio can be unkeyed (not counted against the 3-in-10-minutes limit)`);
+  } else {
+    _rigctldRespawns.push(now);
+    sendCatLog(`[rigctld] rigctld stopped by itself (${how}) while POTACAT was using it — starting it again`);
+  }
   setTimeout(() => {
     const t = settings.catTarget;
     if (!t || t.type !== 'rigctld' || rigctldProc) return; // changed or already back

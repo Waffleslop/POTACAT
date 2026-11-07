@@ -30,6 +30,19 @@ check('it is logged and restarted, at most 3 times in 10 minutes', () => {
   assert.ok(/connectCatSafe\('rigctld restart'\)/.test(fn));
   assert.ok(/t\.type !== 'rigctld' \|\| rigctldProc/.test(fn), 'not when the rig changed or one is already back');
 });
+check('#109 R3: a restart with a PTT release still owed is not counted against the cap', () => {
+  const fn = /function rigctldDiedOnItsOwn\(code, signal\) \{[\s\S]*?\n\}/.exec(main)[0];
+  assert.ok(/const releaseOwed = !!\(_pttReleasePending \|\| _remoteTxState\);/.test(fn), 'reads both release flags');
+  assert.ok(/_rigctldRespawns\.length >= 3 && !releaseOwed/.test(fn), 'the cap yields to an owed release');
+  assert.ok(/PTT release waiting/.test(fn), 'says so in the log');
+  assert.ok(/\} else \{\s*_rigctldRespawns\.push\(now\);/.test(fn), 'only a restart with nothing owed is counted');
+  assert.ok(/setTimeout\(\(\) => \{[\s\S]*?\}, 2000\);/.test(fn), 'still 2 s apart');
+});
+check('#109 R2: a pollDuringTx:false radio gets a short grace after an over', () => {
+  const rc = readSrc(path.join(__dirname, '..', 'lib/rig-controller.js'));
+  assert.ok(/const TX_TAIL_GRACE_MS = 400;/.test(rc));
+  assert.ok(/pollDuringTx === false && this\._txEndedAt && Date\.now\(\) - this\._txEndedAt < TX_TAIL_GRACE_MS\) return;/.test(rc));
+});
 check('ECHOCAT cw-config: an unchanged speed sends nothing', () => {
   const h = /remoteServer\.on\('cw-config'[\s\S]*?\n  \}\);/.exec(main)[0];
   assert.ok(/if \(wpm === settings\.cwWpm && \(!cat \|\| cat\._cwWpm === wpm\)\) return;/.test(h));
