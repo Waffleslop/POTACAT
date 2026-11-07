@@ -3994,10 +3994,17 @@ function sendCatStatus(s) {
           });
         }
       } else {
-        sendCatLog('[CAT] Radio link restored.');
+        // The transport's connect flips the status up before the radio has
+        // said a byte; only a reply within the poll window is a restored
+        // LINK (#190: "Radio link restored." logged, then 10 s of silence and
+        // "RADIO LINK LOST" — the port had reopened, the radio was not there).
+        // Only a RigController knows; the Flex/CatClient paths keep the line.
+        const answered = !(cat && typeof cat.radioPowerEvidence === 'function') || cat.radioPowerEvidence() === true;
+        if (answered) sendCatLog('[CAT] Radio link restored.');
+        else sendCatLog('[CAT] Port reopened — waiting for the radio to answer (the link counts as restored at its first reply).');
         try { yaesuScopeNoteRadioBack('radio link restored'); } catch { /* no scope */ }
         if (win && !win.isDestroyed()) {
-          win.webContents.send('app-notice', { message: 'Radio link restored', duration: 4000 });
+          win.webContents.send('app-notice', { message: answered ? 'Radio link restored' : 'Port reopened — waiting for the radio to answer', duration: 4000 });
         }
         // If a CW key-line drop couldn't reach the port during the loss (the
         // device vanished mid-key), the rig can be stranded in TX. Now that the
@@ -7998,6 +8005,10 @@ function connectCatWithStartupDelay() {
 // in startup.log, invisible next to the Settings panel the user just
 // touched. async functions never throw synchronously, so no try needed.
 function connectCatSafe(context) {
+  // Say why before the port is touched: a reconnect that nothing explains
+  // reads like the radio dropped ("Connecting to Yaesu on /dev/ttyUSB0" twice
+  // in a row, #190) when it was a Settings save or a trial.
+  sendCatLog(`[CAT] ${cat ? 'Reconnecting' : 'Connecting'} (${context})`);
   connectCat().catch((err) => sendCatLog(`[CAT] Connect failed (${context}): ${err.message || err}`));
 }
 
@@ -17904,6 +17915,22 @@ function releaseJtcatForSstv() {
   return true;
 }
 
+/**
+ * A tx-start the dispatch below REFUSED (wrong band, SWR latch, Mercury owns
+ * the radio, licence, watchdog...). For FT8/FT4/PSK/JTTY the engine's
+ * txRefused is exactly txComplete — the slot is gone. For JS8 it is not:
+ * txComplete on an empty queue announces js8-tx-done, and the log said
+ * "[JS8] message fully transmitted: HB EM00" 1 ms after "TX blocked" (#190,
+ * FT-891 on Ubuntu). The refusal reason reaches the js8-tx-refused line.
+ */
+function jtcatRefuseTx(reason) {
+  try {
+    if (!ft8Engine) return;
+    if (typeof ft8Engine.txRefused === 'function') ft8Engine.txRefused(reason);
+    else if (ft8Engine._txActive) ft8Engine.txComplete();
+  } catch {}
+}
+
 function startJtcat(mode) {
   stopJtcat();
   // SSTV and JTCAT can't share the audio input device — getUserMedia
@@ -18058,6 +18085,7 @@ function startJtcat(mode) {
   ft8Engine.removeAllListeners('psk-text');
   ft8Engine.removeAllListeners('js8-rx');
   ft8Engine.removeAllListeners('js8-tx-done');
+  ft8Engine.removeAllListeners('js8-tx-refused');
   ft8Engine.removeAllListeners('decode-ran');
 
   // JS8 continuous RX frames. Like psk-text, deliberately NOT routed through
@@ -18081,6 +18109,17 @@ function startJtcat(mode) {
   });
   ft8Engine.on('js8-tx-done', ({ message }) => {
     sendCatLog(`[JS8] message fully transmitted: ${message}`);
+    js8PushStatus();
+  });
+  // The dispatch refused the tx-start (its own "[JTCAT] TX blocked" line says
+  // why at length): the message never went out and its queue is dropped, so
+  // this cycle's heartbeat is gone too (#190 — this used to read "fully
+  // transmitted").
+  ft8Engine.on('js8-tx-refused', ({ message, reason, framesDropped }) => {
+    const hb = /^HB\b/i.test(String(message || ''));
+    sendCatLog(`[JS8] message NOT transmitted: ${message} (blocked: ${reason})` +
+      (hb ? ` — this heartbeat is dropped${js8HbEnabled ? `; the next auto-heartbeat is due in ${Math.max(1, Math.round((_js8HbLastSent + js8HbIntervalMin() * 60000 - Date.now()) / 60000))} min` : ''}` :
+        (framesDropped ? ` — ${framesDropped} queued frame${framesDropped === 1 ? '' : 's'} dropped; send it again once the block is cleared` : '')));
     js8PushStatus();
   });
   if (ft8Engine._mode === 'JS8') {
@@ -18645,14 +18684,14 @@ function startJtcat(mode) {
     // cleanly. tx-end is guarded to NOT drop Mercury's PTT in this case.
     if (radioOwner === 'mercury') {
       sendCatLog('[JTCAT] TX blocked — Mercury (HF data) owns the radio. Stop Mercury to transmit FT8.');
-      try { if (ft8Engine && ft8Engine._txActive) ft8Engine.txComplete(); } catch {}
+      jtcatRefuseTx('Mercury (HF data) owns the radio');
       return;
     }
     // SWR-guard latch: a prior transmission tripped the over-SWR abort and
     // nothing has plausibly fixed the match yet (no ATU run / band change).
     if (_swrTripped) {
       sendCatLog('[JTCAT] TX blocked — SWR guard tripped. Run the ATU or change bands to re-enable TX.');
-      try { if (ft8Engine && ft8Engine._txActive) ft8Engine.txComplete(); } catch {}
+      jtcatRefuseTx('SWR guard tripped');
       jtcatAbandonQsoBehindSwrLatch(ft8Engine); // a shell that cannot key never reaches its retry cap
       return;
     }
@@ -18681,16 +18720,17 @@ function startJtcat(mode) {
       }
       // ...and on the ECHOCAT device: a web/phone-owned session was refused in silence.
       if (remoteServer && remoteServer.hasClient()) remoteServer.broadcastJtcatQsoState({ phase: 'error', error: dialMsg });
-      try { if (ft8Engine && ft8Engine._txActive) ft8Engine.txComplete(); } catch {}
+      jtcatRefuseTx('the radio is on ' + (_currentFreqHz / 1e6).toFixed(3) + ' MHz' + bandOf(_currentFreqHz) +
+        ', JTCAT on ' + (_jtcatExpectedDialHz / 1e6).toFixed(3) + ' MHz' + bandOf(_jtcatExpectedDialHz));
       return;
     }
     // The operator's licence class, before anything is keyed or played.
     if (ownTxPrivilegeRefused('DATA')) {
-      try { if (ft8Engine && ft8Engine._txActive) ft8Engine.txComplete(); } catch {}
+      jtcatRefuseTx('outside your licence privileges');
       return;
     }
     if (jtcatTxWatchdogTripped(ft8Engine && ft8Engine._mode)) {
-      try { if (ft8Engine && ft8Engine._txActive) ft8Engine.txComplete(); } catch {}
+      jtcatRefuseTx('the JTCAT TX watchdog tripped');
       jtcatTxWatchdogStop();
       return;
     }
@@ -18732,7 +18772,7 @@ function startJtcat(mode) {
       sendCatLog(`[Icom-Network-Audio] TX aborted before PTT: RS-BA1 TX audio is not ready or was not negotiated (transport=${connected}, txReady=${txReady}). CAT/RX can still work while TX audio is unavailable.`);
       if (ft8Engine && ft8Engine._txActive) {
         setTimeout(() => {
-          if (ft8Engine && ft8Engine._txActive) ft8Engine.txComplete();
+          jtcatRefuseTx('Icom Network TX audio is not ready');
         }, 0);
       }
       return;
@@ -18752,7 +18792,7 @@ function startJtcat(mode) {
     // after it. A dial that cannot move means audio rendered for the wrong
     // dial: skip this transmission rather than send it off frequency.
     if (!fakeItShiftForTx(data)) {
-      try { if (ft8Engine && ft8Engine._txActive) ft8Engine.txComplete(); } catch {}
+      jtcatRefuseTx('the split (Fake It) dial could not move');
       return;
     }
     handleRemotePtt(true, { audio: true, emission: 'DATA', txKind: jtcatTxKind() });
@@ -18827,7 +18867,7 @@ function startJtcat(mode) {
       // catches encoder bugs that would otherwise key the radio with a silent carrier.
       if (txAudio.outputPeak < 0.01) {
         logIcomNetworkAudio(`[Icom-Network-Audio] TX aborted: conditioned audio peak ${txAudio.outputPeak.toFixed(4)} is too low (encoder produced silent waveform?)`);
-        if (ft8Engine && ft8Engine._txActive) ft8Engine.txComplete();
+        if (ft8Engine && ft8Engine._txActive) jtcatRefuseTx('the TX audio was silent');
         else handleRemotePtt(false);
         return;
       }

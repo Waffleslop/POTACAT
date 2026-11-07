@@ -453,6 +453,7 @@ const TESTS = [
   'test/lan-review-test.js', // VFO speaker plays LAN audio; a reopened port clears POTACAT's old close; FT-710 named; LAN scope text; LAN transport window and strangers
   'test/guest-pass-full-power-test.js', // a Guest Pass cap on a rig with Full power (W): real watts throughout; a 5 W rig transmits, a 100 W rig is capped
   'test/pacing-vs-mode-note-test.js', // a radio that drops replies gets only the pacing line; a wrong-model radio only the mode note
+  'test/jtcat-tx-refused-test.js', // #190: a refused JS8 tx-start is not "fully transmitted"; FT8 refusal events identical to master; HALT never hidden by mode
   'test/run-tests-runner-test.js', // #175: this runner keeps going past a failing file, names every failure, exits non-zero
   'test/update-check-feedback-test.js', // #186: a manual Check for Updates always ends in a visible message (checking, up to date, found, or the error + download page)
 ];
