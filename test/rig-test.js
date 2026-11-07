@@ -2459,16 +2459,57 @@ test('civ: a GOOD frequency frame still parses and logs no baud suspicion', () =
 });
 
 test('mode-silence watchdog: answering rig that never reports mode logs once', () => {
-  const { rig } = stubRig();
+  const { rig, codec } = stubRig();
   const logs = [];
   rig.on('log', (m) => logs.push(m));
   rig._debug = true;
-  rig._lastReadOkMs = Date.now();                                        // freq/meters ARE answering
   rig._pollStartedMs = Date.now() - (RigController.MODE_SILENCE_MS + 1000);
+  codec.emit('frequency', 14074000);                                     // freq/meters ARE answering (a real reply)
   rig._checkModeSilence();
   rig._checkModeSilence();
   const hits = logs.filter((l) => l.includes('never reported its MODE'));
   assert.strictEqual(hits.length, 1, `got: ${logs.join(' | ')}`);
+});
+
+// #190 (FT-891 on Ubuntu): the radio answered NOTHING for 2.5 minutes, and
+// 21 s after connect the log said it was "answering polls but has never
+// reported its MODE" and blamed the rig model. _lastReadOkMs is refreshed by
+// our own connect, poll restart and TX end too; only _lastAnswerMs is a reply.
+test('mode-silence watchdog: a radio that has never answered gets no MODE note (connect/tune/TX refreshed the read clock)', () => {
+  const { rig } = stubRig();
+  const logs = [];
+  rig.on('log', (m) => logs.push(m));
+  rig._debug = true;
+  rig._lastReadOkMs = Date.now();                                        // what connect, _startPolling and TX end do
+  rig._pollStartedMs = Date.now() - (RigController.MODE_SILENCE_MS + 60000);
+  rig._checkModeSilence();
+  assert.strictEqual(logs.filter((l) => l.includes('never reported its MODE')).length, 0, `got: ${logs.join(' | ')}`);
+  assert.strictEqual(rig._modeSilenceLogged, false, 'the verdict is still open: a later answer without a mode may still earn the note');
+});
+
+test('mode-silence watchdog: an answer from BEFORE this polling run does not count', () => {
+  const { rig } = stubRig();
+  const logs = [];
+  rig.on('log', (m) => logs.push(m));
+  rig._debug = true;
+  rig._pollStartedMs = Date.now() - (RigController.MODE_SILENCE_MS + 60000);
+  rig._lastAnswerMs = rig._pollStartedMs - 5000;                        // the previous session's reply
+  rig._lastReadOkMs = Date.now();
+  rig._checkModeSilence();
+  assert.strictEqual(logs.filter((l) => l.includes('never reported its MODE')).length, 0, `got: ${logs.join(' | ')}`);
+});
+
+test('mode-silence watchdog: the note names what DID answer, not just "polls"', () => {
+  const { rig, codec } = stubRig();
+  const logs = [];
+  rig.on('log', (m) => logs.push(m));
+  rig._debug = true;
+  rig._pollStartedMs = Date.now() - (RigController.MODE_SILENCE_MS + 1000);
+  codec.emit('smeter', 5);
+  rig._checkModeSilence();
+  const hit = logs.find((l) => l.includes('never reported its MODE'));
+  assert.ok(hit, `got: ${logs.join(' | ')}`);
+  assert.ok(/answers other polls \(frequency, meters\)/.test(hit), hit);
 });
 
 test('mode-silence watchdog: silent BEFORE the window is not yet a fault', () => {
