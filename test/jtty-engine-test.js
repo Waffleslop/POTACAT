@@ -278,7 +278,7 @@ function onAir(pcm, leadSec, tailSec) {
     const jttySites = (main.match(/=== 'JTTY'\)/g) || []).length + (main.match(/=== 'JTTY';/g) || []).length;
     assert.ok(jttySites >= pskSites, `JTTY appears beside every startsWith('PSK') mapping (${jttySites} vs ${pskSites})`);
     assert.ok(mgr.includes("config.mode === 'JTTY'") && mgr.includes('new JttyEngine({ profile: config.jttyProfile })'), 'manager branch');
-    assert.ok(/'js8-tx-done', 'jtty-rx', 'encode-failed'/.test(mgr), 'manager forwards jtty-rx');
+    assert.ok(/for \(const evt of \[[^\]]*'jtty-rx'[^\]]*\]\)/.test(mgr), 'manager forwards jtty-rx');
     for (const k of ['jtcatJttySend', 'jtcatJttySetProfile', 'jtcatJttyValidate', 'onJtcatJttyRx']) assert.ok(pre.includes(k), 'preload ' + k);
     assert.ok(main.includes("ipcMain.handle('jtcat-jtty-validate'"), 'composer preview IPC');
     assert.ok(main.includes('setTxMessage(t, { profile: p.profile })'), 'Send carries a per-message profile');
