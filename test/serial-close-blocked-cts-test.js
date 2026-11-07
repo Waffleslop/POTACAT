@@ -20,12 +20,20 @@ class FakeSerialPort extends EventEmitter {
     this.calls = [];
     this.pendingWrite = false;
     this.closeHangs = false;
+    this.ctsHigh = false; // false: the far end never raises CTS (YT-1200)
     ports.push(this);
   }
   open(cb) { this.isOpen = true; setImmediate(() => { cb && cb(null); this.emit('open'); }); }
   write() { this.calls.push('write'); if (this.opts.rtscts) this.pendingWrite = true; return true; }
   set(lines, cb) { this.calls.push('set'); cb && setImmediate(() => cb(null)); }
-  get(cb) { setImmediate(() => cb(null, { cts: false })); }
+  get(cb) { setImmediate(() => cb(null, { cts: this.ctsHigh })); }
+  drain(cb) {
+    // Waits for pending writes: done at once with CTS high, never with CTS low.
+    this.calls.push('drain');
+    if (this.ctsHigh || !this.pendingWrite) {
+      setImmediate(() => { this.pendingWrite = false; this.calls.push('drained'); cb && cb(null); });
+    }
+  }
   flush(cb) {
     // PurgeComm(PURGE_TXABORT|...) / tcflush: aborts the write stuck on CTS.
     this.calls.push('flush');
@@ -53,7 +61,8 @@ async function t(name, fn) {
 const tick = () => new Promise(r => setImmediate(r));
 async function openTransport(handshake, portName) {
   const tr = new SerialTransport();
-  tr._closeTimeoutMs = 150;
+  tr._closeTimeoutMs = 400;
+  tr._drainTimeoutMs = 50;
   const logs = [];
   tr.on('log', (m) => logs.push(m));
   tr.on('error', () => {});
@@ -69,15 +78,31 @@ process.on('exit', () => { if (!finished) { console.log('  FAIL a disconnect nev
 (async () => {
   console.log('serial close with a write blocked on CTS (#174):');
 
-  await t('hardware: a write stuck on CTS is flushed before close, and close finishes', async () => {
-    const { tr, port } = await openTransport('hardware', 'COM21');
+  await t('hardware, working CTS (TS-590/990/2000): the last write drains, no flush, close as before', async () => {
+    const { tr, logs, port } = await openTransport('hardware', 'COM20');
+    port.ctsHigh = true;
+    tr.write('RX;');
+    const t0 = Date.now();
+    assert.strictEqual(await tr.disconnect(), true, 'resolves true: closed');
+    assert.ok(Date.now() - t0 < 45, 'closed without waiting out the drain cap');
+    assert.ok(!port.calls.includes('flush'), 'the receive command is never discarded: ' + port.calls.join(','));
+    const di = port.calls.indexOf('drained'), ci = port.calls.indexOf('close');
+    assert.ok(di >= 0 && ci > di, 'drained before close: ' + port.calls.join(','));
+    assert.ok(!logs.some(l => /waiting on CTS/.test(l)), logs.join(' | '));
+    assert.strictEqual(port.isOpen, false);
+  });
+
+  await t('hardware, CTS never raised: drain cap, one log line, flush, then close', async () => {
+    const { tr, logs, port } = await openTransport('hardware', 'COM21');
     tr.write('FA;');
     assert.strictEqual(port.pendingWrite, true);
     const t0 = Date.now();
     assert.strictEqual(await tr.disconnect(), true, "resolves true: closed");
-    assert.ok(Date.now() - t0 < 140, 'closed without waiting out the timeout');
-    const fi = port.calls.indexOf('flush'), ci = port.calls.indexOf('close');
-    assert.ok(fi >= 0 && ci > fi, 'flush before close: ' + port.calls.join(','));
+    const took = Date.now() - t0;
+    assert.ok(took >= 45 && took < 390, 'after the drain cap, inside the close cap: ' + took);
+    const di = port.calls.indexOf('drain'), fi = port.calls.indexOf('flush'), ci = port.calls.indexOf('close');
+    assert.ok(di >= 0 && fi > di && ci > fi, 'drain, flush, close: ' + port.calls.join(','));
+    assert.strictEqual(logs.filter(l => /COM21: a write is still waiting on CTS; discarding it so the port can close/.test(l)).length, 1, logs.join(' | '));
     assert.strictEqual(port.isOpen, false);
     assert.strictEqual(recentOwnClose('COM21').closed, true);
   });
@@ -89,7 +114,7 @@ process.on('exit', () => { if (!finished) { console.log('  FAIL a disconnect nev
     const t0 = Date.now();
     assert.strictEqual(await tr.disconnect(), false, "resolves false: still closing at the timeout");
     const took = Date.now() - t0;
-    assert.ok(took >= 140 && took < 1000, 'resolved at the timeout, took ' + took);
+    assert.ok(took >= 390 && took < 1500, 'resolved at the timeout, took ' + took);
     assert.ok(logs.some(l => /COM22.*did not finish closing/.test(l)), logs.join(' | '));
     assert.strictEqual(recentOwnClose('COM22').closed, false, 'still remembered as ours (Access denied hint)');
   });
@@ -112,7 +137,7 @@ process.on('exit', () => { if (!finished) { console.log('  FAIL a disconnect nev
       const { tr, port } = await openTransport(mode, 'COM3' + (mode ? 1 : 0));
       tr.write('FA;');
       await tr.disconnect();
-      assert.ok(!port.calls.includes('flush'), port.calls.join(','));
+      assert.ok(!port.calls.includes('flush') && !port.calls.includes('drain'), port.calls.join(','));
       assert.deepStrictEqual(port.calls.slice(-2), ['set', 'close']);
       assert.strictEqual(port.isOpen, false);
     });
