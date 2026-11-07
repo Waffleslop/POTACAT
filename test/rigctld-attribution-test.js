@@ -34,11 +34,13 @@ function test(name, fn) {
 }
 
 const MODEL = { brand: 'Icom', protocol: 'rigctld', caps: {} };
+const KENWOOD = { brand: 'Kenwood', protocol: 'rigctld', caps: {} }; // raw `w PCnnn;` power writes
+const YAESU = { brand: 'Yaesu', protocol: 'rigctld', caps: {} };     // raw `w` passthrough for everything but the basics
 
-function makeCodec() {
+function makeCodec(model = MODEL) {
   const writes = [];
   const events = [];
-  const codec = new RigctldCodec(MODEL, (d) => writes.push(String(d)));
+  const codec = new RigctldCodec(model, (d) => writes.push(String(d)));
   for (const ev of ['smeter', 'swr', 'alc', 'ptt', 'vfo', 'split', 'frequency', 'mode', 'nb']) {
     codec.on(ev, (v) => events.push([ev, v]));
   }
@@ -245,6 +247,117 @@ test('a server that rejects `T` is named once as unable to key (KM4CFT, a logger
   assert.ok(/if \(state && cat\.pttUnavailable\) \{\s*sendCatLog\('PTT FAILED: this rigctld server has no PTT/.test(main));
   assert.ok(/cat\.on\('ptt-unavailable'/.test(main), 'the rigctld Network branch raises a notice');
   void events;
+});
+
+// #128 (N5XHI, FT-857 through Hamlib with RTS PTT, 1.14.0): "PTT FAILED: this
+// rigctld server has no PTT (it answered RPRT -11 to "T")" before every
+// key-down of a packet session while the radio keyed every time. The verdict
+// had been reached by a reply that was never an answer to `T`: a raw `w`
+// write took no slot in the queue, so its rejection shifted onto the `T 1`
+// behind it; and ANY failure code on a `T` entry counted, so the RPRT -1 an
+// FT-857 answers to the TX-time `l ALC` poll latched it whenever the queue
+// was one entry out of step.
+test('#128: a rejected raw write ahead of `T 1` is blamed on the raw write, never on PTT', () => {
+  const { codec, writes } = makeCodec(KENWOOD);
+  let unavailable = 0;
+  codec.on('ptt-unavailable', () => unavailable++);
+  codec.setTxPowerWatts(50);   // raw `w PC050;` — used to take no slot in the queue
+  codec.setTransmit(true);
+  assert.deepStrictEqual(writes, ['w PC050;\n', 'T 1\n']);
+  codec.onData('RPRT -11\nRPRT 0\n');   // the backend rejects the raw write; PTT is fine
+  assert.strictEqual(unavailable, 0, 'the -11 answered the raw write');
+  assert.strictEqual(codec._pending.length, 0, 'both entries consumed');
+});
+
+test('#128: only RPRT -11 is a verdict — the -1 an FT-857 answers to `l ALC` is not, even one entry out of step', () => {
+  const { codec } = makeCodec();
+  let unavailable = 0;
+  codec.on('ptt-unavailable', () => unavailable++);
+  codec.getMode();             // an `m` whose reply never comes
+  codec.setTransmit(true);     // T 1 -> RPRT 0
+  codec.getAlc();              // l ALC -> RPRT -1 (ft857 get_level has no ALC)
+  codec.onData('RPRT 0\nRPRT -1\n');
+  assert.strictEqual(unavailable, 0);
+});
+
+test('#128: a raw write the radio never answered does not swallow PTT\'s RPRT 0', () => {
+  const { codec, writes } = makeCodec(YAESU);
+  codec.sendRaw('AC011;');     // the ATU tune on a band change: rigctld prints nothing for a `w` that worked
+  codec.setTransmit(true);
+  assert.deepStrictEqual(writes, ['w AC011;\n', 'T 1\n']);
+  codec.onData('RPRT 0\n');
+  assert.strictEqual(codec._pending.length, 0, 'the RPRT 0 is T 1\'s; the raw entry goes with it');
+  // ...while a rejection IS the raw write's own answer.
+  codec.sendRaw('AC011;');
+  codec.setTransmit(true);
+  codec.onData('RPRT -11\nRPRT 0\n');
+  assert.deepStrictEqual(codec._pending, []);
+});
+
+test('#128: a raw read\'s text reply consumes its raw entry, so a rejection right behind it is blamed on the right command', () => {
+  // Kenwood through rigctld: `w PC;` runs every ~1.5 s at the power slider,
+  // the radio answers "PC100;" (no RPRT), and the next failed query must
+  // not be blamed on that already-answered raw read.
+  const { codec, writes, events } = makeCodec(KENWOOD);
+  let unavailable = 0;
+  codec.on('ptt-unavailable', () => unavailable++);
+  const power = [];
+  codec.on('power', (w) => power.push(w));
+  codec.getPower();          // w PC;
+  codec.getFrequency();      // f
+  assert.deepStrictEqual(writes, ['w PC;\n', 'f\n']);
+  codec.onData('PC100;\nRPRT -11\n');
+  assert.deepStrictEqual(power, [100]);
+  assert.deepStrictEqual(codec._pending, [], 'PC100; consumed the raw entry; the -11 consumed `f`');
+  assert.strictEqual(unavailable, 0);
+  assert.strictEqual(valueOf(events, 'frequency'), undefined);
+  // The same for a queryRaw read, whose reply is matched by prefix.
+  const c2 = makeCodec(YAESU);
+  c2.codec.queryRaw('AC;', { prefix: 'AC', timeoutMs: 500 }).catch(() => {});
+  c2.codec.getFrequency();
+  c2.codec.onData('AC001;\nRPRT -11\n');
+  assert.deepStrictEqual(c2.codec._rawQueries, [], 'the raw query was answered');
+  assert.deepStrictEqual(c2.codec._pending, []);
+  // A text reply with no raw entry outstanding removes nothing else.
+  const c3 = makeCodec(KENWOOD);
+  c3.codec.getFrequency();
+  c3.codec.onData('PC050;\n');
+  assert.strictEqual(c3.codec._pending.length, 1, 'the `f` entry is untouched');
+});
+
+test('#128: entries nothing answered in 3 s are evicted before an RPRT is blamed', () => {
+  const { codec, writes } = makeCodec();
+  codec.getMode();
+  codec._pending[0].ts -= 3500;   // a lost reply from the last cycle
+  codec.getVfoSplit();
+  codec.onData('RPRT -11\n');     // the backend has no get_vfo
+  writes.length = 0;
+  codec.getVfoSplit();
+  assert.deepStrictEqual(writes, ['s\n'], 'the -11 reached `v`, which is now latched off');
+});
+
+test('#128: the verdict names what else was in flight, and a `T` the server accepts withdraws it', () => {
+  const { codec, logs } = makeCodec();
+  let unavailable = 0, available = 0;
+  codec.on('ptt-unavailable', () => unavailable++);
+  codec.on('ptt-available', () => available++);
+  codec.setTransmit(true);
+  codec.getSmeter();
+  codec.onData('RPRT -11\n');
+  assert.strictEqual(unavailable, 1);
+  assert.ok(logs.some((l) => /cannot key the radio/.test(l) && /also in flight: l STRENGTH/.test(l)), logs.join('\n'));
+  codec.onData('-30\n');          // the S-meter reply behind it still lands
+  codec.setTransmit(false);
+  codec.onData('RPRT 0\n');
+  assert.strictEqual(available, 1, 'an accepted T withdraws the verdict');
+  assert.ok(logs.some((l) => /withdrawn/.test(l)));
+  codec.setTransmit(true);
+  codec.onData('RPRT -11\n');
+  assert.strictEqual(unavailable, 2, 'a later rejection is a new verdict, said again');
+  // Wiring: the controller drops its flag on the withdrawal.
+  const path = require('path');
+  const rc = readSrc(path.join(__dirname, '..', 'lib', 'rig-controller.js'));
+  assert.ok(/this\._codec\.on\('ptt-available', \(\) => \{ this\.pttUnavailable = false;/.test(rc));
 });
 
 console.log(`\nResults: ${passed} passed, ${failed} failed`);

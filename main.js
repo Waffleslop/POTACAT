@@ -435,6 +435,7 @@ const WinlinkStateLib = require('./lib/winlink-state');
 const { createRigctldServer } = require('./lib/rigctld-server');
 const ArdopProcess = require('./lib/ardop-process');
 const DirewolfProcess = require('./lib/direwolf-process');
+const DirewolfAgwMonitor = require('./lib/direwolf-agw-monitor');
 const VaraProcess = require('./lib/vara-process');
 const VaraSetup = require('./lib/vara-setup');
 const WinlinkModes = require('./lib/winlink-modes');
@@ -1885,7 +1886,9 @@ let _winlinkShimRefusedAt = 0;  // last "no session" PTT refusal (rate-limits th
 let _winlinkUnkeyTimer = null;  // the modem asked for PTT off; the tail of its audio is still in POTACAT's pipeline
 let ardopProc = null;           // ardopcf for an ARDOP session
 let direwolfProc = null;        // Dire Wolf for a packet (AX.25) session
-let _direwolfHeard = 0;         // frames Dire Wolf decoded from the radio since it started
+let _direwolfHeard = 0;         // frames Dire Wolf decoded from the radio since it started (its stdout "audio level" lines)
+let _direwolfMonitor = null;    // our client on Dire Wolf's AGW port in monitor mode (lib/direwolf-agw-monitor.js)
+let _direwolfMonitorHeard = 0;  // frames the monitor saw the radio receive this session (stdout never reaches us on Windows, #128)
 let winlinkAudio = null;        // ModemAudioServer: the modem's audio over POTACAT's radio link (no sound card)
 let winlinkTxActive = false;    // Pat has the transmitter keyed (via the shim)
 let _winlinkTxFailsafeTimer = null;
@@ -11086,6 +11089,7 @@ async function startWinlinkShim() {
         // own clock (audio_tcp.c / SocketAudio.c), so this is only POTACAT's
         // share of the latency.
         if (_winlinkUnkeyTimer) return true;
+        _winlinkTxBurst.unkeyAsked();
         _winlinkUnkeyTimer = setTimeout(() => { _winlinkUnkeyTimer = null; winlinkUnkeyNow(); }, winlinkUnkeyDrainMs());
         return true;
       }
@@ -11108,12 +11112,14 @@ async function startWinlinkShim() {
         // restarted by hand: each re-keyed frame is a new over, not one long
         // one (transmit-safety review).
         clearTimeout(_winlinkUnkeyTimer); _winlinkUnkeyTimer = null;
+        _winlinkTxBurst.rekeyed();
         try { txLimit().disarm(); txLimit().arm('winlink'); } catch (e) { console.error('[TX LIMIT]', e); }
         armWinlinkTxFailsafe();
         winlinkSessionTouch();
         return true;
       }
       winlinkTxActive = true;
+      _winlinkTxBurst.keyDown();
       const icom = detectRigType() === 'icom' || (getActiveRigModel()?.brand === 'Icom');
       if (settings.audioSource === 'icom-network') icomNetworkVoiceTx(true, 'Winlink');
       try { handleRemotePtt(true, { audio: true, forceDataMode: icom, emission: 'DATA', txKind: 'winlink' }); } catch (e) { winlinkLog(`PTT failed: ${e.message}`); }
@@ -11132,8 +11138,14 @@ function winlinkUnkeyNow() {
   if (_winlinkUnkeyTimer) { clearTimeout(_winlinkUnkeyTimer); _winlinkUnkeyTimer = null; }
   clearWinlinkTxFailsafe();
   if (winlinkTxActive) { winlinkTxActive = false; try { handleRemotePtt(false); } catch {} }
+  winlinkTxBurstEnd();
   if (settings.audioSource === 'icom-network') icomNetworkVoiceTx(false, 'Winlink');
   winlinkState.setSession({ ptt: false }); winlinkSessionPush();
+}
+/** One line per over — when the modem keyed, when its audio ran and how loud, when it unkeyed (lib/modem-tx-burst.js, #128). */
+function winlinkTxBurstEnd() {
+  const burst = _winlinkTxBurst.keyUp({ gainDb: _modemTxLeveler ? _modemTxLeveler.gainDb : 0 });
+  if (burst) winlinkLog(burst.text);
 }
 /** How long the modem's final samples take to reach the radio after it stops writing. */
 function winlinkUnkeyDrainMs() {
@@ -11158,6 +11170,7 @@ function armWinlinkTxFailsafe() {
     winlinkLog(`TX failsafe — no PTT off within ${WINLINK_PTT_FAILSAFE_MS / 1000}s; forcing PTT off and ending the session`);
     winlinkTxActive = false;
     try { handleRemotePtt(false); } catch {}
+    winlinkTxBurstEnd();
     winlinkAbortSession('the transmitter stayed keyed for 30 s');
   }, WINLINK_PTT_FAILSAFE_MS);
 }
@@ -11204,6 +11217,7 @@ async function startWinlinkAudio({ modemRate = ModemAudioServerMod.MODEM_RATE } 
   srv.on('modem-gone', () => { if (winlinkSessionActive()) winlinkLog('modem audio: the modem closed its audio connection'); });
   srv.on('tx', (mono24k) => {
     if (!winlinkTxActive) return; // the modem only sends while it has PTT; anything else is a stray
+    _winlinkTxBurst.noteAudio(mono24k, 24000);
     winlinkDispatchTx(mono24k);
   });
   try {
@@ -11390,6 +11404,8 @@ let _cableRxRate = 0, _cableTxRate = 0;
 // The level of the radio audio VARA hears through the cable (lib/modem-rx-level.js):
 // trimmed automatically when it reaches the red, shown on every surface.
 const { RxLeveler, TxLeveler } = require('./lib/modem-rx-level');
+const { TxBurst } = require('./lib/modem-tx-burst');
+const _winlinkTxBurst = new TxBurst(); // the modem's current over: PTT asked → audio → PTT off, logged at key-up (#128)
 let _cableRxLeveler = null;
 let _modemTxLeveler = null;   // TxLeveler on the modem's transmit audio, one per session (seeded from settings.winlinkModemTxGain)
 let _modemTxBoostLogged = false;
@@ -11562,7 +11578,45 @@ function winlinkPreviewRestore(why) {
 
 // ── Dire Wolf (packet) ─────────────────────────────────────────────────────
 
+/**
+ * Hear what Dire Wolf hears: a second client on its AGW port in monitor mode
+ * (lib/direwolf-agw-monitor.js). Every frame the radio received is a
+ * "[Winlink] direwolf heard:" line and counts toward the "decoded nothing"
+ * verdict — Dire Wolf's stdout never reached POTACAT on N5XHI's Windows PC
+ * (#128), so that verdict was unproven. Retried a few times if the port
+ * drops the connection; a monitor that cannot connect costs the session nothing.
+ */
+function winlinkAgwMonitorStart(attempt = 0) {
+  if (_direwolfMonitor) { const m = _direwolfMonitor; _direwolfMonitor = null; try { m.close(); } catch {} }
+  if (attempt === 0) _direwolfMonitorHeard = 0;
+  let logged = 0;
+  const mon = DirewolfAgwMonitor.createAgwMonitor({
+    port: _winlinkAgwPort(),
+    onLog: winlinkLog,
+    onFrame: (f, text) => {
+      if (DirewolfAgwMonitor.isReceivedFrame(f)) _direwolfMonitorHeard++;
+      if (logged++ < 300) winlinkLog(`direwolf heard: ${text}`);
+      else if (logged === 301) winlinkLog('direwolf heard: (more frames not logged)');
+    },
+    onClose: (code) => {
+      if (_direwolfMonitor !== mon) return; // stopped by us
+      _direwolfMonitor = null;
+      if (!direwolfProc) return;
+      if (attempt < 3) setTimeout(() => { if (direwolfProc && !_direwolfMonitor) winlinkAgwMonitorStart(attempt + 1); }, 1000);
+      else winlinkLog(`direwolf monitor: gave up (${code}) — what Dire Wolf hears will not be in this log`);
+    },
+  });
+  _direwolfMonitor = mon;
+}
+function winlinkAgwMonitorStop() {
+  if (!_direwolfMonitor) return;
+  const m = _direwolfMonitor; _direwolfMonitor = null;
+  try { m.close(); } catch {}
+  winlinkLog(`direwolf: heard ${_direwolfMonitorHeard} frame${_direwolfMonitorHeard === 1 ? '' : 's'} from the radio over its AGW monitor this session`);
+}
+
 function killDirewolf() {
+  winlinkAgwMonitorStop();
   if (direwolfProc) { try { direwolfProc.kill(); } catch {} direwolfProc = null; }
 }
 
@@ -11596,7 +11650,7 @@ async function spawnDirewolf() {
     const lastLines = []; // what Dire Wolf said last, for a timeout that would otherwise say nothing
     let probeTimer = null;
     const fail = (msg) => { if (!settled) { settled = true; clearInterval(probeTimer); try { proc.kill(); } catch {} reject(new Error(msg)); } };
-    const ready = (how) => { if (!settled) { settled = true; clearInterval(probeTimer); winlinkLog(`direwolf: ready (${how})`); resolve(proc); } };
+    const ready = (how) => { if (!settled) { settled = true; clearInterval(probeTimer); winlinkLog(`direwolf: ready (${how})`); winlinkAgwMonitorStart(); resolve(proc); } };
     // Readiness is the AGW port ACCEPTING, not only the "Ready to accept"
     // line: a build whose stdout reaches us late or not at all (a user's
     // phone session failed with "never opened its AGW port" with no Dire
@@ -11922,7 +11976,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
         } catch {}
         return;
       }
-      if (mode === 'packet' && _direwolfHeard === 0) {
+      if (mode === 'packet' && _direwolfHeard === 0 && _direwolfMonitorHeard === 0) {
         winlinkLog('packet: Dire Wolf decoded nothing from the radio this session. The gateway may have answered (you can see it on the waterfall) but its reply never reached the modem: check the radio audio Input in Settings > Radio, its level, and that the radio is in FM with the squelch open.');
       }
       winlinkEndSession('error', _winlinkSessionError || e.message || String(e));
@@ -12046,6 +12100,7 @@ function winlinkEndSession(state, text, received = 0) {
   _winlinkShimArmed = false;
   if (_winlinkUnkeyTimer) { clearTimeout(_winlinkUnkeyTimer); _winlinkUnkeyTimer = null; }
   if (winlinkTxActive) { winlinkTxActive = false; try { handleRemotePtt(false); } catch {} }
+  winlinkTxBurstEnd();
   const radio = WinlinkModes.isRadioMode(s.mode);
   if (radio) {
     if (s.mode === 'ardop') killArdop();
