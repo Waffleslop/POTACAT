@@ -626,7 +626,9 @@ test('the codec has no TX-hint state left over (nothing read it)', () => {
 
 test('the test is registered in the npm test chain and in CI', () => {
   assert.ok(read('scripts/run-tests.js').includes("'test/commander-codec-test.js'"), 'scripts/run-tests.js');
-  assert.ok(read('.github/workflows/test.yml').includes('node test/commander-codec-test.js'), '.github/workflows/test.yml');
+  // CI runs the whole scripts/run-tests.js list since #205 (before that, a hand-picked step per file).
+  const ci = read('.github/workflows/test.yml');
+  assert.ok(ci.includes('node scripts/run-tests.js') || ci.includes('node test/commander-codec-test.js'), '.github/workflows/test.yml');
 });
 
 (async () => {
