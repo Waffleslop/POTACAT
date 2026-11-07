@@ -5358,8 +5358,8 @@ function gatherDesktopRawDiagnostic() {
 
   let tunnel = null;
   try { tunnel = cloudTunnel ? cloudTunnel.getState() : null; } catch {}
-  let ts = null;
-  try { const { tailscaleStatus } = require('./lib/remote-server'); ts = tailscaleStatus(); } catch {}
+  let ts = null, tsProbe = null;
+  try { const RS = require('./lib/remote-server'); ts = RS.tailscaleStatus(); tsProbe = RS.tailscaleProbeState(); } catch {}
   let conn = null;
   try { conn = remoteServer && typeof remoteServer.activeClientContext === 'function' ? remoteServer.activeClientContext() : null; } catch {}
   let paired = [];
@@ -5431,6 +5431,11 @@ function gatherDesktopRawDiagnostic() {
       connected: !!(ts && ts.loggedIn),
       hostname: (ts && ts.hostname) || null,
       peerCount: null,
+      // #132: what the daemon said and which binary said it — "not signed
+      // in", "VPN off" and "a stray Homebrew CLI answered" look the same above.
+      backendState: (ts && ts.backendState) || null,
+      state: (ts && ts.state) || null,
+      probe: tsProbe,
     },
     cloudTunnel: {
       enabled: !!(tunnel && tunnel.enabled),
@@ -37876,13 +37881,13 @@ function cloudShackNotice(text, kind) {
   // tailscaleStatus() shell-out + lib/cloud-tunnel's getCloudHost().
   // Recomputed at startup, on cloudTunnel 'change', and every 10 min.
   let _altHostsNoteLogged = '';
-  function _refreshAltHosts() {
+  async function _refreshAltHosts() {
     if (!remoteServer) return;
     let tsHost = '';
     let tsIp = '';
     try {
-      const { tailscaleStatus, tailscaleProbeState, tailnetIpFromInterfaces } = require('./lib/remote-server');
-      const ts = tailscaleStatus();
+      const { refreshTailscaleStatus, tailscaleProbeState, tailnetIpFromInterfaces } = require('./lib/remote-server');
+      const ts = await refreshTailscaleStatus();
       // The CLI is not the only evidence. A tailnet address on an interface
       // means this PC is on a tailnet whatever the CLI said, and that
       // address is what a phone dials (pinned, so no name is needed). Before
@@ -44403,9 +44408,9 @@ function cloudShackNotice(text, kind) {
   // Settings card can say why phones cannot connect over the tailnet.
   let _tailscaleCertError = '';
   async function ensureTailscaleCertReady(progressCb) {
-    const { tailscaleStatus, loadCachedTailscaleCert, issueTailscaleCert } = require('./lib/remote-server');
+    const { refreshTailscaleStatus, loadCachedTailscaleCert, issueTailscaleCert, describeTailscaleNotReady } = require('./lib/remote-server');
     const certDir = app.getPath('userData');
-    const ts = tailscaleStatus();
+    const ts = await refreshTailscaleStatus();
     // Only "already set up" if the cached cert matches the machine's
     // CURRENT tailnet hostname — a tailnet/device rename leaves a
     // long-valid cert for a dead name that iOS rejects on every leg.
@@ -44414,15 +44419,15 @@ function cloudShackNotice(text, kind) {
     if (!ts) {
       return { warn: 'Tailscale not detected. iOS pair will likely fail. Install Tailscale to fix.' };
     }
-    if (!ts.loggedIn) {
-      return { warn: 'Tailscale is installed but not signed in. Open the Tailscale app and sign in to your tailnet, then try again.' };
+    if (!ts.loggedIn || ts.state !== 'running') { // Starting is signed in, but certs need Running
+      return { warn: describeTailscaleNotReady(ts) + ' Then try again.' };
     }
     if (!ts.magicDNS) {
       return { warn: 'Tailscale MagicDNS is disabled in your tailnet. Enable it at https://login.tailscale.com/admin/dns (DNS → MagicDNS) and try again.' };
     }
     progressCb(`Issuing TLS cert for ${ts.hostname} (first time can take ~30s)…`);
     try {
-      issueTailscaleCert(certDir, ts.hostname);
+      await issueTailscaleCert(certDir, ts.hostname);
     } catch (err) {
       // Without a Tailscale cert the phone's tailnet leg meets the
       // self-signed cert and iOS refuses it, so this must reach the log.
@@ -44452,9 +44457,9 @@ function cloudShackNotice(text, kind) {
   // for the Settings UI status display and as a manual "renew"
   // hook when a user wants to force a refresh.
   ipcMain.handle('echocat-tailscale-status', async () => {
-    const { tailscaleStatus, tailscaleProbeState, tailnetIpFromInterfaces, loadCachedTailscaleCert } = require('./lib/remote-server');
+    const { refreshTailscaleStatus, tailscaleProbeState, tailnetIpFromInterfaces, loadCachedTailscaleCert, describeTailscaleNotReady } = require('./lib/remote-server');
     const certDir = app.getPath('userData');
-    const ts = tailscaleStatus();
+    const ts = await refreshTailscaleStatus();
     const probe = tailscaleProbeState();
     const ipFromInterfaces = tailnetIpFromInterfaces();
     // Pass the current hostname so a cert left over from a renamed
@@ -44466,6 +44471,8 @@ function cloudShackNotice(text, kind) {
       magicDNS: ts ? !!ts.magicDNS : false,
       hostname: ts && ts.hostname ? ts.hostname : null,
       backendState: ts ? ts.backendState : null,
+      state: ts ? ts.state : null,
+      notReady: describeTailscaleNotReady(ts),
       certCached: !!cached,
       certExpiresAt: cached ? cached.validTo.toISOString() : null,
       daysLeft: cached ? Math.floor(cached.daysLeft) : null,
@@ -44479,21 +44486,21 @@ function cloudShackNotice(text, kind) {
   });
 
   ipcMain.handle('echocat-issue-tailscale-cert', async () => {
-    const { tailscaleStatus, issueTailscaleCert } = require('./lib/remote-server');
+    const { refreshTailscaleStatus, issueTailscaleCert, describeTailscaleNotReady } = require('./lib/remote-server');
     const certDir = app.getPath('userData');
-    const ts = tailscaleStatus();
+    const ts = await refreshTailscaleStatus();
     if (!ts) {
       return { ok: false, error: 'Tailscale CLI not found. Install Tailscale and sign in, then try again.' };
     }
-    if (!ts.loggedIn) {
-      return { ok: false, error: 'Tailscale is not signed in. Open the Tailscale app and sign in to your tailnet, then try again.' };
+    if (!ts.loggedIn || ts.state !== 'running') {
+      return { ok: false, error: describeTailscaleNotReady(ts) + ' Then try again.' };
     }
     if (!ts.magicDNS) {
       return { ok: false, error: 'MagicDNS is disabled in your tailnet. Enable it at admin/dns, then try again.' };
     }
     sendCatLog(`[Tailscale] Issuing cert for ${ts.hostname}…`);
     try {
-      issueTailscaleCert(certDir, ts.hostname);
+      await issueTailscaleCert(certDir, ts.hostname);
     } catch (err) {
       sendCatLog(`[Tailscale] Cert issuance failed: ${err.message}`);
       _tailscaleCertError = err.message;
@@ -44553,7 +44560,7 @@ function cloudShackNotice(text, kind) {
     //   2. ensureTailscaleCertReady() just restarted ECHOCAT for a first-time
     //      cert — a fresh RemoteServer starts with empty _altHosts.
     // (K3SBP 2026-07-15 — "turn on Tailscale, then scan" must embed tsHost.)
-    try { _refreshAltHosts(); } catch {}
+    try { await _refreshAltHosts(); } catch {}
 
     let qrcode;
     try { qrcode = require('qrcode'); }
@@ -44751,7 +44758,7 @@ function cloudShackNotice(text, kind) {
     // Refresh alt-hosts so a link minted right after enabling Tailscale (or
     // after a first-time cert restart) actually carries the tailnet/cloud host.
     // Same staleness reasoning as echocat-create-pairing-qr above.
-    try { _refreshAltHosts(); } catch {}
+    try { await _refreshAltHosts(); } catch {}
     let row;
     try {
       row = remoteServer.createPairLink({
