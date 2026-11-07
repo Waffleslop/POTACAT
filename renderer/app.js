@@ -32153,7 +32153,9 @@ if (window.api.onJtcatTxAbort) window.api.onJtcatTxAbort(function(reason) {
 // through the rig USB CODEC the user already configured for FT8.
 var jtcatTuneOsc = null;
 var jtcatTuneGain = null;
+var jtcatTuneGen = 0; // bumped by every stop: a start still awaiting is cancelled (#214)
 async function startJtcatTuneAudio() {
+  var gen = jtcatTuneGen;
   try {
     var s = await window.api.getSettings();
     var outputDeviceId = s.remoteAudioOutput || '';
@@ -32184,6 +32186,7 @@ async function startJtcatTuneAudio() {
         console.warn('[JTCAT] Tune: could not set the ALSA output, using the default:', e && e.message);
       }
     }
+    if (gen !== jtcatTuneGen) return; // stopped while starting: never start the tone
     stopJtcatTuneAudio();
     jtcatTuneOsc = jtcatTxAudioCtx.createOscillator();
     jtcatTuneOsc.type = 'sine';
@@ -32202,6 +32205,7 @@ async function startJtcatTuneAudio() {
   }
 }
 function stopJtcatTuneAudio() {
+  jtcatTuneGen++;
   if (jtcatTuneOsc) { try { jtcatTuneOsc.stop(); } catch {} try { jtcatTuneOsc.disconnect(); } catch {} jtcatTuneOsc = null; }
   if (jtcatTuneGain) { try { jtcatTuneGain.disconnect(); } catch {} jtcatTuneGain = null; }
 }

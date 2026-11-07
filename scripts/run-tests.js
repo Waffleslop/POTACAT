@@ -102,6 +102,7 @@ const TESTS = [
   'test/ft8-native-decoder-test.js',
   'test/jtcat-hunt-off-test.js',
   'test/halt-tx-test.js',
+  'test/refused-key-audio-test.js', // #214: a refused key-down plays no radio audio (Tune, SSTV, voice macro); a Tune stop during start-up wins
   'test/own-licence-tx-test.js',
   'test/rigctld-power-scale-test.js',
   'test/rigctld-kenwood-power-test.js', // a TS-590/TS-2000 behind Hamlib keeps its power: raw PC, never Hamlib's PC000/PC255 probe

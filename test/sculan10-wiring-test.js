@@ -92,7 +92,7 @@ test('a key-down with the LAN as the audio source is refused: never a silent car
   const target = ptt.indexOf('const target = settings.catTarget;');
   assert.ok(refuse > 0 && refuse < target, 'refused before any keying route');
   const block = ptt.slice(refuse, target);
-  assert.ok(/return;\n\s*\}\s*$/.test(block), 'it returns without keying');
+  assert.ok(/return false;\n\s*\}\s*$/.test(block), 'it returns without keying, and says it refused');
   assert.ok(/jtcatHaltTxNow\(/.test(block), 'JTCAT stops trying');
   assert.ok(/'tune-blocked'/.test(block) && /'app-notice'/.test(block), 'said where the press happened');
   const fdv = bodyOf(main, "remoteServer.on('freedv-set-tx', ({ enabled }) => {", 'txLimitNote(');
