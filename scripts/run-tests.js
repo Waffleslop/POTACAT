@@ -2,8 +2,13 @@
 'use strict';
 // The npm test chain. It outgrew cmd.exe's 8191-character command line as one
 // `a && b && ...` string, so on Windows `npm test` printed "The command line
-// is too long." and ran NOTHING (2026-10-23). Same order, same stop-on-first-
-// failure, one Node process per file. Add new tests to this list.
+// is too long." and ran NOTHING (2026-10-23). Same order, one Node process per
+// file. Add new tests to this list.
+//
+// Every file runs even after one fails (GitHub #175: stopping at file ~208 of
+// 433 hid the other 225), then a summary names each failure and the run exits
+// non-zero if any file failed. `node scripts/run-tests.js <substr>...` runs
+// only the files whose path contains one of the substrings.
 const { spawnSync } = require('child_process');
 const path = require('path');
 
@@ -447,20 +452,37 @@ const TESTS = [
   'test/lan-review-test.js', // VFO speaker plays LAN audio; a reopened port clears POTACAT's old close; FT-710 named; LAN scope text; LAN transport window and strangers
   'test/guest-pass-full-power-test.js', // a Guest Pass cap on a rig with Full power (W): real watts throughout; a 5 W rig transmits, a 100 W rig is capped
   'test/pacing-vs-mode-note-test.js', // a radio that drops replies gets only the pacing line; a wrong-model radio only the mode note
+  'test/run-tests-runner-test.js', // #175: this runner keeps going past a failing file, names every failure, exits non-zero
 ];
 
 const root = path.join(__dirname, '..');
-const only = process.argv.slice(2);
-const list = only.length ? TESTS.filter((f) => only.some((o) => f.includes(o))) : TESTS;
-let n = 0;
-for (const f of list) {
-  const r = spawnSync(process.execPath, [f], { cwd: root, stdio: 'inherit' });
-  n++;
-  if (r.status !== 0) {
-    console.error(`
-[run-tests] FAILED: ${f} (exit ${r.status}${r.signal ? ', ' + r.signal : ''}) — ${n} of ${list.length} run`);
-    process.exit(r.status || 1);
+
+function runAll(list) {
+  const failed = [];
+  let n = 0;
+  for (const f of list) {
+    const r = spawnSync(process.execPath, [f], { cwd: root, stdio: 'inherit' });
+    n++;
+    if (r.status !== 0) {
+      const why = `exit ${r.status}${r.signal ? ', ' + r.signal : ''}`;
+      failed.push(`${f} (${why})`);
+      console.error(`
+[run-tests] FAILED: ${f} (${why}) — ${n} of ${list.length} run, continuing`);
+    }
   }
-}
-console.log(`
+  if (failed.length) {
+    console.error(`
+[run-tests] ${list.length - failed.length} of ${list.length} test files passed, ${failed.length} failed:`);
+    for (const f of failed) console.error(`[run-tests]   ${f}`);
+    process.exit(1);
+  }
+  console.log(`
 [run-tests] all ${list.length} test files passed`);
+}
+
+module.exports = { TESTS, runAll };
+
+if (require.main === module) {
+  const only = process.argv.slice(2);
+  runAll(only.length ? TESTS.filter((f) => only.some((o) => f.includes(o))) : TESTS);
+}

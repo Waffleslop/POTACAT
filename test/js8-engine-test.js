@@ -17,8 +17,24 @@ const assert = require('assert');
 const { Js8Engine, SUBMODES } = require('../lib/js8-engine');
 const { JtcatManager } = require('../lib/jtcat-manager');
 const V = require('../lib/js8-varicode');
+const fs = require('fs');
+const path = require('path');
 
-let pass = 0, fail = 0;
+// TX audio comes from the js8_native addon (the real modem). Without the
+// built file there is no audio to test, so the two cases that need it skip
+// with a reason (GitHub #175: a fresh checkout or worktree has no build).
+// The skip is ONLY for a missing file: a present addon that fails to load or
+// encode is a real failure, and NATIVE_REQUIRED=1 turns the skip into one.
+const ADDON = path.join(__dirname, '..', 'lib', 'js8_native', 'build', 'Release', 'js8_native.node');
+const NO_ADDON = !fs.existsSync(ADDON)
+  ? 'js8_native addon not built here (npm run build-js8)'
+  : null;
+
+let pass = 0, fail = 0, skipped = 0;
+function skip(name, why) {
+  if (process.env.NATIVE_REQUIRED === '1') { report(name, new Error('native addon required: ' + why)); return; }
+  skipped++; console.log('  skip ' + name + ' (' + why + ')');
+}
 const failures = [];
 function report(name, err) {
   if (err) { fail++; failures.push(name + ': ' + (err.message || err)); console.log('  FAIL ' + name); }
@@ -86,7 +102,8 @@ async function main() {
 
   // ── TX: text becomes period-aligned audio ─────────────────────────────────
   let txData = null;
-  try {
+  if (NO_ADDON) skip('armed TX fires at a period boundary with the dispatch payload', NO_ADDON);
+  else try {
     const n = engine.setTxText('KN4CRD SNR?');
     assert.strictEqual(n, 1, 'one directed frame');
     engine._txEnabled = true;
@@ -100,7 +117,8 @@ async function main() {
   } catch (err) { report('armed TX fires at a period boundary with the dispatch payload', err); }
 
   // ── the loop closes: our own TX audio decodes back into the message ───────
-  try {
+  if (NO_ADDON) skip('the station loop closes: text -> air -> interpreted message', NO_ADDON);
+  else try {
     assert.ok(txData, 'needs the TX audio from the previous test');
     // Simulate playback completion so the engine returns to RX.
     engine.txComplete();
@@ -214,7 +232,7 @@ async function main() {
   // termination can crash node on Windows; the settle removes the race.
   await new Promise((r) => setTimeout(r, 750));
 
-  console.log(`\nJS8 engine: ${pass} passed, ${fail} failed`);
+  console.log(`\nJS8 engine: ${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped (${NO_ADDON})` : ''}`);
   if (failures.length) console.log(failures.map((f) => '  ' + f).join('\n'));
   process.exit(fail === 0 ? 0 : 1);
 }

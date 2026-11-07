@@ -227,6 +227,8 @@ jobs:
         run: node test/clock-offset-test.js
       - name: Run require/exports consistency suite
         run: node test/require-exports-test.js
+      - name: Run npm test runner (continues past a failing file, names every failure, exits non-zero)
+        run: node test/run-tests-runner-test.js
 
   # The release workflow installs with npm ci (lockfile-pinned), which fails
   # hard if package.json and package-lock.json drift apart. Catch that on the

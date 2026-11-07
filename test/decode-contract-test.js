@@ -66,6 +66,16 @@ async function runPath(forceWasm) {
   console.log(`decode contract — ${via} decoders`);
 
   for (const [mode, m] of Object.entries(MODES)) {
+    // The WASM FT8 encoder is the ft8js package. When it cannot be resolved
+    // from here (no node_modules; NODE_PATH does not reach an ESM import, so a
+    // worktree borrowing another checkout's modules hits this) there is no
+    // WASM FT8 to test: skip with the reason (GitHub #175). An installed
+    // ft8js that still yields no encoder is a real failure below.
+    if (via === 'WASM' && mode === 'FT8' && FT8JS_MISSING) {
+      if (process.env.NATIVE_REQUIRED === '1') check(`${via} ${mode}: encoder available`, () => assert.fail(FT8JS_MISSING));
+      else console.log(`  skip ${via} ${mode} (${FT8JS_MISSING})`);
+      continue;
+    }
     const enc = await ask({ type: m.encode, text: m.text, frequency: 1234.5 });
     if (!enc || enc.type !== 'encode-result' || !enc.samples) {
       check(`${via} ${mode}: encoder available`, () => assert.fail(`no ${mode} encoder in this worker (${enc && (enc.message || enc.type)})`));
@@ -97,7 +107,15 @@ async function runPath(forceWasm) {
   await w.terminate();
 }
 
+let FT8JS_MISSING = null;
+
 (async () => {
+  // Resolved the way the worker does it (a dynamic import from lib/).
+  try { await import('ft8js'); }
+  catch (e) {
+    if (e && e.code === 'ERR_MODULE_NOT_FOUND' && /'ft8js'/.test(e.message)) FT8JS_MISSING = 'ft8js package not installed here (npm install)';
+    else throw e;
+  }
   await runPath(false); // the native addon, when this machine has it built
   await runPath(true);  // the WASM fallback (what CI and an addon-less install run)
   console.log('');
