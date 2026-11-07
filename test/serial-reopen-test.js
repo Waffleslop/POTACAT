@@ -68,8 +68,8 @@ function fakePort(closeMs) {
   });
   await t('connectCat waits for the old port\'s close before opening the next', () => {
     const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
-    assert.ok(main.includes('cat.disconnect();\n    _icomNetworkTransport = null;\n    const _oldCatClosed = cat._closedPromise;'));
-    assert.ok(main.includes('if (_oldCatClosed) await Promise.race([_oldCatClosed, new Promise(r => setTimeout(r, 3000))]);'));
+    assert.ok(main.includes('cat.disconnect();\n    _icomNetworkTransport = null;\n    _rememberCatClose(cat);'));
+    assert.ok(main.includes('await _awaitPendingCatClose(3000);\n    await new Promise(r => setTimeout(r, 300));'));
   });
   console.log('\nserial reopen: ' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
