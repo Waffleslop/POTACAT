@@ -359,7 +359,7 @@ test('KiwiSDR CW: carrier 0.6 kHz below the spot, window centred on the 600 Hz t
   assert.ok(/freq=14074\.000/.test(sent[0]), 'SSB is not offset: ' + sent[0]);
 });
 
-test('tune() resets predictor', () => {
+test('tune() keeps the ADPCM predictor (#171: the server encoder keeps its state across a retune)', () => {
   const c = newClient();
   for (let i = 0; i < 20; i++) { c._taps[i] = 100; c._history[i] = 200; }
   c._dither = 50;
@@ -367,10 +367,10 @@ test('tune() resets predictor', () => {
   c._ws = { readyState: ws.OPEN, send: () => {} };
   c.tune(14000, 'cw');
   for (let i = 0; i < 20; i++) {
-    assert.strictEqual(c._taps[i], 0);
-    assert.strictEqual(c._history[i], 0);
+    assert.strictEqual(c._taps[i], 100, 'a retune must not reset the decoder taps');
+    assert.strictEqual(c._history[i], 200, 'a retune must not reset the decoder history');
   }
-  assert.strictEqual(c._dither, 0);
+  assert.strictEqual(c._dither, 50, 'a retune must not reset the dither state');
   assert.strictEqual(c._desiredFreqKhz, 14000);
   assert.strictEqual(c._desiredMode, 'cw');
 });
