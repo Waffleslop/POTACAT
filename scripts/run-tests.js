@@ -109,6 +109,7 @@ const TESTS = [
   'test/guest-pass-emission-test.js',
   'test/jtcat-worked-update-test.js',
   'test/g90-tx-poll-test.js',
+  'test/g90-fake-rigctld-test.js', // #109: a fake rigctld that dies on CAT in TX; the G90 keeps the link through an over, a generic model's reconnect unkeys first
   'test/wfm-mode-test.js',
   'test/jtcat-dial-follow-test.js',
   'test/winlink-fault-test.js',
