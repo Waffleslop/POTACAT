@@ -1254,6 +1254,7 @@ async function prepareProfileSwitchRelaunch(fromCall, toCall) {
     if (cat) {
       cat.removeAllListeners();
       cat.disconnect();
+      _rememberCatClose(cat);
       cat = null;
     }
   } catch (err) {
@@ -1783,6 +1784,30 @@ async function sstvGalleryRecordFromFile(filePath, opts) {
 let jtcatMapPopoutWin = null; // pop-out JTCAT map window
 let popoutJtcatQso = null;   // QSO state for popout (like remoteJtcatQso for ECHOCAT)
 let cat = null;
+// The last dropped rig's port close, kept past `cat = null` (switching to
+// None, a profile switch, a port that vanished) so the next connectCat does
+// not reopen the port while the OS still holds it (#174). Cleared when done.
+let _pendingCatClose = null;
+function _rememberCatClose(c) {
+  const p = c && c._closedPromise;
+  if (!p || typeof p.then !== 'function') return;
+  _pendingCatClose = p;
+  p.then(() => { if (_pendingCatClose === p) _pendingCatClose = null; }, () => { if (_pendingCatClose === p) _pendingCatClose = null; });
+}
+async function _awaitPendingCatClose(ms) {
+  const p = _pendingCatClose;
+  if (!p) return true;
+  let timer;
+  const done = await Promise.race([
+    p.then((ok) => ok !== false, () => true), // false: the transport's own close cap ran out
+    new Promise(r => { timer = setTimeout(() => r(false), ms); }),
+  ]);
+  clearTimeout(timer);
+  if (!done) {
+    try { sendCatLog(`[CAT] The previous radio's port did not finish closing within ${ms / 1000} s — opening anyway; "Access denied" now means POTACAT's own old handle, not another program.`); } catch { /* ignore */ }
+  }
+  return done;
+}
 let _icomNetworkTransport = null;
 let _icomNetworkDataModRestore = null;
 let _icomNetworkDataModSession = 0;
@@ -7390,7 +7415,7 @@ function ensureRemoteClient() {
   // already early-returns in remote mode, but an ALREADY-running `cat` was never
   // torn down. The user re-selects a local rig (→ connectCat) to come back.
   if (cat) {
-    try { cat.removeAllListeners(); cat.disconnect(); } catch {}
+    try { cat.removeAllListeners(); cat.disconnect(); _rememberCatClose(cat); } catch {}
     cat = null;
   }
   killRigctld();
@@ -7963,7 +7988,7 @@ async function catPortGoneCheck() {
   const port = SerialPortPresence.portOfTarget(settings.catTarget);
   if (!port || _catPortWatch || _connectCatPending) return;
   if (await serialPortPresent(port)) return;
-  if (cat) { try { cat.removeAllListeners(); cat.disconnect(); } catch {} cat = null; }
+  if (cat) { try { cat.removeAllListeners(); cat.disconnect(); _rememberCatClose(cat); } catch {} cat = null; }
   killRigctld();
   _currentFreqHz = 0;
   sendCatStatus({ connected: false, target: settings.catTarget, error: `${port} is not there` });
@@ -8217,7 +8242,7 @@ async function connectCat() {
     cat.removeAllListeners();
     cat.disconnect();
     _icomNetworkTransport = null;
-    const _oldCatClosed = cat._closedPromise;
+    _rememberCatClose(cat);
     // The dial belonged to the rig we just dropped; the next one reports its
     // own. Left in place it posed as the new rig's frequency (N4FFF 2026-10-04).
     _currentFreqHz = 0;
@@ -8225,8 +8250,13 @@ async function connectCat() {
     // (KK6EZA IC-705: "Opening COM6: Access denied" for 2.5 min after a
     // reconnect). The close callback, capped at 3 s; then the old 300 ms
     // settle ("Resource busy" on macOS when switching rigs).
-    if (_oldCatClosed) await Promise.race([_oldCatClosed, new Promise(r => setTimeout(r, 3000))]);
+    await _awaitPendingCatClose(3000);
     await new Promise(r => setTimeout(r, 300));
+  } else {
+    // No cat now, but the last one's close may still be running: switching
+    // to None set cat = null and dropped it, so the reopen raced a close
+    // that had not finished ("Access denied" until restart, #174).
+    await _awaitPendingCatClose(3000);
   }
   // Determine paddle-availability proactively for the new rig so auth-ok carries
   // the right value BEFORE the phone's first key press. A Yaesu/Kenwood-serial

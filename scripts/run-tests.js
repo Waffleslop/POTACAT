@@ -174,6 +174,7 @@ const TESTS = [
   'test/voice-tx-check-test.js', // 0 W / no ALC on a voice over: one hint naming the radio's audio-input menu
   'test/rig-test-saved-note-test.js', // a passing rig-editor Test says when its port is not saved yet
   'test/serial-reopen-test.js', // connectCat waits for the old port's release; Access denied on our own handle says so (KK6EZA)
+  'test/serial-close-blocked-cts-test.js', // RTS/CTS write stuck on CTS: flush before close, bounded close, None keeps the close (#174)
   'test/yaesu-lines-low-test.js', // every Yaesu drops DTR/RTS at open (stein, G5HOW: keyed on connect)
   'test/split-first-tune-test.js', // #113 item 2: no split OFF unless POTACAT turned split on
   'test/waterfall-palettes-test.js', // waterfall / band scope palettes = the ECHOCAT app's, wired into every waterfall
