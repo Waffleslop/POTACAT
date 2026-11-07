@@ -3157,7 +3157,10 @@
                        mUp === 'USB-D' || mUp === 'LSB-D' ||
                        mUp.startsWith('FREEDV'));
       pttBtn.classList.toggle('hidden', !isVoice);
-      estopBtn.classList.toggle('hidden', !isVoice);
+      // HALT (E-STOP) is a safety stop and is never gated on the mode: a rig
+      // whose mode never arrived, or one in CW/RTTY, had no HALT here for as
+      // long as that lasted (#190, FT-891 silent for 2.5 min). PTT keeps the
+      // voice gate above; HALT stays as the markup made it — visible.
       updateCwPanelVisibility();
       updateSsbPanelVisibility();
     }
