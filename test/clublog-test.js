@@ -3,7 +3,7 @@
 // Club Log upload — the form/multipart bytes and the response map ARE
 // the integration contract. Run: node test/clublog-test.js
 const assert = require('assert');
-const { buildRealtimeForm, buildPutlogsMultipart, mapClublogResponse } = require('../lib/clublog');
+const { buildRealtimeForm, buildPutlogsMultipart, mapClublogResponse, credentialKey } = require('../lib/clublog');
 
 let pass = 0, fail = 0;
 function test(name, fn) {
@@ -46,6 +46,19 @@ test('response map: 200 ok, 400-dupe is success, 403 names the login, 5xx says r
   assert.strictEqual(auth.auth, true);
   assert.ok(/Application Password/.test(auth.message));
   assert.ok(/try again/.test(mapClublogResponse(503, '', 'bulk').message));
+});
+
+// #142: a 403 pauses one account until its credentials change; this key is
+// what "changed" means.
+test('credentialKey is stable and differs on any field (email, password, callsign)', () => {
+  const c = { email: 'op@example.com', password: 'app-pw', callsign: 'K3SBP' };
+  const k = credentialKey(c);
+  assert.ok(/^[0-9a-f]{64}$/.test(k), 'sha256 hex');
+  assert.strictEqual(credentialKey({ ...c }), k);
+  assert.strictEqual(credentialKey({ ...c, callsign: 'k3sbp' }), k, 'callsign case does not matter');
+  assert.notStrictEqual(credentialKey({ ...c, email: 'other@example.com' }), k);
+  assert.notStrictEqual(credentialKey({ ...c, password: 'app-pw2' }), k);
+  assert.notStrictEqual(credentialKey({ ...c, callsign: 'W9XYZ' }), k);
 });
 
 console.log(`\nClubLog: ${pass} passed, ${fail} failed`);
