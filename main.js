@@ -371,6 +371,7 @@ const wsprBands = require('./lib/wspr/bands');
 const wsprlive = require('./lib/wspr/wsprlive');
 const wsprBandhop = require('./lib/wspr/bandhop');
 const jtcatModehop = require('./lib/jtcat-modehop');
+const FakeIt = require('./lib/jtcat-fake-it'); // split operation "Fake It" (fakeItShiftForTx / fakeItRestoreDial)
 const { WsprScheduler } = require('./lib/wspr/scheduler');
 const WsprPowerMemory = require('./lib/wspr-power-memory'); // pre-beacon RF power remember/restore decisions
 const Privileges = require('./lib/privileges');
@@ -3940,6 +3941,7 @@ function sendCatStatus(s) {
     sendCatLog('[PTT] Radio link is back — sending the RX that was requested while it was down');
     try { gatedSetTransmit(false); } catch {}
   }
+  if (s && s.connected && _fakeIt.restorePending) setImmediate(() => fakeItRestoreDial('the radio link is back'));
   // The radio IS controllable via the FlexLib API even if the port-5002 CAT
   // shim (`cat`) never connected — true for self-host (Flex Direct, POTACAT
   // is the GUI client) AND for bound mode (AetherSDR / SmartSDR-Win is the
@@ -4042,8 +4044,75 @@ function sendCatStatus(s) {
 // reads SmartSDR's slice (not POTACAT's), so its freq/mode would show the wrong
 // slice — ignore it there; OUR slice's freq/mode arrives via the smartSdr
 // 'frequency'/'mode' events instead. Every other mode/rig uses cat normally.
+// --- Split operation "Fake It" (level_death 2026-11-04, lib/jtcat-fake-it.js)
+// For each FT8/FT4/FT2 transmission the engine renders the tone at 1500-1999
+// Hz and the dial moves by the difference, so the signal lands on the same RF
+// frequency with the audio in the middle of the radio's filter. The dial
+// moves just before the key-down and comes back just after the key-up; the
+// shifted dial never reaches the displays, the log, the JTCAT anchor or the
+// wrong-band guard (fakeItIsEcho in both frequency handlers).
+const _fakeIt = { active: false, dialHz: 0, txDialHz: 0, shiftHz: 0, restoredAt: 0, restorePending: false };
+function fakeItEnabled() { return settings.jtcatFakeIt === true; }
+// Who moves the dial: the Flex API (same rule as tuneRadio) or the CAT link.
+function fakeItDialRoute() {
+  if (smartSdr && smartSdr.canTune && smartSdr.connected && (smartSdr.mode === 'self' || !cat || !cat.connected)) return 'flex';
+  if (cat && cat.connected && typeof cat.setDialNow === 'function') return 'cat';
+  return null;
+}
+function fakeItSetDial(hz) {
+  const route = fakeItDialRoute();
+  if (route === 'flex') { smartSdr.tuneSlice(flexPttSliceIndex(), hz / 1e6); return true; }
+  if (route === 'cat') return cat.setDialNow(hz) !== false;
+  return false;
+}
+// The engine renders shifted audio only where this PC can move the dial: one
+// band (multi-band engines are built fresh and never shift), a radio with
+// CAT, not driving a remote shack (the shack applies its own). A link that is
+// down at transmit time is fakeItShiftForTx's refusal, not this one's.
+function fakeItSyncEngine() {
+  if (!ft8Engine || typeof ft8Engine.setFakeIt !== 'function') return;
+  const multi = !!(jtcatManager && jtcatManager.sliceCount > 1);
+  const noCat = !!(settings.catTarget && settings.catTarget.type === 'none');
+  ft8Engine.setFakeIt(fakeItEnabled() && !multi && !isRemoteMode() && !noCat);
+}
+function fakeItIsEcho(hz) {
+  return FakeIt.isShiftEcho(hz, _fakeIt, Date.now());
+}
+// tx-start, right before the key-down. Returns false when the dial could not
+// move: the audio was rendered for the shifted dial, so this transmission
+// must not go out (it would land shiftHz away from the signal it answers).
+function fakeItShiftForTx(data) {
+  const shift = Math.round(Number(data && data.dialShiftHz) || 0);
+  if (!shift) return true;
+  if (_fakeIt.active) fakeItRestoreDial('a new transmission');   // never stack two shifts
+  const plan = FakeIt.planShift({ shiftHz: shift, dialHz: _currentFreqHz });
+  if (!plan || !fakeItSetDial(plan.txDialHz)) {
+    sendCatLog(`[JTCAT] Fake It: TX skipped — the dial could not be moved ${shift > 0 ? '+' : ''}${shift} Hz (${!plan ? 'the radio has not reported its dial' : 'no radio link'}). The audio for this transmission is off the passband centre by that much.`);
+    return false;
+  }
+  Object.assign(_fakeIt, { active: true, dialHz: plan.dialHz, txDialHz: plan.txDialHz, shiftHz: plan.shiftHz, restoredAt: 0, restorePending: false });
+  sendCatLog(`[JTCAT] ${FakeIt.describeShift(plan, Math.round((data.freq || 0) - shift))}`);
+  return true;
+}
+// After every key-up (tx-end, a failsafe release, Halt) and on reconnect.
+function fakeItRestoreDial(why) {
+  if (!_fakeIt.active && !_fakeIt.restorePending) return;
+  const hz = _fakeIt.dialHz;
+  _fakeIt.active = false;
+  if (!(hz > 0)) { _fakeIt.restorePending = false; return; }
+  if (fakeItSetDial(hz)) {
+    _fakeIt.restorePending = false;
+    _fakeIt.restoredAt = Date.now();
+    sendCatLog(`[JTCAT] Fake It: dial back to ${(hz / 1e6).toFixed(6)} MHz (${why})`);
+  } else {
+    _fakeIt.restorePending = true;   // sendCatStatus puts it back when the link returns
+    sendCatLog(`[JTCAT] Fake It: the radio link is down — the dial goes back to ${(hz / 1e6).toFixed(6)} MHz when it returns`);
+  }
+}
+
 function catFrequencyHandler(hz) {
   if (smartSdr && smartSdr.mode === 'self') return;
+  if (fakeItIsEcho(hz)) return;   // our own Fake It shift, not the operator's dial
   // Not while transmitting, on any radio: a read during TX is the TX
   // frequency (kg6odijohn, IC-7100 repeater memory: POTACAT acted on the
   // offset). The controller drops them too; this is the net for every path.
@@ -17936,6 +18005,7 @@ function startJtcat(mode) {
     if (typeof ft8Engine.setLateStartTx === 'function') {
       ft8Engine.setLateStartTx(settings.jtcatLateStartTx !== false);
     }
+    fakeItSyncEngine(); // split operation "Fake It" (single band, a dial this PC can move)
     // AP (a priori) decode — RX mirror of late-start TX. Default ON. myCall is
     // authoritative here; the engine auto-derives the QSO partner (dxCall) from
     // its TX message. Recovers marginal/late replies addressed to us.
@@ -18671,6 +18741,13 @@ function startJtcat(mode) {
     jtcatNoteTxSent(data.message);
     jtcatNoteTxSlot(data.slot); // an Auto CQ keeps the slot we last transmitted in
     const networkStartDelayMs = jtcatNetworkTxStartDelayMs(modeForTx);
+    // Split "Fake It": the dial moves first, so the key-down leaves the port
+    // after it. A dial that cannot move means audio rendered for the wrong
+    // dial: skip this transmission rather than send it off frequency.
+    if (!fakeItShiftForTx(data)) {
+      try { if (ft8Engine && ft8Engine._txActive) ft8Engine.txComplete(); } catch {}
+      return;
+    }
     handleRemotePtt(true, { audio: true, emission: 'DATA', txKind: jtcatTxKind() });
     armJtcatTxFailsafe(settings.audioSource === 'icom-network' ? 'Icom Network RS-BA1' : (settings.audioSource === 'smartsdr' ? 'SmartSDR Direct' : 'local audio'), data.samples, 12000, data.offsetMs || 0, networkStartDelayMs);
     if (win && !win.isDestroyed()) {
@@ -18800,6 +18877,7 @@ function startJtcat(mode) {
 	      handleRemotePtt(false);
 	      releaseRadio('jtcat');
 	    }
+	    fakeItRestoreDial('end of transmission');
     // Stop the paced UDP pump if SmartSDR Direct TX was driving this cycle —
     // otherwise packets keep flowing after PTT release (harmless once the
     // radio is in RX, but wasted bandwidth, and a cancel mid-cycle would
@@ -20039,6 +20117,7 @@ function connectSmartSdr() {
   // SmartSDR's slice, not ours — so OUR slice's freq/mode (from the API) is
   // authoritative for the display even though cat is connected.
   smartSdr.on('frequency', (hz) => {
+    if (fakeItIsEcho(hz)) return;   // our own Fake It shift (catFrequencyHandler has the same guard)
     if (smartSdr.mode === 'self') rememberFlexSlice({ hz });
     if (smartSdr.mode === 'self' || !cat || !cat.connected) sendCatFrequency(hz);
   });
@@ -21733,6 +21812,9 @@ function updateRemoteSettings() {
     // jtcat-set-skip-tx1 / jtcat-set-hound-mode.
     jtcatSkipTx1: !!settings.jtcatSkipTx1,
     jtcatHoundMode: !!settings.jtcatHoundMode,
+    // Split operation "Fake It": the shack moves its own dial per transmission.
+    // A device sets it with jtcat-set-pref {key:'jtcatFakeIt'} (Guest Pass refused).
+    jtcatFakeIt: settings.jtcatFakeIt === true,
     // Plain-USB escape hatch for older Yaesu (FTdx3000 etc.) that clip the
     // digital passband in PKTUSB. Desktop is the source of truth; echo it so
     // the phone doesn't fall back to the default-true on every launch and
@@ -26094,6 +26176,11 @@ function connectRemote() {
     saveSettings(settings);
     sendCatLog(`[JTCAT] ${key} = ${JSON.stringify(v)} (remote)`);
     if (JTCAT_HUNT_FILTER_KEYS.includes(key)) broadcastAutoCqState();
+    if (key === 'jtcatFakeIt') {
+      fakeItSyncEngine();
+      updateRemoteSettings();
+      if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-flag-state', { key, enabled: v === true });
+    }
   });
   // Hunt filters from a device (Guest Pass refused in remote-server).
   remoteServer.on('jtcat-hunt-filters', (msg = {}) => applyJtcatHuntFilters(msg, 'remote'));
@@ -27711,6 +27798,7 @@ function handleRemotePtt(state, opts = {}) {
   }
 
   txLimitNote(state, opts);
+  if (!state && _fakeIt.active) fakeItRestoreDial('key-up');
   // A late reply from the last TX poll can still land after this; the next
   // release or the radio's own RX report rests it again.
   if (!state) setTimeout(() => { if (!_remoteTxState && !(cat && cat._transmitting)) txMetersRestOnRx(); }, 600);
@@ -45901,6 +45989,7 @@ function cloudShackNotice(text, kind) {
     delete newSettings.waterfallPalette;
     stampSstvTemplatesPatch(newSettings);
     setImmediate(() => afterSstvSettingsSaved(newSettings));
+    if (newSettings && 'jtcatFakeIt' in newSettings) setImmediate(() => { fakeItSyncEngine(); sendCatLog(`[JTCAT] Split operation Fake It: ${fakeItEnabled() ? 'on' : 'off'}`); });
     // An always-on feature has no off: a stale window's false never lands.
     for (const k of InstallDefaults.ALWAYS_ON) if (k in newSettings) newSettings[k] = true;
     const _rigsBeforeSave = JSON.stringify(settings.rigs || []);
