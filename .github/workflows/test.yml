@@ -1,13 +1,16 @@
 name: Test
 
-# Runs on every push to master + every PR. Fast (~1 min) — pure-JS
-# regression suite for JTCAT FT8/FT4/FT2 state machine, decode
-# classifier, callsign heuristic, mode handling, and the pre-encode
-# race fix. No Electron, no native modules, no live radio.
+# Runs on every push to master + every PR. The jtcat-tests job runs the
+# SAME suite as `npm test` (scripts/run-tests.js: every test file, in order,
+# continuing past failures, exit non-zero if any failed). Until 2026-11-07
+# this job ran a hand-picked list of ~90 files that had to be edited by hand
+# for every new test, and none of the tests added for #136/#142/#143/#174/
+# #179/#186 were on it, so "CI green" did not cover them (GitHub #205).
+# A new test file goes in scripts/run-tests.js and nowhere else.
 #
-# See test/jtcat-test.js for what's covered and
-# memory/project_jtcat_regression_invariants.md for the documented
-# WSJT-X-parity contract these tests enforce.
+# Tests that need Electron, a native build or a bundled helper skip
+# themselves when that is missing (the layout-tests job covers the rendered
+# checks with Electron installed). No live radio.
 #
 # To gate merges on this passing, enable branch protection in
 # GitHub Settings → Branches → master → "Require status checks
@@ -26,150 +29,19 @@ jobs:
     # battery past 5 minutes and runs were being CANCELLED at the timeout —
     # master showed "cancelled", not red, which is how it went unnoticed.
     # 12 → 16 (2026-09-26): the SSTV lock-supervision suite adds ~3 min.
-    timeout-minutes: 16
+    # 16 → 45 (2026-11-07): the whole npm test suite (430+ files) runs here.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-      - name: Every source file parses
-        run: node test/syntax-check-test.js
-      - name: Run JTCAT regression suite
-        run: node test/jtcat-test.js
-      - name: Run JTCAT parser suite
-        run: node test/jtcat-parser-test.js
-      - name: Run FT8 native decoder checks (source guards without the addon)
-        run: node test/ft8-native-decoder-test.js
-      - name: Run SSTV regression suite
-        run: node test/sstv-test.js
-      - name: Run SSTV PSNR-quality matrix
-        run: node test/sstv-quality-test.js
-      - name: Run SSTV realistic reception (SSB filter, in-band noise, mistuning)
-        run: node test/sstv-realistic-rx-test.js
-      - name: Run SSTV audio device (follows the rig, never falls back silently)
-        run: node test/sstv-audio-device-test.js
-      - name: Run SSTV live path (stopped decoder, idle SSTV band, reject logging)
-        run: node test/sstv-live-path-test.js
-      - name: Run LZ3AW batch B (spotter column, CQ/ITU zones, cluster node choice)
-        run: node test/lz3aw-batch-b-test.js
-      - name: Run (tr)uSDX CAT polling (slow poll, none during TX)
-        run: node test/trusdx-poll-test.js
-      - name: Run rigctld sideband width (band change keeps the filter)
-        run: node test/rigctld-sideband-width-test.js
-      - name: Run FT8 decode deadline (reply decoded before the next slot, tries counted by slot)
-        run: node test/ft8-decode-deadline-test.js
-      - name: Run FT8 engine (TX timing, slot locks, late start, wait-for-decode)
-        run: node lib/ft8-engine-test.js
-      - name: Run ECHOCAT USB CODEC TX graph (drive above unity, EQ, TX gate)
-        run: node test/echocat-usb-tx-graph-test.js
-      - name: Run SSTV decoder state (explicit Stop RX, S2C sstv-decoder-state)
-        run: node test/sstv-decoder-state-test.js
-      - name: Run SSTV redesign (starters, looks, packs drawn, replies, SWR trip, guest SSTV)
-        run: node test/sstv-redesign-test.js
-      - name: Run SSTV first columns (purple stripe, Scottie missed sync pulse)
-        run: node test/sstv-first-column-test.js
-      - name: Run SSTV mobile readiness (hello capabilities, TTF in packs, vendorable templates)
-        run: node test/sstv-mobile-readiness-test.js
-      - name: Run SSTV template sync (identity, merge, CAS client, guest guard)
-        run: node test/sstv-template-sync-test.js
-      - name: Run SSTV gallery (newest first, thumbnails, module-scope guard)
-        run: node test/sstv-gallery-test.js
-      - name: Run SSTV help (reports RSV/P scale, help content, calling-frequency sidebands)
-        run: node test/sstv-help-test.js
-      - name: Run SSTV/JTCAT handover (opening either closes the other)
-        run: node test/sstv-jtcat-handover-test.js
-      - name: Run SSTV style packs (pure-data format, signed feed, store, claims sync)
-        run: node test/sstv-packs-test.js
+          node-version: '22' # same as release.yml; the suite needs ws and serialport from the lockfile
+      - name: npm ci (the suite requires ws, serialport and the other runtime deps)
+        run: npm ci --no-audit --no-fund
+      - name: Run the whole npm test suite (scripts/run-tests.js)
+        run: node scripts/run-tests.js
       - name: Validate SSTV style packs in data/sstv-packs
         run: node scripts/validate-sstv-packs.js
-      - name: Run SSTV FSK ID (MMSSTV/QSSTV callsign after the picture)
-        run: node test/sstv-fskid-test.js
-      - name: Run LZ3AW round 10 (SWR 1:1, fast TX wattmeter, paddle element stream, Kenwood FR/FT split)
-        run: node test/lz3aw-round10-test.js
-      - name: Run LZ3AW round 11 (SM query order, S-meter during TX, wattmeter hold, VFO/split trace)
-        run: node test/lz3aw-round11-test.js
-      - name: Run LZ3AW round 12 (VFO/split from FR/FT, S-meter vs power by TX state)
-        run: node test/lz3aw-round12-test.js
-      - name: Run LZ3AW round 14 (web FT8 band follow, Logbook filters, Prop view, PSK31 pane, DX Expeditions)
-        run: node test/lz3aw-round14-test.js
-      - name: Run paddle contact bounce (one tap is one element, web and desktop keyers)
-        run: node test/paddle-bounce-test.js
-      - name: Run spot hides/skips sync (one desktop-owned list for every surface)
-        run: node test/spot-hides-test.js
-      - name: Run macOS title bars (every pop-out hides its own window buttons)
-        run: node test/mac-titlebar-test.js
-      - name: Run VFO card and worked grey-out (N0KAH, KC1SSY)
-        run: node test/vfo-and-greyout-test.js
-      - name: Run Test Connection restores the live link (KF0TDB)
-        run: node test/test-connection-restore-test.js
-      - name: Run serial port names (COM Port 10 -> COM10, KF0TDB)
-        run: node test/serial-path-test.js
-      - name: Run JTTY codec (golden vectors, frame counts, waveform)
-        run: node test/jtty-codec-test.js
-      - name: Run JTTY decoder (WSJT-X sample recording, noise, false decodes)
-        run: node test/jtty-decoder-test.js
-      - name: Run JTTY engine (loopback on both decoder hosts, refusals, main.js wiring)
-        run: node test/jtty-engine-test.js
-      - name: Run JTTY over ECHOCAT (registry, demux, guest refusal, replay buffer, web pane)
-        run: node test/jtty-remote-test.js
-      - name: Run JTTY/PSK31 TX freq from ECHOCAT reaches the pop-out (K3SBP 1500 Hz revert)
-        run: node test/jtty-txfreq-remote-test.js
-      - name: Run Idle Mode over ECHOCAT (per-field setter, echo, guest refusal, JTTY day/night)
-        run: node test/idle-mode-remote-test.js
-      - name: Run No CAT control (VOX) rig type (N4FFF Pebble HF)
-        run: node test/nocat-rig-test.js
-      - name: Run DXLab Commander rig type (TCP command port, command sequences)
-        run: node test/commander-codec-test.js
-      - name: Run removed features stay removed (FT8 Battle Royale)
-        run: node test/removed-features-test.js
-      - name: Run DXpeditions in the Contests view
-        run: node test/dxpedition-contests-test.js
-      - name: Run VFO view shows only the meters the radio reports
-        run: node test/vfo-meters-test.js
-      - name: Run DXpedition spot flags reach ECHOCAT
-        run: node test/dxe-remote-test.js
-      - name: Run SSTV live-engine E2E + real-world front door
-        run: node test/sstv-e2e-test.js
-      - name: Run SSTV lock supervision + VIS validation (wrong-mode locks, mid-image VIS)
-        run: node test/sstv-lock-test.js
-      - name: Run SSTV ingress feed-gate table tests
-        run: node test/sstv-feed-gate-test.js
-      - name: Run hunted-park resolver tests
-        run: node test/hunted-park-test.js
-      - name: Run CW {greeting} token (GM/GA/GE by the other station's local time)
-        run: node test/cw-greeting-test.js
-      - name: Run JTCAT pane splitters (map, Band/My Activity)
-        run: node test/jtcat-split-panes-test.js
-      - name: Run log-comment suite
-        run: node test/log-comment-test.js
-      - name: Run QSO expansion (one contact -> its ADIF records)
-        run: node test/qso-expand-test.js
-      - name: Run logging parity guards (every log surface through logContact)
-        run: node test/logging-parity-test.js
-      - name: Run watchlist sync (desktop <-> ECHOCAT, edit by operation)
-        run: node test/watchlist-sync-test.js
-      - name: Run WRL packet suite (numeric fields must not break forwarding)
-        run: node test/wrl-packet-test.js
-      - name: Run raw CAT command suite (rigctld binary escapes)
-        run: node test/raw-cat-command-test.js
-      - name: Run rigctld stderr explainer suite
-        run: node test/rigctld-stderr-test.js
-      - name: Run JS8 audio-feed guards (JS8 must have a capturer on USB-codec rigs)
-        run: node test/js8-audio-feed-test.js
-      - name: Run JTCAT hunt-off / attended-clock / mode-hop diagnostics guards
-        run: node test/jtcat-hunt-off-test.js
-      - name: Run desktop UX guards (activator split, chime, Propagation view keeps time)
-        run: node test/desktop-ux-test.js
-      - name: Run SWR guard suite (latch policy, ATU outcome, latched-QSO abandon)
-        run: node test/swr-guard-test.js
-      - name: Run FT-710 band-scope suite (frame parser, axis, helper exit codes)
-        run: node test/yaesu-scope-test.js
-      - name: Run SDR band scope suite (rtl_tcp client vs a fake server, spectrum maths, wiring)
-        run: node test/sdr-scope-test.js
-      - name: Run rtl_tcp listening suite (demodulator on generated IQ, client vs a fake server, scope sharing, wiring)
-        run: node test/rtltcp-audio-test.js
-      - name: Run Landmarks suite (catalog gate, hours, rig coverage, NCDXF beacon clock, feed, wiring)
-        run: node test/landmarks-test.js
       - name: Compile the FT-710 scope helper and round-trip one synthetic frame through the parser
         run: |
           gcc -O2 -Wall -o /tmp/yaesu-scope helpers/yaesu-scope/yaesu-scope.c -ldl -lpthread -lm
@@ -183,52 +55,6 @@ jobs:
             if (n !== 1) { console.error('expected 1 frame, got', n); process.exit(1); }
             console.log('helper → parser round trip OK');
           "
-      - name: Run rig-family suite
-        run: node test/rig-family-test.js
-      - name: Run DX cluster login suite
-        run: node test/dxcluster-login-test.js
-      - name: Run settings-secrets suite
-        run: node test/settings-secrets-test.js
-      - name: Run contest-history suite
-        run: node test/contest-history-test.js
-      - name: Run contests-db suite
-        run: node test/contests-db-test.js
-      - name: Run SmartSDR reconnect suite
-        run: node test/smartsdr-reconnect-test.js
-      - name: Run SmartSDR meter suite
-        run: node test/smartsdr-meter-test.js
-      - name: Run SmartSDR self-slice suite
-        run: node test/smartsdr-self-slice-test.js
-      - name: Run watchlist-groups suite
-        run: node test/watchlist-groups-test.js
-      - name: Run event-decode-match suite
-        run: node test/event-decode-match-test.js
-      - name: Run event-progress suite
-        run: node test/event-progress-test.js
-      - name: Run event-registry suite
-        run: node test/event-registry-test.js
-      - name: Run events-catalog suite (BUILTIN_EVENTS validates)
-        run: node test/events-catalog-test.js
-      - name: Run event-geo suite (event stations plot at their city)
-        run: node test/event-geo-test.js
-      - name: Run event-banner-pick suite (which event owns the banner; ended contests)
-        run: node test/event-banner-pick-test.js
-      - name: Run bug-report-log suite
-        run: node test/bug-report-log-test.js
-      - name: Run CW key-line resolver suite
-        run: node test/cw-key-line-test.js
-      - name: Run rig setup notes suite
-        run: node test/rig-setup-notes-test.js
-      - name: Run CW paddle-availability suite
-        run: node test/cw-paddle-availability-test.js
-      - name: Run SDR list sync suite
-        run: node test/sdr-list-sync-test.js
-      - name: Run clock offset suite
-        run: node test/clock-offset-test.js
-      - name: Run require/exports consistency suite
-        run: node test/require-exports-test.js
-      - name: Run npm test runner (continues past a failing file, names every failure, exits non-zero)
-        run: node test/run-tests-runner-test.js
 
   # The release workflow installs with npm ci (lockfile-pinned), which fails
   # hard if package.json and package-lock.json drift apart. Catch that on the

@@ -116,8 +116,12 @@ const mk = (a, b) => new StreamingResampler(a, b);
     await wait(30);
     const frame = new Float32Array(2400).fill(0.3);
     const t0 = Date.now();
-    for (let i = 0; i < 400; i++) srv.feedRx(frame, 12000); // 80 s of audio into a stuck reader
-    assert.ok(Date.now() - t0 < 500, 'feedRx never blocks');
+    // The drop threshold is what Node has not yet handed to the kernel; a
+    // Linux loopback socket swallows several MB before that grows (the CI
+    // runner absorbed 80 s of audio without one drop), so feed far more than
+    // any kernel buffer holds: 800 s of audio into a stuck reader.
+    for (let i = 0; i < 4000; i++) srv.feedRx(frame, 12000);
+    assert.ok(Date.now() - t0 < 3000, 'feedRx never blocks');
     assert.ok(srv.stats.rxDropped > 0, 'excess was dropped, not queued forever');
     modem.destroy();
     await srv.close();
