@@ -118,7 +118,7 @@ check('an SDR the operator chose follows the dial: the readouts show the radio',
   assert.deepStrictEqual(run(false, false, 0), [14285000, 'USB'], 'no SDR: the dial');
 });
 check('PTT is refused while the SDR is live for a frequency the radio cannot reach', () => {
-  assert.ok(/if \(state && listenSdr\.live && listenSdr\.auto\) \{[\s\S]{0,600}return;\s+\}/.test(main));
+  assert.ok(/if \(state && listenSdr\.live && listenSdr\.auto\) \{[\s\S]{0,600}return false;\s+\}/.test(main));
 });
 check('an operator\'s own SDR pick goes live at once; an automatic one waits for the arbiter', () => {
   assert.ok(/if \(kiwiManual\) kiwiGoLive\(false\);\s+else \{ broadcastKiwiStatus\(false, \{ available: true \}\); listenSdrResume\(\); \}/.test(main));

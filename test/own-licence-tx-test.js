@@ -120,7 +120,7 @@ test('an Icom USB-D key-down is no longer an unknown mode to the Guest Pass', ()
 const MAIN = readSrc(path.join(__dirname, '..', 'main.js'));
 test('handleRemotePtt refuses a key-down outside the class', () => {
   assert.ok(/const pttEmission = opts\.emission \|\| \(opts\.forceDataMode \? 'DATA' : null\);/.test(MAIN));
-  assert.ok(/if \(state && ownTxPrivilegeRefused\(pttEmission \|\| _currentMode, opts\.freqHz\)\) return;/.test(MAIN));
+  assert.ok(/if \(state && ownTxPrivilegeRefused\(pttEmission \|\| _currentMode, opts\.freqHz\)\) return false;/.test(MAIN));
 });
 test('the JTCAT key-down is checked before anything is keyed or played, single and multi-slice', () => {
   const i = MAIN.indexOf("if (ownTxPrivilegeRefused('DATA')) {");

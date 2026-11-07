@@ -19248,7 +19248,17 @@ function startJtcatTune(opts = {}) {
   // the tone). The 90s timer auto-releases.
   // opts.noDataSwap: Station Setup's voice test keys in plain USB/LSB, the
   // way a voice over does (the radio's SSB audio input, not its DATA one).
-  handleRemotePtt(true, { audio: true, emission: opts.emission || 'DATA', noDataSwap: !!opts.noDataSwap, txKind: 'tune' });
+  const keyed = handleRemotePtt(true, { audio: true, emission: opts.emission || 'DATA', noDataSwap: !!opts.noDataSwap, txKind: 'tune' });
+  // Refused (SCU-LAN10 audio, SWR guard, licence...): no tone and no timers.
+  // The refusal may already have stopped Tune; a tone started after that ran
+  // until POTACAT closed (#214).
+  if (keyed === false || !jtcatTuneState.active) {
+    jtcatTuneState.active = false;
+    jtcatTuneState.directIcom = false;
+    broadcastJtcatTuneState();
+    sendCatLog('[JTCAT] Tune not started: transmit was refused, so no tone was played');
+    return;
+  }
   // Route the tone the same way FT8 TX is routed: straight to dax_tx on the
   // SmartSDR-Direct path, then the Icom RS-BA1 network path, else the
   // renderer's Windows-DAX device path.
@@ -27482,6 +27492,7 @@ function pttAudioActive(opts = {}) {
     ));
 }
 
+// Returns false when it refuses a key-down (callers with audio must not play it).
 function handleRemotePtt(state, opts = {}) {
   pushActivityState();   // busy.tx edges reach the activity feed (debounced)
   // Driving a remote shack: every PTT source on this desktop (the VFO
@@ -27501,7 +27512,7 @@ function handleRemotePtt(state, opts = {}) {
     if (remoteServer && remoteServer.running) {
       remoteServer.sendToClient({ type: 'tune-blocked', reason: 'PTT blocked — SWR guard tripped. Run the ATU or change bands on the desktop.' });
     }
-    return;
+    return false;
   }
   // The ATU wizard is keying tune carriers across the bands: a PTT from any
   // surface would land on whatever frequency it is measuring.
@@ -27510,7 +27521,7 @@ function handleRemotePtt(state, opts = {}) {
     sendCatLog(`[PTT] ${why}`);
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', why);
     if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'tune-blocked', reason: why });
-    return;
+    return false;
   }
   // The operator's own licence class. opts.emission names what goes out when
   // the rig's mode does not (FT8 keyed in USB, SSTV keyed in USB-D).
@@ -27520,7 +27531,7 @@ function handleRemotePtt(state, opts = {}) {
   // friend on NA4DQ's Guest Pass, 2026-10-29: "Out of band: 28.074 MHz allows
   // CW/digital only on tech privileges").
   const pttEmission = opts.emission || (opts.forceDataMode ? 'DATA' : null);
-  if (state && ownTxPrivilegeRefused(pttEmission || _currentMode, opts.freqHz)) return;
+  if (state && ownTxPrivilegeRefused(pttEmission || _currentMode, opts.freqHz)) return false;
   // You cannot key a receiver: while the SDR is what you hear because the
   // radio cannot reach that frequency, PTT is refused and says so.
   if (state && listenSdr.live && listenSdr.auto) {
@@ -27528,7 +27539,7 @@ function handleRemotePtt(state, opts = {}) {
     sendCatLog(`[PTT] refused — ${why}`);
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', why);
     if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) remoteServer.sendToClient({ type: 'tune-blocked', reason: why });
-    return;
+    return false;
   }
   // Yaesu SCU-LAN10 (experimental): the spec has not decoded transmit audio,
   // so keying with the LAN as the audio source puts a SILENT carrier on the
@@ -27545,7 +27556,7 @@ function handleRemotePtt(state, opts = {}) {
       _yaesuLanTxNoticeAt = Date.now();
       win.webContents.send('app-notice', { message: why, warn: true, duration: 15000 });
     }
-    return;
+    return false;
   }
   const target = settings.catTarget;
   if (target && target.type === 'none') {
@@ -40853,7 +40864,15 @@ function cloudShackNotice(text, kind) {
       // its factory DATA OFF MOD setting takes the mic, not USB, and the rig
       // keys with no audio (WB8IMY IC-7300, 2026-09-26). Receive stays in USB.
       const _sstvIcom = detectRigType() === 'icom' || (getActiveRigModel()?.brand === 'Icom');
-      handleRemotePtt(true, { audio: true, forceDataMode: _sstvIcom, emission: 'SSTV', txKind: 'sstv' });
+      if (handleRemotePtt(true, { audio: true, forceDataMode: _sstvIcom, emission: 'SSTV', txKind: 'sstv' }) === false) {
+        sendCatLog('[SSTV] picture not sent: transmit was refused');
+        if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+          sstvPopoutWin.webContents.send('sstv-abort-tx');
+          sstvPopoutWin.webContents.send('tune-blocked', 'Picture not sent: ' + (yaesuLanTxRefusal() || 'transmit was refused (see the log).'));
+        }
+        if (remoteServer) remoteServer.broadcastSstvTxStatus({ state: autoSstvActive ? 'auto-rx' : 'rx' });
+        return;
+      }
 
       // Optional CW ID — required by some regulators (UK/EU), good
       // practice everywhere. When settings.sstvCwId is true, append
@@ -49428,7 +49447,11 @@ function cloudShackNotice(text, kind) {
   // USB CODEC, so SSB-over-DATA's mode switch IS appropriate here when
   // the user has it enabled (never on a Yaesu: see handleRemotePtt).
   ipcMain.on('voice-macro-ptt', (_e, state) => {
-    handleRemotePtt(!!state, { audio: true });
+    // The window starts the recording with this request: a refusal stops it.
+    if (handleRemotePtt(!!state, { audio: true }) === false && win && !win.isDestroyed()) {
+      sendCatLog('[Voice] macro stopped: transmit was refused');
+      win.webContents.send('stop-voice-macro');
+    }
   });
   // Every surface's macro buttons show what is on the air.
   ipcMain.on('voice-macro-playing', (_e, info) => {
