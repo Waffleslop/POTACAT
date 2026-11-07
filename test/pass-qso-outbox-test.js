@@ -57,6 +57,20 @@ function outbox(fetch, opts = {}) {
     assert.strictEqual(box.pending(), 0);
   });
 
+  await check('a flush with nothing due does not wedge the outbox (#179)', async () => {
+    const fetch = fakeFetch((url, body) => reply(200, { accepted: body.changes.map((c) => c.uuid) }));
+    const { box } = outbox(fetch);
+    await box.flush();
+    box.stop();
+    assert.strictEqual(box._flushing, null, 'an empty flush leaves no settled promise behind');
+    box.add({ code: 'abcd1234', token: TOKEN, fields: fields('W1AW') });
+    box.stop();
+    await box.flush();
+    box.stop();
+    assert.strictEqual(fetch.calls.length, 1, 'the contact added after an empty flush is posted');
+    assert.strictEqual(box.pending(), 0);
+  });
+
   await check('no connection: kept, retried, and survives a restart', async () => {
     const file = tmpFile();
     let up = false;
