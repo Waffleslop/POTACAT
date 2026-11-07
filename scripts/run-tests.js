@@ -336,6 +336,7 @@ const TESTS = [
   'test/save-qso-stall-test.js',
   'test/pota-sync-login-test.js',
   'test/qso-expand-test.js',
+  'test/sota-chase-test.js', // #191: a POTA-primary record carrying a sotaRef uploads its SOTA chase
   'test/spot-park-state-test.js', // a multi-state park's state from the activator's spot locationCode (N0KAH)
   'test/log-dialog-qrz-test.js',
   'test/logging-parity-test.js',

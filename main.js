@@ -327,7 +327,7 @@ if (process.platform === 'linux' &&
 }
 const { execFile, execFileSync, spawn } = require('child_process');
 const { fetchSpots: fetchPotaSpots, parkStatesFromLocation } = require('./lib/pota');
-const { fetchSpots: fetchSotaSpots, fetchSummitCoordsBatch, summitCache, loadAssociations, getAssociationName, SotaUploader } = require('./lib/sota');
+const { fetchSpots: fetchSotaSpots, fetchSummitCoordsBatch, summitCache, loadAssociations, getAssociationName, SotaUploader, sotaChaseSummits } = require('./lib/sota');
 const sotaUploader = new SotaUploader();
 const { CatClient, RigctldClient, CivClient, listSerialPorts } = require('./lib/cat');
 // New rig abstraction layer
@@ -14819,11 +14819,17 @@ async function saveQsoRecord(qsoData, opts) {
     }
   }
 
-  // Auto-upload chaser QSO to SOTAdata if enabled
-  if (settings.sotaUpload && qsoData.sig === 'SOTA' && qsoData.sigInfo && sotaUploader.configured) {
+  // Auto-upload chaser QSO to SOTAdata if enabled. The summit may be the
+  // record's own (sig=SOTA) or ride in sotaRef on a POTA-primary record (an
+  // activator spotted on both, #191) — lib/sota.js sotaChaseSummits decides.
+  const sotaSummits = settings.sotaUpload ? sotaChaseSummits(qsoData) : [];
+  if (sotaSummits.length && !sotaUploader.configured) {
+    sendCatLog(`[SOTA] Chase not uploaded: SOTA upload is on but no SOTAdata login is saved (Settings)`);
+  }
+  for (const sotaSummit of (sotaUploader.configured ? sotaSummits : [])) {
     try {
-      sendCatLog(`[SOTA] Uploading chase: ${qsoData.callsign} @ ${qsoData.sigInfo} RST S${qsoData.rstSent || '?'} R${qsoData.rstRcvd || '?'}`);
-      const sotaResult = await sotaUploader.uploadChase(qsoData);
+      sendCatLog(`[SOTA] Uploading chase: ${qsoData.callsign} @ ${sotaSummit} RST S${qsoData.rstSent || '?'} R${qsoData.rstRcvd || '?'}`);
+      const sotaResult = await sotaUploader.uploadChase(qsoData, sotaSummit);
       if (sotaResult.success) {
         sendCatLog(`[SOTA] Chase uploaded successfully`);
       } else {
