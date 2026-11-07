@@ -2673,7 +2673,7 @@ async function loadSerialcatPorts(savedTarget) {
   const hsSel = document.getElementById('set-serialcat-handshake');
   if (hsSel) {
     const hs = savedTarget && savedTarget.serialHandshake;
-    hsSel.value = hs === 'none' || hs === 'hardware' ? hs : 'auto';
+    hsSel.value = hs === 'none' || hs === 'hardware' || hs === 'asserted' ? hs : 'auto';
   }
   const pttSel = document.getElementById('set-serialcat-ptt');
   if (pttSel) pttSel.value = savedPttChoice(savedTarget);
