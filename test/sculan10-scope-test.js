@@ -29,17 +29,19 @@ test('a spec-shaped frame is 4096 bytes with the marker at twice the line length
   assert.deepStrictEqual(S.findSpectrumEnd(f), { end: 1700, method: 'marker' });
 });
 
-test('the marker/2 rule: the usable line is the first marker/2 bytes, read from byte 0', () => {
+test('a 4096-byte frame: the line is the first 850 bytes, read from byte 0, wherever the marker sits (#143: marker/2 is not the rule)', () => {
   for (const n of [850, 900, 950]) {
     const levels = line(n, { 100: 200, 400: 250 });
     const d = S.decodeScopeFrame(S.buildSpecFrame(levels));
-    assert.strictEqual(d.end, 2 * n);
-    assert.strictEqual(d.usable, n, 'marker ' + 2 * n + ' gives ' + n + ' bins');
-    assert.deepStrictEqual(Array.from(d.levels), Array.from(levels), 'every bin comes back');
+    assert.strictEqual(d.end, 2 * n, 'the marker is still reported');
+    assert.strictEqual(d.usable, 850, 'marker ' + 2 * n + ' still gives 850 bins');
+    assert.deepStrictEqual(Array.from(d.levels), Array.from(levels.subarray(0, 850)), 'every bin comes back');
   }
-  // An odd marker position rounds down, as marker // 2 does.
   const raw = Buffer.alloc(4096, 220); raw[1901] = 1;
-  assert.strictEqual(S.decodeScopeFrame(raw).usable, 950);
+  assert.strictEqual(S.decodeScopeFrame(raw).usable, 850);
+  // A frame of another size has no known layout: the spec's marker // 2, rounded down.
+  const odd = Buffer.alloc(3000, 220); odd[1901] = 1;
+  assert.strictEqual(S.decodeScopeFrame(odd).usable, 950);
 });
 
 test('amplitude is inverted: raw 0 is the strongest, 255 the weakest; level = 255 - raw = 255 x (1 - raw/255)', () => {
@@ -140,7 +142,7 @@ test('review: a reserved 1 beats an earlier 0 even with no reference block anywh
   const raw = Buffer.alloc(4096, 210);
   raw[900] = 0; raw[1720] = 1;
   assert.deepStrictEqual(S.findConfirmedMarker(raw), { end: 1720, method: 'marker' });
-  assert.strictEqual(S.decodeScopeFrame(raw, new S.MarkerTracker()).usable, 860);
+  assert.strictEqual(S.decodeScopeFrame(raw, new S.MarkerTracker()).usable, 850);
 });
 
 test('a span change moves the marker: the old lock no longer reads <= 1 and the search runs again', () => {
@@ -180,10 +182,99 @@ test('bins map linearly across the span centred on the dial', () => {
 
 test('the first-frame log line says what a tester\'s frame looked like', () => {
   const s = S.describeFrame(S.buildSpecFrame(line(850)));
-  assert.ok(/^4096 bytes; boundary marker at byte 1700 \(first byte <= 1 after 500 with the reference block after it\), 850 usable bins; raw min\/median\/max \d+\/\d+\/\d+; FT-710 USB tail FF 01 EE 01: no$/.test(s), s);
+  assert.ok(/^4096 bytes; boundary marker at byte 1700 \(first byte <= 1 after 500 with the reference block after it\), 850 usable bins; raw min\/median\/max \d+\/\d+\/\d+; FT-710 USB tail FF 01 EE 01: no; WF2 \(850\.\.1699\) vs WF1: identical; bytes 1700\.\.2899 min\/max \d+\/\d+$/.test(s), s);
   const odd = Buffer.alloc(3000, 220);
   assert.ok(/3000 bytes \(the spec says 4096\)/.test(S.describeFrame(odd)));
 });
+
+// ---- #143: the FTDX10 frame VK4KTW's radio sent (2026-11-06) ---------------
+// Its first-frame log line: marker at byte 2950 (the first byte of exactly 1
+// after 500), the spec's first-byte rule stopping at byte 850, and so 1475
+// "usable" bins by marker/2. That is the FT-710 USB layout lib/yaesu-scope.js
+// decodes (verified on air): WF1 = bytes 0..849, WF2 = 850..1699, 0xFF up to
+// the metadata at 2900..3049 (2950 sits inside it). Built here byte by byte
+// from that description: no data from the owner's radio.
+function vk4ktwFrame({ wf2 = 'zeros', signals = { 120: 20, 425: 5, 600: 12, 800: 10 } } = {}) {
+  const raw = Buffer.alloc(4096, 0);
+  for (let i = 0; i < 850; i++) raw[i] = 200 + ((i * 17) % 41);   // noise 200-240
+  raw[0] = 0;                                                     // the owner's frame: raw min 0
+  for (const [bin, r] of Object.entries(signals)) raw[Number(bin)] = r;
+  for (let i = 850; i < 1700; i++) raw[i] = wf2 === 'copy' ? raw[i - 850] : 0;
+  for (let i = 1700; i < 2900; i++) raw[i] = 0xFF;
+  for (let i = 2900; i < 3050; i++) raw[i] = 2 + (i % 7);          // metadata: small values, never 1 ...
+  raw[2950] = 1;                                                  // ... except the byte the marker search finds
+  return raw;                                                     // 3050..4095 zero: no FF 01 EE 01 tail
+}
+
+test('#143 fixture: the synthetic frame has the shape of the owner\'s log line', () => {
+  for (const wf2 of ['zeros', 'copy']) {
+    const raw = vk4ktwFrame({ wf2 });
+    for (let i = 500; i < 850; i++) assert.ok(raw[i] > 1, 'raw[500..849] > 1');
+    assert.strictEqual(raw[850], 0);
+    for (let i = 500; i < 2950; i++) assert.notStrictEqual(raw[i], 1, 'no byte == 1 before 2950');
+    assert.strictEqual(raw[2950], 1);
+  }
+});
+
+test('#143: describeFrame reproduces the owner\'s log line (marker 2950, spec rule 850)', () => {
+  const s = S.describeFrame(vk4ktwFrame());
+  assert.ok(s.startsWith('4096 bytes; boundary marker at byte 2950 (first byte <= 1 after 500); the spec\'s first-byte rule alone would stop at byte 850, '), s);
+  assert.ok(/FT-710 USB tail FF 01 EE 01: no/.test(s), s);
+});
+
+test('#143: a 4096-byte frame decodes to the first 850 bytes (WF1), whatever the marker says, and nothing from WF2', () => {
+  for (const wf2 of ['zeros', 'copy']) {
+    const raw = vk4ktwFrame({ wf2 });
+    const t = new S.MarkerTracker();
+    for (let k = 0; k < 4; k++) {
+      const d = S.decodeScopeFrame(raw, t);
+      assert.strictEqual(d.end, 2950, 'the marker is still found, for the log');
+      assert.strictEqual(d.usable, 850, wf2 + ': 850 bins, not marker/2 = 1475');
+      assert.strictEqual(d.levels.length, 850);
+      for (let i = 0; i < 850; i++) assert.strictEqual(d.levels[i], 255 - raw[i], 'bin ' + i);
+      const f = S.toScopeFrame(d.levels);
+      assert.strictEqual(f.wf1[425], 250, 'a signal at bin 425 is drawn at point 425 (the dial)');
+      assert.strictEqual(f.wf1[800], 245);
+      assert.strictEqual(f.wf1[120], 235);
+      assert.ok(f.wf1.slice(1).every((v) => v < 255), wf2 + ': no full-scale wall from WF2');
+    }
+  }
+});
+
+test('#143: the spec-shaped frame (marker 1700) decodes to the same 850 bins as before', () => {
+  const levels = line(850, { 100: 200, 400: 250 });
+  const d = S.decodeScopeFrame(S.buildSpecFrame(levels), new S.MarkerTracker());
+  assert.strictEqual(d.end, 1700);
+  assert.deepStrictEqual(Array.from(d.levels), Array.from(levels));
+});
+
+test('#143: an explicit { bins } override reads a wider line (a one-constant revert if the FTDX10 line is wider)', () => {
+  const raw = vk4ktwFrame();
+  const d = S.decodeScopeFrame(raw, null, { bins: 1475 });
+  assert.strictEqual(d.usable, 1475);
+  assert.strictEqual(d.levels[1000], 255, 'WF2 zeros read as full scale when asked for');
+});
+
+test('#143: describeFrame says how WF2 compares to WF1 and what fills 1700..2899', () => {
+  assert.ok(/WF2 \(850\.\.1699\) vs WF1: constant 0; bytes 1700\.\.2899 min\/max 255\/255/.test(S.describeFrame(vk4ktwFrame({ wf2: 'zeros' }))), S.describeFrame(vk4ktwFrame()));
+  assert.ok(/WF2 \(850\.\.1699\) vs WF1: identical;/.test(S.describeFrame(vk4ktwFrame({ wf2: 'copy' }))));
+  const differs = vk4ktwFrame({ wf2: 'copy' }); differs[1000] = 50; differs[1200] = 90;
+  assert.ok(/WF2 \(850\.\.1699\) vs WF1: different \(mean \|diff\| [\d.]+\);/.test(S.describeFrame(differs)), S.describeFrame(differs));
+});
+
+// The owner's real frame, once it arrives (%APPDATA%\POTACAT\sculan10-scope-frame.bin).
+const FIXTURE = require('path').join(__dirname, 'fixtures/sculan10/ftdx10-vk4ktw-2026-11-06.bin');
+if (require('fs').existsSync(FIXTURE)) {
+  test('#143: the owner\'s captured FTDX10 frame decodes to 850 bins', () => {
+    const raw = require('fs').readFileSync(FIXTURE);
+    const d = S.decodeScopeFrame(raw, new S.MarkerTracker());
+    assert.strictEqual(raw.length, 4096);
+    assert.strictEqual(d.usable, 850);
+    console.log('       ' + S.describeFrame(raw));
+  });
+} else {
+  console.log('  skip the owner\'s FTDX10 frame (test/fixtures/sculan10/ftdx10-vk4ktw-2026-11-06.bin not captured yet)');
+}
 
 console.log(`\nSCU-LAN10 scope: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
