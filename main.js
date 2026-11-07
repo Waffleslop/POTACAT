@@ -4688,6 +4688,18 @@ function bindRigStateEvents(controller) {
       try { remoteServer.sendToClient({ type: 'tune-blocked', reason: msg }); } catch {}
     }
   });
+  // #127: the radio is still keyed after a CW message and the controller's
+  // receive command did not take. Stop every CW sender exactly as the phone's
+  // STOP does (the one thing known to release kc9hekbrian's FTDX10) and force
+  // the CW Key Port's DTR/RTS low. The controller's 'notice' tells the operator.
+  controller.on('cw-stuck', (info) => {
+    if (controller !== cat) return;
+    const t = settings.catTarget || {};
+    const backend = t.type === 'rigctld' ? 'rigctld' : (t.type === 'serial' ? `serial CAT ${t.path || ''}`.trim() : (t.type || 'CAT'));
+    sendCatLog(`[CW] Radio still keyed after a CW message (check ${info && info.pass}/${info && info.of}, ${backend}${settings.cwKeyPort ? `, CW Key Port ${settings.cwKeyPort}` : ''}): stopping all CW and dropping the key line`);
+    try { cancelAllCwSends(); } catch {}
+    dropCwKeyLine('CW stuck after a message');
+  });
   controller.on('antennaPort', sendCatAntennaPort);
   controller.on('preampStep', sendCatPreampStep);
   controller.on('attStep', sendCatAttStep);
@@ -22926,6 +22938,15 @@ function _sendCwTextToRadioImpl(text, opts) {
     if (!_cwTextKyHintLogged && settings.cwKeyPort && cwCaps.textMethod !== 'dtr-key-port' && rigModel?.brand === 'Yaesu') {
       _cwTextKyHintLogged = true;
       sendCatLog('[CW] Text is going out via the CAT KY command, not your CW Key Port. If this radio is an FT-891 or FT-710, select that exact model in Settings > Rig — on those rigs KY is unreliable (radio keys TX with no morse) and the correct model routes text through the key port instead.');
+    }
+    // Say which command keys the text: this path logged nothing, so a stuck
+    // radio left no trace of how it was keyed (#127). Not per keystroke.
+    if (!live) {
+      const via = cwCaps.kyMode === 'km' ? 'KM/KY (keyer memory, BK-IN)'
+        : cwCaps.text === 'ky1' ? (rigModel?.brand === 'Yaesu' ? 'KY (BK-IN)' : 'TX1;+KY')
+        : cwCaps.text === 'civ' ? 'CI-V 0x17' : (cwCaps.text || 'KY');
+      const t = settings.catTarget || {};
+      sendCatLog(`[CW] Text via CAT ${t.type === 'rigctld' ? 'rigctld send_morse' : via} @ ${(cat && cat._cwWpm) || settings.cwWpm || 20} wpm: ${expanded}`);
     }
     // `live` = key-as-I-type: append to the radio's buffer, never abort what
     // is already being keyed (see RigController.sendCwText).
