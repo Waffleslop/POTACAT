@@ -11548,6 +11548,21 @@ function winlinkSetRemoteWatch(count) {
 }
 
 /**
+ * The dial and mode a Winlink session goes back to, exactly as they are now:
+ * an Icom reads USB with DATA as its own flag, so USB + DATA is saved as DIGU
+ * (an FT8 operator in USB-D came back in plain USB before, #187).
+ */
+function winlinkDialHere(from) {
+  const r = pttModeReport();
+  const icomData = !!(r && r.data && cat && cat._codec && cat._codec._dataReportAt);
+  const mode = _currentMode || '';
+  return { freqHz: _currentFreqHz || 0, mode: icomData ? PttModeSwap.dataFormOf(mode) : mode, from };
+}
+function winlinkDialText(d) {
+  return `${(d.freqHz / 1e6).toFixed(4)} MHz${d.mode ? ' ' + d.mode : ''}${d.from ? ` (where it was ${d.from})` : ''}`;
+}
+
+/**
  * A gateway was picked (not yet connected): tune there now, so the waterfall
  * shows that frequency and the operator can see whether it is in use. The
  * dial/mode from before the FIRST pick is remembered and put back when the
@@ -11561,7 +11576,7 @@ function winlinkPreviewQsy({ dialKhz, mode } = {}) {
   if (isRemoteMode()) return { ok: false, error: 'Radio sessions key the shack\'s radio — tune from the shack PC', reason: 'remote' };
   if (winlinkSessionActive()) return { ok: false, error: 'A session is running' };
   if (radioOwner !== 'none' && radioOwner !== 'winlink') return { ok: false, error: `The radio is in use by ${radioOwner}`, reason: 'radio-busy' };
-  if (!_winlinkPreviewReturnTo && _currentFreqHz) _winlinkPreviewReturnTo = { freqHz: _currentFreqHz, mode: _currentMode || '' };
+  if (!_winlinkPreviewReturnTo && _currentFreqHz) _winlinkPreviewReturnTo = winlinkDialHere('before the gateway pick');
   tuneRadio(khz, mode === 'packet' ? 'FM' : 'DIGU', undefined, { origin: 'Winlink gateway pick' });
   winlinkLog(`listening on ${khz.toFixed(1)} kHz for the picked gateway (the radio goes back to ${_winlinkPreviewReturnTo ? (_winlinkPreviewReturnTo.freqHz / 1e6).toFixed(4) + ' MHz' : 'where it was'} after)`);
   return { ok: true };
@@ -11883,7 +11898,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
   winlinkState.setSession({
     state: 'starting', mode, gateway: radio ? String(gateway).toUpperCase() : 'CMS (internet)', dialKhz: radio ? Number(dialKhz) || null : null,
     capSec: radio ? capMin * 60 : 0,
-    returnTo: radio ? (_winlinkPreviewReturnTo || { freqHz: _currentFreqHz || 0, mode: _currentMode || '' }) : null,
+    returnTo: radio ? (_winlinkPreviewReturnTo || winlinkDialHere('at Connect')) : null,
     text: radio ? `Preparing ${WinlinkModes.LABELS[mode]}` : 'Connecting to Winlink over the internet',
   });
   _winlinkSessionError = '';
@@ -11892,6 +11907,8 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
   winlinkSessionTouch();
   winlinkSessionPush();
   winlinkLog(`session start: ${mode}${radio ? ` → ${String(gateway).toUpperCase()} on ${Number(dialKhz).toFixed(1)} kHz dial` : ''} (${origin || 'operator'})`);
+  const _rt = winlinkState.session.returnTo;
+  if (radio && _rt && _rt.freqHz) winlinkLog(`the radio goes back to ${winlinkDialText(_rt)} when the session ends`);
   if (radio) {
     settings.winlinkLastGateway = { call: String(gateway).toUpperCase(), mode, dialKhz: Number(dialKhz) || null };
     saveSettings(settings);
@@ -12133,11 +12150,18 @@ function winlinkEndSession(state, text, received = 0) {
  */
 function winlinkRestoreDial(returnTo, waitedMs = 0) {
   if (!returnTo || !returnTo.freqHz) return;
+  // A Connect inside the 1.5 s (or the ATU wait) would be QSYed off its gateway
+  // mid-call and save the gateway as its own return dial (#187).
+  if (winlinkSessionActive()) {
+    winlinkLog(`not going back to ${winlinkDialText(returnTo)} — a new session is running`);
+    return;
+  }
   if (_atuTuneEpisode && waitedMs < 30000) {
     if (waitedMs === 0) winlinkLog(`holding the return to ${(returnTo.freqHz / 1e6).toFixed(4)} MHz until the ATU tune finishes`);
     setTimeout(() => winlinkRestoreDial(returnTo, waitedMs + 500), 500);
     return;
   }
+  winlinkLog(`session over: the radio goes back to ${winlinkDialText(returnTo)}`);
   try { tuneRadio(returnTo.freqHz / 1000, returnTo.mode || undefined, undefined, { origin: 'Winlink session ended' }); } catch {}
 }
 
@@ -27484,6 +27508,7 @@ function pttAskMode() {
 // Skipped for the latched codec; after the first timeout on a link, every
 // later key-down there keys at the bus-gap minimum (transmit-safety review).
 let _pttDataNoConfirmCat = null;
+let _pttDataHeldLoggedFor = -1; // the Winlink session whose "DATA held" line is already in the log (#187)
 function pttDataConfirmable() {
   const codec = cat && cat._codec;
   if (codec && codec._dataModeUnsupported) return false;
@@ -27732,7 +27757,17 @@ function handleRemotePtt(state, opts = {}) {
     // Switch to DATA mode before TX to prevent local mic bleed
     // Skip when JTCAT is active — it manages its own DATA mode
     const curMode = (_currentMode || '').toUpperCase();
-    if (curMode === 'USB' || curMode === 'LSB' || curMode === 'SSB' || curMode === 'FM' || curMode === 'AM') {
+    // A Winlink session holds DATA from its QSY to its end (GitHub #187): an
+    // Icom reads USB with DATA as its own flag, so every ARDOP frame went
+    // USB -> DIGU and "Restoring USB" undid the session's DIGU (NA4DQ IC-7300).
+    const _holdData = forceData && opts.txKind === 'winlink';
+    const _dataPlan = PttModeSwap.sessionDataPlan({ hold: _holdData, inData: !!(pttModeReport() || {}).data });
+    if (_dataPlan === 'keep') {
+      if (_pttDataHeldLoggedFor !== _winlinkSessionSeq) {
+        _pttDataHeldLoggedFor = _winlinkSessionSeq;
+        sendCatLog('[PTT] the radio is in DATA mode already — keying without a mode change; it stays in DATA until the Winlink session ends');
+      }
+    } else if (curMode === 'USB' || curMode === 'LSB' || curMode === 'SSB' || curMode === 'FM' || curMode === 'AM') {
       // FM and AM have their own data forms on an Icom (FM-D / AM-D). Sending
       // them to USB-D moved an IC-9700 off FM for every voice over (KG5EIU).
       const _dataRig = getActiveRigModel();
@@ -27741,7 +27776,7 @@ function handleRemotePtt(state, opts = {}) {
         : (_icomData && curMode === 'FM') ? 'DIGFM'
         : (_icomData && curMode === 'AM') ? 'DIGAM'
         : 'DIGU';
-      _ssbModeBeforePtt = curMode;
+      _ssbModeBeforePtt = _dataPlan === 'switch-hold' ? null : curMode; // held: the session end puts the mode back, once
       // Capture the dial BEFORE the swap. During TX in DATA mode a Yaesu with
       // DATA MODE = PSK reports the subcarrier-shifted TX carrier (~1.5 kHz
       // below the dial); the poll ingests it into _currentFreqHz mid-TX, and
@@ -27752,7 +27787,7 @@ function handleRemotePtt(state, opts = {}) {
       _ssbFreqBeforePtt = _currentFreqHz;
       // Say WHY: a forced switch is not the SSB-over-DATA setting, and calling
       // it that sent EA1BZN to check two options that were already off.
-      sendCatLog(`[PTT] ${curMode} -> ${dataMode} (${forceData ? (opts.dataReason || 'this audio reaches the radio only in DATA mode') : 'SSB-over-DATA: mic disabled'})`);
+      sendCatLog(`[PTT] ${curMode} -> ${dataMode} (${forceData ? (opts.dataReason || 'this audio reaches the radio only in DATA mode') : 'SSB-over-DATA: mic disabled'})${_dataPlan === 'switch-hold' ? ' — held until the Winlink session ends' : ''}`);
       // Yaesu rigs have a "DATA MODE" menu that controls whether DIGL/DIGU
       // behave as mic-disabled SSB (DATA MODE = Others/STD — carrier freq
       // unchanged) or as a subcarrier-offset PSK mode (DATA MODE = PSK —
@@ -27766,8 +27801,8 @@ function handleRemotePtt(state, opts = {}) {
           sendCatLog('[PTT] Yaesu + SSB-over-DATA: verify the rig menu "DATA MODE" = Others (or DATA-STD), not PSK. PSK shifts the TX carrier by the subcarrier offset (~1500 Hz below the dial freq) and your TX will land off-frequency.');
         }
       }
-      // Suppress mode broadcasts for the entire PTT duration + restore.
-      _modeSuppressUntil = Date.now() + 120000;
+      // Suppress mode broadcasts for the entire PTT duration + restore (a held switch has no restore).
+      _modeSuppressUntil = Date.now() + (_dataPlan === 'switch-hold' ? 2000 : 120000);
       // Change mode only — don't retune frequency (avoids 0Hz bug when freq unknown).
       // Pass current freq so setModeOnly can re-anchor the VFO after the mode
       // change (Yaesu drifts by the filter-width diff on every mode swap).
