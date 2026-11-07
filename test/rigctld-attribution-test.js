@@ -294,6 +294,37 @@ test('#128: a raw write the radio never answered does not swallow PTT\'s RPRT 0'
   assert.deepStrictEqual(codec._pending, []);
 });
 
+test('#128: a raw read\'s text reply consumes its raw entry, so a rejection right behind it is blamed on the right command', () => {
+  // Kenwood through rigctld: `w PC;` runs every ~1.5 s at the power slider,
+  // the radio answers "PC100;" (no RPRT), and the next failed query must
+  // not be blamed on that already-answered raw read.
+  const { codec, writes, events } = makeCodec(KENWOOD);
+  let unavailable = 0;
+  codec.on('ptt-unavailable', () => unavailable++);
+  const power = [];
+  codec.on('power', (w) => power.push(w));
+  codec.getPower();          // w PC;
+  codec.getFrequency();      // f
+  assert.deepStrictEqual(writes, ['w PC;\n', 'f\n']);
+  codec.onData('PC100;\nRPRT -11\n');
+  assert.deepStrictEqual(power, [100]);
+  assert.deepStrictEqual(codec._pending, [], 'PC100; consumed the raw entry; the -11 consumed `f`');
+  assert.strictEqual(unavailable, 0);
+  assert.strictEqual(valueOf(events, 'frequency'), undefined);
+  // The same for a queryRaw read, whose reply is matched by prefix.
+  const c2 = makeCodec(YAESU);
+  c2.codec.queryRaw('AC;', { prefix: 'AC', timeoutMs: 500 }).catch(() => {});
+  c2.codec.getFrequency();
+  c2.codec.onData('AC001;\nRPRT -11\n');
+  assert.deepStrictEqual(c2.codec._rawQueries, [], 'the raw query was answered');
+  assert.deepStrictEqual(c2.codec._pending, []);
+  // A text reply with no raw entry outstanding removes nothing else.
+  const c3 = makeCodec(KENWOOD);
+  c3.codec.getFrequency();
+  c3.codec.onData('PC050;\n');
+  assert.strictEqual(c3.codec._pending.length, 1, 'the `f` entry is untouched');
+});
+
 test('#128: entries nothing answered in 3 s are evicted before an RPRT is blamed', () => {
   const { codec, writes } = makeCodec();
   codec.getMode();
