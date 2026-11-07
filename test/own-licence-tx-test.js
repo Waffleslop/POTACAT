@@ -126,7 +126,9 @@ test('the JTCAT key-down is checked before anything is keyed or played, single a
   const i = MAIN.indexOf("if (ownTxPrivilegeRefused('DATA')) {");
   const a = MAIN.indexOf("acquireRadio('jtcat'); // held for the duration of this transmission");
   assert.ok(i > 0 && a > i && a - i < 600, 'the check sits just before the radio is acquired');
-  assert.ok(/if \(ownTxPrivilegeRefused\('DATA'\)\) \{\s*try \{ if \(ft8Engine && ft8Engine\._txActive\) ft8Engine\.txComplete\(\); \} catch \{\}\s*return;/.test(MAIN));
+  // #190: a refused tx-start unwinds through jtcatRefuseTx (txComplete on a
+  // JS8 engine announced "fully transmitted" for a message that never keyed).
+  assert.ok(/if \(ownTxPrivilegeRefused\('DATA'\)\) \{\s*jtcatRefuseTx\('[^']+'\);\s*return;/.test(MAIN));
   assert.ok(/if \(ownTxPrivilegeRefused\('DATA', s\.freqKhz \? s\.freqKhz \* 1000 : undefined\)\)/.test(MAIN));
 });
 test('data and image key-downs name their emission', () => {
