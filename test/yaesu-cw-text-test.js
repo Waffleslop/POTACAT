@@ -303,6 +303,86 @@ test('main shows the controller notice on screen and on the phone', async () => 
   assert.ok(/controller\.on\('notice', \(msg\) => \{[\s\S]{0,400}send\('app-notice'[\s\S]{0,300}type: 'tune-blocked', reason: msg/.test(main));
 });
 
+// --- #127: the backstop re-checks, survives a link drop, and the hold is capped ---
+// kc9hekbrian FTDX10: a macro left the radio keyed until ECHOCAT's STOP. The
+// 1.13.9 backstop sent ONE TX0; and never looked again; a link that was down
+// when the message ended skipped it with nothing armed for its return.
+
+test('#127: still keyed after the first TX0;: a second TX0; and cw-stuck, and no more than 3 in all', async () => {
+  const { rig: r, codec, writes, logs } = rig('FTDX10');
+  const stuck = [];
+  r.on('cw-stuck', (info) => stuck.push(info));
+  r._cwStuckCheckMs = 300;
+  r._cwWpm = 60;
+  r._breakIn = true;
+  r.sendCwText('E');
+  const polls = setInterval(() => codec.emit('ptt', true), 100); // the radio never unkeys
+  await sleep(4000);
+  clearInterval(polls);
+  const rx = writes.filter((w) => w === 'TX0;').length;
+  assert.strictEqual(rx, 3, 'three receive commands, then it stops trying: ' + JSON.stringify(writes));
+  assert.ok(stuck.length >= 1, 'cw-stuck emitted for main to stop every CW backend');
+  assert.ok(logs.some((l) => /still keyed after TX0;/.test(l)), 'pass 2 says so: ' + JSON.stringify(logs));
+  r.disconnect();
+});
+
+test('#127: the re-check needs a TX readback newer than its own TX0;', async () => {
+  const { rig: r, codec, writes } = rig('FTDX10');
+  r._cwStuckCheckMs = 300;
+  r._cwWpm = 60;
+  r._breakIn = true;
+  r.sendCwText('E');
+  // TX at every poll until our TX0; lands, then the radio goes silent.
+  const polls = setInterval(() => { if (!writes.includes('TX0;')) codec.emit('ptt', true); }, 100);
+  await sleep(3000);
+  clearInterval(polls);
+  assert.strictEqual(writes.filter((w) => w === 'TX0;').length, 1, JSON.stringify(writes));
+  r.disconnect();
+});
+
+test('#127: link down when the message ended: TX0; as soon as the radio answers again', async () => {
+  const { rig: r, codec, writes, logs } = rig('FTDX10');
+  r._cwStuckCheckMs = 300;
+  r._cwWpm = 60;
+  r._breakIn = true;
+  r.sendCwText('E');
+  codec.emit('ptt', true);
+  r.connected = false; r._linkStale = true; // the staleness watchdog fired mid-message
+  await sleep(2500);
+  assert.ok(!writes.includes('TX0;'), 'nothing to send it on yet');
+  const polls = setInterval(() => codec.emit('ptt', true), 100); // link restored, radio still keyed
+  await sleep(1000);
+  clearInterval(polls);
+  assert.ok(writes.includes('TX0;'), 'RX sent once the link came back: ' + JSON.stringify(writes));
+  assert.ok(logs.some((l) => /CW message/.test(l) && /link/.test(l)), JSON.stringify(logs));
+  r.disconnect();
+});
+
+test('#127: a reconnect after a CW message was left keyed says why its PTT off matters', async () => {
+  const { rig: r, codec, writes, logs } = rig('FTDX10');
+  r._cwStuckCheckMs = 300;
+  r._cwWpm = 60;
+  r._breakIn = true;
+  r.sendCwText('E');
+  codec.emit('ptt', true);
+  r.connected = false;
+  await sleep(2500);
+  writes.length = 0;
+  r._transport.emit('connect');
+  assert.ok(writes.includes('TX0;'), 'the connect safety: ' + JSON.stringify(writes));
+  assert.ok(logs.some((l) => /CW message/.test(l)), JSON.stringify(logs));
+  r.disconnect();
+});
+
+test('#127: one hold never runs past 180 s, however much text is queued', async () => {
+  const { rig: r, logs } = rig('FTDX10');
+  r._holdTxForCw('E'.repeat(20000)); // ~4 minutes at 20 wpm
+  r._holdTxForCw('E'.repeat(20000));
+  assert.ok(r._cwHoldUntil - Date.now() <= 180000 + 1000, 'capped: ' + (r._cwHoldUntil - Date.now()));
+  assert.ok(logs.some((l) => /capped/.test(l)), JSON.stringify(logs));
+  r.disconnect();
+});
+
 Promise.all(pending).then(() => {
   console.log(`\nYaesu CW text: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
