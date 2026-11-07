@@ -686,7 +686,7 @@ contextBridge.exposeInMainWorld('api', {
   tgxlSelectAntenna: (port) => ipcRenderer.invoke('tgxl-select-antenna', port),
   tgxlGetStatus: () => ipcRenderer.invoke('tgxl-get-status'),
   onTgxlStatus: (cb) => ipcRenderer.on('tgxl-status', (_e, s) => cb(s)),
-  onRestartJtcatAudio: (cb) => ipcRenderer.on('restart-jtcat-audio', () => cb()),
+  onRestartJtcatAudio: (cb) => ipcRenderer.on('restart-jtcat-audio', (_e, why) => cb(why)),
   // VITA-49 dax_rx audio frames forwarded from main when the user is on
   // "SmartSDR Direct" — the renderer builds a synthetic MediaStream from
   // these to drive the JTCAT waterfall, since the Windows DAX device it

@@ -24,6 +24,10 @@ const audioEl = document.getElementById('remote-playback');
 // anywhere but main, and never a device the operator did not choose (the same
 // rule as the audio capture below). 12 kHz mono, ~170 ms frames.
 let rxSpecStream = null, rxSpecCtx = null, rxSpecNode = null;
+// #133: the newest want wins. An "off" that lands while an "on" is still
+// opening the device used to stop nothing, and the "on" then left a capture of
+// the radio running beside FT8 until the window closed (Restart audio).
+let rxSpecGen = 0;
 function rxSpecStop() {
   try { if (rxSpecNode) rxSpecNode.disconnect(); } catch {}
   try { if (rxSpecCtx) rxSpecCtx.close(); } catch {}
@@ -31,12 +35,15 @@ function rxSpecStop() {
   rxSpecStream = null; rxSpecCtx = null; rxSpecNode = null;
 }
 if (window.api.onRxSpectrumWant) window.api.onRxSpectrumWant(async (o) => {
+  const my = ++rxSpecGen;
   rxSpecStop();
   if (!o || !o.on || !o.inputDeviceId) return;
   try {
-    rxSpecStream = await navigator.mediaDevices.getUserMedia({ audio: {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: {
       deviceId: { exact: o.inputDeviceId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false,
     } });
+    if (my !== rxSpecGen) { stream.getTracks().forEach((t) => t.stop()); return; } // superseded while opening
+    rxSpecStream = stream;
     rxSpecCtx = new AudioContext({ sampleRate: 12000 });
     const src = rxSpecCtx.createMediaStreamSource(rxSpecStream);
     rxSpecNode = rxSpecCtx.createScriptProcessor(2048, 1, 1);
@@ -46,6 +53,7 @@ if (window.api.onRxSpectrumWant) window.api.onRxSpectrumWant(async (o) => {
     src.connect(rxSpecNode);
     rxSpecNode.connect(rxSpecCtx.destination); // a ScriptProcessor only runs when connected; it outputs silence
   } catch (e) {
+    if (my !== rxSpecGen) return; // a newer want owns the capture now
     rxSpecStop();
     window.api.sendRxSpectrumError([e && e.name, e && e.message].filter(Boolean).join(': ') || String(e));
   }
@@ -161,7 +169,10 @@ window.api.onStartAudio(async (config) => {
     // would have answered N2FSM's report in a single message.
     try {
       const t = localStream.getAudioTracks()[0];
-      if (t && !_standInUsed) window.api.sendAudioStatus({ captureLabel: t.label || '(unnamed device)' });
+      // #133: plus what the OS actually opened (rate/channels), to compare with JTCAT's capture.
+      const ts = (t && typeof t.getSettings === 'function' && t.getSettings()) || {};
+      const tsText = [ts.sampleRate && ts.sampleRate + ' Hz', ts.channelCount && ts.channelCount + ' ch'].filter(Boolean).join(', ');
+      if (t && !_standInUsed) window.api.sendAudioStatus({ captureLabel: (t.label || '(unnamed device)') + (tsText ? ' (' + tsText + ')' : '') });
     } catch {}
     // Receive level: the gain stage sits on the captured stream, so every later
     // consumer (sender, CW mix, health monitor) sees the levelled audio. The

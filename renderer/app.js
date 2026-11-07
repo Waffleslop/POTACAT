@@ -30018,14 +30018,29 @@ window.api.onJtcatVita49Audio(function (frame) {
 const JTCAT_RIG_AUDIO_LABEL_RE = /codec|dax|icom|ic-7|yaesu|ftdx|kenwood|xiegu|qmx|qdx|digirig|signalink|cable|vb-audio|loopback|virtual|flex|sbitx|trusdx|radio/i;
 const _jtcatDefaultInputHinted = new Set(); // one hint per device label per session
 
-async function startJtcatAudio() {
-  // Always stop existing audio first to ensure clean device state
-  // (prevents stale stream after ECHOCAT releases the shared device)
-  stopJtcatAudio();
-  // Brief delay for the OS to fully release the audio device
+// One capture build at a time; the newest request wins and a stop cancels a
+// pending one (#133: two overlapping builds left two captures feeding one
+// engine — no decodes — and a stop mid-build left one running). The build
+// checks ctx.stale() after every await; true = superseded and torn down.
+var _jtcatCapture = window.JtcatCaptureGate.createCaptureSerializer({
+  teardown: function() { _teardownJtcatCapture(); },
+  build: function(ctx) { return _buildJtcatCapture(ctx); },
+  log: function(m) { console.log(m); if (window.api.jtcatLog) window.api.jtcatLog(m); },
+});
+
+function startJtcatAudio(reason) {
+  return _jtcatCapture.start(reason || 'desktop');
+}
+
+async function _buildJtcatCapture(ctx) {
+  // The serializer already released any previous capture (clean device state
+  // after ECHOCAT releases the shared device). Brief delay for the OS to fully
+  // release the audio device.
   await new Promise(function(r) { setTimeout(r, 300); });
+  if (ctx.stale()) return false;
   try {
     var s = await window.api.getSettings();
+    if (ctx.stale()) return false;
 
     if (s.audioSource === 'smartsdr' || s.audioSource === 'icom-network' || s.audioSource === 'yaesu-lan') {
       // SmartSDR Direct / Icom Network / Yaesu LAN: JTCAT audio is the PCM stream that
@@ -30044,9 +30059,11 @@ async function startJtcatAudio() {
       jtcatVita49Ctx = new AudioContext();
       if (jtcatVita49Ctx.state === 'suspended') {
         try { await jtcatVita49Ctx.resume(); } catch (e) { /* logged below if it bites */ }
+        if (ctx.stale()) return false;
       }
       try {
         await jtcatVita49Ctx.audioWorklet.addModule('jtcat-vita49-source-worklet.js');
+        if (ctx.stale()) return false;
       } catch (e) {
         console.error('[JTCAT] failed to load VITA-49 source worklet:', e);
         if (window.api.jtcatLog) window.api.jtcatLog('[JTCAT] VITA-49 source worklet load failed: ' + (e.message || e));
@@ -30084,7 +30101,9 @@ async function startJtcatAudio() {
       }
       try {
         jtcatAudioStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+        if (ctx.stale()) return false;
       } catch (e) {
+        if (ctx.stale()) return false;
         // Fall back to default device if configured one fails. Silent
         // fallback used to mask "JTCAT silently decodes nothing" bugs
         // (e.g. Casey 2026-05-03 — SSTV popout held the rig audio device,
@@ -30095,6 +30114,7 @@ async function startJtcatAudio() {
         if (window.api.jtcatLog) window.api.jtcatLog(warn);
         delete audioConstraints.deviceId;
         jtcatAudioStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+        if (ctx.stale()) return false;
       }
       // Default-input trap (WC5B 2026-07-03: his webcam mic was on the JTCAT
       // waterfall — "System Default" resolved to the EMEET cam while the
@@ -30120,6 +30140,7 @@ async function startJtcatAudio() {
     jtcatAudioCtx = new AudioContext();
     if (jtcatAudioCtx.state === 'suspended') {
       try { await jtcatAudioCtx.resume(); } catch (e) { console.warn('[JTCAT] resume failed:', e.message); }
+      if (ctx.stale()) return false;
     }
     // K3SBP 2026-05-04: phone-triggered START on a cold-start desktop
     // sometimes left the AudioContext suspended even after resume() — the
@@ -30167,6 +30188,7 @@ async function startJtcatAudio() {
     // Try AudioWorklet first (reliable on Chromium 134+), fall back to ScriptProcessorNode
     try {
       await jtcatAudioCtx.audioWorklet.addModule('jtcat-audio-worklet.js');
+      if (ctx.stale()) return false;
       var workletNode = new AudioWorkletNode(jtcatAudioCtx, 'jtcat-processor', {
         processorOptions: { dsRatio: dsRatio },
       });
@@ -30243,8 +30265,7 @@ async function startJtcatAudio() {
       // Surface the device label that getUserMedia actually grabbed — useful
       // when the configured device fell through to the system default.
       try {
-        var deviceLabel = audioTrack.label || '(no label)';
-        var notice = `[JTCAT] Audio capture device: ${deviceLabel}${audioTrack.muted ? ' (MUTED at start — Chromium will not deliver samples)' : ''}`;
+        var notice = `[JTCAT] Audio capture device (capture #${ctx.gen}, ${ctx.reason}): ${window.JtcatCaptureGate.describeTrack(audioTrack)}${audioTrack.muted ? ' (MUTED at start — Chromium will not deliver samples)' : ''}`;
         console.log(notice);
         if (window.api.jtcatLog) window.api.jtcatLog(notice);
       } catch {}
@@ -30254,7 +30275,7 @@ async function startJtcatAudio() {
         setTimeout(function() {
           if (jtcatRunning || jtcatRemoteActive) {
             stopJtcatAudio();
-            startJtcatAudio();
+            startJtcatAudio('track ended');
           }
         }, 2000);
       });
@@ -30282,8 +30303,11 @@ async function startJtcatAudio() {
     jtcatWaterfallLoop();
 
     console.log('[JTCAT] Audio capture started, device:', s.remoteAudioInput || 'default', 'sample rate:', jtcatAudioCtx.sampleRate);
+    return true;
   } catch (err) {
     console.error('[JTCAT] Audio capture failed:', err.message || err);
+    if (window.api.jtcatLog) window.api.jtcatLog('[JTCAT] Audio capture #' + ctx.gen + ' failed (' + ctx.reason + '): ' + ([err && err.name, err && err.message].filter(Boolean).join(': ') || err));
+    return false;
   }
 }
 
@@ -30469,12 +30493,18 @@ function jtcatArmStallWatch(track) {
       console.warn(msg);
       if (window.api.jtcatLog) window.api.jtcatLog(msg);
       stopJtcatAudio();
-      startJtcatAudio();
+      startJtcatAudio('stall: ' + d.reason);
     }
   }, 5000);
 }
 
+// Release the capture and cancel any start still pending (#133).
 function stopJtcatAudio() {
+  if (_jtcatCapture) _jtcatCapture.stop();
+  else _teardownJtcatCapture();
+}
+
+function _teardownJtcatCapture() {
   if (_jtcatStallTimer) { clearInterval(_jtcatStallTimer); _jtcatStallTimer = null; }
   if (window.api.setJtcatIpAudioReady) window.api.setJtcatIpAudioReady(false);
   if (jtcatMeterAnim) { cancelAnimationFrame(jtcatMeterAnim); jtcatMeterAnim = null; }
@@ -30511,13 +30541,17 @@ function stopJtcatAudio() {
   jtcatVita49FrameCount = 0;
 }
 
-// Restart JTCAT audio after ECHOCAT releases the shared audio device
-window.api.onRestartJtcatAudio(() => {
-  if (jtcatRunning && !jtcatRemoteActive && !jtcatPopoutOpen) {
-    console.log('[JTCAT] Restarting audio after ECHOCAT teardown');
-    stopJtcatAudio();
-    startJtcatAudio();
-  }
+// Restart JTCAT audio when main asks: after ECHOCAT releases the shared audio
+// device (Restart audio, a device change), or when the engine hears only
+// silence. A capture a REMOTE started is this window's too (#133: the old
+// "desktop view running and not remote" rule made every one of these a no-op
+// for FT8 started from ECHOCAT, so its decoder stayed on a dead capture).
+window.api.onRestartJtcatAudio((why) => {
+  var d = window.JtcatCaptureGate.restartDecision({ desktopRunning: jtcatRunning, remoteActive: jtcatRemoteActive, popoutOpen: jtcatPopoutOpen });
+  var msg = '[JTCAT] Restart capture requested (' + (why || 'unspecified') + ') — ' + (d.restart ? 'restarting the ' + d.why : 'ignored: ' + d.why);
+  console.log(msg);
+  if (window.api.jtcatLog && (d.restart || jtcatRemoteActive || jtcatRunning)) window.api.jtcatLog(msg);
+  if (d.restart) startJtcatAudio('restart: ' + (why || 'unspecified'));
 });
 
 function startJtcatView() {
@@ -30530,7 +30564,7 @@ function startJtcatView() {
   // If popout is open, it handles its own engine start + audio capture
   if (!jtcatRemoteActive && !jtcatPopoutOpen) {
     window.api.jtcatStart(jtcatModeSelect.value);
-    startJtcatAudio();
+    startJtcatAudio('desktop view');
   }
   startJtcatCountdown();
 }
@@ -32243,7 +32277,7 @@ window.api.onJtcatStartForRemote(function() {
   console.log('[JTCAT] Remote requested audio start');
   jtcatRemoteActive = true;
   // Always restart audio — previous stream may be stale after phone disconnect/reconnect
-  startJtcatAudio();
+  startJtcatAudio('remote start');
 });
 window.api.onJtcatStopForRemote(function() {
   console.log('[JTCAT] Remote requested audio stop');

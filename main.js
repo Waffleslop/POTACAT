@@ -18678,7 +18678,7 @@ function startJtcat(mode) {
 
   ft8Engine.on('silent', () => {
     // Audio capture is delivering zeros — tell renderer to restart
-    if (win && !win.isDestroyed()) win.webContents.send('restart-jtcat-audio');
+    if (win && !win.isDestroyed()) win.webContents.send('restart-jtcat-audio', 'engine-silent');
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       // Popout has its own audio — tell it to restart too
       jtcatPopoutWin.webContents.send('restart-popout-audio');
@@ -25892,6 +25892,8 @@ function connectRemote() {
       }
     }
     startJtcat(mode);
+    // #133: who else holds the radio's input when the main window opens its capture.
+    sendCatLog(`[JTCAT] FT8 started from ECHOCAT (${mode || 'FT8'}) — main window capturing; listen bridge ${remoteAudioWin && !remoteAudioWin.isDestroyed() ? 'open' : 'closed'}, rx-spectrum capture ${_rxSpecBridgeOn ? 'on' : 'off'}, audio ${settings.audioSource || 'device'}`);
     // Start audio capture in desktop renderer
     if (win && !win.isDestroyed()) win.webContents.send('jtcat-start-for-remote');
     // Push a confirmed jtcat-status to the phone so its UI doesn't have to
@@ -28797,7 +28799,7 @@ function destroyRemoteAudioWindow() {
   // After ECHOCAT releases the audio device, tell renderer to restart JTCAT
   // audio capture if it was running — the shared device may need re-acquisition
   setTimeout(() => {
-    if (win && !win.isDestroyed()) win.webContents.send('restart-jtcat-audio');
+    if (win && !win.isDestroyed()) win.webContents.send('restart-jtcat-audio', 'echocat-bridge-teardown');
   }, 500);
 }
 
