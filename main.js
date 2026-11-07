@@ -49520,6 +49520,10 @@ function cloudShackNotice(text, kind) {
     }
     handleRemotePtt(!!state, { audio: false });
   });
+  // #170: the VFO window's PC mic on that press, as one plain log line.
+  ipcMain.on('vfo-ptt-mic-report', (_e, r) => {
+    if (r && typeof r === 'object') sendCatLog(require('./lib/vfo-ptt-mic').assess(r).line);
+  });
 
   // Voice macro file storage (shared between desktop and ECHOCAT)
   // Voice macro helpers hoisted to module scope (see below)

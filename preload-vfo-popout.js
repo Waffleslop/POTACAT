@@ -35,6 +35,8 @@ contextBridge.exposeInMainWorld('api', {
   // voiceMacroPtt so SSB-over-DATA doesn't disable the rig's hand mic
   // when the user is just keying TX from the popout button.
   nakedPtt: (state) => ipcRenderer.send('naked-ptt', state),
+  // #170: what the PC mic did on a PTT press (device, output, level) → one log line.
+  vfoPttMicReport: (r) => ipcRenderer.send('vfo-ptt-mic-report', r),
   // Driving a remote shack: the shack released PTT (or a key-down was refused
   // with the link down) — the button must let go.
   onRemotePttReleased: (cb) => ipcRenderer.on('remote-client-ptt-released', (_e, info) => cb(info || {})),
