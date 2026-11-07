@@ -144,6 +144,11 @@ test('the macOS modem builds: ardopcf against the ALSA stand-in, Dire Wolf with 
   assert.ok(/'scripts\/gen-direwolf-patch\.py'/.test(helpers) && /'helpers\/alsa-stub\/\*\*'/.test(helpers), 'and reruns when the patch generator or stub changes');
 });
 
+test('the Linux ardopcf build compiles with GCC 14 and newer', () => {
+  const script = read('scripts/build-winlink-helpers.sh');
+  assert.ok(/make ardopcf CFLAGS="-g -MMD -std=gnu17 -Wno-int-conversion" \)/.test(script), 'rawhid.c\'s int conversions are an error since GCC 14');
+});
+
 test('a Flex keys the modem\'s DAX audio, not the silent mic, and gets its mic back', () => {
   assert.ok(/winlinkFlexDaxOn\(\);/.test(fnBody(main, 'winlinkStartSession')));
   assert.ok(/winlinkFlexDaxRestore\(\);/.test(fnBody(main, 'winlinkEndSession')));
