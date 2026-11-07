@@ -36,7 +36,9 @@ test('8: the drop detector\'s window stands still while transmitting', () => {
 test('9: a Winlink frame re-keyed inside the drain hold restarts the stuck-TX limit', () => {
   const at = main.indexOf('// Keyed again inside the drain hold: stay keyed, nothing to re-assert.');
   const block = main.slice(at, at + 700);
-  assert.ok(/clearTimeout\(_winlinkUnkeyTimer\); _winlinkUnkeyTimer = null;\s*try \{ txLimit\(\)\.disarm\(\); txLimit\(\)\.arm\('winlink'\); \}/.test(block));
+  // Other per-over bookkeeping may sit between the two (#128's TxBurst.rekeyed());
+  // what matters is that the re-key clears the unkey timer and then re-arms the limit.
+  assert.ok(/clearTimeout\(_winlinkUnkeyTimer\); _winlinkUnkeyTimer = null;[\s\S]{0,200}?try \{ txLimit\(\)\.disarm\(\); txLimit\(\)\.arm\('winlink'\); \}/.test(block));
 });
 
 test('10: Full power (W) on the rigctld raw-PC path: 5 W is PC100, PC100 reads back as 5 W', () => {
