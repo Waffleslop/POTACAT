@@ -2009,9 +2009,10 @@
               <option value="auto" selected>Auto (by radio model)</option>
               <option value="none">Held low</option>
               <option value="hardware">RTS/CTS flow control</option>
+              <option value="asserted">Asserted, no flow control</option>
             </select>
           </label>
-          <span class="help-text" style="margin-top:2px;display:block;">Auto uses RTS/CTS flow control for the Kenwood TS-590, TS-990 and TS-2000 and holds RTS low for every other radio. A Yaesu or Kenwood that does not answer with RTS held low (a Yaesu's CAT RTS menu is on, or a Kenwood's COM port waits for RTS) is tried with RTS/CTS, and kept on it if it answers. Choose <b>Held low</b> if the radio transmits as soon as POTACAT connects: some radios that copy the TS-590's commands (FX4CR) key PTT on RTS.</span>
+          <span class="help-text" style="margin-top:2px;display:block;">Auto uses RTS/CTS flow control for the Kenwood TS-590, TS-990 and TS-2000 and holds RTS low for every other radio. A Yaesu or Kenwood that does not answer with RTS held low (a Yaesu's CAT RTS menu is on, or a Kenwood's COM port waits for RTS) is tried with RTS/CTS, and kept on it if it answers. Choose <b>Held low</b> if the radio transmits as soon as POTACAT connects: some radios that copy the TS-590's commands (FX4CR) key PTT on RTS. Choose <b>Asserted, no flow control</b> when the CAT cable runs through a box that passes data but not the handshake (an LDG YT-1200 tuner's PC port) and the radio's CAT RTS menu is on: RTS is held high and POTACAT sends without waiting for CTS.</span>
           <label style="margin-top:6px;">Transmit (PTT):
             <select id="set-serialcat-ptt">
               <option value="cat" selected>Over CAT</option>

@@ -8021,7 +8021,7 @@ const _serialHsTrial = new Map(); // port path -> 'hardware' (trying) | 'done'
 // One Test Connection probe of a direct-serial CAT radio: open the port with
 // the given line settings, ask for the frequency, close. `portError` marks a
 // port that would not open (no retry with other settings helps that).
-function probeSerialCat({ portPath, baudRate, dtrOff, rtscts, stopBits, legacy }) {
+function probeSerialCat({ portPath, baudRate, dtrOff, rtscts, rtsAsserted, stopBits, legacy }) {
   const { SerialPort } = require('serialport');
   return new Promise((resolve) => {
     let settled = false;
@@ -8057,7 +8057,10 @@ function probeSerialCat({ portPath, baudRate, dtrOff, rtscts, stopBits, legacy }
     // (four BCD bytes of 10 Hz, then the mode).
     const legacyRead = Buffer.from([0x00, 0x00, 0x00, 0x00, 0x03]);
     port.on('open', () => {
-      if (dtrOff) {
+      // "Asserted, no flow control" (#136): RTS high, DTR low, as the live link opens it.
+      if (rtsAsserted) {
+        try { port.set({ dtr: false, rts: true }); } catch { /* ignore */ }
+      } else if (dtrOff) {
         try { port.set({ dtr: false, rts: !!rtscts }); } catch { /* ignore */ }
       }
       const q = () => port.write(legacy ? legacyRead : 'FA;');
@@ -8829,6 +8832,8 @@ async function connectCat() {
     if (hs.handshake === 'hardware') {
       sendCatLog(`[CAT] RTS/CTS flow control on (${hs.source === 'rig' ? 'set on this rig' : hs.source === 'trial' ? 'trying it: the radio did not answer with RTS held low' : 'the radio model default'}) — RTS stays asserted. If the radio transmits as soon as POTACAT connects, set My Rigs > RTS line to "Held low".`);
       if (hs.source !== 'rig') armSerialHandshakeFallback(cat, target);
+    } else if (hs.handshake === 'asserted') {
+      sendCatLog('[CAT] RTS line: asserted, no flow control (set on this rig) — RTS held high, DTR low. If the radio transmits as soon as POTACAT connects, set My Rigs > RTS line to "Held low".');
     }
     // The RTS/CTS trial is for the Kenwood-style Yaesus' CAT RTS menu. The
     // FT-817/818/857/897 legacy protocol has no handshake, and asserting RTS
@@ -35944,6 +35949,10 @@ function gatedSetTransmit(state, emission) {
       if (state) sendCatLog('[PTT] FAILED: RTS is the flow-control line on this connection (RTS line = RTS/CTS flow control), so it cannot also key the radio. Set RTS line to Held low, or key on DTR.');
       return false;
     }
+    if (t.ptt === 'rts' && cat._transport && cat._transport._rtsAsserted) {
+      if (state) sendCatLog('[PTT] FAILED: RTS is held high on this connection (RTS line = Asserted, no flow control), so it cannot also key the radio. Set RTS line to Held low, or key on DTR.');
+      return false;
+    }
     cat.setTransmitLine(t.ptt, state, (err) => {
       if (err) sendCatLog(`[PTT] FAILED: ${line} on ${t.path || 'the CAT port'}: ${err.message}`);
       else sendCatLog(`[PTT] ${state ? 'TX' : 'RX'} — ${line} ${state ? 'raised' : 'dropped'} on the CAT port`);
@@ -46934,7 +46943,7 @@ function cloudShackNotice(text, kind) {
     // Wait for OS to fully release the serial port
     await new Promise((r) => setTimeout(r, 500));
 
-    const first = await probeSerialCat({ portPath, baudRate, dtrOff, rtscts: hs.handshake === 'hardware', stopBits: (model && model.serialStopBits) || 1, legacy });
+    const first = await probeSerialCat({ portPath, baudRate, dtrOff, rtscts: hs.handshake === 'hardware', rtsAsserted: hs.handshake === 'asserted', stopBits: (model && model.serialStopBits) || 1, legacy });
     if (first.success || first.portError) return first;
     // On Auto, a Kenwood-protocol Yaesu that does not answer with RTS low is
     // tried with RTS/CTS, as the live connect does (#103).
