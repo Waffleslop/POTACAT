@@ -503,6 +503,109 @@ check('the idle CAT pause never fires while the band scope is watched (N8VCL: sc
   assert.ok(tick.indexOf('yaesuScopeWanted()') < tick.indexOf('cat.pausePolling()'), 'the guard must come before the pause');
 });
 
+// ── GitHub #126: the helper goes quiet and the desktop never notices ─────────
+// ride1226's 2026-11-06 log (FT-710, ECHOCAT 1.5.4, desktop 1.13.10):
+//   03:08:10.535 spawn → 03:08:10.758 frames flowing
+//   03:08:43.782 Power off → 03:08:44.425 "20 consecutive read failures"
+//   ...then NO "helper exited" line, and no restart after the 03:08:51
+//   power-on; frames only came back after a new spawn at 03:09:27. The
+//   02:31 log shows ECHOCAT subscribing with no spawn at all: startYaesuScope
+//   returns at `if (yaesuScopeProc) return;` for a helper that sends nothing.
+const T = (hms) => { const [h, m, s] = hms.split(':'); return ((+h * 60 + +m) * 60 + +s) * 1000; };
+
+check('#126: the helper\'s read-failure line is recognised as fatal', () => {
+  assert.strictEqual(typeof S.isHelperFatalLine, 'function');
+  assert.ok(S.isHelperFatalLine('yaesu-scope: 20 consecutive read failures (status 10, got 0 bytes)'));
+  assert.ok(!S.isHelperFatalLine('yaesu-scope: opened "FT4222 A" — SPI single, 24 MHz/64, idle high, leading edge, SS1'));
+  assert.ok(!S.isHelperFatalLine(''));
+});
+
+check('#126: a helper that reported the bridge lost and did not exit is stalled (ride1226 03:08:44)', () => {
+  assert.strictEqual(typeof S.helperStallReason, 'function');
+  const base = { spawnedAt: T('03:08:10.535'), lastFrameAt: T('03:08:43.700'), fatalAt: T('03:08:44.425') };
+  assert.strictEqual(S.helperStallReason({ ...base, now: T('03:08:45.000') }), null, 'give it a moment to exit on its own');
+  assert.ok(S.helperStallReason({ ...base, now: T('03:08:48.000') }), 'still alive 3.5 s after its fatal line');
+});
+
+check('#126: a helper that was streaming and went silent is stalled; a healthy or just-started one is not', () => {
+  const live = { spawnedAt: T('03:08:10.535'), lastFrameAt: T('03:08:43.700'), fatalAt: 0 };
+  assert.strictEqual(S.helperStallReason({ ...live, now: T('03:08:44.000') }), null);
+  assert.strictEqual(S.helperStallReason({ ...live, now: T('03:08:50.000') }), null, 'a few quiet seconds are not a stall');
+  assert.ok(S.helperStallReason({ ...live, now: T('03:09:00.000') }), '16 s with no frame at all');
+  // Never streamed yet: the helper's own first-frame timeout decides (exit 5/7).
+  assert.strictEqual(S.helperStallReason({ spawnedAt: T('03:08:10.535'), lastFrameAt: 0, fatalAt: 0, now: T('03:08:40.000') }), null);
+});
+
+check('#126: "no FT4222 device" right after the radio powers back on is retried; otherwise it stays a blocker', () => {
+  assert.strictEqual(typeof S.helperExitShouldRetry, 'function');
+  assert.strictEqual(S.helperExitShouldRetry(6, {}), true, 'read error was always transient');
+  assert.strictEqual(S.helperExitShouldRetry(3, {}), false, 'no device with no power event: the SCU-LAN10/driver card');
+  assert.strictEqual(S.helperExitShouldRetry(3, { sinceRadioBackMs: 4000 }), true, 'the FT4222 enumerates seconds after PS1');
+  assert.strictEqual(S.helperExitShouldRetry(3, { sinceRadioBackMs: 60000 }), false);
+  assert.strictEqual(S.helperExitShouldRetry(2, { sinceRadioBackMs: 1000 }), false, 'a missing library is not fixed by power');
+});
+
+check('#126: main.js supervises the helper — kills a stalled one and restarts it as a transient exit', () => {
+  const start = mainSrc.slice(mainSrc.indexOf('function startYaesuScope()'), mainSrc.indexOf('function stopYaesuScope('));
+  assert.ok(start.includes('YaesuScope.isHelperFatalLine('), 'stderr fatal line not noted');
+  assert.ok(start.includes('YaesuScope.helperExitShouldRetry('), 'exit handler must use helperExitShouldRetry');
+  assert.ok(/_stalled/.test(start), 'a killed-for-stall helper must restart, not read as a clean stop');
+  assert.ok(mainSrc.includes('YaesuScope.helperStallReason('), 'no watchdog calls helperStallReason');
+});
+
+check('#126: the scope restarts when the radio comes back (power-on, link restored), not only on Retry', () => {
+  const fn = mainSrc.indexOf('function yaesuScopeNoteRadioBack(');
+  assert.ok(fn > 0, 'yaesuScopeNoteRadioBack missing');
+  const powerOn = mainSrc.slice(mainSrc.indexOf("case 'power-on': {"), mainSrc.indexOf("case 'power-off': {"));
+  assert.ok(powerOn.includes('yaesuScopeNoteRadioBack('), 'power-on does not tell the scope');
+  const restored = mainSrc.indexOf("sendCatLog('[CAT] Radio link restored.');");
+  assert.ok(mainSrc.slice(restored, restored + 400).includes('yaesuScopeNoteRadioBack('), 'link restored does not tell the scope');
+});
+
+check('#126: no silence verdict while transmitting — the FT-710 may pause its scope in TX', () => {
+  const live = { lastFrameAt: T('03:08:43.700'), fatalAt: 0 };
+  assert.strictEqual(S.helperStallReason({ ...live, now: T('03:09:30.000'), transmitting: true }), null, 'a long over or tune is not a stall');
+  // The fatal-line rule is not TX-gated: a helper that said the bridge is gone is gone.
+  assert.ok(S.helperStallReason({ lastFrameAt: T('03:08:43.700'), fatalAt: T('03:08:44.425'), now: T('03:08:48.000'), transmitting: true }));
+});
+
+check('#126: no silence verdict within the post-TX grace, and the 15 s clock restarts at TX end', () => {
+  const lastFrameAt = T('03:08:00.000');
+  const lastTxEndAt = T('03:09:00.000');           // a 60 s over, frames paused throughout
+  assert.strictEqual(S.helperStallReason({ now: T('03:09:03.000'), lastFrameAt, lastTxEndAt }), null, 'inside the 5 s grace');
+  assert.strictEqual(S.helperStallReason({ now: T('03:09:10.000'), lastFrameAt, lastTxEndAt }), null, '10 s after TX end: clock restarted at key-up');
+  assert.ok(S.helperStallReason({ now: T('03:09:16.000'), lastFrameAt, lastTxEndAt }), '16 s after key-up with still no frame');
+});
+
+check('#126: the watchdog-kill budget resets after a healthy minute of streaming', () => {
+  assert.strictEqual(typeof S.stallKillsAfterHealthy, 'function');
+  assert.strictEqual(S.stallKillsAfterHealthy({ kills: 3, streamingSince: T('03:00:00.000'), now: T('03:00:30.000') }), 3, '30 s is not long enough');
+  assert.strictEqual(S.stallKillsAfterHealthy({ kills: 3, streamingSince: T('03:00:00.000'), now: T('03:01:00.000') }), 0, 'a healthy minute clears it');
+  assert.strictEqual(S.stallKillsAfterHealthy({ kills: 3, streamingSince: 0, now: T('03:01:00.000') }), 3, 'not streaming: nothing to reset');
+});
+
+check('#126: main.js feeds TX state into the watchdog and keeps a separate kill budget', () => {
+  const start = mainSrc.slice(mainSrc.indexOf('function startYaesuScope()'), mainSrc.indexOf('function stopYaesuScope('));
+  assert.ok(/transmitting:\s*\w+/.test(start) && start.includes('lastTxEndAt'), 'helperStallReason gets no TX input');
+  assert.ok(start.includes('yaesuScopeTxNow()'), 'the watchdog does not read the TX state');
+  assert.ok(start.includes('YaesuScope.stallKillsAfterHealthy('), 'kill budget never resets');
+  assert.ok(/yaesuScopeStallKills\s*</.test(start), 'stall restarts are not bounded by their own budget');
+  const at = mainSrc.indexOf('function yaesuScopeTxNow(');
+  assert.ok(at > 0, 'yaesuScopeTxNow missing');
+  const tx = mainSrc.slice(at, at + 400);
+  assert.ok(tx.includes('_isEffectivelyTransmitting()') && tx.includes('cat._transmitting'), 'TX state must cover desktop/ECHOCAT PTT, CW and the rig-reported TX');
+});
+
+check('#126: every stop and every silent start says why in the log', () => {
+  const stop = mainSrc.slice(mainSrc.indexOf('function stopYaesuScope('), mainSrc.indexOf('function yaesuScopeOnFrame('));
+  assert.ok(/sendCatLog\('\[Scope\] stop/.test(stop), 'stopYaesuScope logs nothing about why');
+  const start = mainSrc.slice(mainSrc.indexOf('function startYaesuScope()'), mainSrc.indexOf('function stopYaesuScope('));
+  const at = start.indexOf('if (yaesuScopeProc)');
+  assert.ok(start.slice(at, at + 400).includes('sendCatLog('), 'start with a helper already running returns silently');
+  const sub = mainSrc.slice(mainSrc.indexOf("remoteServer.on('scope-subscribe'"), mainSrc.indexOf("remoteServer.on('scope-digital-view'"));
+  assert.ok(sub.includes('sendCatLog('), 'ECHOCAT scope-subscribe is not logged');
+});
+
 console.log('\n' + '='.repeat(52));
 console.log(`Results: ${pass} passed, ${fail} failed`);
 if (fail > 0) {

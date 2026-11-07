@@ -3995,6 +3995,7 @@ function sendCatStatus(s) {
         }
       } else {
         sendCatLog('[CAT] Radio link restored.');
+        try { yaesuScopeNoteRadioBack('radio link restored'); } catch { /* no scope */ }
         if (win && !win.isDestroyed()) {
           win.webContents.send('app-notice', { message: 'Radio link restored', duration: 4000 });
         }
@@ -25893,6 +25894,10 @@ function connectRemote() {
 
   // Band scope: the helper runs while the client's Scope view is on screen.
   remoteServer.on('scope-subscribe', ({ on, guest }) => {
+    if (yaesuScopeRemoteWants !== !!on) {
+      sendCatLog('[Scope] ECHOCAT scope ' + (on ? 'subscribed' : 'unsubscribed') + ' (helper ' + (yaesuScopeProc ? 'pid ' + yaesuScopeProc.pid : 'not running')
+        + ', status ' + yaesuScopeState.status + ')');
+    }
     yaesuScopeRemoteWants = !!on;
     yaesuScopeRemoteIsGuest = !!on && !!guest;
     if (!on) yaesuScopeRemoteDigital = false;
@@ -31039,6 +31044,9 @@ let yaesuScopeRemoteDigital = false; // C2S scope-digital-view: the client shows
 let yaesuScopeJtcatWants = false;    // the JTCAT pop-out is showing the band scope strip
 let yaesuScopeBandspreadWants = false;   // the Bandspread window draws the scope trace behind its spots
 let yaesuScopeRemoteIsGuest = false; // ...and that client holds a Guest Pass (may watch, never change the radio)
+let yaesuScopeRadioBackAt = 0;       // the radio last powered on / its CAT link came back (#126)
+let yaesuScopeRadioBackTimer = null;
+let yaesuScopeStallKills = 0;        // watchdog kills, cleared after a healthy minute (stallKillsAfterHealthy)
 const YAESU_SCOPE_GUEST_DIAG = {
   key: 'guest', severity: 'blocker',
   headline: 'SCU-LAN10 is off, and a Guest Pass cannot change it',
@@ -31299,12 +31307,54 @@ function yaesuScopeNoteFrequency(hz) {
   if (yaesuScopeRemoteWants && Date.now() - yaesuScopeLastStateSend > 250) yaesuScopeBroadcastState();
 }
 
+/**
+ * The radio powered on, or its CAT link came back. A helper that lost the
+ * bridge when the radio went off has exited (or been killed by the stall
+ * watchdog) and, with "no FT4222 device" a blocker, nothing restarted it
+ * until the operator pressed Retry (GitHub #126). Start it again once the
+ * bridge has had time to enumerate; helperExitShouldRetry covers a start
+ * that is still too early.
+ */
+function yaesuScopeNoteRadioBack(why) {
+  yaesuScopeRadioBackAt = Date.now();
+  if (isRemoteMode() || yaesuScopeSynth || scopeSourceKind() !== 'yaesu') return;
+  if (!yaesuScopeWanted() || yaesuScopeState.status === 'live') return;
+  if (yaesuScopeRadioBackTimer) clearTimeout(yaesuScopeRadioBackTimer);
+  sendCatLog('[Scope] ' + why + ' — starting the band scope again in 4 s');
+  yaesuScopeRadioBackTimer = setTimeout(() => {
+    yaesuScopeRadioBackTimer = null;
+    if (!yaesuScopeWanted() || yaesuScopeState.status === 'live' || yaesuScopeProc) return;
+    yaesuScopeRestarts = 0;
+    startYaesuScope();
+  }, 4000);
+}
+
+/** The radio is keyed by any path POTACAT tracks: desktop / ECHOCAT / FT8
+ *  PTT and CW text (_isEffectivelyTransmitting), the rig's own TX report
+ *  (cat._transmitting) and an external-ATU tune carrier. The stall watchdog
+ *  never judges scope silence while this is true (#126 review). */
+function yaesuScopeTxNow() {
+  try {
+    return !!(_isEffectivelyTransmitting() || (cat && cat._transmitting) || _externalAtuActive);
+  } catch { return false; }
+}
+
 function startYaesuScope() {
   // Driving a remote shack: the scope is the SHACK's (its FT-710 bridge or its
   // SDR). Subscribe while a window here watches; its frames and state are
   // forwarded to the windows below (remoteClient 'message' scope-frame/state).
   if (isRemoteMode()) { remoteShackScopeSubscribe(true); return; }
-  if (yaesuScopeProc) return;
+  if (yaesuScopeProc) {
+    // Says so unless it is streaming: a helper alive but silent used to make
+    // every start (ECHOCAT subscribing, the pop-out reopening) a no-op with
+    // nothing in the log (GitHub #126). The stall watchdog clears it.
+    if (yaesuScopeState.status !== 'live') {
+      const p = yaesuScopeProc;
+      sendCatLog('[Scope] start: helper pid ' + p.pid + ' is already running (status ' + yaesuScopeState.status + ', '
+        + (p._lastFrameAt ? 'last frame ' + Math.round((Date.now() - p._lastFrameAt) / 1000) + ' s ago' : 'no frame yet') + ')');
+    }
+    return;
+  }
   if (yaesuScopeRestartTimer) { clearTimeout(yaesuScopeRestartTimer); yaesuScopeRestartTimer = null; }
   const synth = yaesuScopeSynth;
   const kind = synth ? null : scopeSourceKind();
@@ -31320,6 +31370,7 @@ function startYaesuScope() {
   }
   if (!synth && !yaesuScopeRigHasScope()) {
     const onLan = settings.catTarget && settings.catTarget.type === 'yaesu-lan';
+    if (yaesuScopeState.status !== 'unavailable') sendCatLog('[Scope] start: the active rig has no USB band scope (rig type ' + detectRigType() + ')');
     yaesuScopeSetStatus('unavailable', onLan ? { key: 'no-rig', severity: 'notice',
       headline: 'Waiting for the radio\'s scope over the LAN',
       detail: 'The SCU-LAN10 sends the radio\'s band scope once it is connected and streaming. If nothing arrives, check the rig is connected (Settings > My Rigs) and that the radio\'s scope is on.' }
@@ -31359,6 +31410,13 @@ function startYaesuScope() {
   }
   yaesuScopeProc = proc;
   yaesuScopeStderr = '';
+  proc._lastFrameAt = 0;   // any frame, aligned or not (helperStallReason)
+  proc._fatalAt = 0;       // when it printed its read-failure line
+  proc._stalled = false;   // killed by the watchdog below -> handled as exit 6
+  proc._streamingSince = 0; // start of the current unbroken run of frames
+  proc._wasTx = false;
+  proc._lastTxEndAt = 0;
+  sendCatLog('[Scope] helper pid ' + proc.pid + ' started');
   yaesuScopeState.helperPath = helperPath;
   yaesuScopeState.source = 'radio';
   yaesuScopeState.kind = synth ? 1 : 0;
@@ -31366,22 +31424,55 @@ function startYaesuScope() {
   yaesuScopeState.misaligned = 0;
   const stream = new YaesuScope.YaesuScopeStream();
   yaesuScopeStream = stream;
-  stream.on('frame', (f) => { if (yaesuScopeProc === proc) yaesuScopeOnFrame(f); });
+  stream.on('frame', (f) => {
+    const t = Date.now();
+    // A gap longer than the stall window breaks the run of healthy frames.
+    if (!proc._streamingSince || t - proc._lastFrameAt > YaesuScope.HELPER_STALL.silentMs) proc._streamingSince = t;
+    proc._lastFrameAt = t;
+    if (yaesuScopeProc === proc) yaesuScopeOnFrame(f);
+  });
   proc.stdout.on('data', (chunk) => stream.feed(chunk));
   proc.stderr.on('data', (chunk) => {
     const text = chunk.toString();
     yaesuScopeStderr = (yaesuScopeStderr + text).slice(-4096);
-    for (const line of text.split('\n').filter(Boolean)) sendCatLog('[Scope] ' + line);
+    for (const line of text.split('\n').filter(Boolean)) {
+      if (YaesuScope.isHelperFatalLine(line) && !proc._fatalAt) proc._fatalAt = Date.now();
+      sendCatLog('[Scope] ' + line);
+    }
   });
+  // Stall watchdog (GitHub #126): a helper that printed its fatal line but
+  // never exited, or that streamed and then went silent, is killed; its exit
+  // is then a transient read error and the retry path below restarts it.
+  const watch = setInterval(() => {
+    if (yaesuScopeProc !== proc || proc.exitCode !== null || proc.signalCode !== null) { clearInterval(watch); return; }
+    const now = Date.now();
+    const tx = yaesuScopeTxNow();
+    if (proc._wasTx && !tx) proc._lastTxEndAt = now;   // key-up: the silence clock restarts here
+    proc._wasTx = tx;
+    yaesuScopeStallKills = YaesuScope.stallKillsAfterHealthy({ kills: yaesuScopeStallKills, streamingSince: proc._streamingSince, now });
+    const why = YaesuScope.helperStallReason({ now, lastFrameAt: proc._lastFrameAt, fatalAt: proc._fatalAt, transmitting: tx, lastTxEndAt: proc._lastTxEndAt });
+    if (!why) return;
+    clearInterval(watch);
+    proc._stalled = true;
+    yaesuScopeStallKills++;
+    sendCatLog('[Scope] helper pid ' + proc.pid + ' stalled (' + why + ') — killing it so the scope can restart');
+    try { proc.kill('SIGKILL'); } catch { /* already gone */ }
+  }, 2000);
   proc.on('error', (err) => {
+    clearInterval(watch);
     if (yaesuScopeProc === proc) { yaesuScopeProc = null; yaesuScopeStream = null; }
     yaesuScopeSetStatus('error', { key: 'spawn', severity: 'error', headline: 'Could not start the scope helper', detail: err.message });
   });
   proc.on('exit', (code, signal) => {
-    if (yaesuScopeProc !== proc) return; // superseded — a later start owns the state now
+    clearInterval(watch);
+    if (yaesuScopeProc !== proc) { // superseded — a stop or a later start owns the state now
+      sendCatLog('[Scope] helper pid ' + proc.pid + ' exited after it was stopped (' + (signal || 'code ' + code) + ')');
+      return;
+    }
     yaesuScopeProc = null;
     yaesuScopeStream = null;
     yaesuScopeStopCatPolling();
+    if (proc._stalled) { code = 6; signal = null; }   // the watchdog's kill: a lost bridge, retried
     let d = YaesuScope.describeHelperExit(code, { signal });
     if (d.severity === 'info') { yaesuScopeSetStatus('stopped', null); return; }
     // Exit 2 covers three different faults; the helper's own words say which.
@@ -31399,9 +31490,13 @@ function startYaesuScope() {
     if (d.key === 'no-device' && yaesuScopeState.scuLan === '0') d = YaesuScope.describeHelperExit(5);
     sendCatLog('[Scope] helper exited: ' + d.headline + (d.detail ? ' — ' + d.detail : ''));
     yaesuScopeSetStatus(d.severity === 'blocker' ? 'blocked' : 'error', d);
-    if (YaesuScope.helperExitIsTransient(code) && yaesuScopeWanted() && yaesuScopeRestarts < 5) {
-      yaesuScopeRestarts++;
-      sendCatLog('[Scope] retrying in 3 s (' + yaesuScopeRestarts + '/5)');
+    const sinceRadioBackMs = yaesuScopeRadioBackAt ? Date.now() - yaesuScopeRadioBackAt : null;
+    // A watchdog kill spends its own budget (cleared after a healthy minute),
+    // so occasional stalls over a long session never exhaust the retries.
+    const budgetOk = proc._stalled ? yaesuScopeStallKills <= 5 : yaesuScopeRestarts < 5;
+    if (YaesuScope.helperExitShouldRetry(code, { sinceRadioBackMs }) && yaesuScopeWanted() && budgetOk) {
+      if (!proc._stalled) yaesuScopeRestarts++;
+      sendCatLog('[Scope] retrying in 3 s (' + (proc._stalled ? 'stall ' + yaesuScopeStallKills : yaesuScopeRestarts) + '/5)');
       yaesuScopeRestartTimer = setTimeout(() => {
         yaesuScopeRestartTimer = null;
         if (yaesuScopeWanted()) startYaesuScope();
@@ -31414,6 +31509,9 @@ function startYaesuScope() {
 
 function stopYaesuScope(why) {
   if (isRemoteMode()) { remoteShackScopeSubscribe(false); return; }
+  if (yaesuScopeProc || yaesuScopeRestartTimer || yaesuScopeStartAfterExit) {
+    sendCatLog('[Scope] stop: ' + (why || 'no reason given') + (yaesuScopeProc ? ' (helper pid ' + yaesuScopeProc.pid + ')' : ''));
+  }
   if (yaesuScopeRestartTimer) { clearTimeout(yaesuScopeRestartTimer); yaesuScopeRestartTimer = null; }
   yaesuScopeStartAfterExit = false;
   if (sdrScopeClient) { stopSdrScope(why); return; }
@@ -43533,6 +43631,7 @@ function cloudShackNotice(text, kind) {
         // Power-on: radio may be off, so don't require cat.connected — just need transport open
         if (cat && rigType !== 'flex') {
           cat.setPowerState(true);
+          try { yaesuScopeNoteRadioBack('radio powered on'); } catch { /* no scope */ }
         }
         break;
       }
