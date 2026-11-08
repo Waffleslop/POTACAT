@@ -1891,6 +1891,8 @@ let direwolfProc = null;        // Dire Wolf for a packet (AX.25) session
 let _direwolfHeard = 0;         // frames Dire Wolf decoded from the radio since it started (its stdout "audio level" lines)
 let _direwolfMonitor = null;    // our client on Dire Wolf's AGW port in monitor mode (lib/direwolf-agw-monitor.js)
 let _direwolfMonitorHeard = 0;  // frames the monitor saw the radio receive this session (stdout never reaches us on Windows, #128)
+let _direwolfTiming = null;     // {txDelayMs, txTailMs} the running Dire Wolf was given (#257)
+let _winlinkPatConnected = false; // Pat said "Connected to ..." this session: the modem decoded the far end (#257)
 let winlinkAudio = null;        // ModemAudioServer: the modem's audio over POTACAT's radio link (no sound card)
 let winlinkTxActive = false;    // Pat has the transmitter keyed (via the shim)
 let _winlinkTxFailsafeTimer = null;
@@ -10330,6 +10332,7 @@ const WINLINK_NO_PROGRESS_MS = 180000;
 // clears POTACAT's pipeline (socket → resampler → bridge ring / Flex or Icom
 // stream) before the carrier drops. The modem has already waited out its own
 // playback clock; a real sound card's output latency is about this much.
+// Packet holds less: Dire Wolf's TXTAIL already covers part of it (winlinkUnkeyDrainMs, #257).
 const WINLINK_UNKEY_DRAIN_BRIDGE_MS = 250;
 const WINLINK_UNKEY_DRAIN_IP_MS = 120;
 const WINLINK_PAT_READY_MS = 10000;
@@ -10916,7 +10919,10 @@ function spawnPat() {
       tail = (tail + text).slice(-4096);
       // Pat's session chatter goes to pat.log (tailed over /ws); stdout/stderr
       // carry startup and fatal lines only — worth the log, never a flood.
-      for (const line of text.split(/\r?\n/).filter(Boolean).slice(0, 20)) winlinkLog(`pat: ${line}`);
+      for (const line of text.split(/\r?\n/).filter(Boolean).slice(0, 20)) {
+        winlinkLog(`pat: ${line}`);
+        if (DirewolfProcess.patLineSaysConnected(line)) _winlinkPatConnected = true;
+      }
     };
     proc.stdout.on('data', relay);
     proc.stderr.on('data', relay);
@@ -10957,6 +10963,7 @@ function winlinkOnPatEvent(ev) {
   if (ev.kind === 'status') {
     if (winlinkSessionActive()) {
       winlinkSessionTouch();
+      if (ev.connected) _winlinkPatConnected = true;
       if (ev.connected && winlinkState.session.state === 'connecting') {
         winlinkState.setSession({ state: 'connected', text: `Connected${ev.remoteAddr ? ' to ' + ev.remoteAddr : ''}` });
         winlinkSessionPush();
@@ -10987,6 +10994,7 @@ function winlinkOnPatEvent(ev) {
   if (ev.kind === 'log') {
     if (!winlinkSessionActive()) return;
     winlinkSessionTouch();
+    if (DirewolfProcess.patLineSaysConnected(ev.text)) _winlinkPatConnected = true;
     // Pat's log is the session transcript; it stays in pat.log. Only the lines
     // an operator can act on are said, once each, in POTACAT's words.
     if (ev.class === 'login-failed') { _winlinkSessionError = `Winlink refused the password for ${String(settings.myCallsign || '').toUpperCase()} — check it in Settings > Station > Winlink (a password made before 2018 must be typed in CAPITALS)`; _winlinkSessionErrorKind = 'login-failed'; }
@@ -11167,7 +11175,14 @@ function winlinkTxBurstEnd() {
 }
 /** How long the modem's final samples take to reach the radio after it stops writing. */
 function winlinkUnkeyDrainMs() {
-  return winlinkIpAudioRoute() ? WINLINK_UNKEY_DRAIN_IP_MS : WINLINK_UNKEY_DRAIN_BRIDGE_MS;
+  const pipelineMs = winlinkIpAudioRoute() ? WINLINK_UNKEY_DRAIN_IP_MS : WINLINK_UNKEY_DRAIN_BRIDGE_MS;
+  // Packet only (#257): Dire Wolf sends its TXTAIL flags before it asks for
+  // PTT off, so that much of the buffered audio is tail, not frame. ARDOP,
+  // VARA and Mercury keep the full hold.
+  if (winlinkState.session.mode === 'packet' && _direwolfTiming) {
+    return DirewolfProcess.packetUnkeyDrainMs(pipelineMs, _direwolfTiming.txTailMs);
+  }
+  return pipelineMs;
 }
 
 function stopWinlinkShim() {
@@ -11723,12 +11738,17 @@ async function spawnDirewolf() {
   const p = winlinkPaths();
   fs.mkdirSync(p.dir, { recursive: true });
   const confPath = path.join(p.dir, 'direwolf.conf');
+  // TX delay / tail from Settings > Station > Winlink (#257); the tail also
+  // sets how long POTACAT holds PTT after Dire Wolf unkeys (winlinkUnkeyDrainMs).
+  _direwolfTiming = DirewolfProcess.packetTiming(settings);
   fs.writeFileSync(confPath, DirewolfProcess.buildDirewolfConfig({
     mycall: settings.myCallsign, audioPort: winlinkAudio.port,
     modem: settings.winlinkPacketModem, agwPort: _winlinkAgwPort(), shimPort: _winlinkShimPort,
+    txDelayMs: _direwolfTiming.txDelayMs, txTailMs: _direwolfTiming.txTailMs,
   }));
   const args = DirewolfProcess.buildDirewolfArgs({ configName: path.basename(confPath) }); // spawned with cwd = p.dir
   winlinkLog(`direwolf: ${DirewolfProcess.MODEMS.includes(Number(settings.winlinkPacketModem)) ? settings.winlinkPacketModem : 1200} baud, audio on 127.0.0.1:${winlinkAudio.port} at ${DirewolfProcess.DIREWOLF_RATE} samples/s`);
+  winlinkLog(`direwolf: TXDELAY ${_direwolfTiming.txDelayMs} ms, TXTAIL ${_direwolfTiming.txTailMs} ms; PTT held ${winlinkUnkeyDrainMs()} ms after Dire Wolf unkeys`);
   winlinkLog('direwolf spawn: ' + [bin.path, ...args].map((a) => /\s/.test(a) ? `"${a}"` : a).join(' '));
   return await new Promise((resolve, reject) => {
     let proc;
@@ -11981,6 +12001,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
   });
   _winlinkSessionError = '';
   _winlinkSessionErrorKind = '';
+  _winlinkPatConnected = false;
   if (radio) _winlinkPreviewReturnTo = null; // the session's returnTo carries it now
   winlinkSessionTouch();
   winlinkSessionPush();
@@ -12071,7 +12092,9 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
         } catch {}
         return;
       }
-      if (mode === 'packet' && _direwolfHeard === 0 && _direwolfMonitorHeard === 0) {
+      // Never after Pat logged "Connected to": that link came up on a frame
+      // Dire Wolf decoded, whatever its counters say (#257).
+      if (mode === 'packet' && DirewolfProcess.packetDecodedNothing({ stdoutHeard: _direwolfHeard, monitorHeard: _direwolfMonitorHeard, patConnected: _winlinkPatConnected })) {
         winlinkLog('packet: Dire Wolf decoded nothing from the radio this session. The gateway may have answered (you can see it on the waterfall) but its reply never reached the modem: check the radio audio Input in Settings > Radio, its level, and that the radio is in FM with the squelch open.');
       }
       winlinkEndSession('error', _winlinkSessionError || e.message || String(e));

@@ -211,6 +211,7 @@ const TESTS = [
   'test/winlink-vara-test.js',
   'test/winlink-connect-test.js', // #128: /api/connect over http.request with no headers timeout; VARA and ARDOP send the same request
   'test/direwolf-agw-monitor-test.js', // #128: what Dire Wolf heard, over its AGW port's monitor mode
+  'test/packet-timing-test.js', // #257 NA4DQ IC-7100: Dire Wolf TX delay/tail settings, the packet PTT hold, no "decoded nothing" after Pat connected
   'test/modem-tx-burst-test.js', // #128: one log line per modem over — PTT, audio start/end, peak dBFS, unkey
   'test/rigctld-shim-hamlib-test.js',
   'test/rigctld-died-test.js',
@@ -477,6 +478,7 @@ const TESTS = [
   'test/run-tests-runner-test.js', // #175: this runner keeps going past a failing file, names every failure, exits non-zero
   'test/update-check-feedback-test.js', // #186: a manual Check for Updates always ends in a visible message (checking, up to date, found, or the error + download page)
   'test/tls-der-int-test.js', // ECHOCAT self-signed cert: the random serial is minimal DER (a leading 0x00 made OpenSSL reject ~1 in 512 certs)
+  'test/rigctld-data-fm-test.js', // #259: DIGFM/DIGAM have rigctld tokens (PKTFM/PKTAM), so a packet key-down on FM sends the DATA mode
 ];
 
 const root = path.join(__dirname, '..');
