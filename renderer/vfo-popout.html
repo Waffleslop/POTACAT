@@ -755,6 +755,7 @@
 <script src="../lib/custom-cat-follow.js"></script>
 <script src="../lib/rig-bands.js"></script>
 <script src="../lib/freq-paste.js"></script>
+<script src="../lib/wheel-tune.js"></script>
 <script src="../lib/mono-upmix.js"></script>
 <script src="../lib/vfo-ptt-mic.js"></script>
 <script>
@@ -1573,7 +1574,9 @@ window.addEventListener('mouseup', () => {
 function handleFreqWheel(e) {
   e.preventDefault();
   if (vfoLocked || !currentFreqHz) return; // no dial known yet: never step from 0
-  const dir = e.deltaY > 0 ? 1 : -1;
+  // Wheel up = frequency up, like a radio's dial and every logger (#192).
+  const dir = window.WheelTune.wheelDir(e.deltaY);
+  if (!dir) return;
   const stepHz = STEPS[stepIdx].hz * dir;
   currentFreqHz = Math.max(0, currentFreqHz + stepHz);
   vfoAngle += dir * STEP_ANGLE;
