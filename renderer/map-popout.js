@@ -375,6 +375,22 @@ function showTuneArc(lat, lon, freq, source) {
 
 // --- Marker Updates ---
 
+const MARKER_OFFSETS = [-360, 0, 360];
+
+// Everything a spot's marker shows, as one string: equal strings mean the
+// marker is left as it is. Icons are compared by object (a palette change
+// rebuilds them), so each gets a small id.
+const _markerIconIds = new WeakMap();
+let _markerIconSeq = 0;
+function markerSig(s, opts, popupContent) {
+  let iconId = 0;
+  if (opts.icon) {
+    if (!_markerIconIds.has(opts.icon)) _markerIconIds.set(opts.icon, ++_markerIconSeq);
+    iconId = _markerIconIds.get(opts.icon);
+  }
+  return [s.lat, s.lon, iconId, opts.opacity != null ? opts.opacity : 1, opts.zIndexOffset || 0, popupContent].join('\u0001');
+}
+
 function updateMapMarkers(spots) {
   if (!markerLayer) return;
 
@@ -390,7 +406,11 @@ function updateMapMarkers(spots) {
   });
   if (hasOpenPopup) return;
 
-  markerLayer.clearLayers();
+  // Reconcile by spot key (lib/map-marker-reconcile.js, #246): unchanged
+  // markers stay, changed ones update in place, only gone ones are removed.
+  // Clearing and rebuilding every marker on each push made the CW-spot and
+  // SOTA pins blink out on every refresh (electricfalcon).
+  const items = [];
 
   // Clear tune arc if the tuned spot is gone
   if (tuneArcFreq && !spots.some(s => s.frequency === tuneArcFreq)) {
@@ -438,11 +458,42 @@ function updateMapMarkers(spots) {
         ? { icon: oopIcon, opacity: 0.4 }
         : { icon: sourceIcon, ...(s.isWorkedToday ? { opacity: 0.5 } : {}) };
 
-    for (const offset of [-360, 0, 360]) {
-      const marker = L.marker([s.lat, s.lon + offset], markerOptions).bindPopup(popupContent);
-      marker._spotCallsign = s.callsign;
+    items.push({ key: MapMarkerReconcile.spotKey(s), sig: markerSig(s, markerOptions, popupContent), s, popupContent, markerOptions });
+  }
+
+  // One marker per world copy, so the pin shows past the antimeridian.
+  const byKey = markerLayer._spotMarkers || (markerLayer._spotMarkers = new Map()); // key -> { sig, markers }
+  const prevSigs = new Map();
+  for (const [k, e] of byKey) prevSigs.set(k, e.sig);
+  const plan = MapMarkerReconcile.planMarkers(prevSigs, items);
+  const itemOf = new Map();
+  for (const it of items) if (!itemOf.has(it.key)) itemOf.set(it.key, it);
+  for (const k of plan.remove) {
+    for (const m of byKey.get(k).markers) markerLayer.removeLayer(m);
+    byKey.delete(k);
+  }
+  for (const k of plan.update) {
+    const it = itemOf.get(k), e = byKey.get(k), o = it.markerOptions;
+    MARKER_OFFSETS.forEach((offset, i) => {
+      const m = e.markers[i];
+      m.setLatLng([it.s.lat, it.s.lon + offset]);
+      if (m.options.icon !== o.icon) m.setIcon(o.icon);
+      m.setOpacity(o.opacity != null ? o.opacity : 1);
+      m.setZIndexOffset(o.zIndexOffset || 0);
+      m.setPopupContent(it.popupContent);
+      m._spotCallsign = it.s.callsign;
+    });
+    e.sig = plan.next.get(k);
+  }
+  for (const k of plan.add) {
+    const it = itemOf.get(k);
+    const markers = MARKER_OFFSETS.map((offset) => {
+      const marker = L.marker([it.s.lat, it.s.lon + offset], it.markerOptions).bindPopup(it.popupContent);
+      marker._spotCallsign = it.s.callsign;
       marker.addTo(markerLayer);
-    }
+      return marker;
+    });
+    byKey.set(k, { sig: plan.next.get(k), markers });
   }
 }
 

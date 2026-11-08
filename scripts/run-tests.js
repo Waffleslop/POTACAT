@@ -135,6 +135,7 @@ const TESTS = [
   'test/log-freq-follow-test.js',
   'test/freq-paste-test.js',
   'test/spot-source-cache-test.js',
+  'test/map-marker-reconcile-test.js', // #246: map markers reconcile by spot key; CW/SOTA pins no longer blink out per push
   'test/ft-mode-filter-test.js',
   'test/jtcat-map-popup-test.js',
   'test/worked-matrix-test.js',
