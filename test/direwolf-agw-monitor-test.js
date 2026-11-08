@@ -139,7 +139,9 @@ function mon(kind, head, info) {
     assert.ok(/const ready = \(how\) => \{[^\n]*winlinkAgwMonitorStart\(\);/.test(sd), 'started from ready()');
     const kill = main.slice(main.indexOf('function killDirewolf()'), main.indexOf('async function spawnDirewolf('));
     assert.ok(/winlinkAgwMonitorStop\(\);/.test(kill), 'stopped with the process');
-    assert.ok(/mode === 'packet' && _direwolfHeard === 0 && _direwolfMonitorHeard === 0/.test(main), 'both counts must be zero before "decoded nothing"');
+    // Loosened for #257: the verdict lives in lib/direwolf-process.js packetDecodedNothing.
+    assert.ok(/mode === 'packet' && DirewolfProcess\.packetDecodedNothing\(\{ stdoutHeard: _direwolfHeard, monitorHeard: _direwolfMonitorHeard,/.test(main), 'both counts must be zero before "decoded nothing"');
+    assert.strictEqual(require('../lib/direwolf-process').packetDecodedNothing({ stdoutHeard: 0, monitorHeard: 1 }), false, 'a frame on the monitor alone is enough');
     const start = main.slice(main.indexOf('function winlinkAgwMonitorStart('), main.indexOf('function winlinkAgwMonitorStop('));
     assert.ok(/DirewolfAgwMonitor\.createAgwMonitor\(\{/.test(start) && /port: _winlinkAgwPort\(\)/.test(start));
     assert.ok(/if \(DirewolfAgwMonitor\.isReceivedFrame\(f\)\) _direwolfMonitorHeard\+\+;/.test(start));
