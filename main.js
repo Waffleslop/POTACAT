@@ -439,6 +439,7 @@ const DirewolfAgwMonitor = require('./lib/direwolf-agw-monitor');
 const VaraProcess = require('./lib/vara-process');
 const VaraSetup = require('./lib/vara-setup');
 const WinlinkModes = require('./lib/winlink-modes');
+const WinlinkReturn = require('./lib/winlink-return');
 const ModemAudioServerMod = require('./lib/modem-audio-server');
 const { ModemAudioServer } = ModemAudioServerMod;
 const { buildAdifFields, buildAdifRecord, sqliteQsoToAdifFields, ADIF_HEADER, adifField } = require('./lib/adif-writer');
@@ -1909,7 +1910,8 @@ let _winlinkRemoteWatchers = 0;
 let _winlinkSpecAcc = null;
 let _winlinkBusy = null; // WinlinkSpectrum.BusyDetector for the band the devices watch, rebuilt when it changes
 let _winlinkSpecLastAt = 0;
-let _winlinkPreviewReturnTo = null;  // dial/mode before a gateway pick tuned the radio
+let _winlinkPreviewReturnTo = null;  // dial/mode before a gateway pick tuned the radio; kept across attempts until the mail window closes (#187)
+let _winlinkLeftAtHz = 0;            // where POTACAT last left the radio while that return is pending
 
 // ─── JS8 (native) state ──────────────────────────────────────────────────────
 // POTACAT IS the JS8 station — the JS8Call modem is compiled in (GPLv3; see
@@ -11065,6 +11067,7 @@ async function connectWinlink() {
 
 function disconnectWinlink({ quit } = {}) {
   if (winlinkSessionActive()) winlinkEndSession('error', quit ? 'POTACAT is closing' : 'Winlink was turned off');
+  winlinkReturnOnStop(quit);
   clearTimeout(_winlinkAutoCheckTimer); _winlinkAutoCheckTimer = null;
   killArdop();
   killDirewolf();
@@ -11576,10 +11579,11 @@ function winlinkDialText(d) {
 /**
  * A gateway was picked (not yet connected): tune there now, so the waterfall
  * shows that frequency and the operator can see whether it is in use. The
- * dial/mode from before the FIRST pick is remembered and put back when the
- * session ends — or when the window closes with no session. Session start
- * tunes again regardless, so a dial moved in between is corrected before
- * the first transmission.
+ * dial/mode from before the FIRST pick is remembered across attempts and put
+ * back once, when the mail window closes (or Winlink stops, or POTACAT quits);
+ * a later pick never replaces it (#187). Session start tunes again
+ * regardless, so a dial moved in between is corrected before the first
+ * transmission.
  */
 function winlinkPreviewQsy({ dialKhz, mode } = {}) {
   const khz = Number(dialKhz);
@@ -11587,17 +11591,75 @@ function winlinkPreviewQsy({ dialKhz, mode } = {}) {
   if (isRemoteMode()) return { ok: false, error: 'Radio sessions key the shack\'s radio — tune from the shack PC', reason: 'remote' };
   if (winlinkSessionActive()) return { ok: false, error: 'A session is running' };
   if (radioOwner !== 'none' && radioOwner !== 'winlink') return { ok: false, error: `The radio is in use by ${radioOwner}`, reason: 'radio-busy' };
+  winlinkNoteHandTune();
   if (!_winlinkPreviewReturnTo && _currentFreqHz) _winlinkPreviewReturnTo = winlinkDialHere('before the gateway pick');
   tuneRadio(khz, mode === 'packet' ? 'FM' : 'DIGU', undefined, { origin: 'Winlink gateway pick' });
-  winlinkLog(`listening on ${khz.toFixed(1)} kHz for the picked gateway (the radio goes back to ${_winlinkPreviewReturnTo ? (_winlinkPreviewReturnTo.freqHz / 1e6).toFixed(4) + ' MHz' : 'where it was'} after)`);
+  _winlinkLeftAtHz = Math.round(khz * 1000);
+  winlinkLog(`listening on ${khz.toFixed(1)} kHz for the picked gateway (the radio goes back to ${_winlinkPreviewReturnTo ? (_winlinkPreviewReturnTo.freqHz / 1e6).toFixed(4) + ' MHz' : 'where it was'} when the mail window closes)`);
   return { ok: true };
 }
 
+/** The mail window (the desktop pop-out) is open. */
+function winlinkMailWindowOpen() {
+  return !!(winlinkPopoutWin && !winlinkPopoutWin.isDestroyed());
+}
+
+/** A return is pending and the dial is not where POTACAT left it: say so, keep the original. */
+function winlinkNoteHandTune() {
+  const r = _winlinkPreviewReturnTo;
+  if (!r || !WinlinkReturn.movedByHand(_winlinkLeftAtHz, _currentFreqHz)) return;
+  winlinkLog(`the dial was moved by hand to ${(_currentFreqHz / 1e6).toFixed(4)} MHz since the last attempt — the radio still goes back to ${winlinkDialText(r)} when the mail window closes`);
+  _winlinkLeftAtHz = _currentFreqHz;
+}
+
+/** A session ended with the mail window open: the radio stays; the original return point is kept. */
+function winlinkKeepReturn(returnTo) {
+  _winlinkPreviewReturnTo = { ...returnTo, moved: true };
+  _winlinkLeftAtHz = _currentFreqHz || 0;
+  winlinkLog(`session over: the radio stays on ${((_currentFreqHz || 0) / 1e6).toFixed(4)} MHz until the mail window closes, then goes back to ${winlinkDialText(returnTo)}`);
+}
+
+/** The mail window closed (or an ECHOCAT device left its Mail tab): go back once. */
 function winlinkPreviewRestore(why) {
   const r = _winlinkPreviewReturnTo;
+  const s = winlinkState.session;
+  const act = WinlinkReturn.atClose({ pending: r, sessionActive: winlinkSessionActive(), sessionReturn: s.returnTo });
+  const lead = `${why === 'window closed' ? 'the mail window closed' : why}: the radio now goes back to`;
+  if (act === 'after-session') { winlinkLog(`${why === 'window closed' ? 'the mail window closed' : why} during a session — the radio goes back to ${winlinkDialText(s.returnTo)} when it ends`); return; }
   _winlinkPreviewReturnTo = null;
-  if (!r || !r.freqHz || winlinkSessionActive()) return;
-  try { tuneRadio(r.freqHz / 1000, r.mode || undefined, undefined, { origin: `Winlink ${why}` }); } catch {}
+  _winlinkLeftAtHz = 0;
+  if (act === 'return') winlinkRestoreDial(r, 0, lead);
+}
+
+/** Winlink stopped. With the mail window open it is a relaunch: the return point is kept. */
+function winlinkReturnOnStop(quit) {
+  const r = _winlinkPreviewReturnTo;
+  const act = WinlinkReturn.atStop({ pending: r, windowOpen: winlinkMailWindowOpen(), quit: !!quit });
+  if (act === 'none') return;
+  if (act === 'keep') { winlinkLog(`Pat restarts with the mail window open — the radio still goes back to ${winlinkDialText(r)} when it closes`); return; }
+  _winlinkPreviewReturnTo = null;
+  _winlinkLeftAtHz = 0;
+  if (act === 'skip') { winlinkLog(`POTACAT is closing: not going back to ${winlinkDialText(r)} — the radio link is already closed`); return; }
+  winlinkRestoreDial(r, 0, 'Winlink stopped: the radio now goes back to');
+}
+
+/**
+ * POTACAT is quitting with a return pending: send it while the CAT link is up
+ * and carry on quitting after QUIT_RETURN_MS (inside the before-quit budget).
+ * Returns true when quit was deferred; `then` resumes it.
+ */
+function winlinkReturnBeforeQuit(then) {
+  const r = _winlinkPreviewReturnTo;
+  const catUp = !!_catLinkUpLast || !!(cat && cat.connected) || !!(smartSdr && smartSdr.canTune);
+  const v = WinlinkReturn.atQuit({ pending: winlinkSessionActive() ? null : r, catUp, atuBusy: !!_atuTuneEpisode });
+  if (v.act === 'none') return false;
+  _winlinkPreviewReturnTo = null;
+  _winlinkLeftAtHz = 0;
+  if (v.act === 'skip') { winlinkLog(`POTACAT is closing: not going back to ${winlinkDialText(r)} — ${v.why}`); return false; }
+  winlinkLog(`POTACAT is closing: the radio now goes back to ${winlinkDialText(r)}`);
+  try { tuneRadio(r.freqHz / 1000, r.mode || undefined, undefined, { origin: 'Winlink: POTACAT closing' }); } catch {}
+  setTimeout(then, v.waitMs);
+  return true;
 }
 
 // ── ardopcf ─────────────────────────────────────────────────────────────────
@@ -11906,6 +11968,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
   }
 
   const capMin = Math.max(10, Math.min(60, parseInt(settings.winlinkSessionCapMin, 10) || 30));
+  if (radio) winlinkNoteHandTune(); // a later attempt starts from here; the return point stays the original
   winlinkState.setSession({
     state: 'starting', mode, gateway: radio ? String(gateway).toUpperCase() : 'CMS (internet)', dialKhz: radio ? Number(dialKhz) || null : null,
     capSec: radio ? capMin * 60 : 0,
@@ -11919,7 +11982,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
   winlinkSessionPush();
   winlinkLog(`session start: ${mode}${radio ? ` → ${String(gateway).toUpperCase()} on ${Number(dialKhz).toFixed(1)} kHz dial` : ''} (${origin || 'operator'})`);
   const _rt = winlinkState.session.returnTo;
-  if (radio && _rt && _rt.freqHz) winlinkLog(`the radio goes back to ${winlinkDialText(_rt)} when the session ends`);
+  if (radio && _rt && _rt.freqHz) winlinkLog(`the radio goes back to ${winlinkDialText(_rt)} ${winlinkMailWindowOpen() ? 'when the mail window closes (it stays put between attempts)' : 'when the session ends'}`);
   if (radio) {
     settings.winlinkLastGateway = { call: String(gateway).toUpperCase(), mode, dialKhz: Number(dialKhz) || null };
     saveSettings(settings);
@@ -12134,10 +12197,12 @@ function winlinkEndSession(state, text, received = 0) {
     if (s.mode === 'ardop') killArdop();
     if (s.mode === 'packet') killDirewolf();
     if (s.mode === 'mercury') winlinkTakeMercuryBack();
-    // Pat QSXes the dial back itself; POTACAT puts the MODE back too.
-    if (s.tuned && s.returnTo && s.returnTo.mode && s.returnTo.freqHz) {
-      setTimeout(() => winlinkRestoreDial(s.returnTo), 1500);
-    }
+    // The radio stays where the session put it while the mail window is open;
+    // it goes back once, when the window closes (#187: a return per attempt
+    // was two band changes, each an ATU tune). No window: go back now.
+    const _ret = WinlinkReturn.atSessionEnd({ tuned: s.tuned, returnTo: s.returnTo, windowOpen: winlinkMailWindowOpen() });
+    if (_ret === 'keep') winlinkKeepReturn(s.returnTo);
+    else if (_ret === 'return') setTimeout(() => winlinkRestoreDial(s.returnTo), 1500);
     winlinkFlexDaxRestore();
     releaseRadio('winlink');
     stopModemBridgeCable();
@@ -12159,7 +12224,7 @@ function winlinkEndSession(state, text, received = 0) {
  * made the 8600 report TUNE_FAIL_BYPASS and the guard blame the antenna
  * (K3SBP 2026-10-23). Waits for the episode to resolve (≤ 30 s), then tunes.
  */
-function winlinkRestoreDial(returnTo, waitedMs = 0) {
+function winlinkRestoreDial(returnTo, waitedMs = 0, lead = 'session over: the radio goes back to') {
   if (!returnTo || !returnTo.freqHz) return;
   // A Connect inside the 1.5 s (or the ATU wait) would be QSYed off its gateway
   // mid-call and save the gateway as its own return dial (#187).
@@ -12169,11 +12234,11 @@ function winlinkRestoreDial(returnTo, waitedMs = 0) {
   }
   if (_atuTuneEpisode && waitedMs < 30000) {
     if (waitedMs === 0) winlinkLog(`holding the return to ${(returnTo.freqHz / 1e6).toFixed(4)} MHz until the ATU tune finishes`);
-    setTimeout(() => winlinkRestoreDial(returnTo, waitedMs + 500), 500);
+    setTimeout(() => winlinkRestoreDial(returnTo, waitedMs + 500, lead), 500);
     return;
   }
-  winlinkLog(`session over: the radio goes back to ${winlinkDialText(returnTo)}`);
-  try { tuneRadio(returnTo.freqHz / 1000, returnTo.mode || undefined, undefined, { origin: 'Winlink session ended' }); } catch {}
+  winlinkLog(`${lead} ${winlinkDialText(returnTo)}`);
+  try { tuneRadio(returnTo.freqHz / 1000, returnTo.mode || undefined, undefined, { origin: 'Winlink return' }); } catch {}
 }
 
 // ── the Winlink account, from Settings or an ECHOCAT device ──────────────────
@@ -49870,6 +49935,8 @@ app.on('before-quit', (e) => {
     Promise.race([jtcatFlushLogReviews(), new Promise((r) => setTimeout(r, 4000))]).finally(() => app.quit());
     return;
   }
+  // A Winlink return still pending (#187): the radio goes back while CAT is up.
+  if (winlinkReturnBeforeQuit(() => app.quit())) { e.preventDefault(); return; }
   gracefulCleanup();
   // Shutdown watchdog: if quit stalls after cleanup (a pending async close, a
   // wedged device handle), the process lingers headless and the NEXT
