@@ -37,6 +37,10 @@ contextBridge.exposeInMainWorld('api', {
   nakedPtt: (state) => ipcRenderer.send('naked-ptt', state),
   // #170: what the PC mic did on a PTT press (device, output, level) → one log line.
   vfoPttMicReport: (r) => ipcRenderer.send('vfo-ptt-mic-report', r),
+  // #247: POTACAT switched the radio on — reopen the radio audio once its
+  // USB CODEC is back; and the one log line when it was reopened.
+  onRadioPowerOn: (cb) => ipcRenderer.on('vfo-radio-power-on', () => cb()),
+  vfoAudioReattached: (r) => ipcRenderer.send('vfo-audio-reattached', r),
   // Driving a remote shack: the shack released PTT (or a key-down was refused
   // with the link down) — the button must let go.
   onRemotePttReleased: (cb) => ipcRenderer.on('remote-client-ptt-released', (_e, info) => cb(info || {})),
