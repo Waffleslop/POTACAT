@@ -117,12 +117,15 @@ test('they are profile settings (per radio, like Packet speed), not machine-loca
 });
 
 console.log('PTT hold after Dire Wolf unkeys');
-test('packet: the hold is only the part of POTACAT\'s pipeline the TXTAIL does not cover', () => {
-  assert.strictEqual(D.packetUnkeyDrainMs(250, 200), 50, 'sound-card bridge, default tail');
-  assert.strictEqual(D.packetUnkeyDrainMs(120, 200), 0, 'Flex / Icom Network, default tail');
-  assert.strictEqual(D.packetUnkeyDrainMs(250, 100), 150, 'a short tail keeps more of the hold');
-  assert.strictEqual(D.packetUnkeyDrainMs(250, 10), 240);
-  assert.strictEqual(D.packetUnkeyDrainMs(250, 0), 250, 'no tail: the full hold');
+test('packet: only TXTAIL beyond the old 100 ms replaces hold; cover after the frame never shrinks', () => {
+  assert.strictEqual(D.packetUnkeyDrainMs(250, 200), 150, 'sound-card bridge, default tail: 150 + 200 = the old 250 + 100');
+  assert.strictEqual(D.packetUnkeyDrainMs(120, 200), 20, 'Flex / Icom Network, default tail');
+  assert.strictEqual(D.packetUnkeyDrainMs(250, 100), 250, 'the old 100 ms tail keeps the full hold');
+  assert.strictEqual(D.packetUnkeyDrainMs(250, 10), 250, 'a short tail never lengthens the hold past the pipeline');
+  assert.strictEqual(D.packetUnkeyDrainMs(250, 500), 0, 'a 500 ms tail covers the whole hold');
+  for (const tail of [100, 150, 200, 300, 350]) {
+    assert.ok(D.packetUnkeyDrainMs(250, tail) + tail >= 350, `tail ${tail}: at least 350 ms after the frame`);
+  }
 });
 test('ARDOP / VARA / Mercury keep the full hold; only a packet session with Dire Wolf\'s timing shortens it', () => {
   assert.ok(/const WINLINK_UNKEY_DRAIN_BRIDGE_MS = 250;/.test(main), 'bridge hold unchanged');
@@ -139,8 +142,8 @@ test('ARDOP / VARA / Mercury keep the full hold; only a packet session with Dire
   assert.strictEqual(run('vara', false, t), 250);
   assert.strictEqual(run('varafm', false, t), 250);
   assert.strictEqual(run('mercury', false, t), 250);
-  assert.strictEqual(run('packet', false, t), 50);
-  assert.strictEqual(run('packet', true, t), 0);
+  assert.strictEqual(run('packet', false, t), 150);
+  assert.strictEqual(run('packet', true, t), 20);
   assert.strictEqual(run('packet', false, null), 250, 'no Dire Wolf timing known: the full hold');
 });
 test('the shim still schedules PTT-off through winlinkUnkeyDrainMs', () => {
