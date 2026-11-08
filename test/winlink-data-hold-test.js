@@ -110,8 +110,210 @@ test('session start says where the radio goes back to', () => {
 test('the restore says where it goes, and never lands under a newer session', () => {
   const r = fnBody(main, 'winlinkRestoreDial');
   assert.ok(/if \(winlinkSessionActive\(\)\) \{/.test(r), 'refuses while a session runs');
-  assert.ok(/session over: the radio goes back to \$\{winlinkDialText\(returnTo\)\}/.test(r));
+  assert.ok(/lead = 'session over: the radio goes back to'/.test(r), 'the session-end wording is the default');
+  assert.ok(/winlinkLog\(`\$\{lead\} \$\{winlinkDialText\(returnTo\)\}`\)/.test(r), 'every return names where it goes');
+  assert.ok(/winlinkRestoreDial\(returnTo, waitedMs \+ 500, lead\)/.test(r), 'the ATU wait keeps the wording');
   assert.ok(r.indexOf('if (winlinkSessionActive())') < r.indexOf('tuneRadio('), 'checked before the tune');
+});
+
+// ── decision 2026-11-07: the radio stays after an attempt; it goes back once,
+// when the mail window closes, Winlink stops or POTACAT quits ───────────────
+const R = require('../lib/winlink-return');
+
+// A fake station driven the way main.js drives it, through the decisions in
+// lib/winlink-return.js. Every tune is recorded.
+function station({ windowOpen = true, dial = 28074000, mode = 'DIGU' } = {}) {
+  const st = { dial, mode, pending: null, session: null, leftAt: 0, tunes: [], logs: [], windowOpen };
+  const tune = (hz, m, why) => { st.dial = hz; st.mode = m; st.tunes.push({ hz, mode: m, why }); };
+  const restore = (rt, why) => {
+    if (st.session) { st.logs.push('not going back — a new session is running'); return; }
+    tune(rt.freqHz, rt.mode, why);
+  };
+  const noteHand = () => {
+    if (st.pending && R.movedByHand(st.leftAt, st.dial)) st.logs.push('moved by hand; still going back to ' + st.pending.freqHz);
+  };
+  return {
+    st,
+    pick(hz) {
+      noteHand();
+      if (!st.pending) st.pending = { freqHz: st.dial, mode: st.mode, from: R.PICK };
+      tune(hz, 'DIGU', 'gateway pick');
+      st.leftAt = hz;
+    },
+    start(hz) {
+      noteHand();
+      const returnTo = st.pending || { freqHz: st.dial, mode: st.mode, from: 'at Connect' };
+      st.pending = null;
+      st.session = { returnTo, tuned: false };
+      tune(hz, 'DIGU', 'session start');
+      st.session.tuned = true;
+    },
+    end() {
+      const s = st.session; st.session = null;
+      const a = R.atSessionEnd({ tuned: s.tuned, returnTo: s.returnTo, windowOpen: st.windowOpen });
+      if (a === 'keep') { st.pending = { ...s.returnTo, moved: true }; st.leftAt = st.dial; }
+      else if (a === 'return') restore(s.returnTo, 'session over');
+      return a;
+    },
+    close() {
+      st.windowOpen = false;
+      const a = R.atClose({ pending: st.pending, sessionActive: !!st.session, sessionReturn: st.session && st.session.returnTo });
+      if (a === 'after-session') return a;
+      const r = st.pending; st.pending = null;
+      if (a === 'return') restore(r, 'window closed');
+      return a;
+    },
+    stop({ quit = false } = {}) {
+      const a = R.atStop({ pending: st.pending, windowOpen: st.windowOpen, quit });
+      if (a === 'none' || a === 'keep') return a;
+      const r = st.pending; st.pending = null;
+      if (a === 'return') restore(r, 'Winlink stopped');
+      return a;
+    },
+    hand(hz) { st.dial = hz; },
+  };
+}
+const toHome = (st) => st.tunes.filter((t) => t.hz === 28074000);
+
+console.log('the return point (decision 2026-11-07)');
+test('a failed attempt does not QSY: the radio stays on the gateway, the return point is kept', () => {
+  const s = station();
+  s.pick(14109100); s.start(14109100);
+  assert.strictEqual(s.end(), 'keep');
+  assert.strictEqual(s.st.dial, 14109100, 'still on the gateway');
+  assert.strictEqual(toHome(s.st).length, 0, 'no tune back to 28.074');
+  assert.deepStrictEqual([s.st.pending.freqHz, s.st.pending.mode, s.st.pending.from], [28074000, 'DIGU', R.PICK]);
+});
+test('NA4DQ replay: two gateways, five attempts: no band change between them, the return point is still 28.074', () => {
+  const s = station();
+  s.pick(14109100); s.start(14109100); s.end(); s.start(14109100); s.end();
+  s.pick(14102300); s.start(14102300); s.end(); s.start(14102300); s.end(); s.start(14102300); s.end();
+  assert.strictEqual(toHome(s.st).length, 0, 'never went back to 10 m in between (each was two ATU tunes before)');
+  assert.strictEqual(s.st.pending.freqHz, 28074000, 'not replaced by a gateway dial');
+  assert.strictEqual(s.st.pending.from, R.PICK);
+});
+test('a second attempt with no pick in between (the first from Connect) keeps the Connect dial', () => {
+  const s = station({ dial: 7074000 });
+  s.start(14109100); s.end(); s.start(14109100); s.end();
+  assert.strictEqual(s.st.pending.freqHz, 7074000);
+  assert.strictEqual(s.st.pending.from, 'at Connect');
+});
+test('an attempt that never tuned still keeps the return point an earlier one carried', () => {
+  assert.strictEqual(R.atSessionEnd({ tuned: false, returnTo: { freqHz: 7074000, from: 'at Connect', moved: true }, windowOpen: true }), 'keep');
+  assert.strictEqual(R.atSessionEnd({ tuned: false, returnTo: { freqHz: 7074000, from: 'at Connect' }, windowOpen: true }), 'none', 'the radio never moved');
+  assert.strictEqual(R.atSessionEnd({ tuned: true, returnTo: null, windowOpen: true }), 'none');
+});
+test('closing the mail window goes back once, to the original dial and mode', () => {
+  const s = station();
+  s.pick(14109100); s.start(14109100); s.end(); s.pick(14102300); s.start(14102300); s.end();
+  assert.strictEqual(s.close(), 'return');
+  assert.strictEqual(toHome(s.st).length, 1);
+  assert.deepStrictEqual([s.st.dial, s.st.mode], [28074000, 'DIGU']);
+  assert.strictEqual(s.close(), 'none', 'a second close has nothing to do');
+  assert.strictEqual(s.stop(), 'none', 'nor does a stop after it');
+  assert.strictEqual(toHome(s.st).length, 1);
+});
+test('a session running when the window closes is not moved; it goes back when it ends', () => {
+  const s = station();
+  s.pick(14109100); s.start(14109100);
+  assert.strictEqual(s.close(), 'after-session');
+  assert.strictEqual(s.st.dial, 14109100, 'not moved mid-session');
+  assert.strictEqual(s.end(), 'return', 'the window is closed by then');
+  assert.strictEqual(toHome(s.st).length, 1);
+});
+test('a return that would land while a newer session runs is refused (the restore guard)', () => {
+  const s = station();
+  s.pick(14109100); s.start(14109100); s.end();
+  const r = s.st.pending;
+  s.start(14102300);                    // a new session starts before the return lands
+  s.st.pending = r;                     // e.g. the return was waiting out an ATU tune
+  s.close();
+  assert.strictEqual(s.st.dial, 14102300, 'not moved off the running session');
+  assert.strictEqual(toHome(s.st).length, 0);
+});
+test('stopping Winlink goes back once; a relaunch with the mail window open keeps the return point', () => {
+  const s = station();
+  s.pick(14109100); s.start(14109100); s.end();
+  assert.strictEqual(s.stop(), 'keep', 'Pat relaunch for a settings change, window still open');
+  assert.strictEqual(toHome(s.st).length, 0);
+  s.st.windowOpen = false;
+  assert.strictEqual(s.stop(), 'return');
+  assert.strictEqual(s.stop(), 'none');
+  assert.strictEqual(toHome(s.st).length, 1);
+});
+test('a session from an ECHOCAT device with no mail window open goes back at its end, as before', () => {
+  const s = station({ windowOpen: false });
+  s.start(14109100);
+  assert.strictEqual(s.end(), 'return');
+  assert.strictEqual(toHome(s.st).length, 1);
+});
+test('quit: go back only with the radio link up and no ATU tune, inside the cleanup budget', () => {
+  const p = { freqHz: 28074000, mode: 'DIGU', from: R.PICK };
+  assert.deepStrictEqual(R.atQuit({ pending: null, catUp: true }), { act: 'none' });
+  const ok = R.atQuit({ pending: p, catUp: true, atuBusy: false });
+  assert.strictEqual(ok.act, 'return');
+  assert.ok(ok.waitMs > 0 && ok.waitMs < 4000, 'shorter than the 4 s quit flush and the 5 s watchdog');
+  assert.strictEqual(R.atQuit({ pending: p, catUp: false }).act, 'skip');
+  assert.ok(/link is down/.test(R.atQuit({ pending: p, catUp: false }).why));
+  assert.strictEqual(R.atQuit({ pending: p, catUp: true, atuBusy: true }).act, 'skip');
+  assert.strictEqual(R.atStop({ pending: p, windowOpen: true, quit: true }), 'skip', 'Winlink stops after the CAT link closed: logged, not sent');
+});
+test('the dial moved by hand between attempts: the original return point is kept, and it is logged', () => {
+  assert.strictEqual(R.movedByHand(14102300, 14102350), false, 'a nudge inside 100 Hz is not a move');
+  assert.strictEqual(R.movedByHand(14102300, 7074000), true);
+  assert.strictEqual(R.movedByHand(0, 7074000), false, 'nothing to compare with');
+  const s = station();
+  s.pick(14109100); s.start(14109100); s.end();
+  s.hand(7074000);
+  s.start(7101000); s.end();
+  assert.strictEqual(s.st.pending.freqHz, 28074000, 'still the original');
+  assert.ok(s.st.logs.some((l) => /moved by hand/.test(l)), 'said so');
+});
+
+console.log('main.js wiring of the return');
+test('session end keeps the return point while the mail window is open, and says so', () => {
+  const end = fnBody(main, 'winlinkEndSession');
+  assert.ok(/WinlinkReturn\.atSessionEnd\(\{ tuned: s\.tuned, returnTo: s\.returnTo, windowOpen: winlinkMailWindowOpen\(\) \}\)/.test(end));
+  assert.ok(/=== 'keep'\) winlinkKeepReturn\(s\.returnTo\)/.test(end));
+  assert.ok(/else if \(_ret === 'return'\) setTimeout\(\(\) => winlinkRestoreDial\(s\.returnTo\), 1500\);/.test(end), 'goes back at once only with no mail window');
+  const keep = fnBody(main, 'winlinkKeepReturn');
+  assert.ok(/_winlinkPreviewReturnTo = \{ \.\.\.returnTo, moved: true \}/.test(keep), 'the session\'s (original) return point is kept');
+  assert.ok(/stays on .* until the mail window closes/.test(keep));
+  assert.ok(/_winlinkLeftAtHz = _currentFreqHz/.test(keep));
+});
+test('a later gateway pick never replaces the return point; a hand tune between attempts is logged', () => {
+  assert.ok(/if \(!_winlinkPreviewReturnTo && _currentFreqHz\) _winlinkPreviewReturnTo = winlinkDialHere/.test(fnBody(main, 'winlinkPreviewQsy')));
+  assert.ok(/winlinkNoteHandTune\(\)/.test(fnBody(main, 'winlinkPreviewQsy')));
+  assert.ok(/winlinkNoteHandTune\(\)/.test(fnBody(main, 'winlinkStartSession')));
+  assert.ok(/WinlinkReturn\.movedByHand\(_winlinkLeftAtHz, _currentFreqHz\)/.test(fnBody(main, 'winlinkNoteHandTune')));
+});
+test('closing the mail window goes back once through the guarded restore', () => {
+  assert.ok(/winlinkPreviewRestore\('window closed'\)/.test(main));
+  const close = fnBody(main, 'winlinkPreviewRestore');
+  assert.ok(/WinlinkReturn\.atClose\(/.test(close));
+  assert.ok(/_winlinkPreviewReturnTo = null;/.test(close), 'once');
+  assert.ok(/'the mail window closed' : why\}: the radio now goes back to`/.test(close), 'says the window closed and it now goes back');
+  assert.ok(/if \(act === 'return'\) winlinkRestoreDial\(r, 0, lead\);/.test(close), 'through the guarded restore');
+  assert.ok(/during a session — the radio goes back to/.test(close), 'a running session is not moved');
+  assert.ok(!/tuneRadio\(/.test(close), 'no unguarded tune of its own');
+});
+test('stopping Winlink goes back once; on quit it says it was skipped', () => {
+  const dis = fnBody(main, 'disconnectWinlink');
+  assert.ok(dis.indexOf('winlinkReturnOnStop(quit)') > dis.indexOf('winlinkEndSession('), 'after the session ended');
+  const stop = fnBody(main, 'winlinkReturnOnStop');
+  assert.ok(/WinlinkReturn\.atStop\(/.test(stop));
+  assert.ok(/winlinkRestoreDial\(r, 0, 'Winlink stopped: the radio now goes back to'\)/.test(stop));
+  assert.ok(/not going back to/.test(stop), 'a skipped return is logged');
+});
+test('quit goes back first when it can, inside the cleanup budget, before the CAT link closes', () => {
+  const i = main.indexOf("app.on('before-quit', (e) => {");
+  const bq = main.slice(i, main.indexOf('gracefulCleanup();', i));
+  assert.ok(/if \(winlinkReturnBeforeQuit\(\(\) => app\.quit\(\)\)\) \{ e\.preventDefault\(\); return; \}/.test(bq));
+  const q = fnBody(main, 'winlinkReturnBeforeQuit');
+  assert.ok(/WinlinkReturn\.atQuit\(/.test(q));
+  assert.ok(/_winlinkPreviewReturnTo = null;/.test(q), 'once: the second before-quit carries on');
+  assert.ok(/not going back to/.test(q), 'a skipped return is logged');
+  assert.ok(q.indexOf('tuneRadio(') > 0 && /setTimeout\(then, v\.waitMs\)/.test(q));
 });
 
 console.log(`\nWinlink DATA hold (#187): ${pass} passed, ${fail} failed`);
