@@ -82,7 +82,9 @@ cases.push(['cw-diag: the web keyer reports each timer and element when the diag
   assert.ok(notes.filter((n) => n[0] === 'timer').length >= 2, 'tone end and space end not measured: ' + JSON.stringify(notes));
   assert.ok(notes.every((n) => n[1] >= -5), 'a timer reported as early');
   const web2 = readSrc(path.join(__dirname, '..', 'renderer', 'remote.js'));
-  assert.ok(/cwDiagNote\('ahead', schedulePaddleElement\(durMs\)\)/.test(web2), 'the sound lead is not measured');
+  // #244: the lead may go through a variable (onKey also returns it to the keyer).
+  assert.ok(/cwDiagNote\('ahead', schedulePaddleElement\(durMs\)\)/.test(web2) ||
+    /var lead = schedulePaddleElement\(durMs\); cwDiagNote\('ahead', lead\)/.test(web2), 'the sound lead is not measured');
   assert.ok(/noteCwInputLag\(e\);/.test(web2) && /noteCwInputLag\(msg\);/.test(web2), 'keyboard and MIDI input lag not measured');
 }]);
 
