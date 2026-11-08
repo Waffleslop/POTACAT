@@ -96,13 +96,20 @@ test('server: advertises log-as, hydrates operators at connect, never to a Guest
 const main = R('main.js');
 const save = main.slice(main.indexOf('async function saveQsoRecord(qsoData, opts) {'));
 const saveBody = save.slice(0, save.indexOf('\n}\n'));
+const fwdLib = R('lib/logger-forward.js'); // the external-logger fan-out saveQsoRecord calls (#267)
 test('saveQsoRecord resolves logAs first and reads identity, logbook and uploads from `ops`', () => {
   assert.ok(/const logAs = resolveLogAsForSave\(qsoData\);/.test(saveBody));
   assert.ok(/const ops = logAs \? logAs\.settings : settings;/.test(saveBody));
   for (const k of ['myCallsign', 'adifLogPath', 'qrzApiKey', 'qrzLogbook', 'sendToLogbook', 'logbookType', 'defaultPower', 'grid', 'extraUdpEnabled']) {
     assert.ok(!new RegExp('\\bsettings\\.' + k + '\\b').test(saveBody), 'settings.' + k + ' must be ops.' + k + ' inside saveQsoRecord');
   }
-  assert.ok(/forwardToLogbook\(qsoData, ops\)/.test(saveBody) && /sendToQrzLogbook\(qsoData, ops\)/.test(saveBody));
+  // #267: the fan-out moved to lib/logger-forward.js (the Cloud pull shares
+  // it); saveQsoRecord hands it `ops`, and it hands `ops` to each sender.
+  assert.ok(/LoggerForward\.forwardToLoggers\(qsoData, ops, loggerForwardDeps\(\)\)/.test(saveBody), 'the fan-out gets ops');
+  assert.ok(/d\.forwardToLogbook\(qsoData, ops\)/.test(fwdLib) && /d\.sendToQrzLogbook\(qsoData, ops\)/.test(fwdLib));
+  for (const k of ['sendToLogbook', 'logbookType', 'qrzApiKey', 'qrzLogbook', 'extraUdpEnabled']) {
+    assert.ok(!new RegExp('\\bsettings\\.' + k + '\\b').test(fwdLib), 'settings.' + k + ' must be ops.' + k + ' in the fan-out');
+  }
   assert.ok(/stationLocationFillFor\(qsoData, ops\)/.test(saveBody), 'station fill (activation + own county) reads the operator being logged for');
 });
 test('the record is the other operator\'s: OPERATOR and STATION_CALLSIGN forced, journaled under their account', () => {
@@ -136,11 +143,13 @@ test('forwardToLogbook and sendToQrzLogbook take the operator\'s settings', () =
 // #142: the online loggers read the operator being logged for, and Club Log
 // never blocks the save.
 test('Club Log: the gate reads `ops`, and the QSO is queued in the outbox, not awaited', () => {
-  assert.ok(/if \(ops\.clublogEnable && ops\.clublogRealtime !== false && !qsoData\.skipLogbookForward\n\s*&& ops\.clublogEmail && ops\.clublogPassword\)/.test(saveBody), 'gate reads ops');
-  assert.ok(!/settings\.clublog/.test(saveBody), 'no settings.clublog* inside saveQsoRecord');
-  assert.ok(/clublogOutbox\.add\(/.test(saveBody), 'queued');
-  assert.ok(!/await sendQsoToClublog\(/.test(saveBody), 'not awaited');
-  assert.ok(/callsign: ops\.clublogCallsign \|\| ops\.myCallsign/.test(saveBody));
+  // #267: the gate lives in lib/logger-forward.js queueClublog, called with ops.
+  assert.ok(/LoggerForward\.queueClublog\(qsoData, ops, loggerForwardDeps\(\)\)/.test(saveBody), 'saveQsoRecord queues with ops');
+  assert.ok(/if \(ops\.clublogEnable && ops\.clublogRealtime !== false && !qsoData\.skipLogbookForward\n\s*&& ops\.clublogEmail && ops\.clublogPassword\)/.test(fwdLib), 'gate reads ops');
+  assert.ok(!/settings\.clublog/.test(saveBody) && !/settings\.clublog/.test(fwdLib), 'no settings.clublog* inside saveQsoRecord or the fan-out');
+  assert.ok(/addClublog: \(entry\) => \{ initClublogOutbox\(\); clublogOutbox\.add\(entry\); \}/.test(main), 'queued');
+  assert.ok(!/await sendQsoToClublog\(/.test(saveBody) && !/await d\.addClublog\(/.test(fwdLib), 'not awaited');
+  assert.ok(/callsign: ops\.clublogCallsign \|\| ops\.myCallsign/.test(fwdLib));
 });
 test('Wavelog and WRL take the operator\'s settings from forwardToLogbook', () => {
   assert.ok(/return sendWavelogHttp\(qsoData, s\);/.test(main));

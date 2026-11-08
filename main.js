@@ -338,6 +338,7 @@ const { normalizeMuteRules } = require('./lib/spot-mute-rules'); // per-band reg
 const SpotAge = require('./lib/spot-age'); // Max Spot Age, shared with the table (#239)
 const SpotHides = require('./lib/spot-hides'); // hidden spots, one list for every surface (K8IKO)
 const LogAs = require('./lib/log-as'); // log a QSO for another operator on this machine (KD9WI)
+const LoggerForward = require('./lib/logger-forward'); // external-logger fan-out: live saves + Cloud-pulled phone QSOs (#267)
 const WatchlistGroups = require('./lib/watchlist-groups'); // state tokens in the watchlist (N0KAH)
 const { normalizeSerialPath, normalizeSettingsSerialPaths } = require('./lib/serial-path'); // "COM Port 10" -> COM10 (KF0TDB)
 const { TcpTransport, SerialTransport, calloutTwin } = require('./lib/transport');
@@ -14925,63 +14926,10 @@ async function saveQsoRecord(qsoData, opts) {
   // Debounced POTA.app pull — no-ops unless the user has enabled auto-sync.
   if (!logAs && loggedParkRef && potaSync) { try { potaSync.noteQsoLogged(); } catch {} }
 
-  // Forward to external logbook if enabled
-  // skipLogbookForward: multi-park activations send one ADIF record per park ref,
-  // but external logbooks only need one QSO per physical contact
-  let logbookError, qrzError;
-
-  if (ops.sendToLogbook && ops.logbookType && !qsoData.skipLogbookForward) {
-    try {
-      // Name the TARGET: a UDP send "succeeds" whether or not anything is
-      // listening, so when a logbook never receives, the host:port in this
-      // line is the whole diagnosis (KI4GT's WRL report had no way to tell).
-      sendCatLog(`[Logbook] Forwarding QSO to ${ops.logbookType} at ${ops.logbookHost || '127.0.0.1'}:${ops.logbookPort || '(default port)'}: ${qsoData.callsign} ${qsoData.frequency}kHz ${qsoData.mode}`);
-      await forwardToLogbook(qsoData, ops);
-      sendCatLog(`[Logbook] QSO sent (UDP delivery is fire-and-forget — if the logbook never receives, check the host/port above and that it is actually listening)`);
-    } catch (fwdErr) {
-      sendCatLog(`[Logbook] Forwarding failed: ${fwdErr.message}`);
-      console.error('Logbook forwarding failed:', fwdErr.message);
-      logbookError = fwdErr.message;
-    }
-  }
-
-  // Optional: also fire the QSO at a user-defined extra UDP destination
-  // (parallel to the main logbook). For users who want GridTracker / JTAlert
-  // / etc. to see logged QSOs without going through Log4OM as a middleman.
-  if (ops.extraUdpEnabled && !qsoData.skipLogbookForward) {
-    const host = ops.extraUdpHost || '127.0.0.1';
-    const port = parseInt(ops.extraUdpPort, 10) || 2237;
-    const format = ops.extraUdpFormat || 'wsjtx';
-    try {
-      sendCatLog(`[Extra UDP] Broadcasting QSO to ${host}:${port} (${format})`);
-      if (format === 'wsjtx') {
-        // Reuse the persistent bridge so heartbeats have already registered
-        // "POTACAT" as a source with GridTracker before the first QSO.
-        if (!extraUdpBridge.socket || extraUdpBridge.host !== host || extraUdpBridge.port !== port) {
-          extraUdpBridge.start(host, port);
-        }
-        const record = buildAdifRecord(qsoData);
-        const adifText = `<adif_ver:5>3.1.4\n<programid:7>POTACAT\n<EOH>\n${record}\n`;
-        await extraUdpBridge.sendQso(qsoData, adifText);
-      } else {
-        await sendUdpAdif(qsoData, host, port);
-      }
-      sendCatLog(`[Extra UDP] Sent`);
-    } catch (extraErr) {
-      sendCatLog(`[Extra UDP] Send failed: ${extraErr.message}`);
-      console.error('Extra UDP send failed:', extraErr.message);
-    }
-  }
-
-  // Upload to QRZ Logbook if enabled (independent of logbook forwarding)
-  if (ops.qrzLogbook && ops.qrzApiKey && !qsoData.skipLogbookForward) {
-    try {
-      await sendToQrzLogbook(qsoData, ops);
-    } catch (qrzErr) {
-      console.error('QRZ Logbook upload failed:', qrzErr.message);
-      qrzError = qrzErr.message;
-    }
-  }
+  // Forward to the external loggers if enabled: main logbook, Extra UDP, QRZ
+  // Logbook (lib/logger-forward.js — the Cloud pull forwards a phone's
+  // off-grid QSOs through the same gates, GitHub #267).
+  const { logbookError, qrzError } = await LoggerForward.forwardToLoggers(qsoData, ops, loggerForwardDeps());
 
   // Expand respot comment macros ({op_firstname}, {rst}, {mycallsign}, {QTH})
   if (qsoData.respotComment) {
@@ -15151,26 +15099,9 @@ async function saveQsoRecord(qsoData, opts) {
     }
   }
 
-  // Send the QSO to Club Log if enabled — never a gate on logging.
-  // skipLogbookForward: multi-park activations log one record per park but
-  // it's one physical QSO. #142: the account is the logged operator's (`ops`;
-  // a "Log as" operator without Club Log set up uploads nowhere), and the
-  // contact is queued (lib/clublog-outbox.js), so Save never waits on Club Log
-  // and a refused login pauses that account instead of failing every QSO.
-  if (ops.clublogEnable && ops.clublogRealtime !== false && !qsoData.skipLogbookForward
-      && ops.clublogEmail && ops.clublogPassword) {
-    try {
-      initClublogOutbox();
-      clublogOutbox.add({
-        creds: { email: ops.clublogEmail, password: ops.clublogPassword, callsign: ops.clublogCallsign || ops.myCallsign },
-        adif: buildAdifRecord(qsoData),
-        uuid: qsoData.uuid || require('crypto').randomUUID(),
-        call: qsoData.callsign,
-      });
-    } catch (e) {
-      sendCatLog(`[ClubLog] Error: ${e.message}`);
-    }
-  }
+  // Send the QSO to Club Log if enabled — never a gate on logging
+  // (lib/logger-forward.js queueClublog: queued, the logged operator's account).
+  LoggerForward.queueClublog(qsoData, ops, loggerForwardDeps());
 
   const didRespot = (qsoData.respot && qsoData.sig === 'POTA') || qsoData.wwffRespot || qsoData.llotaRespot || qsoData.dxcRespot;
 
@@ -33328,6 +33259,55 @@ function rawQsoToQsoData(raw) {
   };
 }
 
+/**
+ * The real senders behind lib/logger-forward.js: what saveQsoRecord and the
+ * Cloud pull (GitHub #267) hand the external-logger fan-out.
+ */
+function loggerForwardDeps() {
+  return {
+    forwardToLogbook: (q, ops) => forwardToLogbook(q, ops),
+    sendExtraUdp: sendExtraUdpQso,
+    sendToQrzLogbook: (q, ops) => sendToQrzLogbook(q, ops),
+    addClublog: (entry) => { initClublogOutbox(); clublogOutbox.add(entry); },
+    buildAdifRecord,
+    newUuid: () => require('crypto').randomUUID(),
+    log: (msg) => sendCatLog(msg),
+    error: (msg) => console.error(msg),
+  };
+}
+
+/** The Extra UDP destination's send (GridTracker / JTAlert next to the main logbook). */
+async function sendExtraUdpQso(qsoData, host, port, format) {
+  if (format === 'wsjtx') {
+    // Reuse the persistent bridge so heartbeats have already registered
+    // "POTACAT" as a source with GridTracker before the first QSO.
+    if (!extraUdpBridge.socket || extraUdpBridge.host !== host || extraUdpBridge.port !== port) {
+      extraUdpBridge.start(host, port);
+    }
+    const record = buildAdifRecord(qsoData);
+    const adifText = `<adif_ver:5>3.1.4
+<programid:7>POTACAT
+<EOH>
+${record}
+`;
+    await extraUdpBridge.sendQso(qsoData, adifText);
+  } else {
+    await sendUdpAdif(qsoData, host, port);
+  }
+}
+
+/**
+ * GitHub #267: a QSO of this station's that reached this PC only through the
+ * Cloud pull (a paired phone logged it off-grid) goes to the same external
+ * loggers a live QSO does. lib/cloud-ipc.js decides which QSOs qualify.
+ */
+async function forwardPulledQsoToLoggers(fields) {
+  const qsoData = rawQsoToQsoData(fields);
+  sendCatLog(`[Cloud] ${qsoData.callsign} ${qsoData.qsoDate} ${qsoData.timeOn} came in by Cloud sync (logged on the phone off-line): forwarding to the external loggers`);
+  await LoggerForward.forwardToLoggers(qsoData, settings, loggerForwardDeps());
+  LoggerForward.queueClublog(qsoData, settings, loggerForwardDeps());
+}
+
 function forwardToLogbook(qsoData, s = settings) {
   // A home contact reaches the other logger with the home grid as
   // MY_GRIDSQUARE (AE5JE). This copy only: the saved record and LoTW keep none.
@@ -38099,6 +38079,10 @@ app.whenReady().then(() => {
       // journal is kept per profile; each profile's account is read from
       // its own settings file.
       getActiveProfile: () => settings.activeProfile || '',
+      // GitHub #267: this station's QSOs that a paired phone logged off-grid
+      // reach the external loggers when the pull brings them in.
+      forwardPulledQso: (fields) => forwardPulledQsoToLoggers(fields),
+      hasPairedDevice: () => Array.isArray(settings.pairedDevices) && settings.pairedDevices.length > 0,
       listProfiles: () => listProfiles().map((call) => ({ call, owner: cloudIpc ? cloudIpc.ownerIdFor(operatorSettingsFor(call)) : null })),
       sendToRenderer: (channel, data) => {
         if (win && !win.isDestroyed()) win.webContents.send(channel, data);
