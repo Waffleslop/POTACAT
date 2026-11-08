@@ -517,6 +517,15 @@
           <input type="range" id="filter-slider" min="50" max="4000" step="50" value="2400" aria-label="Filter width">
         </label>
       </div>
+      <!-- TX power (GitHub #199): the Rig panel's TX Pwr slider, from the same
+           caps (vfo-radio-state.rigPower). Hidden on a radio without txpower. -->
+      <div class="vfo-section" id="sec-txpower" style="display:none">
+        <label class="filter-row">Power
+          <input type="range" id="vfo-txpower" min="0" max="100" step="1" value="0" aria-label="TX power">
+          <select class="chip" id="vfo-txpower-select" aria-label="TX power" hidden></select>
+          <span class="filter-val" id="vfo-txpower-val">&mdash;</span>
+        </label>
+      </div>
       <div class="controls-row" id="blk-controls">
         <div class="vfo-section rig-toggles-shared" id="sec-controls"></div>
         <span class="spacer"></span>
@@ -753,6 +762,7 @@
      both audio sources apply identical DSP. -->
 <script src="tx-eq-chain.js"></script>
 <script src="../lib/custom-cat-follow.js"></script>
+<script src="../lib/rig-power-view.js"></script>
 <script src="../lib/rig-bands.js"></script>
 <script src="../lib/freq-paste.js"></script>
 <script src="../lib/wheel-tune.js"></script>
@@ -968,6 +978,7 @@ window.api.onRadioState((s) => {
     updateFilterQuickHighlight();
   }
   if (s.txPower != null) currentTxPower = s.txPower; // so "Save profile" can snapshot it
+  if (s.rigPower) applyVfoTxPower(s.rigPower);
   if (s.rfGain != null) currentRfGain = s.rfGain;   // + RF/AF for "Save current" on a rig preset
   if (s.afGain !== undefined) currentAfGain = s.afGain;
   if (s.nb != null) {
@@ -1214,6 +1225,61 @@ filterSlider.addEventListener('change', () => {
   updateFilterQuickHighlight();
   updateDisplay();
 });
+
+// --- TX power (GitHub #199) ---
+// The main window's TX Pwr slider in this window: lib/rig-power-view.js reads
+// main's payload (range/step/choices already scaled by Full power (W)), the
+// set goes through the one rig-control dispatcher (Guest Pass cap there), and
+// a drag reaches the radio at most four times a second.
+const vfoTxPwrSec = document.getElementById('sec-txpower');
+const vfoTxPwrRange = document.getElementById('vfo-txpower');
+const vfoTxPwrSelect = document.getElementById('vfo-txpower-select');
+const vfoTxPwrVal = document.getElementById('vfo-txpower-val');
+let vfoTxPwrDecimals = 0;
+let vfoTxPwrInputAt = 0;
+const vfoTxPwrSend = RigPowerView.createPowerSender((w) => window.api.rigControl({ action: 'set-tx-power', value: w }));
+function applyVfoTxPower(p) {
+  const v = RigPowerView.powerView(p);
+  vfoTxPwrSec.style.display = v.shown ? '' : 'none';
+  if (!v.shown) return;
+  vfoTxPwrDecimals = v.decimals;
+  vfoTxPwrRange.hidden = v.useSelect;
+  vfoTxPwrSelect.hidden = !v.useSelect;
+  vfoTxPwrRange.min = v.min;
+  vfoTxPwrRange.max = v.max;
+  vfoTxPwrRange.step = v.step;
+  vfoTxPwrRange.disabled = vfoTxPwrSelect.disabled = !v.enabled;
+  vfoTxPwrSec.title = v.enabled ? 'Radio TX power: ' + v.min + '–' + v.max + ' W'
+    : 'Radio TX power (read-only: no live CAT or SmartSDR power control)';
+  const want = v.choices.join('|');
+  if (v.useSelect && vfoTxPwrSelect.dataset.choices !== want && document.activeElement !== vfoTxPwrSelect) {
+    vfoTxPwrSelect.innerHTML = '';
+    for (const c of v.choices) {
+      const o = document.createElement('option');
+      o.value = String(c); o.textContent = RigPowerView.formatWatts(c, v.decimals);
+      vfoTxPwrSelect.appendChild(o);
+    }
+    vfoTxPwrSelect.dataset.choices = want;
+  }
+  // The echo of our own set is in flight during a drag: leave the thumb alone.
+  const dragging = document.activeElement === vfoTxPwrRange || document.activeElement === vfoTxPwrSelect
+    || (Date.now() - vfoTxPwrInputAt) < 600;
+  if (dragging) return;
+  if (v.known) {
+    if (v.useSelect) vfoTxPwrSelect.value = v.selectValue;
+    else vfoTxPwrRange.value = v.watts;
+  }
+  vfoTxPwrVal.textContent = v.label;
+}
+function vfoTxPwrInput(el) {
+  vfoTxPwrInputAt = Date.now();
+  const w = parseFloat(el.value);
+  vfoTxPwrVal.textContent = RigPowerView.formatWatts(w, vfoTxPwrDecimals);
+  vfoTxPwrSend(w);
+}
+vfoTxPwrRange.addEventListener('input', () => vfoTxPwrInput(vfoTxPwrRange));
+vfoTxPwrRange.addEventListener('change', () => vfoTxPwrRange.blur());
+vfoTxPwrSelect.addEventListener('change', () => { vfoTxPwrInput(vfoTxPwrSelect); vfoTxPwrSelect.blur(); });
 
 // --- NB / ATU toggles ---
 let nbOn = false, atuOn = false;
@@ -2034,6 +2100,7 @@ const ORDER_BLOCKS = [
   { key: 'band', el: 'sec-band', name: 'Bands' },
   { key: 'filter', el: 'sec-filter', name: 'Filter buttons' },
   { key: 'filter-slider', el: 'sec-filter-slider', name: 'Filter slider' },
+  { key: 'txpower', el: 'sec-txpower', name: 'TX power' },
   { key: 'controls', el: 'blk-controls', name: 'NB, ATU, custom buttons and solar' },
   { key: 'profiles', el: 'sec-profiles-inline', name: 'Profiles' },
   { key: 'cw-controls', el: 'widget-cw-controls', name: 'CW speed and text' },
