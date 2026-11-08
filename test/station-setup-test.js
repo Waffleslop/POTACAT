@@ -171,6 +171,12 @@ t('test transmit outcomes map to plain next steps', () => {
   const np = tx({ result: 'no-power' });
   assert.strictEqual(np.state, 'needs');
   assert.match(np.instructions[0].steps.join(' '), /audio is not reaching the radio/);
+  // #221: an Icom Network rig takes transmit audio over the LAN, not USB.
+  const npNet = step(evalRig({ model: 'IC-7300 MK II', radioType: 'icom-network', audioSource: 'icom-network', live: { txTest: { result: 'no-power' } } }), 'tx-test');
+  const netText = JSON.stringify(npNet.instructions);
+  assert.ok(/from LAN/.test(netText) && !/from USB/.test(netText), netText);
+  assert.ok(netText.includes('DATA MOD → LAN'), 'the LAN setup note is shown: ' + netText);
+  assert.ok(/from USB/.test(np.instructions[0].steps.join(' ')), 'a USB rig still says USB');
   assert.match(tx({ result: 'swr-high', swr: 4.2 }).detail, /SWR was 4\.2/);
   const man = tx({ result: 'error', message: 'cannot read', needsManualPower: true });
   assert.ok(man.actions.some(a => a.id === 'tx-test-current-power'));

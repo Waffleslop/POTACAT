@@ -95,6 +95,16 @@ test('IC-7300: USB Keying (CW) uses the model main-port line, and the override',
   const dtr = note(resolve({ model: 'IC-7300', radioType: 'icom', cwKeyLine: 'dtr' }), 'icom-usb-keying-cw');
   assert.ok(/→ DTR/.test(dtr.steps[0]), dtr.steps[0]);
 });
+test('IC-7300 MK II on Icom Network: DATA MOD = LAN, or TX keys with no power (#221, KJ5CHK)', () => {
+  const lan = note(resolve({ model: 'IC-7300 MK II', radioType: 'icom-network' }), 'icom-network-data-mod-lan');
+  assert.ok(lan, 'LAN DATA MOD note missing for the MK II on Icom Network');
+  assert.strictEqual(lan.level, 'required');
+  assert.strictEqual(lan.feature, 'Audio');
+  assert.ok(lan.steps[0].includes('MENU → SET → Connectors → MOD Input → DATA MOD → LAN'), lan.steps[0]);
+  assert.ok(!/USB/.test(lan.steps.join(' ')), 'the LAN note must not say USB');
+  assert.ok(!note(resolve({ model: 'IC-7300 MK II', radioType: 'icom' }), 'icom-network-data-mod-lan'), 'not on USB');
+  assert.ok(!note(resolve({ model: 'IC-7300', radioType: 'icom-network' }), 'icom-network-data-mod-lan'), 'only models with a confirmed path');
+});
 test('the Icom pickers and the model table agree on every CI-V address the note quotes', () => {
   const opts = [...HTML.matchAll(/<option value="0x([0-9A-Fa-f]+)">(IC-[^<]+)<\/option>/g)];
   assert.ok(opts.length > 5, 'no Icom picker options found');
