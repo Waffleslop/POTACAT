@@ -81,18 +81,22 @@ test('Technician: CW only on 80, 40 and 15 m; US Advanced has its own table', ()
   assert.ok(refuse(14160000, 'USB', 'us_advanced'));
   assert.strictEqual(refuse(14200000, 'USB', 'us_advanced'), null);
 });
-test('renderer/app.js (the spot filter) carries the same tables', () => {
+// #250 step 1: the renderer copies are gone. lib/privileges.js is the one
+// source, loaded as window.Privileges (test/privileges-one-source-test.js
+// proves the result is unchanged, cell by cell).
+test('renderer/app.js (the spot filter) uses the shared tables', () => {
   const src = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
-  const m = src.match(/const PRIVILEGE_RANGES = (\{[\s\S]*?\r?\n\};)/);
-  assert.ok(m, 'table found');
-  assert.deepStrictEqual(Function('return ' + m[1].replace(/;$/, ''))(), P.PRIVILEGE_MAP);
+  assert.ok(!/const PRIVILEGE_RANGES = /.test(src), 'no copy of the table');
+  assert.ok(/Privileges\.isOutOfPrivilege\(/.test(src), 'calls the shared module');
+  const html = readSrc(path.join(__dirname, '..', 'renderer', 'index.html'));
+  assert.ok(html.includes('<script src="../lib/privileges.js"></script>'), 'index.html loads it');
 });
-test('renderer/bandspread-popout.js carries the same tables', () => {
+test('renderer/bandspread-popout.js uses the shared tables', () => {
   const src = readSrc(path.join(__dirname, '..', 'renderer', 'bandspread-popout.js'));
-  const m = src.match(/const PRIVILEGE_MAP = (\{[\s\S]*?\r?\n\};)/);
-  assert.ok(m, 'table found');
-  const copy = Function('return ' + m[1].replace(/;$/, ''))();
-  assert.deepStrictEqual(copy, P.PRIVILEGE_MAP);
+  assert.ok(!/const PRIVILEGE_MAP = /.test(src), 'no copy of the table');
+  assert.ok(/Privileges\.PRIVILEGE_MAP\[cls\]/.test(src), 'reads the shared module');
+  const html = readSrc(path.join(__dirname, '..', 'renderer', 'bandspread-popout.html'));
+  assert.ok(html.includes('<script src="../lib/privileges.js"></script>'), 'the pop-out page loads it');
 });
 
 test('rig data-mode names are data: USB-D, USB-D2, DIGU, PKT-U, DATA-U', () => {

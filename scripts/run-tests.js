@@ -107,6 +107,7 @@ const TESTS = [
   'test/halt-tx-test.js',
   'test/refused-key-audio-test.js', // #214: a refused key-down plays no radio audio (Tune, SSTV, voice macro); a Tune stop during start-up wins
   'test/own-licence-tx-test.js',
+  'test/privileges-one-source-test.js', // #250: lib/privileges.js is the one table (renderer loads it); unverified classes never refuse TX; no change vs master
   'test/rigctld-power-scale-test.js',
   'test/rigctld-kenwood-power-test.js', // a TS-590/TS-2000 behind Hamlib keeps its power: raw PC, never Hamlib's PC000/PC255 probe
   'test/jtcat-tx-watchdog-test.js',
