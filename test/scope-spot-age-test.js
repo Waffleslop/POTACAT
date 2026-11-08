@@ -159,5 +159,11 @@ test('a spot that ages out leaves the scope with no new spots arriving', () => {
   assert.ok(ms > 0 && ms <= 60000, 'at most a minute late: ' + ms);
 });
 
+test('an unparseable spot time is kept, as the table always did; a missing one is dropped', () => {
+  const opts = { maxAgeMin: 30 };
+  assert.strictEqual(SpotAge.spotWithinAge({ source: 'dxc', spotTime: 'not a time' }, opts, Date.now()), true);
+  assert.strictEqual(SpotAge.spotWithinAge({ source: 'rbn', spotTime: '' }, opts, Date.now()), false);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
