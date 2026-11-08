@@ -125,6 +125,23 @@ test('a shack name becomes a clean label; the preview is the server prefix + nam
   assert.strictEqual(CS.shackHostPreview('', '.potacat.com', 'az'), '', 'never builds a host without the server prefix');
 });
 
+test('the cloud reply: an unbound legacy primary is listed and removable; a long label is caught', () => {
+  const list = CS.cleanShacks([
+    { deviceId: null, name: '', cloudHost: 'k3sbp.potacat.com', primary: true, shackName: null },
+    { deviceId: 'dev-b', name: 'AZ', cloudHost: 'k3sbp-az.potacat.com', primary: false, shackName: 'az' },
+    { deviceId: null, primary: false },
+  ]);
+  assert.strictEqual(list.length, 2, 'a row with no device that is not the primary is dropped');
+  assert.strictEqual(list[0].deviceId, CS.UNBOUND_PRIMARY_ID);
+  assert.strictEqual(list[0].deviceId, 'primary', 'DELETE /v1/cloud-tunnel/shacks/primary removes it');
+  assert.strictEqual(list[0].unbound, true);
+  assert.ok(/Main address/.test(list[0].name));
+  assert.strictEqual(list[1].shackName, 'az');
+  assert.strictEqual(CS.shackLabelTooLong('k3sbp-', 'az'), false);
+  assert.strictEqual(CS.shackLabelTooLong('vp2ezz-', 'a'.repeat(20)), false, '27 characters fits');
+  assert.strictEqual(CS.shackLabelTooLong('kh6abc/vp2ezz12-', 'a'.repeat(20)), true, 'over 32 is refused');
+});
+
 test('the server answers are told apart; anything else is an error', () => {
   const e = (code, body) => Object.assign(new Error('x'), { status: 409, code, body: { error: code, ...body } });
   assert.strictEqual(CS.interpretProvision(null, e('shack_name_required', { prefix: 'k-', suffix: '.p', limit: 3 })).state, 'name-required');

@@ -1370,8 +1370,12 @@
     if (!ctOwnPreview) return;
     const o = ctOwnState;
     const host = o && CS ? CS.shackHostPreview(o.prefix, o.suffix, ctShackName ? ctShackName.value : '') : '';
-    ctOwnPreview.textContent = host ? 'Its address will be ' + host : '';
-    if (ctOwnBtn) ctOwnBtn.disabled = !(CS && CS.sanitizeShackName(ctShackName ? ctShackName.value : ''));
+    const typed = ctShackName ? ctShackName.value : '';
+    const tooLong = !!(o && CS && CS.shackLabelTooLong && CS.shackLabelTooLong(o.prefix, typed));
+    ctOwnPreview.textContent = tooLong
+      ? 'That name makes the address too long. Use a shorter name.'
+      : (host ? 'Its address will be ' + host : '');
+    if (ctOwnBtn) ctOwnBtn.disabled = tooLong || !(CS && CS.sanitizeShackName(typed));
   }
 
   async function renderOwnAddress(state) {
