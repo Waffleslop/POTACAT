@@ -45783,6 +45783,18 @@ function cloudShackNotice(text, kind) {
     return { qrz: qrzInfo, pastQsos, totalQsos: all.length, workedMatrix };
   });
 
+  // Prior contacts card (#154): the hunter table's and the FT8 decode list's
+  // right-click item. The log index and the worked grid only, never QRZ. Both
+  // come from the active operator's own logbook (a "Log as" contact is not in
+  // them), the same contacts the worked check mark and the log pop-out show.
+  ipcMain.handle('prior-contacts', (_e, call) => {
+    const trimmed = String(call || '').trim().toUpperCase();
+    if (!trimmed) return { call: '', total: 0, recent: [], workedMatrix: null };
+    const all = lookupPastQsos(trimmed);
+    const workedMatrix = WorkedMatrix.buildWorkedMatrix(WorkedMatrix.entriesForCall(workedQsos, trimmed, JtcatParser.baseCall));
+    return { call: trimmed, total: all.length, recent: all.slice(0, require('./lib/prior-contacts').RECENT), workedMatrix };
+  });
+
   // Export/Import settings
   ipcMain.handle('export-settings', async () => {
     const { dialog } = require('electron');

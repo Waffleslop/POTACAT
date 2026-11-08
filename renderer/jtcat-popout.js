@@ -3382,6 +3382,15 @@ function _applyPopoutTheme(payload) {
     else addIgnore(rowMenuCall);
     closeRowMenu();
   });
+  // Prior contacts card (#154): the log's contacts with this station, read-only.
+  var rowMenuPrior = document.getElementById('jp-row-menu-prior');
+  if (rowMenuPrior) rowMenuPrior.addEventListener('click', function (e) {
+    var call = rowMenuCall, x = e.clientX, y = e.clientY;
+    closeRowMenu();
+    if (!call || !window.api.priorContacts || !window.PriorContacts) return;
+    window.api.priorContacts(call).then(function (data) { PriorContacts.showCard(call, data, x, y); })
+      .catch(function (err) { console.error('[prior-contacts]', err); });
+  });
   document.addEventListener('mousedown', function (e) { if (rowMenu && !rowMenu.hidden && !rowMenu.contains(e.target)) closeRowMenu(); });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && rowMenu && !rowMenu.hidden) closeRowMenu(); });
   function huntFiltersReflectDot() {
