@@ -133,6 +133,7 @@ const TESTS = [
   'test/ft-mode-filter-test.js',
   'test/jtcat-map-popup-test.js',
   'test/worked-matrix-test.js',
+  'test/prior-contacts-test.js', // #154: Prior contacts card from the hunter table and FT8 decode list right-click; check mark hover
   'test/prefix-overlay-test.js',
   'test/dxpedition-dials-test.js',
   'test/renderer-global-api-test.js',

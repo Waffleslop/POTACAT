@@ -38,6 +38,8 @@ contextBridge.exposeInMainWorld('api', {
   // A QSO reached the log, whatever path logged it (saveQsoRecord is the one
   // choke point). Drives the QSO-logged chime.
   onQsoLogged: (cb) => ipcRenderer.on('qso-logged', (_e, q) => cb(q)),
+  // Prior contacts card (#154): the log index and the worked grid for one call, no QRZ.
+  priorContacts: (call) => ipcRenderer.invoke('prior-contacts', call),
   // SWR-guard latch override ("TX anyway") — clears the tripped state.
   swrGuardOverride: () => ipcRenderer.send('swr-guard-override'),
   onSmartSdrUnreachable: (cb) => ipcRenderer.on('smartsdr-unreachable', (_e, data) => cb(data)),

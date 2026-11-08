@@ -14888,6 +14888,8 @@ function render() {
       callTd.className = 'callsign-cell';
       callTd.setAttribute('data-col', 'callsign');
       if (workedOtherTitle) callTd.title = workedOtherTitle;
+      // The check mark's hover (#154): how often, when, band, mode and park.
+      else if (isWorked && window.PriorContacts) callTd.title = PriorContacts.workedHoverText(workedQsos.get(String(s.callsign || '').toUpperCase()));
       // Own-call row: ONE leading cat and nothing else \u2014 the donor paw and
       // creator badges below are suppressed for your own call (K3SBP saw
       // "cat K3SBP paw cat" when spotted; the trailing badges are for OTHER
@@ -16450,6 +16452,9 @@ function showHideSpotMenu(x, y, callsign, frequency, spot) {
   } catch (err) {
     console.error('[mute-rules] region-button setup failed:', err);
   }
+  // Prior contacts (#154): not for a net row, whose "callsign" is the net's name.
+  const priorBtn = document.getElementById('hide-spot-prior-btn');
+  if (priorBtn) priorBtn.classList.toggle('hidden', !!(spot && spot.source === 'net'));
   // Show unhide button if already hidden
   const unhideBtn = hideSpotMenu.querySelector('.hide-spot-unhide');
   unhideBtn.classList.toggle('hidden', !isSpotHidden(callsign, frequency));
@@ -16548,10 +16553,23 @@ if (_hideSpotRegionBtn) {
   });
 }
 
+// Prior contacts card (#154): the log's contacts with this call, read-only.
+const _hideSpotPriorBtn = document.getElementById('hide-spot-prior-btn');
+if (_hideSpotPriorBtn) {
+  _hideSpotPriorBtn.addEventListener('click', async (e) => {
+    const call = hideSpotTarget;
+    const x = e.clientX, y = e.clientY;
+    closeHideSpotMenu();
+    if (!call || !window.api.priorContacts || !window.PriorContacts) return;
+    try { PriorContacts.showCard(call, await window.api.priorContacts(call), x, y); }
+    catch (err) { console.error('[prior-contacts]', err); }
+  });
+}
+
 hideSpotMenu.addEventListener('click', (e) => {
   const btn = e.target.closest('.hide-spot-btn');
   if (!btn || !hideSpotTarget) return;
-  if (btn.id === 'hide-spot-region-btn') return; // has its own handler above
+  if (btn.id === 'hide-spot-region-btn' || btn.id === 'hide-spot-prior-btn') return; // have their own handlers
   const dur = btn.dataset.dur;
   const scope = btn.dataset.scope;
   if (dur === 'unhide') {

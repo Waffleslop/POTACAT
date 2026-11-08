@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('api', {
   jtcatModeHop: (opts) => ipcRenderer.send('jtcat-mode-hop', opts),
   onJtcatModeHopped: (cb) => ipcRenderer.on('jtcat-mode-hopped', (_e, d) => cb(d)),
   platform: process.platform,
+  // Prior contacts card (#154): the log index and the worked grid for one call, no QRZ.
+  priorContacts: (call) => ipcRenderer.invoke('prior-contacts', call),
   // JTCAT engine control
   jtcatStart: (mode) => ipcRenderer.send('jtcat-start', mode),
   jtcatStop: () => ipcRenderer.send('jtcat-stop'),
