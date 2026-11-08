@@ -13090,10 +13090,42 @@ function placeLogDialog() {
     try { localStorage.setItem(LOG_DIALOG_POS_KEY, JSON.stringify({ left: parseInt(logDialog.style.left, 10), top: parseInt(logDialog.style.top, 10) })); } catch {}
   });
   head.addEventListener('dblclick', () => {
-    try { localStorage.removeItem(LOG_DIALOG_POS_KEY); } catch {}
+    try { localStorage.removeItem(LOG_DIALOG_POS_KEY); localStorage.removeItem(LOG_DIALOG_WIDTH_KEY); } catch {}
+    sizeLogDialog();
     placeLogDialog();
   });
 })();
+
+// The Log QSO form is widened (or narrowed) by its corner grip and opens at
+// the width it was last given, kept inside the window (GitHub #240,
+// hoogskev: "the width can't be changed"). Only the width is kept: the
+// height stays automatic so the form still grows when a program's ref rows
+// appear. Double-click the title for the default width and position.
+const LOG_DIALOG_WIDTH_KEY = 'potacat-log-dialog-width';
+let _logDialogAppliedWidth = '';
+function sizeLogDialog() {
+  logDialog.style.height = '';
+  let w = 0;
+  try { w = parseInt(localStorage.getItem(LOG_DIALOG_WIDTH_KEY) || '0', 10) || 0; } catch {}
+  logDialog.style.width = w > 0 ? Math.max(320, Math.min(w, window.innerWidth - 16)) + 'px' : '';
+  _logDialogAppliedWidth = logDialog.style.width;
+}
+if (logDialog && typeof ResizeObserver !== 'undefined') {
+  let _logWidthTimer = null;
+  new ResizeObserver(() => {
+    // Only a drag of the grip sets an inline width other than the one
+    // sizeLogDialog applied; a window too small for the saved width must
+    // not overwrite it.
+    if (!logDialog.open || !logDialog.style.width || logDialog.style.width === _logDialogAppliedWidth) return;
+    clearTimeout(_logWidthTimer);
+    _logWidthTimer = setTimeout(() => {
+      const px = Math.round(logDialog.getBoundingClientRect().width);
+      if (px < 200) return;
+      try { localStorage.setItem(LOG_DIALOG_WIDTH_KEY, String(px)); } catch {}
+      _logDialogAppliedWidth = logDialog.style.width;
+    }, 200);
+  }).observe(logDialog);
+}
 
 // Debounced QRZ name lookup whenever the operator types a callsign — including
 // over a spot's prefilled one. A multi-op activation is spotted under ONE call,
@@ -15565,6 +15597,7 @@ function openLogPopup(spot) {
 
   renderLogWorkedMatrix();
   refreshLogAsOperators(); // Log as: back to the active operator on every open
+  sizeLogDialog();
   logDialog.showModal();
   placeLogDialog();
   // Focus RST Sent so user can immediately type signal report

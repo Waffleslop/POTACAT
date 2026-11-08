@@ -45,7 +45,9 @@ check('Directory tabs step with the arrow keys (hoogskev)', () => {
   assert.ok(/function directoryArrowStep\(step\) \{[\s\S]{0,600}rows\[idx\]\.click\(\);/.test(app));
 });
 check('the Log QSO dialog is wide enough for the worked-band grid (hoogskev)', () => {
-  assert.ok(/#log-dialog \{[\s\S]{0,300}width: min\(500px, 96vw\);/.test(css));
+  // #240 widened it again and made it resizable: at least 500 px, capped by the window.
+  const w = /#log-dialog \{[\s\S]{0,900}?\n  width: min\((\d+)px, (?:96vw|calc\(100vw - \d+px\))\);/.exec(css);
+  assert.ok(w && +w[1] >= 500, 'Log dialog at least 500 px wide');
   assert.ok(/\.log-worked-matrix \{ overflow-x: auto; \}/.test(css));
 });
 check('Settings Save reconnects the cluster only for a CHANGED panadapter gate (hoogskev: DX spots vanished)', () => {
