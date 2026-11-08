@@ -10631,7 +10631,8 @@ function getFiltered() {
   const bands = getDropdownValues(bandFilterEl);
   const modes = getDropdownValues(modeFilterEl);
   const continents = getDropdownValues(continentFilterEl);
-  const maxAgeSecs = maxAgeMin * 60;
+  const ageOpts = { maxAgeMin, sotaMaxAgeMin, dxcMaxAgeMin, potaAgeLimit };
+  const nowMs = Date.now();
   const focusEv = _eventFocusEvent(); // resolved once per render
   return allSpots.filter((s) => {
     // Event Focus is an exclusive lens: ONLY event stations, from EVERY
@@ -10685,20 +10686,13 @@ function getFiltered() {
 
     if (sourceOff) {
       if (!isWatched || spotAgeSecs(s.spotTime) > 300) return false;
-    } else if (s.source === 'pskr') {
-      // PSKReporter already limits to 15 min server-side; don't apply client max-age
-      if (spotAgeSecs(s.spotTime) > 900) return false;
-    } else if (s.source === 'sota') {
-      // SOTA spots are posted once by a human (not re-spotted like POTA)
-      if (spotAgeSecs(s.spotTime) > sotaMaxAgeMin * 60) return false;
-    } else if (s.source === 'dxc') {
-      // DX cluster spots are one-shot — an operator can be in a pileup
-      // for many minutes without a fresh spot, so give DX its own window.
-      if (spotAgeSecs(s.spotTime) > dxcMaxAgeMin * 60) return false;
-    } else if (s.source === 'pota' && !potaAgeLimit) {
-      // pota.app's feed expires POTA spots itself — show what it lists.
-    } else {
-      if (spotAgeSecs(s.spotTime) > maxAgeSecs) return false;
+    } else if (!SpotAge.spotWithinAge(s, ageOpts, nowMs)) {
+      // Max Spot Age, per source (lib/spot-age.js): PSKReporter 15 min, SOTA
+      // and cluster their own windows, POTA follows pota.app's expiry unless
+      // potaAgeLimit. The Band Scope and bandspread pop-outs run the same
+      // function in main (spotsForScope, #239), so they never draw a spot
+      // this table has aged out.
+      return false;
     }
     if (bands && !bands.has(s.band)) return false;
     if (!modeMatches(s.mode, modes)) return false;
