@@ -401,6 +401,7 @@ const TESTS = [
   'test/welcome-cloud-signin-test.js',
   'test/activation-filename-date-test.js',
   'test/remote-rig-test.js',
+  'test/remote-rig-power-test.js', // #152: rig power on/off from a remote POTACAT; no Power Off under a TX
   'test/remote-multi-client-test.js',
   'test/remote-bridge-test.js',
   'test/sstv-context-test.js',

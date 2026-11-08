@@ -1729,6 +1729,54 @@ document.addEventListener('click', (e) => {
   showLogToast(el.getAttribute('data-remote-unavailable'), { warn: true, duration: 7000 });
 }, true);
 
+// #152: the shack's radio power. The line is the shack's own rigPowered; the
+// buttons go to the shack's dispatcher (which refuses Power Off while it is
+// transmitting). Off asks once, as in the VFO window; the ask survives a
+// redraw, because shack info is pushed on every round trip.
+let _remotePowerOffArmedUntil = 0;
+let _remotePowerOffTimer = null;
+function renderRemotePowerRow(info) {
+  const row = document.createElement('div');
+  row.className = 'cat-popover-rig-desc';
+  row.style.cssText = 'padding:4px 8px;display:flex;align-items:center;gap:6px;';
+  const label = document.createElement('span');
+  label.style.flex = '1';
+  label.textContent = 'Radio: ' + (info.radioPowered === true ? 'On' : info.radioPowered === false ? 'Off' : 'Unknown');
+  const canPower = !!(info.canPower && info.linked);
+  const on = document.createElement('button');
+  on.className = 'rig-btn';
+  on.textContent = 'Power On';
+  on.title = 'Switch the radio on';
+  const off = document.createElement('button');
+  off.className = 'rig-btn rig-btn-danger';
+  off.textContent = Date.now() < _remotePowerOffArmedUntil ? 'Press again to power off' : 'Power Off';
+  off.title = 'Switch the radio off. Press twice: the first press asks.';
+  for (const b of [on, off]) {
+    b.disabled = !canPower;
+    if (!canPower) b.style.opacity = '0.4';
+  }
+  const disarm = () => { clearTimeout(_remotePowerOffTimer); _remotePowerOffTimer = null; _remotePowerOffArmedUntil = 0; off.textContent = 'Power Off'; };
+  on.addEventListener('click', () => { disarm(); window.api.rigControl({ action: 'power-on' }); });
+  off.addEventListener('click', () => {
+    if (Date.now() >= _remotePowerOffArmedUntil) {
+      _remotePowerOffArmedUntil = Date.now() + 4000;
+      off.textContent = 'Press again to power off';
+      clearTimeout(_remotePowerOffTimer);
+      _remotePowerOffTimer = setTimeout(() => {
+        _remotePowerOffArmedUntil = 0;
+        if (catPopoverOpen && remoteShack && remoteShack.remote) renderRemoteShackRigs(remoteShack);
+      }, 4000);
+      return;
+    }
+    disarm();
+    window.api.rigControl({ action: 'power-off' });
+  });
+  row.appendChild(label);
+  row.appendChild(on);
+  row.appendChild(off);
+  return row;
+}
+
 // Remote mode: the radios on offer are the SHACK's. A click switches the
 // shack's rig; the last row hands the radio back to this PC.
 function renderRemoteShackRigs(info) {
@@ -1772,6 +1820,7 @@ function renderRemoteShackRigs(info) {
     });
     catPopoverRigs.appendChild(rigEl);
   }
+  catPopoverRigs.appendChild(renderRemotePowerRow(info));
   const back = document.createElement('div');
   back.className = 'cat-popover-rig';
   back.innerHTML = '<span class="cat-popover-rig-dot"></span><div class="cat-popover-rig-info"><div class="cat-popover-rig-name">Use this PC\'s radio</div><div class="cat-popover-rig-desc">Disconnect from the shack</div></div>';
