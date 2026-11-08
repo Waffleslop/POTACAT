@@ -318,6 +318,7 @@ const TESTS = [
   'test/sstv-mobile-readiness-test.js',
   'test/sstv-template-sync-test.js',
   'test/sstv-gallery-test.js',
+  'test/sstv-gallery-dir-test.js', // #123: the gallery folder is prepared async with a time limit, never sync on the SSTV window-open path
   'test/sstv-keep-test.js',
   'test/sstv-help-test.js',
   'test/sstv-jtcat-handover-test.js',

@@ -132,7 +132,7 @@ function handlerBody(marker) {
 const topLevel = (name) => new RegExp(`^(async )?function ${name}\\(|^(const|let) ${name} =`, 'm').test(MAIN);
 
 test('scope guard: every function the gallery handlers call is declared at module scope', () => {
-  const GLOBALS = new Set(['require', 'String', 'Number', 'Math', 'JSON', 'Buffer', 'Date', 'setTimeout', 'if', 'for', 'catch', 'return', 'function', 'async', 'await', 'typeof']);
+  const GLOBALS = new Set(['require', 'String', 'Number', 'Math', 'JSON', 'Buffer', 'Date', 'Error', 'setTimeout', 'if', 'for', 'catch', 'return', 'function', 'async', 'await', 'typeof']);
   for (const marker of ["remoteServer.on('sstv-get-gallery',", "remoteServer.on('sstv-get-gallery-image',", "ipcMain.handle('sstv-get-gallery',"]) {
     const body = handlerBody(marker).replace(/\/\/.*$/gm, '').replace(/'(?:[^'\\]|\\.)*'/g, "''");
     const called = new Set([...body.matchAll(/(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(/g)].map((m) => m[1]));

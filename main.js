@@ -1741,29 +1741,27 @@ function legacySstvGalleryDir() {
 function getSstvGalleryDir() {
   return (settings && settings.sstvDecodedImagesPath) || defaultSstvGalleryDir();
 }
+// #123: opening the SSTV window ran existsSync + mkdirSync (and a sync legacy
+// copy) on the Pictures folder on the MAIN process; a slow or unreachable
+// Pictures folder froze every window. The window-open, ECHOCAT and decode-save
+// paths now prepare it asynchronously with a time limit (null = skipped,
+// logged); the sync helper skips the disk for a folder already prepared.
+let _sstvGalleryDirReady = null;
 let _sstvLegacyGalleryMigrated = false;
-function migrateLegacySstvGalleryIfNeeded(dir) {
-  if (_sstvLegacyGalleryMigrated) return;
-  _sstvLegacyGalleryMigrated = true;
-  if (settings && settings.sstvDecodedImagesPath) return;
-  const oldDir = legacySstvGalleryDir();
-  if (oldDir === dir || !fs.existsSync(oldDir)) return;
-  try {
-    const files = fs.readdirSync(oldDir).filter(f => /\.(png|json)$/i.test(f));
-    for (const f of files) {
-      const src = path.join(oldDir, f);
-      const dest = path.join(dir, f);
-      if (!fs.existsSync(dest)) fs.copyFileSync(src, dest);
-    }
-    if (files.length) sendCatLog(`[SSTV] Copied ${files.length} legacy gallery file(s) to ${dir}`);
-  } catch (err) {
-    console.error('[SSTV] Legacy gallery migration error:', err.message);
-  }
+async function ensureSstvGalleryDirAsync() {
+  const dir = getSstvGalleryDir();
+  if (_sstvGalleryDirReady === dir) return dir;
+  const legacyDir = (!_sstvLegacyGalleryMigrated && !(settings && settings.sstvDecodedImagesPath)) ? legacySstvGalleryDir() : null;
+  const r = await SstvGallery.prepareGalleryDir(dir, { fsp: fs.promises, legacyDir, timeoutMs: 3000, log: sendCatLog });
+  if (!r.ok) return null;
+  _sstvGalleryDirReady = dir;
+  if (legacyDir) _sstvLegacyGalleryMigrated = true;
+  return dir;
 }
 function ensureSstvGalleryDir() {
   const dir = getSstvGalleryDir();
+  if (_sstvGalleryDirReady === dir) return dir;
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  migrateLegacySstvGalleryIfNeeded(dir);
   return dir;
 }
 // The gallery's order, pages and records live in lib/sstv-gallery.js, and
@@ -26866,7 +26864,8 @@ function connectRemote() {
   remoteServer.on('sstv-get-gallery', async ({ limit, offset, requestId, thumbs }) => {
     let dir = '';
     try {
-      dir = ensureSstvGalleryDir();
+      dir = await ensureSstvGalleryDirAsync();
+      if (!dir) throw new Error('it did not answer');
       const page = await SstvGallery.galleryPage(dir, { limit: thumbs ? limit : Math.min(limit || 10, 10), offset, thumbs }, sstvGalleryDeps());
       for (const e of page.errors) sendCatLog('[SSTV] Gallery picture unreadable: ' + e);
       remoteServer.sendSstvGallery(page.images, requestId, page.total);
@@ -26882,7 +26881,7 @@ function connectRemote() {
     const name = SstvGallery.safeGalleryName(filename);
     if (!name) { remoteServer.sendSstvGalleryImage({ filename, requestId, error: 'Not a gallery picture.' }); return; }
     try {
-      const rec = await SstvGallery.galleryRecord(path.join(ensureSstvGalleryDir(), name), sstvGalleryDeps());
+      const rec = await SstvGallery.galleryRecord(path.join(getSstvGalleryDir(), name), sstvGalleryDeps());
       remoteServer.sendSstvGalleryImage({ filename: name, requestId, dataUrl: rec.dataUrl, width: rec.width, height: rec.height });
     } catch (err) {
       sendCatLog('[SSTV] Gallery picture ' + name + ' for ECHOCAT failed: ' + err.message);
@@ -41518,7 +41517,8 @@ function cloudShackNotice(text, kind) {
   saveSstvImageRef = (d) => saveSstvImage(d);
   async function saveSstvImage(data) {
     try {
-      const galleryDir = ensureSstvGalleryDir();
+      const galleryDir = await ensureSstvGalleryDirAsync();
+      if (!galleryDir) return null; // logged: the folder did not answer (#123)
       const ts = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19);
       const modePart = sanitizeSstvFilenamePart(data.mode, 'unknown');
       const heardHz = data.freqHz !== undefined ? data.freqHz : (_currentFreqHz || null);
@@ -41782,7 +41782,9 @@ function cloudShackNotice(text, kind) {
   ipcMain.handle('sstv-get-gallery', async () => {
     try {
       // The 50 most recently RECEIVED (not the alphabetically last).
-      const page = await SstvGallery.galleryPage(ensureSstvGalleryDir(), { limit: 50, offset: 0 }, sstvGalleryDeps());
+      const dir = await ensureSstvGalleryDirAsync();
+      if (!dir) return []; // logged: the folder did not answer; the window opens without it (#123)
+      const page = await SstvGallery.galleryPage(dir, { limit: 50, offset: 0 }, sstvGalleryDeps());
       for (const e of page.errors) sendCatLog('[SSTV] Gallery picture unreadable: ' + e);
       return page.images;
     } catch (err) {
