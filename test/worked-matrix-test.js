@@ -56,7 +56,8 @@ test('Log QSO window: container, script, drawn on open and as the call is typed'
   assert.ok(html.indexOf('../lib/worked-matrix.js') > 0 && html.indexOf('../lib/worked-matrix.js') < html.indexOf('src="app.js"'));
   const app = read('renderer/app.js');
   assert.ok(/function renderLogWorkedMatrix\(\)/.test(app));
-  assert.ok(/renderLogWorkedMatrix\(\);\s*refreshLogAsOperators\(\);[^\n]*\n\s*logDialog\.showModal\(\);/.test(app), 'on open');
+  // #240: sizeLogDialog() (the remembered width) may sit just before showModal.
+  assert.ok(/renderLogWorkedMatrix\(\);\s*refreshLogAsOperators\(\);[^\n]*\n(\s*sizeLogDialog\(\);\n)?\s*logDialog\.showModal\(\);/.test(app), 'on open');
   assert.ok(/logWorkedMatrixTimer = setTimeout\(renderLogWorkedMatrix, 200\)/.test(app), 'while typing');
 });
 test('log pop-out: main returns the grid with the callsign lookup and the window draws it', () => {

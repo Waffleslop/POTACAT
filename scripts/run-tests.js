@@ -429,6 +429,7 @@ const TESTS = [
   'test/worked-other-test.js',
   'test/decode-contract-test.js',
   'test/layout-alignment-test.js',
+  'test/log-form-layout-test.js', // #240: the Log QSO form is wider, resizable with its width remembered, and its paired fields wrap at any Text size / display scale
   'test/g90-hamlib-model-test.js',
   'test/voice-data-mode-test.js',
   'test/n3fjp-pull-test.js',

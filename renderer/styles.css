@@ -6198,13 +6198,44 @@ a.settings-echocat-badge-link:hover {
 
 /* Log dialog */
 #log-dialog {
-  min-width: 340px;
   /* 400 px squeezed the worked-band grid (11 band columns, #108) and broke
-     the form (hoogskev 11-03); the grid scrolls if it still does not fit. */
-  width: min(500px, 96vw);
-  max-width: 500px;
+     the form (hoogskev 11-03); 500 px was still too narrow (#240, 11-07).
+     620 px by default, never wider than the window, and the operator can
+     drag the corner grip wider or narrower: the width is remembered
+     (renderer/app.js sizeLogDialog). Text size (the window zoom) and
+     Windows display scale shrink the window in CSS px, so every limit here
+     is against the viewport, not a fixed maximum. */
+  box-sizing: border-box;
+  width: min(620px, calc(100vw - 16px));
+  min-width: min(340px, calc(100vw - 16px));
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow: auto;   /* resize needs overflow other than visible */
+  resize: both;
 }
 .log-worked-matrix { overflow-x: auto; }
+/* Two fields side by side while each has room for 11em, one under the
+   other when not: a field is never squeezed until its label runs into the
+   input (hoogskev #240: bigger fonts garbled the new log fields). */
+#log-dialog .log-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 12px;
+}
+#log-dialog .log-row > label {
+  flex: 1 1 11em;
+  min-width: 0;
+}
+#log-dialog label {
+  overflow-wrap: anywhere;
+}
+#log-dialog .log-as-wrap { flex-wrap: wrap; white-space: normal; }
+#log-dialog label input,
+#log-dialog label select {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+}
 
 .log-dialog-header {
   display: flex;
@@ -6246,7 +6277,7 @@ a.settings-echocat-badge-link:hover {
 .log-save-btn:hover {
   background: #3db892 !important;
 }
-.log-type-chips { display: flex; gap: 6px; margin: 6px 0 4px; }
+.log-type-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 4px; }
 .log-type-chip {
   padding: 3px 10px; border-radius: 12px; border: 1.5px solid #555;
   background: transparent; color: #888; font-size: 12px; font-weight: 600;

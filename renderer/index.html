@@ -4637,11 +4637,11 @@
       <h3>Log QSO</h3>
       <button type="button" id="log-dialog-close" class="log-dialog-x" title="Close">&times;</button>
     </div>
-    <div style="display:flex;gap:8px;">
-      <label style="flex:1;">Callsign:
+    <div class="log-row">
+      <label>Callsign:
         <input type="text" id="log-callsign" maxlength="60" placeholder="e.g. K0OTC or K0OTC,NO4D" style="text-transform:uppercase;">
       </label>
-      <label style="flex:1;">Name:
+      <label>Name:
         <input type="text" id="log-op-name" readonly tabindex="-1" style="color:#b0bec5;background:transparent;border-color:#333;">
       </label>
     </div>
@@ -4685,11 +4685,11 @@
         <div id="log-ref-name-wwbota" style="font-size:12px;color:var(--accent-green);margin-top:2px;min-height:16px;white-space:pre-line;"></div>
       </div>
     </div>
-    <div style="display:flex;gap:8px;">
-      <label style="flex:1;">Frequency (kHz):
+    <div class="log-row">
+      <label>Frequency (kHz):
         <input type="text" id="log-frequency">
       </label>
-      <label style="flex:1;">Mode:
+      <label>Mode:
         <select id="log-mode">
           <option value="CW">CW</option>
           <option value="SSB">SSB</option>
@@ -4706,19 +4706,19 @@
         </select>
       </label>
     </div>
-    <div style="display:flex;gap:8px;">
-      <label style="flex:1;">Date (UTC):
+    <div class="log-row">
+      <label>Date (UTC):
         <input type="date" id="log-date">
       </label>
-      <label style="flex:1;">Time (UTC):
+      <label>Time (UTC):
         <input type="text" id="log-time" placeholder="HH:MM" maxlength="5" pattern="\d{2}:\d{2}" style="font-variant-numeric:tabular-nums;">
       </label>
     </div>
     <label>Power (W):
       <input type="number" id="log-power" min="1" max="5000">
     </label>
-    <div style="display:flex;gap:8px;">
-      <label style="flex:1;">RST Sent:
+    <div class="log-row">
+      <label>RST Sent:
         <div class="rst-split-mode hidden" style="display:flex;gap:4px;align-items:center;margin-top:4px;">
           <div class="rst-digits" id="rst-sent-split">
             <input type="text" class="rst-digit" maxlength="1" data-idx="0" inputmode="numeric">
@@ -4730,7 +4730,7 @@
           <input type="text" class="rst-input" id="rst-sent-n1mm" maxlength="3" inputmode="numeric" value="599" spellcheck="false" autocomplete="off">
         </div>
       </label>
-      <label style="flex:1;">RST Received:
+      <label>RST Received:
         <div class="rst-split-mode hidden" style="display:flex;gap:4px;align-items:center;margin-top:4px;">
           <div class="rst-digits" id="rst-rcvd-split">
             <input type="text" class="rst-digit" maxlength="1" data-idx="0" inputmode="numeric">

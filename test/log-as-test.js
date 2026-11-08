@@ -159,7 +159,8 @@ test('desktop Log QSO dialog: chooser, re-read on open, sent as logAs, named on 
   const app = R('renderer/app.js');
   const html = R('renderer/index.html');
   assert.ok(/id="log-as-select"/.test(html));
-  assert.ok(/refreshLogAsOperators\(\); \/\/ Log as: back to the active operator on every open\n\s*logDialog\.showModal\(\);/.test(app));
+  // #240: the remembered width is applied between the two (sizeLogDialog).
+  assert.ok(/refreshLogAsOperators\(\); \/\/ Log as: back to the active operator on every open\n(\s*sizeLogDialog\(\);\n)?\s*logDialog\.showModal\(\);/.test(app));
   assert.ok(/logAs: logAsChosen\(\),/.test(app));
   assert.ok(/: `Save for \$\{t\.join\(' \+ '\)\}`;/.test(app), 'the button names every operator ticked');
   assert.ok(/showLogToast\(`Logged \$\{displayCalls\}\$\{logAsTail\(\)\}`\)/.test(app));
