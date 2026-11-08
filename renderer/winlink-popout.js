@@ -139,8 +139,17 @@
     return ((state && state.modes) || []).find(function (m) { return m.id === id; }) || { id: 'telnet', available: true };
   }
 
+  // #188: the compose body hint follows the session mode (NA4DQ: packet said HF).
+  function composeHint(id) {
+    if (id === 'packet') return 'Plain text. Keep it short over VHF packet.';
+    if (id === 'varafm') return 'Plain text. Keep it short over VARA FM.';
+    if (id === 'ardop' || id === 'vara' || id === 'mercury') return 'Plain text. Keep it short over HF.';
+    return 'Plain text.';
+  }
+
   function renderModeNote() {
     var m = currentMode();
+    $('wl-c-body').placeholder = composeHint(m.id);
     var radio = m.id !== 'telnet';
     $('wl-radio-pick').style.display = radio ? 'inline-flex' : 'none';
     var note = '';
