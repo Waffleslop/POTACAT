@@ -15,8 +15,9 @@
 //      profile on this PC signed in to the same account — never because it
 //      differs from the active call (a single profile logging /P keeps all);
 //   B. the duplicate guard never absorbs or tombstones another profile's record;
-//   C. journal entries are per account AND profile; an existing journal
-//      becomes the active profile's on upgrade, silently;
+//   C. journal entries are stamped with their profile (an existing journal
+//      becomes the active profile's on upgrade, silently), but pushes stay
+//      account-wide: any profile of the account pushes them at once;
 //   D. one log line per pull with the counts.
 //
 // Runs the real cloud-ipc with electron stubbed. No network: nothing here
@@ -43,9 +44,24 @@ const SyncJournal = require('../lib/sync-journal');
 
 let failures = 0;
 let passed = 0;
+const queue = [];
 function check(name, fn) {
-  try { fn(); passed++; console.log(`  ok   ${name}`); }
-  catch (err) { failures++; console.error(`  FAIL ${name}\n       ${err.stack || err.message}`); }
+  queue.push(async () => {
+    try { await fn(); passed++; console.log(`  ok   ${name}`); }
+    catch (err) { failures++; console.error(`  FAIL ${name}\n       ${err.stack || err.message}`); }
+  });
+}
+/** Stand-in for the cloud API on this profile's client: records every call, never touches the network. */
+function fakeServer(cloud) {
+  const client = cloud.getCloudSync();
+  client.calls = [];
+  client._authedRequest = async (method, url, body) => {
+    client.calls.push({ method, url, body });
+    if (url.startsWith('/v1/sync/push')) return { accepted: body.changes.map((c) => c.uuid), conflicts: [] };
+    return { qsos: [], hasMore: false };
+  };
+  client.pushed = () => client.calls.filter((c) => c.url.startsWith('/v1/sync/push')).flatMap((c) => c.body.changes.map((x) => x.uuid));
+  return client;
 }
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'potacat-245-'));
@@ -255,30 +271,61 @@ check('the reporter\'s sequence no longer empties the LZ3AW log', () => {
   assert.strictEqual(again.log().length, 6);
 });
 
-// ── C. per-profile journal ─────────────────────────────────────────────────
-check('C. journal entries are per account AND profile: one profile never pushes or sees another\'s', () => {
+// ── C. journal: profile-stamped, pushed account-wide ───────────────────────
+// The server holds one flat set per account, so any profile signed in to the
+// account pushes every pending entry for it (#245 review). The stamp records
+// whose change it is; only a different account (or signed out) holds a push.
+check('C. entries carry the profile that wrote them; a same-account profile still pushes them', async () => {
   const dir = freshDir();
   const base = desktop({ dir, active: 'LZ3AW', profiles: BOTH });
   base.cloud.recordLogChanges([{ action: 'create', fields: { CALL: 'K1A', APP_POTACAT_UUID: uuid(1001), APP_POTACAT_VERSION: '1' } }]);
   assert.strictEqual(base.cloud.journal.getAll()[0].profile, 'LZ3AW');
-  assert.strictEqual(base.cloud.pendingStatus().pendingChanges, 1);
 
   const port = desktop({ dir, active: 'LZ3AW/P', profiles: BOTH });
-  assert.strictEqual(port.cloud.pendingStatus().pendingChanges, 0, '/P does not see LZ3AW\'s pending change');
-  assert.strictEqual(port.cloud.pendingStatus().pendingForOthers.count, 1, 'but it is shown as waiting');
-  assert.deepStrictEqual(port.cloud.pendingStatus().pendingForOthers.profiles, ['LZ3AW']);
-  const view = new SyncJournal(dir).forOwner(ACCOUNT, 'LZ3AW/P');
-  assert.strictEqual(view.getAll().length, 0);
-  view.removeWhere(() => true);
-  assert.strictEqual(new SyncJournal(dir).length, 1, 'removeWhere through /P\'s view leaves LZ3AW\'s entry');
+  assert.strictEqual(port.cloud.pendingStatus().pendingChanges, 1, 'same account: /P will push it');
+  assert.deepStrictEqual(port.cloud.pendingStatus().pendingForOthers, { count: 0, owners: [] }, 'nothing shown as waiting');
+  const client = fakeServer(port.cloud);
+  await port.cloud.syncNow();
+  assert.deepStrictEqual(client.pushed(), [uuid(1001)]);
+  assert.strictEqual(port.cloud.journal.length, 0);
 });
 
-check('C. "Log as" another profile journals under THAT profile', () => {
+check('C. "Log as" a same-account profile: stamped with THAT profile and pushed by the current one right away', async () => {
   const dir = freshDir();
   const base = desktop({ dir, active: 'LZ3AW', profiles: BOTH });
   base.cloud.recordLogChangesFor(ACCOUNT, [{ action: 'create', fields: { CALL: 'K1B', APP_POTACAT_UUID: uuid(1002), APP_POTACAT_VERSION: '1' } }], 'lz3aw/p');
   assert.strictEqual(base.cloud.journal.getAll()[0].profile, 'LZ3AW/P');
+  assert.strictEqual(base.cloud.pendingStatus().pendingChanges, 1);
+  const client = fakeServer(base.cloud);
+  const res = await base.cloud.syncNow();
+  assert.deepStrictEqual(client.pushed(), [uuid(1002)], 'pushed now, not when /P is next active');
+  assert.strictEqual(res.pushed, 1);
+  assert.strictEqual(base.cloud.journal.length, 0);
+});
+
+check('C. "Log as" a profile on a DIFFERENT account still waits for that account', async () => {
+  const dir = freshDir();
+  const profiles = [{ call: 'LZ3AW', owner: ACCOUNT }, { call: 'LZ1ZZ', owner: 'acct-other' }];
+  const base = desktop({ dir, active: 'LZ3AW', profiles });
+  base.cloud.recordLogChangesFor('acct-other', [{ action: 'create', fields: { CALL: 'K1C', APP_POTACAT_UUID: uuid(1003), APP_POTACAT_VERSION: '1' } }], 'LZ1ZZ');
   assert.strictEqual(base.cloud.pendingStatus().pendingChanges, 0);
+  assert.deepStrictEqual(base.cloud.pendingStatus().pendingForOthers, { count: 1, owners: ['acct-other'] });
+  const client = fakeServer(base.cloud);
+  await base.cloud.syncNow();
+  assert.deepStrictEqual(client.pushed(), [], 'never pushed into this account');
+  assert.strictEqual(base.cloud.journal.length, 1, 'still waiting');
+});
+
+check('C. the journal can still narrow a view to one profile (forOwner(owner, profile))', () => {
+  const j = new SyncJournal(freshDir());
+  j.appendMany([
+    { uuid: uuid(1004), action: 'create', owner: ACCOUNT, profile: 'LZ3AW' },
+    { uuid: uuid(1005), action: 'create', owner: ACCOUNT, profile: 'LZ3AW/P' },
+  ]);
+  assert.strictEqual(j.forOwner(ACCOUNT).length, 2);
+  assert.strictEqual(j.forOwner(ACCOUNT, 'lz3aw/p').length, 1);
+  j.forOwner(ACCOUNT, 'LZ3AW/P').removeWhere(() => true);
+  assert.deepStrictEqual(j.getAll().map((e) => e.profile), ['LZ3AW']);
 });
 
 check('C. migration: an existing single-profile journal becomes the active profile\'s, silently, cursor kept', () => {
@@ -301,9 +348,9 @@ check('C. migration: an existing single-profile journal becomes the active profi
   const onDisk = JSON.parse(fs.readFileSync(path.join(dir, 'sync-journal.json'), 'utf-8'));
   assert.ok(onDisk.every((e) => e.profile === 'LZ3AW'), 'stamped on disk once');
   assert.ok(!d.lines.some((l) => /error|unreadable/i.test(l)));
-  // Re-running is a no-op: the second profile does not take them over.
+  // Re-running is a no-op: the second profile does not re-stamp them (it
+  // would still push them: pushes are account-wide).
   const port = desktop({ dir, active: 'LZ3AW/P', profiles: BOTH });
-  assert.strictEqual(port.cloud.pendingStatus().pendingChanges, 0);
   assert.ok(port.cloud.journal.getAll().every((e) => e.profile === 'LZ3AW'));
 });
 
@@ -328,6 +375,9 @@ check('main.js hands cloud-ipc the active profile and every profile with its acc
   assert.ok(/recordLogChangesFor\(cloudIpc\.ownerIdFor\(ops\), changes, call\)/.test(src), '"Log as" passes the target profile');
 });
 
-console.log(`\nCloud pull per profile (#245): ${passed} passed, ${failures} failed`);
-try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
-process.exit(failures ? 1 : 0);
+(async () => {
+  for (const run of queue) await run();
+  console.log(`\nCloud pull per profile (#245): ${passed} passed, ${failures} failed`);
+  try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
+  process.exit(failures ? 1 : 0);
+})();
