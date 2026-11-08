@@ -15052,19 +15052,24 @@ function render() {
       freqTd.appendChild(freqLink);
       cellMap.set('frequency', freqTd);
 
-      // Build reference display — dual-park shows both refs
-      const refDisplay = s.wwffReference ? s.reference + ' / ' + s.wwffReference : s.reference;
+      // Build reference display — a multi-program spot shows every program's
+      // ref (POTA + SOTA too, not only POTA + WWFF): lib/spot-programs.js
+      const refDisplay = SpotPrograms.refDisplay(s);
       const parkDisplay = s.wwffReference ? s.parkName : s.parkName;
 
       // Source badge cell — main.js dedupes the same activator+freq across
       // POTA/SOTA/LLOTA/WWFF/CW/DX into one row, so render every source that
       // reported it. The first entry is the highest-priority source (the row's
       // "primary" — drives row color elsewhere), the rest are shown as
-      // smaller follow-on badges.
+      // smaller follow-on badges. A row on several programs (POTA + SOTA) shows
+      // only its program pills and wraps them, so the second one is not
+      // clipped behind the "…"; the feeds go in the tooltip.
       const sourceTd = document.createElement('td');
       sourceTd.setAttribute('data-col', 'source');
-      const srcList = (Array.isArray(s.sources) && s.sources.length > 0) ? s.sources : [s.source];
-      srcList.forEach((src, i) => {
+      const srcPills = SpotPrograms.sourcePills(s, SOURCE_LABELS);
+      if (srcPills.multiProgram) sourceTd.classList.add('source-multi-program');
+      if (srcPills.title) sourceTd.title = srcPills.title;
+      srcPills.pills.forEach((src, i) => {
         const badge = document.createElement('span');
         badge.className = 'source-badge source-badge-' + (src || 'pota') + (i > 0 ? ' source-badge-secondary' : '');
         badge.textContent = (src === 'cwspots' && s.cwClub && s.cwClub !== 'CW') ? s.cwClub : (SOURCE_LABELS[src] || src || '');
