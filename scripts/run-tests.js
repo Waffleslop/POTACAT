@@ -35,6 +35,7 @@ const TESTS = [
   'test/vfo-ptt-race-test.js',
   'test/vfo-ptt-mic-test.js', // #170: every VFO PTT press logs the mic it opened, the output and the level
   'test/vfo-log-spot-test.js',
+  'test/vfo-wheel-direction-test.js', // #192 w0tlp: wheel up = frequency up in the VFO window
   'test/smartsdr-self-slice-test.js',
   'test/bundle-mac-deps-test.js',
   'test/rig-controls-test.js',
