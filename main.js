@@ -5177,6 +5177,7 @@ function jtcatPopoutRigPowerPayload() {
     // Roaming (host-while-roaming) forwards rig-control to the remote shack,
     // so the set takes there even with no local link.
     settable: !!caps.txpower && (linkUp || isRemoteLinked()),
+    capable: !!caps.txpower, // the VFO window hides its control without it, as the Rig panel does
     known: _currentTxPower > 0,
     minPower: caps.minPower != null ? caps.minPower : 0,
     maxPower: caps.maxPower != null ? caps.maxPower : 100,
@@ -28221,6 +28222,9 @@ function sendVfoState() {
     // when it was needed (KQ5O FTDX101MP over a remote shack, 2026-10-26).
     power: vfoPowerAvailable(),
     wfm: vfoWfmAvailable(),         // a Wideband FM button in the mode picker
+    // The TX power control (GitHub #199): the same payload as the JTCAT and
+    // Winlink windows' TX Pwr, caps already scaled by Full power (W).
+    rigPower: jtcatPopoutRigPowerPayload(),
   });
 }
 // The radio has a Wideband FM mode (IC-7100, IC-705): from the Radio Model,
