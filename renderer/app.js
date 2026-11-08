@@ -1426,6 +1426,14 @@ const setWinlinkArdopBw = document.getElementById('set-winlink-ardop-bw');
 const setWinlinkArdopDrive = document.getElementById('set-winlink-ardop-drive');
 const setWinlinkVaraBw = document.getElementById('set-winlink-vara-bw');
 const setWinlinkPacketModem = document.getElementById('set-winlink-packet-modem');
+const setWinlinkPacketTxDelay = document.getElementById('set-winlink-packet-txdelay'); // #257
+const setWinlinkPacketTxTail = document.getElementById('set-winlink-packet-txtail');
+/** Packet TX delay / tail, ms: blank or junk = the default, kept in range, 10 ms steps (lib/direwolf-process.js clamps the same way). */
+function packetTimingMs(v, def, min, max) {
+  const n = Number(v);
+  const ms = Number.isFinite(n) && n > 0 ? n : def;
+  return Math.round(Math.max(min, Math.min(max, ms)) / 10) * 10;
+}
 const setWinlinkVaraPort = document.getElementById('set-winlink-vara-port');
 // The operator's own VARA (Windows only; the section stays hidden elsewhere).
 const winlinkVaraSection = document.getElementById('winlink-vara-section');
@@ -17694,6 +17702,8 @@ async function openSettingsDialog(tab) {
     setWinlinkArdopBw.value = String(s.winlinkArdopBw || 500);
     setWinlinkVaraBw.value = String(s.winlinkVaraBw || 2300);
     setWinlinkPacketModem.value = String(s.winlinkPacketModem || 1200);
+    if (setWinlinkPacketTxDelay) setWinlinkPacketTxDelay.value = packetTimingMs(s.winlinkPacketTxDelayMs, 500, 50, 1000);
+    if (setWinlinkPacketTxTail) setWinlinkPacketTxTail.value = packetTimingMs(s.winlinkPacketTxTailMs, 200, 10, 500);
     setWinlinkVaraPort.value = s.winlinkVaraPort || 8300;
     if (winlinkVaraSection) {
       winlinkVaraSection.classList.toggle('hidden', window.api.platform !== 'win32');
@@ -18604,6 +18614,8 @@ settingsSave.addEventListener('click', async () => {
       winlinkArdopBw: parseInt(setWinlinkArdopBw.value, 10) || 500,
       winlinkVaraBw: parseInt(setWinlinkVaraBw.value, 10) || 2300,
       winlinkPacketModem: parseInt(setWinlinkPacketModem.value, 10) === 9600 ? 9600 : 1200,
+      ...(setWinlinkPacketTxDelay ? { winlinkPacketTxDelayMs: packetTimingMs(setWinlinkPacketTxDelay.value, 500, 50, 1000) } : {}),
+      ...(setWinlinkPacketTxTail ? { winlinkPacketTxTailMs: packetTimingMs(setWinlinkPacketTxTail.value, 200, 10, 500) } : {}),
       winlinkVaraPort: parseInt(setWinlinkVaraPort.value, 10) || 8300,
       ...(winlinkVaraSection ? {
         enableVaraHf: setVaraHfEnable.checked,

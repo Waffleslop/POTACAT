@@ -242,7 +242,9 @@ async function test(name, fn) {
     assert.strictEqual(D.classifyDirewolfLine('Dire Wolf version 1.7'), 'log');
     const mainSrc = readSrc(require('path').join(__dirname, '..', 'main.js'));
     assert.ok(/kind === 'heard' \|\| kind === 'frame'/.test(mainSrc), 'heard frames bypass the 40-line startup cap');
-    assert.ok(/mode === 'packet' && _direwolfHeard === 0 && _direwolfMonitorHeard === 0/.test(mainSrc), 'a packet failure with nothing decoded (stdout AND the AGW monitor, #128) says so');
+    // Loosened for #257: the verdict lives in D.packetDecodedNothing, fed both counts and Pat's connect.
+    assert.ok(/mode === 'packet' && DirewolfProcess\.packetDecodedNothing\(\{ stdoutHeard: _direwolfHeard, monitorHeard: _direwolfMonitorHeard,/.test(mainSrc), 'a packet failure with nothing decoded (stdout AND the AGW monitor, #128) says so');
+    assert.strictEqual(D.packetDecodedNothing({ stdoutHeard: 0, monitorHeard: 0 }), true, 'nothing on either count and no connect: says so');
     assert.strictEqual(D.classifyDirewolfLine('"XYZ" doesn\'t match any of the input devices.'), 'device-error');
     assert.strictEqual(D.direwolfSupported('darwin'), true, 'macOS since the socket audio backend');
     assert.strictEqual(D.direwolfSupported('freebsd'), false);

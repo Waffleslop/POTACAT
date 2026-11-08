@@ -211,6 +211,7 @@ const TESTS = [
   'test/winlink-vara-test.js',
   'test/winlink-connect-test.js', // #128: /api/connect over http.request with no headers timeout; VARA and ARDOP send the same request
   'test/direwolf-agw-monitor-test.js', // #128: what Dire Wolf heard, over its AGW port's monitor mode
+  'test/packet-timing-test.js', // #257 NA4DQ IC-7100: Dire Wolf TX delay/tail settings, the packet PTT hold, no "decoded nothing" after Pat connected
   'test/modem-tx-burst-test.js', // #128: one log line per modem over — PTT, audio start/end, peak dBFS, unkey
   'test/rigctld-shim-hamlib-test.js',
   'test/rigctld-died-test.js',
