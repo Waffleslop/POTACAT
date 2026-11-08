@@ -4404,6 +4404,9 @@ tr.wl-group-2 td:last-child {
    render smaller next to it so the row clearly shows it was multi-source. */
 .source-badge + .source-badge { margin-left: 3px; }
 .source-badge-secondary { font-size: 9px; padding: 1px 3px; opacity: 0.85; }
+/* A spot on several programs (POTA + SOTA): wrap the program pills instead of
+   clipping all but the first (lib/spot-programs.js). */
+tbody td.source-multi-program { white-space: normal; text-overflow: clip; line-height: 1.6; }
 
 /* When row tinting is disabled, remove backgrounds but keep left borders */
 .no-source-tint .spot-pota,
