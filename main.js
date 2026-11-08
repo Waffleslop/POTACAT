@@ -570,6 +570,7 @@ const BUG_REPORT_BEFORE_MARKER = 150;
 const { RemoteClient, tsWssUrl } = require('./lib/remote-client');
 const { RemoteRigState } = require('./lib/remote-rig');
 const RemoteFeatures = require('./lib/remote-features');
+const RigPower = require('./lib/rig-power');
 // Linux-only ALSA bridge. On non-Linux, alsa.isAvailable() returns false
 // and every other call is a stable no-op — safe to require unconditionally.
 const alsa = require('./lib/alsa');
@@ -7050,6 +7051,8 @@ function remoteShackInfoNow() {
     activeRigId: info.activeRigId || null,
     rigName: activeRig ? (activeRig.name || '') : (target.rigModel || ''),
     radioConnected: remoteRig.catConnected(),
+    radioPowered: remoteRig.radioPowered(), // #152: the CAT popover's Radio: On / Off / Unknown
+    canPower: remoteRig.canPower(),
     audioSilent: !!info.audioSilent,
     audioElsewhere: !!info.audioElsewhere,
     audioHolder: info.audioHolder || '',
@@ -7618,7 +7621,7 @@ function ensureRemoteClient() {
     // Rig panel / VFO window state and caps: re-broadcast only when something
     // other than a meter changed (snapshots arrive every poll).
     if (changed.some(k => !REMOTE_METER_FIELDS.has(k))) broadcastRigState();
-    if (changed.includes('catConnected')) pushRemoteShackInfo();
+    if (changed.includes('catConnected') || changed.includes('rigPowered') || changed.includes('capabilities')) pushRemoteShackInfo();
     if (!win || win.isDestroyed()) return;
     // Forward shack status fields into the local cat-* channels so
     // the renderer's existing handlers update transparently.
@@ -43858,13 +43861,29 @@ function cloudShackNotice(text, kind) {
       }
       case 'power-on': {
         // Power-on: radio may be off, so don't require cat.connected — just need transport open
-        if (cat && rigType !== 'flex') {
-          cat.setPowerState(true);
+        if (rigType === 'flex') break;
+        let sent = false;
+        if (cat) {
+          sent = cat.setPowerState(true);
           try { yaesuScopeNoteRadioBack('radio powered on'); } catch { /* no scope */ }
+        }
+        // #152 rule 2: a remote client's Power On is sent; a closed link to the
+        // radio is said to the device that asked (reopening it is not done here).
+        const onReport = RigPower.powerOnReport({ catPresent: !!cat, sent });
+        if (onReport && source !== 'desktop' && remoteServer && remoteServer.running) {
+          sendCatLog('[Power] From a remote device: ' + onReport);
+          remoteServer.sendToAsker({ type: 'tune-blocked', reason: onReport });
         }
         break;
       }
       case 'power-off': {
+        // #152 rule 1: never switch the radio off under a remote client's over.
+        const offRefused = RigPower.powerOffRefusal({ source, transmitting: _isEffectivelyTransmitting() });
+        if (offRefused) {
+          sendCatLog('[Power] From a remote device: ' + offRefused);
+          if (remoteServer && remoteServer.running) remoteServer.sendToAsker({ type: 'tune-blocked', reason: offRefused });
+          break;
+        }
         if (cat && cat.connected && rigType !== 'flex') {
           cat.setPowerState(false);
         }
