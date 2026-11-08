@@ -87,7 +87,11 @@ test('the Log QSO window no longer snapshots an activation or sends stale QRZ fi
 test('logContact resolves QRZ, parks and the live activation for qso-expand', () => {
   const lc = body(main, 'async function logContact(entry, opts) {');
   assert.ok(/QsoExpand\.expandContact\(/.test(lc));
-  assert.ok(/liveActivationMyRefs\(\)/.test(lc) && /entry\.activation === false/.test(lc));
+  // The live activation's refs, read through the #147 rule check
+  // (activationRefsAt -> liveActivationMyRefs once the activation is still live).
+  const liveRefs = /liveActivationMyRefs\(\)/.test(lc)
+    || (/activationRefsAt\(/.test(lc) && /function activationRefsAt\([^)]*\) \{[^}]*liveActivationMyRefs\(\)/.test(main));
+  assert.ok(liveRefs && /entry\.activation === false/.test(lc));
   assert.ok(/parkInfoFor\(ref\)/.test(lc) && /qrzStationInfo\(c\)/.test(lc));
 });
 

@@ -2107,6 +2107,11 @@
         showToast(msg.text || 'The radio keyed with no power out: it is not getting voice audio.', 12000);
         break;
 
+      case 'activation-ended':
+        // A forgotten activation ended by itself (GitHub #147).
+        showToast(msg.text || 'Your activation ended automatically.', 12000);
+        break;
+
       case 'cloud-shack-notice':
         // Another shack shares (or took) the account's Cloud address.
         showToast(msg.text || 'Another shack is on your Cloud address.', 8000);

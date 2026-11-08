@@ -364,6 +364,7 @@ const { activationStationFill } = require('./lib/activation-station'); // N7VBN:
 const { freqToBand, BANDS } = require('./lib/bands');
 const { splitHostPort } = require('./lib/host-port');
 const activationProgram = require('./lib/activation-program');
+const ActivationClock = require('./lib/activation-clock'); // #147: a forgotten activation ends at the UTC day change or after 6 h idle
 const QsoExpand = require('./lib/qso-expand'); // one contact -> its ADIF records (logContact)
 const WatchlistEdit = require('./lib/watchlist-edit'); // watchlist add/remove by operation (ECHOCAT sync)
 const wsprnet = require('./lib/wspr/wsprnet');
@@ -14199,6 +14200,95 @@ function liveActivationMyRefs() {
   if (!(settings.activationActive || settings.appMode === 'activator') || !parkRefs.length) return [];
   return activationProgram.activationMyRefs(parkRefs, settings.activatorCrossRefs || []);
 }
+
+// GitHub #147: an activation that is never ended ends by itself at the UTC
+// day change or after 6 hours with no contacts, whichever comes first
+// (lib/activation-clock.js). Checked before a contact is attached
+// (activationRefsAt, in logContact) and on a tick (activationClockTick).
+// The clock lives in its own file in userData, not in settings.
+let _activationClock = null; // { startedAt, lastContactAt, refs }
+let _activationAutoEnding = false;
+function activationClockFile() { return path.join(app.getPath('userData'), 'activation-clock.json'); }
+function activationClockLoad() {
+  try { _activationClock = JSON.parse(fs.readFileSync(activationClockFile(), 'utf8')); } catch { _activationClock = null; }
+}
+function activationClockSave() {
+  try {
+    if (_activationClock) fs.writeFileSync(activationClockFile(), JSON.stringify(_activationClock));
+    else if (fs.existsSync(activationClockFile())) fs.unlinkSync(activationClockFile());
+  } catch (err) { console.error('[Activation] clock not saved:', err.message); }
+}
+function activationParkRefList() { return (settings.activatorParkRefs || []).filter((p) => p && p.ref).map((p) => p.ref); }
+function activationRunning() {
+  return !!(settings.activationActive || settings.appMode === 'activator') && activationParkRefList().length > 0;
+}
+// Start, keep or clear the clock to match the activation state. fresh = a
+// new Start (the desktop's Start/Continue/Resume); a new set of parks also
+// starts it again.
+function activationClockFollow(fresh) {
+  if (!activationRunning()) {
+    if (_activationClock) { _activationClock = null; activationClockSave(); }
+    return;
+  }
+  const key = activationParkRefList().join(',');
+  if (fresh || !_activationClock || _activationClock.refs !== key) {
+    _activationClock = ActivationClock.startClock(Date.now(), key);
+    activationClockSave();
+  }
+}
+// Is the running activation still live at time t? If not, it ends here.
+function activationLiveAt(t) {
+  activationClockFollow(false);
+  if (!_activationClock) return false;
+  const d = ActivationClock.decide(_activationClock, t);
+  if (d.live) return true;
+  autoEndActivation(d.reason);
+  return false;
+}
+// The activation refs a contact made at time t is logged with.
+function activationRefsAt(t) {
+  if (!liveActivationMyRefs().length) return [];
+  return activationLiveAt(t) ? liveActivationMyRefs() : [];
+}
+function activationNoteContact(t) {
+  if (!_activationClock || !activationRunning()) return;
+  _activationClock = ActivationClock.noteContact(_activationClock, t);
+  activationClockSave();
+}
+function activationClockTick() {
+  if (activationRunning()) activationLiveAt(Date.now());
+  else activationClockFollow(false);
+}
+// Ends it the way a manual End does: the desktop's End clears
+// activationActive; the phone's End leaves activator mode, clears its park
+// and the device's session list. Contacts already logged are not touched.
+function autoEndActivation(reason) {
+  if (_activationAutoEnding) return;
+  _activationAutoEnding = true;
+  try {
+    const refs = activationParkRefList();
+    const desktopRun = !!settings.activationActive;
+    sendCatLog(ActivationClock.logLine(refs, reason));
+    settings.activationActive = false;
+    settings.appMode = 'hunter';
+    if (!desktopRun) settings.activatorParkRefs = []; // the phone's End clears the park; the desktop keeps it for Continue
+    _activationClock = null;
+    activationClockSave();
+    saveSettings(settings);
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('activation-state', false);
+    try { loadActivatedParks(); } catch {}
+    const text = ActivationClock.noticeText(refs, reason);
+    try { pushActivatorStateToPhone(); } catch {}
+    try { pushActivationToRemoteShack(); } catch {}
+    if (remoteServer) {
+      try { remoteServer.resetSessionContacts(); } catch {}
+      try { remoteServer.sendToClient({ type: 'activation-ended', refs, reason, text }); } catch {}
+    }
+    if (win && !win.isDestroyed()) win.webContents.send('activation-auto-ended', { refs, reason, text });
+  } finally {
+    _activationAutoEnding = false;
+  }
+}
 // A QSO was logged: the JTCAT window and ECHOCAT clear the C / G / D badges
 // on decodes already drawn for that station (the decode stamps them once).
 function jtcatWorkedUpdate(worked) {
@@ -14295,9 +14385,11 @@ async function logContact(entry, opts) {
       },
     }));
   }));
-  const myRefs = entry.mySig && entry.mySigInfo
+  const ownRef = !!(entry.mySig && entry.mySigInfo);
+  const actAt = ActivationClock.contactTime(entry, Date.now()); // #147: its own timestamp decides
+  const myRefs = ownRef
     ? [{ sig: String(entry.mySig).toUpperCase(), ref: entry.mySigInfo }]
-    : (entry.activation === false ? [] : liveActivationMyRefs());
+    : (entry.activation === false ? [] : activationRefsAt(actAt));
   const e = { ...entry };
   delete e.activation;
   // Never a record with no MODE (pota.app refuses the file; NA4DQ 2026-10-27).
@@ -14386,6 +14478,7 @@ async function logContact(entry, opts) {
       } else if (!failure) failure = r;
     }
   }
+  if (written.length && !ownRef && myRefs.length) activationNoteContact(actAt);
   for (const [c, lookup] of late) {
     lookup.then((info) => {
       if (!info) return;
@@ -25506,6 +25599,7 @@ function connectRemote() {
     }
     // Reset session contacts for new activation
     remoteServer.resetSessionContacts();
+    activationClockFollow(false); // #147: a phone Start starts the activation clock (same parks keep it), End clears it
   });
 
   remoteServer.on('set-park-county', ({ ref, state, county }) => {
@@ -42071,6 +42165,10 @@ function cloudShackNotice(text, kind) {
   // "Rate ECHOCAT": checked every 5 minutes; the card itself waits for a calm
   // moment, and the renderer says when it really went on screen.
   setInterval(reviewAskTick, 5 * 60 * 1000);
+  // #147: a forgotten activation ends by itself, even with no new contact.
+  activationClockLoad();
+  activationClockFollow(false);
+  setInterval(activationClockTick, 30 * 1000);
   setTimeout(reviewAskTick, 2 * 60 * 1000 + 5000);
   ipcMain.on('echocat-review-shown', () => {
     settings.echocatReviewAsk = ReviewAsk.markShown(settings.echocatReviewAsk);
@@ -46663,7 +46761,9 @@ function cloudShackNotice(text, kind) {
     };
     const _wlPrevGroups = Array.isArray(settings.watchlistGroups) ? settings.watchlistGroups : null;
     const _themeBefore = JSON.stringify(AppTheme.resolveAppTheme(settings));
+    const _actWasActive = !!settings.activationActive;
     settings = { ...settings, ...newSettings };
+    activationClockFollow(!_actWasActive && !!settings.activationActive); // #147: a desktop Start starts the activation clock, an End clears it
     if (JSON.stringify(AppTheme.resolveAppTheme(settings)) !== _themeBefore) broadcastAppTheme();
     // The rig editor saved a receive level for the active rig: route it through
     // the one choke point so the bridge and every device follow (not in remote

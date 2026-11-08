@@ -198,6 +198,7 @@ const TESTS = [
   'test/rsba1-transport.test.js',
   'test/activation-log-test.js',
   'test/activation-program-test.js',
+  'test/activation-auto-end-test.js', // #147: a forgotten activation ends at the UTC day change or after 6 h with no contacts
   'test/diagnostic-snapshot-test.js',
   'test/mercury-process-test.js',
   'test/winlink-pat-test.js',
