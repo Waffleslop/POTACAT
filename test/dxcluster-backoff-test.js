@@ -76,8 +76,12 @@ async function run() {
 
     check(connections === 5, `node saw each attempt (${connections})`);
     check(delays.length >= 4, `backoff was scheduled between attempts (${delays.length})`);
-    // The floor is 10 s ±20% jitter; each successive delay must roughly double.
-    const growing = delays.every((d, i) => i === 0 || d > delays[i - 1] * 1.4);
+    // The floor is 10 s ±20% jitter and each failed session doubles it, so
+    // delay i is at least 0.8 × 10 s × 2^i. A ratio check between neighbours
+    // can't tell growth from jitter (2 × 0.8 / 1.2 ≈ 1.33, while a pinned
+    // floor can reach 1.2 / 0.8 = 1.5), so check each step's own floor: a
+    // backoff stuck at 10 s fails from the second delay on.
+    const growing = delays.every((d, i) => d >= 10000 * Math.pow(2, i) * 0.8);
     check(growing, `delays grow instead of pinning at the floor: ${delays.join(', ')}`);
     check(delays[0] >= 8000 && delays[0] <= 12000, `first retry near the 10 s floor (${delays[0]}ms)`);
     check(logs.some((l) => /refused the login/i.test(l)), 'the refusal is logged, not swallowed');
