@@ -31699,6 +31699,18 @@ function yaesuScopeNoteRadioBack(why) {
   }, 4000);
 }
 
+/**
+ * POTACAT switched the radio on: the VFO window reopens its radio audio
+ * (GitHub #247). The radio's USB audio CODEC left Windows at power-off and
+ * the window's capture ended with it; the window decides (it knows mute and
+ * whether it is listening at all — lib/vfo-audio-reattach.js) and waits for
+ * the CODEC to come back before reopening it.
+ */
+function vfoAudioNoteRadioBack() {
+  if (!vfoPopoutWin || vfoPopoutWin.isDestroyed()) return;
+  vfoPopoutWin.webContents.send('vfo-radio-power-on');
+}
+
 /** The radio is keyed by any path POTACAT tracks: desktop / ECHOCAT / FT8
  *  PTT and CW text (_isEffectivelyTransmitting), the rig's own TX report
  *  (cat._transmitting) and an external-ATU tune carrier. The stall watchdog
@@ -44076,6 +44088,7 @@ function cloudShackNotice(text, kind) {
         if (cat) {
           sent = cat.setPowerState(true);
           try { yaesuScopeNoteRadioBack('radio powered on'); } catch { /* no scope */ }
+          try { vfoAudioNoteRadioBack(); } catch { /* no VFO window */ }
         }
         // #152 rule 2: a remote client's Power On is sent; a closed link to the
         // radio is said to the device that asked (reopening it is not done here).
@@ -49931,6 +49944,10 @@ function cloudShackNotice(text, kind) {
     handleRemotePtt(!!state, { audio: false });
   });
   // #170: the VFO window's PC mic on that press, as one plain log line.
+  // #247: the VFO window reopened its radio audio after a power cycle.
+  ipcMain.on('vfo-audio-reattached', (_e, r) => {
+    if (r && typeof r === 'object') sendCatLog(require('./lib/vfo-audio-reattach').logLine(r.why, r.device));
+  });
   ipcMain.on('vfo-ptt-mic-report', (_e, r) => {
     if (r && typeof r === 'object') sendCatLog(require('./lib/vfo-ptt-mic').assess(r).line);
   });

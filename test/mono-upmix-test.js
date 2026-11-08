@@ -50,7 +50,10 @@ test('the node handed on is forced to one channel, so the destination plays it i
 test('the VFO window\'s capture monitor goes through it', () => {
   const html = readSrc(path.join(__dirname, '..', 'renderer', 'vfo-popout.html'));
   assert.ok(/<script src="\.\.\/lib\/mono-upmix\.js"><\/script>/.test(html));
-  const fn = html.slice(html.indexOf('async function startAudioMonitor() {'), html.indexOf('} catch (e) {', html.indexOf('async function startAudioMonitor() {')));
+  // startAudioMonitor(opts) since #247 (a reattach passes the followed device).
+  const at = html.search(/async function startAudioMonitor\((opts)?\) \{/);
+  assert.ok(at > 0, 'startAudioMonitor found');
+  const fn = html.slice(at, html.indexOf('} catch (e) {', at));
   assert.ok(/window\.MonoUpmix\.monoToBothSides\(audioMonitorCtx, source\)/.test(fn));
   assert.ok(/monoSource\.connect\(audioMonitorGain\);/.test(fn));
   assert.ok(!/\n\s*source\.connect\(audioMonitorGain\);/.test(fn), 'the capture no longer goes straight to the gain');

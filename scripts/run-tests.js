@@ -35,6 +35,7 @@ const TESTS = [
   'test/smartsdr-dax-tx-claim-test.js',
   'test/vfo-ptt-race-test.js',
   'test/vfo-ptt-mic-test.js', // #170: every VFO PTT press logs the mic it opened, the output and the level
+  'test/vfo-audio-power-cycle-test.js', // #247: VFO window radio audio reattaches after a radio power cycle
   'test/vfo-log-spot-test.js',
   'test/vfo-wheel-direction-test.js', // #192 w0tlp: wheel up = frequency up in the VFO window
   'test/vfo-tx-power-test.js', // #199 w0tlp: TX power slider in the VFO window, the Rig panel's caps and dispatcher
