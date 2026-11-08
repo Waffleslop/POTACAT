@@ -335,6 +335,7 @@ const { RigController } = require('./lib/rig-controller');
 const { RIG_CONTROLS } = require('./lib/rig-controls');
 const _rigGainSteps = require('./lib/rig-gain-steps'); // preamp/ATT ladders (KB2UXB)
 const { normalizeMuteRules } = require('./lib/spot-mute-rules'); // per-band region mutes (N7BBQ)
+const SpotAge = require('./lib/spot-age'); // Max Spot Age, shared with the table (#239)
 const SpotHides = require('./lib/spot-hides'); // hidden spots, one list for every surface (K8IKO)
 const LogAs = require('./lib/log-as'); // log a QSO for another operator on this machine (KD9WI)
 const WatchlistGroups = require('./lib/watchlist-groups'); // state tokens in the watchlist (N0KAH)
@@ -21725,6 +21726,30 @@ function spotsForPanadapter(merged) {
   return merged.filter(s => panadapterAllowsSource(s.source));
 }
 
+// The spot feed for the Band Scope and bandspread pop-outs: the panadapter
+// source picks plus the table's Max Spot Age, through the same function the
+// table runs (lib/spot-age.js). #239 (VK4KTW): the scope drew 222-minute-old
+// spots with a 30-minute limit because it got the source filter only.
+// SmartSDR and TCI keep their own panadapter age caps (pushSpotsToSmartSdr,
+// pushSpotsToTci).
+function spotsForScope(merged) {
+  return SpotAge.filterSpotsByAge(spotsForPanadapter(merged), SpotAge.ageOptsFromSettings(settings), Date.now());
+}
+
+// The pop-outs are pushed when spots arrive. Re-push on a timer as well, so a
+// spot that ages out leaves the scope even when no new spots come in (a
+// stalled feed, or a refresh interval longer than the age limit).
+const PANADAPTER_AGE_REPUSH_MS = 30000;
+function repushPanadapterPopouts() {
+  if (scopePopoutWin && !scopePopoutWin.isDestroyed()) {
+    scopePopoutWin.webContents.send('spots', spotsForScope(lastMergedSpots || []));
+  }
+  if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) {
+    bandspreadPopoutWin.webContents.send('spots', spotsForScope(lastMergedSpots || []));
+  }
+}
+setInterval(repushPanadapterPopouts, PANADAPTER_AGE_REPUSH_MS);
+
 // True when the user has independently selected a source for the panadapter.
 // Used by fetch gates: if the table-side enable* says no, we still pull
 // the source if the panadapter asked for it (and we're in independent mode).
@@ -30218,14 +30243,15 @@ function sendMergedSpots() {
   }
   // Forward to bandspread pop-out if open (reuses 'spots' channel) — apply
   // the same panadapter-source filter so bandspread mirrors the panadapter
-  // (sync-with-table by default, or the operator's independent picks).
+  // (sync-with-table by default, or the operator's independent picks), and
+  // the table's Max Spot Age (#239).
   if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) {
-    bandspreadPopoutWin.webContents.send('spots', spotsForPanadapter(merged));
+    bandspreadPopoutWin.webContents.send('spots', spotsForScope(merged));
   }
   // Band Scope pop-out overlays spots on the radio's own spectrum — same
-  // panadapter-source filter as bandspread, for the same reason.
+  // panadapter-source filter and spot age as bandspread, for the same reason.
   if (scopePopoutWin && !scopePopoutWin.isDestroyed()) {
-    scopePopoutWin.webContents.send('spots', spotsForPanadapter(merged));
+    scopePopoutWin.webContents.send('spots', spotsForScope(merged));
   }
   // Trigger QRZ lookups for new callsigns (async, non-blocking)
   if (qrz.configured && settings.enableQrz) {
@@ -39861,7 +39887,7 @@ function cloudShackNotice(text, kind) {
       // panadapter allowlist so DX-only-panadapter / POTA-only-table
       // setups actually behave that way for the bandspread too.
       if (settings.panadapterSyncTable === false) {
-        const panaSpots = spotsForPanadapter(lastMergedSpots);
+        const panaSpots = spotsForScope(lastMergedSpots);
         payload = Object.assign({}, payload || {}, { spots: panaSpots });
       }
       bandspreadPopoutWin.webContents.send('bandspread-popout-view', payload);
@@ -42145,7 +42171,7 @@ function cloudShackNotice(text, kind) {
     scopePopoutWin.webContents.on('did-finish-load', () => {
       if (!scopePopoutWin || scopePopoutWin.isDestroyed()) return;
       scopePopoutWin.webContents.send('scope-popout-theme', themeQuery());
-      try { scopePopoutWin.webContents.send('spots', spotsForPanadapter(lastMergedSpots || [])); } catch { /* no spots yet */ }
+      try { scopePopoutWin.webContents.send('spots', spotsForScope(lastMergedSpots || [])); } catch { /* no spots yet */ }
       if (yaesuScopeState.centerHz) scopePopoutWin.webContents.send('cat-frequency', yaesuScopeState.centerHz);
       yaesuScopeRestarts = 0;
       startYaesuScope();

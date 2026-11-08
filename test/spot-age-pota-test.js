@@ -48,8 +48,14 @@ test('ECHOCAT, SmartSDR and TCI all use the exemption', () => {
 });
 
 test('the desktop table exempts POTA the same way', () => {
+  // The table's age rule lives in lib/spot-age.js since #239 (shared with the
+  // Band Scope feed): getFiltered hands it potaAgeLimit, and the lib exempts
+  // POTA unless that is on.
   const f = body(app, 'getFiltered');
-  assert.ok(/s\.source === 'pota' && !potaAgeLimit/.test(f));
+  assert.ok(/const ageOpts = \{[^}]*\bpotaAgeLimit\b[^}]*\}/.test(f) && /SpotAge\.spotWithinAge\(s, ageOpts/.test(f), 'getFiltered passes potaAgeLimit to the shared age rule');
+  const SpotAge = require('../lib/spot-age');
+  assert.strictEqual(SpotAge.spotAgeLimitSecs({ source: 'pota' }, { potaAgeLimit: false }), Infinity);
+  assert.strictEqual(SpotAge.spotAgeLimitSecs({ source: 'pota' }, { maxAgeMin: 5, potaAgeLimit: true }), 300);
   assert.ok(/potaAgeLimit = settings\.potaAgeLimit === true;/.test(app), 'loaded at startup');
 });
 
