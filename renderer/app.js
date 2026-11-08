@@ -22845,6 +22845,14 @@ window.api.onReloadPrefs(() => {
   loadPrefs();
 });
 
+// #147: main ended a forgotten activation (UTC day change or 6 h with no
+// contacts). End it here the way the End button does, and say why.
+window.api.onActivationAutoEnded((d) => {
+  if (activationActive) stopActivation();
+  if (appMode === 'activator') setAppMode('hunter');
+  showLogToast((d && d.text) || 'Your activation ended automatically.', { sticky: true });
+});
+
 // FreeDV tooltip — show countdown to next poll on hover
 (function setupPskrTooltip() {
   const label = spotsPskr.closest('label');

@@ -683,6 +683,7 @@ contextBridge.exposeInMainWorld('api', {
   onRemoteTxState: (cb) => ipcRenderer.on('remote-tx-state', (_e, state) => cb(state)),
   onRemoteStatus: (cb) => ipcRenderer.on('remote-status', (_e, s) => cb(s)),
   onReloadPrefs: (cb) => ipcRenderer.on('reload-prefs', () => cb()),
+  onActivationAutoEnded: (cb) => ipcRenderer.on('activation-auto-ended', (_e, d) => cb(d)), // #147
   tgxlSelectAntenna: (port) => ipcRenderer.invoke('tgxl-select-antenna', port),
   tgxlGetStatus: () => ipcRenderer.invoke('tgxl-get-status'),
   onTgxlStatus: (cb) => ipcRenderer.on('tgxl-status', (_e, s) => cb(s)),
