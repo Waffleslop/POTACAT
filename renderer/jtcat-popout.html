@@ -184,6 +184,7 @@
     .jp-wspr-chip:hover, .jp-mode-chip:hover { color: var(--text-secondary); }
     .jp-wspr-chip.on, .jp-mode-chip.on { background: var(--accent-green, #4ecca3); color: #000; border-color: var(--accent-green, #4ecca3); font-weight: 700; }
     .jp-wspr-chip.hopping, .jp-mode-chip.hopping { box-shadow: 0 0 0 2px #4fc3f7; }
+    #jp-hound-chip.off { opacity: 0.55; text-decoration: line-through; font-weight: 400; } /* #160: Hound off reads as off, not hidden */
     .jp-wspr-next.tx { background: var(--accent-red, #e94560); color: var(--on-accent-red); animation: jp-tune-pulse 1s ease-in-out infinite; }
     /* Spot table */
     .jp-wspr-thead, .jp-wspr-row { display: grid; grid-template-columns: 46px 26px 30px 68px 26px 60px 42px 1fr 30px 50px 30px; gap: 4px; padding: 1px 8px; font-family: monospace; font-size: 11px; align-items: baseline; }
@@ -1049,7 +1050,7 @@
            eating bar space. The switches themselves live in Options. -->
       <button id="jp-fd-chip" class="jp-mode-chip hidden" title="Field Day mode is ON — exchanging class + section instead of grid/report. Click to turn off.">FD</button>
       <input id="jp-fd-exch" type="text" maxlength="7" placeholder="2A EMA" title="Your Field Day exchange: transmitters+class then ARRL/RAC section (e.g. 2A EMA)" style="display:none;width:84px;height:44px;font-size:16px;font-weight:700;padding:0 8px;border-radius:8px;border:1px solid var(--border-primary);background:var(--bg-tertiary);color:var(--text-primary);text-transform:uppercase;">
-      <button id="jp-hound-chip" class="jp-mode-chip hidden" title="Hound (DXpedition) mode is ON — calling a Fox station above 1000 Hz. Click to turn off.">HOUND</button>
+      <button id="jp-hound-chip" class="jp-mode-chip off" aria-pressed="false" title="Hound mode: answer a DXpedition Fox. Click to turn on/off.">HOUND</button>
     </div>
     <div class="jp-ctl-main">
       <!-- Hunt = answer OTHERS' CQs. The button is on/off; the select beside it

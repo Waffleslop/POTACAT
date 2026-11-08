@@ -468,7 +468,7 @@ function _applyPopoutTheme(payload) {
   var houndMode = false;
   function reflectHound() {
     if (houndToggle) houndToggle.classList.toggle('active', houndMode);
-    if (houndChip) houndChip.classList.toggle('hidden', !houndMode);
+    if (houndChip) { houndChip.classList.toggle('off', !houndMode); houndChip.setAttribute('aria-pressed', houndMode ? 'true' : 'false'); }
   }
   // Answer callers: while Auto-CQ is on and idle, auto-answer a station calling
   // us directly (abandoned callbacks / late answers), not just CQ callers.
