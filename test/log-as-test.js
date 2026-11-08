@@ -107,8 +107,9 @@ test('saveQsoRecord resolves logAs first and reads identity, logbook and uploads
 });
 test('the record is the other operator\'s: OPERATOR and STATION_CALLSIGN forced, journaled under their account', () => {
   assert.ok(/if \(logAs\) \{\n\s*qsoData\.operator = logAs\.call;\n\s*qsoData\.stationCallsign = logAs\.call;/.test(saveBody));
-  assert.ok(/const sink = logAs \? logAsLogSink\(ops\) : qsoLogSink;/.test(saveBody));
-  assert.ok(/function logAsLogSink\(ops\) \{\n\s*return \(changes\) => \{ if \(cloudIpc\) cloudIpc\.recordLogChangesFor\(cloudIpc\.ownerIdFor\(ops\), changes\); \};/.test(main));
+  // #245: the sink also names their profile (the journal is per profile).
+  assert.ok(/const sink = logAs \? logAsLogSink\(ops(, logAs\.call)?\) : qsoLogSink;/.test(saveBody));
+  assert.ok(/function logAsLogSink\(ops(, call)?\) \{\n\s*return \(changes\) => \{ if \(cloudIpc\) cloudIpc\.recordLogChangesFor\(cloudIpc\.ownerIdFor\(ops\), changes(, call)?\); \};/.test(main));
 });
 test('the active operator\'s caches are untouched by a QSO logged for someone else', () => {
   assert.ok(/if \(!logAs && qsoData\.callsign\) \{\n\s*const call = qsoData\.callsign\.toUpperCase\(\);/.test(saveBody), 'worked QSOs');

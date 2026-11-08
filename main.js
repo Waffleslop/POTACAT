@@ -14811,7 +14811,7 @@ async function saveQsoRecord(qsoData, opts) {
   if (!qsoData.uuid) qsoData.uuid = require('crypto').randomUUID();
   // The cloud copy is exactly the record written to the file. (The journal
   // used to upper-case qsoData's own keys: CALLSIGN, QSODATE, FREQUENCY.)
-  const sink = logAs ? logAsLogSink(ops) : qsoLogSink;
+  const sink = logAs ? logAsLogSink(ops, logAs.call) : qsoLogSink;
   QsoLog.appendRecords(logPath, [buildAdifFields(qsoData)], { existing: [], sink });
   if (logAs) sendCatLog(`[QSO] Logged ${qsoData.callsign} for ${logAs.call}: their logbook, callsign, QRZ and Cloud settings (the active operator's worked lists are untouched)`);
 
@@ -30584,8 +30584,10 @@ function qsoLogSink(changes) {
 // parks until they sign in on this machine; if they never have (owner null)
 // nothing is journaled and the sign-in catch-up (/v1/sync/missing) finds the
 // record in their logbook then.
-function logAsLogSink(ops) {
-  return (changes) => { if (cloudIpc) cloudIpc.recordLogChangesFor(cloudIpc.ownerIdFor(ops), changes); };
+// The entry is also stamped with THEIR profile (#245): it is pushed when that
+// profile is active, even when both profiles share one account.
+function logAsLogSink(ops, call) {
+  return (changes) => { if (cloudIpc) cloudIpc.recordLogChangesFor(cloudIpc.ownerIdFor(ops), changes, call); };
 }
 
 function mutateQsoLog(mutate) {
@@ -38048,6 +38050,12 @@ app.whenReady().then(() => {
       getLogPath: () => settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi'),
       loadWorkedQsos: () => loadWorkedQsos(),
       log: (msg) => sendCatLog(msg),
+      // GitHub #245: profiles sharing one cloud account (LZ3AW + LZ3AW/P).
+      // The pull leaves out another same-account profile's QSOs and the
+      // journal is kept per profile; each profile's account is read from
+      // its own settings file.
+      getActiveProfile: () => settings.activeProfile || '',
+      listProfiles: () => listProfiles().map((call) => ({ call, owner: cloudIpc ? cloudIpc.ownerIdFor(operatorSettingsFor(call)) : null })),
       sendToRenderer: (channel, data) => {
         if (win && !win.isDestroyed()) win.webContents.send(channel, data);
       },
