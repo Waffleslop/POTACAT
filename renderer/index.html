@@ -3973,6 +3973,26 @@
         <button type="button" id="cloud-tunnel-disable-btn" class="btn hidden">Disable</button>
       </div>
       <p id="cloud-tunnel-error" class="help-text hidden" style="color:var(--accent-red);margin-top:6px;"></p>
+      <!-- A Cloud address per shack (lib/cloud-shacks.js, Casey 2026-11-08).
+           Shown when the server needs a name for this shack's own address
+           (another shack has <call>.potacat.com), or when every shack address
+           in the membership is in use. -->
+      <div id="cloud-tunnel-own" class="hidden" style="margin-top:8px;padding:8px 10px;border-radius:6px;background:var(--bg-tertiary);border-left:3px solid var(--accent-blue);font-size:12px;line-height:1.5;color:var(--text-secondary);">
+        <div id="cloud-tunnel-own-text"></div>
+        <div id="cloud-tunnel-own-form" style="display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap;">
+          <label for="cloud-tunnel-shack-name" style="color:var(--text-primary);">This shack's name</label>
+          <input type="text" id="cloud-tunnel-shack-name" maxlength="20" placeholder="az, field, home" autocomplete="off" spellcheck="false" style="width:140px;">
+          <button type="button" id="cloud-tunnel-own-btn" class="btn btn-primary">Create this shack's address</button>
+        </div>
+        <div id="cloud-tunnel-own-preview" style="margin-top:4px;"></div>
+      </div>
+      <!-- The account's shacks and their addresses (GET /v1/cloud-tunnel/shacks).
+           Hidden on a server without per-shack addresses. -->
+      <div id="cloud-tunnel-shacks" class="hidden" style="margin-top:8px;font-size:12px;line-height:1.5;color:var(--text-secondary);">
+        <div><strong id="cloud-tunnel-shacks-title" style="color:var(--text-primary);">Your shacks</strong></div>
+        <div id="cloud-tunnel-shacks-list"></div>
+        <div style="margin-top:2px;">Each shack has its own address. In ECHOCAT on your phone, switch shacks under Paired desktops.</div>
+      </div>
       <!-- DNS-degraded notice (tunnel-dns-degraded-notice). Amber, not red:
            the tunnel is nominally up but cloudflared can't refresh DNS.
            Text comes from state.degradedReason. -->
@@ -5276,6 +5296,7 @@
   <script src="app.js"></script>
   <script src="station-setup.js"></script>
   <script src="echocat-review.js"></script>
+  <script src="../lib/cloud-shacks.js"></script>
   <script src="cloud-ui.js"></script>
   <script src="pota-sync-ui.js"></script>
 </body>

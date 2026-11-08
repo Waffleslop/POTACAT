@@ -827,6 +827,7 @@ const GLOBAL_KEYS = new Set([
   'enableEchoCat',     // ECHOCAT server enable (machine-level)
   'remoteAccess',      // ECHOCAT access off | cloud | lan — the listener is this machine's (lib/remote-access.js)
   'cloudDeviceId',     // stable machine UUID for cloud device registration
+  'cloudShackName',    // this shack's name for its own Cloud address (<call>-<name>.potacat.com)
                        // (must be global so both operators' phones find the same shack)
   'launchAtStartup',   // OS login item — machine-scoped by nature
   'setupSharePending', // Station Setup shares not yet delivered (retried at launch) — about this machine's radios
@@ -38103,10 +38104,11 @@ app.whenReady().then(() => {
 
   // One shack per Cloud address: the question, and the notices on every surface.
 const TunnelClaim = require('./lib/tunnel-claim');
+const CloudShacks = require('./lib/cloud-shacks');
 let _cloudConflictAsking = false;
 async function cloudTunnelAskConflict(c) {
   if (!cloudTunnel || _cloudConflictAsking) return;
-  const d = TunnelClaim.conflictDialog(c.connectors, c.unclaimed, cloudTunnel.getState().cloudHost);
+  const d = TunnelClaim.conflictDialog(c.connectors, c.unclaimed, cloudTunnel.getState().cloudHost, c.ownAddress);
   // Headless (a Pi shack) has nobody to ask: hold, and say how to choose.
   if (!win || win.isDestroyed()) {
     sendCatLog(`[cloud-tunnel] ${d.message} This shack's Cloud Tunnel is held; open POTACAT on this computer, or turn the tunnel off on the other one, to choose.`);
@@ -38116,7 +38118,10 @@ async function cloudTunnelAskConflict(c) {
   _cloudConflictAsking = true;
   try {
     const r = await dialog.showMessageBox(win, { type: 'question', title: d.title, message: d.message, detail: d.detail, buttons: d.buttons, defaultId: d.defaultId, cancelId: d.cancelId, noLink: true });
-    await cloudTunnel.resolveConflict(d.choices[r.response] || 'cancel');
+    const after = await cloudTunnel.resolveConflict(d.choices[r.response] || 'cancel');
+    // "Give this shack its own address" with no name chosen yet: the Cloud
+    // card asks for it (lib/cloud-shacks.js).
+    if (after && after.ownAddress) focusMainWindowAndOpenCloudPanel();
   } finally {
     _cloudConflictAsking = false;
   }
@@ -38145,6 +38150,9 @@ function cloudShackNotice(text, kind) {
       // (lib/tunnel-claim.js): the id it registers in the devices directory,
       // the computer's name, and the radio, so the other shack can say
       // "KQ5O-MAC (FT-710)".
+      // This shack's name for an address of its own, <call>-<name>.potacat.com
+      // (lib/cloud-shacks.js), typed on the Cloud card.
+      getShackName: () => settings.cloudShackName || '',
       getDeviceInfo: () => {
         if (!settings.cloudDeviceId) { settings.cloudDeviceId = require('crypto').randomUUID(); saveSettings(settings); }
         const rig = (settings.rigs || []).find((r) => r && r.id === settings.activeRigId);
@@ -38309,10 +38317,14 @@ function cloudShackNotice(text, kind) {
     return { ok: true };
   });
 
-  ipcMain.handle('cloud-tunnel-enable', async () => {
+  ipcMain.handle('cloud-tunnel-enable', async (_e, opts) => {
     if (!cloudTunnel) return { error: 'cloud-tunnel module not initialized' };
     try {
-      const state = await cloudTunnel.enable();
+      // A name typed on the Cloud card for this shack's own address is kept
+      // (machine-scoped) so a later Enable or launch asks for the same one.
+      const typed = opts && typeof opts.shackName === 'string' ? CloudShacks.sanitizeShackName(opts.shackName) : '';
+      if (typed && typed !== settings.cloudShackName) { settings.cloudShackName = typed; saveSettings(settings); }
+      const state = await cloudTunnel.enable(typed ? { shackName: typed } : {});
       return { ok: true, state };
     } catch (err) {
       const msg = err.message || String(err);
@@ -38347,6 +38359,33 @@ function cloudShackNotice(text, kind) {
     try {
       const state = await cloudTunnel.removeAddress();
       return { ok: true, state };
+    } catch (err) {
+      return { error: err.message || String(err) };
+    }
+  });
+
+  // A Cloud address per shack (lib/cloud-shacks.js): the account's shacks
+  // and their addresses, and removing one to free a slot (confirmed here,
+  // naming the shack and its address).
+  ipcMain.handle('cloud-tunnel-shacks', async () => {
+    if (!cloudTunnel) return { supported: false, shacks: [] };
+    return cloudTunnel.listShacks();
+  });
+  ipcMain.handle('cloud-tunnel-remove-shack', async (_e, deviceId) => {
+    if (!cloudTunnel) return { error: 'cloud-tunnel module not initialized' };
+    const list = await cloudTunnel.listShacks();
+    const shack = (list.shacks || []).find((x) => x.deviceId === deviceId);
+    if (!shack) return { error: 'That shack is not on your account any more.' };
+    const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, {
+      type: 'warning', title: 'Remove a shack address', noLink: true,
+      message: `Remove ${shack.cloudHost || 'the Cloud address'} from ${shack.name}?`,
+      detail: (shack.self ? 'This is this computer. ' : '')
+        + `Your phone and browser will not reach ${shack.name} through POTACAT Cloud until it turns its Cloud Tunnel on again. Its LAN and Tailscale connections keep working.`,
+      buttons: ['Remove the address', 'Cancel'], defaultId: 1, cancelId: 1,
+    });
+    if (r.response !== 0) return { ok: false, cancelled: true };
+    try {
+      return await cloudTunnel.removeShack(deviceId);
     } catch (err) {
       return { error: err.message || String(err) };
     }

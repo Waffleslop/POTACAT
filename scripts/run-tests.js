@@ -227,6 +227,7 @@ const TESTS = [
   'test/wsprd-depth-test.js', // N5IRU: a slow PC steps wsprd's search down instead of timing out every window
   'test/sstv-rx-ended-test.js', // boblk9tc: a decode that ends with no picture leaves Receiving on ECHOCAT
   'test/cloud-tunnel-claim-test.js', // KQ5O: one shack per Cloud address; Off keeps it for the others
+  'test/cloud-shacks-test.js', // a Cloud address per shack (<call>-<name>.potacat.com), so the phone can switch shacks
   'test/icom-ptt-memory-mode-test.js', // nj7n_nate: no frequency re-send around an Icom PTT mode swap (memory mode)
   'test/ssb-sideband-tune-test.js', // a 60 m SSB spot tunes USB
   'test/capture-stall-test.js', // kc8zp_ryan: JTCAT capture rebuilt when the OS mutes/suspends it or it stops delivering
