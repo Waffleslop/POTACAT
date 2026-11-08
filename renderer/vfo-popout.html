@@ -1435,9 +1435,12 @@ function buildCustomCatBtns() {
         const key = customToggleKey(b);
         const paint = () => {
           const v = CustomCatFollow.toggleView(b, customRadioState, customToggleState[key]);
-          btn.textContent = b.name + ' ' + (v.on ? 'On' : 'Off');
-          btn.classList.toggle('active', v.on);
-          btn.title = v.fromRadio ? 'Shows what the radio reports.' : 'Shows the last command sent, not the radio state.';
+          // on === null: not read and nothing sent yet, so neither On nor Off (#242).
+          btn.textContent = b.name + ' ' + (v.on === null ? '?' : (v.on ? 'On' : 'Off'));
+          btn.classList.toggle('active', v.on === true);
+          btn.title = v.fromRadio ? 'Shows what the radio reports.'
+            : v.on === null ? 'State unknown: not read from the radio. A click sends the On command.'
+              : 'Shows the last command sent, not the radio state.';
         };
         btn.addEventListener('click', () => {
           const goingOn = CustomCatFollow.toggleView(b, customRadioState, customToggleState[key]).nextCommand === 'on';
@@ -1462,6 +1465,8 @@ const customToggleState = {};
 let customRadioState = null; // latest vfo-radio-state, for toggles that follow the radio
 const customToggleKey = (b) => [b.name, b.command, b.commandOff || ''].join('');
 buildCustomCatBtns();
+// Opening this window reads the toggles that have their own read (#242).
+window.api.rigControl({ action: 'custom-cat-read' });
 
 // --- Step sizes for VFO dial ---
 const STEPS = [

@@ -98,6 +98,7 @@ const TESTS = [
   'test/merge-latest-mac-test.js',
   'test/lan-advertise-test.js',
   'test/custom-cat-parity-test.js',
+  'test/custom-cat-read-test.js', // #242: a custom toggle's own read command + ON-when rule; unknown, not OFF, when unread; no read during TX
   'test/worked-qsos-chunk-test.js',
   'test/web-log-form-test.js',
   'test/bug-report-log-test.js',

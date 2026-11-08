@@ -101,7 +101,8 @@ test('desktop VFO pop-out: a toggle alternates On and Off commands; a slider is 
   assert.ok(!/b\.type !== 'slider'/.test(vfo), 'no longer filtered out');
   assert.ok(/window\.api\.sendCustomCat\(customSliderCommand\(b\.command, \+range\.value\)\)/.test(vfo));
   assert.ok(/const cmd = String\(\(goingOn \? b\.command : b\.commandOff\) \|\| ''\)\.trim\(\);/.test(vfo));
-  assert.ok(/btn\.textContent = b\.name \+ ' ' \+ \(v\.on \? 'On' : 'Off'\);/.test(vfo));
+  // #242: an unread toggle shows '?' ahead of On/Off.
+  assert.ok(/btn\.textContent = b\.name \+ ' ' \+ \((?:v\.on === null \? '\?' : \()?v\.on \? 'On' : 'Off'\)\)?;/.test(vfo));
 });
 
 console.log('\n=== #13 {call}: the most recently changed field, on any surface ===');

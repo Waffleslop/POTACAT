@@ -2903,6 +2903,32 @@ let _currentPower = 0; // live wattmeter reading from the rig (during TX)
 let _currentAtuState = false;
 let _currentVfo = 'A';
 let _currentSplit = false; // rig split state, readback-fed (IF; P12 / rigctld s)
+// Custom CAT toggles with their own read command and "ON when" rule (GitHub
+// #242, lib/custom-cat-read.js): read at connect, after a press and when the
+// panel opens; never while transmitting. Results ride the rig state as
+// customCatStates and every surface lights its toggles from them.
+const { createCustomCatReader } = require('./lib/custom-cat-read');
+const customCatReader = createCustomCatReader({
+  getSlots: () => (settings && Array.isArray(settings.customCatButtons)) ? settings.customCatButtons : [],
+  query: (cmd) => {
+    if (!cat || !cat.connected || typeof cat.queryRaw !== 'function') return Promise.reject(new Error('this rig link cannot read replies to raw commands'));
+    return cat.queryRaw(cmd, { timeoutMs: 1200 });
+  },
+  isTransmitting: () => _isEffectivelyTransmitting() || !!(cat && cat._transmitting),
+  onChange: () => broadcastRigState(),
+  log: (line) => sendCatLog(line),
+});
+let _customCatLinkUp = false;
+let _customCatConnectTimer = null;
+/** Link up: read every toggle that has a read (once the poll has settled). Link down: unknown. */
+function customCatLinkSeen(up) {
+  if (up === _customCatLinkUp) return;
+  _customCatLinkUp = up;
+  clearTimeout(_customCatConnectTimer);
+  _customCatConnectTimer = null;
+  if (up) _customCatConnectTimer = setTimeout(() => { _customCatConnectTimer = null; customCatReader.readAll('connect'); }, 1500);
+  else customCatReader.reset();
+}
 let _currentFilterWidth = 0;
 
 const RelogGuard = require('./lib/jtcat-relog-guard');
@@ -3959,6 +3985,7 @@ function sendCatStatus(s) {
   if (s && !s.connected && smartSdr && smartSdr.canTune) {
     s = { ...s, connected: true };
   }
+  customCatLinkSeen(!!(s && s.connected));
   // Loud radio-link transitions (see _catLinkUpLast decl). Runs on the
   // EFFECTIVE state (post canTune adjustment) and only on change — status
   // pushes are frequent. The very first status of the session is silent
@@ -4796,6 +4823,7 @@ function bindRigStateEvents(controller) {
   controller.on('breakIn', sendCatBreakIn);
   controller.on('ptt', (on) => txNoteRadioPtt(controller, on));
   controller.on('ptt', (on) => { if (!on && controller === cat) txMetersRestOnRx(); });
+  controller.on('ptt', (on) => { if (!on && controller === cat) customCatReader.txEnded(); }); // #242: reads held during TX
   // Something the radio did that the operator must see, not only the log
   // (lib/rig-controller.js: a radio left in transmit after a CW message).
   controller.on('notice', (msg) => {
@@ -5148,6 +5176,7 @@ function broadcastRigState() {
     // display lying (LZ3AW, TS-480). See sendCatVfo/sendCatSplit.
     vfo: _currentVfo,
     split: _currentSplit,
+    customCatStates: customCatReader.states(), // #242: custom toggles' own reads
     capabilities: caps,
     // Control registry — lets clients render the rig panel (labels, grouping,
     // TX-only tags, which caps gate each) from one source of truth instead of
@@ -28195,6 +28224,7 @@ function _isEffectivelyTransmitting() {
 
 function _broadcastEffectiveTxState() {
   const state = _isEffectivelyTransmitting();
+  if (!state) customCatReader.txEnded(); // #242: reads held during TX
   if (win && !win.isDestroyed()) {
     win.webContents.send('remote-tx-state', state);
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('remote-tx-state', state);
@@ -28263,6 +28293,7 @@ function sendVfoState() {
     mon: _currentMonState,
     rit: _currentRitState,
     breakIn: _currentBreakInState,
+    customCatStates: customCatReader.states(), // #242: custom toggles' own reads
     customCatButtons: settings.customCatButtons || [],
     meters: vfoMetersAvailable(),   // only these meter rows are drawn
     // Power On/Off at the bottom of the window. From the radio MODEL, never
@@ -28347,6 +28378,7 @@ function broadcastRemoteRadioStatus() {
     atuTuning: (smartSdr && smartSdr.connected) ? !!_atuSweeping : undefined,
     vfo: _currentVfo,
     split: _currentSplit,
+    customCatStates: customCatReader.states(), // #242: custom toggles' own reads
     filterWidth: _currentFilterWidth,
     rfgain: rfg,
     squelch: _currentSquelch,
@@ -44608,7 +44640,16 @@ function cloudShackNotice(text, kind) {
           smartSdr._send(cmd);
         } else if (cat && cat.connected) {
           cat.sendRaw(cmd);
+          // A toggle with its own read shows what the radio did (#242).
+          customCatReader.afterPress(cmd);
         }
+        break;
+      }
+      case 'custom-cat-read': {
+        // The custom CAT panel opened: re-read the toggles that have a read
+        // (#242). Rate-limited in lib/custom-cat-read.js.
+        if (meta && meta.guest) break;
+        customCatReader.readAll('panel');
         break;
       }
       // --- FTX-1-class advanced rig controls ---

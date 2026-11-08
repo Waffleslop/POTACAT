@@ -7147,6 +7147,10 @@ a.settings-echocat-badge-link:hover {
   color: var(--text-secondary, #ccc);
 }
 .rig-custom-send.rig-custom-toggle-on { background: #2a6e4e; }
+/* #242: a toggle whose state is not known shows neither On nor Off */
+.rig-custom-send.rig-custom-toggle-unknown { opacity: 0.75; font-style: italic; }
+.rig-custom-read, .rig-custom-onwhen { flex: 1 1 90px; min-width: 70px; }
+.rig-custom-cmd.rig-custom-invalid { border-color: #e94560; }
 
 .rig-custom-name {
   width: 70px;
