@@ -464,7 +464,11 @@
         // to this account (lib/sync-journal.js forOwner).
         const o = status.pendingForOthers;
         if (o && o.count > 0) {
-          pendingOthersSpan.textContent = '+ ' + o.count + ' waiting for ' + (o.owners.length === 1 ? 'another account' : o.owners.length + ' other accounts');
+          // Another profile on this PC (same account) is named by callsign (#245).
+          const who = [];
+          if (o.owners.length) who.push(o.owners.length === 1 ? 'another account' : o.owners.length + ' other accounts');
+          if (o.profiles && o.profiles.length) who.push(o.profiles.join(', ') + "'s profile");
+          pendingOthersSpan.textContent = '+ ' + o.count + ' waiting for ' + who.join(' and ');
           pendingOthersSpan.classList.remove('hidden');
         } else {
           pendingOthersSpan.classList.add('hidden');
