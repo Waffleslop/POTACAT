@@ -688,7 +688,16 @@ function derSet(bufs) { const b = Buffer.concat(bufs); return Buffer.concat([Buf
 function derOid(h) { const b = Buffer.from(h, 'hex'); return Buffer.concat([Buffer.from([0x06, b.length]), b]); }
 function derUtf8(s) { const b = Buffer.from(s, 'utf8'); return Buffer.concat([Buffer.from([0x0c]), derLen(b.length), b]); }
 function derBitString(b) { return Buffer.concat([Buffer.from([0x03]), derLen(b.length + 1), Buffer.from([0x00]), b]); }
-function derInt(b) { if (b[0] & 0x80) b = Buffer.concat([Buffer.from([0x00]), b]); return Buffer.concat([Buffer.from([0x02]), derLen(b.length), b]); }
+// Minimal DER: drop leading zero bytes, then one 0x00 if the high bit is set.
+// A random serial starting 0x00 0x00-0x7f (about 1 in 512) made a certificate
+// OpenSSL rejects ("illegal padding"); same fix as lib/remote-server.js (#260).
+function derInt(b) {
+  let i = 0;
+  while (i < b.length - 1 && b[i] === 0x00) i++;
+  b = b.subarray(i);
+  if (b[0] & 0x80) b = Buffer.concat([Buffer.from([0x00]), b]);
+  return Buffer.concat([Buffer.from([0x02]), derLen(b.length), b]);
+}
 function derExplicit(tag, c) { return Buffer.concat([Buffer.from([0xa0 | tag]), derLen(c.length), c]); }
 function derOctetString(b) { return Buffer.concat([Buffer.from([0x04]), derLen(b.length), b]); }
 function derGeneralizedTime(d) { const s = d.toISOString().replace(/[-:T]/g, '').slice(0, 14) + 'Z'; const b = Buffer.from(s, 'ascii'); return Buffer.concat([Buffer.from([0x18]), derLen(b.length), b]); }
@@ -723,7 +732,11 @@ function generateTlsCert() {
     try {
       const stat = fs.statSync(certPath);
       if (Date.now() - stat.mtimeMs < 365 * 24 * 60 * 60 * 1000) {
-        return { cert: fs.readFileSync(certPath, 'utf8'), key: fs.readFileSync(keyPath, 'utf8') };
+        const cert = fs.readFileSync(certPath, 'utf8');
+        // A certificate saved by a version with the DER serial bug may not
+        // parse; it would have been reused for a year. Regenerate it instead.
+        new crypto.X509Certificate(cert);
+        return { cert, key: fs.readFileSync(keyPath, 'utf8') };
       }
     } catch {}
   }
@@ -1143,4 +1156,4 @@ function main() {
 // Run directly (node launcher.js, the extracted copy) it starts at once;
 // POTACAT.exe --launcher requires it and calls main(); tests only require it.
 if (require.main === module) main();
-module.exports = { main, createDualServer, generateTlsCert, isTunnelRequest, clientKey, routeOf, readPairedDevices, deviceForToken, authorize, sameSecret, CloudReplica, handleRequest };
+module.exports = { main, createDualServer, generateTlsCert, _derInt: derInt, isTunnelRequest, clientKey, routeOf, readPairedDevices, deviceForToken, authorize, sameSecret, CloudReplica, handleRequest };

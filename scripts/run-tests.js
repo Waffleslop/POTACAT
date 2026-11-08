@@ -15,6 +15,7 @@ const path = require('path');
 const TESTS = [
   'test/syntax-check-test.js', // every source file parses (a main.js syntax error passed every other test)
   'test/rig-test.js',
+  'test/icom-baud-list-test.js', // #238: every baud select offers 4800-115200; Icom path accepts each
   'test/cat-port-presence-test.js',
   'test/guest-pass-listen-test.js',
   'test/rigctld-spawn-test.js',
@@ -34,6 +35,7 @@ const TESTS = [
   'test/smartsdr-dax-tx-claim-test.js',
   'test/vfo-ptt-race-test.js',
   'test/vfo-ptt-mic-test.js', // #170: every VFO PTT press logs the mic it opened, the output and the level
+  'test/vfo-audio-power-cycle-test.js', // #247: VFO window radio audio reattaches after a radio power cycle
   'test/vfo-log-spot-test.js',
   'test/vfo-wheel-direction-test.js', // #192 w0tlp: wheel up = frequency up in the VFO window
   'test/vfo-tx-power-test.js', // #199 w0tlp: TX power slider in the VFO window, the Rig panel's caps and dispatcher
@@ -106,6 +108,8 @@ const TESTS = [
   'test/halt-tx-test.js',
   'test/refused-key-audio-test.js', // #214: a refused key-down plays no radio audio (Tune, SSTV, voice macro); a Tune stop during start-up wins
   'test/own-licence-tx-test.js',
+  'test/privileges-one-source-test.js', // #250: lib/privileges.js is the one table (renderer loads it); unverified classes never refuse TX; no change vs master
+  'test/privileges-verified-gate-test.js', // #250: the ATU wizard and Guest Pass never refuse for an unverified licence class
   'test/rigctld-power-scale-test.js',
   'test/rigctld-kenwood-power-test.js', // a TS-590/TS-2000 behind Hamlib keeps its power: raw PC, never Hamlib's PC000/PC255 probe
   'test/jtcat-tx-watchdog-test.js',
@@ -261,6 +265,7 @@ const TESTS = [
   'test/cloud-log-sync-test.js',
   'test/launch-origin-test.js',
   'test/cloud-merge-dupe-test.js',
+  'test/cloud-pull-per-profile-test.js', // #245: profiles sharing one account: each pulls only its own QSOs; the dupe guard and journal stay per profile
   'test/swr-guard-test.js',
   'test/atu-wizard-test.js',         // Flex ATU Calibration Wizard: plan vs privileges, classifier, run loop on a fake Flex, wiring
   'test/ft8-worker-respawn-test.js',
@@ -332,6 +337,7 @@ const TESTS = [
   'test/sstv-jtcat-handover-test.js',
   'scripts/validate-sstv-packs.js',
   'test/spot-age-pota-test.js',
+  'test/scope-spot-age-test.js', // #239: the scope/bandspread pop-outs apply the table's Max Spot Age, re-checked on a timer
   'test/cw-sidetone-schedule-test.js',
   'test/echocat-web-micgain-test.js',
   'test/cloud-billing-ui-test.js',
@@ -478,7 +484,9 @@ const TESTS = [
   'test/jtcat-tx-refused-test.js', // #190: a refused JS8 tx-start is not "fully transmitted"; FT8 refusal events identical to master; HALT never hidden by mode
   'test/run-tests-runner-test.js', // #175: this runner keeps going past a failing file, names every failure, exits non-zero
   'test/update-check-feedback-test.js', // #186: a manual Check for Updates always ends in a visible message (checking, up to date, found, or the error + download page)
+  'test/tls-der-int-test.js', // ECHOCAT self-signed cert: the random serial is minimal DER (a leading 0x00 made OpenSSL reject ~1 in 512 certs)
   'test/rigctld-data-fm-test.js', // #259: DIGFM/DIGAM have rigctld tokens (PKTFM/PKTAM), so a packet key-down on FM sends the DATA mode
+  'test/launcher-cert-der-test.js', // Remote Launcher cert: minimal DER serial; a saved cert that doesn't parse is regenerated
 ];
 
 const root = path.join(__dirname, '..');

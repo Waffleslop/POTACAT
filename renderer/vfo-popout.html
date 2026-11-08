@@ -767,6 +767,8 @@
 <script src="../lib/freq-paste.js"></script>
 <script src="../lib/wheel-tune.js"></script>
 <script src="../lib/mono-upmix.js"></script>
+<script src="../lib/audio-device-heal.js"></script>
+<script src="../lib/vfo-audio-reattach.js"></script>
 <script src="../lib/vfo-ptt-mic.js"></script>
 <script>
 // --- State ---
@@ -3342,12 +3344,16 @@ let audioMonitorActive = false;
 let audioMonitorMuted = false;
 let audioMonitorDirect = false;   // true = playing the SmartSDR Direct VITA-49 stream
 let audioMonitorNextPlay = 0;     // AudioContext play cursor for direct-mode packets
+let audioMonitorLabel = '';       // the capture device's name (#247: follow it by name)
+let audioReattachPending = false; // #247: a power-on / dead stream waits for a reopen
 // Radio audio monitor volume (0–1.5). Drives the monitor's GainNode so the
 // user can throttle click-to-listen audio without touching the PC's master
 // volume. Persisted as a 0–150 percentage.
 let monitorVolume = (parseInt(localStorage.getItem('vfoMonitorVolume') || '100', 10) || 100) / 100;
 
-async function startAudioMonitor() {
+// opts.deviceId: the input to open instead of the saved one — a reattach
+// after a power cycle that followed the CODEC to a new ID (#247).
+async function startAudioMonitor(opts) {
   if (audioMonitorCtx) return;
   try {
     const s = await window.api.getSettings();
@@ -3376,8 +3382,13 @@ async function startAudioMonitor() {
       noiseSuppression: false,
       autoGainControl: false,
     };
-    if (s.remoteAudioInput) constraints.deviceId = { exact: s.remoteAudioInput };
+    const inputId = (opts && opts.deviceId != null) ? opts.deviceId : s.remoteAudioInput;
+    if (inputId) constraints.deviceId = { exact: inputId };
     audioMonitorStream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+    // The track's own name, kept to follow the device by name when the radio
+    // powers off and the CODEC leaves (#247).
+    const track = audioMonitorStream.getAudioTracks()[0];
+    if (track && track.label) audioMonitorLabel = track.label;
     audioMonitorCtx = new AudioContext();
     if (audioMonitorCtx.state === 'suspended') await audioMonitorCtx.resume();
     const source = audioMonitorCtx.createMediaStreamSource(audioMonitorStream);
@@ -3434,16 +3445,98 @@ audioBtn.addEventListener('click', async () => {
   } else {
     // Third click: unmute (but keep muted if SDR is active)
     audioMonitorMuted = false;
+    // A capture that died with a radio power cycle has no audio to un-gain:
+    // reopen it (#247 — before this only closing the window brought it back).
+    const d = VfoAudioReattach.decide(audioReattachState(), 'unmute');
+    audioReattachPending = d.pending;
+    if (d.reopen) await reattachRadioAudio('unmute');
     if (audioMonitorGain) audioMonitorGain.gain.value = kiwiConnected ? 0 : monitorVolume;
     updateAudioBtn();
   }
 });
+
+// --- Radio audio after a radio power cycle (GitHub #247) ---
+// A radio whose USB audio CODEC it powers (FT-710) takes the CODEC out of
+// Windows at power-off; the capture track ends and the CODEC returns at
+// power-on, sometimes under a new device ID. Reopen the capture on POTACAT's
+// power-on, when the device reappears, and on unmute — following the device
+// by name (lib/audio-device-heal.js via lib/vfo-audio-reattach.js).
+function audioMonitorStreamLive() {
+  return !!(audioMonitorStream && audioMonitorStream.getAudioTracks().some((t) => t.readyState === 'live'));
+}
+function audioReattachState() {
+  return {
+    active: audioMonitorActive,
+    direct: audioMonitorDirect,
+    muted: audioMonitorMuted,
+    streamLive: audioMonitorStreamLive(),
+    pending: audioReattachPending,
+  };
+}
+let audioReattachBusy = false;
+// true = reopened (or nothing left to do); false = the device is not back yet.
+async function reattachRadioAudio(why) {
+  if (audioReattachBusy) return false;
+  if (!window.VfoAudioReattach || !navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return false;
+  audioReattachBusy = true;
+  try {
+    const s = await window.api.getSettings();
+    const rig = (s.rigs || []).find((r) => r && r.id === s.activeRigId) || {};
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const pick = VfoAudioReattach.pickInput({
+      deviceId: s.remoteAudioInput || '',
+      label: rig.remoteAudioInputLabel || audioMonitorLabel,
+      rigName: rig.name,
+    }, devices);
+    if (!pick.ok) return false;
+    if (!audioMonitorActive || audioMonitorDirect) { audioReattachPending = false; return true; }
+    stopAudioMonitor();
+    await startAudioMonitor({ deviceId: pick.deviceId });
+    if (!audioMonitorActive) return false;
+    if (audioMonitorGain) audioMonitorGain.gain.value = (audioMonitorMuted || kiwiConnected) ? 0 : monitorVolume;
+    audioReattachPending = false;
+    try { window.api.vfoAudioReattached({ why, device: audioMonitorLabel || pick.label }); } catch {}
+    return true;
+  } catch (e) {
+    console.error('[VFO] radio audio reattach failed:', e && e.message);
+    return false;
+  } finally {
+    audioReattachBusy = false;
+  }
+}
+// POTACAT switched the radio on. The CODEC takes a few seconds to enumerate,
+// so try a few times; a device change in between does it sooner.
+let audioReattachTimers = [];
+if (window.api.onRadioPowerOn) {
+  window.api.onRadioPowerOn(() => {
+    const d = VfoAudioReattach.decide(audioReattachState(), 'power-on');
+    audioReattachPending = d.pending;
+    if (!d.reopen) return;
+    audioReattachTimers.forEach(clearTimeout);
+    audioReattachTimers = [3000, 6000, 10000, 15000, 25000].map((ms) => setTimeout(() => {
+      if (!audioReattachPending || audioMonitorMuted) return;
+      reattachRadioAudio('power-on');
+    }, ms));
+  });
+}
+if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+  let audioReattachDebounce = null;
+  navigator.mediaDevices.addEventListener('devicechange', () => {
+    clearTimeout(audioReattachDebounce);
+    audioReattachDebounce = setTimeout(() => {
+      const d = VfoAudioReattach.decide(audioReattachState(), 'devicechange');
+      audioReattachPending = d.pending;
+      if (d.reopen) reattachRadioAudio(audioMonitorStreamLive() ? 'power-on' : 'devicechange');
+    }, 1500);
+  });
+}
 
 // Long press or right-click to stop monitoring entirely
 audioBtn.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   stopAudioMonitor();
   audioMonitorMuted = false;
+  audioReattachPending = false;
 });
 
 // SmartSDR Direct RX audio — play the VITA-49 frames POTACAT receives, but

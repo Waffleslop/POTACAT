@@ -335,6 +335,7 @@ const { RigController } = require('./lib/rig-controller');
 const { RIG_CONTROLS } = require('./lib/rig-controls');
 const _rigGainSteps = require('./lib/rig-gain-steps'); // preamp/ATT ladders (KB2UXB)
 const { normalizeMuteRules } = require('./lib/spot-mute-rules'); // per-band region mutes (N7BBQ)
+const SpotAge = require('./lib/spot-age'); // Max Spot Age, shared with the table (#239)
 const SpotHides = require('./lib/spot-hides'); // hidden spots, one list for every surface (K8IKO)
 const LogAs = require('./lib/log-as'); // log a QSO for another operator on this machine (KD9WI)
 const WatchlistGroups = require('./lib/watchlist-groups'); // state tokens in the watchlist (N0KAH)
@@ -14810,7 +14811,7 @@ async function saveQsoRecord(qsoData, opts) {
   if (!qsoData.uuid) qsoData.uuid = require('crypto').randomUUID();
   // The cloud copy is exactly the record written to the file. (The journal
   // used to upper-case qsoData's own keys: CALLSIGN, QSODATE, FREQUENCY.)
-  const sink = logAs ? logAsLogSink(ops) : qsoLogSink;
+  const sink = logAs ? logAsLogSink(ops, logAs.call) : qsoLogSink;
   QsoLog.appendRecords(logPath, [buildAdifFields(qsoData)], { existing: [], sink });
   if (logAs) sendCatLog(`[QSO] Logged ${qsoData.callsign} for ${logAs.call}: their logbook, callsign, QRZ and Cloud settings (the active operator's worked lists are untouched)`);
 
@@ -21724,6 +21725,30 @@ function panadapterAllowsSource(source) {
 function spotsForPanadapter(merged) {
   return merged.filter(s => panadapterAllowsSource(s.source));
 }
+
+// The spot feed for the Band Scope and bandspread pop-outs: the panadapter
+// source picks plus the table's Max Spot Age, through the same function the
+// table runs (lib/spot-age.js). #239 (VK4KTW): the scope drew 222-minute-old
+// spots with a 30-minute limit because it got the source filter only.
+// SmartSDR and TCI keep their own panadapter age caps (pushSpotsToSmartSdr,
+// pushSpotsToTci).
+function spotsForScope(merged) {
+  return SpotAge.filterSpotsByAge(spotsForPanadapter(merged), SpotAge.ageOptsFromSettings(settings), Date.now());
+}
+
+// The pop-outs are pushed when spots arrive. Re-push on a timer as well, so a
+// spot that ages out leaves the scope even when no new spots come in (a
+// stalled feed, or a refresh interval longer than the age limit).
+const PANADAPTER_AGE_REPUSH_MS = 30000;
+function repushPanadapterPopouts() {
+  if (scopePopoutWin && !scopePopoutWin.isDestroyed()) {
+    scopePopoutWin.webContents.send('spots', spotsForScope(lastMergedSpots || []));
+  }
+  if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) {
+    bandspreadPopoutWin.webContents.send('spots', spotsForScope(lastMergedSpots || []));
+  }
+}
+setInterval(repushPanadapterPopouts, PANADAPTER_AGE_REPUSH_MS);
 
 // True when the user has independently selected a source for the panadapter.
 // Used by fetch gates: if the table-side enable* says no, we still pull
@@ -30218,14 +30243,15 @@ function sendMergedSpots() {
   }
   // Forward to bandspread pop-out if open (reuses 'spots' channel) — apply
   // the same panadapter-source filter so bandspread mirrors the panadapter
-  // (sync-with-table by default, or the operator's independent picks).
+  // (sync-with-table by default, or the operator's independent picks), and
+  // the table's Max Spot Age (#239).
   if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) {
-    bandspreadPopoutWin.webContents.send('spots', spotsForPanadapter(merged));
+    bandspreadPopoutWin.webContents.send('spots', spotsForScope(merged));
   }
   // Band Scope pop-out overlays spots on the radio's own spectrum — same
-  // panadapter-source filter as bandspread, for the same reason.
+  // panadapter-source filter and spot age as bandspread, for the same reason.
   if (scopePopoutWin && !scopePopoutWin.isDestroyed()) {
-    scopePopoutWin.webContents.send('spots', spotsForPanadapter(merged));
+    scopePopoutWin.webContents.send('spots', spotsForScope(merged));
   }
   // Trigger QRZ lookups for new callsigns (async, non-blocking)
   if (qrz.configured && settings.enableQrz) {
@@ -30558,8 +30584,10 @@ function qsoLogSink(changes) {
 // parks until they sign in on this machine; if they never have (owner null)
 // nothing is journaled and the sign-in catch-up (/v1/sync/missing) finds the
 // record in their logbook then.
-function logAsLogSink(ops) {
-  return (changes) => { if (cloudIpc) cloudIpc.recordLogChangesFor(cloudIpc.ownerIdFor(ops), changes); };
+// The entry is also stamped with THEIR profile (#245): it is pushed when that
+// profile is active, even when both profiles share one account.
+function logAsLogSink(ops, call) {
+  return (changes) => { if (cloudIpc) cloudIpc.recordLogChangesFor(cloudIpc.ownerIdFor(ops), changes, call); };
 }
 
 function mutateQsoLog(mutate) {
@@ -31671,6 +31699,18 @@ function yaesuScopeNoteRadioBack(why) {
     yaesuScopeRestarts = 0;
     startYaesuScope();
   }, 4000);
+}
+
+/**
+ * POTACAT switched the radio on: the VFO window reopens its radio audio
+ * (GitHub #247). The radio's USB audio CODEC left Windows at power-off and
+ * the window's capture ended with it; the window decides (it knows mute and
+ * whether it is listening at all — lib/vfo-audio-reattach.js) and waits for
+ * the CODEC to come back before reopening it.
+ */
+function vfoAudioNoteRadioBack() {
+  if (!vfoPopoutWin || vfoPopoutWin.isDestroyed()) return;
+  vfoPopoutWin.webContents.send('vfo-radio-power-on');
 }
 
 /** The radio is keyed by any path POTACAT tracks: desktop / ECHOCAT / FT8
@@ -38022,6 +38062,12 @@ app.whenReady().then(() => {
       getLogPath: () => settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi'),
       loadWorkedQsos: () => loadWorkedQsos(),
       log: (msg) => sendCatLog(msg),
+      // GitHub #245: profiles sharing one cloud account (LZ3AW + LZ3AW/P).
+      // The pull leaves out another same-account profile's QSOs and the
+      // journal is kept per profile; each profile's account is read from
+      // its own settings file.
+      getActiveProfile: () => settings.activeProfile || '',
+      listProfiles: () => listProfiles().map((call) => ({ call, owner: cloudIpc ? cloudIpc.ownerIdFor(operatorSettingsFor(call)) : null })),
       sendToRenderer: (channel, data) => {
         if (win && !win.isDestroyed()) win.webContents.send(channel, data);
       },
@@ -39861,7 +39907,7 @@ function cloudShackNotice(text, kind) {
       // panadapter allowlist so DX-only-panadapter / POTA-only-table
       // setups actually behave that way for the bandspread too.
       if (settings.panadapterSyncTable === false) {
-        const panaSpots = spotsForPanadapter(lastMergedSpots);
+        const panaSpots = spotsForScope(lastMergedSpots);
         payload = Object.assign({}, payload || {}, { spots: panaSpots });
       }
       bandspreadPopoutWin.webContents.send('bandspread-popout-view', payload);
@@ -42145,7 +42191,7 @@ function cloudShackNotice(text, kind) {
     scopePopoutWin.webContents.on('did-finish-load', () => {
       if (!scopePopoutWin || scopePopoutWin.isDestroyed()) return;
       scopePopoutWin.webContents.send('scope-popout-theme', themeQuery());
-      try { scopePopoutWin.webContents.send('spots', spotsForPanadapter(lastMergedSpots || [])); } catch { /* no spots yet */ }
+      try { scopePopoutWin.webContents.send('spots', spotsForScope(lastMergedSpots || [])); } catch { /* no spots yet */ }
       if (yaesuScopeState.centerHz) scopePopoutWin.webContents.send('cat-frequency', yaesuScopeState.centerHz);
       yaesuScopeRestarts = 0;
       startYaesuScope();
@@ -44050,6 +44096,7 @@ function cloudShackNotice(text, kind) {
         if (cat) {
           sent = cat.setPowerState(true);
           try { yaesuScopeNoteRadioBack('radio powered on'); } catch { /* no scope */ }
+          try { vfoAudioNoteRadioBack(); } catch { /* no VFO window */ }
         }
         // #152 rule 2: a remote client's Power On is sent; a closed link to the
         // radio is said to the device that asked (reopening it is not done here).
@@ -49905,6 +49952,10 @@ function cloudShackNotice(text, kind) {
     handleRemotePtt(!!state, { audio: false });
   });
   // #170: the VFO window's PC mic on that press, as one plain log line.
+  // #247: the VFO window reopened its radio audio after a power cycle.
+  ipcMain.on('vfo-audio-reattached', (_e, r) => {
+    if (r && typeof r === 'object') sendCatLog(require('./lib/vfo-audio-reattach').logLine(r.why, r.device));
+  });
   ipcMain.on('vfo-ptt-mic-report', (_e, r) => {
     if (r && typeof r === 'object') sendCatLog(require('./lib/vfo-ptt-mic').assess(r).line);
   });

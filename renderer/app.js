@@ -10631,7 +10631,8 @@ function getFiltered() {
   const bands = getDropdownValues(bandFilterEl);
   const modes = getDropdownValues(modeFilterEl);
   const continents = getDropdownValues(continentFilterEl);
-  const maxAgeSecs = maxAgeMin * 60;
+  const ageOpts = { maxAgeMin, sotaMaxAgeMin, dxcMaxAgeMin, potaAgeLimit };
+  const nowMs = Date.now();
   const focusEv = _eventFocusEvent(); // resolved once per render
   return allSpots.filter((s) => {
     // Event Focus is an exclusive lens: ONLY event stations, from EVERY
@@ -10685,20 +10686,13 @@ function getFiltered() {
 
     if (sourceOff) {
       if (!isWatched || spotAgeSecs(s.spotTime) > 300) return false;
-    } else if (s.source === 'pskr') {
-      // PSKReporter already limits to 15 min server-side; don't apply client max-age
-      if (spotAgeSecs(s.spotTime) > 900) return false;
-    } else if (s.source === 'sota') {
-      // SOTA spots are posted once by a human (not re-spotted like POTA)
-      if (spotAgeSecs(s.spotTime) > sotaMaxAgeMin * 60) return false;
-    } else if (s.source === 'dxc') {
-      // DX cluster spots are one-shot — an operator can be in a pileup
-      // for many minutes without a fresh spot, so give DX its own window.
-      if (spotAgeSecs(s.spotTime) > dxcMaxAgeMin * 60) return false;
-    } else if (s.source === 'pota' && !potaAgeLimit) {
-      // pota.app's feed expires POTA spots itself — show what it lists.
-    } else {
-      if (spotAgeSecs(s.spotTime) > maxAgeSecs) return false;
+    } else if (!SpotAge.spotWithinAge(s, ageOpts, nowMs)) {
+      // Max Spot Age, per source (lib/spot-age.js): PSKReporter 15 min, SOTA
+      // and cluster their own windows, POTA follows pota.app's expiry unless
+      // potaAgeLimit. The Band Scope and bandspread pop-outs run the same
+      // function in main (spotsForScope, #239), so they never draw a spot
+      // this table has aged out.
+      return false;
     }
     if (bands && !bands.has(s.band)) return false;
     if (!modeMatches(s.mode, modes)) return false;
@@ -10717,7 +10711,7 @@ function getFiltered() {
       if (_clusterSpotterCqZoneSet && s.spotterCqZone != null && !_clusterSpotterCqZoneSet.has(s.spotterCqZone)) return false;
       if (_clusterSpotterItuZoneSet && s.spotterItuZone != null && !_clusterSpotterItuZoneSet.has(s.spotterItuZone)) return false;
     }
-    if (hideOutOfBand && isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass)) return false;
+    if (hideOutOfBand && Privileges.isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass)) return false;
     if (hideWorked && isWorkedSpot(s)) return false;
     if (hideWorkedCallRef && isWorkedSpotStrict(s)) return false;
     if (hideWorkedParks && s.source === 'pota' && s.reference && workedParksSet.has(s.reference)) return false;
@@ -11895,56 +11889,8 @@ function latLonToGridLocal(lat, lon) {
   return `${field1}${field2}${sq1}${sq2}${sub1}${sub2}`;
 }
 
-// --- License privilege check (duplicated from lib/privileges.js — no require in renderer) ---
-const PRIVILEGE_RANGES = {
-  us_extra: [
-    [1800, 2000, 'all'], [3500, 3600, 'cw_digi'], [3600, 4000, 'phone'], [5330.5, 5333.5, 'all'],
-    [5346.5, 5349.5, 'all'], [5351.5, 5366.5, 'all'], [5371.5, 5374.5, 'all'], [5403.5, 5406.5, 'all'],
-    [7000, 7125, 'cw_digi'], [7125, 7300, 'phone'], [14000, 14150, 'cw_digi'], [14150, 14350, 'phone'],
-    [21000, 21200, 'cw_digi'], [21200, 21450, 'phone'], [10100, 10150, 'cw_digi'], [18068, 18110, 'cw_digi'],
-    [18110, 18168, 'phone'], [24890, 24930, 'cw_digi'], [24930, 24990, 'phone'], [28000, 28300, 'cw_digi'],
-    [28300, 29700, 'phone'], [50000, 50100, 'cw'], [50100, 54000, 'all'], [144000, 144100, 'cw'],
-    [144100, 148000, 'all'], [222000, 225000, 'all'], [420000, 450000, 'all'], [902000, 928000, 'all'],
-    [1240000, 1300000, 'all'],
-  ],
-  us_advanced: [
-    [1800, 2000, 'all'], [3525, 3600, 'cw_digi'], [3700, 4000, 'phone'], [5330.5, 5333.5, 'all'],
-    [5346.5, 5349.5, 'all'], [5351.5, 5366.5, 'all'], [5371.5, 5374.5, 'all'], [5403.5, 5406.5, 'all'],
-    [7025, 7125, 'cw_digi'], [7125, 7300, 'phone'], [14025, 14150, 'cw_digi'], [14175, 14350, 'phone'],
-    [21025, 21200, 'cw_digi'], [21225, 21450, 'phone'], [10100, 10150, 'cw_digi'], [18068, 18110, 'cw_digi'],
-    [18110, 18168, 'phone'], [24890, 24930, 'cw_digi'], [24930, 24990, 'phone'], [28000, 28300, 'cw_digi'],
-    [28300, 29700, 'phone'], [50000, 50100, 'cw'], [50100, 54000, 'all'], [144000, 144100, 'cw'],
-    [144100, 148000, 'all'], [222000, 225000, 'all'], [420000, 450000, 'all'], [902000, 928000, 'all'],
-    [1240000, 1300000, 'all'],
-  ],
-  us_general: [
-    [1800, 2000, 'all'], [3525, 3600, 'cw_digi'], [3800, 4000, 'phone'], [5330.5, 5333.5, 'all'],
-    [5346.5, 5349.5, 'all'], [5351.5, 5366.5, 'all'], [5371.5, 5374.5, 'all'], [5403.5, 5406.5, 'all'],
-    [7025, 7125, 'cw_digi'], [7175, 7300, 'phone'], [14025, 14150, 'cw_digi'], [14225, 14350, 'phone'],
-    [21025, 21200, 'cw_digi'], [21275, 21450, 'phone'], [10100, 10150, 'cw_digi'], [18068, 18110, 'cw_digi'],
-    [18110, 18168, 'phone'], [24890, 24930, 'cw_digi'], [24930, 24990, 'phone'], [28000, 28300, 'cw_digi'],
-    [28300, 29700, 'phone'], [50000, 50100, 'cw'], [50100, 54000, 'all'], [144000, 144100, 'cw'],
-    [144100, 148000, 'all'], [222000, 225000, 'all'], [420000, 450000, 'all'], [902000, 928000, 'all'],
-    [1240000, 1300000, 'all'],
-  ],
-  us_technician: [
-    [3525, 3600, 'cw'], [7025, 7125, 'cw'], [21025, 21200, 'cw'], [28000, 28300, 'cw_digi'],
-    [28300, 28500, 'phone'], [50000, 50100, 'cw'], [50100, 54000, 'all'], [144000, 144100, 'cw'],
-    [144100, 148000, 'all'], [222000, 225000, 'all'], [420000, 450000, 'all'], [902000, 928000, 'all'],
-    [1240000, 1300000, 'all'],
-  ],
-  ca_basic: [
-    [50000, 54000, 'all'], [144000, 148000, 'all'], [222000, 225000, 'all'], [430000, 450000, 'all'],
-    [902000, 928000, 'all'], [1240000, 1300000, 'all'],
-  ],
-  ca_honours: [
-    [1800, 2000, 'all'], [3500, 4000, 'all'], [5330.5, 5333.5, 'all'], [5346.5, 5349.5, 'all'],
-    [5351.5, 5366.5, 'all'], [5371.5, 5374.5, 'all'], [5403.5, 5406.5, 'all'], [7000, 7300, 'all'],
-    [10100, 10150, 'all'], [14000, 14350, 'all'], [18068, 18168, 'all'], [21000, 21450, 'all'],
-    [24890, 24990, 'all'], [28000, 29700, 'all'], [50000, 54000, 'all'], [144000, 148000, 'all'],
-    [222000, 225000, 'all'], [430000, 450000, 'all'], [902000, 928000, 'all'], [1240000, 1300000, 'all'],
-  ],
-};
+// License privilege check: lib/privileges.js (window.Privileges, loaded by
+// index.html), the one copy of the tables (#250).
 
 const SOURCE_LABELS = {
   // 'dxc' is the DX CLUSTER feed, not DX: a German operator saw a Bulgarian
@@ -11953,26 +11899,6 @@ const SOURCE_LABELS = {
   rbn: 'RBN', wwff: 'WWFF', llota: 'LLOTA', tiles: 'Tiles', gma: 'GMA', parc: 'PARC', pskr: 'FreeDV', net: 'NET',
   wwbota: 'WWBOTA', freedv: 'FreeDV',
 };
-const CW_DIGI_MODES = new Set(['CW', 'FT8', 'FT4', 'FT2', 'RTTY', 'DIGI', 'JS8', 'PSK31', 'PSK']);
-const PHONE_MODES = new Set(['SSB', 'USB', 'LSB', 'FM', 'AM']);
-
-function isOutOfPrivilege(freqKhz, mode, cls) {
-  if (!cls || cls === 'none') return false;
-  const ranges = PRIVILEGE_RANGES[cls];
-  if (!ranges) return false;
-  if (!mode) return false;
-  const modeUpper = mode.toUpperCase();
-  for (const [lower, upper, allowed] of ranges) {
-    if (freqKhz >= lower && freqKhz <= upper) {
-      if (allowed === 'all') return false;
-      if (allowed === 'cw' && modeUpper === 'CW') return false;
-      if (allowed === 'cw_digi' && CW_DIGI_MODES.has(modeUpper)) return false;
-      if (allowed === 'phone' && PHONE_MODES.has(modeUpper)) return false;
-    }
-  }
-  return true;
-}
-
 function formatDistance(miles) {
   if (miles == null) return '—';
   if (distUnit === 'km') return Math.round(miles * MI_TO_KM);
@@ -12075,7 +12001,7 @@ function updateMapMarkers(filtered) {
     `;
 
     // Pin color matches source: POTA green, SOTA orange, DXC purple, etc.
-    const oop = isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass);
+    const oop = Privileges.isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass);
     const worked = hasWorkedOnBandMode(s);
     const isExpedition = isDxpeditionVisible(s.callsign);
     const sourceIcon = sourceIcons[s.source] || sourceIcons.pota;
@@ -14522,7 +14448,7 @@ function enrichSpotsForPopout(filtered) {
     expeditionNote: expeditionNote(s.callsign),
     expeditionEntity: (expeditionMeta.get(s.callsign.toUpperCase()) || {}).entity || '',
     isNewPark: (s.source === 'pota' || s.source === 'wwff') && isAtnoRef(s.reference),
-    isOop: isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass),
+    isOop: Privileges.isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass),
     isWatched: watchlistMatch(watchlist, s.callsign, s.band, s.mode, s.locationDesc),
     opName: qrzDisplayName(qrzData.get(JtcatParser.baseCall(s.callsign.toUpperCase()))),
   }));
@@ -14778,7 +14704,7 @@ function render() {
       if (s.comments && /POTA.?CAT/i.test(s.comments)) tr.classList.add('potacat-respot');
 
       // License privilege check
-      if (isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass)) {
+      if (Privileges.isOutOfPrivilege(parseFloat(s.frequency), s.mode, licenseClass)) {
         tr.classList.add('out-of-privilege');
       }
 
