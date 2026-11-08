@@ -481,6 +481,8 @@ const PskrTx = require('./lib/pskreporter-tx');
 const { Ft8Engine, freqsForMode } = require('./lib/ft8-engine');
 const DialSnap = require('./lib/dial-snap');
 const { decideDialFollow } = require('./lib/jtcat-dial-follow');
+const JtcatRxSource = require('./lib/jtcat-rx-source'); // #243: JTCAT can hear a WebSDR instead of the radio
+const { StreamResampler } = require('./lib/stream-resampler');
 const { isWinlinkSessionFault } = require('./lib/winlink-fault');
 const { createSpotSourceCache } = require('./lib/spot-source-cache');
 const WorkedMatrix = require('./lib/worked-matrix');
@@ -18962,6 +18964,18 @@ function startJtcat(mode) {
       jtcatRefuseTx('Mercury (HF data) owns the radio');
       return;
     }
+    // Receiving from the WebSDR (#243): it cannot hear us and is not on the
+    // radio's frequency, so nothing is keyed while it is the receive source.
+    const sdrRefusal = JtcatRxSource.jtcatTxRefusalForSource(settings.jtcatRxSource);
+    if (sdrRefusal) {
+      sendCatLog('[JTCAT] ' + sdrRefusal);
+      if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+        jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: sdrRefusal });
+      }
+      if (remoteServer && remoteServer.hasClient()) remoteServer.broadcastJtcatQsoState({ phase: 'error', error: sdrRefusal });
+      jtcatRefuseTx('JTCAT is receiving from the WebSDR');
+      return;
+    }
     // SWR-guard latch: a prior transmission tripped the over-SWR abort and
     // nothing has plausibly fixed the match yet (no ATU run / band change).
     if (_swrTripped) {
@@ -27219,6 +27233,7 @@ function connectRemote() {
     if (freqKhz) {
       tuneRadio(freqKhz, 'DIGU');
       _jtcatExpectedDialHz = Math.round(freqKhz * 1000); // phone-owned session anchor (see pre-TX dial guard)
+      jtcatWebSdrFollowDial(freqKhz, 'ECHOCAT band pick'); // #243
     }
     // WSPR: derive the decoder dial from the band host-side, so mobile doesn't
     // need a separate jtcat-set-wspr-dial message (the popout uses one locally).
@@ -37636,6 +37651,43 @@ app.on('open-url', (event, url) => {
 let kiwiClient = null;
 let kiwiActive = false;
 
+// ═══ JTCAT receiving from the WebSDR (GitHub #243, lib/jtcat-rx-source.js) ═══
+// settings.jtcatRxSource: 'radio' (default) or 'websdr'. With 'websdr' the
+// SDR's audio feeds the FT8 engine and the JTCAT waterfall, the SDR follows
+// JTCAT's dial, and the tx-start handler refuses every transmission.
+function jtcatRxFromWebSdr() {
+  return JtcatRxSource.normalizeJtcatRxSource(settings && settings.jtcatRxSource) === 'websdr';
+}
+let _jtcatSdrResampler = null;
+let _jtcatSdrFrames = 0;
+function feedJtcatFromWebSdr(pcm, sampleRate) {
+  if (!pcm || !pcm.length || !(sampleRate > 0)) return;
+  const engineRunning = !!((jtcatManager && jtcatManager.running) || (ft8Engine && ft8Engine._running));
+  if (!_jtcatSdrResampler || _jtcatSdrResampler.fromRate !== sampleRate) {
+    _jtcatSdrResampler = new StreamResampler(sampleRate, 12000);
+  }
+  const out = _jtcatSdrResampler.process(pcm);
+  if (!out.length) return;
+  // The waterfall first: Electron copies the frame as it is sent.
+  const frame = { pcm: out, sampleRate: 12000 };
+  if (isJtcatIpAudioReady(jtcatPopoutWin)) audioSafeSend(jtcatPopoutWin.webContents, 'jtcat-vita49-audio', frame);
+  else if (isJtcatIpAudioReady(win)) audioSafeSend(win.webContents, 'jtcat-vita49-audio', frame);
+  if (jtcatManager && jtcatManager.running) jtcatManager.feedAudio('default', out);
+  else if (ft8Engine && ft8Engine._running) ft8Engine.feedAudio(out);
+  if (++_jtcatSdrFrames === 1 || _jtcatSdrFrames % 500 === 0) {
+    sendCatLog(`[JTCAT] Receiving from the WebSDR: frame #${_jtcatSdrFrames}, ${pcm.length} samples @ ${sampleRate} Hz -> ${out.length} @ 12000 Hz, decoder ${engineRunning ? 'running' : 'stopped'}`);
+  }
+}
+/** Retune the SDR to JTCAT's dial (USB, the FT8 passband). True when it did. */
+function jtcatWebSdrFollowDial(dialKhz, why) {
+  if (!jtcatRxFromWebSdr() || !kiwiClient || !kiwiClient.connected) return false;
+  const t = JtcatRxSource.websdrTuneForDial(dialKhz);
+  if (!t) return false;
+  kiwiClient.tune(t.freqKhz, t.mode, t.opts);
+  sendCatLog(`[WebSDR] Following JTCAT's dial: ${t.freqKhz} kHz USB${why ? ' (' + why + ')' : ''}`);
+  return true;
+}
+
 // ═══ Who you hear: the radio, or the SDR where the radio cannot go ═══════════
 // (Casey 2026-10-30, lib/listen-source.js.) `listenSdr.live` = the SDR is what
 // every surface plays (kiwi-status connected:true on the wire, the signal the
@@ -43784,8 +43836,12 @@ function cloudShackNotice(text, kind) {
       kiwiLiveHost = kiwiFullHost;
       kiwiKind = sdrKind;
       sendCatLog(`[WebSDR] Connected to ${kiwiFullHost}${auto ? ' (for a frequency the radio cannot reach)' : ''}`);
-      // Auto-tune to current rig frequency on connect.
-      if (_currentFreqHz > 0 && _currentMode) {
+      _jtcatSdrResampler = null; // a new stream
+      // Auto-tune to current rig frequency on connect, or to JTCAT's dial
+      // when JTCAT is receiving from this SDR (#243).
+      if (jtcatRxFromWebSdr() && _jtcatExpectedDialHz > 0 && jtcatWebSdrFollowDial(_jtcatExpectedDialHz / 1000, 'connected')) {
+        // tuned to JTCAT's dial
+      } else if (_currentFreqHz > 0 && _currentMode) {
         const mode = _currentMode.toLowerCase().replace('digu', 'usb').replace('digl', 'lsb').replace('pktusb', 'usb').replace('pktlsb', 'lsb');
         kiwiClient.tune(_currentFreqHz / 1000, mode);
       }
@@ -43800,6 +43856,8 @@ function cloudShackNotice(text, kind) {
     });
     let _kiwiAudioCount = 0;
     kiwiClient.on('audio', (pcmFloat, sampleRate) => {
+      // JTCAT hears the SDR whether or not it is what the speakers play (#243).
+      if (jtcatRxFromWebSdr()) feedJtcatFromWebSdr(pcmFloat, sampleRate);
       if (!listenSdr.live) return;   // idle: connected and following the dial, but not what you hear
       if (++_kiwiAudioCount === 1) sendCatLog(`[WebSDR] First audio packet: ${pcmFloat.length} samples @ ${sampleRate}Hz`);
       // Send the Float32Array directly to each recipient — Electron's
@@ -43970,11 +44028,19 @@ function cloudShackNotice(text, kind) {
       const _anchorKhz = parseFloat(frequency);
       if (isFinite(_anchorKhz) && _anchorKhz > 0) _jtcatExpectedDialHz = Math.round(_anchorKhz * 1000);
     }
+    // JTCAT on the WebSDR (#243): a band pick in either JTCAT window moves the
+    // WebSDR to that dial, with or without a radio on the CAT link.
+    const sdrFollowed = JtcatRxSource.isJtcatDialMode(mode) && jtcatWebSdrFollowDial(parseFloat(frequency), 'band pick');
+    if (sdrFollowed) {
+      const _sdrKhz = parseFloat(frequency);
+      if (isFinite(_sdrKhz) && _sdrKhz > 0) _jtcatExpectedDialHz = Math.round(_sdrKhz * 1000);
+    }
     // Dead rig link → tell the window that asked, on the same channel the
     // VFO lock uses (main window + VFO popout both render it). Before this,
     // a spot click with a dead USB link logged one buried line and the UI
     // moved on as if it worked. (K6RBJ 2026-07-17.)
     if (!((smartSdr && smartSdr.canTune) || (cat && cat.connected))) {
+      if (sdrFollowed) return; // JTCAT listens on the WebSDR; the radio is not needed to hear
       if (settings.catTarget && settings.catTarget.type === 'none') {
         // No CAT control is a choice, not a fault: say what to set by hand.
         const mhz = (parseFloat(frequency) / 1000).toFixed(3);
@@ -44004,8 +44070,8 @@ function cloudShackNotice(text, kind) {
     } else {
       tuneRadio(frequency, mode, bearing, { origin });
     }
-    // Auto-tune KiwiSDR to match
-    if (kiwiActive && kiwiClient && kiwiClient.connected) {
+    // Auto-tune KiwiSDR to match (already done above when JTCAT follows it)
+    if (!sdrFollowed && kiwiActive && kiwiClient && kiwiClient.connected) {
       const freqKhz = parseFloat(frequency);
       if (freqKhz > 100) {
         const m = (mode || _currentMode || 'USB').toLowerCase().replace('digu', 'usb').replace('digl', 'lsb').replace('pktusb', 'usb').replace('pktlsb', 'lsb').replace('ft8', 'usb').replace('ft4', 'usb').replace('ssb', freqKhz >= 10000 ? 'usb' : 'lsb');
@@ -46640,6 +46706,8 @@ function cloudShackNotice(text, kind) {
     // that saves back the settings copy it loaded earlier must not put an
     // old palette back under a choice made since.
     delete newSettings.waterfallPalette;
+    // JTCAT's receive audio has one writer too, jtcat-set-rx-source (#243).
+    delete newSettings.jtcatRxSource;
     stampSstvTemplatesPatch(newSettings);
     setImmediate(() => afterSstvSettingsSaved(newSettings));
     if (newSettings && 'jtcatFakeIt' in newSettings) setImmediate(() => { fakeItSyncEngine(); sendCatLog(`[JTCAT] Split operation Fake It: ${fakeItEnabled() ? 'on' : 'off'}`); });
@@ -48419,6 +48487,27 @@ function cloudShackNotice(text, kind) {
 
   // --- JTCAT IPC ---
   ipcMain.on('jtcat-start', (_e, mode) => startJtcat(mode));
+  // JTCAT's receive audio: the radio or the WebSDR (#243). Saved, the SDR
+  // follows JTCAT's dial at once, and both JTCAT windows rebuild their audio.
+  ipcMain.on('jtcat-set-rx-source', (_e, value) => {
+    const next = JtcatRxSource.normalizeJtcatRxSource(value);
+    if (next === JtcatRxSource.normalizeJtcatRxSource(settings.jtcatRxSource)) return;
+    settings.jtcatRxSource = next;
+    saveSettings(settings);
+    _jtcatSdrResampler = null;
+    const sdrNote = next !== 'websdr' ? ''
+      : (kiwiClient && kiwiClient.connected ? '' : ' (no WebSDR connected yet)') + '. JTCAT will not transmit while it is the source.';
+    sendCatLog(`[JTCAT] Receive audio: ${JtcatRxSource.SOURCE_LABELS[next]}${sdrNote}`);
+    if (next === 'websdr' && _jtcatExpectedDialHz > 0) jtcatWebSdrFollowDial(_jtcatExpectedDialHz / 1000, 'receive source');
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('jtcat-rx-source', next);
+      win.webContents.send('restart-jtcat-audio', 'rx-source');
+    }
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+      jtcatPopoutWin.webContents.send('jtcat-rx-source', next);
+      jtcatPopoutWin.webContents.send('restart-popout-audio');
+    }
+  });
   ipcMain.on('jtcat-stop', () => {
     stopJtcat(); // clears the spot target too (single choke point in stopJtcat)
   });
@@ -48861,6 +48950,9 @@ function cloudShackNotice(text, kind) {
     // Windows-DAX-device capture so the (often silent) device can't
     // double-feed or overwrite the good VITA-49 audio. K3SBP 2026-05-14.
     if (settings.audioSource === 'smartsdr' && smartSdrAudio) return;
+    // JTCAT receiving from the WebSDR (#243): feedJtcatFromWebSdr feeds the
+    // engine; the window's capture is that same audio coming back.
+    if (jtcatRxFromWebSdr()) return;
     // Same story for K4 network: handleK4AudioFrame feeds jtcatManager
     // directly from the Opus-decoded stream, so the renderer's Windows-
     // DAX capture (which on a K4-network setup would just be silence or

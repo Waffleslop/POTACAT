@@ -285,6 +285,21 @@ function _applyPopoutTheme(payload) {
       if (typeof bsWf !== 'undefined' && bsWf && bsWf.supported) bsWf.setPalette(id, o);
     });
   }
+  // Receive audio: the radio or the WebSDR (#243). Main saves it, retunes the
+  // WebSDR to JTCAT's dial and sends restart-popout-audio. While the WebSDR is
+  // the source a lit chip in the bar says so and switches back (JTCAT will
+  // not transmit then; the off switch of a mode that changes TX stays in view).
+  var rxSourceSelect = document.getElementById('jp-rx-source');
+  var rxSdrChip = document.getElementById('jp-rx-sdr-chip');
+  function jpShowRxSource(v) {
+    var sdr = v === 'websdr';
+    if (rxSourceSelect) rxSourceSelect.value = sdr ? 'websdr' : 'radio';
+    if (rxSdrChip) rxSdrChip.hidden = !sdr;
+  }
+  window.api.getSettings().then(function(s) { jpShowRxSource(s && s.jtcatRxSource); }).catch(function() {});
+  if (rxSourceSelect) rxSourceSelect.addEventListener('change', function() { window.api.jtcatSetRxSource(rxSourceSelect.value); });
+  if (rxSdrChip) rxSdrChip.addEventListener('click', function() { window.api.jtcatSetRxSource('radio'); });
+  if (window.api.onJtcatRxSource) window.api.onJtcatRxSource(jpShowRxSource);
   var wfFloorVal = document.getElementById('jp-wf-floor-val');
   var wfFloor = 0;   // display noise floor, 0..200 (ScopeAxis.applyFloor — shared with the Band Scope)
   var wfSpeedHelp = document.getElementById('jp-wf-speed-help');
@@ -5475,7 +5490,7 @@ function _applyPopoutTheme(payload) {
     if (modeSelect.value === 'JTTY') jttySyncFreq();
     // Start audio capture directly in the popout window (never for a remote
     // shack: its engine hears its own radio).
-    if (!remoteShackMode) startPopoutAudio(s.remoteAudioInput || '', s.audioSource);
+    if (!remoteShackMode) startPopoutAudio(s.remoteAudioInput || '', jpCaptureSource(s));
   });
 
   // The shack's FT8 engine, from here. The waterfall loop below reads a
@@ -5513,7 +5528,7 @@ function _applyPopoutTheme(payload) {
       if (remoteShackMode) return;
       console.log('[JTCAT popout] Silence watchdog — restarting audio capture');
       var s = await window.api.getSettings();
-      startPopoutAudio(s.remoteAudioInput || '', s.audioSource);
+      startPopoutAudio(s.remoteAudioInput || '', jpCaptureSource(s));
     });
   }
 
@@ -6030,6 +6045,11 @@ function _applyPopoutTheme(payload) {
   var _audioStartWatchdog = null;
   var _lastAudioArgs = null;
 
+  // JTCAT receiving from the WebSDR (#243): the capture is main's 12 kHz
+  // 'jtcat-vita49-audio' frames, whatever the rig's own audio source is.
+  function jpCaptureSource(s) {
+    return s && s.jtcatRxSource === 'websdr' ? 'websdr' : (s && s.audioSource);
+  }
   async function startPopoutAudio(deviceId, audioSource) {
     _lastAudioArgs = { deviceId: deviceId, audioSource: audioSource };
     jpSetDriveRelevance(audioSource);
@@ -6055,7 +6075,7 @@ function _applyPopoutTheme(payload) {
     try {
       // Yaesu SCU-LAN10 audio arrives the same way: main forwards it as
       // 'jtcat-vita49-audio' frames at 24 kHz (handleYaesuLanAudioFrame).
-      if (audioSource === 'smartsdr' || audioSource === 'yaesu-lan') {
+      if (audioSource === 'smartsdr' || audioSource === 'yaesu-lan' || audioSource === 'websdr') {
         _audioStartStage = 'ctx-create';
         // SmartSDR Direct: audio is the VITA-49 dax_rx stream that main
         // forwards as 'jtcat-vita49-audio' frames. A single AudioWorkletNode
@@ -6080,7 +6100,9 @@ function _applyPopoutTheme(payload) {
           numberOfInputs: 0,
           numberOfOutputs: 1,
           outputChannelCount: [1],
-          processorOptions: { sourceRate: 24000 },
+          processorOptions: audioSource === 'websdr'
+            ? { sourceRate: 12000 }
+            : { sourceRate: 24000 },
         });
         popoutVita49Dest = popoutVita49Ctx.createMediaStreamDestination();
         popoutVita49Node.connect(popoutVita49Dest);
@@ -6094,7 +6116,7 @@ function _applyPopoutTheme(payload) {
         // SmartSDR path sends to both windows and was unaffected, which is
         // why this hid for so long. (K3SBP 2026-08-05.)
         if (window.api.setJtcatIpAudioReady) window.api.setJtcatIpAudioReady(true);
-        console.log('[JTCAT popout] Audio source: SmartSDR Direct (VITA-49 dax_rx via AudioWorklet)');
+        console.log('[JTCAT popout] Audio source: ' + (audioSource === 'websdr' ? 'WebSDR' : 'SmartSDR Direct (VITA-49 dax_rx)') + ' via AudioWorklet');
       } else {
         var constraints = {
           channelCount: 1,
@@ -6240,7 +6262,7 @@ function _applyPopoutTheme(payload) {
       popoutWaterfallLoop();
       // Capture-stall watchdog (kc8zp_ryan 2026-11-03, lib/capture-stall.js):
       // sound-card capture only; the SmartSDR / Icom-network feed is main's.
-      if (window.CaptureStall && audioSource !== 'smartsdr' && audioSource !== 'icom-network' && audioSource !== 'yaesu-lan') {
+      if (window.CaptureStall && audioSource !== 'smartsdr' && audioSource !== 'icom-network' && audioSource !== 'yaesu-lan' && audioSource !== 'websdr') {
         popoutArmStallWatch(popoutAudioStream && popoutAudioStream.getAudioTracks()[0]);
       }
       // Start finished — disarm the stall watchdog and restore the overlay
@@ -6266,6 +6288,7 @@ function _applyPopoutTheme(payload) {
         }
         window.api.jtcatLog('[JTCAT popout] Audio started: ' +
           (audioSource === 'smartsdr' ? 'SmartSDR Direct (VITA-49)' :
+           audioSource === 'websdr' ? 'WebSDR' :
            audioSource === 'icom-network' ? 'Icom network' :
            audioSource === 'yaesu-lan' ? 'Yaesu LAN (SCU-LAN10)' : 'device capture') +
           capLabel + ' @ ' + nativeRate + ' Hz — waterfall live');

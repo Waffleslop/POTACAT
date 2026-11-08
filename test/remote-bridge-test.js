@@ -195,7 +195,8 @@ test('main intercepts at the IPC layer before any handler registers', () => {
 });
 
 test('the pop-out captures nothing for a remote shack and draws the shack\'s spectrum', () => {
-  assert.ok(/if \(!remoteShackMode\) startPopoutAudio\(s\.remoteAudioInput \|\| '', s\.audioSource\);/.test(popout));
+  // #243: the source may go through jpCaptureSource(s) (JTCAT receiving from the WebSDR).
+  assert.ok(/if \(!remoteShackMode\) startPopoutAudio\(s\.remoteAudioInput \|\| '', (s\.audioSource|jpCaptureSource\(s\))\);/.test(popout));
   assert.ok(/if \(remoteShackMode\) return;\n\s+console\.log\('\[JTCAT popout\] Silence watchdog/.test(popout));
   assert.ok(/if \(!remoteShackMode && popoutQuietFreqFrame % 30 === 0\)/.test(popout));
   assert.ok(/if \(!remoteShackMode && popoutSpectrumFrame % 6 === 0\)/.test(popout));

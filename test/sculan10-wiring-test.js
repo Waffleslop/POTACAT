@@ -108,7 +108,8 @@ test('RX audio feeds ECHOCAT, both JTCAT windows, the decoder and SSTV; the soun
   assert.ok(/SstvFeedGate\.streamAudioDecision\(\{[^}]*path: 'yaesu-lan'/.test(h) && /sstvEngine\.feedAudio\(out\)/.test(h), 'SSTV at 48 kHz through the gate');
   assert.ok(/if \(yaesuLanAudioActive\(\) && Date\.now\(\) - _lastYaesuLanFeedMs < 3000\) return;/.test(main), 'renderer JTCAT capture yields while fresh');
   assert.ok(/yaesuLanConnected: !!\(settings\.catTarget && settings\.catTarget\.type === 'yaesu-lan'/.test(main), 'SSTV renderer gate knows the stream');
-  assert.ok(/audioSource === 'smartsdr' \|\| audioSource === 'yaesu-lan'\) \{/.test(popout), 'the JTCAT pop-out takes the frames');
+  // #243: either branch may also take the WebSDR feed.
+  assert.ok(/audioSource === 'smartsdr' \|\| audioSource === 'yaesu-lan'( \|\| audioSource === 'websdr')?\) \{/.test(popout), 'the JTCAT pop-out takes the frames');
   assert.ok(/s\.audioSource === 'smartsdr' \|\| s\.audioSource === 'icom-network' \|\| s\.audioSource === 'yaesu-lan'\) \{/.test(app), 'so does the main window');
 });
 

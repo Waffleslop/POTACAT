@@ -829,6 +829,12 @@
             <option value="FT4">FT4</option>
           </select>
         </div>
+        <div class="jtcat-mode-select">
+          <select id="jtcat-rx-source" title="Receive audio: Where JTCAT hears the band. WebSDR decodes from the WebSDR you are listening to (it follows JTCAT's band) — JTCAT does not transmit while it is the source.">
+            <option value="radio">Radio (sound card)</option>
+            <option value="websdr">WebSDR</option>
+          </select>
+        </div>
         <div id="jtcat-slice-select" class="jtcat-mode-select hidden">
           <select id="jtcat-slice" title="Flex slice for JTCAT (independent of main CAT slice)">
             <option value="">Same as CAT</option>
