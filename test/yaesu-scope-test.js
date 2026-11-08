@@ -457,7 +457,10 @@ check('the helper stops BEFORE the CAT link is torn down at quit (SCU-LAN10 rest
 });
 
 check('SCU-LAN10 is only ever CHANGED by the operator\'s button, and put back', () => {
-  assert.strictEqual((mainSrc.match(/sendRaw\('EX0301261;'\)/g) || []).length, 1, 'exactly one place turns SCU-LAN10 on');
+  // The write comes from YaesuScope.scuLanEnablePlan, only after the radio reads OFF (#113 item 7).
+  assert.strictEqual((mainSrc.match(/EX0301261;/g) || []).length, 0, 'main.js never sends EX0301261; itself');
+  assert.strictEqual((mainSrc.match(/cat\.sendRaw\(plan\.write\)/g) || []).length, 1, 'exactly one place turns SCU-LAN10 on');
+  assert.strictEqual(S.scuLanEnablePlan('0').write, 'EX0301261;');
   assert.ok(mainSrc.includes("cat.sendRaw('EX0301260;')"), 'and one place turns it back off');
   assert.ok(!/EX040101|EX040200/.test(mainSrc), 'the write-ups\' EX0401xx commands are MY CALL on this radio — never send them');
 });

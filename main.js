@@ -31350,6 +31350,7 @@ let yaesuScopeRestartTimer = null;
 let yaesuScopeRestarts = 0;
 let yaesuScopeCatTimer = null;
 let yaesuScopeCatBusy = false;
+let yaesuScopeReadInFlight = null;   // the read now running, so Enable can await it rather than skip it
 let yaesuScopeCatDeadCycles = 0;     // consecutive poll cycles with no reply to any scope read
 let yaesuScopeScuLanWeSet = false;   // POTACAT turned SCU-LAN10 on → it turns it back off
 // A stopped helper keeps the FT4222 until it exits (up to 1.5 s): a start in
@@ -31927,9 +31928,15 @@ async function yaesuScopeReadRadio() {
     if (changed) yaesuScopeBroadcastState();
     return;
   }
-  if (!cat || !cat.connected || typeof cat.queryRaw !== 'function' || yaesuScopeCatBusy) return;
+  if (!cat || !cat.connected || typeof cat.queryRaw !== 'function') return;
+  if (yaesuScopeCatBusy) return yaesuScopeReadInFlight;
   yaesuScopeCatBusy = true;
-  try {
+  yaesuScopeReadInFlight = yaesuScopeReadRadioOnce();
+  try { await yaesuScopeReadInFlight; } finally { yaesuScopeReadInFlight = null; yaesuScopeCatBusy = false; }
+}
+
+async function yaesuScopeReadRadioOnce() {
+  {   // one pass of the four reads; yaesuScopeReadRadio holds the busy flag around it
     let answered = 0;
     const snapshot = () => JSON.stringify([yaesuScopeState.spanHz, yaesuScopeState.anchor, yaesuScopeState.speed, yaesuScopeState.scuLan]);
     const before = snapshot();
@@ -31967,25 +31974,38 @@ async function yaesuScopeReadRadio() {
       yaesuScopeState.catReads = 'unanswered';
       yaesuScopeBroadcastState();
     }
-  } finally {
-    yaesuScopeCatBusy = false;
   }
 }
 
-/** The operator pressed the button: turn SCU-LAN10 on. Remembered, logged, undone at stop. */
-function yaesuScopeEnableOnRadio() {
+/**
+ * The operator pressed the button: make sure SCU-LAN10 is on. It reads
+ * EX030126 first (#113 item 7): a radio already ON is left alone and is not
+ * turned off at close; only a radio that answers OFF gets the write, which is
+ * remembered, logged and undone at stop. No answer: no blind write.
+ */
+async function yaesuScopeEnableOnRadio() {
   if (yaesuScopeState.source === 'icom' || icomScopeModel()) { icomScopeEnableOnRadio(); return; }
   if (!cat || !cat.connected || typeof cat.sendRaw !== 'function') {
     sendCatLog('[Scope] cannot enable SCU-LAN10 — no CAT link to the radio');
     return;
   }
-  sendCatLog('[Scope] turning SCU-LAN10 ON in the radio menu (EX0301261;) — POTACAT turns it back off when the scope closes');
-  yaesuScopeScuLanWeSet = true;
-  cat.sendRaw('EX0301261;');
+  // A fresh read, not the value the card was drawn from: that one can be stale.
+  // A read already in flight may have asked EX030126 before the clear, so a
+  // second read follows when the first leaves it unknown.
+  yaesuScopeState.scuLan = null;
+  await yaesuScopeReadRadio();
+  if (yaesuScopeState.scuLan === null) await yaesuScopeReadRadio();
+  if (!cat || !cat.connected) return;
+  const plan = YaesuScope.scuLanEnablePlan(yaesuScopeState.scuLan);
+  // ON because POTACAT turned it on earlier in this run: still ours to undo.
+  if (yaesuScopeScuLanWeSet && yaesuScopeState.scuLan === '1') sendCatLog('[Scope] SCU-LAN10 is ON (POTACAT turned it on earlier) — it still goes back off when the scope closes');
+  else sendCatLog(plan.log);
+  if (plan.weSet) yaesuScopeScuLanWeSet = plan.weSet;
+  if (plan.write) cat.sendRaw(plan.write);
   setTimeout(() => {
     yaesuScopeReadRadio();
     if (!yaesuScopeProc && yaesuScopeWanted()) { yaesuScopeRestarts = 0; startYaesuScope(); }
-  }, 700);
+  }, plan.write ? 700 : 0);
 }
 
 // ═══ Band scope from a separate SDR (rtl_tcp) ═══════════════════════════════════
