@@ -1351,6 +1351,114 @@
     ctDisableBtn.parentNode.insertBefore(ctRemoveBtn, ctDisableBtn.nextSibling);
   }
   const ctError = document.getElementById('cloud-tunnel-error');
+  // A Cloud address per shack (lib/cloud-shacks.js, window.CloudShacks).
+  const ctOwn = document.getElementById('cloud-tunnel-own');
+  const ctOwnText = document.getElementById('cloud-tunnel-own-text');
+  const ctOwnForm = document.getElementById('cloud-tunnel-own-form');
+  const ctShackName = document.getElementById('cloud-tunnel-shack-name');
+  const ctOwnBtn = document.getElementById('cloud-tunnel-own-btn');
+  const ctOwnPreview = document.getElementById('cloud-tunnel-own-preview');
+  const ctShacks = document.getElementById('cloud-tunnel-shacks');
+  const ctShacksTitle = document.getElementById('cloud-tunnel-shacks-title');
+  const ctShacksList = document.getElementById('cloud-tunnel-shacks-list');
+  const CS = window.CloudShacks || null;
+  let ctOwnState = null;
+  let ctShacksAt = 0;
+  let ctShacksKey = '';
+
+  function ownPreview() {
+    if (!ctOwnPreview) return;
+    const o = ctOwnState;
+    const host = o && CS ? CS.shackHostPreview(o.prefix, o.suffix, ctShackName ? ctShackName.value : '') : '';
+    const typed = ctShackName ? ctShackName.value : '';
+    const tooLong = !!(o && CS && CS.shackLabelTooLong && CS.shackLabelTooLong(o.prefix, typed));
+    ctOwnPreview.textContent = tooLong
+      ? 'That name makes the address too long. Use a shorter name.'
+      : (host ? 'Its address will be ' + host : '');
+    if (ctOwnBtn) ctOwnBtn.disabled = tooLong || !(CS && CS.sanitizeShackName(typed));
+  }
+
+  async function renderOwnAddress(state) {
+    const o = state && state.ownAddress ? state.ownAddress : null;
+    ctOwnState = o;
+    if (!ctOwn) return;
+    if (!o) { ctOwn.classList.add('hidden'); return; }
+    if (ctOwnText) ctOwnText.textContent = o.message || '';
+    if (ctOwnForm) ctOwnForm.classList.toggle('hidden', o.state === 'limit');
+    if (ctShackName && !ctShackName.value && window.api && window.api.getSettings) {
+      try { const st = await window.api.getSettings(); if (st && st.cloudShackName && !ctShackName.value) ctShackName.value = st.cloudShackName; } catch {}
+    }
+    ownPreview();
+    ctOwn.classList.remove('hidden');
+  }
+
+  /** The account's shacks, with Remove on each. Fetched at most every 30 s unless forced. */
+  async function refreshShackList(force) {
+    if (!ctShacks || !window.api || !window.api.cloudTunnelShacks) return;
+    if (!force && Date.now() - ctShacksAt < 30000) return;
+    ctShacksAt = Date.now();
+    let r = null;
+    try { r = await window.api.cloudTunnelShacks(); } catch {}
+    const shacks = r && Array.isArray(r.shacks) ? r.shacks : [];
+    // Shown when the server has per-shack addresses and there is something to
+    // choose between: two or more shacks, or a full membership.
+    const show = !!(r && r.supported && (shacks.length > 1 || (ctOwnState && ctOwnState.state === 'limit')));
+    ctShacks.classList.toggle('hidden', !show);
+    if (!show) return;
+    const key = JSON.stringify([r.limit, shacks]);
+    if (key === ctShacksKey) return;
+    ctShacksKey = key;
+    if (ctShacksTitle) ctShacksTitle.textContent = `Your shacks (${shacks.length} of ${r.limit})`;
+    if (!ctShacksList) return;
+    ctShacksList.textContent = '';
+    for (const sh of shacks) {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:3px;';
+      const label = document.createElement('span');
+      label.style.flex = '1';
+      label.textContent = sh.name + (sh.self ? ' (this computer)' : '') + (sh.cloudHost ? ' · ' + sh.cloudHost : '') + (sh.online ? '' : ' · offline');
+      const rm = document.createElement('button');
+      rm.type = 'button';
+      rm.className = 'btn';
+      rm.textContent = 'Remove';
+      rm.title = 'Remove this shack\'s Cloud address (its LAN and Tailscale connections keep working)';
+      rm.addEventListener('click', async () => {
+        rm.disabled = true;
+        try {
+          const res = await window.api.cloudTunnelRemoveShack(sh.deviceId); // main asks first
+          if (res && res.error && ctError) { ctError.textContent = res.error; ctError.classList.remove('hidden'); }
+          if (res && res.state) renderTunnelState(res.state);
+        } finally {
+          rm.disabled = false;
+          refreshShackList(true);
+        }
+      });
+      row.appendChild(label);
+      row.appendChild(rm);
+      ctShacksList.appendChild(row);
+    }
+  }
+
+  if (ctShackName) ctShackName.addEventListener('input', ownPreview);
+  if (ctShackName) ctShackName.addEventListener('keydown', (e) => { if (e.key === 'Enter' && ctOwnBtn && !ctOwnBtn.disabled) { e.preventDefault(); ctOwnBtn.click(); } });
+  if (ctOwnBtn) {
+    ctOwnBtn.addEventListener('click', async () => {
+      if (!window.api || !window.api.cloudTunnelEnable || !CS) return;
+      const name = CS.sanitizeShackName(ctShackName ? ctShackName.value : '');
+      if (!name) return;
+      ctOwnBtn.disabled = true;
+      ctOwnBtn.textContent = 'Creating…';
+      try {
+        const res = await window.api.cloudTunnelEnable({ shackName: name });
+        if (res && res.ok) renderTunnelState(res.state);
+        else if (res && res.error && ctError) { ctError.textContent = res.error; ctError.classList.remove('hidden'); }
+      } finally {
+        ctOwnBtn.textContent = 'Create this shack\'s address';
+        ownPreview();
+        refreshShackList(true);
+      }
+    });
+  }
   const ctDegraded = document.getElementById('cloud-tunnel-degraded');
   const ctDegradedText = document.getElementById('cloud-tunnel-degraded-text');
   const ctOrigin = document.getElementById('cloud-tunnel-origin');
@@ -1503,6 +1611,8 @@
       }
     }
     refreshStartupOffer(state).catch(() => {});
+    renderOwnAddress(state).catch(() => {});
+    refreshShackList(!!state.ownAddress).catch(() => {});
   }
 
   if (ctBannerManage) {

@@ -304,7 +304,12 @@ check('cloud tab: start-at-login is OFFERED after enabling the tunnel, never app
   // the normal settings path, and main never flips it by itself.
   assert.ok(/if \(!state \|\| !state\.enabled\) \{ ctStartup\.classList\.add\('hidden'\); return; \}/.test(ui), 'only while the tunnel is on');
   assert.ok(/ctStartupLaunch\.checked = !!\(s && s\.launchAtStartup === true\);/.test(ui), 'the box shows the real login-item state');
-  assert.ok(/refreshStartupOffer\(state\)\.catch\(\(\) => \{\}\);\n\s+\}/.test(ui), 'evaluated on every tunnel state render');
+  {
+    // Inside renderTunnelState, wherever it sits: the offer is re-evaluated on every render.
+    const start = ui.indexOf('function renderTunnelState(state) {');
+    const body = start < 0 ? '' : ui.slice(start, ui.indexOf('\n  }\n', start));
+    assert.ok(/refreshStartupOffer\(state\)\.catch\(\(\) => \{\}\);/.test(body), 'evaluated on every tunnel state render');
+  }
   assert.ok(/ctStartupLaunch\.addEventListener\('change', async \(\) => \{\n\s*const on = ctStartupLaunch\.checked;[\s\S]*?await window\.api\.saveSettings\(\{ launchAtStartup: on \}\);/.test(ui), 'the tick sets the login item through the normal settings path');
   assert.ok(/on \? await window\.api\.launcherInstall\(\) : await window\.api\.launcherUninstall\(\)/.test(ui), 'the launcher has its own tick, installed only when ticked');
   assert.ok(!/launchAtStartup: true/.test(readSrc(path.join(__dirname, '..', 'main.js')).replace(/applyLaunchAtStartup\(true\)/g, '')), 'main never flips launchAtStartup on its own');

@@ -197,7 +197,9 @@ contextBridge.exposeInMainWorld('api', {
   pairPopoutOpen: () => ipcRenderer.send('pair-popout-open'),
   // --- POTACAT Cloud (one-tap remote tunnel) ---
   cloudTunnelGetState: () => ipcRenderer.invoke('cloud-tunnel-get-state'),
-  cloudTunnelEnable: () => ipcRenderer.invoke('cloud-tunnel-enable'),
+  cloudTunnelEnable: (opts) => ipcRenderer.invoke('cloud-tunnel-enable', opts || {}),
+  cloudTunnelShacks: () => ipcRenderer.invoke('cloud-tunnel-shacks'),
+  cloudTunnelRemoveShack: (deviceId) => ipcRenderer.invoke('cloud-tunnel-remove-shack', deviceId),
   cloudTunnelDisable: () => ipcRenderer.invoke('cloud-tunnel-disable'),
   cloudTunnelRemoveAddress: () => ipcRenderer.invoke('cloud-tunnel-remove-address'),
   cloudTunnelDiagnostics: () => ipcRenderer.invoke('cloud-tunnel-diagnostics'),
