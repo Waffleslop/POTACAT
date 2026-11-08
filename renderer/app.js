@@ -17117,6 +17117,21 @@ function switchSettingsTab(tabName) {
   }
 }
 
+// #202: the Logging tab points to QRZ logbook upload, which stays on Station.
+document.getElementById('qrz-logging-pointer')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  if (settingsSearch) settingsSearch.value = '';
+  switchSettingsTab('station');
+  const sec = document.getElementById('qrz-logbook-section');
+  // Upload settings show only once QRZ lookup is on; fall back to that checkbox.
+  const target = (sec && !sec.classList.contains('hidden')) ? sec : document.getElementById('set-enable-qrz')?.closest('label');
+  if (!target) return;
+  target.closest('fieldset.collapsed')?.classList.remove('collapsed');
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  target.classList.add('scan-highlight');
+  setTimeout(() => target.classList.remove('scan-highlight'), 2000);
+});
+
 if (settingsTabBar) {
   settingsTabBar.addEventListener('click', (e) => {
     const btn = e.target.closest('.settings-tab');

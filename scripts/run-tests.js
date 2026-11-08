@@ -157,6 +157,7 @@ const TESTS = [
   'test/rigctld-stderr-test.js',
   'test/sdr-list-sync-test.js',
   'test/settings-secrets-test.js',
+  'test/qrz-logging-pointer-test.js', // #202: Logging tab points to the QRZ logbook upload on the Station tab
   'test/sstv-e2e-test.js',
   'test/sstv-feed-gate-test.js',
   'test/wrl-packet-test.js',
