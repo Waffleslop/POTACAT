@@ -5167,7 +5167,7 @@
     }
     // Nothing a slot shows changed: do not rebuild. A rebuild also replaced
     // the slider under the operator's finger in the middle of a drag.
-    const view = (arr) => JSON.stringify((arr || []).map(e => e ? [e.type || 'button', e.name || '', e.command || '', e.commandOff || '', e.min, e.max, e.value] : null));
+    const view = (arr) => JSON.stringify((arr || []).map(e => e ? [e.type || 'button', e.name || '', e.command || '', e.commandOff || '', e.min, e.max, e.value, e.readCommand || '', e.onWhen || ''] : null));
     if (view(before) === view(customCatData) && document.getElementById('rc-custom-cat-btns') && document.getElementById('rc-custom-cat-btns').children.length) return;
     renderCustomCatButtons();
   }
@@ -5183,13 +5183,16 @@
   function customToggleView(e, idx) {
     return window.CustomCatFollow
       ? CustomCatFollow.toggleView(e || {}, customRadioState, customToggleState[idx])
-      : { on: !!customToggleState[idx], fromRadio: false, nextCommand: customToggleState[idx] ? 'off' : 'on' };
+      : { on: typeof customToggleState[idx] === 'boolean' ? customToggleState[idx] : null, fromRadio: false, nextCommand: customToggleState[idx] ? 'off' : 'on' };
   }
   function paintCustomToggle(btn, e, idx) {
     var v = customToggleView(e, idx);
-    btn.textContent = (e.name || ('CAT ' + (idx + 1))) + ' ' + (v.on ? 'On' : 'Off');
-    btn.classList.toggle('rc-custom-cat-on', v.on);
-    btn.title = v.fromRadio ? 'Shows what the radio reports.' : 'Shows the last command sent, not the radio state.';
+    // on === null: not read and nothing sent yet, so neither On nor Off (#242).
+    btn.textContent = (e.name || ('CAT ' + (idx + 1))) + ' ' + (v.on === null ? '?' : (v.on ? 'On' : 'Off'));
+    btn.classList.toggle('rc-custom-cat-on', v.on === true);
+    btn.title = v.fromRadio ? 'Shows what the radio reports.'
+      : v.on === null ? 'State unknown: not read from the radio. A click sends the On command.'
+        : 'Shows the last command sent, not the radio state.';
   }
   // A status push relights every toggle that follows the radio, in place.
   function refreshCustomToggles() {
@@ -5415,6 +5418,21 @@
         }
         followSel.value = (window.CustomCatFollow && CustomCatFollow.isFollowable(entry.follows)) ? entry.follows : '';
         row.appendChild(followSel);
+        // Its own read (#242): the same two fields as the desktop editor.
+        var readIn = document.createElement('input');
+        readIn.className = 'cce-cmd cce-read';
+        readIn.placeholder = 'Read command';
+        readIn.maxLength = 64;
+        readIn.value = entry.readCommand || '';
+        readIn.title = 'Asks the radio for this toggle state, e.g. IF; on a Kenwood. Read at connect and after each press, never while transmitting.';
+        row.appendChild(readIn);
+        var onWhenIn = document.createElement('input');
+        onWhenIn.className = 'cce-cmd cce-onwhen';
+        onWhenIn.placeholder = 'ON when';
+        onWhenIn.maxLength = 64;
+        onWhenIn.value = entry.onWhen || '';
+        onWhenIn.title = 'N=X: the reply character N is X (the first character is 1; TS-480 split in the IF; reply: 33=1). Or /regex/.';
+        row.appendChild(onWhenIn);
       } else if (slotType === 'slider') {
         var minInput = document.createElement('input');
         minInput.className = 'cce-num cce-min';
@@ -5454,6 +5472,10 @@
         if (offEl) next.commandOff = offEl.value.trim();
         var followEl = r.querySelector('.cce-follow');
         if (followEl) { if (followEl.value) next.follows = followEl.value; else delete next.follows; }
+        var readEl = r.querySelector('.cce-read');
+        var onWhenEl = r.querySelector('.cce-onwhen');
+        if (readEl) { if (readEl.value.trim()) next.readCommand = readEl.value.trim(); else delete next.readCommand; }
+        if (onWhenEl) { if (onWhenEl.value.trim()) next.onWhen = onWhenEl.value.trim(); else delete next.onWhen; }
         var minEl = r.querySelector('.cce-min');
         var maxEl = r.querySelector('.cce-max');
         if (minEl) next.min = Number(minEl.value) || 0;

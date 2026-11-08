@@ -25265,6 +25265,8 @@ rigTabBtns.forEach(btn => {
     rigPopover.classList.toggle('rig-popover-wide', tab === 'commands');
     if (tab === 'commands') loadRigCommandTable();
     if (tab === 'presets') rigPresetsLoad();
+    // Toggles with their own read show the radio's state now (#242).
+    if (tab === 'custom') window.api.rigControl({ action: 'custom-cat-read' });
   });
 });
 
@@ -25667,17 +25669,58 @@ function createCustomSlot(i) {
     });
     slot.appendChild(followSel);
 
+    // Its own read (#242): a command that asks the radio, and the rule that
+    // says when the reply means ON. Read at connect, after a press and when
+    // this tab opens.
+    const readInput = document.createElement('input');
+    readInput.className = 'rig-custom-cmd rig-custom-read';
+    readInput.maxLength = 64;
+    readInput.placeholder = 'Read command';
+    readInput.value = b.readCommand || '';
+    readInput.title = "Asks the radio for this toggle's state, e.g. IF; on a Kenwood. Sent when the radio connects, after each press and when this tab opens — never while transmitting.";
+    const onWhenInput = document.createElement('input');
+    onWhenInput.className = 'rig-custom-cmd rig-custom-onwhen';
+    onWhenInput.maxLength = 64;
+    onWhenInput.placeholder = 'ON when';
+    onWhenInput.value = b.onWhen || '';
+    const onWhenHelp = "ON when the reply's character N is X: N=X (the first character is 1; TS-480 split in the IF; reply: 33=1). Or a regular expression between slashes: /SP1/";
+    const checkOnWhen = () => {
+      const r = CustomCatFollow.parseOnRule(onWhenInput.value);
+      const bad = !!(r && r.error);
+      onWhenInput.classList.toggle('rig-custom-invalid', bad);
+      onWhenInput.title = bad ? 'Not understood: ' + r.error + '. ' + onWhenHelp : onWhenHelp;
+    };
+    checkOnWhen();
+    const saveRead = () => {
+      if (!customCatButtons[i]) return;
+      const rc = readInput.value.trim(), ow = onWhenInput.value.trim();
+      if (rc) customCatButtons[i].readCommand = rc; else delete customCatButtons[i].readCommand;
+      if (ow) customCatButtons[i].onWhen = ow; else delete customCatButtons[i].onWhen;
+      checkOnWhen();
+      saveCustomButtons();
+      reflect();
+      window.api.rigControl({ action: 'custom-cat-read' });
+    };
+    readInput.addEventListener('change', saveRead);
+    onWhenInput.addEventListener('input', checkOnWhen);
+    onWhenInput.addEventListener('change', saveRead);
+    slot.appendChild(readInput);
+    slot.appendChild(onWhenInput);
+
     const tglBtn = document.createElement('button');
     tglBtn.className = 'rig-btn rig-custom-send';
     const reflect = () => {
       const v = CustomCatFollow.toggleView(customCatButtons[i] || {}, customRigState, customToggleState[i]);
-      tglBtn.textContent = v.on ? 'On' : 'Off';
-      tglBtn.classList.toggle('rig-custom-toggle-on', v.on);
+      tglBtn.textContent = v.on === null ? '?' : (v.on ? 'On' : 'Off');
+      tglBtn.classList.toggle('rig-custom-toggle-on', v.on === true);
+      tglBtn.classList.toggle('rig-custom-toggle-unknown', v.on === null);
       tglBtn.title = v.fromRadio
         ? (v.on ? 'The radio reports it ON. Click to send the Off command.' : 'The radio reports it OFF. Click to send the On command.')
-        : (v.on
-          ? 'Last sent: the On command. Click to send the Off command. (Shows the last command sent, not the radio state.)'
-          : 'Click to send the On command. (Shows the last command sent, not the radio state.)');
+        : v.on === null
+          ? 'State unknown: POTACAT has not read it from the radio. Click to send the On command. Add a Read command and an ON when rule to show the radio state.'
+          : (v.on
+            ? 'Last sent: the On command. Click to send the Off command. (Shows the last command sent, not the radio state.)'
+            : 'Last sent: the Off command. Click to send the On command. (Shows the last command sent, not the radio state.)');
     };
     reflect();
     customToggleReflectors.push(reflect);
