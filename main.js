@@ -11182,6 +11182,7 @@ async function startWinlinkShim() {
       const icom = detectRigType() === 'icom' || (getActiveRigModel()?.brand === 'Icom');
       if (settings.audioSource === 'icom-network') icomNetworkVoiceTx(true, 'Winlink');
       try { handleRemotePtt(true, { audio: true, forceDataMode: icom, emission: 'DATA', txKind: 'winlink' }); } catch (e) { winlinkLog(`PTT failed: ${e.message}`); }
+      winlinkSendPreKeyAudio(); // the start of this frame, which arrived before the request to key
       armWinlinkTxFailsafe();
       winlinkSessionTouch();
       winlinkState.setSession({ ptt: true }); winlinkSessionPush();
@@ -11197,9 +11198,25 @@ function winlinkUnkeyNow() {
   if (_winlinkUnkeyTimer) { clearTimeout(_winlinkUnkeyTimer); _winlinkUnkeyTimer = null; }
   clearWinlinkTxFailsafe();
   if (winlinkTxActive) { winlinkTxActive = false; try { handleRemotePtt(false); } catch {} }
+  _winlinkPreKey.clear();
   winlinkTxBurstEnd();
   if (settings.audioSource === 'icom-network') icomNetworkVoiceTx(false, 'Winlink');
   winlinkState.setSession({ ptt: false }); winlinkSessionPush();
+}
+/** The modem's transmit audio (24 kHz mono) while it has PTT: measured for the over's log line, then sent to the radio. */
+function winlinkModemTxIn(mono24k) {
+  _winlinkTxBurst.noteAudio(mono24k, 24000);
+  winlinkDispatchTx(mono24k);
+}
+/** Key-down: send what the modem wrote before its PTT request arrived (lib/modem-prekey.js, #289). Said once per session. */
+function winlinkSendPreKeyAudio() {
+  const early = _winlinkPreKey.take();
+  if (!early.ms) return;
+  for (const c of early.chunks) winlinkModemTxIn(c);
+  if (_winlinkPreKeyLoggedFor !== _winlinkSessionSeq) {
+    _winlinkPreKeyLoggedFor = _winlinkSessionSeq;
+    winlinkLog(`modem audio: ${early.ms} ms arrived before the modem's PTT request and was kept — it is the start of the frame`);
+  }
 }
 /** One line per over — when the modem keyed, when its audio ran and how loud, when it unkeyed (lib/modem-tx-burst.js, #128). */
 function winlinkTxBurstEnd() {
@@ -11282,9 +11299,13 @@ async function startWinlinkAudio({ modemRate = ModemAudioServerMod.MODEM_RATE } 
   srv.on('modem-connected', () => winlinkLog(`modem audio: the modem connected at ${modemRate} samples/s — radio audio via ${winlinkAudioRouteName()}${winlinkIpAudioRoute() ? ', no sound card' : ` (${modemBridge.captureLabel || 'input'} → ${modemBridge.playbackLabel || 'output'})`}`));
   srv.on('modem-gone', () => { if (winlinkSessionActive()) winlinkLog('modem audio: the modem closed its audio connection'); });
   srv.on('tx', (mono24k) => {
-    if (!winlinkTxActive) return; // the modem only sends while it has PTT; anything else is a stray
-    _winlinkTxBurst.noteAudio(mono24k, 24000);
-    winlinkDispatchTx(mono24k);
+    // The modem's audio beats its own PTT request here: the audio comes
+    // straight down this socket, the request goes ardopcf -> Pat -> the shim.
+    // Held until the key-down (lib/modem-prekey.js), never discarded: the
+    // discard cost 44 of 50 ARDOP connect requests their leader (#289). With
+    // no key-down behind it, it is dropped after 500 ms as a stray.
+    if (!winlinkTxActive) { _winlinkPreKey.hold(mono24k, 24000); return; }
+    winlinkModemTxIn(mono24k);
   });
   try {
     await srv.listen(0);
@@ -11472,6 +11493,9 @@ let _cableRxRate = 0, _cableTxRate = 0;
 const { RxLeveler, TxLeveler } = require('./lib/modem-rx-level');
 const { TxBurst } = require('./lib/modem-tx-burst');
 const _winlinkTxBurst = new TxBurst(); // the modem's current over: PTT asked → audio → PTT off, logged at key-up (#128)
+const { PreKeyBuffer } = require('./lib/modem-prekey');
+const _winlinkPreKey = new PreKeyBuffer(); // modem audio that beat its own PTT request: sent at key-down, not discarded (#289)
+let _winlinkPreKeyLoggedFor = 0;
 let _cableRxLeveler = null;
 let _modemTxLeveler = null;   // TxLeveler on the modem's transmit audio, one per session (seeded from settings.winlinkModemTxGain)
 let _modemTxBoostLogged = false;

@@ -161,7 +161,7 @@ function fnBody(src, name) {
     assert.ok(/modemBridge\.cable\.state === 'ok'[\s\S]*?audioSafeSend\(modemBridgeWin\.webContents, 'modem-bridge-cable-tx'/.test(feed), 'the radio\'s RX goes to VARA over the cable');
     const dispatch = fnBody(main, 'winlinkDispatchTx');
     assert.ok(/pushTxAudioChunk\(mono24k\)/.test(dispatch) && /pushIcomNetworkVoiceChunk\(mono24k\)/.test(dispatch) && /'modem-bridge-tx'/.test(dispatch), 'Flex, Icom Network, radio-side bridge');
-    assert.ok(/winlinkDispatchTx\(mono24k\)/.test(fnBody(main, 'startWinlinkAudio')), 'the socket modems use the same dispatch');
+    assert.ok(/winlinkModemTxIn\(mono24k\)/.test(fnBody(main, 'startWinlinkAudio')) && /winlinkDispatchTx\(mono24k\)/.test(fnBody(main, 'winlinkModemTxIn')), 'the socket modems use the same dispatch');
     const ready = fnBody(main, 'winlinkVaraAudioReady');
     assert.ok(/if \(!winlinkCableConfigured\(\)\) \{[\s\S]*?winlinkIpAudioRoute\(\)[\s\S]*?set up the virtual audio cable/.test(ready), 'no cable on Flex Direct / Icom Network is refused with the fix');
     assert.ok(/startModemBridgeCable\(\);[\s\S]*?modemBridgeCableReady\(10000\)/.test(ready));
