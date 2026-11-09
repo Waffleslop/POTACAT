@@ -1,7 +1,11 @@
 node_modules/
 dist/
-CLAUDE.md
-.claude/
+# Claude Code: local settings, worktrees and the inbox skill stay out; AGENTS.md, CLAUDE.md
+# and the release skill are shared with every worktree.
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/potacat-release/
 *.png
 !assets/*.png
 !icon/POTACAT-icon-1024-AppStore.png
