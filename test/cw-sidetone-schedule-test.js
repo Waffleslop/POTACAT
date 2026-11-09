@@ -78,7 +78,9 @@ test('iambic keyer hands each element its length; its end is not re-switched', (
   assert.ok(/onKey\(true, isDit \? ditMs\(\) : dahMs\(\)(, \{[^}]*\})?\);/.test(src));
   assert.ok(/onKey\(false, 0\); \/\/ the scheduled element already ends itself/.test(src));
   // cwDiagNote('ahead', …) only measures the lead it returns (cw-diag).
-  assert.ok(/if \(durMs\) \{ (sendCwKeyStream\(true, durMs, info\); )?(cwDiagNote\('ahead', )?schedulePaddleElement\(durMs\)\)?; return; \}/.test(src));
+  // #244: or through `var lead`, returned to the keyer (it withdraws an element not yet sounding).
+  assert.ok(/if \(durMs\) \{ (sendCwKeyStream\(true, durMs, info\); )?(cwDiagNote\('ahead', )?schedulePaddleElement\(durMs\)\)?; return; \}/.test(src) ||
+    /if \(durMs\) \{ (sendCwKeyStream\(true, durMs, info\); )?var lead = schedulePaddleElement\(durMs\); cwDiagNote\('ahead', lead\); return lead; \}/.test(src));
 });
 
 test('live typing appends to the sidetone instead of cutting off what is sounding', () => {

@@ -10134,6 +10134,20 @@
     // a new press; 15 ms is a whole dot at 80 WPM. Same rule in lib/keyer.js.
     var BOUNCE_MS = 15;
     var ditReleaseAt = -1e9, dahReleaseAt = -1e9;
+    // A held paddle's next element is chosen when the space ends, but it is
+    // only HEARD a scheduling lead later (schedulePaddleElement, 20 ms) plus
+    // the device's output latency, and the release reaches this page after
+    // the contact opens (MIDI and keyboard events arrive late). The operator
+    // releases on what he hears, so at 25 wpm (48 ms dit and space) his
+    // release could miss the choice and the keyer sent one more element:
+    // LZ3AW (#244, 1.13.8) measured 54 ms from choice to speaker and paddle
+    // input up to 24 ms late. A release of the contact whose HOLD chose the
+    // element now withdraws it while it has not begun to sound. A latched
+    // element (a real press during the element) is never withdrawn.
+    var heldBy = null;   // 'dit' | 'dah': the held contact that chose this element
+    var undoState = null; // the keyer before that choice
+    var soundAt = 0;     // performance.now() when this element starts to sound
+    var RETRACT_MARGIN_MS = 2;
     function ditMs() { return Math.round(1200 / wpm); }
     function dahMs() { return ditMs() * 3; }
     function clearTimers() {
@@ -10145,7 +10159,9 @@
       currentIsDit = isDit;
       bothAtStart = ditPressed && dahPressed;
       ditLatch = false; dahLatch = false;
-      onKey(true, isDit ? ditMs() : dahMs(), { continued: !!continued, spaceMs: ditMs() });
+      heldBy = null; undoState = null;
+      var lead = onKey(true, isDit ? ditMs() : dahMs(), { continued: !!continued, spaceMs: ditMs() });
+      soundAt = performance.now() + (Number(lead) > 0 ? Number(lead) : 0);
       clearTimers();
       timerDue = performance.now() + (isDit ? ditMs() : dahMs());
       toneTimer = setTimeout(onToneEnd, isDit ? ditMs() : dahMs());
@@ -10167,18 +10183,46 @@
     function onIesEnd() {
       iesTimer = null;
       noteTimerLate();
+      chooseNext();
+    }
+    function chooseNext() {
       var oppLatch = currentIsDit ? dahLatch : ditLatch;
       var oppDown  = currentIsDit ? dahPressed : ditPressed;
       var sameLatch = currentIsDit ? ditLatch : dahLatch;
       var sameDown  = currentIsDit ? ditPressed : dahPressed;
-      if (oppLatch || oppDown) { startElement(!currentIsDit, true); return; }
-      if (sameLatch || sameDown) { startElement(currentIsDit, true); return; }
+      var before = { isDit: currentIsDit, ditLatch: ditLatch, dahLatch: dahLatch, bothAtStart: bothAtStart };
+      if (oppLatch || oppDown) {
+        startElement(!currentIsDit, true);
+        if (!oppLatch) { heldBy = before.isDit ? 'dah' : 'dit'; undoState = before; }
+        return;
+      }
+      if (sameLatch || sameDown) {
+        startElement(currentIsDit, true);
+        if (!sameLatch) { heldBy = before.isDit ? 'dit' : 'dah'; undoState = before; }
+        return;
+      }
       if (mode === 'iambicB' && bothAtStart && !ditPressed && !dahPressed) {
         bothAtStart = false;
         startElement(!currentIsDit, true);
         return;
       }
       state = IDLE;
+    }
+    // The contact whose hold chose the element now sounding-soon opened: take
+    // the element back and choose again as if the release had come in time.
+    function retractHeldBy(contact) {
+      if (state !== TONE || heldBy !== contact || !undoState) return;
+      if (performance.now() >= soundAt - RETRACT_MARGIN_MS) return; // already sounding
+      var u = undoState;
+      clearTimers();
+      heldBy = null; undoState = null;
+      onKey(false, undefined, { cancel: true, retract: true });
+      currentIsDit = u.isDit;
+      ditLatch = ditLatch || u.ditLatch;
+      dahLatch = dahLatch || u.dahLatch;
+      bothAtStart = u.bothAtStart;
+      state = IES;
+      chooseNext();
     }
     function handleDit(pressed) {
       ditPressed = pressed;
@@ -10193,6 +10237,7 @@
         // Ghost-press cleanup (Android BT MIDI etc. — matches server keyer)
         var held = Date.now() - ditPressStart;
         if (ditLatch && held < GHOST_MS && state !== IDLE) ditLatch = false;
+        retractHeldBy('dit');
       }
     }
     function handleDah(pressed) {
@@ -10207,6 +10252,7 @@
         dahReleaseAt = Date.now();
         var held = Date.now() - dahPressStart;
         if (dahLatch && held < GHOST_MS && state !== IDLE) dahLatch = false;
+        retractHeldBy('dah');
       }
     }
     return {
@@ -10239,7 +10285,7 @@
   // macros (2026-09-26). The keyer's timers now only choose the NEXT element;
   // its sound, and the one-dit space after it, are exact. Straight-key mode
   // still follows the contact — that timing is the operator's fist.
-  var paddleOsc = null, paddleGain = null, paddleNextAt = 0;
+  var paddleOsc = null, paddleGain = null, paddleNextAt = 0, paddleLastAt = 0;
   function ensurePaddleVoice() {
     ensureCwAudioCtx();
     if (!paddleOsc) {
@@ -10262,6 +10308,7 @@
     // later element land exactly even when the keyer's timer fires up to
     // ~18 ms late (phones), at the cost of 20 ms before the first element.
     var t = (paddleNextAt > now + 0.002) ? paddleNextAt : now + 0.020;
+    paddleLastAt = t;
     var g = paddleGain.gain;
     g.setValueAtTime(0, t);
     g.linearRampToValueAtTime(cwSidetoneVol, t + ramp);
@@ -10326,7 +10373,7 @@
   // second keyer at the shack meant network jitter decided the elements:
   // a dit release that arrived late became two dits (LZ3AW, 400 km from his
   // TS-480, 2026-09-29: "errors ... especially with the dots").
-  var cwStreamNextAt = 0;
+  var cwStreamNextAt = 0, cwStreamLastAt = 0;
   function sendCwKeyStream(down, durMs, info) {
     if (!cwKeyStreamOk || !ws || ws.readyState !== WebSocket.OPEN) return;
     var now = performance.now();
@@ -10336,6 +10383,7 @@
       // one, whatever this page's timers did; a new streak starts now.
       var at = (info && info.continued && cwStreamNextAt) ? cwStreamNextAt : now;
       cwStreamNextAt = at + durMs + ((info && info.spaceMs) || 0);
+      cwStreamLastAt = at;
       msg = { type: 'cw-key', at: at, down: true, ms: durMs };
     } else if (down) {
       cwStreamNextAt = 0;
@@ -10347,9 +10395,22 @@
     }
     ws.send(JSON.stringify(msg));
   }
+  // The keyer withdrew an element that has not begun to sound (its held
+  // contact opened in time, #244): drop its tone and, in stream mode, its
+  // keying at the shack (a cancelling key-up just before its start; the
+  // playout drops what is scheduled after that), and give its slot back.
+  function retractPaddleElement() {
+    if (paddleGain && cwAudioCtx && paddleLastAt) paddleGain.gain.cancelScheduledValues(paddleLastAt);
+    paddleNextAt = paddleLastAt;
+    if (cwKeyStreamOk && cwStreamLastAt && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'cw-key', at: cwStreamLastAt - 1, down: false, cancel: true }));
+      cwStreamNextAt = cwStreamLastAt;
+    }
+  }
   var localCwKeyer = createLocalCwKeyer(function(down, durMs, info) {
-    if (durMs) { sendCwKeyStream(true, durMs, info); cwDiagNote('ahead', schedulePaddleElement(durMs)); return; } // iambic element
+    if (durMs) { sendCwKeyStream(true, durMs, info); var lead = schedulePaddleElement(durMs); cwDiagNote('ahead', lead); return lead; } // iambic element
     if (durMs === 0) return;                              // its end is already scheduled
+    if (info && info.retract) { retractPaddleElement(); return; }
     // Straight key, or a keyer stop/mode change.
     sendCwKeyStream(down, 0, info);
     if (!down) cancelPaddleTones();
