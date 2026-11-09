@@ -1,0 +1,5 @@
+# Preamp/ATT are LADDERS, not switches
+
+Recorded 2026-08-04. Moved verbatim from the desktop CLAUDE.md on 2026-11-09; the original is archived in the potacat workspace at docs/history/CLAUDE-desktop-2026-11-09.md.
+
+**Preamp/ATT are LADDERS, not switches** — `lib/rig-gain-steps.js` (pure, dual-mode: `require` + `window.RigGainSteps`) owns the step tables and `resolveStep`/`nextStep`/`buttonLabel`. Models declare `preampSteps`/`attSteps` (Yaesu IPO/AMP1/AMP2 + 6/12/18 dB); rigctld's `dump_caps` probe supplies the radio's real dB list at runtime and OVERRIDES the model. Steps ride to clients in `caps.preampSteps`/`caps.attSteps`, state comes back as `preamp`/`att` (boolean) **plus** `preampStep`/`attStep`. `set-preamp`/`set-att` accept a step OR a boolean — `true` = first ON step — so an older ECHOCAT build keeps working. A model that declares no ladder keeps the plain on/off path, so never guess values: a boolean-only rig is correct, a wrong ladder sends the radio a step it rejects. (KB2UXB's FT-710 could only ever reach 6 dB / AMP1, 2026-08-04.)
