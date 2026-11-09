@@ -90,7 +90,9 @@ check('tuneRadio asks the arbiter before anything moves; only the radio case car
   assert.ok(/if \(who !== 'rig'\) return;/.test(main));
 });
 check('the SDR speaks only while live; its idle connection is kept', () => {
-  assert.ok(/kiwiClient\.on\('audio', \(pcmFloat, sampleRate\) => \{\s+if \(!listenSdr\.live\) return;/.test(main));
+  // #243: JTCAT's WebSDR feed may come first (it decodes whether or not the SDR is heard);
+  // nothing that plays the SDR runs before the live gate.
+  assert.ok(/kiwiClient\.on\('audio', \(pcmFloat, sampleRate\) => \{\s+(\/\/[^\n]*\n\s+if \(jtcatRxFromWebSdr\(\)\) feedJtcatFromWebSdr\(pcmFloat, sampleRate\);\s+)?if \(!listenSdr\.live\) return;/.test(main));
   const idle = /function kiwiGoIdle\(why\) \{[\s\S]*?\n\}/.exec(main)[0];
   assert.ok(!/disconnect\(\)/.test(idle), 'idle never disconnects');
   assert.ok(/sendCatFrequency\(_currentFreqHz\)/.test(idle), 'the readouts return to the radio');

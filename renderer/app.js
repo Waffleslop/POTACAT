@@ -30201,8 +30201,11 @@ async function _buildJtcatCapture(ctx) {
   try {
     var s = await window.api.getSettings();
     if (ctx.stale()) return false;
+    // JTCAT receiving from the WebSDR (#243): main feeds the engine and sends
+    // the same audio here as 12 kHz 'jtcat-vita49-audio' frames.
+    var jtcatFromSdr = s.jtcatRxSource === 'websdr';
 
-    if (s.audioSource === 'smartsdr' || s.audioSource === 'icom-network' || s.audioSource === 'yaesu-lan') {
+    if (jtcatFromSdr || s.audioSource === 'smartsdr' || s.audioSource === 'icom-network' || s.audioSource === 'yaesu-lan') {
       // SmartSDR Direct / Icom Network / Yaesu LAN: JTCAT audio is the PCM stream that
       // main forwards as 'jtcat-vita49-audio' frames — not a Windows
       // audio device. Build a synthetic MediaStream from those frames so
@@ -30229,7 +30232,9 @@ async function _buildJtcatCapture(ctx) {
         if (window.api.jtcatLog) window.api.jtcatLog('[JTCAT] VITA-49 source worklet load failed: ' + (e.message || e));
         throw e;
       }
-      const vita49SourceOptions = s.audioSource === 'icom-network'
+      const vita49SourceOptions = jtcatFromSdr
+        ? { sourceRate: 12000 }
+        : s.audioSource === 'icom-network'
         ? { sourceRate: 24000, bufferMs: 600, startBufferMs: 150, resumeBufferMs: 200 }
         : { sourceRate: 24000, bufferMs: 500, startBufferMs: 80, resumeBufferMs: 80 };
       jtcatVita49Node = new AudioWorkletNode(jtcatVita49Ctx, 'jtcat-vita49-source', {
@@ -30244,7 +30249,7 @@ async function _buildJtcatCapture(ctx) {
       jtcatAudioStream = jtcatVita49Dest.stream;
       if (window.api.setJtcatIpAudioReady) window.api.setJtcatIpAudioReady(true);
       if (window.api.jtcatLog) {
-        const label = s.audioSource === 'icom-network' ? 'Icom Network audio (RS-BA1)' : 'SmartSDR Direct (VITA-49 dax_rx)';
+        const label = jtcatFromSdr ? 'WebSDR' : s.audioSource === 'icom-network' ? 'Icom Network audio (RS-BA1)' : 'SmartSDR Direct (VITA-49 dax_rx)';
         const bufferText = s.audioSource === 'icom-network' ? ' with low-latency jitter buffer' : '';
         window.api.jtcatLog(`[JTCAT] Audio source: ${label} via AudioWorklet${bufferText}`);
       }
@@ -30455,7 +30460,7 @@ async function _buildJtcatCapture(ctx) {
     // it. lib/capture-stall.js decides; this resumes or rebuilds. Sound-card
     // capture only: the SmartSDR / Icom-network feed comes from main, and a
     // rebuild here cannot restart it.
-    if (window.CaptureStall && !(s.audioSource === 'smartsdr' || s.audioSource === 'icom-network' || s.audioSource === 'yaesu-lan')) {
+    if (window.CaptureStall && !(jtcatFromSdr || s.audioSource === 'smartsdr' || s.audioSource === 'icom-network' || s.audioSource === 'yaesu-lan')) {
       jtcatArmStallWatch(audioTrack);
     }
 
@@ -30780,6 +30785,15 @@ document.querySelectorAll('.jtcat-band-btn').forEach(function(btn) {
     btn.classList.add('active');
   });
 });
+
+// Receive audio: the radio or the WebSDR (#243). Main saves it, retunes the
+// WebSDR to JTCAT's dial and restarts the capture.
+const jtcatRxSourceSelect = document.getElementById('jtcat-rx-source');
+if (jtcatRxSourceSelect) {
+  window.api.getSettings().then(function(s) { jtcatRxSourceSelect.value = s.jtcatRxSource === 'websdr' ? 'websdr' : 'radio'; }).catch(function() {});
+  jtcatRxSourceSelect.addEventListener('change', function() { window.api.jtcatSetRxSource(jtcatRxSourceSelect.value); });
+  if (window.api.onJtcatRxSource) window.api.onJtcatRxSource(function(v) { jtcatRxSourceSelect.value = v === 'websdr' ? 'websdr' : 'radio'; });
+}
 
 // Mode select
 jtcatModeSelect.addEventListener('change', function() {

@@ -592,6 +592,9 @@ contextBridge.exposeInMainWorld('api', {
   saveShareImage: (data) => ipcRenderer.invoke('save-share-image', data),
   // JTCAT (FT8/FT4)
   jtcatStart: (mode) => ipcRenderer.send('jtcat-start', mode),
+  // JTCAT receive audio: 'radio' or 'websdr' (#243)
+  jtcatSetRxSource: (v) => ipcRenderer.send('jtcat-set-rx-source', v),
+  onJtcatRxSource: (cb) => ipcRenderer.on('jtcat-rx-source', (_e, v) => cb(v)),
   jtcatStop: () => ipcRenderer.send('jtcat-stop'),
   jtcatSetMode: (mode) => ipcRenderer.send('jtcat-set-mode', mode),
   jtcatModeHop: (opts) => ipcRenderer.send('jtcat-mode-hop', opts),

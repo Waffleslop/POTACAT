@@ -621,6 +621,7 @@
       <span id="jp-cycle" class="jtcat-cycle">&mdash;</span>
     </div>
     <button id="jp-multi-btn" class="jtcat-filter-btn" title="Multi-slice: decode multiple bands simultaneously" style="margin-left:4px;">Multi</button>
+    <button id="jp-rx-sdr-chip" class="jtcat-filter-btn active" hidden title="JTCAT is receiving from the WebSDR and will not transmit. Click to go back to the radio's audio." style="margin-left:4px;">RX: WebSDR &times;</button>
     <div style="display:flex;gap:4px;margin-left:auto;">
       <button id="jp-activation-btn" class="jtcat-filter-btn" title="Open the activation log and map" hidden>Activation</button>
       <button id="jp-map-toggle" class="jtcat-filter-btn active" title="Toggle map">Map</button>
@@ -1146,6 +1147,14 @@
        wiring and settings round-trip are unchanged; only the presentation
        moved from cryptic bar toggles to labeled rows with helper text. -->
   <div id="jp-options-pop" class="jp-options-pop hidden">
+    <div class="jp-opt-section">Receive audio</div>
+    <label class="jp-opt-row jp-opt-num-row">
+      <span class="jp-opt-label">Receive audio <select id="jp-rx-source">
+        <option value="radio">Radio (sound card)</option>
+        <option value="websdr">WebSDR</option>
+      </select></span>
+      <span class="jp-opt-help">Where JTCAT hears the band. Radio (sound card) is your radio's audio, as Settings &gt; My Rigs sets it. WebSDR decodes from the WebSDR you are listening to; it follows JTCAT's band. JTCAT does not transmit while the WebSDR is the source: it cannot hear you and is not on your radio's frequency.</span>
+    </label>
     <div class="jp-opt-section">Contacts</div>
     <button id="jp-answer-callers" class="jp-opt-row active">
       <span class="jp-opt-label">Answer stations that call me</span>
