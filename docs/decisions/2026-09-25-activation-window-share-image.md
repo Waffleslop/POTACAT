@@ -1,0 +1,5 @@
+# Activation window + share image
+
+Recorded 2026-09-25. Moved verbatim from the desktop CLAUDE.md on 2026-11-09; the original is archived in the potacat workspace at docs/history/CLAUDE-desktop-2026-11-09.md.
+
+**Activation window + share image** (NO4D 2026-09-25): the actmap pop-out is the Activation window (Map/Both/Log, log mirrors the main log via a `logOnly` push from `renderActivatorLog`; JTCAT pop-out shows an Activation button from main's `activation-state`). Save/Copy render `renderer/actmap-share.html` OFF-SCREEN at exactly 1080×1350 (post, text in the centre square) or 1080×1920 (story; clear of top 270 / bottom 420 / right 150). Two traps, both guarded in `test/activation-share-test.js`: a window is clamped to the screen height (so the viewport is set via CDP `Emulation.setDeviceMetricsOverride` + `Page.captureScreenshot`), and that override BEFORE the first page load crashes Electron 39 outright; a hidden non-offscreen window never paints. `POTACAT_SHARE_TEST_DIR` makes Save write without a dialog (render checks).

@@ -1,0 +1,5 @@
+# States in the watchlist
+
+Recorded 2026-10-06. Moved verbatim from the desktop CLAUDE.md on 2026-11-09; the original is archived in the potacat workspace at docs/history/CLAUDE-desktop-2026-11-09.md.
+
+**States in the watchlist** (N0KAH 2026-10-06, built 2026-10-16): a watchlist token may be a state — `US-NJ`/`CA-ON` (any `XX-YY`) or a bare state/province code (`NJ`, `ON`, `DC`) — in BOTH the general watchlist (`parseWatchlist` → `{state, band, mode}` rule, mirrored in main.js for notifications; `watchlistMatch(..., locationDesc)`) and the colour groups (`lib/watchlist-groups.js` `stateTokenOf`/`spotStates`/`matchSpot`: exact call → `W1AW/*` prefix → the spot's state(s), lowest group wins; `lookupWatchlistGroup(call, locationDesc)` in app.js). A spot's states = its park `locationDesc` (`US-NJ,US-PA` matches either). A bare code is ALSO still a CQ tag (additive); territories are written in full (bare `AS` = the continent tag); FT8 decodes are never state-matched (a grid is not a state); cluster/RBN/PSKR spots have no state. Mobile handoff: potacat-app `docs/desktop-handoffs/watchlist-states.md`. Tests: `test/watchlist-groups-test.js` "states:".

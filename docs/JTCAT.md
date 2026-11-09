@@ -45,6 +45,6 @@ test/decode-contract-test.js (real worker, native and WASM), test/layout-alignme
 phone and desktop widths, CI only), test/remote-bridge-test.js, test/k9cyt-requests-test.js.
 
 ## History
-The long-form reasoning behind each rule (who reported it, what broke, the fix) is kept verbatim in
-the workspace: `D:\Projects\potacat\docs\history\CLAUDE-desktop-2026-11-09.md`, "File Structure"
-lines 34–35 and 55, and "Settings" lines 174–214.
+The long-form reasoning behind each rule (who reported it, what broke, the fix) is in docs/decisions/
+(one file per decision, index in docs/decisions/README.md), docs/settings-reference-dev.md (every JTCAT
+setting with its full note) and docs/modules.md (the engine and codec notes).

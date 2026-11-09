@@ -1,0 +1,5 @@
+# A Host field may contain a pasted `host:port`
+
+Recorded 2026-09-06. Moved verbatim from the desktop CLAUDE.md on 2026-11-09; the original is archived in the potacat workspace at docs/history/CLAUDE-desktop-2026-11-09.md.
+
+**A Host field may contain a pasted `host:port`** — `lib/host-port.js` (`splitHostPort`, pure + `test/host-port-test.js`), applied at the three TCP connect paths via `resolveCatHostPort()` (remote rigctld, Icom CI-V over TCP, Icom network). Every networking doc writes an endpoint as `host:port` and the box is labelled Host, so operators paste the pair; the only symptom is `getaddrinfo ENOTFOUND 127.0.0.1:4532` every 16 s, which reads as an unreachable rigctld rather than a typo one field up (N5ZC 2026-09-06). The embedded port wins over the Port field and the correction is logged, because honouring the half they typed and discarding the other half is the one outcome nobody expects. **A bare IPv6 literal is never split** — `fe80::1` has colons of its own and splitting on the last one would mangle a valid address into an unreachable one, the exact failure this exists to prevent; bracketed `[::1]:4532` is the disambiguated form and is parsed.

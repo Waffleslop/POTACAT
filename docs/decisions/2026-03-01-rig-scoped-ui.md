@@ -1,0 +1,5 @@
+# Rig-scoped UI
+
+Recorded 2026-03-01 (date is when the note was written, taken from the text or the nearest release). Moved verbatim from the desktop CLAUDE.md on 2026-11-09; the original is archived in the potacat workspace at docs/history/CLAUDE-desktop-2026-11-09.md.
+
+**Rig-scoped UI** — any control whose label names a vendor/protocol (DAX, SmartSDR/Flex Direct, RS-BA1, Flex accessories, multi-slice) must be gated on the rig via `lib/rig-family.js` (`rigFamily()`, `audioSourcesFor()`) or `lib/rig-models.js` caps — never shown unconditionally (an IC-7300 user must never see Flex DAX options). `audioSource` is per-rig (`rig.audioSource`), mirrored into `settings.audioSource` on every activation path (cat popover, settings-save `activeRigChanged` in main, ECHOCAT `switch-rig`) so main.js keeps reading the global. rig-family.js is dual-mode (require + `window.RigFamily` via `<script>` tag). Rule: never hide a control whose feature is currently enabled — the off switch must stay reachable.

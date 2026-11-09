@@ -1,0 +1,5 @@
+# Bug reports are complete-from-launch
+
+Recorded 2026-03-01 (date is when the note was written, taken from the text or the nearest release). Moved verbatim from the desktop CLAUDE.md on 2026-11-09; the original is archived in the potacat workspace at docs/history/CLAUDE-desktop-2026-11-09.md.
+
+**Bug reports are complete-from-launch** — `sendCatLog()` is the single log choke point: every line goes to the in-memory ring (600), the renderer panel, AND `<userData>/session.log` (fresh per launch, prior run kept as `.old`, 5MB mid-run rotation). Report a Bug never wipes history — it drops `BUG_REPORT_MARKER` into the stream and `get-bug-report-log` returns startup.log + a session.log head/tail split on that marker (`lib/bug-report-log.js`, pure + CI-tested), redacted in main (`redactLogLines` + `maskHomeDir`) before anything reaches the clipboard. Pre-window ring lines are replayed to the renderer once on did-finish-load (`cat-log-history`). Never put absolute paths in the paste — they leak the Windows username.
