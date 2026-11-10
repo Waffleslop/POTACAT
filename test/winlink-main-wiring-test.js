@@ -160,7 +160,8 @@ test('modem audio rides POTACAT\'s radio link on Flex Direct / Icom Network — 
   const tx = fnBody(main, 'startWinlinkAudio');
   const dispatch = fnBody(main, 'winlinkDispatchTx');
   // (the TxBurst meter's one line sits between the gate and the dispatch, #128)
-  assert.ok(/if \(!winlinkTxActive\) return;[\s\S]{0,160}winlinkDispatchTx\(mono24k\)/.test(tx) && /pushTxAudioChunk\(mono24k\)/.test(dispatch) && /pushIcomNetworkVoiceChunk\(mono24k\)/.test(dispatch), 'modem TX goes to dax_tx / RS-BA1 only while keyed');
+  // Not keyed: held for the key-down that follows within 500 ms, else dropped (lib/modem-prekey.js, #289).
+  assert.ok(/if \(!winlinkTxActive\) \{ _winlinkPreKey\.hold\(mono24k, 24000\); return; \}\n\s*winlinkModemTxIn\(mono24k\);/.test(tx) && /winlinkDispatchTx\(mono24k\)/.test(fnBody(main, 'winlinkModemTxIn')) && /pushTxAudioChunk\(mono24k\)/.test(dispatch) && /pushIcomNetworkVoiceChunk\(mono24k\)/.test(dispatch), 'modem TX goes to dax_tx / RS-BA1 only while keyed');
   assert.ok(/icomNetworkVoiceTx\(true, 'Winlink'\)/.test(fnBody(main, 'startWinlinkShim')), 'Icom voice TX opens with the key-down');
   assert.ok(/new ModemAudioServer\(/.test(tx) && /listen\(0\)/.test(tx));
 });

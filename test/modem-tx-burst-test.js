@@ -96,7 +96,8 @@ test('main.js: the shim\'s PTT hooks, the modem audio \'tx\' event and every unk
   assert.ok(/if \(_winlinkUnkeyTimer\) return true;\n\s*_winlinkTxBurst\.unkeyAsked\(\);/.test(shim), 'PTT off asked is noted before the drain hold');
   assert.ok(/_winlinkTxBurst\.rekeyed\(\);/.test(shim), 'a re-key inside the hold continues the over');
   assert.ok(/winlinkTxActive = true;\n\s*_winlinkTxBurst\.keyDown\(\);/.test(shim), 'key-down starts the over');
-  assert.ok(/if \(!winlinkTxActive\) return; \/\/ the modem only sends while it has PTT; anything else is a stray\n\s*_winlinkTxBurst\.noteAudio\(mono24k, 24000\);/.test(main), 'the modem\'s audio is measured at the server, before the level trim');
+  // Live audio and the audio held from before the key-down (#289) take the same path.
+  assert.ok(/function winlinkModemTxIn\(mono24k\) \{\n\s*_winlinkTxBurst\.noteAudio\(mono24k, 24000\);\n\s*winlinkDispatchTx\(mono24k\);/.test(main), 'the modem\'s audio is measured at the server, before the level trim');
   const unkeys = main.match(/winlinkTxBurstEnd\(\);/g) || [];
   assert.ok(unkeys.length >= 3, `every unkey path (drain, session end, failsafe) logs the over: ${unkeys.length}`);
   assert.ok(/function winlinkTxBurstEnd\(\) \{[\s\S]*?_winlinkTxBurst\.keyUp\(\{ gainDb: _modemTxLeveler \? _modemTxLeveler\.gainDb : 0 \}\)[\s\S]*?winlinkLog\(/.test(main), 'logged with the TX leveler\'s gain');
