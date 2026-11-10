@@ -150,6 +150,7 @@ function drawTrace() {
       scale: V.displayScale(state.levelScale, range.lo, range.hi), gutter: true, sUnits: showSUnits, traceColor,
       overlay: { passband: state.passband, txHz: state.txHz, bandPlan: state.bandPlan, privileges: showPrivileges } });
   drawSpots(traceCanvas.getContext('2d'), w, h, dpr);
+  drawFavorites(traceCanvas.getContext('2d'), w, h, dpr);
 }
 
 function drawFreq() {
@@ -213,11 +214,62 @@ function drawSpots(ctx, w, h, dpr) {
     spotChips.push({ x0: x0 / dpr, x1: (x0 + tw) / dpr, y0: y0 / dpr, y1: (y0 + boxH) / dpr, spots: c.hidden.map((i) => inWindow[i].s) });
   }
 }
-/** The spot label or "+N" chip under a pointer event on the trace, if any. */
+// Favourites (#329, lib/favorites.js): the Landmarks and Channels starred in
+// Directory, marked along the TOP edge (spots own the bottom): a small
+// downward notch at the exact frequency and the name beside it, in POTACAT
+// blue (the theme's --accent-blue). A click tunes it. Drawn whether or not
+// spot labels are shown: they are the operator's own stations.
+let favItems = [];
+let favHits = [];   // [{x0, x1, y0, y1, fav}] in CSS px
+function favColor() {
+  const v = getComputedStyle(document.documentElement).getPropertyValue('--accent-blue').trim();
+  return v || '#4fc3f7';
+}
+function drawFavorites(ctx, w, h, dpr) {
+  favHits = [];
+  if (!axis.known || !favItems.length) return;
+  const inSpan = favItems
+    .map((f) => ({ f, bin: A.hzToBin(axis, Math.round(Number(f.khz) * 1000)) }))
+    .filter((e) => e.bin != null);
+  if (!inSpan.length) return;
+  const col = favColor();
+  ctx.font = `600 ${11 * dpr}px ${getComputedStyle(document.body).fontFamily}`;
+  ctx.textBaseline = 'middle';
+  const boxH = 15 * dpr, top = 3 * dpr;
+  let lastRight = -Infinity;
+  for (const e of inSpan) {
+    const x = e.bin * (w - 1) / (BINS - 1);
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.moveTo(x - 4 * dpr, 0); ctx.lineTo(x + 4 * dpr, 0); ctx.lineTo(x, 6 * dpr); ctx.closePath(); ctx.fill();
+    const label = e.f.name || '';
+    const tw = ctx.measureText(label).width + 8 * dpr;
+    let x0 = Math.max(V.GUTTER_PX * dpr, Math.min(w - tw, x + 6 * dpr));
+    if (x0 < lastRight + 3 * dpr) continue;   // a crowded span keeps the notch, drops the label
+    const y0 = top + 6 * dpr;
+    ctx.fillStyle = 'rgba(0,0,0,0.62)';
+    ctx.fillRect(x0, y0, tw, boxH);
+    ctx.fillStyle = col;
+    ctx.fillText(label, x0 + 4 * dpr, y0 + boxH / 2 + 0.5 * dpr);
+    lastRight = x0 + tw;
+    favHits.push({ x0: Math.min(x0, x - 5 * dpr) / dpr, x1: (x0 + tw) / dpr, y0: 0, y1: (y0 + boxH) / dpr, fav: e.f });
+  }
+}
+function favText(f) {
+  const mhz = (Number(f.khz) / 1000).toFixed(f.khz % 1 ? 4 : 3);
+  return [f.name, mhz + ' MHz', f.mode, f.note].filter(Boolean).join(' · ');
+}
+function applyFavorites(st) { favItems = st && Array.isArray(st.items) ? st.items : []; scheduleDraw(); }
+if (window.api.favoritesGet) window.api.favoritesGet().then(applyFavorites).catch(() => {});
+if (window.api.onFavorites) window.api.onFavorites(applyFavorites);
+
+/** The favourite, spot label or "+N" chip under a pointer event on the trace, if any. */
 function spotAt(e) {
   const r = traceCanvas.getBoundingClientRect();
   const x = e.clientX - r.left, y = e.clientY - r.top;
   const inBox = (b) => x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1;
+  const fav = favHits.find(inBox);
+  if (fav) return { fav: fav.fav };
   const hit = spotHits.find(inBox);
   if (hit) return { spot: hit.spot };
   const chip = spotChips.find(inBox);
@@ -414,6 +466,7 @@ traceCanvas.addEventListener('click', (e) => {
     spotPress = null;
     // A label tunes to the spot with its mode; a "+N" chip only lists (hover).
     if (p.spot) tuneSpot(p.spot);
+    if (p.fav) window.api.tune(String(p.fav.khz), p.fav.mode || null);
     return;
   }
   if (suppressClick) { suppressClick = false; return; }
@@ -470,7 +523,7 @@ function showReadout(el, clientX, clientY) {
   readoutEl.style.top = Math.max(2, clientY - stage.top - 26) + 'px';
 }
 function showSpotReadout(hit, clientX, clientY) {
-  readoutEl.textContent = hit.spot ? spotText(hit.spot)
+  readoutEl.textContent = hit.fav ? favText(hit.fav) : hit.spot ? spotText(hit.spot)
     : hit.chip.spots.length + ' more: ' + hit.chip.spots.map((s) => s.callsign).filter(Boolean).join(', ');
   readoutEl.classList.add('show');
   const stage = readoutEl.parentElement.getBoundingClientRect();

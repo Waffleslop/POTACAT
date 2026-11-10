@@ -2021,6 +2021,7 @@ const landmarksFeed = new (require('./lib/landmarks-feed').LandmarksFeed)({
 landmarksFeed.load();
 const LandmarksLib = require('./lib/landmarks');
 const Channels = require('./lib/channels');
+const Favorites = require('./lib/favorites');
 const VfoCompact = require('./lib/vfo-compact');
 let _vfoCompactNow = false; // the VFO window is the mini strip right now
 // The starter channel chart (data/channels.json: FRS, GMRS, MURS, marine,
@@ -34249,8 +34250,13 @@ function createWindow() {
     // connectRemote() builds a NEW server with an empty directory, and only a
     // fetch (every 4 h) or a net-reminder edit refilled it: until then every
     // phone connected to a blank HF Nets / SWL tab. Seed each new server.
+    // A star from ECHOCAT (#329). A Guest Pass never gets here: favorite-set
+    // is not on the guest allow-list (lib/guest-pass-authority.js).
     onRemoteServer((rs) => {
-      rs.broadcastDirectory({ nets: directoryNets, swl: directorySwl, userNets: buildUserNetsForBroadcast(), ...landmarksPayload(), ...channelsPayload() });
+      rs.on('favorite-set', ({ kind, id, on }) => { favoriteSet(kind, id, on, 'ECHOCAT'); });
+    });
+    onRemoteServer((rs) => {
+      rs.broadcastDirectory({ nets: directoryNets, swl: directorySwl, userNets: buildUserNetsForBroadcast(), ...landmarksPayload(), ...channelsPayload(), ...favoritesPayload() });
     });
     // Auto-reopen pop-out map if it was open when the app last closed
     if (settings.mapPopoutOpen) {
@@ -35144,6 +35150,42 @@ function channelsPayload() {
   return { channels: channelsSaved().list };
 }
 
+// ── Favourites (#329, lib/favorites.js) ──────────────────────────────────
+// The Landmarks and Channels this operator starred. Per operator (not a
+// GLOBAL_KEY). Main owns the list: a star from any window or from ECHOCAT
+// lands here, is saved, and goes back out to every surface at once.
+function favoritesPayload() {
+  return { landmarkFavorites: Favorites.normalize(settings.landmarkFavorites), channelFavorites: Favorites.normalize(settings.channelFavorites) };
+}
+/** Ids plus the starred entries that exist, for the VFO menu and the band scope. */
+function favoritesState() {
+  let landmarks = [];
+  try { landmarks = landmarksFeed.catalog().landmarks || []; } catch { /* no catalog yet */ }
+  const ids = favoritesPayload();
+  // A channel tunes in the mode a radio or SDR demodulates (NFM, DV and the like tune FM: Channels.tuneMode).
+  const items = Favorites.resolve({ landmarks, channels: channelsSaved().list, landmarkIds: ids.landmarkFavorites, channelIds: ids.channelFavorites })
+    .map((f) => (f.kind === 'channel' ? { ...f, mode: Channels.tuneMode(f.mode) } : f));
+  return { ...ids, items };
+}
+function favoritesBroadcast() {
+  const st = favoritesState();
+  for (const wc of require('electron').webContents.getAllWebContents()) { try { wc.send('favorites', st); } catch { /* closing */ } }
+  pushDirectoryToRenderer();
+}
+/** Star or unstar one Landmark or Channel; origin is for the log. */
+function favoriteSet(kind, id, on, origin) {
+  const key = Favorites.keyFor(kind);
+  if (!key) return favoritesState();
+  const before = Favorites.normalize(settings[key]);
+  const next = Favorites.toggle(before, String(id || ''), on);
+  if (JSON.stringify(next) === JSON.stringify(before)) return favoritesState();
+  settings[key] = next;
+  saveSettings(settings);
+  sendCatLog(`[Favorites] ${Favorites.isFavorite(next, String(id)) ? 'starred' : 'unstarred'} ${kind} ${id}${origin ? ' (' + origin + ')' : ''}`);
+  favoritesBroadcast();
+  return favoritesState();
+}
+
 /** The Landmarks part of every directory push (window and ECHOCAT alike). */
 function landmarksPayload() {
   const c = landmarksFeed.catalog();
@@ -35185,7 +35227,7 @@ function buildUserNetsForBroadcast() {
 
 function pushDirectoryToRenderer() {
   if (win && !win.isDestroyed()) {
-    win.webContents.send('directory-data', { nets: directoryNets, swl: directorySwl, ...landmarksPayload(), ...channelsPayload() });
+    win.webContents.send('directory-data', { nets: directoryNets, swl: directorySwl, ...landmarksPayload(), ...channelsPayload(), ...favoritesPayload() });
   }
   // Also to ECHOCAT (always: the directory has no off switch). Not gated on
   // the server LISTENING: broadcastDirectory also stores the snapshot that every
@@ -35200,6 +35242,7 @@ function pushDirectoryToRenderer() {
       // server start stored, and without it a directory refresh or a Channels
       // edit left ECHOCAT with an empty Channels tab (#329).
       ...channelsPayload(),
+      ...favoritesPayload(),
     });
   }
 }
@@ -46687,7 +46730,7 @@ function cloudShackNotice(text, kind) {
   // --- Directory IPC ---
   ipcMain.on('fetch-directory', () => { fetchDirectory(); });
   ipcMain.handle('settings-save-status', () => { try { return settingsSaveStatusLine(); } catch { return '(unknown)'; } });
-  ipcMain.handle('get-directory', () => ({ nets: directoryNets, swl: directorySwl, ...landmarksPayload(), ...channelsPayload() }));
+  ipcMain.handle('get-directory', () => ({ nets: directoryNets, swl: directorySwl, ...landmarksPayload(), ...channelsPayload(), ...favoritesPayload() }));
 
   // --- Channels: the saved frequency chart (lib/channels.js) ---
   ipcMain.handle('channels-get', () => channelsSaved());
@@ -46697,10 +46740,13 @@ function cloudShackNotice(text, kind) {
     next.seeded = prev.seeded;   // the catalog version is main's to track
     settings.channels = next;
     saveSettings(settings);
-    pushDirectoryToRenderer();
+    favoritesBroadcast();   // a starred channel may have been edited or deleted; also pushes the directory
     return next;
   });
   ipcMain.handle('channel-go', (_e, { id } = {}) => channelGo(String(id || ''), 'Directory > Channels'));
+  // Favourites (#329): every window reads and stars through main.
+  ipcMain.handle('favorites-get', () => favoritesState());
+  ipcMain.handle('favorite-set', (_e, { kind, id, on } = {}) => favoriteSet(String(kind || ''), String(id || ''), on, 'desktop'));
   ipcMain.handle('channels-import-csv', async () => {
     const r = await dialog.showOpenDialog(win, { title: 'Import a CHIRP CSV export', properties: ['openFile'], filters: [{ name: 'CHIRP CSV', extensions: ['csv'] }, { name: 'All files', extensions: ['*'] }] });
     if (!r || r.canceled || !r.filePaths || !r.filePaths[0]) return { canceled: true };

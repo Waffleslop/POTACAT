@@ -10,6 +10,9 @@ contextBridge.exposeInMainWorld('api', {
   setTuneStep: (hz) => ipcRenderer.send('tune-step-set', Number(hz)),
   onTuneStep: (cb) => ipcRenderer.on('tune-step', (_e, hz) => cb(hz)),
   tune: (frequency, mode, bearing) => ipcRenderer.send('tune', { frequency, mode, bearing }),
+  // Favourites (#329): starred Landmarks and Channels, as one tune list.
+  favoritesGet: () => ipcRenderer.invoke('favorites-get'),
+  onFavorites: (cb) => ipcRenderer.on('favorites', (_e, st) => cb(st)),
   setVfoLock: (locked) => ipcRenderer.send('vfo-set-lock', locked),
   onVfoLockState: (cb) => ipcRenderer.on('vfo-lock-state', (_e, locked) => cb(locked)),
   onTuneBlocked: (cb) => ipcRenderer.on('tune-blocked', (_e, msg) => cb(msg)),

@@ -135,7 +135,7 @@ for the history.
 | Message | Dir | Purpose |
 |---|---|---|
 | `status` | S→C | Full radio status snapshot. See field table above. |
-| `tune` | C→S | Tune VFO. Fields: `freqKhz` (string, e.g. `"14250.000"`), `mode` (optional), `bearing` (optional, for rotor), `channelId` (optional, a Channels tap: a channel with the radio's memory number `mem` is recalled on the radio instead; older shacks ignore it and tune `freqKhz`). |
+| `tune` | C→S | Tune VFO. Fields: `freqKhz` (string, e.g. `"14250.000"`), `mode` (optional), `bearing` (optional, for rotor), `channelId` (optional, a Channels tap: a channel with the radio's memory number `mem` is recalled on the radio instead; older shacks ignore it and tune `freqKhz`). With no radio control (radio not connected, or a no-CAT rig) a shack advertising `sdr-tune-without-rig` listens through an SDR that covers the frequency (connected, or the first listed one it brings up) instead of replying `tune-blocked` (#329, lib/listen-source.js `routeWithoutRig`). |
 | `tune-blocked` | S→C | Tune was rejected (VFO locked, out of band, etc.). |
 | `set-mode` | C→S | Change mode without retuning frequency. |
 | `set-vfo` | C→S | Switch VFO A/B. |
@@ -226,7 +226,8 @@ for the history.
 
 | Message | Dir | Purpose |
 |---|---|---|
-| `directory` | S→C | Directory data (nets, SWL listings) for the Directory view. |
+| `directory` | S→C | Directory data for the Directory view: `nets`, `swl`, `userNets`, `landmarks`, `landmarkCategories`, `ncdxf`, `channels` (the chart, on every push), and (#329, capability `favorites`) `landmarkFavorites` / `channelFavorites`: the ids this operator starred, in starred order (lib/favorites.js). |
+| `favorite-set` | C→S | Star or unstar: `{kind: "landmark" or "channel", id, on?}` (`on` omitted = toggle). The shack saves it and re-sends `directory` to every client. Refused for a Guest Pass (the owner's settings). Capability `favorites`. |
 | `donor-callsigns` | S→C | List of donor callsigns to highlight in the UI. |
 
 ### JTCAT (FT8 engine)

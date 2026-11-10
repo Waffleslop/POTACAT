@@ -427,6 +427,10 @@ contextBridge.exposeInMainWorld('api', {
   channelsImportCsv: () => ipcRenderer.invoke('channels-import-csv'),
   channelGo: (id) => ipcRenderer.invoke('channel-go', { id }),
   channelsExportCsv: () => ipcRenderer.invoke('channels-export-csv'),
+  // Favourites (#329, lib/favorites.js): starred Landmarks and Channels, owned by main.
+  favoritesGet: () => ipcRenderer.invoke('favorites-get'),
+  favoriteSet: (kind, id, on) => ipcRenderer.invoke('favorite-set', { kind, id, on }),
+  onFavorites: (cb) => ipcRenderer.on('favorites', (_e, st) => cb(st)),
   fetchDirectory: () => ipcRenderer.send('fetch-directory'),
   getDirectory: () => ipcRenderer.invoke('get-directory'),
   // Events system

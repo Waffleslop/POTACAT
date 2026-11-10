@@ -517,6 +517,8 @@
   let directorySwl = [];
   let directoryLandmarks = [];        // the Landmarks tab (lib/landmarks.js)
   let directoryChannels = [];         // the Channels tab: the shack's saved frequency chart (lib/channels.js)
+  let directoryLandmarkFavs = [];     // the ids the shack's operator starred (#329, lib/favorites.js)
+  let directoryChannelFavs = [];
   let directoryLandmarkCategories = [];
   let dirActiveTab = 'nets';          // 'nets' | 'swl' | 'landmarks'
 
@@ -2390,6 +2392,8 @@
         directorySwl = msg.swl || [];
         if (Array.isArray(msg.landmarks)) directoryLandmarks = msg.landmarks;
         if (Array.isArray(msg.channels)) directoryChannels = msg.channels;
+        if (Array.isArray(msg.landmarkFavorites)) directoryLandmarkFavs = msg.landmarkFavorites;
+        if (Array.isArray(msg.channelFavorites)) directoryChannelFavs = msg.channelFavorites;
         if (Array.isArray(msg.landmarkCategories)) directoryLandmarkCategories = msg.landmarkCategories;
         // Show/hide Dir tab based on whether we have data
         var dirTabBtn = document.getElementById('dir-tab-btn');
@@ -12141,6 +12145,22 @@ var _paddleHoldTimer = { dit: null, dah: null };
       ws.send(JSON.stringify({ type: 'tune', freqKhz: String(lm.khz), mode: lm.mode }));
     }
   }
+  // Favourites (#329): a star on each card; a starred one heads its list in a
+  // Favorites group. Stars are the shack operator's (C2S favorite-set); a
+  // Guest Pass sees them but has no star to press (the shack refuses it too).
+  function favStar(kind, id, name) {
+    if (window.__echoGuestPass || !window.Favorites) return '';
+    var ids = kind === 'landmark' ? directoryLandmarkFavs : directoryChannelFavs;
+    return window.Favorites.starHtml(ids.indexOf(id) >= 0, name);
+  }
+  function favToggle(kind, id) {
+    var ids = kind === 'landmark' ? directoryLandmarkFavs : directoryChannelFavs;
+    var on = ids.indexOf(id) < 0;
+    var next = on ? ids.concat([id]) : ids.filter(function(x) { return x !== id; });
+    if (kind === 'landmark') directoryLandmarkFavs = next; else directoryChannelFavs = next;
+    renderDirectoryTab();
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'favorite-set', kind: kind, id: id, on: on }));
+  }
   function renderDirLandmarks(search) {
     var L = window.Landmarks;
     if (!L) return;
@@ -12158,8 +12178,10 @@ var _paddleHoldTimer = { dit: null, dah: null };
           || String(r.lm.khz).indexOf(search) >= 0;
       });
     }
-    var hidden = rows.filter(function(r) { return !r.ok; });
-    var shown = lmkShowAll ? rows : rows.filter(function(r) { return r.ok; });
+    var isFav = function(r) { return directoryLandmarkFavs.indexOf(r.lm.id) >= 0; };
+    // A starred landmark is never hidden: the operator asked for it.
+    var hidden = rows.filter(function(r) { return !r.ok && !isFav(r); });
+    var shown = lmkShowAll ? rows : rows.filter(function(r) { return r.ok || isFav(r); });
 
     if (!lmkHintDismissed() && !search && directoryLandmarks.some(function(l) { return l.id === 'wwv-10000'; })) {
       var hint = document.createElement('div');
@@ -12182,14 +12204,17 @@ var _paddleHoldTimer = { dit: null, dah: null };
 
     var cats = directoryLandmarkCategories.length ? directoryLandmarkCategories
       : L.CATEGORY_IDS.map(function(id) { return { id: id, label: id, reason: '' }; });
+    cats = [{ id: '__fav', label: 'Favorites', reason: 'the stations you starred' }].concat(cats);
     cats.forEach(function(cat) {
-      var inCat = shown.filter(function(r) { return r.lm.category === cat.id; });
+      var inCat = shown.filter(function(r) { return (isFav(r) ? '__fav' : r.lm.category) === cat.id; });
       if (!inCat.length) return;
       // Live first, then by when it is next on, then in the catalog's own
-      // (curated) order: the most useful station first.
-      inCat.sort(function(a, b) { return (a.cd.sortKey - b.cd.sortKey) || (a.i - b.i); });
+      // (curated) order: the most useful station first. Favorites keep the
+      // order they were starred in.
+      if (cat.id === '__fav') inCat.sort(function(a, b) { return directoryLandmarkFavs.indexOf(a.lm.id) - directoryLandmarkFavs.indexOf(b.lm.id); });
+      else inCat.sort(function(a, b) { return (a.cd.sortKey - b.cd.sortKey) || (a.i - b.i); });
       var head = document.createElement('div');
-      head.className = 'lmk-group';
+      head.className = 'lmk-group' + (cat.id === '__fav' ? ' fav-group' : '');
       head.innerHTML = esc(cat.label) + (cat.reason ? '<span>' + esc(cat.reason) + '</span>' : '');
       dirList.appendChild(head);
       inCat.forEach(function(r) {
@@ -12200,7 +12225,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
         card.className = 'dir-card lmk-card' + (cd.status === 'live' ? ' dir-live' : cd.status === 'soon' ? ' dir-soon' : '')
           + (tuned ? ' tuned' : '') + (open ? ' open' : '') + (r.ok ? '' : ' lmk-out');
         var statusHtml = cd.label ? '<span class="dir-card-status ' + cd.status + '">' + esc(cd.label) + '</span>' : '';
-        var html = '<div class="dir-card-row"><span class="dir-card-name">' + esc(lm.name) + '</span>' + statusHtml + '</div>'
+        var html = '<div class="dir-card-row"><span class="dir-card-name">' + esc(lm.name) + '</span>' + statusHtml + favStar('landmark', lm.id, lm.name) + '</div>'
           + '<div class="dir-card-detail"><span class="dir-card-freq">' + lm.khz + ' kHz</span> ' + esc(lm.mode) + ' · ' + esc(r.band) + '</div>'
           + '<div class="lmk-line">' + esc(lm.line) + (lm.ncdxf ? '<span class="lmk-now" data-khz="' + lm.khz + '"></span>' : '') + '</div>';
         if (open) {
@@ -12217,6 +12242,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
         }
         card.innerHTML = html;
         card.addEventListener('click', function(ev) {
+          if (ev.target && ev.target.closest && ev.target.closest('[data-fav]')) { ev.stopPropagation(); favToggle('landmark', lm.id); return; }
           if (ev.target && ev.target.dataset && ev.target.dataset.act === 'tune') { ev.stopPropagation(); lmkTune(lm); return; }
           lmkOpenId = open ? null : lm.id;
           renderDirectoryTab();
@@ -12351,24 +12377,28 @@ var _paddleHoldTimer = { dit: null, dah: null };
       return [c.name, c.note, c.group, c.mode].some(function(v) { return String(v || '').toLowerCase().indexOf(search) >= 0; })
         || String(c.khz).indexOf(search) >= 0 || (c.khz / 1000).toFixed(3).indexOf(search) >= 0;
     });
-    var groups = [];
-    rows.forEach(function(c) { var g = c.group || 'Other'; if (groups.indexOf(g) < 0) groups.push(g); });
+    // Favorites first (starred order), then each group without them.
+    var favRows = directoryChannelFavs.map(function(id) { return rows.filter(function(c) { return c.id === id; })[0]; }).filter(Boolean);
+    var groupOf = function(c) { return directoryChannelFavs.indexOf(c.id) >= 0 ? '__fav' : (c.group || 'Other'); };
+    var groups = favRows.length ? ['__fav'] : [];
+    rows.forEach(function(c) { var g = groupOf(c); if (groups.indexOf(g) < 0) groups.push(g); });
     groups.forEach(function(g) {
       var head = document.createElement('div');
-      head.className = 'lmk-group';
-      head.textContent = g;
+      head.className = 'lmk-group' + (g === '__fav' ? ' fav-group' : '');
+      head.textContent = g === '__fav' ? 'Favorites' : g;
       dirList.appendChild(head);
-      rows.filter(function(c) { return (c.group || 'Other') === g; }).forEach(function(c) {
+      (g === '__fav' ? favRows : rows.filter(function(c) { return groupOf(c) === g; })).forEach(function(c) {
         var card = document.createElement('div');
         card.className = 'dir-card';
         var mhz = (c.khz / 1000).toFixed(c.khz % 1 ? 5 : 4).replace(/0+$/, '').replace(/\.$/, '');
         var off = channelOffsetText(c.offsetKhz);
-        card.innerHTML = '<div class="dir-card-row"><span class="dir-card-name"></span><span class="dir-card-freq"></span></div>'
+        card.innerHTML = '<div class="dir-card-row"><span class="dir-card-name"></span><span class="dir-card-freq"></span>' + favStar('channel', c.id, c.name) + '</div>'
           + '<div class="dir-card-detail"></div>';
         card.querySelector('.dir-card-name').textContent = c.name;
         card.querySelector('.dir-card-freq').textContent = mhz + ' ' + (c.mode || 'FM') + (off ? ' ' + off : '') + (c.tone ? ' T' + c.tone : '') + (c.mem != null ? ' M' + c.mem : '');
         card.querySelector('.dir-card-detail').textContent = c.note || '';
-        card.addEventListener('click', function() {
+        card.addEventListener('click', function(ev) {
+          if (ev.target && ev.target.closest && ev.target.closest('[data-fav]')) { ev.stopPropagation(); favToggle('channel', c.id); return; }
           // channelId (#308): the shack recalls the radio's memory for a channel that has one.
           if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'tune', freqKhz: String(c.khz), mode: channelTuneMode(c.mode), channelId: c.id }));
         });

@@ -1169,6 +1169,7 @@
         </select>
         <select id="dirv-category-filter" class="dirv-filter-select hidden" aria-label="Category">
           <option value="all">All categories</option>
+          <option value="favorites">Favorites</option>
           <option value="time">Time signals</option>
           <option value="beacon">Beacons</option>
           <option value="weather">Weather</option>
@@ -1255,6 +1256,7 @@
             <table class="directory-view-table lmk-table">
               <thead>
                 <tr>
+                  <th class="lmk-col-fav" aria-label="Favorite"></th>
                   <th class="lmk-col-status">Status</th>
                   <th class="lmk-col-name">Name</th>
                   <th class="lmk-col-freq">Freq (kHz)</th>
@@ -5282,6 +5284,7 @@
   <script src="../lib/rig-bands.js"></script>
   <script src="../lib/listen-source.js"></script>
   <script src="../lib/channels.js"></script>
+  <script src="../lib/favorites.js"></script>
   <script src="channels-view.js"></script>
   <script src="../lib/landmarks.js"></script>
   <script src="../lib/commander-sequences.js"></script>

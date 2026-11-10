@@ -20810,6 +20810,29 @@ let directoryLandmarks = [];
 let directoryLandmarkCategories = [];
 let lmkSelectedId = null;
 let lmkShowAll = false;     // show rows the active radio cannot tune (this session)
+// Favourites (#329, lib/favorites.js): this operator's starred Landmarks and
+// Channels. Main owns them; every directory push and 'favorites' event
+// carries the ids. A starred landmark heads the table in a Favorites group.
+let favLandmarkIds = [];
+let favChannelIds = [];
+function favApply(st) {
+  if (!st) return;
+  if (Array.isArray(st.landmarkFavorites)) favLandmarkIds = st.landmarkFavorites;
+  if (Array.isArray(st.channelFavorites)) favChannelIds = st.channelFavorites;
+  if (window.ChannelsView && window.ChannelsView.setFavorites) window.ChannelsView.setFavorites(favChannelIds);
+}
+function favToggle(kind, id) {
+  if (!window.api.favoriteSet) return;
+  const ids = kind === 'landmark' ? favLandmarkIds : favChannelIds;
+  const on = !ids.includes(id);
+  // Shown at once; main's reply (and its broadcast) is the truth.
+  if (kind === 'landmark') favLandmarkIds = on ? favLandmarkIds.concat([id]) : favLandmarkIds.filter(x => x !== id);
+  else favChannelIds = on ? favChannelIds.concat([id]) : favChannelIds.filter(x => x !== id);
+  favApply({ landmarkFavorites: favLandmarkIds, channelFavorites: favChannelIds });
+  renderDirectoryView();
+  window.api.favoriteSet(kind, id, on).then((st) => { favApply(st); renderDirectoryView(); }).catch(() => {});
+}
+if (window.api.onFavorites) window.api.onFavorites((st) => { favApply(st); renderDirectoryView(); });
 // The listening SDR's reach ([[loHz, hiHz], ...], lib/listen-source.js): a
 // station the radio cannot tune but the SDR can hear is shown, tagged SDR,
 // and Tune plays it through the SDR (main.js listenSdrArbitrate).
@@ -20853,9 +20876,12 @@ function renderDirvLandmarks(search, bandFilter, category) {
       || String(r.lm.khz).includes(search));
   }
   if (bandFilter !== 'all') rows = rows.filter(r => r.band === bandFilter);
-  if (category && category !== 'all') rows = rows.filter(r => r.lm.category === category);
-  const hidden = rows.filter(r => !r.ok);
-  const shown = lmkShowAll ? rows : rows.filter(r => r.ok);
+  const favOnly = category === 'favorites';
+  if (favOnly) rows = rows.filter(r => favLandmarkIds.includes(r.lm.id));
+  else if (category && category !== 'all') rows = rows.filter(r => r.lm.category === category);
+  // A starred row is never hidden: the operator asked for it (greyed when out of reach).
+  const hidden = rows.filter(r => !r.ok && !favLandmarkIds.includes(r.lm.id));
+  const shown = lmkShowAll ? rows : rows.filter(r => r.ok || favLandmarkIds.includes(r.lm.id));
 
   if (dirvCount) {
     dirvCount.textContent = `${shown.length} landmark${shown.length !== 1 ? 's' : ''}`
@@ -20864,21 +20890,28 @@ function renderDirvLandmarks(search, bandFilter, category) {
 
   lmkBody.innerHTML = '';
   if (!directoryLandmarks.length) {
-    lmkBody.innerHTML = '<tr class="lmk-hidden-note"><td colspan="6">Loading landmarks...</td></tr>';
+    lmkBody.innerHTML = '<tr class="lmk-hidden-note"><td colspan="7">Loading landmarks...</td></tr>';
     lmkRenderPanel(null, false);
     return;
   }
-  const order = directoryLandmarkCategories.length ? directoryLandmarkCategories : L.CATEGORY_IDS.map(id => ({ id, label: id, reason: '' }));
+  const order = [{ id: '__fav', label: 'Favorites', reason: 'the stations you starred' }].concat(directoryLandmarkCategories.length ? directoryLandmarkCategories : L.CATEGORY_IDS.map(id => ({ id, label: id, reason: '' })));
+  // A starred landmark sits in Favorites, not again in its own category.
+  const groupOf = (r) => favLandmarkIds.includes(r.lm.id) ? '__fav' : r.lm.category;
   let firstLive = null;
+  if (favOnly && !shown.length) {
+    lmkBody.innerHTML = '<tr class="lmk-hidden-note"><td colspan="7">No favorites yet. Click the star beside any landmark (NOAA weather, WWV, a beacon) to keep it here, in the VFO window&#39;s Favorites menu and on the band scope.</td></tr>';
+  }
   for (const cat of order) {
-    const inCat = shown.filter(r => r.lm.category === cat.id);
+    const inCat = shown.filter(r => groupOf(r) === cat.id);
     if (!inCat.length) continue;
     // Within a group: live first, then by when it is next on, then in the
-    // catalog's own order (curated: the most useful station first).
-    inCat.sort((a, b) => (a.cd.sortKey - b.cd.sortKey) || (a.i - b.i));
+    // catalog's own order (curated: the most useful station first). Favorites
+    // keep the order they were starred in.
+    if (cat.id === '__fav') inCat.sort((a, b) => favLandmarkIds.indexOf(a.lm.id) - favLandmarkIds.indexOf(b.lm.id));
+    else inCat.sort((a, b) => (a.cd.sortKey - b.cd.sortKey) || (a.i - b.i));
     const g = document.createElement('tr');
-    g.className = 'lmk-group';
-    g.innerHTML = `<td colspan="6">${esc(cat.label)}${cat.reason ? `<span class="lmk-group-reason">${esc(cat.reason)}</span>` : ''}</td>`;
+    g.className = 'lmk-group' + (cat.id === '__fav' ? ' lmk-group-fav' : '');
+    g.innerHTML = `<td colspan="7">${esc(cat.label)}${cat.reason ? `<span class="lmk-group-reason">${esc(cat.reason)}</span>` : ''}</td>`;
     lmkBody.appendChild(g);
     for (const r of inCat) {
       const { lm, cd } = r;
@@ -20894,7 +20927,8 @@ function renderDirvLandmarks(search, bandFilter, category) {
       const badge = cd.status === 'none'
         ? '<span class="lmk-badge none">—</span>'
         : `<span class="lmk-badge ${cd.status}" title="${esc(cd.label)}">${cd.status === 'live' ? 'Live' : cd.status === 'soon' ? 'Soon' : cd.status === 'today' ? 'Today' : 'Later'}</span>`;
-      tr.innerHTML = `<td>${badge}</td>`
+      tr.innerHTML = `<td class="lmk-fav">${window.Favorites ? window.Favorites.starHtml(favLandmarkIds.includes(lm.id), lm.name) : ''}</td>`
+        + `<td>${badge}</td>`
         + `<td class="lmk-name">${esc(lm.name)}</td>`
         + `<td>${lm.khz}</td>`
         + `<td>${esc(lm.mode)}</td>`
@@ -20905,7 +20939,10 @@ function renderDirvLandmarks(search, bandFilter, category) {
         lmkTune(lm);
         renderDirectoryView();
       };
-      tr.addEventListener('click', choose);
+      tr.addEventListener('click', (e) => {
+        if (e.target && e.target.closest && e.target.closest('[data-fav]')) { e.stopPropagation(); favToggle('landmark', lm.id); return; }
+        choose();
+      });
       tr.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); choose(); } });
       lmkBody.appendChild(tr);
     }
@@ -20915,8 +20952,8 @@ function renderDirvLandmarks(search, bandFilter, category) {
     tr.className = 'lmk-hidden-note';
     const names = hidden.slice(0, 4).map(r => r.lm.name).filter((v, i, a) => a.indexOf(v) === i).join(', ');
     tr.innerHTML = lmkShowAll
-      ? `<td colspan="6">Rows in grey are outside the bands this radio is set up for. <button type="button" class="lmk-show-all">Hide them</button></td>`
-      : `<td colspan="6">${hidden.length} landmark${hidden.length !== 1 ? 's are' : ' is'} hidden because this radio is not set up for ${hidden.length !== 1 ? 'their bands' : 'its band'}${names ? ` (${esc(names)}${hidden.length > 4 ? ', ...' : ''})` : ''}. <button type="button" class="lmk-show-all">Show anyway</button></td>`;
+      ? `<td colspan="7">Rows in grey are outside the bands this radio is set up for. <button type="button" class="lmk-show-all">Hide them</button></td>`
+      : `<td colspan="7">${hidden.length} landmark${hidden.length !== 1 ? 's are' : ' is'} hidden because this radio is not set up for ${hidden.length !== 1 ? 'their bands' : 'its band'}${names ? ` (${esc(names)}${hidden.length > 4 ? ', ...' : ''})` : ''}. <button type="button" class="lmk-show-all">Show anyway</button></td>`;
     tr.querySelector('.lmk-show-all').addEventListener('click', () => { lmkShowAll = !lmkShowAll; renderDirectoryView(); });
     lmkBody.appendChild(tr);
   }
@@ -21227,7 +21264,7 @@ if (dirvTabChannels) dirvTabChannels.addEventListener('click', () => setDirvTab(
 // Channels (renderer/channels-view.js): a click tunes through the one tune path,
 // so the SDR plays a frequency the radio cannot reach (lib/listen-source.js).
 if (window.ChannelsView) {
-  window.ChannelsView.init({ api: window.api, tune: (khz, mode) => window.api.tune(khz, mode), radioKhz: () => radioFreqKhz });
+  window.ChannelsView.init({ api: window.api, tune: (khz, mode) => window.api.tune(khz, mode), radioKhz: () => radioFreqKhz, onFavorite: (id) => favToggle('channel', id) });
 }
 if (dirvCategoryFilter) dirvCategoryFilter.addEventListener('change', () => renderDirectoryView());
 {
@@ -21535,6 +21572,7 @@ window.api.onDirectoryData((data) => {
   directorySwl = data.swl || [];
   directoryLandmarks = Array.isArray(data.landmarks) ? data.landmarks : directoryLandmarks;
   directoryLandmarkCategories = Array.isArray(data.landmarkCategories) ? data.landmarkCategories : directoryLandmarkCategories;
+  favApply(data);
   if (window.ChannelsView && Array.isArray(data.channels)) window.ChannelsView.setList(data.channels);
   renderDirectory();
   renderDirectoryView();
