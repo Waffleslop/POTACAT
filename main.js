@@ -35196,6 +35196,10 @@ function pushDirectoryToRenderer() {
       swl: directorySwl,
       userNets: buildUserNetsForBroadcast(),
       ...landmarksPayload(),
+      // Every push carries the chart: this snapshot replaces the one the
+      // server start stored, and without it a directory refresh or a Channels
+      // edit left ECHOCAT with an empty Channels tab (#329).
+      ...channelsPayload(),
     });
   }
 }
