@@ -31909,8 +31909,9 @@ function startYaesuScope() {
   yaesuScopeProc = proc;
   yaesuScopeStderr = '';
   proc._lastFrameAt = 0;   // any frame, aligned or not (helperStallReason)
-  proc._fatalAt = 0;       // when it printed its read-failure line
-  proc._stalled = false;   // killed by the watchdog below -> handled as exit 6
+  proc._fatalAt = 0;       // when it printed a line it exits after (read failures, could not open)
+  proc._fatalCode = 0;     // the exit code that line means (YaesuScope.helperFatalExitCode)
+  proc._stalled = false;   // killed by the watchdog below -> handled as the exit its last line named (#320)
   proc._streamingSince = 0; // start of the current unbroken run of frames
   proc._wasTx = false;
   proc._lastTxEndAt = 0;
@@ -31933,9 +31934,12 @@ function startYaesuScope() {
   proc.stderr.on('data', (chunk) => {
     const text = chunk.toString();
     yaesuScopeStderr = (yaesuScopeStderr + text).slice(-4096);
-    for (const line of text.split('\n').filter(Boolean)) {
-      if (YaesuScope.isHelperFatalLine(line) && !proc._fatalAt) proc._fatalAt = Date.now();
-      sendCatLog('[Scope] ' + line);
+    for (const line of text.split('\n').filter(Boolean)) sendCatLog('[Scope] ' + line);
+    // A line the helper exits after (read failures, could not open), judged
+    // on everything it has said so far: a pipe chunk can cut a line in two.
+    if (!proc._fatalAt && yaesuScopeProc === proc) {
+      const code = YaesuScope.helperFatalExitCode(yaesuScopeStderr);
+      if (code) { proc._fatalAt = Date.now(); proc._fatalCode = code; }
     }
   });
   // Stall watchdog (GitHub #126): a helper that printed its fatal line but
@@ -31948,11 +31952,13 @@ function startYaesuScope() {
     if (proc._wasTx && !tx) proc._lastTxEndAt = now;   // key-up: the silence clock restarts here
     proc._wasTx = tx;
     yaesuScopeStallKills = YaesuScope.stallKillsAfterHealthy({ kills: yaesuScopeStallKills, streamingSince: proc._streamingSince, now });
-    const why = YaesuScope.helperStallReason({ now, lastFrameAt: proc._lastFrameAt, fatalAt: proc._fatalAt, transmitting: tx, lastTxEndAt: proc._lastTxEndAt });
+    const why = YaesuScope.helperStallReason({ now, lastFrameAt: proc._lastFrameAt, fatalAt: proc._fatalAt, fatalCode: proc._fatalCode, transmitting: tx, lastTxEndAt: proc._lastTxEndAt });
     if (!why) return;
     clearInterval(watch);
     proc._stalled = true;
-    yaesuScopeStallKills++;
+    // An open that failed is not a lost bridge: it exits as 3 (retried only
+    // while the radio is coming back) and spends the ordinary restart budget.
+    if (proc._fatalCode !== 3) yaesuScopeStallKills++;
     sendCatLog('[Scope] helper pid ' + proc.pid + ' stalled (' + why + ') — killing it so the scope can restart');
     try { proc.kill('SIGKILL'); } catch { /* already gone */ }
   }, 2000);
@@ -31970,7 +31976,10 @@ function startYaesuScope() {
     yaesuScopeProc = null;
     yaesuScopeStream = null;
     yaesuScopeStopCatPolling();
-    if (proc._stalled) { code = 6; signal = null; }   // the watchdog's kill: a lost bridge, retried
+    // The watchdog's kill reads as the exit the helper's last line named: a
+    // lost bridge (6, retried) or a failed open (3, retried near power-on).
+    const stallKill = proc._stalled && proc._fatalCode !== 3;
+    if (proc._stalled) { code = proc._fatalCode || 6; signal = null; }
     let d = YaesuScope.describeHelperExit(code, { signal });
     if (d.severity === 'info') { yaesuScopeSetStatus('stopped', null); return; }
     // Exit 2 covers three different faults; the helper's own words say which.
@@ -31991,10 +32000,10 @@ function startYaesuScope() {
     const sinceRadioBackMs = yaesuScopeRadioBackAt ? Date.now() - yaesuScopeRadioBackAt : null;
     // A watchdog kill spends its own budget (cleared after a healthy minute),
     // so occasional stalls over a long session never exhaust the retries.
-    const budgetOk = proc._stalled ? yaesuScopeStallKills <= 5 : yaesuScopeRestarts < 5;
+    const budgetOk = stallKill ? yaesuScopeStallKills <= 5 : yaesuScopeRestarts < 5;
     if (YaesuScope.helperExitShouldRetry(code, { sinceRadioBackMs }) && yaesuScopeWanted() && budgetOk) {
-      if (!proc._stalled) yaesuScopeRestarts++;
-      sendCatLog('[Scope] retrying in 3 s (' + (proc._stalled ? 'stall ' + yaesuScopeStallKills : yaesuScopeRestarts) + '/5)');
+      if (!stallKill) yaesuScopeRestarts++;
+      sendCatLog('[Scope] retrying in 3 s (' + (stallKill ? 'stall ' + yaesuScopeStallKills : yaesuScopeRestarts) + '/5)');
       yaesuScopeRestartTimer = setTimeout(() => {
         yaesuScopeRestartTimer = null;
         if (yaesuScopeWanted()) startYaesuScope();

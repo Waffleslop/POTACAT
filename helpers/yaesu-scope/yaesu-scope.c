@@ -168,10 +168,15 @@ static int stdin_is_pipe(void) {
 #endif
 }
 #ifdef _WIN32
+/* ReadFile on the raw handle, never fread: fread holds the C runtime's stdin
+ * lock while it blocks, and the runtime's exit() flushes every stream under
+ * its lock, so a helper that returned 3 ("could not open") stayed alive until
+ * the parent closed stdin (#320, ride1226's FT-710, 2026-11-10). */
 static unsigned __stdcall stdin_watch(void* arg) {
   (void)arg;
   char c;
-  while (fread(&c, 1, 1, stdin) == 1) { /* ignore input */ }
+  DWORD got = 0;
+  while (ReadFile(GetStdHandle(STD_INPUT_HANDLE), &c, 1, &got, NULL) && got == 1) { /* ignore input */ }
   g_stop = 1;
   return 0;
 }
