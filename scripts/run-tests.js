@@ -77,6 +77,7 @@ const TESTS = [
   'test/sstv-realistic-rx-test.js',
   'test/sstv-audio-device-test.js',
   'test/sstv-live-path-test.js',
+  'test/sstv-text-styles-test.js', // #327: typeface, outline, shadow, letter spacing per SSTV text layer
   'test/sstv-input-level-test.js',
   'test/voice-macros-test.js',
   'test/ts-wss-url-test.js',

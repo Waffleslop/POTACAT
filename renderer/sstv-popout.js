@@ -510,6 +510,55 @@ function renderTextProps() {
   colorInput.addEventListener('input', () => { t.color = colorInput.value; onTextChanged(); renderTextLayers(); });
   textPropsEl.appendChild(colorInput);
 
+  // Typeface, outline, shadow, letter spacing (#327). Rules: lib/sstv-templates.js layerStyle.
+  const style = T.layerStyle(t);
+  const faceSel = document.createElement('select');
+  faceSel.className = 'tp-face';
+  faceSel.title = 'Typeface (Automatic: a template line uses the station\'s lettering)';
+  faceSel.setAttribute('aria-label', 'Typeface');
+  for (const f of T.textFaces()) {
+    const o = document.createElement('option');
+    o.value = f.id; o.textContent = f.name;
+    const ff = T.faceFor(f.id);
+    if (ff) o.style.fontFamily = ff.css;
+    faceSel.appendChild(o);
+  }
+  faceSel.value = style.face;
+  faceSel.addEventListener('change', () => { t.face = faceSel.value; onTextChanged(); renderTextLayers(); });
+  textPropsEl.appendChild(faceSel);
+
+  const outlineBtn = document.createElement('button');
+  outlineBtn.className = 'tp-toggle' + (style.outline ? ' active' : '');
+  outlineBtn.textContent = 'O';
+  outlineBtn.style.webkitTextStroke = '1px currentColor';
+  outlineBtn.title = 'Outline (keeps the words readable after SSTV)';
+  outlineBtn.setAttribute('aria-pressed', String(style.outline));
+  outlineBtn.addEventListener('click', () => { t.outline = !style.outline; onTextChanged(); renderTextProps(); });
+  textPropsEl.appendChild(outlineBtn);
+
+  const shadowBtn = document.createElement('button');
+  shadowBtn.className = 'tp-toggle' + (style.shadow ? ' active' : '');
+  shadowBtn.textContent = 'S';
+  shadowBtn.style.textShadow = '1px 1px 1px rgba(0,0,0,0.6)';
+  shadowBtn.title = 'Shadow';
+  shadowBtn.setAttribute('aria-pressed', String(style.shadow));
+  shadowBtn.addEventListener('click', () => { t.shadow = !style.shadow; onTextChanged(); renderTextProps(); });
+  textPropsEl.appendChild(shadowBtn);
+
+  const spLabel = document.createElement('span');
+  spLabel.style.cssText = 'font-size:10px;color:var(--text-dim);margin-left:4px;';
+  spLabel.textContent = 'Space';
+  textPropsEl.appendChild(spLabel);
+  const spInput = document.createElement('input');
+  spInput.type = 'number';
+  spInput.value = style.spacing;
+  spInput.min = T.SPACING_MIN;
+  spInput.max = T.SPACING_MAX;
+  spInput.title = 'Letter spacing (pixels)';
+  spInput.setAttribute('aria-label', 'Letter spacing');
+  spInput.addEventListener('change', () => { t.spacing = T.layerStyle({ spacing: spInput.value }).spacing; spInput.value = t.spacing; onTextChanged(); });
+  textPropsEl.appendChild(spInput);
+
   // Rotation angle display/input
   const rotLabel = document.createElement('span');
   rotLabel.style.cssText = 'font-size:10px;color:var(--text-dim);margin-left:4px;';
@@ -621,6 +670,8 @@ function pushComposeStateNow() {
       bold: !!t.bold || !!t.tpl, italic: !!t.italic,
       color: b.color, rotation: t.rotation || 0,
       visible: t.visible !== false,
+      // #327: the phone draws these with the same rules (SstvTemplates.layerStyle).
+      face: t.face || '', fontCss: b.css, fontWeight: b.weight, outline: b.outline, shadow: b.shadow, spacing: b.spacing,
     };
   });
   window.api.sstvComposeState({ bgDataUrl, texts, mode: modeSelect.value });
@@ -636,6 +687,7 @@ function saveTextElements() {
     x: t.x, y: t.y, fontSize: t.fontSize, bold: t.bold, italic: t.italic, color: t.color, rotation: t.rotation || 0, visible: t.visible,
     align: t.align, outline: !!t.outline, role: t.role, tpl: !!t.tpl,
     fit: !!t.fit, fontCss: t.fontCss, fontWeight: t.fontWeight,
+    face: t.face || '', shadow: t.shadow, spacing: t.spacing || 0,
   }))});
 }
 
@@ -1150,10 +1202,10 @@ tplSaveBtn.addEventListener('click', () => {
     // Frozen: the words, lettering and colours as they look now, so a later
     // Shuffle or pack never changes a template you saved. Placeholders stay.
     texts: textElements.map(t => {
-      const base = { key: t.key, x: t.x, y: t.y, fontSize: t.fontSize, bold: t.bold, italic: t.italic, color: t.color, rotation: t.rotation || 0, visible: t.visible, label: t.label, align: t.align, outline: !!t.outline, role: t.role, fit: !!(t.tpl || t.fit), fontCss: t.fontCss, fontWeight: t.fontWeight };
+      const base = { key: t.key, x: t.x, y: t.y, fontSize: t.fontSize, bold: t.bold, italic: t.italic, color: t.color, rotation: t.rotation || 0, visible: t.visible, label: t.label, align: t.align, outline: !!t.outline, role: t.role, fit: !!(t.tpl || t.fit), fontCss: t.fontCss, fontWeight: t.fontWeight, face: t.face || '', shadow: t.shadow, spacing: t.spacing || 0 };
       if (t.tpl) {
         const st = T.textStyle(t, currentLook);
-        Object.assign(base, { label: st.label, color: st.color, fontCss: st.fontCss, fontWeight: st.weight, outline: true });
+        Object.assign(base, { label: st.label, color: st.color, fontCss: st.fontCss, fontWeight: st.weight, outline: !!t.outline });
       }
       return base;
     }),
@@ -1188,6 +1240,7 @@ function loadTemplate(idx) {
     visible: saved.visible !== false,
     align: saved.align, outline: !!saved.outline, role: saved.role, tpl: !!saved.tpl,
     fit: !!saved.fit, fontCss: saved.fontCss, fontWeight: saved.fontWeight,
+    face: saved.face || '', shadow: saved.shadow, spacing: saved.spacing || 0,
   }));
   activeStarterId = null;
   activeSlot = tpl.slot || null;
@@ -2682,30 +2735,35 @@ function textBox(t, ctx, canvasW) {
   const cw = canvasW || txCanvas.width;
   let label = t.label || '';
   let color = t.color || '#ffffff';
-  let family = '"Segoe UI", sans-serif';
-  let weight = t.bold ? 'bold' : 'normal';
+  // The automatic face: a template line takes the station's (or the pack's)
+  // lettering; a saved template keeps the lettering it was saved with. A face
+  // the operator picked (#327) wins over both (T.layerFont).
+  let auto = null;
   if (t.tpl) {
     const st = T.textStyle(t, currentLook);
     label = st.label; color = st.color;
-    family = st.fontCss + ', "Segoe UI", sans-serif';
-    weight = String(st.weight);
+    auto = { css: st.fontCss, weight: st.weight };
   } else if (t.fontCss) {
-    // A saved template keeps the lettering it was saved with.
-    family = t.fontCss + ', "Segoe UI", sans-serif';
-    weight = String(t.fontWeight || 400);
+    auto = { css: t.fontCss, weight: t.fontWeight || 400 };
   }
+  const lf = T.layerFont(t, auto);
+  const family = lf.css + ', "Segoe UI", sans-serif';
+  const weight = String(lf.weight);
+  const style = T.layerStyle(t);
   label = T.fillVars(label, templateVars());
   const italic = t.italic ? 'italic ' : '';
   let size = t.fontSize || 14;
   const font = (sz) => italic + weight + ' ' + sz + 'px ' + family;
   c.font = font(size);
+  c.letterSpacing = style.spacing + 'px';
   let width = c.measureText(label).width;
   if (t.tpl || t.fit) {
     const maxW = t.align === 'center' ? cw - 20 : cw - 12 - t.x;
     while (size > 10 && width > maxW) { size -= 1; c.font = font(size); width = c.measureText(label).width; }
   }
+  c.letterSpacing = '0px';   // the context is shared; only drawTextLayer draws spaced
   const x0 = t.align === 'center' ? t.x - width / 2 : t.x;
-  return { label, font: font(size), size, width, x0, color, outline: !!t.outline };
+  return { label, font: font(size), css: lf.css, weight: lf.weight, size, width, x0, color, outline: style.outline, shadow: style.shadow, shadowAuto: t.shadow !== true && t.shadow !== false, spacing: style.spacing };
 }
 
 function drawTextLayer(ctx, t, canvasW) {
@@ -2717,14 +2775,26 @@ function drawTextLayer(ctx, t, canvasW) {
   const dx = b.x0 - t.x;
   ctx.translate(t.x, t.y);
   if (rot) ctx.rotate(rot);
+  ctx.letterSpacing = b.spacing + 'px';
+  // The shadow goes under whatever is drawn first: the outline when there is
+  // one, else the lettering. Scaled with the size so it reads after SSTV.
+  // The automatic shadow keeps its pre-#327 size, so older pictures look the
+  // same; one the operator turned on grows with the lettering.
+  const shadowOn = () => {
+    const off = b.shadowAuto ? 1 : Math.max(1, Math.round(b.size / 14));
+    ctx.shadowColor = '#000'; ctx.shadowBlur = b.shadowAuto ? 3 : Math.max(3, b.size / 6); ctx.shadowOffsetX = off; ctx.shadowOffsetY = off;
+  };
+  const shadowOff = () => { ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0; };
   if (b.outline) {
     // Brightness contrast survives SSTV; a light outline for dark lettering.
+    if (b.shadow) shadowOn();
     ctx.lineJoin = 'round';
     ctx.lineWidth = Math.max(3, b.size / 5);
     ctx.strokeStyle = T.isDark(b.color) ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.85)';
     ctx.strokeText(b.label, dx, 0);
-  } else {
-    ctx.shadowColor = '#000'; ctx.shadowBlur = 3; ctx.shadowOffsetX = 1; ctx.shadowOffsetY = 1;
+    shadowOff();
+  } else if (b.shadow) {
+    shadowOn();
   }
   ctx.fillStyle = b.color;
   ctx.fillText(b.label, dx, 0);
