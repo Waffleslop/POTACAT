@@ -13618,7 +13618,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
     sstvPhoneRenderTemplates();
     if (echoSettings.sstvTextElements && echoSettings.sstvTextElements.length) {
       sstvPhoneTexts = echoSettings.sstvTextElements.map(function(t) {
-        return { key: t.key, label: t.label || '', x: t.x, y: t.y, fontSize: t.fontSize || 14, bold: !!t.bold, italic: !!t.italic, color: t.color || '#ffffff', rotation: t.rotation || 0, visible: t.visible !== false };
+        return { key: t.key, label: t.label || '', x: t.x, y: t.y, fontSize: t.fontSize || 14, bold: !!t.bold, italic: !!t.italic, color: t.color || '#ffffff', rotation: t.rotation || 0, visible: t.visible !== false, face: t.face || '', fontCss: t.fontCss, fontWeight: t.fontWeight, outline: !!t.outline, shadow: t.shadow, spacing: t.spacing || 0 };
       });
       sstvPhoneUserTextCount = sstvPhoneTexts.filter(function(t) { return t.key.indexOf('user-') === 0; }).length;
     }
@@ -13707,7 +13707,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
       bgParams: null,
       bgDataUrl: bgDataUrl,
       texts: sstvPhoneTexts.map(function(t) {
-        return { key: t.key, x: t.x, y: t.y, fontSize: t.fontSize, bold: t.bold, italic: t.italic, color: t.color, rotation: t.rotation || 0, visible: t.visible, label: t.label };
+        return { key: t.key, x: t.x, y: t.y, fontSize: t.fontSize, bold: t.bold, italic: t.italic, color: t.color, rotation: t.rotation || 0, visible: t.visible, label: t.label, face: t.face || '', fontCss: t.fontCss, fontWeight: t.fontWeight, outline: !!t.outline, shadow: t.shadow, spacing: t.spacing || 0 };
       }),
       thumbnail: thumbnail,
     };
@@ -13739,7 +13739,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
       // Restore text elements
       if (Array.isArray(tpl.texts)) {
         sstvPhoneTexts = tpl.texts.map(function(t) {
-          return { key: t.key, label: t.label || '', x: t.x, y: t.y, fontSize: t.fontSize || 14, bold: !!t.bold, italic: !!t.italic, color: t.color || '#ffffff', rotation: t.rotation || 0, visible: t.visible !== false };
+          return { key: t.key, label: t.label || '', x: t.x, y: t.y, fontSize: t.fontSize || 14, bold: !!t.bold, italic: !!t.italic, color: t.color || '#ffffff', rotation: t.rotation || 0, visible: t.visible !== false, face: t.face || '', fontCss: t.fontCss, fontWeight: t.fontWeight, outline: !!t.outline, shadow: t.shadow, spacing: t.spacing || 0 };
         });
       }
       // Fill auto-labels with current callsign/grid
@@ -14016,6 +14016,37 @@ var _paddleHoldTimer = { dit: null, dah: null };
     sstvRenderPhoneCompose();
   }
 
+  // One text layer, with the desktop's rules for typeface, outline, shadow
+  // and letter spacing (#327, lib/sstv-templates.js layerStyle/layerFont).
+  // The OFL faces are not served to this page, so a picked face falls back
+  // to sans-serif here; the transmitted picture is the desktop's.
+  function sstvPhoneDrawText(ctx, t) {
+    var T = window.SstvTemplates;
+    var st = T ? T.layerStyle(t) : { outline: !!t.outline, shadow: !t.outline, spacing: 0 };
+    var lf = T ? T.layerFont(t, t.fontCss ? { css: t.fontCss, weight: t.fontWeight || 400 } : null) : { css: 'sans-serif', weight: t.bold ? 700 : 400 };
+    var size = t.fontSize || 14;
+    var auto = t.shadow !== true && t.shadow !== false;
+    ctx.font = (t.italic ? 'italic ' : '') + lf.weight + ' ' + size + 'px ' + lf.css + ', sans-serif';
+    ctx.letterSpacing = st.spacing + 'px';
+    if (t.rotation) { ctx.translate(t.x, t.y); ctx.rotate(t.rotation); } else { ctx.translate(t.x, t.y); }
+    var shadowOn = function() {
+      var off = auto ? 1 : Math.max(1, Math.round(size / 14));
+      ctx.shadowColor = '#000'; ctx.shadowBlur = auto ? 3 : Math.max(3, size / 6); ctx.shadowOffsetX = off; ctx.shadowOffsetY = off;
+    };
+    if (st.outline) {
+      if (st.shadow) shadowOn();
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = Math.max(3, size / 5);
+      ctx.strokeStyle = (T && T.isDark(t.color || '#ffffff')) ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.85)';
+      ctx.strokeText(t.label, 0, 0);
+      ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
+    } else if (st.shadow) {
+      shadowOn();
+    }
+    ctx.fillStyle = t.color || '#ffffff';
+    ctx.fillText(t.label, 0, 0);
+  }
+
   // Receive live compose state from desktop POTACAT (background + texts)
   function sstvPhoneApplyComposeState(msg) {
     if (msg.texts && Array.isArray(msg.texts)) {
@@ -14026,6 +14057,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
           bold: !!t.bold, italic: !!t.italic,
           color: t.color || '#ffffff', rotation: t.rotation || 0,
           visible: t.visible !== false,
+          face: t.face || '', fontCss: t.fontCss, fontWeight: t.fontWeight, outline: !!t.outline, shadow: t.shadow, spacing: t.spacing || 0,
         };
       });
       sstvPhoneUserTextCount = sstvPhoneTexts.filter(function(t) { return t.key && t.key.indexOf('user-') === 0; }).length;
@@ -14208,19 +14240,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
       var t = sstvPhoneTexts[i];
       if (!t.visible || !t.label) continue;
       sstvPhoneComposeCtx.save();
-      sstvPhoneComposeCtx.shadowColor = '#000';
-      sstvPhoneComposeCtx.shadowBlur = 3;
-      sstvPhoneComposeCtx.shadowOffsetX = 1;
-      sstvPhoneComposeCtx.shadowOffsetY = 1;
-      sstvPhoneComposeCtx.fillStyle = t.color || '#ffffff';
-      sstvPhoneComposeCtx.font = (t.italic ? 'italic ' : '') + (t.bold ? 'bold ' : '') + t.fontSize + 'px sans-serif';
-      if (t.rotation) {
-        sstvPhoneComposeCtx.translate(t.x, t.y);
-        sstvPhoneComposeCtx.rotate(t.rotation);
-        sstvPhoneComposeCtx.fillText(t.label, 0, 0);
-      } else {
-        sstvPhoneComposeCtx.fillText(t.label, t.x, t.y);
-      }
+      sstvPhoneDrawText(sstvPhoneComposeCtx, t);
       sstvPhoneComposeCtx.restore();
     }
     // PiP reply inset (drawn last so it sits above text)
