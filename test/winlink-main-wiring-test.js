@@ -407,7 +407,7 @@ test('Pat gets a prediction engine on every config write, decided in one place',
   assert.ok(/settings\.winlinkPrediction !== false/.test(fn), 'default on');
   assert.ok(/C:\\\\itshfbc\\\\bin_win\\\\voacapw\.exe/.test(fn), 'the operator\'s own Windows VOACAP wins (and the path keeps its backslashes)');
   assert.ok(/'voacapl'/.test(fn), 'voacapl on PATH elsewhere');
-  assert.ok(/WinlinkPat\.predictionConfig\(\{ enabled, localVoacap, serviceUrl: settings\.winlinkPredictionUrl \}\)/.test(fn));
+  assert.ok(/WinlinkPat\.predictionConfig\(\{ enabled, localVoacap, serviceUrl: settings\.winlinkPredictionUrl, serviceUp: _voacapService\.up \}\)/.test(fn));
   assert.ok(/'winlinkPredictionUrl',/.test(read('main.js').slice(0, 60000)), 'the service override is a machine key');
   assert.ok(/'winlinkPrediction', 'winlinkPredictionUrl', 'myCallsign', 'grid'\]/.test(main), 'a change relaunches Pat');
 });
