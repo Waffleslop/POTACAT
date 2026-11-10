@@ -30325,7 +30325,13 @@ function sendMergedSpots() {
     merged.push(...keep);
   }
   lastMergedSpots = merged; // cached for the bandspread-popout-push override
-  win.webContents.send('spots', merged);
+  // Driving a remote shack: the table and map show the SHACK's spots, relayed
+  // by remoteClient.on('spots'). This PC's own list used to be sent here too,
+  // and each one replaced the other: the shack drops CW/RBN and SOTA spots
+  // past their max age before relaying (POTA is exempt), so those rows and map
+  // markers vanished and came back on every refresh (#246, electricfalcon
+  // 2026-11-10). This PC's list fills in only while the link is down.
+  if (!isRemoteLinked()) win.webContents.send('spots', merged);
   pushSpotsToSmartSdr(merged);
   pushSpotsToTci(merged);
   // Forward to ECHOCAT — all modes (phone-side Mode dropdown handles filtering), respect max spot age
