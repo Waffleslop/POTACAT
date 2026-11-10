@@ -12652,14 +12652,19 @@ async function winlinkGateways(mode, band) {
       const tagged = new Set((settings.winlinkMercuryGateways || []).map((c) => String(c).toUpperCase()));
       list = list.map((g) => ({ ...g, mercury: tagged.has(g.call) }));
     }
+    // Only the bands this radio is used on (Settings > My Rigs): the Band
+    // picker offers only those, and "All" means all of them.
+    const onBands = WinlinkPat.gatewaysOnBands(list, activeRigBands());
+    list = onBands.list;
     winlinkState.setGateways(mode, band, list);
     // Pat ranks by predicted link quality when its engine answered; a row
     // with no quality means the engine was off, unreachable, or the gateway
     // is above HF (VOACAP stops at 30 MHz). Say which order the list is in.
     const hf = !WinlinkModes.isFmMode(mode);
     const predicted = list.some((g) => g.quality != null);
-    const note = WinlinkPat.rankingNote({ predicted, count: list.length, hf });
-    const tell = `gateways (${mode}${band ? ', ' + band : ''}): ${list.length} listed, ${predicted ? list.filter((g) => g.quality != null).length + ' with a propagation prediction' : 'nearest first' + (hf && settings.winlinkPrediction !== false && list.length ? (_voacapService.up === false ? ` — POTACAT's VOACAP service is not available (${_voacapService.why})` : ' — no prediction came back') : '')}`;
+    const outside = onBands.dropped ? `${onBands.dropped} gateway${onBands.dropped === 1 ? '' : 's'} on bands this radio is not set up for left out (Settings > My Rigs > Bands).` : '';
+    const note = [WinlinkPat.rankingNote({ predicted, count: list.length, hf }), outside].filter(Boolean).join(' ');
+    const tell = `gateways (${mode}${band ? ', ' + band : ''}): ${list.length} listed${onBands.dropped ? ' (' + onBands.dropped + ' outside the radio\'s bands left out)' : ''}, ${predicted ? list.filter((g) => g.quality != null).length + ' with a propagation prediction' : 'nearest first' + (hf && settings.winlinkPrediction !== false && list.length ? (_voacapService.up === false ? ` — POTACAT's VOACAP service is not available (${_voacapService.why})` : ' — no prediction came back') : '')}`;
     if (tell !== _winlinkGatewaysLogged) { _winlinkGatewaysLogged = tell; winlinkLog(tell); }
     return { ok: true, mode, band: band || '', list, predicted, note };
   } catch (e) {
