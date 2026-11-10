@@ -203,15 +203,21 @@
 
     var p = ss.prompt;
     var pr = $('wl-prompt');
-    pr.classList.toggle('show', !!p);
+    // "Keep waiting" is remembered per prompt: the session is pushed twice a
+    // second, and the bar used to come straight back (#296).
+    pr.classList.toggle('show', !!p && !(p.kind === 'busy-channel' && p.id === keptWaitingFor));
     if (p) {
       if (p.kind === 'busy-channel') {
-        $('wl-prompt-text').textContent = 'The frequency is busy. Wait for it to clear, or give up?';
+        $('wl-prompt-text').textContent = busyPromptText(p);
         $('wl-prompt-yes').textContent = 'Keep waiting';
         $('wl-prompt-no').textContent = 'Give up';
-        $('wl-prompt-yes').onclick = function () { pr.classList.remove('show'); };
+        $('wl-prompt-yes').onclick = function () { keptWaitingFor = p.id; pr.classList.remove('show'); };
+        $('wl-prompt-go').textContent = 'Call anyway';
+        $('wl-prompt-go').style.display = '';
+        $('wl-prompt-go').onclick = function () { window.api.answerPrompt(p.id, 'continue'); };
         $('wl-prompt-no').onclick = function () { window.api.answerPrompt(p.id, 'abort'); };
       } else {
+        $('wl-prompt-go').style.display = 'none';
         $('wl-prompt-text').textContent = p.message || 'Winlink asks for a decision';
         $('wl-prompt-yes').textContent = 'Accept';
         $('wl-prompt-no').textContent = 'Decline';
@@ -219,6 +225,15 @@
         $('wl-prompt-no').onclick = function () { window.api.answerPrompt(p.id, 'decline'); };
       }
     }
+  }
+
+  var keptWaitingFor = null; // the busy-channel prompt the operator chose to keep waiting on
+  /** "The frequency is busy. Waited 0:42 of 5:00; ..." (the same words on ECHOCAT Web, remote.js). */
+  function busyPromptText(p) {
+    var mmss = function (s) { return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+    var t = 'The frequency is busy.';
+    if (p.limitSec && p.waitedSec != null) t += ' Waited ' + mmss(Math.min(p.waitedSec, p.limitSec)) + ' of ' + mmss(p.limitSec) + '; the call starts by itself when it clears and is dropped at ' + mmss(p.limitSec) + '.';
+    return t + ' Call anyway only if you have listened and it is clear.';
   }
 
   // ── lists ────────────────────────────────────────────────────────────────
