@@ -15560,16 +15560,22 @@ var _paddleHoldTimer = { dit: null, dah: null };
     mailEl('mail-abort').classList.toggle('hidden', !mailActive(ss));
     var pr = mailEl('mail-prompt');
     var p = ss.prompt;
-    pr.classList.toggle('hidden', !p);
+    // "Keep waiting" is remembered per prompt (#296): the session arrives twice a second.
+    pr.classList.toggle('hidden', !p || (p.kind === 'busy-channel' && p.id === mailKeptWaitingFor));
     if (p) {
       var busy = p.kind === 'busy-channel';
-      pr.innerHTML = '<span style="flex:1">' + esc(busy ? 'The frequency is busy.' : (p.message || 'Decision needed')) + '</span>'
+      var mmss = function (s) { return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+      var busyText = 'The frequency is busy.' + (p.limitSec && p.waitedSec != null ? ' Waited ' + mmss(Math.min(p.waitedSec, p.limitSec)) + ' of ' + mmss(p.limitSec) + '; the call starts by itself when it clears and is dropped at ' + mmss(p.limitSec) + '.' : '') + ' Call anyway only if you have listened and it is clear.';
+      pr.innerHTML = '<span style="flex:1">' + esc(busy ? busyText : (p.message || 'Decision needed')) + '</span>'
         + '<button type="button" id="mail-p-yes">' + (busy ? 'Keep waiting' : 'Accept') + '</button>'
+        + (busy ? '<button type="button" id="mail-p-go">Call anyway</button>' : '')
         + '<button type="button" id="mail-p-no">' + (busy ? 'Give up' : 'Decline') + '</button>';
-      mailEl('mail-p-yes').onclick = function () { if (busy) pr.classList.add('hidden'); else mailSend({ type: 'winlink-prompt', id: p.id, value: 'accept' }); };
+      if (busy) mailEl('mail-p-go').onclick = function () { mailSend({ type: 'winlink-prompt', id: p.id, value: 'continue' }); };
+      mailEl('mail-p-yes').onclick = function () { if (busy) { mailKeptWaitingFor = p.id; pr.classList.add('hidden'); } else mailSend({ type: 'winlink-prompt', id: p.id, value: 'accept' }); };
       mailEl('mail-p-no').onclick = function () { mailSend({ type: 'winlink-prompt', id: p.id, value: busy ? 'abort' : 'decline' }); };
     }
   }
+  var mailKeptWaitingFor = null; // the busy-channel prompt the operator chose to keep waiting on (#296)
   function mailShowList() {
     mailEl('mail-list').classList.remove('hidden');
     mailEl('mail-reader').classList.add('hidden');

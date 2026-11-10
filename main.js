@@ -10361,6 +10361,7 @@ function disconnectMercury() {
 const _wlNet = require('net');
 const WINLINK_PTT_FAILSAFE_MS = 30000;
 const WINLINK_NO_PROGRESS_MS = 180000;
+const WINLINK_BUSY_WAIT_SEC = 300; // Pat's own limit on a busy channel (pat app/connect.go: 5 * time.Minute)
 // PTT-off is delayed this long after the modem asks, so the tail of its audio
 // clears POTACAT's pipeline (socket → resampler → bridge ring / Flex or Icom
 // stream) before the carrier drops. The modem has already waited out its own
@@ -11014,8 +11015,12 @@ function winlinkOnPatEvent(ev) {
     if (auto != null && patClient) { patClient.respondPrompt(ev.id, auto); return; }
     // The operator decides: a busy channel (wait or abort), or the CMS's
     // new-account password message (accept to download it).
-    winlinkState.setSession({ prompt: { id: ev.id, kind: ev.prompt, message: ev.message } });
-    winlinkLog(ev.prompt === 'busy-channel' ? 'the channel is busy — waiting for it to clear (Abort to give up)' : `Pat asks: ${ev.message}`);
+    // A busy channel: Pat waits up to 5 minutes for it to clear, then gives up
+    // by itself (pat app/connect.go onBusyChannel). `at` and `limitSec` let
+    // every surface show how long it has waited (#296).
+    const busyWait = ev.prompt === 'busy-channel';
+    winlinkState.setSession({ prompt: { id: ev.id, kind: ev.prompt, message: ev.message, at: Date.now(), ...(busyWait ? { limitSec: WINLINK_BUSY_WAIT_SEC } : {}) } });
+    winlinkLog(busyWait ? `the channel is busy — waiting up to ${WINLINK_BUSY_WAIT_SEC / 60} minutes for it to clear (Stop to give up); ${winlinkRxLevelText()}` : `Pat asks: ${ev.message}`);
     winlinkSessionPush();
     return;
   }
@@ -12006,8 +12011,22 @@ function winlinkSessionActive() {
 
 function winlinkSessionTouch() { _winlinkLastActivity = Date.now(); }
 
+/** Pat is holding the call until the frequency clears (its busy-channel prompt is pending). */
+function winlinkWaitingForClearChannel() {
+  const p = winlinkState.session.prompt;
+  return !!(p && p.kind === 'busy-channel' && winlinkSessionActive());
+}
+/** The radio audio the modem hears, in words for the log: a hot feed is the usual cause of a channel that never reads clear. */
+function winlinkRxLevelText() {
+  const fresh = Date.now() - _winlinkRxPeakAt < 1500 && _winlinkRxPeak > 0;
+  if (!fresh) return 'no radio audio is reaching the modem';
+  const db = Math.max(-90, Math.round(20 * Math.log10(_winlinkRxPeak)));
+  return `radio audio to the modem peaks at ${db} dBFS${db >= -3 ? ' (the top of the scale: turn the audio output level of the radio down, a clipped feed can read as busy for ever)' : ''}`;
+}
+
 function winlinkSessionPush() {
   const s = { ...winlinkState.session, remainingSec: winlinkState.remainingSec() };
+  if (s.prompt && s.prompt.at) s.prompt = { ...s.prompt, waitedSec: Math.max(0, Math.round((Date.now() - s.prompt.at) / 1000)) };
   winlinkPopoutSend('winlink-session', s);
   if (remoteServer && remoteServer.broadcastWinlinkSession) { try { remoteServer.broadcastWinlinkSession(s); } catch {} }
   winlinkPush();
@@ -12120,6 +12139,9 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
         _winlinkShimArmed = true;
         _winlinkCapTimer = setTimeout(() => winlinkAbortSession(`the session reached its ${capMin}-minute limit`), capMin * 60000);
         _winlinkWatchdog = setInterval(() => {
+          // Waiting for a busy channel to clear is not a stall: Pat ends that
+          // wait itself after 5 minutes (#296), and the session cap still runs.
+          if (winlinkWaitingForClearChannel()) winlinkSessionTouch();
           if (Date.now() - _winlinkLastActivity > WINLINK_NO_PROGRESS_MS) winlinkAbortSession('nothing moved for 3 minutes');
           else winlinkSessionPush(); // keeps the countdown fresh on every surface
         }, 15000);
@@ -12398,7 +12420,15 @@ function winlinkAbortSession(why) {
   winlinkLog(`aborting the session — ${why}`);
   _winlinkSessionError = `Stopped: ${why}`;
   _winlinkSessionErrorKind = 'stopped';
-  winlinkState.setSession({ state: 'disconnecting', text: `Stopping — ${why}` });
+  // Pat ignores a disconnect while it waits for a clear channel: it went on
+  // waiting, and its leftover call failed the next attempt with "Session
+  // failure" (#289 log). The pending prompt is what stops it.
+  const pending = winlinkState.session.prompt;
+  if (pending && pending.kind === 'busy-channel' && patClient) {
+    patClient.respondPrompt(pending.id, 'abort');
+    winlinkLog('told Pat to stop waiting for a clear channel');
+  }
+  winlinkState.setSession({ state: 'disconnecting', text: `Stopping — ${why}`, prompt: null });
   winlinkSessionPush();
   if (patClient) patClient.disconnect(true).catch(() => {});
   // Pat's connect returns once the transport closes; if it doesn't, end here.
@@ -12408,6 +12438,14 @@ function winlinkAbortSession(why) {
 function winlinkAnswerPrompt(id, value) {
   const s = winlinkState.session;
   if (!s.prompt || s.prompt.id !== id || !patClient) return false;
+  // A busy channel has two answers: "abort" drops the call; anything else
+  // makes Pat call now (pat app/connect.go onBusyChannel). "continue" is only
+  // ever the operator's own Call anyway (Casey, 2026-11-09): a busy detector
+  // can be wrong, and the control operator is the one who has listened.
+  if (s.prompt.kind === 'busy-channel' && value !== 'abort') {
+    if (value !== 'continue') return false;
+    winlinkLog(`the operator chose to call on a channel the modem reads as busy, after ${Math.round((Date.now() - (s.prompt.at || Date.now())) / 1000)} s of waiting; ${winlinkRxLevelText()}`);
+  }
   patClient.respondPrompt(id, value);
   winlinkState.setSession({ prompt: null });
   winlinkSessionPush();
