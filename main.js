@@ -10553,7 +10553,7 @@ async function winlinkVaraConfigure({ kind: k, devices, inputLabel, outputLabel,
   // put up a box nobody can click from ECHOCAT (#183). A line naming one of
   // POTACAT's own ports is reported here and the launch is refused with
   // advice (winlinkVaraReady); VARA FM's PTT option is the operator's.
-  const patched = VaraSetup.planVaraIniPatch(iniText, { inputName: plan.vara.inputName, outputName: plan.vara.outputName, port, ownPorts: winlinkPotacatComPorts(), pttVia: VaraSetup.varaPttViaFor(kind) });
+  const patched = VaraSetup.planVaraIniPatch(iniText, { inputName: plan.vara.inputName, outputName: plan.vara.outputName, port, ownPorts: winlinkPotacatComPorts(), pttVia: VaraSetup.varaPttViaFor(kind), kind });
   const portClash = VaraSetup.describePortConflicts(name, patched.conflicts);
   if (portClash) winlinkLog(portClash.replace(/^.*? was not started: /, `${name}: `));
   const noPort = VaraSetup.describeNoPort(name, VaraSetup.varaIniNoPortValues(patched.text));
@@ -10718,7 +10718,7 @@ async function winlinkVaraReady(mode, { configured } = {}) {
         // takes the port from rigctld and keys the radio itself (n5xhi).
         let iniNow = '';
         try { iniNow = fs.readFileSync(path.join(path.dirname(bin.path), kind === 'fm' ? 'VARAFM.ini' : 'VARA.ini'), 'utf8'); } catch { iniNow = ''; }
-        const clash = VaraSetup.describePortConflicts(name, VaraSetup.varaIniPortConflicts(iniNow, winlinkPotacatComPorts()));
+        const clash = VaraSetup.describePortConflicts(name, VaraSetup.varaIniPortConflicts(iniNow, winlinkPotacatComPorts(), { kind }));
         if (clash) {
           winlinkLog(clash);
           _winlinkSessionErrorKind = 'vara-not-configured';
