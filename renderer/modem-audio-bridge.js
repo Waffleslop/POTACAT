@@ -88,6 +88,8 @@ function makeSide({ name, what, where, rx, status }) {
     if (playCtx.state === 'suspended') await playCtx.resume();
     await playCtx.audioWorklet.addModule('modem-play-worklet.js');
     playNode = new AudioWorkletNode(playCtx, 'modem-play', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [1], processorOptions: { sourceRate: 24000 } });
+    // The worklet answers an over's end with what went wrong inside it, if anything.
+    playNode.port.onmessage = (e) => { if (e.data && e.data.over) status({ txOver: e.data.over }); };
     playGain = playCtx.createGain();
     playGain.gain.value = (typeof c.txGain === 'number' && isFinite(c.txGain)) ? Math.max(0, Math.min(2, c.txGain)) : 1;
     playNode.connect(playGain); playGain.connect(playCtx.destination);
@@ -136,13 +138,18 @@ function makeSide({ name, what, where, rx, status }) {
     playNode.port.postMessage(pcm);
   }
 
+  /** One over begins or ends (main: key-down / carrier dropped). */
+  function over(d) {
+    if (playNode) playNode.port.postMessage({ cmd: d && d.on ? 'over-start' : 'over-end' });
+  }
+
   function stop() {
     clearInterval(levelTimer); levelTimer = null;
     stopCapture(); stopPlayback();
     status({ stopped: true });
   }
 
-  return { start, playback, tx, stop };
+  return { start, playback, tx, over, stop };
 }
 
 const radio = makeSide({
@@ -159,6 +166,7 @@ const cable = makeSide({
 window.bridge.onStart((c) => radio.start(c));
 window.bridge.onPlayback((c) => radio.playback(c));
 window.bridge.onTx((d) => radio.tx(d));
+window.bridge.onOver((d) => radio.over(d));
 window.bridge.onStop(() => { radio.stop(); cable.stop(); });
 window.bridge.onStopRadio(() => radio.stop());
 window.bridge.onCableStart((c) => cable.start({ ...(c || {}), playback: true }));

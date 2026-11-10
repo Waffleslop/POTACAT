@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('bridge', {
   rx: (pcm, sampleRate, peak) => ipcRenderer.send('modem-bridge-rx', { pcm, sampleRate, peak }),
   status: (s) => ipcRenderer.send('modem-bridge-status', s),
   onTx: (cb) => ackedChannel('modem-bridge-tx', cb),
+  onOver: (cb) => ipcRenderer.on('modem-bridge-over', (_e, d) => cb(d)),
   // The cable side (VARA): capture = what VARA transmits, playback = what VARA hears.
   onCableStart: (cb) => ipcRenderer.on('modem-bridge-cable-start', (_e, cfg) => cb(cfg)),
   onCableStop: (cb) => ipcRenderer.on('modem-bridge-cable-stop', () => cb()),

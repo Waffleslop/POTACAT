@@ -82,11 +82,44 @@ test('a mode with no data form, or one already in it, is unchanged', () => {
   for (const m of ['DIGU', 'DIGL', 'CW', 'RTTY', '']) assert.strictEqual(S.dataFormOf(m), m);
 });
 
+console.log('one switch per session (#300)');
+test('a session that already asked for DATA keys as the radio is, whatever it reports', () => {
+  assert.strictEqual(S.sessionDataPlan({ hold: true, inData: false, tried: true }), 'keep');
+  assert.strictEqual(S.sessionDataPlan({ hold: true, inData: true, tried: true }), 'keep');
+  assert.strictEqual(S.sessionDataPlan({ hold: true, inData: false, tried: false }), 'switch-hold');
+  assert.strictEqual(S.sessionDataPlan({ hold: false, inData: false, tried: true }), 'switch-restore', 'voice and SSTV are not a session');
+});
+test('NA4DQ IC-7100 on rigctld: the radio reads back FM after every switch; 79 overs send ONE mode command, not 70', () => {
+  // A radio that never reports DATA: before, every over planned switch-hold.
+  let tried = false; const cmds = [];
+  for (let i = 0; i < 79; i++) {
+    const plan = S.sessionDataPlan({ hold: true, inData: false, tried });
+    if (plan === 'switch-hold') { cmds.push('DIGFM'); tried = true; }
+  }
+  assert.deepStrictEqual(cmds, ['DIGFM']);
+});
+test('main.js: the key-down marks the session as asked; FM-D is asked for before Pat dials, off the key-down', () => {
+  const p = fnBody(main, 'handleRemotePtt');
+  assert.ok(/if \(_dataPlan === 'switch-hold'\) _winlinkDataAskedFor = _winlinkSessionSeq;/.test(p));
+  assert.ok(/not a DATA mode, after this session asked for one — keying as it is/.test(p), 'said once, with what to check');
+  const e = fnBody(main, 'winlinkEnterFmDataBeforeDial');
+  assert.ok(/!WinlinkModes\.isFmMode\(mode\)/.test(e) && /!icom/.test(e), 'Icom FM modems only: HF sessions QSY in DIGU already');
+  assert.ok(/\(pttModeReport\(\) \|\| \{\}\)\.data\) return;/.test(e), 'nothing sent to a radio already in data');
+  assert.ok(e.indexOf('_winlinkDataAskedFor = _winlinkSessionSeq;') < e.indexOf("cat.setModeOnly('DIGFM'"), 'marked before it is sent');
+  assert.ok(/noAnchor: true/.test(e), 'an Icom memory channel keeps its duplex: no frequency write');
+  const s = fnBody(main, 'winlinkStartSession');
+  const tune = s.indexOf("{ origin: 'Winlink session' }");
+  const enter = s.indexOf('await winlinkEnterFmDataBeforeDial(mode);');
+  const dial = s.indexOf('await patClient.connect(url)');
+  assert.ok(tune > 0 && enter > tune && dial > enter, 'after the QSY, before Pat dials');
+  assert.ok(/await winlinkEnterFmDataBeforeDial\(mode\);\n\s*if \(!live\(\)\) throw cancelled\(\);/.test(s), 'a stopped attempt goes no further');
+});
+
 console.log('main.js wiring');
 const ptt = fnBody(main, 'handleRemotePtt');
 test('handleRemotePtt asks the plan for a Winlink key-down, judged on the radio\'s DATA report', () => {
   assert.ok(/const _holdData = forceData && opts\.txKind === 'winlink';/.test(ptt), 'hold = a forced-DATA Winlink frame');
-  assert.ok(/PttModeSwap\.sessionDataPlan\(\{ hold: _holdData, inData: [^}]*pttModeReport\(\)/.test(ptt), 'judged on pttModeReport()');
+  assert.ok(/const _inData = !!\(pttModeReport\(\) \|\| \{\}\)\.data;/.test(ptt) && /PttModeSwap\.sessionDataPlan\(\{ hold: _holdData, inData: _inData, tried: _holdData && _winlinkDataAskedFor === _winlinkSessionSeq \}\)/.test(ptt), 'judged on pttModeReport(), and on whether this session already asked (#300)');
 });
 test('a frame with the radio in DATA keys straight away, logged once per session', () => {
   assert.ok(/_dataPlan === 'keep'/.test(ptt));

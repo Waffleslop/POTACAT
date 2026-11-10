@@ -11184,6 +11184,7 @@ async function startWinlinkShim() {
       }
       winlinkTxActive = true;
       _winlinkTxBurst.keyDown();
+      modemBridgeOver(true);
       const icom = detectRigType() === 'icom' || (getActiveRigModel()?.brand === 'Icom');
       if (settings.audioSource === 'icom-network') icomNetworkVoiceTx(true, 'Winlink');
       try { handleRemotePtt(true, { audio: true, forceDataMode: icom, emission: 'DATA', txKind: 'winlink' }); } catch (e) { winlinkLog(`PTT failed: ${e.message}`); }
@@ -11227,6 +11228,7 @@ function winlinkSendPreKeyAudio() {
 function winlinkTxBurstEnd() {
   const burst = _winlinkTxBurst.keyUp({ gainDb: _modemTxLeveler ? _modemTxLeveler.gainDb : 0 });
   if (burst) winlinkLog(burst.text);
+  if (burst) modemBridgeOver(false);
 }
 /** How long the modem's final samples take to reach the radio after it stops writing. */
 function winlinkUnkeyDrainMs() {
@@ -11550,6 +11552,23 @@ function winlinkRememberModemTxGain() {
   if (saved === g) return;
   settings.winlinkModemTxGain = { ...(settings.winlinkModemTxGain || {}), [key]: g };
   saveSettings(settings);
+}
+/**
+ * Mark the start and end of one over for the bridge window's play worklet,
+ * which counts what only it can see: silence INSIDE the frame (POTACAT fed
+ * the sound card late) and audio dropped as backlog. Either one damages a
+ * long frame and neither showed anywhere (#300). Reported back only when
+ * something was wrong (modem-bridge-status txOver).
+ */
+function modemBridgeOver(on) {
+  if (winlinkIpAudioRoute() || !modemBridgeWin || modemBridgeWin.isDestroyed() || !_modemBridgeLoaded || !modemBridge.playback) return;
+  try { modemBridgeWin.webContents.send('modem-bridge-over', { on: !!on }); } catch {}
+}
+function modemBridgeOverText(o) {
+  const parts = [];
+  if (o.gaps > 0) parts.push(`${o.gaps} gap${o.gaps > 1 ? 's' : ''} of silence inside the frame, ${Math.round(o.gapMs)} ms in all (the audio reached the sound card late)`);
+  if (o.droppedMs > 0) parts.push(`${Math.round(o.droppedMs)} ms of audio dropped as backlog`);
+  return parts.length ? `modem audio bridge: the last over was damaged on its way to the radio: ${parts.join('; ')}. A long frame does not survive this.` : '';
 }
 function modemBridgePlayback(on) {
   modemBridge.playback = !!on;
@@ -12134,6 +12153,8 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
         } else {
           tuneRadio(Number(dialKhz), WinlinkModes.isFmMode(mode) ? 'FM' : 'DIGU', undefined, { origin: 'Winlink session' });
           winlinkState.setSession({ tuned: true });
+          await winlinkEnterFmDataBeforeDial(mode);
+          if (!live()) throw cancelled();
         }
         winlinkFlexDaxOn();
         _winlinkShimArmed = true;
@@ -12180,6 +12201,25 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
     }
   })();
   return { ok: true };
+}
+
+/**
+ * Packet and VARA FM on an Icom key in FM-D. That mode is asked for ONCE,
+ * here, before Pat dials. On the first key-down it cost the first frame: the
+ * key waited 812 ms for a DATA report that an IC-7100 on rigctld never gives,
+ * and the radio was up for the last 180 ms of a 828 ms connect request (#300).
+ */
+async function winlinkEnterFmDataBeforeDial(mode) {
+  const rig = getActiveRigModel();
+  const icom = detectRigType() === 'icom' || !!(rig && rig.brand === 'Icom');
+  if (!icom || !WinlinkModes.isFmMode(mode) || !cat || !cat.connected || !cat.setModeOnly) return;
+  await new Promise((r) => setTimeout(r, 500)); // behind the QSY's own frequency and mode commands
+  if (!cat || !cat.connected || (pttModeReport() || {}).data) return;
+  _winlinkDataAskedFor = _winlinkSessionSeq;
+  _modeSuppressUntil = Date.now() + 2000;
+  winlinkLog('FM -> DIGFM for this session, asked once before the first frame (an Icom takes modem audio in its data mode)');
+  try { cat.setModeOnly('DIGFM', _currentFreqHz || 0, { noAnchor: true }); } catch (e) { winlinkLog(`the data mode could not be set: ${e.message}`); }
+  await new Promise((r) => setTimeout(r, 400));
 }
 
 let _winlinkSessionSeq = 0; // the attempt a start chain belongs to; a stopped one can never end a later one
@@ -27798,6 +27838,7 @@ function pttAskMode() {
 // Skipped for the latched codec; after the first timeout on a link, every
 // later key-down there keys at the bus-gap minimum (transmit-safety review).
 let _pttDataNoConfirmCat = null;
+let _winlinkDataAskedFor = -1;   // the Winlink session that has already asked the radio for a DATA mode (#300)
 let _pttDataHeldLoggedFor = -1; // the Winlink session whose "DATA held" line is already in the log (#187)
 function pttDataConfirmable() {
   const codec = cat && cat._codec;
@@ -28051,11 +28092,15 @@ function handleRemotePtt(state, opts = {}) {
     // Icom reads USB with DATA as its own flag, so every ARDOP frame went
     // USB -> DIGU and "Restoring USB" undid the session's DIGU (NA4DQ IC-7300).
     const _holdData = forceData && opts.txKind === 'winlink';
-    const _dataPlan = PttModeSwap.sessionDataPlan({ hold: _holdData, inData: !!(pttModeReport() || {}).data });
+    const _inData = !!(pttModeReport() || {}).data;
+    const _dataPlan = PttModeSwap.sessionDataPlan({ hold: _holdData, inData: _inData, tried: _holdData && _winlinkDataAskedFor === _winlinkSessionSeq });
+    if (_dataPlan === 'switch-hold') _winlinkDataAskedFor = _winlinkSessionSeq; // one switch per session, never one per over (#300)
     if (_dataPlan === 'keep') {
       if (_pttDataHeldLoggedFor !== _winlinkSessionSeq) {
         _pttDataHeldLoggedFor = _winlinkSessionSeq;
-        sendCatLog('[PTT] the radio is in DATA mode already — keying without a mode change; it stays in DATA until the Winlink session ends');
+        sendCatLog(_inData
+          ? '[PTT] the radio is in DATA mode already — keying without a mode change; it stays in DATA until the Winlink session ends'
+          : `[PTT] the radio reports ${_currentMode || 'no mode'}, not a DATA mode, after this session asked for one — keying as it is, with no mode change on any frame. If nothing is transmitted, set the radio's modulation source for this mode to USB.`);
       }
     } else if (curMode === 'USB' || curMode === 'LSB' || curMode === 'SSB' || curMode === 'FM' || curMode === 'AM') {
       // FM and AM have their own data forms on an Icom (FM-D / AM-D). Sending
@@ -41237,6 +41282,7 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('modem-bridge-status', (e, s = {}) => {
     if (!modemBridgeWin || modemBridgeWin.isDestroyed() || e.sender !== modemBridgeWin.webContents) return;
     if (typeof s.level === 'number') { modemBridge.level = s.level; return; }
+    if (s.txOver) { const t = modemBridgeOverText({ gaps: Number(s.txOver.gaps) || 0, gapMs: Number(s.txOver.gapMs) || 0, droppedMs: Number(s.txOver.droppedMs) || 0 }); if (t) winlinkLog(t); return; }
     if (s.stopped) return;
     if (s.ok) {
       modemBridge.state = 'ok'; modemBridge.error = '';
