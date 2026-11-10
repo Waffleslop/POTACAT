@@ -10896,12 +10896,30 @@ function winlinkPredictionConfig() {
       });
     }
   }
-  const cfg = WinlinkPat.predictionConfig({ enabled, localVoacap, serviceUrl: settings.winlinkPredictionUrl });
-  const how = cfg.engine === 'disabled' ? 'off — gateways nearest first' : cfg.engine === 'voacap' ? 'your own VOACAP install' : `POTACAT's VOACAP service (${cfg.voacap_api.base_url})`;
+  const cfg = WinlinkPat.predictionConfig({ enabled, localVoacap, serviceUrl: settings.winlinkPredictionUrl, serviceUp: _voacapService.up });
+  const how = cfg.engine === 'voacap' ? 'your own VOACAP install'
+    : cfg.engine !== 'disabled' ? `POTACAT's VOACAP service (${cfg.voacap_api.base_url})`
+    : enabled ? `nearest first this run — POTACAT's VOACAP service is not available (${_voacapService.why})`
+    : 'off — gateways nearest first';
   if (how !== _winlinkPredictionLogged) { _winlinkPredictionLogged = how; winlinkLog(`gateway ranking: ${how}`); }
   return cfg;
 }
 let _winlinkPredictionLogged = '';
+// POTACAT's hosted VOACAP, checked once per Winlink start (#278). null = not
+// checked; false = checked and not there, so Pat is not pointed at it.
+const _voacapService = { up: null, why: '' };
+async function winlinkCheckVoacapService() {
+  if (settings.winlinkPrediction === false) return;
+  const base = String(settings.winlinkPredictionUrl || '').trim().replace(/\/+$/, '') || WinlinkPat.PAT_DEFAULTS.predictionUrl;
+  let status = 0, error = '';
+  try {
+    const r = await fetch(`${base}/version`, { signal: AbortSignal.timeout(5000) });
+    status = r.status;
+  } catch (e) { error = (e && (e.name === 'TimeoutError' ? 'no answer in 5 s' : e.message)) || String(e); }
+  const v = WinlinkPat.voacapServiceVerdict({ status, error });
+  _voacapService.up = v.use;
+  _voacapService.why = v.why;
+}
 
 /** Write Pat's config for this launch / this session. Returns the varahf address written. */
 function writePatConfig({ varaAddr } = {}) {
@@ -11087,6 +11105,7 @@ async function connectWinlink() {
     return;
   }
   await startWinlinkShim();
+  await winlinkCheckVoacapService();
   try { writePatConfig(); }
   catch (e) { winlinkState.setPat({ ready: false, error: e.message }); winlinkLog(`could not write Pat's config: ${e.message}`); winlinkPush(); return; }
   try { await spawnPat(); }
@@ -12638,7 +12657,7 @@ async function winlinkGateways(mode, band) {
     const hf = !WinlinkModes.isFmMode(mode);
     const predicted = list.some((g) => g.quality != null);
     const note = WinlinkPat.rankingNote({ predicted, count: list.length, hf });
-    const tell = `gateways (${mode}${band ? ', ' + band : ''}): ${list.length} listed, ${predicted ? list.filter((g) => g.quality != null).length + ' with a propagation prediction' : 'nearest first' + (hf && settings.winlinkPrediction !== false && list.length ? ' — no prediction came back (VOACAP service unreachable?)' : '')}`;
+    const tell = `gateways (${mode}${band ? ', ' + band : ''}): ${list.length} listed, ${predicted ? list.filter((g) => g.quality != null).length + ' with a propagation prediction' : 'nearest first' + (hf && settings.winlinkPrediction !== false && list.length ? (_voacapService.up === false ? ` — POTACAT's VOACAP service is not available (${_voacapService.why})` : ' — no prediction came back') : '')}`;
     if (tell !== _winlinkGatewaysLogged) { _winlinkGatewaysLogged = tell; winlinkLog(tell); }
     return { ok: true, mode, band: band || '', list, predicted, note };
   } catch (e) {
