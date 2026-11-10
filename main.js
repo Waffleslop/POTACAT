@@ -2021,6 +2021,8 @@ const landmarksFeed = new (require('./lib/landmarks-feed').LandmarksFeed)({
 landmarksFeed.load();
 const LandmarksLib = require('./lib/landmarks');
 const Channels = require('./lib/channels');
+const VfoCompact = require('./lib/vfo-compact');
+let _vfoCompactNow = false; // the VFO window is the mini strip right now
 // The starter channel chart (data/channels.json: FRS, GMRS, MURS, marine,
 // aviation, interop, EMS — lists from KL4XQ and KC8DHX). The operator's copy
 // lives in settings.channels; Channels.reconcile seeds it and appends what a
@@ -40430,9 +40432,12 @@ function cloudShackNotice(text, kind) {
     });
     vfoPopoutWin.on('close', () => {
       if (vfoPopoutWin && !vfoPopoutWin.isDestroyed() && !vfoPopoutWin.isMaximized() && !vfoPopoutWin.isMinimized()) {
-        settings.vfoPopoutBounds = vfoPopoutWin.getBounds();
+        // In mini the saved size is the full one, so the next open (which
+        // starts full and shrinks) is never stuck at strip height.
+        settings.vfoPopoutBounds = _vfoCompactNow ? VfoCompact.savedBounds(vfoPopoutWin.getBounds(), settings.vfoFullSize) : vfoPopoutWin.getBounds();
         saveSettings(settings);
       }
+      _vfoCompactNow = false;
     });
     vfoPopoutWin.on('closed', () => {
       vfoPopoutWin = null;
@@ -40458,6 +40463,27 @@ function cloudShackNotice(text, kind) {
       win.show();
       win.focus();
     }
+  });
+
+  // Mini VFO: the window becomes a strip (VfoCompact.miniSize) and grows back
+  // to the size it had (settings.vfoFullSize). The choice is remembered.
+  ipcMain.on('vfo-set-compact', (_e, { on, height, save } = {}) => {
+    const w = vfoPopoutWin;
+    if (!w || w.isDestroyed()) return;
+    if (w.isMaximized()) w.unmaximize();
+    const b = w.getBounds();
+    if (on) {
+      if (!_vfoCompactNow) settings.vfoFullSize = { width: b.width, height: b.height };
+      const size = VfoCompact.miniSize({ width: b.width, height });
+      w.setMinimumSize(VfoCompact.MINI.minWidth, VfoCompact.MINI.minHeight);
+      w.setBounds({ x: b.x, y: b.y, width: size.width, height: size.height });
+    } else if (_vfoCompactNow) {
+      const full = VfoCompact.fullSize(settings.vfoFullSize, b);
+      w.setBounds(clampToWorkArea({ x: b.x, y: b.y, width: full.width, height: full.height }));
+      w.setMinimumSize(300, 360);
+    }
+    _vfoCompactNow = !!on;
+    if (save && settings.vfoCompact !== !!on) { settings.vfoCompact = !!on; saveSettings(settings); }
   });
 
   ipcMain.on('vfo-set-always-on-top', (_e, on) => {

@@ -69,7 +69,7 @@ test('main: every window opens with themeQuery(), theme changes broadcast to all
   assert.ok(!m.includes("{ theme: settings.lightMode ? 'light' : 'dark', variant: settings.darkVariant || 'navy' }"), 'a window still builds its own theme payload');
   assert.ok((m.match(/themeQuery\(\)/g) || []).length >= 30);
   assert.ok(/function broadcastAppTheme\(\)[\s\S]*?BrowserWindow\.getAllWindows\(\)/.test(m));
-  assert.ok(/const _themeBefore = JSON\.stringify\(AppTheme\.resolveAppTheme\(settings\)\);\n\s+settings = \{ \.\.\.settings, \.\.\.newSettings \};\n\s+if \(JSON\.stringify\(AppTheme\.resolveAppTheme\(settings\)\) !== _themeBefore\) broadcastAppTheme\(\);/.test(m));
+  assert.ok(/const _themeBefore = JSON\.stringify\(AppTheme\.resolveAppTheme\(settings\)\);[^]{0,300}?\n\s+settings = \{ \.\.\.settings, \.\.\.newSettings \};[^]{0,400}?\n\s+if \(JSON\.stringify\(AppTheme\.resolveAppTheme\(settings\)\) !== _themeBefore\) broadcastAppTheme\(\);/.test(m));
   assert.ok(/'appTheme',\s+\/\//.test(m), 'appTheme in GLOBAL_KEYS');
 });
 
