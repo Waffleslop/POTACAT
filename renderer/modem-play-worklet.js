@@ -16,8 +16,17 @@ class ModemPlayProcessor extends AudioWorkletProcessor {
     this.bufRead = 0; this.bufWrite = 0; this.bufAvailable = 0;
     this.fracPos = 0;
     this.underruns = 0; this.overflows = 0;
+    // One over (key-down to carrier drop), marked by main: silence between
+    // two stretches of audio is a hole in the frame; a backlog drop is a cut.
+    this.over = null;
     this.port.onmessage = (e) => {
       const msg = e.data;
+      if (msg && msg.cmd === 'over-start') { this.over = { seen: false, pending: 0, gaps: 0, gapFrames: 0, dropped: 0 }; return; }
+      if (msg && msg.cmd === 'over-end') {
+        const o = this.over; this.over = null;
+        if (o && (o.gaps || o.dropped)) this.port.postMessage({ over: { gaps: o.gaps, gapMs: o.gapFrames * 1000 / this.targetRate, droppedMs: o.dropped * 1000 / this.sourceRate } });
+        return;
+      }
       if (msg && msg.cmd === 'reset') { this.bufRead = this.bufWrite = this.bufAvailable = 0; this.fracPos = 0; return; }
       if (msg && msg.cmd === 'stats') { this.port.postMessage({ stats: { underruns: this.underruns, overflows: this.overflows, queued: this.bufAvailable } }); return; }
       const pcm = msg;
@@ -27,6 +36,7 @@ class ModemPlayProcessor extends AudioWorkletProcessor {
         this.bufRead = (this.bufRead + drop) % this.bufSize;
         this.bufAvailable -= drop;
         this.overflows++;
+        if (this.over) this.over.dropped += drop;
       }
       for (let i = 0; i < pcm.length; i++) {
         this.buf[this.bufWrite] = pcm[i];
@@ -39,7 +49,16 @@ class ModemPlayProcessor extends AudioWorkletProcessor {
     const out = outputs[0] && outputs[0][0];
     if (!out) return true;
     for (let i = 0; i < out.length; i++) {
-      if (this.bufAvailable < 2) { out[i] = 0; if (this.bufAvailable === 0) this.underruns++; continue; }
+      if (this.bufAvailable < 2) {
+        out[i] = 0;
+        if (this.bufAvailable === 0) this.underruns++;
+        if (this.over && this.over.seen) this.over.pending++; // dry after audio: a hole if more audio follows, the tail if not
+        continue;
+      }
+      if (this.over) {
+        if (this.over.pending) { this.over.gaps++; this.over.gapFrames += this.over.pending; this.over.pending = 0; }
+        this.over.seen = true;
+      }
       const i0 = this.bufRead, i1 = (this.bufRead + 1) % this.bufSize;
       out[i] = this.buf[i0] + (this.buf[i1] - this.buf[i0]) * this.fracPos;
       this.fracPos += this.step;
