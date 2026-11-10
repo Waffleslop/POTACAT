@@ -249,5 +249,29 @@ test('a gateway list Pat cannot parse is recognised; other failures are not (Mer
   assert.strictEqual((main.match(/patClient\.rmslist\(/g) || []).length, 2, 'no other caller bypasses it');
 });
 
+// #336 (Casey 2026-11-10): ARDOP, radio set for 40 to 10 m, "All" still
+// ranked an 80 m gateway (3589.5 kHz) as Good.
+test('#336: the gateway list keeps only the bands this radio is used on', () => {
+  const rows = [
+    { call: 'A', freqKhz: 3589.5, dialKhz: 3588 },
+    { call: 'B', freqKhz: 7101.5, dialKhz: 7100 },
+    { call: 'C', freqKhz: 14109, dialKhz: 14107.5 },
+    { call: 'D', freqKhz: 28120, dialKhz: 28118.5 },
+    { call: 'E', freqKhz: 5000 },            // in no ham band: never dropped on a guess
+    { call: 'F' },                           // no frequency: kept
+  ];
+  const r = W.gatewaysOnBands(rows, ['40m', '30m', '20m', '17m', '15m', '12m', '10m']);
+  assert.deepStrictEqual(r.list.map((g) => g.call), ['B', 'C', 'D', 'E', 'F']);
+  assert.strictEqual(r.dropped, 1);
+  assert.strictEqual(W.gatewaysOnBands(rows, null).list.length, 6, 'no band list known: everything stays');
+  assert.strictEqual(W.gatewaysOnBands(rows, []).dropped, 0);
+  assert.strictEqual(W.gatewaysOnBands([{ call: 'G', dialKhz: 3588 }], ['40m']).dropped, 1, 'the dial is used when the centre is missing');
+  const main = readSrc(require('path').join(__dirname, '..', 'main.js'));
+  const fn = main.slice(main.indexOf('async function winlinkGateways('), main.indexOf('let _winlinkGatewaysLogged'));
+  const at = fn.indexOf('WinlinkPat.gatewaysOnBands(list, activeRigBands())');
+  assert.ok(at > 0 && at < fn.indexOf('winlinkState.setGateways(mode, band, list)'), 'filtered before it is stored and sent');
+  assert.ok(/on bands this radio is not set up for left out \(Settings > My Rigs > Bands\)/.test(fn), 'the window says how many were left out');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
