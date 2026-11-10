@@ -341,7 +341,7 @@ function fnBody(src, name) {
     assert.ok(/winlinkVaraConfigure\(\{ kind, quiet: true \}\)\.then/.test(main), 'a rig switch re-syncs a closed VARA');
     assert.ok(!/PTT set to None/.test(main), 'VARA has no None: VOX');
     assert.ok(/fs\.copyFileSync\(iniPath, iniPath \+ '\.potacat-'/.test(fn), 'backup before the write');
-    assert.ok(/VaraSetup\.planVaraIniPatch\(iniText, \{ inputName: plan\.vara\.inputName, outputName: plan\.vara\.outputName, port, ownPorts: winlinkPotacatComPorts\(\), pttVia: VaraSetup\.varaPttViaFor\(kind\) \}\)/.test(fn), 'POTACAT\'s own ports are looked for in VARA\'s file (never blanked, #183)');
+    assert.ok(/VaraSetup\.planVaraIniPatch\(iniText, \{ inputName: plan\.vara\.inputName, outputName: plan\.vara\.outputName, port, ownPorts: winlinkPotacatComPorts\(\), pttVia: VaraSetup\.varaPttViaFor\(kind\), kind \}\)/.test(fn), 'POTACAT\'s own ports are looked for in VARA\'s file (never blanked, #183)');
     assert.ok(/rig\.modemCable = \{ inputId: plan\.potacat\.inputId, outputId: plan\.potacat\.outputId, inputLabel: plan\.potacat\.inputLabel, outputLabel: plan\.potacat\.outputLabel, varaInputName: plan\.vara\.inputName, varaOutputName: plan\.vara\.outputName \}/.test(fn), 'POTACAT\'s side and VARA\'s names saved on the rig for later syncs');
     assert.ok(/const l = await listArdopDevices\(\); if \(l && l\.ok\) mme = l\.devices;/.test(fn) && /VaraSetup\.planCables\(devices, \{ mme \}\)/.test(fn), 'VARA\'s names come from the MME listing');
     assert.ok(/VaraSetup\.varaLogDeviceProblem\(/.test(fnBody(main, 'winlinkVaraSetup')), 'VARA\'s log is the verdict');
@@ -412,6 +412,32 @@ function fnBody(src, name) {
     assert.ok(/ownPorts: winlinkPotacatComPorts\(\)/.test(fn) && !/freePorts/.test(fn));
     assert.ok(/VaraSetup\.describeNoPort\(name, VaraSetup\.varaIniNoPortValues\(/.test(fn), 'a COM0 left by 1.14.0 is named in the log');
   });
+  // #304 (n5xhi 2026-11-10, VARA FM 4.4.1): he picked VOX in VARA FM and its
+  // ini then read Via=3, with CATPort=COM9 kept from his earlier choice. COM9
+  // is the TI-3000's PTT port, which POTACAT keys (rigctld --ptt-file), so the
+  // by-value check refused to start a VARA FM that keys nothing.
+  const N5XHI_VOX_INI = '[Soundcard]\r\nInput Device Name=Microphone RigExpert (RigExpert\r\nOutput Device Name=Speaker RigExpert (RigExpert TI\r\nALC Drive Level=-12\r\n[PTT]\r\nRig=51\r\nPTTPort=COM1\r\nCATPort=COM9\r\nBaud=4800\r\nPin=1\r\nRTS=1\r\nDTR=0\r\nVia=3\r\n[Setup]\r\nTCP Command Port=8310\r\nTCP Scan Port=8427\r\nFM Mode=2\r\n';
+  await test('#304: a VARA FM on VOX (Via=3) is started even when its ini still names POTACAT\'s port; any other PTT option is still refused', () => {
+    assert.strictEqual(S.VARA_FM_PTT_VIA_VOX, 3);
+    assert.strictEqual(S.varaIniPttVia(N5XHI_VOX_INI), 3);
+    assert.strictEqual(S.varaIniPttVia(N5XHI_INI), 1);
+    assert.strictEqual(S.varaIniPttVia('[Setup]\nVia=3\n'), null, 'only the [PTT] section counts');
+    assert.strictEqual(S.varaIniPttVia(''), null);
+    assert.strictEqual(S.varaPttIsVox(N5XHI_VOX_INI, 'fm'), true);
+    assert.strictEqual(S.varaPttIsVox(N5XHI_VOX_INI, 'hf'), false, 'VARA HF\'s VOX number is not known from a real file');
+    assert.strictEqual(S.varaPttIsVox(N5XHI_INI, 'fm'), false, 'Via=1 opened COM8 in VARA FM: not VOX');
+    assert.deepStrictEqual(S.varaIniPortConflicts(N5XHI_VOX_INI, ['COM8', 'COM9'], { kind: 'fm' }), [], 'VOX keys nothing: no clash');
+    assert.deepStrictEqual(S.varaIniPortConflicts(N5XHI_VOX_INI, ['COM8', 'COM9']).map((h) => h.key), ['CATPort'], 'no kind given: the old by-value check');
+    assert.deepStrictEqual(S.varaIniPortConflicts(N5XHI_VOX_INI, ['COM9'], { kind: 'hf' }).map((h) => h.key), ['CATPort'], 'VARA HF keeps the by-value check');
+    assert.deepStrictEqual(S.varaIniPortConflicts(N5XHI_INI, ['COM8', 'COM9'], { kind: 'fm' }).map((h) => h.key), ['PTTPort', 'CATPort'], 'VARA FM on another option is still refused');
+    const r = S.planVaraIniPatch(N5XHI_VOX_INI, { inputName: 'Microphone (RigExpert TI-3000)', outputName: 'Speakers (RigExpert TI-3000)', port: 8310, ownPorts: ['COM8', 'COM9'], pttVia: S.varaPttViaFor('fm'), kind: 'fm' });
+    assert.deepStrictEqual(r.conflicts, []);
+    const lines = r.text.split(/\r\n/);
+    assert.ok(lines.includes('CATPort=COM9') && lines.includes('PTTPort=COM1') && lines.includes('Via=3'), 'the port lines and his VOX choice are left as they were (never blanked, #183)');
+    assert.ok(!r.changes.some((c) => /port$/i.test(c.key) && !/TCP/i.test(c.key)) && !r.changes.some((c) => c.key === 'Via'));
+    const ready = fnBody(main, 'winlinkVaraReady');
+    assert.ok(/VaraSetup\.varaIniPortConflicts\(iniNow, winlinkPotacatComPorts\(\), \{ kind \}\)/.test(ready), 'the launch check knows which VARA it is');
+  });
   await test('n5xhi: the direct route\'s names come from the live MME listing, a saved label is never written as-is', () => {
     const r = S.resolveDirectNames({ capture: 'RigExpert (RigExpert TI-3000)', playback: 'RigExpert (RigExpert TI-3000)', mme: N5XHI_MME });
     assert.strictEqual(r.ok, true);
@@ -438,7 +464,7 @@ function fnBody(src, name) {
     const ports = fnBody(main, 'winlinkPotacatComPorts');
     assert.ok(/'path', 'serialPort', 'pttPort'/.test(ports) && /settings\.cwKeyPort/.test(ports));
     const ready = fnBody(main, 'winlinkVaraReady');
-    const clash = ready.indexOf('VaraSetup.varaIniPortConflicts(iniNow, winlinkPotacatComPorts())');
+    const clash = ready.indexOf('VaraSetup.varaIniPortConflicts(iniNow, winlinkPotacatComPorts(), { kind })');
     assert.ok(clash > 0 && clash < ready.indexOf('spawn(bin.path'), 'checked before VARA is started');
     assert.ok(/winlinkLog\(clash\);/.test(ready));
     const setup = fnBody(main, 'winlinkVaraSetup');
