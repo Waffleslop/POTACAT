@@ -24571,6 +24571,16 @@ function connectRemote() {
     // COM port for weeks with no error). Reuse the tune-blocked channel the
     // VFO lock already uses — shipped apps render it with zero mobile changes.
     if (!((smartSdr && smartSdr.canTune) || (cat && cat.connected))) {
+      // POTACAT cannot move the radio, but an SDR may hear it (#329): a
+      // Channels or Landmarks tap, NOAA on 162.55 MHz, CB 9, with the radio
+      // off or no CAT at all, listens through the SDR instead of a refusal.
+      const hz = Math.round(parseFloat(freqKhz) * 1000);
+      if (hz > 0) {
+        const route = ListenSource.routeWithoutRig(hz, rigReachNow(), listenSdrState(), !!sdrCandidateFor(hz));
+        const why = (settings.catTarget && settings.catTarget.type === 'none') ? 'from ECHOCAT (no CAT control)' : 'from ECHOCAT (the radio is not connected)';
+        if (route === 'sdr') { listenSdrTake(hz, mode, why); return; }
+        if (route === 'connect' && listenSdrConnectFor(hz, mode, why)) return;
+      }
       if (settings.catTarget && settings.catTarget.type === 'none') {
         const mhz = (parseFloat(freqKhz) / 1000).toFixed(3);
         const bandNote = noCatBandNote(parseFloat(mhz));
@@ -38003,6 +38013,28 @@ function sdrListenMode(mode, hz) {
   return m === 'DIGU' || m === 'PKTUSB' || m === 'FT8' || m === 'FT4' || m === 'FT2' || m === 'WSPR' ? 'USB' : m === 'DIGL' || m === 'PKTLSB' ? 'LSB' : m === 'SSB' ? (hz >= 10e6 ? 'USB' : 'LSB') : m;
 }
 
+/** The connected SDR becomes what you hear at hz; the radio (if any) stays where it is. */
+function listenSdrTake(hz, mode, why) {
+  const m = sdrListenMode(mode, hz);
+  listenSdr.hz = hz; listenSdr.mode = m;
+  kiwiClient.tune(hz / 1000, m.toLowerCase());
+  if (!listenSdr.live) {
+    sendCatLog(`[WebSDR] ${ListenSource.fmtMhz(hz)} ${m} ${why}: listening through ${kiwiLiveHost || 'the SDR'}` + (_currentFreqHz > 0 ? `; the radio stays on ${ListenSource.fmtMhz(_currentFreqHz)}` : ''));
+    kiwiGoLive(true);
+  }
+  sendCatFrequency(hz);   // the displays show what you hear (the radio's dial is kept, not shown)
+}
+
+/** Bring up the first listed SDR that covers hz and finish the tune when it answers (listenSdrResume). False when none covers it. */
+function listenSdrConnectFor(hz, mode, why) {
+  const cand = sdrCandidateFor(hz);
+  if (!cand) return false;
+  kiwiAutoPending = { hz, mode: sdrListenMode(mode, hz) };
+  sendCatLog(`[WebSDR] ${ListenSource.fmtMhz(hz)} ${why}: connecting ${cand.label} to listen through`);
+  require('electron').ipcMain.emit('kiwi-connect', { sender: { send: () => {} } }, { host: cand.host, port: cand.port, auto: true });
+  return true;
+}
+
 /**
  * Called by tuneRadio before anything moves. Returns 'rig' (carry on), 'sdr'
  * (the SDR took it, the radio stays) or 'none' (nothing can hear it, refused).
@@ -38019,26 +38051,11 @@ function listenSdrArbitrate(hz, mode, origin) {
     // The operator's own choice: the SDR follows the dial as it always has,
     // and the radio tunes too (tuneRadio's own auto-tune moves the SDR).
     if (d.reason === 'chosen') return 'rig';
-    const m = sdrListenMode(mode, hz);
-    listenSdr.hz = hz; listenSdr.mode = m;
-    kiwiClient.tune(hz / 1000, m.toLowerCase());
-    if (!listenSdr.live) {
-      sendCatLog(`[WebSDR] ${ListenSource.fmtMhz(hz)} ${m} is outside the radio's range: listening through ${kiwiLiveHost || 'the SDR'}; the radio stays on ${ListenSource.fmtMhz(_currentFreqHz || 0)}`);
-      kiwiGoLive(true);
-    }
-    sendCatFrequency(hz);   // the displays show what you hear (the radio's dial is kept, not shown)
+    listenSdrTake(hz, mode, 'is outside the radio\'s range');
     return 'sdr';
   }
   // Nothing connected can hear it. An SDR in the list that could: bring it up and come back here.
-  if (!(kiwiClient && kiwiClient.connected)) {
-    const cand = sdrCandidateFor(hz);
-    if (cand) {
-      kiwiAutoPending = { hz, mode: sdrListenMode(mode, hz) };
-      sendCatLog(`[WebSDR] ${ListenSource.fmtMhz(hz)} is outside the radio's range: connecting ${cand.label} to listen through`);
-      require('electron').ipcMain.emit('kiwi-connect', { sender: { send: () => {} } }, { host: cand.host, port: cand.port, auto: true });
-      return 'sdr';
-    }
-  }
+  if (!(kiwiClient && kiwiClient.connected) && listenSdrConnectFor(hz, mode, 'is outside the radio\'s range')) return 'sdr';
   const rigName = getActiveRigModelName() || 'the radio';
   const why = ListenSource.refusal(hz, d, rigName, kiwiLiveHost);
   sendCatLog(`[tune] refused: ${why}`);
