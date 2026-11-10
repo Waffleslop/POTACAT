@@ -47,6 +47,8 @@ contextBridge.exposeInMainWorld('api', {
   openLogForm: () => ipcRenderer.send('vfo-open-log'),
   openWebSdrSettings: () => ipcRenderer.send('vfo-open-websdr-settings'),
   setAlwaysOnTop: (on) => ipcRenderer.send('vfo-set-always-on-top', on),
+  // Mini VFO: shrink to a strip of `height` px, or grow back (main remembers the full size).
+  setVfoCompact: (on, height, save) => ipcRenderer.send('vfo-set-compact', { on: !!on, height: Number(height) || 0, save: save !== false }),
   voiceMacroList: () => ipcRenderer.invoke('voice-macro-list'),
   voiceMacroLoad: (idx) => ipcRenderer.invoke('voice-macro-load', idx),
   getSettings: () => ipcRenderer.invoke('get-settings'),

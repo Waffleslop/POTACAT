@@ -15,7 +15,7 @@
       --t: #e0e0e0; --t2: #b4b4c8; --t3: #8e8ea8;
       --blue: #4fc3f7; --green: #4ecca3; --red: #e94560; --gold: #ffd740; --amber: #f0a500;
       --on-blue: #0d1b2a; --green-tint: rgba(78,204,163,.16); --red-tint: #3a1828; --red-text: #ffc7d1;
-      --ptt: #c8334f; --ptt-on: #e94560; --on-red: #fff; --on-ptt: #fff; --log-bg: rgba(78,204,163,.16);
+      --ptt: #e94560; --ptt-on: #e94560; --on-red: #fff; --on-ptt: #fff; --log-bg: rgba(78,204,163,.16);
       --knob-housing-a: #404058; --knob-housing-b: #2a2a3a; --knob-housing-c: #1a1a28; --knob-base: #222233;
       --knob-a: #4a4a62; --knob-b: #353548; --knob-c: #28283a;
       --knob-ridge: rgba(255,255,255,0.1); --knob-bevel: rgba(255,255,255,0.08);
@@ -35,7 +35,7 @@
       --t: #e6e9ee; --t2: #a9afb8; --t3: #858b95;
       --blue: #38bdf8; --green: #52c992; --red: #ef4444; --gold: #fbbf24; --amber: #f59e0b;
       --on-blue: #06131c; --green-tint: rgba(82,201,146,.15); --red-tint: #2e1414; --red-text: #fecaca;
-      --ptt: #c93636; --ptt-on: #ef4444; --log-bg: rgba(82,201,146,.15);
+      --ptt: #ef4444; --ptt-on: #ef4444; --log-bg: rgba(82,201,146,.15);
       --knob-housing-a: #3a3e46; --knob-housing-b: #23262c; --knob-housing-c: #121417; --knob-base: #0e1013;
       --knob-a: #3c4048; --knob-b: #2a2e35; --knob-c: #1c1f24;
       --knob-ridge: rgba(255,255,255,0.09); --knob-bevel: rgba(255,255,255,0.07);
@@ -61,12 +61,13 @@
        theme's roles here, as ds-bridge.css does for every styles.css window. */
     :root[data-ds] {
       --g: var(--ds-bg); --s: var(--ds-surface); --s2: var(--ds-fill);
-      --s3: color-mix(in srgb, var(--ds-fill), var(--ds-ink) 10%); --in: var(--ds-control); --line: var(--ds-line-subtle);
+      --s3: color-mix(in srgb, var(--ds-fill), var(--ds-ink) 10%); --in: var(--ds-bg); /* wells (meter tracks, text boxes) sink to the page colour; --ds-control is a dark control on the light themes */ --line: var(--ds-line-subtle);
       --t: var(--ds-ink); --t2: var(--ds-ink-muted); --t3: var(--ds-ink-muted);
       --blue: var(--ds-tint); --green: var(--ds-ok); --red: var(--ds-air-ink); --gold: var(--ds-brand); --amber: var(--ds-warn);
       --on-blue: var(--ds-on-tint); --on-red: var(--ds-on-danger); --on-ptt: var(--ds-on-air);
       --green-tint: var(--ds-ok-subtle); --red-tint: var(--ds-danger-subtle); --red-text: var(--ds-danger);
-      --ptt: var(--ds-air-deep); --ptt-on: var(--ds-air); --log-bg: var(--ds-ok-subtle);
+      /* PTT at rest is the theme's on-air red, not its deep shade (the muddy red Casey flagged). */
+      --ptt: var(--ds-air); --ptt-on: var(--ds-air); --log-bg: var(--ds-ok-subtle);
       --knob-housing-a: color-mix(in srgb, var(--ds-fill), var(--ds-ink) 18%); --knob-housing-b: var(--ds-fill); --knob-housing-c: var(--ds-surface); --knob-base: var(--ds-bg);
       --knob-a: color-mix(in srgb, var(--ds-fill), var(--ds-ink) 14%); --knob-b: color-mix(in srgb, var(--ds-fill), var(--ds-ink) 6%); --knob-c: var(--ds-fill);
       --knob-ridge: color-mix(in srgb, var(--ds-ink) 14%, transparent); --knob-bevel: color-mix(in srgb, var(--ds-ink) 10%, transparent);
@@ -151,8 +152,13 @@
     .freq-other { font-size: 18px; font-weight: 600; color: var(--amber); }
     .freq-other-tag { font-size: 11px; color: var(--amber); font-weight: 700; }
     .freq-unit { font-size: 12px; color: var(--t3); }
-    .audio-btn.active { color: var(--green); }
-    .audio-btn.muted { color: var(--red); }
+    /* Audio on / Audio off in words: green while you can hear the radio, red
+       (slashed speaker) while you cannot, whether muted or not started. */
+    .audio-btn { width: auto; padding: 0 10px 0 8px; gap: 6px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+    .audio-btn svg { width: 18px; height: 18px; stroke-width: 2; }
+    .audio-btn.on { background: var(--green-tint); color: var(--green); }
+    .audio-btn.off { background: var(--red-tint); color: var(--red); }
+    .audio-btn.on:hover, .audio-btn.off:hover { filter: brightness(1.15); }
     .vfo-lock-btn.locked { background: var(--red); color: var(--on-red); animation: lock-pulse 1.5s ease-in-out infinite; }
     @keyframes lock-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
 
@@ -165,7 +171,12 @@
     .meter-bar-wrap { flex: 1; height: 8px; background: var(--in); border-radius: 4px; overflow: hidden; }
     .meter-bar { height: 100%; width: 0%; transition: width 0.1s; border-radius: 4px; }
     .meter-text { font-family: 'Cascadia Mono', Consolas, monospace; font-size: 12px; font-weight: 600; min-width: 44px; text-align: right; color: var(--t); }
-    input[type="range"] { accent-color: var(--blue); }
+    /* Sliders: POTACAT blue on a dark track. Without a colour scheme Chromium
+       draws its own pale grey track, which glared on the dark themes. */
+    input[type="range"] { accent-color: var(--blue); color-scheme: dark; }
+    [data-theme="light"] input[type="range"] { color-scheme: light; }
+    /* TX power sets transmit power: red, like every transmit control. */
+    #vfo-txpower { accent-color: var(--ptt-on); }
 
     /* --- SWR guard card --- */
     .swr-alert { display: none; padding: 16px; background: var(--red-tint); border-radius: 14px; flex-direction: column; gap: 10px; color: var(--red-text); }
@@ -248,16 +259,18 @@
     .cw-ctrl-row { display: flex; align-items: center; gap: 6px; }
     .cw-wpm-btn { width: 30px; height: 30px; border: 0; border-radius: 8px; background: var(--s2); color: var(--t); font-size: 16px; font-weight: 600; cursor: pointer; }
     .cw-wpm-btn:hover { background: var(--s3); }
-    .cw-wpm-val { font-family: 'Cascadia Mono', Consolas, monospace; font-size: 16px; font-weight: 600; color: var(--gold); min-width: 26px; text-align: center; }
+    .cw-wpm-val { font-family: 'Cascadia Mono', Consolas, monospace; font-size: 16px; font-weight: 600; color: var(--blue); min-width: 26px; text-align: center; }
     .cw-wpm-unit { font-size: 10px; color: var(--t3); }
     .cw-spot-wpm { font-size: 11px; color: var(--t2); margin-left: 4px; }
     .cw-sync-btn { border: 0; background: var(--blue); color: var(--on-blue); font-size: 11px; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-weight: 600; }
     .cw-text-row { display: flex; gap: 6px; }
     .cw-text-input { flex: 1; min-width: 0; height: 34px; background: var(--in); border: 0; color: var(--t); padding: 0 10px; border-radius: 8px; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 13px; text-transform: uppercase; outline: none; }
     .cw-text-input:focus { box-shadow: inset 0 0 0 2px var(--blue); }
-    .cw-send-btn { border: 0; background: var(--gold); color: #111; font-weight: 600; padding: 0 14px; border-radius: 8px; font-size: 12px; cursor: pointer; }
+    /* Send keys the transmitter: red, like PTT. */
+    .cw-send-btn { border: 0; background: var(--ptt-on); color: var(--on-ptt); font-weight: 600; padding: 0 14px; border-radius: 8px; font-size: 12px; cursor: pointer; }
+    .cw-send-btn:hover { filter: brightness(1.08); }
     .cw-macro-btn, .voice-macro-btn { border: 0; background: var(--s2); padding: 7px 10px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: 600; }
-    .cw-macro-btn { color: var(--gold); }
+    .cw-macro-btn { color: var(--t); }
     .voice-macro-btn { color: var(--blue); }
     .cw-macro-btn:hover, .voice-macro-btn:hover { background: var(--s3); }
     .voice-macro-btn.active { background: var(--blue); color: var(--on-blue); }
@@ -283,6 +296,35 @@
     .sdr-dd-item.current { font-weight: 700; background: color-mix(in srgb, var(--blue) 16%, transparent); box-shadow: inset 3px 0 0 var(--blue); }
     .sdr-dd-item.current:hover { background: color-mix(in srgb, var(--blue) 24%, transparent); }
     .sdr-dd-item.conn::after { content: ' \25CF'; color: var(--green); }
+
+    /* --- Mini VFO: frequency, mode and band, S-meter, Audio, PTT, Log in a strip.
+       The title-bar button switches; main sizes the window (vfo-set-compact).
+       Everything else stays where it is and comes back with Embiggen. --- */
+    .band-chip { display: none; }
+    body.mini { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; align-items: center; }
+    body.mini .titlebar { grid-column: 1 / -1; }
+    body.mini .scroll { overflow: hidden; padding: 0 0 8px 12px; gap: 6px; }
+    body.mini .scroll > :not(.head-card):not(.swr-alert.show) { display: none !important; }
+    body.mini .head-card { padding: 0; gap: 3px; background: transparent; box-shadow: none; }
+    body.mini .freq-display { order: -1; }
+    body.mini .freq-display .fq-main { font-size: 26px; }
+    body.mini .freq-display .fq-sub { font-size: 16px; }
+    body.mini .freq-display .fq-unit { display: none; }
+    body.mini .chip-row { min-height: 0; align-items: center; }
+    body.mini .chip-row .chips { padding-top: 0; gap: 4px; flex-wrap: nowrap; overflow: hidden; }
+    body.mini .chip-row .chip { padding: 3px 6px; font-size: 10px; }
+    body.mini #vfo-badge, body.mini #filter-badge, body.mini #sec-step, body.mini .vfo-lock-btn { display: none !important; }
+    body.mini .band-chip:not(:empty) { display: inline-block; }
+    body.mini .audio-btn { height: 26px; padding: 0 6px; }
+    body.mini .audio-btn .audio-word { display: none; }
+    body.mini #widget-smeter.visible { padding: 0; gap: 0; }
+    body.mini #widget-smeter .meter-row:not(:has(#smeter-bar)) { display: none; }
+    body.mini #widget-smeter .meter-label, body.mini #widget-smeter .meter-text { display: none; }
+    body.mini #widget-smeter .meter-bar-wrap { height: 4px; flex: none; width: 96px; }
+    body.mini .bar { grid-column: 2; grid-row: 2; padding: 0 8px 8px 8px; background: transparent; border-top: 0; gap: 6px; align-self: center; }
+    body.mini .ptt-btn { flex: none; height: 36px; padding: 0 14px; font-size: 13px; border-radius: 9px; }
+    body.mini .log-btn-vfo { width: auto; height: 36px; padding: 0 12px; font-size: 13px; border-radius: 9px; }
+    body.mini #eq-btn { display: none !important; }
 
     /* --- Bottom bar: PTT, transmit audio, LOG --- */
     .bar { flex: none; padding: 12px; background: var(--s); display: flex; gap: 8px; border-top: 1px solid var(--line); }
@@ -420,6 +462,7 @@
   <div class="titlebar">
     <span class="titlebar-title">VFO</span>
     <div class="titlebar-btns">
+      <button class="ib" id="mini-btn" title="Make the VFO small" aria-label="Make the VFO small"><svg viewBox="0 0 24 24"><path d="M4 14h6v6M20 10h-6V4M10 14l-7 7M14 10l7-7"></path></svg></button>
       <button class="ib" id="gear-btn" title="VFO settings" aria-label="VFO settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg></button>
       <button class="ib" id="pin-btn" title="Keep this window on top" aria-label="Keep on top"><svg viewBox="0 0 24 24"><path d="M12 17v5"></path><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3z"></path></svg></button>
       <button class="ib win-btn" onclick="window.api.minimize()" title="Minimize" aria-label="Minimize"><svg viewBox="0 0 24 24"><path d="M6 12h12"></path></svg></button>
@@ -439,6 +482,7 @@
         <span class="chip split" id="split-badge" style="display:none" title="Split operation: transmitting on the other VFO">SPLIT</span>
         <span class="chip sdr" id="kiwi-rx-badge" style="display:none">SDR RX</span>
         <span class="chip tx hidden" id="tx-chip">TX</span>
+        <span class="chip band-chip" id="band-chip"></span>
         </div>
         <button class="ib audio-btn" id="audio-btn" title="Radio audio monitor" aria-label="Radio audio monitor"></button>
         <button class="ib vfo-lock-btn" id="vfo-lock-btn" title="Click to lock VFO" aria-label="Lock frequency"></button>
@@ -557,7 +601,7 @@
         </div>
         <div class="cw-text-row">
           <input type="text" class="cw-text-input" id="vfo-cw-input" placeholder="Type CW text..." spellcheck="false" autocomplete="off">
-          <button class="cw-send-btn" id="vfo-cw-send">TX</button>
+          <button class="cw-send-btn" id="vfo-cw-send" title="Send this text in CW">Send</button>
         </div>
       </div>
       <div class="card tool-card widget-section" id="widget-cw">
@@ -812,6 +856,9 @@ const ICONS = {
   up: '<svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"></path></svg>',
   down: '<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"></path></svg>',
   speakerMuted: '<svg viewBox="0 0 24 24"><path d="M11 5L6 9H3v6h3l5 4z"></path><path d="M16 9l5 6M21 9l-5 6"></path></svg>',
+  speakerOff: '<svg viewBox="0 0 24 24"><path d="M11 5L6 9H3v6h3l5 4z"></path><path d="M15.5 8.5a5 5 0 0 1 0 7"></path><path d="M3 3l18 18"></path></svg>',
+  grow: '<svg viewBox="0 0 24 24"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"></path></svg>',
+  shrink: '<svg viewBox="0 0 24 24"><path d="M4 14h6v6M20 10h-6V4M10 14l-7 7M14 10l7-7"></path></svg>',
 };
 const freqDisplay = document.getElementById('freq-display');
 const modeBadge = document.getElementById('mode-badge');
@@ -1099,6 +1146,8 @@ function rebuildAllBandGrids() {
 
 function updateBandHighlight() {
   const cur = freqToBand(currentFreqHz);
+  const bandChip = document.getElementById('band-chip');
+  if (bandChip) bandChip.textContent = cur || '';
   document.querySelectorAll('.band-btn').forEach(btn => {
     const b = BANDS.find(b => b.freq === parseInt(btn.dataset.freq));
     btn.classList.toggle('active', b && b.label === cur);
@@ -2384,6 +2433,37 @@ sAlwaysOnTop.addEventListener('change', () => {
   window.api.setAlwaysOnTop(sAlwaysOnTop.checked);
   paintPin();
 });
+// Mini VFO: the title-bar button shrinks the window to a strip and grows it
+// back; main sizes the window and remembers the choice (vfo-set-compact).
+const miniBtn = document.getElementById('mini-btn');
+let vfoMini = false;
+function miniHeight() {
+  const tb = document.querySelector('.titlebar').getBoundingClientRect().height;
+  const left = document.getElementById('scroll').scrollHeight;
+  const bar = document.getElementById('widget-ptt-row');
+  const right = bar && bar.classList.contains('visible') ? bar.scrollHeight : 0;
+  return Math.ceil(tb + Math.max(left, right) + 2);
+}
+function setMini(on, { save = true } = {}) {
+  vfoMini = !!on;
+  document.body.classList.toggle('mini', vfoMini);
+  miniBtn.innerHTML = vfoMini ? ICONS.grow : ICONS.shrink;
+  miniBtn.title = vfoMini ? 'Make the VFO bigger' : 'Make the VFO small';
+  miniBtn.setAttribute('aria-label', miniBtn.title);
+  requestAnimationFrame(() => { if (window.api.setVfoCompact) window.api.setVfoCompact(vfoMini, vfoMini ? miniHeight() : 0, save); });
+}
+miniBtn.addEventListener('click', () => setMini(!vfoMini));
+// The strip keeps its height when something in it grows (split's TX line, the SWR guard).
+if (window.ResizeObserver) {
+  let lastH = 0;
+  new ResizeObserver(() => {
+    if (!vfoMini) return;
+    const h = miniHeight();
+    if (Math.abs(h - lastH) > 2) { lastH = h; if (window.api.setVfoCompact) window.api.setVfoCompact(true, h, false); }
+  }).observe(document.getElementById('scroll'));
+}
+window.api.getSettings().then((s) => { if (s && s.vfoCompact) setMini(true, { save: false }); }).catch(() => {});
+
 // Title-bar pin = the same setting as "Always on top" in the sheet.
 const pinBtn = document.getElementById('pin-btn');
 function paintPin() {
@@ -3423,19 +3503,15 @@ function stopAudioMonitor() {
 }
 
 function updateAudioBtn() {
-  if (!audioMonitorActive) {
-    audioBtn.innerHTML = ICONS.speaker;
-    audioBtn.className = 'ib audio-btn';
-    audioBtn.title = 'Click to listen to radio audio';
-  } else if (audioMonitorMuted) {
-    audioBtn.innerHTML = ICONS.speakerMuted;
-    audioBtn.className = 'ib audio-btn muted';
-    audioBtn.title = 'Muted — click to unmute';
-  } else {
-    audioBtn.innerHTML = ICONS.speakerOn;
-    audioBtn.className = 'ib audio-btn active';
-    audioBtn.title = 'Listening — click to mute';
-  }
+  // Two states on screen: you hear the radio, or you do not (muted, or not
+  // started). The click does what it always did.
+  const on = audioMonitorActive && !audioMonitorMuted;
+  audioBtn.innerHTML = (on ? ICONS.speakerOn : ICONS.speakerOff) + '<span class="audio-word">' + (on ? 'Audio on' : 'Audio off') + '</span>';
+  audioBtn.className = 'ib audio-btn ' + (on ? 'on' : 'off');
+  audioBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  audioBtn.title = on ? 'Listening to the radio: click to mute'
+    : audioMonitorActive ? 'Muted: click to listen again' : 'Click to listen to the radio';
+  audioBtn.setAttribute('aria-label', on ? 'Audio on' : 'Audio off');
 }
 
 audioBtn.addEventListener('click', async () => {
