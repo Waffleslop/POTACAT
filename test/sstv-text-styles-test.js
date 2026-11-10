@@ -83,6 +83,11 @@ test('SSTV window: the four fields are saved, kept in a template, loaded back an
   assert.ok(/face: t\.face \|\| '', fontCss: b\.css, fontWeight: b\.weight, outline: b\.outline, shadow: b\.shadow, spacing: b\.spacing,/.test(push), 'the phone gets the font as drawn');
 });
 
+test('a mode change that doubles the width doubles letter spacing too, like x and size; the hello says so', () => {
+  assert.ok(/t\.fontSize = Math\.max\(6, Math\.round\(\(t\.fontSize \|\| 14\) \* kx\)\); if \(t\.spacing\) t\.spacing = T\.layerStyle\(\{ spacing: t\.spacing \* kx \}\)\.spacing;/.test(sstv));
+  assert.ok(/'sstv-text-styles',/.test(server), 'capability for the phone to gate on');
+});
+
 test('ECHOCAT Web: the shared rules are inlined, kept on every layer copy, and drawn', () => {
   assert.ok(/<!-- sstv-templates-js -->/.test(remoteHtml));
   assert.ok(/\['sstv-templates-js', 'sstv-templates\.js'\]/.test(server));

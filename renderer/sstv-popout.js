@@ -309,7 +309,7 @@ modeSelect.addEventListener('change', () => {
   if (activeStarterId) {
     const k = txCanvas.height / (oldH || 256);
     const kx = txCanvas.width / (oldW || 320);
-    if (k !== 1 || kx !== 1) textElements.forEach(t => { t.y = Math.round(t.y * k); t.x = Math.round(t.x * kx); t.fontSize = Math.max(6, Math.round((t.fontSize || 14) * kx)); });
+    if (k !== 1 || kx !== 1) textElements.forEach(t => { t.y = Math.round(t.y * k); t.x = Math.round(t.x * kx); t.fontSize = Math.max(6, Math.round((t.fontSize || 14) * kx)); if (t.spacing) t.spacing = T.layerStyle({ spacing: t.spacing * kx }).spacing; });
     activeSlot = window.SstvTemplates.replySlot(activeStarterId, txCanvas.height, txCanvas.width);
     rerenderStarterScene();
   }

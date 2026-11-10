@@ -363,7 +363,7 @@ and non-private respectively. The predicate is the thread store's own
 | `sstv-get-gallery` | C→S | Pull the RX gallery. |
 | `sstv-gallery` | S→C | Gallery payload. |
 | `sstv-get-compose` | C→S | Get TX compose state. |
-| `sstv-compose-state` | S→C | Compose state push. |
+| `sstv-compose-state` | S→C | Compose state push: `{bgDataUrl, texts[], mode}`. Each text: `key, label, x, y, fontSize, bold, italic, color, rotation, visible`, and (#327, capability `sstv-text-styles`) `face` (`""`, `plain` or a lib/sstv-templates.js FONTS id), `fontCss`/`fontWeight` (the face as drawn), `outline`, `shadow`, `spacing` (px at the canvas size sent, scaled with x and fontSize on a 640-wide mode). Rules: lib/sstv-templates.js layerStyle / layerFont. |
 | `sstv-rx-image` | S→C | A new RX image is ready. |
 | `sstv-rx-progress` | S→C | RX progress (decoded scanlines). |
 | `sstv-tx-status` | S→C | TX progress. |
