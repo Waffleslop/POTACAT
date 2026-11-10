@@ -135,7 +135,7 @@ for the history.
 | Message | Dir | Purpose |
 |---|---|---|
 | `status` | S→C | Full radio status snapshot. See field table above. |
-| `tune` | C→S | Tune VFO. Fields: `freqKhz` (string, e.g. `"14250.000"`), `mode` (optional), `bearing` (optional, for rotor). |
+| `tune` | C→S | Tune VFO. Fields: `freqKhz` (string, e.g. `"14250.000"`), `mode` (optional), `bearing` (optional, for rotor), `channelId` (optional, a Channels tap: a channel with the radio's memory number `mem` is recalled on the radio instead; older shacks ignore it and tune `freqKhz`). |
 | `tune-blocked` | S→C | Tune was rejected (VFO locked, out of band, etc.). |
 | `set-mode` | C→S | Change mode without retuning frequency. |
 | `set-vfo` | C→S | Switch VFO A/B. |

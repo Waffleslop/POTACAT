@@ -50,8 +50,12 @@
   }
 
   function tune(c) {
-    if (!tuneFn) return;
     selectedId = c.id;
+    // A channel with the radio's memory number is recalled on the radio,
+    // offset and tone included (#308); main falls back to tuning when the
+    // radio link cannot recall.
+    if (c.mem != null && api && api.channelGo) { api.channelGo(c.id); return; }
+    if (!tuneFn) return;
     tuneFn(String(c.khz), C.tuneMode(c.mode));
   }
 
@@ -104,7 +108,7 @@
         tr.tabIndex = 0;
         tr.title = h.ok ? (h.viaSdr ? 'Outside the radio’s range; POTACAT plays it through your SDR' : 'Click to tune') : 'Neither the radio nor an SDR you have set up can receive this';
         tr.innerHTML = `<td><span class="chn-grip" title="Drag to reorder">☰</span></td>`
-          + `<td class="chn-name">${esc(c.name)}${h.viaSdr ? '<span class="chn-sdr">SDR</span>' : ''}</td>`
+          + `<td class="chn-name">${esc(c.name)}${c.mem != null ? `<span class="chn-sdr" title="Recalls memory ${c.mem} on the radio, offset and tone included">M${c.mem}</span>` : ''}${h.viaSdr ? '<span class="chn-sdr">SDR</span>' : ''}</td>`
           + `<td class="chn-mhz">${(c.khz / 1000).toFixed(c.khz % 1 ? 5 : 4).replace(/0+$/, '').replace(/\.$/, '')}</td>`
           + `<td>${esc(c.mode)}</td>`
           + `<td>${esc(C.formatOffset(c.offsetKhz))}</td>`
@@ -153,7 +157,7 @@
     const box = el('chn-editor');
     if (!box) return;
     editingId = c ? c.id : null;
-    const v = c || { name: '', khz: '', mode: 'FM', offsetKhz: 0, tone: '', group: '', note: '' };
+    const v = c || { name: '', khz: '', mode: 'FM', offsetKhz: 0, tone: '', group: '', note: '', mem: null };
     const groups = groupsOf(saved.list);
     box.innerHTML = `
       <label>Name <input id="chn-f-name" maxlength="40" value="${esc(v.name)}" placeholder="Local repeater"></label>
@@ -161,6 +165,7 @@
       <label>Mode <select id="chn-f-mode">${C.MODES.map((m) => `<option${m === v.mode ? ' selected' : ''}>${m}</option>`).join('')}</select></label>
       <label>Offset kHz <input id="chn-f-off" inputmode="decimal" value="${esc(v.offsetKhz || '')}" placeholder="-600, +5000, blank = simplex"></label>
       <label>Tone <input id="chn-f-tone" maxlength="12" value="${esc(v.tone)}" placeholder="123.0 or D023"></label>
+      <label title="The radio's own memory channel for this frequency. A click then calls it up on the radio, offset and tone included. Blank = tune the frequency.">Radio memory <input id="chn-f-mem" inputmode="numeric" maxlength="4" value="${v.mem != null ? esc(v.mem) : ''}" placeholder="blank = none"></label>
       <label>Group <input id="chn-f-group" maxlength="40" list="chn-groups" value="${esc(v.group)}" placeholder="Repeaters"><datalist id="chn-groups">${groups.map((g) => `<option value="${esc(g)}">`).join('')}</datalist></label>
       <label class="chn-editor-note">Note <input id="chn-f-note" maxlength="300" value="${esc(v.note)}" placeholder="What it is, who is on it"></label>
       <div class="chn-editor-actions"><button type="button" id="chn-f-cancel" class="chn-btn">Cancel</button><button type="button" id="chn-f-save" class="chn-btn chn-btn-tint">${c ? 'Save' : 'Add'}</button></div>`;
@@ -180,6 +185,7 @@
       id: editingId || C.newId(),
       name: el('chn-f-name').value, khz: Math.round(mhz * 1e6) / 1000, mode: el('chn-f-mode').value,
       offsetKhz: offRaw ? parseFloat(offRaw) : 0, tone: el('chn-f-tone').value, group: el('chn-f-group').value || (existing && existing.group) || 'My channels',
+      mem: C.memNumber(String(el('chn-f-mem').value).trim()),
       note: el('chn-f-note').value, src: existing ? existing.src : 'user',
     };
     saved = C.upsert(saved, c);
