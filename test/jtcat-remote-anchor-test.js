@@ -7,7 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
 const main = readSrc(path.join(__dirname, '..', 'main.js'));
-const at = main.indexOf("remoteServer.on('tune', ({ freqKhz, mode, bearing }) => {");
+const at = main.indexOf("remoteServer.on('tune', ({ freqKhz, mode, bearing, channelId }) => {");
 assert.ok(at > 0);
 const body = main.slice(at, main.indexOf("remoteServer.on('ptt'", at));
 assert.ok(/if \(_jtcatExpectedDialHz > 0 && \(!mode \|\| \/\^\(FT8\|FT4\|FT2\|DIGU/.test(body), 'an ECHOCAT digital or typed tune moves the anchor');

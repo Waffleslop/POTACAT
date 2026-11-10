@@ -24551,7 +24551,15 @@ function connectRemote() {
   // origin check.
   remoteServer.on('server-state', onEchocatServerState);
 
-  remoteServer.on('tune', ({ freqKhz, mode, bearing }) => {
+  remoteServer.on('tune', ({ freqKhz, mode, bearing, channelId }) => {
+    // A Channels tap from ECHOCAT names its channel: one with a memory
+    // number is recalled on the radio instead (#308). Older apps send no
+    // channelId and are tuned by frequency, as before.
+    if (channelId && channelMemoryOf(String(channelId)) != null && cat && cat.connected && cat.canRecallMemory) {
+      markUserActive();
+      channelGo(String(channelId), 'ECHOCAT');
+      return;
+    }
     // The operator is back, from their mobile device: an idle-RX session ends
     // BEFORE the tune (its cancel restores the pre-idle frequency, which must
     // not land after this one).
@@ -36910,6 +36918,52 @@ function gatedSmartSdrTxPower(value) {
   return true;
 }
 
+// ── Channels: the radio's own memory channels (#308) ─────────────────────
+const MemoryRecall = require('./lib/memory-recall');
+let _memoryRecalled = null; // { mem, id, name } while the radio sits on a memory POTACAT recalled
+function channelMemoryOf(id) {
+  const c = channelsSaved().list.find((x) => x.id === id);
+  return c ? MemoryRecall.memNumber(c.mem) : null;
+}
+/**
+ * A Channels tap: recall the channel's memory when it has one and the radio
+ * link can, else tune its receive frequency as before. Said in the log and,
+ * when the recall lands somewhere else, on the screen.
+ */
+function channelGo(id, from) {
+  const c = channelsSaved().list.find((x) => x.id === id);
+  if (!c) return { ok: false, error: 'That channel is not in the chart any more' };
+  const mem = MemoryRecall.memNumber(c.mem);
+  if (mem == null || !cat || !cat.connected || !cat.canRecallMemory) {
+    if (mem != null) sendCatLog(`[Channels] ${c.name}: memory ${mem} cannot be recalled over this radio link yet (Icom CI-V and rigctld can) — tuning ${(c.khz / 1000).toFixed(4)} MHz instead`);
+    tuneRadio(c.khz, Channels.tuneMode(c.mode), undefined, { origin: `Channels (${from})` });
+    if (c.offsetKhz || c.tone) sendCatLog(`[Channels] ${c.name}: receive frequency only — set the ${c.offsetKhz ? 'offset' : ''}${c.offsetKhz && c.tone ? ' and ' : ''}${c.tone ? 'tone ' + c.tone : ''} on the radio before you transmit, or give the channel its memory number`);
+    return { ok: true, recalled: false };
+  }
+  _memoryRecalled = null; // a recall from one memory to another stays in memory mode
+  if (!cat.selectMemory(mem)) return { ok: false, error: 'The radio did not take the memory command' };
+  _memoryRecalled = { mem, id: c.id, name: c.name };
+  sendCatLog(`[Channels] ${c.name}: recalling memory ${mem} (${from})`);
+  const started = Date.now();
+  setTimeout(() => {
+    const v = MemoryRecall.recallVerdict({ channel: c, gotHz: _currentFreqHz });
+    if (!v.text) return;
+    sendCatLog(`[Channels] ${v.text}`);
+    if (v.ok === false) {
+      if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: v.text, warn: true, duration: 15000 });
+      if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'tune-blocked', reason: v.text });
+    }
+  }, 1500 - Math.min(1500, Date.now() - started));
+  return { ok: true, recalled: true, mem };
+}
+/** Leave the recalled memory for VFO mode, once. */
+function channelLeaveMemory(why) {
+  const r = _memoryRecalled;
+  _memoryRecalled = null;
+  if (!r || !cat || !cat.connected) return;
+  if (cat.selectVfoMode()) sendCatLog(`[Channels] back to VFO mode from memory ${r.mem} (${r.name}) for ${why}`);
+}
+
 function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
   let freqHz = Math.round(parseFloat(freqKhz) * 1000); // kHz -> Hz
   // An FT8/FT4/FT2 spot names the signal (dial + audio offset): tune the
@@ -36928,6 +36982,10 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
   //     stray QSY is traceable, but DON'T block it (SWL / general-coverage RX
   //     and WWV all live off the ham bands). `origin` is the renderer stack,
   //     threaded from the 'tune' IPC; internal callers omit it. ---
+  // A recalled memory channel holds its own offset and tone: leave memory
+  // mode before any other tune, or the next contact goes out with the
+  // repeater's offset (#308).
+  if (_memoryRecalled) channelLeaveMemory('a tune to ' + (freqHz / 1e6).toFixed(4) + ' MHz');
   const _freqMhzGuard = freqHz / 1e6;
   if (!Number.isFinite(freqHz) || freqHz <= 0 || _freqMhzGuard > 2000) {
     sendCatLog(`[tune] ⚠ REJECTED implausible frequency ${Number.isFinite(freqHz) ? _freqMhzGuard.toFixed(6) : freqKhz} MHz`
@@ -46580,6 +46638,7 @@ function cloudShackNotice(text, kind) {
     pushDirectoryToRenderer();
     return next;
   });
+  ipcMain.handle('channel-go', (_e, { id } = {}) => channelGo(String(id || ''), 'Directory > Channels'));
   ipcMain.handle('channels-import-csv', async () => {
     const r = await dialog.showOpenDialog(win, { title: 'Import a CHIRP CSV export', properties: ['openFile'], filters: [{ name: 'CHIRP CSV', extensions: ['csv'] }, { name: 'All files', extensions: ['*'] }] });
     if (!r || r.canceled || !r.filePaths || !r.filePaths[0]) return { canceled: true };
@@ -46591,7 +46650,20 @@ function cloudShackNotice(text, kind) {
       text = fs.readFileSync(file, 'utf8');
     } catch (e) { return { error: 'Could not read the file: ' + e.message }; }
     const group = path.basename(file).replace(/\.[^.]+$/, '').slice(0, 40) || 'Imported';
-    const parsed = Channels.parseChirpCsv(text, { group });
+    // A file read from this radio carries its memory numbers (CHIRP's
+    // Location); a RepeaterBook export's Location is only its list order. The
+    // operator says which (#308); the default keeps none.
+    let keepMemory = false;
+    if (Channels.parseChirpCsv(text, { group }).hasLocation) {
+      const a = await dialog.showMessageBox(win, {
+        type: 'question', buttons: ['No, only the frequencies', 'Yes, keep the memory numbers'], defaultId: 0, cancelId: 0,
+        title: 'Memory numbers',
+        message: 'Did this file come from programming your radio?',
+        detail: 'If you saved it from your own radio in CHIRP, its Location column is the radio\'s memory numbers. POTACAT keeps them, and a click on a channel then calls up that memory on the radio, offset and tone included.\n\nA file from RepeaterBook or another list: choose No. Its numbers are only its own list order.',
+      });
+      keepMemory = a.response === 1;
+    }
+    const parsed = Channels.parseChirpCsv(text, { group, keepMemory });
     if (parsed.reason) return { error: parsed.reason };
     const saved = channelsSaved();
     const have = new Set(saved.list.map(c => `${c.khz}|${c.mode}|${c.name.toLowerCase()}`));
@@ -46605,7 +46677,7 @@ function cloudShackNotice(text, kind) {
     settings.channels = saved;
     saveSettings(settings);
     pushDirectoryToRenderer();
-    sendCatLog(`[Channels] imported ${added} channel${added === 1 ? '' : 's'} from a CHIRP file${dupes ? `, ${dupes} already in the chart` : ''}${parsed.skipped ? `, ${parsed.skipped} row${parsed.skipped === 1 ? '' : 's'} without a frequency skipped` : ''}`);
+    sendCatLog(`[Channels] imported ${added} channel${added === 1 ? '' : 's'} from a CHIRP file${keepMemory ? ' with the radio\'s memory numbers' : ''}${dupes ? `, ${dupes} already in the chart` : ''}${parsed.skipped ? `, ${parsed.skipped} row${parsed.skipped === 1 ? '' : 's'} without a frequency skipped` : ''}`);
     return { added, dupes, skipped: parsed.skipped, group };
   });
   ipcMain.handle('channels-export-csv', async () => {

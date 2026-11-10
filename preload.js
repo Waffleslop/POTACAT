@@ -425,6 +425,7 @@ contextBridge.exposeInMainWorld('api', {
   channelsGet: () => ipcRenderer.invoke('channels-get'),
   channelsSave: (saved) => ipcRenderer.invoke('channels-save', saved),
   channelsImportCsv: () => ipcRenderer.invoke('channels-import-csv'),
+  channelGo: (id) => ipcRenderer.invoke('channel-go', { id }),
   channelsExportCsv: () => ipcRenderer.invoke('channels-export-csv'),
   fetchDirectory: () => ipcRenderer.send('fetch-directory'),
   getDirectory: () => ipcRenderer.invoke('get-directory'),

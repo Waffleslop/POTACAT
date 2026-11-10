@@ -12366,10 +12366,11 @@ var _paddleHoldTimer = { dit: null, dah: null };
         card.innerHTML = '<div class="dir-card-row"><span class="dir-card-name"></span><span class="dir-card-freq"></span></div>'
           + '<div class="dir-card-detail"></div>';
         card.querySelector('.dir-card-name').textContent = c.name;
-        card.querySelector('.dir-card-freq').textContent = mhz + ' ' + (c.mode || 'FM') + (off ? ' ' + off : '') + (c.tone ? ' T' + c.tone : '');
+        card.querySelector('.dir-card-freq').textContent = mhz + ' ' + (c.mode || 'FM') + (off ? ' ' + off : '') + (c.tone ? ' T' + c.tone : '') + (c.mem != null ? ' M' + c.mem : '');
         card.querySelector('.dir-card-detail').textContent = c.note || '';
         card.addEventListener('click', function() {
-          if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'tune', freqKhz: String(c.khz), mode: channelTuneMode(c.mode) }));
+          // channelId (#308): the shack recalls the radio's memory for a channel that has one.
+          if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'tune', freqKhz: String(c.khz), mode: channelTuneMode(c.mode), channelId: c.id }));
         });
         dirList.appendChild(card);
       });
