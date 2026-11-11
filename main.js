@@ -2024,6 +2024,8 @@ const Channels = require('./lib/channels');
 const Favorites = require('./lib/favorites');
 const VfoCompact = require('./lib/vfo-compact');
 let _vfoCompactNow = false; // the VFO window is the mini strip right now
+let _vfoMiniSizedAt = 0;    // when we last resized it ourselves (a resize after that is the operator's)
+let _phoneScanning = false; // ECHOCAT's scan engine is running (peer-scan-state)
 // The starter channel chart (data/channels.json: FRS, GMRS, MURS, marine,
 // aviation, interop, EMS — lists from KL4XQ and KC8DHX). The operator's copy
 // lives in settings.channels; Channels.reconcile seeds it and appends what a
@@ -24676,6 +24678,8 @@ function connectRemote() {
     if (win && !win.isDestroyed()) win.webContents.send('remote-scan-control', { action });
   });
   remoteServer.on('peer-scan-state', ({ scanning }) => {
+    _phoneScanning = !!scanning;
+    sendVfoScanState();
     // Mobile's engine changed. Forward for mutual exclusion (one rig: if the
     // phone started scanning, the desktop stops its own) + button reflection.
     if (win && !win.isDestroyed()) win.webContents.send('remote-peer-scan-state', { scanning });
@@ -28388,9 +28392,11 @@ function sendVfoState() {
     vox: _currentVoxState,
     nr: _currentNrState,
     anf: _currentAnfState,
+    apf: _currentApfState,
     mon: _currentMonState,
     rit: _currentRitState,
     breakIn: _currentBreakInState,
+    catCaps: vfoCatCaps(),          // which CAT buttons this radio can take (lib/vfo-layout.js)
     customCatStates: customCatReader.states(), // #242: custom toggles' own reads
     customCatButtons: settings.customCatButtons || [],
     meters: vfoMetersAvailable(),   // only these meter rows are drawn
@@ -28415,6 +28421,20 @@ function vfoWfmAvailable() {
     const m = RIG_MODELS[rig.model] || RIG_MODELS[ct.civModel] || null;
     return !!(m && m.wfm);
   } catch { return false; }
+}
+// The caps flags the VFO's CAT buttons check (VfoLayout.CAT_CHOICES), or null
+// when the radio is not known yet (the VFO then offers them all).
+function vfoCatCaps() {
+  try {
+    const caps = getRigCapabilities(detectRigType()) || {};
+    const out = {};
+    for (const k of ['nb', 'nr', 'anf', 'apf', 'preamp', 'att', 'comp', 'vox', 'mon', 'rit', 'split', 'atu']) out[k] = !!caps[k];
+    return out;
+  } catch { return null; }
+}
+function sendVfoScanState() {
+  if (!vfoPopoutWin || vfoPopoutWin.isDestroyed()) return;
+  vfoPopoutWin.webContents.send('vfo-scan-state', { on: !!(desktopScanning || _phoneScanning) });
 }
 function vfoPowerAvailable() {
   try { return !!getRigCapabilities(detectRigType()).power; } catch { return false; }
@@ -40501,11 +40521,37 @@ function cloudShackNotice(text, kind) {
     if (saved && saved.width > 200 && saved.height > 150 && isOnScreen(saved)) {
       vfoPopoutWin.setBounds(clampToWorkArea(saved));
     }
+    // Left small: open small, where it was and as wide as it was, instead of
+    // opening large and shrinking (Casey 2026-11-10: the window remembers its
+    // open state, size and position).
+    if (settings.vfoCompact) {
+      const b = vfoPopoutWin.getBounds();
+      if (!settings.vfoFullSize) settings.vfoFullSize = { width: b.width, height: b.height };
+      const size = VfoCompact.miniSize({ saved: settings.vfoMiniWidth });
+      vfoPopoutWin.setMinimumSize(VfoCompact.MINI.minWidth, VfoCompact.MINI.minHeight);
+      _vfoMiniSizedAt = Date.now();
+      vfoPopoutWin.setBounds({ x: b.x, y: b.y, width: size.width, height: size.height });
+      _vfoCompactNow = true;
+    }
+    // Opened now, so a restart reopens it even if the app never gets to its
+    // tidy quit (the quit path writes the same flag).
+    if (!settings.vfoPopoutOpen) { settings.vfoPopoutOpen = true; saveSettings(settings); }
     vfoPopoutWin.show();
     vfoPopoutWin.setMenuBarVisibility(false);
     vfoPopoutWin.loadFile(path.join(__dirname, 'renderer', 'vfo-popout.html'), { query: themeQuery() });
+    // The Small VFO's width is the operator's once they drag it; a resize we
+    // made ourselves (switching size, the content's own height) is not.
+    let _vfoMiniWidthTimer = null;
+    vfoPopoutWin.on('resize', () => {
+      if (!_vfoCompactNow || Date.now() - _vfoMiniSizedAt < 500) return;
+      if (!vfoPopoutWin || vfoPopoutWin.isDestroyed() || vfoPopoutWin.isMaximized()) return;
+      settings.vfoMiniWidth = vfoPopoutWin.getBounds().width;
+      clearTimeout(_vfoMiniWidthTimer);
+      _vfoMiniWidthTimer = setTimeout(() => saveSettings(settings), 800);
+    });
     vfoPopoutWin.webContents.on('did-finish-load', () => {
       sendVfoState();
+      sendVfoScanState();
       // {call} for its macros — a pop-out opened after the call was typed
       // used to learn it only from the next keystroke.
       vfoPopoutWin.webContents.send('log-popout-callsign', typedCalls.current());
@@ -40541,6 +40587,9 @@ function cloudShackNotice(text, kind) {
     });
     vfoPopoutWin.on('closed', () => {
       vfoPopoutWin = null;
+      // Closed by the operator: stays closed next start. Closed by the app
+      // quitting: the quit path already wrote whether it was open.
+      if (!_appWindowsClosing && settings.vfoPopoutOpen) { settings.vfoPopoutOpen = false; saveSettings(settings); }
       if (win && !win.isDestroyed()) win.webContents.send('vfo-popout-status', false);
     });
     if (win && !win.isDestroyed()) win.webContents.send('vfo-popout-status', true);
@@ -40567,14 +40616,21 @@ function cloudShackNotice(text, kind) {
 
   // Mini VFO: the window becomes a strip (VfoCompact.miniSize) and grows back
   // to the size it had (settings.vfoFullSize). The choice is remembered.
-  ipcMain.on('vfo-set-compact', (_e, { on, height, save } = {}) => {
+  // width = the line's natural width, used until the operator drags their
+  // own; fit = forget their width and fit the line again.
+  ipcMain.on('vfo-set-compact', (_e, { on, height, save, width, fit } = {}) => {
     const w = vfoPopoutWin;
     if (!w || w.isDestroyed()) return;
     if (w.isMaximized()) w.unmaximize();
     const b = w.getBounds();
+    _vfoMiniSizedAt = Date.now();
     if (on) {
       if (!_vfoCompactNow) settings.vfoFullSize = { width: b.width, height: b.height };
-      const size = VfoCompact.miniSize({ width: b.width, height });
+      if (fit && settings.vfoMiniWidth) { delete settings.vfoMiniWidth; saveSettings(settings); }
+      // Only the height follows the content while small; the width is set on the way in.
+      const size = _vfoCompactNow && !fit
+        ? { width: b.width, height: VfoCompact.miniSize({ height }).height }
+        : VfoCompact.miniSize({ width, height, saved: settings.vfoMiniWidth });
       w.setMinimumSize(VfoCompact.MINI.minWidth, VfoCompact.MINI.minHeight);
       w.setBounds({ x: b.x, y: b.y, width: size.width, height: size.height });
     } else if (_vfoCompactNow) {
@@ -44012,6 +44068,18 @@ function cloudShackNotice(text, kind) {
     desktopScanning = !!scanning;
     if (remoteServer && remoteServer.running) {
       remoteServer.sendToClient({ type: 'scan-state', scanning: desktopScanning });
+    }
+    sendVfoScanState();
+  });
+  // The Small VFO's Scan button: stops whichever scan is running (this
+  // desktop's or the phone's), else starts the main window's spot scan.
+  ipcMain.on('vfo-scan-toggle', () => {
+    if (desktopScanning) {
+      if (win && !win.isDestroyed()) win.webContents.send('remote-scan-control', { action: 'stop' });
+    } else if (_phoneScanning && remoteServer && remoteServer.running) {
+      remoteServer.sendToClient({ type: 'scan-control', action: 'stop' });
+    } else if (win && !win.isDestroyed()) {
+      win.webContents.send('remote-scan-control', { action: 'start' });
     }
   });
   // Desktop Scan button pressed while only the PHONE is scanning → ask the
