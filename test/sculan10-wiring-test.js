@@ -6,9 +6,9 @@ const { readSrc } = require('./_src');
 //   - it is a normal, visible choice in the rig editor (Casey: "turn it on by
 //     default so folks don't have to hunt for it"), connecting only for a rig
 //     that uses it;
-//   - voice PTT (VFO window, ECHOCAT) sends its mic over the LAN (#227);
-//     every other key-down with the LAN as the audio source is refused:
-//     never a silent carrier;
+//   - voice PTT (VFO window, ECHOCAT) sends its mic over the LAN, JTCAT and
+//     Tune their buffer (#227); every other key-down with the LAN as the
+//     audio source is refused: never a silent carrier;
 //   - RX audio feeds JTCAT, SSTV and ECHOCAT, and the sound-card capture
 //     yields to it only while it is actually arriving;
 //   - the password is a stored secret like every other CAT password.
@@ -222,8 +222,8 @@ test('#227: voice PTT from the VFO window and ECHOCAT opens the LAN stream befor
 
 test('#227: the refusal lets a key-down through only while the voice stream is open', () => {
   const r = bodyOf(main, 'function yaesuLanTxRefusal() {', '\n}');
-  assert.ok(/const lan = yaesuLanTransport\(\);\n\s*if \(lan && lan\.voiceTxActive\) return null;/.test(r), r);
-  assert.ok(/FT8\/FT4, Winlink, SSTV and Tune would send a silent carrier/.test(r));
+  assert.ok(/const lan = yaesuLanTransport\(\);\n\s*if \(lan && \(lan\.voiceTxActive \|\| lan\.txAudioActive \|\| _yaesuLanBufferTxClaim\)\) return null;/.test(r), r);
+  assert.ok(/Winlink, SSTV and voice macros would send a silent carrier/.test(r));
   const route = bodyOf(main, 'function yaesuLanVoiceTx(state, who) {', '\n}');
   assert.ok(/if \(!t \|\| !t\.txReady\) \{[\s\S]*?return true;/.test(route), 'not ready: no stream, so the key-down is refused');
   assert.ok(/new mercuryAudioBridge\.StreamingResampler\(24000, Sculan10\.TX_AUDIO_RATE\)/.test(route), '24 kHz mic -> 16 kHz');
@@ -235,7 +235,30 @@ test('#227: the mic reaches the LAN: dax-tx-chunk routes it, both windows stream
   const cfg = bodyOf(main, 'function _buildAudioBridgeConfig() {', 'return {');
   assert.ok(/settings\.audioSource === 'yaesu-lan' && !!\(yaesuLanTransport\(\) && yaesuLanTransport\(\)\.txReady\)/.test(cfg), 'ECHOCAT bridge: daxTxDirect');
   assert.ok(/\(s\.audioSource === 'yaesu-lan' && s\.catTarget && s\.catTarget\.type === 'yaesu-lan'\)/.test(vfo), 'VFO window: direct mic path');
-  assert.ok(/if \(settings\.audioSource === 'yaesu-lan'\) yaesuLanVoiceTx\(false, 'stuck-TX limit'\);/.test(main));
+  assert.ok(/if \(settings\.audioSource === 'yaesu-lan'\) \{ yaesuLanVoiceTx\(false, 'stuck-TX limit'\); releaseYaesuLanTx\('stuck-TX limit'\); \}/.test(main));
+});
+
+
+test('#227: JTCAT sends its buffer over the LAN: no session, no key-down; the claim is set just before PTT; every end path releases it', () => {
+  const start = bodyOf(main, "ft8Engine.on('tx-start', (data) => {", "ft8Engine.on('tx-end'");
+  assert.ok(/const yaesuLanDirectTxOk = settings\.audioSource === 'yaesu-lan' && yaesuLanBufferTxReady\(\);/.test(start));
+  const abort = start.indexOf("JTCAT TX aborted before PTT: the LAN session is not up");
+  const claim = start.indexOf('if (yaesuLanDirectTxOk) _yaesuLanBufferTxClaim = true;\n    handleRemotePtt(true,');
+  assert.ok(abort > 0 && claim > abort, 'refused before the claim and the key-down');
+  assert.ok(/\} else if \(yaesuLanDirectTxOk\) \{[\s\S]*?t\.sendTxAudio\(txAudio\.samples, \{ offsetMs: data\.offsetMs \|\| 0, inputSampleRate: 12000, startDelayMs, tailSilenceMs: 200 \}\)/.test(start));
+  assert.ok(/txAudio\.outputPeak < 0\.01\)[\s\S]{0,300}releaseYaesuLanTx\('silent waveform'\)/.test(start), 'a silent waveform is never keyed on');
+  assert.ok(/if \(e && e\.message === 'TX cancelled'\) return;/.test(start));
+  for (const why of ['JTCAT tx-end', 'JTCAT stop', 'JTCAT halt', 'JTCAT failsafe', 'Tune OFF', 'stuck-TX limit']) {
+    assert.ok(main.includes(`releaseYaesuLanTx('${why}')`), 'released on ' + why);
+  }
+});
+
+test('#227: Tune plays its tone over the LAN, and is refused with no LAN session', () => {
+  const tune = bodyOf(main, 'function startJtcatTune(opts = {}) {', '\nfunction stopJtcatTune');
+  assert.ok(/const directYaesuReady = settings\.audioSource === 'yaesu-lan' && yaesuLanBufferTxReady\(\);/.test(tune));
+  assert.ok(tune.indexOf('Tune blocked: the LAN session is not up') < tune.indexOf('handleRemotePtt(true'), 'blocked before any key-down');
+  assert.ok(/if \(directYaesuReady\) _yaesuLanBufferTxClaim = true;/.test(tune));
+  assert.ok(/\} else if \(jtcatTuneState\.directYaesu\) \{[\s\S]*?yaesuLanTransport\(\)\.sendTxAudio\(/.test(tune));
 });
 
 console.log(`\nSCU-LAN10 wiring: ${pass} passed, ${fail} failed`);

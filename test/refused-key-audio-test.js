@@ -65,6 +65,10 @@ function tuneSandbox(pttImpl) {
     setInterval: (fn) => { const id = nextId++; timers.set(id, fn); return id; },
     clearInterval: (id) => timers.delete(id),
     forceReleaseIcomNetworkTx: () => {},
+    // SCU-LAN10 Tune over the LAN (#227): no LAN session in these cases.
+    yaesuLanBufferTxReady: () => false,
+    releaseYaesuLanTx: () => {},
+    yaesuLanTransport: () => null,
     Date,
     Math,
     Number,

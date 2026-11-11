@@ -8902,8 +8902,9 @@ async function connectCat() {
     // ASCII, so the same Kenwood-style codec a USB-connected Yaesu uses
     // attaches unchanged. RX audio comes over the LAN when audioSource is
     // 'yaesu-lan'. Voice PTT (VFO window, ECHOCAT) sends its mic over the
-    // LAN (yaesuLanVoiceTx); the other transmit paths have no LAN audio yet,
-    // so handleRemotePtt refuses them rather than send a silent carrier.
+    // LAN (yaesuLanVoiceTx), JTCAT and Tune their buffer (sendTxAudio); the
+    // other transmit paths have no LAN audio yet, so handleRemotePtt refuses
+    // them rather than send a silent carrier.
     transport = new Sculan10Transport();
     const model = rigModel || { brand: 'Yaesu', protocol: 'kenwood', caps: {}, cw: {} };
     model.tune = getTuneQuirks(model);
@@ -8945,7 +8946,7 @@ async function connectCat() {
         settings.audioSource = def;
       }
     }
-    sendCatLog(`Connecting to the Yaesu SCU-LAN10 (experimental) at ${_ylHp.host}, UDP ports ${_ylHp.port}-${_ylHp.port + 3}${modelName ? `, ${modelName}` : ''}${settings.audioSource === 'yaesu-lan' ? ', RX audio and voice TX over the LAN (FT8, Winlink, SSTV and Tune not yet)' : ', audio from the sound card on this computer'}. POTACAT ${app.getVersion()}.`);
+    sendCatLog(`Connecting to the Yaesu SCU-LAN10 (experimental) at ${_ylHp.host}, UDP ports ${_ylHp.port}-${_ylHp.port + 3}${modelName ? `, ${modelName}` : ''}${settings.audioSource === 'yaesu-lan' ? ', RX audio, voice, JTCAT and Tune TX over the LAN (Winlink, SSTV and voice macros not yet)' : ', audio from the sound card on this computer'}. POTACAT ${app.getVersion()}.`);
     transport.connect({
       host: _ylHp.host,
       basePort: _ylHp.port,
@@ -18142,6 +18143,7 @@ function armJtcatTxFailsafe(label, samples, sampleRate = 12000, offsetMs = 0, st
     if (settings.audioSource === 'icom-network') {
       forceReleaseIcomNetworkTx(`JTCAT failsafe ${label || 'unknown TX path'}`);
     } else {
+      if (settings.audioSource === 'yaesu-lan') releaseYaesuLanTx('JTCAT failsafe');
       try { handleRemotePtt(false); } catch {}
     }
   }, timeoutMs);
@@ -20304,6 +20306,15 @@ function startJtcat(mode) {
       return;
     }
 
+    // SCU-LAN10: the buffer goes over the LAN (#227); with no LAN session
+    // there is no way out for it, so nothing is keyed.
+    const yaesuLanDirectTxOk = settings.audioSource === 'yaesu-lan' && yaesuLanBufferTxReady();
+    if (settings.audioSource === 'yaesu-lan' && settings.catTarget && settings.catTarget.type === 'yaesu-lan' && !yaesuLanDirectTxOk) {
+      sendCatLog('[SCU-LAN10] JTCAT TX aborted before PTT: the LAN session is not up, so the audio has no way to the radio.');
+      if (ft8Engine && ft8Engine._txActive) setTimeout(() => jtcatRefuseTx('the Yaesu LAN is not connected'), 0);
+      return;
+    }
+
     const modeForTx = ft8Engine ? ft8Engine._mode : 'FT8';
     rigPresetFlushPending(); // a preset still settling for this mode goes on BEFORE the key-down
     jtcatNoteTxPowerForMode(modeForTx, data.message, data.freq, ft8Engine ? ft8Engine._txFreq : undefined);
@@ -20321,8 +20332,9 @@ function startJtcat(mode) {
       jtcatRefuseTx('the split (Fake It) dial could not move');
       return;
     }
+    if (yaesuLanDirectTxOk) _yaesuLanBufferTxClaim = true;
     handleRemotePtt(true, { audio: true, emission: 'DATA', txKind: jtcatTxKind() });
-    armJtcatTxFailsafe(settings.audioSource === 'icom-network' ? 'Icom Network RS-BA1' : (settings.audioSource === 'smartsdr' ? 'SmartSDR Direct' : 'local audio'), data.samples, 12000, data.offsetMs || 0, networkStartDelayMs);
+    armJtcatTxFailsafe(settings.audioSource === 'icom-network' ? 'Icom Network RS-BA1' : settings.audioSource === 'smartsdr' ? 'SmartSDR Direct' : yaesuLanDirectTxOk ? 'Yaesu LAN (SCU-LAN10)' : 'local audio', data.samples, 12000, data.offsetMs || 0, networkStartDelayMs);
     if (win && !win.isDestroyed()) {
       // Carry the mode so the main-window TX badge reads the actual mode
       // ("JS8 TX" / "PSK31 TX") instead of always "JTCAT TX" (Casey 2026-08-09).
@@ -20424,6 +20436,34 @@ function startJtcat(mode) {
             clearJtcatIcomHardRelease();
           }
         });
+    } else if (yaesuLanDirectTxOk) {
+      // 4. Yaesu SCU-LAN10 (#227): the buffer over the LAN, paced by the
+      //    transport; the radio keys on CAT TX1; meanwhile, so the lead
+      //    silence covers the key-down.
+      const t = yaesuLanTransport();
+      const startDelayMs = jtcatNetworkTxStartDelayMs(modeForTx);
+      const txAudio = conditionDirectTxAudio(data.samples, _jtcatDirectTxGainLevel, 1.0);
+      sendCatLog(`[SCU-LAN10] JTCAT TX over the LAN: ${modeForTx}, 16 kHz S16LE, startDelay=${startDelayMs}ms; ${formatDirectTxAudioStats(txAudio)}. Use the radio's RF power for output and keep ALC low.`);
+      if (txAudio.outputPeak < 0.01) {
+        sendCatLog(`[SCU-LAN10] TX aborted: the audio peak ${txAudio.outputPeak.toFixed(4)} is too low (encoder produced a silent waveform?)`);
+        releaseYaesuLanTx('silent waveform');
+        if (ft8Engine && ft8Engine._txActive) jtcatRefuseTx('the TX audio was silent');
+        else handleRemotePtt(false);
+        return;
+      }
+      t.sendTxAudio(txAudio.samples, { offsetMs: data.offsetMs || 0, inputSampleRate: 12000, startDelayMs, tailSilenceMs: 200 })
+        .then(() => {
+          setTimeout(() => {
+            if (ft8Engine && ft8Engine._txActive) ft8Engine.txComplete();
+            else { releaseYaesuLanTx('JTCAT TX done'); handleRemotePtt(false); }
+          }, 150);
+        })
+        .catch((e) => {
+          if (e && e.message === 'TX cancelled') return; // Stop/Halt/failsafe already released PTT
+          sendCatLog(`[SCU-LAN10] JTCAT TX failed: ${e.message}; PTT off (no local-audio fallback while Yaesu LAN audio is selected)`);
+          if (ft8Engine && ft8Engine._txActive) ft8Engine.txComplete();
+          else { releaseYaesuLanTx('JTCAT TX failed'); handleRemotePtt(false); }
+        });
     } else {
       setTimeout(() => {
         if (win && !win.isDestroyed() && ft8Engine && ft8Engine._txActive) {
@@ -20447,6 +20487,7 @@ function startJtcat(mode) {
 	      forceReleaseIcomNetworkTx('JTCAT tx-end');
 	      releaseRadio('jtcat');
 	    } else {
+	      if (settings.audioSource === 'yaesu-lan') releaseYaesuLanTx('JTCAT tx-end');
 	      handleRemotePtt(false);
 	      releaseRadio('jtcat');
 	    }
@@ -20713,6 +20754,7 @@ const jtcatTuneState = {
   endTimer: null,   // setTimeout ref
   tickTimer: null,  // setInterval ref for countdown broadcast
   directIcom: false,
+  directYaesu: false, // the tone goes over the SCU-LAN10 (#227)
 };
 
 function broadcastJtcatTuneState() {
@@ -20806,9 +20848,17 @@ function startJtcatTune(opts = {}) {
     broadcastJtcatTuneState();
     return;
   }
+  const directYaesuReady = settings.audioSource === 'yaesu-lan' && yaesuLanBufferTxReady();
+  if (settings.audioSource === 'yaesu-lan' && settings.catTarget && settings.catTarget.type === 'yaesu-lan' && !directYaesuReady) {
+    sendCatLog('[SCU-LAN10] Tune blocked: the LAN session is not up, so the tone has no way to the radio.');
+    broadcastJtcatTuneState();
+    return;
+  }
   jtcatTuneState.active = true;
   jtcatTuneState.endsAt = Date.now() + JTCAT_TUNE_DURATION_S * 1000;
   jtcatTuneState.directIcom = directIcomReady;
+  jtcatTuneState.directYaesu = directYaesuReady;
+  if (directYaesuReady) _yaesuLanBufferTxClaim = true;
   // Audio is genuinely going to the rig USB CODEC, so audio:true triggers
   // SSB-over-DATA where appropriate (USB -> DIGU mute the rig mic during
   // the tone). The 90s timer auto-releases.
@@ -20821,6 +20871,8 @@ function startJtcatTune(opts = {}) {
   if (keyed === false || !jtcatTuneState.active) {
     jtcatTuneState.active = false;
     jtcatTuneState.directIcom = false;
+    if (jtcatTuneState.directYaesu) releaseYaesuLanTx('Tune refused');
+    jtcatTuneState.directYaesu = false;
     broadcastJtcatTuneState();
     sendCatLog('[JTCAT] Tune not started: transmit was refused, so no tone was played');
     return;
@@ -20852,6 +20904,19 @@ function startJtcatTune(opts = {}) {
           stopJtcatTune();
         }
       });
+  } else if (jtcatTuneState.directYaesu) {
+    const tone = makeSineToneSamples(jtcatTuneState.toneHz || 1500, JTCAT_TUNE_DURATION_S, Sculan10.TX_AUDIO_RATE, YAESU_LAN_TUNE_PEAK);
+    const txAudio = conditionDirectTxAudio(tone, _jtcatDirectTxGainLevel);
+    sendCatLog(`[SCU-LAN10] Tune → radio over the LAN: ${jtcatTuneState.toneHz || 1500} Hz sine; ${formatDirectTxAudioStats(txAudio)}`);
+    yaesuLanTransport().sendTxAudio(txAudio.samples, { offsetMs: 0, inputSampleRate: Sculan10.TX_AUDIO_RATE, startDelayMs: 200, tailSilenceMs: 200 })
+      .then(() => { if (jtcatTuneState.active && jtcatTuneState.directYaesu) stopJtcatTune(); })
+      .catch((e) => {
+        if (e && e.message === 'TX cancelled') return;
+        if (jtcatTuneState.active && jtcatTuneState.directYaesu) {
+          sendCatLog(`[SCU-LAN10] Tune over the LAN failed: ${e.message}`);
+          stopJtcatTune();
+        }
+      });
   } else if (win && !win.isDestroyed()) {
     win.webContents.send('jtcat-tune-audio-start');
   }
@@ -20869,8 +20934,13 @@ function stopJtcatTune() {
   _stopDirectTuneTone(); // no-op unless the Flex SmartSDR-Direct path was used
   const wasDirectIcom = jtcatTuneState.directIcom;
   jtcatTuneState.directIcom = false;
+  const wasDirectYaesu = jtcatTuneState.directYaesu;
+  jtcatTuneState.directYaesu = false;
   if (wasDirectIcom && _icomNetworkTransport) {
     forceReleaseIcomNetworkTx('Tune OFF');
+  } else if (wasDirectYaesu) {
+    releaseYaesuLanTx('Tune OFF');
+    handleRemotePtt(false);
   } else if (win && !win.isDestroyed()) {
     win.webContents.send('jtcat-tune-audio-stop');
     handleRemotePtt(false);
@@ -21138,6 +21208,7 @@ function stopJtcat() {
     forceReleaseIcomNetworkTx('JTCAT stop');
   } else {
     if (_icomNetworkTransport) { try { _icomNetworkTransport.cancelTx(); } catch {} }
+    if (settings.audioSource === 'yaesu-lan') releaseYaesuLanTx('JTCAT stop');
     try { handleRemotePtt(false); } catch {}
   }
   // A WSPR beacon dies with the engine — and takes its 1 W cap with it. The
@@ -22667,6 +22738,25 @@ function yaesuLanVoiceTx(state, who) {
     sendCatLog(`[SCU-LAN10] voice TX stopped (${who} release)`);
   }
   return true;
+}
+
+// FT8/FT4 and Tune over the LAN (#227): the pre-rendered buffer goes to the
+// transport's sendTxAudio(). The claim is set just before the key-down, so
+// yaesuLanTxRefusal lets that one key-down through, and cleared when the
+// transmission ends on any path (tx-end, Stop, Halt, failsafe, Tune off).
+let _yaesuLanBufferTxClaim = false;
+const YAESU_LAN_TUNE_PEAK = 0.5;
+
+function yaesuLanBufferTxReady() {
+  const t = yaesuLanTransport();
+  return yaesuLanVoiceRoute() && !!(t && t.txReady);
+}
+
+function releaseYaesuLanTx(reason) {
+  const t = yaesuLanTransport();
+  if (_yaesuLanBufferTxClaim || (t && t.txAudioActive)) sendCatLog(`[SCU-LAN10] TX audio released (${reason})`);
+  _yaesuLanBufferTxClaim = false;
+  if (t) { try { t.cancelTx(); } catch {} }
 }
 
 // One 24 kHz mic chunk from the VFO window or the ECHOCAT bridge.
@@ -29090,7 +29180,7 @@ function txLimitTrip(t) {
   try { if (ct.type === 'none' && ct.ptt === 'cm108' && win && !win.isDestroyed()) win.webContents.send('cm108-ptt', { state: false, gpio: Number.isInteger(ct.gpio) ? ct.gpio : 3 }); } catch {}
   try { if (smartSdr && smartSdr.connected) gatedSmartSdrTransmit(false); } catch {}
   try { if (settings.audioSource === 'icom-network') forceReleaseIcomNetworkTx('stuck-TX limit'); } catch {}
-  try { if (settings.audioSource === 'yaesu-lan') yaesuLanVoiceTx(false, 'stuck-TX limit'); } catch {}
+  try { if (settings.audioSource === 'yaesu-lan') { yaesuLanVoiceTx(false, 'stuck-TX limit'); releaseYaesuLanTx('stuck-TX limit'); } } catch {}
   const msg = t.message;
   if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: msg, warn: true, duration: 20000 });
   if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', msg);
@@ -29237,8 +29327,8 @@ function yaesuLanTxRefusal() {
   const t = settings.catTarget;
   if (!t || t.type !== 'yaesu-lan' || settings.audioSource !== 'yaesu-lan') return null;
   const lan = yaesuLanTransport();
-  if (lan && lan.voiceTxActive) return null;
-  return "over the Yaesu LAN (SCU-LAN10) only voice from the VFO window's PTT or ECHOCAT is transmitted so far; FT8/FT4, Winlink, SSTV and Tune would send a silent carrier. For those, set Audio Source to the radio's USB sound card on this computer (CAT stays on the LAN).";
+  if (lan && (lan.voiceTxActive || lan.txAudioActive || _yaesuLanBufferTxClaim)) return null;
+  return "over the Yaesu LAN (SCU-LAN10) POTACAT transmits voice from the VFO window's PTT or ECHOCAT, JTCAT (FT8/FT4) and Tune so far; Winlink, SSTV and voice macros would send a silent carrier. For those, set Audio Source to the radio's USB sound card on this computer (CAT stays on the LAN).";
 }
 
 /** Is POTACAT sending the audio for this key-down? opts.audio when the caller
@@ -38510,6 +38600,7 @@ function jtcatHaltTxNow(reason, opts = {}) {
     forceReleaseIcomNetworkTx('JTCAT halt');
   } else {
     if (_icomNetworkTransport) { try { _icomNetworkTransport.cancelTx(); } catch {} }
+    if (settings.audioSource === 'yaesu-lan') releaseYaesuLanTx('JTCAT halt');
     try { handleRemotePtt(false); } catch (e) { console.error('[Halt] PTT:', e); }
     try { if (cat && cat.connected) gatedSetTransmit(false); } catch {}
     try { if (detectRigType() === 'flex' && smartSdr && smartSdr.connected) gatedSmartSdrTransmit(false); } catch {}
