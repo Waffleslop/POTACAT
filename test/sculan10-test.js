@@ -194,7 +194,7 @@ async function bindConsecutive() {
 async function fakeUnit({ user = 'defaultuser', pass = 'defaultuser', sid = 0x22, catDoubleReply = true, setupAcks = true, dropEachSession = false } = {}) {
   const { base, socks } = await bindConsecutive();
   const [ctrl, cat, audio, scope] = socks;
-  const u = { base, ctrl, cat, audio, scope, sid, silent: false, events: [], catSeen: [], keepalives: { ctrl: 0, cat: 0, audio: 0, scope: 0 }, logins: 0, audioPeer: null, respSeq: 0, lastCmdSeq: null };
+  const u = { base, ctrl, cat, audio, scope, sid, silent: false, events: [], catSeen: [], keepalives: { ctrl: 0, cat: 0, audio: 0, scope: 0 }, logins: 0, audioPeer: null, respSeq: 0, lastCmdSeq: null, txAudio: [] };
   const seq = { ctrl: 0, cat: 0, audio: 0, scope: 0 };
   const reply = (name, sock, rinfo, channel, msgType, body) => {
     seq[name] = (seq[name] + 1) & 0xFF;
@@ -259,7 +259,10 @@ async function fakeUnit({ user = 'defaultuser', pass = 'defaultuser', sid = 0x22
     if (catDoubleReply) reply('cat', cat, rinfo, P.CHANNEL.CAT, P.MSG.DATA_IN, body);
   });
   const audioInit = portInit('audio', audio, P.CHANNEL.AUDIO);
-  on('audio', audio, (p, rinfo) => { if (audioInit(p, rinfo)) u.audioPeer = rinfo; });
+  on('audio', audio, (p, rinfo) => {
+    if (audioInit(p, rinfo)) { u.audioPeer = rinfo; return; }
+    if (p.msgType === P.MSG.DATA) u.txAudio.push(p.body);
+  });
   const scopeInit = portInit('scope', scope, P.CHANNEL.SCOPE);
   on('scope', scope, (p, rinfo) => { if (scopeInit(p, rinfo)) u.scopePeer = rinfo; });
   // One scope frame (a 4096-byte body) to the client; dropFirst skips a
@@ -422,7 +425,7 @@ test('disconnect stops everything: no reconnect, no more packets', async () => {
     assert.strictEqual(u.keepalives.ctrl, n);
     assert.strictEqual(c.t.connected, false);
     assert.strictEqual(c.t.write('FA;'), false);
-    assert.strictEqual(c.t.txReady, false, 'no TX audio');
+    assert.strictEqual(c.t.txReady, false, 'no TX audio while disconnected');
   } finally { u.close(); }
 });
 
@@ -657,6 +660,111 @@ test('no address: a clear error, nothing sent', () => {
   t.on('error', (e) => errs.push(e.message));
   t.connect({ host: '' });
   assert.ok(/no address set .* 192\.168\.49\.1/.test(errs[0]), errs[0]);
+});
+
+// ---- TX audio (#227) ----------------------------------------------------------
+
+test('TX audio body: sid, the 24-byte header Yaesu sends (S16LE, stereo, 16 kHz, resend 1, latency 2000, volume 100), then PCM', () => {
+  const pcm = P.txAudioPcm(new Float32Array(P.TX_AUDIO_FRAME_SAMPLES).fill(0.5));
+  assert.strictEqual(pcm.length, 640, '10 ms of stereo Int16');
+  const b = P.txAudioBody(0x23, 0x1234, pcm);
+  assert.strictEqual(b.length, 4 + 24 + 640);
+  assert.deepStrictEqual([...b.subarray(0, 4)], [0x23, 0, 0, 0]);
+  const h = b.subarray(4, 28);
+  assert.strictEqual(h.toString('hex'),
+    '3412' + '01' + '02' + '803e0000' + '01' + '00000000000000' + 'd007' + 'd007' + '64' + '64' + '8002');
+  assert.strictEqual(b.readInt16LE(28), 16384, 'left');
+  assert.strictEqual(b.readInt16LE(30), 16384, 'right: the same sample');
+  // The stream opener: header only, PCM length 0.
+  const open = P.txAudioBody(0x23, 0);
+  assert.strictEqual(open.length, 28);
+  assert.strictEqual(open.readUInt16LE(4 + 22), 0);
+  // Clipping instead of wrapping.
+  const loud = P.txAudioPcm(Float32Array.from([2, -2]));
+  assert.deepStrictEqual([loud.readInt16LE(0), loud.readInt16LE(4)], [32767, -32768]);
+});
+
+test('voice TX against a fake unit: an empty opener, then 10 ms frames, each twice with one frame seq; the tail is padded and sent', async () => {
+  const u = await fakeUnit();
+  const c = client();
+  try {
+    c.t.connect({ host: '127.0.0.1', basePort: u.base, ...FAST });
+    assert.ok(await until(() => c.connects === 1));
+    assert.strictEqual(c.t.txReady, true);
+    assert.strictEqual(c.t.voiceTxActive, false);
+    c.t.startVoiceTx();
+    assert.strictEqual(c.t.voiceTxActive, true);
+    // 50 ms of a 0.25 tone in uneven chunks, as the resampler hands them over, plus 3 ms.
+    const total = 5 * 160 + 48;
+    const all = new Float32Array(total).fill(0.25);
+    for (let off = 0; off < total; off += 85) c.t.pushVoiceChunk(all.subarray(off, Math.min(total, off + 85)));
+    c.t.stopVoiceTx();
+    assert.strictEqual(c.t.voiceTxActive, false);
+    assert.ok(await until(() => u.txAudio.length >= 2 * 7), `packets: ${u.txAudio.length}`);
+    const frames = u.txAudio.map((b) => ({ sid: b[0], seq: b.readUInt16LE(4), len: b.readUInt16LE(4 + 22), first: b.length > 28 ? b.readInt16LE(28) : null, last: b.length > 28 ? b.readInt16LE(b.length - 4) : null }));
+    for (let i = 0; i < frames.length; i += 2) assert.deepStrictEqual(frames[i], frames[i + 1], 'every frame twice');
+    const once = frames.filter((_, i) => i % 2 === 0);
+    assert.deepStrictEqual(once.map((f) => f.seq), [0, 1, 2, 3, 4, 5, 6], 'frame seq counts up');
+    assert.strictEqual(once[0].len, 0, 'the opener has no PCM');
+    assert.ok(once.slice(1).every((f) => f.len === 640 && f.sid === c.t.sessionId));
+    assert.strictEqual(once[1].first, Math.round(0.25 * 32767));
+    assert.strictEqual(once[6].first, Math.round(0.25 * 32767), 'the 3 ms tail went out');
+    assert.strictEqual(once[6].last, 0, '...padded with silence');
+    assert.ok(c.logs.some((l) => /TX audio: stream closed after .* 6 frames/.test(l)), c.logs.join('\n'));
+  } finally { c.t.disconnect(); u.close(); }
+});
+
+test('voice TX: audio backed up past 300 ms is dropped from the front, so the delay cannot grow', async () => {
+  const u = await fakeUnit();
+  const c = client();
+  try {
+    c.t.connect({ host: '127.0.0.1', basePort: u.base, ...FAST });
+    assert.ok(await until(() => c.connects === 1));
+    c.t.startVoiceTx();
+    c.t.pushVoiceChunk(new Float32Array(16000)); // one second at once
+    c.t.stopVoiceTx();
+    assert.ok(c.logs.some((l) => /30 frames, 11200 samples dropped/.test(l)), c.logs.join('\n'));
+  } finally { c.t.disconnect(); u.close(); }
+});
+
+test('a session lost while keyed sends TX0; as soon as the next session is up; one lost while receiving does not', async () => {
+  const u = await fakeUnit();
+  const c = client();
+  try {
+    c.t.connect({ host: '127.0.0.1', basePort: u.base, ...FAST });
+    assert.ok(await until(() => c.connects === 1));
+    c.t.startVoiceTx();
+    c.t.write('TX1;');
+    u.silent = true;
+    assert.ok(await until(() => c.errors.some((e) => e.code === 'SCULAN10_SESSION_LOST'), 3000));
+    assert.strictEqual(c.t.voiceTxActive, false, 'the stream ended with the session');
+    const before = u.catSeen.length;
+    u.silent = false;
+    assert.ok(await until(() => c.connects === 2, 3000), c.logs.join('\n'));
+    assert.ok(await until(() => u.catSeen.slice(before).some((x) => x.text === 'TX0;' && x.sid === c.t.sessionId)), 'TX0; in the new session');
+    assert.ok(c.logs.some((l) => /lost while keyed: sending TX0; now/.test(l)));
+    // Released now: the next loss sends nothing.
+    u.silent = true;
+    assert.ok(await until(() => c.errors.filter((e) => e.code === 'SCULAN10_SESSION_LOST').length === 2, 3000));
+    const mark = u.catSeen.length;
+    u.silent = false;
+    assert.ok(await until(() => c.connects === 3, 3000));
+    await sleep(100);
+    assert.ok(!u.catSeen.slice(mark).some((x) => x.text === 'TX0;'), 'no TX0; when the radio was not keyed');
+  } finally { c.t.disconnect(); u.close(); }
+});
+
+test('disconnect while keyed sends TX0; first', async () => {
+  const u = await fakeUnit();
+  const c = client();
+  try {
+    c.t.connect({ host: '127.0.0.1', basePort: u.base, ...FAST });
+    assert.ok(await until(() => c.connects === 1));
+    c.t.write('TX1;');
+    const mark = u.catSeen.length;
+    c.t.disconnect();
+    assert.ok(await until(() => u.catSeen.slice(mark).some((x) => x.text === 'TX0;')), 'TX0; before the sockets closed');
+  } finally { u.close(); }
 });
 
 (async () => {
