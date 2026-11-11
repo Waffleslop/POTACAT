@@ -186,6 +186,7 @@ const TESTS = [
   'test/wspr-run-time-test.js', // WSPR beacon runs as long as the operator sets (K2BDE); a PTT port keys on RTS by default (K5LEB)
   'test/remote-client-yield-test.js', // a desktop kicked by another of the owner's devices yields the rig (W0EGR)
   'test/remote-spots-one-writer-test.js', // #246: a remote PC's spot list has one writer (the shack's while linked)
+  'test/favorites-test.js', // #329: starred Landmarks and Channels, per operator, in Directory, the VFO window, the band scope and ECHOCAT
   'test/icom-scope-test.js', // an Icom's own band scope over CI-V: parser, codec events, the owner's 30 s recording
   'test/adif-import-refs-test.js', // POTA_REF-only logs (QLog) get SIG/SIG_INFO on import; the Logbook shows them (KC9FOZ)
   'test/icom-lan-voice-test.js', // voice over an Icom's LAN: DATA mode, or USB/LSB when DATA OFF MOD = LAN (EA1BZN)

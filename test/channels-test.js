@@ -199,6 +199,19 @@ check('the import refuses a huge file and reports what it added, skipped and alr
   const h = main.slice(main.indexOf("ipcMain.handle('channels-import-csv'"), main.indexOf("ipcMain.handle('channels-export-csv'"));
   assert.ok(/5 \* 1024 \* 1024/.test(h) && /Channels\.parseChirpCsv\(text, \{ group \}\)/.test(h) && /return \{ added, dupes, skipped: parsed\.skipped, group \}/.test(h));
 });
+// #329: the server-start broadcast carried the chart, but every later push
+// (a directory refresh, a Channels edit) replaced the stored snapshot without
+// it, and ECHOCAT's Channels tab went empty.
+check('#329: every directory broadcast to ECHOCAT carries the channel chart', () => {
+  const calls = [];
+  let at = main.indexOf('broadcastDirectory(');
+  while (at >= 0) {
+    if (main.slice(at - 9, at) !== 'function ') calls.push(main.slice(at, main.indexOf('});', at) + 3));
+    at = main.indexOf('broadcastDirectory(', at + 1);
+  }
+  assert.ok(calls.length >= 2, 'calls found: ' + calls.length);
+  for (const c of calls) assert.ok(c.includes('...channelsPayload()'), 'a broadcast without the chart: ' + c.slice(0, 120));
+});
 check('ECHOCAT Web has the tab and tunes from it', () => {
   assert.ok(/data-dtab="channels"/.test(webHtml));
   assert.ok(/function renderDirChannels\(search\)/.test(web) && /if \(Array\.isArray\(msg\.channels\)\) directoryChannels = msg\.channels;/.test(web));

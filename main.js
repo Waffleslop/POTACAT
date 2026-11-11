@@ -2021,6 +2021,7 @@ const landmarksFeed = new (require('./lib/landmarks-feed').LandmarksFeed)({
 landmarksFeed.load();
 const LandmarksLib = require('./lib/landmarks');
 const Channels = require('./lib/channels');
+const Favorites = require('./lib/favorites');
 const VfoCompact = require('./lib/vfo-compact');
 let _vfoCompactNow = false; // the VFO window is the mini strip right now
 // The starter channel chart (data/channels.json: FRS, GMRS, MURS, marine,
@@ -24576,6 +24577,16 @@ function connectRemote() {
     // COM port for weeks with no error). Reuse the tune-blocked channel the
     // VFO lock already uses — shipped apps render it with zero mobile changes.
     if (!((smartSdr && smartSdr.canTune) || (cat && cat.connected))) {
+      // POTACAT cannot move the radio, but an SDR may hear it (#329): a
+      // Channels or Landmarks tap, NOAA on 162.55 MHz, CB 9, with the radio
+      // off or no CAT at all, listens through the SDR instead of a refusal.
+      const hz = Math.round(parseFloat(freqKhz) * 1000);
+      if (hz > 0) {
+        const route = ListenSource.routeWithoutRig(hz, rigReachNow(), listenSdrState(), !!sdrCandidateFor(hz));
+        const why = (settings.catTarget && settings.catTarget.type === 'none') ? 'from ECHOCAT (no CAT control)' : 'from ECHOCAT (the radio is not connected)';
+        if (route === 'sdr') { listenSdrTake(hz, mode, why); return; }
+        if (route === 'connect' && listenSdrConnectFor(hz, mode, why)) return;
+      }
       if (settings.catTarget && settings.catTarget.type === 'none') {
         const mhz = (parseFloat(freqKhz) / 1000).toFixed(3);
         const bandNote = noCatBandNote(parseFloat(mhz));
@@ -34244,8 +34255,13 @@ function createWindow() {
     // connectRemote() builds a NEW server with an empty directory, and only a
     // fetch (every 4 h) or a net-reminder edit refilled it: until then every
     // phone connected to a blank HF Nets / SWL tab. Seed each new server.
+    // A star from ECHOCAT (#329). A Guest Pass never gets here: favorite-set
+    // is not on the guest allow-list (lib/guest-pass-authority.js).
     onRemoteServer((rs) => {
-      rs.broadcastDirectory({ nets: directoryNets, swl: directorySwl, userNets: buildUserNetsForBroadcast(), ...landmarksPayload(), ...channelsPayload() });
+      rs.on('favorite-set', ({ kind, id, on }) => { favoriteSet(kind, id, on, 'ECHOCAT'); });
+    });
+    onRemoteServer((rs) => {
+      rs.broadcastDirectory({ nets: directoryNets, swl: directorySwl, userNets: buildUserNetsForBroadcast(), ...landmarksPayload(), ...channelsPayload(), ...favoritesPayload() });
     });
     // Auto-reopen pop-out map if it was open when the app last closed
     if (settings.mapPopoutOpen) {
@@ -35139,6 +35155,42 @@ function channelsPayload() {
   return { channels: channelsSaved().list };
 }
 
+// ── Favourites (#329, lib/favorites.js) ──────────────────────────────────
+// The Landmarks and Channels this operator starred. Per operator (not a
+// GLOBAL_KEY). Main owns the list: a star from any window or from ECHOCAT
+// lands here, is saved, and goes back out to every surface at once.
+function favoritesPayload() {
+  return { landmarkFavorites: Favorites.normalize(settings.landmarkFavorites), channelFavorites: Favorites.normalize(settings.channelFavorites) };
+}
+/** Ids plus the starred entries that exist, for the VFO menu and the band scope. */
+function favoritesState() {
+  let landmarks = [];
+  try { landmarks = landmarksFeed.catalog().landmarks || []; } catch { /* no catalog yet */ }
+  const ids = favoritesPayload();
+  // A channel tunes in the mode a radio or SDR demodulates (NFM, DV and the like tune FM: Channels.tuneMode).
+  const items = Favorites.resolve({ landmarks, channels: channelsSaved().list, landmarkIds: ids.landmarkFavorites, channelIds: ids.channelFavorites })
+    .map((f) => (f.kind === 'channel' ? { ...f, mode: Channels.tuneMode(f.mode) } : f));
+  return { ...ids, items };
+}
+function favoritesBroadcast() {
+  const st = favoritesState();
+  for (const wc of require('electron').webContents.getAllWebContents()) { try { wc.send('favorites', st); } catch { /* closing */ } }
+  pushDirectoryToRenderer();
+}
+/** Star or unstar one Landmark or Channel; origin is for the log. */
+function favoriteSet(kind, id, on, origin) {
+  const key = Favorites.keyFor(kind);
+  if (!key) return favoritesState();
+  const before = Favorites.normalize(settings[key]);
+  const next = Favorites.toggle(before, String(id || ''), on);
+  if (JSON.stringify(next) === JSON.stringify(before)) return favoritesState();
+  settings[key] = next;
+  saveSettings(settings);
+  sendCatLog(`[Favorites] ${Favorites.isFavorite(next, String(id)) ? 'starred' : 'unstarred'} ${kind} ${id}${origin ? ' (' + origin + ')' : ''}`);
+  favoritesBroadcast();
+  return favoritesState();
+}
+
 /** The Landmarks part of every directory push (window and ECHOCAT alike). */
 function landmarksPayload() {
   const c = landmarksFeed.catalog();
@@ -35180,7 +35232,7 @@ function buildUserNetsForBroadcast() {
 
 function pushDirectoryToRenderer() {
   if (win && !win.isDestroyed()) {
-    win.webContents.send('directory-data', { nets: directoryNets, swl: directorySwl, ...landmarksPayload(), ...channelsPayload() });
+    win.webContents.send('directory-data', { nets: directoryNets, swl: directorySwl, ...landmarksPayload(), ...channelsPayload(), ...favoritesPayload() });
   }
   // Also to ECHOCAT (always: the directory has no off switch). Not gated on
   // the server LISTENING: broadcastDirectory also stores the snapshot that every
@@ -35191,6 +35243,11 @@ function pushDirectoryToRenderer() {
       swl: directorySwl,
       userNets: buildUserNetsForBroadcast(),
       ...landmarksPayload(),
+      // Every push carries the chart: this snapshot replaces the one the
+      // server start stored, and without it a directory refresh or a Channels
+      // edit left ECHOCAT with an empty Channels tab (#329).
+      ...channelsPayload(),
+      ...favoritesPayload(),
     });
   }
 }
@@ -38008,6 +38065,28 @@ function sdrListenMode(mode, hz) {
   return m === 'DIGU' || m === 'PKTUSB' || m === 'FT8' || m === 'FT4' || m === 'FT2' || m === 'WSPR' ? 'USB' : m === 'DIGL' || m === 'PKTLSB' ? 'LSB' : m === 'SSB' ? (hz >= 10e6 ? 'USB' : 'LSB') : m;
 }
 
+/** The connected SDR becomes what you hear at hz; the radio (if any) stays where it is. */
+function listenSdrTake(hz, mode, why) {
+  const m = sdrListenMode(mode, hz);
+  listenSdr.hz = hz; listenSdr.mode = m;
+  kiwiClient.tune(hz / 1000, m.toLowerCase());
+  if (!listenSdr.live) {
+    sendCatLog(`[WebSDR] ${ListenSource.fmtMhz(hz)} ${m} ${why}: listening through ${kiwiLiveHost || 'the SDR'}` + (_currentFreqHz > 0 ? `; the radio stays on ${ListenSource.fmtMhz(_currentFreqHz)}` : ''));
+    kiwiGoLive(true);
+  }
+  sendCatFrequency(hz);   // the displays show what you hear (the radio's dial is kept, not shown)
+}
+
+/** Bring up the first listed SDR that covers hz and finish the tune when it answers (listenSdrResume). False when none covers it. */
+function listenSdrConnectFor(hz, mode, why) {
+  const cand = sdrCandidateFor(hz);
+  if (!cand) return false;
+  kiwiAutoPending = { hz, mode: sdrListenMode(mode, hz) };
+  sendCatLog(`[WebSDR] ${ListenSource.fmtMhz(hz)} ${why}: connecting ${cand.label} to listen through`);
+  require('electron').ipcMain.emit('kiwi-connect', { sender: { send: () => {} } }, { host: cand.host, port: cand.port, auto: true });
+  return true;
+}
+
 /**
  * Called by tuneRadio before anything moves. Returns 'rig' (carry on), 'sdr'
  * (the SDR took it, the radio stays) or 'none' (nothing can hear it, refused).
@@ -38024,26 +38103,11 @@ function listenSdrArbitrate(hz, mode, origin) {
     // The operator's own choice: the SDR follows the dial as it always has,
     // and the radio tunes too (tuneRadio's own auto-tune moves the SDR).
     if (d.reason === 'chosen') return 'rig';
-    const m = sdrListenMode(mode, hz);
-    listenSdr.hz = hz; listenSdr.mode = m;
-    kiwiClient.tune(hz / 1000, m.toLowerCase());
-    if (!listenSdr.live) {
-      sendCatLog(`[WebSDR] ${ListenSource.fmtMhz(hz)} ${m} is outside the radio's range: listening through ${kiwiLiveHost || 'the SDR'}; the radio stays on ${ListenSource.fmtMhz(_currentFreqHz || 0)}`);
-      kiwiGoLive(true);
-    }
-    sendCatFrequency(hz);   // the displays show what you hear (the radio's dial is kept, not shown)
+    listenSdrTake(hz, mode, 'is outside the radio\'s range');
     return 'sdr';
   }
   // Nothing connected can hear it. An SDR in the list that could: bring it up and come back here.
-  if (!(kiwiClient && kiwiClient.connected)) {
-    const cand = sdrCandidateFor(hz);
-    if (cand) {
-      kiwiAutoPending = { hz, mode: sdrListenMode(mode, hz) };
-      sendCatLog(`[WebSDR] ${ListenSource.fmtMhz(hz)} is outside the radio's range: connecting ${cand.label} to listen through`);
-      require('electron').ipcMain.emit('kiwi-connect', { sender: { send: () => {} } }, { host: cand.host, port: cand.port, auto: true });
-      return 'sdr';
-    }
-  }
+  if (!(kiwiClient && kiwiClient.connected) && listenSdrConnectFor(hz, mode, 'is outside the radio\'s range')) return 'sdr';
   const rigName = getActiveRigModelName() || 'the radio';
   const why = ListenSource.refusal(hz, d, rigName, kiwiLiveHost);
   sendCatLog(`[tune] refused: ${why}`);
@@ -46671,7 +46735,7 @@ function cloudShackNotice(text, kind) {
   // --- Directory IPC ---
   ipcMain.on('fetch-directory', () => { fetchDirectory(); });
   ipcMain.handle('settings-save-status', () => { try { return settingsSaveStatusLine(); } catch { return '(unknown)'; } });
-  ipcMain.handle('get-directory', () => ({ nets: directoryNets, swl: directorySwl, ...landmarksPayload(), ...channelsPayload() }));
+  ipcMain.handle('get-directory', () => ({ nets: directoryNets, swl: directorySwl, ...landmarksPayload(), ...channelsPayload(), ...favoritesPayload() }));
 
   // --- Channels: the saved frequency chart (lib/channels.js) ---
   ipcMain.handle('channels-get', () => channelsSaved());
@@ -46681,10 +46745,13 @@ function cloudShackNotice(text, kind) {
     next.seeded = prev.seeded;   // the catalog version is main's to track
     settings.channels = next;
     saveSettings(settings);
-    pushDirectoryToRenderer();
+    favoritesBroadcast();   // a starred channel may have been edited or deleted; also pushes the directory
     return next;
   });
   ipcMain.handle('channel-go', (_e, { id } = {}) => channelGo(String(id || ''), 'Directory > Channels'));
+  // Favourites (#329): every window reads and stars through main.
+  ipcMain.handle('favorites-get', () => favoritesState());
+  ipcMain.handle('favorite-set', (_e, { kind, id, on } = {}) => favoriteSet(String(kind || ''), String(id || ''), on, 'desktop'));
   ipcMain.handle('channels-import-csv', async () => {
     const r = await dialog.showOpenDialog(win, { title: 'Import a CHIRP CSV export', properties: ['openFile'], filters: [{ name: 'CHIRP CSV', extensions: ['csv'] }, { name: 'All files', extensions: ['*'] }] });
     if (!r || r.canceled || !r.filePaths || !r.filePaths[0]) return { canceled: true };

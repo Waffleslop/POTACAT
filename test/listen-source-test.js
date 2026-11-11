@@ -185,5 +185,37 @@ check('the VFO knob and wheel never step from an unknown dial of 0 (hoogskev 0.0
   assert.strictEqual((vfo.match(/if \(vfoLocked \|\| !currentFreqHz\) return;/g) || []).length, 2);
 });
 
+// #329 (Casey 2026-11-10): Channels and Landmarks "on the wire so ECHOCAT
+// can tune to them - especially on SDRs". A phone tune used to be refused
+// with no radio link or a no-CAT rig even when an SDR could hear it.
+check('#329: a phone tune with no radio control goes to the SDR when one can hear it', () => {
+  const NOAA = 162550000, CB9 = 27065000;
+  const rtl = { connected: true, reach: V4, manual: false };
+  const kiwi = { connected: true, reach: L.KIWI_REACH, manual: false };
+  assert.strictEqual(L.routeWithoutRig(NOAA, null, rtl, false), 'sdr', 'no radio, rtl_tcp covers NOAA');
+  assert.strictEqual(L.routeWithoutRig(NOAA, null, kiwi, false), 'none', 'a KiwiSDR does not reach 162 MHz');
+  assert.strictEqual(L.routeWithoutRig(CB9, null, kiwi, false), 'sdr', 'CB 9 on a KiwiSDR');
+  assert.strictEqual(L.routeWithoutRig(NOAA, null, null, true), 'connect', 'a listed SDR is brought up');
+  assert.strictEqual(L.routeWithoutRig(NOAA, null, null, false), 'none');
+  assert.strictEqual(L.routeWithoutRig(NOAA, null, { connected: true, reach: null, manual: false }, false), 'sdr', 'reach not known yet: benefit of the doubt, as decide()');
+  assert.strictEqual(L.routeWithoutRig(14074000, null, { connected: true, reach: V4, manual: true }, false), 'sdr', 'the SDR the operator chose');
+  // A no-CAT radio still hears its own range: set it by hand, as before.
+  assert.strictEqual(L.routeWithoutRig(14074000, [[30e3, 54e6]], rtl, true), 'hand');
+  assert.strictEqual(L.routeWithoutRig(NOAA, [[30e3, 54e6]], rtl, false), 'sdr', 'no-CAT HF radio, NOAA through the SDR');
+});
+check('#329: the ECHOCAT tune handler asks routeWithoutRig before refusing', () => {
+  const main = readSrc(path.join(ROOT, 'main.js'));
+  const at = main.indexOf("remoteServer.on('tune', ({ freqKhz, mode, bearing, channelId");
+  const h = main.slice(at, at + 4000);
+  const route = h.indexOf('ListenSource.routeWithoutRig(hz, rigReachNow(), listenSdrState(), !!sdrCandidateFor(hz))');
+  assert.ok(route > 0, 'routeWithoutRig in the handler');
+  assert.ok(route < h.indexOf("type: 'tune-blocked'"), 'before any refusal');
+  assert.ok(/if \(route === 'sdr'\) \{ listenSdrTake\(hz, mode, why\); return; \}/.test(h));
+  assert.ok(/if \(route === 'connect' && listenSdrConnectFor\(hz, mode, why\)\) return;/.test(h));
+  const arb = main.slice(main.indexOf('function listenSdrArbitrate('), main.indexOf('function listenSdrResume('));
+  assert.ok(/listenSdrTake\(hz, mode, 'is outside the radio\\'s range'\)/.test(arb), 'the desktop path uses the same helper');
+  assert.ok(/'sdr-tune-without-rig'/.test(readSrc(path.join(ROOT, 'lib', 'remote-server.js'))), 'hello capability');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

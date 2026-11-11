@@ -229,6 +229,9 @@
     .tog.on, .tog.active { background: var(--blue); color: var(--on-blue); font-weight: 600; }
     .band-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; }
     .band-btn { padding: 9px 0; }
+    .fav-grid { display: flex; flex-wrap: wrap; gap: 4px; }
+    .fav-btn { padding: 8px 10px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #sec-favorites.empty { display: none; }
     .seg { display: flex; background: var(--in); border-radius: 8px; padding: 3px; gap: 3px; }
     /* Lightly stroked so each width reads as a button, not a label */
     .seg button { flex: 1; border: 0; background: transparent; color: var(--t2); font-size: 12px; font-weight: 500; padding: 8px 0; border-radius: 6px; cursor: pointer; min-width: 0; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--t3) 40%, transparent); }
@@ -552,6 +555,11 @@
         <div class="lbl">Band</div>
         <div class="band-grid" id="band-grid-dial"></div>
       </div>
+      <!-- Favourites (#329): the Landmarks and Channels starred in Directory. A click tunes. -->
+      <div class="section vfo-section empty" id="sec-favorites">
+        <div class="lbl">Favorites</div>
+        <div class="fav-grid" id="fav-grid"></div>
+      </div>
       <div class="section vfo-section" id="sec-filter">
         <div class="section-head"><span class="lbl">Filter</span><span class="filter-val" id="filter-val">2400 Hz</span></div>
         <div class="seg filter-quick-shared"></div>
@@ -750,6 +758,7 @@
       <label class="settings-toggle">Beam heading to the spot <input type="checkbox" id="w-bearing"></label>
       <label class="settings-toggle">Tuning step chip <input type="checkbox" id="s-step" checked></label>
       <label class="settings-toggle">Bands <input type="checkbox" id="s-band" checked></label>
+      <label class="settings-toggle" title="The landmarks and channels you starred in Directory">Favorites <input type="checkbox" id="s-favorites" checked></label>
       <label class="settings-toggle">Filter buttons <input type="checkbox" id="s-filter" checked></label>
       <label class="settings-toggle">Filter slider <input type="checkbox" id="s-filter-slider" checked></label>
       <label class="settings-toggle">NB, ATU and custom buttons <input type="checkbox" id="s-controls" checked></label>
@@ -1152,7 +1161,46 @@ function updateBandHighlight() {
     const b = BANDS.find(b => b.freq === parseInt(btn.dataset.freq));
     btn.classList.toggle('active', b && b.label === cur);
   });
+  favHighlight();
 }
+
+// ── Favourites (#329, lib/favorites.js) ─────────────────────────────────
+// The Landmarks and Channels starred in Directory, one button each; a click
+// tunes (a frequency the radio cannot reach plays through the SDR, as from
+// Directory). Hidden while nothing is starred; shown, hidden and moved like
+// any other section (VFO settings > Show in this window, Order).
+let vfoFavItems = [];
+function favHighlight() {
+  document.querySelectorAll('#fav-grid .fav-btn').forEach((b) => {
+    b.classList.toggle('active', currentFreqHz > 0 && Math.abs(Number(b.dataset.khz) * 1000 - currentFreqHz) < 500);
+  });
+}
+function renderFavorites() {
+  const grid = document.getElementById('fav-grid');
+  const sec = document.getElementById('sec-favorites');
+  if (!grid || !sec) return;
+  grid.innerHTML = '';
+  for (const f of vfoFavItems) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'tog fav-btn';
+    b.dataset.khz = String(f.khz);
+    b.textContent = f.name;
+    const mhz = (Number(f.khz) / 1000).toFixed(f.khz % 1 ? 4 : 3);
+    b.title = f.name + ' · ' + mhz + ' MHz ' + (f.mode || '') + (f.note ? ' · ' + f.note : '');
+    b.addEventListener('click', () => window.api.tune(String(f.khz), f.mode || undefined));
+    grid.appendChild(b);
+  }
+  sec.classList.toggle('empty', !vfoFavItems.length);
+  favHighlight();
+  if (typeof renderOrderList === 'function' && document.getElementById('order-list')) { try { renderOrderList(); } catch { /* sheet closed */ } }
+}
+function applyFavorites(st) {
+  vfoFavItems = st && Array.isArray(st.items) ? st.items : [];
+  renderFavorites();
+}
+if (window.api.favoritesGet) window.api.favoritesGet().then(applyFavorites).catch(() => {});
+if (window.api.onFavorites) window.api.onFavorites(applyFavorites);
 
 buildBandGrid(document.getElementById('band-grid-dial'));
 // band-grid-mode removed (Mode tab eliminated)
@@ -2145,8 +2193,8 @@ function esc(s) {
 // --- Widget visibility ---
 const WIDGETS = ['smeter', 'ptt', 'log', 'cw', 'cw-controls', 'voice'];
 let vfoWidgets = { smeter: false, ptt: false, log: false, cw: false, 'cw-controls': false, voice: false, bearing: false };
-const SECTIONS = ['dial', 'solar', 'step', 'band', 'filter', 'filter-slider', 'controls', 'profiles-inline'];
-let vfoSections = { dial: true, solar: true, step: true, band: true, filter: true, 'filter-slider': true, controls: true, 'profiles-inline': false };
+const SECTIONS = ['dial', 'solar', 'step', 'band', 'favorites', 'filter', 'filter-slider', 'controls', 'profiles-inline'];
+let vfoSections = { dial: true, solar: true, step: true, band: true, favorites: true, filter: true, 'filter-slider': true, controls: true, 'profiles-inline': false };
 
 // --- Dial-pane order (settings.vfoOrder) ---
 // The blocks under the header, top to bottom. Unknown keys from a newer build
@@ -2154,6 +2202,7 @@ let vfoSections = { dial: true, solar: true, step: true, band: true, filter: tru
 const ORDER_BLOCKS = [
   { key: 'knob', el: 'blk-knob', name: 'Knob and activator' },
   { key: 'band', el: 'sec-band', name: 'Bands' },
+  { key: 'favorites', el: 'sec-favorites', name: 'Favorites' },
   { key: 'filter', el: 'sec-filter', name: 'Filter buttons' },
   { key: 'filter-slider', el: 'sec-filter-slider', name: 'Filter slider' },
   { key: 'txpower', el: 'sec-txpower', name: 'TX power' },
@@ -2196,6 +2245,7 @@ function orderBlockShown(b) {
   if (!el) return false;
   if (b.key === 'controls') return !!(vfoSections.controls || vfoSections.solar);
   if (el.style.display === 'none') return false;
+  if (b.key === 'favorites' && el.classList.contains('empty')) return false;
   if (el.classList.contains('widget-section') && !el.classList.contains('visible')) return false;
   return true;
 }
@@ -2378,6 +2428,7 @@ const sDial = document.getElementById('s-dial');
 const sSolar = document.getElementById('s-solar');
 const sStep = document.getElementById('s-step');
 const sBand = document.getElementById('s-band');
+const sFavorites = document.getElementById('s-favorites');
 const sFilter = document.getElementById('s-filter');
 const sFilterSlider = document.getElementById('s-filter-slider');
 const sControls = document.getElementById('s-controls');
@@ -2396,6 +2447,7 @@ function syncSettingsCheckboxes() {
   sSolar.checked = !!vfoSections.solar;
   sStep.checked = !!vfoSections.step;
   sBand.checked = !!vfoSections.band;
+  sFavorites.checked = vfoSections.favorites !== false;
   sFilter.checked = !!vfoSections.filter;
   sFilterSlider.checked = !!vfoSections['filter-slider'];
   sControls.checked = !!vfoSections.controls;
@@ -2498,12 +2550,13 @@ async function populateMicDevices() {
   }
 }
 
-[sDial, sSolar, sStep, sBand, sFilter, sFilterSlider, sControls, sProfilesInline].forEach(cb => {
+[sDial, sSolar, sStep, sBand, sFavorites, sFilter, sFilterSlider, sControls, sProfilesInline].forEach(cb => {
   cb.addEventListener('change', () => {
     vfoSections.dial = sDial.checked;
     vfoSections.solar = sSolar.checked;
     vfoSections.step = sStep.checked;
     vfoSections.band = sBand.checked;
+    vfoSections.favorites = sFavorites.checked;
     vfoSections.filter = sFilter.checked;
     vfoSections['filter-slider'] = sFilterSlider.checked;
     vfoSections.controls = sControls.checked;

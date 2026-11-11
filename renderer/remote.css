@@ -20,6 +20,7 @@
   --bg-header: #0f3460;
   --accent: #e94560;
   --text: #e0e0e0;
+  --fav: #4fc3f7;   /* a starred Landmark or Channel (#329): POTACAT blue, never yellow */
   --text-dim: #9a9ab0; /* raised 2026-10-16, LZ3AW: grey text unreadable */
   --pota: #4ecca3;
   --sota: #f0a500;
@@ -2984,6 +2985,7 @@ html, body {
   --accent: #c62828;
   --text: #1a1a2e;
   --text-dim: #5e5e76;
+  --fav: #0277bd;
   --border: #ccc;
 }
 
@@ -4583,3 +4585,10 @@ body.popout-mode .popout-only { display: flex; }
 /* FT8 tab on a Flex: the radio's waterfall alone (remote.js ft8ScopeIsFlex). */
 #ft8-bandscope.ft8-bs-radio-wf > div:first-child, #ft8-bandscope.ft8-bs-radio-wf #ft8-bs-trace { display: none !important; }
 #ft8-bandscope.ft8-bs-radio-wf #ft8-bs-wf { height: 120px !important; }
+
+/* Favourites (#329, lib/favorites.js starHtml): the star on a Landmark or
+   Channel card, and the Favorites group at the top of each list. */
+.fav-star { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; margin: -6px -6px -6px 0; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-dim); cursor: pointer; flex-shrink: 0; }
+.fav-star.on { color: var(--fav); }
+.fav-star svg { width: 18px; height: 18px; }
+.lmk-group.fav-group { color: var(--fav); }
