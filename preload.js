@@ -440,6 +440,7 @@ contextBridge.exposeInMainWorld('api', {
   setEventOptIn: (data) => ipcRenderer.invoke('set-event-optin', data),
   setEventWatchlist: (data) => ipcRenderer.invoke('set-event-watchlist', data),
   setEventSnooze: (data) => ipcRenderer.invoke('set-event-snooze', data),
+  setEventBanner: (data) => ipcRenderer.invoke('set-event-banner', data), // { eventId, shown }
   getEventProgress: (eventId) => ipcRenderer.invoke('get-event-progress', eventId),
   markEventRegion: (data) => ipcRenderer.invoke('mark-event-region', data),
   setEventItem: (data) => ipcRenderer.invoke('set-event-item', data),

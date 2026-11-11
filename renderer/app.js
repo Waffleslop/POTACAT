@@ -19221,6 +19221,9 @@ function pickBannerEvent() {
     // banner stays hidden through the lead-in and returns when it goes LIVE.
     if (ev.snoozeUntil && nowMs < ev.snoozeUntil) continue;
     if (ev.dismissed && !ev.optedIn) continue;
+    // "Show this banner" off (the badge's menu, or Spots > Events & Awards):
+    // gone for good, tracked or not, until switched back on.
+    if (ev.bannerHidden) continue;
     // Entries are resolved as an ARRAY — America250 WAS runs multiple
     // concurrent states per week, and the banner shows all of them.
     const current = getActiveScheduleEntries(ev);
@@ -19884,6 +19887,7 @@ function updateSpotsEventsSection() {
 
     const right = document.createElement('div');
     right.style.cssText = 'display:flex;align-items:center;gap:4px;';
+    right.appendChild(eventBannerToggle(ev, 'font-size:10px;margin-right:2px;'));
 
     // Watchlist toggle — only for events that name stations.
     if ((ev.callsignPatterns || []).length) {
@@ -19956,6 +19960,60 @@ document.getElementById('event-dismiss').addEventListener('click', async () => {
   }
 });
 
+// The badge ("250") opens this event's settings: show the banner, track it,
+// its stations on the watchlist, the board. (Casey 2026-11-10: a year-long
+// banner needs a way to stop following it.)
+const eventBadgeEl = document.getElementById('event-badge');
+const eventMenuEl = document.getElementById('event-banner-menu');
+let eventMenuId = null;
+function paintEventMenu() {
+  const ev = activeEvents.find(e => e.id === eventMenuId);
+  if (!ev) { openEventMenu(false); return; }
+  document.getElementById('ebm-title').textContent = ev.name || 'This event';
+  document.getElementById('ebm-show').checked = !ev.bannerHidden;
+  document.getElementById('ebm-track').checked = !!ev.optedIn;
+  const hasStations = (ev.callsignPatterns || []).length > 0;
+  document.getElementById('ebm-watch-row').classList.toggle('hidden', !hasStations);
+  document.getElementById('ebm-watch').checked = !!ev.watchlistOn;
+}
+function openEventMenu(open) {
+  if (open) {
+    const ev = findBannerEvent();
+    if (!ev) return;
+    eventMenuId = ev.id;
+    paintEventMenu();
+  } else {
+    eventMenuId = null;
+  }
+  eventMenuEl.classList.toggle('hidden', !open);
+  eventBadgeEl.setAttribute('aria-expanded', String(!!open));
+}
+eventBadgeEl.addEventListener('click', (e) => {
+  e.stopPropagation();
+  openEventMenu(eventMenuEl.classList.contains('hidden'));
+});
+eventMenuEl.addEventListener('click', (e) => e.stopPropagation());
+document.addEventListener('click', () => { if (eventMenuId) openEventMenu(false); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && eventMenuId) openEventMenu(false); });
+document.getElementById('ebm-show').addEventListener('change', async (e) => {
+  const id = eventMenuId;
+  if (!id) return;
+  const shown = e.target.checked;
+  if (!shown) openEventMenu(false);   // the banner (and this menu on it) goes away
+  await window.api.setEventBanner({ eventId: id, shown });
+});
+document.getElementById('ebm-track').addEventListener('change', async (e) => {
+  if (eventMenuId) await window.api.setEventOptIn({ eventId: eventMenuId, optedIn: e.target.checked, dismissed: false });
+});
+document.getElementById('ebm-watch').addEventListener('change', async (e) => {
+  if (eventMenuId) await window.api.setEventWatchlist({ eventId: eventMenuId, on: e.target.checked });
+});
+document.getElementById('ebm-board').addEventListener('click', () => {
+  const id = eventMenuId;
+  openEventMenu(false);
+  if (id) openEventBoard(id);
+});
+
 document.getElementById('event-progress-btn').addEventListener('click', () => {
   // Focus the board on the event the banner is actually showing — not the
   // stale currentBoardEventId / first-opted-in event toggleEventOverlay() would
@@ -19977,6 +20035,21 @@ document.getElementById('event-export-btn').addEventListener('click', async () =
     alert(`Exported ${result.count} QSOs to ${result.filePath}`);
   }
 });
+
+// "Banner" on/off for one event: the way back for a banner switched off from
+// its badge (Settings > Events and Spots > Events & Awards).
+function eventBannerToggle(ev, style) {
+  const lab = document.createElement('label');
+  lab.style.cssText = 'display:inline-flex;align-items:center;gap:4px;cursor:pointer;color:var(--text-secondary);' + (style || '');
+  lab.title = ev.bannerHidden ? 'The banner for this event is off: tick to show it again' : 'Show this event in the banner at the top';
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.checked = !ev.bannerHidden;
+  cb.style.margin = '0';
+  cb.addEventListener('change', () => window.api.setEventBanner({ eventId: ev.id, shown: cb.checked }));
+  lab.append(cb, document.createTextNode('Banner'));
+  return lab;
+}
 
 function populateSettingsEvents() {
   const container = document.getElementById('settings-events-list');
@@ -20047,6 +20120,7 @@ function populateSettingsEvents() {
       updateEventBanner();
     });
     right.appendChild(toggle);
+    right.appendChild(eventBannerToggle(ev, 'font-size:11px;'));
     // Reset progress button (only if opted in and has progress)
     if (ev.optedIn && Object.keys(ev.progress || {}).length > 0) {
       const resetBtn = document.createElement('button');
@@ -20291,6 +20365,8 @@ window.api.onActiveEvents((events) => {
   }
   rebuildEventWatchlist();
   updateEventBanner();
+  if (eventMenuId) paintEventMenu();
+  populateSettingsEvents();
   updateSpotsEventsSection();
   renderEventWatchlistCards();
   updateEventFocusUi();
