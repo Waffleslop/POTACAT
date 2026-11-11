@@ -767,6 +767,66 @@ test('disconnect while keyed sends TX0; first', async () => {
   } finally { u.close(); }
 });
 
+test('buffer TX (FT8, Tune): 12 kHz resampled to 16 kHz, lead and tail silence, paced in real time, then resolved', async () => {
+  const u = await fakeUnit();
+  const c = client();
+  try {
+    c.t.connect({ host: '127.0.0.1', basePort: u.base, ...FAST });
+    assert.ok(await until(() => c.connects === 1));
+    const tone = new Float32Array(3000).fill(0.5);            // 250 ms at 12 kHz
+    const t0 = Date.now();
+    const p = c.t.sendTxAudio(tone, { inputSampleRate: 12000, startDelayMs: 100, offsetMs: 0, tailSilenceMs: 50 });
+    assert.strictEqual(c.t.txAudioActive, true);
+    assert.strictEqual(c.t.voiceTxActive, false, 'a buffer is not voice');
+    await p;
+    const took = Date.now() - t0;
+    assert.ok(took >= 300 && took < 900, `paced in real time: 400 ms of audio took ${took} ms`);
+    assert.strictEqual(c.t.txAudioActive, false);
+    assert.ok(await until(() => u.txAudio.length >= 2 * 41), `packets ${u.txAudio.length}`);
+    const once = u.txAudio.filter((_, i) => i % 2 === 0);
+    assert.strictEqual(once[0].readUInt16LE(4 + 22), 0, 'opener');
+    const pcm = once.slice(1).map((b) => b.readInt16LE(28));
+    assert.strictEqual(pcm.length, 40, '100 + 250 + 50 ms = 40 frames');
+    assert.deepStrictEqual(pcm.slice(0, 10), new Array(10).fill(0), '100 ms lead silence');
+    assert.ok(pcm.slice(10, 35).every((v) => v === Math.round(0.5 * 32767)), 'the tone');
+    assert.deepStrictEqual(pcm.slice(35), new Array(5).fill(0), '50 ms tail');
+  } finally { c.t.disconnect(); u.close(); }
+});
+
+test('buffer TX: cancelTx() stops it and rejects with "TX cancelled"; voice and a second buffer are refused while one runs', async () => {
+  const u = await fakeUnit();
+  const c = client();
+  try {
+    c.t.connect({ host: '127.0.0.1', basePort: u.base, ...FAST });
+    assert.ok(await until(() => c.connects === 1));
+    const p = c.t.sendTxAudio(new Float32Array(12000 * 5), { inputSampleRate: 12000 });
+    await assert.rejects(c.t.sendTxAudio(new Float32Array(10)), /already in flight/);
+    c.t.startVoiceTx();
+    assert.strictEqual(c.t.voiceTxActive, false, 'voice did not take over the buffer');
+    await sleep(100);
+    c.t.cancelTx();
+    await assert.rejects(p, /TX cancelled/);
+    assert.strictEqual(c.t.txAudioActive, false);
+    const n = u.txAudio.length;
+    await sleep(100);
+    assert.ok(u.txAudio.length - n <= 2, 'nothing more after the cancel');
+    c.t.startVoiceTx();
+    await assert.rejects(c.t.sendTxAudio(new Float32Array(10)), /voice TX is active/);
+  } finally { c.t.disconnect(); u.close(); }
+});
+
+test('buffer TX: a lost session rejects it', async () => {
+  const u = await fakeUnit();
+  const c = client();
+  try {
+    c.t.connect({ host: '127.0.0.1', basePort: u.base, ...FAST });
+    assert.ok(await until(() => c.connects === 1));
+    const p = c.t.sendTxAudio(new Float32Array(12000 * 10), { inputSampleRate: 12000 });
+    u.silent = true;
+    await assert.rejects(p, /session ended/);
+  } finally { c.t.disconnect(); u.close(); }
+});
+
 (async () => {
   for (const [name, fn] of queue) {
     try { await fn(); pass++; console.log('  ok  ' + name); }
