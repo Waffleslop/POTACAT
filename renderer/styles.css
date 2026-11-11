@@ -934,6 +934,13 @@ button:hover {
   position: relative;
 }
 .status-bar > .hidden { display: none !important; }
+/* A remote shack with a long name ("LAPTOP · ICOM IC-7100 · LAN · 9 ms")
+   pushed HOLD TO TALK off the right edge (#298). The bar may now shrink, and
+   only the shack chip gives way, ending in "..." (its title has the whole
+   line); PTT and every other item keep their size. */
+.status-bar { min-width: 0; flex-shrink: 1; }
+.status-bar > * { flex: none; }
+.status-bar > #remote-shack-status { flex: 0 1 auto; min-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-bar > .cw-popover,
 .status-bar > .rig-popover { position: absolute; }
 
@@ -8673,7 +8680,11 @@ body.activator-rbn-on #rbn-view {
   background: var(--text-tertiary);
 }
 .dir-status-dot.on-air { background: var(--accent-green); }
-.dir-action-col { width: 55px; text-align: center; }
+/* Wide enough for "✓ Remove", and never clipped: at 55 px the table's
+   ellipsis left only the check mark (#284, hoogskev 2026-11-09). Same as the
+   newer Directory view's .dirv-action-col. */
+.dir-action-col { width: 84px; text-align: center; }
+.directory-table tbody td.dir-action-col { overflow: visible; text-overflow: clip; }
 .dir-add-btn {
   background: none;
   border: 1px solid var(--accent-blue, var(--accent-blue));

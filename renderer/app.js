@@ -8243,9 +8243,10 @@ if (window.api && window.api.onRemoteClientDisplaced) {
       chip.textContent = '🔗 ' + name + rig + leg + rtt + also + silent;
       chip.style.background = '#4ecca3';
       chip.style.color = '#0a1a14';
-      chip.title = remoteShack.audioSilent
+      // The chip shortens with "..." when the bar is full (#298); the whole line is here.
+      chip.title = (name + rig + leg + rtt + also + silent) + '\n' + (remoteShack.audioSilent
         ? 'Connected to ' + name + ', but no audio has arrived from the shack for 10 s. Check the shack\'s audio source and that ECHOCAT is on there.'
-        : 'Connected to ' + name + ' — click to manage';
+        : 'Connected to ' + name + ' — click to manage');
     } else if (state.state === 'connecting' || state.state === 'authing') {
       chip.textContent = '🔗 ' + name + ' · connecting';
       chip.style.background = '#d4a64a';
@@ -10937,6 +10938,10 @@ const HEADER_LABELS = {
 };
 
 function updateCompactMode(width) {
+  // A hidden pane measures 0 wide (the Nets/SW page hides the table): that is
+  // not a narrow window, and going compact then left the Log button reading
+  // "L" until the next render (#285, hoogskev 2026-11-09).
+  if (!(width > 0)) return;
   const compact = width < COMPACT_THRESHOLD;
   if (compact === isCompact) return;
   isCompact = compact;
@@ -21407,8 +21412,10 @@ function renderNetsTable(search) {
       ? `<a class="dir-name-link" href="#" data-url="${net.url.replace(/"/g, '&quot;')}">${esc(net.name)}</a>`
       : esc(net.name);
     const duration = net.duration ? `${net.duration}m` : '';
+    // String() both sides, as the Directory view does: a reminder saved with a
+    // numeric frequency still matches the sheet's text one.
     const alreadyAdded = currentNetReminders.some(r =>
-      r.name === net.name && r.frequency === net.frequency
+      r.name === net.name && String(r.frequency) === String(net.frequency)
     );
     const actionCell = alreadyAdded
       ? '<button class="dir-remove-btn" type="button" title="Remove from My Net Reminders">\u2713 Remove</button>'
