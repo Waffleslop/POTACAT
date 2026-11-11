@@ -459,6 +459,24 @@
        confused with a logged-QSO confirmation. K3SBP 2026-05-05. */
     .jp-qso-toast.error { background: #f8d7da; color: #721c24; }
     .jp-qso-toast.warn { background: #fff3cd; color: #664d03; }
+    /* QSO logged: a card in the middle of the window (Casey 2026-11-11: the
+       toast at the bottom was hard to see). Only the card takes clicks; it
+       never takes focus, so the decode list behind it keeps working. Theme
+       colours only: --accent-green is darkened in the light themes. */
+    .jp-qso-card { position: fixed; left: 50%; top: 46%; transform: translate(-50%, -46%) scale(0.96); width: 340px; max-width: calc(100vw - 32px); box-sizing: border-box; padding: 16px 20px 0; border-radius: 12px; background: var(--bg-secondary); color: var(--text-primary); border: 2px solid var(--accent-green); box-shadow: 0 12px 40px rgba(0,0,0,0.5); display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; overflow: hidden; z-index: 9999; opacity: 0; pointer-events: none; transition: opacity 0.2s ease, transform 0.2s ease; }
+    .jp-qso-card.visible { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
+    .jp-qso-card-title { font-size: 14px; font-weight: 600; letter-spacing: 0.5px; color: var(--accent-green); }
+    .jp-qso-card-call { font-size: 28px; font-weight: 700; font-family: Consolas, 'Courier New', monospace; line-height: 1.15; color: var(--text-primary); word-break: break-all; }
+    .jp-qso-card-sub { font-size: 14px; color: var(--text-secondary); }
+    .jp-qso-card-btns { display: flex; gap: 8px; margin: 10px 0 14px; }
+    .jp-qso-card-btns button { font: inherit; font-size: 13px; padding: 7px 16px; border-radius: 6px; border: 1px solid var(--accent-green); background: transparent; color: var(--accent-green); cursor: pointer; }
+    .jp-qso-card-btns button:hover { background: var(--ok-subtle); }
+    .jp-qso-card-btns .jp-qso-card-ok { font-weight: 600; }
+    .jp-qso-card-bar { align-self: stretch; height: 3px; margin: 0 -20px; background: var(--border-primary); }
+    .jp-qso-card-bar > div { height: 3px; width: 100%; background: var(--accent-green); }
+    .jp-qso-card.visible .jp-qso-card-bar > div { animation: jp-qso-card-bar 6s linear forwards; }
+    @keyframes jp-qso-card-bar { from { width: 100%; } to { width: 0%; } }
+    @media (prefers-reduced-motion: reduce) { .jp-qso-card { transition: opacity 0.2s ease; } .jp-qso-card.visible .jp-qso-card-bar > div { animation: none; } }
 
     /* Waterfall */
     .jp-waterfall { width: 100%; height: 80px; image-rendering: pixelated; cursor: crosshair; flex-shrink: 0; border-top: 1px solid var(--border-primary); border-bottom: 1px solid var(--border-primary); display: block; }
@@ -1256,6 +1274,16 @@
   </div>
 
   <div id="jp-qso-toast" class="jp-qso-toast"></div>
+  <div id="jp-qso-card" class="jp-qso-card" role="status" aria-live="polite">
+    <div class="jp-qso-card-title">QSO logged</div>
+    <div id="jp-qso-card-call" class="jp-qso-card-call"></div>
+    <div id="jp-qso-card-sub" class="jp-qso-card-sub"></div>
+    <div class="jp-qso-card-btns">
+      <button type="button" id="jp-qso-card-edit" tabindex="-1">Edit in log</button>
+      <button type="button" id="jp-qso-card-ok" class="jp-qso-card-ok" tabindex="-1">OK</button>
+    </div>
+    <div class="jp-qso-card-bar"><div></div></div>
+  </div>
 
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>
   <script src="../lib/rig-family.js"></script>

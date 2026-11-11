@@ -1713,16 +1713,29 @@ function _applyPopoutTheme(payload) {
   var qsoToast = document.getElementById('jp-qso-toast');
   var qsoToastTimer = null;
 
+  // QSO logged: a card in the middle of the window, 6 s (Casey 2026-11-11).
+  // A newer QSO replaces it; it never takes focus. Edit in log opens the main
+  // window, where the log is; OK just closes it.
+  var qsoCard = document.getElementById('jp-qso-card');
+  var qsoCardTimer = null;
+  function hideQsoCard() {
+    if (qsoCardTimer) { clearTimeout(qsoCardTimer); qsoCardTimer = null; }
+    qsoCard.classList.remove('visible');
+  }
   window.api.onJtcatQsoLogged(function(data) {
-    if (qsoToastTimer) clearTimeout(qsoToastTimer);
-    qsoToast.innerHTML = 'QSO with <b>' + esc(data.callsign) + '</b> Logged' +
-      '<div class="jp-toast-sub">' + [data.band, data.mode, data.rstSent, data.rstRcvd, data.grid].filter(Boolean).join(' &middot; ') +
-      ' &mdash; click to edit</div>';
-    qsoToast.classList.add('visible');
-    qsoToastTimer = setTimeout(function() {
-      qsoToast.classList.remove('visible');
-    }, 5000);
+    hideQsoCard();
+    document.getElementById('jp-qso-card-call').textContent = data.callsign || '';
+    var sub = [data.band, data.mode];
+    if (data.rstSent) sub.push('sent ' + data.rstSent);
+    if (data.rstRcvd) sub.push('rcvd ' + data.rstRcvd);
+    sub.push(data.grid);
+    document.getElementById('jp-qso-card-sub').textContent = sub.filter(Boolean).join(' · ');
+    void qsoCard.offsetWidth; // restart the countdown bar for a QSO that replaces one on screen
+    qsoCard.classList.add('visible');
+    qsoCardTimer = setTimeout(hideQsoCard, 6000);
   });
+  document.getElementById('jp-qso-card-edit').addEventListener('click', function() { hideQsoCard(); window.api.focusMain(); });
+  document.getElementById('jp-qso-card-ok').addEventListener('click', hideQsoCard);
 
   qsoToast.addEventListener('click', function() {
     if (qsoToastTimer) clearTimeout(qsoToastTimer);
