@@ -37,13 +37,28 @@ test('growing back uses the size from before the shrink, else the default; a clo
 
 test('main: vfo-set-compact remembers the full size once, sizes the strip, restores, and saves the choice', () => {
   const i = main.indexOf("ipcMain.on('vfo-set-compact'");
-  const h = main.slice(i, i + 1800);
-  assert.ok(/if \(!_vfoCompactNow\) settings\.vfoFullSize = \{ width: b\.width, height: b\.height \};/.test(h), 'remembered before the first shrink only');
+  const h = main.slice(i, i + 2600);
+  assert.ok(/const entering = !_vfoCompactNow;\s*if \(entering\) \{\s*settings\.vfoFullSize = \{ width: b\.width, height: b\.height \};/.test(h), 'remembered before the first shrink only');
   assert.ok(/VfoCompact\.miniSize\(\{ width, height, saved: settings\.vfoMiniWidth \}\)/.test(h) && /setMinimumSize\(VfoCompact\.MINI\.minWidth, VfoCompact\.MINI\.minHeight\)/.test(h));
   assert.ok(/VfoCompact\.fullSize\(settings\.vfoFullSize, b\)/.test(h) && /setMinimumSize\(300, 360\)/.test(h), 'grows back with the old minimum');
   assert.ok(/if \(save && settings\.vfoCompact !== !!on\) \{ settings\.vfoCompact = !!on; saveSettings\(settings\); \}/.test(h));
-  assert.ok(/_vfoCompactNow \? VfoCompact\.savedBounds\(vfoPopoutWin\.getBounds\(\), settings\.vfoFullSize\)/.test(main), 'never saved at strip height');
+  assert.ok(/_vfoCompactNow \? VfoCompact\.savedBounds\(\{ \.\.\.cb, \.\.\.VfoCompact\.placeFor\(settings\.vfoFullPos, cb\) \}, settings\.vfoFullSize\)/.test(main), "never saved at strip height, and at the large VFO's own place");
   assert.ok(/setVfoCompact: \(on, height, save, width, fit\) => ipcRenderer\.send\('vfo-set-compact'/.test(readSrc(path.join(root, 'preload-vfo-popout.js'))));
+});
+
+test('each size remembers its own place (Casey 2026-11-11: max came back where mini was)', () => {
+  const C = require('../lib/vfo-compact');
+  assert.deepStrictEqual(C.placeFor({ x: 100, y: 200 }, { x: 900, y: 50 }), { x: 100, y: 200 }, 'its own place when it has one');
+  assert.deepStrictEqual(C.placeFor(null, { x: 900, y: 50 }), { x: 900, y: 50 }, 'where the window is, the first time');
+  assert.deepStrictEqual(C.placeFor({ x: null, y: 3 }, { x: 9, y: 8 }), { x: 9, y: 8 });
+  assert.deepStrictEqual(C.placeOf({ x: 10.6, y: -4.2, width: 5 }), { x: 11, y: -4 }, 'negative is a real place (a screen left of the main one)');
+  const i = main.indexOf("ipcMain.on('vfo-set-compact'");
+  const h = main.slice(i, i + 2600);
+  assert.ok(/settings\.vfoFullPos = VfoCompact\.placeOf\(b\);/.test(h), 'going small remembers where the large VFO was');
+  assert.ok(/vfoPlaceBounds\(settings\.vfoMiniPos, b, size\)/.test(h), "and goes to the small VFO's own place");
+  assert.ok(/settings\.vfoMiniPos = VfoCompact\.placeOf\(b\);/.test(h) && /vfoPlaceBounds\(settings\.vfoFullPos, b, full\)/.test(h), 'growing back: remember the small place, go to the large one');
+  assert.ok(/vfoPopoutWin\.on\('move', \(\) => \{[\s\S]{0,400}if \(_vfoCompactNow\) settings\.vfoMiniPos = at; else settings\.vfoFullPos = at;/.test(main), "a drag moves only that size's place");
+  assert.ok(/function vfoPlaceBounds\(savedPos, current, size\)[\s\S]{0,300}isOnScreen\(want\)[\s\S]{0,200}clampToWorkArea/.test(main), 'never onto a screen that is gone');
 });
 
 test('the page: a title-bar button switches, the strip is the Small VFO line (test/vfo-layout-test.js)', () => {
