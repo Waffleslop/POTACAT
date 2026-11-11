@@ -414,8 +414,11 @@
     .profile-item.dragging { opacity: 0.45; }
     .profile-item.drop-above { box-shadow: inset 0 2px 0 0 var(--blue); }
     .profile-item.drop-below { box-shadow: inset 0 -2px 0 0 var(--blue); }
-    .profile-name { font-weight: 600; color: var(--t); flex: 1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .profile-detail { font-size: 11px; color: var(--t2); font-family: 'Cascadia Mono', Consolas, monospace; white-space: nowrap; }
+    .profile-name { font-weight: 600; color: var(--t); flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* Shrinks and ends in "..." instead of running out of a narrow box (#283);
+       the whole text is the row's title. */
+    .profile-detail { font-size: 11px; color: var(--t2); font-family: 'Cascadia Mono', Consolas, monospace; white-space: nowrap; flex: 0 1 auto; min-width: 0; max-width: 55%; overflow: hidden; text-overflow: ellipsis; }
+    .profile-item > .profile-del, .profile-item > .profile-edit, .profile-item > .profile-drag { flex: none; }
     .profile-del, .profile-edit { background: none; border: none; color: var(--t3); font-size: 14px; cursor: pointer; padding: 0 4px; }
     .profile-del:hover { color: var(--red); }
     .profile-edit:hover { color: var(--blue); }
@@ -2212,7 +2215,7 @@ function renderRigPresets() {
     rigPresets.presets.forEach((p) => {
       const item = document.createElement('div');
       item.className = 'profile-item';
-      item.title = 'Apply "' + p.name + '"';
+      item.title = 'Apply "' + p.name + '": ' + rigPresetDetail(p);
       item.innerHTML = `
         <span class="profile-name">${esc(p.name)}</span>
         <span class="profile-detail">${esc(rigPresetDetail(p))}</span>

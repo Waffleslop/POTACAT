@@ -129,6 +129,12 @@ test('main: the window opens the size it was left, at its width; open state is w
   assert.ok(/catCaps: vfoCatCaps\(\),/.test(main) && /apf: _currentApfState,/.test(main));
 });
 
+test('#283: a rig preset row stays inside its box: name and detail shrink with an ellipsis', () => {
+  assert.ok(/\.profile-name \{[^}]*min-width: 0;/.test(vfo));
+  assert.ok(/\.profile-detail \{[^}]*min-width: 0; max-width: 55%; overflow: hidden; text-overflow: ellipsis;/.test(vfo));
+  assert.ok(/item\.title = 'Apply "' \+ p\.name \+ '": ' \+ rigPresetDetail\(p\);/.test(vfo), 'the whole text is on hover');
+});
+
 test('this test is in the list CI runs', () => {
   assert.ok(readSrc(path.join(root, 'scripts', 'run-tests.js')).includes("'test/vfo-layout-test.js'"));
 });
