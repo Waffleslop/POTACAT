@@ -78,6 +78,7 @@ const TESTS = [
   'test/sstv-realistic-rx-test.js',
   'test/sstv-audio-device-test.js',
   'test/sstv-live-path-test.js',
+  'test/sstv-start-band-test.js', // #292: SSTV never tunes a radio to a band it is not set up for
   'test/sstv-text-styles-test.js', // #327: typeface, outline, shadow, letter spacing per SSTV text layer
   'test/sstv-input-level-test.js',
   'test/voice-macros-test.js',

@@ -231,14 +231,19 @@ const MODE_RES = {
   fitCanvases();
 
   // Auto-QSY to the selected SSTV frequency on open, or to the one main
-  // asked for (idle SSTV picks the day/night band).
+  // asked for (idle SSTV picks the day/night band). The radio's bands are
+  // read first: a radio that cannot use any SSTV channel in the list is not
+  // moved (#292).
+  try {
+    if (window.api.rigBandsGet) {
+      const d = await window.api.rigBandsGet();
+      sstvRigBands = (d && d.bands) || null;
+      applySstvRigBands();
+    }
+  } catch {}
   try {
     const q = new URLSearchParams(location.search);
-    if (q.get('freqKhz')) selectAndTune(q.get('freqKhz'), q.get('mode'));
-    else {
-      const initOpt = freqSelect.options[freqSelect.selectedIndex];
-      tuneToFreq(freqSelect.value, initOpt && initOpt.dataset.mode);
-    }
+    sstvAutoQsy(q.get('freqKhz') ? { freqKhz: q.get('freqKhz'), mode: q.get('mode') } : null);
   } catch (e) { console.error('[SSTV] Auto-QSY error:', e); }
 
 })();
@@ -247,13 +252,7 @@ const MODE_RES = {
 // Re-tune to the currently selected SSTV frequency so the radio QSYs back
 // from whatever spot the user last clicked.
 window.api.onRefocusQsy((target) => {
-  try {
-    if (target && target.freqKhz) selectAndTune(target.freqKhz, target.mode);
-    else {
-      const opt = freqSelect.options[freqSelect.selectedIndex];
-      tuneToFreq(freqSelect.value, opt && opt.dataset.mode);
-    }
-  } catch (e) { console.error('[SSTV] Refocus QSY error:', e); }
+  try { sstvAutoQsy(target); } catch (e) { console.error('[SSTV] Refocus QSY error:', e); }
   refreshRxDevice();
 });
 
@@ -341,6 +340,27 @@ function getFreqMode(freqKhz) {
 }
 
 // Show a frequency main chose in the dropdown (or the custom box) and tune it.
+// The tune SSTV makes by itself (on open, on re-open): main's day/night
+// channel when it sent one, else the selected channel, else the first one in
+// the list this radio can use. None usable: leave the radio where it is and
+// say SSTV is on HF (#292, Casey's choice: no 2 m SSTV).
+function sstvAutoQsy(target) {
+  if (target && target.freqKhz) { selectAndTune(target.freqKhz, target.mode); return; }
+  const choices = [];
+  freqSelect.querySelectorAll('optgroup').forEach((g) => {
+    g.querySelectorAll('option').forEach((o) => choices.push({ value: o.value, mode: o.dataset.mode, band: g.label }));
+  });
+  const pick = window.SstvStartBand
+    ? window.SstvStartBand.windowChannel(sstvRigBands, choices, freqSelect.value)
+    : { value: freqSelect.value, mode: freqSelect.options[freqSelect.selectedIndex] && freqSelect.options[freqSelect.selectedIndex].dataset.mode };
+  if (!pick) {
+    statusBar.textContent = window.SstvStartBand.NO_BAND_NOTE;
+    return;
+  }
+  if (pick.value !== freqSelect.value) freqSelect.value = pick.value;
+  tuneToFreq(pick.value, pick.mode);
+}
+
 function selectAndTune(freqKhz, mode) {
   const v = String(Math.round(Number(freqKhz)));
   const opt = Array.from(freqSelect.options).find(o => o.value === v);
