@@ -17704,6 +17704,7 @@ async function jtcatAutoLog(qso, opts) {
     // writes one record per ref, each with only its own program's field.
     qsoData.hunted = hunted.refs.map((r) => ({ sig: r.sig, ref: r.ref }));
     sendCatLog(`[JTCAT] Hunted park matched: ${q.call} @ ${hunted.refs.map((r) => `${r.sig} ${r.ref}`).join(', ')}`);
+    jtcatApplyAutoRespot(qsoData, hunted.refs);
   }
   qsoData.gridHeard = !!qsoData.gridsquare; // their decoded grid, not a home QTH
 
@@ -17730,6 +17731,26 @@ async function jtcatAutoLog(qso, opts) {
     return;
   }
   await jtcatWriteLog(qsoData, relogKeyStr);
+}
+
+// Re-spot a hunted activator after a JTCAT contact (opt-in, the JTCAT
+// window's options): the same flags the Log QSO window's re-spot box sets, so
+// logContact/saveQsoRecord post it like a logged phone or CW contact. Only the
+// first record of a contact carries re-spot flags (lib/qso-expand.js), so the
+// POTA ref goes first. POTA and WWFF; a park only, never a guess: the refs
+// come from the live spot list that also stamps the logged reference.
+function jtcatApplyAutoRespot(qsoData, refs) {
+  if (settings.jtcatAutoRespot !== true || !Array.isArray(refs) || !refs.length) return;
+  const pota = refs.find((r) => r.sig === 'POTA');
+  const wwff = refs.find((r) => r.sig === 'WWFF');
+  if (!pota && !wwff) return;
+  if (pota && Array.isArray(qsoData.hunted)) {
+    qsoData.hunted.sort((a, b) => (b.sig === 'POTA') - (a.sig === 'POTA'));
+  }
+  if (pota) qsoData.respot = true;
+  if (wwff) { qsoData.wwffRespot = true; qsoData.wwffReference = wwff.ref; }
+  qsoData.respotComment = settings.respotTemplate || '{rst} in {QTH} 73s {mycallsign} via POTACAT';
+  sendCatLog(`[JTCAT] Re-spot after the contact: ${qsoData.callsign} @ ${[pota, wwff].filter(Boolean).map((r) => `${r.sig} ${r.ref}`).join(', ')}`);
 }
 
 // The one write for a JTCAT contact, automatic or reviewed.

@@ -325,6 +325,7 @@ const TESTS = [
   'test/jtty-codec-test.js',
   'test/jtty-decoder-test.js',
   'test/jtty-engine-test.js',
+  'test/jtcat-auto-respot-test.js', // opt-in re-spot of a hunted activator after a JTCAT contact
   'test/jtty-remote-test.js',
   'test/jtty-txfreq-remote-test.js',
   'test/nocat-rig-test.js',
