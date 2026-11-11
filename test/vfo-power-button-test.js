@@ -28,7 +28,8 @@ test('it stays below every ordered block', () => {
 test('shown from the model caps, never from the CAT link', () => {
   assert.ok(/power: vfoPowerAvailable\(\)/.test(main), 'vfo-radio-state carries power');
   assert.ok(/function vfoPowerAvailable\(\) \{\s*try \{ return !!getRigCapabilities\(detectRigType\(\)\)\.power;/.test(main));
-  assert.ok(/s\.power != null\) document\.getElementById\('sec-power'\)\.style\.display = s\.power \? '' : 'none'/.test(html));
+  assert.ok(/if \(s\.power != null\) \{[\s\S]{0,120}sec\.style\.display = s\.power \? '' : 'none';\s*sec\.classList\.toggle\('visible', !!s\.power\);/.test(html), 'shown with the class a .tool-card needs');
+  assert.ok(/\.tool-card \{[^}]*display: none;[\s\S]{0,80}\.tool-card\.visible \{ display: flex; \}/.test(html), 'the stylesheet rule the class answers');
 });
 test('the buttons go through the one dispatcher; Off asks once', () => {
   assert.ok(/rigControl\(\{ action: 'power-on' \}\)/.test(html));

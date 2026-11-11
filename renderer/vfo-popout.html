@@ -1134,7 +1134,14 @@ window.api.onRadioState((s) => {
     buildRigToggles();
     if (sheetOpen()) renderLayoutLists();
   }
-  if (s.power != null) document.getElementById('sec-power').style.display = s.power ? '' : 'none';
+  // A .tool-card shows only with the "visible" class (vfo-popout.css): an
+  // inline display of '' fell back to the stylesheet's none, so the block
+  // never appeared on any radio.
+  if (s.power != null) {
+    const sec = document.getElementById('sec-power');
+    sec.style.display = s.power ? '' : 'none';
+    sec.classList.toggle('visible', !!s.power);
+  }
   // Active VFO + split badges — readback-fed from the radio (LZ3AW). The
   // VFO badge only appears once the rig reports B at least this session,
   // so single-VFO workflows keep today's clean strip.
