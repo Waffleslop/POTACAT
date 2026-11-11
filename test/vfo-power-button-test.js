@@ -38,6 +38,13 @@ test('a radio that does not answer shows dashes, not its last dial', () => {
   assert.ok(/renderFreqDisplay\(radioLinkUp \? currentFreqHz : 0\);/.test(html));
   assert.ok(/modeBadge\.textContent = !radioLinkUp \? '---'/.test(html));
 });
+test('Power On / Off say what is under way until the link shows it, or that it has not after 20 s', () => {
+  assert.ok(/id="vfo-power-status"[^>]*aria-live="polite"/.test(html));
+  assert.ok(/say\(want === 'on' \? 'Switching on\\u2026' : 'Switching off\\u2026'\)/.test(html));
+  assert.ok(/'No answer from the radio yet' : 'The radio still answers'/.test(html) && /\}, 20000\);/.test(html));
+  assert.ok(/if \(window\.vfoPowerLinkChanged\) window\.vfoPowerLinkChanged\(radioLinkUp\);/.test(html));
+  assert.ok(/disarm\(\);\s*begin\('off'\);\s*window\.api\.rigControl\(\{ action: 'power-off' \}\);/.test(html), 'only the confirmed second press');
+});
 test('the buttons go through the one dispatcher; Off asks once', () => {
   assert.ok(/rigControl\(\{ action: 'power-on' \}\)/.test(html));
   assert.ok(/Press again to power off/.test(html));

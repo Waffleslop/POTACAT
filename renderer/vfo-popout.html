@@ -280,6 +280,7 @@
     .voice-macro-btn.empty { opacity: 0.35; cursor: default; }
     .voice-stop-btn, .cw-cancel-btn { border: 0; background: var(--red); color: var(--on-red); padding: 7px 10px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: 600; }
     .ptt-log-row { display: flex; gap: 6px; align-items: center; }
+    .power-status { font-size: 13px; color: var(--t2); margin-left: 4px; }
     .sdr-btn-vfo { border: 0; padding: 9px 12px; font-size: 13px; font-weight: 600; background: var(--s2); color: var(--gold); border-radius: 8px; cursor: pointer; }
     .sdr-btn-vfo:hover { background: var(--s3); }
     .sdr-btn-vfo.active { background: var(--gold); color: #111; }
@@ -663,6 +664,7 @@
           <span class="macro-label">Radio</span>
           <button class="tog" id="vfo-power-on" title="Switch the radio on">Power On</button>
           <button class="tog" id="vfo-power-off" title="Switch the radio off. Press twice: the first press asks.">Power Off</button>
+          <span id="vfo-power-status" class="power-status" aria-live="polite"></span>
         </div>
       </div>
       <div class="card tool-card widget-section" id="widget-kiwi">
@@ -1089,7 +1091,10 @@ function updateDisplay() {
 // instead of the last dial, so a switched-off radio does not look on.
 let radioLinkUp = true;
 window.api.onRadioState((s) => {
-  if (s && s.radioLinkUp !== undefined) radioLinkUp = !!s.radioLinkUp;
+  if (s && s.radioLinkUp !== undefined) {
+    radioLinkUp = !!s.radioLinkUp;
+    if (window.vfoPowerLinkChanged) window.vfoPowerLinkChanged(radioLinkUp);
+  }
   if (s && s.meters) { radioMeters = s.meters; applyMeterRows(); }
   if (s) {
     // Custom toggles that follow a radio state relight.
@@ -1491,7 +1496,32 @@ vfoTxPwrSelect.addEventListener('change', () => { vfoTxPwrInput(vfoTxPwrSelect);
   if (!on || !off) return;
   let armTimer = null;
   const disarm = () => { clearTimeout(armTimer); armTimer = null; off.textContent = 'Power Off'; off.classList.remove('on'); };
-  on.addEventListener('click', () => { disarm(); window.api.rigControl({ action: 'power-on' }); });
+  // A radio takes seconds to wake or to go quiet, and nothing else on the
+  // window moves meanwhile: say what is under way until the link says it
+  // happened (radioLinkUp, from onRadioState), or that it has not after 20 s.
+  const status = document.getElementById('vfo-power-status');
+  let pending = null, pendingTimer = null;
+  const say = (text) => { if (status) status.textContent = text; };
+  const begin = (want) => {
+    clearTimeout(pendingTimer);
+    pending = want;
+    say(want === 'on' ? 'Switching on\u2026' : 'Switching off\u2026');
+    pendingTimer = setTimeout(() => {
+      if (pending !== want) return;
+      pending = null;
+      say(want === 'on' ? 'No answer from the radio yet' : 'The radio still answers');
+    }, 20000);
+  };
+  window.vfoPowerLinkChanged = (up) => {
+    if (!pending) return;
+    if ((pending === 'on' && up) || (pending === 'off' && !up)) {
+      say(up ? 'Radio on' : 'Radio off');
+      pending = null;
+      clearTimeout(pendingTimer);
+      pendingTimer = setTimeout(() => say(''), 5000);
+    }
+  };
+  on.addEventListener('click', () => { disarm(); begin('on'); window.api.rigControl({ action: 'power-on' }); });
   off.addEventListener('click', () => {
     if (!armTimer) {
       off.textContent = 'Press again to power off';
@@ -1500,6 +1530,7 @@ vfoTxPwrSelect.addEventListener('change', () => { vfoTxPwrInput(vfoTxPwrSelect);
       return;
     }
     disarm();
+    begin('off');
     window.api.rigControl({ action: 'power-off' });
   });
 })();
