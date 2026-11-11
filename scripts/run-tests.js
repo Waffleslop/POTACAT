@@ -325,6 +325,7 @@ const TESTS = [
   'test/jtty-codec-test.js',
   'test/jtty-decoder-test.js',
   'test/jtty-engine-test.js',
+  'test/nfer-refs-test.js', // an n-fer's other parks from the activator's own spot comments
   'test/jtty-remote-test.js',
   'test/jtty-txfreq-remote-test.js',
   'test/nocat-rig-test.js',
