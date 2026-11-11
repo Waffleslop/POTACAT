@@ -314,6 +314,10 @@
     .mini-strip > * { -webkit-app-region: no-drag; flex: none; }
     /* By id, so it outranks the PTT and Log display rules below. */
     #mini-strip .mini-hidden, .mini-strip .no-reading.no-reading { display: none !important; }
+    /* Two lines (Casey 2026-11-11: "a little less wide and taller"): the same
+       items in the same order, wrapping onto a second row; the window is as
+       narrow as two rows allow and grows to their height. */
+    body.mini.mini-two #mini-strip, .mini-strip.preview.two { flex-wrap: wrap; row-gap: 6px; align-content: center; }
     body.mini .scroll { flex: none; overflow: hidden; padding: 0 12px 10px; }
     body.mini .scroll > :not(.swr-alert.show) { display: none !important; }
     body.mini .bar, body.mini .tx-audio-panel { display: none !important; }
@@ -462,7 +466,8 @@
     .settings-toggle input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--blue); cursor: pointer; flex: none; }
     /* Layout lists: a row = grip, name, arrows, switch (Large and Small VFO). */
     .size-seg { margin-top: 6px; }
-    .size-seg button[aria-pressed="true"], .size-seg button[aria-pressed="true"]:hover { background: var(--blue); color: var(--on-blue); font-weight: 600; box-shadow: none; }
+    .size-seg button[aria-pressed="true"], .size-seg button[aria-pressed="true"]:hover,
+    .rows-seg button[aria-pressed="true"], .rows-seg button[aria-pressed="true"]:hover { background: var(--blue); color: var(--on-blue); font-weight: 600; box-shadow: none; }
     .order-row.fixed { cursor: default; }
     .order-row.fixed .grip { visibility: hidden; }
     .order-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--blue); cursor: pointer; flex: none; margin-left: 4px; }
@@ -811,8 +816,13 @@
       <div id="layout-small" hidden>
         <span class="lbl">Preview</span>
         <div class="mini-strip preview" id="mini-preview" aria-hidden="true"></div>
+        <span class="lbl">Lines</span>
+        <div class="seg rows-seg" role="group" aria-label="How many lines the Small VFO uses">
+          <button type="button" id="small-rows-1" aria-pressed="true">One line</button>
+          <button type="button" id="small-rows-2" aria-pressed="false">Two lines</button>
+        </div>
         <span class="lbl">Layout</span>
-        <div class="order-note">One line, left to right. When the window is too narrow, items at the end of the list hide first; frequency and PTT always stay.</div>
+        <div class="order-note" id="small-order-note">One line, left to right. When the window is too narrow, items at the end of the list hide first; frequency and PTT always stay.</div>
         <div class="order-list" id="small-list"></div>
         <div class="layout-links">
           <button type="button" class="link-btn layout-reset" id="small-fit">Fit the width to the line</button>
@@ -2542,8 +2552,45 @@ function renderMiniPreview() {
       pv.appendChild(c);
     }
   }
+  // Two lines: the preview wraps at the width the strip would take.
+  pv.classList.toggle('two', vfoSmall.rows === 2);
+  pv.style.width = ''; pv.style.zoom = '';
+  if (vfoSmall.rows === 2) {
+    // The real two-row shape: as wide as the strip would be, shrunk to fit the
+    // sheet when the sheet is narrower (the sheet is a phone-width column).
+    // Measured once the sheet has laid out; a sheet still opening measures
+    // nothing, and then the preview just wraps at the sheet's width.
+    requestAnimationFrame(() => {
+      const ws = [...pv.children].filter(el => el.getClientRects().length).map(el => el.getBoundingClientRect().width);
+      const w = VfoLayout.rowsWidth(ws, 8, 2);
+      if (w < 120) return;
+      const full = w + 24;
+      const room = pv.parentElement ? pv.parentElement.clientWidth : full;
+      pv.style.width = full + 'px';
+      if (room > 0 && room < full) pv.style.zoom = String(Math.max(0.5, room / full));
+    });
+  }
   if (vfoMini) applyMini();
 }
+
+function renderRowsChoice() {
+  document.getElementById('small-rows-1').setAttribute('aria-pressed', String(vfoSmall.rows !== 2));
+  document.getElementById('small-rows-2').setAttribute('aria-pressed', String(vfoSmall.rows === 2));
+  document.getElementById('small-order-note').textContent = vfoSmall.rows === 2
+    ? 'Two lines, left to right, wrapping onto the second line. When the window is too narrow for two lines, items at the end of the list hide first; frequency and PTT always stay.'
+    : 'One line, left to right. When the window is too narrow, items at the end of the list hide first; frequency and PTT always stay.';
+}
+function setSmallRows(n) {
+  if (vfoSmall.rows === n) return;
+  vfoSmall.rows = n;
+  saveSmall();
+  renderLayoutLists();
+  // The strip refits to the new shape (the dragged width was for the other one).
+  miniFitNext = true;
+  if (vfoMini) setMini(true, { save: false });
+}
+document.getElementById('small-rows-1').addEventListener('click', () => setSmallRows(1));
+document.getElementById('small-rows-2').addEventListener('click', () => setSmallRows(2));
 
 function renderLayoutLists() {
   document.getElementById('size-large').setAttribute('aria-pressed', String(layoutSize === 'large'));
@@ -2551,7 +2598,7 @@ function renderLayoutLists() {
   document.getElementById('layout-large').hidden = layoutSize !== 'large';
   document.getElementById('layout-small').hidden = layoutSize !== 'small';
   if (layoutSize === 'large') renderLargeLists();
-  else { renderSmallList(); renderMiniPreview(); }
+  else { renderRowsChoice(); renderSmallList(); renderMiniPreview(); }
 }
 
 document.getElementById('large-reset').addEventListener('click', () => {
@@ -2788,6 +2835,7 @@ function miniSendHome() {
 
 // Build the line from settings.vfoSmall (or send everything home).
 function applyMini(on = vfoMini) {
+  document.body.classList.toggle('mini-two', vfoSmall.rows === 2);
   miniSendHome();
   if (!on) return;
   for (const k of vfoSmall.order) {
@@ -2807,9 +2855,22 @@ function fitMini() {
   if (!vfoMini) return;
   miniStrip.querySelectorAll('.mini-hidden').forEach(e => e.classList.remove('mini-hidden'));
   for (const k of VfoLayout.hideOrder(vfoSmall)) {
-    if (miniStrip.scrollWidth <= miniStrip.clientWidth + 1) break;
+    if (miniStrip.scrollWidth <= miniStrip.clientWidth + 1 && miniRowCount() <= vfoSmall.rows) break;
     for (const el of miniParts(k)) if (el.parentNode === miniStrip) el.classList.add('mini-hidden');
   }
+}
+
+// How many rows the strip's shown items sit on now (two-line mode wraps).
+function miniRowCount() {
+  // Items on one row overlap vertically (the frequency is taller than a chip
+  // beside it); a new row starts below the last one's bottom.
+  const rects = [...miniStrip.children].filter(el => el.getClientRects().length)
+    .map(el => el.getBoundingClientRect()).sort((a, b) => a.top - b.top);
+  let rows = 0, bottom = -Infinity;
+  for (const r of rects) {
+    if (r.top >= bottom - 2) { rows++; bottom = r.bottom; } else bottom = Math.max(bottom, r.bottom);
+  }
+  return Math.max(1, rows);
 }
 
 // The window width that shows the whole line: its items plus the title bar's buttons.
@@ -2819,7 +2880,12 @@ function miniNaturalWidth() {
   const kids = [...miniStrip.children].filter(el => el.getClientRects().length);
   let w = 0;
   if (kids.length) {
-    const content = kids[kids.length - 1].getBoundingClientRect().right - kids[0].getBoundingClientRect().left;
+    // One line: the line's own width. Two lines: the narrowest width that
+    // keeps every item on two rows, in order (VfoLayout.rowsWidth).
+    const gap = parseFloat(getComputedStyle(miniStrip).columnGap) || 8;
+    const content = vfoSmall.rows === 2
+      ? VfoLayout.rowsWidth(kids.map(el => el.getBoundingClientRect().width), gap, 2)
+      : kids[kids.length - 1].getBoundingClientRect().right - kids[0].getBoundingClientRect().left;
     const tb = document.querySelector('.titlebar').getBoundingClientRect().width;
     w = Math.ceil(content + (tb - miniStrip.clientWidth) + 2);
   }

@@ -135,6 +135,29 @@ test('#283: a rig preset row stays inside its box: name and detail shrink with a
   assert.ok(/item\.title = 'Apply "' \+ p\.name \+ '": ' \+ rigPresetDetail\(p\);/.test(vfo), 'the whole text is on hover');
 });
 
+test('Small VFO: one line or two (Casey 2026-11-11: "a little less wide and taller")', () => {
+  assert.strictEqual(L.normalizeSmall(null).rows, 1, 'one line by default, as before');
+  assert.strictEqual(L.normalizeSmall({ rows: 2 }).rows, 2);
+  assert.strictEqual(L.normalizeSmall({ rows: 3 }).rows, 1, 'anything else is one line');
+  // The narrowest width that keeps the items, in order, on two rows.
+  const ws = [200, 60, 40, 40, 120, 90];
+  assert.strictEqual(L.rowsWidth(ws, 8, 1), 590, 'one line: the whole line');
+  const two = L.rowsWidth(ws, 8, 2);
+  assert.ok(two < 590 && two >= 200, 'two lines: narrower, never under the widest item');
+  assert.strictEqual(two, 314);
+  assert.ok(L.rowsWidth(ws, 8, 2) <= L.rowsWidth(ws, 8, 2) + 0 && L.rowsWidth([500], 8, 2) === 500, 'one wide item is its own width');
+  assert.strictEqual(L.rowsWidth([], 8, 2), 0);
+});
+
+test('the page: the Lines choice in Small VFO settings wraps the strip and refits the window', () => {
+  assert.ok(/id="small-rows-1"[^>]*>One line<\/button>/.test(vfo) && /id="small-rows-2"[^>]*>Two lines<\/button>/.test(vfo));
+  assert.ok(/body\.mini\.mini-two #mini-strip, \.mini-strip\.preview\.two \{ flex-wrap: wrap;/.test(vfo));
+  assert.ok(/document\.body\.classList\.toggle\('mini-two', vfoSmall\.rows === 2\);/.test(vfo));
+  assert.ok(/VfoLayout\.rowsWidth\(kids\.map\(el => el\.getBoundingClientRect\(\)\.width\), gap, 2\)/.test(vfo), 'the window is as narrow as two rows allow');
+  assert.ok(/miniRowCount\(\) <= vfoSmall\.rows/.test(vfo), 'items hide from the end only when two rows are not enough');
+  assert.ok(/function setSmallRows\(n\)[\s\S]{0,300}miniFitNext = true;\s*if \(vfoMini\) setMini\(true, \{ save: false \}\);/.test(vfo), 'switching refits the strip');
+});
+
 test('this test is in the list CI runs', () => {
   assert.ok(readSrc(path.join(root, 'scripts', 'run-tests.js')).includes("'test/vfo-layout-test.js'"));
 });
