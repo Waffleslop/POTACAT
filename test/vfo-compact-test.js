@@ -28,21 +28,48 @@ test('the strip: the operator\'s width, else the line\'s, inside 320..1600; the 
   assert.deepStrictEqual(C.miniSize({}), { width: 640, height: 52 });
 });
 
-test('growing back uses the size from before the shrink, else the default; a close in mini saves the full size', () => {
+test('growing back uses the size from before the shrink, else the default', () => {
   assert.deepStrictEqual(C.fullSize({ width: 420, height: 820 }, { width: 380 }), { width: 420, height: 820 });
   assert.deepStrictEqual(C.fullSize(null, { width: 380 }), { width: 380, height: 760 });
   assert.deepStrictEqual(C.fullSize({ width: 50, height: 100 }, { width: 200 }), { width: 360, height: 760 });
-  assert.deepStrictEqual(C.savedBounds({ x: 10, y: 20, width: 380, height: 108 }, { width: 360, height: 760 }), { x: 10, y: 20, width: 360, height: 760 });
+});
+
+test('each size keeps its own place (Casey 2026-11-11: positions not remembered well)', () => {
+  const size = { width: 640, height: 52 };
+  const onlyLeft = (b) => b.x < 1920; // one 1920-wide screen
+  // The strip goes back to its own spot, not the Large VFO's.
+  assert.deepStrictEqual(C.miniBounds({ x: 900, y: 1000 }, { x: 10, y: 20 }, size, onlyLeft), { x: 900, y: 1000, width: 640, height: 52 });
+  // Its spot is on a screen that is gone: the Large VFO's corner.
+  assert.deepStrictEqual(C.miniBounds({ x: 2500, y: 100 }, { x: 10, y: 20 }, size, onlyLeft), { x: 10, y: 20, width: 640, height: 52 });
+  // Never small before: the Large VFO's corner.
+  assert.deepStrictEqual(C.miniBounds(null, { x: 10, y: 20 }, size), { x: 10, y: 20, width: 640, height: 52 });
+  assert.deepStrictEqual(C.miniBounds({ x: 'a', y: 1 }, null, size), { x: 0, y: 0, width: 640, height: 52 });
+  // The Large VFO goes back to its own place and size, not to where the strip was.
+  assert.deepStrictEqual(C.largeBounds({ x: 100, y: 50, width: 420, height: 820 }, { x: 900, y: 1000, width: 640, height: 52 }, onlyLeft), { x: 100, y: 50, width: 420, height: 820 });
+  // Only a size known (older settings): at the strip's corner, at that size.
+  assert.deepStrictEqual(C.largeBounds({ width: 420, height: 820 }, { x: 900, y: 1000, width: 640, height: 52 }), { x: 900, y: 1000, width: 420, height: 820 });
+  assert.deepStrictEqual(C.largeBounds({ x: 3000, y: 50, width: 420, height: 820 }, { x: 900, y: 10, width: 640, height: 52 }, onlyLeft), { x: 900, y: 10, width: 420, height: 820 });
+});
+
+test('main: the place is saved when the operator stops moving, in the slot for the size it is now', () => {
+  const r = main.slice(main.indexOf('function rememberVfoPlace()'), main.indexOf('function rememberVfoPlace()') + 1200);
+  assert.ok(/if \(_vfoCompactNow\) \{/.test(r) && /settings\.vfoMiniPos = \{ x: b\.x, y: b\.y \};/.test(r));
+  assert.ok(/settings\.vfoPopoutBounds = \{ x: b\.x, y: b\.y, width: b\.width, height: b\.height \};/.test(r));
+  assert.ok(/isMaximized\(\) \|\| w\.isMinimized\(\)/.test(r), 'never a maximized or minimized place');
+  assert.ok(/vfoPopoutWin\.on\('move', rememberVfoPlaceSoon\);/.test(main) && /vfoPopoutWin\.on\('resize', rememberVfoPlaceSoon\);/.test(main), 'not only at a tidy close');
+  assert.ok(/VfoCompact\.miniBounds\(settings\.vfoMiniPos, saved && isOnScreen\(saved\) \? saved : b, size, isOnScreen\)/.test(main), 'opens small at the strip own spot');
+  assert.ok(!/savedBounds/.test(main), 'the strip no longer borrows the Large VFO place');
 });
 
 test('main: vfo-set-compact remembers the full size once, sizes the strip, restores, and saves the choice', () => {
   const i = main.indexOf("ipcMain.on('vfo-set-compact'");
-  const h = main.slice(i, i + 1800);
-  assert.ok(/if \(!_vfoCompactNow\) settings\.vfoFullSize = \{ width: b\.width, height: b\.height \};/.test(h), 'remembered before the first shrink only');
+  const h = main.slice(i, i + 3200);
+  assert.ok(/if \(!_vfoCompactNow\) \{\s*settings\.vfoFullSize = \{ width: b\.width, height: b\.height \};\s*settings\.vfoPopoutBounds = /.test(h), 'remembered before the first shrink only');
   assert.ok(/VfoCompact\.miniSize\(\{ width, height, saved: settings\.vfoMiniWidth \}\)/.test(h) && /setMinimumSize\(VfoCompact\.MINI\.minWidth, VfoCompact\.MINI\.minHeight\)/.test(h));
-  assert.ok(/VfoCompact\.fullSize\(settings\.vfoFullSize, b\)/.test(h) && /setMinimumSize\(300, 360\)/.test(h), 'grows back with the old minimum');
-  assert.ok(/if \(save && settings\.vfoCompact !== !!on\) \{ settings\.vfoCompact = !!on; saveSettings\(settings\); \}/.test(h));
-  assert.ok(/_vfoCompactNow \? VfoCompact\.savedBounds\(vfoPopoutWin\.getBounds\(\), settings\.vfoFullSize\)/.test(main), 'never saved at strip height');
+  assert.ok(/VfoCompact\.largeBounds\(settings\.vfoPopoutBounds \|\| settings\.vfoFullSize, b, isOnScreen\)/.test(h) && /setMinimumSize\(300, 360\)/.test(h), 'grows back to its own place with the old minimum');
+  assert.ok(/VfoCompact\.miniBounds\(settings\.vfoMiniPos, b, size, isOnScreen\)/.test(h), 'shrinks to the strip own place');
+  assert.ok(/settings\.vfoMiniPos = \{ x: b\.x, y: b\.y \};/.test(h), 'the strip place is kept on the way out');
+  assert.ok(/if \(save && settings\.vfoCompact !== !!on\) \{ settings\.vfoCompact = !!on; moved = true; \}/.test(h) && /if \(moved\) saveSettings\(settings\);/.test(h));
   assert.ok(/setVfoCompact: \(on, height, save, width, fit\) => ipcRenderer\.send\('vfo-set-compact'/.test(readSrc(path.join(root, 'preload-vfo-popout.js'))));
 });
 

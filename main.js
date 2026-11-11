@@ -2026,6 +2026,25 @@ const Favorites = require('./lib/favorites');
 const VfoCompact = require('./lib/vfo-compact');
 let _vfoCompactNow = false; // the VFO window is the mini strip right now
 let _vfoMiniSizedAt = 0;    // when we last resized it ourselves (a resize after that is the operator's)
+// The VFO window's place goes into the slot for the size it is now: the Large
+// VFO's bounds (vfoPopoutBounds, and vfoFullSize for the way back from small)
+// or the Small VFO's spot (vfoMiniPos). True when something changed.
+function rememberVfoPlace() {
+  const w = vfoPopoutWin;
+  if (!w || w.isDestroyed() || w.isMaximized() || w.isMinimized() || w.isFullScreen()) return false;
+  const b = w.getBounds();
+  if (_vfoCompactNow) {
+    const p = settings.vfoMiniPos;
+    if (p && p.x === b.x && p.y === b.y) return false;
+    settings.vfoMiniPos = { x: b.x, y: b.y };
+    return true;
+  }
+  const o = settings.vfoPopoutBounds;
+  if (o && o.x === b.x && o.y === b.y && o.width === b.width && o.height === b.height) return false;
+  settings.vfoPopoutBounds = { x: b.x, y: b.y, width: b.width, height: b.height };
+  settings.vfoFullSize = { width: b.width, height: b.height };
+  return true;
+}
 let _phoneScanning = false; // ECHOCAT's scan engine is running (peer-scan-state)
 // The starter channel chart (data/channels.json: FRS, GMRS, MURS, marine,
 // aviation, interop, EMS — lists from KL4XQ and KC8DHX). The operator's copy
@@ -40534,13 +40553,15 @@ function cloudShackNotice(text, kind) {
     // Left small: open small, where it was and as wide as it was, instead of
     // opening large and shrinking (Casey 2026-11-10: the window remembers its
     // open state, size and position).
+    // Each size has its own place (VfoCompact.miniBounds): the strip goes back
+    // to where it was, not to where the Large VFO was pushed to fit the screen.
     if (settings.vfoCompact) {
       const b = vfoPopoutWin.getBounds();
       if (!settings.vfoFullSize) settings.vfoFullSize = { width: b.width, height: b.height };
       const size = VfoCompact.miniSize({ saved: settings.vfoMiniWidth });
       vfoPopoutWin.setMinimumSize(VfoCompact.MINI.minWidth, VfoCompact.MINI.minHeight);
       _vfoMiniSizedAt = Date.now();
-      vfoPopoutWin.setBounds({ x: b.x, y: b.y, width: size.width, height: size.height });
+      vfoPopoutWin.setBounds(clampToWorkArea(VfoCompact.miniBounds(settings.vfoMiniPos, saved && isOnScreen(saved) ? saved : b, size, isOnScreen)));
       _vfoCompactNow = true;
     }
     // Opened now, so a restart reopens it even if the app never gets to its
@@ -40559,6 +40580,17 @@ function cloudShackNotice(text, kind) {
       clearTimeout(_vfoMiniWidthTimer);
       _vfoMiniWidthTimer = setTimeout(() => saveSettings(settings), 800);
     });
+    // Remember the place as soon as the operator stops moving or sizing, not
+    // only at a tidy close: a crash, an update restart or a profile switch
+    // (app.exit) never reaches 'close'. Read when the timer fires, so a size
+    // switch in between is already settled and lands in the right size's slot.
+    let _vfoPlaceTimer = null;
+    const rememberVfoPlaceSoon = () => {
+      clearTimeout(_vfoPlaceTimer);
+      _vfoPlaceTimer = setTimeout(() => { if (rememberVfoPlace()) saveSettings(settings); }, 700);
+    };
+    vfoPopoutWin.on('move', rememberVfoPlaceSoon);
+    vfoPopoutWin.on('resize', rememberVfoPlaceSoon);
     vfoPopoutWin.webContents.on('did-finish-load', () => {
       sendVfoState();
       sendVfoScanState();
@@ -40587,12 +40619,8 @@ function cloudShackNotice(text, kind) {
       });
     });
     vfoPopoutWin.on('close', () => {
-      if (vfoPopoutWin && !vfoPopoutWin.isDestroyed() && !vfoPopoutWin.isMaximized() && !vfoPopoutWin.isMinimized()) {
-        // In mini the saved size is the full one, so the next open (which
-        // starts full and shrinks) is never stuck at strip height.
-        settings.vfoPopoutBounds = _vfoCompactNow ? VfoCompact.savedBounds(vfoPopoutWin.getBounds(), settings.vfoFullSize) : vfoPopoutWin.getBounds();
-        saveSettings(settings);
-      }
+      clearTimeout(_vfoPlaceTimer);
+      if (rememberVfoPlace()) saveSettings(settings);
       _vfoCompactNow = false;
     });
     vfoPopoutWin.on('closed', () => {
@@ -40634,22 +40662,33 @@ function cloudShackNotice(text, kind) {
     if (w.isMaximized()) w.unmaximize();
     const b = w.getBounds();
     _vfoMiniSizedAt = Date.now();
+    let moved = false;
     if (on) {
-      if (!_vfoCompactNow) settings.vfoFullSize = { width: b.width, height: b.height };
-      if (fit && settings.vfoMiniWidth) { delete settings.vfoMiniWidth; saveSettings(settings); }
+      // Leaving the Large VFO: keep its place and size for the way back.
+      if (!_vfoCompactNow) {
+        settings.vfoFullSize = { width: b.width, height: b.height };
+        settings.vfoPopoutBounds = { x: b.x, y: b.y, width: b.width, height: b.height };
+        moved = true;
+      }
+      if (fit && settings.vfoMiniWidth) { delete settings.vfoMiniWidth; moved = true; }
       // Only the height follows the content while small; the width is set on the way in.
       const size = _vfoCompactNow && !fit
         ? { width: b.width, height: VfoCompact.miniSize({ height }).height }
         : VfoCompact.miniSize({ width, height, saved: settings.vfoMiniWidth });
       w.setMinimumSize(VfoCompact.MINI.minWidth, VfoCompact.MINI.minHeight);
-      w.setBounds({ x: b.x, y: b.y, width: size.width, height: size.height });
+      // On the way in the strip goes to its own last place; while small it stays put.
+      const place = _vfoCompactNow ? { x: b.x, y: b.y, ...size } : clampToWorkArea(VfoCompact.miniBounds(settings.vfoMiniPos, b, size, isOnScreen));
+      w.setBounds(place);
     } else if (_vfoCompactNow) {
-      const full = VfoCompact.fullSize(settings.vfoFullSize, b);
-      w.setBounds(clampToWorkArea({ x: b.x, y: b.y, width: full.width, height: full.height }));
+      // Leaving the Small VFO: keep its place, and the Large VFO goes back to its own.
+      settings.vfoMiniPos = { x: b.x, y: b.y };
+      moved = true;
       w.setMinimumSize(300, 360);
+      w.setBounds(clampToWorkArea(VfoCompact.largeBounds(settings.vfoPopoutBounds || settings.vfoFullSize, b, isOnScreen)));
     }
     _vfoCompactNow = !!on;
-    if (save && settings.vfoCompact !== !!on) { settings.vfoCompact = !!on; saveSettings(settings); }
+    if (save && settings.vfoCompact !== !!on) { settings.vfoCompact = !!on; moved = true; }
+    if (moved) saveSettings(settings);
   });
 
   ipcMain.on('vfo-set-always-on-top', (_e, on) => {
