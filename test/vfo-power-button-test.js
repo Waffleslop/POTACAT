@@ -31,6 +31,13 @@ test('shown from the model caps, never from the CAT link', () => {
   assert.ok(/if \(s\.power != null\) \{[\s\S]{0,120}sec\.style\.display = s\.power \? '' : 'none';\s*sec\.classList\.toggle\('visible', !!s\.power\);/.test(html), 'shown with the class a .tool-card needs');
   assert.ok(/\.tool-card \{[^}]*display: none;[\s\S]{0,80}\.tool-card\.visible \{ display: flex; \}/.test(html), 'the stylesheet rule the class answers');
 });
+test('a radio that does not answer shows dashes, not its last dial', () => {
+  assert.ok(/radioLinkUp: vfoRadioLinkUp\(\),/.test(main), 'vfo-radio-state carries the link');
+  assert.ok(/function vfoRadioLinkUp\(\) \{\s*if \(isRemoteMode\(\) \|\| sdrHoldsDial\(\)\) return true;[^\n]*\n\s*return !_catLinkUpKnown \|\| _catLinkUpLast;/.test(main));
+  assert.ok(/_catLinkUpLast = linkUp;\s*stationSetupNotify\(\);\s*sendVfoState\(\);/.test(main), 'a link change reaches the window at once');
+  assert.ok(/renderFreqDisplay\(radioLinkUp \? currentFreqHz : 0\);/.test(html));
+  assert.ok(/modeBadge\.textContent = !radioLinkUp \? '---'/.test(html));
+});
 test('the buttons go through the one dispatcher; Off asks once', () => {
   assert.ok(/rigControl\(\{ action: 'power-on' \}\)/.test(html));
   assert.ok(/Press again to power off/.test(html));

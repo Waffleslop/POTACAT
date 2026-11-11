@@ -1069,9 +1069,10 @@ function renderFreqDisplay(hz) {
 }
 
 function updateDisplay() {
-  renderFreqDisplay(currentFreqHz);
+  renderFreqDisplay(radioLinkUp ? currentFreqHz : 0);
+  freqDisplay.title = radioLinkUp ? 'Click to type a frequency' : 'The radio is not answering (switched off, or the cable is out)';
   const m = (currentMode || '').toUpperCase();
-  modeBadge.textContent = m.startsWith('FREEDV') ? 'RADE' : (currentMode || '---');
+  modeBadge.textContent = !radioLinkUp ? '---' : m.startsWith('FREEDV') ? 'RADE' : (currentMode || '---');
   if (currentFilterWidth > 0) {
     filterBadge.textContent = currentFilterWidth >= 1000
       ? (currentFilterWidth / 1000).toFixed(1) + ' kHz'
@@ -1084,7 +1085,11 @@ function updateDisplay() {
 }
 
 // --- Radio state from main process ---
+// False while main says the radio does not answer (off, cable out): dashes
+// instead of the last dial, so a switched-off radio does not look on.
+let radioLinkUp = true;
 window.api.onRadioState((s) => {
+  if (s && s.radioLinkUp !== undefined) radioLinkUp = !!s.radioLinkUp;
   if (s && s.meters) { radioMeters = s.meters; applyMeterRows(); }
   if (s) {
     // Custom toggles that follow a radio state relight.
