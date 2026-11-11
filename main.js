@@ -361,6 +361,7 @@ const { gridToLatLon, latLonToGrid, haversineDistanceMiles, bearing } = require(
 const ActivationMapData = require('./lib/activation-map-data');
 const LogFreq = require('./lib/log-freq');
 const RigBands = require('./lib/rig-bands');
+const SstvStartBand = require('./lib/sstv-start-band');
 const AwardTables = require('./lib/award-tables');
 const { activationStationFill } = require('./lib/activation-station'); // N7VBN: station side of activation records
 const { freqToBand, BANDS } = require('./lib/bands');
@@ -36172,12 +36173,12 @@ function getSunTimes(lat, lon, date) {
   return { sunrise: noon - ha / 15, sunset: noon + ha / 15 };
 }
 
+// null: the radio cannot use 20 m or 40 m, so SSTV does not tune it (#292).
 function getSstvAutoFreq() {
-  if (!gridToLatLon(settings.grid)) return { freqKhz: 14230, mode: 'USB' };
-  const daytime = isDaytimeAtStation();
   // 40 m SSTV is LSB in North America (7.171 LSB, like 80 m's 3.845); a USB
   // night session heard nothing but inverted garbage.
-  return daytime ? { freqKhz: 14230, mode: 'USB' } : { freqKhz: 7171, mode: 'LSB' };
+  const daytime = gridToLatLon(settings.grid) ? isDaytimeAtStation() : true;
+  return SstvStartBand.autoChannel(activeRigBands(), daytime);
 }
 
 function startAutoSstvTimer() {
@@ -36212,7 +36213,7 @@ function startAutoSstvTimer() {
     if (autoSstvActive && autoIdleJtcatActive && autoIdleRxLabel === 'JTTY') autoIdleJttyFollowSun();
     if (autoSstvActive && !autoIdleJtcatActive && !autoIdleJs8Active) {
       const newBand = getSstvAutoFreq();
-      if (newBand.freqKhz !== autoSstvCurrentFreq) {
+      if (newBand && newBand.freqKhz !== autoSstvCurrentFreq) {
         autoSstvCurrentFreq = newBand.freqKhz;
         if (cat && cat.connected) cat.tune(newBand.freqKhz * 1000, newBand.mode);
         console.log('[Auto-SSTV] Band switch to ' + newBand.freqKhz + ' kHz');
@@ -36327,12 +36328,21 @@ function triggerAutoSstv() {
   autoSstvPrevFreq = _currentFreqHz;
   autoSstvPrevMode = _currentMode;
   const autoSstvBand = getSstvAutoFreq();
-  autoSstvCurrentFreq = autoSstvBand.freqKhz;
-  if (cat && cat.connected) cat.tune(autoSstvBand.freqKhz * 1000, autoSstvBand.mode);
-  // Hand the window the band chosen here: it tunes to its own selection on
-  // open (14.230 by default), which put a night session back on 20 m.
-  if (openSstvPopout) openSstvPopout({ freqKhz: autoSstvBand.freqKhz, mode: autoSstvBand.mode, auto: true });
-  sendCatLog('[Auto-SSTV] Activated — tuned to ' + autoSstvCurrentFreq + ' kHz');
+  if (!autoSstvBand) {
+    // A radio that cannot use 20 m or 40 m stays where it is (#292). The
+    // window applies the same rule to its own list (SstvStartBand.
+    // windowChannel), so it opens without moving the radio and says why.
+    autoSstvCurrentFreq = 0;
+    if (openSstvPopout) openSstvPopout({ auto: true });
+    sendCatLog('[Auto-SSTV] Activated — not tuned: the radio is not set up for 20 m or 40 m');
+  } else {
+    autoSstvCurrentFreq = autoSstvBand.freqKhz;
+    if (cat && cat.connected) cat.tune(autoSstvBand.freqKhz * 1000, autoSstvBand.mode);
+    // Hand the window the band chosen here: it tunes to its own selection on
+    // open (14.230 by default), which put a night session back on 20 m.
+    if (openSstvPopout) openSstvPopout({ freqKhz: autoSstvBand.freqKhz, mode: autoSstvBand.mode, auto: true });
+    sendCatLog('[Auto-SSTV] Activated — tuned to ' + autoSstvCurrentFreq + ' kHz');
+  }
   if (remoteServer) {
     remoteServer.broadcastSstvTxStatus({ state: 'auto-rx', freqKhz: autoSstvCurrentFreq });
   }
