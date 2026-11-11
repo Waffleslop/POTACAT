@@ -433,6 +433,8 @@ const { attachMercuryRadioBridge } = require('./lib/mercury-radio-bridge');
 const mercuryAudioBridge = require('./lib/mercury-audio-bridge');
 const MercuryAppProto = require('./lib/mercury-app-protocol');
 const WinlinkPat = require('./lib/winlink-pat');
+const WinlinkHistory = require('./lib/winlink-history');
+const WinlinkFav = require('./lib/winlink-favourites');
 const PotaEmailSpot = require('./lib/pota-email-spot');
 const { WinlinkClient } = require('./lib/winlink-client');
 const WinlinkStateLib = require('./lib/winlink-state');
@@ -4251,6 +4253,8 @@ function sendCatFrequency(hz) {
   if (win && !win.isDestroyed()) win.webContents.send('cat-frequency', hz);
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-frequency', hz);
   if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('cat-frequency', hz);
+  // The mail window shows the radio's own dial beside the gateway (#254).
+  if (winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) winlinkPopoutWin.webContents.send('cat-frequency', hz);
   if (scopePopoutWin && !scopePopoutWin.isDestroyed()) scopePopoutWin.webContents.send('cat-frequency', hz);
   yaesuScopeNoteFrequency(hz); // the scope's axis is centred on the dial
   if (logPopoutWin && !logPopoutWin.isDestroyed()) logPopoutWin.webContents.send('cat-frequency', hz);
@@ -10817,6 +10821,11 @@ function winlinkPayload() {
     noticeText: WINLINK_NOTICE_TEXT,
     mode: WinlinkModes.pickWinlinkMode(winlinkState.snapshot().modes, settings.winlinkDefaultMode || 'telnet'),
     lastGateway: settings.winlinkLastGateway || null,
+    // My gateways (#254) and how long the last propagation ranking took per
+    // mode, so a surface can say "about N s" while the next one runs.
+    favourites: WinlinkFav.normalize(settings.winlinkFavourites),
+    predictMs: (settings.winlinkPredictMs && typeof settings.winlinkPredictMs === 'object') ? settings.winlinkPredictMs : {},
+    predictionOn: settings.winlinkPrediction !== false,
     ardopBw: [200, 500, 1000, 2000].includes(Number(settings.winlinkArdopBw)) ? Number(settings.winlinkArdopBw) : 500,
     modemBw: winlinkModemBw(),
     wf: { speed: Math.max(1, Math.min(60, parseInt(settings.winlinkWaterfallSpeed, 10) || 60)), shown: settings.winlinkWaterfallShown !== false },
@@ -12115,6 +12124,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
   if (radio) winlinkNoteHandTune(); // a later attempt starts from here; the return point stays the original
   winlinkState.setSession({
     state: 'starting', mode, gateway: radio ? String(gateway).toUpperCase() : 'CMS (internet)', dialKhz: radio ? Number(dialKhz) || null : null,
+    url: radio ? url : '', // the URL Pat dials (carries the gateway's bandwidth): a saved gateway keeps it (#254)
     capSec: radio ? capMin * 60 : 0,
     returnTo: radio ? (_winlinkPreviewReturnTo || winlinkDialHere('at Connect')) : null,
     text: radio ? `Preparing ${WinlinkModes.LABELS[mode]}` : 'Connecting to Winlink over the internet',
@@ -12380,7 +12390,17 @@ function winlinkEndSession(state, text, received = 0) {
     if (modemBridgeWin && modemBridge.state !== 'off') modemBridgePlayback(false);
     setTimeout(winlinkSyncModemBridge, 0);
   }
-  winlinkState.setSession({ state, text: text || '', error: state === 'error' ? (text || 'Session failed') : '', errorKind: state === 'error' ? (_winlinkSessionErrorKind || 'failed') : '', ptt: false, prompt: null });
+  // A good radio session ends with a card that offers to save the gateway to
+  // My gateways (#254, Casey 2026-11-11, after the first ARDOP connect to
+  // KY4RY). A gateway already saved records the good session instead.
+  let result = null;
+  if (state === 'done' && radio && s.gateway && s.dialKhz) {
+    const g = { call: String(s.gateway).toUpperCase(), mode: s.mode, khz: Math.round(Number(s.dialKhz) * 10) / 10 };
+    const mg = WinlinkFav.markGood(settings.winlinkFavourites, g);
+    if (mg.changed) settings.winlinkFavourites = mg.list;
+    result = { ...g, dialKhz: g.khz, url: s.url || '', band: freqToBand(g.khz / 1000) || '', sent: Number(s.sent) || 0, received: Number(received) || 0, saved: WinlinkFav.has(settings.winlinkFavourites, g) };
+  }
+  winlinkState.setSession({ state, text: text || '', error: state === 'error' ? (text || 'Session failed') : '', errorKind: state === 'error' ? (_winlinkSessionErrorKind || 'failed') : '', ptt: false, prompt: null, result });
   // Survives a restart, so every surface can say "Last check: …" (winlink-state.lastSession).
   settings.winlinkLastSession = { at: Date.now(), ok: state === 'done', text: String(text || (state === 'done' ? 'Session finished' : 'Session failed')).slice(0, 200) };
   try { saveSettings(settings); } catch {}
@@ -12652,6 +12672,11 @@ async function winlinkGateways(mode, band) {
     let list = await winlinkRmslistSafe({ mode: patMode, band, timeoutMs });
     const secs = Math.round((Date.now() - t0) / 1000);
     if (secs >= 20) winlinkLog(`gateway list (${mode}): Pat took ${secs} s to rank ${list.length} gateways by propagation`);
+    if (predicting && list.some((g) => g.quality != null)) {
+      // Remembered so the next ranking can say how long it will take (#254).
+      settings.winlinkPredictMs = { ...(settings.winlinkPredictMs || {}), [mode]: Date.now() - t0 };
+      try { saveSettings(settings); } catch {}
+    }
     if (mode === 'mercury') {
       const tagged = new Set((settings.winlinkMercuryGateways || []).map((c) => String(c).toUpperCase()));
       list = list.map((g) => ({ ...g, mercury: tagged.has(g.call) }));
@@ -12666,11 +12691,14 @@ async function winlinkGateways(mode, band) {
     // is above HF (VOACAP stops at 30 MHz). Say which order the list is in.
     const hf = !WinlinkModes.isFmMode(mode);
     const predicted = list.some((g) => g.quality != null);
-    const outside = onBands.dropped ? `${onBands.dropped} gateway${onBands.dropped === 1 ? '' : 's'} on bands this radio is not set up for left out (Settings > My Rigs > Bands).` : '';
-    const note = [WinlinkPat.rankingNote({ predicted, count: list.length, hf }), outside].filter(Boolean).join(' ');
+    // The count left out is its own field: the mail window puts it as the
+    // last line of the gateway list instead of a sentence beside it (#254,
+    // Casey 2026-11-11: "I don't need to see that forever").
+    const leftOut = onBands.dropped || 0;
+    const note = WinlinkPat.rankingNote({ predicted, count: list.length, hf });
     const tell = `gateways (${mode}${band ? ', ' + band : ''}): ${list.length} listed${onBands.dropped ? ' (' + onBands.dropped + ' outside the radio\'s bands left out)' : ''}, ${predicted ? list.filter((g) => g.quality != null).length + ' with a propagation prediction' : 'nearest first' + (hf && settings.winlinkPrediction !== false && list.length ? (_voacapService.up === false ? ` — POTACAT's VOACAP service is not available (${_voacapService.why})` : ' — no prediction came back') : '')}`;
     if (tell !== _winlinkGatewaysLogged) { _winlinkGatewaysLogged = tell; winlinkLog(tell); }
-    return { ok: true, mode, band: band || '', list, predicted, note };
+    return { ok: true, mode, band: band || '', list, predicted, note, leftOut };
   } catch (e) {
     // Said in the log: a list that never arrives was invisible in every bug
     // report (i5ekx: VARA HF, "it no longer downloads the list of gateways").
@@ -12680,6 +12708,45 @@ async function winlinkGateways(mode, band) {
 }
 let _winlinkGatewaysLogged = '';
 const WINLINK_PREDICTED_LIST_MS = 120000;
+
+/**
+ * Gateway history (#254): one row per gateway, mode and dial the operator has
+ * called, newest first, from Pat's own event log, each marked when it is in
+ * My gateways. No log yet (Pat never ran): an empty list.
+ */
+async function winlinkHistoryGet() {
+  let text = '';
+  try { text = await fs.promises.readFile(winlinkPaths().eventLog, 'utf8'); }
+  catch (e) { if (e.code !== 'ENOENT') return { ok: false, error: `Could not read Pat's event log: ${e.message}` }; }
+  const favs = WinlinkFav.normalize(settings.winlinkFavourites);
+  const gateways = WinlinkHistory.gateways(WinlinkHistory.parseEvents(text))
+    .slice(0, 300)
+    .map((g) => ({ ...g, dialKhz: g.khz, saved: WinlinkFav.has(favs, g) }));
+  return { ok: true, gateways };
+}
+
+/** Save ('add') or remove a gateway in My gateways; every surface gets the list on winlink-state. */
+function winlinkFavourite(op, g) {
+  const before = WinlinkFav.normalize(settings.winlinkFavourites);
+  let list;
+  if (op === 'add') {
+    const r = WinlinkFav.add(before, g);
+    if (!r.ok) return { ok: false, error: r.error };
+    list = r.list;
+  } else if (op === 'remove') {
+    list = WinlinkFav.remove(before, g);
+  } else {
+    return { ok: false, error: 'Unknown action' };
+  }
+  settings.winlinkFavourites = list;
+  saveSettings(settings);
+  winlinkLog(`My gateways: ${op === 'add' ? 'saved' : 'removed'} ${String(g.call || '').toUpperCase()} (${g.mode}, ${Number(g.khz).toFixed(1)} kHz)`);
+  // A finished session's card offers Save until it is saved.
+  const res = winlinkState.session.result;
+  if (res) winlinkState.setSession({ result: { ...res, saved: WinlinkFav.has(list, { call: res.call, mode: res.mode, khz: res.khz }) } });
+  winlinkSessionPush();
+  return { ok: true };
+}
 
 function winlinkAcceptNotice() {
   if (!settings.winlinkNoticeAcceptedAt) {
@@ -12793,10 +12860,21 @@ async function winlinkHandleRemote({ type, req = {}, reply }) {
         return;
       case 'winlink-gateways-get': {
         const r = await winlinkGateways(String(req.mode || 'ardop'), req.band || '');
-        if (r.ok) reply({ type: 'winlink-gateways', mode: r.mode, band: r.band, list: r.list, predicted: !!r.predicted, note: r.note || '' });
+        if (r.ok) reply({ type: 'winlink-gateways', mode: r.mode, band: r.band, list: r.list, predicted: !!r.predicted, note: r.note || '', leftOut: r.leftOut || 0 });
         else result('gateways', r);
         return;
       }
+      // Gateway history (#254): every gateway called, from Pat's event log.
+      case 'winlink-history-get': {
+        const r = await winlinkHistoryGet();
+        if (r.ok) reply({ type: 'winlink-history', gateways: r.gateways });
+        else result('history', r);
+        return;
+      }
+      // My gateways (#254): save or remove one; the list rides winlink-state.
+      case 'winlink-favourite':
+        result('favourite', winlinkFavourite(req.op, { call: req.call, mode: req.mode, khz: req.dialKhz, url: req.url }));
+        return;
       case 'winlink-posreport':
         result('posreport', await winlinkPosReport({ lat: req.lat, lon: req.lon, comment: req.comment }));
         return;
@@ -41101,6 +41179,7 @@ function cloudShackNotice(text, kind) {
       for (const box of WinlinkStateLib.BOXES) winlinkPopoutSend('winlink-mailbox', { box, messages: winlinkState.list(box) });
       winlinkPopoutSend('winlink-session', { ...winlinkState.session, remainingSec: winlinkState.remainingSec() });
       winlinkPopoutSend('winlink-popout-theme', themeQuery());
+      if (_currentFreqHz > 0) winlinkPopoutSend('cat-frequency', _currentFreqHz);
       pushWinlinkRigPower(true);
       winlinkPopoutSend('winlink-remote-watch', _winlinkRemoteWatchers > 0);
       winlinkSyncModemBridge();
@@ -41587,6 +41666,8 @@ function cloudShackNotice(text, kind) {
   });
   ipcMain.on('winlink-cmd-prompt', (_e, { id, value } = {}) => { winlinkAnswerPrompt(String(id), String(value)); });
   ipcMain.handle('winlink-cmd-gateways', (_e, { mode, band } = {}) => winlinkGateways(String(mode || 'ardop'), band ? String(band) : ''));
+  ipcMain.handle('winlink-cmd-history', () => winlinkHistoryGet());
+  ipcMain.handle('winlink-cmd-favourite', (_e, { op, call, mode, dialKhz, url } = {}) => winlinkFavourite(String(op || ''), { call: String(call || ''), mode: String(mode || ''), khz: Number(dialKhz), url: String(url || '') }));
   ipcMain.on('winlink-cmd-set-mode', (_e, mode) => winlinkSetMode(mode));
   ipcMain.handle('winlink-cmd-accept-notice', () => winlinkAcceptNotice());
   ipcMain.on('winlink-open-settings', () => {

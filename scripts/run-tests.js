@@ -234,6 +234,7 @@ const TESTS = [
   'test/winlink-voacap-probe-test.js', // #278: the hosted VOACAP is checked once; when it is missing Pat is not pointed at it
   'test/modem-prekey-test.js', // #289: modem audio that arrives before its PTT request is sent at key-down, not discarded
   'test/winlink-busy-wait-test.js', // #296: Keep waiting stays chosen, Stop ends Pat's busy wait, the watchdog does not call the wait a stall
+  'test/winlink-history-test.js', // #254: gateway history from Pat's event log, My gateways (saved gateways)
   'test/rigctld-shim-hamlib-test.js',
   'test/rigctld-died-test.js',
   'test/interface-ptt-test.js',

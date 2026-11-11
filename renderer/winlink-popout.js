@@ -132,6 +132,8 @@
       el.classList.toggle('unread', b === 'in' && n > 0);
     });
     renderSession(s.session || {});
+    renderFavs();
+    if (historyOpen) renderHistory();
   }
 
   function currentMode() {
@@ -151,7 +153,7 @@
     var m = currentMode();
     $('wl-c-body').placeholder = composeHint(m.id);
     var radio = m.id !== 'telnet';
-    $('wl-radio-pick').style.display = radio ? 'inline-flex' : 'none';
+    $('wl-radio-pick').classList.toggle('show', radio);
     var note = '';
     if (m.id === 'mercury') note = 'Experimental: few gateways run Mercury yet.';
     if (m.id === 'vara' || m.id === 'varafm') note = 'Your own ' + (m.id === 'varafm' ? 'VARA FM' : 'VARA HF') + ', with its PTT set to VOX — POTACAT starts it if needed and keys the radio.';
@@ -166,6 +168,8 @@
     }
     $('wl-mode-note').textContent = note;
     if (radio && !gateways.length) loadGateways(false);
+    renderFavs();
+    renderDial();
   }
 
   function renderSession(ss) {
@@ -177,6 +181,8 @@
     $('wl-connect').disabled = active || !(state && state.patReady);
     $('wl-abort').disabled = !active;
     $('wl-mode').disabled = active;
+    renderDoneCard(ss);
+    renderDial();
     var ptt = $('wl-ptt');
     ptt.textContent = active && ss.mode !== 'telnet' ? (ss.ptt ? 'TX' : 'RX') : '';
     ptt.classList.toggle('on', !!ss.ptt);
@@ -255,6 +261,7 @@
 
   Array.prototype.forEach.call(document.querySelectorAll('.wl-folder'), function (f) {
     f.addEventListener('click', function () {
+      if (historyOpen) closeHistory();
       box = f.getAttribute('data-box');
       Array.prototype.forEach.call(document.querySelectorAll('.wl-folder'), function (x) { x.classList.toggle('active', x === f); });
       openMid = null;
@@ -280,7 +287,7 @@
       var m = r.message;
       var html = '<div class="wl-reader-actions">'
         + (box === 'in' ? '<button class="wl-btn" id="wl-reply">Reply</button>' : '')
-        + '<button class="wl-btn" id="wl-fwd">Forward</button>'
+        + '<button class="wl-btn" id="wl-forward">Forward</button>'
         + '<span class="wl-spacer"></span><button class="wl-btn danger" id="wl-del">Delete</button></div>'
         + '<div class="wl-hdr"><b>' + esc(m.subject || '(no subject)') + '</b><br>From <b>' + esc(m.from) + '</b> · ' + esc(new Date(m.date).toLocaleString()) + '<br>To ' + esc((m.to || []).join(', '))
         + (m.cc && m.cc.length ? '<br>Cc ' + esc(m.cc.join(', ')) : '') + '</div>'
@@ -290,7 +297,8 @@
         }).join('') + '</div>' : '');
       showReader(html);
       var rp = $('wl-reply'); if (rp) rp.onclick = function () { compose({ to: m.from, subject: /^re:/i.test(m.subject) ? m.subject : 'Re: ' + m.subject, body: '\n\n--- ' + m.from + ' wrote:\n' + (m.body || '').split('\n').map(function (l) { return '> ' + l; }).join('\n') }); };
-      $('wl-fwd').onclick = function () { compose({ subject: 'Fwd: ' + m.subject, body: '\n\n--- Forwarded from ' + m.from + ':\n' + (m.body || '') }); };
+      // #wl-forward, not #wl-fwd: that id is the PWR meter, which took the click.
+      $('wl-forward').onclick = function () { compose({ subject: 'Fwd: ' + m.subject, body: '\n\n--- Forwarded from ' + m.from + ':\n' + (m.body || '') }); };
       // Delete asks first: the button becomes "Delete this message?" with a
       // Cancel beside it, and reverts by itself after a few seconds.
       var delBtn = $('wl-del');
@@ -589,18 +597,101 @@
   // Picking a gateway tunes the radio to it at once, so the waterfall shows
   // that frequency; the dial goes back when the session ends or the window closes.
   $('wl-gateway').addEventListener('change', function () {
-    var g = gateways[parseInt($('wl-gateway').value, 10)];
-    if (!g || !g.dialKhz) return;
-    window.api.qsy({ dialKhz: g.dialKhz, mode: currentMode().id }).then(function (r) {
-      if (r && !r.ok && r.error) { $('wl-text').textContent = r.error; }
-    });
+    var g = pickedGateway();
+    renderDial();
+    renderFavs();
+    if (g && g.dialKhz) qsyTo(g.dialKhz);
   });
   $('wl-gw-refresh').addEventListener('click', function () { loadGateways(true); });
+
+  function qsyTo(khz) {
+    window.api.qsy({ dialKhz: khz, mode: currentMode().id }).then(function (r) {
+      if (r && !r.ok && r.error) { $('wl-text').textContent = r.error; }
+    });
+  }
+
+  // ── My gateways (#254) ─────────────────────────────────────────────────────
+  function favs() { return (state && Array.isArray(state.favourites)) ? state.favourites : []; }
+  function sameGw(a, b) { return !!a && !!b && String(a.call).toUpperCase() === String(b.call).toUpperCase() && Math.abs(Number(a.khz != null ? a.khz : a.dialKhz) - Number(b.khz != null ? b.khz : b.dialKhz)) < 0.05; }
+  function isFav(g, mode) { return favs().some(function (f) { return f.mode === (mode || currentMode().id) && sameGw(f, g); }); }
+  function fmtKhz(k) {
+    var n = Number(k);
+    if (!(n > 0)) return '';
+    return n.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  }
+  var MODE_SHORT = { ardop: 'ARDOP', vara: 'VARA HF', varafm: 'VARA FM', packet: 'Packet', mercury: 'Mercury' };
+  function fmtDay(ms) {
+    if (!(ms > 0)) return '';
+    var d = new Date(ms);
+    return d.getUTCDate() + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()];
+  }
+  function fmtUtc(ms) {
+    if (!(ms > 0)) return '';
+    var d = new Date(ms);
+    return fmtDay(ms) + ' ' + String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0') + 'Z';
+  }
+  var STAR = '<svg class="wl-star" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8z"></path></svg>';
+  var STAR_EMPTY = STAR.replace('class="wl-star"', 'class="wl-star empty"');
+  var favEditing = false;
+  function renderFavs() {
+    var bar = $('wl-favs');
+    var anyRadio = ((state && state.modes) || []).some(function (m) { return m.available && m.id !== 'telnet'; });
+    var list = favs();
+    bar.hidden = !(anyRadio && (list.length || currentMode().id !== 'telnet'));
+    bar.classList.toggle('editing', favEditing && list.length > 0);
+    $('wl-favs-edit').hidden = !list.length;
+    $('wl-favs-edit').textContent = favEditing ? 'Done' : 'Edit';
+    var picked = pickedGateway();
+    var mode = currentMode().id;
+    $('wl-favs-list').innerHTML = list.length ? list.map(function (f, i) {
+      var on = f.mode === mode && sameGw(f, picked);
+      var when = f.lastGoodAt ? 'good ' + fmtDay(f.lastGoodAt) : 'saved ' + fmtDay(f.savedAt);
+      return '<span class="wl-fav' + (on ? ' active' : '') + '" role="button" tabindex="0" data-i="' + i + '" title="' + esc(f.call + ', ' + (MODE_SHORT[f.mode] || f.mode) + ', ' + fmtKhz(f.khz) + ' kHz dial') + '">'
+        + STAR + '<span class="wl-fav-call">' + esc(f.call) + '</span>'
+        + (f.band ? '<span class="wl-fav-dim">' + esc(f.band) + '</span>' : '')
+        + '<span class="wl-fav-call" style="font-weight:400">' + esc(fmtKhz(f.khz)) + '</span>'
+        + '<span class="wl-fav-when">' + esc((MODE_SHORT[f.mode] || f.mode) + ', ' + when) + '</span>'
+        + '<button class="wl-fav-x" data-x="' + i + '" aria-label="Remove ' + esc(f.call) + ' from My gateways" title="Remove">&#10005;</button></span>';
+    }).join('') : '<span class="wl-favs-empty">None yet. After a good session POTACAT offers to save the gateway here.</span>';
+  }
+  $('wl-favs-edit').addEventListener('click', function () { favEditing = !favEditing; renderFavs(); });
+  $('wl-favs-list').addEventListener('click', function (e) {
+    var x = e.target.closest('.wl-fav-x');
+    if (x) { e.stopPropagation(); var f = favs()[parseInt(x.getAttribute('data-x'), 10)]; if (f) window.api.favourite('remove', f); return; }
+    var chip = e.target.closest('.wl-fav');
+    if (chip && !favEditing) useGateway(favs()[parseInt(chip.getAttribute('data-i'), 10)]);
+  });
+  $('wl-favs-list').addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    var chip = e.target.closest('.wl-fav');
+    if (chip && !favEditing) { e.preventDefault(); useGateway(favs()[parseInt(chip.getAttribute('data-i'), 10)]); }
+  });
+
+  // One gateway (a saved one or a History row) → mode, band, gateway and dial
+  // set together, and the radio tuned there.
+  var pendingPick = null;
+  function useGateway(g) {
+    if (!g) return;
+    var khz = Number(g.khz != null ? g.khz : g.dialKhz);
+    var modeSel = $('wl-mode');
+    var avail = ((state && state.modes) || []).find(function (m) { return m.id === g.mode && m.available; });
+    if (!avail) { $('wl-text').textContent = (MODE_SHORT[g.mode] || g.mode) + ' is not available on this station right now'; return; }
+    if (modeSel.disabled) { $('wl-text').textContent = 'A session is running: Abort it first'; return; }
+    pendingPick = { call: String(g.call).toUpperCase(), khz: khz, mode: g.mode, url: g.url || '' };
+    var modeChanged = modeSel.value !== g.mode;
+    if (modeChanged) { modeSel.value = g.mode; window.api.setMode(g.mode); renderModeNote(); wfSync(); }
+    var bandSel = $('wl-band');
+    var bandOpt = g.band && Array.prototype.find.call(bandSel.options, function (o) { return (o.value || o.textContent) === g.band && !o.hidden && !o.disabled; });
+    bandSel.value = bandOpt ? g.band : '';
+    if (historyOpen) closeHistory();
+    loadGateways(false);
+    qsyTo(khz);
+  }
 
   // One line per gateway, the prediction as a word first: what the operator
   // decides on is whether the path is open, not a percentage.
   function gatewayLabel(g) {
-    var parts = [g.call];
+    var parts = [(isFav(g) ? '\u2605 ' : '') + g.call];
     if (g.dialKhz) parts.push(g.dialKhz.toFixed(1) + ' kHz');
     if (g.qualityWord) parts.push(g.qualityWord + (g.quality != null ? ' ' + g.quality + '%' : ''));
     if (g.distKm != null) parts.push(g.distKm + ' km');
@@ -608,34 +699,220 @@
     return parts.join('  ');
   }
 
+  // The saved gateways for this mode (and band, when one is picked) sit at
+  // the top of the list, before Pat's ranking.
+  var favRows = [];
+  function pickedGateway() {
+    var v = $('wl-gateway').value;
+    if (/^f:\d+$/.test(v)) return favRows[parseInt(v.slice(2), 10)] || null;
+    return gateways[parseInt(v, 10)] || null;
+  }
+
+  // Predicting: how long it has run, and about how long the last one took.
+  var predictTimer = null;
+  function predictStart(modeId) {
+    var t0 = Date.now();
+    var expect = Number(((state && state.predictMs) || {})[modeId]) || 0;
+    var box = $('wl-predict');
+    box.hidden = false;
+    var tick = function () {
+      var s = Math.round((Date.now() - t0) / 1000);
+      var left = expect ? Math.max(1, Math.round((expect - (Date.now() - t0)) / 1000)) : 0;
+      $('wl-predict-text').textContent = 'Predicting propagation: ' + s + ' s' + (expect ? (Date.now() - t0 < expect ? ', about ' + left + ' s left' : ', nearly done') : ' (the first time can take a minute or two)');
+      var frac = expect ? Math.min(0.95, (Date.now() - t0) / expect) : Math.min(0.95, (Date.now() - t0) / 90000);
+      $('wl-predict-fill').style.width = Math.round(frac * 100) + '%';
+    };
+    tick();
+    clearInterval(predictTimer);
+    predictTimer = setInterval(tick, 1000);
+  }
+  function predictStop() { clearInterval(predictTimer); predictTimer = null; $('wl-predict').hidden = true; }
+
+  var loadSeq = 0;
   function loadGateways() {
     var m = currentMode();
     if (m.id === 'telnet' || !m.available) return;
     var sel = $('wl-gateway');
     var note = $('wl-gw-note');
     var hf = m.id !== 'packet' && m.id !== 'varafm';
-    sel.innerHTML = '<option value="">' + (hf ? 'Loading gateways and predicting propagation…' : 'Loading gateways…') + '</option>';
+    var band = $('wl-band').value;
+    var seq = ++loadSeq;
+    // Saved gateways are usable at once, before the list comes back.
+    favRows = favs().filter(function (f) { return f.mode === m.id && (!band || f.band === band); })
+      .map(function (f) { return { call: f.call, dialKhz: f.khz, band: f.band, url: f.url || '', saved: true }; });
+    var favHtml = favRows.length ? '<optgroup label="My gateways">' + favRows.map(function (f, i) {
+      var sel1 = pendingPick && sameGw(pendingPick, f) ? ' selected' : '';
+      return '<option value="f:' + i + '"' + sel1 + '>' + esc('\u2605 ' + f.call + '  ' + fmtKhz(f.dialKhz) + ' kHz' + (f.band ? '  ' + f.band : '')) + '</option>';
+    }).join('') + '</optgroup>' : '';
+    sel.innerHTML = favHtml + '<option value=""' + (favHtml && pendingPick ? '' : ' selected') + '>Loading gateways…</option>';
     if (note) note.textContent = '';
-    window.api.gateways(m.id, $('wl-band').value).then(function (r) {
-      if (!r || !r.ok) { sel.innerHTML = '<option value="">' + esc((r && r.error) || 'No list') + '</option>'; return; }
+    if (hf && state && state.predictionOn) predictStart(m.id); else predictStop();
+    renderDial();
+    window.api.gateways(m.id, band).then(function (r) {
+      if (seq !== loadSeq) return;
+      predictStop();
+      if (!r || !r.ok) { sel.innerHTML = favHtml + '<option value="">' + esc((r && r.error) || 'No list') + '</option>'; pendingPick = null; renderDial(); return; }
       gateways = r.list || [];
-      if (note) note.textContent = r.note || '';
-      if (!gateways.length) { sel.innerHTML = '<option value="">No gateways for that band</option>'; return; }
+      // The ranking is said on hover, not as a sentence beside the list (#254).
+      sel.title = r.note || 'Gateways';
       var last = state && state.lastGateway;
-      sel.innerHTML = gateways.slice(0, 120).map(function (g, i) {
-        var label = gatewayLabel(g);
-        var selAttr = last && last.call === g.call && last.dialKhz === g.dialKhz ? ' selected' : '';
-        return '<option value="' + i + '"' + selAttr + '>' + esc(label) + '</option>';
+      var want = pendingPick || (last && { call: last.call, khz: last.dialKhz });
+      var picked = false;
+      var rows = gateways.slice(0, 120).map(function (g, i) {
+        var hit = !picked && !pendingPick && want && sameGw(want, g);
+        if (hit) picked = true;
+        return '<option value="' + i + '"' + (hit ? ' selected' : '') + '>' + esc(gatewayLabel(g)) + '</option>';
       }).join('');
+      var groupLabel = r.predicted ? 'Best path now' : 'Nearest first';
+      var more = r.leftOut ? '<option value="" disabled>' + esc(r.leftOut + ' more on bands this radio is not set up for (Settings > My Rigs > Bands)') + '</option>' : '';
+      if (!gateways.length) rows = '<option value="" disabled>No gateways for that band</option>';
+      var html = favHtml + (favHtml ? '<optgroup label="' + groupLabel + '">' + rows + '</optgroup>' : rows) + more;
+      sel.innerHTML = html;
+      if (pendingPick) {
+        var fi = favRows.findIndex(function (f) { return sameGw(f, pendingPick); });
+        var gi = gateways.findIndex(function (g) { return sameGw(g, pendingPick); });
+        if (fi >= 0) sel.value = 'f:' + fi;
+        else if (gi >= 0) sel.value = String(gi);
+        else {
+          // A History row not in today's list is still callable: a row of its own at the top.
+          favRows.push({ call: pendingPick.call, dialKhz: pendingPick.khz, band: '', url: pendingPick.url || '' });
+          var opt = document.createElement('option');
+          opt.value = 'f:' + (favRows.length - 1);
+          opt.textContent = pendingPick.call + '  ' + fmtKhz(pendingPick.khz) + ' kHz  (from History)';
+          sel.insertBefore(opt, sel.firstChild);
+          sel.value = opt.value;
+        }
+        pendingPick = null;
+      }
+      renderDial();
+      renderFavs();
     });
   }
+
+  // ── the radio's own dial (#254, like JTCAT): is it on the gateway? ─────────
+  var dialHz = 0;
+  function renderDial() {
+    var num = $('wl-dial'), match = $('wl-dial-match'), btn = $('wl-retune');
+    num.textContent = dialHz > 0 ? fmtKhz(dialHz / 1000) : '\u2014';
+    var g = pickedGateway();
+    if (!g || !g.dialKhz || currentMode().id === 'telnet') { match.textContent = ''; btn.hidden = true; return; }
+    var on = dialHz > 0 && Math.abs(dialHz / 1000 - Number(g.dialKhz)) < 0.05;
+    match.className = 'wl-dial-match' + (on ? '' : ' off');
+    match.textContent = on ? '\u2713 on ' + g.call : (dialHz > 0 ? g.call + ' is on ' + fmtKhz(g.dialKhz) : '');
+    var busy = $('wl-mode').disabled;
+    btn.hidden = on || busy || !(dialHz > 0);
+  }
+  $('wl-retune').addEventListener('click', function () { var g = pickedGateway(); if (g && g.dialKhz) qsyTo(g.dialKhz); });
+  if (window.api.onCatFrequency) window.api.onCatFrequency(function (hz) { dialHz = Number(hz) || 0; renderDial(); });
+
+  // ── a good session ends with a card: save the gateway (#254) ──────────────
+  var doneDismissed = '';
+  function renderDoneCard(ss) {
+    var card = $('wl-done-card');
+    var r = ss && ss.state === 'done' ? ss.result : null;
+    var key = r ? r.call + '|' + r.dialKhz + '|' + (ss.startedAt || '') : '';
+    if (!r || key === doneDismissed || historyOpen) { card.classList.remove('show'); return; }
+    $('wl-done-title').textContent = 'Mail exchanged with ' + r.call;
+    $('wl-done-sub').textContent = [r.band, fmtKhz(r.dialKhz) + ' kHz', MODE_SHORT[r.mode] || r.mode, r.sent + ' sent', r.received + ' received'].filter(Boolean).join(' \u00b7 ');
+    $('wl-done-save').hidden = !!r.saved;
+    $('wl-done-saved').hidden = !r.saved;
+    $('wl-done-close').textContent = r.saved ? 'OK' : 'Not now';
+    $('wl-done-close').onclick = function () { doneDismissed = key; card.classList.remove('show'); };
+    $('wl-done-save').onclick = function () {
+      $('wl-done-save').disabled = true;
+      window.api.favourite('add', { call: r.call, mode: r.mode, dialKhz: r.dialKhz, url: r.url }).then(function (x) {
+        $('wl-done-save').disabled = false;
+        if (x && !x.ok && x.error) $('wl-done-sub').textContent = x.error;
+      });
+    };
+    card.classList.add('show');
+  }
+
+  // ── gateway history (#254) ────────────────────────────────────────────────
+  var historyOpen = false, histRows = [], histFilter = 'all';
+  function openHistory() {
+    historyOpen = true;
+    $('wl-history-btn').classList.add('on');
+    Array.prototype.forEach.call(document.querySelectorAll('.wl-folder'), function (x) { x.classList.remove('active'); });
+    $('wl-list').style.display = 'none';
+    document.querySelector('.wl-pane').style.display = 'none';
+    $('wl-history').classList.add('show');
+    $('wl-done-card').classList.remove('show');
+    $('wl-hist-body').innerHTML = '<div class="wl-empty">Reading the history…</div>';
+    loadHistory();
+  }
+  function closeHistory() {
+    historyOpen = false;
+    $('wl-history-btn').classList.remove('on');
+    $('wl-history').classList.remove('show');
+    $('wl-list').style.display = '';
+    document.querySelector('.wl-pane').style.display = '';
+    Array.prototype.forEach.call(document.querySelectorAll('.wl-folder'), function (x) { x.classList.toggle('active', x.getAttribute('data-box') === box); });
+    if (state && state.session) renderDoneCard(state.session);
+  }
+  function loadHistory() {
+    window.api.history().then(function (r) {
+      if (!historyOpen) return;
+      if (!r || !r.ok) { $('wl-hist-body').innerHTML = '<div class="wl-empty">' + esc((r && r.error) || 'Could not read the history') + '</div>'; return; }
+      histRows = r.gateways || [];
+      renderHistory();
+    });
+  }
+  function renderHistory() {
+    var find = $('wl-hist-find').value.trim().toUpperCase();
+    var rows = histRows.filter(function (g) {
+      if (histFilter === 'ok' && !g.good) return false;
+      if (histFilter === 'no' && g.good) return false;
+      return !find || String(g.call).indexOf(find) >= 0;
+    });
+    var hdr = '<div class="wl-hist-row hdr"><span></span><span>Gateway</span><span>Band, dial</span><span>Mode</span><span>Last tried</span><span>Connected</span><span>Last result</span></div>';
+    if (!histRows.length) { $('wl-hist-body').innerHTML = '<div class="wl-empty">No gateway called yet. Every radio Send / Receive shows up here.</div>'; return; }
+    if (!rows.length) { $('wl-hist-body').innerHTML = hdr + '<div class="wl-empty">Nothing matches.</div>'; return; }
+    $('wl-hist-body').innerHTML = hdr + rows.map(function (g) {
+      var i = histRows.indexOf(g);
+      var saved = isFav(g, g.mode);
+      return '<div class="wl-hist-row item" role="button" tabindex="0" data-h="' + i + '" title="Set band, gateway and dial to ' + esc(g.call) + '">'
+        + '<button class="wl-hist-star" data-star="' + i + '" aria-label="' + (saved ? 'Remove ' + esc(g.call) + ' from My gateways' : 'Save ' + esc(g.call) + ' to My gateways') + '" title="' + (saved ? 'In My gateways (click to remove)' : 'Save to My gateways') + '">' + (saved ? STAR : STAR_EMPTY) + '</button>'
+        + '<span class="call">' + esc(g.call) + '</span>'
+        + '<span><span class="dim">' + esc(g.band || '') + '</span> <span class="mono">' + esc(fmtKhz(g.dialKhz)) + '</span></span>'
+        + '<span>' + esc(MODE_SHORT[g.mode] || g.mode) + '</span>'
+        + '<span class="mono" style="font-size:13px">' + esc(fmtUtc(g.lastAt)) + '</span>'
+        + '<span class="' + (g.good ? 'good' : 'dim') + '">' + g.good + ' of ' + g.tries + '</span>'
+        + '<span class="res" title="' + esc(g.lastResult) + '">' + esc(g.lastResult) + '</span></div>';
+    }).join('');
+  }
+  $('wl-history-btn').addEventListener('click', function () { if (historyOpen) closeHistory(); else openHistory(); });
+  Array.prototype.forEach.call(document.querySelectorAll('.wl-pill[data-hf]'), function (p) {
+    p.addEventListener('click', function () {
+      histFilter = p.getAttribute('data-hf');
+      Array.prototype.forEach.call(document.querySelectorAll('.wl-pill[data-hf]'), function (x) { x.classList.toggle('on', x === p); });
+      renderHistory();
+    });
+  });
+  $('wl-hist-find').addEventListener('input', renderHistory);
+  $('wl-hist-body').addEventListener('click', function (e) {
+    var star = e.target.closest('.wl-hist-star');
+    if (star) {
+      e.stopPropagation();
+      var g = histRows[parseInt(star.getAttribute('data-star'), 10)];
+      if (g) window.api.favourite(isFav(g, g.mode) ? 'remove' : 'add', { call: g.call, mode: g.mode, dialKhz: g.dialKhz, url: g.url });
+      return;
+    }
+    var row = e.target.closest('.wl-hist-row.item');
+    if (row) useGateway(histRows[parseInt(row.getAttribute('data-h'), 10)]);
+  });
+  $('wl-hist-body').addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' || e.target.closest('.wl-hist-star')) return;
+    var row = e.target.closest('.wl-hist-row.item');
+    if (row) useGateway(histRows[parseInt(row.getAttribute('data-h'), 10)]);
+  });
 
   $('wl-connect').addEventListener('click', function () {
     requireNotice(function () {
       var m = currentMode();
       var o = { mode: m.id };
       if (m.id !== 'telnet') {
-        var g = gateways[parseInt($('wl-gateway').value, 10)];
+        var g = pickedGateway();
         if (!g) { $('wl-text').textContent = 'Pick a gateway first'; return; }
         o.gateway = g.call; o.dialKhz = g.dialKhz; o.url = g.url;
       }
