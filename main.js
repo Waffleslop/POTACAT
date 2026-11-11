@@ -8901,8 +8901,9 @@ async function connectCat() {
     // by owners; lib/sculan10-transport.js). The transport carries Yaesu CAT
     // ASCII, so the same Kenwood-style codec a USB-connected Yaesu uses
     // attaches unchanged. RX audio comes over the LAN when audioSource is
-    // 'yaesu-lan'; TX audio is not in the spec yet, so handleRemotePtt
-    // refuses a key-down that would send a silent carrier.
+    // 'yaesu-lan'. Voice PTT (VFO window, ECHOCAT) sends its mic over the
+    // LAN (yaesuLanVoiceTx); the other transmit paths have no LAN audio yet,
+    // so handleRemotePtt refuses them rather than send a silent carrier.
     transport = new Sculan10Transport();
     const model = rigModel || { brand: 'Yaesu', protocol: 'kenwood', caps: {}, cw: {} };
     model.tune = getTuneQuirks(model);
@@ -8939,12 +8940,12 @@ async function connectCat() {
       const activeRig = (settings.rigs || []).find((r) => r && r.id === settings.activeRigId);
       if (activeRig && activeRig.catTarget && activeRig.catTarget.type === 'yaesu-lan' && !activeRig.audioSource) {
         const def = RigFamily.defaultAudioSourceFor('yaesu-lan');
-        if (settings.audioSource !== def) sendCatLog(`[SCU-LAN10] this rig has no audio source saved; using ${def === 'yaesu-lan' ? 'Yaesu LAN audio (receive only)' : def} instead of the previous rig's "${settings.audioSource || 'none'}". Pick one in Settings > My Rigs.`);
+        if (settings.audioSource !== def) sendCatLog(`[SCU-LAN10] this rig has no audio source saved; using ${def === 'yaesu-lan' ? 'Yaesu LAN audio' : def} instead of the previous rig's "${settings.audioSource || 'none'}". Pick one in Settings > My Rigs.`);
         activeRig.audioSource = def;
         settings.audioSource = def;
       }
     }
-    sendCatLog(`Connecting to the Yaesu SCU-LAN10 (experimental) at ${_ylHp.host}, UDP ports ${_ylHp.port}-${_ylHp.port + 3}${modelName ? `, ${modelName}` : ''}${settings.audioSource === 'yaesu-lan' ? ', RX audio over the LAN' : ', RX audio from the sound card on this computer'}; transmit audio over the LAN is not supported yet. POTACAT ${app.getVersion()}.`);
+    sendCatLog(`Connecting to the Yaesu SCU-LAN10 (experimental) at ${_ylHp.host}, UDP ports ${_ylHp.port}-${_ylHp.port + 3}${modelName ? `, ${modelName}` : ''}${settings.audioSource === 'yaesu-lan' ? ', RX audio and voice TX over the LAN (FT8, Winlink, SSTV and Tune not yet)' : ', audio from the sound card on this computer'}. POTACAT ${app.getVersion()}.`);
     transport.connect({
       host: _ylHp.host,
       basePort: _ylHp.port,
@@ -22620,6 +22621,73 @@ function pushIcomNetworkVoiceChunk(samples) {
   }
 }
 
+// --- Yaesu SCU-LAN10 voice TX (mic -> LAN -> radio), #227 ---------------------
+// The VFO window's PTT and an ECHOCAT device send their mic over the LAN as
+// the Icom Network path does: 24 kHz chunks on dax-tx-chunk, resampled to the
+// unit's 16 kHz. The radio stays in USB/LSB (a Yaesu's DATA-U narrows voice)
+// and takes the LAN audio with SSB MOD SOURCE = AUTO or USB in its menu.
+let _yaesuLanTxChunkCount = 0;
+let _yaesuLanTxPeak = 0;
+let _yaesuLanVoiceResampler = null;
+
+function yaesuLanTransport() {
+  const t = settings.catTarget;
+  if (!t || t.type !== 'yaesu-lan' || !cat || !(cat._transport instanceof Sculan10Transport)) return null;
+  return cat._transport;
+}
+
+function yaesuLanVoiceRoute() {
+  return settings.audioSource === 'yaesu-lan' && !!(settings.catTarget && settings.catTarget.type === 'yaesu-lan');
+}
+
+// Starts or stops the LAN voice stream for a PTT edge. Returns true when this
+// PTT's audio goes over the LAN. A key-down without a ready stream is refused
+// by handleRemotePtt (yaesuLanTxRefusal), never keyed silent.
+function yaesuLanVoiceTx(state, who) {
+  if (!yaesuLanVoiceRoute()) return false;
+  const t = yaesuLanTransport();
+  if (state) {
+    if (!t || !t.txReady) {
+      sendCatLog(`[SCU-LAN10] ${who}: the LAN is not connected, no transmit audio`);
+      return true;
+    }
+    if (!t.voiceTxActive) {
+      try {
+        _yaesuLanTxChunkCount = 0;
+        _yaesuLanTxPeak = 0;
+        _yaesuLanVoiceResampler = new mercuryAudioBridge.StreamingResampler(24000, Sculan10.TX_AUDIO_RATE);
+        t.startVoiceTx();
+        sendCatLog(`[SCU-LAN10] voice TX started (${who})`);
+      } catch (e) {
+        sendCatLog('[SCU-LAN10] voice TX start failed: ' + e.message);
+      }
+    }
+  } else if (t && t.voiceTxActive) {
+    t.stopVoiceTx();
+    sendCatLog(`[SCU-LAN10] voice TX stopped (${who} release)`);
+  }
+  return true;
+}
+
+// One 24 kHz mic chunk from the VFO window or the ECHOCAT bridge.
+function pushYaesuLanVoiceChunk(samples) {
+  const t = yaesuLanTransport();
+  if (!t || !t.voiceTxActive || !_yaesuLanVoiceResampler) return;
+  const out = _yaesuLanVoiceResampler.process(samples);
+  _yaesuLanTxChunkCount++;
+  const peak = peakFloat32(out);
+  if (peak > _yaesuLanTxPeak) _yaesuLanTxPeak = peak;
+  // Heartbeat about once a second (24 kHz / 128-sample chunks = 188/s).
+  if (_yaesuLanTxChunkCount === 1 || _yaesuLanTxChunkCount % 188 === 0) {
+    // Chunk #1 comes before the mic graph has settled: only a whole silent second is a warning.
+    sendCatLog(`[SCU-LAN10] voice TX chunk #${_yaesuLanTxChunkCount}: max peak=${_yaesuLanTxPeak.toFixed(4)}${_yaesuLanTxChunkCount > 1 && _yaesuLanTxPeak < 0.001 ? ' (SILENT: check the mic)' : ''}`);
+    _yaesuLanTxPeak = 0;
+  }
+  try { t.pushVoiceChunk(out); } catch (e) {
+    console.warn('[SCU-LAN10] pushVoiceChunk error:', e.message);
+  }
+}
+
 function handleIcomNetworkAudioFrame(frame) {
   if (!frame || !frame.pcm) return;
   const sampleRate = frame.sampleRate || 48000;
@@ -25856,6 +25924,9 @@ function connectRemote() {
     // LAN, in DATA mode unless the rig says its DATA OFF MOD is LAN.
     if (icomNetworkVoiceTx(state, 'ECHOCAT phone PTT')) {
       handleRemotePtt(state, icomLanVoicePttOpts());
+    } else if (yaesuLanVoiceTx(state, 'ECHOCAT phone PTT')) {
+      // SCU-LAN10: the phone's mic over the LAN; the radio stays in USB/LSB.
+      if (handleRemotePtt(state, { audio: true }) === false) yaesuLanVoiceTx(false, 'refused key-down');
     } else {
       handleRemotePtt(state);
     }
@@ -29019,6 +29090,7 @@ function txLimitTrip(t) {
   try { if (ct.type === 'none' && ct.ptt === 'cm108' && win && !win.isDestroyed()) win.webContents.send('cm108-ptt', { state: false, gpio: Number.isInteger(ct.gpio) ? ct.gpio : 3 }); } catch {}
   try { if (smartSdr && smartSdr.connected) gatedSmartSdrTransmit(false); } catch {}
   try { if (settings.audioSource === 'icom-network') forceReleaseIcomNetworkTx('stuck-TX limit'); } catch {}
+  try { if (settings.audioSource === 'yaesu-lan') yaesuLanVoiceTx(false, 'stuck-TX limit'); } catch {}
   const msg = t.message;
   if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: msg, warn: true, duration: 20000 });
   if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', msg);
@@ -29154,7 +29226,9 @@ function pttConfirmRestore(restoreMode, restoreFreq, noAnchor, since) {
 }
 
 // The words for a key-down refused because the SCU-LAN10 has no transmit
-// audio path yet; null when transmitting is fine.
+// audio path for it yet; null when transmitting is fine. Voice is the one
+// path that has one: while yaesuLanVoiceTx holds the LAN stream open, the
+// key-down carries the mic (#227).
 let _yaesuLanTxNoticeAt = 0;
 // A raw Yaesu/Kenwood key-down anywhere in a custom CAT string: TX1; or TX2;
 // (TX0; is receive and always passes).
@@ -29162,7 +29236,9 @@ const RAW_CAT_KEYDOWN_RE = /(^|;)\s*TX[12]\s*(;|$)/i;
 function yaesuLanTxRefusal() {
   const t = settings.catTarget;
   if (!t || t.type !== 'yaesu-lan' || settings.audioSource !== 'yaesu-lan') return null;
-  return "transmit audio over the Yaesu LAN (SCU-LAN10) is not supported yet, so the radio would send a silent carrier. To transmit, set Audio Source to the radio's USB sound card on this computer (CAT stays on the LAN), or use the radio's own microphone.";
+  const lan = yaesuLanTransport();
+  if (lan && lan.voiceTxActive) return null;
+  return "over the Yaesu LAN (SCU-LAN10) only voice from the VFO window's PTT or ECHOCAT is transmitted so far; FT8/FT4, Winlink, SSTV and Tune would send a silent carrier. For those, set Audio Source to the radio's USB sound card on this computer (CAT stays on the LAN).";
 }
 
 /** Is POTACAT sending the audio for this key-down? opts.audio when the caller
@@ -30195,7 +30271,9 @@ function _buildAudioBridgeConfig() {
     (t.type === 'k4-network' && cat && cat.connected) ||
     // Icom Network: the client's mic goes over RS-BA1, never to a PC sound
     // device (the legacy route played it on this computer's speakers).
-    (settings.audioSource === 'icom-network' && !!(_icomNetworkTransport && _icomNetworkTransport.txReady));
+    (settings.audioSource === 'icom-network' && !!(_icomNetworkTransport && _icomNetworkTransport.txReady)) ||
+    // SCU-LAN10: the client's mic goes over the LAN too (#227).
+    (settings.audioSource === 'yaesu-lan' && !!(yaesuLanTransport() && yaesuLanTransport().txReady));
   return {
     inputDeviceId:  settings.remoteAudioInput  || '',
     outputDeviceId: settings.remoteAudioOutput || '',
@@ -50999,6 +51077,19 @@ function cloudShackNotice(text, kind) {
       pushIcomNetworkVoiceChunk(mic);
       return;
     }
+    // SCU-LAN10: the same chunks while a voice PTT holds the LAN stream.
+    {
+      const lan = yaesuLanTransport();
+      if (lan && lan.voiceTxActive) {
+        let mic;
+        if (buf instanceof Float32Array) mic = buf;
+        else if (ArrayBuffer.isView(buf) || buf instanceof ArrayBuffer) mic = new Float32Array(buf);
+        else if (Array.isArray(buf)) mic = new Float32Array(buf);
+        else { try { mic = new Float32Array(Object.values(buf)); } catch { return; } }
+        pushYaesuLanVoiceChunk(mic);
+        return;
+      }
+    }
     if (!smartSdrAudio || !smartSdrAudio.txReady) return;
     // Only stream the phone's mic to the radio's dax_tx WHILE transmitting.
     // The renderer's dax_tx tap runs continuously once the iOS app's WebRTC
@@ -52169,6 +52260,11 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('naked-ptt', (_e, state) => {
     if (icomNetworkVoiceTx(!!state, 'VFO window PTT')) {
       handleRemotePtt(!!state, icomLanVoicePttOpts());
+      return;
+    }
+    // SCU-LAN10: the window's mic over the LAN (#227).
+    if (yaesuLanVoiceTx(!!state, 'VFO window PTT')) {
+      if (handleRemotePtt(!!state, { audio: true }) === false) yaesuLanVoiceTx(false, 'refused key-down');
       return;
     }
     handleRemotePtt(!!state, { audio: false });

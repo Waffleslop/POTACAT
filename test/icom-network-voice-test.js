@@ -114,7 +114,7 @@ const read = (f) => readSrc(path.join(ROOT, f)).replace(/\r\n/g, '\n');
   });
 
   await t('the VFO window never plays its mic on Icom Network, and its speaker plays the radio', () => {
-    assert.ok(/\(s\.audioSource === 'icom-network'\);/.test(vfo), 'PTT takes the direct branch');
+    assert.ok(/\(s\.audioSource === 'icom-network'\)( \|\||;)/.test(vfo), 'PTT takes the direct branch');
     assert.ok(/s\.audioSource === 'smartsdr' \|\| s\.audioSource === 'icom-network'/.test(vfo), 'monitor plays packets');
     assert.ok(/if \(pttDown\) return; \/\/ never play the radio back/.test(vfo));
   });

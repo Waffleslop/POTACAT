@@ -252,7 +252,7 @@ window.api.onStartAudio(async (config) => {
       // the system default output, which is rarely the radio.
       try {
         let label = 'the system default output (set the rig\'s audio Output in Settings > My Rigs)';
-        if (config.daxTxDirect) label = config.audioSource === 'icom-network' ? 'the radio over the LAN (Icom Network)' : 'SmartSDR direct (dax_tx stream)';
+        if (config.daxTxDirect) label = config.audioSource === 'icom-network' ? 'the radio over the LAN (Icom Network)' : config.audioSource === 'yaesu-lan' ? 'the radio over the LAN (Yaesu SCU-LAN10)' : 'SmartSDR direct (dax_tx stream)';
         else if (config.outputDeviceId) {
           const devs = await navigator.mediaDevices.enumerateDevices();
           const d = devs.find((x) => x.kind === 'audiooutput' && x.deviceId === config.outputDeviceId);

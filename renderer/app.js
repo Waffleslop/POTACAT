@@ -2415,7 +2415,7 @@ function getEffectiveSerialcatPort() {
 // the same trap that broke K3SBP's Flex TX (see syncRigAudioDeviceBypass).
 const AUDIO_SOURCE_HELP = {
   flex: 'Flex Direct streams receive and transmit audio straight to the radio (VITA-49) — no DAX program and no audio device setup. Pick Local audio device only if you deliberately run the DAX program.',
-  'yaesu-lan': "Yaesu LAN audio decodes the radio's receive audio over the SCU-LAN10 for JTCAT and SSTV. It is receive only for now: POTACAT will not key the radio with this source, because the carrier would be silent. To transmit from POTACAT, pick the local audio device (the radio's USB sound card on this computer).",
+  'yaesu-lan': "Yaesu LAN audio carries the radio's receive audio over the SCU-LAN10 for listening, JTCAT and SSTV, and voice from the VFO window's PTT or ECHOCAT back to the radio (SSB MOD SOURCE = AUTO or USB in the radio's menu). FT8/FT4, Winlink, SSTV and Tune cannot transmit with this source yet: POTACAT refuses them rather than send a silent carrier. For those, pick the local audio device (the radio's USB sound card on this computer).",
   'icom-network': "Icom Network audio uses the radio's RS-BA1 UDP stream for JTCAT/SSTV receive audio and sends JTCAT FT8/FT4 plus SSTV transmit audio directly over the network — no soundcard needed.",
 };
 function rebuildAudioSourceOptions() {

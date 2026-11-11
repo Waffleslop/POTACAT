@@ -3356,7 +3356,9 @@ async function pttStart() {
         (s.catTarget && s.catTarget.type === 'k4-network') ||
         // Icom Network: the mic goes to the radio over RS-BA1. The legacy
         // branch played it on this computer's speakers (KG5EIU IC-9700 feedback).
-        (s.audioSource === 'icom-network');
+        (s.audioSource === 'icom-network') ||
+        // Yaesu SCU-LAN10: the mic goes to the radio over the LAN (#227).
+        (s.audioSource === 'yaesu-lan' && s.catTarget && s.catTarget.type === 'yaesu-lan');
 
       if (isDaxTxDirect && window.api.daxTxChunk) {
         txPath = 'direct';

@@ -6,8 +6,9 @@ const { readSrc } = require('./_src');
 //   - it is a normal, visible choice in the rig editor (Casey: "turn it on by
 //     default so folks don't have to hunt for it"), connecting only for a rig
 //     that uses it;
-//   - no transmit audio exists yet, so a key-down with the LAN as the audio
-//     source is refused: never a silent carrier;
+//   - voice PTT (VFO window, ECHOCAT) sends its mic over the LAN (#227);
+//     every other key-down with the LAN as the audio source is refused:
+//     never a silent carrier;
 //   - RX audio feeds JTCAT, SSTV and ECHOCAT, and the sound-card capture
 //     yields to it only while it is actually arriving;
 //   - the password is a stored secret like every other CAT password.
@@ -22,6 +23,7 @@ const main = read('main.js');
 const app = read('renderer/app.js');
 const html = read('renderer/index.html');
 const popout = read('renderer/jtcat-popout.js');
+const vfo = read('renderer/vfo-popout.html');
 const RigFamily = require('../lib/rig-family');
 const Secrets = require('../lib/settings-secrets');
 const P = require('../lib/sculan10-protocol');
@@ -48,7 +50,7 @@ test('the rig editor offers it to everyone, labelled experimental, with the unit
   assert.ok(/id="set-yaesu-lan-port"[^>]*value="50000"/.test(html));
   assert.ok(/id="set-yaesu-lan-password" autocomplete="off"/.test(html) && /type="password" id="set-yaesu-lan-password"/.test(html));
   const help = bodyOf(html, 'id="yaesu-lan-config"', 'value="hamlib"');
-  for (const words of ['close PCC-LAN10 first', 'Tailscale or a VPN', 'Transmit audio over the LAN is not supported yet']) {
+  for (const words of ['close PCC-LAN10 first', 'Tailscale or a VPN', "Voice from the VFO window's PTT or ECHOCAT is transmitted over the LAN"]) {
     assert.ok(help.includes(words), 'help says: ' + words);
   }
 });
@@ -65,11 +67,11 @@ test('the editor saves a yaesu-lan target, and only for the three radios the spe
   for (const name of P.MODELS) assert.ok(getModel(name) && getModel(name).brand === 'Yaesu', name + ' exists in rig-models');
 });
 
-test('the family offers LAN receive audio or the local sound card', () => {
+test('the family offers LAN audio or the local sound card', () => {
   assert.strictEqual(RigFamily.familyFromCatTarget({ type: 'yaesu-lan' }), 'yaesu-lan');
   assert.strictEqual(RigFamily.familyFromRadioType('yaesu-lan'), 'yaesu-lan');
   assert.deepStrictEqual(RigFamily.audioSourcesFor('yaesu-lan').map((o) => o.value), ['yaesu-lan', 'dax']);
-  assert.ok(/receive only/.test(RigFamily.audioSourcesFor('yaesu-lan')[0].label));
+  assert.ok(/SCU-LAN10/.test(RigFamily.audioSourcesFor('yaesu-lan')[0].label));
 });
 
 test('connectCat builds the transport with the Yaesu codec, only for a yaesu-lan rig', () => {
@@ -207,6 +209,33 @@ test('review low: the rig editor refuses a login the unit cannot take, by the sa
     assert.strictEqual(fn(v, 'password') === null, P.loginFieldProblem(v, 'password') === null, JSON.stringify(v));
   }
   assert.ok(/yaesuLanLoginProblem\(catTarget\.username, 'user'\) \|\| yaesuLanLoginProblem\(catTarget\.password, 'password'\)/.test(app));
+});
+
+
+test('#227: voice PTT from the VFO window and ECHOCAT opens the LAN stream before keying, in USB/LSB, and closes it on a refusal', () => {
+  const naked = bodyOf(main, "ipcMain.on('naked-ptt', (_e, state) => {", '\n  });');
+  assert.ok(/if \(yaesuLanVoiceTx\(!!state, 'VFO window PTT'\)\) \{\n\s*if \(handleRemotePtt\(!!state, \{ audio: true \}\) === false\) yaesuLanVoiceTx\(false, 'refused key-down'\);/.test(naked), naked);
+  assert.ok(naked.indexOf('icomNetworkVoiceTx') < naked.indexOf('yaesuLanVoiceTx'), 'the Icom route keeps its place');
+  assert.ok(/\} else if \(yaesuLanVoiceTx\(state, 'ECHOCAT phone PTT'\)\) \{\n[^\n]*\n\s*if \(handleRemotePtt\(state, \{ audio: true \}\) === false\) yaesuLanVoiceTx\(false, 'refused key-down'\);/.test(main), 'ECHOCAT');
+  assert.ok(!/yaesuLanVoiceTx\([^)]*\)\) \{\n[^\n]*forceDataMode/.test(main), 'no DATA mode for Yaesu voice');
+});
+
+test('#227: the refusal lets a key-down through only while the voice stream is open', () => {
+  const r = bodyOf(main, 'function yaesuLanTxRefusal() {', '\n}');
+  assert.ok(/const lan = yaesuLanTransport\(\);\n\s*if \(lan && lan\.voiceTxActive\) return null;/.test(r), r);
+  assert.ok(/FT8\/FT4, Winlink, SSTV and Tune would send a silent carrier/.test(r));
+  const route = bodyOf(main, 'function yaesuLanVoiceTx(state, who) {', '\n}');
+  assert.ok(/if \(!t \|\| !t\.txReady\) \{[\s\S]*?return true;/.test(route), 'not ready: no stream, so the key-down is refused');
+  assert.ok(/new mercuryAudioBridge\.StreamingResampler\(24000, Sculan10\.TX_AUDIO_RATE\)/.test(route), '24 kHz mic -> 16 kHz');
+});
+
+test('#227: the mic reaches the LAN: dax-tx-chunk routes it, both windows stream it, the stuck-TX limit closes it', () => {
+  const chunk = bodyOf(main, "ipcMain.on('dax-tx-chunk', (_e, buf) => {", 'if (!smartSdrAudio || !smartSdrAudio.txReady) return;');
+  assert.ok(/if \(lan && lan\.voiceTxActive\) \{[\s\S]*pushYaesuLanVoiceChunk\(mic\);\n\s*return;/.test(chunk));
+  const cfg = bodyOf(main, 'function _buildAudioBridgeConfig() {', 'return {');
+  assert.ok(/settings\.audioSource === 'yaesu-lan' && !!\(yaesuLanTransport\(\) && yaesuLanTransport\(\)\.txReady\)/.test(cfg), 'ECHOCAT bridge: daxTxDirect');
+  assert.ok(/\(s\.audioSource === 'yaesu-lan' && s\.catTarget && s\.catTarget\.type === 'yaesu-lan'\)/.test(vfo), 'VFO window: direct mic path');
+  assert.ok(/if \(settings\.audioSource === 'yaesu-lan'\) yaesuLanVoiceTx\(false, 'stuck-TX limit'\);/.test(main));
 });
 
 console.log(`\nSCU-LAN10 wiring: ${pass} passed, ${fail} failed`);
