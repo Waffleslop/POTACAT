@@ -184,6 +184,7 @@ const TESTS = [
   'test/app-theme-test.js', // design-system themes reach every window; was missing from this list, so a stale check went unseen
   'test/vfo-compact-test.js', // VFO window: Audio on/off, the mini VFO strip, POTACAT colours for PTT, sliders and CW
   'test/vfo-layout-test.js', // VFO window: Large and Small VFO layouts, one-line Small VFO, CAT buttons, Scan
+  'test/main-window-layout-fixes-test.js', // #285 Log button "L", #284 HF Nets check mark, #298 HOLD TO TALK off screen
   'test/wd3d-activator-test.js', // WD3D: toolbar wraps at full screen; a two-fer/n-fer spot fills every P2P park
   'test/wspr-run-time-test.js', // WSPR beacon runs as long as the operator sets (K2BDE); a PTT port keys on RTS by default (K5LEB)
   'test/remote-client-yield-test.js', // a desktop kicked by another of the owner's devices yields the rig (W0EGR)
