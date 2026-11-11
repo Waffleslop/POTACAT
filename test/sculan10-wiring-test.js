@@ -286,5 +286,16 @@ test('#227: a voice macro goes over the LAN: the window decodes it at 16 kHz, ma
   assert.ok(/voiceMacroLan: \(payload\) => ipcRenderer\.send\('voice-macro-lan', payload\)/.test(read('preload.js')));
 });
 
+
+test('#227: CW text on a LAN rig skips the local CW Key Port and uses the keyer memory over CAT', () => {
+  const b = bodyOf(main, "const lanRig = !!(settings.catTarget && settings.catTarget.type === 'yaesu-lan');", '// Serial CAT (Kenwood/Yaesu/Icom)');
+  assert.ok(/if \(!lanRig && \(cwCaps\.textMethod === 'dtr-key-port' \|\| settings\.cwKeyPort\)\) \{/.test(b), 'the key-port branch is skipped');
+  const { getModel } = require('../lib/rig-models');
+  const cw = getModel('FT-710').cw;
+  assert.strictEqual(cw.kyMode, 'km');
+  assert.strictEqual(cw.kmMemory, 1);
+  assert.strictEqual(cw.kmPlay, 'KY01;', 'the form keyed on the air over the LAN');
+});
+
 console.log(`\nSCU-LAN10 wiring: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

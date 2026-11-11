@@ -24760,7 +24760,16 @@ function _sendCwTextToRadioImpl(text, opts) {
   // IC-756 Pro III via rigctld: text went to rigctld's send_morse ('b'),
   // the rig answered RPRT -11, and the separate DTR adapter he explicitly
   // configured sat unused. Configuring the port IS the choice.
-  if (cwCaps.textMethod === 'dtr-key-port' || settings.cwKeyPort) {
+  // Yaesu SCU-LAN10 (#227): the radio is behind the unit, so a CW Key Port
+  // on this computer cannot reach it, and the unit carries no DTR/RTS. Text
+  // goes the CAT way, the model's keyer memory (FT-710: KM1<text>; KY01;),
+  // which DA2PK keyed on the air over the LAN at 50 and 100 W.
+  const lanRig = !!(settings.catTarget && settings.catTarget.type === 'yaesu-lan');
+  if (lanRig && (cwCaps.textMethod === 'dtr-key-port' || settings.cwKeyPort) && !_cwLanKeyPortNoted) {
+    _cwLanKeyPortNoted = true;
+    sendCatLog('[CW] Yaesu LAN: text goes through the radio\'s keyer memory over CAT; the CW Key Port on this computer cannot reach a radio behind the SCU-LAN10.');
+  }
+  if (!lanRig && (cwCaps.textMethod === 'dtr-key-port' || settings.cwKeyPort)) {
     const wpm = (cat && cat._cwWpm) || 20;
     // Honor the per-rig CW-keying-line override (Settings > Radio >
     // CW keying line), exactly like the paddle paths do — raw
@@ -24890,6 +24899,8 @@ function onCwTextUnavailable(info) {
   sendCatLog(`[CW] ${msg}`);
   if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: msg, warn: true, duration: 12000 });
 }
+
+let _cwLanKeyPortNoted = false; // said once per session (sendCwTextToRadio)
 
 // Aborts any in-flight CW text send across every dispatch path. Mirrors
 // the shape of sendCwTextToRadio so we catch every backend. AA6C asked
