@@ -2192,7 +2192,7 @@
           </div>
           <span class="help-text" style="margin-top:6px;display:block;">CAT plus RS-BA1 receive/transmit audio. With Audio source set to Icom Network audio, POTACAT receives radio audio over UDP for JTCAT/SSTV decoding and can send JTCAT FT8/FT4 audio directly over the radio's RS-BA1 TX stream. Network TX gain scales the IP audio drive before it reaches the radio; use it with the JTCAT TX Pwr slider and the radio's LAN MOD gain to get clean output with little or no ALC.</span>
         </div>
-        <label class="radio-label"><input type="radio" name="radio-type" value="yaesu-lan"> Yaesu LAN (SCU-LAN10), experimental <span style="font-size:10px;color:var(--text-tertiary);">— CAT + receive audio</span></label>
+        <label class="radio-label"><input type="radio" name="radio-type" value="yaesu-lan"> Yaesu LAN (SCU-LAN10), experimental <span style="font-size:10px;color:var(--text-tertiary);">— CAT + receive and transmit audio</span></label>
         <div id="yaesu-lan-config" class="radio-sub hidden">
           <span class="help-text" style="font-size:12px;">For the FTDX10, FT-710 and FTDX101D/MP with a Yaesu SCU-LAN10. Pick the radio in Radio Model above. One program at a time: close PCC-LAN10 first. For use away from home, reach the unit through Tailscale or a VPN, because the link is not really encrypted. Voice from the VFO window's PTT or ECHOCAT is transmitted over the LAN, and so are voice macros, JTCAT (FT8/FT4), Tune and SSTV (set SSB MOD SOURCE to AUTO or USB on the radio); Winlink needs the radio's USB sound card on this computer for now. New and untested on real units: after you try it, please send a report with Report a Bug in the Settings sidebar.</span>
           <label>Address:
@@ -2207,11 +2207,14 @@
           <label>Password:
             <input type="password" id="set-yaesu-lan-password" autocomplete="off" placeholder="defaultuser">
           </label>
+          <label class="checkbox-label" title="The radio's monitor and CW sidetone play on its own speaker while you transmit from afar. POTACAT sets them to off and 0 in each mode you use and puts them back when it disconnects.">
+            <input type="checkbox" id="set-yaesu-lan-mute-monitor"> Mute the radio's speaker monitor and CW sidetone while POTACAT has the radio
+          </label>
           <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
             <button type="button" id="yaesu-lan-test-btn">Test Connection</button>
             <span id="yaesu-lan-test-result" style="font-size:12px;"></span>
           </div>
-          <span class="help-text" style="margin-top:6px;display:block;">The base port is the first of four UDP ports (CAT, audio and scope follow it). Blank user and password use the unit's factory login. With Audio source set to Yaesu LAN audio, JTCAT and SSTV decode the radio's audio over the network; to transmit FT8, SSTV or voice from POTACAT, set Audio source to the radio's USB sound card on this computer instead.</span>
+          <span class="help-text" style="margin-top:6px;display:block;">The base port is the first of four UDP ports (CAT, audio and scope follow it). Blank user and password use the unit's factory login. With Audio source set to Yaesu LAN audio, receive and transmit audio both go over the network (Winlink excepted). The monitor option sets the radio's monitor off and its level to 0 (the CW sidetone follows the level) in each mode you use, and puts every mode back when POTACAT disconnects or quits.</span>
         </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="hamlib"> Other Rig (Hamlib)</label>
         <div id="hamlib-config" class="radio-sub hidden">

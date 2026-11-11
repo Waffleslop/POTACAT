@@ -297,5 +297,19 @@ test('#227: CW text on a LAN rig skips the local CW Key Port and uses the keyer 
   assert.strictEqual(cw.kmPlay, 'KY01;', 'the form keyed on the air over the LAN');
 });
 
+
+test('speaker monitor: an opt-in per rig, its saved values persisted per rig, put back before quit', () => {
+  const html = read('renderer/index.html');
+  const app = read('renderer/app.js');
+  assert.ok(/id="set-yaesu-lan-mute-monitor"/.test(html));
+  assert.ok(/muteMonitor: !!\(document\.getElementById\('set-yaesu-lan-mute-monitor'\) \|\| \{\}\)\.checked,/.test(app), 'saved with the target');
+  assert.ok(/set-yaesu-lan-mute-monitor'\)\.checked = !!currentTarget\.muteMonitor;/.test(app), 'loaded with the target');
+  const b = bodyOf(main, "} else if (target.type === 'yaesu-lan') {", "} else if (target.type === 'icom-network') {");
+  assert.ok(/muteMonitor: !!target\.muteMonitor,\s*monitorSaved: \(settings\.yaesuLanMonitorSaved \|\| \{\}\)\[_ylMonKey\] \|\| null,/.test(b));
+  assert.ok(/transport\.on\('monitor-saved'[\s\S]*?saveSettings\(settings\)/.test(b) && /transport\.on\('monitor-restored'[\s\S]*?delete settings\.yaesuLanMonitorSaved\[_ylMonKey\]/.test(b));
+  const quit = bodyOf(main, "app.on('before-quit', (e) => {", 'gracefulCleanup();');
+  assert.ok(/Object\.keys\(lan\.monitorSaved\)\.length\) \{\s*e\.preventDefault\(\);\s*try \{ lan\.disconnect\(\); \} catch \{\}\s*setTimeout\(\(\) => app\.quit\(\), 500\);/.test(quit));
+});
+
 console.log(`\nSCU-LAN10 wiring: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

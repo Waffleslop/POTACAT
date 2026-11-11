@@ -194,7 +194,8 @@ async function bindConsecutive() {
 async function fakeUnit({ user = 'defaultuser', pass = 'defaultuser', sid = 0x22, catDoubleReply = true, setupAcks = true, dropEachSession = false } = {}) {
   const { base, socks } = await bindConsecutive();
   const [ctrl, cat, audio, scope] = socks;
-  const u = { base, ctrl, cat, audio, scope, sid, silent: false, events: [], catSeen: [], keepalives: { ctrl: 0, cat: 0, audio: 0, scope: 0 }, logins: 0, audioPeer: null, respSeq: 0, lastCmdSeq: null, txAudio: [] };
+  const u = { base, ctrl, cat, audio, scope, sid, silent: false, events: [], catSeen: [], keepalives: { ctrl: 0, cat: 0, audio: 0, scope: 0 }, logins: 0, audioPeer: null, respSeq: 0, lastCmdSeq: null, txAudio: [],
+    radio: { mode: '2', fa: '014074000', ml: { 1: { on: '001', level: '005' }, 2: { on: '001', level: '002' }, 3: { on: '000', level: '010' } } } };
   const seq = { ctrl: 0, cat: 0, audio: 0, scope: 0 };
   const reply = (name, sock, rinfo, channel, msgType, body) => {
     seq[name] = (seq[name] + 1) & 0xFF;
@@ -250,8 +251,16 @@ async function fakeUnit({ user = 'defaultuser', pass = 'defaultuser', sid = 0x22
     if (cmdSeq === u.lastCmdSeq) return; // the radio dedupes on cmd_seq
     u.lastCmdSeq = cmdSeq;
     let answer = null;
-    if (text === 'FA;') answer = 'FA014074000;';
+    // A radio with a per-mode monitor (FT-710: ML0 on/off, ML1 level).
+    const R = u.radio;
+    let m;
+    if (text === 'FA;') answer = `FA${R.fa};`;
     else if (text === 'ID;') answer = 'ID0670;';
+    else if (text === 'MD0;') answer = `MD0${R.mode};`;
+    else if ((m = /^MD0([0-9A-F]);$/.exec(text))) R.mode = m[1];
+    else if ((m = /^FA(\d{9});$/.exec(text))) R.fa = m[1];
+    else if (text === 'ML0;' || text === 'ML1;') answer = `${text.slice(0, 3)}${R.ml[R.mode][text[2] === '0' ? 'on' : 'level']};`;
+    else if ((m = /^ML([01])(\d{3});$/.exec(text))) R.ml[R.mode][m[1] === '0' ? 'on' : 'level'] = m[2];
     if (!answer) return;
     u.respSeq = (u.respSeq + 1) & 0xFF;
     const body = Buffer.concat([Buffer.from([u.respSeq, 0, 0, 0]), Buffer.from(answer)]);
@@ -824,6 +833,61 @@ test('buffer TX: a lost session rejects it', async () => {
     const p = c.t.sendTxAudio(new Float32Array(12000 * 10), { inputSampleRate: 12000 });
     u.silent = true;
     await assert.rejects(p, /session ended/);
+  } finally { c.t.disconnect(); u.close(); }
+});
+
+test('speaker monitor: each mode is read once, saved and muted; disconnect puts every mode back, then the mode and dial', async () => {
+  const u = await fakeUnit();
+  const c = client();
+  const saved = [];
+  c.t.on('monitor-saved', (s) => saved.push(s));
+  let restored = 0;
+  c.t.on('monitor-restored', () => restored++);
+  try {
+    c.t.connect({ host: '127.0.0.1', basePort: u.base, ...FAST, muteMonitor: true });
+    assert.ok(await until(() => c.connects === 1));
+    c.t.write('FA;'); c.t.write('MD0;');                        // RigController's poll
+    assert.ok(await until(() => u.radio.ml[2].on === '000' && u.radio.ml[2].level === '000'), JSON.stringify(u.radio));
+    assert.deepStrictEqual(saved.at(-1), { 2: { on: '001', level: '002' } });
+    c.t.write('MD03;'); c.t.write('MD0;');                       // the operator goes to CW
+    assert.ok(await until(() => u.radio.ml[3].level === '000'));
+    assert.deepStrictEqual(c.t.monitorSaved, { 2: { on: '001', level: '002' }, 3: { on: '000', level: '010' } });
+    assert.deepStrictEqual(u.radio.ml[1], { on: '001', level: '005' }, 'a mode never used is left alone');
+    const reads = u.catSeen.filter((x) => x.text === 'ML0;').length;
+    c.t.write('MD0;'); await sleep(150);
+    assert.strictEqual(u.catSeen.filter((x) => x.text === 'ML0;').length, reads, 'no second read in the same mode');
+    c.t.disconnect();
+    assert.ok(await until(() => u.radio.ml[2].level === '002' && u.radio.ml[3].level === '010'), JSON.stringify(u.radio.ml));
+    assert.strictEqual(u.radio.ml[2].on, '001');
+    assert.strictEqual(u.radio.mode, '3', 'back in the mode it was in');
+    assert.strictEqual(u.radio.fa, '014074000', 'and on the dial it was on');
+    assert.strictEqual(restored, 1);
+  } finally { c.t.disconnect(); u.close(); }
+});
+
+test('speaker monitor: values saved by an earlier run are the radio\'s own: not re-read (they would read 0 now), still put back', async () => {
+  const u = await fakeUnit();
+  u.radio.ml[2] = { on: '000', level: '000' };                    // muted by a run that crashed
+  const c = client();
+  try {
+    c.t.connect({ host: '127.0.0.1', basePort: u.base, ...FAST, muteMonitor: true, monitorSaved: { 2: { on: '001', level: '002' } } });
+    assert.ok(await until(() => c.connects === 1));
+    c.t.write('MD0;'); await sleep(200);
+    assert.ok(!u.catSeen.some((x) => x.text === 'ML0;'), 'not read again');
+    c.t.disconnect();
+    assert.ok(await until(() => u.radio.ml[2].on === '001' && u.radio.ml[2].level === '002'));
+  } finally { c.t.disconnect(); u.close(); }
+});
+
+test('speaker monitor off (the default): no ML is ever sent', async () => {
+  const u = await fakeUnit();
+  const c = client();
+  try {
+    c.t.connect({ host: '127.0.0.1', basePort: u.base, ...FAST });
+    assert.ok(await until(() => c.connects === 1));
+    c.t.write('MD0;'); await sleep(200);
+    c.t.disconnect(); await sleep(100);
+    assert.ok(!u.catSeen.some((x) => /^ML/.test(x.text)));
   } finally { c.t.disconnect(); u.close(); }
 });
 

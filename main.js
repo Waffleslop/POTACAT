@@ -8947,11 +8947,27 @@ async function connectCat() {
       }
     }
     sendCatLog(`Connecting to the Yaesu SCU-LAN10 (experimental) at ${_ylHp.host}, UDP ports ${_ylHp.port}-${_ylHp.port + 3}${modelName ? `, ${modelName}` : ''}${settings.audioSource === 'yaesu-lan' ? ', RX audio, voice, voice macros, JTCAT, Tune and SSTV TX over the LAN (Winlink not yet)' : ', audio from the sound card on this computer'}. POTACAT ${app.getVersion()}.`);
+    // Speaker monitor (opt-in per rig): the transport mutes the radio's
+    // monitor/sidetone per mode and puts it back on disconnect; the values
+    // it found are kept here so a crash or lost link cannot lose them.
+    const _ylMonKey = settings.activeRigId || _ylHp.host;
+    transport.on('monitor-saved', (saved) => {
+      settings.yaesuLanMonitorSaved = { ...(settings.yaesuLanMonitorSaved || {}), [_ylMonKey]: saved };
+      saveSettings(settings);
+    });
+    transport.on('monitor-restored', () => {
+      if (settings.yaesuLanMonitorSaved && settings.yaesuLanMonitorSaved[_ylMonKey]) {
+        delete settings.yaesuLanMonitorSaved[_ylMonKey];
+        saveSettings(settings);
+      }
+    });
     transport.connect({
       host: _ylHp.host,
       basePort: _ylHp.port,
       username: target.username || '',
       password: target.password || '',
+      muteMonitor: !!target.muteMonitor,
+      monitorSaved: (settings.yaesuLanMonitorSaved || {})[_ylMonKey] || null,
     });
   } else if (target.type === 'icom-network') {
     // Icom RS-BA1 protocol over UDP. Works with:
@@ -52715,6 +52731,17 @@ app.on('before-quit', (e) => {
   winlinkHoldAwake(false); // never leave the Winlink session's App Nap block behind (#187)
   // A Winlink return still pending (#187): the radio goes back while CAT is up.
   if (winlinkReturnBeforeQuit(() => app.quit())) { e.preventDefault(); return; }
+  // SCU-LAN10 speaker monitor: put the radio's monitor back and give the
+  // packets half a second to leave before the process goes.
+  {
+    const lan = yaesuLanTransport();
+    if (lan && lan.connected && Object.keys(lan.monitorSaved).length) {
+      e.preventDefault();
+      try { lan.disconnect(); } catch {}
+      setTimeout(() => app.quit(), 500);
+      return;
+    }
+  }
   gracefulCleanup();
   // Shutdown watchdog: if quit stalls after cleanup (a pending async close, a
   // wedged device handle), the process lingers headless and the NEXT

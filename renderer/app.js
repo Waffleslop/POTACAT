@@ -2576,6 +2576,7 @@ async function populateRadioSection(currentTarget) {
     document.getElementById('set-yaesu-lan-port').value = currentTarget.port || 50000;
     document.getElementById('set-yaesu-lan-username').value = currentTarget.username || '';
     document.getElementById('set-yaesu-lan-password').value = currentTarget.password || '';
+    document.getElementById('set-yaesu-lan-mute-monitor').checked = !!currentTarget.muteMonitor;
   } else if (currentTarget.type === 'rigctld') {
     setRadioType('hamlib');
     hamlibFieldsLoaded = true;
@@ -10372,6 +10373,7 @@ function yaesuLanTargetFromForm() {
     port: parseInt(document.getElementById('set-yaesu-lan-port').value, 10) || 50000,
     username: document.getElementById('set-yaesu-lan-username').value || '',
     password: document.getElementById('set-yaesu-lan-password').value || '',
+    muteMonitor: !!(document.getElementById('set-yaesu-lan-mute-monitor') || {}).checked,
   };
 }
 document.getElementById('yaesu-lan-test-btn')?.addEventListener('click', async () => {
