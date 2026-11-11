@@ -20,11 +20,12 @@ const main = readSrc(path.join(root, 'main.js'));
 
 console.log('VFO mini and colours');
 
-test('the strip keeps the width inside 300..460 and takes the measured height inside 84..260', () => {
-  assert.deepStrictEqual(C.miniSize({ width: 360, height: 108 }), { width: 360, height: 108 });
-  assert.deepStrictEqual(C.miniSize({ width: 900, height: 20 }), { width: 460, height: 84 });
-  assert.deepStrictEqual(C.miniSize({ width: 100, height: 999 }), { width: 300, height: 260 });
-  assert.deepStrictEqual(C.miniSize({}), { width: 380, height: 110 });
+test('the strip: the operator\'s width, else the line\'s, inside 320..1600; the measured height inside 44..260', () => {
+  assert.deepStrictEqual(C.miniSize({ width: 700, height: 52 }), { width: 700, height: 52 });
+  assert.deepStrictEqual(C.miniSize({ width: 700, height: 52, saved: 540 }), { width: 540, height: 52 }, 'a dragged width wins');
+  assert.deepStrictEqual(C.miniSize({ width: 5000, height: 20 }), { width: 1600, height: 44 });
+  assert.deepStrictEqual(C.miniSize({ width: 100, height: 999 }), { width: 320, height: 260 });
+  assert.deepStrictEqual(C.miniSize({}), { width: 640, height: 52 });
 });
 
 test('growing back uses the size from before the shrink, else the default; a close in mini saves the full size', () => {
@@ -36,22 +37,21 @@ test('growing back uses the size from before the shrink, else the default; a clo
 
 test('main: vfo-set-compact remembers the full size once, sizes the strip, restores, and saves the choice', () => {
   const i = main.indexOf("ipcMain.on('vfo-set-compact'");
-  const h = main.slice(i, i + 1400);
+  const h = main.slice(i, i + 1800);
   assert.ok(/if \(!_vfoCompactNow\) settings\.vfoFullSize = \{ width: b\.width, height: b\.height \};/.test(h), 'remembered before the first shrink only');
-  assert.ok(/VfoCompact\.miniSize\(\{ width: b\.width, height \}\)/.test(h) && /setMinimumSize\(VfoCompact\.MINI\.minWidth, VfoCompact\.MINI\.minHeight\)/.test(h));
+  assert.ok(/VfoCompact\.miniSize\(\{ width, height, saved: settings\.vfoMiniWidth \}\)/.test(h) && /setMinimumSize\(VfoCompact\.MINI\.minWidth, VfoCompact\.MINI\.minHeight\)/.test(h));
   assert.ok(/VfoCompact\.fullSize\(settings\.vfoFullSize, b\)/.test(h) && /setMinimumSize\(300, 360\)/.test(h), 'grows back with the old minimum');
   assert.ok(/if \(save && settings\.vfoCompact !== !!on\) \{ settings\.vfoCompact = !!on; saveSettings\(settings\); \}/.test(h));
   assert.ok(/_vfoCompactNow \? VfoCompact\.savedBounds\(vfoPopoutWin\.getBounds\(\), settings\.vfoFullSize\)/.test(main), 'never saved at strip height');
-  assert.ok(/setVfoCompact: \(on, height, save\) => ipcRenderer\.send\('vfo-set-compact'/.test(readSrc(path.join(root, 'preload-vfo-popout.js'))));
+  assert.ok(/setVfoCompact: \(on, height, save, width, fit\) => ipcRenderer\.send\('vfo-set-compact'/.test(readSrc(path.join(root, 'preload-vfo-popout.js'))));
 });
 
-test('the page: a title-bar button switches, the strip shows frequency, mode, band, S-meter, Audio, PTT and Log', () => {
+test('the page: a title-bar button switches, the strip is the Small VFO line (test/vfo-layout-test.js)', () => {
   assert.ok(/id="mini-btn"/.test(vfo) && /miniBtn\.addEventListener\('click', \(\) => setMini\(!vfoMini\)\);/.test(vfo));
   assert.ok(/if \(s && s\.vfoCompact\) setMini\(true, \{ save: false \}\);/.test(vfo), 'opens the way it was left');
-  assert.ok(/body\.mini \.scroll > :not\(\.head-card\):not\(\.swr-alert\.show\) \{ display: none !important; \}/.test(vfo), 'the SWR guard is never hidden by the strip');
-  assert.ok(/body\.mini #widget-smeter \.meter-row:not\(:has\(#smeter-bar\)\) \{ display: none; \}/.test(vfo), 'only the S-meter row');
-  assert.ok(/body\.mini \.band-chip:not\(:empty\) \{ display: inline-block; \}/.test(vfo) && /bandChip\.textContent = cur \|\| '';/.test(vfo));
-  assert.ok(/new ResizeObserver\(/.test(vfo), 'the strip follows its content (split TX line, SWR guard)');
+  assert.ok(/body\.mini \.scroll > :not\(\.swr-alert\.show\) \{ display: none !important; \}/.test(vfo), 'the SWR guard is never hidden by the strip');
+  assert.ok(/\.mini-strip \.band-chip:not\(:empty\) \{ display: inline-block; \}/.test(vfo) && /bandChip\.textContent = cur \|\| '';/.test(vfo));
+  assert.ok(/new ResizeObserver\(/.test(vfo), 'the strip follows its content (the SWR guard)');
 });
 
 test('the speaker says Audio on or Audio off; the click is unchanged', () => {

@@ -51,7 +51,10 @@ contextBridge.exposeInMainWorld('api', {
   openWebSdrSettings: () => ipcRenderer.send('vfo-open-websdr-settings'),
   setAlwaysOnTop: (on) => ipcRenderer.send('vfo-set-always-on-top', on),
   // Mini VFO: shrink to a strip of `height` px, or grow back (main remembers the full size).
-  setVfoCompact: (on, height, save) => ipcRenderer.send('vfo-set-compact', { on: !!on, height: Number(height) || 0, save: save !== false }),
+  setVfoCompact: (on, height, save, width, fit) => ipcRenderer.send('vfo-set-compact', { on: !!on, height: Number(height) || 0, save: save !== false, width: Number(width) || 0, fit: !!fit }),
+  // Small VFO Scan: start or stop the main window's spot scan (or the phone's).
+  scanToggle: () => ipcRenderer.send('vfo-scan-toggle'),
+  onScanState: (cb) => ipcRenderer.on('vfo-scan-state', (_e, d) => cb(d)),
   voiceMacroList: () => ipcRenderer.invoke('voice-macro-list'),
   voiceMacroLoad: (idx) => ipcRenderer.invoke('voice-macro-load', idx),
   getSettings: () => ipcRenderer.invoke('get-settings'),
