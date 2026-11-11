@@ -38,6 +38,9 @@ specific to this repo. This repo is public; nothing private goes in here.
 - Never send `EX040101` to a Yaesu (it is MY CALL, not scope enable). Never send `atu clear` to a Flex.
 - Map tints and badges use POTACAT colours: worked #4fc3f7, confirmed #4ecca3, never yellow.
 - The spot-row and decode-row builders are shared modules; never hand-build cells in remote.js.
+- Every visible window opens in the theme (`backgroundColor: getThemeWindowBg()`, `loadFile(..., { query: themeQuery() })`,
+  a page that loads popout-theme-boot.js first) and remembers its place: a new window calls
+  `rememberWindowPlace(win, '<name>Bounds', { minWidth, minHeight })` (test/window-rules-test.js).
 
 ## Releases
 Only via the potacat-release skill (.claude/skills/potacat-release), only when Casey asks in this

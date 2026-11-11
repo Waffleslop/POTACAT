@@ -372,6 +372,7 @@ const TESTS = [
   'test/ae5je-settings-audio-test.js', // AE5JE: audio devices follow their name; bug report says whether settings saves land
   'test/page-script-globals-test.js', // one top-level scope per page: a second const of the same name stops a script (WB3EGD, the dead 1.13.5 audio heal)
   'test/window-min-size-test.js',     // N0KAH: no window shrinks past its own controls
+  'test/window-rules-test.js',        // every window opens in the theme and remembers its place
   'test/yaesu-fa-digits-test.js',
   'test/log-as-test.js',
   'test/save-qso-stall-test.js',

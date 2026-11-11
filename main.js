@@ -34013,6 +34013,11 @@ function isOnScreen(saved) {
 
 /** Clamp bounds so window fits within the nearest display's work area */
 function clampToWorkArea(bounds) {
+  // A window wholly on the work areas (one monitor or across two) stays exactly
+  // where it was; only one hanging off a screen is pulled onto the nearest.
+  if (require('./lib/window-place').onWorkAreas(bounds, screen.getAllDisplays().map((d) => d.workArea))) {
+    return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
+  }
   const display = screen.getDisplayMatching(bounds) || screen.getPrimaryDisplay();
   const wa = display.workArea;
   const w = Math.min(bounds.width, wa.width);
@@ -34020,6 +34025,30 @@ function clampToWorkArea(bounds) {
   const x = Math.max(wa.x, Math.min(bounds.x, wa.x + wa.width - w));
   const y = Math.max(wa.y, Math.min(bounds.y, wa.y + wa.height - h));
   return { x, y, width: w, height: h };
+}
+
+// Every window opens where it was, at the size it was (Casey 2026-11-11).
+// Restores settings[key] while it is on a screen, then saves it 0.7 s after
+// the operator stops moving or sizing and again at close, so a crash, an update
+// restart or a profile switch (app.exit, no 'close') keeps the last place.
+// getNormalBounds: a maximized window keeps the size it un-maximizes to.
+// New windows use this; test/window-rules-test.js holds every window to it.
+function rememberWindowPlace(w, key, { minWidth = 200, minHeight = 150 } = {}) {
+  const WindowPlace = require('./lib/window-place');
+  const saved = settings[key];
+  if (WindowPlace.restorable(saved, minWidth, minHeight) && isOnScreen(saved)) w.setBounds(clampToWorkArea(saved));
+  let timer = null;
+  const save = () => {
+    if (!w || w.isDestroyed() || w.isMinimized() || w.isFullScreen()) return;
+    const b = w.getNormalBounds();
+    if (WindowPlace.same(settings[key], b)) return;
+    settings[key] = WindowPlace.toSaved(b);
+    saveSettings(settings);
+  };
+  const soon = () => { clearTimeout(timer); timer = setTimeout(save, 700); };
+  w.on('move', soon);
+  w.on('resize', soon);
+  w.on('close', () => { clearTimeout(timer); save(); });
 }
 
 function getIconPath() {
@@ -39610,6 +39639,7 @@ function cloudShackNotice(text, kind) {
         nodeIntegration: false,
       },
     });
+    rememberWindowPlace(pairPopoutWin, 'pairPopoutBounds', { minWidth: 360, minHeight: 420 });
     pairPopoutWin.show();
     pairPopoutWin.setMenuBarVisibility(false);
     pairPopoutWin.loadFile(path.join(__dirname, 'renderer', 'pair-popout.html'), { query: themeQuery() });
@@ -39660,6 +39690,7 @@ function cloudShackNotice(text, kind) {
         nodeIntegration: false,
       },
     });
+    rememberWindowPlace(pairRequestPopoutWin, 'pairRequestPopoutBounds', { minWidth: 340, minHeight: 260 });
     pairRequestPopoutWin.setMenuBarVisibility(false);
     pairRequestPopoutWin.loadFile(path.join(__dirname, 'renderer', 'pair-request-popout.html'), { query: themeQuery() });
     pairRequestPopoutWin.once('ready-to-show', () => {
@@ -41331,6 +41362,7 @@ function cloudShackNotice(text, kind) {
       icon: getIconPath(),
       webPreferences: { preload: path.join(__dirname, 'preload-js8-map-popout.js'), contextIsolation: true, nodeIntegration: false },
     });
+    rememberWindowPlace(js8MapWin, 'js8MapBounds', { minWidth: 400, minHeight: 300 });
     js8MapWin.setMenuBarVisibility(false);
     js8MapWin.loadFile(path.join(__dirname, 'renderer', 'js8-map-popout.html'), { query: themeQuery() });
     js8MapWin.on('closed', () => { js8MapWin = null; });
@@ -41809,6 +41841,7 @@ function cloudShackNotice(text, kind) {
       frame: false,
       webPreferences: { preload: path.join(__dirname, 'preload-jtcat-popout.js'), contextIsolation: true, nodeIntegration: false },
     });
+    rememberWindowPlace(jtcatMapPopoutWin, 'jtcatMapPopoutBounds', { minWidth: 360, minHeight: 300 });
     jtcatMapPopoutWin.loadFile('renderer/jtcat-map-popout.html', { query: themeQuery() });
     jtcatMapPopoutWin.on('closed', () => { jtcatMapPopoutWin = null; });
     jtcatMapPopoutWin.webContents.on('did-finish-load', () => {
