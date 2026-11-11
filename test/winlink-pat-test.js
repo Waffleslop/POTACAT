@@ -270,7 +270,9 @@ test('#336: the gateway list keeps only the bands this radio is used on', () => 
   const fn = main.slice(main.indexOf('async function winlinkGateways('), main.indexOf('let _winlinkGatewaysLogged'));
   const at = fn.indexOf('WinlinkPat.gatewaysOnBands(list, activeRigBands())');
   assert.ok(at > 0 && at < fn.indexOf('winlinkState.setGateways(mode, band, list)'), 'filtered before it is stored and sent');
-  assert.ok(/on bands this radio is not set up for left out \(Settings > My Rigs > Bands\)/.test(fn), 'the window says how many were left out');
+  // #254: the count is its own field, the last line inside the gateway list (not a sentence beside it).
+  assert.ok(/const leftOut = onBands\.dropped \|\| 0;/.test(fn) && /list, predicted, note, leftOut \};/.test(fn), 'the reply carries how many were left out');
+  assert.ok(/more on bands this radio is not set up for \(Settings > My Rigs > Bands\)/.test(readSrc(require('path').join(__dirname, '..', 'renderer', 'winlink-popout.js'))), 'the mail window says it as the last line of the list');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

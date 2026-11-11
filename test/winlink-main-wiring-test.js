@@ -415,13 +415,14 @@ test('the gateway reply says how it is ordered, on every surface', () => {
   const fn = fnBody(main, 'winlinkGateways');
   assert.ok(/const predicted = list\.some\(\(g\) => g\.quality != null\);/.test(fn));
   assert.ok(/WinlinkPat\.rankingNote\(\{ predicted, count: list\.length, hf \}\)/.test(fn));
-  assert.ok(/return \{ ok: true, mode, band: band \|\| '', list, predicted, note \};/.test(fn));
-  assert.ok(/type: 'winlink-gateways', mode: r\.mode, band: r\.band, list: r\.list, predicted: !!r\.predicted, note: r\.note \|\| ''/.test(main), 'ECHOCAT gets predicted + note');
+  assert.ok(/return \{ ok: true, mode, band: band \|\| '', list, predicted, note, leftOut \};/.test(fn));
+  assert.ok(/type: 'winlink-gateways', mode: r\.mode, band: r\.band, list: r\.list, predicted: !!r\.predicted, note: r\.note \|\| '', leftOut: r\.leftOut \|\| 0/.test(main), 'ECHOCAT gets predicted, note and leftOut');
   const proto = read('lib/echocat-protocol.js');
   assert.ok(/'winlink-gateways': \{[^}]*predicted: f\.optBoolean, note: f\.optString/.test(proto), 'declared on the wire');
   const popout = read('renderer/winlink-popout.js');
   assert.ok(/function gatewayLabel\(g\)/.test(popout) && /g\.qualityWord \+ \(g\.quality != null \? ' ' \+ g\.quality \+ '%' : ''\)/.test(popout), 'pop-out shows the word before the percent');
-  assert.ok(/note\.textContent = r\.note \|\| ''/.test(popout));
+  // #254: the mail window says the order on hover and as the group's label, not as a sentence.
+  assert.ok(/sel\.title = r\.note \|\| 'Gateways'/.test(popout) && /r\.predicted \? 'Best path now' : 'Nearest first'/.test(popout));
   const web = read('renderer/remote.js');
   assert.ok(/function mailGatewayLabel\(g\)/.test(web) && /mailGatewayNote = msg\.note \|\| ''/.test(web), 'web shows the same word and note');
   const html = read('renderer/index.html');

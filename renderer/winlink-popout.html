@@ -28,12 +28,89 @@
     .wl-btn.danger { border-color: #e94560; color: #e94560; }
     select, input[type=text], textarea { background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 4px; padding: 3px 5px; }
 
-    /* Connect bar */
-    .wl-connbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 10px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); flex-shrink: 0; font-size: 12px; }
-    .wl-connbar label { color: var(--text-dim); }
+    /* Top bar (#254): labelled fields in the order you use them, 14 px like
+       JTCAT's bottom bar, the radio's own dial large beside the gateway. */
+    .wl-connbar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: flex-start; padding: 8px 12px 10px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); flex-shrink: 0; font-size: 14px; }
+    .wl-connbar select, .wl-connbar .wl-btn { font-size: 14px; height: 32px; box-sizing: border-box; }
+    .wl-connbar .wl-btn { padding: 0 12px; }
+    .wl-connbar .wl-btn.primary { padding: 0 16px; font-weight: 700; background: var(--ok-subtle, transparent); }
+    .wl-field { display: flex; flex-direction: column; gap: 3px; }
+    .wl-field > label, .wl-label { font-size: 12px; color: var(--text-secondary); }
+    .wl-radio-pick { display: none; flex-wrap: wrap; gap: 8px 14px; align-items: flex-start; }
+    .wl-radio-pick.show { display: flex; }
+    .wl-gw-row { display: flex; gap: 4px; align-items: center; }
+    .wl-predict { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text-secondary); max-width: 300px; }
+    .wl-predict[hidden] { display: none; }
+    .wl-predict-bar { display: block; height: 4px; border-radius: 2px; background: var(--bg-tertiary, var(--bg-primary)); overflow: hidden; }
+    .wl-predict-bar > span { display: block; height: 100%; width: 0; background: var(--accent-blue, #4fc3f7); transition: width 0.9s linear; }
+    .wl-dial { padding-left: 14px; border-left: 1px solid var(--border-primary); }
+    .wl-dial-row { display: flex; align-items: baseline; gap: 8px; height: 32px; }
+    .wl-dial-num { font-family: Consolas, 'Courier New', monospace; font-size: 24px; font-weight: 700; color: var(--text-primary); letter-spacing: 0.5px; }
+    .wl-dial-unit { font-size: 13px; color: var(--text-secondary); }
+    .wl-dial-match { font-size: 13px; font-weight: 600; color: var(--accent-green, #4ecca3); white-space: nowrap; }
+    .wl-dial-match.off { color: var(--text-secondary); font-weight: 400; }
+    .wl-dial-row .wl-btn { height: 28px; font-size: 13px; align-self: center; }
+    .wl-connnotes { display: flex; flex-wrap: wrap; gap: 4px 12px; width: 100%; }
+    .wl-connnotes:empty { display: none; }
     .wl-mycall { font-family: monospace; font-weight: 700; color: var(--accent-green, #4ecca3); }
-    #wl-gateway { min-width: 260px; max-width: 420px; }
-    .wl-mode-note { color: #f0a500; font-size: 11px; }
+    #wl-gateway { width: 300px; min-width: 200px; max-width: 360px; }
+    /* Level with the fields' inputs (under their 12 px labels), so the
+       predicting line below the gateway list moves nothing. */
+    .wl-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; padding-top: 18px; }
+    .wl-mode-note { color: var(--text-secondary); font-size: 12px; }
+    .wl-mode-note:empty { display: none; }
+
+    /* My gateways (#254): one pill per saved gateway; a click sets mode, band,
+       gateway and dial together. */
+    .wl-favs { display: flex; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; padding: 5px 12px; border-bottom: 1px solid var(--border-primary); flex-shrink: 0; font-size: 14px; overflow-x: auto; }
+    .wl-favs[hidden] { display: none; }
+    .wl-favs-label { font-size: 13px; font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
+    .wl-favs-list { display: flex; gap: 8px; align-items: center; }
+    .wl-favs-empty { font-size: 13px; color: var(--text-secondary); }
+    .wl-fav { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 14px; border-radius: 16px; border: 1px solid var(--border-primary); background: var(--bg-primary); color: var(--text-primary); font-size: 14px; cursor: pointer; white-space: nowrap; }
+    .wl-fav:hover { background: var(--bg-hover); }
+    .wl-fav.active { border-color: var(--accent-green, #4ecca3); background: var(--ok-subtle, var(--bg-hover)); }
+    .wl-fav-call { font-family: Consolas, monospace; font-weight: 700; }
+    .wl-fav-dim { color: var(--text-secondary); }
+    .wl-fav-when { font-size: 12px; color: var(--text-secondary); }
+    .wl-fav-x { display: none; border: none; background: transparent; color: var(--text-secondary); font-size: 14px; cursor: pointer; padding: 0 0 0 4px; }
+    .wl-favs.editing .wl-fav-x { display: inline; }
+    .wl-star { width: 15px; height: 15px; flex-shrink: 0; fill: var(--accent-blue, #4fc3f7); }
+    .wl-star.empty { fill: none; stroke: var(--text-secondary); stroke-width: 1.6; }
+
+    /* A good session's card (#254): over the mail area, theme colours only. */
+    .wl-done-card { display: none; position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); width: 400px; max-width: calc(100% - 32px); box-sizing: border-box; flex-direction: column; gap: 8px; padding: 18px 20px 16px; border-radius: 10px; border: 1px solid var(--border-primary); background: var(--bg-secondary); color: var(--text-primary); box-shadow: 0 12px 32px rgba(0,0,0,0.35); z-index: 5; }
+    .wl-done-card.show { display: flex; }
+    .wl-done-title { font-size: 18px; font-weight: 700; color: var(--accent-green, #4ecca3); }
+    .wl-done-sub { font-size: 13px; color: var(--text-secondary); }
+    .wl-done-actions { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+    .wl-done-actions .wl-btn { height: 34px; font-size: 14px; padding: 0 14px; display: inline-flex; align-items: center; gap: 8px; }
+    .wl-done-actions .wl-btn.primary { font-weight: 700; background: var(--ok-subtle, transparent); }
+    .wl-done-actions .wl-btn.primary .wl-star { fill: currentColor; }
+    .wl-done-saved { font-size: 14px; font-weight: 600; color: var(--accent-green, #4ecca3); display: inline-flex; align-items: center; gap: 6px; }
+
+    /* Gateway history (#254): every gateway called, newest first. */
+    .wl-history { display: none; flex: 1; min-width: 0; flex-direction: column; font-size: 14px; }
+    .wl-history.show { display: flex; }
+    .wl-hist-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border-primary); }
+    .wl-hist-title { font-size: 16px; font-weight: 700; }
+    .wl-hist-sub { font-size: 12px; color: var(--text-secondary); }
+    .wl-pill { height: 28px; padding: 0 12px; border-radius: 14px; font-size: 13px; border: 1px solid var(--border-primary); background: transparent; color: var(--text-secondary); cursor: pointer; }
+    .wl-pill.on { border-color: var(--accent-blue, #4fc3f7); background: var(--bg-hover); color: var(--text-primary); }
+    .wl-hist-find { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+    .wl-hist-find input { width: 90px; height: 28px; box-sizing: border-box; font-family: Consolas, monospace; }
+    .wl-hist-body { flex: 1; overflow-y: auto; }
+    .wl-hist-row { display: grid; grid-template-columns: 34px 110px 150px 80px 140px 90px minmax(0, 1fr); gap: 0 10px; align-items: center; padding: 6px 14px; border-bottom: 1px solid var(--border-primary); }
+    .wl-hist-row.hdr { font-size: 12px; color: var(--text-secondary); position: sticky; top: 0; background: var(--bg-primary); }
+    .wl-hist-row.item { cursor: pointer; }
+    .wl-hist-row.item:hover { background: var(--bg-hover); }
+    .wl-hist-row .mono { font-family: Consolas, monospace; }
+    .wl-hist-row .call { font-family: Consolas, monospace; font-weight: 700; }
+    .wl-hist-row .good { color: var(--accent-green, #4ecca3); font-weight: 600; }
+    .wl-hist-row .dim { color: var(--text-secondary); }
+    .wl-hist-row .res { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-secondary); }
+    .wl-hist-star { width: 30px; height: 30px; border-radius: 5px; border: 1px solid var(--border-primary); background: transparent; display: flex; align-items: center; justify-content: center; padding: 0; cursor: pointer; }
+    .wl-hist-foot { padding: 10px 14px; font-size: 12px; color: var(--text-secondary); }
     .wl-sound { font-size: 11px; color: var(--text-dim); }
     .wl-sound a { color: var(--accent-blue, #4fc3f7); cursor: pointer; text-decoration: underline; }
     .wl-sound-card { display: none; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 10px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); font-size: 12px; }
@@ -77,19 +154,22 @@
     .wl-meter.live { color: var(--accent-green, #4ecca3); font-weight: 700; }
     .wl-meter.high { color: #e94560; font-weight: 700; }
     .hidden { display: none !important; }
+    [hidden] { display: none !important; } /* a styled button or flex row still hides (#254: the card showed Save and "In My gateways" together) */
     .wl-prompt { display: none; gap: 6px; align-items: center; padding: 6px 10px; background: #3a2f10; color: #f0c040; border-bottom: 1px solid var(--border-primary); font-size: 12px; }
     .wl-prompt.show { display: flex; }
     .light .wl-prompt { background: #fff4d6; color: #7a5600; }
 
     /* Body */
-    .wl-main { flex: 1; display: flex; min-height: 0; }
-    .wl-folders { width: 130px; flex-shrink: 0; border-right: 1px solid var(--border-primary); padding: 6px 0; display: flex; flex-direction: column; gap: 2px; background: var(--bg-secondary); }
+    .wl-main { flex: 1; display: flex; min-height: 0; position: relative; }
+    .wl-folders { width: 150px; flex-shrink: 0; border-right: 1px solid var(--border-primary); padding: 6px 0; display: flex; flex-direction: column; gap: 2px; background: var(--bg-secondary); }
     .wl-folder { padding: 5px 12px; cursor: pointer; display: flex; justify-content: space-between; }
     .wl-folder:hover { background: var(--bg-hover); }
     .wl-folder.active { background: var(--bg-hover); font-weight: 700; color: var(--accent-blue, #4fc3f7); }
     .wl-count { color: var(--text-dim); font-size: 11px; }
     .wl-count.unread { color: var(--accent-green, #4ecca3); font-weight: 700; }
-    .wl-folders .wl-btn { margin: 6px 10px 0; }
+    /* The buttons fit the column ("Position report" ran into the edge at 130 px). */
+    .wl-folders .wl-btn { box-sizing: border-box; width: calc(100% - 20px); margin: 6px 10px 0; padding: 4px 8px; white-space: normal; text-align: center; }
+    .wl-folders .wl-btn.on { border-color: var(--accent-blue, #4fc3f7); color: var(--accent-blue, #4fc3f7); background: var(--bg-hover); font-weight: 700; }
 
     .wl-list { width: 320px; flex-shrink: 0; border-right: 1px solid var(--border-primary); overflow-y: auto; }
     .wl-row { padding: 6px 10px; border-bottom: 1px solid var(--border-primary); cursor: pointer; }
@@ -137,23 +217,52 @@
   </div>
 
   <div class="wl-connbar">
-    <label for="wl-mode">Send via</label>
-    <select id="wl-mode"></select>
-    <span id="wl-radio-pick" style="display:none;align-items:center;gap:6px;">
-      <label for="wl-band">Band</label>
-      <select id="wl-band">
-        <option value="">All</option>
-        <option>2m</option><option>1.25m</option><option>70cm</option>
-        <option>80m</option><option>60m</option><option>40m</option><option>30m</option><option>20m</option><option>17m</option><option>15m</option><option>12m</option><option>10m</option>
-      </select>
-      <select id="wl-gateway" title="Gateways, best predicted path first (nearest first with no prediction)"><option value="">Load gateways…</option></select>
-      <button class="wl-btn" id="wl-gw-refresh" title="Fetch the gateway list">&#8635;</button>
-      <span class="wl-mode-note" id="wl-gw-note"></span>
+    <div class="wl-field">
+      <label for="wl-mode">Send via</label>
+      <select id="wl-mode"></select>
+    </div>
+    <span id="wl-radio-pick" class="wl-radio-pick">
+      <div class="wl-field">
+        <label for="wl-band">Band</label>
+        <select id="wl-band">
+          <option value="">All</option>
+          <option>2m</option><option>1.25m</option><option>70cm</option>
+          <option>80m</option><option>60m</option><option>40m</option><option>30m</option><option>20m</option><option>17m</option><option>15m</option><option>12m</option><option>10m</option>
+        </select>
+      </div>
+      <div class="wl-field">
+        <label for="wl-gateway">Gateway</label>
+        <div class="wl-gw-row">
+          <select id="wl-gateway" title="Gateways, best predicted path first (nearest first with no prediction)"><option value="">Load gateways…</option></select>
+          <button class="wl-btn" id="wl-gw-refresh" title="Fetch the gateway list again" aria-label="Fetch the gateway list again">&#8635;</button>
+        </div>
+        <div class="wl-predict" id="wl-predict" role="status" hidden>
+          <span id="wl-predict-text"></span>
+          <span class="wl-predict-bar"><span id="wl-predict-fill"></span></span>
+        </div>
+      </div>
+      <div class="wl-field wl-dial">
+        <span class="wl-label">Radio dial</span>
+        <div class="wl-dial-row">
+          <span class="wl-dial-num" id="wl-dial">&mdash;</span>
+          <span class="wl-dial-unit">kHz</span>
+          <span class="wl-dial-match" id="wl-dial-match"></span>
+          <button class="wl-btn" id="wl-retune" hidden>Retune</button>
+        </div>
+      </div>
     </span>
-    <button class="wl-btn primary" id="wl-connect">Send / Receive</button>
-    <button class="wl-btn danger" id="wl-abort" disabled>Abort</button>
-    <span class="wl-mode-note" id="wl-mode-note"></span>
-    <span class="wl-sound" id="wl-sound"></span>
+    <span class="wl-spacer"></span>
+    <span class="wl-actions">
+      <button class="wl-btn primary" id="wl-connect">Send / Receive</button>
+      <button class="wl-btn danger" id="wl-abort" disabled>Abort</button>
+    </span>
+    <div class="wl-connnotes"><span class="wl-mode-note" id="wl-gw-note"></span><span class="wl-mode-note" id="wl-mode-note"></span><span class="wl-sound" id="wl-sound"></span></div>
+  </div>
+  <div class="wl-favs" id="wl-favs" hidden>
+    <span class="wl-favs-label">My gateways</span>
+    <span class="wl-favs-list" id="wl-favs-list"></span>
+    <span class="wl-spacer"></span>
+    <button class="wl-btn" id="wl-favs-edit">Edit</button>
   </div>
   <!-- No Winlink password yet: set the account up right here. winlink.org has
        no web sign-up; an account is created by a client, which is this. -->
@@ -207,7 +316,21 @@
       <button class="wl-btn" id="wl-pos" title="Queue a position report from your grid square">Position report</button>
       <button class="wl-btn" id="wl-pota-spot" title="Spot yourself on POTA by email: your park, frequency and mode, one message per park">POTA spot</button>
       <span class="wl-spacer"></span>
+      <button class="wl-btn" id="wl-history-btn" title="Every gateway you have called">History</button>
       <button class="wl-btn" id="wl-settings">Settings</button>
+    </div>
+    <div class="wl-history" id="wl-history">
+      <div class="wl-hist-head">
+        <span class="wl-hist-title">Gateway history</span>
+        <span class="wl-hist-sub">every gateway you have called, newest first</span>
+        <span class="wl-spacer"></span>
+        <button class="wl-pill on" data-hf="all">All</button>
+        <button class="wl-pill" data-hf="ok">Connected</button>
+        <button class="wl-pill" data-hf="no">Never connected</button>
+        <label class="wl-hist-find">Find <input type="text" id="wl-hist-find" placeholder="call" spellcheck="false"></label>
+      </div>
+      <div class="wl-hist-body" id="wl-hist-body"></div>
+      <div class="wl-hist-foot">Click a row to set band, gateway and dial. The star saves it to My gateways.</div>
     </div>
     <div class="wl-list" id="wl-list"></div>
     <div class="wl-pane">
@@ -220,6 +343,15 @@
         <div class="wl-field"><button class="wl-btn" id="wl-c-attach">Attach…</button><span class="wl-c-files" id="wl-c-files"></span></div>
         <div class="wl-c-err" id="wl-c-err"></div>
         <div class="wl-field"><span class="wl-spacer"></span><button class="wl-btn" id="wl-c-cancel">Cancel</button><button class="wl-btn primary" id="wl-c-send">Put in Outbox</button></div>
+      </div>
+    </div>
+    <div class="wl-done-card" id="wl-done-card" role="status" aria-live="polite">
+      <span class="wl-done-title" id="wl-done-title"></span>
+      <span class="wl-done-sub" id="wl-done-sub"></span>
+      <div class="wl-done-actions">
+        <button class="wl-btn primary" id="wl-done-save"><svg class="wl-star" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8z"></path></svg>Save to My gateways</button>
+        <span class="wl-done-saved" id="wl-done-saved" hidden><svg class="wl-star" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8z"></path></svg>In My gateways</span>
+        <button class="wl-btn" id="wl-done-close">Not now</button>
       </div>
     </div>
   </div>
