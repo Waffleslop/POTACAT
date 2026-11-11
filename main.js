@@ -327,7 +327,7 @@ if (process.platform === 'linux' &&
     'See https://github.com/Waffleslop/POTACAT/issues/37');
 }
 const { execFile, execFileSync, spawn } = require('child_process');
-const { fetchSpots: fetchPotaSpots, parkStatesFromLocation } = require('./lib/pota');
+const { fetchSpots: fetchPotaSpots, fetchSpotHistory: fetchPotaSpotHistory, parkStatesFromLocation } = require('./lib/pota');
 const { fetchSpots: fetchSotaSpots, fetchSummitCoordsBatch, summitCache, loadAssociations, getAssociationName, SotaUploader, sotaChaseSummits } = require('./lib/sota');
 const sotaUploader = new SotaUploader();
 const { CatClient, RigctldClient, CivClient, listSerialPorts } = require('./lib/cat');
@@ -477,6 +477,10 @@ const { SstvEngine, sstvRxVisLogLine } = require('./lib/sstv-engine');
 const { decideSstvStop, sstvDecoderState } = require('./lib/sstv-decoder-state');
 const SstvFeedGate = require('./lib/sstv-feed-gate'); // pure ingress-gate decisions (table-tested)
 const HuntedPark = require('./lib/hunted-park'); // worked-call → live program-spot park refs (JTCAT logging)
+const NferRefs = require('./lib/nfer-refs'); // an n-fer's other parks from the activator's own spot comments
+// Fetched when JTCAT first matches an activator, read (never awaited) at log
+// time: the next TX message is set only after the log write.
+const _nferCache = new NferRefs.NferCache({ fetchHistory: (call, ref) => fetchPotaSpotHistory(call, ref) });
 const WorkedBefore = require('./lib/worked-before'); // JTCAT worked-before policy: rework window + activator exception
 const WorkedRoster = require('./lib/worked-roster'); // states + DXCC entities worked/confirmed by band and mode (WAS, map overlays)
 const StateBackfill = require('./lib/state-backfill'); // "Fill missing states from QRZ": which QSOs, what state, the answer naming those left (#389)
@@ -1858,11 +1862,11 @@ let clusterSpots = []; // streaming DX cluster spots (FIFO, max 500)
 // spotTime, band }.
 let _dxcSpotHistory = [];
 let _rbnSpotHistory = [];
-// POTA/WWFF have no usable public spot-history endpoint — pota.app's
-// /spot/comments/{ref}/{call} returns empty arrays even for activators with
-// dozens of spots in their current activation. We accumulate raw spots from
-// the standard /spot/activator polls instead, deduped by spotId so the same
-// spot appearing across successive polls only lands in the buffer once.
+// POTA/WWFF spots are accumulated from the standard /spot/activator polls,
+// deduped by spotId so the same spot appearing across successive polls only
+// lands in the buffer once. (pota.app's history is /spot/comments/{call}/{ref};
+// the {ref}/{call} order this note once blamed answers an empty list. The
+// n-fer lookup uses it, lib/nfer-refs.js.)
 let _potaSpotHistory = [];
 let _wwffSpotHistory = [];
 const _potaSpotIds = new Set();
@@ -16676,9 +16680,14 @@ function parseCqMessage(text) {
 /** The program refs a callsign is spotted at right now (null if none). ONE
  *  lookup, shared by hunt selection, worked-before and QSO logging. */
 function jtcatSpottedActivator(call) {
-  return HuntedPark.findHuntedRefs(lastMergedSpots, call, {
+  const hunted = HuntedPark.findHuntedRefs(lastMergedSpots, call, {
     freqKhz: (_currentFreqHz || 0) / 1000, myCall: settings.myCallsign,
   });
+  // An n-fer's other parks are only in the activator's spot comments: fetch
+  // their POTA history now, so the log write can read it without waiting.
+  const pota = hunted && hunted.refs.find((r) => r.sig === 'POTA');
+  if (pota) _nferCache.prefetch(call, pota.ref);
+  return hunted;
 }
 
 /** Hunt also answers a plain CQ from a spotted activator (default on). */
@@ -18331,6 +18340,20 @@ async function jtcatAutoLog(qso, opts) {
     // writes one record per ref, each with only its own program's field.
     qsoData.hunted = hunted.refs.map((r) => ({ sig: r.sig, ref: r.ref }));
     sendCatLog(`[JTCAT] Hunted park matched: ${q.call} @ ${hunted.refs.map((r) => `${r.sig} ${r.ref}`).join(', ')}`);
+    // An n-fer self-spotted at one park with the others in the comment.
+    const spotted = hunted.refs.find((r) => r.sig === 'POTA');
+    if (spotted) {
+      const extra = NferRefs.nferExtraRefs({
+        call: q.call, spottedRef: spotted.ref,
+        known: hunted.refs.filter((r) => r.sig === 'POTA').map((r) => r.ref),
+        cached: _nferCache.get(q.call, spotted.ref),
+        collected: _potaSpotHistory.filter((s) => NferRefs.baseCall(s.callsign) === NferRefs.baseCall(q.call)),
+      });
+      if (extra.length) {
+        for (const ref of extra) qsoData.hunted.push({ sig: 'POTA', ref });
+        sendCatLog(`[JTCAT] n-fer: ${q.call} also at ${extra.join(', ')} (from their own spot comments)`);
+      }
+    }
   }
   // Opt-in re-spot (#351): planned now, applied only on the direct write
   // below. Under review the Log QSO window's own re-spot box decides.

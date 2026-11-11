@@ -347,6 +347,7 @@ const TESTS = [
   'test/jtty-engine-test.js',
   'test/jtcat-skip-tx1-steps-test.js', // the QSO steps show the report Faster contacts really sends
   'test/jtcat-auto-respot-test.js', // opt-in re-spot of a hunted activator after a JTCAT contact
+  'test/nfer-refs-test.js', // an n-fer's other parks from the activator's own spot comments
   'test/jtty-remote-test.js',
   'test/jtty-txfreq-remote-test.js',
   'test/nocat-rig-test.js',
