@@ -223,7 +223,7 @@ test('#227: voice PTT from the VFO window and ECHOCAT opens the LAN stream befor
 test('#227: the refusal lets a key-down through only while the voice stream is open', () => {
   const r = bodyOf(main, 'function yaesuLanTxRefusal() {', '\n}');
   assert.ok(/const lan = yaesuLanTransport\(\);\n\s*if \(lan && \(lan\.voiceTxActive \|\| lan\.txAudioActive \|\| _yaesuLanBufferTxClaim\)\) return null;/.test(r), r);
-  assert.ok(/Tune and SSTV so far; Winlink and voice macros would send a silent carrier/.test(r));
+  assert.ok(/Tune, SSTV and voice macros so far; Winlink would send a silent carrier/.test(r));
   const route = bodyOf(main, 'function yaesuLanVoiceTx(state, who) {', '\n}');
   assert.ok(/if \(!t \|\| !t\.txReady\) \{[\s\S]*?return true;/.test(route), 'not ready: no stream, so the key-down is refused');
   assert.ok(/new mercuryAudioBridge\.StreamingResampler\(24000, Sculan10\.TX_AUDIO_RATE\)/.test(route), '24 kHz mic -> 16 kHz');
@@ -271,6 +271,19 @@ test('#227: SSTV sends its picture over the LAN: no session, no key-down; a voic
   assert.ok(/t\.sendTxAudio\(txAudio\.samples, \{ offsetMs: 0, inputSampleRate: SSTV_SAMPLE_RATE, startDelayMs: 100, tailSilenceMs: 200 \}\)/.test(enc));
   const voice = bodyOf(main, 'function yaesuLanVoiceTx(state, who) {', '\n}');
   assert.ok(/if \(t\.txAudioActive && !t\.voiceTxActive\) releaseYaesuLanTx\(`\$\{who\} takes over`\);/.test(voice));
+});
+
+
+test('#227: a voice macro goes over the LAN: the window decodes it at 16 kHz, main keys and sends it, any stop releases it', () => {
+  const app = read('renderer/app.js');
+  assert.ok(/if \(s\.audioSource === 'yaesu-lan' && s\.catTarget && s\.catTarget\.type === 'yaesu-lan' && window\.api\.voiceMacroLan\) \{\s*playVoiceAudioLan\(/.test(app));
+  assert.ok(/function playVoiceAudioLan\(bytes, idx, btn, label\) \{\s*voicePlaybackCtx = new AudioContext\(\{ sampleRate: 16000 \}\);/.test(app), 'the browser resamples, filtered');
+  const lan = bodyOf(main, "ipcMain.on('voice-macro-lan', (_e, payload) => {", '\n  });');
+  assert.ok(lan.indexOf('if (!yaesuLanBufferTxReady())') < lan.indexOf('_yaesuLanBufferTxClaim = true;'));
+  assert.ok(lan.indexOf('_yaesuLanBufferTxClaim = true;') < lan.indexOf('handleRemotePtt(true, { audio: true })'), 'claim before the key-down');
+  assert.ok(/releaseYaesuLanTx\('voice macro refused'\)/.test(lan) && /\.then\(stop\)/.test(lan));
+  assert.ok(/if \(!state && settings\.audioSource === 'yaesu-lan'\) releaseYaesuLanTx\('voice macro stop'\);/.test(main), 'the window\'s stop ends the stream');
+  assert.ok(/voiceMacroLan: \(payload\) => ipcRenderer\.send\('voice-macro-lan', payload\)/.test(read('preload.js')));
 });
 
 console.log(`\nSCU-LAN10 wiring: ${pass} passed, ${fail} failed`);

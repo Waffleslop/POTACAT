@@ -8946,7 +8946,7 @@ async function connectCat() {
         settings.audioSource = def;
       }
     }
-    sendCatLog(`Connecting to the Yaesu SCU-LAN10 (experimental) at ${_ylHp.host}, UDP ports ${_ylHp.port}-${_ylHp.port + 3}${modelName ? `, ${modelName}` : ''}${settings.audioSource === 'yaesu-lan' ? ', RX audio, voice, JTCAT, Tune and SSTV TX over the LAN (Winlink and voice macros not yet)' : ', audio from the sound card on this computer'}. POTACAT ${app.getVersion()}.`);
+    sendCatLog(`Connecting to the Yaesu SCU-LAN10 (experimental) at ${_ylHp.host}, UDP ports ${_ylHp.port}-${_ylHp.port + 3}${modelName ? `, ${modelName}` : ''}${settings.audioSource === 'yaesu-lan' ? ', RX audio, voice, voice macros, JTCAT, Tune and SSTV TX over the LAN (Winlink not yet)' : ', audio from the sound card on this computer'}. POTACAT ${app.getVersion()}.`);
     transport.connect({
       host: _ylHp.host,
       basePort: _ylHp.port,
@@ -29331,7 +29331,7 @@ function yaesuLanTxRefusal() {
   if (!t || t.type !== 'yaesu-lan' || settings.audioSource !== 'yaesu-lan') return null;
   const lan = yaesuLanTransport();
   if (lan && (lan.voiceTxActive || lan.txAudioActive || _yaesuLanBufferTxClaim)) return null;
-  return "over the Yaesu LAN (SCU-LAN10) POTACAT transmits voice from the VFO window's PTT or ECHOCAT, JTCAT (FT8/FT4), Tune and SSTV so far; Winlink and voice macros would send a silent carrier. For those, set Audio Source to the radio's USB sound card on this computer (CAT stays on the LAN).";
+  return "over the Yaesu LAN (SCU-LAN10) POTACAT transmits voice from the VFO window's PTT or ECHOCAT, JTCAT (FT8/FT4), Tune, SSTV and voice macros so far; Winlink would send a silent carrier. For those, set Audio Source to the radio's USB sound card on this computer (CAT stays on the LAN).";
 }
 
 /** Is POTACAT sending the audio for this key-down? opts.audio when the caller
@@ -52368,12 +52368,48 @@ function cloudShackNotice(text, kind) {
   // USB CODEC, so SSB-over-DATA's mode switch IS appropriate here when
   // the user has it enabled (never on a Yaesu: see handleRemotePtt).
   ipcMain.on('voice-macro-ptt', (_e, state) => {
+    // SCU-LAN10: the window's stop (button, end, refusal) also ends the LAN stream.
+    if (!state && settings.audioSource === 'yaesu-lan') releaseYaesuLanTx('voice macro stop');
     // The window starts the recording with this request: a refusal stops it.
     if (handleRemotePtt(!!state, { audio: true }) === false && win && !win.isDestroyed()) {
       sendCatLog('[Voice] macro stopped: transmit was refused');
       win.webContents.send('stop-voice-macro');
     }
   });
+  // SCU-LAN10 (#227): a voice macro, decoded by the window at 16 kHz, sent
+  // over the LAN. The radio stays in USB/LSB, as for live voice. The window
+  // hears 'stop-voice-macro' when it is out (or refused) and sends the
+  // voice-macro-ptt(false) that releases the radio and the stream.
+  ipcMain.on('voice-macro-lan', (_e, payload) => {
+    const stop = () => { if (win && !win.isDestroyed()) win.webContents.send('stop-voice-macro'); };
+    const samples = payload && payload.samples instanceof Float32Array ? payload.samples
+      : (payload && payload.samples ? new Float32Array(Object.values(payload.samples)) : null);
+    const rate = Number(payload && payload.sampleRate) || Sculan10.TX_AUDIO_RATE;
+    if (!samples || !samples.length) { stop(); return; }
+    if (!yaesuLanBufferTxReady()) {
+      sendCatLog('[Voice] macro not sent: the Yaesu LAN session is not up');
+      stop();
+      return;
+    }
+    if (yaesuLanTransport().txAudioActive) releaseYaesuLanTx('voice macro takes over');
+    _yaesuLanBufferTxClaim = true;
+    if (handleRemotePtt(true, { audio: true }) === false) {
+      releaseYaesuLanTx('voice macro refused');
+      sendCatLog('[Voice] macro stopped: transmit was refused');
+      stop();
+      return;
+    }
+    const txAudio = conditionDirectTxAudio(samples, 1, 1.0);
+    sendCatLog(`[Voice] macro "${(payload && payload.label) || ''}" over the Yaesu LAN: ${(samples.length / rate).toFixed(1)} s @ ${rate} Hz; ${formatDirectTxAudioStats(txAudio)}`);
+    yaesuLanTransport().sendTxAudio(txAudio.samples, { offsetMs: 0, inputSampleRate: rate, startDelayMs: 150, tailSilenceMs: 200 })
+      .then(stop)
+      .catch((e) => {
+        if (e && e.message === 'TX cancelled') return;
+        sendCatLog(`[Voice] macro over the Yaesu LAN failed: ${e.message}`);
+        stop();
+      });
+  });
+
   // Every surface's macro buttons show what is on the air.
   ipcMain.on('voice-macro-playing', (_e, info) => {
     if (remoteServer && remoteServer.broadcastVoiceMacroPlaying) {

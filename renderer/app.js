@@ -2415,7 +2415,7 @@ function getEffectiveSerialcatPort() {
 // the same trap that broke K3SBP's Flex TX (see syncRigAudioDeviceBypass).
 const AUDIO_SOURCE_HELP = {
   flex: 'Flex Direct streams receive and transmit audio straight to the radio (VITA-49) — no DAX program and no audio device setup. Pick Local audio device only if you deliberately run the DAX program.',
-  'yaesu-lan': "Yaesu LAN audio carries the radio's receive audio over the SCU-LAN10 for listening, JTCAT and SSTV, and voice from the VFO window's PTT or ECHOCAT back to the radio (SSB MOD SOURCE = AUTO or USB in the radio's menu). FT8/FT4, Winlink, SSTV and Tune cannot transmit with this source yet: POTACAT refuses them rather than send a silent carrier. For those, pick the local audio device (the radio's USB sound card on this computer).",
+  'yaesu-lan': "Yaesu LAN audio carries the radio's receive audio over the SCU-LAN10 for listening, JTCAT and SSTV, and transmit audio back to the radio: voice from the VFO window's PTT or ECHOCAT, voice macros, JTCAT (FT8/FT4), Tune and SSTV (SSB MOD SOURCE = AUTO or USB in the radio's menu). Winlink cannot transmit with this source yet: POTACAT refuses it rather than send a silent carrier. For Winlink, pick the local audio device (the radio's USB sound card on this computer).",
   'icom-network': "Icom Network audio uses the radio's RS-BA1 UDP stream for JTCAT/SSTV receive audio and sends JTCAT FT8/FT4 plus SSTV transmit audio directly over the network — no soundcard needed.",
 };
 function rebuildAudioSourceOptions() {
@@ -23858,6 +23858,13 @@ async function playVoiceAudio(base64, opts) {
   for (var j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
 
   var s = await window.api.getSettings();
+  // Yaesu SCU-LAN10 (#227): the radio's audio is the LAN, not a sound card.
+  // The recording is decoded here at 16 kHz (the browser's own resampler,
+  // filtered) and main sends it over the LAN and keys the radio.
+  if (s.audioSource === 'yaesu-lan' && s.catTarget && s.catTarget.type === 'yaesu-lan' && window.api.voiceMacroLan) {
+    playVoiceAudioLan(bytes, idx, btn, opts.label || '');
+    return;
+  }
   var outputDeviceId = s.remoteAudioOutput || '';
   voicePlaybackCtx = new AudioContext();
   if (voicePlaybackCtx.state === 'suspended') await voicePlaybackCtx.resume();
@@ -23901,6 +23908,36 @@ async function playVoiceAudio(base64, opts) {
     voicePlaybackSource.start(0);
     if (monitor) { try { monitor.start(0); } catch (e) {} }
     voicePlaybackSource.onended = function() { stopVoicePlayback(); };
+    if (window.api.voiceMacroPlaying) window.api.voiceMacroPlaying({ playing: true, label: voicePlayingLabel });
+  }, function(err) {
+    console.warn('[Voice] Could not decode the recording:', err && err.message);
+    stopVoicePlayback();
+  });
+}
+
+function playVoiceAudioLan(bytes, idx, btn, label) {
+  voicePlaybackCtx = new AudioContext({ sampleRate: 16000 });
+  voicePlaybackCtx.decodeAudioData(bytes.buffer, function(audioBuffer) {
+    var n = audioBuffer.length, chs = audioBuffer.numberOfChannels;
+    var mono = new Float32Array(n);
+    for (var c = 0; c < chs; c++) {
+      var d = audioBuffer.getChannelData(c);
+      for (var i = 0; i < n; i++) mono[i] += d[i] / chs;
+    }
+    voicePlayingIdx = idx;
+    voicePlayingLabel = label;
+    if (btn) btn.classList.add('active');
+    // Monitor copy on this computer's default output, as on the sound-card path.
+    if (voiceMacroMonitor) {
+      try {
+        voiceMonitorSource = voicePlaybackCtx.createBufferSource();
+        voiceMonitorSource.buffer = audioBuffer;
+        voiceMonitorSource.connect(voicePlaybackCtx.destination);
+        voiceMonitorSource.start(0);
+      } catch (e) { voiceMonitorSource = null; }
+    }
+    // main keys the radio and sends 'stop-voice-macro' when the recording is out.
+    window.api.voiceMacroLan({ samples: mono, sampleRate: audioBuffer.sampleRate, label: label });
     if (window.api.voiceMacroPlaying) window.api.voiceMacroPlaying({ playing: true, label: voicePlayingLabel });
   }, function(err) {
     console.warn('[Voice] Could not decode the recording:', err && err.message);
