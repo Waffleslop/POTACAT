@@ -223,7 +223,7 @@ test('#227: voice PTT from the VFO window and ECHOCAT opens the LAN stream befor
 test('#227: the refusal lets a key-down through only while the voice stream is open', () => {
   const r = bodyOf(main, 'function yaesuLanTxRefusal() {', '\n}');
   assert.ok(/const lan = yaesuLanTransport\(\);\n\s*if \(lan && \(lan\.voiceTxActive \|\| lan\.txAudioActive \|\| _yaesuLanBufferTxClaim\)\) return null;/.test(r), r);
-  assert.ok(/Winlink, SSTV and voice macros would send a silent carrier/.test(r));
+  assert.ok(/Tune and SSTV so far; Winlink and voice macros would send a silent carrier/.test(r));
   const route = bodyOf(main, 'function yaesuLanVoiceTx(state, who) {', '\n}');
   assert.ok(/if \(!t \|\| !t\.txReady\) \{[\s\S]*?return true;/.test(route), 'not ready: no stream, so the key-down is refused');
   assert.ok(/new mercuryAudioBridge\.StreamingResampler\(24000, Sculan10\.TX_AUDIO_RATE\)/.test(route), '24 kHz mic -> 16 kHz');
@@ -259,6 +259,18 @@ test('#227: Tune plays its tone over the LAN, and is refused with no LAN session
   assert.ok(tune.indexOf('Tune blocked: the LAN session is not up') < tune.indexOf('handleRemotePtt(true'), 'blocked before any key-down');
   assert.ok(/if \(directYaesuReady\) _yaesuLanBufferTxClaim = true;/.test(tune));
   assert.ok(/\} else if \(jtcatTuneState\.directYaesu\) \{[\s\S]*?yaesuLanTransport\(\)\.sendTxAudio\(/.test(tune));
+});
+
+
+test('#227: SSTV sends its picture over the LAN: no session, no key-down; a voice PTT takes over a buffer left draining', () => {
+  const enc = bodyOf(main, "sstvEngine.on('encode-complete', (data) => {", "sstvEngine.on('rx-vis'");
+  assert.ok(/const useYaesuLanTx = settings\.audioSource === 'yaesu-lan' && yaesuLanBufferTxReady\(\);/.test(enc));
+  assert.ok(enc.indexOf('Yaesu LAN TX blocked before PTT') < enc.indexOf('if (useYaesuLanTx) _yaesuLanBufferTxClaim = true;'));
+  assert.ok(enc.indexOf('if (useYaesuLanTx) _yaesuLanBufferTxClaim = true;') < enc.indexOf('handleRemotePtt(true,'));
+  assert.ok(/if \(useYaesuLanTx\) releaseYaesuLanTx\('SSTV refused'\);/.test(enc) && /if \(useYaesuLanTx\) releaseYaesuLanTx\('SSTV not keyed'\);/.test(enc));
+  assert.ok(/t\.sendTxAudio\(txAudio\.samples, \{ offsetMs: 0, inputSampleRate: SSTV_SAMPLE_RATE, startDelayMs: 100, tailSilenceMs: 200 \}\)/.test(enc));
+  const voice = bodyOf(main, 'function yaesuLanVoiceTx(state, who) {', '\n}');
+  assert.ok(/if \(t\.txAudioActive && !t\.voiceTxActive\) releaseYaesuLanTx\(`\$\{who\} takes over`\);/.test(voice));
 });
 
 console.log(`\nSCU-LAN10 wiring: ${pass} passed, ${fail} failed`);

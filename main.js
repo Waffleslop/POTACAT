@@ -8946,7 +8946,7 @@ async function connectCat() {
         settings.audioSource = def;
       }
     }
-    sendCatLog(`Connecting to the Yaesu SCU-LAN10 (experimental) at ${_ylHp.host}, UDP ports ${_ylHp.port}-${_ylHp.port + 3}${modelName ? `, ${modelName}` : ''}${settings.audioSource === 'yaesu-lan' ? ', RX audio, voice, JTCAT and Tune TX over the LAN (Winlink, SSTV and voice macros not yet)' : ', audio from the sound card on this computer'}. POTACAT ${app.getVersion()}.`);
+    sendCatLog(`Connecting to the Yaesu SCU-LAN10 (experimental) at ${_ylHp.host}, UDP ports ${_ylHp.port}-${_ylHp.port + 3}${modelName ? `, ${modelName}` : ''}${settings.audioSource === 'yaesu-lan' ? ', RX audio, voice, JTCAT, Tune and SSTV TX over the LAN (Winlink and voice macros not yet)' : ', audio from the sound card on this computer'}. POTACAT ${app.getVersion()}.`);
     transport.connect({
       host: _ylHp.host,
       basePort: _ylHp.port,
@@ -22722,6 +22722,9 @@ function yaesuLanVoiceTx(state, who) {
       sendCatLog(`[SCU-LAN10] ${who}: the LAN is not connected, no transmit audio`);
       return true;
     }
+    // A buffer still on the wire after its PTT was released (an SSTV picture
+    // stopped early) must not ride on this key-down: the voice takes over.
+    if (t.txAudioActive && !t.voiceTxActive) releaseYaesuLanTx(`${who} takes over`);
     if (!t.voiceTxActive) {
       try {
         _yaesuLanTxChunkCount = 0;
@@ -29328,7 +29331,7 @@ function yaesuLanTxRefusal() {
   if (!t || t.type !== 'yaesu-lan' || settings.audioSource !== 'yaesu-lan') return null;
   const lan = yaesuLanTransport();
   if (lan && (lan.voiceTxActive || lan.txAudioActive || _yaesuLanBufferTxClaim)) return null;
-  return "over the Yaesu LAN (SCU-LAN10) POTACAT transmits voice from the VFO window's PTT or ECHOCAT, JTCAT (FT8/FT4) and Tune so far; Winlink, SSTV and voice macros would send a silent carrier. For those, set Audio Source to the radio's USB sound card on this computer (CAT stays on the LAN).";
+  return "over the Yaesu LAN (SCU-LAN10) POTACAT transmits voice from the VFO window's PTT or ECHOCAT, JTCAT (FT8/FT4), Tune and SSTV so far; Winlink and voice macros would send a silent carrier. For those, set Audio Source to the radio's USB sound card on this computer (CAT stays on the LAN).";
 }
 
 /** Is POTACAT sending the audio for this key-down? opts.audio when the caller
@@ -43553,6 +43556,15 @@ function cloudShackNotice(text, kind) {
         }
         return;
       }
+      // SCU-LAN10 (#227): the picture goes over the LAN; with no LAN session
+      // it has no way to the radio, so nothing is keyed.
+      const useYaesuLanTx = settings.audioSource === 'yaesu-lan' && yaesuLanBufferTxReady();
+      if (settings.audioSource === 'yaesu-lan' && settings.catTarget && settings.catTarget.type === 'yaesu-lan' && !useYaesuLanTx) {
+        sendCatLog('[SSTV] Yaesu LAN TX blocked before PTT: the LAN session is not up, so the picture has no way to the radio.');
+        if (remoteServer) remoteServer.broadcastSstvTxStatus({ state: autoSstvActive ? 'auto-rx' : 'rx' });
+        return;
+      }
+      if (useYaesuLanTx) _yaesuLanBufferTxClaim = true;
       // Key PTT. The SSTV audio goes through the rig's USB audio, so say so:
       // SSB-over-DATA applies (it never did — this call carried no `audio`),
       // and an Icom always transmits it in USB-D/LSB-D, because in plain USB
@@ -43560,6 +43572,7 @@ function cloudShackNotice(text, kind) {
       // keys with no audio (WB8IMY IC-7300, 2026-09-26). Receive stays in USB.
       const _sstvIcom = detectRigType() === 'icom' || (getActiveRigModel()?.brand === 'Icom');
       if (handleRemotePtt(true, { audio: true, forceDataMode: _sstvIcom, emission: 'SSTV', txKind: 'sstv' }) === false) {
+        if (useYaesuLanTx) releaseYaesuLanTx('SSTV refused');
         sendCatLog('[SSTV] picture not sent: transmit was refused');
         if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
           sstvPopoutWin.webContents.send('sstv-abort-tx');
@@ -43617,6 +43630,7 @@ function cloudShackNotice(text, kind) {
       const _sstvKeyCalledAt = Date.now();
       const _sstvStartAudio = (fn) => pttKeyGate().then((keyed) => {
         if (!keyed) {
+          if (useYaesuLanTx) releaseYaesuLanTx('SSTV not keyed');
           sendCatLog('[SSTV] PTT was released before the radio keyed — picture not sent');
           if (remoteServer) remoteServer.broadcastSstvTxStatus({ state: autoSstvActive ? 'auto-rx' : 'rx' });
           return;
@@ -43709,6 +43723,33 @@ function cloudShackNotice(text, kind) {
                   state: autoSstvActive ? 'auto-rx' : 'rx',
                 });
               }
+            });
+        } else if (useYaesuLanTx) {
+          // SCU-LAN10 (#227): 48 kHz picture audio, resampled to 16 kHz by
+          // the transport (SSTV tones are at most 2300 Hz). Gain only, no
+          // clipping: the tones carry the picture in their exact frequencies.
+          const txAudio = conditionDirectTxAudio(outSamples, clampNumber(settings.sstvTxGain, 0, 1, 0.5), 1.0);
+          sendCatLog(`[SSTV] TX via Yaesu LAN (SCU-LAN10) — ${outDurSec.toFixed(0)}s (${outSamples.length} samples @48k); ${formatDirectTxAudioStats(txAudio)}`);
+          const done = (why) => {
+            releaseYaesuLanTx(why);
+            handleRemotePtt(false);
+            if (remoteServer) remoteServer.broadcastSstvTxStatus({ state: autoSstvActive ? 'auto-rx' : 'rx' });
+          };
+          if (txAudio.outputPeak < 0.01) {
+            sendCatLog(`[SSTV] TX aborted: conditioned audio peak ${txAudio.outputPeak.toFixed(4)} is too low (encoder produced silent waveform?)`);
+            done('SSTV silent waveform');
+            return;
+          }
+          if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+            sstvPopoutWin.webContents.send('sstv-tx-audio', { samples: [], durationSec: outDurSec, daxTx: true, directTxLabel: 'Yaesu LAN' });
+          }
+          const t = yaesuLanTransport();
+          t.sendTxAudio(txAudio.samples, { offsetMs: 0, inputSampleRate: SSTV_SAMPLE_RATE, startDelayMs: 100, tailSilenceMs: 200 })
+            .then(() => { sendCatLog('[SSTV] TX complete (Yaesu LAN)'); done('SSTV done'); })
+            .catch((err) => {
+              if (err && err.message === 'TX cancelled') return;
+              sendCatLog(`[SSTV] Yaesu LAN TX failed: ${err.message}`);
+              done('SSTV failed');
             });
         } else if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
           sstvPopoutWin.webContents.send('sstv-tx-audio', {
