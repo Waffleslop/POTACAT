@@ -110,7 +110,9 @@ check('Directory > Channels: a star per row and a Favorites view', () => {
 check('VFO window: a Favorites section that tunes, moves and hides like the others', () => {
   const vfo = src('renderer/vfo-popout.html');
   assert.ok(/id="sec-favorites"/.test(vfo) && /id="fav-grid"/.test(vfo) && /id="s-favorites"/.test(vfo));
-  assert.ok(/\{ key: 'favorites', el: 'sec-favorites', name: 'Favorites' \}/.test(vfo), 'in the Order list');
+  // The Large VFO's blocks: names and order in lib/vfo-layout.js, elements in the page.
+  assert.ok(/\{ key: 'favorites',\s+name: 'Favorites' \}/.test(src('lib/vfo-layout.js')), 'in the Large VFO layout list');
+  assert.ok(/favorites: 'sec-favorites'/.test(vfo) && /favorites: 's-favorites'/.test(vfo), 'its block and its switch');
   assert.ok(/const SECTIONS = \[[^\]]*'favorites'/.test(vfo));
   assert.ok(/b\.addEventListener\('click', \(\) => window\.api\.tune\(String\(f\.khz\), f\.mode \|\| undefined\)\)/.test(vfo));
   assert.ok(/#sec-favorites\.empty \{ display: none; \}/.test(vfo), 'hidden until something is starred');
