@@ -222,6 +222,7 @@ const TESTS = [
   'test/diagnostic-snapshot-test.js',
   'test/mercury-process-test.js',
   'test/winlink-pat-test.js',
+  'test/winlink-reach-test.js',      // a radio session goes only where this radio can transmit
   'test/winlink-units-test.js',
   'test/winlink-spectrum-test.js',
   'test/winlink-main-wiring-test.js',
