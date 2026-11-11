@@ -325,6 +325,7 @@ const TESTS = [
   'test/jtty-codec-test.js',
   'test/jtty-decoder-test.js',
   'test/jtty-engine-test.js',
+  'test/jtcat-latency-store-test.js', // the auto latency is learned per audio source (a sound card's never seeds the SCU-LAN10)
   'test/jtty-remote-test.js',
   'test/jtty-txfreq-remote-test.js',
   'test/nocat-rig-test.js',

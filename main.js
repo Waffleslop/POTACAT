@@ -354,6 +354,7 @@ const { FlrigTransport, probeFlrig } = require('./lib/flrig-transport');
 const { CivCodec } = require('./lib/codecs/civ-codec');
 const IcomScope = require('./lib/icom-scope');
 const Sculan10Scope = require('./lib/sculan10-scope');
+const JtcatLatencyStore = require('./lib/jtcat-latency-store');
 const { CommanderCodec, commanderModel, probeCommander } = require('./lib/codecs/commander-codec');
 const CommanderSequences = require('./lib/commander-sequences');
 const { getTuneQuirks, resolveSerialHandshake, holdSerialLinesLow } = require('./lib/rig-models');
@@ -18372,9 +18373,11 @@ function startJtcat(mode) {
         // instead of re-converging from zero. This is what the persist
         // handler below always intended ("apply it immediately") but the
         // apply only ever ran for manual pins. K3SBP 2026-06-14.
-        if (typeof ft8Engine.seedAudioLatencyMs === 'function' &&
-            typeof settings.jtcatAudioLatencyMs === 'number') {
-          ft8Engine.seedAudioLatencyMs(settings.jtcatAudioLatencyMs);
+        // Per audio source (lib/jtcat-latency-store.js): a sound card's lag
+        // seeding the SCU-LAN10 decoded nothing, and never recovered.
+        if (typeof ft8Engine.seedAudioLatencyMs === 'function') {
+          const seedMs = JtcatLatencyStore.seedFor(settings);
+          if (seedMs != null) ft8Engine.seedAudioLatencyMs(seedMs);
         }
       }
     }
@@ -18435,8 +18438,7 @@ function startJtcat(mode) {
   if (ft8Engine && typeof ft8Engine.on === 'function') {
     ft8Engine.removeAllListeners('audio-latency-changed');
     ft8Engine.on('audio-latency-changed', ({ ms, auto }) => {
-      if (auto && settings.jtcatAudioLatencyMs !== ms) {
-        settings.jtcatAudioLatencyMs = ms;
+      if (auto && JtcatLatencyStore.remember(settings, ms)) {
         // Don't flip the manual flag — auto stays on across runs.
         saveSettings(settings);
         if (win && !win.isDestroyed()) {
