@@ -325,6 +325,7 @@ const TESTS = [
   'test/jtty-codec-test.js',
   'test/jtty-decoder-test.js',
   'test/jtty-engine-test.js',
+  'test/jtcat-skip-tx1-steps-test.js', // the QSO steps show the report Faster contacts really sends
   'test/jtty-remote-test.js',
   'test/jtty-txfreq-remote-test.js',
   'test/nocat-rig-test.js',

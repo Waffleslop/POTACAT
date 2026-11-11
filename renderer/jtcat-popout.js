@@ -888,13 +888,24 @@ function _applyPopoutTheme(payload) {
     { key: 'done',      dir: '--', label: function()  { return 'QSO Complete'; } },
   ];
   var QSO_PHASES_REPLY = [
-    { key: 'reply',     dir: 'tx', label: function(q) { return q.call + ' ' + q.myCall + ' ' + q.myGrid; } },
+    { key: 'reply',     dir: 'tx', label: replyStepLabel },
     { key: 'rpt-rx',    dir: 'rx', label: function(q) { return q.myCall + ' ' + q.call + ' ' + (q.report || '-XX'); } },
     { key: 'r+report',  dir: 'tx', label: function(q) { return q.call + ' ' + q.myCall + ' R' + (q.sentReport || '-XX'); } },
     { key: 'rr73-rx',   dir: 'rx', label: function(q) { return q.myCall + ' ' + q.call + ' RR73'; } },
     { key: '73',        dir: 'tx', label: function(q) { return q.call + ' ' + q.myCall + ' 73'; } },
     { key: 'done',      dir: '--', label: function()  { return 'QSO Complete'; } },
   ];
+
+  // The first answer as it really goes out: with Faster contacts (skip Tx1)
+  // it is a report, not the grid, and a Field Day reply carries the exchange.
+  // Showing the grid there looked like the option was ignored (DA2PK
+  // 2026-11-11). While it is being sent, main's txMsg says it exactly;
+  // afterwards the report we sent stands for it.
+  function replyStepLabel(q) {
+    if (q.phase === 'reply' && q.txMsg) return q.txMsg;
+    if (skipTx1 && q.sentReport) return q.call + ' ' + q.myCall + ' ' + q.sentReport;
+    return q.call + ' ' + q.myCall + ' ' + q.myGrid;
+  }
 
   function renderQsoTracker() {
     reflectCqButton();
