@@ -46,6 +46,7 @@ const TESTS = [
   'test/rig-family-test.js',
   'test/rigctld-attribution-test.js',
   'test/flrig-codec-test.js',
+  'test/cw-text-unsupported-link-test.js',
   'test/dxcluster-login-test.js',
   'test/dxcluster-backoff-test.js',
   'test/audio-backpressure-test.js',
