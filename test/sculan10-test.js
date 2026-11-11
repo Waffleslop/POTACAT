@@ -108,9 +108,10 @@ test('CAT framing: sid + cmd_seq out, resp_seq + text back; a codec write splits
   assert.deepStrictEqual(P.splitCatCommands('FA014074000;'), ['FA014074000;']);
 });
 
-function audioBody(seq, left, right = 0) {
+function audioBody(seq, left, right = 0, resend = 0) {
   const b = Buffer.alloc(24 + 640);
   b[0] = seq; b[1] = 0x00; b[2] = 0x01; b[3] = 0x02;
+  b[8] = resend;
   b.writeUInt32LE(16000, 4);
   b.writeUInt16LE(2000, 16); b.writeUInt16LE(1000, 18); b.writeUInt16LE(0x6464, 20); b.writeUInt16LE(640, 22);
   for (let i = 0; i < 160; i++) { b.writeInt16LE(left, 24 + i * 4); b.writeInt16LE(right, 26 + i * 4); }
@@ -281,7 +282,7 @@ async function fakeUnit({ user = 'defaultuser', pass = 'defaultuser', sid = 0x22
     if (dropFirst) seq.scope = (seq.scope + 1) & 0xFF;
     reply('scope', scope, u.scopePeer, P.CHANNEL.SCOPE, P.MSG.DATA_IN, body);
   };
-  u.sendAudio = (frameSeq, left) => { if (u.audioPeer) reply('audio', audio, u.audioPeer, P.CHANNEL.AUDIO, P.MSG.DATA_IN, audioBody(frameSeq, left)); };
+  u.sendAudio = (frameSeq, left, resend = 0) => { if (u.audioPeer) reply('audio', audio, u.audioPeer, P.CHANNEL.AUDIO, P.MSG.DATA_IN, audioBody(frameSeq, left, 0, resend)); };
   u.sendCat = (text, respSeq) => {
     // unsolicited: to the CAT peer the client last used
     const last = u._catPeer; if (!last) return;
@@ -888,6 +889,25 @@ test('speaker monitor off (the default): no ML is ever sent', async () => {
     c.t.write('MD0;'); await sleep(200);
     c.t.disconnect(); await sleep(100);
     assert.ok(!u.catSeen.some((x) => /^ML/.test(x.text)));
+  } finally { c.t.disconnect(); u.close(); }
+});
+
+test('RX audio in resend mode (each frame twice, same seq) reaches JTCAT once; resend 0 frames are never dropped', async () => {
+  const u = await fakeUnit();
+  const c = client();
+  try {
+    c.t.connect({ host: '127.0.0.1', basePort: u.base, ...FAST });
+    assert.ok(await until(() => c.connects === 1));
+    assert.ok(await until(() => u.audioPeer));
+    // After the client's first TX the FT-710's unit switched its RX stream
+    // to resend mode: 200 frames/s, and JTCAT decoded nothing (2026-11-11).
+    for (let seq = 1; seq <= 5; seq++) { u.sendAudio(seq, 1000, 1); u.sendAudio(seq, 1000, 1); }
+    assert.ok(await until(() => c.frames.length >= 5));
+    await sleep(100);
+    assert.strictEqual(c.frames.length, 5, 'each resend-mode frame once');
+    // A resend-0 stream that happens to repeat a seq is not touched.
+    u.sendAudio(9, 500, 0); u.sendAudio(9, 500, 0);
+    assert.ok(await until(() => c.frames.length >= 7));
   } finally { c.t.disconnect(); u.close(); }
 });
 
