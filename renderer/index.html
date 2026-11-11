@@ -508,7 +508,15 @@
   </div>
 
   <div id="event-banner" class="hidden">
-    <span id="event-badge" class="event-badge-inline">250</span>
+    <button type="button" id="event-badge" class="event-badge-inline" title="This event: banner and tracking settings" aria-haspopup="dialog" aria-expanded="false">250</button>
+    <div id="event-banner-menu" class="event-banner-menu hidden" role="dialog" aria-label="Event settings">
+      <div class="ebm-title" id="ebm-title"></div>
+      <label class="ebm-row"><input type="checkbox" id="ebm-show"> Show this banner</label>
+      <label class="ebm-row"><input type="checkbox" id="ebm-track"> Track my progress</label>
+      <label class="ebm-row" id="ebm-watch-row"><input type="checkbox" id="ebm-watch"> Stations on my watchlist</label>
+      <div class="ebm-note">With the banner off, switch it back on in the Spots menu, under Events &amp; Awards.</div>
+      <button type="button" class="ebm-link" id="ebm-board">Open the board</button>
+    </div>
     <span id="event-message"></span>
     <span id="event-progress-count"></span>
     <button id="event-optin-btn" class="event-action-btn hidden">Track It</button>

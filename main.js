@@ -35118,6 +35118,7 @@ function pushEventsToRenderer() {
     dismissed: !!(eventStates[ev.id] && eventStates[ev.id].dismissed),
     watchlistOn: !!(eventStates[ev.id] && eventStates[ev.id].watchlistOn),
     snoozeUntil: (eventStates[ev.id] && eventStates[ev.id].snoozeUntil) || 0,
+    bannerHidden: !!(eventStates[ev.id] && eventStates[ev.id].bannerHidden),
     progress: mergedEventProgress(eventStates[ev.id]),
   }));
   win.webContents.send('active-events', payload);
@@ -35262,6 +35263,21 @@ function setEventOptIn(eventId, optedIn, dismissed) {
   if (!settings.events[eventId]) settings.events[eventId] = { optedIn: false, dismissed: false, progress: {} };
   if (optedIn !== undefined) settings.events[eventId].optedIn = optedIn;
   if (dismissed !== undefined) settings.events[eventId].dismissed = dismissed;
+  saveSettings(settings);
+  pushEventsToRenderer();
+}
+
+// The banner at the top of the main window, per event. A year-long event
+// (America250 WAS) came back every week after the x, because the x only
+// snoozes to the next cohort's start; "Show this banner" off keeps it gone
+// for good, tracked or not, until the operator switches it back on
+// (Casey 2026-11-10: "a user wants to stop seeing the WAS 250 banner").
+function setEventBanner(eventId, shown) {
+  if (!eventId) return;
+  if (!settings.events) settings.events = {};
+  if (!settings.events[eventId]) settings.events[eventId] = { optedIn: false, dismissed: false, progress: {} };
+  if (shown) delete settings.events[eventId].bannerHidden;
+  else settings.events[eventId].bannerHidden = true;
   saveSettings(settings);
   pushEventsToRenderer();
 }
@@ -46810,6 +46826,7 @@ function cloudShackNotice(text, kind) {
       dismissed: !!(eventStates[ev.id] && eventStates[ev.id].dismissed),
       watchlistOn: !!(eventStates[ev.id] && eventStates[ev.id].watchlistOn),
       snoozeUntil: (eventStates[ev.id] && eventStates[ev.id].snoozeUntil) || 0,
+      bannerHidden: !!(eventStates[ev.id] && eventStates[ev.id].bannerHidden),
       progress: mergedEventProgress(eventStates[ev.id]),
     }));
   });
@@ -46828,6 +46845,11 @@ function cloudShackNotice(text, kind) {
 
   ipcMain.handle('set-event-snooze', (_e, { eventId, snoozeUntil }) => {
     setEventSnooze(eventId, snoozeUntil);
+    return true;
+  });
+
+  ipcMain.handle('set-event-banner', (_e, { eventId, shown } = {}) => {
+    setEventBanner(String(eventId || ''), !!shown);
     return true;
   });
 
