@@ -52,11 +52,16 @@ const PAIRS = [
 console.log('design tokens');
 
 test('assets/design/tokens.json is the phone\'s token file, unchanged', () => {
-  const phone = path.join(root, '..', 'potacat-app', 'docs', 'design-system', 'tokens.json');
-  if (!fs.existsSync(phone)) return 'skip';
-  const h = (p) => crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+  // The phone repo is echocat/ beside desktop/ (potacat-app/ before the folder
+  // move); a worktree sits one level deeper, under worktrees/.
+  const rel = ['docs', 'design-system', 'tokens.json'];
+  const phone = [['..', 'echocat'], ['..', 'potacat-app'], ['..', '..', 'echocat'], ['..', '..', 'potacat-app']]
+    .map((p) => path.join(root, ...p, ...rel)).find((p) => fs.existsSync(p));
+  if (!phone) return 'skip';
+  // Content, not line endings: the Windows main checkout is CRLF.
+  const h = (p) => crypto.createHash('sha256').update(fs.readFileSync(p, 'utf8').replace(/\r\n/g, '\n')).digest('hex');
   assert.strictEqual(h(gen.SRC), h(phone),
-    'the two token files differ: copy potacat-app/docs/design-system/tokens.json to assets/design/tokens.json and run node scripts/gen-design-tokens-css.js');
+    'the two token files differ: copy echocat/docs/design-system/tokens.json to assets/design/tokens.json and run node scripts/gen-design-tokens-css.js');
 });
 
 test('renderer/tokens.css is current (regenerate with node scripts/gen-design-tokens-css.js)', () => {
