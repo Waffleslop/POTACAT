@@ -1952,6 +1952,7 @@ let _winlinkTxCutMs = 0;             // transmit audio the sound card would not 
 let _winlinkPatLastLine = '';        // Pat's own last word on a failure ("Exchange failed: ...")
 let _winlinkPatReply = '';           // Pat's raw /api/connect reply: for the log, never for the status
 let _winlinkReceived = null;         // messages Pat took into the Inbox, when a session did not finish
+let _patArqTimeoutAskedS = 0;        // #425: the ARDOP link timeout the running Pat was started with (seconds)
 let _winlinkLinkStory = null;        // WinlinkDiag.ArdopLinkStory: the modem's last state and which side ended the link
 let _winlinkAudioSummary = '';       // the session's audio sentence, repeated in its summary line
 const _winlinkSummaries = [];        // the last sessions' summary lines, for Report a Bug
@@ -11128,7 +11129,11 @@ function spawnPat() {
     let tail = '';
     winlinkLog('spawn: ' + [bin.path, ...args].map((a) => /\s/.test(a) ? `"${a}"` : a).join(' '));
     let proc;
-    try { proc = spawn(bin.path, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }); }
+    // #425: the ARDOP link timeout reaches POTACAT's build of Pat through its environment.
+    const patEnv = WinlinkPat.patSpawnEnv(process.env, { arqTimeoutS: settings.winlinkArdopArqTimeout });
+    _patArqTimeoutAskedS = Number(patEnv[WinlinkPat.ARDOP_ARQ_TIMEOUT.env]);
+    winlinkLog(`ARDOP link timeout asked of Pat: ${_patArqTimeoutAskedS} s`);
+    try { proc = spawn(bin.path, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: patEnv }); }
     catch (e) { return reject(e); }
     patProc = proc;
     const relay = (chunk) => {
@@ -12929,6 +12934,9 @@ function winlinkOutcomeFacts(state, s, raw, received, outbox) {
     sent: s.sent, received: state === 'done' ? received : _winlinkReceived,
     queued: _winlinkQueuedAtStart, outbox,
     modemEnd: story && story.end, modemAudioClosed: _winlinkModemAudioClosed, txCutMs: _winlinkTxCutMs,
+    // #425: the link timeout in force is what the modem's log showed it being given; failing that, what Pat was asked for.
+    arqTimeoutSetS: (story && story.arqTimeoutS) || 0, arqTimeoutAskedS: _patArqTimeoutAskedS,
+    arqTimeoutS: (story && story.arqTimeoutS) || _patArqTimeoutAskedS || 0,
     capMin: s.capSec ? Math.round(s.capSec / 60) : 0,
     autoRetry: !!s.autoRetry, origin: s.origin || '',
   };
@@ -48903,7 +48911,7 @@ function cloudShackNotice(text, kind) {
     // The password is in pat-config.json, so a new one needs a relaunch too.
     if (['enableLoggerCat', 'loggerCatPort'].some((k) => has(k) && newSettings[k] !== settings[k])) setTimeout(startLoggerCat, 0);
     const winlinkChanged = ['enableWinlink', 'winlinkPassword', 'winlinkPatPath', 'winlinkArdopPort', 'winlinkVaraPort', 'winlinkVaraFmPort', 'winlinkVaraHost', 'winlinkVaraFmHost',
-      'winlinkArdopBw', 'winlinkVaraBw', 'winlinkAgwPort', 'winlinkPrediction', 'winlinkPredictionUrl', 'myCallsign', 'grid']
+      'winlinkArdopBw', 'winlinkArdopArqTimeout', 'winlinkVaraBw', 'winlinkAgwPort', 'winlinkPrediction', 'winlinkPredictionUrl', 'myCallsign', 'grid']
       .some((k) => has(k) && JSON.stringify(newSettings[k]) !== JSON.stringify(settings[k]));
     const winlinkAutoCheckChanged = ['winlinkTelnetAutoCheck', 'winlinkTelnetAutoCheckMin']
       .some((k) => has(k) && newSettings[k] !== settings[k]);
