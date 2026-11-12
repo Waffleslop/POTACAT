@@ -19,6 +19,12 @@ contextBridge.exposeInMainWorld('api', {
   sstvAudio: (buf) => ipcRenderer.send('sstv-audio', buf),
   sstvRedecode: (opts) => ipcRenderer.send('sstv-redecode', opts),
   sstvSetSampleRate: (rate) => ipcRenderer.send('sstv-set-sample-rate', rate),
+  // Receive from the radio or the SDR (the ISS on 145.800 FM), and the ISS's next pass.
+  sstvSetRxSource: (v) => ipcRenderer.send('sstv-set-rx-source', v),
+  sstvSdrInfo: () => ipcRenderer.invoke('sstv-sdr-info'),
+  onSstvRxSource: (cb) => ipcRenderer.on('sstv-rx-source', (_e, d) => cb(d)),
+  sstvSdrTune: (freqKhz, mode) => ipcRenderer.send('sstv-sdr-tune', { freqKhz, mode }),
+  sstvIssPass: () => ipcRenderer.invoke('sstv-iss-pass'),
   sstvWfBins: (bins) => ipcRenderer.send('sstv-wf-bins', bins),
   // Live compose sync to ECHOCAT mobile
   sstvComposeState: (state) => ipcRenderer.send('sstv-compose-state', state),

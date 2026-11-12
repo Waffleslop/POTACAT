@@ -172,6 +172,7 @@ const TESTS = [
   'test/qrz-logging-pointer-test.js', // #202: Logging tab points to the QRZ logbook upload on the Station tab
   'test/sstv-e2e-test.js',
   'test/sstv-feed-gate-test.js',
+  'test/sstv-iss-sdr-test.js', // SSTV from the SDR (the ISS on 145.800 FM), the frequency box (#359), ISS passes
   'test/wrl-packet-test.js',
   'test/jtcat-snr-floor-test.js', // Hunt does not call a CQ below the operator's signal floor (per band)
   'test/rx-spectrum-test.js', // the phone's VFO waterfall with no FT8 engine: Flex/Icom streams, the rig's sound card

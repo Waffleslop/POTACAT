@@ -274,7 +274,15 @@ async function refreshRxDevice() {
 window.addEventListener('focus', () => { refreshRxDevice(); });
 
 // --- Radio frequency sync ---
+// The operator typed in the box within the last few seconds, or it has focus:
+// the radio's next poll must not overwrite it (#359, n5xhiworkshop).
+let _freqTypedAt = 0;
+function freqBoxBusy() {
+  return document.activeElement === freqInput || (Date.now() - _freqTypedAt) < 5000;
+}
 window.api.onCatFrequency((hz) => {
+  if (sstvRxSource === 'sdr') return;   // SSTV hears the SDR: the radio's dial is not its frequency
+  if (freqBoxBusy()) return;
   const khz = Math.round(hz / 1000);
   // Update dropdown if a matching option exists
   for (let i = 0; i < freqSelect.options.length; i++) {
@@ -333,7 +341,9 @@ const tuneBtn = document.getElementById('tune-btn');
 
 // The sideband SSTV uses on a frequency: LSB below 10 MHz except 60 m,
 // which is USB by regulation. The ECHOCAT app uses the same rule.
+// FM above 30 MHz: 2 m and 70 cm SSTV (the ISS on 145.800) is FM.
 function getFreqMode(freqKhz) {
+  if (window.SstvRxSource) return window.SstvRxSource.freqMode(freqKhz);
   const k = parseInt(freqKhz);
   if (k >= 5250 && k <= 5450) return 'USB';
   return k < 10000 ? 'LSB' : 'USB';
@@ -348,6 +358,7 @@ function sstvAutoQsy(target) {
   if (target && target.freqKhz) { selectAndTune(target.freqKhz, target.mode); return; }
   const choices = [];
   freqSelect.querySelectorAll('optgroup').forEach((g) => {
+    if (g.dataset.auto === 'no') return;   // the ISS: chosen by the operator, never by the automatic tune (#292)
     g.querySelectorAll('option').forEach((o) => choices.push({ value: o.value, mode: o.dataset.mode, band: g.label }));
   });
   const pick = window.SstvStartBand
@@ -371,8 +382,14 @@ function selectAndTune(freqKhz, mode) {
 
 function tuneToFreq(freq, mode) {
   const m = mode || getFreqMode(freq);
-  window.api.tune(freq, m);
-  statusBar.textContent = 'Tuned to ' + freq + ' kHz ' + m;
+  if (sstvRxSource === 'sdr') {
+    window.api.sstvSdrTune(Number(freq), m);
+    statusBar.textContent = 'SDR on ' + (Number(freq) / 1000).toFixed(3) + ' MHz ' + m + (sstvSdrState.connected ? '' : ' (connecting the SDR…)');
+  } else {
+    window.api.tune(freq, m);
+    statusBar.textContent = 'Tuned to ' + freq + ' kHz ' + m;
+  }
+  showIssNote(Number(freq) === (window.SstvRxSource ? window.SstvRxSource.ISS.freqKhz : 145800));
 }
 
 // Dropdown change QSYs immediately with correct mode
@@ -382,22 +399,20 @@ freqSelect.addEventListener('change', () => {
   tuneToFreq(freqSelect.value, opt && opt.dataset.mode);
 });
 
-// Tune button: for custom frequency input
-tuneBtn.addEventListener('click', () => {
-  const custom = freqInput.value.trim();
-  if (custom && !isNaN(custom)) {
-    tuneToFreq(custom);
-  }
-});
-
-// Enter in custom input tunes
+// Tune button / Enter: the custom box, in kHz or MHz (145.8 and 145800 are the same).
+function typedFreqKhz() {
+  const k = window.SstvRxSource ? window.SstvRxSource.parseFreq(freqInput.value) : parseFloat(freqInput.value);
+  if (!(k > 0)) { statusBar.textContent = 'Type a frequency in kHz or MHz, like 14230 or 145.800'; return null; }
+  return k;
+}
+function tuneTyped() {
+  const k = typedFreqKhz();
+  if (k) { freqInput.value = String(k); tuneToFreq(k); }
+}
+freqInput.addEventListener('input', () => { _freqTypedAt = Date.now(); });
+tuneBtn.addEventListener('click', tuneTyped);
 freqInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    const freq = freqInput.value.trim();
-    if (freq && !isNaN(freq)) {
-      tuneToFreq(freq);
-    }
-  }
+  if (e.key === 'Enter') tuneTyped();
 });
 
 // --- Text Layer Editor ---
@@ -1402,6 +1417,10 @@ txBtn.addEventListener('click', () => {
     abortTxLocal('TX halted');
     return;
   }
+  if (sstvRxSource === 'sdr') {
+    statusBar.textContent = window.SstvRxSource ? window.SstvRxSource.TX_REFUSAL : 'SSTV is receiving from the SDR, so it does not transmit.';
+    return;
+  }
   const mode = modeSelect.value;
   const res = MODE_RES[mode] || { w: 320, h: 256 };
   // A selected text draws an editing handle on the picture; never send it.
@@ -1903,6 +1922,8 @@ async function startRxAudio() {
       // exclusive by construction. Main mirrors this gate (sstv-feed-gate).
       if (settings && settings.audioSource === 'smartsdr'
           && (Date.now() - _lastVitaAudioTs) < 3000) return;
+      // Receiving from the SDR: main feeds the decoder and the waterfall from it.
+      if (sstvRxSource === 'sdr') return;
       _markDecoderAudio(e.data, 'mic');
       // Send audio samples to main process for SSTV decoder (skip during TX to avoid self-decode)
       if (!isTx) window.api.sstvAudio(e.data);
@@ -3176,15 +3197,17 @@ trayTabs.forEach(b => b.addEventListener('click', () => showTab(b.dataset.t)));
 showTab('rx');
 
 // ---- Top bar: bands and the frequency picker -----------------------------------
-const BAND_OF = (khz) => khz < 4000 ? '80' : khz < 8000 ? '40' : khz < 15000 ? '20' : khz < 19000 ? '17' : khz < 22000 ? '15' : khz < 25500 ? '12' : khz < 30000 ? '10' : '6';
+const BAND_OF = (khz) => khz < 4000 ? '80' : khz < 8000 ? '40' : khz < 15000 ? '20' : khz < 19000 ? '17' : khz < 22000 ? '15' : khz < 25500 ? '12' : khz < 30000 ? '10' : khz < 54000 ? '6' : (khz >= 144000 && khz <= 148000) ? 'ISS' : '';
 const bandsEl = document.getElementById('bands');
 (function buildBands() {
   const groups = Array.from(freqSelect.querySelectorAll('optgroup'));
   for (const g of groups) {
-    const band = g.label.replace('m', '');
+    // The satellite group is one short button, ISS (receive only, 145.800 FM).
+    const iss = g.dataset.auto === 'no';
+    const band = iss ? 'ISS' : g.label.replace('m', '');
     const b = document.createElement('button');
     b.type = 'button'; b.className = 'band jtcat-band-btn'; b.textContent = band; b.dataset.band = band;
-    b.title = g.label + ' SSTV';
+    b.title = iss ? 'The ISS, 145.800 MHz FM (receive only, during ARISS SSTV events)' : g.label + ' SSTV';
     b.addEventListener('click', () => {
       // The calling frequency when the band has one, else its first.
       const opts = Array.from(g.querySelectorAll('option'));
@@ -3204,10 +3227,14 @@ var sstvRigBands = null; // var: the multi-band builder may run before this line
 function applySstvRigBands(root) {
   if (!window.RigBands) return;
   const RB = window.RigBands;
-  RB.applyToElements(bandsEl, '.band', sstvRigBands, (el) => el.dataset.band + 'm');
+  RB.applyToElements(bandsEl, '.band', sstvRigBands, (el) => (el.dataset.band === 'ISS' ? '2' : el.dataset.band) + 'm');
+  // The ISS button: shown when SSTV hears the SDR, or the radio has 2 m.
+  const issBtn = bandsEl.querySelector('.band[data-band="ISS"]');
+  if (issBtn && typeof sstvRxSource !== 'undefined' && sstvRxSource === 'sdr') issBtn.hidden = false;
   for (const scope of [root || document]) {
     scope.querySelectorAll('optgroup').forEach((g) => {
-      const ok = RB.allowed(sstvRigBands, g.label);
+      // The ISS group is 2 m: shown when the radio has 2 m, or when SSTV hears the SDR.
+      const ok = (g.dataset.auto === 'no' && typeof sstvRxSource !== 'undefined' && sstvRxSource === 'sdr') || RB.allowed(sstvRigBands, g.dataset.band || g.label);
       g.hidden = !ok;
       g.querySelectorAll('option').forEach((o) => { o.hidden = !ok; o.disabled = !ok; });
     });
@@ -3238,9 +3265,9 @@ freqSelect.addEventListener('change', () => {
   showFreq(freqSelect.value, opt && opt.dataset.mode);
   closeFreqPop();
 });
-freqInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { showFreq(freqInput.value.trim()); closeFreqPop(); } });
-tuneBtn.addEventListener('click', () => { showFreq(freqInput.value.trim()); closeFreqPop(); });
-window.api.onCatFrequency((hz) => { if (hz > 0) showFreq(Math.round(hz / 1000)); });
+freqInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { const k = window.SstvRxSource && window.SstvRxSource.parseFreq(freqInput.value); if (k) { showFreq(k); closeFreqPop(); } } });
+tuneBtn.addEventListener('click', () => { const k = window.SstvRxSource && window.SstvRxSource.parseFreq(freqInput.value); if (k) { showFreq(k); closeFreqPop(); } });
+window.api.onCatFrequency((hz) => { if (hz > 0 && sstvRxSource !== 'sdr') showFreq(Math.round(hz / 1000)); });
 { const o = freqSelect.options[freqSelect.selectedIndex]; showFreq(freqSelect.value, o && o.dataset.mode); }
 
 // ---- Settings popover --------------------------------------------------------------
@@ -3781,3 +3808,59 @@ function clearRxPicture() {
   const b = document.getElementById('rx-clear-btn');
   if (b) b.addEventListener('click', (e) => { e.stopPropagation(); clearRxPicture(); });
 }
+
+
+// ---- Receive from: the radio or the SDR; the ISS's next pass -------------------
+// (Casey 2026-11-11: "tune into the ISS via a SDR and decode SSTV".) The SDR
+// choice is offered only when an SDR is set up (Settings, the WebSDR/SDR list);
+// main connects it, keeps it on this window's frequency and feeds the decoder.
+var sstvRxSource = 'radio';
+var sstvSdrState = { connected: false, name: '' };
+const rxSrcWrap = document.getElementById('rx-src-wrap');
+const rxSrcSel = document.getElementById('rx-src');
+const rxSrcSdrOpt = document.getElementById('rx-src-sdr');
+function applySstvRxInfo(info) {
+  if (!info) return;
+  sstvRxSource = info.source === 'sdr' ? 'sdr' : 'radio';
+  sstvSdrState = { connected: !!info.connected, name: info.name || '' };
+  rxSrcWrap.hidden = !info.configured && sstvRxSource !== 'sdr';
+  rxSrcSdrOpt.textContent = 'SDR' + (info.name ? ' (' + info.name + ')' : '');
+  rxSrcSel.value = sstvRxSource;
+  txBtn.disabled = sstvRxSource === 'sdr';
+  txBtn.title = sstvRxSource === 'sdr' && window.SstvRxSource ? window.SstvRxSource.TX_REFUSAL : '';
+  applySstvRigBands();
+}
+if (window.api.sstvSdrInfo) window.api.sstvSdrInfo().then(applySstvRxInfo).catch(() => {});
+if (window.api.onSstvRxSource) window.api.onSstvRxSource(applySstvRxInfo);
+rxSrcSel.addEventListener('change', () => {
+  sstvRxSource = rxSrcSel.value === 'sdr' ? 'sdr' : 'radio';
+  window.api.sstvSetRxSource(sstvRxSource);
+  applySstvRigBands();
+  // Put whichever receiver is now the source on this window's frequency.
+  const k = Number(freqSelect.value) || (window.SstvRxSource && window.SstvRxSource.parseFreq(freqInput.value));
+  if (k) tuneToFreq(k, freqSelect.value && freqSelect.options[freqSelect.selectedIndex] ? freqSelect.options[freqSelect.selectedIndex].dataset.mode : undefined);
+  statusBar.textContent = sstvRxSource === 'sdr'
+    ? 'Receiving from the SDR. SSTV does not transmit while the SDR is the source.'
+    : 'Receiving from the radio.';
+});
+
+// var and a lookup inside: the automatic tune on open calls this before this part of the file has run.
+var _issTimer = null;
+function showIssNote(on) {
+  const issNote = document.getElementById('iss-note');
+  if (!issNote) return;
+  clearInterval(_issTimer); _issTimer = null;
+  issNote.hidden = !on;
+  if (!on || !window.api.sstvIssPass) return;
+  const refresh = () => window.api.sstvIssPass().then((r) => {
+    document.getElementById('iss-line').textContent = r && r.ok ? r.line : ((r && r.error) || 'ISS pass times are not available');
+    document.getElementById('iss-sub').textContent = (r && r.ok && r.better ? r.better + '. ' : '')
+      + 'ISS SSTV runs only during announced ARISS events: see ariss.org for the next one.';
+  }).catch(() => {});
+  refresh();
+  _issTimer = setInterval(refresh, 60000);
+}
+freqSelect.addEventListener('change', () => {
+  const opt = freqSelect.options[freqSelect.selectedIndex];
+  showIssNote(!!(opt && opt.dataset.iss));
+});
