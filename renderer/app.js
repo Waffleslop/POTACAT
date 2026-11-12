@@ -3917,15 +3917,13 @@ bandButtonsEl.addEventListener('click', (e) => {
   const band = btn.dataset.band;
   const freq = getBandQsyFreq(band);
   if (freq) {
-    const curMode = (radioMode || 'USB').toUpperCase();
-    let mode = curMode;
-    // Flip sideband for SSB: LSB below 10 MHz, USB at/above 10 MHz. 60m is the
-    // exception — USB by convention/regulation despite being below 10 MHz.
-    if (curMode === 'USB' || curMode === 'LSB' || curMode === 'SSB') {
-      const lsbBands = new Set(['160m', '80m', '40m']);
-      mode = lsbBands.has(band) ? 'LSB' : 'USB';
-    }
-    window.api.tune(String(freq), mode);
+    const curMode = (radioMode || '').toUpperCase();
+    // Voice SSB (or a mode not read yet): main decides, from the radio's own
+    // mode and DATA state, whether the band's sideband goes with it (#445,
+    // lib/ssb-sideband.js, the rule spot clicks use). Any other mode is sent
+    // as it is, as before.
+    if (!curMode || curMode === 'USB' || curMode === 'LSB' || curMode === 'SSB') window.api.tuneByBand(String(freq));
+    else window.api.tune(String(freq), curMode);
   }
 });
 
@@ -20653,8 +20651,6 @@ function renderDirvNets(search, bandFilter, statusFilter) {
   }
   if (dirvPlaceholder) dirvPlaceholder.classList.add('hidden');
 
-  const lsbBands = new Set(['160m', '80m', '40m']);
-
   for (const net of entries) {
     const tr = document.createElement('tr');
     const cd = net._cd;
@@ -20700,11 +20696,9 @@ function renderDirvNets(search, bandFilter, statusFilter) {
       if (e.target.closest('.dir-add-btn')) return; // don't tune on Add click
       const freq = String(net.frequency);
       if (!freq) return;
-      let mode = (net.mode || '').toUpperCase();
-      if (mode === 'SSB') {
-        const band = net.band;
-        mode = lsbBands.has(band) ? 'LSB' : 'USB';
-      }
+      // A net listed as SSB goes as SSB: main resolves it to the band's
+      // sideband (lib/ssb-sideband.js), the same as a spot.
+      const mode = (net.mode || '').toUpperCase();
       window.api.tune(freq, mode);
     });
 

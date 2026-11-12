@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld('api', {
   // `origin` captures the renderer-side call stack so a stray QSY (e.g. the
   // 33 MHz jump) can be traced to its exact caller in the main-process log.
   tune: (frequency, mode, bearing, slicePort) => ipcRenderer.send('tune', { frequency, mode, bearing, slicePort, origin: (new Error()).stack }),
+  // A band button: in voice SSB main picks the band's sideband (#445).
+  tuneByBand: (frequency) => ipcRenderer.send('tune', { frequency, pickSideband: true, origin: (new Error()).stack }),
   onTuneBlocked: (cb) => ipcRenderer.on('tune-blocked', (_e, msg) => cb(msg)),
   // Generic main→renderer toast ({message, warn?, duration?}) — radio-link
   // transitions etc. Rendered via showLogToast in app.js.

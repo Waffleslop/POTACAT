@@ -272,6 +272,7 @@ const TESTS = [
   'test/cloud-shacks-test.js', // a Cloud address per shack (<call>-<name>.potacat.com), so the phone can switch shacks
   'test/icom-ptt-memory-mode-test.js', // nj7n_nate: no frequency re-send around an Icom PTT mode swap (memory mode)
   'test/ssb-sideband-tune-test.js', // a 60 m SSB spot tunes USB
+  'test/ssb-sideband-one-rule-test.js', // #445: band buttons and typed frequencies pick LSB/USB by band in voice SSB; one copy of the rule
   'test/capture-stall-test.js', // kc8zp_ryan: JTCAT capture rebuilt when the OS mutes/suspends it or it stops delivering
   'test/jtcat-capture-gate-test.js', // #133: a remote-started FT8 capture is restarted like a desktop one; one capture build at a time
   'test/jtcat-log-comment-test.js', // dcxweaver: the "JTCAT FT8" COMMENT is optional (default on)

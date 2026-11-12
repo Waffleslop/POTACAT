@@ -25380,7 +25380,7 @@ function connectRemote() {
   // origin check.
   remoteServer.on('server-state', onEchocatServerState);
 
-  remoteServer.on('tune', ({ freqKhz, mode, bearing, channelId }) => {
+  remoteServer.on('tune', ({ freqKhz, mode, bearing, channelId, pickSideband }) => {
     // A Channels tap from ECHOCAT names its channel: one with a memory
     // number is recalled on the radio instead (#308). Older apps send no
     // channelId and are tuned by frequency, as before.
@@ -25425,7 +25425,9 @@ function connectRemote() {
     // lag with margin. Window cleared naturally once it elapses.
     _freqSuppressUntil = Date.now() + 3000;
     // Only clear XIT for manual freq entry (no mode); apply CW XIT for spot clicks
-    tuneRadio(freqKhz, mode, bearing, { clearXit: !mode });
+    // A band button or typed frequency from the device: the band's sideband
+    // in voice SSB, the same as on the desktop (#445).
+    tuneRadio(freqKhz, mode || (pickSideband && bandJumpMode(freqKhz)) || mode, bearing, { clearXit: !mode });
     // The wrong-band TX guard exists for a DESKTOP spots-table click moving the
     // radio under a JTCAT window (KF0U). A tune from the ECHOCAT device is the
     // operator's own deliberate move from the screen running FT8 — a spot
@@ -25440,7 +25442,7 @@ function connectRemote() {
     }
     // Auto-tune KiwiSDR
     if (kiwiActive && kiwiClient && kiwiClient.connected && freqKhz > 100) {
-      const m = (mode || _currentMode || 'USB').toLowerCase().replace('digu', 'usb').replace('digl', 'lsb').replace('pktusb', 'usb').replace('pktlsb', 'lsb').replace('ft8', 'usb').replace('ft4', 'usb').replace('ssb', freqKhz >= 10000 ? 'usb' : 'lsb');
+      const m = (mode || _currentMode || 'USB').toLowerCase().replace('digu', 'usb').replace('digl', 'lsb').replace('pktusb', 'usb').replace('pktlsb', 'lsb').replace('ft8', 'usb').replace('ft4', 'usb').replace('ssb', SsbSideband.ssbSideband(freqKhz * 1000).toLowerCase());
       sendCatLog(`[WebSDR] Auto-tune: ${freqKhz} kHz mode=${m}`);
       kiwiClient.tune(freqKhz, m);
     }
@@ -38259,6 +38261,22 @@ function channelLeaveMemory(why) {
   if (cat.selectVfoMode()) sendCatLog(`[Channels] back to VFO mode from memory ${r.mem} (${r.name}) for ${why}`);
 }
 
+// LSB/USB by band: the one rule, lib/ssb-sideband.js.
+const SsbSideband = require('./lib/ssb-sideband');
+/** A band button or typed frequency (#445): the sideband to send with it while
+ *  the radio is in voice SSB, or undefined to leave the mode alone. */
+function bandJumpMode(freqKhz) {
+  const codec = cat && cat._codec;
+  const sb = SsbSideband.bandJumpSideband({
+    mode: _currentMode,
+    dataOn: !!(codec && codec._dataOn),
+    voiceAsData: !!(cat && cat._voiceSentAsData),
+    digitalBusy: !!(ft8Engine || freedvEngine || js8Active()),
+  }, Math.round(parseFloat(freqKhz) * 1000));
+  if (sb) sendCatLog(`[tune] band jump in ${_currentMode}: ${sb} for ${FreqDots.khzMhz(freqKhz)} (LSB below 10 MHz, USB from 10 MHz and on 60 m)`);
+  return sb || undefined;
+}
+
 function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
   let freqHz = Math.round(parseFloat(freqKhz) * 1000); // kHz -> Hz
   // An FT8/FT4/FT2 spot names the signal (dial + audio offset): tune the
@@ -38357,7 +38375,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
     const fKhz = freqHz / 1000;
     const m = (mode || _currentMode || 'USB').toLowerCase()
       .replace('digu', 'usb').replace('digl', 'lsb').replace('pktusb', 'usb').replace('pktlsb', 'lsb')
-      .replace('ft8', 'usb').replace('ft4', 'usb').replace('ssb', fKhz >= 10000 ? 'usb' : 'lsb');
+      .replace('ft8', 'usb').replace('ft4', 'usb').replace('ssb', SsbSideband.ssbSideband(fKhz * 1000).toLowerCase());
     kiwiClient.tune(fKhz, m);
   }
 
@@ -38473,7 +38491,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
     //    on FTDX3000 v1.5.7.)
     //
     //  freedvForceSideband (default '', i.e. auto):
-    //    ''      → band-based: LSB <10 MHz, USB >=10 MHz. Matches
+    //    ''      → band-based: LSB <10 MHz, USB >=10 MHz and on 60 m. Matches
     //              voice SSB convention. (IU7RAL fix.)
     //    'upper' → always USB-side, regardless of band
     //    'lower' → always LSB-side, regardless of band
@@ -38487,7 +38505,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
     let upperSideband;
     if (forceSb === 'upper') upperSideband = true;
     else if (forceSb === 'lower') upperSideband = false;
-    else upperSideband = freqHz >= 10_000_000;
+    else upperSideband = SsbSideband.ssbSideband(freqHz) === 'USB';
     if (useData) {
       mode = upperSideband ? 'DIGU' : 'DIGL';
     } else {
@@ -38528,7 +38546,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
       const sliceIndex = (settings.catTarget.port || 5002) - 5002;
       const wsjtxTuneHz = useVfoShift ? (freqHz + settings.cwXit) : freqHz;
       const freqMhz = wsjtxTuneHz / 1e6;
-      const ssbSide = freqHz < 10000000 && !(freqHz >= 5300000 && freqHz <= 5410000) ? 'LSB' : 'USB';
+      const ssbSide = SsbSideband.ssbSideband(freqHz);
       const flexMode = (mode === 'FT8' || mode === 'FT4' || mode === 'FT2' || mode === 'JT65' || mode === 'JT9' || mode === 'WSPR' || mode === 'DIGU' || mode === 'PKTUSB' || String(mode).startsWith('PSK') || mode === 'JTTY')
         ? 'DIGU' : (mode === 'DIGL' || mode === 'PKTLSB') ? 'DIGL'
         : (mode === 'CW' ? 'CW' : (mode === 'AM' ? 'AM' : (mode === 'FM' ? 'FM' : (mode === 'SSB' ? ssbSide : (mode === 'USB' ? 'USB' : (mode === 'LSB' ? 'LSB' : null))))));
@@ -38583,7 +38601,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
     const sliceIndex = smartSdr.ourSliceIndex != null ? smartSdr.ourSliceIndex : 0;
     const tuneHz = useVfoShift ? (freqHz + settings.cwXit) : freqHz;
     const freqMhz = tuneHz / 1e6;
-    const ssbSide = freqHz < 10000000 && !(freqHz >= 5300000 && freqHz <= 5410000) ? 'LSB' : 'USB';
+    const ssbSide = SsbSideband.ssbSideband(freqHz);
     const flexMode = (mode === 'FT8' || mode === 'FT4' || mode === 'FT2' || mode === 'JT65' || mode === 'JT9' || mode === 'WSPR' || mode === 'DIGU' || mode === 'PKTUSB' || String(mode).startsWith('PSK') || mode === 'JTTY')
       ? 'DIGU' : (mode === 'DIGL' || mode === 'PKTLSB') ? 'DIGL'
       : (mode === 'CW' ? 'CW' : (mode === 'AM' ? 'AM' : (mode === 'FM' ? 'FM' : (mode === 'SSB' ? ssbSide : (mode === 'USB' ? 'USB' : (mode === 'LSB' ? 'LSB' : null))))));
@@ -39295,7 +39313,7 @@ function kiwiGoIdle(why) {
 
 function sdrListenMode(mode, hz) {
   const m = String(mode || listenSdr.mode || (hz > 30e6 ? 'FM' : (_currentMode || 'USB'))).toUpperCase();
-  return m === 'DIGU' || m === 'PKTUSB' || m === 'FT8' || m === 'FT4' || m === 'FT2' || m === 'WSPR' ? 'USB' : m === 'DIGL' || m === 'PKTLSB' ? 'LSB' : m === 'SSB' ? (hz >= 10e6 ? 'USB' : 'LSB') : m;
+  return m === 'DIGU' || m === 'PKTUSB' || m === 'FT8' || m === 'FT4' || m === 'FT2' || m === 'WSPR' ? 'USB' : m === 'DIGL' || m === 'PKTLSB' ? 'LSB' : m === 'SSB' ? SsbSideband.ssbSideband(hz) : m;
 }
 
 /** The connected SDR becomes what you hear at hz; the radio (if any) stays where it is. */
@@ -45652,7 +45670,7 @@ function cloudShackNotice(text, kind) {
   // longer auto-follow the kiwi — acceptable; that path needs a real
   // race-protection design before re-introducing.)
 
-  ipcMain.on('tune', (_e, { frequency, mode, bearing, slicePort, origin }) => {
+  ipcMain.on('tune', (_e, { frequency, mode, bearing, slicePort, origin, pickSideband }) => {
     // The idle-RX session's own QSY (including WSPR band hops) must not read
     // as the operator returning — see markUserActive().
     markUserActive({ selfDriven: isIdleRxSelfAction(_e.sender) });
@@ -45683,7 +45701,7 @@ function cloudShackNotice(text, kind) {
       // kHz straight through shrank every QSY 1000× on the wire: the shack
       // saw "7.026 kHz", and PassEnforcement rightly blocked it as
       // out-of-band. K3SBP 2026-06-11.
-      remoteClient.sendTune({ frequency: Math.round(parseFloat(frequency) * 1000), mode, bearing });
+      remoteClient.sendTune({ frequency: Math.round(parseFloat(frequency) * 1000), mode, bearing, pickSideband: !mode && !!pickSideband });
       return;
     }
     // JTCAT dial anchor: a tune issued BY the JTCAT popout is the dial the
@@ -45725,7 +45743,7 @@ function cloudShackNotice(text, kind) {
       // JTCAT on a separate Flex slice
       const sliceIndex = slicePort - 5002;
       const freqHz = Math.round(parseFloat(frequency) * 1000);
-      const jtSsbSide = freqHz < 10000000 && !(freqHz >= 5300000 && freqHz <= 5410000) ? 'LSB' : 'USB';
+      const jtSsbSide = SsbSideband.ssbSideband(freqHz);
       const flexMode = (mode === 'FT8' || mode === 'FT4' || mode === 'FT2' || mode === 'DIGU' || String(mode).startsWith('PSK') || mode === 'JTTY')
         ? 'DIGU' : (mode === 'CW' ? 'CW' : (mode === 'SSB' ? jtSsbSide : (mode === 'USB' ? 'USB' : (mode === 'LSB' ? 'LSB' : null))));
       const filterWidth = settings.digitalFilterWidth || 0;
@@ -45736,13 +45754,15 @@ function cloudShackNotice(text, kind) {
       smartSdr.setTxSlice(sliceIndex);
       smartSdr.setActiveSlice(sliceIndex);
     } else {
-      tuneRadio(frequency, mode, bearing, { origin });
+      // A band button or typed frequency names no mode: in voice SSB it takes
+      // the band's sideband, as a spot click does (#445).
+      tuneRadio(frequency, mode || (pickSideband && bandJumpMode(frequency)) || mode, bearing, { origin });
     }
     // Auto-tune KiwiSDR to match (already done above when JTCAT follows it)
     if (!sdrFollowed && kiwiActive && kiwiClient && kiwiClient.connected) {
       const freqKhz = parseFloat(frequency);
       if (freqKhz > 100) {
-        const m = (mode || _currentMode || 'USB').toLowerCase().replace('digu', 'usb').replace('digl', 'lsb').replace('pktusb', 'usb').replace('pktlsb', 'lsb').replace('ft8', 'usb').replace('ft4', 'usb').replace('ssb', freqKhz >= 10000 ? 'usb' : 'lsb');
+        const m = (mode || _currentMode || 'USB').toLowerCase().replace('digu', 'usb').replace('digl', 'lsb').replace('pktusb', 'usb').replace('pktlsb', 'lsb').replace('ft8', 'usb').replace('ft4', 'usb').replace('ssb', SsbSideband.ssbSideband(freqKhz * 1000).toLowerCase());
         sendCatLog(`[WebSDR] Auto-tune: ${freqKhz} kHz mode=${m}`);
         kiwiClient.tune(freqKhz, m);
       }

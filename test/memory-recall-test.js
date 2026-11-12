@@ -140,7 +140,7 @@ test('ECHOCAT: a channel tap names its channel; the shack recalls, an older app 
   assert.ok(/type: 'tune', freqKhz: String\(c\.khz\), mode: channelTuneMode\(c\.mode\), channelId: c\.id/.test(web));
   const srv = readSrc(path.join(root, 'lib', 'remote-server.js'));
   assert.ok(/channelId: typeof msg\.channelId === 'string' \? msg\.channelId\.slice\(0, 64\) : undefined/.test(srv));
-  const i = main.indexOf("remoteServer.on('tune', ({ freqKhz, mode, bearing, channelId }) => {");
+  const i = main.indexOf("remoteServer.on('tune', ({ freqKhz, mode, bearing, channelId, pickSideband }) => {");
   assert.ok(i > 0);
   const head = main.slice(i, i + 700);
   assert.ok(/channelMemoryOf\(String\(channelId\)\) != null && cat && cat\.connected && cat\.canRecallMemory/.test(head) && /channelGo\(String\(channelId\), 'ECHOCAT'\)/.test(head));

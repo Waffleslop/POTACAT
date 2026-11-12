@@ -235,7 +235,7 @@ test('dial follow: main retunes the connected SDR only while JTCAT receives from
 });
 
 test('wiring: a JTCAT band pick (either window, or ECHOCAT) retunes the SDR, even with no radio on the CAT link', () => {
-  const tuneAt = MAIN.indexOf("ipcMain.on('tune', (_e, { frequency, mode, bearing, slicePort, origin }) => {");
+  const tuneAt = MAIN.indexOf("ipcMain.on('tune', (_e, { frequency, mode, bearing, slicePort, origin, pickSideband }) => {");
   const tune = MAIN.slice(tuneAt, MAIN.indexOf('// --- Rig Control Panel IPC ---', tuneAt));
   const follow = tune.indexOf("const sdrFollowed = JtcatRxSource.isJtcatDialMode(mode) && jtcatWebSdrFollowDial(parseFloat(frequency), 'band pick');");
   const dead = tune.indexOf('if (!((smartSdr && smartSdr.canTune) || (cat && cat.connected))) {');

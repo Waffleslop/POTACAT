@@ -219,7 +219,7 @@ test('the reply bar shows where they were heard, and offers to go back when the 
     const line = src.slice(i, src.indexOf('\n', i));
     return /\}\s*$/.test(line) ? line + '\n' : src.slice(i, src.indexOf('\n}\n', i) + 2); // one-liner or block
   };
-  const fns = new Function('FreqDots', grab('getFreqMode') + grab('sideOf') + grab('fmtQrg') + 'return { getFreqMode, sideOf, fmtQrg };')(require('../lib/freq-dots'));
+  const fns = new Function('FreqDots', 'window', grab('getFreqMode') + grab('sideOf') + grab('fmtQrg') + 'return { getFreqMode, sideOf, fmtQrg };')(require('../lib/freq-dots'), { SsbSideband: require('../lib/ssb-sideband') });
   assert.strictEqual(fns.fmtQrg(7171500), '7.172.00', 'whole kHz first, then the VFO way');
   assert.strictEqual(fns.fmtQrg(14230000), '14.230.00');
   assert.deepStrictEqual(['3845', '5357', '7171', '14230', '28680'].map(fns.getFreqMode), ['LSB', 'USB', 'LSB', 'USB', 'USB'], '60 m is USB');
