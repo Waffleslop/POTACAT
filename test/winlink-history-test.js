@@ -56,7 +56,11 @@ test('results in plain words', () => {
   assert.strictEqual(by('KG4OCM').result, 'Did not answer');
   assert.strictEqual(by('NA3MD').result, 'Did not answer');
   assert.strictEqual(by('W9OU-10').result, 'The modem was not running');
-  assert.strictEqual(H.resultText({ connected: true }), 'Connected, but the mail exchange failed');
+  // #425: a call that connected and did not finish is a dropped link, in the words the status uses.
+  assert.strictEqual(H.resultText({ connected: true }), 'Link dropped before the mail exchange finished');
+  assert.strictEqual(H.resultText({ connected: true, error: 'secure login failed' }), 'Winlink refused the password');
+  // Pat's own error text (a Go error) never shows.
+  assert.strictEqual(H.resultText({ error: 'dial tcp 127.0.0.1:8515: i/o error {x}' }), 'Did not connect');
 });
 
 test('one row per gateway, mode and dial, newest first, counting tries and good sessions', () => {
