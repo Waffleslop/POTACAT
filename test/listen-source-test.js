@@ -77,6 +77,21 @@ check('the refusal names the frequency, the radio and the way out', () => {
   assert.strictEqual(L.fmtMhz(14250000), '14.25 MHz');
 });
 
+check('#277: a ham band the rig is not set up for says where to tick it, not "add an SDR"', () => {
+  const HF6 = [[30e3, 54e6]];
+  const r = L.refusal(144.2e6, L.decide(144.2e6, HF6, null), 'KX2/KX3', null, { unlistedBand: '2m' });
+  assert.ok(/144\.2 MHz/.test(r) && /2m/.test(r) && /KX2\/KX3/.test(r), r);
+  assert.ok(/Check all bands you can use with this radio/.test(r) && /Settings > Radio > Edit/.test(r), r);
+  assert.ok(!/WebSDR/.test(r), r);
+  assert.ok(/WebSDR/.test(L.refusal(162.475e6, L.decide(162.475e6, HF6, null), 'KX2/KX3', null, { unlistedBand: '' })), 'off the ham bands: the SDR advice stays');
+  assert.ok(/No radio is connected/.test(L.refusal(144.2e6, { source: 'none', reason: 'no-rig' }, 'x', null, { unlistedBand: '2m' })));
+});
+check('#277: main names an unlisted ham band in the refusal', () => {
+  const m = readSrc(path.join(ROOT, 'main.js'));
+  assert.ok(m.includes('ListenSource.refusal(hz, d, rigName, kiwiLiveHost, { unlistedBand: unlistedRigBand(hz) })'));
+  assert.ok(/function unlistedRigBand\(hz\) \{[\s\S]{0,400}model\.rxHz[\s\S]{0,400}RigBands\.allowed\(bands, band\)/.test(m));
+});
+
 console.log('Wiring');
 const main = readSrc(path.join(ROOT, 'main.js'));
 const app = readSrc(path.join(ROOT, 'renderer/app.js'));
