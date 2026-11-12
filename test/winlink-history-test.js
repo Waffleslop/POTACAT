@@ -199,6 +199,14 @@ test('working radio sound says nothing; only a device to choose or a fault is sa
   assert.ok(/Radio sound not set · <a id="wl-sound-change">Choose<\/a>/.test(js) && /b\.state === 'error'/.test(js), 'the actionable cases stay');
 });
 
+test('compose reads like a mail program: rows of its own, the actions in one bar (Casey 2026-11-11)', () => {
+  assert.ok(/\.wl-connbar \.wl-field \{ display: flex; flex-direction: column;/.test(html), 'the top bar\'s column rule never reaches the compose rows');
+  assert.ok(!/^\s*\.wl-field \{/m.test(html), 'no bare .wl-field rule');
+  assert.ok(/<div class="wl-c-row"><label for="wl-c-to">To<\/label>/.test(html) && /\.wl-c-row label \{ flex: 0 0 76px; text-align: left;/.test(html));
+  const bar = (html.match(/<div class="wl-c-actions">[\s\S]*?<\/div>/) || [''])[0];
+  assert.ok(/id="wl-c-attach"/.test(bar) && /id="wl-c-cancel"/.test(bar) && /id="wl-c-send"/.test(bar), 'Attach, Cancel and Put in Outbox on one row');
+});
+
 test('a short window never pushes the folder buttons over the waterfall', () => {
   assert.ok(/\.wl-folders \{[^}]*min-height: 0; overflow-y: auto; \}/.test(html));
 });

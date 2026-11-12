@@ -34,8 +34,9 @@
     .wl-connbar select, .wl-connbar .wl-btn { font-size: 14px; height: 32px; box-sizing: border-box; }
     .wl-connbar .wl-btn { padding: 0 12px; }
     .wl-connbar .wl-btn.primary { padding: 0 16px; font-weight: 700; background: var(--ok-subtle, transparent); }
-    .wl-field { display: flex; flex-direction: column; gap: 3px; }
-    .wl-field > label, .wl-label { font-size: 12px; color: var(--text-secondary); }
+    /* The top bar's labelled fields only: the compose form has its own rows. */
+    .wl-connbar .wl-field { display: flex; flex-direction: column; gap: 3px; }
+    .wl-connbar .wl-field > label, .wl-label { font-size: 12px; color: var(--text-secondary); }
     .wl-radio-pick { display: none; flex-wrap: wrap; gap: 8px 14px; align-items: flex-start; }
     .wl-radio-pick.show { display: flex; }
     .wl-gw-row { display: flex; gap: 4px; align-items: center; }
@@ -194,14 +195,25 @@
     .wl-attach { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
     .wl-reader-actions { display: flex; gap: 6px; margin-bottom: 8px; }
 
-    .wl-compose { display: none; flex-direction: column; gap: 6px; padding: 10px 14px; flex: 1; min-height: 0; }
+    /* Compose, laid out like a mail program (Casey 2026-11-11): left-aligned
+       labels in one column, full-width fields with a hairline under each, the
+       body filling the rest, the actions in a bar at the bottom. */
+    .wl-compose { display: none; flex-direction: column; flex: 1; min-height: 0; font-size: 14px; }
     .wl-compose.show { display: flex; }
-    .wl-compose .wl-field { display: flex; gap: 6px; align-items: center; }
-    .wl-compose .wl-field label { width: 56px; color: var(--text-dim); font-size: 12px; }
-    .wl-compose .wl-field input { flex: 1; }
-    #wl-c-body { flex: 1; resize: none; font-family: monospace; min-height: 120px; }
-    .wl-c-files { font-size: 12px; color: var(--text-dim); }
-    .wl-c-err { color: #e94560; font-size: 12px; min-height: 16px; }
+    .wl-c-row { display: flex; align-items: center; min-height: 40px; padding: 0 14px; border-bottom: 1px solid var(--border-primary); }
+    .wl-c-row[hidden] { display: none; }
+    .wl-c-row:focus-within { box-shadow: inset 3px 0 0 var(--accent-blue, #4fc3f7); }
+    .wl-c-row label { flex: 0 0 76px; text-align: left; font-size: 13px; color: var(--text-secondary); }
+    .wl-compose .wl-c-row input { flex: 1; min-width: 0; border: none; border-radius: 0; background: transparent; color: var(--text-primary); font-size: 14px; padding: 9px 0; outline: none; }
+    .wl-compose #wl-c-body { flex: 1; min-height: 140px; resize: none; border: none; border-radius: 0; outline: none; padding: 12px 14px; background: var(--bg-primary); color: var(--text-primary); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.5; }
+    .wl-c-attach-row { display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-top: 1px solid var(--border-primary); }
+    .wl-c-attach-row[hidden] { display: none; }
+    .wl-c-files { font-size: 12px; color: var(--text-secondary); }
+    .wl-c-err { color: var(--accent-red-text, var(--accent-red, #e94560)); font-size: 13px; padding: 0 14px; }
+    .wl-c-err:empty { display: none; }
+    .wl-c-actions { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-top: 1px solid var(--border-primary); background: var(--bg-secondary); }
+    .wl-c-actions .wl-btn { height: 32px; font-size: 13px; padding: 0 14px; }
+    .wl-c-actions .wl-btn.primary { font-weight: 700; background: var(--ok-subtle, transparent); }
 
     /* Notice gate */
     .wl-notice { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: center; justify-content: center; z-index: 10; }
@@ -336,14 +348,14 @@
     <div class="wl-pane">
       <div class="wl-reader" id="wl-reader"><div class="wl-empty">Pick a message.</div></div>
       <div class="wl-compose" id="wl-compose">
-        <div class="wl-field" id="wl-c-name-row" hidden><label for="wl-c-name">Name</label><input type="text" id="wl-c-name" maxlength="60" placeholder="what the Templates menu calls it"></div>
-        <div class="wl-field"><label for="wl-c-to">To</label><input type="text" id="wl-c-to" placeholder="callsign or email, separated by commas"></div>
-        <div class="wl-field"><label for="wl-c-cc">Cc</label><input type="text" id="wl-c-cc"></div>
-        <div class="wl-field"><label for="wl-c-subj">Subject</label><input type="text" id="wl-c-subj" maxlength="128"></div>
+        <div class="wl-c-row" id="wl-c-name-row" hidden><label for="wl-c-name">Name</label><input type="text" id="wl-c-name" maxlength="60" placeholder="what the Templates menu calls it"></div>
+        <div class="wl-c-row"><label for="wl-c-to">To</label><input type="text" id="wl-c-to" placeholder="callsign or email, separated by commas"></div>
+        <div class="wl-c-row"><label for="wl-c-cc">Cc</label><input type="text" id="wl-c-cc"></div>
+        <div class="wl-c-row"><label for="wl-c-subj">Subject</label><input type="text" id="wl-c-subj" maxlength="128"></div>
         <textarea id="wl-c-body" spellcheck="true" placeholder="Plain text."></textarea>
-        <div class="wl-field"><button class="wl-btn" id="wl-c-attach">Attach…</button><span class="wl-c-files" id="wl-c-files"></span></div>
         <div class="wl-c-err" id="wl-c-err"></div>
-        <div class="wl-field"><button class="wl-btn" id="wl-c-save-tpl" title="Keep this message as a template in the Templates menu">Save as template</button><span class="wl-spacer"></span><button class="wl-btn" id="wl-c-cancel">Cancel</button><button class="wl-btn primary" id="wl-c-send">Put in Outbox</button></div>
+        <!-- One row (Casey 2026-11-11): Attach | Cancel | Put in Outbox -->
+        <div class="wl-c-actions"><button class="wl-btn" id="wl-c-attach">Attach…</button><button class="wl-btn" id="wl-c-save-tpl" title="Keep this message as a template in the Templates menu">Save as template</button><span class="wl-c-files" id="wl-c-files"></span><span class="wl-spacer"></span><button class="wl-btn" id="wl-c-cancel">Cancel</button><button class="wl-btn primary" id="wl-c-send">Put in Outbox</button></div>
       </div>
     </div>
     <div class="wl-done-card" id="wl-done-card" role="status" aria-live="polite">

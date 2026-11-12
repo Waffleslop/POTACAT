@@ -345,7 +345,8 @@
   function setTemplateMode(t) {
     tplEdit = t;
     $('wl-c-name-row').hidden = !t;
-    $('wl-c-attach').parentNode.hidden = !!t;     // templates carry no attachments
+    $('wl-c-attach').hidden = !!t;                // templates carry no attachments
+    $('wl-c-files').hidden = !!t;
     $('wl-c-save-tpl').hidden = !!t;
     $('wl-c-send').textContent = t ? 'Save template' : 'Put in Outbox';
   }
