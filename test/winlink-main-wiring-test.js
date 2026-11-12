@@ -436,7 +436,7 @@ test('the gateway reply says how it is ordered, on every surface', () => {
   // #254: the mail window says the order on hover and as the group's label, not as a sentence.
   assert.ok(/sel\.title = r\.note \|\| 'Gateways'/.test(popout) && /r\.predicted \? 'Best path now' : 'Nearest first'/.test(popout));
   const web = read('renderer/remote.js');
-  assert.ok(/function mailGatewayLabel\(g\)/.test(web) && /mailGatewayNote = msg\.note \|\| ''/.test(web), 'web shows the same word and note');
+  assert.ok(/function mailGatewayLabel\(g\)/.test(web) && /mailGwStatus\(MailView\.gatewayNote\(msg\), false\)/.test(web), 'web shows the same word and note');
   const html = read('renderer/index.html');
   assert.ok(/id="set-winlink-prediction" checked/.test(html), 'the switch is on by default');
   assert.ok(/api\.potacat\.com/.test(html.slice(html.indexOf('set-winlink-prediction'), html.indexOf('set-winlink-prediction') + 900)), 'the copy says where the grid goes');

@@ -4620,3 +4620,68 @@ body.popout-mode .popout-only { display: flex; }
 .fav-star.on { color: var(--fav); }
 .fav-star svg { width: 18px; height: 18px; }
 .lmk-group.fav-group { color: var(--fav); }
+
+/* ── Mail tab (Winlink): what the first batch added (W1, W2, W4) ──────────
+   Roles, not colours: each points at the page's own theme variables, and at
+   the design-system roles when one of the six looks is on (data-ds). No
+   colour literal belongs in a Mail rule (test/remote-web-mail-test.js). */
+#mail-view {
+  --mail-surface: var(--bg-card);
+  --mail-line: var(--border);
+  --mail-ink: var(--text);
+  --mail-muted: var(--text-dim);
+  --mail-tint: var(--fav);
+  --mail-on-tint: var(--bg);
+  --mail-ok: var(--pota);
+  --mail-warn: var(--sota);
+}
+:root[data-ds] #mail-view {
+  --mail-tint: var(--ds-tint);
+  --mail-on-tint: var(--ds-on-tint);
+  --mail-ok: var(--ds-ok);
+  --mail-warn: var(--ds-warn);
+}
+/* Winlink off on the shack: only the line that says where to turn it on. */
+#mail-view.mail-is-off > :not(#mail-off) { display: none !important; }
+.mail-off { padding: 24px 16px; font-size: 16px; line-height: 1.45; color: var(--mail-ink); text-align: center; overflow-wrap: anywhere; }
+
+.mail-btn {
+  min-height: 44px; width: 100%; padding: 8px 16px; border-radius: 8px;
+  border: 1px solid var(--mail-line); background: var(--mail-surface); color: var(--mail-ink);
+  font-size: 16px; font-weight: 700; font-family: inherit; cursor: pointer;
+}
+.mail-btn-main { border-color: var(--mail-tint); background: var(--mail-tint); color: var(--mail-on-tint); }
+.mail-btn:focus-visible { outline: 2px solid var(--mail-tint); outline-offset: 2px; }
+.mail-input {
+  min-height: 44px; width: 100%; padding: 8px 12px; border-radius: 8px;
+  border: 1px solid var(--mail-line); background: var(--bg); color: var(--mail-ink);
+  font-size: 16px; font-family: inherit;
+}
+
+/* The account card: no Winlink password on the shack yet. */
+.mail-acct { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--mail-line); background: var(--mail-surface); color: var(--mail-ink); font-size: 16px; line-height: 1.4; flex-shrink: 0; }
+.mail-acct-title { font-size: 18px; }
+.mail-acct-text { overflow-wrap: anywhere; }
+
+/* Why a "Send via" mode is greyed; the line under the gateway list. */
+.mail-note { padding: 8px 16px; border-bottom: 1px solid var(--mail-line); color: var(--mail-ink); font-size: 16px; line-height: 1.4; overflow-wrap: anywhere; flex-shrink: 0; }
+.mail-note > div + div { margin-top: 6px; }
+.mail-gw-status { flex-basis: 100%; display: flex; flex-direction: column; gap: 8px; padding: 6px 0; }
+.mail-note-text { color: var(--mail-ink); font-size: 16px; line-height: 1.4; overflow-wrap: anywhere; }
+
+/* How the last session ended (mailRenderEndCard). */
+.mail-end-card {
+  display: flex; flex-direction: column; gap: 8px; margin: 12px; padding: 14px 16px;
+  border: 1px solid var(--mail-line); border-left: 6px solid var(--mail-warn); border-radius: 10px;
+  background: var(--mail-surface); color: var(--mail-ink); font-size: 16px; line-height: 1.4; flex-shrink: 0;
+}
+.mail-end-card.mail-end-done { border-left-color: var(--mail-ok); }
+.mail-end-label { font-size: 16px; font-weight: 800; color: var(--mail-muted); overflow-wrap: anywhere; }
+.mail-end-title { font-size: 18px; font-weight: 700; overflow-wrap: anywhere; }
+.mail-end-line { overflow-wrap: anywhere; }
+.mail-end-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+@media (min-width: 600px) {
+  .mail-end-actions { flex-direction: row; }
+  .mail-end-actions .mail-btn { width: auto; min-width: 160px; }
+  .mail-acct .mail-btn, .mail-gw-status .mail-btn { width: auto; min-width: 160px; align-self: flex-start; }
+}

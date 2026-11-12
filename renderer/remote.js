@@ -2333,47 +2333,17 @@
         // arrives through the next status.
         showToast('Rig preset ' + (msg.name || '') + ': ' + (msg.text || '') + (msg.why && msg.why !== 'tap' ? ' — ' + msg.why : ''), 4000);
         break;
+      // Winlink mail: every message is handled in the Mail section (mailOnMessage).
       case 'winlink-state':
-        mailState = msg;
-        mailRenderState();
-        break;
       case 'winlink-account':
-        mailAcctAnswer(msg);
-        break;
       case 'winlink-mailbox':
-        mailLists[msg.box] = msg.messages || [];
-        if (msg.box === mailBox) mailRenderList();
-        break;
       case 'winlink-session':
-        if (mailState) mailState.session = msg.session || {};
-        mailRenderSession();
-        break;
       case 'winlink-message':
-        mailShowMessage(msg);
-        break;
       case 'winlink-gateways':
-        mailGateways = msg.list || [];
-        mailGatewayNote = msg.note || '';
-        mailRenderGateways();
-        break;
       case 'winlink-attachment':
-        try {
-          var bin = atob(msg.dataBase64 || '');
-          var bytes = new Uint8Array(bin.length);
-          for (var bi = 0; bi < bin.length; bi++) bytes[bi] = bin.charCodeAt(bi);
-          var url = URL.createObjectURL(new Blob([bytes]));
-          var a = document.createElement('a'); a.href = url; a.download = msg.name || 'attachment';
-          document.body.appendChild(a); a.click(); a.remove();
-          setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
-        } catch (e) { showToast('Could not save the attachment', 3000, true); }
-        break;
       case 'winlink-result':
-        if (msg.op === 'account-check' || msg.op === 'register' || msg.op === 'set-password') { mailAcctResult(msg); break; }
-        if (!msg.ok && msg.error) showToast(msg.error, 5000, true);
-        else if (msg.ok && msg.op === 'compose') { showToast('In the Outbox. It goes out on the next Send / Receive.', 3000); mailShowList(); }
-        break;
       case 'winlink-refused':
-        showToast(msg.reason === 'guest-pass' ? 'Winlink mail belongs to the shack\'s owner — not available on a Guest Pass' : 'Not available', 4000, true);
+        mailOnMessage(msg);
         break;
       case 'rig-presets-refused':
         showToast('A Guest Pass cannot change the rig presets', 3000, true);
@@ -7077,6 +7047,8 @@
       }
     } catch { /* pre-init switch — nothing subscribed yet */ }
     try { scopeSyncSubscription(tab); } catch { /* pre-init */ }
+    // Leaving Mail: a radio moved to a gateway for a look goes back (W1).
+    try { if (activeTab === 'mail' && tab !== 'mail') mailOnLeave(); } catch { /* pre-init */ }
     // Leaving FT8: remember where it was, to come back to it (item 15).
     try {
       if (activeTab === 'ft8' && tab !== 'ft8' && currentFreqKhz > 0) {
@@ -15570,38 +15542,138 @@ var _paddleHoldTimer = { dit: null, dah: null };
   // ── Winlink mail (the shack's Pat; owner only) ────────────────────────
   // The shack holds the mailbox and runs the session; this tab composes,
   // reads and presses Send / Receive. State arrives as winlink-state.
+  var MailView = window.WinlinkMailView;
   var mailState = null;
   var mailLists = { in: [], out: [], sent: [], archive: [] };
   var mailBox = 'in';
   var mailGateways = [];
-  var mailGatewayNote = '';
   var mailNoticeThen = null;
+  var mailOpen = false;       // the Mail tab is on screen
   function mailSend(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
   function mailEl(id) { return document.getElementById(id); }
+  function mailShow(id, on) { var el = mailEl(id); if (el) el.classList.toggle('hidden', !on); }
+
+  // Every S2C winlink-* message lands here (the page's message switch calls it).
+  function mailOnMessage(msg) {
+    switch (msg.type) {
+      case 'winlink-state':
+        mailState = msg;
+        mailSessionSeen(mailState.session);
+        mailRenderState();
+        // A pick made before the link dropped, and the tab left meanwhile: put the radio back now.
+        if (!mailOpen) mailQsyRestore();
+        break;
+      case 'winlink-account':
+        mailAcctAnswer(msg);
+        break;
+      case 'winlink-mailbox':
+        mailLists[msg.box] = msg.messages || [];
+        if (msg.box === mailBox) mailRenderList();
+        break;
+      case 'winlink-session':
+        if (mailState) mailState.session = msg.session || {};
+        mailSessionSeen(msg.session);
+        mailRenderSession();
+        break;
+      case 'winlink-message':
+        mailShowMessage(msg);
+        break;
+      case 'winlink-gateways':
+        mailGatewaysArrived(msg);
+        break;
+      case 'winlink-attachment':
+        try {
+          var bin = atob(msg.dataBase64 || '');
+          var bytes = new Uint8Array(bin.length);
+          for (var bi = 0; bi < bin.length; bi++) bytes[bi] = bin.charCodeAt(bi);
+          var url = URL.createObjectURL(new Blob([bytes]));
+          var a = document.createElement('a'); a.href = url; a.download = msg.name || 'attachment';
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+        } catch (e) { showToast('Could not save the attachment', 3000, true); }
+        break;
+      case 'winlink-result':
+        if (msg.op === 'account-check' || msg.op === 'register' || msg.op === 'set-password') { mailAcctResult(msg); break; }
+        if (msg.op === 'gateways') { if (!msg.ok) mailGatewaysFailed(msg); break; }
+        // The shack tuned to the picked gateway: this page now owes it a restore.
+        if (msg.op === 'qsy' && msg.ok) mailQsyMoved = true;
+        if (!msg.ok && msg.error) showToast(msg.error, 5000, true);
+        else if (msg.ok && msg.op === 'compose') { showToast('In the Outbox. It goes out on the next Send / Receive.', 3000); mailShowList(); }
+        break;
+      case 'winlink-refused':
+        showToast(msg.reason === 'guest-pass' ? 'Winlink mail belongs to the shack\'s owner — not available on a Guest Pass' : 'Not available', 4000, true);
+        break;
+      default:
+    }
+  }
+
+  // ── W1: the radio goes back after a look at a gateway ────────────────
+  // Picking a gateway tunes the shack's radio there (C2S winlink-qsy). The
+  // desktop Mail window puts the dial back when it closes; this page does the
+  // same when the operator leaves the Mail tab, closes the page, or goes back
+  // to the internet without connecting (C2S winlink-qsy-restore). Never while
+  // a session runs: the radio is the session's, and the shack puts it back
+  // itself when the session ends (lib/winlink-return.js).
+  var mailQsyMoved = false;   // the shack answered a winlink-qsy from this page with ok
+  function mailSessionSeen(ss) {
+    if (MailView.sessionActive(ss)) mailQsyMoved = false; // the session carries the return now
+  }
+  function mailQsyRestore() {
+    var act = MailView.restoreOnLeave({ moved: mailQsyMoved, session: mailState && mailState.session });
+    if (act === 'none') return;
+    if (act === 'send') {
+      // No link right now: keep the debt; it is paid when the shack is back (winlink-state).
+      if (!(ws && ws.readyState === WebSocket.OPEN)) return;
+      mailSend({ type: 'winlink-qsy-restore' });
+    }
+    mailQsyMoved = false;
+  }
+  function mailOnLeave() {
+    mailOpen = false;
+    mailQsyRestore();
+  }
+  window.addEventListener('pagehide', mailQsyRestore);
+  window.addEventListener('beforeunload', mailQsyRestore);
+
   // No Winlink password on the shack yet: set the account up from here.
   // winlink.org has no web sign-up; the shack's Pat creates the account.
   var mailAcct = { asked: false, exists: null };
+  function mailAcctForm(on) {
+    mailShow('mail-acct-pw', on);
+    mailShow('mail-acct-go', on);
+    mailShow('mail-acct-email', on && mailAcct.exists === false);
+  }
+  function mailAcctCheck() {
+    mailAcct.asked = true;
+    mailEl('mail-acct-text').textContent = MailView.CHECKING_ACCOUNT;
+    mailShow('mail-acct-retry', false);
+    mailSend({ type: 'winlink-account-check' });
+  }
   function mailAcctRender(s) {
     var card = mailEl('mail-acct');
     if (!card) return;
     var need = !!(s.enabled && s.hasPassword === false && (s.patReady || s.patStarted === false));
     card.classList.toggle('hidden', !need);
-    card.style.display = need ? 'flex' : 'none';
     if (!need) { mailAcct.asked = false; return; }
-    if (!mailAcct.asked) { mailAcct.asked = true; mailSend({ type: 'winlink-account-check' }); }
+    if (!mailAcct.asked) mailAcctCheck();
   }
   function mailAcctAnswer(msg) {
     mailAcct.exists = !!msg.exists;
     mailEl('mail-acct-text').textContent = msg.exists
       ? msg.callsign + ' already has a Winlink account. Enter its password.'
       : msg.callsign + ' has no Winlink account yet. Create one here; winlink.org does not sign up new users on its website.';
-    mailEl('mail-acct-email').style.display = msg.exists ? 'none' : '';
+    mailShow('mail-acct-retry', false);
+    mailAcctForm(true);
     mailEl('mail-acct-go').textContent = msg.exists ? 'Save password' : 'Create my Winlink account';
   }
   function mailAcctResult(msg) {
     if (msg.op === 'account-check') {
-      mailEl('mail-acct-text').textContent = 'Could not reach Winlink to check: ' + (msg.error || 'no answer') + '. Close and reopen Mail to try again.';
-      mailAcct.asked = false;
+      // Winlink could not be reached: say so and offer Try again (W4), as the desktop card does.
+      var f = MailView.accountCheckFailed(msg.error);
+      mailEl('mail-acct-text').textContent = f.text;
+      mailEl('mail-acct-retry').textContent = f.button;
+      mailShow('mail-acct-retry', true);
+      mailAcctForm(false);
       return;
     }
     if (msg.ok) { mailEl('mail-acct-pw').value = ''; showToast(mailAcct.exists ? 'Saved. Try Send / Receive over the internet.' : 'Account created. Send / Receive over the internet is your first login.', 4000); }
@@ -15628,20 +15700,40 @@ var _paddleHoldTimer = { dit: null, dah: null };
 
   function mailRenderState() {
     var s = mailState || {};
-    mailAcctRender(s);
+    // The tab shows for the shack's owner whether Winlink is on or off: off
+    // says where to turn it on (W4). winlink-state is never sent to a Guest
+    // Pass (lib/remote-server.js _sendToOwners), so a guest never gets the tab.
     var btn = mailEl('mail-tab-btn');
-    if (btn) btn.classList.toggle('hidden', !s.enabled);
+    if (btn) btn.classList.toggle('hidden', !mailState);
+    var view = mailEl('mail-view');
+    if (view) view.classList.toggle('mail-is-off', !s.enabled);
+    var off = mailEl('mail-off');
+    if (off) { off.textContent = s.enabled ? '' : MailView.OFF_TEXT; off.classList.toggle('hidden', !!s.enabled); }
+    mailAcctRender(s);
     var badge = mailEl('tab-mail-badge');
     if (badge) { badge.textContent = String(s.unread || 0); badge.classList.toggle('hidden', !s.unread); }
     var sel = mailEl('mail-mode');
     if (sel) {
       var cur = sel.value || s.mode || 'telnet';
-      sel.innerHTML = (s.modes || []).map(function (m) {
-        return '<option value="' + esc(m.id) + '"' + (m.available ? '' : ' disabled') + '>' + esc(m.label) + (m.available ? '' : ' (unavailable)') + '</option>';
-      }).join('');
+      sel.textContent = '';
+      (s.modes || []).forEach(function (m) {
+        var o = document.createElement('option');
+        o.value = m.id;
+        o.disabled = !m.available;
+        o.textContent = MailView.modeOptionText(m);
+        sel.appendChild(o);
+      });
       var ok = (s.modes || []).some(function (m) { return m.id === cur && m.available; });
       sel.value = ok ? cur : 'telnet';
       mailEl('mail-radio').classList.toggle('hidden', sel.value === 'telnet');
+    }
+    // A greyed mode says why, in the shack's own words (W4).
+    var note = mailEl('mail-mode-note');
+    if (note) {
+      var why = MailView.modeReasons(s.modes);
+      note.textContent = '';
+      why.forEach(function (line) { var d = document.createElement('div'); d.textContent = line; note.appendChild(d); });
+      note.classList.toggle('hidden', !why.length);
     }
     mailRenderSession();
   }
@@ -15653,7 +15745,10 @@ var _paddleHoldTimer = { dit: null, dah: null };
     if (!el) return;
     if (!s.patReady) { el.textContent = s.patError ? 'Shack: ' + s.patError : 'The shack is starting Pat…'; }
     else {
-      var t = ss.state === 'error' ? (ss.error || 'The session did not finish.') : (ss.text || '');
+      // How a session ended is on the card (mailRenderEndCard); the line says
+      // it only once the card has been put away.
+      var carded = !!mailEndCardShown();
+      var t = carded ? '' : ss.state === 'error' ? (ss.error || 'The session did not finish.') : (ss.text || '');
       if (mailActive(ss) && ss.subject) t = (ss.direction === 'receiving' ? 'Receiving ' : 'Sending ') + '"' + ss.subject + '" ' + (ss.pct || 0) + '%';
       if (mailActive(ss) && ss.remainingSec != null) t += ' · ' + Math.floor(ss.remainingSec / 60) + ' min left';
       if (mailActive(ss) && ss.mode !== 'telnet') t = (ss.ptt ? 'TX · ' : 'RX · ') + t;
@@ -15662,9 +15757,10 @@ var _paddleHoldTimer = { dit: null, dah: null };
       // nothing is put in front of it. "Failed: connect: HTTP 500" is gone (#425).
       var words = { starting: 'Starting', connecting: 'Connecting', connected: 'Connected', disconnecting: 'Stopping', done: '', error: '' };
       el.textContent = (words[ss.state] ? words[ss.state] + ' · ' : '') + t;
-      el.style.color = ss.state === 'error' ? '#e94560' : ss.state === 'done' ? '#4ecca3' : '';
+      el.style.color = ss.state === 'done' ? '#4ecca3' : '';
       el.style.fontWeight = (ss.state === 'done' || ss.state === 'error') ? '700' : '';
     }
+    mailRenderEndCard();
     mailEl('mail-connect').classList.toggle('hidden', mailActive(ss));
     mailEl('mail-abort').classList.toggle('hidden', !mailActive(ss));
     var pr = mailEl('mail-prompt');
@@ -15685,6 +15781,71 @@ var _paddleHoldTimer = { dit: null, dah: null };
     }
   }
   var mailKeptWaitingFor = null; // the busy-channel prompt the operator chose to keep waiting on (#296)
+
+  // ── W2: how the last session ended, as a card ─────────────────────────
+  // "Mail exchanged with KY4RY" after a good radio session; the not-finished
+  // card (the shack's label and sentences, Try again, OK) after one that did
+  // not finish. Every word but the buttons is the shack's (session.outcome,
+  // lib/winlink-outcome.js) and is set with textContent. MailView.endCard()
+  // reads only the fields it knows, so new fields on session.outcome are ignored.
+  var mailCardDismissed = '';
+  var mailCardDrawn = '';
+  function mailEndCardShown() {
+    var card = MailView.endCard((mailState && mailState.session) || {}, { fmtDial: FreqDots.khzMhz });
+    return card && card.key !== mailCardDismissed ? card : null;
+  }
+  function mailRenderEndCard() {
+    var box = mailEl('mail-end-card');
+    if (!box) return;
+    var card = mailEndCardShown();
+    if (!card) { box.classList.add('hidden'); box.textContent = ''; mailCardDrawn = ''; return; }
+    // The session arrives twice a second: redraw only when the words change,
+    // so a button is never replaced under a finger.
+    var sig = [card.key, card.label, card.title].concat(card.lines).join('\n');
+    if (sig === mailCardDrawn) return;
+    mailCardDrawn = sig;
+    box.textContent = '';
+    box.className = 'mail-end-card mail-end-' + card.kind;
+    var add = function (tag, cls, text) {
+      var el = document.createElement(tag);
+      el.className = cls;
+      el.textContent = text;
+      box.appendChild(el);
+      return el;
+    };
+    add('div', 'mail-end-label', card.label);
+    add('div', 'mail-end-title', card.title);
+    card.lines.forEach(function (line) { add('div', 'mail-end-line', line); });
+    // AUTOMATIC RETRY (follow-up): the countdown line ("Trying KY4RY again in
+    // 14 s") and its Cancel button go HERE, between the sentences and the
+    // buttons, once the shack sends the retry fields on session.outcome. Add
+    // them to MailView.endCard() first; this function only draws its result.
+    var actions = add('div', 'mail-end-actions', '');
+    var dismiss = function () {
+      mailCardDismissed = card.key;
+      mailRenderSession();
+    };
+    if (card.retry) {
+      var again = document.createElement('button');
+      again.type = 'button';
+      again.id = 'mail-end-retry';
+      again.className = 'mail-btn mail-btn-main';
+      again.textContent = MailView.TRY_AGAIN;
+      // The same gateway, dial, mode and url the session used.
+      again.onclick = function () {
+        dismiss();
+        mailRequireNotice(function () { mailSend(MailView.retryMessage(card)); });
+      };
+      actions.appendChild(again);
+    }
+    var ok = document.createElement('button');
+    ok.type = 'button';
+    ok.id = 'mail-end-ok';
+    ok.className = 'mail-btn';
+    ok.textContent = card.ok;
+    ok.onclick = dismiss;
+    actions.appendChild(ok);
+  }
   function mailShowList() {
     mailEl('mail-list').classList.remove('hidden');
     mailEl('mail-reader').classList.add('hidden');
@@ -15757,23 +15918,75 @@ var _paddleHoldTimer = { dit: null, dah: null };
     if (g.distKm != null) parts.push(g.distKm + ' km');
     return parts.join('  ');
   }
+  // The line under the gateway list: prediction progress while it loads, the
+  // list's order once it is here, or why it did not load, with Try again (W4).
+  var mailGwSeq = 0;
+  var mailGwReqId = '';
+  var mailGwTimer = null;
+  function mailGwStatus(text, retry) {
+    var note = mailEl('mail-gw-note');
+    if (note) note.textContent = text || '';
+    mailShow('mail-gw-retry', !!retry);
+    mailShow('mail-gw-status', !!(text || retry));
+  }
+  function mailGwOneOption(text) {
+    var sel = mailEl('mail-gateway');
+    sel.textContent = '';
+    var o = document.createElement('option');
+    o.value = '';
+    o.textContent = text;
+    sel.appendChild(o);
+    sel.value = '';
+  }
+  function mailGwStopTimer() { if (mailGwTimer) { clearInterval(mailGwTimer); mailGwTimer = null; } }
   function mailRenderGateways() {
     var sel = mailEl('mail-gateway');
-    var note = mailEl('mail-gw-note');
-    if (note) note.textContent = mailGatewayNote;
-    if (!mailGateways.length) { sel.innerHTML = '<option value="">No gateways for that band</option>'; return; }
-    sel.innerHTML = mailGateways.slice(0, 80).map(function (g, i) {
-      return '<option value="' + i + '">' + esc(mailGatewayLabel(g)) + '</option>';
-    }).join('');
+    if (!mailGateways.length) { mailGwOneOption('No gateways for that band'); return; }
+    sel.textContent = '';
+    mailGateways.slice(0, 80).forEach(function (g, i) {
+      var o = document.createElement('option');
+      o.value = String(i);
+      o.textContent = mailGatewayLabel(g);
+      sel.appendChild(o);
+    });
+    sel.value = '0';
+  }
+  function mailGatewaysArrived(msg) {
+    if (msg.reqId && msg.reqId !== mailGwReqId) return; // an answer to an earlier band or mode
+    mailGwStopTimer();
+    mailGateways = msg.list || [];
+    mailRenderGateways();
+    mailGwStatus(MailView.gatewayNote(msg), false);
+  }
+  function mailGatewaysFailed(msg) {
+    if (msg.reqId && msg.reqId !== mailGwReqId) return;
+    mailGwStopTimer();
+    mailGateways = [];
+    var f = MailView.gatewaysFailed(msg.error);
+    mailGwOneOption(f.option);
+    mailEl('mail-gw-retry').textContent = f.button;
+    mailGwStatus(f.text, true);
   }
   function mailLoadGateways() {
     var mode = mailEl('mail-mode').value;
-    if (mode === 'telnet') return;
-    mailEl('mail-gateway').innerHTML = '<option value="">' + (mode === 'packet' || mode === 'varafm' ? 'Loading…' : 'Loading, predicting propagation…') + '</option>';
-    mailGatewayNote = '';
-    mailSend({ type: 'winlink-gateways-get', mode: mode, band: mailEl('mail-band').value });
+    mailGwStopTimer();
+    if (mode === 'telnet') { mailGwStatus('', false); return; }
+    var s = mailState || {};
+    mailGateways = [];
+    mailGwOneOption(MailView.loadingText(mode, s.predictionOn));
+    // How long the ranking has run, and about how long the last one took.
+    var t0 = Date.now();
+    var tick = function () { mailGwStatus(MailView.predictText({ mode: mode, predictionOn: s.predictionOn, predictMs: s.predictMs, elapsedMs: Date.now() - t0 }), false); };
+    tick();
+    if (mailEl('mail-gw-note').textContent) mailGwTimer = setInterval(tick, 1000);
+    mailGwReqId = 'gw' + (++mailGwSeq);
+    mailSend({ type: 'winlink-gateways-get', mode: mode, band: mailEl('mail-band').value, reqId: mailGwReqId });
   }
   function mailOnOpen() {
+    mailOpen = true;
+    // Winlink off on the shack: the tab only says where to turn it on. A
+    // request would start Pat (any winlink-* request does).
+    if (mailState && !mailState.enabled) return;
     mailSend({ type: 'winlink-list', box: mailBox });
     mailShowList();
   }
@@ -15795,8 +16008,12 @@ var _paddleHoldTimer = { dit: null, dah: null };
       mailSend({ type: 'winlink-set-mode', mode: mode });
       mailEl('mail-radio').classList.toggle('hidden', mode === 'telnet');
       mailGateways = [];
+      // Back to the internet without connecting: the gateway picker is closed, the radio goes back (W1).
+      if (mode === 'telnet') mailQsyRestore();
       mailLoadGateways();
     });
+    mailEl('mail-gw-retry').addEventListener('click', mailLoadGateways);
+    mailEl('mail-acct-retry').addEventListener('click', mailAcctCheck);
     mailEl('mail-band').addEventListener('change', mailLoadGateways);
     mailEl('mail-gateway').addEventListener('change', function () {
       var g = mailGateways[parseInt(mailEl('mail-gateway').value, 10)];
