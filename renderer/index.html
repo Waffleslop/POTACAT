@@ -3426,6 +3426,8 @@
           <input type="number" id="set-winlink-cap" min="10" max="60" value="30" style="width:50px;"> minutes
         </label>
         <span class="help-text" style="display:block;">A stuck session also ends after 3 minutes with no progress, and the transmitter is released if it stays keyed for 30 seconds.</span>
+        <label class="checkbox-label" style="margin-top:6px;"><input type="checkbox" id="set-winlink-record-audio"> Record what the modem hears on the next radio session</label>
+        <span class="help-text" style="display:block;">For a bug report: 30 seconds of the radio audio POTACAT gives the modem and 30 seconds of what the modem sends, saved as two sound files beside the modem's log. It switches itself off after that session. ARDOP and packet only.</span>
         <details style="margin-top:6px;">
           <summary class="help-text">Advanced</summary>
           <label>Pat binary:
