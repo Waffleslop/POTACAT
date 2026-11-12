@@ -19121,8 +19121,11 @@ function startJtcat(mode) {
     if (jtcatMapPopoutWin && !jtcatMapPopoutWin.isDestroyed()) {
       jtcatMapPopoutWin.webContents.send('jtcat-decode', data);
     }
-    // Broadcast to phone + advance remote QSO state machine
-    if (remoteServer && remoteServer.hasClient()) {
+    // Broadcast to phone + advance remote QSO state machine. Not gated on a
+    // connected client: remote-server keeps the last cycles for the next
+    // device that connects (it sends only when someone is there), so a web
+    // FT8 tab opened on an idle shack shows recent decodes at once (#249).
+    if (remoteServer) {
       const timeStr = jtcatPeriodUtc(data.mode);
       const sliceBand = jtcatManager ? jtcatManager.getDialFreq('default').band : '';
       remoteServer.broadcastJtcatDecode({ ...data, time: timeStr, sliceId: 'default', band: sliceBand });
@@ -19481,7 +19484,13 @@ function startJtcat(mode) {
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       jtcatPopoutWin.webContents.send('jtcat-status', data);
     }
-    if (remoteServer && remoteServer.hasClient()) remoteServer.broadcastJtcatStatus(data);
+    // Always, client or not: remote-server caches this for the next connect.
+    // Gated on hasClient(), the cache froze at whatever the last remote session
+    // saw. An idle-RX WSPR start (popout, no device connected) never reached
+    // it, so ECHOCAT Web connected hours later into "FT8 running" plus that
+    // session's old decodes, never sent jtcat-start, and sat on a WSPR engine
+    // (#249, kc8zp 11-03 and 11-08). broadcastJtcatStatus sends only to clients.
+    if (remoteServer) remoteServer.broadcastJtcatStatus(data);
     // FT8/FT4 are time-locked: the decoder only searches a ~±2.5 s window
     // around the slot boundary it derives from the OS clock, so a PC clock
     // more than ~1 s off UTC silently zeroes out decodes while audio + the
@@ -20490,6 +20499,10 @@ function stopJtcat() {
   // radio sat in SSTV RX (K3SBP 2026-11-01). The SSTV cancel path does the same.
   if (remoteServer) {
     try { remoteServer.broadcastJtcatTxStatus({ state: 'rx' }); } catch {}
+    // Same for the engine status (#249): multi-slice has no status listener,
+    // and a stop with nobody connected must still reach the hydration cache,
+    // or the next device to connect is told FT8 is running and never starts it.
+    try { remoteServer.broadcastJtcatStatus({ running: false }); } catch {}
   }
   wsprSessionEnd();       // results stay serveable; next session starts fresh
   pushActivityState();    // the "now" feed follows every stop

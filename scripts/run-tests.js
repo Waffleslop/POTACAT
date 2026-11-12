@@ -274,6 +274,7 @@ const TESTS = [
   'test/js8-remote-test.js',
   'test/idle-activity-test.js',
   'test/idle-mode-remote-test.js',
+  'test/remote-web-ft8-first-open-test.js',
   'test/js8call-threads-test.js',
   'test/js8call-main-wiring-test.js',
   'test/renderer-csp-test.js',
