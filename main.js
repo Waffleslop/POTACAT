@@ -355,6 +355,7 @@ const { CivCodec } = require('./lib/codecs/civ-codec');
 const IcomScope = require('./lib/icom-scope');
 const Sculan10Scope = require('./lib/sculan10-scope');
 const K4Pan = require('./lib/k4-pan');
+const KenwoodScope = require('./lib/kenwood-scope');
 const { CommanderCodec, commanderModel, probeCommander } = require('./lib/codecs/commander-codec');
 const CommanderSequences = require('./lib/commander-sequences');
 const { getTuneQuirks, resolveSerialHandshake, holdSerialLinesLow } = require('./lib/rig-models');
@@ -3422,6 +3423,9 @@ function getRigCapabilities(rigType) {
   // PAN frames arrive (lib/k4-pan.js, #396).
   if (!caps.nativeScope && k4ScopeAvailable()) caps.nativeScope = 'k4';
   if (!caps.nativeScope && icomScopeModel()) caps.nativeScope = 'icom';
+  // A Kenwood TS-890S on its USB/COM port: the radio's bandscope over CAT
+  // (lib/kenwood-scope.js, #397). Its model says so (bandscope 'kenwood-dd').
+  if (!caps.nativeScope && kenwoodScopeModel()) caps.nativeScope = 'kenwood';
   if (!caps.nativeScope && flexScopeAvailable()) caps.nativeScope = 'flex';
   if (!caps.nativeScope && sdrScopeSettingsForActiveRig().enabled) caps.nativeScope = 'sdr';
   // AF (speaker) level: the Flex slice's audio_level, or a codec with
@@ -32257,6 +32261,8 @@ function scopeLevelScale() {
   // = 0 dB on a 7300; -100..0 on a 7610), relative to its REF level, so
   // they are labelled "dB (radio)" and never claimed as dBm.
   if (s.source === 'icom' && icomScopeEntry) return { unit: 'radio', min: icomScopeEntry.dbmMin, max: icomScopeEntry.dbmMax };
+  // The TS-890S states its points as 0 dB (top) to -100 dB, relative: not dBm.
+  if (s.source === 'kenwood') return { ...KenwoodScope.LEVEL_SCALE };
   return { unit: null, min: 0, max: 255 };
 }
 
@@ -32444,6 +32450,7 @@ function startYaesuScope() {
   if (kind === 'icom') { startIcomScope(); return; }
   if (kind === 'sculan10') { startSculanScope(); return; }
   if (kind === 'k4') { startK4Scope(); return; }
+  if (kind === 'kenwood') { startKenwoodScope(); return; }
   if (yaesuScopeStopping && yaesuScopeStopping.exitCode === null && yaesuScopeStopping.signalCode === null) {
     if (!yaesuScopeStartAfterExit) sendCatLog('[Scope] waiting for the previous helper to release the radio');
     yaesuScopeStartAfterExit = true;
@@ -32620,6 +32627,7 @@ function stopYaesuScope(why) {
   if (flexScopeOn) { stopFlexScope(why); return; }
   if (sculanScopeOn) { stopSculanScope(why); return; }
   if (k4ScopeOn) { stopK4Scope(why); return; }
+  if (kenwoodScopeOn) { stopKenwoodScope(why); return; }
   if (icomScopeOn || (yaesuScopeState.source === 'icom' && !yaesuScopeProc)) { stopIcomScope(why); return; }
   yaesuScopeStopCatPolling();
   // SCU-LAN10 goes back off once the helper has let go, unless the scope was
@@ -32663,7 +32671,8 @@ function yaesuScopeOnFrame(f) {
     sendCatLog('[Scope] frames flowing (' + (f.kind === 1 ? 'synthetic signal' : yaesuScopeState.source === 'sdr' ? 'SDR' : yaesuScopeState.source === 'flex' ? 'Flex panadapter'
       : yaesuScopeState.source === 'icom' ? ((icomScopeEntry && icomScopeEntry.name) || 'Icom') + ' scope over CI-V'
       : yaesuScopeState.source === 'sculan10' ? 'SCU-LAN10 scope over the LAN'
-      : yaesuScopeState.source === 'k4' ? 'K4 panadapter over the network' : 'live radio') + ')');
+      : yaesuScopeState.source === 'k4' ? 'K4 panadapter over the network'
+      : yaesuScopeState.source === 'kenwood' ? 'TS-890S bandscope over CAT' : 'live radio') + ')');
     yaesuScopeSetStatus('live', null);
   }
   if (scopePopoutWin && !scopePopoutWin.isDestroyed()) {
@@ -32824,11 +32833,13 @@ function scopeSourceKind() {
   const flex = flexScopeAvailable();
   const sculan = sculanScopeAvailable();
   const k4 = k4ScopeAvailable();
-  if (sdr.enabled && (sdr.preferSdr || (!native && !icom && !flex && !sculan && !k4))) return 'sdr';
+  const kenwood = !!kenwoodScopeModel();
+  if (sdr.enabled && (sdr.preferSdr || (!native && !icom && !flex && !sculan && !k4 && !kenwood))) return 'sdr';
   if (sculan) return 'sculan10';
   if (k4) return 'k4';
   if (native) return 'yaesu';
   if (icom) return 'icom';
+  if (kenwood) return 'kenwood';
   return flex ? 'flex' : null;
 }
 
@@ -33267,6 +33278,167 @@ function stopK4Scope(why) {
   k4ScopeOn = false;
   yaesuScopeState.modeLabel = null;
   if (was) sendCatLog('[Scope] K4 panadapter stopped' + (why ? ' — ' + why : ''));
+  if (yaesuScopeState.status !== 'stopped') yaesuScopeSetStatus('stopped', null);
+}
+
+// ═══ The Kenwood TS-890S bandscope over CAT (lib/kenwood-scope.js, #397) ═════
+// On the USB/COM port POTACAT already polls, at 115200 baud. POTACAT reads
+// AI and DD0 first, sets AI0 only if Auto Information was on (DD0 5 is
+// refused on a port that uses it), asks for DD05, checks it took, and puts
+// both back at close. Each sweep is 33 DD4 lines: piece 00 states the mode
+// and range, so the axis is the radio's own. The lines interleave with the
+// poll's replies; the codec hands them on before anything else parses them,
+// and replies are matched by prefix, so the poll is not disturbed.
+let kenwoodScopeOn = false;
+let kenwoodScopeCtl = null;          // the RigController the listener is on
+let kenwoodScopeOff = null;          // detaches it
+let kenwoodScopeAsm = null;
+let kenwoodScopeRestore = [];        // what puts the radio back
+let kenwoodScopeTimer = null;
+let kenwoodScopeStartedAt = 0;
+let kenwoodScopeLastSweepAt = 0;
+let kenwoodScopeSeq = 0;
+let kenwoodScopeSetupBusy = false;
+let kenwoodScopeLastStateAt = 0;
+let kenwoodScopeOutOfRange = null;
+
+function kenwoodScopeModel() {
+  const { target, model } = icomScopeCaptureTarget();
+  if (!target || target.type !== 'serial') return null;   // the radio's own port, not rigctld or a TCP bridge
+  const info = model ? getModel(model, null) : null;
+  return KenwoodScope.modelHasScope(info) ? { name: model } : null;
+}
+
+function kenwoodScopeAttach(ctl) {
+  if (kenwoodScopeOff) kenwoodScopeOff();
+  kenwoodScopeCtl = ctl;
+  const asm = new KenwoodScope.SweepAssembler();
+  kenwoodScopeAsm = asm;
+  asm.on('sweep', (s) => { if (kenwoodScopeAsm === asm) kenwoodScopeOnSweep(s); });
+  const onLine = (line) => { if (kenwoodScopeAsm === asm) asm.feed(KenwoodScope.parseDdLine(line)); };
+  ctl.on('kenwood-scope', onLine);
+  kenwoodScopeOff = () => { ctl.removeListener('kenwood-scope', onLine); kenwoodScopeOff = null; };
+}
+
+/** Read AI and DD0, ask for DD05, confirm it took. */
+async function kenwoodScopeSetup() {
+  if (kenwoodScopeSetupBusy || !kenwoodScopeOn || !cat || !cat.connected || typeof cat.queryRaw !== 'function') return;
+  kenwoodScopeSetupBusy = true;
+  try {
+    const ask = (cmd, prefix) => cat.queryRaw(cmd, { prefix, timeoutMs: 1500 }).catch(() => null);
+    const ai = KenwoodScope.parseAi(await ask('AI;', 'AI'));
+    const dd0 = KenwoodScope.parseDd0(await ask('DD0;', 'DD0'));
+    if (!kenwoodScopeOn) return;
+    const plan = KenwoodScope.startPlan({ ai, dd0 });
+    sendCatLog(plan.log);
+    if (!plan.ok) { yaesuScopeSetStatus('error', KenwoodScope.diag('no-ai')); return; }
+    // Only the first setup of a session decides what "put back" means: a
+    // re-setup after a reconnect must not record our own AI0/DD05 as the
+    // operator's settings.
+    if (!kenwoodScopeRestore.length) kenwoodScopeRestore = plan.restore;
+    for (const w of plan.writes) cat.sendRaw(w);
+    await new Promise((r) => setTimeout(r, 600));
+    if (!kenwoodScopeOn || !cat || !cat.connected) return;
+    const now = KenwoodScope.parseDd0(await ask('DD0;', 'DD0'));
+    if (now !== '5') {
+      sendCatLog(`[Scope] TS-890S: DD0 reads ${now == null ? 'nothing' : now} after DD05, so the radio did not take it`);
+      yaesuScopeSetStatus('error', KenwoodScope.diag('refused'));
+    } else {
+      sendCatLog('[Scope] TS-890S: DD0 is 5, bandscope output on');
+    }
+  } finally {
+    kenwoodScopeSetupBusy = false;
+  }
+}
+
+function kenwoodScopeTick() {
+  if (!kenwoodScopeOn) return;
+  if (cat && cat.connected && kenwoodScopeCtl !== cat) {
+    kenwoodScopeAttach(cat);
+    kenwoodScopeSetup();
+    return;
+  }
+  const since = Date.now() - (kenwoodScopeLastSweepAt || kenwoodScopeStartedAt);
+  if (since > 6000 && yaesuScopeState.status !== 'error' && yaesuScopeState.status !== 'blocked') {
+    sendCatLog(`[Scope] TS-890S: no complete bandscope sweep for ${Math.round(since / 1000)} s` + (kenwoodScopeAsm && kenwoodScopeAsm.dropped ? ` (${kenwoodScopeAsm.dropped} incomplete dropped)` : ''));
+    yaesuScopeSetStatus('error', KenwoodScope.diag('silent'));
+  }
+}
+
+function kenwoodScopeOnSweep(s) {
+  kenwoodScopeLastSweepAt = Date.now();
+  const st = yaesuScopeState;
+  const ax = KenwoodScope.axisFor(s.header);
+  let spanChanged = false;
+  if (ax) {
+    if (ax.spanHz !== st.spanHz || ax.modeLabel !== st.modeLabel || st.anchor !== 'fixed') {
+      sendCatLog(`[Scope] TS-890S: ${ax.modeLabel} mode, ${YaesuScope.formatSpan(ax.spanHz)} from ${((ax.centerHz - ax.spanHz / 2) / 1e6).toFixed(3)} MHz`);
+      spanChanged = true;
+    }
+    const centreChanged = ax.centerHz !== st.centerHz;
+    st.anchor = 'fixed';
+    st.spanHz = ax.spanHz;
+    st.centerHz = ax.centerHz;
+    st.modeLabel = ax.modeLabel;
+    const now = Date.now();
+    if (spanChanged || (centreChanged && now - kenwoodScopeLastStateAt >= 200)) {
+      kenwoodScopeLastStateAt = now;
+      yaesuScopeBroadcastState();
+    }
+  }
+  if (s.header && s.header.outOfRange !== kenwoodScopeOutOfRange) {
+    kenwoodScopeOutOfRange = s.header.outOfRange;
+    if (s.header.outOfRange) sendCatLog('[Scope] TS-890S: the radio says the scope is outside its measuring range');
+  }
+  yaesuScopeOnFrame(KenwoodScope.toScopeFrame(s.points, { seq: ++kenwoodScopeSeq }));
+}
+
+function startKenwoodScope() {
+  if (kenwoodScopeOn) return;
+  const entry = kenwoodScopeModel();
+  if (!entry) return;
+  const { target } = icomScopeCaptureTarget();
+  Object.assign(yaesuScopeState, {
+    source: 'kenwood', kind: 0, spanCode: null, spanHz: 0, anchor: 'fixed', modeCode: null, modeLabel: null, speed: null, scuLan: null,
+    frames: 0, misaligned: 0, helperPath: '', catReads: null,
+    centerHz: _currentFreqHz || yaesuScopeState.centerHz || 0,
+  });
+  if (!KenwoodScope.baudOk(target)) {
+    // Not one command sent: the radio sends the scope only at 115200.
+    sendCatLog(`[Scope] ${entry.name}: the bandscope needs 115200 baud; this link is at ${target.baudRate || 'an unknown rate'}`);
+    yaesuScopeSetStatus('blocked', KenwoodScope.diag('baud', { baud: target.baudRate }));
+    return;
+  }
+  kenwoodScopeOn = true;
+  kenwoodScopeRestore = [];
+  kenwoodScopeStartedAt = Date.now();
+  kenwoodScopeLastSweepAt = 0;
+  kenwoodScopeOutOfRange = null;
+  sendCatLog(`[Scope] ${entry.name} bandscope over CAT (${target.path || 'serial'}, ${target.baudRate} baud)`);
+  yaesuScopeSetStatus('starting', null);
+  if (cat && cat.connected) { kenwoodScopeAttach(cat); kenwoodScopeSetup(); }
+  kenwoodScopeTimer = setInterval(kenwoodScopeTick, 2000);
+}
+
+function stopKenwoodScope(why) {
+  const was = kenwoodScopeOn;
+  kenwoodScopeOn = false;
+  if (kenwoodScopeTimer) { clearInterval(kenwoodScopeTimer); kenwoodScopeTimer = null; }
+  if (kenwoodScopeOff) kenwoodScopeOff();
+  kenwoodScopeAsm = null;
+  kenwoodScopeCtl = null;
+  yaesuScopeState.modeLabel = null;
+  if (kenwoodScopeRestore.length) {
+    if (cat && cat.connected && typeof cat.sendRaw === 'function') {
+      for (const w of kenwoodScopeRestore) cat.sendRaw(w);
+      sendCatLog(`[Scope] TS-890S: put back as it was (${kenwoodScopeRestore.join(' ')})` + (why ? ' — ' + why : ''));
+    } else {
+      sendCatLog(`[Scope] TS-890S: the radio is not connected, so ${kenwoodScopeRestore.join(' ')} could not be sent` + (why ? ' — ' + why : ''));
+    }
+    kenwoodScopeRestore = [];
+  } else if (was) {
+    sendCatLog('[Scope] TS-890S bandscope stopped' + (why ? ' — ' + why : ''));
+  }
   if (yaesuScopeState.status !== 'stopped') yaesuScopeSetStatus('stopped', null);
 }
 
