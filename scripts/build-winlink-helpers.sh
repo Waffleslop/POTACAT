@@ -142,7 +142,9 @@ if [[ " $want " == *" ardop "* ]]; then
       # (macos-14) do not (run 39906494543).
       ( cd "$WORK/ardop" && make ardopcf CC=cc CFLAGS="-g -MMD -std=gnu17 -Wno-int-conversion -D_DARWIN_C_SOURCE -include sys/types.h -I$ROOT/helpers/alsa-stub" LDFLAGS="" LDLIBS="-lm -lpthread" )
     else
-      ( cd "$WORK/ardop" && make ardopcf CFLAGS="-g -MMD -std=gnu17" )
+      # -Wno-int-conversion for the same rawhid.c PTT path as on macOS: GCC 14
+      # made it an error, and the release runners' GCC 11 only warns.
+      ( cd "$WORK/ardop" && make ardopcf CFLAGS="-g -MMD -std=gnu17 -Wno-int-conversion" )
     fi
     cp "$WORK/ardop/ardopcf$EXE" "$ROOT/assets/ardopcf/ardopcf$EXE"
     test -f "$ROOT/assets/ardopcf/ardopcf$EXE"
