@@ -35,7 +35,15 @@ console.log('winlink busy wait (#296)');
 test('the prompt carries when it began and Pat\'s 5-minute limit; each push adds how long it has waited', () => {
   assert.ok(/const WINLINK_BUSY_WAIT_SEC = 300;/.test(main), 'Pat\'s own limit');
   assert.ok(/prompt: \{ id: ev\.id, kind: ev\.prompt, message: ev\.message, at: Date\.now\(\), \.\.\.\(busyWait \? \{ limitSec: WINLINK_BUSY_WAIT_SEC \} : \{\}\) \}/.test(main));
-  assert.ok(/if \(s\.prompt && s\.prompt\.at\) s\.prompt = \{ \.\.\.s\.prompt, waitedSec:/.test(fnBody(main, 'winlinkSessionPush')), 'waitedSec is main\'s clock, so a phone needs none');
+  assert.ok(/if \(s\.prompt && s\.prompt\.at\) s\.prompt = \{ \.\.\.s\.prompt, waitedSec:/.test(fnBody(main, 'winlinkSessionView')), 'waitedSec is main\'s clock, so a phone needs none');
+  assert.ok(/const s = winlinkSessionView\(\);/.test(fnBody(main, 'winlinkSessionPush')));
+});
+
+test('the state push carries the same session as the session push, so the busy text never flickers', () => {
+  // Casey 2026-11-11: the busy prompt "blinks with more text after it". The
+  // state push sent the raw session (no waitedSec) between session pushes.
+  assert.ok(/snap\.session = winlinkSessionView\(\);\s*return snap;/.test(fnBody(main, 'winlinkPayload')));
+  assert.ok(!/winlinkPopoutSend\('winlink-session', \{ \.\.\.winlinkState\.session/.test(main), 'no raw session goes to the mail window');
 });
 
 test('the log line for a busy channel says how loud the radio audio is', () => {
