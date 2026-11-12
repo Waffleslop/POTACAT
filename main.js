@@ -4038,6 +4038,7 @@ function sendCatStatus(s) {
     } else if (linkUp !== _catLinkUpLast) {
       _catLinkUpLast = linkUp;
       stationSetupNotify();
+      sendVfoState(); // the VFO window stops (or starts) showing the radio's dial
       if (!linkUp) {
         // A Flex Direct station has no USB to drop: "lost" there means the
         // radio holds no slice POTACAT can tune (it will create one).
@@ -28946,6 +28947,10 @@ function sendVfoState() {
     // window's Rig button (shown only while CAT answers) hid Power On exactly
     // when it was needed (KQ5O FTDX101MP over a remote shack, 2026-10-26).
     power: vfoPowerAvailable(),
+    // False while the radio does not answer (switched off, cable out): the
+    // window shows dashes, not the last dial, which looked like a radio
+    // still on after Power Off.
+    radioLinkUp: vfoRadioLinkUp(),
     wfm: vfoWfmAvailable(),         // a Wideband FM button in the mode picker
     // The TX power control (GitHub #199): the same payload as the JTCAT and
     // Winlink windows' TX Pwr, caps already scaled by Full power (W).
@@ -28977,6 +28982,11 @@ function sendVfoScanState() {
   if (!vfoPopoutWin || vfoPopoutWin.isDestroyed()) return;
   vfoPopoutWin.webContents.send('vfo-scan-state', { on: !!(desktopScanning || _phoneScanning) });
 }
+function vfoRadioLinkUp() {
+  if (isRemoteMode() || sdrHoldsDial()) return true; // the dial shown is the shack's or the SDR's
+  return !_catLinkUpKnown || _catLinkUpLast;
+}
+
 function vfoPowerAvailable() {
   try { return !!getRigCapabilities(detectRigType()).power; } catch { return false; }
 }
