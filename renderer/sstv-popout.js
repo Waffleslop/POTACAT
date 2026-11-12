@@ -334,11 +334,10 @@ const freqInput = document.getElementById('freq-input');
 const tuneBtn = document.getElementById('tune-btn');
 
 // The sideband SSTV uses on a frequency: LSB below 10 MHz except 60 m,
-// which is USB by regulation. The ECHOCAT app uses the same rule.
+// which is USB by regulation. One rule for every tune (lib/ssb-sideband.js);
+// the ECHOCAT app uses the same.
 function getFreqMode(freqKhz) {
-  const k = parseInt(freqKhz);
-  if (k >= 5250 && k <= 5450) return 'USB';
-  return k < 10000 ? 'LSB' : 'USB';
+  return window.SsbSideband.ssbSideband(parseInt(freqKhz) * 1000);
 }
 
 // Show a frequency main chose in the dropdown (or the custom box) and tune it.
@@ -2158,7 +2157,7 @@ multiStartBtn.addEventListener('click', async () => {
 
   // Tune each Flex slice to its SSTV frequency (creates the slice if needed)
   for (const cfg of multiSliceConfigs) {
-    window.api.tune(String(cfg.freqKhz), cfg.freqKhz < 10000 ? 'LSB' : 'USB', undefined, cfg.slicePort);
+    window.api.tune(String(cfg.freqKhz), getFreqMode(cfg.freqKhz), undefined, cfg.slicePort);
   }
 
   // Build decode panes

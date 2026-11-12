@@ -943,6 +943,14 @@ function tuneFromPopout(freqKhz, mode, bearing, slicePort) {
   _freqSuppressDeadline = Date.now() + 3000;
   window.api.tune(freqKhz, mode, bearing, slicePort);
 }
+// A band button or a typed frequency: in voice SSB the radio takes the band's
+// sideband (LSB below 10 MHz, USB above and on 60 m), as a spot click does;
+// every other mode stays (#445). The dial and the wheel keep the mode.
+function tuneJumpFromPopout(freqKhz) {
+  _freqSuppressTarget = Math.round(freqKhz * 1000);
+  _freqSuppressDeadline = Date.now() + 3000;
+  window.api.tuneByBand(freqKhz);
+}
 let currentFilterWidth = 0;
 let currentTxPower = null; // watts — tracked from vfo-radio-state so profiles can snapshot it
 let currentRfGain = null;  // 0–100, from vfo-radio-state (rig presets "Save current")
@@ -1271,7 +1279,7 @@ function buildBandGrid(container) {
     btn.dataset.freq = b.freq;
     btn.addEventListener('click', () => {
       if (vfoLocked) return;
-      tuneFromPopout(b.freq);
+      tuneJumpFromPopout(b.freq);
     });
     container.appendChild(btn);
   }
@@ -1995,7 +2003,7 @@ kpGo.addEventListener('click', () => {
   if (vfoLocked) { window.api.setVfoLock(true); return; }
   const khz = kpTargetKhz(kpBuffer);
   if (!khz) return;
-  tuneFromPopout(khz);
+  tuneJumpFromPopout(khz);
   currentFreqHz = khz * 1000;
   kpRememberRecent(khz);
   kpBuffer = '';

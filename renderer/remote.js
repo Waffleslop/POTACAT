@@ -4123,7 +4123,7 @@
       return;
     }
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'tune', freqKhz: val.toString(), mode: '' }));
+      ws.send(JSON.stringify({ type: 'tune', freqKhz: val.toString(), mode: '', pickSideband: true }));
     }
     cancelFreqEdit();
   }
@@ -4179,14 +4179,19 @@
     }
   }
 
-  function dpTune(freqKhz) {
+  // pickSideband: a band button or a typed frequency. In voice SSB the shack
+  // then picks the band's sideband, as for a spot (#445); a dial step or
+  // the arrows leave it unset and keep the mode.
+  function dpTune(freqKhz, pickSideband) {
     if (!freqKhz || isNaN(freqKhz) || freqKhz < 100 || freqKhz > 500000) return;
     if (vfoLocked) {
       showToast('VFO Locked — Unlock VFO to change frequency', 2000);
       return;
     }
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'tune', freqKhz: freqKhz.toString(), mode: '' }));
+      var tuneMsg = { type: 'tune', freqKhz: freqKhz.toString(), mode: '' };
+      if (pickSideband) tuneMsg.pickSideband = true;
+      ws.send(JSON.stringify(tuneMsg));
     }
     // Immediately update local display
     const hz = Math.round(freqKhz * 1000);
@@ -4226,7 +4231,7 @@
 
   dpGo.addEventListener('click', () => {
     const val = parseFloat(dpInput);
-    dpTune(val);
+    dpTune(val, true);
     closeDialPad();
   });
 
@@ -7173,7 +7178,7 @@
           var freqEl = document.getElementById('sstv-freq-phone');
           if (freqEl && freqEl.value) {
             var fOpt = freqEl.options[freqEl.selectedIndex];
-            var fMode = (fOpt && fOpt.dataset.mode) || (parseInt(freqEl.value) < 10000 ? 'LSB' : 'USB');
+            var fMode = (fOpt && fOpt.dataset.mode) || 'SSB'; // the shack picks the band's sideband
             ws.send(JSON.stringify({ type: 'tune', freqKhz: freqEl.value, mode: fMode }));
           }
         } catch (e) {}
@@ -12344,11 +12349,9 @@ var _paddleHoldTimer = { dit: null, dah: null };
             showToast('VFO Locked — Unlock VFO to change frequency', 2000);
             return;
           }
+          // A net listed as SSB goes as SSB: the shack resolves it to the
+          // band's sideband (lib/ssb-sideband.js; 60 m is USB).
           var mode = (net.mode || '').toUpperCase();
-          if (mode === 'SSB') {
-            var lsbBands = { '160m': 1, '80m': 1, '60m': 1, '40m': 1 };
-            mode = lsbBands[band] ? 'LSB' : 'USB';
-          }
           var freqStr = String(net.frequency);
           if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'tune', freqKhz: freqStr, mode: mode }));
@@ -14920,7 +14923,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
     fullview.querySelectorAll('.vf-band').forEach((btn) => {
       btn.addEventListener('click', () => {
         const khz = parseInt(btn.dataset.khz, 10);
-        if (khz > 0) dpTune(khz);
+        if (khz > 0) dpTune(khz, true);
       });
     });
 

@@ -128,7 +128,7 @@ test('remote MODE guards the local rig; sends need the LINK and refuse out loud'
   const ccAt = main.indexOf('async function connectCat() {');
   const cc = main.slice(ccAt, main.indexOf("_connectCatSkipLogged = '';", ccAt));
   assert.ok(/if \(isRemoteMode\(\)\) \{/.test(cc), 'connectCat refuses while a shack is the target, linked or not');
-  const tune = handlerBody(main, "ipcMain.on('tune', (_e, { frequency, mode, bearing, slicePort, origin }) => {");
+  const tune = handlerBody(main, "ipcMain.on('tune', (_e, { frequency, mode, bearing, slicePort, origin, pickSideband }) => {");
   assert.ok(/if \(isRemoteMode\(\)\) \{\n\s+if \(!isRemoteLinked\(\)\) \{ refuseRemoteNotLinked\(_e\.sender\); return; \}/.test(tune), 'tune');
   const rc = main.slice(main.indexOf("ipcMain.handle('rig-control', (_e, data) => {"), main.indexOf("return applyRigControl(data, 'desktop');"));
   assert.ok(/isRemoteMode\(\) && !\(data && data\.action === 'get-state'\)/.test(rc), 'get-state answers from the mirror');
