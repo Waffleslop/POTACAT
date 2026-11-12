@@ -883,6 +883,10 @@
   let ft8CountdownTimer = null;
   let ft8CycleBoundary = 0;     // epoch ms of next cycle boundary
   let ft8Mode = 'FT8';
+  // The mode this tab would run: ft8Mode follows an idle-RX session (WSPR,
+  // PSK31, JTTY) for display; opening the tab hands the radio back in this.
+  let ft8OwnMode = 'FT8';
+  let ft8IdleRx = null;         // jtcat-status idleRx: the engine is the shack's idle receive
   let ft8HuntCall = '';        // callsign we're hunting from spot list
   let ft8UserScrolled = false; // true when user has scrolled up in decode log
   let ft8CqFilter = false;     // CQ-only filter
@@ -2918,7 +2922,11 @@
         // the FT8 tab never sent jtcat-start after an idle stop (kc8zp 11-03:
         // the Cloud FT8 view stayed stale until the phone app woke it).
         ft8Running = msg.running === true || msg.state === 'running';
+        // idleRx: the shack's idle receive (WSPR, PSK31, JTTY) owns the engine.
+        // Opening the tab takes it over (Casey 2026-11-12, #249 follow-up).
+        ft8IdleRx = ft8Running && msg.idleRx ? String(msg.idleRx) : null;
         if (ft8Running) ft8Mode = msg.mode || ft8Mode;
+        if (ft8Running && !ft8IdleRx) ft8OwnMode = ft8Mode;
         ft8ModeSelect.value = ft8Mode;
         ft8SyncStatus.textContent = 'Sync: ' + (msg.sync || '--');
         applyDigitalPanes(); // host-driven mode change (popout/phone) swaps panes too
@@ -3769,6 +3777,7 @@
       // an FT4 spot was hunted by an FT8 engine; LZ3AW item 15).
       const modeChanged = ft8Mode !== modeUpper;
       ft8Mode = modeUpper;
+      ft8OwnMode = modeUpper;
       ft8ModeSelect.value = ft8Mode;
       if (modeChanged) {
         updateBandFreqs();
@@ -7121,10 +7130,9 @@
       updateLogViewState();
     } else if (tab === 'ft8') {
       ft8View.classList.remove('hidden');
-      // Auto-start engine if not running
-      if (!ft8Running) {
-        ft8Send({ type: 'jtcat-start', mode: ft8Mode });
-      }
+      // Auto-start engine if not running, or take it from the shack's idle
+      // receive: an idle WSPR is nobody's session (Casey 2026-11-12).
+      if (!ft8Running || ft8IdleRx) ft8TakeEngine();
       // If coming from a spot click with a specific frequency, select the matching band
       // and skip the default band tune (the spot already tuned the radio)
       var spotFreq = opts && opts.freqKhz ? parseFloat(opts.freqKhz) : 0;
@@ -9166,9 +9174,23 @@
     ft8UserScrolled = false;
   });
 
+  // Start the engine in this tab's own mode. Over an idle-RX session the
+  // desktop's jtcat-start cancels the idle receive (markUserActive) first.
+  function ft8TakeEngine() {
+    if (ft8IdleRx) {
+      ft8Mode = ft8OwnMode;
+      ft8ModeSelect.value = ft8Mode;
+      ft8IdleRx = null;
+      updateBandFreqs();
+      if (typeof applyDigitalPanes === 'function') applyDigitalPanes();
+    }
+    ft8Send({ type: 'jtcat-start', mode: ft8Mode });
+  }
+
   // --- Mode select ---
   ft8ModeSelect.addEventListener('change', () => {
     ft8Mode = ft8ModeSelect.value;
+    ft8OwnMode = ft8Mode;
     updateBandFreqs();
     ft8Send({ type: 'jtcat-set-mode', mode: ft8Mode });
     ft8StartCountdown(); // restart with new cycle duration
@@ -9213,10 +9235,8 @@
     ft8DecodeLog = [];
     ft8DecodeLogEl.innerHTML = '<div class="ft8-empty">Switching to ' + band + '...</div>';
     ft8UserScrolled = false;
-    // Auto-start if not running
-    if (!ft8Running) {
-      ft8Send({ type: 'jtcat-start', mode: ft8Mode });
-    }
+    // Auto-start if not running, or take it from the shack's idle receive
+    if (!ft8Running || ft8IdleRx) ft8TakeEngine();
   });
 
   // --- Waterfall tap to set TX freq ---
