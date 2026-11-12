@@ -404,6 +404,7 @@ const { sanitizeKiwiSdrList, reconcileSdrSettings } = require('./lib/sdr-list-sy
 const { stripSigTag, appendTag, ensureSigTag } = require('./lib/log-comment');
 const { buildWrlContactInfo } = require('./lib/wrl-packet');
 const YaesuScope = require('./lib/yaesu-scope');
+const Ft4222Lib = require('./lib/ft4222-library');
 const SdrScope = require('./lib/sdr-scope');
 const RtlTcpAudio = require('./lib/rtltcp-audio');
 const ScopeOverlay = require('./lib/scope-overlay');
@@ -5889,12 +5890,6 @@ function stationSetupResultsFor(rigId) {
 // rights, no System32, and it survives app updates.
 function ftdiUserDir() { return path.join(app.getPath('userData'), 'ftdi'); }
 
-function ft4222LibraryNames() {
-  if (process.platform === 'win32') return ['LibFT4222-64.dll', 'LibFT4222.dll'];
-  if (process.platform === 'darwin') return ['libft4222.dylib'];
-  return ['libft4222.so', 'libft4222.so.1.4.7', 'libft4222.so.1.4.6', 'libft4222.so.1.4.4.44'];
-}
-
 // Same places the helper's LoadLibrary/dlopen will look, plus ours.
 function ft4222SearchDirs() {
   const dirs = [ftdiUserDir()];
@@ -5910,24 +5905,38 @@ function ft4222SearchDirs() {
   return dirs;
 }
 
+function readHead(p, n = 4096) {
+  const fd = fs.openSync(p, 'r');
+  try { const b = Buffer.alloc(n); const got = fs.readSync(fd, b, 0, n, 0); return b.subarray(0, got); } finally { fs.closeSync(fd); }
+}
+
+// The LibFT4222 the helper will load, by the same rules (lib/ft4222-library.js):
+// FTDI's versioned Mac and Linux names count (#360). On a Mac the library
+// needs libftd2xx.dylib in the same folder; d2xxFound says whether it is.
 function findFt4222() {
+  const plat = process.platform;
   const dirs = ft4222SearchDirs();
-  const has = (name) => dirs.some(d => { try { return fs.existsSync(path.join(d, name)); } catch { return false; } });
-  // The helper is 64-bit: a 32-bit LibFT4222.dll on the PATH is a file it
-  // cannot load, so it does not count as installed.
-  const usable = (name) => dirs.some(d => {
+  let libraryFound = false, libraryPath = null, d2xxBeside = false, archs = null;
+  for (const d of dirs) {
+    let names;
+    try { names = fs.readdirSync(d); } catch { continue; }
+    const pick = Ft4222Lib.pickInFolder(names, plat);
+    if (!pick.library) continue;
+    const p = path.join(d, pick.library);
     try {
-      const p = path.join(d, name);
-      if (!fs.existsSync(p)) return false;
-      if (process.platform !== 'win32') return true;
-      const fd = fs.openSync(p, 'r');
-      try { const b = Buffer.alloc(4096); fs.readSync(fd, b, 0, 4096, 0); return StationSetup.peMachine(b) !== 'x86'; } finally { fs.closeSync(fd); }
-    } catch { return false; }
-  });
-  const libraryFound = ft4222LibraryNames().some(usable);
-  // ftd2xx.dll is FTDI's D2XX driver (Windows only; libft4222 bundles it on Unix).
-  const d2xxFound = process.platform !== 'win32' || has('ftd2xx.dll');
-  return { libraryFound, d2xxFound };
+      // The helper is 64-bit: a 32-bit LibFT4222.dll on the PATH is a file it
+      // cannot load, so it does not count as installed.
+      if (plat === 'win32' && StationSetup.peMachine(readHead(p)) === 'x86') continue;
+      if (plat === 'darwin') archs = Ft4222Lib.machoArchs(readHead(p));
+    } catch { continue; }
+    libraryFound = true; libraryPath = p; d2xxBeside = !!pick.d2xx;
+    break;
+  }
+  let d2xxFound;
+  if (plat === 'win32') d2xxFound = dirs.some(d => { try { return fs.existsSync(path.join(d, 'ftd2xx.dll')); } catch { return false; } });
+  else if (plat === 'darwin') d2xxFound = !libraryFound || d2xxBeside;
+  else d2xxFound = true;   // libft4222.so carries the D2XX calls itself
+  return { libraryFound, d2xxFound, libraryPath, archs };
 }
 
 function stationSetupLive(rig) {
@@ -32345,6 +32354,9 @@ function startYaesuScope() {
     if (process.platform === 'win32') pre('PATH', ';');
     else if (process.platform === 'darwin') pre('DYLD_LIBRARY_PATH', ':');
     else pre('LD_LIBRARY_PATH', ':');
+    // The helper also scans this folder itself for FTDI's versioned file
+    // names and loads libftd2xx.dylib from it first (#360).
+    env.POTACAT_FTDI_DIR = ftdiDir;
     proc = spawn(helperPath, args, { stdio: ['pipe', 'pipe', 'pipe'], env });
   } catch (err) {
     yaesuScopeSetStatus('error', { key: 'spawn', severity: 'error', headline: 'Could not start the scope helper', detail: err.message });
@@ -32431,8 +32443,16 @@ function startYaesuScope() {
       d = { ...d, headline: 'The FTDI D2XX driver could not be loaded', action: 'Install the D2XX setup executable from ftdichip.com, then reopen the Band Scope.' };
     } else if (d.key === 'no-library' && /missing entry points|cannot enumerate/.test(yaesuScopeStderr)) {
       d = { ...d, headline: 'This FTDI library is the wrong version', action: 'Download the current LibFT4222 from ftdichip.com, and press Find the file for me in Station Setup.' };
-    } else if (d.key === 'no-library' && findFt4222().libraryFound) {
-      d = { ...d, headline: 'LibFT4222 is on this computer but would not load', action: 'Press Find the file for me in Station Setup and choose LibFT4222-64.dll from the amd64 folder.' };
+    } else if (d.key === 'no-library' && (/found but would not load|load failed: /.test(yaesuScopeStderr) || findFt4222().libraryFound)) {
+      // The loader's own reason (dlerror) goes in the card and the log, in
+      // the platform's words (#360).
+      const lib = findFt4222();
+      const fail = Ft4222Lib.loadFailureDiag({ platform: process.platform, stderr: yaesuScopeStderr,
+        archs: lib.archs, helper: Ft4222Lib.helperArch(process.arch) });
+      d = { ...d, headline: fail.headline, detail: fail.detail || d.detail, action: fail.action };
+      sendCatLog('[Scope] LibFT4222 would not load (' + fail.kind + ')' + (lib.libraryPath ? ': ' + lib.libraryPath : '')
+        + (lib.archs ? ' [' + lib.archs.join('+') + ', helper ' + Ft4222Lib.helperArch(process.arch) + ']' : '')
+        + (fail.reason ? ' -- ' + fail.reason : ''));
     }
     // With SCU-LAN10 OFF the FT-710's FT4222 is not on USB at all (GitHub
     // #113 item 7, mdeltito), so "no FT4222 device" is the menu, not a driver:
@@ -43286,31 +43306,50 @@ function cloudShackNotice(text, kind) {
       case 'open-ftdi-download': shell.openExternal('https://ftdichip.com/software-examples/ft4222h-software-examples/'); break;
       case 'open-ftdi-driver': shell.openExternal('https://ftdichip.com/drivers/d2xx-drivers/'); break;
       case 'locate-ft4222': {
-        const names = ft4222LibraryNames();
+        const plat = process.platform;
         const pick = await dialog.showOpenDialog(win, {
-          title: process.platform === 'win32' ? 'Choose LibFT4222-64.dll (in the amd64 folder)' : 'Choose the libft4222 file',
+          title: plat === 'win32' ? 'Choose LibFT4222-64.dll (in the amd64 folder)'
+            : plat === 'darwin' ? 'Choose the libft4222 file in the "build" folder' : 'Choose the libft4222 file',
           properties: ['openFile'],
-          filters: process.platform === 'win32' ? [{ name: 'LibFT4222', extensions: ['dll'] }] : [],
+          filters: plat === 'win32' ? [{ name: 'LibFT4222', extensions: ['dll'] }]
+            : plat === 'darwin' ? [{ name: 'LibFT4222', extensions: ['dylib'] }] : [],
         });
         if (pick.canceled || !pick.filePaths || !pick.filePaths[0]) break;
         const src = pick.filePaths[0];
-        const base = path.basename(src);
-        if (!/^libft4222/i.test(base)) {
-          message = `That file is "${base}". Choose the one named ${names[0]}.`;
-          break;
-        }
+        const srcDir = path.dirname(src);
+        let siblings = [];
+        try { siblings = fs.readdirSync(srcDir); } catch { /* the plan says what is missing */ }
+        // FTDI's Mac library is libft4222.<version>.dylib and needs
+        // libftd2xx.dylib beside it: the plan copies both, under the names
+        // the helper asks for first (#360).
+        const plan = Ft4222Lib.installPlan({ platform: plat, chosenName: path.basename(src), siblings });
+        if (!plan.ok) { message = plan.message; break; }
         try {
-          if (process.platform === 'win32') {
+          if (plat === 'win32') {
             const arch = StationSetup.peMachine(fs.readFileSync(src));
             if (arch === 'x86') { message = 'That is the 32-bit copy. Choose the one in the folder named "amd64".'; break; }
             if (arch !== 'x64') { message = 'That file is not a 64-bit Windows library. Choose LibFT4222-64.dll from the folder named "amd64".'; break; }
           }
+          if (plat === 'darwin') {
+            const archs = Ft4222Lib.machoArchs(readHead(src));
+            const need = Ft4222Lib.helperArch(process.arch);
+            if (archs && !archs.includes(need)) {
+              message = `That copy of the library is built for ${archs.join(' and ')}, and this POTACAT needs ${need}. Download the current LibFT4222 for Mac from FTDI and choose the file in its "build" folder.`;
+              break;
+            }
+          }
           fs.mkdirSync(ftdiUserDir(), { recursive: true });
-          // Always install under the name the helper asks for first.
-          const destName = process.platform === 'win32' ? 'LibFT4222-64.dll' : base;
-          fs.copyFileSync(src, path.join(ftdiUserDir(), destName));
-          sendCatLog(`[Setup] FTDI LibFT4222 installed for the band scope: ${destName} -> ${ftdiUserDir()}`);
-          message = 'Done. The file is installed.';
+          for (const c of plan.copies) {
+            const dest = path.join(ftdiUserDir(), c.to);
+            fs.copyFileSync(path.join(srcDir, c.from), dest);
+            // The operator chose this file. A copy keeps the download's
+            // quarantine flag, which can make macOS refuse to load it.
+            if (plat === 'darwin') {
+              try { require('child_process').execFileSync('/usr/bin/xattr', ['-d', 'com.apple.quarantine', dest], { stdio: 'ignore' }); } catch { /* it was not quarantined */ }
+            }
+            sendCatLog(`[Setup] FTDI library installed for the band scope: ${c.from} -> ${dest}`);
+          }
+          message = plan.message;
         } catch (err) {
           message = `Could not copy the file: ${err.message}`;
         }

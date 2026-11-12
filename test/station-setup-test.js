@@ -227,6 +227,23 @@ t('band scope: installed but never run -> open the scope; live -> ok; helper dia
   assert.ok(sk.actions.some(a => a.id === 'unskip'));
 });
 
+t('band scope on a Mac (#360): Mac download steps, libftd2xx beside the library, the loader reason shown', () => {
+  const lib = step(evalRig({ model: 'FT-710', platform: 'darwin', live: { scope: { libraryFound: false, d2xxFound: true } } }), 'band-scope');
+  const words = lib.instructions[0].steps.join(' ');
+  assert.match(words, /\.dmg/);
+  assert.match(words, /"build"/);
+  assert.doesNotMatch(words + lib.detail, /amd64|\.dll|zip file\.$/);
+  const noD2 = step(evalRig({ model: 'FT-710', platform: 'darwin', live: { scope: { libraryFound: true, d2xxFound: false } } }), 'band-scope');
+  assert.strictEqual(noD2.state, 'needs');
+  assert.match(noD2.detail, /libftd2xx\.dylib/);
+  assert.ok(noD2.actions.some(a => a.id === 'locate-ft4222'));
+  const noLoad = step(evalRig({ model: 'FT-710', platform: 'darwin', live: { scope: { libraryFound: true, d2xxFound: true, status: 'blocked', diagKey: 'no-library',
+    diagHeadline: 'LibFT4222 is on this computer but would not load', diagDetail: 'The computer said: Library not loaded: libftd2xx.dylib' } } }), 'band-scope');
+  const s = noLoad.instructions[0].steps.join(' ');
+  assert.match(s, /The computer said: Library not loaded/);
+  assert.doesNotMatch(s, /amd64|\.dll/);
+});
+
 // --- summary, remembered passes, the launch prompt ---
 t('summary: next = first unfinished required step that is not waiting on another', () => {
   const r = evalRig({ model: 'IC-7300', live: { rxTest: null, txTest: null } });
@@ -299,6 +316,10 @@ t('main.js: settings saves keep setup progress; test-transmit restore trusts onl
   has('_lastPowerReadback = { watts: Number(watts) || 0, at: Date.now() }; if (!isRemoteMode()) stationSetupReconcilePower(Number(watts) || 0);');
   has('const back = await waitForPowerReadback(sentAt, (w) => w > testW + 0.5, 6000);');
   has("if (process.platform === 'win32') pre('PATH', ';');");
+  has('env.POTACAT_FTDI_DIR = ftdiDir;');
+  has("const plan = Ft4222Lib.installPlan({ platform: plat, chosenName: path.basename(src), siblings });");
+  // The "would not load" card is the platform's (#360): no amd64 advice hard-coded in main.js.
+  assert.ok(!main.includes("choose LibFT4222-64.dll from the amd64 folder.' };"), 'main.js still hard-codes the Windows wording for every platform');
   has("proc = spawn(helperPath, args, { stdio: ['pipe', 'pipe', 'pipe'], env });");
   has("_stationSetupLaunchLastVersion = settings.lastVersion || null;");
   for (const ch of ['station-setup-get', 'station-setup-report', 'station-setup-action']) has(`ipcMain.handle('${ch}'`);
