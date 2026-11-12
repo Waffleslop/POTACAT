@@ -90,8 +90,10 @@ class Direction {
   }
   push(f32) {
     const now = Date.now();
-    // A new transmission: more than 60 ms since the last transmit audio.
-    if (now - this.lastTxAt > 60) {
+    // A new transmission: no transmit audio for 250 ms. ardopcf writes its
+    // audio in chunks up to ~100 ms apart within one frame, so a shorter
+    // pause is the same transmission (key delay would otherwise cut every chunk).
+    if (now - this.lastTxAt > 250) {
       this.dropLeft = Math.round((this.imp.keyDelayMs || 0) * this.rate / 1000);
     } else {
       const gap = now - this.lastTxAt;

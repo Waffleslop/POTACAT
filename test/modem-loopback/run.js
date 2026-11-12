@@ -5,6 +5,7 @@
 //   node test/modem-loopback/run.js                 L1 + L2, ARDOP and packet (the CI set)
 //   node test/modem-loopback/run.js --modem ardop   one modem
 //   node test/modem-loopback/run.js --stress        the tolerance matrix (long)
+//   --filter <regex>   only the cases whose label matches
 //   --out <file.json>  results;  --logs <dir>  modem logs
 //
 // Needs the built helpers in assets/ (ardopcf, direwolf). Without them it says
@@ -73,8 +74,8 @@ function stressSet() {
   const add = (name, imp) => s.push({ ...base, imp, label: `${m} stress ${name}` });
   for (const g of [-10, -20, -30, -40]) add(`level ${g} dB`, { gainDb: g });
   for (const n of [-50, -40, -30, -25, -20]) add(`noise ${n} dBFS`, { noiseDbfs: n });
-  for (const p of [50, 500, 5000]) add(`clock ${p} ppm`, { ppm: p });
-  for (const d of [5, 20, 100]) add(`dropout ${d} ms/s`, { dropoutMs: d });
+  for (const p of [50, 500, 1000, 2000, 5000]) add(`clock ${p} ppm`, { ppm: p });
+  for (const d of [2, 5, 10, 20, 50, 100]) add(`dropout ${d} ms/s`, { dropoutMs: d });
   for (const k of [50, 150, 300, 500]) add(`key delay ${k} ms`, { keyDelayMs: k });
   return s;
 }
@@ -88,7 +89,9 @@ function stressSet() {
     console.log(`modem loopback: ${required ? 'FAIL' : 'SKIP'} (no helper at ${missing.join(', ')}; build them with scripts/build-winlink-helpers.sh)`);
     process.exit(required ? 1 : 0);
   }
-  const set = has('--stress') ? stressSet() : ciSet();
+  let set = has('--stress') ? stressSet() : ciSet();
+  const filt = opt('--filter', '');
+  if (filt) set = set.filter((c) => new RegExp(filt, 'i').test(c.label));
   const results = [];
   for (const c of set) results.push(await once(c));
   const summary = { platform: process.platform, arch: process.arch, node: process.version, when: new Date().toISOString(), passed: results.filter((r) => r.ok).length, total: results.length };
