@@ -299,6 +299,14 @@
     .sdr-dd-item.current { font-weight: 700; background: color-mix(in srgb, var(--blue) 16%, transparent); box-shadow: inset 3px 0 0 var(--blue); }
     .sdr-dd-item.current:hover { background: color-mix(in srgb, var(--blue) 24%, transparent); }
     .sdr-dd-item.conn::after { content: ' \25CF'; color: var(--green); }
+    /* A receiver that would not come on (#390): the words, Try again, and a mark in the list. */
+    .sdr-fail { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 6px 6px 6px 10px; border-radius: 8px; background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--t); font-size: 13px; line-height: 1.3; }
+    .sdr-fail[hidden] { display: none; }
+    .sdr-fail.busy { background: var(--s2); color: var(--t3); }
+    .sdr-fail span { flex: 1; min-width: 0; }
+    .sdr-fail .sdr-btn-vfo { flex-shrink: 0; padding: 6px 10px; }
+    .sdr-dd-item.failed { color: var(--t3); }
+    .sdr-dd-item .sdr-dd-mark { margin-left: 8px; font-size: 11px; color: var(--t3); }
 
     /* --- Small VFO: one line in the title bar (Casey 2026-11-10). The items
        the operator chose (lib/vfo-layout.js, settings.vfoSmall) are moved into
@@ -672,6 +680,7 @@
       </div>
       <div class="card tool-card widget-section" id="widget-kiwi">
         <div class="ptt-log-row" id="kiwi-btn-row"></div>
+        <div class="sdr-fail" id="kiwi-fail" role="status" hidden><span id="kiwi-fail-text"></span><button class="sdr-btn-vfo" id="kiwi-fail-retry" type="button">Try again</button></div>
         <div id="kiwi-volume-row" style="display:none;align-items:center;gap:8px;font-size:11px;color:var(--text-dim);">
           <span style="min-width:42px;">Volume</span>
           <input type="range" id="kiwi-volume" min="0" max="150" value="80" style="flex:1;">
@@ -903,6 +912,7 @@
 <script src="../lib/audio-device-heal.js"></script>
 <script src="../lib/vfo-audio-reattach.js"></script>
 <script src="../lib/vfo-ptt-mic.js"></script>
+<script src="../lib/sdr-failure.js"></script>
 <script>
 // --- State ---
 let currentFreqHz = 0;
@@ -4323,6 +4333,52 @@ function buildKiwiStationList(s) {
 let kiwiSelectedHost = localStorage.getItem('kiwiSelectedHost') || '';
 let kiwiDdEl = null;
 
+// A receiver that would not come on (#390). An offline one took 10 s to time
+// out in main and the window never said so: the chip just stayed OFF. Now the
+// line under the SDR row says "Connecting to <name>..." while it tries, then
+// "<name> did not answer." (or "is full", "needs a password") with Try again,
+// and the list marks it for the rest of this session. Nothing is pinged in the
+// background: a receiver is marked only after the operator tried it.
+const kiwiFailed = new Map();   // station fullHost -> failure kind, this session
+let kiwiTrying = null;          // the station this window last asked for, until main answers
+let kiwiFailStation = null;     // the station Try again reconnects
+function kiwiStationFor(host) {
+  return host ? (kiwiStations.find(st => window.SdrFailure.sameHost(st.fullHost, host)) || null) : null;
+}
+function kiwiShowLine(text, retry) {
+  const box = document.getElementById('kiwi-fail');
+  if (!box) return;
+  document.getElementById('kiwi-fail-text').textContent = text;
+  document.getElementById('kiwi-fail-retry').hidden = !retry;
+  box.classList.toggle('busy', !retry);
+  box.hidden = !text;
+}
+let kiwiTryTimer = null;
+function kiwiTryConnect(st) {
+  kiwiTrying = st;
+  kiwiFailStation = null;
+  kiwiShowLine('Connecting to ' + st.label + '...', false);
+  // The clients give up after 10 s and say so; a route that never answers at
+  // all must not leave "Connecting..." up for good.
+  clearTimeout(kiwiTryTimer);
+  kiwiTryTimer = setTimeout(() => { if (kiwiTrying === st && !kiwiConnected) kiwiNoteFailure(st.fullHost, 'did not answer'); }, 20000);
+  window.api.kiwiConnect({ host: st.host, port: st.port });
+  kiwiConnectedHost = st.fullHost;
+  updateKiwiButtonStates();
+}
+function kiwiNoteFailure(host, error) {
+  clearTimeout(kiwiTryTimer);
+  const st = kiwiStationFor(host) || kiwiTrying;
+  const cls = window.SdrFailure.classify(error);
+  if (st) kiwiFailed.set(st.fullHost, cls.kind);
+  kiwiTrying = null;
+  kiwiFailStation = st;
+  kiwiShowLine(window.SdrFailure.message(st ? st.label : (host || ''), error), !!st);
+}
+document.getElementById('kiwi-fail-retry').addEventListener('click', () => {
+  if (kiwiFailStation) kiwiTryConnect(kiwiFailStation);
+});
+
 function kiwiSelectedStation() {
   return kiwiStations.find(st => st.fullHost === kiwiSelectedHost) || kiwiStations[0] || null;
 }
@@ -4346,9 +4402,7 @@ function buildKiwiButtons() {
     if (kiwiConnected) {
       window.api.kiwiDisconnect();
     } else if (st) {
-      window.api.kiwiConnect({ host: st.host, port: st.port });
-      kiwiConnectedHost = st.fullHost;
-      updateKiwiButtonStates();
+      kiwiTryConnect(st);
     }
   });
   kiwiBtnRow.appendChild(label);
@@ -4388,13 +4442,21 @@ async function toggleKiwiDropdown() {
       + (kiwiConnected && st.fullHost === kiwiConnectedHost ? ' conn' : '');
     item.textContent = st.label;
     item.title = st.fullHost;
+    // Tried this session and it would not come on: say so (no pinging, #390).
+    const failedKind = kiwiFailed.get(st.fullHost);
+    if (failedKind) {
+      item.className += ' failed';
+      const mark = document.createElement('span');
+      mark.className = 'sdr-dd-mark';
+      mark.textContent = window.SdrFailure.mark(failedKind);
+      item.appendChild(mark);
+      item.title = st.fullHost + ' — ' + window.SdrFailure.mark(failedKind) + ' when tried this session';
+    }
     item.addEventListener('click', () => {
       kiwiSelectedHost = st.fullHost;
       localStorage.setItem('kiwiSelectedHost', st.fullHost);
       closeKiwiDropdown();
-      window.api.kiwiConnect({ host: st.host, port: st.port });
-      kiwiConnectedHost = st.fullHost;
-      updateKiwiButtonStates();
+      kiwiTryConnect(st);
     });
     dd.appendChild(item);
   });
@@ -4480,6 +4542,16 @@ window.api.onKiwiStatus((s) => {
   kiwiConnected = s.connected;
   if (s.host) kiwiConnectedHost = s.host;
   if (!s.connected) { kiwiConnectedHost = ''; kiwiNextPlayTime = 0; }
+  // #390: say why a receiver would not come on. The plain {connected:false}
+  // that follows an error (the socket closing) leaves the words up.
+  if (s.error) kiwiNoteFailure(s.host || (kiwiTrying && kiwiTrying.fullHost) || '', s.error);
+  else if (s.connected) {
+    const st = kiwiStationFor(s.host) || kiwiTrying;
+    if (st) kiwiFailed.delete(st.fullHost);
+    clearTimeout(kiwiTryTimer);
+    kiwiTrying = null; kiwiFailStation = null;
+    kiwiShowLine('', false);
+  }
   // Selection follows the live connection — a connect initiated elsewhere
   // (ECHOCAT phone, web client) lands on whatever station is actually
   // playing, so the "SDR: [name][ON]" control never shows a stale name.

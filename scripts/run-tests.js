@@ -178,6 +178,7 @@ const TESTS = [
   'test/yaesu-scope-test.js', // the FT-710's own scope: frame parser, axis, helper exit codes, remote payload guard (was CI-only)
   'test/flex-scope-test.js', // the Flex's own panadapter as the band scope (Flex Direct), against a real 8600 capture
   'test/scope-digital-view-test.js', // the scope's tight view on a digital mode's decode window (Flex)
+  'test/sdr-failure-test.js', // #390: a WebSDR that would not come on says why in the VFO window, with Try again
   'test/kiwisdr-test.js', // KiwiSDR: settings after AR OK (firmware 1.902), receivers that allow no apps
   'test/listen-source-test.js', // who you hear: the radio, or the SDR where the radio cannot go (Casey 2026-10-30)
   'test/k4rvc-preset-flip-test.js', // an Icom's DATA flag folded into the mode the preset rules see; launch applies nothing
