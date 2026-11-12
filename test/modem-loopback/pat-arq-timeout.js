@@ -29,6 +29,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { rawEndpoint } = require('./relay');
 const { binPath: ardopBin } = require('./ardop');
+const { patTestEnv } = require('./pat-env');
 
 const ROOT = path.join(__dirname, '..', '..');
 const WinlinkPat = require(path.join(ROOT, 'lib', 'winlink-pat.js'));
@@ -162,8 +163,9 @@ async function once(c, index) {
     cfg.ardop = { addr: `127.0.0.1:${relayPortNo}`, arq_bandwidth: { Forced: false, Max: 500 }, cwid_enabled: false };
     const cfgPath = path.join(dir, 'pat-config.json');
     fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
-    const base = { ...process.env };
-    delete base[ENV];
+    // Its own XDG folders and no way out (./pat-env.js): upstream Pat would otherwise ask winlink.org
+    // about N0CALL and wait two minutes for an answer before it opens the modem.
+    const base = patTestEnv(dir, ['N0CALL']);
     let env = base;
     if (typeof c.env === 'string') env = { ...base, [ENV]: c.env };
     else if (c.env && typeof c.env === 'object') env = WinlinkPat.patSpawnEnv(base, { arqTimeoutS: c.env.setting });

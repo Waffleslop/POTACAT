@@ -73,6 +73,13 @@ jobs:
           LOOPBACK_REQUIRED: '1'
         timeout-minutes: 10
         run: node test/modem-loopback/pat-arq-timeout.js --out pat-arq-timeout-results.json --logs pat-arq-timeout-logs
+      - name: Our Pat end to end (#425; two Pats exchange mail over two ardopcf with no radio, and the Telnet path against a closed port and a local stand-in CMS)
+        if: always()
+        shell: bash
+        env:
+          LOOPBACK_REQUIRED: '1'
+        timeout-minutes: 15
+        run: node test/modem-loopback/pat-session.js --out pat-session-results.json --logs pat-session-logs
       - name: Electron for the bridge checks
         if: always()
         shell: bash
@@ -98,6 +105,8 @@ jobs:
             loopback-logs/
             pat-arq-timeout-results.json
             pat-arq-timeout-logs/
+            pat-session-results.json
+            pat-session-logs/
             bridge-results.json
             l3-results.json
             l3-logs/
@@ -144,6 +153,13 @@ jobs:
           LOOPBACK_REQUIRED: '1'
         timeout-minutes: 10
         run: node test/modem-loopback/pat-arq-timeout.js --out pat-arq-timeout-results.json --logs pat-arq-timeout-logs
+      - name: Our Pat end to end (#425; two Pats exchange mail over two ardopcf with no radio, and the Telnet path against a closed port and a local stand-in CMS)
+        if: always()
+        shell: bash
+        env:
+          LOOPBACK_REQUIRED: '1'
+        timeout-minutes: 15
+        run: node test/modem-loopback/pat-session.js --out pat-session-results.json --logs pat-session-logs
       - name: Electron for the bridge checks
         if: always()
         run: npm ci --no-audit --no-fund
@@ -166,6 +182,8 @@ jobs:
             loopback-logs/
             pat-arq-timeout-results.json
             pat-arq-timeout-logs/
+            pat-session-results.json
+            pat-session-logs/
             bridge-results.json
             l3-results.json
             l3-logs/
@@ -219,6 +237,13 @@ jobs:
           LOOPBACK_REQUIRED: '1'
         timeout-minutes: 10
         run: node test/modem-loopback/pat-arq-timeout.js --out pat-arq-timeout-results.json --logs pat-arq-timeout-logs
+      - name: Our Pat end to end (#425; two Pats exchange mail over two ardopcf with no radio, and the Telnet path against a closed port and a local stand-in CMS)
+        if: always()
+        shell: bash
+        env:
+          LOOPBACK_REQUIRED: '1'
+        timeout-minutes: 15
+        run: node test/modem-loopback/pat-session.js --out pat-session-results.json --logs pat-session-logs
       - name: Electron for the bridge check
         if: always()
         run: npm ci --no-audit --no-fund
@@ -241,6 +266,8 @@ jobs:
             loopback-logs/
             pat-arq-timeout-results.json
             pat-arq-timeout-logs/
+            pat-session-results.json
+            pat-session-logs/
             bridge-results.json
             l3-results.json
             l3-logs/

@@ -161,6 +161,11 @@ test('the Pat build applies the patch, fails loudly without it, and leaves wl2k-
   // And proven on the built binaries on every helper runner.
   const wf = read('.github/workflows/winlink-helpers.yml');
   assert.strictEqual(wf.split('run: node test/modem-loopback/pat-arq-timeout.js --out pat-arq-timeout-results.json --logs pat-arq-timeout-logs').length - 1, 3, 'windows, linux (x64 + arm64) and mac (arm64 + x64) jobs');
+  assert.strictEqual(wf.split('run: node test/modem-loopback/pat-session.js --out pat-session-results.json --logs pat-session-logs').length - 1, 3, 'and the end-to-end Pat layer on every job');
+  // The test Pats never use the PC's own Pat state and never reach winlink.org.
+  const penv = read('test/modem-loopback/pat-env.js');
+  assert.ok(penv.includes('XDG_STATE_HOME') && penv.includes("'account-confirmed', 'version_report'") && penv.includes("'http://127.0.0.1:9'"));
+  for (const f of ['test/modem-loopback/pat-arq-timeout.js', 'test/modem-loopback/pat-session.js']) assert.ok(read(f).includes("require('./pat-env')"), f);
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);
