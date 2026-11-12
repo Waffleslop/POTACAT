@@ -191,6 +191,33 @@ test('the POTA spot form shows examples, not a how-to: one park, then a 2-fer as
   assert.ok(/' POTA CA-0035 14\.285 SSB/.test(js) && /' POTA CA-0110 14\.285 SSB/.test(js), 'a 2-fer on 20 m SSB, one line per park');
 });
 
+test('the action bars are pinned: content scrolls, buttons never reach the waterfall', () => {
+  const rule = (sel) => {
+    const m = html.match(new RegExp('\\n\\s*' + sel.replace(/[.#>*]/g, (c) => '\\' + c) + '\\s*\\{([^}]*)\\}'));
+    assert.ok(m, 'rule missing: ' + sel);
+    return m[1];
+  };
+  assert.ok(/min-height:\s*0/.test(rule('.wl-main > *')), 'every column under the toolbar can shrink');
+  const pane = rule('.wl-pane');
+  assert.ok(/min-height:\s*0/.test(pane) && /overflow:\s*hidden/.test(pane), 'the reading pane clips to its height');
+  const scroll = rule('.wl-c-scroll');
+  assert.ok(/min-height:\s*0/.test(scroll) && /overflow-y:\s*auto/.test(scroll), 'compose scrolls above its bar');
+  assert.ok(/flex-shrink:\s*0/.test(rule('.wl-c-actions')), 'the action bar keeps its height');
+  for (const sel of ['.wl-form-body', '.wl-book-list', '.wl-hist-body']) {
+    const r = rule(sel);
+    assert.ok(/min-height:\s*0/.test(r) && /overflow-y:\s*auto/.test(r), sel + ' scrolls inside its height');
+  }
+  // Every compose part that can grow sits inside the scroll region, before the bar.
+  const compose = html.slice(html.indexOf('<div class="wl-compose" id="wl-compose">'));
+  const s = compose.indexOf('<div class="wl-c-scroll">');
+  const bar = compose.indexOf('<div class="wl-c-actions">');
+  assert.ok(s > 0 && bar > s);
+  for (const id of ['wl-c-hint', 'wl-c-body', 'wl-c-err']) {
+    const at = compose.indexOf('id="' + id + '"');
+    assert.ok(at > s && at < bar, id + ' is inside the scroll region');
+  }
+});
+
 test('this test is in the list CI runs', () => {
   assert.ok(readSrc(path.join(root, 'scripts', 'run-tests.js')).includes("'test/winlink-contacts-test.js'"));
 });

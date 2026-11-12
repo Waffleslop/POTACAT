@@ -104,7 +104,7 @@
     .wl-pill.on { border-color: var(--accent-blue, #4fc3f7); background: var(--bg-hover); color: var(--text-primary); }
     .wl-hist-find { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
     .wl-hist-find input { width: 90px; height: 28px; box-sizing: border-box; font-family: Consolas, monospace; }
-    .wl-hist-body { flex: 1; overflow-y: auto; }
+    .wl-hist-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
     .wl-hist-row { display: grid; grid-template-columns: 34px 110px 150px 80px 140px 90px minmax(0, 1fr); gap: 0 10px; align-items: center; padding: 6px 14px; border-bottom: 1px solid var(--border-primary); }
     .wl-hist-row.hdr { font-size: 12px; color: var(--text-secondary); position: sticky; top: 0; background: var(--bg-primary); }
     .wl-hist-row.item { cursor: pointer; }
@@ -188,7 +188,17 @@
     .wl-subj { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .wl-empty { padding: 20px; color: var(--text-dim); text-align: center; }
 
-    .wl-pane { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+    /* The container rule (Casey 2026-11-11: "buttons cannot overflow into the
+       waterfall"). Every column below the toolbar is exactly the height it is
+       given and clips; inside each, the content scrolls and the action bar is
+       pinned (flex-shrink: 0). Content added later (a hint, an example, an
+       error) makes the middle scroll; it can never push a button down.
+       test/winlink-contacts-test.js guards this. */
+    .wl-main > * { min-height: 0; }
+    .wl-pane { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+    .wl-history { overflow: hidden; }
+    .wl-c-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+    .wl-c-scroll > .wl-c-head, .wl-c-scroll > .wl-c-hint, .wl-c-scroll > .wl-c-err { flex-shrink: 0; }
     .wl-reader { flex: 1; overflow-y: auto; padding: 10px 14px; }
     .wl-hdr { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; line-height: 1.6; }
     .wl-hdr b { color: var(--text-primary); }
@@ -208,7 +218,7 @@
     .wl-c-row label { flex: 0 0 66px; text-align: left; font-size: 13px; color: var(--text-secondary); }
     .wl-compose .wl-c-row input { flex: 1; min-width: 0; height: 34px; box-sizing: border-box; border: 1px solid var(--border-primary); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary); font-size: 14px; padding: 0 10px; outline: none; }
     .wl-compose .wl-c-row input:focus, .wl-compose #wl-c-body:focus { border-color: var(--accent-blue, #4fc3f7); box-shadow: 0 0 0 1px var(--accent-blue, #4fc3f7); }
-    .wl-compose #wl-c-body { flex: 1; min-height: 140px; resize: none; margin: 10px 14px; border: 1px solid var(--border-primary); border-radius: 6px; outline: none; padding: 10px 12px; background: var(--bg-primary); color: var(--text-primary); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.5; }
+    .wl-compose #wl-c-body { flex: 1 0 auto; min-height: 120px; resize: none; margin: 10px 14px; border: 1px solid var(--border-primary); border-radius: 6px; outline: none; padding: 10px 12px; background: var(--bg-primary); color: var(--text-primary); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.5; }
     .wl-c-attach-row { display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-top: 1px solid var(--border-primary); }
     .wl-c-attach-row[hidden] { display: none; }
     .wl-c-files { font-size: 12px; color: var(--text-secondary); }
@@ -218,7 +228,7 @@
     .wl-c-hint { margin: 10px 14px 0; padding: 9px 12px; border-radius: 6px; border: 1px solid var(--border-primary); border-left: 3px solid var(--accent-blue, #4fc3f7); background: var(--bg-secondary); color: var(--text-primary); font-size: 13px; line-height: 1.5; white-space: pre-line; }
     .wl-c-hint[hidden] { display: none; }
     .wl-c-hint b { font-weight: 700; }
-    .wl-c-actions { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-top: 1px solid var(--border-primary); background: var(--bg-secondary); }
+    .wl-c-actions { flex-shrink: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 14px; border-top: 1px solid var(--border-primary); background: var(--bg-secondary); }
     .wl-c-actions .wl-btn { height: 32px; font-size: 13px; padding: 0 14px; }
     .wl-c-actions .wl-btn.primary { font-weight: 700; background: var(--ok-subtle, transparent); }
 
@@ -247,7 +257,7 @@
     .wl-pane { position: relative; }
     .wl-form { display: flex; flex-direction: column; flex: 1; min-height: 0; font-size: 14px; }
     .wl-form[hidden] { display: none; }
-    .wl-form-body { flex: 1; overflow-y: auto; padding: 14px 16px; }
+    .wl-form-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 14px 16px; }
     .wl-form-title { margin: 0 0 4px; font-size: 17px; font-weight: 700; color: var(--text-primary); }
     .wl-form-lead { margin: 0 0 14px; color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
     .wl-form-grid { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px 12px; align-items: center; max-width: 620px; }
@@ -265,7 +275,7 @@
     .wl-book-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border-primary); background: var(--bg-secondary); }
     .wl-book-head .wl-form-title { margin: 0; }
     .wl-book-head input { flex: 1; height: 32px; box-sizing: border-box; border: 1px solid var(--border-primary); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary); padding: 0 10px; font-size: 14px; }
-    .wl-book-list { flex: 1; overflow-y: auto; }
+    .wl-book-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
     .wl-book-sec { padding: 8px 14px 4px; font-size: 12px; color: var(--text-secondary); }
     .wl-book-row { display: flex; align-items: center; gap: 10px; padding: 7px 14px; border-bottom: 1px solid var(--border-primary); }
     .wl-book-who { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -409,6 +419,8 @@
     <div class="wl-pane">
       <div class="wl-reader" id="wl-reader"><div class="wl-empty">Pick a message.</div></div>
       <div class="wl-compose" id="wl-compose">
+        <!-- Everything above the action bar scrolls; the bar never moves (Casey 2026-11-11). -->
+        <div class="wl-c-scroll">
         <div class="wl-c-head">
           <div class="wl-c-row" id="wl-c-name-row" hidden><label for="wl-c-name">Name</label><input type="text" id="wl-c-name" maxlength="60" placeholder="what the Templates menu calls it"></div>
           <!-- To and Cc: chips with suggestions from the address book and past mail (Casey 2026-11-11).
@@ -420,6 +432,7 @@
         <div class="wl-c-hint" id="wl-c-hint" role="note" hidden></div>
         <textarea id="wl-c-body" spellcheck="true" placeholder="Plain text."></textarea>
         <div class="wl-c-err" id="wl-c-err"></div>
+        </div>
         <!-- One row (Casey 2026-11-11): Attach | Cancel | Put in Outbox -->
         <div class="wl-c-actions"><button class="wl-btn" id="wl-c-attach">Attach…</button><button class="wl-btn" id="wl-c-save-tpl" title="Keep this message as a template in the Templates menu">Save as template</button><span class="wl-c-files" id="wl-c-files"></span><span class="wl-spacer"></span><button class="wl-btn" id="wl-c-cancel">Cancel</button><button class="wl-btn primary" id="wl-c-send">Put in Outbox</button></div>
       </div>
