@@ -1433,6 +1433,8 @@ const setVaraHfPath = document.getElementById('set-vara-hf-path');
 const setVaraFmEnable = document.getElementById('set-vara-fm-enable');
 const setVaraFmPath = document.getElementById('set-vara-fm-path');
 const setVaraFmPort = document.getElementById('set-vara-fm-port');
+const setVaraHfHost = document.getElementById('set-vara-hf-host');
+const setVaraFmHost = document.getElementById('set-vara-fm-host');
 const setVaraAutoLaunch = document.getElementById('set-vara-autolaunch');
 const setVaraCableIn = document.getElementById('set-vara-cable-in');
 const setVaraCableOut = document.getElementById('set-vara-cable-out');
@@ -5628,13 +5630,22 @@ if (setMercuryEnable) {
       const statusEl = document.getElementById(`vara-${kind}-status`);
       const browse = document.getElementById(`vara-${kind}-browse`);
       const find = document.getElementById(`vara-${kind}-find`);
+      const test = document.getElementById(`vara-${kind}-test`);
+      const hostEl = kind === 'hf' ? setVaraHfHost : setVaraFmHost;
+      const portEl = kind === 'hf' ? setWinlinkVaraPort : setVaraFmPort;
       if (browse) browse.addEventListener('click', async () => {
         const p = await window.api.echocatPickFile({ title: `Select ${kind === 'fm' ? 'VARAFM.exe' : 'VARA.exe'}`, filters: [{ name: 'Programs', extensions: ['exe'] }, { name: 'All files', extensions: ['*'] }] });
         if (p) pathEl.value = p;
       });
+      // Linux / macOS (#287): no program to find, only the port to reach.
+      if (test) test.addEventListener('click', async () => {
+        statusEl.textContent = 'Testing…';
+        const r = await window.api.winlinkVaraFind(kind, { host: hostEl ? hostEl.value : '', port: portEl ? portEl.value : '' });
+        statusEl.textContent = !r ? 'No answer' : (r.text || '');
+      });
       if (find) find.addEventListener('click', async () => {
         statusEl.textContent = 'Looking…';
-        const r = await window.api.winlinkVaraFind(kind);
+        const r = await window.api.winlinkVaraFind(kind, { host: hostEl ? hostEl.value : '', port: portEl ? portEl.value : '' });
         if (!r) { statusEl.textContent = 'No answer'; return; }
         if (r.found && !pathEl.value) pathEl.value = r.path;
         statusEl.textContent = r.text || '';
@@ -17701,7 +17712,16 @@ async function openSettingsDialog(tab) {
     if (setWinlinkPacketTxTail) setWinlinkPacketTxTail.value = packetTimingMs(s.winlinkPacketTxTailMs, 200, 10, 500);
     setWinlinkVaraPort.value = s.winlinkVaraPort || 8300;
     if (winlinkVaraSection) {
-      winlinkVaraSection.classList.toggle('hidden', window.api.platform !== 'win32');
+      // Every system (#287): Windows gets the program, "Set up VARA for me" and
+      // auto-start; Linux and macOS get the host, port and Test, and open on them.
+      const onWindows = window.api.platform === 'win32';
+      winlinkVaraSection.classList.remove('hidden');
+      winlinkVaraSection.querySelectorAll('.vara-win-only').forEach((el) => el.classList.toggle('hidden', !onWindows));
+      winlinkVaraSection.querySelectorAll('.vara-other-only').forEach((el) => el.classList.toggle('hidden', onWindows));
+      const varaDetails = document.getElementById('vara-details');
+      if (varaDetails && !onWindows) varaDetails.open = true;
+      if (setVaraHfHost) setVaraHfHost.value = s.winlinkVaraHost || '';
+      if (setVaraFmHost) setVaraFmHost.value = s.winlinkVaraFmHost || '';
       setVaraHfEnable.checked = s.enableVaraHf === true || (s.enableVaraHf == null && s.winlinkShowVara === true);
       setVaraFmEnable.checked = s.enableVaraFm === true;
       setVaraHfPath.value = s.winlinkVaraHfPath || '';
@@ -18606,6 +18626,8 @@ settingsSave.addEventListener('click', async () => {
         winlinkVaraHfPath: setVaraHfPath.value.trim(),
         winlinkVaraFmPath: setVaraFmPath.value.trim(),
         winlinkVaraFmPort: parseInt(setVaraFmPort.value, 10) || 8310,
+        ...(setVaraHfHost ? { winlinkVaraHost: setVaraHfHost.value.trim() } : {}),
+        ...(setVaraFmHost ? { winlinkVaraFmHost: setVaraFmHost.value.trim() } : {}),
         winlinkVaraAutoLaunch: setVaraAutoLaunch.checked,
       } : {}),
       winlinkSessionCapMin: Math.max(10, Math.min(60, parseInt(setWinlinkCap.value, 10) || 30)),

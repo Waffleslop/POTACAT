@@ -518,7 +518,7 @@ contextBridge.exposeInMainWorld('api', {
   settingsSaveStatus: () => ipcRenderer.invoke('settings-save-status'),
   winlinkListArdopDevices: () => ipcRenderer.invoke('winlink-list-ardop-devices'),
   winlinkAccountCheck: (call) => ipcRenderer.invoke('winlink-account-check', call),
-  winlinkVaraFind: (kind) => ipcRenderer.invoke('winlink-vara-find', { kind }),
+  winlinkVaraFind: (kind, o) => ipcRenderer.invoke('winlink-vara-find', { kind, host: o && o.host, port: o && o.port }),
   winlinkVaraSetup: (kind, devices, labels) => ipcRenderer.invoke('winlink-vara-setup', { kind, devices, ...(labels || {}) }),
   winlinkAudioRig: () => ipcRenderer.invoke('winlink-audio-rig'),
   winlinkRegister: (o) => ipcRenderer.invoke('winlink-register', o),

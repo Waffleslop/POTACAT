@@ -100,7 +100,8 @@ function fnBody(src, name) {
     assert.deepStrictEqual(on.map((m) => [m.id, m.available]), [['telnet', true], ['ardop', true], ['packet', true], ['vara', true], ['varafm', true]]);
     assert.strictEqual(M.LABELS.varafm, 'VARA FM (VHF/UHF radio, your own VARA FM)');
     const mac = M.winlinkModesFor({ ...base, platform: 'darwin', varaHf: { enabled: true, port: 8301 } });
-    assert.ok(!mac[3].available && /Windows program/.test(mac[3].reason));
+    // #287: VARA on Linux and macOS too (under Wine, or on another computer); test/winlink-vara-anywhere-test.js.
+    assert.ok(mac[3].id === 'vara' && mac[3].available && !/Windows program/.test(mac[3].reason));
     const flex = M.winlinkModesFor({ ...base, rigFamily: 'flex', audioSource: 'smartsdr', varaHf: { enabled: true, port: 8301, cable: false }, varaFm: { enabled: true, port: 8310, cable: false } });
     assert.ok(!flex[3].available && /virtual audio cable/.test(flex[3].reason) && /Flex Direct/.test(flex[3].reason));
     assert.ok(!flex[4].available && /virtual audio cable/.test(flex[4].reason));
@@ -137,16 +138,16 @@ function fnBody(src, name) {
   console.log('main.js wiring');
   await test('a VARA session probes/starts VARA and readies its audio before Pat connects; VARA FM QSYs to FM', () => {
     const s = fnBody(main, 'winlinkStartSession');
-    assert.ok(/if \(mode === 'vara' \|\| mode === 'varafm'\) \{\s*await winlinkVaraReady\(mode\);\s*if \(!live\(\)\) throw cancelled\(\);\s*await winlinkVaraAudioReady\(\);/.test(s));
+    assert.ok(/if \(mode === 'vara' \|\| mode === 'varafm'\) \{\s*await winlinkVaraReady\(mode\);\s*if \(!live\(\)\) throw cancelled\(\);\s*await winlinkVaraAudioReady\(mode\);/.test(s));
     assert.ok(s.indexOf('await winlinkVaraReady(mode)') < s.indexOf('await patClient.connect(url)'), 'before the connect');
     assert.ok(/WinlinkModes\.isFmMode\(mode\) \? 'FM' : 'DIGU'/.test(s), 'FM for packet and VARA FM, USB data for the rest');
     assert.ok(/mode === 'varafm' \? 'varafm' : 'varahf'/.test(fnBody(main, 'winlinkGateways')), 'the gateway list asks Pat for varafm');
-    assert.ok(/varaFmAddr: `127\.0\.0\.1:\$\{_winlinkVaraFmPort\(\)\}`/.test(fnBody(main, 'writePatConfig')));
+    assert.ok(fnBody(main, 'writePatConfig').includes("varaFmAddr: VaraProcess.varaAddr(_winlinkVaraHost('fm'), _winlinkVaraFmPort()),"), 'VARA FM at its host and port (#287)');
     assert.ok(/if \(mode === 'varafm'\) return `VARA FM is not answering/.test(fnBody(main, 'winlinkTransportDownText')));
   });
   await test('a VARA whose port Pat holds from the last session is reused, not refused (W7RTA)', () => {
     const s = fnBody(main, 'winlinkVaraReady');
-    const reuse = s.indexOf("_patHoldsVara[kind] === patProc && await varaProcessRunning(kind)");
+    const reuse = s.indexOf("_patHoldsVara[kind] === patProc && (!_winlinkVaraLaunches(kind) || await varaProcessRunning(kind))");
     assert.ok(reuse > 0, 'reuse check');
     assert.ok(reuse < s.indexOf('is open on the shack PC but is not answering'), 'before the not-answering refusal');
     assert.ok(/_patHoldsVara\[kind\] = patProc;[^\n]*\n\s*winlinkLog\(`\$\{name\} ready on/.test(s), 'marked when Pat is handed VARA');
@@ -185,7 +186,8 @@ function fnBody(src, name) {
     assert.ok(/'winlinkVaraFmPort',/.test(main.slice(main.indexOf('const winlinkChanged = ['), main.indexOf('const winlinkChanged = [') + 300)), 'a new FM port relaunches Pat');
     const app = read('renderer/app.js');
     assert.ok(/r\.modemCable = \(inputId \|\| outputId\) \? \{ inputId, outputId \} : null;/.test(app), 'the renderer stamps the cable on the active rig at save');
-    assert.ok(/winlinkVaraSection\.classList\.toggle\('hidden', window\.api\.platform !== 'win32'\)/.test(app), 'the VARA section shows on Windows only');
+    // #287: on every system; the Windows-only parts (program, Set up VARA for me, auto-start) hide elsewhere.
+    assert.ok(app.includes("winlinkVaraSection.querySelectorAll('.vara-win-only').forEach((el) => el.classList.toggle('hidden', !onWindows));"), 'the Windows-only parts show on Windows only');
     const pkg = JSON.parse(read('package.json'));
     const text = JSON.stringify(pkg.build) + read('scripts/build-winlink-helpers.sh') + read('NOTICE');
     assert.ok(!/vara\.exe|varafm\.exe|rosmodem/i.test(text), 'never bundled, fetched or attributed as shipped');

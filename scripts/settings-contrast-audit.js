@@ -7,6 +7,7 @@
 // user-data dir, a stub preload, no main process.
 //
 // Run: npx electron scripts/settings-contrast-audit.js [--json out.json] [--shot dir]
+//   AUDIT_PLATFORM=linux (or darwin) audits the page as those systems show it (default win32).
 //   prints one line per failure and a count per theme; exit 1 on any failure.
 'use strict';
 const { app, BrowserWindow } = require('electron');
@@ -28,7 +29,7 @@ const STUB = path.join(os.tmpdir(), 'potacat-settings-audit-stub.js');
 fs.writeFileSync(STUB, `
 (function () {
   var noop = function () { return Promise.resolve(undefined); };
-  window.api = new Proxy({ platform: 'win32' }, { get: function (t, k) {
+  window.api = new Proxy({ platform: ${JSON.stringify(process.env.AUDIT_PLATFORM || 'win32')} }, { get: function (t, k) {
     if (k in t) return t[k];
     if (k === 'then') return undefined;
     return /^on[A-Z]/.test(String(k)) ? function () { return function () {}; } : noop;

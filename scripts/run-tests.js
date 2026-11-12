@@ -240,6 +240,7 @@ const TESTS = [
   'test/winlink-spectrum-test.js',
   'test/winlink-main-wiring-test.js',
   'test/winlink-vara-test.js',
+  'test/winlink-vara-anywhere-test.js', // #287: VARA HF and VARA FM on Linux, macOS and Windows, at a host and port; a fake VARA TNC (real Pat when its binary is present)
   'test/winlink-connect-test.js', // #128: /api/connect over http.request with no headers timeout; VARA and ARDOP send the same request
   'test/direwolf-agw-monitor-test.js', // #128: what Dire Wolf heard, over its AGW port's monitor mode
   'test/packet-timing-test.js', // #257 NA4DQ IC-7100: Dire Wolf TX delay/tail settings, the packet PTT hold, no "decoded nothing" after Pat connected

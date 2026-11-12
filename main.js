@@ -872,6 +872,8 @@ const GLOBAL_KEYS = new Set([
   'winlinkModemTxGain', // Winlink: the transmit-audio gain learned per modem ({vara: 2.1, ...}) — the installed modem's level, a machine fact
   'winlinkVaraPort',   // Winlink: the operator's own VARA HF TNC port on this machine (default 8300)
   'winlinkVaraFmPort', // Winlink: the operator's own VARA FM port on this machine (default 8310 — VARA FM ships on 8300 too)
+  'winlinkVaraHost',   // Winlink: where the operator's VARA HF runs (blank = this computer; another PC on the LAN; #287)
+  'winlinkVaraFmHost', // Winlink: where the operator's VARA FM runs (blank = this computer; #287)
   'winlinkVaraHfPath', // Winlink: where VARA.exe is on THIS machine (blank = the usual places)
   'winlinkVaraFmPath', // Winlink: where VARAFM.exe is on THIS machine
   'winlinkPredictionUrl', // Winlink: a VOACAP service other than api.potacat.com (dev / self-hosted); blank = POTACAT's
@@ -10555,9 +10557,9 @@ function winlinkModes() {
     ardopFound: ArdopProcess.ardopSupported(process.platform) ? findArdop().found : false,
     direwolfFound: DirewolfProcess.direwolfSupported(process.platform) ? findDirewolf().found : false,
     ardopSocketAudio: true, // ardopcf and Dire Wolf carry POTACAT's socket audio backends (no sound card of their own on any rig)
-    // The operator's own VARA (Windows): listed only when turned on in Settings.
-    varaHf: { enabled: _winlinkVaraEnabled('hf'), port: _winlinkVaraPort(), cable: winlinkCableConfigured() },
-    varaFm: { enabled: _winlinkVaraEnabled('fm'), port: _winlinkVaraFmPort(), cable: winlinkCableConfigured() },
+    // The operator's own VARA (Windows, Wine, or another PC: #287): listed only when turned on in Settings.
+    varaHf: { enabled: _winlinkVaraEnabled('hf'), port: _winlinkVaraPort(), host: _winlinkVaraHost('hf'), hostBad: _winlinkVaraHostBad('hf'), cable: winlinkCableConfigured() },
+    varaFm: { enabled: _winlinkVaraEnabled('fm'), port: _winlinkVaraFmPort(), host: _winlinkVaraHost('fm'), hostBad: _winlinkVaraHostBad('fm'), cable: winlinkCableConfigured() },
   });
 }
 
@@ -10565,6 +10567,15 @@ function _winlinkVaraPort() {
   const n = parseInt(settings.winlinkVaraPort, 10);
   return n > 0 && n < 65536 ? n : WinlinkPat.PAT_DEFAULTS.varaPort;
 }
+/** Where the operator's VARA runs (#287): 127.0.0.1 unless they named another computer. */
+function _winlinkVaraHost(kind) { return VaraProcess.varaHostFor(settings, kind); }
+/** A typed host that is not a computer name or address ('' when fine). */
+function _winlinkVaraHostBad(kind) {
+  const raw = kind === 'fm' ? settings.winlinkVaraFmHost : settings.winlinkVaraHost;
+  return raw != null && String(raw).trim() && !VaraProcess.normalizeVaraHost(raw) ? String(raw).slice(0, 60) : '';
+}
+/** POTACAT starts VARA only on Windows, for a copy on this PC (#287). */
+function _winlinkVaraLaunches(kind) { return VaraProcess.canLaunchVara({ platform: process.platform, host: _winlinkVaraHost(kind) }); }
 function _winlinkVaraFmPort() {
   const n = parseInt(settings.winlinkVaraFmPort, 10);
   return n > 0 && n < 65536 ? n : WinlinkPat.PAT_DEFAULTS.varaFmPort;
@@ -10775,10 +10786,21 @@ async function winlinkVaraReady(mode, { configured } = {}) {
   const kind = VaraProcess.kindOfMode(mode);
   const name = VaraProcess.varaName(kind);
   const port = kind === 'fm' ? _winlinkVaraFmPort() : _winlinkVaraPort();
-  let probe = await VaraProcess.probeVaraPort(port);
-  if (!probe.ok && patProc && _patHoldsVara[kind] === patProc && await varaProcessRunning(kind)) {
-    winlinkLog(`${name} on 127.0.0.1:${port} is held by Pat from the last session — reusing it`);
+  const host = _winlinkVaraHost(kind);
+  const where = VaraProcess.varaWhere(host, port);
+  let probe = await VaraProcess.probeVaraPort(port, { host });
+  if (!probe.ok && patProc && _patHoldsVara[kind] === patProc && (!_winlinkVaraLaunches(kind) || await varaProcessRunning(kind))) {
+    winlinkLog(`${name} on ${where} is held by Pat from the last session — reusing it`);
     return;
+  }
+  // Linux, macOS, or VARA on another computer (#287): POTACAT never starts it
+  // there, so a VARA that does not answer is the operator's to start.
+  if (!probe.ok && !_winlinkVaraLaunches(kind)) {
+    _winlinkSessionErrorKind = 'vara-not-answering';
+    const how = VaraProcess.isLocalVaraHost(host)
+      ? (process.platform === 'win32' ? '' : ' under Wine on this computer')
+      : ' on that computer';
+    throw new Error(`${name} is not answering at ${where} — start ${name}${how} with its TCP port set to ${port} and its PTT set to VOX, then try again`);
   }
   if (!probe.ok) {
     const bin = findVara(kind);
@@ -10858,7 +10880,7 @@ async function winlinkVaraReady(mode, { configured } = {}) {
     }
   }
   _patHoldsVara[kind] = patProc; // Pat opens it this session and keeps it
-  winlinkLog(`${name} ready on 127.0.0.1:${port}${probe.version ? ' — ' + probe.version : probe.silent ? ' (answered the connection, no VERSION reply)' : ''}`);
+  winlinkLog(`${name} ready on ${where}${probe.version ? ' — ' + probe.version : probe.silent ? ' (answered the connection, no VERSION reply)' : ''}`);
 }
 
 /**
@@ -10867,7 +10889,14 @@ async function winlinkVaraReady(mode, { configured } = {}) {
  * and Icom Network too), or VARA opens the radio's sound card itself.
  * @returns {Promise<'cable'|'direct'>}
  */
-async function winlinkVaraAudioReady() {
+async function winlinkVaraAudioReady(mode) {
+  // VARA on another computer (#287) opens that computer's sound card: nothing
+  // of this PC's audio is involved, so no cable and no bridge here.
+  const kind = VaraProcess.kindOfMode(mode) || 'hf';
+  if (!VaraProcess.isLocalVaraHost(_winlinkVaraHost(kind))) {
+    winlinkLog(`vara: ${VaraProcess.varaName(kind)} runs on ${_winlinkVaraHost(kind)} — its audio is that computer's; POTACAT keys this radio through Pat as usual`);
+    return 'remote';
+  }
   if (!winlinkCableConfigured()) {
     if (winlinkIpAudioRoute()) throw new Error(`VARA cannot open this radio's audio (${winlinkAudioRouteName()}) — set up the virtual audio cable in Settings > Station > Winlink`);
     winlinkLog('vara: no virtual cable set — VARA opens the radio\'s sound card itself (choose the radio\'s devices in VARA)');
@@ -11048,7 +11077,7 @@ function writePatConfig({ varaAddr } = {}) {
   const p = winlinkPaths();
   fs.mkdirSync(p.dir, { recursive: true });
   fs.mkdirSync(p.mbox, { recursive: true });
-  const addr = varaAddr || `127.0.0.1:${_winlinkVaraPort()}`;
+  const addr = varaAddr || VaraProcess.varaAddr(_winlinkVaraHost('hf'), _winlinkVaraPort());
   const cfg = WinlinkPat.buildPatConfig({
     mycall: settings.myCallsign,
     password: settings.winlinkPassword || '',
@@ -11060,7 +11089,7 @@ function writePatConfig({ varaAddr } = {}) {
       ardopBw: settings.winlinkArdopBw,
       varaAddr: addr,
       varaBw: settings.winlinkVaraBw,
-      varaFmAddr: `127.0.0.1:${_winlinkVaraFmPort()}`,
+      varaFmAddr: VaraProcess.varaAddr(_winlinkVaraHost('fm'), _winlinkVaraFmPort()),
       agwPort: _winlinkAgwPort(),
     },
     prediction: winlinkPredictionConfig(),
@@ -11194,8 +11223,8 @@ function winlinkOnPatEvent(ev) {
 }
 
 function winlinkTransportDownText(mode) {
-  if (mode === 'vara') return `VARA HF is not answering on port ${_winlinkVaraPort()} — start VARA (and set its PTT to VOX) first`;
-  if (mode === 'varafm') return `VARA FM is not answering on port ${_winlinkVaraFmPort()} — start VARA FM (PTT VOX; port ${_winlinkVaraFmPort()} in its Settings) first`;
+  if (mode === 'vara') return `VARA HF is not answering at ${VaraProcess.varaWhere(_winlinkVaraHost('hf'), _winlinkVaraPort())} — start VARA (and set its PTT to VOX) first`;
+  if (mode === 'varafm') return `VARA FM is not answering at ${VaraProcess.varaWhere(_winlinkVaraHost('fm'), _winlinkVaraFmPort())} — start VARA FM (PTT VOX; port ${_winlinkVaraFmPort()} in its Settings) first`;
   if (mode === 'mercury') return 'Mercury is not answering — check Mercury in Settings > Station';
   if (mode === 'ardop') return 'ardopcf is not answering — see the [Winlink] ardop lines above';
   return 'The modem is not answering';
@@ -12508,11 +12537,11 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
       if (mode === 'vara' || mode === 'varafm') {
         await winlinkVaraReady(mode);
         if (!live()) throw cancelled();
-        await winlinkVaraAudioReady();
+        await winlinkVaraAudioReady(mode);
         if (!live()) throw cancelled();
       }
       if (mode === 'mercury' || mode === 'vara') {
-        const want = mode === 'mercury' ? `127.0.0.1:${mercuryProcess.mercuryPorts(settings).control}` : `127.0.0.1:${_winlinkVaraPort()}`;
+        const want = mode === 'mercury' ? `127.0.0.1:${mercuryProcess.mercuryPorts(settings).control}` : VaraProcess.varaAddr(_winlinkVaraHost('hf'), _winlinkVaraPort());
         if (want !== _patVaraAddr) {
           writePatConfig({ varaAddr: want });
           await patClient.reload().catch(() => {});
@@ -13464,8 +13493,8 @@ function winlinkDiagLine() {
     + `, shim :${_winlinkShimPort || '-'}, mode ${settings.winlinkDefaultMode || 'telnet'}`
     + `, password ${settings.winlinkPassword ? 'set' : 'MISSING'}, notice ${settings.winlinkNoticeAcceptedAt ? 'accepted' : 'not accepted'}`
     + `, session ${s.state}${s.error ? ' (' + s.error + ')' : ''}, ${audioLine}`
-    + `, ${VaraProcess.describeVara('hf', { enabled: _winlinkVaraEnabled('hf'), found: findVara('hf').found })}`
-    + `, ${VaraProcess.describeVara('fm', { enabled: _winlinkVaraEnabled('fm'), found: findVara('fm').found })}`
+    + `, ${VaraProcess.describeVara('hf', { enabled: _winlinkVaraEnabled('hf'), found: _winlinkVaraLaunches('hf') && findVara('hf').found, host: _winlinkVaraHost('hf'), port: _winlinkVaraPort(), launches: _winlinkVaraLaunches('hf') })}`
+    + `, ${VaraProcess.describeVara('fm', { enabled: _winlinkVaraEnabled('fm'), found: _winlinkVaraLaunches('fm') && findVara('fm').found, host: _winlinkVaraHost('fm'), port: _winlinkVaraFmPort(), launches: _winlinkVaraLaunches('fm') })}`
     + `, cable ${winlinkCableConfigured() ? (modemBridge.cable.state === 'off' ? 'set' : modemBridge.cable.state + (modemBridge.cable.error ? ' ' + modemBridge.cable.error : '')) : 'not set'}`;
 }
 
@@ -42840,10 +42869,15 @@ function cloudShackNotice(text, kind) {
   // The operator's own VARA: where it is, and whether it answers (Settings "Find" / "Test").
   ipcMain.handle('winlink-vara-find', async (_e, o = {}) => {
     const kind = o.kind === 'fm' ? 'fm' : 'hf';
-    const bin = findVara(kind);
-    const port = kind === 'fm' ? _winlinkVaraFmPort() : _winlinkVaraPort();
-    const probe = await VaraProcess.probeVaraPort(port, { timeoutMs: 1500 });
-    return { kind, found: bin.found, path: bin.found ? bin.path : '', port, running: probe.ok, version: probe.version || '', text: VaraProcess.describeVara(kind, { enabled: true, found: bin.found, path: bin.found ? bin.path : '', probe }) };
+    // The fields as typed (Settings "Test" before Save), else the saved ones.
+    const typedPort = parseInt(o.port, 10);
+    const port = typedPort > 0 && typedPort < 65536 ? typedPort : (kind === 'fm' ? _winlinkVaraFmPort() : _winlinkVaraPort());
+    const host = o.host != null ? VaraProcess.normalizeVaraHost(o.host) : _winlinkVaraHost(kind);
+    if (!host) return { kind, ok: false, text: `"${String(o.host).slice(0, 60)}" is not a computer name or address` };
+    const launches = VaraProcess.canLaunchVara({ platform: process.platform, host });
+    const bin = launches ? findVara(kind) : { found: false, path: '' };
+    const probe = await VaraProcess.probeVaraPort(port, { host, timeoutMs: 1500 });
+    return { kind, found: bin.found, path: bin.found ? bin.path : '', host, port, launches, running: probe.ok, version: probe.version || '', text: VaraProcess.describeVara(kind, { enabled: true, found: bin.found, path: bin.found ? bin.path : '', probe, host, port, launches }) };
   });
   ipcMain.handle('winlink-vara-setup', (_e, o = {}) => winlinkVaraSetup({ kind: o.kind, devices: Array.isArray(o.devices) ? o.devices.slice(0, 200) : [], inputLabel: String(o.inputLabel || ''), outputLabel: String(o.outputLabel || '') }));
   ipcMain.handle('winlink-audio-save', (_e, o = {}) => {
@@ -48493,7 +48527,7 @@ function cloudShackNotice(text, kind) {
     // Winlink (Pat) relaunches only for keys baked into its config / launch.
     // The password is in pat-config.json, so a new one needs a relaunch too.
     if (['enableLoggerCat', 'loggerCatPort'].some((k) => has(k) && newSettings[k] !== settings[k])) setTimeout(startLoggerCat, 0);
-    const winlinkChanged = ['enableWinlink', 'winlinkPassword', 'winlinkPatPath', 'winlinkArdopPort', 'winlinkVaraPort', 'winlinkVaraFmPort',
+    const winlinkChanged = ['enableWinlink', 'winlinkPassword', 'winlinkPatPath', 'winlinkArdopPort', 'winlinkVaraPort', 'winlinkVaraFmPort', 'winlinkVaraHost', 'winlinkVaraFmHost',
       'winlinkArdopBw', 'winlinkVaraBw', 'winlinkAgwPort', 'winlinkPrediction', 'winlinkPredictionUrl', 'myCallsign', 'grid']
       .some((k) => has(k) && JSON.stringify(newSettings[k]) !== JSON.stringify(settings[k]));
     const winlinkAutoCheckChanged = ['winlinkTelnetAutoCheck', 'winlinkTelnetAutoCheckMin']
