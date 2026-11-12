@@ -134,6 +134,7 @@
     renderSession(s.session || {});
     refreshFavMarks(); // re-stars the list only when the favorites changed
     if (historyOpen) renderHistory();
+    refreshAddressBits();
   }
 
   function currentMode() {
@@ -272,6 +273,7 @@
   });
 
   function showReader(html) {
+    if (chipFields && chipFields.to) hideForms();
     $('wl-compose').classList.remove('show');
     $('wl-reader').style.display = '';
     $('wl-reader').innerHTML = html;
@@ -288,6 +290,7 @@
       var html = '<div class="wl-reader-actions">'
         + (box === 'in' ? '<button class="wl-btn" id="wl-reply">Reply</button>' : '')
         + '<button class="wl-btn" id="wl-forward">Forward</button>'
+        + (m.from && !contactFor(m.from) && WC.normalizeAddress(m.from) ? '<button class="wl-btn" id="wl-addbook">Add to address book</button>' : '')
         + '<span class="wl-spacer"></span><button class="wl-btn danger" id="wl-del">Delete</button></div>'
         + '<div class="wl-hdr"><b>' + esc(m.subject || '(no subject)') + '</b><br>From <b>' + esc(m.from) + '</b> · ' + esc(new Date(m.date).toLocaleString()) + '<br>To ' + esc((m.to || []).join(', '))
         + (m.cc && m.cc.length ? '<br>Cc ' + esc(m.cc.join(', ')) : '') + '</div>'
@@ -298,6 +301,7 @@
       showReader(html);
       var rp = $('wl-reply'); if (rp) rp.onclick = function () { compose({ to: m.from, subject: /^re:/i.test(m.subject) ? m.subject : 'Re: ' + m.subject, body: '\n\n--- ' + m.from + ' wrote:\n' + (m.body || '').split('\n').map(function (l) { return '> ' + l; }).join('\n') }); };
       // #wl-forward, not #wl-fwd: that id is the PWR meter, which took the click.
+      var ab = $('wl-addbook'); if (ab) ab.onclick = function () { openBook({ address: m.from }); };
       $('wl-forward').onclick = function () { compose({ subject: 'Fwd: ' + m.subject, body: '\n\n--- Forwarded from ' + m.from + ':\n' + (m.body || '') }); };
       // Delete asks first: the button becomes "Delete this message?" with a
       // Cancel beside it, and reverts by itself after a few seconds.
@@ -354,12 +358,13 @@
     // A template is the operator's own text: no notice needed until it is sent.
     var go = function () {
       pre = pre || {};
+      hideForms();
       $('wl-reader').style.display = 'none';
       $('wl-compose').classList.add('show');
       setTemplateMode(pre.template ? { id: pre.id || null } : null);
       $('wl-c-name').value = pre.name || '';
-      $('wl-c-to').value = pre.to || '';
-      $('wl-c-cc').value = pre.cc || '';
+      setChips('to', pre.to || '');
+      setChips('cc', pre.cc || '');
       $('wl-c-subj').value = pre.subject || '';
       $('wl-c-body').value = pre.body || '';
       pendingFiles = [];
@@ -368,7 +373,7 @@
       // A template's instructions go in their own panel above the body.
       $('wl-c-hint').textContent = pre.note || '';
       $('wl-c-hint').hidden = !pre.note;
-      (pre.template ? $('wl-c-name') : pre.to ? $('wl-c-body') : $('wl-c-to')).focus();
+      (pre.template ? $('wl-c-name') : pre.to ? $('wl-c-body') : chipFields.to.input).focus();
     };
     if (pre && pre.template) go(); else requireNotice(go);
   }
@@ -388,38 +393,22 @@
     $('wl-c-err').textContent = '';
     if (tplEdit) { saveTemplate(); return; }
     $('wl-c-send').disabled = true;
-    window.api.send({ to: $('wl-c-to').value, cc: $('wl-c-cc').value, subject: $('wl-c-subj').value, body: $('wl-c-body').value, attachments: pendingFiles }).then(function (r) {
+    window.api.send({ to: chipValue('to'), cc: chipValue('cc'), subject: $('wl-c-subj').value, body: $('wl-c-body').value, attachments: pendingFiles }).then(function (r) {
       $('wl-c-send').disabled = false;
       if (!r || !r.ok) { $('wl-c-err').textContent = (r && r.error) || 'Could not queue it'; return; }
       showReader('<div class="wl-empty">In the Outbox. It goes out on the next Send / Receive.</div>');
     });
   });
-  function positionReport() {
-    requireNotice(function () {
-      window.api.posreport({}).then(function (r) {
-        showReader('<div class="wl-empty">' + esc(r && r.ok ? 'Position report in the Outbox.' : ((r && r.error) || 'Could not queue it')) + '</div>');
-      });
-    });
-  }
+
   $('wl-settings').addEventListener('click', function () { window.api.openSettings(); });
   // POTA spot: a message to spot@pota.tdod.org, one line per park; the
   // operator reads and edits it before it goes in the Outbox.
+  // The POTA spot opens its form (Casey 2026-11-11: fields, not a line to edit by hand).
   function composeSpot(t) {
     if (!t || !t.to) return;
-    // The instructions sit in their own panel above the body (Casey 2026-11-11:
-    // "Fill in the park" looked like part of the message).
-    var how = 'How a POTA spot is written: one line per park, exactly like this:\n'
-      + '!YOURCALL POTA PARK FREQUENCY MODE comment\n'
-      + 'PARK is the park reference (for example US-1234). FREQUENCY is in MHz, like 14.074. '
-      + 'MODE is CW, SSB, FM, FT8, FT4 or DATA. The comment is optional.\n'
-      + 'Each line becomes one spot on POTA, so an n-fer is one line per park. '
-      + 'It posts a real spot when this message goes out.';
-    var todo = (t.missing && t.missing.length)
-      ? 'Still to fill in: ' + t.missing.join(', ') + '. In the line below, replace the word in capitals ('
-        + (t.missing.indexOf('the park') >= 0 ? 'PARK' : 'FREQ or MODE') + ').\n\n'
-      : '';
-    compose({ to: t.to, subject: t.subject, body: t.body, note: todo + how });
+    openSpotForm(t);
   }
+
   if (window.api.onComposePrefill) window.api.onComposePrefill(composeSpot);
 
   // ── Templates (Casey 2026-11-11): one button instead of a column of them ──
@@ -494,7 +483,7 @@
     if (!b) return;
     var k = b.getAttribute('data-tpl');
     closeTemplateMenu();
-    if (k === 'pos') positionReport();
+    if (k === 'pos') openPositionForm();
     else if (k === 'pota') window.api.potaSpotTemplate({}).then(composeSpot);
     else if (k === 'add') compose({ template: true });
   });
@@ -502,7 +491,7 @@
     if (e.key === 'Enter' && e.target.matches('[data-own]')) e.target.click();
   });
   function saveTemplate() {
-    var t = { id: tplEdit && tplEdit.id, name: $('wl-c-name').value, to: $('wl-c-to').value, cc: $('wl-c-cc').value, subject: $('wl-c-subj').value, body: $('wl-c-body').value };
+    var t = { id: tplEdit && tplEdit.id, name: $('wl-c-name').value, to: chipValue('to'), cc: chipValue('cc'), subject: $('wl-c-subj').value, body: $('wl-c-body').value };
     if (!String(t.name).trim()) { $('wl-c-err').textContent = 'Give the template a name, the one the Templates menu shows.'; $('wl-c-name').focus(); return; }
     $('wl-c-send').disabled = true;
     window.api.template('save', t).then(function (r) {
@@ -1188,6 +1177,378 @@
   // cat-swr is the Flex-style 0-255 wire value; cat-swr-ratio the true ratio and wins when it arrives.
   window.api.onCatSwr(function (v) { if (swrRatioSeen) return; var n = Number(v) || 0; showSwr(n > 0 ? 1 + n / 60 : 0); });
   window.api.onCatSwrRatio(function (v) { swrRatioSeen = true; showSwr(Number(v) || 0); });
+
+  // ── address book, chip fields and the two forms (Casey 2026-11-11) ───────
+  var WC = window.WinlinkContacts;
+  var PES = window.PotaEmailSpot;
+  function contacts() { return (state && Array.isArray(state.contacts)) ? state.contacts : []; }
+  function groups() { return (state && Array.isArray(state.contactGroups)) ? state.contactGroups : []; }
+  function contactFor(addr) { var a = WC.normalizeAddress(addr); return contacts().find(function (c) { return c.address === a; }) || null; }
+  var KIND_WORD = { winlink: 'Winlink', email: 'Email' };
+
+  // One chip field per box: To, Cc, Also email to (addresses) and Parks (POTA references).
+  var chipFields = {};
+  function initChips(field, hiddenId, kind) {
+    var box = document.querySelector('.wl-chips[data-field="' + field + '"]');
+    var f = { field: field, box: box, list: box.querySelector('.wl-chip-list'), input: box.querySelector('.wl-chip-in'), hidden: $(hiddenId), kind: kind, items: [] };
+    chipFields[field] = f;
+    box.addEventListener('mousedown', function (e) { if (e.target === box || e.target === f.list) { e.preventDefault(); f.input.focus(); } });
+    f.input.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { if (sug.field === field && sug.rows.length) { e.preventDefault(); moveSuggest(e.key === 'ArrowDown' ? 1 : -1); } return; }
+      if (e.key === 'Escape') { if (sug.field === field) { e.preventDefault(); hideSuggest(); } return; }
+      if (e.key === 'Enter' || e.key === 'Tab' || e.key === ',' || e.key === ';') {
+        if (sug.field === field && sug.on >= 0 && sug.rows[sug.on]) { e.preventDefault(); pickSuggest(sug.rows[sug.on]); return; }
+        if (f.input.value.trim()) { if (e.key !== 'Tab') e.preventDefault(); commitTyped(field); }
+        else if (e.key === 'Enter' && f.kind === 'park') e.preventDefault();
+        return;
+      }
+      if (e.key === 'Backspace' && !f.input.value && f.items.length) { f.items.pop(); renderChips(field); showSuggest(field); }
+    });
+    f.input.addEventListener('input', function () {
+      if (/[,;]/.test(f.input.value)) { commitTyped(field); return; }
+      showSuggest(field);
+    });
+    f.input.addEventListener('focus', function () { showSuggest(field); });
+    f.input.addEventListener('blur', function () { setTimeout(function () { if (document.activeElement !== f.input) { commitTyped(field); if (sug.field === field) hideSuggest(); } }, 150); });
+    f.list.addEventListener('click', function (e) {
+      var x = e.target.closest('.wl-chip-x');
+      if (!x) return;
+      f.items.splice(parseInt(x.getAttribute('data-i'), 10), 1);
+      renderChips(field);
+      f.input.focus();
+    });
+  }
+  function itemOk(f, it) { return f.kind === 'park' ? !!PES.parkRef(it) : !!WC.normalizeAddress(it); }
+  function normItem(f, it) { return f.kind === 'park' ? (PES.parkRef(it) || String(it).toUpperCase().trim()) : (WC.normalizeAddress(it) || String(it).trim()); }
+  function renderChips(field) {
+    var f = chipFields[field];
+    f.list.innerHTML = f.items.map(function (it, i) {
+      var ok = itemOk(f, it);
+      var c = f.kind === 'park' ? null : contactFor(it);
+      var label = c && c.name ? c.name : it;
+      var tip = f.kind === 'park' ? (ok ? it : it + ': not a POTA park reference (like US-1234)') : (ok ? it + (c && c.name ? ' (' + c.name + ')' : '') + ' · ' + KIND_WORD[WC.kindOf(it)] : it + ': not a callsign or an email address');
+      return '<span class="wl-chip' + (ok ? '' : ' bad') + '" title="' + esc(tip) + '"><span class="wl-chip-name">' + esc(label) + '</span><button type="button" class="wl-chip-x" data-i="' + i + '" aria-label="Remove ' + esc(label) + '">&#10005;</button></span>';
+    }).join('');
+    f.hidden.value = f.kind === 'park' ? f.items.join(' ') : f.items.join(', ');
+    if (f.onChange) f.onChange();
+  }
+  function addItems(field, list) {
+    var f = chipFields[field];
+    list.forEach(function (it) { var n = normItem(f, it); if (n && f.items.indexOf(n) < 0) f.items.push(n); });
+    renderChips(field);
+  }
+  function commitTyped(field) {
+    var f = chipFields[field];
+    var parts = f.input.value.split(/[,;\s]+/).filter(Boolean);
+    f.input.value = '';
+    if (parts.length) addItems(field, parts);
+  }
+  function setChips(field, s) {
+    var f = chipFields[field];
+    f.items = [];
+    f.input.value = '';
+    addItems(field, String(s || '').split(/[,;\s]+/).filter(Boolean));
+  }
+  function chipValue(field) { commitTyped(field); return chipFields[field].hidden.value; }
+
+  // Suggestions under an address field: saved contacts and groups first, then
+  // everyone seen in the Inbox and Sent, best match first.
+  var sug = { field: null, rows: [], on: -1 };
+  function showSuggest(field) {
+    var f = chipFields[field];
+    if (f.kind !== 'address') return;
+    var rows = WC.suggest(f.input.value, { contacts: contacts(), groups: groups(), lists: lists, mycall: state && state.mycall, exclude: f.items, limit: 8 });
+    var el = $('wl-suggest');
+    if (!rows.length || (!f.input.value.trim() && document.activeElement !== f.input)) { hideSuggest(); return; }
+    sug = { field: field, rows: rows, on: f.input.value.trim() ? 0 : -1 };
+    el.innerHTML = rows.map(function (r, i) {
+      if (r.type === 'group') return '<button type="button" class="wl-sug" role="option" data-i="' + i + '"><span class="wl-sug-name">' + esc(r.name) + '</span><span class="wl-sug-addr">group of ' + r.members.length + '</span></button>';
+      return '<button type="button" class="wl-sug" role="option" data-i="' + i + '">' + (r.name ? '<span class="wl-sug-name">' + esc(r.name) + '</span>' : '') + '<span class="wl-sug-addr">' + esc(r.address) + '</span><span class="wl-spacer"></span><span class="wl-kind">' + esc(KIND_WORD[r.kind] || '') + '</span></button>';
+    }).join('');
+    var pane = document.querySelector('.wl-pane').getBoundingClientRect(), b = f.box.getBoundingClientRect();
+    el.style.left = Math.round(b.left - pane.left) + 'px';
+    el.style.top = Math.round(b.bottom - pane.top + 4) + 'px';
+    el.style.width = Math.round(Math.max(280, Math.min(420, b.width))) + 'px';
+    el.hidden = false;
+    paintSuggest();
+  }
+  function paintSuggest() {
+    Array.prototype.forEach.call($('wl-suggest').querySelectorAll('.wl-sug'), function (b, i) { b.classList.toggle('on', i === sug.on); b.setAttribute('aria-selected', String(i === sug.on)); });
+  }
+  function moveSuggest(d) { sug.on = (sug.on + d + sug.rows.length) % sug.rows.length; paintSuggest(); }
+  function hideSuggest() { $('wl-suggest').hidden = true; sug = { field: null, rows: [], on: -1 }; }
+  function pickSuggest(r) {
+    var field = sug.field;
+    if (!field) return;
+    chipFields[field].input.value = '';
+    addItems(field, r.type === 'group' ? r.members : [r.address]);
+    hideSuggest();
+    chipFields[field].input.focus();
+  }
+  $('wl-suggest').addEventListener('mousedown', function (e) {
+    var b = e.target.closest('.wl-sug');
+    if (!b) return;
+    e.preventDefault();
+    pickSuggest(sug.rows[parseInt(b.getAttribute('data-i'), 10)]);
+  });
+
+  initChips('to', 'wl-c-to', 'address');
+  initChips('cc', 'wl-c-cc', 'address');
+  initChips('posalso', 'wl-pos-also', 'address');
+  initChips('parks', 'wl-spot-parks', 'park');
+
+  // ── the address book panel ──────────────────────────────────────────────
+  var bookDelArmed = null;
+  function openBook(edit) {
+    hideSuggest();
+    $('wl-book').hidden = false;
+    $('wl-book-find').value = '';
+    bookDelArmed = null;
+    renderBook();
+    if (edit) editContact(edit); else { $('wl-book-edit').hidden = true; $('wl-book-find').focus(); }
+  }
+  function closeBook() { $('wl-book').hidden = true; $('wl-book-edit').hidden = true; }
+  function composeOpen() { return $('wl-compose').classList.contains('show'); }
+  function renderBook() {
+    var q = $('wl-book-find').value.trim().toLowerCase();
+    var hit = function (s) { return !q || String(s || '').toLowerCase().indexOf(q) >= 0; };
+    var cs = contacts().filter(function (c) { return hit(c.name) || hit(c.address) || hit(c.note); })
+      .sort(function (a, b) { return (a.name || a.address).localeCompare(b.name || b.address); });
+    var gs = groups().filter(function (g) { return hit(g.name) || g.members.some(hit); });
+    var saved = {};
+    contacts().forEach(function (c) { saved[c.address] = true; });
+    var seen = WC.seenAddresses(lists, state && state.mycall).filter(function (s) { return !saved[s.address] && hit(s.address); })
+      .sort(function (a, b) { return b.lastAt - a.lastAt; }).slice(0, 30);
+    var addBtns = function (attr, val) {
+      return composeOpen() ? '<button type="button" class="wl-btn" data-' + attr + '-to="' + esc(val) + '">To</button><button type="button" class="wl-btn" data-' + attr + '-cc="' + esc(val) + '">Cc</button>' : '';
+    };
+    var html = '';
+    if (cs.length) {
+      html += '<div class="wl-book-sec">Contacts</div>' + cs.map(function (c) {
+        var armed = bookDelArmed === c.id;
+        return '<div class="wl-book-row"><div class="wl-book-who"><span class="wl-sug-name">' + esc(c.name || c.address) + '</span><span class="wl-sug-addr">' + esc(c.address) + (c.note ? ' · ' + esc(c.note) : '') + '</span></div><span class="wl-kind">' + esc(KIND_WORD[c.kind]) + '</span>'
+          + addBtns('addr', c.address)
+          + '<button type="button" class="wl-btn" data-edit="' + esc(c.id) + '">Edit</button><button type="button" class="wl-btn" data-del="' + esc(c.id) + '" aria-label="Delete ' + esc(c.name || c.address) + '">' + (armed ? 'Delete?' : '&#10005;') + '</button></div>';
+      }).join('');
+    }
+    if (gs.length) {
+      html += '<div class="wl-book-sec">Groups</div>' + gs.map(function (g) {
+        var armed = bookDelArmed === g.id;
+        return '<div class="wl-book-row"><div class="wl-book-who"><span class="wl-sug-name">' + esc(g.name) + '</span><span class="wl-sug-addr">' + esc(g.members.join(', ')) + '</span></div>'
+          + addBtns('group', g.id)
+          + '<button type="button" class="wl-btn" data-gedit="' + esc(g.id) + '">Edit</button><button type="button" class="wl-btn" data-gdel="' + esc(g.id) + '" aria-label="Delete ' + esc(g.name) + '">' + (armed ? 'Delete?' : '&#10005;') + '</button></div>';
+      }).join('');
+    }
+    if (seen.length) {
+      html += '<div class="wl-book-sec">From your mail, not saved yet</div>' + seen.map(function (s) {
+        return '<div class="wl-book-row"><div class="wl-book-who"><span class="wl-sug-addr">' + esc(s.address) + '</span></div><span class="wl-kind">' + esc(KIND_WORD[WC.kindOf(s.address)]) + '</span>'
+          + addBtns('addr', s.address)
+          + '<button type="button" class="wl-btn" data-save="' + esc(s.address) + '">Save</button></div>';
+      }).join('');
+    }
+    $('wl-book-list').innerHTML = html || '<div class="wl-book-empty">' + (q ? 'Nothing matches.' : 'No contacts yet. Save someone with + New contact, or from a message you received with Add to address book.') + '</div>';
+  }
+  function editContact(c) {
+    c = c || {};
+    var box = $('wl-book-edit');
+    box.hidden = false;
+    box.innerHTML = '<form class="wl-form-grid" id="wl-ce-form"><label for="wl-ce-name">Name</label><input type="text" id="wl-ce-name" maxlength="60" placeholder="for example Mom, or W1AW ARES net control">'
+      + '<label for="wl-ce-addr">Address</label><input type="text" id="wl-ce-addr" maxlength="120" placeholder="a callsign (Winlink) or an email address" spellcheck="false">'
+      + '<label for="wl-ce-note">Note</label><input type="text" id="wl-ce-note" maxlength="200" placeholder="optional">'
+      + '<span></span><span class="wl-form-inline"><button type="submit" class="wl-btn primary">Save contact</button><button type="button" class="wl-btn" id="wl-ce-cancel">Cancel</button><span class="wl-c-err" id="wl-ce-err"></span></span></form>';
+    $('wl-ce-name').value = c.name || '';
+    $('wl-ce-addr').value = c.address || '';
+    $('wl-ce-note').value = c.note || '';
+    $('wl-ce-cancel').onclick = function () { box.hidden = true; };
+    $('wl-ce-form').onsubmit = function (e) {
+      e.preventDefault();
+      window.api.contact('save', { id: c.id || undefined, name: $('wl-ce-name').value, address: $('wl-ce-addr').value, note: $('wl-ce-note').value }).then(function (r) {
+        if (!r || !r.ok) { $('wl-ce-err').textContent = (r && r.error) || 'Could not save it'; return; }
+        box.hidden = true;
+      });
+    };
+    (c.address ? $('wl-ce-name') : $('wl-ce-addr')).focus();
+  }
+  function editGroup(g) {
+    g = g || {};
+    var box = $('wl-book-edit');
+    box.hidden = false;
+    box.innerHTML = '<form class="wl-form-grid" id="wl-ge-form"><label for="wl-ge-name">Group name</label><input type="text" id="wl-ge-name" maxlength="60" placeholder="for example ARES net, or Family">'
+      + '<label for="wl-ge-members">Addresses</label><input type="text" id="wl-ge-members" placeholder="callsigns and emails, separated by commas" spellcheck="false">'
+      + '<span></span><span class="wl-form-inline"><button type="submit" class="wl-btn primary">Save group</button><button type="button" class="wl-btn" id="wl-ge-cancel">Cancel</button><span class="wl-c-err" id="wl-ge-err"></span></span></form>';
+    $('wl-ge-name').value = g.name || '';
+    $('wl-ge-members').value = (g.members || []).join(', ');
+    $('wl-ge-cancel').onclick = function () { box.hidden = true; };
+    $('wl-ge-form').onsubmit = function (e) {
+      e.preventDefault();
+      window.api.contactGroup('save', { id: g.id || undefined, name: $('wl-ge-name').value, members: WC.splitAddresses($('wl-ge-members').value) }).then(function (r) {
+        if (!r || !r.ok) { $('wl-ge-err').textContent = (r && r.error) || 'Could not save it'; return; }
+        box.hidden = true;
+      });
+    };
+    $('wl-ge-name').focus();
+  }
+  $('wl-c-book').addEventListener('click', function () { openBook(null); });
+  $('wl-book-close').addEventListener('click', closeBook);
+  $('wl-book-find').addEventListener('input', renderBook);
+  $('wl-book-new').addEventListener('click', function () { editContact({}); });
+  $('wl-book-newgroup').addEventListener('click', function () { editGroup({}); });
+  $('wl-book-list').addEventListener('click', function (e) {
+    var b = e.target.closest('button');
+    if (!b) return;
+    var a;
+    if ((a = b.getAttribute('data-addr-to'))) { addItems('to', [a]); return; }
+    if ((a = b.getAttribute('data-addr-cc'))) { addItems('cc', [a]); return; }
+    if ((a = b.getAttribute('data-group-to')) || (a = b.getAttribute('data-group-cc'))) {
+      var g = groups().find(function (x) { return x.id === a; });
+      if (g) addItems(b.hasAttribute('data-group-to') ? 'to' : 'cc', g.members);
+      return;
+    }
+    if ((a = b.getAttribute('data-save'))) { editContact({ address: a }); return; }
+    if ((a = b.getAttribute('data-edit'))) { editContact(contacts().find(function (c) { return c.id === a; })); return; }
+    if ((a = b.getAttribute('data-gedit'))) { editGroup(groups().find(function (g) { return g.id === a; })); return; }
+    if ((a = b.getAttribute('data-del'))) {
+      if (bookDelArmed !== a) { bookDelArmed = a; renderBook(); return; }
+      bookDelArmed = null; window.api.contact('delete', { id: a }); return;
+    }
+    if ((a = b.getAttribute('data-gdel'))) {
+      if (bookDelArmed !== a) { bookDelArmed = a; renderBook(); return; }
+      bookDelArmed = null; window.api.contactGroup('delete', { id: a });
+    }
+  });
+
+  // ── the forms share the reading pane with the reader and compose ────────
+  function hideForms() {
+    $('wl-form-pos').hidden = true;
+    $('wl-form-spot').hidden = true;
+    closeBook();
+    hideSuggest();
+  }
+  function showForm(id) {
+    hideForms();
+    $('wl-reader').style.display = 'none';
+    $('wl-compose').classList.remove('show');
+    $(id).hidden = false;
+  }
+
+  // Position report: where it goes said plainly, the position editable, and
+  // the same position as ordinary mail to whoever should know.
+  function openPositionForm() {
+    requireNotice(function () {
+      showForm('wl-form-pos');
+      var p = state && state.position;
+      $('wl-pos-lat').value = p ? String(p.lat) : '';
+      $('wl-pos-lon').value = p ? String(p.lon) : '';
+      $('wl-pos-from').textContent = p
+        ? 'Starting point: the center of grid square ' + p.grid + ', accurate to about ' + p.km + ' km. Type your exact position for a better fix.'
+        : 'No grid square is set (Settings > Station). Type your position.';
+      $('wl-pos-comment').value = '';
+      setChips('posalso', '');
+      $('wl-pos-err').textContent = '';
+      $('wl-pos-lat').focus();
+    });
+  }
+  $('wl-pos-cancel').addEventListener('click', function () { showReader('<div class="wl-empty">Pick a message.</div>'); });
+  $('wl-form-pos').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var lat = Number(String($('wl-pos-lat').value).trim()), lon = Number(String($('wl-pos-lon').value).trim());
+    if (!isFinite(lat) || lat < -90 || lat > 90 || String($('wl-pos-lat').value).trim() === '') { $('wl-pos-err').textContent = 'Latitude is a number from -90 to 90, like 40.7291'; $('wl-pos-lat').focus(); return; }
+    if (!isFinite(lon) || lon < -180 || lon > 180 || String($('wl-pos-lon').value).trim() === '') { $('wl-pos-err').textContent = 'Longitude is a number from -180 to 180, like -74.0416'; $('wl-pos-lon').focus(); return; }
+    var comment = $('wl-pos-comment').value.trim();
+    var also = chipValue('posalso');
+    var bad = chipFields.posalso.items.filter(function (it) { return !WC.normalizeAddress(it); });
+    if (bad.length) { $('wl-pos-err').textContent = bad[0] + ' is not a callsign or an email address'; return; }
+    $('wl-pos-send').disabled = true;
+    window.api.posreport({ lat: lat, lon: lon, comment: comment }).then(function (r) {
+      if (!r || !r.ok) { $('wl-pos-send').disabled = false; $('wl-pos-err').textContent = (r && r.error) || 'Could not queue it'; return null; }
+      if (!also) return { ok: true, n: 0 };
+      var p = state && state.position;
+      var body = 'My position: ' + lat.toFixed(4) + ', ' + lon.toFixed(4) + (p && p.grid ? ' (grid ' + p.grid + ')' : '') + '\n' + (comment ? comment + '\n' : '');
+      return window.api.send({ to: also, cc: '', subject: 'Position report from ' + ((state && state.mycall) || ''), body: body, attachments: [] }).then(function (s) { return s && s.ok ? { ok: true, n: WC.splitAddresses(also).length } : s; });
+    }).then(function (r) {
+      $('wl-pos-send').disabled = false;
+      if (!r) return;
+      if (!r.ok) { $('wl-pos-err').textContent = 'The position report is in the Outbox, but the email could not be queued: ' + (r.error || 'unknown reason'); return; }
+      showReader('<div class="wl-empty">Position report in the Outbox' + (r.n ? ', and an email with the same position to ' + r.n + (r.n === 1 ? ' address' : ' addresses') : '') + '. It goes out on the next Send / Receive.</div>');
+    });
+  });
+
+  // POTA spot: fields in, the exact lines POTA receives shown before it goes.
+  (function fillModes() {
+    $('wl-spot-mode').innerHTML = PES.FORM_MODES.map(function (m) { return '<option>' + m + '</option>'; }).join('');
+  })();
+  function spotLines() {
+    var call = String((state && state.mycall) || '').toUpperCase();
+    var mhz = Number(String($('wl-spot-freq').value).trim());
+    var mode = $('wl-spot-mode').value;
+    var comment = $('wl-spot-comment').value.trim();
+    return chipFields.parks.items.filter(function (r) { return !!PES.parkRef(r); }).map(function (ref) {
+      return PES.spotLine({ call: call, ref: ref, freqKhz: mhz > 0 ? mhz * 1000 : 0, mode: mode, comment: comment });
+    });
+  }
+  // Examples instead of a how-to (Casey 2026-11-11), in the operator's own
+  // call: one park, then a 2-fer, which is one line per park.
+  function renderSpotExamples() {
+    var call = String((state && state.mycall) || 'K1ABC').toUpperCase();
+    $('wl-spot-examples').textContent =
+      'One park, CW on 40 m:\n'
+      + '!' + call + ' POTA US-1449 7.025 CW\n\n'
+      + 'A 2-fer, SSB on 20 m: one line per park\n'
+      + '!' + call + ' POTA CA-0035 14.285 SSB\n'
+      + '!' + call + ' POTA CA-0110 14.285 SSB';
+  }
+  function renderSpotPreview() {
+    renderSpotExamples();
+    var lines = spotLines();
+    $('wl-spot-preview').textContent = lines.length ? lines.join('\n') : 'Add a park to see the spot line.';
+    var bad = chipFields.parks.items.filter(function (r) { return !PES.parkRef(r); });
+    $('wl-spot-err').textContent = bad.length
+      ? bad.join(', ') + (bad.length === 1 ? ' is' : ' are') + ' not a POTA park reference, so ' + (bad.length === 1 ? 'it is' : 'they are') + ' left out. They look like US-1234.'
+      : '';
+  }
+  chipFields.parks.onChange = renderSpotPreview;
+  ['wl-spot-freq', 'wl-spot-comment'].forEach(function (id) { $(id).addEventListener('input', renderSpotPreview); });
+  $('wl-spot-mode').addEventListener('change', renderSpotPreview);
+  function openSpotForm(t) {
+    t = t || {};
+    requireNotice(function () {
+      showForm('wl-form-spot');
+      setChips('parks', (t.refs || []).join(' '));
+      $('wl-spot-freq').value = t.freqKhz > 0 ? PES.formatFreqMhz(t.freqKhz) : '';
+      $('wl-spot-freq-from').textContent = t.freqKhz > 0 ? 'where you are activating' : 'type the frequency you are on';
+      var mode = String(t.mode || '').toUpperCase();
+      if (mode && PES.FORM_MODES.indexOf(mode) < 0) $('wl-spot-mode').insertAdjacentHTML('beforeend', '<option>' + esc(mode) + '</option>');
+      $('wl-spot-mode').value = mode || 'SSB';
+      $('wl-spot-comment').value = t.comment || '';
+      $('wl-spot-err').textContent = '';
+      renderSpotPreview();
+      (chipFields.parks.items.length ? $('wl-spot-freq') : chipFields.parks.input).focus();
+    });
+  }
+  $('wl-spot-cancel').addEventListener('click', function () { showReader('<div class="wl-empty">Pick a message.</div>'); });
+  $('wl-form-spot').addEventListener('submit', function (e) {
+    e.preventDefault();
+    commitTyped('parks');
+    var items = chipFields.parks.items;
+    var bad = items.filter(function (r) { return !PES.parkRef(r); });
+    if (!items.length) { $('wl-spot-err').textContent = 'Add the park you are activating, like US-1234'; chipFields.parks.input.focus(); return; }
+    if (bad.length) { $('wl-spot-err').textContent = bad[0] + ' is not a POTA park reference. They look like US-1234.'; return; }
+    if (!(Number(String($('wl-spot-freq').value).trim()) > 0)) { $('wl-spot-err').textContent = 'The frequency is in MHz, like 14.074'; $('wl-spot-freq').focus(); return; }
+    if (!(state && state.mycall)) { $('wl-spot-err').textContent = 'Set your callsign in Settings > Station first'; return; }
+    var lines = spotLines();
+    $('wl-spot-send').disabled = true;
+    window.api.send({ to: PES.SPOT_ADDRESS, cc: '', subject: 'POTA spot', body: lines.join('\n'), attachments: [] }).then(function (r) {
+      $('wl-spot-send').disabled = false;
+      if (!r || !r.ok) { $('wl-spot-err').textContent = (r && r.error) || 'Could not queue it'; return; }
+      showReader('<div class="wl-empty">' + (lines.length === 1 ? 'The POTA spot is' : lines.length + ' POTA spots are') + ' in the Outbox. ' + (lines.length === 1 ? 'It posts' : 'They post') + ' when the next Send / Receive delivers ' + (lines.length === 1 ? 'it' : 'them') + '.</div>');
+    });
+  });
+
+  function refreshAddressBits() {
+    if (!chipFields || !chipFields.to) return;
+    if (!$('wl-book').hidden) renderBook();
+    ['to', 'cc', 'posalso'].forEach(function (f) { renderChips(f); });
+  }
 
   // ── wiring ───────────────────────────────────────────────────────────────
   window.api.onState(function (s) { state = s; renderState(); renderSound(); autoSound(); wfSync(); });

@@ -238,6 +238,7 @@ const TESTS = [
   'test/winlink-diag-test.js', // #295: the modem's events and the audio's health in the session log; modem logs in Report a Bug
   'test/winlink-busy-wait-test.js', // #296: Keep waiting stays chosen, Stop ends Pat's busy wait, the watchdog does not call the wait a stall
   'test/winlink-history-test.js', // #254: gateway history from Pat's event log, My gateways (saved gateways)
+  'test/winlink-contacts-test.js', // the Winlink address book, and the Position report and POTA spot forms
   'test/rigctld-shim-hamlib-test.js',
   'test/rigctld-died-test.js',
   'test/interface-ptt-test.js',

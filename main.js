@@ -437,6 +437,7 @@ const WinlinkDiag = require('./lib/winlink-diag');
 const WinlinkHistory = require('./lib/winlink-history');
 const WinlinkFav = require('./lib/winlink-favourites');
 const WinlinkTemplates = require('./lib/winlink-templates');
+const WinlinkContacts = require('./lib/winlink-contacts');
 const WinlinkReach = require('./lib/winlink-reach');
 const PotaEmailSpot = require('./lib/pota-email-spot');
 const { WinlinkClient } = require('./lib/winlink-client');
@@ -10849,6 +10850,18 @@ function winlinkPayload() {
     // The operator's own message templates (the built-in Position report and
     // POTA spot are not stored: every surface offers them itself).
     templates: WinlinkTemplates.normalize(settings.winlinkTemplates),
+    // The Position report form's starting point: the center of the grid, and
+    // how far off that can be (half the square's diagonal, rounded).
+    position: (() => {
+      const g = String(settings.grid || '').trim().toUpperCase();
+      const ll = g ? gridToLatLon(g) : null;
+      if (!ll) return null;
+      const km = g.length >= 8 ? 1 : g.length >= 6 ? 5 : 100;
+      return { grid: g, lat: Math.round(ll.lat * 10000) / 10000, lon: Math.round(ll.lon * 10000) / 10000, km };
+    })(),
+    // The address book (Casey 2026-11-11): saved contacts and groups.
+    contacts: WinlinkContacts.normalizeContacts(settings.winlinkContacts),
+    contactGroups: WinlinkContacts.normalizeGroups(settings.winlinkContactGroups),
     predictMs: (settings.winlinkPredictMs && typeof settings.winlinkPredictMs === 'object') ? settings.winlinkPredictMs : {},
     predictionOn: settings.winlinkPrediction !== false,
     ardopBw: [200, 500, 1000, 2000].includes(Number(settings.winlinkArdopBw)) ? Number(settings.winlinkArdopBw) : 500,
@@ -12803,7 +12816,52 @@ async function winlinkSend({ to, cc, subject, body, p2p, attachments } = {}) {
     winlinkLog(`POTA spot by email: ${sp.bodies.join(' | ')} — in the Outbox`);
     return { ok: true, spots: sp.bodies.length };
   }
-  return winlinkSendOne({ to, cc, subject, body, p2p, attachments });
+  const r = await winlinkSendOne({ to, cc, subject, body, p2p, attachments });
+  // The address book ranks people by when you last wrote to them.
+  if (r && r.ok) {
+    const t = WinlinkContacts.touch(settings.winlinkContacts, WinlinkContacts.splitAddresses(`${to || ''},${cc || ''}`));
+    if (t.changed) { settings.winlinkContacts = t.list; try { saveSettings(settings); } catch {} winlinkPush(); }
+  }
+  return r;
+}
+
+/** winlink-pota-spot: what a phone needs to show the POTA spot form, filled. */
+function winlinkPotaSpotReply(over = {}) {
+  const t = winlinkPotaSpotTemplate(over);
+  return {
+    type: 'winlink-pota-spot', to: t.to, subject: t.subject, call: t.call, parks: t.refs,
+    freqKhz: t.freqKhz, mode: t.mode, comment: t.comment, body: t.body, missing: t.missing,
+    hint: PotaEmailSpot.spotHint(t.missing),
+  };
+}
+
+/** Save or delete an address-book contact; every surface gets the list on winlink-state. */
+function winlinkContact(op, c) {
+  const before = WinlinkContacts.normalizeContacts(settings.winlinkContacts);
+  let r;
+  if (op === 'save') r = WinlinkContacts.saveContact(before, c || {});
+  else if (op === 'delete') r = { ok: true, list: WinlinkContacts.removeContact(before, String((c && c.id) || '')) };
+  else return { ok: false, error: 'Unknown action' };
+  if (!r.ok) return { ok: false, error: r.error };
+  settings.winlinkContacts = r.list;
+  // A deleted contact leaves the groups it was in only when the operator says so; groups keep plain addresses.
+  saveSettings(settings);
+  winlinkPush();
+  return { ok: true, id: r.id || null };
+}
+
+/** Save or delete an address-book group (a name and its addresses). */
+function winlinkContactGroup(op, g) {
+  const before = WinlinkContacts.normalizeGroups(settings.winlinkContactGroups);
+  let r;
+  if (op === 'save') r = WinlinkContacts.saveGroup(before, g || {});
+  else if (op === 'delete') r = { ok: true, list: WinlinkContacts.removeGroup(before, String((g && g.id) || '')) };
+  else return { ok: false, error: 'Unknown action' };
+  if (!r.ok) return { ok: false, error: r.error };
+  settings.winlinkContactGroups = r.list;
+  saveSettings(settings);
+  winlinkPush();
+  return { ok: true, id: r.id || null };
 }
 
 // The POTA spot template for the live activation: the operator's call, every
@@ -13125,6 +13183,18 @@ async function winlinkHandleRemote({ type, req = {}, reply }) {
         result('favourite', winlinkFavourite(req.op, { call: req.call, mode: req.mode, khz: req.dialKhz, url: req.url }));
         return;
       // Message templates: op 'save' (a new one, or the one with that id) | 'delete' {id}.
+      // The address book: op 'save' (new, or the one with id) | 'delete' {id}.
+      case 'winlink-contact':
+        result('contact', winlinkContact(req.op, { id: req.id, name: req.name, address: req.address, note: req.note }));
+        return;
+      case 'winlink-contact-group':
+        result('contact-group', winlinkContactGroup(req.op, { id: req.id, name: req.name, members: req.members }));
+        return;
+      // The POTA spot prefill for the phone: the same source as the desktop's form
+      // (callsign, the live activation's parks, the pre-Winlink dial, the mapped mode).
+      case 'winlink-pota-spot-get':
+        reply(winlinkPotaSpotReply());
+        return;
       case 'winlink-template':
         result('template', winlinkTemplate(req.op, { id: req.id, name: req.name, to: req.to, cc: req.cc, subject: req.subject, body: req.body }));
         return;
@@ -41973,6 +42043,8 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('winlink-cmd-prompt', (_e, { id, value } = {}) => { winlinkAnswerPrompt(String(id), String(value)); });
   ipcMain.handle('winlink-cmd-gateways', (_e, { mode, band } = {}) => winlinkGateways(String(mode || 'ardop'), band ? String(band) : ''));
   ipcMain.handle('winlink-cmd-history', () => winlinkHistoryGet());
+  ipcMain.handle('winlink-cmd-contact', (_e, { op, c } = {}) => winlinkContact(String(op || ''), c && typeof c === 'object' ? c : {}));
+  ipcMain.handle('winlink-cmd-contact-group', (_e, { op, g } = {}) => winlinkContactGroup(String(op || ''), g && typeof g === 'object' ? g : {}));
   ipcMain.handle('winlink-cmd-template', (_e, { op, t } = {}) => winlinkTemplate(String(op || ''), t && typeof t === 'object' ? t : {}));
   ipcMain.handle('winlink-cmd-favourite', (_e, { op, call, mode, dialKhz, url } = {}) => winlinkFavourite(String(op || ''), { call: String(call || ''), mode: String(mode || ''), khz: Number(dialKhz), url: String(url || '') }));
   ipcMain.on('winlink-cmd-set-mode', (_e, mode) => winlinkSetMode(mode));
