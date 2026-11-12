@@ -26413,19 +26413,13 @@ piAccessEl.addEventListener('click', (e) => {
   e.stopPropagation();
   const mod = e.ctrlKey || e.metaKey;
   if (!mod || !e.shiftKey) return;
-  // Ctrl+Alt+Shift+Click (Cmd+Alt+Shift on Mac) -> revoke ULTRACAT
-  if (e.altKey) {
-    if (!ultracatUnlocked) return;
-    applyUltracat(false);
-    window.api.saveSettings({ ultracat: false });
-    flashUltracatOverlay(true);
-    return;
-  }
-  // Ctrl+Shift+Click (Cmd+Shift on Mac) -> unlock ULTRACAT
-  if (ultracatUnlocked) return; // already in; revoke is the way out
-  applyUltracat(true);
-  window.api.saveSettings({ ultracat: true });
-  flashUltracatOverlay(false);
+  // The same gesture turns it on and off (Casey 2026-11-11: off needed Alt
+  // as well). Alt still only turns it off, so an old habit never turns it on.
+  const next = e.altKey ? false : !ultracatUnlocked;
+  if (next === ultracatUnlocked) return;
+  applyUltracat(next);
+  window.api.saveSettings({ ultracat: next });
+  flashUltracatOverlay(!next);
 });
 
 // MIDI hot-plug: re-enumerate when devices change

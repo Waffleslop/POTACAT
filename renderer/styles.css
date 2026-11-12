@@ -4764,6 +4764,9 @@ tbody td.source-multi-program { white-space: normal; text-overflow: clip; line-h
   color: var(--text-tertiary);
   flex-shrink: 0;
   padding-top: 8px;
+  /* A band under Save / Cancel that only the π sits in, so it can never
+     land on Cancel at any window size (Casey 2026-11-11). */
+  padding-bottom: 18px;
   border-top: 1px solid var(--border-secondary);
 }
 
@@ -4909,8 +4912,8 @@ a.settings-echocat-badge-link:hover {
 /* Pi access easter egg */
 .pi-access {
   position: absolute;
-  bottom: 2px;
-  right: -8px;
+  bottom: 0;
+  right: 22px; /* left of the dialog's resize grip in the corner */
   font-size: 12px;
   color: var(--text-tertiary);
   cursor: default;
