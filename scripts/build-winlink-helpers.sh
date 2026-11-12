@@ -92,8 +92,11 @@ if [[ " $want " == *" pat "* ]]; then
     cd "$WORK/pat"
     WL2K_VER="$(go list -m -f '{{.Version}}' github.com/la5nta/wl2k-go)"
     [ "$WL2K_VER" = "$WL2K_GO_VERSION" ] || { echo "::error::pat $PAT_TAG pins wl2k-go $WL2K_VER, expected $WL2K_GO_VERSION: re-read third_party/pat/README.md before moving it"; exit 1; }
+    # Fetch first: on a fresh runner the module cache is empty and .Dir is "" until then.
+    go mod download || { echo "::error::could not download Pat's Go modules"; exit 1; }
     go mod verify >/dev/null || { echo "::error::a Go module Pat depends on does not match go.sum"; exit 1; }
     WL2K_DIR="$(go list -m -f '{{.Dir}}' github.com/la5nta/wl2k-go)"
+    [ -n "$WL2K_DIR" ] && [ -d "$WL2K_DIR" ] || { echo "::error::wl2k-go $WL2K_VER is not in the module cache after download"; exit 1; }
     grep -q 'DefaultARQTimeout = 90 \* time.Second' "$WL2K_DIR/transport/ardop/ardop.go" \
       && grep -q 'func (tnc \*TNC) SetARQTimeout(d time.Duration) error' "$WL2K_DIR/transport/ardop/tnc.go" \
       || { echo "::error::wl2k-go $WL2K_VER no longer has the 90 s default or SetARQTimeout the Pat patch relies on"; exit 1; }

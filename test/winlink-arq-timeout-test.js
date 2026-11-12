@@ -146,6 +146,7 @@ test('the Pat build applies the patch, fails loudly without it, and leaves wl2k-
   assert.ok(pat.includes('grep -q \'a.potacatApplyARQTimeout()\' "$WORK/pat/app/connect.go"'), 'the hook is checked in the tree');
   assert.ok(pat.includes('grep -a -q \'POTACAT_ARDOP_ARQ_TIMEOUT\' "$ROOT/assets/pat/pat$EXE" || { echo "::error::the built Pat does not carry the ARQ timeout patch"; exit 1; }'), 'and in the binary');
   assert.ok(/^WL2K_GO_VERSION=v1\.0\.1$/m.test(sh) && pat.includes('[ "$WL2K_VER" = "$WL2K_GO_VERSION" ] ||') && pat.includes('go mod verify'));
+  assert.ok(pat.indexOf('go mod download') > 0 && pat.indexOf('go mod download') < pat.indexOf("go list -m -f '{{.Dir}}'"), 'the module is fetched before its folder is read (CI 2026-11-12: empty cache, empty .Dir)');
   assert.ok(!/go mod vendor|-mod=mod|\breplace\b/.test(pat), 'no vendored or replaced dependency');
   // The patch itself: Pat's own source only, LF, and the two files it is described as touching.
   const patchRaw = require('fs').readFileSync(path.join(root, 'third_party', 'pat', 'potacat-arq-timeout.patch'), 'utf8');
