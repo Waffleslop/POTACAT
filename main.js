@@ -441,6 +441,7 @@ const WinlinkPat = require('./lib/winlink-pat');
 const WinlinkDiag = require('./lib/winlink-diag');
 const WinlinkHistory = require('./lib/winlink-history');
 const WinlinkOutcome = require('./lib/winlink-outcome'); // how a session ended, in the words every surface shows (#425)
+const WinlinkPatRecover = require('./lib/winlink-pat-recover'); // Pat still on a call nobody owns: restart it, never refuse for ever (#430)
 const WinlinkFav = require('./lib/winlink-favourites');
 const WinlinkTemplates = require('./lib/winlink-templates');
 const WinlinkContacts = require('./lib/winlink-contacts');
@@ -11208,6 +11209,8 @@ function winlinkTransportDownText(mode) {
  */
 let _winlinkStarting = null;
 async function winlinkEnsureStarted() {
+  // Pat is being restarted (#430): wait for that, never start a second Pat beside it.
+  if (_winlinkPatRestart) { try { await _winlinkPatRestart; } catch {} }
   if (patClient && winlinkState.snapshot().patReady) return true;
   if (!_winlinkStarting && !patProc) {
     _winlinkStarting = connectWinlink().catch(() => {}).finally(() => { _winlinkStarting = null; });
@@ -11265,7 +11268,74 @@ async function connectWinlink() {
   winlinkArmAutoCheck();
 }
 
+/**
+ * Stop Pat and start it again, in place (#430): the same folders, config and
+ * radio control shim; nothing else of Winlink is touched. Used when Pat still
+ * reports a call that POTACAT has ended. Stopping the process ends whatever
+ * Pat was doing with it, a dial included, which a disconnect request did not
+ * always do (a VARA dial waiting for a clear channel, 2026-10-23). Pat's own
+ * /api/reload does the same more slowly: it took 10.6 s in the no-RF loopback,
+ * because Pat first waits 10 s for the stuck call's request to finish.
+ * One restart at a time; every caller gets the same answer.
+ * @returns {Promise<boolean>} Pat answers again
+ */
+let _winlinkPatRestart = null;
+function winlinkRestartPat(why) {
+  if (_winlinkPatRestart) return _winlinkPatRestart;
+  _winlinkPatRestart = (async () => {
+    if (winlinkSessionActive()) { winlinkLog('Pat is not restarted: a session is running'); return false; }
+    winlinkLog(`restarting Pat: ${why}`);
+    const t0 = Date.now();
+    try {
+      killPat();
+      const port = await winlinkFreePort(WinlinkPat.PAT_DEFAULTS.httpPortRange);
+      if (!port) throw new Error('no free local port for Pat (8590-8599)');
+      _patHttpPort = port;
+      writePatConfig({ varaAddr: _patVaraAddr || undefined });
+      await spawnPat();
+      patClient = new WinlinkClient({ port: _patHttpPort });
+      patClient.on('event', winlinkOnPatEvent);
+      patClient.openEvents();
+      if (!(await winlinkWaitPatReady(15000))) throw new Error(`its API on 127.0.0.1:${_patHttpPort} did not answer within 15 s`);
+      winlinkState.setPat({ ready: true, error: '' });
+      winlinkLog(`Pat restarted in ${((Date.now() - t0) / 1000).toFixed(1)} s, ready on 127.0.0.1:${_patHttpPort}`);
+      winlinkPush();
+      winlinkRefreshMailboxes();
+      return true;
+    } catch (e) {
+      // Left stopped: the next use of Winlink starts everything afresh (winlinkEnsureStarted).
+      const msg = `Pat did not come back after a restart: ${(e && e.message) || e}`;
+      killPat();
+      winlinkState.setPat({ ready: false, error: msg });
+      winlinkLog(msg);
+      winlinkPush();
+      return false;
+    }
+  })().finally(() => { _winlinkPatRestart = null; });
+  return _winlinkPatRestart;
+}
+
+/**
+ * About 10 s after an Abort, by itself: if Pat still reports that call and no
+ * session is running, restart Pat now, so the next Connect starts at once.
+ */
+let _winlinkAfterAbortTimer = null;
+function winlinkArmAfterAbortCheck() {
+  clearTimeout(_winlinkAfterAbortTimer);
+  _winlinkAfterAbortTimer = setTimeout(() => {
+    _winlinkAfterAbortTimer = null;
+    WinlinkPatRecover.afterAbort({
+      busy: winlinkPatStillBusy,
+      sessionActive: winlinkSessionActive,
+      patRunning: () => !!(patClient && patProc),
+      restart: winlinkRestartPat,
+      log: winlinkLog,
+    }).catch((e) => winlinkLog(`the check of Pat after the Abort failed: ${(e && e.message) || e}`));
+  }, WinlinkPatRecover.AFTER_ABORT_CHECK_MS);
+}
+
 function disconnectWinlink({ quit } = {}) {
+  clearTimeout(_winlinkAfterAbortTimer); _winlinkAfterAbortTimer = null;
   if (winlinkSessionActive()) { winlinkNoteCause(quit ? 'closing' : 'turned-off'); winlinkEndSession('error', quit ? 'POTACAT is closing' : 'Winlink was turned off'); }
   winlinkReturnOnStop(quit);
   clearTimeout(_winlinkAutoCheckTimer); _winlinkAutoCheckTimer = null;
@@ -12438,14 +12508,22 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
   // Pat may still be on the last call: a VARA dial waiting for a clear
   // channel ignores the first disconnect and goes on dialing once the channel
   // clears (K3SBP 2026-10-23: 45 s of PTT requests after Stop). A new session
-  // on top of that collides at Pat ("Session failure") — refuse until it is
-  // really over, and tell Pat again.
-  if (radio && patClient) {
-    const busy = await winlinkPatStillBusy();
-    if (busy) {
-      patClient.disconnect(true).catch(() => {});
-      return { ok: false, error: `Pat is still ${busy} the last call — wait a few seconds and try again`, reason: 'pat-busy' };
-    }
+  // on top of that collided at Pat ("Session failure"), so a session never
+  // starts while Pat reports a call. No session of ours is running here, so
+  // that call is nobody's: after an Abort Pat waits on a modem that has been
+  // stopped and reports "connected" for ever (#430). Pat is restarted, which
+  // ends the call and any dial with it, and the Connect goes on; it is refused
+  // only when Pat does not come back clean (lib/winlink-pat-recover.js).
+  if (patClient) {
+    const clear = await WinlinkPatRecover.clearForConnect({
+      busy: winlinkPatStillBusy,
+      sessionActive: winlinkSessionActive,
+      restart: winlinkRestartPat,
+      log: winlinkLog,
+    });
+    if (!clear.ok) return { ok: false, error: clear.error, reason: clear.reason };
+    // A second Connect may have started a session while Pat was restarting.
+    if (clear.restarted && winlinkSessionActive()) return { ok: false, error: 'A Winlink session is already running' };
   }
   const url = WinlinkPat.sessionUrl({ mode, gateway, dialKhz, bw: mode === 'vara' ? settings.winlinkVaraBw : undefined, rowUrl });
   if (!url) return { ok: false, error: 'Pick a gateway first' };
@@ -12618,14 +12696,7 @@ let _winlinkMeterTimer = null;
 
 /** Is Pat still dialing or connected from the last call? '' when idle. Pat's keys have varied in case. */
 async function winlinkPatStillBusy() {
-  try {
-    const st = await patClient.status();
-    if (!st || typeof st !== 'object') return '';
-    const v = (k) => st[k] !== undefined ? st[k] : st[k.charAt(0).toUpperCase() + k.slice(1)];
-    if (v('connected')) return 'on';
-    if (v('dialing')) return 'hanging up';
-    return '';
-  } catch { return ''; }
+  try { return WinlinkPatRecover.patBusyWord(await patClient.status()); } catch { return ''; }
 }
 
 /**
@@ -12994,6 +13065,9 @@ function winlinkAbortSession(why, cause) {
   if (patClient) patClient.disconnect(true).catch(() => {});
   // Pat's connect returns once the transport closes; if it doesn't, end here.
   setTimeout(() => { if (winlinkSessionActive()) winlinkEndSession('error', `Stopped: ${why}`); }, 6000);
+  // Pat can go on reporting this call after the session and its modem are
+  // gone (#430): looked at once, by itself, so the next Connect is ready.
+  winlinkArmAfterAbortCheck();
 }
 
 function winlinkAnswerPrompt(id, value) {

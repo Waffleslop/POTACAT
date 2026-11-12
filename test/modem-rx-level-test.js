@@ -119,7 +119,7 @@ test('wiring: the session chain is tokened, VARA launches once, Pat is asked bef
   assert.ok((main.match(/if \(!live\(\)\) throw cancelled\(\);/g) || []).length >= 5, 'a liveness check after every await');
   assert.ok(/if \(e && e\.cancelled\) \{ winlinkLog\(`attempt #\$\{seq\} ended after it was stopped/.test(main), 'a cancelled chain never ends a later session');
   assert.ok(/const launched = _varaLaunch\[kind\];/.test(main) && /_varaLaunch\[kind\] = \{ child, at: Date\.now\(\) \};/.test(main), 'single-flight VARA launch');
-  assert.ok(/const busy = await winlinkPatStillBusy\(\);/.test(main), 'a new radio session asks Pat first');
+  assert.ok(/const clear = await WinlinkPatRecover\.clearForConnect\(\{\s*busy: winlinkPatStillBusy,/.test(main), 'a new session asks Pat first (#430: and restarts a Pat that is stuck on the last call)');
   assert.ok(/_cableRxLeveler\.process\(/.test(main), 'the cable feed goes through the leveler');
   assert.ok(/_cableRxLeveler = null; \/\/ the next session starts at unity/.test(main));
   assert.ok(/winlinkStartSessionMeter\(\)/.test(main) && /setSession\(\{ audio: winlinkAudioLevels\(\) \}\)/.test(main));
