@@ -62,6 +62,7 @@ const TESTS = [
   'test/jtcat-qso-card-test.js',     // QSO logged is a centred card in theme colours
   'test/ft8-engine-rebaseline-test.js',
   'test/guest-pass-test.js',
+  'test/pass-code-log-test.js',
   'test/guest-pass-onair-call-test.js', // the pass's station call is the on-air call (K3SBP on W7RTA's pass)
   'test/guest-pass-lease-end-test.js', // the end of a pass stops every transmitter and closes the guest socket
   'test/guest-pass-hopping-test.js', // guests hop between rigs; the owner takes over and hands back

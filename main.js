@@ -27552,7 +27552,7 @@ function connectRemote() {
         remoteServer.broadcastSstvTxStatus({ state: 'rx', error: res.userVisible });
         return;
       }
-      sendCatLog(`[SSTV] Transmitting a picture from guest ${guest.call || 'on pass ' + guest.code}`);
+      sendCatLog(`[SSTV] Transmitting a picture from guest ${guest.call || '(no callsign)'}`);
     }
     // startSstv also restarts a STOPPED engine (the old `!sstvEngine` test
     // never did, so a photo after any stop encoded into nothing).
