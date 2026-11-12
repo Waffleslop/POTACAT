@@ -165,6 +165,12 @@ jobs:
         if: always()
         timeout-minutes: 12
         run: node test/modem-loopback/bridge-check.js --seconds 120 --out bridge-results.json
+      - name: Real ARDOP frames through the bridge capture and playback (L3, #187)
+        if: always()
+        timeout-minutes: 8
+        env:
+          LOOPBACK_REQUIRED: '1'
+        run: node test/modem-loopback/l3-check.js --out l3-results.json --logs l3-logs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -173,4 +179,6 @@ jobs:
             loopback-results.json
             loopback-logs/
             bridge-results.json
+            l3-results.json
+            l3-logs/
           if-no-files-found: warn

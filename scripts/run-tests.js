@@ -237,6 +237,7 @@ const TESTS = [
   'test/modem-prekey-test.js', // #289: modem audio that arrives before its PTT request is sent at key-down, not discarded
   'test/winlink-diag-test.js', // #295: the modem's events and the audio's health in the session log; modem logs in Report a Bug
   'test/winlink-busy-wait-test.js', // #296: Keep waiting stays chosen, Stop ends Pat's busy wait, the watchdog does not call the wait a stall
+  'test/winlink-awake-test.js', // #187: a radio Winlink session holds off App Nap (the hidden bridge window starved on a Mac)
   'test/winlink-history-test.js', // #254: gateway history from Pat's event log, My gateways (saved gateways)
   'test/rigctld-shim-hamlib-test.js',
   'test/rigctld-died-test.js',

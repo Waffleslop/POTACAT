@@ -161,4 +161,4 @@ async function runArdop({ root, epA, epB, hostPortBase, logDir, bw = 500, bytes 
   return res;
 }
 
-module.exports = { runArdop, binPath };
+module.exports = { runArdop, binPath, Ardop };

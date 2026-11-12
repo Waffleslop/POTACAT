@@ -16,13 +16,16 @@ const arg = (k, d) => { const a = process.argv.find((x) => x.startsWith(k + '=')
 const OUT = arg('--out');
 const SECONDS = Number(arg('--seconds', '120'));
 const BLOCKER = process.argv.includes('--blocker');
-app.setPath('userData', path.join(path.dirname(OUT), 'ud-' + (BLOCKER ? 'b' : 'n')));
+const NO_BACKGROUNDING = process.argv.includes('--no-backgrounding');
+if (NO_BACKGROUNDING) app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.setPath('userData', path.join(path.dirname(OUT), 'ud-' + (BLOCKER ? 'b' : 'n') + (NO_BACKGROUNDING ? 'r' : '')));
 app.commandLine.appendSwitch('use-fake-device-for-media-stream');
 app.commandLine.appendSwitch('use-fake-ui-for-media-stream');
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 if (process.platform === 'darwin' && app.dock) app.dock.hide(); // the app is never frontmost, like POTACAT behind other windows
 
-const result = { platform: process.platform, arch: process.arch, seconds: SECONDS, blocker: BLOCKER, rx: {}, tx: {}, statuses: [], errors: [] };
+const { AudioFlowMeter } = require(path.join(ROOT, 'lib', 'winlink-diag.js'));
+const result = { platform: process.platform, arch: process.arch, seconds: SECONDS, blocker: BLOCKER, noBackgrounding: NO_BACKGROUNDING, rx: {}, tx: {}, statuses: [], errors: [] };
 const write = () => fs.writeFileSync(OUT, JSON.stringify(result, null, 1));
 const fatal = setTimeout(() => { result.errors.push('timeout'); write(); app.exit(1); }, (SECONDS + 60) * 1000);
 
@@ -31,13 +34,16 @@ app.whenReady().then(async () => {
   let blockId = null;
   if (BLOCKER) blockId = powerSaveBlocker.start('prevent-app-suspension');
   // RX: arrival of each capture batch in main.
-  let first = 0, last = 0, samples = 0, rate = 0, maxGap = 0, gaps50 = 0, batches = 0;
+  let first = 0, last = 0, samples = 0, rate = 0, maxGap = 0, gaps50 = 0, batches = 0, meter = null;
   ipcMain.on('modem-bridge-rx', (_e, d) => {
     if (!d || !d.pcm) return;
     const n = d.pcm.length != null ? d.pcm.length : (d.pcm.byteLength / 4);
     const now = performance.now();
     if (!first) first = now; else { const g = now - last; if (g > maxGap) maxGap = g; if (g > 50) gaps50++; }
     last = now; samples += n; rate = d.sampleRate; batches++;
+    // #371's meter: how long the audio actually ran out (bursty arrival is not a hole).
+    if (!meter) meter = new AudioFlowMeter({ rate: d.sampleRate, warnMs: 20 });
+    meter.note(n);
   });
   let acks = 0;
   ipcMain.on('audio-ack', (_e, m) => { if (m && m.channel === 'modem-bridge-tx') acks += m.count | 0; });
@@ -49,7 +55,7 @@ app.whenReady().then(async () => {
   await win.loadFile(path.join(ROOT, 'renderer', 'modem-audio-bridge.html'));
   win.webContents.send('modem-bridge-start', { inputId: 'default', outputId: 'default', playback: true, txGain: 1 });
   await new Promise((r) => setTimeout(r, 2500));
-  first = 0; last = 0; samples = 0; maxGap = 0; gaps50 = 0; batches = 0;
+  first = 0; last = 0; samples = 0; maxGap = 0; gaps50 = 0; batches = 0; if (meter) meter.reset();
 
   // TX: a continuous tone, 20 ms per chunk, paced by the wall clock like main's modem path.
   const t0 = performance.now();
@@ -70,7 +76,7 @@ app.whenReady().then(async () => {
   clearInterval(tick);
   await new Promise((r) => setTimeout(r, 1500));
   const span = (last - first) / 1000;
-  result.rx = { sampleRate: rate, batches, seconds: +span.toFixed(1), samples, expected: Math.round(span * rate), lostPct: rate ? +(100 * (1 - samples / Math.max(1, span * rate))).toFixed(2) : null, maxGapMs: +maxGap.toFixed(1), gapsOver50ms: gaps50 };
+  result.rx = { sampleRate: rate, batches, seconds: +span.toFixed(1), samples, expected: Math.round(span * rate), lostPct: rate ? +(100 * (1 - samples / Math.max(1, span * rate))).toFixed(2) : null, maxGapMs: +maxGap.toFixed(1), gapsOver50ms: gaps50, holes: meter ? meter.snapshot(rate) : null };
   result.tx = { chunksSent: sent, acks, timerMaxLateMs: +txMaxLate.toFixed(1), overs: result.statuses.filter((s) => s && s.txOver).map((s) => s.txOver) };
   win.webContents.send('modem-bridge-stop');
   await new Promise((r) => setTimeout(r, 400));

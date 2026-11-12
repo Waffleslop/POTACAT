@@ -12345,6 +12345,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
 
   const capMin = Math.max(10, Math.min(60, parseInt(settings.winlinkSessionCapMin, 10) || 30));
   if (radio) winlinkNoteHandTune(); // a later attempt starts from here; the return point stays the original
+  if (radio) winlinkHoldAwake(true, mode);
   winlinkState.setSession({
     state: 'starting', mode, gateway: radio ? String(gateway).toUpperCase() : 'CMS (internet)', dialKhz: radio ? Number(dialKhz) || null : null,
     url: radio ? url : '', // the URL Pat dials (carries the gateway's bandwidth): a saved gateway keeps it (#254)
@@ -12587,7 +12588,31 @@ function winlinkSessionSummary(mode, sent, received, gateway) {
   return `${out}; ${inb}.`;
 }
 
+/**
+ * Keep the app awake for a radio Winlink session (#187, docs/ardop-macos-plan.md
+ * L4). The modem's audio crosses the main process and a hidden window; macOS
+ * App Nap throttles an app with no visible window, and on a Mac runner that
+ * left the capture without audio for up to 751 ms (1.2% lost), which no ARDOP
+ * frame or packet survives. Held from Connect to the end of the session on
+ * every path (done, error, abort, quit); harmless where there is no App Nap.
+ */
+let _winlinkAwakeId = null;
+function winlinkHoldAwake(on, why = '') {
+  try {
+    if (on) {
+      if (_winlinkAwakeId == null || !powerSaveBlocker.isStarted(_winlinkAwakeId)) {
+        _winlinkAwakeId = powerSaveBlocker.start('prevent-app-suspension');
+        winlinkLog(`keeping POTACAT awake for the ${why || 'radio'} session (no App Nap)`);
+      }
+    } else if (_winlinkAwakeId != null) {
+      if (powerSaveBlocker.isStarted(_winlinkAwakeId)) powerSaveBlocker.stop(_winlinkAwakeId);
+      _winlinkAwakeId = null;
+    }
+  } catch {}
+}
+
 function winlinkEndSession(state, text, received = 0) {
+  winlinkHoldAwake(false); // first, so no early return below can keep it held
   if (!winlinkSessionActive() && state !== 'error') return;
   const s = winlinkState.session;
   clearTimeout(_winlinkCapTimer); _winlinkCapTimer = null;
@@ -51119,6 +51144,7 @@ function gracefulCleanup() {
 }
 
 app.on('before-quit', (e) => {
+  winlinkHoldAwake(false); // never leave the Winlink session's App Nap block behind (#187)
   if (jtcatLogReviews.size) {
     // Written while the log, QRZ and the rig are all still up.
     e.preventDefault();

@@ -20,21 +20,41 @@ if (!electron || typeof electron !== 'string' || !fs.existsSync(electron)) {
   console.log('bridge check: SKIP (no Electron; run npm ci)');
   process.exit(process.env.LOOPBACK_REQUIRED === '1' ? 1 : 0);
 }
+// The bar, from the stress table (docs/ardop-macos-plan.md): packet fails from
+// 5 ms of audio lost once a second and ARDOP connects poorly past 50 ms, so a
+// hole of 20 ms is the most the capture may leave, and losses under 0.05% are
+// within measuring noise (a 2-minute run is ~6 million samples).
+const MAX_HOLE_MS = Number(process.env.L4_MAX_HOLE_MS || 20);
+const MAX_LOST_PCT = Number(process.env.L4_MAX_LOST_PCT || 0.05);
+function meets(r) {
+  const rx = r.rx || {}, h = rx.holes || {}, tx = r.tx || {};
+  return !(r.errors || []).length && h.maxGapMs != null && h.maxGapMs <= MAX_HOLE_MS && rx.lostPct <= MAX_LOST_PCT && tx.acks >= tx.chunksSent;
+}
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'potacat-bridge-check-'));
 const runs = [];
-for (const blocker of [false, true]) {
-  const out = path.join(dir, `r-${blocker ? 'b' : 'n'}.json`);
+// before: the app as it was; fix: the session's power-save blocker (main.js
+// winlinkHoldAwake); fix+: also no renderer backgrounding, to see if it adds anything.
+const VARIANTS = [
+  { name: 'before (no blocker)', blocker: false, nobg: false, required: false },
+  { name: 'fix (session power-save blocker)', blocker: true, nobg: false, required: true },
+  { name: 'fix + renderer not backgrounded', blocker: true, nobg: true, required: false },
+];
+for (const v of VARIANTS) {
+  const blocker = v.blocker;
+  const out = path.join(dir, `r-${v.blocker ? 'b' : 'n'}${v.nobg ? 'r' : ''}.json`);
   const args = [path.join(__dirname, 'bridge-harness.js'), '--no-sandbox', `--out=${out}`, `--seconds=${SECONDS}`];
-  if (blocker) args.push('--blocker');
+  if (v.blocker) args.push('--blocker');
+  if (v.nobg) args.push('--no-backgrounding');
   const res = spawnSync(electron, args, { encoding: 'utf8', timeout: (SECONDS + 90) * 1000, env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: '1' } });
   const r = fs.existsSync(out) ? JSON.parse(fs.readFileSync(out, 'utf8')) : { blocker, errors: ['no result: exit ' + res.status + ' ' + (res.stderr || '').slice(-800)] };
+  r.variant = v.name; r.required = v.required;
   runs.push(r);
   const rx = r.rx || {}, tx = r.tx || {};
-  console.log(`${blocker ? 'with power-save blocker   ' : 'without power-save blocker'}  RX ${rx.sampleRate} Hz: lost ${rx.lostPct}%, largest gap ${rx.maxGapMs} ms, gaps over 50 ms ${rx.gapsOver50ms}  |  TX: ${tx.chunksSent} chunks sent, ${tx.acks} acked, timer late up to ${tx.timerMaxLateMs} ms, overs ${JSON.stringify(tx.overs || [])}${(r.errors || []).length ? '  ERRORS ' + r.errors.join(' / ') : ''}`);
+  const h = rx.holes || {};
+  console.log(`${v.name.padEnd(34)} RX ${rx.sampleRate} Hz: lost ${rx.lostPct}%, longest hole ${h.maxGapMs} ms (${h.gapsOverWarn} over 20 ms), largest arrival gap ${rx.maxGapMs} ms  |  TX: ${tx.chunksSent} chunks sent, ${tx.acks} acked, timer late up to ${tx.timerMaxLateMs} ms, overs ${JSON.stringify(tx.overs || [])}${(r.errors || []).length ? '  ERRORS ' + r.errors.join(' / ') : ''}`);
 }
 fs.writeFileSync(OUT, JSON.stringify({ platform: process.platform, arch: process.arch, seconds: SECONDS, runs }, null, 1));
-// Pass: no capture gap a modem cannot ride out (the loopback stress tolerates
-// dropouts below its threshold) and every transmit chunk acknowledged.
-const bad = runs.filter((r) => !r.rx || r.rx.maxGapMs > 100 || r.rx.lostPct > 1 || (r.tx && r.tx.acks < r.tx.chunksSent * 0.99) || (r.errors || []).length);
-console.log(bad.length ? `bridge check: FAIL (${bad.length} of ${runs.length})` : 'bridge check: pass');
+// Pass, for the variant POTACAT now runs (the fix): see THRESHOLDS below.
+const bad = runs.filter((r) => r.required && !meets(r));
+console.log(bad.length ? `bridge check: FAIL (the fix variant: longest hole must be <= ${MAX_HOLE_MS} ms and loss <= ${MAX_LOST_PCT}%)` : `bridge check: pass (the fix variant within ${MAX_HOLE_MS} ms and ${MAX_LOST_PCT}%)`);
 process.exit(bad.length ? 1 : 0);
