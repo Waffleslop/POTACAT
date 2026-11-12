@@ -804,10 +804,20 @@ function _applyPopoutTheme(payload) {
   let reviewId = 0;
   let reviewHeld = null;
   const reviewBar = document.getElementById('lp-review');
+  // The note names parks read from the activator's spot comment. It goes with
+  // the reference list as it was offered: once the operator edits the box, the
+  // note no longer describes what is in it and is dropped (and comes back if
+  // the box is put back).
+  let reviewShown = null;
+  const refText = (v) => String(v || '').replace(/\s+/g, '').toUpperCase();
   function reviewText(p) {
+    const noteHolds = p.nferNote && refText(refInput.value) === refText(p.reference);
     return 'Review before saving' + (p.waiting ? ' · ' + p.waiting + ' more waiting' : '')
-      + (p.nferNote ? ' · ' + p.nferNote : '');
+      + (noteHolds ? ' · ' + p.nferNote : '');
   }
+  refInput.addEventListener('input', () => {
+    if (reviewId && reviewShown && reviewShown.nferNote) reviewBar.textContent = reviewText(reviewShown);
+  });
   function showReview(p) {
     reviewHeld = null;
     reviewId = p.review;
@@ -816,6 +826,7 @@ function _applyPopoutTheme(payload) {
     // ticked, and this box alone decides whether the spot goes out.
     respotCheckEl.checked = !!p.respotOn;
     clearBtn.textContent = "Don't log";
+    reviewShown = p;
     reviewBar.textContent = reviewText(p);
     reviewBar.hidden = false;
     window.api.logReviewShown(p.review);

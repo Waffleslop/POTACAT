@@ -3,7 +3,8 @@
 // An n-fer's other parks, read from the activator's own spot comment (#353):
 // which spot decides, what its comment must look like, when pota.app is asked,
 // what the external logbook and a remote client are sent. The rule is the
-// header of lib/nfer-refs.js; the refused comments are the second review's.
+// header of lib/nfer-refs.js; the refused comments are the two reviews' of
+// PR #427, and test/fixtures/nfer-real-comments.json is a real pota.app sample.
 // No network: https.get is stubbed for lib/pota.js, the cache takes a fake fetch.
 // Run: node test/nfer-refs-test.js
 const assert = require('assert');
@@ -37,11 +38,17 @@ const extra = (spots, spottedRef = 'US-1234', over = {}) => N.nferExtraRefs({ ca
 const YES = { parkKnown: () => true };   // the country's park list is loaded and has them all
 const refs = (comment, spotted = 'US-1111', opts) => N.commentRefs(comment, spotted, opts);
 
-test('rule (a): the comment says n-fer with a number, and lists exactly that many parks', () => {
+test('rule (a): an n-fer word with a number, exactly that many parks, nothing else but neutral tokens', () => {
   const rows = [
     // comment, spotted park, extra parks logged
-    ['3-fer DE-1197,DE-0941,DE-0034 FT8', 'DE-1197', ['DE-0941', 'DE-0034']],
-    ['2-fer: US-1611 US-6544', 'US-1611', ['US-6544']],          // the Ham2K PoLo form, live on pota.app
+    // seen on pota.app, 2026-11-12:
+    ['2Fer (DE-0157, DE-0288) - Self-spotted via World Radio League', 'DE-0157', ['DE-0288']],
+    ['3-fer: US-4579 US-4576 US-4566', 'US-4579', ['US-4576', 'US-4566']],   // Ham2K PoLo
+    ['2-fer: US-7461 US-3762', 'US-7461', ['US-3762']],
+    ['3-fer: GB-0553 GB-2874 GB-0151', 'GB-0553', ['GB-2874', 'GB-0151']],
+    ['2-fer: US-1611 US-6544', 'US-1611', ['US-6544']],
+    ['3-fer DE-1197,DE-0941,DE-0034 FT8', 'DE-1197', ['DE-0941', 'DE-0034']],  // DK5UR, #353
+    // shapes
     ['2-fer US-1234 US-5678', 'US-1234', ['US-5678']],
     ['2-fer K-1234 K-5678', 'US-1234', ['US-5678']],              // the old US prefix is the same park
     ['2fer K-1111 US-2222', 'US-1111', ['US-2222']],
@@ -53,59 +60,82 @@ test('rule (a): the comment says n-fer with a number, and lists exactly that man
     ['US-1111 2fer with US-2222', 'US-1111', ['US-2222']],
     ['US-1111 (2fer US-2222)', 'US-1111', ['US-2222']],
     ['2-fer with US-1111 and US-2222', 'US-1111', ['US-2222']],
+    ['2fer US-1111 w/ US-2222', 'US-1111', ['US-2222']],
+    ['2fer (US-1111/US-2222)', 'US-1111', ['US-2222']],
+    ['2fer [US-1111, US-2222]', 'US-1111', ['US-2222']],
     ['2fer US–1111 US—2222', 'US-1111', ['US-2222']],  // en and em dashes
     ['2fer US-1111 &amp; US-2222', 'US-1111', ['US-2222']],
     ['2fer US-1111 &#38; US-2222', 'US-1111', ['US-2222']],
-    ['2-fer K-1234 K-5678 (yesterday K-9999)', 'US-1234', ['US-5678']],
-    ['2fer US-1111 US-2222 next US-3333', 'US-1111', ['US-2222']],
-    ['2fer US-1111 US-2222, next 2fer US-3333 US-4444', 'US-1111', ['US-2222']],
-    ['2fer US-1111 US-2222 QSY to US-3333 at 20z', 'US-1111', ['US-2222']],
-    ['2-fer US-1234 GFF-0012 US-5678', 'US-1234', ['US-5678']],  // a WWFF reference in the list is not a park
-    ['x'.repeat(300) + ' 2fer US-1111 US-2222', 'US-1111', ['US-2222']],
+    ['CQ POTA 2-fer US-1111 US-2222 20m FT8 14.074 73 tnx', 'US-1111', ['US-2222']],
+    ['2-fer: US-1111 US-2222 [Ham2K PoLo]', 'US-1111', ['US-2222']],
+    ['2fer US-1111 US-2222 - Self spotted via HAMRS Pro.', 'US-1111', ['US-2222']],
     // the spot is AT the spotted park: "2-fer with the other one" counts it
     ['2fer with US-2222', 'US-1111', ['US-2222']],
     ['2-fer w/ US-2222 FT8', 'US-1111', ['US-2222']],
-    ['2-fer US-2222', 'US-1111', ['US-2222']],
+    ['2fer w US-2222', 'US-1111', ['US-2222']],
+    ['2-fer: US-2222', 'US-1111', ['US-2222']],
+    ['2fer us-2222 [PoLo]', 'US-1111', ['US-2222']],
+    ['two-fer US-2222', 'US-1111', ['US-2222']],
   ];
   for (const [comment, spotted, want] of rows) {
-    assert.deepStrictEqual(refs(comment, spotted), want, `${comment.slice(-60)} @ ${spotted}`);
+    assert.deepStrictEqual(refs(comment, spotted), want, `${comment} @ ${spotted}`);
   }
 });
 
-test('rule (a) refuses: a count that does not match, P2P anywhere, another place or time', () => {
+// Third review of PR #427 (2026-11-12): with only a list of words to refuse,
+// each of these, in the activator's own spot at US-1111, logged US-2222.
+test('rule (a) is an allow-list: any other word, anywhere, means no extra parks', () => {
   for (const comment of [
-    '2fer US-1111 US-2222 US-3333',               // says two, lists three
-    '3-fer US-1111 US-2222',                      // says three, lists two
-    '3-fer US-1111, KFF-1111, US-2222',           // the third is WWFF
-    '2-fer US-1111 and DE-0001',                  // another country
-    '2-fer US-1111 FT8-1234',
-    '2fer US-2222 US-3333',                       // two others, and the spot is at US-1111: three
-    '2fer US-1111 US-222',                        // not a reference
-    '2fer US1111 US2222',
-    '2fer US-1111 US-2222 tnx P2P US-3333',       // P2P anywhere
-    '2fer US-1111 US-2222 P2P',
-    'P2P 2-fer US-1111 US-2222',
-    'park to park 2fer US-1111 US-2222',
-    'QSY to 2-fer US-1111 US-2222',
-    'next 2fer US-1111 US-2222',
-    'worked 2-fer US-1111 US-2222',
-    'yesterday 2fer US-1111, US-2222',
-    'rove 2fer US-1111 US-2222',
-    '2fer US-1111 US-2222 next',
-    '2fer US-1111 US-2222 later today',
-    '2fer US-1111, US-2222 tomorrow',
-    '2fer US-1111 US-2222 planned',
-    '2fer US-1111 US-2222 maybe',
-    '2fer yesterday at US-2222 US-3333, today just US-1111',
+    'Correction: not a 2fer with US-2222',
+    'Correction: this is not a 2-fer with US-2222',
+    'NOT 2fer with US-2222',
+    'almost a 2fer with US-2222',
+    '2fer US-2222 is next', '2fer US-2222 up next', '2fer US-2222 coming up', '2fer US-2222 in 30 min', '2fer US-2222 at 2pm',
+    '2fer US-2222 after this', '2fer US-2222?', '2fer US-2222 failed',
+    'maybe 2fer US-2222', 'possible 2fer US-2222', 'hoping for 2fer US-2222', 'will be 2fer US-2222', 'going for 2fer US-2222',
+    'on the way to a 2fer US-2222', 'driving to the 2fer US-2222', 'en route 2fer US-2222', 'enroute 2fer US-2222',
+    'Heading to my 2fer US-2222', '2fer US-2222 if time permits',
+    'Completed 2fer US-2222', 'prior 2fer US-2222', 'ex 2fer US-2222', 'left the 2fer US-2222', 'just left 2fer US-2222',
+    'coming from 2fer US-2222', 'did 2fer US-2222 this AM', 'activated 2fer US-2222 already', 'previous park was 2fer US-2222',
+    'QSYing to 2fer US-2222', "QSY'd from 2fer US-2222",
+    'worked K1ABC at his 2fer US-2222', 'K1ABC is 2fer US-2222', 'looking for K1ABC 2fer US-2222 US-3333',
+    'TNX K1ABC for park-to-park 2fer US-2222', 'park 2 park 2fer US-2222', "P2P's welcome 2fer US-1111 US-2222", 'S2S 2fer US-2222',
+    'TNX 2fer US-2222', 'tnx all 2fer US-2222', '2fer US-2222 hunter K1ABC tnx', 'Thx for the 2fer! US-1111 US-2222',
+    'not a 2fer US-1111 US-2222', 'no longer 2fer US-1111 US-2222', "isn't a 2fer US-1111, US-2222",
+    'no longer a 2fer with US-2222, only US-1111', 'US-1111 US-2222 is not a 2fer', 'Wish this was a 2fer US-1111 US-2222',
+    '2fer US-1111 US-2222 cancelled', '2fer US-1111 US-2222 canceled, US-1111 only',
+    '2fer tmrw US-1111 US-2222', '2fer tmw US-1111 US-2222', '2fer tomorrow US-1111 US-2222', 'Tomorrow: 2fer US-1111 US-2222',
+    '2fer day US-2222 US-1111', '2nd park of 2fer rove US-2222',
+    '2fer at 1800z US-1111 US-2222', '2fer US-1111 US-2222 at 1800z', 'in 1 hr 2fer US-1111 US-2222', '2fer US-1111 US-2222 in 1 hr',
+    '2fer US-1111 US-2222 later, US-1111 only now', '2fer US-1111 US-2222 tomorrow, US-3333 today',
+    '2fer US-1111 US-2222 tomorrow US-1111 today', '2fer US-1111 US-2222 then US-3333',
+    'this morning 2fer with US-2222, now just US-1111', 'QRT. 2fer with US-2222 after lunch',
+    // the activator has left: QRT is not neutral
+    '2fer US-1111 US-2222 QRT', 'QRT 2fer US-1111 US-2222', 'QRT - 2fer US-1111 US-2222', 'QRT: was 2fer US-1111 US-2222', 'Qrt, 73 2fer US-1111 US-2222',
+    'QRT 2Fer (US-1111, US-2222) - Self-spotted via World Radio League',
+    // a WWFF or foreign reference in the list refuses the list; it is not skipped before counting
+    '2fer US-1111 KFF-1111 US-3333', '3fer US-1111 US-2222 KFF-3333 US-4444', '2fer US-1111 KFF-1111', '2fer US-1111, CA-2222',
+    '2-fer US-1111 and DE-0001', '2fer with DE-2222', '2-fer US-1111 FT8-1234',
+    // the count
+    '2fer US-1111 US-2222 US-3333', '3-fer US-1111 US-2222', '2fer: US-2222 & US-3333', 'US-1111 2fer US-2222 US-3333',
+    'US-1111 and 2fer US-2222 US-3333', '2fer US-2222 US-3333',
+    // not one list
+    '2fer US-1111 14.074 US-2222', '2fer US-1111. US-2222', '2fer US-1111 - US-2222', 'US-1111 2fer, US-2222 next',
+    'not US-2222, 2fer US-1111 US-3333', '2fer US-1111 US-2222 next US-3333', '2-fer US-1111 US-2222 (yesterday US-9999)',
+    '2fer US-1111 US-2222, next 2fer US-3333 US-4444', '2fer US-1111 US-2222 QSY to US-3333 at 20z',
+    // not an n-fer word, or two of them
+    '2fer 2fer US-2222', '2fer US-2222 3fer US-3333 US-4444', '3fer US-2222 US-3333 2fer US-4444', '12fer US-2222', '1fer US-2222',
+    '2fers US-2222', '2FER.US-2222', '2 fer sure US-1111 US-2222', 'US-1111 US-2222 N fer sure', 'US-1111 US-2222 n-fer',
+    'offer US-1111 US-2222', 'transfer US-1111 US-2222', 'conifer US-1111 US-2222', 'refer US-1111 US-2222',
+    'double US-1111 US-2222', '2x US-1111 US-2222', '2 x US-1111 US-2222', '2 parks US-1111 US-2222',
     '2fer US-1111 und US-2222',                   // no foreign-language joiners
-    'US-1111 US-2222 N fer sure',                 // a bare "N fer" is not a number
-    'US-1111 US-2222 n-fer',
-    'transfer station US-1111 US-2222',
-    'US-1111 US-2222 conifer trail',
-    '2 x US-1111 US-2222',
-    'double US-1111 US-2222',
-    '1-fer US-1111 US-2222',
-    '12-fer US-1111 US-2222',
+    // references that are not references
+    '2fer US-1111 US-222', '2fer US1111 US2222', '2fer US-01111 US-2222',
+    // an app tag is a tag, not a sentence
+    '2fer US-2222 [tomorrow]', '2fer US-2222 [not today]', '2fer US-2222 [a b c d e]', '2fer US-2222 [PoLo] [PoLo]',
+    'Self-spotted via World Radio League 2fer US-2222 next', '2fer US-2222 - Self-spotted via P2P with K1ABC',
+    '2fer US-1111 US-2222 tnx P2P US-3333', '2fer US-1111 US-2222 P2P', 'P2P 2-fer US-1111 US-2222', 'park to park 2fer US-1111 US-2222',
+    'TU 2fer US-1111 US-2222', '73 2-fer US-1111 US-2222',
   ]) {
     assert.deepStrictEqual(refs(comment, 'US-1111', YES), [], comment);
   }
@@ -122,21 +152,51 @@ test('rule (b): no n-fer word, a joined list, nothing else but neutral tokens, t
     'US-1111 &amp; US-2222',
     'US-1111 &#38; US-2222',
     '(US-1111,US-2222)',
+    '[US-1111, US-2222]',
     'US-1111,US-2222.',
     'US-1111, US-2222 FT8',
-    'US-1111/US-2222 20m FT8 14.074 FN20 QRV',
+    'US-1111/US-2222 20m FT8 14.074 FN20qr QRV',
     'CQ POTA US-1111, US-2222 14074.5 kHz 73 tnx',
-    'US-1111, KFF-1111, US-2222 CW',              // a WWFF reference beside it is neutral
+    'US-1111, US-2222 7.200 MHz SSB',
+    'US-1111, US-2222 15M',
+    'US-1111, US-2222 AM',
     'FT8 20M: US-2222 / US-1111!',
+    'US-1111 + US-2222 - 73!',
+    'US-1111, US-2222 (TNX)',
+    'US-1111, US-2222 [Ham2K PoLo]',
   ]) {
     assert.deepStrictEqual(refs(comment, 'US-1111', YES), ['US-2222'], comment);
   }
   assert.deepStrictEqual(refs('US-1111, US-2222, US-3333, US-4444 FT8', 'US-1111', YES), ['US-2222', 'US-3333', 'US-4444']);
 });
 
+test('neutral means neutral: a clock time, a made-up band, a short grid, thanks in front are not', () => {
+  for (const comment of [
+    'US-1111, US-2222 18.30',                      // a time, not a frequency
+    'DE-1111, DE-2222 18.30',
+    'US-1111, US-2222 1800', 'US-1111, US-2222 20m 1800', 'US-1111, US-2222 QRV 1830', 'US-1111, US-2222 1840',
+    'US-1111, US-2222 18000',                      // 18.000 MHz is in no ham band
+    'US-1111, US-2222 1800z', 'US-1111, US-2222 18z', 'US-1111, US-2222 1800utc',
+    'US-1111, US-2222 5M',                         // not a band
+    'US-1111, US-2222 20M 15M',                    // one band label, not two
+    'US-1111, US-2222 EM12', 'US-1111, US-2222 IN23', 'US-1111, US-2222 ON12', 'US-1111, US-2222 OK12', 'NO73 US-1111, US-2222', // four-character "grids" are words
+    'TNX US-2222, US-1111', 'TU 73 US-2222 & US-1111', 'TNX P2P US-2222, US-1111', '73 US-1111, US-2222', // thanks in front thank someone
+    'US-1111, US-2222 this AM', 'US-1111, US-2222 2', 'US-1111, US-2222 1 of 2', 'US-1111, US-2222 RX', 'US-1111, US-2222 WX',
+    'US-1111, US-2222 K1ABC', 'US-1111, US-2222 S2S', 'US-1111, US-2222 W4C/WM-001', 'US-1111, US-2222 MA', 'US-1111, US-2222 QRT',
+    'US-1111, US-2222 QSY', 'US-1111, US-2222 NEXT', 'US-1111, US-2222 \u{1F600}', 'US-1111, US-2222 https://x.y',
+    'US-1111, US-2222 14.074-14.078', 'US-1111, US-2222 73 TU P2P',
+    'US-1111, US-2222 KFF-0001', 'US-1111, KFF-2222', 'US-1111, KFF-1111, US-2222 CW', // a WWFF reference refuses the list
+    'US-1111: US-2222', 'US-1111 - US-2222', 'US-1111, US-2222. US-3333', 'QRV US-1111 (US-2222)', 'US-1111,,,US-2222',
+    'US-1111 &amp;amp; US-2222', 'US-1111 &lt;US-2222&gt;', 'US-2222, US-3333',
+    'US-1111 / US-2222 / US-3333 / US-4444 / US-5555',
+  ]) {
+    assert.deepStrictEqual(refs(comment, comment.startsWith('DE-') ? 'DE-1111' : 'US-1111', YES), [], comment);
+  }
+});
+
 // Every one of these logged a park the contact was not at (second review of
 // PR #427, 2026-11-12). Refused even when the catalogue knows every park.
-test('the reviewer\'s false positives: every one adds nothing', () => {
+test('the second review\'s false positives: every one adds nothing', () => {
   for (const comment of [
     'Rove today: US-1111, US-2222, US-3333',
     'Park 1 of 3: US-1111, US-2222, US-3333',
@@ -165,12 +225,11 @@ test('the reviewer\'s false positives: every one adds nothing', () => {
     // questionable ones: refused too
     'today US-1111 and US-2222',
     'US-1111 / US-2222 ?',
-    'US-1111 US-2222 N fer sure',
     'US-1111, US-2222 hunters tnx',
     'tnx for the P2Ps! US-1111, US-2222',
     'heading to US-1111, US-2222',
     'US-1111 / CA-2222',
-    // the rest of the reviewer's list
+    // the rest of that list
     'moving to US-2222', 'US-1111 moving to US-2222', 'was at US-2222', 'US-1111 then US-2222', 'US-1111, then US-2222',
     'P2P US-2222', 'thx US-2222 for P2P', 'US-1111 - US-2222 later', 'US-1111 / US-2222 later today',
     'US-1111 now, US-2222 @ 15z', 'done with US-2222, now US-1111', 'Sorry, not US-2222, US-1111 is correct',
@@ -181,10 +240,10 @@ test('the reviewer\'s false positives: every one adds nothing', () => {
     // ... and what the first rule let through on purpose
     'US-1111 US-2222 FT8',                         // side by side, nothing joins them
     'US-1111 US-2222',
-    'US-1111, US-2222 1800',                       // four bare digits may be a time
     'US-1111, US-2222 FT8 US-3333',                // a park outside the list
     'also US-2222', 'US-1111 also US-2222',
     'US-1111 und US-2222', 'US-1111 y US-2222', 'US-1111 と US-2222', 'US-1111、US-2222',
+    'K-1111 KFF-1111 FT8',                         // the common US self-spot
     'QSY 20m FT8', 'FT8', '',
   ]) {
     assert.deepStrictEqual(refs(comment, 'US-1111', YES), [], comment);
@@ -195,9 +254,9 @@ test('WWFF is refused whatever its prefix length: KFF-, GFF-, IFF-, FFF-, DLFF-'
   for (const ff of ['KFF-1234', 'GFF-0012', 'IFF-0345', 'FFF-0456', 'DLFF-0123', 'VKFF-1234']) {
     assert.deepStrictEqual(refs(`2-fer US-1234, ${ff}`, 'US-1234', YES), [], ff);
     assert.deepStrictEqual(refs(`US-1234, ${ff}`, 'US-1234', YES), [], ff + ' in a plain list');
-    assert.deepStrictEqual(refs(`2-fer US-1234, ${ff}, US-5678`, 'US-1234', YES), ['US-5678'], ff + ' between two parks');
+    assert.deepStrictEqual(refs(`2-fer US-1234, ${ff}, US-5678`, 'US-1234', YES), [], ff + ' between two parks: the list is not believed');
+    assert.deepStrictEqual(refs(`3-fer US-1234, ${ff}, US-5678`, 'US-1234', YES), [], ff + ' counted as the third');
   }
-  assert.deepStrictEqual(refs('K-1234 KFF-1234 FT8', 'US-1234', YES), [], 'the common US self-spot');
   assert.deepStrictEqual(refs('2-fer KFF-1234 KFF-5678', 'KFF-1234', YES), [], 'a WWFF spot never starts a POTA n-fer');
 });
 
@@ -206,13 +265,20 @@ test('the parks catalogue: (b) needs its yes, (a) stands without it, a park it d
   // (b): unknown = refuse
   assert.deepStrictEqual(refs('US-1111, US-2222'), [], 'no catalogue at all');
   assert.deepStrictEqual(refs('US-1111, US-2222', 'US-1111', { parkKnown: () => null }), [], 'that country\'s list is not loaded');
+  assert.deepStrictEqual(refs('US-1111, US-2222', 'US-1111', { parkKnown: () => undefined }), []);
+  assert.deepStrictEqual(refs('US-1111, US-2222', 'US-1111', { parkKnown: () => 1 }), [], 'only a plain true is a yes');
   assert.deepStrictEqual(refs('US-1111, US-2222', 'US-1111', { parkKnown: knows(['US-2222']) }), ['US-2222']);
   assert.deepStrictEqual(refs('US-1111, US-2222, US-3333', 'US-1111', { parkKnown: knows(['US-2222']) }), [], 'one unknown park: none of the list');
   // (a): not loaded = the other checks stand
   assert.deepStrictEqual(refs('2-fer US-1111 US-2222'), ['US-2222']);
   assert.deepStrictEqual(refs('2-fer US-1111 US-2222', 'US-1111', { parkKnown: () => null }), ['US-2222']);
+  assert.deepStrictEqual(refs('2-fer US-1111 US-2222', 'US-1111', { parkKnown: () => false }), []);
   assert.deepStrictEqual(refs('3-fer US-1111, US-2222, US-9999', 'US-1111', { parkKnown: knows(['US-1111', 'US-2222']) }), [], 'US-9999 is no park: the comment is not believed');
   assert.deepStrictEqual(refs('2-fer K-1111 K-2222', 'US-1111', { parkKnown: knows(['US-2222']) }), ['US-2222'], 'asked in the catalogue\'s own form');
+  // a catalogue that throws is a catalogue that did not answer
+  const boom = { parkKnown: () => { throw new Error('x'); } };
+  assert.deepStrictEqual(refs('2-fer US-1111 US-2222', 'US-1111', boom), ['US-2222']);
+  assert.deepStrictEqual(refs('US-1111, US-2222', 'US-1111', boom), []);
 });
 
 test('list sizes: a plain list adds at most three parks, an n-fer at most nine', () => {
@@ -221,6 +287,29 @@ test('list sizes: a plain list adds at most three parks, an n-fer at most nine',
   assert.deepStrictEqual(refs(list(5), 'US-1111', YES), []);
   assert.strictEqual(refs('10-fer ' + list(10), 'US-1111', YES).length, 9);
   assert.deepStrictEqual(refs('10-fer ' + list(11), 'US-1111', YES), []);
+});
+
+test('a comment over 500 characters is not read: a cut could hide a word or shorten a reference', () => {
+  const pad = (n) => '.'.repeat(n);
+  // US-22223 cut to US-2222 at the limit: the first version logged US-2222.
+  for (const n of [470, 478, 479, 480, 481, 482, 483, 484, 485]) {
+    const c = pad(n) + ' 2fer US-1111 US-22223';
+    const got = refs(c, 'US-1111', YES);
+    assert.ok(got.length === 0 || (c.length <= 500 && got[0] === 'US-22223'), `pad ${n}: ${JSON.stringify(got)}`);
+    assert.ok(!got.includes('US-2222'), 'never the shortened park, pad ' + n);
+  }
+  assert.deepStrictEqual(refs(pad(478) + ' 2fer US-1111 US-22223', 'US-1111', YES), ['US-22223'], '500 characters exactly is read whole');
+  assert.deepStrictEqual(refs(pad(479) + ' 2fer US-1111 US-22223', 'US-1111', YES), []);
+  // A trailing word past the limit is not neutral just because it was not seen.
+  assert.deepStrictEqual(refs('2fer US-1111 US-2222' + ' '.repeat(481) + 'NEXT', 'US-1111', YES), []);
+  assert.deepStrictEqual(refs('2fer US-1111 US-2222 ' + pad(480) + ' later', 'US-1111', YES), []);
+  assert.deepStrictEqual(refs('2fer US-1111 US-2222' + ' '.repeat(600), 'US-1111', YES), ['US-2222'], 'trailing blanks are nothing');
+  // ... and through the spot path, where the comment is trimmed and kept one character past the limit.
+  const long = '2fer US-1111 US-2222' + ' '.repeat(481) + 'NEXT';
+  assert.deepStrictEqual(extra([own(long)], 'US-1111'), []);
+  assert.deepStrictEqual(extra([own('x'.repeat(100000))], 'US-1111'), []);
+  assert.strictEqual(N.selfSpots([own('x'.repeat(100000))], 'K1ABC')[0].comments.length, 501, 'too long stays too long');
+  assert.strictEqual(N.MAX_COMMENT, 500);
 });
 
 test('a hostile comment costs nothing: 100 kB strings in well under 50 ms each', () => {
@@ -236,7 +325,9 @@ test('a hostile comment costs nothing: 100 kB strings in well under 50 ms each',
     "'".repeat(K) + '-X US-1111,US-2222',
     ('A'.repeat(50) + '-').repeat(2000) + ' US-1111, US-2222',
     '2-FER US-1111 ' + 'US-2222 & '.repeat(K / 10),
-    '('.repeat(K), ' '.repeat(K), '&AMP;'.repeat(K / 5),
+    '('.repeat(K), ' '.repeat(K), '&AMP;'.repeat(K / 5), '['.repeat(K), 'SELF-SPOTTED VIA '.repeat(K / 20),
+    ('US-1111,US-2222 AND ').repeat(25).slice(0, 500), ('2FER ' + 'US-1111 US-2222 '.repeat(31)).slice(0, 500),
+    '[ ' + 'A '.repeat(240) + ']', 'US-1111' + ' W'.repeat(240),
   ];
   N.commentRefs('2-fer US-1111 US-2222', 'US-1111'); // warm up
   for (const c of hostile) {
@@ -246,9 +337,37 @@ test('a hostile comment costs nothing: 100 kB strings in well under 50 ms each',
     const ms = Number(process.hrtime.bigint() - t0) / 1e6;
     assert.ok(ms < 50, `${ms.toFixed(1)} ms for ${c.slice(0, 12)}... (${c.length} chars)`);
   }
-  assert.strictEqual(N.MAX_COMMENT, 500);
-  assert.strictEqual(N.selfSpots([{ spotter: 'K1ABC', comments: 'x'.repeat(K), spotTime: at('15:00') }], 'K1ABC')[0].comments.length, 500, 'what is kept is cut too');
-  assert.deepStrictEqual(refs('y'.repeat(600) + ' 2fer US-1111 US-2222'), [], 'past 500 characters nothing is read');
+  const t0 = process.hrtime.bigint();
+  N.nferExtraRefs({ call: 'K1ABC', spottedRef: 'US-1111', now: NOW, spots: Array.from({ length: 100 }, () => ({ spotter: 'K1ABC/' + 'A/'.repeat(50000), comments: 'x'.repeat(100000), spotTime: '2'.repeat(100000) })) });
+  N.baseCall('A1A/'.repeat(25000));
+  N.canonRef('A'.repeat(100000) + '-1234');
+  assert.ok(Number(process.hrtime.bigint() - t0) / 1e6 < 50, 'huge spotter, time and reference strings are not walked');
+});
+
+// The activator's own spot comments (and the other spotters' that name a park
+// or say "fer") from two pota.app samples of 2026-11-12, 3,726 spots: comment
+// text, park, own spot or not, and what the comment adds. Public spots.
+test('real pota.app comments: only the plain n-fer forms add parks, and only from an own spot', () => {
+  const rows = JSON.parse(readSrc(path.join(__dirname, 'fixtures', 'nfer-real-comments.json')));
+  assert.ok(rows.length > 150 && rows.filter((r) => r.own).length > 100, 'the sample is there');
+  const adds = [];
+  for (const r of rows) {
+    assert.deepStrictEqual(N.commentRefs(r.comment, r.park, YES), r.extra, `${r.park}: ${r.comment}`);
+    const got = N.nferExtraRefs({ call: 'K1ABC', spottedRef: r.park, now: NOW, ...YES,
+      spots: [{ spotter: r.own ? 'K1ABC' : 'W9XYZ', comments: r.comment, spotTime: at('15:00') }] });
+    assert.deepStrictEqual(got, r.own ? r.extra : [], `${r.own ? 'own' : 'another spotter\'s'} spot at ${r.park}: ${r.comment}`);
+    if (got.length) adds.push(r.comment);
+  }
+  assert.deepStrictEqual(adds.sort(), [
+    '2-fer: US-7461 US-3762',
+    '2Fer (DE-0157, DE-0288) - Self-spotted via World Radio League',
+    '3-fer: GB-0553 GB-2874 GB-0151',
+    '3-fer: US-4579 US-4576 US-4566',
+  ]);
+  const byComment = (c) => rows.find((r) => r.comment === c);
+  assert.deepStrictEqual(byComment('QRT 2Fer (DE-0157, DE-0288) - Self-spotted via World Radio League').extra, [], 'QRT: they have left');
+  assert.deepStrictEqual(byComment('3fer 4579,4576,4566').extra, [], 'numbers alone are not references');
+  assert.strictEqual(byComment('3-fer: US-1586 US-10775 US-4581').own, false, 'a hunter repeating the n-fer is not the activator');
 });
 
 // ---- which spot ------------------------------------------------------------
@@ -272,8 +391,11 @@ test('whose spot: the repo\'s one base-call rule, so KH6/K1A is never KH6/W7X', 
     ['EA8/G4A', 'EA8/M0B', false],
     ['VE3/N1A', 'VE3XYZ', false],
     ['W1ABC', 'W1AW', false],
+    ['W1ABC', 'W1ABCD', false],
     ['W1ABC', 'W1ABC-#', false],       // RBN
     ['W1ABC', 'W1ABC-7', false],
+    ['W1ABC', '', false],
+    ['', '', false],
     ['W1ABC/P', 'W1ABC', true],
     ['W1ABC', 'W1ABC/7', true],
     ['VE3/W1ABC', 'W1ABC', true],
@@ -283,23 +405,42 @@ test('whose spot: the repo\'s one base-call rule, so KH6/K1A is never KH6/W7X', 
     assert.deepStrictEqual(by(a, s), same ? ['US-2222'] : [], `${a} spotted by ${s}`);
     assert.strictEqual(N.baseCall(a), JtcatParser.baseCall(a), 'one definition: ' + a);
   }
-  assert.ok(/function baseCall\(call\) \{\n\s*return typeof call === 'string' \? JtcatParser\.baseCall\(call\) : '';\n\}/.test(readSrc(path.join(root, 'lib', 'nfer-refs.js'))));
+  assert.ok(/return typeof call === 'string' && call\.length <= 40 \? JtcatParser\.baseCall\(call\) : '';/.test(readSrc(path.join(root, 'lib', 'nfer-refs.js'))));
 });
 
-test('the newest of their own spots at the park decides alone', () => {
+test('the newest of their own spots decides alone', () => {
   // A newer plain spot after leaving the second park: nothing, whatever the older one said.
   assert.deepStrictEqual(extra([own('2-fer: US-1111 US-2222', '14:00'), own('QSY 20m FT8', '15:05')], 'US-1111'), []);
   assert.deepStrictEqual(extra([own('QSY 20m FT8', '15:05'), own('2-fer: US-1111 US-2222', '14:00')], 'US-1111'), [], 'whatever the order they arrive in');
   assert.deepStrictEqual(extra([own('2-fer: US-1111 US-2222', '14:00'), own('US-1111 40m FT8', '14:30')], 'US-1111'), []);
   assert.deepStrictEqual(extra([own('2-fer: US-1111 US-2222', '14:00'), own('', '14:30')], 'US-1111'), []);
+  assert.deepStrictEqual(extra([own('2-fer: US-1111 US-2222', '14:00'), { spotter: 'K1ABC', comments: null, spotTime: at('14:30') }], 'US-1111'), []);
+  assert.deepStrictEqual(extra([own('3-fer: US-4579 US-4576 US-4566', '14:59'), own('now US-4579 only', '15:02')], 'US-4579'), []);
   // Both are n-fers: the newest one's parks, never both.
   assert.deepStrictEqual(extra([own('2-fer US-1111, US-2222', '14:00'), own('2-fer US-1111, US-3333', '14:30')], 'US-1111'), ['US-3333']);
   assert.deepStrictEqual(extra([own('2-fer US-1111, US-3333', '14:30'), own('2-fer US-1111, US-2222', '14:00')], 'US-1111'), ['US-3333']);
-  // Hunters' spots in between change nothing: they are not the activator's.
-  assert.deepStrictEqual(extra([own('2-fer US-1111 US-2222', '14:40'), own('tnx 2-fer US-1111 US-9999', '15:08', 'K9XYZ')], 'US-1111'), ['US-2222']);
+  // Hunters' and skimmers' spots in between change nothing: they are not the activator's.
+  assert.deepStrictEqual(extra([own('2-fer US-1111 US-2222', '14:40'), own('2-fer US-1111 US-9999', '15:08', 'K9XYZ'), own('20 dB 22 WPM CQ', '15:09', 'KM3T-#')], 'US-1111'), ['US-2222']);
   // Same instant, different lists: no answer.
   assert.deepStrictEqual(extra([own('2fer US-1111 US-2222', '15:00'), own('2fer US-1111 US-3333', '15:00')], 'US-1111'), []);
-  assert.deepStrictEqual(extra([own('2fer US-1111 US-2222', '15:00'), own('2fer US-1111 US-2222', '15:00')], 'US-1111'), ['US-2222'], 'the same spot from both sources');
+  assert.deepStrictEqual(extra([own('2fer US-1111 US-2222', '15:00'), own('QRT', '15:00')], 'US-1111'), []);
+  assert.deepStrictEqual(extra([{ spotter: 'K1ABC', comments: '2fer US-1111 US-2222', spotTime: at('15:00') + 'Z' }, own('QRT', '15:00')], 'US-1111'), [], 'the same instant written two ways');
+  assert.deepStrictEqual(extra([own('2fer US-1111 US-2222', '15:00'), own('2fer US-1111 US-2222', '15:00')], 'US-1111'), ['US-2222'], 'the same spot twice');
+});
+
+test('a spot whose time cannot be read might be the newest: nothing is added', () => {
+  const nfer = own('2fer US-1111 US-2222', '14:30');
+  for (const spotTime of ['', undefined, null, 'a moment ago', 'soon', '17:50', '1750', '2026', '2026-11-12', '11/12/2026 15:00',
+    'Thu, 12 Nov 2026 15:00:00 GMT', String(NOW - 60000), NaN, Infinity, -5, {}, [], true, '2'.repeat(100000)]) {
+    assert.deepStrictEqual(extra([nfer, { spotter: 'K1ABC', comments: 'QRT moved', spotTime }], 'US-1111'), [], 'newer spot with time ' + String(spotTime).slice(0, 30));
+    assert.deepStrictEqual(extra([{ spotter: 'K1ABC', comments: '2fer US-1111 US-2222', spotTime }], 'US-1111'), [], 'an n-fer with time ' + String(spotTime).slice(0, 30));
+  }
+  // Another spotter's unreadable time is nobody's business.
+  assert.deepStrictEqual(extra([nfer, { spotter: 'W9XYZ', comments: 'QRT', spotTime: '' }], 'US-1111'), ['US-2222']);
+  // Times that ARE plain: pota.app's own form, with a zone, with a space, epoch seconds and milliseconds.
+  for (const spotTime of [at('15:00'), '2026-11-12T15:00:00Z', '2026-11-12T15:00:00.250Z', '2026-11-12 15:00:00', '2026-11-12T17:00:00+02:00', NOW - 60000, Math.floor(NOW / 1000) - 60]) {
+    assert.deepStrictEqual(extra([{ spotter: 'K1ABC', comments: '2fer US-1111 US-2222', spotTime }], 'US-1111'), ['US-2222'], String(spotTime));
+  }
 });
 
 test('only spots from now: 90 minutes back (as the spot list match), 5 minutes of clock skew ahead', () => {
@@ -309,15 +450,10 @@ test('only spots from now: 90 minutes back (as the spot list match), 5 minutes o
   assert.deepStrictEqual(extra([ago(91)], 'US-1111'), []);
   assert.deepStrictEqual(extra([ago(-4)], 'US-1111'), ['US-2222'], '4 min ahead: clock skew');
   assert.deepStrictEqual(extra([ago(-6)], 'US-1111'), [], '6 min ahead');
-  // The reviewer's two: an n-fer comment 170 min old with a plain spot 5 min ago; one 100 min old with only hunters since.
+  // The second review's two: an n-fer comment 170 min old with a plain spot 5 min ago; one 100 min old with only hunters since.
   assert.deepStrictEqual(extra([ago(170, '2-fer: US-1111 US-2222'), ago(5, 'QSY 20m FT8')], 'US-1111'), []);
   assert.deepStrictEqual(extra([ago(100, '2fer US-1111 US-2222'), ago(2, 'tnx', 'K9XYZ'), ago(1, '2fer US-1111 US-2222', 'W9HUNT')], 'US-1111'), []);
   assert.deepStrictEqual(extra([{ spotter: 'K1ABC', comments: c, spotTime: '2026-11-11T15:00:00' }], 'US-1111'), [], 'yesterday');
-  assert.deepStrictEqual(extra([{ spotter: 'K1ABC', comments: c }], 'US-1111'), [], 'no time: not used');
-  assert.deepStrictEqual(extra([{ spotter: 'K1ABC', comments: c, spotTime: 'soon' }], 'US-1111'), [], 'unreadable time: not used');
-  for (const spotTime of ['2026-11-12T15:00:00Z', '2026-11-12 15:00:00', '2026-11-12T17:00:00+02:00', NOW - 60000]) {
-    assert.deepStrictEqual(extra([{ spotter: 'K1ABC', comments: c, spotTime }], 'US-1111'), ['US-2222'], String(spotTime));
-  }
   assert.strictEqual(N.MAX_SPOT_AGE_MS, require('../lib/hunted-park').MAX_SPOT_AGE_MS, 'one window for "spotted there now"');
   assert.strictEqual(N.MAX_SPOT_AGE_MS, 90 * 60 * 1000);
 });
@@ -329,20 +465,55 @@ test('two activations on one day: only this afternoon\'s parks', () => {
   assert.deepStrictEqual(extra(day, 'US-1111', { now: Date.UTC(2026, 10, 12, 9, 30) }), ['US-2222'], 'at 09:30 the morning\'s; the afternoon has not happened');
 });
 
-test('a spot posted at another park says nothing about this one (POTACAT\'s collected buffer has every park)', () => {
-  const buf = (reference, comments, hhmm) => ({ _key: 'pota:' + hhmm, callsign: 'W1ABC', reference, spotter: 'W1ABC', comments, source: 'pota', spotTime: at(hhmm) });
-  const go = (spots) => N.nferExtraRefs({ call: 'W1ABC', spottedRef: 'US-1111', spots, now: NOW, ...YES });
-  // The reviewer's rove: an hour ago at US-2222 "US-2222, US-1111 at 1500z", now at US-1111 "FT8".
-  assert.deepStrictEqual(go([buf('US-2222', 'US-2222, US-1111 at 1500z', '14:10'), buf('US-1111', 'FT8', '15:07')]), []);
-  assert.deepStrictEqual(go([buf('US-2222', '2-fer: US-2222 US-3333', '13:50'), buf('US-2222', 'US-2222, US-1111', '14:10'), buf('US-1111', 'FT8', '15:07')]), []);
-  // Even with nothing newer at US-1111, the other park's spot is not read.
-  assert.deepStrictEqual(go([buf('US-2222', '2-fer US-2222 US-1111', '15:00')]), []);
-  assert.deepStrictEqual(go([buf('US-2222', 'US-2222, US-1111', '15:00')]), []);
-  // At the spotted park (in either form of the prefix) it is.
-  assert.deepStrictEqual(go([buf('US-1111', '2-fer US-2222 US-1111', '15:00')]), ['US-2222']);
-  assert.deepStrictEqual(go([buf('K-1111', 'US-1111, US-2222 FT8', '15:00')]), ['US-2222']);
-  // pota.app's history for call + park carries no reference: every entry is at that park.
-  assert.deepStrictEqual(go([own('2fer with US-2222', '15:00', 'W1ABC')]), ['US-2222']);
+// POTACAT's collected spots hold every park the activator was spotted at, and
+// one row per activator per poll. They are handed in as `buffer`.
+const buf = (reference, comments, hhmm, spotter = 'W1ABC') => ({ _key: 'pota:' + hhmm + reference, callsign: 'W1ABC', reference, spotter, comments, source: 'pota', spotTime: at(hhmm) });
+const go = (spots, buffer) => N.nferExtraRefs({ call: 'W1ABC', spottedRef: 'US-1111', spots, buffer, now: NOW, ...YES });
+
+test('no fresh pota.app history: nothing is added, whatever the collected spots say', () => {
+  const nfer = buf('US-1111', '2-fer US-1111 US-2222', '15:00');
+  for (const none of [null, undefined, false, 'x', {}]) {
+    assert.deepStrictEqual(go(none, [nfer]), [], 'history: ' + JSON.stringify(none));
+  }
+  assert.deepStrictEqual(go([], [nfer]), [], 'a history with none of their spots: the collected one is not enough');
+  // The third review's case: the collected spots have the 3-fer and a skimmer's
+  // spot after it; the activator's own "now US-4579 only" was never polled.
+  assert.deepStrictEqual(N.nferExtraRefs({ call: 'K0RDY', spottedRef: 'US-4579', now: NOW, ...YES, spots: null, buffer: [
+    { callsign: 'K0RDY', reference: 'US-4579', spotter: 'K0RDY', comments: '3-fer: US-4579 US-4576 US-4566', spotTime: at('14:59') },
+    { callsign: 'K0RDY', reference: 'US-4579', spotter: 'W3LPL-#', comments: '18 dB 20 WPM CQ', spotTime: at('15:03') }] }), []);
+  // With the history it is the history's newest own spot that decides.
+  assert.deepStrictEqual(go([own('2-fer US-1111 US-2222', '15:00', 'W1ABC')], []), ['US-2222']);
+  assert.deepStrictEqual(go([own('2-fer US-1111 US-2222', '15:00', 'W1ABC')], [nfer]), ['US-2222'], 'the same spot from both');
+});
+
+test('the collected spots only ever take parks away', () => {
+  const history = [own('2-fer US-1111 US-2222', '14:50', 'W1ABC')];
+  // A newer own spot seen only in the collected spots still decides: plain, so nothing.
+  assert.deepStrictEqual(go(history, [buf('US-1111', 'QSY 40m', '15:05')]), []);
+  // Even when that newer collected spot is itself an n-fer, it adds nothing: it was not in the history.
+  assert.deepStrictEqual(go(history, [buf('US-1111', '2-fer US-1111 US-3333', '15:05')]), []);
+  assert.deepStrictEqual(go([own('FT8', '14:50', 'W1ABC')], [buf('US-1111', '2-fer US-1111 US-3333', '15:05')]), []);
+  // Older collected spots, other people's collected spots: the history's newest stands.
+  assert.deepStrictEqual(go(history, [buf('US-1111', 'QSY 40m', '14:40'), buf('US-1111', 'QRT', '15:05', 'K9XYZ')]), ['US-2222']);
+  // A collected own spot with no readable time at this park: nothing.
+  assert.deepStrictEqual(go(history, [{ callsign: 'W1ABC', reference: 'US-1111', spotter: 'W1ABC', comments: 'QRT', spotTime: '' }]), []);
+});
+
+test('their newest spot is at ANOTHER park: they have moved, nothing is added', () => {
+  const history = [own('2-fer US-1111 US-2222', '14:30', 'W1ABC')];
+  assert.deepStrictEqual(go(history, [buf('US-3333', 'now here', '15:05')]), []);
+  assert.deepStrictEqual(go(history, [buf('US-3333', '', '15:05')]), []);
+  assert.deepStrictEqual(go(history, [buf('US-2222', '2-fer US-2222 US-1111', '15:05')]), [], 'even naming this park: it was posted there');
+  assert.deepStrictEqual(go(history, [buf('US-3333', 'now here', '14:30')]), [], 'the same instant at two parks');
+  // Older spots elsewhere, and other people's spots of them elsewhere, change nothing.
+  assert.deepStrictEqual(go(history, [buf('US-3333', 'first park', '13:50'), buf('US-3333', 'he moved', '15:05', 'K9XYZ')]), ['US-2222']);
+  // A spot at another park never supplies parks for this one (the second review's rove).
+  assert.deepStrictEqual(go([own('FT8', '15:07', 'W1ABC')], [buf('US-2222', 'US-2222, US-1111 at 1500z', '14:10')]), []);
+  assert.deepStrictEqual(go([], [buf('US-2222', '2-fer US-2222 US-1111', '15:00')]), []);
+  // The old and the new form of the US prefix are one park.
+  assert.deepStrictEqual(go(history, [buf('K-1111', '2-fer US-1111 US-2222', '14:30')]), ['US-2222']);
+  // An unreadable time on a spot at another park does not veto this park.
+  assert.deepStrictEqual(go(history, [{ callsign: 'W1ABC', reference: 'US-3333', spotter: 'W1ABC', comments: 'x', spotTime: '' }]), ['US-2222']);
 });
 
 test('hostile entries are skipped, not coerced', () => {
@@ -350,11 +521,11 @@ test('hostile entries are skipped, not coerced', () => {
     { spotter: { toString() { return 'K1ABC'; } }, comments: '2fer US-1111 US-2222', spotTime: at('15:00') },
     { spotter: 'K1ABC', comments: ['2fer US-1111 US-2222'], spotTime: at('15:01') },
     { spotter: 'K1ABC', comments: { a: 1 }, spotTime: at('15:02') },
-    { spotter: 'K1ABC', comments: '2fer US-1111 US-2222', spotTime: { valueOf() { return NOW; } } },
   ];
   assert.deepStrictEqual(extra(spots, 'US-1111'), []);
   assert.deepStrictEqual(N.nferExtraRefs({ call: {}, spottedRef: 'US-1111', spots, now: NOW }), []);
   assert.deepStrictEqual(N.nferExtraRefs({ call: 'K1ABC', spottedRef: ['US-1111'], spots, now: NOW }), []);
+  assert.deepStrictEqual(N.nferExtraRefs({ call: 'K1ABC', spottedRef: 'W4C/WM-001', spots: [own('2fer US-1111 US-2222')], now: NOW }), []);
   assert.deepStrictEqual(N.commentRefs(['2fer US-1111 US-2222'], 'US-1111'), []);
   assert.deepStrictEqual(N.commentRefs('2fer US-1111 US-2222', 'not a park'), []);
 });
@@ -366,59 +537,94 @@ test('parks the spot list already matched are not repeated', () => {
   assert.deepStrictEqual(N.nferExtraRefs(), [], 'nothing in, nothing out');
 });
 
-// ---- the cache and the prefetch --------------------------------------------
+// ---- the cache: only a fresh history ----------------------------------------
 
-test('cache: one fetch per activator and park, read without waiting, the time rule applied at log time', async () => {
-  let calls = 0;
-  const history = [own('2-fer US-1234, US-5678', '14:50'), own('P2P US-1234, US-0009', '14:55', 'W9XYZ')];
-  const c = new N.NferCache({ fetchHistory: async () => { calls++; return history; } });
-  assert.deepStrictEqual(c.get('K1ABC', 'US-1234'), [], 'nothing before the fetch lands');
+test('cache: one fetch per activator and park per 2 minutes, never waited on', async () => {
+  let t = 1000000, calls = 0;
+  const history = [own('2-fer US-1234, US-5678', '14:50'), own('2-fer US-1234, US-0009', '14:55', 'W9XYZ')];
+  const c = new N.NferCache({ now: () => t, fetchHistory: async () => { calls++; return history; } });
+  assert.strictEqual(c.fresh('K1ABC', 'US-1234'), null, 'never fetched: no history');
   assert.strictEqual(c.prefetch('K1ABC', 'US-1234'), undefined, 'nothing to await');
+  assert.strictEqual(c.fresh('K1ABC', 'US-1234'), null, 'pending: no history yet');
   c.prefetch('K1ABC', 'US-1234');
   await wait(10);
   c.prefetch('K1ABC/P', 'K-1234');
-  assert.strictEqual(calls, 1);
-  const got = c.get('K1ABC', 'US-1234');
+  await wait(5);
+  assert.strictEqual(calls, 1, 'one key for the call and the park, however they are written');
+  const got = c.fresh('K1ABC', 'US-1234');
   assert.deepStrictEqual(got, [{ spotter: 'K1ABC', comments: '2-fer US-1234, US-5678', spotTime: at('14:50') }], 'their own spots, as spots');
   assert.deepStrictEqual(extra(got), ['US-5678']);
-  assert.deepStrictEqual(extra(got, 'US-1234', { now: NOW + 4 * 3600 * 1000 }), [], 'the same cached spot is too old four hours on');
+  t += 2 * 60 * 1000 + 1;
+  c.prefetch('K1ABC', 'US-1234');
+  await wait(5);
+  assert.strictEqual(calls, 2, 'asked again once it is 2 minutes old');
+  const many = new N.NferCache({ max: 3, fetchHistory: async () => [] });
+  for (let i = 0; i < 10; i++) many.prefetch('K1ABC', 'US-100' + i);
+  await wait(5);
+  assert.strictEqual(many._map.size, 3, 'bounded');
 });
 
-test('cache: a failed fetch is no extras and is tried again later; a hung one does not hold the key for good', async () => {
+test('cache: a history is used for 3 minutes after it arrived, then not at all', async () => {
   let t = 1000000;
-  let calls = 0;
-  const failing = new N.NferCache({ now: () => t, fetchHistory: async () => { calls++; throw new Error('down'); } });
-  failing.prefetch('K1ABC', 'US-1234');
-  await wait(10);
-  assert.deepStrictEqual(failing.get('K1ABC', 'US-1234'), []);
-  failing.prefetch('K1ABC', 'US-1234');
-  assert.strictEqual(calls, 1, 'not hammered');
-  t += 5 * 60 * 1000 + 1;
-  failing.prefetch('K1ABC', 'US-1234');
+  const c = new N.NferCache({ now: () => t, ttlMs: 1e12, fetchHistory: async () => [own('2-fer US-1234, US-5678', '14:50')] });
+  c.prefetch('K1ABC', 'US-1234');
   await wait(5);
-  assert.strictEqual(calls, 2, 'tried again after 5 minutes');
-
-  let hung = 0;
-  const stuck = new N.NferCache({ now: () => t, fetchHistory: () => { hung++; return new Promise(() => {}); } });
-  stuck.prefetch('K1ABC', 'US-1234');
-  await wait(5);
-  stuck.prefetch('K1ABC', 'US-1234');
-  assert.strictEqual(hung, 1, 'one request while it is in flight');
-  t += 15 * 1000 + 1;
-  stuck.prefetch('K1ABC', 'US-1234');
-  await wait(5);
-  assert.strictEqual(hung, 2, 'a request that never settled is given up on after 15 s');
-  assert.deepStrictEqual(stuck.get('K1ABC', 'US-1234'), []);
+  t += 3 * 60 * 1000;
+  assert.strictEqual(c.fresh('K1ABC', 'US-1234').length, 1, '3 minutes: still fresh');
+  t += 1;
+  assert.strictEqual(c.fresh('K1ABC', 'US-1234'), null, 'older: not used');
+  assert.deepStrictEqual(c.get('K1ABC', 'US-1234'), []);
+  assert.strictEqual(N.FRESH_MS, 3 * 60 * 1000);
 });
 
-test('cache: bounded', async () => {
-  const c = new N.NferCache({ max: 3, fetchHistory: async () => [] });
-  for (let i = 0; i < 10; i++) c.prefetch('K1ABC', 'US-100' + i);
-  await wait(5);
-  assert.strictEqual(c._map.size, 3);
+test('cache: a failed or hung refresh never leaves the old spots deciding', async () => {
+  // The third review's run: 3-fer at 15:59, "now US-4579 only" at 16:12, contacts at 16:00, 16:20 and later.
+  const T0 = Date.UTC(2026, 10, 12, 16, 0, 0);
+  const iso = (ms) => new Date(ms).toISOString().slice(0, 19);
+  let clock = T0, mode = 'ok', calls = 0;
+  const history = [{ spotter: 'K0RDY', comments: '3-fer: US-4579 US-4576 US-4566', spotTime: iso(T0 - 60000) }];
+  const cache = new N.NferCache({ now: () => clock, fetchHistory: async () => { calls++; if (mode === 'fail') throw new Error('timeout'); if (mode === 'hang') return new Promise(() => {}); return history.slice(); } });
+  const logAt = () => N.nferExtraRefs({ call: 'K0RDY', spottedRef: 'US-4579', now: clock, ...YES, spots: cache.fresh('K0RDY', 'US-4579') });
+  cache.prefetch('K0RDY', 'US-4579'); await wait(5);
+  assert.deepStrictEqual(logAt(), ['US-4576', 'US-4566'], '16:00, fresh history');
+  history.unshift({ spotter: 'K0RDY', comments: 'now US-4579 only', spotTime: iso(T0 + 12 * 60000) });
+  clock = T0 + 20 * 60000;
+  assert.deepStrictEqual(logAt(), [], '16:20 before the new QSO fetched anything: the 16:00 history is 20 minutes old');
+  cache.prefetch('K0RDY', 'US-4579'); await wait(5);
+  assert.strictEqual(calls, 2, 'the second QSO fetches again');
+  assert.deepStrictEqual(logAt(), [], '16:20: his newest own spot says one park');
+  // pota.app fails from here: nothing old is kept.
+  mode = 'fail';
+  history.shift();
+  for (const m of [31, 40, 60, 89]) {
+    clock = T0 + m * 60000; cache.prefetch('K0RDY', 'US-4579'); await wait(5);
+    assert.strictEqual(cache.fresh('K0RDY', 'US-4579'), null, `+${m} min, request failed`);
+    assert.deepStrictEqual(logAt(), []);
+  }
+  assert.deepStrictEqual(cache._map.get('K0RDY|US-4579').spots, [], 'dropped, not kept for later');
+  // It answers again, then a refresh fails within the 3 minutes: the failure wins.
+  mode = 'ok'; clock += 61000;
+  history[0] = { ...history[0], spotTime: iso(clock - 60000) }; // he re-spots the 3-fer
+  cache.prefetch('K0RDY', 'US-4579'); await wait(5);
+  assert.deepStrictEqual(logAt(), ['US-4576', 'US-4566']);
+  mode = 'fail'; clock += 2 * 60000 + 1; cache.prefetch('K0RDY', 'US-4579'); await wait(5);
+  assert.deepStrictEqual(logAt(), [], 'a failed refresh is not papered over with the last good answer');
+  // A refresh that hangs: the last good answer serves until it is 3 minutes old, no longer.
+  mode = 'ok'; clock += 61000; cache.prefetch('K0RDY', 'US-4579'); await wait(5);
+  mode = 'hang'; clock += 2 * 60000 + 1; cache.prefetch('K0RDY', 'US-4579'); await wait(5);
+  assert.deepStrictEqual(logAt(), ['US-4576', 'US-4566'], '2 minutes old, refresh pending');
+  clock += 60000;
+  assert.deepStrictEqual(logAt(), [], 'over 3 minutes old');
+  const before = calls;
+  clock += 15000; cache.prefetch('K0RDY', 'US-4579'); await wait(5);
+  assert.strictEqual(calls, before + 1, 'a request that never settled is given up on after 15 s');
+  // An answer that is not a list is a failure.
+  const odd = new N.NferCache({ fetchHistory: async () => ({ error: 'x' }) });
+  odd.prefetch('K1ABC', 'US-1111'); await wait(5);
+  assert.strictEqual(odd.fresh('K1ABC', 'US-1111'), null);
 });
 
-test('a QSO starts once: the state is broadcast on every step, the prefetch is for the first', () => {
+test('a QSO starts once: the state is broadcast on every step, the spot-list lookup is for the first', () => {
   const g = new N.QsoStartGate();
   assert.strictEqual(g.started('popout', 'K1ABC'), true);
   assert.strictEqual(g.started('popout', 'K1ABC'), false);
@@ -516,44 +722,65 @@ test('an answer that is not a spot history is cut off at 512 kB and never parsed
   await wait(20);
   const kept = c.get('K1ABC', 'US-1234');
   assert.strictEqual(kept.length, 100);
-  assert.strictEqual(kept[0].comments.length, 500);
+  assert.strictEqual(kept[0].comments.length, 501, 'one past the limit: too long stays too long');
   assert.ok(!('reference' in kept[0]), 'the history asked for call + park is at that park');
 });
 
 // ---- away from the shack ---------------------------------------------------
 
-test('remote clients are told: S2C jtcat-qso-logged carries the park text', () => {
-  const Proto = require('../lib/echocat-protocol');
-  const B = require('../lib/remote-bridge');
+test('S2C jtcat-qso-logged goes only to clients that declared they understand it', () => {
+  const { RemoteServer } = require('../lib/remote-server');
+  const sent = [];
+  const client = (name, caps) => ({ name, _clientCapabilities: caps });
+  const clients = [
+    client('new web', ['chunked-all-qsos', 'jtcat-qso-logged']),
+    client('old phone', ['chunked-all-qsos', 'qso-delta']),       // would log "rx UNPARSEABLE" once per contact
+    client('legacy, no hello', []),
+    { name: 'no capabilities at all' },
+    client('remote JTCAT window', ['qso-attributed', 'jtcat-qso-logged']),
+  ];
+  const fake = { _openClients: () => clients, _sendTo: (c, msg) => sent.push([c.name, msg]) };
+  const d = { callsign: 'DK5UR', parksText: 'at DE-1197 and DE-0941', parksNote: 'DE-0941: from their own spot comment', band: '20m', mode: 'FT8' };
+  const n = RemoteServer.prototype.broadcastJtcatQsoLogged.call(fake, d);
+  assert.strictEqual(n, 2);
+  assert.deepStrictEqual(sent.map((s) => s[0]), ['new web', 'remote JTCAT window']);
+  assert.deepStrictEqual(sent[0][1], { type: 'jtcat-qso-logged', ...d });
+  assert.strictEqual(RemoteServer.prototype.broadcastJtcatQsoLogged.call({ _openClients: () => [], _sendTo: () => { throw new Error('nobody'); } }, d), 0);
+  // The two clients in this repo declare it; the registry and the wire contract say so.
+  const web = readSrc(path.join(root, 'renderer', 'remote.js'));
+  assert.ok(/capabilities: \['chunked-all-qsos', 'qso-delta', 'chunked-worked-qsos', 'local-cw-sidetone', 'jtcat-qso-logged'\],/.test(web), 'ECHOCAT Web');
+  assert.ok(/capabilities: \['qso-attributed', 'log-error', 'diagnostic-snapshot', 'jtcat-qso-logged'\],/.test(readSrc(path.join(root, 'lib', 'remote-client.js'))), 'a desktop driving a remote shack');
   const reg = readSrc(path.join(root, 'lib', 'echocat-protocol.js'));
   assert.ok(/'jtcat-qso-logged': \{ dir: Dir\.S2C, feature: 'jtcat', fields: \{ callsign: f\.string, parksText: f\.optString, parksNote: f\.optString,/.test(reg));
-  assert.ok(JSON.stringify(Proto).includes('jtcat-qso-logged') || /jtcat-qso-logged/.test(reg));
-  // The shack sends it to every client at the write.
-  const server = readSrc(path.join(root, 'lib', 'remote-server.js'));
-  assert.ok(/broadcastJtcatQsoLogged\(data\) \{\n\s*if \(this\.hasClient\(\)\) this\._sendToAll\(\{ type: 'jtcat-qso-logged', \.\.\.data \}\);/.test(server));
+  const doc = readSrc(path.join(root, 'docs', 'echocat-protocol.md'));
+  assert.ok(doc.includes('| `jtcat-qso-logged` | S→C |') && doc.includes('only to a client whose `hello.capabilities` include `jtcat-qso-logged`'), 'in the wire contract, with its gate');
+});
+
+test('the shack sends one notice per JTCAT write; a remote JTCAT window shows the card; ECHOCAT Web toasts only parks read from a comment', () => {
+  const B = require('../lib/remote-bridge');
   const write = fnBody('jtcatWriteLog');
   assert.ok(/if \(jtcatPopoutWin && !jtcatPopoutWin\.isDestroyed\(\)\) jtcatPopoutWin\.webContents\.send\('jtcat-qso-logged', logged\);/.test(write));
   assert.ok(/if \(remoteServer\) remoteServer\.broadcastJtcatQsoLogged\(logged\);/.test(write), 'the same payload as the JTCAT window');
-  // A remote JTCAT window (desktop to desktop) shows the same card.
   const d = { callsign: 'DK5UR', parksText: 'at DE-1197 and DE-0941', parksNote: 'DE-0941: from their own spot comment', band: '20m', mode: 'FT8' };
   assert.deepStrictEqual(B.IN['jtcat-qso-logged']({ type: 'jtcat-qso-logged', ...d }), [['jtcat-qso-logged', d]]);
-  // ECHOCAT Web: a toast, as text.
   const web = readSrc(path.join(root, 'renderer', 'remote.js'));
   const i = web.indexOf("case 'jtcat-qso-logged': {");
   assert.ok(i > 0);
-  const h = web.slice(i, web.indexOf('break;', i));
+  const h = web.slice(i, web.indexOf("case 'jtcat-tx-status':", i));
+  assert.ok(/if \(!msg\.parksNote\) break;/.test(h), 'an ordinary contact shows no new toast');
+  assert.ok(/if \(logToast\.classList\.contains\('error'\) && !logToast\.classList\.contains\('hidden'\)\) break;/.test(h), 'an error toast on screen is not replaced');
+  assert.ok(h.indexOf('if (!msg.parksNote) break;') < h.indexOf('showToast('));
   assert.ok(/let line = 'Logged ' \+ \(msg\.callsign \|\| ''\);/.test(h));
   assert.ok(/if \(msg\.parksText\) line \+= ' ' \+ msg\.parksText;/.test(h));
-  assert.ok(/if \(msg\.parksNote\) line \+= ' \(' \+ msg\.parksNote \+ '\)';/.test(h));
-  assert.ok(/showToast\(line, msg\.parksNote \? 6000 : 3000\);/.test(h), 'textContent, and longer when there is a note to read');
+  assert.ok(/line \+= ' \(' \+ msg\.parksNote \+ '\)';/.test(h));
+  assert.ok(/showToast\(line, 6000\);/.test(h), 'as text, long enough to read');
   assert.ok(!/innerHTML/.test(h));
   assert.strictEqual(N.loggedLine(d), 'Logged DK5UR at DE-1197 and DE-0941 (DE-0941: from their own spot comment)', 'the wording, in one place for the handoff');
   assert.strictEqual(N.loggedLine({ callsign: 'k1abc', parksText: 'at US-1111' }), 'Logged K1ABC at US-1111');
   assert.strictEqual(N.loggedLine({ callsign: 'K1ABC' }), 'Logged K1ABC');
-  assert.ok(readSrc(path.join(root, 'docs', 'echocat-protocol.md')).includes('| `jtcat-qso-logged` | S→C |'), 'in the wire contract');
 });
 
-test('the Log QSO review says which parks came from the comment, before Save', () => {
+test('the Log QSO review says which parks came from the comment, until the reference box is edited', () => {
   const { LogReviewQueue, prefillFor } = require('../lib/log-review');
   const q = new LogReviewQueue();
   const record = { callsign: 'DK5UR', frequency: '14074', mode: 'FT8', hunted: [{ sig: 'POTA', ref: 'DE-1197' }, { sig: 'POTA', ref: 'DE-0941' }] };
@@ -564,10 +791,23 @@ test('the Log QSO review says which parks came from the comment, before Save', (
   const q2 = new LogReviewQueue();
   q2.add({ ...record, hunted: [{ sig: 'POTA', ref: 'DE-1197' }] }, { relogKey: 'k' });
   assert.strictEqual(prefillFor(q2.current, 0).nferNote, '');
-  const lp = readSrc(path.join(root, 'renderer', 'log-popout.js'));
-  assert.ok(/\+ \(p\.nferNote \? ' · ' \+ p\.nferNote : ''\);/.test(lp), 'in the review bar, as text');
-  assert.ok(/reviewBar\.textContent = reviewText\(p\);/.test(lp));
   assert.ok(/item\.meta\.nferNote = NferRefs\.nferNote\(_nferLogged\.get\(item\.meta\.relogKey\)\);/.test(fnBody('jtcatShowLogReview')), 'main hands the note to the form');
+  // The form: the note holds while the box is as offered, goes when it is edited, comes back when it is put back.
+  const lp = readSrc(path.join(root, 'renderer', 'log-popout.js'));
+  const m = /const refText = (\(v\) => [^\n]+;)\n\s*function reviewText\(p\) \{\n([\s\S]*?)\n  \}\n/.exec(lp);
+  assert.ok(m, 'reviewText found');
+  const mk = new Function('refInput', `const refText = ${m[1]} return function (p) {${m[2]}};`);
+  const refInput = { value: 'DE-1197,DE-0941' };
+  const reviewText = mk(refInput);
+  assert.strictEqual(reviewText(p), 'Review before saving · DE-0941: from their own spot comment');
+  refInput.value = 'de-1197, de-0941 ';
+  assert.strictEqual(reviewText(p), 'Review before saving · DE-0941: from their own spot comment', 'case and blanks are not an edit');
+  refInput.value = 'DE-1197';
+  assert.strictEqual(reviewText({ ...p, waiting: 2 }), 'Review before saving · 2 more waiting', 'the operator took the park out: the note goes');
+  refInput.value = 'DE-1197,DE-0941';
+  assert.strictEqual(reviewText(p), 'Review before saving · DE-0941: from their own spot comment');
+  assert.ok(/refInput\.addEventListener\('input', \(\) => \{\n\s*if \(reviewId && reviewShown && reviewShown\.nferNote\) reviewBar\.textContent = reviewText\(reviewShown\);/.test(lp), 'on every edit of the box');
+  assert.ok(/reviewShown = p;\n\s*reviewBar\.textContent = reviewText\(p\);/.test(lp));
 });
 
 // ---- what is forwarded -----------------------------------------------------
@@ -701,38 +941,58 @@ function fnBody(name) {
   return main.slice(i, main.indexOf('\n}\n', i));
 }
 
-test('pota.app is asked when a QSO with the activator starts, never per decoded station', () => {
+test('pota.app is asked while a QSO with the activator is under way, never per decoded station', () => {
   const lookup = fnBody('jtcatSpottedActivator');
   assert.ok(!/_nferCache|prefetch|fetchPotaSpotHistory/.test(lookup), 'the lookup every decode runs through asks nobody');
   const pre = fnBody('jtcatNferPrefetch');
-  assert.ok(/if \(!_nferQsoStart\.started\(owner, qso && qso\.call\)\) return;/.test(pre), 'once per QSO');
+  assert.ok(/if \(_nferQsoStart\.started\(owner, call\)\) \{/.test(pre), 'the spot-list lookup once per QSO');
+  assert.ok(pre.indexOf('jtcatSpottedActivator(call)') > pre.indexOf('_nferQsoStart.started(owner, call)'));
   assert.ok(/if \(!jtcatNferEnabled\(\)\) return;/.test(pre), 'option off: no request at all');
-  assert.ok(/_nferCache\.prefetch\(qso\.call, pota\.ref\);/.test(pre));
+  assert.ok(/if \(_nferQsoPark\[owner\] && jtcatNferEnabled\(\)\) _nferCache\.prefetch\(call, _nferQsoPark\[owner\]\);/.test(pre), 'again while the QSO lasts; the cache allows one request per 2 minutes');
+  assert.ok(/if \(!call\) \{ _nferQsoPark\[owner\] = ''; return; \}/.test(pre), 'no QSO: nothing is asked');
   assert.strictEqual((main.match(/_nferCache\.prefetch\(/g) || []).length, 1, 'the one place that asks');
+  assert.strictEqual((main.match(/fetchPotaSpotHistory\(/g) || []).length, 1, 'only through the cache');
+  // Every QSO, whoever runs it and on whichever slice, passes one of the two broadcasts.
   assert.ok(/jtcatNferPrefetch\('remote', remoteJtcatQso\);/.test(fnBody('remoteJtcatBroadcastQso')), 'a phone\'s QSO');
   assert.ok(/jtcatNferPrefetch\('popout', popoutJtcatQso\);/.test(fnBody('popoutBroadcastQso')), 'the JTCAT window\'s QSO');
-  assert.strictEqual((main.match(/fetchPotaSpotHistory\(/g) || []).length, 1, 'only through the cache');
+  const perSlice = main.match(/(popoutJtcatQso|remoteJtcatQso) = \{[^\n]*\n?[^\n]*sliceId: (replySliceId|sliceKey)[^\n]*\};/g) || [];
+  assert.ok(perSlice.length >= 4, 'a slice\'s QSO is one of the same two QSO objects: ' + perSlice.length);
+  assert.ok(!/(sliceQso|jtcatSliceQso|multiQso)\s*=/.test(main), 'there is no third kind of QSO that would miss the prefetch');
 });
 
-test('logging never waits on the network; the rule is the library\'s', () => {
-  assert.ok(!/await[^\n]*(_nferCache|jtcatNferPrefetch|fetchPotaSpotHistory)/.test(main), 'never awaited: the next TX message waits on the log write');
+test('at the log write: only a fresh history adds parks, nothing is awaited, a throw cannot lose the contact', () => {
+  assert.ok(!/await[^\n]*(_nferCache|jtcatNferPrefetch|jtcatNferExtras|fetchPotaSpotHistory)/.test(main), 'never awaited: the next TX message waits on the log write');
   assert.ok(!/\.then\([^\n]*_nferCache/.test(main));
+  const ex = fnBody('jtcatNferExtras');
+  assert.ok(/^function jtcatNferExtras\(call, spotted, knownRefs\) \{\n  try \{/.test(ex), 'the whole of it is inside the try');
+  assert.ok(/\} catch \(err\) \{\n\s*sendCatLog\(`\[JTCAT\] n-fer: could not read[^\n]*\n\s*return \[\];\n\s*\}$/.test(ex), 'one CAT log line, then the spot-list park only');
+  assert.ok(/const history = _nferCache\.fresh\(call, spotted\.ref\);\n\s*if \(!history\) \{/.test(ex), 'no history from the last 3 minutes: nothing is added');
+  assert.ok(/spots: history,\n\s*buffer: _potaSpotHistory\.filter\(\(s\) => NferRefs\.baseCall\(s\.callsign\) === theirCall\),/.test(ex), 'the collected spots go in as the buffer, their spots at ANY park');
+  assert.ok(!/_nferCache\.get\(/.test(main), 'never the cache without the freshness check');
+  assert.ok(/now: Date\.now\(\)/.test(ex), 'the time of the contact');
+  assert.ok(/parkKnown: jtcatParkKnown,/.test(ex));
+  assert.ok(!/matchAll|\.comments|RegExp/.test(ex), 'no parsing in main.js');
   const log = fnBody('jtcatAutoLog');
+  assert.ok(log.indexOf('q._logged = true;') < log.indexOf('jtcatNferExtras('), 'after the contact is marked logged');
   assert.ok(/const spotted = jtcatNferEnabled\(\) \? hunted\.refs\.find\(\(r\) => r\.sig === 'POTA'\) : null;/.test(log), 'option off: nothing is read');
-  assert.ok(/NferRefs\.nferExtraRefs\(\{\n\s*call: q\.call, spottedRef: spotted\.ref, now: Date\.now\(\),/.test(log), 'the time of the contact');
-  assert.ok(/spots: _nferCache\.get\(q\.call, spotted\.ref\)\n\s*\.concat\(_potaSpotHistory\.filter\(/.test(log), 'both sources go through the one rule');
-  assert.ok(/\.concat\(_potaSpotHistory\.filter\(\(s\) => NferRefs\.baseCall\(s\.callsign\) === theirCall\n\s*&& NferRefs\.canonRef\(s\.reference\) === atPark\)\),/.test(log), 'the collected buffer: their spots AT the spotted park only');
-  assert.ok(/parkKnown: jtcatParkKnown,/.test(log));
+  assert.ok(/const extra = jtcatNferExtras\(q\.call, spotted, hunted\.refs\.filter\(\(r\) => r\.sig === 'POTA'\)\.map\(\(r\) => r\.ref\)\);/.test(log));
   assert.ok(/for \(const ref of extra\) qsoData\.hunted\.push\(\{ sig: 'POTA', ref \}\);/.test(log), 'logged through logContact + qso-expand like every park');
   assert.ok(!/hunted\.refs\.push/.test(log), 'the spot list\'s refs stay the spot list\'s: a re-spot never uses a park read from a comment');
-  assert.ok(!/POTA_REF_RE|matchAll|\.comments/.test(log), 'no parsing in main.js');
   const known = fnBody('jtcatParkKnown');
   assert.ok(/if \(!list \|\| !list\.map \|\| !list\.map\.size\) return null;/.test(known), 'list not loaded = no answer, not "unknown park"');
 });
 
+test('a country with no park list is not asked for again at every QSO start', () => {
+  const en = fnBody('ensureParksForRef');
+  assert.ok(/const failedAt = _parksNoList\.get\(program\);\n\s*if \(failedAt && Date\.now\(\) - failedAt < PARKS_NO_LIST_MS\) return;/.test(en));
+  assert.ok(/if \(program === parksDbPrefix \|\| _parksOther\.has\(program\)\) _parksNoList\.delete\(program\);/.test(en), 'a list that did load clears it');
+  assert.ok(/_parksNoList\.set\(program, Date\.now\(\)\);/.test(en));
+  assert.ok(/const PARKS_NO_LIST_MS = 15 \* 60 \* 1000;/.test(main));
+});
+
 test('the n-fer block comes before any automatic re-spot (#351)', () => {
   const log = fnBody('jtcatAutoLog');
-  const nfer = log.indexOf('NferRefs.nferExtraRefs(');
+  const nfer = log.indexOf('jtcatNferExtras(');
   assert.ok(nfer > 0);
   for (const name of ['jtcatApplyAutoRespot', 'jtcatAutoRespotPlan', 'applyAutoRespot']) {
     const i = log.indexOf(name);

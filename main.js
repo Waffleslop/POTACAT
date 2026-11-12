@@ -478,11 +478,13 @@ const { decideSstvStop, sstvDecoderState } = require('./lib/sstv-decoder-state')
 const SstvFeedGate = require('./lib/sstv-feed-gate'); // pure ingress-gate decisions (table-tested)
 const HuntedPark = require('./lib/hunted-park'); // worked-call → live program-spot park refs (JTCAT logging)
 const NferRefs = require('./lib/nfer-refs'); // an n-fer's other parks from the activator's own spot comments
-// Fetched when a JTCAT QSO with a spotted activator starts (jtcatNferPrefetch),
-// read (never awaited) at log time: the next TX message is set only after the
-// log write.
+// Fetched while a JTCAT QSO with a spotted activator is under way
+// (jtcatNferPrefetch), read (never awaited) at log time: the next TX message
+// is set only after the log write. Only a history fetched in the last 3
+// minutes is ever used (NferCache.fresh).
 const _nferCache = new NferRefs.NferCache({ fetchHistory: (call, ref) => fetchPotaSpotHistory(call, ref) });
 const _nferQsoStart = new NferRefs.QsoStartGate();
+const _nferQsoPark = { popout: '', remote: '' }; // the POTA park the QSO under way was spotted at, per owner
 const _nferLogged = new Map(); // relog key -> parks added from a comment, for the logged card
 const WorkedBefore = require('./lib/worked-before'); // JTCAT worked-before policy: rework window + activator exception
 const WorkedRoster = require('./lib/worked-roster'); // states + DXCC entities worked/confirmed by band and mode (WAS, map overlays)
@@ -699,6 +701,8 @@ let parksDbLoading = false;
 const _parksLoads = new Map();   // program -> Promise of the load in flight
 const _parksOther = new Map();   // program -> { array, map }, insertion order = age
 const PARKS_OTHER_MAX = 5;
+const _parksNoList = new Map();  // program -> when its list last failed to load (ensureParksForRef)
+const PARKS_NO_LIST_MS = 15 * 60 * 1000;
 
 // --- cty.dat database (loaded once at startup) ---
 let ctyDb = null;
@@ -16694,18 +16698,51 @@ function jtcatNferEnabled() {
 }
 
 // An n-fer's other parks are only in the activator's spot comment. When a QSO
-// with a spotted POTA activator STARTS, fetch their pota.app spot history and
-// have their country's park list at hand, so the log write reads both without
-// waiting. Once per QSO: never from jtcatSpottedActivator, which runs for
-// every decoded station that is spotted (tens of requests an hour).
+// with a spotted POTA activator STARTS, look them up once, have their
+// country's park list at hand and fetch their pota.app spot history; while the
+// QSO goes on the history is fetched again when it is 2 minutes old (the cache
+// decides), so the log write has one under 3 minutes old without waiting.
+// Never from jtcatSpottedActivator, which runs for every decoded station that
+// is spotted (tens of requests an hour). Called from the two QSO-state
+// broadcasts, which every QSO passes through, a slice's included.
 function jtcatNferPrefetch(owner, qso) {
-  if (!_nferQsoStart.started(owner, qso && qso.call)) return;
-  if (!jtcatNferEnabled()) return;
-  const hunted = jtcatSpottedActivator(qso.call);
-  const pota = hunted && hunted.refs.find((r) => r.sig === 'POTA');
-  if (!pota) return;
-  _nferCache.prefetch(qso.call, pota.ref);
-  ensureParksForRef(pota.ref).catch(() => {});
+  const call = qso && qso.call;
+  if (_nferQsoStart.started(owner, call)) {
+    _nferQsoPark[owner] = '';
+    if (!jtcatNferEnabled()) return;
+    const hunted = jtcatSpottedActivator(call);
+    const pota = hunted && hunted.refs.find((r) => r.sig === 'POTA');
+    if (!pota) return;
+    _nferQsoPark[owner] = pota.ref;
+    ensureParksForRef(pota.ref).catch(() => {});
+  }
+  if (!call) { _nferQsoPark[owner] = ''; return; }
+  if (_nferQsoPark[owner] && jtcatNferEnabled()) _nferCache.prefetch(call, _nferQsoPark[owner]);
+}
+
+// The extra parks of an n-fer for a contact being logged (#353; the rule is
+// lib/nfer-refs.js). Read, never awaited. Only with a pota.app history
+// fetched in the last 3 minutes: POTACAT's collected spots (one row per
+// activator per poll) may take parks away, never add them. A throw here must
+// never lose the contact: it is logged at the spot-list park.
+function jtcatNferExtras(call, spotted, knownRefs) {
+  try {
+    const history = _nferCache.fresh(call, spotted.ref);
+    if (!history) {
+      sendCatLog(`[JTCAT] n-fer: no spot history for ${call} @ ${spotted.ref} from the last 3 minutes, logged at the spot-list park only`);
+      return [];
+    }
+    const theirCall = NferRefs.baseCall(call);
+    return NferRefs.nferExtraRefs({
+      call, spottedRef: spotted.ref, now: Date.now(), known: knownRefs,
+      spots: history,
+      buffer: _potaSpotHistory.filter((s) => NferRefs.baseCall(s.callsign) === theirCall), // at ANY park: a newer spot elsewhere means they moved
+      parkKnown: jtcatParkKnown,
+    });
+  } catch (err) {
+    sendCatLog(`[JTCAT] n-fer: could not read ${call}'s spot comment (${err && err.message}), logged at the spot-list park only`);
+    return [];
+  }
 }
 
 /** The parks catalogue's answer for the n-fer rule: true / false, null = that country's list is not loaded. */
@@ -18374,16 +18411,7 @@ async function jtcatAutoLog(qso, opts) {
     _nferLogged.delete(relogKeyStr);
     const spotted = jtcatNferEnabled() ? hunted.refs.find((r) => r.sig === 'POTA') : null;
     if (spotted) {
-      const theirCall = NferRefs.baseCall(q.call);
-      const atPark = NferRefs.canonRef(spotted.ref);
-      const extra = NferRefs.nferExtraRefs({
-        call: q.call, spottedRef: spotted.ref, now: Date.now(),
-        known: hunted.refs.filter((r) => r.sig === 'POTA').map((r) => r.ref),
-        spots: _nferCache.get(q.call, spotted.ref)
-          .concat(_potaSpotHistory.filter((s) => NferRefs.baseCall(s.callsign) === theirCall
-            && NferRefs.canonRef(s.reference) === atPark)),
-        parkKnown: jtcatParkKnown,
-      });
+      const extra = jtcatNferExtras(q.call, spotted, hunted.refs.filter((r) => r.sig === 'POTA').map((r) => r.ref));
       if (extra.length) {
         for (const ref of extra) qsoData.hunted.push({ sig: 'POTA', ref });
         _nferLogged.set(relogKeyStr, extra);
@@ -51872,7 +51900,16 @@ async function ensureParksForRef(ref) {
   if (ParksDb.isTestRef(ref)) return;
   const program = ParksDb.programOfRef(ref);
   if (!program || program === parksDbPrefix) return;
+  // A program with no list (a WWFF prefix, a typo, pota.app down) is not
+  // asked for again at every QSO start or keystroke: once in 15 minutes.
+  const failedAt = _parksNoList.get(program);
+  if (failedAt && Date.now() - failedAt < PARKS_NO_LIST_MS) return;
   try { await loadParksDbForProgram(program, { home: false }); } catch { /* lookup falls back to spots */ }
+  if (program === parksDbPrefix || _parksOther.has(program)) _parksNoList.delete(program);
+  else {
+    _parksNoList.set(program, Date.now());
+    while (_parksNoList.size > 50) _parksNoList.delete(_parksNoList.keys().next().value);
+  }
 }
 
 /** The loaded list for a reference's program (home or another), or null. */
