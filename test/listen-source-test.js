@@ -80,7 +80,7 @@ check('the refusal names the frequency, the radio and the way out', () => {
 check('#277: a ham band the rig is not set up for says where to tick it, not "add an SDR"', () => {
   const HF6 = [[30e3, 54e6]];
   const r = L.refusal(144.2e6, L.decide(144.2e6, HF6, null), 'KX2/KX3', null, { unlistedBand: '2m' });
-  assert.ok(/144\.2 MHz/.test(r) && /2m/.test(r) && /KX2\/KX3/.test(r), r);
+  assert.ok(/144\.200\.00 MHz/.test(r) && /2m/.test(r) && /KX2\/KX3/.test(r), r);
   assert.ok(/Check all bands you can use with this radio/.test(r) && /Settings > Radio > Edit/.test(r), r);
   assert.ok(!/WebSDR/.test(r), r);
   assert.ok(/WebSDR/.test(L.refusal(162.475e6, L.decide(162.475e6, HF6, null), 'KX2/KX3', null, { unlistedBand: '' })), 'off the ham bands: the SDR advice stays');
