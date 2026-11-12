@@ -38497,6 +38497,23 @@ function rigReachNow() {
   } catch { return [[0, Infinity]]; }
 }
 
+/**
+ * The ham band hz is in, when the radio's reach comes only from the bands it
+ * is set up for and that band is not one of them; '' otherwise. A model with
+ * a published receive range (rxHz) is never second-guessed. (#277)
+ */
+function unlistedRigBand(hz) {
+  try {
+    const model = getActiveRigModel();
+    if (model && Array.isArray(model.rxHz) && model.rxHz.length) return '';
+    const band = RigBands.bandOfMhz(hz / 1e6);
+    if (!band) return '';
+    const rig = (settings.rigs || []).find(r => r && r.id === settings.activeRigId) || null;
+    const bands = RigBands.bandsForRig(rig, getActiveRigModelName(), model);
+    return bands && !RigBands.allowed(bands, band) ? band : '';
+  } catch { return ''; }
+}
+
 function listenSdrState() {
   if (!kiwiClient || !kiwiClient.connected) return null;
   return { connected: true, reach: kiwiClient.reach === undefined ? null : kiwiClient.reach, manual: kiwiManual };
@@ -38592,7 +38609,7 @@ function listenSdrArbitrate(hz, mode, origin) {
   // Nothing connected can hear it. An SDR in the list that could: bring it up and come back here.
   if (!(kiwiClient && kiwiClient.connected) && listenSdrConnectFor(hz, mode, 'is outside the radio\'s range')) return 'sdr';
   const rigName = getActiveRigModelName() || 'the radio';
-  const why = ListenSource.refusal(hz, d, rigName, kiwiLiveHost);
+  const why = ListenSource.refusal(hz, d, rigName, kiwiLiveHost, { unlistedBand: unlistedRigBand(hz) });
   sendCatLog(`[tune] refused: ${why}`);
   if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', why);
   if (win && !win.isDestroyed()) win.webContents.send('app-notice', { text: why, kind: 'warn' });
