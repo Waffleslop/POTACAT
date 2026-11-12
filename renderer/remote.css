@@ -2989,6 +2989,34 @@ html, body {
   --border: #ccc;
 }
 
+/* ========== THE SIX ECHOCAT LOOKS (#376) ==========
+   The page paints in one of the phone's six themes (lib/app-theme.js): data-ds
+   on <html> scopes the --ds-* roles (tokens.css, inlined ahead of this sheet),
+   and these point the page's own variables at them. (0,2,0) beats the light
+   block above. --accent is the on-air ink: PTT, TX and stop; the brand colour
+   is never a state. */
+:root[data-ds] {
+  --bg: var(--ds-bg);
+  --bg-card: var(--ds-surface);
+  --bg-header: var(--ds-surface);
+  --accent: var(--ds-air-ink);
+  --text: var(--ds-ink);
+  --text-dim: var(--ds-ink-muted);
+  --fav: var(--ds-tint);
+  --border: var(--ds-line);
+}
+/* Acid Burn is mono throughout, as on the phone. */
+:root[data-ds="acid"] body,
+:root[data-ds="acid"] button,
+:root[data-ds="acid"] input,
+:root[data-ds="acid"] select,
+:root[data-ds="acid"] textarea {
+  font-family: var(--ds-font-mono);
+}
+.so-row.so-row-look { flex-wrap: wrap; align-items: flex-start; }
+.so-row-look #so-look-picker { flex: 1 1 100%; }
+.so-row-look .look-picker .look-card { width: 140px; }
+
 /* Token input */
 [data-theme="light"] #token-input { border-color: #ccc; }
 [data-theme="light"] #club-callsign,

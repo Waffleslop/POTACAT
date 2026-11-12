@@ -3,6 +3,8 @@
 // both work. Sets data-theme and (in charcoal dark variant only) the
 // data-dark-variant attribute on <html>.
 function _applyPopoutTheme(payload) {
+  // The shared rule (popout-theme-boot*.js) also sets data-ds (#376).
+  if (window.applyPopoutTheme) return window.applyPopoutTheme(payload);
   const theme = typeof payload === 'string'
     ? payload
     : ((payload && payload.theme) || 'dark');
@@ -458,10 +460,7 @@ window.api.onColorblindMode((enabled) => {
 async function init() {
   try {
     const settings = await window.api.getSettings();
-    _applyPopoutTheme({
-      theme: settings.lightMode ? 'light' : 'dark',
-      variant: settings.darkVariant || 'navy',
-    });
+    if (settings.themeNow) _applyPopoutTheme(settings.themeNow);
     if (settings.colorblindMode) accentGreen = '#4fc3f7';
     myCallsign = String(settings.myCallsign || '').toUpperCase();
     initMap();

@@ -27,7 +27,9 @@
   <!-- worked-overlay-js -->
   <!-- rig-bands-js -->
   <!-- landmarks-js -->
-  <script>if(localStorage.getItem('echocat-theme')==='light'){document.documentElement.setAttribute('data-theme','light');document.querySelector('meta[name="theme-color"]').content='#e8eaed'}</script>
+  <!-- app-theme-js -->
+  <!-- look-picker-js -->
+  <script>(function(){try{var A=window.AppTheme;if(!A)return;var s=A.webState(function(k){return localStorage.getItem(k)});var r=A.resolveAppTheme(s,!!(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches));A.applyToDocument(document,r);document.querySelector('meta[name="theme-color"]').content=A.WINDOW_BG[r.ds]||'#07111b'}catch(e){}})()</script>
 </head>
 <body>
 
@@ -666,12 +668,11 @@
             <button type="button" class="rc-btn rc-toggle active" id="so-dist-km">km</button>
           </div>
         </div>
-        <div class="so-row">
-          <label class="so-label">Theme</label>
-          <div class="so-controls">
-            <button type="button" class="rc-btn rc-toggle active" id="so-theme-dark">Dark</button>
-            <button type="button" class="rc-btn rc-toggle" id="so-theme-light">Light</button>
-          </div>
+        <!-- The six ECHOCAT looks (#376): Light / Dark / System and a theme
+             for each mode, kept in this browser (lib/look-picker.js). -->
+        <div class="so-row so-row-look">
+          <label class="so-label">Appearance</label>
+          <div id="so-look-picker"></div>
         </div>
         <div class="so-row" title="Hide the tab bar and navigate from a menu button in the header instead — reclaims a full row for content (parity with the mobile app's hamburger nav).">
           <label class="so-label">Navigation</label>

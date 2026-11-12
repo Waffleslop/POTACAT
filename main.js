@@ -82,7 +82,7 @@ function logStartupStage(name) {
   if (_startupTiming) console.error(line);
 }
 
-const { app, BrowserWindow, ipcMain, Menu, dialog, Notification, screen, nativeImage, clipboard, powerSaveBlocker } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, dialog, Notification, screen, nativeImage, clipboard, powerSaveBlocker, nativeTheme } = require('electron');
 // Desktop-to-desktop, Phase B: every JTCAT pop-out channel in
 // lib/remote-bridge.js OUT is routed through bridgeIpcToShack() first, so in
 // remote mode the SHACK's engine answers it and the local handler never runs.
@@ -813,7 +813,11 @@ const GLOBAL_KEYS = new Set([
   'ultracat',          // ULTRACAT mode unlock (CTRL+SHIFT+click π — The Net)
   'lightMode',         // theme — light vs dark master switch
   'darkVariant',       // dark sub-variant: 'navy' (legacy) | 'charcoal'
-  'appTheme',          // 'classic' | a design-system theme id (lib/app-theme.js), shared with the phone
+  'appTheme',          // the theme in force at the last save (lib/app-theme.js), for older readers
+  'appearance',        // 'light' | 'dark' | 'system' (#376, lib/app-theme.js)
+  'themeLight', 'themeDark', // the chosen theme for each mode, ECHOCAT's ids
+  'themeLegacy',       // the pre-#376 theme values, remembered once by the migration
+  'themeNotice',       // the one-time "Your theme is now ..." message, cleared when shown
   'updateChannel',     // auto-update channel
   'telemetry',         // telemetry opt-in
   'windowState',       // window geometry
@@ -1046,11 +1050,12 @@ function loadSettingsFromDisk() {
     // Truly fresh install: return defaults, no profile yet. RBN + PSKReporter
     // Propagation default ON so the "where am I heard" view has data out of the
     // box (both activate once myCallsign is set). K3SBP 2026-06-10.
-    // New installs start in LIGHT mode; switching to dark lands on charcoal,
-    // and navy stays one click away. Idle receive mode is WSPR (Casey
-    // 2026-09-25). Written here, not as read-side fallbacks, so installs that
-    // never chose keep what they have been looking at: dark navy, SSTV.
-    return { grid: 'FN20jb', catTarget: null, enablePota: true, enableSota: false, enableRbn: true, enablePskrMap: true, firstRun: true, watchlist: 'K3SBP', lightMode: true, darkVariant: 'charcoal', idleRxMode: 'wspr', enableTelemetry: true };
+    // New installs follow the computer's Light / Dark (#376): POTACAT Light
+    // by day, POTACAT Dark by night (lib/app-theme.js DEFAULTS). Idle receive
+    // mode is WSPR (Casey 2026-09-25). Written here, not as read-side
+    // fallbacks, so installs that never chose keep what they were looking at:
+    // the theme migration maps them once, idle stays SSTV.
+    return { grid: 'FN20jb', catTarget: null, enablePota: true, enableSota: false, enableRbn: true, enablePskrMap: true, firstRun: true, watchlist: 'K3SBP', ...AppTheme.DEFAULTS, idleRxMode: 'wspr', enableTelemetry: true };
   }
   // Migration path: legacy settings.json (no activeProfile) gets migrated
   // when it has a myCallsign. We do this lazily on first save rather than
@@ -34369,8 +34374,13 @@ function getIconPath() {
 // query (popout-theme-bootstrap.js stamps it before first paint) and for the
 // live theme payloads. One place, so a design-system theme (lib/app-theme.js,
 // settings.appTheme) reaches every pop-out the classic themes reach.
+function resolveTheme() {
+  let dark = true;
+  try { dark = !!nativeTheme.shouldUseDarkColors; } catch { /* no nativeTheme in a test harness */ }
+  return AppTheme.resolveAppTheme(settings, dark);
+}
 function themeQuery() {
-  const r = AppTheme.resolveAppTheme(settings);
+  const r = resolveTheme();
   const q = { theme: r.theme, variant: r.variant };
   if (r.ds) q.ds = r.ds;
   return q;
@@ -34381,7 +34391,7 @@ function themeQuery() {
 // synced setting). Each window's own theme handler may also run; both set the
 // same attributes.
 function broadcastAppTheme() {
-  const r = AppTheme.resolveAppTheme(settings);
+  const r = resolveTheme();
   const js = `(function(s){var e=document.documentElement;e.setAttribute('data-theme',s.theme);`
     + `if(s.theme!=='light'&&s.variant&&s.variant!=='navy'&&!s.ds)e.setAttribute('data-dark-variant',s.variant);else e.removeAttribute('data-dark-variant');`
     + `if(s.ds)e.setAttribute('data-ds',s.ds);else e.removeAttribute('data-ds');})(${JSON.stringify(r)})`;
@@ -34391,11 +34401,8 @@ function broadcastAppTheme() {
 }
 
 function getThemeWindowBg() {
-  const ds = AppTheme.resolveAppTheme(settings).ds;
-  // Mirrors --ds-bg in renderer/tokens.css for the design-system themes.
-  if (ds) return { night: '#07111b', dark: '#0b0d10', acid: '#000000', light: '#f4f5f7' }[ds] || '#07111b';
-  if (settings.lightMode) return '#f0f2f5';
-  return (settings.darkVariant === 'charcoal') ? '#0b0d10' : '#1a1a2e';
+  // Mirrors --ds-bg in renderer/tokens.css (lib/app-theme.js WINDOW_BG).
+  return AppTheme.WINDOW_BG[resolveTheme().ds] || AppTheme.WINDOW_BG.night;
 }
 
 function applyIconToAllWindows() {
@@ -38654,6 +38661,22 @@ app.whenReady().then(() => {
       for (const f of fixes) sendCatLog(`[CAT] ${f.key} "${f.from}" is not a Windows port name; using ${f.to}`);
     }
   }
+  // #376: the six ECHOCAT themes. Once, at the first start after the update:
+  // the old look maps to its theme, the old values are remembered
+  // (themeLegacy), and the main window says so once (themeNotice).
+  {
+    const mig = AppTheme.migrateThemeSettings(settings);
+    if (mig) {
+      Object.assign(settings, mig.settings, { themeNotice: mig.theme.name });
+      saveSettings(settings);
+      console.log(`[theme] migrated ${mig.from} -> ${mig.theme.id}`);
+    }
+  }
+  // Appearance System: the computer switching Light / Dark repaints every
+  // window at once, pop-outs included.
+  try {
+    nativeTheme.on('updated', () => { if (settings && settings.appearance === 'system') broadcastAppTheme(); });
+  } catch (e) { console.error('[theme] nativeTheme listener:', e.message); }
   // Station Setup's "new for your radio" card compares against the version
   // this launch upgraded FROM — read before What's New rewrites lastVersion.
   _stationSetupLaunchLastVersion = settings.lastVersion || null;
@@ -45698,7 +45721,9 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('refresh', () => { markUserActive(); refreshSpots(); });
 
   ipcMain.on('app-relaunch', () => { app.relaunch(); app.exit(0); });
-  ipcMain.handle('get-settings', () => ({ ...settings, appVersion: getAppDisplayVersion(), remoteShack: isRemoteMode() }));
+  // themeNow: the theme in force (Appearance System decided here), for a
+  // window that reads the theme from the settings (#376).
+  ipcMain.handle('get-settings', () => ({ ...settings, appVersion: getAppDisplayVersion(), remoteShack: isRemoteMode(), themeNow: themeQuery() }));
   // Hidden spots (see changeSpotHides). The window's pre-sync list lived in its
   // localStorage; it is folded in once and then cleared there.
   ipcMain.handle('spot-hides-get', () => ({ hides: spotHidesNow(), skips: spotSkipsNow(), migrated: !!settings.spotHidesMigrated }));
@@ -47861,11 +47886,12 @@ function cloudShackNotice(text, kind) {
       cwSpotsMaxWpm: settings.cwSpotsMaxWpm, myCallsign: settings.myCallsign,
     };
     const _wlPrevGroups = Array.isArray(settings.watchlistGroups) ? settings.watchlistGroups : null;
-    const _themeBefore = JSON.stringify(AppTheme.resolveAppTheme(settings));
+    if (newSettings && 'themeNow' in newSettings) delete newSettings.themeNow; // computed by get-settings, never stored
+    const _themeBefore = JSON.stringify(resolveTheme());
     const _actWasActive = !!settings.activationActive;
     settings = { ...settings, ...newSettings };
     activationClockFollow(!_actWasActive && !!settings.activationActive); // #147: a desktop Start starts the activation clock, an End clears it
-    if (JSON.stringify(AppTheme.resolveAppTheme(settings)) !== _themeBefore) broadcastAppTheme();
+    if (JSON.stringify(resolveTheme()) !== _themeBefore) broadcastAppTheme();
     // The rig editor saved a receive level for the active rig: route it through
     // the one choke point so the bridge and every device follow (not in remote
     // mode — this PC's rigs are not the radio then).

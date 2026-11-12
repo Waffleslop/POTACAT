@@ -6,6 +6,8 @@
 // (lib/atu-wizard.js). STOP is in the footer on every page while a run is
 // live and unkeys at once.
 function _applyPopoutTheme(payload) {
+  // The shared rule (popout-theme-boot*.js) also sets data-ds (#376).
+  if (window.applyPopoutTheme) return window.applyPopoutTheme(payload);
   const theme = typeof payload === 'string' ? payload : ((payload && payload.theme) || 'dark');
   const variant = (payload && typeof payload === 'object' && payload.variant) || 'navy';
   document.documentElement.setAttribute('data-theme', theme);
