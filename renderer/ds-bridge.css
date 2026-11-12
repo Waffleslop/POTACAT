@@ -52,6 +52,8 @@
   --on-accent-red: var(--ds-on-danger);
   --on-accent-blue: var(--ds-on-tint);
   --on-accent-green: var(--ds-on-ok);
+  --on-accent-green-btn: var(--ds-on-ok); /* the green button is --ds-ok here */
+  --accent-red-text: var(--ds-air-ink);
   --on-tx-active: var(--ds-on-air);
 
   /* Effects */
