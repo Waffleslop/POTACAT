@@ -25206,6 +25206,9 @@ function connectRemote() {
       try { saveSettings(settings); } catch {}
     }
   });
+  // Refuse at auth, before the station state goes out (#301); the
+  // client-connected check below stays as the backstop for the other paths.
+  remoteServer.setNoRadioCheck(() => (isRemoteMode() ? REMOTE_NO_RADIO_TO_SHARE_MSG : null));
   remoteServer.on('client-connected', ({ deviceId, profileCallsign, platform, pass } = {}) => {
     // This desktop is driving a remote shack: it has no radio of its own to
     // lend a phone, and chaining one link through another is not supported.
