@@ -1795,51 +1795,148 @@
         <div id="scope-phone-readout" style="position:absolute;z-index:4;pointer-events:none;display:none;padding:2px 6px;border-radius:3px;background:rgba(10,10,20,0.9);border:1px solid rgba(79,195,247,0.5);color:#e0e6ee;font-family:monospace;font-size:11px;white-space:nowrap;"></div>
       </div>
     </div>
-    <div id="mail-view" class="hidden" style="display:none;flex-direction:column;flex:1;min-height:0;">
+    <!-- Winlink mail (W0 layout, 2026-11-12): one column on a phone; two panes,
+         the list beside the open screen, once the Mail view is 700 px wide.
+         data-screen on #mail-view: list | read | compose | connect. Every
+         style is in remote.css (.mail-*); no inline style here (test/remote-web-mail-test.js). -->
+    <div id="mail-view" class="mail-view hidden" data-screen="list">
       <!-- Winlink is off on the shack: the tab says where to turn it on (a Guest Pass never gets the tab) -->
       <div id="mail-off" class="mail-off hidden" role="status"></div>
-      <div id="mail-acct" class="mail-acct hidden">
-        <b class="mail-acct-title">Set up your Winlink account</b>
-        <span id="mail-acct-text" class="mail-acct-text">Checking whether your callsign has an account…</span>
-        <button type="button" id="mail-acct-retry" class="mail-btn mail-btn-main hidden">Try again</button>
-        <input type="password" id="mail-acct-pw" class="mail-input" placeholder="Password, 6 to 12 characters" maxlength="12" autocomplete="new-password" aria-label="Winlink password" title="6 to 12 characters: letters, numbers and . ! @ # $ % ^ & * ( ) _ (no dash, no space)">
-        <input type="email" id="mail-acct-email" class="mail-input" placeholder="Recovery email (optional)" aria-label="Recovery email (optional)">
-        <button type="button" id="mail-acct-go" class="mail-btn mail-btn-main">Create my Winlink account</button>
+      <div class="mail-panes">
+        <section class="mail-pane-list" aria-label="Mail">
+          <header class="mail-head">
+            <div class="mail-head-text">
+              <h2 class="mail-head-title">Mail</h2>
+              <div id="mail-head-sub" class="mail-head-sub">Winlink</div>
+            </div>
+          </header>
+          <div class="mail-list-scroll">
+            <div id="mail-acct" class="mail-card mail-acct hidden">
+              <h3 class="mail-acct-title">Set up your Winlink account</h3>
+              <p id="mail-acct-text" class="mail-acct-text">Checking whether your callsign has an account…</p>
+              <button type="button" id="mail-acct-retry" class="mail-btn mail-btn-main hidden">Try again</button>
+              <label for="mail-acct-pw" class="mail-label">Winlink password</label>
+              <input type="password" id="mail-acct-pw" class="mail-input" placeholder="6 to 12 characters" maxlength="12" autocomplete="new-password" title="6 to 12 characters: letters, numbers and . ! @ # $ % ^ & * ( ) _ (no dash, no space)">
+              <label for="mail-acct-email" id="mail-acct-email-label" class="mail-label">Recovery email (optional)</label>
+              <input type="email" id="mail-acct-email" class="mail-input" autocomplete="email">
+              <button type="button" id="mail-acct-go" class="mail-btn mail-btn-main">Create my Winlink account</button>
+            </div>
+            <!-- The last session (winlink-state.lastSession), or the one running now; a tap opens Send / Receive -->
+            <button type="button" id="mail-last" class="mail-card mail-last hidden">
+              <span id="mail-last-label" class="mail-caps"></span>
+              <span id="mail-last-text" class="mail-last-text"></span>
+            </button>
+            <div id="mail-folders" class="mail-seg mail-seg-4" role="group" aria-label="Folder">
+              <button type="button" class="mail-seg-btn" data-box="in" aria-pressed="true">Inbox</button>
+              <button type="button" class="mail-seg-btn" data-box="out" aria-pressed="false">Outbox</button>
+              <button type="button" class="mail-seg-btn" data-box="sent" aria-pressed="false">Sent</button>
+              <button type="button" class="mail-seg-btn" data-box="archive" aria-pressed="false">Archive</button>
+            </div>
+            <div id="mail-list" class="mail-list"></div>
+          </div>
+          <div class="mail-bar">
+            <button type="button" id="mail-new" class="mail-btn mail-btn-bar">Write</button>
+            <button type="button" id="mail-open-connect" class="mail-btn mail-btn-bar mail-btn-main mail-grow">Send / Receive</button>
+          </div>
+        </section>
+
+        <section class="mail-pane-main">
+          <!-- Wide view, nothing open -->
+          <div id="mail-empty" class="mail-screen mail-empty">
+            <p class="mail-empty-text">Pick a message to read it.</p>
+          </div>
+
+          <!-- Reading a message -->
+          <div id="mail-reader" class="mail-screen hidden">
+            <header class="mail-head">
+              <button type="button" class="mail-icon-btn mail-back" data-back="1" aria-label="Back to Mail"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 3 5 9l6 6"/></svg></button>
+              <div class="mail-head-text">
+                <h2 id="mail-read-subject" class="mail-read-subject"></h2>
+                <div id="mail-read-meta" class="mail-head-sub"></div>
+              </div>
+            </header>
+            <div class="mail-read-actions">
+              <button type="button" id="mail-reply" class="mail-btn mail-btn-main mail-btn-fit">Reply</button>
+              <button type="button" id="mail-del" class="mail-btn mail-btn-danger mail-btn-fit">Delete</button>
+            </div>
+            <div class="mail-scroll">
+              <div id="mail-read-body" class="mail-read-body"></div>
+              <div id="mail-read-atts" class="mail-read-atts"></div>
+            </div>
+          </div>
+
+          <!-- Writing a message -->
+          <div id="mail-compose" class="mail-screen hidden">
+            <header class="mail-head">
+              <button type="button" id="mail-cancel" class="mail-icon-btn" aria-label="Close without saving"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4l10 10M14 4 4 14"/></svg></button>
+              <div class="mail-head-text"><h2 class="mail-head-title mail-head-title-sm">New message</h2></div>
+            </header>
+            <div class="mail-scroll mail-form">
+              <label for="mail-to" class="mail-caps">To</label>
+              <input type="text" id="mail-to" class="mail-input" placeholder="Callsign or email" autocomplete="off" autocapitalize="characters">
+              <label for="mail-subj" class="mail-caps">Subject</label>
+              <input type="text" id="mail-subj" class="mail-input" maxlength="128">
+              <label for="mail-body" class="mail-caps">Message</label>
+              <textarea id="mail-body" class="mail-input mail-body"></textarea>
+              <div id="mail-body-hint" class="mail-muted">Plain text. Keep it short over the radio.</div>
+              <div id="mail-err" class="mail-err" role="alert"></div>
+            </div>
+            <div class="mail-bar">
+              <button type="button" id="mail-queue" class="mail-btn mail-btn-bar mail-btn-main mail-grow">Put in Outbox</button>
+            </div>
+          </div>
+
+          <!-- Send / Receive: how, which band, which gateway; the session and how it ended -->
+          <div id="mail-connect-screen" class="mail-screen hidden">
+            <header class="mail-head">
+              <button type="button" class="mail-icon-btn mail-back" data-back="1" aria-label="Back to Mail"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 3 5 9l6 6"/></svg></button>
+              <div class="mail-head-text"><h2 class="mail-head-title mail-head-title-sm">Send / Receive</h2></div>
+            </header>
+            <div class="mail-scroll">
+              <div id="mail-session" class="mail-card mail-session hidden" role="status"></div>
+              <div id="mail-prompt" class="mail-card mail-prompt hidden" role="alert"></div>
+              <!-- How the last session ended: "Mail exchanged with ..." or the not-finished card (drawn by mailRenderEndCard) -->
+              <div id="mail-end-card" class="mail-end-card hidden" role="status" aria-live="polite"></div>
+              <div class="mail-section">
+                <div id="mail-mode-label" class="mail-caps">Send via</div>
+                <div id="mail-mode" class="mail-seg" role="group" aria-labelledby="mail-mode-label"></div>
+                <!-- Why a mode is not offered (the shack's own reason) -->
+                <div id="mail-mode-note" class="mail-note hidden"></div>
+                <div id="mail-mode-caveat" class="mail-note hidden"></div>
+              </div>
+              <div id="mail-radio" class="hidden">
+                <div class="mail-section">
+                  <div id="mail-band-label" class="mail-caps">Band</div>
+                  <div id="mail-band" class="mail-chips" role="group" aria-labelledby="mail-band-label"></div>
+                </div>
+                <div class="mail-section">
+                  <div id="mail-gw-head" class="mail-caps">Gateway</div>
+                  <div id="mail-gateway" class="mail-gw-list" role="group" aria-labelledby="mail-gw-head"></div>
+                  <div id="mail-gw-status" class="mail-gw-status hidden">
+                    <span id="mail-gw-note" class="mail-note-text"></span>
+                    <button type="button" id="mail-gw-retry" class="mail-btn mail-btn-main hidden">Try again</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div id="mail-connect-bar" class="mail-bar mail-bar-col">
+              <div id="mail-radio-line" class="mail-muted hidden"></div>
+              <button type="button" id="mail-connect" class="mail-btn mail-btn-bar mail-btn-ok">Send / Receive</button>
+              <button type="button" id="mail-abort" class="mail-btn mail-btn-bar mail-btn-danger hidden">Abort</button>
+            </div>
+          </div>
+        </section>
       </div>
-      <div style="display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--bg-header);border-bottom:1px solid var(--border);flex-shrink:0;font-size:12px;flex-wrap:wrap;">
-        <select id="mail-box" style="font-size:12px;"><option value="in">Inbox</option><option value="out">Outbox</option><option value="sent">Sent</option><option value="archive">Archive</option></select>
-        <button type="button" id="mail-new" style="font-size:12px;">New</button>
-        <span style="flex:1"></span>
-        <select id="mail-mode" style="font-size:12px;max-width:150px;"></select>
-        <button type="button" id="mail-connect" style="font-size:12px;font-weight:700;">Send / Receive</button>
-        <button type="button" id="mail-abort" class="hidden" style="font-size:12px;color:#e94560;">Abort</button>
-      </div>
-      <!-- Why a greyed "Send via" mode is greyed (the shack's own reason) -->
-      <div id="mail-mode-note" class="mail-note hidden"></div>
-      <div id="mail-radio" class="hidden" style="display:flex;gap:6px;align-items:center;padding:4px 10px;border-bottom:1px solid var(--border);font-size:12px;flex-wrap:wrap;">
-        <select id="mail-band" style="font-size:12px;"><option value="">All bands</option><option>2m</option><option>1.25m</option><option>70cm</option><option>80m</option><option>60m</option><option>40m</option><option>30m</option><option>20m</option><option>17m</option><option>15m</option><option>12m</option><option>10m</option></select>
-        <select id="mail-gateway" style="font-size:12px;flex:1;min-width:160px;"><option value="">Load gateways</option></select>
-        <div id="mail-gw-status" class="mail-gw-status hidden">
-          <span id="mail-gw-note" class="mail-note-text"></span>
-          <button type="button" id="mail-gw-retry" class="mail-btn mail-btn-main hidden">Try again</button>
+      <!-- The Winlink notice, once, before the first message or session -->
+      <div id="mail-notice" class="mail-notice hidden" role="dialog" aria-modal="true" aria-labelledby="mail-notice-title">
+        <div class="mail-notice-card">
+          <h2 id="mail-notice-title" class="mail-head-title mail-head-title-sm">Before you use Winlink</h2>
+          <div id="mail-notice-text" class="mail-notice-text"></div>
+          <div class="mail-notice-actions">
+            <button type="button" id="mail-notice-no" class="mail-btn">Not now</button>
+            <button type="button" id="mail-notice-ok" class="mail-btn mail-btn-main">I understand</button>
+          </div>
         </div>
-      </div>
-      <div id="mail-session" style="padding:4px 10px;font-size:12px;color:var(--text-dim);border-bottom:1px solid var(--border);min-height:16px;"></div>
-      <div id="mail-prompt" class="hidden" style="padding:6px 10px;font-size:12px;background:#3a2f10;color:#f0c040;display:flex;gap:6px;align-items:center;"></div>
-      <!-- How the last session ended: "Mail exchanged with ..." or the not-finished card (drawn by mailRenderEndCard) -->
-      <div id="mail-end-card" class="mail-end-card hidden" role="status" aria-live="polite"></div>
-      <div id="mail-list" style="flex:1;overflow-y:auto;min-height:0;"></div>
-      <div id="mail-reader" class="hidden" style="flex:1;overflow-y:auto;min-height:0;padding:8px 10px;"></div>
-      <div id="mail-compose" class="hidden" style="flex:1;display:flex;flex-direction:column;gap:6px;padding:8px 10px;min-height:0;">
-        <input type="text" id="mail-to" placeholder="To: callsign or email" style="font-size:14px;">
-        <input type="text" id="mail-subj" placeholder="Subject" maxlength="128" style="font-size:14px;">
-        <textarea id="mail-body" placeholder="Message (plain text, keep it short over HF)" style="flex:1;min-height:120px;font-size:14px;font-family:monospace;"></textarea>
-        <div id="mail-err" style="color:#e94560;font-size:12px;"></div>
-        <div style="display:flex;gap:6px;justify-content:flex-end;"><button type="button" id="mail-cancel">Cancel</button><button type="button" id="mail-queue" style="font-weight:700;">Put in Outbox</button></div>
-      </div>
-      <div id="mail-notice" class="hidden" style="padding:12px 14px;font-size:13px;line-height:1.5;border-top:1px solid var(--border);background:var(--bg-card);">
-        <div id="mail-notice-text"></div>
-        <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:8px;"><button type="button" id="mail-notice-no">Not now</button><button type="button" id="mail-notice-ok" style="font-weight:700;">I understand</button></div>
       </div>
     </div>
     <div id="bottom-bar">
