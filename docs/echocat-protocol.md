@@ -161,7 +161,7 @@ for the history.
 | `scan-state` | ↔ | Scan on/off STATE sync. Field: `scanning` (boolean). Each side announces when ITS own scan engine turns on/off; the receiver mirrors it as the peer's state. On mutual exclusion (one rig) a side that sees the peer's `scanning:true` stops its own engine. Re-sent to a (re)connecting client so a mid-scan reconnect shows the in-progress scan. |
 | `scan-control` | ↔ | Ask the peer to change ITS scan. Field: `action` (string): `"stop"` (the reported use-case) or `"start"` (optional; uses that side's own filters). Gated like other rig C→S (authenticated active client). NOTE: supersedes the older, unused `scan:state`/`scan:control` (colon) registrations. |
 | `rig-control` | C→S | Generic raw-CAT passthrough button (Settings → Rig table). |
-| `rig-blocked` | S→C | Rig switch denied (club mode etc.). |
+| `rig-blocked` | S→C | Rig switch denied (club mode etc.), or no radio to share. Fields: `reason` (string), `retry` (optional boolean). `retry: false` = a desktop that is itself driving a remote shack; it sends `auth-ok` then this, with no station state, and closes 1008 "no radio here" 750 ms later. Redialling will not help until the desktop leaves remote mode (#301, 2026-11-12). |
 | `rigs` | S→C | List of configured rigs and the active one. |
 | `switch-rig` | C→S | Activate a different rig profile. |
 | `tgxl-select-antenna` | C→S | TGXL antenna switch select. |
