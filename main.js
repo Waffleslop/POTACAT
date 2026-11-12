@@ -354,6 +354,7 @@ const { FlrigTransport, probeFlrig } = require('./lib/flrig-transport');
 const { CivCodec } = require('./lib/codecs/civ-codec');
 const IcomScope = require('./lib/icom-scope');
 const Sculan10Scope = require('./lib/sculan10-scope');
+const K4Pan = require('./lib/k4-pan');
 const { CommanderCodec, commanderModel, probeCommander } = require('./lib/codecs/commander-codec');
 const CommanderSequences = require('./lib/commander-sequences');
 const { getTuneQuirks, resolveSerialHandshake, holdSerialLinesLow } = require('./lib/rig-models');
@@ -3415,6 +3416,9 @@ function getRigCapabilities(rigType) {
   // SmartSDR is running (bound): its pan is SmartSDR's.
   // An Icom with a scope, reached over CI-V (USB, CI-V over TCP, Icom
   // Network): the radio's own spectrum (lib/icom-scope.js).
+  // An Elecraft K4 over the network: its own panadapter, offered while its
+  // PAN frames arrive (lib/k4-pan.js, #396).
+  if (!caps.nativeScope && k4ScopeAvailable()) caps.nativeScope = 'k4';
   if (!caps.nativeScope && icomScopeModel()) caps.nativeScope = 'icom';
   if (!caps.nativeScope && flexScopeAvailable()) caps.nativeScope = 'flex';
   if (!caps.nativeScope && sdrScopeSettingsForActiveRig().enabled) caps.nativeScope = 'sdr';
@@ -8601,6 +8605,9 @@ async function connectCat() {
     // any rig-side audio device. K3SBP 2026-05-16.
     if (target.type === 'k4-network') {
       cat.on('k4-audio', (frame) => handleK4AudioFrame(frame));
+      // The K4's panadapter rides the same socket (lib/k4-pan.js, #396).
+      k4ScopeConnectionReset();
+      cat.on('k4-pan', k4ScopeOnPan);
     }
     cat.connect(target);
     return;
@@ -32093,7 +32100,7 @@ function yaesuScopeRemotePayload(extra) {
  *  SDR are relative, so they carry neither. */
 function scopeCalibration() {
   const s = yaesuScopeState;
-  if (s.source !== 'flex' || !Number.isFinite(s.dbmMin) || !Number.isFinite(s.dbmMax) || s.dbmMax <= s.dbmMin) return {};
+  if ((s.source !== 'flex' && s.source !== 'k4') || !Number.isFinite(s.dbmMin) || !Number.isFinite(s.dbmMax) || s.dbmMax <= s.dbmMin) return {};
   return { dbmMin: s.dbmMin, dbmMax: s.dbmMax };
 }
 
@@ -32109,7 +32116,7 @@ function scopeCalibration() {
 function scopeLevelScale() {
   const s = yaesuScopeState;
   if (s.kind === 1) return { unit: null, min: 0, max: 255 };
-  if (s.source === 'flex') {
+  if (s.source === 'flex' || s.source === 'k4') {
     const c = scopeCalibration();
     return Number.isFinite(c.dbmMin) ? { unit: 'dBm', min: c.dbmMin, max: c.dbmMax } : { unit: null, min: 0, max: 255 };
   }
@@ -32304,6 +32311,7 @@ function startYaesuScope() {
   if (kind === 'flex') { startFlexScope(); return; }
   if (kind === 'icom') { startIcomScope(); return; }
   if (kind === 'sculan10') { startSculanScope(); return; }
+  if (kind === 'k4') { startK4Scope(); return; }
   if (yaesuScopeStopping && yaesuScopeStopping.exitCode === null && yaesuScopeStopping.signalCode === null) {
     if (!yaesuScopeStartAfterExit) sendCatLog('[Scope] waiting for the previous helper to release the radio');
     yaesuScopeStartAfterExit = true;
@@ -32468,6 +32476,7 @@ function stopYaesuScope(why) {
   if (sdrScopeClient) { stopSdrScope(why); return; }
   if (flexScopeOn) { stopFlexScope(why); return; }
   if (sculanScopeOn) { stopSculanScope(why); return; }
+  if (k4ScopeOn) { stopK4Scope(why); return; }
   if (icomScopeOn || (yaesuScopeState.source === 'icom' && !yaesuScopeProc)) { stopIcomScope(why); return; }
   yaesuScopeStopCatPolling();
   // SCU-LAN10 goes back off once the helper has let go, unless the scope was
@@ -32510,7 +32519,8 @@ function yaesuScopeOnFrame(f) {
     yaesuScopeRestarts = 0;
     sendCatLog('[Scope] frames flowing (' + (f.kind === 1 ? 'synthetic signal' : yaesuScopeState.source === 'sdr' ? 'SDR' : yaesuScopeState.source === 'flex' ? 'Flex panadapter'
       : yaesuScopeState.source === 'icom' ? ((icomScopeEntry && icomScopeEntry.name) || 'Icom') + ' scope over CI-V'
-      : yaesuScopeState.source === 'sculan10' ? 'SCU-LAN10 scope over the LAN' : 'live radio') + ')');
+      : yaesuScopeState.source === 'sculan10' ? 'SCU-LAN10 scope over the LAN'
+      : yaesuScopeState.source === 'k4' ? 'K4 panadapter over the network' : 'live radio') + ')');
     yaesuScopeSetStatus('live', null);
   }
   if (scopePopoutWin && !scopePopoutWin.isDestroyed()) {
@@ -32670,8 +32680,10 @@ function scopeSourceKind() {
   const icom = !!icomScopeModel();
   const flex = flexScopeAvailable();
   const sculan = sculanScopeAvailable();
-  if (sdr.enabled && (sdr.preferSdr || (!native && !icom && !flex && !sculan))) return 'sdr';
+  const k4 = k4ScopeAvailable();
+  if (sdr.enabled && (sdr.preferSdr || (!native && !icom && !flex && !sculan && !k4))) return 'sdr';
   if (sculan) return 'sculan10';
+  if (k4) return 'k4';
   if (native) return 'yaesu';
   if (icom) return 'icom';
   return flex ? 'flex' : null;
@@ -32995,6 +33007,123 @@ function stopFlexScope(why) {
   if (flexScopeCenterTimer) { clearTimeout(flexScopeCenterTimer); flexScopeCenterTimer = null; }
   if (smartSdr) smartSdr.stopPanScope();
   sendCatLog('[Scope] Flex panadapter stopped' + (why ? ' — ' + why : ''));
+  if (yaesuScopeState.status !== 'stopped') yaesuScopeSetStatus('stopped', null);
+}
+
+// ═══ The Elecraft K4's panadapter over the network (lib/k4-pan.js, #396) ═════
+// A K4 reached as 'k4-network' streams its panadapter (PAN, type 0x02) on the
+// same framed socket as CAT and audio, continuously, with nothing asked of it
+// (Elecraft K4 Programmer's Reference rev. D5, "Streaming Data"). It is a
+// scope source like the SCU-LAN10: offered while frames arrive, the same
+// state and fan-out. Main receiver only. The axis is each packet's own centre
+// and width (anchor 'fixed'); its bins are dBm, so the level scale is dBm.
+// POTACAT writes nothing to the radio for it: span, REF and rate stay the
+// operator's. The first frame of each connection is logged and saved
+// (k4-pan-frame.bin) so an owner's report settles the layout.
+let k4ScopeOn = false;
+let k4ScopeLastFrameAt = 0;
+let k4ScopeLiveTimer = null;
+let k4ScopeSeq = 0;
+let k4ScopeFirstLogged = false;
+let k4ScopeLastStateAt = 0;
+let k4ScopeLastTier = 0;
+
+function k4ScopeAvailable() {
+  return !!(settings.catTarget && settings.catTarget.type === 'k4-network' && cat && cat.connected
+    && Date.now() - k4ScopeLastFrameAt < 3000);
+}
+
+function k4ScopeConnectionReset() {
+  k4ScopeFirstLogged = false;
+  k4ScopeLastFrameAt = 0;
+  k4ScopeLastTier = 0;
+}
+
+function k4ScopeOnPan(payload) {
+  const pan = K4Pan.parsePanPayload(payload);
+  if (!pan || pan.mini || pan.receiver !== 0) return;   // Main PAN only
+  const wasAvailable = k4ScopeAvailable();
+  k4ScopeLastFrameAt = Date.now();
+  if (!k4ScopeFirstLogged) {
+    k4ScopeFirstLogged = true;
+    sendCatLog('[K4] first panadapter frame: ' + K4Pan.describePan(pan));
+    try {
+      const framePath = path.join(app.getPath('userData'), 'k4-pan-frame.bin');
+      fs.writeFileSync(framePath, Buffer.from(payload));
+      sendCatLog(`[K4] saved one raw panadapter frame (${payload.length} bytes) to ${framePath}: attach that file to a report so the scope can be checked against your radio`);
+    } catch (e) { sendCatLog('[K4] could not save the raw panadapter frame: ' + (e && e.message ? e.message : e)); }
+  }
+  if (!wasAvailable) {
+    sendCatLog('[Scope] K4 panadapter frames are arriving: the band scope is available');
+    try { broadcastRigState(); } catch { /* no rig yet */ }
+    if (yaesuScopeWanted() && !k4ScopeOn) {
+      stopYaesuScope('K4 panadapter frames arrived');
+      yaesuScopeRestarts = 0;
+      startYaesuScope();
+    } else {
+      yaesuScopeBroadcastState();
+    }
+  }
+  if (k4ScopeLiveTimer) clearTimeout(k4ScopeLiveTimer);
+  k4ScopeLiveTimer = setTimeout(k4ScopeQuiet, 3100);
+  if (!k4ScopeOn) return;
+  const st = yaesuScopeState;
+  const ax = K4Pan.axisFor(pan);
+  if (pan.spanHz !== k4ScopeLastTier) {
+    sendCatLog(`[Scope] K4 panadapter: ${pan.binCount} bins over ${YaesuScope.formatSpan(pan.spanHz)}` + (pan.tierKnown ? '' : ' (not a width POTACAT knows; please send a report)'));
+    k4ScopeLastTier = pan.spanHz;
+  }
+  // The span changes rarely and is sent at once; the centre follows the dial
+  // and is sent at most 5 times a second.
+  const spanChanged = ax.spanHz !== st.spanHz || st.anchor !== 'fixed';
+  const centreChanged = ax.centerHz !== st.centerHz;
+  st.anchor = 'fixed';
+  st.spanHz = ax.spanHz;
+  st.centerHz = ax.centerHz;
+  const now = Date.now();
+  if (spanChanged || (centreChanged && now - k4ScopeLastStateAt >= 200)) {
+    k4ScopeLastStateAt = now;
+    yaesuScopeBroadcastState();
+  }
+  yaesuScopeOnFrame(K4Pan.toScopeFrame(pan, { seq: ++k4ScopeSeq }));
+}
+
+/** No PAN frame for 3 s: the scope is no longer offered, and a running one says why. */
+function k4ScopeQuiet() {
+  k4ScopeLiveTimer = null;
+  if (k4ScopeAvailable()) return;
+  sendCatLog('[Scope] no K4 panadapter frames for 3 s');
+  try { broadcastRigState(); } catch { /* no rig */ }
+  if (!k4ScopeOn) { yaesuScopeBroadcastState(); return; }
+  if (!(settings.catTarget && settings.catTarget.type === 'k4-network')) {
+    stopK4Scope('the active rig is no longer the K4 over the network');
+    if (yaesuScopeWanted()) startYaesuScope();
+    return;
+  }
+  yaesuScopeSetStatus('error', { key: 'k4-silent', severity: 'error',
+    headline: 'No panadapter frames from the K4',
+    detail: 'The network connection is ' + (cat && cat.connected ? 'up, but the radio stopped sending its panadapter.' : 'down; POTACAT is reconnecting.') + ' The picture comes back by itself when frames arrive.' });
+}
+
+function startK4Scope() {
+  if (k4ScopeOn) return;
+  k4ScopeOn = true;
+  k4ScopeLastTier = 0;
+  Object.assign(yaesuScopeState, {
+    source: 'k4', kind: 0, spanCode: null, spanHz: 0, anchor: 'fixed', modeCode: null, modeLabel: 'PANADAPTER', speed: null, scuLan: null,
+    frames: 0, misaligned: 0, helperPath: '', catReads: null,
+    centerHz: _currentFreqHz || yaesuScopeState.centerHz || 0,
+    dbmMin: K4Pan.DBM_MIN, dbmMax: K4Pan.DBM_MAX,
+  });
+  sendCatLog('[Scope] Elecraft K4 panadapter over the network (Main receiver)');
+  yaesuScopeSetStatus('starting', null);
+}
+
+function stopK4Scope(why) {
+  const was = k4ScopeOn;
+  k4ScopeOn = false;
+  yaesuScopeState.modeLabel = null;
+  if (was) sendCatLog('[Scope] K4 panadapter stopped' + (why ? ' — ' + why : ''));
   if (yaesuScopeState.status !== 'stopped') yaesuScopeSetStatus('stopped', null);
 }
 

@@ -176,6 +176,7 @@ const TESTS = [
   'test/jtcat-snr-floor-test.js', // Hunt does not call a CQ below the operator's signal floor (per band)
   'test/rx-spectrum-test.js', // the phone's VFO waterfall with no FT8 engine: Flex/Icom streams, the rig's sound card
   'test/yaesu-scope-test.js', // the FT-710's own scope: frame parser, axis, helper exit codes, remote payload guard (was CI-only)
+  'test/k4-pan-test.js', // #396: the Elecraft K4's network panadapter (PAN 0x02): header, dBm, 850 points, fixed axis, wiring
   'test/flex-scope-test.js', // the Flex's own panadapter as the band scope (Flex Direct), against a real 8600 capture
   'test/scope-digital-view-test.js', // the scope's tight view on a digital mode's decode window (Flex)
   'test/kiwisdr-test.js', // KiwiSDR: settings after AR OK (firmware 1.902), receivers that allow no apps
