@@ -13530,14 +13530,8 @@ function initWasFilters() {
         const r = await window.api.wasBackfillStates();
         if (!r || !r.ok) {
           wasEls.backfillStatus.textContent = (r && r.error) || 'Could not fill states.';
-        } else if (!r.filled) {
-          wasEls.backfillStatus.textContent = r.remaining
-            ? `No states found for the ${r.remaining} QSO${r.remaining === 1 ? '' : 's'} still without one.`
-            : 'Every QSO already has a state.';
         } else {
-          wasEls.backfillStatus.textContent = `Filled ${r.filled} QSO${r.filled === 1 ? '' : 's'}` +
-            (r.remaining ? `, ${r.remaining} still without a state` : '') +
-            (r.more ? ' (press again for more)' : '') + '.';
+          wasEls.backfillStatus.textContent = r.text; // names the QSOs left (lib/state-backfill.js, #389)
         }
       } catch (err) {
         wasEls.backfillStatus.textContent = 'Could not fill states: ' + (err.message || err);

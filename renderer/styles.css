@@ -5886,7 +5886,9 @@ a.settings-echocat-badge-link:hover {
 .was-swatch-worked { background: rgba(79, 195, 247, 0.5); border: 1px solid #4fc3f7; }
 .was-swatch-confirmed { background: rgba(78, 204, 163, 0.55); border: 1px solid #4ecca3; }
 .was-tools { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
-.was-backfill-status { font-size: 11px; color: var(--text-secondary); }
+.was-backfill-status { font-size: 11px; color: var(--text-secondary); min-width: 0; }
+/* The answer can name the QSOs left (#389): it wraps, the button never does */
+#was-backfill-btn { flex-shrink: 0; white-space: nowrap; }
 #was-count.was-count-confirmed { color: #4ecca3; }
 .ref-state-pill { background: #e040fb; color: #000; font-size: 9px; font-weight: bold; padding: 1px 3px; border-radius: 3px; margin-left: 4px; }
 .ref-dx-pill { background: #ffd740; color: #000; font-size: 9px; font-weight: bold; padding: 1px 3px; border-radius: 3px; margin-left: 4px; }
