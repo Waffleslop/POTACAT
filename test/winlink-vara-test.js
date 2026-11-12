@@ -140,7 +140,7 @@ function fnBody(src, name) {
     const s = fnBody(main, 'winlinkStartSession');
     assert.ok(/if \(mode === 'vara' \|\| mode === 'varafm'\) \{\s*await winlinkVaraReady\(mode\);\s*if \(!live\(\)\) throw cancelled\(\);\s*await winlinkVaraAudioReady\(mode\);/.test(s));
     assert.ok(s.indexOf('await winlinkVaraReady(mode)') < s.indexOf('await patClient.connect(url)'), 'before the connect');
-    assert.ok(/WinlinkModes\.isFmMode\(mode\) \? 'FM' : 'DIGU'/.test(s), 'FM for packet and VARA FM, USB data for the rest');
+    assert.ok(/WinlinkModes\.isFmMode\(mode\) \? \(pm && pm\.byHand \? undefined : 'FM'\) : 'DIGU'/.test(s), 'FM for packet and VARA FM, USB data for the rest');
     assert.ok(/mode === 'varafm' \? 'varafm' : 'varahf'/.test(fnBody(main, 'winlinkGateways')), 'the gateway list asks Pat for varafm');
     assert.ok(fnBody(main, 'writePatConfig').includes("varaFmAddr: VaraProcess.varaAddr(_winlinkVaraHost('fm'), _winlinkVaraFmPort()),"), 'VARA FM at its host and port (#287)');
     assert.ok(/if \(mode === 'varafm'\) return `VARA FM is not answering/.test(fnBody(main, 'winlinkTransportDownText')));

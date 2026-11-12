@@ -455,6 +455,7 @@ const { createRigctldServer } = require('./lib/rigctld-server');
 const ArdopProcess = require('./lib/ardop-process');
 const DirewolfProcess = require('./lib/direwolf-process');
 const DirewolfAgwMonitor = require('./lib/direwolf-agw-monitor');
+const PacketRigMode = require('./lib/packet-rig-mode');
 const VaraProcess = require('./lib/vara-process');
 const VaraSetup = require('./lib/vara-setup');
 const WinlinkModes = require('./lib/winlink-modes');
@@ -10563,6 +10564,7 @@ function winlinkModes() {
     varaPort: _winlinkVaraPort(),
     ardopFound: ArdopProcess.ardopSupported(process.platform) ? findArdop().found : false,
     direwolfFound: DirewolfProcess.direwolfSupported(process.platform) ? findDirewolf().found : false,
+    fmModeNote: (() => { const pm = winlinkPacketRigMode('packet'); return pm && pm.byHand && family !== 'none' ? pm.note : ''; })(),
     ardopSocketAudio: true, // ardopcf and Dire Wolf carry POTACAT's socket audio backends (no sound card of their own on any rig)
     // The operator's own VARA (Windows, Wine, or another PC: #287): listed only when turned on in Settings.
     varaHf: { enabled: _winlinkVaraEnabled('hf'), port: _winlinkVaraPort(), host: _winlinkVaraHost('hf'), hostBad: _winlinkVaraHostBad('hf'), cable: winlinkCableConfigured() },
@@ -11456,10 +11458,12 @@ async function startWinlinkShim() {
       _winlinkTxBurst.keyDown();
       modemBridgeOver(true);
       const icom = detectRigType() === 'icom' || (getActiveRigModel()?.brand === 'Icom');
+      // Packet and VARA FM: the session start put the radio in the rig's packet mode (#128); a frame never changes it.
+      const pttMode = PacketRigMode.keyDownOpts({ icom, resolved: winlinkPacketRigMode(winlinkState.session.mode) });
       if (settings.audioSource === 'icom-network') icomNetworkVoiceTx(true, 'Winlink');
       const ringAt = _catLogRing.length;
       let keyed = true;
-      try { keyed = handleRemotePtt(true, { audio: true, forceDataMode: icom, emission: 'DATA', txKind: 'winlink' }) !== false; }
+      try { keyed = handleRemotePtt(true, { audio: true, ...pttMode, emission: 'DATA', txKind: 'winlink' }) !== false; }
       catch (e) { keyed = false; winlinkLog(`PTT failed: ${e.message}`); }
       if (!keyed) {
         // The radio refused the key-down (SWR guard, licence, a frequency it
@@ -12163,7 +12167,9 @@ function winlinkPreviewQsy({ dialKhz, mode } = {}) {
   if (!reach.ok) { winlinkLog(`gateway pick refused: ${reach.why}`); return { ok: false, error: reach.why, reason: 'out-of-reach' }; }
   winlinkNoteHandTune();
   if (!_winlinkPreviewReturnTo && _currentFreqHz) _winlinkPreviewReturnTo = winlinkDialHere('before the gateway pick');
-  tuneRadio(khz, mode === 'packet' ? 'FM' : 'DIGU', undefined, { origin: 'Winlink gateway pick' });
+  // FM data the operator sets by hand (#128): the pick moves the dial and leaves the radio's mode alone.
+  const pickPm = mode === 'packet' ? winlinkPacketRigMode(mode) : null;
+  tuneRadio(khz, mode === 'packet' ? (pickPm && pickPm.byHand ? undefined : 'FM') : 'DIGU', undefined, { origin: 'Winlink gateway pick' });
   _winlinkLeftAtHz = Math.round(khz * 1000);
   winlinkLog(`listening on ${khz.toFixed(1)} kHz for the picked gateway (the radio goes back to ${_winlinkPreviewReturnTo ? (_winlinkPreviewReturnTo.freqHz / 1e6).toFixed(4) + ' MHz' : 'where it was'} when the mail window closes)`);
   return { ok: true };
@@ -12228,6 +12234,7 @@ function winlinkReturnBeforeQuit(then) {
   if (v.act === 'skip') { winlinkLog(`POTACAT is closing: not going back to ${winlinkDialText(r)} — ${v.why}`); return false; }
   winlinkLog(`POTACAT is closing: the radio now goes back to ${winlinkDialText(r)}`);
   try { tuneRadio(r.freqHz / 1000, r.mode || undefined, undefined, { origin: 'Winlink: POTACAT closing' }); } catch {}
+  winlinkReturnModeByName(r);
   setTimeout(then, v.waitMs);
   return true;
 }
@@ -12253,6 +12260,8 @@ function winlinkAgwMonitorStart(attempt = 0) {
     onLog: winlinkLog,
     onFrame: (f, text) => {
       if (DirewolfAgwMonitor.isReceivedFrame(f)) _direwolfMonitorHeard++;
+      if (_winlinkLinkStory && _winlinkLinkStory.noteFrame) _winlinkLinkStory.noteFrame(text);
+      direwolfRingPush(`heard: ${text}`); // Report a Bug's Dire Wolf block: its stdout arrives late or never (#128)
       if (logged++ < 300) winlinkLog(`direwolf heard: ${text}`);
       else if (logged === 301) winlinkLog('direwolf heard: (more frames not logged)');
     },
@@ -12650,14 +12659,20 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
         // No CAT control (NA4DQ): the operator sets the dial; POTACAT keys by
         // VOX or the rig's PTT line, as for every other no-CAT transmission.
         const noCat = !!(settings.catTarget && settings.catTarget.type === 'none');
+        // Packet mode on the radio, per rig (#128, lib/packet-rig-mode.js): FM, or the radio's own FM data mode.
+        const pm = winlinkPacketRigMode(mode);
+        _winlinkRadioMode = pm ? { resolved: pm, noCat, sent: '', state: '' } : null;
+        if (pm) winlinkLog(`packet mode on the radio: ${pm.label}${pm.note ? ' — ' + pm.note : ''}`);
         if (noCat) {
-          const byHand = `Set the radio to ${FreqDots.khzMhz(dialKhz)} ${WinlinkModes.isFmMode(mode) ? 'FM' : 'USB (data)'} yourself; POTACAT keys it by VOX or your PTT line`;
+          const byHand = `Set the radio to ${FreqDots.khzMhz(dialKhz)} ${WinlinkModes.isFmMode(mode) ? (pm && pm.want === 'fmdata' ? 'FM data' : 'FM') : 'USB (data)'} yourself; POTACAT keys it by VOX or your PTT line`;
           winlinkLog(`no CAT control: ${byHand}`);
           winlinkState.setSession({ tuned: false, text: byHand });
         } else {
-          tuneRadio(Number(dialKhz), WinlinkModes.isFmMode(mode) ? 'FM' : 'DIGU', undefined, { origin: 'Winlink session' });
+          const tunedAt = Date.now();
+          // FM data the operator sets by hand: the dial moves, the radio's mode is left alone.
+          tuneRadio(Number(dialKhz), WinlinkModes.isFmMode(mode) ? (pm && pm.byHand ? undefined : 'FM') : 'DIGU', undefined, { origin: 'Winlink session' });
           winlinkState.setSession({ tuned: true });
-          await winlinkEnterFmDataBeforeDial(mode);
+          await winlinkEnterFmDataBeforeDial(mode, pm, tunedAt);
           if (!live()) throw cancelled();
         }
         winlinkFlexDaxOn();
@@ -12718,21 +12733,66 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
 }
 
 /**
- * Packet and VARA FM on an Icom key in FM-D. That mode is asked for ONCE,
+ * The active rig's "Packet mode on the radio", resolved by the one resolver
+ * (lib/packet-rig-mode.js, #128). Null for a mode that is not FM.
+ */
+function winlinkPacketRigMode(mode) {
+  if (!WinlinkModes.isFmMode(mode)) return null;
+  const rig = winlinkActiveRig();
+  let family = 'none';
+  try { family = rig ? RigFamily.rigFamily(rig) : (settings.catTarget ? RigFamily.familyFromCatTarget(settings.catTarget) : 'none'); } catch {}
+  const model = getActiveRigModel();
+  return PacketRigMode.resolvePacketRigMode({ choice: rig && rig.packetMode, family, brand: model && model.brand, protocol: model && model.protocol });
+}
+let _winlinkUnreportedDataMode = ''; // a data mode sent to a radio that reads it back as FM (#128, the FT-857's PKT)
+/**
+ * After the return tune: a radio that reports its packet mode as FM is sent
+ * the return mode by name. To POTACAT that radio never left FM, so a tune
+ * back to FM carries no mode command (lib/rig-controller.js tune) and the
+ * radio would stay in its packet mode.
+ */
+function winlinkReturnModeByName(returnTo) {
+  const was = _winlinkUnreportedDataMode;
+  if (!was || !returnTo || !returnTo.mode) return;
+  _winlinkUnreportedDataMode = '';
+  winlinkLog(`the radio reports ${was} as FM, so ${returnTo.mode} is sent again by name`);
+  setTimeout(() => {
+    try { if (cat && cat.connected && cat.setModeOnly && !winlinkSessionActive()) cat.setModeOnly(returnTo.mode, returnTo.freqHz, { noAnchor: true }); } catch {}
+  }, 400);
+}
+let _winlinkRadioMode = null; // this session's packet mode on the radio: what was resolved and what was sent (#128)
+/** "radio mode: ..." for the session summary line: the choice, what was sent, what the radio reports now. */
+function winlinkRadioModeText() {
+  const m = _winlinkRadioMode;
+  if (!m) return '';
+  const linkUp = !!(cat && cat.connected);
+  return PacketRigMode.sentText({ ...m, report: linkUp ? pttModeReport() : null, reportMode: linkUp ? _currentMode : '' });
+}
+
+/**
+ * Packet and VARA FM in the radio's FM data mode (an Icom's FM-D on Automatic;
+ * any rig set to "FM data" whose codec has the mode, #128). That mode is asked for ONCE,
  * here, before Pat dials. On the first key-down it cost the first frame: the
  * key waited 812 ms for a DATA report that an IC-7100 on rigctld never gives,
  * and the radio was up for the last 180 ms of a 828 ms connect request (#300).
  */
-async function winlinkEnterFmDataBeforeDial(mode) {
-  const rig = getActiveRigModel();
-  const icom = detectRigType() === 'icom' || !!(rig && rig.brand === 'Icom');
-  if (!icom || !WinlinkModes.isFmMode(mode) || !cat || !cat.connected || !cat.setModeOnly) return;
+async function winlinkEnterFmDataBeforeDial(mode, pm, tunedAt = 0) {
+  if (!pm || pm.want !== 'fmdata' || !pm.dataMode) return;
+  const note = (state, sent = '') => { if (_winlinkRadioMode) { _winlinkRadioMode.state = state; _winlinkRadioMode.sent = sent; } };
+  if (!cat || !cat.connected || !cat.setModeOnly) { note('link-down'); return; }
   await new Promise((r) => setTimeout(r, 500)); // behind the QSY's own frequency and mode commands
-  if (!cat || !cat.connected || (pttModeReport() || {}).data) return;
+  if (!cat || !cat.connected) { note('link-down'); return; }
+  // An Icom's DATA flag is its own report; a mode NAME from before the FM tune is stale.
+  const rep = pttModeReport() || {};
+  if (rep.data && (pm.link === 'civ' || rep.at > tunedAt)) { note('already'); return; }
   _winlinkDataAskedFor = _winlinkSessionSeq;
   _modeSuppressUntil = Date.now() + 2000;
-  winlinkLog('FM -> DIGFM for this session, asked once before the first frame (an Icom takes modem audio in its data mode)');
-  try { cat.setModeOnly('DIGFM', _currentFreqHz || 0, { noAnchor: true }); } catch (e) { winlinkLog(`the data mode could not be set: ${e.message}`); }
+  note('sent', pm.dataMode);
+  if (!pm.confirm) _winlinkUnreportedDataMode = pm.dataMode;
+  const rig = getActiveRigModel();
+  const why = rig && rig.brand === 'Icom' ? 'an Icom takes modem audio in its data mode' : `Packet mode on the radio: ${pm.label}`;
+  winlinkLog(`FM -> ${pm.dataMode} for this session, asked once before the first frame (${why})`);
+  try { cat.setModeOnly(pm.dataMode, _currentFreqHz || 0, { noAnchor: true }); } catch (e) { note('failed', pm.dataMode); winlinkLog(`the data mode could not be set: ${e.message}`); }
   await new Promise((r) => setTimeout(r, 400));
 }
 
@@ -12842,7 +12902,8 @@ function winlinkOutcomeReset(mode) {
   _winlinkPatReply = '';
   _winlinkReceived = null;
   _winlinkAudioSummary = '';
-  _winlinkLinkStory = mode === 'ardop' ? new WinlinkDiag.ArdopLinkStory() : null;
+  _winlinkLinkStory = mode === 'ardop' ? new WinlinkDiag.ArdopLinkStory() : mode === 'packet' ? new DirewolfAgwMonitor.PacketLinkStory() : null;
+  _winlinkRadioMode = null;
   // The Outbox as the session starts: what is gone from it afterwards was sent.
   _winlinkQueuedAtStart = winlinkState.total('out');
   const seq = _winlinkSessionSeq + 1;
@@ -12916,6 +12977,7 @@ async function winlinkSettleOutcome(state, s, raw, received, endedAt) {
     modemState: story ? story.stateText : '',
     endedBy: WinlinkOutcome.endedByText({ cause: _winlinkCause, modemEnd: story && story.end, mode: s.mode }),
     audio: _winlinkAudioSummary.replace(/^audio this session:\s*/, ''),
+    radioMode: winlinkRadioModeText(),
     patLine: _winlinkPatLastLine, raw: _winlinkPatReply,
   };
   const facts = { ...taken, outbox: await winlinkOutboxCount() };
@@ -13201,6 +13263,7 @@ function winlinkRestoreDial(returnTo, waitedMs = 0, lead = 'session over: the ra
   }
   winlinkLog(`${lead} ${winlinkDialText(returnTo)}`);
   try { tuneRadio(returnTo.freqHz / 1000, returnTo.mode || undefined, undefined, { origin: 'Winlink return' }); } catch {}
+  winlinkReturnModeByName(returnTo);
 }
 
 // ── the Winlink account, from Settings or an ECHOCAT device ──────────────────
@@ -46882,6 +46945,13 @@ function cloudShackNotice(text, kind) {
   // in the renderer, because the note text is filled from the model table and
   // the same key-line resolver the CW keying code uses.
   ipcMain.handle('get-rig-setup-notes', (_e, q) => rigSetupNotesFor(q || {}));
+  // Rig editor "Packet mode on the radio": what the choice means for the rig being edited (lib/packet-rig-mode.js).
+  ipcMain.handle('get-packet-rig-mode', (_e, q) => {
+    q = q || {};
+    const info = RIG_MODELS[String(q.model || '').trim()] || null;
+    const o = { choice: q.choice, family: RigFamily.familyFromRadioType(q.radioType), brand: info && info.brand, protocol: info && info.protocol };
+    return { ...PacketRigMode.resolvePacketRigMode(o), editorNote: PacketRigMode.editorNote(o) };
+  });
   ipcMain.handle('get-sdr-directory', () => require('./lib/sdr-directory').STATIONS);
 
   // Resolve contest occurrences for the current moment + serialize as

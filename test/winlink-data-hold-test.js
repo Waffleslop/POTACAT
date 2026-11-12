@@ -103,16 +103,17 @@ test('main.js: the key-down marks the session as asked; FM-D is asked for before
   assert.ok(/if \(_dataPlan === 'switch-hold'\) _winlinkDataAskedFor = _winlinkSessionSeq;/.test(p));
   assert.ok(/not a DATA mode, after this session asked for one — keying as it is/.test(p), 'said once, with what to check');
   const e = fnBody(main, 'winlinkEnterFmDataBeforeDial');
-  assert.ok(/!WinlinkModes\.isFmMode\(mode\)/.test(e) && /!icom/.test(e), 'Icom FM modems only: HF sessions QSY in DIGU already');
-  assert.ok(/\(pttModeReport\(\) \|\| \{\}\)\.data\) return;/.test(e), 'nothing sent to a radio already in data');
-  assert.ok(e.indexOf('_winlinkDataAskedFor = _winlinkSessionSeq;') < e.indexOf("cat.setModeOnly('DIGFM'"), 'marked before it is sent');
+  // Which rig, and which mode name, is lib/packet-rig-mode.js (#128); test/packet-rig-mode-test.js runs this function.
+  assert.ok(/if \(!pm \|\| pm\.want !== 'fmdata' \|\| !pm\.dataMode\) return;/.test(e), 'FM data sessions only: HF sessions QSY in DIGU already');
+  assert.ok(/if \(rep\.data && \(pm\.link === 'civ' \|\| rep\.at > tunedAt\)\) \{ note\('already'\); return; \}/.test(e), 'nothing sent to a radio already in data');
+  assert.ok(e.indexOf('_winlinkDataAskedFor = _winlinkSessionSeq;') < e.indexOf('cat.setModeOnly(pm.dataMode'), 'marked before it is sent');
   assert.ok(/noAnchor: true/.test(e), 'an Icom memory channel keeps its duplex: no frequency write');
   const s = fnBody(main, 'winlinkStartSession');
   const tune = s.indexOf("{ origin: 'Winlink session' }");
-  const enter = s.indexOf('await winlinkEnterFmDataBeforeDial(mode);');
+  const enter = s.indexOf('await winlinkEnterFmDataBeforeDial(mode, pm, tunedAt);');
   const dial = s.indexOf('await patClient.connect(url)');
   assert.ok(tune > 0 && enter > tune && dial > enter, 'after the QSY, before Pat dials');
-  assert.ok(/await winlinkEnterFmDataBeforeDial\(mode\);\n\s*if \(!live\(\)\) throw cancelled\(\);/.test(s), 'a stopped attempt goes no further');
+  assert.ok(/await winlinkEnterFmDataBeforeDial\(mode, pm, tunedAt\);\n\s*if \(!live\(\)\) throw cancelled\(\);/.test(s), 'a stopped attempt goes no further');
 });
 
 console.log('main.js wiring');

@@ -180,7 +180,7 @@ test('a gateway pick tunes the radio only outside a session, and the dial goes b
   const q = fnBody(main, 'winlinkPreviewQsy');
   assert.ok(/if \(winlinkSessionActive\(\)\) return \{ ok: false/.test(q));
   assert.ok(/if \(isRemoteMode\(\)\) return \{ ok: false/.test(q));
-  assert.ok(/tuneRadio\(khz, mode === 'packet' \? 'FM' : 'DIGU'/.test(q));
+  assert.ok(/tuneRadio\(khz, mode === 'packet' \? \(pickPm && pickPm\.byHand \? undefined : 'FM'\) : 'DIGU'/.test(q));
   assert.ok(/returnTo: radio \? \(_winlinkPreviewReturnTo \|\|/.test(fnBody(main, 'winlinkStartSession')), 'the session returns to the pre-pick dial');
   assert.ok(/winlinkPreviewRestore\('window closed'\)/.test(main), 'closing the window with no session puts the dial back');
 });
@@ -195,7 +195,7 @@ console.log('radio control');
 test('the shim binds loopback and keys through handleRemotePtt with audio', () => {
   const shim = fnBody(main, 'startWinlinkShim');
   assert.ok(/createRigctldServer\(/.test(shim) && /host: '127\.0\.0\.1'/.test(shim));
-  assert.ok(/handleRemotePtt\(true, \{ audio: true, forceDataMode: icom(, emission: 'DATA')?(, txKind: 'winlink')? \}\)/.test(shim));
+  assert.ok(/handleRemotePtt\(true, \{ audio: true, \.\.\.pttMode, emission: 'DATA', txKind: 'winlink' \}\)/.test(shim)); // pttMode: lib/packet-rig-mode.js keyDownOpts (#128)
   assert.ok(/radioOwner !== 'winlink'/.test(shim), 'refuses outside a session');
   assert.ok(/_swrTripped/.test(shim), 'honours the SWR latch');
   assert.ok(/armWinlinkTxFailsafe\(\)/.test(shim), 'arms the failsafe on key-down');

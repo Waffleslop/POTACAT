@@ -163,7 +163,7 @@ test('rigctld: the T 0 is written the moment it is asked for, never queued behin
 console.log('packet keys through the Winlink DATA hold (#187), not a per-over mode flip');
 test('the shim keys every modem, packet included, as txKind winlink', () => {
   const shim = main.slice(main.indexOf('setPtt: (on) => {'), main.indexOf('function winlinkUnkeyNow('));
-  assert.ok(/handleRemotePtt\(true, \{ audio: true, forceDataMode: icom, emission: 'DATA', txKind: 'winlink' \}\)/.test(shim));
+  assert.ok(/handleRemotePtt\(true, \{ audio: true, \.\.\.pttMode, emission: 'DATA', txKind: 'winlink' \}\)/.test(shim)); // pttMode: lib/packet-rig-mode.js keyDownOpts (#128)
   assert.ok(!/session\.mode === 'packet'/.test(shim), 'no packet-only branch around the key-down');
 });
 test('replay of the 22:10:45-22:11:59 attempt (15 overs from FM): one FM -> DIGFM, no "Restoring FM"', () => {

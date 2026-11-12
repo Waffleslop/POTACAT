@@ -2470,6 +2470,10 @@ function updateRadioSubPanels() {
   // Voice in DATA mode runs in the rig controller: serial, Icom, Hamlib and flrig links.
   const voiceAsDataRow = document.getElementById('rig-voice-as-data');
   if (voiceAsDataRow) voiceAsDataRow.classList.toggle('hidden', !['serialcat', 'icom', 'civ-tcp', 'icom-network', 'hamlib', 'rigctldnet', 'flrig', 'dxlab-commander', 'yaesu-lan'].includes(type));
+  // Packet mode on the radio (#128): for every radio, shown once Winlink is on.
+  const packetModeRow = document.getElementById('rig-packet-mode');
+  if (packetModeRow) packetModeRow.classList.toggle('hidden', !(typeof setWinlinkEnable !== 'undefined' && setWinlinkEnable && setWinlinkEnable.checked));
+  refreshPacketModeNote();
   // Voice streamed over the LAN goes only to an Icom Network radio.
   const lanVoiceSsbRow = document.getElementById('rig-lan-voice-ssb');
   if (lanVoiceSsbRow) lanVoiceSsbRow.classList.toggle('hidden', type !== 'icom-network');
@@ -2887,7 +2891,21 @@ if (icomScopeCaptureBtn) {
   });
 }
 
+// "Packet mode on the radio" (lib/packet-rig-mode.js, resolved in main, which has the model table).
+var packetModeNoteSeq = 0; // var: the sub-panel refresh can run before this line does
+async function refreshPacketModeNote() {
+  const sel = document.getElementById('set-packet-mode');
+  const note = document.getElementById('packet-mode-note');
+  if (!sel || !note || !window.api.getPacketRigMode) return;
+  const seq = ++packetModeNoteSeq;
+  let r = null;
+  try { r = await window.api.getPacketRigMode({ model: rigSetupModelName(), radioType: getSelectedRadioType(), choice: sel.value }); } catch { r = null; }
+  if (seq !== packetModeNoteSeq) return;
+  note.textContent = (r && r.editorNote) || "";
+}
+
 async function refreshRigSetupNotes() {
+  refreshPacketModeNote();
   refreshIcomScopeCaptureRow();
   if (!rigSetupBtn || !window.api.getRigSetupNotes) return;
   const seq = ++rigSetupSeq;
@@ -3002,6 +3020,7 @@ function renderRigSetupNotes() {
 if (rigSetupBtn) {
   rigSetupBtn.addEventListener('click', () => setRigSetupPanelOpen(rigSetupPanel.classList.contains('hidden')));
   if (rigModelSelect) rigModelSelect.addEventListener('change', refreshRigSetupNotes);
+  { const pm = document.getElementById('set-packet-mode'); if (pm) pm.addEventListener('change', refreshPacketModeNote); }
   if (setCwKeyLine) setCwKeyLine.addEventListener('change', refreshRigSetupNotes);
   document.querySelectorAll('input[name="radio-type"]').forEach((b) => b.addEventListener('change', refreshRigSetupNotes));
   for (const id of ['set-icom-model', 'set-civ-tcp-model', 'set-icom-network-model']) {
@@ -3498,6 +3517,8 @@ async function openRigEditor(mode, rigId) {
       if (voiceAsDataEl) voiceAsDataEl.checked = !!rig.voiceAsData;
       const lanVoiceSsbEl = document.getElementById('set-lan-voice-ssb');
       if (lanVoiceSsbEl) lanVoiceSsbEl.checked = !!rig.lanVoiceInSsb;
+      const packetModeEl = document.getElementById('set-packet-mode');
+      if (packetModeEl) packetModeEl.value = rig.packetMode === 'fm' || rig.packetMode === 'fmdata' ? rig.packetMode : 'auto';
       // Per-rig Flex band→antenna map. Always rebuilt so editing a
       // different rig doesn't show the previous rig's selections.
       buildFlexBandAntennaMap(rig.flexBandAntennaMap || {});
@@ -3518,6 +3539,7 @@ async function openRigEditor(mode, rigId) {
     buildFlexBandAntennaMap({});
     fillSdrScopeForm(null);
     { const v = document.getElementById('set-voice-as-data'); if (v) v.checked = false; }
+    { const v = document.getElementById('set-packet-mode'); if (v) v.value = 'auto'; }
     await populateRigAudioDevices('', '');
   }
 
@@ -3654,6 +3676,8 @@ async function saveRigEditor() {
   const rigVoiceAsData = !!(voiceAsDataEl && voiceAsDataEl.checked);
   const lanVoiceSsbEl = document.getElementById('set-lan-voice-ssb');
   const rigLanVoiceInSsb = !!(lanVoiceSsbEl && lanVoiceSsbEl.checked);
+  const packetModeEl = document.getElementById('set-packet-mode');
+  const rigPacketMode = packetModeEl && (packetModeEl.value === 'fm' || packetModeEl.value === 'fmdata') ? packetModeEl.value : '';
 
   // Per-rig Flex per-band antenna map (skipped silently for non-Flex
   // rigs — empty map serializes as `{}`, no runtime impact).
@@ -3682,6 +3706,7 @@ async function saveRigEditor() {
       rig.atuKeepOn = rigAtuKeepOn;
       if (rigVoiceAsData) rig.voiceAsData = true; else delete rig.voiceAsData;
       if (rigLanVoiceInSsb) rig.lanVoiceInSsb = true; else delete rig.lanVoiceInSsb;
+      if (rigPacketMode) rig.packetMode = rigPacketMode; else delete rig.packetMode; // absent = Automatic
       rig.flexBandAntennaMap = flexBandAntennaMap;
       if (rigSdrScope) rig.sdrScope = rigSdrScope;
       rig.setupDone = [...rigSetupDone];
@@ -3710,6 +3735,7 @@ async function saveRigEditor() {
       atuKeepOn: rigAtuKeepOn,
       ...(rigVoiceAsData ? { voiceAsData: true } : {}),
       ...(rigLanVoiceInSsb ? { lanVoiceInSsb: true } : {}),
+      ...(rigPacketMode ? { packetMode: rigPacketMode } : {}),
       flexBandAntennaMap,
       ...(rigSdrScope ? { sdrScope: rigSdrScope } : {}),
       setupDone: [...rigSetupDone],

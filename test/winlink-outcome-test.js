@@ -443,6 +443,7 @@ async function runSettle({ patBody, outboxAfter, queued, connected = true, modem
     WinlinkOutcome: O, WinlinkDiag: D, WinlinkModes, winlinkState: state,
     patClient: new WinlinkClient({ port: pat.port }),
     winlinkLog: (m) => logs.push(m),
+    winlinkRadioModeText: () => '', // packet and VARA FM only (#128, test/packet-rig-mode-test.js)
     winlinkSessionPush: () => pushes.push(state.session),
     winlinkRetryFields: () => ({}), // the automatic retry's fields (#425); its own test is winlink-auto-retry-test.js
     winlinkSummariesLoad: () => {}, winlinkSummariesSave: () => {}, // the file on disk has its own test (winlink-summary-store-test.js)

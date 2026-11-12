@@ -2364,6 +2364,17 @@
           <label class="checkbox-label"><input type="checkbox" id="set-voice-as-data"> Voice in DATA mode (USB-D / LSB-D)</label>
           <span class="help-text" style="display:block;margin:2px 0 0 24px;">For radios whose data port is silent in USB and LSB, such as the Xiegu G90: POTACAT puts the radio in USB-D or LSB-D for voice, so receive audio reaches your sound card interface and ECHOCAT. Contacts are still logged as SSB. The radio's own microphone is off in these modes, so voice has to come in through the data port.</span>
         </div>
+        <div id="rig-packet-mode" class="hidden" style="margin-top:8px;">
+          <label>Packet mode on the radio:
+            <select id="set-packet-mode" style="margin-top:2px;">
+              <option value="auto">Automatic</option>
+              <option value="fm">FM (voice)</option>
+              <option value="fmdata">FM data</option>
+            </select>
+          </label>
+          <span class="help-text" id="packet-mode-note" style="display:block;margin:2px 0 0 0;"></span>
+          <span class="help-text" style="display:block;margin:2px 0 0 0;">The mode the radio is in while Winlink sends packet (and VARA FM). FM (voice) suits an interface on the microphone jack, or a radio that takes its rear or USB audio in FM. FM data is the radio's own data or packet FM mode, for a radio that takes rear or USB audio only there. Automatic: FM data on an Icom, FM (voice) on every other radio. The mode the radio was in comes back when the session is over.</span>
+        </div>
         <div id="rig-lan-voice-ssb" class="hidden" style="margin-top:8px;">
           <label class="checkbox-label"><input type="checkbox" id="set-lan-voice-ssb"> Voice over the LAN stays in USB / LSB</label>
           <span class="help-text" style="display:block;margin:2px 0 0 24px;">Tick this when the radio's DATA OFF MOD menu is set to LAN. The radio then takes voice from the network in plain USB and LSB, with its speech compressor and SSB transmit filter. Leave it off at the radio's factory setting: LAN audio only reaches the transmitter in DATA mode, so POTACAT switches to USB-D for each transmission.</span>
