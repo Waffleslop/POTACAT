@@ -25,11 +25,16 @@ check('WSPR: centred on dial + 1500 Hz, as narrow as the radio allows', () => {
   const v = V.digitalView({ mode: 'WSPR', rigMode: 'USB', minSpanHz: 1230 });
   assert.deepStrictEqual(v, { offsetHz: 1500, spanHz: 1230, window: { lo: 1400, hi: 1600 } });
 });
-check('FT8, FT4, FT2, JTTY, PSK31: the whole 200-3000 Hz window, 100 Hz either side', () => {
+check('FT8, FT4, FT2, JTTY, PSK31: the whole 200-3000 Hz window, 100 Hz margin plus 50 Hz slack either side', () => {
   for (const mode of ['FT8', 'FT4', 'FT2', 'JTTY', 'PSK31', 'ft8']) {
     const v = V.digitalView({ mode, rigMode: 'DIGU', minSpanHz: 1230 });
-    assert.deepStrictEqual(v, { offsetHz: 1600, spanHz: 3000, window: { lo: 200, hi: 3000 } }, mode);
+    assert.deepStrictEqual(v, { offsetHz: 1600, spanHz: 3100, window: { lo: 200, hi: 3000 } }, mode);
   }
+});
+check('a radio that rounds the asked width down by up to 100 Hz still shows the 100 Hz margin', () => {
+  const v = V.digitalView({ mode: 'FT8', rigMode: 'USB' });
+  assert.ok(V.viewFit(v, { offsetHz: v.offsetHz, spanHz: v.spanHz - 100 }).fits);
+  assert.ok(!V.viewFit(v, { offsetHz: v.offsetHz, spanHz: v.spanHz - 104 }).fits);
 });
 check('the window always fits inside the span', () => {
   for (const mode of ['WSPR', 'FT8']) {
@@ -42,7 +47,7 @@ check('a radio that has not said its minimum: the 8600 figure', () => {
 });
 check('LSB: the window is below the dial', () => {
   const v = V.digitalView({ mode: 'FT8', rigMode: 'LSB' });
-  assert.deepStrictEqual(v, { offsetHz: -1600, spanHz: 3000, window: { lo: -3000, hi: -200 } });
+  assert.deepStrictEqual(v, { offsetHz: -1600, spanHz: 3100, window: { lo: -3000, hi: -200 } });
 });
 check('no mode, or a mode with no window: no view', () => {
   assert.strictEqual(V.digitalView({ mode: '' }), null);
@@ -54,6 +59,73 @@ check('the key changes with the mode and the side, not otherwise', () => {
   assert.strictEqual(k('FT8', 'USB'), k('FT4', 'DIGU'));
   assert.notStrictEqual(k('FT8', 'USB'), k('WSPR', 'USB'));
   assert.notStrictEqual(k('FT8', 'USB'), k('FT8', 'LSB'));
+});
+
+console.log('Where the pan really is (Casey 8600, 2026-11-11)');
+const DIAL = 14074000;
+const ASK = { hz: DIAL + 1600, dial: DIAL, at: 1000 };
+check('the radio centred where asked: the offset is the asked one', () => {
+  assert.strictEqual(V.panOffsetFromStatus({ reportedCentreHz: DIAL + 1600, ask: ASK, nowMs: 1050 }), 1600);
+});
+check('the radio rounded the centre: the axis takes the reported one at once', () => {
+  assert.strictEqual(V.panOffsetFromStatus({ reportedCentreHz: DIAL + 1620, ask: ASK, nowMs: 1050 }), 1620);
+});
+check('a clamped centre: held while the ask is fresh (a stale line), taken once it has settled', () => {
+  // The radio keeps the pan at dial + 1300 however we ask.
+  assert.strictEqual(V.panOffsetFromStatus({ reportedCentreHz: DIAL + 1300, ask: ASK, nowMs: 1100 }), null);
+  assert.strictEqual(V.panOffsetFromStatus({ reportedCentreHz: DIAL + 1300, ask: ASK, nowMs: 1000 + V.SETTLE_MS }), 1300);
+});
+check('a bandwidth echo that still carries the dial-centred pan does not flash offset 0', () => {
+  assert.strictEqual(V.panOffsetFromStatus({ reportedCentreHz: DIAL, ask: ASK, nowMs: 1020 }), null);
+});
+check('knob spinning: an answer to an ask made for an earlier dial gives the same offset (no flash)', () => {
+  const ask = { hz: DIAL + 1600 + 1300, dial: DIAL + 1300, at: 2000 };   // the clamp moves with the dial
+  assert.strictEqual(V.panOffsetFromStatus({ reportedCentreHz: ask.dial + 1300, ask, dialHz: DIAL + 1700, nowMs: 2000 + V.SETTLE_MS }), 1300);
+});
+check('LSB: the reported centre below the dial', () => {
+  const ask = { hz: DIAL - 1600, dial: DIAL, at: 0 };
+  assert.strictEqual(V.panOffsetFromStatus({ reportedCentreHz: DIAL - 1590, ask, nowMs: 10 }), -1590);
+});
+check('nothing asked: the live dial, or nothing', () => {
+  assert.strictEqual(V.panOffsetFromStatus({ reportedCentreHz: DIAL + 5, dialHz: DIAL }), 5);
+  assert.strictEqual(V.panOffsetFromStatus({ reportedCentreHz: DIAL + 5 }), null);
+  assert.strictEqual(V.panOffsetFromStatus({ reportedCentreHz: 0, ask: ASK, nowMs: 5000 }), null);
+});
+check('a clamped centre cuts the window: the width to ask for shows it all with the margin', () => {
+  const v = V.digitalView({ mode: 'FT8', rigMode: 'USB' });
+  const fit = V.viewFit(v, { offsetHz: 1300, spanHz: 3100 });   // 1300 +- 1550 = -250..2850: the top is cut
+  assert.strictEqual(fit.fits, false);
+  // 3000 + 100 - 1300 = 1800 each side, plus 50 slack: 3700.
+  assert.strictEqual(fit.needSpanHz, 3700);
+  const after = V.viewFit(v, { offsetHz: 1300, spanHz: fit.needSpanHz });
+  assert.ok(after.fits, 'the wider pan fits');
+  const ax = A.scopeAxis({ centerHz: DIAL + 1300, spanHz: fit.needSpanHz, anchor: 'center' });
+  assert.ok(A.hzToBin(ax, DIAL + 100) != null && A.hzToBin(ax, DIAL + 3100) != null, '100 to 3100 Hz on screen');
+});
+check('a clamped span (the radio gave less than asked): widen', () => {
+  const v = V.digitalView({ mode: 'FT8', rigMode: 'DIGU' });
+  const fit = V.viewFit(v, { offsetHz: 1600, spanHz: 2800 });
+  assert.strictEqual(fit.fits, false);
+  assert.strictEqual(fit.needSpanHz, 3100);
+});
+check('LSB mirror fits the same way', () => {
+  const v = V.digitalView({ mode: 'FT8', rigMode: 'LSB' });
+  assert.ok(V.viewFit(v, { offsetHz: -1600, spanHz: 3100 }).fits);
+  assert.strictEqual(V.viewFit(v, { offsetHz: -1300, spanHz: 3100 }).needSpanHz, 3700);
+});
+check('no view or no span: nothing to widen', () => {
+  assert.deepStrictEqual(V.viewFit(null, { offsetHz: 0, spanHz: 3000 }), { fits: true, needSpanHz: 0 });
+  assert.deepStrictEqual(V.viewFit(V.digitalView({ mode: 'FT8' }), { offsetHz: 1600, spanHz: 0 }), { fits: true, needSpanHz: 0 });
+});
+check('main widens at most MAX_SPAN_ASKS times per view, only after the width ask has settled', () => {
+  const m = readSrc(path.join(ROOT, 'main.js'));
+  const fn = /function flexScopeFollowPan\(\) \{[\s\S]*?\n\}/.exec(m)[0];
+  assert.ok(/ask\.n < ScopeDigitalView\.MAX_SPAN_ASKS/.test(fn));
+  assert.ok(/fit\.needSpanHz > ask\.hz/.test(fn), 'only ever wider: no loop');
+  assert.ok(/spanSettled/.test(fn));
+  const sync = /function flexDigitalViewSync\(\) \{[\s\S]*?\n\}/.exec(m)[0];
+  assert.ok(/flexScopeWantOffsetHz = v\.offsetHz;/.test(sync) && /flexScopeWantOffsetHz = 0;/.test(sync));
+  assert.ok(/flexDigitalSpanAsk = \{ hz: v\.spanHz, at: Date\.now\(\), n: 0 \};/.test(sync));
 });
 
 console.log('The shared axis');
@@ -109,8 +181,8 @@ check('an ECHOCAT device showing FT8 gets the digital view too (C2S scope-digita
   const reg = proto.MESSAGES || proto.messages || proto.PROTOCOL || proto;
   assert.ok(JSON.stringify(Object.keys(reg)).includes('scope-digital-view') || readSrc(path.join(ROOT, 'lib/echocat-protocol.js')).includes("'scope-digital-view': { dir: Dir.C2S"));
 });
-check('the dial recentres the pan with the offset', () => {
-  assert.ok(/flexScopeQueueCenter\(hz \+ \(yaesuScopeState\.centerOffsetHz \|\| 0\)\)/.test(main));
+check('the dial recentres the pan with the offset we want (not the one read back)', () => {
+  assert.ok(/flexScopeQueueCenter\(hz \+ flexScopeWantOffsetHz\)/.test(main));
 });
 check('ECHOCAT gets the offset and window (an explicit field list)', () => {
   assert.ok(/centerOffsetHz: s\.centerOffsetHz \|\| 0, decodeWindow: s\.decodeWindow \|\| null/.test(main));

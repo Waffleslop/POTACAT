@@ -32224,7 +32224,7 @@ function yaesuScopeNoteFrequency(hz) {
     // around its own live dial) and the pan follows it, at most 10 times a
     // second while the knob spins.
     yaesuScopeState.centerHz = hz;
-    flexScopeQueueCenter(hz + (yaesuScopeState.centerOffsetHz || 0));
+    flexScopeQueueCenter(hz + flexScopeWantOffsetHz);
     if (yaesuScopeRemoteWants && Date.now() - yaesuScopeLastStateSend > 250) yaesuScopeBroadcastState();
     return;
   }
@@ -32693,14 +32693,33 @@ function flexScopeAvailable() {
 
 let flexScopeCenterTimer = null;
 let flexScopeCenterWant = 0;
+// The offset we ASK the pan to sit at (the digital view's, else 0). The axis
+// offset (yaesuScopeState.centerOffsetHz) is where the pan really is, from its
+// status; recentring always uses this one, so a radio that clamps the centre
+// cannot walk the pan further off with every dial step.
+let flexScopeWantOffsetHz = 0;
+let flexPanCenterAsk = null;         // { hz, dial, at }: the last centre sent, for panOffsetFromStatus
+let flexPanSettleTimer = null;
+/** Send a pan centre and remember it, so its status answer can be told from a stale line. */
+function flexScopeAskCenter(hz) {
+  if (!smartSdr || !(hz > 0)) return;
+  smartSdr.setPanCenter(hz);
+  flexPanCenterAsk = { hz, dial: hz - flexScopeWantOffsetHz, at: Date.now() };
+  // A radio that ignores the ask sends no new centre: look again once it has had time.
+  if (flexPanSettleTimer) clearTimeout(flexPanSettleTimer);
+  flexPanSettleTimer = setTimeout(() => {
+    flexPanSettleTimer = null;
+    if (flexScopeOn && flexScopeFollowPan()) yaesuScopeBroadcastState();
+  }, ScopeDigitalView.SETTLE_MS + 50);
+}
 /** Recentre the pan on the dial, coalesced to one command per 100 ms. */
 function flexScopeQueueCenter(hz) {
   flexScopeCenterWant = hz;
   if (flexScopeCenterTimer) return;
-  if (smartSdr) smartSdr.setPanCenter(hz);
+  flexScopeAskCenter(hz);
   flexScopeCenterTimer = setTimeout(() => {
     flexScopeCenterTimer = null;
-    if (flexScopeOn && smartSdr && flexScopeCenterWant && flexScopeCenterWant !== hz) smartSdr.setPanCenter(flexScopeCenterWant);
+    if (flexScopeOn && smartSdr && flexScopeCenterWant && flexScopeCenterWant !== hz) flexScopeAskCenter(flexScopeCenterWant);
   }, 100);
 }
 
@@ -32904,6 +32923,41 @@ function flexScopeApplyGeometry() {
   // A calibrated source: level 0..255 = dbmMin..dbmMax (scopeCalibration).
   if (Number.isFinite(g.dbmMin) && g.dbmMin !== yaesuScopeState.dbmMin) { yaesuScopeState.dbmMin = g.dbmMin; changed = true; }
   if (Number.isFinite(g.dbmMax) && g.dbmMax !== yaesuScopeState.dbmMax) { yaesuScopeState.dbmMax = g.dbmMax; changed = true; }
+  if (flexScopeFollowPan()) changed = true;
+  return changed;
+}
+
+/**
+ * The axis follows the pan's REAL centre (pan status `center=`), not the one
+ * we asked for (Casey's 8600, FT8 view, 2026-11-11: the scope had empty space
+ * past the passband on the right and the low audio end off the left, because
+ * every surface drew the pan where we had asked it to be). centerHz stays the
+ * dial; centerOffsetHz becomes reported centre minus the dial the ask was for
+ * (lib/scope-digital-view.js panOffsetFromStatus). In the digital view, a pan
+ * that then does not show the whole decode window plus the margin (a rounded
+ * width, a clamped centre) is widened, at most MAX_SPAN_ASKS times per view.
+ */
+let flexDigitalView = null;          // the view flexDigitalViewSync asked for, or null
+let flexDigitalSpanAsk = null;       // { hz, at, n }: the last width asked for in this view
+function flexScopeFollowPan() {
+  const id = smartSdr && (smartSdr.panScopeId || smartSdr.ourPanId);
+  const g = id && flexPanGeometry[id];
+  if (!g || !g.centerHz) return false;
+  const now = Date.now();
+  let changed = false;
+  // No ask yet (the scope is starting): a centre left from an earlier session says nothing; hold.
+  const off = ScopeDigitalView.panOffsetFromStatus({ reportedCentreHz: g.centerHz, ask: flexPanCenterAsk, nowMs: now });
+  if (off != null && off !== (yaesuScopeState.centerOffsetHz || 0)) { yaesuScopeState.centerOffsetHz = off; changed = true; }
+  const ask = flexDigitalSpanAsk;
+  const spanSettled = ask && g.spanHz && (Math.abs(g.spanHz - ask.hz) <= ask.hz * 0.05 || now - ask.at >= ScopeDigitalView.SETTLE_MS);
+  if (flexDigitalView && off != null && spanSettled && ask.n < ScopeDigitalView.MAX_SPAN_ASKS) {
+    const fit = ScopeDigitalView.viewFit(flexDigitalView, { offsetHz: off, spanHz: g.spanHz });
+    if (!fit.fits && fit.needSpanHz > ask.hz) {
+      smartSdr.setPanBandwidth(fit.needSpanHz);
+      flexDigitalSpanAsk = { hz: fit.needSpanHz, at: now, n: ask.n + 1 };
+      sendCatLog(`[Scope] Flex panadapter: the pan sits ${off > 0 ? '+' : ''}${off} Hz from the dial and is ${g.spanHz} Hz wide, which cuts the decode window; asking for ${fit.needSpanHz} Hz`);
+    }
+  }
   return changed;
 }
 
@@ -32923,7 +32977,7 @@ function startFlexScope() {
     const id = flexScopeAvailable() ? smartSdr.startPanScope(15) : null;
     if (id) {
       sendCatLog(`[Scope] Flex panadapter ${id}: ${FlexScope.BINS} points at 15 fps, centred on the dial`);
-      if (_currentFreqHz) smartSdr.setPanCenter(_currentFreqHz);
+      if (_currentFreqHz) flexScopeAskCenter(_currentFreqHz + flexScopeWantOffsetHz);
       // Where the operator left the zoom last time.
       const span = FlexScope.nearestSpan(settings.flexScopeSpanHz);
       if (span) { smartSdr.setPanBandwidth(span); yaesuScopeState.spanHz = span; }
@@ -32968,19 +33022,27 @@ function flexDigitalViewSync() {
   flexDigitalViewKey = key;
   const dial = _currentFreqHz || yaesuScopeState.centerHz || 0;
   if (v) {
+    // Until the pan status answers, the axis assumes the radio did as asked;
+    // flexScopeFollowPan then moves it to where the pan really is.
+    flexScopeWantOffsetHz = v.offsetHz;
+    flexDigitalView = v;
+    flexDigitalSpanAsk = { hz: v.spanHz, at: Date.now(), n: 0 };
     yaesuScopeState.centerOffsetHz = v.offsetHz;
     yaesuScopeState.decodeWindow = v.window;
     smartSdr.setPanBandwidth(v.spanHz);
     yaesuScopeState.spanHz = v.spanHz;   // the pan status confirms (or clamps) it
-    if (dial) smartSdr.setPanCenter(dial + v.offsetHz);
+    if (dial) flexScopeAskCenter(dial + v.offsetHz);
     sendCatLog(`[Scope] Flex panadapter: ${ft8Engine._mode} view, ${v.spanHz} Hz wide, centred ${v.offsetHz > 0 ? '+' : ''}${v.offsetHz} Hz from the dial (decode window ${v.window.lo} to ${v.window.hi} Hz)`);
   } else if (wasOn) {
+    flexScopeWantOffsetHz = 0;
+    flexDigitalView = null;
+    flexDigitalSpanAsk = null;
     yaesuScopeState.centerOffsetHz = 0;
     yaesuScopeState.decodeWindow = null;
     const span = FlexScope.nearestSpan(settings.flexScopeSpanHz) || FlexScope.SPANS[2];
     smartSdr.setPanBandwidth(span);
     yaesuScopeState.spanHz = span;
-    if (dial) smartSdr.setPanCenter(dial);
+    if (dial) flexScopeAskCenter(dial);
     sendCatLog(`[Scope] Flex panadapter: back to your zoom (${YaesuScope.formatSpan(span)}), centred on the dial`);
   }
   yaesuScopeBroadcastState();
@@ -32989,10 +33051,15 @@ function flexDigitalViewSync() {
 function stopFlexScope(why) {
   flexScopeOn = false;
   flexDigitalViewKey = '';
+  flexScopeWantOffsetHz = 0;
+  flexDigitalView = null;
+  flexDigitalSpanAsk = null;
+  flexPanCenterAsk = null;
   yaesuScopeState.centerOffsetHz = 0;
   yaesuScopeState.decodeWindow = null;
   if (flexScopeRetry) { clearTimeout(flexScopeRetry); flexScopeRetry = null; }
   if (flexScopeCenterTimer) { clearTimeout(flexScopeCenterTimer); flexScopeCenterTimer = null; }
+  if (flexPanSettleTimer) { clearTimeout(flexPanSettleTimer); flexPanSettleTimer = null; }
   if (smartSdr) smartSdr.stopPanScope();
   sendCatLog('[Scope] Flex panadapter stopped' + (why ? ' — ' + why : ''));
   if (yaesuScopeState.status !== 'stopped') yaesuScopeSetStatus('stopped', null);

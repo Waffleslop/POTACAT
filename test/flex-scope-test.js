@@ -145,11 +145,26 @@ check('the source is chosen only in Flex Direct; a radio\'s own scope wins over 
 });
 check('always centred on the dial (Casey): anchor center, the pan follows at most 10x a second', () => {
   const fn = main.slice(main.indexOf('function yaesuScopeNoteFrequency('), main.indexOf('function startYaesuScope('));
-  assert.ok(/if \(flexScopeOn\) \{[\s\S]{0,600}yaesuScopeState\.centerHz = hz;\s+flexScopeQueueCenter\(hz \+ \(yaesuScopeState\.centerOffsetHz \|\| 0\)\);/.test(fn));
+  // Recentred with the offset we WANT, never the axis offset read back from the pan.
+  assert.ok(/if \(flexScopeOn\) \{[\s\S]{0,600}yaesuScopeState\.centerHz = hz;\s+flexScopeQueueCenter\(hz \+ flexScopeWantOffsetHz\);/.test(fn));
   const start = main.slice(main.indexOf('function startFlexScope('), main.indexOf('function stopFlexScope('));
-  assert.ok(/anchor: 'center'/.test(start) && /smartSdr\.setPanCenter\(_currentFreqHz\)/.test(start));
+  assert.ok(/anchor: 'center'/.test(start) && /flexScopeAskCenter\(_currentFreqHz \+ flexScopeWantOffsetHz\)/.test(start));
   const q = main.slice(main.indexOf('function flexScopeQueueCenter('), main.indexOf('function flexScopeQueueCenter(') + 500);
   assert.ok(/setTimeout\([\s\S]*\}, 100\);/.test(q), 'coalesced to 100 ms');
+});
+check('every pan centre we send is remembered, so its status answer is known', () => {
+  const ask = main.slice(main.indexOf('function flexScopeAskCenter('), main.indexOf('function flexScopeQueueCenter('));
+  assert.ok(/smartSdr\.setPanCenter\(hz\);\s+flexPanCenterAsk = \{ hz, dial: hz - flexScopeWantOffsetHz, at: Date\.now\(\) \};/.test(ask));
+  const scope = main.slice(main.indexOf('function flexScopeQueueCenter('), main.indexOf('function stopFlexScope('));
+  assert.ok(!/smartSdr\.setPanCenter\(/.test(scope), 'no centre is sent around flexScopeAskCenter');
+});
+check('the axis follows the pan\'s reported centre; centerHz stays the dial', () => {
+  const ap = main.slice(main.indexOf('function flexScopeApplyGeometry('), main.indexOf('function startFlexScope('));
+  assert.ok(/if \(flexScopeFollowPan\(\)\) changed = true;/.test(ap));
+  assert.ok(/ScopeDigitalView\.panOffsetFromStatus\(\{ reportedCentreHz: g\.centerHz, ask: flexPanCenterAsk, nowMs: now \}\)/.test(ap));
+  assert.ok(/yaesuScopeState\.centerOffsetHz = off;/.test(ap));
+  assert.ok(!/yaesuScopeState\.centerHz = g\.centerHz;/.test(ap), 'centerHz is never the pan centre');
+  assert.ok(/smartSdr\.on\('pan-geometry'[\s\S]{0,200}if \(flexScopeOn && flexScopeApplyGeometry\(\)\) yaesuScopeBroadcastState\(\);/.test(main), 'broadcast on change');
 });
 check('zoom: the steps, the command, remembered per source, on the wire', () => {
   assert.deepStrictEqual(F.SPANS, [5000, 10000, 25000, 50000, 100000, 200000, 500000, 1000000]);
