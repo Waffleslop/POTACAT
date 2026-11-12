@@ -125,7 +125,7 @@ test('a good radio session ends with a result the card offers to save; a saved g
   assert.ok(/prompt: null, result \}\);/.test(end), 'every end sets result (null for a failure)');
   assert.ok(/url: radio \? url : ''/.test(main) && /url: s\.url \|\| ''/.test(main), 'the session keeps the URL it dialled and the card offers it');
 
-  assert.ok(/id="wl-done-save"[^>]*>[\s\S]*Save to My gateways<\/button>/.test(html));
+  assert.ok(/id="wl-done-save"[^>]*>[\s\S]*Add to favorites<\/button>/.test(html));
   assert.ok(/window\.api\.favourite\('add', \{ call: r\.call, mode: r\.mode, dialKhz: r\.dialKhz, url: r\.url \}\)/.test(js));
 });
 
@@ -157,6 +157,67 @@ test('theme colours only in the new styles', () => {
     const bare = r.replace(/var\([^)]*\)/g, '').replace(/rgba\(0,0,0,0\.35\)/g, '');
     assert.ok(!/#[0-9a-f]{3,8}\b/i.test(bare), 'a colour outside a theme token: ' + r.slice(0, 80));
   }
+});
+
+// Casey 2026-11-11, second pass: favorites live in the gateway list, a
+// Templates button replaces the column of buttons, frequencies use dots.
+const T = require('../lib/winlink-templates');
+
+test('favorites: starred in the gateway list in its ranking, a star beside it, no strip', () => {
+  assert.ok(!/id="wl-favs"/.test(html) && !/function renderFavs\(/.test(js), 'the My gateways strip is gone');
+  assert.ok(/id="wl-fav"[^>]*aria-pressed="false"/.test(html), 'the star beside the gateway list');
+  assert.ok(/window\.api\.favourite\(isFav\(g, m\) \? 'remove' : 'add', \{ call: g\.call, mode: m, dialKhz: g\.dialKhz, url: g\.url \|\| '' \}\)/.test(js));
+  assert.ok(/var parts = \[\(isFav\(g\) \? '\\u2605 ' : ''\) \+ g\.call\];/.test(js), 'a favorite is starred where Pat ranked it');
+  assert.ok(/'<optgroup label="Favorites not in this list">'/.test(js), 'a favorite Pat did not list is still there');
+  assert.ok(/if \(sig === favSig\) \{ renderFavBtn\(\); return; \}/.test(js), 'the list is rebuilt only when the favorites change, not on every push');
+});
+
+test('frequencies the way the VFO writes them: dots, never a comma', () => {
+  const i = js.indexOf('function fmtDial(khz)');
+  const body = js.slice(i, js.indexOf('\n  }\n', i) + 4);
+  const fmtDial = new Function(body + '; return fmtDial;')();
+  assert.strictEqual(fmtDial(7100.5), '7.100.50');
+  assert.strictEqual(fmtDial(14105), '14.105.00');
+  assert.strictEqual(fmtDial(149090), '149.090.00');
+  assert.strictEqual(fmtDial(0), '');
+  assert.ok(!/toLocaleString\('en-US'/.test(js), 'no grouping commas in the mail window');
+  assert.ok(/<span class="wl-dial-unit">MHz<\/span>/.test(html));
+});
+
+test('Templates: one button, built-ins and the operator\'s own, Add new template', () => {
+  assert.ok(/id="wl-tpl-btn"[^>]*>Templates<\/button>/.test(html));
+  assert.ok(!/id="wl-pos"/.test(html) && !/id="wl-pota-spot"/.test(html), 'Position report and POTA spot moved into it');
+  assert.ok(/data-tpl="pos"/.test(js) && /data-tpl="pota"/.test(js) && /\+ Add new template/.test(js));
+  assert.ok(/id="wl-c-save-tpl"[^>]*>Save as template<\/button>/.test(html), 'a message being written can become one');
+  assert.ok(/templates: WinlinkTemplates\.normalize\(settings\.winlinkTemplates\)/.test(main) && /case 'winlink-template':/.test(main));
+  const gp = readSrc(path.join(root, 'lib', 'guest-pass-authority.js'));
+  assert.ok(/'winlink-template'/.test(gp), 'refused for a Guest Pass');
+});
+
+test('working radio sound says nothing; only a device to choose or a fault is said', () => {
+  assert.ok(!/Radio sound: via POTACAT/.test(js), 'the "via POTACAT" line is gone (Casey 2026-11-11)');
+  assert.ok(/Radio sound not set · <a id="wl-sound-change">Choose<\/a>/.test(js) && /b\.state === 'error'/.test(js), 'the actionable cases stay');
+});
+
+test('a short window never pushes the folder buttons over the waterfall', () => {
+  assert.ok(/\.wl-folders \{[^}]*min-height: 0; overflow-y: auto; \}/.test(html));
+});
+
+test('templates: a name, unique, edited in place, at most MAX', () => {
+  let r = T.save([], { name: 'Net check-in', to: 'w1aw', subject: 'Check-in', body: 'K3SBP FN20' });
+  assert.ok(r.ok && r.id);
+  assert.deepStrictEqual(r.list.map((t) => t.name), ['Net check-in']);
+  assert.ok(!T.save(r.list, { name: 'net CHECK-IN' }).ok, 'names are unique, case aside');
+  const id = r.id;
+  r = T.save(r.list, { id, name: 'Net check-in', subject: 'Check-in 2' });
+  assert.strictEqual(r.list.length, 1);
+  assert.strictEqual(r.list[0].subject, 'Check-in 2', 'the same id edits it in place');
+  assert.ok(!T.save(r.list, { name: '  ' }).ok, 'a name is needed');
+  assert.deepStrictEqual(T.remove(r.list, id), []);
+  let many = [];
+  for (let i = 0; i < T.MAX + 3; i++) { const s = T.save(many, { name: 'T' + i }); if (s.ok) many = s.list; }
+  assert.strictEqual(many.length, T.MAX);
+  assert.strictEqual(T.clean({ name: 'x', subject: 'y'.repeat(500) }).subject.length, T.LIMITS.subject);
 });
 
 test('this test is in the list CI runs', () => {

@@ -435,6 +435,7 @@ const MercuryAppProto = require('./lib/mercury-app-protocol');
 const WinlinkPat = require('./lib/winlink-pat');
 const WinlinkHistory = require('./lib/winlink-history');
 const WinlinkFav = require('./lib/winlink-favourites');
+const WinlinkTemplates = require('./lib/winlink-templates');
 const PotaEmailSpot = require('./lib/pota-email-spot');
 const { WinlinkClient } = require('./lib/winlink-client');
 const WinlinkStateLib = require('./lib/winlink-state');
@@ -10824,6 +10825,9 @@ function winlinkPayload() {
     // My gateways (#254) and how long the last propagation ranking took per
     // mode, so a surface can say "about N s" while the next one runs.
     favourites: WinlinkFav.normalize(settings.winlinkFavourites),
+    // The operator's own message templates (the built-in Position report and
+    // POTA spot are not stored: every surface offers them itself).
+    templates: WinlinkTemplates.normalize(settings.winlinkTemplates),
     predictMs: (settings.winlinkPredictMs && typeof settings.winlinkPredictMs === 'object') ? settings.winlinkPredictMs : {},
     predictionOn: settings.winlinkPrediction !== false,
     ardopBw: [200, 500, 1000, 2000].includes(Number(settings.winlinkArdopBw)) ? Number(settings.winlinkArdopBw) : 500,
@@ -12725,6 +12729,20 @@ async function winlinkHistoryGet() {
   return { ok: true, gateways };
 }
 
+/** Save or delete one of the operator's message templates; every surface gets the list on winlink-state. */
+function winlinkTemplate(op, t) {
+  const before = WinlinkTemplates.normalize(settings.winlinkTemplates);
+  let r;
+  if (op === 'save') r = WinlinkTemplates.save(before, t || {});
+  else if (op === 'delete') r = { ok: true, list: WinlinkTemplates.remove(before, String((t && t.id) || '')) };
+  else return { ok: false, error: 'Unknown action' };
+  if (!r.ok) return { ok: false, error: r.error };
+  settings.winlinkTemplates = r.list;
+  saveSettings(settings);
+  winlinkPush();
+  return { ok: true, id: r.id || null };
+}
+
 /** Save ('add') or remove a gateway in My gateways; every surface gets the list on winlink-state. */
 function winlinkFavourite(op, g) {
   const before = WinlinkFav.normalize(settings.winlinkFavourites);
@@ -12874,6 +12892,10 @@ async function winlinkHandleRemote({ type, req = {}, reply }) {
       // My gateways (#254): save or remove one; the list rides winlink-state.
       case 'winlink-favourite':
         result('favourite', winlinkFavourite(req.op, { call: req.call, mode: req.mode, khz: req.dialKhz, url: req.url }));
+        return;
+      // Message templates: op 'save' (a new one, or the one with that id) | 'delete' {id}.
+      case 'winlink-template':
+        result('template', winlinkTemplate(req.op, { id: req.id, name: req.name, to: req.to, cc: req.cc, subject: req.subject, body: req.body }));
         return;
       case 'winlink-posreport':
         result('posreport', await winlinkPosReport({ lat: req.lat, lon: req.lon, comment: req.comment }));
@@ -41701,6 +41723,7 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('winlink-cmd-prompt', (_e, { id, value } = {}) => { winlinkAnswerPrompt(String(id), String(value)); });
   ipcMain.handle('winlink-cmd-gateways', (_e, { mode, band } = {}) => winlinkGateways(String(mode || 'ardop'), band ? String(band) : ''));
   ipcMain.handle('winlink-cmd-history', () => winlinkHistoryGet());
+  ipcMain.handle('winlink-cmd-template', (_e, { op, t } = {}) => winlinkTemplate(String(op || ''), t && typeof t === 'object' ? t : {}));
   ipcMain.handle('winlink-cmd-favourite', (_e, { op, call, mode, dialKhz, url } = {}) => winlinkFavourite(String(op || ''), { call: String(call || ''), mode: String(mode || ''), khz: Number(dialKhz), url: String(url || '') }));
   ipcMain.on('winlink-cmd-set-mode', (_e, mode) => winlinkSetMode(mode));
   ipcMain.handle('winlink-cmd-accept-notice', () => winlinkAcceptNotice());
