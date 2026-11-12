@@ -124,7 +124,9 @@ test('wiring: the session chain is tokened, VARA launches once, Pat is asked bef
   assert.ok(/_cableRxLeveler = null; \/\/ the next session starts at unity/.test(main));
   assert.ok(/winlinkStartSessionMeter\(\)/.test(main) && /setSession\(\{ audio: winlinkAudioLevels\(\) \}\)/.test(main));
   assert.ok(/telling Pat to hang up/.test(main), 'a stray PTT after Stop re-sends the disconnect');
-  assert.ok(/function winlinkDispatchTx\(mono24k\) \{\r?\n  mono24k = winlinkLevelModemTx\(mono24k\);/.test(main), 'every modem transmit route goes through the TX leveler');
+  // In the modem audio lane (#187): the socket modems and VARA's cable audio (txIn) alike.
+  const lane = readSrc(path.join(__dirname, '..', 'lib', 'modem-audio-lane.js'));
+  assert.ok(/const out = this\.leveler\.process\(pcm, this\.now\(\)\);/.test(lane) && /txIn\(pcm\) \{ if \(pcm && pcm\.length\) this\._out\(pcm, false\); \}/.test(lane) && /if \(winlinkAudio\) \{ winlinkAudio\.txIn\(mono24k\); return; \}/.test(main), 'every modem transmit route goes through the TX leveler');
   assert.ok(/winlinkRememberModemTxGain\(\);/.test(main) && /'winlinkModemTxGain',/.test(main), 'the learned gain is kept per modem, machine-scoped');
   assert.ok(/boostDb/.test(readSrc(path.join(__dirname, '..', 'renderer', 'winlink-popout.js'))), 'the Mail window shows the boost');
   const html = readSrc(path.join(__dirname, '..', 'renderer', 'winlink-popout.html'));

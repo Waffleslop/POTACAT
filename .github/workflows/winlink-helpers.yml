@@ -18,11 +18,13 @@ on:
       - 'third_party/pat/**'
       - 'third_party/direwolf/**'
       - '.github/workflows/winlink-helpers.yml'
+      - 'test/modem-loopback/**'
+      - 'lib/modem-audio-server.js'
 
 jobs:
   windows:
     runs-on: windows-2022
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -54,6 +56,42 @@ jobs:
             assets/pat/pat.exe
             assets/ardopcf/ardopcf.exe
             assets/direwolf/
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Modem loopback, two modems and no radio (docs/ardop-macos-plan.md L1 + L2, #187)
+        shell: bash
+        env:
+          LOOPBACK_REQUIRED: '1'
+        timeout-minutes: 25
+        run: node test/modem-loopback/run.js --out loopback-results.json --logs loopback-logs
+      - name: Electron for the bridge checks
+        if: always()
+        shell: bash
+        run: npm ci --no-audit --no-fund
+      - name: Hidden bridge window keeps the modem fed (L4, #187; 2 min as POTACAT runs it, 2 min with main frozen 200 ms every second)
+        if: always()
+        timeout-minutes: 12
+        shell: bash
+        run: node test/modem-loopback/bridge-check.js --seconds 120 --out bridge-results.json
+      - name: Real ARDOP frames through the bridge capture and playback (L3, #187)
+        if: always()
+        timeout-minutes: 8
+        shell: bash
+        env:
+          LOOPBACK_REQUIRED: '1'
+        run: node test/modem-loopback/l3-check.js --out l3-results.json --logs l3-logs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: modem-loopback-windows
+          path: |
+            loopback-results.json
+            loopback-logs/
+            bridge-results.json
+            l3-results.json
+            l3-logs/
+          if-no-files-found: warn
 
   linux:
     strategy:
@@ -61,7 +99,7 @@ jobs:
       matrix:
         runner: [ubuntu-22.04, ubuntu-22.04-arm]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -80,6 +118,39 @@ jobs:
           ./assets/ardopcf/ardopcf -h | head -3 || true
           ldd assets/direwolf/direwolf | grep -i hamlib
           ./assets/direwolf/direwolf -h 2>&1 | head -3 || true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Modem loopback, two modems and no radio (docs/ardop-macos-plan.md L1 + L2, #187)
+        shell: bash
+        env:
+          LOOPBACK_REQUIRED: '1'
+        timeout-minutes: 25
+        run: node test/modem-loopback/run.js --out loopback-results.json --logs loopback-logs
+      - name: Electron for the bridge checks
+        if: always()
+        run: npm ci --no-audit --no-fund
+      - name: Hidden bridge window keeps the modem fed (L4, #187; 2 min as POTACAT runs it, 2 min with main frozen 200 ms every second)
+        if: always()
+        timeout-minutes: 12
+        run: xvfb-run -a node test/modem-loopback/bridge-check.js --seconds 120 --out bridge-results.json
+      - name: Real ARDOP frames through the bridge capture and playback (L3, #187)
+        if: always()
+        timeout-minutes: 8
+        env:
+          LOOPBACK_REQUIRED: '1'
+        run: xvfb-run -a node test/modem-loopback/l3-check.js --out l3-results.json --logs l3-logs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: modem-loopback-${{ matrix.runner }}
+          path: |
+            loopback-results.json
+            loopback-logs/
+            bridge-results.json
+            l3-results.json
+            l3-logs/
+          if-no-files-found: warn
 
   mac:
     strategy:
@@ -88,7 +159,7 @@ jobs:
         # macos-15 = the release's arm64 host (macos-14 retired 2026-11-02).
         runner: [macos-15, macos-15-intel]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -113,3 +184,36 @@ jobs:
           otool -L assets/direwolf/direwolf
           otool -L assets/direwolf/direwolf | grep -i hamlib
           ./assets/direwolf/direwolf -h 2>&1 | head -3 || true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Modem loopback, two modems and no radio (docs/ardop-macos-plan.md L1 + L2, #187)
+        shell: bash
+        env:
+          LOOPBACK_REQUIRED: '1'
+        timeout-minutes: 25
+        run: node test/modem-loopback/run.js --out loopback-results.json --logs loopback-logs
+      - name: Electron for the bridge check
+        if: always()
+        run: npm ci --no-audit --no-fund
+      - name: Hidden bridge window keeps the modem fed (L4, #187; 2 min without and 2 min with a power-save blocker)
+        if: always()
+        timeout-minutes: 12
+        run: node test/modem-loopback/bridge-check.js --seconds 120 --out bridge-results.json
+      - name: Real ARDOP frames through the bridge capture and playback (L3, #187)
+        if: always()
+        timeout-minutes: 8
+        env:
+          LOOPBACK_REQUIRED: '1'
+        run: node test/modem-loopback/l3-check.js --out l3-results.json --logs l3-logs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: modem-loopback-${{ matrix.runner }}
+          path: |
+            loopback-results.json
+            loopback-logs/
+            bridge-results.json
+            l3-results.json
+            l3-logs/
+          if-no-files-found: warn
