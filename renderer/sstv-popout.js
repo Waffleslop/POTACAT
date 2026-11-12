@@ -167,7 +167,7 @@ const MODE_RES = {
   callsign = settings.myCallsign || '';
   grid = settings.grid || '';
   try { if (settings.sstvMode) modeSelect.value = settings.sstvMode; } catch {}
-  try { txGainSlider.value = Math.round((settings.sstvTxGain || 0.5) * 100); } catch {}
+  try { txGainSlider.value = window.SstvDrive.pctFromSaved(settings.sstvTxGain); showDrive(); } catch {}
 
   // Restore saved text elements if available
   try {
@@ -730,9 +730,17 @@ addTextBtn.addEventListener('click', () => {
   renderTextProps();
 });
 
-// --- TX Gain ---
+// --- TX Gain (Drive) ---
+// The percentage beside the slider, so a setting can be repeated (#279). It
+// follows the drag; the value is saved when the drag ends, and 0 stays 0.
+const txGainVal = document.getElementById('tx-gain-val');
+function showDrive() {
+  if (txGainVal) txGainVal.textContent = window.SstvDrive.label(txGainSlider.value);
+}
+txGainSlider.addEventListener('input', showDrive);
 txGainSlider.addEventListener('change', () => {
-  window.api.saveSettings({ sstvTxGain: txGainSlider.value / 100 });
+  showDrive();
+  window.api.saveSettings({ sstvTxGain: window.SstvDrive.gainFromPct(txGainSlider.value) });
 });
 
 // ===== IMAGE LOADING =======================================================
@@ -1465,7 +1473,7 @@ window.api.onSstvTxAudio(async (data) => {
   }
 
   const samplesArray = data.samples || data;
-  const gainLevel = (txGainSlider.value / 100) || 0.5;
+  const gainLevel = window.SstvDrive.gainFromPct(txGainSlider.value);
 
   try {
     // The radio's output (My Rigs > Audio) unless this window chose one; a
