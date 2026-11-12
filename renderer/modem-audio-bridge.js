@@ -93,7 +93,8 @@ function makeSide({ name, what, where, rx, status }) {
     playGain = playCtx.createGain();
     playGain.gain.value = (typeof c.txGain === 'number' && isFinite(c.txGain)) ? Math.max(0, Math.min(2, c.txGain)) : 1;
     playNode.connect(playGain); playGain.connect(playCtx.destination);
-    return { playbackLabel: (await labelFor('audiooutput', c.outputId)) || c.outputId };
+    // The rate the output actually runs at after setSinkId (#295 L5: a Mac output at 44.1 kHz).
+    return { playbackLabel: (await labelFor('audiooutput', c.outputId)) || c.outputId, playbackSampleRate: playCtx.sampleRate };
   }
 
   function stopPlayback() {

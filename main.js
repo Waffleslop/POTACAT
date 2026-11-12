@@ -433,6 +433,7 @@ const { attachMercuryRadioBridge } = require('./lib/mercury-radio-bridge');
 const mercuryAudioBridge = require('./lib/mercury-audio-bridge');
 const MercuryAppProto = require('./lib/mercury-app-protocol');
 const WinlinkPat = require('./lib/winlink-pat');
+const WinlinkDiag = require('./lib/winlink-diag');
 const WinlinkHistory = require('./lib/winlink-history');
 const WinlinkFav = require('./lib/winlink-favourites');
 const WinlinkTemplates = require('./lib/winlink-templates');
@@ -11428,6 +11429,137 @@ function stopWinlinkAudio() {
   if (winlinkAudio) { try { winlinkAudio.close(); } catch {} winlinkAudio = null; }
 }
 
+// ── Winlink diagnostics (#295; docs/ardop-macos-plan.md layer L5) ─────────────
+// The modem's own story in the session log (ardopcf writes it only to its
+// debug file), the audio's health per session, and an optional one-session
+// recording of the audio crossing the modem socket. lib/winlink-diag.js.
+let _ardopTail = null;
+function newestModemLog(prefix) {
+  try {
+    const dir = winlinkPaths().ardopLogs;
+    const files = fs.readdirSync(dir).filter((n) => n.startsWith(prefix) && n.endsWith('.log'))
+      .map((n) => ({ f: path.join(dir, n), t: fs.statSync(path.join(dir, n)).mtimeMs }))
+      .sort((a, b) => b.t - a.t);
+    return files.length ? files[0].f : null;
+  } catch { return null; }
+}
+/** Follow ardopcf's debug log from its current end; each event that matters becomes one [Winlink] ardop: line. */
+function startArdopTail() {
+  stopArdopTail();
+  const t = { file: null, pos: 0, carry: '', log: new WinlinkDiag.ModemEventLog(), timer: null };
+  const pick = () => {
+    const f = newestModemLog('ARDOPDebug');
+    if (f && f !== t.file) { t.file = f; try { t.pos = fs.statSync(f).size; } catch { t.pos = 0; } t.carry = ''; }
+  };
+  pick();
+  const read = () => {
+    if (!t.file) { pick(); if (!t.file) return; }
+    let size;
+    try { size = fs.statSync(t.file).size; } catch { return; }
+    if (size < t.pos) t.pos = 0;
+    if (size === t.pos) {
+      // ardopcf starts a new file at midnight UTC: follow it from its start.
+      const f = newestModemLog('ARDOPDebug');
+      if (f && f !== t.file) { t.file = f; t.pos = 0; t.carry = ''; }
+      return;
+    }
+    const len = Math.min(size - t.pos, 256 * 1024);
+    const b = Buffer.alloc(len);
+    let fd = null;
+    try { fd = fs.openSync(t.file, 'r'); fs.readSync(fd, b, 0, len, t.pos); } catch { return; } finally { if (fd != null) try { fs.closeSync(fd); } catch {} }
+    t.pos += len;
+    const lines = (t.carry + b.toString('utf8')).split(/\r?\n/);
+    t.carry = lines.pop();
+    const now = Date.now();
+    for (const l of lines) {
+      const ev = WinlinkDiag.classifyArdopDebugLine(l);
+      if (ev) for (const o of t.log.feed(ev, now)) winlinkLog('ardop: ' + o);
+    }
+  };
+  t.read = read;
+  t.timer = setInterval(read, 500);
+  _ardopTail = t;
+}
+function stopArdopTail() {
+  const t = _ardopTail;
+  _ardopTail = null;
+  if (!t) return;
+  clearInterval(t.timer);
+  try { t.read(); } catch {}
+  for (const o of t.log.flush()) winlinkLog('ardop: ' + o);
+}
+
+let _winlinkRec = null;
+let _winlinkAudioDiagOn = false;
+function winlinkAudioDiagStart() {
+  if (!winlinkAudio) return;
+  _winlinkAudioDiagOn = true;
+  winlinkAudio.resetMeters();
+  const rate = winlinkAudio.modemRate;
+  if (winlinkIpAudioRoute()) winlinkLog(`audio: ${winlinkAudioRouteName()}, no sound card; modem side ${rate} samples/s`);
+  else winlinkLog(`audio: capture "${modemBridge.captureLabel || 'unknown'}" at ${modemBridge.sampleRate || '?'} Hz, playback "${modemBridge.playbackLabel || 'unknown'}" at ${modemBridge.playbackSampleRate || '?'} Hz; modem side ${rate} samples/s`);
+  if (settings.winlinkRecordModemAudio) {
+    _winlinkRec = { rx: new WinlinkDiag.PcmRecorder({ rate, seconds: 30 }), tx: new WinlinkDiag.PcmRecorder({ rate, seconds: 30 }), at: new Date() };
+    winlinkAudio.tap = {
+      rx: (b) => { const r = _winlinkRec; if (r && r.rx.push(b) && r.tx.full) winlinkRecordingSave('30 seconds each way'); },
+      tx: (b) => { const r = _winlinkRec; if (r && r.tx.push(b) && r.rx.full) winlinkRecordingSave('30 seconds each way'); },
+    };
+    winlinkLog('recording what the modem hears and sends, 30 seconds each (Settings > Station > Winlink)');
+  }
+}
+function winlinkRecordingSave(why) {
+  const r = _winlinkRec;
+  _winlinkRec = null;
+  if (winlinkAudio) winlinkAudio.tap = null;
+  if (!r) return;
+  const dir = winlinkPaths().ardopLogs;
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  const stamp = r.at.toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z').replace('T', '-');
+  const saved = [];
+  for (const [k, name] of [['rx', 'modem-hears'], ['tx', 'modem-sends']]) {
+    if (!r[k].count) continue;
+    const f = path.join(dir, `${name}-${stamp}.wav`);
+    try { fs.writeFileSync(f, r[k].toWav()); saved.push(`${path.basename(f)} (${(r[k].count / r[k].rate).toFixed(1)} s)`); }
+    catch (e) { winlinkLog(`could not save the modem recording: ${e.message}`); }
+  }
+  settings.winlinkRecordModemAudio = false; // one session only
+  try { saveSettings(settings); } catch {}
+  winlinkLog(saved.length
+    ? `modem audio recorded (${why}): ${saved.join(', ')}, in the Winlink folder's ardop-logs; the recording setting is off again`
+    : 'modem audio recording: no audio crossed the modem link, nothing saved');
+}
+function winlinkAudioDiagEnd() {
+  if (!_winlinkAudioDiagOn) return;
+  _winlinkAudioDiagOn = false;
+  if (_winlinkRec) winlinkRecordingSave('the session ended');
+  if (!winlinkAudio) return;
+  const rate = winlinkAudio.modemRate;
+  winlinkLog(WinlinkDiag.audioSummaryText({ rx: winlinkAudio.rxMeter.snapshot(rate), tx: winlinkAudio.txMeter.snapshot(rate), rxDropped: winlinkAudio.stats.rxDropped, rate }));
+}
+
+// Dire Wolf's recent output, for Report a Bug (its frames also go to the session log, capped).
+const _direwolfRing = [];
+function direwolfRingPush(line) {
+  _direwolfRing.push(String(line).slice(0, 300));
+  if (_direwolfRing.length > 400) _direwolfRing.shift();
+}
+
+/** The modem's own logs for Report a Bug: ardopcf's last run, Dire Wolf's last lines, any recordings. */
+function winlinkModemReport() {
+  const out = { ardop: null, ardopSession: null, direwolf: null, recordings: [] };
+  const recent = (f) => { try { return Date.now() - fs.statSync(f).mtimeMs < 2 * 24 * 3600 * 1000; } catch { return false; } };
+  const dbg = newestModemLog('ARDOPDebug');
+  if (dbg && recent(dbg)) { try { out.ardop = { file: path.basename(dbg), ...WinlinkDiag.lastArdopRun(fs.readFileSync(dbg, 'utf8'), { maxLines: 150, maxChars: 12000 }) }; } catch {} }
+  const ses = newestModemLog('ARDOPSession');
+  if (ses && recent(ses)) { try { out.ardopSession = { file: path.basename(ses), ...WinlinkDiag.lastArdopRun(fs.readFileSync(ses, 'utf8'), { maxLines: 60, maxChars: 5000, keepDebug: true }) }; } catch {} }
+  if (_direwolfRing.length) out.direwolf = WinlinkDiag.capTail(_direwolfRing, { maxLines: 120, maxChars: 9000 });
+  try {
+    const dir = winlinkPaths().ardopLogs;
+    out.recordings = fs.readdirSync(dir).filter((n) => /^modem-(hears|sends)-.*\.wav$/.test(n) && recent(path.join(dir, n))).sort().slice(-4);
+  } catch {}
+  return out;
+}
+
 /**
  * Everything a socket-audio modem needs before it is launched, for any rig:
  * the audio server at the modem's rate, the radio's audio path up (Flex
@@ -11462,7 +11594,7 @@ async function winlinkModemAudioReady({ modemRate, modemName }) {
 let modemBridgeWin = null;
 let _modemBridgeLoaded = false;
 const modemBridge = {
-  state: 'off', error: '', captureLabel: '', playbackLabel: '', playback: false, sampleRate: 0, level: 0, startedAt: 0,
+  state: 'off', error: '', captureLabel: '', playbackLabel: '', playback: false, sampleRate: 0, playbackSampleRate: 0, level: 0, startedAt: 0,
   // The CABLE side (phase 4): the virtual audio cable VARA is wired to. Capture
   // = what VARA transmits (→ the radio while it has PTT); playback = what VARA
   // hears (the radio's receive audio). Session-only, radio side or not.
@@ -11972,6 +12104,7 @@ async function spawnDirewolf() {
     const onLine = (chunk) => {
       for (const line of chunk.toString().split(/\r?\n/).filter(Boolean)) {
         lastLines.push(line); if (lastLines.length > 3) lastLines.shift();
+        direwolfRingPush(line);
         const kind = DirewolfProcess.classifyDirewolfLine(line);
         if (kind === 'ready') { winlinkLog(`direwolf: ${line}`); ready('its own ready line'); continue; }
         if (kind === 'no-hamlib') { winlinkLog(`direwolf: ${line}`); fail('This Dire Wolf was built without Hamlib, so POTACAT cannot key the radio through it — use the bundled one'); continue; }
@@ -12248,6 +12381,9 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
       if (mode === 'ardop') await spawnArdop();
       if (mode === 'packet') await spawnDirewolf();
       if (mode === 'ardop' || mode === 'packet') await winlinkModemAudioConnected(mode === 'packet' ? 'Dire Wolf' : 'ardopcf');
+      // #295: the modem's events and the audio's health go to the session log.
+      if (mode === 'ardop' || mode === 'packet') winlinkAudioDiagStart();
+      if (mode === 'ardop') startArdopTail();
       if (mode === 'mercury') winlinkHandMercuryToPat();
       if (!live()) throw cancelled();
       if (mode === 'vara' || mode === 'varafm') {
@@ -12466,6 +12602,8 @@ function winlinkEndSession(state, text, received = 0) {
   winlinkTxBurstEnd();
   const radio = WinlinkModes.isRadioMode(s.mode);
   if (radio) {
+    if (s.mode === 'ardop') stopArdopTail();
+    winlinkAudioDiagEnd();
     if (s.mode === 'ardop') killArdop();
     if (s.mode === 'packet') killDirewolf();
     if (s.mode === 'mercury') winlinkTakeMercuryBack();
@@ -41803,6 +41941,7 @@ function cloudShackNotice(text, kind) {
       modemBridge.state = 'ok'; modemBridge.error = '';
       if (s.captureLabel) modemBridge.captureLabel = s.captureLabel;
       if (s.playbackLabel) modemBridge.playbackLabel = s.playbackLabel;
+      if (s.playbackSampleRate) modemBridge.playbackSampleRate = s.playbackSampleRate;
       if (s.sampleRate) modemBridge.sampleRate = s.sampleRate;
       if (typeof s.playback === 'boolean') modemBridge.playback = s.playback;
       winlinkLog(`modem audio bridge: ${modemBridge.captureLabel || 'input'}${modemBridge.playback ? ' → ' + (modemBridge.playbackLabel || 'output') : ''} ready${modemBridge.sampleRate ? ' at ' + modemBridge.sampleRate + ' Hz' : ''}`);
@@ -44235,6 +44374,8 @@ function cloudShackNotice(text, kind) {
         skipped: sel.skipped,
         markerFound: sel.markerFound,
         tailTruncated: sel.tailTruncated,
+        // #295: the modem's own logs (ardopcf / Dire Wolf) and any recordings to attach.
+        winlinkModem: (() => { try { const m = winlinkModemReport(); const c = (x) => x ? { ...x, lines: clean(x.lines) } : null; return { ardop: c(m.ardop), ardopSession: c(m.ardopSession), direwolf: c(m.direwolf), recordings: m.recordings }; } catch { return null; } })(),
       };
     } catch (err) {
       return { ok: false, error: String((err && err.message) || err) };
