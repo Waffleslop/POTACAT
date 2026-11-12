@@ -113,17 +113,14 @@ Settings live in the same place either way. More Windows detail in **[INSTALL.md
 ### 🍎 macOS
 
 1. Download the `.dmg` for **your** chip — `-arm64.dmg` for Apple Silicon, plain `.dmg` for Intel.
+   Not sure which? Apple menu → **About This Mac** → **Chip** says "Apple M…" or "Intel".
 2. Open it and drag **POTACAT** into **Applications**.
-3. Apple Silicon Macs will say *"POTACAT is damaged and can't be opened."* It isn't damaged —
-   that's what macOS says about any app built without a paid Apple Developer ID. Open **Terminal**
-   and paste this once:
+3. Open POTACAT normally. The Mac builds are signed and notarized by Apple, so no Terminal
+   command is needed.
 
-   ```bash
-   sudo xattr -dr com.apple.quarantine /Applications/POTACAT.app
-   ```
-
-   Enter your Mac password, then open POTACAT normally. On Intel Macs, right-click → **Open** →
-   **Open** is usually enough.
+If macOS says POTACAT *"is damaged and can't be opened"*, you have an old download from before
+signing or the file for the other chip. Delete the app from **Applications**, download the current
+`.dmg` for your chip, and drag it in again.
 
 ### 🐧 Linux
 
