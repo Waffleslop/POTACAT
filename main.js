@@ -10809,7 +10809,7 @@ function _winlinkArdopPort() {
 function winlinkPayload() {
   winlinkState.setModes(winlinkModes());
   winlinkState.setAutoCheck({ enabled: !!settings.winlinkTelnetAutoCheck, min: _winlinkAutoCheckMin() });
-  return winlinkState.snapshot({
+  const snap = winlinkState.snapshot({
     // Always available (Casey 2026-10-23: no "turn on"). Pat starts on first
     // use — patStarted false means "not running yet, any request starts it".
     enabled: true,
@@ -10855,6 +10855,9 @@ function winlinkPayload() {
       };
     })(),
   });
+  // The same session every 'winlink-session' push carries (waited time and all).
+  snap.session = winlinkSessionView();
+  return snap;
 }
 
 function winlinkPopoutSend(channel, payload) {
@@ -12077,9 +12080,20 @@ function winlinkRxLevelText() {
   return `radio audio to the modem peaks at ${db} dBFS${db >= -3 ? ' (the top of the scale: turn the audio output level of the radio down, a clipped feed can read as busy for ever)' : ''}`;
 }
 
-function winlinkSessionPush() {
+/**
+ * The session as every surface shows it. The one copy both 'winlink-session'
+ * and 'winlink-state' carry: the state push used to send the raw session, so
+ * the busy prompt flipped between "Waited 0:42 of 5:00; ..." and the short
+ * text twice a second (Casey 2026-11-11, "caught in a refresh loop").
+ */
+function winlinkSessionView() {
   const s = { ...winlinkState.session, remainingSec: winlinkState.remainingSec() };
   if (s.prompt && s.prompt.at) s.prompt = { ...s.prompt, waitedSec: Math.max(0, Math.round((Date.now() - s.prompt.at) / 1000)) };
+  return s;
+}
+
+function winlinkSessionPush() {
+  const s = winlinkSessionView();
   winlinkPopoutSend('winlink-session', s);
   if (remoteServer && remoteServer.broadcastWinlinkSession) { try { remoteServer.broadcastWinlinkSession(s); } catch {} }
   winlinkPush();
@@ -41211,7 +41225,7 @@ function cloudShackNotice(text, kind) {
       winlinkPopoutSend('winlink-state', winlinkPayload());
       if (_winlinkPendingCompose) { winlinkPopoutSend('winlink-compose-prefill', _winlinkPendingCompose); _winlinkPendingCompose = null; }
       for (const box of WinlinkStateLib.BOXES) winlinkPopoutSend('winlink-mailbox', { box, messages: winlinkState.list(box) });
-      winlinkPopoutSend('winlink-session', { ...winlinkState.session, remainingSec: winlinkState.remainingSec() });
+      winlinkPopoutSend('winlink-session', winlinkSessionView());
       winlinkPopoutSend('winlink-popout-theme', themeQuery());
       if (_currentFreqHz > 0) winlinkPopoutSend('cat-frequency', _currentFreqHz);
       pushWinlinkRigPower(true);
