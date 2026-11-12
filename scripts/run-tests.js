@@ -250,6 +250,7 @@ const TESTS = [
   'test/modem-audio-lane-test.js', // #187: the modem's audio off the main process; credit, drain, counted cuts
   'test/winlink-awake-test.js', // #187: a radio Winlink session holds off App Nap (the hidden bridge window starved on a Mac)
   'test/winlink-history-test.js', // #254: gateway history from Pat's event log, My gateways (saved gateways)
+  'test/winlink-outcome-test.js', // #425: how a session ended is worded in one place; Pat's reply never reaches a status; one summary line per session
   'test/winlink-contacts-test.js', // the Winlink address book, and the Position report and POTA spot forms
   'test/rigctld-shim-hamlib-test.js',
   'test/rigctld-died-test.js',

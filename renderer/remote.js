@@ -15618,12 +15618,15 @@ var _paddleHoldTimer = { dit: null, dah: null };
     if (!el) return;
     if (!s.patReady) { el.textContent = s.patError ? 'Shack: ' + s.patError : 'The shack is starting Pat…'; }
     else {
-      var t = ss.state === 'error' ? (ss.error || 'Session failed') : (ss.text || '');
+      var t = ss.state === 'error' ? (ss.error || 'The session did not finish.') : (ss.text || '');
       if (mailActive(ss) && ss.subject) t = (ss.direction === 'receiving' ? 'Receiving ' : 'Sending ') + '"' + ss.subject + '" ' + (ss.pct || 0) + '%';
       if (mailActive(ss) && ss.remainingSec != null) t += ' · ' + Math.floor(ss.remainingSec / 60) + ' min left';
       if (mailActive(ss) && ss.mode !== 'telnet') t = (ss.ptt ? 'TX · ' : 'RX · ') + t;
-      var words = { starting: 'Starting', connecting: 'Connecting', connected: 'Connected', disconnecting: 'Stopping', done: '', error: 'Failed: ' };
-      el.textContent = (words[ss.state] ? words[ss.state] + (ss.state === 'error' ? '' : ' · ') : '') + t;
+      // How a session ended is one sentence from the shack (session.error,
+      // lib/winlink-outcome.js): it says what happened and what to do, so
+      // nothing is put in front of it. "Failed: connect: HTTP 500" is gone (#425).
+      var words = { starting: 'Starting', connecting: 'Connecting', connected: 'Connected', disconnecting: 'Stopping', done: '', error: '' };
+      el.textContent = (words[ss.state] ? words[ss.state] + ' · ' : '') + t;
       el.style.color = ss.state === 'error' ? '#e94560' : ss.state === 'done' ? '#4ecca3' : '';
       el.style.fontWeight = (ss.state === 'done' || ss.state === 'error') ? '700' : '';
     }

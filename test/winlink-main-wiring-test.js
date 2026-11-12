@@ -328,7 +328,7 @@ test('account check / set-password / register / recovery email are on the wire, 
   // Settings IPC and the device share one implementation.
   assert.ok(/ipcMain\.handle\('winlink-register', \(_e, o = \{\}\) => winlinkRegister\(o, (\(o && o\.origin\) \|\| )?'Settings'\)\);/.test(main));
   // session.errorKind rides beside the text.
-  assert.ok(/errorKind: state === 'error' \? \(_winlinkSessionErrorKind \|\| 'failed'\) : ''/.test(main));
+  assert.ok(/errorKind: state === 'error' \? outcome\.errorKind : ''/.test(main), 'from the one place that words an ending (lib/winlink-outcome.js, #425)');
   assert.ok(/_winlinkSessionErrorKind = 'login-failed'/.test(main));
 });
 
@@ -383,7 +383,7 @@ test('on a sound-device rig the bridge window carries the modem audio; the modem
   const spawn = fnBody(main, 'winlinkModemAudioReady');
   assert.ok(/if \(!winlinkIpAudioRoute\(\)\) \{[\s\S]*?modemBridgeReady\(10000\)[\s\S]*?throw new Error\(modemBridge\.error/.test(spawn), 'the session waits for the bridge and fails with its reason');
   assert.ok(/ipcMain\.on\('modem-bridge-rx'[\s\S]{0,400}winlinkFeedRx\(pcm, /.test(main), 'bridge RX feeds the server (and the waterfall)');
-  assert.ok(/if \(s\.captureEnded && winlinkSessionActive\(\)\) winlinkAbortSession\(modemBridge\.error\);/.test(main), 'an unplugged device ends the session');
+  assert.ok(/if \(s\.captureEnded && winlinkSessionActive\(\)\) winlinkAbortSession\(modemBridge\.error, \{ kind: 'audio-device', detail: modemBridge\.error \}\);/.test(main), 'an unplugged device ends the session');
   assert.ok(/try \{ stopModemBridge\('quit'\); \} catch \{\}/.test(main), 'stopped at quit');
   const start = fnBody(main, 'ensureModemBridgeWindow');
   assert.ok(/backgroundThrottling: false/.test(start), 'a throttled worklet starves the modem');

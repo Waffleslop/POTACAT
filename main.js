@@ -440,6 +440,7 @@ const MercuryAppProto = require('./lib/mercury-app-protocol');
 const WinlinkPat = require('./lib/winlink-pat');
 const WinlinkDiag = require('./lib/winlink-diag');
 const WinlinkHistory = require('./lib/winlink-history');
+const WinlinkOutcome = require('./lib/winlink-outcome'); // how a session ended, in the words every surface shows (#425)
 const WinlinkFav = require('./lib/winlink-favourites');
 const WinlinkTemplates = require('./lib/winlink-templates');
 const WinlinkContacts = require('./lib/winlink-contacts');
@@ -1919,6 +1920,21 @@ let _winlinkWatchdog = null;
 let _winlinkLastActivity = 0;
 let _winlinkSessionError = '';
 let _winlinkSessionErrorKind = '';   // 'login-failed' | 'no-answer' | 'transport-down' | 'rig-refused' | 'stopped' | '' — session.errorKind for clients
+// How this session ended, as facts for lib/winlink-outcome.js (#425). The
+// status every surface shows is written there from these, never from Pat's reply.
+let _winlinkCause = null;            // { kind, detail }: a cause POTACAT knows from its own side (the first one wins)
+let _winlinkDialed = false;          // POTACAT got as far as asking Pat to call
+let _winlinkConnectedAt = 0;         // when the link came up, this session
+let _winlinkQueuedAtStart = null;    // messages in the Outbox when the session started
+let _winlinkModemAudioClosed = false; // the modem closed its audio connection while the session ran
+let _winlinkTxCutMs = 0;             // transmit audio the sound card would not take, this session
+let _winlinkPatLastLine = '';        // Pat's own last word on a failure ("Exchange failed: ...")
+let _winlinkPatReply = '';           // Pat's raw /api/connect reply: for the log, never for the status
+let _winlinkReceived = null;         // messages Pat took into the Inbox, when a session did not finish
+let _winlinkLinkStory = null;        // WinlinkDiag.ArdopLinkStory: the modem's last state and which side ended the link
+let _winlinkAudioSummary = '';       // the session's audio sentence, repeated in its summary line
+const _winlinkSummaries = [];        // the last sessions' summary lines, for Report a Bug
+const _patProgressSaid = new WinlinkDiag.PatProgressLog(); // Pat's repainted transfer progress, logged when it changes
 let _winlinkMercuryWasConnected = false;
 let _winlinkAutoCheckTimer = null;
 let winlinkPopoutWin = null;
@@ -2901,7 +2917,7 @@ function tripSwrGuard(swr) {
   if (smartSdr && smartSdr.connected) gatedSmartSdrTransmit(false);
   // A Winlink session keys through the shim and would re-key on Pat's next
   // frame: stop it, with the reason every surface shows ("Stopped: SWR 3.4:1 …").
-  if (winlinkSessionActive()) winlinkAbortSession(`SWR ${swr.toFixed(1)}:1 — the SWR guard stopped the transmission`);
+  if (winlinkSessionActive()) winlinkAbortSession(`SWR ${swr.toFixed(1)}:1 — the SWR guard stopped the transmission`, { kind: 'swr', detail: `SWR ${swr.toFixed(1)}:1` });
   // The SSTV window plays the picture itself and was never told: the audio
   // kept playing into an unkeyed radio and TRANSMIT stayed on HALT until
   // pressed (Casey 2026-09-29). Stop it and show the trip there.
@@ -9960,7 +9976,7 @@ function acquireRadio(who) {
       sendCatLog(`[radio] ${who} is transmitting — ${d.preempted} stands down (it cannot be asked to stop mid-frame)`);
       if (d.preempted === 'jtcat') haltJtcatForPreemption();
       else if (d.preempted === 'mercury' && mercuryClient) { try { mercuryClient.abort(); } catch { /* already gone */ } }
-      else if (d.preempted === 'winlink') winlinkAbortSession('another engine took the radio');
+      else if (d.preempted === 'winlink') winlinkAbortSession('another engine took the radio', { kind: 'preempted' });
     }
     radioOwner = d.owner;
     return true;
@@ -11064,7 +11080,12 @@ function spawnPat() {
       tail = (tail + text).slice(-4096);
       // Pat's session chatter goes to pat.log (tailed over /ws); stdout/stderr
       // carry startup and fatal lines only — worth the log, never a flood.
+      // One thing was a flood: during a transfer Pat repaints its progress on
+      // stdout four times a second ("Subject:  23%"), 240 lines a minute, which
+      // pushed the start of a session out of a Report a Bug's 400 lines in
+      // under two minutes (seen in the no-RF loopback of #425). Said when it changes.
       for (const line of text.split(/\r?\n/).filter(Boolean).slice(0, 20)) {
+        if (!_patProgressSaid.keep(line)) continue;
         winlinkLog(`pat: ${line}`);
         if (DirewolfProcess.patLineSaysConnected(line)) _winlinkPatConnected = true;
       }
@@ -11080,7 +11101,7 @@ function spawnPat() {
       if (proc._potacatStopping) return; // POTACAT stopped it (relaunch / off / quit)
       winlinkState.setPat({ ready: false, error: last });
       winlinkLog(`Pat stopped: ${last}`);
-      if (winlinkSessionActive()) winlinkEndSession('error', 'Pat stopped during the session');
+      if (winlinkSessionActive()) { winlinkNoteCause('pat-stopped', last); winlinkEndSession('error', 'Pat stopped during the session'); }
       winlinkPush();
     });
     setTimeout(() => { if (!settled) { settled = true; resolve(proc); } }, 500);
@@ -11109,6 +11130,7 @@ function winlinkOnPatEvent(ev) {
     if (winlinkSessionActive()) {
       winlinkSessionTouch();
       if (ev.connected) _winlinkPatConnected = true;
+      if (ev.connected && !_winlinkConnectedAt) _winlinkConnectedAt = Date.now();
       if (ev.connected && winlinkState.session.state === 'connecting') {
         winlinkState.setSession({ state: 'connected', text: `Connected${ev.remoteAddr ? ' to ' + ev.remoteAddr : ''}` });
         winlinkSessionPush();
@@ -11144,6 +11166,9 @@ function winlinkOnPatEvent(ev) {
     if (!winlinkSessionActive()) return;
     winlinkSessionTouch();
     if (DirewolfProcess.patLineSaysConnected(ev.text)) _winlinkPatConnected = true;
+    if (_winlinkPatConnected && !_winlinkConnectedAt) _winlinkConnectedAt = Date.now();
+    // Pat's own reason for a session that did not finish: kept for the summary line (#425), never shown.
+    if (/Exchange failed:|Unable to establish connection to remote:/i.test(ev.text)) _winlinkPatLastLine = ev.text.slice(0, 200);
     // Pat's log is the session transcript; it stays in pat.log. Only the lines
     // an operator can act on are said, once each, in POTACAT's words.
     if (ev.class === 'login-failed') { _winlinkSessionError = `Winlink refused the password for ${String(settings.myCallsign || '').toUpperCase()} — check it in Settings > Station > Winlink (a password made before 2018 must be typed in CAPITALS)`; _winlinkSessionErrorKind = 'login-failed'; }
@@ -11228,7 +11253,7 @@ async function connectWinlink() {
 }
 
 function disconnectWinlink({ quit } = {}) {
-  if (winlinkSessionActive()) winlinkEndSession('error', quit ? 'POTACAT is closing' : 'Winlink was turned off');
+  if (winlinkSessionActive()) { winlinkNoteCause(quit ? 'closing' : 'turned-off'); winlinkEndSession('error', quit ? 'POTACAT is closing' : 'Winlink was turned off'); }
   winlinkReturnOnStop(quit);
   clearTimeout(_winlinkAutoCheckTimer); _winlinkAutoCheckTimer = null;
   killArdop();
@@ -11288,8 +11313,8 @@ async function startWinlinkShim() {
         }
         return false;
       }
-      if (_swrTripped) { winlinkLog('refused Pat\'s PTT — the SWR guard has tripped'); return false; }
-      if (yaesuLanTxRefusal()) { winlinkLog('refused Pat\'s PTT — ' + yaesuLanTxRefusal()); return false; }
+      if (_swrTripped) { winlinkLog('refused Pat\'s PTT — the SWR guard has tripped'); winlinkNoteCause('swr', ''); return false; }
+      if (yaesuLanTxRefusal()) { winlinkLog('refused Pat\'s PTT — ' + yaesuLanTxRefusal()); winlinkNoteCause('ptt-refused', yaesuLanTxRefusal()); return false; }
       if (_winlinkUnkeyTimer) {
         // Keyed again inside the drain hold: stay keyed, nothing to re-assert.
         // handleRemotePtt is not called here, so the stuck-TX limit is
@@ -11327,7 +11352,7 @@ async function startWinlinkShim() {
         const why = WinlinkReach.pttRefusalText(said);
         winlinkLog(`the radio refused to transmit — ending the attempt: ${why}`);
         winlinkState.setSession({ ptt: false }); winlinkSessionPush();
-        winlinkAbortSession(`the radio refused to transmit: ${why}`);
+        winlinkAbortSession(`the radio refused to transmit: ${why}`, { kind: 'ptt-refused', detail: why });
         return false;
       }
       winlinkLaneKeyDown(); // the start of this frame (it arrived before the request to key), then the rest
@@ -11422,7 +11447,7 @@ function armWinlinkTxFailsafe() {
     try { handleRemotePtt(false); } catch {}
     if (winlinkAudio) winlinkAudio.key(false);
     winlinkTxBurstEnd();
-    winlinkAbortSession('the transmitter stayed keyed for 30 s');
+    winlinkAbortSession('the transmitter stayed keyed for 30 s', { kind: 'tx-failsafe' });
   }, WINLINK_PTT_FAILSAFE_MS);
 }
 
@@ -11463,7 +11488,7 @@ async function startWinlinkAudio({ modemRate = ModemAudioServerMod.MODEM_RATE } 
   // cut a transmission (docs/ardop-macos-plan.md L4). Main keeps the radio.
   const srv = new ModemAudioLane({ modemRate, log: winlinkLog });
   srv.on('modem-connected', () => winlinkLog(`modem audio: the modem connected at ${modemRate} samples/s — radio audio via ${winlinkAudioRouteName()}${winlinkIpAudioRoute() ? ', no sound card' : ` (${modemBridge.captureLabel || 'input'} → ${modemBridge.playbackLabel || 'output'})`}`));
-  srv.on('modem-gone', () => { if (winlinkSessionActive()) winlinkLog('modem audio: the modem closed its audio connection'); });
+  srv.on('modem-gone', () => { if (winlinkSessionActive()) { _winlinkModemAudioClosed = true; winlinkLog('modem audio: the modem closed its audio connection'); } });
   // The modem's audio beats its own PTT request: the audio comes straight
   // down the socket, the request goes ardopcf -> Pat -> the shim. The lane
   // holds it until the key-down (lib/modem-prekey.js), never discards it: the
@@ -11472,10 +11497,10 @@ async function startWinlinkAudio({ modemRate = ModemAudioServerMod.MODEM_RATE } 
   srv.on('tx-out', (mono24k) => { if (winlinkTxActive) winlinkDispatchOut(mono24k); });
   srv.on('prekey-sent', (d) => winlinkPreKeyNoted(d.ms));
   srv.on('tx-boost', (l) => winlinkLog(`modem transmit audio raised ${l.boostDb} dB — the modem plays about ${l.inDb} dBFS peak and full scale is the set RF power (the modem's own drive slider does the same)`));
-  srv.on('tx-cut', (c) => winlinkLog(`modem audio: ${c.ms} ms of transmit audio cut — the sound card stopped taking it (${c.totalMs} ms this session)`));
+  srv.on('tx-cut', (c) => { _winlinkTxCutMs = Math.max(_winlinkTxCutMs, Number(c.totalMs) || 0); winlinkLog(`modem audio: ${c.ms} ms of transmit audio cut — the sound card stopped taking it (${c.totalMs} ms this session)`); });
   srv.on('over-report', (o) => { const t = modemBridgeOverText({ gaps: Number(o.gaps) || 0, gapMs: Number(o.gapMs) || 0, droppedMs: Number(o.droppedMs) || 0 }); if (t) winlinkLog(t); });
   srv.on('drained', () => winlinkLaneDrained());
-  srv.on('exit', () => { if (winlinkAudio === srv) { winlinkAudio = null; if (winlinkSessionActive()) winlinkAbortSession('the modem audio process stopped'); } });
+  srv.on('exit', () => { if (winlinkAudio === srv) { winlinkAudio = null; if (winlinkSessionActive()) winlinkAbortSession('the modem audio process stopped', { kind: 'audio-stopped' }); } });
   try {
     await srv.listen(0);
     winlinkAudio = srv;
@@ -11554,7 +11579,8 @@ function startArdopTail() {
     const now = Date.now();
     for (const l of lines) {
       const ev = WinlinkDiag.classifyArdopDebugLine(l);
-      if (ev) for (const o of t.log.feed(ev, now)) winlinkLog('ardop: ' + o);
+      if (ev && _winlinkLinkStory) _winlinkLinkStory.note(ev); // its last state, and which side ended the link (#425)
+      if (ev && !ev.quiet) for (const o of t.log.feed(ev, now)) winlinkLog('ardop: ' + o);
     }
   };
   t.read = read;
@@ -11615,7 +11641,8 @@ function winlinkAudioDiagEnd() {
   if (_winlinkRec) winlinkRecordingSave('the session ended');
   if (!winlinkAudio) return;
   const rate = winlinkAudio.modemRate;
-  winlinkLog(WinlinkDiag.audioSummaryText({ rx: winlinkAudio.rxMeter.snapshot(rate), tx: winlinkAudio.txMeter.snapshot(rate), rxDropped: winlinkAudio.stats.rxDropped, rate }));
+  _winlinkAudioSummary = WinlinkDiag.audioSummaryText({ rx: winlinkAudio.rxMeter.snapshot(rate), tx: winlinkAudio.txMeter.snapshot(rate), rxDropped: winlinkAudio.stats.rxDropped, rate });
+  winlinkLog(_winlinkAudioSummary);
 }
 
 // Dire Wolf's recent output, for Report a Bug (its frames also go to the session log, capped).
@@ -11627,10 +11654,10 @@ function direwolfRingPush(line) {
 
 /** The modem's own logs for Report a Bug: ardopcf's last run, Dire Wolf's last lines, any recordings. */
 function winlinkModemReport() {
-  const out = { ardop: null, ardopSession: null, direwolf: null, recordings: [] };
+  const out = { ardop: null, ardopSession: null, direwolf: null, recordings: [], sessions: WinlinkOutcome.summaryLines(_winlinkSummaries) };
   const recent = (f) => { try { return Date.now() - fs.statSync(f).mtimeMs < 2 * 24 * 3600 * 1000; } catch { return false; } };
   const dbg = newestModemLog('ARDOPDebug');
-  if (dbg && recent(dbg)) { try { out.ardop = { file: path.basename(dbg), ...WinlinkDiag.lastArdopRun(fs.readFileSync(dbg, 'utf8'), { maxLines: 150, maxChars: 12000 }) }; } catch {} }
+  if (dbg && recent(dbg)) { try { out.ardop = { file: path.basename(dbg), ...WinlinkDiag.ardopReportTail(fs.readFileSync(dbg, 'utf8')) }; } catch {} }
   const ses = newestModemLog('ARDOPSession');
   if (ses && recent(ses)) { try { out.ardopSession = { file: path.basename(ses), ...WinlinkDiag.lastArdopRun(fs.readFileSync(ses, 'utf8'), { maxLines: 60, maxChars: 5000, keepDebug: true }) }; } catch {} }
   if (_direwolfRing.length) out.direwolf = WinlinkDiag.capTail(_direwolfRing, { maxLines: 120, maxChars: 9000 });
@@ -12205,7 +12232,7 @@ async function spawnDirewolf() {
     proc.on('exit', (code) => {
       if (direwolfProc === proc) direwolfProc = null;
       if (!settled) { settled = true; clearInterval(probeTimer); reject(new Error(`Dire Wolf exited (code ${code})` + (lastLines.length ? ` — it last said: ${lastLines.join(' | ')}` : ' before printing anything'))); return; }
-      if (winlinkSessionActive() && winlinkState.session.mode === 'packet') winlinkAbortSession('Dire Wolf stopped');
+      if (winlinkSessionActive() && winlinkState.session.mode === 'packet') winlinkAbortSession('Dire Wolf stopped', { kind: 'modem-stopped' });
     });
     setTimeout(() => fail(DirewolfProcess.agwTimeoutMessage({ port: _winlinkAgwPort(), seconds: 15, lastLines, lastProbe })), 15000);
   });
@@ -12326,7 +12353,7 @@ function spawnArdopProcess(bin, args) {
       if (ardopProc === proc) ardopProc = null;
       // 3221225477 = 0xC0000005, an access violation inside ardopcf (e.g. upstream's 16-device table).
       if (!settled) { settled = true; reject(new Error(code === 3221225477 || code === -1073741819 ? 'ardopcf crashed while opening the sound devices — update POTACAT (the bundled build is patched for PCs with many sound devices)' : `ardopcf exited (code ${code})`)); return; }
-      if (winlinkSessionActive() && winlinkState.session.mode === 'ardop') winlinkAbortSession('ardopcf stopped');
+      if (winlinkSessionActive() && winlinkState.session.mode === 'ardop') winlinkAbortSession('ardopcf stopped', { kind: 'modem-stopped' });
     });
     // Ready = its host port accepts a connection.
     const until = Date.now() + 8000;
@@ -12429,6 +12456,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
     returnTo: radio ? (_winlinkPreviewReturnTo || winlinkDialHere('at Connect')) : null,
     text: radio ? `Preparing ${WinlinkModes.LABELS[mode]}` : 'Connecting to Winlink over the internet',
   });
+  winlinkOutcomeReset(mode);
   _winlinkSessionError = '';
   _winlinkSessionErrorKind = '';
   _winlinkPatConnected = false;
@@ -12453,6 +12481,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
   const seq = ++_winlinkSessionSeq;
   const live = () => seq === _winlinkSessionSeq && winlinkSessionActive();
   const cancelled = () => Object.assign(new Error('cancelled'), { cancelled: true });
+  let dialed = false; // this attempt asked Pat to call: an error after that is Pat's reply, not a sentence of ours
   (async () => {
     try {
       if (mode === 'ardop') await spawnArdop();
@@ -12497,18 +12526,19 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
         }
         winlinkFlexDaxOn();
         _winlinkShimArmed = true;
-        _winlinkCapTimer = setTimeout(() => winlinkAbortSession(`the session reached its ${capMin}-minute limit`), capMin * 60000);
+        _winlinkCapTimer = setTimeout(() => winlinkAbortSession(`the session reached its ${capMin}-minute limit`, { kind: 'cap' }), capMin * 60000);
         _winlinkWatchdog = setInterval(() => {
           // Waiting for a busy channel to clear is not a stall: Pat ends that
           // wait itself after 5 minutes (#296), and the session cap still runs.
           if (winlinkWaitingForClearChannel()) winlinkSessionTouch();
-          if (Date.now() - _winlinkLastActivity > WINLINK_NO_PROGRESS_MS) winlinkAbortSession('nothing moved for 3 minutes');
+          if (Date.now() - _winlinkLastActivity > WINLINK_NO_PROGRESS_MS) winlinkAbortSession('nothing moved for 3 minutes', { kind: 'stall' });
           else winlinkSessionPush(); // keeps the countdown fresh on every surface
         }, 15000);
       }
       if (radio) winlinkStartSessionMeter();
       winlinkState.setSession({ state: 'connecting', text: radio ? `Calling ${String(gateway).toUpperCase()}` : 'Connecting to the CMS' });
       winlinkSessionPush();
+      _winlinkDialed = true; dialed = true;
       const received = await patClient.connect(url);
       if (!live()) throw cancelled();
       winlinkEndSession('done', winlinkSessionSummary(mode, winlinkState.session.sent, received, gateway), received);
@@ -12522,7 +12552,10 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
         winlinkLog(`attempt #${seq} failed after it was stopped (${why}) — kept as the reason`);
         try {
           const ls = settings.winlinkLastSession;
-          if (ls && !ls.ok && !String(ls.text || '').includes(why)) {
+          // Only a reason POTACAT wrote itself (a session that could not start).
+          // Pat's reply to a call that was stopped ("connect: HTTP 500 — Session
+          // failure ...") is in the log line above and never in the status (#425).
+          if (ls && !ls.ok && !dialed && !String(ls.text || '').includes(why)) {
             ls.text = `${ls.text || 'Session failed'} — ${why}`.slice(0, 300);
             saveSettings(settings);
             if (!winlinkSessionActive()) winlinkState.setSession({ error: ls.text, errorKind: _winlinkSessionErrorKind || 'stopped' });
@@ -12536,6 +12569,12 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
       if (mode === 'packet' && DirewolfProcess.packetDecodedNothing({ stdoutHeard: _direwolfHeard, monitorHeard: _direwolfMonitorHeard, patConnected: _winlinkPatConnected })) {
         winlinkLog('packet: Dire Wolf decoded nothing from the radio this session. The gateway may have answered (you can see it on the waterfall) but its reply never reached the modem: check the radio audio Input in Settings > Radio, its level, and that the radio is in FM with the squelch open.');
       }
+      // Pat's reply ("connect: HTTP 500 — Session failure {"NumReceived":0}",
+      // the same for every session that did not finish) goes to the log. What
+      // the operator reads is written from what POTACAT saw (#425).
+      _winlinkPatReply = dialed ? String((e && e.message) || e) : '';
+      if (dialed && e && e.body != null) { const n = WinlinkOutcome.receivedFromPatBody(e.body); if (n != null) _winlinkReceived = n; }
+      if (dialed && e && !e.status) winlinkNoteCause('pat-lost', e.message);
       winlinkEndSession('error', _winlinkSessionError || e.message || String(e));
     }
   })();
@@ -12655,13 +12694,91 @@ function winlinkTakeMercuryBack() {
   }
 }
 
-/** One plain sentence for a finished session — what every surface shows. */
+/** One plain sentence for a finished session — what every surface shows (lib/winlink-outcome.js). */
 function winlinkSessionSummary(mode, sent, received, gateway) {
-  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
-  const via = mode === 'telnet' ? 'over the internet' : `via ${String(gateway || '').toUpperCase()} (${(WinlinkModes.LABELS[mode] || mode).replace(/ \(.*\)$/, '')})`;
-  const out = sent ? `Sent ${plural(sent, 'message')} ${via}` : `Checked mail ${via} — nothing to send`;
-  const inb = received ? `${plural(received, 'new message')} in your Inbox` : 'no new mail';
-  return `${out}; ${inb}.`;
+  return WinlinkOutcome.doneText({ mode, sent, received, gateway });
+}
+
+// ── how a session ended (#425) ──────────────────────────────────────────────
+// Every surface shows ONE sentence for the end of a session, written by
+// lib/winlink-outcome.js from what POTACAT saw: whether the link came up,
+// what stopped it if POTACAT knows, what moved, what is still in the Outbox.
+function winlinkOutcomeReset(mode) {
+  _winlinkCause = null;
+  _winlinkDialed = false;
+  _winlinkConnectedAt = 0;
+  _winlinkModemAudioClosed = false;
+  _winlinkTxCutMs = 0;
+  _winlinkPatLastLine = '';
+  _winlinkPatReply = '';
+  _winlinkReceived = null;
+  _winlinkAudioSummary = '';
+  _winlinkLinkStory = mode === 'ardop' ? new WinlinkDiag.ArdopLinkStory() : null;
+  // The Outbox as the session starts: what is gone from it afterwards was sent.
+  _winlinkQueuedAtStart = winlinkState.total('out');
+  const seq = _winlinkSessionSeq + 1;
+  winlinkOutboxCount().then((n) => { if (n != null && seq === _winlinkSessionSeq && !_winlinkPatConnected) _winlinkQueuedAtStart = n; });
+}
+/** A cause POTACAT knows from its own side. The first one is the cause; what follows is consequence. */
+function winlinkNoteCause(kind, detail) {
+  if (!_winlinkCause) _winlinkCause = { kind, detail: detail ? String(detail) : '' };
+}
+/** The Outbox as Pat has it on disk right now, or null when Pat cannot be asked. */
+async function winlinkOutboxCount() {
+  if (!patClient) return null;
+  try { return (await patClient.mailbox('out')).length; } catch { return null; }
+}
+/** The facts of the session that just ended, for describeOutcome() and summaryLine(). */
+function winlinkOutcomeFacts(state, s, raw, received, outbox) {
+  const story = _winlinkLinkStory ? _winlinkLinkStory.snapshot() : null;
+  return {
+    state, mode: s.mode, gateway: WinlinkModes.isRadioMode(s.mode) ? s.gateway : '', dialKhz: s.dialKhz,
+    dialed: _winlinkDialed, connected: _winlinkPatConnected,
+    cause: _winlinkCause, hint: _winlinkSessionErrorKind, hintText: _winlinkSessionError,
+    setupText: _winlinkDialed ? '' : raw,
+    sent: s.sent, received: state === 'done' ? received : _winlinkReceived,
+    queued: _winlinkQueuedAtStart, outbox,
+    modemEnd: story && story.end, modemAudioClosed: _winlinkModemAudioClosed, txCutMs: _winlinkTxCutMs,
+    capMin: s.capSec ? Math.round(s.capSec / 60) : 0,
+  };
+}
+/** What a surface needs of an outcome: the state word, the sentence in its parts, whether Try again fits. */
+function winlinkOutcomeView(o) {
+  return { kind: o.kind, word: o.word, title: o.title, detail: o.detail, next: o.next, retry: !!o.retry };
+}
+/**
+ * The Outbox is read back once Pat has let go of the session, the status
+ * gains what it says ("2 messages are still in your Outbox..."), and the
+ * session's ONE summary line is written: gateway, dial, mode, how long, what
+ * moved, the modem's last state, which side ended it, the audio, and Pat's
+ * own reply. That line is what a Report a Bug is read for.
+ */
+async function winlinkSettleOutcome(state, s, raw, received, endedAt) {
+  // Everything about THIS session is taken now: the next one may start (Try
+  // again) while Pat is being asked for the Outbox.
+  const story = _winlinkLinkStory ? _winlinkLinkStory.snapshot() : null;
+  const taken = {
+    ...winlinkOutcomeFacts(state, s, raw, received, null),
+    ranMs: s.startedAt ? endedAt - s.startedAt : null,
+    connectedMs: _winlinkConnectedAt ? endedAt - _winlinkConnectedAt : null,
+    inProgress: s.subject && s.total && s.pct < 100 ? `${s.direction === 'receiving' ? 'receiving' : 'sending'} one at ${s.pct}% of ${s.total} bytes when it ended` : '',
+    modemState: story ? story.stateText : '',
+    endedBy: WinlinkOutcome.endedByText({ cause: _winlinkCause, modemEnd: story && story.end, mode: s.mode }),
+    audio: _winlinkAudioSummary.replace(/^audio this session:\s*/, ''),
+    patLine: _winlinkPatLastLine, raw: _winlinkPatReply,
+  };
+  const facts = { ...taken, outbox: await winlinkOutboxCount() };
+  const outcome = WinlinkOutcome.describeOutcome(facts);
+  const line = WinlinkOutcome.summaryLine({ ...facts, outcome });
+  winlinkLog(line);
+  // Kept for Report a Bug: the last 8 radio sessions; the internet auto-check never pushes one out.
+  WinlinkOutcome.keepSummary(_winlinkSummaries, { at: endedAt, radio: WinlinkModes.isRadioMode(s.mode), line });
+  // Still the same ended session on screen? Then it gains the Outbox sentence.
+  const now = winlinkState.session;
+  if (state === 'error' && !winlinkSessionActive() && now.startedAt === s.startedAt && now.state === 'error' && now.error !== outcome.text) {
+    winlinkState.setSession({ text: outcome.text, error: outcome.text, outcome: winlinkOutcomeView(outcome) });
+    winlinkSessionPush();
+  }
 }
 
 /**
@@ -12691,6 +12808,8 @@ function winlinkEndSession(state, text, received = 0) {
   winlinkHoldAwake(false); // first, so no early return below can keep it held
   if (!winlinkSessionActive() && state !== 'error') return;
   const s = winlinkState.session;
+  const endedAt = Date.now();
+  const wasActive = winlinkSessionActive();
   clearTimeout(_winlinkCapTimer); _winlinkCapTimer = null;
   clearInterval(_winlinkWatchdog); _winlinkWatchdog = null;
   clearInterval(_winlinkMeterTimer); _winlinkMeterTimer = null;
@@ -12731,13 +12850,25 @@ function winlinkEndSession(state, text, received = 0) {
     if (mg.changed) settings.winlinkFavourites = mg.list;
     result = { ...g, dialKhz: g.khz, url: s.url || '', band: freqToBand(g.khz / 1000) || '', sent: Number(s.sent) || 0, received: Number(received) || 0, saved: WinlinkFav.has(settings.winlinkFavourites, g) };
   }
-  winlinkState.setSession({ state, text: text || '', error: state === 'error' ? (text || 'Session failed') : '', errorKind: state === 'error' ? (_winlinkSessionErrorKind || 'failed') : '', ptt: false, prompt: null, result });
+  // What the operator reads comes from what POTACAT saw, in one place for
+  // every surface (lib/winlink-outcome.js, #425). `text` as it was passed in
+  // (Pat's reply, or a setup reason) is for the log.
+  const raw = String(text || '');
+  const outcome = WinlinkOutcome.describeOutcome(winlinkOutcomeFacts(state, s, raw, received, null));
+  text = outcome.text;
+  winlinkState.setSession({ state, text, error: state === 'error' ? text : '', errorKind: state === 'error' ? outcome.errorKind : '', outcome: winlinkOutcomeView(outcome), ptt: false, prompt: null, result });
   // Survives a restart, so every surface can say "Last check: …" (winlink-state.lastSession).
-  settings.winlinkLastSession = { at: Date.now(), ok: state === 'done', text: String(text || (state === 'done' ? 'Session finished' : 'Session failed')).slice(0, 200) };
+  settings.winlinkLastSession = { at: endedAt, ok: state === 'done', text: String(outcome.title || (state === 'done' ? 'Session finished' : 'Session failed')).slice(0, 300) };
   try { saveSettings(settings); } catch {}
   winlinkLog(`session ${state === 'done' ? 'finished' : 'failed'}: ${text}`);
+  // Pat's own reply, or the reason as it was first worded: here and in the Verbose Log, never in the status.
+  if (state === 'error' && raw && raw !== text) winlinkLog(`the reason as it was reported: ${raw.replace(/[\r\n]+/g, ' ').slice(0, 300)}`);
   winlinkSessionPush();
-  winlinkRefreshMailboxes();
+  // One summary line per session that ran, written once the Outbox has been read back.
+  const settle = wasActive
+    ? winlinkSettleOutcome(state, s, raw, received, endedAt).catch((e) => winlinkLog(`session summary could not be written: ${e.message}`))
+    : Promise.resolve();
+  settle.then(() => winlinkRefreshMailboxes());
 }
 
 /**
@@ -12831,9 +12962,10 @@ async function winlinkRecoveryEmailSet(email) {
   catch (e) { return { ok: false, error: e.message }; }
 }
 
-function winlinkAbortSession(why) {
+function winlinkAbortSession(why, cause) {
   if (!winlinkSessionActive()) return;
   winlinkLog(`aborting the session — ${why}`);
+  winlinkNoteCause((cause && cause.kind) || 'stopped', cause && cause.kind ? cause.detail : why);
   _winlinkSessionError = `Stopped: ${why}`;
   _winlinkSessionErrorKind = 'stopped';
   // Pat ignores a disconnect while it waits for a clear channel: it went on
@@ -13219,7 +13351,7 @@ async function winlinkHandleRemote({ type, req = {}, reply }) {
         result('connect', await winlinkStartSession({ mode: req.mode, gateway: req.gateway, dialKhz: req.dialKhz, url: req.url, origin: 'ECHOCAT device' }));
         return;
       case 'winlink-abort':
-        winlinkAbortSession('stopped from an ECHOCAT device');
+        winlinkAbortSession('stopped from an ECHOCAT device', { kind: 'operator' });
         result('abort', { ok: true });
         return;
       case 'winlink-qsy':
@@ -42452,7 +42584,7 @@ function cloudShackNotice(text, kind) {
     if (isRemoteMode() && WinlinkModes.isRadioMode(o.mode)) return { ok: false, error: 'Radio sessions key the shack\'s radio — start them on the shack PC' };
     return winlinkStartSession({ mode: o.mode, gateway: o.gateway, dialKhz: o.dialKhz, url: o.url, origin: 'mail window' });
   });
-  ipcMain.on('winlink-cmd-abort', () => winlinkAbortSession('stopped by the operator'));
+  ipcMain.on('winlink-cmd-abort', () => winlinkAbortSession('stopped by the operator', { kind: 'operator' }));
   ipcMain.handle('winlink-cmd-qsy', (_e, o = {}) => winlinkPreviewQsy(o));
   ipcMain.on('winlink-watch-audio', (_e, on) => { _winlinkWatchAudio = !!on; });
   // The modem audio bridge window: the radio's RX audio, and its status.
@@ -42489,7 +42621,7 @@ function cloudShackNotice(text, kind) {
       c.state = 'error'; c.error = String(s.error || 'unknown error');
       winlinkLog(`modem audio bridge (cable): ${c.error}`);
       modemBridgeCableSettle(false);
-      if (s.captureEnded && winlinkSessionActive()) winlinkAbortSession(c.error);
+      if (s.captureEnded && winlinkSessionActive()) winlinkAbortSession(c.error, { kind: 'audio-device', detail: c.error });
     }
     winlinkPush();
   });
@@ -42514,7 +42646,7 @@ function cloudShackNotice(text, kind) {
       winlinkLog(`modem audio bridge: ${modemBridge.error}`);
       modemBridgeSettle(false);
       // A device that went away mid-session ends the session with the reason.
-      if (s.captureEnded && winlinkSessionActive()) winlinkAbortSession(modemBridge.error);
+      if (s.captureEnded && winlinkSessionActive()) winlinkAbortSession(modemBridge.error, { kind: 'audio-device', detail: modemBridge.error });
     }
     winlinkPush();
   });
@@ -44962,7 +45094,7 @@ function cloudShackNotice(text, kind) {
         markerFound: sel.markerFound,
         tailTruncated: sel.tailTruncated,
         // #295: the modem's own logs (ardopcf / Dire Wolf) and any recordings to attach.
-        winlinkModem: (() => { try { const m = winlinkModemReport(); const c = (x) => x ? { ...x, lines: clean(x.lines) } : null; return { ardop: c(m.ardop), ardopSession: c(m.ardopSession), direwolf: c(m.direwolf), recordings: m.recordings }; } catch { return null; } })(),
+        winlinkModem: (() => { try { const m = winlinkModemReport(); const c = (x) => x ? { ...x, lines: clean(x.lines), ...(x.key ? { key: clean(x.key) } : {}) } : null; return { ardop: c(m.ardop), ardopSession: c(m.ardopSession), direwolf: c(m.direwolf), recordings: m.recordings, sessions: clean(m.sessions || []) }; } catch { return null; } })(),
       };
     } catch (err) {
       return { ok: false, error: String((err && err.message) || err) };
@@ -51771,7 +51903,7 @@ process.on('uncaughtException', (err) => {
     if (isWinlinkSessionFault(err, { sessionActive: winlinkSessionActive() })) {
       sendCatLog(`[Winlink] ERROR inside the session, ended instead of crashing POTACAT: ${msg}`);
       if (err && err.stack) sendCatLog('[Winlink] ' + String(err.stack).split(/\r?\n/).slice(0, 6).join(' | '));
-      winlinkAbortSession(`POTACAT hit an error in the Winlink session: ${msg}`);
+      winlinkAbortSession(`POTACAT hit an error in the Winlink session: ${msg}`, { kind: 'internal' });
       return;
     }
   } catch { /* fall through to the crash dialog */ }

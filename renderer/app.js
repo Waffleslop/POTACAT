@@ -22331,8 +22331,16 @@ catLogClearBtn.addEventListener('click', () => {
         // #295: the modem's own logs, so a Winlink report says what the modem
         // sent, heard and decided, not only what POTACAT did.
         const wm = pkg.winlinkModem;
+        // #425: one summary line per Winlink session (gateway, dial, how long,
+        // what moved, the modem's last state, which side ended it), kept apart
+        // so a retry cannot push the session that dropped out of the report.
+        if (wm && wm.sessions && wm.sessions.length) {
+          logSections.push('', '### Winlink sessions (latest last)', '```', wm.sessions.join('\n'), '```');
+        }
         if (wm && wm.ardop && wm.ardop.lines && wm.ardop.lines.length) {
-          logSections.push('', '### ARDOP modem log (' + wm.ardop.file + ', its last run' + (wm.ardop.omitted ? ', ' + wm.ardop.omitted + ' earlier lines left out' : '') + ')', '```', wm.ardop.lines.join('\n'), '```');
+          logSections.push('', '### ARDOP modem log (' + wm.ardop.file + ', its last ' + (wm.ardop.runs > 1 ? wm.ardop.runs + ' runs' : 'run') + (wm.ardop.omitted ? ', ' + wm.ardop.omitted + ' earlier lines left out' : '') + ')', '```',
+            ...(wm.ardop.key && wm.ardop.key.length ? ['(how each link began and ended, from the lines left out)', ...wm.ardop.key, '(the last lines)'] : []),
+            wm.ardop.lines.join('\n'), '```');
         }
         if (wm && wm.ardopSession && wm.ardopSession.lines && wm.ardopSession.lines.length) {
           logSections.push('', '### ARDOP session log (' + wm.ardopSession.file + ')', '```', wm.ardopSession.lines.join('\n'), '```');

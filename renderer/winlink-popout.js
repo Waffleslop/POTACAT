@@ -178,7 +178,13 @@
     var st = ss.state || 'idle';
     var el = $('wl-state');
     el.className = 'wl-state ' + st;
-    el.textContent = STATE_WORDS[st] || st;
+    // How it ended comes from the shack in one piece (session.outcome,
+    // lib/winlink-outcome.js): "Link dropped", "No answer", "Stopped". A link
+    // that had connected never reads "Failed" (#425).
+    var ended = st === 'done' || st === 'error';
+    el.textContent = (ended && ss.outcome && ss.outcome.word) || STATE_WORDS[st] || st;
+    // A finished session's sentence is read in full: it wraps, it is not cut.
+    document.querySelector('.wl-session').classList.toggle('final', ended);
     var active = ['starting', 'connecting', 'connected', 'disconnecting'].indexOf(st) >= 0;
     $('wl-connect').disabled = active || !(state && state.patReady);
     $('wl-abort').disabled = !active;
@@ -204,8 +210,12 @@
     $('wl-bar').style.width = (active && ss.total ? ss.pct : 0) + '%';
     var text = ss.error && st === 'error' ? ss.error : (ss.text || '');
     if (active && ss.subject) text = (ss.direction === 'receiving' ? 'Receiving ' : 'Sending ') + '"' + ss.subject + '" ' + (ss.total ? fmtSize(ss.bytes) + ' / ' + fmtSize(ss.total) : '');
-    $('wl-text').textContent = text;
-    $('wl-text').style.color = st === 'error' ? '#e94560' : st === 'done' ? 'var(--accent-green, #4ecca3)' : '';
+    // While the card is up with the whole sentence, the bar keeps to its first
+    // part; with the card closed the bar says all of it.
+    var cardUp = $('wl-done-card').classList.contains('show') && $('wl-done-card').classList.contains('bad');
+    $('wl-text').textContent = cardUp && ss.outcome && ss.outcome.title ? ss.outcome.title : text;
+    $('wl-text').title = ended ? text : '';
+    $('wl-text').style.color = st === 'error' ? 'var(--accent-red-text, var(--accent-red, #e94560))' : st === 'done' ? 'var(--accent-green, #4ecca3)' : '';
     $('wl-text').style.fontWeight = (st === 'done' || st === 'error') ? '700' : '';
     $('wl-remaining').textContent = active && ss.remainingSec != null ? Math.floor(ss.remainingSec / 60) + ':' + String(ss.remainingSec % 60).padStart(2, '0') + ' left' : '';
 
@@ -939,12 +949,36 @@
   if (window.api.onCatFrequency) window.api.onCatFrequency(function (hz) { dialHz = Number(hz) || 0; renderDial(); });
 
   // ── a good session ends with a card: save the gateway (#254) ──────────────
+  // A radio session that did not finish gets the same card (#425): what
+  // happened, what moved, what to do next, and Try again on the same gateway.
+  // Every word on it is the shack's (session.outcome); nothing is worded here.
   var doneDismissed = '';
   function renderDoneCard(ss) {
     var card = $('wl-done-card');
     var r = ss && ss.state === 'done' ? ss.result : null;
-    var key = r ? r.call + '|' + r.dialKhz + '|' + (ss.startedAt || '') : '';
-    if (!r || key === doneDismissed || historyOpen) { card.classList.remove('show'); return; }
+    var bad = ss && ss.state === 'error' && ss.outcome && ss.outcome.retry && ss.mode !== 'telnet' && ss.gateway ? ss.outcome : null;
+    var key = r ? r.call + '|' + r.dialKhz + '|' + (ss.startedAt || '') : bad ? 'ended|' + (ss.startedAt || '') : '';
+    if ((!r && !bad) || key === doneDismissed || historyOpen) { card.classList.remove('show'); return; }
+    card.classList.toggle('bad', !!bad);
+    $('wl-done-retry').hidden = !bad;
+    if (bad) {
+      $('wl-done-title').textContent = bad.title;
+      $('wl-done-sub').textContent = [bad.detail, bad.next].filter(Boolean).join(' ');
+      $('wl-done-save').hidden = true;
+      $('wl-done-saved').hidden = true;
+      $('wl-done-close').textContent = 'OK';
+      $('wl-done-close').onclick = function () { doneDismissed = key; card.classList.remove('show'); renderSession(ss); };
+      $('wl-done-retry').onclick = function () {
+        doneDismissed = key; card.classList.remove('show');
+        requireNotice(function () {
+          window.api.connect({ mode: ss.mode, gateway: ss.gateway, dialKhz: ss.dialKhz, url: ss.url || '' }).then(function (x) {
+            if (x && !x.ok) { $('wl-text').textContent = x.error || 'Could not start'; $('wl-text').style.color = '#e94560'; }
+          });
+        });
+      };
+      card.classList.add('show');
+      return;
+    }
     $('wl-done-title').textContent = 'Mail exchanged with ' + r.call;
     $('wl-done-sub').textContent = [r.band, fmtDial(r.dialKhz) + ' MHz', MODE_SHORT[r.mode] || r.mode, r.sent + ' sent', r.received + ' received'].filter(Boolean).join(' \u00b7 ');
     $('wl-done-save').hidden = !!r.saved;
@@ -971,6 +1005,7 @@
     document.querySelector('.wl-pane').style.display = 'none';
     $('wl-history').classList.add('show');
     $('wl-done-card').classList.remove('show');
+    if (state && state.session) renderSession(state.session); // the bar says the whole sentence while the card is away
     $('wl-hist-body').innerHTML = '<div class="wl-empty">Reading the history…</div>';
     loadHistory();
   }
@@ -981,7 +1016,7 @@
     $('wl-list').style.display = '';
     document.querySelector('.wl-pane').style.display = '';
     Array.prototype.forEach.call(document.querySelectorAll('.wl-folder'), function (x) { x.classList.toggle('active', x.getAttribute('data-box') === box); });
-    if (state && state.session) renderDoneCard(state.session);
+    if (state && state.session) renderSession(state.session);
   }
   function loadHistory() {
     window.api.history().then(function (r) {

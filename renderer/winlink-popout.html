@@ -87,7 +87,9 @@
     .wl-done-card { display: none; position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); width: 400px; max-width: calc(100% - 32px); box-sizing: border-box; flex-direction: column; gap: 8px; padding: 18px 20px 16px; border-radius: 10px; border: 1px solid var(--border-primary); background: var(--bg-secondary); color: var(--text-primary); box-shadow: 0 12px 32px rgba(0,0,0,0.35); z-index: 5; }
     .wl-done-card.show { display: flex; }
     .wl-done-title { font-size: 18px; font-weight: 700; color: var(--accent-green, #4ecca3); }
-    .wl-done-sub { font-size: 13px; color: var(--text-secondary); }
+    .wl-done-sub { font-size: 13px; color: var(--text-secondary); overflow-wrap: anywhere; }
+    .wl-done-card.bad .wl-done-title { color: var(--accent-red-text, var(--accent-red, #e94560)); font-size: 16px; overflow-wrap: anywhere; }
+    .wl-done-card.bad .wl-done-sub { font-size: 14px; line-height: 1.4; color: var(--text-primary); }
     .wl-done-actions { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
     .wl-done-actions .wl-btn { height: 34px; font-size: 14px; padding: 0 14px; display: inline-flex; align-items: center; gap: 8px; }
     .wl-done-actions .wl-btn.primary { font-weight: 700; background: var(--ok-subtle, transparent); }
@@ -144,14 +146,19 @@
     .wl-state.idle, .wl-state.done { color: var(--text-dim); }
     .wl-state.starting, .wl-state.connecting, .wl-state.disconnecting { color: #f0a500; }
     .wl-state.connected { color: var(--accent-green, #4ecca3); }
-    .wl-state.error { color: #e94560; }
+    .wl-state.error { color: var(--accent-red-text, var(--accent-red, #e94560)); }
     .wl-ptt { padding: 0 6px; border-radius: 3px; font-weight: 700; font-size: 11px; }
     .wl-ptt.on { background: var(--accent-red, #e94560); color: var(--on-accent-red); }
     .wl-audio { font-size: 11px; opacity: 0.8; font-family: Consolas, "Courier New", monospace; white-space: nowrap; }
     .wl-audio.hot { color: var(--accent-red, #e94560); opacity: 1; font-weight: 700; }
     .wl-bar { flex: 0 0 120px; height: 6px; background: var(--bg-tertiary, #2a2a40); border-radius: 3px; overflow: hidden; }
     .wl-bar > div { height: 100%; width: 0; background: var(--accent-blue, #4fc3f7); }
-    .wl-text { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .wl-text { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    /* A finished session: the sentence that says what happened is read in full (#425). */
+    .wl-session.final { align-items: flex-start; flex-wrap: wrap; row-gap: 2px; }
+    .wl-session.final .wl-state { white-space: nowrap; line-height: 18px; }
+    .wl-session.final .wl-bar { display: none; }
+    .wl-session.final .wl-text { flex: 1 1 260px; white-space: normal; overflow: visible; overflow-wrap: anywhere; font-size: 13px; line-height: 18px; }
     .wl-rig { display: inline-flex; gap: 10px; align-items: center; font-size: 12px; white-space: nowrap; }
     .wl-rig label { color: var(--text-dim); }
     .wl-rig input, .wl-rig select { font-size: 12px; padding: 1px 4px; }
@@ -488,6 +495,7 @@
       <div class="wl-done-actions">
         <button class="wl-btn primary" id="wl-done-save"><svg class="wl-star" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8z"></path></svg>Add to favorites</button>
         <span class="wl-done-saved" id="wl-done-saved" hidden><svg class="wl-star" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8z"></path></svg>In your favorites</span>
+        <button class="wl-btn primary" id="wl-done-retry" hidden>Try again</button>
         <button class="wl-btn" id="wl-done-close">Not now</button>
       </div>
     </div>

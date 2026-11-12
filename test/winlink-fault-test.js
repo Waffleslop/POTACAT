@@ -38,7 +38,7 @@ test('main.js ends the session in its uncaughtException handler, before the cras
   const guard = h.indexOf('isWinlinkSessionFault(err, { sessionActive: winlinkSessionActive() })');
   assert.ok(guard > 0, 'guard present');
   assert.ok(guard < h.indexOf('_fatalCrashDialog(err)'), 'before the dialog');
-  assert.ok(/winlinkAbortSession\(`POTACAT hit an error in the Winlink session: \$\{msg\}`\)/.test(h), 'the session ends with the reason');
+  assert.ok(/winlinkAbortSession\(`POTACAT hit an error in the Winlink session: \$\{msg\}`, \{ kind: 'internal' \}\)/.test(h), 'the session ends with the reason (in the log; the status says it in plain words, #425)');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
