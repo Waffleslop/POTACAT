@@ -75,7 +75,7 @@ test('main: connects nothing, keys nothing, refuses nothing — and says what to
   assert.ok(main.includes("if (target.type === 'none') {") && main.includes("sendCatStatus({ connected: false, noCat: true });"), 'connectCat branch');
   assert.ok(main.includes("[CAT] No CAT control for this radio: tune it by hand"), 'one plain log line');
   assert.ok(main.includes("if (target && target.type === 'none') {") && main.includes("no CAT control, the radio's VOX keys on the audio"), 'PTT is a quiet log, not PTT FAILED');
-  assert.strictEqual((main.match(/No CAT control — set the radio to \$\{mhz\} MHz by hand/g) || []).length, 2, 'both tune paths (desktop IPC + ECHOCAT) say the frequency');
+  assert.strictEqual((main.match(/No CAT control — set the radio to \$\{FreqDots\.khzMhz\((freqKhz|frequency)\)\} by hand/g) || []).length, 2, 'both tune paths (desktop IPC + ECHOCAT) say the frequency');
 });
 
 test('Pebble HF is a real model: no CAT, 20 m, 5 W — and the picker selects the no-CAT type for it', () => {

@@ -458,7 +458,7 @@ function _applyPopoutTheme(payload) {
 
       // Freq
       var freqTd = document.createElement('td');
-      freqTd.textContent = parseFloat(s.frequency).toFixed(1);
+      freqTd.textContent = FreqDots.fromKhz(s.frequency);
       tr.appendChild(freqTd);
 
       // Mode

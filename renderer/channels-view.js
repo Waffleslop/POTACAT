@@ -101,7 +101,7 @@
       const inGroup = favView
         ? favIds.map((id) => saved.list.find((c) => c.id === id)).filter(Boolean)
         : saved.list.filter((c) => (c.group || 'Other') === g);
-      const rows = inGroup.filter((c) => (!q || [c.name, c.note, c.group, c.mode, c.tone].some((v) => String(v || '').toLowerCase().includes(q)) || String(c.khz).includes(q) || (c.khz / 1000).toFixed(3).includes(q)));
+      const rows = inGroup.filter((c) => (!q || [c.name, c.note, c.group, c.mode, c.tone].some((v) => String(v || '').toLowerCase().includes(q)) || String(c.khz).includes(q) || (c.khz / 1000).toFixed(3).includes(q) || window.FreqDots.fromKhz(c.khz).includes(q)));
       if (!rows.length) continue;
       const gr = document.createElement('tr');
       gr.className = 'chn-group';
@@ -119,7 +119,7 @@
         tr.title = h.ok ? (h.viaSdr ? 'Outside the radio’s range; POTACAT plays it through your SDR' : 'Click to tune') : 'Neither the radio nor an SDR you have set up can receive this';
         tr.innerHTML = `<td class="chn-lead"><span class="chn-grip" title="Drag to reorder">☰</span>${window.Favorites ? window.Favorites.starHtml(favIds.includes(c.id), c.name) : ''}</td>`
           + `<td class="chn-name">${esc(c.name)}${c.mem != null ? `<span class="chn-sdr" title="Recalls memory ${c.mem} on the radio, offset and tone included">M${c.mem}</span>` : ''}${h.viaSdr ? '<span class="chn-sdr">SDR</span>' : ''}</td>`
-          + `<td class="chn-mhz">${(c.khz / 1000).toFixed(c.khz % 1 ? 5 : 4).replace(/0+$/, '').replace(/\.$/, '')}</td>`
+          + `<td class="chn-mhz">${window.FreqDots.fromKhz(c.khz)}</td>`
           + `<td>${esc(c.mode)}</td>`
           + `<td>${esc(C.formatOffset(c.offsetKhz))}</td>`
           + `<td>${esc(c.tone)}</td>`

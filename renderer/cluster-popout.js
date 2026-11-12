@@ -157,7 +157,7 @@ function _applyPopoutTheme(payload) {
       const spot = parseSpotLine(text);
       if (spot) {
         div.classList.add('term-line-clickable');
-        div.title = `Tune to ${spot.callsign} on ${spot.freqKhz} kHz (${spot.mode})`;
+        div.title = `Tune to ${spot.callsign} on ${FreqDots.khzMhz(spot.freqKhz) || spot.freqKhz + ' kHz'} (${spot.mode})`;
         div.addEventListener('click', () => {
           window.api.tune(String(spot.freqKhz), spot.mode);
           // Brief flash to confirm click

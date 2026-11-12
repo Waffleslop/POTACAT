@@ -177,7 +177,7 @@ function addContactMarker(callsign, lat, lon, timeUtc, freqDisplay, mode, name) 
   }
   usedPositions.push([lat, lon]);
 
-  const fMhz = freqDisplay || '';
+  const fMhz = FreqDots.mhzMhz(freqDisplay) || freqDisplay || '';
   const popupHtml = `<b>${callsign}</b>${name ? ' — ' + name : ''}<br>${timeUtc || ''} UTC  ${fMhz} ${mode || ''}<br><span style="color:#aaa">${''}</span>`;
   const marker = L.circleMarker([cLat, cLon], {
     radius: 6, fillColor: '#4fc3f7', color: '#fff', weight: 1, fillOpacity: 0.85,
@@ -220,7 +220,7 @@ function renderLog() {
       <td class="num">${i + 1}</td>
       <td class="time">${esc(c.timeUtc)}</td>
       <td class="call" title="${esc(c.name || '')}">${esc(c.callsign)}${p2p}</td>
-      <td>${esc(c.band || c.freqDisplay)}</td>
+      <td>${esc(c.band || FreqDots.fromMhz(c.freqDisplay) || c.freqDisplay)}</td>
       <td>${esc(c.mode)}</td>
       <td>${esc(c.rstSent)}</td>
       <td>${esc(c.rstRcvd)}</td>

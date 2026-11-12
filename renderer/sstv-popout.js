@@ -374,7 +374,7 @@ function selectAndTune(freqKhz, mode) {
 function tuneToFreq(freq, mode) {
   const m = mode || getFreqMode(freq);
   window.api.tune(freq, m);
-  statusBar.textContent = 'Tuned to ' + freq + ' kHz ' + m;
+  statusBar.textContent = 'Tuned to ' + (FreqDots.khzMhz(freq) || freq + ' kHz') + ' ' + m;
 }
 
 // Dropdown change QSYs immediately with correct mode
@@ -2192,7 +2192,7 @@ function buildMultiPane(cfg) {
 
   const label = document.createElement('div');
   label.className = 'sstv-rx-pane-label';
-  label.textContent = SLICE_NAMES[cfg.slicePort] + ': ' + (cfg.freqKhz / 1000).toFixed(3) + ' MHz';
+  label.textContent = SLICE_NAMES[cfg.slicePort] + ': ' + FreqDots.khzMhz(cfg.freqKhz);
   pane.appendChild(label);
 
   const canvas = document.createElement('canvas');
@@ -3222,7 +3222,7 @@ if (window.api && window.api.rigBandsGet) {
 function showFreq(khz, mode) {
   const k = Number(khz);
   if (!Number.isFinite(k) || k <= 0) return;
-  document.getElementById('freq-label').textContent = (k / 1000).toFixed(3);
+  document.getElementById('freq-label').textContent = FreqDots.fromKhz(k);
   document.getElementById('freq-mode').textContent = (mode || getFreqMode(k)) + ' \u25BE';
   const band = BAND_OF(k);
   bandsEl.querySelectorAll('.band').forEach(b => b.classList.toggle('active', b.dataset.band === band));
@@ -3672,7 +3672,8 @@ function entryQrgHz(e) {
   return null;
 }
 // Whole kHz first: 7171.5 kHz is 7.172, never a float-rounded 7.171.
-function fmtQrg(hz) { return (Math.round(hz / 1000) / 1000).toFixed(3); }
+// Whole kHz (where a picture was heard is not exact), written the VFO way: 7.172.00.
+function fmtQrg(hz) { return FreqDots.fromHz(Math.round(hz / 1000) * 1000); }
 const rbQrg = document.getElementById('rb-qrg');
 function showReplyQrg() {
   if (!rbQrg) return;

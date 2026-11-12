@@ -38,7 +38,7 @@ $('aw-close').onclick = () => window.api.close();
 window.api.onPopoutTheme(_applyPopoutTheme);
 
 const fmtSwr = (v) => (Number.isFinite(v) ? v.toFixed(1) + ':1' : '—');
-const fmtMhz = (khz) => (khz / 1000).toFixed(khz % 1 ? 4 : 3);
+const fmtMhz = (khz) => FreqDots.fromKhz(khz); // the VFO way, 14.074.00
 const fmtMin = (ms) => { const m = Math.round(ms / 60000); return m < 1 ? 'under a minute' : `about ${m} minute${m === 1 ? '' : 's'}`; };
 const fmtAtu = (s) => (s ? String(s).replace(/^TUNE_/, '').replace(/_/g, ' ').toLowerCase() : '—');
 

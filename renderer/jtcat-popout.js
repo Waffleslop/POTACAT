@@ -1533,7 +1533,7 @@ function _applyPopoutTheme(payload) {
   if (window.api.onCatFrequency) {
     window.api.onCatFrequency(function(hz) {
       if (!radioFreqEl || !hz) return;
-      radioFreqEl.textContent = (hz / 1000000).toFixed(3) + ' MHz';
+      radioFreqEl.textContent = FreqDots.hzMhz(hz);
       radioHz = hz;
       syncBandMode();
     });
@@ -3550,7 +3550,7 @@ function _applyPopoutTheme(payload) {
     if (btn) btn.classList.add('active');
     bandSelectFollowActive();
     decodeLog = [];
-    bandActivity.innerHTML = '<div class="jp-empty">Following the radio to ' + esc(d.band || ((khz / 1000).toFixed(3) + ' MHz')) + '...</div>';
+    bandActivity.innerHTML = '<div class="jp-empty">Following the radio to ' + esc(d.band || FreqDots.khzMhz(khz)) + '...</div>';
     myActivity.innerHTML = '<div class="jp-empty">No activity yet</div>';
     markerLayer.clearLayers();
     arcLayer.clearLayers();
@@ -3630,12 +3630,9 @@ function _applyPopoutTheme(payload) {
   var pkHintEl = document.getElementById('jp-pk-hint');
   var PK_MODE_LABEL = { FT8: 'FT8', FT4: 'FT4', FT2: 'FT2', WSPR: 'WSPR', PSK31: 'PSK', JTTY: 'JTTY' };
   var pk = { mode: '', band: '' };
-  // Dials in MHz everywhere (14.074, 7.0475, 14.0956): three places, more
-  // only when the dial has them.
+  // Dials the VFO way everywhere (14.074.00, 7.047.50; lib/freq-dots.js).
   function pkFmtMhz(k) {
-    var n = Number(k);
-    if (!isFinite(n) || n <= 0) return '';
-    return (n / 1000).toLocaleString('en-US', { useGrouping: false, minimumFractionDigits: 3, maximumFractionDigits: 4 }) + ' MHz';
+    return FreqDots.khzMhz(k);
   }
   function pkActiveBand() {
     var a = document.querySelector('.jp-band-opt.active');
@@ -3843,8 +3840,8 @@ function _applyPopoutTheme(payload) {
       o.dataset.call = d.call; o.dataset.mode = d.mode; o.dataset.freq = d.khz; o.dataset.band = d.band;
       if (d.hound) o.dataset.hound = '1';
       if (d.superFox) o.dataset.superfox = '1';
-      o.textContent = d.call + ' ' + d.mode + ' ' + (d.khz / 1000).toFixed(3) + (d.superFox ? ' SuperFox' : d.hound ? ' F/H' : '');
-      o.title = (d.entity ? d.entity + ': ' : '') + d.call + ' on ' + d.mode + ' ' + (d.khz / 1000).toFixed(3) + ' MHz' + (d.end ? ', until ' + d.end : '');
+      o.textContent = d.call + ' ' + d.mode + ' ' + FreqDots.fromKhz(d.khz) + (d.superFox ? ' SuperFox' : d.hound ? ' F/H' : '');
+      o.title = (d.entity ? d.entity + ': ' : '') + d.call + ' on ' + d.mode + ' ' + FreqDots.khzMhz(d.khz) + (d.end ? ', until ' + d.end : '');
       g.appendChild(o);
     });
     bandSelect.appendChild(g);
@@ -3864,7 +3861,7 @@ function _applyPopoutTheme(payload) {
       bandSelectFollowActive();
       var sub = opt.dataset.superfox ? 'They run SuperFox, which POTACAT\'s Hound mode does not decode. Use WSJT-X in SuperFox Hound mode for this one.'
         : opt.dataset.hound ? (houndMode ? 'Fox/Hound: Hound is on.' : 'They run Fox/Hound: turn on Hound before you call.') : '';
-      showJtcatWarnToast('Tuned to ' + opt.dataset.call + ' on ' + (khz / 1000).toFixed(3) + ' MHz ' + (mode || ''), sub);
+      showJtcatWarnToast('Tuned to ' + opt.dataset.call + ' on ' + FreqDots.khzMhz(khz) + ' ' + (mode || ''), sub);
     }, true);
     if (window.api.onJtcatDxpeditions) window.api.onJtcatDxpeditions(renderDxpeditionDials);
     if (window.api.jtcatDxpeditionsGet) window.api.jtcatDxpeditionsGet().then(renderDxpeditionDials).catch(function() {});
@@ -4114,7 +4111,7 @@ function _applyPopoutTheme(payload) {
       var chip = document.createElement('span');
       chip.className = 'jp-wspr-chip' + (wsprHopSel.indexOf(b) >= 0 ? ' on' : '');
       chip.textContent = b.replace('m', '');
-      chip.title = b + ' — ' + WSPR_BAND_FREQS[b] + ' kHz';
+      chip.title = b + ' — ' + FreqDots.khzMhz(WSPR_BAND_FREQS[b]);
       chip.dataset.band = b;
       chip.addEventListener('click', function() {
         var i = wsprHopSel.indexOf(b);
@@ -4176,7 +4173,7 @@ function _applyPopoutTheme(payload) {
           '<span class="w-time">' + wsprEsc(wsprFmtTime(s.timeUtc)) + '</span>' +
           '<span class="w-db">' + (s.snr != null ? s.snr : '') + '</span>' +
           '<span class="w-dt">' + (s.dt != null ? s.dt.toFixed(1) : '') + '</span>' +
-          '<span class="w-freq">' + (s.freqMHz != null ? s.freqMHz.toFixed(4) : '') + '</span>' +
+          '<span class="w-freq">' + (s.freqMHz != null ? FreqDots.fromMhz(s.freqMHz) : '') + '</span>' +
           '<span class="w-dr">' + (s.drift != null ? s.drift : '') + '</span>' +
           '<span class="w-call">' + wsprEsc(s.call || '') + '</span>' +
           '<span class="w-grid">' + wsprEsc(s.grid || '') + '</span>' +

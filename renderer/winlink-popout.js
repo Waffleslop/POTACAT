@@ -734,15 +734,8 @@
   function isFav(g, mode) { return favs().some(function (f) { return f.mode === (mode || currentMode().id) && sameGw(f, g); }); }
   // A frequency the way the VFO writes it: 7.100.50 (MHz, kHz, tens of Hz),
   // dots, never a comma (Casey 2026-11-11). Input in kHz.
-  function fmtDial(khz) {
-    var n = Number(khz);
-    if (!(n > 0)) return '';
-    var t = Math.round(n * 100);              // tens of Hz
-    var mhz = Math.floor(t / 100000);
-    var k = Math.floor((t % 100000) / 100);
-    var f = t % 100;
-    return mhz + '.' + String(k).padStart(3, '0') + '.' + String(f).padStart(2, '0');
-  }
+  // lib/freq-dots.js, the one formatter
+  function fmtDial(khz) { return FreqDots.fromKhz(khz); }
   var MODE_SHORT = { ardop: 'ARDOP', vara: 'VARA HF', varafm: 'VARA FM', packet: 'Packet', mercury: 'Mercury' };
   function fmtDay(ms) {
     if (!(ms > 0)) return '';

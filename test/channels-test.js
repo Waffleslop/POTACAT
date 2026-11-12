@@ -146,7 +146,7 @@ check('KL4XQ\'s export: tones, a negative offset, a nameless row, a 300 MHz spli
   assert.strictEqual(r.channels.length, 5);
   const [kl3k, noname, kl7cc, kl4gr, wx] = r.channels;
   assert.strictEqual(kl3k.tone, '123.0'); assert.strictEqual(kl3k.offsetKhz, -600);
-  assert.strictEqual(noname.name, '146.64 MHz'); assert.strictEqual(noname.tone, '');
+  assert.strictEqual(noname.name, '146.640.00 MHz'); assert.strictEqual(noname.tone, '');
   assert.strictEqual(kl7cc.offsetKhz, 300000);
   assert.strictEqual(kl4gr.mode, 'DIG');
   assert.strictEqual(wx.mode, 'AM');

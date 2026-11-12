@@ -174,8 +174,8 @@ test('favorites: starred in the gateway list in its ranking, a star beside it, n
 
 test('frequencies the way the VFO writes them: dots, never a comma', () => {
   const i = js.indexOf('function fmtDial(khz)');
-  const body = js.slice(i, js.indexOf('\n  }\n', i) + 4);
-  const fmtDial = new Function(body + '; return fmtDial;')();
+  const body = js.slice(i, js.indexOf('\n', i));
+  const fmtDial = new Function('FreqDots', body + '; return fmtDial;')(require('../lib/freq-dots'));
   assert.strictEqual(fmtDial(7100.5), '7.100.50');
   assert.strictEqual(fmtDial(14105), '14.105.00');
   assert.strictEqual(fmtDial(149090), '149.090.00');

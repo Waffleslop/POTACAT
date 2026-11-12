@@ -446,7 +446,7 @@ function updateMapMarkers(spots) {
 
     const popupContent = `
       <b>${watched ? '\u2B50 ' : ''}<a href="#" class="popup-qrz" data-call="${s.callsign}">${s.callsign}</a></b> <span style="color:${sourceColor};font-size:11px;">[${sourceLabel}]</span>${expeditionBadge}${newBadge}${wwffBadge}<br>
-      ${opLine}${parseFloat(s.frequency).toFixed(1)} kHz &middot; ${s.mode}<br>
+      ${opLine}${FreqDots.khzMhz(s.frequency)} &middot; ${s.mode}<br>
       <b>${s.reference || ''}</b> ${s.parkName || ''}${wwffRefLine}<br>
       ${distStr}<br>
       <button class="tune-btn" data-freq="${s.frequency}" data-mode="${s.mode}" data-bearing="${s.bearing != null ? s.bearing : ''}" data-lat="${s.lat != null ? s.lat : ''}" data-lon="${s.lon != null ? s.lon : ''}" data-source="${s.source || ''}">Tune</button>${logBtnHtml}
