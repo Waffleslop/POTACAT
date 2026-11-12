@@ -441,6 +441,7 @@ const WinlinkPat = require('./lib/winlink-pat');
 const WinlinkDiag = require('./lib/winlink-diag');
 const WinlinkHistory = require('./lib/winlink-history');
 const WinlinkOutcome = require('./lib/winlink-outcome'); // how a session ended, in the words every surface shows (#425)
+const WinlinkSummaryStore = require('./lib/winlink-summary-store'); // the session summary lines, kept across a restart (#425)
 const WinlinkFav = require('./lib/winlink-favourites');
 const WinlinkTemplates = require('./lib/winlink-templates');
 const WinlinkContacts = require('./lib/winlink-contacts');
@@ -1946,6 +1947,7 @@ let _winlinkReceived = null;         // messages Pat took into the Inbox, when a
 let _winlinkLinkStory = null;        // WinlinkDiag.ArdopLinkStory: the modem's last state and which side ended the link
 let _winlinkAudioSummary = '';       // the session's audio sentence, repeated in its summary line
 const _winlinkSummaries = [];        // the last sessions' summary lines, for Report a Bug
+let _winlinkSummariesFile = '';      // the file those lines were read from: session-summaries.json in this profile's Winlink folder
 const _patProgressSaid = new WinlinkDiag.PatProgressLog(); // Pat's repainted transfer progress, logged when it changes
 let _winlinkMercuryWasConnected = false;
 let _winlinkAutoCheckTimer = null;
@@ -11667,6 +11669,7 @@ function direwolfRingPush(line) {
 
 /** The modem's own logs for Report a Bug: ardopcf's last run, Dire Wolf's last lines, any recordings. */
 function winlinkModemReport() {
+  winlinkSummariesLoad(); // after a restart the sessions from before it are still reported (#425)
   const out = { ardop: null, ardopSession: null, direwolf: null, recordings: [], sessions: WinlinkOutcome.summaryLines(_winlinkSummaries) };
   const recent = (f) => { try { return Date.now() - fs.statSync(f).mtimeMs < 2 * 24 * 3600 * 1000; } catch { return false; } };
   const dbg = newestModemLog('ARDOPDebug');
@@ -12755,6 +12758,27 @@ function winlinkOutcomeFacts(state, s, raw, received, outbox) {
     capMin: s.capSec ? Math.round(s.capSec / 60) : 0,
   };
 }
+/**
+ * The summary lines survive a restart (#425): an operator whose link dropped
+ * restarts POTACAT and then presses Report a Bug, and the report must still
+ * hold the session that dropped. They are read from this profile's Winlink
+ * folder the first time they are needed (and again after a profile switch),
+ * and written back when a session ends (lib/winlink-summary-store.js).
+ */
+function winlinkSummariesLoad() {
+  let file = '';
+  try { file = WinlinkSummaryStore.fileIn(winlinkDir()); } catch { return; }
+  if (file === _winlinkSummariesFile) return;
+  _winlinkSummariesFile = file;
+  _winlinkSummaries.length = 0;
+  for (const e of WinlinkSummaryStore.load(file)) _winlinkSummaries.push(e);
+}
+function winlinkSummariesSave() {
+  if (!_winlinkSummariesFile) return;
+  if (!WinlinkSummaryStore.save(_winlinkSummariesFile, _winlinkSummaries, { secrets: [settings.winlinkPassword] })) {
+    winlinkLog('the session summaries could not be saved for the next start (this run still has them for Report a Bug)');
+  }
+}
 /** What a surface needs of an outcome: the state word, the sentence in its parts, whether Try again fits. */
 function winlinkOutcomeView(o) {
   return { kind: o.kind, word: o.word, title: o.title, detail: o.detail, next: o.next, retry: !!o.retry };
@@ -12785,7 +12809,9 @@ async function winlinkSettleOutcome(state, s, raw, received, endedAt) {
   const line = WinlinkOutcome.summaryLine({ ...facts, outcome });
   winlinkLog(line);
   // Kept for Report a Bug: the last 8 radio sessions; the internet auto-check never pushes one out.
+  winlinkSummariesLoad(); // the lines from before this start come first, so they are not written over
   WinlinkOutcome.keepSummary(_winlinkSummaries, { at: endedAt, radio: WinlinkModes.isRadioMode(s.mode), line });
+  winlinkSummariesSave();
   // Still the same ended session on screen? Then it gains the Outbox sentence.
   const now = winlinkState.session;
   if (state === 'error' && !winlinkSessionActive() && now.startedAt === s.startedAt && now.state === 'error' && now.error !== outcome.text) {

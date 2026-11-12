@@ -444,6 +444,7 @@ async function runSettle({ patBody, outboxAfter, queued, connected = true, modem
     patClient: new WinlinkClient({ port: pat.port }),
     winlinkLog: (m) => logs.push(m),
     winlinkSessionPush: () => pushes.push(state.session),
+    winlinkSummariesLoad: () => {}, winlinkSummariesSave: () => {}, // the file on disk has its own test (winlink-summary-store-test.js)
     winlinkSessionActive: () => ['starting', 'connecting', 'connected', 'disconnecting'].includes(state.session.state),
     console, Date, Math, Promise, String, Number,
   });
