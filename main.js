@@ -42994,7 +42994,9 @@ function cloudShackNotice(text, kind) {
           sendCatLog(`[SSTV] TX via Icom Network RS-BA1 audio — ${outDurSec.toFixed(0)}s (${outSamples.length} samples @48k, networkTxGain=${Math.round(networkTxGain * 100)}%); ${formatDirectTxAudioStats(txAudio)}`);
           // Abort before PTT if the encoder produced a silent waveform.
           if (txAudio.outputPeak < 0.01) {
-            sendCatLog(`[SSTV] TX aborted: conditioned audio peak ${txAudio.outputPeak.toFixed(4)} is too low (encoder produced silent waveform?)`);
+            sendCatLog(sstvTxGain === 0
+              ? '[SSTV] TX aborted: Drive is at 0 % in the SSTV window'
+              : `[SSTV] TX aborted: conditioned audio peak ${txAudio.outputPeak.toFixed(4)} is too low (encoder produced silent waveform?)`);
             handleRemotePtt(false);
             return;
           }
