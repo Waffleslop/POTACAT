@@ -1934,6 +1934,7 @@ let _winlinkReceived = null;         // messages Pat took into the Inbox, when a
 let _winlinkLinkStory = null;        // WinlinkDiag.ArdopLinkStory: the modem's last state and which side ended the link
 let _winlinkAudioSummary = '';       // the session's audio sentence, repeated in its summary line
 const _winlinkSummaries = [];        // the last sessions' summary lines, for Report a Bug
+const _patProgressSaid = new WinlinkDiag.PatProgressLog(); // Pat's repainted transfer progress, logged when it changes
 let _winlinkMercuryWasConnected = false;
 let _winlinkAutoCheckTimer = null;
 let winlinkPopoutWin = null;
@@ -11079,7 +11080,12 @@ function spawnPat() {
       tail = (tail + text).slice(-4096);
       // Pat's session chatter goes to pat.log (tailed over /ws); stdout/stderr
       // carry startup and fatal lines only — worth the log, never a flood.
+      // One thing was a flood: during a transfer Pat repaints its progress on
+      // stdout four times a second ("Subject:  23%"), 240 lines a minute, which
+      // pushed the start of a session out of a Report a Bug's 400 lines in
+      // under two minutes (seen in the no-RF loopback of #425). Said when it changes.
       for (const line of text.split(/\r?\n/).filter(Boolean).slice(0, 20)) {
+        if (!_patProgressSaid.keep(line)) continue;
         winlinkLog(`pat: ${line}`);
         if (DirewolfProcess.patLineSaysConnected(line)) _winlinkPatConnected = true;
       }

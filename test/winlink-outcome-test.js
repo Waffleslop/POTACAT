@@ -343,6 +343,57 @@ test('the modem\'s own lines say its last state and which side ended the link', 
   assert.ok(/^POTACAT \(stall\)/.test(O.endedByText({ cause: { kind: 'stall' }, modemEnd: t.end, mode: 'ardop' })), 'POTACAT\'s own stop is named first');
 });
 
+// Real lines: ardopcf 1.0.4.1.3 inside POTACAT, a software link to a second
+// ardopcf and a Pat in listen mode (no RF, 2026-11-12). The audio between the
+// modems was cut at 17:34:15 in the middle of a message.
+const REAL_DROP_LINES = [
+  '17:33:04.943 D  Command Trace TO Host CONNECTED N0CALL-10 500',
+  '17:33:04.943 D  Command Trace TO Host STATUS ARQ CONNECTION ESTABLISHED WITH N0CALL-10, SESSION BW = 500 HZ',
+  '17:33:04.943 D  Command Trace TO Host NEWSTATE IDLE ',
+  '17:33:10.100 D  Command Trace TO Host NEWSTATE ISS ',
+  '17:35:52.996 D ARDOPprotocol.tmrSendTimeout]  ARQ Timeout from ProtocolState: ISS Going to DISC state',
+  '17:35:52.996 D SendID  N0CALL:[FN20jb]  ARQ Timeout',
+  '17:35:52.996 I Sending Frame Type IDFrame',
+  '17:36:01.559 D  Command Trace TO Host DISCONNECTED',
+  '17:36:01.559 D  Command Trace TO Host STATUS ARQ Timeout from Protocol State:  ISS',
+  '17:36:01.559 I Sending Frame Type DISC',
+  '17:36:02.029 D  Command Trace TO Host NEWSTATE DISC ',
+  '17:36:31.568 D [Command Trace FROM host: DISCONNECT]',
+  '17:36:31.568 D  Command Trace TO Host DISCONNECT IGNORED',
+  '17:37:01.573 D [Command Trace FROM host: ABORT]',
+  '17:37:01.573 D  Command Trace TO Host ABORT',
+];
+
+test('a real dropped link (no-RF loopback): the modem\'s time limit is named, and Pat\'s later DISCONNECT and ABORT are not the cause', () => {
+  const s = story(REAL_DROP_LINES);
+  assert.strictEqual(s.end.by, 'timeout');
+  assert.strictEqual(s.end.state, 'ISS');
+  assert.strictEqual(s.stateText, 'ISS, then DISCONNECTED');
+  assert.strictEqual(O.endedByText({ modemEnd: s.end, mode: 'ardop' }), 'this station\'s modem, on its ARQ timeout (ARQ timeout in state ISS: nothing got through for the modem\'s time limit, so it ended the link)');
+  // Pat asking, on a session that finished: said once, not twice.
+  assert.strictEqual(O.endedByText({ modemEnd: story(CLEAN_LINES).end, mode: 'ardop' }), 'Pat asked the modem to disconnect');
+  assert.strictEqual(O.endedByText({ modemEnd: { by: 'host', text: 'Pat asked the modem to abort' }, mode: 'ardop' }), 'Pat asked the modem to abort');
+});
+
+test('Pat\'s progress repaint (four times a second) is a log line only when it changes', () => {
+  // What Pat writes during a transfer: a carriage return, the subject, the percentage, no newline.
+  assert.deepStrictEqual(D.patProgress('\rLoopback test 3 long (no RF):  57%'), { title: 'Loopback test 3 long (no RF)', pct: 57 });
+  assert.deepStrictEqual(D.patProgress('Loopback test 1 (no RF):  23%'), { title: 'Loopback test 1 (no RF)', pct: 23 });
+  assert.deepStrictEqual(D.patProgress('\rA: B:  81%\rA: B: 100%'), { title: 'A: B', pct: 100 }, 'several repaints in one chunk: the last');
+  for (const l of ['2026/11/12 12:37:01 Exchange failed: connection lost', 'FS +', '>FQ', 'Remote accepted 5JMWCJ3NE45U', 'Transmitting [Loopback test 1 (no RF)] [offset 0]', '2026/11/12 12:25:03 Connected to N0CALL-10 (ardop)', '']) {
+    assert.strictEqual(D.patProgress(l), null, l);
+  }
+  const p = new D.PatProgressLog();
+  const said = [];
+  const lines = [];
+  for (let i = 0; i < 240; i++) lines.push(`\rLong one:  ${Math.min(100, Math.floor(i / 24) * 10)}%`); // a minute at four a second
+  lines.splice(100, 0, '2026/11/12 12:37:01 Exchange failed: connection lost');
+  for (const l of lines) if (p.keep(l)) said.push(l);
+  assert.strictEqual(said.length, 11, '10 changes of percentage and the one real line, not 241');
+  assert.ok(said.includes('2026/11/12 12:37:01 Exchange failed: connection lost'), 'a real line is never dropped');
+  assert.ok(/if \(!_patProgressSaid\.keep\(line\)\) continue;\s*winlinkLog\(`pat: \$\{line\}`\);/.test(main), 'wired where Pat\'s stdout is relayed');
+});
+
 // ── B1: the one summary line ────────────────────────────────────────────────
 
 test('the summary line carries the gateway, dial, mode, duration, what moved, the modem\'s last state, who ended it and Pat\'s reply', () => {
