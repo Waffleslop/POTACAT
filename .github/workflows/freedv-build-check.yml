@@ -1,0 +1,134 @@
+name: FreeDV/RADE build check (#124, temporary)
+
+# TEMPORARY. Proves PR #124 on every release runner: the FreeDV and RADE
+# addons build the way release.yml builds them, load, decode, and land in the
+# packaged app. Publishes nothing: no tag, no release, electron-builder --dir
+# with --publish never, no signing secrets. Delete with the branch.
+on:
+  push:
+    branches:
+      - 'chore/124-freedv-build-check'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: windows-x64
+            os: windows-2022
+            natives_args: ''
+            cf_args: '--platform=win'
+            builder_args: '--win --x64'
+          - label: macos-arm64
+            os: macos-15
+            natives_args: ''
+            cf_args: '--platform=mac --arch=arm64'
+            builder_args: '--mac --arm64 --config builder-config.js'
+            arch: arm64
+          - label: macos-x64
+            os: macos-15-intel
+            natives_args: '-- --arch=x64'
+            cf_args: '--platform=mac --arch=x64'
+            builder_args: '--mac --x64 --config builder-config.js'
+            arch: x86_64
+          - label: linux-x64
+            os: ubuntu-22.04
+            natives_args: ''
+            cf_args: '--platform=linux --arch=x64'
+            builder_args: '--linux --x64'
+          - label: linux-arm64
+            os: ubuntu-22.04-arm
+            natives_args: ''
+            cf_args: '--platform=linux --arch=arm64'
+            builder_args: '--linux --arm64'
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install system build deps (as release.yml)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential python3 libudev-dev cmake rpm patchelf \
+            autoconf automake libtool texinfo pkg-config \
+            libusb-1.0-0-dev libreadline-dev libxml2-dev \
+            libasound2-dev
+      - name: Toolchain
+        run: |
+          node --version; cmake --version | head -1 || echo 'no cmake'
+          (cc --version || true) | head -1
+          uname -a || true
+      - name: Install dependencies
+        run: npm ci
+      - name: Build native addons (as release.yml, no continue-on-error)
+        run: npm run build-natives ${{ matrix.natives_args }} 2>&1 | tee build-natives.log
+      - name: FreeDV and RADE addons exist
+        run: |
+          set -e
+          grep -E 'freedv_native|rade_native|Done:' build-natives.log | grep -E 'built|failed|Done' || true
+          ls -la lib/freedv_native/build/Release/freedv_native.node lib/rade_native/build/Release/rade_native.node
+      - name: Arch and libraries (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -e
+          for f in lib/freedv_native/build/Release/freedv_native.node lib/rade_native/build/Release/rade_native.node lib/rade_native/opus_lib/macos/libopus.a; do
+            echo "== $f"; file "$f"; lipo -info "$f"
+            lipo -archs "$f" | grep -qw '${{ matrix.arch }}'
+          done
+          for f in lib/freedv_native/build/Release/freedv_native.node lib/rade_native/build/Release/rade_native.node; do
+            echo "== otool -L $f"; otool -L "$f"
+            if otool -L "$f" | tail -n +2 | grep -vE '/usr/lib/|/System/Library/'; then echo "::error::$f links outside the system"; exit 1; fi
+          done
+      - name: Arch, libraries and glibc floor (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -e
+          for f in lib/freedv_native/build/Release/freedv_native.node lib/rade_native/build/Release/rade_native.node; do
+            echo "== $f"; file "$f"; ldd "$f"
+            if ldd "$f" | grep -q 'not found'; then echo "::error::$f has a missing library"; exit 1; fi
+            MAX=$(objdump -T "$f" | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -V | tail -1)
+            echo "highest GLIBC: ${MAX:-none}"
+            if [ -n "$MAX" ] && [ "$(printf '%s\n%s\n' "${MAX#GLIBC_}" 2.35 | sort -V | tail -1)" != "2.35" ]; then
+              echo "::error::$f needs $MAX > GLIBC_2.35"; exit 1
+            fi
+          done
+      - name: Repo FreeDV / RADE tests
+        run: node scripts/run-tests.js rade-native freedv
+      - name: Load + decode check (Node)
+        run: node .github/freedv-build-check/check-addons.js .
+      - name: Fetch cloudflared (as release.yml)
+        run: node scripts/fetch-cloudflared.js ${{ matrix.cf_args }}
+      - name: Package (electron-builder --dir, no signing, no publish)
+        run: npx electron-builder ${{ matrix.builder_args }} --dir --publish never
+      - name: Addons in the packaged app, loaded by its Electron
+        run: |
+          set -e
+          case "${{ runner.os }}" in
+            macOS)   APP=$(ls -d dist/mac*/POTACAT.app | head -1); RES="$APP/Contents/Resources"; EXE="$APP/Contents/MacOS/POTACAT" ;;
+            Linux)   DIR=$(ls -d dist/linux*-unpacked | head -1); RES="$DIR/resources"
+                     # the afterPack hook renamed the real binary to <name>.bin and put a launcher script at <name>
+                     for f in "$DIR"/*.bin; do [ -f "${f%.bin}" ] && head -c2 "${f%.bin}" | grep -q '#!' && EXE="$f"; done ;;
+            Windows) RES="dist/win-unpacked/resources"; EXE="dist/win-unpacked/POTACAT.exe" ;;
+          esac
+          echo "resources: $RES  exe: $EXE"
+          ls -la "$RES/app.asar.unpacked/lib/freedv_native/build/Release/freedv_native.node" \
+                 "$RES/app.asar.unpacked/lib/rade_native/build/Release/rade_native.node"
+          if [ "${{ runner.os }}" = macOS ]; then
+            lipo -archs "$EXE"
+            lipo -archs "$RES/app.asar.unpacked/lib/rade_native/build/Release/rade_native.node"
+          fi
+          ELECTRON_RUN_AS_NODE=1 "$EXE" .github/freedv-build-check/check-addons.js "$RES/app.asar"
