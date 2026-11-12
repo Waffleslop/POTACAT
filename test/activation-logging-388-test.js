@@ -87,6 +87,15 @@ test('both RST pairs (Log dialog and Activator) go through lib/rst-advance.js', 
   assert.ok(/<script src="\.\.\/lib\/rst-advance\.js"><\/script>/.test(read('renderer/index.html')));
 });
 
+test('the "N1MM-style RST logging" help says what ticking it does (split boxes), not the other mode', () => {
+  const html = read('renderer/index.html');
+  const i = html.indexOf('id="set-n1mm-rst"');
+  const help = html.slice(i, html.indexOf('</span>', i));
+  assert.ok(/On: one box per digit/.test(help));
+  assert.ok(/Off: one field per report/.test(help));
+  assert.ok(!/Single text field per RST/.test(html), 'the inverted help text is gone');
+});
+
 // --- 2. The park grid the operator typed ---
 
 test('a corrected grid is remembered for that park and wins over the park\'s own', () => {
