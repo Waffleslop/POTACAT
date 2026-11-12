@@ -101,6 +101,8 @@ if [[ " $want " == *" pat "* ]]; then
       && grep -q 'func (tnc \*TNC) SetARQTimeout(d time.Duration) error' "$WL2K_DIR/transport/ardop/tnc.go" \
       || { echo "::error::wl2k-go $WL2K_VER no longer has the 90 s default or SetARQTimeout the Pat patch relies on"; exit 1; }
     CGO_ENABLED=$CGO go build -trimpath -ldflags "-s -w" -o "$ROOT/assets/pat/pat$EXE" .
+    # wl2k-go is compiled into the binary: its MIT notice ships beside Pat's.
+    cp "$WL2K_DIR/LICENSE" "$ROOT/third_party/pat/LICENSE-wl2k-go"
   )
   test -f "$ROOT/assets/pat/pat$EXE"
   # The patched code must be in the binary that ships, not only in the tree.

@@ -51,10 +51,15 @@ or in the LICENSES/ directory of the distribution where applicable.
     Copyright (c) 2020 Martin Hebnes Pedersen (LA5NTA)
     License: MIT
     Source: https://github.com/la5nta/pat (third_party/pat/: pinned tag + LICENSE)
+    Includes wl2k-go v1.0.1, unmodified, compiled into the same executable:
+    Copyright (c) 2014-2017 Martin Hebnes Pedersen (LA5NTA), MIT
+    (third_party/pat/LICENSE-wl2k-go; https://github.com/la5nta/wl2k-go)
     Modified by POTACAT: built from the pinned tag with one source patch
     (third_party/pat/potacat-arq-timeout.patch, described in
     third_party/pat/README.md) that lets the ARDOP link timeout be set from
-    the environment. The patch is offered under the same MIT license.
+    the environment. The patch is offered under the same MIT license and is
+    shipped with POTACAT beside this file; it is also public at
+    https://github.com/Waffleslop/POTACAT/tree/master/third_party/pat
 
   ardopcf (ARDOP modem) — bundled as a SEPARATE executable (Windows/Linux),
     reached over its loopback host port; NOT linked into POTACAT.

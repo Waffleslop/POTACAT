@@ -64,8 +64,11 @@ to Pat's authors.
   Pedersen LA5NTA); wl2k-go is MIT (Copyright (c) 2014-2017 the same
   author) and is used unmodified. MIT allows modified copies provided the
   copyright and permission notice stay with them: `LICENSE` here is Pat's,
-  copied from the pinned tag at build time, and the root `NOTICE` names Pat
-  and this modification. The patch is offered under the same MIT terms.
+  copied from the pinned tag at build time; `LICENSE-wl2k-go` is wl2k-go's,
+  copied by the build from the verified module (wl2k-go is compiled into the
+  same binary); the root `NOTICE` names both and this modification. The
+  patch and this README ship inside every POTACAT package beside those
+  files (`package.json` `build.files`), and are public in this repo. The patch is offered under the same MIT terms.
 - **To make the patch again** after moving the pin: check out the new tag,
   make the same two edits, and write `git diff` (with the new file added by
   `git add -N`) to `potacat-arq-timeout.patch` with LF line endings.

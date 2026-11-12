@@ -158,6 +158,10 @@ test('the Pat build applies the patch, fails loudly without it, and leaves wl2k-
   // Recorded where the repo records third-party changes.
   assert.ok(/Pat \(Winlink client\)[\s\S]{0,500}Modified by POTACAT[\s\S]{0,300}potacat-arq-timeout\.patch/.test(read('NOTICE')));
   assert.ok(read('third_party/pat/README.md').includes('potacat-arq-timeout.patch'));
+  // The licences, the modification notice and the patch itself go out inside every package.
+  const pkgFiles = require("../package.json").build.files;
+  for (const f of ['NOTICE', 'third_party/pat/LICENSE', 'third_party/pat/LICENSE-wl2k-go', 'third_party/pat/README.md', 'third_party/pat/potacat-arq-timeout.patch']) assert.ok(pkgFiles.includes(f), f + " is packaged");
+  assert.ok(/Copyright \(c\) 2014-2017 Martin Hebnes Pedersen/.test(read('third_party/pat/LICENSE-wl2k-go')) && pat.includes('cp "$WL2K_DIR/LICENSE" "$ROOT/third_party/pat/LICENSE-wl2k-go"'));
   // And proven on the built binaries on every helper runner.
   const wf = read('.github/workflows/winlink-helpers.yml');
   assert.strictEqual(wf.split('run: node test/modem-loopback/pat-arq-timeout.js --out pat-arq-timeout-results.json --logs pat-arq-timeout-logs').length - 1, 3, 'windows, linux (x64 + arm64) and mac (arm64 + x64) jobs');
