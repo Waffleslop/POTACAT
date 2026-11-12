@@ -100,8 +100,12 @@
     /* Same title as every other window (styles.css --titlebar-*). */
     .titlebar-title { font-size: 12px; font-weight: 700; letter-spacing: 0.3px; color: var(--t2); flex: 1; }
     .titlebar-btns { -webkit-app-region: no-drag; display: flex; gap: 2px; }
-    /* macOS: the system traffic lights replace minimize/close (popout-theme-boot.js). */
-    .platform-darwin .titlebar { padding-left: 80px; }
+    /* macOS: the system traffic lights replace minimize/close (popout-theme-boot.js).
+       Their room is kept in both sizes: body.mini .titlebar sets its own padding
+       and out-ranks the plain rule, so the Small VFO drew the frequency under
+       the lights (#387). The second selector keeps the inset there too. */
+    .platform-darwin .titlebar,
+    .platform-darwin body.mini .titlebar { padding-left: 80px; }
     .platform-darwin .titlebar-btns .win-btn { display: none; }
     .ib {
       width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent;
