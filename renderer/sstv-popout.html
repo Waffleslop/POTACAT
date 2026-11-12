@@ -50,6 +50,13 @@
     .chip:hover { color: var(--text-primary); }
     .chip.on { background: var(--accent-blue, #4fc3f7); border-color: var(--accent-blue, #4fc3f7); color: #06202c; }
     .freqwrap { position: relative; }
+    .rxsrc { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+    .rxsrc[hidden] { display: none; }
+    .rxsrc select { font-size: 12px; }
+    /* The ISS line: when it is next overhead, under the top bar while the ISS channel is chosen. */
+    .iss-note { flex-shrink: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; padding: 5px 12px; font-size: 13px; color: var(--text-primary); background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); border-left: 3px solid var(--accent-blue, #4fc3f7); }
+    .iss-note[hidden] { display: none; }
+    .iss-note .iss-sub { color: var(--text-secondary); font-size: 12px; }
     .freq { font-family: Consolas, 'Courier New', monospace; font-size: 14px; color: var(--text-primary); padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-primary); white-space: nowrap; cursor: pointer; }
     .freq small { color: var(--text-dim); font-size: 11px; margin-left: 4px; }
     .top select { font-size: 13px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 4px; padding: 4px 6px; }
@@ -242,13 +249,17 @@
           <optgroup label="12m"><option value="24975" data-mode="USB">24.975</option></optgroup>
           <optgroup label="10m"><option value="28680" data-mode="USB">28.680 (calling)</option></optgroup>
           <optgroup label="6m"><option value="50680" data-mode="USB">50.680</option></optgroup>
+          <!-- Receive only, never an automatic tune (#292): the ISS during ARISS SSTV events. -->
+          <optgroup label="Satellite (receive)" data-band="2m" data-auto="no"><option value="145800" data-mode="FM" data-iss="1">145.800 ISS (FM)</option></optgroup>
         </select>
         <div class="row">
-          <input type="text" id="freq-input" class="sstv-freq-input" placeholder="kHz" title="Another frequency, in kHz — press Enter">
+          <input type="text" id="freq-input" class="sstv-freq-input" placeholder="kHz or MHz" title="Another frequency: 14230 (kHz) or 145.800 (MHz). Press Enter">
           <button type="button" class="btn" id="tune-btn">Tune</button>
         </div>
       </div>
     </div>
+    <!-- Where SSTV hears pictures: the radio, or the SDR (Casey 2026-11-11: the ISS). -->
+    <label class="rxsrc" id="rx-src-wrap" hidden>From <select id="rx-src" title="Where SSTV hears pictures. From the SDR, SSTV receives only: the SDR cannot hear you and is not your radio."><option value="radio">Radio</option><option value="sdr" id="rx-src-sdr">SDR</option></select></label>
     <select id="mode-select" title="SSTV mode">
       <optgroup label="Martin">
         <option value="martin1">Martin M1 · 114 s</option>
@@ -308,6 +319,9 @@
       </div>
     </div>
   </div>
+
+  <!-- The ISS: when it is next overhead (shown while the ISS channel is chosen). -->
+  <div class="iss-note" id="iss-note" role="status" hidden><span id="iss-line"></span><span class="iss-sub" id="iss-sub"></span></div>
 
   <!-- SWR trip -->
   <div class="trip" id="trip" hidden role="alert">
@@ -420,6 +434,7 @@
   <script src="../lib/rig-family.js"></script>
   <script src="../lib/rig-bands.js"></script>
   <script src="../lib/sstv-start-band.js"></script>
+  <script src="../lib/sstv-rx-source.js"></script>
   <script src="../lib/sstv-templates.js"></script>
   <script src="../lib/sstv-help.js"></script>
   <script src="sstv-popout.js"></script>
