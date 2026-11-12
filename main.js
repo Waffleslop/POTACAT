@@ -44869,10 +44869,8 @@ function cloudShackNotice(text, kind) {
     kiwiClient.on('error', (msg) => {
       sendCatLog(`[WebSDR] Error: ${msg}`);
       listenSdr.live = false; listenSdr.auto = false;
-      // `host`: which receiver failed, so the VFO window can name it and mark
-      // it in its list (#390). Desktop windows only; the phone's message is unchanged.
       for (const wc of require('electron').webContents.getAllWebContents()) {
-        wc.send('kiwi-status', { connected: false, error: msg, host: kiwiFullHost });
+        wc.send('kiwi-status', { connected: false, error: msg, host: kiwiFullHost }); // host: the VFO window names it (#390)
       }
       if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
         remoteServer.sendToClient({ type: 'kiwi-status', connected: false, error: msg });
