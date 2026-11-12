@@ -58,6 +58,7 @@ const TESTS = [
   'test/protocol-demux-parity-test.js',
   'test/jtcat-test.js',
   'test/jtcat-parser-test.js',
+  'test/jtcat-qso-card-test.js',     // QSO logged is a centred card in theme colours
   'test/ft8-engine-rebaseline-test.js',
   'test/guest-pass-test.js',
   'test/guest-pass-onair-call-test.js', // the pass's station call is the on-air call (K3SBP on W7RTA's pass)
