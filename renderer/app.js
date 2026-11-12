@@ -1426,7 +1426,7 @@ function packetTimingMs(v, def, min, max) {
   return Math.round(Math.max(min, Math.min(max, ms)) / 10) * 10;
 }
 const setWinlinkVaraPort = document.getElementById('set-winlink-vara-port');
-// The operator's own VARA (Windows only; the section stays hidden elsewhere).
+// The operator's own VARA: on every system (#287). Windows adds the program path, "Set up VARA for me" and auto-start.
 const winlinkVaraSection = document.getElementById('winlink-vara-section');
 const setVaraHfEnable = document.getElementById('set-vara-hf-enable');
 const setVaraHfPath = document.getElementById('set-vara-hf-path');

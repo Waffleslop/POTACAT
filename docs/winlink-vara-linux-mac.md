@@ -34,28 +34,36 @@ In Settings > Station > Winlink > VARA (your own copy), under "Details and manua
 | Field | Default | Meaning |
 |---|---|---|
 | Use VARA HF / Use VARA FM | off | List the mode in the mail window. |
-| Host | blank (this computer, 127.0.0.1) | Where VARA runs: a computer name or address on your network for VARA on another computer. |
+| Host | blank (this computer, 127.0.0.1) | Where VARA runs: a computer name or address on your network for VARA on another computer. Only the name or address: a port typed here is refused, it goes in Port. |
 | Port | 8300 (HF), 8310 (FM) | VARA's TCP command port, as set in VARA's own Settings. VARA FM ships on 8300 like VARA HF; set it to 8310 so both can run. |
-| Test | | Asks VARA at that host and port for its version, using the fields as typed. |
+| Test | | Asks VARA at that host and port for its version, using the fields as typed. It says "VARA HF answered at 127.0.0.1:8300 (VARA HF v4.8.7)." or what to check. |
 | Bandwidth (HF) | 2300 | As on Windows. |
 
 On Windows the same Host field lets a Windows station use a VARA on another computer; POTACAT
-then never starts it.
+then never starts it, and "Set up VARA for me" says to set it up on that computer.
+
+Ports: VARA also listens one port above its command port (its data port). VARA HF and VARA FM
+on the same computer therefore cannot use the same port or ports next to each other; the mail
+window greys VARA FM and says so. On different computers any ports will do.
+
+POTACAT connects only to the host and port in these fields (and that port plus one, through
+Pat). Nothing else is contacted for VARA.
 
 ## Audio
 
 Two ways for VARA on this computer:
 
 1. **Straight to the radio's sound card.** In VARA, choose the radio's USB sound card. POTACAT
-   is not in the audio path. Simplest.
-2. **Through a virtual audio cable,** so POTACAT carries the audio between VARA and the radio,
-   levels it, and shows it on the waterfall, as it does for ARDOP. You need two cables, one
-   each way:
-   - macOS: BlackHole (its 2-channel version) provides virtual devices.
-   - Linux: two PulseAudio or PipeWire null sinks; each has a monitor source to record from.
+   is not in the audio path. Simplest, and the one to try first.
+2. **Through two virtual audio devices,** one each way, so POTACAT carries the audio between
+   VARA and the radio, as it does on Windows with virtual audio cables. In VARA choose the
+   devices' ends; in Settings > Station > Winlink choose the other ends under "From VARA (the
+   cable POTACAT listens to)" and "To VARA (the cable POTACAT plays into)".
 
-   In VARA choose the cables' ends; in Settings > Station > Winlink choose the other ends under
-   "From VARA (the cable POTACAT listens to)" and "To VARA (the cable POTACAT plays into)".
+   This second way has not been tried on Linux or macOS. Candidates are BlackHole on macOS and
+   PulseAudio or PipeWire virtual devices on Linux. Two things are unknown: whether Wine shows
+   those devices to VARA, and whether POTACAT's device lists show the end it must record from
+   (a null sink's monitor source may not be listed).
 
 A radio whose audio comes over the network (Flex Direct, Icom Network) has no sound card VARA
 can open on this computer: use the virtual cable route, or VARA on another computer with that
@@ -68,4 +76,6 @@ radio's audio there.
   (`test/winlink-vara-anywhere-test.js`).
 - Not yet checked on the air: VARA under Wine on Linux, VARA under Wine on macOS, and VARA on
   another computer. Each needs one operator to complete a gateway session and send the session
-  log.
+  log. No VARA session has completed in our hands on any system, Windows included; the tests
+  use a stand-in for VARA.
+- Not tried at all: the virtual audio device route on Linux and macOS (above).

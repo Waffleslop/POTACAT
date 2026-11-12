@@ -3380,7 +3380,7 @@
             <span style="display:block;margin-bottom:4px;">VARA is a Windows program. On this computer, run it under Wine, or on a Windows computer or virtual machine on your network. POTACAT connects to it, sends your mail through it and keys your radio; it never starts VARA here.</span>
             <ol style="margin:0 0 4px 18px;padding:0;">
               <li>Start VARA HF (or VARA FM). In its Settings set the TCP port (8300 for VARA HF, 8310 for VARA FM) and PTT to <b>VOX</b>: POTACAT keys the radio.</li>
-              <li>Choose VARA's sound card: the radio's USB sound card directly, or a virtual audio cable (BlackHole on macOS, a PulseAudio or PipeWire null sink on Linux) so POTACAT carries the audio and sets the level, the way it does for ARDOP.</li>
+              <li>In VARA's SoundCard settings choose the radio's USB sound card. (A radio whose audio comes over the network has none: see "Audio between VARA and the radio" below.)</li>
               <li>Below, tick <b>Use VARA HF</b> (or <b>Use VARA FM</b>), check the host and port, and click <b>Test</b>.</li>
             </ol>
             <span style="display:block;">VARA on another computer uses that computer's sound card: connect the radio's audio there. How to run VARA under Wine is your setup, not POTACAT's.</span>
@@ -3402,7 +3402,7 @@
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
             <label class="checkbox-label"><input type="checkbox" id="set-vara-hf-enable"> Use VARA HF</label>
             <label class="vara-win-only">Program: <input type="text" id="set-vara-hf-path" placeholder="C:\VARA\VARA.exe (found for you)" style="width:210px;"> <button type="button" id="vara-hf-browse">Browse&hellip;</button> <button type="button" id="vara-hf-find">Find / test</button></label>
-            <label title="Blank or 127.0.0.1 = this computer. Another computer: its name or address; VARA's audio then runs there.">Host: <input type="text" id="set-vara-hf-host" placeholder="127.0.0.1" spellcheck="false" style="width:120px;"></label>
+            <label title="Blank = this computer. Another computer: its name or address; VARA's audio then runs there.">Host: <input type="text" id="set-vara-hf-host" placeholder="this computer" spellcheck="false" style="width:120px;"></label>
             <label>Port: <input type="number" id="set-winlink-vara-port" min="1" max="65535" value="8300" style="width:70px;"></label>
             <button type="button" class="vara-other-only" id="vara-hf-test">Test</button>
             <label>Bandwidth: <select id="set-winlink-vara-bw" style="width:80px;"><option value="500">500</option><option value="2300" selected>2300</option><option value="2750">2750</option></select></label>
@@ -3411,16 +3411,17 @@
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:4px;">
             <label class="checkbox-label"><input type="checkbox" id="set-vara-fm-enable"> Use VARA FM</label>
             <label class="vara-win-only">Program: <input type="text" id="set-vara-fm-path" placeholder="C:\VARA FM\VARAFM.exe (found for you)" style="width:210px;"> <button type="button" id="vara-fm-browse">Browse&hellip;</button> <button type="button" id="vara-fm-find">Find / test</button></label>
-            <label title="Blank or 127.0.0.1 = this computer. Another computer: its name or address; VARA's audio then runs there.">Host: <input type="text" id="set-vara-fm-host" placeholder="127.0.0.1" spellcheck="false" style="width:120px;"></label>
+            <label title="Blank = this computer. Another computer: its name or address; VARA's audio then runs there.">Host: <input type="text" id="set-vara-fm-host" placeholder="this computer" spellcheck="false" style="width:120px;"></label>
             <label>Port: <input type="number" id="set-vara-fm-port" min="1" max="65535" value="8310" style="width:70px;"></label>
             <button type="button" class="vara-other-only" id="vara-fm-test">Test</button>
             <span class="help-text" id="vara-fm-status"></span>
           </div>
+          <span class="help-text" style="display:block;">Host: leave it blank when VARA runs on this computer. For VARA on another computer, type that computer's name or address (for example 192.168.1.50). The radio's audio must then be connected to that computer, and POTACAT does not start VARA there.</span>
           <span class="help-text" style="display:block;">VARA FM ships on port 8300, the same as VARA HF: set 8310 in VARA FM's Settings so both can be installed.</span>
           <!-- In a div: .checkbox-label forces display:flex !important, which outranks .hidden. -->
           <div class="vara-win-only"><label class="checkbox-label" style="margin-top:4px;"><input type="checkbox" id="set-vara-autolaunch" checked> Start VARA for me when a session needs it (it stays open; POTACAT never closes it)</label></div>
           <div style="margin-top:6px;font-weight:600;">Audio between VARA and the radio</div>
-          <span class="vara-other-only help-text" style="display:block;margin-bottom:4px;">For VARA on this computer, through a virtual audio cable: create two (one each way) with BlackHole on macOS or two PulseAudio or PipeWire null sinks on Linux, choose their ends in VARA, and choose them here. POTACAT carries their audio to and from the radio. Leave both blank and VARA uses the radio's sound card directly.</span>
+          <span class="vara-other-only help-text" style="display:block;margin-bottom:4px;">Leave both blank and VARA uses the radio's sound card directly: that is the simple way. A radio whose audio comes over the network (Flex Direct, Icom Network) needs two virtual audio devices instead, one each way (for example BlackHole on macOS, or PulseAudio or PipeWire virtual devices on Linux): choose their ends in VARA and here, and POTACAT carries the audio to and from the radio. This second way has not been tried on Linux or macOS yet.</span>
           <span class="vara-win-only help-text" style="display:block;margin-bottom:4px;">Recommended: two virtual audio cables, one for each direction. VB-Audio's free VB-CABLE is one cable and its A+B pack adds two more (<a href="https://vb-audio.com/Cable/" data-external style="color:var(--accent-blue,#4fc3f7);">vb-audio.com/Cable</a>). POTACAT carries the audio between the cables and the radio the way it does for ARDOP, so VARA never touches DAX or the radio's sound card, and it works on Flex Direct and Icom Network too. In VARA's SoundCard settings choose the cables' other ends. Leave both blank and VARA opens the radio's sound card itself: then choose the radio's devices in VARA.</span>
           <div style="display:flex;gap:12px;flex-wrap:wrap;">
             <label>From VARA (the cable POTACAT listens to): <select id="set-vara-cable-in" style="max-width:260px;"></select></label>
