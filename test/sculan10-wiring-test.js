@@ -137,7 +137,7 @@ test('band scope: a source of its own, offered only on a yaesu-lan rig while fra
     'an FT-710 on the LAN never spawns the USB bridge helper, and the scope shows only with frames');
   const kind = bodyOf(main, 'function scopeSourceKind() {', '\n}');
   assert.ok(kind.indexOf("if (sculan) return 'sculan10';") > 0 && kind.indexOf("if (sculan) return 'sculan10';") < kind.indexOf("if (native) return 'yaesu';"));
-  assert.ok(/\(!native && !icom && !flex && !sculan && !k4\)\)\) return 'sdr';/.test(kind), 'the radio\'s own scope wins over an SDR unless preferSdr');
+  assert.ok(/\(!native && !icom && !flex && !sculan && !k4 && !kenwood\)\)\) return 'sdr';/.test(kind), 'the radio\'s own scope wins over an SDR unless preferSdr');
   assert.ok(/if \(kind === 'sculan10'\) \{ startSculanScope\(\); return; \}/.test(main));
   assert.ok(/if \(sculanScopeOn\) \{ stopSculanScope\(why\); return; \}/.test(main));
   const b = bodyOf(main, "} else if (target.type === 'yaesu-lan') {", "} else if (target.type === 'icom-network') {");
