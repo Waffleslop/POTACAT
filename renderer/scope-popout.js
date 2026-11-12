@@ -86,11 +86,12 @@ function applyState(s) {
   pill.className = 'sc-pill ' + (state.status || 'stopped');
   pill.textContent = ({ stopped: 'Stopped', starting: 'Starting', live: 'Live', blocked: 'Blocked', error: 'Error', unavailable: 'Unavailable' })[state.status] || state.status;
   $('sc-synth-badge').style.display = state.kind === 1 ? '' : 'none';
-  // An SDR source (lib/sdr-scope.js), a Flex panadapter (lib/flex-scope.js)
-  // and an Icom (lib/icom-scope.js) have no sweep speed and no SCU-LAN10:
-  // those rows are the FT-710's.
+  // The sweep speed and SCU-LAN10 rows are the FT-710's ('radio', or the
+  // SCU-LAN10 box): every other source (an SDR, a Flex or K4 panadapter, an
+  // Icom, a Kenwood) has neither.
   const sdr = state.source === 'sdr' && state.kind !== 1;
-  const notYaesu = (state.source === 'sdr' || state.source === 'flex' || state.source === 'icom') && state.kind !== 1;
+  const yaesuSource = !state.source || state.source === 'radio' || state.source === 'sculan10';
+  const notYaesu = !yaesuSource && state.kind !== 1;
   $('sc-sdr-badge').style.display = sdr ? '' : 'none';
   $('sc-speed-wrap').style.display = notYaesu ? 'none' : '';
   // Over the SCU-LAN10 itself (source 'sculan10') the unit is plainly on:
