@@ -1462,16 +1462,15 @@
         <button type="button" class="settings-tab" data-tab="network">ECHOCAT</button>
         <button type="button" class="settings-tab" data-tab="display">Display</button>
         <button type="button" class="settings-tab" data-tab="cloud">Cloud</button>
-        <!-- Theme switch — sticks to the bottom-section of the
-             sidebar above Report a Bug. Labeled "Light Mode" when on,
-             "Dark Mode" when off so the current state is obvious
-             without having to flip and see what changes. -->
-        <label class="settings-tab-theme-toggle settings-tab-theme-pick" title="Change the theme of every window">
-          <span class="settings-tab-theme-label">Change Theme</span>
-          <select id="quick-theme" class="settings-tab-theme-select"></select>
-          <!-- The old on/off switch, kept hidden: the dropdown drives it. -->
-          <input type="checkbox" id="quick-light-mode" hidden style="display:none">
-          <span id="quick-light-mode-label" hidden></span>
+        <!-- Appearance, one step from any tab (#376): Light, Dark or System.
+             The themes for each mode are chosen in Settings > Display. -->
+        <label class="settings-tab-theme-toggle settings-tab-theme-pick" title="Light, Dark, or follow your computer. Choose the themes in Settings > Display.">
+          <span class="settings-tab-theme-label">Appearance</span>
+          <select id="quick-appearance" class="settings-tab-theme-select">
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+            <option value="system">System</option>
+          </select>
         </label>
         <!-- Action button styled like a tab, sits at the bottom of
              the sidebar nav. Doesn't switch tabs — fires the
@@ -3154,22 +3153,15 @@
     <!-- 8. Display (trimmed — bearing moved to Antenna, SmartSDR absorbed) -->
     <fieldset class="source-toggles" data-settings-tab="display">
       <legend>Display</legend>
-      <label for="set-app-theme" style="display:block;margin-bottom:6px;">Change Theme:
-        <select id="set-app-theme"></select>
-      </label>
-      <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Changes every window at once. The Classic themes are POTACAT's original look; the others are the same as the ECHOCAT app, colour for colour (a few controls still keep their old look while windows move onto them).</span>
+      <div class="settings-look">
+        <div style="margin-bottom:4px;">Appearance:</div>
+        <div id="set-look-picker"></div>
+        <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Changes every window at once. The same six looks as the ECHOCAT app. System follows your computer's light or dark setting, using the light theme and the dark theme chosen here.</span>
+      </div>
       <label for="set-waterfall-palette" style="display:block;margin-bottom:6px;">Waterfall colours:
         <select id="set-waterfall-palette"></select>
       </label>
       <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">The colours of every waterfall and band scope: the FT8 window, the Band Scope, SSTV and Winlink. The palettes are the ECHOCAT app's. Standard keeps each window's usual colours. Changes at once.</span>
-      <!-- The old Dark/Light switch and Navy/Charcoal radios, kept hidden:
-           Change Theme above drives them, and the Settings save reads them. -->
-      <input type="checkbox" id="set-light-mode" hidden style="display:none">
-      <div id="set-dark-variant-group" class="dark-variant-group" hidden style="display:none">
-        <span class="dark-variant-label">Dark variant:</span>
-        <label class="radio-inline"><input type="radio" name="set-dark-variant" value="navy" checked> Navy</label>
-        <label class="radio-inline"><input type="radio" name="set-dark-variant" value="charcoal"> Charcoal</label>
-      </div>
       <div class="text-size-row">
         <span class="text-size-label">Text size:</span>
         <button type="button" id="set-text-size-down" class="text-size-btn" title="Smaller text (Ctrl &minus;)">&minus;</button>
@@ -3984,7 +3976,7 @@
           <button type="button" id="pota-sync-now" class="btn btn-sm">Refresh</button>
           <span>Last refresh: <strong id="pota-sync-last">never</strong></span>
         </div>
-        <p id="pota-sync-error" class="hidden" style="color:var(--accent-gold);font-size:11px;margin-top:4px;"></p>
+        <p id="pota-sync-error" class="hidden" style="color:var(--accent-red-text);font-size:11px;margin-top:4px;"></p>
       </div>
     </fieldset>
 
@@ -4957,18 +4949,6 @@
     <h3>POTACAT: Democratizing Remote Radio</h3>
     <p class="welcome-text">Here are some quick settings to get you up and running. There are many more inside the Settings menu.</p>
 
-    <div class="welcome-section-label">Display</div>
-    <label class="welcome-field" for="welcome-theme" style="display:block;">
-      <span style="font-size:13px;color:var(--text-secondary);">Change Theme</span>
-      <select id="welcome-theme" style="display:block;margin-top:4px;"></select>
-      <!-- The old switch, kept hidden: the dropdown drives it, the Welcome save reads it. -->
-      <input type="checkbox" id="welcome-light-mode" checked hidden style="display:none">
-    </label>
-    <div class="welcome-field">
-      <span style="font-size:13px;color:var(--text-secondary);">Change Font Size</span>
-      <span class="help-text" style="display:block;margin-top:2px;">Press <kbd>Ctrl +</kbd> to make text larger, <kbd>Ctrl &minus;</kbd> to make smaller, <kbd>Ctrl 0</kbd> to reset</span>
-    </div>
-
     <div class="welcome-section-label">Station</div>
     <div style="display:flex;gap:8px;align-items:flex-end;">
       <label class="welcome-field" style="margin-bottom:0;">Callsign:
@@ -5005,6 +4985,17 @@
     <label class="checkbox-label" style="margin-top:4px;margin-bottom:8px;" title="Hide spots your license class can't operate, plus any truly out-of-band frequencies. Uses the License Class above.">
       <input type="checkbox" id="welcome-hide-oob"> Hide spots outside my license privileges
     </label>
+
+    <!-- Pick your look (#376): right after the callsign. Appearance, the
+         themes for the mode in force, and a live preview; every click
+         repaints this window at once. -->
+    <div class="welcome-section-label" id="welcome-look-label">Pick your look</div>
+    <div id="welcome-look-picker"></div>
+    <span class="help-text" style="display:block;margin-bottom:6px;">The same six looks as the ECHOCAT app. Change any time in Settings &gt; Display.</span>
+    <div class="welcome-field">
+      <span style="font-size:13px;color:var(--text-secondary);">Change Font Size</span>
+      <span class="help-text" style="display:block;margin-top:2px;">Press <kbd>Ctrl +</kbd> to make text larger, <kbd>Ctrl &minus;</kbd> to make smaller, <kbd>Ctrl 0</kbd> to reset</span>
+    </div>
 
     <div class="welcome-section-label">Idle Mode</div>
     <label class="checkbox-label" style="margin-bottom:4px;">
@@ -5291,6 +5282,7 @@
   <script src="../lib/rig-family.js"></script>
   <script src="../lib/waterfall-palettes.js"></script>
   <script src="../lib/app-theme.js"></script>
+  <script src="../lib/look-picker.js"></script>
   <script src="../lib/rig-bands.js"></script>
   <script src="../lib/listen-source.js"></script>
   <script src="../lib/channels.js"></script>

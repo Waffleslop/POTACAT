@@ -184,6 +184,7 @@ const TESTS = [
   'test/channels-test.js', // Directory > Channels: the saved frequency chart, CHIRP CSV both ways (KL4XQ, KC8DHX lists)
   'test/memory-recall-test.js', // #308: a Channels entry recalls the radio's own memory; any later tune leaves memory mode first
   'test/app-theme-test.js', // design-system themes reach every window; was missing from this list, so a stale check went unseen
+  'test/look-picker-test.js', // #376: Light / Dark / System, the six swatches in order, contrast 4.5:1 per theme
   'test/vfo-compact-test.js', // VFO window: Audio on/off, the mini VFO strip, POTACAT colours for PTT, sliders and CW
   'test/vfo-layout-test.js', // VFO window: Large and Small VFO layouts, one-line Small VFO, CAT buttons, Scan
   'test/main-window-layout-fixes-test.js', // #285 Log button "L", #284 HF Nets check mark, #298 HOLD TO TALK off screen

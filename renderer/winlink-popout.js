@@ -17,6 +17,7 @@
   $('wl-max').addEventListener('click', function () { window.api.maximize(); });
   $('wl-close').addEventListener('click', function () { window.api.close(); });
   if (window.api.onPopoutTheme) window.api.onPopoutTheme(function (t) {
+    if (window.applyPopoutTheme) window.applyPopoutTheme(t);
     document.documentElement.classList.toggle('light', t && t.theme === 'light');
   });
 

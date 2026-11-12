@@ -3,6 +3,8 @@
 // both work. Sets data-theme and (in charcoal dark variant only) the
 // data-dark-variant attribute on <html>.
 function _applyPopoutTheme(payload) {
+  // The shared rule (popout-theme-boot*.js) also sets data-ds (#376).
+  if (window.applyPopoutTheme) return window.applyPopoutTheme(payload);
   const theme = typeof payload === 'string'
     ? payload
     : ((payload && payload.theme) || 'dark');
@@ -962,7 +964,7 @@ function _applyPopoutTheme(payload) {
   (async () => {
     try {
       const s = await window.api.getSettings();
-      if (s && s.lightMode) applyTheme('light');
+      if (s && s.themeNow) applyTheme(s.themeNow);
     } catch {}
   })();
 

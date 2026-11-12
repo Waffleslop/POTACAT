@@ -3,6 +3,8 @@
 // both work. Sets data-theme and (in charcoal dark variant only) the
 // data-dark-variant attribute on <html>.
 function _applyPopoutTheme(payload) {
+  // The shared rule (popout-theme-boot*.js) also sets data-ds (#376).
+  if (window.applyPopoutTheme) return window.applyPopoutTheme(payload);
   const theme = typeof payload === 'string'
     ? payload
     : ((payload && payload.theme) || 'dark');
@@ -995,10 +997,7 @@ ro.observe(wrap);
 // --- Bootstrap ---
 (async function init() {
   settings = await window.api.getSettings();
-  _applyPopoutTheme({
-    theme: settings.lightMode ? 'light' : 'dark',
-    variant: settings.darkVariant || 'navy',
-  });
+  if (settings.themeNow) _applyPopoutTheme(settings.themeNow);
   licenseClass = settings.licenseClass || 'none';
   selectedBand = settings.bandspreadBand && BANDS[settings.bandspreadBand] ? settings.bandspreadBand : '20m';
   const savedScale = parseFloat(settings.bandspreadFontScale);

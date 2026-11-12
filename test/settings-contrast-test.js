@@ -74,7 +74,8 @@ test('the rules Settings uses are theme tokens', () => {
 
 test('the rendered audit exists and this test is in the list CI runs', () => {
   const audit = readSrc(path.join(root, 'scripts', 'settings-contrast-audit.js'));
-  assert.ok(audit.includes('On Frequency') && audit.includes('Halloween') && /ratio\(fg, bg\)/.test(audit), 'all ten themes, measured');
+  assert.ok(audit.includes("require('../lib/app-theme')") && audit.includes('AppTheme.APP_THEMES') && /ratio\(fg, bg\)/.test(audit), 'all six themes, measured');
+  assert.ok(!audit.includes('Halloween') && !audit.includes('Charcoal'), 'the retired looks are not measured');
   assert.ok(readSrc(path.join(root, 'scripts', 'run-tests.js')).includes("'test/settings-contrast-test.js'"));
 });
 

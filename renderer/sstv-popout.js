@@ -3,6 +3,8 @@
 // both work. Sets data-theme and (in charcoal dark variant only) the
 // data-dark-variant attribute on <html>.
 function _applyPopoutTheme(payload) {
+  // The shared rule (popout-theme-boot*.js) also sets data-ds (#376).
+  if (window.applyPopoutTheme) return window.applyPopoutTheme(payload);
   const theme = typeof payload === 'string'
     ? payload
     : ((payload && payload.theme) || 'dark');
@@ -214,7 +216,7 @@ const MODE_RES = {
   try { await loadGallery(); } catch (e) { console.error('[SSTV] Gallery load error:', e); }
 
   // Set theme
-  try { applyTheme(settings.lightMode ? 'light' : 'dark'); } catch {}
+  try { if (settings.themeNow) applyTheme(settings.themeNow); } catch {}
 
   // Fonts load asynchronously; redraw once they are here so the first
   // picture isn't in the fallback face.

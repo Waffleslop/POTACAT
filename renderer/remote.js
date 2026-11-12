@@ -1562,8 +1562,6 @@
   const soMaxageVal = document.getElementById('so-maxage-val');
   const soDistMi = document.getElementById('so-dist-mi');
   const soDistKm = document.getElementById('so-dist-km');
-  const soThemeDark = document.getElementById('so-theme-dark');
-  const soThemeLight = document.getElementById('so-theme-light');
   // Tuning settings overlay elements
   const soXitDn = document.getElementById('so-xit-dn');
   const soXitUp = document.getElementById('so-xit-up');
@@ -1592,20 +1590,42 @@
   let tuneClick = false;
 
   // --- Theme ---
-  function applyTheme(light) {
-    document.documentElement.setAttribute('data-theme', light ? 'light' : 'dark');
-    soThemeDark.classList.toggle('active', !light);
-    soThemeLight.classList.toggle('active', light);
-    // Update mobile browser chrome color
-    var meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute('content', light ? '#e8eaed' : '#0f3460');
-    localStorage.setItem('echocat-theme', light ? 'light' : 'dark');
+  // The six ECHOCAT looks (#376, lib/app-theme.js): Light / Dark / System and
+  // one theme per mode, kept in this browser like the phone keeps its own.
+  // System follows the device's light or dark setting live.
+  const lookSysDark = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+  const lookGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  let lookState = window.AppTheme ? window.AppTheme.webState(lookGet) : null;
+  function applyLook() {
+    const AT = window.AppTheme;
+    if (!AT || !lookState) return;
+    const sysDark = !!(lookSysDark && lookSysDark.matches);
+    const r = AT.resolveAppTheme(lookState, sysDark);
+    AT.applyToDocument(document, r);
+    // Mobile browser chrome colour
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', AT.WINDOW_BG[r.ds] || '#07111b');
+    if (window.LookPicker) {
+      window.LookPicker.render(document.getElementById('so-look-picker'), {
+        state: lookState, systemDark: sysDark, scope: 'all',
+        onChange: (next) => {
+          lookState = { appearance: next.appearance, themeLight: next.themeLight, themeDark: next.themeDark };
+          try {
+            localStorage.setItem(AT.WEB_KEYS.appearance, lookState.appearance);
+            localStorage.setItem(AT.WEB_KEYS.themeLight, lookState.themeLight);
+            localStorage.setItem(AT.WEB_KEYS.themeDark, lookState.themeDark);
+          } catch (e) { /* private window: the look holds for this visit */ }
+          applyLook();
+        },
+      });
+    }
   }
-  // Apply saved theme on load
-  applyTheme(localStorage.getItem('echocat-theme') === 'light');
-
-  soThemeDark.addEventListener('click', () => applyTheme(false));
-  soThemeLight.addEventListener('click', () => applyTheme(true));
+  applyLook();
+  if (lookSysDark) {
+    const onSys = () => { if (lookState && lookState.appearance === 'system') applyLook(); };
+    if (lookSysDark.addEventListener) lookSysDark.addEventListener('change', onSys);
+    else if (lookSysDark.addListener) lookSysDark.addListener(onSys);
+  }
 
   // --- Split layout (iPad-sized screens: dock the VFO panel on a side) ---
   // Modes: 'right' (default), 'left', 'off'. Only actually engages when the
