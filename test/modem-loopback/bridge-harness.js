@@ -57,7 +57,10 @@ app.whenReady().then(async () => {
   await new Promise((r) => setTimeout(r, 2500));
   first = 0; last = 0; samples = 0; maxGap = 0; gaps50 = 0; batches = 0; if (meter) meter.reset();
 
-  // TX: a continuous tone, 20 ms per chunk, paced by the wall clock like main's modem path.
+  // TX: one over (as main marks key-down), a continuous tone, 20 ms per chunk,
+  // paced by the wall clock like main's modem path. The play worklet counts
+  // every hole inside the over and reports it at over-end (txOver).
+  win.webContents.send('modem-bridge-over', { on: true });
   const t0 = performance.now();
   let sent = 0, phase = 0, txMaxLate = 0, lastTick = t0;
   const tick = setInterval(() => {
@@ -75,9 +78,14 @@ app.whenReady().then(async () => {
   await new Promise((r) => setTimeout(r, SECONDS * 1000));
   clearInterval(tick);
   await new Promise((r) => setTimeout(r, 1500));
+  win.webContents.send('modem-bridge-over', { on: false });
+  await new Promise((r) => setTimeout(r, 1000));
   const span = (last - first) / 1000;
   result.rx = { sampleRate: rate, batches, seconds: +span.toFixed(1), samples, expected: Math.round(span * rate), lostPct: rate ? +(100 * (1 - samples / Math.max(1, span * rate))).toFixed(2) : null, maxGapMs: +maxGap.toFixed(1), gapsOver50ms: gaps50, holes: meter ? meter.snapshot(rate) : null };
   result.tx = { chunksSent: sent, acks, timerMaxLateMs: +txMaxLate.toFixed(1), overs: result.statuses.filter((s) => s && s.txOver).map((s) => s.txOver) };
+  // No report at over-end = the worklet never ran dry inside the over.
+  const ov = result.tx.overs[0] || { gaps: 0, gapMs: 0, droppedMs: 0 };
+  result.tx.holes = ov.gaps; result.tx.holeMs = +(ov.gapMs || 0).toFixed(1); result.tx.droppedMs = +(ov.droppedMs || 0).toFixed(1);
   win.webContents.send('modem-bridge-stop');
   await new Promise((r) => setTimeout(r, 400));
   if (blockId != null) powerSaveBlocker.stop(blockId);

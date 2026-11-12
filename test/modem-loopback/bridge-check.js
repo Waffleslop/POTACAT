@@ -51,7 +51,7 @@ for (const v of VARIANTS) {
   runs.push(r);
   const rx = r.rx || {}, tx = r.tx || {};
   const h = rx.holes || {};
-  console.log(`${v.name.padEnd(34)} RX ${rx.sampleRate} Hz: lost ${rx.lostPct}%, longest hole ${h.maxGapMs} ms (${h.gapsOverWarn} over 20 ms), largest arrival gap ${rx.maxGapMs} ms  |  TX: ${tx.chunksSent} chunks sent, ${tx.acks} acked, timer late up to ${tx.timerMaxLateMs} ms, overs ${JSON.stringify(tx.overs || [])}${(r.errors || []).length ? '  ERRORS ' + r.errors.join(' / ') : ''}`);
+  console.log(`${v.name.padEnd(34)} RX ${rx.sampleRate} Hz: lost ${rx.lostPct}%, longest hole ${h.maxGapMs} ms (${h.gapsOverWarn} over 20 ms), largest arrival gap ${rx.maxGapMs} ms  |  TX: ${tx.chunksSent} chunks sent, ${tx.acks} acked, timer late up to ${tx.timerMaxLateMs} ms, holes in the over ${tx.holes} (${tx.holeMs} ms), cut ${tx.droppedMs} ms${(r.errors || []).length ? '  ERRORS ' + r.errors.join(' / ') : ''}`);
 }
 fs.writeFileSync(OUT, JSON.stringify({ platform: process.platform, arch: process.arch, seconds: SECONDS, runs }, null, 1));
 // Pass, for the variant POTACAT now runs (the fix): see THRESHOLDS below.

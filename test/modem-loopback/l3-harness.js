@@ -33,7 +33,7 @@ const { Ardop } = require('./ardop');
 const mkServer = () => new ModemAudioServer({ makeResampler: (a, b) => new StreamingResampler(a, b), txOutRate: 24000, log: () => {} });
 const result = { phase: PHASE, platform: process.platform, arch: process.arch, statuses: [], errors: [] };
 const write = () => fs.writeFileSync(OUT, JSON.stringify(result, null, 1));
-const fatal = setTimeout(() => { result.errors.push('timeout'); write(); app.exit(1); }, 150000);
+const fatal = setTimeout(() => { result.errors.push('timeout'); write(); app.exit(1); }, 300000);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Frames B decoded: its debug log's "[DecodeFrame] Frame: X Decode PASS" lines.
@@ -135,8 +135,16 @@ app.whenReady().then(async () => {
     await sleep(800);
     const play = Float32Array.from(got.raw);
     const step = Math.round(got.rate / 50); // 20 ms
-    for (let o = 0; o < play.length; o += step) { srvB.feedRx(play.subarray(o, o + step), got.rate); await sleep(20); }
-    for (let i = 0; i < 100; i++) { srvB.feedRx(new Float32Array(step), got.rate); await sleep(20); }
+    // Paced by the wall clock, not by sleep(20) per block: on a Mac VM a 20 ms
+    // timer fires up to ~150 ms late, which stretched 30 s of audio past the limit.
+    const tail = new Float32Array(got.rate * 2);
+    const feed = new Float32Array(play.length + tail.length); feed.set(play, 0);
+    const t0 = Date.now(); let fed = 0;
+    while (fed < feed.length) {
+      const due = Math.min(feed.length, Math.floor((Date.now() - t0) / 1000 * got.rate));
+      if (due > fed) { srvB.feedRx(feed.subarray(fed, due), got.rate); fed = due; }
+      await sleep(10);
+    }
     result.bDecoded = decodes(dirB);
     result.bLines = B.lines.slice(-15);
     B.stop();
