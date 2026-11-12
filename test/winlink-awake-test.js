@@ -21,7 +21,8 @@ t('held from the start of a radio session', () => {
 });
 t('released first thing at every session end, and at quit', () => {
   assert.ok(/function winlinkEndSession\([^)]*\) \{\n\s*winlinkHoldAwake\(false\);/.test(main.replace(/\r\n/g, '\n')), 'before any early return');
-  assert.ok(/app\.on\('before-quit', \(e\) => \{\n\s*winlinkHoldAwake\(false\);/.test(main.replace(/\r\n/g, '\n')));
+  const at = main.indexOf("app.on('before-quit', (e) => {");
+  assert.ok(at > 0 && /winlinkHoldAwake\(false\);/.test(main.slice(at, at + 900)), 'released at quit, after the log reviews are written');
 });
 t('it is App Nap suspension that is blocked, once', () => {
   const s = body('winlinkHoldAwake');

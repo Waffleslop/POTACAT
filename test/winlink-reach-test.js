@@ -115,7 +115,8 @@ test('a refused key-down ends the attempt instead of keying into nothing', () =>
   assert.ok(/keyed = handleRemotePtt\(true, \{[^}]*\}\) !== false;/.test(f), 'the refusal is read, not ignored');
   const b = f.slice(f.indexOf('if (!keyed) {'));
   assert.ok(/winlinkTxActive = false;/.test(b) && /winlinkAbortSession\(`the radio refused to transmit: \$\{why\}`\);/.test(b) && /return false;/.test(b));
-  assert.ok(f.indexOf('if (!keyed) {') < f.indexOf('winlinkSendPreKeyAudio();'), 'no audio is sent after a refusal');
+  assert.ok(f.indexOf('if (!keyed) {') < f.indexOf('winlinkLaneKeyDown();'), 'no audio is sent after a refusal');
+  assert.ok(/if \(winlinkAudio\) winlinkAudio\.key\(false\); \/\/ nothing it held is sent after a refusal/.test(b), 'and what the lane held is dropped');
 });
 
 test('the modem must be on POTACAT\'s audio before anything tunes or keys', () => {

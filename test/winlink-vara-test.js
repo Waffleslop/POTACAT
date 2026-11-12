@@ -159,9 +159,12 @@ function fnBody(src, name) {
     assert.ok(/e\.sender !== modemBridgeWin\.webContents/.test(rx), 'only the bridge window may feed it');
     const feed = fnBody(main, 'winlinkFeedRx');
     assert.ok(/modemBridge\.cable\.state === 'ok'[\s\S]*?audioSafeSend\(modemBridgeWin\.webContents, 'modem-bridge-cable-tx'/.test(feed), 'the radio\'s RX goes to VARA over the cable');
+    // One pipeline (#187): VARA's audio enters the modem audio lane like the socket modems' audio;
+    // the lane plays the radio-side bridge itself and hands Flex / Icom back to winlinkDispatchOut.
     const dispatch = fnBody(main, 'winlinkDispatchTx');
-    assert.ok(/pushTxAudioChunk\(mono24k\)/.test(dispatch) && /pushIcomNetworkVoiceChunk\(mono24k\)/.test(dispatch) && /'modem-bridge-tx'/.test(dispatch), 'Flex, Icom Network, radio-side bridge');
-    assert.ok(/winlinkModemTxIn\(mono24k\)/.test(fnBody(main, 'startWinlinkAudio')) && /winlinkDispatchTx\(mono24k\)/.test(fnBody(main, 'winlinkModemTxIn')), 'the socket modems use the same dispatch');
+    const out = fnBody(main, 'winlinkDispatchOut');
+    assert.ok(/winlinkAudio\.txIn\(mono24k\)/.test(dispatch) && /pushTxAudioChunk\(mono24k\)/.test(out) && /pushIcomNetworkVoiceChunk\(mono24k\)/.test(out) && /'modem-bridge-tx'/.test(out), 'Flex, Icom Network, radio-side bridge');
+    assert.ok(/srv\.on\('tx-out', \(mono24k\) => \{ if \(winlinkTxActive\) winlinkDispatchOut\(mono24k\); \}\);/.test(fnBody(main, 'startWinlinkAudio')), 'the socket modems use the same dispatch');
     const ready = fnBody(main, 'winlinkVaraAudioReady');
     assert.ok(/if \(!winlinkCableConfigured\(\)\) \{[\s\S]*?winlinkIpAudioRoute\(\)[\s\S]*?set up the virtual audio cable/.test(ready), 'no cable on Flex Direct / Icom Network is refused with the fix');
     assert.ok(/startModemBridgeCable\(\);[\s\S]*?modemBridgeCableReady\(10000\)/.test(ready));

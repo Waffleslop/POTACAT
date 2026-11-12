@@ -450,7 +450,7 @@ const VaraSetup = require('./lib/vara-setup');
 const WinlinkModes = require('./lib/winlink-modes');
 const WinlinkReturn = require('./lib/winlink-return');
 const ModemAudioServerMod = require('./lib/modem-audio-server');
-const { ModemAudioServer } = ModemAudioServerMod;
+const { ModemAudioLane } = require('./lib/modem-audio-lane-client'); // the modem's audio, off the main process (#187)
 const { buildAdifFields, buildAdifRecord, sqliteQsoToAdifFields, ADIF_HEADER, adifField } = require('./lib/adif-writer');
 const { PassQsoOutbox } = require('./lib/pass-qso-outbox');
 const { ClublogOutbox } = require('./lib/clublog-outbox');
@@ -1903,7 +1903,7 @@ let _direwolfMonitor = null;    // our client on Dire Wolf's AGW port in monitor
 let _direwolfMonitorHeard = 0;  // frames the monitor saw the radio receive this session (stdout never reaches us on Windows, #128)
 let _direwolfTiming = null;     // {txDelayMs, txTailMs} the running Dire Wolf was given (#257)
 let _winlinkPatConnected = false; // Pat said "Connected to ..." this session: the modem decoded the far end (#257)
-let winlinkAudio = null;        // ModemAudioServer: the modem's audio over POTACAT's radio link (no sound card)
+let winlinkAudio = null;        // ModemAudioLane: the modem's audio socket, in its own process (lib/modem-audio-lane.js, #187)
 let winlinkTxActive = false;    // Pat has the transmitter keyed (via the shim)
 let _winlinkTxFailsafeTimer = null;
 let _winlinkCapTimer = null;
@@ -10401,6 +10401,9 @@ const WINLINK_BUSY_WAIT_SEC = 300; // Pat's own limit on a busy channel (pat app
 // Packet holds less: Dire Wolf's TXTAIL already covers part of it (winlinkUnkeyDrainMs, #257).
 const WINLINK_UNKEY_DRAIN_BRIDGE_MS = 250;
 const WINLINK_UNKEY_DRAIN_IP_MS = 120;
+// With the modem audio lane the bridge itself reports the end of the frame;
+// this is only the backstop past the usual hold (pre-buffer 250 ms + slack).
+const WINLINK_LANE_DRAIN_BACKSTOP_MS = 2000;
 const WINLINK_PAT_READY_MS = 10000;
 const WINLINK_NOTICE_TEXT = 'Winlink is amateur radio: no business or commercial traffic, nothing that needs privacy (messages are not encrypted and can be read by anyone), and messages for third parties in other countries only where your licence allows it.';
 
@@ -11216,7 +11219,15 @@ async function startWinlinkShim() {
         // share of the latency.
         if (_winlinkUnkeyTimer) return true;
         _winlinkTxBurst.unkeyAsked();
-        _winlinkUnkeyTimer = setTimeout(() => { _winlinkUnkeyTimer = null; winlinkUnkeyNow(); }, winlinkUnkeyDrainMs());
+        if (winlinkLaneDrains()) {
+          // The bridge plays out what it holds and says so ('drained'): PTT drops
+          // when the frame has really played, pre-buffer included (#187). The
+          // timer is only the backstop.
+          winlinkAudio.endOver({ leaveMs: winlinkUnkeyLeaveMs() });
+          _winlinkUnkeyTimer = setTimeout(() => { _winlinkUnkeyTimer = null; winlinkLog('modem audio: the bridge did not report the end of the frame — PTT off by the clock'); winlinkUnkeyNow(); }, WINLINK_UNKEY_DRAIN_BRIDGE_MS + WINLINK_LANE_DRAIN_BACKSTOP_MS);
+        } else {
+          _winlinkUnkeyTimer = setTimeout(() => { _winlinkUnkeyTimer = null; winlinkUnkeyNow(); }, winlinkUnkeyDrainMs());
+        }
         return true;
       }
       if (!_winlinkShimArmed || radioOwner !== 'winlink') {
@@ -11238,6 +11249,7 @@ async function startWinlinkShim() {
         // restarted by hand: each re-keyed frame is a new over, not one long
         // one (transmit-safety review).
         clearTimeout(_winlinkUnkeyTimer); _winlinkUnkeyTimer = null;
+        if (winlinkAudio) winlinkAudio.cancelEnd();
         _winlinkTxBurst.rekeyed();
         try { txLimit().disarm(); txLimit().arm('winlink'); } catch (e) { console.error('[TX LIMIT]', e); }
         armWinlinkTxFailsafe();
@@ -11261,7 +11273,7 @@ async function startWinlinkShim() {
         // radio's own reason (the line handleRemotePtt just logged).
         winlinkTxActive = false;
         _winlinkTxBurst.reset();
-        _winlinkPreKey.clear();
+        if (winlinkAudio) winlinkAudio.key(false); // nothing it held is sent after a refusal
         modemBridgeOver(false);
         if (settings.audioSource === 'icom-network') icomNetworkVoiceTx(false, 'Winlink');
         const said = _catLogRing.length > ringAt ? _catLogRing[_catLogRing.length - 1] : '';
@@ -11271,7 +11283,7 @@ async function startWinlinkShim() {
         winlinkAbortSession(`the radio refused to transmit: ${why}`);
         return false;
       }
-      winlinkSendPreKeyAudio(); // the start of this frame, which arrived before the request to key
+      winlinkLaneKeyDown(); // the start of this frame (it arrived before the request to key), then the rest
       armWinlinkTxFailsafe();
       winlinkSessionTouch();
       winlinkState.setSession({ ptt: true }); winlinkSessionPush();
@@ -11287,29 +11299,47 @@ function winlinkUnkeyNow() {
   if (_winlinkUnkeyTimer) { clearTimeout(_winlinkUnkeyTimer); _winlinkUnkeyTimer = null; }
   clearWinlinkTxFailsafe();
   if (winlinkTxActive) { winlinkTxActive = false; try { handleRemotePtt(false); } catch {} }
-  _winlinkPreKey.clear();
+  if (winlinkAudio) winlinkAudio.key(false); // nothing held survives the carrier drop
   winlinkTxBurstEnd();
   if (settings.audioSource === 'icom-network') icomNetworkVoiceTx(false, 'Winlink');
   winlinkState.setSession({ ptt: false }); winlinkSessionPush();
 }
-/** The modem's transmit audio (24 kHz mono) while it has PTT: measured for the over's log line, then sent to the radio. */
-function winlinkModemTxIn(mono24k) {
-  _winlinkTxBurst.noteAudio(mono24k, 24000);
-  winlinkDispatchTx(mono24k);
+/**
+ * Key-down for the modem audio lane: it sends what the modem wrote before its
+ * PTT request arrived (lib/modem-prekey.js, #289), then the live audio, to
+ * the bridge worklet (sound card) or back here (Flex Direct / Icom Network).
+ */
+function winlinkLaneKeyDown() {
+  if (!winlinkAudio) return;
+  const saved = settings.winlinkModemTxGain && Number(settings.winlinkModemTxGain[winlinkModemTxGainKey()]);
+  winlinkAudio.key(true, { seedGain: saved >= 1 && saved <= 8 ? saved : 1, bridge: !winlinkIpAudioRoute() });
 }
-/** Key-down: send what the modem wrote before its PTT request arrived (lib/modem-prekey.js, #289). Said once per session. */
-function winlinkSendPreKeyAudio() {
-  const early = _winlinkPreKey.take();
-  if (!early.ms) return;
-  for (const c of early.chunks) winlinkModemTxIn(c);
+/** The bridge plays the over out and reports it (sound card, worklet attached). */
+function winlinkLaneDrains() {
+  return !!(winlinkAudio && winlinkAudio.txDirect && !winlinkIpAudioRoute() && modemBridge.playback);
+}
+/** How much of the frame's very end packet may leave unplayed (Dire Wolf's extra TXTAIL, #257). */
+function winlinkUnkeyLeaveMs() {
+  return winlinkState.session.mode === 'packet' && _direwolfTiming ? DirewolfProcess.packetUnkeyLeaveMs(_direwolfTiming.txTailMs) : 0;
+}
+/** The bridge has played the last of the over: PTT off now. */
+function winlinkLaneDrained() {
+  if (!_winlinkUnkeyTimer) return; // re-keyed, or the backstop already fired
+  clearTimeout(_winlinkUnkeyTimer); _winlinkUnkeyTimer = null;
+  winlinkUnkeyNow();
+}
+/** The lane sent audio that beat the PTT request. Said once per session. */
+function winlinkPreKeyNoted(ms) {
+  if (!ms) return;
   if (_winlinkPreKeyLoggedFor !== _winlinkSessionSeq) {
     _winlinkPreKeyLoggedFor = _winlinkSessionSeq;
-    winlinkLog(`modem audio: ${early.ms} ms arrived before the modem's PTT request and was kept — it is the start of the frame`);
+    winlinkLog(`modem audio: ${ms} ms arrived before the modem's PTT request and was kept — it is the start of the frame`);
   }
 }
 /** One line per over — when the modem keyed, when its audio ran and how loud, when it unkeyed (lib/modem-tx-burst.js, #128). */
 function winlinkTxBurstEnd() {
-  const burst = _winlinkTxBurst.keyUp({ gainDb: _modemTxLeveler ? _modemTxLeveler.gainDb : 0 });
+  const lv = winlinkLaneTxLevel();
+  const burst = _winlinkTxBurst.keyUp({ gainDb: lv ? lv.gainDb : 0 });
   if (burst) winlinkLog(burst.text);
   if (burst) modemBridgeOver(false);
 }
@@ -11343,6 +11373,7 @@ function armWinlinkTxFailsafe() {
     winlinkLog(`TX failsafe — no PTT off within ${WINLINK_PTT_FAILSAFE_MS / 1000}s; forcing PTT off and ending the session`);
     winlinkTxActive = false;
     try { handleRemotePtt(false); } catch {}
+    if (winlinkAudio) winlinkAudio.key(false);
     winlinkTxBurstEnd();
     winlinkAbortSession('the transmitter stayed keyed for 30 s');
   }, WINLINK_PTT_FAILSAFE_MS);
@@ -11380,28 +11411,31 @@ function winlinkAudioRouteName() {
  */
 async function startWinlinkAudio({ modemRate = ModemAudioServerMod.MODEM_RATE } = {}) {
   stopWinlinkAudio();
-  const srv = new ModemAudioServer({
-    makeResampler: (a, b) => new mercuryAudioBridge.StreamingResampler(a, b),
-    txOutRate: 24000,
-    modemRate,
-    log: winlinkLog,
-  });
+  // The socket, the pre-key hold, the transmit leveler and the bridge
+  // worklets' audio all live in the lane's own process: a main stall cannot
+  // cut a transmission (docs/ardop-macos-plan.md L4). Main keeps the radio.
+  const srv = new ModemAudioLane({ modemRate, log: winlinkLog });
   srv.on('modem-connected', () => winlinkLog(`modem audio: the modem connected at ${modemRate} samples/s — radio audio via ${winlinkAudioRouteName()}${winlinkIpAudioRoute() ? ', no sound card' : ` (${modemBridge.captureLabel || 'input'} → ${modemBridge.playbackLabel || 'output'})`}`));
   srv.on('modem-gone', () => { if (winlinkSessionActive()) winlinkLog('modem audio: the modem closed its audio connection'); });
-  srv.on('tx', (mono24k) => {
-    // The modem's audio beats its own PTT request here: the audio comes
-    // straight down this socket, the request goes ardopcf -> Pat -> the shim.
-    // Held until the key-down (lib/modem-prekey.js), never discarded: the
-    // discard cost 44 of 50 ARDOP connect requests their leader (#289). With
-    // no key-down behind it, it is dropped after 500 ms as a stray.
-    if (!winlinkTxActive) { _winlinkPreKey.hold(mono24k, 24000); return; }
-    winlinkModemTxIn(mono24k);
-  });
+  // The modem's audio beats its own PTT request: the audio comes straight
+  // down the socket, the request goes ardopcf -> Pat -> the shim. The lane
+  // holds it until the key-down (lib/modem-prekey.js), never discards it: the
+  // discard cost 44 of 50 ARDOP connect requests their leader (#289).
+  srv.on('tx-note', (n) => { if (winlinkTxActive) _winlinkTxBurst.noteLevel(n.samples, n.peak, n.rate); });
+  srv.on('tx-out', (mono24k) => { if (winlinkTxActive) winlinkDispatchOut(mono24k); });
+  srv.on('prekey-sent', (d) => winlinkPreKeyNoted(d.ms));
+  srv.on('tx-boost', (l) => winlinkLog(`modem transmit audio raised ${l.boostDb} dB — the modem plays about ${l.inDb} dBFS peak and full scale is the set RF power (the modem's own drive slider does the same)`));
+  srv.on('tx-cut', (c) => winlinkLog(`modem audio: ${c.ms} ms of transmit audio cut — the sound card stopped taking it (${c.totalMs} ms this session)`));
+  srv.on('over-report', (o) => { const t = modemBridgeOverText({ gaps: Number(o.gaps) || 0, gapMs: Number(o.gapMs) || 0, droppedMs: Number(o.droppedMs) || 0 }); if (t) winlinkLog(t); });
+  srv.on('drained', () => winlinkLaneDrained());
+  srv.on('exit', () => { if (winlinkAudio === srv) { winlinkAudio = null; if (winlinkSessionActive()) winlinkAbortSession('the modem audio process stopped'); } });
   try {
     await srv.listen(0);
     winlinkAudio = srv;
+    if (modemBridgeWin && !modemBridgeWin.isDestroyed() && modemBridge.state === 'ok') srv.attachBridge(modemBridgeWin.webContents, { tx: !!modemBridge.playback, rx: true });
   } catch (e) {
     winlinkLog(`modem audio server could not listen: ${e.message}`);
+    try { srv.close(); } catch {}
   }
 }
 
@@ -11731,20 +11765,22 @@ let _cableTxResampler = null;   // VARA's TX (the cable's capture rate) → 24 k
 let _cableRxRate = 0, _cableTxRate = 0;
 // The level of the radio audio VARA hears through the cable (lib/modem-rx-level.js):
 // trimmed automatically when it reaches the red, shown on every surface.
-const { RxLeveler, TxLeveler } = require('./lib/modem-rx-level');
+const { RxLeveler } = require('./lib/modem-rx-level'); // the modem's TxLeveler runs in the modem audio lane (#187)
 const { TxBurst } = require('./lib/modem-tx-burst');
 const _winlinkTxBurst = new TxBurst(); // the modem's current over: PTT asked → audio → PTT off, logged at key-up (#128)
-const { PreKeyBuffer } = require('./lib/modem-prekey');
-const _winlinkPreKey = new PreKeyBuffer(); // modem audio that beat its own PTT request: sent at key-down, not discarded (#289)
+// The pre-key hold (#289) runs in the modem audio lane (lib/modem-audio-lane.js, #187).
 let _winlinkPreKeyLoggedFor = 0;
 let _cableRxLeveler = null;
-let _modemTxLeveler = null;   // TxLeveler on the modem's transmit audio, one per session (seeded from settings.winlinkModemTxGain)
-let _modemTxBoostLogged = false;
 let _cableRxTrimLoggedAt = 0;
 let _winlinkRxPeak = 0, _winlinkRxPeakAt = 0; // the radio feed's own peak (any radio mode), for the meter
 /** The one place modem TX audio (24 kHz mono) meets the radio: Flex stream, Icom Network, or the radio side of the bridge. */
 function winlinkDispatchTx(mono24k) {
-  mono24k = winlinkLevelModemTx(mono24k);
+  // Through the lane: the same transmit leveler and the same worklet port as the socket modems (#187).
+  if (winlinkAudio) { winlinkAudio.txIn(mono24k); return; }
+  winlinkDispatchOut(mono24k);
+}
+/** Leveled transmit audio back from the lane, for a route it does not play itself. */
+function winlinkDispatchOut(mono24k) {
   if (settings.audioSource === 'smartsdr') {
     if (smartSdrAudio && smartSdrAudio.txReady) smartSdrAudio.pushTxAudioChunk(mono24k);
   } else if (settings.audioSource === 'icom-network') {
@@ -11762,27 +11798,18 @@ function winlinkDispatchTx(mono24k) {
  * is kept per modem across sessions so the first frame already goes out right.
  */
 function winlinkModemTxGainKey() { return String((winlinkState.session && winlinkState.session.mode) || 'modem'); }
-function winlinkLevelModemTx(mono24k) {
-  if (!_modemTxLeveler) {
-    const saved = settings.winlinkModemTxGain && Number(settings.winlinkModemTxGain[winlinkModemTxGainKey()]);
-    _modemTxLeveler = new TxLeveler({ gain: saved >= 1 && saved <= 8 ? saved : 1 });
-    _modemTxBoostLogged = false;
-  }
-  const out = _modemTxLeveler.process(mono24k);
-  if (!_modemTxBoostLogged && _modemTxLeveler.gainDb >= 2) {
-    _modemTxBoostLogged = true;
-    const l = _modemTxLeveler.levels();
-    winlinkLog(`modem transmit audio raised ${l.boostDb} dB — the modem plays about ${l.inDb} dBFS peak and full scale is the set RF power (the modem's own drive slider does the same)`);
-  }
-  return out;
+/** The lane's transmit leveler (lib/modem-audio-lane.js): its latest state. */
+function winlinkLaneTxLevel() {
+  return (winlinkAudio && winlinkAudio.last && winlinkAudio.last.txLevel) || null;
 }
 function winlinkRememberModemTxGain() {
-  if (!_modemTxLeveler) return;
+  const lv = winlinkLaneTxLevel();
+  if (winlinkAudio) winlinkAudio.txLevelReset(); // the next session's modem seeds its own
+  if (!lv || !(lv.gain > 0)) return;
   const key = winlinkModemTxGainKey();
-  const g = Math.round(_modemTxLeveler.gain * 100) / 100;
+  const g = Math.round(lv.gain * 100) / 100;
   const saved = settings.winlinkModemTxGain && settings.winlinkModemTxGain[key];
-  if (_modemTxLeveler.gainDb >= 1) winlinkLog(`modem transmit audio: peak ${_modemTxLeveler.levels().inDb} dBFS from the modem, raised ${_modemTxLeveler.levels().boostDb} dB`);
-  _modemTxLeveler = null;
+  if (lv.gainDb >= 1) winlinkLog(`modem transmit audio: peak ${lv.inDb} dBFS from the modem, raised ${lv.boostDb} dB`);
   if (saved === g) return;
   settings.winlinkModemTxGain = { ...(settings.winlinkModemTxGain || {}), [key]: g };
   saveSettings(settings);
@@ -11795,6 +11822,7 @@ function winlinkRememberModemTxGain() {
  * something was wrong (modem-bridge-status txOver).
  */
 function modemBridgeOver(on) {
+  if (winlinkAudio && winlinkAudio.txDirect) return; // the lane marks the over on the worklet's own port
   if (winlinkIpAudioRoute() || !modemBridgeWin || modemBridgeWin.isDestroyed() || !_modemBridgeLoaded || !modemBridge.playback) return;
   try { modemBridgeWin.webContents.send('modem-bridge-over', { on: !!on }); } catch {}
 }
@@ -11812,8 +11840,9 @@ function modemBridgePlayback(on) {
 }
 
 /** Receive audio from the radio link → the modem (called from the Flex and Icom RX taps). */
-function winlinkFeedRx(pcm, sampleRate) {
-  if (winlinkAudio && winlinkAudio.connected) winlinkAudio.feedRx(pcm, sampleRate);
+function winlinkFeedRx(pcm, sampleRate, { fromBridge = false } = {}) {
+  // The bridge's capture worklet feeds the lane itself (#187); this copy is the meter's and VARA's.
+  if (winlinkAudio && winlinkAudio.connected && !(fromBridge && winlinkAudio.rxDirect)) winlinkAudio.feedRx(pcm, sampleRate);
   // The feed's own peak, held 500 ms, for the session meter (any radio mode).
   if (winlinkSessionActive()) {
     const now = Date.now();
@@ -12513,8 +12542,8 @@ function winlinkAudioLevels() {
     out.toModemDb = l.outDb; out.trimDb = l.trimDb; out.hot = l.hot;
     out.fromModemDb = db(modemBridge.cable.level || 0);
   }
-  if (_modemTxLeveler) {
-    const t = _modemTxLeveler.levels();
+  const t = winlinkLaneTxLevel();
+  if (t && winlinkTxActive) {
     if (out.fromModemDb == null) out.fromModemDb = t.inDb;
     out.boostDb = t.boostDb;
   }
@@ -12624,6 +12653,7 @@ function winlinkEndSession(state, text, received = 0) {
   _winlinkShimArmed = false;
   if (_winlinkUnkeyTimer) { clearTimeout(_winlinkUnkeyTimer); _winlinkUnkeyTimer = null; }
   if (winlinkTxActive) { winlinkTxActive = false; try { handleRemotePtt(false); } catch {} }
+  if (winlinkAudio) winlinkAudio.key(false); // the lane drops what it held for the radio
   winlinkTxBurstEnd();
   const radio = WinlinkModes.isRadioMode(s.mode);
   if (radio) {
@@ -41923,7 +41953,7 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('modem-bridge-rx', (e, d) => {
     if (!modemBridgeWin || modemBridgeWin.isDestroyed() || e.sender !== modemBridgeWin.webContents || !d || !d.pcm) return;
     const pcm = d.pcm instanceof Float32Array ? d.pcm : new Float32Array(d.pcm.buffer ? d.pcm.buffer : d.pcm);
-    winlinkFeedRx(pcm, Number(d.sampleRate) || 48000);
+    winlinkFeedRx(pcm, Number(d.sampleRate) || 48000, { fromBridge: true });
   });
   // The cable side: what VARA transmits into the virtual cable → the radio,
   // only while VARA has PTT (through Pat and the shim); anything else is a
@@ -41969,6 +41999,8 @@ function cloudShackNotice(text, kind) {
       if (s.playbackSampleRate) modemBridge.playbackSampleRate = s.playbackSampleRate;
       if (s.sampleRate) modemBridge.sampleRate = s.sampleRate;
       if (typeof s.playback === 'boolean') modemBridge.playback = s.playback;
+      // Each worklet (re)built gets its own port to the modem audio lane (#187).
+      if (winlinkAudio) winlinkAudio.attachBridge(modemBridgeWin.webContents, { tx: !!modemBridge.playback, rx: true });
       winlinkLog(`modem audio bridge: ${modemBridge.captureLabel || 'input'}${modemBridge.playback ? ' → ' + (modemBridge.playbackLabel || 'output') : ''} ready${modemBridge.sampleRate ? ' at ' + modemBridge.sampleRate + ' Hz' : ''}`);
       modemBridgeSettle(true);
     } else {
@@ -51144,13 +51176,13 @@ function gracefulCleanup() {
 }
 
 app.on('before-quit', (e) => {
-  winlinkHoldAwake(false); // never leave the Winlink session's App Nap block behind (#187)
   if (jtcatLogReviews.size) {
     // Written while the log, QRZ and the rig are all still up.
     e.preventDefault();
     Promise.race([jtcatFlushLogReviews(), new Promise((r) => setTimeout(r, 4000))]).finally(() => app.quit());
     return;
   }
+  winlinkHoldAwake(false); // never leave the Winlink session's App Nap block behind (#187)
   // A Winlink return still pending (#187): the radio goes back while CAT is up.
   if (winlinkReturnBeforeQuit(() => app.quit())) { e.preventDefault(); return; }
   gracefulCleanup();

@@ -81,19 +81,20 @@ test('clear() empties it (carrier dropped, session over); empty and bad input ar
 
 test('main.js: early modem audio is held, sent at key-down after PTT is asserted, and cleared at unkey', () => {
   const main = readSrc(path.join(__dirname, '..', 'main.js'));
-  assert.ok(/const \{ PreKeyBuffer \} = require\('\.\/lib\/modem-prekey'\);/.test(main));
-  assert.ok(/const _winlinkPreKey = new PreKeyBuffer\(\);/.test(main));
-  assert.ok(/if \(!winlinkTxActive\) \{ _winlinkPreKey\.hold\(mono24k, 24000\); return; \}\n\s*winlinkModemTxIn\(mono24k\);/.test(main), 'not keyed yet: held, never dispatched');
+  // The hold runs in the modem audio lane (#187), the same PreKeyBuffer.
+  const lane = readSrc(path.join(__dirname, '..', 'lib', 'modem-audio-lane.js'));
+  assert.ok(/const \{ PreKeyBuffer \} = require\('\.\/modem-prekey'\);/.test(lane));
+  assert.ok(/if \(!this\.keyed\) \{ this\.preKey\.hold\(pcm, TX_RATE\); return; \}/.test(lane), 'not keyed yet: held, never dispatched');
   assert.ok(!/if \(!winlinkTxActive\) return; \/\/ the modem only sends while it has PTT/.test(main), 'the old discard is gone');
   const shim = main.slice(main.indexOf('async function startWinlinkShim('), main.indexOf('function winlinkUnkeyNow('));
   const key = shim.indexOf('handleRemotePtt(true,');
-  const flush = shim.indexOf('winlinkSendPreKeyAudio()');
+  const flush = shim.indexOf('winlinkLaneKeyDown()');
   assert.ok(key > 0 && flush > key, 'the held audio goes out after the radio was asked to key');
   assert.ok(shim.indexOf('_swrTripped') < key && shim.indexOf('_winlinkShimArmed') < key, 'every refusal still comes first');
-  const send = main.slice(main.indexOf('function winlinkSendPreKeyAudio('), main.indexOf('function winlinkSendPreKeyAudio(') + 700);
-  assert.ok(/_winlinkPreKey\.take\(\)/.test(send) && /winlinkModemTxIn\(c\)/.test(send), 'through the same meter and dispatch as live audio');
+  const keyOn = lane.slice(lane.indexOf('  key(on,'), lane.indexOf('  endOver('));
+  assert.ok(/const early = this\.preKey\.take\(\);\n\s*for \(const c of early\.chunks\) this\._out\(c, true\);/.test(keyOn), 'through the same meter and dispatch as live audio');
   const unkey = main.slice(main.indexOf('function winlinkUnkeyNow('), main.indexOf('function winlinkTxBurstEnd('));
-  assert.ok(/_winlinkPreKey\.clear\(\)/.test(unkey), 'nothing held survives the carrier drop');
+  assert.ok(/if \(winlinkAudio\) winlinkAudio\.key\(false\);/.test(unkey) && /this\.preKey\.clear\(\);/.test(keyOn), 'nothing held survives the carrier drop');
   const list = readSrc(path.join(__dirname, '..', 'scripts', 'run-tests.js'));
   assert.ok(list.includes("'test/modem-prekey-test.js'"), 'this test is in the list CI runs');
 });

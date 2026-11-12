@@ -16,6 +16,13 @@ function ackedChannel(channel, cb) {
   setInterval(flush, 250);
 }
 
+// The modem audio lane's ports (#187, lib/modem-audio-lane.js): one for the
+// play worklet ('tx'), one for the capture worklet ('rx'). A MessagePort
+// cannot cross contextBridge, so it goes to the page by window.postMessage.
+ipcRenderer.on('modem-bridge-port', (e, d) => {
+  if (e.ports && e.ports[0]) window.postMessage({ potacatModemLanePort: (d && d.kind) || '' }, '*', [e.ports[0]]);
+});
+
 contextBridge.exposeInMainWorld('bridge', {
   onStart: (cb) => ipcRenderer.on('modem-bridge-start', (_e, cfg) => cb(cfg)),
   onPlayback: (cb) => ipcRenderer.on('modem-bridge-playback', (_e, cfg) => cb(cfg)),

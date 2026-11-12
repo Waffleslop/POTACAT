@@ -121,6 +121,10 @@ test('packet: only TXTAIL beyond the old 100 ms replaces hold; cover after the f
   assert.strictEqual(D.packetUnkeyDrainMs(250, 200), 150, 'sound-card bridge, default tail: 150 + 200 = the old 250 + 100');
   assert.strictEqual(D.packetUnkeyDrainMs(120, 200), 20, 'Flex / Icom Network, default tail');
   assert.strictEqual(D.packetUnkeyDrainMs(250, 100), 250, 'the old 100 ms tail keeps the full hold');
+  // With the modem audio lane the bridge reports the frame's end (#187): the same allowance, as audio left unplayed.
+  assert.strictEqual(D.packetUnkeyLeaveMs(200), 100, 'default tail: 100 ms of flags may go unplayed');
+  assert.strictEqual(D.packetUnkeyLeaveMs(100), 0, 'the old tail: all of it plays');
+  assert.strictEqual(D.packetUnkeyLeaveMs(-5), 0);
   assert.strictEqual(D.packetUnkeyDrainMs(250, 10), 250, 'a short tail never lengthens the hold past the pipeline');
   assert.strictEqual(D.packetUnkeyDrainMs(250, 500), 0, 'a 500 ms tail covers the whole hold');
   for (const tail of [100, 150, 200, 300, 350]) {

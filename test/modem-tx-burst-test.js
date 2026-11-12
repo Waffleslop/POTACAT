@@ -97,10 +97,13 @@ test('main.js: the shim\'s PTT hooks, the modem audio \'tx\' event and every unk
   assert.ok(/_winlinkTxBurst\.rekeyed\(\);/.test(shim), 'a re-key inside the hold continues the over');
   assert.ok(/winlinkTxActive = true;\n\s*_winlinkTxBurst\.keyDown\(\);/.test(shim), 'key-down starts the over');
   // Live audio and the audio held from before the key-down (#289) take the same path.
-  assert.ok(/function winlinkModemTxIn\(mono24k\) \{\n\s*_winlinkTxBurst\.noteAudio\(mono24k, 24000\);\n\s*winlinkDispatchTx\(mono24k\);/.test(main), 'the modem\'s audio is measured at the server, before the level trim');
+  // The modem audio lane measures each chunk before its leveler and sends the summary (#187).
+  const lane = readSrc(path.join(__dirname, '..', 'lib', 'modem-audio-lane.js'));
+  assert.ok(/if \(fromModem\) this\.toMain\('tx-note', \{ samples: pcm\.length, peak: peakOf\(pcm\), rate: TX_RATE \}\);\n\s*const out = this\.leveler\.process/.test(lane), 'the modem\'s audio is measured at the server, before the level trim');
+  assert.ok(/srv\.on\('tx-note', \(n\) => \{ if \(winlinkTxActive\) _winlinkTxBurst\.noteLevel\(n\.samples, n\.peak, n\.rate\); \}\);/.test(main));
   const unkeys = main.match(/winlinkTxBurstEnd\(\);/g) || [];
   assert.ok(unkeys.length >= 3, `every unkey path (drain, session end, failsafe) logs the over: ${unkeys.length}`);
-  assert.ok(/function winlinkTxBurstEnd\(\) \{[\s\S]*?_winlinkTxBurst\.keyUp\(\{ gainDb: _modemTxLeveler \? _modemTxLeveler\.gainDb : 0 \}\)[\s\S]*?winlinkLog\(/.test(main), 'logged with the TX leveler\'s gain');
+  assert.ok(/function winlinkTxBurstEnd\(\) \{[\s\S]*?_winlinkTxBurst\.keyUp\(\{ gainDb: lv \? lv\.gainDb : 0 \}\)[\s\S]*?winlinkLog\(/.test(main), 'logged with the TX leveler\'s gain');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

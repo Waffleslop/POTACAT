@@ -30,6 +30,14 @@ if (process.platform === 'darwin' && app.dock) app.dock.hide();
 const { ModemAudioServer } = require(path.join(ROOT, 'lib', 'modem-audio-server.js'));
 const { StreamingResampler } = require(path.join(ROOT, 'lib', 'mercury-audio-bridge.js'));
 const { Ardop } = require('./ardop');
+const { ModemAudioLane } = require(path.join(ROOT, 'lib', 'modem-audio-lane-client.js'));
+// The path POTACAT runs (#187): the modem audio lane owns the modem's socket and the bridge worklets talk to it directly.
+async function laneFor(win) {
+  const lane = new ModemAudioLane({ modemRate: 12000, log: (m) => result.errors.push('lane: ' + m) });
+  await lane.listen();
+  return lane;
+}
+const bridgeOk = () => new Promise((r) => ipcMain.on('modem-bridge-status', (_e, s) => { if (s && s.ok) r(s); }));
 const mkServer = () => new ModemAudioServer({ makeResampler: (a, b) => new StreamingResampler(a, b), txOutRate: 24000, log: () => {} });
 const result = { phase: PHASE, platform: process.platform, arch: process.arch, statuses: [], errors: [] };
 const write = () => fs.writeFileSync(OUT, JSON.stringify(result, null, 1));
@@ -89,34 +97,38 @@ app.on('window-all-closed', () => {});
 app.whenReady().then(async () => {
   ipcMain.on('modem-bridge-status', (_e, s) => { if (s && typeof s.level !== 'number') result.statuses.push(s); });
   if (PHASE === 'capture') {
-    const srv = mkServer(); await srv.listen(0);
-    const dirB = path.join(LOGS, 'l3-capture-B');
-    const B = await startB(srv, PORT, dirB);
-    let rxRate = 0, rxSamples = 0;
-    ipcMain.on('modem-bridge-rx', (_e, d) => {
-      if (!d || !d.pcm) return;
-      const pcm = d.pcm instanceof Float32Array ? d.pcm : new Float32Array(d.pcm.buffer ? d.pcm.buffer : d.pcm);
-      rxRate = d.sampleRate; rxSamples += pcm.length;
-      srv.feedRx(pcm, d.sampleRate);
-    });
     const win = await bridgeWindow(null);
+    const lane = await laneFor(win);
+    const dirB = path.join(LOGS, 'l3-capture-B');
+    const B = await startB(lane, PORT, dirB);
+    ipcMain.on('modem-bridge-rx', () => {}); // main's copy: the meter's; the modem is fed by the lane
+    const ok = bridgeOk();
     win.webContents.send('modem-bridge-start', { inputId: 'default', outputId: 'default', playback: false });
+    await ok;
+    lane.attachBridge(win.webContents, { tx: false, rx: true });
     await sleep(40000);
     win.webContents.send('modem-bridge-stop');
-    await sleep(500);
-    result.captureRate = rxRate; result.capturedSeconds = rxRate ? +(rxSamples / rxRate).toFixed(1) : 0;
+    await sleep(800);
+    const st = await new Promise((r) => lane.once('stats', r));
+    result.rxDirect = lane.rxDirect;
+    result.captureRate = st.rx.rate; result.capturedSeconds = st.rx.rate ? +(st.rx.frames / st.rx.rate).toFixed(1) : 0;
+    await lane.close();
     result.bDecoded = decodes(dirB);
     result.bLines = B.lines.slice(-15);
     B.stop();
   } else {
     // A calls through the bridge's playback; the page tap records what it played.
-    const srvA = mkServer(); await srvA.listen(0);
-    const dirA = path.join(LOGS, 'l3-playback-A');
-    const A = new Ardop({ root: ROOT, name: 'A', call: 'W1AAA', hostPort: PORT, audioPort: srvA.port, logDir: dirA });
     const win = await bridgeWindow(TAP);
+    const lane = await laneFor(win);
+    const dirA = path.join(LOGS, 'l3-playback-A');
+    const A = new Ardop({ root: ROOT, name: 'A', call: 'W1AAA', hostPort: PORT, audioPort: lane.port, logDir: dirA });
+    const ok = bridgeOk();
     win.webContents.send('modem-bridge-start', { inputId: 'default', outputId: 'default', playback: true, txGain: 1 });
+    await ok;
+    lane.attachBridge(win.webContents, { tx: true, rx: false });
     await sleep(2500);
-    srvA.on('tx', (pcm) => win.webContents.send('modem-bridge-tx', { pcm }));
+    result.txDirect = lane.txDirect;
+    lane.key(true, { bridge: true, seedGain: 1 }); // keyed for the whole run: A's calls and the silence between
     // A hears nothing back, so it keeps calling: ConReq frames for ~25 s.
     await A.start();
     A.send('PROTOCOLMODE ARQ'); A.send('ARQBW 2000MAX');
@@ -125,6 +137,8 @@ app.whenReady().then(async () => {
     await sleep(25000);
     A.stop();
     await sleep(1500);
+    lane.key(false);
+    await lane.close();
     const got = await win.webContents.executeJavaScript(`(() => { const n = window.__tap.reduce((a, c) => a + c.length, 0); const all = new Float32Array(n); let o = 0; for (const c of window.__tap) { all.set(c, o); o += c.length; } let pk = 0; for (let i = 0; i < n; i++) { const v = Math.abs(all[i]); if (v > pk) pk = v; } return { rate: window.__tapRate, n, peak: pk, raw: Array.from(all) }; })()`);
     result.playbackRate = got.rate; result.playedSeconds = got.rate ? +(got.n / got.rate).toFixed(1) : 0; result.playedPeak = +got.peak.toFixed(3);
     win.webContents.send('modem-bridge-stop');

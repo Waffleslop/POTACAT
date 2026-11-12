@@ -161,9 +161,12 @@ test('modem audio rides POTACAT\'s radio link on Flex Direct / Icom Network — 
   const dispatch = fnBody(main, 'winlinkDispatchTx');
   // (the TxBurst meter's one line sits between the gate and the dispatch, #128)
   // Not keyed: held for the key-down that follows within 500 ms, else dropped (lib/modem-prekey.js, #289).
-  assert.ok(/if \(!winlinkTxActive\) \{ _winlinkPreKey\.hold\(mono24k, 24000\); return; \}\n\s*winlinkModemTxIn\(mono24k\);/.test(tx) && /winlinkDispatchTx\(mono24k\)/.test(fnBody(main, 'winlinkModemTxIn')) && /pushTxAudioChunk\(mono24k\)/.test(dispatch) && /pushIcomNetworkVoiceChunk\(mono24k\)/.test(dispatch), 'modem TX goes to dax_tx / RS-BA1 only while keyed');
+  // The modem audio lane (lib/modem-audio-lane.js, #187) holds early audio until key-down and hands the
+  // leveled audio of a Flex / Icom route back to main, which sends it only while keyed.
+  const out = fnBody(main, 'winlinkDispatchOut');
+  assert.ok(/srv\.on\('tx-out', \(mono24k\) => \{ if \(winlinkTxActive\) winlinkDispatchOut\(mono24k\); \}\);/.test(tx) && /pushTxAudioChunk\(mono24k\)/.test(out) && /pushIcomNetworkVoiceChunk\(mono24k\)/.test(out) && /winlinkAudio\.txIn\(mono24k\)/.test(dispatch), 'modem TX goes to dax_tx / RS-BA1 only while keyed');
   assert.ok(/icomNetworkVoiceTx\(true, 'Winlink'\)/.test(fnBody(main, 'startWinlinkShim')), 'Icom voice TX opens with the key-down');
-  assert.ok(/new ModemAudioServer\(/.test(tx) && /listen\(0\)/.test(tx));
+  assert.ok(/new ModemAudioLane\(/.test(tx) && /listen\(0\)/.test(tx));
 });
 
 test('a gateway pick tunes the radio only outside a session, and the dial goes back', () => {
@@ -368,8 +371,10 @@ console.log('the modem audio bridge (every rig, no device picker for ARDOP)');
 test('on a sound-device rig the bridge window carries the modem audio; the modem never opens a device', () => {
   assert.ok(/function winlinkSocketAudioRoute\(\) \{ return true; \}/.test(main), 'every rig is a socket rig');
   assert.ok(/function winlinkIpAudioRoute\(\)/.test(main));
-  const srv = fnBody(main, 'winlinkDispatchTx');
-  assert.ok(/audioSafeSend\(modemBridgeWin\.webContents, 'modem-bridge-tx', \{ pcm: mono24k \}\)/.test(srv), 'TX goes to the bridge window on a sound-device rig');
+  // TX reaches the bridge's play worklet on its own port from the modem audio lane (#187);
+  // the page channel is the fallback while the worklet has no port yet.
+  assert.ok(/winlinkAudio\.attachBridge\(modemBridgeWin\.webContents, \{ tx: !!modemBridge\.playback, rx: true \}\)/.test(main), 'TX goes to the bridge window on a sound-device rig');
+  assert.ok(/audioSafeSend\(modemBridgeWin\.webContents, 'modem-bridge-tx', \{ pcm: mono24k \}\)/.test(fnBody(main, 'winlinkDispatchOut')), 'the fallback path is kept');
   const spawn = fnBody(main, 'winlinkModemAudioReady');
   assert.ok(/if \(!winlinkIpAudioRoute\(\)\) \{[\s\S]*?modemBridgeReady\(10000\)[\s\S]*?throw new Error\(modemBridge\.error/.test(spawn), 'the session waits for the bridge and fails with its reason');
   assert.ok(/ipcMain\.on\('modem-bridge-rx'[\s\S]{0,400}winlinkFeedRx\(pcm, /.test(main), 'bridge RX feeds the server (and the waterfall)');
