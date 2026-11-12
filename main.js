@@ -2973,6 +2973,7 @@ let _currentFilterWidth = 0;
 const RelogGuard = require('./lib/jtcat-relog-guard');
 const { JtcatQsoClock } = require('./lib/jtcat-qso-clock');
 const LogReview = require('./lib/log-review');
+const JtcatAutoRespot = require('./lib/jtcat-auto-respot'); // opt-in re-spot after a hunted contact (#351)
 const JtcatTxSlot = require('./lib/jtcat-tx-slot');
 // The callsign being worked — CW-macro {call} on every surface. See
 // lib/typed-call.js for the rule (most recently changed non-empty field wins).
@@ -15551,8 +15552,10 @@ async function saveQsoRecord(qsoData, opts) {
   // off-grid QSOs through the same gates, GitHub #267).
   const { logbookError, qrzError } = await LoggerForward.forwardToLoggers(qsoData, ops, loggerForwardDeps());
 
-  // Expand respot comment macros ({op_firstname}, {rst}, {mycallsign}, {QTH})
-  if (qsoData.respotComment) {
+  // Expand respot comment macros ({op_firstname}, {rst}, {mycallsign}, {QTH}).
+  // wwffRespotComment: the WWFF template when one contact spots POTA and WWFF
+  // (JTCAT's auto re-spot, #351); otherwise WWFF uses respotComment.
+  if (qsoData.respotComment || qsoData.wwffRespotComment) {
     let opName = '';
     if (qrz.configured && settings.enableQrz && qsoData.callsign) {
       try {
@@ -15560,12 +15563,14 @@ async function saveQsoRecord(qsoData, opts) {
         if (qrzData) opName = qrzData.nickname || qrzData.fname || '';
       } catch { /* QRZ lookup failed — leave blank */ }
     }
-    qsoData.respotComment = qsoData.respotComment
+    const expand = (text) => text
       .replace(/\{op_firstname\}/gi, opName || 'OM') // OM like the desktop log dialog; '' left a double space
       .replace(/\{rst\}/gi, qsoData.rstSent || '59')
       .replace(/\{mycallsign\}/gi, ops.myCallsign || '')
       .replace(/\{QTH\}/gi, ops.grid || '')
       .replace(/\{call\}/gi, qsoData.callsign || '');
+    if (qsoData.respotComment) qsoData.respotComment = expand(qsoData.respotComment);
+    if (qsoData.wwffRespotComment) qsoData.wwffRespotComment = expand(qsoData.wwffRespotComment);
   }
 
   // Re-spot on POTA if requested
@@ -15598,7 +15603,7 @@ async function saveQsoRecord(qsoData, opts) {
           frequency: qsoData.frequency,
           reference: qsoData.wwffReference,
           mode: qsoData.mode,
-          comments: qsoData.respotComment || '',
+          comments: qsoData.wwffRespotComment || qsoData.respotComment || '',
         });
         trackRespot('wwff');
       } catch (respotErr) {
@@ -18190,8 +18195,10 @@ async function jtcatAutoLog(qso, opts) {
     // writes one record per ref, each with only its own program's field.
     qsoData.hunted = hunted.refs.map((r) => ({ sig: r.sig, ref: r.ref }));
     sendCatLog(`[JTCAT] Hunted park matched: ${q.call} @ ${hunted.refs.map((r) => `${r.sig} ${r.ref}`).join(', ')}`);
-    jtcatApplyAutoRespot(qsoData, hunted.refs);
   }
+  // Opt-in re-spot (#351): planned now, applied only on the direct write
+  // below. Under review the Log QSO window's own re-spot box decides.
+  const respotPlan = hunted ? jtcatAutoRespotPlan(qsoData, hunted.refs, opts) : null;
   qsoData.gridHeard = !!qsoData.gridsquare; // their decoded grid, not a home QTH
 
   // ARRL Field Day: log the class + ARRL/RAC section exchange (ADIF contest fields)
@@ -18208,35 +18215,37 @@ async function jtcatAutoLog(qso, opts) {
   // Only a QSO the operator ran from the JTCAT window: one run from a phone
   // may have nobody at the shack to press Save.
   if (opts && opts.fromWindow && settings.jtcatLogPrompt === true) {
+    // The re-spot box starts ticked when the option would have spotted them.
+    const respotOn = !!(respotPlan && (respotPlan.pota || respotPlan.wwff));
     // Marked now, not at Save: a repeated R-report or Run must not take this
     // station for a new contact while the form waits.
     RelogGuard.noteLogged(_jtcatRecentLogs, relogKeyStr, Date.now());
-    jtcatLogReviews.add(qsoData, { relogKey: relogKeyStr });
+    jtcatLogReviews.add(qsoData, { relogKey: relogKeyStr, respotOn });
     sendCatLog(`[JTCAT] ${qsoData.callsign}: waiting in the Log QSO window (${jtcatLogReviews.size} to review)`);
     jtcatShowLogReview();
     return;
   }
+  if (JtcatAutoRespot.applyAutoRespot(qsoData, respotPlan, settings)) {
+    sendCatLog(`[JTCAT] Re-spot after the contact: ${qsoData.callsign} @ ${[respotPlan.pota && `POTA ${respotPlan.pota}`, respotPlan.wwff && `WWFF ${respotPlan.wwff}`].filter(Boolean).join(', ')}`);
+  }
   await jtcatWriteLog(qsoData, relogKeyStr);
 }
 
-// Re-spot a hunted activator after a JTCAT contact (opt-in, the JTCAT
-// window's options): the same flags the Log QSO window's re-spot box sets, so
-// logContact/saveQsoRecord post it like a logged phone or CW contact. Only the
-// first record of a contact carries re-spot flags (lib/qso-expand.js), so the
-// POTA ref goes first. POTA and WWFF; a park only, never a guess: the refs
-// come from the live spot list that also stamps the logged reference.
-function jtcatApplyAutoRespot(qsoData, refs) {
-  if (settings.jtcatAutoRespot !== true || !Array.isArray(refs) || !refs.length) return;
-  const pota = refs.find((r) => r.sig === 'POTA');
-  const wwff = refs.find((r) => r.sig === 'WWFF');
-  if (!pota && !wwff) return;
-  if (pota && Array.isArray(qsoData.hunted)) {
-    qsoData.hunted.sort((a, b) => (b.sig === 'POTA') - (a.sig === 'POTA'));
+// Re-spot a hunted activator after a JTCAT contact (#351, opt-in, the JTCAT
+// window's options; lib/jtcat-auto-respot.js). Never for a manual log, and not
+// when the live spot list already has them at that park on this band from the
+// last 10 minutes.
+function jtcatAutoRespotPlan(qsoData, refs, opts) {
+  const plan = JtcatAutoRespot.planAutoRespot({
+    settings, refs, manual: !!(opts && opts.manual), spots: lastMergedSpots,
+    callsign: qsoData.callsign, band: qsoData.band, now: Date.now(),
+  });
+  if (plan) {
+    for (const s of plan.skipped) {
+      sendCatLog(`[JTCAT] No re-spot: ${qsoData.callsign} @ ${s.sig} ${s.ref} already spotted on ${qsoData.band} ${s.ageMin} min ago`);
+    }
   }
-  if (pota) qsoData.respot = true;
-  if (wwff) { qsoData.wwffRespot = true; qsoData.wwffReference = wwff.ref; }
-  qsoData.respotComment = settings.respotTemplate || '{rst} in {QTH} 73s {mycallsign} via POTACAT';
-  sendCatLog(`[JTCAT] Re-spot after the contact: ${qsoData.callsign} @ ${[pota, wwff].filter(Boolean).map((r) => `${r.sig} ${r.ref}`).join(', ')}`);
+  return plan;
 }
 
 // The one write for a JTCAT contact, automatic or reviewed.
@@ -22797,6 +22806,9 @@ function updateRemoteSettings() {
     // Split operation "Fake It": the shack moves its own dial per transmission.
     // A device sets it with jtcat-set-pref {key:'jtcatFakeIt'} (Guest Pass refused).
     jtcatFakeIt: settings.jtcatFakeIt === true,
+    // Re-spot a hunted activator after the contact (#351), off by default.
+    // A device sets it with jtcat-set-pref {key:'jtcatAutoRespot'} (Guest Pass refused).
+    jtcatAutoRespot: settings.jtcatAutoRespot === true,
     // Plain-USB escape hatch for older Yaesu (FTdx3000 etc.) that clip the
     // digital passband in PKTUSB. Desktop is the source of truth; echo it so
     // the phone doesn't fall back to the default-true on every launch and
@@ -27234,6 +27246,7 @@ function connectRemote() {
       updateRemoteSettings();
       if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-flag-state', { key, enabled: v === true });
     }
+    if (key === 'jtcatAutoRespot') updateRemoteSettings(); // every device shows the new state
   });
   // Hunt filters from a device (Guest Pass refused in remote-server).
   remoteServer.on('jtcat-hunt-filters', (msg = {}) => applyJtcatHuntFilters(msg, 'remote'));
@@ -48637,7 +48650,8 @@ function cloudShackNotice(text, kind) {
         // Re-spot templates and saved messages: a connected device kept the
         // old text until it reconnected (K8IKO respot-templates-mobile).
         has('respotTemplate') || has('dxRespotTemplate') || has('wwffRespotTemplate') ||
-        has('llotaRespotTemplate') || has('wwbotaRespotTemplate') || has('respotPresets') || has('respotDefault')) {
+        has('llotaRespotTemplate') || has('wwbotaRespotTemplate') || has('respotPresets') || has('respotDefault') ||
+        has('jtcatAutoRespot')) {
       updateRemoteSettings();
     }
 
