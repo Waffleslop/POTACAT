@@ -158,6 +158,13 @@ jobs:
           LOOPBACK_REQUIRED: '1'
         timeout-minutes: 25
         run: node test/modem-loopback/run.js --out loopback-results.json --logs loopback-logs
+      - name: Electron for the bridge check
+        if: always()
+        run: npm ci --no-audit --no-fund
+      - name: Hidden bridge window keeps the modem fed (L4, #187; 2 min without and 2 min with a power-save blocker)
+        if: always()
+        timeout-minutes: 12
+        run: node test/modem-loopback/bridge-check.js --seconds 120 --out bridge-results.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -165,4 +172,5 @@ jobs:
           path: |
             loopback-results.json
             loopback-logs/
+            bridge-results.json
           if-no-files-found: warn

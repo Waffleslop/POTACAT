@@ -1,0 +1,40 @@
+#!/usr/bin/env node
+'use strict';
+// Layer L4 runner (docs/ardop-macos-plan.md, #187): the real bridge window,
+// hidden, for --seconds, without and then with a power-save blocker. Prints
+// the receive continuity and transmit figures and writes --out. CI-only on
+// the Mac runners (needs Electron from npm ci); elsewhere it runs the same.
+//   node test/modem-loopback/bridge-check.js --seconds 120 --out bridge.json
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { spawnSync } = require('child_process');
+
+const argv = process.argv.slice(2);
+const opt = (k, d) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d; };
+const SECONDS = Number(opt('--seconds', '120'));
+const OUT = opt('--out', path.join(os.tmpdir(), 'potacat-bridge-check.json'));
+let electron = null;
+try { electron = require('electron'); } catch { electron = null; }
+if (!electron || typeof electron !== 'string' || !fs.existsSync(electron)) {
+  console.log('bridge check: SKIP (no Electron; run npm ci)');
+  process.exit(process.env.LOOPBACK_REQUIRED === '1' ? 1 : 0);
+}
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'potacat-bridge-check-'));
+const runs = [];
+for (const blocker of [false, true]) {
+  const out = path.join(dir, `r-${blocker ? 'b' : 'n'}.json`);
+  const args = [path.join(__dirname, 'bridge-harness.js'), '--no-sandbox', `--out=${out}`, `--seconds=${SECONDS}`];
+  if (blocker) args.push('--blocker');
+  const res = spawnSync(electron, args, { encoding: 'utf8', timeout: (SECONDS + 90) * 1000, env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: '1' } });
+  const r = fs.existsSync(out) ? JSON.parse(fs.readFileSync(out, 'utf8')) : { blocker, errors: ['no result: exit ' + res.status + ' ' + (res.stderr || '').slice(-800)] };
+  runs.push(r);
+  const rx = r.rx || {}, tx = r.tx || {};
+  console.log(`${blocker ? 'with power-save blocker   ' : 'without power-save blocker'}  RX ${rx.sampleRate} Hz: lost ${rx.lostPct}%, largest gap ${rx.maxGapMs} ms, gaps over 50 ms ${rx.gapsOver50ms}  |  TX: ${tx.chunksSent} chunks sent, ${tx.acks} acked, timer late up to ${tx.timerMaxLateMs} ms, overs ${JSON.stringify(tx.overs || [])}${(r.errors || []).length ? '  ERRORS ' + r.errors.join(' / ') : ''}`);
+}
+fs.writeFileSync(OUT, JSON.stringify({ platform: process.platform, arch: process.arch, seconds: SECONDS, runs }, null, 1));
+// Pass: no capture gap a modem cannot ride out (the loopback stress tolerates
+// dropouts below its threshold) and every transmit chunk acknowledged.
+const bad = runs.filter((r) => !r.rx || r.rx.maxGapMs > 100 || r.rx.lostPct > 1 || (r.tx && r.tx.acks < r.tx.chunksSent * 0.99) || (r.errors || []).length);
+console.log(bad.length ? `bridge check: FAIL (${bad.length} of ${runs.length})` : 'bridge check: pass');
+process.exit(bad.length ? 1 : 0);
