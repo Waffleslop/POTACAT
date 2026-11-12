@@ -283,6 +283,48 @@ console.log('\n=== tailscale section: daemon state and the probe (GitHub #132) =
   eq(assembleSections({ tailscale: { installed: true, connected: true, hostname: 'x.ts.net' } }, {}).tailscale.candidates, [], 'an old-shape raw still ships');
 }
 
+// ── Report a Bug header masks addresses like the log lines (GitHub #404) ──
+console.log('\nReport a Bug header masking:');
+{
+  const { maskHost, maskReportText, maskSerialPath } = require('../lib/diagnostic-snapshot');
+  eq(maskHost('192.168.1.50'), '192.168.1.0/24', 'an IPv4 rig host goes to its /24, as in the log lines');
+  eq(maskHost('192.168.1.50:4532'), '192.168.1.0/24:4532', 'host:port keeps the port');
+  eq(maskHost('127.0.0.1'), '127.0.0.1', 'loopback stays');
+  eq(maskHost('localhost'), 'localhost', 'localhost stays');
+  eq(maskHost('SHACKPC'), 'SHACKPC', 'a single-label LAN name stays');
+  eq(maskHost('shack.local'), 'shack.local', 'an mDNS .local name stays');
+  eq(maskHost('shack.tail1234.ts.net'), 'shack.' + REDACTED, 'a Tailscale name keeps its first label only');
+  eq(maskHost('k3sbp.ddns.net:50001'), 'k3sbp.' + REDACTED + ':50001', 'a public hostname keeps its first label and port');
+  eq(maskHost('fe80::1'), REDACTED, 'IPv6 is masked');
+  eq(maskHost(''), '', 'empty stays empty');
+  eq(maskReportText('Home shack'), 'Home shack', 'a plain shack name stays');
+  eq(maskReportText('Shack 10.0.0.5'), 'Shack 10.0.0.0/24', 'an address typed into a shack name is masked');
+  eq(maskReportText('Remote k3sbp.ddns.net'), 'Remote k3sbp.' + REDACTED, 'a hostname typed into a shack name is masked');
+  eq(maskReportText('Field 12:30:45'), 'Field 12:30:45', 'a time is not taken for IPv6');
+  eq(maskSerialPath('COM11'), 'COM11', 'a COM port stays');
+  eq(maskSerialPath('/dev/tty.usbserial-A10'), '/dev/tty.usbserial-A10', 'a /dev serial path stays');
+  eq(maskSerialPath('/Users/casey/ptty/rig'), '/Users/' + REDACTED + '/ptty/rig', 'a macOS home path is masked');
+  eq(maskSerialPath('/home/pi/ttyV0'), '/home/' + REDACTED + '/ttyV0', 'a Linux home path is masked');
+
+  // Source guard: the header in renderer/app.js runs every address through
+  // the masker, and the page loads the module before app.js.
+  const fs = require('fs');
+  const path = require('path');
+  const { readSrc } = require('./_src');
+  const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
+  const i = app.indexOf('async function buildReport()');
+  const body = app.slice(i, app.indexOf('const md = {', i));
+  check(i > 0 && /window\.DiagnosticSnapshot/.test(body), 'buildReport reads window.DiagnosticSnapshot');
+  check(/maskHost\(activeRig\.catTarget\.host\)/.test(body), 'the rig host goes through maskHost');
+  check(/maskSerialPath\(activeRig\.catTarget\.path\)/.test(body), 'the serial path goes through maskSerialPath');
+  check(/maskReportText\(remoteTarget\.name\)/.test(body) && /maskHost\(remoteTarget\.host\)/.test(body), 'the remote shack name and host are masked');
+  check(!/activeRig\.catTarget\.host\s*\+/.test(body) && !/:\s*activeRig\.catTarget\.path\)/.test(body), 'no raw host or path left in the header');
+  check(!/remoteTarget\.name \|\| remoteTarget\.host/.test(body), 'no raw remote name or host left in the header');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  const ds = html.indexOf('<script src="../lib/diagnostic-snapshot.js"></script>');
+  check(ds > 0 && ds < html.indexOf('<script src="app.js"></script>'), 'index.html loads diagnostic-snapshot.js before app.js');
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 console.log('\n' + '='.repeat(50));
 console.log(`Results: ${passed} passed, ${failed} failed`);

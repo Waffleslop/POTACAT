@@ -24943,7 +24943,7 @@ function connectRemote() {
       const r = await sync.verifyPairToken(pairToken, shackDeviceId || settings.cloudDeviceId);
       if (r && r.ok) {
         resultPayload = { pairToken, ok: true, userId: r.userId, clientDeviceId: r.clientDeviceId };
-        sendCatLog(`[Pair-Account] cloud verify OK token=${pairToken.slice(0, 8)}… from=${fromIp}`);
+        sendCatLog(`[Pair-Account] cloud verify OK (token ${String(pairToken).length} chars) from=${fromIp}`);
       } else {
         resultPayload = { pairToken, ok: false, error: (r && r.error) || 'verify denied' };
       }
@@ -27430,7 +27430,7 @@ function connectRemote() {
     if (guest && passEnforcement) {
       const res = passEnforcement.interceptCatCommand({ type: 'sstv_tx', freqHz: effectiveTxFreqHz(), split: _currentSplit });
       if (!res.allowed) {
-        sendCatLog(`[pass] SSTV picture from guest ${guest.call || guest.code} refused: ${res.userVisible}`);
+        sendCatLog(`[pass] SSTV picture from guest ${guest.call || '(no callsign)'} refused: ${res.userVisible}`);
         remoteServer.broadcastSstvTxStatus({ state: 'rx', error: res.userVisible });
         return;
       }
@@ -38085,7 +38085,7 @@ async function redeemPairLinkUrl(rawUrl) {
   const friendly = params.get('name') || params.get('n') || 'Remote shack';
   const expHint = params.get('exp') || '';
 
-  sendCatLog(`[pair-link] Redeeming token=${token.slice(0, 8)}… lan=${!!lanHost} ts=${!!tsHost} cloud=${!!cloudHost}`);
+  sendCatLog(`[pair-link] Redeeming a pairing token (${String(token).length} chars) lan=${!!lanHost} ts=${!!tsHost} cloud=${!!cloudHost}`);
 
   // Build the dial list. Order: LAN > Tailscale > Cloud (cloud last
   // because cloud-only carries the most latency).
@@ -38183,7 +38183,7 @@ async function redeemGuestPass(rawInput) {
     return { status: res.status, body };
   };
 
-  sendCatLog(`[guest-pass] Redeeming ${code} (${settings.cloudAccessToken ? 'signed-in' : 'anonymous'})…`);
+  sendCatLog(`[guest-pass] Redeeming a Guest Pass code (${String(code).length} chars, ${settings.cloudAccessToken ? 'signed-in' : 'anonymous'})…`);
   let r;
   try {
     if (settings.cloudAccessToken) {
@@ -38920,7 +38920,7 @@ app.whenReady().then(() => {
       // clients and purges the browser sign-ins for that pass.
       onPassRevoked: (code) => {
         if (passEnforcement && passEnforcement.endPassIfCode(code, 'revoked')) {
-          sendCatLog(`[pass] revoked by the owner: live session for code=${code} ended`);
+          sendCatLog(`[pass] revoked by the owner: the live Guest Pass session ended`);
         }
       },
       // The signed-in account changed (any sign-in / sign-out path): the
@@ -39462,7 +39462,7 @@ function cloudShackNotice(text, kind) {
           passClientDisconnectTimer = null;
           const st = passEnforcement.getState();
           if ((st === 'active' || st === 'expiring' || st === 'paused') && !remoteServer.hasActivePassClient()) {
-            sendCatLog(`[pass] guest gone 60s with no reconnect — ending enforcement session for ${code}`);
+            sendCatLog(`[pass] guest gone 60s with no reconnect — ending the Guest Pass enforcement session`);
             passEnforcement.endPass('disconnected');
           }
         }, 60_000);
@@ -39519,7 +39519,7 @@ function cloudShackNotice(text, kind) {
           throw err;
         }
         clearPassDisconnectTimer();
-        sendCatLog(`[pass] superseding stale session ${cur.code} (no guest connected) with ${code}`);
+        sendCatLog(`[pass] superseding a stale Guest Pass session (no guest connected) with a new one`);
         passEnforcement.endPass('superseded');
         // endPass settles to idle on the next tick (setImmediate) —
         // wait for it before loading the new pass.
