@@ -44956,7 +44956,7 @@ function cloudShackNotice(text, kind) {
       sendCatLog(`[WebSDR] Error: ${msg}`);
       listenSdr.live = false; listenSdr.auto = false;
       for (const wc of require('electron').webContents.getAllWebContents()) {
-        wc.send('kiwi-status', { connected: false, error: msg });
+        wc.send('kiwi-status', { connected: false, error: msg, host: kiwiFullHost }); // host: the VFO window names it (#390)
       }
       if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) {
         remoteServer.sendToClient({ type: 'kiwi-status', connected: false, error: msg });
