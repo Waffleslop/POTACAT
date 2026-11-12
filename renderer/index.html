@@ -3382,6 +3382,10 @@
         <label style="margin-left:8px;">ARDOP drive level:
           <input type="number" id="set-winlink-ardop-drive" min="1" max="100" value="90" style="width:55px;"> %
         </label>
+        <label style="margin-left:8px;">ARDOP link timeout:
+          <input type="number" id="set-winlink-ardop-arq-timeout" min="90" max="180" step="10" value="120" style="width:60px;"> seconds
+        </label>
+        <span class="help-text" style="display:block;">ARDOP link timeout: how long the modem keeps trying when nothing is getting through, before it ends the link. A longer time (up to 180 seconds) helps when the signal fades in and out. The gateway has a time limit of its own and may still hang up first.</span>
         <span class="help-text" style="display:block;">Packet: if the gateway misses your first frame (it answers late or not at all, or you need several tries to connect), raise the TX delay: a radio keyed over CAT comes on air a little after Dire Wolf starts sending.</span>
         <div id="winlink-vara-section" class="hidden" style="margin-top:10px;">
           <div style="font-weight:600;">VARA (your own copy)</div>

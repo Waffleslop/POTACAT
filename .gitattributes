@@ -3,4 +3,5 @@
 data/sstv-packs/** -text
 # Patches and the sources they add are applied byte-for-byte on every OS.
 third_party/ardopcf/potacat-socket-audio.patch -text
+third_party/pat/potacat-arq-timeout.patch -text
 third_party/ardopcf/src/** -text

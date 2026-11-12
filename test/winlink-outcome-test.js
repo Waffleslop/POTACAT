@@ -453,7 +453,7 @@ async function runSettle({ patBody, outboxAfter, queued, connected = true, modem
   const decl = (name) => { const m = new RegExp(`^(?:let|const) ${name} = [^;]+;`, 'm').exec(main); assert.ok(m, `${name} is declared in main.js`); return m[0]; };
   const src = ['_winlinkCause', '_winlinkDialed', '_winlinkConnectedAt', '_winlinkQueuedAtStart', '_winlinkModemAudioClosed', '_winlinkTxCutMs',
     '_winlinkPatLastLine', '_winlinkPatReply', '_winlinkReceived', '_winlinkLinkStory', '_winlinkAudioSummary', '_winlinkSummaries',
-    '_winlinkSessionError', '_winlinkSessionErrorKind', '_winlinkPatConnected', '_winlinkSessionSeq'].map(decl).join('\n')
+    '_winlinkSessionError', '_winlinkSessionErrorKind', '_winlinkPatConnected', '_winlinkSessionSeq', '_patArqTimeoutAskedS'].map(decl).join('\n')
     + '\n' + ['winlinkOutcomeReset', 'winlinkNoteCause', 'winlinkOutboxCount', 'winlinkOutcomeFacts', 'winlinkOutcomeView', 'winlinkSettleOutcome'].map((f) => fnBody(main, f)).join('\n')
     + `\nglobalThis.api = {
       reset: winlinkOutcomeReset, settle: winlinkSettleOutcome, facts: winlinkOutcomeFacts, view: winlinkOutcomeView, note: winlinkNoteCause,

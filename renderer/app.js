@@ -1415,6 +1415,7 @@ const setWinlinkArdopIn = document.getElementById('set-winlink-ardop-in');
 const setWinlinkArdopOut = document.getElementById('set-winlink-ardop-out');
 const setWinlinkArdopBw = document.getElementById('set-winlink-ardop-bw');
 const setWinlinkArdopDrive = document.getElementById('set-winlink-ardop-drive');
+const setWinlinkArdopArqTimeout = document.getElementById('set-winlink-ardop-arq-timeout');
 const setWinlinkVaraBw = document.getElementById('set-winlink-vara-bw');
 const setWinlinkPacketModem = document.getElementById('set-winlink-packet-modem');
 const setWinlinkPacketTxDelay = document.getElementById('set-winlink-packet-txdelay'); // #257
@@ -17731,6 +17732,8 @@ async function openSettingsDialog(tab) {
     setWinlinkAutoCheck.checked = s.winlinkTelnetAutoCheck === true;
     setWinlinkAutoCheckMin.value = s.winlinkTelnetAutoCheckMin || 30;
     setWinlinkArdopBw.value = String(s.winlinkArdopBw || 500);
+    // #425: 120 s unless set; 90 (Pat's own) to 180. main.js holds it to the same range (lib/winlink-pat.js).
+    if (setWinlinkArdopArqTimeout) setWinlinkArdopArqTimeout.value = Math.max(90, Math.min(180, parseInt(s.winlinkArdopArqTimeout, 10) || 120));
     setWinlinkVaraBw.value = String(s.winlinkVaraBw || 2300);
     setWinlinkPacketModem.value = String(s.winlinkPacketModem || 1200);
     if (setWinlinkPacketTxDelay) setWinlinkPacketTxDelay.value = packetTimingMs(s.winlinkPacketTxDelayMs, 500, 50, 1000);
@@ -18641,6 +18644,7 @@ settingsSave.addEventListener('click', async () => {
       winlinkTelnetAutoCheck: setWinlinkAutoCheck.checked,
       winlinkTelnetAutoCheckMin: Math.max(10, Math.min(240, parseInt(setWinlinkAutoCheckMin.value, 10) || 30)),
       winlinkArdopBw: parseInt(setWinlinkArdopBw.value, 10) || 500,
+      ...(setWinlinkArdopArqTimeout ? { winlinkArdopArqTimeout: Math.max(90, Math.min(180, parseInt(setWinlinkArdopArqTimeout.value, 10) || 120)) } : {}),
       winlinkVaraBw: parseInt(setWinlinkVaraBw.value, 10) || 2300,
       winlinkPacketModem: parseInt(setWinlinkPacketModem.value, 10) === 9600 ? 9600 : 1200,
       ...(setWinlinkPacketTxDelay ? { winlinkPacketTxDelayMs: packetTimingMs(setWinlinkPacketTxDelay.value, 500, 50, 1000) } : {}),
