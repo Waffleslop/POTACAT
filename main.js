@@ -12673,10 +12673,15 @@ async function winlinkSend({ to, cc, subject, body, p2p, attachments } = {}) {
 // passes its calling frequency) or the radio's.
 function winlinkPotaSpotTemplate(over = {}) {
   const refs = liveActivationMyRefs().filter((r) => r.sig === 'POTA').map((r) => r.ref);
-  const rigMode = String(_currentMode || '').toUpperCase();
+  // From the mail window the radio usually sits on a Winlink gateway: spot
+  // where it was before Winlink moved it (where the operator is activating),
+  // never the gateway's dial (Casey 2026-11-11).
+  const before = _winlinkPreviewReturnTo || (winlinkState.session && winlinkState.session.returnTo) || null;
+  const away = !over.freqKhz && before && before.freqHz > 0 && _currentFreqHz && Math.abs(before.freqHz - _currentFreqHz) > 50;
+  const rigMode = String((away ? before.mode : _currentMode) || '').toUpperCase();
   const dataMode = rigMode === 'DIGU' || rigMode === 'DIGL' || /-D$/.test(rigMode) || rigMode === 'PKTUSB' || rigMode === 'PKTLSB';
   const mode = over.mode || (dataMode ? String((ft8Engine && ft8Engine._mode) || 'FT8').toUpperCase() : rigMode);
-  const freqKhz = Number(over.freqKhz) || (_currentFreqHz ? _currentFreqHz / 1000 : 0);
+  const freqKhz = Number(over.freqKhz) || (away ? before.freqHz / 1000 : (_currentFreqHz ? _currentFreqHz / 1000 : 0));
   return PotaEmailSpot.buildSpotMessage({ call: settings.myCallsign || '', refs, freqKhz, mode, comment: over.comment || '' });
 }
 

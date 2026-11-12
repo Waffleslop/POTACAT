@@ -40,7 +40,8 @@
     .wl-radio-pick { display: none; flex-wrap: wrap; gap: 8px 14px; align-items: flex-start; }
     .wl-radio-pick.show { display: flex; }
     .wl-gw-row { display: flex; gap: 4px; align-items: center; }
-    .wl-predict { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text-secondary); max-width: 300px; }
+    .wl-predict { display: flex; flex-direction: column; justify-content: center; gap: 4px; font-size: 12px; color: var(--text-secondary); flex: 1 1 112px; min-width: 112px; max-width: 240px; padding-top: 18px; min-height: 32px; }
+    .wl-predict > #wl-predict-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .wl-predict[hidden] { display: none; }
     .wl-predict-bar { display: block; height: 4px; border-radius: 2px; background: var(--bg-tertiary, var(--bg-primary)); overflow: hidden; }
     .wl-predict-bar > span { display: block; height: 100%; width: 0; background: var(--accent-blue, #4fc3f7); transition: width 0.9s linear; }
@@ -54,7 +55,7 @@
     .wl-connnotes { display: flex; flex-wrap: wrap; gap: 4px 12px; width: 100%; }
     .wl-connnotes:empty { display: none; }
     .wl-mycall { font-family: monospace; font-weight: 700; color: var(--accent-green, #4ecca3); }
-    #wl-gateway { width: 300px; min-width: 200px; max-width: 360px; }
+    #wl-gateway { width: 276px; min-width: 200px; max-width: 360px; }
     /* Level with the fields' inputs (under their 12 px labels), so the
        predicting line below the gateway list moves nothing. */
     .wl-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; padding-top: 18px; }
@@ -200,17 +201,23 @@
        body filling the rest, the actions in a bar at the bottom. */
     .wl-compose { display: none; flex-direction: column; flex: 1; min-height: 0; font-size: 14px; }
     .wl-compose.show { display: flex; }
-    .wl-c-row { display: flex; align-items: center; min-height: 40px; padding: 0 14px; border-bottom: 1px solid var(--border-primary); }
+    /* The header rows sit on the panel colour; each field is a box of its own (Casey 2026-11-11: "they don't look like they have a field to click on"). */
+    .wl-c-head { background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); padding: 6px 0; }
+    .wl-c-row { display: flex; align-items: center; gap: 10px; padding: 4px 14px; }
     .wl-c-row[hidden] { display: none; }
-    .wl-c-row:focus-within { box-shadow: inset 3px 0 0 var(--accent-blue, #4fc3f7); }
-    .wl-c-row label { flex: 0 0 76px; text-align: left; font-size: 13px; color: var(--text-secondary); }
-    .wl-compose .wl-c-row input { flex: 1; min-width: 0; border: none; border-radius: 0; background: transparent; color: var(--text-primary); font-size: 14px; padding: 9px 0; outline: none; }
-    .wl-compose #wl-c-body { flex: 1; min-height: 140px; resize: none; border: none; border-radius: 0; outline: none; padding: 12px 14px; background: var(--bg-primary); color: var(--text-primary); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.5; }
+    .wl-c-row label { flex: 0 0 66px; text-align: left; font-size: 13px; color: var(--text-secondary); }
+    .wl-compose .wl-c-row input { flex: 1; min-width: 0; height: 34px; box-sizing: border-box; border: 1px solid var(--border-primary); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary); font-size: 14px; padding: 0 10px; outline: none; }
+    .wl-compose .wl-c-row input:focus, .wl-compose #wl-c-body:focus { border-color: var(--accent-blue, #4fc3f7); box-shadow: 0 0 0 1px var(--accent-blue, #4fc3f7); }
+    .wl-compose #wl-c-body { flex: 1; min-height: 140px; resize: none; margin: 10px 14px; border: 1px solid var(--border-primary); border-radius: 6px; outline: none; padding: 10px 12px; background: var(--bg-primary); color: var(--text-primary); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.5; }
     .wl-c-attach-row { display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-top: 1px solid var(--border-primary); }
     .wl-c-attach-row[hidden] { display: none; }
     .wl-c-files { font-size: 12px; color: var(--text-secondary); }
     .wl-c-err { color: var(--accent-red-text, var(--accent-red, #e94560)); font-size: 13px; padding: 0 14px; }
     .wl-c-err:empty { display: none; }
+    /* How to fill a message in (a template's instructions): a panel of its own above the body, never text that could be part of the message. */
+    .wl-c-hint { margin: 10px 14px 0; padding: 9px 12px; border-radius: 6px; border: 1px solid var(--border-primary); border-left: 3px solid var(--accent-blue, #4fc3f7); background: var(--bg-secondary); color: var(--text-primary); font-size: 13px; line-height: 1.5; white-space: pre-line; }
+    .wl-c-hint[hidden] { display: none; }
+    .wl-c-hint b { font-weight: 700; }
     .wl-c-actions { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-top: 1px solid var(--border-primary); background: var(--bg-secondary); }
     .wl-c-actions .wl-btn { height: 32px; font-size: 13px; padding: 0 14px; }
     .wl-c-actions .wl-btn.primary { font-weight: 700; background: var(--ok-subtle, transparent); }
@@ -255,10 +262,6 @@
           <button class="wl-btn wl-fav-btn" id="wl-fav" aria-pressed="false" title="Add this gateway to your favorites" aria-label="Add this gateway to your favorites" disabled><svg class="wl-star empty" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8z"></path></svg></button>
           <button class="wl-btn" id="wl-gw-refresh" title="Fetch the gateway list again" aria-label="Fetch the gateway list again">&#8635;</button>
         </div>
-        <div class="wl-predict" id="wl-predict" role="status" hidden>
-          <span id="wl-predict-text"></span>
-          <span class="wl-predict-bar"><span id="wl-predict-fill"></span></span>
-        </div>
       </div>
       <div class="wl-field wl-dial">
         <span class="wl-label">Radio dial</span>
@@ -275,6 +278,11 @@
       <button class="wl-btn primary" id="wl-connect">Send / Receive</button>
       <button class="wl-btn danger" id="wl-abort" disabled>Abort</button>
     </span>
+    <!-- Right of Abort (Casey 2026-11-11): the progress never adds a row to the bar. -->
+    <div class="wl-predict" id="wl-predict" role="status" hidden>
+      <span id="wl-predict-text"></span>
+      <span class="wl-predict-bar"><span id="wl-predict-fill"></span></span>
+    </div>
     <div class="wl-connnotes"><span class="wl-mode-note" id="wl-gw-note"></span><span class="wl-mode-note" id="wl-mode-note"></span><span class="wl-sound" id="wl-sound"></span></div>
   </div>
   <!-- No Winlink password yet: set the account up right here. winlink.org has
@@ -348,10 +356,13 @@
     <div class="wl-pane">
       <div class="wl-reader" id="wl-reader"><div class="wl-empty">Pick a message.</div></div>
       <div class="wl-compose" id="wl-compose">
-        <div class="wl-c-row" id="wl-c-name-row" hidden><label for="wl-c-name">Name</label><input type="text" id="wl-c-name" maxlength="60" placeholder="what the Templates menu calls it"></div>
-        <div class="wl-c-row"><label for="wl-c-to">To</label><input type="text" id="wl-c-to" placeholder="callsign or email, separated by commas"></div>
-        <div class="wl-c-row"><label for="wl-c-cc">Cc</label><input type="text" id="wl-c-cc"></div>
-        <div class="wl-c-row"><label for="wl-c-subj">Subject</label><input type="text" id="wl-c-subj" maxlength="128"></div>
+        <div class="wl-c-head">
+          <div class="wl-c-row" id="wl-c-name-row" hidden><label for="wl-c-name">Name</label><input type="text" id="wl-c-name" maxlength="60" placeholder="what the Templates menu calls it"></div>
+          <div class="wl-c-row"><label for="wl-c-to">To</label><input type="text" id="wl-c-to" placeholder="callsign or email, separated by commas"></div>
+          <div class="wl-c-row"><label for="wl-c-cc">Cc</label><input type="text" id="wl-c-cc"></div>
+          <div class="wl-c-row"><label for="wl-c-subj">Subject</label><input type="text" id="wl-c-subj" maxlength="128"></div>
+        </div>
+        <div class="wl-c-hint" id="wl-c-hint" role="note" hidden></div>
         <textarea id="wl-c-body" spellcheck="true" placeholder="Plain text."></textarea>
         <div class="wl-c-err" id="wl-c-err"></div>
         <!-- One row (Casey 2026-11-11): Attach | Cancel | Put in Outbox -->
