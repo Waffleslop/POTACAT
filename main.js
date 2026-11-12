@@ -14663,7 +14663,7 @@ function activationStationFillFor(rec, s = settings) {
   if (!rec || !rec.mySigInfo) return {};
   let park = null;
   try { park = getParkDb(parksMap, rec.mySigInfo) || null; } catch {}
-  return activationStationFill(rec, { myCallsign: s.myCallsign, park, latLonToGrid, parkStates: parkStatesFromLocation });
+  return activationStationFill(rec, { myCallsign: s.myCallsign, park, latLonToGrid, parkStates: parkStatesFromLocation, parkGrids: s.activatorParkGrids });
 }
 /**
  * The station side of a record: the activation fill above, then the
