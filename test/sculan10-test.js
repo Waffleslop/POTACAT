@@ -196,7 +196,11 @@ async function fakeUnit({ user = 'defaultuser', pass = 'defaultuser', sid = 0x22
   const { base, socks } = await bindConsecutive();
   const [ctrl, cat, audio, scope] = socks;
   const u = { base, ctrl, cat, audio, scope, sid, silent: false, events: [], catSeen: [], keepalives: { ctrl: 0, cat: 0, audio: 0, scope: 0 }, logins: 0, audioPeer: null, respSeq: 0, lastCmdSeq: null, txAudio: [],
-    radio: { mode: '2', fa: '014074000', ml: { 1: { on: '001', level: '005' }, 2: { on: '001', level: '002' }, 3: { on: '000', level: '010' } } } };
+    // tx: the PTT the radio reports to TX;. ignoreTx0: that many TX0; are
+    // lost on the way (UDP); answerTx: false = the radio never answers TX;.
+    // ignoreMl: modes whose ML writes the radio does not take.
+    ignoreTx0: 0, answerTx: true, ignoreMl: [],
+    radio: { tx: '0', mode: '2', fa: '014074000', ml: { 1: { on: '001', level: '005' }, 2: { on: '001', level: '002' }, 3: { on: '000', level: '010' } } } };
   const seq = { ctrl: 0, cat: 0, audio: 0, scope: 0 };
   const reply = (name, sock, rinfo, channel, msgType, body) => {
     seq[name] = (seq[name] + 1) & 0xFF;
@@ -261,7 +265,9 @@ async function fakeUnit({ user = 'defaultuser', pass = 'defaultuser', sid = 0x22
     else if ((m = /^MD0([0-9A-F]);$/.exec(text))) R.mode = m[1];
     else if ((m = /^FA(\d{9});$/.exec(text))) R.fa = m[1];
     else if (text === 'ML0;' || text === 'ML1;') answer = `${text.slice(0, 3)}${R.ml[R.mode][text[2] === '0' ? 'on' : 'level']};`;
-    else if ((m = /^ML([01])(\d{3});$/.exec(text))) R.ml[R.mode][m[1] === '0' ? 'on' : 'level'] = m[2];
+    else if ((m = /^ML([01])(\d{3});$/.exec(text))) { if (!u.ignoreMl.includes(R.mode)) R.ml[R.mode][m[1] === '0' ? 'on' : 'level'] = m[2]; }
+    else if (text === 'TX;') { if (u.answerTx) answer = `TX${R.tx};`; }
+    else if ((m = /^TX([012]);$/.exec(text))) { if (m[1] === '0' && u.ignoreTx0 > 0) u.ignoreTx0--; else R.tx = m[1]; }
     if (!answer) return;
     u.respSeq = (u.respSeq + 1) & 0xFF;
     const body = Buffer.concat([Buffer.from([u.respSeq, 0, 0, 0]), Buffer.from(answer)]);
@@ -753,7 +759,8 @@ test('a session lost while keyed sends TX0; as soon as the next session is up; o
     assert.ok(await until(() => c.connects === 2, 3000), c.logs.join('\n'));
     assert.ok(await until(() => u.catSeen.slice(before).some((x) => x.text === 'TX0;' && x.sid === c.t.sessionId)), 'TX0; in the new session');
     assert.ok(c.logs.some((l) => /lost while keyed: sending TX0; now/.test(l)));
-    // Released now: the next loss sends nothing.
+    // Released and confirmed (the radio reports receive): the next loss sends nothing.
+    assert.ok(await until(() => !c.t.mayBeKeyed, 3000), c.logs.join('\n'));
     u.silent = true;
     assert.ok(await until(() => c.errors.filter((e) => e.code === 'SCULAN10_SESSION_LOST').length === 2, 3000));
     const mark = u.catSeen.length;
@@ -857,12 +864,13 @@ test('speaker monitor: each mode is read once, saved and muted; disconnect puts 
     const reads = u.catSeen.filter((x) => x.text === 'ML0;').length;
     c.t.write('MD0;'); await sleep(150);
     assert.strictEqual(u.catSeen.filter((x) => x.text === 'ML0;').length, reads, 'no second read in the same mode');
-    c.t.disconnect();
-    assert.ok(await until(() => u.radio.ml[2].level === '002' && u.radio.ml[3].level === '010'), JSON.stringify(u.radio.ml));
+    await c.t.disconnect();
+    assert.ok(u.radio.ml[2].level === '002' && u.radio.ml[3].level === '010', JSON.stringify(u.radio.ml));
     assert.strictEqual(u.radio.ml[2].on, '001');
     assert.strictEqual(u.radio.mode, '3', 'back in the mode it was in');
     assert.strictEqual(u.radio.fa, '014074000', 'and on the dial it was on');
-    assert.strictEqual(restored, 1);
+    assert.strictEqual(restored, 1, 'let go only after every mode read back');
+    assert.ok(c.logs.some((l) => /read back for 2\/2 mode/.test(l)), c.logs.join('\n'));
   } finally { c.t.disconnect(); u.close(); }
 });
 
@@ -908,6 +916,151 @@ test('RX audio in resend mode (each frame twice, same seq) reaches JTCAT once; r
     // A resend-0 stream that happens to repeat a seq is not touched.
     u.sendAudio(9, 500, 0); u.sendAudio(9, 500, 0);
     assert.ok(await until(() => c.frames.length >= 7));
+  } finally { c.t.disconnect(); u.close(); }
+});
+
+test('TX0; survives UDP: sent again at +150 and +500 ms, then read back until the radio reports receive', async () => {
+  const u = await fakeUnit();
+  const c = client();
+  try {
+    c.t.connect({ host: '127.0.0.1', basePort: u.base, ...FAST });
+    assert.ok(await until(() => c.connects === 1));
+    c.t.write('TX1;');
+    assert.ok(await until(() => u.radio.tx === '1'));
+    u.ignoreTx0 = 3;                     // the first three TX0; are lost
+    const mark = u.catSeen.length;
+    c.t.write('TX0;');
+    assert.strictEqual(c.t.mayBeKeyed, true, 'unconfirmed until the radio says receive');
+    assert.ok(await until(() => !c.t.mayBeKeyed, 4000), c.logs.join('\n'));
+    assert.strictEqual(u.radio.tx, '0');
+    const seen = u.catSeen.slice(mark);
+    const tx0 = new Set(seen.filter((x) => x.text === 'TX0;').map((x) => x.cmdSeq));
+    assert.ok(tx0.size >= 4, `TX0; sent ${tx0.size} times`);
+    assert.ok(seen.some((x) => x.text === 'TX;'), 'read back');
+    assert.ok(c.logs.some((l) => /still reports TX1 after TX0;/.test(l)));
+    assert.ok(c.logs.some((l) => /TX0; confirmed/.test(l)));
+  } finally { c.t.disconnect(); u.close(); }
+});
+
+test('a TX0; with nothing keyed (the safety TX0; at connect, the radio switched off) is not read back and never warns', async () => {
+  const u = await fakeUnit();
+  u.answerTx = false;                    // a radio that is off answers nothing
+  const c = client();
+  const warned = [];
+  c.t.on('unkey-unreachable', (w) => warned.push(w));
+  try {
+    c.t.connect({ host: '127.0.0.1', basePort: u.base, ...FAST });
+    assert.ok(await until(() => c.connects === 1));
+    c.t.write('TX0;');
+    await sleep(1200);
+    assert.strictEqual(warned.length, 0);
+    assert.strictEqual(c.t.mayBeKeyed, false);
+    assert.ok(!u.catSeen.some((x) => x.text === 'TX;'), 'no read-back');
+  } finally { c.t.disconnect(); u.close(); }
+});
+
+test('a TX0; the radio never confirms is said: unkey-unreachable, and the radio still counts as keyed', async () => {
+  const u = await fakeUnit();
+  u.answerTx = false;
+  const c = client();
+  const warned = [];
+  c.t.on('unkey-unreachable', (w) => warned.push(w));
+  try {
+    c.t.connect({ host: '127.0.0.1', basePort: u.base, ...FAST });
+    assert.ok(await until(() => c.connects === 1));
+    c.t.write('TX1;');
+    c.t.write('TX0;');
+    assert.ok(await until(() => warned.length === 1, 6000), c.logs.join('\n'));
+    assert.strictEqual(warned[0].message, 'POTACAT could not reach the radio to unkey it. It may still be transmitting.');
+    assert.strictEqual(c.t.mayBeKeyed, true);
+  } finally { c.t.disconnect(); u.close(); }
+});
+
+test('a session lost while keyed comes back at the minimum delay, whatever the back-off', async () => {
+  const u = await fakeUnit();
+  const c = client();
+  try {
+    c.t.connect({ host: '127.0.0.1', basePort: u.base, ...FAST, reconnectMinMs: 100, reconnectMaxMs: 20000 });
+    assert.ok(await until(() => c.connects === 1));
+    c.t._reconnects = 6;                 // deep in the back-off: 100 ms * 2^4
+    c.t.write('TX1;');
+    u.silent = true;
+    assert.ok(await until(() => c.errors.some((e) => e.code === 'SCULAN10_SESSION_LOST'), 3000));
+    assert.ok(c.logs.some((l) => /in 0 s \(the radio may be keyed: at the minimum delay\)/.test(l)), c.logs.join('\n'));
+  } finally { c.t.disconnect(); u.close(); }
+});
+
+test('disconnect with the radio possibly keyed and no session says so', async () => {
+  const u = await fakeUnit();
+  const c = client();
+  const warned = [];
+  c.t.on('unkey-unreachable', (w) => warned.push(w));
+  try {
+    c.t.connect({ host: '127.0.0.1', basePort: u.base, ...FAST, reconnectMinMs: 5000, reconnectMaxMs: 5000 });
+    assert.ok(await until(() => c.connects === 1));
+    c.t.write('TX1;');
+    u.silent = true;
+    assert.ok(await until(() => c.errors.some((e) => e.code === 'SCULAN10_SESSION_LOST'), 3000));
+    await c.t.disconnect();
+    assert.strictEqual(warned.length, 1);
+    assert.strictEqual(warned[0].reason, 'disconnected with no session to the unit');
+  } finally { c.t.disconnect(); u.close(); }
+});
+
+test('speaker monitor: a mode that does not read back stays saved; the others are let go', async () => {
+  const u = await fakeUnit();
+  const c = client();
+  const saved = [];
+  let restored = 0;
+  c.t.on('monitor-saved', (s) => saved.push(s));
+  c.t.on('monitor-restored', () => restored++);
+  try {
+    c.t.connect({ host: '127.0.0.1', basePort: u.base, ...FAST, muteMonitor: true });
+    assert.ok(await until(() => c.connects === 1));
+    c.t.write('FA;'); c.t.write('MD0;');
+    assert.ok(await until(() => u.radio.ml[2].level === '000'));
+    c.t.write('MD03;'); c.t.write('MD0;');
+    assert.ok(await until(() => u.radio.ml[3].level === '000'));
+    u.ignoreMl = ['3'];                  // mode 3 does not take the restore
+    await c.t.disconnect();
+    assert.strictEqual(restored, 0, 'not let go: mode 3 is still muted');
+    assert.deepStrictEqual(saved.at(-1), { 3: { on: '000', level: '010' } });
+    assert.deepStrictEqual(u.radio.ml[2], { on: '001', level: '002' });
+    assert.strictEqual(u.radio.mode, '3', 'back in the operator\'s mode');
+    assert.ok(c.logs.some((l) => /mode 3 did not read back/.test(l)), c.logs.join('\n'));
+  } finally { c.t.disconnect(); u.close(); }
+});
+
+test('speaker monitor: saved values with the option now off are put back right after connecting, ending in the operator\'s mode', async () => {
+  const u = await fakeUnit();
+  u.radio.ml[3] = { on: '000', level: '000' };                    // muted by a run that crashed
+  u.radio.mode = '2';
+  const c = client();
+  let restored = 0;
+  c.t.on('monitor-restored', () => restored++);
+  try {
+    c.t.connect({ host: '127.0.0.1', basePort: u.base, ...FAST, monitorSaved: { 3: { on: '000', level: '010' } } });
+    assert.ok(await until(() => c.connects === 1));
+    c.t.write('MD0;');                   // the poll: the mode is tracked though the option is off
+    assert.ok(await until(() => restored === 1, 4000), c.logs.join('\n'));
+    assert.deepStrictEqual(u.radio.ml[3], { on: '000', level: '010' });
+    assert.strictEqual(u.radio.mode, '2', 'left in USB, where the operator was');
+    assert.deepStrictEqual(c.t.monitorSaved, {});
+  } finally { c.t.disconnect(); u.close(); }
+});
+
+test('speaker monitor: a mode reading 000/000 after another was muted is never saved (ML not per mode)', async () => {
+  const u = await fakeUnit();
+  const c = client();
+  try {
+    c.t.connect({ host: '127.0.0.1', basePort: u.base, ...FAST, muteMonitor: true });
+    assert.ok(await until(() => c.connects === 1));
+    c.t.write('FA;'); c.t.write('MD0;');
+    assert.ok(await until(() => u.radio.ml[2].level === '000'));
+    u.radio.ml[3] = { on: '000', level: '000' };                  // what a shared ML would read
+    c.t.write('MD03;'); c.t.write('MD0;');
+    assert.ok(await until(() => c.logs.some((l) => /mode 3 reads ML0000 ML1000 after mode\(s\) 2 were muted; not saved/.test(l))), c.logs.join('\n'));
+    assert.deepStrictEqual(c.t.monitorSaved, { 2: { on: '001', level: '002' } });
   } finally { c.t.disconnect(); u.close(); }
 });
 
