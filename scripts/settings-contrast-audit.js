@@ -17,6 +17,8 @@ const ROOT = path.join(__dirname, '..');
 const args = process.argv.slice(2);
 const jsonOut = args.includes('--json') ? args[args.indexOf('--json') + 1] : null;
 const shotDir = args.includes('--shot') ? args[args.indexOf('--shot') + 1] : null;
+// --shot-id <id>: which control to photograph in each theme (its label and the help text under it).
+const shotId = args.includes('--shot-id') ? args[args.indexOf('--shot-id') + 1] : 'vara-setup-hf';
 
 const THEMES = [
   ['Navy', { theme: 'dark', variant: '', ds: '' }],
@@ -153,11 +155,11 @@ app.whenReady().then(async () => {
     for (const f of live.sort((a, b) => a.ratio - b.ratio).slice(0, 40)) console.log(`  ${f.ratio.toFixed(2)} < ${f.need}  ${f.el}  ${f.fg} on ${f.bg}`);
     if (shotDir) {
       fs.mkdirSync(shotDir, { recursive: true });
-      const ok = await w.webContents.executeJavaScript(`(function(){ var b = document.getElementById('vara-setup-hf'); if (!b) return false; b.scrollIntoView({ block: 'center' }); return true; })()`);
+      const ok = await w.webContents.executeJavaScript(`(function(){ var b = document.getElementById(${JSON.stringify(shotId)}); if (!b) return false; b.scrollIntoView({ block: 'center' }); return true; })()`);
       if (ok) {
-        const r = await w.webContents.executeJavaScript(`(function(){ var b = document.getElementById('vara-setup-hf').parentElement.getBoundingClientRect(); return { x: Math.max(0, Math.floor(b.left) - 10), y: Math.max(0, Math.floor(b.top) - 10), width: Math.ceil(b.width) + 20, height: Math.ceil(b.height) + 20 }; })()`);
+        const r = await w.webContents.executeJavaScript(`(function(){ var el = document.getElementById(${JSON.stringify(shotId)}); var box = el.closest('label') || el.parentElement; var b = box.getBoundingClientRect(); var n = box.nextElementSibling; if (n && n.classList.contains('help-text')) { var h = n.getBoundingClientRect(); b = { left: Math.min(b.left, h.left), top: b.top, width: Math.max(b.right, h.right) - Math.min(b.left, h.left), height: h.bottom - b.top }; } return { x: Math.max(0, Math.floor(b.left) - 10), y: Math.max(0, Math.floor(b.top) - 10), width: Math.ceil(b.width) + 20, height: Math.ceil(b.height) + 20 }; })()`);
         const img = await w.webContents.capturePage(r);
-        fs.writeFileSync(path.join(shotDir, 'vara-' + name.replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.png'), img.toPNG());
+        fs.writeFileSync(path.join(shotDir, shotId + '-' + name.replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.png'), img.toPNG());
       }
     }
   }

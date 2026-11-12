@@ -1447,6 +1447,7 @@ const setVaraCableIn = document.getElementById('set-vara-cable-in');
 const setVaraCableOut = document.getElementById('set-vara-cable-out');
 const setWinlinkCap = document.getElementById('set-winlink-cap');
 const setWinlinkPrediction = document.getElementById('set-winlink-prediction');
+const setWinlinkRecordAudio = document.getElementById('set-winlink-record-audio');
 const setWinlinkPatPath = document.getElementById('set-winlink-pat-path');
 const setTciPort = document.getElementById('set-tci-port');
 const setTciMaxAge = document.getElementById('set-tci-max-age');
@@ -17733,6 +17734,7 @@ async function openSettingsDialog(tab) {
     }
     setWinlinkCap.value = s.winlinkSessionCapMin || 30;
     if (setWinlinkPrediction) setWinlinkPrediction.checked = s.winlinkPrediction !== false;
+    if (setWinlinkRecordAudio) setWinlinkRecordAudio.checked = !!s.winlinkRecordModemAudio;
     setWinlinkPatPath.value = s.winlinkPatPath || '';
     const rig = (s.rigs || []).find((x) => x.id === s.activeRigId) || {};
     const wa = rig.winlinkAudio || {};
@@ -18642,6 +18644,7 @@ settingsSave.addEventListener('click', async () => {
       } : {}),
       winlinkSessionCapMin: Math.max(10, Math.min(60, parseInt(setWinlinkCap.value, 10) || 30)),
       winlinkPrediction: setWinlinkPrediction ? setWinlinkPrediction.checked : true,
+      winlinkRecordModemAudio: setWinlinkRecordAudio ? setWinlinkRecordAudio.checked : false,
       winlinkPatPath: setWinlinkPatPath.value.trim(),
     } : {}),
     ...(setMercuryEnable ? {
@@ -22351,6 +22354,21 @@ catLogClearBtn.addEventListener('click', () => {
           logSections.push('### Startup log', '```', pkg.startup.join('\n'), '```', '');
         }
         logSections.push('### Log (from launch — the minutes before and after the "recording started" marker)', '```', body.join('\n'), '```');
+        // #295: the modem's own logs, so a Winlink report says what the modem
+        // sent, heard and decided, not only what POTACAT did.
+        const wm = pkg.winlinkModem;
+        if (wm && wm.ardop && wm.ardop.lines && wm.ardop.lines.length) {
+          logSections.push('', '### ARDOP modem log (' + wm.ardop.file + ', its last run' + (wm.ardop.omitted ? ', ' + wm.ardop.omitted + ' earlier lines left out' : '') + ')', '```', wm.ardop.lines.join('\n'), '```');
+        }
+        if (wm && wm.ardopSession && wm.ardopSession.lines && wm.ardopSession.lines.length) {
+          logSections.push('', '### ARDOP session log (' + wm.ardopSession.file + ')', '```', wm.ardopSession.lines.join('\n'), '```');
+        }
+        if (wm && wm.direwolf && wm.direwolf.lines && wm.direwolf.lines.length) {
+          logSections.push('', '### Packet modem (Dire Wolf), last lines', '```', wm.direwolf.lines.join('\n'), '```');
+        }
+        if (wm && wm.recordings && wm.recordings.length) {
+          logSections.push('', '**Modem recordings to attach:** ' + wm.recordings.join(', ') + ' (in the ardop-logs folder inside the Winlink folder of the POTACAT data folder).');
+        }
       }
     } catch {}
     if (!logSections) {
