@@ -811,7 +811,9 @@ function _applyPopoutTheme(payload) {
     reviewHeld = null;
     reviewId = p.review;
     applySpotPrefill(p);
-    respotCheckEl.checked = false; // the automatic log never re-spots
+    // Off, unless JTCAT's "Re-spot the activator" option is on (#351): then
+    // ticked, and this box alone decides whether the spot goes out.
+    respotCheckEl.checked = !!p.respotOn;
     clearBtn.textContent = "Don't log";
     reviewBar.textContent = reviewText(p);
     reviewBar.hidden = false;

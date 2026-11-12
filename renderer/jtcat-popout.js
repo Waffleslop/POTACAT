@@ -125,6 +125,8 @@ function _applyPopoutTheme(payload) {
     }
     logPrompt = s.jtcatLogPrompt === true;
     if (logPromptToggle) logPromptToggle.classList.toggle('active', logPrompt);
+    autoRespot = s.jtcatAutoRespot === true;
+    if (autoRespotToggle) autoRespotToggle.classList.toggle('active', autoRespot);
     fakeIt = s.jtcatFakeIt === true;
     if (fakeItToggle) fakeItToggle.classList.toggle('active', fakeIt);
     if (relogMinInput) {
@@ -459,6 +461,8 @@ function _applyPopoutTheme(payload) {
   });
   var logPromptToggle = document.getElementById('jp-log-prompt');
   var logPrompt = false;
+  var autoRespotToggle = document.getElementById('jp-auto-respot');
+  var autoRespot = false;
   var fakeItToggle = document.getElementById('jp-fake-it');
   var fakeIt = false;   // split operation "Fake It" (main.js fakeItShiftForTx)
   var huntSpottedToggle = document.getElementById('jp-hunt-spotted');
@@ -3260,6 +3264,13 @@ function _applyPopoutTheme(payload) {
       logPrompt = !logPrompt;
       logPromptToggle.classList.toggle('active', logPrompt);
       window.api.saveSettings({ jtcatLogPrompt: logPrompt });
+    });
+  }
+  if (autoRespotToggle) {
+    autoRespotToggle.addEventListener('click', function() {
+      autoRespot = !autoRespot;
+      autoRespotToggle.classList.toggle('active', autoRespot);
+      window.api.saveSettings({ jtcatAutoRespot: autoRespot });
     });
   }
   if (fakeItToggle) {
