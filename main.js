@@ -28416,6 +28416,9 @@ function connectRemote() {
     // The door is set at the desktop only: a device cannot open or close the
     // listener it is talking through (lib/remote-access.js).
     if (partial) { delete partial.remoteAccess; delete partial.enableRemote; }
+    // Where the shack's VARA runs is typed at the shack only (#287): Pat
+    // connects to that host, so a device never names it.
+    if (partial) { delete partial.winlinkVaraHost; delete partial.winlinkVaraFmHost; }
     Object.assign(settings, partial);
     saveSettings(settings);
     afterSstvSettingsSaved(partial);

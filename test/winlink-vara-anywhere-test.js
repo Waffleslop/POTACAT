@@ -112,6 +112,8 @@ test('review: Test says what happened in plain words; Set up refuses a VARA on a
   const s = main.slice(main.indexOf('async function winlinkVaraSetup('), main.indexOf('async function winlinkVaraSetup(') + 900);
   assert.ok(s.indexOf('if (!_winlinkVaraLaunches(kind)) {') > 0 && s.indexOf('if (!_winlinkVaraLaunches(kind)) {') < s.indexOf('winlinkVaraConfigure('), '"Set up VARA for me" writes no local settings for a VARA on another computer');
   assert.ok(main.includes('if (!_winlinkVaraLaunches(kind)) continue; // a VARA on another computer is not ours to configure (#287)'), 'nor does a rig switch');
+  const rs = main.slice(main.indexOf("remoteServer.on('save-settings', (partial) => {"), main.indexOf("remoteServer.on('save-settings', (partial) => {") + 2500);
+  assert.ok(rs.indexOf('delete partial.winlinkVaraHost; delete partial.winlinkVaraFmHost;') > 0 && rs.indexOf('delete partial.winlinkVaraHost;') < rs.indexOf('Object.assign(settings, partial);'), 'a device cannot set the host Pat connects to: it is typed at the shack');
   assert.ok(!/probeVaraPort\(port\);/.test(main.slice(main.indexOf('async function winlinkVaraReady('), main.indexOf('async function winlinkVaraAudioReady('))), 'every probe in a session names the host');
 });
 
