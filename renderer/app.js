@@ -6696,16 +6696,16 @@ async function refreshLauncherStatus() {
     const running = !!s.running;
     let label, color, detail;
     if (running && installed) {
-      label = '● running'; color = '#4ecca3';
+      label = '● running'; color = 'var(--accent-green)';
       detail = 'Auto-starts at login. The phone app can restart POTACAT via port 7301.';
     } else if (installed && !running) {
-      label = '○ installed, not running'; color = '#f0a500';
+      label = '○ installed, not running'; color = 'var(--warn)';
       detail = 'Click Start now to spawn it without logging out, or wait — it will auto-start at your next login.';
     } else if (!installed && running) {
-      label = '● running (no autostart)'; color = '#f0a500';
+      label = '● running (no autostart)'; color = 'var(--warn)';
       detail = 'Launcher is up but won\'t auto-start at login. Click Install to make it persistent.';
     } else {
-      label = '○ not installed'; color = '#888';
+      label = '○ not installed'; color = 'var(--text-secondary)';
       detail = '';
     }
     launcherStatusPill.textContent = label;
@@ -6721,7 +6721,7 @@ async function refreshLauncherStatus() {
     renderLauncherCloud(s);
   } catch (err) {
     launcherStatusPill.textContent = 'status unavailable';
-    launcherStatusPill.style.color = '#888';
+    launcherStatusPill.style.color = 'var(--text-secondary)';
   }
 }
 // Restart from anywhere: the launcher's own connector on the Cloud Tunnel.

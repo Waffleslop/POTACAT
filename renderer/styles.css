@@ -126,8 +126,18 @@
      points each at the design theme's "on" colour (Acid Burn's green and
      cyan need black). */
   --on-accent-red: #fff;
-  --on-accent-blue: #fff;
-  --on-accent-green: #fff;
+  /* Dark text on the classic dark themes' light blue and green fills: white
+     on #4fc3f7 / #4ecca3 is 2:1 (Casey 2026-11-11, the contrast rule). The
+     light themes and ds-bridge.css set their own. */
+  --on-accent-blue: #10131a;
+  --on-accent-green: #10131a;
+  /* Text on the green button (.btn-primary, var(--accent-green-btn)): black
+     was hard-coded, unreadable on a theme's dark green (She's On Frequency,
+     "Set up VARA HF for me"). */
+  --on-accent-green-btn: #10131a;
+  /* Red used as TEXT (not a fill). The brand red is 4.2:1 on Navy's panels;
+     Navy reads a lighter red here, every other theme its own red. */
+  --accent-red-text: var(--accent-red);
   --on-tx-active: #fff;
   /* One window title bar for every window (custom bars in Log, Winlink,
      Mercury, Scope and SSTV read these too; the VFO window copies them). */
@@ -250,7 +260,20 @@
      it here. */
 }
 
+/* Navy (the classic dark default): the brand red as text, lightened to pass on its panels. */
+:root:not([data-theme="light"]):not([data-dark-variant]):not([data-ds]) {
+  --accent-red-text: #ff6b81;
+}
+
 [data-theme="light"] {
+  /* White on the light theme's darker fills (#1565c0 5.8:1, #2e7d5a 5.0:1).
+     The green button stays #4ecca3 here, so it keeps the dark text. */
+  --on-accent-blue: #fff;
+  --on-accent-green: #fff;
+  /* Warnings as text: the SOTA orange is 1.9:1 on white. */
+  --warn: #8a5c00;
+  /* Red as text: #c62828 is 4.2:1 on the red tint. */
+  --accent-red-text: #b71c1c;
   --bg-primary: #f0f2f5;
   --bg-secondary: #ffffff;
   --bg-tertiary: #e8eaed;
@@ -265,7 +288,7 @@
   --text-dim: #74748a;
   --text-dimmer: #8c8c9e;
   --accent-red: #c62828;
-  --accent-blue: #1976d2;
+  --accent-blue: #1565c0; /* was #1976d2: 3.8:1 as text on the light panels; #1565c0 is 4.8:1 or more */
   --accent-green: #2e7d5a;
   --accent-green-btn: #4ecca3;
   --shadow: rgba(0,0,0,0.1);
@@ -335,6 +358,7 @@
   --accent-red: #b71c1c;
   --accent-green: #1b5e3b;
   --accent-green-btn: #1b5e3b;
+  --on-accent-green-btn: #fff;
   --accent-blue: #0d47a1;
   --border-primary: #888898;
   --border-secondary: #9a9aaa;
@@ -900,12 +924,10 @@ button:hover {
 .btn-primary {
   background: var(--accent-green-btn);
   border-color: var(--accent-green-btn);
-  color: #000;
+  color: var(--on-accent-green-btn);
   font-weight: 600;
 }
 .btn-primary:hover { filter: brightness(1.15); background: var(--accent-green-btn); }
-[data-theme="light"][data-wcag] .btn-primary,
-[data-wcag] .btn-primary { color: #000; }
 
 .btn-blue {
   background: var(--accent-blue);
@@ -917,7 +939,7 @@ button:hover {
 .btn-danger {
   background: transparent;
   border-color: var(--accent-red);
-  color: var(--accent-red);
+  color: var(--accent-red-text);
 }
 .btn-danger:hover { background: var(--tint-red); }
 
@@ -1062,7 +1084,7 @@ button:hover {
 
 .status.disconnected {
   background: var(--tint-red);
-  color: var(--accent-red);
+  color: var(--accent-red-text);
 }
 
 .status.warn {
@@ -2237,10 +2259,10 @@ dialog {
    handler) not a tab switcher. Distinct red accent + no active
    state because it never stays "selected." */
 .settings-tab.settings-tab-action {
-  color: var(--accent-red);
+  color: var(--accent-red-text);
 }
 .settings-tab.settings-tab-action:hover {
-  color: #ff6b81;
+  color: var(--accent-red-text);
   background: color-mix(in srgb, var(--accent-red) 10%, transparent);
 }
 /* Sidebar layout is the default everywhere now (Casey 2026-06-08 —
@@ -3772,8 +3794,8 @@ dialog {
   font-weight: 700;
   letter-spacing: 0.5px;
   text-transform: uppercase;
-  color: var(--source-pota, #4ecca3);
-  border: 1px solid color-mix(in srgb, var(--source-pota, #4ecca3) 50%, transparent);
+  color: var(--text-primary); /* the green is the border: green text on its tint is 4.2:1 in the light theme */
+  border: 1px solid color-mix(in srgb, var(--accent-green) 50%, transparent);
   border-radius: 999px;
   padding: 1px 7px;
 }
@@ -4001,8 +4023,11 @@ dialog::backdrop {
 
 dialog h3 {
   margin-bottom: 16px;
-  color: var(--accent-red);
+  color: var(--accent-red-text);
 }
+
+/* A link in Settings with no colour of its own: the theme's link colour, not the browser's #0000ee. */
+#settings-dialog a:not([class]):not([style*="color"]) { color: var(--link, var(--accent-blue)); }
 
 #settings-dialog .settings-shell > h3 {
   flex-shrink: 0;
@@ -4844,7 +4869,7 @@ a.settings-echocat-badge-link:hover {
 }
 
 .settings-version {
-  color: var(--text-dim);
+  color: var(--text-secondary);
   margin-bottom: 4px;
 }
 
@@ -4867,7 +4892,7 @@ a.settings-echocat-badge-link:hover {
 }
 
 .footer-dot {
-  color: var(--text-dimmer);
+  color: var(--text-secondary);
 }
 
 .settings-footer a {
@@ -5100,14 +5125,14 @@ a.settings-echocat-badge-link:hover {
 .flex-status {
   margin: 6px 0 4px;
   font-size: 12px;
-  color: #8a8a9a;
+  color: var(--text-secondary);
 }
 .flex-status.connected { color: var(--accent-green); }
 
 #flex-config summary {
   cursor: pointer;
   font-size: 12px;
-  color: #8a8a9a;
+  color: var(--text-secondary);
   user-select: none;
   margin-top: 4px;
 }
@@ -5329,13 +5354,14 @@ a.settings-echocat-badge-link:hover {
 
 .rig-editor-buttons button:first-child {
   background: var(--accent-green);
-  color: var(--bg-primary);
+  color: var(--on-accent-green);
   border-color: var(--accent-green);
   font-weight: bold;
 }
 
 .rig-editor-buttons button:first-child:hover {
-  background: #3db892;
+  background: var(--accent-green);
+  filter: brightness(1.1);
 }
 
 /* Net editor panel (mirrors rig editor) */
@@ -5348,7 +5374,7 @@ a.settings-echocat-badge-link:hover {
 }
 
 #net-editor h4 {
-  color: var(--source-net);
+  color: var(--accent-blue); /* was the net yellow: 1.3:1 on the light themes; the same blue as Add Rig */
   margin-bottom: 10px;
   font-size: 13px;
 }
@@ -10679,7 +10705,7 @@ dialog[open] {
 }
 .cloud-subscribe-section { margin-top: 4px; }
 .cloud-subscribe-section .btn-primary { font-size: 14px; padding: 8px 14px; }
-.cloud-subscribe-section .cloud-yearly-btn { background: #1f6f9f; border-color: #1f6f9f; }
+.cloud-subscribe-section .cloud-yearly-btn { background: var(--accent-blue); border-color: var(--accent-blue); color: var(--on-accent-blue); }
 .cloud-trial-line { font-size: 12px; color: var(--accent-blue); margin-left: 4px; }
 .cloud-trial-line.urgent { color: #f0a500; font-weight: 600; }
 .cloud-upload-nudge {
