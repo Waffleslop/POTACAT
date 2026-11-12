@@ -35,8 +35,10 @@ jobs:
   # this job does not have). scripts/run-tests.js deals the files out by
   # measured time (scripts/test-times.json) so the shards finish together;
   # test/run-tests-shard-test.js proves every file runs in exactly one shard.
-  # The job keeps its name, so "jtcat-tests (1)" .. "(4)" are the checks.
-  jtcat-tests:
+  # Branch protection requires a check called "jtcat-tests": that is the small
+  # job below, which passes only when all four shards passed.
+  test-shard:
+    name: test shard ${{ matrix.shard }} of 4
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
@@ -55,6 +57,21 @@ jobs:
         env:
           TEST_SHARD: ${{ matrix.shard }}/4
         run: node scripts/run-tests.js
+
+  # The required check (branch protection names "jtcat-tests"): green only when
+  # every shard is green; a failed or cancelled shard makes it red.
+  jtcat-tests:
+    needs: test-shard
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: All four test shards passed
+        run: |
+          if [ "${{ needs.test-shard.result }}" != "success" ]; then
+            echo "A test shard did not pass (result: ${{ needs.test-shard.result }})"; exit 1
+          fi
+          echo "All four test shards passed"
 
   # The checks that are not test files: SSTV packs and the FT-710 helper.
   helper-checks:

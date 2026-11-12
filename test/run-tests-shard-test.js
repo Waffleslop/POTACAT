@@ -61,6 +61,8 @@ test('the workflow runs all four shards, and cancels only superseded PR runs', (
   assert.ok(/shard: \[1, 2, 3, 4\]/.test(wf), 'a four-shard matrix');
   assert.ok(/TEST_SHARD: \$\{\{ matrix\.shard \}\}\/4/.test(wf));
   assert.ok(/cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}/.test(wf), 'a master push is never cancelled');
+  // Branch protection requires a check named jtcat-tests: it must still exist and wait on every shard.
+  assert.ok(/\n  jtcat-tests:\n    needs: test-shard\n    if: always\(\)/.test(wf.replace(/\r\n/g, '\n')), 'the required jtcat-tests check gathers the shards');
 });
 
 test('the Electron tests skip at once without a display, unless the job requires them', () => {
