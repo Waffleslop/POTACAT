@@ -4684,7 +4684,7 @@ body.popout-mode .popout-only { display: flex; }
 .mail-view:not([data-screen="list"]) .mail-pane-list { display: none; }
 .mail-screen { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 @container mail (min-width: 700px) {
-  .mail-view[data-screen] .mail-pane-list { display: flex; flex: 0 0 clamp(300px, 42%, 400px); border-right: 1px solid var(--m-line); }
+  .mail-view[data-screen] .mail-pane-list { display: flex; flex: 0 0 clamp(340px, 46%, 400px); border-right: 1px solid var(--m-line); }
   .mail-view[data-screen] .mail-pane-main { display: flex; }
   .mail-pane-main .mail-back { display: none; }
 }
@@ -4741,8 +4741,8 @@ body.popout-mode .popout-only { display: flex; }
 .mail-seg-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .mail-seg-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .mail-seg-btn {
-  min-height: 44px; padding: 4px 4px; border: 0; border-radius: 6px; background: transparent; color: var(--m-muted);
-  font-family: inherit; font-size: 16px; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; cursor: pointer;
+  min-height: 44px; min-width: 0; padding: 4px 2px; border: 0; border-radius: 6px; background: transparent; color: var(--m-muted);
+  font-family: inherit; font-size: 16px; font-weight: 700; line-height: 1.2; overflow-wrap: normal; word-break: normal; cursor: pointer;
 }
 .mail-seg-btn[aria-pressed="true"] { background: var(--m-surface); color: var(--m-ink); }
 
