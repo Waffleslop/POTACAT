@@ -90,6 +90,9 @@
     .wl-done-sub { font-size: 13px; color: var(--text-secondary); overflow-wrap: anywhere; }
     .wl-done-card.bad .wl-done-title { color: var(--accent-red-text, var(--accent-red, #e94560)); font-size: 16px; overflow-wrap: anywhere; }
     .wl-done-card.bad .wl-done-sub { font-size: 14px; line-height: 1.4; color: var(--text-primary); }
+    .wl-done-auto { font-size: 15px; font-weight: 700; line-height: 1.4; color: var(--text-primary); overflow-wrap: anywhere; }
+    .wl-done-auto.ended { font-weight: 600; color: var(--text-secondary); }
+    .wl-done-actions { flex-wrap: wrap; }
     .wl-done-actions { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
     .wl-done-actions .wl-btn { height: 34px; font-size: 14px; padding: 0 14px; display: inline-flex; align-items: center; gap: 8px; }
     .wl-done-actions .wl-btn.primary { font-weight: 700; background: var(--ok-subtle, transparent); }
@@ -492,9 +495,12 @@
     <div class="wl-done-card" id="wl-done-card" role="status" aria-live="polite">
       <span class="wl-done-title" id="wl-done-title"></span>
       <span class="wl-done-sub" id="wl-done-sub"></span>
+      <span class="wl-done-auto" id="wl-done-auto" hidden></span>
       <div class="wl-done-actions">
         <button class="wl-btn primary" id="wl-done-save"><svg class="wl-star" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8z"></path></svg>Add to favorites</button>
         <span class="wl-done-saved" id="wl-done-saved" hidden><svg class="wl-star" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8z"></path></svg>In your favorites</span>
+        <button class="wl-btn primary" id="wl-done-retrynow" hidden>Try now</button>
+        <button class="wl-btn" id="wl-done-retrycancel" hidden>Cancel</button>
         <button class="wl-btn primary" id="wl-done-retry" hidden>Try again</button>
         <button class="wl-btn" id="wl-done-close">Not now</button>
       </div>

@@ -966,6 +966,20 @@
       $('wl-done-sub').textContent = [bad.detail, bad.next].filter(Boolean).join(' ');
       $('wl-done-save').hidden = true;
       $('wl-done-saved').hidden = true;
+      // The automatic retry (#425): the countdown, Try now and Cancel while it
+      // waits; afterwards one line saying why it was not made. Words from the shack.
+      var rs = bad.retryState || '';
+      var waiting = rs === 'counting' || rs === 'waiting-clear' || rs === 'starting';
+      var auto = $('wl-done-auto');
+      auto.hidden = !bad.retryText;
+      auto.textContent = bad.retryText || '';
+      auto.classList.toggle('ended', rs === 'cancelled' || rs === 'skipped');
+      $('wl-done-retrynow').hidden = !(rs === 'counting' || rs === 'waiting-clear');
+      $('wl-done-retrycancel').hidden = !(rs === 'counting' || rs === 'waiting-clear');
+      $('wl-done-retry').hidden = waiting;
+      $('wl-done-close').hidden = waiting;
+      $('wl-done-retrynow').onclick = function () { window.api.retry('now'); };
+      $('wl-done-retrycancel').onclick = function () { window.api.retry('cancel'); };
       $('wl-done-close').textContent = 'OK';
       $('wl-done-close').onclick = function () { doneDismissed = key; card.classList.remove('show'); renderSession(ss); };
       $('wl-done-retry').onclick = function () {
@@ -979,6 +993,10 @@
       card.classList.add('show');
       return;
     }
+    $('wl-done-auto').hidden = true;
+    $('wl-done-retrynow').hidden = true;
+    $('wl-done-retrycancel').hidden = true;
+    $('wl-done-close').hidden = false;
     $('wl-done-title').textContent = 'Mail exchanged with ' + r.call;
     $('wl-done-sub').textContent = [r.band, fmtDial(r.dialKhz) + ' MHz', MODE_SHORT[r.mode] || r.mode, r.sent + ' sent', r.received + ' received'].filter(Boolean).join(' \u00b7 ');
     $('wl-done-save').hidden = !!r.saved;

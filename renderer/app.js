@@ -1438,6 +1438,7 @@ const setVaraCableIn = document.getElementById('set-vara-cable-in');
 const setVaraCableOut = document.getElementById('set-vara-cable-out');
 const setWinlinkCap = document.getElementById('set-winlink-cap');
 const setWinlinkPrediction = document.getElementById('set-winlink-prediction');
+const setWinlinkAutoRetry = document.getElementById('set-winlink-auto-retry');
 const setWinlinkRecordAudio = document.getElementById('set-winlink-record-audio');
 const setWinlinkPatPath = document.getElementById('set-winlink-pat-path');
 const setTciPort = document.getElementById('set-tci-port');
@@ -17713,6 +17714,7 @@ async function openSettingsDialog(tab) {
     }
     setWinlinkCap.value = s.winlinkSessionCapMin || 30;
     if (setWinlinkPrediction) setWinlinkPrediction.checked = s.winlinkPrediction !== false;
+    if (setWinlinkAutoRetry) setWinlinkAutoRetry.checked = s.winlinkAutoRetry !== false;
     if (setWinlinkRecordAudio) setWinlinkRecordAudio.checked = !!s.winlinkRecordModemAudio;
     setWinlinkPatPath.value = s.winlinkPatPath || '';
     const rig = (s.rigs || []).find((x) => x.id === s.activeRigId) || {};
@@ -18610,6 +18612,7 @@ settingsSave.addEventListener('click', async () => {
       } : {}),
       winlinkSessionCapMin: Math.max(10, Math.min(60, parseInt(setWinlinkCap.value, 10) || 30)),
       winlinkPrediction: setWinlinkPrediction ? setWinlinkPrediction.checked : true,
+      winlinkAutoRetry: setWinlinkAutoRetry ? setWinlinkAutoRetry.checked : true,
       winlinkRecordModemAudio: setWinlinkRecordAudio ? setWinlinkRecordAudio.checked : false,
       winlinkPatPath: setWinlinkPatPath.value.trim(),
     } : {}),

@@ -306,7 +306,7 @@ test('the dial moved by hand between attempts: the original return point is kept
 console.log('main.js wiring of the return');
 test('session end keeps the return point while the mail window is open, and says so', () => {
   const end = fnBody(main, 'winlinkEndSession');
-  assert.ok(/WinlinkReturn\.atSessionEnd\(\{ tuned: s\.tuned, returnTo: s\.returnTo, windowOpen: winlinkMailWindowOpen\(\) \}\)/.test(end));
+  assert.ok(/WinlinkReturn\.atSessionEnd\(\{ tuned: s\.tuned, returnTo: s\.returnTo, windowOpen: winlinkMailWindowOpen\(\) \|\| retryWill \}\)/.test(end), 'a pending automatic retry (#425) keeps the radio like an open window');
   assert.ok(/=== 'keep'\) winlinkKeepReturn\(s\.returnTo\)/.test(end));
   assert.ok(/else if \(_ret === 'return'\) setTimeout\(\(\) => winlinkRestoreDial\(s\.returnTo\), 1500\);/.test(end), 'goes back at once only with no mail window');
   const keep = fnBody(main, 'winlinkKeepReturn');

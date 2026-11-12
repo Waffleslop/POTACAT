@@ -441,6 +441,7 @@ const WinlinkPat = require('./lib/winlink-pat');
 const WinlinkDiag = require('./lib/winlink-diag');
 const WinlinkHistory = require('./lib/winlink-history');
 const WinlinkOutcome = require('./lib/winlink-outcome'); // how a session ended, in the words every surface shows (#425)
+const WinlinkAutoRetry = require('./lib/winlink-auto-retry'); // one automatic retry after a dropped link (#425)
 const WinlinkPatRecover = require('./lib/winlink-pat-recover'); // Pat still on a call nobody owns: restart it, never refuse for ever (#430)
 const WinlinkFav = require('./lib/winlink-favourites');
 const WinlinkTemplates = require('./lib/winlink-templates');
@@ -1924,7 +1925,10 @@ let _direwolfHeard = 0;         // frames Dire Wolf decoded from the radio since
 let _direwolfMonitor = null;    // our client on Dire Wolf's AGW port in monitor mode (lib/direwolf-agw-monitor.js)
 let _direwolfMonitorHeard = 0;  // frames the monitor saw the radio receive this session (stdout never reaches us on Windows, #128)
 let _direwolfTiming = null;     // {txDelayMs, txTailMs} the running Dire Wolf was given (#257)
-let _winlinkPatConnected = false; // Pat said "Connected to ..." this session: the modem decoded the far end (#257)
+let _winlinkPatConnected = false;
+// The automatic retry pending after a dropped link (#425, lib/winlink-auto-retry.js):
+// { gateway, mode, dialKhz, url, origin, noCat, endsAt, tryNow, watch, timer, acc, busy, ofStartedAt, holdsReturn }, or null.
+let _winlinkRetry = null; // Pat said "Connected to ..." this session: the modem decoded the far end (#257)
 let winlinkAudio = null;        // ModemAudioLane: the modem's audio socket, in its own process (lib/modem-audio-lane.js, #187)
 let winlinkTxActive = false;    // Pat has the transmitter keyed (via the shim)
 let _winlinkTxFailsafeTimer = null;
@@ -11335,6 +11339,7 @@ function winlinkArmAfterAbortCheck() {
 }
 
 function disconnectWinlink({ quit } = {}) {
+  winlinkRetryCancel('winlink-off'); // a session it ends is never retried either: its cause is 'turned-off' or 'closing'
   clearTimeout(_winlinkAfterAbortTimer); _winlinkAfterAbortTimer = null;
   if (winlinkSessionActive()) { winlinkNoteCause(quit ? 'closing' : 'turned-off'); winlinkEndSession('error', quit ? 'POTACAT is closing' : 'Winlink was turned off'); }
   winlinkReturnOnStop(quit);
@@ -11810,7 +11815,7 @@ function winlinkCableConfigured() {
 function modemBridgeWanted() {
   if (winlinkIpAudioRoute() || isRemoteMode()) return false;
   if (!winlinkState.snapshot().modes.some((m) => m.available && (m.id === 'ardop' || m.id === 'packet' || ((m.id === 'vara' || m.id === 'varafm') && winlinkCableConfigured())))) return false;
-  return !!((winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) || _winlinkRemoteWatchers > 0 || winlinkSessionActive());
+  return !!((winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) || _winlinkRemoteWatchers > 0 || winlinkSessionActive() || _winlinkRetry);
 }
 function modemBridgeSettle(ok) {
   while (_modemBridgeWaiters.length) { const w = _modemBridgeWaiters.shift(); clearTimeout(w.timer); w.resolve(ok); }
@@ -12032,6 +12037,7 @@ function winlinkFeedRx(pcm, sampleRate, { fromBridge = false } = {}) {
     audioSafeSend(winlinkPopoutWin.webContents, 'winlink-audio-frame', { pcm, sampleRate });
   }
   if (_winlinkRemoteWatchers > 0) winlinkSpecAcc().push(pcm, sampleRate);
+  if (_winlinkRetry) winlinkRetryFeed(pcm, sampleRate); // the automatic retry's channel check (#425)
 }
 
 function winlinkSpecAcc() {
@@ -12495,7 +12501,7 @@ function winlinkSessionPush() {
  * the pop-out's Connect and ECHOCAT's winlink-connect, both operator actions.
  * @returns {{ok:boolean, error?:string, reason?:string}}
  */
-async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin } = {}) {
+async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin, autoRetry } = {}) {
   if (!(await winlinkEnsureStarted())) return { ok: false, error: winlinkState.snapshot().patError || 'Winlink could not start — see the [Winlink] lines in the log' };
   if (!settings.winlinkNoticeAcceptedAt) return { ok: false, error: 'Read and accept the Winlink notice first' };
   if (!settings.winlinkPassword) return { ok: false, error: 'Set your Winlink password in Settings > Station > Winlink first' };
@@ -12545,7 +12551,9 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
     url: radio ? url : '', // the URL Pat dials (carries the gateway's bandwidth): a saved gateway keeps it (#254)
     capSec: radio ? capMin * 60 : 0,
     returnTo: radio ? (_winlinkPreviewReturnTo || winlinkDialHere('at Connect')) : null,
-    text: radio ? `Preparing ${WinlinkModes.LABELS[mode]}` : 'Connecting to Winlink over the internet',
+    text: autoRetry ? WinlinkOutcome.retryText({ state: 'starting', gateway }) : radio ? `Preparing ${WinlinkModes.LABELS[mode]}` : 'Connecting to Winlink over the internet',
+    // Who started it (the retry rules ask), and whether it is the automatic retry after a drop (#425).
+    origin: String(origin || 'operator'), autoRetry: !!autoRetry,
   });
   winlinkOutcomeReset(mode);
   _winlinkSessionError = '';
@@ -12824,6 +12832,7 @@ function winlinkOutcomeFacts(state, s, raw, received, outbox) {
     queued: _winlinkQueuedAtStart, outbox,
     modemEnd: story && story.end, modemAudioClosed: _winlinkModemAudioClosed, txCutMs: _winlinkTxCutMs,
     capMin: s.capSec ? Math.round(s.capSec / 60) : 0,
+    autoRetry: !!s.autoRetry, origin: s.origin || '',
   };
 }
 /** What a surface needs of an outcome: the state word, the sentence in its parts, whether Try again fits. */
@@ -12860,7 +12869,7 @@ async function winlinkSettleOutcome(state, s, raw, received, endedAt) {
   // Still the same ended session on screen? Then it gains the Outbox sentence.
   const now = winlinkState.session;
   if (state === 'error' && !winlinkSessionActive() && now.startedAt === s.startedAt && now.state === 'error' && now.error !== outcome.text) {
-    winlinkState.setSession({ text: outcome.text, error: outcome.text, outcome: winlinkOutcomeView(outcome) });
+    winlinkState.setSession({ text: outcome.text, error: outcome.text, outcome: { ...winlinkOutcomeView(outcome), ...winlinkRetryFields(now.outcome) } });
     winlinkSessionPush();
   }
 }
@@ -12906,18 +12915,30 @@ function winlinkEndSession(state, text, received = 0) {
   if (winlinkAudio) winlinkAudio.key(false); // the lane drops what it held for the radio
   winlinkTxBurstEnd();
   const radio = WinlinkModes.isRadioMode(s.mode);
+  // The modem's last lines and the session's audio first: the wording below reads them.
   if (radio) {
     if (s.mode === 'ardop') stopArdopTail();
     winlinkAudioDiagEnd();
+  }
+  // What the operator reads comes from what POTACAT saw, in one place for
+  // every surface (lib/winlink-outcome.js, #425). `text` as it was passed in
+  // (Pat's reply, or a setup reason) is for the log.
+  const raw = String(text || '');
+  const outcome = WinlinkOutcome.describeOutcome(winlinkOutcomeFacts(state, s, raw, received, null));
+  // A link that dropped is tried once more by itself (#425). Decided before
+  // the radio is put back: a pending retry keeps the radio on the gateway.
+  const retryWill = wasActive && state === 'error' ? winlinkRetryDecide(s, outcome) : false;
+  if (radio) {
     if (s.mode === 'ardop') killArdop();
     if (s.mode === 'packet') killDirewolf();
     if (s.mode === 'mercury') winlinkTakeMercuryBack();
     // The radio stays where the session put it while the mail window is open;
     // it goes back once, when the window closes (#187: a return per attempt
     // was two band changes, each an ATU tune). No window: go back now.
-    const _ret = WinlinkReturn.atSessionEnd({ tuned: s.tuned, returnTo: s.returnTo, windowOpen: winlinkMailWindowOpen() });
+    const _ret = WinlinkReturn.atSessionEnd({ tuned: s.tuned, returnTo: s.returnTo, windowOpen: winlinkMailWindowOpen() || retryWill });
     if (_ret === 'keep') winlinkKeepReturn(s.returnTo);
     else if (_ret === 'return') setTimeout(() => winlinkRestoreDial(s.returnTo), 1500);
+    if (retryWill && _ret === 'keep' && !winlinkMailWindowOpen()) _winlinkRetry.holdsReturn = true; // goes back if the retry is not made
     winlinkFlexDaxRestore();
     releaseRadio('winlink');
     stopModemBridgeCable();
@@ -12934,13 +12955,8 @@ function winlinkEndSession(state, text, received = 0) {
     if (mg.changed) settings.winlinkFavourites = mg.list;
     result = { ...g, dialKhz: g.khz, url: s.url || '', band: freqToBand(g.khz / 1000) || '', sent: Number(s.sent) || 0, received: Number(received) || 0, saved: WinlinkFav.has(settings.winlinkFavourites, g) };
   }
-  // What the operator reads comes from what POTACAT saw, in one place for
-  // every surface (lib/winlink-outcome.js, #425). `text` as it was passed in
-  // (Pat's reply, or a setup reason) is for the log.
-  const raw = String(text || '');
-  const outcome = WinlinkOutcome.describeOutcome(winlinkOutcomeFacts(state, s, raw, received, null));
   text = outcome.text;
-  winlinkState.setSession({ state, text, error: state === 'error' ? text : '', errorKind: state === 'error' ? outcome.errorKind : '', outcome: winlinkOutcomeView(outcome), ptt: false, prompt: null, result });
+  winlinkState.setSession({ state, text, error: state === 'error' ? text : '', errorKind: state === 'error' ? outcome.errorKind : '', outcome: { ...winlinkOutcomeView(outcome), ...winlinkRetryFields() }, ptt: false, prompt: null, result });
   // Survives a restart, so every surface can say "Last check: …" (winlink-state.lastSession).
   settings.winlinkLastSession = { at: endedAt, ok: state === 'done', text: String(outcome.title || (state === 'done' ? 'Session finished' : 'Session failed')).slice(0, 300) };
   try { saveSettings(settings); } catch {}
@@ -12953,6 +12969,155 @@ function winlinkEndSession(state, text, received = 0) {
     ? winlinkSettleOutcome(state, s, raw, received, endedAt).catch((e) => winlinkLog(`session summary could not be written: ${e.message}`))
     : Promise.resolve();
   settle.then(() => winlinkRefreshMailboxes());
+  if (retryWill) winlinkRetryTick();
+}
+
+// ── one automatic retry after a dropped link (#425) ─────────────────────────
+// The rules are lib/winlink-auto-retry.js; the words lib/winlink-outcome.js.
+// Here: the countdown, the channel watch, the checks, and one log line each
+// when a retry is scheduled, cancelled, skipped or started.
+
+/** The transmitter is keyed by anything POTACAT knows of. */
+function winlinkAnyTx() {
+  return !!(_remoteTxState || (cat && cat._transmitting) || winlinkTxActive || mercuryTxActive);
+}
+function winlinkNoCat() {
+  return !!(settings.catTarget && settings.catTarget.type === 'none');
+}
+
+/** The retry fields of session.outcome (additive on the wire: retryState, retryInS, retryText). */
+function winlinkRetryFields(from) {
+  const src = from || (winlinkState.session && winlinkState.session.outcome) || {};
+  const out = {};
+  for (const k of ['retryState', 'retryInS', 'retryText']) if (src[k] !== undefined) out[k] = src[k];
+  return out;
+}
+/** Write the retry's state onto the ended session's outcome, for every surface. */
+function winlinkRetryShow(fields) {
+  const s = winlinkState.session;
+  if (winlinkSessionActive() || !s || !s.outcome) return;
+  const r = _winlinkRetry;
+  if (r && s.startedAt !== r.ofStartedAt) return; // another session's card: leave it
+  winlinkState.setSession({ outcome: { ...s.outcome, ...fields } });
+  winlinkSessionPush();
+}
+
+/** Called once per session that ended in error. Schedules the retry; returns true when one is pending. */
+function winlinkRetryDecide(s, outcome) {
+  winlinkRetryCancel('', { quiet: true }); // never two
+  const d = WinlinkAutoRetry.shouldRetry({ outcome, mode: s.mode, gateway: s.gateway, dialKhz: s.dialKhz, origin: s.origin, autoRetry: s.autoRetry, enabled: settings.winlinkAutoRetry !== false });
+  if (!d.retry) {
+    if (d.why) winlinkLog(`automatic retry skipped: ${d.why}`);
+    return false;
+  }
+  const noCat = winlinkNoCat();
+  _winlinkRetry = {
+    gateway: String(s.gateway).toUpperCase(), mode: s.mode, dialKhz: Number(s.dialKhz), url: s.url || '', origin: s.origin || '',
+    noCat, endsAt: Date.now() + WinlinkAutoRetry.COUNTDOWN_S * 1000, tryNow: false,
+    watch: new WinlinkAutoRetry.ChannelWatch(), acc: null, busy: null, ofStartedAt: s.startedAt, holdsReturn: false, timer: null,
+  };
+  _winlinkRetry.timer = setInterval(winlinkRetryTick, 1000);
+  winlinkLog(`automatic retry scheduled: ${_winlinkRetry.gateway} on ${_winlinkRetry.dialKhz.toFixed(1)} kHz dial (${WinlinkModes.LABELS[s.mode] || s.mode}) in ${WinlinkAutoRetry.COUNTDOWN_S} s, once; the channel must read clear for ${WinlinkAutoRetry.CLEAR_S} s first${noCat ? '; no CAT control, so the radio must still be on that dial' : ''}`);
+  setTimeout(winlinkSyncModemBridge, 0); // a sound-device radio's audio keeps coming, for the channel check
+  return true;
+}
+
+/** Radio audio during the retry's channel watch (called from winlinkFeedRx). */
+function winlinkRetryFeed(pcm, sampleRate) {
+  const r = _winlinkRetry;
+  if (!r || !r.watch.started) return;
+  if (!r.acc) {
+    const band = WinlinkSpectrum.markerBand(r.mode, winlinkModemBw());
+    r.busy = new WinlinkSpectrum.BusyDetector(band.lo, band.hi);
+    r.acc = new WinlinkSpectrum.SpectrumAccumulator((mags) => {
+      if (_winlinkRetry !== r) return;
+      const now = Date.now();
+      r.watch.frame(r.busy.update(mags, now).busy, now);
+    });
+  }
+  r.acc.push(pcm, sampleRate);
+}
+
+function winlinkRetryTick() {
+  const r = _winlinkRetry;
+  if (!r) return;
+  const now = Date.now();
+  // The channel is listened to for the last LISTEN_FROM_S seconds of the countdown.
+  if (!r.watch.started && now >= r.endsAt - WinlinkAutoRetry.LISTEN_FROM_S * 1000) r.watch.start(now);
+  if (WinlinkAutoRetry.dialMoved({ noCat: r.noCat, nowHz: _currentFreqHz, dialKhz: r.dialKhz })) { winlinkRetryCancel('dial'); return; }
+  const radio = WinlinkAutoRetry.radioReady({ transmitting: winlinkAnyTx(), radioOwner, swrTripped: _swrTripped, sessionActive: winlinkSessionActive() });
+  const st = WinlinkAutoRetry.step({ now, endsAt: r.endsAt, tryNow: r.tryNow, radio, channel: r.watch.verdict(now, r.endsAt) });
+  if (st.act === 'skip') { winlinkRetryEnd('skipped', st.why); return; }
+  if (st.act === 'start') { winlinkRetryStart(); return; }
+  if (st.state === 'waiting-clear' && r.state !== 'waiting-clear') winlinkLog(`automatic retry: the channel ${r.watch.everBusy ? 'was busy' : 'has not read clear for long enough'} at the end of the countdown; waiting up to ${WinlinkAutoRetry.BUSY_WAIT_S} s for ${WinlinkAutoRetry.CLEAR_S} s of clear`);
+  r.state = st.state;
+  winlinkRetryShow({ retryState: st.state, retryInS: st.inS, retryText: WinlinkOutcome.retryText({ state: st.state, gateway: r.gateway, inS: st.inS, waitedS: st.waitedS, maxWaitS: WinlinkAutoRetry.BUSY_WAIT_S, noCat: r.noCat, dialKhz: r.dialKhz }) });
+}
+
+async function winlinkRetryStart() {
+  const r = _winlinkRetry;
+  if (!r) return;
+  winlinkRetryStop();
+  winlinkLog(`automatic retry started: ${r.gateway} on ${r.dialKhz.toFixed(1)} kHz dial (${WinlinkModes.LABELS[r.mode] || r.mode})${r.tryNow ? ', now: the operator pressed Try now' : ''}`);
+  winlinkRetryShow({ retryState: 'starting', retryInS: 0, retryText: WinlinkOutcome.retryText({ state: 'starting', gateway: r.gateway }) });
+  const res = await winlinkStartSession({ mode: r.mode, gateway: r.gateway, dialKhz: r.dialKhz, url: r.url, origin: 'automatic retry', autoRetry: true });
+  if (!res || !res.ok) {
+    const why = WinlinkOutcome.plainReason((res && res.error) || 'it could not start', 160).replace(/[.\s]+$/, '');
+    winlinkLog(`automatic retry skipped: it could not start (${why})`);
+    winlinkRetryShow({ retryState: 'skipped', retryInS: 0, retryText: WinlinkOutcome.retryText({ state: 'skipped', gateway: r.gateway, why: why.charAt(0).toLowerCase() + why.slice(1) }) });
+    if (r.holdsReturn) winlinkRetryReturnDial();
+  }
+}
+
+/** Stop the countdown and the channel watch; the card keeps its last words. */
+function winlinkRetryStop() {
+  const r = _winlinkRetry;
+  if (!r) return;
+  clearInterval(r.timer);
+  _winlinkRetry = null;
+  setTimeout(winlinkSyncModemBridge, 0);
+}
+
+/** The radio was kept on the gateway for the retry, with no mail window open: put it back now. */
+function winlinkRetryReturnDial() {
+  if (winlinkMailWindowOpen() || winlinkSessionActive() || !_winlinkPreviewReturnTo) return;
+  const back = _winlinkPreviewReturnTo;
+  _winlinkPreviewReturnTo = null; _winlinkLeftAtHz = 0;
+  winlinkRestoreDial(back, 0, 'no automatic retry: the radio now goes back to');
+}
+
+function winlinkRetryEnd(state, why) {
+  const r = _winlinkRetry;
+  if (!r) return;
+  winlinkRetryStop();
+  winlinkLog(state === 'cancelled' ? `automatic retry cancelled: ${why}` : `automatic retry skipped: ${why === 'busy' ? `the channel stayed busy for ${WinlinkAutoRetry.BUSY_WAIT_S} s after the countdown` : why}`);
+  winlinkRetryShow({ retryState: state, retryInS: 0, retryText: WinlinkOutcome.retryText({ state, gateway: r.gateway, why }) });
+  if (r.holdsReturn && (state === 'skipped' || why === WinlinkAutoRetry.cancelReason('cancel'))) winlinkRetryReturnDial();
+}
+
+/**
+ * An operator action that cancels a pending retry ('cancel' | 'connect' |
+ * 'gateway-pick' | 'mode' | 'dial' | 'winlink-off' | 'setting-off'). quiet:
+ * only clears it (a new decision replaces it).
+ */
+function winlinkRetryCancel(action, { quiet } = {}) {
+  if (!_winlinkRetry) return false;
+  if (quiet) { winlinkRetryStop(); return true; }
+  winlinkRetryEnd('cancelled', WinlinkAutoRetry.cancelReason(action) || 'it was cancelled');
+  return true;
+}
+
+/** Try now / Cancel from the mail window or an ECHOCAT device. */
+function winlinkRetryCommand(op) {
+  if (!_winlinkRetry) return { ok: false, error: 'No automatic retry is waiting' };
+  if (op === 'cancel') { winlinkRetryCancel('cancel'); return { ok: true }; }
+  if (op === 'now') {
+    _winlinkRetry.tryNow = true;
+    winlinkLog('automatic retry: the operator pressed Try now (the channel is not waited for)');
+    winlinkRetryTick();
+    return { ok: true };
+  }
+  return { ok: false, error: 'Unknown retry command' };
 }
 
 /**
@@ -13099,7 +13264,7 @@ function winlinkArmAutoCheck() {
   _winlinkAutoCheckTimer = setTimeout(async () => {
     _winlinkAutoCheckTimer = null;
     // Internet only, by construction: this function never passes a radio mode.
-    if (!winlinkSessionActive() && settings.winlinkPassword && settings.winlinkNoticeAcceptedAt) {
+    if (!winlinkSessionActive() && !_winlinkRetry && settings.winlinkPassword && settings.winlinkNoticeAcceptedAt) {
       const r = await winlinkStartSession({ mode: 'telnet', origin: 'auto-check (internet)' });
       winlinkState.setAutoCheck({ lastAt: Date.now(), lastResult: r.ok ? 'started' : r.error });
     }
@@ -13390,6 +13555,7 @@ async function winlinkPosReport({ lat, lon, comment } = {}) {
 
 function winlinkSetMode(mode) {
   if (!WinlinkPat.WINLINK_MODES.includes(mode)) return false;
+  if (_winlinkRetry && mode !== _winlinkRetry.mode) winlinkRetryCancel('mode');
   settings.winlinkDefaultMode = mode;
   saveSettings(settings);
   winlinkPush();
@@ -13435,6 +13601,7 @@ async function winlinkHandleRemote({ type, req = {}, reply }) {
       }
       case 'winlink-connect':
         // An operator's tap on the phone — the same Connect as the window's.
+        winlinkRetryCancel('connect');
         result('connect', await winlinkStartSession({ mode: req.mode, gateway: req.gateway, dialKhz: req.dialKhz, url: req.url, origin: 'ECHOCAT device' }));
         return;
       case 'winlink-abort':
@@ -13442,6 +13609,7 @@ async function winlinkHandleRemote({ type, req = {}, reply }) {
         result('abort', { ok: true });
         return;
       case 'winlink-qsy':
+        winlinkRetryCancel('gateway-pick');
         result('qsy', winlinkPreviewQsy({ dialKhz: req.dialKhz, mode: req.mode }));
         return;
       case 'winlink-qsy-restore':
@@ -13514,6 +13682,10 @@ async function winlinkHandleRemote({ type, req = {}, reply }) {
         return;
       case 'winlink-set-mode':
         winlinkSetMode(req.mode);
+        return;
+      case 'winlink-retry':
+        // The automatic retry's Cancel / Try now from a device (#425).
+        result('retry', winlinkRetryCommand(String(req.op || '')));
         return;
       default:
     }
@@ -42807,10 +42979,12 @@ function cloudShackNotice(text, kind) {
   ipcMain.handle('winlink-cmd-posreport', (_e, o = {}) => winlinkPosReport(o));
   ipcMain.handle('winlink-cmd-connect', (_e, o = {}) => {
     if (isRemoteMode() && WinlinkModes.isRadioMode(o.mode)) return { ok: false, error: 'Radio sessions key the shack\'s radio — start them on the shack PC' };
+    winlinkRetryCancel('connect');
     return winlinkStartSession({ mode: o.mode, gateway: o.gateway, dialKhz: o.dialKhz, url: o.url, origin: 'mail window' });
   });
   ipcMain.on('winlink-cmd-abort', () => winlinkAbortSession('stopped by the operator', { kind: 'operator' }));
-  ipcMain.handle('winlink-cmd-qsy', (_e, o = {}) => winlinkPreviewQsy(o));
+  ipcMain.handle('winlink-cmd-qsy', (_e, o = {}) => { winlinkRetryCancel('gateway-pick'); return winlinkPreviewQsy(o); });
+  ipcMain.handle('winlink-cmd-retry', (_e, op) => winlinkRetryCommand(String(op || '')));
   ipcMain.on('winlink-watch-audio', (_e, on) => { _winlinkWatchAudio = !!on; });
   // The modem audio bridge window: the radio's RX audio, and its status.
   ipcMain.on('modem-bridge-rx', (e, d) => {
@@ -48786,6 +48960,8 @@ function cloudShackNotice(text, kind) {
     // The rig's audio devices win over an empty or stale mirror in the blob.
     healRigAudioMirror(settings);
     saveSettings(settings);
+    // Automatic retry turned off while one waits: it is cancelled now (#425).
+    if (settings.winlinkAutoRetry === false) winlinkRetryCancel('setting-off');
 
     // Watchlist group edits (lists, colors, emoji) must reach every open
     // window NOW — the broadcast only fired from the remote-URL fetch paths,

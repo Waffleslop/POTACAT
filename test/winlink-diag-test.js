@@ -157,7 +157,8 @@ test('the modem audio server measures both directions and feeds the recorder tap
 
 test('wired: the tail and the audio facts run for each ARDOP or packet session', () => {
   assert.ok(/if \(mode === 'ardop' \|\| mode === 'packet'\) winlinkAudioDiagStart\(\);\s*if \(mode === 'ardop'\) startArdopTail\(\);/.test(main));
-  assert.ok(/if \(s\.mode === 'ardop'\) stopArdopTail\(\);\s*winlinkAudioDiagEnd\(\);\s*if \(s\.mode === 'ardop'\) killArdop\(\);/.test(main), 'flushed before the modem is stopped');
+  // #425: the ending is worded (and the automatic retry decided) between the flush and the stop; the order is what matters.
+  assert.ok(/if \(s\.mode === 'ardop'\) stopArdopTail\(\);\s*winlinkAudioDiagEnd\(\);[\s\S]{0,1400}?if \(s\.mode === 'ardop'\) killArdop\(\);/.test(main), 'flushed before the modem is stopped');
   assert.ok(/winlinkLog\('ardop: ' \+ o\)/.test(main));
   assert.ok(/playback "\$\{modemBridge\.playbackLabel/.test(main) && /modemBridge\.playbackSampleRate = s\.playbackSampleRate/.test(main));
   assert.ok(/playbackSampleRate: playCtx\.sampleRate/.test(readSrc(path.join(root, 'renderer', 'modem-audio-bridge.js'))));

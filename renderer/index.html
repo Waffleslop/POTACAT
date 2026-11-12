@@ -3414,6 +3414,8 @@
         </div>
         <label class="checkbox-label" style="margin-top:6px;"><input type="checkbox" id="set-winlink-prediction" checked> Rank gateways by predicted propagation</label>
         <span class="help-text" style="display:block;">The gateway list is ordered by the path VOACAP expects to be open right now, not by distance. Your grid square and each gateway's are sent to POTACAT's VOACAP service at api.potacat.com; a VOACAP you installed yourself is used instead. Off = nearest first, nothing sent.</span>
+        <label class="checkbox-label" style="margin-top:6px;"><input type="checkbox" id="set-winlink-auto-retry" checked> Try again once by itself when a link drops</label>
+        <span class="help-text" style="display:block;">If a radio link to a gateway connects and then drops before the mail is exchanged, POTACAT waits 20 seconds, checks that the channel is clear and nothing is transmitting, and calls the same gateway on the same frequency once more. You can cancel it during the wait. Never after you press Abort, and never after "no answer".</span>
         <label style="margin-top:6px;">End a radio session after
           <input type="number" id="set-winlink-cap" min="10" max="60" value="30" style="width:50px;"> minutes
         </label>
