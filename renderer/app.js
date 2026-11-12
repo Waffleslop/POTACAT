@@ -20818,7 +20818,7 @@ function renderDirvSwl(search, bandFilter, statusFilter) {
 
     tr.innerHTML = `<td class="dirv-status-col">${statusBadge}</td>`
       + `<td class="dirv-name-col">${esc(entry.station)}</td>`
-      + `<td class="dirv-freq-col">${FreqDots.fromKhz(entry.frequency) || entry.frequency || ''}</td>`
+      + `<td class="dirv-freq-col">${entry.frequency || ''}</td>` // shortwave stays kHz (Casey 2026-11-12)
       + `<td class="dirv-mode-col">${esc(entry.mode)}</td>`
       + `<td class="dirv-band-col">${esc(entry.band)}</td>`
       + `<td class="dirv-time-col">${esc(entry.startTimeUtc)}</td>`
@@ -20838,7 +20838,7 @@ function renderDirvSwl(search, bandFilter, statusFilter) {
 
     attachDirHover(tr, [
       { label: 'Station', value: entry.station },
-      { label: 'Frequency', value: entry.frequency ? (FreqDots.khzMhz(entry.frequency) || `${entry.frequency} kHz`) : '' },
+      { label: 'Frequency', value: entry.frequency ? `${entry.frequency} kHz` : '' },
       { label: 'Mode', value: entry.mode },
       { label: 'Schedule', value: `${entry.startTimeUtc || '?'} \u2013 ${entry.endTimeUtc || '?'} UTC` },
       { label: 'Language', value: entry.language },
@@ -21475,7 +21475,7 @@ function renderSwlTable(search) {
     const powerStr = entry.powerKw ? `${entry.powerKw} kW` : '';
     tr.innerHTML = `<td class="dir-status-col">${dot}</td>`
       + `<td class="dir-name-col">${esc(entry.station)}</td>`
-      + `<td class="dir-freq-col">${FreqDots.fromKhz(entry.frequency) || entry.frequency || ''}</td>`
+      + `<td class="dir-freq-col">${entry.frequency || ''}</td>` // shortwave stays kHz (Casey 2026-11-12)
       + `<td class="dir-mode-col">${esc(entry.mode)}</td>`
       + `<td class="dir-time-col">${esc(entry.startTimeUtc)}</td>`
       + `<td class="dir-time-col">${esc(entry.endTimeUtc)}</td>`
@@ -21486,7 +21486,7 @@ function renderSwlTable(search) {
     // Hover popup
     attachDirHover(tr, [
       { label: 'Station', value: entry.station },
-      { label: 'Frequency', value: entry.frequency ? (FreqDots.khzMhz(entry.frequency) || `${entry.frequency} kHz`) : '' },
+      { label: 'Frequency', value: entry.frequency ? `${entry.frequency} kHz` : '' },
       { label: 'Mode', value: entry.mode },
       { label: 'Schedule', value: `${entry.startTimeUtc || '?'} \u2013 ${entry.endTimeUtc || '?'} UTC` },
       { label: 'Language', value: entry.language },

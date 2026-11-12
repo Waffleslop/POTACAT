@@ -12452,7 +12452,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
       card.className = 'dir-card' + (cd.status === 'live' ? ' dir-live' : cd.status === 'soon' ? ' dir-soon' : '') + (isTunedSwl ? ' tuned' : '');
       var statusHtml = cd.label ? '<span class="dir-card-status ' + cd.status + '">' + cd.label + '</span>' : '';
       card.innerHTML = '<div class="dir-card-row"><span class="dir-card-name">' + (s.station || 'Unknown') + '</span>' + statusHtml + '</div>' +
-        '<div class="dir-card-detail"><span class="dir-card-freq">' + (FreqDots.khzMhz(s.frequency) || '?') + '</span>' +
+        '<div class="dir-card-detail"><span class="dir-card-freq">' + (s.frequency || '?') + ' kHz</span>' +
         (s.language ? ' \u00b7 ' + s.language : '') + (e.band ? ' \u00b7 ' + e.band : '') +
         (s.powerKw ? ' \u00b7 ' + s.powerKw + 'kW' : '') + '</div>';
       (function(swl) {

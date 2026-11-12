@@ -90,7 +90,27 @@ test('the desktop spot table and RBN table write the VFO way, and the header has
   assert.ok(/freqLink\.textContent = FreqDots\.fromKhz\(s\.frequency\)/.test(app));
   assert.ok(/freqTd\.textContent = FreqDots\.fromKhz\(s\.frequency\)/.test(app));
   assert.ok(!/label: 'Freq \(kHz\)'/.test(app));
-  assert.ok(!/Freq \(kHz\)<\/th>/.test(readSrc(path.join(ROOT, 'renderer/index.html'))));
+  // Only the two shortwave tables keep "(kHz)" (the next test).
+  assert.strictEqual((readSrc(path.join(ROOT, 'renderer/index.html')).match(/Freq \(kHz\)<\/th>/g) || []).length, 2);
+});
+test('shortwave broadcast stays in kHz: the one exception (Casey 2026-11-12)', () => {
+  // Schedules, broadcasters and listeners all quote kHz (9610, not 9.610.00 MHz).
+  const html = readSrc(path.join(ROOT, 'renderer/index.html'));
+  for (const body of ['id="dirv-swl-body"', 'id="dir-swl-body"']) {
+    const i = html.indexOf(body);
+    assert.ok(i > 0, body);
+    assert.ok(/Freq \(kHz\)<\/th>/.test(html.slice(i - 1500, i)), 'the header above ' + body + ' says kHz');
+  }
+  const app = readSrc(path.join(ROOT, 'renderer/app.js'));
+  for (const fn of ['function renderDirvSwl(', 'function renderSwlTable(']) {
+    const i = app.indexOf(fn);
+    assert.ok(i > 0, fn);
+    const body = app.slice(i, app.indexOf('\nfunction ', i + 10));
+    assert.ok(!/FreqDots\./.test(body), fn + ' does not dot its frequencies');
+    assert.ok(/-freq-col">\$\{entry\.frequency \|\| ''\}<\/td>/.test(body), fn + ' cell is the kHz value');
+    assert.ok(/value: entry\.frequency \? `\$\{entry\.frequency\} kHz` : ''/.test(body), fn + ' hover card says kHz');
+  }
+  assert.ok(/\(s\.frequency \|\| '\?'\) \+ ' kHz<\/span>'/.test(readSrc(path.join(ROOT, 'renderer/remote.js'))), 'ECHOCAT Web SWL card says kHz');
 });
 
 console.log(`\nfreq-dots: ${passed} passed, ${failures.length} failed`);
