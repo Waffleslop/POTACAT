@@ -2971,6 +2971,15 @@
         ft8StartCountdown();
         break;
 
+      case 'jtcat-qso-logged': {
+        // The shack wrote a JTCAT contact: say who and at which park(s), and
+        // which parks were read from the activator's own spot comment.
+        let line = 'Logged ' + (msg.callsign || '');
+        if (msg.parksText) line += ' ' + msg.parksText;
+        if (msg.parksNote) line += ' (' + msg.parksNote + ')';
+        showToast(line, msg.parksNote ? 6000 : 3000);
+        break;
+      }
       case 'jtcat-tx-status':
         ft8Transmitting = msg.state === 'tx';
         ft8TxMsg = msg.message || ft8TxMsg;

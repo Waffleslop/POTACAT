@@ -805,7 +805,8 @@ function _applyPopoutTheme(payload) {
   let reviewHeld = null;
   const reviewBar = document.getElementById('lp-review');
   function reviewText(p) {
-    return 'Review before saving' + (p.waiting ? ' · ' + p.waiting + ' more waiting' : '');
+    return 'Review before saving' + (p.waiting ? ' · ' + p.waiting + ' more waiting' : '')
+      + (p.nferNote ? ' · ' + p.nferNote : '');
   }
   function showReview(p) {
     reviewHeld = null;

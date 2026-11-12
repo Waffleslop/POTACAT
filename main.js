@@ -18371,14 +18371,17 @@ async function jtcatAutoLog(qso, opts) {
     // the rule is lib/nfer-refs.js). Read, never awaited. qsoData.hunted only:
     // hunted.refs stays the spot list's, so nothing that spots (a re-spot)
     // ever uses a park read from a comment.
+    _nferLogged.delete(relogKeyStr);
     const spotted = jtcatNferEnabled() ? hunted.refs.find((r) => r.sig === 'POTA') : null;
     if (spotted) {
       const theirCall = NferRefs.baseCall(q.call);
+      const atPark = NferRefs.canonRef(spotted.ref);
       const extra = NferRefs.nferExtraRefs({
         call: q.call, spottedRef: spotted.ref, now: Date.now(),
         known: hunted.refs.filter((r) => r.sig === 'POTA').map((r) => r.ref),
         spots: _nferCache.get(q.call, spotted.ref)
-          .concat(_potaSpotHistory.filter((s) => NferRefs.baseCall(s.callsign) === theirCall)),
+          .concat(_potaSpotHistory.filter((s) => NferRefs.baseCall(s.callsign) === theirCall
+            && NferRefs.canonRef(s.reference) === atPark)),
         parkKnown: jtcatParkKnown,
       });
       if (extra.length) {
@@ -18459,19 +18462,21 @@ async function jtcatWriteLog(qsoData, relogKeyStr) {
     const loggedAt = [...new Set((res.records || []).map((r) => r.sigInfo).filter(Boolean))];
     const fromComment = (_nferLogged.get(relogKeyStr) || []).filter((r) => loggedAt.includes(r));
     _nferLogged.delete(relogKeyStr);
-    // Notify the popout window
-    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
-      jtcatPopoutWin.webContents.send('jtcat-qso-logged', {
-        parksText: NferRefs.parksText(loggedAt),
-        parksNote: NferRefs.nferNote(fromComment),
-        callsign: String(call).toUpperCase(),
-        grid: qsoData.gridsquare || '',
-        band: qsoData.band,
-        mode: qsoData.mode,
-        rstSent: qsoData.rstSent || '',
-        rstRcvd: qsoData.rstRcvd || '',
-      });
-    }
+    // One notice for the JTCAT window, a remote JTCAT window, ECHOCAT Web
+    // and the phone (S2C jtcat-qso-logged): an operator away from the shack
+    // must see the parks too.
+    const logged = {
+      parksText: NferRefs.parksText(loggedAt),
+      parksNote: NferRefs.nferNote(fromComment),
+      callsign: String(call).toUpperCase(),
+      grid: qsoData.gridsquare || '',
+      band: qsoData.band,
+      mode: qsoData.mode,
+      rstSent: qsoData.rstSent || '',
+      rstRcvd: qsoData.rstRcvd || '',
+    };
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-qso-logged', logged);
+    if (remoteServer) remoteServer.broadcastJtcatQsoLogged(logged);
     return res;
   } catch (err) {
     _nferLogged.delete(relogKeyStr);
@@ -18493,6 +18498,8 @@ function jtcatShowLogReview() {
   const item = jtcatLogReviews.current;
   if (!item) return;
   if (!logPopoutWin || logPopoutWin.isDestroyed()) _logPopoutForReview = true;
+  // Parks read from the activator's own spot comment are named in the review bar, before Save.
+  item.meta.nferNote = NferRefs.nferNote(_nferLogged.get(item.meta.relogKey));
   _logPopoutQuiet = !!(jtcatFullAutoCq || jtcatAutoCqMode !== 'off' || jtcatHuntFallbackMode);
   ipcMain.emit('log-popout-open', null, { ...LogReview.prefillFor(item, jtcatLogReviews.waiting), power: _currentTxPower || undefined });
   _logPopoutQuiet = false;
