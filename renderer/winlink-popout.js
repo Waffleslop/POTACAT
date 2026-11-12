@@ -873,7 +873,7 @@
       if (hit) picked = true;
       return favOption(f, i, hit);
     }).join('') + '</optgroup>' : '';
-    var more = r.leftOut ? '<option value="" disabled>' + esc(r.leftOut + ' more on bands this radio is not set up for (Settings > My Rigs > Bands)') + '</option>' : '';
+    var more = r.leftOut ? '<option value="" disabled>' + esc(r.leftOut + ' more this radio cannot call (outside the amateur bands, or bands not set up in Settings > My Rigs > Bands)') + '</option>' : '';
     sel.innerHTML = '<optgroup label="' + (r.predicted ? 'Best path now' : 'Nearest first') + '">' + rows + '</optgroup>' + extra + more;
     if (pendingPick && !picked) {
       // A History row not in today's list is still callable: a row of its own at the top.

@@ -436,6 +436,7 @@ const WinlinkPat = require('./lib/winlink-pat');
 const WinlinkHistory = require('./lib/winlink-history');
 const WinlinkFav = require('./lib/winlink-favourites');
 const WinlinkTemplates = require('./lib/winlink-templates');
+const WinlinkReach = require('./lib/winlink-reach');
 const PotaEmailSpot = require('./lib/pota-email-spot');
 const { WinlinkClient } = require('./lib/winlink-client');
 const WinlinkStateLib = require('./lib/winlink-state');
@@ -11247,7 +11248,28 @@ async function startWinlinkShim() {
       modemBridgeOver(true);
       const icom = detectRigType() === 'icom' || (getActiveRigModel()?.brand === 'Icom');
       if (settings.audioSource === 'icom-network') icomNetworkVoiceTx(true, 'Winlink');
-      try { handleRemotePtt(true, { audio: true, forceDataMode: icom, emission: 'DATA', txKind: 'winlink' }); } catch (e) { winlinkLog(`PTT failed: ${e.message}`); }
+      const ringAt = _catLogRing.length;
+      let keyed = true;
+      try { keyed = handleRemotePtt(true, { audio: true, forceDataMode: icom, emission: 'DATA', txKind: 'winlink' }) !== false; }
+      catch (e) { keyed = false; winlinkLog(`PTT failed: ${e.message}`); }
+      if (!keyed) {
+        // The radio refused the key-down (SWR guard, licence, a frequency it
+        // cannot transmit on...). Never go on keying into nothing: on
+        // 2026-11-11 Dire Wolf keyed three times on 149.09 MHz, each refused,
+        // until the operator pressed Stop. The attempt ends here with the
+        // radio's own reason (the line handleRemotePtt just logged).
+        winlinkTxActive = false;
+        _winlinkTxBurst.reset();
+        _winlinkPreKey.clear();
+        modemBridgeOver(false);
+        if (settings.audioSource === 'icom-network') icomNetworkVoiceTx(false, 'Winlink');
+        const said = _catLogRing.length > ringAt ? _catLogRing[_catLogRing.length - 1] : '';
+        const why = WinlinkReach.pttRefusalText(said);
+        winlinkLog(`the radio refused to transmit — ending the attempt: ${why}`);
+        winlinkState.setSession({ ptt: false }); winlinkSessionPush();
+        winlinkAbortSession(`the radio refused to transmit: ${why}`);
+        return false;
+      }
       winlinkSendPreKeyAudio(); // the start of this frame, which arrived before the request to key
       armWinlinkTxFailsafe();
       winlinkSessionTouch();
@@ -11380,6 +11402,26 @@ async function startWinlinkAudio({ modemRate = ModemAudioServerMod.MODEM_RATE } 
   } catch (e) {
     winlinkLog(`modem audio server could not listen: ${e.message}`);
   }
+}
+
+/**
+ * The modem is on POTACAT's audio socket before anything is tuned or keyed.
+ * Both patched modems connect as they open their audio; one that never does
+ * is a build from before socket audio, which plays into this computer's own
+ * sound card instead (K3SBP 2026-11-11: a Dire Wolf built 10/22 put the
+ * packet tones on his speakers, and every key-down went out silent).
+ */
+const WINLINK_MODEM_AUDIO_WAIT_MS = 5000;
+function winlinkModemAudioConnected(modemName) {
+  const srv = winlinkAudio;
+  if (srv && srv.connected) return Promise.resolve();
+  const why = `${modemName} did not connect to POTACAT's audio, so it would play into this computer's sound card instead of the radio. Nothing was sent. This copy of ${modemName} is older than POTACAT: reinstall POTACAT (running from source: rebuild the Winlink helpers with scripts/build-winlink-helpers.sh).`;
+  if (!srv) return Promise.reject(new Error(why));
+  return new Promise((resolve, reject) => {
+    const on = () => { clearTimeout(t); resolve(); };
+    const t = setTimeout(() => { srv.removeListener('modem-connected', on); winlinkLog(`modem audio: ${modemName} never connected in ${WINLINK_MODEM_AUDIO_WAIT_MS / 1000} s`); reject(new Error(why)); }, WINLINK_MODEM_AUDIO_WAIT_MS);
+    srv.once('modem-connected', on);
+  });
 }
 
 function stopWinlinkAudio() {
@@ -11736,6 +11778,11 @@ function winlinkDialText(d) {
   return `${(d.freqHz / 1e6).toFixed(4)} MHz${d.mode ? ' ' + d.mode : ''}${d.from ? ` (where it was ${d.from})` : ''}`;
 }
 
+/** What lib/winlink-reach.js needs to judge a gateway: the radio's bands, its range, its name. */
+function winlinkReachOpts() {
+  return { bands: activeRigBands(), reach: rigReachNow(), rigName: getActiveRigModelName() || 'the radio' };
+}
+
 /**
  * A gateway was picked (not yet connected): tune there now, so the waterfall
  * shows that frequency and the operator can see whether it is in use. The
@@ -11751,6 +11798,8 @@ function winlinkPreviewQsy({ dialKhz, mode } = {}) {
   if (isRemoteMode()) return { ok: false, error: 'Radio sessions key the shack\'s radio — tune from the shack PC', reason: 'remote' };
   if (winlinkSessionActive()) return { ok: false, error: 'A session is running' };
   if (radioOwner !== 'none' && radioOwner !== 'winlink') return { ok: false, error: `The radio is in use by ${radioOwner}`, reason: 'radio-busy' };
+  const reach = WinlinkReach.gatewayReach(khz, winlinkReachOpts());
+  if (!reach.ok) { winlinkLog(`gateway pick refused: ${reach.why}`); return { ok: false, error: reach.why, reason: 'out-of-reach' }; }
   winlinkNoteHandTune();
   if (!_winlinkPreviewReturnTo && _currentFreqHz) _winlinkPreviewReturnTo = winlinkDialHere('before the gateway pick');
   tuneRadio(khz, mode === 'packet' ? 'FM' : 'DIGU', undefined, { origin: 'Winlink gateway pick' });
@@ -12152,6 +12201,10 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
   const url = WinlinkPat.sessionUrl({ mode, gateway, dialKhz, bw: mode === 'vara' ? settings.winlinkVaraBw : undefined, rowUrl });
   if (!url) return { ok: false, error: 'Pick a gateway first' };
   if (radio) {
+    // Never an attempt on a frequency this radio cannot transmit on: nothing
+    // tunes, no modem starts, nothing keys (lib/winlink-reach.js).
+    const reach = WinlinkReach.gatewayReach(dialKhz, winlinkReachOpts());
+    if (!reach.ok) { winlinkLog(`session refused: ${String(gateway || '').toUpperCase()} — ${reach.why}`); return { ok: false, error: reach.why, reason: 'out-of-reach' }; }
     if (!_winlinkShimPort) return { ok: false, error: 'The radio control shim is not running — restart Winlink' };
     if (_swrTripped) return { ok: false, error: 'The SWR guard has tripped — fix the antenna match first' };
     if (!acquireRadio('winlink')) return { ok: false, error: `The radio is in use by ${radioOwner}`, reason: 'radio-busy' };
@@ -12194,6 +12247,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
     try {
       if (mode === 'ardop') await spawnArdop();
       if (mode === 'packet') await spawnDirewolf();
+      if (mode === 'ardop' || mode === 'packet') await winlinkModemAudioConnected(mode === 'packet' ? 'Dire Wolf' : 'ardopcf');
       if (mode === 'mercury') winlinkHandMercuryToPat();
       if (!live()) throw cancelled();
       if (mode === 'vara' || mode === 'varafm') {
@@ -12718,9 +12772,10 @@ async function winlinkGateways(mode, band) {
       const tagged = new Set((settings.winlinkMercuryGateways || []).map((c) => String(c).toUpperCase()));
       list = list.map((g) => ({ ...g, mercury: tagged.has(g.call) }));
     }
-    // Only the bands this radio is used on (Settings > My Rigs): the Band
-    // picker offers only those, and "All" means all of them.
-    const onBands = WinlinkPat.gatewaysOnBands(list, activeRigBands());
+    // Only gateways this radio can call (lib/winlink-reach.js): an amateur
+    // band it is set up for (Settings > My Rigs), inside its range. The Band
+    // picker offers only those bands, and "All" means all of them.
+    const onBands = WinlinkReach.gatewaysInReach(list, winlinkReachOpts());
     list = onBands.list;
     winlinkState.setGateways(mode, band, list);
     // Pat ranks by predicted link quality when its engine answered; a row
@@ -12733,7 +12788,7 @@ async function winlinkGateways(mode, band) {
     // Casey 2026-11-11: "I don't need to see that forever").
     const leftOut = onBands.dropped || 0;
     const note = WinlinkPat.rankingNote({ predicted, count: list.length, hf });
-    const tell = `gateways (${mode}${band ? ', ' + band : ''}): ${list.length} listed${onBands.dropped ? ' (' + onBands.dropped + ' outside the radio\'s bands left out)' : ''}, ${predicted ? list.filter((g) => g.quality != null).length + ' with a propagation prediction' : 'nearest first' + (hf && settings.winlinkPrediction !== false && list.length ? (_voacapService.up === false ? ` — POTACAT's VOACAP service is not available (${_voacapService.why})` : ' — no prediction came back') : '')}`;
+    const tell = `gateways (${mode}${band ? ', ' + band : ''}): ${list.length} listed${onBands.dropped ? ' (' + onBands.dropped + ' the radio cannot call left out)' : ''}, ${predicted ? list.filter((g) => g.quality != null).length + ' with a propagation prediction' : 'nearest first' + (hf && settings.winlinkPrediction !== false && list.length ? (_voacapService.up === false ? ` — POTACAT's VOACAP service is not available (${_voacapService.why})` : ' — no prediction came back') : '')}`;
     if (tell !== _winlinkGatewaysLogged) { _winlinkGatewaysLogged = tell; winlinkLog(tell); }
     return { ok: true, mode, band: band || '', list, predicted, note, leftOut };
   } catch (e) {
