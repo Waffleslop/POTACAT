@@ -202,9 +202,32 @@ test('working radio sound says nothing; only a device to choose or a fault is sa
 test('compose reads like a mail program: rows of its own, the actions in one bar (Casey 2026-11-11)', () => {
   assert.ok(/\.wl-connbar \.wl-field \{ display: flex; flex-direction: column;/.test(html), 'the top bar\'s column rule never reaches the compose rows');
   assert.ok(!/^\s*\.wl-field \{/m.test(html), 'no bare .wl-field rule');
-  assert.ok(/<div class="wl-c-row"><label for="wl-c-to">To<\/label>/.test(html) && /\.wl-c-row label \{ flex: 0 0 76px; text-align: left;/.test(html));
+  assert.ok(/<div class="wl-c-row"><label for="wl-c-to">To<\/label>/.test(html) && /\.wl-c-row label \{ flex: 0 0 \d+px; text-align: left;/.test(html));
+  // Each field is a box you can see is a field (Casey 2026-11-11, She's On Frequency).
+  assert.ok(/\.wl-compose \.wl-c-row input \{[^}]*border: 1px solid var\(--border-primary\);[^}]*background: var\(--bg-primary\)/.test(html));
+  assert.ok(/<div class="wl-c-head">/.test(html) && /\.wl-c-head \{ background: var\(--bg-secondary\)/.test(html));
   const bar = (html.match(/<div class="wl-c-actions">[\s\S]*?<\/div>/) || [''])[0];
   assert.ok(/id="wl-c-attach"/.test(bar) && /id="wl-c-cancel"/.test(bar) && /id="wl-c-send"/.test(bar), 'Attach, Cancel and Put in Outbox on one row');
+});
+
+test('template instructions sit in their own panel, never inside the message body', () => {
+  assert.ok(/<div class="wl-c-hint" id="wl-c-hint" role="note" hidden><\/div>/.test(html));
+  assert.ok(/\$\('wl-c-hint'\)\.textContent = pre\.note \|\| '';/.test(js) && /\$\('wl-c-err'\)\.textContent = '';/.test(js));
+  assert.ok(/How a POTA spot is written: one line per park/.test(js) && /PARK is the park reference \(for example US-1234\)/.test(js));
+});
+
+test('the prediction progress sits right of Abort and never adds a row', () => {
+  const abortAt = html.indexOf('id="wl-abort"');
+  const predictAt = html.indexOf('id="wl-predict"');
+  assert.ok(abortAt > 0 && predictAt > abortAt, 'after the Abort button in the bar');
+  assert.ok(/\.wl-predict \{[^}]*flex: 1 1 \d+px; min-width: \d+px; max-width: \d+px;/.test(html), 'starts small so the bar never wraps for it');
+});
+
+test('a POTA spot from the mail window uses where the radio was before Winlink moved it', () => {
+  const i = main.indexOf('function winlinkPotaSpotTemplate(');
+  const fn = main.slice(i, main.indexOf('\n}\n', i));
+  assert.ok(/const before = _winlinkPreviewReturnTo \|\| \(winlinkState\.session && winlinkState\.session\.returnTo\)/.test(fn));
+  assert.ok(/away \? before\.freqHz \/ 1000/.test(fn), 'never the Winlink gateway\'s dial');
 });
 
 test('a short window never pushes the folder buttons over the waterfall', () => {

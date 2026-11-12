@@ -364,7 +364,10 @@
       $('wl-c-body').value = pre.body || '';
       pendingFiles = [];
       renderFiles();
-      $('wl-c-err').textContent = pre.note || '';
+      $('wl-c-err').textContent = '';
+      // A template's instructions go in their own panel above the body.
+      $('wl-c-hint').textContent = pre.note || '';
+      $('wl-c-hint').hidden = !pre.note;
       (pre.template ? $('wl-c-name') : pre.to ? $('wl-c-body') : $('wl-c-to')).focus();
     };
     if (pre && pre.template) go(); else requireNotice(go);
@@ -403,7 +406,19 @@
   // operator reads and edits it before it goes in the Outbox.
   function composeSpot(t) {
     if (!t || !t.to) return;
-    compose({ to: t.to, subject: t.subject, body: t.body, note: (t.missing && t.missing.length) ? 'Fill in ' + t.missing.join(', ') + ' before it goes out.' : 'Check the line, then Put in Outbox and Send / Receive. It posts a real POTA spot.' });
+    // The instructions sit in their own panel above the body (Casey 2026-11-11:
+    // "Fill in the park" looked like part of the message).
+    var how = 'How a POTA spot is written: one line per park, exactly like this:\n'
+      + '!YOURCALL POTA PARK FREQUENCY MODE comment\n'
+      + 'PARK is the park reference (for example US-1234). FREQUENCY is in MHz, like 14.074. '
+      + 'MODE is CW, SSB, FM, FT8, FT4 or DATA. The comment is optional.\n'
+      + 'Each line becomes one spot on POTA, so an n-fer is one line per park. '
+      + 'It posts a real spot when this message goes out.';
+    var todo = (t.missing && t.missing.length)
+      ? 'Still to fill in: ' + t.missing.join(', ') + '. In the line below, replace the word in capitals ('
+        + (t.missing.indexOf('the park') >= 0 ? 'PARK' : 'FREQ or MODE') + ').\n\n'
+      : '';
+    compose({ to: t.to, subject: t.subject, body: t.body, note: todo + how });
   }
   if (window.api.onComposePrefill) window.api.onComposePrefill(composeSpot);
 
@@ -836,7 +851,9 @@
     var tick = function () {
       var s = Math.round((Date.now() - t0) / 1000);
       var left = expect ? Math.max(1, Math.round((expect - (Date.now() - t0)) / 1000)) : 0;
-      $('wl-predict-text').textContent = 'Predicting propagation: ' + s + ' s' + (expect ? (Date.now() - t0 < expect ? ', about ' + left + ' s left' : ', nearly done') : ' (the first time can take a minute or two)');
+      // Short enough to sit right of Abort; the full sentence is the tooltip.
+      $('wl-predict-text').textContent = 'Predicting ' + s + (expect && Date.now() - t0 < expect ? '/' + Math.round(expect / 1000) : '') + ' s';
+      box.title = 'Predicting propagation for every gateway: ' + s + ' s so far' + (expect ? ', about ' + Math.round(expect / 1000) + ' s last time' : '; the first ranking can take a minute or two');
       var frac = expect ? Math.min(0.95, (Date.now() - t0) / expect) : Math.min(0.95, (Date.now() - t0) / 90000);
       $('wl-predict-fill').style.width = Math.round(frac * 100) + '%';
     };
