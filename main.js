@@ -478,9 +478,12 @@ const { decideSstvStop, sstvDecoderState } = require('./lib/sstv-decoder-state')
 const SstvFeedGate = require('./lib/sstv-feed-gate'); // pure ingress-gate decisions (table-tested)
 const HuntedPark = require('./lib/hunted-park'); // worked-call → live program-spot park refs (JTCAT logging)
 const NferRefs = require('./lib/nfer-refs'); // an n-fer's other parks from the activator's own spot comments
-// Fetched when JTCAT first matches an activator, read (never awaited) at log
-// time: the next TX message is set only after the log write.
+// Fetched when a JTCAT QSO with a spotted activator starts (jtcatNferPrefetch),
+// read (never awaited) at log time: the next TX message is set only after the
+// log write.
 const _nferCache = new NferRefs.NferCache({ fetchHistory: (call, ref) => fetchPotaSpotHistory(call, ref) });
+const _nferQsoStart = new NferRefs.QsoStartGate();
+const _nferLogged = new Map(); // relog key -> parks added from a comment, for the logged card
 const WorkedBefore = require('./lib/worked-before'); // JTCAT worked-before policy: rework window + activator exception
 const WorkedRoster = require('./lib/worked-roster'); // states + DXCC entities worked/confirmed by band and mode (WAS, map overlays)
 const StateBackfill = require('./lib/state-backfill'); // "Fill missing states from QRZ": which QSOs, what state, the answer naming those left (#389)
@@ -16680,14 +16683,36 @@ function parseCqMessage(text) {
 /** The program refs a callsign is spotted at right now (null if none). ONE
  *  lookup, shared by hunt selection, worked-before and QSO logging. */
 function jtcatSpottedActivator(call) {
-  const hunted = HuntedPark.findHuntedRefs(lastMergedSpots, call, {
+  return HuntedPark.findHuntedRefs(lastMergedSpots, call, {
     freqKhz: (_currentFreqHz || 0) / 1000, myCall: settings.myCallsign,
   });
-  // An n-fer's other parks are only in the activator's spot comments: fetch
-  // their POTA history now, so the log write can read it without waiting.
+}
+
+/** Log every park of an n-fer the activator's own spot names (default on, #353). */
+function jtcatNferEnabled() {
+  return settings.jtcatNferParks !== false;
+}
+
+// An n-fer's other parks are only in the activator's spot comment. When a QSO
+// with a spotted POTA activator STARTS, fetch their pota.app spot history and
+// have their country's park list at hand, so the log write reads both without
+// waiting. Once per QSO: never from jtcatSpottedActivator, which runs for
+// every decoded station that is spotted (tens of requests an hour).
+function jtcatNferPrefetch(owner, qso) {
+  if (!_nferQsoStart.started(owner, qso && qso.call)) return;
+  if (!jtcatNferEnabled()) return;
+  const hunted = jtcatSpottedActivator(qso.call);
   const pota = hunted && hunted.refs.find((r) => r.sig === 'POTA');
-  if (pota) _nferCache.prefetch(call, pota.ref);
-  return hunted;
+  if (!pota) return;
+  _nferCache.prefetch(qso.call, pota.ref);
+  ensureParksForRef(pota.ref).catch(() => {});
+}
+
+/** The parks catalogue's answer for the n-fer rule: true / false, null = that country's list is not loaded. */
+function jtcatParkKnown(ref) {
+  const list = parksListForRef(ref);
+  if (!list || !list.map || !list.map.size) return null;
+  try { return !!getParkDb(list.map, ref); } catch { return null; }
 }
 
 /** Hunt also answers a plain CQ from a spotted activator (default on). */
@@ -18210,6 +18235,7 @@ function remoteJtcatBroadcastQso() {
   if (remoteJtcatQso && remoteJtcatQso.call) _jtcatQsoClock.note(remoteJtcatQso.call, Date.now());
   if (remoteServer) remoteServer.broadcastJtcatQsoState(remoteJtcatQso || { phase: 'idle' });
   wsjtxStatusOnQsoChange();
+  jtcatNferPrefetch('remote', remoteJtcatQso);
 }
 
 // WSJT-X sends a Status whenever its QSO state changes; GridTracker's roster
@@ -18230,6 +18256,7 @@ function popoutBroadcastQso() {
     jtcatPopoutWin.webContents.send('jtcat-qso-state', popoutJtcatQso || { phase: 'idle' });
   }
   wsjtxStatusOnQsoChange();
+  jtcatNferPrefetch('popout', popoutJtcatQso);
 }
 
 // call|band|mode -> ms of the last JTCAT auto-log (lib/jtcat-relog-guard.js).
@@ -18340,18 +18367,24 @@ async function jtcatAutoLog(qso, opts) {
     // writes one record per ref, each with only its own program's field.
     qsoData.hunted = hunted.refs.map((r) => ({ sig: r.sig, ref: r.ref }));
     sendCatLog(`[JTCAT] Hunted park matched: ${q.call} @ ${hunted.refs.map((r) => `${r.sig} ${r.ref}`).join(', ')}`);
-    // An n-fer self-spotted at one park with the others in the comment.
-    const spotted = hunted.refs.find((r) => r.sig === 'POTA');
+    // An n-fer self-spotted at one park with the others in the comment (#353,
+    // the rule is lib/nfer-refs.js). Read, never awaited. qsoData.hunted only:
+    // hunted.refs stays the spot list's, so nothing that spots (a re-spot)
+    // ever uses a park read from a comment.
+    const spotted = jtcatNferEnabled() ? hunted.refs.find((r) => r.sig === 'POTA') : null;
     if (spotted) {
+      const theirCall = NferRefs.baseCall(q.call);
       const extra = NferRefs.nferExtraRefs({
-        call: q.call, spottedRef: spotted.ref,
+        call: q.call, spottedRef: spotted.ref, now: Date.now(),
         known: hunted.refs.filter((r) => r.sig === 'POTA').map((r) => r.ref),
-        cached: _nferCache.get(q.call, spotted.ref),
-        collected: _potaSpotHistory.filter((s) => NferRefs.baseCall(s.callsign) === NferRefs.baseCall(q.call)),
+        spots: _nferCache.get(q.call, spotted.ref)
+          .concat(_potaSpotHistory.filter((s) => NferRefs.baseCall(s.callsign) === theirCall)),
+        parkKnown: jtcatParkKnown,
       });
       if (extra.length) {
         for (const ref of extra) qsoData.hunted.push({ sig: 'POTA', ref });
-        sendCatLog(`[JTCAT] n-fer: ${q.call} also at ${extra.join(', ')} (from their own spot comments)`);
+        _nferLogged.set(relogKeyStr, extra);
+        sendCatLog(`[JTCAT] n-fer: ${q.call} also at ${extra.join(', ')} (named in their own spot at ${spotted.ref}; JTCAT Options, "Log every park of a two-fer")`);
       }
     }
   }
@@ -18421,9 +18454,16 @@ async function jtcatWriteLog(qsoData, relogKeyStr) {
 
     console.log('[JTCAT] Auto-logged QSO:', call, 'OK');
     RelogGuard.noteLogged(_jtcatRecentLogs, relogKeyStr, Date.now());
+    // The parks it was really logged at (after any edit in the Log QSO
+    // window), and which of them came from the activator's comment.
+    const loggedAt = [...new Set((res.records || []).map((r) => r.sigInfo).filter(Boolean))];
+    const fromComment = (_nferLogged.get(relogKeyStr) || []).filter((r) => loggedAt.includes(r));
+    _nferLogged.delete(relogKeyStr);
     // Notify the popout window
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       jtcatPopoutWin.webContents.send('jtcat-qso-logged', {
+        parksText: NferRefs.parksText(loggedAt),
+        parksNote: NferRefs.nferNote(fromComment),
         callsign: String(call).toUpperCase(),
         grid: qsoData.gridsquare || '',
         band: qsoData.band,
@@ -18434,6 +18474,7 @@ async function jtcatWriteLog(qsoData, relogKeyStr) {
     }
     return res;
   } catch (err) {
+    _nferLogged.delete(relogKeyStr);
     sendCatLog(`[JTCAT] NOT LOGGED: ${call} — ${err.message}`);
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       jtcatPopoutWin.webContents.send('jtcat-dupe-warning', { message: `${call} was not logged`, sub: err.message });
@@ -18476,6 +18517,7 @@ function jtcatCancelLogReview(id) {
   const item = jtcatLogReviews.take(id);
   if (!item) return;
   _jtcatRecentLogs.delete(item.meta.relogKey);
+  _nferLogged.delete(item.meta.relogKey);
   const call = item.record.callsign;
   sendCatLog(`[JTCAT] ${call}: not logged, the Log QSO window was closed without saving`);
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
@@ -22960,6 +23002,9 @@ function updateRemoteSettings() {
     // blob so a (re)connecting phone seeds its picker; live changes come via the
     // jtcat-chase-target S2C message.
     jtcatChaseTarget: settings.jtcatChaseTarget || '',
+    // Log every park of an n-fer the activator's own spot names (#353), ON by
+    // default. A device sets it with jtcat-set-pref {key:'jtcatNferParks'}.
+    jtcatNferParks: settings.jtcatNferParks !== false,
     // Skip Grid + Hound (2026-07-07) — shared last-writer-wins JTCAT toggles.
     // The host applies them to BOTH owners' replies (main.js builds every TX
     // message), so a phone only needs the toggle UI. Live changes ride the
@@ -27410,6 +27455,7 @@ function connectRemote() {
     settings[key] = v;
     saveSettings(settings);
     sendCatLog(`[JTCAT] ${key} = ${JSON.stringify(v)} (remote)`);
+    if (key === 'jtcatNferParks') updateRemoteSettings(); // every device shows the new state
     if (JTCAT_HUNT_FILTER_KEYS.includes(key)) broadcastAutoCqState();
     if (key === 'jtcatFakeIt') {
       fakeItSyncEngine();
@@ -40317,9 +40363,10 @@ function cloudShackNotice(text, kind) {
 
   // Spot history (per-callsign list of recent prior spots) for the ⓘ popover
   // on the desktop spots table. All sources are served from local rolling
-  // history buffers — pota.app's /spot/comments endpoint returns empty even
-  // for activators with dozens of spots, so we accumulate from the standard
-  // /spot/activator polls (deduped by spotId) instead.
+  // history buffers, accumulated from the standard polls (deduped by spotId):
+  // no request per click, and the same answer for POTA, WWFF, DX cluster and
+  // RBN. (pota.app does have a per-activator history,
+  // /spot/comments/{call}/{ref}; JTCAT's n-fer lookup reads it, lib/nfer-refs.js.)
   ipcMain.handle('pota-spot-history', async (_e, { source, callsign, reference } = {}) => {
     const call = (callsign || '').toUpperCase();
     if (!call) return { ok: false, error: 'Missing callsign', entries: [] };
@@ -48994,6 +49041,8 @@ function cloudShackNotice(text, kind) {
         has('jtcatAutoRespot')) {
       updateRemoteSettings();
     }
+    // JTCAT's n-fer option (#353): a connected device shows the desktop's change.
+    if (has('jtcatNferParks')) updateRemoteSettings();
 
     // Start/stop WSJT-X-binary bridge. HamRS, Logger32, MacLoggerDX, RUMlogNG
     // and Log4OM-binary all share this path — they recognize POTACAT as a

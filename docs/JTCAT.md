@@ -18,7 +18,7 @@ lib/ft8_native, renderer/jtcat-popout.* or the ECHOCAT jtcat-* messages.
 - The pop-out to shack bridge is lib/remote-bridge.js (a row per channel; the test fails otherwise).
 
 ## Operating rules that are settings (names only; semantics in each module's header)
-Per profile: jtcatMaxQsoAttempts, jtcatReworkDays, jtcatHuntSpotted, jtcatLogPrompt,
+Per profile: jtcatMaxQsoAttempts, jtcatReworkDays, jtcatHuntSpotted, jtcatNferParks, jtcatLogPrompt,
 jtcatRelogCooldownMin, jtcatRunPauseAfter, jtcatModeHop*, jtcatFdMode/jtcatFdExch, jtcatHoundMode,
 jtcatSkipTx1, jtcatApDecode, jtcatLateStartTx, jttyMacroStyle, jttyMacros, pskMacros.
 Machine-wide (GLOBAL_KEY): ultracat, jtcatRxGain, jtcatTxGain (desktop-authoritative, one writer

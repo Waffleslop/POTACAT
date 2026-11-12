@@ -166,6 +166,7 @@ const TESTS = [
   'test/event-registry-test.js',
   'test/events-catalog-test.js',
   'test/hunted-park-test.js',
+  'test/nfer-refs-test.js', // an n-fer's other parks, read from the activator's own spot comment (#353)
   'test/js8-audio-feed-test.js',
   'test/log-comment-test.js',
   'test/raw-cat-command-test.js',
@@ -347,7 +348,6 @@ const TESTS = [
   'test/jtty-engine-test.js',
   'test/jtcat-skip-tx1-steps-test.js', // the QSO steps show the report Faster contacts really sends
   'test/jtcat-auto-respot-test.js', // opt-in re-spot of a hunted activator after a JTCAT contact
-  'test/nfer-refs-test.js', // an n-fer's other parks from the activator's own spot comments
   'test/jtty-remote-test.js',
   'test/jtty-txfreq-remote-test.js',
   'test/nocat-rig-test.js',

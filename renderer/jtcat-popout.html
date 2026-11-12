@@ -467,6 +467,9 @@
     .jp-qso-card.visible { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
     .jp-qso-card-title { font-size: 14px; font-weight: 600; letter-spacing: 0.5px; color: var(--accent-green); }
     .jp-qso-card-call { font-size: 28px; font-weight: 700; font-family: Consolas, 'Courier New', monospace; line-height: 1.15; color: var(--text-primary); word-break: break-all; }
+    .jp-qso-card-parks { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+    .jp-qso-card-note { font-size: 14px; color: var(--text-secondary); }
+    .jp-qso-card-parks:empty, .jp-qso-card-note:empty { display: none; }
     .jp-qso-card-sub { font-size: 14px; color: var(--text-secondary); }
     .jp-qso-card-btns { display: flex; gap: 8px; margin: 10px 0 14px; }
     .jp-qso-card-btns button { font: inherit; font-size: 13px; padding: 7px 16px; border-radius: 6px; border: 1px solid var(--accent-green); background: transparent; color: var(--accent-green); cursor: pointer; }
@@ -1214,6 +1217,10 @@
       <span class="jp-opt-label">Hunt activators who call a plain CQ</span>
       <span class="jp-opt-help">POTA and SOTA hunt normally look for "CQ POTA" or "CQ SOTA" in the message, but most activators just call CQ. With this on, a station the live spot list places at a park or summit is hunted whenever you hear them call, whatever their CQ says — and the QSO still logs with their reference. Off = only an explicit CQ POTA / CQ SOTA counts.</span>
     </button>
+    <button id="jp-nfer-parks" class="jp-opt-row">
+      <span class="jp-opt-label">Log every park of a two-fer</span>
+      <span class="jp-opt-help">An activator in two or more parks at once is spotted at one of them, and usually names the others in their own spot. With this on, JTCAT logs the contact at each of those parks, and the QSO logged card lists them. Only their own spot from the last 3 hours is read, and only parks in the same country. Off = JTCAT logs only the park in the spot list.</span>
+    </button>
     <button id="jp-mode-hop" class="jp-opt-row">
       <span class="jp-opt-label">Try FT4 and FT2 on the same band when it goes quiet</span>
       <span class="jp-opt-help">While Hunt or Auto CQ is running, if nobody you could work has called for a few minutes, move between FT8, FT4 and FT2 on the band you are already on — 20m FT8 becomes 20m FT4, and so on. The band never changes, so the antenna and tuner are never asked to follow. Stations already worked on this band count as fresh contacts in another mode.</span>
@@ -1281,6 +1288,8 @@
   <div id="jp-qso-card" class="jp-qso-card" role="status" aria-live="polite">
     <div class="jp-qso-card-title">QSO logged</div>
     <div id="jp-qso-card-call" class="jp-qso-card-call"></div>
+    <div id="jp-qso-card-parks" class="jp-qso-card-parks"></div>
+    <div id="jp-qso-card-note" class="jp-qso-card-note"></div>
     <div id="jp-qso-card-sub" class="jp-qso-card-sub"></div>
     <div class="jp-qso-card-btns">
       <button type="button" id="jp-qso-card-edit" tabindex="-1">Edit in log</button>
