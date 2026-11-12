@@ -166,6 +166,7 @@ const TESTS = [
   'test/event-registry-test.js',
   'test/events-catalog-test.js',
   'test/hunted-park-test.js',
+  'test/nfer-refs-test.js', // an n-fer's other parks, read from the activator's own spot comment (#353)
   'test/js8-audio-feed-test.js',
   'test/log-comment-test.js',
   'test/raw-cat-command-test.js',

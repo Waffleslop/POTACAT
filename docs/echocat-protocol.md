@@ -260,6 +260,7 @@ for the history.
 | `jtcat-cycle` | S→C | Cycle boundary tick (for slot indicators). |
 | `jtcat-tx-status` | S→C | Currently transmitting? what message? what slot? |
 | `jtcat-qso-state` | S→C | Active QSO phase tracker. |
+| `jtcat-qso-logged` | S→C | A JTCAT contact was written to the shack's log: `{ callsign, band, mode, grid, rstSent, rstRcvd, parksText, parksNote }`. `parksText` is ready to show: `at US-1111`, `at US-1111 and US-2222`, `at DE-1197, DE-0941 and DE-0034`, or `''` when the contact was not at a park. `parksNote` names the parks read from the activator's own spot comment (JTCAT option `jtcatNferParks`): `US-2222: from their own spot comment`, or `''`. Sent at the moment of the write, not cached or replayed, and **only to a client whose `hello.capabilities` include `jtcat-qso-logged`** (an older client never receives it), and never to a Guest Pass session. Toast when `parksNote` is set: `Logged <callsign> <parksText> (<parksNote>)`; ECHOCAT Web shows nothing new for a contact without a note and never replaces an error toast. Added 2026-11-12. |
 | `jtcat-spectrum` | S→C | Waterfall spectrum bins for the popout. |
 | `jtcat-waterfall` | C→S | Request the spectrum stream (start/stop). |
 | `jtcat-start-multi-remote` | C→S | Multi-slice JTCAT (Flex). |

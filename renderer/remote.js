@@ -1852,7 +1852,9 @@
           // one record per log write instead of re-pushing the whole log.
           // local-cw-sidetone: this page plays its own sidetone for the CW it
           // sends, so the desktop must not mix a second copy into RX audio.
-          capabilities: ['chunked-all-qsos', 'qso-delta', 'chunked-worked-qsos', 'local-cw-sidetone'],
+          // jtcat-qso-logged: this page says which parks a JTCAT contact was
+          // logged at when some were read from the activator's spot comment.
+          capabilities: ['chunked-all-qsos', 'qso-delta', 'chunked-worked-qsos', 'local-cw-sidetone', 'jtcat-qso-logged'],
         }));
       } catch {}
       onOpen();
@@ -2971,6 +2973,19 @@
         ft8StartCountdown();
         break;
 
+      case 'jtcat-qso-logged': {
+        // The shack wrote a JTCAT contact. Said here only when parks were read
+        // from the activator's own spot comment (the operator must learn of
+        // those); an ordinary contact shows no new toast, and an error toast
+        // on screen is never replaced.
+        if (!msg.parksNote) break;
+        if (logToast.classList.contains('error') && !logToast.classList.contains('hidden')) break;
+        let line = 'Logged ' + (msg.callsign || '');
+        if (msg.parksText) line += ' ' + msg.parksText;
+        line += ' (' + msg.parksNote + ')';
+        showToast(line, 6000);
+        break;
+      }
       case 'jtcat-tx-status':
         ft8Transmitting = msg.state === 'tx';
         ft8TxMsg = msg.message || ft8TxMsg;

@@ -167,6 +167,8 @@ function _applyPopoutTheme(payload) {
     reflectHuntCqFallback();
     huntSpotted = s.jtcatHuntSpotted !== false; // default on
     reflectHuntSpotted();
+    nferParks = s.jtcatNferParks !== false; // default on (Casey 2026-11-12)
+    if (nferParksToggle) nferParksToggle.classList.toggle('active', nferParks);
     answerCallers = s.jtcatAnswerCallers !== false; // default on
     reflectAnswerCallers();
     holdTxFreq = !!s.jtcatHoldTxFreq;
@@ -467,6 +469,8 @@ function _applyPopoutTheme(payload) {
   var fakeIt = false;   // split operation "Fake It" (main.js fakeItShiftForTx)
   var huntSpottedToggle = document.getElementById('jp-hunt-spotted');
   var huntSpotted = true;   // default on — see main.js jtcatHuntProgramMatch
+  var nferParksToggle = document.getElementById('jp-nfer-parks');
+  var nferParks = true;     // default on: main.js jtcatNferEnabled, lib/nfer-refs.js
   var skipTx1 = false;
   var holdTxToggle = document.getElementById('jp-hold-tx');
   var holdTxFreq = false;
@@ -1742,6 +1746,10 @@ function _applyPopoutTheme(payload) {
   window.api.onJtcatQsoLogged(function(data) {
     hideQsoCard();
     document.getElementById('jp-qso-card-call').textContent = data.callsign || '';
+    // The park(s) it was logged at; the note names any read from the
+    // activator's own spot comment (main.js jtcatWriteLog, lib/nfer-refs.js).
+    document.getElementById('jp-qso-card-parks').textContent = data.parksText || '';
+    document.getElementById('jp-qso-card-note').textContent = data.parksNote || '';
     var sub = [data.band, data.mode];
     if (data.rstSent) sub.push('sent ' + data.rstSent);
     if (data.rstRcvd) sub.push('rcvd ' + data.rstRcvd);
@@ -3285,6 +3293,14 @@ function _applyPopoutTheme(payload) {
       huntSpotted = !huntSpotted;
       reflectHuntSpotted();
       window.api.saveSettings({ jtcatHuntSpotted: huntSpotted });
+    });
+  }
+  // Log every park of a two-fer (#353): the parks the activator's own spot names.
+  if (nferParksToggle) {
+    nferParksToggle.addEventListener('click', function() {
+      nferParks = !nferParks;
+      nferParksToggle.classList.toggle('active', nferParks);
+      window.api.saveSettings({ jtcatNferParks: nferParks });
     });
   }
 
