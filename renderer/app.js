@@ -6902,10 +6902,17 @@ async function echocatRefreshTailscaleStatus() {
   if (!s.installed && s.ipFromInterfaces) {
     // On a tailnet, but POTACAT cannot run the CLI: pairing still carries the
     // address, only the MagicDNS name and the public cert need the command.
+    // The reason names every place POTACAT looked and what each said (#313).
+    const fix = s.platform === 'darwin'
+      ? 'quit and reopen the Tailscale app, or install Tailscale\'s command line tool from the app\'s settings, then restart POTACAT'
+      : (s.platform === 'linux' ? 'install the CLI package or add it to PATH' : 'reinstall Tailscale');
     echocatTsStatus.innerHTML =
       'Tailscale: this PC is on a tailnet at <b>' + _esc(s.ipFromInterfaces) + '</b>, but POTACAT could not run the <code>tailscale</code> command'
       + (s.cliError ? ' (' + _esc(s.cliError) + ')' : '') + '. Phones will reach this PC by that address. '
-      + 'For the MagicDNS name and a public certificate too, make the <code>tailscale</code> command available to POTACAT (on Linux, install the CLI package or add it to PATH).';
+      + 'For the MagicDNS name and a public certificate too, make the <code>tailscale</code> command available to POTACAT (' + fix + ').';
+    // Stop here: the not-signed-in branch below used to overwrite this with
+    // "Tailscale not detected", hiding the address the card had just found.
+    return;
   } else if (!s.installed) {
     echocatTsStatus.innerHTML =
       'Tailscale not detected. <a href="https://tailscale.com/download" target="_blank" style="color:#4fc3f7;">Install Tailscale</a> for iOS app pairing.';
@@ -9022,8 +9029,11 @@ async function _renderSummaryEchocat() {
       tailscaleUrl = 'https://' + tsHost + ':' + port;
       tailscaleCertValid = true;
     } else {
+      // No name from the tailscale command: the tailnet address on this
+      // computer's interfaces still works from anywhere on the tailnet (#313).
       const tsIp = (ips || []).find((ip) => ip.tailscale);
-      if (tsIp) tailscaleUrl = 'https://' + tsIp.address + ':' + port;
+      const addr = tsIp ? tsIp.address : (tail && tail.ipFromInterfaces) || '';
+      if (addr) tailscaleUrl = 'https://' + addr + ':' + port;
     }
     // POTACAT Cloud: the tunnel host is a real HTTPS origin any browser
     // can open from anywhere — the visitor signs in at
@@ -9043,6 +9053,9 @@ async function _renderSummaryEchocat() {
       token: (s.remoteRequireToken === true) ? (s.remoteToken || '') : '',
       tailscaleUrl,
       tailscaleCertValid,
+      // The command gave no signed-in answer, so the row is the bare address
+      // for that reason, not because MagicDNS is off.
+      tailscaleNoCommand: !!(tail && tail.fallbackNote),
       cloudUrl,
     };
   } catch {}
@@ -9103,7 +9116,9 @@ function _buildEchocatWebHTML(web) {
     ? urlRow('Away from home (Tailscale)', web.tailscaleUrl, !hasCloud)
       + (web.tailscaleCertValid
         ? ''
-        : '<div class="echo-web-extra">MagicDNS is off — this uses your Tailscale IP, so you\'ll get a certificate warning. Turn on MagicDNS for a clean link.</div>')
+        : (web.tailscaleNoCommand
+          ? '<div class="echo-web-extra">POTACAT could not get your Tailscale name, so this uses your Tailscale address: expect a certificate warning the first time.</div>'
+          : '<div class="echo-web-extra">MagicDNS is off — this uses your Tailscale IP, so you\'ll get a certificate warning. Turn on MagicDNS for a clean link.</div>'))
     : '';
   // No password display here: the one place for the ECHOCAT password is the
   // "Password-protect your rig" setting right under these URLs (Casey
@@ -9157,7 +9172,12 @@ function _buildEchocatCardHTML(tunnel, tail, devices, web) {
       detail = tunnel.lastError ? ('Tunnel error: ' + tunnel.lastError) : 'POTACAT Cloud tunnel reported an error.';
     }
   }
-  if (pillCls === '' && tail && tail.installed && tail.loggedIn) {
+  if (pillCls === '' && tail && tail.fallbackNote) {
+    // #313: a tailnet address on this computer, but no signed-in answer from
+    // the tailscale command. The address works; say so, and why the name is missing.
+    pillTxt = 'Tailscale'; pillCls = 'warn';
+    detail = tail.fallbackNote;
+  } else if (pillCls === '' && tail && tail.installed && tail.loggedIn) {
     pillTxt = 'Tailscale'; pillCls = 'ok';
     detail = tail.hostname
       ? 'Available remotely via Tailscale (' + tail.hostname + ').'

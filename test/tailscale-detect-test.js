@@ -84,7 +84,7 @@ test('the probe state says why the CLI gave nothing', () => {
 test('Linux looks in the snap and per-user locations, then the login shell\'s PATH', () => {
   const src = R('lib/remote-server.js');
   assert.ok(/'\/snap\/bin\/tailscale'/.test(src) && /\.local\/bin\/tailscale/.test(src));
-  assert.ok(/exec\('\/bin\/sh', \['-lc', 'command -v tailscale'\]/.test(src), 'the login-shell lookup is asynchronous too');
+  assert.ok(/exec\(shell \|\| '\/bin\/sh', \['-lc', 'command -v tailscale'\]/.test(src), 'the login-shell lookup is asynchronous too');
 });
 
 test('main publishes the interface address as the tailnet leg when the CLI gives nothing, and says why once', () => {
@@ -97,7 +97,8 @@ test('main publishes the interface address as the tailnet leg when the CLI gives
   assert.ok(/if \(line !== _altHostsNoteLogged\)/.test(fn), 'logged on change, not every 10 minutes');
   assert.ok(/\[Pair QR\] OK — mode=\$\{effectiveMode\} lan=.*tailscale=/.test(main), 'the QR log names every leg');
   const ipc = main.slice(main.indexOf("ipcMain.handle('echocat-tailscale-status'"), main.indexOf("ipcMain.handle('echocat-tailscale-status'") + 1800);
-  assert.ok(/ipFromInterfaces: ipFromInterfaces \|\| null,/.test(ipc) && /cliError: ts \? '' : \(probe\.error \|\| ''\)/.test(ipc));
+  assert.ok(/ipFromInterfaces: ipFromInterfaces \|\| null,/.test(ipc) && /cliError: ts \? '' : \(summarizeTailscaleProbe\(probe\) \|\| probe\.error \|\| ''\)/.test(ipc));
+  assert.ok(/fallbackNote: describeTailscaleFallback\(ts, probe, ipFromInterfaces\),/.test(ipc), '#313: the status line for an address without a command');
   const app = R('renderer/app.js');
   assert.ok(/if \(!s\.installed && s\.ipFromInterfaces\) \{/.test(app), 'the card tells the truth');
 });
@@ -294,14 +295,14 @@ test('concurrent refreshes share one probe', async () => {
 
 test('no static candidate: the login shell is asked once, and what it names is probed', async () => {
   const exec = fakeExec({ '/bin/sh': { stdout: '/Users/op/bin/tailscale\n' }, '/Users/op/bin/tailscale': { json: RUNNING } });
-  RS._resetTailscaleProbeForTests({ exec, candidates: [], platform: 'darwin' });
+  RS._resetTailscaleProbeForTests({ exec, candidates: [], platform: 'darwin', shell: '/bin/sh' });
   const ts = await RS.refreshTailscaleStatus();
   assert.strictEqual(ts.state, 'running');
   assert.deepStrictEqual(exec.calls, ['/bin/sh -lc command -v tailscale', '/Users/op/bin/tailscale status --json']);
   assert.strictEqual(RS.tailscaleProbeState().binary, '/Users/op/bin/tailscale');
   // Nothing anywhere: null, and the probe state says so.
   const none = fakeExec({ '/bin/sh': { stdout: '' } });
-  RS._resetTailscaleProbeForTests({ exec: none, candidates: [], platform: 'darwin' });
+  RS._resetTailscaleProbeForTests({ exec: none, candidates: [], platform: 'darwin', shell: '/bin/sh' });
   assert.strictEqual(await RS.refreshTailscaleStatus(), null);
   assert.strictEqual(RS.tailscaleProbeState().error, 'tailscale command not found');
 });
@@ -312,9 +313,128 @@ test('the probe state carries each candidate\'s answer for the bug report', asyn
   await RS.refreshTailscaleStatus();
   const st = RS.tailscaleProbeState();
   assert.deepStrictEqual(st.candidates, [
-    { path: BUNDLE, backendState: 'Running', error: '' },
-    { path: BREW, backendState: 'NeedsLogin', error: '' },
+    { path: BUNDLE, backendState: 'Running', error: '', attempts: 1 },
+    { path: BREW, backendState: 'NeedsLogin', error: '', attempts: 1 },
   ]);
+});
+
+// ── #313: a Mac whose CLI is up but POTACAT does not see it ──────────────────
+const HOME_BUNDLE = '/Users/op/Applications/Tailscale.app/Contents/MacOS/Tailscale';
+// exec whose answer depends on the deadline: below `needMs` it times out the
+// way execFile does (killed by the signal), at or above it it answers.
+function slowExec(table) {
+  const calls = [];
+  const exec = async (file, args, opts) => {
+    calls.push(file + ' ' + (opts && opts.timeout));
+    const r = table[file];
+    if (r === undefined) { const e = new Error(`spawn ${file} ENOENT`); e.code = 'ENOENT'; e.stdout = ''; e.stderr = ''; throw e; }
+    if (r.needMs && (!opts || opts.timeout < r.needMs)) {
+      const e = new Error('Command failed'); e.killed = true; e.signal = 'SIGKILL'; e.stdout = ''; e.stderr = ''; throw e;
+    }
+    return { stdout: JSON.stringify(r.json), stderr: '' };
+  };
+  exec.calls = calls;
+  return exec;
+}
+
+test('macOS: an app in ~/Applications is a candidate, right after /Applications', () => {
+  const present = new Set([BUNDLE, HOME_BUNDLE, BREW]);
+  const got = RS.tailscaleCandidates('darwin', { PATH: '/usr/bin', HOME: '/Users/op' }, (p) => present.has(p), (p) => p);
+  assert.deepStrictEqual(got, [BUNDLE, HOME_BUNDLE, BREW]);
+  const onlyHome = RS.tailscaleCandidates('darwin', { PATH: '/usr/bin', HOME: '/Users/op' }, (p) => p === HOME_BUNDLE, (p) => p);
+  assert.deepStrictEqual(onlyHome, [HOME_BUNDLE]);
+});
+
+test('the app bundle binary is asked for its command (TAILSCALE_BE_CLI); every call is killed hard at its deadline', () => {
+  const app = RS.tailscaleExecOptions(BUNDLE, 3000, { PATH: '/usr/bin' });
+  assert.strictEqual(app.env.TAILSCALE_BE_CLI, '1');
+  assert.strictEqual(app.env.PATH, '/usr/bin', 'the rest of the environment is kept');
+  assert.strictEqual(app.killSignal, 'SIGKILL');
+  assert.strictEqual(app.timeout, 3000);
+  assert.strictEqual(RS.tailscaleExecOptions(HOME_BUNDLE, 3000, {}).env.TAILSCALE_BE_CLI, '1');
+  const brew = RS.tailscaleExecOptions(BREW, 3000, {});
+  assert.strictEqual(brew.env, undefined, 'other binaries inherit the environment untouched');
+  assert.strictEqual(brew.killSignal, 'SIGKILL');
+});
+
+test('a candidate that times out is asked again with a longer deadline, and wins when it answers', async () => {
+  const exec = slowExec({ [BUNDLE]: { json: RUNNING, needMs: 500 } });
+  const r = await RS.probeTailscale({ candidates: [BUNDLE], exec, timeoutMs: 100, retryTimeoutMs: 1000 });
+  assert.strictEqual(r.binary, BUNDLE);
+  assert.strictEqual(r.status.state, 'running');
+  assert.strictEqual(r.results[0].attempts, 2);
+  assert.deepStrictEqual(exec.calls, [BUNDLE + ' 100', BUNDLE + ' 1000']);
+});
+
+test('two timeouts are named with both deadlines', async () => {
+  const exec = slowExec({ [BUNDLE]: { json: RUNNING, needMs: 5000 } });
+  const r = await RS.probeTailscale({ candidates: [BUNDLE], exec, timeoutMs: 100, retryTimeoutMs: 1000 });
+  assert.strictEqual(r.status, null);
+  assert.strictEqual(r.results[0].error, 'timed out after 0.1 s, then 1 s');
+});
+
+test('#132 holds through the retry: a NeedsLogin answer is not retried, and the slow signed-in bundle still wins', async () => {
+  const exec = slowExec({ [BREW]: { json: NEEDS_LOGIN }, [BUNDLE]: { json: RUNNING, needMs: 500 } });
+  const r = await RS.probeTailscale({ candidates: [BREW, BUNDLE], exec, timeoutMs: 100, retryTimeoutMs: 1000 });
+  assert.strictEqual(r.binary, BUNDLE);
+  assert.strictEqual(exec.calls.filter((c) => c.startsWith(BREW)).length, 1, 'brew answered; asked once');
+  // And a stray daemon that answers slowly with NeedsLogin cannot beat a signed-in one.
+  const exec2 = slowExec({ [BREW]: { json: NEEDS_LOGIN, needMs: 500 }, [BUNDLE]: { json: RUNNING } });
+  const r2 = await RS.probeTailscale({ candidates: [BREW, BUNDLE], exec: exec2, timeoutMs: 100, retryTimeoutMs: 1000 });
+  assert.strictEqual(r2.binary, BUNDLE);
+  assert.strictEqual(exec2.calls.length, 2, 'a signed-in answer ends the probe: no retry');
+});
+
+test('the probe state and the summary line carry each timeout for the bug report', async () => {
+  const exec = slowExec({ [BUNDLE]: { json: RUNNING, needMs: 5000 }, [BREW]: { json: NEEDS_LOGIN } });
+  RS._resetTailscaleProbeForTests({ exec, candidates: [BUNDLE, BREW], platform: 'win32', timeoutMs: 100, retryTimeoutMs: 1000 });
+  await RS.refreshTailscaleStatus();
+  const st = RS.tailscaleProbeState();
+  assert.deepStrictEqual(st.candidates, [
+    { path: BUNDLE, backendState: null, error: 'timed out after 0.1 s, then 1 s', attempts: 2 },
+    { path: BREW, backendState: 'NeedsLogin', error: '', attempts: 1 },
+  ]);
+  assert.strictEqual(RS.summarizeTailscaleProbe(st), '/Applications/Tailscale.app: timed out after 0.1 s, then 1 s; /opt/homebrew/bin/tailscale: NeedsLogin');
+  assert.strictEqual(RS.summarizeTailscaleProbe(null), '');
+});
+
+test('the status line: an address on the interfaces without a signed-in command says both', () => {
+  const probeState = { error: 'timed out after 3 s, then 10 s', candidates: [{ path: BUNDLE, backendState: null, error: 'timed out after 3 s, then 10 s', attempts: 2 }] };
+  const none = RS.describeTailscaleFallback(null, probeState, '100.93.206.18');
+  assert.ok(/on Tailscale at 100\.93\.206\.18/.test(none), none);
+  assert.ok(/could not run the tailscale command \(\/Applications\/Tailscale\.app: timed out after 3 s, then 10 s\)/.test(none), none);
+  assert.ok(/can reach it at that address/.test(none));
+  const stopped = RS.describeTailscaleFallback(RS.classifyTailscaleStatus(STOPPED), probeState, '100.93.206.18');
+  assert.ok(/reports Stopped/.test(stopped), stopped);
+  assert.strictEqual(RS.describeTailscaleFallback(RS.classifyTailscaleStatus(RUNNING), probeState, '100.93.206.18'), '', 'signed in: nothing to explain');
+  assert.strictEqual(RS.describeTailscaleFallback(null, probeState, null), '', 'no address: the not-detected wording applies');
+});
+
+test('the login shell is the operator\'s own on macOS, and an alias it prints is understood', async () => {
+  assert.strictEqual(RS.loginShellFor('darwin', { SHELL: '/bin/zsh' }), '/bin/zsh');
+  assert.strictEqual(RS.loginShellFor('darwin', { SHELL: '/opt/homebrew/bin/bash' }), '/opt/homebrew/bin/bash');
+  assert.strictEqual(RS.loginShellFor('darwin', { SHELL: '/usr/local/bin/fish' }), '/bin/sh', 'unknown shells: /bin/sh');
+  assert.strictEqual(RS.loginShellFor('darwin', { SHELL: '/bin/zsh; rm -rf ~' }), '/bin/sh');
+  assert.strictEqual(RS.loginShellFor('linux', { SHELL: '/bin/zsh' }), '/bin/sh', 'Linux unchanged');
+  assert.strictEqual(RS.parseCommandV('/opt/homebrew/bin/tailscale\n'), '/opt/homebrew/bin/tailscale');
+  assert.strictEqual(RS.parseCommandV('alias tailscale=/Applications/Tailscale.app/Contents/MacOS/Tailscale'), BUNDLE);
+  assert.strictEqual(RS.parseCommandV("alias tailscale='/Applications/Tailscale.app/Contents/MacOS/Tailscale'"), BUNDLE);
+  assert.strictEqual(RS.parseCommandV('tailscale'), null, 'a bare name is not a path');
+  assert.strictEqual(RS.parseCommandV(''), null);
+  const exec = fakeExec({ '/bin/zsh': { stdout: 'alias tailscale=' + BUNDLE + '\n' }, [BUNDLE]: { json: RUNNING } });
+  RS._resetTailscaleProbeForTests({ exec, candidates: [], platform: 'darwin', shell: '/bin/zsh' });
+  const ts = await RS.refreshTailscaleStatus();
+  assert.strictEqual(ts.state, 'running');
+  assert.deepStrictEqual(exec.calls, ['/bin/zsh -lc command -v tailscale', BUNDLE + ' status --json']);
+});
+
+test('#313 wiring: the cards use the status line, and the bug report carries the summary (source guard)', () => {
+  const app = R('renderer/app.js'), main = R('main.js');
+  const settingsCard = app.slice(app.indexOf('if (!s.installed && s.ipFromInterfaces) {'), app.indexOf('} else if (!s.installed) {'));
+  assert.ok(/\n\s+return;\n\s*$/.test(settingsCard), 'the address line is not overwritten by "not detected"');
+  assert.ok(/if \(pillCls === '' && tail && tail\.fallbackNote\) \{/.test(app), 'the ECHOCAT card status line');
+  assert.ok(/tailscaleNoCommand: !!\(tail && tail\.fallbackNote\)/.test(app), 'the Away from home row names the real reason');
+  assert.ok(/probeSummary: tsProbeSummary \|\| null,/.test(main) && /ipFromInterfaces: tsIfIp,/.test(main), 'diagnostic snapshot');
 });
 
 // ── #132: certs ──────────────────────────────────────────────────────────────
