@@ -132,7 +132,7 @@
       el.classList.toggle('unread', b === 'in' && n > 0);
     });
     renderSession(s.session || {});
-    renderFavs();
+    refreshFavMarks(); // re-stars the list only when the favorites changed
     if (historyOpen) renderHistory();
   }
 
@@ -168,7 +168,7 @@
     }
     $('wl-mode-note').textContent = note;
     if (radio && !gateways.length) loadGateways(false);
-    renderFavs();
+    renderFavBtn();
     renderDial();
   }
 
@@ -339,20 +339,35 @@
   });
   $('wl-notice-no').addEventListener('click', function () { $('wl-notice').classList.remove('show'); noticeThen = null; });
 
+  // tplEdit: null for a message; { id } while writing or editing a template
+  // (the same form, with a Name and Save template instead of Put in Outbox).
+  var tplEdit = null;
+  function setTemplateMode(t) {
+    tplEdit = t;
+    $('wl-c-name-row').hidden = !t;
+    $('wl-c-attach').hidden = !!t;                // templates carry no attachments
+    $('wl-c-files').hidden = !!t;
+    $('wl-c-save-tpl').hidden = !!t;
+    $('wl-c-send').textContent = t ? 'Save template' : 'Put in Outbox';
+  }
   function compose(pre) {
-    requireNotice(function () {
+    // A template is the operator's own text: no notice needed until it is sent.
+    var go = function () {
       pre = pre || {};
       $('wl-reader').style.display = 'none';
       $('wl-compose').classList.add('show');
+      setTemplateMode(pre.template ? { id: pre.id || null } : null);
+      $('wl-c-name').value = pre.name || '';
       $('wl-c-to').value = pre.to || '';
-      $('wl-c-cc').value = '';
+      $('wl-c-cc').value = pre.cc || '';
       $('wl-c-subj').value = pre.subject || '';
       $('wl-c-body').value = pre.body || '';
       pendingFiles = [];
       renderFiles();
       $('wl-c-err').textContent = pre.note || '';
-      (pre.to ? $('wl-c-body') : $('wl-c-to')).focus();
-    });
+      (pre.template ? $('wl-c-name') : pre.to ? $('wl-c-body') : $('wl-c-to')).focus();
+    };
+    if (pre && pre.template) go(); else requireNotice(go);
   }
   function renderFiles() {
     var total = pendingFiles.reduce(function (n, f) { return n + f.size; }, 0);
@@ -368,6 +383,7 @@
   });
   $('wl-c-send').addEventListener('click', function () {
     $('wl-c-err').textContent = '';
+    if (tplEdit) { saveTemplate(); return; }
     $('wl-c-send').disabled = true;
     window.api.send({ to: $('wl-c-to').value, cc: $('wl-c-cc').value, subject: $('wl-c-subj').value, body: $('wl-c-body').value, attachments: pendingFiles }).then(function (r) {
       $('wl-c-send').disabled = false;
@@ -375,13 +391,13 @@
       showReader('<div class="wl-empty">In the Outbox. It goes out on the next Send / Receive.</div>');
     });
   });
-  $('wl-pos').addEventListener('click', function () {
+  function positionReport() {
     requireNotice(function () {
       window.api.posreport({}).then(function (r) {
         showReader('<div class="wl-empty">' + esc(r && r.ok ? 'Position report in the Outbox.' : ((r && r.error) || 'Could not queue it')) + '</div>');
       });
     });
-  });
+  }
   $('wl-settings').addEventListener('click', function () { window.api.openSettings(); });
   // POTA spot: a message to spot@pota.tdod.org, one line per park; the
   // operator reads and edits it before it goes in the Outbox.
@@ -389,8 +405,104 @@
     if (!t || !t.to) return;
     compose({ to: t.to, subject: t.subject, body: t.body, note: (t.missing && t.missing.length) ? 'Fill in ' + t.missing.join(', ') + ' before it goes out.' : 'Check the line, then Put in Outbox and Send / Receive. It posts a real POTA spot.' });
   }
-  $('wl-pota-spot').addEventListener('click', function () { window.api.potaSpotTemplate({}).then(composeSpot); });
   if (window.api.onComposePrefill) window.api.onComposePrefill(composeSpot);
+
+  // ── Templates (Casey 2026-11-11): one button instead of a column of them ──
+  // Built in: Position report, POTA spot. Then the operator's own (saved in
+  // the profile, winlink-state.templates), then Add new template.
+  function templates() { return (state && Array.isArray(state.templates)) ? state.templates : []; }
+  var tplMenuOpen = false, tplDelArmed = null;
+  function renderTemplateMenu() {
+    var own = templates();
+    var html = '<div class="wl-tpl-head">Built in</div>'
+      + '<button class="wl-tpl-item" role="menuitem" data-tpl="pos"><span class="wl-tpl-main">Position report<span class="wl-tpl-sub">From your grid square, straight to the Outbox</span></span></button>'
+      + '<button class="wl-tpl-item" role="menuitem" data-tpl="pota"><span class="wl-tpl-main">POTA spot<span class="wl-tpl-sub">Your park, frequency and mode</span></span></button>';
+    if (own.length) {
+      html += '<div class="wl-tpl-sep"></div><div class="wl-tpl-head">Yours</div>' + own.map(function (t) {
+        var armed = tplDelArmed === t.id;
+        return '<div class="wl-tpl-item" role="menuitem" tabindex="0" data-own="' + esc(t.id) + '"><span class="wl-tpl-main">' + esc(t.name)
+          + '<span class="wl-tpl-sub">' + esc([t.to, t.subject].filter(Boolean).join(' · ') || 'No address or subject yet') + '</span></span>'
+          + '<button class="wl-tpl-del" data-edit="' + esc(t.id) + '" aria-label="Edit ' + esc(t.name) + '" title="Edit">Edit</button>'
+          + '<button class="wl-tpl-del" data-del="' + esc(t.id) + '" aria-label="Delete ' + esc(t.name) + '" title="Delete">' + (armed ? 'Delete?' : '&#10005;') + '</button></div>';
+      }).join('');
+    }
+    html += '<div class="wl-tpl-sep"></div><button class="wl-tpl-item wl-tpl-add" role="menuitem" data-tpl="add">+ Add new template</button>';
+    $('wl-tpl-menu').innerHTML = html;
+  }
+  function openTemplateMenu() {
+    var btn = $('wl-tpl-btn'), menu = $('wl-tpl-menu'), main = $('wl-main');
+    tplDelArmed = null;
+    renderTemplateMenu();
+    menu.hidden = false;
+    tplMenuOpen = true;
+    btn.setAttribute('aria-expanded', 'true');
+    var b = btn.getBoundingClientRect(), m = main.getBoundingClientRect();
+    menu.style.left = Math.round(b.right - m.left + 6) + 'px';
+    // Beside the button, kept inside the mail area.
+    var top = b.top - m.top;
+    menu.style.top = Math.max(8, Math.min(top, m.height - menu.offsetHeight - 8)) + 'px';
+    var first = menu.querySelector('.wl-tpl-item'); if (first) first.focus();
+  }
+  function closeTemplateMenu() {
+    $('wl-tpl-menu').hidden = true;
+    tplMenuOpen = false;
+    $('wl-tpl-btn').setAttribute('aria-expanded', 'false');
+  }
+  $('wl-tpl-btn').addEventListener('click', function (e) { e.stopPropagation(); if (tplMenuOpen) closeTemplateMenu(); else openTemplateMenu(); });
+  document.addEventListener('click', function (e) { if (tplMenuOpen && !e.target.closest('#wl-tpl-menu')) closeTemplateMenu(); });
+  document.addEventListener('keydown', function (e) { if (tplMenuOpen && e.key === 'Escape') { closeTemplateMenu(); $('wl-tpl-btn').focus(); } });
+  $('wl-tpl-menu').addEventListener('click', function (e) {
+    e.stopPropagation();
+    var del = e.target.closest('[data-del]');
+    if (del) {
+      var id = del.getAttribute('data-del');
+      if (tplDelArmed !== id) { tplDelArmed = id; renderTemplateMenu(); return; }   // a second click deletes
+      tplDelArmed = null;
+      window.api.template('delete', { id: id });
+      return;
+    }
+    var edit = e.target.closest('[data-edit]');
+    if (edit) {
+      var te = templates().find(function (x) { return x.id === edit.getAttribute('data-edit'); });
+      closeTemplateMenu();
+      if (te) compose({ template: true, id: te.id, name: te.name, to: te.to, cc: te.cc, subject: te.subject, body: te.body });
+      return;
+    }
+    var own = e.target.closest('[data-own]');
+    if (own) {
+      var t = templates().find(function (x) { return x.id === own.getAttribute('data-own'); });
+      closeTemplateMenu();
+      if (t) compose({ to: t.to, cc: t.cc, subject: t.subject, body: t.body });
+      return;
+    }
+    var b = e.target.closest('[data-tpl]');
+    if (!b) return;
+    var k = b.getAttribute('data-tpl');
+    closeTemplateMenu();
+    if (k === 'pos') positionReport();
+    else if (k === 'pota') window.api.potaSpotTemplate({}).then(composeSpot);
+    else if (k === 'add') compose({ template: true });
+  });
+  $('wl-tpl-menu').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && e.target.matches('[data-own]')) e.target.click();
+  });
+  function saveTemplate() {
+    var t = { id: tplEdit && tplEdit.id, name: $('wl-c-name').value, to: $('wl-c-to').value, cc: $('wl-c-cc').value, subject: $('wl-c-subj').value, body: $('wl-c-body').value };
+    if (!String(t.name).trim()) { $('wl-c-err').textContent = 'Give the template a name, the one the Templates menu shows.'; $('wl-c-name').focus(); return; }
+    $('wl-c-send').disabled = true;
+    window.api.template('save', t).then(function (r) {
+      $('wl-c-send').disabled = false;
+      if (!r || !r.ok) { $('wl-c-err').textContent = (r && r.error) || 'Could not save the template'; return; }
+      setTemplateMode(null);
+      showReader('<div class="wl-empty">Template "' + esc(String(t.name).trim()) + '" saved. It is in the Templates menu.</div>');
+    });
+  }
+  // A message being written becomes a template: same fields, add a name.
+  $('wl-c-save-tpl').addEventListener('click', function () {
+    setTemplateMode({ id: null });
+    $('wl-c-err').textContent = '';
+    $('wl-c-name').focus();
+  });
 
   // ── waterfall: is the gateway frequency in use? ──────────────────────────
   // 0–3000 Hz of the receiver's passband, from main's direct-audio frames
@@ -599,7 +711,7 @@
   $('wl-gateway').addEventListener('change', function () {
     var g = pickedGateway();
     renderDial();
-    renderFavs();
+    renderFavBtn();
     if (g && g.dialKhz) qsyTo(g.dialKhz);
   });
   $('wl-gw-refresh').addEventListener('click', function () { loadGateways(true); });
@@ -610,14 +722,21 @@
     });
   }
 
-  // ── My gateways (#254) ─────────────────────────────────────────────────────
+  // ── favorite gateways (#254; Casey 2026-11-11: starred in the gateway list,
+  // in its propagation order, no strip of their own) ──────────────────────────
   function favs() { return (state && Array.isArray(state.favourites)) ? state.favourites : []; }
   function sameGw(a, b) { return !!a && !!b && String(a.call).toUpperCase() === String(b.call).toUpperCase() && Math.abs(Number(a.khz != null ? a.khz : a.dialKhz) - Number(b.khz != null ? b.khz : b.dialKhz)) < 0.05; }
   function isFav(g, mode) { return favs().some(function (f) { return f.mode === (mode || currentMode().id) && sameGw(f, g); }); }
-  function fmtKhz(k) {
-    var n = Number(k);
+  // A frequency the way the VFO writes it: 7.100.50 (MHz, kHz, tens of Hz),
+  // dots, never a comma (Casey 2026-11-11). Input in kHz.
+  function fmtDial(khz) {
+    var n = Number(khz);
     if (!(n > 0)) return '';
-    return n.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    var t = Math.round(n * 100);              // tens of Hz
+    var mhz = Math.floor(t / 100000);
+    var k = Math.floor((t % 100000) / 100);
+    var f = t % 100;
+    return mhz + '.' + String(k).padStart(3, '0') + '.' + String(f).padStart(2, '0');
   }
   var MODE_SHORT = { ardop: 'ARDOP', vara: 'VARA HF', varafm: 'VARA FM', packet: 'Packet', mercury: 'Mercury' };
   function fmtDay(ms) {
@@ -632,42 +751,40 @@
   }
   var STAR = '<svg class="wl-star" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8z"></path></svg>';
   var STAR_EMPTY = STAR.replace('class="wl-star"', 'class="wl-star empty"');
-  var favEditing = false;
-  function renderFavs() {
-    var bar = $('wl-favs');
-    var anyRadio = ((state && state.modes) || []).some(function (m) { return m.available && m.id !== 'telnet'; });
-    var list = favs();
-    bar.hidden = !(anyRadio && (list.length || currentMode().id !== 'telnet'));
-    bar.classList.toggle('editing', favEditing && list.length > 0);
-    $('wl-favs-edit').hidden = !list.length;
-    $('wl-favs-edit').textContent = favEditing ? 'Done' : 'Edit';
-    var picked = pickedGateway();
-    var mode = currentMode().id;
-    $('wl-favs-list').innerHTML = list.length ? list.map(function (f, i) {
-      var on = f.mode === mode && sameGw(f, picked);
-      var when = f.lastGoodAt ? 'good ' + fmtDay(f.lastGoodAt) : 'saved ' + fmtDay(f.savedAt);
-      return '<span class="wl-fav' + (on ? ' active' : '') + '" role="button" tabindex="0" data-i="' + i + '" title="' + esc(f.call + ', ' + (MODE_SHORT[f.mode] || f.mode) + ', ' + fmtKhz(f.khz) + ' kHz dial') + '">'
-        + STAR + '<span class="wl-fav-call">' + esc(f.call) + '</span>'
-        + (f.band ? '<span class="wl-fav-dim">' + esc(f.band) + '</span>' : '')
-        + '<span class="wl-fav-call" style="font-weight:400">' + esc(fmtKhz(f.khz)) + '</span>'
-        + '<span class="wl-fav-when">' + esc((MODE_SHORT[f.mode] || f.mode) + ', ' + when) + '</span>'
-        + '<button class="wl-fav-x" data-x="' + i + '" aria-label="Remove ' + esc(f.call) + ' from My gateways" title="Remove">&#10005;</button></span>';
-    }).join('') : '<span class="wl-favs-empty">None yet. After a good session POTACAT offers to save the gateway here.</span>';
-  }
-  $('wl-favs-edit').addEventListener('click', function () { favEditing = !favEditing; renderFavs(); });
-  $('wl-favs-list').addEventListener('click', function (e) {
-    var x = e.target.closest('.wl-fav-x');
-    if (x) { e.stopPropagation(); var f = favs()[parseInt(x.getAttribute('data-x'), 10)]; if (f) window.api.favourite('remove', f); return; }
-    var chip = e.target.closest('.wl-fav');
-    if (chip && !favEditing) useGateway(favs()[parseInt(chip.getAttribute('data-i'), 10)]);
-  });
-  $('wl-favs-list').addEventListener('keydown', function (e) {
-    if (e.key !== 'Enter' && e.key !== ' ') return;
-    var chip = e.target.closest('.wl-fav');
-    if (chip && !favEditing) { e.preventDefault(); useGateway(favs()[parseInt(chip.getAttribute('data-i'), 10)]); }
-  });
 
-  // One gateway (a saved one or a History row) → mode, band, gateway and dial
+  // The star beside the gateway list: filled when the picked gateway is a
+  // favorite; one click adds or removes it, like a bookmark.
+  function renderFavBtn() {
+    var b = $('wl-fav');
+    var g = pickedGateway();
+    var m = currentMode().id;
+    var ok = !!(g && g.call && g.dialKhz && m !== 'telnet');
+    var on = ok && isFav(g, m);
+    b.disabled = !ok;
+    b.setAttribute('aria-pressed', String(on));
+    b.innerHTML = on ? STAR : STAR_EMPTY;
+    var t = !ok ? 'Pick a gateway to add it to your favorites' : on ? g.call + ' is a favorite (click to remove it)' : 'Add ' + g.call + ' to your favorites';
+    b.title = t;
+    b.setAttribute('aria-label', t);
+  }
+  $('wl-fav').addEventListener('click', function () {
+    var g = pickedGateway();
+    var m = currentMode().id;
+    if (!g || m === 'telnet') return;
+    window.api.favourite(isFav(g, m) ? 'remove' : 'add', { call: g.call, mode: m, dialKhz: g.dialKhz, url: g.url || '' });
+  });
+  // Favorites changed (a winlink-state push): re-star the list in place,
+  // keeping the pick; Pat is not asked again.
+  var favSig = '';
+  function refreshFavMarks() {
+    var sig = JSON.stringify(favs().map(function (f) { return f.call + '|' + f.mode + '|' + f.khz; }));
+    if (sig === favSig) { renderFavBtn(); return; }
+    favSig = sig;
+    if (lastList) { var keep = pickedGateway(); buildGatewayOptions(lastList, keep ? { call: keep.call, khz: keep.dialKhz } : null); }
+    else renderFavBtn();
+  }
+
+  // One gateway (a favorite or a History row) → mode, band, gateway and dial
   // set together, and the radio tuned there.
   var pendingPick = null;
   function useGateway(g) {
@@ -689,18 +806,19 @@
   }
 
   // One line per gateway, the prediction as a word first: what the operator
-  // decides on is whether the path is open, not a percentage.
+  // decides on is whether the path is open, not a percentage. A favorite
+  // carries a star and keeps its place in the ranking.
   function gatewayLabel(g) {
     var parts = [(isFav(g) ? '\u2605 ' : '') + g.call];
-    if (g.dialKhz) parts.push(g.dialKhz.toFixed(1) + ' kHz');
+    if (g.dialKhz) parts.push(fmtDial(g.dialKhz) + ' MHz');
     if (g.qualityWord) parts.push(g.qualityWord + (g.quality != null ? ' ' + g.quality + '%' : ''));
     if (g.distKm != null) parts.push(g.distKm + ' km');
     if (g.mercury) parts.push('(Mercury)');
     return parts.join('  ');
   }
 
-  // The saved gateways for this mode (and band, when one is picked) sit at
-  // the top of the list, before Pat's ranking.
+  // Rows the gateway list holds besides Pat's: favorites Pat did not list
+  // this time, and a History row picked from outside the list.
   var favRows = [];
   function pickedGateway() {
     var v = $('wl-gateway').value;
@@ -728,6 +846,49 @@
   }
   function predictStop() { clearInterval(predictTimer); predictTimer = null; $('wl-predict').hidden = true; }
 
+  function favOption(f, i, selected) {
+    return '<option value="f:' + i + '"' + (selected ? ' selected' : '') + '>' + esc('\u2605 ' + f.call + '  ' + fmtDial(f.dialKhz) + ' MHz' + (f.band ? '  ' + f.band : '')) + '</option>';
+  }
+
+  // The list from one Pat answer: Pat's ranking with favorites starred in
+  // place, then any favorite Pat did not list, then the left-out line.
+  var lastList = null;
+  function buildGatewayOptions(r, keep) {
+    var sel = $('wl-gateway');
+    var m = currentMode().id;
+    var band = $('wl-band').value;
+    favRows = favs().filter(function (f) { return f.mode === m && (!band || f.band === band) && !gateways.some(function (g) { return sameGw(g, f); }); })
+      .map(function (f) { return { call: f.call, dialKhz: f.khz, band: f.band, url: f.url || '', saved: true }; });
+    var last = state && state.lastGateway;
+    var want = pendingPick || keep || (last && { call: last.call, khz: last.dialKhz });
+    var picked = false;
+    var rows = gateways.slice(0, 120).map(function (g, i) {
+      var hit = !picked && want && sameGw(want, g);
+      if (hit) picked = true;
+      return '<option value="' + i + '"' + (hit ? ' selected' : '') + '>' + esc(gatewayLabel(g)) + '</option>';
+    }).join('');
+    if (!gateways.length) rows = '<option value="" disabled>No gateways for that band</option>';
+    var extra = favRows.length ? '<optgroup label="Favorites not in this list">' + favRows.map(function (f, i) {
+      var hit = !picked && want && sameGw(want, f);
+      if (hit) picked = true;
+      return favOption(f, i, hit);
+    }).join('') + '</optgroup>' : '';
+    var more = r.leftOut ? '<option value="" disabled>' + esc(r.leftOut + ' more on bands this radio is not set up for (Settings > My Rigs > Bands)') + '</option>' : '';
+    sel.innerHTML = '<optgroup label="' + (r.predicted ? 'Best path now' : 'Nearest first') + '">' + rows + '</optgroup>' + extra + more;
+    if (pendingPick && !picked) {
+      // A History row not in today's list is still callable: a row of its own at the top.
+      favRows.push({ call: pendingPick.call, dialKhz: pendingPick.khz, band: '', url: pendingPick.url || '' });
+      var opt = document.createElement('option');
+      opt.value = 'f:' + (favRows.length - 1);
+      opt.textContent = pendingPick.call + '  ' + fmtDial(pendingPick.khz) + ' MHz  (from History)';
+      sel.insertBefore(opt, sel.firstChild);
+      sel.value = opt.value;
+    }
+    pendingPick = null;
+    renderDial();
+    renderFavBtn();
+  }
+
   var loadSeq = 0;
   function loadGateways() {
     var m = currentMode();
@@ -737,55 +898,27 @@
     var hf = m.id !== 'packet' && m.id !== 'varafm';
     var band = $('wl-band').value;
     var seq = ++loadSeq;
-    // Saved gateways are usable at once, before the list comes back.
+    lastList = null;
+    // Favorites are usable at once, while the list and its prediction load.
     favRows = favs().filter(function (f) { return f.mode === m.id && (!band || f.band === band); })
       .map(function (f) { return { call: f.call, dialKhz: f.khz, band: f.band, url: f.url || '', saved: true }; });
-    var favHtml = favRows.length ? '<optgroup label="My gateways">' + favRows.map(function (f, i) {
-      var sel1 = pendingPick && sameGw(pendingPick, f) ? ' selected' : '';
-      return '<option value="f:' + i + '"' + sel1 + '>' + esc('\u2605 ' + f.call + '  ' + fmtKhz(f.dialKhz) + ' kHz' + (f.band ? '  ' + f.band : '')) + '</option>';
-    }).join('') + '</optgroup>' : '';
+    var favHtml = favRows.length ? '<optgroup label="Favorites">' + favRows.map(function (f, i) { return favOption(f, i, pendingPick && sameGw(pendingPick, f)); }).join('') + '</optgroup>' : '';
     sel.innerHTML = favHtml + '<option value=""' + (favHtml && pendingPick ? '' : ' selected') + '>Loading gateways…</option>';
     if (note) note.textContent = '';
     if (hf && state && state.predictionOn) predictStart(m.id); else predictStop();
     renderDial();
+    renderFavBtn();
     window.api.gateways(m.id, band).then(function (r) {
       if (seq !== loadSeq) return;
       predictStop();
-      if (!r || !r.ok) { sel.innerHTML = favHtml + '<option value="">' + esc((r && r.error) || 'No list') + '</option>'; pendingPick = null; renderDial(); return; }
+      if (!r || !r.ok) { sel.innerHTML = favHtml + '<option value="">' + esc((r && r.error) || 'No list') + '</option>'; pendingPick = null; renderDial(); renderFavBtn(); return; }
       gateways = r.list || [];
       // The ranking is said on hover, not as a sentence beside the list (#254).
       sel.title = r.note || 'Gateways';
-      var last = state && state.lastGateway;
-      var want = pendingPick || (last && { call: last.call, khz: last.dialKhz });
-      var picked = false;
-      var rows = gateways.slice(0, 120).map(function (g, i) {
-        var hit = !picked && !pendingPick && want && sameGw(want, g);
-        if (hit) picked = true;
-        return '<option value="' + i + '"' + (hit ? ' selected' : '') + '>' + esc(gatewayLabel(g)) + '</option>';
-      }).join('');
-      var groupLabel = r.predicted ? 'Best path now' : 'Nearest first';
-      var more = r.leftOut ? '<option value="" disabled>' + esc(r.leftOut + ' more on bands this radio is not set up for (Settings > My Rigs > Bands)') + '</option>' : '';
-      if (!gateways.length) rows = '<option value="" disabled>No gateways for that band</option>';
-      var html = favHtml + (favHtml ? '<optgroup label="' + groupLabel + '">' + rows + '</optgroup>' : rows) + more;
-      sel.innerHTML = html;
-      if (pendingPick) {
-        var fi = favRows.findIndex(function (f) { return sameGw(f, pendingPick); });
-        var gi = gateways.findIndex(function (g) { return sameGw(g, pendingPick); });
-        if (fi >= 0) sel.value = 'f:' + fi;
-        else if (gi >= 0) sel.value = String(gi);
-        else {
-          // A History row not in today's list is still callable: a row of its own at the top.
-          favRows.push({ call: pendingPick.call, dialKhz: pendingPick.khz, band: '', url: pendingPick.url || '' });
-          var opt = document.createElement('option');
-          opt.value = 'f:' + (favRows.length - 1);
-          opt.textContent = pendingPick.call + '  ' + fmtKhz(pendingPick.khz) + ' kHz  (from History)';
-          sel.insertBefore(opt, sel.firstChild);
-          sel.value = opt.value;
-        }
-        pendingPick = null;
-      }
-      renderDial();
-      renderFavs();
+      // Keep what was picked while the list loaded (a favorite), if anything.
+      var during = pickedGateway();
+      lastList = r;
+      buildGatewayOptions(r, during ? { call: during.call, khz: during.dialKhz } : null);
     });
   }
 
@@ -793,12 +926,12 @@
   var dialHz = 0;
   function renderDial() {
     var num = $('wl-dial'), match = $('wl-dial-match'), btn = $('wl-retune');
-    num.textContent = dialHz > 0 ? fmtKhz(dialHz / 1000) : '\u2014';
+    num.textContent = dialHz > 0 ? fmtDial(dialHz / 1000) : '\u2014';
     var g = pickedGateway();
     if (!g || !g.dialKhz || currentMode().id === 'telnet') { match.textContent = ''; btn.hidden = true; return; }
     var on = dialHz > 0 && Math.abs(dialHz / 1000 - Number(g.dialKhz)) < 0.05;
     match.className = 'wl-dial-match' + (on ? '' : ' off');
-    match.textContent = on ? '\u2713 on ' + g.call : (dialHz > 0 ? g.call + ' is on ' + fmtKhz(g.dialKhz) : '');
+    match.textContent = on ? '\u2713 on ' + g.call : (dialHz > 0 ? g.call + ' is on ' + fmtDial(g.dialKhz) : '');
     var busy = $('wl-mode').disabled;
     btn.hidden = on || busy || !(dialHz > 0);
   }
@@ -813,7 +946,7 @@
     var key = r ? r.call + '|' + r.dialKhz + '|' + (ss.startedAt || '') : '';
     if (!r || key === doneDismissed || historyOpen) { card.classList.remove('show'); return; }
     $('wl-done-title').textContent = 'Mail exchanged with ' + r.call;
-    $('wl-done-sub').textContent = [r.band, fmtKhz(r.dialKhz) + ' kHz', MODE_SHORT[r.mode] || r.mode, r.sent + ' sent', r.received + ' received'].filter(Boolean).join(' \u00b7 ');
+    $('wl-done-sub').textContent = [r.band, fmtDial(r.dialKhz) + ' MHz', MODE_SHORT[r.mode] || r.mode, r.sent + ' sent', r.received + ' received'].filter(Boolean).join(' \u00b7 ');
     $('wl-done-save').hidden = !!r.saved;
     $('wl-done-saved').hidden = !r.saved;
     $('wl-done-close').textContent = r.saved ? 'OK' : 'Not now';
@@ -872,9 +1005,9 @@
       var i = histRows.indexOf(g);
       var saved = isFav(g, g.mode);
       return '<div class="wl-hist-row item" role="button" tabindex="0" data-h="' + i + '" title="Set band, gateway and dial to ' + esc(g.call) + '">'
-        + '<button class="wl-hist-star" data-star="' + i + '" aria-label="' + (saved ? 'Remove ' + esc(g.call) + ' from My gateways' : 'Save ' + esc(g.call) + ' to My gateways') + '" title="' + (saved ? 'In My gateways (click to remove)' : 'Save to My gateways') + '">' + (saved ? STAR : STAR_EMPTY) + '</button>'
+        + '<button class="wl-hist-star" data-star="' + i + '" aria-label="' + (saved ? 'Remove ' + esc(g.call) + ' from your favorites' : 'Add ' + esc(g.call) + ' to your favorites') + '" title="' + (saved ? 'A favorite (click to remove it)' : 'Add to your favorites') + '">' + (saved ? STAR : STAR_EMPTY) + '</button>'
         + '<span class="call">' + esc(g.call) + '</span>'
-        + '<span><span class="dim">' + esc(g.band || '') + '</span> <span class="mono">' + esc(fmtKhz(g.dialKhz)) + '</span></span>'
+        + '<span><span class="dim">' + esc(g.band || '') + '</span> <span class="mono">' + esc(fmtDial(g.dialKhz)) + '</span></span>'
         + '<span>' + esc(MODE_SHORT[g.mode] || g.mode) + '</span>'
         + '<span class="mono" style="font-size:13px">' + esc(fmtUtc(g.lastAt)) + '</span>'
         + '<span class="' + (g.good ? 'good' : 'dim') + '">' + g.good + ' of ' + g.tries + '</span>'
@@ -931,10 +1064,11 @@
     var el = $('wl-sound');
     if (!a.needed) { el.textContent = ''; return; }
     // Packet (Dire Wolf) still opens the sound card itself; its pick lives in a.packet.
-    if (currentMode().id === 'packet' && a.packet && a.packet.needed) {
-      el.innerHTML = a.packet.ready
-        ? 'Radio sound: ' + esc(shortName(a.packet.capture)) + ' / ' + esc(shortName(a.packet.playback)) + ' · <a id="wl-sound-change">Change</a>'
-        : 'Radio sound not set · <a id="wl-sound-change">Choose</a>';
+    // Said only when there is something to do (Casey 2026-11-11: "Radio sound:
+    // via POTACAT" on every visit told the operator nothing). Working audio is
+    // silent; a device to choose or an audio fault is said, with its action.
+    if (currentMode().id === 'packet' && a.packet && a.packet.needed && !a.packet.ready) {
+      el.innerHTML = 'Radio sound not set · <a id="wl-sound-change">Choose</a>';
       var ch = $('wl-sound-change');
       if (ch) ch.onclick = function () { openSoundCard(null); };
       return;
@@ -942,8 +1076,8 @@
     // Everything else rides POTACAT: the Flex Direct / Icom Network stream, or
     // the audio bridge on the radio's own sound card (the devices FT8 uses).
     var b = a.bridge || null;
-    if (b && b.state === 'error') { el.innerHTML = '<span style="color:#e94560">Radio sound: ' + esc(b.error) + '</span>'; return; }
-    el.textContent = 'Radio sound: via POTACAT (' + shortName(a.capture) + (a.playback && a.playback !== a.capture ? ' → ' + shortName(a.playback) : '') + ')' + (b && b.state === 'starting' ? ' — opening…' : '');
+    if (b && b.state === 'error') { el.innerHTML = '<span style="color:var(--accent-red-text, var(--accent-red, #e94560))">Radio sound: ' + esc(b.error) + '</span>'; return; }
+    el.textContent = '';
   }
   function fillSelect(sel, list, pick) {
     sel.innerHTML = '<option value="">(choose)</option>' + list.map(function (d) {
