@@ -10698,6 +10698,11 @@ async function winlinkVaraConfigure({ kind: k, devices, inputLabel, outputLabel,
 async function winlinkVaraSetup({ kind: k, devices, inputLabel, outputLabel } = {}) {
   const kind = k === 'fm' ? 'fm' : 'hf';
   const name = VaraProcess.varaName(kind);
+  // A VARA on another computer (#287) is set up there, by its operator: this
+  // button writes the settings of a VARA on this PC only.
+  if (!_winlinkVaraLaunches(kind)) {
+    return { ok: false, step: 'remote', error: `${name} is set to run on another computer (${_winlinkVaraHost(kind)}). Set it up on that computer: its TCP port, and PTT set to VOX. To use ${name} on this PC instead, clear the Host box and save.` };
+  }
   const c = await winlinkVaraConfigure({ kind, devices, inputLabel, outputLabel });
   if (!c.ok) return c;
   const { plan, bin, port } = c;
@@ -10862,7 +10867,7 @@ async function winlinkVaraReady(mode, { configured } = {}) {
       let lastTick = 0;
       while (!probe.ok && Date.now() < until) {
         await new Promise((r) => setTimeout(r, 1000));
-        probe = await VaraProcess.probeVaraPort(port);
+        probe = await VaraProcess.probeVaraPort(port, { host });
         const s = Math.round((Date.now() - startedAt) / 1000);
         if (!probe.ok && s - lastTick >= 5) { lastTick = s; progress(`Starting ${name} on the shack PC (${s} s)`); }
       }
@@ -42873,11 +42878,14 @@ function cloudShackNotice(text, kind) {
     const typedPort = parseInt(o.port, 10);
     const port = typedPort > 0 && typedPort < 65536 ? typedPort : (kind === 'fm' ? _winlinkVaraFmPort() : _winlinkVaraPort());
     const host = o.host != null ? VaraProcess.normalizeVaraHost(o.host) : _winlinkVaraHost(kind);
-    if (!host) return { kind, ok: false, text: `"${String(o.host).slice(0, 60)}" is not a computer name or address` };
+    if (!host) return { kind, ok: false, text: VaraProcess.varaHostProblem(o.host) };
     const launches = VaraProcess.canLaunchVara({ platform: process.platform, host });
     const bin = launches ? findVara(kind) : { found: false, path: '' };
     const probe = await VaraProcess.probeVaraPort(port, { host, timeoutMs: 1500 });
-    return { kind, found: bin.found, path: bin.found ? bin.path : '', host, port, launches, running: probe.ok, version: probe.version || '', text: VaraProcess.describeVara(kind, { enabled: true, found: bin.found, path: bin.found ? bin.path : '', probe, host, port, launches }) };
+    const text = launches
+      ? VaraProcess.describeVara(kind, { enabled: true, found: bin.found, path: bin.found ? bin.path : '', probe, host, port, launches })
+      : VaraProcess.varaTestText(kind, { probe, host, port });
+    return { kind, found: bin.found, path: bin.found ? bin.path : '', host, port, launches, running: probe.ok, version: probe.version || '', text };
   });
   ipcMain.handle('winlink-vara-setup', (_e, o = {}) => winlinkVaraSetup({ kind: o.kind, devices: Array.isArray(o.devices) ? o.devices.slice(0, 200) : [], inputLabel: String(o.inputLabel || ''), outputLabel: String(o.outputLabel || '') }));
   ipcMain.handle('winlink-audio-save', (_e, o = {}) => {
@@ -48727,6 +48735,7 @@ function cloudShackNotice(text, kind) {
         setTimeout(() => {
           for (const kind of ['hf', 'fm']) {
             if (!(kind === 'fm' ? settings.enableVaraFm : settings.enableVaraHf)) continue;
+            if (!_winlinkVaraLaunches(kind)) continue; // a VARA on another computer is not ours to configure (#287)
             winlinkVaraConfigure({ kind, quiet: true }).then((c) => { if (!c.ok && c.step !== 'running') winlinkLog(`${VaraProcess.varaName(kind)}: not configured for ${rigNow && rigNow.name ? rigNow.name : 'the new radio'} — ${c.error}`); }).catch(() => {});
           }
         }, 1500);

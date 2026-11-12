@@ -75,6 +75,46 @@ test('hosts: cleaned, local or not, written for Pat', () => {
   assert.strictEqual(V.varaHostFor({ winlinkVaraHost: 'bad host' }, 'hf'), '127.0.0.1', 'a bad host never reaches Pat');
 });
 
+test('review: a host with a port in it, a name that only looks local, ports next to each other', () => {
+  // "host:port" is not an IPv6 address: it must never reach Pat as "[192.168.1.5:8300]:8300".
+  assert.strictEqual(V.normalizeVaraHost('192.168.1.5:8300'), null);
+  assert.strictEqual(V.normalizeVaraHost('shack-pc:8300'), null);
+  assert.match(V.varaHostProblem('192.168.1.5:8300'), /has a port in it.*Port box/);
+  assert.match(V.varaHostProblem('my vara!'), /is not a computer name or address/);
+  assert.strictEqual(V.normalizeVaraHost('fe80::1'), 'fe80::1', 'IPv6 still passes');
+  assert.strictEqual(V.normalizeVaraHost('-shack'), null);
+  assert.strictEqual(V.normalizeVaraHost('shack.'), null);
+  // 127.x.x.x is this computer only as an address: a name beginning "127." is on the network,
+  // so POTACAT never starts a local VARA for it and never treats its audio as local.
+  assert.ok(!V.isLocalVaraHost('127.example.com'));
+  assert.ok(V.isLocalVaraHost('127.0.0.2'));
+  assert.ok(!V.canLaunchVara({ platform: 'win32', host: '127.example.com' }));
+  const named = mode(M.winlinkModesFor({ ...base, platform: 'win32', audioSource: 'smartsdr', varaHf: { enabled: true, port: 8300, host: '127.example.com' } }), 'vara');
+  assert.ok(named.available, 'the mode list reads that name as another computer too');
+  // VARA's data port is its command port plus one: HF on 8300 holds 8301.
+  const next = mode(M.winlinkModesFor({ ...base, platform: 'linux', varaHf: { enabled: true, port: 8300 }, varaFm: { enabled: true, port: 8301 } }), 'varafm');
+  assert.ok(!next.available && /next to each other \(8301 and 8300\)/.test(next.reason), next.reason);
+  const below = mode(M.winlinkModesFor({ ...base, platform: 'linux', varaHf: { enabled: true, port: 8300 }, varaFm: { enabled: true, port: 8299 } }), 'varafm');
+  assert.ok(!below.available, 'VARA FM on 8299 would hold 8300');
+  const nextApart = mode(M.winlinkModesFor({ ...base, platform: 'linux', varaHf: { enabled: true, port: 8300 }, varaFm: { enabled: true, port: 8301, host: '10.0.0.9' } }), 'varafm');
+  assert.ok(nextApart.available, 'only on the same computer');
+});
+
+test('review: Test says what happened in plain words; Set up refuses a VARA on another computer', () => {
+  assert.strictEqual(V.varaTestText('hf', { probe: { ok: true, version: 'VARA HF v4.8.7' }, host: '127.0.0.1', port: 8300 }), 'VARA HF answered at 127.0.0.1:8300 (VARA HF v4.8.7).');
+  assert.match(V.varaTestText('hf', { probe: { ok: false, error: 'refused' }, host: '127.0.0.1', port: 8300 }), /^VARA HF did not answer at 127\.0\.0\.1:8300\. Start VARA HF and check that its TCP port is 8300\.$/);
+  assert.match(V.varaTestText('fm', { probe: { ok: false, error: 'refused' }, host: '10.0.0.9', port: 8310 }), /Start VARA FM on that computer/);
+  assert.match(V.varaTestText('hf', { probe: { ok: false, error: 'ENOTFOUND' }, host: 'shack-pc', port: 8300 }), /No computer named "shack-pc" was found/);
+  assert.match(V.varaTestText('hf', { probe: { ok: false, error: 'timeout' }, host: '10.0.0.9', port: 8300 }), /firewall/);
+  assert.match(V.varaTestText('hf', { probe: { ok: true, version: '', silent: true }, host: '127.0.0.1', port: 8300 }), /did not give a VARA version/);
+  for (const k of ['refused', 'timeout', 'ENOTFOUND', 'EHOSTUNREACH']) assert.ok(!/ECONN|ENOT|EHOST/.test(V.varaTestText('hf', { probe: { ok: false, error: k }, host: 'shack-pc', port: 8300 })), 'no error codes in the words');
+  assert.ok(main.includes(': VaraProcess.varaTestText(kind, { probe, host, port });'), 'the Test button uses those words where POTACAT does not start VARA');
+  const s = main.slice(main.indexOf('async function winlinkVaraSetup('), main.indexOf('async function winlinkVaraSetup(') + 900);
+  assert.ok(s.indexOf('if (!_winlinkVaraLaunches(kind)) {') > 0 && s.indexOf('if (!_winlinkVaraLaunches(kind)) {') < s.indexOf('winlinkVaraConfigure('), '"Set up VARA for me" writes no local settings for a VARA on another computer');
+  assert.ok(main.includes('if (!_winlinkVaraLaunches(kind)) continue; // a VARA on another computer is not ours to configure (#287)'), 'nor does a rig switch');
+  assert.ok(!/probeVaraPort\(port\);/.test(main.slice(main.indexOf('async function winlinkVaraReady('), main.indexOf('async function winlinkVaraAudioReady('))), 'every probe in a session names the host');
+});
+
 test('POTACAT starts VARA only on Windows, for a copy on this PC', () => {
   assert.ok(V.canLaunchVara({ platform: 'win32', host: '127.0.0.1' }));
   assert.ok(!V.canLaunchVara({ platform: 'win32', host: '192.168.1.50' }));
