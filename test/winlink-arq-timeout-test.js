@@ -168,7 +168,7 @@ test('the Pat build applies the patch, fails loudly without it, and leaves wl2k-
   assert.strictEqual(wf.split('run: node test/modem-loopback/pat-session.js --out pat-session-results.json --logs pat-session-logs').length - 1, 3, 'and the end-to-end Pat layer on every job');
   // The test Pats never use the PC's own Pat state and never reach winlink.org.
   const penv = read('test/modem-loopback/pat-env.js');
-  assert.ok(penv.includes('XDG_STATE_HOME') && penv.includes("'account-confirmed', 'version_report'") && penv.includes("'http://127.0.0.1:9'"));
+  assert.ok(penv.includes('XDG_STATE_HOME') && penv.includes("'account-confirmed', 'version_report'") && penv.includes("'http://127.0.0.1:9'") && penv.includes('dir = path.resolve(dir);'), 'absolute XDG folders: a relative one is ignored and Pat falls back to the PC\'s own');
   for (const f of ['test/modem-loopback/pat-arq-timeout.js', 'test/modem-loopback/pat-session.js']) assert.ok(read(f).includes("require('./pat-env')"), f);
 });
 

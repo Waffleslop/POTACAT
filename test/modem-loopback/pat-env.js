@@ -19,7 +19,12 @@ const path = require('path');
 const ENV_NAME = 'POTACAT_ARDOP_ARQ_TIMEOUT';
 
 function patTestEnv(dir, calls) {
+  // Absolute, always: adrg/xdg ignores a relative XDG_* (as the XDG spec says) and falls back to the
+  // PC's own folder. CI passes --logs as a relative path (winlink-helpers run 43312317124: every Pat
+  // sat at the account prompt).
+  dir = path.resolve(dir);
   const xdg = { XDG_STATE_HOME: path.join(dir, 'xdg-state'), XDG_DATA_HOME: path.join(dir, 'xdg-data'), XDG_CONFIG_HOME: path.join(dir, 'xdg-config') };
+  for (const d of Object.values(xdg)) if (!path.isAbsolute(d)) throw new Error(`pat-env: ${d} is not absolute`);
   for (const d of Object.values(xdg)) fs.mkdirSync(path.join(d, 'pat'), { recursive: true });
   const now = JSON.stringify(new Date().toISOString()) + '\n';
   for (const call of calls) {
