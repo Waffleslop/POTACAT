@@ -28,7 +28,9 @@ check('the evaluation the page does', () => {
   assert.strictEqual(run({ state: 'running', mode: 'FT8' }), true);
 });
 check('opening the FT8 tab starts a stopped engine', () => {
-  assert.ok(/tab === 'ft8'\) \{[\s\S]{0,200}if \(!ft8Running\) \{\s+ft8Send\(\{ type: 'jtcat-start'/.test(web));
+  // Stopped, or the shack's idle receive (Casey 2026-11-12): ft8TakeEngine sends jtcat-start.
+  assert.ok(/tab === 'ft8'\) \{[\s\S]{0,300}if \(!ft8Running \|\| ft8IdleRx\) ft8TakeEngine\(\);/.test(web));
+  assert.ok(/function ft8TakeEngine\(\) \{[\s\S]{0,400}ft8Send\(\{ type: 'jtcat-start', mode: ft8Mode \}\);/.test(web));
 });
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
