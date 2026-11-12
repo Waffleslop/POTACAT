@@ -567,7 +567,8 @@ test('wired: no surface words an ending itself', () => {
   const web = readSrc(path.join(root, 'renderer', 'remote.js'));
   assert.ok(/disconnecting: 'Stopping', done: '', error: '' \};/.test(web), 'ECHOCAT Web puts nothing in front of the shack\'s sentence');
   assert.ok(!/error: 'Failed: '/.test(web));
-  assert.ok(/var t = ss\.state === 'error' \? \(ss\.error \|\| 'The session did not finish\.'\) : \(ss\.text \|\| ''\);/.test(web));
+  // the sentence is on the web card (lib/winlink-mail-view.js endCard: outcome.title, .detail, .next); the line carries it once the card is put away
+  assert.ok(/var t = carded \? '' : ss\.state === 'error' \? \(ss\.error \|\| 'The session did not finish\.'\) : \(ss\.text \|\| ''\);/.test(web));
   // the wire: the session object carries the sentence and its parts to the phone
   const proto = readSrc(path.join(root, 'lib', 'echocat-protocol.js'));
   assert.ok(/session\.outcome = \{ kind, word, title, detail, next,\n\s*\/\/ retry \}/.test(proto) && /'winlink-session': \{ dir: Dir\.S2C, feature: 'winlink', fields: \{ session: f\.object \} \}/.test(proto));

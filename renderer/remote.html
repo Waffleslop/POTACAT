@@ -18,6 +18,7 @@
   <!-- waterfall-palettes-js -->
   <!-- sstv-templates-js -->
   <!-- favorites-js -->
+  <!-- winlink-mail-view-js -->
   <!-- cloud-billing-ui-js -->
   <!-- custom-cat-follow-js -->
   <!-- jtty-macros-js -->
@@ -969,7 +970,7 @@
       <button class="tab" data-tab="sstv">SSTV</button>
       <!-- Band scope: shown when the shack's rig streams its own spectrum (FT-710 over USB) -->
       <button class="tab hidden" data-tab="scope" id="scope-tab-btn">Scope</button>
-      <!-- Winlink email through the shack (shown while the shack has Winlink on) -->
+      <!-- Winlink email through the shack (shown to the owner once winlink-state arrives; off says where to turn it on) -->
       <button class="tab hidden" data-tab="mail" id="mail-tab-btn">Mail <span id="tab-mail-badge" class="tab-badge hidden">0</span></button>
     </div>
 
@@ -1795,12 +1796,15 @@
       </div>
     </div>
     <div id="mail-view" class="hidden" style="display:none;flex-direction:column;flex:1;min-height:0;">
-      <div id="mail-acct" class="hidden" style="padding:10px;border-bottom:1px solid var(--accent-blue,#4fc3f7);font-size:13px;display:flex;flex-direction:column;gap:6px;">
-        <b>Set up your Winlink account</b>
-        <span id="mail-acct-text">Checking whether your callsign has an account…</span>
-        <input type="password" id="mail-acct-pw" placeholder="Password, 6 to 12 characters" maxlength="12" autocomplete="new-password" title="6 to 12 characters: letters, numbers and . ! @ # $ % ^ & * ( ) _ (no dash, no space)" style="font-size:14px;">
-        <input type="email" id="mail-acct-email" placeholder="Recovery email (optional)" style="font-size:14px;">
-        <button type="button" id="mail-acct-go" style="font-weight:700;">Create my Winlink account</button>
+      <!-- Winlink is off on the shack: the tab says where to turn it on (a Guest Pass never gets the tab) -->
+      <div id="mail-off" class="mail-off hidden" role="status"></div>
+      <div id="mail-acct" class="mail-acct hidden">
+        <b class="mail-acct-title">Set up your Winlink account</b>
+        <span id="mail-acct-text" class="mail-acct-text">Checking whether your callsign has an account…</span>
+        <button type="button" id="mail-acct-retry" class="mail-btn mail-btn-main hidden">Try again</button>
+        <input type="password" id="mail-acct-pw" class="mail-input" placeholder="Password, 6 to 12 characters" maxlength="12" autocomplete="new-password" aria-label="Winlink password" title="6 to 12 characters: letters, numbers and . ! @ # $ % ^ & * ( ) _ (no dash, no space)">
+        <input type="email" id="mail-acct-email" class="mail-input" placeholder="Recovery email (optional)" aria-label="Recovery email (optional)">
+        <button type="button" id="mail-acct-go" class="mail-btn mail-btn-main">Create my Winlink account</button>
       </div>
       <div style="display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--bg-header);border-bottom:1px solid var(--border);flex-shrink:0;font-size:12px;flex-wrap:wrap;">
         <select id="mail-box" style="font-size:12px;"><option value="in">Inbox</option><option value="out">Outbox</option><option value="sent">Sent</option><option value="archive">Archive</option></select>
@@ -1810,13 +1814,20 @@
         <button type="button" id="mail-connect" style="font-size:12px;font-weight:700;">Send / Receive</button>
         <button type="button" id="mail-abort" class="hidden" style="font-size:12px;color:#e94560;">Abort</button>
       </div>
+      <!-- Why a greyed "Send via" mode is greyed (the shack's own reason) -->
+      <div id="mail-mode-note" class="mail-note hidden"></div>
       <div id="mail-radio" class="hidden" style="display:flex;gap:6px;align-items:center;padding:4px 10px;border-bottom:1px solid var(--border);font-size:12px;flex-wrap:wrap;">
         <select id="mail-band" style="font-size:12px;"><option value="">All bands</option><option>2m</option><option>1.25m</option><option>70cm</option><option>80m</option><option>60m</option><option>40m</option><option>30m</option><option>20m</option><option>17m</option><option>15m</option><option>12m</option><option>10m</option></select>
         <select id="mail-gateway" style="font-size:12px;flex:1;min-width:160px;"><option value="">Load gateways</option></select>
-        <span id="mail-gw-note" style="font-size:11px;color:var(--text-dim);flex-basis:100%;"></span>
+        <div id="mail-gw-status" class="mail-gw-status hidden">
+          <span id="mail-gw-note" class="mail-note-text"></span>
+          <button type="button" id="mail-gw-retry" class="mail-btn mail-btn-main hidden">Try again</button>
+        </div>
       </div>
       <div id="mail-session" style="padding:4px 10px;font-size:12px;color:var(--text-dim);border-bottom:1px solid var(--border);min-height:16px;"></div>
       <div id="mail-prompt" class="hidden" style="padding:6px 10px;font-size:12px;background:#3a2f10;color:#f0c040;display:flex;gap:6px;align-items:center;"></div>
+      <!-- How the last session ended: "Mail exchanged with ..." or the not-finished card (drawn by mailRenderEndCard) -->
+      <div id="mail-end-card" class="mail-end-card hidden" role="status" aria-live="polite"></div>
       <div id="mail-list" style="flex:1;overflow-y:auto;min-height:0;"></div>
       <div id="mail-reader" class="hidden" style="flex:1;overflow-y:auto;min-height:0;padding:8px 10px;"></div>
       <div id="mail-compose" class="hidden" style="flex:1;display:flex;flex-direction:column;gap:6px;padding:8px 10px;min-height:0;">

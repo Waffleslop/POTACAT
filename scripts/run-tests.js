@@ -286,6 +286,7 @@ const TESTS = [
   'test/idle-activity-test.js',
   'test/idle-mode-remote-test.js',
   'test/remote-web-ft8-first-open-test.js',
+  'test/remote-web-mail-test.js', // #425 web W1, W2, W4: the Mail tab puts the radio back, shows how a session ended, and says why
   'test/js8call-threads-test.js',
   'test/js8call-main-wiring-test.js',
   'test/renderer-csp-test.js',
