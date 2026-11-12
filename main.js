@@ -5447,8 +5447,12 @@ function gatherDesktopRawDiagnostic() {
 
   let tunnel = null;
   try { tunnel = cloudTunnel ? cloudTunnel.getState() : null; } catch {}
-  let ts = null, tsProbe = null;
-  try { const RS = require('./lib/remote-server'); ts = RS.tailscaleStatus(); tsProbe = RS.tailscaleProbeState(); } catch {}
+  let ts = null, tsProbe = null, tsIfIp = null, tsProbeSummary = '';
+  try {
+    const RS = require('./lib/remote-server');
+    ts = RS.tailscaleStatus(); tsProbe = RS.tailscaleProbeState();
+    tsIfIp = RS.tailnetIpFromInterfaces(); tsProbeSummary = RS.summarizeTailscaleProbe(tsProbe);
+  } catch {}
   let conn = null;
   try { conn = remoteServer && typeof remoteServer.activeClientContext === 'function' ? remoteServer.activeClientContext() : null; } catch {}
   let paired = [];
@@ -5525,6 +5529,10 @@ function gatherDesktopRawDiagnostic() {
       backendState: (ts && ts.backendState) || null,
       state: (ts && ts.state) || null,
       probe: tsProbe,
+      // #313: each candidate's answer (or timeout) in one line, and the
+      // tailnet address on the interfaces whatever the command said.
+      probeSummary: tsProbeSummary || null,
+      ipFromInterfaces: tsIfIp,
     },
     cloudTunnel: {
       enabled: !!(tunnel && tunnel.enabled),
@@ -39254,7 +39262,7 @@ function cloudShackNotice(text, kind) {
     let tsHost = '';
     let tsIp = '';
     try {
-      const { refreshTailscaleStatus, tailscaleProbeState, tailnetIpFromInterfaces } = require('./lib/remote-server');
+      const { refreshTailscaleStatus, tailscaleProbeState, tailnetIpFromInterfaces, summarizeTailscaleProbe } = require('./lib/remote-server');
       const ts = await refreshTailscaleStatus();
       // The CLI is not the only evidence. A tailnet address on an interface
       // means this PC is on a tailnet whatever the CLI said, and that
@@ -39268,7 +39276,7 @@ function cloudShackNotice(text, kind) {
           const port = settings.remotePort || 7300;
           tsIp = ifIp + ':' + port;
           const probe = tailscaleProbeState();
-          const why = ts ? `Tailscale reports ${ts.backendState || 'not running'}` : `POTACAT could not run the tailscale command (${probe.error || 'not found'})`;
+          const why = ts ? `Tailscale reports ${ts.backendState || 'not running'}` : `POTACAT could not run the tailscale command (${summarizeTailscaleProbe(probe) || probe.error || 'not found'})`;
           const line = `[alt-hosts] This PC is on a Tailscale network at ${ifIp}, but ${why}. Phones and other POTACATs will reach it at ${tsIp}; for its MagicDNS name as well, make the tailscale command available to POTACAT.`;
           if (line !== _altHostsNoteLogged) { _altHostsNoteLogged = line; sendCatLog(line); }
         }
@@ -46021,7 +46029,7 @@ function cloudShackNotice(text, kind) {
   // for the Settings UI status display and as a manual "renew"
   // hook when a user wants to force a refresh.
   ipcMain.handle('echocat-tailscale-status', async () => {
-    const { refreshTailscaleStatus, tailscaleProbeState, tailnetIpFromInterfaces, loadCachedTailscaleCert, describeTailscaleNotReady } = require('./lib/remote-server');
+    const { refreshTailscaleStatus, tailscaleProbeState, tailnetIpFromInterfaces, loadCachedTailscaleCert, describeTailscaleNotReady, summarizeTailscaleProbe, describeTailscaleFallback } = require('./lib/remote-server');
     const certDir = app.getPath('userData');
     const ts = await refreshTailscaleStatus();
     const probe = tailscaleProbeState();
@@ -46043,7 +46051,10 @@ function cloudShackNotice(text, kind) {
       // The tailnet address seen on this PC's interfaces (null = none), and
       // why the CLI gave nothing: the card tells the operator which it is.
       ipFromInterfaces: ipFromInterfaces || null,
-      cliError: ts ? '' : (probe.error || ''),
+      cliError: ts ? '' : (summarizeTailscaleProbe(probe) || probe.error || ''),
+      // #313: the card's status line when the address is there but the
+      // command gave no signed-in answer ('' otherwise).
+      fallbackNote: describeTailscaleFallback(ts, probe, ipFromInterfaces),
       certError: cached ? '' : _tailscaleCertError,
       platform: process.platform,
     };
