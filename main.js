@@ -1777,12 +1777,6 @@ async function ensureSstvGalleryDirAsync() {
   if (legacyDir) _sstvLegacyGalleryMigrated = true;
   return dir;
 }
-function ensureSstvGalleryDir() {
-  const dir = getSstvGalleryDir();
-  if (_sstvGalleryDirReady === dir) return dir;
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  return dir;
-}
 // The gallery's order, pages and records live in lib/sstv-gallery.js, and
 // every caller reaches them from HERE, at module scope. The record builder
 // used to be declared inside app.whenReady(), where the ECHOCAT handler in
@@ -42823,7 +42817,7 @@ function cloudShackNotice(text, kind) {
     if (buf instanceof Float32Array) samples = buf;
     else if (Array.isArray(buf)) samples = new Float32Array(buf);
     else { try { samples = new Float32Array(Object.values(buf)); } catch { return; } }
-    sstvEngine.feedAudio(samples);
+    if (sstvEngine) sstvEngine.feedAudio(samples);   // audio can arrive before the engine starts
   });
 
   ipcMain.on('sstv-encode', (_e, data) => {
@@ -42904,7 +42898,8 @@ function cloudShackNotice(text, kind) {
   ipcMain.handle('sstv-gallery-set-call', async (_e, { filename, call } = {}) => {
     try {
       if (!filename) return false;
-      const metaPath = path.join(ensureSstvGalleryDir(), path.basename(String(filename))).replace(/\.png$/i, '.json');
+      // The folder the gallery was read from; no synchronous filesystem call here (#123).
+      const metaPath = path.join(getSstvGalleryDir(), path.basename(String(filename))).replace(/\.png$/i, '.json');
       let meta = {};
       try { meta = JSON.parse(await fs.promises.readFile(metaPath, 'utf-8')); } catch { meta = {}; }
       meta.theirCall = String(call || '').toUpperCase().replace(/[^A-Z0-9/]/g, '').slice(0, 12);
@@ -43010,7 +43005,7 @@ function cloudShackNotice(text, kind) {
 
   ipcMain.handle('sstv-delete-image', async (_e, filename) => {
     try {
-      const galleryDir = ensureSstvGalleryDir();
+      const galleryDir = getSstvGalleryDir();   // no synchronous filesystem call (#123)
       const filePath = path.join(galleryDir, path.basename(filename));
       await fs.promises.unlink(filePath).catch(() => {});
       await fs.promises.unlink(filePath.replace(/\.png$/i, '.json')).catch(() => {});
@@ -43042,9 +43037,11 @@ function cloudShackNotice(text, kind) {
     if (saved) sendCatLog(`[SSTV] Kept a weak decode at the operator's request: ${saved.filename || ''}`);
     return saved;
   });
-  ipcMain.on('sstv-open-gallery-folder', () => {
-    const galleryDir = ensureSstvGalleryDir();
-    require('electron').shell.openPath(galleryDir);
+  ipcMain.on('sstv-open-gallery-folder', async () => {
+    // Made off the main process with a time limit, like the gallery itself: a
+    // Pictures folder that does not answer is logged, never a frozen app (#123).
+    const galleryDir = await ensureSstvGalleryDirAsync();
+    if (galleryDir) require('electron').shell.openPath(galleryDir);
   });
 
   // SSTV pop-out window
