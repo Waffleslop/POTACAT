@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 // SSTV from the SDR (Casey 2026-11-11: "tune into the ISS via a SDR and decode
-// SSTV"): the receive source, the frequency box (#359), FM above 30 MHz, the
+// SSTV"): the receive source, the frequency box (#359), FM from 2 m up, the
 // satellite FM channel with Doppler, the feed gate, and the ISS pass times.
 // Run: node test/sstv-iss-sdr-test.js
 const assert = require('assert');
@@ -33,12 +33,13 @@ test('receive source: radio unless set to the SDR; the SDR never transmits', () 
   assert.ok(/does not transmit/.test(R.txRefusal('sdr')));
 });
 
-test('FM above 30 MHz; LSB below 10 MHz except 60 m; USB above', () => {
+test('FM from 2 m up; 6 m USB; LSB below 10 MHz except 60 m; USB above', () => {
   assert.strictEqual(R.freqMode(3730), 'LSB');
   assert.strictEqual(R.freqMode(5357), 'USB');
   assert.strictEqual(R.freqMode(7171), 'LSB');
   assert.strictEqual(R.freqMode(14230), 'USB');
   assert.strictEqual(R.freqMode(28680), 'USB');
+  assert.strictEqual(R.freqMode(50680), 'USB', '6 m SSTV is USB (the calling list)');
   assert.strictEqual(R.freqMode(145800), 'FM', 'the ISS was tuned in USB (#359)');
   assert.strictEqual(R.freqMode(437550), 'FM');
 });
@@ -178,8 +179,10 @@ test('the pass sentence', () => {
 
 test('wiring: the SDR feeds SSTV, only SSTV retunes it, and the window offers the choice', () => {
   assert.ok(/if \(sstvRxFromSdr\(\)\) feedSstvFromSdr\(pcmFloat, sampleRate\);/.test(main));
-  assert.ok(/kiwiClient\.tune = \(\.\.\.a\) => \(sstvHoldsSdr\(\) && !_sstvTuningSdr \? undefined : rawTune\(\.\.\.a\)\)/.test(main), 'the radio, JTCAT and the phone cannot pull it off the ISS');
-  assert.ok(/const sdrRefusal = SstvRxSource\.txRefusal\(settings\.sstvRxSource\);/.test(main), 'transmit refused from the SDR');
+  assert.ok(/client\.tune = \(\.\.\.a\) => \(sstvHoldsSdr\(\) && !_sstvTuningSdr \? undefined : rawTune\(\.\.\.a\)\)/.test(main), 'the radio, JTCAT and the phone cannot pull it off the ISS');
+  assert.ok(/\n    sstvAttachSdrClient\(kiwiClient\);/.test(main), 'every new SDR client is wired');
+  assert.ok(/ipcMain\.on\('sstv-encode', \(_e, data\) => \{\n\s+if \(sstvSdrTxRefused\(/.test(main), 'the window cannot transmit from the SDR');
+  assert.ok(/remoteServer\.on\('sstv-photo', \(\{ image, mode, guest \}\) => \{\n\s+if \(sstvSdrTxRefused\(/.test(main), 'nor can the phone');
   assert.ok(/delete newSettings\.sstvRxSource;/.test(main), 'one writer for the choice');
   assert.ok(/<select id="rx-src"[^>]*><option value="radio">Radio<\/option><option value="sdr" id="rx-src-sdr">SDR<\/option><\/select>/.test(html));
   assert.ok(/<option value="145800" data-mode="FM" data-iss="1">145\.800 ISS \(FM\)<\/option>/.test(html));

@@ -341,9 +341,10 @@ const tuneBtn = document.getElementById('tune-btn');
 
 // The sideband SSTV uses on a frequency: LSB below 10 MHz except 60 m,
 // which is USB by regulation. The ECHOCAT app uses the same rule.
-// FM above 30 MHz: 2 m and 70 cm SSTV (the ISS on 145.800) is FM.
+// FM from 2 m up: 2 m and 70 cm SSTV (the ISS on 145.800) is FM; 6 m stays USB.
 function getFreqMode(freqKhz) {
-  if (window.SstvRxSource) return window.SstvRxSource.freqMode(freqKhz);
+  if (typeof window !== 'undefined' && window.SstvRxSource) return window.SstvRxSource.freqMode(freqKhz);
+  if (parseInt(freqKhz) >= 60000) return 'FM';
   const k = parseInt(freqKhz);
   if (k >= 5250 && k <= 5450) return 'USB';
   return k < 10000 ? 'LSB' : 'USB';

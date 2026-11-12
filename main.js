@@ -21934,7 +21934,7 @@ function handleYaesuLanAudioFrame(frame) {
   }
   // 4) SSTV: 48 kHz. The pop-out gets its copy BEFORE feedAudio, which
   //    transfers (detaches) the buffer to the worker.
-  const sstvGate = SstvFeedGate.streamAudioDecision({ engineRunning: !!sstvEngine, feedPaused: _sstvFeedPaused, audioSource: settings.audioSource, path: 'yaesu-lan', rxSource: SstvRxSource.normalize(settings.sstvRxSource) });
+  const sstvGate = SstvFeedGate.streamAudioDecision({ engineRunning: !!sstvEngine, feedPaused: _sstvFeedPaused, audioSource: settings.audioSource, path: 'yaesu-lan', rxSource: settings.sstvRxSource });
   if (sstvGate.accept) {
     const out = _yaesuLanResamplers.to48k.process(pcm);
     if (out.length) {
@@ -27354,8 +27354,7 @@ function connectRemote() {
 
   // SSTV from ECHOCAT phone — receive photo, encode, transmit
   remoteServer.on('sstv-photo', ({ image, mode, guest }) => {
-    const sdrRefusal = SstvRxSource.txRefusal(settings.sstvRxSource);
-    if (sdrRefusal) { sendCatLog('[SSTV] Picture from ECHOCAT not sent: ' + sdrRefusal); remoteServer.broadcastSstvTxStatus({ state: 'rx', error: sdrRefusal }); return; }
+    if (sstvSdrTxRefused((m) => remoteServer.broadcastSstvTxStatus({ state: 'rx', error: m }), 'Picture from ECHOCAT')) return;
     if (guest && passEnforcement) {
       const res = passEnforcement.interceptCatCommand({ type: 'sstv_tx', freqHz: effectiveTxFreqHz(), split: _currentSplit });
       if (!res.allowed) {
@@ -38380,12 +38379,36 @@ function jtcatWebSdrFollowDial(dialKhz, why) {
 // radio's audio does not (lib/sstv-feed-gate.js); the SDR stays on the SSTV
 // window's frequency while SSTV runs; and SSTV refuses to transmit.
 function sstvRxFromSdr() { return SstvRxSource.normalize(settings && settings.sstvRxSource) === 'sdr'; }
+// Receiving from the SDR, SSTV does not transmit (the SDR cannot hear you and is
+// not on your radio's frequency). True when refused; reply(sentence) tells the sender.
+function sstvSdrTxRefused(reply, who) {
+  const msg = SstvRxSource.txRefusal(settings && settings.sstvRxSource);
+  if (!msg) return false;
+  sendCatLog('[SSTV] ' + (who ? who + ' not sent: ' : '') + msg);
+  try { reply(msg); } catch (_) {}
+  return true;
+}
 let _sstvSdrResampler = null;
 let _sstvSdrFrames = 0;
 let _lastSstvSdrFeedMs = 0;
 let _sstvSdrTune = null;     // { freqKhz, mode } the SSTV window last asked the SDR for
 let _sstvTuningSdr = false;  // SSTV's own tune is in progress (the guard lets it through)
 /** SSTV owns the SDR's frequency: receiving from it, running, with a frequency chosen. */
+// Every new SDR client (rtl_tcp, KiwiSDR, WebSDR) passes through here once.
+// While SSTV holds the SDR, only SSTV retunes it: the radio's dial, JTCAT and the
+// phone would otherwise pull it off 145.800. Its audio feeds the SSTV decoder.
+function sstvAttachSdrClient(client) {
+  const rawTune = client.tune.bind(client);
+  client.tune = (...a) => (sstvHoldsSdr() && !_sstvTuningSdr ? undefined : rawTune(...a));
+  client.on('audio', (pcmFloat, sampleRate) => { if (sstvRxFromSdr()) feedSstvFromSdr(pcmFloat, sampleRate); });
+  // Deferred, so main's own 'connected' listener (kiwiKind, the radio's dial) has run first.
+  client.on('connected', () => {
+    _sstvSdrResampler = null;
+    if (sstvHoldsSdr()) setImmediate(() => sstvSdrTuneNow('connected'));
+    setImmediate(pushSstvSdrInfo);
+  });
+  client.on('disconnected', () => setImmediate(pushSstvSdrInfo));
+}
 function sstvHoldsSdr() { return sstvRxFromSdr() && !!_sstvSdrTune && !!(sstvEngine && sstvEngine.running); }
 function feedSstvFromSdr(pcm, sampleRate) {
   if (!sstvEngine || _sstvFeedPaused || !pcm || !pcm.length || !(sampleRate > 0)) return;
@@ -42828,13 +42851,7 @@ function cloudShackNotice(text, kind) {
   ipcMain.handle('sstv-iss-pass', () => sstvIssPass().catch((e) => ({ ok: false, error: e.message })));
 
   ipcMain.on('sstv-encode', (_e, data) => {
-    // Receiving from the SDR: no transmit (it cannot hear you, it is not your radio).
-    const sdrRefusal = SstvRxSource.txRefusal(settings.sstvRxSource);
-    if (sdrRefusal) {
-      sendCatLog('[SSTV] ' + sdrRefusal);
-      if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('sstv-tx-status', { state: 'rx', error: sdrRefusal });
-      return;
-    }
+    if (sstvSdrTxRefused((m) => sstvPopoutWin && !sstvPopoutWin.isDestroyed() && sstvPopoutWin.webContents.send('sstv-tx-status', { state: 'rx', error: m }))) return;
     startSstv(); // creates, or restarts a stopped engine; no-op when running
     const imageData = new Uint8ClampedArray(data.imageData);
     sstvEngine.encode(imageData, data.width, data.height, data.mode);
@@ -44784,9 +44801,7 @@ function cloudShackNotice(text, kind) {
     } else {
       kiwiClient = new KiwiSdrClient();
     }
-    // While SSTV receives from this SDR (the ISS), only SSTV retunes it: the
-    // radio's dial, JTCAT and the phone would otherwise pull it off 145.800.
-    { const rawTune = kiwiClient.tune.bind(kiwiClient); kiwiClient.tune = (...a) => (sstvHoldsSdr() && !_sstvTuningSdr ? undefined : rawTune(...a)); }
+    sstvAttachSdrClient(kiwiClient);   // SSTV from the SDR (the ISS, #359)
     const kiwiFullHost = host + ':' + port;
     kiwiClient.on('log', (msg) => sendCatLog(`[WebSDR] ${msg}`));
     kiwiClient.on('connected', () => {
@@ -44795,15 +44810,11 @@ function cloudShackNotice(text, kind) {
       kiwiLiveHost = kiwiFullHost;
       kiwiKind = sdrKind;
       sendCatLog(`[WebSDR] Connected to ${kiwiFullHost}${auto ? ' (for a frequency the radio cannot reach)' : ''}`);
-      setImmediate(pushSstvSdrInfo);
       _jtcatSdrResampler = null; // a new stream
-      _sstvSdrResampler = null;
       // Auto-tune to current rig frequency on connect, or to JTCAT's dial
       // when JTCAT is receiving from this SDR (#243).
       if (jtcatRxFromWebSdr() && _jtcatExpectedDialHz > 0 && jtcatWebSdrFollowDial(_jtcatExpectedDialHz / 1000, 'connected')) {
         // tuned to JTCAT's dial
-      } else if (sstvHoldsSdr() && sstvSdrTuneNow('connected')) {
-        // tuned to the SSTV window's frequency (the ISS)
       } else if (_currentFreqHz > 0 && _currentMode) {
         const mode = _currentMode.toLowerCase().replace('digu', 'usb').replace('digl', 'lsb').replace('pktusb', 'usb').replace('pktlsb', 'lsb');
         kiwiClient.tune(_currentFreqHz / 1000, mode);
@@ -44821,8 +44832,6 @@ function cloudShackNotice(text, kind) {
     kiwiClient.on('audio', (pcmFloat, sampleRate) => {
       // JTCAT hears the SDR whether or not it is what the speakers play (#243).
       if (jtcatRxFromWebSdr()) feedJtcatFromWebSdr(pcmFloat, sampleRate);
-      // SSTV hears the SDR too when it is SSTV's source (the ISS, 145.800 FM).
-      if (sstvRxFromSdr()) feedSstvFromSdr(pcmFloat, sampleRate);
       if (!listenSdr.live) return;   // idle: connected and following the dial, but not what you hear
       if (++_kiwiAudioCount === 1) sendCatLog(`[WebSDR] First audio packet: ${pcmFloat.length} samples @ ${sampleRate}Hz`);
       // Send the Float32Array directly to each recipient — Electron's
@@ -44872,7 +44881,6 @@ function cloudShackNotice(text, kind) {
       listenSdr.live = false; listenSdr.auto = false; kiwiLiveHost = '';
       if (wasLive && _currentFreqHz > 0) sendCatFrequency(_currentFreqHz);   // the readouts return to the radio
       sendCatLog('[WebSDR] Disconnected');
-      setImmediate(pushSstvSdrInfo);
       for (const wc of require('electron').webContents.getAllWebContents()) {
         wc.send('kiwi-status', { connected: false });
       }
@@ -47704,10 +47712,8 @@ function cloudShackNotice(text, kind) {
     // that saves back the settings copy it loaded earlier must not put an
     // old palette back under a choice made since.
     delete newSettings.waterfallPalette;
-    // JTCAT's receive audio has one writer too, jtcat-set-rx-source (#243).
-    delete newSettings.jtcatRxSource;
-    // And SSTV's, sstv-set-rx-source (the ISS from the SDR).
-    delete newSettings.sstvRxSource;
+    // JTCAT's and SSTV's receive audio: one writer each, *-set-rx-source.
+    delete newSettings.jtcatRxSource; delete newSettings.sstvRxSource;
     stampSstvTemplatesPatch(newSettings);
     setImmediate(() => afterSstvSettingsSaved(newSettings));
     if (newSettings && 'jtcatFakeIt' in newSettings) setImmediate(() => { fakeItSyncEngine(); sendCatLog(`[JTCAT] Split operation Fake It: ${fakeItEnabled() ? 'on' : 'off'}`); });
