@@ -85,7 +85,8 @@ test('the engine status listener feeds remote-server without a hasClient gate', 
   const i = sj.indexOf("ft8Engine.on('status'");
   assert.ok(i >= 0);
   const listener = sj.slice(i, sj.indexOf('\n  });', i));
-  assert.ok(/\n\s+if \(remoteServer\) remoteServer\.broadcastJtcatStatus\(data\);/.test(listener), 'ungated broadcastJtcatStatus');
+  assert.ok(/\n\s+if \(remoteServer\) \{\n\s+const idle = autoRxKind\(\);\n\s+remoteServer\.broadcastJtcatStatus\(idle && idle !== 'sstv' && idle !== 'js8' \? \{ \.\.\.data, idleRx: idle \} : data\);/.test(listener),
+    'ungated broadcastJtcatStatus, with idleRx during an idle receive');
   assert.ok(!/hasClient\(\)\) remoteServer\.broadcastJtcatStatus/.test(listener), 'no hasClient gate');
 });
 
@@ -109,12 +110,28 @@ test('every stop tells the cache, client or not', () => {
 
 // ── remote.js: the tab starts the engine on open exactly when it is stopped ──
 
-test('the web FT8 tab sends jtcat-start on open when the status says stopped', () => {
+test('the web FT8 tab starts the engine on open when stopped, or takes an idle receive', () => {
   assert.ok(/ft8Running = msg\.running === true \|\| msg\.state === 'running';/.test(REMOTE), 'running read from jtcat-status');
+  assert.ok(/ft8IdleRx = ft8Running && msg\.idleRx \? String\(msg\.idleRx\) : null;/.test(REMOTE), 'idleRx read from jtcat-status');
+  assert.ok(/if \(ft8Running && !ft8IdleRx\) ft8OwnMode = ft8Mode;/.test(REMOTE), 'an idle mode never becomes the tab\'s own');
   const i = REMOTE.indexOf("} else if (tab === 'ft8') {");
   assert.ok(i >= 0);
-  const open = REMOTE.slice(i, i + 400);
-  assert.ok(/if \(!ft8Running\) \{\n\s+ft8Send\(\{ type: 'jtcat-start', mode: ft8Mode \}\);/.test(open));
+  const open = REMOTE.slice(i, i + 500);
+  assert.ok(/if \(!ft8Running \|\| ft8IdleRx\) ft8TakeEngine\(\);/.test(open), 'tab open');
+  const j = REMOTE.indexOf('function ft8TakeEngine(');
+  assert.ok(j >= 0);
+  const take = REMOTE.slice(j, REMOTE.indexOf('\n  }\n', j));
+  assert.ok(/ft8Mode = ft8OwnMode;/.test(take) && /ft8Send\(\{ type: 'jtcat-start', mode: ft8Mode \}\);/.test(take));
+});
+
+test('a device taking an idle receive closes the idle window without takeover notices', () => {
+  const i = MAIN.indexOf("remoteServer.on('jtcat-start'");
+  assert.ok(i >= 0);
+  const h = MAIN.slice(i, MAIN.indexOf('startJtcat(mode);', i));
+  assert.ok(h.indexOf('const fromIdle = autoRxKind() && autoIdleJtcatActive;') >= 0, 'fromIdle');
+  assert.ok(h.indexOf('const fromIdle') < h.indexOf('markUserActive();'), 'read before markUserActive cancels the idle receive');
+  const idle = h.slice(h.indexOf('if (fromIdle'), h.indexOf('} else if (jtcatPopoutWin'));
+  assert.ok(!/jtcat-owner|jtcat-takeover-notice/.test(idle));
 });
 
 test('the web page renders the hydration replay through the decode handler', () => {

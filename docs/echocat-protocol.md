@@ -236,7 +236,7 @@ for the history.
 |---|---|---|
 | `jtcat-start` | C→S | Start the FT8 engine. |
 | `jtcat-stop` | C→S | Stop the FT8 engine. |
-| `jtcat-status` | S→C | Engine state (running, mode, slot timing, etc.). |
+| `jtcat-status` | S→C | Engine state (running, mode, slot timing, etc.). Optional `idleRx` (`wspr` / `psk31` / `jtty`): the engine is the shack's idle receive, nobody's session; the FT8 tab takes it over on open with `jtcat-start` (2026-11-12). |
 | `jtcat-set-mode` | C→S | FT8 / FT4 / FT2 / WSPR. |
 | `jtcat-set-band` | C→S | Switch band (informs JTCAT of TX freq). |
 | `jtcat-set-tx-freq` | C→S | TX audio frequency offset (Hz). |

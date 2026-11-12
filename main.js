@@ -19519,7 +19519,12 @@ function startJtcat(mode) {
     // it, so ECHOCAT Web connected hours later into "FT8 running" plus that
     // session's old decodes, never sent jtcat-start, and sat on a WSPR engine
     // (#249, kc8zp 11-03 and 11-08). broadcastJtcatStatus sends only to clients.
-    if (remoteServer) remoteServer.broadcastJtcatStatus(data);
+    // idleRx names an idle receive on this engine (WSPR, PSK31, JTTY): the
+    // FT8 tab of a device that connects takes it over (Casey 2026-11-12).
+    if (remoteServer) {
+      const idle = autoRxKind();
+      remoteServer.broadcastJtcatStatus(idle && idle !== 'sstv' && idle !== 'js8' ? { ...data, idleRx: idle } : data);
+    }
     // FT8/FT4 are time-locked: the decoder only searches a ~±2.5 s window
     // around the slot boundary it derives from the OS clock, so a PC clock
     // more than ~1 s off UTC silently zeroes out decodes while audio + the
@@ -26799,9 +26804,15 @@ function connectRemote() {
     // this the idle session outlived it: the popout it opened was closed
     // just below, and when FT8 later stopped the leftover flag read as
     // "SSTV armed" for hours (K3SBP 2026-09-27, 14.074 DIGU on the header).
+    // An idle receive (WSPR, PSK31, JTTY) is nobody's session: taking it is
+    // not taking FT8 from the shack, so no takeover notices for it.
+    const fromIdle = autoRxKind() && autoIdleJtcatActive;
     markUserActive();
     // Close JTCAT popout if open — only one platform at a time
-    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+    if (fromIdle && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+      sendCatLog(`[JTCAT] ECHOCAT took the engine from the shack's idle receive`);
+      jtcatPopoutWin.close();
+    } else if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       sendCatLog('[JTCAT] Closing popout — ECHOCAT taking over FT8');
       jtcatPopoutWin.close();
       // Tell the device that took it, too: the shack's own window was running FT8.
