@@ -139,7 +139,7 @@ test('every key-down refusal in handleRemotePtt returns false', () => {
     'if (state && _swrTripped) {',
     'if (state && atuWizardActive()) {',
     'if (state && listenSdr.live && listenSdr.auto) {',
-    'if (state && yaesuLanTxRefusal()) {',
+    'if (state && yaesuLanTxRefusal(opts.lanOwner || null)) {',
   ];
   for (const r of refusals) {
     const i = head.indexOf(r);
@@ -155,8 +155,8 @@ test('SSTV does not send the picture when its key-down is refused', () => {
   const i = MAIN.indexOf("sstvEngine.on('encode-complete'");
   assert.ok(i >= 0);
   const b = MAIN.slice(i, MAIN.indexOf('_sstvStartAudio(() => {', i));
-  assert.ok(/if \(handleRemotePtt\(true, \{ audio: true, forceDataMode: _sstvIcom, emission: 'SSTV', txKind: 'sstv' \}\) === false\) \{/.test(b), 'refusal not checked');
-  const r = b.slice(b.indexOf("txKind: 'sstv' }) === false) {"));
+  assert.ok(/if \(handleRemotePtt\(true, \{ audio: true, forceDataMode: _sstvIcom, emission: 'SSTV', txKind: 'sstv'(, lanOwner: [^}]+)? \}\) === false\) \{/.test(b), 'refusal not checked');
+  const r = b.slice(b.indexOf("txKind: 'sstv'"));
   assert.ok(/picture not sent: transmit was refused/.test(r), 'no log line');
   assert.ok(/sstv-abort-tx/.test(r) && /return;/.test(r), 'pop-out not told / audio not skipped');
 });

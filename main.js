@@ -346,6 +346,7 @@ const { TcpTransport, SerialTransport, calloutTwin } = require('./lib/transport'
 const { RsBa1Transport } = require('./lib/rsba1-transport');
 const { Sculan10Transport } = require('./lib/sculan10-transport');
 const Sculan10 = require('./lib/sculan10-protocol');
+const YaesuLanTx = require('./lib/yaesu-lan-tx');
 const { KenwoodCodec } = require('./lib/codecs/kenwood-codec');
 const { YaesuLegacyCodec } = require('./lib/codecs/yaesu-legacy-codec');
 const { RigctldCodec } = require('./lib/codecs/rigctld-codec');
@@ -8902,7 +8903,7 @@ async function connectCat() {
     // ASCII, so the same Kenwood-style codec a USB-connected Yaesu uses
     // attaches unchanged. RX audio comes over the LAN when audioSource is
     // 'yaesu-lan'. Voice PTT (VFO window, ECHOCAT) sends its mic over the
-    // LAN (yaesuLanVoiceTx), JTCAT and Tune their buffer (sendTxAudio); the
+    // LAN (yaesuLanVoicePtt), JTCAT and Tune their buffer (sendTxAudio); the
     // other transmit paths have no LAN audio yet, so handleRemotePtt refuses
     // them rather than send a silent carrier.
     transport = new Sculan10Transport();
@@ -8961,12 +8962,22 @@ async function connectCat() {
         saveSettings(settings);
       }
     });
+    // The transport could not reach the radio to unkey it (lost session,
+    // another program on the unit, closing while keyed): the operator must know.
+    transport.on('unkey-unreachable', ({ message }) => { // the transport logs it itself
+      if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message, warn: true, duration: 30000 });
+      if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', message);
+      if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'tune-blocked', reason: message });
+    });
+    // FT-710 only until an FTDX10 and an FTDX101 owner confirm ML is per mode there.
+    const muteMonitor = !!target.muteMonitor && modelName === 'FT-710';
+    if (target.muteMonitor && !muteMonitor) sendCatLog(`[SCU-LAN10] speaker monitor mute is for the FT-710 only so far; left off for ${modelName || 'this radio'}`);
     transport.connect({
       host: _ylHp.host,
       basePort: _ylHp.port,
       username: target.username || '',
       password: target.password || '',
-      muteMonitor: !!target.muteMonitor,
+      muteMonitor,
       monitorSaved: (settings.yaesuLanMonitorSaved || {})[_ylMonKey] || null,
     });
   } else if (target.type === 'icom-network') {
@@ -18159,8 +18170,8 @@ function armJtcatTxFailsafe(label, samples, sampleRate = 12000, offsetMs = 0, st
     if (settings.audioSource === 'icom-network') {
       forceReleaseIcomNetworkTx(`JTCAT failsafe ${label || 'unknown TX path'}`);
     } else {
-      if (settings.audioSource === 'yaesu-lan') releaseYaesuLanTx('JTCAT failsafe');
-      try { handleRemotePtt(false); } catch {}
+      if (settings.audioSource === 'yaesu-lan') { try { endYaesuLanTx('jtcat', 'JTCAT failsafe'); } catch {} }
+      else { try { handleRemotePtt(false); } catch {} }
     }
   }, timeoutMs);
 }
@@ -20330,6 +20341,15 @@ function startJtcat(mode) {
       if (ft8Engine && ft8Engine._txActive) setTimeout(() => jtcatRefuseTx('the Yaesu LAN is not connected'), 0);
       return;
     }
+    // Another transmitter on the LAN (a voice over, Tune, SSTV, a macro):
+    // this slot is skipped before PTT, and that transmission goes on.
+    if (yaesuLanDirectTxOk) {
+      const busy = claimYaesuLanTx('jtcat', 'JTCAT TX', ['jtcat']);
+      if (busy) {
+        if (ft8Engine && ft8Engine._txActive) setTimeout(() => jtcatRefuseTx(busy), 0);
+        return;
+      }
+    }
 
     const modeForTx = ft8Engine ? ft8Engine._mode : 'FT8';
     rigPresetFlushPending(); // a preset still settling for this mode goes on BEFORE the key-down
@@ -20345,11 +20365,11 @@ function startJtcat(mode) {
     // after it. A dial that cannot move means audio rendered for the wrong
     // dial: skip this transmission rather than send it off frequency.
     if (!fakeItShiftForTx(data)) {
+      if (yaesuLanDirectTxOk) releaseYaesuLanTx('jtcat', 'split dial did not move');
       jtcatRefuseTx('the split (Fake It) dial could not move');
       return;
     }
-    if (yaesuLanDirectTxOk) _yaesuLanBufferTxClaim = true;
-    handleRemotePtt(true, { audio: true, emission: 'DATA', txKind: jtcatTxKind() });
+    handleRemotePtt(true, { audio: true, emission: 'DATA', txKind: jtcatTxKind(), lanOwner: yaesuLanDirectTxOk ? 'jtcat' : undefined });
     armJtcatTxFailsafe(settings.audioSource === 'icom-network' ? 'Icom Network RS-BA1' : settings.audioSource === 'smartsdr' ? 'SmartSDR Direct' : yaesuLanDirectTxOk ? 'Yaesu LAN (SCU-LAN10)' : 'local audio', data.samples, 12000, data.offsetMs || 0, networkStartDelayMs);
     if (win && !win.isDestroyed()) {
       // Carry the mode so the main-window TX badge reads the actual mode
@@ -20462,23 +20482,22 @@ function startJtcat(mode) {
       sendCatLog(`[SCU-LAN10] JTCAT TX over the LAN: ${modeForTx}, 16 kHz S16LE, startDelay=${startDelayMs}ms; ${formatDirectTxAudioStats(txAudio)}. Use the radio's RF power for output and keep ALC low.`);
       if (txAudio.outputPeak < 0.01) {
         sendCatLog(`[SCU-LAN10] TX aborted: the audio peak ${txAudio.outputPeak.toFixed(4)} is too low (encoder produced a silent waveform?)`);
-        releaseYaesuLanTx('silent waveform');
         if (ft8Engine && ft8Engine._txActive) jtcatRefuseTx('the TX audio was silent');
-        else handleRemotePtt(false);
+        endYaesuLanTx('jtcat', 'silent waveform');
         return;
       }
       t.sendTxAudio(txAudio.samples, { offsetMs: data.offsetMs || 0, inputSampleRate: 12000, startDelayMs, tailSilenceMs: 200 })
         .then(() => {
           setTimeout(() => {
             if (ft8Engine && ft8Engine._txActive) ft8Engine.txComplete();
-            else { releaseYaesuLanTx('JTCAT TX done'); handleRemotePtt(false); }
+            else endYaesuLanTx('jtcat', 'JTCAT TX done');
           }, 150);
         })
         .catch((e) => {
           if (e && e.message === 'TX cancelled') return; // Stop/Halt/failsafe already released PTT
           sendCatLog(`[SCU-LAN10] JTCAT TX failed: ${e.message}; PTT off (no local-audio fallback while Yaesu LAN audio is selected)`);
           if (ft8Engine && ft8Engine._txActive) ft8Engine.txComplete();
-          else { releaseYaesuLanTx('JTCAT TX failed'); handleRemotePtt(false); }
+          else endYaesuLanTx('jtcat', 'JTCAT TX failed');
         });
     } else {
       setTimeout(() => {
@@ -20503,8 +20522,10 @@ function startJtcat(mode) {
 	      forceReleaseIcomNetworkTx('JTCAT tx-end');
 	      releaseRadio('jtcat');
 	    } else {
-	      if (settings.audioSource === 'yaesu-lan') releaseYaesuLanTx('JTCAT tx-end');
-	      handleRemotePtt(false);
+	      // SCU-LAN10: a slot refused because the LAN was busy ends here too,
+	      // and must not unkey the transmission that holds it.
+	      if (settings.audioSource === 'yaesu-lan') endYaesuLanTx('jtcat', 'JTCAT tx-end');
+	      else handleRemotePtt(false);
 	      releaseRadio('jtcat');
 	    }
 	    fakeItRestoreDial('end of transmission');
@@ -20870,24 +20891,27 @@ function startJtcatTune(opts = {}) {
     broadcastJtcatTuneState();
     return;
   }
+  if (directYaesuReady && claimYaesuLanTx('tune', 'Tune', ['jtcat', 'vfo', 'echocat'])) {
+    broadcastJtcatTuneState();
+    return;
+  }
   jtcatTuneState.active = true;
   jtcatTuneState.endsAt = Date.now() + JTCAT_TUNE_DURATION_S * 1000;
   jtcatTuneState.directIcom = directIcomReady;
   jtcatTuneState.directYaesu = directYaesuReady;
-  if (directYaesuReady) _yaesuLanBufferTxClaim = true;
   // Audio is genuinely going to the rig USB CODEC, so audio:true triggers
   // SSB-over-DATA where appropriate (USB -> DIGU mute the rig mic during
   // the tone). The 90s timer auto-releases.
   // opts.noDataSwap: Station Setup's voice test keys in plain USB/LSB, the
   // way a voice over does (the radio's SSB audio input, not its DATA one).
-  const keyed = handleRemotePtt(true, { audio: true, emission: opts.emission || 'DATA', noDataSwap: !!opts.noDataSwap, txKind: 'tune' });
+  const keyed = handleRemotePtt(true, { audio: true, emission: opts.emission || 'DATA', noDataSwap: !!opts.noDataSwap, txKind: 'tune', lanOwner: directYaesuReady ? 'tune' : undefined });
   // Refused (SCU-LAN10 audio, SWR guard, licence...): no tone and no timers.
   // The refusal may already have stopped Tune; a tone started after that ran
   // until POTACAT closed (#214).
   if (keyed === false || !jtcatTuneState.active) {
     jtcatTuneState.active = false;
     jtcatTuneState.directIcom = false;
-    if (jtcatTuneState.directYaesu) releaseYaesuLanTx('Tune refused');
+    if (jtcatTuneState.directYaesu) releaseYaesuLanTx('tune', 'Tune refused');
     jtcatTuneState.directYaesu = false;
     broadcastJtcatTuneState();
     sendCatLog('[JTCAT] Tune not started: transmit was refused, so no tone was played');
@@ -20923,8 +20947,15 @@ function startJtcatTune(opts = {}) {
   } else if (jtcatTuneState.directYaesu) {
     const tone = makeSineToneSamples(jtcatTuneState.toneHz || 1500, JTCAT_TUNE_DURATION_S, Sculan10.TX_AUDIO_RATE, YAESU_LAN_TUNE_PEAK);
     const txAudio = conditionDirectTxAudio(tone, _jtcatDirectTxGainLevel);
+    const lan = yaesuLanTransport();
+    if (!lan) {
+      // The session went between the check and here: no way out for the tone.
+      sendCatLog('[SCU-LAN10] Tune stopped: the LAN session ended before the tone could start');
+      stopJtcatTune();
+      return;
+    }
     sendCatLog(`[SCU-LAN10] Tune → radio over the LAN: ${jtcatTuneState.toneHz || 1500} Hz sine; ${formatDirectTxAudioStats(txAudio)}`);
-    yaesuLanTransport().sendTxAudio(txAudio.samples, { offsetMs: 0, inputSampleRate: Sculan10.TX_AUDIO_RATE, startDelayMs: 200, tailSilenceMs: 200 })
+    lan.sendTxAudio(txAudio.samples, { offsetMs: 0, inputSampleRate: Sculan10.TX_AUDIO_RATE, startDelayMs: 200, tailSilenceMs: 200 })
       .then(() => { if (jtcatTuneState.active && jtcatTuneState.directYaesu) stopJtcatTune(); })
       .catch((e) => {
         if (e && e.message === 'TX cancelled') return;
@@ -20955,8 +20986,7 @@ function stopJtcatTune() {
   if (wasDirectIcom && _icomNetworkTransport) {
     forceReleaseIcomNetworkTx('Tune OFF');
   } else if (wasDirectYaesu) {
-    releaseYaesuLanTx('Tune OFF');
-    handleRemotePtt(false);
+    endYaesuLanTx('tune', 'Tune OFF');
   } else if (win && !win.isDestroyed()) {
     win.webContents.send('jtcat-tune-audio-stop');
     handleRemotePtt(false);
@@ -21224,8 +21254,8 @@ function stopJtcat() {
     forceReleaseIcomNetworkTx('JTCAT stop');
   } else {
     if (_icomNetworkTransport) { try { _icomNetworkTransport.cancelTx(); } catch {} }
-    if (settings.audioSource === 'yaesu-lan') releaseYaesuLanTx('JTCAT stop');
-    try { handleRemotePtt(false); } catch {}
+    if (settings.audioSource === 'yaesu-lan') { try { endYaesuLanTx('jtcat', 'JTCAT stop'); } catch {} }
+    else { try { handleRemotePtt(false); } catch {} }
   }
   // A WSPR beacon dies with the engine — and takes its 1 W cap with it. The
   // 1 s tick used to notice the engine was gone and disarm on its own, but
@@ -22727,43 +22757,86 @@ function yaesuLanVoiceRoute() {
   return settings.audioSource === 'yaesu-lan' && !!(settings.catTarget && settings.catTarget.type === 'yaesu-lan');
 }
 
-// Starts or stops the LAN voice stream for a PTT edge. Returns true when this
-// PTT's audio goes over the LAN. A key-down without a ready stream is refused
-// by handleRemotePtt (yaesuLanTxRefusal), never keyed silent.
-function yaesuLanVoiceTx(state, who) {
+// A voice PTT edge on the LAN route (VFO window, ECHOCAT): the mic goes over
+// the LAN, the radio stays in USB/LSB. Returns false off the route (the caller
+// keys the usual way); otherwise it has keyed, refused or released here.
+// Voice holds the LAN like any other transmitter: a press while JTCAT, Tune,
+// SSTV or a macro is on the air is refused before PTT, and a release while
+// another one holds it leaves the radio alone. `where` is where the press
+// happened ('vfo', 'echocat'), so a refusal is said there.
+const YAESU_LAN_VOICE_NO_MIC_MS = 1000;
+let _yaesuLanNoMicTimer = null;
+function yaesuLanVoicePtt(state, who, where) {
   if (!yaesuLanVoiceRoute()) return false;
   const t = yaesuLanTransport();
   if (state) {
     if (!t || !t.txReady) {
-      sendCatLog(`[SCU-LAN10] ${who}: the LAN is not connected, no transmit audio`);
+      const why = 'the Yaesu LAN (SCU-LAN10) is not connected, so the mic has no way to the radio. Not keyed.';
+      sendCatLog(`[SCU-LAN10] ${who}: ${why}`);
+      sayYaesuLanTxRefused(why, [where]);
       return true;
     }
-    // A buffer still on the wire after its PTT was released (an SSTV picture
-    // stopped early) must not ride on this key-down: the voice takes over.
-    if (t.txAudioActive && !t.voiceTxActive) releaseYaesuLanTx(`${who} takes over`);
-    if (!t.voiceTxActive) {
-      try {
-        _yaesuLanTxChunkCount = 0;
-        _yaesuLanTxPeak = 0;
-        _yaesuLanVoiceResampler = new mercuryAudioBridge.StreamingResampler(24000, Sculan10.TX_AUDIO_RATE);
-        t.startVoiceTx();
-        sendCatLog(`[SCU-LAN10] voice TX started (${who})`);
-      } catch (e) {
-        sendCatLog('[SCU-LAN10] voice TX start failed: ' + e.message);
-      }
+    if (_yaesuLanTx.owner === 'voice' && t.voiceTxActive) {
+      handleRemotePtt(true, { audio: true, lanOwner: 'voice' }); // a repeated key-down
+      return true;
     }
-  } else if (t && t.voiceTxActive) {
-    t.stopVoiceTx();
-    sendCatLog(`[SCU-LAN10] voice TX stopped (${who} release)`);
+    if (claimYaesuLanTx('voice', who, [where])) return true;
+    try {
+      _yaesuLanTxChunkCount = 0;
+      _yaesuLanTxPeak = 0;
+      _yaesuLanVoiceResampler = new mercuryAudioBridge.StreamingResampler(24000, Sculan10.TX_AUDIO_RATE);
+      t.startVoiceTx();
+      sendCatLog(`[SCU-LAN10] voice TX started (${who})`);
+    } catch (e) {
+      sendCatLog('[SCU-LAN10] voice TX start failed: ' + e.message + '. Not keyed.');
+      releaseYaesuLanTx('voice', 'voice TX start failed');
+      return true;
+    }
+    if (handleRemotePtt(true, { audio: true, lanOwner: 'voice' }) === false) {
+      yaesuLanVoiceStop('refused key-down');
+      return true;
+    }
+    // "Never a silent carrier": a key-down whose mic never arrives is let go.
+    if (_yaesuLanNoMicTimer) clearTimeout(_yaesuLanNoMicTimer);
+    _yaesuLanNoMicTimer = setTimeout(() => {
+      _yaesuLanNoMicTimer = null;
+      if (_yaesuLanTx.owner !== 'voice' || _yaesuLanTxChunkCount > 0) return;
+      const why = `no mic audio reached POTACAT within ${YAESU_LAN_VOICE_NO_MIC_MS / 1000} s of the key-down, so PTT was released rather than send a silent carrier. Check the mic in the ${where === 'echocat' ? 'ECHOCAT app' : 'VFO window'}.`;
+      sendCatLog(`[SCU-LAN10] ${who}: ${why}`);
+      sayYaesuLanTxRefused(why, [where]);
+      yaesuLanVoiceStop('no mic audio');
+      handleRemotePtt(false);
+    }, YAESU_LAN_VOICE_NO_MIC_MS);
+    return true;
   }
+  if (_yaesuLanTx.owner !== 'voice') {
+    // Not ours: a release while JTCAT or Tune holds the LAN must not drop it.
+    // With nobody on the LAN a release is always safe, and always sent.
+    if (!_yaesuLanTx.owner) handleRemotePtt(false);
+    else sendCatLog(`[SCU-LAN10] ${who} release ignored: ${YaesuLanTx.OWNER_LABELS[_yaesuLanTx.owner]} holds the LAN`);
+    return true;
+  }
+  yaesuLanVoiceStop(`${who} release`);
+  handleRemotePtt(false);
   return true;
 }
 
-// FT8/FT4 and Tune over the LAN (#227): the pre-rendered buffer goes to the
-// transport's sendTxAudio(). The claim is set just before the key-down, so
-// yaesuLanTxRefusal lets that one key-down through, and cleared when the
-// transmission ends on any path (tx-end, Stop, Halt, failsafe, Tune off).
-let _yaesuLanBufferTxClaim = false;
+// Close the voice stream and give the LAN back (the caller unkeys).
+function yaesuLanVoiceStop(why) {
+  if (_yaesuLanNoMicTimer) { clearTimeout(_yaesuLanNoMicTimer); _yaesuLanNoMicTimer = null; }
+  const t = yaesuLanTransport();
+  if (t && t.voiceTxActive) {
+    try { t.stopVoiceTx(); } catch {}
+    sendCatLog(`[SCU-LAN10] voice TX stopped (${why})`);
+  }
+  _yaesuLanTx.release('voice');
+}
+
+// Who holds the LAN for transmitting (lib/yaesu-lan-tx.js): voice, JTCAT,
+// Tune, SSTV or a voice macro. Each takes it with claimYaesuLanTx before its
+// key-down and gives it back with endYaesuLanTx (or releaseYaesuLanTx when
+// it unkeys on its own path); a key-down from anyone else meanwhile is refused.
+const _yaesuLanTx = new YaesuLanTx.YaesuLanTxGate();
 const YAESU_LAN_TUNE_PEAK = 0.5;
 
 function yaesuLanBufferTxReady() {
@@ -22771,11 +22844,59 @@ function yaesuLanBufferTxReady() {
   return yaesuLanVoiceRoute() && !!(t && t.txReady);
 }
 
-function releaseYaesuLanTx(reason) {
+// Say a LAN transmit refusal where the press happened ('vfo', 'echocat',
+// 'jtcat', 'sstv', 'main'), and in the log.
+function sayYaesuLanTxRefused(why, where = []) {
+  if (where.includes('vfo') && vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', why);
+  if (where.includes('jtcat') && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('tune-blocked', why);
+  if (where.includes('sstv') && sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('tune-blocked', why);
+  if (where.includes('echocat') && remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'tune-blocked', reason: why });
+  if (where.includes('main') && win && !win.isDestroyed()) win.webContents.send('app-notice', { message: why, warn: true, duration: 10000 });
+}
+
+/** Take the LAN for `owner` before its key-down. Null when it may key; else the refusal, already said. */
+function claimYaesuLanTx(owner, who, where = []) {
+  const why = _yaesuLanTx.claim(owner);
+  if (why) {
+    sendCatLog(`[SCU-LAN10] ${who || YaesuLanTx.OWNER_LABELS[owner]} refused before PTT: ${why}`);
+    sayYaesuLanTxRefused(why, where);
+  }
+  return why;
+}
+
+/** Give the LAN back and cancel `owner`'s own buffer. False when it did not hold it (nothing cancelled). */
+function releaseYaesuLanTx(owner, reason) {
+  if (!_yaesuLanTx.release(owner)) return false;
+  sendCatLog(`[SCU-LAN10] TX released by ${YaesuLanTx.OWNER_LABELS[owner]} (${reason})`);
   const t = yaesuLanTransport();
-  if (_yaesuLanBufferTxClaim || (t && t.txAudioActive)) sendCatLog(`[SCU-LAN10] TX audio released (${reason})`);
-  _yaesuLanBufferTxClaim = false;
-  if (t) { try { t.cancelTx(); } catch {} }
+  if (t && owner !== 'voice') { try { t.cancelTx(); } catch {} }
+  return true;
+}
+
+// Whoever holds the LAN (stuck-TX limit): the stream, the buffer, the claim.
+function releaseAllYaesuLanTx(reason) {
+  const was = _yaesuLanTx.owner;
+  if (was === 'voice') yaesuLanVoiceStop(reason);
+  else if (was) releaseYaesuLanTx(was, reason);
+  const t = yaesuLanTransport();
+  if (t) { try { t.cancelTx(); } catch {} try { if (t.voiceTxActive) t.stopVoiceTx(); } catch {} }
+}
+
+/**
+ * May `owner` unkey the radio now? Off the LAN route always. On it, only
+ * while it holds the LAN or nobody does: a JTCAT tx-end, a Tune or SSTV stop
+ * must never drop a voice over (or one another's transmission).
+ */
+function yaesuLanMayUnkey(owner, reason) {
+  if (_yaesuLanTx.mayUnkey({ route: yaesuLanVoiceRoute(), owner })) return true;
+  sendCatLog(`[SCU-LAN10] ${reason}: PTT left as it is, ${YaesuLanTx.OWNER_LABELS[_yaesuLanTx.owner]} holds the LAN`);
+  return false;
+}
+
+/** The end of `owner`'s transmission: its buffer cancelled, the LAN given back, then the unkey. */
+function endYaesuLanTx(owner, reason) {
+  releaseYaesuLanTx(owner, reason);
+  if (yaesuLanMayUnkey(owner, reason)) handleRemotePtt(false);
 }
 
 // One 24 kHz mic chunk from the VFO window or the ECHOCAT bridge.
@@ -26044,9 +26165,8 @@ function connectRemote() {
     // LAN, in DATA mode unless the rig says its DATA OFF MOD is LAN.
     if (icomNetworkVoiceTx(state, 'ECHOCAT phone PTT')) {
       handleRemotePtt(state, icomLanVoicePttOpts());
-    } else if (yaesuLanVoiceTx(state, 'ECHOCAT phone PTT')) {
+    } else if (yaesuLanVoicePtt(state, 'ECHOCAT phone PTT', 'echocat')) {
       // SCU-LAN10: the phone's mic over the LAN; the radio stays in USB/LSB.
-      if (handleRemotePtt(state, { audio: true }) === false) yaesuLanVoiceTx(false, 'refused key-down');
     } else {
       handleRemotePtt(state);
     }
@@ -29210,7 +29330,7 @@ function txLimitTrip(t) {
   try { if (ct.type === 'none' && ct.ptt === 'cm108' && win && !win.isDestroyed()) win.webContents.send('cm108-ptt', { state: false, gpio: Number.isInteger(ct.gpio) ? ct.gpio : 3 }); } catch {}
   try { if (smartSdr && smartSdr.connected) gatedSmartSdrTransmit(false); } catch {}
   try { if (settings.audioSource === 'icom-network') forceReleaseIcomNetworkTx('stuck-TX limit'); } catch {}
-  try { if (settings.audioSource === 'yaesu-lan') { yaesuLanVoiceTx(false, 'stuck-TX limit'); releaseYaesuLanTx('stuck-TX limit'); } } catch {}
+  try { if (settings.audioSource === 'yaesu-lan') releaseAllYaesuLanTx('stuck-TX limit'); } catch {}
   const msg = t.message;
   if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: msg, warn: true, duration: 20000 });
   if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', msg);
@@ -29345,20 +29465,17 @@ function pttConfirmRestore(restoreMode, restoreFreq, noAnchor, since) {
   });
 }
 
-// The words for a key-down refused because the SCU-LAN10 has no transmit
-// audio path for it yet; null when transmitting is fine. Voice is the one
-// path that has one: while yaesuLanVoiceTx holds the LAN stream open, the
-// key-down carries the mic (#227).
+// The words for a key-down refused on the SCU-LAN10 route; null when it may
+// key (#227). A key-down passes while its own transmitter holds the LAN
+// (`asking`: 'voice', 'jtcat', 'tune', 'sstv', 'macro'); one from anywhere
+// else is refused, with no holder because it would be a silent carrier, with
+// one because it would key or unkey under that transmission.
 let _yaesuLanTxNoticeAt = 0;
 // A raw Yaesu/Kenwood key-down anywhere in a custom CAT string: TX1; or TX2;
 // (TX0; is receive and always passes).
 const RAW_CAT_KEYDOWN_RE = /(^|;)\s*TX[12]\s*(;|$)/i;
-function yaesuLanTxRefusal() {
-  const t = settings.catTarget;
-  if (!t || t.type !== 'yaesu-lan' || settings.audioSource !== 'yaesu-lan') return null;
-  const lan = yaesuLanTransport();
-  if (lan && (lan.voiceTxActive || lan.txAudioActive || _yaesuLanBufferTxClaim)) return null;
-  return "over the Yaesu LAN (SCU-LAN10) POTACAT transmits voice from the VFO window's PTT or ECHOCAT, JTCAT (FT8/FT4), Tune, SSTV and voice macros so far; Winlink would send a silent carrier. For those, set Audio Source to the radio's USB sound card on this computer (CAT stays on the LAN).";
+function yaesuLanTxRefusal(asking = null) {
+  return _yaesuLanTx.refusal({ route: yaesuLanVoiceRoute(), asking });
 }
 
 /** Is POTACAT sending the audio for this key-down? opts.audio when the caller
@@ -29425,10 +29542,12 @@ function handleRemotePtt(state, opts = {}) {
   // air. Refused, said where the press happened, and JTCAT stops trying.
   // With Audio Source set to the radio's USB sound card on this computer
   // (CAT still over the LAN), the audio has a way out and PTT works.
-  if (state && yaesuLanTxRefusal()) {
-    const why = yaesuLanTxRefusal();
+  if (state && yaesuLanTxRefusal(opts.lanOwner || null)) {
+    const why = yaesuLanTxRefusal(opts.lanOwner || null);
     sendCatLog(`[PTT] refused — ${why}`);
-    try { if (jtcatAnyTxActive() || jtcatTuneState.active) jtcatHaltTxNow('no transmit audio over the Yaesu LAN'); } catch {}
+    // Only a key-down with no audio at all stops JTCAT; a busy LAN is someone
+    // else's transmission, and halting JTCAT would unkey it.
+    try { if (!_yaesuLanTx.owner && (jtcatAnyTxActive() || jtcatTuneState.active)) jtcatHaltTxNow('no transmit audio over the Yaesu LAN'); } catch {}
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', why);
     if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'tune-blocked', reason: why });
     if (win && !win.isDestroyed() && Date.now() - _yaesuLanTxNoticeAt > 60000) {
@@ -30393,7 +30512,9 @@ function _buildAudioBridgeConfig() {
     // device (the legacy route played it on this computer's speakers).
     (settings.audioSource === 'icom-network' && !!(_icomNetworkTransport && _icomNetworkTransport.txReady)) ||
     // SCU-LAN10: the client's mic goes over the LAN too (#227).
-    (settings.audioSource === 'yaesu-lan' && !!(yaesuLanTransport() && yaesuLanTransport().txReady));
+    // By route, not readiness: the phone's mic must never play on this
+    // computer's speakers, and reaches the stream once PTT opens it.
+    yaesuLanVoiceRoute();
   return {
     inputDeviceId:  settings.remoteAudioInput  || '',
     outputDeviceId: settings.remoteAudioOutput || '',
@@ -38630,9 +38751,13 @@ function jtcatHaltTxNow(reason, opts = {}) {
     forceReleaseIcomNetworkTx('JTCAT halt');
   } else {
     if (_icomNetworkTransport) { try { _icomNetworkTransport.cancelTx(); } catch {} }
-    if (settings.audioSource === 'yaesu-lan') releaseYaesuLanTx('JTCAT halt');
-    try { handleRemotePtt(false); } catch (e) { console.error('[Halt] PTT:', e); }
-    try { if (cat && cat.connected) gatedSetTransmit(false); } catch {}
+    // SCU-LAN10: Halt stops JTCAT and Tune (stopJtcatTune above), never a
+    // voice over, SSTV picture or macro holding the LAN.
+    if (settings.audioSource === 'yaesu-lan') releaseYaesuLanTx('jtcat', 'JTCAT halt');
+    if (yaesuLanMayUnkey('jtcat', 'JTCAT halt')) {
+      try { handleRemotePtt(false); } catch (e) { console.error('[Halt] PTT:', e); }
+      try { if (cat && cat.connected) gatedSetTransmit(false); } catch {}
+    }
     try { if (detectRigType() === 'flex' && smartSdr && smartSdr.connected) gatedSmartSdrTransmit(false); } catch {}
   }
   releaseRadio('jtcat');
@@ -38655,7 +38780,10 @@ function jtcatAnyTxActive() {
 }
 
 function sstvHaltTxNow() {
-  try { handleRemotePtt(false); } catch (e) { console.error('[SSTV] halt PTT release:', e); }
+  // SCU-LAN10: HALT also stops the picture on the wire, and gives the LAN
+  // back; it never unkeys another transmitter holding it.
+  if (settings.audioSource === 'yaesu-lan') { try { endYaesuLanTx('sstv', 'SSTV halt'); } catch (e) { console.error('[SSTV] halt LAN release:', e); } }
+  else { try { handleRemotePtt(false); } catch (e) { console.error('[SSTV] halt PTT release:', e); } }
   if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
     sstvPopoutWin.webContents.send('sstv-abort-tx');
   }
@@ -38669,8 +38797,8 @@ function gatedSetTransmit(state, emission) {
   // a CAT key-down from ANY path here would be a silent carrier. The
   // external-ATU tune carrier (an AM/CW carrier on purpose) stays allowed;
   // the radio's own ATU (cat.startTune) never comes through here.
-  if (state && yaesuLanTxRefusal() && !_externalAtuActive) {
-    const why = yaesuLanTxRefusal();
+  if (state && yaesuLanTxRefusal(YaesuLanTx.ANY_HOLDER) && !_externalAtuActive) {
+    const why = yaesuLanTxRefusal(YaesuLanTx.ANY_HOLDER);
     sendCatLog(`[PTT] CAT transmit refused — ${why}`);
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', why);
     if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'tune-blocked', reason: why });
@@ -43591,19 +43719,23 @@ function cloudShackNotice(text, kind) {
         if (remoteServer) remoteServer.broadcastSstvTxStatus({ state: autoSstvActive ? 'auto-rx' : 'rx' });
         return;
       }
-      if (useYaesuLanTx) _yaesuLanBufferTxClaim = true;
+      if (useYaesuLanTx && claimYaesuLanTx('sstv', 'SSTV picture', ['sstv', 'echocat'])) {
+        if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('sstv-abort-tx');
+        if (remoteServer) remoteServer.broadcastSstvTxStatus({ state: autoSstvActive ? 'auto-rx' : 'rx' });
+        return;
+      }
       // Key PTT. The SSTV audio goes through the rig's USB audio, so say so:
       // SSB-over-DATA applies (it never did — this call carried no `audio`),
       // and an Icom always transmits it in USB-D/LSB-D, because in plain USB
       // its factory DATA OFF MOD setting takes the mic, not USB, and the rig
       // keys with no audio (WB8IMY IC-7300, 2026-09-26). Receive stays in USB.
       const _sstvIcom = detectRigType() === 'icom' || (getActiveRigModel()?.brand === 'Icom');
-      if (handleRemotePtt(true, { audio: true, forceDataMode: _sstvIcom, emission: 'SSTV', txKind: 'sstv' }) === false) {
-        if (useYaesuLanTx) releaseYaesuLanTx('SSTV refused');
+      if (handleRemotePtt(true, { audio: true, forceDataMode: _sstvIcom, emission: 'SSTV', txKind: 'sstv', lanOwner: useYaesuLanTx ? 'sstv' : undefined }) === false) {
+        if (useYaesuLanTx) releaseYaesuLanTx('sstv', 'SSTV refused');
         sendCatLog('[SSTV] picture not sent: transmit was refused');
         if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
           sstvPopoutWin.webContents.send('sstv-abort-tx');
-          sstvPopoutWin.webContents.send('tune-blocked', 'Picture not sent: ' + (yaesuLanTxRefusal() || 'transmit was refused (see the log).'));
+          sstvPopoutWin.webContents.send('tune-blocked', 'Picture not sent: transmit was refused (see the log).');
         }
         if (remoteServer) remoteServer.broadcastSstvTxStatus({ state: autoSstvActive ? 'auto-rx' : 'rx' });
         return;
@@ -43657,7 +43789,7 @@ function cloudShackNotice(text, kind) {
       const _sstvKeyCalledAt = Date.now();
       const _sstvStartAudio = (fn) => pttKeyGate().then((keyed) => {
         if (!keyed) {
-          if (useYaesuLanTx) releaseYaesuLanTx('SSTV not keyed');
+          if (useYaesuLanTx) releaseYaesuLanTx('sstv', 'SSTV not keyed');
           sendCatLog('[SSTV] PTT was released before the radio keyed — picture not sent');
           if (remoteServer) remoteServer.broadcastSstvTxStatus({ state: autoSstvActive ? 'auto-rx' : 'rx' });
           return;
@@ -43758,8 +43890,7 @@ function cloudShackNotice(text, kind) {
           const txAudio = conditionDirectTxAudio(outSamples, clampNumber(settings.sstvTxGain, 0, 1, 0.5), 1.0);
           sendCatLog(`[SSTV] TX via Yaesu LAN (SCU-LAN10) — ${outDurSec.toFixed(0)}s (${outSamples.length} samples @48k); ${formatDirectTxAudioStats(txAudio)}`);
           const done = (why) => {
-            releaseYaesuLanTx(why);
-            handleRemotePtt(false);
+            endYaesuLanTx('sstv', why);
             if (remoteServer) remoteServer.broadcastSstvTxStatus({ state: autoSstvActive ? 'auto-rx' : 'rx' });
           };
           if (txAudio.outputPeak < 0.01) {
@@ -43771,6 +43902,11 @@ function cloudShackNotice(text, kind) {
             sstvPopoutWin.webContents.send('sstv-tx-audio', { samples: [], durationSec: outDurSec, daxTx: true, directTxLabel: 'Yaesu LAN' });
           }
           const t = yaesuLanTransport();
+          if (!t) {
+            sendCatLog('[SSTV] Yaesu LAN TX stopped: the LAN session ended before the picture could start');
+            done('SSTV no LAN session');
+            return;
+          }
           t.sendTxAudio(txAudio.samples, { offsetMs: 0, inputSampleRate: SSTV_SAMPLE_RATE, startDelayMs: 100, tailSilenceMs: 200 })
             .then(() => { sendCatLog('[SSTV] TX complete (Yaesu LAN)'); done('SSTV done'); })
             .catch((err) => {
@@ -44185,7 +44321,8 @@ function cloudShackNotice(text, kind) {
   });
 
   ipcMain.on('sstv-tx-complete', () => {
-    handleRemotePtt(false);
+    if (settings.audioSource === 'yaesu-lan') endYaesuLanTx('sstv', 'SSTV tx-complete');
+    else handleRemotePtt(false);
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
       sstvPopoutWin.webContents.send('sstv-tx-status', { state: 'rx' });
     }
@@ -52395,8 +52532,9 @@ function cloudShackNotice(text, kind) {
   // USB CODEC, so SSB-over-DATA's mode switch IS appropriate here when
   // the user has it enabled (never on a Yaesu: see handleRemotePtt).
   ipcMain.on('voice-macro-ptt', (_e, state) => {
-    // SCU-LAN10: the window's stop (button, end, refusal) also ends the LAN stream.
-    if (!state && settings.audioSource === 'yaesu-lan') releaseYaesuLanTx('voice macro stop');
+    // SCU-LAN10: the window's stop (button, end, refusal) also ends the LAN
+    // stream, and unkeys only a macro's own transmission.
+    if (!state && yaesuLanVoiceRoute()) { endYaesuLanTx('macro', 'voice macro stop'); return; }
     // The window starts the recording with this request: a refusal stops it.
     if (handleRemotePtt(!!state, { audio: true }) === false && win && !win.isDestroyed()) {
       sendCatLog('[Voice] macro stopped: transmit was refused');
@@ -52404,9 +52542,9 @@ function cloudShackNotice(text, kind) {
     }
   });
   // SCU-LAN10 (#227): a voice macro, decoded by the window at 16 kHz, sent
-  // over the LAN. The radio stays in USB/LSB, as for live voice. The window
-  // hears 'stop-voice-macro' when it is out (or refused) and sends the
-  // voice-macro-ptt(false) that releases the radio and the stream.
+  // over the LAN. The radio stays in USB/LSB, as for live voice. Main unkeys
+  // when the recording is out (or failed), then tells the window with
+  // 'stop-voice-macro'; it does not wait on the window's round trip.
   ipcMain.on('voice-macro-lan', (_e, payload) => {
     const stop = () => { if (win && !win.isDestroyed()) win.webContents.send('stop-voice-macro'); };
     const samples = payload && payload.samples instanceof Float32Array ? payload.samples
@@ -52418,21 +52556,23 @@ function cloudShackNotice(text, kind) {
       stop();
       return;
     }
-    if (yaesuLanTransport().txAudioActive) releaseYaesuLanTx('voice macro takes over');
-    _yaesuLanBufferTxClaim = true;
-    if (handleRemotePtt(true, { audio: true }) === false) {
-      releaseYaesuLanTx('voice macro refused');
+    if (claimYaesuLanTx('macro', `voice macro "${(payload && payload.label) || ''}"`, ['main', 'echocat'])) { stop(); return; }
+    if (handleRemotePtt(true, { audio: true, lanOwner: 'macro' }) === false) {
+      releaseYaesuLanTx('macro', 'voice macro refused');
       sendCatLog('[Voice] macro stopped: transmit was refused');
       stop();
       return;
     }
     const txAudio = conditionDirectTxAudio(samples, 1, 1.0);
     sendCatLog(`[Voice] macro "${(payload && payload.label) || ''}" over the Yaesu LAN: ${(samples.length / rate).toFixed(1)} s @ ${rate} Hz; ${formatDirectTxAudioStats(txAudio)}`);
-    yaesuLanTransport().sendTxAudio(txAudio.samples, { offsetMs: 0, inputSampleRate: rate, startDelayMs: 150, tailSilenceMs: 200 })
-      .then(stop)
+    const lan = yaesuLanTransport();
+    if (!lan) { endYaesuLanTx('macro', 'voice macro: no LAN session'); stop(); return; }
+    lan.sendTxAudio(txAudio.samples, { offsetMs: 0, inputSampleRate: rate, startDelayMs: 150, tailSilenceMs: 200 })
+      .then(() => { endYaesuLanTx('macro', 'voice macro done'); stop(); })
       .catch((e) => {
-        if (e && e.message === 'TX cancelled') return;
+        if (e && e.message === 'TX cancelled') return; // the stop that cancelled it unkeys
         sendCatLog(`[Voice] macro over the Yaesu LAN failed: ${e.message}`);
+        endYaesuLanTx('macro', 'voice macro failed');
         stop();
       });
   });
@@ -52458,10 +52598,7 @@ function cloudShackNotice(text, kind) {
       return;
     }
     // SCU-LAN10: the window's mic over the LAN (#227).
-    if (yaesuLanVoiceTx(!!state, 'VFO window PTT')) {
-      if (handleRemotePtt(!!state, { audio: true }) === false) yaesuLanVoiceTx(false, 'refused key-down');
-      return;
-    }
+    if (yaesuLanVoicePtt(!!state, 'VFO window PTT', 'vfo')) return;
     handleRemotePtt(!!state, { audio: false });
   });
   // #170: the VFO window's PC mic on that press, as one plain log line.
@@ -52721,6 +52858,7 @@ function gracefulCleanup() {
   } catch {}
 }
 
+let _yaesuLanQuitDone = false;
 app.on('before-quit', (e) => {
   if (jtcatLogReviews.size) {
     // Written while the log, QRZ and the rig are all still up.
@@ -52731,15 +52869,24 @@ app.on('before-quit', (e) => {
   winlinkHoldAwake(false); // never leave the Winlink session's App Nap block behind (#187)
   // A Winlink return still pending (#187): the radio goes back while CAT is up.
   if (winlinkReturnBeforeQuit(() => app.quit())) { e.preventDefault(); return; }
-  // SCU-LAN10 speaker monitor: put the radio's monitor back and give the
-  // packets half a second to leave before the process goes.
+  // SCU-LAN10: unkey (TX0; read back) and put the radio's monitor back
+  // (paced, read back) before the process goes, at most 5 s. A radio that
+  // may still be keyed with no session to reach it is said out loud.
   {
     const lan = yaesuLanTransport();
-    if (lan && lan.connected && Object.keys(lan.monitorSaved).length) {
-      e.preventDefault();
-      try { lan.disconnect(); } catch {}
-      setTimeout(() => app.quit(), 500);
-      return;
+    if (lan && !_yaesuLanQuitDone && (lan.mayBeKeyed || Object.keys(lan.monitorSaved).length)) {
+      _yaesuLanQuitDone = true;
+      if (!lan.connected && lan.mayBeKeyed) {
+        sendCatLog('[SCU-LAN10] WARNING: quitting while the radio may be keyed and the unit is not reachable');
+        try { dialog.showMessageBoxSync({ type: 'warning', title: 'POTACAT', message: 'POTACAT could not reach the radio to unkey it. It may still be transmitting.', detail: 'Check the radio, or switch it off.' }); } catch {}
+      } else if (lan.connected) {
+        e.preventDefault();
+        let closed;
+        try { closed = lan.disconnect(); } catch {}
+        Promise.race([Promise.resolve(closed), new Promise((r) => setTimeout(r, 5000))])
+          .finally(() => setTimeout(() => app.quit(), 350)); // the sockets linger 300 ms for the last packets
+        return;
+      }
     }
   }
   gracefulCleanup();

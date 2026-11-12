@@ -2415,7 +2415,7 @@ function getEffectiveSerialcatPort() {
 // the same trap that broke K3SBP's Flex TX (see syncRigAudioDeviceBypass).
 const AUDIO_SOURCE_HELP = {
   flex: 'Flex Direct streams receive and transmit audio straight to the radio (VITA-49) — no DAX program and no audio device setup. Pick Local audio device only if you deliberately run the DAX program.',
-  'yaesu-lan': "Yaesu LAN audio carries the radio's receive audio over the SCU-LAN10 for listening, JTCAT and SSTV, and transmit audio back to the radio: voice from the VFO window's PTT or ECHOCAT, voice macros, JTCAT (FT8/FT4), Tune and SSTV (SSB MOD SOURCE = AUTO or USB in the radio's menu). Winlink cannot transmit with this source yet: POTACAT refuses it rather than send a silent carrier. For Winlink, pick the local audio device (the radio's USB sound card on this computer).",
+  'yaesu-lan': "Yaesu LAN audio carries the radio's receive audio over the SCU-LAN10 for listening, JTCAT and SSTV, and transmit audio back to the radio: voice from the VFO window's PTT or ECHOCAT, voice macros, JTCAT (FT8/FT4), Tune and SSTV (the radio's menu setting is under Setup instructions in the rig editor). Winlink cannot transmit with this source yet: POTACAT refuses it rather than send a silent carrier. For Winlink, pick the local audio device (the radio's USB sound card on this computer).",
   'icom-network': "Icom Network audio uses the radio's RS-BA1 UDP stream for JTCAT/SSTV receive audio and sends JTCAT FT8/FT4 plus SSTV transmit audio directly over the network — no soundcard needed.",
 };
 function rebuildAudioSourceOptions() {
@@ -2577,6 +2577,7 @@ async function populateRadioSection(currentTarget) {
     document.getElementById('set-yaesu-lan-username').value = currentTarget.username || '';
     document.getElementById('set-yaesu-lan-password').value = currentTarget.password || '';
     document.getElementById('set-yaesu-lan-mute-monitor').checked = !!currentTarget.muteMonitor;
+    syncYaesuLanMuteMonitorRow();
   } else if (currentTarget.type === 'rigctld') {
     setRadioType('hamlib');
     hamlibFieldsLoaded = true;
@@ -3464,6 +3465,16 @@ function rigBandsToSave() {
   return list.length ? list : undefined;
 }
 if (rigModelSelect) rigModelSelect.addEventListener('change', () => { loadRigBandsForModel(); });
+// The SCU-LAN10 monitor mute is offered on the FT-710 only, until an FTDX10 or
+// FTDX101 owner confirms that radio's monitor (ML) is set per mode too.
+function syncYaesuLanMuteMonitorRow() {
+  const row = document.getElementById('yaesu-lan-mute-monitor-row');
+  if (!row) return;
+  const ok = !!rigModelSelect && rigModelSelect.value === 'FT-710';
+  row.style.display = ok ? '' : 'none';
+  if (!ok) { const cb = document.getElementById('set-yaesu-lan-mute-monitor'); if (cb) cb.checked = false; }
+}
+if (rigModelSelect) rigModelSelect.addEventListener('change', syncYaesuLanMuteMonitorRow);
 {
   const reset = document.getElementById('rig-bands-reset');
   if (reset) reset.addEventListener('click', () => { rigBandsState.touched = false; loadRigBandsForModel(); });
@@ -3486,7 +3497,7 @@ async function openRigEditor(mode, rigId) {
       setRigName.value = rig.name || '';
       const catLabelEl = document.getElementById('set-rig-cat-label');
       if (catLabelEl) catLabelEl.value = rig.catLabel || '';
-      if (rigModelSelect) rigModelSelect.value = rig.model || '';
+      if (rigModelSelect) { rigModelSelect.value = rig.model || ''; syncYaesuLanMuteMonitorRow(); }
       await populateRadioSection(rig.catTarget);
       // Per-rig audio source — populateRadioSection just rebuilt the options
       // for this rig's radio type, so the stored value (validated) sticks.
@@ -3530,7 +3541,7 @@ async function openRigEditor(mode, rigId) {
     rigEditorTitle.textContent = 'Add Rig';
     setRigName.value = '';
     { const catLabelEl = document.getElementById('set-rig-cat-label'); if (catLabelEl) catLabelEl.value = ''; }
-    if (rigModelSelect) rigModelSelect.value = '';
+    if (rigModelSelect) { rigModelSelect.value = ''; syncYaesuLanMuteMonitorRow(); }
     if (setCwKeyLine) setCwKeyLine.value = 'auto';
     if (setRadioNr) setRadioNr.value = '1';
     setRigFullPowerField(null);

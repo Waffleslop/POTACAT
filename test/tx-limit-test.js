@@ -111,7 +111,7 @@ test('main arms the limit for every PTT POTACAT asserts and disarms it on releas
 });
 
 test('each key-down names its kind', () => {
-  assert.ok(/handleRemotePtt\(true, \{ audio: true, emission: 'DATA', txKind: jtcatTxKind\(\) \}\)/.test(main), 'JTCAT');
+  assert.ok(/handleRemotePtt\(true, \{ audio: true, emission: 'DATA', txKind: jtcatTxKind\(\)(, lanOwner: [^}]+)? \}\)/.test(main), 'JTCAT');
   assert.ok(/emission: 'SSTV', txKind: 'sstv'/.test(main), 'SSTV');
   assert.ok(/noDataSwap: !!opts\.noDataSwap, txKind: 'tune'/.test(main), 'tune / Test transmit');
   assert.ok((main.match(/txKind: 'winlink'/g) || []).length >= 2, 'Winlink + Mercury');
