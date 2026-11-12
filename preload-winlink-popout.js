@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('api', {
   // Sessions — Connect is the only way a radio session starts.
   connect: (o) => ipcRenderer.invoke('winlink-cmd-connect', o),
   abort: () => ipcRenderer.send('winlink-cmd-abort'),
+  retry: (op) => ipcRenderer.invoke('winlink-cmd-retry', op), // the automatic retry: 'cancel' | 'now' (#425)
   // The account, from the mail window (no account = the first thing it shows).
   accountCheck: () => ipcRenderer.invoke('winlink-account-check'),
   register: (o) => ipcRenderer.invoke('winlink-register', { ...o, origin: 'mail window' }),

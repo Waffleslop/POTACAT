@@ -444,6 +444,8 @@ async function runSettle({ patBody, outboxAfter, queued, connected = true, modem
     patClient: new WinlinkClient({ port: pat.port }),
     winlinkLog: (m) => logs.push(m),
     winlinkSessionPush: () => pushes.push(state.session),
+    winlinkRetryFields: () => ({}), // the automatic retry's fields (#425); its own test is winlink-auto-retry-test.js
+    winlinkSummariesLoad: () => {}, winlinkSummariesSave: () => {}, // the file on disk has its own test (winlink-summary-store-test.js)
     winlinkSessionActive: () => ['starting', 'connecting', 'connected', 'disconnecting'].includes(state.session.state),
     console, Date, Math, Promise, String, Number,
   });
@@ -525,8 +527,10 @@ test('B1: one message went and one arrived before the drop, and a session that n
 
 test('wired: winlinkEndSession words the ending from the facts, logs Pat\'s reply, and writes the summary for every session that ran', () => {
   const end = fnBody(main, 'winlinkEndSession');
-  assert.ok(/const raw = String\(text \|\| ''\);\s*const outcome = WinlinkOutcome\.describeOutcome\(winlinkOutcomeFacts\(state, s, raw, received, null\)\);\s*text = outcome\.text;/.test(end), 'the status is the outcome\'s, whatever text was passed in');
-  assert.ok(/winlinkState\.setSession\(\{ state, text, error: state === 'error' \? text : '', errorKind: state === 'error' \? outcome\.errorKind : '', outcome: winlinkOutcomeView\(outcome\)/.test(end));
+  // #425 automatic retry: the outcome is worded before the radio is put back (the retry decision needs it), then becomes the status.
+  assert.ok(/const raw = String\(text \|\| ''\);\s*const outcome = WinlinkOutcome\.describeOutcome\(winlinkOutcomeFacts\(state, s, raw, received, null\)\);[\s\S]*?\n {2}text = outcome\.text;/.test(end), 'the status is the outcome\'s, whatever text was passed in');
+  assert.strictEqual((end.match(/WinlinkOutcome\.describeOutcome\(/g) || []).length, 1, 'worded once');
+  assert.ok(/winlinkState\.setSession\(\{ state, text, error: state === 'error' \? text : '', errorKind: state === 'error' \? outcome\.errorKind : '', outcome: \{ \.\.\.winlinkOutcomeView\(outcome\), \.\.\.winlinkRetryFields\(\) \}/.test(end), 'with the automatic retry\'s fields, if one waits (#425)');
   assert.ok(/settings\.winlinkLastSession = \{ at: endedAt, ok: state === 'done', text: String\(outcome\.title/.test(end), 'Last check: the first sentence');
   assert.ok(/if \(state === 'error' && raw && raw !== text\) winlinkLog\(`the reason as it was reported: \$\{raw\.replace/.test(end), 'Pat\'s reply stays in the log (and so in the Verbose Log)');
   assert.ok(/winlinkSettleOutcome\(state, s, raw, received, endedAt\)/.test(end), 'the summary line');

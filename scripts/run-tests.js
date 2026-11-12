@@ -254,7 +254,9 @@ const TESTS = [
   'test/winlink-history-test.js', // #254: gateway history from Pat's event log, My gateways (saved gateways)
   'test/winlink-outcome-test.js', // #425: how a session ended is worded in one place; Pat's reply never reaches a status; one summary line per session
   'test/winlink-pat-recover-test.js', // #430: after an Abort, Connect restarts a Pat that is stuck on the last call; a session never starts on top of a dial (VARA)
+  'test/winlink-auto-retry-test.js', // #425: one automatic retry after a dropped link, never after no answer or Abort; countdown, channel check, Cancel
   'test/winlink-contacts-test.js', // the Winlink address book, and the Position report and POTA spot forms
+  'test/winlink-summary-store-test.js', // #425: the session summary lines survive a restart, so Report a Bug still holds the session that dropped
   'test/rigctld-shim-hamlib-test.js',
   'test/rigctld-died-test.js',
   'test/interface-ptt-test.js',
