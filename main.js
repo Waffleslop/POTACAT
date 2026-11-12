@@ -873,7 +873,9 @@ const CLOUD_TUNNEL_CONFIG_FILENAME = 'cloud-tunnel.json';
 // Windows/macOS: Electron's login-item API (HKCU Run key / LaunchAgent).
 // Linux: Electron's API is a no-op there, so write/remove an XDG autostart
 // .desktop entry instead; APPIMAGE (when set) is the user-visible path — the
-// mounted process.execPath dies with the mount.
+// mounted process.execPath dies with the mount. A distro package that runs
+// POTACAT on a shared Electron names its launcher in POTACAT_EXEC: there
+// process.execPath alone would start a bare Electron at login.
 function applyLaunchAtStartup(enabled) {
   try {
     if (process.platform === 'linux') {
@@ -881,7 +883,7 @@ function applyLaunchAtStartup(enabled) {
       const dir = path.join(os.homedir(), '.config', 'autostart');
       const file = path.join(dir, 'potacat.desktop');
       if (enabled) {
-        const execPath = process.env.APPIMAGE || process.execPath;
+        const execPath = process.env.APPIMAGE || process.env.POTACAT_EXEC || process.execPath;
         fs.mkdirSync(dir, { recursive: true });
         fs.writeFileSync(file, `[Desktop Entry]\nType=Application\nName=POTACAT\nComment=POTA hunting with CAT control\nExec="${execPath}"\nX-GNOME-Autostart-enabled=true\n`);
       } else if (fs.existsSync(file)) {
