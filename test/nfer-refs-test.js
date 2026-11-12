@@ -141,57 +141,142 @@ test('rule (a) is an allow-list: any other word, anywhere, means no extra parks'
   }
 });
 
-test('rule (b): no n-fer word, a joined list, nothing else but neutral tokens, the catalogue confirms', () => {
+// Rule (b) of the earlier versions (a bare joined list, confirmed by the
+// catalogue) is gone: in 384 real own-spot comments it never once meant an
+// n-fer, and "US-1111, US-2222, US-3333" is how a plan is written.
+test('no n-fer word, no extra parks: a list of parks may be a plan', () => {
   for (const comment of [
     'US-1111/US-2222',
     'US-1111, US-2222',
+    'US-1111, US-2222, US-3333',
     'K-1111 & K-2222',
     'US-1111 + US-2222',
     'US-1111; US-2222',
     'us-1111 and us-2222',
     'US-1111 &amp; US-2222',
-    'US-1111 &#38; US-2222',
     '(US-1111,US-2222)',
     '[US-1111, US-2222]',
     'US-1111,US-2222.',
     'US-1111, US-2222 FT8',
     'US-1111/US-2222 20m FT8 14.074 FN20qr QRV',
     'CQ POTA US-1111, US-2222 14074.5 kHz 73 tnx',
-    'US-1111, US-2222 7.200 MHz SSB',
-    'US-1111, US-2222 15M',
-    'US-1111, US-2222 AM',
-    'FT8 20M: US-2222 / US-1111!',
-    'US-1111 + US-2222 - 73!',
-    'US-1111, US-2222 (TNX)',
     'US-1111, US-2222 [Ham2K PoLo]',
+    'US-1111, US-2222 - Self-spotted via World Radio League',
+    'US-1111 with US-2222',
+    'US-1111 w/ US-2222',
   ]) {
-    assert.deepStrictEqual(refs(comment, 'US-1111', YES), ['US-2222'], comment);
+    assert.deepStrictEqual(refs(comment, 'US-1111', YES), [], comment);
   }
-  assert.deepStrictEqual(refs('US-1111, US-2222, US-3333, US-4444 FT8', 'US-1111', YES), ['US-2222', 'US-3333', 'US-4444']);
 });
 
 test('neutral means neutral: a clock time, a made-up band, a short grid, thanks in front are not', () => {
-  for (const comment of [
-    'US-1111, US-2222 18.30',                      // a time, not a frequency
-    'DE-1111, DE-2222 18.30',
-    'US-1111, US-2222 1800', 'US-1111, US-2222 20m 1800', 'US-1111, US-2222 QRV 1830', 'US-1111, US-2222 1840',
-    'US-1111, US-2222 18000',                      // 18.000 MHz is in no ham band
-    'US-1111, US-2222 1800z', 'US-1111, US-2222 18z', 'US-1111, US-2222 1800utc',
-    'US-1111, US-2222 5M',                         // not a band
-    'US-1111, US-2222 20M 15M',                    // one band label, not two
-    'US-1111, US-2222 EM12', 'US-1111, US-2222 IN23', 'US-1111, US-2222 ON12', 'US-1111, US-2222 OK12', 'NO73 US-1111, US-2222', // four-character "grids" are words
-    'TNX US-2222, US-1111', 'TU 73 US-2222 & US-1111', 'TNX P2P US-2222, US-1111', '73 US-1111, US-2222', // thanks in front thank someone
-    'US-1111, US-2222 this AM', 'US-1111, US-2222 2', 'US-1111, US-2222 1 of 2', 'US-1111, US-2222 RX', 'US-1111, US-2222 WX',
-    'US-1111, US-2222 K1ABC', 'US-1111, US-2222 S2S', 'US-1111, US-2222 W4C/WM-001', 'US-1111, US-2222 MA', 'US-1111, US-2222 QRT',
-    'US-1111, US-2222 QSY', 'US-1111, US-2222 NEXT', 'US-1111, US-2222 \u{1F600}', 'US-1111, US-2222 https://x.y',
-    'US-1111, US-2222 14.074-14.078', 'US-1111, US-2222 73 TU P2P',
-    'US-1111, US-2222 KFF-0001', 'US-1111, KFF-2222', 'US-1111, KFF-1111, US-2222 CW', // a WWFF reference refuses the list
-    'US-1111: US-2222', 'US-1111 - US-2222', 'US-1111, US-2222. US-3333', 'QRV US-1111 (US-2222)', 'US-1111,,,US-2222',
-    'US-1111 &amp;amp; US-2222', 'US-1111 &lt;US-2222&gt;', 'US-2222, US-3333',
-    'US-1111 / US-2222 / US-3333 / US-4444 / US-5555',
-  ]) {
-    assert.deepStrictEqual(refs(comment, comment.startsWith('DE-') ? 'DE-1111' : 'US-1111', YES), [], comment);
+  const ok = (tail) => refs('2fer US-1111 US-2222 ' + tail, 'US-1111', YES);
+  for (const tail of ['FT8', 'CW', 'SSB', 'AM', '20M', '70cm', '14.074', '14074', '14074.5', '7.200 MHz', '7200KHZ', '21.300', '50.313',
+    '7074', '3573', 'FN20ab', 'QRV', 'CQ POTA', '73', 'TU 73', 'tnx', 'FT8 20m 14.074 FN20qr 73']) {
+    assert.deepStrictEqual(ok(tail), ['US-2222'], tail);
   }
+  for (const tail of [
+    '18.30',                                        // a time, not a frequency
+    '1800', '1830', '1840', '20m 1800',             // four digits that read as a clock time
+    '18000',                                        // 18.000 MHz is in no ham band
+    '1800z', '18z', '1800utc', '2pm',
+    '5M',                                           // not a band
+    '20M 15M',                                      // one band label, not two
+    'EM12', 'IN23', 'ON12', 'OK12',                 // four-character "grids" are words
+    'this AM', '2', '1 of 2', 'RX', 'WX', 'K1ABC', 'S2S', 'W4C/WM-001', 'MA', 'QRT', 'QSY', 'NEXT',
+    '\u{1F600}', 'https://x.y', '14.074-14.078', '73 TU P2P', 'KFF-0001',
+  ]) {
+    assert.deepStrictEqual(ok(tail), [], tail);
+  }
+  for (const comment of ['TNX 2fer US-1111 US-2222', 'TU 73 2fer US-1111 US-2222', '73 2fer US-1111 US-2222', 'NO73 2fer US-1111 US-2222']) {
+    assert.deepStrictEqual(refs(comment, 'US-1111', YES), [], comment + ': thanks in front thank someone');
+  }
+});
+
+// Fourth review: the app tag was "any bracket, any words after via".
+test('an app signature is a known app\'s name and nothing else', () => {
+  for (const comment of [
+    '2Fer (US-1111, US-2222) - Self-spotted via World Radio League',   // real
+    '2fer US-1111 US-2222 Self-spotted via World Radio League',
+    '2fer US-1111 US-2222 - Self-spotted via WRL.',
+    '2fer US-1111 US-2222 Self-spot via HAMRS Pro',                    // real form of HAMRS
+    '2fer US-1111 US-2222 - Self spotted via HAMRS',
+    '2fer US-1111 US-2222 Sent via Smart Logger',                      // real
+    '2fer US-1111 US-2222 - via Tiles on the Air',                     // real
+    '2fer US-1111 US-2222 via POTACAT',                                // real
+    '2fer US-1111 US-2222 [Ham2K PoLo]', '2fer US-1111 US-2222 [PoLo]', '2fer US-1111 US-2222 [HAMRS]', '2fer US-1111 US-2222 [PW]',
+    '[Ham2K PoLo] 2fer US-1111 US-2222',
+    'FT8 14.074 2fer US-1111 US-2222 20M EM12KX 73 [Ham2K PoLo] ',
+  ]) {
+    assert.deepStrictEqual(refs(comment, 'US-1111', YES), ['US-2222'], comment);
+  }
+  for (const comment of [
+    '2fer US-1111 US-2222 [wrong]', '2fer US-1111 US-2222 [moved]', '2fer US-1111 US-2222 [outside boundary]',
+    '2fer US-1111 US-2222 [just one park]', '2fer US-1111 US-2222 [1fer]', '2fer US-1111 US-2222 [2 hours ago]',
+    '2fer US-1111 US-2222 [failed]', '2fer US-1111 US-2222 [left]', '2fer US-1111 US-2222 [tomorrow]', '2fer US-1111 US-2222 [i am not there]',
+    '2fer US-1111 US-2222 [PoLo wrong]', '2fer US-1111 US-2222 [not PoLo]', '2fer US-1111 US-2222 [PoLo] [PoLo]', '2fer US-1111 US-2222 [PoLo',
+    '2fer US-1111 US-2222 Self-spotted via phone wrong park sorry',
+    '2fer US-1111 US-2222 Self-spotted via polo second park closed',
+    '2fer US-1111 US-2222 Self-spotted via app 1fer',
+    '2fer US-1111 US-2222 Self-spotted via World Radio League wrong',
+    '2fer US-1111 US-2222 wrong Self-spotted via World Radio League',
+    '2fer US-1111 US-2222 Self-spotted via',
+    '2fer US-1111 US-2222 Self-spotted',
+    '2fer US-1111 US-2222 spotted via World Radio League by mistake',
+    'Self-spotted via World Radio League 2fer US-2222 next',
+    '2fer US-2222 - Self-spotted via P2P with K1ABC',
+    'QRT 2fer US-1111 US-2222 - via Tiles on the Air',
+  ]) {
+    assert.deepStrictEqual(refs(comment, 'US-1111', YES), [], comment);
+  }
+  assert.deepStrictEqual([...N.APP_NAMES].sort(), ['HAM2K POLO', 'HAM2K PORTABLE LOGGER', 'HAMRS', 'HAMRS PRO', 'POLO', 'POTACAT', 'PW',
+    'SMART LOGGER', 'TILES ON THE AIR', 'WORLD RADIO LEAGUE', 'WRL'], 'the whole list; adding a name is a decision');
+});
+
+// Fourth review: "-", "!", ":" and "(" were neutral anywhere.
+test('punctuation is neutral only where real comments have it', () => {
+  for (const comment of [
+    '2-fer: US-1111 US-2222',                       // a colon right after the n-fer word
+    '2fer (US-1111, US-2222)', '2fer [US-1111/US-2222]', '2FER (US-2222)',   // round the list
+    'US-1111 (2fer US-2222)', 'US-1111, 2fer with US-2222', 'US-1111 2fer: US-2222',
+    '2fer US-1111, US-2222', '2fer US-1111 + US-2222', '2fer US-1111 & US-2222', '2fer US-1111; US-2222', '2fer US-1111, and US-2222',
+    '2fer US-1111 US-2222.',                        // one final full stop
+    '2fer US-1111 US-2222 - Self-spotted via World Radio League',   // " - " before the app's tail
+    '2fer w/ US-2222', '2fer: w/ US-2222',
+  ]) {
+    assert.deepStrictEqual(refs(comment, 'US-1111', YES), ['US-2222'], comment);
+  }
+  for (const comment of [
+    '!2fer US-1111 US-2222', '2fer US-1111 US-2222!', '2fer! US-1111 US-2222', '2fer US-1111 US-2222 73!',
+    '2fer US-1111 US-2222 :(', '2fer US-1111 US-2222 :-(', '2fer US-1111 US-2222 ;)', '2fer US-1111 US-2222 :',
+    '-2fer US-1111 US-2222', '2fer US-1111 US-2222 -', '2fer - US-1111 US-2222', '- 2fer US-1111 US-2222',
+    '2fer, US-1111 US-2222', '2fer US-1111 US-2222,', ', 2fer US-1111 US-2222', '2fer US-1111 US-2222 / FT8',
+    '(2fer US-1111 US-2222', '2fer US-1111 US-2222)', '2fer (US-1111 US-2222', '2fer US-1111) US-2222', '2fer ((US-1111 US-2222))',
+    '2fer [US-1111 US-2222', '2fer US-1111 US-2222]', 'US-1111 (2fer US-2222', 'US-1111 2fer ( US-2222', 'US-1111 2fer [ US-2222',
+    '2fer US-1111 ,, US-2222', '2fer US-1111 , , US-2222', '2fer US-1111 + + US-2222', '2fer US-1111 & & US-2222', '2fer US-1111 ;; US-2222',
+    '2fer US-1111 // US-2222', '2fer US-1111 and and US-2222', '2fer US-1111 and, US-2222',
+    'US-1111 2fer :, US-2222', 'US-1111 2fer ,: US-2222', 'US-1111 2fer :( US-2222', 'US-1111 2fer ;( US-2222',
+    '2fer US-1111 US-2222 .. .', '2fer. US-1111 US-2222', '2fer US-1111 US-2222 ?', '2fer US-1111 US-2222 *', '2fer US-1111 US-2222 #1',
+    '2fer US-1111 US-2222 "not"', "2fer US-1111 US-2222 'maybe'",
+    // and without the n-fer word they were plain lists anyway
+    '-US-2222, US-1111', '!US-2222, US-1111', 'US-1111, US-2222 :-(',
+  ]) {
+    assert.deepStrictEqual(refs(comment, 'US-1111', YES), [], comment);
+  }
+});
+
+test('the n-fer word and a park number are exact', () => {
+  for (const comment of ['02fer US-2222', '002fer US-2222', '1fer US-2222', '11fer US-2222', '0fer US-2222', '2.fer US-2222', '2ferr US-2222', 'x2fer US-2222']) {
+    assert.deepStrictEqual(refs(comment, 'US-1111', YES), [], comment);
+  }
+  // 4 digits, or 5 not starting with 0: "US-02222" is a typo, with or without a catalogue.
+  for (const comment of ['2fer US-02222', '2fer US-1111 US-02222', '2fer US-222', '2fer US-222222', '2fer US-2222a', '2fer US-22-22']) {
+    assert.deepStrictEqual(refs(comment), [], comment + ' (no catalogue)');
+    assert.deepStrictEqual(refs(comment, 'US-1111', YES), [], comment);
+  }
+  assert.deepStrictEqual(refs('2fer US-22223'), ['US-22223']);
+  assert.deepStrictEqual(refs('2fer US-1111 US-0222'), ['US-0222']);
+  assert.deepStrictEqual(refs('10-fer US-1111 US-1112 US-1113 US-1114 US-1115 US-1116 US-1117 US-1118 US-1119 US-1120').length, 9);
 });
 
 // Every one of these logged a park the contact was not at (second review of
@@ -260,37 +345,29 @@ test('WWFF is refused whatever its prefix length: KFF-, GFF-, IFF-, FFF-, DLFF-'
   assert.deepStrictEqual(refs('2-fer KFF-1234 KFF-5678', 'KFF-1234', YES), [], 'a WWFF spot never starts a POTA n-fer');
 });
 
-test('the parks catalogue: (b) needs its yes, (a) stands without it, a park it denies sinks the list', () => {
+test('the parks catalogue: a park it denies sinks the list; when it is not loaded the other checks stand', () => {
   const knows = (list) => (ref) => list.includes(ref);
-  // (b): unknown = refuse
-  assert.deepStrictEqual(refs('US-1111, US-2222'), [], 'no catalogue at all');
-  assert.deepStrictEqual(refs('US-1111, US-2222', 'US-1111', { parkKnown: () => null }), [], 'that country\'s list is not loaded');
-  assert.deepStrictEqual(refs('US-1111, US-2222', 'US-1111', { parkKnown: () => undefined }), []);
-  assert.deepStrictEqual(refs('US-1111, US-2222', 'US-1111', { parkKnown: () => 1 }), [], 'only a plain true is a yes');
-  assert.deepStrictEqual(refs('US-1111, US-2222', 'US-1111', { parkKnown: knows(['US-2222']) }), ['US-2222']);
-  assert.deepStrictEqual(refs('US-1111, US-2222, US-3333', 'US-1111', { parkKnown: knows(['US-2222']) }), [], 'one unknown park: none of the list');
-  // (a): not loaded = the other checks stand
-  assert.deepStrictEqual(refs('2-fer US-1111 US-2222'), ['US-2222']);
-  assert.deepStrictEqual(refs('2-fer US-1111 US-2222', 'US-1111', { parkKnown: () => null }), ['US-2222']);
-  assert.deepStrictEqual(refs('2-fer US-1111 US-2222', 'US-1111', { parkKnown: () => false }), []);
+  assert.deepStrictEqual(refs('2-fer US-1111 US-2222'), ['US-2222'], 'no catalogue at all');
+  assert.deepStrictEqual(refs('2-fer US-1111 US-2222', 'US-1111', { parkKnown: () => null }), ['US-2222'], 'that country\'s list is not loaded');
+  assert.deepStrictEqual(refs('2-fer US-1111 US-2222', 'US-1111', { parkKnown: () => undefined }), ['US-2222']);
+  assert.deepStrictEqual(refs('2-fer US-1111 US-2222', 'US-1111', { parkKnown: () => false }), [], 'loaded, and it is no park');
+  assert.deepStrictEqual(refs('2-fer US-1111 US-2222', 'US-1111', { parkKnown: knows(['US-2222']) }), ['US-2222']);
   assert.deepStrictEqual(refs('3-fer US-1111, US-2222, US-9999', 'US-1111', { parkKnown: knows(['US-1111', 'US-2222']) }), [], 'US-9999 is no park: the comment is not believed');
   assert.deepStrictEqual(refs('2-fer K-1111 K-2222', 'US-1111', { parkKnown: knows(['US-2222']) }), ['US-2222'], 'asked in the catalogue\'s own form');
   // a catalogue that throws is a catalogue that did not answer
-  const boom = { parkKnown: () => { throw new Error('x'); } };
-  assert.deepStrictEqual(refs('2-fer US-1111 US-2222', 'US-1111', boom), ['US-2222']);
-  assert.deepStrictEqual(refs('US-1111, US-2222', 'US-1111', boom), []);
+  assert.deepStrictEqual(refs('2-fer US-1111 US-2222', 'US-1111', { parkKnown: () => { throw new Error('x'); } }), ['US-2222']);
 });
 
-test('list sizes: a plain list adds at most three parks, an n-fer at most nine', () => {
+test('list sizes: an n-fer adds at most nine parks', () => {
   const list = (n) => Array.from({ length: n }, (_, i) => 'US-' + String(1111 + i)).join(',');
-  assert.strictEqual(refs(list(4), 'US-1111', YES).length, 3);
-  assert.deepStrictEqual(refs(list(5), 'US-1111', YES), []);
   assert.strictEqual(refs('10-fer ' + list(10), 'US-1111', YES).length, 9);
   assert.deepStrictEqual(refs('10-fer ' + list(11), 'US-1111', YES), []);
+  assert.deepStrictEqual(refs('11-fer ' + list(11), 'US-1111', YES), []);
+  assert.deepStrictEqual(refs(list(4), 'US-1111', YES), [], 'and a list with no n-fer word adds none');
 });
 
 test('a comment over 500 characters is not read: a cut could hide a word or shorten a reference', () => {
-  const pad = (n) => '.'.repeat(n);
+  const pad = (n) => ('CQ '.repeat(Math.floor(n / 3)) + ' '.repeat(n % 3)); // n characters of something neutral
   // US-22223 cut to US-2222 at the limit: the first version logged US-2222.
   for (const n of [470, 478, 479, 480, 481, 482, 483, 484, 485]) {
     const c = pad(n) + ' 2fer US-1111 US-22223';
@@ -345,7 +422,7 @@ test('a hostile comment costs nothing: 100 kB strings in well under 50 ms each',
 });
 
 // The activator's own spot comments (and the other spotters' that name a park
-// or say "fer") from two pota.app samples of 2026-11-12, 3,726 spots: comment
+// or say "fer") from four pota.app samples of 2026-11-12: comment
 // text, park, own spot or not, and what the comment adds. Public spots.
 test('real pota.app comments: only the plain n-fer forms add parks, and only from an own spot', () => {
   const rows = JSON.parse(readSrc(path.join(__dirname, 'fixtures', 'nfer-real-comments.json')));
@@ -358,11 +435,14 @@ test('real pota.app comments: only the plain n-fer forms add parks, and only fro
     assert.deepStrictEqual(got, r.own ? r.extra : [], `${r.own ? 'own' : 'another spotter\'s'} spot at ${r.park}: ${r.comment}`);
     if (got.length) adds.push(r.comment);
   }
-  assert.deepStrictEqual(adds.sort(), [
-    '2-fer: US-7461 US-3762',
-    '2Fer (DE-0157, DE-0288) - Self-spotted via World Radio League',
-    '3-fer: GB-0553 GB-2874 GB-0151',
-    '3-fer: US-4579 US-4576 US-4566',
+  assert.deepStrictEqual([...new Set(adds)].sort(), [
+    '2-fer: CA-0076 CA-5288',                                           // VY2MG
+    '2-fer: PT-0051 PT-0054',                                           // CS7BHA/P, spotted at PT-0054
+    '2-fer: US-7461 US-3762',                                           // N4NN
+    '2Fer (DE-0157, DE-0288) - Self-spotted via World Radio League',    // DL/NT6B
+    '3-fer: GB-0553 GB-2874 GB-0151',                                   // M7VDS
+    '3-fer: US-3544 US-4566 US-4578',                                   // N6FMD
+    '3-fer: US-4579 US-4576 US-4566',                                   // K0RDY
   ]);
   const byComment = (c) => rows.find((r) => r.comment === c);
   assert.deepStrictEqual(byComment('QRT 2Fer (DE-0157, DE-0288) - Self-spotted via World Radio League').extra, [], 'QRT: they have left');
@@ -443,6 +523,52 @@ test('a spot whose time cannot be read might be the newest: nothing is added', (
   }
 });
 
+// Fourth review: with the PC clock 10 to 60 minutes slow, the newer "now only
+// US-1111" looked like a spot from the future, was skipped, and the 70-minute-old
+// 2-fer decided.
+test('a spot from the future means our clock is wrong: nothing is added', () => {
+  const real = Date.UTC(2026, 10, 12, 18, 0, 0);
+  const isoAgo = (min) => new Date(real - min * 60000).toISOString().slice(0, 19);
+  const spots = [{ spotter: 'K1ABC', comments: '2fer US-1111 US-2222', spotTime: isoAgo(70) }, { spotter: 'K1ABC', comments: 'now only US-1111', spotTime: isoAgo(3) }];
+  for (const slow of [0, 4, 6, 10, 30, 60, 89, 120]) {
+    assert.deepStrictEqual(N.nferExtraRefs({ call: 'K1ABC', spottedRef: 'US-1111', now: real - slow * 60000, spots }), [], `PC ${slow} min slow`);
+  }
+  // The newer spot seen only in the collected spots, at another park.
+  for (const slow of [6, 10, 60]) {
+    assert.deepStrictEqual(N.nferExtraRefs({ call: 'K1ABC', spottedRef: 'US-1111', now: real - slow * 60000, spots: spots.slice(0, 1),
+      buffer: [{ callsign: 'K1ABC', reference: 'US-3333', spotter: 'K1ABC', comments: 'here now', spotTime: isoAgo(3) }] }), [], `PC ${slow} min slow, moved`);
+  }
+  // A future-dated spot of theirs refuses even when it is the n-fer itself, or sits at another park, or says nothing.
+  const two = { spotter: 'K1ABC', comments: '2fer US-1111 US-2222', spotTime: isoAgo(20) };
+  assert.deepStrictEqual(N.nferExtraRefs({ call: 'K1ABC', spottedRef: 'US-1111', now: real, spots: [two] }), ['US-2222']);
+  assert.deepStrictEqual(N.nferExtraRefs({ call: 'K1ABC', spottedRef: 'US-1111', now: real, spots: [two, { spotter: 'K1ABC', comments: 'single park now', spotTime: isoAgo(-10) }] }), []);
+  assert.deepStrictEqual(N.nferExtraRefs({ call: 'K1ABC', spottedRef: 'US-1111', now: real, spots: [two, { spotter: 'K1ABC', comments: '', spotTime: isoAgo(-6) }] }), []);
+  assert.deepStrictEqual(N.nferExtraRefs({ call: 'K1ABC', spottedRef: 'US-1111', now: real, spots: [two],
+    buffer: [{ callsign: 'K1ABC', reference: 'US-3333', spotter: 'K1ABC', comments: '', spotTime: isoAgo(-10) }] }), []);
+  // Within the 5 minutes of skew a newer spot is simply the newest.
+  assert.deepStrictEqual(N.nferExtraRefs({ call: 'K1ABC', spottedRef: 'US-1111', now: real, spots: [two, { spotter: 'K1ABC', comments: 'single park now', spotTime: isoAgo(-4) }] }), []);
+  assert.deepStrictEqual(N.nferExtraRefs({ call: 'K1ABC', spottedRef: 'US-1111', now: real, spots: [{ ...two, spotTime: isoAgo(-4) }] }), ['US-2222']);
+  // Somebody else's future-dated spot is not our business.
+  assert.deepStrictEqual(N.nferExtraRefs({ call: 'K1ABC', spottedRef: 'US-1111', now: real, spots: [two, { spotter: 'W9XYZ', comments: 'x', spotTime: isoAgo(-30) }] }), ['US-2222']);
+  // A fast PC clock only makes spots look older: a 3-minute-old 2-fer still reads as theirs, until it looks over 90 minutes old.
+  for (const fast of [10, 30, 60, 85]) assert.deepStrictEqual(N.nferExtraRefs({ call: 'K1ABC', spottedRef: 'US-1111', now: real + fast * 60000, spots: [{ ...two, spotTime: isoAgo(3) }] }), ['US-2222']);
+  assert.deepStrictEqual(N.nferExtraRefs({ call: 'K1ABC', spottedRef: 'US-1111', now: real + 95 * 60000, spots: [{ ...two, spotTime: isoAgo(3) }] }), []);
+});
+
+test('a time that cannot be true is a time that cannot be read', () => {
+  const two = own('2fer US-1111 US-2222', '14:50');
+  for (const spotTime of [5, 1, 1577836799, 1577836799000, 99999999999, 100000000000, 4102444800000, '2019-12-31T23:59:59', '1970-01-01T00:00:00',
+    '0000-00-00T00:00:00', '2026-13-45T99:99:99', '2099-01-01T00:00:00']) {
+    assert.deepStrictEqual(extra([two, { spotter: 'K1ABC', comments: 'single park now', spotTime }], 'US-1111'), [], 'a newer denial timed ' + spotTime);
+    assert.deepStrictEqual(extra([{ spotter: 'K1ABC', comments: '2fer US-1111 US-2222', spotTime }], 'US-1111'), [], 'an n-fer timed ' + spotTime);
+    assert.deepStrictEqual(N.nferExtraRefs({ call: 'K1ABC', spottedRef: 'US-1111', now: NOW, spots: [two],
+      buffer: [{ callsign: 'K1ABC', reference: 'US-3333', spotter: 'K1ABC', comments: 'moved', spotTime }] }), [], 'a collected spot at another park timed ' + spotTime);
+  }
+  assert.deepStrictEqual(extra([two], 'US-1111'), ['US-2222']);
+  // An OLD spot with a sound time is just old.
+  assert.deepStrictEqual(extra([two, own('QRT', '09:00'), { spotter: 'K1ABC', comments: 'x', spotTime: '2026-11-01T10:00:00' }], 'US-1111'), ['US-2222']);
+});
+
 test('only spots from now: 90 minutes back (as the spot list match), 5 minutes of clock skew ahead', () => {
   const c = '2-fer US-1111, US-2222';
   const ago = (min, comment = c, spotter = 'K1ABC') => ({ spotter, comments: comment, spotTime: new Date(NOW - min * 60000).toISOString().slice(0, 19) });
@@ -462,7 +588,7 @@ test('two activations on one day: only this afternoon\'s parks', () => {
   const day = [own('2-fer K-1111 K-2222', '09:00'), own('2-fer K-1111 K-3333', '14:40')];
   assert.deepStrictEqual(extra(day, 'US-1111'), ['US-3333']);
   assert.deepStrictEqual(extra(day.slice(0, 1), 'US-1111'), [], 'the morning spot alone is 6 hours old');
-  assert.deepStrictEqual(extra(day, 'US-1111', { now: Date.UTC(2026, 10, 12, 9, 30) }), ['US-2222'], 'at 09:30 the morning\'s; the afternoon has not happened');
+  assert.deepStrictEqual(extra(day.slice(0, 1), 'US-1111', { now: Date.UTC(2026, 10, 12, 9, 30) }), ['US-2222'], 'at 09:30 it was the morning\'s');
 });
 
 // POTACAT's collected spots hold every park the activator was spotted at, and
@@ -512,8 +638,9 @@ test('their newest spot is at ANOTHER park: they have moved, nothing is added', 
   assert.deepStrictEqual(go([], [buf('US-2222', '2-fer US-2222 US-1111', '15:00')]), []);
   // The old and the new form of the US prefix are one park.
   assert.deepStrictEqual(go(history, [buf('K-1111', '2-fer US-1111 US-2222', '14:30')]), ['US-2222']);
-  // An unreadable time on a spot at another park does not veto this park.
-  assert.deepStrictEqual(go(history, [{ callsign: 'W1ABC', reference: 'US-3333', spotter: 'W1ABC', comments: 'x', spotTime: '' }]), ['US-2222']);
+  // An unreadable time on their spot at another park: it might be the newest, so nothing.
+  assert.deepStrictEqual(go(history, [{ callsign: 'W1ABC', reference: 'US-3333', spotter: 'W1ABC', comments: 'x', spotTime: '' }]), []);
+  assert.deepStrictEqual(go(history, [{ callsign: 'W1ABC', reference: 'US-3333', spotter: 'W1ABC', comments: 'x', spotTime: 5 }]), []);
 });
 
 test('hostile entries are skipped, not coerced', () => {
@@ -622,6 +749,31 @@ test('cache: a failed or hung refresh never leaves the old spots deciding', asyn
   const odd = new N.NferCache({ fetchHistory: async () => ({ error: 'x' }) });
   odd.prefetch('K1ABC', 'US-1111'); await wait(5);
   assert.strictEqual(odd.fresh('K1ABC', 'US-1111'), null);
+});
+
+test('cache: of a long history the NEWEST own spots are kept, whatever order it came in', async () => {
+  const mins = (m) => new Date(NOW - m * 60000).toISOString().slice(0, 19);
+  for (const order of ['ascending', 'descending', 'shuffled']) {
+    // 150 own spots, one a minute; the newest says one park, the other 149 say 2-fer.
+    let many = Array.from({ length: 150 }, (_, i) => ({ spotter: 'K1ABC', comments: i === 0 ? 'QSY single park' : '2fer US-1111 US-2222', spotTime: mins(i + 1) }));
+    if (order === 'ascending') many = many.reverse();
+    if (order === 'shuffled') many = many.map((x, i) => [(i * 7919) % 150, x]).sort((a, b) => a[0] - b[0]).map((p) => p[1]);
+    const c = new N.NferCache({ now: () => NOW, fetchHistory: async () => many });
+    c.prefetch('K1ABC', 'US-1111');
+    await wait(5);
+    const kept = c.fresh('K1ABC', 'US-1111');
+    assert.strictEqual(kept.length, 100, order);
+    assert.strictEqual(kept[0].comments, 'QSY single park', order + ': the newest is kept, first');
+    assert.deepStrictEqual(extra(kept, 'US-1111'), [], order + ': and it decides');
+  }
+  // A spot with no readable time is kept too (it sorts first) and refuses.
+  const odd = Array.from({ length: 150 }, (_, i) => ({ spotter: 'K1ABC', comments: '2fer US-1111 US-2222', spotTime: mins(i + 1) }));
+  odd.push({ spotter: 'K1ABC', comments: 'moved', spotTime: '' });
+  const c = new N.NferCache({ now: () => NOW, fetchHistory: async () => odd });
+  c.prefetch('K1ABC', 'US-1111');
+  await wait(5);
+  assert.strictEqual(c.fresh('K1ABC', 'US-1111')[0].comments, 'moved');
+  assert.deepStrictEqual(extra(c.fresh('K1ABC', 'US-1111'), 'US-1111'), []);
 });
 
 test('a QSO starts once: the state is broadcast on every step, the spot-list lookup is for the first', () => {
@@ -738,6 +890,7 @@ test('S2C jtcat-qso-logged goes only to clients that declared they understand it
     client('legacy, no hello', []),
     { name: 'no capabilities at all' },
     client('remote JTCAT window', ['qso-attributed', 'jtcat-qso-logged']),
+    { name: 'Guest Pass session', _passSession: { id: 'p1' }, _clientCapabilities: ['chunked-all-qsos', 'jtcat-qso-logged'] }, // the log is the owner's
   ];
   const fake = { _openClients: () => clients, _sendTo: (c, msg) => sent.push([c.name, msg]) };
   const d = { callsign: 'DK5UR', parksText: 'at DE-1197 and DE-0941', parksNote: 'DE-0941: from their own spot comment', band: '20m', mode: 'FT8' };
@@ -754,6 +907,8 @@ test('S2C jtcat-qso-logged goes only to clients that declared they understand it
   assert.ok(/'jtcat-qso-logged': \{ dir: Dir\.S2C, feature: 'jtcat', fields: \{ callsign: f\.string, parksText: f\.optString, parksNote: f\.optString,/.test(reg));
   const doc = readSrc(path.join(root, 'docs', 'echocat-protocol.md'));
   assert.ok(doc.includes('| `jtcat-qso-logged` | S→C |') && doc.includes('only to a client whose `hello.capabilities` include `jtcat-qso-logged`'), 'in the wire contract, with its gate');
+  assert.ok(doc.includes('never to a Guest Pass session'));
+  assert.ok(/if \(c\._passSession\) continue;/.test(readSrc(path.join(root, 'lib', 'remote-server.js')).split('broadcastJtcatQsoLogged(data) {')[1].slice(0, 200)));
 });
 
 test('the shack sends one notice per JTCAT write; a remote JTCAT window shows the card; ECHOCAT Web toasts only parks read from a comment', () => {
@@ -969,7 +1124,7 @@ test('at the log write: only a fresh history adds parks, nothing is awaited, a t
   assert.ok(/const history = _nferCache\.fresh\(call, spotted\.ref\);\n\s*if \(!history\) \{/.test(ex), 'no history from the last 3 minutes: nothing is added');
   assert.ok(/spots: history,\n\s*buffer: _potaSpotHistory\.filter\(\(s\) => NferRefs\.baseCall\(s\.callsign\) === theirCall\),/.test(ex), 'the collected spots go in as the buffer, their spots at ANY park');
   assert.ok(!/_nferCache\.get\(/.test(main), 'never the cache without the freshness check');
-  assert.ok(/now: Date\.now\(\)/.test(ex), 'the time of the contact');
+  assert.ok(/now: StationClock\.now\(\),/.test(ex) && !/Date\.now\(\)/.test(ex), 'the time of the contact, by the corrected station clock');
   assert.ok(/parkKnown: jtcatParkKnown,/.test(ex));
   assert.ok(!/matchAll|\.comments|RegExp/.test(ex), 'no parsing in main.js');
   const log = fnBody('jtcatAutoLog');
@@ -982,12 +1137,15 @@ test('at the log write: only a fresh history adds parks, nothing is awaited, a t
   assert.ok(/if \(!list \|\| !list\.map \|\| !list\.map\.size\) return null;/.test(known), 'list not loaded = no answer, not "unknown park"');
 });
 
-test('a country with no park list is not asked for again at every QSO start', () => {
+test('a park list that failed to load: asked again after 90 s, after 15 minutes when POTA said the program has no parks', () => {
   const en = fnBody('ensureParksForRef');
-  assert.ok(/const failedAt = _parksNoList\.get\(program\);\n\s*if \(failedAt && Date\.now\(\) - failedAt < PARKS_NO_LIST_MS\) return;/.test(en));
+  assert.ok(/const failed = _parksNoList\.get\(program\);\n\s*if \(failed && Date\.now\(\) - failed\.at < failed\.ms\) return;/.test(en));
   assert.ok(/if \(program === parksDbPrefix \|\| _parksOther\.has\(program\)\) _parksNoList\.delete\(program\);/.test(en), 'a list that did load clears it');
-  assert.ok(/_parksNoList\.set\(program, Date\.now\(\)\);/.test(en));
-  assert.ok(/const PARKS_NO_LIST_MS = 15 \* 60 \* 1000;/.test(main));
+  assert.ok(!/_parksNoList\.set/.test(en), 'how long is decided where the failure is known');
+  const rd = fnBody('readParksProgram');
+  assert.ok(/_parksNoList\.set\(prefix, \{ at: Date\.now\(\), ms: \/\^POTA has no parks\/\.test\(String\(err && err\.message\)\) \? PARKS_NO_LIST_MS : PARKS_RETRY_MS \}\);/.test(rd));
+  assert.ok(/throw new Error\(`POTA has no parks for program \$\{prefix\}`\);/.test(rd), 'the message the 15 minutes hang on');
+  assert.ok(/const PARKS_NO_LIST_MS = 15 \* 60 \* 1000;/.test(main) && /const PARKS_RETRY_MS = 90 \* 1000;/.test(main), 'a network blip hides a country from the park search for 90 s, not 15 minutes');
 });
 
 test('the n-fer block comes before any automatic re-spot (#351)', () => {

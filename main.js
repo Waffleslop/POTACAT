@@ -701,8 +701,9 @@ let parksDbLoading = false;
 const _parksLoads = new Map();   // program -> Promise of the load in flight
 const _parksOther = new Map();   // program -> { array, map }, insertion order = age
 const PARKS_OTHER_MAX = 5;
-const _parksNoList = new Map();  // program -> when its list last failed to load (ensureParksForRef)
-const PARKS_NO_LIST_MS = 15 * 60 * 1000;
+const _parksNoList = new Map();  // program -> { at, ms }: its list failed to load at `at`, do not ask again for `ms`
+const PARKS_NO_LIST_MS = 15 * 60 * 1000; // POTA answered: no parks for this program
+const PARKS_RETRY_MS = 90 * 1000;        // a network error
 
 // --- cty.dat database (loaded once at startup) ---
 let ctyDb = null;
@@ -16734,7 +16735,7 @@ function jtcatNferExtras(call, spotted, knownRefs) {
     }
     const theirCall = NferRefs.baseCall(call);
     return NferRefs.nferExtraRefs({
-      call, spottedRef: spotted.ref, now: Date.now(), known: knownRefs,
+      call, spottedRef: spotted.ref, now: StationClock.now(), known: knownRefs, // the corrected clock: spot ages are compared with it
       spots: history,
       buffer: _potaSpotHistory.filter((s) => NferRefs.baseCall(s.callsign) === theirCall), // at ANY park: a newer spot elsewhere means they moved
       parkKnown: jtcatParkKnown,
@@ -51857,6 +51858,11 @@ async function readParksProgram(prefix) {
     return parks;
   } catch (err) {
     sendCatLog(`[ParksDB] Could not load parks for ${prefix}: ${err.message}`);
+    // Not asked again at once (ensureParksForRef): 15 minutes when POTA
+    // answered that the program has no parks, 90 s after a network error, so a
+    // blip does not hide a country's parks from the park search.
+    _parksNoList.set(prefix, { at: Date.now(), ms: /^POTA has no parks/.test(String(err && err.message)) ? PARKS_NO_LIST_MS : PARKS_RETRY_MS });
+    while (_parksNoList.size > 50) _parksNoList.delete(_parksNoList.keys().next().value);
     return (cached && Array.isArray(cached.parks)) ? cached.parks : [];
   }
 }
@@ -51900,16 +51906,12 @@ async function ensureParksForRef(ref) {
   if (ParksDb.isTestRef(ref)) return;
   const program = ParksDb.programOfRef(ref);
   if (!program || program === parksDbPrefix) return;
-  // A program with no list (a WWFF prefix, a typo, pota.app down) is not
-  // asked for again at every QSO start or keystroke: once in 15 minutes.
-  const failedAt = _parksNoList.get(program);
-  if (failedAt && Date.now() - failedAt < PARKS_NO_LIST_MS) return;
+  // A program whose list just failed to load is not asked for again at every
+  // QSO start or keystroke (readParksProgram notes the failure and for how long).
+  const failed = _parksNoList.get(program);
+  if (failed && Date.now() - failed.at < failed.ms) return;
   try { await loadParksDbForProgram(program, { home: false }); } catch { /* lookup falls back to spots */ }
   if (program === parksDbPrefix || _parksOther.has(program)) _parksNoList.delete(program);
-  else {
-    _parksNoList.set(program, Date.now());
-    while (_parksNoList.size > 50) _parksNoList.delete(_parksNoList.keys().next().value);
-  }
 }
 
 /** The loaded list for a reference's program (home or another), or null. */

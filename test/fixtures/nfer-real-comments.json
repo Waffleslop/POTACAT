@@ -6,6 +6,12 @@
   "extra": [ "GB-2874", "GB-0151"]
  },
  {
+  "park": "US-3544",
+  "comment": "3-fer: US-3544 US-4566 US-4578",
+  "own": true,
+  "extra": [ "US-4566", "US-4578"]
+ },
+ {
   "park": "US-4579",
   "comment": "3-fer: US-4579 US-4576 US-4566",
   "own": true,
@@ -18,10 +24,22 @@
   "extra": [ "US-10775", "US-4581"]
  },
  {
+  "park": "CA-0076",
+  "comment": "2-fer: CA-0076 CA-5288",
+  "own": true,
+  "extra": [ "CA-5288"]
+ },
+ {
   "park": "DE-0157",
   "comment": "2Fer (DE-0157, DE-0288) - Self-spotted via World Radio League",
   "own": true,
   "extra": [ "DE-0288"]
+ },
+ {
+  "park": "PT-0054",
+  "comment": "2-fer: PT-0051 PT-0054",
+  "own": true,
+  "extra": [ "PT-0051"]
  },
  {
   "park": "US-7461",
@@ -30,8 +48,38 @@
   "extra": [ "US-3762"]
  },
  {
+  "park": "US-9938",
+  "comment": "2fer with US-4526",
+  "own": false,
+  "extra": [ "US-4526"]
+ },
+ {
+  "park": "AR-0047",
+  "comment": "Llamando cq",
+  "own": true,
+  "extra": []
+ },
+ {
   "park": "CA-0154",
   "comment": "",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "CA-0154",
+  "comment": "QRT.   Thanks hunters!",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "CA-1294",
+  "comment": "Ft4",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "CA-1294",
+  "comment": "Qrt",
   "own": true,
   "extra": []
  },
@@ -44,6 +92,12 @@
  {
   "park": "CA-3445",
   "comment": "beautiful day outside",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "CA-3445",
+  "comment": "lets give 17m a try",
   "own": true,
   "extra": []
  },
@@ -79,6 +133,30 @@
  },
  {
   "park": "CA-5585",
+  "comment": "FT8",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "CA-5598",
+  "comment": "Ft8",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "CA-6392",
+  "comment": "FT8",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "CA-6392",
+  "comment": "QRT",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "CN-0177",
   "comment": "FT8",
   "own": true,
   "extra": []
@@ -145,6 +223,24 @@
  },
  {
   "park": "GB-4563",
+  "comment": ".",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "GB-4563",
+  "comment": "back on frequency",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "GB-4563",
+  "comment": "going hunting for a while",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "GB-4563",
   "comment": "going off hunting but I will be back soon",
   "own": true,
   "extra": []
@@ -158,6 +254,12 @@
  {
   "park": "GB-4563",
   "comment": "Hoping for north America but happy to talk to anybody",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "GB-4563",
+  "comment": "new frequency",
   "own": true,
   "extra": []
  },
@@ -182,6 +284,24 @@
  {
   "park": "GB-6092",
   "comment": "Qsy 10m",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "GB-6569",
+  "comment": "20m FT8",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-0013",
+  "comment": "5/9",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-0013",
+  "comment": "Ssb",
   "own": true,
   "extra": []
  },
@@ -242,6 +362,18 @@
  {
   "park": "US-0602",
   "comment": "QRT",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-0661",
+  "comment": "Hunting CW",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-0661",
+  "comment": "Hunting FT8",
   "own": true,
   "extra": []
  },
@@ -312,8 +444,74 @@
   "extra": []
  },
  {
+  "park": "US-1049",
+  "comment": "CW QRP",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-1052",
+  "comment": "On air ssb",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-1052",
+  "comment": "On air SSB",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-1052",
+  "comment": "Qrt moving to 17 m",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-10530",
+  "comment": "cw - foggy morning",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-10530",
+  "comment": "qrt - to next park",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-10530",
+  "comment": "SWL",
+  "own": true,
+  "extra": []
+ },
+ {
   "park": "US-10788",
   "comment": "Ssb",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-1091",
+  "comment": "ft8",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-1091",
+  "comment": "ft8 3fer",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-11019",
+  "comment": "Hey friends.  And us-4510",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-11019",
+  "comment": "QRT.   TNX AGN. 73",
   "own": true,
   "extra": []
  },
@@ -330,14 +528,68 @@
   "extra": []
  },
  {
+  "park": "US-12153",
+  "comment": "cw - park #3",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-12153",
+  "comment": "cw -at park 3",
+  "own": true,
+  "extra": []
+ },
+ {
   "park": "US-12204",
   "comment": "cw",
   "own": true,
   "extra": []
  },
  {
+  "park": "US-1223",
+  "comment": "SSB",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-1256",
+  "comment": "Calling CQ",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-1256",
+  "comment": "QSY",
+  "own": true,
+  "extra": []
+ },
+ {
   "park": "US-12685",
   "comment": "SSB",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-12816",
+  "comment": "Also us-4578",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-1288",
+  "comment": "",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-1288",
+  "comment": "KY",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-1288",
+  "comment": "Qrt",
   "own": true,
   "extra": []
  },
@@ -360,6 +612,18 @@
   "extra": []
  },
  {
+  "park": "US-13642",
+  "comment": "",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-13642",
+  "comment": "QRT",
+  "own": true,
+  "extra": []
+ },
+ {
   "park": "US-13647",
   "comment": "",
   "own": true,
@@ -378,14 +642,56 @@
   "extra": []
  },
  {
+  "park": "US-13657",
+  "comment": "QRT",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-13657",
+  "comment": "QRV BRAND NEW PARK",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-1402",
+  "comment": "ft8",
+  "own": true,
+  "extra": []
+ },
+ {
   "park": "US-1586",
   "comment": "SSB",
   "own": true,
   "extra": []
  },
  {
+  "park": "US-1735",
+  "comment": "CQ DE",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-1735",
+  "comment": "Moved frequencies",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-1832",
+  "comment": "",
+  "own": true,
+  "extra": []
+ },
+ {
   "park": "US-1877",
   "comment": "Sebring, FL",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-1940",
+  "comment": "CQ",
   "own": true,
   "extra": []
  },
@@ -432,8 +738,50 @@
   "extra": []
  },
  {
+  "park": "US-2169",
+  "comment": "US-2169",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-2281",
+  "comment": "",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-2328",
+  "comment": "FT8",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-2361",
+  "comment": "POTA",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-2361",
+  "comment": "QRT THANK YOU HUNTERS",
+  "own": true,
+  "extra": []
+ },
+ {
   "park": "US-2425",
   "comment": "Cq",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-2487",
+  "comment": "Ft8",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-2641",
+  "comment": "HUNT ME! (SENT VIA OFFLINE SPOTTER FOR IOS) [SMS] [APSPOT]",
   "own": true,
   "extra": []
  },
@@ -486,6 +834,12 @@
   "extra": []
  },
  {
+  "park": "US-2844",
+  "comment": "FT8",
+  "own": true,
+  "extra": []
+ },
+ {
   "park": "US-2890",
   "comment": "",
   "own": true,
@@ -506,6 +860,12 @@
  {
   "park": "US-2890",
   "comment": "Ssb",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-2903",
+  "comment": "Call cq",
   "own": true,
   "extra": []
  },
@@ -534,6 +894,12 @@
   "extra": []
  },
  {
+  "park": "US-2907",
+  "comment": "QRV  CQ",
+  "own": true,
+  "extra": []
+ },
+ {
   "park": "US-3005",
   "comment": "QSY",
   "own": true,
@@ -554,6 +920,18 @@
  {
   "park": "US-3025",
   "comment": "Ft8",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-3025",
+  "comment": "Qrt",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-3053",
+  "comment": "",
   "own": true,
   "extra": []
  },
@@ -588,8 +966,38 @@
   "extra": []
  },
  {
+  "park": "US-3544",
+  "comment": "Qrt 3-fer: US-3544 US-4566 US-4578",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-3615",
+  "comment": "Gone hunting",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-3615",
+  "comment": "Self-spotted via World Radio League",
+  "own": true,
+  "extra": []
+ },
+ {
   "park": "US-3654",
   "comment": "QRP",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-3724",
+  "comment": "QRT",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-3724",
+  "comment": "QRV",
   "own": true,
   "extra": []
  },
@@ -608,6 +1016,12 @@
  {
   "park": "US-3931",
   "comment": "Had to qsy to here!",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-3931",
+  "comment": "Ouch! Bad noise. I’ll qsy",
   "own": true,
   "extra": []
  },
@@ -637,12 +1051,42 @@
  },
  {
   "park": "US-3949",
+  "comment": "Qrt",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-3949",
   "comment": "Ssb",
   "own": true,
   "extra": []
  },
  {
   "park": "US-4247",
+  "comment": "Double Ops N9NAV & W9PIO",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-4265",
+  "comment": "",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-4265",
+  "comment": "Am 10 meters hifi sound",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-4265",
+  "comment": "Hifi AM pota sound",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-4314",
   "comment": "Double Ops N9NAV & W9PIO",
   "own": true,
   "extra": []
@@ -660,6 +1104,30 @@
   "extra": []
  },
  {
+  "park": "US-4433",
+  "comment": "PARK ROVE: Park 3 of 5 (Skipped 1 stops)",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-4433",
+  "comment": "PARK ROVE: QRT - Going to next park (1 more parks to go)",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-4450",
+  "comment": "2nd park US-9924",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-4450",
+  "comment": "QSY 20m",
+  "own": true,
+  "extra": []
+ },
+ {
   "park": "US-4491",
   "comment": "qFT8",
   "own": true,
@@ -672,8 +1140,20 @@
   "extra": []
  },
  {
+  "park": "US-4646",
+  "comment": "",
+  "own": true,
+  "extra": []
+ },
+ {
   "park": "US-4746",
   "comment": "",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-4746",
+  "comment": "QRT",
   "own": true,
   "extra": []
  },
@@ -720,6 +1200,12 @@
   "extra": []
  },
  {
+  "park": "US-6035",
+  "comment": "Cw",
+  "own": true,
+  "extra": []
+ },
+ {
   "park": "US-6305",
   "comment": "Cw",
   "own": true,
@@ -740,6 +1226,18 @@
  {
   "park": "US-6305",
   "comment": "Upping 40M EFHW",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-6590",
+  "comment": "how bout 60m ft8",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-6590",
+  "comment": "park 5 of 6   ft4",
   "own": true,
   "extra": []
  },
@@ -774,6 +1272,12 @@
   "extra": []
  },
  {
+  "park": "US-6848",
+  "comment": "ON AIR NOW! HUNT ME! (SENT VIA OFFLINE SPOTTER FOR IOS) [SMS] [APSPOT]",
+  "own": true,
+  "extra": []
+ },
+ {
   "park": "US-6937",
   "comment": "Self-spot via HAMRS Pro",
   "own": true,
@@ -788,6 +1292,30 @@
  {
   "park": "US-7381",
   "comment": "Cw pota",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-7461",
+  "comment": "QRT 2-fer: US-7461 US-3762",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-7920",
+  "comment": "Ready for your call",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-8147",
+  "comment": "",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-8152",
+  "comment": "CW",
   "own": true,
   "extra": []
  },
@@ -816,6 +1344,18 @@
   "extra": []
  },
  {
+  "park": "US-8364",
+  "comment": "cqcq",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-8364",
+  "comment": "qrt",
+  "own": true,
+  "extra": []
+ },
+ {
   "park": "US-8369",
   "comment": "QRT",
   "own": true,
@@ -828,8 +1368,50 @@
   "extra": []
  },
  {
+  "park": "US-8414",
+  "comment": "Cw",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-8507",
+  "comment": "On the air",
+  "own": true,
+  "extra": []
+ },
+ {
   "park": "US-8512",
   "comment": "Cw",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-8666",
+  "comment": "",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-8666",
+  "comment": "CW QRP .1 W",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-8666",
+  "comment": "CW QRP 1w",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-8670",
+  "comment": "CQ 12 meters",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-8670",
+  "comment": "CQ 15",
   "own": true,
   "extra": []
  },
@@ -842,6 +1424,24 @@
  {
   "park": "US-8670",
   "comment": "CQ 20",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-8670",
+  "comment": "CQ 6 m",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-8670",
+  "comment": "CQ 6 m SSB",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-8670",
+  "comment": "QRT",
   "own": true,
   "extra": []
  },
@@ -894,6 +1494,18 @@
   "extra": []
  },
  {
+  "park": "US-9401",
+  "comment": "",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-9401",
+  "comment": "Qsy ssb",
+  "own": true,
+  "extra": []
+ },
+ {
   "park": "US-9467",
   "comment": "FT8",
   "own": true,
@@ -912,6 +1524,24 @@
   "extra": []
  },
  {
+  "park": "US-9516",
+  "comment": "Qrt",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-9516",
+  "comment": "Ssb",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-9669",
+  "comment": "Ft8",
+  "own": true,
+  "extra": []
+ },
+ {
   "park": "US-9954",
   "comment": "FT8",
   "own": true,
@@ -919,8 +1549,38 @@
  },
  {
   "park": "US-9954",
+  "comment": "QRT",
+  "own": true,
+  "extra": []
+ },
+ {
+  "park": "US-9954",
   "comment": "QRT switching bands to 15m",
   "own": true,
+  "extra": []
+ },
+ {
+  "park": "AR-0373",
+  "comment": "POTA AR-0373 FT8  Sent: -14  Rcvd: -16",
+  "own": false,
+  "extra": []
+ },
+ {
+  "park": "CA-0154",
+  "comment": "[PW] CA-0154, Biscotasi Lake Provincial Park",
+  "own": false,
+  "extra": []
+ },
+ {
+  "park": "CA-1658",
+  "comment": "CA-1658",
+  "own": false,
+  "extra": []
+ },
+ {
+  "park": "CA-1658",
+  "comment": "CA-1658 Sunnidale Recreation Park",
+  "own": false,
   "extra": []
  },
  {
@@ -948,6 +1608,18 @@
   "extra": []
  },
  {
+  "park": "US-1010",
+  "comment": "US-1010   US-IL   FT8  Sent: -12  Rcvd: -12",
+  "own": false,
+  "extra": []
+ },
+ {
+  "park": "US-11019",
+  "comment": "[PW] US-11019, Shining Rock Wilderness Area",
+  "own": false,
+  "extra": []
+ },
+ {
   "park": "US-12685",
   "comment": "[POTA US-12685 US-MN Mallard Marsh:Gombold Unit Wildlife Management Area]",
   "own": false,
@@ -960,8 +1632,26 @@
   "extra": []
  },
  {
+  "park": "US-13649",
+  "comment": "[PW] US-13649, Old Koschak Farm Wildlife Management Area",
+  "own": false,
+  "extra": []
+ },
+ {
+  "park": "US-13657",
+  "comment": "[PW] US-13657, Nessel Wildlife Management Area",
+  "own": false,
+  "extra": []
+ },
+ {
   "park": "US-1877",
   "comment": "[POTA US-1877 US-FL Highlands Hammock State Park]",
+  "own": false,
+  "extra": []
+ },
+ {
+  "park": "US-2090",
+  "comment": "P2P US-0661 Florida 73",
   "own": false,
   "extra": []
  },
@@ -974,6 +1664,12 @@
  {
   "park": "US-2169",
   "comment": "[PW] Cloudland Canyon State Park also KFF-2169",
+  "own": false,
+  "extra": []
+ },
+ {
+  "park": "US-2169",
+  "comment": "59 US-9924 US 4450",
   "own": false,
   "extra": []
  },
@@ -992,6 +1688,24 @@
  {
   "park": "US-3025",
   "comment": "FT8  Sent: -14  Rcvd: -03 US-3025",
+  "own": false,
+  "extra": []
+ },
+ {
+  "park": "US-3544",
+  "comment": "[55 ON]   {Also: US-4566,US-4578}",
+  "own": false,
+  "extra": []
+ },
+ {
+  "park": "US-3544",
+  "comment": "US-3544,US-4566,US-4578",
+  "own": false,
+  "extra": []
+ },
+ {
+  "park": "US-3654",
+  "comment": "P2P US-0661 Florida 73",
   "own": false,
   "extra": []
  },
@@ -1038,6 +1752,12 @@
   "extra": []
  },
  {
+  "park": "US-4579",
+  "comment": "US-4579,US-4566,US-4576",
+  "own": false,
+  "extra": []
+ },
+ {
   "park": "US-4939",
   "comment": "[POTA US-4939 US-NH Opechee Bay State Forest]",
   "own": false,
@@ -1046,6 +1766,12 @@
  {
   "park": "US-4939",
   "comment": "[PW] US-4939, Opechee Bay State Forest",
+  "own": false,
+  "extra": []
+ },
+ {
+  "park": "US-6035",
+  "comment": "P2P US-0661 Florida 73",
   "own": false,
   "extra": []
  },
@@ -1062,6 +1788,18 @@
   "extra": []
  },
  {
+  "park": "US-6615",
+  "comment": "POTA US-6615 R-09/S+01",
+  "own": false,
+  "extra": []
+ },
+ {
+  "park": "US-6615",
+  "comment": "US-6615",
+  "own": false,
+  "extra": []
+ },
+ {
   "park": "US-6848",
   "comment": "[PW] US-6848, President James K. Polk State Historic Site",
   "own": false,
@@ -1070,6 +1808,24 @@
  {
   "park": "US-6848",
   "comment": "59 US-0454 (tnx for P2P)",
+  "own": false,
+  "extra": []
+ },
+ {
+  "park": "US-7381",
+  "comment": "P2P US-0661 Florida 73",
+  "own": false,
+  "extra": []
+ },
+ {
+  "park": "US-7461",
+  "comment": "[CENTRAL TX]   {Also: US-3762}",
+  "own": false,
+  "extra": []
+ },
+ {
+  "park": "US-8147",
+  "comment": "P2P US-0661 Florida 73",
   "own": false,
   "extra": []
  },
@@ -1088,6 +1844,12 @@
  {
   "park": "US-8369",
   "comment": "[PW] US-8369, River Lakes State Conservation Area",
+  "own": false,
+  "extra": []
+ },
+ {
+  "park": "US-8414",
+  "comment": "P2P US-0661 Florida 73",
   "own": false,
   "extra": []
  },
@@ -1136,6 +1898,12 @@
  {
   "park": "US-9938",
   "comment": "SSB  + US-4526 with KM4KDF",
+  "own": false,
+  "extra": []
+ },
+ {
+  "park": "US-9954",
+  "comment": "US-9954   US-VA   FT8  Sent: -01  Rcvd: +00",
   "own": false,
   "extra": []
  }
