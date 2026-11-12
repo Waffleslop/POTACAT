@@ -71,16 +71,16 @@ check('an SDR whose greeting has not named the tuner yet is trusted off the rig\
 });
 check('the refusal names the frequency, the radio and the way out', () => {
   const r = L.refusal(450e6, L.decide(450e6, FLEX, null), 'FLEX-8400/8600');
-  assert.ok(/450 MHz/.test(r) && /FLEX-8400\/8600/.test(r) && /WebSDR/.test(r), r);
+  assert.ok(/450\.000\.00 MHz/.test(r) && /FLEX-8400\/8600/.test(r) && /WebSDR/.test(r), r);
   assert.ok(/cannot receive it either/.test(L.refusal(450e6, { source: 'none', reason: 'neither' }, 'the radio', 'pi')));
-  assert.strictEqual(L.fmtMhz(162475000), '162.475 MHz');
-  assert.strictEqual(L.fmtMhz(14250000), '14.25 MHz');
+  assert.strictEqual(L.fmtMhz(162475000), '162.475.00 MHz'); // the VFO way (Casey 2026-11-11)
+  assert.strictEqual(L.fmtMhz(14250000), '14.250.00 MHz');
 });
 
 check('#277: a ham band the rig is not set up for says where to tick it, not "add an SDR"', () => {
   const HF6 = [[30e3, 54e6]];
   const r = L.refusal(144.2e6, L.decide(144.2e6, HF6, null), 'KX2/KX3', null, { unlistedBand: '2m' });
-  assert.ok(/144\.2 MHz/.test(r) && /2m/.test(r) && /KX2\/KX3/.test(r), r);
+  assert.ok(/144\.200\.00 MHz/.test(r) && /2m/.test(r) && /KX2\/KX3/.test(r), r);
   assert.ok(/Check all bands you can use with this radio/.test(r) && /Settings > Radio > Edit/.test(r), r);
   assert.ok(!/WebSDR/.test(r), r);
   assert.ok(/WebSDR/.test(L.refusal(162.475e6, L.decide(162.475e6, HF6, null), 'KX2/KX3', null, { unlistedBand: '' })), 'off the ham bands: the SDR advice stays');

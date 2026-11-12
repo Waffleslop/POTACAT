@@ -469,6 +469,7 @@ const TESTS = [
   'test/worked-other-test.js',
   'test/decode-contract-test.js',
   'test/layout-alignment-test.js',
+  'test/freq-dots-test.js', // every frequency an operator reads is written the VFO way, 14.074.00 (Casey 2026-11-11)
   'test/settings-contrast-test.js', // Settings meets the contrast rule in every theme (VARA button in She's On Frequency); rendered: scripts/settings-contrast-audit.js
   'test/settings-pi-test.js',
   'test/log-form-layout-test.js', // #240: the Log QSO form is wider, resizable with its width remembered, and its paired fields wrap at any Text size / display scale

@@ -259,8 +259,7 @@ function drawFavorites(ctx, w, h, dpr) {
   }
 }
 function favText(f) {
-  const mhz = (Number(f.khz) / 1000).toFixed(f.khz % 1 ? 4 : 3);
-  return [f.name, mhz + ' MHz', f.mode, f.note].filter(Boolean).join(' · ');
+  return [f.name, FreqDots.khzMhz(f.khz), f.mode, f.note].filter(Boolean).join(' · ');
 }
 function applyFavorites(st) { favItems = st && Array.isArray(st.items) ? st.items : []; scheduleDraw(); }
 if (window.api.favoritesGet) window.api.favoritesGet().then(applyFavorites).catch(() => {});
@@ -283,7 +282,7 @@ function spotText(s) {
   const t = s.spotTime ? Date.parse(/Z$|[+-]dd:?dd$/.test(String(s.spotTime)) ? s.spotTime : s.spotTime + 'Z') : NaN;
   const mins = Number.isFinite(t) ? Math.round((Date.now() - t) / 60000) : null;
   const hz = spotHz(s);
-  return [s.callsign, ref, s.mode, hz ? (hz / 1e6).toFixed(4) + ' MHz' : '', mins != null && mins >= 0 ? mins + ' min ago' : '']
+  return [s.callsign, ref, s.mode, hz ? FreqDots.hzMhz(hz) : '', mins != null && mins >= 0 ? mins + ' min ago' : '']
     .filter(Boolean).join(' · ');
 }
 function tuneSpot(s) {

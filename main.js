@@ -91,6 +91,7 @@ const { app, BrowserWindow, ipcMain, Menu, dialog, Notification, screen, nativeI
 // Outbound fetch never offers Brotli (CVE-2026-111497; Electron 39 carries
 // no fixed Node). Installed before any module that fetches is loaded.
 require('./lib/fetch-policy').installNoBrotliFetch(globalThis);
+const FreqDots = require('./lib/freq-dots'); // display only: 14.074.00 MHz, the VFO way
 const RemoteBridge = require('./lib/remote-bridge');
 const WaterfallPalettes = require('./lib/waterfall-palettes');
 {
@@ -2560,7 +2561,7 @@ async function atuWizardStart(req = {}) {
   const cls = settings.licenseClass || 'none';
   for (const p of points) {
     const v = AtuWizard.pointAllowed(p.freqKhz, p.mode, cls, AtuWizard.DEFAULTS.edgeMarginKhz);
-    if (!v.ok) return { ok: false, reason: `${(p.freqKhz / 1000).toFixed(4)} MHz ${p.mode}: ${v.reason}.` };
+    if (!v.ok) return { ok: false, reason: `${FreqDots.khzMhz(p.freqKhz)} ${p.mode}: ${v.reason}.` };
     if (!p.sliceMode) p.sliceMode = AtuWizard.SLICE_MODE[p.mode] || 'USB';
     if (!p.id) p.id = `${p.band}:${p.mode}:${p.freqKhz}`;
   }
@@ -3565,8 +3566,7 @@ function notifyWatchlistSpot({ callsign, frequency, mode, source, reference, loc
   recentNotifications.set(callsign, now);
 
   // Build notification body
-  const freqMHz = (parseFloat(frequency) / 1000).toFixed(3);
-  let body = `${freqMHz} MHz`;
+  let body = FreqDots.khzMhz(parseFloat(frequency));
   if (mode) body += ` ${mode}`;
   const sourceLabels = { pota: 'POTA', sota: 'SOTA', wwff: 'WWFF', llota: 'LLOTA', gma: 'GMA', parc: 'PARC', dxc: 'DX Cluster', rbn: 'RBN', pskr: 'FreeDV' };
   const label = sourceLabels[source] || source;
@@ -7819,7 +7819,7 @@ function ensureRemoteClient() {
       case 'client-action': {
         const by = (msg.by && msg.by.name) || 'Another device';
         let what = '';
-        if (msg.action === 'tune') what = 'tuned to ' + (msg.freqKhz ? Number(msg.freqKhz).toFixed(1) + ' kHz' : 'a new frequency') + (msg.mode ? ' ' + msg.mode : '');
+        if (msg.action === 'tune') what = 'tuned to ' + (msg.freqKhz ? FreqDots.khzMhz(msg.freqKhz) : 'a new frequency') + (msg.mode ? ' ' + msg.mode : '');
         else if (msg.action === 'set-mode') what = 'changed the mode' + (msg.mode ? ' to ' + msg.mode : '');
         else if (msg.action === 'switch-rig') what = 'switched the radio';
         else if (msg.action === 'jtcat-start') what = 'started FT8';
@@ -12486,7 +12486,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
         // VOX or the rig's PTT line, as for every other no-CAT transmission.
         const noCat = !!(settings.catTarget && settings.catTarget.type === 'none');
         if (noCat) {
-          const byHand = `Set the radio to ${(Number(dialKhz) / 1000).toFixed(4)} MHz ${WinlinkModes.isFmMode(mode) ? 'FM' : 'USB (data)'} yourself; POTACAT keys it by VOX or your PTT line`;
+          const byHand = `Set the radio to ${FreqDots.khzMhz(dialKhz)} ${WinlinkModes.isFmMode(mode) ? 'FM' : 'USB (data)'} yourself; POTACAT keys it by VOX or your PTT line`;
           winlinkLog(`no CAT control: ${byHand}`);
           winlinkState.setSession({ tuned: false, text: byHand });
         } else {
@@ -25138,7 +25138,7 @@ function connectRemote() {
         const mhz = (parseFloat(freqKhz) / 1000).toFixed(3);
         const bandNote = noCatBandNote(parseFloat(mhz));
         sendCatLog(`[Echo CAT] tune: no CAT control — set the radio to ${mhz} MHz by hand${bandNote} (mobile device told)`);
-        remoteServer.sendToClient({ type: 'tune-blocked', reason: `No CAT control — set the radio to ${mhz} MHz by hand${bandNote}` });
+        remoteServer.sendToClient({ type: 'tune-blocked', reason: `No CAT control — set the radio to ${FreqDots.khzMhz(freqKhz)} by hand${bandNote}` });
         return;
       }
       sendCatLog('[Echo CAT] tune refused — radio not connected (mobile device notified)');
@@ -34167,7 +34167,7 @@ async function icomScopeCapture(seconds = 30) {
   let message;
   if (sum.sweeps) {
     message = `Recorded ${sum.sweeps} sweeps of ${sum.points.join('/')} points (${sum.mode} mode, `
-      + `${(sum.centerHz / 1e6).toFixed(3)} MHz, ${Math.round(sum.spanHz / 1000)} kHz wide). Thank you. Please send this file to POTACAT.`;
+      + `${FreqDots.hzMhz(sum.centerHz)}, ${Math.round(sum.spanHz / 1000)} kHz wide). Thank you. Please send this file to POTACAT.`;
   } else if (dataFrames) {
     message = `The radio sent ${dataFrames} scope frames but no complete sweep. Please send this file to POTACAT anyway; it is exactly what we need to see.`;
   } else if (scopeWas || outputWas) {
@@ -37045,7 +37045,7 @@ function autoIdleJttyFollowSun() {
   sendCatLog(`[Auto-RX] JTTY band change at ${why}: ${band} (${(khz / 1000).toFixed(3)} MHz)`);
   const now = Date.now();
   jtcatJttyRxQueue({ id: 'band-' + now, marker: true, complete: true, utcMs: now, freqHz: 0, snrDb: 0,
-    band, freqKhz: khz, text: `Band changed to ${band} (${(khz / 1000).toFixed(3)} MHz) at ${why}` });
+    band, freqKhz: khz, text: `Band changed to ${band} (${FreqDots.khzMhz(khz)}) at ${why}` });
 }
 
 function getSunTimes(lat, lon, date) {
@@ -45429,7 +45429,7 @@ function cloudShackNotice(text, kind) {
         const mhz = (parseFloat(frequency) / 1000).toFixed(3);
         const bandNote = noCatBandNote(parseFloat(mhz));
         sendCatLog(`tune: no CAT control — set the radio to ${mhz} MHz${mode ? ' ' + String(mode).toUpperCase() : ''} by hand${bandNote}`);
-        _e.sender.send('tune-blocked', `No CAT control — set the radio to ${mhz} MHz by hand${bandNote}`);
+        _e.sender.send('tune-blocked', `No CAT control — set the radio to ${FreqDots.khzMhz(frequency)} by hand${bandNote}`);
         return;
       }
       sendCatLog('tune refused — no radio connected. Check Settings -> My Rigs.');
@@ -49623,7 +49623,7 @@ function cloudShackNotice(text, kind) {
     const r = await probeFlrig({ host, port });
     if (!r.ok) return { success: false, error: r.error };
     const radio = r.xcvr
-      ? `${r.xcvr}, ${(r.freqHz / 1e6).toFixed(6)} MHz ${r.mode}`
+      ? `${r.xcvr}, ${FreqDots.hzMhz(r.freqHz)} ${r.mode}`
       : 'no transceiver online in flrig yet (Config > Setup > Transceiver, then Init)';
     return { success: true, version: r.version, xcvr: r.xcvr, frequency: r.freqHz, mode: r.mode, modes: r.modes,
       message: `Connected! flrig ${r.version}: ${radio}` };
@@ -49643,7 +49643,7 @@ function cloudShackNotice(text, kind) {
         error: 'DXLab Commander answered, but it has no radio (frequency .000). Check that Commander is connected to your transceiver.' };
     }
     return { success: true, frequency: r.freqHz, mode: r.mode,
-      message: `Connected! DXLab Commander: ${(r.freqHz / 1e6).toFixed(6)} MHz ${r.mode || '(mode not reported)'}` };
+      message: `Connected! DXLab Commander: ${FreqDots.hzMhz(r.freqHz)} ${r.mode || '(mode not reported)'}` };
   });
 
   ipcMain.handle('test-hamlib', async (_e, config) => {

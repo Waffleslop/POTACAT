@@ -56,12 +56,13 @@ test('the JTCAT window builds decode rows only through DecodeRow', () => {
 test('the server serves the page with both modules inlined (no placeholder left)', () => {
   // Rebuild the inline the way remote-server does, on the real files.
   let html = webHtml;
-  for (const [mark, file] of [['spot-row-js', 'spot-row.js'], ['decode-row-js', 'decode-row.js']]) {
+  for (const [mark, file] of [['freq-dots-js', 'freq-dots.js'], ['spot-row-js', 'spot-row.js'], ['decode-row-js', 'decode-row.js']]) {
     const js = readSrc(path.join(ROOT, 'lib', file));
     html = html.replace('<!-- ' + mark + ' -->', () => '<script>\n' + js + '\n</script>');
   }
-  assert.ok(!/<!-- (spot|decode)-row-js -->/.test(html));
-  assert.ok(html.indexOf('root.SpotRow = factory()') < html.indexOf('src="remote.js"') || !/src="remote\.js"/.test(html), 'modules load before remote.js');
+  assert.ok(!/<!-- ((spot|decode)-row|freq-dots)-js -->/.test(html));
+  assert.ok(html.indexOf('root.FreqDots = factory()') < html.indexOf('root.SpotRow = factory('), 'the frequency formatter loads before the spot rows that use it');
+  assert.ok(html.indexOf('root.SpotRow = factory(') < html.indexOf('src="remote.js"') || !/src="remote\.js"/.test(html), 'modules load before remote.js');
 });
 
 // ---------------------------------------------------------------------------
@@ -128,7 +129,7 @@ function decodeNumbers(rows, prefix, label) {
 function spotNumbers(rows, label) {
   for (const r of rows) {
     for (const c of r.cells) {
-      if (/spot-freq/.test(c.cls)) assert.ok(/^(\d+\.\d)?$/.test(c.text), `${label}: freq "${c.text}" on "${r.id}"`);
+      if (/spot-freq/.test(c.cls)) assert.ok(/^(\d+\.\d{3}\.\d{2})?$/.test(c.text), `${label}: freq "${c.text}" on "${r.id}" is not written the VFO way (14.074.00)`);
       if (/spot-dist/.test(c.cls)) assert.ok(/^(\d+(mi|km)|\d+(\.\d)?k)?$/.test(c.text), `${label}: distance "${c.text}" on "${r.id}"`);
       if (/spot-zone/.test(c.cls)) assert.ok(/^(\d{1,2}|—)$/.test(c.text), `${label}: zone "${c.text}" on "${r.id}"`);
     }

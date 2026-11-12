@@ -907,6 +907,7 @@
 
 <!-- Shared TX EQ chain (Phase 1). Also loaded by remote-audio.html so
      both audio sources apply identical DSP. -->
+<script src="../lib/freq-dots.js"></script>
 <script src="tx-eq-chain.js"></script>
 <script src="../lib/custom-cat-follow.js"></script>
 <script src="../lib/rig-power-view.js"></script>
@@ -1314,8 +1315,8 @@ function renderFavorites() {
     b.className = 'tog fav-btn';
     b.dataset.khz = String(f.khz);
     b.textContent = f.name;
-    const mhz = (Number(f.khz) / 1000).toFixed(f.khz % 1 ? 4 : 3);
-    b.title = f.name + ' · ' + mhz + ' MHz ' + (f.mode || '') + (f.note ? ' · ' + f.note : '');
+    const mhz = FreqDots.khzMhz(f.khz);
+    b.title = f.name + ' · ' + mhz + ' ' + (f.mode || '') + (f.note ? ' · ' + f.note : '');
     b.addEventListener('click', () => window.api.tune(String(f.khz), f.mode || undefined));
     grid.appendChild(b);
   }
@@ -1942,7 +1943,7 @@ function kpRender() {
   kpInput.value = kpBuffer;
   const khz = kpTargetKhz(kpBuffer);
   kpGo.disabled = !khz;
-  kpGo.textContent = khz ? 'Tune ' + fmtMhz(khz) + ' MHz' : 'Tune';
+  kpGo.textContent = khz ? 'Tune ' + FreqDots.khzMhz(khz) : 'Tune';
 }
 // Recent frequencies typed here (this device only).
 const KP_RECENT_KEY = 'vfoRecentKhz';
@@ -1964,7 +1965,7 @@ function kpRenderRecent() {
   list.forEach(khz => {
     const b = document.createElement('button');
     b.className = 'tog mono';
-    b.textContent = fmtMhz(khz);
+    b.textContent = FreqDots.fromKhz(khz);
     b.addEventListener('click', () => { kpBuffer = fmtMhz(khz); kpGo.click(); });
     row.appendChild(b);
   });
@@ -4271,8 +4272,8 @@ function renderOpInfo(spot) {
         const d = op.dupeDetail || {};
         const ts = d.when ? new Date(d.when) : null;
         const hhmm = ts ? String(ts.getUTCHours()).padStart(2,'0') + ':' + String(ts.getUTCMinutes()).padStart(2,'0') : '';
-        const fMHz = d.freq ? (parseFloat(d.freq) / 1000).toFixed(3) : '';
-        const detail = [hhmm && (hhmm + ' UTC'), fMHz && (fMHz + ' MHz'), d.mode].filter(Boolean).join(' · ');
+        const fMHz = d.freq ? FreqDots.khzMhz(parseFloat(d.freq)) : '';
+        const detail = [hhmm && (hhmm + ' UTC'), fMHz, d.mode].filter(Boolean).join(' · ');
         html += '<span class="op-dupe" title="' + esc(detail ? 'Already worked: ' + detail : 'Already worked this activation today') + '">DUPE</span>';
       }
       if (op.displayName) html += '<span class="op-name">' + esc(op.displayName) + '</span>';

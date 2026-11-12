@@ -61,7 +61,7 @@ async function render(width, css, body, scripts) {
 app.whenReady().then(async () => {
   const SpotRow = require(path.join(ROOT, 'lib', 'spot-row.js'));
   const DecodeRow = require(path.join(ROOT, 'lib', 'decode-row.js'));
-  const libScripts = [read('lib/spot-row.js'), read('lib/decode-row.js')];
+  const libScripts = [read('lib/freq-dots.js'), read('lib/spot-row.js'), read('lib/decode-row.js')];
   const webCss = read('renderer/remote.css');
   const results = {};
   try {

@@ -3090,7 +3090,7 @@
           if (sstvPhoneStatus) { sstvPhoneStatus.textContent = 'Transmitting...'; sstvPhoneStatus.style.color = 'var(--accent)'; }
         } else if (msg.state === 'auto-rx') {
           if (sstvPhoneStatus) {
-            sstvPhoneStatus.textContent = 'Auto-SSTV ' + (msg.freqKhz ? (msg.freqKhz / 1000).toFixed(3) : '') + ' MHz';
+            sstvPhoneStatus.textContent = 'Auto-SSTV' + (msg.freqKhz ? ' ' + FreqDots.khzMhz(msg.freqKhz) : '');
             sstvPhoneStatus.style.color = 'var(--pota)';
           }
         } else {
@@ -7564,7 +7564,7 @@
         const offClass = c._offline ? ' offline' : '';
         const dupeClass = c.dupe ? ' dupe' : '';
         const time = c.timeUtc ? c.timeUtc.slice(0, 2) + ':' + c.timeUtc.slice(2, 4) : '';
-        const freq = c.freqKhz ? parseFloat(c.freqKhz).toFixed(1) : '';
+        const freq = c.freqKhz ? FreqDots.fromKhz(c.freqKhz) : '';
         const dupeTag = c.dupe ? ' <span class="dupe-tag">DUPE</span>' : '';
         return `<div class="contact-row${offClass}${dupeClass}">
           <span class="contact-nr">${c.nr || ''}</span>
@@ -7654,7 +7654,7 @@
           '<span class="pa-nr">' + (j + 1) + '</span>' +
           '<span class="pa-time">' + formatPaTime(c.timeOn) + '</span>' +
           '<span class="pa-call">' + esc(c.callsign) + '</span>' +
-          '<span class="pa-freq">' + (c.freq ? parseFloat(c.freq).toFixed(3) : '') + '</span>' +
+          '<span class="pa-freq">' + (c.freq ? FreqDots.fromMhz(c.freq) : '') + '</span>' +
           '<span class="pa-mode">' + esc(c.mode) + '</span>' +
           '<span class="pa-rst">' + esc(c.rstSent) + '/' + esc(c.rstRcvd) + '</span>' +
           '</div>';
@@ -8165,7 +8165,7 @@
     lbList.innerHTML = filtered.map(q => {
       const idx = q.idx;
       const call = esc(q.CALL || '');
-      const freqMhz = q.FREQ ? parseFloat(q.FREQ).toFixed(3) : '';
+      const freqMhz = q.FREQ ? FreqDots.fromMhz(q.FREQ) : '';
       const mode = esc(q.MODE || '');
       const ref = esc(q.SIG_INFO || '');
       const date = formatLbDate(q.QSO_DATE || '');
@@ -12206,7 +12206,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
     if (!lmkHintDismissed() && !search && directoryLandmarks.some(function(l) { return l.id === 'wwv-10000'; })) {
       var hint = document.createElement('div');
       hint.className = 'lmk-hint';
-      hint.innerHTML = '<p><b>New radio?</b> Tune <b>WWV on 10000 kHz</b>. A tick every second means the radio, the antenna and the audio all work.</p>'
+      hint.innerHTML = '<p><b>New radio?</b> Tune <b>WWV on 10.000.00 MHz</b>. A tick every second means the radio, the antenna and the audio all work.</p>'
         + '<div class="lmk-actions"><button type="button" class="lmk-btn lmk-btn-tint" data-act="tune">Tune WWV</button>'
         + '<button type="button" class="lmk-btn lmk-btn-plain" data-act="close">Got it</button></div>';
       hint.addEventListener('click', function(ev) {
@@ -12246,7 +12246,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
           + (tuned ? ' tuned' : '') + (open ? ' open' : '') + (r.ok ? '' : ' lmk-out');
         var statusHtml = cd.label ? '<span class="dir-card-status ' + cd.status + '">' + esc(cd.label) + '</span>' : '';
         var html = '<div class="dir-card-row"><span class="dir-card-name">' + esc(lm.name) + '</span>' + statusHtml + favStar('landmark', lm.id, lm.name) + '</div>'
-          + '<div class="dir-card-detail"><span class="dir-card-freq">' + lm.khz + ' kHz</span> ' + esc(lm.mode) + ' · ' + esc(r.band) + '</div>'
+          + '<div class="dir-card-detail"><span class="dir-card-freq">' + FreqDots.khzMhz(lm.khz) + '</span> ' + esc(lm.mode) + ' · ' + esc(r.band) + '</div>'
           + '<div class="lmk-line">' + esc(lm.line) + (lm.ncdxf ? '<span class="lmk-now" data-khz="' + lm.khz + '"></span>' : '') + '</div>';
         if (open) {
           html += '<div class="lmk-detail">'
@@ -12256,7 +12256,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
             + (lm.hear ? '<div class="lmk-sec"><b>What you’ll hear</b><p>' + esc(lm.hear) + '</p></div>' : '')
             + (lm.why ? '<div class="lmk-sec"><b>Why it matters</b><p>' + esc(lm.why) + '</p></div>' : '')
             + (lm.try ? '<div class="lmk-sec lmk-try"><b>Try this</b><p>' + esc(lm.try) + '</p></div>' : '')
-            + '<div class="lmk-actions"><button type="button" class="lmk-btn lmk-btn-tint" data-act="tune">Tune ' + lm.khz + ' kHz</button>'
+            + '<div class="lmk-actions"><button type="button" class="lmk-btn lmk-btn-tint" data-act="tune">Tune ' + FreqDots.khzMhz(lm.khz) + '</button>'
             + (lm.region ? '<span class="lmk-region">' + esc(lm.region) + '</span>' : '') + '</div>'
             + '</div>';
         }
@@ -12328,7 +12328,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
       card.className = 'dir-card' + (cd.status === 'live' ? ' dir-live' : cd.status === 'soon' ? ' dir-soon' : '') + (isTunedNet ? ' tuned' : '');
       var statusHtml = cd.label ? '<span class="dir-card-status ' + cd.status + '">' + cd.label + '</span>' : '';
       card.innerHTML = '<div class="dir-card-row"><span class="dir-card-name">' + (n.name || 'Unknown') + '</span>' + statusHtml + '</div>' +
-        '<div class="dir-card-detail"><span class="dir-card-freq">' + (n.frequency || '?') + ' kHz</span> ' + (n.mode || '') + (e.band ? ' \u00b7 ' + e.band : '') +
+        '<div class="dir-card-detail"><span class="dir-card-freq">' + (FreqDots.khzMhz(n.frequency) || '?') + '</span> ' + (n.mode || '') + (e.band ? ' \u00b7 ' + e.band : '') +
         (n.days && n.days !== 'Daily' ? ' \u00b7 ' + n.days : '') + '</div>';
       (function(net, band) {
         card.addEventListener('click', function() {
@@ -12395,7 +12395,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
     var rows = directoryChannels.filter(function(c) {
       if (!search) return true;
       return [c.name, c.note, c.group, c.mode].some(function(v) { return String(v || '').toLowerCase().indexOf(search) >= 0; })
-        || String(c.khz).indexOf(search) >= 0 || (c.khz / 1000).toFixed(3).indexOf(search) >= 0;
+        || String(c.khz).indexOf(search) >= 0 || (c.khz / 1000).toFixed(3).indexOf(search) >= 0 || FreqDots.fromKhz(c.khz).indexOf(search) >= 0;
     });
     // Favorites first (starred order), then each group without them.
     var favRows = directoryChannelFavs.map(function(id) { return rows.filter(function(c) { return c.id === id; })[0]; }).filter(Boolean);
@@ -12410,7 +12410,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
       (g === '__fav' ? favRows : rows.filter(function(c) { return groupOf(c) === g; })).forEach(function(c) {
         var card = document.createElement('div');
         card.className = 'dir-card';
-        var mhz = (c.khz / 1000).toFixed(c.khz % 1 ? 5 : 4).replace(/0+$/, '').replace(/\.$/, '');
+        var mhz = FreqDots.fromKhz(c.khz);
         var off = channelOffsetText(c.offsetKhz);
         card.innerHTML = '<div class="dir-card-row"><span class="dir-card-name"></span><span class="dir-card-freq"></span>' + favStar('channel', c.id, c.name) + '</div>'
           + '<div class="dir-card-detail"></div>';
@@ -14477,7 +14477,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
     var d = img.timestamp ? new Date(img.timestamp) : null;
     var dateStr = d ? d.toLocaleDateString([], { month: 'numeric', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
     var imgHz = img.freqHz || (img.freqKhz ? img.freqKhz * 1000 : 0);
-    info.textContent = (img.mode || '') + (imgHz ? ' ' + (Math.round(imgHz / 1000) / 1000).toFixed(3) : '') + ' ' + dateStr;
+    info.textContent = (img.mode || '') + (imgHz ? ' ' + FreqDots.fromHz(Math.round(imgHz / 1000) * 1000) : '') + ' ' + dateStr;
     div.appendChild(info);
     // Reply button — overlays the thumb, taps set this image as PiP reply inset
     var replyBtn = document.createElement('button');
@@ -14571,7 +14571,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
     var info = document.createElement('div');
     info.style.cssText = 'position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.6);font-size:10px;color:#ccc;padding:1px 4px;text-align:center;';
     var now = new Date();
-    info.textContent = 'NEW ' + (msg.mode || '') + (msg.freqHz ? ' ' + (Math.round(msg.freqHz / 1000) / 1000).toFixed(3) : '') + ' ' + now.toLocaleDateString([], {month:'numeric',day:'numeric'}) + ' ' + now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    info.textContent = 'NEW ' + (msg.mode || '') + (msg.freqHz ? ' ' + FreqDots.fromHz(Math.round(msg.freqHz / 1000) * 1000) : '') + ' ' + now.toLocaleDateString([], {month:'numeric',day:'numeric'}) + ' ' + now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
     div.appendChild(info);
     // Reply button on live decode — most valuable placement since this is the
     // thumbnail users reach for first right after receiving
@@ -14724,7 +14724,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
               const d = tunedDupe;
               const parts = [];
               if (d.timeUtc) parts.push(d.timeUtc.slice(0, 2) + ':' + d.timeUtc.slice(2, 4) + ' UTC');
-              if (d.freqKhz) parts.push((parseFloat(d.freqKhz) / 1000).toFixed(3) + ' MHz');
+              if (d.freqKhz) parts.push(FreqDots.khzMhz(d.freqKhz));
               if (d.mode) parts.push(d.mode);
               vfOpDupe.textContent = 'DUPE';
               vfOpDupe.title = parts.length ? 'Already worked: ' + parts.join(' · ') : 'Already worked this activation';
@@ -15223,8 +15223,8 @@ var _paddleHoldTimer = { dit: null, dah: null };
       vfoProfiles.forEach((p, i) => {
         const item = document.createElement('div');
         item.className = 'vf-profile-item';
-        const freqMhz = p.freqKhz ? (p.freqKhz / 1000).toFixed(3) : '?';
-        const detail = freqMhz + ' MHz ' + (p.mode || '') + (p.filterWidth ? ' BW:' + p.filterWidth : '');
+        const freqMhz = p.freqKhz ? FreqDots.khzMhz(p.freqKhz) : '? MHz';
+        const detail = freqMhz + ' ' + (p.mode || '') + (p.filterWidth ? ' BW:' + p.filterWidth : '');
         const nameSpan = document.createElement('span');
         nameSpan.className = 'vf-profile-item-name';
         nameSpan.textContent = p.name || '(unnamed)';
@@ -15714,7 +15714,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
   }
   function mailGatewayLabel(g) {
     var parts = [g.call];
-    if (g.dialKhz) parts.push(g.dialKhz.toFixed(1) + ' kHz');
+    if (g.dialKhz) parts.push(FreqDots.khzMhz(g.dialKhz));
     if (g.qualityWord) parts.push(g.qualityWord + (g.quality != null ? ' ' + g.quality + '%' : ''));
     if (g.distKm != null) parts.push(g.distKm + ' km');
     return parts.join('  ');

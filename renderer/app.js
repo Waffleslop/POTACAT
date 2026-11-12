@@ -2489,7 +2489,7 @@ function updateFlexStatus() {
   if (typeof catConnected !== 'undefined' && catConnected) {
     let txt = '● Connected';
     if (typeof radioFreqKhz === 'number' && radioFreqKhz > 0) {
-      txt += ' — ' + (radioFreqKhz / 1000).toFixed(3) + ' MHz';
+      txt += ' — ' + FreqDots.khzMhz(radioFreqKhz);
       if (typeof radioMode === 'string' && radioMode) txt += ' ' + radioMode;
     }
     el.textContent = txt;
@@ -4207,8 +4207,8 @@ function updateBlDupeChip() {
   if (dupe) {
     const ts = dupe.timestamp ? new Date(dupe.timestamp) : null;
     const hhmm = ts ? `${String(ts.getUTCHours()).padStart(2, '0')}:${String(ts.getUTCMinutes()).padStart(2, '0')}` : '';
-    const fMHz = dupe.frequency ? (parseFloat(dupe.frequency) / 1000).toFixed(3) : '';
-    const detail = [hhmm && `${hhmm} UTC`, fMHz && `${fMHz} MHz`, dupe.mode].filter(Boolean).join(' · ');
+    const fMHz = dupe.frequency ? FreqDots.khzMhz(parseFloat(dupe.frequency)) : '';
+    const detail = [hhmm && `${hhmm} UTC`, fMHz, dupe.mode].filter(Boolean).join(' · ');
     blDupeChip.title = detail ? `Already worked: ${detail}` : 'Already worked this activation today';
     blDupeChip.classList.remove('hidden');
   } else {
@@ -5064,7 +5064,7 @@ function renderNetList(nets) {
       : net.schedule?.type === 'dates'
         ? (net.schedule.dates || []).join(', ')
         : 'Daily';
-    detailEl.textContent = `${net.frequency} kHz ${net.mode} \u2022 ${net.startTime} ${net.timeZone === 'utc' ? 'UTC' : 'Local'} \u2022 ${schedStr}`;
+    detailEl.textContent = `${FreqDots.khzMhz(net.frequency) || net.frequency} ${net.mode} \u2022 ${net.startTime} ${net.timeZone === 'utc' ? 'UTC' : 'Local'} \u2022 ${schedStr}`;
     info.appendChild(nameEl);
     info.appendChild(detailEl);
 
@@ -8121,7 +8121,7 @@ function _showLogErrorModal(payload) {
   // frequency is kHz string → MHz with 3 dp for display
   const freqKhz = parseFloat(qso.frequency || '0');
   const freqMHz = Number.isFinite(freqKhz) && freqKhz > 0
-    ? (freqKhz / 1000).toFixed(3) + ' MHz'
+    ? FreqDots.khzMhz(freqKhz)
     : '(unknown freq)';
   const mode = qso.mode || '(unknown mode)';
   const rstSent = qso.rstSent || '---';
@@ -10161,8 +10161,8 @@ hamlibTestBtn.addEventListener('click', async () => {
     const dtrOff = setRigDtrOff.checked;
     const result = await window.api.testHamlib({ rigId, serialPort, baudRate, dtrOff });
     if (result.success) {
-      const freqMHz = (parseInt(result.frequency, 10) / 1e6).toFixed(6);
-      hamlibTestResult.textContent = `Connected! Freq: ${freqMHz} MHz` + rigTestSavedNote(serialPort);
+      const freqMHz = FreqDots.hzMhz(parseInt(result.frequency, 10)) || 'unknown';
+      hamlibTestResult.textContent = `Connected! Freq: ${freqMHz}` + rigTestSavedNote(serialPort);
       hamlibTestResult.className = 'hamlib-test-success';
     } else {
       hamlibTestResult.textContent = `Failed: ${result.error}`;
@@ -10235,7 +10235,7 @@ serialcatTestBtn.addEventListener('click', async () => {
     const model = rigModelSelect ? rigModelSelect.value : '';
     const result = await window.api.testSerialCat({ portPath, baudRate, dtrOff, serialHandshake, model });
     if (result.success) {
-      serialcatTestResult.textContent = `Connected! Freq: ${result.frequency} MHz` + (result.note ? ` (${result.note})` : '') + rigTestSavedNote(portPath);
+      serialcatTestResult.textContent = `Connected! Freq: ${FreqDots.mhzMhz(result.frequency) || result.frequency + ' MHz'}` + (result.note ? ` (${result.note})` : '') + rigTestSavedNote(portPath);
       serialcatTestResult.className = 'hamlib-test-success';
     } else {
       serialcatTestResult.textContent = `Failed: ${result.error}`;
@@ -10271,7 +10271,7 @@ document.getElementById('icom-test-btn').addEventListener('click', async () => {
   try {
     const result = await window.api.testIcomCiv({ portPath, baudRate, civAddress });
     if (result.success) {
-      resultEl.textContent = `Connected! Freq: ${result.frequency} MHz` + rigTestSavedNote(portPath);
+      resultEl.textContent = `Connected! Freq: ${FreqDots.mhzMhz(result.frequency) || result.frequency + ' MHz'}` + rigTestSavedNote(portPath);
       resultEl.className = 'hamlib-test-success';
     } else {
       resultEl.textContent = `Failed: ${result.error}`;
@@ -10301,7 +10301,7 @@ document.getElementById('civ-tcp-test-btn')?.addEventListener('click', async () 
   try {
     const result = await window.api.testCivTcp({ host, port, civAddress });
     if (result.success) {
-      resultEl.textContent = `Connected! Freq: ${result.frequency} MHz`;
+      resultEl.textContent = `Connected! Freq: ${FreqDots.mhzMhz(result.frequency) || result.frequency + ' MHz'}`;
       resultEl.className = 'hamlib-test-success';
     } else {
       resultEl.textContent = `Failed: ${result.error}`;
@@ -10351,7 +10351,7 @@ document.getElementById('yaesu-lan-test-btn')?.addEventListener('click', async (
     if (r.success) {
       const sid = r.sessionId != null ? ' Session 0x' + Number(r.sessionId).toString(16).toUpperCase().padStart(2, '0') + '.' : '';
       const radio = r.radio ? ' ' + r.radio + '.' : (r.id ? ' Radio ID ' + r.id + '.' : '');
-      const freq = r.frequency ? ' Freq: ' + r.frequency + ' MHz.' : '';
+      const freq = r.frequency ? ' Freq: ' + (FreqDots.mhzMhz(r.frequency) || r.frequency + ' MHz') + '.' : '';
       resultEl.textContent = 'Logged in!' + sid + radio + freq + (r.note ? ' ' + r.note : '');
       resultEl.className = 'hamlib-test-success';
     } else {
@@ -10400,7 +10400,7 @@ document.getElementById('icom-network-test-btn')?.addEventListener('click', asyn
         ? ` (answered probe 0x${result.probedAddress.toString(16).toUpperCase().padStart(2, '0')})`
         : '';
       const radioName = result.radioName ? ` ${result.radioName}` : '';
-      resultEl.textContent = `Connected!${radioName} Freq: ${result.frequency} MHz${responseAddr}${probeAddr}`;
+      resultEl.textContent = `Connected!${radioName} Freq: ${FreqDots.mhzMhz(result.frequency) || result.frequency + ' MHz'}${responseAddr}${probeAddr}`;
       resultEl.className = 'hamlib-test-success';
     } else {
       resultEl.textContent = `Failed: ${result.error}`;
@@ -10801,7 +10801,7 @@ function sortSpots(spots) {
 const HIDDEN_COLS_KEY = 'pota-cat-hidden-cols';
 const HIDEABLE_COLUMNS = [
   { key: 'operator', label: 'Operator' },
-  { key: 'frequency', label: 'Freq (kHz)' },
+  { key: 'frequency', label: 'Freq' },
   { key: 'mode', label: 'Mode' },
   { key: 'wpm', label: 'WPM (CW speed)' },
   { key: 'source', label: 'Source' },
@@ -11072,8 +11072,8 @@ let colOrder = loadColOrder();
 const COL_WIDTHS_KEY = 'pota-cat-col-pct-v10';
 const COL_WIDTHS_KEY_V9 = 'pota-cat-col-pct-v9';
 const DEFAULT_COL_PCT_OBJ = {
-  log: 4, callsign: 8, operator: 7, frequency: 6, mode: 5, wpm: 4, source: 5, reference: 6,
-  parkName: 14, locationDesc: 7, grid: 5, cqz: 3, ituz: 3, distance: 6, bearing: 5, spotTime: 5, spotter: 7, comments: 10, skip: 4, hide: 4
+  log: 4, callsign: 8, operator: 7, frequency: 8, mode: 5, wpm: 4, source: 5, reference: 6,
+  parkName: 12, locationDesc: 7, grid: 5, cqz: 3, ituz: 3, distance: 6, bearing: 5, spotTime: 5, spotter: 7, comments: 10, skip: 4, hide: 4
 };
 
 function loadColWidths() {
@@ -11086,6 +11086,18 @@ function loadColWidths() {
     for (const col of DEFAULT_COL_ORDER) {
       if (obj[col] == null) { obj[col] = DEFAULT_COL_PCT_OBJ[col] || 5; changed = true; }
     }
+    // Frequencies are written the VFO way now ("14.074.00", two characters
+    // longer than "14074.0"; Casey 2026-11-11). Once, give a saved Freq column
+    // narrower than the new default its width back, taken from Park Name.
+    try {
+      if (!localStorage.getItem('pota-cat-col-freq-dots') && obj.frequency < DEFAULT_COL_PCT_OBJ.frequency) {
+        const need = DEFAULT_COL_PCT_OBJ.frequency - obj.frequency;
+        obj.frequency = DEFAULT_COL_PCT_OBJ.frequency;
+        if (obj.parkName > need + 6) obj.parkName -= need;
+        changed = true;
+      }
+      localStorage.setItem('pota-cat-col-freq-dots', '1');
+    } catch { /* storage unavailable: widths stay as saved */ }
     if (changed) saveColWidths(obj);
     return obj;
   };
@@ -12025,7 +12037,7 @@ function updateMapMarkers(filtered) {
     const opLine = opName ? `<span style="color:#b0bec5;font-size:11px;">${opName}</span><br>` : '';
     const popupContent = `
       <b>${watched ? '\u2B50 ' : ''}<a href="#" class="popup-qrz" data-call="${s.callsign}">${s.callsign}</a></b>${donorBadge}${creatorBadge} <span style="color:${sourceColor};font-size:11px;">[${sourceLabel}]</span>${expeditionBadge}${eventBadgeHtml}${newBadge}${wwffBadge}<br>
-      ${opLine}${parseFloat(s.frequency).toFixed(1)} kHz &middot; ${s.mode}<br>
+      ${opLine}${FreqDots.khzMhz(s.frequency)} &middot; ${s.mode}<br>
       <b>${s.reference}</b> ${s.parkName}${wwffRefLine}<br>
       ${distStr}<br>
       <button class="tune-btn" data-call="${s.callsign || ''}" data-freq="${s.frequency}" data-mode="${s.mode}" data-bearing="${s.bearing != null ? s.bearing : ''}" data-lat="${s.lat != null ? s.lat : ''}" data-lon="${s.lon != null ? s.lon : ''}" data-source="${s.source || ''}">Tune</button>${logBtnHtml}
@@ -12542,7 +12554,7 @@ async function openQuickRespot() {
   document.getElementById('respot-callsign').textContent = s.callsign;
   const qrz = qrzData.get(s.callsign.toUpperCase());
   document.getElementById('respot-name').textContent = qrz ? qrzDisplayName(qrz) : '';
-  document.getElementById('respot-freq').textContent = parseFloat(s.frequency).toFixed(1) + ' kHz';
+  document.getElementById('respot-freq').textContent = FreqDots.khzMhz(s.frequency);
 
   // Reference display
   let refText = '';
@@ -12759,7 +12771,7 @@ async function sendDxCommand() {
       dxSpotFreq.value = '';
       dxSpotNote.value = '';
       const nodeName = nodeId ? dxCommandNode.options[dxCommandNode.selectedIndex].textContent : result.sent + ' node' + (result.sent > 1 ? 's' : '');
-      showLogToast('Spotted ' + call + ' on ' + freq + ' kHz \u2192 ' + nodeName, { duration: 3000 });
+      showLogToast('Spotted ' + call + ' on ' + (FreqDots.khzMhz(freq) || freq + ' kHz') + ' \u2192 ' + nodeName, { duration: 3000 });
     }
   } catch (err) {
     showLogToast('DX command failed: ' + err.message, { warn: true, duration: 5000 });
@@ -15089,7 +15101,7 @@ function render() {
       const freqTd = document.createElement('td');
       freqTd.setAttribute('data-col', 'frequency');
       const freqLink = document.createElement('span');
-      freqLink.textContent = parseFloat(s.frequency).toFixed(1);
+      freqLink.textContent = FreqDots.fromKhz(s.frequency);
       freqLink.className = 'freq-link';
       freqTd.appendChild(freqLink);
       cellMap.set('frequency', freqTd);
@@ -16242,7 +16254,7 @@ async function showSpotHistoryPopover(anchorEl, { source, callsign, reference, a
     const row = document.createElement('div');
     row.className = 'sh-row';
     const spotter = e.spotter || e.de || '';
-    const freq = e.frequency != null ? parseFloat(e.frequency).toFixed(1) : '';
+    const freq = e.frequency != null ? FreqDots.fromKhz(e.frequency) : '';
     const mode = e.mode || '';
     const comments = e.comments || e.comment || '';
     row.innerHTML = `
@@ -16480,7 +16492,7 @@ function showHideSpotMenu(x, y, callsign, frequency, spot) {
   hideSpotTarget = callsign.toUpperCase();
   hideSpotFreq = String(Math.round(parseFloat(frequency)));
   hideSpotCallEl.textContent = callsign;
-  hideSpotFreqLabel.textContent = `Hide on ${frequency} kHz only`;
+  hideSpotFreqLabel.textContent = `Hide on ${FreqDots.khzMhz(frequency) || frequency + ' kHz'} only`;
   // Region-on-band mute (N7BBQ): offered only when the spot resolved a
   // continent AND a band, and no such rule exists yet. One click creates
   // the rule from the row under the cursor — no dialog. try/catch: the menu's
@@ -20672,7 +20684,7 @@ function renderDirvNets(search, bandFilter, statusFilter) {
 
     tr.innerHTML = `<td class="dirv-status-col">${statusBadge}</td>`
       + `<td class="dirv-name-col">${esc(net.name)}</td>`
-      + `<td class="dirv-freq-col">${net.frequency || ''}</td>`
+      + `<td class="dirv-freq-col">${FreqDots.fromKhz(net.frequency) || net.frequency || ''}</td>`
       + `<td class="dirv-mode-col">${esc(net.mode)}</td>`
       + `<td class="dirv-band-col">${esc(net.band)}</td>`
       + `<td class="dirv-days-col">${esc(net.days)}</td>`
@@ -20699,7 +20711,7 @@ function renderDirvNets(search, bandFilter, statusFilter) {
     // Hover popup
     attachDirHover(tr, [
       { label: 'Net', value: net.name },
-      { label: 'Frequency', value: net.frequency ? `${net.frequency} kHz` : '' },
+      { label: 'Frequency', value: net.frequency ? (FreqDots.khzMhz(net.frequency) || `${net.frequency} kHz`) : '' },
       { label: 'Mode', value: net.mode },
       { label: 'Schedule', value: `${net.days || 'Daily'} at ${net.startTimeUtc || '?'} UTC` },
       { label: 'Duration', value: duration },
@@ -20806,7 +20818,7 @@ function renderDirvSwl(search, bandFilter, statusFilter) {
 
     tr.innerHTML = `<td class="dirv-status-col">${statusBadge}</td>`
       + `<td class="dirv-name-col">${esc(entry.station)}</td>`
-      + `<td class="dirv-freq-col">${entry.frequency || ''}</td>`
+      + `<td class="dirv-freq-col">${entry.frequency || ''}</td>` // shortwave stays kHz (Casey 2026-11-12)
       + `<td class="dirv-mode-col">${esc(entry.mode)}</td>`
       + `<td class="dirv-band-col">${esc(entry.band)}</td>`
       + `<td class="dirv-time-col">${esc(entry.startTimeUtc)}</td>`
@@ -20967,7 +20979,7 @@ function renderDirvLandmarks(search, bandFilter, category) {
       tr.innerHTML = `<td class="lmk-fav">${window.Favorites ? window.Favorites.starHtml(favLandmarkIds.includes(lm.id), lm.name) : ''}</td>`
         + `<td>${badge}</td>`
         + `<td class="lmk-name">${esc(lm.name)}</td>`
-        + `<td>${lm.khz}</td>`
+        + `<td>${FreqDots.fromKhz(lm.khz)}</td>`
         + `<td>${esc(lm.mode)}</td>`
         + `<td>${esc(r.band)}${r.viaSdr ? '<span class="lmk-sdr" title="Outside the radio&#39;s bands; POTACAT plays it through your SDR">SDR</span>' : ''}</td>`
         + `<td class="lmk-line">${esc(lm.line)}${lm.ncdxf ? `<span class="lmk-now" data-khz="${lm.khz}"></span>` : ''}</td>`;
@@ -21018,7 +21030,7 @@ function lmkRenderPanel(lm, ok) {
   lmkPanel.innerHTML = `
     <div class="lmk-p-head">
       <h3 class="lmk-p-name">${esc(lm.name)}</h3>
-      <span class="lmk-p-freq">${lm.khz} kHz ${esc(lm.mode)}</span>
+      <span class="lmk-p-freq">${FreqDots.khzMhz(lm.khz)} ${esc(lm.mode)}</span>
       <span class="lmk-p-meta">${esc(meta)}</span>
     </div>
     ${lm.ncdxf ? `<div class="lmk-beacon" data-khz="${lm.khz}">
@@ -21033,7 +21045,7 @@ function lmkRenderPanel(lm, ok) {
     ${sec('Why it matters', lm.why)}
     ${sec('Try this', lm.try, 'lmk-try')}
     <div class="lmk-p-actions">
-      <button type="button" class="lmk-btn lmk-btn-tint" id="lmk-panel-tune">Tune ${lm.khz} kHz</button>
+      <button type="button" class="lmk-btn lmk-btn-tint" id="lmk-panel-tune">Tune ${FreqDots.khzMhz(lm.khz)}</button>
       ${lm.url ? '<button type="button" class="lmk-link" id="lmk-panel-link">Station page</button>' : ''}
     </div>`;
   const tuneBtn = document.getElementById('lmk-panel-tune');
@@ -21378,7 +21390,7 @@ function renderNetsTable(search) {
       : '<button class="dir-add-btn" type="button">+ Add</button>';
     tr.innerHTML = `<td class="dir-status-col">${dot}</td>`
       + `<td class="dir-name-col">${nameCell}</td>`
-      + `<td class="dir-freq-col">${net.frequency || ''}</td>`
+      + `<td class="dir-freq-col">${FreqDots.fromKhz(net.frequency) || net.frequency || ''}</td>`
       + `<td class="dir-mode-col">${esc(net.mode)}</td>`
       + `<td class="dir-days-col">${esc(net.days)}</td>`
       + `<td class="dir-time-col">${esc(net.startTimeUtc)}</td>`
@@ -21389,7 +21401,7 @@ function renderNetsTable(search) {
     // Hover popup
     attachDirHover(tr, [
       { label: 'Net', value: net.name },
-      { label: 'Frequency', value: net.frequency ? `${net.frequency} kHz` : '' },
+      { label: 'Frequency', value: net.frequency ? (FreqDots.khzMhz(net.frequency) || `${net.frequency} kHz`) : '' },
       { label: 'Mode', value: net.mode },
       { label: 'Schedule', value: `${net.days || 'Daily'} at ${net.startTimeUtc || '?'} UTC` },
       { label: 'Duration', value: duration },
@@ -21463,7 +21475,7 @@ function renderSwlTable(search) {
     const powerStr = entry.powerKw ? `${entry.powerKw} kW` : '';
     tr.innerHTML = `<td class="dir-status-col">${dot}</td>`
       + `<td class="dir-name-col">${esc(entry.station)}</td>`
-      + `<td class="dir-freq-col">${entry.frequency || ''}</td>`
+      + `<td class="dir-freq-col">${entry.frequency || ''}</td>` // shortwave stays kHz (Casey 2026-11-12)
       + `<td class="dir-mode-col">${esc(entry.mode)}</td>`
       + `<td class="dir-time-col">${esc(entry.startTimeUtc)}</td>`
       + `<td class="dir-time-col">${esc(entry.endTimeUtc)}</td>`
@@ -21807,8 +21819,8 @@ window.api.onWsjtxClear(() => {
 
 window.api.onWsjtxQsoLogged((qso) => {
   // Show a toast when WSJT-X logs a QSO
-  const freqMHz = (qso.txFrequency / 1e6).toFixed(3);
-  showLogToast(`WSJT-X logged ${qso.dxCall} on ${freqMHz} MHz ${qso.mode}`);
+  const freqMHz = FreqDots.hzMhz(qso.txFrequency);
+  showLogToast(`WSJT-X logged ${qso.dxCall} on ${freqMHz} ${qso.mode}`);
 });
 
 // WSJT-X QSO logged while in activator mode — add to activator contact list
@@ -22918,7 +22930,7 @@ function renderRbnTable() {
 
     // Freq
     const freqTd = document.createElement('td');
-    freqTd.textContent = parseFloat(s.frequency).toFixed(1);
+    freqTd.textContent = FreqDots.fromKhz(s.frequency);
     tr.appendChild(freqTd);
 
     // Mode
@@ -27793,7 +27805,7 @@ function renderActivatorLog() {
       <td class="act-log-call act-log-editable" data-field="callsign">${c.callsign || ''}${dupeFlag}${p2pBadge}</td>
       <td class="act-log-name">${c.name || ''}</td>
       <td class="act-log-state act-log-editable" data-field="state">${c.state || ''}</td>
-      <td class="act-log-freq act-log-editable" data-field="freqDisplay">${c.freqDisplay || ''}</td>
+      <td class="act-log-freq act-log-editable" data-field="freqDisplay">${FreqDots.fromMhz(c.freqDisplay) || c.freqDisplay || ''}</td>
       <td class="act-log-mode act-log-editable" data-field="mode">${c.mode || ''}</td>
       <td class="act-log-rst act-log-editable" data-field="rstSent">${c.rstSent || ''}</td>
       <td class="act-log-rst act-log-editable" data-field="rstRcvd">${c.rstRcvd || ''}</td>
@@ -28104,7 +28116,7 @@ async function showPastActivations() {
             const hh = (c.timeOn || '').substring(0, 2);
             const mm = (c.timeOn || '').substring(2, 4);
             const t = (hh && mm) ? `${hh}:${mm}` : '';
-            const fMhz = c.freq ? parseFloat(c.freq).toFixed(3) : '';
+            const fMhz = c.freq ? FreqDots.fromMhz(c.freq) : '';
             return `<tr><td>${i + 1}</td><td>${t}</td><td>${c.callsign}</td><td>${c.name || ''}</td><td>${fMhz}</td><td>${c.mode || ''}</td><td>${c.rstSent || ''}</td><td>${c.rstRcvd || ''}</td></tr>`;
           }).join('')}</tbody>
         </table>
@@ -28344,7 +28356,7 @@ async function showActivationMap(act) {
     const hh = (c.timeOn || '').substring(0, 2);
     const mm = (c.timeOn || '').substring(2, 4);
     const t = (hh && mm) ? `${hh}:${mm}` : '';
-    const fMhz = c.freq ? parseFloat(c.freq).toFixed(3) : '';
+    const fMhz = c.freq ? FreqDots.mhzMhz(c.freq) : '';
     const locName = loc.name || (locations[c.callsign] && locations[c.callsign].name) || '';
     const gridLabel = c.grid ? ` (${c.grid})` : '';
     const popupHtml = `<b>${c.callsign}</b>${c.name ? ' — ' + c.name : ''}<br>${t} UTC  ${fMhz} ${c.mode || ''}<br><span style="color:#aaa">${locName}${gridLabel}</span>`;
@@ -29250,8 +29262,8 @@ if (activatorSpotBtn) {
       });
       if (result && result.success) {
         showLogToast(away
-          ? `Spotted on your calling frequency: ${ref} ${Math.round(freq)} kHz ${mode}`
-          : `Spotted on POTA: ${ref} ${Math.round(freq)} kHz ${mode}`);
+          ? `Spotted on your calling frequency: ${ref} ${FreqDots.khzMhz(freq)} ${mode}`
+          : `Spotted on POTA: ${ref} ${FreqDots.khzMhz(freq)} ${mode}`);
       } else {
         showLogToast('Self-spot failed: ' + (result?.error || 'unknown error'), { warn: true });
       }
@@ -29778,7 +29790,7 @@ function updateActivatorHomeUi() {
   if (activatorHomeChip) activatorHomeChip.classList.toggle('hidden', !away);
   if (activatorFreqInput) activatorFreqInput.classList.toggle('off-home', away);
   if (away && activatorHomeBtn) {
-    const mhz = (activatorHomeFreqHz / 1e6).toFixed(3);
+    const mhz = FreqDots.fromHz(activatorHomeFreqHz);
     const homeBand = freqToBandActivator(Math.round(activatorHomeFreqHz / 1000)) || '';
     const nowBand = freqToBandActivator(activatorFreqKhz) || '';
     // Name the band too when the excursion crossed one — that is exactly when

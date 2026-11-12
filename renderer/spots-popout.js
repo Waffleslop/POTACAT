@@ -197,7 +197,7 @@ function render() {
     });
 
     const freq = parseFloat(s.frequency);
-    const freqStr = freq ? freq.toFixed(1) : s.frequency;
+    const freqStr = freq ? FreqDots.fromKhz(freq) : s.frequency;
     const dist = s.distance != null ? Math.round(s.distance) : '';
 
     tr.innerHTML = `

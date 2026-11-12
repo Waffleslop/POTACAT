@@ -264,10 +264,10 @@ function _applyPopoutTheme(payload) {
     return `${datePart} ${t.slice(0, 2)}:${t.slice(2, 4)}`;
   }
 
-  /** Display an integer kHz as "14074" (no decimals). */
+  /** kHz written the VFO way, 14.074.00 (lib/freq-dots.js). */
   function formatFreq(kHz) {
     if (kHz == null || isNaN(kHz)) return '';
-    return String(Math.round(kHz));
+    return FreqDots.fromKhz(kHz);
   }
 
   /** Render the past-QSOs panel. */

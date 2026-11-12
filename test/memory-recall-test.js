@@ -69,7 +69,7 @@ test('the read-back: within 1 kHz is the channel; elsewhere names both frequenci
   assert.strictEqual(M.recallVerdict({ channel: ch, gotHz: 146940600 }).ok, true);
   const bad = M.recallVerdict({ channel: ch, gotHz: 147300000 });
   assert.strictEqual(bad.ok, false);
-  assert.ok(/147\.3000 MHz, not W4XYZ's 146\.9400 MHz/.test(bad.text) && /memory number in Directory > Channels/.test(bad.text));
+  assert.ok(/147\.300\.00 MHz, not W4XYZ's 146\.940\.00 MHz/.test(bad.text) && /memory number in Directory > Channels/.test(bad.text));
   assert.strictEqual(M.recallVerdict({ channel: ch, gotHz: 0 }).ok, null);
 });
 
