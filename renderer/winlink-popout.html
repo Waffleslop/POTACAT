@@ -222,6 +222,59 @@
     .wl-c-actions .wl-btn { height: 32px; font-size: 13px; padding: 0 14px; }
     .wl-c-actions .wl-btn.primary { font-weight: 700; background: var(--ok-subtle, transparent); }
 
+    /* Chip fields (To, Cc, Also email to, Parks): one box like the other
+       fields, each address a chip, typing at the end. */
+    .wl-chips { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: 34px; box-sizing: border-box; padding: 3px 6px; border: 1px solid var(--border-primary); border-radius: 6px; background: var(--bg-primary); cursor: text; }
+    .wl-chips:focus-within { border-color: var(--accent-blue, #4fc3f7); box-shadow: 0 0 0 1px var(--accent-blue, #4fc3f7); }
+    .wl-chip-list { display: contents; }
+    .wl-compose .wl-chips .wl-chip-in, .wl-form .wl-chips .wl-chip-in { flex: 1; min-width: 120px; height: 26px; border: none; box-shadow: none; background: transparent; padding: 0 4px; color: var(--text-primary); font-size: 14px; outline: none; }
+    .wl-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 26px; padding: 0 4px 0 9px; border-radius: 13px; background: var(--bg-hover); border: 1px solid var(--border-primary); color: var(--text-primary); font-size: 13px; white-space: nowrap; }
+    .wl-chip.bad { border-color: var(--accent-red-text, var(--accent-red, #e94560)); color: var(--accent-red-text, var(--accent-red, #e94560)); }
+    .wl-chip-name { overflow: hidden; text-overflow: ellipsis; }
+    .wl-chip-x { border: none; background: transparent; color: var(--text-secondary); cursor: pointer; padding: 0 4px; font-size: 13px; line-height: 1; border-radius: 8px; }
+    .wl-chip-x:hover { background: var(--bg-primary); color: var(--text-primary); }
+    .wl-kind { display: inline-block; padding: 0 6px; border-radius: 8px; font-size: 11px; line-height: 16px; border: 1px solid var(--border-primary); color: var(--text-secondary); }
+    .wl-book-btn { width: 34px; height: 34px; padding: 0 !important; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .wl-ico { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+    /* Suggestions under a chip field. */
+    .wl-suggest { position: absolute; z-index: 7; min-width: 280px; max-width: 420px; max-height: 280px; overflow-y: auto; padding: 4px; border-radius: 8px; border: 1px solid var(--border-primary); background: var(--bg-secondary); box-shadow: 0 10px 28px rgba(0,0,0,0.35); }
+    .wl-sug { display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box; padding: 7px 10px; border: none; border-radius: 6px; background: transparent; color: var(--text-primary); font-size: 14px; text-align: left; cursor: pointer; }
+    .wl-sug.on, .wl-sug:hover { background: var(--bg-hover); }
+    .wl-sug-name { font-weight: 600; }
+    .wl-sug-addr { color: var(--text-secondary); font-size: 13px; overflow: hidden; text-overflow: ellipsis; }
+    .wl-sug .wl-spacer { flex: 1; }
+    /* The two forms and the address book fill the reading pane. */
+    .wl-pane { position: relative; }
+    .wl-form { display: flex; flex-direction: column; flex: 1; min-height: 0; font-size: 14px; }
+    .wl-form[hidden] { display: none; }
+    .wl-form-body { flex: 1; overflow-y: auto; padding: 14px 16px; }
+    .wl-form-title { margin: 0 0 4px; font-size: 17px; font-weight: 700; color: var(--text-primary); }
+    .wl-form-lead { margin: 0 0 14px; color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
+    .wl-form-grid { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px 12px; align-items: center; max-width: 620px; }
+    .wl-form-grid > label { font-size: 13px; color: var(--text-secondary); }
+    .wl-form input[type=text], .wl-form select { height: 34px; box-sizing: border-box; border: 1px solid var(--border-primary); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary); font-size: 14px; padding: 0 10px; }
+    .wl-form input[type=text]:focus, .wl-form select:focus { outline: none; border-color: var(--accent-blue, #4fc3f7); box-shadow: 0 0 0 1px var(--accent-blue, #4fc3f7); }
+    .wl-form-inline { display: flex; align-items: center; gap: 8px; }
+    .wl-form-inline input { width: 120px; }
+    .wl-form-unit { color: var(--text-secondary); font-size: 13px; }
+    .wl-form-help { color: var(--text-secondary); font-size: 12px; line-height: 1.4; }
+    .wl-form-preview { margin-top: 16px; max-width: 620px; }
+    .wl-form-preview pre { margin: 4px 0 0; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border-primary); background: var(--bg-secondary); color: var(--text-primary); font-family: Consolas, 'Courier New', monospace; font-size: 13px; white-space: pre-wrap; }
+    .wl-book { position: absolute; inset: 0; z-index: 6; display: flex; flex-direction: column; background: var(--bg-primary); font-size: 14px; }
+    .wl-book[hidden] { display: none; }
+    .wl-book-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border-primary); background: var(--bg-secondary); }
+    .wl-book-head .wl-form-title { margin: 0; }
+    .wl-book-head input { flex: 1; height: 32px; box-sizing: border-box; border: 1px solid var(--border-primary); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary); padding: 0 10px; font-size: 14px; }
+    .wl-book-list { flex: 1; overflow-y: auto; }
+    .wl-book-sec { padding: 8px 14px 4px; font-size: 12px; color: var(--text-secondary); }
+    .wl-book-row { display: flex; align-items: center; gap: 10px; padding: 7px 14px; border-bottom: 1px solid var(--border-primary); }
+    .wl-book-who { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .wl-book-who .wl-sug-addr { font-family: Consolas, monospace; }
+    .wl-book-row .wl-btn { height: 28px; padding: 0 10px; font-size: 13px; }
+    .wl-book-edit { padding: 12px 14px; border-top: 1px solid var(--border-primary); background: var(--bg-secondary); }
+    .wl-book-edit[hidden] { display: none; }
+    .wl-book-empty { padding: 18px 14px; color: var(--text-secondary); }
+
     /* Notice gate */
     .wl-notice { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: center; justify-content: center; z-index: 10; }
     .wl-notice.show { display: flex; }
@@ -358,8 +411,10 @@
       <div class="wl-compose" id="wl-compose">
         <div class="wl-c-head">
           <div class="wl-c-row" id="wl-c-name-row" hidden><label for="wl-c-name">Name</label><input type="text" id="wl-c-name" maxlength="60" placeholder="what the Templates menu calls it"></div>
-          <div class="wl-c-row"><label for="wl-c-to">To</label><input type="text" id="wl-c-to" placeholder="callsign or email, separated by commas"></div>
-          <div class="wl-c-row"><label for="wl-c-cc">Cc</label><input type="text" id="wl-c-cc"></div>
+          <!-- To and Cc: chips with suggestions from the address book and past mail (Casey 2026-11-11).
+               The hidden inputs hold the comma-separated addresses the send path reads. -->
+          <div class="wl-c-row"><label for="wl-c-to-in">To</label><div class="wl-chips" data-field="to"><span class="wl-chip-list"></span><input type="text" id="wl-c-to-in" class="wl-chip-in" autocomplete="off" spellcheck="false" placeholder="callsign, name or email"></div><button type="button" class="wl-btn wl-book-btn" id="wl-c-book" title="Address book" aria-label="Open the address book"><svg class="wl-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v16H6.5A1.5 1.5 0 0 0 5 20.5v-16Z"/><path d="M5 20.5A1.5 1.5 0 0 0 6.5 22H19v-3"/><circle cx="12" cy="9" r="2.5"/><path d="M8.5 15c.7-1.8 2-2.7 3.5-2.7s2.8.9 3.5 2.7"/></svg></button><input type="hidden" id="wl-c-to"></div>
+          <div class="wl-c-row"><label for="wl-c-cc-in">Cc</label><div class="wl-chips" data-field="cc"><span class="wl-chip-list"></span><input type="text" id="wl-c-cc-in" class="wl-chip-in" autocomplete="off" spellcheck="false"></div><input type="hidden" id="wl-c-cc"></div>
           <div class="wl-c-row"><label for="wl-c-subj">Subject</label><input type="text" id="wl-c-subj" maxlength="128"></div>
         </div>
         <div class="wl-c-hint" id="wl-c-hint" role="note" hidden></div>
@@ -368,6 +423,48 @@
         <!-- One row (Casey 2026-11-11): Attach | Cancel | Put in Outbox -->
         <div class="wl-c-actions"><button class="wl-btn" id="wl-c-attach">Attach…</button><button class="wl-btn" id="wl-c-save-tpl" title="Keep this message as a template in the Templates menu">Save as template</button><span class="wl-c-files" id="wl-c-files"></span><span class="wl-spacer"></span><button class="wl-btn" id="wl-c-cancel">Cancel</button><button class="wl-btn primary" id="wl-c-send">Put in Outbox</button></div>
       </div>
+      <!-- Position report (Casey 2026-11-11: "what is the full strategy"): a form, not an instant queue. -->
+      <form class="wl-form" id="wl-form-pos" hidden autocomplete="off">
+        <div class="wl-form-body">
+          <h2 class="wl-form-title">Position report</h2>
+          <p class="wl-form-lead">Goes to Winlink's position map (QTH), not a person's inbox. The people supporting you can look you up there.</p>
+          <div class="wl-form-grid">
+            <label for="wl-pos-lat">Latitude</label><input type="text" id="wl-pos-lat" inputmode="decimal" placeholder="40.7291">
+            <label for="wl-pos-lon">Longitude</label><input type="text" id="wl-pos-lon" inputmode="decimal" placeholder="-74.0416">
+            <span></span><span class="wl-form-help" id="wl-pos-from"></span>
+            <label for="wl-pos-comment">Comment</label><input type="text" id="wl-pos-comment" maxlength="80" placeholder="optional, for example At US-1234 until 1800Z">
+            <label for="wl-pos-also-in">Also email to</label><div class="wl-chips" data-field="posalso"><span class="wl-chip-list"></span><input type="text" id="wl-pos-also-in" class="wl-chip-in" autocomplete="off" spellcheck="false" placeholder="optional: people to send the same position to"></div>
+          </div>
+          <input type="hidden" id="wl-pos-also">
+          <div class="wl-c-err" id="wl-pos-err"></div>
+        </div>
+        <div class="wl-c-actions"><span class="wl-spacer"></span><button type="button" class="wl-btn" id="wl-pos-cancel">Cancel</button><button type="submit" class="wl-btn primary" id="wl-pos-send">Put in Outbox</button></div>
+      </form>
+      <!-- POTA spot: fields, never a hand-edited line (Casey 2026-11-11). -->
+      <form class="wl-form" id="wl-form-spot" hidden autocomplete="off">
+        <div class="wl-form-body">
+          <h2 class="wl-form-title">POTA spot</h2>
+          <p class="wl-form-lead">Spots you on POTA by email, one spot per park. It posts a real spot when this message goes out.</p>
+          <div class="wl-form-grid">
+            <label for="wl-spot-parks-in">Parks</label><div class="wl-chips" data-field="parks"><span class="wl-chip-list"></span><input type="text" id="wl-spot-parks-in" class="wl-chip-in" autocomplete="off" spellcheck="false" placeholder="US-1234, then Enter"></div>
+            <label for="wl-spot-freq">Frequency</label><span class="wl-form-inline"><input type="text" id="wl-spot-freq" inputmode="decimal" placeholder="14.074"><span class="wl-form-unit">MHz</span><span class="wl-form-help" id="wl-spot-freq-from"></span></span>
+            <label for="wl-spot-mode">Mode</label><select id="wl-spot-mode"></select>
+            <label for="wl-spot-comment">Comment</label><input type="text" id="wl-spot-comment" maxlength="60" placeholder="optional, for example QRT 1800Z">
+          </div>
+          <input type="hidden" id="wl-spot-parks">
+          <div class="wl-form-preview"><span class="wl-form-help">POTA receives</span><pre id="wl-spot-preview"></pre></div>
+          <div class="wl-c-err" id="wl-spot-err"></div>
+        </div>
+        <div class="wl-c-actions"><span class="wl-spacer"></span><button type="button" class="wl-btn" id="wl-spot-cancel">Cancel</button><button type="submit" class="wl-btn primary" id="wl-spot-send">Put in Outbox</button></div>
+      </form>
+      <!-- Address book: contacts and groups; add any of them to To or Cc. -->
+      <div class="wl-book" id="wl-book" role="dialog" aria-label="Address book" hidden>
+        <div class="wl-book-head"><span class="wl-form-title">Address book</span><input type="text" id="wl-book-find" placeholder="Find a name, call or email" spellcheck="false" aria-label="Find in the address book"><button type="button" class="wl-btn" id="wl-book-close">Done</button></div>
+        <div class="wl-book-list" id="wl-book-list"></div>
+        <div class="wl-book-edit" id="wl-book-edit" hidden></div>
+        <div class="wl-c-actions"><button type="button" class="wl-btn" id="wl-book-new">+ New contact</button><button type="button" class="wl-btn" id="wl-book-newgroup">+ New group</button><span class="wl-spacer"></span><span class="wl-form-help">Everyone you have exchanged mail with is offered as you type, saved or not.</span></div>
+      </div>
+      <div class="wl-suggest" id="wl-suggest" role="listbox" hidden></div>
     </div>
     <div class="wl-done-card" id="wl-done-card" role="status" aria-live="polite">
       <span class="wl-done-title" id="wl-done-title"></span>
@@ -409,6 +506,8 @@
   <script src="waterfall.js"></script>
   <script src="../lib/winlink-spectrum.js"></script>
   <script src="../lib/rig-bands.js"></script>
+  <script src="../lib/winlink-contacts.js"></script>
+  <script src="../lib/pota-email-spot.js"></script>
   <script src="winlink-popout.js"></script>
 </body>
 </html>

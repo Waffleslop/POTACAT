@@ -62,6 +62,8 @@ contextBridge.exposeInMainWorld('api', {
   gateways: (mode, band) => ipcRenderer.invoke('winlink-cmd-gateways', { mode, band }),
   history: () => ipcRenderer.invoke('winlink-cmd-history'),
   template: (op, t) => ipcRenderer.invoke('winlink-cmd-template', { op, t }),
+  contact: (op, c) => ipcRenderer.invoke('winlink-cmd-contact', { op, c }),
+  contactGroup: (op, g) => ipcRenderer.invoke('winlink-cmd-contact-group', { op, g }),
   favourite: (op, g) => ipcRenderer.invoke('winlink-cmd-favourite', { op, call: g && g.call, mode: g && g.mode, dialKhz: g && (g.dialKhz != null ? g.dialKhz : g.khz), url: g && g.url }),
   onCatFrequency: (cb) => ipcRenderer.on('cat-frequency', (_e, hz) => cb(hz)),
   setMode: (mode) => ipcRenderer.send('winlink-cmd-set-mode', mode),
