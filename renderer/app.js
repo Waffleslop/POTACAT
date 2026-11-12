@@ -22151,12 +22151,20 @@ catLogClearBtn.addEventListener('click', () => {
     // NOTE the `|| rigs[0]` above: when activeRigId matches nothing, this line
     // still names a rig, which reads as "a rig is active" when none is. Say so.
     const rigActive = !!(activeRig && activeRig.id === s.activeRigId);
+    // This text is pasted into public channels, so the header masks the rig's
+    // host, a remote shack's host and a home path in a serial path with the
+    // same rules as the log lines (lib/diagnostic-snapshot.js, GitHub #404).
+    // Without the module, mask everything rather than paste it in full.
+    const DS = window.DiagnosticSnapshot;
+    const maskHost = DS ? DS.maskHost : () => '<redacted>';
+    const maskSerialPath = DS ? DS.maskSerialPath : () => '<redacted>';
+    const maskReportText = DS ? DS.maskReportText : () => '<redacted>';
     const rigDesc = activeRig
       ? [activeRig.name, activeRig.model, activeRig.catTarget && activeRig.catTarget.type,
          activeRig.catTarget && (activeRig.catTarget.host
            // Icom Network keeps its port as controlPort; "host:undefined" told a reader nothing (KG5EIU).
-           ? activeRig.catTarget.host + ((activeRig.catTarget.port || activeRig.catTarget.controlPort) ? ':' + (activeRig.catTarget.port || activeRig.catTarget.controlPort) : '')
-           : activeRig.catTarget.path)]
+           ? maskHost(activeRig.catTarget.host) + ((activeRig.catTarget.port || activeRig.catTarget.controlPort) ? ':' + (activeRig.catTarget.port || activeRig.catTarget.controlPort) : '')
+           : maskSerialPath(activeRig.catTarget.path))]
         .filter(Boolean).join(' / ') + (rigActive ? '' : '  [NOT THE ACTIVE RIG — activeRigId matches nothing]')
       : '(none configured)';
     // Two settings silently stop POTACAT touching the local radio, and neither
@@ -22166,7 +22174,8 @@ catLogClearBtn.addEventListener('click', () => {
     const remoteTarget = s.activeTargetId &&
       (s.connectionTargets || []).find((t) => t && t.id === s.activeTargetId);
     const radioOwner = remoteTarget
-      ? 'REMOTE SHACK — ' + (remoteTarget.name || remoteTarget.host || 'unnamed target') +
+      ? 'REMOTE SHACK — ' + (remoteTarget.name ? maskReportText(remoteTarget.name)
+        : remoteTarget.host ? maskHost(remoteTarget.host) : 'unnamed target') +
         ' (the local rig is deliberately not connected)'
       : s.enableWsjtx ? 'WSJT-X integration is ON (POTACAT releases the radio to WSJT-X)'
       : 'this station';
