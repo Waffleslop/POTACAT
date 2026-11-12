@@ -445,6 +445,7 @@ async function runSettle({ patBody, outboxAfter, queued, connected = true, modem
     winlinkLog: (m) => logs.push(m),
     winlinkSessionPush: () => pushes.push(state.session),
     winlinkRetryFields: () => ({}), // the automatic retry's fields (#425); its own test is winlink-auto-retry-test.js
+    winlinkSummariesLoad: () => {}, winlinkSummariesSave: () => {}, // the file on disk has its own test (winlink-summary-store-test.js)
     winlinkSessionActive: () => ['starting', 'connecting', 'connected', 'disconnecting'].includes(state.session.state),
     console, Date, Math, Promise, String, Number,
   });
