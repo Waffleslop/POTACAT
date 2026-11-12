@@ -71,8 +71,14 @@ let electronPath = null;
 try { electronPath = require('electron'); } catch { electronPath = null; }
 let data = null;
 let skipReason = '';
+// Linux with no display: Electron cannot open a window and spawnSync used to
+// wait out its timeout (~4 min in CI) before saying SKIP. Say it at once; the
+// layout-tests job runs this under xvfb with LAYOUT_REQUIRED=1, where it is real.
+const noDisplay = process.platform === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY;
 if (!electronPath || typeof electronPath !== 'string' || !fs.existsSync(electronPath)) {
   skipReason = 'Electron binary not installed (npm install)';
+} else if (noDisplay && !required) {
+  skipReason = 'no display (Linux without DISPLAY); the layout-tests job runs this under xvfb';
 } else {
   const res = spawnSync(electronPath, [path.join(__dirname, 'layout', 'harness.js'), '--no-sandbox'], {
     cwd: ROOT, encoding: 'utf8', timeout: 120000, env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: '1' },

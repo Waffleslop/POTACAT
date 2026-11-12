@@ -22,24 +22,52 @@ on:
   pull_request:
     branches: [master]
 
+# A newer push to the same PR cancels the run it replaces (a rebase or a quick
+# fix no longer waits behind a stale run). A push to master is never cancelled:
+# it is the check that two PRs green alone still pass together.
+concurrency:
+  group: test-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # The whole suite, in four parallel shards (2026-11-12: one job took ~24
+  # min; 9 of them were two Electron tests waiting out a timeout for a display
+  # this job does not have). scripts/run-tests.js deals the files out by
+  # measured time (scripts/test-times.json) so the shards finish together;
+  # test/run-tests-shard-test.js proves every file runs in exactly one shard.
+  # The job keeps its name, so "jtcat-tests (1)" .. "(4)" are the checks.
   jtcat-tests:
     runs-on: ubuntu-latest
-    # Bumped 5 → 12 (2026-07-09): the SSTV e2e + quality suites pushed the
-    # battery past 5 minutes and runs were being CANCELLED at the timeout —
-    # master showed "cancelled", not red, which is how it went unnoticed.
-    # 12 → 16 (2026-09-26): the SSTV lock-supervision suite adds ~3 min.
-    # 16 → 45 (2026-11-07): the whole npm test suite (430+ files) runs here.
-    timeout-minutes: 45
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22' # same as release.yml; the suite needs ws and serialport from the lockfile
+          cache: npm
       - name: npm ci (the suite requires ws, serialport and the other runtime deps)
         run: npm ci --no-audit --no-fund
-      - name: Run the whole npm test suite (scripts/run-tests.js)
+      - name: Run shard ${{ matrix.shard }} of 4 of the npm test suite (scripts/run-tests.js)
+        env:
+          TEST_SHARD: ${{ matrix.shard }}/4
         run: node scripts/run-tests.js
+
+  # The checks that are not test files: SSTV packs and the FT-710 helper.
+  helper-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: npm ci
+        run: npm ci --no-audit --no-fund
       - name: Validate SSTV style packs in data/sstv-packs
         run: node scripts/validate-sstv-packs.js
       - name: Compile the FT-710 scope helper and round-trip one synthetic frame through the parser
