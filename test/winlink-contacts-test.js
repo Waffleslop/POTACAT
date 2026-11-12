@@ -183,6 +183,14 @@ test('theme colours only in the new styles', () => {
   }
 });
 
+test('the POTA spot form shows examples, not a how-to: one park, then a 2-fer as one line per park', () => {
+  const html = readSrc(path.join(__dirname, '..', 'renderer', 'winlink-popout.html'));
+  const js = readSrc(path.join(__dirname, '..', 'renderer', 'winlink-popout.js'));
+  assert.ok(/<span class="wl-form-help">Examples<\/span><pre id="wl-spot-examples"><\/pre>/.test(html));
+  assert.ok(/' POTA US-1449 7\.025 CW/.test(js), 'one park, CW on 40 m');
+  assert.ok(/' POTA CA-0035 14\.285 SSB/.test(js) && /' POTA CA-0110 14\.285 SSB/.test(js), 'a 2-fer on 20 m SSB, one line per park');
+});
+
 test('this test is in the list CI runs', () => {
   assert.ok(readSrc(path.join(root, 'scripts', 'run-tests.js')).includes("'test/winlink-contacts-test.js'"));
 });

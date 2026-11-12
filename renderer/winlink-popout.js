@@ -1486,7 +1486,19 @@
       return PES.spotLine({ call: call, ref: ref, freqKhz: mhz > 0 ? mhz * 1000 : 0, mode: mode, comment: comment });
     });
   }
+  // Examples instead of a how-to (Casey 2026-11-11), in the operator's own
+  // call: one park, then a 2-fer, which is one line per park.
+  function renderSpotExamples() {
+    var call = String((state && state.mycall) || 'K1ABC').toUpperCase();
+    $('wl-spot-examples').textContent =
+      'One park, CW on 40 m:\n'
+      + '!' + call + ' POTA US-1449 7.025 CW\n\n'
+      + 'A 2-fer, SSB on 20 m: one line per park\n'
+      + '!' + call + ' POTA CA-0035 14.285 SSB\n'
+      + '!' + call + ' POTA CA-0110 14.285 SSB';
+  }
   function renderSpotPreview() {
+    renderSpotExamples();
     var lines = spotLines();
     $('wl-spot-preview').textContent = lines.length ? lines.join('\n') : 'Add a park to see the spot line.';
     var bad = chipFields.parks.items.filter(function (r) { return !PES.parkRef(r); });
