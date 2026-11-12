@@ -400,6 +400,7 @@ const { qsoDayInScheduleEntry, matchChecklistItem, matchRegionPatterns, activeSc
 const { cwPaddleAvailability } = require('./lib/cw-paddle-availability');
 const { resolveCwKeyPins, resolveKeyPortPins, keyLineLabel } = require('./lib/cw-key-line');
 const { buildPersistentKeyerScript } = require('./lib/cw-keyer-script');
+const { cwTextUnavailablePlan } = require('./lib/cw-text-fallback');
 const { sanitizeKiwiSdrList, reconcileSdrSettings } = require('./lib/sdr-list-sync');
 const { stripSigTag, appendTag, ensureSigTag } = require('./lib/log-comment');
 const { buildWrlContactInfo } = require('./lib/wrl-packet');
@@ -8637,6 +8638,7 @@ async function connectCat() {
     cat = new RigController(model, transport, codec);
     cat._debug = true;
     cat.on('log', sendCatLog);
+    cat.on('cw-text-unavailable', onCwTextUnavailable);
     // rigctld that cannot open the radio's port (another program holds it, or
     // the radio does not answer at this baud) still accepts POTACAT, then drops
     // it a few seconds later with nothing said. WX4MWA's TS-2000 log was that
@@ -8682,6 +8684,7 @@ async function connectCat() {
     cat = new RigController(model, transport, codec);
     cat._debug = true;
     cat.on('log', sendCatLog);
+    cat.on('cw-text-unavailable', onCwTextUnavailable);
     cat.on('status', (s) => {
       sendCatLog(`rigctld-net status: connected=${s.connected}${s.error ? ' error=' + s.error : ''}`);
       sendCatStatus(s);
@@ -23921,21 +23924,10 @@ function _sendCwTextToRadioImpl(text, opts) {
     // the sendCwTextToRadio wrapper caught it (KM4CFT 2026-07-21).
     const activeRig = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
     const txtPins = resolveCwKeyPins({ modelPins: cwCaps.dtrPins, cwKeyLine: activeRig && activeRig.cwKeyLine });
-    const pinLabel = txtPins.dtr && txtPins.rts ? 'DTR+RTS' : (txtPins.rts ? 'RTS' : 'DTR');
     // Key via the dedicated port with whichever backend is ready: pyserial
     // (this driver rejected TIOCMSET, keys via TIOCMBIS/BIC) or node-serialport
     // DTR. Returns a label if it keyed, else false.
-    const keyViaKeyPort = () => {
-      if (_cwKeyPortPathForPython) {
-        // Prefer the persistent keyer (also carries real-time paddle); it owns
-        // the port, so the per-message python is only the fallback when the
-        // keyer can't run (win32 / no python).
-        if (cwPersistentText(wpm, expanded, txtPins)) return `persistent keyer (${pinLabel})`;
-        if (sendCwTextViaPython(expanded, wpm, txtPins)) return `Python pyserial (${pinLabel})`;
-      }
-      if (cwKeyPort && cwKeyPort.isOpen && sendCwTextViaDtrKey(expanded, wpm, txtPins, { live })) return `${pinLabel} keyer`;
-      return false;
-    };
+    const keyViaKeyPort = () => keyCwTextOnKeyPort(expanded, wpm, txtPins, live);
     // A configured key port is authoritative for these rigs — their CAT KY is
     // unreliable (keys TX with NO morse), so NEVER fall through to it. The port
     // opens ASYNCHRONOUSLY, so the first send of a session arrives before the
@@ -23989,12 +23981,64 @@ function _sendCwTextToRadioImpl(text, opts) {
         : cwCaps.text === 'ky1' ? (rigModel?.brand === 'Yaesu' ? 'KY (BK-IN)' : 'TX1;+KY')
         : cwCaps.text === 'civ' ? 'CI-V 0x17' : (cwCaps.text || 'KY');
       const t = settings.catTarget || {};
-      sendCatLog(`[CW] Text via CAT ${t.type === 'rigctld' ? 'rigctld send_morse' : via} @ ${(cat && cat._cwWpm) || settings.cwWpm || 20} wpm: ${expanded}`);
+      if (!cat.cwTextUnavailable) sendCatLog(`[CW] Text via CAT ${t.type === 'rigctld' ? 'rigctld send_morse' : via} @ ${(cat && cat._cwWpm) || settings.cwWpm || 20} wpm: ${expanded}`);
     }
     // `live` = key-as-I-type: append to the radio's buffer, never abort what
     // is already being keyed (see RigController.sendCwText).
     cat.sendCwText(expanded, { live });
   }
+}
+
+// Key CW text on the dedicated CW Key Port with whichever backend is ready:
+// pyserial (a driver that rejected TIOCMSET keys via TIOCMBIS/BIC) or
+// node-serialport DTR. Returns a label if it keyed, else false.
+function keyCwTextOnKeyPort(expanded, wpm, txtPins, live) {
+  const pinLabel = txtPins.dtr && txtPins.rts ? 'DTR+RTS' : (txtPins.rts ? 'RTS' : 'DTR');
+  if (_cwKeyPortPathForPython) {
+    // Prefer the persistent keyer (also carries real-time paddle); it owns
+    // the port, so the per-message python is only the fallback when the
+    // keyer can't run (win32 / no python).
+    if (cwPersistentText(wpm, expanded, txtPins)) return `persistent keyer (${pinLabel})`;
+    if (sendCwTextViaPython(expanded, wpm, txtPins)) return `Python pyserial (${pinLabel})`;
+  }
+  if (cwKeyPort && cwKeyPort.isOpen && sendCwTextViaDtrKey(expanded, wpm, txtPins, { live })) return `${pinLabel} keyer`;
+  return false;
+}
+
+// The rig link cannot send CW text (rigctld answered RPRT -11 to send_morse:
+// Xiegu X5105, #383). Key the lost text on the CW Key Port when one is open;
+// otherwise say, in one sentence, what to set up. Never PTT: keying the
+// transmitter with nothing to key the CW is a carrier or dead air. The
+// sentence is repeated at most every 30 s, so each macro is not a new line.
+let _cwTextUnavailableSaidAt = 0;
+function onCwTextUnavailable(info) {
+  const text = info && info.text;
+  // Known from Hamlib's dump_caps at connect: nothing was lost yet. The
+  // first macro arrives here again and gets the sentence.
+  if (!text && !(info && info.again)) return;
+  const plan = cwTextUnavailablePlan({
+    keyPortPath: settings.cwKeyPort,
+    keyPortReady: !!(_cwKeyPortPathForPython || (cwKeyPort && cwKeyPort.isOpen)),
+  });
+  if (plan.route === 'key-port' && text) {
+    const rigModel = getActiveRigModel();
+    const activeRig = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
+    const pins = resolveCwKeyPins({ modelPins: rigModel?.cw?.dtrPins, cwKeyLine: activeRig && activeRig.cwKeyLine });
+    const wpm = (cat && cat._cwWpm) || settings.cwWpm || 20;
+    const via = keyCwTextOnKeyPort(text, wpm, pins, false);
+    if (via) {
+      sendCatLog(`[CW] ${plan.message} Text via ${via} @ ${wpm} wpm: ${text}`);
+      return;
+    }
+  }
+  const now = Date.now();
+  if (now - _cwTextUnavailableSaidAt < 30000) return;
+  _cwTextUnavailableSaidAt = now;
+  const msg = plan.route === 'key-port'
+    ? cwTextUnavailablePlan({ keyPortPath: settings.cwKeyPort, keyPortReady: false }).message
+    : plan.message;
+  sendCatLog(`[CW] ${msg}`);
+  if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: msg, warn: true, duration: 12000 });
 }
 
 // Aborts any in-flight CW text send across every dispatch path. Mirrors

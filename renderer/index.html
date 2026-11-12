@@ -1882,7 +1882,7 @@
             <option value="rts">RTS</option>
           </select>
         </label>
-        <span class="help-text" style="margin-bottom:8px;display:block;">For serial rigs (Icom/Yaesu/Kenwood) that key CW off a USB control line. Must match the radio's <b>USB Keying (CW)</b> / <b>PC KEYING</b> menu — <b>Setup instructions</b> above names the exact setting for your radio. Ignored for FlexRadio and dedicated CW-key-port setups. See docs/linux-cw-keying.md.</span>
+        <span class="help-text" style="margin-bottom:8px;display:block;">For serial rigs (Icom/Yaesu/Kenwood) that key CW off a USB control line. Must match the radio's <b>USB Keying (CW)</b> / <b>PC KEYING</b> menu — <b>Setup instructions</b> above names the exact setting for your radio. With a CW Key Port (Settings &rarr; ECHOCAT) it picks the line keyed on that port instead. Ignored for FlexRadio. On Hamlib it works only with a CW Key Port: the CAT port belongs to rigctld. See docs/linux-cw-keying.md.</span>
         <label>N1MM Radio #:
           <select id="set-radio-nr" style="width:80px;">
             <option value="1">1</option>
