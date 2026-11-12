@@ -473,6 +473,7 @@ const SstvFeedGate = require('./lib/sstv-feed-gate'); // pure ingress-gate decis
 const HuntedPark = require('./lib/hunted-park'); // worked-call → live program-spot park refs (JTCAT logging)
 const WorkedBefore = require('./lib/worked-before'); // JTCAT worked-before policy: rework window + activator exception
 const WorkedRoster = require('./lib/worked-roster'); // states + DXCC entities worked/confirmed by band and mode (WAS, map overlays)
+const StateBackfill = require('./lib/state-backfill'); // "Fill missing states from QRZ": which QSOs, what state, the answer naming those left (#389)
 const GridState = require('./lib/grid-state'); // a decode's US state / province from its grid (certain or straddling), QRZ second
 const { describeJtcatTxAudioFault } = require('./lib/jtcat-tx-audio-fault'); // renderer TX route refused: configured output device unavailable
 const EventRegistry = require('./lib/event-registry'); // unified Events/Contests registry (roadmap #1 Phase A)
@@ -14718,7 +14719,7 @@ function activationStationFillFor(rec, s = settings) {
   if (!rec || !rec.mySigInfo) return {};
   let park = null;
   try { park = getParkDb(parksMap, rec.mySigInfo) || null; } catch {}
-  return activationStationFill(rec, { myCallsign: s.myCallsign, park, latLonToGrid, parkStates: parkStatesFromLocation });
+  return activationStationFill(rec, { myCallsign: s.myCallsign, park, latLonToGrid, parkStates: parkStatesFromLocation, parkGrids: s.activatorParkGrids });
 }
 /**
  * The station side of a record: the activation fill above, then the
@@ -48491,21 +48492,22 @@ function cloudShackNotice(text, kind) {
       return states.length === 1 ? states[0] : ''; // '' = park known to straddle or unknown: leave alone
     };
 
-    // Candidates: no STATE, an entity whose STATE field is a state the
-    // roster tracks (lib/worked-roster.js stateKeys).
-    const TRACKED = new Set(['United States', 'Alaska', 'Hawaii', 'Canada', 'Australia']);
+    // Candidates: no STATE, an entity whose states the roster tracks (US,
+    // Alaska, Hawaii, Canada; never Australia, #389). lib/state-backfill.js
+    // decides each record and words the answer, naming the QSOs left.
+    const backfillCtx = {
+      entityOf: rosterEntityOf,
+      tracksEntity: WorkedRoster.tracksEntity,
+      stateKeys: WorkedRoster.stateKeys,
+      parkStateOf, // park contact: the park decides, QRZ is not consulted
+      baseCall: JtcatParser.baseCall,
+    };
     const wantCalls = new Set();
-    let candidates = 0;
     for (const rec of raw) {
-      if (rec.STATE) continue;
-      const ent = rosterEntityOf(rec.CALL);
-      if (!TRACKED.has(ent)) continue;
-      candidates++;
-      if (parkStateOf(rec) !== null) continue; // park contact: the park decides, QRZ is not consulted
-      wantCalls.add(JtcatParser.baseCall(String(rec.CALL).toUpperCase()));
+      if (StateBackfill.wantsLookup(rec, backfillCtx)) wantCalls.add(JtcatParser.baseCall(String(rec.CALL).toUpperCase()));
     }
 
-    const found = new Map();
+    const lookups = new Map(); // baseCall -> QRZ record | null; absent = not looked up this press
     let live = 0;
     let skippedForBudget = 0;
     for (const call of wantCalls) {
@@ -48516,22 +48518,21 @@ function cloudShackNotice(text, kind) {
         live++;
         try { q = await qrz.lookup(call); } catch { q = null; }
       }
-      if (q && q.state) found.set(call, String(q.state).trim().toUpperCase());
+      lookups.set(call, q || null);
     }
 
     let filled = 0;
     let fromPark = 0;
+    let left = []; // the QSOs still without a state, named in the answer
     try {
       mutateLog(logPath, (qsos) => {
+        left = []; filled = 0; fromPark = 0;
         for (const rec of qsos) {
-          if (rec.STATE) continue;
-          const ent = rosterEntityOf(rec.CALL);
-          const ps = parkStateOf(rec);
-          let state = '';
-          if (ps !== null) { state = ps; if (state) fromPark++; }
-          else state = found.get(JtcatParser.baseCall(String(rec.CALL || '').toUpperCase())) || '';
-          if (!state || !WorkedRoster.stateKeys(ent, state).length) continue; // a province on a US call, a typo: never written
-          rec.STATE = state;
+          const d = StateBackfill.decide(rec, backfillCtx, lookups);
+          if (!d) continue;
+          if (!d.state) { left.push(StateBackfill.describe(rec, d)); continue; } // a province on a US call, a typo: never written
+          rec.STATE = d.state;
+          if (d.fromPark) fromPark++;
           filled++;
         }
         return filled ? undefined : false;
@@ -48540,9 +48541,11 @@ function cloudShackNotice(text, kind) {
       return { ok: false, error: 'Could not update the log: ' + err.message };
     }
     if (filled) loadWorkedQsos();
-    const remaining = candidates - filled;
-    sendCatLog(`[WAS] Filled STATE on ${filled} QSO${filled === 1 ? '' : 's'} (${fromPark} from the park, ${filled - fromPark} from QRZ; ${live} QRZ lookups); ${remaining} still without a state` + (skippedForBudget ? ` — ${skippedForBudget} calls not looked up yet, press again` : ''));
-    return { ok: true, filled, fromPark, remaining, live, more: skippedForBudget > 0 };
+    const remaining = left.length;
+    const more = skippedForBudget > 0;
+    sendCatLog(`[WAS] Filled STATE on ${filled} QSO${filled === 1 ? '' : 's'} (${fromPark} from the park, ${filled - fromPark} from QRZ; ${live} QRZ lookups); ${remaining} still without a state` + (skippedForBudget ? ` — ${skippedForBudget} calls not looked up yet, press again` : '') + (left.length ? ': ' + left.join('; ') : ''));
+    const text = StateBackfill.resultText({ filled, remaining, left, more });
+    return { ok: true, filled, fromPark, remaining, left, live, more, text };
   }
   ipcMain.handle('was-backfill-states', () => wasBackfillStates());
   // The map legend's "Update from LoTW / QRZ" buttons (every map window, the
@@ -48557,8 +48560,7 @@ function cloudShackNotice(text, kind) {
     if (kind === 'qrz') {
       const r = await wasBackfillStates();
       if (!r || !r.ok) return { ok: false, text: (r && r.error) || 'Could not fill states.' };
-      if (!r.filled) return { ok: true, text: r.remaining ? `No states found for the ${r.remaining} QSO${r.remaining === 1 ? '' : 's'} still without one.` : 'Every QSO already has a state.' };
-      return { ok: true, text: `Filled ${r.filled} QSO${r.filled === 1 ? '' : 's'}` + (r.remaining ? `, ${r.remaining} still without a state` : '') + (r.more ? ' (press again for more)' : '') + '.' };
+      return { ok: true, text: r.text };
     }
     return { ok: false, text: 'Unknown sync.' };
   });

@@ -552,6 +552,8 @@ let appMode = 'hunter'; // 'hunter' or 'activator'
 let activatorParkRefs = [];   // [{ref:'K-1234', name:'Cedar Falls SP', program:'POTA'}, ...]  max MAX_N_FER
 let activatorCrossRefs = [];  // [{program:'WWFF', ref:'KFF-1234'}, {program:'LLOTA', ref:'LLCL-0001'}]
 let activatorParkGrid = '';   // Maidenhead grid for active park (auto from lat/lon, user-editable)
+let activatorParkGridFromPark = ''; // the primary park's own grid, from its position
+let activatorParkGrids = {};  // settings.activatorParkGrids: the operator's grid per park (lib/park-grid.js, #388)
 let hunterParkRefs = [];      // [{ref:'K-5678', name:'Shenandoah NF', program:'POTA'}]  max MAX_N_FER, resets per QSO; program drives ADIF SIG (default POTA)
 let activatorContacts = []; // in-memory QSO list for current activation session
 
@@ -2236,6 +2238,8 @@ async function loadPrefs() {
   updateDxccButton();
   // Pi access — JTCAT button visibility on startup
   if (jtcatBtn) jtcatBtn.classList.remove('hidden');
+  // Grid corrections per park, before anything fills the grid box below
+  if (settings.activatorParkGrids && typeof settings.activatorParkGrids === 'object') activatorParkGrids = settings.activatorParkGrids;
   // Activator mode restore
   if (settings.appMode === 'activator') {
     appMode = 'activator';
@@ -2271,13 +2275,8 @@ async function loadPrefs() {
       }
       // Auto-populate grid from primary park
       if (activatorParkRefs.length > 0) {
-        window.api.getPark(activatorParkRefs[0].ref).then(park => {
-          if (park && park.latitude && park.longitude) {
-            activatorParkGrid = latLonToGridLocal(parseFloat(park.latitude), parseFloat(park.longitude));
-            const gi = document.getElementById('activator-grid');
-            if (gi) gi.value = activatorParkGrid;
-          }
-        });
+        const firstRef = activatorParkRefs[0].ref;
+        window.api.getPark(firstRef).then(park => setActivatorGridForPark(firstRef, park));
       }
     } else if (settings.activatorParkRef) {
       activatorParkRefs = ActivationProgram.normalizeParkRefs([{ ref: settings.activatorParkRef, name: '' }]);
@@ -11869,6 +11868,19 @@ function gridToBoundsLocal(grid) {
   return [[south, west], [south + 1, west + 2]];
 }
 
+/**
+ * Fill the activation's grid box for the primary park: the operator's own
+ * grid for that park if they corrected it (lib/park-grid.js, #388), else the
+ * park's, from its position. `park` may be null (not in the parks list).
+ */
+function setActivatorGridForPark(ref, park) {
+  activatorParkGridFromPark = (park && park.latitude && park.longitude)
+    ? latLonToGridLocal(parseFloat(park.latitude), parseFloat(park.longitude)) : '';
+  activatorParkGrid = window.ParkGrid.gridFor(activatorParkGrids, ref, activatorParkGridFromPark);
+  const gi = document.getElementById('activator-grid');
+  if (gi) gi.value = activatorParkGrid;
+}
+
 // Lightweight lat/lon -> Maidenhead grid for the renderer (no require of Node module)
 function latLonToGridLocal(lat, lon) {
   let lng = lon + 180;
@@ -13518,14 +13530,8 @@ function initWasFilters() {
         const r = await window.api.wasBackfillStates();
         if (!r || !r.ok) {
           wasEls.backfillStatus.textContent = (r && r.error) || 'Could not fill states.';
-        } else if (!r.filled) {
-          wasEls.backfillStatus.textContent = r.remaining
-            ? `No states found for the ${r.remaining} QSO${r.remaining === 1 ? '' : 's'} still without one.`
-            : 'Every QSO already has a state.';
         } else {
-          wasEls.backfillStatus.textContent = `Filled ${r.filled} QSO${r.filled === 1 ? '' : 's'}` +
-            (r.remaining ? `, ${r.remaining} still without a state` : '') +
-            (r.more ? ' (press again for more)' : '') + '.';
+          wasEls.backfillStatus.textContent = r.text; // names the QSOs left (lib/state-backfill.js, #389)
         }
       } catch (err) {
         wasEls.backfillStatus.textContent = 'Could not fill states: ' + (err.message || err);
@@ -15652,17 +15658,22 @@ document.querySelectorAll('.rst-digits').forEach((container) => {
 });
 
 // --- N1MM RST auto-advance ---
+// A full report in Sent jumps to Rcvd; a habit Tab straight after the jump
+// is absorbed so it does not carry on to the next field (lib/rst-advance.js, #388).
 function setupRstAutoAdvance(sentId, rcvdId, getExpectedLen) {
   const sent = document.getElementById(sentId);
   const rcvd = document.getElementById(rcvdId);
   if (!sent || !rcvd) return;
+  const adv = window.RstAdvance.create();
   [sent, rcvd].forEach(el => el.addEventListener('focus', () => el.select()));
-  sent.addEventListener('input', () => {
-    const expected = getExpectedLen();
-    if (sent.value.length >= expected) {
-      rcvd.focus();
-    }
+  sent.addEventListener('focus', () => adv.reset());
+  sent.addEventListener('input', (e) => {
+    if (adv.sentInput(sent.value.length, getExpectedLen(), e.inputType)) rcvd.focus();
   });
+  rcvd.addEventListener('keydown', (e) => {
+    if (adv.rcvdKeydown(e)) e.preventDefault();
+  });
+  rcvd.addEventListener('blur', () => adv.reset());
 }
 
 // Log dialog N1MM auto-advance
@@ -27525,19 +27536,13 @@ function resumeActivation(activation) {
   activatorParkRefInput.value = mainRefs.map(r => r.ref).join(',');
   activatorParkNameEl.textContent = '';
   updateParkExtraBadge();
-  // Look up park names; grid comes from the primary park
-  const gridInput = document.getElementById('activator-grid');
+  // Look up park names; grid comes from the primary park (or the operator's own for it)
   activatorParkRefs.forEach((p, i) => {
     window.api.getPark(p.ref).then(park => {
+      if (i === 0) setActivatorGridForPark(p.ref, park);
       if (!park) return;
       p.name = park.name || '';
-      if (i === 0) {
-        activatorParkNameEl.textContent = park.name || '';
-        if (park.latitude && park.longitude) {
-          activatorParkGrid = latLonToGridLocal(parseFloat(park.latitude), parseFloat(park.longitude));
-          if (gridInput) gridInput.value = activatorParkGrid;
-        }
-      }
+      if (i === 0) activatorParkNameEl.textContent = park.name || '';
     });
   });
   window.api.saveSettings({ activatorParkRefs, activatorCrossRefs });
@@ -28443,6 +28448,14 @@ if (activatorParkRefInput) {
     gridInput.addEventListener('input', () => {
       activatorParkGrid = gridInput.value.trim().toUpperCase();
     });
+    // Remembered for this park, so ending and starting again, a restart or a
+    // resume keeps it (#388). Typing the park's own grid back clears it.
+    gridInput.addEventListener('change', () => {
+      const ref = primaryParkRef();
+      if (!ref) return;
+      activatorParkGrids = window.ParkGrid.remember(activatorParkGrids, ref, gridInput.value, activatorParkGridFromPark);
+      window.api.saveSettings({ activatorParkGrids });
+    });
   }
   // On-air callsign for this activation (STATION_CALLSIGN on its QSOs).
   // Remembered across restarts like the park refs; blank = Station callsign.
@@ -28470,15 +28483,8 @@ function selectPark(park) {
   activatorParkNameEl.textContent = park.name || '';
   activatorParkDropdown.classList.add('hidden');
   updateParkExtraBadge();
-  // Auto-populate grid from park lat/lon
-  const gridInput = document.getElementById('activator-grid');
-  if (park.latitude && park.longitude) {
-    activatorParkGrid = latLonToGridLocal(parseFloat(park.latitude), parseFloat(park.longitude));
-    if (gridInput) gridInput.value = activatorParkGrid;
-  } else {
-    activatorParkGrid = '';
-    if (gridInput) gridInput.value = '';
-  }
+  // Grid from park lat/lon, or the operator's own for this park
+  setActivatorGridForPark(park.reference, park);
   // Enable start button
   activatorStartBtn.disabled = false;
   // Persist to settings
@@ -28518,10 +28524,8 @@ function selectParkMulti(park) {
   updateParkExtraBadge();
 
   // Grid from the first park
-  const gridInput = document.getElementById('activator-grid');
   if (activatorParkRefs.length === 1 && park.latitude && park.longitude) {
-    activatorParkGrid = latLonToGridLocal(parseFloat(park.latitude), parseFloat(park.longitude));
-    if (gridInput) gridInput.value = activatorParkGrid;
+    setActivatorGridForPark(park.reference, park);
   }
 
   activatorStartBtn.disabled = false;
@@ -28576,11 +28580,7 @@ function finalizeCommaSeparatedParks() {
         park.unknown = false;
         if (idx === 0) activatorParkNameEl.textContent = p.name || '';
         // Set grid from first park if not already set
-        if (idx === 0 && p.latitude && p.longitude) {
-          activatorParkGrid = latLonToGridLocal(parseFloat(p.latitude), parseFloat(p.longitude));
-          const gridInput = document.getElementById('activator-grid');
-          if (gridInput) gridInput.value = activatorParkGrid;
-        }
+        if (idx === 0 && p.latitude && p.longitude) setActivatorGridForPark(park.ref, p);
         updateParkExtraBadge();
       } else {
         park.unknown = checkable;
