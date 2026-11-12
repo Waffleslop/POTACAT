@@ -132,6 +132,48 @@ test('the Position report is a form: where it goes said plainly, the position ed
   assert.ok(/if \(k === 'pos'\) openPositionForm\(\);/.test(js), 'the Templates menu opens it');
 });
 
+// The phone asks the shack for the POTA spot prefill (ECHOCAT, 2026-11-12).
+function fnSrc(name) {
+  const i = main.indexOf('function ' + name + '(');
+  assert.ok(i >= 0, name + ' exists');
+  return main.slice(i, main.indexOf('\n}\n', i) + 2);
+}
+test('winlink-pota-spot carries the same prefill as the desktop form, from a stubbed activation', () => {
+  const src = fnSrc('winlinkPotaSpotTemplate') + '\n' + fnSrc('winlinkPotaSpotReply') + '\nreturn winlinkPotaSpotReply;';
+  const make = (env) => new Function('liveActivationMyRefs', '_winlinkPreviewReturnTo', 'winlinkState', '_currentFreqHz', '_currentMode', 'ft8Engine', 'settings', 'PotaEmailSpot', src)(
+    () => env.refs, env.before, { session: {} }, env.dialHz, env.mode, { _mode: 'FT8' }, { myCallsign: 'k3sbp' }, P);
+  // Activating US-1234 and K-0005 on 14.074 FT8, then the mail window moved the radio to a gateway.
+  const r = make({ refs: [{ sig: 'POTA', ref: 'US-1234' }, { sig: 'POTA', ref: 'K-0005' }, { sig: 'SOTA', ref: 'W2/NJ-001' }], before: { freqHz: 14074000, mode: 'DIGU' }, dialHz: 7100500, mode: 'DIGU' })();
+  assert.strictEqual(r.type, 'winlink-pota-spot');
+  assert.strictEqual(r.to, 'spot@pota.tdod.org');
+  assert.strictEqual(r.call, 'K3SBP');
+  assert.deepStrictEqual(r.parks, ['US-1234', 'K-0005'], 'POTA parks only');
+  assert.strictEqual(r.freqKhz, 14074, 'where the radio was before Winlink moved it, not the gateway dial');
+  assert.strictEqual(r.mode, 'FT8');
+  assert.strictEqual(r.body, '!K3SBP POTA US-1234 14.074 FT8\n!K3SBP POTA K-0005 14.074 FT8', 'the exact lines, built by spotLine');
+  assert.deepStrictEqual(r.missing, []);
+  assert.ok(/^How a POTA spot is written/.test(r.hint));
+  // No activation: the park is missing, and the hint says so first.
+  const none = make({ refs: [], before: null, dialHz: 14074000, mode: 'CW' })();
+  assert.deepStrictEqual(none.missing, ['the park']);
+  assert.ok(/^Still to fill in: the park\. In the line below, replace the word in capitals \(PARK\)\./.test(none.hint));
+  assert.strictEqual(none.body, '!K3SBP POTA PARK 14.074 CW');
+});
+
+test('winlink-pota-spot-get: declared, routed with the Winlink requests, refused for a Guest Pass', () => {
+  const proto = readSrc(path.join(root, 'lib', 'echocat-protocol.js'));
+  assert.ok(/'winlink-pota-spot-get': \{ dir: Dir\.C2S/.test(proto) && /'winlink-pota-spot': \{ dir: Dir\.S2C/.test(proto));
+  const rs = readSrc(path.join(root, 'lib', 'remote-server.js')).replace(/\r\n/g, '\n');
+  const at = rs.indexOf("case 'winlink-pota-spot-get':");
+  const block = rs.slice(at, at + 1500);
+  assert.ok(at > 0 && /if \(ws\._passSession\) \{ this\._sendTo\(ws, \{ type: 'winlink-refused', reason: 'guest-pass', reqId \}\); break; \}/.test(block), 'a Guest Pass is refused before main hears it');
+  const gp = require('../lib/guest-pass-authority');
+  const refused = gp.GUEST_REFUSED_INSIDE || null;
+  if (refused) assert.ok(refused.has('winlink-pota-spot-get'));
+  else assert.ok(/'winlink-pota-spot-get'/.test(readSrc(path.join(root, 'lib', 'guest-pass-authority.js'))));
+  assert.ok(/case 'winlink-pota-spot-get':\s*reply\(winlinkPotaSpotReply\(\)\);/.test(main));
+});
+
 test('theme colours only in the new styles', () => {
   const rules = html.match(/\.(wl-chips?[a-z-]*|wl-kind|wl-book[a-z-]*|wl-sug[a-z-]*|wl-suggest|wl-form[a-z-]*|wl-ico)[^{]*\{[^}]*\}/g) || [];
   assert.ok(rules.length >= 20, 'rules found: ' + rules.length);

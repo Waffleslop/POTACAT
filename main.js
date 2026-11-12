@@ -12687,6 +12687,16 @@ async function winlinkSend({ to, cc, subject, body, p2p, attachments } = {}) {
   return r;
 }
 
+/** winlink-pota-spot: what a phone needs to show the POTA spot form, filled. */
+function winlinkPotaSpotReply(over = {}) {
+  const t = winlinkPotaSpotTemplate(over);
+  return {
+    type: 'winlink-pota-spot', to: t.to, subject: t.subject, call: t.call, parks: t.refs,
+    freqKhz: t.freqKhz, mode: t.mode, comment: t.comment, body: t.body, missing: t.missing,
+    hint: PotaEmailSpot.spotHint(t.missing),
+  };
+}
+
 /** Save or delete an address-book contact; every surface gets the list on winlink-state. */
 function winlinkContact(op, c) {
   const before = WinlinkContacts.normalizeContacts(settings.winlinkContacts);
@@ -13041,6 +13051,11 @@ async function winlinkHandleRemote({ type, req = {}, reply }) {
         return;
       case 'winlink-contact-group':
         result('contact-group', winlinkContactGroup(req.op, { id: req.id, name: req.name, members: req.members }));
+        return;
+      // The POTA spot prefill for the phone: the same source as the desktop's form
+      // (callsign, the live activation's parks, the pre-Winlink dial, the mapped mode).
+      case 'winlink-pota-spot-get':
+        reply(winlinkPotaSpotReply());
         return;
       case 'winlink-template':
         result('template', winlinkTemplate(req.op, { id: req.id, name: req.name, to: req.to, cc: req.cc, subject: req.subject, body: req.body }));
