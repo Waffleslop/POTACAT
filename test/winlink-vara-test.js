@@ -95,33 +95,32 @@ function fnBody(src, name) {
   console.log('winlink-modes');
   await test('VARA is listed only when the operator turned it on; Windows only; the cable lifts the Flex Direct / Icom Network reason', () => {
     const base = { rigFamily: 'serial', audioSource: 'dax', platform: 'win32', mercuryEnabled: true, mercuryPort: 8300, ardopFound: true, direwolfFound: true, ardopSocketAudio: true };
-    assert.deepStrictEqual(M.winlinkModesFor(base).map((m) => m.id), ['telnet', 'ardop', 'packet', 'mercury'], 'off = not listed');
+    assert.deepStrictEqual(M.winlinkModesFor(base).map((m) => m.id), ['telnet', 'ardop', 'packet'], 'off = not listed');
     const on = M.winlinkModesFor({ ...base, varaHf: { enabled: true, port: 8301, cable: false }, varaFm: { enabled: true, port: 8310, cable: false } });
-    assert.deepStrictEqual(on.map((m) => [m.id, m.available]), [['telnet', true], ['ardop', true], ['packet', true], ['mercury', true], ['vara', true], ['varafm', true]]);
+    assert.deepStrictEqual(on.map((m) => [m.id, m.available]), [['telnet', true], ['ardop', true], ['packet', true], ['vara', true], ['varafm', true]]);
     assert.strictEqual(M.LABELS.varafm, 'VARA FM (VHF/UHF radio, your own VARA FM)');
     const mac = M.winlinkModesFor({ ...base, platform: 'darwin', varaHf: { enabled: true, port: 8301 } });
-    assert.ok(!mac[4].available && /Windows program/.test(mac[4].reason));
+    assert.ok(!mac[3].available && /Windows program/.test(mac[3].reason));
     const flex = M.winlinkModesFor({ ...base, rigFamily: 'flex', audioSource: 'smartsdr', varaHf: { enabled: true, port: 8301, cable: false }, varaFm: { enabled: true, port: 8310, cable: false } });
-    assert.ok(!flex[4].available && /virtual audio cable/.test(flex[4].reason) && /Flex Direct/.test(flex[4].reason));
-    assert.ok(!flex[5].available && /virtual audio cable/.test(flex[5].reason));
+    assert.ok(!flex[3].available && /virtual audio cable/.test(flex[3].reason) && /Flex Direct/.test(flex[3].reason));
+    assert.ok(!flex[4].available && /virtual audio cable/.test(flex[4].reason));
     const flexCable = M.winlinkModesFor({ ...base, rigFamily: 'flex', audioSource: 'smartsdr', varaHf: { enabled: true, port: 8301, cable: true }, varaFm: { enabled: true, port: 8310, cable: true } });
-    assert.ok(flexCable[4].available && flexCable[5].available, 'with the cable, VARA works on Flex Direct');
-    assert.ok(!flexCable[3].available, 'Mercury still needs a device');
+    assert.ok(flexCable[3].available && flexCable[4].available, 'with the cable, VARA works on Flex Direct');
     const icomCable = M.winlinkModesFor({ ...base, rigFamily: 'icom-network', audioSource: 'icom-network', varaHf: { enabled: true, port: 8301, cable: true } });
-    assert.ok(icomCable[4].available);
-    assert.ok(!M.winlinkModesFor({ ...base, remote: true, varaHf: { enabled: true, port: 8301, cable: true } })[4].available, 'never from a laptop driving a shack');
-    const noCatVara = M.winlinkModesFor({ ...base, rigFamily: 'none', varaHf: { enabled: true, port: 8301, cable: true } })[4];
+    assert.ok(icomCable[3].available);
+    assert.ok(!M.winlinkModesFor({ ...base, remote: true, varaHf: { enabled: true, port: 8301, cable: true } })[3].available, 'never from a laptop driving a shack');
+    const noCatVara = M.winlinkModesFor({ ...base, rigFamily: 'none', varaHf: { enabled: true, port: 8301, cable: true } })[3];
     assert.ok(noCatVara.available && /No CAT control/.test(noCatVara.note), 'a no-CAT radio runs VARA too; the operator sets the dial (NA4DQ)');
   });
   await test('port clashes are named: VARA HF vs Mercury, VARA FM vs VARA HF', () => {
     const base = { rigFamily: 'serial', audioSource: 'dax', platform: 'win32', mercuryEnabled: true, mercuryPort: 8300, ardopSocketAudio: true };
     const clash = M.winlinkModesFor({ ...base, varaHf: { enabled: true, port: 8300 } });
-    assert.ok(!clash[4].available && /same port \(8300\)/.test(clash[4].reason));
+    assert.ok(!clash[3].available && /same port \(8300\)/.test(clash[3].reason));
     const fmClash = M.winlinkModesFor({ ...base, varaHf: { enabled: true, port: 8301 }, varaFm: { enabled: true, port: 8301 } });
-    assert.ok(fmClash[4].available, 'HF is fine');
-    assert.ok(!fmClash[5].available && /VARA FM and VARA HF are set to the same port \(8301\)/.test(fmClash[5].reason));
+    assert.ok(fmClash[3].available, 'HF is fine');
+    assert.ok(!fmClash[4].available && /VARA FM and VARA HF are set to the same port \(8301\)/.test(fmClash[4].reason));
     const fmAlone = M.winlinkModesFor({ ...base, varaHf: { enabled: false, port: 8301 }, varaFm: { enabled: true, port: 8301 } });
-    assert.ok(fmAlone[4].id === 'varafm' && fmAlone[4].available, 'no clash with a VARA HF that is off');
+    assert.ok(fmAlone[3].id === 'varafm' && fmAlone[3].available, 'no clash with a VARA HF that is off');
     assert.ok(M.isRadioMode('varafm') && M.isFmMode('varafm') && M.isFmMode('packet') && !M.isFmMode('vara'));
   });
 

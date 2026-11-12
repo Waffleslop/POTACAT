@@ -254,14 +254,19 @@ async function test(name, fn) {
   await test('telnet everywhere; radio modes need CAT, a sound device, and the right OS', () => {
     const base = { rigFamily: 'serial', audioSource: 'dax', platform: 'win32', mercuryEnabled: true, mercuryPort: 8300, ardopFound: true, direwolfFound: true, varaHf: { enabled: true, port: 8301, cable: false } };
     const ok = M.winlinkModesFor(base);
-    assert.deepStrictEqual(ok.map((m) => [m.id, m.available]), [['telnet', true], ['ardop', true], ['packet', true], ['mercury', true], ['vara', true]]);
+    assert.deepStrictEqual(ok.map((m) => [m.id, m.available]), [['telnet', true], ['ardop', true], ['packet', true], ['vara', true]]);
+    // #372 (Casey 2026-11-12): Mercury is not offered for Winlink, on or off, on any OS.
+    for (const o of [base, { ...base, mercuryEnabled: false }, { ...base, platform: 'darwin' }, { ...base, platform: 'linux' }]) {
+      assert.ok(!M.winlinkModesFor(o).some((m) => m.id === 'mercury'));
+    }
+    assert.strictEqual(M.MERCURY_OFFERED, false);
+    assert.ok(/not offered for Winlink/.test(M.NOT_OFFERED.mercury) && /ARDOP, packet or the internet/.test(M.NOT_OFFERED.mercury));
     const flex = M.winlinkModesFor({ ...base, rigFamily: 'flex', audioSource: 'smartsdr' });
-    assert.ok(flex.filter((m) => m.id !== 'telnet' && m.id !== 'ardop').every((m) => !m.available && /Flex Direct/.test(m.reason)), 'packet/Mercury/VARA still need a device');
+    assert.ok(flex.filter((m) => m.id !== 'telnet' && m.id !== 'ardop').every((m) => !m.available && /Flex Direct/.test(m.reason)), 'packet/VARA still need a device');
     assert.ok(!flex[1].available && /Flex Direct/.test(flex[1].reason), 'ARDOP too, without the socket backend');
     const flexSock = M.winlinkModesFor({ ...base, rigFamily: 'flex', audioSource: 'smartsdr', ardopSocketAudio: true });
     assert.ok(flexSock[1].available, 'ARDOP over Flex Direct via POTACAT socket audio');
     assert.ok(flexSock[2].available, 'packet over Flex Direct too — Dire Wolf carries the same socket backend');
-    assert.ok(!flexSock[3].available && /Flex Direct/.test(flexSock[3].reason), 'Mercury still opens its own device');
     const icom = M.winlinkModesFor({ ...base, rigFamily: 'icom-network', audioSource: 'icom-network' });
     assert.ok(/Icom Network/.test(icom[1].reason));
     const icomSock = M.winlinkModesFor({ ...base, rigFamily: 'icom-network', audioSource: 'icom-network', ardopSocketAudio: true });
@@ -270,8 +275,7 @@ async function test(name, fn) {
     const mac = M.winlinkModesFor({ ...base, platform: 'darwin', ardopSocketAudio: true });
     assert.ok(mac[1].available, 'ARDOP on macOS (socket audio; no CoreAudio code)');
     assert.ok(mac[2].available, 'packet on macOS');
-    assert.ok(!mac[4].available && /Windows/.test(mac[4].reason));
-    assert.ok(mac[3].available, 'Mercury runs on macOS');
+    assert.ok(mac[3].id === 'vara' && !mac[3].available && /Windows/.test(mac[3].reason));
     assert.ok(!M.winlinkModesFor({ ...base, platform: 'darwin', ardopFound: false })[1].available, 'a missing ardopcf is still named on macOS');
     assert.ok(/Dire Wolf was not found/.test(M.winlinkModesFor({ ...base, direwolfFound: false })[2].reason));
     const noCat = M.winlinkModesFor({ ...base, rigFamily: 'none' });
@@ -281,21 +285,22 @@ async function test(name, fn) {
     const remote = M.winlinkModesFor({ ...base, remote: true });
     assert.ok(remote.slice(1).every((m) => /shack/.test(m.reason)));
   });
-  await test('VARA on Mercury\'s port is refused with the reason; Mercury off is named', () => {
+  await test('VARA on Mercury\'s port is refused with the reason (the Mercury chat window still uses it)', () => {
     const clash = M.winlinkModesFor({ rigFamily: 'serial', audioSource: 'dax', platform: 'win32', mercuryEnabled: true, mercuryPort: 8300, ardopFound: true, varaHf: { enabled: true, port: 8300 } });
-    assert.ok(!clash[4].available && /same port/.test(clash[4].reason));
-    const off = M.winlinkModesFor({ rigFamily: 'serial', audioSource: 'dax', platform: 'win32', mercuryEnabled: false, ardopFound: true });
-    assert.ok(!off[3].available && /Mercury/.test(off[3].reason));
+    assert.ok(clash[3].id === 'vara' && !clash[3].available && /same port/.test(clash[3].reason));
   });
   await test('VARA is not offered unless the operator turned it on in Settings (test/winlink-vara-test.js has the rest)', () => {
     const m = M.winlinkModesFor({ rigFamily: 'serial', audioSource: 'dax', platform: 'win32', ardopFound: true });
-    assert.deepStrictEqual(m.map((x) => x.id), ['telnet', 'ardop', 'packet', 'mercury']);
+    assert.deepStrictEqual(m.map((x) => x.id), ['telnet', 'ardop', 'packet']);
   });
   await test('pickWinlinkMode falls back to telnet', () => {
     const modes = [{ id: 'telnet', available: true }, { id: 'ardop', available: false }];
     assert.strictEqual(M.pickWinlinkMode(modes, 'ardop'), 'telnet');
     assert.strictEqual(M.pickWinlinkMode(modes, 'telnet'), 'telnet');
     assert.ok(M.isRadioMode('mercury') && !M.isRadioMode('telnet'));
+    // A saved default of Mercury (no longer listed) opens on the internet.
+    const listed = M.winlinkModesFor({ rigFamily: 'serial', audioSource: 'dax', platform: 'win32', mercuryEnabled: true, ardopFound: true });
+    assert.strictEqual(M.pickWinlinkMode(listed, 'mercury'), 'telnet');
   });
 
   console.log('winlink-client against a fake Pat');

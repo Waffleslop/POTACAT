@@ -12392,7 +12392,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
   if (winlinkSessionActive()) return { ok: false, error: 'A Winlink session is already running' };
   const modes = winlinkModes();
   const m = modes.find((x) => x.id === mode);
-  if (!m) return { ok: false, error: `Unknown mode ${mode}` };
+  if (!m) return { ok: false, error: WinlinkModes.NOT_OFFERED[mode] || `Unknown mode ${mode}`, reason: 'unavailable' };
   if (!m.available) return { ok: false, error: m.reason, reason: 'unavailable' };
   const radio = WinlinkModes.isRadioMode(mode);
   // Pat may still be on the last call: a VARA dial waiting for a clear
