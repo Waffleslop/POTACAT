@@ -275,7 +275,8 @@ async function test(name, fn) {
     const mac = M.winlinkModesFor({ ...base, platform: 'darwin', ardopSocketAudio: true });
     assert.ok(mac[1].available, 'ARDOP on macOS (socket audio; no CoreAudio code)');
     assert.ok(mac[2].available, 'packet on macOS');
-    assert.ok(mac[3].id === 'vara' && !mac[3].available && /Windows/.test(mac[3].reason));
+    // #287: VARA HF is offered on macOS too (the operator's own, under Wine or on another computer).
+    assert.ok(mac[3].id === 'vara' && mac[3].available && !/Windows/.test(mac[3].reason), 'VARA HF on macOS');
     assert.ok(!M.winlinkModesFor({ ...base, platform: 'darwin', ardopFound: false })[1].available, 'a missing ardopcf is still named on macOS');
     assert.ok(/Dire Wolf was not found/.test(M.winlinkModesFor({ ...base, direwolfFound: false })[2].reason));
     const noCat = M.winlinkModesFor({ ...base, rigFamily: 'none' });
