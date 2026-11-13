@@ -3081,14 +3081,18 @@
         if (msg.state === 'tx') {
           sstvPhoneStartTxProgress(msg.durationSec || 0);
           if (sstvPhoneStatus) { sstvPhoneStatus.textContent = 'Transmitting...'; sstvPhoneStatus.style.color = 'var(--accent)'; }
-        } else if (msg.state === 'auto-rx') {
+        } else if (msg.state === 'auto-rx' && !msg.error) {
           if (sstvPhoneStatus) {
             sstvPhoneStatus.textContent = 'Auto-SSTV' + (msg.freqKhz ? ' ' + FreqDots.khzMhz(msg.freqKhz) : '');
             sstvPhoneStatus.style.color = 'var(--pota)';
           }
         } else {
           sstvPhoneStopTxProgress();
-          if (sstvPhoneStatus) { sstvPhoneStatus.textContent = 'Ready'; sstvPhoneStatus.style.color = 'var(--text-dim)'; }
+          // error (#357): a picture was not sent; say why until the next send.
+          if (sstvPhoneStatus) {
+            if (msg.error) { sstvPhoneStatus.textContent = String(msg.error); sstvPhoneStatus.style.color = 'var(--accent)'; }
+            else { sstvPhoneStatus.textContent = 'Ready'; sstvPhoneStatus.style.color = 'var(--text-dim)'; }
+          }
         }
         sstvPhoneUpdateSendBtn();
         break;
@@ -14418,7 +14422,12 @@ var _paddleHoldTimer = { dit: null, dah: null };
       var dataUrl = sstvPhoneCompose.toDataURL('image/jpeg', 0.9);
       var modeEl = document.getElementById('sstv-mode-phone');
       var mode = modeEl ? modeEl.value : 'martin1';
-      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'sstv-photo', image: dataUrl, mode: mode }));
+      // freqKhz: the channel shown here. The shack tunes there before the
+      // picture keys, unless the radio is already within 10 kHz of it (#357).
+      var sendKhz = sstvFreqPhone ? parseInt(sstvFreqPhone.value, 10) : 0;
+      var photoMsg = { type: 'sstv-photo', image: dataUrl, mode: mode };
+      if (sendKhz > 0) photoMsg.freqKhz = sendKhz;
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(photoMsg));
       if (sstvPhoneStatus) { sstvPhoneStatus.textContent = 'Sending...'; sstvPhoneStatus.style.color = 'var(--accent)'; }
     });
   }
