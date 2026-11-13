@@ -276,6 +276,14 @@ async function refreshRxDevice() {
 window.addEventListener('focus', () => { refreshRxDevice(); });
 
 // --- Radio frequency sync ---
+// The radio's poll never writes the box while the operator is typing in it,
+// or soon after he typed without tuning (#359: on 2 m and 70 cm, off the
+// channel list, every poll overwrote what he was typing). lib/sstv-freq.js.
+let _freqEditedAt = 0;   // the last keystroke of an edit not yet tuned; 0 = none
+function radioMayWriteFreqBox() {
+  if (!window.SstvFreq) return document.activeElement !== freqInput;
+  return window.SstvFreq.radioMayWriteBox({ focused: document.activeElement === freqInput, editedAtMs: _freqEditedAt, nowMs: Date.now() });
+}
 window.api.onCatFrequency((hz) => {
   const khz = Math.round(hz / 1000);
   // Update dropdown if a matching option exists
@@ -285,8 +293,8 @@ window.api.onCatFrequency((hz) => {
       return;
     }
   }
-  // No exact match — show in custom input
-  freqInput.value = khz;
+  // No exact match — show in custom input, unless the operator is in it
+  if (radioMayWriteFreqBox()) freqInput.value = khz;
 });
 
 // --- Theme ---
@@ -333,10 +341,12 @@ const freqSelect = document.getElementById('freq-select');
 const freqInput = document.getElementById('freq-input');
 const tuneBtn = document.getElementById('tune-btn');
 
-// The sideband SSTV uses on a frequency: LSB below 10 MHz except 60 m,
-// which is USB by regulation. One rule for every tune (lib/ssb-sideband.js);
-// the ECHOCAT app uses the same.
+// The mode SSTV uses on a frequency: FM from 2 m up (#359), else the voice
+// sideband, LSB below 10 MHz except 60 m, which is USB by regulation. One
+// rule for every tune (lib/sstv-freq.js over lib/ssb-sideband.js); the
+// ECHOCAT app uses the same sideband rule.
 function getFreqMode(freqKhz) {
+  if (window.SstvFreq) return window.SstvFreq.modeForKhz(freqKhz);
   return window.SsbSideband.ssbSideband(parseInt(freqKhz) * 1000);
 }
 
@@ -379,26 +389,36 @@ function tuneToFreq(freq, mode) {
 // Dropdown change QSYs immediately with correct mode
 freqSelect.addEventListener('change', () => {
   freqInput.value = '';
+  _freqEditedAt = 0;
   const opt = freqSelect.options[freqSelect.selectedIndex];
   tuneToFreq(freqSelect.value, opt && opt.dataset.mode);
 });
 
+// The custom box, in kHz or MHz: 14230 and 14.230 are the same, so are
+// 145.800 and 145800 (#359). Null, with a line that says why, when it is not
+// a frequency.
+function typedFreqKhz() {
+  const raw = freqInput.value.trim();
+  if (!raw) return null;
+  const k = window.SstvFreq ? window.SstvFreq.parseFreqKhz(raw) : (isNaN(raw) ? null : Number(raw));
+  if (!(k > 0)) { statusBar.textContent = 'Type a frequency in kHz or MHz, like 14230 or 145.800'; return null; }
+  return k;
+}
+function tuneTyped() {
+  const k = typedFreqKhz();
+  if (!k) return null;
+  _freqEditedAt = 0;   // tuned: the radio's poll may follow again
+  tuneToFreq(String(k));
+  return k;
+}
+freqInput.addEventListener('input', () => { _freqEditedAt = Date.now(); });
+
 // Tune button: for custom frequency input
-tuneBtn.addEventListener('click', () => {
-  const custom = freqInput.value.trim();
-  if (custom && !isNaN(custom)) {
-    tuneToFreq(custom);
-  }
-});
+tuneBtn.addEventListener('click', () => { tuneTyped(); });
 
 // Enter in custom input tunes
 freqInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    const freq = freqInput.value.trim();
-    if (freq && !isNaN(freq)) {
-      tuneToFreq(freq);
-    }
-  }
+  if (e.key === 'Enter') tuneTyped();
 });
 
 // --- Text Layer Editor ---
@@ -3185,7 +3205,7 @@ trayTabs.forEach(b => b.addEventListener('click', () => showTab(b.dataset.t)));
 showTab('rx');
 
 // ---- Top bar: bands and the frequency picker -----------------------------------
-const BAND_OF = (khz) => khz < 4000 ? '80' : khz < 8000 ? '40' : khz < 15000 ? '20' : khz < 19000 ? '17' : khz < 22000 ? '15' : khz < 25500 ? '12' : khz < 30000 ? '10' : '6';
+const BAND_OF = (khz) => khz < 4000 ? '80' : khz < 8000 ? '40' : khz < 15000 ? '20' : khz < 19000 ? '17' : khz < 22000 ? '15' : khz < 25500 ? '12' : khz < 30000 ? '10' : khz < 54000 ? '6' : '';   // 2 m and 70 cm: no band button lights
 const bandsEl = document.getElementById('bands');
 (function buildBands() {
   const groups = Array.from(freqSelect.querySelectorAll('optgroup'));
@@ -3247,8 +3267,14 @@ freqSelect.addEventListener('change', () => {
   showFreq(freqSelect.value, opt && opt.dataset.mode);
   closeFreqPop();
 });
-freqInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { showFreq(freqInput.value.trim()); closeFreqPop(); } });
-tuneBtn.addEventListener('click', () => { showFreq(freqInput.value.trim()); closeFreqPop(); });
+// The typed box in kHz or MHz (lib/sstv-freq.js); the line under it already says when it is not a frequency.
+function showTypedFreq() {
+  const raw = freqInput.value.trim();
+  const k = window.SstvFreq ? window.SstvFreq.parseFreqKhz(raw) : Number(raw);
+  if (k > 0) { showFreq(k); closeFreqPop(); }
+}
+freqInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') showTypedFreq(); });
+tuneBtn.addEventListener('click', showTypedFreq);
 window.api.onCatFrequency((hz) => { if (hz > 0) showFreq(Math.round(hz / 1000)); });
 { const o = freqSelect.options[freqSelect.selectedIndex]; showFreq(freqSelect.value, o && o.dataset.mode); }
 
