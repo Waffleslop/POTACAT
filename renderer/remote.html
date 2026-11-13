@@ -20,6 +20,7 @@
   <!-- favorites-js -->
   <!-- winlink-mail-view-js -->
   <!-- winlink-mail-actions-js -->
+  <!-- wspr-dbm-js -->
   <!-- cloud-billing-ui-js -->
   <!-- custom-cat-follow-js -->
   <!-- jtty-macros-js -->
@@ -1408,10 +1409,8 @@
         <div style="display:flex;align-items:center;gap:10px;padding:5px 10px;flex-wrap:wrap;background:var(--bg-header);border-bottom:1px solid var(--border);font-size:12px;">
           <label style="display:flex;align-items:center;gap:4px;" title="Transmit a WSPR beacon in a share of 120s cycles. The toggle reflects the host's confirmation — it may revert if arming fails."><input type="checkbox" id="wspr-tx-enable"> Beacon</label>
           <label title="Share of cycles used for beacon TX">TX% <input type="range" id="wspr-txpct" min="0" max="100" step="5" value="20" style="width:66px;vertical-align:middle;"> <span id="wspr-txpct-val">20%</span></label>
-          <label title="Reported power (dBm) — capped at 30 dBm (1 W)">Pwr <select id="wspr-dbm" class="ft8-mode-select" style="font-size:11px;">
-            <option value="0">0 dBm</option><option value="7">7 dBm</option><option value="10">10 dBm</option>
-            <option value="13">13 dBm</option><option value="17">17 dBm</option><option value="20">20 dBm</option>
-            <option value="23">23 dBm</option><option value="27">27 dBm</option><option value="30" selected>30 dBm</option>
+          <label title="Power the beacon reports to WSPRnet. Auto follows the RF power the beacon runs at (1 W, or the level you set while it is armed). Pick a value to report a fixed power instead.">Reported <select id="wspr-dbm" class="ft8-mode-select" style="font-size:11px;">
+            <option value="auto" selected>Auto</option>
           </select></label>
           <span id="wspr-next" style="margin-left:auto;color:var(--text-dim);"></span>
         </div>

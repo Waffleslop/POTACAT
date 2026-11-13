@@ -3937,6 +3937,20 @@ function _applyPopoutTheme(payload) {
   var wsprTxPctEl = document.getElementById('jp-wspr-txpct');
   var wsprTxPctVal = document.getElementById('jp-wspr-txpct-val');
   var wsprDbmEl = document.getElementById('jp-wspr-dbm');
+  var wsprDbmFromHost = false;                                      // the host's beacon state has drawn the menu
+  // The Reported power menu: Auto (follows the beacon's RF power, #268) or a
+  // fixed WSPR value 0..60 dBm, drawn by lib/wspr/dbm.js exactly as ECHOCAT
+  // Web draws it, so both show the same value.
+  function wsprRenderDbm(st) {
+    if (!wsprDbmEl || !window.WsprDbm || !st) return;
+    var m = window.WsprDbm.menu(st);
+    if (wsprDbmEl.options.length !== m.options.length) {
+      wsprDbmEl.innerHTML = '';
+      m.options.forEach(function(o) { var el = document.createElement('option'); el.value = o.value; wsprDbmEl.appendChild(el); });
+    }
+    m.options.forEach(function(o, i) { wsprDbmEl.options[i].textContent = o.text; });
+    wsprDbmEl.value = m.value;
+  }
   var wsprRunEl = document.getElementById('jp-wspr-run');          // how long the beacon runs (0 = until stopped)
   var wsprRunAsked = false;                                        // the one-time question has been answered
   var wsprRunAskVisible = function() { var a = document.getElementById('jp-wspr-run-ask'); return !!(a && !a.classList.contains('hidden')); };
@@ -4046,11 +4060,9 @@ function _applyPopoutTheme(payload) {
     if (wsprRunEl && !Array.prototype.some.call(wsprRunEl.options, function(o) { return o.value === wsprRunEl.value; })) wsprRunEl.value = '0';
     wsprRunAsked = !!s.wsprBeaconRunAsked;
     wsprTxPctVal.textContent = wsprTxPctEl.value + '%';
-    // Power is capped at 30 dBm (1 W). Clamp a restored value and fall back to
-    // 30 if it doesn't match an offered (<=1 W) option.
-    var savedDbm = Math.min(30, s.wsprDbm != null ? s.wsprDbm : 30);
-    wsprDbmEl.value = String(savedDbm);
-    if (wsprDbmEl.selectedIndex < 0) wsprDbmEl.value = '30';
+    // Reported power: the host's beacon state draws the menu (it knows the
+    // beacon's RF power); until it arrives, the saved choice.
+    if (!wsprDbmFromHost) wsprRenderDbm({ dBmAuto: s.wsprDbmAuto, dBm: s.wsprDbm != null ? s.wsprDbm : 30 });
     wsprUploadEl.checked = !!s.wsprUpload;
 
     wsprTxPctEl.addEventListener('input', function() { wsprTxPctVal.textContent = wsprTxPctEl.value + '%'; });
@@ -4060,9 +4072,8 @@ function _applyPopoutTheme(payload) {
       if (window.api.jtcatWsprBeacon) window.api.jtcatWsprBeacon({ txPct: v });
     });
     wsprDbmEl.addEventListener('change', function() {
-      var v = Math.min(30, parseInt(wsprDbmEl.value, 10) || 0); // 30 dBm = 1 W cap
-      window.api.saveSettings({ wsprDbm: v });
-      if (window.api.jtcatWsprBeacon) window.api.jtcatWsprBeacon({ dBm: v });
+      // Auto or a fixed value; the host saves it and echoes the beacon state.
+      if (window.api.jtcatWsprBeacon && window.WsprDbm) window.api.jtcatWsprBeacon(window.WsprDbm.controlFromMenu(wsprDbmEl.value));
     });
     wsprUploadEl.addEventListener('change', function() {
       window.api.saveSettings({ wsprUpload: wsprUploadEl.checked });
@@ -4072,7 +4083,6 @@ function _applyPopoutTheme(payload) {
       window.api.jtcatWsprBeacon(Object.assign({
         enabled: wsprTxEnable.checked,
         txPct: parseInt(wsprTxPctEl.value, 10),
-        dBm: parseInt(wsprDbmEl.value, 10),
         runMin: wsprRunEl ? parseInt(wsprRunEl.value, 10) || 0 : 0,
       }, extra || {}));
     }
@@ -4341,6 +4351,7 @@ function _applyPopoutTheme(payload) {
       if (wsprTxEnable) wsprTxEnable.checked = !!(st && st.enabled);
       if (st && st.runAsked) wsprRunAsked = true;
       if (st && st.runMin != null && wsprRunEl && !wsprRunAskVisible()) wsprRunEl.value = String(st.runMin);
+      if (st && st.dBm != null) { wsprDbmFromHost = true; wsprRenderDbm(st); }
       // Per-slot feedback. A beacon that says nothing during listen slots is
       // indistinguishable from a dead one (N7BBQ armed at 20%, watched 5
       // silent minutes — a 51% outcome — and reported TX broken).
