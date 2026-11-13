@@ -901,7 +901,7 @@ test('S2C jtcat-qso-logged goes only to clients that declared they understand it
   assert.strictEqual(RemoteServer.prototype.broadcastJtcatQsoLogged.call({ _openClients: () => [], _sendTo: () => { throw new Error('nobody'); } }, d), 0);
   // The two clients in this repo declare it; the registry and the wire contract say so.
   const web = readSrc(path.join(root, 'renderer', 'remote.js'));
-  assert.ok(/capabilities: \['chunked-all-qsos', 'qso-delta', 'chunked-worked-qsos', 'local-cw-sidetone', 'jtcat-qso-logged'\],/.test(web), 'ECHOCAT Web');
+  assert.ok(/capabilities: \['chunked-all-qsos', 'qso-delta', 'chunked-worked-qsos', 'local-cw-sidetone', 'jtcat-qso-logged'(, '[a-z0-9-]+')*\],/.test(web), 'ECHOCAT Web'); // later capabilities may follow (mail-folders-v2, #475)
   assert.ok(/capabilities: \['qso-attributed', 'log-error', 'diagnostic-snapshot', 'jtcat-qso-logged'\],/.test(readSrc(path.join(root, 'lib', 'remote-client.js'))), 'a desktop driving a remote shack');
   const reg = readSrc(path.join(root, 'lib', 'echocat-protocol.js'));
   assert.ok(/'jtcat-qso-logged': \{ dir: Dir\.S2C, feature: 'jtcat', fields: \{ callsign: f\.string, parksText: f\.optString, parksNote: f\.optString,/.test(reg));
