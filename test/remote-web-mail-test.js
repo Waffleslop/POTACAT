@@ -161,6 +161,7 @@ function loadMail(opts) {
   const toasts = [];
   const win = new El('window');
   win.WinlinkMailView = MailView;
+  win.WinlinkMailActions = require('../lib/winlink-mail-actions');
   win.RigBands = RigBands;
   const ws = { readyState: 1, send: (w) => sent.push(JSON.parse(w)) };
   const clock = { now: Date.parse('2026-11-12T20:00:00Z') };
@@ -633,7 +634,8 @@ test('W0: the inbox: header with the call, folder segments with counts, rows as 
   p.mailOnMessage(INBOX);
   assert.strictEqual(p.screen(), 'list');
   assert.strictEqual(p.$('mail-head-sub').textContent, 'K3SBP · Winlink');
-  const folders = p.$('mail-folders').children;
+  // An older shack (no deletedDays in winlink-state) has no Deleted folder: its button stays hidden (#475).
+  const folders = p.$('mail-folders').children.filter((b) => !b.classList.contains('hidden'));
   assert.deepStrictEqual(folders.map((b) => [b.textContent, b.getAttribute('aria-pressed')]), [['Inbox 1', 'true'], ['Outbox 2', 'false'], ['Sent', 'false'], ['Archive', 'false']]);
   const rows = p.$('mail-list').querySelectorAll('.mail-row');
   assert.strictEqual(rows.length, 2);
@@ -805,6 +807,97 @@ test('W0: the Mail rules carry no colour literal; text 16 px except the 12 px sm
   assert.ok(/\.mail-row-who \{[^}]*font-size: 18px;[^}]*font-weight: 800;/.test(block), 'row titles 18 px / 800');
   assert.ok(/@container mail \(min-width: 700px\)/.test(block), 'two panes once the Mail view is 700 px wide');
   assert.ok(/:root\[data-ds\] #mail-view \{[^}]*--m-on-tint: var\(--ds-on-tint\);[^}]*--m-on-ok: var\(--ds-on-ok\);/.test(block), 'text on a fill uses its on- ink');
+});
+
+// ── #462 / #475: Archive, the Deleted folder, Reply all ─────────────────────
+const btnIds = (p) => p.$('mail-read-actions').children.map((b) => b.id + ':' + b.textContent);
+
+test('#462/#475: a shack with mail-folders-v2: Archive, Delete to Deleted, the Deleted folder and its note', () => {
+  const p = loadMail();
+  p.mailOnMessage(state({ deletedDays: 30, counts: { in: 2, out: 0, sent: 0, archive: 0, deleted: 1 } }));
+  p.mailOnOpen();
+  p.mailOnMessage(INBOX);
+  const shown = p.$('mail-folders').children.filter((b) => !b.classList.contains('hidden')).map((b) => b.textContent);
+  assert.deepStrictEqual(shown, ['Inbox', 'Outbox', 'Sent', 'Archive', 'Deleted']);
+  assert.ok(p.$('mail-folders').classList.contains('mail-seg-5'), 'five folders: three over two');
+  p.take();
+  p.mailOnMessage({ type: 'winlink-message', box: 'in', mid: 'A1', message: { from: 'KY4RY', to: ['K3SBP', 'W1AW'], cc: ['k3sbp@winlink.org', 'N0CALL'], subject: 'Net', body: 'Hi' } });
+  assert.deepStrictEqual(btnIds(p), ['mail-reply:Reply', 'mail-reply-all:Reply all', 'mail-archive:Archive', 'mail-del:Delete']);
+  assert.strictEqual(p.$('mail-read-cc').textContent, 'Cc k3sbp@winlink.org, N0CALL');
+  p.$('mail-archive').click();
+  assert.deepStrictEqual(p.take(), [{ type: 'winlink-move', box: 'in', mid: 'A1', to: 'archive' }]);
+  assert.strictEqual(p.screen(), 'list');
+  p.mailOnMessage({ type: 'winlink-result', op: 'move', ok: true });
+  assert.strictEqual(p.toasts.pop(), 'Moved to Archive.');
+  // Delete is undoable here: no second press.
+  p.mailOnMessage({ type: 'winlink-message', box: 'in', mid: 'A2', message: { from: 'SERVICE', to: ['K3SBP'], subject: 'x' } });
+  p.$('mail-del').click();
+  assert.deepStrictEqual(p.take(), [{ type: 'winlink-delete', box: 'in', mid: 'A2' }]);
+  p.mailOnMessage({ type: 'winlink-result', op: 'delete', ok: true });
+  assert.strictEqual(p.toasts.pop(), 'Moved to Deleted.');
+  // The Deleted folder.
+  p.mailOnMessage({ type: 'winlink-mailbox', box: 'deleted', messages: [{ mid: 'D1', box: 'deleted', from: 'KY4RY', to: ['K3SBP'], subject: 'Old', date: '2026-11-01T10:00:00Z', read: true, fromBox: 'in', deletedAt: '2026-11-10T20:00:00Z' }] });
+  p.$('mail-folders').querySelector('[data-box="deleted"]').click();
+  assert.deepStrictEqual(p.take(), [{ type: 'winlink-list', box: 'deleted' }]);
+  assert.strictEqual(p.$('mail-list').querySelector('.mail-del-note').textContent, 'Deleted messages are removed for good after 30 days.');
+  assert.strictEqual(p.$('mail-list').querySelectorAll('.mail-row').length, 1);
+});
+
+test('#475: in Deleted: Restore to where it came from; Delete for good asks once on the button', () => {
+  const p = loadMail();
+  p.mailOnMessage(state({ deletedDays: 30 }));
+  p.mailOnOpen();
+  p.take();
+  p.mailOnMessage({ type: 'winlink-message', box: 'deleted', mid: 'D1', message: { mid: 'D1', from: 'KY4RY', to: ['K3SBP'], subject: 'Old', body: 'b', fromBox: 'sent', deletedAt: '2026-11-10T20:00:00Z', attachments: [{ name: 'p.jpg', size: 4096 }] } });
+  assert.deepStrictEqual(btnIds(p), ['mail-restore:Restore to Sent', 'mail-del:Delete for good']);
+  assert.strictEqual(p.$('mail-read-note').textContent, 'Deleted from Sent. Removed for good in 28 days.');
+  assert.strictEqual(p.$('mail-read-atts').querySelector('button'), null, 'no Save in Deleted: Pat cannot read it there');
+  p.$('mail-del').click();
+  assert.strictEqual(p.$('mail-del').textContent, 'Delete for good? It cannot be brought back.');
+  assert.deepStrictEqual(p.take(), []);
+  p.$('mail-del').click();
+  assert.deepStrictEqual(p.take(), [{ type: 'winlink-delete', box: 'deleted', mid: 'D1' }]);
+  p.mailOnMessage({ type: 'winlink-message', box: 'deleted', mid: 'D1', message: { mid: 'D1', from: 'KY4RY', subject: 'Old', fromBox: 'sent', deletedAt: '2026-11-10T20:00:00Z' } });
+  p.$('mail-restore').click();
+  assert.deepStrictEqual(p.take(), [{ type: 'winlink-move', box: 'deleted', mid: 'D1', to: 'sent' }]);
+});
+
+test('#462: in Archive: Move to Inbox for mail from others, Move to Sent for our own', () => {
+  const p = loadMail();
+  p.mailOnMessage(state({ deletedDays: 7 }));
+  p.mailOnMessage({ type: 'winlink-message', box: 'archive', mid: 'R1', message: { from: 'KY4RY', to: ['K3SBP'], subject: 'a' } });
+  assert.deepStrictEqual(btnIds(p), ['mail-reply:Reply', 'mail-move-back:Move to Inbox', 'mail-del:Delete']);
+  p.mailOnMessage({ type: 'winlink-message', box: 'archive', mid: 'R2', message: { from: 'K3SBP-10', to: ['KY4RY'], subject: 'a' } });
+  assert.deepStrictEqual(btnIds(p), ['mail-move-back:Move to Sent', 'mail-del:Delete']);
+  p.take();
+  p.$('mail-move-back').click();
+  assert.deepStrictEqual(p.take(), [{ type: 'winlink-move', box: 'archive', mid: 'R2', to: 'sent' }]);
+});
+
+test('#475: Reply all fills To with the sender and Cc with everyone else but us; Reply stays To-only', () => {
+  const p = loadMail();
+  p.mailOnMessage(state());
+  p.mailOnMessage({ type: 'winlink-message', box: 'in', mid: 'A1', message: { from: 'KY4RY', to: ['K3SBP', 'W1AW'], cc: ['K3SBP@winlink.org', 'ky4ry@winlink.org', 'N0CALL'], subject: 'Net' } });
+  // An older shack: Reply all still works (it is a compose with Cc); no Archive, and Delete asks first.
+  assert.deepStrictEqual(btnIds(p), ['mail-reply:Reply', 'mail-reply-all:Reply all', 'mail-del:Delete']);
+  p.$('mail-reply-all').click();
+  assert.strictEqual(p.screen(), 'compose');
+  assert.strictEqual(p.$('mail-to').value, 'KY4RY');
+  assert.strictEqual(p.$('mail-cc').value, 'W1AW, N0CALL');
+  assert.strictEqual(p.$('mail-subj').value, 'Re: Net');
+  p.$('mail-body').value = 'ok';
+  p.take();
+  p.$('mail-queue').click();
+  assert.deepStrictEqual(p.take(), [{ type: 'winlink-compose', to: 'KY4RY', subject: 'Re: Net', body: 'ok', cc: 'W1AW, N0CALL' }]);
+  p.mailOnMessage({ type: 'winlink-message', box: 'in', mid: 'A1', message: { from: 'KY4RY', to: ['K3SBP'], subject: 'Net' } });
+  assert.deepStrictEqual(btnIds(p), ['mail-reply:Reply', 'mail-del:Delete'], 'no Reply all when there is nobody else');
+  p.$('mail-reply').click();
+  assert.strictEqual(p.$('mail-cc').value, '');
+});
+
+test('#475: the page carries lib/winlink-mail-actions.js inlined by the server', () => {
+  assert.ok(/<!-- winlink-mail-actions-js -->/.test(HTML));
+  assert.ok(/\['winlink-mail-actions-js', 'winlink-mail-actions\.js'\]/.test(SERVER));
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);
