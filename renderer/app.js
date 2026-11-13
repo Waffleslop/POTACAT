@@ -16100,6 +16100,19 @@ logSaveBtn.addEventListener('click', async () => {
   }
 });
 
+// #463: macOS refuses POTACAT the microphone, so the radio's audio is silent.
+// Main decides when to say it (lib/mac-mic-access.js) and clears it when
+// sound arrives; the sticky warn toast carries the theme's own colours.
+if (window.api.onMacMicNotice) {
+  window.api.onMacMicNotice((d) => {
+    const mine = document.querySelector('.log-toast.mac-mic');
+    if (!d || !d.show) { if (mine) mine.remove(); return; }
+    showLogToast(d.message, { warn: true, sticky: true });
+    const t = document.querySelector('.log-toast');
+    if (t) t.classList.add('mac-mic');
+  });
+}
+
 function showLogToast(message, opts) {
   const existing = document.querySelector('.log-toast');
   if (existing) existing.remove();
@@ -22340,6 +22353,7 @@ catLogClearBtn.addEventListener('click', () => {
       winlink: winlinkLine,
       launcher: launcherLine,
       settingsSaved,
+      micAccess: '',
     };
     // Complete-from-launch log: main reads startup.log + session.log (both
     // capture everything since process start, including the pre-window lines
@@ -22362,6 +22376,7 @@ catLogClearBtn.addEventListener('click', () => {
         }
         body.push(...(pkg.tail || []));
         logSections = [];
+        if (pkg.micAccess) md.micAccess = pkg.micAccess; // #463
         // The crashed run goes FIRST — it is the reason the report exists,
         // and a reader who stops after one code block should still see it.
         if (pkg.prevRunUnclean) {
@@ -22425,6 +22440,7 @@ catLogClearBtn.addEventListener('click', () => {
       ...(md.winlink ? ['**Winlink:** ' + md.winlink] : []),
       ...(md.launcher ? ['**Launcher:** ' + md.launcher] : []),
       '**Settings saved:** ' + md.settingsSaved,
+      ...(md.micAccess ? ['**macOS microphone access:** ' + md.micAccess] : []),
       '',
       '### What I tried to do',
       '<!-- fill in: the steps you took -->',
@@ -30513,6 +30529,7 @@ async function _buildJtcatCapture(ctx) {
       });
       workletNode.port.onmessage = function(e) {
         if (_jtcatStallWatch) _jtcatStallWatch.noteSamples(e.data, Date.now());
+        jtcatMicNote(e.data);
         window.api.jtcatAudio(e.data);
       };
       jtcatRxGainNode.connect(workletNode);
@@ -30569,6 +30586,7 @@ async function _buildJtcatCapture(ctx) {
             samples = Array.from(rawSamples);
           }
           if (_jtcatStallWatch) _jtcatStallWatch.noteSamples(samples, Date.now());
+          jtcatMicNote(samples);
           window.api.jtcatAudio(samples);
         } catch (err) {
           console.error('[JTCAT] Audio processor error:', err.message || err);
@@ -30793,8 +30811,22 @@ window.api.onJtcatSetTxGain(function(level) {
 // does not.
 var _jtcatStallWatch = null;
 var _jtcatStallTimer = null;
+// #463: on a Mac that refuses the microphone, the input is exact zeros from
+// the first buffer (lib/mac-mic-access.js; main decides what to say).
+var _jtcatMicWatch = null;
+function jtcatMicNote(samples) {
+  if (!_jtcatMicWatch) return;
+  var now = Date.now();
+  var ev = _jtcatMicWatch.note(samples, now);
+  if (ev && window.api.macMicSilence) window.api.macMicSilence({ surface: 'jtcat', silent: ev === 'silent', silentMs: _jtcatMicWatch.silentFor(now) });
+}
 function jtcatArmStallWatch(track) {
   var now = Date.now();
+  if (window.MacMicAccess && window.api.platform === 'darwin') {
+    if (_jtcatMicWatch) _jtcatMicWatch.started(now);
+    else _jtcatMicWatch = new window.MacMicAccess.SilenceWatch(now);
+    if (window.api.macMicCaptureStart) window.api.macMicCaptureStart('jtcat').catch(function() {});
+  }
   if (_jtcatStallWatch) _jtcatStallWatch.started(now);
   else _jtcatStallWatch = new window.CaptureStall.CaptureStallWatch(now);
   if (_jtcatStallTimer) clearInterval(_jtcatStallTimer);

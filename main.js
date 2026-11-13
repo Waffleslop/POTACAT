@@ -535,6 +535,7 @@ const { RemoteServer } = require('./lib/remote-server');
 const { buildDiagnosticSnapshot, redactLogLines } = require('./lib/diagnostic-snapshot');
 const { BUG_REPORT_MARKER, selectReportLines, maskHomeDir, sessionLogRotationMoves } = require('./lib/bug-report-log');
 const SettingsSaveStatus = require('./lib/settings-save-status');
+const MacMicAccess = require('./lib/mac-mic-access'); // #463: macOS microphone permission and the silence it causes
 const { healActiveRig } = require('./lib/active-rig');
 const { healRigAudioMirror } = require('./lib/rig-audio-mirror');
 const Cm108Ptt = require('./lib/cm108-ptt');
@@ -11999,6 +12000,8 @@ function startModemBridge({ playback } = {}) {
   const dev = modemBridgeDevices();
   const cfg = { ...dev, playback: !!playback, txGain: winlinkTxGain() };
   modemBridge.state = 'starting'; modemBridge.error = ''; modemBridge.playback = !!playback; modemBridge.startedAt = Date.now();
+  _modemMicWatch = null; // #463: a new capture is judged afresh (from its first buffer)
+  macMicCaptureStart('winlink').catch(() => {});
   if (modemBridgeWin && !modemBridgeWin.isDestroyed()) {
     if (_modemBridgeLoaded) modemBridgeWin.webContents.send('modem-bridge-start', cfg);
     return; // not loaded yet: did-finish-load sends the start for every side that wants one
@@ -30414,12 +30417,7 @@ ipcMain.handle('remote-shack-audio-set', (_e, patch) => {
 
 async function startRemoteClientAudio() {
   if (!remoteClient) { sendCatLog('[remote-client-audio] no active remote shack to listen to'); return; }
-  if (process.platform === 'darwin') {
-    const { systemPreferences } = require('electron');
-    if (systemPreferences.getMediaAccessStatus('microphone') !== 'granted') {
-      try { await systemPreferences.askForMediaAccess('microphone'); } catch {}
-    }
-  }
+  await macMicCaptureStart('echocat-link'); // #463: logs it, asks once, says so when refused
   if (remoteAudioClientWin && !remoteAudioClientWin.isDestroyed()) {
     pushRemoteShackAudioConfig();
     remoteAudioClientWin.webContents.send('rac-start'); // re-arm an existing window
@@ -30565,6 +30563,98 @@ function audioSilenceIsSquelch() {
   if (t.type === 'none') return true;
   return /FM/.test(String(_currentMode || '').toUpperCase());
 }
+
+// --- macOS microphone permission (#463, #125) ---
+// A refused permission turns every audio input, the radio's USB sound card
+// included, into exact digital zero, and macOS says nothing. The state goes
+// in the session log at startup and on every capture start, and in Report a
+// Bug; when to tell the operator is lib/mac-mic-access.js. Off macOS all of
+// this is a no-op.
+const _macMicLedger = new MacMicAccess.MicNoticeLedger();
+let _macMicAsked = false;
+let _modemMicWatch = null; // Winlink's radio capture, fed by modem-bridge-rx
+function macMicStatus() {
+  if (process.platform !== 'darwin') return null;
+  try { return require('electron').systemPreferences.getMediaAccessStatus('microphone'); } catch { return 'unknown'; }
+}
+function macMicLog(where, status) {
+  const d = MacMicAccess.describeMicStatus(process.platform, status);
+  if (d) sendCatLog(`[mic] macOS microphone access: ${d}${where ? ' (' + where + ')' : ''}`);
+}
+/** Winlink's radio capture (modem-bridge-rx): a refused Mac delivers exact zeros from the first buffer. */
+function macMicModemNote(peakOrPcm) {
+  if (process.platform !== 'darwin' || winlinkTxActive) return;
+  const now = Date.now();
+  if (!_modemMicWatch) _modemMicWatch = new MacMicAccess.SilenceWatch(now);
+  const ev = _modemMicWatch.note(peakOrPcm, now);
+  if (ev) macMicNotice('winlink', { silent: ev === 'silent', silentMs: _modemMicWatch.silentFor(now) });
+}
+function macMicSurface(s) {
+  const k = String(s || '');
+  return /^[a-z0-9-]{1,32}$/.test(k) ? k : 'audio';
+}
+/**
+ * A capture is starting on `surface`: log the permission, ask macOS once if
+ * it never asked, and say the message when the answer is no. Resolves to the
+ * status (null off macOS).
+ */
+async function macMicCaptureStart(surface, sender) {
+  if (process.platform !== 'darwin') return null;
+  let status = macMicStatus();
+  if (status === 'not-determined' && !_macMicAsked) {
+    _macMicAsked = true;
+    try { await require('electron').systemPreferences.askForMediaAccess('microphone'); } catch {}
+    status = macMicStatus();
+  }
+  macMicLog(`${surface} capture starting`, status);
+  macMicNotice(surface, { status, sender });
+  return status;
+}
+/**
+ * A capture reported exact digital silence since it started
+ * ({ silent: true, silentMs }) or sound arriving ({ silent: false }).
+ */
+function macMicNotice(surface, o = {}) {
+  if (process.platform !== 'darwin') return;
+  if (o.silent === false) {
+    if (_macMicLedger.clear(surface)) {
+      sendCatLog(`[mic] ${surface}: sound is arriving now`);
+      macMicSend({ surface, show: false }, o.sender);
+    }
+    return;
+  }
+  const status = o.status !== undefined ? o.status : macMicStatus();
+  const v = MacMicAccess.micVerdict({
+    platform: process.platform, status, heardSound: false,
+    silentMs: o.silentMs, minSilentMs: o.minSilentMs,
+  });
+  if (!v.say) return;
+  // An FM radio with its squelch closed (or a radio with no CAT, where the
+  // mode is unknown) sends exact zeros too (KS9B): not a permission fault.
+  if (v.reason === 'silence' && audioSilenceIsSquelch()) return;
+  if (!_macMicLedger.show(surface)) return;
+  sendCatLog(`[mic] ${surface}: ` + (v.reason === 'denied'
+    ? 'macOS refuses POTACAT the microphone, so every audio input is silent'
+    : `the audio input has delivered only exact digital silence (-120 dBFS) for ${Math.round((Number(o.silentMs) || 0) / 1000)} s since it started`)
+    + `; microphone access: ${MacMicAccess.describeMicStatus(process.platform, status)}. Told the operator: ${v.message}`);
+  macMicSend({ surface, show: true, message: v.message }, o.sender);
+}
+/** The notice goes to the main window, and to the window whose capture it is. */
+function macMicSend(payload, sender) {
+  if (win && !win.isDestroyed()) win.webContents.send('mac-mic-notice', payload);
+  try {
+    if (sender && !sender.isDestroyed() && !(win && !win.isDestroyed() && sender === win.webContents)) sender.send('mac-mic-notice', payload);
+  } catch {}
+}
+ipcMain.handle('mac-mic-capture-start', (e, surface) => macMicCaptureStart(macMicSurface(surface), e.sender));
+ipcMain.on('mac-mic-silence', (e, o = {}) => {
+  macMicNotice(macMicSurface(o.surface), {
+    silent: o.silent !== false,
+    silentMs: Number(o.silentMs) || 0,
+    minSilentMs: typeof o.minSilentMs === 'number' ? o.minSilentMs : undefined,
+    sender: e.sender,
+  });
+});
 
 // --- Remote Audio (hidden BrowserWindow for WebRTC) ---
 // Single source of truth for the config payload sent to the audio bridge
@@ -30762,15 +30852,13 @@ async function startRemoteAudio() {
   // On macOS, request microphone permission before creating the audio window.
   // Without this, getUserMedia() silently returns an empty/silent stream.
   // (Pre-warm never captures, so the permission ask stays on the start path.)
+  // #463: the refusal goes in the session log (Report a Bug) and to the
+  // operator, not only to the console.
   if (process.platform === 'darwin') {
-    const { systemPreferences } = require('electron');
-    const micStatus = systemPreferences.getMediaAccessStatus('microphone');
-    if (micStatus !== 'granted') {
-      const granted = await systemPreferences.askForMediaAccess('microphone');
-      if (!granted) {
-        console.error('[Echo CAT] Microphone permission denied by macOS');
-        return;
-      }
+    const micStatus = await macMicCaptureStart('echocat');
+    if (micStatus === 'denied' || micStatus === 'restricted') {
+      sendCatLog('[Echo CAT] macOS refuses POTACAT the microphone, so no radio audio can reach the phone');
+      return;
     }
   }
 
@@ -40242,6 +40330,7 @@ function kiwiStatusHint() {
 
 app.whenReady().then(() => {
   logStartupStage('app.whenReady fired');
+  macMicLog('at startup', macMicStatus()); // #463: a no-op off macOS
   // Windows app identity. Without it every toast POTACAT raises (watchlist
   // spot alerts, pair requests) is attributed to the launching executable —
   // "electron.app.Electron" with the Electron icon in dev, and on some
@@ -43625,6 +43714,7 @@ function cloudShackNotice(text, kind) {
     if (!modemBridgeWin || modemBridgeWin.isDestroyed() || e.sender !== modemBridgeWin.webContents || !d || !d.pcm) return;
     const pcm = d.pcm instanceof Float32Array ? d.pcm : new Float32Array(d.pcm.buffer ? d.pcm.buffer : d.pcm);
     winlinkFeedRx(pcm, Number(d.sampleRate) || 48000, { fromBridge: true });
+    macMicModemNote(typeof d.peak === 'number' ? d.peak : pcm); // #463
   });
   // The cable side: what VARA transmits into the virtual cable → the radio,
   // only while VARA has PTT (through Pat and the shim); anything else is a
@@ -46150,6 +46240,8 @@ function cloudShackNotice(text, kind) {
         skipped: sel.skipped,
         markerFound: sel.markerFound,
         tailTruncated: sel.tailTruncated,
+        // #463: macOS microphone permission ('' off macOS).
+        micAccess: MacMicAccess.describeMicStatus(process.platform, macMicStatus()),
         // #295: the modem's own logs (ardopcf / Dire Wolf) and any recordings to attach.
         winlinkModem: (() => { try { const m = winlinkModemReport(); const c = (x) => x ? { ...x, lines: clean(x.lines), ...(x.key ? { key: clean(x.key) } : {}) } : null; return { ardop: c(m.ardop), ardopSession: c(m.ardopSession), direwolf: c(m.direwolf), recordings: m.recordings, sessions: clean(m.sessions || []) }; } catch { return null; } })(),
       };

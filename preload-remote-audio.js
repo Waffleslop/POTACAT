@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('api', {
   // whether ECHOCAT phone audio is reaching the radio's USB CODEC.
   sendTxMeter: (peak) => ipcRenderer.send('remote-audio-tx-meter', peak),
   sendAudioHealth: (state) => ipcRenderer.send('remote-audio-health', state),
+  // #463: exact digital silence since the capture started (macOS microphone permission).
+  macMicSilence: (o) => ipcRenderer.send('mac-mic-silence', o),
   onFreedvMute: (cb) => ipcRenderer.on('freedv-mute', (_e, muted) => cb(muted)),
   // KiwiSDR / WebSDR audio routed through the WebRTC bridge so mobile clients
   // (which don't have Web Audio) hear SDR audio over the same path as rig

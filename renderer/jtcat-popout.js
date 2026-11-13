@@ -1805,6 +1805,12 @@ function _applyPopoutTheme(payload) {
       delete qsoToast.dataset.errorToast;
     }, 6000);
   }
+  // #463: macOS refuses POTACAT the microphone (the main window keeps it until sound arrives).
+  if (window.api.onMacMicNotice) {
+    window.api.onMacMicNotice(function(d) {
+      if (d && d.show && d.message) showJtcatWarnToast(d.message);
+    });
+  }
   if (window.api.onJtcatDupeWarning) {
     window.api.onJtcatDupeWarning(function(data) {
       showJtcatWarnToast((data && data.message) || 'Already worked', data && data.sub);
@@ -6050,8 +6056,22 @@ function _applyPopoutTheme(payload) {
   // does not.
   var _popoutStallWatch = null;
   var _popoutStallTimer = null;
+  // #463: on a Mac that refuses the microphone, the input is exact zeros from
+  // the first buffer (lib/mac-mic-access.js; main decides what to say).
+  var _popoutMicWatch = null;
+  function popoutMicNote(samples) {
+    if (!_popoutMicWatch) return;
+    var now = Date.now();
+    var ev = _popoutMicWatch.note(samples, now);
+    if (ev && window.api.macMicSilence) window.api.macMicSilence({ surface: 'jtcat', silent: ev === 'silent', silentMs: _popoutMicWatch.silentFor(now) });
+  }
   function popoutArmStallWatch(track) {
     var now = Date.now();
+    if (window.MacMicAccess && window.api.platform === 'darwin') {
+      if (_popoutMicWatch) _popoutMicWatch.started(now);
+      else _popoutMicWatch = new window.MacMicAccess.SilenceWatch(now);
+      if (window.api.macMicCaptureStart) window.api.macMicCaptureStart('jtcat').catch(function () {});
+    }
     if (_popoutStallWatch) _popoutStallWatch.started(now);
     else _popoutStallWatch = new window.CaptureStall.CaptureStallWatch(now);
     if (_popoutStallTimer) clearInterval(_popoutStallTimer);
@@ -6249,6 +6269,7 @@ function _applyPopoutTheme(payload) {
         });
         workletNode.port.onmessage = function(e) {
           if (_popoutStallWatch) _popoutStallWatch.noteSamples(e.data, Date.now());
+          popoutMicNote(e.data);
           window.api.jtcatAudio(e.data);
         };
         popoutRxGainNode.connect(workletNode);
@@ -6305,6 +6326,7 @@ function _applyPopoutTheme(payload) {
               samples = Array.from(rawSamples);
             }
             if (_popoutStallWatch) _popoutStallWatch.noteSamples(samples, Date.now());
+            popoutMicNote(samples);
             window.api.jtcatAudio(samples);
           } catch (err) {
             console.error('[JTCAT popout] Audio processor error:', err.message || err);

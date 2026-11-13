@@ -6,6 +6,7 @@
 <!-- Shared TX EQ chain (Phase 1). Also loaded by vfo-popout.html so
      both audio sources apply identical DSP. -->
 <script src="tx-eq-chain.js"></script>
+<script src="../lib/mac-mic-access.js"></script>
 <script>
 // Hidden BrowserWindow — WebRTC audio bridge between radio USB audio and phone
 let pc = null;
@@ -778,9 +779,13 @@ const HEALTH_POST_TX_GRACE_MS = 1500; // suppress detection after PTT release
                                       // tripping a false silent flag. K3SBP
                                       // 2026-05-13 saw FT8 trip this mid-QSO.
 
+// #463: on a Mac that refuses the microphone, the rig's input is exact zeros
+// from the first buffer. lib/mac-mic-access.js watches; main decides what to say.
+let _micWatch = null;
 function startHealthMonitor(stream) {
   stopHealthMonitor();
   if (!stream || !window.api.sendAudioHealth) return;
+  _micWatch = (window.MacMicAccess && window.api.macMicSilence) ? new window.MacMicAccess.SilenceWatch(Date.now()) : null;
   _healthCtx = new AudioContext();
   const source = _healthCtx.createMediaStreamSource(stream);
   _healthAnalyser = _healthCtx.createAnalyser();
@@ -823,6 +828,11 @@ function startHealthMonitor(stream) {
     for (let i = 0; i < buf.length; i++) {
       const v = Math.abs(buf[i]);
       if (v > peak) peak = v;
+    }
+    if (_micWatch) {
+      const now = Date.now();
+      const ev = _micWatch.note(peak, now);
+      if (ev) window.api.macMicSilence({ surface: 'echocat', silent: ev === 'silent', silentMs: _micWatch.silentFor(now) });
     }
     if (peak < HEALTH_PEAK_FLOOR) {
       _healthSilentCount++;

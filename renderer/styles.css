@@ -6470,6 +6470,16 @@ a.settings-echocat-badge-link:hover {
   padding-right: 28px;
 }
 
+/* #463: the macOS microphone message is read once and acted on: larger text. */
+.log-toast.mac-mic {
+  font-size: 15px;
+  line-height: 1.45;
+  max-width: 460px;
+  /* --warn is the theme's readable amber (dark amber on light themes). */
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
 .log-toast-dismiss {
   position: absolute;
   top: 4px;
