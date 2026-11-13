@@ -91,7 +91,8 @@ test('nothing is counted outside an over, and each over starts clean', () => {
 test('main.js marks each over for the bridge and logs a damaged one in plain words', () => {
   const main = readSrc(path.join(root, 'main.js'));
   assert.ok(/_winlinkTxBurst\.keyDown\(\);\n\s*modemBridgeOver\(true\);/.test(main), 'over starts at key-down');
-  assert.ok(/if \(burst\) winlinkLog\(burst\.text\);\n\s*if \(burst\) modemBridgeOver\(false\);/.test(main), 'over ends with the burst line, on every unkey path');
+  // #300: the burst line gains what reached the radio, inside an `if (burst) { ... }` block.
+  assert.ok(/winlinkLog\(burst\.text \+ [^\n]*\n\s*\}\n\s*if \(burst\) modemBridgeOver\(false\);/.test(main), 'over ends with the burst line, on every unkey path');
   assert.ok(/if \(s\.txOver\) \{[^\n]*modemBridgeOverText\(/.test(main));
   const i = main.indexOf('function modemBridgeOverText(');
   const fn = new Function('return ' + main.slice(i, main.indexOf('\nfunction ', i + 10)))();
