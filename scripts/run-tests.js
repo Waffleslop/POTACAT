@@ -185,6 +185,7 @@ const TESTS = [
   'test/kenwood-scope-test.js', // #397: the TS-890S bandscope over USB/COM (DD0 5 -> DD4): lines, sweeps, axis, AI/DD0 read-first and put back, 115200, poll not disturbed
   'test/flex-scope-test.js', // the Flex's own panadapter as the band scope (Flex Direct), against a real 8600 capture
   'test/scope-digital-view-test.js', // the scope's tight view on a digital mode's decode window (Flex)
+  'test/scope-watchers-test.js', // #358: each remote device watching the scope is counted; one leaving does not stop the others
   'test/sdr-failure-test.js', // #390: a WebSDR that would not come on says why in the VFO window, with Try again
   'test/kiwisdr-test.js', // KiwiSDR: settings after AR OK (firmware 1.902), receivers that allow no apps
   'test/listen-source-test.js', // who you hear: the radio, or the SDR where the radio cannot go (Casey 2026-10-30)

@@ -20944,6 +20944,7 @@ const { computeSpectrumBins } = require('./lib/spectrum-fft');
 const { RxSpectrumRing } = require('./lib/rx-spectrum-ring');
 const FlexScope = require('./lib/flex-scope');
 const ScopeDigitalView = require('./lib/scope-digital-view');
+const { createScopeWatchers } = require('./lib/scope-watchers'); // #358: each remote device's scope view counted on its own
 const ListenSource = require('./lib/listen-source');
 const FlexReadback = require('./lib/flex-readback');
 let _flexSliceKv = {};          // merged status of our slice, for the read-back
@@ -26156,13 +26157,14 @@ function connectRemote() {
     // nothing here needs to be sticky — and a flag left true would let a
     // helper (and the radio's SCU-LAN10) run for a client that has gone, or
     // start for the next one that never asked (mobile handoff, follow-up 2).
-    if (yaesuScopeRemoteWants || yaesuScopeRemoteDigital) {
-      yaesuScopeRemoteWants = false;
-      yaesuScopeRemoteDigital = false;
+    // This fires when the LAST device is gone; one of several leaving is
+    // 'scope-client-gone' (#358).
+    const hadRemoteScope = yaesuScopeRemoteWants || yaesuScopeRemoteDigital;
+    scopeRemoteApply(scopeWatchers.clear());
+    if (hadRemoteScope) {
       if (!yaesuScopeWanted()) { try { stopYaesuScope('ECHOCAT client disconnected'); } catch { /* not running */ } }
       else { try { flexDigitalViewSync(); } catch { /* no Flex scope */ } }
     }
-    yaesuScopeRemoteIsGuest = false;
     if (win && !win.isDestroyed()) {
       win.webContents.send('remote-status', { connected: false });
       // Phone gone — clear any mirrored "phone is scanning" state so the
@@ -27628,24 +27630,36 @@ function connectRemote() {
     else { stopInProcessSpectrum(); rxSpectrumSync(); rxSpecRing.clear(); }
   });
 
-  // Band scope: the helper runs while the client's Scope view is on screen.
-  remoteServer.on('scope-subscribe', ({ on, guest }) => {
-    if (yaesuScopeRemoteWants !== !!on) {
-      sendCatLog('[Scope] ECHOCAT scope ' + (on ? 'subscribed' : 'unsubscribed') + ' (helper ' + (yaesuScopeProc ? 'pid ' + yaesuScopeProc.pid : 'not running')
+  // Band scope: the helper runs while any device's Scope view is on screen.
+  // Each device (phone, ECHOCAT Web, a remote POTACAT) is counted by its
+  // connection; the scope stops when the last one leaves (#358).
+  remoteServer.on('scope-subscribe', ({ on, guest, clientId }) => {
+    const was = scopeWatchers.has(clientId);
+    const sum = scopeRemoteApply(scopeWatchers.subscribe(clientId, { on, guest }));
+    if (was !== !!on) {
+      sendCatLog('[Scope] ECHOCAT scope ' + (on ? 'subscribed' : 'unsubscribed') + ' by device ' + (clientId || '?')
+        + ' (' + sum.count + ' watching; helper ' + (yaesuScopeProc ? 'pid ' + yaesuScopeProc.pid : 'not running')
         + ', status ' + yaesuScopeState.status + ')');
     }
-    yaesuScopeRemoteWants = !!on;
-    yaesuScopeRemoteIsGuest = !!on && !!guest;
-    if (!on) yaesuScopeRemoteDigital = false;
     if (on) { yaesuScopeRestarts = 0; startYaesuScope(); yaesuScopeBroadcastState(); }
     else if (!yaesuScopeWanted()) stopYaesuScope('ECHOCAT scope view closed');
     else flexDigitalViewSync();
   });
+  // A device's connection went away while others stay connected, goodbye
+  // said or not: its scope view ends; the scope stops after the last (#358).
+  remoteServer.on('scope-client-gone', ({ clientId } = {}) => {
+    const was = scopeWatchers.has(clientId);
+    const sum = scopeRemoteApply(scopeWatchers.remove(clientId));
+    if (was) sendCatLog('[Scope] ECHOCAT device ' + (clientId || '?') + ' watching the scope disconnected (' + sum.count + ' still watching)');
+    if (was && !yaesuScopeWanted()) { try { stopYaesuScope('the last ECHOCAT device watching it disconnected'); } catch { /* not running */ } }
+    else { try { flexDigitalViewSync(); } catch { /* no Flex scope */ } }
+  });
   // The phone's FT8 tab (or its Pan in a digital mode) asks for the digital
   // view on a Flex pan; its Pan outside FT8 keeps the operator's own zoom.
-  remoteServer.on('scope-digital-view', ({ on } = {}) => {
-    if (yaesuScopeRemoteDigital === !!on) return;
-    yaesuScopeRemoteDigital = !!on;
+  remoteServer.on('scope-digital-view', ({ on, clientId } = {}) => {
+    const before = yaesuScopeRemoteDigital;
+    scopeRemoteApply(scopeWatchers.setDigital(clientId, on));
+    if (yaesuScopeRemoteDigital === before) return;
     flexDigitalViewSync();
   });
   remoteServer.on('scope-span', ({ spanHz, guest } = {}) => { setScopeSpan(spanHz, 'ECHOCAT device', { guest }); });
@@ -32840,11 +32854,20 @@ let yaesuScopeScuLanWeSet = false;   // POTACAT turned SCU-LAN10 on → it turns
 let yaesuScopeStopping = null;
 let yaesuScopeStartAfterExit = false;
 let yaesuScopeSynth = false;         // generated signal, no radio (pop-out gear menu)
-let yaesuScopeRemoteWants = false;   // an ECHOCAT client has its Scope view open
+let yaesuScopeRemoteWants = false;   // an ECHOCAT client has its Scope view open (any of them: scopeWatchers)
 let yaesuScopeRemoteDigital = false; // C2S scope-digital-view: the client shows FT8 / a digital Pan
 let yaesuScopeJtcatWants = false;    // the JTCAT pop-out is showing the band scope strip
 let yaesuScopeBandspreadWants = false;   // the Bandspread window draws the scope trace behind its spots
 let yaesuScopeRemoteIsGuest = false; // ...and that client holds a Guest Pass (may watch, never change the radio)
+// The three flags above follow scopeWatchers (#358): every device watching is
+// counted by its connection, so one leaving does not stop the others.
+const scopeWatchers = createScopeWatchers();
+function scopeRemoteApply(sum) {
+  yaesuScopeRemoteWants = sum.wants;
+  yaesuScopeRemoteDigital = sum.digital;
+  yaesuScopeRemoteIsGuest = sum.guest;
+  return sum;
+}
 let yaesuScopeRadioBackAt = 0;       // the radio last powered on / its CAT link came back (#126)
 let yaesuScopeRadioBackTimer = null;
 let yaesuScopeStallKills = 0;        // watchdog kills, cleared after a healthy minute (stallKillsAfterHealthy)

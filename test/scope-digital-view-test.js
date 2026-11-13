@@ -101,7 +101,9 @@ check('an ECHOCAT device showing FT8 gets the digital view too (C2S scope-digita
   assert.ok(/yaesuScopeRemoteDigital && yaesuScopeRemoteWants && ft8Engine\._running/.test(fn), 'device + subscribed + engine running');
   assert.ok(/remoteServer\.on\('scope-digital-view'[\s\S]{0,200}flexDigitalViewSync\(\)/.test(main));
   const disc = /remoteServer\.on\('client-disconnected'[\s\S]{0,900}/.exec(main)[0];
-  assert.ok(/yaesuScopeRemoteDigital = false/.test(disc), 'ends with the socket');
+  // #358: the flags follow scopeWatchers; the last device gone clears them all.
+  assert.ok(/scopeRemoteApply\(scopeWatchers\.clear\(\)\)/.test(disc), 'ends with the socket');
+  assert.ok(/remoteServer\.on\('scope-client-gone'[\s\S]{0,600}scopeWatchers\.remove\(clientId\)/.test(main), 'ends with that one device\'s socket too');
   const rs = readSrc(path.join(ROOT, 'lib/remote-server.js'));
   assert.ok(/'scope-digital-view'\]/.test(rs), 'hello capability');
   assert.ok(/case 'scope-digital-view':[\s\S]{0,300}this\.emit\('scope-digital-view'/.test(rs));
