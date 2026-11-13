@@ -1931,6 +1931,7 @@ const winlinkState = new WinlinkStateLib.WinlinkState();
 let winlinkShim = null;         // loopback rigctld shim Pat keys and tunes through
 let _winlinkShimPort = 0;
 let _winlinkShimArmed = false;  // Pat may tune/key only while a radio session runs
+let _winlinkShimDisarmedAt = 0; // when the last radio session let go of the shim (Pat's teardown QSX is refused quietly, #455)
 let _winlinkShimRefusedAt = 0;  // last "no session" PTT refusal (rate-limits the log line + the repeat hang-up)
 let _winlinkUnkeyTimer = null;  // the modem asked for PTT off; the tail of its audio is still in POTACAT's pipeline
 let ardopProc = null;           // ardopcf for an ARDOP session
@@ -11458,7 +11459,11 @@ async function startWinlinkShim() {
     getFreqHz: () => _currentFreqHz || 0,
     getPtt: () => winlinkTxActive && !_winlinkUnkeyTimer, // the REQUESTED state: Hamlib re-reads PTT after a set and would otherwise see "still keyed" through the drain hold
     setFreqHz: (hz) => {
-      if (!_winlinkShimArmed || radioOwner !== 'winlink') { winlinkLog(`refused Pat's tune to ${(hz / 1e6).toFixed(4)} MHz — no radio session is running`); return false; }
+      if (!_winlinkShimArmed || radioOwner !== 'winlink') {
+        // Pat's QSX back to the dial as a session is torn down is refused quietly (#455).
+        if (WinlinkReturn.patTuneRefusalLogged({ msSinceSessionEnd: Date.now() - _winlinkShimDisarmedAt })) winlinkLog(`refused Pat's tune to ${(hz / 1e6).toFixed(4)} MHz — no radio session is running`);
+        return false;
+      }
       if (_atuTuneEpisode && Math.abs(hz - (_currentFreqHz || 0)) > 100) { winlinkLog(`held Pat's tune to ${(hz / 1e6).toFixed(4)} MHz — an ATU tune is running`); return false; }
       if (Math.abs(hz - (_currentFreqHz || 0)) <= 1) return true; // Pat's QSX back to the dial it is already on
       tuneRadio(hz / 1000, undefined, undefined, { origin: 'Winlink (Pat via the rigctld shim)' });
@@ -11613,6 +11618,7 @@ function winlinkUnkeyDrainMs() {
 }
 
 function stopWinlinkShim() {
+  if (_winlinkShimArmed) _winlinkShimDisarmedAt = Date.now();
   _winlinkShimArmed = false;
   if (_winlinkUnkeyTimer) { clearTimeout(_winlinkUnkeyTimer); _winlinkUnkeyTimer = null; }
   stopWinlinkAudio();
@@ -12757,13 +12763,15 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
         // the failure (VARA not answering after 45 s under an operator's
         // Stop) — keep it on the last-session record every surface shows.
         const why = e && e.message ? e.message : String(e);
-        winlinkLog(`attempt #${seq} failed after it was stopped (${why}) — kept as the reason`);
         try {
           const ls = settings.winlinkLastSession;
           // Only a reason POTACAT wrote itself (a session that could not start).
           // Pat's reply to a call that was stopped ("connect: HTTP 500 — Session
-          // failure ...") is in the log line above and never in the status (#425).
+          // failure ...") is its answer to the Stop, not a fault: it is in Pat's
+          // own log and never in the status (#425) nor in ours (#455), since the
+          // session's summary line was already written when it was stopped.
           if (ls && !ls.ok && !dialed && !String(ls.text || '').includes(why)) {
+            winlinkLog(`attempt #${seq} failed after it was stopped (${why}) — kept as the reason`);
             ls.text = `${ls.text || 'Session failed'} — ${why}`.slice(0, 300);
             saveSettings(settings);
             if (!winlinkSessionActive()) winlinkState.setSession({ error: ls.text, errorKind: _winlinkSessionErrorKind || 'stopped' });
@@ -13091,6 +13099,7 @@ function winlinkEndSession(state, text, received = 0) {
   _cableRxLeveler = null; // the next session starts at unity and finds its own level
   winlinkRememberModemTxGain(); // the transmit gain it learned is this modem's, kept for the next session
   clearWinlinkTxFailsafe();
+  if (_winlinkShimArmed) _winlinkShimDisarmedAt = endedAt;
   _winlinkShimArmed = false;
   if (_winlinkUnkeyTimer) { clearTimeout(_winlinkUnkeyTimer); _winlinkUnkeyTimer = null; }
   if (winlinkTxActive) { winlinkTxActive = false; try { handleRemotePtt(false); } catch {} }
