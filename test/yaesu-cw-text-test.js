@@ -203,6 +203,39 @@ test('a radio still in transmit 4 s after the message is sent to receive, and th
   r.disconnect();
 });
 
+test('a receive readback in a word space does not end the watch: a radio keyed after the message is sent to receive', async () => {
+  // FT-710 keyer memory over BK-IN: TX0 for ~120 ms in each word space.
+  const { rig: r, codec, writes } = rig('FT-710');
+  const notices = [];
+  r.on('notice', (m) => notices.push(m));
+  r._cwWpm = 60;
+  r._breakIn = true;
+  r.sendCwText('E E');
+  codec.emit('ptt', true);
+  codec.emit('ptt', false);            // the word space
+  assert.strictEqual(r._transmitting, true, 'still keying the message');
+  const polls = setInterval(() => { if (!writes.includes('TX0;')) codec.emit('ptt', true); }, 500); // then stuck in TX
+  await sleep(6500);
+  clearInterval(polls);
+  assert.ok(writes.includes('TX0;'), 'RX sent: ' + JSON.stringify(writes));
+  assert.ok(notices.some((m) => /stayed in transmit after the CW message/.test(m)));
+  r.disconnect();
+});
+
+test('the backstop is armed even when the last readback before the end was receive', async () => {
+  const { rig: r, codec, writes } = rig('FT-710');
+  r._cwWpm = 60;
+  r._breakIn = true;
+  r.sendCwText('E');
+  codec.emit('ptt', false);            // a word-space readback just before the estimate ends
+  await sleep(700);                    // the hold has ended
+  const polls = setInterval(() => { if (!writes.includes('TX0;')) codec.emit('ptt', true); }, 500);
+  await sleep(5500);
+  clearInterval(polls);
+  assert.ok(writes.includes('TX0;'), 'RX sent: ' + JSON.stringify(writes));
+  r.disconnect();
+});
+
 test('the backstop leaves a PTT POTACAT itself is holding alone', async () => {
   const { rig: r, codec, writes } = rig('FTDX10');
   r._cwWpm = 60;
