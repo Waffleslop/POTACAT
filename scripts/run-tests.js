@@ -53,6 +53,7 @@ const TESTS = [
   'test/dxcluster-backoff-test.js',
   'test/audio-backpressure-test.js',
   'test/spot-mute-rules-test.js',
+  'test/spot-filter-presets-test.js',
   'test/websdr-test.js',
   'test/jtcat-websdr-source-test.js', // #243: JTCAT decodes from the WebSDR: source switch, dial follow, TX refused, 12 kHz resampler
   'test/ragchew-test.js',

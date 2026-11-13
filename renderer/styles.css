@@ -10840,3 +10840,22 @@ dialog[open] {
 .rig-preset-rule-line { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
 .settings-preset-root { max-width: 560px; }
 .settings-preset-root .rig-preset-item { font-size: 12px; }
+
+/* Filter presets (lib/spot-filter-presets.js): the button names the preset
+   in force; each menu row applies one, with its tools on the right. */
+.filter-presets-name:not(:empty)::before { content: ': '; }
+.filter-presets-name { display: inline-block; max-width: 160px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+#filter-presets-menu { min-width: 320px; max-height: 70vh; overflow-y: auto; }
+.filter-presets-empty { padding: 6px 12px; font-size: 13px; color: var(--text-secondary); max-width: 300px; }
+.filter-presets-row { display: flex; align-items: center; gap: 2px; padding: 1px 4px; }
+.filter-presets-row.active .filter-presets-apply { color: var(--accent-green, #4ecca3); font-weight: 600; }
+.filter-presets-apply {
+  flex: 1; min-width: 0; text-align: left; background: none; border: none; color: var(--text-primary);
+  padding: 6px 8px; font-size: 13px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.filter-presets-apply:hover, .filter-presets-tool:hover:not(:disabled) { background: var(--bg-header); }
+.filter-presets-tool {
+  background: none; border: 1px solid transparent; color: var(--text-secondary); padding: 3px 6px;
+  font-size: 12px; border-radius: 3px; cursor: pointer;
+}
+.filter-presets-tool:disabled { opacity: 0.35; cursor: default; }
