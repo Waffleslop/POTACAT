@@ -7,6 +7,8 @@
 'use strict';
 
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 const { SmartSdrClient, sliceFilterEdges } = require('../lib/smartsdr');
 
 let pass = 0, fail = 0;
@@ -43,6 +45,22 @@ test('tuneSlice sends filt with the LSB edges', () => {
   c._send = (s) => sent.push(s);
   c.tuneSlice(0, 7.188, 'LSB', 2400);
   assert.deepStrictEqual(sent, ['slice tune 0 7.188000', 'slice set 0 mode=LSB', 'filt 0 -2500 -100']);
+});
+
+test('filter-width change on an LSB slice keeps the lower side (dispatcher)', () => {
+  const { RigDispatcher } = require('../lib/rig-dispatcher');
+  const d = new RigDispatcher();
+  const calls = [];
+  d.setSmartSdr({ connected: true, setSliceFilter: (i, lo, hi) => calls.push([i, lo, hi]) });
+  d._state.mode = 'LSB';
+  d.dispatch('set-filter-width', { value: 2400 });
+  assert.deepStrictEqual(calls, [[0, -2500, -100]]);
+});
+
+test('main.js filter-width paths use sliceFilterEdges, not +100..+w', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.ok(!/lo = 100;\s*hi = 100 \+ width;/.test(src), 'main.js still hard-codes the upper sideband');
+  assert.ok((src.match(/sliceFilterEdges\(_currentMode, width\)/g) || []).length >= 2);
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

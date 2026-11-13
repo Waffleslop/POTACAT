@@ -471,7 +471,7 @@ const JtcatSnrFloor = require('./lib/jtcat-snr-floor');
 const OriginHealth = require('./lib/origin-health');
 const RemoteAccess = require('./lib/remote-access'); // ECHOCAT access: off | cloud | lan (the door itself)
 const { planImport, findDuplicateGroups } = require('./lib/qso-match');
-const { SmartSdrClient, setColorblindMode: setSmartSdrColorblind } = require('./lib/smartsdr');
+const { SmartSdrClient, setColorblindMode: setSmartSdrColorblind, sliceFilterEdges } = require('./lib/smartsdr');
 const { SmartSdrAudio } = require('./lib/smartsdr-audio');
 const { TciClient, setTciColorblindMode } = require('./lib/tci');
 const { AntennaGeniusClient } = require('./lib/antenna-genius');
@@ -26638,15 +26638,8 @@ function connectRemote() {
 
   function applyFilter(width) {
     if (flexSdr()) {
-      const m = (_currentMode || '').toUpperCase();
-      let lo, hi;
-      if (m === 'CW') {
-        lo = Math.max(0, 600 - Math.round(width / 2));
-        hi = 600 + Math.round(width / 2);
-      } else {
-        lo = 100;
-        hi = 100 + width;
-      }
+      // LSB/DIGL below the carrier, AM/FM centred (#129).
+      const { lo, hi } = sliceFilterEdges(_currentMode, width);
       smartSdr.setSliceFilter(0, lo, hi);
     } else if (cat && cat.connected) {
       cat.setFilterWidth(width);
@@ -46343,15 +46336,8 @@ function cloudShackNotice(text, kind) {
         const width = Number(data.value) || 0;
         if (width <= 0) break;
         if (flexSdr()) {
-          const m = (_currentMode || '').toUpperCase();
-          let lo, hi;
-          if (m === 'CW') {
-            lo = Math.max(0, 600 - Math.round(width / 2));
-            hi = 600 + Math.round(width / 2);
-          } else {
-            lo = 100;
-            hi = 100 + width;
-          }
+          // LSB/DIGL below the carrier, AM/FM centred (#129).
+          const { lo, hi } = sliceFilterEdges(_currentMode, width);
           smartSdr.setSliceFilter(0, lo, hi);
         } else if (cat && cat.connected) {
           cat.setFilterWidth(width);
