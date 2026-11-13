@@ -478,6 +478,7 @@ const { AntennaGeniusClient } = require('./lib/antenna-genius');
 const { TunerGeniusClient } = require('./lib/tuner-genius');
 const { FreedvEngine } = require('./lib/freedv-engine');
 const { SstvEngine, sstvRxVisLogLine } = require('./lib/sstv-engine');
+const SstvSend = require('./lib/sstv-send'); // #357: a picture from ECHOCAT: copy, tune first, fail as a status line
 const { decideSstvStop, sstvDecoderState } = require('./lib/sstv-decoder-state');
 const SstvFeedGate = require('./lib/sstv-feed-gate'); // pure ingress-gate decisions (table-tested)
 const HuntedPark = require('./lib/hunted-park'); // worked-call → live program-spot park refs (JTCAT logging)
@@ -28227,13 +28228,15 @@ function connectRemote() {
     }
   });
 
-  // SSTV from ECHOCAT phone — receive photo, encode, transmit
-  remoteServer.on('sstv-photo', ({ image, mode, guest }) => {
+  // SSTV from ECHOCAT phone — receive photo, tune, encode, transmit. #357
+  // (lib/sstv-send.js): the radio goes to the SSTV frequency before the
+  // picture keys, the encoder gets its own copy of the pixels, and a failure
+  // is a status line here and on the phone, never a dialog box.
+  remoteServer.on('sstv-photo', ({ image, mode, guest, freqKhz }) => {
     if (guest && passEnforcement) {
       const res = passEnforcement.interceptCatCommand({ type: 'sstv_tx', freqHz: effectiveTxFreqHz(), split: _currentSplit });
       if (!res.allowed) {
-        sendCatLog(`[pass] SSTV picture from guest ${guest.call || '(no callsign)'} refused: ${res.userVisible}`);
-        remoteServer.broadcastSstvTxStatus({ state: 'rx', error: res.userVisible });
+        sstvSendFailed(res.userVisible, { log: `[pass] SSTV picture from guest ${guest.call || '(no callsign)'} refused: ${res.userVisible}` });
         return;
       }
       sendCatLog(`[SSTV] Transmitting a picture from guest ${guest.call || '(no callsign)'}`);
@@ -28242,21 +28245,17 @@ function connectRemote() {
     // never did, so a photo after any stop encoded into nothing).
     if (startSstv) startSstv();
     if (!sstvEngine) {
-      console.error('[SSTV] ECHOCAT photo received but SSTV not initialized');
+      sstvSendFailed('Picture not sent: SSTV could not start on this computer.');
       return;
     }
-    // Open the desktop popout so the operator can see what's being sent. The
-    // popout also owns TX audio playback for the Flex audio path.
-    const popoutWasOpen = !!(sstvPopoutWin && !sstvPopoutWin.isDestroyed());
-    if (!popoutWasOpen && openSstvPopout) openSstvPopout({ openedBy: 'app' });
     try {
       const { nativeImage } = require('electron');
       // Decode base64 JPEG/PNG from phone
-      const base64 = image.replace(/^data:image\/\w+;base64,/, '');
+      const base64 = String(image || '').replace(/^data:image\/\w+;base64,/, '');
       const img = nativeImage.createFromBuffer(Buffer.from(base64, 'base64'));
       const size = img.getSize();
       if (size.width === 0 || size.height === 0) {
-        console.error('[SSTV] ECHOCAT: invalid image');
+        sstvSendFailed('Picture not sent: the picture could not be read.');
         return;
       }
       const bitmap = img.toBitmap(); // BGRA format
@@ -28269,10 +28268,34 @@ function connectRemote() {
         rgba[i + 3] = bitmap[i + 3]; // A
       }
       console.log(`[SSTV] ECHOCAT photo received: ${size.width}x${size.height}, mode=${mode}`);
+      // Tune first. The window tunes only once it has opened, and the picture
+      // keyed before that, on the old Winlink frequency (NA4DQ). A guest's
+      // picture is checked against the pass where the radio is, and the
+      // radio is not moved for it.
+      const plan = guest ? { act: 'stay' } : SstvSend.sendChannel({
+        radioHz: _currentFreqHz, requestedKhz: freqKhz, bands: activeRigBands(),
+        daytime: gridToLatLon(settings.grid) ? isDaytimeAtStation() : true, split: !!_currentSplit,
+      });
+      if (plan.why) sendCatLog('[SSTV] ' + plan.why);
+      // Open the desktop popout so the operator can see what's being sent. The
+      // popout also owns TX audio playback for the Flex audio path, and opening
+      // it hands the radio over from JTCAT before the tune below. It opens on
+      // the frequency chosen here (or the one the radio is on), so its own
+      // tune on open does not move the radio somewhere else mid-picture.
+      const popoutWasOpen = !!(sstvPopoutWin && !sstvPopoutWin.isDestroyed());
+      if (!popoutWasOpen && openSstvPopout) {
+        const hereKhz = plan.act === 'tune' ? plan.freqKhz : Math.round((_currentFreqHz || 0) / 1000);
+        openSstvPopout(hereKhz > 0 ? { openedBy: 'app', freqKhz: hereKhz, mode: plan.mode || '' } : { openedBy: 'app' });
+      }
+      if (plan.act === 'tune') {
+        sendCatLog(`[SSTV] picture from ECHOCAT: tuning to ${(plan.freqKhz / 1000).toFixed(3)} MHz ${plan.mode} before it is sent`);
+        tuneRadio(plan.freqKhz, plan.mode, undefined, { origin: 'SSTV picture from ECHOCAT' });
+      }
       // Show the outgoing image on the desktop popout's TX canvas so the op
       // can see what their phone is sending. Send immediately if popout was
-      // already open; otherwise wait for it to finish loading.
-      const pushTxImage = () => {
+      // already open; otherwise wait for it to finish loading. A failure here
+      // is only the preview: the picture still goes.
+      const pushTxImage = SstvSend.guard(() => {
         if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
           sstvPopoutWin.webContents.send('sstv-tx-image', {
             imageData: Array.from(rgba),
@@ -28282,15 +28305,17 @@ function connectRemote() {
             guestCall: guest ? (guest.call || 'guest') : null,
           });
         }
-      };
+      }, (err) => sendCatLog('[SSTV] the SSTV window could not show the picture from ECHOCAT: ' + err.message));
       if (popoutWasOpen) {
         pushTxImage();
       } else {
         setTimeout(pushTxImage, 1500);
       }
-      sstvEngine.encode(rgba, size.width, size.height, mode);
+      // The encoder's own copy: it hands its pixels to a worker, which leaves
+      // the array it was given empty, and pushTxImage reads rgba later.
+      sstvEngine.encode(SstvSend.ownCopy(rgba), size.width, size.height, mode);
     } catch (err) {
-      console.error('[SSTV] ECHOCAT photo error:', err.message);
+      sstvSendFailed(SstvSend.failText(err), { log: 'ECHOCAT picture not sent: ' + err.message });
     }
   });
   remoteServer.on('sstv-stop', ({ reason } = {}) => {
@@ -37733,6 +37758,19 @@ function getSstvAutoFreq() {
   return SstvStartBand.autoChannel(activeRigBands(), daytime);
 }
 
+// A picture was not sent: one status line in the log, the SSTV window and on
+// every ECHOCAT client (sstv-tx-status `error`). Never a dialog box: one held
+// the whole app at the shack while the operator was on the phone (#357).
+function sstvSendFailed(text, { log } = {}) {
+  sendCatLog('[SSTV] ' + (log || text));
+  if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
+    try { sstvPopoutWin.webContents.send('tune-blocked', text); } catch {}
+  }
+  if (remoteServer) {
+    try { remoteServer.broadcastSstvTxStatus(SstvSend.notSentStatus({ autoActive: autoSstvActive, error: text })); } catch {}
+  }
+}
+
 function startAutoSstvTimer() {
   stopAutoSstvTimer();
   if (!settings.enableAutoSstv) return;
@@ -38315,6 +38353,7 @@ function passTxJustBlocked() { return Date.now() - _passTxBlockedAt < 500; }
 // Returns true when the key-down must be refused, after saying why everywhere.
 let _ownTxRefusedLogAt = 0;
 let _ownTxRefusedLast = '';
+let _ownTxRefused = null; // { why, at } of the latest refusal, logged or not
 function ownTxPrivilegeRefused(emission, freqHz) {
   const why = Privileges.txPrivilegeRefusal({
     freqHz: freqHz != null ? freqHz : _currentFreqHz,
@@ -38323,6 +38362,7 @@ function ownTxPrivilegeRefused(emission, freqHz) {
   });
   if (!why) return false;
   const now = Date.now();
+  _ownTxRefused = { why, at: now }; // the SSTV send says it on the phone's status line (#357)
   if (why !== _ownTxRefusedLast || now - _ownTxRefusedLogAt > 10000) {
     _ownTxRefusedLast = why; _ownTxRefusedLogAt = now;
     sendCatLog(`[TX] Refused: ${why}`);
@@ -43371,7 +43411,13 @@ function cloudShackNotice(text, kind) {
     // "running" state and are deduped away.
     sstvEngine.on('status', () => pushSstvDecoderState());
 
-    sstvEngine.on('encode-complete', (data) => {
+    // A throw anywhere from here to the audio start releases PTT and becomes a
+    // status line, never the crash dialog (#357, lib/sstv-send.js guard).
+    const sstvSendThrew = (err) => {
+      try { handleRemotePtt(false); } catch {}
+      sstvSendFailed(SstvSend.failText(err), { log: 'picture not sent, PTT released: ' + ((err && err.stack) || err).toString().split(/\r?\n/).slice(0, 3).join(' | ') });
+    };
+    sstvEngine.on('encode-complete', SstvSend.guard((data) => {
       // Ensure popout is open for audio playback — open it if needed
       if (!sstvPopoutWin || sstvPopoutWin.isDestroyed()) {
         openSstvPopout();
@@ -43391,12 +43437,11 @@ function cloudShackNotice(text, kind) {
       // keys with no audio (WB8IMY IC-7300, 2026-09-26). Receive stays in USB.
       const _sstvIcom = detectRigType() === 'icom' || (getActiveRigModel()?.brand === 'Icom');
       if (handleRemotePtt(true, { audio: true, forceDataMode: _sstvIcom, emission: 'SSTV', txKind: 'sstv' }) === false) {
-        sendCatLog('[SSTV] picture not sent: transmit was refused');
-        if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
-          sstvPopoutWin.webContents.send('sstv-abort-tx');
-          sstvPopoutWin.webContents.send('tune-blocked', 'Picture not sent: ' + (yaesuLanTxRefusal() || 'transmit was refused (see the log).'));
-        }
-        if (remoteServer) remoteServer.broadcastSstvTxStatus({ state: autoSstvActive ? 'auto-rx' : 'rx' });
+        if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send('sstv-abort-tx');
+        // The reason reaches the phone too, not only a bare "rx" (#357).
+        const ownWhy = _ownTxRefused && Date.now() - _ownTxRefused.at < 3000 ? _ownTxRefused.why : '';
+        sstvSendFailed('Picture not sent: ' + (yaesuLanTxRefusal() || ownWhy || 'transmit was refused (see the log).'),
+          { log: 'picture not sent: transmit was refused' });
         return;
       }
 
@@ -43453,7 +43498,7 @@ function cloudShackNotice(text, kind) {
           return;
         }
         const wait = Math.max(delay - (Date.now() - _sstvKeyCalledAt), SSTV_AUDIO_AFTER_KEY_MS);
-        setTimeout(fn, wait);
+        setTimeout(SstvSend.guard(fn, sstvSendThrew), wait);
       });
       _sstvStartAudio(() => {
         if (useDaxTx) {
@@ -43549,13 +43594,14 @@ function cloudShackNotice(text, kind) {
         } else {
           // Failsafe: release PTT if popout never opened
           handleRemotePtt(false);
+          sstvSendFailed('Picture not sent: the SSTV window closed before the audio started.');
         }
       });
       // Notify ECHOCAT with duration so phone can show progress
       if (remoteServer) {
         remoteServer.broadcastSstvTxStatus({ state: 'tx', durationSec: outDurSec });
       }
-    });
+    }, sstvSendThrew));
 
     sstvEngine.on('rx-vis', (data) => {
       // data.mode is the mode KEY ('pd160'), never a number — formatting it as
