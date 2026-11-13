@@ -3,6 +3,8 @@
 // both work. Sets data-theme and (in charcoal dark variant only) the
 // data-dark-variant attribute on <html>.
 function _applyPopoutTheme(payload) {
+  // The shared rule (popout-theme-boot*.js) also sets data-ds (#376).
+  if (window.applyPopoutTheme) return window.applyPopoutTheme(payload);
   const theme = typeof payload === 'string'
     ? payload
     : ((payload && payload.theme) || 'dark');
@@ -165,7 +167,7 @@ const MODE_RES = {
   callsign = settings.myCallsign || '';
   grid = settings.grid || '';
   try { if (settings.sstvMode) modeSelect.value = settings.sstvMode; } catch {}
-  try { txGainSlider.value = Math.round((settings.sstvTxGain || 0.5) * 100); } catch {}
+  try { txGainSlider.value = window.SstvDrive.pctFromSaved(settings.sstvTxGain); showDrive(); } catch {}
 
   // Restore saved text elements if available
   try {
@@ -214,7 +216,7 @@ const MODE_RES = {
   try { await loadGallery(); } catch (e) { console.error('[SSTV] Gallery load error:', e); }
 
   // Set theme
-  try { applyTheme(settings.lightMode ? 'light' : 'dark'); } catch {}
+  try { if (settings.themeNow) applyTheme(settings.themeNow); } catch {}
 
   // Fonts load asynchronously; redraw once they are here so the first
   // picture isn't in the fallback face.
@@ -231,14 +233,19 @@ const MODE_RES = {
   fitCanvases();
 
   // Auto-QSY to the selected SSTV frequency on open, or to the one main
-  // asked for (idle SSTV picks the day/night band).
+  // asked for (idle SSTV picks the day/night band). The radio's bands are
+  // read first: a radio that cannot use any SSTV channel in the list is not
+  // moved (#292).
+  try {
+    if (window.api.rigBandsGet) {
+      const d = await window.api.rigBandsGet();
+      sstvRigBands = (d && d.bands) || null;
+      applySstvRigBands();
+    }
+  } catch {}
   try {
     const q = new URLSearchParams(location.search);
-    if (q.get('freqKhz')) selectAndTune(q.get('freqKhz'), q.get('mode'));
-    else {
-      const initOpt = freqSelect.options[freqSelect.selectedIndex];
-      tuneToFreq(freqSelect.value, initOpt && initOpt.dataset.mode);
-    }
+    sstvAutoQsy(q.get('freqKhz') ? { freqKhz: q.get('freqKhz'), mode: q.get('mode') } : null);
   } catch (e) { console.error('[SSTV] Auto-QSY error:', e); }
 
 })();
@@ -247,13 +254,7 @@ const MODE_RES = {
 // Re-tune to the currently selected SSTV frequency so the radio QSYs back
 // from whatever spot the user last clicked.
 window.api.onRefocusQsy((target) => {
-  try {
-    if (target && target.freqKhz) selectAndTune(target.freqKhz, target.mode);
-    else {
-      const opt = freqSelect.options[freqSelect.selectedIndex];
-      tuneToFreq(freqSelect.value, opt && opt.dataset.mode);
-    }
-  } catch (e) { console.error('[SSTV] Refocus QSY error:', e); }
+  try { sstvAutoQsy(target); } catch (e) { console.error('[SSTV] Refocus QSY error:', e); }
   refreshRxDevice();
 });
 
@@ -309,7 +310,7 @@ modeSelect.addEventListener('change', () => {
   if (activeStarterId) {
     const k = txCanvas.height / (oldH || 256);
     const kx = txCanvas.width / (oldW || 320);
-    if (k !== 1 || kx !== 1) textElements.forEach(t => { t.y = Math.round(t.y * k); t.x = Math.round(t.x * kx); t.fontSize = Math.max(6, Math.round((t.fontSize || 14) * kx)); });
+    if (k !== 1 || kx !== 1) textElements.forEach(t => { t.y = Math.round(t.y * k); t.x = Math.round(t.x * kx); t.fontSize = Math.max(6, Math.round((t.fontSize || 14) * kx)); if (t.spacing) t.spacing = T.layerStyle({ spacing: t.spacing * kx }).spacing; });
     activeSlot = window.SstvTemplates.replySlot(activeStarterId, txCanvas.height, txCanvas.width);
     rerenderStarterScene();
   }
@@ -333,14 +334,34 @@ const freqInput = document.getElementById('freq-input');
 const tuneBtn = document.getElementById('tune-btn');
 
 // The sideband SSTV uses on a frequency: LSB below 10 MHz except 60 m,
-// which is USB by regulation. The ECHOCAT app uses the same rule.
+// which is USB by regulation. One rule for every tune (lib/ssb-sideband.js);
+// the ECHOCAT app uses the same.
 function getFreqMode(freqKhz) {
-  const k = parseInt(freqKhz);
-  if (k >= 5250 && k <= 5450) return 'USB';
-  return k < 10000 ? 'LSB' : 'USB';
+  return window.SsbSideband.ssbSideband(parseInt(freqKhz) * 1000);
 }
 
 // Show a frequency main chose in the dropdown (or the custom box) and tune it.
+// The tune SSTV makes by itself (on open, on re-open): main's day/night
+// channel when it sent one, else the selected channel, else the first one in
+// the list this radio can use. None usable: leave the radio where it is and
+// say SSTV is on HF (#292, Casey's choice: no 2 m SSTV).
+function sstvAutoQsy(target) {
+  if (target && target.freqKhz) { selectAndTune(target.freqKhz, target.mode); return; }
+  const choices = [];
+  freqSelect.querySelectorAll('optgroup').forEach((g) => {
+    g.querySelectorAll('option').forEach((o) => choices.push({ value: o.value, mode: o.dataset.mode, band: g.label }));
+  });
+  const pick = window.SstvStartBand
+    ? window.SstvStartBand.windowChannel(sstvRigBands, choices, freqSelect.value)
+    : { value: freqSelect.value, mode: freqSelect.options[freqSelect.selectedIndex] && freqSelect.options[freqSelect.selectedIndex].dataset.mode };
+  if (!pick) {
+    statusBar.textContent = window.SstvStartBand.NO_BAND_NOTE;
+    return;
+  }
+  if (pick.value !== freqSelect.value) freqSelect.value = pick.value;
+  tuneToFreq(pick.value, pick.mode);
+}
+
 function selectAndTune(freqKhz, mode) {
   const v = String(Math.round(Number(freqKhz)));
   const opt = Array.from(freqSelect.options).find(o => o.value === v);
@@ -352,7 +373,7 @@ function selectAndTune(freqKhz, mode) {
 function tuneToFreq(freq, mode) {
   const m = mode || getFreqMode(freq);
   window.api.tune(freq, m);
-  statusBar.textContent = 'Tuned to ' + freq + ' kHz ' + m;
+  statusBar.textContent = 'Tuned to ' + (FreqDots.khzMhz(freq) || freq + ' kHz') + ' ' + m;
 }
 
 // Dropdown change QSYs immediately with correct mode
@@ -510,6 +531,55 @@ function renderTextProps() {
   colorInput.addEventListener('input', () => { t.color = colorInput.value; onTextChanged(); renderTextLayers(); });
   textPropsEl.appendChild(colorInput);
 
+  // Typeface, outline, shadow, letter spacing (#327). Rules: lib/sstv-templates.js layerStyle.
+  const style = T.layerStyle(t);
+  const faceSel = document.createElement('select');
+  faceSel.className = 'tp-face';
+  faceSel.title = 'Typeface (Automatic: a template line uses the station\'s lettering)';
+  faceSel.setAttribute('aria-label', 'Typeface');
+  for (const f of T.textFaces()) {
+    const o = document.createElement('option');
+    o.value = f.id; o.textContent = f.name;
+    const ff = T.faceFor(f.id);
+    if (ff) o.style.fontFamily = ff.css;
+    faceSel.appendChild(o);
+  }
+  faceSel.value = style.face;
+  faceSel.addEventListener('change', () => { t.face = faceSel.value; onTextChanged(); renderTextLayers(); });
+  textPropsEl.appendChild(faceSel);
+
+  const outlineBtn = document.createElement('button');
+  outlineBtn.className = 'tp-toggle' + (style.outline ? ' active' : '');
+  outlineBtn.textContent = 'O';
+  outlineBtn.style.webkitTextStroke = '1px currentColor';
+  outlineBtn.title = 'Outline (keeps the words readable after SSTV)';
+  outlineBtn.setAttribute('aria-pressed', String(style.outline));
+  outlineBtn.addEventListener('click', () => { t.outline = !style.outline; onTextChanged(); renderTextProps(); });
+  textPropsEl.appendChild(outlineBtn);
+
+  const shadowBtn = document.createElement('button');
+  shadowBtn.className = 'tp-toggle' + (style.shadow ? ' active' : '');
+  shadowBtn.textContent = 'S';
+  shadowBtn.style.textShadow = '1px 1px 1px rgba(0,0,0,0.6)';
+  shadowBtn.title = 'Shadow';
+  shadowBtn.setAttribute('aria-pressed', String(style.shadow));
+  shadowBtn.addEventListener('click', () => { t.shadow = !style.shadow; onTextChanged(); renderTextProps(); });
+  textPropsEl.appendChild(shadowBtn);
+
+  const spLabel = document.createElement('span');
+  spLabel.style.cssText = 'font-size:10px;color:var(--text-dim);margin-left:4px;';
+  spLabel.textContent = 'Space';
+  textPropsEl.appendChild(spLabel);
+  const spInput = document.createElement('input');
+  spInput.type = 'number';
+  spInput.value = style.spacing;
+  spInput.min = T.SPACING_MIN;
+  spInput.max = T.SPACING_MAX;
+  spInput.title = 'Letter spacing (pixels)';
+  spInput.setAttribute('aria-label', 'Letter spacing');
+  spInput.addEventListener('change', () => { t.spacing = T.layerStyle({ spacing: spInput.value }).spacing; spInput.value = t.spacing; onTextChanged(); });
+  textPropsEl.appendChild(spInput);
+
   // Rotation angle display/input
   const rotLabel = document.createElement('span');
   rotLabel.style.cssText = 'font-size:10px;color:var(--text-dim);margin-left:4px;';
@@ -621,6 +691,8 @@ function pushComposeStateNow() {
       bold: !!t.bold || !!t.tpl, italic: !!t.italic,
       color: b.color, rotation: t.rotation || 0,
       visible: t.visible !== false,
+      // #327: the phone draws these with the same rules (SstvTemplates.layerStyle).
+      face: t.face || '', fontCss: b.css, fontWeight: b.weight, outline: b.outline, shadow: b.shadow, spacing: b.spacing,
     };
   });
   window.api.sstvComposeState({ bgDataUrl, texts, mode: modeSelect.value });
@@ -636,6 +708,7 @@ function saveTextElements() {
     x: t.x, y: t.y, fontSize: t.fontSize, bold: t.bold, italic: t.italic, color: t.color, rotation: t.rotation || 0, visible: t.visible,
     align: t.align, outline: !!t.outline, role: t.role, tpl: !!t.tpl,
     fit: !!t.fit, fontCss: t.fontCss, fontWeight: t.fontWeight,
+    face: t.face || '', shadow: t.shadow, spacing: t.spacing || 0,
   }))});
 }
 
@@ -656,9 +729,17 @@ addTextBtn.addEventListener('click', () => {
   renderTextProps();
 });
 
-// --- TX Gain ---
+// --- TX Gain (Drive) ---
+// The percentage beside the slider, so a setting can be repeated (#279). It
+// follows the drag; the value is saved when the drag ends, and 0 stays 0.
+const txGainVal = document.getElementById('tx-gain-val');
+function showDrive() {
+  if (txGainVal) txGainVal.textContent = window.SstvDrive.label(txGainSlider.value);
+}
+txGainSlider.addEventListener('input', showDrive);
 txGainSlider.addEventListener('change', () => {
-  window.api.saveSettings({ sstvTxGain: txGainSlider.value / 100 });
+  showDrive();
+  window.api.saveSettings({ sstvTxGain: window.SstvDrive.gainFromPct(txGainSlider.value) });
 });
 
 // ===== IMAGE LOADING =======================================================
@@ -1150,10 +1231,10 @@ tplSaveBtn.addEventListener('click', () => {
     // Frozen: the words, lettering and colours as they look now, so a later
     // Shuffle or pack never changes a template you saved. Placeholders stay.
     texts: textElements.map(t => {
-      const base = { key: t.key, x: t.x, y: t.y, fontSize: t.fontSize, bold: t.bold, italic: t.italic, color: t.color, rotation: t.rotation || 0, visible: t.visible, label: t.label, align: t.align, outline: !!t.outline, role: t.role, fit: !!(t.tpl || t.fit), fontCss: t.fontCss, fontWeight: t.fontWeight };
+      const base = { key: t.key, x: t.x, y: t.y, fontSize: t.fontSize, bold: t.bold, italic: t.italic, color: t.color, rotation: t.rotation || 0, visible: t.visible, label: t.label, align: t.align, outline: !!t.outline, role: t.role, fit: !!(t.tpl || t.fit), fontCss: t.fontCss, fontWeight: t.fontWeight, face: t.face || '', shadow: t.shadow, spacing: t.spacing || 0 };
       if (t.tpl) {
         const st = T.textStyle(t, currentLook);
-        Object.assign(base, { label: st.label, color: st.color, fontCss: st.fontCss, fontWeight: st.weight, outline: true });
+        Object.assign(base, { label: st.label, color: st.color, fontCss: st.fontCss, fontWeight: st.weight, outline: !!t.outline });
       }
       return base;
     }),
@@ -1188,6 +1269,7 @@ function loadTemplate(idx) {
     visible: saved.visible !== false,
     align: saved.align, outline: !!saved.outline, role: saved.role, tpl: !!saved.tpl,
     fit: !!saved.fit, fontCss: saved.fontCss, fontWeight: saved.fontWeight,
+    face: saved.face || '', shadow: saved.shadow, spacing: saved.spacing || 0,
   }));
   activeStarterId = null;
   activeSlot = tpl.slot || null;
@@ -1390,7 +1472,7 @@ window.api.onSstvTxAudio(async (data) => {
   }
 
   const samplesArray = data.samples || data;
-  const gainLevel = (txGainSlider.value / 100) || 0.5;
+  const gainLevel = window.SstvDrive.gainFromPct(txGainSlider.value);
 
   try {
     // The radio's output (My Rigs > Audio) unless this window chose one; a
@@ -2075,7 +2157,7 @@ multiStartBtn.addEventListener('click', async () => {
 
   // Tune each Flex slice to its SSTV frequency (creates the slice if needed)
   for (const cfg of multiSliceConfigs) {
-    window.api.tune(String(cfg.freqKhz), cfg.freqKhz < 10000 ? 'LSB' : 'USB', undefined, cfg.slicePort);
+    window.api.tune(String(cfg.freqKhz), getFreqMode(cfg.freqKhz), undefined, cfg.slicePort);
   }
 
   // Build decode panes
@@ -2117,7 +2199,7 @@ function buildMultiPane(cfg) {
 
   const label = document.createElement('div');
   label.className = 'sstv-rx-pane-label';
-  label.textContent = SLICE_NAMES[cfg.slicePort] + ': ' + (cfg.freqKhz / 1000).toFixed(3) + ' MHz';
+  label.textContent = SLICE_NAMES[cfg.slicePort] + ': ' + FreqDots.khzMhz(cfg.freqKhz);
   pane.appendChild(label);
 
   const canvas = document.createElement('canvas');
@@ -2682,30 +2764,35 @@ function textBox(t, ctx, canvasW) {
   const cw = canvasW || txCanvas.width;
   let label = t.label || '';
   let color = t.color || '#ffffff';
-  let family = '"Segoe UI", sans-serif';
-  let weight = t.bold ? 'bold' : 'normal';
+  // The automatic face: a template line takes the station's (or the pack's)
+  // lettering; a saved template keeps the lettering it was saved with. A face
+  // the operator picked (#327) wins over both (T.layerFont).
+  let auto = null;
   if (t.tpl) {
     const st = T.textStyle(t, currentLook);
     label = st.label; color = st.color;
-    family = st.fontCss + ', "Segoe UI", sans-serif';
-    weight = String(st.weight);
+    auto = { css: st.fontCss, weight: st.weight };
   } else if (t.fontCss) {
-    // A saved template keeps the lettering it was saved with.
-    family = t.fontCss + ', "Segoe UI", sans-serif';
-    weight = String(t.fontWeight || 400);
+    auto = { css: t.fontCss, weight: t.fontWeight || 400 };
   }
+  const lf = T.layerFont(t, auto);
+  const family = lf.css + ', "Segoe UI", sans-serif';
+  const weight = String(lf.weight);
+  const style = T.layerStyle(t);
   label = T.fillVars(label, templateVars());
   const italic = t.italic ? 'italic ' : '';
   let size = t.fontSize || 14;
   const font = (sz) => italic + weight + ' ' + sz + 'px ' + family;
   c.font = font(size);
+  c.letterSpacing = style.spacing + 'px';
   let width = c.measureText(label).width;
   if (t.tpl || t.fit) {
     const maxW = t.align === 'center' ? cw - 20 : cw - 12 - t.x;
     while (size > 10 && width > maxW) { size -= 1; c.font = font(size); width = c.measureText(label).width; }
   }
+  c.letterSpacing = '0px';   // the context is shared; only drawTextLayer draws spaced
   const x0 = t.align === 'center' ? t.x - width / 2 : t.x;
-  return { label, font: font(size), size, width, x0, color, outline: !!t.outline };
+  return { label, font: font(size), css: lf.css, weight: lf.weight, size, width, x0, color, outline: style.outline, shadow: style.shadow, shadowAuto: t.shadow !== true && t.shadow !== false, spacing: style.spacing };
 }
 
 function drawTextLayer(ctx, t, canvasW) {
@@ -2717,14 +2804,26 @@ function drawTextLayer(ctx, t, canvasW) {
   const dx = b.x0 - t.x;
   ctx.translate(t.x, t.y);
   if (rot) ctx.rotate(rot);
+  ctx.letterSpacing = b.spacing + 'px';
+  // The shadow goes under whatever is drawn first: the outline when there is
+  // one, else the lettering. Scaled with the size so it reads after SSTV.
+  // The automatic shadow keeps its pre-#327 size, so older pictures look the
+  // same; one the operator turned on grows with the lettering.
+  const shadowOn = () => {
+    const off = b.shadowAuto ? 1 : Math.max(1, Math.round(b.size / 14));
+    ctx.shadowColor = '#000'; ctx.shadowBlur = b.shadowAuto ? 3 : Math.max(3, b.size / 6); ctx.shadowOffsetX = off; ctx.shadowOffsetY = off;
+  };
+  const shadowOff = () => { ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0; };
   if (b.outline) {
     // Brightness contrast survives SSTV; a light outline for dark lettering.
+    if (b.shadow) shadowOn();
     ctx.lineJoin = 'round';
     ctx.lineWidth = Math.max(3, b.size / 5);
     ctx.strokeStyle = T.isDark(b.color) ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.85)';
     ctx.strokeText(b.label, dx, 0);
-  } else {
-    ctx.shadowColor = '#000'; ctx.shadowBlur = 3; ctx.shadowOffsetX = 1; ctx.shadowOffsetY = 1;
+    shadowOff();
+  } else if (b.shadow) {
+    shadowOn();
   }
   ctx.fillStyle = b.color;
   ctx.fillText(b.label, dx, 0);
@@ -3130,7 +3229,7 @@ if (window.api && window.api.rigBandsGet) {
 function showFreq(khz, mode) {
   const k = Number(khz);
   if (!Number.isFinite(k) || k <= 0) return;
-  document.getElementById('freq-label').textContent = (k / 1000).toFixed(3);
+  document.getElementById('freq-label').textContent = FreqDots.fromKhz(k);
   document.getElementById('freq-mode').textContent = (mode || getFreqMode(k)) + ' \u25BE';
   const band = BAND_OF(k);
   bandsEl.querySelectorAll('.band').forEach(b => b.classList.toggle('active', b.dataset.band === band));
@@ -3580,7 +3679,8 @@ function entryQrgHz(e) {
   return null;
 }
 // Whole kHz first: 7171.5 kHz is 7.172, never a float-rounded 7.171.
-function fmtQrg(hz) { return (Math.round(hz / 1000) / 1000).toFixed(3); }
+// Whole kHz (where a picture was heard is not exact), written the VFO way: 7.172.00.
+function fmtQrg(hz) { return FreqDots.fromHz(Math.round(hz / 1000) * 1000); }
 const rbQrg = document.getElementById('rb-qrg');
 function showReplyQrg() {
   if (!rbQrg) return;

@@ -17,13 +17,13 @@ function test(name, fn) {
 }
 const root = path.join(__dirname, '..');
 
-function makeNode(rate = 48000) {
+function makeNode(rate = 48000, opts = { prebufferMs: 0, ringMs: 300 }) {
   let Proc = null;
   const posted = [];
   class AudioWorkletProcessor { constructor() { this.port = { onmessage: null, postMessage: (m) => posted.push(m) }; } }
   const ctx = { AudioWorkletProcessor, sampleRate: rate, registerProcessor: (_n, c) => { Proc = c; }, Float32Array, Math };
   vm.runInNewContext(readSrc(path.join(root, 'renderer', 'modem-play-worklet.js')), ctx);
-  const node = new Proc({ processorOptions: { sourceRate: 24000 } });
+  const node = new Proc({ processorOptions: { sourceRate: 24000, ...opts } });
   const send = (m) => node.port.onmessage({ data: m });
   const play = (ms) => { for (let n = Math.round(rate * ms / 1000 / 128); n > 0; n--) node.process([], [[new Float32Array(128)]]); };
   const audio = (ms) => { const f = new Float32Array(Math.round(24000 * ms / 1000)); f.fill(0.5); send(f); };
@@ -64,7 +64,20 @@ test('a backlog past the ring is cut: the dropped audio is counted', () => {
   n.play(200);
   n.send({ cmd: 'over-end' });
   assert.strictEqual(n.posted.length, 1);
-  assert.ok(n.posted[0].over.droppedMs > 300, `dropped ${n.posted[0].over.droppedMs} ms`);
+  // Only what did not fit (500 into 300), counted; nothing more is thrown away (#187).
+  assert.ok(Math.abs(n.posted[0].over.droppedMs - 200) < 5, `dropped ${n.posted[0].over.droppedMs} ms`);
+});
+
+test('as the bridge runs it (250 ms pre-buffer, 2 s ring, #187): late audio and a backlog do no harm', () => {
+  const n = makeNode(48000, {});
+  n.send({ cmd: 'over-start' });
+  n.audio(100); n.play(100);
+  n.play(120);              // 120 ms late: the over has not started playing yet
+  n.audio(100); n.play(100);
+  n.audio(250); n.audio(250); // a burst after a stall: the ring holds it
+  n.play(900);
+  n.send({ cmd: 'over-end' });
+  assert.deepStrictEqual(n.posted, [], JSON.stringify(n.posted));
 });
 
 test('nothing is counted outside an over, and each over starts clean', () => {

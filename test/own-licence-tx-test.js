@@ -138,7 +138,7 @@ test('the JTCAT key-down is checked before anything is keyed or played, single a
 test('data and image key-downs name their emission', () => {
   assert.ok(/handleRemotePtt\(true, \{ audio: true, emission: 'DATA', txKind: jtcatTxKind\(\) \}\);/.test(MAIN), 'FT8');
   assert.ok(/forceDataMode: _sstvIcom, emission: 'SSTV'/.test(MAIN), 'SSTV');
-  assert.ok(/forceDataMode: icom, emission: 'DATA'/.test(MAIN), 'Winlink');
+  assert.ok(/\.\.\.pttMode, emission: 'DATA', txKind: 'winlink'/.test(MAIN), 'Winlink');
   assert.ok(/handleRemotePtt\(on, on \? \{ audio: true, emission: 'DATA', txKind: 'winlink' \} : \{\}\)/.test(MAIN), 'Mercury');
 });
 test('CW text and the remote paddle are checked', () => {

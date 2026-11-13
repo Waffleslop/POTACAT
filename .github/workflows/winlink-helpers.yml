@@ -4,7 +4,8 @@
 # that Dire Wolf will not link the Hamlib zip on Windows. Triggers on a change
 # to the script, the ardopcf patch and its sources, the pinned versions, or
 # this file, and on demand (the release skill dispatches it). Then smoke-tests
-# each binary.
+# each binary, runs the modem loopback layers, and proves the Pat patch
+# (third_party/pat/potacat-arq-timeout.patch) on the binaries just built.
 name: winlink helpers
 on:
   workflow_dispatch:
@@ -18,11 +19,13 @@ on:
       - 'third_party/pat/**'
       - 'third_party/direwolf/**'
       - '.github/workflows/winlink-helpers.yml'
+      - 'test/modem-loopback/**'
+      - 'lib/modem-audio-server.js'
 
 jobs:
   windows:
     runs-on: windows-2022
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -54,6 +57,60 @@ jobs:
             assets/pat/pat.exe
             assets/ardopcf/ardopcf.exe
             assets/direwolf/
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Modem loopback, two modems and no radio (docs/ardop-macos-plan.md L1 + L2, #187)
+        shell: bash
+        env:
+          LOOPBACK_REQUIRED: '1'
+        timeout-minutes: 25
+        run: node test/modem-loopback/run.js --out loopback-results.json --logs loopback-logs
+      - name: Pat's ARDOP link timeout follows POTACAT_ARDOP_ARQ_TIMEOUT (our Pat patch, #425; real Pat and real ardopcf, no radio)
+        if: always()
+        shell: bash
+        env:
+          LOOPBACK_REQUIRED: '1'
+        timeout-minutes: 10
+        run: node test/modem-loopback/pat-arq-timeout.js --out pat-arq-timeout-results.json --logs pat-arq-timeout-logs
+      - name: Our Pat end to end (#425; two Pats exchange mail over two ardopcf with no radio, and the Telnet path against a closed port and a local stand-in CMS)
+        if: always()
+        shell: bash
+        env:
+          LOOPBACK_REQUIRED: '1'
+        timeout-minutes: 15
+        run: node test/modem-loopback/pat-session.js --out pat-session-results.json --logs pat-session-logs
+      - name: Electron for the bridge checks
+        if: always()
+        shell: bash
+        run: npm ci --no-audit --no-fund
+      - name: Hidden bridge window keeps the modem fed (L4, #187; 2 min as POTACAT runs it, 2 min with main frozen 200 ms every second)
+        if: always()
+        timeout-minutes: 12
+        shell: bash
+        run: node test/modem-loopback/bridge-check.js --seconds 120 --out bridge-results.json
+      - name: Real ARDOP frames through the bridge capture and playback (L3, #187)
+        if: always()
+        timeout-minutes: 8
+        shell: bash
+        env:
+          LOOPBACK_REQUIRED: '1'
+        run: node test/modem-loopback/l3-check.js --out l3-results.json --logs l3-logs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: modem-loopback-windows
+          path: |
+            loopback-results.json
+            loopback-logs/
+            pat-arq-timeout-results.json
+            pat-arq-timeout-logs/
+            pat-session-results.json
+            pat-session-logs/
+            bridge-results.json
+            l3-results.json
+            l3-logs/
+          if-no-files-found: warn
 
   linux:
     strategy:
@@ -61,7 +118,7 @@ jobs:
       matrix:
         runner: [ubuntu-22.04, ubuntu-22.04-arm]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -80,6 +137,57 @@ jobs:
           ./assets/ardopcf/ardopcf -h | head -3 || true
           ldd assets/direwolf/direwolf | grep -i hamlib
           ./assets/direwolf/direwolf -h 2>&1 | head -3 || true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Modem loopback, two modems and no radio (docs/ardop-macos-plan.md L1 + L2, #187)
+        shell: bash
+        env:
+          LOOPBACK_REQUIRED: '1'
+        timeout-minutes: 25
+        run: node test/modem-loopback/run.js --out loopback-results.json --logs loopback-logs
+      - name: Pat's ARDOP link timeout follows POTACAT_ARDOP_ARQ_TIMEOUT (our Pat patch, #425; real Pat and real ardopcf, no radio)
+        if: always()
+        shell: bash
+        env:
+          LOOPBACK_REQUIRED: '1'
+        timeout-minutes: 10
+        run: node test/modem-loopback/pat-arq-timeout.js --out pat-arq-timeout-results.json --logs pat-arq-timeout-logs
+      - name: Our Pat end to end (#425; two Pats exchange mail over two ardopcf with no radio, and the Telnet path against a closed port and a local stand-in CMS)
+        if: always()
+        shell: bash
+        env:
+          LOOPBACK_REQUIRED: '1'
+        timeout-minutes: 15
+        run: node test/modem-loopback/pat-session.js --out pat-session-results.json --logs pat-session-logs
+      - name: Electron for the bridge checks
+        if: always()
+        run: npm ci --no-audit --no-fund
+      - name: Hidden bridge window keeps the modem fed (L4, #187; 2 min as POTACAT runs it, 2 min with main frozen 200 ms every second)
+        if: always()
+        timeout-minutes: 12
+        run: xvfb-run -a node test/modem-loopback/bridge-check.js --seconds 120 --out bridge-results.json
+      - name: Real ARDOP frames through the bridge capture and playback (L3, #187)
+        if: always()
+        timeout-minutes: 8
+        env:
+          LOOPBACK_REQUIRED: '1'
+        run: xvfb-run -a node test/modem-loopback/l3-check.js --out l3-results.json --logs l3-logs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: modem-loopback-${{ matrix.runner }}
+          path: |
+            loopback-results.json
+            loopback-logs/
+            pat-arq-timeout-results.json
+            pat-arq-timeout-logs/
+            pat-session-results.json
+            pat-session-logs/
+            bridge-results.json
+            l3-results.json
+            l3-logs/
+          if-no-files-found: warn
 
   mac:
     strategy:
@@ -88,7 +196,7 @@ jobs:
         # macos-15 = the release's arm64 host (macos-14 retired 2026-11-02).
         runner: [macos-15, macos-15-intel]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -113,3 +221,54 @@ jobs:
           otool -L assets/direwolf/direwolf
           otool -L assets/direwolf/direwolf | grep -i hamlib
           ./assets/direwolf/direwolf -h 2>&1 | head -3 || true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Modem loopback, two modems and no radio (docs/ardop-macos-plan.md L1 + L2, #187)
+        shell: bash
+        env:
+          LOOPBACK_REQUIRED: '1'
+        timeout-minutes: 25
+        run: node test/modem-loopback/run.js --out loopback-results.json --logs loopback-logs
+      - name: Pat's ARDOP link timeout follows POTACAT_ARDOP_ARQ_TIMEOUT (our Pat patch, #425; real Pat and real ardopcf, no radio)
+        if: always()
+        shell: bash
+        env:
+          LOOPBACK_REQUIRED: '1'
+        timeout-minutes: 10
+        run: node test/modem-loopback/pat-arq-timeout.js --out pat-arq-timeout-results.json --logs pat-arq-timeout-logs
+      - name: Our Pat end to end (#425; two Pats exchange mail over two ardopcf with no radio, and the Telnet path against a closed port and a local stand-in CMS)
+        if: always()
+        shell: bash
+        env:
+          LOOPBACK_REQUIRED: '1'
+        timeout-minutes: 15
+        run: node test/modem-loopback/pat-session.js --out pat-session-results.json --logs pat-session-logs
+      - name: Electron for the bridge check
+        if: always()
+        run: npm ci --no-audit --no-fund
+      - name: Hidden bridge window keeps the modem fed (L4, #187; 2 min without and 2 min with a power-save blocker)
+        if: always()
+        timeout-minutes: 12
+        run: node test/modem-loopback/bridge-check.js --seconds 120 --out bridge-results.json
+      - name: Real ARDOP frames through the bridge capture and playback (L3, #187)
+        if: always()
+        timeout-minutes: 8
+        env:
+          LOOPBACK_REQUIRED: '1'
+        run: node test/modem-loopback/l3-check.js --out l3-results.json --logs l3-logs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: modem-loopback-${{ matrix.runner }}
+          path: |
+            loopback-results.json
+            loopback-logs/
+            pat-arq-timeout-results.json
+            pat-arq-timeout-logs/
+            pat-session-results.json
+            pat-session-logs/
+            bridge-results.json
+            l3-results.json
+            l3-logs/
+          if-no-files-found: warn

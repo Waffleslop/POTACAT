@@ -188,6 +188,50 @@ console.log('\n=== jtcat-reply demux forwarding (grid-instead-of-report regressi
     '"K3SBP A1BC FN19" classifies as send-report to A1BC (the 2026-07-09 report)');
 }
 
+// ── docs/echocat-protocol.md: the Winlink section follows the registry (#425) ──
+// A winlink-* message added to lib/echocat-protocol.js without a row in the
+// document fails here; so does a row for a message that no longer exists, a
+// row with the wrong direction, a declared field the section never names,
+// and a winlink-result op main.js sends that the section does not list.
+console.log('\n=== protocol document: Winlink section ===');
+{
+  const path = require('path');
+  const doc = readSrc(path.join(__dirname, '..', 'docs', 'echocat-protocol.md'));
+  const start = doc.indexOf('\n### Winlink (email over radio)\n');
+  const end = start < 0 ? -1 : doc.indexOf('\n### ', start + 5);
+  const section = start < 0 ? '' : doc.slice(start, end < 0 ? doc.length : end);
+  check(start > 0 && section.length > 2000, 'the document has a Winlink section');
+  const arrow = { [P.Dir.S2C]: 'S→C', [P.Dir.C2S]: 'C→S', [P.Dir.BOTH]: '↔' };
+  const rows = new Map();
+  for (const m of section.matchAll(/^\| `(winlink-[a-z-]+)` \| (S→C|C→S|↔) \|/gm)) {
+    if (rows.has(m[1])) { failed++; console.log('  ✗ FAIL: ' + m[1] + ' has two rows in the Winlink section'); }
+    rows.set(m[1], m[2]);
+  }
+  const types = Object.keys(P.MESSAGES).filter((t) => t.startsWith('winlink-'));
+  check(types.length >= 30, 'the registry still holds the Winlink messages (' + types.length + ')');
+  const missing = types.filter((t) => !rows.has(t));
+  check(missing.length === 0, 'every winlink-* message in the registry has a row' + (missing.length ? ': add ' + missing.join(', ') + ' to docs/echocat-protocol.md' : ''));
+  const stale = [...rows.keys()].filter((t) => !P.MESSAGES[t]);
+  check(stale.length === 0, 'no row for a message the registry does not have' + (stale.length ? ': ' + stale.join(', ') : ''));
+  const wrongDir = types.filter((t) => rows.has(t) && rows.get(t) !== arrow[P.MESSAGES[t].dir]);
+  check(wrongDir.length === 0, 'every row gives the registry\'s direction' + (wrongDir.length ? ': ' + wrongDir.join(', ') : ''));
+  const unnamed = [];
+  for (const t of types) {
+    for (const f of Object.keys(P.MESSAGES[t].fields || {})) {
+      if (!new RegExp('(^|[^A-Za-z])' + f + '([^A-Za-z]|$)').test(section)) unnamed.push(t + '.' + f);
+    }
+  }
+  check(unnamed.length === 0, 'every declared field of a winlink-* message is named in the section' + (unnamed.length ? ': ' + unnamed.join(', ') : ''));
+  const mainSrc = readSrc(path.join(__dirname, '..', 'main.js'));
+  const h = mainSrc.indexOf('async function winlinkHandleRemote(');
+  const handler = mainSrc.slice(h, mainSrc.indexOf('\nonRemoteServer(', h));
+  const ops = [...new Set([...handler.matchAll(/\bresult\('([a-z-]+)'/g)].map((m) => m[1]))];
+  const opsMissing = ops.filter((op) => !section.includes('`' + op + '`') && !section.includes("op: '" + op + "'"));
+  check(ops.length >= 15 && opsMissing.length === 0, 'every winlink-result op main.js sends is listed' + (opsMissing.length ? ': ' + opsMissing.join(', ') : ''));
+  check(/winlink-refused \{reason: 'guest-pass'/.test(section) && /Guest Pass/.test(section), 'the section says who may send: the owner; a Guest Pass gets winlink-refused');
+  check(/errorKind/.test(section) && /\{kind, word, title, detail, next, retry\}/.test(section), 'the section documents session.errorKind and session.outcome (#429)');
+}
+
 console.log('\n' + '='.repeat(52));
 console.log(`Results: ${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

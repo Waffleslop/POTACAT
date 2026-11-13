@@ -56,6 +56,26 @@ jobs:
             console.log('helper → parser round trip OK');
           "
 
+  # The FT-710 scope helper finds and loads FTDI's LibFT4222 under FTDI's own
+  # file names on macOS and Linux (GitHub #360: on a Mac the library is
+  # libft4222.<version>.dylib and needs libftd2xx.dylib beside it). Stand-in
+  # libraries, the real helper, no radio. macos-15 is Apple Silicon, like the
+  # reporter's Mac and the release's arm64 job.
+  ft4222-loader:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Helper loads LibFT4222 the way an operator has it installed
+        run: bash scripts/test-ft4222-loader.sh
+
   # The release workflow installs with npm ci (lockfile-pinned), which fails
   # hard if package.json and package-lock.json drift apart. Catch that on the
   # push that introduces the drift instead of at release-tag time.

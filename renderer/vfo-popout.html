@@ -63,7 +63,7 @@
       --g: var(--ds-bg); --s: var(--ds-surface); --s2: var(--ds-fill);
       --s3: color-mix(in srgb, var(--ds-fill), var(--ds-ink) 10%); --in: var(--ds-bg); /* wells (meter tracks, text boxes) sink to the page colour; --ds-control is a dark control on the light themes */ --line: var(--ds-line-subtle);
       --t: var(--ds-ink); --t2: var(--ds-ink-muted); --t3: var(--ds-ink-muted);
-      --blue: var(--ds-tint); --green: var(--ds-ok); --red: var(--ds-air-ink); --gold: var(--ds-brand); --amber: var(--ds-warn);
+      --blue: var(--ds-tint); --green: var(--ds-ok); --red: var(--ds-air-ink); --gold: var(--ds-warn); /* states, never the brand colour (#376) */ --amber: var(--ds-warn);
       --on-blue: var(--ds-on-tint); --on-red: var(--ds-on-danger); --on-ptt: var(--ds-on-air);
       --green-tint: var(--ds-ok-subtle); --red-tint: var(--ds-danger-subtle); --red-text: var(--ds-danger);
       /* PTT at rest is the theme's on-air red, not its deep shade (the muddy red Casey flagged). */
@@ -100,8 +100,12 @@
     /* Same title as every other window (styles.css --titlebar-*). */
     .titlebar-title { font-size: 12px; font-weight: 700; letter-spacing: 0.3px; color: var(--t2); flex: 1; }
     .titlebar-btns { -webkit-app-region: no-drag; display: flex; gap: 2px; }
-    /* macOS: the system traffic lights replace minimize/close (popout-theme-boot.js). */
-    .platform-darwin .titlebar { padding-left: 80px; }
+    /* macOS: the system traffic lights replace minimize/close (popout-theme-boot.js).
+       Their room is kept in both sizes: body.mini .titlebar sets its own padding
+       and out-ranks the plain rule, so the Small VFO drew the frequency under
+       the lights (#387). The second selector keeps the inset there too. */
+    .platform-darwin .titlebar,
+    .platform-darwin body.mini .titlebar { padding-left: 80px; }
     .platform-darwin .titlebar-btns .win-btn { display: none; }
     .ib {
       width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent;
@@ -229,6 +233,9 @@
     .tog.on, .tog.active { background: var(--blue); color: var(--on-blue); font-weight: 600; }
     .band-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; }
     .band-btn { padding: 9px 0; }
+    .fav-grid { display: flex; flex-wrap: wrap; gap: 4px; }
+    .fav-btn { padding: 8px 10px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #sec-favorites.empty { display: none; }
     .seg { display: flex; background: var(--in); border-radius: 8px; padding: 3px; gap: 3px; }
     /* Lightly stroked so each width reads as a button, not a label */
     .seg button { flex: 1; border: 0; background: transparent; color: var(--t2); font-size: 12px; font-weight: 500; padding: 8px 0; border-radius: 6px; cursor: pointer; min-width: 0; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--t3) 40%, transparent); }
@@ -277,6 +284,7 @@
     .voice-macro-btn.empty { opacity: 0.35; cursor: default; }
     .voice-stop-btn, .cw-cancel-btn { border: 0; background: var(--red); color: var(--on-red); padding: 7px 10px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: 600; }
     .ptt-log-row { display: flex; gap: 6px; align-items: center; }
+    .power-status { font-size: 13px; color: var(--t2); margin-left: 4px; }
     .sdr-btn-vfo { border: 0; padding: 9px 12px; font-size: 13px; font-weight: 600; background: var(--s2); color: var(--gold); border-radius: 8px; cursor: pointer; }
     .sdr-btn-vfo:hover { background: var(--s3); }
     .sdr-btn-vfo.active { background: var(--gold); color: #111; }
@@ -296,35 +304,64 @@
     .sdr-dd-item.current { font-weight: 700; background: color-mix(in srgb, var(--blue) 16%, transparent); box-shadow: inset 3px 0 0 var(--blue); }
     .sdr-dd-item.current:hover { background: color-mix(in srgb, var(--blue) 24%, transparent); }
     .sdr-dd-item.conn::after { content: ' \25CF'; color: var(--green); }
+    /* A receiver that would not come on (#390): the words, Try again, and a mark in the list. */
+    .sdr-fail { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 6px 6px 6px 10px; border-radius: 8px; background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--t); font-size: 13px; line-height: 1.3; }
+    .sdr-fail[hidden] { display: none; }
+    .sdr-fail.busy { background: var(--s2); color: var(--t3); }
+    .sdr-fail span { flex: 1; min-width: 0; }
+    .sdr-fail .sdr-btn-vfo { flex-shrink: 0; padding: 6px 10px; }
+    .sdr-dd-item.failed { color: var(--t3); }
+    .sdr-dd-item .sdr-dd-mark { margin-left: 8px; font-size: 11px; color: var(--t3); }
 
-    /* --- Mini VFO: frequency, mode and band, S-meter, Audio, PTT, Log in a strip.
-       The title-bar button switches; main sizes the window (vfo-set-compact).
-       Everything else stays where it is and comes back with Embiggen. --- */
+    /* --- Small VFO: one line in the title bar (Casey 2026-11-10). The items
+       the operator chose (lib/vfo-layout.js, settings.vfoSmall) are moved into
+       .mini-strip in their order and back home on the way out, so every
+       button keeps its own handlers. The line never wraps: when the window is
+       narrower than the line, items hide from the end (VfoLayout.hideOrder).
+       The same rules draw the preview in VFO settings (.mini-strip.preview). */
     .band-chip { display: none; }
-    body.mini { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; align-items: center; }
-    body.mini .titlebar { grid-column: 1 / -1; }
-    body.mini .scroll { overflow: hidden; padding: 0 0 8px 12px; gap: 6px; }
-    body.mini .scroll > :not(.head-card):not(.swr-alert.show) { display: none !important; }
-    body.mini .head-card { padding: 0; gap: 3px; background: transparent; box-shadow: none; }
-    body.mini .freq-display { order: -1; }
-    body.mini .freq-display .fq-main { font-size: 26px; }
-    body.mini .freq-display .fq-sub { font-size: 16px; }
-    body.mini .freq-display .fq-unit { display: none; }
-    body.mini .chip-row { min-height: 0; align-items: center; }
-    body.mini .chip-row .chips { padding-top: 0; gap: 4px; flex-wrap: nowrap; overflow: hidden; }
-    body.mini .chip-row .chip { padding: 3px 6px; font-size: 10px; }
-    body.mini #vfo-badge, body.mini #filter-badge, body.mini #sec-step, body.mini .vfo-lock-btn { display: none !important; }
-    body.mini .band-chip:not(:empty) { display: inline-block; }
-    body.mini .audio-btn { height: 26px; padding: 0 6px; }
-    body.mini .audio-btn .audio-word { display: none; }
-    body.mini #widget-smeter.visible { padding: 0; gap: 0; }
-    body.mini #widget-smeter .meter-row:not(:has(#smeter-bar)) { display: none; }
-    body.mini #widget-smeter .meter-label, body.mini #widget-smeter .meter-text { display: none; }
-    body.mini #widget-smeter .meter-bar-wrap { height: 4px; flex: none; width: 96px; }
-    body.mini .bar { grid-column: 2; grid-row: 2; padding: 0 8px 8px 8px; background: transparent; border-top: 0; gap: 6px; align-self: center; }
-    body.mini .ptt-btn { flex: none; height: 36px; padding: 0 14px; font-size: 13px; border-radius: 9px; }
-    body.mini .log-btn-vfo { width: auto; height: 36px; padding: 0 12px; font-size: 13px; border-radius: 9px; }
-    body.mini #eq-btn { display: none !important; }
+    .mini-strip { display: none; align-items: center; gap: 8px; min-width: 0; }
+    body.mini .titlebar { height: auto; min-height: 52px; padding: 8px 6px 8px 12px; gap: 6px; }
+    body.mini .titlebar-title { display: none; }
+    body.mini #mini-strip { display: flex; flex: 1; overflow: hidden; }
+    .mini-strip > * { -webkit-app-region: no-drag; flex: none; }
+    /* By id, so it outranks the PTT and Log display rules below. */
+    #mini-strip .mini-hidden, .mini-strip .no-reading.no-reading { display: none !important; }
+    /* Two lines (Casey 2026-11-11: "a little less wide and taller"): the same
+       items in the same order, wrapping onto a second row; the window is as
+       narrow as two rows allow and grows to their height. */
+    body.mini.mini-two #mini-strip, .mini-strip.preview.two { flex-wrap: wrap; row-gap: 6px; align-content: center; }
+    body.mini .scroll { flex: none; overflow: hidden; padding: 0 12px 10px; }
+    body.mini .scroll > :not(.swr-alert.show) { display: none !important; }
+    body.mini .bar, body.mini .tx-audio-panel { display: none !important; }
+    .mini-strip .freq-display { align-items: baseline; }
+    .mini-strip .freq-display .fq-main { font-size: 26px; }
+    .mini-strip .freq-display .fq-sub { font-size: 16px; }
+    .mini-strip .freq-display .fq-unit { display: none; }
+    .mini-strip .freq-other-row { margin-top: 0; }
+    .mini-strip .freq-other { font-size: 14px; }
+    .mini-strip .chip { padding: 5px 7px; }
+    .mini-strip .band-chip:not(:empty) { display: inline-block; }
+    .mini-strip .audio-btn { width: 36px; height: 36px; padding: 0; justify-content: center; border-radius: 9px; }
+    .mini-strip .audio-btn .audio-word { display: none; }
+    .mini-strip .vfo-lock-btn { width: 32px; height: 32px; }
+    .mini-strip .meter-bar-wrap { flex: none; width: 84px; height: 6px; }
+    .mini-strip .meter-row { gap: 6px; }
+    .mini-strip .meter-row .meter-label { width: auto; }
+    .mini-strip .meter-row input[type="range"] { flex: none !important; width: 88px; }
+    .mini-strip .meter-row .meter-text { min-width: 36px; font-size: 11px; }
+    .mini-strip .ptt-btn { display: flex !important; flex: none; height: 36px; min-width: 112px; padding: 0 18px; font-size: 14px; border-radius: 9px; }
+    .mini-strip .log-btn-vfo { display: block !important; width: auto; height: 36px; padding: 0 14px; font-size: 13px; border-radius: 9px; }
+    .mini-strip .rig-toggles-shared { flex-wrap: nowrap; gap: 4px; }
+    .mini-strip .tog { padding: 0 10px; height: 30px; }
+    .mini-strip .custom-cat-slider { height: 30px; padding: 0 8px; }
+    .mini-text-btn { height: 30px; padding: 0 12px; border: 0; border-radius: 8px; background: var(--s2); color: var(--t); font-size: 12px; font-weight: 600; cursor: pointer; }
+    .mini-text-btn:hover { background: var(--s3); }
+    .mini-text-btn.on { background: var(--blue); color: var(--on-blue); }
+    #mini-parts { display: none; }
+    /* The preview in VFO settings: a picture of the line, not live controls. */
+    .mini-strip.preview { display: flex; overflow-x: auto; padding: 10px 12px; border-radius: 10px; background: var(--g); box-shadow: inset 0 0 0 1px var(--s3); pointer-events: none; }
+    .mini-strip.preview > * { -webkit-app-region: none; }
 
     /* --- Bottom bar: PTT, transmit audio, LOG --- */
     .bar { flex: none; padding: 12px; background: var(--s); display: flex; gap: 8px; border-top: 1px solid var(--line); }
@@ -394,8 +431,11 @@
     .profile-item.dragging { opacity: 0.45; }
     .profile-item.drop-above { box-shadow: inset 0 2px 0 0 var(--blue); }
     .profile-item.drop-below { box-shadow: inset 0 -2px 0 0 var(--blue); }
-    .profile-name { font-weight: 600; color: var(--t); flex: 1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .profile-detail { font-size: 11px; color: var(--t2); font-family: 'Cascadia Mono', Consolas, monospace; white-space: nowrap; }
+    .profile-name { font-weight: 600; color: var(--t); flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* Shrinks and ends in "..." instead of running out of a narrow box (#283);
+       the whole text is the row's title. */
+    .profile-detail { font-size: 11px; color: var(--t2); font-family: 'Cascadia Mono', Consolas, monospace; white-space: nowrap; flex: 0 1 auto; min-width: 0; max-width: 55%; overflow: hidden; text-overflow: ellipsis; }
+    .profile-item > .profile-del, .profile-item > .profile-edit, .profile-item > .profile-drag { flex: none; }
     .profile-del, .profile-edit { background: none; border: none; color: var(--t3); font-size: 14px; cursor: pointer; padding: 0 4px; }
     .profile-del:hover { color: var(--red); }
     .profile-edit:hover { color: var(--blue); }
@@ -437,6 +477,22 @@
     .order-move:hover:not(:disabled) { background: var(--s3); color: var(--t); }
     .order-move:disabled { opacity: .35; cursor: default; }
     .settings-toggle input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--blue); cursor: pointer; flex: none; }
+    /* Layout lists: a row = grip, name, arrows, switch (Large and Small VFO). */
+    .size-seg { margin-top: 6px; }
+    .size-seg button[aria-pressed="true"], .size-seg button[aria-pressed="true"]:hover,
+    .rows-seg button[aria-pressed="true"], .rows-seg button[aria-pressed="true"]:hover { background: var(--blue); color: var(--on-blue); font-weight: 600; box-shadow: none; }
+    .order-row.fixed { cursor: default; }
+    .order-row.fixed .grip { visibility: hidden; }
+    .order-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--blue); cursor: pointer; flex: none; margin-left: 4px; }
+    .order-row input[type="checkbox"]:disabled { cursor: default; opacity: .5; }
+    .order-sub { font-size: 11px; color: var(--t3); margin-left: 6px; }
+    .cat-pick { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 0 10px 24px; border-bottom: 1px solid var(--line); }
+    .cat-pick label { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 10px; border-radius: 8px; background: var(--s2); color: var(--t2); font-size: 12px; font-weight: 600; cursor: pointer; }
+    .cat-pick label.on { background: color-mix(in srgb, var(--blue) 18%, var(--s2)); color: var(--t); box-shadow: inset 0 0 0 1px var(--blue); }
+    .cat-pick input { width: 14px; height: 14px; accent-color: var(--blue); margin: 0; }
+    .cat-pick .cat-pick-note { flex-basis: 100%; font-size: 12px; color: var(--t3); }
+    .layout-links { display: flex; gap: 4px; flex-wrap: wrap; }
+    .layout-reset { padding: 0; margin-top: 6px; margin-right: 14px; }
     .settings-note { font-size: 12px; color: var(--t2); line-height: 1.5; margin-top: 8px; }
     .band-checkboxes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px 8px; padding-top: 4px; }
     .band-checkboxes label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--t2); padding: 5px 0; cursor: pointer; }
@@ -461,6 +517,8 @@
   <!-- Titlebar: settings and keep-on-top live here, beside the window buttons -->
   <div class="titlebar">
     <span class="titlebar-title">VFO</span>
+    <!-- Small VFO: the chosen items are moved in here (applyMini) -->
+    <div class="mini-strip" id="mini-strip"></div>
     <div class="titlebar-btns">
       <button class="ib" id="mini-btn" title="Make the VFO small" aria-label="Make the VFO small"><svg viewBox="0 0 24 24"><path d="M4 14h6v6M20 10h-6V4M10 14l-7 7M14 10l7-7"></path></svg></button>
       <button class="ib" id="gear-btn" title="VFO settings" aria-label="VFO settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg></button>
@@ -552,6 +610,11 @@
         <div class="lbl">Band</div>
         <div class="band-grid" id="band-grid-dial"></div>
       </div>
+      <!-- Favourites (#329): the Landmarks and Channels starred in Directory. A click tunes. -->
+      <div class="section vfo-section empty" id="sec-favorites">
+        <div class="lbl">Favorites</div>
+        <div class="fav-grid" id="fav-grid"></div>
+      </div>
       <div class="section vfo-section" id="sec-filter">
         <div class="section-head"><span class="lbl">Filter</span><span class="filter-val" id="filter-val">2400 Hz</span></div>
         <div class="seg filter-quick-shared"></div>
@@ -572,7 +635,8 @@
       </div>
       <div class="controls-row" id="blk-controls">
         <div class="vfo-section rig-toggles-shared" id="sec-controls"></div>
-        <span class="spacer"></span>
+      </div>
+      <div class="controls-row" id="blk-solar">
         <div class="vfo-section solar-pills" id="sec-solar">
           <span class="chip" title="Solar Flux Index">SFI <span class="solar-val" id="sv-sfi">--</span></span>
           <span class="chip" title="K-Index">K <span class="solar-val" id="sv-k">--</span></span>
@@ -617,10 +681,12 @@
           <span class="macro-label">Radio</span>
           <button class="tog" id="vfo-power-on" title="Switch the radio on">Power On</button>
           <button class="tog" id="vfo-power-off" title="Switch the radio off. Press twice: the first press asks.">Power Off</button>
+          <span id="vfo-power-status" class="power-status" aria-live="polite"></span>
         </div>
       </div>
       <div class="card tool-card widget-section" id="widget-kiwi">
         <div class="ptt-log-row" id="kiwi-btn-row"></div>
+        <div class="sdr-fail" id="kiwi-fail" role="status" hidden><span id="kiwi-fail-text"></span><button class="sdr-btn-vfo" id="kiwi-fail-retry" type="button">Try again</button></div>
         <div id="kiwi-volume-row" style="display:none;align-items:center;gap:8px;font-size:11px;color:var(--text-dim);">
           <span style="min-width:42px;">Volume</span>
           <input type="range" id="kiwi-volume" min="0" max="150" value="80" style="flex:1;">
@@ -732,6 +798,12 @@
     <button class="log-btn-vfo" id="log-btn-vfo" style="display:none;">LOG</button>
   </div>
 
+  <!-- Small VFO only: kept here until the line asks for them -->
+  <div id="mini-parts">
+    <button class="mini-text-btn" id="mini-scan-btn" title="Scan through the spots in the main window">Scan</button>
+    <div class="rig-toggles-shared" id="mini-cat"></div>
+  </div>
+
   <!-- Settings sheet (gear) -->
   <div class="sheet-backdrop" id="sheet-backdrop"></div>
   <div class="sheet" id="tab-settings" role="dialog" aria-label="VFO settings">
@@ -741,7 +813,40 @@
       <button class="sheet-done" id="sheet-done">Done</button>
     </div>
     <div class="sheet-body">
-      <span class="lbl">Show in this window</span>
+      <!-- One layout per size (Casey 2026-11-10): what shows and in what order, in one list -->
+      <div class="seg size-seg" role="group" aria-label="Which size to edit">
+        <button type="button" id="size-large" aria-pressed="true">Large VFO</button>
+        <button type="button" id="size-small" aria-pressed="false">Small VFO</button>
+      </div>
+      <div id="layout-large">
+        <span class="lbl">Top of window</span>
+        <div class="order-list" id="large-top"></div>
+        <span class="lbl">Body</span>
+        <div class="order-note">Switch a row on or off. Drag a row, or use the arrows, to move it.</div>
+        <div class="order-list" id="order-list"></div>
+        <span class="lbl">Bottom bar</span>
+        <div class="order-list" id="large-bottom"></div>
+        <button type="button" class="link-btn layout-reset" id="large-reset">Reset Large VFO to default</button>
+      </div>
+      <div id="layout-small" hidden>
+        <span class="lbl">Preview</span>
+        <div class="mini-strip preview" id="mini-preview" aria-hidden="true"></div>
+        <span class="lbl">Lines</span>
+        <div class="seg rows-seg" role="group" aria-label="How many lines the Small VFO uses">
+          <button type="button" id="small-rows-1" aria-pressed="true">One line</button>
+          <button type="button" id="small-rows-2" aria-pressed="false">Two lines</button>
+        </div>
+        <span class="lbl">Layout</span>
+        <div class="order-note" id="small-order-note">One line, left to right. When the window is too narrow, items at the end of the list hide first; frequency and PTT always stay.</div>
+        <div class="order-list" id="small-list"></div>
+        <div class="layout-links">
+          <button type="button" class="link-btn layout-reset" id="small-fit">Fit the width to the line</button>
+          <button type="button" class="link-btn layout-reset" id="small-reset">Reset Small VFO to default</button>
+        </div>
+      </div>
+
+      <!-- The switches the layout lists drive (their change handlers do the work) -->
+      <div id="layout-switches" hidden>
       <label class="settings-toggle">Meters <input type="checkbox" id="w-smeter"></label>
       <label class="settings-toggle">PTT button <input type="checkbox" id="w-ptt"></label>
       <label class="settings-toggle">LOG button <input type="checkbox" id="w-log"></label>
@@ -750,6 +855,7 @@
       <label class="settings-toggle">Beam heading to the spot <input type="checkbox" id="w-bearing"></label>
       <label class="settings-toggle">Tuning step chip <input type="checkbox" id="s-step" checked></label>
       <label class="settings-toggle">Bands <input type="checkbox" id="s-band" checked></label>
+      <label class="settings-toggle" title="The landmarks and channels you starred in Directory">Favorites <input type="checkbox" id="s-favorites" checked></label>
       <label class="settings-toggle">Filter buttons <input type="checkbox" id="s-filter" checked></label>
       <label class="settings-toggle">Filter slider <input type="checkbox" id="s-filter-slider" checked></label>
       <label class="settings-toggle">NB, ATU and custom buttons <input type="checkbox" id="s-controls" checked></label>
@@ -758,10 +864,7 @@
       <label class="settings-toggle">CW speed and text <input type="checkbox" id="w-cw-controls"></label>
       <label class="settings-toggle">Voice macros <input type="checkbox" id="w-voice"></label>
       <label class="settings-toggle">Profiles under the dial <input type="checkbox" id="s-profiles-inline"></label>
-
-      <span class="lbl">Order</span>
-      <div class="order-note">Drag a row, or use the arrows.</div>
-      <div class="order-list" id="order-list"></div>
+      </div>
 
       <span class="lbl">Profiles</span>
       <div class="profile-add-row">
@@ -804,16 +907,19 @@
 
 <!-- Shared TX EQ chain (Phase 1). Also loaded by remote-audio.html so
      both audio sources apply identical DSP. -->
+<script src="../lib/freq-dots.js"></script>
 <script src="tx-eq-chain.js"></script>
 <script src="../lib/custom-cat-follow.js"></script>
 <script src="../lib/rig-power-view.js"></script>
 <script src="../lib/rig-bands.js"></script>
+<script src="../lib/vfo-layout.js"></script>
 <script src="../lib/freq-paste.js"></script>
 <script src="../lib/wheel-tune.js"></script>
 <script src="../lib/mono-upmix.js"></script>
 <script src="../lib/audio-device-heal.js"></script>
 <script src="../lib/vfo-audio-reattach.js"></script>
 <script src="../lib/vfo-ptt-mic.js"></script>
+<script src="../lib/sdr-failure.js"></script>
 <script>
 // --- State ---
 let currentFreqHz = 0;
@@ -836,6 +942,14 @@ function tuneFromPopout(freqKhz, mode, bearing, slicePort) {
   _freqSuppressTarget = Math.round(freqKhz * 1000);
   _freqSuppressDeadline = Date.now() + 3000;
   window.api.tune(freqKhz, mode, bearing, slicePort);
+}
+// A band button or a typed frequency: in voice SSB the radio takes the band's
+// sideband (LSB below 10 MHz, USB above and on 60 m), as a spot click does;
+// every other mode stays (#445). The dial and the wheel keep the mode.
+function tuneJumpFromPopout(freqKhz) {
+  _freqSuppressTarget = Math.round(freqKhz * 1000);
+  _freqSuppressDeadline = Date.now() + 3000;
+  window.api.tuneByBand(freqKhz);
 }
 let currentFilterWidth = 0;
 let currentTxPower = null; // watts — tracked from vfo-radio-state so profiles can snapshot it
@@ -936,19 +1050,33 @@ function showPane(name) {
 }
 const sheetEl = document.getElementById('tab-settings');
 const sheetBackdrop = document.getElementById('sheet-backdrop');
-function openSheet(open) {
-  if (open) renderOrderList();
+// The gear on the Small VFO: the strip has no room for the sheet, so the
+// window grows to the Large VFO with settings open on the Small VFO tab, and
+// Done takes it back to the strip (Casey 2026-11-10).
+let sheetFromMini = false;
+let layoutSize = 'large';
+function openSheet(open, size) {
+  if (open) {
+    layoutSize = size || (vfoMini ? 'small' : 'large');
+    renderLayoutLists();
+  }
   sheetEl.classList.toggle('show', open);
   sheetBackdrop.classList.toggle('show', open);
   document.getElementById('gear-btn').classList.toggle('on', open);
+  if (!open && sheetFromMini) { sheetFromMini = false; setMini(true, { save: false }); }
 }
-document.getElementById('gear-btn').addEventListener('click', () => openSheet(!sheetEl.classList.contains('show')));
+document.getElementById('gear-btn').addEventListener('click', () => {
+  if (vfoMini) { sheetFromMini = true; setMini(false, { save: false }); openSheet(true, 'small'); return; }
+  openSheet(!sheetEl.classList.contains('show'));
+});
 document.getElementById('sheet-done').addEventListener('click', () => openSheet(false));
 sheetBackdrop.addEventListener('click', () => openSheet(false));
 const sheetOpen = () => sheetEl.classList.contains('show');
 sheetEl.addEventListener('change', (e) => {
-  if (e.target && e.target.type === 'checkbox' && sheetOpen()) renderOrderList();
+  if (e.target && e.target.type === 'checkbox' && sheetOpen()) renderLayoutLists();
 });
+document.getElementById('size-large').addEventListener('click', () => { layoutSize = 'large'; renderLayoutLists(); });
+document.getElementById('size-small').addEventListener('click', () => { layoutSize = 'small'; renderLayoutLists(); });
 
 // --- Frequency display ---
 function formatFreqKhz(hz) {
@@ -976,9 +1104,10 @@ function renderFreqDisplay(hz) {
 }
 
 function updateDisplay() {
-  renderFreqDisplay(currentFreqHz);
+  renderFreqDisplay(radioLinkUp ? currentFreqHz : 0);
+  freqDisplay.title = radioLinkUp ? 'Click to type a frequency' : 'The radio is not answering (switched off, or the cable is out)';
   const m = (currentMode || '').toUpperCase();
-  modeBadge.textContent = m.startsWith('FREEDV') ? 'RADE' : (currentMode || '---');
+  modeBadge.textContent = !radioLinkUp ? '---' : m.startsWith('FREEDV') ? 'RADE' : (currentMode || '---');
   if (currentFilterWidth > 0) {
     filterBadge.textContent = currentFilterWidth >= 1000
       ? (currentFilterWidth / 1000).toFixed(1) + ' kHz'
@@ -991,7 +1120,14 @@ function updateDisplay() {
 }
 
 // --- Radio state from main process ---
+// False while main says the radio does not answer (off, cable out): dashes
+// instead of the last dial, so a switched-off radio does not look on.
+let radioLinkUp = true;
 window.api.onRadioState((s) => {
+  if (s && s.radioLinkUp !== undefined) {
+    radioLinkUp = !!s.radioLinkUp;
+    if (window.vfoPowerLinkChanged) window.vfoPowerLinkChanged(radioLinkUp);
+  }
   if (s && s.meters) { radioMeters = s.meters; applyMeterRows(); }
   if (s) {
     // Custom toggles that follow a radio state relight.
@@ -1030,14 +1166,24 @@ window.api.onRadioState((s) => {
   if (s.rigPower) applyVfoTxPower(s.rigPower);
   if (s.rfGain != null) currentRfGain = s.rfGain;   // + RF/AF for "Save current" on a rig preset
   if (s.afGain !== undefined) currentAfGain = s.afGain;
-  if (s.nb != null) {
-    nbOn = s.nb;
-    document.querySelectorAll('.nb-toggle').forEach(b => b.classList.toggle('on', nbOn));
+  // CAT buttons light from the radio's own state, whichever ones are shown.
+  let catChanged = false;
+  for (const c of VfoLayout.CAT_CHOICES) {
+    if (s[c.state] != null && catState[c.state] !== !!s[c.state]) { catState[c.state] = !!s[c.state]; catChanged = true; }
   }
-  if (s.power != null) document.getElementById('sec-power').style.display = s.power ? '' : 'none';
-  if (s.atu != null) {
-    atuOn = s.atu;
-    document.querySelectorAll('.atu-toggle').forEach(b => b.classList.toggle('on', atuOn));
+  if (catChanged) paintCatButtons();
+  if (s.catCaps !== undefined && JSON.stringify(s.catCaps) !== JSON.stringify(vfoCatCaps)) {
+    vfoCatCaps = s.catCaps;
+    buildRigToggles();
+    if (sheetOpen()) renderLayoutLists();
+  }
+  // A .tool-card shows only with the "visible" class (vfo-popout.css): an
+  // inline display of '' fell back to the stylesheet's none, so the block
+  // never appeared on any radio.
+  if (s.power != null) {
+    const sec = document.getElementById('sec-power');
+    sec.style.display = s.power ? '' : 'none';
+    sec.classList.toggle('visible', !!s.power);
   }
   // Active VFO + split badges — readback-fed from the radio (LZ3AW). The
   // VFO badge only appears once the rig reports B at least this session,
@@ -1133,7 +1279,7 @@ function buildBandGrid(container) {
     btn.dataset.freq = b.freq;
     btn.addEventListener('click', () => {
       if (vfoLocked) return;
-      tuneFromPopout(b.freq);
+      tuneJumpFromPopout(b.freq);
     });
     container.appendChild(btn);
   }
@@ -1152,7 +1298,46 @@ function updateBandHighlight() {
     const b = BANDS.find(b => b.freq === parseInt(btn.dataset.freq));
     btn.classList.toggle('active', b && b.label === cur);
   });
+  favHighlight();
 }
+
+// ── Favourites (#329, lib/favorites.js) ─────────────────────────────────
+// The Landmarks and Channels starred in Directory, one button each; a click
+// tunes (a frequency the radio cannot reach plays through the SDR, as from
+// Directory). Hidden while nothing is starred; shown, hidden and moved like
+// any other section (VFO settings > Show in this window, Order).
+let vfoFavItems = [];
+function favHighlight() {
+  document.querySelectorAll('#fav-grid .fav-btn').forEach((b) => {
+    b.classList.toggle('active', currentFreqHz > 0 && Math.abs(Number(b.dataset.khz) * 1000 - currentFreqHz) < 500);
+  });
+}
+function renderFavorites() {
+  const grid = document.getElementById('fav-grid');
+  const sec = document.getElementById('sec-favorites');
+  if (!grid || !sec) return;
+  grid.innerHTML = '';
+  for (const f of vfoFavItems) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'tog fav-btn';
+    b.dataset.khz = String(f.khz);
+    b.textContent = f.name;
+    const mhz = FreqDots.khzMhz(f.khz);
+    b.title = f.name + ' · ' + mhz + ' ' + (f.mode || '') + (f.note ? ' · ' + f.note : '');
+    b.addEventListener('click', () => window.api.tune(String(f.khz), f.mode || undefined));
+    grid.appendChild(b);
+  }
+  sec.classList.toggle('empty', !vfoFavItems.length);
+  favHighlight();
+  if (sheetOpen()) { try { renderLayoutLists(); } catch { /* still loading */ } }
+}
+function applyFavorites(st) {
+  vfoFavItems = st && Array.isArray(st.items) ? st.items : [];
+  renderFavorites();
+}
+if (window.api.favoritesGet) window.api.favoritesGet().then(applyFavorites).catch(() => {});
+if (window.api.onFavorites) window.api.onFavorites(applyFavorites);
 
 buildBandGrid(document.getElementById('band-grid-dial'));
 // band-grid-mode removed (Mode tab eliminated)
@@ -1333,7 +1518,6 @@ vfoTxPwrRange.addEventListener('change', () => vfoTxPwrRange.blur());
 vfoTxPwrSelect.addEventListener('change', () => { vfoTxPwrInput(vfoTxPwrSelect); vfoTxPwrSelect.blur(); });
 
 // --- NB / ATU toggles ---
-let nbOn = false, atuOn = false;
 
 // Radio power (bottom of the dial pane). Power On needs no link: the radio is
 // off, so it cannot answer. Power Off asks once: the first press turns the
@@ -1345,7 +1529,32 @@ let nbOn = false, atuOn = false;
   if (!on || !off) return;
   let armTimer = null;
   const disarm = () => { clearTimeout(armTimer); armTimer = null; off.textContent = 'Power Off'; off.classList.remove('on'); };
-  on.addEventListener('click', () => { disarm(); window.api.rigControl({ action: 'power-on' }); });
+  // A radio takes seconds to wake or to go quiet, and nothing else on the
+  // window moves meanwhile: say what is under way until the link says it
+  // happened (radioLinkUp, from onRadioState), or that it has not after 20 s.
+  const status = document.getElementById('vfo-power-status');
+  let pending = null, pendingTimer = null;
+  const say = (text) => { if (status) status.textContent = text; };
+  const begin = (want) => {
+    clearTimeout(pendingTimer);
+    pending = want;
+    say(want === 'on' ? 'Switching on\u2026' : 'Switching off\u2026');
+    pendingTimer = setTimeout(() => {
+      if (pending !== want) return;
+      pending = null;
+      say(want === 'on' ? 'No answer from the radio yet' : 'The radio still answers');
+    }, 20000);
+  };
+  window.vfoPowerLinkChanged = (up) => {
+    if (!pending) return;
+    if ((pending === 'on' && up) || (pending === 'off' && !up)) {
+      say(up ? 'Radio on' : 'Radio off');
+      pending = null;
+      clearTimeout(pendingTimer);
+      pendingTimer = setTimeout(() => say(''), 5000);
+    }
+  };
+  on.addEventListener('click', () => { disarm(); begin('on'); window.api.rigControl({ action: 'power-on' }); });
   off.addEventListener('click', () => {
     if (!armTimer) {
       off.textContent = 'Press again to power off';
@@ -1354,37 +1563,47 @@ let nbOn = false, atuOn = false;
       return;
     }
     disarm();
+    begin('off');
     window.api.rigControl({ action: 'power-off' });
   });
 })();
 
+// CAT buttons: the operator picks them per size (VFO settings > CAT buttons),
+// from the controls this radio takes (main's catCaps). The Large VFO always
+// had NB and ATU, so those are its defaults (VfoLayout.CAT_DEFAULT_LARGE).
+let vfoCatLarge = VfoLayout.CAT_DEFAULT_LARGE.slice();
+let vfoSmall = VfoLayout.normalizeSmall(null);   // settings.vfoSmall: { order, on, cat }
+let vfoCatCaps = null;       // null until the radio is known: offer them all
+const catState = {};         // vfo-radio-state field -> on, e.g. { nb: true }
+function catPicksFor(row) { return row.id === 'mini-cat' ? vfoSmall.cat : vfoCatLarge; }
+function paintCatButtons() {
+  document.querySelectorAll('.cat-builtin').forEach(b => {
+    if (b.dataset.state) b.classList.toggle('on', !!catState[b.dataset.state]);
+  });
+}
 function buildRigToggles() {
   document.querySelectorAll('.rig-toggles-shared').forEach(row => {
-    row.innerHTML = '';
-    const nbBtn = document.createElement('button');
-    nbBtn.className = 'tog toggle-btn nb-toggle' + (nbOn ? ' on' : '');
-    nbBtn.textContent = 'NB';
-    nbBtn.title = 'Noise Blanker';
-    nbBtn.addEventListener('click', () => {
-      nbOn = !nbOn;
-      // set-nb reads data.value (main.js) — the field name must match, or the
-      // handler sees value=undefined and NB never turns on.
-      window.api.rigControl({ action: 'set-nb', value: nbOn });
-      document.querySelectorAll('.nb-toggle').forEach(b => b.classList.toggle('on', nbOn));
-    });
-    row.appendChild(nbBtn);
-
-    const atuBtn = document.createElement('button');
-    atuBtn.className = 'tog toggle-btn atu-toggle' + (atuOn ? ' on' : '');
-    atuBtn.textContent = 'ATU';
-    atuBtn.title = 'Start ATU tune cycle';
-    // Momentary: atu-tune runs a tune cycle on every press (NOT a toggle — see
-    // the rig-controls registry + applyRigControl). The .on indicator is driven
-    // by the radio's reported ATU state (onRadioState → atuOn), not the click.
-    atuBtn.addEventListener('click', () => {
-      window.api.rigControl({ action: 'atu-tune' });
-    });
-    row.appendChild(atuBtn);
+    row.querySelectorAll('.cat-builtin').forEach(b => b.remove());
+    const before = row.querySelector('.custom-cat-injected');
+    for (const c of VfoLayout.catButtons(catPicksFor(row), vfoCatCaps, null)) {
+      const btn = document.createElement('button');
+      btn.className = 'tog toggle-btn cat-builtin' + (catState[c.state] ? ' on' : '');
+      btn.textContent = c.label;
+      btn.dataset.state = c.state || '';
+      const ch = VfoLayout.CAT_CHOICES.find(x => x.key === c.action);
+      btn.title = c.momentary ? 'Start an ATU tune cycle' : (ch ? ch.label + ': on or off' : c.label);
+      btn.addEventListener('click', () => {
+        // Momentary: atu-tune runs a tune cycle on every press (not a toggle;
+        // see the rig-controls registry). Its light is the radio's ATU state.
+        if (c.momentary) { window.api.rigControl({ action: c.action }); return; }
+        // The handlers read data.value (main.js): the field name must match.
+        const on = !catState[c.state];
+        catState[c.state] = on;
+        window.api.rigControl({ action: c.action, value: on });
+        paintCatButtons();
+      });
+      row.insertBefore(btn, before);
+    }
   });
 }
 buildRigToggles();
@@ -1429,9 +1648,12 @@ function buildCustomCatBtns() {
   // window to move it ("not visible in VFO pane", LZ3AW 2026-09-19).
   const btns = customCatButtons.filter(b => b.name && b.command);
   if (btns.length === 0) return;
-  // Append custom CAT controls into each rig-toggles-shared row
+  // Append custom CAT controls into each rig-toggles-shared row. The Large
+  // VFO shows every custom button, as it always has; the Small VFO only the
+  // ones picked for it (vfoSmall.cat, "custom:<name>").
   document.querySelectorAll('.rig-toggles-shared').forEach(row => {
     btns.forEach(b => {
+      if (row.id === 'mini-cat' && !vfoSmall.cat.includes(VfoLayout.CUSTOM_PREFIX + b.name)) return;
       if (b.type === 'slider') {
         const lo = Number.isFinite(b.min) ? b.min : 0;
         const hi = Number.isFinite(b.max) ? b.max : 255;
@@ -1729,7 +1951,7 @@ function kpRender() {
   kpInput.value = kpBuffer;
   const khz = kpTargetKhz(kpBuffer);
   kpGo.disabled = !khz;
-  kpGo.textContent = khz ? 'Tune ' + fmtMhz(khz) + ' MHz' : 'Tune';
+  kpGo.textContent = khz ? 'Tune ' + FreqDots.khzMhz(khz) : 'Tune';
 }
 // Recent frequencies typed here (this device only).
 const KP_RECENT_KEY = 'vfoRecentKhz';
@@ -1751,7 +1973,7 @@ function kpRenderRecent() {
   list.forEach(khz => {
     const b = document.createElement('button');
     b.className = 'tog mono';
-    b.textContent = fmtMhz(khz);
+    b.textContent = FreqDots.fromKhz(khz);
     b.addEventListener('click', () => { kpBuffer = fmtMhz(khz); kpGo.click(); });
     row.appendChild(b);
   });
@@ -1781,7 +2003,7 @@ kpGo.addEventListener('click', () => {
   if (vfoLocked) { window.api.setVfoLock(true); return; }
   const khz = kpTargetKhz(kpBuffer);
   if (!khz) return;
-  tuneFromPopout(khz);
+  tuneJumpFromPopout(khz);
   currentFreqHz = khz * 1000;
   kpRememberRecent(khz);
   kpBuffer = '';
@@ -2069,7 +2291,7 @@ function renderRigPresets() {
     rigPresets.presets.forEach((p) => {
       const item = document.createElement('div');
       item.className = 'profile-item';
-      item.title = 'Apply "' + p.name + '"';
+      item.title = 'Apply "' + p.name + '": ' + rigPresetDetail(p);
       item.innerHTML = `
         <span class="profile-name">${esc(p.name)}</span>
         <span class="profile-detail">${esc(rigPresetDetail(p))}</span>
@@ -2145,39 +2367,42 @@ function esc(s) {
 // --- Widget visibility ---
 const WIDGETS = ['smeter', 'ptt', 'log', 'cw', 'cw-controls', 'voice'];
 let vfoWidgets = { smeter: false, ptt: false, log: false, cw: false, 'cw-controls': false, voice: false, bearing: false };
-const SECTIONS = ['dial', 'solar', 'step', 'band', 'filter', 'filter-slider', 'controls', 'profiles-inline'];
-let vfoSections = { dial: true, solar: true, step: true, band: true, filter: true, 'filter-slider': true, controls: true, 'profiles-inline': false };
+const SECTIONS = ['dial', 'solar', 'step', 'band', 'favorites', 'filter', 'filter-slider', 'controls', 'profiles-inline'];
+let vfoSections = { dial: true, solar: true, step: true, band: true, favorites: true, filter: true, 'filter-slider': true, controls: true, 'profiles-inline': false };
 
-// --- Dial-pane order (settings.vfoOrder) ---
-// The blocks under the header, top to bottom. Unknown keys from a newer build
-// are dropped and a block added later lands in its default place.
-const ORDER_BLOCKS = [
-  { key: 'knob', el: 'blk-knob', name: 'Knob and activator' },
-  { key: 'band', el: 'sec-band', name: 'Bands' },
-  { key: 'filter', el: 'sec-filter', name: 'Filter buttons' },
-  { key: 'filter-slider', el: 'sec-filter-slider', name: 'Filter slider' },
-  { key: 'txpower', el: 'sec-txpower', name: 'TX power' },
-  { key: 'controls', el: 'blk-controls', name: 'NB, ATU, custom buttons and solar' },
-  { key: 'profiles', el: 'sec-profiles-inline', name: 'Profiles' },
-  { key: 'cw-controls', el: 'widget-cw-controls', name: 'CW speed and text' },
-  { key: 'cw', el: 'widget-cw', name: 'CW macros' },
-  { key: 'voice', el: 'widget-voice', name: 'Voice macros' },
-  { key: 'kiwi', el: 'widget-kiwi', name: 'WebSDR' },
-];
-const DEFAULT_ORDER = ORDER_BLOCKS.map(b => b.key);
+const DEFAULT_WIDGETS = { ...vfoWidgets };
+const DEFAULT_SECTIONS = { ...vfoSections };
+
+// --- Large VFO body order (settings.vfoOrder) ---
+// The blocks under the header, top to bottom (VfoLayout.LARGE_BLOCKS has the
+// names and the default order). Unknown keys from a newer build are dropped
+// and a block added later lands in its default place.
+const LARGE_EL = {
+  knob: 'blk-knob', kiwi: 'widget-kiwi', band: 'sec-band', favorites: 'sec-favorites', filter: 'sec-filter',
+  'filter-slider': 'sec-filter-slider', txpower: 'sec-txpower', controls: 'blk-controls', solar: 'blk-solar',
+  profiles: 'sec-profiles-inline', 'cw-controls': 'widget-cw-controls', cw: 'widget-cw', voice: 'widget-voice',
+};
+// The switch each block's row drives (null: shown when the radio supports it).
+const LARGE_SWITCH = {
+  knob: 's-dial', kiwi: 'w-kiwi', band: 's-band', favorites: 's-favorites', filter: 's-filter',
+  'filter-slider': 's-filter-slider', txpower: null, controls: 's-controls', solar: 's-solar',
+  profiles: 's-profiles-inline', 'cw-controls': 'w-cw-controls', cw: 'w-cw', voice: 'w-voice',
+};
+const ORDER_BLOCKS = VfoLayout.LARGE_BLOCKS.map(b => ({ key: b.key, el: LARGE_EL[b.key], name: b.name }));
+const DEFAULT_ORDER = VfoLayout.LARGE_KEYS.slice();
 let vfoOrder = DEFAULT_ORDER.slice();
+const LARGE_TOP = [
+  { name: 'Meters (S, SWR, ALC, power, TX, VOL)', sw: 'w-smeter' },
+  { name: 'Tuning step', sw: 's-step' },
+  { name: 'Operator photo (QRZ)', sw: 'w-op-photo' },
+  { name: 'Beam heading to the spot', sw: 'w-bearing' },
+];
+const LARGE_BOTTOM = [
+  { name: 'PTT', sw: 'w-ptt' },
+  { name: 'Log', sw: 'w-log' },
+];
 
-function normalizeOrder(saved) {
-  const out = [];
-  if (Array.isArray(saved)) for (const k of saved) if (DEFAULT_ORDER.includes(k) && !out.includes(k)) out.push(k);
-  DEFAULT_ORDER.forEach((k, i) => {
-    if (out.includes(k)) return;
-    // A block this profile never ordered goes after its default predecessor.
-    const prev = DEFAULT_ORDER.slice(0, i).reverse().find(p => out.includes(p));
-    out.splice(prev ? out.indexOf(prev) + 1 : 0, 0, k);
-  });
-  return out;
-}
+function normalizeOrder(saved) { return VfoLayout.normalizeOrder(saved, DEFAULT_ORDER); }
 
 function applyOrder() {
   const pane = document.getElementById('tab-dial');
@@ -2191,15 +2416,6 @@ function applyOrder() {
   if (power) pane.appendChild(power);
 }
 
-function orderBlockShown(b) {
-  const el = document.getElementById(b.el);
-  if (!el) return false;
-  if (b.key === 'controls') return !!(vfoSections.controls || vfoSections.solar);
-  if (el.style.display === 'none') return false;
-  if (el.classList.contains('widget-section') && !el.classList.contains('visible')) return false;
-  return true;
-}
-
 function moveOrder(key, toIndex) {
   const from = vfoOrder.indexOf(key);
   if (from < 0) return;
@@ -2208,46 +2424,63 @@ function moveOrder(key, toIndex) {
   vfoOrder.splice(from, 1);
   vfoOrder.splice(toIndex, 0, key);
   applyOrder();
-  renderOrderList();
+  renderLayoutLists();
   window.api.saveSettings({ vfoOrder });
 }
 
-let _orderDragKey = null;
-function renderOrderList() {
-  const list = document.getElementById('order-list');
-  if (!list) return;
-  list.innerHTML = '';
-  vfoOrder.forEach((k, i) => {
-    const b = ORDER_BLOCKS.find(x => x.key === k);
-    if (!b) return;
-    const row = document.createElement('div');
-    const shown = orderBlockShown(b);
-    row.className = 'order-row' + (shown ? '' : ' off');
+// Flip one of the switches in #layout-switches (or WebSDR's): its own change
+// handler shows, hides and saves, exactly as the old toggle list did.
+function flipSwitch(id, on) {
+  const cb = document.getElementById(id);
+  if (!cb || cb.checked === on) return;
+  cb.checked = on;
+  cb.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+// One row of a layout list: grip, name, arrows (when it moves), switch.
+//   opts: { name, sub, on, fixed, noSwitch, onSwitch(v), canUp, canDown, onUp, onDown, dragKey, list }
+function layoutRow(opts) {
+  const row = document.createElement('div');
+  const moves = !!(opts.onUp || opts.onDown);
+  row.className = 'order-row' + (opts.on ? '' : ' off') + (moves ? '' : ' fixed');
+  row.innerHTML = '<span class="grip">' + ICONS.grip + '</span><span class="order-name"></span>'
+    + (moves ? '<button class="order-move" title="Move up" aria-label="Move up">' + ICONS.up + '</button>'
+      + '<button class="order-move" title="Move down" aria-label="Move down">' + ICONS.down + '</button>' : '');
+  const nm = row.querySelector('.order-name');
+  nm.textContent = opts.name;
+  if (opts.sub) { const s = document.createElement('span'); s.className = 'order-sub'; s.textContent = opts.sub; nm.appendChild(s); }
+  if (moves) {
+    const [up, down] = row.querySelectorAll('.order-move');
+    up.disabled = !opts.canUp; down.disabled = !opts.canDown;
+    up.setAttribute('aria-label', 'Move ' + opts.name + ' up');
+    down.setAttribute('aria-label', 'Move ' + opts.name + ' down');
+    up.addEventListener('click', opts.onUp);
+    down.addEventListener('click', opts.onDown);
+  }
+  if (!opts.noSwitch) {
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !!opts.on;
+    cb.disabled = !!opts.fixed;
+    cb.setAttribute('aria-label', 'Show ' + opts.name);
+    cb.addEventListener('change', () => opts.onSwitch && opts.onSwitch(cb.checked));
+    row.appendChild(cb);
+  }
+  if (opts.dragKey && opts.onDrop) {
     row.draggable = true;
-    row.dataset.key = k;
-    row.innerHTML = '<span class="grip">' + ICONS.grip + '</span>'
-      + '<span class="order-name"></span>'
-      + (shown ? '' : '<span class="order-off">hidden</span>')
-      + '<button class="order-move" title="Move up" aria-label="Move up">' + ICONS.up + '</button>'
-      + '<button class="order-move" title="Move down" aria-label="Move down">' + ICONS.down + '</button>';
-    row.querySelector('.order-name').textContent = b.name;
-    const [upBtn, downBtn] = row.querySelectorAll('.order-move');
-    upBtn.disabled = i === 0;
-    downBtn.disabled = i === vfoOrder.length - 1;
-    upBtn.addEventListener('click', () => moveOrder(k, i - 1));
-    downBtn.addEventListener('click', () => moveOrder(k, i + 1));
+    row.dataset.key = opts.dragKey;
     row.addEventListener('dragstart', (e) => {
-      _orderDragKey = k;
+      _orderDragKey = opts.dragKey; _orderDragList = opts.list;
       row.classList.add('dragging');
       e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', k);
+      e.dataTransfer.setData('text/plain', opts.dragKey);
     });
     row.addEventListener('dragend', () => {
       _orderDragKey = null;
-      list.querySelectorAll('.order-row').forEach(r => r.classList.remove('dragging', 'drop-before', 'drop-after'));
+      document.querySelectorAll('.order-row').forEach(r => r.classList.remove('dragging', 'drop-before', 'drop-after'));
     });
     row.addEventListener('dragover', (e) => {
-      if (!_orderDragKey || _orderDragKey === k) return;
+      if (!_orderDragKey || _orderDragKey === opts.dragKey || _orderDragList !== opts.list) return;
       e.preventDefault();
       const r = row.getBoundingClientRect();
       const after = e.clientY > r.top + r.height / 2;
@@ -2258,21 +2491,214 @@ function renderOrderList() {
     row.addEventListener('drop', (e) => {
       e.preventDefault();
       const dragKey = _orderDragKey;
-      if (!dragKey || dragKey === k) return;
-      const after = row.classList.contains('drop-after');
-      const from = vfoOrder.indexOf(dragKey);
-      let to = vfoOrder.indexOf(k) + (after ? 1 : 0);
-      if (from < to) to -= 1;
-      moveOrder(dragKey, to);
+      if (!dragKey || dragKey === opts.dragKey || _orderDragList !== opts.list) return;
+      opts.onDrop(dragKey, row.classList.contains('drop-after'));
     });
-    list.appendChild(row);
+  }
+  return row;
+}
+let _orderDragKey = null, _orderDragList = null;
+
+// The CAT button chooser under a "CAT buttons" row.
+function catPicker(picks, onChange, note) {
+  const box = document.createElement('div');
+  box.className = 'cat-pick';
+  const offer = VfoLayout.catOffer(vfoCatCaps, note ? null : customCatButtons);
+  for (const o of offer) {
+    const lab = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = picks.includes(o.key);
+    lab.className = cb.checked ? 'on' : '';
+    cb.addEventListener('change', () => {
+      const next = cb.checked ? picks.concat([o.key]) : picks.filter(k => k !== o.key);
+      onChange(next);
+    });
+    lab.appendChild(cb);
+    lab.appendChild(document.createTextNode(o.label));
+    box.appendChild(lab);
+  }
+  if (note) { const n = document.createElement('div'); n.className = 'cat-pick-note'; n.textContent = note; box.appendChild(n); }
+  return box;
+}
+
+function swOn(id) { const cb = document.getElementById(id); return !!(cb && cb.checked); }
+
+function renderLargeLists() {
+  const top = document.getElementById('large-top');
+  const body = document.getElementById('order-list');
+  const bottom = document.getElementById('large-bottom');
+  top.innerHTML = ''; body.innerHTML = ''; bottom.innerHTML = '';
+  for (const t of LARGE_TOP) top.appendChild(layoutRow({ name: t.name, on: swOn(t.sw), onSwitch: (v) => flipSwitch(t.sw, v) }));
+  vfoOrder.forEach((k, i) => {
+    const b = ORDER_BLOCKS.find(x => x.key === k);
+    if (!b) return;
+    const sw = LARGE_SWITCH[k];
+    const on = sw ? swOn(sw) : document.getElementById(b.el).style.display !== 'none';
+    body.appendChild(layoutRow({
+      name: b.name,
+      sub: sw ? '' : 'when the radio supports it',
+      on, noSwitch: !sw, onSwitch: (v) => flipSwitch(sw, v),
+      canUp: i > 0, canDown: i < vfoOrder.length - 1,
+      onUp: () => moveOrder(k, i - 1), onDown: () => moveOrder(k, i + 1),
+      dragKey: k, list: 'large',
+      onDrop: (dragKey, after) => {
+        const from = vfoOrder.indexOf(dragKey);
+        let to = vfoOrder.indexOf(k) + (after ? 1 : 0);
+        if (from < to) to -= 1;
+        moveOrder(dragKey, to);
+      },
+    }));
+    if (k === 'controls' && on) {
+      body.appendChild(catPicker(vfoCatLarge, (next) => {
+        vfoCatLarge = next;
+        window.api.saveSettings({ vfoCatLarge });
+        buildRigToggles();
+        renderLayoutLists();
+      }, 'Your custom CAT buttons always show here too.'));
+    }
+  });
+  for (const t of LARGE_BOTTOM) bottom.appendChild(layoutRow({ name: t.name, on: swOn(t.sw), onSwitch: (v) => flipSwitch(t.sw, v) }));
+}
+
+function saveSmall() {
+  window.api.saveSettings({ vfoSmall });
+  buildRigToggles();
+  buildCustomCatBtns();
+  if (vfoMini) applyMini();
+}
+
+function moveSmall(key, toIndex) {
+  vfoSmall.order = VfoLayout.move(vfoSmall.order, key, toIndex);
+  saveSmall();
+  renderLayoutLists();
+}
+
+function renderSmallList() {
+  const list = document.getElementById('small-list');
+  list.innerHTML = '';
+  vfoSmall.order.forEach((k, i) => {
+    const it = VfoLayout.item(k);
+    if (!it) return;
+    const moves = !it.fixed;
+    list.appendChild(layoutRow({
+      name: it.name,
+      sub: it.fixed ? 'always first' : (it.keep ? 'never hides' : ''),
+      on: vfoSmall.on[k], fixed: it.fixed,
+      onSwitch: (v) => { vfoSmall.on[k] = v; saveSmall(); renderLayoutLists(); },
+      canUp: moves && i > 1, canDown: moves && i < vfoSmall.order.length - 1,
+      onUp: moves ? () => moveSmall(k, i - 1) : null, onDown: moves ? () => moveSmall(k, i + 1) : null,
+      dragKey: moves ? k : null, list: 'small',
+      onDrop: moves ? (dragKey, after) => {
+        const from = vfoSmall.order.indexOf(dragKey);
+        let to = vfoSmall.order.indexOf(k) + (after ? 1 : 0);
+        if (from < to) to -= 1;
+        moveSmall(dragKey, to);
+      } : null,
+    }));
+    if (k === 'cat' && vfoSmall.on.cat) {
+      list.appendChild(catPicker(vfoSmall.cat, (next) => { vfoSmall.cat = next; saveSmall(); renderLayoutLists(); }));
+    }
   });
 }
+
+// A picture of the Small VFO line, drawn from the real controls (copies,
+// without ids or handlers), so it can be edited while the window is large.
+function renderMiniPreview() {
+  const pv = document.getElementById('mini-preview');
+  pv.innerHTML = '';
+  if (vfoMini) applyMini(false);   // put the parts home so their copies come from one place
+  for (const k of vfoSmall.order) {
+    if (!vfoSmall.on[k]) continue;
+    for (const el of miniParts(k)) {
+      const c = el.cloneNode(true);
+      c.removeAttribute('id');
+      c.querySelectorAll('[id]').forEach(n => n.removeAttribute('id'));
+      c.classList.remove('mini-hidden');
+      pv.appendChild(c);
+    }
+  }
+  // Two lines: the preview wraps at the width the strip would take.
+  pv.classList.toggle('two', vfoSmall.rows === 2);
+  pv.style.width = ''; pv.style.zoom = '';
+  if (vfoSmall.rows === 2) {
+    // The real two-row shape: as wide as the strip would be, shrunk to fit the
+    // sheet when the sheet is narrower (the sheet is a phone-width column).
+    // Measured once the sheet has laid out; a sheet still opening measures
+    // nothing, and then the preview just wraps at the sheet's width.
+    requestAnimationFrame(() => {
+      const ws = [...pv.children].filter(el => el.getClientRects().length).map(el => el.getBoundingClientRect().width);
+      const w = VfoLayout.rowsWidth(ws, 8, 2);
+      if (w < 120) return;
+      const full = w + 24;
+      const room = pv.parentElement ? pv.parentElement.clientWidth : full;
+      pv.style.width = full + 'px';
+      if (room > 0 && room < full) pv.style.zoom = String(Math.max(0.5, room / full));
+    });
+  }
+  if (vfoMini) applyMini();
+}
+
+function renderRowsChoice() {
+  document.getElementById('small-rows-1').setAttribute('aria-pressed', String(vfoSmall.rows !== 2));
+  document.getElementById('small-rows-2').setAttribute('aria-pressed', String(vfoSmall.rows === 2));
+  document.getElementById('small-order-note').textContent = vfoSmall.rows === 2
+    ? 'Two lines, left to right, wrapping onto the second line. When the window is too narrow for two lines, items at the end of the list hide first; frequency and PTT always stay.'
+    : 'One line, left to right. When the window is too narrow, items at the end of the list hide first; frequency and PTT always stay.';
+}
+function setSmallRows(n) {
+  if (vfoSmall.rows === n) return;
+  vfoSmall.rows = n;
+  saveSmall();
+  renderLayoutLists();
+  // The strip refits to the new shape (the dragged width was for the other one).
+  miniFitNext = true;
+  if (vfoMini) setMini(true, { save: false });
+}
+document.getElementById('small-rows-1').addEventListener('click', () => setSmallRows(1));
+document.getElementById('small-rows-2').addEventListener('click', () => setSmallRows(2));
+
+function renderLayoutLists() {
+  document.getElementById('size-large').setAttribute('aria-pressed', String(layoutSize === 'large'));
+  document.getElementById('size-small').setAttribute('aria-pressed', String(layoutSize === 'small'));
+  document.getElementById('layout-large').hidden = layoutSize !== 'large';
+  document.getElementById('layout-small').hidden = layoutSize !== 'small';
+  if (layoutSize === 'large') renderLargeLists();
+  else { renderRowsChoice(); renderSmallList(); renderMiniPreview(); }
+}
+
+document.getElementById('large-reset').addEventListener('click', () => {
+  vfoOrder = DEFAULT_ORDER.slice();
+  applyOrder();
+  vfoWidgets = { ...DEFAULT_WIDGETS };
+  vfoSections = { ...DEFAULT_SECTIONS };
+  vfoCatLarge = VfoLayout.CAT_DEFAULT_LARGE.slice();
+  window.api.saveSettings({ vfoOrder, vfoCatLarge });
+  saveWidgets();
+  applyWidgets(); applySections(); syncSettingsCheckboxes(); buildRigToggles();
+  if (_lastOpsPayload) renderOpInfo(_lastOpsPayload);
+  renderLayoutLists();
+});
+document.getElementById('small-reset').addEventListener('click', () => {
+  vfoSmall = VfoLayout.normalizeSmall(null);
+  saveSmall();
+  renderLayoutLists();
+});
+// Forget the width the operator dragged; the strip fits its line next time it is small.
+document.getElementById('small-fit').addEventListener('click', () => {
+  miniFitNext = true;
+  if (vfoMini) setMini(true, { save: false });
+});
 
 async function loadWidgets() {
   const s = await window.api.getSettings();
   vfoOrder = normalizeOrder(s.vfoOrder);
   applyOrder();
+  vfoSmall = VfoLayout.normalizeSmall(s.vfoSmall);
+  vfoCatLarge = VfoLayout.normalizeCat(s.vfoCatLarge, VfoLayout.CAT_DEFAULT_LARGE);
+  buildRigToggles();
+  buildCustomCatBtns();
+  if (vfoMini) applyMini();
   if (s.vfoWidgets) vfoWidgets = { ...vfoWidgets, ...s.vfoWidgets };
   if (s.vfoSections) vfoSections = { ...vfoSections, ...s.vfoSections };
   if (s.vfoHiddenBands) vfoHiddenBands = s.vfoHiddenBands;
@@ -2303,6 +2729,9 @@ function applyMeterRows() {
     row.style.display = on ? '' : 'none';
     any = any || on;
   }
+  // The Small VFO's S-meter bar is moved out of its row: it hides itself.
+  const sWrap = document.getElementById('smeter-bar')?.parentElement;
+  if (sWrap) sWrap.classList.toggle('no-reading', !m.smeter);
   const txRow = document.getElementById('tx-peak-bar')?.closest('.meter-row');
   if (txRow) txRow.style.display = txPeakSeen ? '' : 'none';
   any = any || txPeakSeen;
@@ -2356,6 +2785,9 @@ function applySections() {
       el.style.display = vfoSections[s] ? '' : 'none';
     });
   });
+  // A block whose only content is hidden takes no room in the column.
+  document.getElementById('blk-controls').style.display = vfoSections.controls ? '' : 'none';
+  document.getElementById('blk-solar').style.display = vfoSections.solar ? '' : 'none';
   // Render inline profiles if visible
   if (vfoSections['profiles-inline']) renderInlineProfiles();
 }
@@ -2378,6 +2810,7 @@ const sDial = document.getElementById('s-dial');
 const sSolar = document.getElementById('s-solar');
 const sStep = document.getElementById('s-step');
 const sBand = document.getElementById('s-band');
+const sFavorites = document.getElementById('s-favorites');
 const sFilter = document.getElementById('s-filter');
 const sFilterSlider = document.getElementById('s-filter-slider');
 const sControls = document.getElementById('s-controls');
@@ -2396,6 +2829,7 @@ function syncSettingsCheckboxes() {
   sSolar.checked = !!vfoSections.solar;
   sStep.checked = !!vfoSections.step;
   sBand.checked = !!vfoSections.band;
+  sFavorites.checked = vfoSections.favorites !== false;
   sFilter.checked = !!vfoSections.filter;
   sFilterSlider.checked = !!vfoSections['filter-slider'];
   sControls.checked = !!vfoSections.controls;
@@ -2436,31 +2870,143 @@ sAlwaysOnTop.addEventListener('change', () => {
 // Mini VFO: the title-bar button shrinks the window to a strip and grows it
 // back; main sizes the window and remembers the choice (vfo-set-compact).
 const miniBtn = document.getElementById('mini-btn');
+const miniStrip = document.getElementById('mini-strip');
 let vfoMini = false;
+let miniFitNext = false;   // "Fit the width to the line": forget the operator's width once
+let miniMoved = [];        // the controls on the line now, to send home
+
+// The controls each Small VFO item is made of. Each is the real control,
+// moved onto the line and back, so it keeps its handlers and live state.
+function miniParts(key) {
+  const $ = (id) => document.getElementById(id);
+  const ids = {
+    freq: ['freq-display', 'freq-other-row'],
+    mode: ['mode-badge', 'vfo-badge', 'split-badge', 'kiwi-rx-badge', 'tx-chip'],
+    band: ['band-chip'], scan: ['mini-scan-btn'], audio: ['audio-btn'], ptt: ['ptt-btn'],
+    log: ['log-btn-vfo'], cat: ['mini-cat'], filter: ['filter-badge'], step: ['sec-step'], lock: ['vfo-lock-btn'],
+  }[key];
+  if (ids) return ids.map($).filter(Boolean);
+  if (key === 'smeter') { const b = $('smeter-bar'); return b ? [b.parentElement] : []; }
+  if (key === 'volume') { const v = $('vol-slider'); return v ? [v.closest('.meter-row')] : []; }
+  return [];
+}
+
+function miniSendHome() {
+  for (const el of miniMoved) {
+    el.classList.remove('mini-hidden');
+    if (el._miniHome && el._miniHome.parentNode) el._miniHome.parentNode.insertBefore(el, el._miniHome);
+  }
+  miniMoved = [];
+}
+
+// Build the line from settings.vfoSmall (or send everything home).
+function applyMini(on = vfoMini) {
+  document.body.classList.toggle('mini-two', vfoSmall.rows === 2);
+  miniSendHome();
+  if (!on) return;
+  for (const k of vfoSmall.order) {
+    if (!vfoSmall.on[k]) continue;
+    for (const el of miniParts(k)) {
+      if (!el._miniHome) { el._miniHome = document.createComment('small-vfo:' + k); el.parentNode.insertBefore(el._miniHome, el); }
+      miniStrip.appendChild(el);
+      miniMoved.push(el);
+    }
+  }
+  fitMini();
+}
+
+// One line, never wrapped: while it is wider than the window, hide items
+// from the end of the order (VfoLayout.hideOrder; frequency and PTT stay).
+function fitMini() {
+  if (!vfoMini) return;
+  miniStrip.querySelectorAll('.mini-hidden').forEach(e => e.classList.remove('mini-hidden'));
+  for (const k of VfoLayout.hideOrder(vfoSmall)) {
+    if (miniStrip.scrollWidth <= miniStrip.clientWidth + 1 && miniRowCount() <= vfoSmall.rows) break;
+    for (const el of miniParts(k)) if (el.parentNode === miniStrip) el.classList.add('mini-hidden');
+  }
+}
+
+// How many rows the strip's shown items sit on now (two-line mode wraps).
+function miniRowCount() {
+  // Items on one row overlap vertically (the frequency is taller than a chip
+  // beside it); a new row starts below the last one's bottom.
+  const rects = [...miniStrip.children].filter(el => el.getClientRects().length)
+    .map(el => el.getBoundingClientRect()).sort((a, b) => a.top - b.top);
+  let rows = 0, bottom = -Infinity;
+  for (const r of rects) {
+    if (r.top >= bottom - 2) { rows++; bottom = r.bottom; } else bottom = Math.max(bottom, r.bottom);
+  }
+  return Math.max(1, rows);
+}
+
+// The window width that shows the whole line: its items plus the title bar's buttons.
+function miniNaturalWidth() {
+  // Measured with nothing hidden: the items a narrow window hid count too.
+  miniStrip.querySelectorAll('.mini-hidden').forEach(e => e.classList.remove('mini-hidden'));
+  const kids = [...miniStrip.children].filter(el => el.getClientRects().length);
+  let w = 0;
+  if (kids.length) {
+    // One line: the line's own width. Two lines: the narrowest width that
+    // keeps every item on two rows, in order (VfoLayout.rowsWidth).
+    const gap = parseFloat(getComputedStyle(miniStrip).columnGap) || 8;
+    const content = vfoSmall.rows === 2
+      ? VfoLayout.rowsWidth(kids.map(el => el.getBoundingClientRect().width), gap, 2)
+      : kids[kids.length - 1].getBoundingClientRect().right - kids[0].getBoundingClientRect().left;
+    const tb = document.querySelector('.titlebar').getBoundingClientRect().width;
+    w = Math.ceil(content + (tb - miniStrip.clientWidth) + 2);
+  }
+  fitMini();
+  return w;
+}
+
 function miniHeight() {
   const tb = document.querySelector('.titlebar').getBoundingClientRect().height;
-  const left = document.getElementById('scroll').scrollHeight;
-  const bar = document.getElementById('widget-ptt-row');
-  const right = bar && bar.classList.contains('visible') ? bar.scrollHeight : 0;
-  return Math.ceil(tb + Math.max(left, right) + 2);
+  const swr = document.getElementById('swr-alert');
+  const extra = swr && swr.classList.contains('show') ? document.getElementById('scroll').scrollHeight : 0;
+  return Math.ceil(tb + extra);
 }
+
 function setMini(on, { save = true } = {}) {
   vfoMini = !!on;
   document.body.classList.toggle('mini', vfoMini);
   miniBtn.innerHTML = vfoMini ? ICONS.grow : ICONS.shrink;
   miniBtn.title = vfoMini ? 'Make the VFO bigger' : 'Make the VFO small';
   miniBtn.setAttribute('aria-label', miniBtn.title);
-  requestAnimationFrame(() => { if (window.api.setVfoCompact) window.api.setVfoCompact(vfoMini, vfoMini ? miniHeight() : 0, save); });
+  applyMini();
+  requestAnimationFrame(() => {
+    if (window.api.setVfoCompact) {
+      window.api.setVfoCompact(vfoMini, vfoMini ? miniHeight() : 0, save, vfoMini ? miniNaturalWidth() : 0, vfoMini && miniFitNext);
+    }
+    miniFitNext = false;
+    requestAnimationFrame(fitMini);
+  });
 }
 miniBtn.addEventListener('click', () => setMini(!vfoMini));
-// The strip keeps its height when something in it grows (split's TX line, the SWR guard).
+window.addEventListener('resize', () => requestAnimationFrame(fitMini));
+// The strip keeps its height when something in it grows (the SWR guard).
 if (window.ResizeObserver) {
   let lastH = 0;
-  new ResizeObserver(() => {
-    if (!vfoMini) return;
+  const ro = new ResizeObserver(() => {
+    if (!vfoMini) { lastH = 0; return; }
     const h = miniHeight();
     if (Math.abs(h - lastH) > 2) { lastH = h; if (window.api.setVfoCompact) window.api.setVfoCompact(true, h, false); }
-  }).observe(document.getElementById('scroll'));
+  });
+  ro.observe(document.getElementById('scroll'));
+  ro.observe(document.querySelector('.titlebar'));
+  // The line refits whenever its width changes (a drag, a size switch).
+  new ResizeObserver(() => { if (vfoMini) requestAnimationFrame(fitMini); }).observe(miniStrip);
+}
+
+// Scan: the main window's spot scan (or the phone's), started or stopped here.
+const miniScanBtn = document.getElementById('mini-scan-btn');
+miniScanBtn.addEventListener('click', () => { if (window.api.scanToggle) window.api.scanToggle(); });
+if (window.api.onScanState) {
+  window.api.onScanState(({ on } = {}) => {
+    miniScanBtn.textContent = on ? 'Stop' : 'Scan';
+    miniScanBtn.classList.toggle('on', !!on);
+    miniScanBtn.title = on ? 'Stop the scan' : 'Scan through the spots in the main window';
+    if (vfoMini) requestAnimationFrame(fitMini);
+  });
 }
 window.api.getSettings().then((s) => { if (s && s.vfoCompact) setMini(true, { save: false }); }).catch(() => {});
 
@@ -2498,12 +3044,13 @@ async function populateMicDevices() {
   }
 }
 
-[sDial, sSolar, sStep, sBand, sFilter, sFilterSlider, sControls, sProfilesInline].forEach(cb => {
+[sDial, sSolar, sStep, sBand, sFavorites, sFilter, sFilterSlider, sControls, sProfilesInline].forEach(cb => {
   cb.addEventListener('change', () => {
     vfoSections.dial = sDial.checked;
     vfoSections.solar = sSolar.checked;
     vfoSections.step = sStep.checked;
     vfoSections.band = sBand.checked;
+    vfoSections.favorites = sFavorites.checked;
     vfoSections.filter = sFilter.checked;
     vfoSections['filter-slider'] = sFilterSlider.checked;
     vfoSections.controls = sControls.checked;
@@ -3733,8 +4280,8 @@ function renderOpInfo(spot) {
         const d = op.dupeDetail || {};
         const ts = d.when ? new Date(d.when) : null;
         const hhmm = ts ? String(ts.getUTCHours()).padStart(2,'0') + ':' + String(ts.getUTCMinutes()).padStart(2,'0') : '';
-        const fMHz = d.freq ? (parseFloat(d.freq) / 1000).toFixed(3) : '';
-        const detail = [hhmm && (hhmm + ' UTC'), fMHz && (fMHz + ' MHz'), d.mode].filter(Boolean).join(' · ');
+        const fMHz = d.freq ? FreqDots.khzMhz(parseFloat(d.freq)) : '';
+        const detail = [hhmm && (hhmm + ' UTC'), fMHz, d.mode].filter(Boolean).join(' · ');
         html += '<span class="op-dupe" title="' + esc(detail ? 'Already worked: ' + detail : 'Already worked this activation today') + '">DUPE</span>';
       }
       if (op.displayName) html += '<span class="op-name">' + esc(op.displayName) + '</span>';
@@ -3842,6 +4389,52 @@ function buildKiwiStationList(s) {
 let kiwiSelectedHost = localStorage.getItem('kiwiSelectedHost') || '';
 let kiwiDdEl = null;
 
+// A receiver that would not come on (#390). An offline one took 10 s to time
+// out in main and the window never said so: the chip just stayed OFF. Now the
+// line under the SDR row says "Connecting to <name>..." while it tries, then
+// "<name> did not answer." (or "is full", "needs a password") with Try again,
+// and the list marks it for the rest of this session. Nothing is pinged in the
+// background: a receiver is marked only after the operator tried it.
+const kiwiFailed = new Map();   // station fullHost -> failure kind, this session
+let kiwiTrying = null;          // the station this window last asked for, until main answers
+let kiwiFailStation = null;     // the station Try again reconnects
+function kiwiStationFor(host) {
+  return host ? (kiwiStations.find(st => window.SdrFailure.sameHost(st.fullHost, host)) || null) : null;
+}
+function kiwiShowLine(text, retry) {
+  const box = document.getElementById('kiwi-fail');
+  if (!box) return;
+  document.getElementById('kiwi-fail-text').textContent = text;
+  document.getElementById('kiwi-fail-retry').hidden = !retry;
+  box.classList.toggle('busy', !retry);
+  box.hidden = !text;
+}
+let kiwiTryTimer = null;
+function kiwiTryConnect(st) {
+  kiwiTrying = st;
+  kiwiFailStation = null;
+  kiwiShowLine('Connecting to ' + st.label + '...', false);
+  // The clients give up after 10 s and say so; a route that never answers at
+  // all must not leave "Connecting..." up for good.
+  clearTimeout(kiwiTryTimer);
+  kiwiTryTimer = setTimeout(() => { if (kiwiTrying === st && !kiwiConnected) kiwiNoteFailure(st.fullHost, 'did not answer'); }, 20000);
+  window.api.kiwiConnect({ host: st.host, port: st.port });
+  kiwiConnectedHost = st.fullHost;
+  updateKiwiButtonStates();
+}
+function kiwiNoteFailure(host, error) {
+  clearTimeout(kiwiTryTimer);
+  const st = kiwiStationFor(host) || kiwiTrying;
+  const cls = window.SdrFailure.classify(error);
+  if (st) kiwiFailed.set(st.fullHost, cls.kind);
+  kiwiTrying = null;
+  kiwiFailStation = st;
+  kiwiShowLine(window.SdrFailure.message(st ? st.label : (host || ''), error), !!st);
+}
+document.getElementById('kiwi-fail-retry').addEventListener('click', () => {
+  if (kiwiFailStation) kiwiTryConnect(kiwiFailStation);
+});
+
 function kiwiSelectedStation() {
   return kiwiStations.find(st => st.fullHost === kiwiSelectedHost) || kiwiStations[0] || null;
 }
@@ -3865,9 +4458,7 @@ function buildKiwiButtons() {
     if (kiwiConnected) {
       window.api.kiwiDisconnect();
     } else if (st) {
-      window.api.kiwiConnect({ host: st.host, port: st.port });
-      kiwiConnectedHost = st.fullHost;
-      updateKiwiButtonStates();
+      kiwiTryConnect(st);
     }
   });
   kiwiBtnRow.appendChild(label);
@@ -3907,13 +4498,21 @@ async function toggleKiwiDropdown() {
       + (kiwiConnected && st.fullHost === kiwiConnectedHost ? ' conn' : '');
     item.textContent = st.label;
     item.title = st.fullHost;
+    // Tried this session and it would not come on: say so (no pinging, #390).
+    const failedKind = kiwiFailed.get(st.fullHost);
+    if (failedKind) {
+      item.className += ' failed';
+      const mark = document.createElement('span');
+      mark.className = 'sdr-dd-mark';
+      mark.textContent = window.SdrFailure.mark(failedKind);
+      item.appendChild(mark);
+      item.title = st.fullHost + ' — ' + window.SdrFailure.mark(failedKind) + ' when tried this session';
+    }
     item.addEventListener('click', () => {
       kiwiSelectedHost = st.fullHost;
       localStorage.setItem('kiwiSelectedHost', st.fullHost);
       closeKiwiDropdown();
-      window.api.kiwiConnect({ host: st.host, port: st.port });
-      kiwiConnectedHost = st.fullHost;
-      updateKiwiButtonStates();
+      kiwiTryConnect(st);
     });
     dd.appendChild(item);
   });
@@ -3999,6 +4598,16 @@ window.api.onKiwiStatus((s) => {
   kiwiConnected = s.connected;
   if (s.host) kiwiConnectedHost = s.host;
   if (!s.connected) { kiwiConnectedHost = ''; kiwiNextPlayTime = 0; }
+  // #390: say why a receiver would not come on. The plain {connected:false}
+  // that follows an error (the socket closing) leaves the words up.
+  if (s.error) kiwiNoteFailure(s.host || (kiwiTrying && kiwiTrying.fullHost) || '', s.error);
+  else if (s.connected) {
+    const st = kiwiStationFor(s.host) || kiwiTrying;
+    if (st) kiwiFailed.delete(st.fullHost);
+    clearTimeout(kiwiTryTimer);
+    kiwiTrying = null; kiwiFailStation = null;
+    kiwiShowLine('', false);
+  }
   // Selection follows the live connection — a connect initiated elsewhere
   // (ECHOCAT phone, web client) lands on whatever station is actually
   // playing, so the "SDR: [name][ON]" control never shows a stale name.

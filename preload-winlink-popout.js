@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('api', {
   // Sessions — Connect is the only way a radio session starts.
   connect: (o) => ipcRenderer.invoke('winlink-cmd-connect', o),
   abort: () => ipcRenderer.send('winlink-cmd-abort'),
+  retry: (op) => ipcRenderer.invoke('winlink-cmd-retry', op), // the automatic retry: 'cancel' | 'now' (#425)
   // The account, from the mail window (no account = the first thing it shows).
   accountCheck: () => ipcRenderer.invoke('winlink-account-check'),
   register: (o) => ipcRenderer.invoke('winlink-register', { ...o, origin: 'mail window' }),
@@ -60,6 +61,12 @@ contextBridge.exposeInMainWorld('api', {
   },
   answerPrompt: (id, value) => ipcRenderer.send('winlink-cmd-prompt', { id, value }),
   gateways: (mode, band) => ipcRenderer.invoke('winlink-cmd-gateways', { mode, band }),
+  history: () => ipcRenderer.invoke('winlink-cmd-history'),
+  template: (op, t) => ipcRenderer.invoke('winlink-cmd-template', { op, t }),
+  contact: (op, c) => ipcRenderer.invoke('winlink-cmd-contact', { op, c }),
+  contactGroup: (op, g) => ipcRenderer.invoke('winlink-cmd-contact-group', { op, g }),
+  favourite: (op, g) => ipcRenderer.invoke('winlink-cmd-favourite', { op, call: g && g.call, mode: g && g.mode, dialKhz: g && (g.dialKhz != null ? g.dialKhz : g.khz), url: g && g.url }),
+  onCatFrequency: (cb) => ipcRenderer.on('cat-frequency', (_e, hz) => cb(hz)),
   setMode: (mode) => ipcRenderer.send('winlink-cmd-set-mode', mode),
   acceptNotice: () => ipcRenderer.invoke('winlink-cmd-accept-notice'),
   getState: () => ipcRenderer.invoke('winlink-cmd-state'),

@@ -508,7 +508,15 @@
   </div>
 
   <div id="event-banner" class="hidden">
-    <span id="event-badge" class="event-badge-inline">250</span>
+    <button type="button" id="event-badge" class="event-badge-inline" title="This event: banner and tracking settings" aria-haspopup="dialog" aria-expanded="false">250</button>
+    <div id="event-banner-menu" class="event-banner-menu hidden" role="dialog" aria-label="Event settings">
+      <div class="ebm-title" id="ebm-title"></div>
+      <label class="ebm-row"><input type="checkbox" id="ebm-show"> Show this banner</label>
+      <label class="ebm-row"><input type="checkbox" id="ebm-track"> Track my progress</label>
+      <label class="ebm-row" id="ebm-watch-row"><input type="checkbox" id="ebm-watch"> Stations on my watchlist</label>
+      <div class="ebm-note">With the banner off, switch it back on in the Spots menu, under Events &amp; Awards.</div>
+      <button type="button" class="ebm-link" id="ebm-board">Open the board</button>
+    </div>
     <span id="event-message"></span>
     <span id="event-progress-count"></span>
     <button id="event-optin-btn" class="event-action-btn hidden">Track It</button>
@@ -1169,6 +1177,7 @@
         </select>
         <select id="dirv-category-filter" class="dirv-filter-select hidden" aria-label="Category">
           <option value="all">All categories</option>
+          <option value="favorites">Favorites</option>
           <option value="time">Time signals</option>
           <option value="beacon">Beacons</option>
           <option value="weather">Weather</option>
@@ -1184,7 +1193,7 @@
             <tr>
               <th class="dirv-status-col" data-dir-col="status">Status</th>
               <th class="dirv-name-col" data-dir-col="name">Net Name</th>
-              <th class="dirv-freq-col" data-dir-col="freq">Freq (kHz)</th>
+              <th class="dirv-freq-col" data-dir-col="freq">Freq</th>
               <th class="dirv-mode-col" data-dir-col="mode">Mode</th>
               <th class="dirv-band-col" data-dir-col="band">Band</th>
               <th class="dirv-days-col" data-dir-col="days">Days</th>
@@ -1255,9 +1264,10 @@
             <table class="directory-view-table lmk-table">
               <thead>
                 <tr>
+                  <th class="lmk-col-fav" aria-label="Favorite"></th>
                   <th class="lmk-col-status">Status</th>
                   <th class="lmk-col-name">Name</th>
-                  <th class="lmk-col-freq">Freq (kHz)</th>
+                  <th class="lmk-col-freq">Freq</th>
                   <th class="lmk-col-mode">Mode</th>
                   <th class="lmk-col-band">Band</th>
                   <th class="lmk-col-line">What it is</th>
@@ -1428,7 +1438,7 @@
   <!-- Settings dialog -->
   <dialog id="settings-dialog">
     <div class="settings-shell">
-    <h3 style="display:flex;justify-content:space-between;align-items:baseline;">Settings <span style="font-size:11px;font-weight:normal;color:#666;">ESC to close</span></h3>
+    <h3 style="display:flex;justify-content:space-between;align-items:baseline;">Settings <span style="font-size:11px;font-weight:normal;color:var(--text-secondary);">ESC to close</span></h3>
     <!-- 0. Connection Status (only visible when sources are enabled) -->
     <div id="settings-conn-status" class="settings-conn-bar hidden">
       <span id="conn-cluster" class="conn-pill hidden"><span class="conn-dot"></span> DX Cluster</span>
@@ -1452,16 +1462,15 @@
         <button type="button" class="settings-tab" data-tab="network">ECHOCAT</button>
         <button type="button" class="settings-tab" data-tab="display">Display</button>
         <button type="button" class="settings-tab" data-tab="cloud">Cloud</button>
-        <!-- Theme switch — sticks to the bottom-section of the
-             sidebar above Report a Bug. Labeled "Light Mode" when on,
-             "Dark Mode" when off so the current state is obvious
-             without having to flip and see what changes. -->
-        <label class="settings-tab-theme-toggle settings-tab-theme-pick" title="Change the theme of every window">
-          <span class="settings-tab-theme-label">Change Theme</span>
-          <select id="quick-theme" class="settings-tab-theme-select"></select>
-          <!-- The old on/off switch, kept hidden: the dropdown drives it. -->
-          <input type="checkbox" id="quick-light-mode" hidden style="display:none">
-          <span id="quick-light-mode-label" hidden></span>
+        <!-- Appearance, one step from any tab (#376): Light, Dark or System.
+             The themes for each mode are chosen in Settings > Display. -->
+        <label class="settings-tab-theme-toggle settings-tab-theme-pick" title="Light, Dark, or follow your computer. Choose the themes in Settings > Display.">
+          <span class="settings-tab-theme-label">Appearance</span>
+          <select id="quick-appearance" class="settings-tab-theme-select">
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+            <option value="system">System</option>
+          </select>
         </label>
         <!-- Action button styled like a tab, sits at the bottom of
              the sidebar nav. Doesn't switch tabs — fires the
@@ -1556,7 +1565,7 @@
                   <input type="number" id="quick-cw-sidetone-pitch" min="300" max="1000" data-mirror="set-cw-sidetone-pitch" style="width:64px;">
                 </label>
                 <label style="display:flex;align-items:center;gap:6px;">Vol:
-                  <input type="range" id="quick-cw-sidetone-volume" min="0" max="100" data-mirror="set-cw-sidetone-volume" style="width:90px;accent-color:#4fc3f7;">
+                  <input type="range" id="quick-cw-sidetone-volume" min="0" max="100" data-mirror="set-cw-sidetone-volume" style="width:90px;accent-color:var(--accent-blue);">
                   <span id="quick-cw-sidetone-volume-label" style="font-size:11px;min-width:28px;">30%</span>
                 </label>
               </div>
@@ -1672,8 +1681,8 @@
     <fieldset class="source-toggles" data-settings-tab="station">
       <legend>App Mode</legend>
       <div style="display:flex;gap:16px;align-items:center;">
-        <label class="radio-label"><input type="radio" name="set-app-mode" value="hunter" checked> Hunter <span style="color:#888;font-size:12px;">(spot browser)</span></label>
-        <label class="radio-label"><input type="radio" name="set-app-mode" value="activator"> Activator <span style="color:#888;font-size:12px;">(park logging)</span></label>
+        <label class="radio-label"><input type="radio" name="set-app-mode" value="hunter" checked> Hunter <span style="color:var(--text-secondary);font-size:12px;">(spot browser)</span></label>
+        <label class="radio-label"><input type="radio" name="set-app-mode" value="activator"> Activator <span style="color:var(--text-secondary);font-size:12px;">(park logging)</span></label>
       </div>
       <span class="help-text" style="display:block;margin-top:4px;">Hunter mode shows live spots. Activator mode provides a rapid logging interface for park activations.</span>
     </fieldset>
@@ -1873,7 +1882,7 @@
             <option value="rts">RTS</option>
           </select>
         </label>
-        <span class="help-text" style="margin-bottom:8px;display:block;">For serial rigs (Icom/Yaesu/Kenwood) that key CW off a USB control line. Must match the radio's <b>USB Keying (CW)</b> / <b>PC KEYING</b> menu — <b>Setup instructions</b> above names the exact setting for your radio. Ignored for FlexRadio and dedicated CW-key-port setups. See docs/linux-cw-keying.md.</span>
+        <span class="help-text" style="margin-bottom:8px;display:block;">For serial rigs (Icom/Yaesu/Kenwood) that key CW off a USB control line. Must match the radio's <b>USB Keying (CW)</b> / <b>PC KEYING</b> menu — <b>Setup instructions</b> above names the exact setting for your radio. With a CW Key Port (Settings &rarr; ECHOCAT) it picks the line keyed on that port instead. Ignored for FlexRadio. On Hamlib it works only with a CW Key Port: the CAT port belongs to rigctld. See docs/linux-cw-keying.md.</span>
         <label>N1MM Radio #:
           <select id="set-radio-nr" style="width:80px;">
             <option value="1">1</option>
@@ -1891,7 +1900,7 @@
         </label>
         <span class="help-text" id="audio-source-help" style="display:block;margin-bottom:8px;"></span>
         <div id="rig-audio-devices" style="margin:4px 0 10px;">
-          <div style="font-size:13px;color:#4fc3f7;margin-bottom:4px;">Audio Devices</div>
+          <div style="font-size:13px;color:var(--accent-blue);margin-bottom:4px;">Audio Devices</div>
           <label>RX audio in (from radio):
             <select id="rig-remote-audio-input" style="width:100%;margin-top:2px;"><option value="">-- system default --</option></select>
           </label>
@@ -2330,7 +2339,7 @@
           </div>
         </div>
         <details id="rig-external-atu-details" style="margin-top:8px;">
-          <summary style="cursor:pointer;font-size:13px;color:#4fc3f7;">External ATU (optional)</summary>
+          <summary style="cursor:pointer;font-size:13px;color:var(--accent-blue);">External ATU (optional)</summary>
           <div style="margin-top:6px;margin-left:4px;">
             <label>External ATU type:
               <select id="set-external-atu" style="margin-top:2px;">
@@ -2354,6 +2363,17 @@
         <div id="rig-voice-as-data" style="margin-top:8px;">
           <label class="checkbox-label"><input type="checkbox" id="set-voice-as-data"> Voice in DATA mode (USB-D / LSB-D)</label>
           <span class="help-text" style="display:block;margin:2px 0 0 24px;">For radios whose data port is silent in USB and LSB, such as the Xiegu G90: POTACAT puts the radio in USB-D or LSB-D for voice, so receive audio reaches your sound card interface and ECHOCAT. Contacts are still logged as SSB. The radio's own microphone is off in these modes, so voice has to come in through the data port.</span>
+        </div>
+        <div id="rig-packet-mode" class="hidden" style="margin-top:8px;">
+          <label>Packet mode on the radio:
+            <select id="set-packet-mode" style="margin-top:2px;">
+              <option value="auto">Automatic</option>
+              <option value="fm">FM (voice)</option>
+              <option value="fmdata">FM data</option>
+            </select>
+          </label>
+          <span class="help-text" id="packet-mode-note" style="display:block;margin:2px 0 0 0;"></span>
+          <span class="help-text" style="display:block;margin:2px 0 0 0;">The mode the radio is in while Winlink sends packet (and VARA FM). FM (voice) suits an interface on the microphone jack, or a radio that takes its rear or USB audio in FM. FM data is the radio's own data or packet FM mode, for a radio that takes rear or USB audio only there. Automatic: FM data on an Icom, FM (voice) on every other radio. The mode the radio was in comes back when the session is over.</span>
         </div>
         <div id="rig-lan-voice-ssb" class="hidden" style="margin-top:8px;">
           <label class="checkbox-label"><input type="checkbox" id="set-lan-voice-ssb"> Voice over the LAN stays in USB / LSB</label>
@@ -2470,7 +2490,7 @@
       </div>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-cwspots"> CW Spots (CW club members)</label>
       <div id="cwspots-config" class="radio-sub hidden">
-        <span class="help-text" style="font-size:12px;">Shows RBN spots filtered by CW club membership. Powered by <a href="https://rbn.telegraphy.de" style="color:#4fc3f7;">rbn.telegraphy.de</a> (DJ5CW).</span>
+        <span class="help-text" style="font-size:12px;">Shows RBN spots filtered by CW club membership. Powered by <a href="https://rbn.telegraphy.de" style="color:var(--accent-blue);">rbn.telegraphy.de</a> (DJ5CW).</span>
         <label>Server:
           <select id="set-cwspots-preset" style="width:200px;">
             <option value="rbn.telegraphy.de:7000">CW Club Spotter</option>
@@ -2484,7 +2504,7 @@
           <label>Port: <input type="number" id="set-cwspots-port" value="7000" min="1" max="65535" style="width:70px;"></label>
         </div>
         <div id="cwspots-clubs" style="margin-top:6px;">
-          <span class="help-text" style="font-size:12px;display:block;">Choose your clubs on the <a href="https://rbn.telegraphy.de" style="color:#4fc3f7;">rbn.telegraphy.de</a> website. The filter you set there for your callsign is what POTACAT receives.</span>
+          <span class="help-text" style="font-size:12px;display:block;">Choose your clubs on the <a href="https://rbn.telegraphy.de" style="color:var(--accent-blue);">rbn.telegraphy.de</a> website. The filter you set there for your callsign is what POTACAT receives.</span>
         </div>
         <div style="margin-top:6px;">
           <label style="font-size:12px;">Max CW speed: <input type="number" id="set-cwspots-max-wpm" min="0" max="99" value="0" style="width:50px;"> WPM</label>
@@ -2509,7 +2529,7 @@
       <label class="checkbox-label"><input type="checkbox" id="set-pskr-upload"> Report my JTCAT decodes to PSKReporter</label>
       <div id="pskr-upload-config" class="radio-sub hidden">
         <span class="help-text" style="margin-left:12px;display:block;">Contribute the FT8/FT4 stations JTCAT decodes to <b>pskreporter.info</b> — the way WSJT-X does, so you appear on the global reception map. Sent every 5 minutes. Requires your callsign + grid above.</span>
-        <label style="margin-left:12px;display:block;margin-top:6px;">Antenna <span style="color:var(--text-dim,#888);">(optional)</span>:
+        <label style="margin-left:12px;display:block;margin-top:6px;">Antenna <span style="color:var(--text-secondary);">(optional)</span>:
           <input type="text" id="set-pskr-antenna" placeholder="e.g. EFHW @ 30 ft" style="width:160px;" maxlength="60">
         </label>
       </div>
@@ -2855,7 +2875,7 @@
           <input type="number" id="set-default-power" min="1" max="5000" value="100">
         </label>
         <label class="checkbox-label"><input type="checkbox" id="set-n1mm-rst"> N1MM-style RST logging</label>
-        <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Single text field per RST — type full report and auto-advance to next field</span>
+        <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">On: one box per digit of each report. Off: one field per report; a full report moves the cursor to RST Rcvd by itself, and a Tab pressed straight after stays there.</span>
         <label class="checkbox-label"><input type="checkbox" id="set-log-comment-tags" checked> Auto park/club tags in comment</label>
         <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">On: add <code>[POTA US-1234 …]</code>/club tags to the COMMENT field of logged QSOs. Off: COMMENT is exactly what you type — the park still goes to SIG_INFO/POTA_REF regardless.</span>
         <label class="checkbox-label"><input type="checkbox" id="set-jtcat-log-comment" checked> "JTCAT FT8" in the comment of FT8/FT4 contacts</label>
@@ -3122,7 +3142,7 @@
               <tr>
                 <th class="dir-status-col"></th>
                 <th class="dir-name-col">Station</th>
-                <th class="dir-freq-col">Freq</th>
+                <th class="dir-freq-col">Freq (kHz)</th>
                 <th class="dir-mode-col">Mode</th>
                 <th class="dir-time-col">Start (UTC)</th>
                 <th class="dir-time-col">End (UTC)</th>
@@ -3144,22 +3164,15 @@
     <!-- 8. Display (trimmed — bearing moved to Antenna, SmartSDR absorbed) -->
     <fieldset class="source-toggles" data-settings-tab="display">
       <legend>Display</legend>
-      <label for="set-app-theme" style="display:block;margin-bottom:6px;">Change Theme:
-        <select id="set-app-theme"></select>
-      </label>
-      <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Changes every window at once. The Classic themes are POTACAT's original look; the others are the same as the ECHOCAT app, colour for colour (a few controls still keep their old look while windows move onto them).</span>
+      <div class="settings-look">
+        <div style="margin-bottom:4px;">Appearance:</div>
+        <div id="set-look-picker"></div>
+        <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Changes every window at once. The same six looks as the ECHOCAT app. System follows your computer's light or dark setting, using the light theme and the dark theme chosen here.</span>
+      </div>
       <label for="set-waterfall-palette" style="display:block;margin-bottom:6px;">Waterfall colours:
         <select id="set-waterfall-palette"></select>
       </label>
       <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">The colours of every waterfall and band scope: the FT8 window, the Band Scope, SSTV and Winlink. The palettes are the ECHOCAT app's. Standard keeps each window's usual colours. Changes at once.</span>
-      <!-- The old Dark/Light switch and Navy/Charcoal radios, kept hidden:
-           Change Theme above drives them, and the Settings save reads them. -->
-      <input type="checkbox" id="set-light-mode" hidden style="display:none">
-      <div id="set-dark-variant-group" class="dark-variant-group" hidden style="display:none">
-        <span class="dark-variant-label">Dark variant:</span>
-        <label class="radio-inline"><input type="radio" name="set-dark-variant" value="navy" checked> Navy</label>
-        <label class="radio-inline"><input type="radio" name="set-dark-variant" value="charcoal"> Charcoal</label>
-      </div>
       <div class="text-size-row">
         <span class="text-size-label">Text size:</span>
         <button type="button" id="set-text-size-down" class="text-size-btn" title="Smaller text (Ctrl &minus;)">&minus;</button>
@@ -3340,7 +3353,7 @@
         <span class="help-text" style="display:block;">Internet only, never the radio. A radio session always starts from your Send / Receive.</span>
 
         <div style="margin-top:10px;font-weight:600;">Over the radio</div>
-        <span class="help-text" style="display:block;margin-bottom:4px;">ARDOP (HF) and packet (VHF/UHF, through Dire Wolf) are open and built into POTACAT on Windows, macOS and Linux. Their audio goes through POTACAT on every radio, using the Audio devices set for the radio in My Rigs — nothing to pick. Mercury uses your Mercury setup above.</span>
+        <span class="help-text" style="display:block;margin-bottom:4px;">ARDOP (HF) and packet (VHF/UHF, through Dire Wolf) are open and built into POTACAT on Windows, macOS and Linux. Their audio goes through POTACAT on every radio, using the Audio devices set for the radio in My Rigs — nothing to pick.</span>
         <span class="help-text hidden" id="winlink-audio-via" style="display:block;margin-bottom:4px;color:var(--accent-green,#4ecca3);"></span>
         <div id="winlink-audio-pick" class="hidden" style="margin-top:4px;">
         <span class="help-text" style="display:block;margin-bottom:4px;">Sound devices for a modem you built yourself (the bundled ones never open a sound card).</span>
@@ -3369,40 +3382,62 @@
         <label style="margin-left:8px;">ARDOP drive level:
           <input type="number" id="set-winlink-ardop-drive" min="1" max="100" value="90" style="width:55px;"> %
         </label>
+        <label style="margin-left:8px;">ARDOP link timeout:
+          <input type="number" id="set-winlink-ardop-arq-timeout" min="90" max="180" step="10" value="120" style="width:60px;"> seconds
+        </label>
+        <span class="help-text" style="display:block;">ARDOP link timeout: how long the modem keeps trying when nothing is getting through, before it ends the link. A longer time (up to 180 seconds) helps when the signal fades in and out. The gateway has a time limit of its own and may still hang up first.</span>
         <span class="help-text" style="display:block;">Packet: if the gateway misses your first frame (it answers late or not at all, or you need several tries to connect), raise the TX delay: a radio keyed over CAT comes on air a little after Dire Wolf starts sending.</span>
         <div id="winlink-vara-section" class="hidden" style="margin-top:10px;">
-          <div style="font-weight:600;">VARA (your own copy, Windows)</div>
-          <span class="help-text" style="display:block;margin-bottom:4px;">VARA is EA5HVK's modem, installed and licensed by you; nothing of VARA is installed or downloaded by POTACAT. Without a licence it runs at reduced speed. Three things to install, then one click:</span>
-          <ol class="help-text" style="margin:0 0 6px 18px;padding:0;">
+          <div style="font-weight:600;">VARA (your own copy)</div>
+          <span class="help-text" style="display:block;margin-bottom:4px;">VARA is EA5HVK's modem, installed and licensed by you; nothing of VARA is installed or downloaded by POTACAT. Without a licence it runs at reduced speed.</span>
+          <!-- Linux and macOS (#287): VARA is a Windows program, run by the operator under Wine or on another computer; POTACAT connects to it. -->
+          <div class="vara-other-only help-text" style="margin-bottom:6px;">
+            <span style="display:block;margin-bottom:4px;">VARA is a Windows program. On this computer, run it under Wine, or on a Windows computer or virtual machine on your network. POTACAT connects to it, sends your mail through it and keys your radio; it never starts VARA here.</span>
+            <ol style="margin:0 0 4px 18px;padding:0;">
+              <li>Start VARA HF (or VARA FM). In its Settings set the TCP port (8300 for VARA HF, 8310 for VARA FM) and PTT to <b>VOX</b>: POTACAT keys the radio.</li>
+              <li>In VARA's SoundCard settings choose the radio's USB sound card. (A radio whose audio comes over the network has none: see "Audio between VARA and the radio" below.)</li>
+              <li>Below, tick <b>Use VARA HF</b> (or <b>Use VARA FM</b>), check the host and port, and click <b>Test</b>.</li>
+            </ol>
+            <span style="display:block;">VARA on another computer uses that computer's sound card: connect the radio's audio there. How to run VARA under Wine is your setup, not POTACAT's.</span>
+          </div>
+          <span class="vara-win-only help-text" style="display:block;margin-bottom:4px;">Three things to install, then one click:</span>
+          <ol class="vara-win-only help-text" style="margin:0 0 6px 18px;padding:0;">
             <li>VARA HF (and VARA FM if you want VHF) from <a href="https://rosmodem.wordpress.com/" data-external style="color:var(--accent-blue,#4fc3f7);">rosmodem.wordpress.com</a>.</li>
             <li><b>Only for a radio whose audio comes over the network (Flex Direct, Icom Network):</b> two virtual audio cables, both free from <a href="https://vb-audio.com/Cable/" data-external style="color:var(--accent-blue,#4fc3f7);">vb-audio.com/Cable</a>: <b>VB-CABLE</b> and the <b>Hi-Fi Cable</b> (or the donation A+B pack). Run each installer as administrator, then reboot. A radio with a USB sound card needs no cable: VARA uses it directly.</li>
             <li>Click <b>Set up VARA for me</b>. POTACAT configures VARA for the active radio: its sound card (or the cables), PTT via VOX (POTACAT keys the radio), the port; then starts VARA and checks that it opened the devices. VARA is re-configured whenever a session starts it or you switch radios.</li>
           </ol>
-          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:6px;">
+          <div class="vara-win-only" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:6px;">
             <button type="button" id="vara-setup-hf" class="btn btn-primary btn-sm">Set up VARA HF for me</button>
             <button type="button" id="vara-setup-fm" class="btn btn-sm">Set up VARA FM for me</button>
             <span class="help-text" id="vara-setup-status" style="flex-basis:100%;"></span>
           </div>
-          <details style="margin-bottom:4px;">
+          <details id="vara-details" style="margin-bottom:4px;">
           <summary class="help-text" style="cursor:pointer;">Details and manual settings</summary>
-          <span class="help-text" style="display:block;margin:4px 0;">If you set VARA by hand instead: Settings &gt; SoundCard = the cable ends named below, Settings &gt; PTT = <b>VOX</b> (VARA has no "None"; VOX means VARA keys nothing and POTACAT keys the radio through Pat).</span>
+          <span class="vara-win-only help-text" style="display:block;margin:4px 0;">If you set VARA by hand instead: Settings &gt; SoundCard = the cable ends named below, Settings &gt; PTT = <b>VOX</b> (VARA has no "None"; VOX means VARA keys nothing and POTACAT keys the radio through Pat).</span>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
             <label class="checkbox-label"><input type="checkbox" id="set-vara-hf-enable"> Use VARA HF</label>
-            <label>Program: <input type="text" id="set-vara-hf-path" placeholder="C:\VARA\VARA.exe (found for you)" style="width:210px;"> <button type="button" id="vara-hf-browse">Browse&hellip;</button> <button type="button" id="vara-hf-find">Find / test</button></label>
+            <label class="vara-win-only">Program: <input type="text" id="set-vara-hf-path" placeholder="C:\VARA\VARA.exe (found for you)" style="width:210px;"> <button type="button" id="vara-hf-browse">Browse&hellip;</button> <button type="button" id="vara-hf-find">Find / test</button></label>
+            <label title="Blank = this computer. Another computer: its name or address; VARA's audio then runs there.">Host: <input type="text" id="set-vara-hf-host" placeholder="this computer" spellcheck="false" style="width:120px;"></label>
             <label>Port: <input type="number" id="set-winlink-vara-port" min="1" max="65535" value="8300" style="width:70px;"></label>
+            <button type="button" class="vara-other-only" id="vara-hf-test">Test</button>
             <label>Bandwidth: <select id="set-winlink-vara-bw" style="width:80px;"><option value="500">500</option><option value="2300" selected>2300</option><option value="2750">2750</option></select></label>
             <span class="help-text" id="vara-hf-status"></span>
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:4px;">
             <label class="checkbox-label"><input type="checkbox" id="set-vara-fm-enable"> Use VARA FM</label>
-            <label>Program: <input type="text" id="set-vara-fm-path" placeholder="C:\VARA FM\VARAFM.exe (found for you)" style="width:210px;"> <button type="button" id="vara-fm-browse">Browse&hellip;</button> <button type="button" id="vara-fm-find">Find / test</button></label>
+            <label class="vara-win-only">Program: <input type="text" id="set-vara-fm-path" placeholder="C:\VARA FM\VARAFM.exe (found for you)" style="width:210px;"> <button type="button" id="vara-fm-browse">Browse&hellip;</button> <button type="button" id="vara-fm-find">Find / test</button></label>
+            <label title="Blank = this computer. Another computer: its name or address; VARA's audio then runs there.">Host: <input type="text" id="set-vara-fm-host" placeholder="this computer" spellcheck="false" style="width:120px;"></label>
             <label>Port: <input type="number" id="set-vara-fm-port" min="1" max="65535" value="8310" style="width:70px;"></label>
+            <button type="button" class="vara-other-only" id="vara-fm-test">Test</button>
             <span class="help-text" id="vara-fm-status"></span>
           </div>
+          <span class="help-text" style="display:block;">Host: leave it blank when VARA runs on this computer. For VARA on another computer, type that computer's name or address (for example 192.168.1.50). The radio's audio must then be connected to that computer, and POTACAT does not start VARA there.</span>
           <span class="help-text" style="display:block;">VARA FM ships on port 8300, the same as VARA HF: set 8310 in VARA FM's Settings so both can be installed.</span>
-          <label class="checkbox-label" style="margin-top:4px;"><input type="checkbox" id="set-vara-autolaunch" checked> Start VARA for me when a session needs it (it stays open; POTACAT never closes it)</label>
+          <!-- In a div: .checkbox-label forces display:flex !important, which outranks .hidden. -->
+          <div class="vara-win-only"><label class="checkbox-label" style="margin-top:4px;"><input type="checkbox" id="set-vara-autolaunch" checked> Start VARA for me when a session needs it (it stays open; POTACAT never closes it)</label></div>
           <div style="margin-top:6px;font-weight:600;">Audio between VARA and the radio</div>
-          <span class="help-text" style="display:block;margin-bottom:4px;">Recommended: two virtual audio cables, one for each direction. VB-Audio's free VB-CABLE is one cable and its A+B pack adds two more (<a href="https://vb-audio.com/Cable/" data-external style="color:var(--accent-blue,#4fc3f7);">vb-audio.com/Cable</a>). POTACAT carries the audio between the cables and the radio the way it does for ARDOP, so VARA never touches DAX or the radio's sound card, and it works on Flex Direct and Icom Network too. In VARA's SoundCard settings choose the cables' other ends. Leave both blank and VARA opens the radio's sound card itself: then choose the radio's devices in VARA.</span>
+          <span class="vara-other-only help-text" style="display:block;margin-bottom:4px;">Leave both blank and VARA uses the radio's sound card directly: that is the simple way. A radio whose audio comes over the network (Flex Direct, Icom Network) needs two virtual audio devices instead, one each way (for example BlackHole on macOS, or PulseAudio or PipeWire virtual devices on Linux): choose their ends in VARA and here, and POTACAT carries the audio to and from the radio. This second way has not been tried on Linux or macOS yet.</span>
+          <span class="vara-win-only help-text" style="display:block;margin-bottom:4px;">Recommended: two virtual audio cables, one for each direction. VB-Audio's free VB-CABLE is one cable and its A+B pack adds two more (<a href="https://vb-audio.com/Cable/" data-external style="color:var(--accent-blue,#4fc3f7);">vb-audio.com/Cable</a>). POTACAT carries the audio between the cables and the radio the way it does for ARDOP, so VARA never touches DAX or the radio's sound card, and it works on Flex Direct and Icom Network too. In VARA's SoundCard settings choose the cables' other ends. Leave both blank and VARA opens the radio's sound card itself: then choose the radio's devices in VARA.</span>
           <div style="display:flex;gap:12px;flex-wrap:wrap;">
             <label>From VARA (the cable POTACAT listens to): <select id="set-vara-cable-in" style="max-width:260px;"></select></label>
             <label>To VARA (the cable POTACAT plays into): <select id="set-vara-cable-out" style="max-width:260px;"></select></label>
@@ -3412,10 +3447,14 @@
         </div>
         <label class="checkbox-label" style="margin-top:6px;"><input type="checkbox" id="set-winlink-prediction" checked> Rank gateways by predicted propagation</label>
         <span class="help-text" style="display:block;">The gateway list is ordered by the path VOACAP expects to be open right now, not by distance. Your grid square and each gateway's are sent to POTACAT's VOACAP service at api.potacat.com; a VOACAP you installed yourself is used instead. Off = nearest first, nothing sent.</span>
+        <label class="checkbox-label" style="margin-top:6px;"><input type="checkbox" id="set-winlink-auto-retry" checked> Try again once by itself when a link drops</label>
+        <span class="help-text" style="display:block;">If a radio link to a gateway connects and then drops before the mail is exchanged, POTACAT waits 20 seconds, checks that the channel is clear and nothing is transmitting, and calls the same gateway on the same frequency once more. You can cancel it during the wait. Never after you press Abort, and never after "no answer".</span>
         <label style="margin-top:6px;">End a radio session after
           <input type="number" id="set-winlink-cap" min="10" max="60" value="30" style="width:50px;"> minutes
         </label>
         <span class="help-text" style="display:block;">A stuck session also ends after 3 minutes with no progress, and the transmitter is released if it stays keyed for 30 seconds.</span>
+        <label class="checkbox-label" style="margin-top:6px;"><input type="checkbox" id="set-winlink-record-audio"> Record what the modem hears on the next radio session</label>
+        <span class="help-text" style="display:block;">For a bug report: 30 seconds of the radio audio POTACAT gives the modem and 30 seconds of what the modem sends, saved as two sound files beside the modem's log. It switches itself off after that session. ARDOP and packet only.</span>
         <details style="margin-top:6px;">
           <summary class="help-text">Advanced</summary>
           <label>Pat binary:
@@ -3448,7 +3487,7 @@
       </div>
       <div id="kiwi-extra-rows"></div>
       <button type="button" id="kiwi-add-row-btn" style="margin-top:6px;">Add SDR</button>
-      <span class="help-text" style="display:block;margin-top:4px;">Live directories with current listings: <a href="#" onclick="window.api.openExternal('http://rx.linkfanel.net');return false;" style="color:var(--accent-blue);">KiwiSDR</a> &middot; <a href="#" onclick="window.api.openExternal('http://websdr.org');return false;" style="color:var(--accent-blue);">WebSDR.org</a></span>
+      <span class="help-text" style="display:block;margin-top:4px;">Live directories with current listings: <a href="http://rx.linkfanel.net" data-external style="color:var(--accent-blue);">KiwiSDR</a> &middot; <a href="http://websdr.org" data-external style="color:var(--accent-blue);">WebSDR.org</a></span>
     </fieldset>
     <!-- 9. CW Keyer -->
     <fieldset class="source-toggles collapsible" data-settings-tab="station">
@@ -3525,7 +3564,7 @@
             <input type="number" id="set-cw-sidetone-pitch" min="300" max="1000" value="600" style="width:60px;">
           </label>
           <label style="display:flex;align-items:center;gap:6px;">Vol:
-            <input type="range" id="set-cw-sidetone-volume" min="0" max="100" value="30" style="width:80px;accent-color:#4fc3f7;">
+            <input type="range" id="set-cw-sidetone-volume" min="0" max="100" value="30" style="width:80px;accent-color:var(--accent-blue);">
             <span id="cw-sidetone-volume-label" style="font-size:11px;min-width:28px;">30%</span>
           </label>
         </div>
@@ -3640,9 +3679,9 @@
            Audio Bridge, TX EQ + Compression. -->
       <div class="pair-section">
         <strong>Audio &amp; PTT</strong>
-        <div id="remote-audio-display" style="margin-top:6px;font-size:12px;color:#aaa;">
+        <div id="remote-audio-display" style="margin-top:6px;font-size:12px;color:var(--text-secondary);">
           Audio: <span id="remote-audio-summary">not configured</span>
-          <a href="#" id="remote-audio-edit-link" style="margin-left:8px;font-size:11px;color:#4fc3f7;cursor:pointer;">Edit in Radio tab</a>
+          <a href="#" id="remote-audio-edit-link" style="margin-left:8px;font-size:11px;color:var(--accent-blue);cursor:pointer;">Edit in Radio tab</a>
         </div>
         <span class="help-text" style="display:block;margin-top:2px;">Audio devices &mdash; and, for rigs that stream audio over the network, the audio source &mdash; are set per-rig under Settings &rarr; Radio.</span>
         <div style="margin-top:8px;">
@@ -3667,7 +3706,7 @@
              Direct, K4 network) and the USB CODEC / DAX-device graph. -->
         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:10px;">
           <div style="flex:1;min-width:280px;">
-            <strong>TX EQ + Compression <span style="color:#888;font-weight:normal;font-size:11px;">(ECHOCAT mic audio)</span></strong>
+            <strong>TX EQ + Compression <span style="color:var(--text-secondary);font-weight:normal;font-size:11px;">(ECHOCAT mic audio)</span></strong>
             <span class="help-text" style="display:block;">Compensates for radios that disable internal EQ + compression in DATA mode (IC-7300 and similar). Applied to mic audio before it reaches the rig.</span>
           </div>
           <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
@@ -3676,7 +3715,7 @@
           </label>
         </div>
         <div id="set-tx-eq-preset-row" style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px;padding-left:6px;">
-          <span style="font-size:12px;color:#aaa;">Preset</span>
+          <span style="font-size:12px;color:var(--text-secondary);">Preset</span>
           <select id="set-tx-eq-preset" style="padding:4px;min-width:150px;">
             <option value="ragchew">Ragchew &mdash; flat, light comp</option>
             <option value="pileup">Pileup &mdash; +6 dB @ 2 kHz, 4:1 comp</option>
@@ -3692,9 +3731,9 @@
       <div class="pair-section">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
           <div style="flex:1;min-width:280px;">
-            <strong>Remote Launcher <span id="launcher-status-pill" class="help-text" style="font-weight:normal;margin-left:6px;color:#888;">checking&hellip;</span></strong>
+            <strong>Remote Launcher <span id="launcher-status-pill" class="help-text" style="font-weight:normal;margin-left:6px;color:var(--text-secondary);">checking&hellip;</span></strong>
             <span class="help-text" style="display:block;">Starts a tiny background server (port 7301) so the phone app can start/restart POTACAT when it crashes or you close it accidentally. Auto-launches at login.</span>
-            <span id="launcher-status-detail" class="help-text" style="display:block;color:#888;font-size:11px;"></span>
+            <span id="launcher-status-detail" class="help-text" style="display:block;color:var(--text-secondary);font-size:11px;"></span>
             <label id="launcher-via-cloud-row" class="hidden" style="display:flex;align-items:center;gap:6px;margin-top:6px;">
               <input type="checkbox" id="launcher-via-cloud" checked>
               <span>Restart from anywhere through your Cloud Tunnel</span>
@@ -3738,7 +3777,7 @@
       <!--
            for everyone running stock ECHOCAT. -->
       <details style="margin-top:12px;border-top:1px solid #333;padding-top:10px;">
-        <summary style="cursor:pointer;font-size:13px;color:#aaa;outline:none;user-select:none;">Advanced ECHOCAT settings</summary>
+        <summary style="cursor:pointer;font-size:13px;color:var(--text-secondary);outline:none;user-select:none;">Advanced ECHOCAT settings</summary>
         <div style="margin-top:10px;display:flex;flex-direction:column;gap:10px;">
           <div>
             <label style="font-size:12px;font-weight:600;display:block;margin-bottom:3px;">Connection</label>
@@ -3859,7 +3898,7 @@
             <span id="cloud-forgot-status" class="help-text" style="font-size:11px;"></span>
           </div>
         </div>
-        <p id="cloud-login-signout" class="hidden" style="margin-top:8px;font-size:12px;color:var(--text-secondary);">Having trouble? <a href="#" id="cloud-login-signout-link" style="color:var(--accent-red);">Sign out and start fresh</a></p>
+        <p id="cloud-login-signout" class="hidden" style="margin-top:8px;font-size:12px;color:var(--text-secondary);">Having trouble? <a href="#" id="cloud-login-signout-link" style="color:var(--accent-red-text);">Sign out and start fresh</a></p>
         <!-- Would rather pay than trial (an existing supporter, an impatient
              buyer): the potacat.com join page creates the account on payment
              and emails a set-password link. Signed-IN members never go there;
@@ -3972,7 +4011,7 @@
           <button type="button" id="pota-sync-now" class="btn btn-sm">Refresh</button>
           <span>Last refresh: <strong id="pota-sync-last">never</strong></span>
         </div>
-        <p id="pota-sync-error" class="hidden" style="color:var(--accent-gold);font-size:11px;margin-top:4px;"></p>
+        <p id="pota-sync-error" class="hidden" style="color:var(--accent-red-text);font-size:11px;margin-top:4px;"></p>
       </div>
     </fieldset>
 
@@ -4013,14 +4052,14 @@
            the tunnel is nominally up but cloudflared can't refresh DNS.
            Text comes from state.degradedReason. -->
       <div id="cloud-tunnel-degraded" class="hidden" style="margin-top:8px;padding:8px 10px;border-radius:6px;background:rgba(212,166,74,0.12);border-left:3px solid var(--source-sota);font-size:12px;line-height:1.5;color:var(--text-secondary);">
-        <strong style="color:var(--source-sota);">⚠ Cloud Tunnel DNS trouble</strong>
+        <strong style="color:var(--warn);">⚠ Cloud Tunnel DNS trouble</strong>
         <span id="cloud-tunnel-degraded-text"></span>
       </div>
       <!-- Origin self-test (lib/origin-health.js): the tunnel is up but
            POTACAT itself is not answering behind it — wrong port, no TLS,
            port not bound. Amber; the cloud link is withheld while shown. -->
       <div id="cloud-tunnel-origin" class="hidden" style="margin-top:8px;padding:8px 10px;border-radius:6px;background:rgba(212,166,74,0.12);border-left:3px solid var(--source-sota);font-size:12px;line-height:1.5;color:var(--text-secondary);">
-        <strong style="color:var(--source-sota);" id="cloud-tunnel-origin-title">⚠ Cloud up · POTACAT not answering</strong>
+        <strong style="color:var(--warn);" id="cloud-tunnel-origin-title">⚠ Cloud up · POTACAT not answering</strong>
         <span id="cloud-tunnel-origin-text"></span>
       </div>
       <!-- Start-at-login: shown while the tunnel is on. A reboot otherwise
@@ -4122,7 +4161,7 @@
            are refused. Loaded from the cloud when the account view shows. -->
       <label class="checkbox-label" id="cloud-embed-public-row" style="margin-top:4px;"><input type="checkbox" id="cloud-embed-public" checked> Show my widgets publicly (and allow browser API keys)</label>
       <span id="cloud-embed-public-status" class="help-text" style="margin-left:24px;display:block;margin-bottom:6px;"></span>
-      <p style="font-size:11px;color:var(--text-tertiary);margin-bottom:8px;">Click <strong>Copy Embed</strong> to copy an iframe tag to your clipboard, then paste it into your page's HTML. Add <code style="background:var(--bg-tertiary);padding:1px 4px;border-radius:2px;">?theme=light</code> for light mode or <code style="background:var(--bg-tertiary);padding:1px 4px;border-radius:2px;">?display=square</code> for a square layout.</p>
+      <p style="font-size:11px;color:var(--text-tertiary);margin-bottom:8px;">Click <strong>Copy Embed</strong> to copy an iframe tag to your clipboard, then paste it into your page's HTML. Add <code style="background:var(--bg-tertiary);color:var(--text-primary);padding:1px 4px;border-radius:2px;">?theme=light</code> for light mode or <code style="background:var(--bg-tertiary);color:var(--text-primary);padding:1px 4px;border-radius:2px;">?display=square</code> for a square layout.</p>
       <div id="cloud-embeds-section">
         <table style="width:100%;font-size:12px;border-collapse:collapse;" id="cloud-embed-table">
           <tr style="color:var(--text-secondary);">
@@ -4945,18 +4984,6 @@
     <h3>POTACAT: Democratizing Remote Radio</h3>
     <p class="welcome-text">Here are some quick settings to get you up and running. There are many more inside the Settings menu.</p>
 
-    <div class="welcome-section-label">Display</div>
-    <label class="welcome-field" for="welcome-theme" style="display:block;">
-      <span style="font-size:13px;color:var(--text-secondary);">Change Theme</span>
-      <select id="welcome-theme" style="display:block;margin-top:4px;"></select>
-      <!-- The old switch, kept hidden: the dropdown drives it, the Welcome save reads it. -->
-      <input type="checkbox" id="welcome-light-mode" checked hidden style="display:none">
-    </label>
-    <div class="welcome-field">
-      <span style="font-size:13px;color:var(--text-secondary);">Change Font Size</span>
-      <span class="help-text" style="display:block;margin-top:2px;">Press <kbd>Ctrl +</kbd> to make text larger, <kbd>Ctrl &minus;</kbd> to make smaller, <kbd>Ctrl 0</kbd> to reset</span>
-    </div>
-
     <div class="welcome-section-label">Station</div>
     <div style="display:flex;gap:8px;align-items:flex-end;">
       <label class="welcome-field" style="margin-bottom:0;">Callsign:
@@ -4993,6 +5020,17 @@
     <label class="checkbox-label" style="margin-top:4px;margin-bottom:8px;" title="Hide spots your license class can't operate, plus any truly out-of-band frequencies. Uses the License Class above.">
       <input type="checkbox" id="welcome-hide-oob"> Hide spots outside my license privileges
     </label>
+
+    <!-- Pick your look (#376): right after the callsign. Appearance, the
+         themes for the mode in force, and a live preview; every click
+         repaints this window at once. -->
+    <div class="welcome-section-label" id="welcome-look-label">Pick your look</div>
+    <div id="welcome-look-picker"></div>
+    <span class="help-text" style="display:block;margin-bottom:6px;">The same six looks as the ECHOCAT app. Change any time in Settings &gt; Display.</span>
+    <div class="welcome-field">
+      <span style="font-size:13px;color:var(--text-secondary);">Change Font Size</span>
+      <span class="help-text" style="display:block;margin-top:2px;">Press <kbd>Ctrl +</kbd> to make text larger, <kbd>Ctrl &minus;</kbd> to make smaller, <kbd>Ctrl 0</kbd> to reset</span>
+    </div>
 
     <div class="welcome-section-label">Idle Mode</div>
     <label class="checkbox-label" style="margin-bottom:4px;">
@@ -5276,12 +5314,15 @@
   </dialog>
 
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>
+  <script src="../lib/freq-dots.js"></script>
   <script src="../lib/rig-family.js"></script>
   <script src="../lib/waterfall-palettes.js"></script>
   <script src="../lib/app-theme.js"></script>
+  <script src="../lib/look-picker.js"></script>
   <script src="../lib/rig-bands.js"></script>
   <script src="../lib/listen-source.js"></script>
   <script src="../lib/channels.js"></script>
+  <script src="../lib/favorites.js"></script>
   <script src="channels-view.js"></script>
   <script src="../lib/landmarks.js"></script>
   <script src="../lib/commander-sequences.js"></script>
@@ -5307,12 +5348,15 @@
   <script src="../lib/watchlist-groups.js"></script>
   <script src="../lib/activation-program.js"></script>
   <script src="../lib/park-db-check.js"></script>
+  <script src="../lib/park-grid.js"></script>
+  <script src="../lib/rst-advance.js"></script>
   <script src="../lib/prop-empty-state.js"></script>
   <script src="../lib/dxpedition-contests.js"></script>
   <script src="../lib/worked-roster.js"></script>
   <script src="../lib/worked-overlay.js"></script>
   <script src="../lib/capture-stall.js"></script>
   <script src="../lib/jtcat-capture-gate.js"></script>
+  <script src="../lib/diagnostic-snapshot.js"></script>
   <script src="was-view.js"></script>
   <script src="jtcat-parser.js"></script>
   <script src="remote-ptt.js"></script>

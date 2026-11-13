@@ -36,6 +36,40 @@ check('the channels a user asked for are there, with the right frequencies', () 
   assert.strictEqual(by['interop-vcall10'].khz, 155752.5);
   assert.strictEqual(by['ems-med-1'].khz, 463000);
 });
+// #328 (Casey 2026-11-10): the 40 CB channels, emergency and the customary
+// channels named with their numbers. Frequencies from 47 CFR 95.963 (read
+// 2026-11-10); channel 9 from 95.931(a)(2): "CBRS Channel 9 may be used only
+// for emergency communications or traveler assistance."
+check('#328: all 40 CB channels, at the FCC frequencies, AM, with 9 and 19 named', () => {
+  const cb = catalog.channels.filter((c) => c.group === 'CB (Citizens Band)');
+  assert.strictEqual(cb.length, 40);
+  assert.deepStrictEqual(cb.map((c) => c.id), Array.from({ length: 40 }, (_, i) => 'cb-' + (i + 1)), 'in channel order');
+  const by = Object.fromEntries(cb.map((c) => [c.id, c]));
+  assert.strictEqual(by['cb-1'].khz, 26965);
+  assert.strictEqual(by['cb-9'].khz, 27065);
+  assert.strictEqual(by['cb-19'].khz, 27185);
+  assert.strictEqual(by['cb-22'].khz, 27225);
+  assert.strictEqual(by['cb-23'].khz, 27255, 'channel 23 sits above 24 and 25');
+  assert.strictEqual(by['cb-24'].khz, 27235);
+  assert.strictEqual(by['cb-25'].khz, 27245);
+  assert.strictEqual(by['cb-40'].khz, 27405);
+  assert.strictEqual(by['cb-9'].name, 'CB 9 Emergency');
+  assert.ok(/emergency/i.test(by['cb-9'].note) && /95\.931/.test(by['cb-9'].note));
+  assert.strictEqual(by['cb-19'].name, 'CB 19 Highway');
+  assert.ok(/custom/i.test(by['cb-19'].note) && /do not reserve/.test(by['cb-19'].note), 'a custom is never called a rule');
+  assert.strictEqual(by['cb-38'].mode, 'LSB');
+  for (let n = 1; n <= 35; n++) assert.strictEqual(by['cb-' + n].mode, 'AM', 'cb-' + n);
+  for (const c of cb) assert.ok(new RegExp('^CB ' + c.id.slice(3) + '\\b').test(c.name), 'every name starts with its channel number: ' + c.name);
+});
+check('#328: an install seeded with catalog 1 gets the CB channels appended, nothing it deleted comes back', () => {
+  const v1 = { ...catalog, version: 1, channels: catalog.channels.filter((c) => !c.id.startsWith('cb-')) };
+  let s = C.reconcile(undefined, v1);
+  s = C.remove(s, 'murs-1');
+  s = C.reconcile(s, catalog);
+  assert.strictEqual(catalog.version, 2);
+  assert.strictEqual(s.list.filter((c) => c.id.startsWith('cb-')).length, 40);
+  assert.ok(!s.list.some((c) => c.id === 'murs-1'));
+});
 check('nothing personal is bundled: no callsign-named repeaters', () => {
   for (const c of catalog.channels) assert.ok(!/^[AKNW][A-Z]?\d[A-Z]{1,3}$/.test(c.name), c.name);
 });
@@ -112,7 +146,7 @@ check('KL4XQ\'s export: tones, a negative offset, a nameless row, a 300 MHz spli
   assert.strictEqual(r.channels.length, 5);
   const [kl3k, noname, kl7cc, kl4gr, wx] = r.channels;
   assert.strictEqual(kl3k.tone, '123.0'); assert.strictEqual(kl3k.offsetKhz, -600);
-  assert.strictEqual(noname.name, '146.64 MHz'); assert.strictEqual(noname.tone, '');
+  assert.strictEqual(noname.name, '146.640.00 MHz'); assert.strictEqual(noname.tone, '');
   assert.strictEqual(kl7cc.offsetKhz, 300000);
   assert.strictEqual(kl4gr.mode, 'DIG');
   assert.strictEqual(wx.mode, 'AM');
@@ -164,6 +198,19 @@ check('edits go through main (channels-save) so ECHOCAT follows; the chart rides
 check('the import refuses a huge file and reports what it added, skipped and already had', () => {
   const h = main.slice(main.indexOf("ipcMain.handle('channels-import-csv'"), main.indexOf("ipcMain.handle('channels-export-csv'"));
   assert.ok(/5 \* 1024 \* 1024/.test(h) && /Channels\.parseChirpCsv\(text, \{ group \}\)/.test(h) && /return \{ added, dupes, skipped: parsed\.skipped, group \}/.test(h));
+});
+// #329: the server-start broadcast carried the chart, but every later push
+// (a directory refresh, a Channels edit) replaced the stored snapshot without
+// it, and ECHOCAT's Channels tab went empty.
+check('#329: every directory broadcast to ECHOCAT carries the channel chart', () => {
+  const calls = [];
+  let at = main.indexOf('broadcastDirectory(');
+  while (at >= 0) {
+    if (main.slice(at - 9, at) !== 'function ') calls.push(main.slice(at, main.indexOf('});', at) + 3));
+    at = main.indexOf('broadcastDirectory(', at + 1);
+  }
+  assert.ok(calls.length >= 2, 'calls found: ' + calls.length);
+  for (const c of calls) assert.ok(c.includes('...channelsPayload()'), 'a broadcast without the chart: ' + c.slice(0, 120));
 });
 check('ECHOCAT Web has the tab and tunes from it', () => {
   assert.ok(/data-dtab="channels"/.test(webHtml));

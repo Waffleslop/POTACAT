@@ -103,16 +103,17 @@ test('main.js: the key-down marks the session as asked; FM-D is asked for before
   assert.ok(/if \(_dataPlan === 'switch-hold'\) _winlinkDataAskedFor = _winlinkSessionSeq;/.test(p));
   assert.ok(/not a DATA mode, after this session asked for one — keying as it is/.test(p), 'said once, with what to check');
   const e = fnBody(main, 'winlinkEnterFmDataBeforeDial');
-  assert.ok(/!WinlinkModes\.isFmMode\(mode\)/.test(e) && /!icom/.test(e), 'Icom FM modems only: HF sessions QSY in DIGU already');
-  assert.ok(/\(pttModeReport\(\) \|\| \{\}\)\.data\) return;/.test(e), 'nothing sent to a radio already in data');
-  assert.ok(e.indexOf('_winlinkDataAskedFor = _winlinkSessionSeq;') < e.indexOf("cat.setModeOnly('DIGFM'"), 'marked before it is sent');
+  // Which rig, and which mode name, is lib/packet-rig-mode.js (#128); test/packet-rig-mode-test.js runs this function.
+  assert.ok(/if \(!pm \|\| pm\.want !== 'fmdata' \|\| !pm\.dataMode\) return;/.test(e), 'FM data sessions only: HF sessions QSY in DIGU already');
+  assert.ok(/if \(rep\.data && \(pm\.link === 'civ' \|\| rep\.at > tunedAt\)\) \{ note\('already'\); return; \}/.test(e), 'nothing sent to a radio already in data');
+  assert.ok(e.indexOf('_winlinkDataAskedFor = _winlinkSessionSeq;') < e.indexOf('cat.setModeOnly(pm.dataMode'), 'marked before it is sent');
   assert.ok(/noAnchor: true/.test(e), 'an Icom memory channel keeps its duplex: no frequency write');
   const s = fnBody(main, 'winlinkStartSession');
   const tune = s.indexOf("{ origin: 'Winlink session' }");
-  const enter = s.indexOf('await winlinkEnterFmDataBeforeDial(mode);');
+  const enter = s.indexOf('await winlinkEnterFmDataBeforeDial(mode, pm, tunedAt);');
   const dial = s.indexOf('await patClient.connect(url)');
   assert.ok(tune > 0 && enter > tune && dial > enter, 'after the QSY, before Pat dials');
-  assert.ok(/await winlinkEnterFmDataBeforeDial\(mode\);\n\s*if \(!live\(\)\) throw cancelled\(\);/.test(s), 'a stopped attempt goes no further');
+  assert.ok(/await winlinkEnterFmDataBeforeDial\(mode, pm, tunedAt\);\n\s*if \(!live\(\)\) throw cancelled\(\);/.test(s), 'a stopped attempt goes no further');
 });
 
 console.log('main.js wiring');
@@ -306,7 +307,7 @@ test('the dial moved by hand between attempts: the original return point is kept
 console.log('main.js wiring of the return');
 test('session end keeps the return point while the mail window is open, and says so', () => {
   const end = fnBody(main, 'winlinkEndSession');
-  assert.ok(/WinlinkReturn\.atSessionEnd\(\{ tuned: s\.tuned, returnTo: s\.returnTo, windowOpen: winlinkMailWindowOpen\(\) \}\)/.test(end));
+  assert.ok(/WinlinkReturn\.atSessionEnd\(\{ tuned: s\.tuned, returnTo: s\.returnTo, windowOpen: winlinkMailWindowOpen\(\) \|\| retryWill \}\)/.test(end), 'a pending automatic retry (#425) keeps the radio like an open window');
   assert.ok(/=== 'keep'\) winlinkKeepReturn\(s\.returnTo\)/.test(end));
   assert.ok(/else if \(_ret === 'return'\) setTimeout\(\(\) => winlinkRestoreDial\(s\.returnTo\), 1500\);/.test(end), 'goes back at once only with no mail window');
   const keep = fnBody(main, 'winlinkKeepReturn');

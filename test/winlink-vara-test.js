@@ -95,33 +95,33 @@ function fnBody(src, name) {
   console.log('winlink-modes');
   await test('VARA is listed only when the operator turned it on; Windows only; the cable lifts the Flex Direct / Icom Network reason', () => {
     const base = { rigFamily: 'serial', audioSource: 'dax', platform: 'win32', mercuryEnabled: true, mercuryPort: 8300, ardopFound: true, direwolfFound: true, ardopSocketAudio: true };
-    assert.deepStrictEqual(M.winlinkModesFor(base).map((m) => m.id), ['telnet', 'ardop', 'packet', 'mercury'], 'off = not listed');
+    assert.deepStrictEqual(M.winlinkModesFor(base).map((m) => m.id), ['telnet', 'ardop', 'packet'], 'off = not listed');
     const on = M.winlinkModesFor({ ...base, varaHf: { enabled: true, port: 8301, cable: false }, varaFm: { enabled: true, port: 8310, cable: false } });
-    assert.deepStrictEqual(on.map((m) => [m.id, m.available]), [['telnet', true], ['ardop', true], ['packet', true], ['mercury', true], ['vara', true], ['varafm', true]]);
+    assert.deepStrictEqual(on.map((m) => [m.id, m.available]), [['telnet', true], ['ardop', true], ['packet', true], ['vara', true], ['varafm', true]]);
     assert.strictEqual(M.LABELS.varafm, 'VARA FM (VHF/UHF radio, your own VARA FM)');
     const mac = M.winlinkModesFor({ ...base, platform: 'darwin', varaHf: { enabled: true, port: 8301 } });
-    assert.ok(!mac[4].available && /Windows program/.test(mac[4].reason));
+    // #287: VARA on Linux and macOS too (under Wine, or on another computer); test/winlink-vara-anywhere-test.js.
+    assert.ok(mac[3].id === 'vara' && mac[3].available && !/Windows program/.test(mac[3].reason));
     const flex = M.winlinkModesFor({ ...base, rigFamily: 'flex', audioSource: 'smartsdr', varaHf: { enabled: true, port: 8301, cable: false }, varaFm: { enabled: true, port: 8310, cable: false } });
-    assert.ok(!flex[4].available && /virtual audio cable/.test(flex[4].reason) && /Flex Direct/.test(flex[4].reason));
-    assert.ok(!flex[5].available && /virtual audio cable/.test(flex[5].reason));
+    assert.ok(!flex[3].available && /virtual audio cable/.test(flex[3].reason) && /Flex Direct/.test(flex[3].reason));
+    assert.ok(!flex[4].available && /virtual audio cable/.test(flex[4].reason));
     const flexCable = M.winlinkModesFor({ ...base, rigFamily: 'flex', audioSource: 'smartsdr', varaHf: { enabled: true, port: 8301, cable: true }, varaFm: { enabled: true, port: 8310, cable: true } });
-    assert.ok(flexCable[4].available && flexCable[5].available, 'with the cable, VARA works on Flex Direct');
-    assert.ok(!flexCable[3].available, 'Mercury still needs a device');
+    assert.ok(flexCable[3].available && flexCable[4].available, 'with the cable, VARA works on Flex Direct');
     const icomCable = M.winlinkModesFor({ ...base, rigFamily: 'icom-network', audioSource: 'icom-network', varaHf: { enabled: true, port: 8301, cable: true } });
-    assert.ok(icomCable[4].available);
-    assert.ok(!M.winlinkModesFor({ ...base, remote: true, varaHf: { enabled: true, port: 8301, cable: true } })[4].available, 'never from a laptop driving a shack');
-    const noCatVara = M.winlinkModesFor({ ...base, rigFamily: 'none', varaHf: { enabled: true, port: 8301, cable: true } })[4];
+    assert.ok(icomCable[3].available);
+    assert.ok(!M.winlinkModesFor({ ...base, remote: true, varaHf: { enabled: true, port: 8301, cable: true } })[3].available, 'never from a laptop driving a shack');
+    const noCatVara = M.winlinkModesFor({ ...base, rigFamily: 'none', varaHf: { enabled: true, port: 8301, cable: true } })[3];
     assert.ok(noCatVara.available && /No CAT control/.test(noCatVara.note), 'a no-CAT radio runs VARA too; the operator sets the dial (NA4DQ)');
   });
   await test('port clashes are named: VARA HF vs Mercury, VARA FM vs VARA HF', () => {
     const base = { rigFamily: 'serial', audioSource: 'dax', platform: 'win32', mercuryEnabled: true, mercuryPort: 8300, ardopSocketAudio: true };
     const clash = M.winlinkModesFor({ ...base, varaHf: { enabled: true, port: 8300 } });
-    assert.ok(!clash[4].available && /same port \(8300\)/.test(clash[4].reason));
+    assert.ok(!clash[3].available && /same port \(8300\)/.test(clash[3].reason));
     const fmClash = M.winlinkModesFor({ ...base, varaHf: { enabled: true, port: 8301 }, varaFm: { enabled: true, port: 8301 } });
-    assert.ok(fmClash[4].available, 'HF is fine');
-    assert.ok(!fmClash[5].available && /VARA FM and VARA HF are set to the same port \(8301\)/.test(fmClash[5].reason));
+    assert.ok(fmClash[3].available, 'HF is fine');
+    assert.ok(!fmClash[4].available && /VARA FM and VARA HF are set to the same port \(8301\)/.test(fmClash[4].reason));
     const fmAlone = M.winlinkModesFor({ ...base, varaHf: { enabled: false, port: 8301 }, varaFm: { enabled: true, port: 8301 } });
-    assert.ok(fmAlone[4].id === 'varafm' && fmAlone[4].available, 'no clash with a VARA HF that is off');
+    assert.ok(fmAlone[3].id === 'varafm' && fmAlone[3].available, 'no clash with a VARA HF that is off');
     assert.ok(M.isRadioMode('varafm') && M.isFmMode('varafm') && M.isFmMode('packet') && !M.isFmMode('vara'));
   });
 
@@ -138,16 +138,16 @@ function fnBody(src, name) {
   console.log('main.js wiring');
   await test('a VARA session probes/starts VARA and readies its audio before Pat connects; VARA FM QSYs to FM', () => {
     const s = fnBody(main, 'winlinkStartSession');
-    assert.ok(/if \(mode === 'vara' \|\| mode === 'varafm'\) \{\s*await winlinkVaraReady\(mode\);\s*if \(!live\(\)\) throw cancelled\(\);\s*await winlinkVaraAudioReady\(\);/.test(s));
+    assert.ok(/if \(mode === 'vara' \|\| mode === 'varafm'\) \{\s*await winlinkVaraReady\(mode\);\s*if \(!live\(\)\) throw cancelled\(\);\s*await winlinkVaraAudioReady\(mode\);/.test(s));
     assert.ok(s.indexOf('await winlinkVaraReady(mode)') < s.indexOf('await patClient.connect(url)'), 'before the connect');
-    assert.ok(/WinlinkModes\.isFmMode\(mode\) \? 'FM' : 'DIGU'/.test(s), 'FM for packet and VARA FM, USB data for the rest');
+    assert.ok(/WinlinkModes\.isFmMode\(mode\) \? \(pm && pm\.byHand \? undefined : 'FM'\) : 'DIGU'/.test(s), 'FM for packet and VARA FM, USB data for the rest');
     assert.ok(/mode === 'varafm' \? 'varafm' : 'varahf'/.test(fnBody(main, 'winlinkGateways')), 'the gateway list asks Pat for varafm');
-    assert.ok(/varaFmAddr: `127\.0\.0\.1:\$\{_winlinkVaraFmPort\(\)\}`/.test(fnBody(main, 'writePatConfig')));
+    assert.ok(fnBody(main, 'writePatConfig').includes("varaFmAddr: VaraProcess.varaAddr(_winlinkVaraHost('fm'), _winlinkVaraFmPort()),"), 'VARA FM at its host and port (#287)');
     assert.ok(/if \(mode === 'varafm'\) return `VARA FM is not answering/.test(fnBody(main, 'winlinkTransportDownText')));
   });
   await test('a VARA whose port Pat holds from the last session is reused, not refused (W7RTA)', () => {
     const s = fnBody(main, 'winlinkVaraReady');
-    const reuse = s.indexOf("_patHoldsVara[kind] === patProc && await varaProcessRunning(kind)");
+    const reuse = s.indexOf("_patHoldsVara[kind] === patProc && (!_winlinkVaraLaunches(kind) || await varaProcessRunning(kind))");
     assert.ok(reuse > 0, 'reuse check');
     assert.ok(reuse < s.indexOf('is open on the shack PC but is not answering'), 'before the not-answering refusal');
     assert.ok(/_patHoldsVara\[kind\] = patProc;[^\n]*\n\s*winlinkLog\(`\$\{name\} ready on/.test(s), 'marked when Pat is handed VARA');
@@ -159,9 +159,12 @@ function fnBody(src, name) {
     assert.ok(/e\.sender !== modemBridgeWin\.webContents/.test(rx), 'only the bridge window may feed it');
     const feed = fnBody(main, 'winlinkFeedRx');
     assert.ok(/modemBridge\.cable\.state === 'ok'[\s\S]*?audioSafeSend\(modemBridgeWin\.webContents, 'modem-bridge-cable-tx'/.test(feed), 'the radio\'s RX goes to VARA over the cable');
+    // One pipeline (#187): VARA's audio enters the modem audio lane like the socket modems' audio;
+    // the lane plays the radio-side bridge itself and hands Flex / Icom back to winlinkDispatchOut.
     const dispatch = fnBody(main, 'winlinkDispatchTx');
-    assert.ok(/pushTxAudioChunk\(mono24k\)/.test(dispatch) && /pushIcomNetworkVoiceChunk\(mono24k\)/.test(dispatch) && /'modem-bridge-tx'/.test(dispatch), 'Flex, Icom Network, radio-side bridge');
-    assert.ok(/winlinkModemTxIn\(mono24k\)/.test(fnBody(main, 'startWinlinkAudio')) && /winlinkDispatchTx\(mono24k\)/.test(fnBody(main, 'winlinkModemTxIn')), 'the socket modems use the same dispatch');
+    const out = fnBody(main, 'winlinkDispatchOut');
+    assert.ok(/winlinkAudio\.txIn\(mono24k\)/.test(dispatch) && /pushTxAudioChunk\(mono24k\)/.test(out) && /pushIcomNetworkVoiceChunk\(mono24k\)/.test(out) && /'modem-bridge-tx'/.test(out), 'Flex, Icom Network, radio-side bridge');
+    assert.ok(/srv\.on\('tx-out', \(mono24k\) => \{ if \(winlinkTxActive\) winlinkDispatchOut\(mono24k\); \}\);/.test(fnBody(main, 'startWinlinkAudio')), 'the socket modems use the same dispatch');
     const ready = fnBody(main, 'winlinkVaraAudioReady');
     assert.ok(/if \(!winlinkCableConfigured\(\)\) \{[\s\S]*?winlinkIpAudioRoute\(\)[\s\S]*?set up the virtual audio cable/.test(ready), 'no cable on Flex Direct / Icom Network is refused with the fix');
     assert.ok(/startModemBridgeCable\(\);[\s\S]*?modemBridgeCableReady\(10000\)/.test(ready));
@@ -183,7 +186,8 @@ function fnBody(src, name) {
     assert.ok(/'winlinkVaraFmPort',/.test(main.slice(main.indexOf('const winlinkChanged = ['), main.indexOf('const winlinkChanged = [') + 300)), 'a new FM port relaunches Pat');
     const app = read('renderer/app.js');
     assert.ok(/r\.modemCable = \(inputId \|\| outputId\) \? \{ inputId, outputId \} : null;/.test(app), 'the renderer stamps the cable on the active rig at save');
-    assert.ok(/winlinkVaraSection\.classList\.toggle\('hidden', window\.api\.platform !== 'win32'\)/.test(app), 'the VARA section shows on Windows only');
+    // #287: on every system; the Windows-only parts (program, Set up VARA for me, auto-start) hide elsewhere.
+    assert.ok(app.includes("winlinkVaraSection.querySelectorAll('.vara-win-only').forEach((el) => el.classList.toggle('hidden', !onWindows));"), 'the Windows-only parts show on Windows only');
     const pkg = JSON.parse(read('package.json'));
     const text = JSON.stringify(pkg.build) + read('scripts/build-winlink-helpers.sh') + read('NOTICE');
     assert.ok(!/vara\.exe|varafm\.exe|rosmodem/i.test(text), 'never bundled, fetched or attributed as shipped');
@@ -341,7 +345,7 @@ function fnBody(src, name) {
     assert.ok(/winlinkVaraConfigure\(\{ kind, quiet: true \}\)\.then/.test(main), 'a rig switch re-syncs a closed VARA');
     assert.ok(!/PTT set to None/.test(main), 'VARA has no None: VOX');
     assert.ok(/fs\.copyFileSync\(iniPath, iniPath \+ '\.potacat-'/.test(fn), 'backup before the write');
-    assert.ok(/VaraSetup\.planVaraIniPatch\(iniText, \{ inputName: plan\.vara\.inputName, outputName: plan\.vara\.outputName, port, ownPorts: winlinkPotacatComPorts\(\), pttVia: VaraSetup\.varaPttViaFor\(kind\) \}\)/.test(fn), 'POTACAT\'s own ports are looked for in VARA\'s file (never blanked, #183)');
+    assert.ok(/VaraSetup\.planVaraIniPatch\(iniText, \{ inputName: plan\.vara\.inputName, outputName: plan\.vara\.outputName, port, ownPorts: winlinkPotacatComPorts\(\), pttVia: VaraSetup\.varaPttViaFor\(kind\), kind \}\)/.test(fn), 'POTACAT\'s own ports are looked for in VARA\'s file (never blanked, #183)');
     assert.ok(/rig\.modemCable = \{ inputId: plan\.potacat\.inputId, outputId: plan\.potacat\.outputId, inputLabel: plan\.potacat\.inputLabel, outputLabel: plan\.potacat\.outputLabel, varaInputName: plan\.vara\.inputName, varaOutputName: plan\.vara\.outputName \}/.test(fn), 'POTACAT\'s side and VARA\'s names saved on the rig for later syncs');
     assert.ok(/const l = await listArdopDevices\(\); if \(l && l\.ok\) mme = l\.devices;/.test(fn) && /VaraSetup\.planCables\(devices, \{ mme \}\)/.test(fn), 'VARA\'s names come from the MME listing');
     assert.ok(/VaraSetup\.varaLogDeviceProblem\(/.test(fnBody(main, 'winlinkVaraSetup')), 'VARA\'s log is the verdict');
@@ -412,6 +416,32 @@ function fnBody(src, name) {
     assert.ok(/ownPorts: winlinkPotacatComPorts\(\)/.test(fn) && !/freePorts/.test(fn));
     assert.ok(/VaraSetup\.describeNoPort\(name, VaraSetup\.varaIniNoPortValues\(/.test(fn), 'a COM0 left by 1.14.0 is named in the log');
   });
+  // #304 (n5xhi 2026-11-10, VARA FM 4.4.1): he picked VOX in VARA FM and its
+  // ini then read Via=3, with CATPort=COM9 kept from his earlier choice. COM9
+  // is the TI-3000's PTT port, which POTACAT keys (rigctld --ptt-file), so the
+  // by-value check refused to start a VARA FM that keys nothing.
+  const N5XHI_VOX_INI = '[Soundcard]\r\nInput Device Name=Microphone RigExpert (RigExpert\r\nOutput Device Name=Speaker RigExpert (RigExpert TI\r\nALC Drive Level=-12\r\n[PTT]\r\nRig=51\r\nPTTPort=COM1\r\nCATPort=COM9\r\nBaud=4800\r\nPin=1\r\nRTS=1\r\nDTR=0\r\nVia=3\r\n[Setup]\r\nTCP Command Port=8310\r\nTCP Scan Port=8427\r\nFM Mode=2\r\n';
+  await test('#304: a VARA FM on VOX (Via=3) is started even when its ini still names POTACAT\'s port; any other PTT option is still refused', () => {
+    assert.strictEqual(S.VARA_FM_PTT_VIA_VOX, 3);
+    assert.strictEqual(S.varaIniPttVia(N5XHI_VOX_INI), 3);
+    assert.strictEqual(S.varaIniPttVia(N5XHI_INI), 1);
+    assert.strictEqual(S.varaIniPttVia('[Setup]\nVia=3\n'), null, 'only the [PTT] section counts');
+    assert.strictEqual(S.varaIniPttVia(''), null);
+    assert.strictEqual(S.varaPttIsVox(N5XHI_VOX_INI, 'fm'), true);
+    assert.strictEqual(S.varaPttIsVox(N5XHI_VOX_INI, 'hf'), false, 'VARA HF\'s VOX number is not known from a real file');
+    assert.strictEqual(S.varaPttIsVox(N5XHI_INI, 'fm'), false, 'Via=1 opened COM8 in VARA FM: not VOX');
+    assert.deepStrictEqual(S.varaIniPortConflicts(N5XHI_VOX_INI, ['COM8', 'COM9'], { kind: 'fm' }), [], 'VOX keys nothing: no clash');
+    assert.deepStrictEqual(S.varaIniPortConflicts(N5XHI_VOX_INI, ['COM8', 'COM9']).map((h) => h.key), ['CATPort'], 'no kind given: the old by-value check');
+    assert.deepStrictEqual(S.varaIniPortConflicts(N5XHI_VOX_INI, ['COM9'], { kind: 'hf' }).map((h) => h.key), ['CATPort'], 'VARA HF keeps the by-value check');
+    assert.deepStrictEqual(S.varaIniPortConflicts(N5XHI_INI, ['COM8', 'COM9'], { kind: 'fm' }).map((h) => h.key), ['PTTPort', 'CATPort'], 'VARA FM on another option is still refused');
+    const r = S.planVaraIniPatch(N5XHI_VOX_INI, { inputName: 'Microphone (RigExpert TI-3000)', outputName: 'Speakers (RigExpert TI-3000)', port: 8310, ownPorts: ['COM8', 'COM9'], pttVia: S.varaPttViaFor('fm'), kind: 'fm' });
+    assert.deepStrictEqual(r.conflicts, []);
+    const lines = r.text.split(/\r\n/);
+    assert.ok(lines.includes('CATPort=COM9') && lines.includes('PTTPort=COM1') && lines.includes('Via=3'), 'the port lines and his VOX choice are left as they were (never blanked, #183)');
+    assert.ok(!r.changes.some((c) => /port$/i.test(c.key) && !/TCP/i.test(c.key)) && !r.changes.some((c) => c.key === 'Via'));
+    const ready = fnBody(main, 'winlinkVaraReady');
+    assert.ok(/VaraSetup\.varaIniPortConflicts\(iniNow, winlinkPotacatComPorts\(\), \{ kind \}\)/.test(ready), 'the launch check knows which VARA it is');
+  });
   await test('n5xhi: the direct route\'s names come from the live MME listing, a saved label is never written as-is', () => {
     const r = S.resolveDirectNames({ capture: 'RigExpert (RigExpert TI-3000)', playback: 'RigExpert (RigExpert TI-3000)', mme: N5XHI_MME });
     assert.strictEqual(r.ok, true);
@@ -438,7 +468,7 @@ function fnBody(src, name) {
     const ports = fnBody(main, 'winlinkPotacatComPorts');
     assert.ok(/'path', 'serialPort', 'pttPort'/.test(ports) && /settings\.cwKeyPort/.test(ports));
     const ready = fnBody(main, 'winlinkVaraReady');
-    const clash = ready.indexOf('VaraSetup.varaIniPortConflicts(iniNow, winlinkPotacatComPorts())');
+    const clash = ready.indexOf('VaraSetup.varaIniPortConflicts(iniNow, winlinkPotacatComPorts(), { kind })');
     assert.ok(clash > 0 && clash < ready.indexOf('spawn(bin.path'), 'checked before VARA is started');
     assert.ok(/winlinkLog\(clash\);/.test(ready));
     const setup = fnBody(main, 'winlinkVaraSetup');

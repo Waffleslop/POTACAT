@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Build the Winlink sidecars from PINNED source into assets/ for packaging
 # (docs/winlink-integration-plan.md):
-#   pat      — the Winlink client (Go, MIT, LA5NTA)        → assets/pat/pat[.exe]
+#   pat      — the Winlink client (Go, MIT, LA5NTA), with POTACAT's ARQ
+#              timeout patch (third_party/pat/)             → assets/pat/pat[.exe]
 #   ardopcf  — the ARDOP modem (C, MIT, Muething/Wiseman/LaRue)
 #                                                          → assets/ardopcf/ardopcf[.exe]
 #   direwolf — the AX.25 packet soft TNC (C, GPL-2.0, WB2OSZ), built WITH
@@ -27,6 +28,9 @@ set -euo pipefail
 PAT_REPO=https://github.com/la5nta/pat
 PAT_TAG=v1.0.0
 PAT_SHA=2e6a8d14baf0268f4e2aa4d01784a54ca935cf52
+# The wl2k-go Pat's go.mod pins at that tag (its ARDOP transport is what
+# third_party/pat/potacat-arq-timeout.patch builds on).
+WL2K_GO_VERSION=v1.0.1
 ARDOP_REPO=https://github.com/pflarue/ardop
 ARDOP_TAG=1.0.4.1.3
 ARDOP_SHA=96dec85fc96d7e6d3dd90379fd809ba6cf83b6cc
@@ -73,8 +77,36 @@ if [[ " $want " == *" pat "* ]]; then
   # 2026-10-22: "retrieveTermSettings undefined" with CGO off), and Pat's own
   # macOS builds are cgo builds. The web UI is committed at the tag (web/dist).
   CGO=0; [ "$HOST" = mac ] && CGO=1
-  ( cd "$WORK/pat" && CGO_ENABLED=$CGO go build -trimpath -ldflags "-s -w" -o "$ROOT/assets/pat/pat$EXE" . )
+  # POTACAT patch (MIT allows it; recorded in third_party/pat/README.md and
+  # NOTICE): the ARDOP link timeout from the environment (#425). Upstream Pat
+  # sets the modem's ARQTIMEOUT to 90 s every time it opens the modem and has
+  # no setting for it. The patch touches Pat's own source only (one call in
+  # app/connect.go and one new file); its dependency wl2k-go stays the module
+  # go.sum pins, unmodified, and is checked below for the two things the patch
+  # relies on. With POTACAT_ARDOP_ARQ_TIMEOUT unset the built Pat sends what
+  # upstream sends.
+  git -C "$WORK/pat" apply --ignore-whitespace "$ROOT/third_party/pat/potacat-arq-timeout.patch" || { echo "::error::potacat-arq-timeout.patch did not apply to pat $PAT_TAG"; exit 1; }
+  grep -q 'a.potacatApplyARQTimeout()' "$WORK/pat/app/connect.go" && test -f "$WORK/pat/app/potacat_arq_timeout.go" \
+    || { echo "::error::the ARQ timeout hook is missing from Pat after the patch"; exit 1; }
+  (
+    cd "$WORK/pat"
+    WL2K_VER="$(go list -m -f '{{.Version}}' github.com/la5nta/wl2k-go)"
+    [ "$WL2K_VER" = "$WL2K_GO_VERSION" ] || { echo "::error::pat $PAT_TAG pins wl2k-go $WL2K_VER, expected $WL2K_GO_VERSION: re-read third_party/pat/README.md before moving it"; exit 1; }
+    # Fetch first: on a fresh runner the module cache is empty and .Dir is "" until then.
+    go mod download || { echo "::error::could not download Pat's Go modules"; exit 1; }
+    go mod verify >/dev/null || { echo "::error::a Go module Pat depends on does not match go.sum"; exit 1; }
+    WL2K_DIR="$(go list -m -f '{{.Dir}}' github.com/la5nta/wl2k-go)"
+    [ -n "$WL2K_DIR" ] && [ -d "$WL2K_DIR" ] || { echo "::error::wl2k-go $WL2K_VER is not in the module cache after download"; exit 1; }
+    grep -q 'DefaultARQTimeout = 90 \* time.Second' "$WL2K_DIR/transport/ardop/ardop.go" \
+      && grep -q 'func (tnc \*TNC) SetARQTimeout(d time.Duration) error' "$WL2K_DIR/transport/ardop/tnc.go" \
+      || { echo "::error::wl2k-go $WL2K_VER no longer has the 90 s default or SetARQTimeout the Pat patch relies on"; exit 1; }
+    CGO_ENABLED=$CGO go build -trimpath -ldflags "-s -w" -o "$ROOT/assets/pat/pat$EXE" .
+    # wl2k-go is compiled into the binary: its MIT notice ships beside Pat's.
+    cp "$WL2K_DIR/LICENSE" "$ROOT/third_party/pat/LICENSE-wl2k-go"
+  )
   test -f "$ROOT/assets/pat/pat$EXE"
+  # The patched code must be in the binary that ships, not only in the tree.
+  grep -a -q 'POTACAT_ARDOP_ARQ_TIMEOUT' "$ROOT/assets/pat/pat$EXE" || { echo "::error::the built Pat does not carry the ARQ timeout patch"; exit 1; }
   "$ROOT/assets/pat/pat$EXE" version || true
   cp "$WORK/pat/LICENSE" "$ROOT/third_party/pat/LICENSE"
   echo "pat $PAT_TAG ($PAT_SHA) → assets/pat/pat$EXE"
@@ -142,7 +174,9 @@ if [[ " $want " == *" ardop "* ]]; then
       # (macos-14) do not (run 39906494543).
       ( cd "$WORK/ardop" && make ardopcf CC=cc CFLAGS="-g -MMD -std=gnu17 -Wno-int-conversion -D_DARWIN_C_SOURCE -include sys/types.h -I$ROOT/helpers/alsa-stub" LDFLAGS="" LDLIBS="-lm -lpthread" )
     else
-      ( cd "$WORK/ardop" && make ardopcf CFLAGS="-g -MMD -std=gnu17" )
+      # -Wno-int-conversion for the same rawhid.c PTT path as on macOS: GCC 14
+      # made it an error, and the release runners' GCC 11 only warns.
+      ( cd "$WORK/ardop" && make ardopcf CFLAGS="-g -MMD -std=gnu17 -Wno-int-conversion" )
     fi
     cp "$WORK/ardop/ardopcf$EXE" "$ROOT/assets/ardopcf/ardopcf$EXE"
     test -f "$ROOT/assets/ardopcf/ardopcf$EXE"

@@ -82,7 +82,9 @@ test('idle SSTV: the SSTV window tunes as part of the session, to the band idle 
   assert.ok(/openSstvPopout\(\{ freqKhz: autoSstvBand\.freqKhz, mode: autoSstvBand\.mode(, auto: true)? \}\)/.test(MAIN), 'the day/night band is handed to the window');
   assert.ok(/webContents\.send\('sstv-refocus-qsy', target\)/.test(MAIN), 'an already-open window gets it too');
   const pop = R('renderer/sstv-popout.js');
-  assert.ok(/q\.get\('freqKhz'\)\) selectAndTune/.test(pop), 'a new window tunes to it instead of its dropdown default');
+  // Since #292 the open-time tune goes through sstvAutoQsy, which takes main's band first.
+  assert.ok(/sstvAutoQsy\(q\.get\('freqKhz'\) \? \{ freqKhz: q\.get\('freqKhz'\), mode: q\.get\('mode'\) \} : null\)/.test(pop), 'a new window tunes to it instead of its dropdown default');
+  assert.ok(/function sstvAutoQsy\(target\) \{\n\s+if \(target && target\.freqKhz\) \{ selectAndTune\(target\.freqKhz, target\.mode\); return; \}/.test(pop));
 });
 
 test('a quality-gate reject reaches the bug-report log and ends the decode', () => {

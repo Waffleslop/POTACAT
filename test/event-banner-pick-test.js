@@ -117,6 +117,15 @@ console.log('pickBannerEvent — which event owns the banner:');
   p = pickAt(MID, [yearLong({ dismissed: true }), nineDay({ dismissed: true })]);
   check(p === null, 'every candidate dismissed → no banner');
 
+  // "Show this banner" off from the badge (Casey 2026-11-10: the WAS 250
+  // banner showed all year): gone for good, tracked or not.
+  p = pickAt(MID, [yearLong({ bannerHidden: true, optedIn: true })]);
+  check(p === null, 'banner switched off: a tracked year-long event no longer shows, every week');
+  p = pickAt(MID, [yearLong(), nineDay({ bannerHidden: true })]);
+  check(p && p.ev.id === 'yearlong', 'banner switched off for one event: the next event takes the banner');
+  p = pickAt('2026-09-10T12:00:00Z', [nineDay({ bannerHidden: true })]);
+  check(p === null, 'and it is not previewed as upcoming either');
+
   // Two nine-day events at once: same span → feed order breaks the tie.
   const other = { ...nineDay(), id: 'nineday-b', name: 'Other nine days' };
   p = pickAt(MID, [other, nineDay()]);
@@ -164,6 +173,20 @@ console.log('\n_contestsStatus — a one-shot whose window has passed:');
   check(s.kind === 'soon' && s.label === 'in 7d', 'days away is soon');
   s = contestsStatus({ whenRule: 'See sponsor' }, now);
   check(s.kind === 'unscheduled', 'no start date is unscheduled');
+}
+
+console.log('\nthe badge opens the event\'s settings; "Show this banner" is saved per event:');
+{
+  const html = readSrc(path.join(__dirname, '..', 'renderer', 'index.html'));
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
+  const preload = readSrc(path.join(__dirname, '..', 'preload.js'));
+  check(/<button type="button" id="event-badge" class="event-badge-inline"/.test(html), 'the 250 badge is a button');
+  check(/id="ebm-show"> Show this banner/.test(html) && /id="ebm-track"> Track my progress/.test(html), 'its menu: Show this banner, Track my progress');
+  check(/eventBadgeEl\.addEventListener\('click'/.test(src) && /window\.api\.setEventBanner\(\{ eventId: id, shown \}\)/.test(src), 'the menu switches the banner off and on');
+  check(/function eventBannerToggle\(ev, style\)/.test(src) && (src.match(/eventBannerToggle\(ev, /g) || []).length >= 3, 'a Banner switch in Settings > Events and Spots > Events & Awards is the way back');
+  check(/setEventBanner: \(data\) => ipcRenderer\.invoke\('set-event-banner', data\)/.test(preload), 'preload');
+  check(/ipcMain\.handle\('set-event-banner'/.test(main) && /settings\.events\[eventId\]\.bannerHidden = true;/.test(main), 'main saves it with the event');
+  check((main.match(/bannerHidden: !!\(eventStates\[ev\.id\] && eventStates\[ev\.id\]\.bannerHidden\),/g) || []).length === 2, 'both event payloads carry it (push and get-active-events)');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

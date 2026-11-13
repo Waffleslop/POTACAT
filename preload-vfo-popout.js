@@ -10,6 +10,11 @@ contextBridge.exposeInMainWorld('api', {
   setTuneStep: (hz) => ipcRenderer.send('tune-step-set', Number(hz)),
   onTuneStep: (cb) => ipcRenderer.on('tune-step', (_e, hz) => cb(hz)),
   tune: (frequency, mode, bearing) => ipcRenderer.send('tune', { frequency, mode, bearing }),
+  // A band button or typed frequency: in voice SSB main picks the band's sideband (#445).
+  tuneByBand: (frequency) => ipcRenderer.send('tune', { frequency, pickSideband: true }),
+  // Favourites (#329): starred Landmarks and Channels, as one tune list.
+  favoritesGet: () => ipcRenderer.invoke('favorites-get'),
+  onFavorites: (cb) => ipcRenderer.on('favorites', (_e, st) => cb(st)),
   setVfoLock: (locked) => ipcRenderer.send('vfo-set-lock', locked),
   onVfoLockState: (cb) => ipcRenderer.on('vfo-lock-state', (_e, locked) => cb(locked)),
   onTuneBlocked: (cb) => ipcRenderer.on('tune-blocked', (_e, msg) => cb(msg)),
@@ -48,7 +53,10 @@ contextBridge.exposeInMainWorld('api', {
   openWebSdrSettings: () => ipcRenderer.send('vfo-open-websdr-settings'),
   setAlwaysOnTop: (on) => ipcRenderer.send('vfo-set-always-on-top', on),
   // Mini VFO: shrink to a strip of `height` px, or grow back (main remembers the full size).
-  setVfoCompact: (on, height, save) => ipcRenderer.send('vfo-set-compact', { on: !!on, height: Number(height) || 0, save: save !== false }),
+  setVfoCompact: (on, height, save, width, fit) => ipcRenderer.send('vfo-set-compact', { on: !!on, height: Number(height) || 0, save: save !== false, width: Number(width) || 0, fit: !!fit }),
+  // Small VFO Scan: start or stop the main window's spot scan (or the phone's).
+  scanToggle: () => ipcRenderer.send('vfo-scan-toggle'),
+  onScanState: (cb) => ipcRenderer.on('vfo-scan-state', (_e, d) => cb(d)),
   voiceMacroList: () => ipcRenderer.invoke('voice-macro-list'),
   voiceMacroLoad: (idx) => ipcRenderer.invoke('voice-macro-load', idx),
   getSettings: () => ipcRenderer.invoke('get-settings'),

@@ -249,5 +249,16 @@ test('a gateway list Pat cannot parse is recognised; other failures are not (Mer
   assert.strictEqual((main.match(/patClient\.rmslist\(/g) || []).length, 2, 'no other caller bypasses it');
 });
 
+// #336 (the gateway list keeps only the radio's bands) moved to
+// test/winlink-reach-test.js with the rule that replaced it.
+// #254: how many gateways the radio cannot call is its own field, the last
+// line inside the mail window's gateway list (not a sentence beside it).
+test('#254: the gateway reply carries how many were left out', () => {
+  const main = readSrc(require('path').join(__dirname, '..', 'main.js'));
+  const fn = main.slice(main.indexOf('async function winlinkGateways('), main.indexOf('let _winlinkGatewaysLogged'));
+  assert.ok(fn.includes('const leftOut = onBands.dropped || 0;') && fn.includes('list, predicted, note, leftOut };'));
+  assert.ok(!fn.slice(fn.indexOf('const note ='), fn.indexOf('const tell =')).includes('left out ('), 'the note is the ranking only');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

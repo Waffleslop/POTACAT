@@ -47,6 +47,8 @@ const TESTS = [
   'test/rig-family-test.js',
   'test/rigctld-attribution-test.js',
   'test/flrig-codec-test.js',
+  'test/cw-text-unsupported-link-test.js',
+  'test/cw-text-fallback-test.js',
   'test/dxcluster-login-test.js',
   'test/dxcluster-backoff-test.js',
   'test/audio-backpressure-test.js',
@@ -58,8 +60,10 @@ const TESTS = [
   'test/protocol-demux-parity-test.js',
   'test/jtcat-test.js',
   'test/jtcat-parser-test.js',
+  'test/jtcat-qso-card-test.js',     // QSO logged is a centred card in theme colours
   'test/ft8-engine-rebaseline-test.js',
   'test/guest-pass-test.js',
+  'test/pass-code-log-test.js',
   'test/guest-pass-onair-call-test.js', // the pass's station call is the on-air call (K3SBP on W7RTA's pass)
   'test/guest-pass-lease-end-test.js', // the end of a pass stops every transmitter and closes the guest socket
   'test/guest-pass-hopping-test.js', // guests hop between rigs; the owner takes over and hands back
@@ -78,6 +82,9 @@ const TESTS = [
   'test/sstv-realistic-rx-test.js',
   'test/sstv-audio-device-test.js',
   'test/sstv-live-path-test.js',
+  'test/sstv-drive-test.js', // #279: the SSTV Drive slider keeps 0, shows its value, and is never squeezed
+  'test/sstv-start-band-test.js', // #292: SSTV never tunes a radio to a band it is not set up for
+  'test/sstv-text-styles-test.js', // #327: typeface, outline, shadow, letter spacing per SSTV text layer
   'test/sstv-input-level-test.js',
   'test/voice-macros-test.js',
   'test/ts-wss-url-test.js',
@@ -160,6 +167,7 @@ const TESTS = [
   'test/event-registry-test.js',
   'test/events-catalog-test.js',
   'test/hunted-park-test.js',
+  'test/nfer-refs-test.js', // an n-fer's other parks, read from the activator's own spot comment (#353)
   'test/js8-audio-feed-test.js',
   'test/log-comment-test.js',
   'test/raw-cat-command-test.js',
@@ -172,19 +180,29 @@ const TESTS = [
   'test/wrl-packet-test.js',
   'test/jtcat-snr-floor-test.js', // Hunt does not call a CQ below the operator's signal floor (per band)
   'test/rx-spectrum-test.js', // the phone's VFO waterfall with no FT8 engine: Flex/Icom streams, the rig's sound card
+  'test/ft4222-library-test.js', // #360: FTDI's LibFT4222 names per platform (versioned Mac dylib + libftd2xx), Setup's copy plan, Mach-O archs, the loader's reason in Mac words
   'test/yaesu-scope-test.js', // the FT-710's own scope: frame parser, axis, helper exit codes, remote payload guard (was CI-only)
+  'test/k4-pan-test.js', // #396: the Elecraft K4's network panadapter (PAN 0x02): header, dBm, 850 points, fixed axis, wiring
+  'test/kenwood-scope-test.js', // #397: the TS-890S bandscope over USB/COM (DD0 5 -> DD4): lines, sweeps, axis, AI/DD0 read-first and put back, 115200, poll not disturbed
   'test/flex-scope-test.js', // the Flex's own panadapter as the band scope (Flex Direct), against a real 8600 capture
   'test/scope-digital-view-test.js', // the scope's tight view on a digital mode's decode window (Flex)
+  'test/sdr-failure-test.js', // #390: a WebSDR that would not come on says why in the VFO window, with Try again
   'test/kiwisdr-test.js', // KiwiSDR: settings after AR OK (firmware 1.902), receivers that allow no apps
   'test/listen-source-test.js', // who you hear: the radio, or the SDR where the radio cannot go (Casey 2026-10-30)
   'test/k4rvc-preset-flip-test.js', // an Icom's DATA flag folded into the mode the preset rules see; launch applies nothing
   'test/channels-test.js', // Directory > Channels: the saved frequency chart, CHIRP CSV both ways (KL4XQ, KC8DHX lists)
   'test/memory-recall-test.js', // #308: a Channels entry recalls the radio's own memory; any later tune leaves memory mode first
   'test/app-theme-test.js', // design-system themes reach every window; was missing from this list, so a stale check went unseen
+  'test/design-tokens-test.js', // tokens.css is generated and current, theme ids and order match the phone; was missing from this list
+  'test/look-picker-test.js', // #376: Light / Dark / System, the six swatches in order, contrast 4.5:1 per theme
   'test/vfo-compact-test.js', // VFO window: Audio on/off, the mini VFO strip, POTACAT colours for PTT, sliders and CW
+  'test/vfo-layout-test.js', // VFO window: Large and Small VFO layouts, one-line Small VFO, CAT buttons, Scan
+  'test/main-window-layout-fixes-test.js', // #285 Log button "L", #284 HF Nets check mark, #298 HOLD TO TALK off screen
   'test/wd3d-activator-test.js', // WD3D: toolbar wraps at full screen; a two-fer/n-fer spot fills every P2P park
   'test/wspr-run-time-test.js', // WSPR beacon runs as long as the operator sets (K2BDE); a PTT port keys on RTS by default (K5LEB)
   'test/remote-client-yield-test.js', // a desktop kicked by another of the owner's devices yields the rig (W0EGR)
+  'test/remote-spots-one-writer-test.js', // #246: a remote PC's spot list has one writer (the shack's while linked)
+  'test/favorites-test.js', // #329: starred Landmarks and Channels, per operator, in Directory, the VFO window, the band scope and ECHOCAT
   'test/icom-scope-test.js', // an Icom's own band scope over CI-V: parser, codec events, the owner's 30 s recording
   'test/adif-import-refs-test.js', // POTA_REF-only logs (QLog) get SIG/SIG_INFO on import; the Logbook shows them (KC9FOZ)
   'test/icom-lan-voice-test.js', // voice over an Icom's LAN: DATA mode, or USB/LSB when DATA OFF MOD = LAN (EA1BZN)
@@ -213,21 +231,36 @@ const TESTS = [
   'test/activation-log-test.js',
   'test/activation-program-test.js',
   'test/activation-auto-end-test.js', // #147: a forgotten activation ends at the UTC day change or after 6 h with no contacts
+  'test/activation-logging-388-test.js', // #388: a habit Tab after the RST jump is absorbed; a corrected park grid is kept per park
+  'test/state-backfill-test.js', // #389: QRZ state fill counts only tracked entities (never VK) and names the QSOs left
   'test/diagnostic-snapshot-test.js',
   'test/mercury-process-test.js',
   'test/winlink-pat-test.js',
+  'test/winlink-reach-test.js',      // a radio session goes only where this radio can transmit
   'test/winlink-units-test.js',
   'test/winlink-spectrum-test.js',
   'test/winlink-main-wiring-test.js',
   'test/winlink-vara-test.js',
+  'test/winlink-vara-anywhere-test.js', // #287: VARA HF and VARA FM on Linux, macOS and Windows, at a host and port; a fake VARA TNC (real Pat when its binary is present)
   'test/winlink-connect-test.js', // #128: /api/connect over http.request with no headers timeout; VARA and ARDOP send the same request
   'test/direwolf-agw-monitor-test.js', // #128: what Dire Wolf heard, over its AGW port's monitor mode
+  'test/packet-rig-mode-test.js', // #128 N5XHI FT-857D: Packet mode on the radio per rig; Automatic is the old behaviour for every family
   'test/packet-timing-test.js', // #257 NA4DQ IC-7100: Dire Wolf TX delay/tail settings, the packet PTT hold, no "decoded nothing" after Pat connected
   'test/modem-play-over-test.js', // #300: gaps and backlog drops inside a transmitted frame are counted and logged
   'test/modem-tx-burst-test.js', // #128: one log line per modem over — PTT, audio start/end, peak dBFS, unkey
   'test/winlink-voacap-probe-test.js', // #278: the hosted VOACAP is checked once; when it is missing Pat is not pointed at it
   'test/modem-prekey-test.js', // #289: modem audio that arrives before its PTT request is sent at key-down, not discarded
+  'test/winlink-diag-test.js', // #295: the modem's events and the audio's health in the session log; modem logs in Report a Bug
   'test/winlink-busy-wait-test.js', // #296: Keep waiting stays chosen, Stop ends Pat's busy wait, the watchdog does not call the wait a stall
+  'test/modem-audio-lane-test.js', // #187: the modem's audio off the main process; credit, drain, counted cuts
+  'test/winlink-awake-test.js', // #187: a radio Winlink session holds off App Nap (the hidden bridge window starved on a Mac)
+  'test/winlink-history-test.js', // #254: gateway history from Pat's event log, My gateways (saved gateways)
+  'test/winlink-outcome-test.js', // #425: how a session ended is worded in one place; Pat's reply never reaches a status; one summary line per session
+  'test/winlink-pat-recover-test.js', // #430: after an Abort, Connect restarts a Pat that is stuck on the last call; a session never starts on top of a dial (VARA)
+  'test/winlink-auto-retry-test.js', // #425: one automatic retry after a dropped link, never after no answer or Abort; countdown, channel check, Cancel
+  'test/winlink-arq-timeout-test.js', // #425: the ARDOP link timeout is a setting; it reaches our Pat build through the environment; the summary says the value in force
+  'test/winlink-contacts-test.js', // the Winlink address book, and the Position report and POTA spot forms
+  'test/winlink-summary-store-test.js', // #425: the session summary lines survive a restart, so Report a Bug still holds the session that dropped
   'test/rigctld-shim-hamlib-test.js',
   'test/rigctld-died-test.js',
   'test/interface-ptt-test.js',
@@ -246,6 +279,7 @@ const TESTS = [
   'test/cloud-shacks-test.js', // a Cloud address per shack (<call>-<name>.potacat.com), so the phone can switch shacks
   'test/icom-ptt-memory-mode-test.js', // nj7n_nate: no frequency re-send around an Icom PTT mode swap (memory mode)
   'test/ssb-sideband-tune-test.js', // a 60 m SSB spot tunes USB
+  'test/ssb-sideband-one-rule-test.js', // #445: band buttons and typed frequencies pick LSB/USB by band in voice SSB; one copy of the rule
   'test/capture-stall-test.js', // kc8zp_ryan: JTCAT capture rebuilt when the OS mutes/suspends it or it stops delivering
   'test/jtcat-capture-gate-test.js', // #133: a remote-started FT8 capture is restarted like a desktop one; one capture build at a time
   'test/jtcat-log-comment-test.js', // dcxweaver: the "JTCAT FT8" COMMENT is optional (default on)
@@ -259,6 +293,8 @@ const TESTS = [
   'test/js8-remote-test.js',
   'test/idle-activity-test.js',
   'test/idle-mode-remote-test.js',
+  'test/remote-web-ft8-first-open-test.js',
+  'test/remote-web-mail-test.js', // #425 web W1, W2, W4: the Mail tab puts the radio back, shows how a session ended, and says why
   'test/js8call-threads-test.js',
   'test/js8call-main-wiring-test.js',
   'test/renderer-csp-test.js',
@@ -319,6 +355,8 @@ const TESTS = [
   'test/jtty-codec-test.js',
   'test/jtty-decoder-test.js',
   'test/jtty-engine-test.js',
+  'test/jtcat-skip-tx1-steps-test.js', // the QSO steps show the report Faster contacts really sends
+  'test/jtcat-auto-respot-test.js', // opt-in re-spot of a hunted activator after a JTCAT contact
   'test/jtty-remote-test.js',
   'test/jtty-txfreq-remote-test.js',
   'test/nocat-rig-test.js',
@@ -365,10 +403,12 @@ const TESTS = [
   'test/ae5je-settings-audio-test.js', // AE5JE: audio devices follow their name; bug report says whether settings saves land
   'test/page-script-globals-test.js', // one top-level scope per page: a second const of the same name stops a script (WB3EGD, the dead 1.13.5 audio heal)
   'test/window-min-size-test.js',     // N0KAH: no window shrinks past its own controls
+  'test/window-rules-test.js',        // every window opens in the theme and remembers its place
   'test/yaesu-fa-digits-test.js',
   'test/log-as-test.js',
   'test/save-qso-stall-test.js',
   'test/pota-sync-login-test.js',
+  'test/pota-sync-log-test.js', // #406: the pota.app Connect step logs names and lengths, never a value
   'test/qso-expand-test.js',
   'test/sota-chase-test.js', // #191: a POTA-primary record carrying a sotaRef uploads its SOTA chase
   'test/spot-programs-test.js', // POTA + SOTA spot: both pills, summit in the Ref column
@@ -442,6 +482,9 @@ const TESTS = [
   'test/worked-other-test.js',
   'test/decode-contract-test.js',
   'test/layout-alignment-test.js',
+  'test/freq-dots-test.js', // every frequency an operator reads is written the VFO way, 14.074.00 (Casey 2026-11-11)
+  'test/settings-contrast-test.js', // Settings meets the contrast rule in every theme (VARA button in She's On Frequency); rendered: scripts/settings-contrast-audit.js
+  'test/settings-pi-test.js',
   'test/log-form-layout-test.js', // #240: the Log QSO form is wider, resizable with its width remembered, and its paired fields wrap at any Text size / display scale
   'test/g90-hamlib-model-test.js',
   'test/voice-data-mode-test.js',

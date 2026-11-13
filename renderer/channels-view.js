@@ -21,6 +21,10 @@
   let dragId = null;
   let lastSearch = '';
   let selectedId = null;
+  // Starred channels (#329, lib/favorites.js); main owns them, app.js passes them in.
+  let favIds = [];
+  const FAV = '__fav';
+  let onFav = null;   // (id) => toggle, from app.js
 
   const el = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -70,8 +74,8 @@
     const sel = el('chn-group-filter');
     if (!sel) return;
     const cur = sel.value || 'all';
-    sel.innerHTML = '<option value="all">All groups</option>' + groups.map((g) => `<option value="${esc(g)}">${esc(g)}</option>`).join('');
-    sel.value = groups.indexOf(cur) >= 0 ? cur : 'all';
+    sel.innerHTML = '<option value="all">All groups</option><option value="' + FAV + '">Favorites</option>' + groups.map((g) => `<option value="${esc(g)}">${esc(g)}</option>`).join('');
+    sel.value = cur === FAV || groups.indexOf(cur) >= 0 ? cur : 'all';
   }
 
   function render(search) {
@@ -89,13 +93,19 @@
       return;
     }
     let shown = 0, hidden = 0;
-    for (const g of groups) {
-      if (gfilter !== 'all' && g !== gfilter) continue;
-      const rows = saved.list.filter((c) => (c.group || 'Other') === g && (!q || [c.name, c.note, c.group, c.mode, c.tone].some((v) => String(v || '').toLowerCase().includes(q)) || String(c.khz).includes(q) || (c.khz / 1000).toFixed(3).includes(q)));
+    // Favorites: one group of the starred channels, in starred order.
+    const favView = gfilter === FAV;
+    const groupList = favView ? [FAV] : groups;
+    for (const g of groupList) {
+      if (!favView && gfilter !== 'all' && g !== gfilter) continue;
+      const inGroup = favView
+        ? favIds.map((id) => saved.list.find((c) => c.id === id)).filter(Boolean)
+        : saved.list.filter((c) => (c.group || 'Other') === g);
+      const rows = inGroup.filter((c) => (!q || [c.name, c.note, c.group, c.mode, c.tone].some((v) => String(v || '').toLowerCase().includes(q)) || String(c.khz).includes(q) || (c.khz / 1000).toFixed(3).includes(q) || window.FreqDots.fromKhz(c.khz).includes(q)));
       if (!rows.length) continue;
       const gr = document.createElement('tr');
       gr.className = 'chn-group';
-      gr.innerHTML = `<td colspan="8">${esc(g)} <span class="chn-status">${rows.length}</span></td>`;
+      gr.innerHTML = `<td colspan="8">${esc(favView ? 'Favorites' : g)} <span class="chn-status">${rows.length}</span></td>`;
       body.appendChild(gr);
       for (const c of rows) {
         const h = hearable(c);
@@ -107,15 +117,16 @@
         tr.dataset.id = c.id;
         tr.tabIndex = 0;
         tr.title = h.ok ? (h.viaSdr ? 'Outside the radio’s range; POTACAT plays it through your SDR' : 'Click to tune') : 'Neither the radio nor an SDR you have set up can receive this';
-        tr.innerHTML = `<td><span class="chn-grip" title="Drag to reorder">☰</span></td>`
+        tr.innerHTML = `<td class="chn-lead"><span class="chn-grip" title="Drag to reorder">☰</span>${window.Favorites ? window.Favorites.starHtml(favIds.includes(c.id), c.name) : ''}</td>`
           + `<td class="chn-name">${esc(c.name)}${c.mem != null ? `<span class="chn-sdr" title="Recalls memory ${c.mem} on the radio, offset and tone included">M${c.mem}</span>` : ''}${h.viaSdr ? '<span class="chn-sdr">SDR</span>' : ''}</td>`
-          + `<td class="chn-mhz">${(c.khz / 1000).toFixed(c.khz % 1 ? 5 : 4).replace(/0+$/, '').replace(/\.$/, '')}</td>`
+          + `<td class="chn-mhz">${window.FreqDots.fromKhz(c.khz)}</td>`
           + `<td>${esc(c.mode)}</td>`
           + `<td>${esc(C.formatOffset(c.offsetKhz))}</td>`
           + `<td>${esc(c.tone)}</td>`
           + `<td class="chn-note" title="${esc(c.note)}">${esc(c.note)}</td>`
           + `<td class="chn-tools"><button type="button" class="chn-btn" data-act="edit">Edit</button> <button type="button" class="chn-btn chn-btn-danger" data-act="del">Delete</button></td>`;
         tr.addEventListener('click', (e) => {
+          if (e.target && e.target.closest && e.target.closest('[data-fav]')) { e.stopPropagation(); if (onFav) onFav(c.id); return; }
           const act = e.target && e.target.dataset ? e.target.dataset.act : '';
           if (act === 'edit') { e.stopPropagation(); openEditor(c); return; }
           if (act === 'del') { e.stopPropagation(); saved = C.remove(saved, c.id); status(`Deleted ${c.name}`); persist(); return; }
@@ -199,6 +210,7 @@
     api = opts.api;
     tuneFn = opts.tune;
     radioKhzFn = opts.radioKhz || radioKhzFn;
+    onFav = opts.onFavorite || null;
     const on = (id, fn) => { const b = el(id); if (b) b.addEventListener('click', fn); };
     on('chn-add', () => openEditor(null));
     on('chn-import', async () => {
@@ -235,6 +247,12 @@
     render(lastSearch);
   }
   function refresh() { render(lastSearch); }
+  function setFavorites(ids) {
+    const next = Array.isArray(ids) ? ids.slice() : [];
+    if (JSON.stringify(next) === JSON.stringify(favIds)) return;
+    favIds = next;
+    render(lastSearch);
+  }
 
-  window.ChannelsView = { init, render, load, setList, setReach, refresh, openEditor };
+  window.ChannelsView = { init, render, load, setList, setReach, refresh, openEditor, setFavorites };
 })();

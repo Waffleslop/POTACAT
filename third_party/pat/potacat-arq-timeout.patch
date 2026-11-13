@@ -1,0 +1,82 @@
+diff --git a/app/connect.go b/app/connect.go
+index 65bf029..908eff9 100644
+--- a/app/connect.go
++++ b/app/connect.go
+@@ -287,6 +287,11 @@ func (a *App) initARDOP() error {
+ 		return fmt.Errorf("ARDOP TNC initialization failed: %w", err)
+ 	}
+ 
++	// POTACAT: the ARQ timeout can be set from the environment (potacat_arq_timeout.go).
++	if err := a.potacatApplyARQTimeout(); err != nil {
++		return err
++	}
++
+ 	a.ardop.SetBusyFunc(a.onBusyChannel)
+ 
+ 	if !a.config.Ardop.ARQBandwidth.IsZero() {
+diff --git a/app/potacat_arq_timeout.go b/app/potacat_arq_timeout.go
+new file mode 100644
+index 0000000..dd75210
+--- /dev/null
++++ b/app/potacat_arq_timeout.go
+@@ -0,0 +1,60 @@
++// POTACAT modification to Pat v1.0.0. NOT part of upstream Pat.
++// Added by the POTACAT project (https://github.com/Waffleslop/POTACAT) and
++// offered under the same MIT license as Pat (see the LICENSE file).
++// Report problems with this file to POTACAT, not to Pat's authors.
++
++package app
++
++import (
++	"fmt"
++	"log"
++	"os"
++	"strconv"
++	"strings"
++	"time"
++
++	"github.com/la5nta/wl2k-go/transport/ardop"
++)
++
++// potacatARQTimeoutEnv names the environment variable holding the ARQ link
++// timeout for the ARDOP modem, in whole seconds.
++const potacatARQTimeoutEnv = "POTACAT_ARDOP_ARQ_TIMEOUT"
++
++// The range ardopcf's ARQTIMEOUT host command accepts.
++const (
++	potacatARQTimeoutMin = 30
++	potacatARQTimeoutMax = 240
++)
++
++// potacatARQTimeout reads a value of POTACAT_ARDOP_ARQ_TIMEOUT. ok is false
++// for anything but a whole number of seconds from 30 to 240.
++func potacatARQTimeout(v string) (d time.Duration, ok bool) {
++	n, err := strconv.Atoi(strings.TrimSpace(v))
++	if err != nil || n < potacatARQTimeoutMin || n > potacatARQTimeoutMax {
++		return 0, false
++	}
++	return time.Duration(n) * time.Second, true
++}
++
++// potacatApplyARQTimeout runs once each time Pat has opened the ARDOP modem.
++// Opening it has already set the timeout to ardop.DefaultARQTimeout (90 s).
++// With the variable unset or empty nothing more is sent, so Pat behaves as
++// upstream does. With a valid value the timeout is set again to that value.
++// An invalid value is ignored and said in the log.
++func (a *App) potacatApplyARQTimeout() error {
++	v, set := os.LookupEnv(potacatARQTimeoutEnv)
++	if !set || strings.TrimSpace(v) == "" {
++		return nil
++	}
++	d, ok := potacatARQTimeout(v)
++	if !ok {
++		log.Printf("POTACAT: ignoring %s=%q (want whole seconds, %d to %d); the ARQ timeout stays at %d s",
++			potacatARQTimeoutEnv, v, potacatARQTimeoutMin, potacatARQTimeoutMax, int(ardop.DefaultARQTimeout/time.Second))
++		return nil
++	}
++	if err := a.ardop.SetARQTimeout(d); err != nil {
++		return fmt.Errorf("unable to set ARQ timeout for ardop TNC: %w", err)
++	}
++	log.Printf("POTACAT: ARQ timeout set to %d s (%s)", int(d/time.Second), potacatARQTimeoutEnv)
++	return nil
++}

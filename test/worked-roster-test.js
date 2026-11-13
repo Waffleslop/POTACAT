@@ -172,7 +172,10 @@ test('wiring: main.js builds the roster from workedQsos, adds live, serves and p
   const bf = main.slice(main.indexOf('async function wasBackfillStates('), main.indexOf('async function wasBackfillStates(') + 6000);
   assert.ok(/mutateLog\(logPath,[\s\S]*\{ sink: qsoLogSink \}\)/.test(bf));
   assert.ok(!/rewriteAdifFile|appendRawQso/.test(bf));
-  assert.ok(/stateKeys\(ent, state\)\.length/.test(bf), 'a state QRZ lists that is not one for that entity is never written');
+  // The per-record decision lives in lib/state-backfill.js (#389): main hands it WorkedRoster.stateKeys
+  assert.ok(/stateKeys: WorkedRoster\.stateKeys/.test(bf) && /StateBackfill\.decide\(/.test(bf), 'main decides through lib/state-backfill.js');
+  const lib = readSrc(path.join(__dirname, '..', 'lib', 'state-backfill.js'));
+  assert.ok(/if \(!ctx\.stateKeys\(ent, st\)\.length\) return \{ state: ''/.test(lib), 'a state QRZ lists that is not one for that entity is never written');
 });
 
 test('wiring: renderer loads the roster module and the view, preload exposes the channels', () => {

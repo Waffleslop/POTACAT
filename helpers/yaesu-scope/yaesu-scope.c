@@ -15,8 +15,9 @@
  *
  * No FTDI SDK is needed to build this. The dozen entry points are declared
  * here and resolved at run time from the FTDI libraries the operator installs
- * (Windows: ftd2xx.dll + LibFT4222-64.dll; Linux/macOS: libft4222, which
- * carries the D2XX calls too). Nothing of FTDI's ships in the installer, and
+ * (Windows: ftd2xx.dll + LibFT4222-64.dll; Linux: libft4222.so, which carries
+ * the D2XX calls too; macOS: libft4222.<version>.dylib, which loads
+ * libftd2xx.dylib from beside it). Nothing of FTDI's ships in the installer, and
  * "library missing" is a clean exit code instead of a loader failure.
  *
  * Exit codes (mirrored in lib/yaesu-scope.js HELPER_EXIT — keep in step):
@@ -66,6 +67,7 @@ typedef HMODULE lib_t;
 #  include <time.h>
 #  include <unistd.h>
 #  include <sys/stat.h>
+#  include <dirent.h>
 #  define FTAPI
 typedef void* lib_t;
 #  define lib_open(name) dlopen((name), RTLD_NOW)
@@ -168,10 +170,15 @@ static int stdin_is_pipe(void) {
 #endif
 }
 #ifdef _WIN32
+/* ReadFile on the raw handle, never fread: fread holds the C runtime's stdin
+ * lock while it blocks, and the runtime's exit() flushes every stream under
+ * its lock, so a helper that returned 3 ("could not open") stayed alive until
+ * the parent closed stdin (#320, ride1226's FT-710, 2026-11-10). */
 static unsigned __stdcall stdin_watch(void* arg) {
   (void)arg;
   char c;
-  while (fread(&c, 1, 1, stdin) == 1) { /* ignore input */ }
+  DWORD got = 0;
+  while (ReadFile(GetStdHandle(STD_INPUT_HANDLE), &c, 1, &got, NULL) && got == 1) { /* ignore input */ }
   g_stop = 1;
   return 0;
 }
@@ -191,6 +198,112 @@ static void start_stdin_watch(void) {
 #endif
 
 /* ─── Loading the FTDI libraries at run time ─────────────────────────────── */
+#ifndef _WIN32
+/* macOS and Linux (GitHub #360). FTDI's Mac package names the library
+ * libft4222.<version>.dylib, never plainly libft4222.dylib, and it loads
+ * libftd2xx.dylib by bare name from beside it. So each folder is scanned for
+ * any libft4222* file, libftd2xx.dylib in the same folder is loaded first
+ * (RTLD_GLOBAL, so its install name is already satisfied), and every file
+ * that exists and still will not load prints the loader's own reason:
+ *     yaesu-scope: load failed: <path>: <dlerror>
+ * lib/ft4222-library.js reads that line. POTACAT_FTDI_DIR is the folder
+ * Station Setup copies the files into; it is searched first. */
+static int g_found_unloadable = 0;
+
+static void one_line(char* s) { for (; s && *s; s++) if (*s == '\n' || *s == '\r') *s = ' '; }
+
+static int is_ft4222_name(const char* n) {
+  if (strncmp(n, "libft4222", 9) != 0) return 0;
+#  ifdef __APPLE__
+  size_t len = strlen(n);
+  return len >= 15 && strcmp(n + len - 6, ".dylib") == 0;
+#  else
+  return strstr(n, ".so") != NULL;
+#  endif
+}
+
+static int file_exists(const char* p) { struct stat st; return stat(p, &st) == 0 && S_ISREG(st.st_mode); }
+
+/* dlopen a file that exists; on failure print why. */
+static lib_t open_existing(const char* path, int global) {
+  lib_t h = dlopen(path, RTLD_NOW | (global ? RTLD_GLOBAL : RTLD_LOCAL));
+  if (h) { fprintf(stderr, "yaesu-scope: loaded %s\n", path); return h; }
+  char why[1024];
+  const char* e = dlerror();
+  snprintf(why, sizeof why, "%s", e ? e : "(the loader gave no reason)");
+  one_line(why);
+  fprintf(stderr, "yaesu-scope: load failed: %s: %s\n", path, why);
+  return NULL;
+}
+
+/* The libft4222 in one folder, with its libftd2xx loaded first. */
+static lib_t load_from_dir(const char* dir) {
+  if (!dir || !*dir) return NULL;
+  DIR* d = opendir(dir);
+  if (!d) return NULL;
+  char best[512] = { 0 };
+  struct dirent* e;
+  while ((e = readdir(d)) != NULL) {
+    if (!is_ft4222_name(e->d_name)) continue;
+    /* The plain name wins; otherwise the name that sorts last (the newest version, in practice). */
+    int plain = !strcmp(e->d_name, "libft4222.dylib") || !strcmp(e->d_name, "libft4222.so");
+    if (plain) { snprintf(best, sizeof best, "%s", e->d_name); break; }
+    if (!best[0] || strcmp(e->d_name, best) > 0) snprintf(best, sizeof best, "%s", e->d_name);
+  }
+  closedir(d);
+  if (!best[0]) return NULL;
+  char p[1024];
+#  ifdef __APPLE__
+  snprintf(p, sizeof p, "%s/libftd2xx.dylib", dir);
+  if (file_exists(p)) open_existing(p, 1);
+  else fprintf(stderr, "yaesu-scope: note: no libftd2xx.dylib in %s (FTDI's libft4222 needs it beside it)\n", dir);
+#  endif
+  snprintf(p, sizeof p, "%s/%s", dir, best);
+  if (!file_exists(p)) return NULL;
+  lib_t h = open_existing(p, 0);
+  if (!h) g_found_unloadable = 1;
+  return h;
+}
+
+static lib_t load_ft4222_unix(void) {
+  const char* dirs[] = {
+    getenv("POTACAT_FTDI_DIR"),
+#  ifdef __APPLE__
+    "/usr/local/lib", "/opt/homebrew/lib",
+#  else
+    "/usr/local/lib", "/usr/lib", "/usr/lib/x86_64-linux-gnu", "/usr/lib/aarch64-linux-gnu", "/usr/lib/arm-linux-gnueabihf",
+#  endif
+    NULL,
+  };
+  const int ndirs = (int)(sizeof dirs / sizeof dirs[0]) - 1;
+  for (int i = 0; i < ndirs; i++) {
+    lib_t h = load_from_dir(dirs[i]);
+    if (h) return h;
+  }
+  /* Last: bare names, for an ldconfig'd Linux install or DYLD/LD_LIBRARY_PATH.
+   * Their failures are only "not here" and are printed only if nothing loads. */
+  static const char* names[] = {
+    "libft4222.so", "libft4222.so.1.4.7", "libft4222.so.1.4.6", "libft4222.so.1.4.4.44",
+    "libft4222.dylib",
+    NULL,
+  };
+  char misses[2048] = { 0 };
+  for (int i = 0; names[i]; i++) {
+    lib_t h = dlopen(names[i], RTLD_NOW);
+    if (h) { fprintf(stderr, "yaesu-scope: loaded %s\n", names[i]); return h; }
+    const char* e = dlerror();
+    size_t used = strlen(misses);
+    if (used < sizeof misses - 2) snprintf(misses + used, sizeof misses - used, "  %s: %s\n", names[i], e ? e : "?");
+  }
+  if (g_found_unloadable) {
+    fprintf(stderr, "yaesu-scope: libft4222 found but would not load (reason above)\n");
+  } else {
+    fprintf(stderr, "yaesu-scope: libft4222 not found (install FTDI's LibFT4222; on Linux run ldconfig after). Tried by name:\n%s", misses);
+  }
+  return NULL;
+}
+#endif
+
 static int load_ftdi(void) {
 #ifdef _WIN32
   lib_t d2xx = lib_open("ftd2xx.dll");
@@ -206,15 +319,8 @@ static int load_ftdi(void) {
   ft.GetDeviceInfoDetail = (pFT_GetDeviceInfoDetail)lib_sym(d2xx, "FT_GetDeviceInfoDetail");
   lib_t l = l4222;
 #else
-  static const char* names[] = {
-    "libft4222.so", "libft4222.so.1.4.7", "libft4222.so.1.4.6", "libft4222.so.1.4.4.44",
-    "/usr/local/lib/libft4222.so", "/usr/lib/libft4222.so",
-    "libft4222.dylib", "/usr/local/lib/libft4222.dylib", "/opt/homebrew/lib/libft4222.dylib",
-    NULL,
-  };
-  lib_t l = NULL;
-  for (int i = 0; names[i] && !l; i++) l = lib_open(names[i]);
-  if (!l) { fprintf(stderr, "yaesu-scope: libft4222 not found (install FTDI's LibFT4222; on Linux run ldconfig after)\n"); return 0; }
+  lib_t l = load_ft4222_unix();
+  if (!l) return 0;
   ft.OpenEx = (pFT_OpenEx)lib_sym(l, "FT_OpenEx");
   ft.Close = (pFT_Close)lib_sym(l, "FT_Close");
   ft.SetTimeouts = (pFT_SetTimeouts)lib_sym(l, "FT_SetTimeouts");

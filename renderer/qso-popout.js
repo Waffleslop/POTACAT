@@ -3,6 +3,8 @@
 // both work. Sets data-theme and (in charcoal dark variant only) the
 // data-dark-variant attribute on <html>.
 function _applyPopoutTheme(payload) {
+  // The shared rule (popout-theme-boot*.js) also sets data-ds (#376).
+  if (window.applyPopoutTheme) return window.applyPopoutTheme(payload);
   const theme = typeof payload === 'string'
     ? payload
     : ((payload && payload.theme) || 'dark');
@@ -832,7 +834,7 @@ function updateMap() {
     // Build popup content
     const lines = qsos.slice(0, 8).map(q => {
       const d = q.QSO_DATE ? q.QSO_DATE.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : '';
-      const parts = [d, q.FREQ ? q.FREQ + ' MHz' : '', q.MODE || '', q.SIG_INFO || ''].filter(Boolean);
+      const parts = [d, q.FREQ ? (FreqDots.mhzMhz(q.FREQ) || q.FREQ + ' MHz') : '', q.MODE || '', q.SIG_INFO || ''].filter(Boolean);
       return parts.join(' &middot; ');
     });
     if (qsos.length > 8) lines.push(`... +${qsos.length - 8} more`);
@@ -1341,7 +1343,7 @@ function renderDupeGroups() {
         radio,
         dupeCell(f.CALL),
         dupeCell(`${date} ${time}`),
-        dupeCell(f.FREQ ? (parseFloat(f.FREQ) * 1000).toFixed(1) : f.BAND),
+        dupeCell(f.FREQ ? FreqDots.fromMhz(f.FREQ) : f.BAND),
         dupeCell(mode),
         dupeCell(f.BAND),
         dupeCell(refs, 'dupe-ref'),
@@ -1548,10 +1550,7 @@ async function resolveAllParkLocations() {
 // --- Initial load ---
 (async function init() {
   const settings = await window.api.getSettings();
-  _applyPopoutTheme({
-    theme: settings.lightMode ? 'light' : 'dark',
-    variant: settings.darkVariant || 'navy',
-  });
+  if (settings.themeNow) _applyPopoutTheme(settings.themeNow);
   if (settings.colorblindMode) accentGreen = '#4fc3f7';
   homeGrid = settings.grid || '';
 
