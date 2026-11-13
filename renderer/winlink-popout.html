@@ -214,7 +214,15 @@
     .wl-hdr b { color: var(--text-primary); }
     .wl-body { white-space: pre-wrap; word-break: break-word; font-family: monospace; user-select: text; }
     .wl-attach { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
-    .wl-reader-actions { display: flex; gap: 6px; margin-bottom: 8px; }
+    .wl-reader-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+    .wl-act-msg:empty { display: none; }
+    .wl-act-msg { margin-bottom: 8px; font-size: 13px; }
+    .wl-act-msg.bad { color: var(--accent-red-text, var(--accent-red, #e94560)); }
+    .wl-del-note { margin-bottom: 8px; font-size: 13px; color: var(--text-dim); }
+    .wl-att-name { font-size: 12px; color: var(--text-dim); align-self: center; }
+    .wl-del-head { padding: 8px 10px; border-bottom: 1px solid var(--border-primary); font-size: 13px; background: var(--bg-secondary); }
+    .wl-del-head select { font-size: 13px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 4px; padding: 2px 4px; }
+    .wl-del-head-note { margin-top: 4px; color: var(--text-dim); }
 
     /* Compose, laid out like a mail program (Casey 2026-11-11): left-aligned
        labels in one column, full-width fields with a hairline under each, the
@@ -406,6 +414,7 @@
       <div class="wl-folder" data-box="out">Outbox <span class="wl-count" id="wl-c-out"></span></div>
       <div class="wl-folder" data-box="sent">Sent <span class="wl-count" id="wl-c-sent"></span></div>
       <div class="wl-folder" data-box="archive">Archive <span class="wl-count" id="wl-c-archive"></span></div>
+      <div class="wl-folder" data-box="deleted">Deleted <span class="wl-count" id="wl-c-deleted"></span></div>
       <button class="wl-btn primary" id="wl-new">New message</button>
       <button class="wl-btn" id="wl-tpl-btn" aria-haspopup="menu" aria-expanded="false" title="Start from a template: Position report, POTA spot, or your own">Templates</button>
       <span class="wl-spacer"></span>
@@ -538,6 +547,7 @@
   <script src="../lib/winlink-spectrum.js"></script>
   <script src="../lib/rig-bands.js"></script>
   <script src="../lib/winlink-contacts.js"></script>
+  <script src="../lib/winlink-mail-actions.js"></script>
   <script src="../lib/pota-email-spot.js"></script>
   <script src="winlink-popout.js"></script>
 </body>

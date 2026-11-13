@@ -451,6 +451,8 @@ const WinlinkReach = require('./lib/winlink-reach');
 const PotaEmailSpot = require('./lib/pota-email-spot');
 const { WinlinkClient } = require('./lib/winlink-client');
 const WinlinkStateLib = require('./lib/winlink-state');
+const WinlinkMailActions = require('./lib/winlink-mail-actions'); // Archive, Deleted, Reply all: which moves and buttons (#462, #475)
+const WinlinkDeleted = require('./lib/winlink-deleted'); // POTACAT's Deleted folder inside Pat's mailbox, and its purge (#475)
 const { createRigctldServer } = require('./lib/rigctld-server');
 const ArdopProcess = require('./lib/ardop-process');
 const DirewolfProcess = require('./lib/direwolf-process');
@@ -10952,6 +10954,8 @@ function winlinkPayload() {
     lastSession: settings.winlinkLastSession || null,
     noticeAccepted: !!settings.winlinkNoticeAcceptedAt,
     noticeText: WINLINK_NOTICE_TEXT,
+    // The Deleted folder empties itself after this many days (0 = never, #475).
+    deletedDays: WinlinkMailActions.deletedDays(settings.winlinkDeletedDays),
     mode: WinlinkModes.pickWinlinkMode(winlinkState.snapshot().modes, settings.winlinkDefaultMode || 'telnet'),
     lastGateway: settings.winlinkLastGateway || null,
     // My gateways (#254) and how long the last propagation ranking took per
@@ -11031,9 +11035,12 @@ function winlinkPushMailbox(box) {
   if (remoteServer && remoteServer.broadcastWinlinkMailbox) { try { remoteServer.broadcastWinlinkMailbox(msg); } catch {} }
 }
 
-async function winlinkRefreshMailboxes(boxes = WinlinkStateLib.BOXES) {
-  if (!patClient) return;
+async function winlinkRefreshMailboxes(boxes = WinlinkStateLib.FOLDERS) {
+  // The Deleted folder is POTACAT's own copies: listed with or without Pat.
+  if (boxes.includes('deleted')) await winlinkRefreshDeleted();
+  if (!patClient) { if (boxes.includes('deleted')) winlinkPush(); return; }
   for (const box of boxes) {
+    if (box === 'deleted') continue;
     try {
       winlinkState.applyMailbox(box, await patClient.mailbox(box));
       winlinkPushMailbox(box);
@@ -11313,6 +11320,7 @@ async function connectWinlink() {
   winlinkLog(`Pat ready on 127.0.0.1:${_patHttpPort} as ${call.toUpperCase()}${settings.winlinkPassword ? '' : ' — no Winlink password set yet'}`);
   await winlinkRefreshMailboxes();
   winlinkArmAutoCheck();
+  winlinkArmDeletedPurge();
 }
 
 /**
@@ -13502,6 +13510,11 @@ async function winlinkSendOne({ to, cc, subject, body, p2p, attachments } = {}) 
 }
 
 async function winlinkRead(box, mid) {
+  if (box === WinlinkDeleted.DELETED) {
+    // Read from POTACAT's copy: Pat cannot read its Deleted folder.
+    const rec = await WinlinkDeleted.readOne(winlinkMailboxDir(), mid);
+    return rec ? { ok: true, message: WinlinkDeleted.readEntry(rec) } : { ok: false, error: 'That message is no longer in Deleted.' };
+  }
   if (!patClient) return { ok: false, error: 'Pat is not running' };
   try {
     const msg = await patClient.message(box, mid);
@@ -13513,15 +13526,135 @@ async function winlinkRead(box, mid) {
   } catch (e) { return { ok: false, error: e.message }; }
 }
 
-async function winlinkDelete(box, mid) {
+// ── Folders (#462, #475): Archive, the Deleted folder, Restore ───────────
+// Which moves exist is lib/winlink-mail-actions.js; the Deleted folder's
+// files, paths and purge are lib/winlink-deleted.js. Every move but one is
+// Pat's own (POST /api/mailbox/<to> + X-Pat-SourcePath): Pat cannot move a
+// message INTO the Outbox, so a deleted Outbox message is put back with the
+// same rename, done here.
+
+/** Pat's mailbox directory for this station (<mbox>/<MYCALL>), or null with no callsign. */
+function winlinkMailboxDir() {
+  return WinlinkDeleted.mailboxDir(winlinkPaths().mbox, settings.myCallsign);
+}
+
+async function winlinkRefreshDeleted() {
+  let list = [];
+  try { list = (await WinlinkDeleted.readAll(winlinkMailboxDir())).map(WinlinkDeleted.listEntry); }
+  catch (e) { winlinkLog(`could not list Deleted: ${e.message}`); }
+  winlinkState.applyMailbox(WinlinkDeleted.DELETED, list);
+  winlinkPushMailbox(WinlinkDeleted.DELETED);
+}
+
+const _wlName = (b) => WinlinkMailActions.folderName(b);
+
+/**
+ * Move one message. box 'deleted' is a Restore (to = the folder to go back
+ * to; '' = where it came from); to 'deleted' is Delete. Archive and back are
+ * plain Pat moves.
+ */
+async function winlinkMove(box, mid, to) {
+  box = String(box || ''); mid = String(mid || ''); to = String(to || '');
+  if (box === WinlinkDeleted.DELETED) return winlinkRestore(mid, to);
+  if (to === WinlinkDeleted.DELETED) return winlinkDelete(box, mid);
+  if (!WinlinkMailActions.canMove(box, to)) return { ok: false, error: `A message cannot be moved from ${_wlName(box)} to ${_wlName(to)}.` };
+  if (!WinlinkDeleted.validMid(mid)) return { ok: false, error: 'That is not a message id.' };
   if (!patClient) return { ok: false, error: 'Pat is not running' };
   try {
-    await patClient.delete(box, mid);
-    winlinkState.remove(box, mid);
-    winlinkPushMailbox(box);
-    winlinkPush();
-    return { ok: true };
-  } catch (e) { return { ok: false, error: e.message }; }
+    await patClient.move(box, mid, to);
+  } catch (e) {
+    return { ok: false, error: `Could not move the message to ${_wlName(to)}: ${e.message}` };
+  }
+  winlinkLog(`moved message ${mid} from ${_wlName(box)} to ${_wlName(to)}`);
+  winlinkState.remove(box, mid);
+  await winlinkRefreshMailboxes([box, to]);
+  return { ok: true };
+}
+
+/**
+ * Delete = move to the Deleted folder (#475). Pat's copy of the message (body
+ * included) is saved first as deleted/<mid>.json with where it came from, so
+ * the folder can be listed and read without Pat; then Pat moves the file.
+ * In the Deleted folder itself, Delete is for good.
+ */
+async function winlinkDelete(box, mid) {
+  box = String(box || ''); mid = String(mid || '');
+  if (box === WinlinkDeleted.DELETED) return winlinkDeleteForGood(mid);
+  if (!WinlinkStateLib.BOXES.includes(box)) return { ok: false, error: 'There is no such folder.' };
+  if (!WinlinkDeleted.validMid(mid)) return { ok: false, error: 'That is not a message id.' };
+  if (!patClient) return { ok: false, error: 'Pat is not running' };
+  const dir = winlinkMailboxDir();
+  if (!WinlinkDeleted.paths(dir, mid)) return { ok: false, error: 'Set your callsign in Settings first' };
+  let msg;
+  try { msg = await patClient.message(box, mid); }
+  catch (e) { return { ok: false, error: `Could not read the message to keep a copy in Deleted: ${e.message}` }; }
+  try {
+    await WinlinkDeleted.save(dir, WinlinkDeleted.makeRecord(msg, box, Date.now()));
+    await patClient.move(box, mid, WinlinkDeleted.DELETED);
+  } catch (e) {
+    await WinlinkDeleted.forget(dir, mid).catch(() => {});
+    return { ok: false, error: `Could not move the message to Deleted: ${e.message}` };
+  }
+  winlinkLog(`moved message ${mid} from ${_wlName(box)} to Deleted`);
+  winlinkState.remove(box, mid);
+  winlinkPushMailbox(box);
+  await winlinkRefreshDeleted();
+  winlinkPush();
+  return { ok: true };
+}
+
+/** Restore from Deleted: back where it came from, or to the folder asked for. */
+async function winlinkRestore(mid, to) {
+  const dir = winlinkMailboxDir();
+  const rec = WinlinkDeleted.validMid(mid) ? await WinlinkDeleted.readOne(dir, mid) : null;
+  if (!rec) return { ok: false, error: 'That message is no longer in Deleted.' };
+  const target = to || rec.fromBox;
+  if (!WinlinkMailActions.canMove(WinlinkDeleted.DELETED, target)) return { ok: false, error: `A message cannot be restored to ${_wlName(target)}.` };
+  try {
+    if (target === 'out') await WinlinkDeleted.restoreToOutbox(dir, mid);
+    else {
+      if (!patClient) return { ok: false, error: 'Pat is not running' };
+      await patClient.move(WinlinkDeleted.DELETED, mid, target);
+    }
+    await WinlinkDeleted.forget(dir, mid);
+  } catch (e) {
+    return { ok: false, error: e && e.code === 'ENOENT' ? 'The message file is no longer in the Deleted folder.' : `Could not restore the message: ${e.message}` };
+  }
+  winlinkLog(`restored message ${mid} from Deleted to ${_wlName(target)}`);
+  await winlinkRefreshMailboxes([WinlinkDeleted.DELETED, target]);
+  return { ok: true };
+}
+
+async function winlinkDeleteForGood(mid) {
+  if (!WinlinkDeleted.validMid(mid)) return { ok: false, error: 'That is not a message id.' };
+  try { await WinlinkDeleted.removeForGood(winlinkMailboxDir(), mid); }
+  catch (e) { return { ok: false, error: `Could not delete the message: ${e.message}` }; }
+  winlinkLog(`deleted message ${mid} for good`);
+  await winlinkRefreshDeleted();
+  winlinkPush();
+  return { ok: true };
+}
+
+/** Remove for good what has been in Deleted longer than the setting (winlinkDeletedDays; 0 = never). */
+async function winlinkPurgeDeleted(why) {
+  const days = WinlinkMailActions.deletedDays(settings.winlinkDeletedDays);
+  if (!days) return;
+  let removed = [];
+  try { removed = await WinlinkDeleted.purge(winlinkMailboxDir(), days, Date.now()); }
+  catch (e) { winlinkLog(`Deleted folder: could not empty it (${why}): ${e.message}`); return; }
+  if (!removed.length) return;
+  winlinkLog(`Deleted folder (${why}): removed ${removed.length} message${removed.length === 1 ? '' : 's'} deleted more than ${days} days ago`);
+  await winlinkRefreshDeleted();
+  winlinkPush();
+}
+
+// At Winlink start and once a day after that.
+let _winlinkPurgeTimer = null;
+function winlinkArmDeletedPurge() {
+  winlinkPurgeDeleted('Winlink start');
+  if (_winlinkPurgeTimer) return;
+  _winlinkPurgeTimer = setInterval(() => winlinkPurgeDeleted('daily'), 24 * 3600 * 1000);
+  if (_winlinkPurgeTimer.unref) _winlinkPurgeTimer.unref();
 }
 
 async function winlinkAttachment(box, mid, name) {
@@ -13703,7 +13836,7 @@ async function winlinkHandleRemote({ type, req = {}, reply }) {
   try {
     switch (type) {
       case 'winlink-list': {
-        const box = WinlinkStateLib.BOXES.includes(req.box) ? req.box : 'in';
+        const box = WinlinkStateLib.FOLDERS.includes(req.box) ? req.box : 'in';
         await winlinkRefreshMailboxes([box]);
         reply({ type: 'winlink-mailbox', box, messages: winlinkState.list(box), total: winlinkState.total(box) });
         return;
@@ -13721,8 +13854,13 @@ async function winlinkHandleRemote({ type, req = {}, reply }) {
         reply({ type: 'winlink-attachment', box: String(req.box), mid: String(req.mid), name: String(req.name), size: r.data.length, dataBase64: r.data.toString('base64') });
         return;
       }
+      // Delete moves the message to Deleted; in Deleted it removes it for good (#475).
       case 'winlink-delete':
         result('delete', await winlinkDelete(String(req.box || 'in'), String(req.mid || '')));
+        return;
+      // Archive, Move to Inbox / Sent, and Restore from Deleted (#462, #475).
+      case 'winlink-move':
+        result('move', await winlinkMove(String(req.box || ''), String(req.mid || ''), String(req.to || '')));
         return;
       case 'winlink-compose': {
         const atts = (req.attachments || []).filter((a) => a && typeof a.name === 'string' && typeof a.dataBase64 === 'string')
@@ -42722,7 +42860,7 @@ function cloudShackNotice(text, kind) {
     winlinkPopoutWin.webContents.on('did-finish-load', () => {
       winlinkPopoutSend('winlink-state', winlinkPayload());
       if (_winlinkPendingCompose) { winlinkPopoutSend('winlink-compose-prefill', _winlinkPendingCompose); _winlinkPendingCompose = null; }
-      for (const box of WinlinkStateLib.BOXES) winlinkPopoutSend('winlink-mailbox', { box, messages: winlinkState.list(box) });
+      for (const box of WinlinkStateLib.FOLDERS) winlinkPopoutSend('winlink-mailbox', { box, messages: winlinkState.list(box) });
       winlinkPopoutSend('winlink-session', winlinkSessionView());
       winlinkPopoutSend('winlink-popout-theme', themeQuery());
       if (_currentFreqHz > 0) winlinkPopoutSend('cat-frequency', _currentFreqHz);
@@ -43099,12 +43237,13 @@ function cloudShackNotice(text, kind) {
   ipcMain.handle('winlink-diag', () => winlinkDiagLine());
   ipcMain.handle('winlink-cmd-state', () => winlinkPayload());
   ipcMain.handle('winlink-cmd-list', async (_e, box) => {
-    const b = WinlinkStateLib.BOXES.includes(box) ? box : 'in';
+    const b = WinlinkStateLib.FOLDERS.includes(box) ? box : 'in';
     await winlinkRefreshMailboxes([b]);
     return { ok: true, box: b, messages: winlinkState.list(b) };
   });
   ipcMain.handle('winlink-cmd-read', (_e, { box, mid } = {}) => winlinkRead(String(box), String(mid)));
   ipcMain.handle('winlink-cmd-delete', (_e, { box, mid } = {}) => winlinkDelete(String(box), String(mid)));
+  ipcMain.handle('winlink-cmd-move', (_e, { box, mid, to } = {}) => winlinkMove(String(box || ''), String(mid || ''), String(to || '')));
   ipcMain.handle('winlink-cmd-save-attachment', async (_e, { box, mid, name } = {}) => {
     const r = await winlinkAttachment(String(box), String(mid), String(name));
     if (!r.ok) return r;
@@ -43213,6 +43352,13 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('winlink-cmd-pref', (_e, { key, value } = {}) => {
     if (key === 'winlinkWaterfallSpeed') settings.winlinkWaterfallSpeed = Math.max(1, Math.min(60, parseInt(value, 10) || 60));
     else if (key === 'winlinkWaterfallShown') settings.winlinkWaterfallShown = value !== false;
+    else if (key === 'winlinkDeletedDays') {
+      settings.winlinkDeletedDays = WinlinkMailActions.deletedDays(value);
+      saveSettings(settings);
+      winlinkPush();
+      winlinkPurgeDeleted('setting changed');
+      return;
+    }
     else return;
     saveSettings(settings);
   });
@@ -48832,6 +48978,8 @@ function cloudShackNotice(text, kind) {
     delete newSettings.jtcatRxSource;
     stampSstvTemplatesPatch(newSettings);
     setImmediate(() => afterSstvSettingsSaved(newSettings));
+    // #475: the Deleted folder's days reach every Winlink surface (winlink-state.deletedDays).
+    if (newSettings && 'winlinkDeletedDays' in newSettings) setImmediate(() => { try { winlinkPush(); } catch {} });
     if (newSettings && 'jtcatFakeIt' in newSettings) setImmediate(() => { fakeItSyncEngine(); sendCatLog(`[JTCAT] Split operation Fake It: ${fakeItEnabled() ? 'on' : 'off'}`); });
     // An always-on feature has no off: a stale window's false never lands.
     for (const k of InstallDefaults.ALWAYS_ON) if (k in newSettings) newSettings[k] = true;
