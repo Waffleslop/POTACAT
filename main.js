@@ -381,6 +381,7 @@ const jtcatModehop = require('./lib/jtcat-modehop');
 const FakeIt = require('./lib/jtcat-fake-it'); // split operation "Fake It" (fakeItShiftForTx / fakeItRestoreDial)
 const { WsprScheduler } = require('./lib/wspr/scheduler');
 const WsprPowerMemory = require('./lib/wspr-power-memory'); // pre-beacon RF power remember/restore decisions
+const WsprDbm = require('./lib/wspr/dbm'); // the dBm the beacon reports: follows its RF power, or the operator's fixed pick (#268)
 const Privileges = require('./lib/privileges');
 const SwrGuard = require('./lib/swr-guard'); // SWR-guard auto-tune + ATU result policy (pure)
 const { encodeWspr } = require('./lib/wspr/encode');
@@ -16657,9 +16658,9 @@ let ft8Engine = null;    // alias for jtcatManager.engine (Phase 0 compatibility
 let remoteJtcatQso = null;
 let jtcatQuietFreq = 1500; // auto-detected quiet TX frequency from FFT analysis
 // WSPR beacon state — driven by the IPC handler + a 1 s scheduler tick.
-// WSPR is a QRPp propagation beacon: power is HARD-CAPPED at 1 W (30 dBm).
+// The beacon's default RF power, 1 W. Since #268 it runs at the level the
+// operator sets while it is armed, and reports that power (lib/wspr/dbm.js).
 const JTCAT_WSPR_MAX_WATTS = 1;
-const JTCAT_WSPR_MAX_DBM = 30;
 // The TX audio routes prepend a ~500 ms PTT-settle lead before the waveform.
 const JTCAT_TX_AUDIO_LEAD_MS = 500;
 let jtcatWsprScheduler = null;
@@ -18416,15 +18417,16 @@ function maybeHopBand() {
   if (win && !win.isDestroyed()) win.webContents.send('jtcat-wspr-hop-band', { band: nb });
 }
 
-// dBm -> watts, hard-capped at the WSPR QRPp ceiling (1 W).
-function wsprWattsFromDbm(dbm) {
-  return Math.min(JTCAT_WSPR_MAX_WATTS, Math.pow(10, (Number(dbm) - 30) / 10));
+// The dBm the beacon reports in its message (#268). Auto (the default): the
+// highest WSPR value not above the RF power the beacon runs at, so a 5 W
+// beacon says 37 dBm on WSPRnet instead of 30. Auto off: the operator's
+// fixed value, 0..60 dBm. Read at every frame, so a power change while armed
+// is reported from the next frame on.
+function wsprDbmAuto() {
+  return WsprDbm.isAuto(settings.wsprDbmAuto);
 }
-
-// Clamp reported power to <=30 dBm (1 W). Shared by the local (ipcMain) and
-// remote (phone) entry points so a client can never store/report >1 W.
-function clampWsprDbm(d) {
-  return Math.max(0, Math.min(JTCAT_WSPR_MAX_DBM, Number(d) || 0));
+function wsprReportedDbm() {
+  return WsprDbm.reportedDbm({ auto: wsprDbmAuto(), manualDbm: settings.wsprDbm, beaconWatts: wsprBeaconWatts() });
 }
 
 // Random TX audio offset within the 200 Hz WSPR sub-band. Tone-0 base is kept
@@ -18487,6 +18489,9 @@ function wsprNoteOperatorPower(watts, source) {
   if (prev && prev.watts === lvl.watts && (prev.rigId || null) === lvl.rigId) return;
   settings.wsprBeaconWatts = lvl;
   try { saveSettings(settings); } catch {}
+  // The reported dBm follows this level under Auto: show it everywhere now.
+  if (jtcatWsprScheduler) jtcatWsprScheduler.setDbm(wsprReportedDbm());
+  wsprBroadcastBeaconState();
   if (_wsprBeaconLevelLogTimer) clearTimeout(_wsprBeaconLevelLogTimer);
   // One line per drag, not one per 80 ms step.
   _wsprBeaconLevelLogTimer = setTimeout(() => {
@@ -18624,15 +18629,15 @@ function wsprFrameRfEnd() {
   if (line) sendCatLog(line);
 }
 
-// Transmit one WSPR frame. Power is capped three ways: dBm <= 30 (clamped),
-// the rig commanded to 1 W via CAT, and the audio drive scaled for sub-watt
-// targets. Reuses the standard tx-start audio dispatch (now failsafe-correct
-// for the 110.6 s waveform); txComplete()/the failsafe release PTT.
+// Transmit one WSPR frame. The radio is commanded to the beacon's level (1 W
+// or the operator's), the message reports `dbm` (wsprReportedDbm), and a fixed
+// report below the radio's level turns the audio drive down toward it.
+// Reuses the standard tx-start audio dispatch (now failsafe-correct for the
+// 110.6 s waveform); txComplete()/the failsafe release PTT.
 function wsprBeaconTransmit(call, grid, dbm) {
   if (!ft8Engine || ft8Engine._mode !== 'WSPR' || ft8Engine._txActive) return;
-  dbm = Math.max(0, Math.min(JTCAT_WSPR_MAX_DBM, dbm));
-  const watts = wsprWattsFromDbm(dbm);
-  wsprForcePowerCap(); // re-assert the 1 W rig cap immediately before key-up
+  if (!WsprDbm.isValid(dbm)) dbm = WsprDbm.normalizeManual(dbm);
+  wsprForcePowerCap(); // re-assert the beacon's RF power immediately before key-up
   // Pick a fresh random spot in the 200 Hz WSPR sub-band every transmission.
   // Unlike FT8 you can't FFT a quiet slot here — WSPR signals are below the
   // noise floor (invisible), so everyone randomizes within 1400–1600 Hz and
@@ -18642,12 +18647,12 @@ function wsprBeaconTransmit(call, grid, dbm) {
   try {
     samples = encodeWspr(call, grid, dbm, { baseFreqHz: baseHz });
   } catch (e) { sendCatLog('[JTCAT] WSPR beacon encode error: ' + (e && e.message || e)); return; }
-  // Drive scaling approximates sub-1 W targets on top of the rig's 1 W cap
-  // (power ~ amplitude^2). The rig cap is the real limit; this is secondary.
-  const amp = Math.max(0.05, Math.min(1, Math.sqrt(watts / JTCAT_WSPR_MAX_WATTS)));
+  // A fixed report below the radio's level scales the drive toward it (power
+  // ~ amplitude^2); Auto reports what the radio is set to and keeps full drive.
+  const amp = WsprDbm.driveScale({ auto: wsprDbmAuto(), reportedDbm: dbm, beaconWatts: wsprBeaconWatts() });
   if (amp < 0.999) { for (let i = 0; i < samples.length; i++) samples[i] *= amp; }
   ft8Engine._txActive = true;
-  sendCatLog(`[JTCAT] WSPR beacon TX: ${call} ${grid} ${dbm} dBm (~${watts >= 1 ? '1 W' : Math.round(watts * 1000) + ' mW'}, rig set to ${wsprBeaconWatts()} W, drive ${Math.round(amp * 100)}%) @ ${baseHz} Hz`);
+  sendCatLog(`[JTCAT] WSPR beacon TX: ${call} ${grid} reporting ${WsprDbm.label(dbm)}${wsprDbmAuto() ? ' (Auto)' : ''}, rig set to ${wsprBeaconWatts()} W, drive ${Math.round(amp * 100)}% @ ${baseHz} Hz`);
   // What the radio's own wattmeter says during this frame, for one line at
   // tx-end (#268: three frames at 0 W measured, and nothing said so).
   _wsprFrameRf = { meterFrames: 0, peakW: 0, setW: wsprBeaconWatts() };
@@ -18670,8 +18675,21 @@ function wsprRunLabel(min) {
   return min % 60 === 0 ? `${min / 60} h` : `${min} min`;
 }
 /** The beacon state every surface shows; runMin rides along (additive). */
+// dBm/dBmAuto/beaconWatts: what the beacon reports and runs at, so the JTCAT
+// window and ECHOCAT show the same value (#268).
 function wsprBeaconStateExtra() {
-  return { runMin: wsprBeaconRunMin(), runAsked: !!settings.wsprBeaconRunAsked };
+  return {
+    runMin: wsprBeaconRunMin(), runAsked: !!settings.wsprBeaconRunAsked,
+    dBm: wsprReportedDbm(), dBmAuto: wsprDbmAuto(), beaconWatts: wsprBeaconWatts(),
+  };
+}
+// Push the beacon state to the pop-out and ECHOCAT after something it shows
+// changed (the reported dBm, the beacon's power) outside an arm/disarm.
+function wsprBroadcastBeaconState() {
+  if (isRemoteMode()) return;
+  const payload = { enabled: wsprBeaconArmed(), ...wsprBeaconStateExtra() };
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-wspr-beacon-state', payload);
+  if (remoteServer && remoteServer.hasClient()) remoteServer.broadcastJtcatWsprBeaconState(payload);
 }
 
 function wsprBeaconTick() {
@@ -18710,7 +18728,7 @@ function wsprBeaconTick() {
   if (!plan) return;
   const call = onAirCall();
   const grid = (settings.grid || '').trim().toUpperCase().slice(0, 4);
-  const dbm = Math.min(JTCAT_WSPR_MAX_DBM, settings.wsprDbm != null ? settings.wsprDbm : 30);
+  const dbm = wsprReportedDbm();
   // The audio dispatch prepends a ~500 ms PTT-settle lead before the waveform
   // (FT8 keys at slot+0 to land audio at slot+500 ms). WSPR's signal should
   // start at slot+1.0 s, so key 500 ms early to absorb that lead and center DT
@@ -18765,30 +18783,30 @@ function setWsprBeacon(on, opts = {}) {
   }
   // Validate the identity through the clean-room encoder before keying anything.
   try {
-    encodeWspr(call, grid, Math.min(JTCAT_WSPR_MAX_DBM, settings.wsprDbm != null ? settings.wsprDbm : 30), { baseFreqHz: 1500 });
+    encodeWspr(call, grid, wsprReportedDbm(), { baseFreqHz: 1500 });
   } catch (e) {
     sendCatLog('[JTCAT] WSPR beacon: ' + (e && e.message || e));
     tellPopout(false);
     return;
   }
-  // Remember the level we are about to override, THEN force the 1 W cap. If no
-  // power-control path is live, the operator MUST set <=1 W by hand — say so
-  // unmistakably.
+  // Remember the level we are about to override, THEN command the beacon's
+  // level. If no power-control path is live, the operator MUST set it by hand —
+  // say so unmistakably.
   if (_wsprRestoreRetryTimer) { clearInterval(_wsprRestoreRetryTimer); _wsprRestoreRetryTimer = null; }
   const restoreWatts = wsprRememberPreCapPower();
   const capped = wsprForcePowerCap();
   if (!jtcatWsprScheduler) jtcatWsprScheduler = new WsprScheduler({});
   jtcatWsprScheduler.setTxPct(settings.wsprTxPct != null ? settings.wsprTxPct : 20);
-  jtcatWsprScheduler.setDbm(Math.min(JTCAT_WSPR_MAX_DBM, settings.wsprDbm != null ? settings.wsprDbm : 30));
+  jtcatWsprScheduler.setDbm(wsprReportedDbm());
   jtcatWsprScheduler.setEnabled(true);
   jtcatWsprBeaconArmedAt = Date.now();
   if (jtcatWsprBeaconTimer) clearInterval(jtcatWsprBeaconTimer);
   jtcatWsprBeaconTimer = setInterval(wsprBeaconTick, 1000);
-  const dbm = Math.min(JTCAT_WSPR_MAX_DBM, settings.wsprDbm != null ? settings.wsprDbm : 30);
+  const dbm = wsprReportedDbm();
   _jtcatWsprAnnouncedSlot = -1; // re-announce the current slot's draw on (re)arm
   const avgMin = jtcatWsprScheduler.txPct > 0 ? Math.round(200 / jtcatWsprScheduler.txPct) : 0;
   const secToNextSlot = Math.ceil((120000 - (StationClock.now() % 120000)) / 1000);
-  sendCatLog(`[JTCAT] WSPR beacon ARMED: ${call} ${grid} @ ${dbm} dBm (${wsprWattsFromDbm(dbm) >= 1 ? '1 W' : Math.round(wsprWattsFromDbm(dbm) * 1000) + ' mW'} max), TX ${jtcatWsprScheduler.txPct}% of slots.` +
+  sendCatLog(`[JTCAT] WSPR beacon ARMED: ${call} ${grid} reporting ${WsprDbm.label(dbm)}${wsprDbmAuto() ? ' (Auto: follows the beacon\'s RF power)' : ' (fixed)'}, TX ${jtcatWsprScheduler.txPct}% of slots.` +
     (jtcatWsprScheduler.txPct > 0
       ? ` First transmission fires on the next even-minute slot (~${secToNextSlot}s) to confirm the chain` +
         (avgMin > 2 ? `; after that slots are drawn at random — roughly one TX every ${avgMin} minutes, listening slots in between are normal` : '')
@@ -18806,20 +18824,26 @@ function setWsprBeacon(on, opts = {}) {
 }
 
 // Shared WSPR beacon control — the local popout (ipcMain) and a remote phone
-// (remote-server) both route here, so power clamping and the host TX policy are
-// identical no matter who asks. Partial: undefined fields are left unchanged.
+// (remote-server) both route here, so the reported-power rules and the host TX
+// policy are identical no matter who asks. Partial: undefined fields are left
+// unchanged. dBm/dBmAuto: lib/wspr/dbm.js applyControl (a client from before
+// Auto repeating its menu's value on an on/off toggle never turns Auto off).
 function applyWsprBeaconControl(opts) {
   opts = opts || {};
   if (opts.txPct != null) settings.wsprTxPct = Math.max(0, Math.min(100, opts.txPct));
-  if (opts.dBm != null) settings.wsprDbm = clampWsprDbm(opts.dBm); // <=1 W, server-side
+  const dbmBefore = { auto: wsprDbmAuto(), dbm: settings.wsprDbm };
+  const dbmNext = WsprDbm.applyControl(dbmBefore, opts);
+  const dbmChanged = dbmNext.auto !== dbmBefore.auto || dbmNext.dbm !== dbmBefore.dbm;
+  if (dbmChanged) { settings.wsprDbmAuto = dbmNext.auto; settings.wsprDbm = dbmNext.dbm; }
   if (opts.runMin != null) { const v = Number(opts.runMin); settings.wsprBeaconRunMin = Number.isFinite(v) && v > 0 ? Math.min(Math.round(v), 7 * 24 * 60) : 0; }
   if (opts.runAsked) settings.wsprBeaconRunAsked = true;   // the one-time "how long?" question has been answered
   saveSettings(settings);
   if (jtcatWsprScheduler) {
     if (opts.txPct != null) jtcatWsprScheduler.setTxPct(settings.wsprTxPct);
-    if (opts.dBm != null) jtcatWsprScheduler.setDbm(settings.wsprDbm);
+    if (dbmChanged) jtcatWsprScheduler.setDbm(wsprReportedDbm());
   }
   if (opts.enabled != null) setWsprBeacon(!!opts.enabled);
+  else if (dbmChanged) wsprBroadcastBeaconState();
 }
 
 function remoteJtcatMyCall() { return onAirCall(); }
@@ -23722,7 +23746,10 @@ function updateRemoteSettings() {
     jtcatFdExch: settings.jtcatFdExch || '',
     jttySerial: parseInt(settings.jttySerial, 10) > 0 ? parseInt(settings.jttySerial, 10) : 1,
     wsprTxPct: typeof settings.wsprTxPct === 'number' ? settings.wsprTxPct : 20,
-    wsprDbm: typeof settings.wsprDbm === 'number' ? settings.wsprDbm : 30,
+    // The dBm the beacon reports now (Auto follows its RF power, #268), and
+    // whether that is Auto: a client from before Auto shows the number.
+    wsprDbm: wsprReportedDbm(),
+    wsprDbmAuto: wsprDbmAuto(),
     sstvTemplates: settings.sstvTemplates || [],
     sstvTextElements: settings.sstvTextElements || [],
     enableAutoSstv: !!settings.enableAutoSstv,
@@ -42857,6 +42884,8 @@ function cloudShackNotice(text, kind) {
       jtcatPopoutWin.webContents.send('jtcat-auto-cq-state', jtcatAutoCqStatePayload());
       // ...and the radio's RF power, so the TX Pwr slider never opens blank.
       pushJtcatPopoutRigPower(true);
+      // ...and the beacon's reported dBm (Auto follows its RF power, #268).
+      if (!isRemoteMode()) jtcatPopoutWin.webContents.send('jtcat-wspr-beacon-state', { enabled: wsprBeaconArmed(), ...wsprBeaconStateExtra() });
     });
     jtcatPopoutWin.webContents.on('before-input-event', (_e, input) => {
       if (input.key === 'F12' && input.type === 'keyDown') {

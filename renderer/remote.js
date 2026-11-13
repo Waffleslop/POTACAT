@@ -9291,8 +9291,22 @@
         wsprTxPct.value = echoSettings.wsprTxPct;
         wsprTxPctVal.textContent = echoSettings.wsprTxPct + '%';
       }
-      if (typeof echoSettings.wsprDbm === 'number') wsprDbm.value = String(Math.min(30, echoSettings.wsprDbm));
+      if (typeof echoSettings.wsprDbm === 'number') wsprRenderDbm({ dBm: echoSettings.wsprDbm, dBmAuto: echoSettings.wsprDbmAuto });
     }
+  }
+
+  // The Reported power menu: Auto (follows the beacon's RF power, #268) or a
+  // fixed WSPR value 0..60 dBm. Drawn from the host's state by the same
+  // lib/wspr/dbm.js the JTCAT window uses, so both show the same value.
+  function wsprRenderDbm(st) {
+    if (!wsprDbm || !window.WsprDbm || !st || st.dBm == null) return;
+    const m = window.WsprDbm.menu(st);
+    if (wsprDbm.options.length !== m.options.length) {
+      wsprDbm.innerHTML = '';
+      for (const o of m.options) { const el = document.createElement('option'); el.value = o.value; wsprDbm.appendChild(el); }
+    }
+    m.options.forEach((o, i) => { wsprDbm.options[i].textContent = o.text; });
+    wsprDbm.value = m.value;
   }
 
   function wsprHandleSpots(msg) {
@@ -9339,12 +9353,14 @@
     // renders ONLY from here, never from the local tap.
     wsprBeaconOn = !!msg.enabled;
     if (wsprTxEnable) wsprTxEnable.checked = wsprBeaconOn;
+    wsprRenderDbm(msg);
   }
 
   if (wsprTxEnable) wsprTxEnable.addEventListener('change', () => {
     const wanted = wsprTxEnable.checked;
     wsprTxEnable.checked = wsprBeaconOn; // optimistic-free: revert; the state echo flips it
-    ft8Send({ type: 'jtcat-wspr-beacon', enabled: wanted, txPct: parseInt(wsprTxPct.value, 10), dBm: Math.min(30, parseInt(wsprDbm.value, 10)) });
+    // The reported power is the host's (Auto or the fixed pick); not resent here.
+    ft8Send({ type: 'jtcat-wspr-beacon', enabled: wanted, txPct: parseInt(wsprTxPct.value, 10) });
   });
   if (wsprTxPct) wsprTxPct.addEventListener('input', () => {
     wsprTxPctVal.textContent = wsprTxPct.value + '%';
@@ -9353,7 +9369,8 @@
     ft8Send({ type: 'jtcat-wspr-beacon', txPct: parseInt(wsprTxPct.value, 10) });
   });
   if (wsprDbm) wsprDbm.addEventListener('change', () => {
-    ft8Send({ type: 'jtcat-wspr-beacon', dBm: Math.min(30, parseInt(wsprDbm.value, 10)) });
+    if (!window.WsprDbm) return;
+    ft8Send(Object.assign({ type: 'jtcat-wspr-beacon' }, window.WsprDbm.controlFromMenu(wsprDbm.value)));
   });
 
   // 120s cycle phase/countdown — same window math as the popout: the TX
