@@ -395,5 +395,24 @@ test('quit goes back first when it can, inside the cleanup budget, before the CA
   assert.ok(q.indexOf('tuneRadio(') > 0 && /setTimeout\(then, v\.waitMs\)/.test(q));
 });
 
+test('#455: Pat\'s QSX as a session is torn down is refused quietly; a stray tune later is still logged', () => {
+  const R = require('../lib/winlink-return');
+  assert.strictEqual(R.patTuneRefusalLogged({ msSinceSessionEnd: 1000 }), false, 'teardown QSX');
+  assert.strictEqual(R.patTuneRefusalLogged({ msSinceSessionEnd: R.TEARDOWN_QUIET_MS - 1 }), false);
+  assert.strictEqual(R.patTuneRefusalLogged({ msSinceSessionEnd: R.TEARDOWN_QUIET_MS }), true);
+  assert.strictEqual(R.patTuneRefusalLogged({ msSinceSessionEnd: Date.now() }), true, 'no session since start');
+  assert.strictEqual(R.patTuneRefusalLogged({}), true);
+  const shim = fnBody(main, 'startWinlinkShim');
+  assert.ok(/if \(WinlinkReturn\.patTuneRefusalLogged\(\{ msSinceSessionEnd: Date\.now\(\) - _winlinkShimDisarmedAt \}\)\) winlinkLog\(`refused Pat's tune/.test(shim));
+  assert.ok(/if \(_winlinkShimArmed\) _winlinkShimDisarmedAt = endedAt;/.test(fnBody(main, 'winlinkEndSession')));
+  assert.ok(/if \(_winlinkShimArmed\) _winlinkShimDisarmedAt = Date\.now\(\);/.test(fnBody(main, 'stopWinlinkShim')));
+});
+test('#455: "failed after it was stopped — kept as the reason" is logged only when it is kept', () => {
+  const i = main.indexOf('failed after it was stopped');
+  assert.ok(i > 0);
+  const before = main.slice(main.lastIndexOf('if (ls && !ls.ok && !dialed', i), i);
+  assert.ok(before.length > 0 && before.length < 200, 'the line sits inside the branch that keeps the reason');
+});
+
 console.log(`\nWinlink DATA hold (#187): ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

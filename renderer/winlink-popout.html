@@ -165,6 +165,10 @@
     .wl-rig { display: inline-flex; gap: 10px; align-items: center; font-size: 12px; white-space: nowrap; }
     .wl-rig label { color: var(--text-dim); }
     .wl-rig input, .wl-rig select { font-size: 12px; padding: 1px 4px; }
+    /* #300: the modem's transmit audio level, in the theme's own accent. */
+    .wl-rig input[type="range"] { width: 90px; padding: 0; vertical-align: middle; accent-color: var(--accent-blue, #4fc3f7); background: transparent; }
+    .wl-rig input[type="range"]:disabled { opacity: 0.5; }
+    .wl-txlevel-val { display: inline-block; min-width: 34px; text-align: right; color: var(--text-primary); font-family: monospace; }
     .wl-meter { font-family: monospace; min-width: 70px; color: var(--text-dim); }
     .wl-meter.live { color: var(--accent-green, #4ecca3); font-weight: 700; }
     .wl-meter.high { color: #e94560; font-weight: 700; }
@@ -388,6 +392,7 @@
     <span id="wl-remaining"></span>
     <span class="wl-rig">
       <label title="The radio's RF power setting">Power <input type="number" id="wl-pwr" min="1" max="100" step="1" style="width:52px;"><select id="wl-pwr-sel" class="hidden"></select> W</label>
+      <label id="wl-txlevel-label" title="The modem's audio level into the radio's sound card (fine control at the low end). It sets modulation, not RF power. Turn it down if the radio's ALC goes high or long frames are rejected.">TX level <input type="range" id="wl-txlevel" min="0" max="100" step="1" value="100"> <span class="wl-txlevel-val" id="wl-txlevel-val">100%</span></label>
       <span class="wl-meter" id="wl-fwd" title="Measured forward power">PWR —</span>
       <span class="wl-meter" id="wl-swr" title="Measured SWR">SWR —</span>
     </span>
