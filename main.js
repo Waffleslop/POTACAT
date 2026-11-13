@@ -7252,6 +7252,7 @@ function remoteShackInfoNow() {
     radioConnected: remoteRig.catConnected(),
     radioPowered: remoteRig.radioPowered(), // #152: the CAT popover's Radio: On / Off / Unknown
     canPower: remoteRig.canPower(),
+    canPowerOn: remoteRig.canPowerOn(), // #485: false on an off-only radio (FTX-1); Power On hidden
     audioSilent: !!info.audioSilent,
     audioElsewhere: !!info.audioElsewhere,
     audioHolder: info.audioHolder || '',
@@ -29994,6 +29995,9 @@ function sendVfoState() {
     // window's Rig button (shown only while CAT answers) hid Power On exactly
     // when it was needed (KQ5O FTDX101MP over a remote shack, 2026-10-26).
     power: vfoPowerAvailable(),
+    // #485: false on a radio that can be switched off over CAT but not on
+    // (FTX-1); the window then shows Power Off alone.
+    powerOn: vfoPowerOnAvailable(),
     // False while the radio does not answer (switched off, cable out): the
     // window shows dashes, not the last dial, which looked like a radio
     // still on after Power Off.
@@ -30036,6 +30040,9 @@ function vfoRadioLinkUp() {
 
 function vfoPowerAvailable() {
   try { return !!getRigCapabilities(detectRigType()).power; } catch { return false; }
+}
+function vfoPowerOnAvailable() {
+  try { return RigPower.powerOnAvailable(getRigCapabilities(detectRigType())); } catch { return false; }
 }
 
 function applyFreedvAudioMute() {
@@ -46725,6 +46732,16 @@ function cloudShackNotice(text, kind) {
       case 'power-on': {
         // Power-on: radio may be off, so don't require cat.connected — just need transport open
         if (rigType === 'flex') break;
+        // #485: an off-only radio (caps.powerOn false, the FTX-1) has no CAT
+        // power-on; say so instead of sending PS1; into a radio that ignores it.
+        let onCaps = null;
+        try { onCaps = getRigCapabilities(rigType); } catch { onCaps = null; }
+        const onRefused = RigPower.powerOnRefusal(onCaps);
+        if (onRefused) {
+          sendCatLog('[Power] ' + onRefused);
+          if (source !== 'desktop' && remoteServer && remoteServer.running) remoteServer.sendToAsker({ type: 'tune-blocked', reason: onRefused });
+          break;
+        }
         let sent = false;
         if (cat) {
           sent = cat.setPowerState(true);

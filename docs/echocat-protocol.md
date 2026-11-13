@@ -123,7 +123,7 @@ The `status` message is a kitchen-sink snapshot. The canonical fields are:
 | `swr` | number | live SWR (Gap 10) |
 | `alc` | number | live ALC (Gap 10) |
 | `power` | number | live wattmeter (Gap 10) |
-| `capabilities` | object | per-rig feature flags (filter, nb, atu, vfo, rfgain, txpower, power) |
+| `capabilities` | object | per-rig feature flags (filter, nb, atu, vfo, rfgain, txpower, power, powerOn). `powerOn` (optional boolean, added 2026-11-13, #485): `false` = the radio can be switched OFF over CAT but not on (`power` is still `true`); show Power Off alone and no Power On. Absent (every older desktop, every other radio) = on and off both, as `power` says. Sent as `false` for the Yaesu FTX-1 Field and FTX-1 Optima (Yaesu FTX-1 CAT manual rev 2508-C p.23: PS Set has only P1=0, power off). A `power-on` rig-control for such a radio is refused with a `tune-blocked` reason. |
 | `vfoLocked` | boolean | VFO lock active |
 | `audioState` | string | WebRTC connection state (when ECHOCAT audio bridge is up) |
 

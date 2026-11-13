@@ -1777,7 +1777,8 @@ function renderRemotePowerRow(info) {
     window.api.rigControl({ action: 'power-off' });
   });
   row.appendChild(label);
-  row.appendChild(on);
+  // #485: an off-only radio (the FTX-1) gets no Power On.
+  if (info.canPowerOn !== false) row.appendChild(on);
   row.appendChild(off);
   return row;
 }
@@ -24952,7 +24953,8 @@ function rigApplyCapabilities(caps) {
   if (activatorAtuBtn) activatorAtuBtn.style.display = caps.atu ? '' : 'none';
   rigNbBtn.style.display = caps.nb ? '' : 'none';
   if (rigWnbBtn) rigWnbBtn.style.display = caps.wnb ? '' : 'none';
-  rigPowerOnBtn.style.display = caps.power ? '' : 'none';
+  // #485: powerOn false = the radio switches off over CAT but not on (FTX-1).
+  rigPowerOnBtn.style.display = caps.power && caps.powerOn !== false ? '' : 'none';
   rigPowerOffBtn.style.display = caps.power ? '' : 'none';
   rigRfGain.closest('.rig-popover-row').style.display = caps.rfgain ? '' : 'none';
   // Radio-native RF gain steps (Flex): swap the 0-100 slider for a dB select
