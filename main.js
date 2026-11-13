@@ -455,6 +455,7 @@ const { WinlinkClient } = require('./lib/winlink-client');
 const WinlinkStateLib = require('./lib/winlink-state');
 const WinlinkMailActions = require('./lib/winlink-mail-actions'); // Archive, Deleted, Reply all: which moves and buttons (#462, #475)
 const WinlinkDeleted = require('./lib/winlink-deleted'); // POTACAT's Deleted folder inside Pat's mailbox, and its purge (#475)
+const WinlinkSentRoutes = require('./lib/winlink-sent-routes'); // how each sent message went out: gateway, dial, mode or internet, when (#442)
 const { createRigctldServer } = require('./lib/rigctld-server');
 const ArdopProcess = require('./lib/ardop-process');
 const DirewolfProcess = require('./lib/direwolf-process');
@@ -1966,6 +1967,7 @@ let _winlinkCause = null;            // { kind, detail }: a cause POTACAT knows 
 let _winlinkDialed = false;          // POTACAT got as far as asking Pat to call
 let _winlinkConnectedAt = 0;         // when the link came up, this session
 let _winlinkQueuedAtStart = null;    // messages in the Outbox when the session started
+let _winlinkOutMidsAtStart = null;   // #442: their ids, so the ones the session sent get their route
 let _winlinkModemAudioClosed = false; // the modem closed its audio connection while the session ran
 let _winlinkTxCutMs = 0;             // transmit audio the sound card would not take, this session
 let _winlinkPatLastLine = '';        // Pat's own last word on a failure ("Exchange failed: ...")
@@ -13045,8 +13047,13 @@ function winlinkOutcomeReset(mode) {
   _winlinkRadioMode = null;
   // The Outbox as the session starts: what is gone from it afterwards was sent.
   _winlinkQueuedAtStart = winlinkState.total('out');
+  _winlinkOutMidsAtStart = winlinkState.list('out').map((m) => m.mid);
   const seq = _winlinkSessionSeq + 1;
-  winlinkOutboxCount().then((n) => { if (n != null && seq === _winlinkSessionSeq && !_winlinkPatConnected) _winlinkQueuedAtStart = n; });
+  winlinkOutboxList().then((list) => {
+    if (!list || seq !== _winlinkSessionSeq || _winlinkPatConnected) return;
+    _winlinkQueuedAtStart = list.length;
+    _winlinkOutMidsAtStart = list.map((m) => m && m.mid);
+  });
 }
 /** A cause POTACAT knows from its own side. The first one is the cause; what follows is consequence. */
 function winlinkNoteCause(kind, detail) {
@@ -13054,8 +13061,52 @@ function winlinkNoteCause(kind, detail) {
 }
 /** The Outbox as Pat has it on disk right now, or null when Pat cannot be asked. */
 async function winlinkOutboxCount() {
+  const list = await winlinkOutboxList();
+  return list ? list.length : null;
+}
+/** The Outbox as Pat has it on disk right now (every message, not the capped list), or null. */
+async function winlinkOutboxList() {
   if (!patClient) return null;
-  try { return (await patClient.mailbox('out')).length; } catch { return null; }
+  try { return await patClient.mailbox('out'); } catch { return null; }
+}
+
+// ── how each sent message went out (#442) ──────────────────────────────────
+// Pat moves a delivered message from out/ to sent/ and records nothing about
+// the route. When a session ends, the messages that were in the Outbox when it
+// started, are gone from it and are now in Sent get one record each (gateway,
+// dial, mode or the internet, the time), kept by message id in the profile's
+// Winlink folder (lib/winlink-sent-routes.js). Archive and Deleted keep the id,
+// so they keep the route. A message sent before this was kept shows nothing.
+let _winlinkSentRoutes = {};
+let _winlinkSentRoutesFile = '';
+function winlinkSentRoutesLoad() {
+  let file = '';
+  try { file = WinlinkSentRoutes.fileIn(winlinkDir()); } catch { return; }
+  if (file === _winlinkSentRoutesFile) return;
+  _winlinkSentRoutesFile = file;
+  _winlinkSentRoutes = WinlinkSentRoutes.load(file);
+}
+async function winlinkRecordSentRoutes(s, outBefore, endedAt) {
+  if (!patClient || !Array.isArray(outBefore) || !outBefore.length) return;
+  const route = WinlinkSentRoutes.makeRoute({ mode: s.mode, gateway: WinlinkModes.isRadioMode(s.mode) ? s.gateway : '', dialKhz: WinlinkModes.isRadioMode(s.mode) ? s.dialKhz : 0 }, endedAt);
+  if (!route) return;
+  let outAfter, sentAfter;
+  try { outAfter = await patClient.mailbox('out'); sentAfter = await patClient.mailbox('sent'); }
+  catch (e) { winlinkLog(`could not read Outbox and Sent to note how messages went out: ${e.message}`); return; }
+  const mids = WinlinkSentRoutes.sentThisSession({ outBefore, outAfter, sentAfter });
+  if (!mids.length) return;
+  winlinkSentRoutesLoad();
+  _winlinkSentRoutes = WinlinkSentRoutes.record(_winlinkSentRoutes, mids, route);
+  const how = route.transport === 'internet' ? 'over the internet' : `via ${route.gateway || 'the gateway'}${route.dialKhz ? ` on ${route.dialKhz} kHz dial` : ''} (${WinlinkModes.LABELS[route.mode] || route.mode})`;
+  if (WinlinkSentRoutes.save(_winlinkSentRoutesFile, _winlinkSentRoutes)) winlinkLog(`sent ${mids.length} message${mids.length === 1 ? '' : 's'} ${how}: ${mids.join(', ')}`);
+  else winlinkLog('how the messages went out could not be saved');
+}
+/** The message with its route (message.sentRoute) when POTACAT kept one; Inbox and Outbox never have one. */
+function winlinkWithSentRoute(box, msg) {
+  if (!msg || typeof msg !== 'object' || box === 'in' || box === 'out') return msg;
+  winlinkSentRoutesLoad();
+  const r = WinlinkSentRoutes.get(_winlinkSentRoutes, String(msg.mid || ''));
+  return r ? { ...msg, sentRoute: r } : msg;
 }
 /** The facts of the session that just ended, for describeOutcome() and summaryLine(). */
 function winlinkOutcomeFacts(state, s, raw, received, outbox) {
@@ -13234,7 +13285,13 @@ function winlinkEndSession(state, text, received = 0) {
   const settle = wasActive
     ? winlinkSettleOutcome(state, s, raw, received, endedAt).catch((e) => winlinkLog(`session summary could not be written: ${e.message}`))
     : Promise.resolve();
-  settle.then(() => winlinkRefreshMailboxes());
+  // What left the Outbox in this session gets its route (#442); a failed session can still have sent some.
+  // The Outbox ids are taken now: the next session (Try again) resets them.
+  const outBefore = wasActive ? _winlinkOutMidsAtStart : null;
+  settle
+    .then(() => (outBefore ? winlinkRecordSentRoutes(s, outBefore, endedAt) : null))
+    .catch((e) => winlinkLog(`how the messages went out could not be noted: ${e.message}`))
+    .then(() => winlinkRefreshMailboxes());
   if (retryWill) winlinkRetryTick();
 }
 
@@ -13644,7 +13701,7 @@ async function winlinkRead(box, mid) {
   if (box === WinlinkDeleted.DELETED) {
     // Read from POTACAT's copy: Pat cannot read its Deleted folder.
     const rec = await WinlinkDeleted.readOne(winlinkMailboxDir(), mid);
-    return rec ? { ok: true, message: WinlinkDeleted.readEntry(rec) } : { ok: false, error: 'That message is no longer in Deleted.' };
+    return rec ? { ok: true, message: winlinkWithSentRoute(box, WinlinkDeleted.readEntry(rec)) } : { ok: false, error: 'That message is no longer in Deleted.' };
   }
   if (!patClient) return { ok: false, error: 'Pat is not running' };
   try {
@@ -13653,7 +13710,7 @@ async function winlinkRead(box, mid) {
       patClient.markRead(box, mid).catch(() => {});
       if (winlinkState.markRead(mid)) { winlinkPushMailbox('in'); winlinkPush(); }
     }
-    return { ok: true, message: msg };
+    return { ok: true, message: winlinkWithSentRoute(box, msg) };
   } catch (e) { return { ok: false, error: e.message }; }
 }
 
