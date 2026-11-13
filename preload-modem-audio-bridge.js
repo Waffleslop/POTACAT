@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld('bridge', {
   status: (s) => ipcRenderer.send('modem-bridge-status', s),
   onTx: (cb) => ackedChannel('modem-bridge-tx', cb),
   onOver: (cb) => ipcRenderer.on('modem-bridge-over', (_e, d) => cb(d)),
+  // Winlink's TX level changed while the bridge plays (#300): applied at once.
+  onTxGain: (cb) => ipcRenderer.on('modem-bridge-tx-gain', (_e, g) => cb(g)),
   // The cable side (VARA): capture = what VARA transmits, playback = what VARA hears.
   onCableStart: (cb) => ipcRenderer.on('modem-bridge-cable-start', (_e, cfg) => cb(cfg)),
   onCableStop: (cb) => ipcRenderer.on('modem-bridge-cable-stop', () => cb()),

@@ -460,6 +460,7 @@ const VaraProcess = require('./lib/vara-process');
 const VaraSetup = require('./lib/vara-setup');
 const WinlinkModes = require('./lib/winlink-modes');
 const WinlinkReturn = require('./lib/winlink-return');
+const WinlinkTxLevel = require('./lib/winlink-tx-level'); // #300: Winlink's own transmit audio level, and the session's levels
 const ModemAudioServerMod = require('./lib/modem-audio-server');
 const { ModemAudioLane } = require('./lib/modem-audio-lane-client'); // the modem's audio, off the main process (#187)
 const { buildAdifFields, buildAdifRecord, sqliteQsoToAdifFields, ADIF_HEADER, adifField } = require('./lib/adif-writer');
@@ -886,6 +887,7 @@ const GLOBAL_KEYS = new Set([
   'winlinkAgwPort',    // Winlink: Dire Wolf's AGWPE port on this machine (default 8010)
   'winlinkWaterfallSpeed', // mail-window waterfall lines/sec — a display property of this screen (as jtcatWaterfallSpeed)
   'winlinkWaterfallShown', // mail-window waterfall shown/hidden — display
+  'winlinkTxGain',     // Winlink modem TX audio level 0–1 (square-curve domain, #300) — machine audio property like jtcatTxGain
 ]);
 
 const CLOUD_TUNNEL_CONFIG_FILENAME = 'cloud-tunnel.json';
@@ -1955,6 +1957,7 @@ let _winlinkReceived = null;         // messages Pat took into the Inbox, when a
 let _patArqTimeoutAskedS = 0;        // #425: the ARDOP link timeout the running Pat was started with (seconds)
 let _winlinkLinkStory = null;        // WinlinkDiag.ArdopLinkStory: the modem's last state and which side ended the link
 let _winlinkAudioSummary = '';       // the session's audio sentence, repeated in its summary line
+const _winlinkLevels = new WinlinkTxLevel.SessionLevels(); // #300: the RX peak and what our overs sent to the radio, for the summary line
 const _winlinkSummaries = [];        // the last sessions' summary lines, for Report a Bug
 let _winlinkSummariesFile = '';      // the file those lines were read from: session-summaries.json in this profile's Winlink folder
 const _patProgressSaid = new WinlinkDiag.PatProgressLog(); // Pat's repainted transfer progress, logged when it changes
@@ -10977,6 +10980,7 @@ function winlinkPayload() {
     ardopBw: [200, 500, 1000, 2000].includes(Number(settings.winlinkArdopBw)) ? Number(settings.winlinkArdopBw) : 500,
     modemBw: winlinkModemBw(),
     wf: { speed: Math.max(1, Math.min(60, parseInt(settings.winlinkWaterfallSpeed, 10) || 60)), shown: settings.winlinkWaterfallShown !== false },
+    txLevel: { gain: winlinkTxGain(), soundCard: !winlinkIpAudioRoute() }, // #300: the window's TX level slider
     audio: (() => {
       const rig = winlinkActiveRig();
       const a = (rig && rig.winlinkAudio) || {};
@@ -11541,11 +11545,40 @@ function winlinkPreKeyNoted(ms) {
     winlinkLog(`modem audio: ${ms} ms arrived before the modem's PTT request and was kept — it is the start of the frame`);
   }
 }
+/**
+ * Winlink's transmit audio level on a sound-card rig (#300, lib/winlink-tx-level.js):
+ * its own setting, the gain of the bridge's playback. Until #300 this was
+ * JTCAT's Drive, which nobody would look for from the Winlink window.
+ */
+function winlinkTxGain() {
+  return WinlinkTxLevel.resolveTxGain(settings, _jtcatDirectTxGainLevel);
+}
+let _winlinkTxGainLogTimer = null;
+function applyWinlinkTxGain(value) {
+  let v = Number(value);
+  if (!Number.isFinite(v)) return;
+  v = Math.max(0, Math.min(1, v));
+  settings.winlinkTxGain = v;
+  // At once, to the bridge that is playing (the next over goes out at it).
+  if (modemBridgeWin && !modemBridgeWin.isDestroyed() && _modemBridgeLoaded) { try { modemBridgeWin.webContents.send('modem-bridge-tx-gain', v); } catch {} }
+  // A slider streams input events: save and log the settled value once.
+  clearTimeout(_winlinkTxGainLogTimer);
+  _winlinkTxGainLogTimer = setTimeout(() => {
+    try { saveSettings(settings); } catch {}
+    winlinkLog(`TX level set to ${WinlinkTxLevel.pctFromGain(v)}% in the Winlink window (the modem's audio level into the radio, not RF power${winlinkIpAudioRoute() ? `; ${winlinkAudioRouteName()} does not use it, its audio goes at full scale` : ''})`);
+  }, 1200);
+}
 /** One line per over — when the modem keyed, when its audio ran and how loud, when it unkeyed (lib/modem-tx-burst.js, #128). */
 function winlinkTxBurstEnd() {
   const lv = winlinkLaneTxLevel();
   const burst = _winlinkTxBurst.keyUp({ gainDb: lv ? lv.gainDb : 0 });
-  if (burst) winlinkLog(burst.text);
+  if (burst) {
+    // The peak above is the modem's, before the TX level: say what reached the radio too (#300).
+    const soundCard = !winlinkIpAudioRoute();
+    const out = WinlinkTxLevel.overOutDbfs({ peakDbfs: burst.peakDbfs, gainDb: burst.gainDb, txGain: winlinkTxGain(), soundCard });
+    _winlinkLevels.noteOver({ peakDbfs: burst.peakDbfs, gainDb: burst.gainDb, txGain: winlinkTxGain(), soundCard: !winlinkIpAudioRoute() });
+    winlinkLog(burst.text + (soundCard && out != null ? `; to the radio ${out} dBFS at TX level ${WinlinkTxLevel.pctFromGain(winlinkTxGain())}%` : ''));
+  }
   if (burst) modemBridgeOver(false);
 }
 /** How long the modem's final samples take to reach the radio after it stops writing. */
@@ -11877,7 +11910,7 @@ function modemBridgeReady(timeoutMs = 8000) {
 }
 function startModemBridge({ playback } = {}) {
   const dev = modemBridgeDevices();
-  const cfg = { ...dev, playback: !!playback, txGain: _jtcatDirectTxGainLevel };
+  const cfg = { ...dev, playback: !!playback, txGain: winlinkTxGain() };
   modemBridge.state = 'starting'; modemBridge.error = ''; modemBridge.playback = !!playback; modemBridge.startedAt = Date.now();
   if (modemBridgeWin && !modemBridgeWin.isDestroyed()) {
     if (_modemBridgeLoaded) modemBridgeWin.webContents.send('modem-bridge-start', cfg);
@@ -11934,7 +11967,7 @@ function ensureModemBridgeWindow() {
   modemBridgeWin.webContents.on('did-finish-load', () => {
     if (!modemBridgeWin || modemBridgeWin.isDestroyed()) return;
     _modemBridgeLoaded = true;
-    if (modemBridge.state !== 'off') modemBridgeWin.webContents.send('modem-bridge-start', { ...modemBridgeDevices(), playback: modemBridge.playback, txGain: _jtcatDirectTxGainLevel });
+    if (modemBridge.state !== 'off') modemBridgeWin.webContents.send('modem-bridge-start', { ...modemBridgeDevices(), playback: modemBridge.playback, txGain: winlinkTxGain() });
     if (modemBridge.cable.state !== 'off') modemBridgeWin.webContents.send('modem-bridge-cable-start', { ...winlinkCableDevices(), txGain: 1 });
   });
   modemBridgeWin.on('closed', () => {
@@ -12044,7 +12077,7 @@ function modemBridgePlayback(on) {
   modemBridge.playback = !!on;
   if (!modemBridgeWin || modemBridgeWin.isDestroyed()) return;
   if (on) modemBridge.state = 'starting';
-  modemBridgeWin.webContents.send('modem-bridge-playback', { on: !!on, ...modemBridgeDevices(), txGain: _jtcatDirectTxGainLevel });
+  modemBridgeWin.webContents.send('modem-bridge-playback', { on: !!on, ...modemBridgeDevices(), txGain: winlinkTxGain() });
 }
 
 /** Receive audio from the radio link → the modem (called from the Flex and Icom RX taps). */
@@ -12057,6 +12090,7 @@ function winlinkFeedRx(pcm, sampleRate, { fromBridge = false } = {}) {
     let pk = 0;
     for (let i = 0; i < pcm.length; i++) { const a = pcm[i] < 0 ? -pcm[i] : pcm[i]; if (a > pk) pk = a; }
     if (pk > _winlinkRxPeak || now - _winlinkRxPeakAt > 500) { _winlinkRxPeak = pk; _winlinkRxPeakAt = now; }
+    if (!winlinkTxActive) _winlinkLevels.noteRx(pk); // the session's loudest receive, the gateway's and not our own over (#300)
   }
   // VARA hears the radio through the virtual cable: the cable side's playback.
   if (modemBridge.cable.state === 'ok' && modemBridgeWin && !modemBridgeWin.isDestroyed()) {
@@ -12907,6 +12941,7 @@ function winlinkOutcomeReset(mode) {
   _winlinkPatReply = '';
   _winlinkReceived = null;
   _winlinkAudioSummary = '';
+  _winlinkLevels.reset();
   _winlinkLinkStory = mode === 'ardop' ? new WinlinkDiag.ArdopLinkStory() : mode === 'packet' ? new DirewolfAgwMonitor.PacketLinkStory() : null;
   _winlinkRadioMode = null;
   // The Outbox as the session starts: what is gone from it afterwards was sent.
@@ -12986,6 +13021,7 @@ async function winlinkSettleOutcome(state, s, raw, received, endedAt) {
     endedBy: WinlinkOutcome.endedByText({ cause: _winlinkCause, modemEnd: story && story.end, mode: s.mode }),
     audio: _winlinkAudioSummary.replace(/^audio this session:\s*/, ''),
     radioMode: winlinkRadioModeText(),
+    levels: _winlinkLevels.text(), levelsAdvice: _winlinkLevels.advice(),
     patLine: _winlinkPatLastLine, raw: _winlinkPatReply,
   };
   const facts = { ...taken, outbox: await winlinkOutboxCount() };
@@ -39874,6 +39910,9 @@ app.whenReady().then(() => {
   if (typeof settings.jtcatTxGain === 'number' && Number.isFinite(settings.jtcatTxGain)) {
     _jtcatDirectTxGainLevel = Math.max(0, Math.min(1, settings.jtcatTxGain));
   }
+  // #300: Winlink's transmit level is its own now. Until then it was JTCAT's Drive;
+  // an operator who never set one keeps exactly that, written down once.
+  if (WinlinkTxLevel.seedTxGain(settings, _jtcatDirectTxGainLevel)) saveSettings(settings);
   // JS8 went native (docs/js8-native-plan.md): the bridge-era settings are
   // retired. Clear them once, loudly, so nobody wonders whether an old cable
   // config is still doing something. js8HeartbeatMin / js8Submode are the
@@ -43211,6 +43250,7 @@ function cloudShackNotice(text, kind) {
   });
   // Display preferences of the mail window (speed as the JTCAT pop-out's: slower = averaged, never dropped).
   ipcMain.on('winlink-cmd-pref', (_e, { key, value } = {}) => {
+    if (key === 'winlinkTxGain') { applyWinlinkTxGain(value); return; }
     if (key === 'winlinkWaterfallSpeed') settings.winlinkWaterfallSpeed = Math.max(1, Math.min(60, parseInt(value, 10) || 60));
     else if (key === 'winlinkWaterfallShown') settings.winlinkWaterfallShown = value !== false;
     else return;

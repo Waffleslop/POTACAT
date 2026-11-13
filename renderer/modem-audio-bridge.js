@@ -154,13 +154,21 @@ function makeSide({ name, what, where, rx, status }) {
     if (playNode) playNode.port.postMessage({ cmd: d && d.on ? 'over-start' : 'over-end' });
   }
 
+  /** The transmit level changed (#300): the playing output follows at once. */
+  function setTxGain(g) {
+    const v = (typeof g === 'number' && isFinite(g)) ? Math.max(0, Math.min(2, g)) : null;
+    if (v == null) return;
+    if (cfg) cfg.txGain = v;
+    if (playGain) playGain.gain.value = v;
+  }
+
   function stop() {
     clearInterval(levelTimer); levelTimer = null;
     stopCapture(); stopPlayback();
     status({ stopped: true });
   }
 
-  return { start, playback, tx, over, stop, lanePort };
+  return { start, playback, tx, over, stop, lanePort, setTxGain };
 }
 
 const radio = makeSide({
@@ -183,6 +191,7 @@ window.bridge.onStart((c) => radio.start(c));
 window.bridge.onPlayback((c) => radio.playback(c));
 window.bridge.onTx((d) => radio.tx(d));
 window.bridge.onOver((d) => radio.over(d));
+window.bridge.onTxGain((g) => radio.setTxGain(g));
 window.bridge.onStop(() => { radio.stop(); cable.stop(); });
 window.bridge.onStopRadio(() => radio.stop());
 window.bridge.onCableStart((c) => cable.start({ ...(c || {}), playback: true }));
