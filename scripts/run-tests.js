@@ -83,6 +83,7 @@ const TESTS = [
   'test/sstv-live-path-test.js',
   'test/sstv-drive-test.js', // #279: the SSTV Drive slider keeps 0, shows its value, and is never squeezed
   'test/sstv-start-band-test.js', // #292: SSTV never tunes a radio to a band it is not set up for
+  'test/sstv-freq-box-test.js', // #359: the frequency box is not overwritten while typing; kHz or MHz; FM from 2 m up
   'test/sstv-text-styles-test.js', // #327: typeface, outline, shadow, letter spacing per SSTV text layer
   'test/sstv-input-level-test.js',
   'test/voice-macros-test.js',

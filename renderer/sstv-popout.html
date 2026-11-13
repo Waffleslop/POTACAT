@@ -72,7 +72,7 @@
     .pop .row { display: flex; gap: 6px; align-items: center; }
     #freq-pop { top: 36px; left: 0; width: 230px; }
     #freq-select { width: 100%; }
-    #freq-input { width: 90px; font-family: Consolas, monospace; }
+    #freq-input { width: 104px; font-family: Consolas, monospace; }
     #gear-pop { top: calc(100% + 4px); right: 10px; width: 300px; max-height: calc(100vh - 120px); overflow-y: auto; }
     #look-desc { color: var(--text-primary); }
 
@@ -249,7 +249,7 @@
           <optgroup label="6m"><option value="50680" data-mode="USB">50.680</option></optgroup>
         </select>
         <div class="row">
-          <input type="text" id="freq-input" class="sstv-freq-input" placeholder="kHz" title="Another frequency, in kHz — press Enter">
+          <input type="text" id="freq-input" class="sstv-freq-input" placeholder="kHz or MHz" title="Another frequency: 14230 (kHz) or 145.800 (MHz). 2 m and up tunes in FM. Press Enter">
           <button type="button" class="btn" id="tune-btn">Tune</button>
         </div>
       </div>
@@ -429,6 +429,7 @@
   <script src="../lib/rig-family.js"></script>
   <script src="../lib/rig-bands.js"></script>
   <script src="../lib/ssb-sideband.js"></script>
+  <script src="../lib/sstv-freq.js"></script>
 <script src="../lib/sstv-start-band.js"></script>
   <script src="../lib/sstv-templates.js"></script>
   <script src="../lib/sstv-help.js"></script>
