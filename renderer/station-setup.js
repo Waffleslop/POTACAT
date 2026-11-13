@@ -336,6 +336,8 @@
     if (!deviceId) return { result: 'error', error: 'no input chosen' };
     if (/^alsa:/.test(deviceId)) return { result: 'unsupported', error: 'This input is a Linux sound device POTACAT opens directly; it is checked when FT8 runs.' };
     let stream = null, ctx = null;
+    // #463: logs the macOS microphone permission and asks once if macOS never asked.
+    try { if (window.api.macMicCaptureStart) await window.api.macMicCaptureStart('listen-test'); } catch {}
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: { deviceId: { exact: deviceId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
@@ -357,7 +359,8 @@
         if (rms > peak) peak = rms;
       }
       const dbfs = peak > 0 ? 20 * Math.log10(peak) : -120;
-      return { result: dbfs < -80 ? 'silent' : dbfs < -50 ? 'low' : 'ok', dbfs };
+      // zeros: every sample was exact digital zero (-120 dBFS), what a Mac that refuses the microphone delivers.
+      return { result: dbfs < -80 ? 'silent' : dbfs < -50 ? 'low' : 'ok', dbfs, zeros: peak === 0 };
     } catch (err) {
       return { result: 'error', error: (err && (err.message || err.name)) || 'could not open the input' };
     } finally {
@@ -400,6 +403,15 @@
     try { current = await window.api.stationSetupReport({ rigId, kind, result }); } catch {}
     delete busy[stepId];
     render();
+    // #463: three seconds of exact zeros on a Mac is the refused-microphone
+    // signature; say where to fix it (lib/mac-mic-access.js) and log it in main.
+    if (kind === 'rxTest' && result && result.zeros && window.MacMicAccess) {
+      const v = window.MacMicAccess.micVerdict({ platform: window.api.platform, silentMs: 3000, minSilentMs: 3000, heardSound: false });
+      if (v.say) {
+        showMessage(v.message);
+        if (window.api.macMicSilence) window.api.macMicSilence({ surface: 'listen-test', silent: true, silentMs: 3000, minSilentMs: 3000 });
+      }
+    }
     afterChange();
   }
 

@@ -1933,6 +1933,7 @@ async function startRxAudio() {
       if (settings && settings.audioSource === 'smartsdr'
           && (Date.now() - _lastVitaAudioTs) < 3000) return;
       _markDecoderAudio(e.data, 'mic');
+      if (!isTx) sstvMicNote(e.data); // #463
       // Send audio samples to main process for SSTV decoder (skip during TX to avoid self-decode)
       if (!isTx) window.api.sstvAudio(e.data);
       // Feed waterfall
@@ -1947,6 +1948,7 @@ async function startRxAudio() {
     window.api.sstvSetSampleRate(actualRate);
 
     rxInfo.textContent = 'Listening...';
+    sstvMicArm(); // #463
     // Say WHICH device: "RX audio started" alone never showed that SSTV was
     // on the laptop microphone.
     const track = sstvStream.getAudioTracks()[0];
@@ -1991,6 +1993,32 @@ let _lastVitaAudioTs = 0; // for the smartsdr mic-fallback gate below
 const RX_LOW_DBFS = -50;
 let _rxLevelPeak = 0;   // peak |sample| since the last level tick
 let _rxLevelHold = 0;   // slow-decaying hold for the badge (no flicker between lines)
+// #463: on a Mac that refuses the microphone, the radio's input is exact
+// zeros from the first buffer (lib/mac-mic-access.js; main decides what to
+// say, and the status bar carries it until sound arrives).
+let _sstvMicWatch = null;
+function sstvMicArm() {
+  if (!window.MacMicAccess || window.api.platform !== 'darwin') return;
+  const now = Date.now();
+  if (_sstvMicWatch) _sstvMicWatch.started(now);
+  else _sstvMicWatch = new window.MacMicAccess.SilenceWatch(now);
+  if (window.api.macMicCaptureStart) window.api.macMicCaptureStart('sstv').catch(() => {});
+}
+function sstvMicNote(samples) {
+  if (!_sstvMicWatch) return;
+  const now = Date.now();
+  const ev = _sstvMicWatch.note(samples, now);
+  if (ev && window.api.macMicSilence) window.api.macMicSilence({ surface: 'sstv', silent: ev === 'silent', silentMs: _sstvMicWatch.silentFor(now) });
+}
+let _sstvMicMessage = '';
+if (window.api.onMacMicNotice) {
+  window.api.onMacMicNotice((d) => {
+    if (!statusBar) return;
+    if (d && d.show && d.message) { _sstvMicMessage = d.message; statusBar.textContent = d.message; }
+    else if (_sstvMicMessage && statusBar.textContent === _sstvMicMessage) { statusBar.textContent = 'Listening'; _sstvMicMessage = ''; }
+  });
+}
+
 function _markDecoderAudio(samples, source) {
   if (source === 'vita') _lastVitaAudioTs = Date.now();
   // Silence check: a live-but-muted feed is just as dead as no feed.
