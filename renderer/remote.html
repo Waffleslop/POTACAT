@@ -19,6 +19,7 @@
   <!-- sstv-templates-js -->
   <!-- favorites-js -->
   <!-- winlink-mail-view-js -->
+  <!-- winlink-mail-actions-js -->
   <!-- wspr-dbm-js -->
   <!-- cloud-billing-ui-js -->
   <!-- custom-cat-follow-js -->
@@ -1830,6 +1831,7 @@
               <button type="button" class="mail-seg-btn" data-box="out" aria-pressed="false">Outbox</button>
               <button type="button" class="mail-seg-btn" data-box="sent" aria-pressed="false">Sent</button>
               <button type="button" class="mail-seg-btn" data-box="archive" aria-pressed="false">Archive</button>
+              <button type="button" class="mail-seg-btn hidden" data-box="deleted" aria-pressed="false">Deleted</button>
             </div>
             <div id="mail-list" class="mail-list"></div>
           </div>
@@ -1854,11 +1856,11 @@
                 <div id="mail-read-meta" class="mail-head-sub"></div>
               </div>
             </header>
-            <div class="mail-read-actions">
-              <button type="button" id="mail-reply" class="mail-btn mail-btn-main mail-btn-fit">Reply</button>
-              <button type="button" id="mail-del" class="mail-btn mail-btn-danger mail-btn-fit">Delete</button>
-            </div>
+            <!-- Reply, Reply all, Archive / Move to Inbox, Delete; Restore and Delete for good in Deleted (lib/winlink-mail-actions.js) -->
+            <div id="mail-read-actions" class="mail-read-actions"></div>
             <div class="mail-scroll">
+              <div id="mail-read-cc" class="mail-read-cc mail-muted hidden"></div>
+              <div id="mail-read-note" class="mail-read-note mail-muted hidden"></div>
               <div id="mail-read-body" class="mail-read-body"></div>
               <div id="mail-read-atts" class="mail-read-atts"></div>
             </div>
@@ -1873,6 +1875,8 @@
             <div class="mail-scroll mail-form">
               <label for="mail-to" class="mail-caps">To</label>
               <input type="text" id="mail-to" class="mail-input" placeholder="Callsign or email" autocomplete="off" autocapitalize="characters">
+              <label for="mail-cc" class="mail-caps">Cc</label>
+              <input type="text" id="mail-cc" class="mail-input" placeholder="Optional" autocomplete="off" autocapitalize="characters">
               <label for="mail-subj" class="mail-caps">Subject</label>
               <input type="text" id="mail-subj" class="mail-input" maxlength="128">
               <label for="mail-body" class="mail-caps">Message</label>

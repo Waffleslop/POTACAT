@@ -34,7 +34,7 @@ async function test(name, fn) {
     assert.ok(!s.markRead('a'), 'already read');
     assert.strictEqual(s.totalUnread, 1);
     assert.ok(s.remove('in', 'c'));
-    assert.deepStrictEqual(s.counts(), { in: 2, out: 0, sent: 1, archive: 0 });
+    assert.deepStrictEqual(s.counts(), { in: 2, out: 0, sent: 1, archive: 0, deleted: 0 });
     assert.ok(!s.applyMailbox('spam', []));
   });
   await test('a session starts fresh, rejects unknown states, counts finished transfers', () => {

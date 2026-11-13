@@ -265,6 +265,7 @@ const TESTS = [
   'test/winlink-arq-timeout-test.js', // #425: the ARDOP link timeout is a setting; it reaches our Pat build through the environment; the summary says the value in force
   'test/winlink-contacts-test.js', // the Winlink address book, and the Position report and POTA spot forms
   'test/winlink-summary-store-test.js', // #425: the session summary lines survive a restart, so Report a Bug still holds the session that dropped
+  'test/winlink-folders-test.js', // #462 #475: Archive and back, the Deleted folder (copies, Restore, purge after N days), Reply all; a real Pat when present
   'test/winlink-tx-level-test.js', // #300: Winlink's own TX level; the summary says the RX peak and what our overs sent; the pause between overs is not a gap
   'test/rigctld-shim-hamlib-test.js',
   'test/rigctld-died-test.js',

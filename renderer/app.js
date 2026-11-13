@@ -1441,6 +1441,7 @@ const setVaraCableIn = document.getElementById('set-vara-cable-in');
 const setVaraCableOut = document.getElementById('set-vara-cable-out');
 const setWinlinkCap = document.getElementById('set-winlink-cap');
 const setWinlinkPrediction = document.getElementById('set-winlink-prediction');
+const setWinlinkDeletedDays = document.getElementById('set-winlink-deleted-days'); // #475: 7 | 30 | 90 | 0 (never)
 const setWinlinkAutoRetry = document.getElementById('set-winlink-auto-retry');
 const setWinlinkRecordAudio = document.getElementById('set-winlink-record-audio');
 const setWinlinkPatPath = document.getElementById('set-winlink-pat-path');
@@ -17761,6 +17762,7 @@ async function openSettingsDialog(tab) {
     }
     setWinlinkCap.value = s.winlinkSessionCapMin || 30;
     if (setWinlinkPrediction) setWinlinkPrediction.checked = s.winlinkPrediction !== false;
+    if (setWinlinkDeletedDays) setWinlinkDeletedDays.value = String([7, 30, 90, 0].includes(Number(s.winlinkDeletedDays)) && s.winlinkDeletedDays !== '' && s.winlinkDeletedDays != null ? Number(s.winlinkDeletedDays) : 30);
     if (setWinlinkAutoRetry) setWinlinkAutoRetry.checked = s.winlinkAutoRetry !== false;
     if (setWinlinkRecordAudio) setWinlinkRecordAudio.checked = !!s.winlinkRecordModemAudio;
     setWinlinkPatPath.value = s.winlinkPatPath || '';
@@ -18662,6 +18664,7 @@ settingsSave.addEventListener('click', async () => {
       } : {}),
       winlinkSessionCapMin: Math.max(10, Math.min(60, parseInt(setWinlinkCap.value, 10) || 30)),
       winlinkPrediction: setWinlinkPrediction ? setWinlinkPrediction.checked : true,
+      ...(setWinlinkDeletedDays ? { winlinkDeletedDays: Number(setWinlinkDeletedDays.value) } : {}),
       winlinkAutoRetry: setWinlinkAutoRetry ? setWinlinkAutoRetry.checked : true,
       winlinkRecordModemAudio: setWinlinkRecordAudio ? setWinlinkRecordAudio.checked : false,
       winlinkPatPath: setWinlinkPatPath.value.trim(),

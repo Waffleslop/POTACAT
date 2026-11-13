@@ -4740,6 +4740,8 @@ body.popout-mode .popout-only { display: flex; }
 .mail-seg-1 { grid-template-columns: minmax(0, 1fr); }
 .mail-seg-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .mail-seg-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+/* Five folders (#475): three over two, so each word stays whole at phone width. */
+.mail-seg-5 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .mail-seg-btn {
   min-height: 44px; min-width: 0; padding: 4px 2px; border: 0; border-radius: 6px; background: transparent; color: var(--m-muted);
   font-family: inherit; font-size: 16px; font-weight: 700; line-height: 1.2; overflow-wrap: normal; word-break: normal; cursor: pointer;
@@ -4809,6 +4811,7 @@ body.popout-mode .popout-only { display: flex; }
 /* ── reading ── */
 .mail-read-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 12px 0; flex-shrink: 0; }
 .mail-read-actions .mail-btn { flex: 1; min-width: 120px; }
+.mail-read-cc, .mail-read-note { padding-bottom: 8px; }
 .mail-read-body { max-width: 640px; font-size: 17px; line-height: 26px; white-space: pre-wrap; overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
 .mail-read-atts { display: flex; flex-direction: column; gap: 8px; max-width: 640px; }
 .mail-att { display: flex; align-items: center; gap: 8px; }

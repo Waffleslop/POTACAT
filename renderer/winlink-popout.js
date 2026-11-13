@@ -6,7 +6,7 @@
   var $ = function (id) { return document.getElementById(id); };
 
   var state = null;              // last winlink-state payload
-  var lists = { in: [], out: [], sent: [], archive: [] };
+  var lists = { in: [], out: [], sent: [], archive: [], deleted: [] };
   var box = 'in';
   var openMid = null;
   var pendingFiles = [];         // [{name,size,dataBase64}]
@@ -126,8 +126,9 @@
 
     // Counts
     var c = s.counts || {};
-    ['in', 'out', 'sent', 'archive'].forEach(function (b) {
+    ['in', 'out', 'sent', 'archive', 'deleted'].forEach(function (b) {
       var el = $('wl-c-' + b);
+      if (!el) return;
       var n = b === 'in' ? (s.unread || 0) : (c[b] || 0);
       el.textContent = n ? String(n) : '';
       el.classList.toggle('unread', b === 'in' && n > 0);
@@ -257,15 +258,31 @@
   // ── lists ────────────────────────────────────────────────────────────────
   function renderList() {
     var rows = lists[box] || [];
-    if (!rows.length) { $('wl-list').innerHTML = '<div class="wl-empty">Nothing in ' + ({ in: 'the inbox', out: 'the outbox', sent: 'Sent', archive: 'the archive' })[box] + '.</div>'; return; }
-    $('wl-list').innerHTML = rows.map(function (m) {
-      var who = box === 'in' ? m.from : (m.to || []).join(', ');
+    // The Deleted folder says how long it keeps a message, with the choice beside it (#475).
+    var head = box === 'deleted' ? deletedHead() : '';
+    if (!rows.length) { $('wl-list').innerHTML = head + '<div class="wl-empty">Nothing in ' + ({ in: 'the inbox', out: 'the outbox', sent: 'Sent', archive: 'the archive', deleted: 'Deleted' })[box] + '.</div>'; return; }
+    $('wl-list').innerHTML = head + rows.map(function (m) {
+      var fromOther = box === 'in' || ((box === 'archive' || box === 'deleted') && !WMA.isOwnAddress(m.from, state && state.mycall));
+      var who = fromOther ? m.from : (m.to || []).join(', ');
       return '<div class="wl-row' + (m.read ? '' : ' unread') + (m.mid === openMid ? ' active' : '') + '" data-mid="' + esc(m.mid) + '">'
         + '<div class="wl-row-top"><span class="wl-from">' + esc(who) + '</span><span>' + esc(fmtDate(m.date)) + '</span></div>'
         + '<div class="wl-subj">' + (m.attachments && m.attachments.length ? '[' + m.attachments.length + ' att] ' : '') + esc(m.subject || '(no subject)') + '</div></div>';
     }).join('');
   }
 
+  function deletedHead() {
+    var d = WMA.deletedDays(state && state.deletedDays);
+    return '<div class="wl-del-head"><label for="wl-del-days">Remove for good after</label> <select id="wl-del-days">'
+      + WMA.DELETED_DAYS_CHOICES.map(function (n) { return '<option value="' + n + '"' + (n === d ? ' selected' : '') + '>' + esc(WMA.daysChoiceLabel(n)) + '</option>'; }).join('')
+      + '</select><div class="wl-del-head-note">' + esc(WMA.deletedFolderNote(d)) + '</div></div>';
+  }
+  $('wl-list').addEventListener('change', function (e) {
+    if (!e.target || e.target.id !== 'wl-del-days') return;
+    var n = WMA.deletedDays(e.target.value);
+    if (state) state.deletedDays = n;
+    window.api.setPref('winlinkDeletedDays', n);
+    renderList();
+  });
   $('wl-list').addEventListener('click', function (e) {
     var row = e.target.closest('.wl-row');
     if (row) openMessage(row.getAttribute('data-mid'));
@@ -290,50 +307,82 @@
     $('wl-reader').innerHTML = html;
   }
 
+  // The reader's buttons come from lib/winlink-mail-actions.js (#462, #475):
+  // the same buttons, in the same order, with the same words as ECHOCAT Web.
+  var WMA = window.WinlinkMailActions;
+  var READER_BTN = { reply: 'wl-reply', 'reply-all': 'wl-reply-all', forward: 'wl-forward', archive: 'wl-archive', 'move-back': 'wl-move-back', delete: 'wl-del', restore: 'wl-restore', 'delete-for-good': 'wl-del' };
+  function quoteBody(m) { return '\n\n--- ' + m.from + ' wrote:\n' + (m.body || '').split('\n').map(function (l) { return '> ' + l; }).join('\n'); }
+
   function openMessage(mid) {
     openMid = mid;
     renderList();
     showReader('<div class="wl-empty">Opening…</div>');
-    window.api.read(box, mid).then(function (r) {
+    var openBox = box;
+    window.api.read(openBox, mid).then(function (r) {
       if (openMid !== mid) return;
       if (!r || !r.ok) { showReader('<div class="wl-empty">' + esc((r && r.error) || 'Could not open it') + '</div>'); return; }
       var m = r.message;
+      var mycall = state && state.mycall;
+      var acts = WMA.readerActions(openBox, m, mycall);
+      var btn = function (a) { return '<button class="wl-btn' + (a.danger ? ' danger' : '') + '" id="' + READER_BTN[a.id] + '">' + esc(a.label) + '</button>'; };
+      var left = acts.filter(function (a) { return !a.danger; });
+      var right = acts.filter(function (a) { return a.danger; });
+      var deleted = openBox === WMA.DELETED;
       var html = '<div class="wl-reader-actions">'
-        + (box === 'in' ? '<button class="wl-btn" id="wl-reply">Reply</button>' : '')
-        + '<button class="wl-btn" id="wl-forward">Forward</button>'
-        + (m.from && !contactFor(m.from) && WC.normalizeAddress(m.from) ? '<button class="wl-btn" id="wl-addbook">Add to address book</button>' : '')
-        + '<span class="wl-spacer"></span><button class="wl-btn danger" id="wl-del">Delete</button></div>'
+        + left.map(btn).join('')
+        + (!deleted && m.from && !contactFor(m.from) && WC.normalizeAddress(m.from) ? '<button class="wl-btn" id="wl-addbook">Add to address book</button>' : '')
+        + '<span class="wl-spacer"></span>' + right.map(btn).join('') + '</div>'
+        + '<div class="wl-act-msg" id="wl-act-msg" role="status"></div>'
+        + (deleted ? '<div class="wl-del-note">' + esc(WMA.deletedNote(m, state && state.deletedDays, Date.now())) + '</div>' : '')
         + '<div class="wl-hdr"><b>' + esc(m.subject || '(no subject)') + '</b><br>From <b>' + esc(m.from) + '</b> · ' + esc(new Date(m.date).toLocaleString()) + '<br>To ' + esc((m.to || []).join(', '))
         + (m.cc && m.cc.length ? '<br>Cc ' + esc(m.cc.join(', ')) : '') + '</div>'
         + '<div class="wl-body">' + esc(m.body || '') + '</div>'
         + (m.attachments && m.attachments.length ? '<div class="wl-attach">' + m.attachments.map(function (a) {
-          return '<button class="wl-btn wl-att" data-name="' + esc(a.name) + '">Save ' + esc(a.name) + ' (' + fmtSize(a.size) + ')</button>';
-        }).join('') + '</div>' : '');
+          // Pat cannot read its Deleted folder: an attachment there is named, and saved after Restore.
+          return deleted ? '<span class="wl-att-name">' + esc(a.name) + ' (' + fmtSize(a.size) + ')</span>'
+            : '<button class="wl-btn wl-att" data-name="' + esc(a.name) + '">Save ' + esc(a.name) + ' (' + fmtSize(a.size) + ')</button>';
+        }).join('') + (deleted ? '<span class="wl-att-name">Restore the message to save its attachments.</span>' : '') + '</div>' : '');
       showReader(html);
-      var rp = $('wl-reply'); if (rp) rp.onclick = function () { compose({ to: m.from, subject: /^re:/i.test(m.subject) ? m.subject : 'Re: ' + m.subject, body: '\n\n--- ' + m.from + ' wrote:\n' + (m.body || '').split('\n').map(function (l) { return '> ' + l; }).join('\n') }); };
+      var say = function (t, bad) { var el = $('wl-act-msg'); if (el) { el.textContent = t || ''; el.classList.toggle('bad', !!bad); } };
+      var after = function (word) {
+        return function (d) {
+          if (d && d.ok) { openMid = null; showReader('<div class="wl-empty">' + esc(word) + '</div>'); }
+          else say((d && d.error) || 'That did not work.', true);
+        };
+      };
+      var on = function (id, f) { var el = $(id); if (el) el.onclick = f; };
+      on('wl-reply', function () { compose({ to: m.from, subject: WMA.replySubject(m.subject), body: quoteBody(m) }); });
+      // Reply all: never the default; To = the sender, Cc = everyone else but this station.
+      on('wl-reply-all', function () { var ra = WMA.replyAll(m, mycall); compose({ to: ra.to.join(', '), cc: ra.cc.join(', '), subject: WMA.replySubject(m.subject), body: quoteBody(m) }); });
+      on('wl-addbook', function () { openBook({ address: m.from }); });
       // #wl-forward, not #wl-fwd: that id is the PWR meter, which took the click.
-      var ab = $('wl-addbook'); if (ab) ab.onclick = function () { openBook({ address: m.from }); };
-      $('wl-forward').onclick = function () { compose({ subject: 'Fwd: ' + m.subject, body: '\n\n--- Forwarded from ' + m.from + ':\n' + (m.body || '') }); };
-      // Delete asks first: the button becomes "Delete this message?" with a
-      // Cancel beside it, and reverts by itself after a few seconds.
+      on('wl-forward', function () { compose({ subject: 'Fwd: ' + m.subject, body: '\n\n--- Forwarded from ' + m.from + ':\n' + (m.body || '') }); });
+      acts.forEach(function (a) {
+        if (a.id === 'archive' || a.id === 'move-back' || a.id === 'restore') {
+          on(READER_BTN[a.id], function () { window.api.move(openBox, mid, a.to).then(after('Moved to ' + WMA.folderName(a.to) + '.')); });
+        }
+      });
+      // Delete moves the message to Deleted (it can be restored from there).
+      if (!deleted) on('wl-del', function () { window.api.del(openBox, mid).then(after('Moved to Deleted. Restore it from there if you need it again.')); });
+      // Delete for good asks once, on the button itself, with Cancel beside it.
       var delBtn = $('wl-del');
       var delArmed = null;
-      delBtn.onclick = function () {
+      if (deleted && delBtn) delBtn.onclick = function () {
         if (!delArmed) {
-          delBtn.textContent = 'Delete this message?';
+          delBtn.textContent = WMA.DELETE_FOR_GOOD_CONFIRM;
           var cancel = document.createElement('button');
           cancel.className = 'wl-btn'; cancel.textContent = 'Cancel'; cancel.id = 'wl-del-cancel';
           delBtn.parentNode.insertBefore(cancel, delBtn);
-          var disarm = function () { if (!delArmed) return; clearTimeout(delArmed); delArmed = null; delBtn.textContent = 'Delete'; cancel.remove(); };
+          var disarm = function () { if (!delArmed) return; clearTimeout(delArmed); delArmed = null; delBtn.textContent = 'Delete for good'; cancel.remove(); };
           cancel.onclick = disarm;
-          delArmed = setTimeout(disarm, 5000);
+          delArmed = setTimeout(disarm, 6000);
           return;
         }
         clearTimeout(delArmed); delArmed = null;
-        window.api.del(box, mid).then(function (d) { if (d && d.ok) { openMid = null; showReader('<div class="wl-empty">Deleted.</div>'); } });
+        window.api.del(openBox, mid).then(after('Deleted for good.'));
       };
       Array.prototype.forEach.call(document.querySelectorAll('.wl-att'), function (b) {
-        b.onclick = function () { window.api.saveAttachment(box, mid, b.getAttribute('data-name')); };
+        b.onclick = function () { window.api.saveAttachment(openBox, mid, b.getAttribute('data-name')); };
       });
     });
   }
