@@ -6475,6 +6475,9 @@ a.settings-echocat-badge-link:hover {
   font-size: 15px;
   line-height: 1.45;
   max-width: 460px;
+  /* --warn is the theme's readable amber (dark amber on light themes). */
+  color: var(--warn);
+  border-color: var(--warn);
 }
 
 .log-toast-dismiss {
