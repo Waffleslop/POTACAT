@@ -1223,8 +1223,8 @@
     if (!txlEditing) { txlIn.value = String(pct); txlVal.textContent = pct + '%'; }
     txlIn.disabled = t.soundCard === false;
     $('wl-txlevel-label').title = t.soundCard === false
-      ? 'Not used on this radio: its network audio goes at full scale, and the radio's RF power sets the level.'
-      : 'The modem's audio level into the radio's sound card (fine control at the low end). It sets modulation, not RF power. Turn it down if the radio's ALC goes high or long frames are rejected.';
+      ? "Not used on this radio: its network audio goes at full scale, and the radio's RF power sets the level."
+      : "The modem's audio level into the radio's sound card (fine control at the low end). It sets modulation, not RF power. Turn it down if the radio's ALC goes high or long frames are rejected.";
   }
   txlIn.addEventListener('pointerdown', function () { txlEditing = true; });
   txlIn.addEventListener('change', function () { txlEditing = false; });
