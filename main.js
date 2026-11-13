@@ -1035,7 +1035,14 @@ function _noteSettingsMtime(p) {
   if (_settingsMtimeAtLaunch.has(p)) return;
   try { _settingsMtimeAtLaunch.set(p, fs.statSync(p).mtimeMs); } catch { _settingsMtimeAtLaunch.set(p, null); }
 }
+// GitHub #344: once an operator switch has moved the profile pointer, no
+// settings file is written until the restart (lib/profile-switch-guard.js).
+const ProfileSwitchGuard = require('./lib/profile-switch-guard');
+const _settingsWriteGate = ProfileSwitchGuard.createSettingsWriteGate({
+  log: (line) => { console.log(line); try { sendCatLog(line); } catch { /* log not up */ } },
+});
 function _writeJsonAtomic(p, obj) {
+  if (!_settingsWriteGate.allowWrite(path.basename(path.dirname(p)) + '/' + path.basename(p))) return;
   _noteSettingsMtime(p);
   try { fs.mkdirSync(path.dirname(p), { recursive: true }); } catch {}
   try {
@@ -1269,12 +1276,14 @@ function switchProfile(callsign) {
   // against the new operator's settings) is a follow-up — too many cached
   // subsystems to chase down in one PR. Restart is one click and
   // guarantees correctness.
+  // The gate closes the moment the pointer moves (#344): settings still hold
+  // this operator, so a save before the restart would write them into the
+  // new operator's file.
   let currentProfile = '';
   try {
-    currentProfile = settings.activeProfile;
-    saveSettings(settings);
-    setActiveProfilePointer(call);
-    settings.activeProfile = call;
+    currentProfile = ProfileSwitchGuard.commitProfileSwitch(call, {
+      settings, saveSettings, setActiveProfilePointer, gate: _settingsWriteGate,
+    }).previous;
     if (currentProfile && currentProfile !== call) {
       console.log('[multi-op] switched activeProfile ' + currentProfile + ' -> ' + call);
     }
