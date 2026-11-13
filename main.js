@@ -40907,6 +40907,12 @@ function cloudShackNotice(text, kind) {
       }
       if (dryRun) detail.push('', 'Dry run: your logbook was not changed. Run Import hunter log to apply.');
       if (backupPath) detail.push('', `Your log before the import was saved to:\n${backupPath}`);
+      // Signed in, every change was journaled for the Cloud (qsoLogSink): a
+      // filled park raised that record's version and an added contact is a new
+      // Cloud QSO, so the next sync brings them back over a restored .bak.
+      if (backupPath && cloudIpc && cloudIpc.currentOwnerId()) {
+        detail.push('With POTACAT Cloud on, copying the backup back does not undo the import in the Cloud.');
+      }
       const { response } = await dialog.showMessageBox(parentWin, {
         type: 'info',
         title: 'POTA.app Hunter Log Import',
