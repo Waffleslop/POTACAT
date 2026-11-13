@@ -15658,7 +15658,8 @@ var _paddleHoldTimer = { dit: null, dah: null };
         break;
       case 'winlink-result':
         if (msg.op === 'account-check' || msg.op === 'register' || msg.op === 'set-password') { mailAcctResult(msg); break; }
-        if (msg.op === 'gateways') { if (!msg.ok) mailGatewaysFailed(msg); break; }
+        // 'gateways-get' is the shack's answer when the request itself threw (#435).
+        if (msg.op === 'gateways' || msg.op === 'gateways-get') { if (!msg.ok) mailGatewaysFailed(msg); break; }
         // The shack tuned to the picked gateway: this page now owes it a restore.
         if (msg.op === 'qsy' && msg.ok) { mailQsyMoved = true; mailRenderBar(); }
         if (!msg.ok && msg.error) showToast(msg.error, 5000, true);
@@ -16223,13 +16224,14 @@ var _paddleHoldTimer = { dit: null, dah: null };
     mailRenderGateways();
     mailGwStatus(MailView.gatewayNote(msg), false);
   }
-  function mailGatewaysFailed(msg) {
+  function mailGatewaysFailed(msg, f) {
     if (msg.reqId && msg.reqId !== mailGwReqId) return;
     mailGwStopTimer();
     mailGwLoaded = true;
+    mailGwReqId = '';   // a late answer to the request given up on is not drawn
     mailGateways = [];
     mailPick = -1;
-    var f = MailView.gatewaysFailed(msg.error);
+    f = f || MailView.gatewaysFailed(msg.error);
     mailGwMessage(f.option);
     mailEl('mail-gw-retry').textContent = f.button;
     mailGwStatus(f.text, true);
@@ -16245,13 +16247,24 @@ var _paddleHoldTimer = { dit: null, dah: null };
     mailGwLoaded = false;
     var head = mailEl('mail-gw-head');
     if (head) head.textContent = 'Gateway';
+    mailGwReqId = 'gw' + (++mailGwSeq);
+    // No link to the shack: the request would be dropped and the list would
+    // say Loading for ever. Say so, with Try again (#435).
+    if (!(ws && ws.readyState === WebSocket.OPEN)) {
+      mailGatewaysFailed({}, { option: MailView.gatewaysTimedOut().option, text: MailView.NOT_CONNECTED, button: MailView.TRY_AGAIN });
+      return;
+    }
     mailGwMessage(MailView.loadingText(mode, s.predictionOn));
     // How long the ranking has run, and about how long the last one took.
+    // The same tick gives up when the shack has not answered in time (#435).
     var t0 = Date.now();
-    var tick = function () { mailGwStatus(MailView.predictText({ mode: mode, predictionOn: s.predictionOn, predictMs: s.predictMs, elapsedMs: Date.now() - t0 }), false); };
+    var waitMs = MailView.gatewayWait(mode, s.predictionOn);
+    var tick = function () {
+      if (Date.now() - t0 > waitMs) { mailGatewaysFailed({}, MailView.gatewaysTimedOut()); return; }
+      mailGwStatus(MailView.predictText({ mode: mode, predictionOn: s.predictionOn, predictMs: s.predictMs, elapsedMs: Date.now() - t0 }), false);
+    };
     tick();
-    if (mailEl('mail-gw-note').textContent) mailGwTimer = setInterval(tick, 1000);
-    mailGwReqId = 'gw' + (++mailGwSeq);
+    mailGwTimer = setInterval(tick, 1000);
     mailRenderBar();
     mailSend({ type: 'winlink-gateways-get', mode: mode, band: mailBand, reqId: mailGwReqId });
   }
@@ -16278,7 +16291,8 @@ var _paddleHoldTimer = { dit: null, dah: null };
     var line = mailEl('mail-radio-line');
     var text = '';
     if (!active && mode !== 'telnet') {
-      if (!g) text = mailGwLoaded ? 'No gateway to call on this band.' : 'Waiting for the gateway list.';
+      // While the list is fetched or ranked (up to about two minutes) the line says so (#435).
+      if (!g) text = mailGwLoaded ? 'No gateway to call on this band.' : MailView.connectWaitText(mode, (mailState || {}).predictionOn);
       else if (mailQsyMoved) text = 'The radio is set for ' + g.call + (g.dialKhz ? ' on ' + FreqDots.khzMhz(g.dialKhz) : '') + '. It goes back when you leave Mail.';
       else text = 'Tap a gateway to tune the radio to it, or connect now.';
     }
@@ -16292,7 +16306,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
       var o = { type: 'winlink-connect', mode: mode };
       if (mode !== 'telnet') {
         var g = mailGateways[mailPick];
-        if (!g) { showToast('Pick a gateway first', 3000, true); return; }
+        if (!g) { showToast(mailGwLoaded ? 'Pick a gateway first' : MailView.connectWaitText(mode, (mailState || {}).predictionOn), 3000, true); return; }
         o.gateway = g.call; o.dialKhz = g.dialKhz; o.url = g.url;
       }
       mailSend(o);

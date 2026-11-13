@@ -5757,9 +5757,16 @@ if (setMercuryEnable) {
       acctStatus.textContent = 'Checking… (the first check starts Winlink, a few seconds)';
       const r = await window.api.winlinkAccountCheck();
       if (!r || !r.ok) { acctStatus.textContent = (r && r.error) || 'Could not check'; return; }
-      acctStatus.textContent = r.exists ? `${r.callsign} has a Winlink account.` : `${r.callsign} has no Winlink account yet.`;
+      acctStatus.textContent = r.exists ? `${r.callsign} has a Winlink account. Checking the password…` : `${r.callsign} has no Winlink account yet.`;
       regBox.classList.toggle('hidden', !!r.exists);
-      if (r.exists) showWinlinkRecovery(); else if (recBox) recBox.classList.add('hidden');
+      // Reading the recovery address needs the saved password, so Winlink
+      // checks it there: a wrong password shows now, not at the first
+      // session (#435). No radio, no session, nothing sent.
+      if (r.exists) showWinlinkRecovery().then((pw) => {
+        const said = pw && window.WinlinkMailView ? window.WinlinkMailView.passwordCheck(pw).text : '';
+        acctStatus.textContent = `${r.callsign} has a Winlink account.${said ? ' ' + said : ''}`;
+      });
+      else if (recBox) recBox.classList.add('hidden');
     });
     // An existing account's recovery address: read through Pat with the
     // saved password, changed in place.
@@ -5774,6 +5781,7 @@ if (setMercuryEnable) {
       const r = await window.api.winlinkRecoveryEmailGet();
       if (r && r.ok) recCurrent.textContent = r.email || 'none set';
       else { recCurrent.textContent = 'unknown'; recStatus.textContent = (r && r.error) || 'Could not read it (is your Winlink password saved?)'; }
+      return r || { ok: false, error: '' };
     }
     const recChange = document.getElementById('winlink-recovery-change');
     if (recChange) recChange.addEventListener('click', async () => {
