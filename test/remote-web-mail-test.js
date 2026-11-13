@@ -615,7 +615,18 @@ const INBOX = { type: 'winlink-mailbox', box: 'in', messages: [
   { mid: 'A2', from: 'SERVICE', to: ['K3SBP'], subject: 'Your Winlink account is ready', date: '2026-11-10T09:05:00Z', read: true, attachments: [{ name: 'a.txt' }] },
 ] };
 
-test('W0: the inbox: header with the call, folder segments with counts, rows as cards', () => {
+// MailView.shortTime() reads the real Date.now() (the page's FakeDate does not reach the
+// module), and prints a time-only label only for today's UTC date. Pin the real clock to the
+// fake one's instant so these expectations hold on any day, at any hour, in any year.
+function atFixedNow(fn) {
+  return () => {
+    const realNow = Date.now;
+    Date.now = () => Date.parse('2026-11-12T20:00:00Z');
+    try { fn(); } finally { Date.now = realNow; }
+  };
+}
+
+test('W0: the inbox: header with the call, folder segments with counts, rows as cards', atFixedNow(() => {
   const p = loadMail();
   p.mailOnMessage(state({ unread: 1, counts: { in: 2, out: 2, sent: 7, archive: 0 } }));
   p.mailOnOpen();
@@ -637,9 +648,9 @@ test('W0: the inbox: header with the call, folder segments with counts, rows as 
   assert.deepStrictEqual(p.take(), [{ type: 'winlink-list', box: 'out' }]);
   assert.strictEqual(p.$('mail-folders').children[1].getAttribute('aria-pressed'), 'true');
   assert.strictEqual(p.$('mail-list').textContent, 'Nothing here.', 'an empty Outbox; the Inbox hint is only on the Inbox');
-});
+}));
 
-test('W0: the last-session card, and the session running now in its place', () => {
+test('W0: the last-session card, and the session running now in its place', atFixedNow(() => {
   const p = loadMail();
   p.mailOnMessage(state({ lastSession: { at: '2026-11-12T14:32:00Z', ok: true, text: 'Sent 1 message via KY4RY (ARDOP); 2 new messages in your Inbox.' } }));
   assert.strictEqual(p.$('mail-last').hidden, false);
@@ -654,7 +665,7 @@ test('W0: the last-session card, and the session running now in its place', () =
   const q = loadMail();
   q.mailOnMessage(state({ lastSession: null }));
   assert.ok(q.$('mail-last').hidden, 'no card before the first session');
-});
+}));
 
 test('W0: screens: a row opens the reader; Back, Write and Send / Receive move between screens', () => {
   const p = loadMail();
