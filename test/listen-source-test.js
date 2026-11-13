@@ -44,6 +44,19 @@ check('every model with a receive range covers every band it lists', () => {
     for (const b of m.bands || []) { const e = BANDS[b]; if (e) assert.ok(L.covers(m.rxHz, e.lower * 1e6 + 1), `${name} lists ${b} but its receive range misses it`); }
   }
 });
+check('#447: the FTX-1 hears GMRS and the rest of its real range (Yaesu manual EH084M201, p.80)', () => {
+  for (const name of ['FTX-1 Field', 'FTX-1 Optima']) {
+    const rx = RIG_MODELS[name].rxHz;
+    assert.deepStrictEqual(rx, [[30e3, 174e6], [400e6, 470e6]], name);
+    assert.strictEqual(L.decide(462.5625e6, rx, null).source, 'rig', name + ': GMRS channel 1');
+    assert.strictEqual(L.decide(467.7125e6, rx, null).source, 'rig', name + ': GMRS channel 22');
+    assert.strictEqual(L.decide(162.475e6, rx, null).source, 'rig', name + ': NOAA weather');
+    assert.strictEqual(L.decide(146.52e6, rx, null).source, 'rig', name + ': 2 m');
+    assert.strictEqual(L.decide(14.074e6, rx, null).source, 'rig', name + ': 20 m');
+    assert.notStrictEqual(L.decide(300e6, rx, null).source, 'rig', name + ': 300 MHz is outside both ranges');
+    assert.notStrictEqual(L.decide(480e6, rx, null).source, 'rig', name + ': above 470 MHz');
+  }
+});
 
 console.log('The decision (Casey\'s table)');
 const sdr = { connected: true, reach: V4, manual: false };
@@ -71,10 +84,25 @@ check('an SDR whose greeting has not named the tuner yet is trusted off the rig\
 });
 check('the refusal names the frequency, the radio and the way out', () => {
   const r = L.refusal(450e6, L.decide(450e6, FLEX, null), 'FLEX-8400/8600');
-  assert.ok(/450 MHz/.test(r) && /FLEX-8400\/8600/.test(r) && /WebSDR/.test(r), r);
+  assert.ok(/450\.000\.00 MHz/.test(r) && /FLEX-8400\/8600/.test(r) && /WebSDR/.test(r), r);
   assert.ok(/cannot receive it either/.test(L.refusal(450e6, { source: 'none', reason: 'neither' }, 'the radio', 'pi')));
-  assert.strictEqual(L.fmtMhz(162475000), '162.475 MHz');
-  assert.strictEqual(L.fmtMhz(14250000), '14.25 MHz');
+  assert.strictEqual(L.fmtMhz(162475000), '162.475.00 MHz'); // the VFO way (Casey 2026-11-11)
+  assert.strictEqual(L.fmtMhz(14250000), '14.250.00 MHz');
+});
+
+check('#277: a ham band the rig is not set up for says where to tick it, not "add an SDR"', () => {
+  const HF6 = [[30e3, 54e6]];
+  const r = L.refusal(144.2e6, L.decide(144.2e6, HF6, null), 'KX2/KX3', null, { unlistedBand: '2m' });
+  assert.ok(/144\.200\.00 MHz/.test(r) && /2m/.test(r) && /KX2\/KX3/.test(r), r);
+  assert.ok(/Check all bands you can use with this radio/.test(r) && /Settings > Radio > Edit/.test(r), r);
+  assert.ok(!/WebSDR/.test(r), r);
+  assert.ok(/WebSDR/.test(L.refusal(162.475e6, L.decide(162.475e6, HF6, null), 'KX2/KX3', null, { unlistedBand: '' })), 'off the ham bands: the SDR advice stays');
+  assert.ok(/No radio is connected/.test(L.refusal(144.2e6, { source: 'none', reason: 'no-rig' }, 'x', null, { unlistedBand: '2m' })));
+});
+check('#277: main names an unlisted ham band in the refusal', () => {
+  const m = readSrc(path.join(ROOT, 'main.js'));
+  assert.ok(m.includes('ListenSource.refusal(hz, d, rigName, kiwiLiveHost, { unlistedBand: unlistedRigBand(hz) })'));
+  assert.ok(/function unlistedRigBand\(hz\) \{[\s\S]{0,400}model\.rxHz[\s\S]{0,400}RigBands\.allowed\(bands, band\)/.test(m));
 });
 
 console.log('Wiring');
@@ -145,11 +173,15 @@ const RigBands = require('../lib/rig-bands');
 const { BANDS } = require('../lib/bands');
 const rangesFor = (model) => (RigBands.bandsForRig(null, model, RIG_MODELS[model]) || [])
   .map((b) => BANDS[b]).filter(Boolean).map((e) => [e.lower * 1e6, e.upper * 1e6]);
-check('FTX-1 (HF + 2 m + 70 cm, no published range) reaches NOAA weather 162.45 MHz and marine 156.8 MHz', () => {
-  assert.ok(!RIG_MODELS['FTX-1 Field'].rxHz, 'premise: no published range');
-  const reach = L.generalCoverage(rangesFor('FTX-1 Field'));
+check('a radio with no published range (HF + 2 m + 70 cm, guessed) reaches NOAA weather 162.45 MHz and marine 156.8 MHz', () => {
+  // The guess, for the 32 models with no rxHz (the FTX-1 had one until #447).
+  const reach = L.generalCoverage([[1.8e6, 2e6], [14e6, 14.35e6], [50e6, 54e6], [144e6, 148e6], [420e6, 450e6]]);
   assert.ok(L.covers(reach, 162.45e6) && L.covers(reach, 156.8e6));
   assert.strictEqual(L.decide(162.45e6, reach, null).source, 'rig');
+});
+check('the FTX-1 published range reaches NOAA weather and marine too', () => {
+  const rx = RIG_MODELS['FTX-1 Field'].rxHz;
+  assert.ok(L.covers(rx, 162.45e6) && L.covers(rx, 156.8e6));
 });
 check('an HF + 6 m radio still hands a 2 m click to the SDR', () => {
   const reach = L.generalCoverage([[1.8e6, 2e6], [14e6, 14.35e6], [50e6, 54e6]]);

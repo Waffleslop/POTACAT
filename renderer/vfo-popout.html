@@ -63,7 +63,7 @@
       --g: var(--ds-bg); --s: var(--ds-surface); --s2: var(--ds-fill);
       --s3: color-mix(in srgb, var(--ds-fill), var(--ds-ink) 10%); --in: var(--ds-bg); /* wells (meter tracks, text boxes) sink to the page colour; --ds-control is a dark control on the light themes */ --line: var(--ds-line-subtle);
       --t: var(--ds-ink); --t2: var(--ds-ink-muted); --t3: var(--ds-ink-muted);
-      --blue: var(--ds-tint); --green: var(--ds-ok); --red: var(--ds-air-ink); --gold: var(--ds-brand); --amber: var(--ds-warn);
+      --blue: var(--ds-tint); --green: var(--ds-ok); --red: var(--ds-air-ink); --gold: var(--ds-warn); /* states, never the brand colour (#376) */ --amber: var(--ds-warn);
       --on-blue: var(--ds-on-tint); --on-red: var(--ds-on-danger); --on-ptt: var(--ds-on-air);
       --green-tint: var(--ds-ok-subtle); --red-tint: var(--ds-danger-subtle); --red-text: var(--ds-danger);
       /* PTT at rest is the theme's on-air red, not its deep shade (the muddy red Casey flagged). */
@@ -100,8 +100,12 @@
     /* Same title as every other window (styles.css --titlebar-*). */
     .titlebar-title { font-size: 12px; font-weight: 700; letter-spacing: 0.3px; color: var(--t2); flex: 1; }
     .titlebar-btns { -webkit-app-region: no-drag; display: flex; gap: 2px; }
-    /* macOS: the system traffic lights replace minimize/close (popout-theme-boot.js). */
-    .platform-darwin .titlebar { padding-left: 80px; }
+    /* macOS: the system traffic lights replace minimize/close (popout-theme-boot.js).
+       Their room is kept in both sizes: body.mini .titlebar sets its own padding
+       and out-ranks the plain rule, so the Small VFO drew the frequency under
+       the lights (#387). The second selector keeps the inset there too. */
+    .platform-darwin .titlebar,
+    .platform-darwin body.mini .titlebar { padding-left: 80px; }
     .platform-darwin .titlebar-btns .win-btn { display: none; }
     .ib {
       width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent;
@@ -280,6 +284,7 @@
     .voice-macro-btn.empty { opacity: 0.35; cursor: default; }
     .voice-stop-btn, .cw-cancel-btn { border: 0; background: var(--red); color: var(--on-red); padding: 7px 10px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: 600; }
     .ptt-log-row { display: flex; gap: 6px; align-items: center; }
+    .power-status { font-size: 13px; color: var(--t2); margin-left: 4px; }
     .sdr-btn-vfo { border: 0; padding: 9px 12px; font-size: 13px; font-weight: 600; background: var(--s2); color: var(--gold); border-radius: 8px; cursor: pointer; }
     .sdr-btn-vfo:hover { background: var(--s3); }
     .sdr-btn-vfo.active { background: var(--gold); color: #111; }
@@ -299,6 +304,14 @@
     .sdr-dd-item.current { font-weight: 700; background: color-mix(in srgb, var(--blue) 16%, transparent); box-shadow: inset 3px 0 0 var(--blue); }
     .sdr-dd-item.current:hover { background: color-mix(in srgb, var(--blue) 24%, transparent); }
     .sdr-dd-item.conn::after { content: ' \25CF'; color: var(--green); }
+    /* A receiver that would not come on (#390): the words, Try again, and a mark in the list. */
+    .sdr-fail { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 6px 6px 6px 10px; border-radius: 8px; background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--t); font-size: 13px; line-height: 1.3; }
+    .sdr-fail[hidden] { display: none; }
+    .sdr-fail.busy { background: var(--s2); color: var(--t3); }
+    .sdr-fail span { flex: 1; min-width: 0; }
+    .sdr-fail .sdr-btn-vfo { flex-shrink: 0; padding: 6px 10px; }
+    .sdr-dd-item.failed { color: var(--t3); }
+    .sdr-dd-item .sdr-dd-mark { margin-left: 8px; font-size: 11px; color: var(--t3); }
 
     /* --- Small VFO: one line in the title bar (Casey 2026-11-10). The items
        the operator chose (lib/vfo-layout.js, settings.vfoSmall) are moved into
@@ -668,10 +681,12 @@
           <span class="macro-label">Radio</span>
           <button class="tog" id="vfo-power-on" title="Switch the radio on">Power On</button>
           <button class="tog" id="vfo-power-off" title="Switch the radio off. Press twice: the first press asks.">Power Off</button>
+          <span id="vfo-power-status" class="power-status" aria-live="polite"></span>
         </div>
       </div>
       <div class="card tool-card widget-section" id="widget-kiwi">
         <div class="ptt-log-row" id="kiwi-btn-row"></div>
+        <div class="sdr-fail" id="kiwi-fail" role="status" hidden><span id="kiwi-fail-text"></span><button class="sdr-btn-vfo" id="kiwi-fail-retry" type="button">Try again</button></div>
         <div id="kiwi-volume-row" style="display:none;align-items:center;gap:8px;font-size:11px;color:var(--text-dim);">
           <span style="min-width:42px;">Volume</span>
           <input type="range" id="kiwi-volume" min="0" max="150" value="80" style="flex:1;">
@@ -892,6 +907,7 @@
 
 <!-- Shared TX EQ chain (Phase 1). Also loaded by remote-audio.html so
      both audio sources apply identical DSP. -->
+<script src="../lib/freq-dots.js"></script>
 <script src="tx-eq-chain.js"></script>
 <script src="../lib/custom-cat-follow.js"></script>
 <script src="../lib/rig-power-view.js"></script>
@@ -903,6 +919,7 @@
 <script src="../lib/audio-device-heal.js"></script>
 <script src="../lib/vfo-audio-reattach.js"></script>
 <script src="../lib/vfo-ptt-mic.js"></script>
+<script src="../lib/sdr-failure.js"></script>
 <script>
 // --- State ---
 let currentFreqHz = 0;
@@ -925,6 +942,14 @@ function tuneFromPopout(freqKhz, mode, bearing, slicePort) {
   _freqSuppressTarget = Math.round(freqKhz * 1000);
   _freqSuppressDeadline = Date.now() + 3000;
   window.api.tune(freqKhz, mode, bearing, slicePort);
+}
+// A band button or a typed frequency: in voice SSB the radio takes the band's
+// sideband (LSB below 10 MHz, USB above and on 60 m), as a spot click does;
+// every other mode stays (#445). The dial and the wheel keep the mode.
+function tuneJumpFromPopout(freqKhz) {
+  _freqSuppressTarget = Math.round(freqKhz * 1000);
+  _freqSuppressDeadline = Date.now() + 3000;
+  window.api.tuneByBand(freqKhz);
 }
 let currentFilterWidth = 0;
 let currentTxPower = null; // watts — tracked from vfo-radio-state so profiles can snapshot it
@@ -1079,9 +1104,10 @@ function renderFreqDisplay(hz) {
 }
 
 function updateDisplay() {
-  renderFreqDisplay(currentFreqHz);
+  renderFreqDisplay(radioLinkUp ? currentFreqHz : 0);
+  freqDisplay.title = radioLinkUp ? 'Click to type a frequency' : 'The radio is not answering (switched off, or the cable is out)';
   const m = (currentMode || '').toUpperCase();
-  modeBadge.textContent = m.startsWith('FREEDV') ? 'RADE' : (currentMode || '---');
+  modeBadge.textContent = !radioLinkUp ? '---' : m.startsWith('FREEDV') ? 'RADE' : (currentMode || '---');
   if (currentFilterWidth > 0) {
     filterBadge.textContent = currentFilterWidth >= 1000
       ? (currentFilterWidth / 1000).toFixed(1) + ' kHz'
@@ -1094,7 +1120,14 @@ function updateDisplay() {
 }
 
 // --- Radio state from main process ---
+// False while main says the radio does not answer (off, cable out): dashes
+// instead of the last dial, so a switched-off radio does not look on.
+let radioLinkUp = true;
 window.api.onRadioState((s) => {
+  if (s && s.radioLinkUp !== undefined) {
+    radioLinkUp = !!s.radioLinkUp;
+    if (window.vfoPowerLinkChanged) window.vfoPowerLinkChanged(radioLinkUp);
+  }
   if (s && s.meters) { radioMeters = s.meters; applyMeterRows(); }
   if (s) {
     // Custom toggles that follow a radio state relight.
@@ -1144,7 +1177,14 @@ window.api.onRadioState((s) => {
     buildRigToggles();
     if (sheetOpen()) renderLayoutLists();
   }
-  if (s.power != null) document.getElementById('sec-power').style.display = s.power ? '' : 'none';
+  // A .tool-card shows only with the "visible" class (vfo-popout.css): an
+  // inline display of '' fell back to the stylesheet's none, so the block
+  // never appeared on any radio.
+  if (s.power != null) {
+    const sec = document.getElementById('sec-power');
+    sec.style.display = s.power ? '' : 'none';
+    sec.classList.toggle('visible', !!s.power);
+  }
   // Active VFO + split badges — readback-fed from the radio (LZ3AW). The
   // VFO badge only appears once the rig reports B at least this session,
   // so single-VFO workflows keep today's clean strip.
@@ -1239,7 +1279,7 @@ function buildBandGrid(container) {
     btn.dataset.freq = b.freq;
     btn.addEventListener('click', () => {
       if (vfoLocked) return;
-      tuneFromPopout(b.freq);
+      tuneJumpFromPopout(b.freq);
     });
     container.appendChild(btn);
   }
@@ -1283,8 +1323,8 @@ function renderFavorites() {
     b.className = 'tog fav-btn';
     b.dataset.khz = String(f.khz);
     b.textContent = f.name;
-    const mhz = (Number(f.khz) / 1000).toFixed(f.khz % 1 ? 4 : 3);
-    b.title = f.name + ' · ' + mhz + ' MHz ' + (f.mode || '') + (f.note ? ' · ' + f.note : '');
+    const mhz = FreqDots.khzMhz(f.khz);
+    b.title = f.name + ' · ' + mhz + ' ' + (f.mode || '') + (f.note ? ' · ' + f.note : '');
     b.addEventListener('click', () => window.api.tune(String(f.khz), f.mode || undefined));
     grid.appendChild(b);
   }
@@ -1489,7 +1529,32 @@ vfoTxPwrSelect.addEventListener('change', () => { vfoTxPwrInput(vfoTxPwrSelect);
   if (!on || !off) return;
   let armTimer = null;
   const disarm = () => { clearTimeout(armTimer); armTimer = null; off.textContent = 'Power Off'; off.classList.remove('on'); };
-  on.addEventListener('click', () => { disarm(); window.api.rigControl({ action: 'power-on' }); });
+  // A radio takes seconds to wake or to go quiet, and nothing else on the
+  // window moves meanwhile: say what is under way until the link says it
+  // happened (radioLinkUp, from onRadioState), or that it has not after 20 s.
+  const status = document.getElementById('vfo-power-status');
+  let pending = null, pendingTimer = null;
+  const say = (text) => { if (status) status.textContent = text; };
+  const begin = (want) => {
+    clearTimeout(pendingTimer);
+    pending = want;
+    say(want === 'on' ? 'Switching on\u2026' : 'Switching off\u2026');
+    pendingTimer = setTimeout(() => {
+      if (pending !== want) return;
+      pending = null;
+      say(want === 'on' ? 'No answer from the radio yet' : 'The radio still answers');
+    }, 20000);
+  };
+  window.vfoPowerLinkChanged = (up) => {
+    if (!pending) return;
+    if ((pending === 'on' && up) || (pending === 'off' && !up)) {
+      say(up ? 'Radio on' : 'Radio off');
+      pending = null;
+      clearTimeout(pendingTimer);
+      pendingTimer = setTimeout(() => say(''), 5000);
+    }
+  };
+  on.addEventListener('click', () => { disarm(); begin('on'); window.api.rigControl({ action: 'power-on' }); });
   off.addEventListener('click', () => {
     if (!armTimer) {
       off.textContent = 'Press again to power off';
@@ -1498,6 +1563,7 @@ vfoTxPwrSelect.addEventListener('change', () => { vfoTxPwrInput(vfoTxPwrSelect);
       return;
     }
     disarm();
+    begin('off');
     window.api.rigControl({ action: 'power-off' });
   });
 })();
@@ -1885,7 +1951,7 @@ function kpRender() {
   kpInput.value = kpBuffer;
   const khz = kpTargetKhz(kpBuffer);
   kpGo.disabled = !khz;
-  kpGo.textContent = khz ? 'Tune ' + fmtMhz(khz) + ' MHz' : 'Tune';
+  kpGo.textContent = khz ? 'Tune ' + FreqDots.khzMhz(khz) : 'Tune';
 }
 // Recent frequencies typed here (this device only).
 const KP_RECENT_KEY = 'vfoRecentKhz';
@@ -1907,7 +1973,7 @@ function kpRenderRecent() {
   list.forEach(khz => {
     const b = document.createElement('button');
     b.className = 'tog mono';
-    b.textContent = fmtMhz(khz);
+    b.textContent = FreqDots.fromKhz(khz);
     b.addEventListener('click', () => { kpBuffer = fmtMhz(khz); kpGo.click(); });
     row.appendChild(b);
   });
@@ -1937,7 +2003,7 @@ kpGo.addEventListener('click', () => {
   if (vfoLocked) { window.api.setVfoLock(true); return; }
   const khz = kpTargetKhz(kpBuffer);
   if (!khz) return;
-  tuneFromPopout(khz);
+  tuneJumpFromPopout(khz);
   currentFreqHz = khz * 1000;
   kpRememberRecent(khz);
   kpBuffer = '';
@@ -4214,8 +4280,8 @@ function renderOpInfo(spot) {
         const d = op.dupeDetail || {};
         const ts = d.when ? new Date(d.when) : null;
         const hhmm = ts ? String(ts.getUTCHours()).padStart(2,'0') + ':' + String(ts.getUTCMinutes()).padStart(2,'0') : '';
-        const fMHz = d.freq ? (parseFloat(d.freq) / 1000).toFixed(3) : '';
-        const detail = [hhmm && (hhmm + ' UTC'), fMHz && (fMHz + ' MHz'), d.mode].filter(Boolean).join(' · ');
+        const fMHz = d.freq ? FreqDots.khzMhz(parseFloat(d.freq)) : '';
+        const detail = [hhmm && (hhmm + ' UTC'), fMHz, d.mode].filter(Boolean).join(' · ');
         html += '<span class="op-dupe" title="' + esc(detail ? 'Already worked: ' + detail : 'Already worked this activation today') + '">DUPE</span>';
       }
       if (op.displayName) html += '<span class="op-name">' + esc(op.displayName) + '</span>';
@@ -4323,6 +4389,52 @@ function buildKiwiStationList(s) {
 let kiwiSelectedHost = localStorage.getItem('kiwiSelectedHost') || '';
 let kiwiDdEl = null;
 
+// A receiver that would not come on (#390). An offline one took 10 s to time
+// out in main and the window never said so: the chip just stayed OFF. Now the
+// line under the SDR row says "Connecting to <name>..." while it tries, then
+// "<name> did not answer." (or "is full", "needs a password") with Try again,
+// and the list marks it for the rest of this session. Nothing is pinged in the
+// background: a receiver is marked only after the operator tried it.
+const kiwiFailed = new Map();   // station fullHost -> failure kind, this session
+let kiwiTrying = null;          // the station this window last asked for, until main answers
+let kiwiFailStation = null;     // the station Try again reconnects
+function kiwiStationFor(host) {
+  return host ? (kiwiStations.find(st => window.SdrFailure.sameHost(st.fullHost, host)) || null) : null;
+}
+function kiwiShowLine(text, retry) {
+  const box = document.getElementById('kiwi-fail');
+  if (!box) return;
+  document.getElementById('kiwi-fail-text').textContent = text;
+  document.getElementById('kiwi-fail-retry').hidden = !retry;
+  box.classList.toggle('busy', !retry);
+  box.hidden = !text;
+}
+let kiwiTryTimer = null;
+function kiwiTryConnect(st) {
+  kiwiTrying = st;
+  kiwiFailStation = null;
+  kiwiShowLine('Connecting to ' + st.label + '...', false);
+  // The clients give up after 10 s and say so; a route that never answers at
+  // all must not leave "Connecting..." up for good.
+  clearTimeout(kiwiTryTimer);
+  kiwiTryTimer = setTimeout(() => { if (kiwiTrying === st && !kiwiConnected) kiwiNoteFailure(st.fullHost, 'did not answer'); }, 20000);
+  window.api.kiwiConnect({ host: st.host, port: st.port });
+  kiwiConnectedHost = st.fullHost;
+  updateKiwiButtonStates();
+}
+function kiwiNoteFailure(host, error) {
+  clearTimeout(kiwiTryTimer);
+  const st = kiwiStationFor(host) || kiwiTrying;
+  const cls = window.SdrFailure.classify(error);
+  if (st) kiwiFailed.set(st.fullHost, cls.kind);
+  kiwiTrying = null;
+  kiwiFailStation = st;
+  kiwiShowLine(window.SdrFailure.message(st ? st.label : (host || ''), error), !!st);
+}
+document.getElementById('kiwi-fail-retry').addEventListener('click', () => {
+  if (kiwiFailStation) kiwiTryConnect(kiwiFailStation);
+});
+
 function kiwiSelectedStation() {
   return kiwiStations.find(st => st.fullHost === kiwiSelectedHost) || kiwiStations[0] || null;
 }
@@ -4346,9 +4458,7 @@ function buildKiwiButtons() {
     if (kiwiConnected) {
       window.api.kiwiDisconnect();
     } else if (st) {
-      window.api.kiwiConnect({ host: st.host, port: st.port });
-      kiwiConnectedHost = st.fullHost;
-      updateKiwiButtonStates();
+      kiwiTryConnect(st);
     }
   });
   kiwiBtnRow.appendChild(label);
@@ -4388,13 +4498,21 @@ async function toggleKiwiDropdown() {
       + (kiwiConnected && st.fullHost === kiwiConnectedHost ? ' conn' : '');
     item.textContent = st.label;
     item.title = st.fullHost;
+    // Tried this session and it would not come on: say so (no pinging, #390).
+    const failedKind = kiwiFailed.get(st.fullHost);
+    if (failedKind) {
+      item.className += ' failed';
+      const mark = document.createElement('span');
+      mark.className = 'sdr-dd-mark';
+      mark.textContent = window.SdrFailure.mark(failedKind);
+      item.appendChild(mark);
+      item.title = st.fullHost + ' — ' + window.SdrFailure.mark(failedKind) + ' when tried this session';
+    }
     item.addEventListener('click', () => {
       kiwiSelectedHost = st.fullHost;
       localStorage.setItem('kiwiSelectedHost', st.fullHost);
       closeKiwiDropdown();
-      window.api.kiwiConnect({ host: st.host, port: st.port });
-      kiwiConnectedHost = st.fullHost;
-      updateKiwiButtonStates();
+      kiwiTryConnect(st);
     });
     dd.appendChild(item);
   });
@@ -4480,6 +4598,16 @@ window.api.onKiwiStatus((s) => {
   kiwiConnected = s.connected;
   if (s.host) kiwiConnectedHost = s.host;
   if (!s.connected) { kiwiConnectedHost = ''; kiwiNextPlayTime = 0; }
+  // #390: say why a receiver would not come on. The plain {connected:false}
+  // that follows an error (the socket closing) leaves the words up.
+  if (s.error) kiwiNoteFailure(s.host || (kiwiTrying && kiwiTrying.fullHost) || '', s.error);
+  else if (s.connected) {
+    const st = kiwiStationFor(s.host) || kiwiTrying;
+    if (st) kiwiFailed.delete(st.fullHost);
+    clearTimeout(kiwiTryTimer);
+    kiwiTrying = null; kiwiFailStation = null;
+    kiwiShowLine('', false);
+  }
   // Selection follows the live connection — a connect initiated elsewhere
   // (ECHOCAT phone, web client) lands on whatever station is actually
   // playing, so the "SDR: [name][ON]" control never shows a stale name.

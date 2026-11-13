@@ -82,6 +82,27 @@ test('Report a Bug takes ardopcf\'s last run, without its routine debug lines, c
   assert.ok(capped.lines[149].endsWith('line 499'), 'the newest lines are kept');
 });
 
+test('raw memory in a modem log never reaches a report: a line with non-text bytes is dropped whole and counted', () => {
+  // ardopcf's files carry runs of raw memory (K3SBP 2026-11-11: 440 binary lines a file).
+  const text = [
+    '11:00:00.000 I ardopcf Version 1.0.4.1.3 (https://www.github.com/pflarue/ardop)',
+    '11:00:01.000 I Sending Frame Type ConReq2000M',
+    '\u0000\u0000G\u0002-\u0000\u0000\u0000secret?\u0000Invalid parameter passed to C runtime function.',
+    'abc\u0007def',
+    'text then a byte that was not text �',
+    '11:00:02.000 I [DecodeFrame] Frame: END Decode PASS,  Quality= 90,  RS fixed 0 (of 0 max).',
+    '    Avg Frame Type decode distance= 0.9\tover 33 decodes',
+  ].join('\n');
+  const r = D.lastArdopRun(text, { keepDebug: true });
+  assert.strictEqual(r.binary, 3);
+  assert.ok(r.lines.every((l) => !/[\u0000-\u0008\u000a-\u001f\u007f-\u009f�]/.test(l)), 'no control or non-text byte survives');
+  assert.ok(!r.lines.some((l) => l.includes('secret?')), 'the readable part of a binary line goes too');
+  assert.strictEqual(r.lines.length, 4, 'every plain line, tabs included, is kept');
+  const dw = D.capTail(['[0L] K3SBP>KY4RY:', 'x\u0000y']);
+  assert.deepStrictEqual(dw.lines, ['[0L] K3SBP>KY4RY:']);
+  assert.strictEqual(dw.binary, 1);
+});
+
 test('the audio meter counts only holes where the audio ran out', () => {
   const m = new D.AudioFlowMeter({ rate: 12000, warnMs: 50, idleMs: 1000 });
   let t = 0;
@@ -136,7 +157,8 @@ test('the modem audio server measures both directions and feeds the recorder tap
 
 test('wired: the tail and the audio facts run for each ARDOP or packet session', () => {
   assert.ok(/if \(mode === 'ardop' \|\| mode === 'packet'\) winlinkAudioDiagStart\(\);\s*if \(mode === 'ardop'\) startArdopTail\(\);/.test(main));
-  assert.ok(/if \(s\.mode === 'ardop'\) stopArdopTail\(\);\s*winlinkAudioDiagEnd\(\);\s*if \(s\.mode === 'ardop'\) killArdop\(\);/.test(main), 'flushed before the modem is stopped');
+  // #425: the ending is worded (and the automatic retry decided) between the flush and the stop; the order is what matters.
+  assert.ok(/if \(s\.mode === 'ardop'\) stopArdopTail\(\);\s*winlinkAudioDiagEnd\(\);[\s\S]{0,1400}?if \(s\.mode === 'ardop'\) killArdop\(\);/.test(main), 'flushed before the modem is stopped');
   assert.ok(/winlinkLog\('ardop: ' \+ o\)/.test(main));
   assert.ok(/playback "\$\{modemBridge\.playbackLabel/.test(main) && /modemBridge\.playbackSampleRate = s\.playbackSampleRate/.test(main));
   assert.ok(/playbackSampleRate: playCtx\.sampleRate/.test(readSrc(path.join(root, 'renderer', 'modem-audio-bridge.js'))));

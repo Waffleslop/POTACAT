@@ -3,6 +3,8 @@
 // both work. Sets data-theme and (in charcoal dark variant only) the
 // data-dark-variant attribute on <html>.
 function _applyPopoutTheme(payload) {
+  // The shared rule (popout-theme-boot*.js) also sets data-ds (#376).
+  if (window.applyPopoutTheme) return window.applyPopoutTheme(payload);
   const theme = typeof payload === 'string'
     ? payload
     : ((payload && payload.theme) || 'dark');
@@ -714,7 +716,7 @@ function draw() {
   if (currentVfoKhz >= lo && currentVfoKhz <= hi) {
     const x = xOf(currentVfoKhz);
     const xs = Math.round(x) + 0.5;
-    const label = (currentVfoKhz / 1000).toFixed(3) + (currentMode ? ' ' + currentMode : '');
+    const label = FreqDots.fromKhz(currentVfoKhz) + (currentMode ? ' ' + currentMode : '');
     ctx.font = 'bold ' + (RULER_FONT + 1) + 'px -apple-system, sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
@@ -757,7 +759,7 @@ function updateSpotCount(n) {
   if (zoomed) {
     const v = currentView();
     if (v) {
-      infoEl.textContent = `${base} · ${(v.lo / 1000).toFixed(3)}–${(v.hi / 1000).toFixed(3)} MHz (dbl-click: reset)`;
+      infoEl.textContent = `${base} · ${FreqDots.fromKhz(v.lo)}–${FreqDots.fromKhz(v.hi)} MHz (dbl-click: reset)`;
       return;
     }
   }
@@ -903,7 +905,7 @@ canvas.addEventListener('mousemove', (e) => {
   const parts = [];
   parts.push(`<b>${escapeHtml(s.callsign || '')}</b>`);
   if (s.mode) parts.push(escapeHtml(s.mode));
-  if (s.frequency) parts.push((parseFloat(s.frequency) / 1000).toFixed(3) + ' MHz');
+  if (s.frequency) parts.push(FreqDots.khzMhz(s.frequency));
   const refParts = [];
   if (s.reference) refParts.push(s.reference);
   if (s.parkName) refParts.push(s.parkName);
@@ -995,10 +997,7 @@ ro.observe(wrap);
 // --- Bootstrap ---
 (async function init() {
   settings = await window.api.getSettings();
-  _applyPopoutTheme({
-    theme: settings.lightMode ? 'light' : 'dark',
-    variant: settings.darkVariant || 'navy',
-  });
+  if (settings.themeNow) _applyPopoutTheme(settings.themeNow);
   licenseClass = settings.licenseClass || 'none';
   selectedBand = settings.bandspreadBand && BANDS[settings.bandspreadBand] ? settings.bandspreadBand : '20m';
   const savedScale = parseFloat(settings.bandspreadFontScale);

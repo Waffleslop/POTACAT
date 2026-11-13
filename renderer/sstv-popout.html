@@ -39,12 +39,17 @@
     .btn.gear { font-size: 15px; padding: 2px 8px; }
 
     /* Top bar: where you are and what the radio is doing */
-    .top { flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border-primary); background: var(--bg-secondary); position: relative; }
+    /* Wraps to a second row in a narrow window instead of cutting off the tuner and settings buttons. */
+    .top { flex-shrink: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 6px 10px; border-bottom: 1px solid var(--border-primary); background: var(--bg-secondary); position: relative; }
     .bands { display: flex; gap: 2px; }
     /* Band buttons share the FT8 window's style (.jtcat-band-btn in styles.css), a little tighter to fit. */
     .bands .jtcat-band-btn { padding: 4px 8px; min-width: 30px; font-size: 12px; }
     .top-drive { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary); font-family: Consolas, monospace; }
-    .top-drive input { width: 60px; accent-color: var(--accent-green, #4ecca3); }
+    /* Drive: wide enough to set by hand, never squeezed, its value beside it (#279). */
+    .top-drive { flex-shrink: 0; }
+    .top-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; margin-left: auto; }
+    .top-drive input { width: 90px; margin: 0; flex-shrink: 0; accent-color: var(--accent-green, #4ecca3); }
+    .top-drive output { min-width: 4ch; text-align: right; color: var(--text-primary); }
     .chips { display: flex; gap: 3px; align-items: center; }
     .chip { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border-primary); background: transparent; color: var(--text-secondary); cursor: pointer; }
     .chip:hover { color: var(--text-primary); }
@@ -68,7 +73,7 @@
     #freq-pop { top: 36px; left: 0; width: 230px; }
     #freq-select { width: 100%; }
     #freq-input { width: 90px; font-family: Consolas, monospace; }
-    #gear-pop { top: 44px; right: 10px; width: 300px; max-height: calc(100vh - 120px); overflow-y: auto; }
+    #gear-pop { top: calc(100% + 4px); right: 10px; width: 300px; max-height: calc(100vh - 120px); overflow-y: auto; }
     #look-desc { color: var(--text-primary); }
 
     /* SWR trip */
@@ -275,11 +280,13 @@
       </optgroup>
     </select>
     <span class="spacer"></span>
-    <label class="top-drive" title="Audio level SSTV sends to the radio">Drive <input type="range" id="tx-gain" min="0" max="100" value="50"></label>
+    <div class="top-right">
+    <label class="top-drive" title="Audio level SSTV sends to the radio">Drive <input type="range" id="tx-gain" min="0" max="100" step="1" value="50"> <output id="tx-gain-val" for="tx-gain">50%</output></label>
     <span class="meter" id="m-swr" title="SWR, live while transmitting">SWR <i></i> <b>—</b></span>
     <span class="meter" id="m-pwr" title="Forward power, live while transmitting">PWR <i></i> <b>—</b></span>
     <button type="button" class="btn atu" id="atu-btn" title="Run the radio's antenna tuner" hidden>ATU Tune</button>
     <button type="button" class="btn gear" id="gear-btn" title="SSTV settings" aria-label="SSTV settings">&#9881;</button>
+    </div>
 
     <div class="pop" id="gear-pop" hidden>
       <h4>Your look</h4>
@@ -414,12 +421,15 @@
 
   <div class="ctx" id="ctx-menu" hidden role="menu"></div>
 
+  <script src="../lib/freq-dots.js"></script>
   <script src="../lib/waterfall-palettes.js"></script>
   <script src="waterfall.js"></script>
   <script src="../lib/sstv-audio-device.js"></script>
+  <script src="../lib/sstv-drive.js"></script>
   <script src="../lib/rig-family.js"></script>
   <script src="../lib/rig-bands.js"></script>
-  <script src="../lib/sstv-start-band.js"></script>
+  <script src="../lib/ssb-sideband.js"></script>
+<script src="../lib/sstv-start-band.js"></script>
   <script src="../lib/sstv-templates.js"></script>
   <script src="../lib/sstv-help.js"></script>
   <script src="sstv-popout.js"></script>

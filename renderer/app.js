@@ -552,6 +552,8 @@ let appMode = 'hunter'; // 'hunter' or 'activator'
 let activatorParkRefs = [];   // [{ref:'K-1234', name:'Cedar Falls SP', program:'POTA'}, ...]  max MAX_N_FER
 let activatorCrossRefs = [];  // [{program:'WWFF', ref:'KFF-1234'}, {program:'LLOTA', ref:'LLCL-0001'}]
 let activatorParkGrid = '';   // Maidenhead grid for active park (auto from lat/lon, user-editable)
+let activatorParkGridFromPark = ''; // the primary park's own grid, from its position
+let activatorParkGrids = {};  // settings.activatorParkGrids: the operator's grid per park (lib/park-grid.js, #388)
 let hunterParkRefs = [];      // [{ref:'K-5678', name:'Shenandoah NF', program:'POTA'}]  max MAX_N_FER, resets per QSO; program drives ADIF SIG (default POTA)
 let activatorContacts = []; // in-memory QSO list for current activation session
 
@@ -1342,17 +1344,6 @@ if (setExtraUdp) {
 }
 const setDisableAutoUpdate = document.getElementById('set-disable-auto-update');
 const setEnableTelemetry = document.getElementById('set-enable-telemetry');
-const setLightMode = document.getElementById('set-light-mode');
-setLightMode.addEventListener('change', () => applyTheme(setLightMode.checked));
-// Dark sub-variant — live preview on radio change. Save still happens
-// in the Settings save handler; this just paints immediately so the user
-// can A/B charcoal vs navy without committing.
-document.querySelectorAll('input[name="set-dark-variant"]').forEach((r) => {
-  r.addEventListener('change', () => {
-    const v = document.querySelector('input[name="set-dark-variant"]:checked');
-    if (v) applyTheme(setLightMode.checked, v.value);
-  });
-});
 const setEnableQrz = document.getElementById('set-enable-qrz');
 const qrzConfig = document.getElementById('qrz-config');
 const setQrzUsername = document.getElementById('set-qrz-username');
@@ -1424,6 +1415,7 @@ const setWinlinkArdopIn = document.getElementById('set-winlink-ardop-in');
 const setWinlinkArdopOut = document.getElementById('set-winlink-ardop-out');
 const setWinlinkArdopBw = document.getElementById('set-winlink-ardop-bw');
 const setWinlinkArdopDrive = document.getElementById('set-winlink-ardop-drive');
+const setWinlinkArdopArqTimeout = document.getElementById('set-winlink-ardop-arq-timeout');
 const setWinlinkVaraBw = document.getElementById('set-winlink-vara-bw');
 const setWinlinkPacketModem = document.getElementById('set-winlink-packet-modem');
 const setWinlinkPacketTxDelay = document.getElementById('set-winlink-packet-txdelay'); // #257
@@ -1435,18 +1427,21 @@ function packetTimingMs(v, def, min, max) {
   return Math.round(Math.max(min, Math.min(max, ms)) / 10) * 10;
 }
 const setWinlinkVaraPort = document.getElementById('set-winlink-vara-port');
-// The operator's own VARA (Windows only; the section stays hidden elsewhere).
+// The operator's own VARA: on every system (#287). Windows adds the program path, "Set up VARA for me" and auto-start.
 const winlinkVaraSection = document.getElementById('winlink-vara-section');
 const setVaraHfEnable = document.getElementById('set-vara-hf-enable');
 const setVaraHfPath = document.getElementById('set-vara-hf-path');
 const setVaraFmEnable = document.getElementById('set-vara-fm-enable');
 const setVaraFmPath = document.getElementById('set-vara-fm-path');
 const setVaraFmPort = document.getElementById('set-vara-fm-port');
+const setVaraHfHost = document.getElementById('set-vara-hf-host');
+const setVaraFmHost = document.getElementById('set-vara-fm-host');
 const setVaraAutoLaunch = document.getElementById('set-vara-autolaunch');
 const setVaraCableIn = document.getElementById('set-vara-cable-in');
 const setVaraCableOut = document.getElementById('set-vara-cable-out');
 const setWinlinkCap = document.getElementById('set-winlink-cap');
 const setWinlinkPrediction = document.getElementById('set-winlink-prediction');
+const setWinlinkAutoRetry = document.getElementById('set-winlink-auto-retry');
 const setWinlinkRecordAudio = document.getElementById('set-winlink-record-audio');
 const setWinlinkPatPath = document.getElementById('set-winlink-pat-path');
 const setTciPort = document.getElementById('set-tci-port');
@@ -2042,41 +2037,43 @@ function watchlistHasCallsign(rules, callsign) {
   return false;
 }
 
-// Current dark sub-variant. Read by applyTheme() when the user hasn't
-// passed an explicit variant arg — keeps existing two-arg-less call
-// sites (welcome screen, quick light toggle) working without a thread
-// of plumbing. Updated when settings load OR the variant radio changes.
-let _currentDarkVariant = 'navy';
-// settings.appTheme: 'classic' (the light/dark/variant choices) or a
-// design-system theme shared with the phone (lib/app-theme.js). While one is
-// chosen it decides light vs dark and data-ds on <html>.
-let _currentAppTheme = 'classic';
-function _resolvedAppTheme(light) {
-  if (!window.AppTheme) return { theme: light ? 'light' : 'dark', variant: _currentDarkVariant || 'navy', ds: null };
-  return window.AppTheme.resolveAppTheme({ appTheme: _currentAppTheme, lightMode: !!light, darkVariant: _currentDarkVariant });
+// The theme (#376, lib/app-theme.js): Appearance (Light, Dark or System)
+// and one chosen theme per mode, the phone's model. _themeState is what was
+// saved; System follows the computer live (prefers-color-scheme, which
+// Electron ties to the operating system's setting).
+let _themeState = Object.assign({}, window.AppTheme ? window.AppTheme.DEFAULTS : {});
+const _systemDarkQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+function _systemDark() { return !!(_systemDarkQuery && _systemDarkQuery.matches); }
+// Saved settings to the picker state; settings from before #376 map through
+// the migration table (main migrates them at start, this is the fallback).
+function _themeStateFrom(s) {
+  s = s || {};
+  if (!s.appearance && window.AppTheme) {
+    const m = window.AppTheme.migrateThemeSettings(s);
+    if (m) s = m.settings;
+  }
+  const d = window.AppTheme ? window.AppTheme.DEFAULTS : {};
+  return { appearance: s.appearance || d.appearance, themeLight: s.themeLight || d.themeLight, themeDark: s.themeDark || d.themeDark };
+}
+function _resolvedAppTheme() {
+  if (!window.AppTheme) return { theme: 'dark', variant: 'navy', ds: null };
+  return window.AppTheme.resolveAppTheme(_themeState, _systemDark());
 }
 
-function applyTheme(light, darkVariant) {
-  if (darkVariant !== undefined) _currentDarkVariant = darkVariant;
-  const _r = _resolvedAppTheme(light);
-  if (_r.ds) {
-    window.AppTheme.applyToDocument(document, _r);
-    if (typeof rerenderRbn === 'function') rerenderRbn();
-    return;
-  }
-  document.documentElement.removeAttribute('data-ds');
-  document.documentElement.setAttribute('data-theme', light ? 'light' : 'dark');
-  // data-dark-variant is only set when in dark mode AND non-default.
-  // Removing it when light or navy keeps the attribute set minimal and
-  // means the CSS [data-dark-variant="charcoal"] block can be a single
-  // override without :not() guards.
-  if (!light && _currentDarkVariant && _currentDarkVariant !== 'navy') {
-    document.documentElement.setAttribute('data-dark-variant', _currentDarkVariant);
-  } else {
-    document.documentElement.removeAttribute('data-dark-variant');
-  }
+function applyTheme() {
+  if (window.AppTheme) window.AppTheme.applyToDocument(document, _resolvedAppTheme());
   // The Propagation map's dots and arcs are styled for the theme at draw time.
   if (typeof rerenderRbn === 'function') rerenderRbn();
+}
+if (_systemDarkQuery) {
+  const _onSystemTheme = () => {
+    if (_themeState.appearance !== 'system') return;
+    applyTheme();
+    broadcastPopoutTheme(_popoutThemePayload());
+    renderLookPickers();
+  };
+  if (_systemDarkQuery.addEventListener) _systemDarkQuery.addEventListener('change', _onSystemTheme);
+  else if (_systemDarkQuery.addListener) _systemDarkQuery.addListener(_onSystemTheme);
 }
 
 async function loadPrefs() {
@@ -2105,9 +2102,15 @@ async function loadPrefs() {
       quickShowMeter.checked = meterBoxVisible;
     }
   }
-  _currentAppTheme = settings.appTheme || 'classic';
-  applyTheme(settings.lightMode === true, settings.darkVariant || 'navy');
-  syncThemePickers();
+  _themeState = _themeStateFrom(settings);
+  applyTheme();
+  renderLookPickers();
+  // Once, after the #376 migration (main sets themeNotice): say what the
+  // theme is now and where to change it. A click opens Settings > Display.
+  if (settings.themeNotice && window.AppTheme) {
+    showLogToast(window.AppTheme.migrationNotice(settings.themeNotice), { sticky: true, onClick: () => openSettingsDialog('display') });
+    window.api.saveSettings({ themeNotice: null });
+  }
   applyColorblindMode(settings.colorblindMode === true);
   applyWcagMode(settings.wcagMode === true);
   grid = settings.grid || '';
@@ -2239,6 +2242,8 @@ async function loadPrefs() {
   updateDxccButton();
   // Pi access — JTCAT button visibility on startup
   if (jtcatBtn) jtcatBtn.classList.remove('hidden');
+  // Grid corrections per park, before anything fills the grid box below
+  if (settings.activatorParkGrids && typeof settings.activatorParkGrids === 'object') activatorParkGrids = settings.activatorParkGrids;
   // Activator mode restore
   if (settings.appMode === 'activator') {
     appMode = 'activator';
@@ -2274,13 +2279,8 @@ async function loadPrefs() {
       }
       // Auto-populate grid from primary park
       if (activatorParkRefs.length > 0) {
-        window.api.getPark(activatorParkRefs[0].ref).then(park => {
-          if (park && park.latitude && park.longitude) {
-            activatorParkGrid = latLonToGridLocal(parseFloat(park.latitude), parseFloat(park.longitude));
-            const gi = document.getElementById('activator-grid');
-            if (gi) gi.value = activatorParkGrid;
-          }
-        });
+        const firstRef = activatorParkRefs[0].ref;
+        window.api.getPark(firstRef).then(park => setActivatorGridForPark(firstRef, park));
       }
     } else if (settings.activatorParkRef) {
       activatorParkRefs = ActivationProgram.normalizeParkRefs([{ ref: settings.activatorParkRef, name: '' }]);
@@ -2471,6 +2471,10 @@ function updateRadioSubPanels() {
   // Voice in DATA mode runs in the rig controller: serial, Icom, Hamlib and flrig links.
   const voiceAsDataRow = document.getElementById('rig-voice-as-data');
   if (voiceAsDataRow) voiceAsDataRow.classList.toggle('hidden', !['serialcat', 'icom', 'civ-tcp', 'icom-network', 'hamlib', 'rigctldnet', 'flrig', 'dxlab-commander', 'yaesu-lan'].includes(type));
+  // Packet mode on the radio (#128): for every radio, shown once Winlink is on.
+  const packetModeRow = document.getElementById('rig-packet-mode');
+  if (packetModeRow) packetModeRow.classList.toggle('hidden', !(typeof setWinlinkEnable !== 'undefined' && setWinlinkEnable && setWinlinkEnable.checked));
+  refreshPacketModeNote();
   // Voice streamed over the LAN goes only to an Icom Network radio.
   const lanVoiceSsbRow = document.getElementById('rig-lan-voice-ssb');
   if (lanVoiceSsbRow) lanVoiceSsbRow.classList.toggle('hidden', type !== 'icom-network');
@@ -2493,7 +2497,7 @@ function updateFlexStatus() {
   if (typeof catConnected !== 'undefined' && catConnected) {
     let txt = '● Connected';
     if (typeof radioFreqKhz === 'number' && radioFreqKhz > 0) {
-      txt += ' — ' + (radioFreqKhz / 1000).toFixed(3) + ' MHz';
+      txt += ' — ' + FreqDots.khzMhz(radioFreqKhz);
       if (typeof radioMode === 'string' && radioMode) txt += ' ' + radioMode;
     }
     el.textContent = txt;
@@ -2888,7 +2892,21 @@ if (icomScopeCaptureBtn) {
   });
 }
 
+// "Packet mode on the radio" (lib/packet-rig-mode.js, resolved in main, which has the model table).
+var packetModeNoteSeq = 0; // var: the sub-panel refresh can run before this line does
+async function refreshPacketModeNote() {
+  const sel = document.getElementById('set-packet-mode');
+  const note = document.getElementById('packet-mode-note');
+  if (!sel || !note || !window.api.getPacketRigMode) return;
+  const seq = ++packetModeNoteSeq;
+  let r = null;
+  try { r = await window.api.getPacketRigMode({ model: rigSetupModelName(), radioType: getSelectedRadioType(), choice: sel.value }); } catch { r = null; }
+  if (seq !== packetModeNoteSeq) return;
+  note.textContent = (r && r.editorNote) || "";
+}
+
 async function refreshRigSetupNotes() {
+  refreshPacketModeNote();
   refreshIcomScopeCaptureRow();
   if (!rigSetupBtn || !window.api.getRigSetupNotes) return;
   const seq = ++rigSetupSeq;
@@ -3003,6 +3021,7 @@ function renderRigSetupNotes() {
 if (rigSetupBtn) {
   rigSetupBtn.addEventListener('click', () => setRigSetupPanelOpen(rigSetupPanel.classList.contains('hidden')));
   if (rigModelSelect) rigModelSelect.addEventListener('change', refreshRigSetupNotes);
+  { const pm = document.getElementById('set-packet-mode'); if (pm) pm.addEventListener('change', refreshPacketModeNote); }
   if (setCwKeyLine) setCwKeyLine.addEventListener('change', refreshRigSetupNotes);
   document.querySelectorAll('input[name="radio-type"]').forEach((b) => b.addEventListener('change', refreshRigSetupNotes));
   for (const id of ['set-icom-model', 'set-civ-tcp-model', 'set-icom-network-model']) {
@@ -3499,6 +3518,8 @@ async function openRigEditor(mode, rigId) {
       if (voiceAsDataEl) voiceAsDataEl.checked = !!rig.voiceAsData;
       const lanVoiceSsbEl = document.getElementById('set-lan-voice-ssb');
       if (lanVoiceSsbEl) lanVoiceSsbEl.checked = !!rig.lanVoiceInSsb;
+      const packetModeEl = document.getElementById('set-packet-mode');
+      if (packetModeEl) packetModeEl.value = rig.packetMode === 'fm' || rig.packetMode === 'fmdata' ? rig.packetMode : 'auto';
       // Per-rig Flex band→antenna map. Always rebuilt so editing a
       // different rig doesn't show the previous rig's selections.
       buildFlexBandAntennaMap(rig.flexBandAntennaMap || {});
@@ -3519,6 +3540,7 @@ async function openRigEditor(mode, rigId) {
     buildFlexBandAntennaMap({});
     fillSdrScopeForm(null);
     { const v = document.getElementById('set-voice-as-data'); if (v) v.checked = false; }
+    { const v = document.getElementById('set-packet-mode'); if (v) v.value = 'auto'; }
     await populateRigAudioDevices('', '');
   }
 
@@ -3655,6 +3677,8 @@ async function saveRigEditor() {
   const rigVoiceAsData = !!(voiceAsDataEl && voiceAsDataEl.checked);
   const lanVoiceSsbEl = document.getElementById('set-lan-voice-ssb');
   const rigLanVoiceInSsb = !!(lanVoiceSsbEl && lanVoiceSsbEl.checked);
+  const packetModeEl = document.getElementById('set-packet-mode');
+  const rigPacketMode = packetModeEl && (packetModeEl.value === 'fm' || packetModeEl.value === 'fmdata') ? packetModeEl.value : '';
 
   // Per-rig Flex per-band antenna map (skipped silently for non-Flex
   // rigs — empty map serializes as `{}`, no runtime impact).
@@ -3683,6 +3707,7 @@ async function saveRigEditor() {
       rig.atuKeepOn = rigAtuKeepOn;
       if (rigVoiceAsData) rig.voiceAsData = true; else delete rig.voiceAsData;
       if (rigLanVoiceInSsb) rig.lanVoiceInSsb = true; else delete rig.lanVoiceInSsb;
+      if (rigPacketMode) rig.packetMode = rigPacketMode; else delete rig.packetMode; // absent = Automatic
       rig.flexBandAntennaMap = flexBandAntennaMap;
       if (rigSdrScope) rig.sdrScope = rigSdrScope;
       rig.setupDone = [...rigSetupDone];
@@ -3711,6 +3736,7 @@ async function saveRigEditor() {
       atuKeepOn: rigAtuKeepOn,
       ...(rigVoiceAsData ? { voiceAsData: true } : {}),
       ...(rigLanVoiceInSsb ? { lanVoiceInSsb: true } : {}),
+      ...(rigPacketMode ? { packetMode: rigPacketMode } : {}),
       flexBandAntennaMap,
       ...(rigSdrScope ? { sdrScope: rigSdrScope } : {}),
       setupDone: [...rigSetupDone],
@@ -3921,15 +3947,13 @@ bandButtonsEl.addEventListener('click', (e) => {
   const band = btn.dataset.band;
   const freq = getBandQsyFreq(band);
   if (freq) {
-    const curMode = (radioMode || 'USB').toUpperCase();
-    let mode = curMode;
-    // Flip sideband for SSB: LSB below 10 MHz, USB at/above 10 MHz. 60m is the
-    // exception — USB by convention/regulation despite being below 10 MHz.
-    if (curMode === 'USB' || curMode === 'LSB' || curMode === 'SSB') {
-      const lsbBands = new Set(['160m', '80m', '40m']);
-      mode = lsbBands.has(band) ? 'LSB' : 'USB';
-    }
-    window.api.tune(String(freq), mode);
+    const curMode = (radioMode || '').toUpperCase();
+    // Voice SSB (or a mode not read yet): main decides, from the radio's own
+    // mode and DATA state, whether the band's sideband goes with it (#445,
+    // lib/ssb-sideband.js, the rule spot clicks use). Any other mode is sent
+    // as it is, as before.
+    if (!curMode || curMode === 'USB' || curMode === 'LSB' || curMode === 'SSB') window.api.tuneByBand(String(freq));
+    else window.api.tune(String(freq), curMode);
   }
 });
 
@@ -4211,8 +4235,8 @@ function updateBlDupeChip() {
   if (dupe) {
     const ts = dupe.timestamp ? new Date(dupe.timestamp) : null;
     const hhmm = ts ? `${String(ts.getUTCHours()).padStart(2, '0')}:${String(ts.getUTCMinutes()).padStart(2, '0')}` : '';
-    const fMHz = dupe.frequency ? (parseFloat(dupe.frequency) / 1000).toFixed(3) : '';
-    const detail = [hhmm && `${hhmm} UTC`, fMHz && `${fMHz} MHz`, dupe.mode].filter(Boolean).join(' · ');
+    const fMHz = dupe.frequency ? FreqDots.khzMhz(parseFloat(dupe.frequency)) : '';
+    const detail = [hhmm && `${hhmm} UTC`, fMHz, dupe.mode].filter(Boolean).join(' · ');
     blDupeChip.title = detail ? `Already worked: ${detail}` : 'Already worked this activation today';
     blDupeChip.classList.remove('hidden');
   } else {
@@ -5068,7 +5092,7 @@ function renderNetList(nets) {
       : net.schedule?.type === 'dates'
         ? (net.schedule.dates || []).join(', ')
         : 'Daily';
-    detailEl.textContent = `${net.frequency} kHz ${net.mode} \u2022 ${net.startTime} ${net.timeZone === 'utc' ? 'UTC' : 'Local'} \u2022 ${schedStr}`;
+    detailEl.textContent = `${FreqDots.khzMhz(net.frequency) || net.frequency} ${net.mode} \u2022 ${net.startTime} ${net.timeZone === 'utc' ? 'UTC' : 'Local'} \u2022 ${schedStr}`;
     info.appendChild(nameEl);
     info.appendChild(detailEl);
 
@@ -5632,13 +5656,22 @@ if (setMercuryEnable) {
       const statusEl = document.getElementById(`vara-${kind}-status`);
       const browse = document.getElementById(`vara-${kind}-browse`);
       const find = document.getElementById(`vara-${kind}-find`);
+      const test = document.getElementById(`vara-${kind}-test`);
+      const hostEl = kind === 'hf' ? setVaraHfHost : setVaraFmHost;
+      const portEl = kind === 'hf' ? setWinlinkVaraPort : setVaraFmPort;
       if (browse) browse.addEventListener('click', async () => {
         const p = await window.api.echocatPickFile({ title: `Select ${kind === 'fm' ? 'VARAFM.exe' : 'VARA.exe'}`, filters: [{ name: 'Programs', extensions: ['exe'] }, { name: 'All files', extensions: ['*'] }] });
         if (p) pathEl.value = p;
       });
+      // Linux / macOS (#287): no program to find, only the port to reach.
+      if (test) test.addEventListener('click', async () => {
+        statusEl.textContent = 'Testing…';
+        const r = await window.api.winlinkVaraFind(kind, { host: hostEl ? hostEl.value : '', port: portEl ? portEl.value : '' });
+        statusEl.textContent = !r ? 'No answer' : (r.text || '');
+      });
       if (find) find.addEventListener('click', async () => {
         statusEl.textContent = 'Looking…';
-        const r = await window.api.winlinkVaraFind(kind);
+        const r = await window.api.winlinkVaraFind(kind, { host: hostEl ? hostEl.value : '', port: portEl ? portEl.value : '' });
         if (!r) { statusEl.textContent = 'No answer'; return; }
         if (r.found && !pathEl.value) pathEl.value = r.path;
         statusEl.textContent = r.text || '';
@@ -6905,10 +6938,17 @@ async function echocatRefreshTailscaleStatus() {
   if (!s.installed && s.ipFromInterfaces) {
     // On a tailnet, but POTACAT cannot run the CLI: pairing still carries the
     // address, only the MagicDNS name and the public cert need the command.
+    // The reason names every place POTACAT looked and what each said (#313).
+    const fix = s.platform === 'darwin'
+      ? 'quit and reopen the Tailscale app, or install Tailscale\'s command line tool from the app\'s settings, then restart POTACAT'
+      : (s.platform === 'linux' ? 'install the CLI package or add it to PATH' : 'reinstall Tailscale');
     echocatTsStatus.innerHTML =
       'Tailscale: this PC is on a tailnet at <b>' + _esc(s.ipFromInterfaces) + '</b>, but POTACAT could not run the <code>tailscale</code> command'
       + (s.cliError ? ' (' + _esc(s.cliError) + ')' : '') + '. Phones will reach this PC by that address. '
-      + 'For the MagicDNS name and a public certificate too, make the <code>tailscale</code> command available to POTACAT (on Linux, install the CLI package or add it to PATH).';
+      + 'For the MagicDNS name and a public certificate too, make the <code>tailscale</code> command available to POTACAT (' + fix + ').';
+    // Stop here: the not-signed-in branch below used to overwrite this with
+    // "Tailscale not detected", hiding the address the card had just found.
+    return;
   } else if (!s.installed) {
     echocatTsStatus.innerHTML =
       'Tailscale not detected. <a href="https://tailscale.com/download" target="_blank" style="color:#4fc3f7;">Install Tailscale</a> for iOS app pairing.';
@@ -7113,11 +7153,7 @@ function refreshSummaryCard() {
   // dropdown open.
   if (typeof refreshEchoCatInfo === 'function') refreshEchoCatInfo();
   // Sync the Summary header theme toggle to the current theme.
-  if (quickLightMode) {
-    quickLightMode.checked = document.documentElement.getAttribute('data-theme') === 'light';
-    if (typeof _updateThemeToggleLabel === 'function') _updateThemeToggleLabel();
-  }
-  if (typeof syncThemePickers === 'function') syncThemePickers();
+  if (typeof renderLookPickers === 'function') renderLookPickers();
   // PSTRotator quick toggle: only visible when a rotor has been
   // configured under Settings → Tuning. quickRotorLabel was
   // gated on this in the old dropdown's open path.
@@ -8122,7 +8158,7 @@ function _showLogErrorModal(payload) {
   // frequency is kHz string → MHz with 3 dp for display
   const freqKhz = parseFloat(qso.frequency || '0');
   const freqMHz = Number.isFinite(freqKhz) && freqKhz > 0
-    ? (freqKhz / 1000).toFixed(3) + ' MHz'
+    ? FreqDots.khzMhz(freqKhz)
     : '(unknown freq)';
   const mode = qso.mode || '(unknown mode)';
   const rstSent = qso.rstSent || '---';
@@ -9029,8 +9065,11 @@ async function _renderSummaryEchocat() {
       tailscaleUrl = 'https://' + tsHost + ':' + port;
       tailscaleCertValid = true;
     } else {
+      // No name from the tailscale command: the tailnet address on this
+      // computer's interfaces still works from anywhere on the tailnet (#313).
       const tsIp = (ips || []).find((ip) => ip.tailscale);
-      if (tsIp) tailscaleUrl = 'https://' + tsIp.address + ':' + port;
+      const addr = tsIp ? tsIp.address : (tail && tail.ipFromInterfaces) || '';
+      if (addr) tailscaleUrl = 'https://' + addr + ':' + port;
     }
     // POTACAT Cloud: the tunnel host is a real HTTPS origin any browser
     // can open from anywhere — the visitor signs in at
@@ -9050,6 +9089,9 @@ async function _renderSummaryEchocat() {
       token: (s.remoteRequireToken === true) ? (s.remoteToken || '') : '',
       tailscaleUrl,
       tailscaleCertValid,
+      // The command gave no signed-in answer, so the row is the bare address
+      // for that reason, not because MagicDNS is off.
+      tailscaleNoCommand: !!(tail && tail.fallbackNote),
       cloudUrl,
     };
   } catch {}
@@ -9110,7 +9152,9 @@ function _buildEchocatWebHTML(web) {
     ? urlRow('Away from home (Tailscale)', web.tailscaleUrl, !hasCloud)
       + (web.tailscaleCertValid
         ? ''
-        : '<div class="echo-web-extra">MagicDNS is off — this uses your Tailscale IP, so you\'ll get a certificate warning. Turn on MagicDNS for a clean link.</div>')
+        : (web.tailscaleNoCommand
+          ? '<div class="echo-web-extra">POTACAT could not get your Tailscale name, so this uses your Tailscale address: expect a certificate warning the first time.</div>'
+          : '<div class="echo-web-extra">MagicDNS is off — this uses your Tailscale IP, so you\'ll get a certificate warning. Turn on MagicDNS for a clean link.</div>'))
     : '';
   // No password display here: the one place for the ECHOCAT password is the
   // "Password-protect your rig" setting right under these URLs (Casey
@@ -9164,7 +9208,12 @@ function _buildEchocatCardHTML(tunnel, tail, devices, web) {
       detail = tunnel.lastError ? ('Tunnel error: ' + tunnel.lastError) : 'POTACAT Cloud tunnel reported an error.';
     }
   }
-  if (pillCls === '' && tail && tail.installed && tail.loggedIn) {
+  if (pillCls === '' && tail && tail.fallbackNote) {
+    // #313: a tailnet address on this computer, but no signed-in answer from
+    // the tailscale command. The address works; say so, and why the name is missing.
+    pillTxt = 'Tailscale'; pillCls = 'warn';
+    detail = tail.fallbackNote;
+  } else if (pillCls === '' && tail && tail.installed && tail.loggedIn) {
     pillTxt = 'Tailscale'; pillCls = 'ok';
     detail = tail.hostname
       ? 'Available remotely via Tailscale (' + tail.hostname + ').'
@@ -10149,8 +10198,8 @@ hamlibTestBtn.addEventListener('click', async () => {
     const dtrOff = setRigDtrOff.checked;
     const result = await window.api.testHamlib({ rigId, serialPort, baudRate, dtrOff });
     if (result.success) {
-      const freqMHz = (parseInt(result.frequency, 10) / 1e6).toFixed(6);
-      hamlibTestResult.textContent = `Connected! Freq: ${freqMHz} MHz` + rigTestSavedNote(serialPort);
+      const freqMHz = FreqDots.hzMhz(parseInt(result.frequency, 10)) || 'unknown';
+      hamlibTestResult.textContent = `Connected! Freq: ${freqMHz}` + rigTestSavedNote(serialPort);
       hamlibTestResult.className = 'hamlib-test-success';
     } else {
       hamlibTestResult.textContent = `Failed: ${result.error}`;
@@ -10223,7 +10272,7 @@ serialcatTestBtn.addEventListener('click', async () => {
     const model = rigModelSelect ? rigModelSelect.value : '';
     const result = await window.api.testSerialCat({ portPath, baudRate, dtrOff, serialHandshake, model });
     if (result.success) {
-      serialcatTestResult.textContent = `Connected! Freq: ${result.frequency} MHz` + (result.note ? ` (${result.note})` : '') + rigTestSavedNote(portPath);
+      serialcatTestResult.textContent = `Connected! Freq: ${FreqDots.mhzMhz(result.frequency) || result.frequency + ' MHz'}` + (result.note ? ` (${result.note})` : '') + rigTestSavedNote(portPath);
       serialcatTestResult.className = 'hamlib-test-success';
     } else {
       serialcatTestResult.textContent = `Failed: ${result.error}`;
@@ -10259,7 +10308,7 @@ document.getElementById('icom-test-btn').addEventListener('click', async () => {
   try {
     const result = await window.api.testIcomCiv({ portPath, baudRate, civAddress });
     if (result.success) {
-      resultEl.textContent = `Connected! Freq: ${result.frequency} MHz` + rigTestSavedNote(portPath);
+      resultEl.textContent = `Connected! Freq: ${FreqDots.mhzMhz(result.frequency) || result.frequency + ' MHz'}` + rigTestSavedNote(portPath);
       resultEl.className = 'hamlib-test-success';
     } else {
       resultEl.textContent = `Failed: ${result.error}`;
@@ -10289,7 +10338,7 @@ document.getElementById('civ-tcp-test-btn')?.addEventListener('click', async () 
   try {
     const result = await window.api.testCivTcp({ host, port, civAddress });
     if (result.success) {
-      resultEl.textContent = `Connected! Freq: ${result.frequency} MHz`;
+      resultEl.textContent = `Connected! Freq: ${FreqDots.mhzMhz(result.frequency) || result.frequency + ' MHz'}`;
       resultEl.className = 'hamlib-test-success';
     } else {
       resultEl.textContent = `Failed: ${result.error}`;
@@ -10339,7 +10388,7 @@ document.getElementById('yaesu-lan-test-btn')?.addEventListener('click', async (
     if (r.success) {
       const sid = r.sessionId != null ? ' Session 0x' + Number(r.sessionId).toString(16).toUpperCase().padStart(2, '0') + '.' : '';
       const radio = r.radio ? ' ' + r.radio + '.' : (r.id ? ' Radio ID ' + r.id + '.' : '');
-      const freq = r.frequency ? ' Freq: ' + r.frequency + ' MHz.' : '';
+      const freq = r.frequency ? ' Freq: ' + (FreqDots.mhzMhz(r.frequency) || r.frequency + ' MHz') + '.' : '';
       resultEl.textContent = 'Logged in!' + sid + radio + freq + (r.note ? ' ' + r.note : '');
       resultEl.className = 'hamlib-test-success';
     } else {
@@ -10388,7 +10437,7 @@ document.getElementById('icom-network-test-btn')?.addEventListener('click', asyn
         ? ` (answered probe 0x${result.probedAddress.toString(16).toUpperCase().padStart(2, '0')})`
         : '';
       const radioName = result.radioName ? ` ${result.radioName}` : '';
-      resultEl.textContent = `Connected!${radioName} Freq: ${result.frequency} MHz${responseAddr}${probeAddr}`;
+      resultEl.textContent = `Connected!${radioName} Freq: ${FreqDots.mhzMhz(result.frequency) || result.frequency + ' MHz'}${responseAddr}${probeAddr}`;
       resultEl.className = 'hamlib-test-success';
     } else {
       resultEl.textContent = `Failed: ${result.error}`;
@@ -10789,7 +10838,7 @@ function sortSpots(spots) {
 const HIDDEN_COLS_KEY = 'pota-cat-hidden-cols';
 const HIDEABLE_COLUMNS = [
   { key: 'operator', label: 'Operator' },
-  { key: 'frequency', label: 'Freq (kHz)' },
+  { key: 'frequency', label: 'Freq' },
   { key: 'mode', label: 'Mode' },
   { key: 'wpm', label: 'WPM (CW speed)' },
   { key: 'source', label: 'Source' },
@@ -11060,8 +11109,8 @@ let colOrder = loadColOrder();
 const COL_WIDTHS_KEY = 'pota-cat-col-pct-v10';
 const COL_WIDTHS_KEY_V9 = 'pota-cat-col-pct-v9';
 const DEFAULT_COL_PCT_OBJ = {
-  log: 4, callsign: 8, operator: 7, frequency: 6, mode: 5, wpm: 4, source: 5, reference: 6,
-  parkName: 14, locationDesc: 7, grid: 5, cqz: 3, ituz: 3, distance: 6, bearing: 5, spotTime: 5, spotter: 7, comments: 10, skip: 4, hide: 4
+  log: 4, callsign: 8, operator: 7, frequency: 8, mode: 5, wpm: 4, source: 5, reference: 6,
+  parkName: 12, locationDesc: 7, grid: 5, cqz: 3, ituz: 3, distance: 6, bearing: 5, spotTime: 5, spotter: 7, comments: 10, skip: 4, hide: 4
 };
 
 function loadColWidths() {
@@ -11074,6 +11123,18 @@ function loadColWidths() {
     for (const col of DEFAULT_COL_ORDER) {
       if (obj[col] == null) { obj[col] = DEFAULT_COL_PCT_OBJ[col] || 5; changed = true; }
     }
+    // Frequencies are written the VFO way now ("14.074.00", two characters
+    // longer than "14074.0"; Casey 2026-11-11). Once, give a saved Freq column
+    // narrower than the new default its width back, taken from Park Name.
+    try {
+      if (!localStorage.getItem('pota-cat-col-freq-dots') && obj.frequency < DEFAULT_COL_PCT_OBJ.frequency) {
+        const need = DEFAULT_COL_PCT_OBJ.frequency - obj.frequency;
+        obj.frequency = DEFAULT_COL_PCT_OBJ.frequency;
+        if (obj.parkName > need + 6) obj.parkName -= need;
+        changed = true;
+      }
+      localStorage.setItem('pota-cat-col-freq-dots', '1');
+    } catch { /* storage unavailable: widths stay as saved */ }
     if (changed) saveColWidths(obj);
     return obj;
   };
@@ -11876,6 +11937,19 @@ function gridToBoundsLocal(grid) {
   return [[south, west], [south + 1, west + 2]];
 }
 
+/**
+ * Fill the activation's grid box for the primary park: the operator's own
+ * grid for that park if they corrected it (lib/park-grid.js, #388), else the
+ * park's, from its position. `park` may be null (not in the parks list).
+ */
+function setActivatorGridForPark(ref, park) {
+  activatorParkGridFromPark = (park && park.latitude && park.longitude)
+    ? latLonToGridLocal(parseFloat(park.latitude), parseFloat(park.longitude)) : '';
+  activatorParkGrid = window.ParkGrid.gridFor(activatorParkGrids, ref, activatorParkGridFromPark);
+  const gi = document.getElementById('activator-grid');
+  if (gi) gi.value = activatorParkGrid;
+}
+
 // Lightweight lat/lon -> Maidenhead grid for the renderer (no require of Node module)
 function latLonToGridLocal(lat, lon) {
   let lng = lon + 180;
@@ -12000,7 +12074,7 @@ function updateMapMarkers(filtered) {
     const opLine = opName ? `<span style="color:#b0bec5;font-size:11px;">${opName}</span><br>` : '';
     const popupContent = `
       <b>${watched ? '\u2B50 ' : ''}<a href="#" class="popup-qrz" data-call="${s.callsign}">${s.callsign}</a></b>${donorBadge}${creatorBadge} <span style="color:${sourceColor};font-size:11px;">[${sourceLabel}]</span>${expeditionBadge}${eventBadgeHtml}${newBadge}${wwffBadge}<br>
-      ${opLine}${parseFloat(s.frequency).toFixed(1)} kHz &middot; ${s.mode}<br>
+      ${opLine}${FreqDots.khzMhz(s.frequency)} &middot; ${s.mode}<br>
       <b>${s.reference}</b> ${s.parkName}${wwffRefLine}<br>
       ${distStr}<br>
       <button class="tune-btn" data-call="${s.callsign || ''}" data-freq="${s.frequency}" data-mode="${s.mode}" data-bearing="${s.bearing != null ? s.bearing : ''}" data-lat="${s.lat != null ? s.lat : ''}" data-lon="${s.lon != null ? s.lon : ''}" data-source="${s.source || ''}">Tune</button>${logBtnHtml}
@@ -12517,7 +12591,7 @@ async function openQuickRespot() {
   document.getElementById('respot-callsign').textContent = s.callsign;
   const qrz = qrzData.get(s.callsign.toUpperCase());
   document.getElementById('respot-name').textContent = qrz ? qrzDisplayName(qrz) : '';
-  document.getElementById('respot-freq').textContent = parseFloat(s.frequency).toFixed(1) + ' kHz';
+  document.getElementById('respot-freq').textContent = FreqDots.khzMhz(s.frequency);
 
   // Reference display
   let refText = '';
@@ -12734,7 +12808,7 @@ async function sendDxCommand() {
       dxSpotFreq.value = '';
       dxSpotNote.value = '';
       const nodeName = nodeId ? dxCommandNode.options[dxCommandNode.selectedIndex].textContent : result.sent + ' node' + (result.sent > 1 ? 's' : '');
-      showLogToast('Spotted ' + call + ' on ' + freq + ' kHz \u2192 ' + nodeName, { duration: 3000 });
+      showLogToast('Spotted ' + call + ' on ' + (FreqDots.khzMhz(freq) || freq + ' kHz') + ' \u2192 ' + nodeName, { duration: 3000 });
     }
   } catch (err) {
     showLogToast('DX command failed: ' + err.message, { warn: true, duration: 5000 });
@@ -13525,14 +13599,8 @@ function initWasFilters() {
         const r = await window.api.wasBackfillStates();
         if (!r || !r.ok) {
           wasEls.backfillStatus.textContent = (r && r.error) || 'Could not fill states.';
-        } else if (!r.filled) {
-          wasEls.backfillStatus.textContent = r.remaining
-            ? `No states found for the ${r.remaining} QSO${r.remaining === 1 ? '' : 's'} still without one.`
-            : 'Every QSO already has a state.';
         } else {
-          wasEls.backfillStatus.textContent = `Filled ${r.filled} QSO${r.filled === 1 ? '' : 's'}` +
-            (r.remaining ? `, ${r.remaining} still without a state` : '') +
-            (r.more ? ' (press again for more)' : '') + '.';
+          wasEls.backfillStatus.textContent = r.text; // names the QSOs left (lib/state-backfill.js, #389)
         }
       } catch (err) {
         wasEls.backfillStatus.textContent = 'Could not fill states: ' + (err.message || err);
@@ -15070,7 +15138,7 @@ function render() {
       const freqTd = document.createElement('td');
       freqTd.setAttribute('data-col', 'frequency');
       const freqLink = document.createElement('span');
-      freqLink.textContent = parseFloat(s.frequency).toFixed(1);
+      freqLink.textContent = FreqDots.fromKhz(s.frequency);
       freqLink.className = 'freq-link';
       freqTd.appendChild(freqLink);
       cellMap.set('frequency', freqTd);
@@ -15659,17 +15727,22 @@ document.querySelectorAll('.rst-digits').forEach((container) => {
 });
 
 // --- N1MM RST auto-advance ---
+// A full report in Sent jumps to Rcvd; a habit Tab straight after the jump
+// is absorbed so it does not carry on to the next field (lib/rst-advance.js, #388).
 function setupRstAutoAdvance(sentId, rcvdId, getExpectedLen) {
   const sent = document.getElementById(sentId);
   const rcvd = document.getElementById(rcvdId);
   if (!sent || !rcvd) return;
+  const adv = window.RstAdvance.create();
   [sent, rcvd].forEach(el => el.addEventListener('focus', () => el.select()));
-  sent.addEventListener('input', () => {
-    const expected = getExpectedLen();
-    if (sent.value.length >= expected) {
-      rcvd.focus();
-    }
+  sent.addEventListener('focus', () => adv.reset());
+  sent.addEventListener('input', (e) => {
+    if (adv.sentInput(sent.value.length, getExpectedLen(), e.inputType)) rcvd.focus();
   });
+  rcvd.addEventListener('keydown', (e) => {
+    if (adv.rcvdKeydown(e)) e.preventDefault();
+  });
+  rcvd.addEventListener('blur', () => adv.reset());
 }
 
 // Log dialog N1MM auto-advance
@@ -16218,7 +16291,7 @@ async function showSpotHistoryPopover(anchorEl, { source, callsign, reference, a
     const row = document.createElement('div');
     row.className = 'sh-row';
     const spotter = e.spotter || e.de || '';
-    const freq = e.frequency != null ? parseFloat(e.frequency).toFixed(1) : '';
+    const freq = e.frequency != null ? FreqDots.fromKhz(e.frequency) : '';
     const mode = e.mode || '';
     const comments = e.comments || e.comment || '';
     row.innerHTML = `
@@ -16456,7 +16529,7 @@ function showHideSpotMenu(x, y, callsign, frequency, spot) {
   hideSpotTarget = callsign.toUpperCase();
   hideSpotFreq = String(Math.round(parseFloat(frequency)));
   hideSpotCallEl.textContent = callsign;
-  hideSpotFreqLabel.textContent = `Hide on ${frequency} kHz only`;
+  hideSpotFreqLabel.textContent = `Hide on ${FreqDots.khzMhz(frequency) || frequency + ' kHz'} only`;
   // Region-on-band mute (N7BBQ): offered only when the spot resolved a
   // continent AND a band, and no such rule exists yet. One click creates
   // the rule from the row under the cursor — no dialog. try/catch: the menu's
@@ -16770,7 +16843,6 @@ const settingsDropdown = {
   querySelector: () => null,
   appendChild: () => {},
 };
-const quickLightMode = document.getElementById('quick-light-mode');
 const quickActivatorMode = document.getElementById('quick-activator-mode');
 const quickHideWorkedParks = document.getElementById('quick-hide-worked-parks');
 
@@ -16778,15 +16850,6 @@ settingsBtn.addEventListener('click', (e) => {
   e.stopPropagation();
   openSettingsDialog();
 });
-
-// Reused by both the change handler below AND refreshSummaryCard
-// (which fires on dialog open) so the label always reflects current
-// theme state without waiting for a click.
-function _updateThemeToggleLabel() {
-  const label = document.getElementById('quick-light-mode-label');
-  if (!label) return;
-  label.textContent = quickLightMode && quickLightMode.checked ? 'Light Mode' : 'Dark Mode';
-}
 
 // Theme payload for popouts. The wire shape is `{theme, variant}` —
 // popouts read both fields, set data-theme + data-dark-variant on
@@ -16815,85 +16878,38 @@ function broadcastPopoutTheme(p) {
 }
 
 function _popoutThemePayload() {
-  const r = _resolvedAppTheme(setLightMode.checked);
+  const r = _resolvedAppTheme();
   const p = { theme: r.theme, variant: r.variant };
   if (r.ds) p.ds = r.ds;
   return p;
 }
 
-quickLightMode.addEventListener('change', async () => {
-  const light = quickLightMode.checked;
-  // With a design-system theme chosen, the quick toggle moves between its
-  // light and dark themes (POTACAT Light / the chosen dark one).
-  const _wasAppTheme = _currentAppTheme;
-  if (window.AppTheme) _currentAppTheme = window.AppTheme.toggledAppTheme(_currentAppTheme, light);
-  applyTheme(light);
-  setLightMode.checked = light;
-  _updateThemeToggleLabel();
-  broadcastPopoutTheme(_popoutThemePayload());
-  const _quickSave = { lightMode: light };
-  if (_currentAppTheme !== _wasAppTheme) _quickSave.appTheme = _currentAppTheme;
-  await window.api.saveSettings(_quickSave);
-});
-
-// Change Theme: ONE dropdown in the Settings sidebar and the same one in
-// Settings > Display (Casey 2026-11-04: a dropdown, not a light/dark on/off).
-// Every look is an entry (lib/app-theme.js THEME_CHOICES); picking one
-// paints every window and saves at once.
-function _themeChoiceNow() {
-  if (!window.AppTheme || !window.AppTheme.choiceFor) return 'classic-navy';
-  return window.AppTheme.choiceFor({
-    appTheme: _currentAppTheme,
-    lightMode: document.documentElement.getAttribute('data-theme') === 'light',
-    darkVariant: _currentDarkVariant,
-  });
+// The look picker (#376, lib/look-picker.js): Settings > Display shows both
+// modes' themes, the Welcome screen's "Pick your look" the mode in force with
+// a live preview, and the Settings sidebar's Appearance menu switches Light,
+// Dark or System. Every change paints every window and saves at once.
+function renderLookPickers() {
+  if (!window.LookPicker || !window.AppTheme) return;
+  const sd = _systemDark();
+  window.LookPicker.render(document.getElementById('set-look-picker'), { state: _themeState, systemDark: sd, scope: 'all', onChange: applyLookChoice });
+  window.LookPicker.render(document.getElementById('welcome-look-picker'), { state: _themeState, systemDark: sd, scope: 'active', preview: true, onChange: applyLookChoice });
+  const q = document.getElementById('quick-appearance');
+  if (q) q.value = _themeState.appearance;
 }
-function syncThemePickers() {
-  if (!window.AppTheme || !window.AppTheme.THEME_CHOICES) return;
-  const now = _themeChoiceNow();
-  for (const id of ['quick-theme', 'set-app-theme', 'welcome-theme']) {
-    const sel = document.getElementById(id);
-    if (!sel) continue;
-    if (sel.options.length !== window.AppTheme.THEME_CHOICES.length) {
-      sel.innerHTML = '';
-      for (const c of window.AppTheme.THEME_CHOICES) {
-        const o = document.createElement('option');
-        o.value = c.id; o.textContent = c.name;
-        sel.appendChild(o);
-      }
-    }
-    // The Welcome screen shows what its Continue will save (a first run
-    // starts on Light, test/fresh-install-defaults-test.js), not the window.
-    if (id === 'welcome-theme') {
-      const w = document.getElementById('welcome-light-mode');
-      sel.value = w ? window.AppTheme.choiceFor({ appTheme: _currentAppTheme, lightMode: w.checked, darkVariant: _currentDarkVariant }) : now;
-    } else {
-      sel.value = now;
-    }
-  }
-}
-async function applyThemeChoice(id) {
-  if (!window.AppTheme || !window.AppTheme.settingsForChoice) return;
-  const s = window.AppTheme.settingsForChoice(id);
-  _currentAppTheme = s.appTheme;
-  if (s.darkVariant) {
-    const r = document.querySelector(`input[name="set-dark-variant"][value="${s.darkVariant}"]`);
-    if (r) r.checked = true;
-  }
-  setLightMode.checked = s.lightMode === true;
-  applyTheme(s.lightMode === true, s.darkVariant);
-  if (quickLightMode) quickLightMode.checked = document.documentElement.getAttribute('data-theme') === 'light';
-  { const w = document.getElementById('welcome-light-mode'); if (w) w.checked = s.lightMode === true; }
-  _updateThemeToggleLabel();
+async function applyLookChoice(next) {
+  if (!window.AppTheme) return;
+  const s = window.AppTheme.settingsFor(next, _systemDark());
+  _themeState = { appearance: s.appearance, themeLight: s.themeLight, themeDark: s.themeDark };
+  applyTheme();
   broadcastPopoutTheme(_popoutThemePayload());
-  syncThemePickers();
+  renderLookPickers();
   await window.api.saveSettings(s);
 }
-for (const id of ['quick-theme', 'set-app-theme', 'welcome-theme']) {
-  const sel = document.getElementById(id);
-  if (sel) sel.addEventListener('change', () => applyThemeChoice(sel.value));
+{
+  const q = document.getElementById('quick-appearance');
+  if (q) q.addEventListener('change', () => applyLookChoice(Object.assign({}, _themeState, { appearance: q.value })));
 }
-syncThemePickers();
+renderLookPickers();
 
 // More dropdown → "Activator mode" entry. Behaves like the other
 // view-menu-item buttons: one click enters Activator mode. Exiting
@@ -17716,13 +17732,24 @@ async function openSettingsDialog(tab) {
     setWinlinkAutoCheck.checked = s.winlinkTelnetAutoCheck === true;
     setWinlinkAutoCheckMin.value = s.winlinkTelnetAutoCheckMin || 30;
     setWinlinkArdopBw.value = String(s.winlinkArdopBw || 500);
+    // #425: 120 s unless set; 90 (Pat's own) to 180. main.js holds it to the same range (lib/winlink-pat.js).
+    if (setWinlinkArdopArqTimeout) setWinlinkArdopArqTimeout.value = Math.max(90, Math.min(180, parseInt(s.winlinkArdopArqTimeout, 10) || 120));
     setWinlinkVaraBw.value = String(s.winlinkVaraBw || 2300);
     setWinlinkPacketModem.value = String(s.winlinkPacketModem || 1200);
     if (setWinlinkPacketTxDelay) setWinlinkPacketTxDelay.value = packetTimingMs(s.winlinkPacketTxDelayMs, 500, 50, 1000);
     if (setWinlinkPacketTxTail) setWinlinkPacketTxTail.value = packetTimingMs(s.winlinkPacketTxTailMs, 200, 10, 500);
     setWinlinkVaraPort.value = s.winlinkVaraPort || 8300;
     if (winlinkVaraSection) {
-      winlinkVaraSection.classList.toggle('hidden', window.api.platform !== 'win32');
+      // Every system (#287): Windows gets the program, "Set up VARA for me" and
+      // auto-start; Linux and macOS get the host, port and Test, and open on them.
+      const onWindows = window.api.platform === 'win32';
+      winlinkVaraSection.classList.remove('hidden');
+      winlinkVaraSection.querySelectorAll('.vara-win-only').forEach((el) => el.classList.toggle('hidden', !onWindows));
+      winlinkVaraSection.querySelectorAll('.vara-other-only').forEach((el) => el.classList.toggle('hidden', onWindows));
+      const varaDetails = document.getElementById('vara-details');
+      if (varaDetails && !onWindows) varaDetails.open = true;
+      if (setVaraHfHost) setVaraHfHost.value = s.winlinkVaraHost || '';
+      if (setVaraFmHost) setVaraFmHost.value = s.winlinkVaraFmHost || '';
       setVaraHfEnable.checked = s.enableVaraHf === true || (s.enableVaraHf == null && s.winlinkShowVara === true);
       setVaraFmEnable.checked = s.enableVaraFm === true;
       setVaraHfPath.value = s.winlinkVaraHfPath || '';
@@ -17734,6 +17761,7 @@ async function openSettingsDialog(tab) {
     }
     setWinlinkCap.value = s.winlinkSessionCapMin || 30;
     if (setWinlinkPrediction) setWinlinkPrediction.checked = s.winlinkPrediction !== false;
+    if (setWinlinkAutoRetry) setWinlinkAutoRetry.checked = s.winlinkAutoRetry !== false;
     if (setWinlinkRecordAudio) setWinlinkRecordAudio.checked = !!s.winlinkRecordModemAudio;
     setWinlinkPatPath.value = s.winlinkPatPath || '';
     const rig = (s.rigs || []).find((x) => x.id === s.activeRigId) || {};
@@ -17875,14 +17903,9 @@ async function openSettingsDialog(tab) {
   updateSettingsConnBar();
   setDisableAutoUpdate.checked = s.disableAutoUpdate === true;
   setEnableTelemetry.checked = s.enableTelemetry === true;
-  setLightMode.checked = s.lightMode === true;
   { const _wp = document.getElementById('set-waterfall-palette'); if (_wp && window.WaterfallPalettes) _wp.value = window.WaterfallPalettes.normalize(s.waterfallPalette); }
-  // Mirror the dark sub-variant radio. Default 'navy' for legacy users
-  // who don't have the field yet; setting persists in settings.json.
-  const _dvVal = s.darkVariant || 'navy';
-  const _dvRadio = document.querySelector(`input[name="set-dark-variant"][value="${_dvVal}"]`);
-  if (_dvRadio) _dvRadio.checked = true;
-  syncThemePickers();
+  _themeState = _themeStateFrom(s);
+  renderLookPickers();
   hamlibTestResult.textContent = '';
   hamlibTestResult.className = '';
   renderRigList(s.rigs || [], s.activeRigId || null);
@@ -17908,9 +17931,10 @@ async function openSettingsDialog(tab) {
 }
 
 settingsCancel.addEventListener('click', async () => {
-  // Revert theme to saved state on cancel
+  // The theme saves as it is picked; repaint from what is saved.
   const s = await window.api.getSettings();
-  applyTheme(s.lightMode === true, s.darkVariant || 'navy');
+  _themeState = _themeStateFrom(s);
+  applyTheme();
   settingsDialog.close();
 });
 
@@ -18345,14 +18369,6 @@ settingsSave.addEventListener('click', async () => {
   const lightIconEnabled = setLightIcon.checked;
   const disableAutoUpdate = setDisableAutoUpdate.checked;
   const telemetryEnabled = setEnableTelemetry.checked;
-  const lightModeEnabled = setLightMode.checked;
-  // Change Theme (applyThemeChoice) keeps _currentAppTheme and the hidden
-  // light/variant inputs in step, so Save writes what is on screen.
-  const appThemeVal = _currentAppTheme || 'classic';
-  // Dark sub-variant — radio "navy" vs "charcoal". Reads the checked
-  // radio; falls back to current value so missing UI doesn't reset it.
-  const darkVariantRadio = document.querySelector('input[name="set-dark-variant"]:checked');
-  const darkVariantVal = (darkVariantRadio && darkVariantRadio.value) || _currentDarkVariant || 'navy';
   const smartSdrSpotsEnabled = setSmartSdrSpots.checked;
   const smartSdrMaxAgeVal = parseInt(setSmartSdrMaxAge.value, 10) || 0;
   const smartSdrMaxSpotsVal = parseInt(setSmartSdrMaxSpots.value, 10) || 0;
@@ -18599,9 +18615,8 @@ settingsSave.addEventListener('click', async () => {
     extraUdpFormat: setExtraUdpFormat.value || 'wsjtx',
     disableAutoUpdate: disableAutoUpdate,
     enableTelemetry: telemetryEnabled,
-    lightMode: lightModeEnabled,
-    darkVariant: darkVariantVal,
-    appTheme: appThemeVal,
+    // The look picker saves as it is picked; Save writes the same (#376).
+    ...(window.AppTheme ? window.AppTheme.settingsFor(_themeState, _systemDark()) : {}),
     panadapterSyncTable: setPanadapterSyncTable.checked,
     panadapterPota:      setPanadapterPota.checked,
     panadapterSota:      setPanadapterSota.checked,
@@ -18629,6 +18644,7 @@ settingsSave.addEventListener('click', async () => {
       winlinkTelnetAutoCheck: setWinlinkAutoCheck.checked,
       winlinkTelnetAutoCheckMin: Math.max(10, Math.min(240, parseInt(setWinlinkAutoCheckMin.value, 10) || 30)),
       winlinkArdopBw: parseInt(setWinlinkArdopBw.value, 10) || 500,
+      ...(setWinlinkArdopArqTimeout ? { winlinkArdopArqTimeout: Math.max(90, Math.min(180, parseInt(setWinlinkArdopArqTimeout.value, 10) || 120)) } : {}),
       winlinkVaraBw: parseInt(setWinlinkVaraBw.value, 10) || 2300,
       winlinkPacketModem: parseInt(setWinlinkPacketModem.value, 10) === 9600 ? 9600 : 1200,
       ...(setWinlinkPacketTxDelay ? { winlinkPacketTxDelayMs: packetTimingMs(setWinlinkPacketTxDelay.value, 500, 50, 1000) } : {}),
@@ -18640,10 +18656,13 @@ settingsSave.addEventListener('click', async () => {
         winlinkVaraHfPath: setVaraHfPath.value.trim(),
         winlinkVaraFmPath: setVaraFmPath.value.trim(),
         winlinkVaraFmPort: parseInt(setVaraFmPort.value, 10) || 8310,
+        ...(setVaraHfHost ? { winlinkVaraHost: setVaraHfHost.value.trim() } : {}),
+        ...(setVaraFmHost ? { winlinkVaraFmHost: setVaraFmHost.value.trim() } : {}),
         winlinkVaraAutoLaunch: setVaraAutoLaunch.checked,
       } : {}),
       winlinkSessionCapMin: Math.max(10, Math.min(60, parseInt(setWinlinkCap.value, 10) || 30)),
       winlinkPrediction: setWinlinkPrediction ? setWinlinkPrediction.checked : true,
+      winlinkAutoRetry: setWinlinkAutoRetry ? setWinlinkAutoRetry.checked : true,
       winlinkRecordModemAudio: setWinlinkRecordAudio ? setWinlinkRecordAudio.checked : false,
       winlinkPatPath: setWinlinkPatPath.value.trim(),
     } : {}),
@@ -18788,8 +18807,7 @@ settingsSave.addEventListener('click', async () => {
   defaultPower = defaultPowerVal;
   updateLoggingVisibility();
   updateBannerLoggerVisibility();
-  _currentAppTheme = appThemeVal;
-  applyTheme(lightModeEnabled, darkVariantVal);
+  applyTheme();
   broadcastPopoutTheme(_popoutThemePayload());
   enableDxcc = dxccEnabled;
   licenseClass = licenseClassVal;
@@ -20688,8 +20706,6 @@ function renderDirvNets(search, bandFilter, statusFilter) {
   }
   if (dirvPlaceholder) dirvPlaceholder.classList.add('hidden');
 
-  const lsbBands = new Set(['160m', '80m', '40m']);
-
   for (const net of entries) {
     const tr = document.createElement('tr');
     const cd = net._cd;
@@ -20719,7 +20735,7 @@ function renderDirvNets(search, bandFilter, statusFilter) {
 
     tr.innerHTML = `<td class="dirv-status-col">${statusBadge}</td>`
       + `<td class="dirv-name-col">${esc(net.name)}</td>`
-      + `<td class="dirv-freq-col">${net.frequency || ''}</td>`
+      + `<td class="dirv-freq-col">${FreqDots.fromKhz(net.frequency) || net.frequency || ''}</td>`
       + `<td class="dirv-mode-col">${esc(net.mode)}</td>`
       + `<td class="dirv-band-col">${esc(net.band)}</td>`
       + `<td class="dirv-days-col">${esc(net.days)}</td>`
@@ -20735,18 +20751,16 @@ function renderDirvNets(search, bandFilter, statusFilter) {
       if (e.target.closest('.dir-add-btn')) return; // don't tune on Add click
       const freq = String(net.frequency);
       if (!freq) return;
-      let mode = (net.mode || '').toUpperCase();
-      if (mode === 'SSB') {
-        const band = net.band;
-        mode = lsbBands.has(band) ? 'LSB' : 'USB';
-      }
+      // A net listed as SSB goes as SSB: main resolves it to the band's
+      // sideband (lib/ssb-sideband.js), the same as a spot.
+      const mode = (net.mode || '').toUpperCase();
       window.api.tune(freq, mode);
     });
 
     // Hover popup
     attachDirHover(tr, [
       { label: 'Net', value: net.name },
-      { label: 'Frequency', value: net.frequency ? `${net.frequency} kHz` : '' },
+      { label: 'Frequency', value: net.frequency ? (FreqDots.khzMhz(net.frequency) || `${net.frequency} kHz`) : '' },
       { label: 'Mode', value: net.mode },
       { label: 'Schedule', value: `${net.days || 'Daily'} at ${net.startTimeUtc || '?'} UTC` },
       { label: 'Duration', value: duration },
@@ -20853,7 +20867,7 @@ function renderDirvSwl(search, bandFilter, statusFilter) {
 
     tr.innerHTML = `<td class="dirv-status-col">${statusBadge}</td>`
       + `<td class="dirv-name-col">${esc(entry.station)}</td>`
-      + `<td class="dirv-freq-col">${entry.frequency || ''}</td>`
+      + `<td class="dirv-freq-col">${entry.frequency || ''}</td>` // shortwave stays kHz (Casey 2026-11-12)
       + `<td class="dirv-mode-col">${esc(entry.mode)}</td>`
       + `<td class="dirv-band-col">${esc(entry.band)}</td>`
       + `<td class="dirv-time-col">${esc(entry.startTimeUtc)}</td>`
@@ -21014,7 +21028,7 @@ function renderDirvLandmarks(search, bandFilter, category) {
       tr.innerHTML = `<td class="lmk-fav">${window.Favorites ? window.Favorites.starHtml(favLandmarkIds.includes(lm.id), lm.name) : ''}</td>`
         + `<td>${badge}</td>`
         + `<td class="lmk-name">${esc(lm.name)}</td>`
-        + `<td>${lm.khz}</td>`
+        + `<td>${FreqDots.fromKhz(lm.khz)}</td>`
         + `<td>${esc(lm.mode)}</td>`
         + `<td>${esc(r.band)}${r.viaSdr ? '<span class="lmk-sdr" title="Outside the radio&#39;s bands; POTACAT plays it through your SDR">SDR</span>' : ''}</td>`
         + `<td class="lmk-line">${esc(lm.line)}${lm.ncdxf ? `<span class="lmk-now" data-khz="${lm.khz}"></span>` : ''}</td>`;
@@ -21065,7 +21079,7 @@ function lmkRenderPanel(lm, ok) {
   lmkPanel.innerHTML = `
     <div class="lmk-p-head">
       <h3 class="lmk-p-name">${esc(lm.name)}</h3>
-      <span class="lmk-p-freq">${lm.khz} kHz ${esc(lm.mode)}</span>
+      <span class="lmk-p-freq">${FreqDots.khzMhz(lm.khz)} ${esc(lm.mode)}</span>
       <span class="lmk-p-meta">${esc(meta)}</span>
     </div>
     ${lm.ncdxf ? `<div class="lmk-beacon" data-khz="${lm.khz}">
@@ -21080,7 +21094,7 @@ function lmkRenderPanel(lm, ok) {
     ${sec('Why it matters', lm.why)}
     ${sec('Try this', lm.try, 'lmk-try')}
     <div class="lmk-p-actions">
-      <button type="button" class="lmk-btn lmk-btn-tint" id="lmk-panel-tune">Tune ${lm.khz} kHz</button>
+      <button type="button" class="lmk-btn lmk-btn-tint" id="lmk-panel-tune">Tune ${FreqDots.khzMhz(lm.khz)}</button>
       ${lm.url ? '<button type="button" class="lmk-link" id="lmk-panel-link">Station page</button>' : ''}
     </div>`;
   const tuneBtn = document.getElementById('lmk-panel-tune');
@@ -21425,7 +21439,7 @@ function renderNetsTable(search) {
       : '<button class="dir-add-btn" type="button">+ Add</button>';
     tr.innerHTML = `<td class="dir-status-col">${dot}</td>`
       + `<td class="dir-name-col">${nameCell}</td>`
-      + `<td class="dir-freq-col">${net.frequency || ''}</td>`
+      + `<td class="dir-freq-col">${FreqDots.fromKhz(net.frequency) || net.frequency || ''}</td>`
       + `<td class="dir-mode-col">${esc(net.mode)}</td>`
       + `<td class="dir-days-col">${esc(net.days)}</td>`
       + `<td class="dir-time-col">${esc(net.startTimeUtc)}</td>`
@@ -21436,7 +21450,7 @@ function renderNetsTable(search) {
     // Hover popup
     attachDirHover(tr, [
       { label: 'Net', value: net.name },
-      { label: 'Frequency', value: net.frequency ? `${net.frequency} kHz` : '' },
+      { label: 'Frequency', value: net.frequency ? (FreqDots.khzMhz(net.frequency) || `${net.frequency} kHz`) : '' },
       { label: 'Mode', value: net.mode },
       { label: 'Schedule', value: `${net.days || 'Daily'} at ${net.startTimeUtc || '?'} UTC` },
       { label: 'Duration', value: duration },
@@ -21510,7 +21524,7 @@ function renderSwlTable(search) {
     const powerStr = entry.powerKw ? `${entry.powerKw} kW` : '';
     tr.innerHTML = `<td class="dir-status-col">${dot}</td>`
       + `<td class="dir-name-col">${esc(entry.station)}</td>`
-      + `<td class="dir-freq-col">${entry.frequency || ''}</td>`
+      + `<td class="dir-freq-col">${entry.frequency || ''}</td>` // shortwave stays kHz (Casey 2026-11-12)
       + `<td class="dir-mode-col">${esc(entry.mode)}</td>`
       + `<td class="dir-time-col">${esc(entry.startTimeUtc)}</td>`
       + `<td class="dir-time-col">${esc(entry.endTimeUtc)}</td>`
@@ -21854,8 +21868,8 @@ window.api.onWsjtxClear(() => {
 
 window.api.onWsjtxQsoLogged((qso) => {
   // Show a toast when WSJT-X logs a QSO
-  const freqMHz = (qso.txFrequency / 1e6).toFixed(3);
-  showLogToast(`WSJT-X logged ${qso.dxCall} on ${freqMHz} MHz ${qso.mode}`);
+  const freqMHz = FreqDots.hzMhz(qso.txFrequency);
+  showLogToast(`WSJT-X logged ${qso.dxCall} on ${freqMHz} ${qso.mode}`);
 });
 
 // WSJT-X QSO logged while in activator mode — add to activator contact list
@@ -22229,12 +22243,20 @@ catLogClearBtn.addEventListener('click', () => {
     // NOTE the `|| rigs[0]` above: when activeRigId matches nothing, this line
     // still names a rig, which reads as "a rig is active" when none is. Say so.
     const rigActive = !!(activeRig && activeRig.id === s.activeRigId);
+    // This text is pasted into public channels, so the header masks the rig's
+    // host, a remote shack's host and a home path in a serial path with the
+    // same rules as the log lines (lib/diagnostic-snapshot.js, GitHub #404).
+    // Without the module, mask everything rather than paste it in full.
+    const DS = window.DiagnosticSnapshot;
+    const maskHost = DS ? DS.maskHost : () => '<redacted>';
+    const maskSerialPath = DS ? DS.maskSerialPath : () => '<redacted>';
+    const maskReportText = DS ? DS.maskReportText : () => '<redacted>';
     const rigDesc = activeRig
       ? [activeRig.name, activeRig.model, activeRig.catTarget && activeRig.catTarget.type,
          activeRig.catTarget && (activeRig.catTarget.host
            // Icom Network keeps its port as controlPort; "host:undefined" told a reader nothing (KG5EIU).
-           ? activeRig.catTarget.host + ((activeRig.catTarget.port || activeRig.catTarget.controlPort) ? ':' + (activeRig.catTarget.port || activeRig.catTarget.controlPort) : '')
-           : activeRig.catTarget.path)]
+           ? maskHost(activeRig.catTarget.host) + ((activeRig.catTarget.port || activeRig.catTarget.controlPort) ? ':' + (activeRig.catTarget.port || activeRig.catTarget.controlPort) : '')
+           : maskSerialPath(activeRig.catTarget.path))]
         .filter(Boolean).join(' / ') + (rigActive ? '' : '  [NOT THE ACTIVE RIG — activeRigId matches nothing]')
       : '(none configured)';
     // Two settings silently stop POTACAT touching the local radio, and neither
@@ -22244,7 +22266,8 @@ catLogClearBtn.addEventListener('click', () => {
     const remoteTarget = s.activeTargetId &&
       (s.connectionTargets || []).find((t) => t && t.id === s.activeTargetId);
     const radioOwner = remoteTarget
-      ? 'REMOTE SHACK — ' + (remoteTarget.name || remoteTarget.host || 'unnamed target') +
+      ? 'REMOTE SHACK — ' + (remoteTarget.name ? maskReportText(remoteTarget.name)
+        : remoteTarget.host ? maskHost(remoteTarget.host) : 'unnamed target') +
         ' (the local rig is deliberately not connected)'
       : s.enableWsjtx ? 'WSJT-X integration is ON (POTACAT releases the radio to WSJT-X)'
       : 'this station';
@@ -22357,8 +22380,16 @@ catLogClearBtn.addEventListener('click', () => {
         // #295: the modem's own logs, so a Winlink report says what the modem
         // sent, heard and decided, not only what POTACAT did.
         const wm = pkg.winlinkModem;
+        // #425: one summary line per Winlink session (gateway, dial, how long,
+        // what moved, the modem's last state, which side ended it), kept apart
+        // so a retry cannot push the session that dropped out of the report.
+        if (wm && wm.sessions && wm.sessions.length) {
+          logSections.push('', '### Winlink sessions (latest last)', '```', wm.sessions.join('\n'), '```');
+        }
         if (wm && wm.ardop && wm.ardop.lines && wm.ardop.lines.length) {
-          logSections.push('', '### ARDOP modem log (' + wm.ardop.file + ', its last run' + (wm.ardop.omitted ? ', ' + wm.ardop.omitted + ' earlier lines left out' : '') + ')', '```', wm.ardop.lines.join('\n'), '```');
+          logSections.push('', '### ARDOP modem log (' + wm.ardop.file + ', its last ' + (wm.ardop.runs > 1 ? wm.ardop.runs + ' runs' : 'run') + (wm.ardop.omitted ? ', ' + wm.ardop.omitted + ' earlier lines left out' : '') + ')', '```',
+            ...(wm.ardop.key && wm.ardop.key.length ? ['(how each link began and ended, from the lines left out)', ...wm.ardop.key, '(the last lines)'] : []),
+            wm.ardop.lines.join('\n'), '```');
         }
         if (wm && wm.ardopSession && wm.ardopSession.lines && wm.ardopSession.lines.length) {
           logSections.push('', '### ARDOP session log (' + wm.ardopSession.file + ')', '```', wm.ardopSession.lines.join('\n'), '```');
@@ -22956,7 +22987,7 @@ function renderRbnTable() {
 
     // Freq
     const freqTd = document.createElement('td');
-    freqTd.textContent = parseFloat(s.frequency).toFixed(1);
+    freqTd.textContent = FreqDots.fromKhz(s.frequency);
     tr.appendChild(freqTd);
 
     // Mode
@@ -26508,10 +26539,8 @@ if (window.api.platform === 'darwin') {
 // --- Welcome dialog (first run) ---
 const welcomeDialog = document.getElementById('welcome-dialog');
 const welcomeGridInput = document.getElementById('welcome-grid');
-const welcomeLightMode = document.getElementById('welcome-light-mode');
 const welcomeCallsignInput = document.getElementById('welcome-callsign');
 
-welcomeLightMode.addEventListener('change', () => applyTheme(welcomeLightMode.checked));
 
 // --- Welcome rig editor ---
 let welcomeRig = null; // rig configured in welcome dialog
@@ -26756,7 +26785,6 @@ document.getElementById('welcome-start').addEventListener('click', async () => {
   const idleWsprBandHopVal = document.getElementById('welcome-idle-wspr-band-hop').checked;
   const idleWsprBandVal = document.getElementById('welcome-idle-wspr-band').value || '20m';
   const idlePskBandVal = document.getElementById('welcome-idle-psk-band').value || '20m';
-  const lightModeEnabled = welcomeLightMode.checked;
   const telemetryEl = document.getElementById('welcome-enable-telemetry');
   const qrzUser = (document.getElementById('welcome-qrz-user')?.value || '').trim().toUpperCase();
   const qrzPass = document.getElementById('welcome-qrz-pass')?.value || '';
@@ -26778,7 +26806,6 @@ document.getElementById('welcome-start').addEventListener('click', async () => {
     idlePskBand: idlePskBandVal,
     firstRun: false,
     lastVersion: currentSettings.appVersion,
-    lightMode: lightModeEnabled,
   };
   // Usage statistics: ticked by default on a new install, the operator's
   // own choice when the welcome screen is reopened (see main.js telemetry).
@@ -27180,8 +27207,8 @@ async function checkFirstRun(force = false) {
       const welcomeQrzPass = document.getElementById('welcome-qrz-pass');
       if (welcomeQrzUser) welcomeQrzUser.value = s.qrzUsername || '';
       if (welcomeQrzPass) welcomeQrzPass.value = s.qrzPassword || '';
-      welcomeLightMode.checked = s.lightMode === true;
-      syncThemePickers();
+      _themeState = _themeStateFrom(s);
+      renderLookPickers();
       // Show existing active rig if any
       const rigs = s.rigs || [];
       const activeRig = rigs.find(r => r.id === s.activeRigId) || rigs[0];
@@ -27598,19 +27625,13 @@ function resumeActivation(activation) {
   activatorParkRefInput.value = mainRefs.map(r => r.ref).join(',');
   activatorParkNameEl.textContent = '';
   updateParkExtraBadge();
-  // Look up park names; grid comes from the primary park
-  const gridInput = document.getElementById('activator-grid');
+  // Look up park names; grid comes from the primary park (or the operator's own for it)
   activatorParkRefs.forEach((p, i) => {
     window.api.getPark(p.ref).then(park => {
+      if (i === 0) setActivatorGridForPark(p.ref, park);
       if (!park) return;
       p.name = park.name || '';
-      if (i === 0) {
-        activatorParkNameEl.textContent = park.name || '';
-        if (park.latitude && park.longitude) {
-          activatorParkGrid = latLonToGridLocal(parseFloat(park.latitude), parseFloat(park.longitude));
-          if (gridInput) gridInput.value = activatorParkGrid;
-        }
-      }
+      if (i === 0) activatorParkNameEl.textContent = park.name || '';
     });
   });
   window.api.saveSettings({ activatorParkRefs, activatorCrossRefs });
@@ -27841,7 +27862,7 @@ function renderActivatorLog() {
       <td class="act-log-call act-log-editable" data-field="callsign">${c.callsign || ''}${dupeFlag}${p2pBadge}</td>
       <td class="act-log-name">${c.name || ''}</td>
       <td class="act-log-state act-log-editable" data-field="state">${c.state || ''}</td>
-      <td class="act-log-freq act-log-editable" data-field="freqDisplay">${c.freqDisplay || ''}</td>
+      <td class="act-log-freq act-log-editable" data-field="freqDisplay">${FreqDots.fromMhz(c.freqDisplay) || c.freqDisplay || ''}</td>
       <td class="act-log-mode act-log-editable" data-field="mode">${c.mode || ''}</td>
       <td class="act-log-rst act-log-editable" data-field="rstSent">${c.rstSent || ''}</td>
       <td class="act-log-rst act-log-editable" data-field="rstRcvd">${c.rstRcvd || ''}</td>
@@ -28152,7 +28173,7 @@ async function showPastActivations() {
             const hh = (c.timeOn || '').substring(0, 2);
             const mm = (c.timeOn || '').substring(2, 4);
             const t = (hh && mm) ? `${hh}:${mm}` : '';
-            const fMhz = c.freq ? parseFloat(c.freq).toFixed(3) : '';
+            const fMhz = c.freq ? FreqDots.fromMhz(c.freq) : '';
             return `<tr><td>${i + 1}</td><td>${t}</td><td>${c.callsign}</td><td>${c.name || ''}</td><td>${fMhz}</td><td>${c.mode || ''}</td><td>${c.rstSent || ''}</td><td>${c.rstRcvd || ''}</td></tr>`;
           }).join('')}</tbody>
         </table>
@@ -28392,7 +28413,7 @@ async function showActivationMap(act) {
     const hh = (c.timeOn || '').substring(0, 2);
     const mm = (c.timeOn || '').substring(2, 4);
     const t = (hh && mm) ? `${hh}:${mm}` : '';
-    const fMhz = c.freq ? parseFloat(c.freq).toFixed(3) : '';
+    const fMhz = c.freq ? FreqDots.mhzMhz(c.freq) : '';
     const locName = loc.name || (locations[c.callsign] && locations[c.callsign].name) || '';
     const gridLabel = c.grid ? ` (${c.grid})` : '';
     const popupHtml = `<b>${c.callsign}</b>${c.name ? ' — ' + c.name : ''}<br>${t} UTC  ${fMhz} ${c.mode || ''}<br><span style="color:#aaa">${locName}${gridLabel}</span>`;
@@ -28516,6 +28537,14 @@ if (activatorParkRefInput) {
     gridInput.addEventListener('input', () => {
       activatorParkGrid = gridInput.value.trim().toUpperCase();
     });
+    // Remembered for this park, so ending and starting again, a restart or a
+    // resume keeps it (#388). Typing the park's own grid back clears it.
+    gridInput.addEventListener('change', () => {
+      const ref = primaryParkRef();
+      if (!ref) return;
+      activatorParkGrids = window.ParkGrid.remember(activatorParkGrids, ref, gridInput.value, activatorParkGridFromPark);
+      window.api.saveSettings({ activatorParkGrids });
+    });
   }
   // On-air callsign for this activation (STATION_CALLSIGN on its QSOs).
   // Remembered across restarts like the park refs; blank = Station callsign.
@@ -28543,15 +28572,8 @@ function selectPark(park) {
   activatorParkNameEl.textContent = park.name || '';
   activatorParkDropdown.classList.add('hidden');
   updateParkExtraBadge();
-  // Auto-populate grid from park lat/lon
-  const gridInput = document.getElementById('activator-grid');
-  if (park.latitude && park.longitude) {
-    activatorParkGrid = latLonToGridLocal(parseFloat(park.latitude), parseFloat(park.longitude));
-    if (gridInput) gridInput.value = activatorParkGrid;
-  } else {
-    activatorParkGrid = '';
-    if (gridInput) gridInput.value = '';
-  }
+  // Grid from park lat/lon, or the operator's own for this park
+  setActivatorGridForPark(park.reference, park);
   // Enable start button
   activatorStartBtn.disabled = false;
   // Persist to settings
@@ -28591,10 +28613,8 @@ function selectParkMulti(park) {
   updateParkExtraBadge();
 
   // Grid from the first park
-  const gridInput = document.getElementById('activator-grid');
   if (activatorParkRefs.length === 1 && park.latitude && park.longitude) {
-    activatorParkGrid = latLonToGridLocal(parseFloat(park.latitude), parseFloat(park.longitude));
-    if (gridInput) gridInput.value = activatorParkGrid;
+    setActivatorGridForPark(park.reference, park);
   }
 
   activatorStartBtn.disabled = false;
@@ -28649,11 +28669,7 @@ function finalizeCommaSeparatedParks() {
         park.unknown = false;
         if (idx === 0) activatorParkNameEl.textContent = p.name || '';
         // Set grid from first park if not already set
-        if (idx === 0 && p.latitude && p.longitude) {
-          activatorParkGrid = latLonToGridLocal(parseFloat(p.latitude), parseFloat(p.longitude));
-          const gridInput = document.getElementById('activator-grid');
-          if (gridInput) gridInput.value = activatorParkGrid;
-        }
+        if (idx === 0 && p.latitude && p.longitude) setActivatorGridForPark(park.ref, p);
         updateParkExtraBadge();
       } else {
         park.unknown = checkable;
@@ -29303,8 +29319,8 @@ if (activatorSpotBtn) {
       });
       if (result && result.success) {
         showLogToast(away
-          ? `Spotted on your calling frequency: ${ref} ${Math.round(freq)} kHz ${mode}`
-          : `Spotted on POTA: ${ref} ${Math.round(freq)} kHz ${mode}`);
+          ? `Spotted on your calling frequency: ${ref} ${FreqDots.khzMhz(freq)} ${mode}`
+          : `Spotted on POTA: ${ref} ${FreqDots.khzMhz(freq)} ${mode}`);
       } else {
         showLogToast('Self-spot failed: ' + (result?.error || 'unknown error'), { warn: true });
       }
@@ -29831,7 +29847,7 @@ function updateActivatorHomeUi() {
   if (activatorHomeChip) activatorHomeChip.classList.toggle('hidden', !away);
   if (activatorFreqInput) activatorFreqInput.classList.toggle('off-home', away);
   if (away && activatorHomeBtn) {
-    const mhz = (activatorHomeFreqHz / 1e6).toFixed(3);
+    const mhz = FreqDots.fromHz(activatorHomeFreqHz);
     const homeBand = freqToBandActivator(Math.round(activatorHomeFreqHz / 1000)) || '';
     const nowBand = freqToBandActivator(activatorFreqKhz) || '';
     // Name the band too when the excursion crossed one — that is exactly when

@@ -59,17 +59,41 @@ test('FT-710 without a key port: keyer memory 1, played with KY01; (W3MDT)', asy
   r.disconnect();
 });
 
-test('FTX-1: KM5 then KYA; a long message waits for each memory to play', async () => {
+test('FTX-1: KM5 then KY05; a long message waits for each memory to play', async () => {
   const { rig: r, writes } = rig('FTX-1 Field');
   r.setCwSpeed(60); // 200 ms per character keeps the test short
   writes.length = 0;
   const text = 'A'.repeat(50) + 'B';
   r.sendCwText(text);
-  assert.deepStrictEqual(writes.filter((w) => !/^BI/.test(w)), ['KM5' + 'A'.repeat(50) + ';', 'KYA;'], 'only the first memory now');
+  assert.deepStrictEqual(writes.filter((w) => !/^BI/.test(w)), ['KM5' + 'A'.repeat(50) + ';', 'KY05;'], 'only the first memory now');
   assert.strictEqual(r._cwKmTimers.length, 1, 'the second chunk waits');
   r.stopCwText();
   assert.strictEqual(r._cwKmTimers.length, 0, 'stop drops the waiting chunk');
   r.disconnect();
+});
+
+// #384: the FTX-1 CAT manual (2508-C p.18) plays keyer memory with KY P1 P2;
+// P1 0 = TEXT memory, P2 1-5 = the memory. There is no KYA; form, and the
+// radio played nothing. The KY that plays must name the memory KM wrote.
+for (const id of ['FTX-1 Field', 'FTX-1 Optima']) {
+  test(`${id}: KM5<text>; then KY05; (the documented form, not KYA;)`, async () => {
+    const { rig: r, writes } = rig(id);
+    r._breakIn = true;
+    r.sendCwText('TU 73');
+    assert.deepStrictEqual(writes.slice(-2), ['KM5TU 73;', 'KY05;']);
+    assert.ok(!writes.includes('KYA;'), JSON.stringify(writes));
+    r.disconnect();
+  });
+}
+
+test('every keyer-memory rig plays the memory it wrote (KY0n; names kmMemory n)', () => {
+  for (const [id, m] of Object.entries(RIG_MODELS)) {
+    const cw = m && m.cw;
+    if (!cw || cw.kyMode !== 'km' || !cw.kmPlay) continue;
+    const mm = /^KY0([1-5]);$/.exec(cw.kmPlay);
+    assert.ok(mm, `${id}: kmPlay ${cw.kmPlay} is not KY0n;`);
+    assert.strictEqual(Number(mm[1]), cw.kmMemory, `${id}: KM writes ${cw.kmMemory} but ${cw.kmPlay} plays ${mm[1]}`);
+  }
 });
 
 test('rigctld on an FTX-1 (W2XYZ): "b text" with no "T 1" before it', async () => {

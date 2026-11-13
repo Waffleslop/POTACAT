@@ -1,3 +1,5 @@
 la5nta/pat v1.0.0
 commit 2e6a8d14baf0268f4e2aa4d01784a54ca935cf52
 https://github.com/la5nta/pat/tree/v1.0.0
++ POTACAT patch: potacat-arq-timeout.patch (see README.md)
+dependency used unmodified: github.com/la5nta/wl2k-go v1.0.1

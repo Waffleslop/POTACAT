@@ -883,6 +883,10 @@
   let ft8CountdownTimer = null;
   let ft8CycleBoundary = 0;     // epoch ms of next cycle boundary
   let ft8Mode = 'FT8';
+  // The mode this tab would run: ft8Mode follows an idle-RX session (WSPR,
+  // PSK31, JTTY) for display; opening the tab hands the radio back in this.
+  let ft8OwnMode = 'FT8';
+  let ft8IdleRx = null;         // jtcat-status idleRx: the engine is the shack's idle receive
   let ft8HuntCall = '';        // callsign we're hunting from spot list
   let ft8UserScrolled = false; // true when user has scrolled up in decode log
   let ft8CqFilter = false;     // CQ-only filter
@@ -1562,8 +1566,6 @@
   const soMaxageVal = document.getElementById('so-maxage-val');
   const soDistMi = document.getElementById('so-dist-mi');
   const soDistKm = document.getElementById('so-dist-km');
-  const soThemeDark = document.getElementById('so-theme-dark');
-  const soThemeLight = document.getElementById('so-theme-light');
   // Tuning settings overlay elements
   const soXitDn = document.getElementById('so-xit-dn');
   const soXitUp = document.getElementById('so-xit-up');
@@ -1592,20 +1594,42 @@
   let tuneClick = false;
 
   // --- Theme ---
-  function applyTheme(light) {
-    document.documentElement.setAttribute('data-theme', light ? 'light' : 'dark');
-    soThemeDark.classList.toggle('active', !light);
-    soThemeLight.classList.toggle('active', light);
-    // Update mobile browser chrome color
-    var meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute('content', light ? '#e8eaed' : '#0f3460');
-    localStorage.setItem('echocat-theme', light ? 'light' : 'dark');
+  // The six ECHOCAT looks (#376, lib/app-theme.js): Light / Dark / System and
+  // one theme per mode, kept in this browser like the phone keeps its own.
+  // System follows the device's light or dark setting live.
+  const lookSysDark = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+  const lookGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  let lookState = window.AppTheme ? window.AppTheme.webState(lookGet) : null;
+  function applyLook() {
+    const AT = window.AppTheme;
+    if (!AT || !lookState) return;
+    const sysDark = !!(lookSysDark && lookSysDark.matches);
+    const r = AT.resolveAppTheme(lookState, sysDark);
+    AT.applyToDocument(document, r);
+    // Mobile browser chrome colour
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', AT.WINDOW_BG[r.ds] || '#07111b');
+    if (window.LookPicker) {
+      window.LookPicker.render(document.getElementById('so-look-picker'), {
+        state: lookState, systemDark: sysDark, scope: 'all',
+        onChange: (next) => {
+          lookState = { appearance: next.appearance, themeLight: next.themeLight, themeDark: next.themeDark };
+          try {
+            localStorage.setItem(AT.WEB_KEYS.appearance, lookState.appearance);
+            localStorage.setItem(AT.WEB_KEYS.themeLight, lookState.themeLight);
+            localStorage.setItem(AT.WEB_KEYS.themeDark, lookState.themeDark);
+          } catch (e) { /* private window: the look holds for this visit */ }
+          applyLook();
+        },
+      });
+    }
   }
-  // Apply saved theme on load
-  applyTheme(localStorage.getItem('echocat-theme') === 'light');
-
-  soThemeDark.addEventListener('click', () => applyTheme(false));
-  soThemeLight.addEventListener('click', () => applyTheme(true));
+  applyLook();
+  if (lookSysDark) {
+    const onSys = () => { if (lookState && lookState.appearance === 'system') applyLook(); };
+    if (lookSysDark.addEventListener) lookSysDark.addEventListener('change', onSys);
+    else if (lookSysDark.addListener) lookSysDark.addListener(onSys);
+  }
 
   // --- Split layout (iPad-sized screens: dock the VFO panel on a side) ---
   // Modes: 'right' (default), 'left', 'off'. Only actually engages when the
@@ -1828,7 +1852,9 @@
           // one record per log write instead of re-pushing the whole log.
           // local-cw-sidetone: this page plays its own sidetone for the CW it
           // sends, so the desktop must not mix a second copy into RX audio.
-          capabilities: ['chunked-all-qsos', 'qso-delta', 'chunked-worked-qsos', 'local-cw-sidetone'],
+          // jtcat-qso-logged: this page says which parks a JTCAT contact was
+          // logged at when some were read from the activator's spot comment.
+          capabilities: ['chunked-all-qsos', 'qso-delta', 'chunked-worked-qsos', 'local-cw-sidetone', 'jtcat-qso-logged'],
         }));
       } catch {}
       onOpen();
@@ -2307,47 +2333,17 @@
         // arrives through the next status.
         showToast('Rig preset ' + (msg.name || '') + ': ' + (msg.text || '') + (msg.why && msg.why !== 'tap' ? ' — ' + msg.why : ''), 4000);
         break;
+      // Winlink mail: every message is handled in the Mail section (mailOnMessage).
       case 'winlink-state':
-        mailState = msg;
-        mailRenderState();
-        break;
       case 'winlink-account':
-        mailAcctAnswer(msg);
-        break;
       case 'winlink-mailbox':
-        mailLists[msg.box] = msg.messages || [];
-        if (msg.box === mailBox) mailRenderList();
-        break;
       case 'winlink-session':
-        if (mailState) mailState.session = msg.session || {};
-        mailRenderSession();
-        break;
       case 'winlink-message':
-        mailShowMessage(msg);
-        break;
       case 'winlink-gateways':
-        mailGateways = msg.list || [];
-        mailGatewayNote = msg.note || '';
-        mailRenderGateways();
-        break;
       case 'winlink-attachment':
-        try {
-          var bin = atob(msg.dataBase64 || '');
-          var bytes = new Uint8Array(bin.length);
-          for (var bi = 0; bi < bin.length; bi++) bytes[bi] = bin.charCodeAt(bi);
-          var url = URL.createObjectURL(new Blob([bytes]));
-          var a = document.createElement('a'); a.href = url; a.download = msg.name || 'attachment';
-          document.body.appendChild(a); a.click(); a.remove();
-          setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
-        } catch (e) { showToast('Could not save the attachment', 3000, true); }
-        break;
       case 'winlink-result':
-        if (msg.op === 'account-check' || msg.op === 'register' || msg.op === 'set-password') { mailAcctResult(msg); break; }
-        if (!msg.ok && msg.error) showToast(msg.error, 5000, true);
-        else if (msg.ok && msg.op === 'compose') { showToast('In the Outbox. It goes out on the next Send / Receive.', 3000); mailShowList(); }
-        break;
       case 'winlink-refused':
-        showToast(msg.reason === 'guest-pass' ? 'Winlink mail belongs to the shack\'s owner — not available on a Guest Pass' : 'Not available', 4000, true);
+        mailOnMessage(msg);
         break;
       case 'rig-presets-refused':
         showToast('A Guest Pass cannot change the rig presets', 3000, true);
@@ -2898,7 +2894,11 @@
         // the FT8 tab never sent jtcat-start after an idle stop (kc8zp 11-03:
         // the Cloud FT8 view stayed stale until the phone app woke it).
         ft8Running = msg.running === true || msg.state === 'running';
+        // idleRx: the shack's idle receive (WSPR, PSK31, JTTY) owns the engine.
+        // Opening the tab takes it over (Casey 2026-11-12, #249 follow-up).
+        ft8IdleRx = ft8Running && msg.idleRx ? String(msg.idleRx) : null;
         if (ft8Running) ft8Mode = msg.mode || ft8Mode;
+        if (ft8Running && !ft8IdleRx) ft8OwnMode = ft8Mode;
         ft8ModeSelect.value = ft8Mode;
         ft8SyncStatus.textContent = 'Sync: ' + (msg.sync || '--');
         applyDigitalPanes(); // host-driven mode change (popout/phone) swaps panes too
@@ -2943,6 +2943,19 @@
         ft8StartCountdown();
         break;
 
+      case 'jtcat-qso-logged': {
+        // The shack wrote a JTCAT contact. Said here only when parks were read
+        // from the activator's own spot comment (the operator must learn of
+        // those); an ordinary contact shows no new toast, and an error toast
+        // on screen is never replaced.
+        if (!msg.parksNote) break;
+        if (logToast.classList.contains('error') && !logToast.classList.contains('hidden')) break;
+        let line = 'Logged ' + (msg.callsign || '');
+        if (msg.parksText) line += ' ' + msg.parksText;
+        line += ' (' + msg.parksNote + ')';
+        showToast(line, 6000);
+        break;
+      }
       case 'jtcat-tx-status':
         ft8Transmitting = msg.state === 'tx';
         ft8TxMsg = msg.message || ft8TxMsg;
@@ -3070,7 +3083,7 @@
           if (sstvPhoneStatus) { sstvPhoneStatus.textContent = 'Transmitting...'; sstvPhoneStatus.style.color = 'var(--accent)'; }
         } else if (msg.state === 'auto-rx') {
           if (sstvPhoneStatus) {
-            sstvPhoneStatus.textContent = 'Auto-SSTV ' + (msg.freqKhz ? (msg.freqKhz / 1000).toFixed(3) : '') + ' MHz';
+            sstvPhoneStatus.textContent = 'Auto-SSTV' + (msg.freqKhz ? ' ' + FreqDots.khzMhz(msg.freqKhz) : '');
             sstvPhoneStatus.style.color = 'var(--pota)';
           }
         } else {
@@ -3749,6 +3762,7 @@
       // an FT4 spot was hunted by an FT8 engine; LZ3AW item 15).
       const modeChanged = ft8Mode !== modeUpper;
       ft8Mode = modeUpper;
+      ft8OwnMode = modeUpper;
       ft8ModeSelect.value = ft8Mode;
       if (modeChanged) {
         updateBandFreqs();
@@ -4109,7 +4123,7 @@
       return;
     }
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'tune', freqKhz: val.toString(), mode: '' }));
+      ws.send(JSON.stringify({ type: 'tune', freqKhz: val.toString(), mode: '', pickSideband: true }));
     }
     cancelFreqEdit();
   }
@@ -4165,14 +4179,19 @@
     }
   }
 
-  function dpTune(freqKhz) {
+  // pickSideband: a band button or a typed frequency. In voice SSB the shack
+  // then picks the band's sideband, as for a spot (#445); a dial step or
+  // the arrows leave it unset and keep the mode.
+  function dpTune(freqKhz, pickSideband) {
     if (!freqKhz || isNaN(freqKhz) || freqKhz < 100 || freqKhz > 500000) return;
     if (vfoLocked) {
       showToast('VFO Locked — Unlock VFO to change frequency', 2000);
       return;
     }
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'tune', freqKhz: freqKhz.toString(), mode: '' }));
+      var tuneMsg = { type: 'tune', freqKhz: freqKhz.toString(), mode: '' };
+      if (pickSideband) tuneMsg.pickSideband = true;
+      ws.send(JSON.stringify(tuneMsg));
     }
     // Immediately update local display
     const hz = Math.round(freqKhz * 1000);
@@ -4212,7 +4231,7 @@
 
   dpGo.addEventListener('click', () => {
     const val = parseFloat(dpInput);
-    dpTune(val);
+    dpTune(val, true);
     closeDialPad();
   });
 
@@ -7033,6 +7052,8 @@
       }
     } catch { /* pre-init switch — nothing subscribed yet */ }
     try { scopeSyncSubscription(tab); } catch { /* pre-init */ }
+    // Leaving Mail: a radio moved to a gateway for a look goes back (W1).
+    try { if (activeTab === 'mail' && tab !== 'mail') mailOnLeave(); } catch { /* pre-init */ }
     // Leaving FT8: remember where it was, to come back to it (item 15).
     try {
       if (activeTab === 'ft8' && tab !== 'ft8' && currentFreqKhz > 0) {
@@ -7101,10 +7122,9 @@
       updateLogViewState();
     } else if (tab === 'ft8') {
       ft8View.classList.remove('hidden');
-      // Auto-start engine if not running
-      if (!ft8Running) {
-        ft8Send({ type: 'jtcat-start', mode: ft8Mode });
-      }
+      // Auto-start engine if not running, or take it from the shack's idle
+      // receive: an idle WSPR is nobody's session (Casey 2026-11-12).
+      if (!ft8Running || ft8IdleRx) ft8TakeEngine();
       // If coming from a spot click with a specific frequency, select the matching band
       // and skip the default band tune (the spot already tuned the radio)
       var spotFreq = opts && opts.freqKhz ? parseFloat(opts.freqKhz) : 0;
@@ -7158,7 +7178,7 @@
           var freqEl = document.getElementById('sstv-freq-phone');
           if (freqEl && freqEl.value) {
             var fOpt = freqEl.options[freqEl.selectedIndex];
-            var fMode = (fOpt && fOpt.dataset.mode) || (parseInt(freqEl.value) < 10000 ? 'LSB' : 'USB');
+            var fMode = (fOpt && fOpt.dataset.mode) || 'SSB'; // the shack picks the band's sideband
             ws.send(JSON.stringify({ type: 'tune', freqKhz: freqEl.value, mode: fMode }));
           }
         } catch (e) {}
@@ -7544,7 +7564,7 @@
         const offClass = c._offline ? ' offline' : '';
         const dupeClass = c.dupe ? ' dupe' : '';
         const time = c.timeUtc ? c.timeUtc.slice(0, 2) + ':' + c.timeUtc.slice(2, 4) : '';
-        const freq = c.freqKhz ? parseFloat(c.freqKhz).toFixed(1) : '';
+        const freq = c.freqKhz ? FreqDots.fromKhz(c.freqKhz) : '';
         const dupeTag = c.dupe ? ' <span class="dupe-tag">DUPE</span>' : '';
         return `<div class="contact-row${offClass}${dupeClass}">
           <span class="contact-nr">${c.nr || ''}</span>
@@ -7634,7 +7654,7 @@
           '<span class="pa-nr">' + (j + 1) + '</span>' +
           '<span class="pa-time">' + formatPaTime(c.timeOn) + '</span>' +
           '<span class="pa-call">' + esc(c.callsign) + '</span>' +
-          '<span class="pa-freq">' + (c.freq ? parseFloat(c.freq).toFixed(3) : '') + '</span>' +
+          '<span class="pa-freq">' + (c.freq ? FreqDots.fromMhz(c.freq) : '') + '</span>' +
           '<span class="pa-mode">' + esc(c.mode) + '</span>' +
           '<span class="pa-rst">' + esc(c.rstSent) + '/' + esc(c.rstRcvd) + '</span>' +
           '</div>';
@@ -8145,7 +8165,7 @@
     lbList.innerHTML = filtered.map(q => {
       const idx = q.idx;
       const call = esc(q.CALL || '');
-      const freqMhz = q.FREQ ? parseFloat(q.FREQ).toFixed(3) : '';
+      const freqMhz = q.FREQ ? FreqDots.fromMhz(q.FREQ) : '';
       const mode = esc(q.MODE || '');
       const ref = esc(q.SIG_INFO || '');
       const date = formatLbDate(q.QSO_DATE || '');
@@ -8687,8 +8707,8 @@
     if (!RB) return;
     RB.applyToElements(document, '.vf-band', webRigBands);
     RB.applyToElements(document, '#rc-band-filter .rc-dropdown-item', webRigBands);
-    var mailSel = document.getElementById('mail-band');
-    if (mailSel) { RB.applyToElements(mailSel, 'option', webRigBands); RB.fixSelect(mailSel); }
+    // The Mail tab's band chips are drawn from the same list (mailRenderBands).
+    if (document.getElementById('mail-band') && typeof mailRenderBands === 'function') mailRenderBands();
     var ft8Sel = document.getElementById('ft8-band-select');
     if (ft8Sel) {
       var cur = ft8Sel.value;
@@ -9146,9 +9166,23 @@
     ft8UserScrolled = false;
   });
 
+  // Start the engine in this tab's own mode. Over an idle-RX session the
+  // desktop's jtcat-start cancels the idle receive (markUserActive) first.
+  function ft8TakeEngine() {
+    if (ft8IdleRx) {
+      ft8Mode = ft8OwnMode;
+      ft8ModeSelect.value = ft8Mode;
+      ft8IdleRx = null;
+      updateBandFreqs();
+      if (typeof applyDigitalPanes === 'function') applyDigitalPanes();
+    }
+    ft8Send({ type: 'jtcat-start', mode: ft8Mode });
+  }
+
   // --- Mode select ---
   ft8ModeSelect.addEventListener('change', () => {
     ft8Mode = ft8ModeSelect.value;
+    ft8OwnMode = ft8Mode;
     updateBandFreqs();
     ft8Send({ type: 'jtcat-set-mode', mode: ft8Mode });
     ft8StartCountdown(); // restart with new cycle duration
@@ -9193,10 +9227,8 @@
     ft8DecodeLog = [];
     ft8DecodeLogEl.innerHTML = '<div class="ft8-empty">Switching to ' + band + '...</div>';
     ft8UserScrolled = false;
-    // Auto-start if not running
-    if (!ft8Running) {
-      ft8Send({ type: 'jtcat-start', mode: ft8Mode });
-    }
+    // Auto-start if not running, or take it from the shack's idle receive
+    if (!ft8Running || ft8IdleRx) ft8TakeEngine();
   });
 
   // --- Waterfall tap to set TX freq ---
@@ -12186,7 +12218,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
     if (!lmkHintDismissed() && !search && directoryLandmarks.some(function(l) { return l.id === 'wwv-10000'; })) {
       var hint = document.createElement('div');
       hint.className = 'lmk-hint';
-      hint.innerHTML = '<p><b>New radio?</b> Tune <b>WWV on 10000 kHz</b>. A tick every second means the radio, the antenna and the audio all work.</p>'
+      hint.innerHTML = '<p><b>New radio?</b> Tune <b>WWV on 10.000.00 MHz</b>. A tick every second means the radio, the antenna and the audio all work.</p>'
         + '<div class="lmk-actions"><button type="button" class="lmk-btn lmk-btn-tint" data-act="tune">Tune WWV</button>'
         + '<button type="button" class="lmk-btn lmk-btn-plain" data-act="close">Got it</button></div>';
       hint.addEventListener('click', function(ev) {
@@ -12226,7 +12258,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
           + (tuned ? ' tuned' : '') + (open ? ' open' : '') + (r.ok ? '' : ' lmk-out');
         var statusHtml = cd.label ? '<span class="dir-card-status ' + cd.status + '">' + esc(cd.label) + '</span>' : '';
         var html = '<div class="dir-card-row"><span class="dir-card-name">' + esc(lm.name) + '</span>' + statusHtml + favStar('landmark', lm.id, lm.name) + '</div>'
-          + '<div class="dir-card-detail"><span class="dir-card-freq">' + lm.khz + ' kHz</span> ' + esc(lm.mode) + ' · ' + esc(r.band) + '</div>'
+          + '<div class="dir-card-detail"><span class="dir-card-freq">' + FreqDots.khzMhz(lm.khz) + '</span> ' + esc(lm.mode) + ' · ' + esc(r.band) + '</div>'
           + '<div class="lmk-line">' + esc(lm.line) + (lm.ncdxf ? '<span class="lmk-now" data-khz="' + lm.khz + '"></span>' : '') + '</div>';
         if (open) {
           html += '<div class="lmk-detail">'
@@ -12236,7 +12268,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
             + (lm.hear ? '<div class="lmk-sec"><b>What you’ll hear</b><p>' + esc(lm.hear) + '</p></div>' : '')
             + (lm.why ? '<div class="lmk-sec"><b>Why it matters</b><p>' + esc(lm.why) + '</p></div>' : '')
             + (lm.try ? '<div class="lmk-sec lmk-try"><b>Try this</b><p>' + esc(lm.try) + '</p></div>' : '')
-            + '<div class="lmk-actions"><button type="button" class="lmk-btn lmk-btn-tint" data-act="tune">Tune ' + lm.khz + ' kHz</button>'
+            + '<div class="lmk-actions"><button type="button" class="lmk-btn lmk-btn-tint" data-act="tune">Tune ' + FreqDots.khzMhz(lm.khz) + '</button>'
             + (lm.region ? '<span class="lmk-region">' + esc(lm.region) + '</span>' : '') + '</div>'
             + '</div>';
         }
@@ -12308,7 +12340,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
       card.className = 'dir-card' + (cd.status === 'live' ? ' dir-live' : cd.status === 'soon' ? ' dir-soon' : '') + (isTunedNet ? ' tuned' : '');
       var statusHtml = cd.label ? '<span class="dir-card-status ' + cd.status + '">' + cd.label + '</span>' : '';
       card.innerHTML = '<div class="dir-card-row"><span class="dir-card-name">' + (n.name || 'Unknown') + '</span>' + statusHtml + '</div>' +
-        '<div class="dir-card-detail"><span class="dir-card-freq">' + (n.frequency || '?') + ' kHz</span> ' + (n.mode || '') + (e.band ? ' \u00b7 ' + e.band : '') +
+        '<div class="dir-card-detail"><span class="dir-card-freq">' + (FreqDots.khzMhz(n.frequency) || '?') + '</span> ' + (n.mode || '') + (e.band ? ' \u00b7 ' + e.band : '') +
         (n.days && n.days !== 'Daily' ? ' \u00b7 ' + n.days : '') + '</div>';
       (function(net, band) {
         card.addEventListener('click', function() {
@@ -12317,11 +12349,9 @@ var _paddleHoldTimer = { dit: null, dah: null };
             showToast('VFO Locked — Unlock VFO to change frequency', 2000);
             return;
           }
+          // A net listed as SSB goes as SSB: the shack resolves it to the
+          // band's sideband (lib/ssb-sideband.js; 60 m is USB).
           var mode = (net.mode || '').toUpperCase();
-          if (mode === 'SSB') {
-            var lsbBands = { '160m': 1, '80m': 1, '60m': 1, '40m': 1 };
-            mode = lsbBands[band] ? 'LSB' : 'USB';
-          }
           var freqStr = String(net.frequency);
           if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'tune', freqKhz: freqStr, mode: mode }));
@@ -12375,7 +12405,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
     var rows = directoryChannels.filter(function(c) {
       if (!search) return true;
       return [c.name, c.note, c.group, c.mode].some(function(v) { return String(v || '').toLowerCase().indexOf(search) >= 0; })
-        || String(c.khz).indexOf(search) >= 0 || (c.khz / 1000).toFixed(3).indexOf(search) >= 0;
+        || String(c.khz).indexOf(search) >= 0 || (c.khz / 1000).toFixed(3).indexOf(search) >= 0 || FreqDots.fromKhz(c.khz).indexOf(search) >= 0;
     });
     // Favorites first (starred order), then each group without them.
     var favRows = directoryChannelFavs.map(function(id) { return rows.filter(function(c) { return c.id === id; })[0]; }).filter(Boolean);
@@ -12390,7 +12420,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
       (g === '__fav' ? favRows : rows.filter(function(c) { return groupOf(c) === g; })).forEach(function(c) {
         var card = document.createElement('div');
         card.className = 'dir-card';
-        var mhz = (c.khz / 1000).toFixed(c.khz % 1 ? 5 : 4).replace(/0+$/, '').replace(/\.$/, '');
+        var mhz = FreqDots.fromKhz(c.khz);
         var off = channelOffsetText(c.offsetKhz);
         card.innerHTML = '<div class="dir-card-row"><span class="dir-card-name"></span><span class="dir-card-freq"></span>' + favStar('channel', c.id, c.name) + '</div>'
           + '<div class="dir-card-detail"></div>';
@@ -14457,7 +14487,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
     var d = img.timestamp ? new Date(img.timestamp) : null;
     var dateStr = d ? d.toLocaleDateString([], { month: 'numeric', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
     var imgHz = img.freqHz || (img.freqKhz ? img.freqKhz * 1000 : 0);
-    info.textContent = (img.mode || '') + (imgHz ? ' ' + (Math.round(imgHz / 1000) / 1000).toFixed(3) : '') + ' ' + dateStr;
+    info.textContent = (img.mode || '') + (imgHz ? ' ' + FreqDots.fromHz(Math.round(imgHz / 1000) * 1000) : '') + ' ' + dateStr;
     div.appendChild(info);
     // Reply button — overlays the thumb, taps set this image as PiP reply inset
     var replyBtn = document.createElement('button');
@@ -14551,7 +14581,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
     var info = document.createElement('div');
     info.style.cssText = 'position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.6);font-size:10px;color:#ccc;padding:1px 4px;text-align:center;';
     var now = new Date();
-    info.textContent = 'NEW ' + (msg.mode || '') + (msg.freqHz ? ' ' + (Math.round(msg.freqHz / 1000) / 1000).toFixed(3) : '') + ' ' + now.toLocaleDateString([], {month:'numeric',day:'numeric'}) + ' ' + now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    info.textContent = 'NEW ' + (msg.mode || '') + (msg.freqHz ? ' ' + FreqDots.fromHz(Math.round(msg.freqHz / 1000) * 1000) : '') + ' ' + now.toLocaleDateString([], {month:'numeric',day:'numeric'}) + ' ' + now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
     div.appendChild(info);
     // Reply button on live decode — most valuable placement since this is the
     // thumbnail users reach for first right after receiving
@@ -14704,7 +14734,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
               const d = tunedDupe;
               const parts = [];
               if (d.timeUtc) parts.push(d.timeUtc.slice(0, 2) + ':' + d.timeUtc.slice(2, 4) + ' UTC');
-              if (d.freqKhz) parts.push((parseFloat(d.freqKhz) / 1000).toFixed(3) + ' MHz');
+              if (d.freqKhz) parts.push(FreqDots.khzMhz(d.freqKhz));
               if (d.mode) parts.push(d.mode);
               vfOpDupe.textContent = 'DUPE';
               vfOpDupe.title = parts.length ? 'Already worked: ' + parts.join(' · ') : 'Already worked this activation';
@@ -14893,7 +14923,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
     fullview.querySelectorAll('.vf-band').forEach((btn) => {
       btn.addEventListener('click', () => {
         const khz = parseInt(btn.dataset.khz, 10);
-        if (khz > 0) dpTune(khz);
+        if (khz > 0) dpTune(khz, true);
       });
     });
 
@@ -15203,8 +15233,8 @@ var _paddleHoldTimer = { dit: null, dah: null };
       vfoProfiles.forEach((p, i) => {
         const item = document.createElement('div');
         item.className = 'vf-profile-item';
-        const freqMhz = p.freqKhz ? (p.freqKhz / 1000).toFixed(3) : '?';
-        const detail = freqMhz + ' MHz ' + (p.mode || '') + (p.filterWidth ? ' BW:' + p.filterWidth : '');
+        const freqMhz = p.freqKhz ? FreqDots.khzMhz(p.freqKhz) : '? MHz';
+        const detail = freqMhz + ' ' + (p.mode || '') + (p.filterWidth ? ' BW:' + p.filterWidth : '');
         const nameSpan = document.createElement('span');
         nameSpan.className = 'vf-profile-item-name';
         nameSpan.textContent = p.name || '(unnamed)';
@@ -15515,38 +15545,176 @@ var _paddleHoldTimer = { dit: null, dah: null };
   // ── Winlink mail (the shack's Pat; owner only) ────────────────────────
   // The shack holds the mailbox and runs the session; this tab composes,
   // reads and presses Send / Receive. State arrives as winlink-state.
+  //
+  // Layout (W0, 2026-11-12): #mail-view carries data-screen = list | read |
+  // compose | connect. On a phone one screen shows at a time; once the Mail
+  // view is 700 px wide the list stays on the left and the open screen sits
+  // on the right (remote.css, a container query). Every word from the shack
+  // is set with textContent; rows and cards are built with createElement.
+  var MailView = window.WinlinkMailView;
   var mailState = null;
   var mailLists = { in: [], out: [], sent: [], archive: [] };
   var mailBox = 'in';
   var mailGateways = [];
-  var mailGatewayNote = '';
+  var mailPick = -1;          // index into mailGateways of the gateway picked
+  var mailMode = '';          // the "Send via" mode chosen on this page
+  var mailBand = '';          // '' = all bands
   var mailNoticeThen = null;
+  var mailOpen = false;       // the Mail tab is on screen
+  var mailScreen = 'list';
+  var mailReadMid = '';       // the message open in the reader
   function mailSend(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
   function mailEl(id) { return document.getElementById(id); }
+  function mailShow(id, on) { var el = mailEl(id); if (el) el.classList.toggle('hidden', !on); }
+  function mailMake(tag, cls, text) {
+    var el = document.createElement(tag);
+    if (cls) el.className = cls;
+    if (text != null) el.textContent = text;
+    return el;
+  }
+
+  // Which screen is open. 'list' on a phone is the list alone; on a wide
+  // view the right-hand pane then shows "Pick a message to read it."
+  function mailGo(screen) {
+    mailScreen = screen;
+    var view = mailEl('mail-view');
+    if (view) view.setAttribute('data-screen', screen);
+    mailShow('mail-empty', screen === 'list');
+    mailShow('mail-reader', screen === 'read');
+    mailShow('mail-compose', screen === 'compose');
+    mailShow('mail-connect-screen', screen === 'connect');
+    if (screen !== 'read') mailReadMid = '';
+    if (screen === 'connect') mailOpenConnect();
+    mailRenderList();
+  }
+
+  // Every S2C winlink-* message lands here (the page's message switch calls it).
+  function mailOnMessage(msg) {
+    switch (msg.type) {
+      case 'winlink-state':
+        mailState = msg;
+        mailSessionSeen(mailState.session);
+        mailRenderState();
+        // A pick made before the link dropped, and the tab left meanwhile: put the radio back now.
+        if (!mailOpen) mailQsyRestore();
+        break;
+      case 'winlink-account':
+        mailAcctAnswer(msg);
+        break;
+      case 'winlink-mailbox':
+        mailLists[msg.box] = msg.messages || [];
+        if (msg.box === mailBox) mailRenderList();
+        break;
+      case 'winlink-session':
+        if (mailState) mailState.session = msg.session || {};
+        mailSessionSeen(msg.session);
+        mailRenderSession();
+        mailRenderLast();
+        break;
+      case 'winlink-message':
+        mailShowMessage(msg);
+        break;
+      case 'winlink-gateways':
+        mailGatewaysArrived(msg);
+        break;
+      case 'winlink-attachment':
+        try {
+          var bin = atob(msg.dataBase64 || '');
+          var bytes = new Uint8Array(bin.length);
+          for (var bi = 0; bi < bin.length; bi++) bytes[bi] = bin.charCodeAt(bi);
+          var url = URL.createObjectURL(new Blob([bytes]));
+          var a = document.createElement('a'); a.href = url; a.download = msg.name || 'attachment';
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+        } catch (e) { showToast('Could not save the attachment', 3000, true); }
+        break;
+      case 'winlink-result':
+        if (msg.op === 'account-check' || msg.op === 'register' || msg.op === 'set-password') { mailAcctResult(msg); break; }
+        if (msg.op === 'gateways') { if (!msg.ok) mailGatewaysFailed(msg); break; }
+        // The shack tuned to the picked gateway: this page now owes it a restore.
+        if (msg.op === 'qsy' && msg.ok) { mailQsyMoved = true; mailRenderBar(); }
+        if (!msg.ok && msg.error) showToast(msg.error, 5000, true);
+        else if (msg.ok && msg.op === 'compose') { showToast('In the Outbox. It goes out on the next Send / Receive.', 3000); mailShowList(); }
+        break;
+      case 'winlink-refused':
+        showToast(msg.reason === 'guest-pass' ? 'Winlink mail belongs to the shack\'s owner — not available on a Guest Pass' : 'Not available', 4000, true);
+        break;
+      default:
+    }
+  }
+
+  // ── W1: the radio goes back after a look at a gateway ────────────────
+  // Picking a gateway tunes the shack's radio there (C2S winlink-qsy). The
+  // desktop Mail window puts the dial back when it closes; this page does the
+  // same when the operator leaves the Mail tab, closes the page, or goes back
+  // to the internet without connecting (C2S winlink-qsy-restore). Never while
+  // a session runs: the radio is the session's, and the shack puts it back
+  // itself when the session ends (lib/winlink-return.js).
+  var mailQsyMoved = false;   // the shack answered a winlink-qsy from this page with ok
+  function mailSessionSeen(ss) {
+    if (MailView.sessionActive(ss)) mailQsyMoved = false; // the session carries the return now
+  }
+  function mailQsyRestore() {
+    var act = MailView.restoreOnLeave({ moved: mailQsyMoved, session: mailState && mailState.session });
+    if (act === 'none') return;
+    if (act === 'send') {
+      // No link right now: keep the debt; it is paid when the shack is back (winlink-state).
+      if (!(ws && ws.readyState === WebSocket.OPEN)) return;
+      mailSend({ type: 'winlink-qsy-restore' });
+    }
+    mailQsyMoved = false;
+    mailRenderBar();
+  }
+  function mailOnLeave() {
+    mailOpen = false;
+    mailQsyRestore();
+  }
+  window.addEventListener('pagehide', mailQsyRestore);
+  window.addEventListener('beforeunload', mailQsyRestore);
+
   // No Winlink password on the shack yet: set the account up from here.
   // winlink.org has no web sign-up; the shack's Pat creates the account.
   var mailAcct = { asked: false, exists: null };
+  function mailAcctForm(on) {
+    mailShow('mail-acct-pw', on);
+    mailShow('mail-acct-go', on);
+    mailShow('mail-acct-email', on && mailAcct.exists === false);
+    var lab = document.querySelector ? document.querySelector('label[for="mail-acct-pw"]') : null;
+    if (lab) lab.classList.toggle('hidden', !on);
+    mailShow('mail-acct-email-label', on && mailAcct.exists === false);
+  }
+  function mailAcctCheck() {
+    mailAcct.asked = true;
+    mailEl('mail-acct-text').textContent = MailView.CHECKING_ACCOUNT;
+    mailShow('mail-acct-retry', false);
+    mailAcctForm(false);
+    mailSend({ type: 'winlink-account-check' });
+  }
   function mailAcctRender(s) {
     var card = mailEl('mail-acct');
     if (!card) return;
     var need = !!(s.enabled && s.hasPassword === false && (s.patReady || s.patStarted === false));
     card.classList.toggle('hidden', !need);
-    card.style.display = need ? 'flex' : 'none';
     if (!need) { mailAcct.asked = false; return; }
-    if (!mailAcct.asked) { mailAcct.asked = true; mailSend({ type: 'winlink-account-check' }); }
+    if (!mailAcct.asked) mailAcctCheck();
   }
   function mailAcctAnswer(msg) {
     mailAcct.exists = !!msg.exists;
     mailEl('mail-acct-text').textContent = msg.exists
       ? msg.callsign + ' already has a Winlink account. Enter its password.'
       : msg.callsign + ' has no Winlink account yet. Create one here; winlink.org does not sign up new users on its website.';
-    mailEl('mail-acct-email').style.display = msg.exists ? 'none' : '';
+    mailShow('mail-acct-retry', false);
+    mailAcctForm(true);
     mailEl('mail-acct-go').textContent = msg.exists ? 'Save password' : 'Create my Winlink account';
   }
   function mailAcctResult(msg) {
     if (msg.op === 'account-check') {
-      mailEl('mail-acct-text').textContent = 'Could not reach Winlink to check: ' + (msg.error || 'no answer') + '. Close and reopen Mail to try again.';
-      mailAcct.asked = false;
+      // Winlink could not be reached: say so and offer Try again (W4), as the desktop card does.
+      var f = MailView.accountCheckFailed(msg.error);
+      mailEl('mail-acct-text').textContent = f.text;
+      mailEl('mail-acct-retry').textContent = f.button;
+      mailShow('mail-acct-retry', true);
+      mailAcctForm(false);
       return;
     }
     if (msg.ok) { mailEl('mail-acct-pw').value = ''; showToast(mailAcct.exists ? 'Saved. Try Send / Receive over the internet.' : 'Account created. Send / Receive over the internet is your first login.', 4000); }
@@ -15573,108 +15741,324 @@ var _paddleHoldTimer = { dit: null, dah: null };
 
   function mailRenderState() {
     var s = mailState || {};
-    mailAcctRender(s);
+    // The tab shows for the shack's owner whether Winlink is on or off: off
+    // says where to turn it on (W4). winlink-state is never sent to a Guest
+    // Pass (lib/remote-server.js _sendToOwners), so a guest never gets the tab.
     var btn = mailEl('mail-tab-btn');
-    if (btn) btn.classList.toggle('hidden', !s.enabled);
+    if (btn) btn.classList.toggle('hidden', !mailState);
+    var view = mailEl('mail-view');
+    if (view) view.classList.toggle('mail-is-off', !s.enabled);
+    var off = mailEl('mail-off');
+    if (off) { off.textContent = s.enabled ? '' : MailView.OFF_TEXT; off.classList.toggle('hidden', !!s.enabled); }
+    mailAcctRender(s);
     var badge = mailEl('tab-mail-badge');
     if (badge) { badge.textContent = String(s.unread || 0); badge.classList.toggle('hidden', !s.unread); }
-    var sel = mailEl('mail-mode');
-    if (sel) {
-      var cur = sel.value || s.mode || 'telnet';
-      sel.innerHTML = (s.modes || []).map(function (m) {
-        return '<option value="' + esc(m.id) + '"' + (m.available ? '' : ' disabled') + '>' + esc(m.label) + (m.available ? '' : ' (unavailable)') + '</option>';
-      }).join('');
-      var ok = (s.modes || []).some(function (m) { return m.id === cur && m.available; });
-      sel.value = ok ? cur : 'telnet';
-      mailEl('mail-radio').classList.toggle('hidden', sel.value === 'telnet');
-    }
+    var sub = mailEl('mail-head-sub');
+    if (sub) sub.textContent = (s.mycall ? s.mycall + ' · ' : '') + 'Winlink';
+    mailRenderFolders();
+    mailRenderLast();
+    mailRenderModes();
     mailRenderSession();
   }
+
+  // "Send via": one segment per mode the shack offers now. A mode it cannot
+  // offer is not a segment; the line under the control says why (W4).
+  function mailCurrentMode() {
+    var modes = (mailState && mailState.modes) || [];
+    var ok = function (id) { return modes.some(function (m) { return m.id === id && m.available; }); };
+    if (mailMode && ok(mailMode)) return mailMode;
+    var s = mailState || {};
+    return s.mode && ok(s.mode) ? s.mode : 'telnet';
+  }
+  var mailModesDrawn = '';
+  function mailRenderModes() {
+    var box = mailEl('mail-mode');
+    if (!box) return;
+    var modes = ((mailState && mailState.modes) || []).filter(function (m) { return m.available; });
+    if (!modes.length) modes = [{ id: 'telnet', label: 'Internet (telnet)', available: true }];
+    var cur = mailCurrentMode();
+    mailMode = cur;
+    var sig = modes.map(function (m) { return m.id; }).join(',') + '|' + cur;
+    if (sig !== mailModesDrawn) {
+      mailModesDrawn = sig;
+      box.textContent = '';
+      box.className = 'mail-seg mail-seg-' + Math.min(modes.length, 3);
+      modes.forEach(function (m) {
+        var b = mailMake('button', 'mail-seg-btn', MailView.MODE_WORDS[m.id] || m.label);
+        b.type = 'button';
+        b.setAttribute('data-mode', m.id);
+        b.setAttribute('aria-pressed', m.id === cur ? 'true' : 'false');
+        b.setAttribute('title', m.label);
+        b.onclick = function () { mailChooseMode(m.id); };
+        box.appendChild(b);
+      });
+    }
+    // Why a mode is not offered, in the shack's own words (W4).
+    var note = mailEl('mail-mode-note');
+    if (note) {
+      var why = MailView.modeReasons(mailState && mailState.modes);
+      note.textContent = '';
+      why.forEach(function (line) { note.appendChild(mailMake('div', '', line)); });
+      note.classList.toggle('hidden', !why.length);
+    }
+    // A mode that runs with a caveat (no CAT control: the operator sets the dial).
+    var cav = mailEl('mail-mode-caveat');
+    var curMode = ((mailState && mailState.modes) || []).filter(function (m) { return m.id === cur; })[0];
+    if (cav) { cav.textContent = (curMode && curMode.note) || ''; cav.classList.toggle('hidden', !(curMode && curMode.note)); }
+    mailShow('mail-radio', cur !== 'telnet');
+    mailRenderBands();
+    mailRenderBar();
+  }
+  function mailChooseMode(id) {
+    if (id === mailMode) return;
+    mailMode = id;
+    mailSend({ type: 'winlink-set-mode', mode: id });
+    mailGateways = [];
+    mailPick = -1;
+    mailBand = '';
+    // Back to the internet without connecting: the gateway picker is closed, the radio goes back (W1).
+    if (id === 'telnet') mailQsyRestore();
+    mailRenderModes();
+    mailLoadGateways();
+  }
+
+  // Band chips: the bands this mode uses that the shack's rig is set up for
+  // (S2C rig-bands), then All.
+  function mailRenderBands() {
+    var box = mailEl('mail-band');
+    if (!box) return;
+    var RB = window.RigBands;
+    var rig = typeof webRigBands !== 'undefined' ? webRigBands : null;
+    var bands = MailView.bandsFor(mailCurrentMode()).filter(function (b) { return !RB || RB.allowed(rig, b); });
+    if (mailBand && bands.indexOf(mailBand) < 0) mailBand = '';
+    box.textContent = '';
+    bands.concat(['']).forEach(function (b) {
+      var c = mailMake('button', 'mail-chip', b || 'All');
+      c.type = 'button';
+      c.setAttribute('data-band', b);
+      c.setAttribute('aria-pressed', b === mailBand ? 'true' : 'false');
+      c.onclick = function () {
+        if (mailBand === b) return;
+        mailBand = b;
+        mailRenderBands();
+        mailLoadGateways();
+      };
+      box.appendChild(c);
+    });
+  }
+
+  // The last session, or the one running now, as a card at the top of the inbox.
+  function mailRenderLast() {
+    var el = mailEl('mail-last');
+    if (!el) return;
+    var c = MailView.lastCard(mailState);
+    el.classList.toggle('hidden', !c);
+    if (!c) return;
+    el.className = 'mail-card mail-last mail-tone-' + c.tone;
+    mailEl('mail-last-label').textContent = c.label;
+    mailEl('mail-last-text').textContent = c.text;
+  }
+  function mailRenderFolders() {
+    var box = mailEl('mail-folders');
+    if (!box) return;
+    Array.prototype.forEach.call(box.querySelectorAll('[data-box]'), function (b) {
+      var id = b.getAttribute('data-box');
+      b.textContent = MailView.folderLabel(id, mailState);
+      b.setAttribute('aria-pressed', id === mailBox ? 'true' : 'false');
+    });
+  }
+
   function mailActive(ss) { return ['starting', 'connecting', 'connected', 'disconnecting'].indexOf(ss.state) >= 0; }
+  var mailPromptDrawn = '';
   function mailRenderSession() {
     var s = mailState || {};
     var ss = s.session || {};
     var el = mailEl('mail-session');
     if (!el) return;
-    if (!s.patReady) { el.textContent = s.patError ? 'Shack: ' + s.patError : 'The shack is starting Pat…'; }
+    if (!s.patReady) { el.textContent = s.patError ? 'Shack: ' + s.patError : 'The shack is starting Pat…'; el.className = 'mail-card mail-session'; }
     else {
-      var t = ss.state === 'error' ? (ss.error || 'Session failed') : (ss.text || '');
+      // How a session ended is on the card (mailRenderEndCard); the line says
+      // it only once the card has been put away.
+      var carded = !!mailEndCardShown();
+      var t = carded ? '' : ss.state === 'error' ? (ss.error || 'The session did not finish.') : (ss.text || '');
       if (mailActive(ss) && ss.subject) t = (ss.direction === 'receiving' ? 'Receiving ' : 'Sending ') + '"' + ss.subject + '" ' + (ss.pct || 0) + '%';
       if (mailActive(ss) && ss.remainingSec != null) t += ' · ' + Math.floor(ss.remainingSec / 60) + ' min left';
       if (mailActive(ss) && ss.mode !== 'telnet') t = (ss.ptt ? 'TX · ' : 'RX · ') + t;
-      var words = { starting: 'Starting', connecting: 'Connecting', connected: 'Connected', disconnecting: 'Stopping', done: '', error: 'Failed: ' };
-      el.textContent = (words[ss.state] ? words[ss.state] + (ss.state === 'error' ? '' : ' · ') : '') + t;
-      el.style.color = ss.state === 'error' ? '#e94560' : ss.state === 'done' ? '#4ecca3' : '';
-      el.style.fontWeight = (ss.state === 'done' || ss.state === 'error') ? '700' : '';
+      // How a session ended is one sentence from the shack (session.error,
+      // lib/winlink-outcome.js): it says what happened and what to do, so
+      // nothing is put in front of it. "Failed: connect: HTTP 500" is gone (#425).
+      var words = { starting: 'Starting', connecting: 'Connecting', connected: 'Connected', disconnecting: 'Stopping', done: '', error: '' };
+      el.textContent = (words[ss.state] ? words[ss.state] + ' · ' : '') + t;
+      el.className = 'mail-card mail-session' + (mailActive(ss) ? ' mail-tone-run' : ss.state === 'done' ? ' mail-tone-ok' : ss.state === 'error' ? ' mail-tone-warn' : '');
     }
-    mailEl('mail-connect').classList.toggle('hidden', mailActive(ss));
-    mailEl('mail-abort').classList.toggle('hidden', !mailActive(ss));
+    el.classList.toggle('hidden', !el.textContent);
+    mailRenderEndCard();
+    mailRenderBar();
     var pr = mailEl('mail-prompt');
     var p = ss.prompt;
     // "Keep waiting" is remembered per prompt (#296): the session arrives twice a second.
     pr.classList.toggle('hidden', !p || (p.kind === 'busy-channel' && p.id === mailKeptWaitingFor));
-    if (p) {
-      var busy = p.kind === 'busy-channel';
-      var mmss = function (s) { return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
-      var busyText = 'The frequency is busy.' + (p.limitSec && p.waitedSec != null ? ' Waited ' + mmss(Math.min(p.waitedSec, p.limitSec)) + ' of ' + mmss(p.limitSec) + '; the call starts by itself when it clears and is dropped at ' + mmss(p.limitSec) + '.' : '') + ' Call anyway only if you have listened and it is clear.';
-      pr.innerHTML = '<span style="flex:1">' + esc(busy ? busyText : (p.message || 'Decision needed')) + '</span>'
-        + '<button type="button" id="mail-p-yes">' + (busy ? 'Keep waiting' : 'Accept') + '</button>'
-        + (busy ? '<button type="button" id="mail-p-go">Call anyway</button>' : '')
-        + '<button type="button" id="mail-p-no">' + (busy ? 'Give up' : 'Decline') + '</button>';
-      if (busy) mailEl('mail-p-go').onclick = function () { mailSend({ type: 'winlink-prompt', id: p.id, value: 'continue' }); };
-      mailEl('mail-p-yes').onclick = function () { if (busy) { mailKeptWaitingFor = p.id; pr.classList.add('hidden'); } else mailSend({ type: 'winlink-prompt', id: p.id, value: 'accept' }); };
-      mailEl('mail-p-no').onclick = function () { mailSend({ type: 'winlink-prompt', id: p.id, value: busy ? 'abort' : 'decline' }); };
-    }
+    if (!p) { mailPromptDrawn = ''; return; }
+    // A prompt needs the operator: bring Send / Receive up unless they are writing.
+    if (mailOpen && mailScreen === 'list') mailGo('connect');
+    var busy = p.kind === 'busy-channel';
+    var mmss = function (s) { return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+    var busyText = 'The frequency is busy.' + (p.limitSec && p.waitedSec != null ? ' Waited ' + mmss(Math.min(p.waitedSec, p.limitSec)) + ' of ' + mmss(p.limitSec) + '; the call starts by itself when it clears and is dropped at ' + mmss(p.limitSec) + '.' : '') + ' Call anyway only if you have listened and it is clear.';
+    var text = busy ? busyText : (p.message || 'Decision needed');
+    var sig = p.id + '|' + text;
+    if (sig === mailPromptDrawn) return;   // the same words: keep the buttons under the finger
+    var hadButtons = mailPromptDrawn && mailPromptDrawn.split('|')[0] === String(p.id);
+    mailPromptDrawn = sig;
+    if (hadButtons && pr.firstChild) { pr.firstChild.textContent = text; return; }
+    pr.textContent = '';
+    pr.appendChild(mailMake('div', 'mail-prompt-text', text));
+    var row = mailMake('div', 'mail-prompt-actions');
+    var addBtn = function (id, word, cls) { var b = mailMake('button', 'mail-btn ' + (cls || ''), word); b.type = 'button'; b.id = id; row.appendChild(b); return b; };
+    addBtn('mail-p-yes', busy ? 'Keep waiting' : 'Accept', 'mail-btn-main');
+    if (busy) addBtn('mail-p-go', 'Call anyway');
+    addBtn('mail-p-no', busy ? 'Give up' : 'Decline', busy ? 'mail-btn-danger' : '');
+    pr.appendChild(row);
+    if (busy) mailEl('mail-p-go').onclick = function () { mailSend({ type: 'winlink-prompt', id: p.id, value: 'continue' }); };
+    mailEl('mail-p-yes').onclick = function () { if (busy) { mailKeptWaitingFor = p.id; pr.classList.add('hidden'); } else mailSend({ type: 'winlink-prompt', id: p.id, value: 'accept' }); };
+    mailEl('mail-p-no').onclick = function () { mailSend({ type: 'winlink-prompt', id: p.id, value: busy ? 'abort' : 'decline' }); };
   }
   var mailKeptWaitingFor = null; // the busy-channel prompt the operator chose to keep waiting on (#296)
-  function mailShowList() {
-    mailEl('mail-list').classList.remove('hidden');
-    mailEl('mail-reader').classList.add('hidden');
-    mailEl('mail-compose').classList.add('hidden');
-    mailRenderList();
+
+  // ── W2: how the last session ended, as a card ─────────────────────────
+  // "Mail exchanged with KY4RY" after a good radio session; the not-finished
+  // card (the shack's label and sentences, Try again, OK) after one that did
+  // not finish. Every word but the buttons is the shack's (session.outcome,
+  // lib/winlink-outcome.js) and is set with textContent. MailView.endCard()
+  // reads only the fields it knows, so new fields on session.outcome are ignored.
+  var mailCardDismissed = '';
+  var mailCardDrawn = '';
+  function mailEndCardShown() {
+    var card = MailView.endCard((mailState && mailState.session) || {}, { fmtDial: FreqDots.khzMhz });
+    return card && card.key !== mailCardDismissed ? card : null;
   }
+  function mailRenderEndCard() {
+    var box = mailEl('mail-end-card');
+    if (!box) return;
+    var card = mailEndCardShown();
+    if (!card) { box.classList.add('hidden'); box.textContent = ''; mailCardDrawn = ''; return; }
+    // The session arrives twice a second: redraw only when the words change,
+    // so a button is never replaced under a finger.
+    var sig = [card.key, card.label, card.title].concat(card.lines).join('\n');
+    if (sig === mailCardDrawn) return;
+    mailCardDrawn = sig;
+    box.textContent = '';
+    box.className = 'mail-end-card mail-end-' + card.kind;
+    var add = function (tag, cls, text) {
+      var el = document.createElement(tag);
+      el.className = cls;
+      el.textContent = text;
+      box.appendChild(el);
+      return el;
+    };
+    add('div', 'mail-end-label', card.label);
+    add('div', 'mail-end-title', card.title);
+    card.lines.forEach(function (line) { add('div', 'mail-end-line', line); });
+    // AUTOMATIC RETRY (follow-up): the countdown line ("Trying KY4RY again in
+    // 14 s") and its Cancel button go HERE, between the sentences and the
+    // buttons, once the shack sends the retry fields on session.outcome. Add
+    // them to MailView.endCard() first; this function only draws its result.
+    // The layout keeps a block for it: .mail-end-retry-box in remote.css.
+    var actions = add('div', 'mail-end-actions', '');
+    var dismiss = function () {
+      mailCardDismissed = card.key;
+      mailRenderSession();
+    };
+    if (card.retry) {
+      var again = document.createElement('button');
+      again.type = 'button';
+      again.id = 'mail-end-retry';
+      again.className = 'mail-btn mail-btn-main';
+      again.textContent = MailView.TRY_AGAIN;
+      // The same gateway, dial, mode and url the session used.
+      again.onclick = function () {
+        dismiss();
+        mailRequireNotice(function () { mailSend(MailView.retryMessage(card)); });
+      };
+      actions.appendChild(again);
+    }
+    var ok = document.createElement('button');
+    ok.type = 'button';
+    ok.id = 'mail-end-ok';
+    ok.className = 'mail-btn';
+    ok.textContent = card.ok;
+    ok.onclick = dismiss;
+    actions.appendChild(ok);
+  }
+
+  // ── the list ──────────────────────────────────────────────────────────
+  function mailShowList() { mailGo('list'); }
   function mailRenderList() {
     var rows = mailLists[mailBox] || [];
     var el = mailEl('mail-list');
     if (!el) return;
-    if (!rows.length) { el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-dim);font-size:13px;">Nothing here.</div>'; return; }
-    el.innerHTML = rows.map(function (m) {
+    el.textContent = '';
+    rows.forEach(function (m) {
       var who = mailBox === 'in' ? m.from : (m.to || []).join(', ');
-      return '<div class="mail-row" data-mid="' + esc(m.mid) + '" style="padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer;">'
-        + '<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-dim);"><span>' + esc(who) + '</span><span>' + esc(new Date(m.date).toLocaleDateString()) + '</span></div>'
-        + '<div style="font-size:14px;' + (m.read ? '' : 'font-weight:700;') + '">' + (m.attachments && m.attachments.length ? '[' + m.attachments.length + ' att] ' : '') + esc(m.subject || '(no subject)') + '</div></div>';
-    }).join('');
+      var b = mailMake('button', 'mail-row' + (m.read ? '' : ' mail-unread'));
+      b.type = 'button';
+      b.setAttribute('data-mid', m.mid);
+      if (mailScreen === 'read' && m.mid === mailReadMid) b.setAttribute('aria-current', 'true');
+      b.appendChild(mailMake('span', 'mail-dot'));
+      var mid = mailMake('span', 'mail-row-main');
+      mid.appendChild(mailMake('span', 'mail-row-who', who || '(no address)'));
+      var n = (m.attachments && m.attachments.length) || 0;
+      mid.appendChild(mailMake('span', 'mail-row-line', (m.subject || '(no subject)') + (n ? ' · ' + n + (n === 1 ? ' attachment' : ' attachments') : '')));
+      b.appendChild(mid);
+      b.appendChild(mailMake('span', 'mail-row-time', MailView.shortTime(m.date)));
+      b.onclick = function () { mailSend({ type: 'winlink-read', box: mailBox, mid: m.mid }); };
+      el.appendChild(b);
+    });
+    if (!rows.length) el.appendChild(mailMake('div', 'mail-list-empty', 'Nothing here.'));
+    if (mailBox === 'in') el.appendChild(mailMake('div', 'mail-list-empty', 'New mail arrives when you press Send / Receive.'));
   }
+
+  // ── reading ───────────────────────────────────────────────────────────
+  var mailDelArmed = null;
   function mailShowMessage(msg) {
     var m = msg.message || {};
-    var r = mailEl('mail-reader');
-    mailEl('mail-list').classList.add('hidden');
-    mailEl('mail-compose').classList.add('hidden');
-    r.classList.remove('hidden');
-    r.innerHTML = '<div style="display:flex;gap:6px;margin-bottom:8px;"><button type="button" id="mail-back">Back</button>'
-      + (msg.box === 'in' ? '<button type="button" id="mail-reply">Reply</button>' : '')
-      + '<span style="flex:1"></span><button type="button" id="mail-del" style="color:#e94560;">Delete</button></div>'
-      + '<div style="font-size:12px;color:var(--text-dim);line-height:1.6;"><b style="color:var(--text)">' + esc(m.subject || '') + '</b><br>From ' + esc(m.from) + '<br>To ' + esc((m.to || []).join(', ')) + '</div>'
-      + '<div style="white-space:pre-wrap;word-break:break-word;font-family:monospace;font-size:13px;margin-top:8px;">' + esc(m.body || '') + '</div>'
-      + (m.attachments || []).map(function (a) { return '<button type="button" class="mail-att" data-name="' + esc(a.name) + '" style="margin:6px 6px 0 0;">Save ' + esc(a.name) + '</button>'; }).join('');
-    mailEl('mail-back').onclick = mailShowList;
+    mailReadMid = msg.mid;
+    mailEl('mail-read-subject').textContent = m.subject || '(no subject)';
+    // The time the way the list says it: "1431z" today, else "Nov 10".
+    mailEl('mail-read-meta').textContent = ['From ' + (m.from || ''), 'to ' + (m.to || []).join(', '), m.date ? MailView.shortTime(m.date) : ''].filter(Boolean).join(' · ');
+    mailEl('mail-read-body').textContent = m.body || '';
+    var atts = mailEl('mail-read-atts');
+    atts.textContent = '';
+    (m.attachments || []).forEach(function (a) {
+      var card = mailMake('div', 'mail-card mail-att');
+      var t = mailMake('div', 'mail-att-text');
+      t.appendChild(mailMake('div', 'mail-att-name', a.name + (a.size ? ' · ' + Math.max(1, Math.round(a.size / 1024)) + ' kB' : '')));
+      t.appendChild(mailMake('div', 'mail-muted', 'Attachment'));
+      card.appendChild(t);
+      var save = mailMake('button', 'mail-btn mail-btn-fit', 'Save');
+      save.type = 'button';
+      save.setAttribute('aria-label', 'Save ' + a.name);
+      save.onclick = function () { mailSend({ type: 'winlink-attachment-get', box: msg.box, mid: msg.mid, name: a.name }); };
+      card.appendChild(save);
+      atts.appendChild(card);
+    });
     var rp = mailEl('mail-reply');
-    if (rp) rp.onclick = function () { mailCompose(m.from, /^re:/i.test(m.subject) ? m.subject : 'Re: ' + m.subject); };
-    var delArmed = null;
-    mailEl('mail-del').onclick = function () {
-      var b = mailEl('mail-del');
-      if (!delArmed) {
-        b.textContent = 'Delete this message?';
-        delArmed = setTimeout(function () { delArmed = null; b.textContent = 'Delete'; }, 5000);
+    rp.classList.toggle('hidden', msg.box !== 'in');
+    rp.onclick = function () { mailCompose(m.from, /^re:/i.test(m.subject) ? m.subject : 'Re: ' + m.subject); };
+    var del = mailEl('mail-del');
+    if (mailDelArmed) { clearTimeout(mailDelArmed); mailDelArmed = null; }
+    del.textContent = 'Delete';
+    del.onclick = function () {
+      if (!mailDelArmed) {
+        del.textContent = 'Delete this message?';
+        mailDelArmed = setTimeout(function () { mailDelArmed = null; del.textContent = 'Delete'; }, 5000);
         return;
       }
-      clearTimeout(delArmed); delArmed = null;
+      clearTimeout(mailDelArmed); mailDelArmed = null;
       mailSend({ type: 'winlink-delete', box: msg.box, mid: msg.mid }); mailShowList();
     };
-    Array.prototype.forEach.call(r.querySelectorAll('.mail-att'), function (b) {
-      b.onclick = function () { mailSend({ type: 'winlink-attachment-get', box: msg.box, mid: msg.mid, name: b.getAttribute('data-name') }); };
-    });
+    mailGo('read');
   }
+
   function mailRequireNotice(then) {
     if (mailState && mailState.noticeAccepted) { then(); return; }
     mailNoticeThen = then;
@@ -15683,79 +16067,191 @@ var _paddleHoldTimer = { dit: null, dah: null };
   }
   function mailCompose(to, subj) {
     mailRequireNotice(function () {
-      mailEl('mail-list').classList.add('hidden');
-      mailEl('mail-reader').classList.add('hidden');
-      mailEl('mail-compose').classList.remove('hidden');
       mailEl('mail-to').value = to || '';
       mailEl('mail-subj').value = subj || '';
       mailEl('mail-body').value = '';
       mailEl('mail-err').textContent = '';
+      mailGo('compose');
     });
   }
+
+  // ── Send / Receive: the gateway list ──────────────────────────────────
   function mailGatewayLabel(g) {
     var parts = [g.call];
-    if (g.dialKhz) parts.push(g.dialKhz.toFixed(1) + ' kHz');
+    if (g.dialKhz) parts.push(FreqDots.khzMhz(g.dialKhz));
     if (g.qualityWord) parts.push(g.qualityWord + (g.quality != null ? ' ' + g.quality + '%' : ''));
     if (g.distKm != null) parts.push(g.distKm + ' km');
     return parts.join('  ');
   }
-  function mailRenderGateways() {
-    var sel = mailEl('mail-gateway');
+  // The line under the gateway list: prediction progress while it loads, the
+  // list's order once it is here, or why it did not load, with Try again (W4).
+  var mailGwSeq = 0;
+  var mailGwReqId = '';
+  var mailGwTimer = null;
+  var mailGwLoaded = false;   // a list (or its failure) has arrived for the current mode and band
+  function mailGwStatus(text, retry) {
     var note = mailEl('mail-gw-note');
-    if (note) note.textContent = mailGatewayNote;
-    if (!mailGateways.length) { sel.innerHTML = '<option value="">No gateways for that band</option>'; return; }
-    sel.innerHTML = mailGateways.slice(0, 80).map(function (g, i) {
-      return '<option value="' + i + '">' + esc(mailGatewayLabel(g)) + '</option>';
-    }).join('');
+    if (note) note.textContent = text || '';
+    mailShow('mail-gw-retry', !!retry);
+    mailShow('mail-gw-status', !!(text || retry));
+  }
+  function mailGwMessage(text) {
+    var box = mailEl('mail-gateway');
+    box.textContent = '';
+    box.appendChild(mailMake('div', 'mail-gw-msg', text));
+  }
+  function mailGwStopTimer() { if (mailGwTimer) { clearInterval(mailGwTimer); mailGwTimer = null; } }
+  function mailRenderGateways() {
+    var box = mailEl('mail-gateway');
+    if (!mailGateways.length) { mailGwMessage('No gateways for that band'); mailRenderBar(); return; }
+    box.textContent = '';
+    mailGateways.slice(0, 80).forEach(function (g, i) {
+      var b = mailMake('button', 'mail-gw');
+      b.type = 'button';
+      b.setAttribute('data-i', String(i));
+      b.setAttribute('aria-pressed', i === mailPick ? 'true' : 'false');
+      b.setAttribute('aria-label', mailGatewayLabel(g));
+      var main = mailMake('span', 'mail-row-main');
+      main.appendChild(mailMake('span', 'mail-row-who', g.call));
+      main.appendChild(mailMake('span', 'mail-row-line', [g.dialKhz ? FreqDots.khzMhz(g.dialKhz) : '', g.distKm != null ? g.distKm + ' km' : ''].filter(Boolean).join(' · ')));
+      b.appendChild(main);
+      var tag = MailView.qualityTag(g);
+      if (tag) b.appendChild(mailMake('span', 'mail-tag mail-tag-' + tag.tone, tag.text));
+      b.onclick = function () { mailPickGateway(i); };
+      box.appendChild(b);
+    });
+    mailRenderBar();
+  }
+  function mailPickGateway(i) {
+    var g = mailGateways[i];
+    if (!g) return;
+    mailPick = i;
+    Array.prototype.forEach.call(mailEl('mail-gateway').querySelectorAll('.mail-gw'), function (b) {
+      b.setAttribute('aria-pressed', b.getAttribute('data-i') === String(i) ? 'true' : 'false');
+    });
+    if (g.dialKhz) mailSend({ type: 'winlink-qsy', dialKhz: g.dialKhz, mode: mailCurrentMode() });
+    mailRenderBar();
+  }
+  function mailGatewaysArrived(msg) {
+    if (msg.reqId && msg.reqId !== mailGwReqId) return; // an answer to an earlier band or mode
+    mailGwStopTimer();
+    mailGwLoaded = true;
+    mailGateways = msg.list || [];
+    mailPick = mailGateways.length ? 0 : -1;   // the first is picked; a tap on it (or another) tunes the radio
+    var head = mailEl('mail-gw-head');
+    if (head) head.textContent = mailGateways.length ? (msg.predicted ? 'Best path now' : 'Nearest first') : 'Gateway';
+    mailRenderGateways();
+    mailGwStatus(MailView.gatewayNote(msg), false);
+  }
+  function mailGatewaysFailed(msg) {
+    if (msg.reqId && msg.reqId !== mailGwReqId) return;
+    mailGwStopTimer();
+    mailGwLoaded = true;
+    mailGateways = [];
+    mailPick = -1;
+    var f = MailView.gatewaysFailed(msg.error);
+    mailGwMessage(f.option);
+    mailEl('mail-gw-retry').textContent = f.button;
+    mailGwStatus(f.text, true);
+    mailRenderBar();
   }
   function mailLoadGateways() {
-    var mode = mailEl('mail-mode').value;
-    if (mode === 'telnet') return;
-    mailEl('mail-gateway').innerHTML = '<option value="">' + (mode === 'packet' || mode === 'varafm' ? 'Loading…' : 'Loading, predicting propagation…') + '</option>';
-    mailGatewayNote = '';
-    mailSend({ type: 'winlink-gateways-get', mode: mode, band: mailEl('mail-band').value });
+    var mode = mailCurrentMode();
+    mailGwStopTimer();
+    if (mode === 'telnet') { mailGwStatus('', false); return; }
+    var s = mailState || {};
+    mailGateways = [];
+    mailPick = -1;
+    mailGwLoaded = false;
+    var head = mailEl('mail-gw-head');
+    if (head) head.textContent = 'Gateway';
+    mailGwMessage(MailView.loadingText(mode, s.predictionOn));
+    // How long the ranking has run, and about how long the last one took.
+    var t0 = Date.now();
+    var tick = function () { mailGwStatus(MailView.predictText({ mode: mode, predictionOn: s.predictionOn, predictMs: s.predictMs, elapsedMs: Date.now() - t0 }), false); };
+    tick();
+    if (mailEl('mail-gw-note').textContent) mailGwTimer = setInterval(tick, 1000);
+    mailGwReqId = 'gw' + (++mailGwSeq);
+    mailRenderBar();
+    mailSend({ type: 'winlink-gateways-get', mode: mode, band: mailBand, reqId: mailGwReqId });
   }
+  // Opening Send / Receive in a radio mode loads the list once.
+  function mailOpenConnect() {
+    mailRenderModes();
+    if (mailCurrentMode() !== 'telnet' && !mailGwLoaded && !mailGwTimer && !mailGateways.length) mailLoadGateways();
+  }
+
+  // The bottom bar of Send / Receive: the radio line and one button.
+  function mailRenderBar() {
+    var c = mailEl('mail-connect');
+    if (!c) return;
+    var ss = (mailState && mailState.session) || {};
+    var active = mailActive(ss);
+    var mode = mailCurrentMode();
+    var g = mode !== 'telnet' ? mailGateways[mailPick] : null;
+    // The not-finished card has its own Try again: one way to call again at a time.
+    var carded = mailEndCardShown();
+    if (carded && carded.retry) active = true;
+    c.textContent = mode === 'telnet' ? 'Send / Receive over the internet' : g ? 'Connect to ' + g.call : 'Connect';
+    c.classList.toggle('hidden', active || (mode !== 'telnet' && !g));
+    mailShow('mail-abort', mailActive(ss));
+    var line = mailEl('mail-radio-line');
+    var text = '';
+    if (!active && mode !== 'telnet') {
+      if (!g) text = mailGwLoaded ? 'No gateway to call on this band.' : 'Waiting for the gateway list.';
+      else if (mailQsyMoved) text = 'The radio is set for ' + g.call + (g.dialKhz ? ' on ' + FreqDots.khzMhz(g.dialKhz) : '') + '. It goes back when you leave Mail.';
+      else text = 'Tap a gateway to tune the radio to it, or connect now.';
+    }
+    if (line) { line.textContent = text; line.classList.toggle('hidden', !text); }
+    // Nothing to say and nothing to press: no empty bar.
+    mailShow('mail-connect-bar', !!text || !c.classList.contains('hidden') || mailActive(ss));
+  }
+  function mailConnect() {
+    mailRequireNotice(function () {
+      var mode = mailCurrentMode();
+      var o = { type: 'winlink-connect', mode: mode };
+      if (mode !== 'telnet') {
+        var g = mailGateways[mailPick];
+        if (!g) { showToast('Pick a gateway first', 3000, true); return; }
+        o.gateway = g.call; o.dialKhz = g.dialKhz; o.url = g.url;
+      }
+      mailSend(o);
+    });
+  }
+
   function mailOnOpen() {
+    mailOpen = true;
+    // Winlink off on the shack: the tab only says where to turn it on. A
+    // request would start Pat (any winlink-* request does).
+    if (mailState && !mailState.enabled) return;
     mailSend({ type: 'winlink-list', box: mailBox });
-    mailShowList();
+    mailRenderList();
   }
   (function mailWire() {
     if (!mailEl('mail-view')) return;
-    mailEl('mail-box').addEventListener('change', function () { mailBox = mailEl('mail-box').value; mailOnOpen(); });
-    mailEl('mail-new').addEventListener('click', function () { mailCompose('', ''); });
-    mailEl('mail-list').addEventListener('click', function (e) {
-      var row = e.target.closest('.mail-row');
-      if (row) mailSend({ type: 'winlink-read', box: mailBox, mid: row.getAttribute('data-mid') });
+    Array.prototype.forEach.call(mailEl('mail-folders').querySelectorAll('[data-box]'), function (b) {
+      b.addEventListener('click', function () {
+        mailBox = b.getAttribute('data-box');
+        mailRenderFolders();
+        mailSend({ type: 'winlink-list', box: mailBox });
+        mailGo('list');
+      });
     });
+    Array.prototype.forEach.call(mailEl('mail-view').querySelectorAll('[data-back]'), function (b) {
+      b.addEventListener('click', mailShowList);
+    });
+    mailEl('mail-new').addEventListener('click', function () { mailCompose('', ''); });
+    mailEl('mail-open-connect').addEventListener('click', function () { mailGo('connect'); });
+    mailEl('mail-last').addEventListener('click', function () { mailGo('connect'); });
     mailEl('mail-cancel').addEventListener('click', mailShowList);
     mailEl('mail-queue').addEventListener('click', function () {
       if (!mailEl('mail-to').value.trim() || !mailEl('mail-subj').value.trim()) { mailEl('mail-err').textContent = 'Add a recipient and a subject'; return; }
+      mailEl('mail-err').textContent = '';
       mailSend({ type: 'winlink-compose', to: mailEl('mail-to').value, subject: mailEl('mail-subj').value, body: mailEl('mail-body').value });
     });
-    mailEl('mail-mode').addEventListener('change', function () {
-      var mode = mailEl('mail-mode').value;
-      mailSend({ type: 'winlink-set-mode', mode: mode });
-      mailEl('mail-radio').classList.toggle('hidden', mode === 'telnet');
-      mailGateways = [];
-      mailLoadGateways();
-    });
-    mailEl('mail-band').addEventListener('change', mailLoadGateways);
-    mailEl('mail-gateway').addEventListener('change', function () {
-      var g = mailGateways[parseInt(mailEl('mail-gateway').value, 10)];
-      if (g && g.dialKhz) mailSend({ type: 'winlink-qsy', dialKhz: g.dialKhz, mode: mailEl('mail-mode').value });
-    });
-    mailEl('mail-connect').addEventListener('click', function () {
-      mailRequireNotice(function () {
-        var mode = mailEl('mail-mode').value || 'telnet';
-        var o = { type: 'winlink-connect', mode: mode };
-        if (mode !== 'telnet') {
-          var g = mailGateways[parseInt(mailEl('mail-gateway').value, 10)];
-          if (!g) { showToast('Pick a gateway first', 3000, true); return; }
-          o.gateway = g.call; o.dialKhz = g.dialKhz; o.url = g.url;
-        }
-        mailSend(o);
-      });
-    });
+    mailEl('mail-gw-retry').addEventListener('click', mailLoadGateways);
+    mailEl('mail-acct-retry').addEventListener('click', mailAcctCheck);
+    mailEl('mail-connect').addEventListener('click', mailConnect);
     mailEl('mail-abort').addEventListener('click', function () { mailSend({ type: 'winlink-abort' }); });
     mailEl('mail-notice-ok').addEventListener('click', function () {
       mailSend({ type: 'winlink-accept-notice' });
@@ -15764,6 +16260,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
       var f = mailNoticeThen; mailNoticeThen = null; if (f) f();
     });
     mailEl('mail-notice-no').addEventListener('click', function () { mailEl('mail-notice').classList.add('hidden'); mailNoticeThen = null; });
+    mailGo('list');
   })();
 
   // Auto-connect on page load (or bootstrap popout view)

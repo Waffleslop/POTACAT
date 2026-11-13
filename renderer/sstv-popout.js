@@ -3,6 +3,8 @@
 // both work. Sets data-theme and (in charcoal dark variant only) the
 // data-dark-variant attribute on <html>.
 function _applyPopoutTheme(payload) {
+  // The shared rule (popout-theme-boot*.js) also sets data-ds (#376).
+  if (window.applyPopoutTheme) return window.applyPopoutTheme(payload);
   const theme = typeof payload === 'string'
     ? payload
     : ((payload && payload.theme) || 'dark');
@@ -165,7 +167,7 @@ const MODE_RES = {
   callsign = settings.myCallsign || '';
   grid = settings.grid || '';
   try { if (settings.sstvMode) modeSelect.value = settings.sstvMode; } catch {}
-  try { txGainSlider.value = Math.round((settings.sstvTxGain || 0.5) * 100); } catch {}
+  try { txGainSlider.value = window.SstvDrive.pctFromSaved(settings.sstvTxGain); showDrive(); } catch {}
 
   // Restore saved text elements if available
   try {
@@ -214,7 +216,7 @@ const MODE_RES = {
   try { await loadGallery(); } catch (e) { console.error('[SSTV] Gallery load error:', e); }
 
   // Set theme
-  try { applyTheme(settings.lightMode ? 'light' : 'dark'); } catch {}
+  try { if (settings.themeNow) applyTheme(settings.themeNow); } catch {}
 
   // Fonts load asynchronously; redraw once they are here so the first
   // picture isn't in the fallback face.
@@ -332,11 +334,10 @@ const freqInput = document.getElementById('freq-input');
 const tuneBtn = document.getElementById('tune-btn');
 
 // The sideband SSTV uses on a frequency: LSB below 10 MHz except 60 m,
-// which is USB by regulation. The ECHOCAT app uses the same rule.
+// which is USB by regulation. One rule for every tune (lib/ssb-sideband.js);
+// the ECHOCAT app uses the same.
 function getFreqMode(freqKhz) {
-  const k = parseInt(freqKhz);
-  if (k >= 5250 && k <= 5450) return 'USB';
-  return k < 10000 ? 'LSB' : 'USB';
+  return window.SsbSideband.ssbSideband(parseInt(freqKhz) * 1000);
 }
 
 // Show a frequency main chose in the dropdown (or the custom box) and tune it.
@@ -372,7 +373,7 @@ function selectAndTune(freqKhz, mode) {
 function tuneToFreq(freq, mode) {
   const m = mode || getFreqMode(freq);
   window.api.tune(freq, m);
-  statusBar.textContent = 'Tuned to ' + freq + ' kHz ' + m;
+  statusBar.textContent = 'Tuned to ' + (FreqDots.khzMhz(freq) || freq + ' kHz') + ' ' + m;
 }
 
 // Dropdown change QSYs immediately with correct mode
@@ -728,9 +729,17 @@ addTextBtn.addEventListener('click', () => {
   renderTextProps();
 });
 
-// --- TX Gain ---
+// --- TX Gain (Drive) ---
+// The percentage beside the slider, so a setting can be repeated (#279). It
+// follows the drag; the value is saved when the drag ends, and 0 stays 0.
+const txGainVal = document.getElementById('tx-gain-val');
+function showDrive() {
+  if (txGainVal) txGainVal.textContent = window.SstvDrive.label(txGainSlider.value);
+}
+txGainSlider.addEventListener('input', showDrive);
 txGainSlider.addEventListener('change', () => {
-  window.api.saveSettings({ sstvTxGain: txGainSlider.value / 100 });
+  showDrive();
+  window.api.saveSettings({ sstvTxGain: window.SstvDrive.gainFromPct(txGainSlider.value) });
 });
 
 // ===== IMAGE LOADING =======================================================
@@ -1463,7 +1472,7 @@ window.api.onSstvTxAudio(async (data) => {
   }
 
   const samplesArray = data.samples || data;
-  const gainLevel = (txGainSlider.value / 100) || 0.5;
+  const gainLevel = window.SstvDrive.gainFromPct(txGainSlider.value);
 
   try {
     // The radio's output (My Rigs > Audio) unless this window chose one; a
@@ -2148,7 +2157,7 @@ multiStartBtn.addEventListener('click', async () => {
 
   // Tune each Flex slice to its SSTV frequency (creates the slice if needed)
   for (const cfg of multiSliceConfigs) {
-    window.api.tune(String(cfg.freqKhz), cfg.freqKhz < 10000 ? 'LSB' : 'USB', undefined, cfg.slicePort);
+    window.api.tune(String(cfg.freqKhz), getFreqMode(cfg.freqKhz), undefined, cfg.slicePort);
   }
 
   // Build decode panes
@@ -2190,7 +2199,7 @@ function buildMultiPane(cfg) {
 
   const label = document.createElement('div');
   label.className = 'sstv-rx-pane-label';
-  label.textContent = SLICE_NAMES[cfg.slicePort] + ': ' + (cfg.freqKhz / 1000).toFixed(3) + ' MHz';
+  label.textContent = SLICE_NAMES[cfg.slicePort] + ': ' + FreqDots.khzMhz(cfg.freqKhz);
   pane.appendChild(label);
 
   const canvas = document.createElement('canvas');
@@ -3220,7 +3229,7 @@ if (window.api && window.api.rigBandsGet) {
 function showFreq(khz, mode) {
   const k = Number(khz);
   if (!Number.isFinite(k) || k <= 0) return;
-  document.getElementById('freq-label').textContent = (k / 1000).toFixed(3);
+  document.getElementById('freq-label').textContent = FreqDots.fromKhz(k);
   document.getElementById('freq-mode').textContent = (mode || getFreqMode(k)) + ' \u25BE';
   const band = BAND_OF(k);
   bandsEl.querySelectorAll('.band').forEach(b => b.classList.toggle('active', b.dataset.band === band));
@@ -3670,7 +3679,8 @@ function entryQrgHz(e) {
   return null;
 }
 // Whole kHz first: 7171.5 kHz is 7.172, never a float-rounded 7.171.
-function fmtQrg(hz) { return (Math.round(hz / 1000) / 1000).toFixed(3); }
+// Whole kHz (where a picture was heard is not exact), written the VFO way: 7.172.00.
+function fmtQrg(hz) { return FreqDots.fromHz(Math.round(hz / 1000) * 1000); }
 const rbQrg = document.getElementById('rb-qrg');
 function showReplyQrg() {
   if (!rbQrg) return;

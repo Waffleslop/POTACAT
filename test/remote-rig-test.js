@@ -128,7 +128,7 @@ test('remote MODE guards the local rig; sends need the LINK and refuse out loud'
   const ccAt = main.indexOf('async function connectCat() {');
   const cc = main.slice(ccAt, main.indexOf("_connectCatSkipLogged = '';", ccAt));
   assert.ok(/if \(isRemoteMode\(\)\) \{/.test(cc), 'connectCat refuses while a shack is the target, linked or not');
-  const tune = handlerBody(main, "ipcMain.on('tune', (_e, { frequency, mode, bearing, slicePort, origin }) => {");
+  const tune = handlerBody(main, "ipcMain.on('tune', (_e, { frequency, mode, bearing, slicePort, origin, pickSideband }) => {");
   assert.ok(/if \(isRemoteMode\(\)\) \{\n\s+if \(!isRemoteLinked\(\)\) \{ refuseRemoteNotLinked\(_e\.sender\); return; \}/.test(tune), 'tune');
   const rc = main.slice(main.indexOf("ipcMain.handle('rig-control', (_e, data) => {"), main.indexOf("return applyRigControl(data, 'desktop');"));
   assert.ok(/isRemoteMode\(\) && !\(data && data\.action === 'get-state'\)/.test(rc), 'get-state answers from the mirror');
@@ -408,9 +408,49 @@ asyncTests.push(['a desktop driving a shack refuses its own ECHOCAT devices', as
   rs._client = { readyState: 1, close: (code) => { closed = code; } };
   rs._sendTo = (ws, m) => sent.push(m);
   assert.strictEqual(rs.refuseCurrentClient('no radio'), true);
-  assert.deepStrictEqual(sent, [{ type: 'rig-blocked', reason: 'no radio' }]);
+  assert.deepStrictEqual(sent, [{ type: 'rig-blocked', reason: 'no radio', retry: false }]);
   await new Promise((r) => setTimeout(r, 900));
   assert.strictEqual(closed, 1008);
+}]);
+
+// #301: a phone paired to a laptop that drives a remote shack redialled about
+// once a second (632 reconnects in an hour), and each time the laptop sent
+// the whole station state (about a megabyte) before turning it away.
+asyncTests.push(['#301: refused at auth, before the state push, with retry: false', async () => {
+  const { RemoteServer } = require('../lib/remote-server');
+  const rs = new RemoteServer();
+  const sent = [];
+  let closed = null, hydrated = 0, connected = 0, admitted = 0;
+  rs._sendTo = (ws, m) => sent.push(m);
+  rs._hydrateClient = () => { hydrated++; };
+  rs._admitClient = () => { admitted++; };
+  rs.on('client-connected', () => { connected++; });
+  rs.on('log', () => {});
+  rs.setNoRadioCheck(() => 'no radio to share');
+  const ws = { readyState: 1, close: (code) => { closed = code; } };
+  rs._finishWsAuth(ws, null);
+  assert.deepStrictEqual(sent.map((m) => m.type), ['auth-ok', 'rig-blocked']);
+  assert.strictEqual(sent[1].retry, false);
+  assert.strictEqual(sent[1].reason, 'no radio to share');
+  assert.strictEqual(hydrated + admitted + connected, 0, 'no state, no admit, no client-connected');
+  await new Promise((r) => setTimeout(r, 900));
+  assert.strictEqual(closed, 1008);
+  // With a radio again, the same path admits and hydrates as before.
+  rs.setNoRadioCheck(() => null);
+  sent.length = 0;
+  rs._finishWsAuth({ readyState: 1, close() {} }, null);
+  assert.strictEqual(hydrated, 1);
+  assert.strictEqual(connected, 1);
+  assert.ok(/remoteServer\.setNoRadioCheck\(\(\) => \(isRemoteMode\(\) \? REMOTE_NO_RADIO_TO_SHARE_MSG : null\)\);/.test(main));
+  const proto = require('../lib/echocat-protocol');
+  const reg = proto.MESSAGES || proto.REGISTRY || proto.messages;
+  if (reg && reg['rig-blocked']) assert.ok(reg['rig-blocked'].fields.retry, 'retry is in the protocol registry');
+}]);
+
+asyncTests.push(['#301: a cloud 530 reads as the shack being offline', async () => {
+  const { RemoteClient } = require('../lib/remote-client');
+  assert.ok(/shack is offline/.test(RemoteClient._describeDialError('Unexpected server response: 530')));
+  assert.ok(!/offline/.test(RemoteClient._describeDialError('Unexpected server response: 5300')));
 }]);
 
 asyncTests.push(['a dial that fails says which leg failed and why, in one line', async () => {

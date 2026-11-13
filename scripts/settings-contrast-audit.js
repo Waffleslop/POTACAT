@@ -2,10 +2,12 @@
 // text on dark green in She's On Frequency). Opens the real Settings dialog in
 // a scratch Electron window, shows every tab (hidden callouts and closed
 // <details> included), and measures WCAG contrast for every element that
-// draws text, in all ten themes. Never touches a running POTACAT: its own
+// draws text, in all six themes (#376, lib/app-theme.js, Casey's order).
+// Never touches a running POTACAT: its own
 // user-data dir, a stub preload, no main process.
 //
 // Run: npx electron scripts/settings-contrast-audit.js [--json out.json] [--shot dir]
+//   AUDIT_PLATFORM=linux (or darwin) audits the page as those systems show it (default win32).
 //   prints one line per failure and a count per theme; exit 1 on any failure.
 'use strict';
 const { app, BrowserWindow } = require('electron');
@@ -20,24 +22,14 @@ const shotDir = args.includes('--shot') ? args[args.indexOf('--shot') + 1] : nul
 // --shot-id <id>: which control to photograph in each theme (its label and the help text under it).
 const shotId = args.includes('--shot-id') ? args[args.indexOf('--shot-id') + 1] : 'vara-setup-hf';
 
-const THEMES = [
-  ['Navy', { theme: 'dark', variant: '', ds: '' }],
-  ['Charcoal', { theme: 'dark', variant: 'charcoal', ds: '' }],
-  ['Classic light', { theme: 'light', variant: '', ds: '' }],
-  ['Night', { theme: 'dark', variant: '', ds: 'night' }],
-  ['Dark', { theme: 'dark', variant: '', ds: 'dark' }],
-  ['Acid Burn', { theme: 'dark', variant: '', ds: 'acid' }],
-  ['Miami', { theme: 'dark', variant: '', ds: 'miami' }],
-  ['Light', { theme: 'light', variant: '', ds: 'light' }],
-  ["She's On Frequency", { theme: 'light', variant: '', ds: 'sof' }],
-  ['Halloween', { theme: 'dark', variant: '', ds: 'halloween' }],
-];
+const AppTheme = require('../lib/app-theme');
+const THEMES = AppTheme.APP_THEMES.map((t) => [t.name, { theme: t.scheme, variant: '', ds: t.column }]);
 
 const STUB = path.join(os.tmpdir(), 'potacat-settings-audit-stub.js');
 fs.writeFileSync(STUB, `
 (function () {
   var noop = function () { return Promise.resolve(undefined); };
-  window.api = new Proxy({ platform: 'win32' }, { get: function (t, k) {
+  window.api = new Proxy({ platform: ${JSON.stringify(process.env.AUDIT_PLATFORM || 'win32')} }, { get: function (t, k) {
     if (k in t) return t[k];
     if (k === 'then') return undefined;
     return /^on[A-Z]/.test(String(k)) ? function () { return function () {}; } : noop;

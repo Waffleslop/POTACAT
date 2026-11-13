@@ -56,7 +56,13 @@ test('results in plain words', () => {
   assert.strictEqual(by('KG4OCM').result, 'Did not answer');
   assert.strictEqual(by('NA3MD').result, 'Did not answer');
   assert.strictEqual(by('W9OU-10').result, 'The modem was not running');
-  assert.strictEqual(H.resultText({ connected: true }), 'Connected, but the mail exchange failed');
+  // #425: a call that connected and did not finish is a dropped link, in the words the status uses.
+  assert.strictEqual(H.resultText({ connected: true, error: 'connection lost' }), 'Link dropped before the mail exchange finished');
+  // No exchange event at all (the operator's Abort left Pat without one): not called a drop.
+  assert.strictEqual(H.resultText({ connected: true }), 'Connected, but the mail exchange did not finish');
+  assert.strictEqual(H.resultText({ connected: true, error: 'secure login failed' }), 'Winlink refused the password');
+  // Pat's own error text (a Go error) never shows.
+  assert.strictEqual(H.resultText({ error: 'dial tcp 127.0.0.1:8515: i/o error {x}' }), 'Did not connect');
 });
 
 test('one row per gateway, mode and dial, newest first, counting tries and good sessions', () => {
@@ -174,8 +180,8 @@ test('favorites: starred in the gateway list in its ranking, a star beside it, n
 
 test('frequencies the way the VFO writes them: dots, never a comma', () => {
   const i = js.indexOf('function fmtDial(khz)');
-  const body = js.slice(i, js.indexOf('\n  }\n', i) + 4);
-  const fmtDial = new Function(body + '; return fmtDial;')();
+  const body = js.slice(i, js.indexOf('\n', i));
+  const fmtDial = new Function('FreqDots', body + '; return fmtDial;')(require('../lib/freq-dots'));
   assert.strictEqual(fmtDial(7100.5), '7.100.50');
   assert.strictEqual(fmtDial(14105), '14.105.00');
   assert.strictEqual(fmtDial(149090), '149.090.00');

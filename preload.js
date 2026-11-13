@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld('api', {
   // `origin` captures the renderer-side call stack so a stray QSY (e.g. the
   // 33 MHz jump) can be traced to its exact caller in the main-process log.
   tune: (frequency, mode, bearing, slicePort) => ipcRenderer.send('tune', { frequency, mode, bearing, slicePort, origin: (new Error()).stack }),
+  // A band button: in voice SSB main picks the band's sideband (#445).
+  tuneByBand: (frequency) => ipcRenderer.send('tune', { frequency, pickSideband: true, origin: (new Error()).stack }),
   onTuneBlocked: (cb) => ipcRenderer.on('tune-blocked', (_e, msg) => cb(msg)),
   // Generic main→renderer toast ({message, warn?, duration?}) — radio-link
   // transitions etc. Rendered via showLogToast in app.js.
@@ -265,6 +267,7 @@ contextBridge.exposeInMainWorld('api', {
   getSettings: () => ipcRenderer.invoke('get-settings'),
   getRigModels: () => ipcRenderer.invoke('get-rig-models'),
   getRigSetupNotes: (q) => ipcRenderer.invoke('get-rig-setup-notes', q),
+  getPacketRigMode: (q) => ipcRenderer.invoke('get-packet-rig-mode', q),
   icomScopeCapture: () => ipcRenderer.invoke('icom-scope-capture'),
   stationSetupGet: (rigId) => ipcRenderer.invoke('station-setup-get', rigId),
   stationSetupReport: (q) => ipcRenderer.invoke('station-setup-report', q),
@@ -518,7 +521,7 @@ contextBridge.exposeInMainWorld('api', {
   settingsSaveStatus: () => ipcRenderer.invoke('settings-save-status'),
   winlinkListArdopDevices: () => ipcRenderer.invoke('winlink-list-ardop-devices'),
   winlinkAccountCheck: (call) => ipcRenderer.invoke('winlink-account-check', call),
-  winlinkVaraFind: (kind) => ipcRenderer.invoke('winlink-vara-find', { kind }),
+  winlinkVaraFind: (kind, o) => ipcRenderer.invoke('winlink-vara-find', { kind, host: o && o.host, port: o && o.port }),
   winlinkVaraSetup: (kind, devices, labels) => ipcRenderer.invoke('winlink-vara-setup', { kind, devices, ...(labels || {}) }),
   winlinkAudioRig: () => ipcRenderer.invoke('winlink-audio-rig'),
   winlinkRegister: (o) => ipcRenderer.invoke('winlink-register', o),

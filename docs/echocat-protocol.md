@@ -135,7 +135,7 @@ for the history.
 | Message | Dir | Purpose |
 |---|---|---|
 | `status` | S→C | Full radio status snapshot. See field table above. |
-| `tune` | C→S | Tune VFO. Fields: `freqKhz` (string, e.g. `"14250.000"`), `mode` (optional), `bearing` (optional, for rotor), `channelId` (optional, a Channels tap: a channel with the radio's memory number `mem` is recalled on the radio instead; older shacks ignore it and tune `freqKhz`). With no radio control (radio not connected, or a no-CAT rig) a shack advertising `sdr-tune-without-rig` listens through an SDR that covers the frequency (connected, or the first listed one it brings up) instead of replying `tune-blocked` (#329, lib/listen-source.js `routeWithoutRig`). |
+| `tune` | C→S | Tune VFO. Fields: `freqKhz` (string, e.g. `"14250.000"`), `mode` (optional), `bearing` (optional, for rotor), `channelId` (optional, a Channels tap: a channel with the radio's memory number `mem` is recalled on the radio instead; older shacks ignore it and tune `freqKhz`), `pickSideband` (optional boolean, #445, desktop 2026-11-12: send `true` with a band button or a typed frequency and no `mode`; when the radio is in plain voice USB/LSB the shack sends the band's sideband with the tune, LSB below 10 MHz, USB from 10 MHz and on 60 m, the rule spot clicks use; CW, AM, FM, RTTY, every data mode, a radio in DATA, a running FT8/FreeDV/JS8 session and an unknown mode are left alone; leave it out for dial steps, arrows and scope taps; older shacks ignore it). With no radio control (radio not connected, or a no-CAT rig) a shack advertising `sdr-tune-without-rig` listens through an SDR that covers the frequency (connected, or the first listed one it brings up) instead of replying `tune-blocked` (#329, lib/listen-source.js `routeWithoutRig`). |
 | `tune-blocked` | S→C | Tune was rejected (VFO locked, out of band, etc.). |
 | `set-mode` | C→S | Change mode without retuning frequency. |
 | `set-vfo` | C→S | Switch VFO A/B. |
@@ -161,7 +161,7 @@ for the history.
 | `scan-state` | ↔ | Scan on/off STATE sync. Field: `scanning` (boolean). Each side announces when ITS own scan engine turns on/off; the receiver mirrors it as the peer's state. On mutual exclusion (one rig) a side that sees the peer's `scanning:true` stops its own engine. Re-sent to a (re)connecting client so a mid-scan reconnect shows the in-progress scan. |
 | `scan-control` | ↔ | Ask the peer to change ITS scan. Field: `action` (string): `"stop"` (the reported use-case) or `"start"` (optional; uses that side's own filters). Gated like other rig C→S (authenticated active client). NOTE: supersedes the older, unused `scan:state`/`scan:control` (colon) registrations. |
 | `rig-control` | C→S | Generic raw-CAT passthrough button (Settings → Rig table). |
-| `rig-blocked` | S→C | Rig switch denied (club mode etc.). |
+| `rig-blocked` | S→C | Rig switch denied (club mode etc.), or no radio to share. Fields: `reason` (string), `retry` (optional boolean). `retry: false` = a desktop that is itself driving a remote shack; it sends `auth-ok` then this, with no station state, and closes 1008 "no radio here" 750 ms later. Redialling will not help until the desktop leaves remote mode (#301, 2026-11-12). |
 | `rigs` | S→C | List of configured rigs and the active one. |
 | `switch-rig` | C→S | Activate a different rig profile. |
 | `tgxl-select-antenna` | C→S | TGXL antenna switch select. |
@@ -236,7 +236,7 @@ for the history.
 |---|---|---|
 | `jtcat-start` | C→S | Start the FT8 engine. |
 | `jtcat-stop` | C→S | Stop the FT8 engine. |
-| `jtcat-status` | S→C | Engine state (running, mode, slot timing, etc.). |
+| `jtcat-status` | S→C | Engine state (running, mode, slot timing, etc.). Optional `idleRx` (`wspr` / `psk31` / `jtty`): the engine is the shack's idle receive, nobody's session; the FT8 tab takes it over on open with `jtcat-start` (2026-11-12). |
 | `jtcat-set-mode` | C→S | FT8 / FT4 / FT2 / WSPR. |
 | `jtcat-set-band` | C→S | Switch band (informs JTCAT of TX freq). |
 | `jtcat-set-tx-freq` | C→S | TX audio frequency offset (Hz). |
@@ -260,6 +260,7 @@ for the history.
 | `jtcat-cycle` | S→C | Cycle boundary tick (for slot indicators). |
 | `jtcat-tx-status` | S→C | Currently transmitting? what message? what slot? |
 | `jtcat-qso-state` | S→C | Active QSO phase tracker. |
+| `jtcat-qso-logged` | S→C | A JTCAT contact was written to the shack's log: `{ callsign, band, mode, grid, rstSent, rstRcvd, parksText, parksNote }`. `parksText` is ready to show: `at US-1111`, `at US-1111 and US-2222`, `at DE-1197, DE-0941 and DE-0034`, or `''` when the contact was not at a park. `parksNote` names the parks read from the activator's own spot comment (JTCAT option `jtcatNferParks`): `US-2222: from their own spot comment`, or `''`. Sent at the moment of the write, not cached or replayed, and **only to a client whose `hello.capabilities` include `jtcat-qso-logged`** (an older client never receives it), and never to a Guest Pass session. Toast when `parksNote` is set: `Logged <callsign> <parksText> (<parksNote>)`; ECHOCAT Web shows nothing new for a contact without a note and never replaces an error toast. Added 2026-11-12. |
 | `jtcat-spectrum` | S→C | Waterfall spectrum bins for the popout. |
 | `jtcat-waterfall` | C→S | Request the spectrum stream (start/stop). |
 | `jtcat-start-multi-remote` | C→S | Multi-slice JTCAT (Flex). |
@@ -369,6 +370,158 @@ and non-private respectively. The predicate is the thread store's own
 | `sstv-rx-progress` | S→C | RX progress (decoded scanlines). |
 | `sstv-tx-status` | S→C | TX progress. |
 | `sstv-wf-bins` | S→C | Waterfall bins for SSTV view. |
+
+### Winlink (email over radio)
+
+The shack holds the mailbox, the Winlink account and the radio session: Pat, the Winlink
+client inside POTACAT, runs there, with the modems. A device composes, reads, picks a gateway
+and presses Send / Receive; every rule (which modes are offered, which gateways the radio can
+call, how a session's end is worded) is decided on the shack and sent as data. Gated by the
+`winlink` entry in the server hello's `capabilities`; a shack that handles the account messages also lists
+`winlink-account`. Registry: `lib/echocat-protocol.js` (feature `winlink`). Server:
+`lib/remote-server.js` (`case 'winlink-list'` onward). Handlers: `winlinkHandleRemote` in
+`main.js`.
+
+**Who may send.** The owner's devices only. A Guest Pass session gets
+`winlink-refused {reason: 'guest-pass', reqId}` for every C→S message below, is never sent
+`winlink-state`, `winlink-mailbox`, `winlink-session` or `winlink-spectrum`, and is not
+hydrated.
+
+**Requests and replies.** Every C→S message except `winlink-watch`, `winlink-prompt` and
+`winlink-set-mode` may carry `reqId` (string, the first 64 characters are kept). The reply goes
+only to the device that asked and repeats the `reqId`. A request has either its own reply
+type (named in its row) or `winlink-result {op, ok, error?}`; when the own-type reply cannot
+be built, the `winlink-result` with the `op` in the row is sent instead. Only the fields the
+registry declares for a type reach the handler. Any request except `winlink-watch` starts Pat
+if it is not running yet (the first one can wait up to 15 s).
+
+**Pushes.** `winlink-state`, `winlink-mailbox` and `winlink-session` go to every owner device
+when they change, carry no `reqId`, and are cached on the server: a device that connects is
+sent the last `winlink-state`, one `winlink-mailbox` per folder already listed, and the last
+`winlink-session`.
+
+Folders (`box`): `in`, `out`, `sent`, `archive`. Mode ids: `telnet` (internet), `ardop`,
+`packet`, and `vara` / `varafm` when the operator has turned them on at the shack. A client
+shows the modes it is sent in `winlink-state.modes` and nothing else.
+
+#### State, mailbox and session (S→C pushes)
+
+| Message | Dir | Purpose |
+|---|---|---|
+| `winlink-state` | S→C | The one payload every surface renders; fields in the table below. Never carries the password or a message body. Sent coalesced (about 50 ms) after any change, and again with every `winlink-session`. |
+| `winlink-mailbox` | S→C | One folder: `{box, messages[], total}`. `messages` = the newest 500, newest first, without bodies; `total` = how many the folder holds. Each message: `mid`, `box`, `from`, `to[]`, `cc[]`, `subject`, `date`, `read` (always true outside `in`), `p2pOnly`, `attachments[{name, size}]`. Pushed to every owner device when a folder changes; also the reply to `winlink-list` (then with `reqId`). |
+| `winlink-session` | S→C | `{session}`: the running or last session; fields in the table below. Pushed on every change: progress, PTT, a prompt, the end. |
+| `winlink-spectrum` | S→C | The waterfall, about 10 a second, only to owner devices that sent `winlink-watch {on: true}`; a frame is dropped, never queued, for a device whose socket is behind. `bins` = 128 values over 0 to 3000 Hz (0 = noise floor, 255 = +50 dB); `lo`, `hi` = the modem's band as fractions of that width, with `label`; `busy` and `peakDb` = the Busy / Clear verdict, decided on the shack. |
+| `winlink-refused` | S→C | `{reason: 'guest-pass', reqId?}`: a Guest Pass session sent a Winlink message. The only reason in use. |
+
+`winlink-state` fields:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `enabled` | boolean | Winlink is available on this shack. Always `true` from the current desktop. |
+| `patStarted` | boolean | Pat is running. `false` = not started yet, not an error: any request starts it. |
+| `patReady`, `patError` | boolean, string | Pat answered and can be used; if not, why. |
+| `mycall` | string | The station callsign, upper case. |
+| `hasPassword` | boolean | A Winlink password is saved on the shack. The password itself is never sent. |
+| `noticeAccepted`, `noticeText` | boolean, string | Whether the operator accepted the Winlink notice, and its text. Sending is refused until it is accepted (`winlink-accept-notice`). |
+| `mode` | string | The mode in use: the saved choice if it is available, else the first that is. |
+| `modes` | array | `[{id, label, available, reason}]`: every mode the shack offers, in display order. `reason` says why an unavailable one is unavailable, in words to show as they are. |
+| `unread`, `counts` | integer, object | Unread messages in `in`; `{in, out, sent, archive}` totals. |
+| `session` | object | The same object `winlink-session` carries. |
+| `autoCheck` | object | The internet auto-check: `{enabled, min, lastAt, lastResult}`. Never a radio session. |
+| `lastGateway` | object or null | The gateway of the last radio session: `{call, mode, dialKhz}`. |
+| `lastSession` | object or null | `{at, ok, text}` of the last finished session; kept across a shack restart. |
+| `favourites` | array | My gateways: `[{call, mode, dialKhz, khz, url, band, savedAt, lastGoodAt}]`. |
+| `templates` | array | The operator's message templates: `[{id, name, to, cc, subject, body}]`. The built-in Position report and POTA spot are not in it. |
+| `contacts`, `contactGroups` | array | The address book: `[{id, name, address, kind 'winlink' or 'email', note, lastUsedAt}]` and `[{id, name, members[]}]`. |
+| `position` | object or null | `{grid, lat, lon, km}`: the centre of the station's grid and how far off it can be; the Position report form's starting point. `null` with no grid set. |
+| `predictionOn`, `predictMs` | boolean, object | Whether gateway lists are ranked by predicted propagation, and how long the last ranking took per mode (`{mode: ms}`), so a surface can say how long the next one will take. |
+| `ardopBw`, `modemBw` | integer | The ARDOP bandwidth setting (200, 500, 1000 or 2000 Hz) and the bandwidth of the mode in use. |
+| `wf` | object | The shack's waterfall settings: `{speed, shown}`. |
+| `audio` | object | How the modem's audio reaches the radio: `{needed, ready, viaPotacat, capture, playback, rigName, cable{configured, state, error, capture, playback}}`, and on a sound-card radio `bridge{state, error}` and `packet{needed, ready, capture, playback}`. Nothing for a device to pick: the shack routes it. |
+
+`session` fields:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `state` | string | `idle`, `starting`, `connecting`, `connected`, `disconnecting`, `done` or `error`. |
+| `mode`, `gateway`, `dialKhz`, `url` | string, string, number or null, string | What is being called. For `telnet`, `gateway` is `CMS (internet)` and `dialKhz` is null. |
+| `text` | string | The status line, a whole sentence to show as it is. |
+| `direction`, `subject`, `bytes`, `total`, `pct` | | The message moving now: `sending` or `receiving`, its subject, and how far along. |
+| `sent`, `received` | integer | Messages finished so far in this session. |
+| `ptt` | boolean | The shack's radio is transmitting for this session. |
+| `startedAt`, `lastProgressAt` | epoch ms | When the session started and when anything last moved. |
+| `capSec`, `remainingSec` | integer, integer or null | The session's time limit (radio sessions only) and the seconds left. |
+| `tuned`, `returnTo` | boolean, object or null | Whether the shack tuned the radio for the session, and the dial and mode it goes back to (`{freqHz, mode, from}`). |
+| `audio` | object | Levels during a radio session, in dB: `rxDb`, and when they apply `toModemDb`, `fromModemDb`, `trimDb`, `boostDb`, `hot`. |
+| `prompt` | object or null | A question only the operator can answer; see the busy prompt below. |
+| `error`, `errorKind` | string | Set when `state` is `error`. `error` is a whole sentence to show as it is, never Pat's reply. `errorKind` is one of `login-failed`, `no-answer`, `not-connected`, `dropped` (the link came up, then ended before the exchange finished), `transport-down`, `rig-refused`, `stopped`, `failed`, or a `vara-` kind (`vara-not-answering`, `vara-not-running`, `vara-not-found`, `vara-not-configured`). |
+| `outcome` | object or null | How the session ended, worded once on the shack for every surface (`lib/winlink-outcome.js`): `{kind, word, title, detail, next, retry}`. `word` is `Finished`, `Link dropped`, `No answer`, `Not connected`, `Stopped` or `Failed`; `title` says what happened, `detail` what moved and what is still in the Outbox, `next` what to do; `retry` = trying the same gateway again is a sensible next step. The automatic retry adds `retryState` (`counting`, `waiting-clear`, `starting`, `cancelled`, `skipped`; absent when none was considered), `retryInS` (seconds left while `counting`, else 0) and `retryText` (the sentence to show as it is); while `counting` or `waiting-clear` a client shows Try now and Cancel (`winlink-retry`) in place of Try again and OK. `session.autoRetry` marks the retry session itself. `text` (state `done`) and `error` (state `error`) are the same sentences joined. The Outbox sentence can arrive a moment after the end, in a second push. |
+| `result` | object or null | After a good radio session: `{call, mode, khz, dialKhz, url, band, sent, received, saved}`, for a card that offers to save the gateway to My gateways (`saved` = already there). |
+
+**The busy prompt.** When the modem hears the channel in use, Pat waits for it to clear and
+the session carries `prompt: {id, kind: 'busy-channel', message, at, limitSec: 300,
+waitedSec}`. The device shows how long it has waited and offers two answers with
+`winlink-prompt {id, value}`: `continue` (call now; the operator has listened and decides) or
+`abort`. Any other value is ignored for a busy prompt. `prompt` goes back to `null` when it
+is answered, when the channel clears, or when Pat gives up after `limitSec`. Other prompt
+kinds from Pat (an account-activation message to accept) use the same two messages, and
+`value` is passed to Pat as sent. Pat's password prompt is answered by the shack from the
+saved password and is not shown.
+
+#### Mail
+
+| Message | Dir | Purpose |
+|---|---|---|
+| `winlink-list` | C→S | `{box}`: refresh one folder from Pat. Reply: `winlink-mailbox`. An unknown `box` is read as `in`. |
+| `winlink-read` | C→S | `{box, mid}`: one message with its body. Reply: `winlink-message`, else `winlink-result {op: 'read'}`. Reading an unread message in `in` marks it read on the shack; a `winlink-mailbox` and a `winlink-state` push follow. |
+| `winlink-message` | S→C | `{box, mid, message}`: the message as in `winlink-mailbox`, plus `body`. To the asker only. |
+| `winlink-attachment-get` | C→S | `{box, mid, name}`: one attachment. Reply: `winlink-attachment`, else `winlink-result {op: 'attachment'}`. An attachment over 2 MB is refused with an error. |
+| `winlink-attachment` | S→C | `{box, mid, name, size, dataBase64}`. To the asker only. |
+| `winlink-delete` | C→S | `{box, mid}`: delete a message. Reply: `winlink-result {op: 'delete'}`; the folder is pushed again. |
+| `winlink-compose` | C→S | `{to, subject, cc?, body?, p2p?, attachments?}`: put a message in the Outbox; it goes out on the next session. `attachments` = `[{name, dataBase64}]`, the first 10 are taken. Refused until the notice is accepted. A message to the POTA spot address is split into one message per line of its body. Reply: `winlink-result {op: 'compose'}`. |
+| `winlink-template` | C→S | `{op, id?, name?, to?, cc?, subject?, body?}`: `op` `save` (a new template, or the one with `id`) or `delete` (`id`). Reply: `winlink-result {op: 'template'}`; the list follows in `winlink-state.templates`. |
+| `winlink-contact` | C→S | `{op, id?, name?, address?, note?}`: `op` `save` or `delete`, as for templates. Reply: `winlink-result {op: 'contact'}`; the list follows in `winlink-state.contacts`. |
+| `winlink-contact-group` | C→S | `{op, id?, name?, members?}`: the same for a group of addresses. Reply: `winlink-result {op: 'contact-group'}`; the list follows in `winlink-state.contactGroups`. |
+| `winlink-posreport` | C→S | `{lat?, lon?, comment?}`: queue a Winlink position report in the Outbox. Without `lat` and `lon` the shack uses the centre of its grid, and refuses if no grid is set. Reply: `winlink-result {op: 'posreport'}`. |
+| `winlink-pota-spot-get` | C→S | Ask for the POTA spot form, filled in by the shack. Reply: `winlink-pota-spot`. A shack that predates the message does not answer; the device then builds the line itself. |
+| `winlink-pota-spot` | S→C | `{to, subject, call, parks[], freqKhz, mode, comment, body, missing[], hint}`: the spot message ready to send with `winlink-compose`. `parks` = the live activation's POTA references; `freqKhz` and `mode` = where the radio was before Winlink moved it; `missing` names what the shack could not fill in, and `hint` says it in words. To the asker only. |
+
+#### Gateways and sessions
+
+| Message | Dir | Purpose |
+|---|---|---|
+| `winlink-gateways-get` | C→S | `{mode, band?}`: the gateway list for a mode. Reply: `winlink-gateways`, else `winlink-result {op: 'gateways'}`. With ranking on, an HF list can take up to two minutes. |
+| `winlink-gateways` | S→C | `{mode, band, list[], predicted, note, leftOut}`. Each row: `call`, `grid`, `distKm`, `bearing`, `modes`, `freqKhz`, `dialKhz`, `band`, `url`, `quality` (0 to 100, or null with no prediction), `qualityWord`. The order is the shack's: by predicted link quality when `predicted`, else nearest first; `note` says which, in words. Only gateways the radio can call are listed; `leftOut` counts the rest. To the asker only. |
+| `winlink-history-get` | C→S | Every gateway the operator has called. Reply: `winlink-history`, else `winlink-result {op: 'history'}`. |
+| `winlink-history` | S→C | `{gateways[]}`, newest first, at most 300, one row per gateway, mode and dial: `call`, `mode`, `dialKhz`, `band`, `tries`, `good`, `lastAt`, `lastGoodAt`, `lastResult`, `lastOk`, `saved` (in My gateways). To the asker only. |
+| `winlink-favourite` | C→S | `{op, call, mode, dialKhz, url?}`: `op` `add` or `remove` a gateway in My gateways. Reply: `winlink-result {op: 'favourite'}`; the list follows in `winlink-state.favourites`. |
+| `winlink-set-mode` | C→S | `{mode}`: save the mode to use. No reply; a `winlink-state` push follows. A mode the shack does not know is ignored. |
+| `winlink-qsy` | C→S | `{dialKhz, mode?}`: a gateway was picked, not yet called: tune the shack's radio there so the waterfall shows that frequency. Refused while a session runs, while another part of POTACAT has the radio, or for a frequency the radio cannot reach. The dial from before the first pick is remembered. Reply: `winlink-result {op: 'qsy'}`. |
+| `winlink-qsy-restore` | C→S | The device is leaving its Mail tab: put the dial back where it was before the first `winlink-qsy`. Nothing happens if nothing moved; during a session the radio goes back when the session ends. Reply: `winlink-result {op: 'qsy-restore'}`. |
+| `winlink-connect` | C→S | `{mode, gateway?, dialKhz?, url?}`: start a session, the same as Send / Receive at the shack. `telnet` needs only `mode`. `url` is the gateway row's own `url` from `winlink-gateways` (it carries the bandwidth) and is checked against `gateway` and `mode`. Refused, with the reason as `error`, until the notice is accepted and a password is saved, while a session runs, for a mode that is not available (its `reason`), and for a frequency the radio cannot reach. Reply: `winlink-result {op: 'connect'}` as soon as the session has started (`ok: true`) or was refused; everything after that, the end included, arrives as `winlink-session` pushes. |
+| `winlink-abort` | C→S | Stop the running session. Reply: `winlink-result {op: 'abort'}`. |
+| `winlink-retry` | C→S | `{op, reqId?}`, `op` = `cancel` or `now`: act on the automatic retry after a dropped link (Cancel, or Try now). Reply: `winlink-result {op: 'retry'}`. Refused for a Guest Pass. |
+| `winlink-prompt` | C→S | `{id, value}`: answer `session.prompt` (the busy prompt above). No reply; a `winlink-session` push follows. |
+| `winlink-watch` | C→S | `{on}`: subscribe this device to `winlink-spectrum`, or stop. No reply. The shack computes the spectrum only while a device watches; a closed socket ends the subscription. |
+| `winlink-result` | S→C | `{op, ok, error?, reqId?}`: the outcome of a request, to the asker only. `error` is a sentence to show. `op` is one of `read`, `attachment`, `delete`, `compose`, `template`, `contact`, `contact-group`, `posreport`, `gateways`, `history`, `favourite`, `qsy`, `qsy-restore`, `connect`, `abort`, `retry`, `accept-notice`, `account-check`, `set-password`, `register`, `recovery-email`. |
+
+#### Account
+
+A shack that handles these lists `winlink-account` in its hello's `capabilities`
+(`winlink-accept-notice` needs only `winlink`). The password is never sent to a device on any
+message.
+
+| Message | Dir | Purpose |
+|---|---|---|
+| `winlink-accept-notice` | C→S | The operator read and accepted the Winlink notice (`winlink-state.noticeText`). Reply: `winlink-result {op: 'accept-notice'}`; a `winlink-state` push follows. |
+| `winlink-account-check` | C→S | Does a Winlink account exist for the station's callsign? Reply: `winlink-account`, else `winlink-result {op: 'account-check'}`. |
+| `winlink-account` | S→C | `{callsign, exists}`. To the asker only. |
+| `winlink-set-password` | C→S | `{password}`: the password of an existing account. Saved on the shack; Pat restarts with it. Refused while a session runs. Reply: `winlink-result {op: 'set-password'}`; `winlink-state.hasPassword` follows. |
+| `winlink-register` | C→S | `{password, recoveryEmail?}`: create the Winlink account for the station's callsign. Reply: `winlink-result {op: 'register'}`; `winlink-state.hasPassword` follows. |
+| `winlink-recovery-email-get` | C→S | Read the account's password-recovery address. Reply: `winlink-recovery-email`, else `winlink-result {op: 'recovery-email'}`. |
+| `winlink-recovery-email-set` | C→S | `{email}`: change it. Reply: `winlink-result {op: 'recovery-email'}`. |
+| `winlink-recovery-email` | S→C | `{email}`. To the asker only. |
 
 ### Cloud (cross-device QSO sync via Cognito)
 

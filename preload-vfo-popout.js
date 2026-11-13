@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('api', {
   setTuneStep: (hz) => ipcRenderer.send('tune-step-set', Number(hz)),
   onTuneStep: (cb) => ipcRenderer.on('tune-step', (_e, hz) => cb(hz)),
   tune: (frequency, mode, bearing) => ipcRenderer.send('tune', { frequency, mode, bearing }),
+  // A band button or typed frequency: in voice SSB main picks the band's sideband (#445).
+  tuneByBand: (frequency) => ipcRenderer.send('tune', { frequency, pickSideband: true }),
   // Favourites (#329): starred Landmarks and Channels, as one tune list.
   favoritesGet: () => ipcRenderer.invoke('favorites-get'),
   onFavorites: (cb) => ipcRenderer.on('favorites', (_e, st) => cb(st)),

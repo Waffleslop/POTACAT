@@ -219,16 +219,16 @@ test('the reply bar shows where they were heard, and offers to go back when the 
     const line = src.slice(i, src.indexOf('\n', i));
     return /\}\s*$/.test(line) ? line + '\n' : src.slice(i, src.indexOf('\n}\n', i) + 2); // one-liner or block
   };
-  const fns = new Function(grab('getFreqMode') + grab('sideOf') + grab('fmtQrg') + 'return { getFreqMode, sideOf, fmtQrg };')();
-  assert.strictEqual(fns.fmtQrg(7171500), '7.172', 'whole kHz first');
-  assert.strictEqual(fns.fmtQrg(14230000), '14.230');
+  const fns = new Function('FreqDots', 'window', grab('getFreqMode') + grab('sideOf') + grab('fmtQrg') + 'return { getFreqMode, sideOf, fmtQrg };')(require('../lib/freq-dots'), { SsbSideband: require('../lib/ssb-sideband') });
+  assert.strictEqual(fns.fmtQrg(7171500), '7.172.00', 'whole kHz first, then the VFO way');
+  assert.strictEqual(fns.fmtQrg(14230000), '14.230.00');
   assert.deepStrictEqual(['3845', '5357', '7171', '14230', '28680'].map(fns.getFreqMode), ['LSB', 'USB', 'LSB', 'USB', 'USB'], '60 m is USB');
   assert.deepStrictEqual(['PKTUSB', 'USB-D', 'DIGU', 'LSB', 'DIGL', 'CW', ''].map(fns.sideOf), ['USB', 'USB', 'USB', 'LSB', 'LSB', 'OTHER', '']);
   assert.ok(/tuneToFreq\(String\(khz\), mode\)/.test(js));
   assert.ok(/sstvLogContact\(\{ call: replySession\.call, rsvSent: replySession\.rsv, freqHz: replySession\.freqHz/.test(js), 'Log uses the heard frequency');
   assert.ok(/const hz = Number\(freqHz\) > 0 \? Number\(freqHz\) : _currentFreqHz;/.test(MAIN));
   assert.ok(/id="rb-qrg"/.test(readSrc(path.join(ROOT, 'renderer', 'sstv-popout.html'))));
-  assert.ok(/msg\.freqHz \? ' ' \+ \(Math\.round\(msg\.freqHz \/ 1000\)/.test(readSrc(path.join(ROOT, 'renderer', 'remote.js'))), 'the web client shows it too');
+  assert.ok(/msg\.freqHz \? ' ' \+ FreqDots\.fromHz\(Math\.round\(msg\.freqHz \/ 1000\)/.test(readSrc(path.join(ROOT, 'renderer', 'remote.js'))), 'the web client shows it too');
 });
 
 (async () => {

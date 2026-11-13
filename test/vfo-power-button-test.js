@@ -28,7 +28,22 @@ test('it stays below every ordered block', () => {
 test('shown from the model caps, never from the CAT link', () => {
   assert.ok(/power: vfoPowerAvailable\(\)/.test(main), 'vfo-radio-state carries power');
   assert.ok(/function vfoPowerAvailable\(\) \{\s*try \{ return !!getRigCapabilities\(detectRigType\(\)\)\.power;/.test(main));
-  assert.ok(/s\.power != null\) document\.getElementById\('sec-power'\)\.style\.display = s\.power \? '' : 'none'/.test(html));
+  assert.ok(/if \(s\.power != null\) \{[\s\S]{0,120}sec\.style\.display = s\.power \? '' : 'none';\s*sec\.classList\.toggle\('visible', !!s\.power\);/.test(html), 'shown with the class a .tool-card needs');
+  assert.ok(/\.tool-card \{[^}]*display: none;[\s\S]{0,80}\.tool-card\.visible \{ display: flex; \}/.test(html), 'the stylesheet rule the class answers');
+});
+test('a radio that does not answer shows dashes, not its last dial', () => {
+  assert.ok(/radioLinkUp: vfoRadioLinkUp\(\),/.test(main), 'vfo-radio-state carries the link');
+  assert.ok(/function vfoRadioLinkUp\(\) \{\s*if \(isRemoteMode\(\) \|\| sdrHoldsDial\(\)\) return true;[^\n]*\n\s*return !_catLinkUpKnown \|\| _catLinkUpLast;/.test(main));
+  assert.ok(/_catLinkUpLast = linkUp;\s*stationSetupNotify\(\);\s*sendVfoState\(\);/.test(main), 'a link change reaches the window at once');
+  assert.ok(/renderFreqDisplay\(radioLinkUp \? currentFreqHz : 0\);/.test(html));
+  assert.ok(/modeBadge\.textContent = !radioLinkUp \? '---'/.test(html));
+});
+test('Power On / Off say what is under way until the link shows it, or that it has not after 20 s', () => {
+  assert.ok(/id="vfo-power-status"[^>]*aria-live="polite"/.test(html));
+  assert.ok(/say\(want === 'on' \? 'Switching on\\u2026' : 'Switching off\\u2026'\)/.test(html));
+  assert.ok(/'No answer from the radio yet' : 'The radio still answers'/.test(html) && /\}, 20000\);/.test(html));
+  assert.ok(/if \(window\.vfoPowerLinkChanged\) window\.vfoPowerLinkChanged\(radioLinkUp\);/.test(html));
+  assert.ok(/disarm\(\);\s*begin\('off'\);\s*window\.api\.rigControl\(\{ action: 'power-off' \}\);/.test(html), 'only the confirmed second press');
 });
 test('the buttons go through the one dispatcher; Off asks once', () => {
   assert.ok(/rigControl\(\{ action: 'power-on' \}\)/.test(html));

@@ -104,6 +104,22 @@ test('colours: PTT is POTACAT red at rest, sliders get a dark track, TX power is
   assert.ok(/\.cw-wpm-val \{[^}]*color: var\(--blue\);/.test(vfo) && /\.cw-macro-btn \{ color: var\(--t\); \}/.test(vfo));
 });
 
+test('macOS: the traffic lights keep their room in the Large and the Small VFO (#387)', () => {
+  // The window has the system controls on a Mac (hiddenInset), drawn over the page's top-left.
+  assert.ok(/isMac \? \{ titleBarStyle: 'hiddenInset' \}/.test(main), 'the VFO window uses the inset traffic lights on macOS');
+  assert.ok(/<script src="popout-theme-boot\.js"><\/script>/.test(vfo), 'the boot script sets .platform-darwin');
+  const css = vfo.replace(/\/\*[\s\S]*?\*\//g, '');
+  const rule = css.match(/([^{}]+)\{\s*padding-left:\s*(\d+)px;\s*\}/g) || [];
+  const inset = (sel) => rule.some(r => {
+    const m = r.match(/([^{}]+)\{\s*padding-left:\s*(\d+)px/);
+    return m && Number(m[2]) >= 80 && m[1].split(',').map(s => s.trim()).includes(sel);
+  });
+  assert.ok(inset('.platform-darwin .titlebar'), 'Large: the title bar starts after the lights');
+  assert.ok(inset('.platform-darwin body.mini .titlebar'), 'Small: body.mini .titlebar out-ranks the plain rule, so it needs its own');
+  // Windows and Linux: the Small VFO padding itself is unchanged.
+  assert.ok(/body\.mini \.titlebar \{ height: auto; min-height: 52px; padding: 8px 6px 8px 12px; gap: 6px; \}/.test(vfo));
+});
+
 test('this test is in the list CI runs', () => {
   assert.ok(readSrc(path.join(root, 'scripts', 'run-tests.js')).includes("'test/vfo-compact-test.js'"));
 });

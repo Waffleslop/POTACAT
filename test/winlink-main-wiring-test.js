@@ -45,7 +45,9 @@ test('the internet auto-check can only start a telnet session', () => {
 });
 test('winlinkStartSession is reached only from Connect paths and the auto-check', () => {
   const callers = main.split('\n').filter((l) => /winlinkStartSession\(/.test(l) && !/function winlinkStartSession/.test(l));
-  const allowed = [/origin: 'mail window'/, /origin: 'ECHOCAT device'/, /mode: 'telnet', origin: 'auto-check/];
+  // #425: the automatic retry after a dropped link is the one caller that is not an operator's tap.
+  // It only ever repeats a session the operator started (lib/winlink-auto-retry.js shouldRetry).
+  const allowed = [/origin: 'mail window'/, /origin: 'ECHOCAT device'/, /mode: 'telnet', origin: 'auto-check/, /origin: 'automatic retry', autoRetry: true }/];
   for (const l of callers) assert.ok(allowed.some((r) => r.test(l)), 'unexpected caller: ' + l.trim());
 });
 test('Pat never gets --listen / --send-only; ardopcf never gets a PTT or CAT flag', () => {
@@ -144,6 +146,11 @@ test('the macOS modem builds: ardopcf against the ALSA stand-in, Dire Wolf with 
   assert.ok(/'scripts\/gen-direwolf-patch\.py'/.test(helpers) && /'helpers\/alsa-stub\/\*\*'/.test(helpers), 'and reruns when the patch generator or stub changes');
 });
 
+test('the Linux ardopcf build compiles with GCC 14 and newer', () => {
+  const script = read('scripts/build-winlink-helpers.sh');
+  assert.ok(/make ardopcf CFLAGS="-g -MMD -std=gnu17 -Wno-int-conversion" \)/.test(script), 'rawhid.c\'s int conversions are an error since GCC 14');
+});
+
 test('a Flex keys the modem\'s DAX audio, not the silent mic, and gets its mic back', () => {
   assert.ok(/winlinkFlexDaxOn\(\);/.test(fnBody(main, 'winlinkStartSession')));
   assert.ok(/winlinkFlexDaxRestore\(\);/.test(fnBody(main, 'winlinkEndSession')));
@@ -161,16 +168,19 @@ test('modem audio rides POTACAT\'s radio link on Flex Direct / Icom Network — 
   const dispatch = fnBody(main, 'winlinkDispatchTx');
   // (the TxBurst meter's one line sits between the gate and the dispatch, #128)
   // Not keyed: held for the key-down that follows within 500 ms, else dropped (lib/modem-prekey.js, #289).
-  assert.ok(/if \(!winlinkTxActive\) \{ _winlinkPreKey\.hold\(mono24k, 24000\); return; \}\n\s*winlinkModemTxIn\(mono24k\);/.test(tx) && /winlinkDispatchTx\(mono24k\)/.test(fnBody(main, 'winlinkModemTxIn')) && /pushTxAudioChunk\(mono24k\)/.test(dispatch) && /pushIcomNetworkVoiceChunk\(mono24k\)/.test(dispatch), 'modem TX goes to dax_tx / RS-BA1 only while keyed');
+  // The modem audio lane (lib/modem-audio-lane.js, #187) holds early audio until key-down and hands the
+  // leveled audio of a Flex / Icom route back to main, which sends it only while keyed.
+  const out = fnBody(main, 'winlinkDispatchOut');
+  assert.ok(/srv\.on\('tx-out', \(mono24k\) => \{ if \(winlinkTxActive\) winlinkDispatchOut\(mono24k\); \}\);/.test(tx) && /pushTxAudioChunk\(mono24k\)/.test(out) && /pushIcomNetworkVoiceChunk\(mono24k\)/.test(out) && /winlinkAudio\.txIn\(mono24k\)/.test(dispatch), 'modem TX goes to dax_tx / RS-BA1 only while keyed');
   assert.ok(/icomNetworkVoiceTx\(true, 'Winlink'\)/.test(fnBody(main, 'startWinlinkShim')), 'Icom voice TX opens with the key-down');
-  assert.ok(/new ModemAudioServer\(/.test(tx) && /listen\(0\)/.test(tx));
+  assert.ok(/new ModemAudioLane\(/.test(tx) && /listen\(0\)/.test(tx));
 });
 
 test('a gateway pick tunes the radio only outside a session, and the dial goes back', () => {
   const q = fnBody(main, 'winlinkPreviewQsy');
   assert.ok(/if \(winlinkSessionActive\(\)\) return \{ ok: false/.test(q));
   assert.ok(/if \(isRemoteMode\(\)\) return \{ ok: false/.test(q));
-  assert.ok(/tuneRadio\(khz, mode === 'packet' \? 'FM' : 'DIGU'/.test(q));
+  assert.ok(/tuneRadio\(khz, mode === 'packet' \? \(pickPm && pickPm\.byHand \? undefined : 'FM'\) : 'DIGU'/.test(q));
   assert.ok(/returnTo: radio \? \(_winlinkPreviewReturnTo \|\|/.test(fnBody(main, 'winlinkStartSession')), 'the session returns to the pre-pick dial');
   assert.ok(/winlinkPreviewRestore\('window closed'\)/.test(main), 'closing the window with no session puts the dial back');
 });
@@ -185,7 +195,7 @@ console.log('radio control');
 test('the shim binds loopback and keys through handleRemotePtt with audio', () => {
   const shim = fnBody(main, 'startWinlinkShim');
   assert.ok(/createRigctldServer\(/.test(shim) && /host: '127\.0\.0\.1'/.test(shim));
-  assert.ok(/handleRemotePtt\(true, \{ audio: true, forceDataMode: icom(, emission: 'DATA')?(, txKind: 'winlink')? \}\)/.test(shim));
+  assert.ok(/handleRemotePtt\(true, \{ audio: true, \.\.\.pttMode, emission: 'DATA', txKind: 'winlink' \}\)/.test(shim)); // pttMode: lib/packet-rig-mode.js keyDownOpts (#128)
   assert.ok(/radioOwner !== 'winlink'/.test(shim), 'refuses outside a session');
   assert.ok(/_swrTripped/.test(shim), 'honours the SWR latch');
   assert.ok(/armWinlinkTxFailsafe\(\)/.test(shim), 'arms the failsafe on key-down');
@@ -320,7 +330,7 @@ test('account check / set-password / register / recovery email are on the wire, 
   // Settings IPC and the device share one implementation.
   assert.ok(/ipcMain\.handle\('winlink-register', \(_e, o = \{\}\) => winlinkRegister\(o, (\(o && o\.origin\) \|\| )?'Settings'\)\);/.test(main));
   // session.errorKind rides beside the text.
-  assert.ok(/errorKind: state === 'error' \? \(_winlinkSessionErrorKind \|\| 'failed'\) : ''/.test(main));
+  assert.ok(/errorKind: state === 'error' \? outcome\.errorKind : ''/.test(main), 'from the one place that words an ending (lib/winlink-outcome.js, #425)');
   assert.ok(/_winlinkSessionErrorKind = 'login-failed'/.test(main));
 });
 
@@ -368,12 +378,14 @@ console.log('the modem audio bridge (every rig, no device picker for ARDOP)');
 test('on a sound-device rig the bridge window carries the modem audio; the modem never opens a device', () => {
   assert.ok(/function winlinkSocketAudioRoute\(\) \{ return true; \}/.test(main), 'every rig is a socket rig');
   assert.ok(/function winlinkIpAudioRoute\(\)/.test(main));
-  const srv = fnBody(main, 'winlinkDispatchTx');
-  assert.ok(/audioSafeSend\(modemBridgeWin\.webContents, 'modem-bridge-tx', \{ pcm: mono24k \}\)/.test(srv), 'TX goes to the bridge window on a sound-device rig');
+  // TX reaches the bridge's play worklet on its own port from the modem audio lane (#187);
+  // the page channel is the fallback while the worklet has no port yet.
+  assert.ok(/winlinkAudio\.attachBridge\(modemBridgeWin\.webContents, \{ tx: !!modemBridge\.playback, rx: true \}\)/.test(main), 'TX goes to the bridge window on a sound-device rig');
+  assert.ok(/audioSafeSend\(modemBridgeWin\.webContents, 'modem-bridge-tx', \{ pcm: mono24k \}\)/.test(fnBody(main, 'winlinkDispatchOut')), 'the fallback path is kept');
   const spawn = fnBody(main, 'winlinkModemAudioReady');
   assert.ok(/if \(!winlinkIpAudioRoute\(\)\) \{[\s\S]*?modemBridgeReady\(10000\)[\s\S]*?throw new Error\(modemBridge\.error/.test(spawn), 'the session waits for the bridge and fails with its reason');
   assert.ok(/ipcMain\.on\('modem-bridge-rx'[\s\S]{0,400}winlinkFeedRx\(pcm, /.test(main), 'bridge RX feeds the server (and the waterfall)');
-  assert.ok(/if \(s\.captureEnded && winlinkSessionActive\(\)\) winlinkAbortSession\(modemBridge\.error\);/.test(main), 'an unplugged device ends the session');
+  assert.ok(/if \(s\.captureEnded && winlinkSessionActive\(\)\) winlinkAbortSession\(modemBridge\.error, \{ kind: 'audio-device', detail: modemBridge\.error \}\);/.test(main), 'an unplugged device ends the session');
   assert.ok(/try \{ stopModemBridge\('quit'\); \} catch \{\}/.test(main), 'stopped at quit');
   const start = fnBody(main, 'ensureModemBridgeWindow');
   assert.ok(/backgroundThrottling: false/.test(start), 'a throttled worklet starves the modem');
@@ -424,7 +436,7 @@ test('the gateway reply says how it is ordered, on every surface', () => {
   // #254: the mail window says the order on hover and as the group's label, not as a sentence.
   assert.ok(/sel\.title = r\.note \|\| 'Gateways'/.test(popout) && /r\.predicted \? 'Best path now' : 'Nearest first'/.test(popout));
   const web = read('renderer/remote.js');
-  assert.ok(/function mailGatewayLabel\(g\)/.test(web) && /mailGatewayNote = msg\.note \|\| ''/.test(web), 'web shows the same word and note');
+  assert.ok(/function mailGatewayLabel\(g\)/.test(web) && /mailGwStatus\(MailView\.gatewayNote\(msg\), false\)/.test(web), 'web shows the same word and note');
   const html = read('renderer/index.html');
   assert.ok(/id="set-winlink-prediction" checked/.test(html), 'the switch is on by default');
   assert.ok(/api\.potacat\.com/.test(html.slice(html.indexOf('set-winlink-prediction'), html.indexOf('set-winlink-prediction') + 900)), 'the copy says where the grid goes');

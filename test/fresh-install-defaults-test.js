@@ -1,6 +1,7 @@
-// What a brand-new install starts with (Casey 2026-09-25): light mode (with
-// charcoal as the dark theme they get if they switch), WSPR as the idle receive mode, and no ECHOCAT Web token. Installs
-// that never chose keep what they have (navy, SSTV), so these live in the
+// What a brand-new install starts with: Appearance System with POTACAT Light
+// and POTACAT Dark (#376, 2026-11-12), WSPR as the idle receive mode
+// (Casey 2026-09-25), and no ECHOCAT Web token. Installs that never chose keep
+// what they have (their look maps once, SSTV), so these live in the
 // fresh-install settings, not in the read-side fallbacks.
 'use strict';
 const { readSrc } = require('./_src');
@@ -17,11 +18,12 @@ const R = (f) => readSrc(path.join(__dirname, '..', f)).replace(/\r\n/g, '\n');
 const main = R('main.js');
 const html = R('renderer/index.html');
 
-test('fresh-install settings: light mode, charcoal when they go dark, and WSPR', () => {
+test('fresh-install settings: System with POTACAT Light and POTACAT Dark, and WSPR', () => {
   const load = main.slice(main.indexOf('function loadSettings()'), main.indexOf('function loadSettings()') + 1200);
   const fresh = (load.match(/return \{ grid: 'FN20jb'[^\n]*\};/) || [''])[0];
-  assert.ok(/lightMode: true/.test(fresh), fresh);
-  assert.ok(/darkVariant: 'charcoal'/.test(fresh), fresh);
+  assert.ok(/\.\.\.AppTheme\.DEFAULTS,/.test(fresh), fresh);
+  assert.ok(!/lightMode|darkVariant/.test(fresh), fresh);
+  assert.deepStrictEqual(require('../lib/app-theme').DEFAULTS, { appearance: 'system', themeLight: 'potacat-light', themeDark: 'potacat-dark' });
   assert.ok(/idleRxMode: 'wspr'/.test(fresh), fresh);
   assert.ok(!/remoteRequireToken/.test(fresh), 'a fresh install must not require an ECHOCAT token');
 });
@@ -31,18 +33,20 @@ test('the first-run welcome screen shows WSPR before any setting is read', () =>
   assert.ok(/<option value="wspr" selected>WSPR<\/option>/.test(sel));
 });
 
-test('the welcome screen starts on Light (its value is what Continue saves on a first run)', () => {
-  // Hidden since Change Theme (the Welcome dropdown drives it), still checked.
-  assert.ok(/<input type="checkbox" id="welcome-light-mode" checked[ >]/.test(html));
+test('the welcome screen shows the look the install has (no hidden switch overrides it on Continue)', () => {
+  assert.ok(!/id="welcome-light-mode"/.test(html));
+  assert.ok(/<div id="welcome-look-picker"><\/div>/.test(html));
+  assert.ok(!/lightMode: lightModeEnabled/.test(R('renderer/app.js')), 'the Welcome save no longer writes a light/dark switch');
 });
 
-// Every window's theme comes from lib/app-theme.js since the design-system
-// themes (d70afbd3), so the fallback is checked there, by behaviour.
-test('existing installs keep their look: the read-side fallback is still navy', () => {
+// Every window's theme comes from lib/app-theme.js, so the fallback is
+// checked there, by behaviour (#376: the old look maps, never a surprise).
+test('existing installs keep their look: settings that never chose map to POTACAT Dark (the old navy)', () => {
   const AppTheme = require('../lib/app-theme');
-  assert.strictEqual(AppTheme.resolveAppTheme({}).variant, 'navy');
-  assert.strictEqual(AppTheme.resolveAppTheme({ lightMode: false }).variant, 'navy');
-  assert.ok(/AppTheme\.resolveAppTheme\(settings\)/.test(main), 'main resolves the theme through lib/app-theme.js');
+  assert.strictEqual(AppTheme.resolveAppTheme({}).appTheme, 'potacat-dark');
+  assert.strictEqual(AppTheme.resolveAppTheme({ lightMode: false }).appTheme, 'potacat-dark');
+  assert.strictEqual(AppTheme.resolveAppTheme({ lightMode: true }).appTheme, 'potacat-light');
+  assert.ok(/AppTheme\.resolveAppTheme\(settings, dark\)/.test(main), 'main resolves the theme through lib/app-theme.js');
 });
 
 // Telemetry (Casey 2026-10-01): on for NEW installs, shown as a ticked box on

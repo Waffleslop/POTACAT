@@ -3,6 +3,8 @@
 // both work. Sets data-theme and (in charcoal dark variant only) the
 // data-dark-variant attribute on <html>.
 function _applyPopoutTheme(payload) {
+  // The shared rule (popout-theme-boot*.js) also sets data-ds (#376).
+  if (window.applyPopoutTheme) return window.applyPopoutTheme(payload);
   const theme = typeof payload === 'string'
     ? payload
     : ((payload && payload.theme) || 'dark');
@@ -123,6 +125,8 @@ function _applyPopoutTheme(payload) {
     }
     logPrompt = s.jtcatLogPrompt === true;
     if (logPromptToggle) logPromptToggle.classList.toggle('active', logPrompt);
+    autoRespot = s.jtcatAutoRespot === true;
+    if (autoRespotToggle) autoRespotToggle.classList.toggle('active', autoRespot);
     fakeIt = s.jtcatFakeIt === true;
     if (fakeItToggle) fakeItToggle.classList.toggle('active', fakeIt);
     if (relogMinInput) {
@@ -163,6 +167,8 @@ function _applyPopoutTheme(payload) {
     reflectHuntCqFallback();
     huntSpotted = s.jtcatHuntSpotted !== false; // default on
     reflectHuntSpotted();
+    nferParks = s.jtcatNferParks !== false; // default on (Casey 2026-11-12)
+    if (nferParksToggle) nferParksToggle.classList.toggle('active', nferParks);
     answerCallers = s.jtcatAnswerCallers !== false; // default on
     reflectAnswerCallers();
     holdTxFreq = !!s.jtcatHoldTxFreq;
@@ -457,10 +463,14 @@ function _applyPopoutTheme(payload) {
   });
   var logPromptToggle = document.getElementById('jp-log-prompt');
   var logPrompt = false;
+  var autoRespotToggle = document.getElementById('jp-auto-respot');
+  var autoRespot = false;
   var fakeItToggle = document.getElementById('jp-fake-it');
   var fakeIt = false;   // split operation "Fake It" (main.js fakeItShiftForTx)
   var huntSpottedToggle = document.getElementById('jp-hunt-spotted');
   var huntSpotted = true;   // default on — see main.js jtcatHuntProgramMatch
+  var nferParksToggle = document.getElementById('jp-nfer-parks');
+  var nferParks = true;     // default on: main.js jtcatNferEnabled, lib/nfer-refs.js
   var skipTx1 = false;
   var holdTxToggle = document.getElementById('jp-hold-tx');
   var holdTxFreq = false;
@@ -888,13 +898,24 @@ function _applyPopoutTheme(payload) {
     { key: 'done',      dir: '--', label: function()  { return 'QSO Complete'; } },
   ];
   var QSO_PHASES_REPLY = [
-    { key: 'reply',     dir: 'tx', label: function(q) { return q.call + ' ' + q.myCall + ' ' + q.myGrid; } },
+    { key: 'reply',     dir: 'tx', label: replyStepLabel },
     { key: 'rpt-rx',    dir: 'rx', label: function(q) { return q.myCall + ' ' + q.call + ' ' + (q.report || '-XX'); } },
     { key: 'r+report',  dir: 'tx', label: function(q) { return q.call + ' ' + q.myCall + ' R' + (q.sentReport || '-XX'); } },
     { key: 'rr73-rx',   dir: 'rx', label: function(q) { return q.myCall + ' ' + q.call + ' RR73'; } },
     { key: '73',        dir: 'tx', label: function(q) { return q.call + ' ' + q.myCall + ' 73'; } },
     { key: 'done',      dir: '--', label: function()  { return 'QSO Complete'; } },
   ];
+
+  // The first answer as it really goes out: with Faster contacts (skip Tx1)
+  // it is a report, not the grid, and a Field Day reply carries the exchange.
+  // Showing the grid there looked like the option was ignored (DA2PK
+  // 2026-11-11). While it is being sent, main's txMsg says it exactly;
+  // afterwards the report we sent stands for it.
+  function replyStepLabel(q) {
+    if (q.phase === 'reply' && q.txMsg) return q.txMsg;
+    if (skipTx1 && q.sentReport) return q.call + ' ' + q.myCall + ' ' + q.sentReport;
+    return q.call + ' ' + q.myCall + ' ' + q.myGrid;
+  }
 
   function renderQsoTracker() {
     reflectCqButton();
@@ -1520,7 +1541,7 @@ function _applyPopoutTheme(payload) {
   if (window.api.onCatFrequency) {
     window.api.onCatFrequency(function(hz) {
       if (!radioFreqEl || !hz) return;
-      radioFreqEl.textContent = (hz / 1000000).toFixed(3) + ' MHz';
+      radioFreqEl.textContent = FreqDots.hzMhz(hz);
       radioHz = hz;
       syncBandMode();
     });
@@ -1725,6 +1746,10 @@ function _applyPopoutTheme(payload) {
   window.api.onJtcatQsoLogged(function(data) {
     hideQsoCard();
     document.getElementById('jp-qso-card-call').textContent = data.callsign || '';
+    // The park(s) it was logged at; the note names any read from the
+    // activator's own spot comment (main.js jtcatWriteLog, lib/nfer-refs.js).
+    document.getElementById('jp-qso-card-parks').textContent = data.parksText || '';
+    document.getElementById('jp-qso-card-note').textContent = data.parksNote || '';
     var sub = [data.band, data.mode];
     if (data.rstSent) sub.push('sent ' + data.rstSent);
     if (data.rstRcvd) sub.push('rcvd ' + data.rstRcvd);
@@ -3249,6 +3274,13 @@ function _applyPopoutTheme(payload) {
       window.api.saveSettings({ jtcatLogPrompt: logPrompt });
     });
   }
+  if (autoRespotToggle) {
+    autoRespotToggle.addEventListener('click', function() {
+      autoRespot = !autoRespot;
+      autoRespotToggle.classList.toggle('active', autoRespot);
+      window.api.saveSettings({ jtcatAutoRespot: autoRespot });
+    });
+  }
   if (fakeItToggle) {
     fakeItToggle.addEventListener('click', function() {
       fakeIt = !fakeIt;
@@ -3261,6 +3293,14 @@ function _applyPopoutTheme(payload) {
       huntSpotted = !huntSpotted;
       reflectHuntSpotted();
       window.api.saveSettings({ jtcatHuntSpotted: huntSpotted });
+    });
+  }
+  // Log every park of a two-fer (#353): the parks the activator's own spot names.
+  if (nferParksToggle) {
+    nferParksToggle.addEventListener('click', function() {
+      nferParks = !nferParks;
+      nferParksToggle.classList.toggle('active', nferParks);
+      window.api.saveSettings({ jtcatNferParks: nferParks });
     });
   }
 
@@ -3537,7 +3577,7 @@ function _applyPopoutTheme(payload) {
     if (btn) btn.classList.add('active');
     bandSelectFollowActive();
     decodeLog = [];
-    bandActivity.innerHTML = '<div class="jp-empty">Following the radio to ' + esc(d.band || ((khz / 1000).toFixed(3) + ' MHz')) + '...</div>';
+    bandActivity.innerHTML = '<div class="jp-empty">Following the radio to ' + esc(d.band || FreqDots.khzMhz(khz)) + '...</div>';
     myActivity.innerHTML = '<div class="jp-empty">No activity yet</div>';
     markerLayer.clearLayers();
     arcLayer.clearLayers();
@@ -3617,12 +3657,9 @@ function _applyPopoutTheme(payload) {
   var pkHintEl = document.getElementById('jp-pk-hint');
   var PK_MODE_LABEL = { FT8: 'FT8', FT4: 'FT4', FT2: 'FT2', WSPR: 'WSPR', PSK31: 'PSK', JTTY: 'JTTY' };
   var pk = { mode: '', band: '' };
-  // Dials in MHz everywhere (14.074, 7.0475, 14.0956): three places, more
-  // only when the dial has them.
+  // Dials the VFO way everywhere (14.074.00, 7.047.50; lib/freq-dots.js).
   function pkFmtMhz(k) {
-    var n = Number(k);
-    if (!isFinite(n) || n <= 0) return '';
-    return (n / 1000).toLocaleString('en-US', { useGrouping: false, minimumFractionDigits: 3, maximumFractionDigits: 4 }) + ' MHz';
+    return FreqDots.khzMhz(k);
   }
   function pkActiveBand() {
     var a = document.querySelector('.jp-band-opt.active');
@@ -3830,8 +3867,8 @@ function _applyPopoutTheme(payload) {
       o.dataset.call = d.call; o.dataset.mode = d.mode; o.dataset.freq = d.khz; o.dataset.band = d.band;
       if (d.hound) o.dataset.hound = '1';
       if (d.superFox) o.dataset.superfox = '1';
-      o.textContent = d.call + ' ' + d.mode + ' ' + (d.khz / 1000).toFixed(3) + (d.superFox ? ' SuperFox' : d.hound ? ' F/H' : '');
-      o.title = (d.entity ? d.entity + ': ' : '') + d.call + ' on ' + d.mode + ' ' + (d.khz / 1000).toFixed(3) + ' MHz' + (d.end ? ', until ' + d.end : '');
+      o.textContent = d.call + ' ' + d.mode + ' ' + FreqDots.fromKhz(d.khz) + (d.superFox ? ' SuperFox' : d.hound ? ' F/H' : '');
+      o.title = (d.entity ? d.entity + ': ' : '') + d.call + ' on ' + d.mode + ' ' + FreqDots.khzMhz(d.khz) + (d.end ? ', until ' + d.end : '');
       g.appendChild(o);
     });
     bandSelect.appendChild(g);
@@ -3851,7 +3888,7 @@ function _applyPopoutTheme(payload) {
       bandSelectFollowActive();
       var sub = opt.dataset.superfox ? 'They run SuperFox, which POTACAT\'s Hound mode does not decode. Use WSJT-X in SuperFox Hound mode for this one.'
         : opt.dataset.hound ? (houndMode ? 'Fox/Hound: Hound is on.' : 'They run Fox/Hound: turn on Hound before you call.') : '';
-      showJtcatWarnToast('Tuned to ' + opt.dataset.call + ' on ' + (khz / 1000).toFixed(3) + ' MHz ' + (mode || ''), sub);
+      showJtcatWarnToast('Tuned to ' + opt.dataset.call + ' on ' + FreqDots.khzMhz(khz) + ' ' + (mode || ''), sub);
     }, true);
     if (window.api.onJtcatDxpeditions) window.api.onJtcatDxpeditions(renderDxpeditionDials);
     if (window.api.jtcatDxpeditionsGet) window.api.jtcatDxpeditionsGet().then(renderDxpeditionDials).catch(function() {});
@@ -4101,7 +4138,7 @@ function _applyPopoutTheme(payload) {
       var chip = document.createElement('span');
       chip.className = 'jp-wspr-chip' + (wsprHopSel.indexOf(b) >= 0 ? ' on' : '');
       chip.textContent = b.replace('m', '');
-      chip.title = b + ' — ' + WSPR_BAND_FREQS[b] + ' kHz';
+      chip.title = b + ' — ' + FreqDots.khzMhz(WSPR_BAND_FREQS[b]);
       chip.dataset.band = b;
       chip.addEventListener('click', function() {
         var i = wsprHopSel.indexOf(b);
@@ -4163,7 +4200,7 @@ function _applyPopoutTheme(payload) {
           '<span class="w-time">' + wsprEsc(wsprFmtTime(s.timeUtc)) + '</span>' +
           '<span class="w-db">' + (s.snr != null ? s.snr : '') + '</span>' +
           '<span class="w-dt">' + (s.dt != null ? s.dt.toFixed(1) : '') + '</span>' +
-          '<span class="w-freq">' + (s.freqMHz != null ? s.freqMHz.toFixed(4) : '') + '</span>' +
+          '<span class="w-freq">' + (s.freqMHz != null ? FreqDots.fromMhz(s.freqMHz) : '') + '</span>' +
           '<span class="w-dr">' + (s.drift != null ? s.drift : '') + '</span>' +
           '<span class="w-call">' + wsprEsc(s.call || '') + '</span>' +
           '<span class="w-grid">' + wsprEsc(s.grid || '') + '</span>' +

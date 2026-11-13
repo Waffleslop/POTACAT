@@ -3,6 +3,8 @@
 // both work. Sets data-theme and (in charcoal dark variant only) the
 // data-dark-variant attribute on <html>.
 function _applyPopoutTheme(payload) {
+  // The shared rule (popout-theme-boot*.js) also sets data-ds (#376).
+  if (window.applyPopoutTheme) return window.applyPopoutTheme(payload);
   const theme = typeof payload === 'string'
     ? payload
     : ((payload && payload.theme) || 'dark');
@@ -262,10 +264,10 @@ function _applyPopoutTheme(payload) {
     return `${datePart} ${t.slice(0, 2)}:${t.slice(2, 4)}`;
   }
 
-  /** Display an integer kHz as "14074" (no decimals). */
+  /** kHz written the VFO way, 14.074.00 (lib/freq-dots.js). */
   function formatFreq(kHz) {
     if (kHz == null || isNaN(kHz)) return '';
-    return String(Math.round(kHz));
+    return FreqDots.fromKhz(kHz);
   }
 
   /** Render the past-QSOs panel. */
@@ -802,15 +804,29 @@ function _applyPopoutTheme(payload) {
   let reviewId = 0;
   let reviewHeld = null;
   const reviewBar = document.getElementById('lp-review');
+  // The note names parks read from the activator's spot comment. It goes with
+  // the reference list as it was offered: once the operator edits the box, the
+  // note no longer describes what is in it and is dropped (and comes back if
+  // the box is put back).
+  let reviewShown = null;
+  const refText = (v) => String(v || '').replace(/\s+/g, '').toUpperCase();
   function reviewText(p) {
-    return 'Review before saving' + (p.waiting ? ' · ' + p.waiting + ' more waiting' : '');
+    const noteHolds = p.nferNote && refText(refInput.value) === refText(p.reference);
+    return 'Review before saving' + (p.waiting ? ' · ' + p.waiting + ' more waiting' : '')
+      + (noteHolds ? ' · ' + p.nferNote : '');
   }
+  refInput.addEventListener('input', () => {
+    if (reviewId && reviewShown && reviewShown.nferNote) reviewBar.textContent = reviewText(reviewShown);
+  });
   function showReview(p) {
     reviewHeld = null;
     reviewId = p.review;
     applySpotPrefill(p);
-    respotCheckEl.checked = false; // the automatic log never re-spots
+    // Off, unless JTCAT's "Re-spot the activator" option is on (#351): then
+    // ticked, and this box alone decides whether the spot goes out.
+    respotCheckEl.checked = !!p.respotOn;
     clearBtn.textContent = "Don't log";
+    reviewShown = p;
     reviewBar.textContent = reviewText(p);
     reviewBar.hidden = false;
     window.api.logReviewShown(p.review);
@@ -962,7 +978,7 @@ function _applyPopoutTheme(payload) {
   (async () => {
     try {
       const s = await window.api.getSettings();
-      if (s && s.lightMode) applyTheme('light');
+      if (s && s.themeNow) applyTheme(s.themeNow);
     } catch {}
   })();
 

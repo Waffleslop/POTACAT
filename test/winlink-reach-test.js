@@ -29,7 +29,7 @@ console.log('Winlink: only gateways this radio can call');
 test('149.09 MHz (W9OU-10) is refused: not an amateur band', () => {
   const r = R.gatewayReach(149090, FLEX);
   assert.strictEqual(r.ok, false);
-  assert.match(r.why, /149\.09 MHz is not in an amateur band/);
+  assert.match(r.why, /149\.090\.00 MHz is not in an amateur band/);
   assert.strictEqual(R.gatewayReach(149090, {}).ok, false, 'even with nothing known about the radio');
   assert.strictEqual(R.gatewayReach(27185, {}).ok, false, 'CB is not amateur either');
   assert.strictEqual(R.gatewayReach(5000, {}).ok, false);
@@ -38,14 +38,14 @@ test('149.09 MHz (W9OU-10) is refused: not an amateur band', () => {
 test('a band the radio is not set up for is refused, and says where to change it', () => {
   const r = R.gatewayReach(145090, FLEX);
   assert.strictEqual(r.ok, false);
-  assert.match(r.why, /145\.09 MHz is on 2m, a band FLEX-8600 is not set up for \(Settings > My Rigs > Bands\)/);
+  assert.match(r.why, /145\.090\.00 MHz is on 2m, a band FLEX-8600 is not set up for \(Settings > My Rigs > Bands\)/);
   assert.strictEqual(R.gatewayReach(3588, FLEX).ok, false, '#336: 80 m on a radio set for 40 to 6 m');
 });
 
 test('outside the radio\'s range is refused even when the band is ticked', () => {
   const r = R.gatewayReach(145090, { bands: ['2m'], reach: [[30000, 54000000]], rigName: 'FLEX-8600' });
   assert.strictEqual(r.ok, false);
-  assert.match(r.why, /FLEX-8600 cannot transmit on 145\.09 MHz/);
+  assert.match(r.why, /FLEX-8600 cannot transmit on 145\.090\.00 MHz/);
 });
 
 test('a gateway the radio can call is allowed', () => {
@@ -114,8 +114,9 @@ test('a refused key-down ends the attempt instead of keying into nothing', () =>
   const f = main.slice(i, main.indexOf('}, { host: \'127.0.0.1\', log: winlinkLog });', i));
   assert.ok(/keyed = handleRemotePtt\(true, \{[^}]*\}\) !== false;/.test(f), 'the refusal is read, not ignored');
   const b = f.slice(f.indexOf('if (!keyed) {'));
-  assert.ok(/winlinkTxActive = false;/.test(b) && /winlinkAbortSession\(`the radio refused to transmit: \$\{why\}`\);/.test(b) && /return false;/.test(b));
-  assert.ok(f.indexOf('if (!keyed) {') < f.indexOf('winlinkSendPreKeyAudio();'), 'no audio is sent after a refusal');
+  assert.ok(/winlinkTxActive = false;/.test(b) && /winlinkAbortSession\(`the radio refused to transmit: \$\{why\}`, \{ kind: 'ptt-refused', detail: why \}\);/.test(b) && /return false;/.test(b));
+  assert.ok(f.indexOf('if (!keyed) {') < f.indexOf('winlinkLaneKeyDown();'), 'no audio is sent after a refusal');
+  assert.ok(/if \(winlinkAudio\) winlinkAudio\.key\(false\); \/\/ nothing it held is sent after a refusal/.test(b), 'and what the lane held is dropped');
 });
 
 test('the modem must be on POTACAT\'s audio before anything tunes or keys', () => {
