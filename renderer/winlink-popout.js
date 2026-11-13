@@ -161,15 +161,11 @@
     if (m.id === 'mercury') note = 'Experimental: few gateways run Mercury yet.';
     if (m.id === 'vara' || m.id === 'varafm') note = 'Your own ' + (m.id === 'varafm' ? 'VARA FM' : 'VARA HF') + ', with its PTT set to VOX — POTACAT starts it if needed and keys the radio.';
     if (m.note) note = m.note;   // a radio mode that runs with a caveat: no CAT control, the operator sets the dial (NA4DQ)
-    if (m.id === 'telnet') {
-      // Say WHY the radio modes are greyed — a tooltip on a disabled option
-      // is invisible on most systems. One line per distinct reason.
-      var seen = {};
-      var reasons = ((state && state.modes) || []).filter(function (x) { return !x.available && x.reason && !seen[x.reason] && (seen[x.reason] = 1); })
-        .map(function (x) { return x.reason; });
-      if (reasons.length) note = 'Radio: ' + reasons.join(' · ');
-    }
-    $('wl-mode-note').textContent = note;
+    // Say WHY the other modes are greyed, whichever mode is picked (#435) —
+    // a tooltip on a disabled option is invisible on most systems. One line
+    // per distinct reason, as ECHOCAT Web says it.
+    var why = WinlinkMailView.modeNoteLines((state && state.modes) || []);
+    $('wl-mode-note').textContent = [note].concat(why).filter(Boolean).join(' ');
     if (radio && !gateways.length) loadGateways(false);
     renderFavBtn();
     renderDial();
@@ -951,6 +947,7 @@
   }
 
   var loadSeq = 0;
+  var gwLoading = false;   // a list is being fetched or ranked (#435)
   function loadGateways() {
     var m = currentMode();
     if (m.id === 'telnet' || !m.available) return;
@@ -959,6 +956,7 @@
     var hf = m.id !== 'packet' && m.id !== 'varafm';
     var band = $('wl-band').value;
     var seq = ++loadSeq;
+    gwLoading = true;
     lastList = null;
     // Favorites are usable at once, while the list and its prediction load.
     favRows = favs().filter(function (f) { return f.mode === m.id && (!band || f.band === band); })
@@ -971,8 +969,18 @@
     renderFavBtn();
     window.api.gateways(m.id, band).then(function (r) {
       if (seq !== loadSeq) return;
+      gwLoading = false;
+      // The "Ranking gateways" line from a Connect pressed early gives way to the session line.
+      if ($('wl-text').textContent === WinlinkMailView.connectWaitText(m.id, state && state.predictionOn)) renderSession((state && state.session) || {});
       predictStop();
-      if (!r || !r.ok) { sel.innerHTML = favHtml + '<option value="">' + esc((r && r.error) || 'No list') + '</option>'; pendingPick = null; renderDial(); renderFavBtn(); return; }
+      if (!r || !r.ok) {
+        sel.innerHTML = favHtml + '<option value="">' + esc(WinlinkMailView.gatewaysFailed().option) + '</option>';
+        // The reason in words, and where Try again is (#435).
+        if (note) note.textContent = WinlinkMailView.gatewaysFailed(r && r.error).text + ' Press the round arrow beside the list to try again.';
+        pendingPick = null; renderDial(); renderFavBtn(); return;
+      }
+      // No grid square: no distances and no ranking; say what to set (#435).
+      if (note) note.textContent = r.note && r.note === WinlinkMailView.gridNote('') ? r.note : '';
       gateways = r.list || [];
       // The ranking is said on hover, not as a sentence beside the list (#254).
       sel.title = r.note || 'Gateways';
@@ -1150,7 +1158,8 @@
       var o = { mode: m.id };
       if (m.id !== 'telnet') {
         var g = pickedGateway();
-        if (!g) { $('wl-text').textContent = 'Pick a gateway first'; return; }
+        // Still being fetched or ranked (up to about two minutes): say so, not "pick one" (#435).
+        if (!g) { $('wl-text').textContent = gwLoading ? WinlinkMailView.connectWaitText(m.id, state && state.predictionOn) : 'Pick a gateway first'; return; }
         o.gateway = g.call; o.dialKhz = g.dialKhz; o.url = g.url;
       }
       window.api.connect(o).then(function (r) {

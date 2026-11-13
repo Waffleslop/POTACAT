@@ -440,6 +440,7 @@ const { attachMercuryRadioBridge } = require('./lib/mercury-radio-bridge');
 const mercuryAudioBridge = require('./lib/mercury-audio-bridge');
 const MercuryAppProto = require('./lib/mercury-app-protocol');
 const WinlinkPat = require('./lib/winlink-pat');
+const WinlinkMailView = require('./lib/winlink-mail-view'); // first-run words shared with every surface (#435)
 const WinlinkDiag = require('./lib/winlink-diag');
 const WinlinkHistory = require('./lib/winlink-history');
 const WinlinkOutcome = require('./lib/winlink-outcome'); // how a session ended, in the words every surface shows (#425)
@@ -11935,7 +11936,7 @@ function winlinkModemReport() {
  */
 async function winlinkModemAudioReady({ modemRate, modemName }) {
   if (!winlinkAudio || !winlinkAudio.port || winlinkAudio.modemRate !== modemRate) await startWinlinkAudio({ modemRate });
-  if (!winlinkAudio || !winlinkAudio.port) throw new Error('POTACAT\'s modem audio server is not running — restart Winlink');
+  if (!winlinkAudio || !winlinkAudio.port) throw new Error(WinlinkMailView.AUDIO_DOWN);
   if (settings.audioSource === 'smartsdr' && !(smartSdrAudio && smartSdrAudio.connected)) throw new Error(`Flex Direct audio is not connected — the radio must be on for ${modemName}`);
   if (settings.audioSource === 'icom-network' && !_icomNetworkTransport) throw new Error(`Icom Network audio is not connected — the radio must be on for ${modemName}`);
   if (!winlinkIpAudioRoute()) {
@@ -12433,7 +12434,7 @@ function killDirewolf() {
 async function spawnDirewolf() {
   killDirewolf();
   if (!DirewolfProcess.direwolfSupported(process.platform)) throw new Error('Packet (Dire Wolf) is not available on this system');
-  if (!_winlinkShimPort) throw new Error('The radio control shim is not running — restart Winlink');
+  if (!_winlinkShimPort) throw new Error(WinlinkMailView.SHIM_DOWN);
   const bin = findDirewolf();
   if (!bin.found) throw new Error('Dire Wolf was not found — reinstall POTACAT or set its path in Settings');
   await winlinkModemAudioReady({ modemRate: DirewolfProcess.DIREWOLF_RATE, modemName: 'direwolf' });
@@ -12726,7 +12727,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
     // tunes, no modem starts, nothing keys (lib/winlink-reach.js).
     const reach = WinlinkReach.gatewayReach(dialKhz, winlinkReachOpts());
     if (!reach.ok) { winlinkLog(`session refused: ${String(gateway || '').toUpperCase()} — ${reach.why}`); return { ok: false, error: reach.why, reason: 'out-of-reach' }; }
-    if (!_winlinkShimPort) return { ok: false, error: 'The radio control shim is not running — restart Winlink' };
+    if (!_winlinkShimPort) return { ok: false, error: WinlinkMailView.SHIM_DOWN };
     if (_swrTripped) return { ok: false, error: 'The SWR guard has tripped — fix the antenna match first' };
     if (!acquireRadio('winlink')) return { ok: false, error: `The radio is in use by ${radioOwner}`, reason: 'radio-busy' };
   }
@@ -13917,8 +13918,10 @@ async function winlinkGateways(mode, band) {
     // last line of the gateway list instead of a sentence beside it (#254,
     // Casey 2026-11-11: "I don't need to see that forever").
     const leftOut = onBands.dropped || 0;
-    const note = WinlinkPat.rankingNote({ predicted, count: list.length, hf });
-    const tell = `gateways (${mode}${band ? ', ' + band : ''}): ${list.length} listed${onBands.dropped ? ' (' + onBands.dropped + ' the radio cannot call left out)' : ''}, ${predicted ? list.filter((g) => g.quality != null).length + ' with a propagation prediction' : 'nearest first' + (hf && settings.winlinkPrediction !== false && list.length ? (_voacapService.up === false ? ` — POTACAT's VOACAP service is not available (${_voacapService.why})` : ' — no prediction came back') : '')}`;
+    // No grid square: Pat has no distances and cannot predict from here, so
+    // the list is in no useful order; say what to set and where (#435).
+    const note = WinlinkMailView.gridNote(settings.grid) || WinlinkPat.rankingNote({ predicted, count: list.length, hf });
+    const tell = `gateways (${mode}${band ? ', ' + band : ''})${WinlinkMailView.hasGrid(settings.grid) ? '' : ' with no grid square set'}: ${list.length} listed${onBands.dropped ? ' (' + onBands.dropped + ' the radio cannot call left out)' : ''}, ${predicted ? list.filter((g) => g.quality != null).length + ' with a propagation prediction' : 'nearest first' + (hf && settings.winlinkPrediction !== false && list.length ? (_voacapService.up === false ? ` — POTACAT's VOACAP service is not available (${_voacapService.why})` : ' — no prediction came back') : '')}`;
     if (tell !== _winlinkGatewaysLogged) { _winlinkGatewaysLogged = tell; winlinkLog(tell); }
     return { ok: true, mode, band: band || '', list, predicted, note, leftOut };
   } catch (e) {

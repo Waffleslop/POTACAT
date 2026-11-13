@@ -583,7 +583,7 @@ test('W4e: Winlink off on the shack shows the tab with where to turn it on, and 
   p.mailOnMessage({ type: 'winlink-state', enabled: false, patReady: false, modes: [], session: { state: 'idle' } });
   assert.strictEqual(p.$('mail-tab-btn').hidden, false, 'the tab shows');
   assert.strictEqual(p.$('mail-off').hidden, false);
-  assert.strictEqual(p.$('mail-off').textContent, 'Turn Winlink on at the shack: Settings > Station > Winlink');
+  assert.strictEqual(p.$('mail-off').textContent, 'Winlink is off at the shack. On the shack computer, open Settings > Station > Winlink and tick Enable Winlink email.');
   assert.ok(p.$('mail-view').classList.contains('mail-is-off'));
   assert.ok(/#mail-view\.mail-is-off > :not\(#mail-off\) \{ display: none !important; \}/.test(MAIL_CSS), 'everything else in the tab is hidden');
   p.mailOnOpen();
@@ -739,7 +739,7 @@ test('W0: Send / Receive: band chips for the mode and the rig, gateway cards wit
   chip(p, '40m').click();
   const ask = p.take().find((m) => m.type === 'winlink-gateways-get');
   assert.deepStrictEqual([ask.mode, ask.band], ['ardop', '40m']);
-  assert.strictEqual(p.$('mail-radio-line').textContent, 'Waiting for the gateway list.');
+  assert.strictEqual(p.$('mail-radio-line').textContent, 'Ranking gateways… This can take a minute or two.');
   assert.ok(p.$('mail-connect').hidden, 'no Connect without a gateway');
   seg(p, 'packet').click();
   assert.deepStrictEqual(p.$('mail-band').children.map((c) => c.textContent), ['2m', '1.25m', '70cm', 'All']);
@@ -898,6 +898,117 @@ test('#475: Reply all fills To with the sender and Cc with everyone else but us;
 test('#475: the page carries lib/winlink-mail-actions.js inlined by the server', () => {
   assert.ok(/<!-- winlink-mail-actions-js -->/.test(HTML));
   assert.ok(/\['winlink-mail-actions-js', 'winlink-mail-actions\.js'\]/.test(SERVER));
+});
+
+// ── #435: the Winlink first run ──────────────────────────────────────────────
+test('#435: the off line names the real Settings place and the checkbox to tick', () => {
+  const html = readSrc(path.join(ROOT, 'renderer', 'index.html'));
+  assert.ok(/data-tab="station">Station</.test(html), 'Settings has a Station tab');
+  assert.ok(/<legend>Winlink \(email over radio\)<\/legend>/.test(html), 'its Winlink section');
+  assert.ok(/id="set-winlink-enable"[^>]*> Enable Winlink email/.test(html), 'the checkbox the line names');
+  assert.ok(/Enable Winlink email/.test(MailView.OFF_TEXT) && /Settings > Station > Winlink/.test(MailView.OFF_TEXT));
+});
+
+test('#435: a list the shack never answers stops saying Loading and offers Try again', () => {
+  const p = loadMail();
+  p.mailOnMessage(state({ mode: 'ardop' }));
+  p.mailOnOpen();
+  p.$('mail-open-connect').click();
+  const ask = p.take().find((m) => m.type === 'winlink-gateways-get');
+  assert.ok(ask);
+  p.clock.now += MailView.gatewayWait('ardop', true) - 1000;
+  p.tick();
+  assert.strictEqual(p.$('mail-gateway').textContent, 'Loading, predicting propagation…', 'still waiting inside the shack\'s own limit');
+  p.clock.now += 2000;
+  p.tick();
+  assert.strictEqual(p.$('mail-gateway').textContent, 'The list did not load');
+  assert.strictEqual(p.$('mail-gw-note').textContent, 'The shack did not send the gateway list.');
+  assert.strictEqual(p.$('mail-gw-retry').hidden, false);
+  assert.strictEqual(p.$('mail-radio-line').textContent, 'No gateway to call on this band.');
+  p.mailOnMessage({ type: 'winlink-gateways', mode: 'ardop', list: GATEWAYS, predicted: true, reqId: ask.reqId });
+  assert.strictEqual(p.$('mail-gateway').textContent, 'The list did not load', 'a very late answer is not drawn over Try again');
+  assert.strictEqual(MailView.gatewayWait('packet', true), 60000);
+  assert.strictEqual(MailView.gatewayWait('ardop', true), 150000);
+});
+
+test('#435: with no link to the shack the list says so at once, with Try again', () => {
+  const p = loadMail();
+  p.mailOnMessage(state({ mode: 'ardop' }));
+  p.mailOnOpen();
+  p.ws.readyState = 3;
+  p.$('mail-open-connect').click();
+  assert.strictEqual(p.$('mail-gateway').textContent, 'The list did not load');
+  assert.strictEqual(p.$('mail-gw-note').textContent, MailView.NOT_CONNECTED);
+  assert.strictEqual(p.$('mail-gw-retry').hidden, false);
+  p.ws.readyState = 1;
+  p.$('mail-gw-retry').click();
+  assert.ok(p.take().some((m) => m.type === 'winlink-gateways-get'), 'Try again asks once the link is back');
+});
+
+test('#435: a request the shack failed outright (op gateways-get) clears Loading too', () => {
+  const p = loadMail();
+  p.mailOnMessage(state({ mode: 'ardop' }));
+  p.mailOnOpen();
+  p.$('mail-open-connect').click();
+  const ask = p.take().find((m) => m.type === 'winlink-gateways-get');
+  p.mailOnMessage({ type: 'winlink-result', op: 'gateways-get', ok: false, error: 'boom', reqId: ask.reqId });
+  assert.strictEqual(p.$('mail-gw-note').textContent, 'The gateway list did not load: boom.');
+  assert.ok(/result\(type\.replace\(\/\^winlink-\/, ''\)/.test(readSrc(path.join(ROOT, 'main.js'))), 'main answers a thrown request with op gateways-get');
+});
+
+test('#435: while the list is ranked the Connect line says so; FM lists say Loading', () => {
+  assert.strictEqual(MailView.connectWaitText('ardop', true), 'Ranking gateways… This can take a minute or two.');
+  assert.strictEqual(MailView.connectWaitText('ardop', false), 'Loading gateways…');
+  assert.strictEqual(MailView.connectWaitText('packet', true), 'Loading gateways…');
+  assert.ok(/showToast\(mailGwLoaded \? 'Pick a gateway first' : MailView\.connectWaitText/.test(REMOTE), '"Pick a gateway first" only once the list is here');
+});
+
+test('#435: no grid square: the list says what to set and where', () => {
+  assert.strictEqual(MailView.gridNote(''), 'No grid square is set, so the list has no distances and is not ranked for you. Set it in Settings > Station > QTH Grid Square.');
+  assert.strictEqual(MailView.gridNote('FN20'), '');
+  assert.strictEqual(MailView.gridNote('fn20xa'), '');
+  assert.strictEqual(MailView.gridNote('12AB'), MailView.gridNote(''));
+  const html = readSrc(path.join(ROOT, 'renderer', 'index.html'));
+  assert.ok(/QTH Grid Square: <input type="text" id="set-grid"/.test(html), 'the label the note names');
+  assert.ok(/const note = WinlinkMailView\.gridNote\(settings\.grid\) \|\| WinlinkPat\.rankingNote/.test(readSrc(path.join(ROOT, 'main.js'))), 'the shack sends it as the list note');
+  const p = loadMail();
+  p.mailOnMessage(state({ mode: 'ardop' }));
+  p.mailOnOpen();
+  p.$('mail-open-connect').click();
+  const ask = p.take().find((m) => m.type === 'winlink-gateways-get');
+  p.mailOnMessage({ type: 'winlink-gateways', mode: 'ardop', list: GATEWAYS, predicted: false, note: MailView.gridNote(''), reqId: ask.reqId });
+  assert.strictEqual(p.$('mail-gw-note').textContent, MailView.gridNote(''), 'ECHOCAT Web shows it under the list');
+});
+
+test('#435: nothing tells the operator to "restart Winlink" any more; the words say what to do', () => {
+  for (const f of ['main.js', 'renderer/winlink-popout.js', 'renderer/remote.js', 'renderer/app.js']) {
+    assert.ok(!/restart Winlink/i.test(readSrc(path.join(ROOT, f))), f);
+  }
+  const main = readSrc(path.join(ROOT, 'main.js'));
+  assert.strictEqual((main.match(/WinlinkMailView\.SHIM_DOWN/g) || []).length, 2);
+  assert.strictEqual((main.match(/WinlinkMailView\.AUDIO_DOWN/g) || []).length, 1);
+  assert.ok(/Close POTACAT and open it again/.test(MailView.SHIM_DOWN) && /Close POTACAT and open it again/.test(MailView.AUDIO_DOWN));
+});
+
+test('#435: Check my account says whether Winlink accepted the saved password', () => {
+  assert.deepStrictEqual(MailView.passwordCheck({ ok: true, email: 'a@b.c' }), { ok: true, text: 'Winlink accepted your password.' });
+  assert.strictEqual(MailView.passwordCheck({ ok: false, error: 'recovery email: HTTP 500 — Invalid password' }).ok, false);
+  assert.strictEqual(MailView.passwordCheck({ ok: false, error: 'recovery email: HTTP 400 — Missing callsign or password in config' }).text, 'No Winlink password is saved yet. Type it in Winlink password and press Save.');
+  assert.deepStrictEqual(MailView.passwordCheck({ ok: false, error: 'fetch failed' }), { ok: null, text: 'Could not check the password: fetch failed.' });
+  const app = readSrc(path.join(ROOT, 'renderer', 'app.js'));
+  assert.ok(/WinlinkMailView\.passwordCheck\(pw\)/.test(app), 'the Settings check uses it');
+  assert.ok(/<script src="\.\.\/lib\/winlink-mail-view\.js"><\/script>/.test(readSrc(path.join(ROOT, 'renderer', 'index.html'))), 'loaded in the main window');
+});
+
+test('#435: the desktop Mail window: mode reasons whatever is picked; Ranking, not "Pick a gateway first", while the list loads', () => {
+  const pop = readSrc(path.join(ROOT, 'renderer', 'winlink-popout.js'));
+  assert.ok(!/if \(m\.id === 'telnet'\) \{\s*\/\/ Say WHY/.test(pop), 'reasons no longer only on Internet');
+  assert.ok(/WinlinkMailView\.modeNoteLines\(/.test(pop));
+  assert.ok(/gwLoading \? WinlinkMailView\.connectWaitText\(/.test(pop));
+  assert.ok(pop.includes("note.textContent = r.note && r.note === WinlinkMailView.gridNote('') ? r.note : ''"), 'the grid note is shown, not only a tooltip');
+  assert.ok(/<script src="\.\.\/lib\/winlink-mail-view\.js"><\/script>/.test(readSrc(path.join(ROOT, 'renderer', 'winlink-popout.html'))));
+  assert.deepStrictEqual(MailView.modeNoteLines([{ id: 'telnet', label: 'Internet', available: true }, { id: 'ardop', label: 'ARDOP (radio)', available: false, reason: 'Set up a radio first (Settings > My Rigs)' }]),
+    ['ARDOP (radio) is not available: Set up a radio first (Settings > My Rigs).']);
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);
