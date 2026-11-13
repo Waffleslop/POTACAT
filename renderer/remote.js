@@ -3286,6 +3286,12 @@
       if (rcPowerGroup) rcPowerGroup.classList.toggle('hidden', !s.capabilities.power);
       const vfPowerRow = document.getElementById('vf-power-row');
       if (vfPowerRow) vfPowerRow.classList.toggle('hidden', !s.capabilities.power);
+      // #485: powerOn false = off over CAT but not on (FTX-1): Off alone.
+      const offOnly = s.capabilities.powerOn === false;
+      const rcPowerOn = document.getElementById('rc-power-on');
+      if (rcPowerOn) rcPowerOn.classList.toggle('hidden', offOnly);
+      const vfPowerOn = document.getElementById('vf-power-on-btn');
+      if (vfPowerOn) vfPowerOn.classList.toggle('hidden', offOnly);
       // Clamp TX power slider to radio's min/max
       if (s.capabilities.minPower != null) rcTxPowerSlider.min = s.capabilities.minPower;
       if (s.capabilities.maxPower != null) rcTxPowerSlider.max = s.capabilities.maxPower;
@@ -16079,6 +16085,13 @@ var _paddleHoldTimer = { dit: null, dah: null };
     var note = mailEl('mail-read-note');
     note.textContent = deleted ? MailActions.deletedNote(m, mailState && mailState.deletedDays, Date.now()) : '';
     note.classList.toggle('hidden', !deleted);
+    // How it went out (#442): message.sentRoute, from a shack that kept it; nothing otherwise.
+    var route = mailEl('mail-read-route');
+    if (route) {
+      var routeText = MailActions.sentRouteLine(m.sentRoute);
+      route.textContent = routeText;
+      route.classList.toggle('hidden', !routeText);
+    }
     mailEl('mail-read-body').textContent = m.body || '';
     var atts = mailEl('mail-read-atts');
     atts.textContent = '';

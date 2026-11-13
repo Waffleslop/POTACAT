@@ -264,6 +264,7 @@ const TESTS = [
   'test/winlink-auto-retry-test.js', // #425: one automatic retry after a dropped link, never after no answer or Abort; countdown, channel check, Cancel
   'test/winlink-arq-timeout-test.js', // #425: the ARDOP link timeout is a setting; it reaches our Pat build through the environment; the summary says the value in force
   'test/winlink-contacts-test.js', // the Winlink address book, and the Position report and POTA spot forms
+  'test/winlink-sent-routes-test.js', // #442: how each sent message went out (gateway, dial, mode or internet, time), kept by message id
   'test/winlink-summary-store-test.js', // #425: the session summary lines survive a restart, so Report a Bug still holds the session that dropped
   'test/winlink-folders-test.js', // #462 #475: Archive and back, the Deleted folder (copies, Restore, purge after N days), Reply all; a real Pat when present
   'test/winlink-tx-level-test.js', // #300: Winlink's own TX level; the summary says the RX peak and what our overs sent; the pause between overs is not a gap
@@ -286,6 +287,7 @@ const TESTS = [
   'test/icom-ptt-memory-mode-test.js', // nj7n_nate: no frequency re-send around an Icom PTT mode swap (memory mode)
   'test/ssb-sideband-tune-test.js', // a 60 m SSB spot tunes USB
   'test/ssb-sideband-one-rule-test.js', // #445: band buttons and typed frequencies pick LSB/USB by band in voice SSB; one copy of the rule
+  'test/mac-mic-access-test.js', // #463: a Mac that refuses the microphone is named, logged and in Report a Bug
   'test/capture-stall-test.js', // kc8zp_ryan: JTCAT capture rebuilt when the OS mutes/suspends it or it stops delivering
   'test/jtcat-capture-gate-test.js', // #133: a remote-started FT8 capture is restarted like a desktop one; one capture build at a time
   'test/jtcat-log-comment-test.js', // dcxweaver: the "JTCAT FT8" COMMENT is optional (default on)
@@ -478,6 +480,7 @@ const TESTS = [
   'test/activation-filename-date-test.js',
   'test/remote-rig-test.js',
   'test/remote-rig-power-test.js', // #152: rig power on/off from a remote POTACAT; no Power Off under a TX
+  'test/rig-power-on-cap-test.js', // #485: FTX-1 powers off over CAT but not on; Power On hidden everywhere
   'test/remote-multi-client-test.js',
   'test/remote-bridge-test.js',
   'test/sstv-context-test.js',
@@ -490,6 +493,7 @@ const TESTS = [
   'test/web-row-alignment-test.js',
   'test/worked-other-test.js',
   'test/decode-contract-test.js',
+  'test/ft8-wasm-bracket-test.js',
   'test/layout-alignment-test.js',
   'test/freq-dots-test.js', // every frequency an operator reads is written the VFO way, 14.074.00 (Casey 2026-11-11)
   'test/settings-contrast-test.js', // Settings meets the contrast rule in every theme (VARA button in She's On Frequency); rendered: scripts/settings-contrast-audit.js
