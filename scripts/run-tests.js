@@ -32,6 +32,7 @@ const TESTS = [
   'test/clock-offset-test.js',
   'test/require-exports-test.js',
   'test/smartsdr-meter-test.js',
+  'test/flex-slice-filter-test.js',
   'test/smartsdr-dax-tx-claim-test.js',
   'test/vfo-ptt-race-test.js',
   'test/vfo-ptt-mic-test.js', // #170: every VFO PTT press logs the mic it opened, the output and the level
