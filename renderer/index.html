@@ -197,6 +197,12 @@
           </div>
         </div>
       </div>
+      <!-- Filter presets (lib/spot-filter-presets.js): named sets of the spot
+           filters; the menu is built by app.js renderFilterPresetsMenu. -->
+      <div class="multi-dropdown" id="filter-presets-dropdown">
+        <button class="multi-dropdown-btn" type="button" id="filter-presets-btn">Presets<span id="filter-presets-text" class="filter-presets-name"></span> &#x25BE;</button>
+        <div class="multi-dropdown-menu" id="filter-presets-menu"></div>
+      </div>
       <button id="scan-btn" title="Scan through spots">Scan</button>
       <button type="button" id="settings-btn" title="Settings">Settings</button>
       <button id="logbook-btn" title="View/Edit Logbook (F2)">Logbook</button>
@@ -5343,6 +5349,7 @@
   <script src="../lib/worked-matrix.js"></script>
   <script src="../lib/prior-contacts.js"></script>
   <script src="../lib/spot-mute-rules.js"></script>
+  <script src="../lib/spot-filter-presets.js"></script>
   <script src="../lib/spot-age.js"></script>
   <script src="../lib/call-filter.js"></script>
   <script src="../lib/dx-rule.js"></script>
