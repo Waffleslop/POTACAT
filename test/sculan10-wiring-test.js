@@ -321,15 +321,16 @@ test('#227: CW text on a LAN rig skips the local CW Key Port and uses the keyer 
 });
 
 
-test('speaker monitor: an opt-in per rig (FT-710 only for now), its saved values persisted per rig, put back before quit', () => {
+test('speaker monitor: an opt-in per rig (FT-710 and FTDX10, where ML is per mode), its saved values persisted per rig, put back before quit', () => {
   const html = read('renderer/index.html');
   const app = read('renderer/app.js');
   assert.ok(/id="yaesu-lan-mute-monitor-row"[^>]*>\s*<input type="checkbox" id="set-yaesu-lan-mute-monitor">/.test(html));
   assert.ok(/muteMonitor: !!\(document\.getElementById\('set-yaesu-lan-mute-monitor'\) \|\| \{\}\)\.checked,/.test(app), 'saved with the target');
   assert.ok(/set-yaesu-lan-mute-monitor'\)\.checked = !!currentTarget\.muteMonitor;\n\s*syncYaesuLanMuteMonitorRow\(\);/.test(app), 'loaded with the target');
-  assert.ok(/const ok = !!rigModelSelect && rigModelSelect\.value === 'FT-710';/.test(app), 'offered on the FT-710 only');
+  assert.ok(/const ok = !!rigModelSelect && \['FT-710', 'FTDX10'\]\.includes\(rigModelSelect\.value\);/.test(app), 'offered where ML is per mode');
+  assert.deepStrictEqual([...P.MONITOR_PER_MODE_MODELS], ['FT-710', 'FTDX10'], 'the editor and main agree');
   const b = bodyOf(main, "} else if (target.type === 'yaesu-lan') {", "} else if (target.type === 'icom-network') {");
-  assert.ok(/const muteMonitor = !!target\.muteMonitor && modelName === 'FT-710';/.test(b), 'and honoured on the FT-710 only');
+  assert.ok(/const muteMonitor = !!target\.muteMonitor && Sculan10\.MONITOR_PER_MODE_MODELS\.includes\(modelName\);/.test(b), 'and honoured only there');
   assert.ok(/muteMonitor,\s*monitorSaved: \(settings\.yaesuLanMonitorSaved \|\| \{\}\)\[_ylMonKey\] \|\| null,/.test(b));
   assert.ok(/transport\.on\('monitor-saved'[\s\S]*?saveSettings\(settings\)/.test(b) && /transport\.on\('monitor-restored'[\s\S]*?delete settings\.yaesuLanMonitorSaved\[_ylMonKey\]/.test(b));
   const quit = bodyOf(main, "app.on('before-quit', (e) => {", 'gracefulCleanup();');
@@ -337,11 +338,15 @@ test('speaker monitor: an opt-in per rig (FT-710 only for now), its saved values
   assert.ok(/try \{ closed = lan\.disconnect\(\); \} catch \{\}\n\s*Promise\.race\(\[Promise\.resolve\(closed\), new Promise\(\(r\) => setTimeout\(r, 5000\)\)\]\)/.test(quit), 'waits for the paced restore, at most 5 s');
 });
 
-test('setup note: the FT-710 menu setting for LAN transmit audio lives in lib/rig-setup-notes.js', () => {
+test('setup notes: the FT-710 and FTDX10 menu settings for LAN transmit audio live in lib/rig-setup-notes.js', () => {
   const { NOTES } = require('../lib/rig-setup-notes');
   const n = NOTES.find((x) => x.id === 'ft710-scu-lan10-ssb-mod-source');
   assert.ok(n && n.applies.radioTypes.join() === 'yaesu-lan' && n.applies.models.join() === 'FT-710');
   assert.strictEqual(n.source, 'DA2PK, FT-710, 2026-11-11');
+  const dx = NOTES.find((x) => x.id === 'ftdx10-scu-lan10-ssb-mod-source');
+  assert.ok(dx && dx.applies.radioTypes.join() === 'yaesu-lan' && dx.applies.models.join() === 'FTDX10');
+  assert.ok(/SSB MOD SOURCE to REAR and REAR SELECT to USB/.test(dx.steps[0]));
+  assert.strictEqual(dx.source, 'VK4KTW, FTDX10, 2026-11-13');
   assert.ok(!/SSB MOD SOURCE/.test(read('renderer/index.html')) && !/SSB MOD SOURCE/.test(read('renderer/app.js')), 'the help texts point to the note');
 });
 

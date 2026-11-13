@@ -2207,14 +2207,14 @@
           <label>Password:
             <input type="password" id="set-yaesu-lan-password" autocomplete="off" placeholder="defaultuser">
           </label>
-          <label class="checkbox-label" id="yaesu-lan-mute-monitor-row" title="FT-710 only for now: the monitor is known to be set per mode there. The radio's monitor and CW sidetone play on its own speaker while you transmit from afar. POTACAT sets them to off and 0 in each mode you use and puts them back when it disconnects.">
+          <label class="checkbox-label" id="yaesu-lan-mute-monitor-row" title="FT-710 and FTDX10 for now: the monitor is known to be set per mode there. The radio's monitor and CW sidetone play on its own speaker while you transmit from afar. POTACAT sets them to off and 0 in each mode you use and puts them back when it disconnects.">
             <input type="checkbox" id="set-yaesu-lan-mute-monitor"> Mute the radio's speaker monitor and CW sidetone while POTACAT has the radio
           </label>
           <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
             <button type="button" id="yaesu-lan-test-btn">Test Connection</button>
             <span id="yaesu-lan-test-result" style="font-size:12px;"></span>
           </div>
-          <span class="help-text" style="margin-top:6px;display:block;">The base port is the first of four UDP ports (CAT, audio and scope follow it). Blank user and password use the unit's factory login. With Audio source set to Yaesu LAN audio, receive and transmit audio both go over the network (Winlink excepted). The monitor option (FT-710) sets the radio's monitor off and its level to 0 (the CW sidetone follows the level) in each mode you use, and puts every mode back when POTACAT disconnects or quits.</span>
+          <span class="help-text" style="margin-top:6px;display:block;">The base port is the first of four UDP ports (CAT, audio and scope follow it). Blank user and password use the unit's factory login. With Audio source set to Yaesu LAN audio, receive and transmit audio both go over the network (Winlink excepted). The monitor option (FT-710, FTDX10) sets the radio's monitor off and its level to 0 (the CW sidetone follows the level) in each mode you use, and puts every mode back when POTACAT disconnects or quits.</span>
         </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="hamlib"> Other Rig (Hamlib)</label>
         <div id="hamlib-config" class="radio-sub hidden">

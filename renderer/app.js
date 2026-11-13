@@ -3465,12 +3465,13 @@ function rigBandsToSave() {
   return list.length ? list : undefined;
 }
 if (rigModelSelect) rigModelSelect.addEventListener('change', () => { loadRigBandsForModel(); });
-// The SCU-LAN10 monitor mute is offered on the FT-710 only, until an FTDX10 or
-// FTDX101 owner confirms that radio's monitor (ML) is set per mode too.
+// The SCU-LAN10 monitor mute is offered where an owner confirmed the radio's
+// monitor (ML) is set per mode: FT-710 and FTDX10 (lib/sculan10-protocol.js
+// MONITOR_PER_MODE_MODELS). The FTDX101 waits for an owner.
 function syncYaesuLanMuteMonitorRow() {
   const row = document.getElementById('yaesu-lan-mute-monitor-row');
   if (!row) return;
-  const ok = !!rigModelSelect && rigModelSelect.value === 'FT-710';
+  const ok = !!rigModelSelect && ['FT-710', 'FTDX10'].includes(rigModelSelect.value);
   row.style.display = ok ? '' : 'none';
   if (!ok) { const cb = document.getElementById('set-yaesu-lan-mute-monitor'); if (cb) cb.checked = false; }
 }

@@ -8969,9 +8969,9 @@ async function connectCat() {
       if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', message);
       if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'tune-blocked', reason: message });
     });
-    // FT-710 only until an FTDX10 and an FTDX101 owner confirm ML is per mode there.
-    const muteMonitor = !!target.muteMonitor && modelName === 'FT-710';
-    if (target.muteMonitor && !muteMonitor) sendCatLog(`[SCU-LAN10] speaker monitor mute is for the FT-710 only so far; left off for ${modelName || 'this radio'}`);
+    // Only on a radio an owner confirmed sets ML per mode (the FTDX101 waits for one).
+    const muteMonitor = !!target.muteMonitor && Sculan10.MONITOR_PER_MODE_MODELS.includes(modelName);
+    if (target.muteMonitor && !muteMonitor) sendCatLog(`[SCU-LAN10] speaker monitor mute is for the ${Sculan10.MONITOR_PER_MODE_MODELS.join(' and ')} so far; left off for ${modelName || 'this radio'}`);
     transport.connect({
       host: _ylHp.host,
       basePort: _ylHp.port,
