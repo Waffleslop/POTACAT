@@ -415,6 +415,7 @@ const ScopeOverlay = require('./lib/scope-overlay');
 const { explainRigctldFailure } = require('./lib/rigctld-stderr');
 const RigFamily = require('./lib/rig-family');
 const RigFullPower = require('./lib/rig-full-power');
+const { decideBandPowerReapply } = require('./lib/band-power-reapply');
 const AtuWizard = require('./lib/atu-wizard');
 const AppTheme = require('./lib/app-theme');
 const { stripSecrets, restoreSecrets } = require('./lib/settings-secrets');
@@ -4311,6 +4312,9 @@ function sendCatFrequency(hz) {
   }
   // Rig presets: a band rule (20 m SSB → A, 40 m SSB → B) is decided here too.
   try { rigPresetOnBand(); } catch { /* presets are best-effort */ }
+  // A radio that cannot report its power gets POTACAT's level again on a new
+  // band (lib/band-power-reapply.js, #184).
+  if (!(sdrHoldsDial() && hz === listenSdr.hz)) bandPowerFollowDial(hz);
   // A tune result still in flight was for the band we just left.
   if (_atuTuneEpisode && _atuTuneEpisode.band && hz > 0) {
     const b = freqToBand(hz / 1e6);
@@ -4847,8 +4851,39 @@ function sendCatPower(watts) {
   // restore that never landed — this readback is where it gets put back.
   if (!isRemoteMode()) wsprReconcilePreCapPower(watts);
   // Same for a Station Setup test transmit (lowered to QRP for the test).
+  _powerReadbackThisLink = true; // this radio reports its power (#184)
   _lastPowerReadback = { watts: Number(watts) || 0, at: Date.now() };
   if (!isRemoteMode()) stationSetupReconcilePower(Number(watts) || 0);
+}
+
+// Band change on a radio that cannot report its power (deskHPSDR, Zeus: PC;
+// answers ?): send POTACAT's level again, a moment after the SDR program has
+// put its own per-band drive in place. The rule is lib/band-power-reapply.js.
+let _powerReadbackThisLink = false;   // the radio has reported its power since connect
+let _bandPowerBand = null;            // the band the dial was last seen on
+let _bandPowerTimer = null;
+let _catLinkAt = 0;                   // when connectCat last opened a link
+// The level POTACAT sent on THIS link (0: none). Not _currentTxPower, which
+// can still hold the previous radio's level after a rig switch.
+let _bandPowerSetW = 0;
+function bandPowerFollowDial(hz) {
+  if (isRemoteMode() || !cat || !cat.connected) return;
+  const band = hz > 0 ? (freqToBand(hz / 1e6) || null) : null;
+  const rigType = detectRigType();
+  const d = decideBandPowerReapply({
+    prevBand: _bandPowerBand, band, watts: _bandPowerSetW,
+    readsBack: _powerReadbackThisLink, linkAgeMs: Date.now() - _catLinkAt,
+    transmitting: !!cat._transmitting, rigType,
+  });
+  if (band) _bandPowerBand = band;
+  if (!d.resend) return;
+  if (_bandPowerTimer) clearTimeout(_bandPowerTimer);
+  _bandPowerTimer = setTimeout(() => {
+    _bandPowerTimer = null;
+    if (!cat || !cat.connected || cat._transmitting || _powerReadbackThisLink) return;
+    const w = _bandPowerSetW;
+    if (w > 0 && gatedSetTxPower(w, { rigType })) sendCatLog(`[Power] ${d.reason}: sent ${w} W again (this radio does not report its power)`);
+  }, 300);
 }
 
 function sendCatNb(on) {
@@ -5059,6 +5094,7 @@ function setRadioTxPowerRaw(watts) {
     if (typeof cat.setTxPowerWatts === 'function') cat.setTxPowerWatts(w);
     else if (rigType === 'rigctld') cat.setTxPower(w / 100);
     else cat.setTxPower(w);
+    _bandPowerSetW = w; // the level a band change puts back (#184)
   } else {
     return false;
   }
@@ -8505,6 +8541,11 @@ async function connectCat() {
     });
     _setCwPaddleAvailability(_pa.available, _pa.reason || 'rig-changed');
   }
+  // A new link: nothing is known yet about this radio's power (#184).
+  _powerReadbackThisLink = false;
+  _bandPowerBand = null;
+  _bandPowerSetW = 0;
+  _catLinkAt = Date.now();
   killRigctld();
   healActiveRigNow('connect');
   let target = settings.catTarget;
@@ -8604,6 +8645,8 @@ async function connectCat() {
     // Plain Flex TCP doesn't claim native XIT here (it's handled via the
     // SmartSDR API path; see smartSdr.setSliceXit). N7QT 2026-05-16.
     cat.hasNativeXit = (target.type === 'k4-network');
+    // PC watts on the model's scale, Full power (W) included (#184).
+    cat.setPowerModel(rigModel);
     // Pull rig-model-driven CAT overrides that CatClient's TCP path used to
     // ignore (the old code assumed every TCP target was Flex). The K4 in
     // particular uses DT instead of DA for the DATA sub-mode toggle, and
@@ -38552,6 +38595,7 @@ function gatedSetTxPower(value, opts = {}) {
   if (typeof cat.setTxPowerWatts === 'function') cat.setTxPowerWatts(actual);
   else if (opts.rigType === 'rigctld') cat.setTxPower(actual / 100);
   else cat.setTxPower(actual);
+  _bandPowerSetW = Number(actual) || 0; // the level a band change puts back (#184)
   return true;
 }
 

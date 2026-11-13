@@ -502,6 +502,7 @@ const TESTS = [
   'test/sculan10-read-first-test.js', // FT-710 scope Enable reads SCU-LAN10 (EX030126) before writing: already ON is left alone and not turned off at close; no answer means no blind write (#113 item 7)
   'test/sculan10-scope-test.js', // SCU-LAN10 band scope: spec-shaped frames, inverted amplitude, the line is the first 850 bytes of a 4096-byte frame (#143), the boundary marker and its lock, 850-point resampling, bin-to-frequency
   'test/rig-full-power-test.js', // a radio's real full power (rig.fullPowerW): W5LEE's 5 W Hermes Lite behind deskHPSDR's 100 W TS-2000 emulation, slider, PC command, readback and log in real watts
+  'test/kenwood-pc-power-test.js', // the TCP Kenwood client (deskHPSDR, Zeus) sends PC on the model's scale, Full power included (6 W = PC100, not PC006), never drops the last slider level, and a radio that cannot report its power gets it again after a band change (#184)
   'test/power-restore-test.js', // the external-tuner / test restore: never a 100 W guess, never against the operator's own knob (GitHub #111, 1.13.10 regression)
   'test/activator-log-once-test.js', // the Activator log saves once per press, and a slow QRZ never holds up a save (.eddiejames duplicates)
   'test/serial-hs-trial-test.js', // the RTS/CTS no-answer trial covers Kenwood too (jcoreyc TS-480), never the legacy Yaesu protocol
