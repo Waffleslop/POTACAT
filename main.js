@@ -12205,23 +12205,34 @@ function winlinkKeepReturn(returnTo) {
 function winlinkPreviewRestore(why) {
   const r = _winlinkPreviewReturnTo;
   const s = winlinkState.session;
-  const act = WinlinkReturn.atClose({ pending: r, sessionActive: winlinkSessionActive(), sessionReturn: s.returnTo });
+  const act = WinlinkReturn.atClose({ pending: r, sessionActive: winlinkSessionActive(), sessionReturn: s.returnTo, leftAtHz: _winlinkLeftAtHz, nowHz: _currentFreqHz });
   const lead = `${why === 'window closed' ? 'the mail window closed' : why}: the radio now goes back to`;
   if (act === 'after-session') { winlinkLog(`${why === 'window closed' ? 'the mail window closed' : why} during a session — the radio goes back to ${winlinkDialText(s.returnTo)} when it ends`); return; }
+  const leftAt = _winlinkLeftAtHz;
   _winlinkPreviewReturnTo = null;
   _winlinkLeftAtHz = 0;
   if (act === 'return') winlinkRestoreDial(r, 0, lead);
+  else if (act === 'moved') winlinkLogLeftAlone(why === 'window closed' ? 'the mail window closed' : why, r, leftAt);
+}
+
+/** The radio was moved since Winlink left it (SSTV, a spot, the knob): it stays (#357). */
+function winlinkLogLeftAlone(lead, returnTo, leftAtHz) {
+  const was = leftAtHz ? `${(leftAtHz / 1e6).toFixed(4)} MHz` : 'where Winlink left it';
+  const now = _currentFreqHz ? `${(_currentFreqHz / 1e6).toFixed(4)} MHz` : 'somewhere else';
+  winlinkLog(`${lead}: the radio stays on ${now} — it was moved since Winlink left it on ${was}, so it does not go back to ${winlinkDialText(returnTo)}`);
 }
 
 /** Winlink stopped. With the mail window open it is a relaunch: the return point is kept. */
 function winlinkReturnOnStop(quit) {
   const r = _winlinkPreviewReturnTo;
-  const act = WinlinkReturn.atStop({ pending: r, windowOpen: winlinkMailWindowOpen(), quit: !!quit });
+  const act = WinlinkReturn.atStop({ pending: r, windowOpen: winlinkMailWindowOpen(), quit: !!quit, leftAtHz: _winlinkLeftAtHz, nowHz: _currentFreqHz });
   if (act === 'none') return;
   if (act === 'keep') { winlinkLog(`Pat restarts with the mail window open — the radio still goes back to ${winlinkDialText(r)} when it closes`); return; }
+  const leftAt = _winlinkLeftAtHz;
   _winlinkPreviewReturnTo = null;
   _winlinkLeftAtHz = 0;
   if (act === 'skip') { winlinkLog(`POTACAT is closing: not going back to ${winlinkDialText(r)} — the radio link is already closed`); return; }
+  if (act === 'moved') { winlinkLogLeftAlone('Winlink stopped', r, leftAt); return; }
   winlinkRestoreDial(r, 0, 'Winlink stopped: the radio now goes back to');
 }
 
@@ -12233,7 +12244,7 @@ function winlinkReturnOnStop(quit) {
 function winlinkReturnBeforeQuit(then) {
   const r = _winlinkPreviewReturnTo;
   const catUp = !!_catLinkUpLast || !!(cat && cat.connected) || !!(smartSdr && smartSdr.canTune);
-  const v = WinlinkReturn.atQuit({ pending: winlinkSessionActive() ? null : r, catUp, atuBusy: !!_atuTuneEpisode });
+  const v = WinlinkReturn.atQuit({ pending: winlinkSessionActive() ? null : r, catUp, atuBusy: !!_atuTuneEpisode, leftAtHz: _winlinkLeftAtHz, nowHz: _currentFreqHz });
   if (v.act === 'none') return false;
   _winlinkPreviewReturnTo = null;
   _winlinkLeftAtHz = 0;
@@ -13213,7 +13224,10 @@ function winlinkRetryStop() {
 function winlinkRetryReturnDial() {
   if (winlinkMailWindowOpen() || winlinkSessionActive() || !_winlinkPreviewReturnTo) return;
   const back = _winlinkPreviewReturnTo;
+  const leftAt = _winlinkLeftAtHz;
   _winlinkPreviewReturnTo = null; _winlinkLeftAtHz = 0;
+  // Only Winlink's own move is undone (#357): a radio taken since stays.
+  if (!WinlinkReturn.stillWhereLeft(leftAt, _currentFreqHz)) { winlinkLogLeftAlone('no automatic retry', back, leftAt); return; }
   winlinkRestoreDial(back, 0, 'no automatic retry: the radio now goes back to');
 }
 
