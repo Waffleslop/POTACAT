@@ -415,6 +415,7 @@ const ScopeOverlay = require('./lib/scope-overlay');
 const { explainRigctldFailure } = require('./lib/rigctld-stderr');
 const RigFamily = require('./lib/rig-family');
 const RigFullPower = require('./lib/rig-full-power');
+const { decideBandPowerReapply } = require('./lib/band-power-reapply');
 const AtuWizard = require('./lib/atu-wizard');
 const AppTheme = require('./lib/app-theme');
 const { stripSecrets, restoreSecrets } = require('./lib/settings-secrets');
@@ -462,6 +463,7 @@ const VaraProcess = require('./lib/vara-process');
 const VaraSetup = require('./lib/vara-setup');
 const WinlinkModes = require('./lib/winlink-modes');
 const WinlinkReturn = require('./lib/winlink-return');
+const WinlinkTxLevel = require('./lib/winlink-tx-level'); // #300: Winlink's own transmit audio level, and the session's levels
 const ModemAudioServerMod = require('./lib/modem-audio-server');
 const { ModemAudioLane } = require('./lib/modem-audio-lane-client'); // the modem's audio, off the main process (#187)
 const { buildAdifFields, buildAdifRecord, sqliteQsoToAdifFields, ADIF_HEADER, adifField } = require('./lib/adif-writer');
@@ -473,7 +475,7 @@ const JtcatSnrFloor = require('./lib/jtcat-snr-floor');
 const OriginHealth = require('./lib/origin-health');
 const RemoteAccess = require('./lib/remote-access'); // ECHOCAT access: off | cloud | lan (the door itself)
 const { planImport, findDuplicateGroups } = require('./lib/qso-match');
-const { SmartSdrClient, setColorblindMode: setSmartSdrColorblind } = require('./lib/smartsdr');
+const { SmartSdrClient, setColorblindMode: setSmartSdrColorblind, sliceFilterEdges } = require('./lib/smartsdr');
 const { SmartSdrAudio } = require('./lib/smartsdr-audio');
 const { TciClient, setTciColorblindMode } = require('./lib/tci');
 const { AntennaGeniusClient } = require('./lib/antenna-genius');
@@ -861,6 +863,8 @@ const GLOBAL_KEYS = new Set([
                        // (same reasoning as lightMode/darkVariant above)
   'wsprPreCapPower',   // {watts, rigId, at}: the RF power the WSPR beacon found on the
                        // radio before capping it at 1 W — the radio is this machine's
+  'wsprBeaconWatts',   // {watts, rigId}: the beacon's RF power when the operator set one
+                       // while it was armed (#268) — also this machine's radio
   'mainMicDeviceId', 'mainPlaybackDeviceId',
   'echocatPort',       // ECHOCAT server port
   'echocatToken',      // ECHOCAT legacy single shared token (machine)
@@ -888,6 +892,7 @@ const GLOBAL_KEYS = new Set([
   'winlinkAgwPort',    // Winlink: Dire Wolf's AGWPE port on this machine (default 8010)
   'winlinkWaterfallSpeed', // mail-window waterfall lines/sec — a display property of this screen (as jtcatWaterfallSpeed)
   'winlinkWaterfallShown', // mail-window waterfall shown/hidden — display
+  'winlinkTxGain',     // Winlink modem TX audio level 0–1 (square-curve domain, #300) — machine audio property like jtcatTxGain
 ]);
 
 const CLOUD_TUNNEL_CONFIG_FILENAME = 'cloud-tunnel.json';
@@ -1036,7 +1041,14 @@ function _noteSettingsMtime(p) {
   if (_settingsMtimeAtLaunch.has(p)) return;
   try { _settingsMtimeAtLaunch.set(p, fs.statSync(p).mtimeMs); } catch { _settingsMtimeAtLaunch.set(p, null); }
 }
+// GitHub #344: once an operator switch has moved the profile pointer, no
+// settings file is written until the restart (lib/profile-switch-guard.js).
+const ProfileSwitchGuard = require('./lib/profile-switch-guard');
+const _settingsWriteGate = ProfileSwitchGuard.createSettingsWriteGate({
+  log: (line) => { console.log(line); try { sendCatLog(line); } catch { /* log not up */ } },
+});
 function _writeJsonAtomic(p, obj) {
+  if (!_settingsWriteGate.allowWrite(path.basename(path.dirname(p)) + '/' + path.basename(p))) return;
   _noteSettingsMtime(p);
   try { fs.mkdirSync(path.dirname(p), { recursive: true }); } catch {}
   try {
@@ -1270,12 +1282,14 @@ function switchProfile(callsign) {
   // against the new operator's settings) is a follow-up — too many cached
   // subsystems to chase down in one PR. Restart is one click and
   // guarantees correctness.
+  // The gate closes the moment the pointer moves (#344): settings still hold
+  // this operator, so a save before the restart would write them into the
+  // new operator's file.
   let currentProfile = '';
   try {
-    currentProfile = settings.activeProfile;
-    saveSettings(settings);
-    setActiveProfilePointer(call);
-    settings.activeProfile = call;
+    currentProfile = ProfileSwitchGuard.commitProfileSwitch(call, {
+      settings, saveSettings, setActiveProfilePointer, gate: _settingsWriteGate,
+    }).previous;
     if (currentProfile && currentProfile !== call) {
       console.log('[multi-op] switched activeProfile ' + currentProfile + ' -> ' + call);
     }
@@ -1923,6 +1937,7 @@ const winlinkState = new WinlinkStateLib.WinlinkState();
 let winlinkShim = null;         // loopback rigctld shim Pat keys and tunes through
 let _winlinkShimPort = 0;
 let _winlinkShimArmed = false;  // Pat may tune/key only while a radio session runs
+let _winlinkShimDisarmedAt = 0; // when the last radio session let go of the shim (Pat's teardown QSX is refused quietly, #455)
 let _winlinkShimRefusedAt = 0;  // last "no session" PTT refusal (rate-limits the log line + the repeat hang-up)
 let _winlinkUnkeyTimer = null;  // the modem asked for PTT off; the tail of its audio is still in POTACAT's pipeline
 let ardopProc = null;           // ardopcf for an ARDOP session
@@ -1957,6 +1972,7 @@ let _winlinkReceived = null;         // messages Pat took into the Inbox, when a
 let _patArqTimeoutAskedS = 0;        // #425: the ARDOP link timeout the running Pat was started with (seconds)
 let _winlinkLinkStory = null;        // WinlinkDiag.ArdopLinkStory: the modem's last state and which side ended the link
 let _winlinkAudioSummary = '';       // the session's audio sentence, repeated in its summary line
+const _winlinkLevels = new WinlinkTxLevel.SessionLevels(); // #300: the RX peak and what our overs sent to the radio, for the summary line
 const _winlinkSummaries = [];        // the last sessions' summary lines, for Report a Bug
 let _winlinkSummariesFile = '';      // the file those lines were read from: session-summaries.json in this profile's Winlink folder
 const _patProgressSaid = new WinlinkDiag.PatProgressLog(); // Pat's repainted transfer progress, logged when it changes
@@ -4313,6 +4329,9 @@ function sendCatFrequency(hz) {
   }
   // Rig presets: a band rule (20 m SSB → A, 40 m SSB → B) is decided here too.
   try { rigPresetOnBand(); } catch { /* presets are best-effort */ }
+  // A radio that cannot report its power gets POTACAT's level again on a new
+  // band (lib/band-power-reapply.js, #184).
+  if (!(sdrHoldsDial() && hz === listenSdr.hz)) bandPowerFollowDial(hz);
   // A tune result still in flight was for the band we just left.
   if (_atuTuneEpisode && _atuTuneEpisode.band && hz > 0) {
     const b = freqToBand(hz / 1e6);
@@ -4825,6 +4844,10 @@ function sendCatFwdPower(watts) {
     _voiceTxCheck.fwdEvents++;
     if (w > _voiceTxCheck.peakW) _voiceTxCheck.peakW = w;
   }
+  if (_wsprFrameRf) {
+    _wsprFrameRf.meterFrames++;
+    if (w > _wsprFrameRf.peakW) _wsprFrameRf.peakW = w;
+  }
   const push = (v) => {
     if (win && !win.isDestroyed()) win.webContents.send('cat-fwd-power', v);
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-fwd-power', v);
@@ -4849,8 +4872,39 @@ function sendCatPower(watts) {
   // restore that never landed — this readback is where it gets put back.
   if (!isRemoteMode()) wsprReconcilePreCapPower(watts);
   // Same for a Station Setup test transmit (lowered to QRP for the test).
+  _powerReadbackThisLink = true; // this radio reports its power (#184)
   _lastPowerReadback = { watts: Number(watts) || 0, at: Date.now() };
   if (!isRemoteMode()) stationSetupReconcilePower(Number(watts) || 0);
+}
+
+// Band change on a radio that cannot report its power (deskHPSDR, Zeus: PC;
+// answers ?): send POTACAT's level again, a moment after the SDR program has
+// put its own per-band drive in place. The rule is lib/band-power-reapply.js.
+let _powerReadbackThisLink = false;   // the radio has reported its power since connect
+let _bandPowerBand = null;            // the band the dial was last seen on
+let _bandPowerTimer = null;
+let _catLinkAt = 0;                   // when connectCat last opened a link
+// The level POTACAT sent on THIS link (0: none). Not _currentTxPower, which
+// can still hold the previous radio's level after a rig switch.
+let _bandPowerSetW = 0;
+function bandPowerFollowDial(hz) {
+  if (isRemoteMode() || !cat || !cat.connected) return;
+  const band = hz > 0 ? (freqToBand(hz / 1e6) || null) : null;
+  const rigType = detectRigType();
+  const d = decideBandPowerReapply({
+    prevBand: _bandPowerBand, band, watts: _bandPowerSetW,
+    readsBack: _powerReadbackThisLink, linkAgeMs: Date.now() - _catLinkAt,
+    transmitting: !!cat._transmitting, rigType,
+  });
+  if (band) _bandPowerBand = band;
+  if (!d.resend) return;
+  if (_bandPowerTimer) clearTimeout(_bandPowerTimer);
+  _bandPowerTimer = setTimeout(() => {
+    _bandPowerTimer = null;
+    if (!cat || !cat.connected || cat._transmitting || _powerReadbackThisLink) return;
+    const w = _bandPowerSetW;
+    if (w > 0 && gatedSetTxPower(w, { rigType })) sendCatLog(`[Power] ${d.reason}: sent ${w} W again (this radio does not report its power)`);
+  }, 300);
 }
 
 function sendCatNb(on) {
@@ -5061,6 +5115,7 @@ function setRadioTxPowerRaw(watts) {
     if (typeof cat.setTxPowerWatts === 'function') cat.setTxPowerWatts(w);
     else if (rigType === 'rigctld') cat.setTxPower(w / 100);
     else cat.setTxPower(w);
+    _bandPowerSetW = w; // the level a band change puts back (#184)
   } else {
     return false;
   }
@@ -8507,6 +8562,11 @@ async function connectCat() {
     });
     _setCwPaddleAvailability(_pa.available, _pa.reason || 'rig-changed');
   }
+  // A new link: nothing is known yet about this radio's power (#184).
+  _powerReadbackThisLink = false;
+  _bandPowerBand = null;
+  _bandPowerSetW = 0;
+  _catLinkAt = Date.now();
   killRigctld();
   healActiveRigNow('connect');
   let target = settings.catTarget;
@@ -8606,6 +8666,8 @@ async function connectCat() {
     // Plain Flex TCP doesn't claim native XIT here (it's handled via the
     // SmartSDR API path; see smartSdr.setSliceXit). N7QT 2026-05-16.
     cat.hasNativeXit = (target.type === 'k4-network');
+    // PC watts on the model's scale, Full power (W) included (#184).
+    cat.setPowerModel(rigModel);
     // Pull rig-model-driven CAT overrides that CatClient's TCP path used to
     // ignore (the old code assumed every TCP target was Flex). The K4 in
     // particular uses DT instead of DA for the DATA sub-mode toggle, and
@@ -8739,6 +8801,12 @@ async function connectCat() {
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
     cat.on('alc', sendCatAlc);
+    // The radio's RF power setting and its wattmeter, as on every other
+    // backend. Without these a rigctld radio never told POTACAT its power:
+    // TX Pwr showed the last level POTACAT sent, the beacon's 1 W never
+    // showed, and no wattmeter drew during a frame (#268, IC-7100).
+    cat.on('power', sendCatPower);
+    cat.on('powerMeter', sendCatFwdPower);
     sendCatLog(`Connecting to rigctld on 127.0.0.1:${rigctldPort}`);
     transport.connect({ host: '127.0.0.1', port: rigctldPort });
 
@@ -8773,6 +8841,12 @@ async function connectCat() {
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
     cat.on('alc', sendCatAlc);
+    // The radio's RF power setting and its wattmeter, as on every other
+    // backend. Without these a rigctld radio never told POTACAT its power:
+    // TX Pwr showed the last level POTACAT sent, the beacon's 1 W never
+    // showed, and no wattmeter drew during a frame (#268, IC-7100).
+    cat.on('power', sendCatPower);
+    cat.on('powerMeter', sendCatFwdPower);
     const { host, port } = resolveCatHostPort(target, 4532, 'remote rigctld');
     sendCatLog(`Connecting to remote rigctld on ${host}:${port}`);
     transport.connect({ host, port });
@@ -10981,6 +11055,7 @@ function winlinkPayload() {
     ardopBw: [200, 500, 1000, 2000].includes(Number(settings.winlinkArdopBw)) ? Number(settings.winlinkArdopBw) : 500,
     modemBw: winlinkModemBw(),
     wf: { speed: Math.max(1, Math.min(60, parseInt(settings.winlinkWaterfallSpeed, 10) || 60)), shown: settings.winlinkWaterfallShown !== false },
+    txLevel: { gain: winlinkTxGain(), soundCard: !winlinkIpAudioRoute() }, // #300: the window's TX level slider
     audio: (() => {
       const rig = winlinkActiveRig();
       const a = (rig && rig.winlinkAudio) || {};
@@ -11414,7 +11489,11 @@ async function startWinlinkShim() {
     getFreqHz: () => _currentFreqHz || 0,
     getPtt: () => winlinkTxActive && !_winlinkUnkeyTimer, // the REQUESTED state: Hamlib re-reads PTT after a set and would otherwise see "still keyed" through the drain hold
     setFreqHz: (hz) => {
-      if (!_winlinkShimArmed || radioOwner !== 'winlink') { winlinkLog(`refused Pat's tune to ${(hz / 1e6).toFixed(4)} MHz — no radio session is running`); return false; }
+      if (!_winlinkShimArmed || radioOwner !== 'winlink') {
+        // Pat's QSX back to the dial as a session is torn down is refused quietly (#455).
+        if (WinlinkReturn.patTuneRefusalLogged({ msSinceSessionEnd: Date.now() - _winlinkShimDisarmedAt })) winlinkLog(`refused Pat's tune to ${(hz / 1e6).toFixed(4)} MHz — no radio session is running`);
+        return false;
+      }
       if (_atuTuneEpisode && Math.abs(hz - (_currentFreqHz || 0)) > 100) { winlinkLog(`held Pat's tune to ${(hz / 1e6).toFixed(4)} MHz — an ATU tune is running`); return false; }
       if (Math.abs(hz - (_currentFreqHz || 0)) <= 1) return true; // Pat's QSX back to the dial it is already on
       tuneRadio(hz / 1000, undefined, undefined, { origin: 'Winlink (Pat via the rigctld shim)' });
@@ -11549,11 +11628,40 @@ function winlinkPreKeyNoted(ms) {
     winlinkLog(`modem audio: ${ms} ms arrived before the modem's PTT request and was kept — it is the start of the frame`);
   }
 }
+/**
+ * Winlink's transmit audio level on a sound-card rig (#300, lib/winlink-tx-level.js):
+ * its own setting, the gain of the bridge's playback. Until #300 this was
+ * JTCAT's Drive, which nobody would look for from the Winlink window.
+ */
+function winlinkTxGain() {
+  return WinlinkTxLevel.resolveTxGain(settings, _jtcatDirectTxGainLevel);
+}
+let _winlinkTxGainLogTimer = null;
+function applyWinlinkTxGain(value) {
+  let v = Number(value);
+  if (!Number.isFinite(v)) return;
+  v = Math.max(0, Math.min(1, v));
+  settings.winlinkTxGain = v;
+  // At once, to the bridge that is playing (the next over goes out at it).
+  if (modemBridgeWin && !modemBridgeWin.isDestroyed() && _modemBridgeLoaded) { try { modemBridgeWin.webContents.send('modem-bridge-tx-gain', v); } catch {} }
+  // A slider streams input events: save and log the settled value once.
+  clearTimeout(_winlinkTxGainLogTimer);
+  _winlinkTxGainLogTimer = setTimeout(() => {
+    try { saveSettings(settings); } catch {}
+    winlinkLog(`TX level set to ${WinlinkTxLevel.pctFromGain(v)}% in the Winlink window (the modem's audio level into the radio, not RF power${winlinkIpAudioRoute() ? `; ${winlinkAudioRouteName()} does not use it, its audio goes at full scale` : ''})`);
+  }, 1200);
+}
 /** One line per over — when the modem keyed, when its audio ran and how loud, when it unkeyed (lib/modem-tx-burst.js, #128). */
 function winlinkTxBurstEnd() {
   const lv = winlinkLaneTxLevel();
   const burst = _winlinkTxBurst.keyUp({ gainDb: lv ? lv.gainDb : 0 });
-  if (burst) winlinkLog(burst.text);
+  if (burst) {
+    // The peak above is the modem's, before the TX level: say what reached the radio too (#300).
+    const soundCard = !winlinkIpAudioRoute();
+    const out = WinlinkTxLevel.overOutDbfs({ peakDbfs: burst.peakDbfs, gainDb: burst.gainDb, txGain: winlinkTxGain(), soundCard });
+    _winlinkLevels.noteOver({ peakDbfs: burst.peakDbfs, gainDb: burst.gainDb, txGain: winlinkTxGain(), soundCard: !winlinkIpAudioRoute() });
+    winlinkLog(burst.text + (soundCard && out != null ? `; to the radio ${out} dBFS at TX level ${WinlinkTxLevel.pctFromGain(winlinkTxGain())}%` : ''));
+  }
   if (burst) modemBridgeOver(false);
 }
 /** How long the modem's final samples take to reach the radio after it stops writing. */
@@ -11569,6 +11677,7 @@ function winlinkUnkeyDrainMs() {
 }
 
 function stopWinlinkShim() {
+  if (_winlinkShimArmed) _winlinkShimDisarmedAt = Date.now();
   _winlinkShimArmed = false;
   if (_winlinkUnkeyTimer) { clearTimeout(_winlinkUnkeyTimer); _winlinkUnkeyTimer = null; }
   stopWinlinkAudio();
@@ -11885,7 +11994,7 @@ function modemBridgeReady(timeoutMs = 8000) {
 }
 function startModemBridge({ playback } = {}) {
   const dev = modemBridgeDevices();
-  const cfg = { ...dev, playback: !!playback, txGain: _jtcatDirectTxGainLevel };
+  const cfg = { ...dev, playback: !!playback, txGain: winlinkTxGain() };
   modemBridge.state = 'starting'; modemBridge.error = ''; modemBridge.playback = !!playback; modemBridge.startedAt = Date.now();
   if (modemBridgeWin && !modemBridgeWin.isDestroyed()) {
     if (_modemBridgeLoaded) modemBridgeWin.webContents.send('modem-bridge-start', cfg);
@@ -11942,7 +12051,7 @@ function ensureModemBridgeWindow() {
   modemBridgeWin.webContents.on('did-finish-load', () => {
     if (!modemBridgeWin || modemBridgeWin.isDestroyed()) return;
     _modemBridgeLoaded = true;
-    if (modemBridge.state !== 'off') modemBridgeWin.webContents.send('modem-bridge-start', { ...modemBridgeDevices(), playback: modemBridge.playback, txGain: _jtcatDirectTxGainLevel });
+    if (modemBridge.state !== 'off') modemBridgeWin.webContents.send('modem-bridge-start', { ...modemBridgeDevices(), playback: modemBridge.playback, txGain: winlinkTxGain() });
     if (modemBridge.cable.state !== 'off') modemBridgeWin.webContents.send('modem-bridge-cable-start', { ...winlinkCableDevices(), txGain: 1 });
   });
   modemBridgeWin.on('closed', () => {
@@ -12052,7 +12161,7 @@ function modemBridgePlayback(on) {
   modemBridge.playback = !!on;
   if (!modemBridgeWin || modemBridgeWin.isDestroyed()) return;
   if (on) modemBridge.state = 'starting';
-  modemBridgeWin.webContents.send('modem-bridge-playback', { on: !!on, ...modemBridgeDevices(), txGain: _jtcatDirectTxGainLevel });
+  modemBridgeWin.webContents.send('modem-bridge-playback', { on: !!on, ...modemBridgeDevices(), txGain: winlinkTxGain() });
 }
 
 /** Receive audio from the radio link → the modem (called from the Flex and Icom RX taps). */
@@ -12065,6 +12174,7 @@ function winlinkFeedRx(pcm, sampleRate, { fromBridge = false } = {}) {
     let pk = 0;
     for (let i = 0; i < pcm.length; i++) { const a = pcm[i] < 0 ? -pcm[i] : pcm[i]; if (a > pk) pk = a; }
     if (pk > _winlinkRxPeak || now - _winlinkRxPeakAt > 500) { _winlinkRxPeak = pk; _winlinkRxPeakAt = now; }
+    if (!winlinkTxActive) _winlinkLevels.noteRx(pk); // the session's loudest receive, the gateway's and not our own over (#300)
   }
   // VARA hears the radio through the virtual cable: the cable side's playback.
   if (modemBridge.cable.state === 'ok' && modemBridgeWin && !modemBridgeWin.isDestroyed()) {
@@ -12713,13 +12823,15 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
         // the failure (VARA not answering after 45 s under an operator's
         // Stop) — keep it on the last-session record every surface shows.
         const why = e && e.message ? e.message : String(e);
-        winlinkLog(`attempt #${seq} failed after it was stopped (${why}) — kept as the reason`);
         try {
           const ls = settings.winlinkLastSession;
           // Only a reason POTACAT wrote itself (a session that could not start).
           // Pat's reply to a call that was stopped ("connect: HTTP 500 — Session
-          // failure ...") is in the log line above and never in the status (#425).
+          // failure ...") is its answer to the Stop, not a fault: it is in Pat's
+          // own log and never in the status (#425) nor in ours (#455), since the
+          // session's summary line was already written when it was stopped.
           if (ls && !ls.ok && !dialed && !String(ls.text || '').includes(why)) {
+            winlinkLog(`attempt #${seq} failed after it was stopped (${why}) — kept as the reason`);
             ls.text = `${ls.text || 'Session failed'} — ${why}`.slice(0, 300);
             saveSettings(settings);
             if (!winlinkSessionActive()) winlinkState.setSession({ error: ls.text, errorKind: _winlinkSessionErrorKind || 'stopped' });
@@ -12915,6 +13027,7 @@ function winlinkOutcomeReset(mode) {
   _winlinkPatReply = '';
   _winlinkReceived = null;
   _winlinkAudioSummary = '';
+  _winlinkLevels.reset();
   _winlinkLinkStory = mode === 'ardop' ? new WinlinkDiag.ArdopLinkStory() : mode === 'packet' ? new DirewolfAgwMonitor.PacketLinkStory() : null;
   _winlinkRadioMode = null;
   // The Outbox as the session starts: what is gone from it afterwards was sent.
@@ -12994,6 +13107,7 @@ async function winlinkSettleOutcome(state, s, raw, received, endedAt) {
     endedBy: WinlinkOutcome.endedByText({ cause: _winlinkCause, modemEnd: story && story.end, mode: s.mode }),
     audio: _winlinkAudioSummary.replace(/^audio this session:\s*/, ''),
     radioMode: winlinkRadioModeText(),
+    levels: _winlinkLevels.text(), levelsAdvice: _winlinkLevels.advice(),
     patLine: _winlinkPatLastLine, raw: _winlinkPatReply,
   };
   const facts = { ...taken, outbox: await winlinkOutboxCount() };
@@ -13047,6 +13161,7 @@ function winlinkEndSession(state, text, received = 0) {
   _cableRxLeveler = null; // the next session starts at unity and finds its own level
   winlinkRememberModemTxGain(); // the transmit gain it learned is this modem's, kept for the next session
   clearWinlinkTxFailsafe();
+  if (_winlinkShimArmed) _winlinkShimDisarmedAt = endedAt;
   _winlinkShimArmed = false;
   if (_winlinkUnkeyTimer) { clearTimeout(_winlinkUnkeyTimer); _winlinkUnkeyTimer = null; }
   if (winlinkTxActive) { winlinkTxActive = false; try { handleRemotePtt(false); } catch {} }
@@ -18451,12 +18566,14 @@ function wsprRandomTxAudioHz() {
 // silently skipped the way it was on the first on-air test (cat connected=false).
 function wsprForcePowerCap() {
   let capped = false;
+  // 1 W unless the operator set the beacon a level of its own (#268).
+  const beaconW = wsprBeaconWatts();
   // Flex Direct / SmartSDR API — rfpower percent. 1% ≈ 1 W (≤1 W on lower-power
   // models). This is the real cap for Flex; the Flex stage limits output
   // regardless of DAX drive level.
   try {
     if (smartSdr && smartSdr.connected && typeof smartSdr.setTxPower === 'function') {
-      smartSdr.setTxPower(1); capped = true;
+      smartSdr.setTxPower(beaconW); capped = true;
     }
   } catch {}
   // CAT rigs, through the same converter as every other power set: rigctld
@@ -18465,11 +18582,44 @@ function wsprForcePowerCap() {
   // G90 at 5 W went to 20 W (WZ1H, Frank, 2026-10-24).
   try {
     if (cat && cat.connected && typeof cat.setTxPower === 'function') {
-      if (gatedSetTxPower(JTCAT_WSPR_MAX_WATTS, { rigType: detectRigType() })) capped = true;
+      if (gatedSetTxPower(beaconW, { rigType: detectRigType() })) capped = true;
     }
   } catch {}
+  // Say the level we set: every surface's TX Pwr and the "TX start ... RF
+  // power set to" line read this, and it said 100 W while the radio sat at
+  // the cap (#268, a rigctld link that never reported power back).
+  if (capped) { _currentTxPower = beaconW; broadcastRigState(); }
   return capped;
 }
+
+// The beacon's RF power: 1 W, or the level the operator set while it was armed.
+function wsprBeaconWatts() {
+  return WsprPowerMemory.beaconWatts(settings.wsprBeaconWatts, settings.activeRigId || null);
+}
+
+// A power set from any surface while the beacon is armed is the operator
+// choosing the beacon's level: keep it for every later frame and re-arm
+// instead of forcing 1 W back over it (#268). The pre-beacon level is still
+// what comes back when the beacon stands down.
+function wsprNoteOperatorPower(watts, source) {
+  const lvl = WsprPowerMemory.operatorBeaconLevel({
+    armed: wsprBeaconArmed(), source, watts, rigId: settings.activeRigId || null,
+  });
+  if (!lvl) return;
+  const prev = settings.wsprBeaconWatts;
+  if (prev && prev.watts === lvl.watts && (prev.rigId || null) === lvl.rigId) return;
+  settings.wsprBeaconWatts = lvl;
+  try { saveSettings(settings); } catch {}
+  if (_wsprBeaconLevelLogTimer) clearTimeout(_wsprBeaconLevelLogTimer);
+  // One line per drag, not one per 80 ms step.
+  _wsprBeaconLevelLogTimer = setTimeout(() => {
+    _wsprBeaconLevelLogTimer = null;
+    const m = settings.wsprPreCapPower;
+    sendCatLog(`[JTCAT] WSPR beacon: TX power ${wsprBeaconWatts()} W set by you — the beacon keeps this level for its frames from now on` +
+      (m && m.watts > 0 ? `; ${m.watts} W still comes back when it stands down.` : '.'));
+  }, 1500);
+}
+let _wsprBeaconLevelLogTimer = null;
 
 // ---- WSPR pre-beacon power memory ------------------------------------------
 // The cap above used to be one-way: the beacon set 1 W and the disarm path
@@ -18501,7 +18651,7 @@ function wsprForgetPreCapPower() {
 function wsprRememberPreCapPower() {
   const r = WsprPowerMemory.rememberPreCapPower({
     current: _currentTxPower, prior: settings.wsprPreCapPower,
-    rigId: settings.activeRigId || null, cap: JTCAT_WSPR_MAX_WATTS, now: Date.now(),
+    rigId: settings.activeRigId || null, cap: wsprBeaconWatts(), now: Date.now(),
   });
   if (r.changed) {
     settings.wsprPreCapPower = r.marker;
@@ -18533,7 +18683,7 @@ const WSPR_RESTORE_MAX_ATTEMPTS = 3;
 function wsprRestorePreCapPower(why, opts = {}) {
   const m = settings.wsprPreCapPower;
   const d = WsprPowerMemory.decideRestore({
-    marker: m, rigId: settings.activeRigId || null, cap: JTCAT_WSPR_MAX_WATTS,
+    marker: m, rigId: settings.activeRigId || null, cap: wsprBeaconWatts(),
     txActiveWspr: !!(ft8Engine && ft8Engine._txActive && ft8Engine._mode === 'WSPR'),
     immediate: !!opts.immediate, attempts: _wsprRestoreAttempts, maxAttempts: WSPR_RESTORE_MAX_ATTEMPTS,
   });
@@ -18562,10 +18712,10 @@ function wsprRestorePreCapPower(why, opts = {}) {
   }
   _wsprRestoreAttempts++;
   if (!wsprCommandTxPower(m.watts)) {
-    sendCatLog(`[JTCAT] WSPR beacon ${why}: could not restore TX power to ${m.watts} W (no live CAT/SmartSDR power control). The radio is still at the ~${JTCAT_WSPR_MAX_WATTS} W beacon cap — raise it by hand, or it will be restored on the next power readback.`);
+    sendCatLog(`[JTCAT] WSPR beacon ${why}: could not restore TX power to ${m.watts} W (no live CAT/SmartSDR power control). The radio is still at the beacon's ~${wsprBeaconWatts()} W — raise it by hand, or it will be restored on the next power readback.`);
     return 'failed';
   }
-  sendCatLog(`[JTCAT] WSPR beacon ${why}: TX power restored to ${m.watts} W (the beacon had capped it at ${JTCAT_WSPR_MAX_WATTS} W).`);
+  sendCatLog(`[JTCAT] WSPR beacon ${why}: TX power restored to ${m.watts} W (the beacon had set it to ${wsprBeaconWatts()} W).`);
   // Optimistic local echo so every surface shows the restored level now; the
   // radio's readback confirms it and clears the marker (or retries).
   _currentTxPower = m.watts;
@@ -18582,10 +18732,19 @@ function wsprRestorePreCapPower(why, opts = {}) {
 function wsprReconcilePreCapPower(watts) {
   const d = WsprPowerMemory.decideReconcile({
     marker: settings.wsprPreCapPower, armed: wsprBeaconArmed(),
-    retryPending: !!_wsprRestoreRetryTimer, watts, cap: JTCAT_WSPR_MAX_WATTS,
+    retryPending: !!_wsprRestoreRetryTimer, watts, cap: wsprBeaconWatts(),
   });
   if (d === 'forget') wsprForgetPreCapPower();
   else if (d === 'restore') wsprRestorePreCapPower('left the radio at the beacon cap', { immediate: true });
+}
+
+let _wsprFrameRf = null; // {meterFrames, peakW, setW} while a beacon frame is out
+function wsprFrameRfEnd() {
+  const f = _wsprFrameRf;
+  _wsprFrameRf = null;
+  if (!f) return;
+  const line = WsprPowerMemory.frameRfVerdict(f);
+  if (line) sendCatLog(line);
 }
 
 // Transmit one WSPR frame. Power is capped three ways: dBm <= 30 (clamped),
@@ -18611,7 +18770,10 @@ function wsprBeaconTransmit(call, grid, dbm) {
   const amp = Math.max(0.05, Math.min(1, Math.sqrt(watts / JTCAT_WSPR_MAX_WATTS)));
   if (amp < 0.999) { for (let i = 0; i < samples.length; i++) samples[i] *= amp; }
   ft8Engine._txActive = true;
-  sendCatLog(`[JTCAT] WSPR beacon TX: ${call} ${grid} ${dbm} dBm (~${watts >= 1 ? '1 W' : Math.round(watts * 1000) + ' mW'}, rig capped 1 W, drive ${Math.round(amp * 100)}%) @ ${baseHz} Hz`);
+  sendCatLog(`[JTCAT] WSPR beacon TX: ${call} ${grid} ${dbm} dBm (~${watts >= 1 ? '1 W' : Math.round(watts * 1000) + ' mW'}, rig set to ${wsprBeaconWatts()} W, drive ${Math.round(amp * 100)}%) @ ${baseHz} Hz`);
+  // What the radio's own wattmeter says during this frame, for one line at
+  // tx-end (#268: three frames at 0 W measured, and nothing said so).
+  _wsprFrameRf = { meterFrames: 0, peakW: 0, setW: wsprBeaconWatts() };
   ft8Engine.emit('tx-start', { samples, message: `${call} ${grid} ${dbm}`, freq: baseHz, slot: 'wspr', offsetMs: 0 });
   // Backstop tx-end after the waveform in case an audio route doesn't call
   // txComplete itself; the armed failsafe is the hard PTT-off backstop.
@@ -18707,7 +18869,7 @@ function setWsprBeacon(on, opts = {}) {
     const why = opts.why || 'disarmed';
     const r = wsprRestorePreCapPower(why, { immediate: !!opts.immediate });
     if (r === 'none') {
-      sendCatLog(`[JTCAT] WSPR beacon ${why}. TX power is still at the ~${JTCAT_WSPR_MAX_WATTS} W beacon cap (no pre-beacon level was known) — raise it in the Rig panel or with the TX Pwr slider in the JTCAT window before other modes.`);
+      sendCatLog(`[JTCAT] WSPR beacon ${why}. TX power is still at the beacon's ~${wsprBeaconWatts()} W (no pre-beacon level was known) — raise it in the Rig panel or with the TX Pwr slider in the JTCAT window before other modes.`);
     }
     tellPopout(false);
     return;
@@ -18755,12 +18917,14 @@ function setWsprBeacon(on, opts = {}) {
         (avgMin > 2 ? `; after that slots are drawn at random — roughly one TX every ${avgMin} minutes, listening slots in between are normal` : '')
       : ' TX 0% = listen only.') +
     (wsprBeaconRunMin() > 0 ? ` It runs for ${wsprRunLabel(wsprBeaconRunMin())}, then stands down.` : ' It runs until you stop it.'));
+  const beaconW = wsprBeaconWatts();
   sendCatLog(capped
-    ? '[JTCAT] WSPR: radio commanded to ~1 W (rfpower 1% on Flex / PC001 on CAT). Still verify actual output on a meter.' +
+    ? `[JTCAT] WSPR: radio commanded to ~${beaconW} W${beaconW === JTCAT_WSPR_MAX_WATTS ? '' : ' (the level you set for the beacon)'}. Still verify actual output on a meter;` +
+      ' some radios make almost nothing at their lowest settings, more so on VHF/UHF — raise TX Pwr in the JTCAT window and the beacon keeps that level.' +
       (restoreWatts > 0
         ? ` ${restoreWatts} W will be restored when the beacon stands down.`
-        : ' No pre-beacon power level was known, so it stays at 1 W until you raise it.')
-    : '[JTCAT] ⚠ WSPR: could NOT set radio power automatically (no live CAT/SmartSDR power control) — set your radio to ≤1 W BY HAND before it transmits.');
+        : ` No pre-beacon power level was known, so it stays at ${beaconW} W until you raise it.`)
+    : `[JTCAT] WSPR: could NOT set radio power automatically (no live CAT/SmartSDR power control) — set your radio to ${beaconW} W or less BY HAND before it transmits.`);
   tellPopout(true);
 }
 
@@ -20575,6 +20739,7 @@ function startJtcat(mode) {
 	    _jtcatLastTxEndMs = Date.now();
 	    clearJtcatTxFailsafe();
 	    clearJtcatIcomHardRelease();
+	    wsprFrameRfEnd();
 	    // If Mercury owns the radio, this tx-end is unwinding a JTCAT TX the
 	    // arbiter blocked at tx-start — do NOT drop Mercury's PTT. Otherwise
 	    // release PTT normally and hand the radio back.
@@ -21030,6 +21195,7 @@ const { computeSpectrumBins } = require('./lib/spectrum-fft');
 const { RxSpectrumRing } = require('./lib/rx-spectrum-ring');
 const FlexScope = require('./lib/flex-scope');
 const ScopeDigitalView = require('./lib/scope-digital-view');
+const { createScopeWatchers } = require('./lib/scope-watchers'); // #358: each remote device's scope view counted on its own
 const ListenSource = require('./lib/listen-source');
 const FlexReadback = require('./lib/flex-readback');
 let _flexSliceKv = {};          // merged status of our slice, for the read-back
@@ -26242,13 +26408,14 @@ function connectRemote() {
     // nothing here needs to be sticky — and a flag left true would let a
     // helper (and the radio's SCU-LAN10) run for a client that has gone, or
     // start for the next one that never asked (mobile handoff, follow-up 2).
-    if (yaesuScopeRemoteWants || yaesuScopeRemoteDigital) {
-      yaesuScopeRemoteWants = false;
-      yaesuScopeRemoteDigital = false;
+    // This fires when the LAST device is gone; one of several leaving is
+    // 'scope-client-gone' (#358).
+    const hadRemoteScope = yaesuScopeRemoteWants || yaesuScopeRemoteDigital;
+    scopeRemoteApply(scopeWatchers.clear());
+    if (hadRemoteScope) {
       if (!yaesuScopeWanted()) { try { stopYaesuScope('ECHOCAT client disconnected'); } catch { /* not running */ } }
       else { try { flexDigitalViewSync(); } catch { /* no Flex scope */ } }
     }
-    yaesuScopeRemoteIsGuest = false;
     if (win && !win.isDestroyed()) {
       win.webContents.send('remote-status', { connected: false });
       // Phone gone — clear any mirrored "phone is scanning" state so the
@@ -26776,15 +26943,8 @@ function connectRemote() {
 
   function applyFilter(width) {
     if (flexSdr()) {
-      const m = (_currentMode || '').toUpperCase();
-      let lo, hi;
-      if (m === 'CW') {
-        lo = Math.max(0, 600 - Math.round(width / 2));
-        hi = 600 + Math.round(width / 2);
-      } else {
-        lo = 100;
-        hi = 100 + width;
-      }
+      // LSB/DIGL below the carrier, AM/FM centred (#129).
+      const { lo, hi } = sliceFilterEdges(_currentMode, width);
       smartSdr.setSliceFilter(0, lo, hi);
     } else if (cat && cat.connected) {
       cat.setFilterWidth(width);
@@ -26879,6 +27039,7 @@ function connectRemote() {
     _currentTxPower = value;
     // The operator has taken the level over — a WSPR restore must not undo it.
     if (!wsprBeaconArmed()) wsprForgetPreCapPower();
+    else wsprNoteOperatorPower(value, 'echocat');
     _txPowerSuppressBroadcast = Date.now() + 500;
     if (_txPowerEchoTimer) clearTimeout(_txPowerEchoTimer);
     _txPowerEchoTimer = setTimeout(() => { _txPowerEchoTimer = null; broadcastRemoteRadioStatus(); }, 550);
@@ -27714,24 +27875,36 @@ function connectRemote() {
     else { stopInProcessSpectrum(); rxSpectrumSync(); rxSpecRing.clear(); }
   });
 
-  // Band scope: the helper runs while the client's Scope view is on screen.
-  remoteServer.on('scope-subscribe', ({ on, guest }) => {
-    if (yaesuScopeRemoteWants !== !!on) {
-      sendCatLog('[Scope] ECHOCAT scope ' + (on ? 'subscribed' : 'unsubscribed') + ' (helper ' + (yaesuScopeProc ? 'pid ' + yaesuScopeProc.pid : 'not running')
+  // Band scope: the helper runs while any device's Scope view is on screen.
+  // Each device (phone, ECHOCAT Web, a remote POTACAT) is counted by its
+  // connection; the scope stops when the last one leaves (#358).
+  remoteServer.on('scope-subscribe', ({ on, guest, clientId }) => {
+    const was = scopeWatchers.has(clientId);
+    const sum = scopeRemoteApply(scopeWatchers.subscribe(clientId, { on, guest }));
+    if (was !== !!on) {
+      sendCatLog('[Scope] ECHOCAT scope ' + (on ? 'subscribed' : 'unsubscribed') + ' by device ' + (clientId || '?')
+        + ' (' + sum.count + ' watching; helper ' + (yaesuScopeProc ? 'pid ' + yaesuScopeProc.pid : 'not running')
         + ', status ' + yaesuScopeState.status + ')');
     }
-    yaesuScopeRemoteWants = !!on;
-    yaesuScopeRemoteIsGuest = !!on && !!guest;
-    if (!on) yaesuScopeRemoteDigital = false;
     if (on) { yaesuScopeRestarts = 0; startYaesuScope(); yaesuScopeBroadcastState(); }
     else if (!yaesuScopeWanted()) stopYaesuScope('ECHOCAT scope view closed');
     else flexDigitalViewSync();
   });
+  // A device's connection went away while others stay connected, goodbye
+  // said or not: its scope view ends; the scope stops after the last (#358).
+  remoteServer.on('scope-client-gone', ({ clientId } = {}) => {
+    const was = scopeWatchers.has(clientId);
+    const sum = scopeRemoteApply(scopeWatchers.remove(clientId));
+    if (was) sendCatLog('[Scope] ECHOCAT device ' + (clientId || '?') + ' watching the scope disconnected (' + sum.count + ' still watching)');
+    if (was && !yaesuScopeWanted()) { try { stopYaesuScope('the last ECHOCAT device watching it disconnected'); } catch { /* not running */ } }
+    else { try { flexDigitalViewSync(); } catch { /* no Flex scope */ } }
+  });
   // The phone's FT8 tab (or its Pan in a digital mode) asks for the digital
   // view on a Flex pan; its Pan outside FT8 keeps the operator's own zoom.
-  remoteServer.on('scope-digital-view', ({ on } = {}) => {
-    if (yaesuScopeRemoteDigital === !!on) return;
-    yaesuScopeRemoteDigital = !!on;
+  remoteServer.on('scope-digital-view', ({ on, clientId } = {}) => {
+    const before = yaesuScopeRemoteDigital;
+    scopeRemoteApply(scopeWatchers.setDigital(clientId, on));
+    if (yaesuScopeRemoteDigital === before) return;
     flexDigitalViewSync();
   });
   remoteServer.on('scope-span', ({ spanHz, guest } = {}) => { setScopeSpan(spanHz, 'ECHOCAT device', { guest }); });
@@ -32926,11 +33099,20 @@ let yaesuScopeScuLanWeSet = false;   // POTACAT turned SCU-LAN10 on → it turns
 let yaesuScopeStopping = null;
 let yaesuScopeStartAfterExit = false;
 let yaesuScopeSynth = false;         // generated signal, no radio (pop-out gear menu)
-let yaesuScopeRemoteWants = false;   // an ECHOCAT client has its Scope view open
+let yaesuScopeRemoteWants = false;   // an ECHOCAT client has its Scope view open (any of them: scopeWatchers)
 let yaesuScopeRemoteDigital = false; // C2S scope-digital-view: the client shows FT8 / a digital Pan
 let yaesuScopeJtcatWants = false;    // the JTCAT pop-out is showing the band scope strip
 let yaesuScopeBandspreadWants = false;   // the Bandspread window draws the scope trace behind its spots
 let yaesuScopeRemoteIsGuest = false; // ...and that client holds a Guest Pass (may watch, never change the radio)
+// The three flags above follow scopeWatchers (#358): every device watching is
+// counted by its connection, so one leaving does not stop the others.
+const scopeWatchers = createScopeWatchers();
+function scopeRemoteApply(sum) {
+  yaesuScopeRemoteWants = sum.wants;
+  yaesuScopeRemoteDigital = sum.digital;
+  yaesuScopeRemoteIsGuest = sum.guest;
+  return sum;
+}
 let yaesuScopeRadioBackAt = 0;       // the radio last powered on / its CAT link came back (#126)
 let yaesuScopeRadioBackTimer = null;
 let yaesuScopeStallKills = 0;        // watchdog kills, cleared after a healthy minute (stallKillsAfterHealthy)
@@ -33183,7 +33365,7 @@ function yaesuScopeNoteFrequency(hz) {
     // around its own live dial) and the pan follows it, at most 10 times a
     // second while the knob spins.
     yaesuScopeState.centerHz = hz;
-    flexScopeQueueCenter(hz + (yaesuScopeState.centerOffsetHz || 0));
+    flexScopeQueueCenter(hz + flexScopeWantOffsetHz);
     if (yaesuScopeRemoteWants && Date.now() - yaesuScopeLastStateSend > 250) yaesuScopeBroadcastState();
     return;
   }
@@ -33673,14 +33855,33 @@ function flexScopeAvailable() {
 
 let flexScopeCenterTimer = null;
 let flexScopeCenterWant = 0;
+// The offset we ASK the pan to sit at (the digital view's, else 0). The axis
+// offset (yaesuScopeState.centerOffsetHz) is where the pan really is, from its
+// status; recentring always uses this one, so a radio that clamps the centre
+// cannot walk the pan further off with every dial step.
+let flexScopeWantOffsetHz = 0;
+let flexPanCenterAsk = null;         // { hz, dial, at }: the last centre sent, for panOffsetFromStatus
+let flexPanSettleTimer = null;
+/** Send a pan centre and remember it, so its status answer can be told from a stale line. */
+function flexScopeAskCenter(hz) {
+  if (!smartSdr || !(hz > 0)) return;
+  smartSdr.setPanCenter(hz);
+  flexPanCenterAsk = { hz, dial: hz - flexScopeWantOffsetHz, at: Date.now() };
+  // A radio that ignores the ask sends no new centre: look again once it has had time.
+  if (flexPanSettleTimer) clearTimeout(flexPanSettleTimer);
+  flexPanSettleTimer = setTimeout(() => {
+    flexPanSettleTimer = null;
+    if (flexScopeOn && flexScopeFollowPan()) yaesuScopeBroadcastState();
+  }, ScopeDigitalView.SETTLE_MS + 50);
+}
 /** Recentre the pan on the dial, coalesced to one command per 100 ms. */
 function flexScopeQueueCenter(hz) {
   flexScopeCenterWant = hz;
   if (flexScopeCenterTimer) return;
-  if (smartSdr) smartSdr.setPanCenter(hz);
+  flexScopeAskCenter(hz);
   flexScopeCenterTimer = setTimeout(() => {
     flexScopeCenterTimer = null;
-    if (flexScopeOn && smartSdr && flexScopeCenterWant && flexScopeCenterWant !== hz) smartSdr.setPanCenter(flexScopeCenterWant);
+    if (flexScopeOn && smartSdr && flexScopeCenterWant && flexScopeCenterWant !== hz) flexScopeAskCenter(flexScopeCenterWant);
   }, 100);
 }
 
@@ -33884,6 +34085,41 @@ function flexScopeApplyGeometry() {
   // A calibrated source: level 0..255 = dbmMin..dbmMax (scopeCalibration).
   if (Number.isFinite(g.dbmMin) && g.dbmMin !== yaesuScopeState.dbmMin) { yaesuScopeState.dbmMin = g.dbmMin; changed = true; }
   if (Number.isFinite(g.dbmMax) && g.dbmMax !== yaesuScopeState.dbmMax) { yaesuScopeState.dbmMax = g.dbmMax; changed = true; }
+  if (flexScopeFollowPan()) changed = true;
+  return changed;
+}
+
+/**
+ * The axis follows the pan's REAL centre (pan status `center=`), not the one
+ * we asked for (Casey's 8600, FT8 view, 2026-11-11: the scope had empty space
+ * past the passband on the right and the low audio end off the left, because
+ * every surface drew the pan where we had asked it to be). centerHz stays the
+ * dial; centerOffsetHz becomes reported centre minus the dial the ask was for
+ * (lib/scope-digital-view.js panOffsetFromStatus). In the digital view, a pan
+ * that then does not show the whole decode window plus the margin (a rounded
+ * width, a clamped centre) is widened, at most MAX_SPAN_ASKS times per view.
+ */
+let flexDigitalView = null;          // the view flexDigitalViewSync asked for, or null
+let flexDigitalSpanAsk = null;       // { hz, at, n }: the last width asked for in this view
+function flexScopeFollowPan() {
+  const id = smartSdr && (smartSdr.panScopeId || smartSdr.ourPanId);
+  const g = id && flexPanGeometry[id];
+  if (!g || !g.centerHz) return false;
+  const now = Date.now();
+  let changed = false;
+  // No ask yet (the scope is starting): a centre left from an earlier session says nothing; hold.
+  const off = ScopeDigitalView.panOffsetFromStatus({ reportedCentreHz: g.centerHz, ask: flexPanCenterAsk, nowMs: now });
+  if (off != null && off !== (yaesuScopeState.centerOffsetHz || 0)) { yaesuScopeState.centerOffsetHz = off; changed = true; }
+  const ask = flexDigitalSpanAsk;
+  const spanSettled = ask && g.spanHz && (Math.abs(g.spanHz - ask.hz) <= ask.hz * 0.05 || now - ask.at >= ScopeDigitalView.SETTLE_MS);
+  if (flexDigitalView && off != null && spanSettled && ask.n < ScopeDigitalView.MAX_SPAN_ASKS) {
+    const fit = ScopeDigitalView.viewFit(flexDigitalView, { offsetHz: off, spanHz: g.spanHz });
+    if (!fit.fits && fit.needSpanHz > ask.hz) {
+      smartSdr.setPanBandwidth(fit.needSpanHz);
+      flexDigitalSpanAsk = { hz: fit.needSpanHz, at: now, n: ask.n + 1 };
+      sendCatLog(`[Scope] Flex panadapter: the pan sits ${off > 0 ? '+' : ''}${off} Hz from the dial and is ${g.spanHz} Hz wide, which cuts the decode window; asking for ${fit.needSpanHz} Hz`);
+    }
+  }
   return changed;
 }
 
@@ -33903,7 +34139,7 @@ function startFlexScope() {
     const id = flexScopeAvailable() ? smartSdr.startPanScope(15) : null;
     if (id) {
       sendCatLog(`[Scope] Flex panadapter ${id}: ${FlexScope.BINS} points at 15 fps, centred on the dial`);
-      if (_currentFreqHz) smartSdr.setPanCenter(_currentFreqHz);
+      if (_currentFreqHz) flexScopeAskCenter(_currentFreqHz + flexScopeWantOffsetHz);
       // Where the operator left the zoom last time.
       const span = FlexScope.nearestSpan(settings.flexScopeSpanHz);
       if (span) { smartSdr.setPanBandwidth(span); yaesuScopeState.spanHz = span; }
@@ -33948,19 +34184,27 @@ function flexDigitalViewSync() {
   flexDigitalViewKey = key;
   const dial = _currentFreqHz || yaesuScopeState.centerHz || 0;
   if (v) {
+    // Until the pan status answers, the axis assumes the radio did as asked;
+    // flexScopeFollowPan then moves it to where the pan really is.
+    flexScopeWantOffsetHz = v.offsetHz;
+    flexDigitalView = v;
+    flexDigitalSpanAsk = { hz: v.spanHz, at: Date.now(), n: 0 };
     yaesuScopeState.centerOffsetHz = v.offsetHz;
     yaesuScopeState.decodeWindow = v.window;
     smartSdr.setPanBandwidth(v.spanHz);
     yaesuScopeState.spanHz = v.spanHz;   // the pan status confirms (or clamps) it
-    if (dial) smartSdr.setPanCenter(dial + v.offsetHz);
+    if (dial) flexScopeAskCenter(dial + v.offsetHz);
     sendCatLog(`[Scope] Flex panadapter: ${ft8Engine._mode} view, ${v.spanHz} Hz wide, centred ${v.offsetHz > 0 ? '+' : ''}${v.offsetHz} Hz from the dial (decode window ${v.window.lo} to ${v.window.hi} Hz)`);
   } else if (wasOn) {
+    flexScopeWantOffsetHz = 0;
+    flexDigitalView = null;
+    flexDigitalSpanAsk = null;
     yaesuScopeState.centerOffsetHz = 0;
     yaesuScopeState.decodeWindow = null;
     const span = FlexScope.nearestSpan(settings.flexScopeSpanHz) || FlexScope.SPANS[2];
     smartSdr.setPanBandwidth(span);
     yaesuScopeState.spanHz = span;
-    if (dial) smartSdr.setPanCenter(dial);
+    if (dial) flexScopeAskCenter(dial);
     sendCatLog(`[Scope] Flex panadapter: back to your zoom (${YaesuScope.formatSpan(span)}), centred on the dial`);
   }
   yaesuScopeBroadcastState();
@@ -33969,10 +34213,15 @@ function flexDigitalViewSync() {
 function stopFlexScope(why) {
   flexScopeOn = false;
   flexDigitalViewKey = '';
+  flexScopeWantOffsetHz = 0;
+  flexDigitalView = null;
+  flexDigitalSpanAsk = null;
+  flexPanCenterAsk = null;
   yaesuScopeState.centerOffsetHz = 0;
   yaesuScopeState.decodeWindow = null;
   if (flexScopeRetry) { clearTimeout(flexScopeRetry); flexScopeRetry = null; }
   if (flexScopeCenterTimer) { clearTimeout(flexScopeCenterTimer); flexScopeCenterTimer = null; }
+  if (flexPanSettleTimer) { clearTimeout(flexPanSettleTimer); flexPanSettleTimer = null; }
   if (smartSdr) smartSdr.stopPanScope();
   sendCatLog('[Scope] Flex panadapter stopped' + (why ? ' — ' + why : ''));
   if (yaesuScopeState.status !== 'stopped') yaesuScopeSetStatus('stopped', null);
@@ -38690,6 +38939,7 @@ function gatedSetTxPower(value, opts = {}) {
   if (typeof cat.setTxPowerWatts === 'function') cat.setTxPowerWatts(actual);
   else if (opts.rigType === 'rigctld') cat.setTxPower(actual / 100);
   else cat.setTxPower(actual);
+  _bandPowerSetW = Number(actual) || 0; // the level a band change puts back (#184)
   return true;
 }
 
@@ -40012,6 +40262,9 @@ app.whenReady().then(() => {
   if (typeof settings.jtcatTxGain === 'number' && Number.isFinite(settings.jtcatTxGain)) {
     _jtcatDirectTxGainLevel = Math.max(0, Math.min(1, settings.jtcatTxGain));
   }
+  // #300: Winlink's transmit level is its own now. Until then it was JTCAT's Drive;
+  // an operator who never set one keeps exactly that, written down once.
+  if (WinlinkTxLevel.seedTxGain(settings, _jtcatDirectTxGainLevel)) saveSettings(settings);
   // JS8 went native (docs/js8-native-plan.md): the bridge-era settings are
   // retired. Clear them once, loudly, so nobody wonders whether an old cable
   // config is still doing something. js8HeartbeatMin / js8Submode are the
@@ -43350,6 +43603,7 @@ function cloudShackNotice(text, kind) {
   });
   // Display preferences of the mail window (speed as the JTCAT pop-out's: slower = averaged, never dropped).
   ipcMain.on('winlink-cmd-pref', (_e, { key, value } = {}) => {
+    if (key === 'winlinkTxGain') { applyWinlinkTxGain(value); return; }
     if (key === 'winlinkWaterfallSpeed') settings.winlinkWaterfallSpeed = Math.max(1, Math.min(60, parseInt(value, 10) || 60));
     else if (key === 'winlinkWaterfallShown') settings.winlinkWaterfallShown = value !== false;
     else if (key === 'winlinkDeletedDays') {
@@ -46475,6 +46729,8 @@ function cloudShackNotice(text, kind) {
         _currentTxPower = value;
         // The operator has taken the level over — a WSPR restore must not undo it.
         if (!wsprBeaconArmed()) wsprForgetPreCapPower();
+        // ...and while the beacon is armed it is the beacon's level from now on (#268).
+        else wsprNoteOperatorPower(value, source);
         // ...nor a tuner/test restore (the 1.13.10 knob fight, GitHub #111).
         if (source !== 'setup' && settings.setupTxPowerRestore) {
           delete settings.setupTxPowerRestore;
@@ -46489,15 +46745,8 @@ function cloudShackNotice(text, kind) {
         const width = Number(data.value) || 0;
         if (width <= 0) break;
         if (flexSdr()) {
-          const m = (_currentMode || '').toUpperCase();
-          let lo, hi;
-          if (m === 'CW') {
-            lo = Math.max(0, 600 - Math.round(width / 2));
-            hi = 600 + Math.round(width / 2);
-          } else {
-            lo = 100;
-            hi = 100 + width;
-          }
+          // LSB/DIGL below the carrier, AM/FM centred (#129).
+          const { lo, hi } = sliceFilterEdges(_currentMode, width);
           smartSdr.setSliceFilter(0, lo, hi);
         } else if (cat && cat.connected) {
           cat.setFilterWidth(width);

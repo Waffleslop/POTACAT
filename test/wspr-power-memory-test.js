@@ -143,8 +143,8 @@ t('the beacon cap goes through gatedSetTxPower (rigctld takes a fraction: a bare
   const fn = main.indexOf('function wsprForcePowerCap()');
   const end = main.indexOf('\n}\n', fn);
   const body = main.slice(fn, end);
-  assert.ok(body.includes('gatedSetTxPower(JTCAT_WSPR_MAX_WATTS, { rigType: detectRigType() })'));
-  assert.ok(!body.includes('cat.setTxPower(JTCAT_WSPR_MAX_WATTS)'), 'raw cat.setTxPower(1) is L RFPOWER 1.000 on rigctld');
+  assert.ok(body.includes('gatedSetTxPower(beaconW, { rigType: detectRigType() })'));
+  assert.ok(!/cat\.setTxPower\((JTCAT_WSPR_MAX_WATTS|beaconW)\)/.test(body), 'raw cat.setTxPower(1) is L RFPOWER 1.000 on rigctld');
 });
 
 console.log(`\nWSPR power memory: ${passed} passed, ${failed} failed`);

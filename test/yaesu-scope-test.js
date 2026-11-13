@@ -215,7 +215,8 @@ check('2. a client disconnect clears the remote subscription and stops an unwatc
   const i = mainSrc.indexOf("remoteServer.on('client-disconnected'");
   assert.ok(i > 0);
   const body = mainSrc.slice(i, i + 900);
-  assert.ok(body.includes('yaesuScopeRemoteWants = false'), 'flag not cleared on disconnect');
+  // #358: the flags follow scopeWatchers; the last device gone clears every watcher.
+  assert.ok(body.includes('scopeRemoteApply(scopeWatchers.clear())'), 'flag not cleared on disconnect');
   assert.ok(body.includes("stopYaesuScope('ECHOCAT client disconnected')"), 'helper not stopped on disconnect');
 });
 
@@ -232,9 +233,10 @@ check('3. a Guest Pass cannot turn SCU-LAN10 on, and is told why', () => {
   const pay = mainSrc.slice(mainSrc.indexOf('function yaesuScopeRemotePayload'), mainSrc.indexOf('function yaesuScopeBroadcastState'));
   // One card per source: an Icom guest is told about the radio's scope, an FT-710 guest about SCU-LAN10.
   assert.ok(/yaesuScopeRemoteIsGuest && asksForEnable\) \? \(s\.source === 'icom' \? ICOM_SCOPE_GUEST_DIAG : YAESU_SCOPE_GUEST_DIAG\) : s\.diag/.test(pay), 'remote payload must substitute the guest diag for a guest session');
-  assert.ok(serverSrc.includes("this.emit('scope-subscribe', { on: !!msg.on, guest: !!ws._passSession })"), 'subscribe must carry the guest flag');
+  assert.ok(serverSrc.includes("this.emit('scope-subscribe', { on: !!msg.on, guest: !!ws._passSession, clientId: this._scopeClientId(ws) })"), 'subscribe must carry the guest flag (and the device, #358)');
   const d = mainSrc.indexOf("remoteServer.on('client-disconnected'");
-  assert.ok(mainSrc.slice(d, d + 1000).includes('yaesuScopeRemoteIsGuest = false'), 'guest flag must clear on disconnect');
+  assert.ok(mainSrc.slice(d, d + 1000).includes('scopeRemoteApply(scopeWatchers.clear())'), 'guest flag must clear on disconnect');
+  assert.ok(/function scopeRemoteApply\(sum\) \{[\s\S]{0,200}yaesuScopeRemoteIsGuest = sum\.guest;/.test(mainSrc), 'the guest flag follows the watchers');
 });
 
 check('4. the synthetic signal advertises nativeScope on any rig and re-broadcasts rig state', () => {

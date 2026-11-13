@@ -161,7 +161,9 @@ check('listen slot (rng says no) does not fire; next TX slot does', () => {
 
 check('decideSlot draws exactly once per slot (idempotent)', () => {
   let calls = 0;
-  const sch = new S.WsprScheduler({ txPct: 50, rng: () => { calls++; return 0.1; } });
+  // 20 %: after a listen slot the chance is 0.25, so the rng is consulted
+  // (at 50 % it is 1 and no draw is needed).
+  const sch = new S.WsprScheduler({ txPct: 20, rng: () => { calls++; return 0.1; } });
   sch.setEnabled(true);
   sch.decideSlot(3 * SLOT + 100);   // guaranteed first slot — no rng draw
   assert.strictEqual(calls, 0, 'guaranteed slot must not consume an rng draw');
@@ -181,6 +183,84 @@ check('setEnabled(false) resets fire/decision latches', () => {
   sch.setEnabled(true);
   // Re-enabled: same slot 9 can fire again (latch was reset).
   assert.ok(sch.tick(9 * SLOT + 300));
+});
+
+// ---- never two slots in a row (GitHub #268) ---------------------------
+// NA4DQ armed at 50 % on 2 m and the beacon keyed 19:06, 19:08 and 19:10:
+// the guaranteed first frame, then two independent 50 % draws that both came
+// up TX. A beacon listens after every frame unless TX % is above 50.
+
+function lcg(seed) {
+  return () => { seed = (1103515245 * seed + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+}
+function run(txPct, rng, slots) {
+  const sch = new S.WsprScheduler({ txPct, rng });
+  sch.setEnabled(true);
+  const out = [];
+  for (let s = 1; s <= slots; s++) out.push(!!sch.tick(s * SLOT + 100));
+  return out;
+}
+
+check('#268: at 50 % with an rng that always says TX, frames alternate', () => {
+  const out = run(50, () => 0.0, 8);
+  assert.deepStrictEqual(out, [true, false, true, false, true, false, true, false]);
+});
+
+check('#268: no two consecutive TX slots at any TX % up to 50', () => {
+  for (const pct of [5, 10, 20, 25, 33, 40, 50]) {
+    const out = run(pct, lcg(pct * 7919), 5000);
+    for (let i = 1; i < out.length; i++) {
+      assert.ok(!(out[i] && out[i - 1]), `${pct} %: slots ${i} and ${i + 1} both transmitted`);
+    }
+  }
+});
+
+check('#268: the long-run TX share still matches TX %', () => {
+  for (const pct of [5, 20, 33, 50, 75, 90]) {
+    const out = run(pct, lcg(pct * 104729), 20000);
+    const share = out.filter(Boolean).length / out.length * 100;
+    assert.ok(Math.abs(share - pct) < 2, `${pct} % gave ${share.toFixed(1)} %`);
+  }
+});
+
+check('#268: 100 % is every slot; above 50 % repeats are allowed (the operator asked)', () => {
+  assert.ok(run(100, () => 0.99, 6).every(Boolean));
+  const out = run(75, lcg(42), 2000);
+  let repeats = 0;
+  for (let i = 1; i < out.length; i++) if (out[i] && out[i - 1]) repeats++;
+  assert.ok(repeats > 0, 'at 75 % some frames must follow a frame');
+});
+
+check('#268: txChance values', () => {
+  assert.strictEqual(S.txChance(0, false), 0);
+  assert.strictEqual(S.txChance(20, true), 0);
+  assert.strictEqual(S.txChance(20, false), 0.25);
+  assert.strictEqual(S.txChance(50, true), 0);
+  assert.strictEqual(S.txChance(50, false), 1);
+  assert.strictEqual(S.txChance(75, false), 1);
+  assert.ok(Math.abs(S.txChance(75, true) - (2 - 1 / 0.75)) < 1e-12);
+  assert.strictEqual(S.txChance(100, true), 1);
+});
+
+check('#268: re-arming right after a frame does not key the next slot', () => {
+  // NA4DQ disarmed and re-armed between frames (20:50:15 / 20:50:19); the
+  // arm-time "first frame" must wait for a slot that does not follow one.
+  const sch = new S.WsprScheduler({ txPct: 20, rng: () => 0.99 });
+  sch.setEnabled(true);
+  assert.ok(sch.tick(2 * SLOT + 100), 'guaranteed first frame');
+  sch.setEnabled(false);
+  sch.setEnabled(true);                                   // re-armed during slot 2
+  assert.strictEqual(sch.tick(3 * SLOT + 100), null, 'slot 3 follows a frame');
+  assert.ok(sch.tick(4 * SLOT + 100), 'the guarantee lands on slot 4');
+});
+
+check('#268: re-arming in the same slot as a frame does not key it again', () => {
+  const sch = new S.WsprScheduler({ txPct: 50, rng: () => 0.0 });
+  sch.setEnabled(true);
+  assert.ok(sch.tick(9 * SLOT + 100));
+  sch.setEnabled(false);
+  sch.setEnabled(true);
+  assert.strictEqual(sch.tick(9 * SLOT + 300), null);
 });
 
 console.log(`\nWSPR scheduler: ${pass} passed, ${fail} failed`);

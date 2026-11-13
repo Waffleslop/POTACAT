@@ -329,6 +329,24 @@ test('NA4DQ\'s 22:16 session: the gateway connected, polled, and never took a da
   assert.strictEqual(snap.end, null, 'the DM answered our first connect request; the link went on');
   assert.strictEqual(snap.connected, true);
 });
+test('#455: connected, but no greeting (I frame) decoded: the summary blames the greeting, not our data frames', () => {
+  // W5AUY-10-like session (made-up calls): UA, RR and DISC heard, never an I frame.
+  const s = new PacketLinkStory();
+  ['rx 1:Fm GW1XYZ-10 To N0CALL <UA F=1 >[1]', 'rx 1:Fm GW1XYZ-10 To N0CALL <RR R0 P=1 >[2]', 'rx 1:Fm GW1XYZ-10 To N0CALL <RR R0 P=1 >[3]', 'rx 1:Fm GW1XYZ-10 To N0CALL <DISC P=1 >[4]'].forEach((f) => s.noteFrame(f));
+  const text = s.snapshot().stateText;
+  assert.ok(/the gateway's greeting never decoded here \(heard only short frames\)/.test(text), text);
+  assert.ok(/look at the receive level and the path/.test(text), text);
+  assert.ok(!/acknowledged none of our data frames/.test(text), 'we never sent one');
+  assert.ok(text.length <= 240, `fits the summary's modem state (${text.length})`);
+  // An I frame before the link came up does not count as the greeting.
+  const pre = new PacketLinkStory();
+  ['rx 1:Fm G To M <I S0 R0 pid=F0 Len=5 P=0 >[0]', 'rx 1:Fm G To M <UA F=1 >[1]', 'rx 1:Fm G To M <RR R0 P=1 >[2]'].forEach((f) => pre.noteFrame(f));
+  assert.ok(/greeting never decoded here/.test(pre.snapshot().stateText));
+  // Never connected: no greeting sentence (there was no link to greet on).
+  const no = new PacketLinkStory();
+  ['rx 1:Fm G To M <DM F=1 >[1]'].forEach((f) => no.noteFrame(f));
+  assert.ok(!/greeting/.test(no.snapshot().stateText), no.snapshot().stateText);
+});
 test('a gateway that takes our frames, then hangs up', () => {
   const s = new PacketLinkStory();
   ['rx 1:Fm G To M <UA F=1 >[1]', 'rx 1:Fm G To M <RR R3 F=1 >[2]', 'rx 1:Fm G To M <DISC P=1 >[3]', 'tx 1:Fm M To G <UI >[4]', 'not a frame'].forEach((f) => s.noteFrame(f));

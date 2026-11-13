@@ -1259,6 +1259,31 @@
   pwrIn.addEventListener('keydown', function (e) { if (e.key === 'Enter') { clearTimeout(pwrTimer); sendPower(pwrIn.value); pwrIn.blur(); } });
   pwrSel.addEventListener('change', function () { sendPower(pwrSel.value); });
   window.api.onRigPower(renderRigPower);
+
+  // ── the modem's transmit audio level (#300) ───────────────────────────────
+  // Its own setting (it used to be JTCAT's Drive). The square curve of every
+  // audio slider: gain = (percent / 100)^2. Sound-card rigs only: Flex Direct
+  // and Icom Network send the modem's audio at full scale.
+  var txlIn = $('wl-txlevel'), txlVal = $('wl-txlevel-val'), txlEditing = false;
+  function renderTxLevel() {
+    var t = state && state.txLevel;
+    if (!t || typeof t.gain !== 'number') return;
+    var pct = Math.round(Math.sqrt(Math.max(0, Math.min(1, t.gain))) * 100);
+    if (!txlEditing) { txlIn.value = String(pct); txlVal.textContent = pct + '%'; }
+    txlIn.disabled = t.soundCard === false;
+    $('wl-txlevel-label').title = t.soundCard === false
+      ? "Not used on this radio: its network audio goes at full scale, and the radio's RF power sets the level."
+      : "The modem's audio level into the radio's sound card (fine control at the low end). It sets modulation, not RF power. Turn it down if the radio's ALC goes high or long frames are rejected.";
+  }
+  txlIn.addEventListener('pointerdown', function () { txlEditing = true; });
+  txlIn.addEventListener('change', function () { txlEditing = false; });
+  txlIn.addEventListener('input', function () {
+    var pct = Math.max(0, Math.min(100, parseInt(txlIn.value, 10) || 0));
+    txlVal.textContent = pct + '%';
+    var gain = (pct / 100) * (pct / 100);
+    if (state && state.txLevel) state.txLevel.gain = gain;
+    window.api.setPref('winlinkTxGain', gain);
+  });
   var fwdEl = $('wl-fwd'), swrEl = $('wl-swr'), swrRatioSeen = false;
   window.api.onCatFwdPower(function (v) {
     var w = Number(v) || 0;
@@ -1647,14 +1672,14 @@
   }
 
   // ── wiring ───────────────────────────────────────────────────────────────
-  window.api.onState(function (s) { state = s; renderState(); renderSound(); autoSound(); wfSync(); });
+  window.api.onState(function (s) { state = s; renderState(); renderSound(); autoSound(); wfSync(); renderTxLevel(); });
   window.api.onSession(function (ss) { if (state) state.session = ss; renderSession(ss); });
   window.api.onMailbox(function (d) {
     if (!d || !lists.hasOwnProperty(d.box)) return;
     lists[d.box] = d.messages || [];
     if (d.box === box) renderList();
   });
-  window.api.getState().then(function (s) { state = s; renderState(); renderSound(); autoSound(); wfSync(); });
+  window.api.getState().then(function (s) { state = s; renderState(); renderSound(); autoSound(); wfSync(); renderTxLevel(); });
 })();
 
 // Bands this radio is used on (rig editor; main.js rig-bands): the gateway

@@ -32,6 +32,7 @@ const TESTS = [
   'test/clock-offset-test.js',
   'test/require-exports-test.js',
   'test/smartsdr-meter-test.js',
+  'test/flex-slice-filter-test.js',
   'test/smartsdr-dax-tx-claim-test.js',
   'test/vfo-ptt-race-test.js',
   'test/vfo-ptt-mic-test.js', // #170: every VFO PTT press logs the mic it opened, the output and the level
@@ -83,6 +84,7 @@ const TESTS = [
   'test/sstv-live-path-test.js',
   'test/sstv-drive-test.js', // #279: the SSTV Drive slider keeps 0, shows its value, and is never squeezed
   'test/sstv-start-band-test.js', // #292: SSTV never tunes a radio to a band it is not set up for
+  'test/sstv-freq-box-test.js', // #359: the frequency box is not overwritten while typing; kHz or MHz; FM from 2 m up
   'test/sstv-text-styles-test.js', // #327: typeface, outline, shadow, letter spacing per SSTV text layer
   'test/sstv-input-level-test.js',
   'test/voice-macros-test.js',
@@ -185,6 +187,7 @@ const TESTS = [
   'test/kenwood-scope-test.js', // #397: the TS-890S bandscope over USB/COM (DD0 5 -> DD4): lines, sweeps, axis, AI/DD0 read-first and put back, 115200, poll not disturbed
   'test/flex-scope-test.js', // the Flex's own panadapter as the band scope (Flex Direct), against a real 8600 capture
   'test/scope-digital-view-test.js', // the scope's tight view on a digital mode's decode window (Flex)
+  'test/scope-watchers-test.js', // #358: each remote device watching the scope is counted; one leaving does not stop the others
   'test/sdr-failure-test.js', // #390: a WebSDR that would not come on says why in the VFO window, with Try again
   'test/kiwisdr-test.js', // KiwiSDR: settings after AR OK (firmware 1.902), receivers that allow no apps
   'test/listen-source-test.js', // who you hear: the radio, or the SDR where the radio cannot go (Casey 2026-10-30)
@@ -206,6 +209,7 @@ const TESTS = [
   'test/adif-import-refs-test.js', // POTA_REF-only logs (QLog) get SIG/SIG_INFO on import; the Logbook shows them (KC9FOZ)
   'test/icom-lan-voice-test.js', // voice over an Icom's LAN: DATA mode, or USB/LSB when DATA OFF MOD = LAN (EA1BZN)
   'test/settings-file-test.js', // settings written via temp+rename with a .bak; a truncated file is restored, never read as a fresh install
+  'test/profile-switch-guard-test.js', // #344: no settings save between an operator switch and the restart; the new operator keeps its own callsign, log and Cloud sign-in
   'test/wsjtx-qdatetime-test.js', // QSO Logged dates are valid UTC; an invalid one never goes out as 1899 (ik4idf Logger32)
   'test/operating-entity-test.js', // W1AW/KL7 is Alaska; the log takes QRZ's DXCC entity, not its mailing country
   'test/hound-log-call-test.js', // a hound calls the fox's base call but logs the full call (level_death 6W/IK2HKT)
@@ -261,6 +265,7 @@ const TESTS = [
   'test/winlink-contacts-test.js', // the Winlink address book, and the Position report and POTA spot forms
   'test/winlink-summary-store-test.js', // #425: the session summary lines survive a restart, so Report a Bug still holds the session that dropped
   'test/winlink-folders-test.js', // #462 #475: Archive and back, the Deleted folder (copies, Restore, purge after N days), Reply all; a real Pat when present
+  'test/winlink-tx-level-test.js', // #300: Winlink's own TX level; the summary says the RX peak and what our overs sent; the pause between overs is not a gap
   'test/rigctld-shim-hamlib-test.js',
   'test/rigctld-died-test.js',
   'test/interface-ptt-test.js',
@@ -285,6 +290,8 @@ const TESTS = [
   'test/jtcat-log-comment-test.js', // dcxweaver: the "JTCAT FT8" COMMENT is optional (default on)
   'test/vfo-sdr-volume-test.js', // #118 df1vb: the SDR Volume row stands in when the VOL knob is hidden
   'test/wspr-power-memory-test.js',
+  'test/wspr-scheduler-test.js', // #268: a beacon never keys two slots in a row unless TX % is over 50
+  'test/wspr-beacon-power-test.js', // #268: the beacon keeps the operator's RF power; rigctld reports the radio's power
   'test/js8-native-test.js',
   'test/js8-varicode-test.js',
   'test/js8-qso-test.js',
@@ -503,6 +510,7 @@ const TESTS = [
   'test/sculan10-read-first-test.js', // FT-710 scope Enable reads SCU-LAN10 (EX030126) before writing: already ON is left alone and not turned off at close; no answer means no blind write (#113 item 7)
   'test/sculan10-scope-test.js', // SCU-LAN10 band scope: spec-shaped frames, inverted amplitude, the line is the first 850 bytes of a 4096-byte frame (#143), the boundary marker and its lock, 850-point resampling, bin-to-frequency
   'test/rig-full-power-test.js', // a radio's real full power (rig.fullPowerW): W5LEE's 5 W Hermes Lite behind deskHPSDR's 100 W TS-2000 emulation, slider, PC command, readback and log in real watts
+  'test/kenwood-pc-power-test.js', // the TCP Kenwood client (deskHPSDR, Zeus) sends PC on the model's scale, Full power included (6 W = PC100, not PC006), never drops the last slider level, and a radio that cannot report its power gets it again after a band change (#184)
   'test/power-restore-test.js', // the external-tuner / test restore: never a 100 W guess, never against the operator's own knob (GitHub #111, 1.13.10 regression)
   'test/activator-log-once-test.js', // the Activator log saves once per press, and a slow QRZ never holds up a save (.eddiejames duplicates)
   'test/serial-hs-trial-test.js', // the RTS/CTS no-answer trial covers Kenwood too (jcoreyc TS-480), never the legacy Yaesu protocol
