@@ -477,7 +477,7 @@ saved password and is not shown.
 |---|---|---|
 | `winlink-list` | C→S | `{box}`: refresh one folder from Pat. Reply: `winlink-mailbox`. An unknown `box` is read as `in`. |
 | `winlink-read` | C→S | `{box, mid}`: one message with its body. Reply: `winlink-message`, else `winlink-result {op: 'read'}`. Reading an unread message in `in` marks it read on the shack; a `winlink-mailbox` and a `winlink-state` push follow. |
-| `winlink-message` | S→C | `{box, mid, message}`: the message as in `winlink-mailbox`, plus `body`. To the asker only. |
+| `winlink-message` | S→C | `{box, mid, message}`: the message as in `winlink-mailbox`, plus `body`, and `sentRoute` when the shack kept one (see below). To the asker only. |
 | `winlink-attachment-get` | C→S | `{box, mid, name}`: one attachment. Reply: `winlink-attachment`, else `winlink-result {op: 'attachment'}`. An attachment over 2 MB is refused with an error. |
 | `winlink-attachment` | S→C | `{box, mid, name, size, dataBase64}`. To the asker only. |
 | `winlink-delete` | C→S | `{box, mid}`: delete a message. On a shack with `mail-folders-v2` this MOVES it to `deleted` (from `in`, `out`, `sent` or `archive`; from `out` it is no longer sent), and in `deleted` it removes it for good. An older shack removes it for good. Reply: `winlink-result {op: 'delete'}`; the folders are pushed again. |
@@ -518,6 +518,26 @@ never sent that folder. Any client may ask for it with `winlink-list {box: 'dele
   `Move to Inbox` / `Move to Sent` (in Archive: Sent when the station sent it, else Inbox), `Delete`
   (`Delete (do not send)` in the Outbox), and in Deleted `Restore to <folder>` and `Delete for good`,
   which asks once on the button itself: `Delete for good? It cannot be brought back.`
+
+#### How a sent message went out (`message.sentRoute`, #442, added 2026-11-13)
+
+Pat records nothing about how a message left. When a session ends, the shack gives each message
+that was in the Outbox when the session started, is gone from it, and is now in Sent one record,
+kept by message id (`lib/winlink-sent-routes.js`). Archive and Deleted keep the id, so they keep it.
+
+- **Where.** `winlink-message.message.sentRoute`, for `box` `sent`, `archive` and `deleted` only,
+  and only when the shack kept a record. Messages sent before 2026-11-13 (POTACAT before this
+  change), or sent by another program, have none: show nothing, never a guess. Never on `in` or
+  `out`, never in `winlink-mailbox` rows.
+- **Fields.** `{mode, transport, sentAt, gateway?, dialKhz?}`. `mode`: `telnet`, `ardop`, `packet`,
+  `vara`, `varafm`, `mercury`. `transport`: `internet` (telnet) or `radio`. `sentAt`: ISO time the
+  session ended (the message left during it). `gateway` (upper case, with SSID) and `dialKhz` (the
+  dial, kHz) on radio routes only, each when known.
+- **Words** (`lib/winlink-mail-actions.js` `sentRouteLine`), one line in the reader:
+  `Sent 13 Nov 2026 at 14:32 UTC via W5ABC on 7.102 MHz (ARDOP).` or
+  `Sent 13 Nov 2026 at 14:32 UTC over the internet.` Mode words: ARDOP, Packet, VARA HF, VARA FM,
+  Mercury. The dial is in MHz with at least three decimals (145.050 MHz, 10.1455 MHz).
+- Additive: an older client ignores the field; an older shack never sends it.
 
 #### Gateways and sessions
 

@@ -336,6 +336,8 @@
         + (deleted ? '<div class="wl-del-note">' + esc(WMA.deletedNote(m, state && state.deletedDays, Date.now())) + '</div>' : '')
         + '<div class="wl-hdr"><b>' + esc(m.subject || '(no subject)') + '</b><br>From <b>' + esc(m.from) + '</b> · ' + esc(new Date(m.date).toLocaleString()) + '<br>To ' + esc((m.to || []).join(', '))
         + (m.cc && m.cc.length ? '<br>Cc ' + esc(m.cc.join(', ')) : '') + '</div>'
+        // How it went out (#442): gateway, dial and mode, or the internet; only when POTACAT kept it.
+        + (WMA.sentRouteLine(m.sentRoute) ? '<div class="wl-route" id="wl-route">' + esc(WMA.sentRouteLine(m.sentRoute)) + '</div>' : '')
         + '<div class="wl-body">' + esc(m.body || '') + '</div>'
         + (m.attachments && m.attachments.length ? '<div class="wl-attach">' + m.attachments.map(function (a) {
           // Pat cannot read its Deleted folder: an attachment there is named, and saved after Restore.

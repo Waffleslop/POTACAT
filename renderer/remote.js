@@ -16084,6 +16084,13 @@ var _paddleHoldTimer = { dit: null, dah: null };
     var note = mailEl('mail-read-note');
     note.textContent = deleted ? MailActions.deletedNote(m, mailState && mailState.deletedDays, Date.now()) : '';
     note.classList.toggle('hidden', !deleted);
+    // How it went out (#442): message.sentRoute, from a shack that kept it; nothing otherwise.
+    var route = mailEl('mail-read-route');
+    if (route) {
+      var routeText = MailActions.sentRouteLine(m.sentRoute);
+      route.textContent = routeText;
+      route.classList.toggle('hidden', !routeText);
+    }
     mailEl('mail-read-body').textContent = m.body || '';
     var atts = mailEl('mail-read-atts');
     atts.textContent = '';
