@@ -288,6 +288,8 @@ const TESTS = [
   'test/jtcat-log-comment-test.js', // dcxweaver: the "JTCAT FT8" COMMENT is optional (default on)
   'test/vfo-sdr-volume-test.js', // #118 df1vb: the SDR Volume row stands in when the VOL knob is hidden
   'test/wspr-power-memory-test.js',
+  'test/wspr-scheduler-test.js', // #268: a beacon never keys two slots in a row unless TX % is over 50
+  'test/wspr-beacon-power-test.js', // #268: the beacon keeps the operator's RF power; rigctld reports the radio's power
   'test/js8-native-test.js',
   'test/js8-varicode-test.js',
   'test/js8-qso-test.js',
