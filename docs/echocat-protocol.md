@@ -359,7 +359,7 @@ and non-private respectively. The predicate is the thread store's own
 | Message | Dir | Purpose |
 |---|---|---|
 | `sstv-open` | C→S | Open SSTV view (starts decoder). |
-| `sstv-photo` | C→S | TX a photo (mode chosen client-side). |
+| `sstv-photo` | C→S | TX a photo (mode chosen client-side). `{image, mode, freqKhz?}`. `freqKhz` (#357, capability `sstv-send-tune`): the SSTV frequency chosen on the client, a number in kHz. The desktop tunes the radio there BEFORE the picture keys, unless the radio is already within 10 kHz of it. Without `freqKhz` it tunes to the SSTV channel of the radio's band (14.230, 7.171 LSB, 3.845 LSB, 18.161, 21.340, 24.975, 28.680, 50.680) unless the radio is within 10 kHz of an SSTV channel, and to 20 m (day) or 40 m (night) from a band with none. Never to a band the radio is not set up for, never with split on, and never for a Guest Pass picture (the pass is checked where the radio is). Rules: lib/sstv-send.js `sendChannel`. |
 | `sstv-stop` | C→S | Close SSTV. |
 | `sstv-halt-tx` | C→S | Cancel an in-progress TX. |
 | `sstv-get-gallery` | C→S | Pull the RX gallery. |
@@ -368,7 +368,7 @@ and non-private respectively. The predicate is the thread store's own
 | `sstv-compose-state` | S→C | Compose state push: `{bgDataUrl, texts[], mode}`. Each text: `key, label, x, y, fontSize, bold, italic, color, rotation, visible`, and (#327, capability `sstv-text-styles`) `face` (`""`, `plain` or a lib/sstv-templates.js FONTS id), `fontCss`/`fontWeight` (the face as drawn), `outline`, `shadow`, `spacing` (px at the canvas size sent, scaled with x and fontSize on a 640-wide mode). Rules: lib/sstv-templates.js layerStyle / layerFont. |
 | `sstv-rx-image` | S→C | A new RX image is ready. |
 | `sstv-rx-progress` | S→C | RX progress (decoded scanlines). |
-| `sstv-tx-status` | S→C | TX progress. |
+| `sstv-tx-status` | S→C | TX progress. `{state, durationSec?, freqKhz?, error?}`. `state`: `tx` (with `durationSec`), `rx`, or `auto-rx` (Idle Mode SSTV, with `freqKhz`). `error` (#357, capability `sstv-send-tune`; guest refusals carried it since `sstv-guest-check`): a picture was NOT sent, one plain line saying why ("Picture not sent: 14.105 MHz phone is outside US Extra privileges. ..."). It comes with `rx` or `auto-rx`. Show it on the SSTV status line in place of "Ready" until the next send or the next `sstv-tx-status`; never as a blocking alert. Every picture that is not sent ends in one of these, never in silence. |
 | `sstv-wf-bins` | S→C | Waterfall bins for SSTV view. |
 
 ### Winlink (email over radio)

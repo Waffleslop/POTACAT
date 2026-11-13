@@ -61,7 +61,9 @@ test('the hello advertises sstv-packs, sstv-fskid and sstv-guest-check', () => {
   assert.ok(/case 'sstv-pack-claims':/.test(src) && /type: 'sstv-pack-claims'/.test(src), 'pack claims both ways');
   const main = R('main.js');
   assert.ok(/type: 'sstv-rx-fskid'/.test(main) && /fskCall: meta\.fskCall/.test(R('lib/sstv-gallery.js')), 'FSK ID reaches clients and gallery records');
-  assert.ok(/interceptCatCommand\(\{ type: 'sstv_tx'/.test(main) && /broadcastSstvTxStatus\(\{ state: 'rx', error: res\.userVisible \}\)/.test(main), 'guest picture checked, refusal as sstv-tx-status');
+  // #357: the refusal goes through sstvSendFailed, which sends sstv-tx-status with the error.
+  assert.ok(/interceptCatCommand\(\{ type: 'sstv_tx'/.test(main) && /sstvSendFailed\(res\.userVisible,/.test(main), 'guest picture checked, refusal as sstv-tx-status');
+  assert.ok(/broadcastSstvTxStatus\(SstvSend\.notSentStatus\(\{ autoActive: autoSstvActive, error: text \}\)\)/.test(main), 'sstvSendFailed sends the error');
 });
 
 test('schema 2 requires a TTF beside every WOFF2; schema 1 stays WOFF2-only and valid', () => {
