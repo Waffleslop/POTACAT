@@ -496,6 +496,7 @@ const TESTS = [
   'test/decode-contract-test.js',
   'test/ft8-wasm-bracket-test.js',
   'test/layout-alignment-test.js',
+  'test/net-reminder-row-test.js', // a Net Reminders row always names its net (#284)
   'test/freq-dots-test.js', // every frequency an operator reads is written the VFO way, 14.074.00 (Casey 2026-11-11)
   'test/settings-contrast-test.js', // Settings meets the contrast rule in every theme (VARA button in She's On Frequency); rendered: scripts/settings-contrast-audit.js
   'test/settings-pi-test.js',
