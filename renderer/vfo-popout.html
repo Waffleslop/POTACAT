@@ -1206,10 +1206,7 @@ window.api.onRadioState((s) => {
     const sb = document.getElementById('split-badge');
     if (sb) sb.style.display = s.split ? '' : 'none';
   }
-  if (s.customCatButtons) {
-    customCatButtons = s.customCatButtons;
-    buildCustomCatBtns();
-  }
+  if (s.customCatButtons) applyCustomCatSlots(s.customCatButtons);
   updateDisplay();
   updateModeHighlight();
 });
@@ -1644,6 +1641,58 @@ function customSliderCommand(template, value) {
 }
 
 const customSliderTimers = {};
+// The value each slider slot last sent from this window, by name|command.
+// The controls are rebuilt when the slot list changes, and a rebuilt slider
+// starts here instead of at its minimum.
+const customSliderLast = {};
+let customCatSlotsSig = null;
+
+// The slot list without the slider values: what decides a rebuild.
+function customCatSlotsSignature(list) {
+  return JSON.stringify((Array.isArray(list) ? list : []).map((b) => {
+    const o = Object.assign({}, b);
+    delete o.value;
+    return o;
+  }));
+}
+
+// Where a slider starts: what this window last sent, else the value the
+// main window saved, else the minimum.
+function customSliderStartValue(b, last, lo) {
+  if (Number.isFinite(last)) return last;
+  if (Number.isFinite(b.value)) return b.value;
+  return lo;
+}
+
+// Every vfo-radio-state carries the slot list, several times a second.
+// Rebuilding the controls on each one put a slider back at its minimum under
+// the pointer while it was dragged, so it could not be moved down at all.
+// Rebuild only when a slot changed; a value moved in the main window is
+// shown in place, except on a slider being dragged here.
+function applyCustomCatSlots(list) {
+  const sig = customCatSlotsSignature(list);
+  if (sig !== customCatSlotsSig) {
+    customCatSlotsSig = sig;
+    customCatButtons = list;
+    buildCustomCatBtns();
+    return;
+  }
+  const moved = list.filter((b) => b.type === 'slider' && Number.isFinite(b.value));
+  for (const b of moved) {
+    const key = b.name + '|' + b.command;
+    const prev = customCatButtons.find((x) => x.name === b.name && x.command === b.command);
+    if (prev && prev.value === b.value) continue;
+    customSliderLast[key] = b.value;
+    document.querySelectorAll('.custom-cat-slider.custom-cat-injected').forEach((el) => {
+      if (el._key !== key) return;
+      const r = el.querySelector('input[type="range"]'), v = el.querySelector('.ccs-val');
+      if (!r || r === document.activeElement) return;
+      r.value = b.value;
+      if (v) v.textContent = r.value;
+    });
+  }
+  customCatButtons = list;
+}
 
 function buildCustomCatBtns() {
   // Remove any previously injected custom controls
@@ -1673,7 +1722,7 @@ function buildCustomCatBtns() {
         range.className = 'ccs-range';
         range.min = lo;
         range.max = hi;
-        range.value = Number.isFinite(b.value) ? b.value : lo;
+        range.value = customSliderStartValue(b, customSliderLast[b.name + '|' + b.command], lo);
         range.title = b.command;
         const val = document.createElement('span');
         val.className = 'ccs-val';
@@ -1683,6 +1732,7 @@ function buildCustomCatBtns() {
           // Debounced like the main window's: dragging a slider must not
           // fire a CAT command per pixel.
           const key = b.name + '|' + b.command;
+          customSliderLast[key] = +range.value;
           if (customSliderTimers[key]) clearTimeout(customSliderTimers[key]);
           customSliderTimers[key] = setTimeout(() => {
             customSliderTimers[key] = null;
