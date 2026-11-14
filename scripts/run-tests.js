@@ -462,6 +462,7 @@ const TESTS = [
   'test/rumlogng-logbook-test.js',
   'test/wsjtx-status-bridge-test.js',
   'test/jtcat-tx-slot-test.js',
+  'test/jtcat-mode-change-test.js',
   'test/activation-map-data-test.js',
   'test/log-freq-test.js',
   'test/log-tx-power-test.js',

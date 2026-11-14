@@ -381,6 +381,7 @@ const wsprBands = require('./lib/wspr/bands');
 const wsprlive = require('./lib/wspr/wsprlive');
 const wsprBandhop = require('./lib/wspr/bandhop');
 const jtcatModehop = require('./lib/jtcat-modehop');
+const { operatorModeChange: jtcatModeChangeRule } = require('./lib/jtcat-mode-change');
 const FakeIt = require('./lib/jtcat-fake-it'); // split operation "Fake It" (fakeItShiftForTx / fakeItRestoreDial)
 const { WsprScheduler } = require('./lib/wspr/scheduler');
 const WsprPowerMemory = require('./lib/wspr-power-memory'); // pre-beacon RF power remember/restore decisions
@@ -28490,10 +28491,7 @@ function connectRemote() {
       startJtcat(mode);
       return;
     }
-    ft8Engine.setMode(mode); // accepts 'WSPR'
-    jtcatModeHopReset(); // the operator just chose a mode — the idle clock starts here
-    if (mode !== 'WSPR') wsprSessionEnd();
-    pushActivityState();
+    jtcatOperatorModeChange(mode); // #517: a real change stops TX and clears decodes
   });
 
   // PSK31 one-shot Send from the phone — same contract as the popout's
@@ -38752,7 +38750,9 @@ function cancelAutoSstv() {
       // settings alone leaves the running engine in WSPR while the operator
       // looks at the mode they asked for, so move the engine too.
       sendCatLog(`[Auto-RX] handing the JTCAT window back to you — switching ${ft8Engine._mode} to ${restoreMode}`);
-      ipcMain.emit('jtcat-set-mode', null, restoreMode);
+      // handBack: the idle receive never transmitted, and the click that
+      // ended it may have just armed a hunt; the mode change must not halt it.
+      ipcMain.emit('jtcat-set-mode', null, restoreMode, { handBack: true });
     }
     autoIdleJtcatOpenedPopout = false;
     sendCatLog('[Auto-RX] ' + (autoIdleRxLabel || 'WSPR') + ' receive stopped');
@@ -39261,6 +39261,25 @@ function jtcatHaltTxNow(reason, opts = {}) {
   if (win && !win.isDestroyed()) win.webContents.send('jtcat-tx-status', { state: 'rx' });
   sendCatLog(`[JTCAT] ${why}: ${wasTx ? 'transmission stopped, PTT released' : 'PTT released'}${stopped.length ? `; also stopped ${stopped.join(', ')}` : ''}`);
   return stopped;
+}
+
+/**
+ * The OPERATOR changed JTCAT mode inside the FT family (pop-out, main window,
+ * ECHOCAT). #517: a real change stops TX (queued and armed too) and empties the
+ * server's decode replay; every surface clears its own decodes and callers.
+ * Automatic hops never come here (jtcatHopMode keeps Run going), and the Spot
+ * Target a spot click just armed survives (lib/jtcat-mode-change.js).
+ */
+function jtcatOperatorModeChange(mode, opts) {
+  return jtcatModeChangeRule(mode, {
+    engineMode: () => (ft8Engine ? ft8Engine._mode : ''),
+    halt: (why) => jtcatHaltTxNow(why),
+    clearDecodes: () => { if (remoteServer) { try { remoteServer.clearJtcatDecodes(); } catch {} } },
+    setMode: (m) => ft8Engine.setMode(m), // accepts 'WSPR'
+    modeHopReset: () => jtcatModeHopReset(),
+    wsprSessionEnd: () => wsprSessionEnd(),
+    pushActivityState: () => pushActivityState(),
+  }, opts || {});
 }
 
 function jtcatAnyTxActive() {
@@ -51521,7 +51540,7 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('jtcat-stop', () => {
     stopJtcat(); // clears the spot target too (single choke point in stopJtcat)
   });
-  ipcMain.on('jtcat-set-mode', (_e, mode) => {
+  ipcMain.on('jtcat-set-mode', (_e, mode, internal) => {
     if (!ft8Engine) return;
     // PSK31, JS8 and JTTY live in different engine classes — Ft8Engine.setMode()
     // silently coerces unknown strings to 'FT8', so a family switch in ANY
@@ -51534,10 +51553,9 @@ function cloudShackNotice(text, kind) {
       if (mode === 'JS8') openJs8Popout();
       return;
     }
-    ft8Engine.setMode(mode);
-    jtcatModeHopReset(); // the operator just chose a mode — the idle clock starts here
-    if (mode !== 'WSPR') wsprSessionEnd();
-    pushActivityState();
+    // #517: a real change stops TX and clears decodes. `internal` only ever
+    // comes from ipcMain.emit in this file (the preload sends the mode alone).
+    jtcatOperatorModeChange(mode, { handBack: !!(internal && internal.handBack) });
   });
   // JS8 submode (NORMAL/FAST/TURBO/SLOW/ULTRA). NORMAL is the validated one;
   // the engine accepts the others but the popout only offers what's proven.
