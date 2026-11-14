@@ -459,6 +459,7 @@ const TESTS = [
   'test/station-clock-test.js', // ECHOCAT device sets the FT8 slot clock
   'test/rig-bands-test.js',
   'test/award-tables-test.js',
+  'test/dxcc-progress-test.js',
   'test/wspr-legend-test.js',
   'test/directory-echocat-seed-test.js',
   'test/pota-email-spot-test.js',

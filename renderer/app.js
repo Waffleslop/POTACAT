@@ -14635,7 +14635,7 @@ function renderDxccMatrix() {
   if (!dxccData || !dxccData.entities) {
     dxccMatrixBody.innerHTML = '';
     dxccPlaceholder.classList.remove('hidden');
-    dxccCountEl.textContent = '0 / 100';
+    dxccCountEl.textContent = window.DxccProgress.dxccProgressText(0, 'worked').count;
     dxccAwardLabelEl.textContent = '';
     dxccChallengeEl.classList.add('hidden');
     return;
@@ -14683,12 +14683,14 @@ function renderDxccMatrix() {
   }
 
   // Update progress counter
-  dxccCountEl.textContent = `${confirmedCount} / 100`;
-  dxccAwardLabelEl.textContent = confirmedCount >= 100 ? 'DXCC!' : '';
+  // #382: say what is counted, worked (ADIF) or confirmed (Log4OM SQLite).
+  const progress = window.DxccProgress.dxccProgressText(confirmedCount, dxccData.basis, challengeCount);
+  dxccCountEl.textContent = progress.count;
+  dxccAwardLabelEl.textContent = progress.award;
 
   // DXCC Challenge counter (All Bands view only)
   if (isAllBands) {
-    dxccChallengeEl.textContent = `Challenge: ${challengeCount}`;
+    dxccChallengeEl.textContent = progress.challenge;
     dxccChallengeEl.classList.remove('hidden');
   } else {
     dxccChallengeEl.classList.add('hidden');
