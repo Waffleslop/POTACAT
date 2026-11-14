@@ -113,6 +113,7 @@ const TESTS = [
   'test/merge-latest-mac-test.js',
   'test/lan-advertise-test.js',
   'test/custom-cat-parity-test.js',
+  'test/vfo-custom-cat-slider-test.js', // #526: a custom CAT slider in the VFO window stays where it is dragged; no rebuild per push
   'test/custom-cat-read-test.js', // #242: a custom toggle's own read command + ON-when rule; unknown, not OFF, when unread; no read during TX
   'test/worked-qsos-chunk-test.js',
   'test/web-log-form-test.js',
