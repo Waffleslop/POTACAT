@@ -153,4 +153,4 @@ async function runPacket({ root, epA, epB, agwBase, logDir, bytes = 2048, txDela
   return res;
 }
 
-module.exports = { runPacket, binPath };
+module.exports = { runPacket, binPath, Wolf };
