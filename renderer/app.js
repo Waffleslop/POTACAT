@@ -4908,7 +4908,8 @@ document.getElementById('qrz-download-btn').addEventListener('click', async () =
   try {
     const result = await window.api.qrzDownloadLogbook();
     if (result.ok) {
-      statusEl.textContent = `Imported ${result.imported} new QSOs (${result.total} total in QRZ)`;
+      statusEl.textContent = `Imported ${result.imported} new QSOs (${result.total} total in QRZ)` +
+        (result.updated > 0 ? `, ${result.updated} updated with confirmations` : '');
       statusEl.style.color = '#4ecca3';
     } else {
       statusEl.textContent = result.error || 'Download failed';
@@ -5086,15 +5087,11 @@ function renderNetList(nets) {
     info.className = 'net-item-info';
     const nameEl = document.createElement('div');
     nameEl.className = 'net-item-name';
-    nameEl.textContent = net.name;
+    nameEl.textContent = NetReminderRow.title(net);
+    nameEl.title = nameEl.textContent;
     const detailEl = document.createElement('div');
     detailEl.className = 'net-item-detail';
-    const schedStr = net.schedule?.type === 'weekly'
-      ? ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].filter((_,i) => (net.schedule.days || []).includes(i)).join(', ')
-      : net.schedule?.type === 'dates'
-        ? (net.schedule.dates || []).join(', ')
-        : 'Daily';
-    detailEl.textContent = `${FreqDots.khzMhz(net.frequency) || net.frequency} ${net.mode} \u2022 ${net.startTime} ${net.timeZone === 'utc' ? 'UTC' : 'Local'} \u2022 ${schedStr}`;
+    detailEl.textContent = NetReminderRow.detail(net);
     info.appendChild(nameEl);
     info.appendChild(detailEl);
 
@@ -10101,6 +10098,7 @@ async function runAdifImport(resultEl) {
       resultEl.textContent = '';
     } else if (result.success) {
       const parts = [`${result.imported.toLocaleString()} QSOs imported`];
+      if (result.updated > 0) parts.push(`${result.updated.toLocaleString()} updated with confirmations`);
       if (result.skipped > 0) parts.push(`${result.skipped.toLocaleString()} already in the log`);
       if (result.parksAdded > 0) {
         parts.push(`${result.parksAdded.toLocaleString()} new park ref${result.parksAdded === 1 ? '' : 's'}`);
@@ -14641,7 +14639,7 @@ function renderDxccMatrix() {
   if (!dxccData || !dxccData.entities) {
     dxccMatrixBody.innerHTML = '';
     dxccPlaceholder.classList.remove('hidden');
-    dxccCountEl.textContent = '0 / 100';
+    dxccCountEl.textContent = window.DxccProgress.dxccProgressText(0, 'worked').count;
     dxccAwardLabelEl.textContent = '';
     dxccChallengeEl.classList.add('hidden');
     return;
@@ -14689,12 +14687,14 @@ function renderDxccMatrix() {
   }
 
   // Update progress counter
-  dxccCountEl.textContent = `${confirmedCount} / 100`;
-  dxccAwardLabelEl.textContent = confirmedCount >= 100 ? 'DXCC!' : '';
+  // #382: say what is counted, worked (ADIF) or confirmed (Log4OM SQLite).
+  const progress = window.DxccProgress.dxccProgressText(confirmedCount, dxccData.basis, challengeCount);
+  dxccCountEl.textContent = progress.count;
+  dxccAwardLabelEl.textContent = progress.award;
 
   // DXCC Challenge counter (All Bands view only)
   if (isAllBands) {
-    dxccChallengeEl.textContent = `Challenge: ${challengeCount}`;
+    dxccChallengeEl.textContent = progress.challenge;
     dxccChallengeEl.classList.remove('hidden');
   } else {
     dxccChallengeEl.classList.add('hidden');

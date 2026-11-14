@@ -212,6 +212,7 @@ const TESTS = [
   'test/settings-file-test.js', // settings written via temp+rename with a .bak; a truncated file is restored, never read as a fresh install
   'test/profile-switch-guard-test.js', // #344: no settings save between an operator switch and the restart; the new operator keeps its own callsign, log and Cloud sign-in
   'test/wsjtx-qdatetime-test.js', // QSO Logged dates are valid UTC; an invalid one never goes out as 1899 (ik4idf Logger32)
+  'test/kg4-us-calls-test.js', // #342 KG4 + two letters is Guantanamo, else US
   'test/operating-entity-test.js', // W1AW/KL7 is Alaska; the log takes QRZ's DXCC entity, not its mailing country
   'test/hound-log-call-test.js', // a hound calls the fox's base call but logs the full call (level_death 6W/IK2HKT)
   'test/jtcat-hound-chip-test.js', // #160: HOUND chip is a two-way toggle on the main screen
@@ -451,6 +452,7 @@ const TESTS = [
   'test/lz3aw-round14-test.js',
   'test/lz3aw-batch-b-test.js',
   'test/lotw-report-test.js',
+  'test/import-confirmations-test.js', // Import Log merges QSL / LoTW confirmations into QSOs already logged (#461)
   'test/rumlogng-logbook-test.js',
   'test/wsjtx-status-bridge-test.js',
   'test/jtcat-tx-slot-test.js',
@@ -459,6 +461,7 @@ const TESTS = [
   'test/station-clock-test.js', // ECHOCAT device sets the FT8 slot clock
   'test/rig-bands-test.js',
   'test/award-tables-test.js',
+  'test/dxcc-progress-test.js',
   'test/wspr-legend-test.js',
   'test/directory-echocat-seed-test.js',
   'test/pota-email-spot-test.js',
@@ -496,6 +499,7 @@ const TESTS = [
   'test/decode-contract-test.js',
   'test/ft8-wasm-bracket-test.js',
   'test/layout-alignment-test.js',
+  'test/net-reminder-row-test.js', // a Net Reminders row always names its net (#284)
   'test/freq-dots-test.js', // every frequency an operator reads is written the VFO way, 14.074.00 (Casey 2026-11-11)
   'test/settings-contrast-test.js', // Settings meets the contrast rule in every theme (VARA button in She's On Frequency); rendered: scripts/settings-contrast-audit.js
   'test/settings-pi-test.js',

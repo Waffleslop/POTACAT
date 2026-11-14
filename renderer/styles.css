@@ -5391,6 +5391,15 @@ a.settings-echocat-badge-link:hover {
   border-bottom: 1px solid var(--border-primary);
 }
 
+/* `dialog input` makes every input a full-width block; this checkbox is only the
+   on/off state and must leave the row to the net's name (#284). */
+.net-item input[type="checkbox"] {
+  display: inline-block;
+  width: auto;
+  margin: 0;
+  flex: 0 0 auto;
+}
+
 .net-item-info {
   flex: 1;
   min-width: 0;
