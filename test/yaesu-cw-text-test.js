@@ -65,7 +65,7 @@ test('FTX-1: KM5 then KY05; a long message waits for each memory to play', async
   writes.length = 0;
   const text = 'A'.repeat(50) + 'B';
   r.sendCwText(text);
-  assert.deepStrictEqual(writes.filter((w) => !/^BI/.test(w)), ['KM5' + 'A'.repeat(50) + ';', 'KY05;'], 'only the first memory now');
+  assert.deepStrictEqual(writes.filter((w) => !/^BI|^SD;/.test(w)), ['KM5' + 'A'.repeat(50) + ';', 'KY05;'], 'only the first memory now');
   assert.strictEqual(r._cwKmTimers.length, 1, 'the second chunk waits');
   r.stopCwText();
   assert.strictEqual(r._cwKmTimers.length, 0, 'stop drops the waiting chunk');
@@ -203,6 +203,39 @@ test('a radio still in transmit 4 s after the message is sent to receive, and th
   r.disconnect();
 });
 
+test('a receive readback in a word space does not end the watch: a radio keyed after the message is sent to receive', async () => {
+  // FT-710 keyer memory over BK-IN: TX0 for ~120 ms in each word space.
+  const { rig: r, codec, writes } = rig('FT-710');
+  const notices = [];
+  r.on('notice', (m) => notices.push(m));
+  r._cwWpm = 60;
+  r._breakIn = true;
+  r.sendCwText('E E');
+  codec.emit('ptt', true);
+  codec.emit('ptt', false);            // the word space
+  assert.strictEqual(r._transmitting, true, 'still keying the message');
+  const polls = setInterval(() => { if (!writes.includes('TX0;')) codec.emit('ptt', true); }, 500); // then stuck in TX
+  await sleep(6500);
+  clearInterval(polls);
+  assert.ok(writes.includes('TX0;'), 'RX sent: ' + JSON.stringify(writes));
+  assert.ok(notices.some((m) => /stayed in transmit after the CW message/.test(m)));
+  r.disconnect();
+});
+
+test('the backstop is armed even when the last readback before the end was receive', async () => {
+  const { rig: r, codec, writes } = rig('FT-710');
+  r._cwWpm = 60;
+  r._breakIn = true;
+  r.sendCwText('E');
+  codec.emit('ptt', false);            // a word-space readback just before the estimate ends
+  await sleep(700);                    // the hold has ended
+  const polls = setInterval(() => { if (!writes.includes('TX0;')) codec.emit('ptt', true); }, 500);
+  await sleep(5500);
+  clearInterval(polls);
+  assert.ok(writes.includes('TX0;'), 'RX sent: ' + JSON.stringify(writes));
+  r.disconnect();
+});
+
 test('the backstop leaves a PTT POTACAT itself is holding alone', async () => {
   const { rig: r, codec, writes } = rig('FTDX10');
   r._cwWpm = 60;
@@ -236,6 +269,88 @@ test('the backstop needs a fresh readback: a TX report from seconds ago proves n
   codec.emit('ptt', true); // once, then the radio goes quiet
   await sleep(6000);
   assert.ok(!writes.includes('TX0;'), JSON.stringify(writes));
+  r.disconnect();
+});
+
+// --- The break-in delay sets the check (DA2PK FT-710, 2026-11-14) ---------
+// The blanket 4 s check came 0.4 s after the operator had reached for PTT.
+
+test('every keyer-memory message asks the radio for its BK-IN delay (SD;)', async () => {
+  const { rig: r, writes } = rig('FT-710');
+  r._breakIn = true;
+  r.sendCwText('TEST');
+  const sd = writes.indexOf('SD;'), km = writes.findIndex((w) => /^KM/.test(w));
+  assert.ok(sd >= 0 && sd < km, 'SD; before the text: ' + JSON.stringify(writes));
+  r.disconnect();
+});
+
+test('codec: the SD reply in Yaesu codes and in milliseconds', () => {
+  const model = RIG_MODELS['FT-710'];
+  const c = new KenwoodCodec(model, () => {});
+  const got = [];
+  c.on('breakInDelay', (ms) => got.push(ms));
+  for (const m of ['SD0005', 'SD0007', 'SD0034', 'SD0200', 'SD3000', 'SD0000']) c.onData(m + ';');
+  assert.deepStrictEqual(got, [200, 300, 3000, 200, 3000]);
+});
+
+test('codec: a TX readback carries the raw state for the log', () => {
+  const c = new KenwoodCodec(RIG_MODELS['FT-710'], () => {});
+  const got = [];
+  c.on('ptt', (on, raw) => got.push([on, raw]));
+  c.onData('TX2;');
+  assert.deepStrictEqual(got, [[true, 2]]);
+});
+
+test('with the delay known, a radio still keyed after it is sent to receive within about a second', async () => {
+  const { rig: r, codec, writes, logs } = rig('FT-710');
+  r._cwWpm = 60;
+  r._breakIn = true;
+  r.sendCwText('E');
+  codec.emit('breakInDelay', 200);
+  const t0 = Date.now();
+  let rxAt = 0;
+  const polls = setInterval(() => {
+    if (writes.includes('TX0;')) { if (!rxAt) rxAt = Date.now(); return; }
+    codec.emit('ptt', true, 2);
+  }, 150);
+  await sleep(2600);
+  clearInterval(polls);
+  assert.ok(rxAt, 'RX sent: ' + JSON.stringify(writes));
+  // 'E' at 60 wpm: hold ~0.8 s + 0.3 s, then delay 200 ms + 600 ms
+  assert.ok(rxAt - t0 < 2300, `receive after ${rxAt - t0} ms, not the blanket 4 s`);
+  assert.ok(logs.some((l) => /still transmitting [\d.]+ s after the message ended \(readback TX2; \d+ ms old, BK-IN delay 200 ms\)/.test(l)), logs.join('\n'));
+  r.disconnect();
+});
+
+test('with the delay known, a readback from inside the delay is not acted on', async () => {
+  const { rig: r, codec, writes } = rig('FT-710');
+  r._cwWpm = 60;
+  r._breakIn = true;
+  r.sendCwText('E');
+  codec.emit('breakInDelay', 1500);
+  codec.emit('ptt', true, 2);
+  await sleep(1150);                  // the hold has just ended
+  codec.emit('ptt', true, 2);         // inside the 1.5 s delay: the radio may still be keyed
+  await sleep(1500);
+  codec.emit('ptt', false, 0);        // and it drops by itself
+  await sleep(1500);
+  assert.ok(!writes.includes('TX0;'), JSON.stringify(writes));
+  r.disconnect();
+});
+
+test('BK-IN goes back off only once the radio reports receive', async () => {
+  const { rig: r, codec, writes } = rig('FT-710');
+  r._cwWpm = 60;
+  r._breakIn = false;
+  r._cwStuckCheckMs = 60000;          // keep the backstop out of this test
+  r.sendCwText('E');
+  const polls = setInterval(() => codec.emit('ptt', true, 2), 300);
+  await sleep(5400);                  // past the 3.5 s grace, the radio still in TX
+  assert.ok(!writes.includes('BI0;'), 'not sent into a transmission: ' + JSON.stringify(writes));
+  clearInterval(polls);
+  codec.emit('ptt', false, 0);
+  await sleep(700);
+  assert.ok(writes.includes('BI0;'), 'put back once in receive: ' + JSON.stringify(writes));
   r.disconnect();
 });
 
