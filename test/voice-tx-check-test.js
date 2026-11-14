@@ -24,6 +24,25 @@ t('Icom voice in USB names DATA OFF MOD; in USB-D it names DATA MOD', () => {
   assert.ok(/MOD Input > DATA OFF MOD = USB/.test(decideVoiceTxHint({ ...silent, brand: 'Icom' }).hint));
   assert.ok(/MOD Input > DATA MOD = USB/.test(decideVoiceTxHint({ ...silent, brand: 'Icom', mode: 'USB-D' }).hint));
 });
+t('Icom over the LAN (RS-BA1) names DATA MOD = LAN, not USB (#221)', () => {
+  const d = decideVoiceTxHint({ ...silent, brand: 'Icom', mode: 'USB-D', network: true });
+  assert.ok(/MOD Input > DATA MOD = LAN/.test(d.hint), d.hint);
+  assert.ok(/Icom Network Audio \(RS-BA1\)/.test(d.hint) && !/USB Audio CODEC/.test(d.hint), d.hint);
+});
+t('Icom voice over the LAN keeps DATA OFF MOD = USB (LAN is confirmed only for DATA MOD)', () => {
+  const d = decideVoiceTxHint({ ...silent, brand: 'Icom', network: true });
+  assert.ok(/MOD Input > DATA OFF MOD = USB/.test(d.hint), d.hint);
+});
+t('main.js passes network to both voice hint call sites (#221)', () => {
+  const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
+  const calls = main.match(/decideVoiceTxHint\(\{[^}]*brand:[^}]*\}\)/g) || [];
+  assert.strictEqual(calls.length, 2, 'two call sites');
+  const want = [
+    /network: !!\(settings\.catTarget && settings\.catTarget\.type === 'icom-network'\)/,
+    /network: !!\(rig\.catTarget && rig\.catTarget\.type === 'icom-network'\)/,
+  ];
+  for (const c of calls) assert.ok(want.some((re) => re.test(c)), c);
+});
 t('no hint when power or ALC moved, when the over was a blip, or when the radio reports no power at all', () => {
   assert.strictEqual(decideVoiceTxHint({ ...silent, brand: 'Yaesu', peakW: 12 }), null);
   assert.strictEqual(decideVoiceTxHint({ ...silent, brand: 'Yaesu', peakAlc: 40 }), null);
