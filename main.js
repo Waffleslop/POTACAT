@@ -1054,6 +1054,7 @@ function _noteSettingsMtime(p) {
 // GitHub #344: once an operator switch has moved the profile pointer, no
 // settings file is written until the restart (lib/profile-switch-guard.js).
 const ProfileSwitchGuard = require('./lib/profile-switch-guard');
+const RigMigration = require('./lib/rig-migration'); // #314: when a catTarget becomes a rig
 const _settingsWriteGate = ProfileSwitchGuard.createSettingsWriteGate({
   log: (line) => { console.log(line); try { sendCatLog(line); } catch { /* log not up */ } },
 });
@@ -1195,8 +1196,11 @@ function saveSettings(s) {
 }
 
 function setActiveProfilePointer(callsign) {
-  const global = _readJsonSafe(SETTINGS_PATH, {});
-  global.activeProfile = String(callsign || '').toUpperCase();
+  // #314: a read that gives nothing must not write a file holding the pointer
+  // alone (rig list gone); the machine keys in memory are the floor.
+  const disk = _readJsonSafe(SETTINGS_PATH, null);
+  if (!disk) console.warn('[multi-op] settings.json could not be read while moving the operator pointer; writing the machine settings held in memory');
+  const global = ProfileSwitchGuard.globalWithPointer(disk, settings ? _splitSettings(settings).global : null, callsign);
   _writeJsonAtomic(SETTINGS_PATH, global);
 }
 
@@ -38964,18 +38968,16 @@ function describeTargetForMigration(target) {
 }
 
 function migrateRigSettings(s) {
+  // A catTarget becomes a rig only when the file has no rig list at all, and
+  // the log says why (lib/rig-migration.js, #314): an emptied list is left
+  // alone, and a lost list in the profile layout is said loudly.
+  const rigPlan = RigMigration.planRigMigration(s, { describe: describeTargetForMigration });
   if (!s.rigs) {
     s.rigs = [];
   }
-  if (s.catTarget && s.rigs.length === 0) {
-    const rig = {
-      id: 'rig_' + Date.now(),
-      name: describeTargetForMigration(s.catTarget),
-      catTarget: JSON.parse(JSON.stringify(s.catTarget)),
-    };
-    s.rigs.push(rig);
-    s.activeRigId = rig.id;
-    delete s.catTarget;
+  if (RigMigration.applyRigMigration(s, rigPlan)) {
+    if (rigPlan.action === 'lost') console.warn(rigPlan.log); else console.log(rigPlan.log);
+    setTimeout(() => { try { sendCatLog(rigPlan.log); } catch { /* no log yet */ } }, 0);
     saveSettings(s);
   }
   // Dedup rigs with identical catTarget (could happen from repeated migration)
