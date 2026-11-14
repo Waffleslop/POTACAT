@@ -214,6 +214,7 @@ const TESTS = [
   'test/icom-lan-voice-test.js', // voice over an Icom's LAN: DATA mode, or USB/LSB when DATA OFF MOD = LAN (EA1BZN)
   'test/settings-file-test.js', // settings written via temp+rename with a .bak; a truncated file is restored, never read as a fresh install
   'test/profile-switch-guard-test.js', // #344: no settings save between an operator switch and the restart; the new operator keeps its own callsign, log and Cloud sign-in
+  'test/rig-list-lost-test.js', // #314: moving the operator pointer keeps the rig list; a catTarget becomes a rig only from a file with no rig list, and the log says so
   'test/wsjtx-qdatetime-test.js', // QSO Logged dates are valid UTC; an invalid one never goes out as 1899 (ik4idf Logger32)
   'test/kg4-us-calls-test.js', // #342 KG4 + two letters is Guantanamo, else US
   'test/operating-entity-test.js', // W1AW/KL7 is Alaska; the log takes QRZ's DXCC entity, not its mailing country
