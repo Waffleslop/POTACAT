@@ -4419,7 +4419,8 @@ function buildKiwiStationList(s) {
     const clean = kiwiCleanHost(host);
     if (!clean) return;
     const parts = clean.split(':');
-    kiwiStations.push({ label: label || parts[0], host: parts[0], port: parseInt(parts[1], 10) || 8073, fullHost: clean });
+    // tls: entered as https:// (a KiwiSDR with HTTPS on: its audio is wss://).
+    kiwiStations.push({ label: label || parts[0], host: parts[0], port: parseInt(parts[1], 10) || 8073, fullHost: clean, tls: /^\s*https:\/\//i.test(host) });
   });
   // Build select (for settings reference)
   kiwiStationSelect.innerHTML = '<option value="">-- select station --</option>';
@@ -4472,7 +4473,7 @@ function kiwiTryConnect(st) {
   // all must not leave "Connecting..." up for good.
   clearTimeout(kiwiTryTimer);
   kiwiTryTimer = setTimeout(() => { if (kiwiTrying === st && !kiwiConnected) kiwiNoteFailure(st.fullHost, 'did not answer'); }, 20000);
-  window.api.kiwiConnect({ host: st.host, port: st.port });
+  window.api.kiwiConnect({ host: st.host, port: st.port, tls: !!st.tls });
   kiwiConnectedHost = st.fullHost;
   updateKiwiButtonStates();
 }
