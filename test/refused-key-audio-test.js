@@ -65,6 +65,10 @@ function tuneSandbox(pttImpl) {
     setInterval: (fn) => { const id = nextId++; timers.set(id, fn); return id; },
     clearInterval: (id) => timers.delete(id),
     forceReleaseIcomNetworkTx: () => {},
+    // SCU-LAN10 Tune over the LAN (#227): no LAN session in these cases.
+    yaesuLanBufferTxReady: () => false,
+    releaseYaesuLanTx: () => {},
+    yaesuLanTransport: () => null,
     Date,
     Math,
     Number,
@@ -135,7 +139,7 @@ test('every key-down refusal in handleRemotePtt returns false', () => {
     'if (state && _swrTripped) {',
     'if (state && atuWizardActive()) {',
     'if (state && listenSdr.live && listenSdr.auto) {',
-    'if (state && yaesuLanTxRefusal()) {',
+    'if (state && yaesuLanTxRefusal(opts.lanOwner || null)) {',
   ];
   for (const r of refusals) {
     const i = head.indexOf(r);
@@ -151,8 +155,8 @@ test('SSTV does not send the picture when its key-down is refused', () => {
   const i = MAIN.indexOf("sstvEngine.on('encode-complete'");
   assert.ok(i >= 0);
   const b = MAIN.slice(i, MAIN.indexOf('_sstvStartAudio(() => {', i));
-  assert.ok(/if \(handleRemotePtt\(true, \{ audio: true, forceDataMode: _sstvIcom, emission: 'SSTV', txKind: 'sstv' \}\) === false\) \{/.test(b), 'refusal not checked');
-  const r = b.slice(b.indexOf("txKind: 'sstv' }) === false) {"));
+  assert.ok(/if \(handleRemotePtt\(true, \{ audio: true, forceDataMode: _sstvIcom, emission: 'SSTV', txKind: 'sstv'(, lanOwner: [^}]+)? \}\) === false\) \{/.test(b), 'refusal not checked');
+  const r = b.slice(b.indexOf("txKind: 'sstv'"));
   assert.ok(/picture not sent: transmit was refused/.test(r), 'no log line');
   assert.ok(/sstv-abort-tx/.test(r) && /return;/.test(r), 'pop-out not told / audio not skipped');
 });
@@ -160,7 +164,9 @@ test('SSTV does not send the picture when its key-down is refused', () => {
 test('a voice macro stops when its key-down is refused', () => {
   const b = fnBody(MAIN, "ipcMain.on('voice-macro-ptt'");
   assert.ok(/handleRemotePtt\(!!state, \{ audio: true \}\) === false/.test(b), 'refusal not checked');
-  assert.ok(/send\('stop-voice-macro'\)/.test(b) && /macro stopped: transmit was refused/.test(b));
+  // The stop goes to the window that plays the macro (main window or VFO window).
+  assert.ok(/stopVoiceMacroIn\(_e\.sender\)/.test(b) && /macro stopped: transmit was refused/.test(b));
+  assert.ok(/function stopVoiceMacroIn\(sender\) \{[^}]*sender\.send\('stop-voice-macro'\)/.test(MAIN));
   assert.ok(/onStopVoiceMacro\(/.test(APP), 'the main window stops the macro on stop-voice-macro');
 });
 

@@ -134,7 +134,7 @@ test('main: the encode-complete handler and its audio timer are guarded, and rel
   assert.ok(t.indexOf('handleRemotePtt(false)') >= 0 && t.indexOf('handleRemotePtt(false)') < t.indexOf('sstvSendFailed('), 'PTT released first');
 });
 test('main: a refused key-down tells the phone why, not a bare "rx"', () => {
-  const b = slice(MAIN, "txKind: 'sstv' }) === false) {", 'return;');
+  const b = slice(MAIN, "lanOwner: useYaesuLanTx ? 'sstv' : undefined }) === false) {", 'return;');
   assert.ok(/_ownTxRefused\.why/.test(b) && /sstvSendFailed\('Picture not sent: ' \+/.test(b));
   assert.ok(/_ownTxRefused = \{ why, at: now \}/.test(MAIN), 'every refusal is recorded, logged or not');
 });

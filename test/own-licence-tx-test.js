@@ -136,7 +136,7 @@ test('the JTCAT key-down is checked before anything is keyed or played, single a
   assert.ok(/if \(ownTxPrivilegeRefused\('DATA', s\.freqKhz \? s\.freqKhz \* 1000 : undefined\)\)/.test(MAIN));
 });
 test('data and image key-downs name their emission', () => {
-  assert.ok(/handleRemotePtt\(true, \{ audio: true, emission: 'DATA', txKind: jtcatTxKind\(\) \}\);/.test(MAIN), 'FT8');
+  assert.ok(/handleRemotePtt\(true, \{ audio: true, emission: 'DATA', txKind: jtcatTxKind\(\)(, lanOwner: [^}]+)? \}\);/.test(MAIN), 'FT8');
   assert.ok(/forceDataMode: _sstvIcom, emission: 'SSTV'/.test(MAIN), 'SSTV');
   assert.ok(/\.\.\.pttMode, emission: 'DATA', txKind: 'winlink'/.test(MAIN), 'Winlink');
   assert.ok(/handleRemotePtt\(on, on \? \{ audio: true, emission: 'DATA', txKind: 'winlink' \} : \{\}\)/.test(MAIN), 'Mercury');

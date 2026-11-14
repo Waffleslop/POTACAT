@@ -570,6 +570,8 @@ contextBridge.exposeInMainWorld('api', {
   cwStop: () => ipcRenderer.send('cw-stop'),
   sendCwText: (text, opts) => ipcRenderer.send('send-cw-text', text, opts),
   voiceMacroPtt: (state) => ipcRenderer.send('voice-macro-ptt', state),
+  // SCU-LAN10 (#227): the decoded recording, 16 kHz mono, for main to send over the LAN.
+  voiceMacroLan: (payload) => ipcRenderer.send('voice-macro-lan', payload),
   exportSettings: () => ipcRenderer.invoke('export-settings'),
   importSettings: () => ipcRenderer.invoke('import-settings'),
   relaunch: () => ipcRenderer.send('app-relaunch'),

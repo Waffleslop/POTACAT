@@ -2417,7 +2417,7 @@ function getEffectiveSerialcatPort() {
 // the same trap that broke K3SBP's Flex TX (see syncRigAudioDeviceBypass).
 const AUDIO_SOURCE_HELP = {
   flex: 'Flex Direct streams receive and transmit audio straight to the radio (VITA-49) — no DAX program and no audio device setup. Pick Local audio device only if you deliberately run the DAX program.',
-  'yaesu-lan': "Yaesu LAN audio decodes the radio's receive audio over the SCU-LAN10 for JTCAT and SSTV. It is receive only for now: POTACAT will not key the radio with this source, because the carrier would be silent. To transmit from POTACAT, pick the local audio device (the radio's USB sound card on this computer).",
+  'yaesu-lan': "Yaesu LAN audio carries the radio's receive audio over the SCU-LAN10 for listening, JTCAT and SSTV, and transmit audio back to the radio: voice from the VFO window's PTT or ECHOCAT, voice macros, JTCAT (FT8/FT4), Tune and SSTV (the radio's menu setting is under Setup instructions in the rig editor). Winlink cannot transmit with this source yet: POTACAT refuses it rather than send a silent carrier. For Winlink, pick the local audio device (the radio's USB sound card on this computer).",
   'icom-network': "Icom Network audio uses the radio's RS-BA1 UDP stream for JTCAT/SSTV receive audio and sends JTCAT FT8/FT4 plus SSTV transmit audio directly over the network — no soundcard needed.",
 };
 function rebuildAudioSourceOptions() {
@@ -2578,6 +2578,8 @@ async function populateRadioSection(currentTarget) {
     document.getElementById('set-yaesu-lan-port').value = currentTarget.port || 50000;
     document.getElementById('set-yaesu-lan-username').value = currentTarget.username || '';
     document.getElementById('set-yaesu-lan-password').value = currentTarget.password || '';
+    document.getElementById('set-yaesu-lan-mute-monitor').checked = !!currentTarget.muteMonitor;
+    syncYaesuLanMuteMonitorRow();
   } else if (currentTarget.type === 'rigctld') {
     setRadioType('hamlib');
     hamlibFieldsLoaded = true;
@@ -3470,6 +3472,17 @@ function rigBandsToSave() {
   return list.length ? list : undefined;
 }
 if (rigModelSelect) rigModelSelect.addEventListener('change', () => { loadRigBandsForModel(); });
+// The SCU-LAN10 monitor mute is offered where an owner confirmed the radio's
+// monitor (ML) is set per mode: FT-710 and FTDX10 (lib/sculan10-protocol.js
+// MONITOR_PER_MODE_MODELS). The FTDX101 waits for an owner.
+function syncYaesuLanMuteMonitorRow() {
+  const row = document.getElementById('yaesu-lan-mute-monitor-row');
+  if (!row) return;
+  const ok = !!rigModelSelect && ['FT-710', 'FTDX10'].includes(rigModelSelect.value);
+  row.style.display = ok ? '' : 'none';
+  if (!ok) { const cb = document.getElementById('set-yaesu-lan-mute-monitor'); if (cb) cb.checked = false; }
+}
+if (rigModelSelect) rigModelSelect.addEventListener('change', syncYaesuLanMuteMonitorRow);
 {
   const reset = document.getElementById('rig-bands-reset');
   if (reset) reset.addEventListener('click', () => { rigBandsState.touched = false; loadRigBandsForModel(); });
@@ -3492,7 +3505,7 @@ async function openRigEditor(mode, rigId) {
       setRigName.value = rig.name || '';
       const catLabelEl = document.getElementById('set-rig-cat-label');
       if (catLabelEl) catLabelEl.value = rig.catLabel || '';
-      if (rigModelSelect) rigModelSelect.value = rig.model || '';
+      if (rigModelSelect) { rigModelSelect.value = rig.model || ''; syncYaesuLanMuteMonitorRow(); }
       await populateRadioSection(rig.catTarget);
       // Per-rig audio source — populateRadioSection just rebuilt the options
       // for this rig's radio type, so the stored value (validated) sticks.
@@ -3536,7 +3549,7 @@ async function openRigEditor(mode, rigId) {
     rigEditorTitle.textContent = 'Add Rig';
     setRigName.value = '';
     { const catLabelEl = document.getElementById('set-rig-cat-label'); if (catLabelEl) catLabelEl.value = ''; }
-    if (rigModelSelect) rigModelSelect.value = '';
+    if (rigModelSelect) { rigModelSelect.value = ''; syncYaesuLanMuteMonitorRow(); }
     if (setCwKeyLine) setCwKeyLine.value = 'auto';
     if (setRadioNr) setRadioNr.value = '1';
     setRigFullPowerField(null);
@@ -10391,6 +10404,7 @@ function yaesuLanTargetFromForm() {
     port: parseInt(document.getElementById('set-yaesu-lan-port').value, 10) || 50000,
     username: document.getElementById('set-yaesu-lan-username').value || '',
     password: document.getElementById('set-yaesu-lan-password').value || '',
+    muteMonitor: !!(document.getElementById('set-yaesu-lan-mute-monitor') || {}).checked,
   };
 }
 document.getElementById('yaesu-lan-test-btn')?.addEventListener('click', async () => {
@@ -23897,6 +23911,13 @@ async function playVoiceAudio(base64, opts) {
   for (var j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
 
   var s = await window.api.getSettings();
+  // Yaesu SCU-LAN10 (#227): the radio's audio is the LAN, not a sound card.
+  // The recording is decoded here at 16 kHz (the browser's own resampler,
+  // filtered) and main sends it over the LAN and keys the radio.
+  if (s.audioSource === 'yaesu-lan' && s.catTarget && s.catTarget.type === 'yaesu-lan' && window.api.voiceMacroLan) {
+    playVoiceAudioLan(bytes, idx, btn, opts.label || '');
+    return;
+  }
   var outputDeviceId = s.remoteAudioOutput || '';
   voicePlaybackCtx = new AudioContext();
   if (voicePlaybackCtx.state === 'suspended') await voicePlaybackCtx.resume();
@@ -23940,6 +23961,36 @@ async function playVoiceAudio(base64, opts) {
     voicePlaybackSource.start(0);
     if (monitor) { try { monitor.start(0); } catch (e) {} }
     voicePlaybackSource.onended = function() { stopVoicePlayback(); };
+    if (window.api.voiceMacroPlaying) window.api.voiceMacroPlaying({ playing: true, label: voicePlayingLabel });
+  }, function(err) {
+    console.warn('[Voice] Could not decode the recording:', err && err.message);
+    stopVoicePlayback();
+  });
+}
+
+function playVoiceAudioLan(bytes, idx, btn, label) {
+  voicePlaybackCtx = new AudioContext({ sampleRate: 16000 });
+  voicePlaybackCtx.decodeAudioData(bytes.buffer, function(audioBuffer) {
+    var n = audioBuffer.length, chs = audioBuffer.numberOfChannels;
+    var mono = new Float32Array(n);
+    for (var c = 0; c < chs; c++) {
+      var d = audioBuffer.getChannelData(c);
+      for (var i = 0; i < n; i++) mono[i] += d[i] / chs;
+    }
+    voicePlayingIdx = idx;
+    voicePlayingLabel = label;
+    if (btn) btn.classList.add('active');
+    // Monitor copy on this computer's default output, as on the sound-card path.
+    if (voiceMacroMonitor) {
+      try {
+        voiceMonitorSource = voicePlaybackCtx.createBufferSource();
+        voiceMonitorSource.buffer = audioBuffer;
+        voiceMonitorSource.connect(voicePlaybackCtx.destination);
+        voiceMonitorSource.start(0);
+      } catch (e) { voiceMonitorSource = null; }
+    }
+    // main keys the radio and sends 'stop-voice-macro' when the recording is out.
+    window.api.voiceMacroLan({ samples: mono, sampleRate: audioBuffer.sampleRate, label: label });
     if (window.api.voiceMacroPlaying) window.api.voiceMacroPlaying({ playing: true, label: voicePlayingLabel });
   }, function(err) {
     console.warn('[Voice] Could not decode the recording:', err && err.message);

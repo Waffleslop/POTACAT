@@ -6,8 +6,9 @@ const { readSrc } = require('./_src');
 //   - it is a normal, visible choice in the rig editor (Casey: "turn it on by
 //     default so folks don't have to hunt for it"), connecting only for a rig
 //     that uses it;
-//   - no transmit audio exists yet, so a key-down with the LAN as the audio
-//     source is refused: never a silent carrier;
+//   - voice PTT (VFO window, ECHOCAT) sends its mic over the LAN, JTCAT and
+//     Tune their buffer (#227); every other key-down with the LAN as the
+//     audio source is refused: never a silent carrier;
 //   - RX audio feeds JTCAT, SSTV and ECHOCAT, and the sound-card capture
 //     yields to it only while it is actually arriving;
 //   - the password is a stored secret like every other CAT password.
@@ -22,6 +23,7 @@ const main = read('main.js');
 const app = read('renderer/app.js');
 const html = read('renderer/index.html');
 const popout = read('renderer/jtcat-popout.js');
+const vfo = read('renderer/vfo-popout.html');
 const RigFamily = require('../lib/rig-family');
 const Secrets = require('../lib/settings-secrets');
 const P = require('../lib/sculan10-protocol');
@@ -48,7 +50,7 @@ test('the rig editor offers it to everyone, labelled experimental, with the unit
   assert.ok(/id="set-yaesu-lan-port"[^>]*value="50000"/.test(html));
   assert.ok(/id="set-yaesu-lan-password" autocomplete="off"/.test(html) && /type="password" id="set-yaesu-lan-password"/.test(html));
   const help = bodyOf(html, 'id="yaesu-lan-config"', 'value="hamlib"');
-  for (const words of ['close PCC-LAN10 first', 'Tailscale or a VPN', 'Transmit audio over the LAN is not supported yet']) {
+  for (const words of ['close PCC-LAN10 first', 'Tailscale or a VPN', "Voice from the VFO window's PTT or ECHOCAT is transmitted over the LAN"]) {
     assert.ok(help.includes(words), 'help says: ' + words);
   }
 });
@@ -65,11 +67,11 @@ test('the editor saves a yaesu-lan target, and only for the three radios the spe
   for (const name of P.MODELS) assert.ok(getModel(name) && getModel(name).brand === 'Yaesu', name + ' exists in rig-models');
 });
 
-test('the family offers LAN receive audio or the local sound card', () => {
+test('the family offers LAN audio or the local sound card', () => {
   assert.strictEqual(RigFamily.familyFromCatTarget({ type: 'yaesu-lan' }), 'yaesu-lan');
   assert.strictEqual(RigFamily.familyFromRadioType('yaesu-lan'), 'yaesu-lan');
   assert.deepStrictEqual(RigFamily.audioSourcesFor('yaesu-lan').map((o) => o.value), ['yaesu-lan', 'dax']);
-  assert.ok(/receive only/.test(RigFamily.audioSourcesFor('yaesu-lan')[0].label));
+  assert.ok(/SCU-LAN10/.test(RigFamily.audioSourcesFor('yaesu-lan')[0].label));
 });
 
 test('connectCat builds the transport with the Yaesu codec, only for a yaesu-lan rig', () => {
@@ -84,16 +86,15 @@ test('connectCat builds the transport with the Yaesu codec, only for a yaesu-lan
 });
 
 test('a key-down with the LAN as the audio source is refused: never a silent carrier', () => {
-  const r = bodyOf(main, 'function yaesuLanTxRefusal() {', '\n}');
-  assert.ok(/t\.type !== 'yaesu-lan' \|\| settings\.audioSource !== 'yaesu-lan'\) return null;/.test(r));
-  assert.ok(/silent carrier/.test(r));
+  const r = bodyOf(main, 'function yaesuLanTxRefusal(asking = null) {', '\n}');
+  assert.ok(/return _yaesuLanTx\.refusal\(\{ route: yaesuLanVoiceRoute\(\), asking \}\);/.test(r), r);
   const ptt = bodyOf(main, 'function handleRemotePtt(state, opts = {}) {', '\nfunction ');
-  const refuse = ptt.indexOf('if (state && yaesuLanTxRefusal()) {');
+  const refuse = ptt.indexOf('if (state && yaesuLanTxRefusal(opts.lanOwner || null)) {');
   const target = ptt.indexOf('const target = settings.catTarget;');
   assert.ok(refuse > 0 && refuse < target, 'refused before any keying route');
   const block = ptt.slice(refuse, target);
   assert.ok(/return false;\n\s*\}\s*$/.test(block), 'it returns without keying, and says it refused');
-  assert.ok(/jtcatHaltTxNow\(/.test(block), 'JTCAT stops trying');
+  assert.ok(/if \(!_yaesuLanTx\.owner && \(jtcatAnyTxActive\(\) \|\| jtcatTuneState\.active\)\) jtcatHaltTxNow\(/.test(block), 'JTCAT stops trying only when nothing holds the LAN');
   assert.ok(/'tune-blocked'/.test(block) && /'app-notice'/.test(block), 'said where the press happened');
   const fdv = bodyOf(main, "remoteServer.on('freedv-set-tx', ({ enabled }) => {", 'txLimitNote(');
   assert.ok(/if \(enabled && yaesuLanTxRefusal\(\)\) \{[\s\S]*?return;/.test(fdv), 'FreeDV, which keys around the dispatcher, refuses too');
@@ -160,7 +161,7 @@ test('band scope: frames go through the shared fan-out, and testers get the firs
 
 test('review 2 (high): a CAT key-down from any path is refused at gatedSetTransmit too; the external-ATU carrier stays allowed', () => {
   const g = bodyOf(main, 'function gatedSetTransmit(state, emission) {', '\n}\n');
-  const gate = g.indexOf('if (state && yaesuLanTxRefusal() && !_externalAtuActive) {');
+  const gate = g.indexOf('if (state && yaesuLanTxRefusal(YaesuLanTx.ANY_HOLDER) && !_externalAtuActive) {');
   assert.ok(gate > 0 && gate < g.indexOf('if (passEnforcement && state)'), 'first thing it checks');
   assert.ok(/return false;/.test(g.slice(gate, gate + 600)));
   // the radio's own ATU (RigController.startTune) never keys through here
@@ -207,6 +208,164 @@ test('review low: the rig editor refuses a login the unit cannot take, by the sa
     assert.strictEqual(fn(v, 'password') === null, P.loginFieldProblem(v, 'password') === null, JSON.stringify(v));
   }
   assert.ok(/yaesuLanLoginProblem\(catTarget\.username, 'user'\) \|\| yaesuLanLoginProblem\(catTarget\.password, 'password'\)/.test(app));
+});
+
+
+test('#227: voice PTT from the VFO window and ECHOCAT takes the LAN, opens the stream, then keys in USB/LSB', () => {
+  const naked = bodyOf(main, "ipcMain.on('naked-ptt', (_e, state) => {", '\n  });');
+  assert.ok(/if \(yaesuLanVoicePtt\(!!state, 'VFO window PTT', 'vfo'\)\) return;/.test(naked), naked);
+  assert.ok(naked.indexOf('icomNetworkVoiceTx') < naked.indexOf('yaesuLanVoicePtt'), 'the Icom route keeps its place');
+  assert.ok(/\} else if \(yaesuLanVoicePtt\(state, 'ECHOCAT phone PTT', 'echocat'\)\) \{/.test(main), 'ECHOCAT');
+  const v = bodyOf(main, 'function yaesuLanVoicePtt(state, who, where) {', '\n}\n');
+  const claim = v.indexOf("if (claimYaesuLanTx('voice', who, [where])) return true;");
+  const open = v.indexOf('t.startVoiceTx();');
+  const key = v.indexOf("handleRemotePtt(true, { audio: true, lanOwner: 'voice' }) === false");
+  assert.ok(claim > 0 && claim < open && open < key, 'claimed before the stream, the stream before the key-down');
+  assert.ok(!/forceDataMode/.test(v), 'no DATA mode for Yaesu voice');
+  assert.ok(/if \(!t \|\| !t\.txReady\) \{[\s\S]*?return true;/.test(v), 'not connected: not keyed');
+  assert.ok(/new mercuryAudioBridge\.StreamingResampler\(24000, Sculan10\.TX_AUDIO_RATE\)/.test(v), '24 kHz mic -> 16 kHz');
+  assert.ok(/if \(_yaesuLanTx\.owner !== 'voice'\) \{[\s\S]*?if \(!_yaesuLanTx\.owner\) handleRemotePtt\(false\);/.test(v), 'a release while another holds the LAN leaves it keyed');
+  assert.ok(/_yaesuLanTxChunkCount > 0\) return;[\s\S]*?yaesuLanVoiceStop\('no mic audio'\);\n\s*handleRemotePtt\(false\);/.test(v), 'no mic within 1 s: unkeyed');
+  assert.ok(/const YAESU_LAN_VOICE_NO_MIC_MS = 1000;/.test(main));
+});
+
+test('#227: one transmitter at a time: a second owner is refused before PTT, a release cancels only its own', () => {
+  assert.ok(/const _yaesuLanTx = new YaesuLanTx\.YaesuLanTxGate\(\);/.test(main));
+  const rel = bodyOf(main, 'function releaseYaesuLanTx(owner, reason) {', '\n}');
+  assert.ok(/if \(!_yaesuLanTx\.release\(owner\)\) return false;/.test(rel), 'not the holder: nothing cancelled');
+  const end = bodyOf(main, 'function endYaesuLanTx(owner, reason) {', '\n}');
+  assert.ok(/releaseYaesuLanTx\(owner, reason\);\n\s*if \(yaesuLanMayUnkey\(owner, reason\)\) handleRemotePtt\(false\);/.test(end));
+  assert.ok(!/releaseYaesuLanTx\([^)]*takes over/.test(main), 'no owner takes over another');
+  assert.ok(!/_yaesuLanBufferTxClaim/.test(main), 'the boolean claim is gone');
+});
+
+test('#227: the mic reaches the LAN: dax-tx-chunk routes it, both windows stream it, the stuck-TX limit closes it', () => {
+  const chunk = bodyOf(main, "ipcMain.on('dax-tx-chunk', (_e, buf) => {", 'if (!smartSdrAudio || !smartSdrAudio.txReady) return;');
+  assert.ok(/if \(lan && lan\.voiceTxActive\) \{[\s\S]*pushYaesuLanVoiceChunk\(mic\);\n\s*return;/.test(chunk));
+  const cfg = bodyOf(main, 'function _buildAudioBridgeConfig() {', 'return {');
+  assert.ok(/\n\s*yaesuLanVoiceRoute\(\);/.test(cfg), 'ECHOCAT bridge: daxTxDirect by route, not readiness');
+  assert.ok(/\(s\.audioSource === 'yaesu-lan' && s\.catTarget && s\.catTarget\.type === 'yaesu-lan'\)/.test(vfo), 'VFO window: direct mic path');
+  assert.ok(/if \(settings\.audioSource === 'yaesu-lan'\) releaseAllYaesuLanTx\('stuck-TX limit'\);/.test(main));
+});
+
+test('#227: JTCAT sends its buffer over the LAN: no session or a busy LAN, no key-down; every end path gives the LAN back', () => {
+  const start = bodyOf(main, "ft8Engine.on('tx-start', (data) => {", "ft8Engine.on('tx-end'");
+  assert.ok(/const yaesuLanDirectTxOk = settings\.audioSource === 'yaesu-lan' && yaesuLanBufferTxReady\(\);/.test(start));
+  const abort = start.indexOf('JTCAT TX aborted before PTT: the LAN session is not up');
+  const claim = start.indexOf("const busy = claimYaesuLanTx('jtcat', 'JTCAT TX', ['jtcat']);");
+  const key = start.indexOf("lanOwner: yaesuLanDirectTxOk ? 'jtcat' : undefined });");
+  assert.ok(abort > 0 && claim > abort && key > claim, 'refused before the claim, the claim before the key-down');
+  assert.ok(/if \(busy\) \{\n\s*if \(ft8Engine && ft8Engine\._txActive\) setTimeout\(\(\) => jtcatRefuseTx\(busy\), 0\);\n\s*return;/.test(start), 'a busy LAN skips the slot');
+  assert.ok(/\} else if \(yaesuLanDirectTxOk\) \{[\s\S]*?t\.sendTxAudio\(txAudio\.samples, \{ offsetMs: data\.offsetMs \|\| 0, inputSampleRate: 12000, startDelayMs, tailSilenceMs: 200 \}\)/.test(start));
+  assert.ok(/txAudio\.outputPeak < 0\.01\)[\s\S]{0,300}endYaesuLanTx\('jtcat', 'silent waveform'\)/.test(start), 'a silent waveform is never keyed on');
+  assert.ok(/if \(e && e\.message === 'TX cancelled'\) return;/.test(start));
+  for (const why of ['JTCAT tx-end', 'JTCAT stop', 'JTCAT failsafe']) {
+    assert.ok(main.includes(`endYaesuLanTx('jtcat', '${why}')`), 'given back and unkeyed (if allowed) on ' + why);
+  }
+  const halt = bodyOf(main, 'function jtcatHaltTxNow(reason, opts = {}) {', '\n}\n');
+  assert.ok(/releaseYaesuLanTx\('jtcat', 'JTCAT halt'\);\n\s*if \(yaesuLanMayUnkey\('jtcat', 'JTCAT halt'\)\) \{/.test(halt), 'Halt never drops a voice over');
+});
+
+test('#227: Tune plays its tone over the LAN, refused with no LAN session or a busy LAN', () => {
+  const tune = bodyOf(main, 'function startJtcatTune(opts = {}) {', '\nfunction stopJtcatTune');
+  assert.ok(/const directYaesuReady = settings\.audioSource === 'yaesu-lan' && yaesuLanBufferTxReady\(\);/.test(tune));
+  assert.ok(tune.indexOf('Tune blocked: the LAN session is not up') < tune.indexOf('handleRemotePtt(true'), 'blocked before any key-down');
+  assert.ok(tune.indexOf("claimYaesuLanTx('tune'") < tune.indexOf('handleRemotePtt(true'), 'claimed before the key-down');
+  assert.ok(/const lan = yaesuLanTransport\(\);\n\s*if \(!lan\) \{/.test(tune), 'null-checked');
+  assert.ok(/\} else if \(jtcatTuneState\.directYaesu\) \{[\s\S]*?lan\.sendTxAudio\(/.test(tune));
+  assert.ok(main.includes("endYaesuLanTx('tune', 'Tune OFF');"));
+});
+
+test('#227: SSTV sends its picture over the LAN; HALT and tx-complete stop it on the wire', () => {
+  const enc = bodyOf(main, "sstvEngine.on('encode-complete', SstvSend.guard((data) => {", "sstvEngine.on('rx-vis'");
+  assert.ok(/const useYaesuLanTx = settings\.audioSource === 'yaesu-lan' && yaesuLanBufferTxReady\(\);/.test(enc));
+  const claim = enc.indexOf("claimYaesuLanTx('sstv', 'SSTV picture', ['sstv', 'echocat'])");
+  assert.ok(enc.indexOf('Yaesu LAN TX blocked before PTT') < claim && claim < enc.indexOf('handleRemotePtt(true,'));
+  assert.ok(/if \(useYaesuLanTx\) releaseYaesuLanTx\('sstv', 'SSTV refused'\);/.test(enc) && /if \(useYaesuLanTx\) releaseYaesuLanTx\('sstv', 'SSTV not keyed'\);/.test(enc));
+  assert.ok(/const t = yaesuLanTransport\(\);\n\s*if \(!t\) \{/.test(enc), 'null-checked');
+  assert.ok(/t\.sendTxAudio\(txAudio\.samples, \{ offsetMs: 0, inputSampleRate: SSTV_SAMPLE_RATE, startDelayMs: 100, tailSilenceMs: 200 \}\)/.test(enc));
+  const halt = bodyOf(main, 'function sstvHaltTxNow() {', '\n}');
+  assert.ok(/if \(settings\.audioSource === 'yaesu-lan'\) \{ try \{ endYaesuLanTx\('sstv', 'SSTV halt'\);/.test(halt));
+  const done = bodyOf(main, "ipcMain.on('sstv-tx-complete', () => {", '\n  });');
+  assert.ok(/if \(settings\.audioSource === 'yaesu-lan'\) endYaesuLanTx\('sstv', 'SSTV tx-complete'\);/.test(done));
+});
+
+test('#227: a voice macro goes over the LAN: main keys it, sends it and unkeys it at the end itself', () => {
+  const app = read('renderer/app.js');
+  assert.ok(/if \(s\.audioSource === 'yaesu-lan' && s\.catTarget && s\.catTarget\.type === 'yaesu-lan' && window\.api\.voiceMacroLan\) \{\s*playVoiceAudioLan\(/.test(app));
+  assert.ok(/function playVoiceAudioLan\(bytes, idx, btn, label\) \{\s*voicePlaybackCtx = new AudioContext\(\{ sampleRate: 16000 \}\);/.test(app), 'the browser resamples, filtered');
+  const lan = bodyOf(main, "ipcMain.on('voice-macro-lan', (_e, payload) => {", '\n  });');
+  assert.ok(lan.indexOf('if (!yaesuLanBufferTxReady())') < lan.indexOf("claimYaesuLanTx('macro'"));
+  assert.ok(lan.indexOf("claimYaesuLanTx('macro'") < lan.indexOf("handleRemotePtt(true, { audio: true, lanOwner: 'macro' })"), 'claim before the key-down');
+  assert.ok(/\.then\(\(\) => \{ endYaesuLanTx\('macro', 'voice macro done'\); stop\(\); \}\)/.test(lan), 'unkeyed in main, then the window is told');
+  assert.ok(/endYaesuLanTx\('macro', 'voice macro failed'\);\n\s*stop\(\);/.test(lan));
+  assert.ok(/if \(!state && yaesuLanVoiceRoute\(\)\) \{ endYaesuLanTx\('macro', 'voice macro stop'\); return; \}/.test(main), 'the window\'s stop ends the stream');
+  assert.ok(/voiceMacroLan: \(payload\) => ipcRenderer\.send\('voice-macro-lan', payload\)/.test(read('preload.js')));
+});
+
+test('#227: the VFO window\'s macro bar takes the same LAN path, and is stopped in its own window (VK4KTW, FTDX10)', () => {
+  const vfo = read('renderer/vfo-popout.html');
+  const play = bodyOf(vfo, 'async function playVoiceMacro(idx, btn, outputDeviceId) {', '\nfunction playVoiceMacroLan(');
+  assert.ok(/if \(s\.audioSource === 'yaesu-lan' && s\.catTarget && s\.catTarget\.type === 'yaesu-lan' && window\.api\.voiceMacroLan\) \{/.test(play));
+  assert.ok(play.indexOf('playVoiceMacroLan(raw, idx, btn)') < play.indexOf("confirm('Voice macros play audio"),
+    'no "no output device" question on the LAN: the LAN is the output');
+  assert.ok(/function playVoiceMacroLan\(bytes, idx, btn\) \{\s*voicePlaybackCtx = new AudioContext\(\{ sampleRate: 16000 \}\);/.test(vfo));
+  assert.ok(/window\.api\.onStopVoiceMacro\(\(\) => \{ if \(voicePlayingIdx >= 0\) stopVoicePlayback\(\); \}\)/.test(vfo));
+  const pre = read('preload-vfo-popout.js');
+  assert.ok(/voiceMacroLan: \(payload\) => ipcRenderer\.send\('voice-macro-lan', payload\)/.test(pre));
+  assert.ok(/onStopVoiceMacro: \(cb\) => ipcRenderer\.on\('stop-voice-macro', \(\) => cb\(\)\)/.test(pre));
+  const lan = bodyOf(main, "ipcMain.on('voice-macro-lan', (_e, payload) => {", '\n  });');
+  assert.ok(/const stop = \(\) => stopVoiceMacroIn\(_e\.sender\);/.test(lan), 'the end goes to the window that plays it');
+  assert.ok(/claimYaesuLanTx\('macro', [^\n]*voiceMacroWhere\(_e\.sender\)\)/.test(lan), 'a busy LAN is said in that window');
+  const ptt = bodyOf(main, "ipcMain.on('voice-macro-ptt', (_e, state) => {", '\n  });');
+  assert.ok(/stopVoiceMacroIn\(_e\.sender\);/.test(ptt), 'a refused key-down stops the playback where it runs');
+});
+
+test('#227: a radio that may be left keyed is said: log, app notice, VFO window and ECHOCAT, and a dialog at quit', () => {
+  const b = bodyOf(main, "} else if (target.type === 'yaesu-lan') {", "} else if (target.type === 'icom-network') {");
+  assert.ok(/transport\.on\('unkey-unreachable', \(\{ message \}\) => \{[\s\S]*?'app-notice'[\s\S]*?'tune-blocked'[\s\S]*?type: 'tune-blocked'/.test(b));
+  const quit = bodyOf(main, "app.on('before-quit', (e) => {", 'gracefulCleanup();');
+  assert.ok(/if \(!lan\.connected && lan\.mayBeKeyed\) \{[\s\S]*?dialog\.showMessageBoxSync\(\{ type: 'warning', title: 'POTACAT', message: 'POTACAT could not reach the radio to unkey it\. It may still be transmitting\.'/.test(quit));
+});
+
+test('#227: CW text on a LAN rig skips the local CW Key Port and uses the keyer memory over CAT', () => {
+  const b = bodyOf(main, "const lanRig = !!(settings.catTarget && settings.catTarget.type === 'yaesu-lan');", '// Serial CAT (Kenwood/Yaesu/Icom)');
+  assert.ok(/if \(!lanRig && \(cwCaps\.textMethod === 'dtr-key-port' \|\| settings\.cwKeyPort\)\) \{/.test(b), 'the key-port branch is skipped');
+  const { getModel } = require('../lib/rig-models');
+  const cw = getModel('FT-710').cw;
+  assert.strictEqual(cw.kyMode, 'km');
+  assert.strictEqual(cw.kmMemory, 1);
+  assert.strictEqual(cw.kmPlay, 'KY01;', 'the form keyed on the air over the LAN');
+});
+
+
+test('speaker monitor: an opt-in per rig (FT-710 and FTDX10, where ML is per mode), its saved values persisted per rig, put back before quit', () => {
+  const html = read('renderer/index.html');
+  const app = read('renderer/app.js');
+  assert.ok(/id="yaesu-lan-mute-monitor-row"[^>]*>\s*<input type="checkbox" id="set-yaesu-lan-mute-monitor">/.test(html));
+  assert.ok(/muteMonitor: !!\(document\.getElementById\('set-yaesu-lan-mute-monitor'\) \|\| \{\}\)\.checked,/.test(app), 'saved with the target');
+  assert.ok(/set-yaesu-lan-mute-monitor'\)\.checked = !!currentTarget\.muteMonitor;\n\s*syncYaesuLanMuteMonitorRow\(\);/.test(app), 'loaded with the target');
+  assert.ok(/const ok = !!rigModelSelect && \['FT-710', 'FTDX10'\]\.includes\(rigModelSelect\.value\);/.test(app), 'offered where ML is per mode');
+  assert.deepStrictEqual([...P.MONITOR_PER_MODE_MODELS], ['FT-710', 'FTDX10'], 'the editor and main agree');
+  const b = bodyOf(main, "} else if (target.type === 'yaesu-lan') {", "} else if (target.type === 'icom-network') {");
+  assert.ok(/const muteMonitor = !!target\.muteMonitor && Sculan10\.MONITOR_PER_MODE_MODELS\.includes\(modelName\);/.test(b), 'and honoured only there');
+  assert.ok(/muteMonitor,\s*monitorSaved: \(settings\.yaesuLanMonitorSaved \|\| \{\}\)\[_ylMonKey\] \|\| null,/.test(b));
+  assert.ok(/transport\.on\('monitor-saved'[\s\S]*?saveSettings\(settings\)/.test(b) && /transport\.on\('monitor-restored'[\s\S]*?delete settings\.yaesuLanMonitorSaved\[_ylMonKey\]/.test(b));
+  const quit = bodyOf(main, "app.on('before-quit', (e) => {", 'gracefulCleanup();');
+  assert.ok(/lan\.mayBeKeyed \|\| Object\.keys\(lan\.monitorSaved\)\.length/.test(quit));
+  assert.ok(/try \{ closed = lan\.disconnect\(\); \} catch \{\}\n\s*Promise\.race\(\[Promise\.resolve\(closed\), new Promise\(\(r\) => setTimeout\(r, 5000\)\)\]\)/.test(quit), 'waits for the paced restore, at most 5 s');
+});
+
+test('setup notes: the FT-710 and FTDX10 menu settings for LAN transmit audio live in lib/rig-setup-notes.js', () => {
+  const { NOTES } = require('../lib/rig-setup-notes');
+  const n = NOTES.find((x) => x.id === 'ft710-scu-lan10-ssb-mod-source');
+  assert.ok(n && n.applies.radioTypes.join() === 'yaesu-lan' && n.applies.models.join() === 'FT-710');
+  assert.strictEqual(n.source, 'DA2PK, FT-710, 2026-11-11');
+  const dx = NOTES.find((x) => x.id === 'ftdx10-scu-lan10-ssb-mod-source');
+  assert.ok(dx && dx.applies.radioTypes.join() === 'yaesu-lan' && dx.applies.models.join() === 'FTDX10');
+  assert.ok(/SSB MOD SOURCE to REAR and REAR SELECT to USB/.test(dx.steps[0]));
+  assert.strictEqual(dx.source, 'VK4KTW, FTDX10, 2026-11-13');
+  assert.ok(!/SSB MOD SOURCE/.test(read('renderer/index.html')) && !/SSB MOD SOURCE/.test(read('renderer/app.js')), 'the help texts point to the note');
 });
 
 console.log(`\nSCU-LAN10 wiring: ${pass} passed, ${fail} failed`);
