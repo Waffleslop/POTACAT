@@ -755,6 +755,14 @@ html, body {
   flex-shrink: 0;
 }
 
+/* The owner holds the radio this Guest Pass rides on (pass-paused, #541):
+   a wrapping line in the station orange, not the one-line summary. */
+#pass-banner.pass-held {
+  color: var(--sota);
+  white-space: normal;
+  font-size: 13px;
+}
+
 /* --- Filter Toolbar --- */
 #filter-toolbar {
   flex-shrink: 0;

@@ -2003,6 +2003,7 @@
         vfoLocked = !!msg.vfoLocked;
         updateVfoLockUi();
         // ECHOCAT Web session (POTACAT Cloud): pass banner + Sign out row
+        passAuthRetries = 0;
         renderPassBanner(msg.passSession);
         renderWebSessionRow(msg.passSession);
         try { sessionStorage.removeItem('echocat-web-reload'); } catch {}
@@ -2168,6 +2169,26 @@
         break;
 
       case 'auth-fail':
+        // The owner or another guest has the radio, the shack could not check
+        // a Guest Pass with Cloud, or the pass has not started: the pass is
+        // fine, so say which and ask again on a timer. Never "revoked" (#541).
+        if (window.PassWording && PassWording.isRetryableAuthFail(msg.code, msg.passReason)) {
+          var waitWords = PassWording.describe({ kind: 'auth-fail', code: msg.code, by: msg.by, reason: msg.passReason, at: msg.passAt, owner: passOwnerCall() });
+          var waitText = [waitWords.title, waitWords.line].filter(Boolean).join(' ');
+          var waitMs = PassWording.retryDelayMs(msg.code, passAuthRetries, { reason: msg.passReason, at: msg.passAt });
+          passAuthRetries++;
+          if (reconnectTimer) clearTimeout(reconnectTimer);
+          reconnectTimer = setTimeout(function() { reconnectTimer = null; reconnectNow(); }, waitMs);
+          if (mainUI.classList.contains('hidden')) {
+            connectError.textContent = waitText;
+            connectError.classList.remove('hidden');
+            connectBtn.textContent = waitWords.action || 'Connect';
+            connectBtn.disabled = false;
+          } else {
+            showToast(waitText, 8000);
+          }
+          break;
+        }
         if (webCookieMode()) {
           // The cookie the server pre-authenticated on was refused after
           // all (expired device row, Guest Pass no longer valid). Nothing
@@ -2175,7 +2196,12 @@
           webSignOutAndReload('link-expired');
           break;
         }
-        connectError.textContent = msg.reason || 'Authentication failed';
+        if (msg.code === 'pass_not_valid' && window.PassWording) {
+          var overWords = PassWording.describe({ kind: 'auth-fail', code: msg.code, reason: msg.passReason, at: msg.passAt, owner: passOwnerCall() });
+          connectError.textContent = [overWords.title, overWords.line].filter(Boolean).join(' ');
+        } else {
+          connectError.textContent = msg.reason || 'Authentication failed';
+        }
         connectError.classList.remove('hidden');
         connectBtn.textContent = authMode === 'club' ? 'Log In' : 'Connect';
         connectBtn.disabled = false;
@@ -2200,8 +2226,19 @@
       case 'pass-ended':
         // The owner ended or revoked the Guest Pass, or it expired.
         if (webCookieMode()) { webSignOutAndReload('pass-ended'); break; }
+        var endWords = window.PassWording ? PassWording.describe({ kind: 'pass-ended', reason: msg.reason, owner: passOwnerCall() }) : null;
         renderPassBanner(null);
-        showToast('Guest Pass ended' + (msg.reason ? ': ' + msg.reason : ''), 6000, true);
+        showToast(endWords ? [endWords.title, endWords.line].filter(Boolean).join(' ') : ('Guest Pass ended' + (msg.reason ? ': ' + msg.reason : '')), 8000, !endWords || endWords.terminal);
+        break;
+
+      case 'pass-paused':
+        // The owner took the radio back. The guest keeps listening and is
+        // back on the air when the owner hands it over (#541).
+        renderPassHold(true);
+        break;
+
+      case 'pass-resumed':
+        renderPassHold(false);
         break;
 
       case 'audio-devices':
@@ -6483,7 +6520,25 @@
   }
   // Guest Pass banner under the status bar: who issued it and what it
   // allows, so a guest is never surprised by a refused mode or power.
+  var lastPassSession = null;
+  var passAuthRetries = 0;
+  function passOwnerCall() {
+    return (lastPassSession && lastPassSession.ownerCallsign) || '';
+  }
+  // The owner holds the radio (pass-paused): the banner says so, in the
+  // words POTACAT uses (lib/pass-wording.js). pass-resumed puts the
+  // normal Guest Pass line back.
+  function renderPassHold(held) {
+    var el = document.getElementById('pass-banner');
+    if (!el) return;
+    if (!held || !window.PassWording) { el.classList.remove('pass-held'); renderPassBanner(lastPassSession); return; }
+    var w = PassWording.describe({ kind: 'paused', owner: passOwnerCall() });
+    el.textContent = w.title + ' ' + w.line;
+    el.classList.add('pass-held');
+    el.classList.remove('hidden');
+  }
   function renderPassBanner(ps) {
+    if (ps && ps.code) lastPassSession = ps;
     // A Guest Pass session must never see the owner's billing (Cloud section
     // + top banner read this flag).
     window.__echoGuestPass = !!(ps && ps.code);
@@ -6520,18 +6575,21 @@
 
   // --- Reconnect ---
   let noTokenMode = false;
+  function reconnectNow() {
+    if (authMode === 'club') {
+      var call = clubCallInput.value.trim().toUpperCase();
+      var pass = clubPassInput.value;
+      if (call && pass) connectClub(call, pass);
+    } else {
+      connect(storedToken || '');
+    }
+  }
   function scheduleReconnect() {
     if (reconnectTimer) return;
     latencyEl.textContent = '--ms';
     reconnectTimer = setTimeout(function() {
       reconnectTimer = null;
-      if (authMode === 'club') {
-        var call = clubCallInput.value.trim().toUpperCase();
-        var pass = clubPassInput.value;
-        if (call && pass) connectClub(call, pass);
-      } else {
-        connect(storedToken || '');
-      }
+      reconnectNow();
     }, 3000);
   }
 
