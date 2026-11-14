@@ -90,3 +90,78 @@ test('main.js: both update-qso paths and Past Activations use lib/qso-edit', () 
   const past = src.slice(src.indexOf('function getPastActivations()'), src.indexOf("ipcMain.handle('get-past-activations'"));
   assert.match(past, /activationSigOf\(q\)/);
 });
+
+// Their park (the Park cell, SIG_INFO). Since 12 Nov 2026 POTA.app's uploader
+// reads POTA_REF and ignores SIG_INFO when both are present, so a corrected
+// park must move POTA_REF with it or the wrong park-to-park is credited.
+
+test('correcting their park moves POTA_REF with it', () => {
+  const rec = { ...hunterQso(), POTA_REF: 'US-0001' };
+  const r = applyQsoEdit(rec, { SIG_INFO: ' us-0002' });
+  assert.equal(rec.SIG_INFO, 'US-0002');
+  assert.equal(rec.SIG, 'POTA');
+  assert.equal(rec.POTA_REF, 'US-0002');
+  assert.deepEqual(r.fields, { SIG_INFO: 'US-0002', SIG: 'POTA', POTA_REF: 'US-0002' });
+});
+
+test('a park given to a plain QSO gets SIG and POTA_REF', () => {
+  const rec = { CALL: 'K1ABC', QSO_DATE: '20261114' };
+  applyQsoEdit(rec, { SIG_INFO: 'US-1234' });
+  assert.equal(rec.SIG, 'POTA');
+  assert.equal(rec.POTA_REF, 'US-1234');
+});
+
+test('a POTA_REF left stale by an older edit is replaced too', () => {
+  const rec = { ...hunterQso(), SIG_INFO: 'US-0002', POTA_REF: 'US-0001' };
+  applyQsoEdit(rec, { SIG_INFO: 'W4C/CM-001' });
+  assert.equal(rec.SIG, 'SOTA');
+  assert.equal(rec.SOTA_REF, 'W4C/CM-001');
+  assert.equal('POTA_REF' in rec, false);
+});
+
+test('their park keeps an LLOTA SIG on a same-shape correction; WWFF mirrors to WWFF_REF', () => {
+  const rec = { SIG: 'LLOTA', SIG_INFO: 'US-0010', LLOTA_REF: 'US-0010' };
+  applyQsoEdit(rec, { SIG_INFO: 'US-0011' });
+  assert.equal(rec.SIG, 'LLOTA');
+  assert.equal(rec.LLOTA_REF, 'US-0011');
+  assert.equal('POTA_REF' in rec, false);
+  const w = { ...hunterQso(), POTA_REF: 'US-0001' };
+  applyQsoEdit(w, { SIG_INFO: 'KFF-1234' });
+  assert.equal(w.SIG, 'WWFF');
+  assert.equal(w.WWFF_REF, 'KFF-1234');
+  assert.equal('POTA_REF' in w, false);
+});
+
+test('clearing their park clears SIG and POTA_REF; a non-park SIG stays', () => {
+  const rec = { ...hunterQso(), POTA_REF: 'US-0001' };
+  const r = applyQsoEdit(rec, { SIG_INFO: '' });
+  assert.equal('SIG' in rec || 'SIG_INFO' in rec || 'POTA_REF' in rec, false);
+  assert.deepEqual(r.fields, { SIG_INFO: '', SIG: '', POTA_REF: '' });
+  // A QLog import with POTA_REF alone: the cell shows POTA_REF, clearing it clears it.
+  const qlog = { CALL: 'K1ABC', POTA_REF: 'US-0001' };
+  applyQsoEdit(qlog, { SIG_INFO: '' });
+  assert.equal('POTA_REF' in qlog, false);
+  const other = { SIG: 'IOTA', SIG_INFO: 'EU-005' };
+  applyQsoEdit(other, { SIG_INFO: '' });
+  assert.equal(other.SIG, 'IOTA');
+});
+
+test('a POTA list stays one record (the split prompt\'s "single row") with POTA_REF as the ADIF list', () => {
+  const rec = { ...hunterQso(), POTA_REF: 'US-0001' };
+  applyQsoEdit(rec, { SIG_INFO: 'us-1595, US-4567' });
+  assert.equal(rec.SIG_INFO, 'US-1595,US-4567');
+  assert.equal(rec.POTA_REF, 'US-1595,US-4567');
+  assert.equal(rec.SIG, 'POTA');
+  // Editing it back to one park replaces the whole list.
+  applyQsoEdit(rec, { SIG_INFO: 'US-1595' });
+  assert.equal(rec.POTA_REF, 'US-1595');
+});
+
+test('a list outside POTA, or a mixed one, is refused and the record is untouched', () => {
+  for (const v of ['W4C/CM-001,W4C/CM-002', 'US-1234,KFF-1234', 'US-1234 US-5678']) {
+    const rec = { ...hunterQso(), POTA_REF: 'US-0001' };
+    const r = applyQsoEdit(rec, { SIG_INFO: v });
+    assert.ok(r.error, v);
+    assert.deepEqual(rec, { ...hunterQso(), POTA_REF: 'US-0001' });
+  }
+});
