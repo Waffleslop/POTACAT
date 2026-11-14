@@ -370,6 +370,7 @@ const { activationStationFill } = require('./lib/activation-station'); // N7VBN:
 const { freqToBand, BANDS } = require('./lib/bands');
 const { splitHostPort } = require('./lib/host-port');
 const activationProgram = require('./lib/activation-program');
+const { applyQsoEdit, activationSigOf } = require('./lib/qso-edit'); // Logbook cell edits (#509)
 const ActivationClock = require('./lib/activation-clock'); // #147: a forgotten activation ends at the UTC day change or after 6 h idle
 const QsoExpand = require('./lib/qso-expand'); // one contact -> its ADIF records (logContact)
 const WatchlistEdit = require('./lib/watchlist-edit'); // watchlist add/remove by operation (ECHOCAT sync)
@@ -27821,18 +27822,26 @@ function connectRemote() {
     }
   });
 
-  remoteServer.on('update-qso', ({ idx, fields }) => {
+  remoteServer.on('update-qso', ({ idx, fields: edit }) => {
     try {
       let found = false;
+      let applied = null;
       mutateQsoLog((qsos) => {
         if (!qsos[idx]) return false;
         found = true;
-        Object.assign(qsos[idx], fields);
+        // My Park also sets MY_SIG and its mirror (lib/qso-edit.js, #509).
+        applied = applyQsoEdit(qsos[idx], edit);
+        if (applied.error) return false;
       });
       if (!found) {
         remoteServer.sendQsoUpdated({ success: false, idx, error: 'Invalid index' });
         return;
       }
+      if (applied.error) {
+        remoteServer.sendQsoUpdated({ success: false, idx, error: applied.error });
+        return;
+      }
+      const fields = applied.fields;
       loadWorkedQsos();
       // Notify desktop QSO pop-out
       if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
@@ -52566,8 +52575,11 @@ function cloudShackNotice(text, kind) {
       // Group by MY_SIG_INFO (park/summit ref) + QSO_DATE
       const groups = new Map();
       for (const q of qsos) {
-        const mySig = (q.MY_SIG || '').toUpperCase();
-        if (!mySig || !q.MY_SIG_INFO) continue;
+        // MY_SIG, or the ref's program when a reference-shaped MY_SIG_INFO
+        // has none (a Logbook My Park edit before #509). The group's sig is
+        // what Export ADIF / Upload to POTA.app write as MY_SIG.
+        const mySig = activationSigOf(q);
+        if (!mySig) continue;
         const ref = q.MY_SIG_INFO.toUpperCase();
         const date = q.QSO_DATE || '';
         const key = `${ref}|${date}`;
@@ -52764,22 +52776,28 @@ function cloudShackNotice(text, kind) {
     }
   });
 
-  ipcMain.handle('update-qso', async (event, { idx, fields }) => {
+  ipcMain.handle('update-qso', async (event, { idx, fields: edit }) => {
     try {
       let found = false;
+      let applied = null;
       mutateQsoLog((qsos) => {
         if (!qsos[idx]) return false;
         found = true;
-        Object.assign(qsos[idx], fields);
+        // My Park also sets MY_SIG and its mirror, so Past Activations finds
+        // the QSO (lib/qso-edit.js, #509).
+        applied = applyQsoEdit(qsos[idx], edit);
+        if (applied.error) return false;
       });
       if (!found) return { success: false, error: 'Invalid index' };
+      if (applied.error) return { success: false, error: applied.error };
+      const fields = applied.fields;
       loadWorkedQsos();
       // Notify other windows about the change
       const sender = event.sender;
       if (qsoPopoutWin && !qsoPopoutWin.isDestroyed() && qsoPopoutWin.webContents !== sender) {
         qsoPopoutWin.webContents.send('qso-popout-updated', { idx, fields });
       }
-      return { success: true };
+      return { success: true, fields };
     } catch (err) {
       return { success: false, error: err.message };
     }
