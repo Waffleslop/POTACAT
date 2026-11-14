@@ -237,6 +237,7 @@ const TESTS = [
   'test/rsba1-transport.test.js',
   'test/activation-log-test.js',
   'test/activation-program-test.js',
+  'test/qso-edit-test.js', // #509: My Park edit sets MY_SIG so Past Activations finds the QSO
   'test/activation-auto-end-test.js', // #147: a forgotten activation ends at the UTC day change or after 6 h with no contacts
   'test/activation-logging-388-test.js', // #388: a habit Tab after the RST jump is absorbed; a corrected park grid is kept per park
   'test/state-backfill-test.js', // #389: QRZ state fill counts only tracked entities (never VK) and names the QSOs left

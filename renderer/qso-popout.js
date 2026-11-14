@@ -947,7 +947,8 @@ tbody.addEventListener('dblclick', (e) => {
     const result = await window.api.updateQso({ idx, fields });
     if (result.success) {
       const qso = allQsos.find(q => q.idx === idx);
-      if (qso) Object.assign(qso, fields);
+      // Main's fields: a My Park edit also writes MY_SIG (#509).
+      if (qso) Object.assign(qso, result.fields || fields);
       render();
       toast(`Updated ${qso ? qso.CALL : 'QSO'}`);
     } else {
