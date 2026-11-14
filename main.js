@@ -24975,9 +24975,9 @@ function sendCwTextViaDtrKey(text, wpm, dtrPins, opts) {
   const pins = dtrPins || { dtr: true };
   const setKey = (down) => {
     if (!cwKeyPort || !cwKeyPort.isOpen) return false;
-    const state = {};
-    if (pins.dtr) state.dtr = !!down;
-    if (pins.rts) state.rts = !!down;
+    // Name both lines: a line left out of set() goes to node-serialport's
+    // default (HIGH), which keyed the other line on every send.
+    const state = { dtr: pins.dtr ? !!down : false, rts: pins.rts ? !!down : false };
     // Runs inside setTimeout callbacks — a synchronous throw here (port closed
     // mid-sequence) would escape to uncaughtException and crash the app.
     // Returns whether the write was issued so the end-pulse can tell a clean
@@ -26744,10 +26744,11 @@ function connectRemote() {
         if (rigType === 'flex' && smartSdr && smartSdr.connected) {
           smartSdr.cwPttRelease();
         }
-        // Force CW key port DTR low (key up) on full teardown
-        if (cwKeyPort && cwKeyPort.isOpen) {
-          cwKeyPort.set({ dtr: false }, () => {});
-        }
+        // Key up on full teardown: BOTH lines low. node-serialport fills a
+        // line left out of set() with its default (HIGH), so the old
+        // set({ dtr: false }) raised RTS and keyed an RTS keyer 60 s after
+        // the last remote client left (N6UGP, X5105, 1.14.4).
+        dropCwKeyLine('ECHOCAT client gone');
         // Delayed safety TX-off: catches VOX re-trigger from audio artifacts
         // during teardown and any race conditions from FT8 engine shutdown
         setTimeout(() => {
