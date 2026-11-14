@@ -461,6 +461,7 @@ const { createRigctldServer } = require('./lib/rigctld-server');
 const ArdopProcess = require('./lib/ardop-process');
 const DirewolfProcess = require('./lib/direwolf-process');
 const DirewolfAgwMonitor = require('./lib/direwolf-agw-monitor');
+const PacketLinkClose = require('./lib/packet-link-close');
 const PacketRigMode = require('./lib/packet-rig-mode');
 const VaraProcess = require('./lib/vara-process');
 const VaraSetup = require('./lib/vara-setup');
@@ -1977,6 +1978,10 @@ let _winlinkPatReply = '';           // Pat's raw /api/connect reply: for the lo
 let _winlinkReceived = null;         // messages Pat took into the Inbox, when a session did not finish
 let _patArqTimeoutAskedS = 0;        // #425: the ARDOP link timeout the running Pat was started with (seconds)
 let _winlinkLinkStory = null;        // WinlinkDiag.ArdopLinkStory: the modem's last state and which side ended the link
+let _winlinkPacketWatch = null;      // PacketLinkClose.PacketLinkWatch: this session's AX.25 link as Dire Wolf's monitor heard it (#300)
+let _winlinkPacketClose = null;      // a packet session waiting for the gateway to answer our DISC before Dire Wolf stops (#300)
+let _winlinkPacketClosed = false;    // that wait is over for this session: the next end is the real one
+let _winlinkPacketTimer = null;      // once a second in a packet session: a call that opened on a held link (#300)
 let _winlinkAudioSummary = '';       // the session's audio sentence, repeated in its summary line
 const _winlinkLevels = new WinlinkTxLevel.SessionLevels(); // #300: the RX peak and what our overs sent to the radio, for the summary line
 const _winlinkSummaries = [];        // the last sessions' summary lines, for Report a Bug
@@ -11473,6 +11478,9 @@ function winlinkArmAfterAbortCheck() {
 
 function disconnectWinlink({ quit } = {}) {
   winlinkRetryCancel('winlink-off'); // a session it ends is never retried either: its cause is 'turned-off' or 'closing'
+  // #300: quitting or Winlink off does not wait for the gateway to answer a DISC.
+  if (_winlinkPacketClose) winlinkPacketCloseFinish('forced');
+  _winlinkPacketClosed = true;
   clearTimeout(_winlinkAfterAbortTimer); _winlinkAfterAbortTimer = null;
   if (winlinkSessionActive()) { winlinkNoteCause(quit ? 'closing' : 'turned-off'); winlinkEndSession('error', quit ? 'POTACAT is closing' : 'Winlink was turned off'); }
   winlinkReturnOnStop(quit);
@@ -12404,6 +12412,7 @@ function winlinkAgwMonitorStart(attempt = 0) {
     onFrame: (f, text) => {
       if (DirewolfAgwMonitor.isReceivedFrame(f)) _direwolfMonitorHeard++;
       if (_winlinkLinkStory && _winlinkLinkStory.noteFrame) _winlinkLinkStory.noteFrame(text);
+      if (_winlinkPacketWatch) _winlinkPacketWatch.noteFrame(text, Date.now()); // #300: the link's UA, DM, DISC, FRMR and greeting
       direwolfRingPush(`heard: ${text}`); // Report a Bug's Dire Wolf block: its stdout arrives late or never (#128)
       if (logged++ < 300) winlinkLog(`direwolf heard: ${text}`);
       else if (logged === 301) winlinkLog('direwolf heard: (more frames not logged)');
@@ -12745,6 +12754,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
     origin: String(origin || 'operator'), autoRetry: !!autoRetry,
   });
   winlinkOutcomeReset(mode);
+  winlinkPacketReset(mode);
   _winlinkSessionError = '';
   _winlinkSessionErrorKind = '';
   _winlinkPatConnected = false;
@@ -12830,6 +12840,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
         }, 15000);
       }
       if (radio) winlinkStartSessionMeter();
+      if (mode === 'packet') winlinkPacketTimerStart(); // #300: a call that opens on a link the gateway still holds
       winlinkState.setSession({ state: 'connecting', text: radio ? `Calling ${String(gateway).toUpperCase()}` : 'Connecting to the CMS' });
       winlinkSessionPush();
       _winlinkDialed = true; dialed = true;
@@ -13221,6 +13232,10 @@ function winlinkHoldAwake(on, why = '') {
 function winlinkEndSession(state, text, received = 0) {
   winlinkHoldAwake(false); // first, so no early return below can keep it held
   if (!winlinkSessionActive() && state !== 'error') return;
+  // #300: a packet link is closed (DISC answered) before Dire Wolf, PTT and the audio go.
+  if (winlinkPacketHoldEnd(state, text, received)) return;
+  if (_winlinkPacketClose) { clearInterval(_winlinkPacketClose.timer); _winlinkPacketClose = null; }
+  clearInterval(_winlinkPacketTimer); _winlinkPacketTimer = null;
   const s = winlinkState.session;
   const endedAt = Date.now();
   const wasActive = winlinkSessionActive();
@@ -13543,8 +13558,103 @@ async function winlinkRecoveryEmailSet(email) {
   catch (e) { return { ok: false, error: e.message }; }
 }
 
+// ── packet: close the AX.25 link before Dire Wolf stops (#300) ─────────────
+// The rules are lib/packet-link-close.js. Here: the clean disconnect, the wait
+// for the gateway's UA or DM (Dire Wolf, PTT and the modem audio stay up), and
+// a call that opened on a link the gateway still holds.
+
+/**
+ * A packet session is ending: if its link is up, ask Pat for a clean
+ * disconnect and keep everything up until the gateway answers it (or
+ * CLOSE_WAIT_MS). Returns true when the end is held; the real end follows from
+ * winlinkPacketCloseFinish. A held end that is asked again keeps the later reason.
+ */
+function winlinkPacketHoldEnd(state, text, received) {
+  const s = winlinkState.session;
+  if (!s || s.mode !== 'packet' || _winlinkPacketClosed || !winlinkSessionActive()) return false;
+  if (_winlinkPacketClose) {
+    const p = _winlinkPacketClose;
+    // Pat's own reply when its connect returns is the better line for the log; 'done' stays done.
+    if (p.state !== 'done') p.args = [state, text, received];
+    return true;
+  }
+  const w = _winlinkPacketWatch;
+  if (!w || !direwolfProc) return false;
+  // A finished exchange: Pat has closed the link already. Waited for only when the monitor can see the answer.
+  if (state === 'done' && !(_direwolfMonitor && _direwolfMonitor.connected)) return false;
+  if (!PacketLinkClose.closeFirst({ mode: s.mode, cause: _winlinkCause })) return false;
+  if (!w.needsClose({ patConnected: _winlinkPatConnected })) return false;
+  const now = Date.now();
+  w.beginClose(now);
+  _winlinkPacketClose = { state, args: [state, text, received], timer: null };
+  _winlinkPacketClose.timer = setInterval(winlinkPacketCloseTick, 200);
+  winlinkLog(`packet: asking Pat to close the link to ${String(s.gateway || '').toUpperCase() || 'the gateway'} cleanly; Dire Wolf, PTT and the modem audio stay up until the gateway answers, ${Math.round(PacketLinkClose.CLOSE_WAIT_MS / 1000)} s at most`);
+  if (patClient) patClient.disconnect(false).catch(() => {});
+  winlinkState.setSession({ state: 'disconnecting', text: `Closing the link to ${String(s.gateway || '').toUpperCase() || 'the gateway'}`, prompt: null });
+  winlinkSessionPush();
+  return true;
+}
+
+function winlinkPacketCloseTick() {
+  if (!_winlinkPacketClose) return;
+  const w = _winlinkPacketWatch;
+  const st = w ? w.closeState(Date.now()) : { done: true, by: 'timeout', ms: 0 };
+  if (st.done) winlinkPacketCloseFinish(st.by, st.ms);
+}
+
+/** The wait is over (the gateway answered, the cap, or a second Stop): the session ends now. */
+function winlinkPacketCloseFinish(by, ms) {
+  const p = _winlinkPacketClose;
+  if (!p) return;
+  clearInterval(p.timer);
+  _winlinkPacketClose = null;
+  _winlinkPacketClosed = true;
+  const w = _winlinkPacketWatch;
+  const took = ms != null ? ms : (w && w.closingAt ? Date.now() - w.closingAt : 0);
+  winlinkLog(PacketLinkClose.closeLogText({ by, ms: took, gateway: winlinkState.session.gateway }));
+  winlinkEndSession(...p.args);
+}
+
+/**
+ * Stop (or another cause) while the packet link is being closed. A second
+ * Stop, or a cause after which nothing may be transmitted, ends it at once;
+ * the stall and the cap firing again during the wait do not. True = handled.
+ */
+function winlinkPacketAbortWhileClosing(why, cause) {
+  if (!_winlinkPacketClose) return false;
+  const k = (cause && cause.kind) || 'stopped';
+  if (k === 'operator' || PacketLinkClose.END_AT_ONCE.includes(k)) {
+    winlinkLog(`stopping at once — ${why}`);
+    if (patClient) patClient.disconnect(true).catch(() => {});
+    winlinkPacketCloseFinish('forced');
+  }
+  return true;
+}
+
+/** A new session: a fresh watch of its packet link, and no close pending. */
+function winlinkPacketReset(mode) {
+  if (_winlinkPacketClose) { clearInterval(_winlinkPacketClose.timer); _winlinkPacketClose = null; }
+  clearInterval(_winlinkPacketTimer); _winlinkPacketTimer = null;
+  _winlinkPacketClosed = false;
+  _winlinkPacketWatch = mode === 'packet' ? new PacketLinkClose.PacketLinkWatch({ gateway: winlinkState.session.gateway, mycall: settings.myCallsign }) : null;
+}
+
+function winlinkPacketTimerStart() {
+  clearInterval(_winlinkPacketTimer);
+  _winlinkPacketTimer = setInterval(() => {
+    const w = _winlinkPacketWatch;
+    if (!w || !winlinkSessionActive() || winlinkState.session.mode !== 'packet' || _winlinkPacketClose) return;
+    const v = w.stuck(Date.now());
+    if (!v.stuck) return;
+    clearInterval(_winlinkPacketTimer); _winlinkPacketTimer = null;
+    winlinkLog(PacketLinkClose.stuckLogText({ why: v.why, gateway: winlinkState.session.gateway }));
+    winlinkAbortSession('the gateway is still holding the last link', { kind: 'stuck-link', detail: v.why });
+  }, 1000);
+}
+
 function winlinkAbortSession(why, cause) {
   if (!winlinkSessionActive()) return;
+  if (winlinkPacketAbortWhileClosing(why, cause)) return;
   winlinkLog(`aborting the session — ${why}`);
   winlinkNoteCause((cause && cause.kind) || 'stopped', cause && cause.kind ? cause.detail : why);
   _winlinkSessionError = `Stopped: ${why}`;
@@ -13559,9 +13669,14 @@ function winlinkAbortSession(why, cause) {
   }
   winlinkState.setSession({ state: 'disconnecting', text: `Stopping — ${why}`, prompt: null });
   winlinkSessionPush();
-  if (patClient) patClient.disconnect(true).catch(() => {});
-  // Pat's connect returns once the transport closes; if it doesn't, end here.
-  setTimeout(() => { if (winlinkSessionActive()) winlinkEndSession('error', `Stopped: ${why}`); }, 6000);
+  // #300: an AX.25 link that is up is closed cleanly (Pat has Dire Wolf send
+  // DISC) and the session waits for the gateway's answer before Dire Wolf
+  // stops. A dirty disconnect left the gateway holding the old link.
+  if (!winlinkPacketHoldEnd('error', `Stopped: ${why}`, 0)) {
+    if (patClient) patClient.disconnect(true).catch(() => {});
+    // Pat's connect returns once the transport closes; if it doesn't, end here.
+    setTimeout(() => { if (winlinkSessionActive()) winlinkEndSession('error', `Stopped: ${why}`); }, 6000);
+  }
   // Pat can go on reporting this call after the session and its modem are
   // gone (#430): looked at once, by itself, so the next Connect is ready.
   winlinkArmAfterAbortCheck();

@@ -147,6 +147,22 @@ test('Yaesu legacy: PKTFM is mode byte 0C, which reads back as FM (so it cannot 
   const c = new YaesuLegacyCodec({ brand: 'Yaesu', protocol: 'yaesu-legacy' }, () => {});
   assert.deepStrictEqual(c.resolveMode('PKTFM', 145630000), { mode817: 0x0C });
 });
+test('FT-817/818/857/897 behind Hamlib: FM data is not confirmed, so FM read back is never called "not a data mode" (#300)', () => {
+  for (const model of ['FT-817/818', 'FT-857', 'FT-897']) {
+    for (const type of ['hamlib', 'rigctldnet']) {
+      const r = P.resolvePacketRigMode(rigIn(type, model, 'fmdata'));
+      assert.strictEqual(r.dataMode, 'DIGFM', `${model}/${type}`);
+      assert.strictEqual(r.confirm, false, `${model}/${type}`);
+      assert.strictEqual(r.radioName, 'PKT', `${model}/${type}`);
+      assert.strictEqual(r.note, 'This radio reports PKT as FM, so POTACAT cannot confirm it: check the radio\'s display during the session.');
+      const said = P.sentText({ resolved: r, state: 'sent', sent: 'DIGFM', report: { mode: 'FM', data: false } });
+      assert.ok(!/not a data mode/.test(said), said);
+      assert.ok(/this radio reports PKT as FM, so it is not confirmed$/.test(said), said);
+    }
+  }
+  // Every other radio behind Hamlib is still confirmed by its own report.
+  for (const model of ['IC-7100', 'FT-991/991A', '']) assert.strictEqual(P.resolvePacketRigMode(rigIn('hamlib', model, 'fmdata')).confirm, true, model || '(no model)');
+});
 test('flrig: PKTFM picks the radio\'s own FM data name; DIGFM is a name it does not know', () => {
   assert.deepStrictEqual(MODE_CANDIDATES.PKTFM.slice(0, 3), ['FM-D', 'DATA-FM', 'PKT-FM']);
   const c = new FlrigCodec({}, () => {});
@@ -408,13 +424,14 @@ test('the editor asks main what the choice means for the rig being edited', () =
 
 console.log('setup notes and the mode list');
 test('FT-817/818, FT-857 and FT-897 get the packet tip, with its source and no menu path', () => {
-  for (const model of ['FT-817/818', 'FT-857', 'FT-897']) {
-    const n = resolveSetupNotes({ model, modelInfo: RIG_MODELS[model], radioType: 'serialcat', platform: 'win32' }).find((x) => x.id === 'yaesu-legacy-packet-pkt');
-    assert.ok(n, model); assert.strictEqual(n.level, 'tip'); assert.ok(/#128/.test(n.source));
+  for (const model of ['FT-817/818', 'FT-857', 'FT-897']) for (const radioType of ['serialcat', 'hamlib', 'rigctldnet']) {
+    const n = resolveSetupNotes({ model, modelInfo: RIG_MODELS[model], radioType, platform: 'win32' }).find((x) => x.id === 'yaesu-legacy-packet-pkt');
+    assert.ok(n, `${model}/${radioType}: rigctld users see the tip too (#300)`); assert.strictEqual(n.level, 'tip'); assert.ok(/#128/.test(n.source));
     assert.ok(n.steps[0].includes(`"${P.SETTING_LABEL}" to ${P.LABELS.fmdata}`), 'names the setting as the editor shows it');
     assert.ok(!n.steps.some((s) => /MENU|No\.? ?\d|→/.test(s)), 'no radio menu path: none was checked against the manual');
   }
   assert.ok(!resolveSetupNotes({ model: 'FT-710', modelInfo: RIG_MODELS['FT-710'], radioType: 'serialcat', platform: 'win32' }).some((x) => x.id === 'yaesu-legacy-packet-pkt'));
+  assert.ok(!resolveSetupNotes({ model: 'FT-857', modelInfo: RIG_MODELS['FT-857'], radioType: 'flrig', platform: 'win32' }).some((x) => x.id === 'yaesu-legacy-packet-pkt'), 'not behind flrig: flrig picks its own name for the mode');
 });
 test('an IC-7100 on Hamlib is told that the CI-V connection takes FM-D (#300)', () => {
   const has = (radioType) => resolveSetupNotes({ model: 'IC-7100', modelInfo: RIG_MODELS['IC-7100'], radioType, platform: 'win32' }).some((x) => x.id === 'ic7100-packet-civ');
