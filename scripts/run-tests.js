@@ -212,6 +212,7 @@ const TESTS = [
   'test/settings-file-test.js', // settings written via temp+rename with a .bak; a truncated file is restored, never read as a fresh install
   'test/profile-switch-guard-test.js', // #344: no settings save between an operator switch and the restart; the new operator keeps its own callsign, log and Cloud sign-in
   'test/wsjtx-qdatetime-test.js', // QSO Logged dates are valid UTC; an invalid one never goes out as 1899 (ik4idf Logger32)
+  'test/kg4-us-calls-test.js', // #342 KG4 + two letters is Guantanamo, else US
   'test/operating-entity-test.js', // W1AW/KL7 is Alaska; the log takes QRZ's DXCC entity, not its mailing country
   'test/hound-log-call-test.js', // a hound calls the fox's base call but logs the full call (level_death 6W/IK2HKT)
   'test/jtcat-hound-chip-test.js', // #160: HOUND chip is a two-way toggle on the main screen
