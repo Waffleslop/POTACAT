@@ -714,8 +714,8 @@ void fsk_demod_core(struct FSK *fsk, uint8_t rx_bits[], float rx_filt[],
   memset(_f_int_flat, 0, M * _f_int_cols * sizeof(COMP));
   #define f_int_at(r,c) _f_int_flat[(r) * _f_int_cols + (c)]
 #else
-  COMP f_int_at(M,(nsym + 1) * P);
-  #define f_int_at(r,c) f_int_at(r,c)
+  COMP f_int[M][(nsym + 1) * P];
+  #define f_int_at(r,c) f_int[r][c]
 #endif
   for (i = 0; i < (nsym + 1) * P; i++) {
     int st = i * Ts / P;
