@@ -53,6 +53,8 @@ check('pass_check_failed: trying again, never revoked, back-off 30 s 1 2 4 5 5 m
   const w = W.describe({ kind: 'auth-fail', code: 'pass_check_failed', owner: 'K3SBP' });
   assert.strictEqual(w.title, 'Couldn\'t check your pass just now. Trying again.');
   assert.strictEqual(w.terminal, false);
+  assert.strictEqual(w.stillGood, true, 'a failed check says the pass is still good');
+  assert.ok(/Your pass is still good\./.test(w.line));
   assert.ok(!/revok/i.test(w.title + w.line));
   assert.deepStrictEqual([0, 1, 2, 3, 4, 9].map((n) => W.retryDelayMs('pass_check_failed', n)),
     [30000, 60000, 120000, 240000, 300000, 300000]);
@@ -192,7 +194,7 @@ check('station: Cloud could not answer -> auth-fail pass_check_failed, reason ne
   assert.ok(!/revok/i.test(sent[0].reason), 'older phones read "revoked" as a dead pass');
   assert.strictEqual(sent[0].state, 'reconnecting');
   assert.strictEqual(sent[0].stateReason, 'check-failed');
-  assert.strictEqual(sent[0].text, "Couldn't check your pass just now. Trying again.");
+  assert.strictEqual(sent[0].text, "Couldn't check your pass just now. Trying again. Your pass is still good.");
 });
 check('station: owner on the radio -> auth-fail rig_in_use, state waiting / owner, text with the owner call', async () => {
   const { rs, sent } = fakeServer(async () => ({ code: 'brave-otter', owner_callsign: 'K3SBP' }));
