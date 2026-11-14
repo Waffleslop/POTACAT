@@ -17,6 +17,7 @@ const TESTS = [
   'test/rig-test.js',
   'test/icom-baud-list-test.js', // #238: every baud select offers 4800-115200; Icom path accepts each
   'test/cat-port-presence-test.js',
+  'test/cat-connect-gate-test.js',
   'test/guest-pass-listen-test.js',
   'test/rigctld-spawn-test.js',
   'test/echocat-connect-diet-test.js',

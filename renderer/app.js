@@ -2752,6 +2752,11 @@ let currentRigs = []; // local copy of settings.rigs
 // A passing Test checks the EDITOR's port, not the saved radio's, and four
 // operators read "Connected!" as done while the saved rig had no port and the
 // live link kept failing (KK6EZA, arys64/KO6BAH, NJ2DX). Say so on the result.
+// A passing test while WSJT-X Mode holds the radio: main left the radio to
+// WSJT-X instead of keeping the link, and says where to change that (#407).
+function rigTestWsjtxNote(result) {
+  return result && result.wsjtxNote ? ' ' + result.wsjtxNote : '';
+}
 function rigTestSavedNote(portPath) {
   const norm = (p) => String(p || '').trim().toUpperCase();
   const rig = editingRigId ? currentRigs.find(r => r && r.id === editingRigId) : null;
@@ -10207,7 +10212,7 @@ hamlibTestBtn.addEventListener('click', async () => {
     const result = await window.api.testHamlib({ rigId, serialPort, baudRate, dtrOff });
     if (result.success) {
       const freqMHz = FreqDots.hzMhz(parseInt(result.frequency, 10)) || 'unknown';
-      hamlibTestResult.textContent = `Connected! Freq: ${freqMHz}` + rigTestSavedNote(serialPort);
+      hamlibTestResult.textContent = `Connected! Freq: ${freqMHz}` + rigTestSavedNote(serialPort) + rigTestWsjtxNote(result);
       hamlibTestResult.className = 'hamlib-test-success';
     } else {
       hamlibTestResult.textContent = `Failed: ${result.error}`;
@@ -10280,7 +10285,7 @@ serialcatTestBtn.addEventListener('click', async () => {
     const model = rigModelSelect ? rigModelSelect.value : '';
     const result = await window.api.testSerialCat({ portPath, baudRate, dtrOff, serialHandshake, model });
     if (result.success) {
-      serialcatTestResult.textContent = `Connected! Freq: ${FreqDots.mhzMhz(result.frequency) || result.frequency + ' MHz'}` + (result.note ? ` (${result.note})` : '') + rigTestSavedNote(portPath);
+      serialcatTestResult.textContent = `Connected! Freq: ${FreqDots.mhzMhz(result.frequency) || result.frequency + ' MHz'}` + (result.note ? ` (${result.note})` : '') + rigTestSavedNote(portPath) + rigTestWsjtxNote(result);
       serialcatTestResult.className = 'hamlib-test-success';
     } else {
       serialcatTestResult.textContent = `Failed: ${result.error}`;
@@ -10316,7 +10321,7 @@ document.getElementById('icom-test-btn').addEventListener('click', async () => {
   try {
     const result = await window.api.testIcomCiv({ portPath, baudRate, civAddress });
     if (result.success) {
-      resultEl.textContent = `Connected! Freq: ${FreqDots.mhzMhz(result.frequency) || result.frequency + ' MHz'}` + rigTestSavedNote(portPath);
+      resultEl.textContent = `Connected! Freq: ${FreqDots.mhzMhz(result.frequency) || result.frequency + ' MHz'}` + rigTestSavedNote(portPath) + rigTestWsjtxNote(result);
       resultEl.className = 'hamlib-test-success';
     } else {
       resultEl.textContent = `Failed: ${result.error}`;
@@ -10346,7 +10351,7 @@ document.getElementById('civ-tcp-test-btn')?.addEventListener('click', async () 
   try {
     const result = await window.api.testCivTcp({ host, port, civAddress });
     if (result.success) {
-      resultEl.textContent = `Connected! Freq: ${FreqDots.mhzMhz(result.frequency) || result.frequency + ' MHz'}`;
+      resultEl.textContent = `Connected! Freq: ${FreqDots.mhzMhz(result.frequency) || result.frequency + ' MHz'}` + rigTestWsjtxNote(result);
       resultEl.className = 'hamlib-test-success';
     } else {
       resultEl.textContent = `Failed: ${result.error}`;
@@ -10397,7 +10402,7 @@ document.getElementById('yaesu-lan-test-btn')?.addEventListener('click', async (
       const sid = r.sessionId != null ? ' Session 0x' + Number(r.sessionId).toString(16).toUpperCase().padStart(2, '0') + '.' : '';
       const radio = r.radio ? ' ' + r.radio + '.' : (r.id ? ' Radio ID ' + r.id + '.' : '');
       const freq = r.frequency ? ' Freq: ' + (FreqDots.mhzMhz(r.frequency) || r.frequency + ' MHz') + '.' : '';
-      resultEl.textContent = 'Logged in!' + sid + radio + freq + (r.note ? ' ' + r.note : '');
+      resultEl.textContent = 'Logged in!' + sid + radio + freq + (r.note ? ' ' + r.note : '') + rigTestWsjtxNote(r);
       resultEl.className = 'hamlib-test-success';
     } else {
       resultEl.textContent = 'Failed: ' + r.error;
@@ -10445,7 +10450,7 @@ document.getElementById('icom-network-test-btn')?.addEventListener('click', asyn
         ? ` (answered probe 0x${result.probedAddress.toString(16).toUpperCase().padStart(2, '0')})`
         : '';
       const radioName = result.radioName ? ` ${result.radioName}` : '';
-      resultEl.textContent = `Connected!${radioName} Freq: ${FreqDots.mhzMhz(result.frequency) || result.frequency + ' MHz'}${responseAddr}${probeAddr}`;
+      resultEl.textContent = `Connected!${radioName} Freq: ${FreqDots.mhzMhz(result.frequency) || result.frequency + ' MHz'}${responseAddr}${probeAddr}` + rigTestWsjtxNote(result);
       resultEl.className = 'hamlib-test-success';
     } else {
       resultEl.textContent = `Failed: ${result.error}`;

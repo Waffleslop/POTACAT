@@ -8212,6 +8212,8 @@ function connectCatWithStartupDelay() {
       // crash triage 2026-07-17 — parity with the retry path's .catch above).
       if (!settings.enableWsjtx) {
         connectCat().catch((err) => sendCatLog(`[Icom Network] Startup connect failed: ${err.message || err}`));
+      } else {
+        logConnectCatSkip(CatGate.wsjtxDeclineLine());
       }
     }, ICOM_NETWORK_STARTUP_CONNECT_DELAY_MS);
   } else {
@@ -8236,6 +8238,7 @@ function connectCatSafe(context) {
 // Not an error to retry against: POTACAT waits for the port to appear and then
 // connects, saying so once. See lib/serial-port-presence.js for the G90 report.
 const SerialPortPresence = require('./lib/serial-port-presence');
+const CatGate = require('./lib/cat-connect-gate'); // why no radio link, said once (#407)
 let _catPortWatch = null; // { port, timer }
 async function serialPortPresent(port) {
   if (!SerialPortPresence.isDevicePort(port)) return true;
@@ -8251,9 +8254,42 @@ async function serialPortPresent(port) {
     if (SerialPortPresence.portListed(port, list)) return true;
     // Windows' own record of every COM port: serialport's list misses ports
     // whose driver registers no COM-port interface (see the lib).
-    if (process.platform === 'win32') return SerialPortPresence.portListed(port, await windowsSerialCommPorts());
+    if (process.platform === 'win32') {
+      if (SerialPortPresence.portListed(port, await windowsSerialCommPorts())) return true;
+      // In neither list. A virtual port (Win4Yaesu, a port sharer) can be
+      // missing from both and still open, as Test Connection proved while
+      // startup waited for it forever (#407). Open it once and let the error
+      // decide: only "File not found" means the device is not there.
+      const how = CatGate.classifyOpenResult(await openSerialPortOnce(port));
+      if (how === 'absent') return false;
+      const key = String(port).toUpperCase();
+      if (!_catUnlistedPortNoted.has(key)) {
+        _catUnlistedPortNoted.add(key);
+        sendCatLog(CatGate.unlistedPortLine(port, how));
+      }
+      return true;
+    }
     return false;
   } catch { return true; } // cannot tell: let the connect try, as before
+}
+const _catUnlistedPortNoted = new Set(); // ports already logged as "not listed, used anyway"
+/**
+ * Open a serial port and close it at once; resolves with the open error or
+ * null. DTR and RTS stay low (hupcl false, no flow control) so the probe can
+ * never key a radio whose interface keys PTT on a handshake line.
+ */
+function openSerialPortOnce(port) {
+  return new Promise((resolve) => {
+    let sp;
+    try {
+      const { SerialPort } = require('serialport');
+      sp = new SerialPort({ path: port, baudRate: 9600, autoOpen: false, hupcl: false, rtscts: false });
+    } catch (err) { return resolve(err); }
+    sp.open((err) => {
+      if (err) return resolve(err);
+      sp.close(() => setTimeout(() => resolve(null), 150)); // let Windows let go before the connect opens it
+    });
+  });
 }
 function windowsSerialCommPorts() {
   return new Promise((resolve, reject) => {
@@ -39793,7 +39829,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
   }
 
   if (!cat || !cat.connected) {
-    sendCatLog('tune ignored — no radio connected. Check Settings -> My Rigs.');
+    sendCatLog(CatGate.tuneRefusal({ verb: 'ignored', wsjtxMode: CatGate.wsjtxHoldsRadio(settings), waitingPort: _catPortWatch ? _catPortWatch.port : '', catNone: !settings.catTarget && !!settings.catNone }).log);
     return;
   }
 
@@ -40755,7 +40791,10 @@ app.whenReady().then(() => {
       }
     }, 1000);
   }
+  // WSJT-X Mode leaves the radio to WSJT-X; say so, or the log has no
+  // connect attempt at all and reads like a dead cable (#407).
   if (!settings.enableWsjtx) connectCatWithStartupDelay();
+  else logConnectCatSkip(CatGate.wsjtxDeclineLine());
   if (settings.enableCluster) connectCluster();
   if (settings.enableCwSpots) connectCwSpots();
   // RBN auto-connects when myCallsign is set — passively collected so the
@@ -46914,8 +46953,11 @@ function cloudShackNotice(text, kind) {
         _e.sender.send('tune-blocked', `No CAT control — set the radio to ${FreqDots.khzMhz(frequency)} by hand${bandNote}`);
         return;
       }
-      sendCatLog('tune refused — no radio connected. Check Settings -> My Rigs.');
-      _e.sender.send('tune-blocked', 'Radio not connected — check the USB/serial link (Settings > My Rigs)');
+      // The real cause and the place to fix it (#407): WSJT-X Mode, None, a
+      // port POTACAT is waiting for; otherwise the link itself.
+      const why = CatGate.tuneRefusal({ verb: 'refused', wsjtxMode: CatGate.wsjtxHoldsRadio(settings), waitingPort: _catPortWatch ? _catPortWatch.port : '', catNone: !settings.catTarget && !!settings.catNone });
+      sendCatLog(why.log);
+      _e.sender.send('tune-blocked', why.toast);
       return;
     }
     if (slicePort && smartSdr && smartSdr.connected) {
@@ -50720,6 +50762,12 @@ function cloudShackNotice(text, kind) {
     return { success: true, sent, total: rawQsos.length };
   });
 
+  // A passing test while WSJT-X Mode holds the radio says that POTACAT will
+  // not keep the link (#407); the rig editor shows result.wsjtxNote.
+  const withWsjtxTestNote = (result) => {
+    if (result && result.success && CatGate.wsjtxHoldsRadio(settings)) result.wsjtxNote = CatGate.wsjtxTestNote();
+    return result;
+  };
   // Every connection test below disconnects the live link to free the port
   // and, until 2026-10-02, never put it back: a PASSING test was followed by
   // "Radio not connected - check the USB/serial link" until Settings were
@@ -50727,16 +50775,21 @@ function cloudShackNotice(text, kind) {
   // pass or fail, reconnect the SAVED rig, once the test has let go of the
   // port. (test-hamlib restores its own rigctld.)
   const handleCatTest = (name, label, fn) => ipcMain.handle(name, async (e, config) => {
-    try { return await fn(e, config); }
+    try { return withWsjtxTestNote(await fn(e, config)); }
     finally {
       // Not awaited: the operator sees the result now, the reconnect follows.
       // A serial test waits for Windows to really release the port first
       // (waitForSerialPortFree, the K5AWJ race).
+      // WSJT-X Mode is honoured here as on every other connect path: the
+      // test proves the cable and settings, it does not take the radio from
+      // WSJT-X for the rest of the session (#407). The result says so.
       const testedPath = config && (config.portPath || config.path);
       (async () => {
         await new Promise((r) => setTimeout(r, 300));
         if (testedPath) await waitForSerialPortFree(testedPath, 3000);
-        if (settings.catTarget || (settings.rigs || []).some((r) => r && r.catTarget)) connectCatSafe(label + ' finished');
+        const next = CatGate.afterCatTest(settings);
+        if (next === 'reconnect') connectCatSafe(label + ' finished');
+        else if (next === 'wsjtx') sendCatLog(`[CAT] ${label} finished. ` + CatGate.wsjtxTestNote());
       })().catch(() => {});
     }
   });
@@ -51230,7 +51283,7 @@ function cloudShackNotice(text, kind) {
         });
       });
 
-      return { success: true, frequency: freq };
+      return withWsjtxTestNote({ success: true, frequency: freq });
     } catch (err) {
       return { success: false, error: err.message };
     } finally {

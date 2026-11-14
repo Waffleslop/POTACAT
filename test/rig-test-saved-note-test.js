@@ -35,9 +35,9 @@ t('a radio not saved yet says so', () => {
   assert.ok(/not saved yet: press Save/.test(make(null, [])('COM4')));
 });
 t('all three Test buttons append it to "Connected!"', () => {
-  assert.ok(app.includes("(result.note ? ` (${result.note})` : '') + rigTestSavedNote(portPath);"), 'Serial CAT');
-  assert.ok(app.includes('`Connected! Freq: ${freqMHz}` + rigTestSavedNote(serialPort);'), 'Hamlib');
-  assert.ok(app.includes('resultEl.textContent = `Connected! Freq: ${FreqDots.mhzMhz(result.frequency) || result.frequency + \' MHz\'}` + rigTestSavedNote(portPath);'), 'Icom CI-V');
+  assert.ok(app.includes("(result.note ? ` (${result.note})` : '') + rigTestSavedNote(portPath) + rigTestWsjtxNote(result);"), 'Serial CAT');
+  assert.ok(app.includes('`Connected! Freq: ${freqMHz}` + rigTestSavedNote(serialPort) + rigTestWsjtxNote(result);'), 'Hamlib');
+  assert.ok(app.includes('resultEl.textContent = `Connected! Freq: ${FreqDots.mhzMhz(result.frequency) || result.frequency + \' MHz\'}` + rigTestSavedNote(portPath) + rigTestWsjtxNote(result);'), 'Icom CI-V');
 });
 console.log('\nrig editor Test: ' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
