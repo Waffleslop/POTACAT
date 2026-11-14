@@ -2072,6 +2072,10 @@ let workedParks = new Map(); // reference -> park data from POTA parks CSV
 let wsjtx = null;
 let wsjtxStatus = null; // last Status message from WSJT-X
 let wsjtxHighlightTimer = null; // throttle timer for highlight updates
+// WSJT-X Mode's "heard" flag (#547): a Heartbeat/Status in the last 60 s.
+// Re-checked every few seconds so the 60 s edge is seen without a packet.
+let _wsjtxHeard = false;
+let _wsjtxHeardTimer = null;
 let donorCallsigns = new Set(); // supporter callsigns from potacat.com
 let expeditionCallsigns = new Set(); // active DX expeditions from Club Log + danplanet iCal
 let expeditionMeta = new Map(); // callsign -> { entity, startDate, endDate, description }
@@ -6134,6 +6138,8 @@ function stationSetupLive(rig) {
     callsign: settings.myCallsign || '',
     grid: settings.grid || '',
     catConnected,
+    // WSJT-X Mode on the radio in use: its checks are skipped (#547).
+    wsjtxMode: isActive && !!settings.enableWsjtx,
     freqHz: catConnected ? _currentFreqHz : 0,
     clock: jtcatLastClock,
     rxTest: r.rxTest || null,
@@ -8311,6 +8317,7 @@ function connectCatSafe(context) {
 // connects, saying so once. See lib/serial-port-presence.js for the G90 report.
 const SerialPortPresence = require('./lib/serial-port-presence');
 const CatGate = require('./lib/cat-connect-gate'); // why no radio link, said once (#407)
+const WsjtxModeNotice = require('./lib/wsjtx-mode-notice'); // WSJT-X Mode heard + wording (#547)
 let _catPortWatch = null; // { port, timer }
 async function serialPortPresent(port) {
   if (!SerialPortPresence.isDevicePort(port)) return true;
@@ -16852,7 +16859,17 @@ async function saveQsoRecord(qsoData, opts) {
 
 // --- WSJT-X integration ---
 function sendWsjtxStatus(s) {
-  if (win && !win.isDestroyed()) win.webContents.send('wsjtx-status', s);
+  _wsjtxHeard = WsjtxModeNotice.isHeard(wsjtx && wsjtx.lastHeardAt, Date.now());
+  if (win && !win.isDestroyed()) win.webContents.send('wsjtx-status', { ...s, heard: _wsjtxHeard });
+}
+
+// Re-decide "heard" and, when it flips, tell the main window and ECHOCAT
+// (status.wsjtxHeard). Called on a timer while WSJT-X Mode is on (#547).
+function refreshWsjtxHeard() {
+  const heard = WsjtxModeNotice.isHeard(wsjtx && wsjtx.lastHeardAt, Date.now());
+  if (heard === _wsjtxHeard) return;
+  sendWsjtxStatus({ connected: !!(wsjtx && wsjtx.connected), listening: !!wsjtx });
+  try { broadcastRemoteRadioStatus(); } catch { /* server not up */ }
 }
 
 function connectWsjtx() {
@@ -16871,7 +16888,11 @@ function connectWsjtx() {
 
   wsjtx.on('status', (s) => {
     sendWsjtxStatus(s);
+    try { broadcastRemoteRadioStatus(); } catch { /* server not up */ }
   });
+  if (_wsjtxHeardTimer) clearInterval(_wsjtxHeardTimer);
+  _wsjtxHeardTimer = setInterval(refreshWsjtxHeard, 5000);
+  try { broadcastRemoteRadioStatus(); } catch { /* server not up */ } // status.wsjtxMode is now true
 
   wsjtx.on('error', (err) => {
     console.error('WSJT-X UDP error:', err.message);
@@ -17038,7 +17059,9 @@ function disconnectWsjtx() {
     wsjtx = null;
   }
   wsjtxStatus = null;
+  if (_wsjtxHeardTimer) { clearInterval(_wsjtxHeardTimer); _wsjtxHeardTimer = null; }
   sendWsjtxStatus({ connected: false });
+  try { broadcastRemoteRadioStatus(); } catch { /* server not up */ } // wsjtxMode / wsjtxHeard
 
   // Reconnect CAT now that WSJT-X is no longer managing the radio
   if (wasRunning) {
@@ -27214,8 +27237,9 @@ function connectRemote() {
       sendCatLog('[Echo CAT] rig-reconnect connectSmartSdr failed: ' + err.message);
     }
     // Ack so the phone can toast "reconnecting…" — the actual outcome
-    // arrives via the existing cat-status / radio-status broadcasts.
-    remoteServer.sendToClient({ type: 'rig-reconnect-ack' });
+    // arrives via the existing cat-status / radio-status broadcasts. With
+    // WSJT-X Mode on nothing reconnects, and the ack says why (#547).
+    remoteServer.sendToClient(CatGate.rigReconnectAck(settings));
   });
 
   remoteServer.on('refresh-events', () => {
@@ -30491,6 +30515,10 @@ function broadcastRemoteRadioStatus() {
       remoteAudioWin && !remoteAudioWin.isDestroyed()
     ),
   };
+  // WSJT-X Mode (#547): the shack has left the radio to WSJT-X, and whether
+  // WSJT-X has been heard in the last 60 s. ECHOCAT shows the chip and note.
+  status.wsjtxMode = !!settings.enableWsjtx;
+  status.wsjtxHeard = !!(settings.enableWsjtx && _wsjtxHeard);
   remoteServer.broadcastRadioStatus(status);
 }
 

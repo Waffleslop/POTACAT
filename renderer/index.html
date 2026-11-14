@@ -240,6 +240,10 @@
     </div>
     <div class="status-bar">
       <span id="utc-clock" class="utc-clock"></span>
+      <!-- WSJT-X Mode flag (#547, lib/wsjtx-mode-notice.js): first among the chips,
+           amber, shown whenever WSJT-X Mode is on. Click = the CAT menu with the
+           WSJT-X Mode panel at the top. -->
+      <span id="wsjtx-status" class="status wsjtx-mode-chip hidden" role="button" tabindex="0" title="WSJT-X Mode is on: WSJT-X has the radio. Click for details.">WSJT-X Mode</span>
       <span id="cat-status" class="status disconnected">CAT</span>
       <!-- Active remote shack indicator (v1.9 desktop-to-desktop).
            Hidden when activeTargetId is null; shown when this desktop
@@ -260,7 +264,6 @@
            do use split legitimately). KQ4MHD report 2026-04-30. -->
       <span id="split-indicator" class="status hidden" style="background:#f0a500;color:#1a1a2e;font-weight:bold;cursor:pointer;" title="Split mode is ON — RX and TX are on different VFOs. Click to disable.">SPLIT</span>
       <span id="jtcat-tx-indicator" class="status hidden" style="background:var(--accent-red, #e94560);color:#fff;font-weight:bold;animation:tx-blink 1s ease-in-out infinite;">JTCAT TX</span>
-      <span id="wsjtx-status" class="status disconnected hidden">WSJT-X</span>
       <span id="cw-keyer-status" class="status hidden" style="background:#b8860b;color:#fff;cursor:pointer;">CW</span>
       <div id="cw-popover" class="cw-popover hidden">
         <div class="cw-popover-row">
@@ -480,6 +483,18 @@
   </header>
 
   <div id="cat-popover" class="cat-popover hidden">
+    <!-- WSJT-X Mode panel (#547): shown at the top while the mode is on. The
+         words come from lib/wsjtx-mode-notice.js. Turn off = unticking the box below. -->
+    <div id="cat-popover-wsjtx-panel" class="wsjtx-mode-panel hidden" role="status">
+      <div class="wsjtx-mode-title" id="wsjtx-panel-title">WSJT-X Mode is on</div>
+      <div class="wsjtx-mode-line" id="wsjtx-panel-line"></div>
+      <div class="wsjtx-mode-state" id="wsjtx-panel-state"></div>
+      <div class="wsjtx-mode-line" id="wsjtx-panel-hint"></div>
+      <div class="wsjtx-mode-buttons">
+        <button type="button" id="wsjtx-panel-off" class="wsjtx-mode-btn">Turn off WSJT-X Mode</button>
+        <button type="button" id="wsjtx-panel-keep" class="wsjtx-mode-btn">Keep it on</button>
+      </div>
+    </div>
     <div class="cat-popover-rigs" id="cat-popover-rigs"></div>
     <div class="cat-popover-divider"></div>
     <label class="cat-popover-wsjtx">
@@ -489,12 +504,6 @@
       <label>UDP Port:
         <input type="number" id="cat-popover-wsjtx-port-input" min="1024" max="65535" style="width:70px;">
       </label>
-    </div>
-    <div id="cat-popover-wsjtx-warning" class="cat-popover-wsjtx-warning hidden">
-      WSJT-X Mode is on but POTACAT isn't receiving heartbeats on
-      port <span id="cat-popover-wsjtx-warn-port">2237</span>. If
-      WSJT-X isn't running, uncheck the box above to take direct CAT
-      control.
     </div>
   </div>
 
@@ -2511,7 +2520,7 @@
           <span class="help-text" style="display:inline;margin-left:4px;">(0 = no limit)</span>
         </div>
       </div>
-      <label class="checkbox-label"><input type="checkbox" id="set-enable-wsjtx"> WSJT-X Integration</label>
+      <label class="checkbox-label"><input type="checkbox" id="set-enable-wsjtx"> WSJT-X Mode</label>
       <div id="wsjtx-config" class="radio-sub hidden">
         <span class="help-text" style="font-size:12px;">Connect to WSJT-X via UDP. POTA activators are highlighted in the decode window and decodes appear in POTACAT.</span>
         <label>UDP Port:
@@ -4910,6 +4919,7 @@
       <button type="button" id="ss-close" class="log-dialog-x" title="Close">&times;</button>
     </div>
     <div id="ss-progress" class="ss-progress"></div>
+    <div id="ss-notice" class="ss-notice hidden" role="status"></div>
     <div id="ss-message" class="ss-message hidden"></div>
     <div id="ss-steps" class="ss-steps"></div>
     <div id="ss-share" class="ss-share hidden"></div>
@@ -4927,6 +4937,16 @@
     <div class="er-title">Enjoying ECHOCAT?</div>
     <div id="er-text" class="ss-card-text"></div>
     <div id="er-buttons" class="ss-card-buttons"></div>
+  </div>
+  <!-- WSJT-X Mode start notice (#547): 30 s after start, mode on, WSJT-X never
+       heard. Words from lib/wsjtx-mode-notice.js. Keep it on = until next start. -->
+  <div id="wsjtx-mode-card" class="station-setup-card wsjtx-mode-card hidden" role="alert">
+    <div class="wsjtx-mode-title" id="wsjtx-card-title"></div>
+    <div class="ss-card-text" id="wsjtx-card-text"></div>
+    <div class="ss-card-buttons">
+      <button type="button" id="wsjtx-card-off" class="wsjtx-mode-btn primary">Turn off WSJT-X Mode</button>
+      <button type="button" id="wsjtx-card-keep" class="wsjtx-mode-btn">Keep it on</button>
+    </div>
   </div>
   <div id="station-setup-card" class="station-setup-card hidden" role="status">
     <div id="ss-card-text" class="ss-card-text"></div>
@@ -5340,6 +5360,7 @@
   <script src="../lib/spot-programs.js"></script>
   <script src="../lib/cm108-ptt.js"></script>
   <script src="../lib/remote-features.js"></script>
+  <script src="../lib/wsjtx-mode-notice.js"></script>
   <script src="../lib/cloud-billing-ui.js"></script>
   <script src="../lib/custom-cat-follow.js"></script>
   <script src="../lib/rig-gain-steps.js"></script>

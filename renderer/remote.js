@@ -3190,6 +3190,27 @@
   }
 
   // --- Status ---
+  // WSJT-X Mode at the shack (#547): status.wsjtxMode / wsjtxHeard. A chip in
+  // the header and an explain-only note; turning it off happens at the shack.
+  var wsjtxModeChip = document.getElementById('wsjtx-mode-chip');
+  var wsjtxModeNote = document.getElementById('wsjtx-mode-note');
+  var wsjtxModeOn = false;
+  var wsjtxNoteHidden = false; // the chip toggles the note for this page load
+  function applyWsjtxMode(on, heard) {
+    if (!wsjtxModeChip || !wsjtxModeNote) return;
+    if (on && !wsjtxModeOn) wsjtxNoteHidden = false;
+    wsjtxModeOn = on;
+    wsjtxModeChip.classList.toggle('hidden', !on);
+    wsjtxModeChip.title = on ? ('The shack is in WSJT-X Mode' + (heard ? '; WSJT-X is talking to POTACAT' : '; WSJT-X not heard')) : '';
+    var W = window.WsjtxModeNotice;
+    wsjtxModeNote.textContent = W ? W.remoteNote() : '';
+    wsjtxModeNote.classList.toggle('hidden', !on || wsjtxNoteHidden);
+  }
+  if (wsjtxModeChip) wsjtxModeChip.addEventListener('click', function () {
+    wsjtxNoteHidden = !wsjtxNoteHidden;
+    if (wsjtxModeNote) wsjtxModeNote.classList.toggle('hidden', !wsjtxModeOn || wsjtxNoteHidden);
+  });
+
   function updateStatus(s) {
     // Merged copy for custom toggles that follow the radio (fields a push
     // leaves out keep their last value).
@@ -3252,6 +3273,7 @@
       catDot.title = s.catConnected ? 'Radio connected' : 'Radio disconnected';
       settingsOverlay.classList.toggle('disabled', !s.catConnected);
     }
+    if (s.wsjtxMode !== undefined) applyWsjtxMode(!!s.wsjtxMode, !!s.wsjtxHeard);
     if (s.txState !== undefined) {
       txState = s.txState;
       txBanner.classList.toggle('hidden', !s.txState);
