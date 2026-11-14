@@ -239,6 +239,7 @@ const TESTS = [
   'test/activation-program-test.js',
   'test/activation-auto-end-test.js', // #147: a forgotten activation ends at the UTC day change or after 6 h with no contacts
   'test/activation-logging-388-test.js', // #388: a habit Tab after the RST jump is absorbed; a corrected park grid is kept per park
+  'test/activation-announce-508-test.js', // #508: QSOs from the Log window (and ECHOCAT) join the live activation list, once
   'test/state-backfill-test.js', // #389: QRZ state fill counts only tracked entities (never VK) and names the QSOs left
   'test/diagnostic-snapshot-test.js',
   'test/mercury-process-test.js',
