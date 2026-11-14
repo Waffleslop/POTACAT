@@ -310,6 +310,7 @@ const TESTS = [
   'test/js8-engine-test.js',
   'test/js8-remote-test.js',
   'test/idle-activity-test.js',
+  'test/auto-sstv-cancel-525-test.js',
   'test/idle-mode-remote-test.js',
   'test/remote-web-ft8-first-open-test.js',
   'test/remote-web-mail-test.js', // #425 web W1, W2, W4: the Mail tab puts the radio back, shows how a session ended, and says why

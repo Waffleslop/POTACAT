@@ -28817,6 +28817,7 @@ function connectRemote() {
   // picture keys, the encoder gets its own copy of the pixels, and a failure
   // is a status line here and on the phone, never a dialog box.
   remoteServer.on('sstv-photo', ({ image, mode, guest, freqKhz }) => {
+    autoSstvOpenedPopout = false; // a picture going out keeps its window (#525)
     if (guest && passEnforcement) {
       const res = passEnforcement.interceptCatCommand({ type: 'sstv_tx', freqHz: effectiveTxFreqHz(), split: _currentSplit });
       if (!res.allowed) {
@@ -38409,6 +38410,11 @@ let autoSstvActive = false;
 let autoSstvPrevFreq = null;
 let autoSstvPrevMode = null;
 let autoSstvCurrentFreq = 0;
+// Auto-SSTV opened the SSTV window itself (it was not open before), and the
+// operator has not since taken it over. Cancelling Auto-SSTV closes it then,
+// which stops the decoder; otherwise the decoder ran on, reported as
+// listening, on whatever the radio was tuned to next (#525).
+let autoSstvOpenedPopout = false;
 // JTCAT-on-idle: the idle-RX feature can open the JTCAT popout in WSPR or
 // PSK31 instead of SSTV (settings.idleRxMode). These track that variant so
 // cancel restores the user's prior JTCAT mode and only closes the popout if
@@ -38694,6 +38700,7 @@ function triggerAutoSstv() {
   autoSstvActive = true;
   autoSstvPrevFreq = _currentFreqHz;
   autoSstvPrevMode = _currentMode;
+  autoSstvOpenedPopout = !(sstvPopoutWin && !sstvPopoutWin.isDestroyed());
   const autoSstvBand = getSstvAutoFreq();
   if (!autoSstvBand) {
     // A radio that cannot use 20 m or 40 m stays where it is (#292). The
@@ -38765,6 +38772,15 @@ function cancelAutoSstv() {
     cat.tune(autoSstvPrevFreq, autoSstvPrevMode || 'USB');
   }
   sendCatLog('[Auto-SSTV] Cancelled — restored ' + (autoSstvPrevFreq ? (autoSstvPrevFreq / 1000) + ' kHz' : 'previous frequency'));
+  // Close the SSTV window only if Auto-SSTV opened it and nobody took it
+  // over; its closed handler stops the decoder and pushes
+  // sstv-decoder-state {running:false, windowOpen:false} (#525).
+  const closeSstvWindow = autoSstvOpenedPopout && sstvPopoutWin && !sstvPopoutWin.isDestroyed();
+  autoSstvOpenedPopout = false;
+  if (closeSstvWindow) {
+    try { sstvPopoutWin.close(); } catch {}
+    sendCatLog('[Auto-SSTV] Closed the SSTV window it opened');
+  }
   // The server caches the last sstv-tx-status and replays it at connect, so
   // without this a phone that connects later still sees the AUTO-SSTV banner.
   if (remoteServer) remoteServer.broadcastSstvTxStatus({ state: 'rx' });
@@ -44776,6 +44792,7 @@ function cloudShackNotice(text, kind) {
   });
 
   ipcMain.on('sstv-encode', (_e, data) => {
+    autoSstvOpenedPopout = false; // sending from the window takes it over (#525)
     startSstv(); // creates, or restarts a stopped engine; no-op when running
     const imageData = new Uint8ClampedArray(data.imageData);
     sstvEngine.encode(imageData, data.width, data.height, data.mode);
@@ -45006,6 +45023,9 @@ function cloudShackNotice(text, kind) {
     const target = opts && opts.freqKhz ? { freqKhz: opts.freqKhz, mode: opts.mode || '' } : null;
     // An already-open window keeps its opener: the app re-sending sstv-open
     // must not take ownership of a window the operator opened at the desk.
+    // Opened again by the operator (desk or phone): the window is theirs now,
+    // so cancelling Auto-SSTV leaves it open (#525).
+    if (!(opts && opts.auto)) autoSstvOpenedPopout = false;
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) {
       // Popout already open — ask it to re-QSY to the selected SSTV freq so the
       // radio moves back from whatever POTA spot the user last tuned to.
