@@ -155,7 +155,7 @@ test('the log lines say who answered, how long it took, and what is left', () =>
 console.log('the words, and no automatic retry');
 test('the held link says what it is and what to do, and nothing else', () => {
   const o = O.describeOutcome({ state: 'error', mode: 'packet', gateway: GW, dialed: true, connected: true, cause: { kind: 'stuck-link', detail: 'frmr' }, queued: 2, outbox: 2, received: 0 });
-  assert.strictEqual(o.text, 'The gateway is still holding the last link. Wait a few minutes, then try again.');
+  assert.strictEqual(o.text, 'The gateway is still holding the last link, or its greeting did not decode here. Wait a few minutes and try again. If it keeps happening, check the receive level.');
   assert.strictEqual(o.kind, 'stuck-link');
   assert.strictEqual(o.retry, false);
   assert.strictEqual(o.errorKind, 'stopped', 'a word every surface already knows');
