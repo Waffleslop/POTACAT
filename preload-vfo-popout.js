@@ -36,6 +36,10 @@ contextBridge.exposeInMainWorld('api', {
   onLogPopoutCallsign: (cb) => ipcRenderer.on('log-popout-callsign', (_e, call) => cb(call)),
   onCwWpmChanged: (cb) => ipcRenderer.on('cw-wpm-changed', (_e, wpm) => cb(wpm)),
   voiceMacroPtt: (state) => ipcRenderer.send('voice-macro-ptt', state),
+  // SCU-LAN10 (#227): the macro, decoded here at 16 kHz, goes over the LAN;
+  // main keys the radio and says 'stop-voice-macro' when it is out.
+  voiceMacroLan: (payload) => ipcRenderer.send('voice-macro-lan', payload),
+  onStopVoiceMacro: (cb) => ipcRenderer.on('stop-voice-macro', () => cb()),
   // Naked PTT (manual PTT button, no audio bridge). Distinct from
   // voiceMacroPtt so SSB-over-DATA doesn't disable the rig's hand mic
   // when the user is just keying TX from the popout button.

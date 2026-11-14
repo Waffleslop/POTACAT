@@ -52535,18 +52535,27 @@ function cloudShackNotice(text, kind) {
     // SCU-LAN10: the window's stop (button, end, refusal) also ends the LAN
     // stream, and unkeys only a macro's own transmission.
     if (!state && yaesuLanVoiceRoute()) { endYaesuLanTx('macro', 'voice macro stop'); return; }
-    // The window starts the recording with this request: a refusal stops it.
-    if (handleRemotePtt(!!state, { audio: true }) === false && win && !win.isDestroyed()) {
+    // The window starts the recording with this request: a refusal stops it,
+    // in the window that plays it (the main window or the VFO window).
+    if (handleRemotePtt(!!state, { audio: true }) === false) {
       sendCatLog('[Voice] macro stopped: transmit was refused');
-      win.webContents.send('stop-voice-macro');
+      stopVoiceMacroIn(_e.sender);
     }
   });
+  // The macro's own window: the main window, or the VFO window's macro bar.
+  function stopVoiceMacroIn(sender) {
+    try { if (sender && !sender.isDestroyed()) sender.send('stop-voice-macro'); } catch {}
+  }
+  function voiceMacroWhere(sender) {
+    return vfoPopoutWin && !vfoPopoutWin.isDestroyed() && sender === vfoPopoutWin.webContents
+      ? ['vfo', 'echocat'] : ['main', 'echocat'];
+  }
   // SCU-LAN10 (#227): a voice macro, decoded by the window at 16 kHz, sent
   // over the LAN. The radio stays in USB/LSB, as for live voice. Main unkeys
   // when the recording is out (or failed), then tells the window with
   // 'stop-voice-macro'; it does not wait on the window's round trip.
   ipcMain.on('voice-macro-lan', (_e, payload) => {
-    const stop = () => { if (win && !win.isDestroyed()) win.webContents.send('stop-voice-macro'); };
+    const stop = () => stopVoiceMacroIn(_e.sender);
     const samples = payload && payload.samples instanceof Float32Array ? payload.samples
       : (payload && payload.samples ? new Float32Array(Object.values(payload.samples)) : null);
     const rate = Number(payload && payload.sampleRate) || Sculan10.TX_AUDIO_RATE;
@@ -52556,7 +52565,7 @@ function cloudShackNotice(text, kind) {
       stop();
       return;
     }
-    if (claimYaesuLanTx('macro', `voice macro "${(payload && payload.label) || ''}"`, ['main', 'echocat'])) { stop(); return; }
+    if (claimYaesuLanTx('macro', `voice macro "${(payload && payload.label) || ''}"`, voiceMacroWhere(_e.sender))) { stop(); return; }
     if (handleRemotePtt(true, { audio: true, lanOwner: 'macro' }) === false) {
       releaseYaesuLanTx('macro', 'voice macro refused');
       sendCatLog('[Voice] macro stopped: transmit was refused');

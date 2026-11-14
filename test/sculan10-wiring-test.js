@@ -303,6 +303,24 @@ test('#227: a voice macro goes over the LAN: main keys it, sends it and unkeys i
   assert.ok(/voiceMacroLan: \(payload\) => ipcRenderer\.send\('voice-macro-lan', payload\)/.test(read('preload.js')));
 });
 
+test('#227: the VFO window\'s macro bar takes the same LAN path, and is stopped in its own window (VK4KTW, FTDX10)', () => {
+  const vfo = read('renderer/vfo-popout.html');
+  const play = bodyOf(vfo, 'async function playVoiceMacro(idx, btn, outputDeviceId) {', '\nfunction playVoiceMacroLan(');
+  assert.ok(/if \(s\.audioSource === 'yaesu-lan' && s\.catTarget && s\.catTarget\.type === 'yaesu-lan' && window\.api\.voiceMacroLan\) \{/.test(play));
+  assert.ok(play.indexOf('playVoiceMacroLan(raw, idx, btn)') < play.indexOf("confirm('Voice macros play audio"),
+    'no "no output device" question on the LAN: the LAN is the output');
+  assert.ok(/function playVoiceMacroLan\(bytes, idx, btn\) \{\s*voicePlaybackCtx = new AudioContext\(\{ sampleRate: 16000 \}\);/.test(vfo));
+  assert.ok(/window\.api\.onStopVoiceMacro\(\(\) => \{ if \(voicePlayingIdx >= 0\) stopVoicePlayback\(\); \}\)/.test(vfo));
+  const pre = read('preload-vfo-popout.js');
+  assert.ok(/voiceMacroLan: \(payload\) => ipcRenderer\.send\('voice-macro-lan', payload\)/.test(pre));
+  assert.ok(/onStopVoiceMacro: \(cb\) => ipcRenderer\.on\('stop-voice-macro', \(\) => cb\(\)\)/.test(pre));
+  const lan = bodyOf(main, "ipcMain.on('voice-macro-lan', (_e, payload) => {", '\n  });');
+  assert.ok(/const stop = \(\) => stopVoiceMacroIn\(_e\.sender\);/.test(lan), 'the end goes to the window that plays it');
+  assert.ok(/claimYaesuLanTx\('macro', [^\n]*voiceMacroWhere\(_e\.sender\)\)/.test(lan), 'a busy LAN is said in that window');
+  const ptt = bodyOf(main, "ipcMain.on('voice-macro-ptt', (_e, state) => {", '\n  });');
+  assert.ok(/stopVoiceMacroIn\(_e\.sender\);/.test(ptt), 'a refused key-down stops the playback where it runs');
+});
+
 test('#227: a radio that may be left keyed is said: log, app notice, VFO window and ECHOCAT, and a dialog at quit', () => {
   const b = bodyOf(main, "} else if (target.type === 'yaesu-lan') {", "} else if (target.type === 'icom-network') {");
   assert.ok(/transport\.on\('unkey-unreachable', \(\{ message \}\) => \{[\s\S]*?'app-notice'[\s\S]*?'tune-blocked'[\s\S]*?type: 'tune-blocked'/.test(b));

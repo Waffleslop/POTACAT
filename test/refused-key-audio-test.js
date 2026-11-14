@@ -164,7 +164,9 @@ test('SSTV does not send the picture when its key-down is refused', () => {
 test('a voice macro stops when its key-down is refused', () => {
   const b = fnBody(MAIN, "ipcMain.on('voice-macro-ptt'");
   assert.ok(/handleRemotePtt\(!!state, \{ audio: true \}\) === false/.test(b), 'refusal not checked');
-  assert.ok(/send\('stop-voice-macro'\)/.test(b) && /macro stopped: transmit was refused/.test(b));
+  // The stop goes to the window that plays the macro (main window or VFO window).
+  assert.ok(/stopVoiceMacroIn\(_e\.sender\)/.test(b) && /macro stopped: transmit was refused/.test(b));
+  assert.ok(/function stopVoiceMacroIn\(sender\) \{[^}]*sender\.send\('stop-voice-macro'\)/.test(MAIN));
   assert.ok(/onStopVoiceMacro\(/.test(APP), 'the main window stops the macro on stop-voice-macro');
 });
 
