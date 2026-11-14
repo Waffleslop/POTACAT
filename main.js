@@ -46276,7 +46276,7 @@ function cloudShackNotice(text, kind) {
   // ── LoTW Phase 3: confirmation download (lotwreport.adi) ────────────
   // Different auth than upload: the LoTW WEBSITE login, not the TQSL cert.
   async function lotwDownloadConfirmations(opts) {
-    const { buildLotwReportQuery, parseLotwAdif, looksLikeLotwAuthFailure, stampLotwConfirmations } = require('./lib/lotw-report');
+    const { buildLotwReportQuery, parseLotwAdif, looksLikeLotwAuthFailure, stampLotwConfirmations, nextLotwQslWindow } = require('./lib/lotw-report');
     const { lotwKey } = require('./lib/lotw-flags');
     const login = (opts && opts.login) || settings.lotwLogin;
     const password = (opts && opts.password) || settings.lotwPassword;
@@ -46286,7 +46286,9 @@ function cloudShackNotice(text, kind) {
     // Incremental after the first pull, with a 7-day overlap so a QSL that
     // lands between runs can never slip through the crack.
     let qslSince = null;
-    if (settings.lotwLastQslDownload) {
+    // #460: "Download all confirmations again" fetches from the beginning once.
+    const fullAgain = !!(opts && opts.all);
+    if (settings.lotwLastQslDownload && !fullAgain) {
       qslSince = new Date(settings.lotwLastQslDownload - 7 * 86400000).toISOString().slice(0, 10);
     }
     // Once: pulls before 2026-10-23 stamped the confirmation and dropped
@@ -46324,7 +46326,9 @@ function cloudShackNotice(text, kind) {
       if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) qsoPopoutWin.webContents.send('qso-popout-refresh');
     }
     if (stats.detailed > 0) sendCatLog(`[LoTW] ${stats.detailed} QSOs gained the other station's certified state, county or grid from LoTW (what Worked All States counts)`);
-    settings.lotwLastQslDownload = Date.now();
+    // #460: never move the window past a confirmation that matched nothing
+    // (lib/lotw-report.js nextLotwQslWindow has the rule).
+    settings.lotwLastQslDownload = nextLotwQslWindow({ previous: settings.lotwLastQslDownload, now: Date.now(), unmatchedDates: stats.unmatchedDates });
     settings.lotwDetailPulled = true;
     if (opts && opts.login) settings.lotwLogin = opts.login;
     if (opts && opts.password) settings.lotwPassword = opts.password;
