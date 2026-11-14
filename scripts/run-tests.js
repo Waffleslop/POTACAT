@@ -557,15 +557,53 @@ const TESTS = [
   'test/tls-der-int-test.js', // ECHOCAT self-signed cert: the random serial is minimal DER (a leading 0x00 made OpenSSL reject ~1 in 512 certs)
   'test/rigctld-data-fm-test.js', // #259: DIGFM/DIGAM have rigctld tokens (PKTFM/PKTAM), so a packet key-down on FM sends the DATA mode
   'test/launcher-cert-der-test.js', // Remote Launcher cert: minimal DER serial; a saved cert that doesn't parse is regenerated
+  'test/run-tests-shard-test.js', // CI's four test shards cover every file once; Electron tests skip at once with no display
 ];
 
 const root = path.join(__dirname, '..');
 
+// ---------------------------------------------------------------------------
+// Shards (CI runs the suite as TEST_SHARD=1/4 .. 4/4 in parallel jobs).
+// Files are dealt out by measured time (longest first, each to the lightest
+// shard) so the four jobs finish together; within a shard the list order is
+// kept. Every file lands in exactly one shard (test/run-tests-shard-test.js).
+// SLOW_SECONDS: files that take more than ~3 s in CI (measured; run
+// `TEST_TIMES=1 node scripts/run-tests.js` to print every file's time).
+// Anything not listed counts as 1 s.
+// ---------------------------------------------------------------------------
+const SLOW_SECONDS = require('./test-times.json');
+
+function shardOf(list, k, n) {
+  if (!(n > 1)) return list.slice();
+  const order = list.map((f, i) => ({ f, i, w: Number(SLOW_SECONDS[f]) || 1 }))
+    .sort((a, b) => (b.w - a.w) || (a.i - b.i));
+  const load = new Array(n).fill(0);
+  const pick = new Map();
+  for (const t of order) {
+    let s = 0;
+    for (let j = 1; j < n; j++) if (load[j] < load[s]) s = j;
+    load[s] += t.w;
+    pick.set(t.f, s);
+  }
+  return list.filter((f) => pick.get(f) === k - 1);
+}
+
+/** "2/4" → { k: 2, n: 4 }, or null. */
+function parseShard(v) {
+  const m = /^(\d+)\/(\d+)$/.exec(String(v || '').trim());
+  if (!m) return null;
+  const k = Number(m[1]), n = Number(m[2]);
+  return k >= 1 && n >= 1 && k <= n ? { k, n } : null;
+}
+
 function runAll(list) {
   const failed = [];
+  const times = [];
   let n = 0;
   for (const f of list) {
+    const t0 = Date.now();
     const r = spawnSync(process.execPath, [f], { cwd: root, stdio: 'inherit' });
+    times.push([f, (Date.now() - t0) / 1000]);
     n++;
     if (r.status !== 0) {
       const why = `exit ${r.status}${r.signal ? ', ' + r.signal : ''}`;
@@ -574,6 +612,12 @@ function runAll(list) {
 [run-tests] FAILED: ${f} (${why}) — ${n} of ${list.length} run, continuing`);
     }
   }
+  // The slowest files, always (so CI logs show where the time goes); every
+  // file with TEST_TIMES=1; TEST_TIMES_OUT=<path> writes them as JSON.
+  const slow = times.slice().sort((a, b) => b[1] - a[1]);
+  console.log('\n[run-tests] slowest: ' + slow.slice(0, 8).map(([f, s]) => `${f} ${s.toFixed(1)} s`).join(', '));
+  if (process.env.TEST_TIMES === '1') for (const [f, s] of times) console.log(`[run-tests] time ${s.toFixed(2)} s ${f}`);
+  if (process.env.TEST_TIMES_OUT) require('fs').writeFileSync(process.env.TEST_TIMES_OUT, JSON.stringify(Object.fromEntries(times), null, 1));
   if (failed.length) {
     console.error(`
 [run-tests] ${list.length - failed.length} of ${list.length} test files passed, ${failed.length} failed:`);
@@ -584,9 +628,17 @@ function runAll(list) {
 [run-tests] all ${list.length} test files passed`);
 }
 
-module.exports = { TESTS, runAll };
+module.exports = { TESTS, runAll, shardOf, parseShard, SLOW_SECONDS };
 
 if (require.main === module) {
   const only = process.argv.slice(2);
-  runAll(only.length ? TESTS.filter((f) => only.some((o) => f.includes(o))) : TESTS);
+  let list = only.length ? TESTS.filter((f) => only.some((o) => f.includes(o))) : TESTS;
+  const shard = parseShard(process.env.TEST_SHARD);
+  if (process.env.TEST_SHARD && !shard) { console.error(`[run-tests] TEST_SHARD="${process.env.TEST_SHARD}" is not k/n`); process.exit(2); }
+  if (shard) {
+    list = shardOf(list, shard.k, shard.n);
+    console.log(`[run-tests] shard ${shard.k}/${shard.n}: ${list.length} files`);
+    for (const f of list) console.log(`[run-tests] shard ${shard.k}/${shard.n} runs ${f}`);
+  }
+  runAll(list);
 }
