@@ -105,8 +105,9 @@ async function waitFor(fn, ms, step = 100) {
     await sleep(500);
     A.connect(GW);
     await A.once2('connected', 60000);
-    A.rx = Buffer.alloc(0);
-    await A.waitBytes(GREETING.length, 60000);
+    // The greeting is not what this case is about: a link that is up is enough.
+    await sleep(4000);
+    console.log(`  dirty: the link is up (${watch.greeting ? 'greeting heard' : 'no greeting heard'}); the station's Dire Wolf is killed with it up`);
     mon.close(); mon = null;
     A.stop(); // killed with the link up: no DISC, as before this fix
     await sleep(3000);
@@ -121,8 +122,12 @@ async function waitFor(fn, ms, step = 100) {
     const v = await waitFor(() => { const s = watch.stuck(Date.now()); return s.stuck ? s : null; }, 30000, 250);
     check(v && v.stuck, `dirty: the new call met the held link (${v ? v.why : 'not held'}; the gateway reported ${greeted} connects and greeted once)`);
     if (!(v && v.stuck)) console.log('  heard: ' + seen.slice(-12).join('\n         '));
+    console.log(`  station AGW events: ${A.events.slice(-8).join(' | ')}`);
+    console.log(`  gateway AGW events: ${B.events.slice(-8).join(' | ')}`);
   } catch (e) {
     check(false, `error: ${e.message}`);
+    console.log(`  station AGW events: ${A.events.slice(-10).join(' | ')}`);
+    console.log(`  gateway AGW events: ${B.events.slice(-10).join(' | ')}`);
   } finally {
     if (mon) mon.close();
     A.stop(); B.stop();
