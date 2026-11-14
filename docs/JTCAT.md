@@ -33,6 +33,11 @@ Rule: a setting that is operating policy is per profile; a setting about this ma
 - Hunt answers a plain CQ from a spotted park station; a straddling grid only when every candidate
   state is wanted.
 - Mode hop never changes band.
+- An OPERATOR mode change (pop-out, main window, ECHOCAT) stops TX, including Run, Hunt, the WSPR
+  beacon and any QSO in progress, and clears the decode history and the calling list on every surface
+  and in the server's replay buffer (#517; main.js jtcatOperatorModeChange, lib/jtcat-mode-change.js).
+  The Spot Target a spot click just armed survives. An automatic mode hop is not an operator change:
+  it calls the engine directly and Run keeps going. Never put the halt in the engine's setMode.
 - Wrong-band and out-of-privilege TX guards trust only a LIVE dial reading.
 - ULTRACAT (hidden, `settings.ultracat`): Run mode and unattended Hunt are the operator's
   responsibility; without it Hunt stops after 30 min idle (test/jtcat-hunt-off-test.js).

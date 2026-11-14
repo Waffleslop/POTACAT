@@ -3779,6 +3779,7 @@
         updateBandFreqs();
         if (ft8Running) ft8Send({ type: 'jtcat-set-mode', mode: ft8Mode });
         if (typeof applyDigitalPanes === 'function') applyDigitalPanes();
+        ft8ClearForModeChange('Switching to ' + ft8Mode + '...'); // #517, before the hunt below
       }
       ft8HuntCall = callsign.toUpperCase();
       // Clear decode log for fresh start
@@ -8468,20 +8469,34 @@
   // My Activity is an append-only view of decodes directed at us; over a long
   // session it becomes a wall. Clearing is a VIEW action only — the log, the
   // QSO state machine and Band Activity are untouched (LZ3AW 2026-08-29).
+  function ft8ClearMyActivity() {
+    const myLog = document.getElementById('ft8-my-activity');
+    const myHeader = document.getElementById('ft8-my-activity-header');
+    if (myLog) myLog.innerHTML = '';
+    // Re-hide the empty pane so the layout returns to its pre-activity
+    // state; the next directed decode unhides both again.
+    if (myLog) myLog.classList.add('hidden');
+    if (myHeader) myHeader.classList.add('hidden');
+  }
   (function initMyActivityClear() {
     const btn = document.getElementById('ft8-my-activity-clear');
     if (!btn) return;
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const myLog = document.getElementById('ft8-my-activity');
-      const myHeader = document.getElementById('ft8-my-activity-header');
-      if (myLog) myLog.innerHTML = '';
-      // Re-hide the empty pane so the layout returns to its pre-activity
-      // state; the next directed decode unhides both again.
-      if (myLog) myLog.classList.add('hidden');
-      if (myHeader) myHeader.classList.add('hidden');
+      ft8ClearMyActivity();
     });
   })();
+
+  // The operator changed mode (#517): the shack stops TX and drops its decode
+  // replay; this page clears its decode history and the stations calling us
+  // (My Activity). The hunt call is NOT cleared: a spot click sets it right
+  // after its own mode change.
+  function ft8ClearForModeChange(note) {
+    ft8DecodeLog = [];
+    ft8DecodeLogEl.innerHTML = '<div class="ft8-empty">' + esc(note) + '</div>';
+    ft8UserScrolled = false;
+    ft8ClearMyActivity();
+  }
 
   function ft8AddTxRow(message) {
     const log = ft8DecodeLogEl;
@@ -9196,6 +9211,7 @@
     ft8OwnMode = ft8Mode;
     updateBandFreqs();
     ft8Send({ type: 'jtcat-set-mode', mode: ft8Mode });
+    ft8ClearForModeChange('Switching to ' + ft8Mode + '...'); // #517: decodes and callers go with the old mode
     ft8StartCountdown(); // restart with new cycle duration
     applyDigitalPanes(); // WSPR/PSK panes replace the decode log for those modes
     // Retune to the active band's new frequency for the selected mode
