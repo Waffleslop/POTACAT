@@ -46698,7 +46698,7 @@ function cloudShackNotice(text, kind) {
   // kiwiClient and kiwiActive declared near top of whenReady for global access
 
   let kiwiConnectSeq = 0; // a newer kiwi-connect during the rtl_tcp probe wins
-  ipcMain.on('kiwi-connect', async (_e, { host: rawHost, port: rawPort, password, auto }) => {
+  ipcMain.on('kiwi-connect', async (_e, { host: rawHost, port: rawPort, password, auto, tls: tlsAsked }) => {
     // Inline station password: "password@host:port" in the SDR field.
     // KiwiSDR sysops hand out passwords for full-length sessions on
     // preview-limited receivers (work item kiwi-preview-bump-too-busy);
@@ -46715,7 +46715,11 @@ function cloudShackNotice(text, kind) {
       hostIn = hostIn.slice(atIdx + 1);
       sendCatLog('[WebSDR] Using inline station password for ' + hostIn);
     }
-    // Sanitize host — strip http://, https://, trailing slashes
+    // Sanitize host — strip http://, https://, trailing slashes. An https://
+    // entry is a KiwiSDR whose owner turned on HTTPS: its audio is wss://
+    // (the VFO window strips the scheme and says so in `tls`). Every other
+    // caller is covered by the client's own wss:// retry (lib/kiwisdr.js).
+    const tls = tlsAsked === true || /^https:\/\//i.test(hostIn.trim());
     const host = hostIn.replace(/^https?:\/\//, '').replace(/\/+$/, '');
     const port = rawPort || 8073;
     if (!host) { sendCatLog('[WebSDR] No host specified'); return; }
@@ -46869,7 +46873,7 @@ function cloudShackNotice(text, kind) {
       // KiwiSDR connect: pass myCallsign through so the client can both
       // identify (SET ident_user) and authenticate as a real ham (SET auth p=)
       // for extended listener time on tlimit-restricted kiwis.
-      kiwiClient.connect(host, port, stationPassword, settings.myCallsign || '');
+      kiwiClient.connect(host, port, stationPassword, settings.myCallsign || '', { tls });
     }
   });
 
