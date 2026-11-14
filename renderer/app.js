@@ -5086,15 +5086,11 @@ function renderNetList(nets) {
     info.className = 'net-item-info';
     const nameEl = document.createElement('div');
     nameEl.className = 'net-item-name';
-    nameEl.textContent = net.name;
+    nameEl.textContent = NetReminderRow.title(net);
+    nameEl.title = nameEl.textContent;
     const detailEl = document.createElement('div');
     detailEl.className = 'net-item-detail';
-    const schedStr = net.schedule?.type === 'weekly'
-      ? ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].filter((_,i) => (net.schedule.days || []).includes(i)).join(', ')
-      : net.schedule?.type === 'dates'
-        ? (net.schedule.dates || []).join(', ')
-        : 'Daily';
-    detailEl.textContent = `${FreqDots.khzMhz(net.frequency) || net.frequency} ${net.mode} \u2022 ${net.startTime} ${net.timeZone === 'utc' ? 'UTC' : 'Local'} \u2022 ${schedStr}`;
+    detailEl.textContent = NetReminderRow.detail(net);
     info.appendChild(nameEl);
     info.appendChild(detailEl);
 
