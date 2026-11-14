@@ -885,6 +885,7 @@
   // ended up blank. Defer the TX row from tx-status to the cycle-decode
   // handler so it lands AFTER the cycle separator instead of before.
   let ft8PendingTxMsg = '';
+  let ft8PendingTxHz = 0; // the offset that pending TX went out on (#503)
   let ft8QsoState = null;       // {mode, call, grid, phase, txMsg, report, sentReport} or null
   let ft8CycleSlot = '--';
   let ft8CountdownTimer = null;
@@ -2991,6 +2992,8 @@
           // the time the cycle decode arrives (~14s later), live append
           // would land in the *previous* cycle's section.
           ft8PendingTxMsg = ft8TxMsg;
+          // Its offset, kept with it: the slider may move before the row draws.
+          ft8PendingTxHz = msg.txFreq || 0;
         }
         // JTTY has no cycles: our transmission is a row in its list right now.
         if (ft8Mode === 'JTTY') jttyOnTxStatus(msg);
@@ -8371,9 +8374,10 @@
         // next quiet cycle shows "No decodes" again.
         const row = document.createElement('div');
         row.className = 'ft8-row ft8-tx';
-        row.innerHTML = DecodeRow.txRowInner(ft8PendingTxMsg, 'ft8');
+        row.innerHTML = DecodeRow.txRowInner(ft8PendingTxMsg, 'ft8', ft8PendingTxHz);
         log.appendChild(row);
         ft8PendingTxMsg = '';
+        ft8PendingTxHz = 0;
       } else {
         const row = document.createElement('div');
         row.className = 'ft8-row';
@@ -8514,11 +8518,11 @@
     ft8ClearMyActivity();
   }
 
-  function ft8AddTxRow(message) {
+  function ft8AddTxRow(message, txHz) {
     const log = ft8DecodeLogEl;
     const row = document.createElement('div');
     row.className = 'ft8-row ft8-tx';
-    row.innerHTML = DecodeRow.txRowInner(message, 'ft8');
+    row.innerHTML = DecodeRow.txRowInner(message, 'ft8', txHz);
     log.appendChild(row);
     log.scrollTop = log.scrollHeight;
   }
