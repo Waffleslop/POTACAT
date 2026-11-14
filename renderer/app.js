@@ -4908,7 +4908,8 @@ document.getElementById('qrz-download-btn').addEventListener('click', async () =
   try {
     const result = await window.api.qrzDownloadLogbook();
     if (result.ok) {
-      statusEl.textContent = `Imported ${result.imported} new QSOs (${result.total} total in QRZ)`;
+      statusEl.textContent = `Imported ${result.imported} new QSOs (${result.total} total in QRZ)` +
+        (result.updated > 0 ? `, ${result.updated} updated with confirmations` : '');
       statusEl.style.color = '#4ecca3';
     } else {
       statusEl.textContent = result.error || 'Download failed';
@@ -10091,6 +10092,7 @@ async function runAdifImport(resultEl) {
       resultEl.textContent = '';
     } else if (result.success) {
       const parts = [`${result.imported.toLocaleString()} QSOs imported`];
+      if (result.updated > 0) parts.push(`${result.updated.toLocaleString()} updated with confirmations`);
       if (result.skipped > 0) parts.push(`${result.skipped.toLocaleString()} already in the log`);
       if (result.parksAdded > 0) {
         parts.push(`${result.parksAdded.toLocaleString()} new park ref${result.parksAdded === 1 ? '' : 's'}`);

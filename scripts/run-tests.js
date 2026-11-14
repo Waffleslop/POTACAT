@@ -452,6 +452,7 @@ const TESTS = [
   'test/lz3aw-round14-test.js',
   'test/lz3aw-batch-b-test.js',
   'test/lotw-report-test.js',
+  'test/import-confirmations-test.js', // Import Log merges QSL / LoTW confirmations into QSOs already logged (#461)
   'test/rumlogng-logbook-test.js',
   'test/wsjtx-status-bridge-test.js',
   'test/jtcat-tx-slot-test.js',
