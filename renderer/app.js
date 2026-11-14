@@ -6006,15 +6006,18 @@ lotwUploadBtn.addEventListener('click', async () => {
   }
   lotwUploadBtn.disabled = false;
 });
-lotwDownloadBtn.addEventListener('click', async () => {
+const lotwDownloadAllBtn = document.getElementById('lotw-download-all-btn');
+async function runLotwDownload(all) {
   if (!window.api || !window.api.lotwDownloadConfirmations) return;
   lotwDownloadBtn.disabled = true;
+  if (lotwDownloadAllBtn) lotwDownloadAllBtn.disabled = true;
   lotwDownloadResult.style.color = '';
   lotwDownloadResult.textContent = 'Downloading from LoTW...';
   try {
     const r = await window.api.lotwDownloadConfirmations({
       login: setLotwLogin.value.trim(),
       password: setLotwWebPassword.value,
+      all: !!all,
     });
     lotwDownloadResult.textContent = r.message || (r.ok ? 'Done.' : 'Download failed.');
     lotwDownloadResult.style.color = r.ok ? '#4ecca3' : '#e94560';
@@ -6023,7 +6026,10 @@ lotwDownloadBtn.addEventListener('click', async () => {
     lotwDownloadResult.style.color = '#e94560';
   }
   lotwDownloadBtn.disabled = false;
-});
+  if (lotwDownloadAllBtn) lotwDownloadAllBtn.disabled = false;
+}
+lotwDownloadBtn.addEventListener('click', () => runLotwDownload(false));
+if (lotwDownloadAllBtn) lotwDownloadAllBtn.addEventListener('click', () => runLotwDownload(true));
 
 // Club Log — checkbox toggles config; bulk button sends the whole log.
 setClublogEnable.addEventListener('change', () => {
