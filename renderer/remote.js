@@ -504,6 +504,13 @@
   // VFO Lock — mirrors desktop _vfoLocked, synced via WS.
   let vfoLocked = false;
   var qrzNameCache = {}; // callsign -> first name / nickname from QRZ
+  // Base callsign -> { name, state } from every qrz-result. CW macros take
+  // {op_firstname} and {state} from here for the call {call} sends, never from
+  // the tuned spot: with two spots on one frequency the tuned spot and the
+  // call being worked can be different stations (GitHub #524).
+  var qrzOpByCall = {};
+  var qrzOpPending = {};
+  var qrzOpWarmTimer = null;
   let tunedState = '';
   let currentNb = false;
   let currentAtu = false;
@@ -2210,6 +2217,10 @@
 
       case 'typed-call':
         sharedTypedCall = String(msg.call || '').trim().toUpperCase();
+        // Fetch the name/state for the call being worked once typing settles,
+        // so the first macro already has them (#524).
+        if (qrzOpWarmTimer) clearTimeout(qrzOpWarmTimer);
+        qrzOpWarmTimer = setTimeout(function() { qrzOpWarmTimer = null; requestQrzOp(sharedTypedCall); }, 800);
         break;
 
       case 'swr-ratio':
@@ -2359,6 +2370,11 @@
       }
 
       case 'qrz-result':
+        if (msg.callsign) {
+          var qrzKey = String(msg.callsign).toUpperCase();
+          qrzOpByCall[qrzKey] = { name: msg.nickname || msg.fname || '', state: msg.state || '' };
+          delete qrzOpPending[qrzKey];
+        }
         if (msg.callsign && msg.callsign.toUpperCase() === JtcatParser.baseCall(tunedCallsign)) {
           // Prefer nickname over fname (matches desktop QRZ display logic)
           tunedOpName = msg.nickname || msg.fname || '';
@@ -10858,14 +10874,26 @@
     return tunedCallsign || '';
   }
 
+  /** Ask main for a callsign's QRZ name/state (once per call) for CW macros. */
+  function requestQrzOp(call) {
+    var base = call ? String(JtcatParser.baseCall(String(call).toUpperCase()) || '').toUpperCase() : '';
+    if (!base || qrzOpByCall[base] || (qrzOpPending[base] && Date.now() - qrzOpPending[base] < 30000)) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    qrzOpPending[base] = Date.now();
+    ws.send(JSON.stringify({ type: 'qrz-lookup', callsign: base }));
+  }
+
   function sendCwText(text) {
     if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
-    // Expand macros: {op_firstname} -> operator name or "OM", {call} -> the
-    // callsign being worked (typed in the log form, else the tuned spot).
-    var expanded = text
-      .replace(/\{op_firstname\}/gi, tunedOpName || '')
-      .replace(/\{call\}/gi, macroCallsign())
-      .replace(/\{state\}/gi, tunedState || '');
+    // Expand macros: {call} -> the callsign being worked (typed in any
+    // callsign field, else the tuned spot); see macroCallsign().
+    // {op_firstname} and {state} belong to that same callsign: they are looked
+    // up for it in qrzOpByCall, never taken from the tuned spot (#524). No
+    // name known yet -> 'OM', as main uses for device text; the lookup is
+    // asked for so the next macro has it. CW never waits on the network.
+    var call = macroCallsign();
+    var expanded = CwRemoteExpand.expandForCall(text, call, qrzOpByCall, JtcatParser.baseCall).text;
+    if (/\{(op_firstname|state)\}/i.test(text)) requestQrzOp(call);
     ws.send(JSON.stringify({ type: 'cw-text', text: expanded }));
     playCwTextSidetone(expanded);
   }
