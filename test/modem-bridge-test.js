@@ -20,6 +20,13 @@ if (!electronPath || typeof electronPath !== 'string' || !fs.existsSync(electron
   console.log('modem bridge: SKIP (electron binary not available)');
   process.exit(required ? 1 : 0);
 }
+// Linux with no display: say SKIP at once instead of waiting out the spawn
+// timeout (~4 min in CI). The layout-tests job runs this under xvfb with
+// LAYOUT_REQUIRED=1, where it is real and a failure is a failure.
+if (process.platform === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY && !required) {
+  console.log('modem bridge: SKIP (no display; the layout-tests job runs this under xvfb)');
+  process.exit(0);
+}
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'potacat-modem-bridge-'));
 const out = path.join(dir, 'result.json');
 const res = spawnSync(electronPath, [path.join(__dirname, 'modem-bridge', 'harness.js'), '--no-sandbox', '--out=' + out], {
