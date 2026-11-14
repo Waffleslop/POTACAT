@@ -371,6 +371,7 @@ const { freqToBand, BANDS } = require('./lib/bands');
 const { splitHostPort } = require('./lib/host-port');
 const activationProgram = require('./lib/activation-program');
 const ActivationClock = require('./lib/activation-clock'); // #147: a forgotten activation ends at the UTC day change or after 6 h idle
+const ActivationAnnounce = require('./lib/activation-announce'); // #508: which saved contacts join the live activation list
 const QsoExpand = require('./lib/qso-expand'); // one contact -> its ADIF records (logContact)
 const WatchlistEdit = require('./lib/watchlist-edit'); // watchlist add/remove by operation (ECHOCAT sync)
 const wsprnet = require('./lib/wspr/wsprnet');
@@ -15997,19 +15998,20 @@ async function qrzStationInfo(call) {
     qth: q.addr2 || '', cqz: q.cqzone || '', ituz: q.ituzone || '',
   };
 }
-// An activation contact logged outside the Act screen (JTCAT, the WSJT-X
-// bridge, ECHOCAT) still belongs in the live activation log and the mobile
-// device's session list. No-op when no activation is running.
-function announceActivationContact(entry, records, freqKhz) {
-  const mine = (records || []).filter((r) => r && r.mySig);
-  if (!mine.length) return;
+// An activation contact logged outside the Act screen (the Log window,
+// JTCAT, the WSJT-X bridge, ECHOCAT) still belongs in the live activation log
+// and the mobile device's session list. Called once, by logContact, for
+// every save (#508); lib/activation-announce.js decides which records are
+// this activation's and where they go. No-op when no activation is running.
+function announceActivationContact(records, targets) {
+  const mine = ActivationAnnounce.activationRecords(records, liveActivationMyRefs());
+  if (!mine.length || !targets || (!targets.window && !targets.session)) return;
   const first = mine[0];
+  const freqKhz = Number(first.frequency) || 0;
   const timeOn = String(first.timeOn || '');
   const timeUtc = timeOn.length >= 4 ? `${timeOn.slice(0, 2)}:${timeOn.slice(2, 4)}` : '';
-  const calls = [...new Set(mine.map((r) => r.callsign))];
-  for (const call of calls) {
-    const list = mine.filter((r) => r.callsign === call);
-    if (win && !win.isDestroyed()) {
+  for (const { callsign: call, records: list } of ActivationAnnounce.groupByCall(mine)) {
+    if (targets.window && win && !win.isDestroyed()) {
       win.webContents.send('wsjtx-activator-qso', {
         callsign: call,
         timeUtc,
@@ -16025,9 +16027,9 @@ function announceActivationContact(entry, records, freqKhz) {
         qsoDataList: list,
       });
     }
-    if (remoteServer && remoteServer.running) {
+    if (targets.session && remoteServer && remoteServer.running) {
       const dupe = remoteServer.getSessionContacts().some((c) =>
-        c.callsign && c.callsign.toUpperCase() === call && c.band === (first.band || ''));
+        c.callsign && c.callsign.toUpperCase() === String(call).toUpperCase() && c.band === (first.band || ''));
       remoteServer.addSessionContact({
         callsign: call, timeUtc: timeOn, freqKhz: String(freqKhz || ''), mode: first.mode,
         band: first.band || '', rstSent: first.rstSent, rstRcvd: first.rstRcvd, dupe,
@@ -16165,6 +16167,13 @@ async function logContact(entry, opts) {
     }
   }
   if (written.length && !ownRef && myRefs.length) activationNoteContact(actAt);
+  // The live activation list hears of it here, once, whichever surface saved
+  // it; the main window's own forms list it themselves (opts.listed). #508
+  if (written.length) {
+    try { announceActivationContact(written, ActivationAnnounce.announceTargets(opts)); } catch (err) {
+      console.error('[Activation] live list not told:', err.message);
+    }
+  }
   for (const [c, lookup] of late) {
     lookup.then((info) => {
       if (!info) return;
@@ -16876,7 +16885,6 @@ function connectWsjtx() {
       }
       qsoData.gridHeard = !!qsoData.gridsquare; // their decoded grid, not a home QTH
       const res = await logContact(qsoData, { origin: 'wsjtx-bridge' });
-      if (res.success) announceActivationContact(qsoData, res.records, Math.round(freqMHz * 1000));
     } catch (err) {
       console.error('Failed to log WSJT-X QSO:', err.message);
     }
@@ -19415,7 +19423,6 @@ async function jtcatWriteLog(qsoData, relogKeyStr) {
     // logbook, QRZ and Club Log (logging parity audit 2026-10-19).
     const res = await logContact(qsoData, { origin: 'jtcat-engine' });
     if (!res.success) throw new Error(res.error || 'not logged');
-    announceActivationContact(qsoData, res.records, Number(qsoData.frequency) || 0);
 
     console.log('[JTCAT] Auto-logged QSO:', call, 'OK');
     RelogGuard.noteLogged(_jtcatRecentLogs, relogKeyStr, Date.now());
@@ -51329,10 +51336,14 @@ function cloudShackNotice(text, kind) {
   ipcMain.handle('cluster-node-enable', (_e, { id, enabled } = {}) => applyClusterNodeChoice(id, enabled, 'desktop'));
   ipcMain.handle('cluster-node-choices', () => ClusterNodeChoice.nodesForMenu(settings.clusterNodes));
 
-  ipcMain.handle('log-contact', async (_e, entry) => {
+  ipcMain.handle('log-contact', async (e, entry) => {
     markUserActive();
     try {
-      return await logContact(entry, { origin: 'local-manual' });
+      // The main window's forms (Act Log button, banner, spot dialog) put the
+      // contact in the live activation list themselves; the Log window and
+      // the QSO log window do not, so logContact tells it for them (#508).
+      const listed = !!(win && !win.isDestroyed() && e && e.sender === win.webContents);
+      return await logContact(entry, { origin: 'local-manual', listed });
     } catch (err) {
       return { success: false, error: err.message, records: [] };
     }
