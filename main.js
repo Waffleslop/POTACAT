@@ -32522,7 +32522,10 @@ async function buildDxccData() {
   const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
   if (!fs.existsSync(logPath)) return null;
   try {
-    const qsos = isSqliteFile(logPath)
+    // basis (#382): a Log4OM SQLite log is read confirmed-only, an ADIF log
+    // is every QSO, so the tracker's labels say which one they count.
+    const sqlite = isSqliteFile(logPath);
+    const qsos = sqlite
       ? await parseSqliteConfirmed(logPath)
       : parseAdifFile(logPath, { confirmedOnly: false });
 
@@ -32573,7 +32576,7 @@ async function buildDxccData() {
     // Sort by entity name
     allEnts.sort((a, b) => a.name.localeCompare(b.name));
 
-    return { entities: allEnts };
+    return { entities: allEnts, basis: sqlite ? 'confirmed' : 'worked' };
   } catch (err) {
     console.error('Failed to parse ADIF:', err.message);
     return null;
