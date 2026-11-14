@@ -248,6 +248,7 @@ const TESTS = [
   'test/winlink-vara-anywhere-test.js', // #287: VARA HF and VARA FM on Linux, macOS and Windows, at a host and port; a fake VARA TNC (real Pat when its binary is present)
   'test/winlink-connect-test.js', // #128: /api/connect over http.request with no headers timeout; VARA and ARDOP send the same request
   'test/direwolf-agw-monitor-test.js', // #128: what Dire Wolf heard, over its AGW port's monitor mode
+  'test/packet-link-close-test.js', // #300: a packet link is closed (DISC answered) before Dire Wolf stops; a call on a link the gateway still holds is ended, not retried
   'test/packet-rig-mode-test.js', // #128 N5XHI FT-857D: Packet mode on the radio per rig; Automatic is the old behaviour for every family
   'test/packet-timing-test.js', // #257 NA4DQ IC-7100: Dire Wolf TX delay/tail settings, the packet PTT hold, no "decoded nothing" after Pat connected
   'test/modem-play-over-test.js', // #300: gaps and backlog drops inside a transmitted frame are counted and logged
