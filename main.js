@@ -32624,17 +32624,39 @@ function mutateQsoLog(mutate) {
  * uses (lib/qso-match.js). Re-importing an export from ACLog etc. used to add
  * every earlier QSO again, and each copy then synced as a new cloud QSO.
  */
-function importQsoRecords(records) {
+function importQsoRecords(records, { mergeConfirmations = true } = {}) {
   const logPath = qsoLogPath();
-  const existing = QsoLog.readLog(logPath);
+  let existing = QsoLog.readLog(logPath);
   // A logger that names the park only as POTA_REF (QLog) gets SIG / SIG_INFO
   // filled in, so the Logbook and every export see it (KC9FOZ, 2026-10-22).
   const { fillSigFromProgramRefs } = require('./lib/adif-normalize');
   records = records.map(fillSigFromProgramRefs);
-  const { fresh, skipped } = planImport(existing, records);
+  if (!mergeConfirmations) {
+    const { fresh, skipped } = planImport(existing, records);
+    QsoLog.appendRecords(logPath, fresh, { existing, sink: qsoLogSink });
+    const unique = new Set(fresh.map((r) => String(r.CALL).toUpperCase())).size;
+    return { imported: fresh.length, skipped, updated: 0, unique };
+  }
+  // A record the log already holds brings its QSL / LoTW / eQSL
+  // confirmations into that QSO instead of being skipped whole (#461).
+  // LoTW's own report file names its confirmation QSL_RCVD; it is moved to
+  // the LoTW fields first. The merge is a mutateLog, so it journals.
+  const { fromLotwReport, planImportWithConfirmations, applyUpdates } = require('./lib/import-confirmations');
+  records = records.map(fromLotwReport);
+  let plan = planImportWithConfirmations(existing, records);
+  let updated = 0;
+  if (plan.updates.length) {
+    const { qsos } = QsoLog.mutateLog(logPath, (log) => {
+      plan = planImportWithConfirmations(log, records);
+      updated = applyUpdates(plan.updates);
+      if (!updated) return false;
+    }, { sink: qsoLogSink });
+    existing = qsos;
+  }
+  const { fresh, skipped } = plan;
   QsoLog.appendRecords(logPath, fresh, { existing, sink: qsoLogSink });
   const unique = new Set(fresh.map((r) => String(r.CALL).toUpperCase())).size;
-  return { imported: fresh.length, skipped, unique };
+  return { imported: fresh.length, skipped, updated, unique };
 }
 
 // Once per log path per session: rewrite records the pre-2026-09-17 cloud
@@ -35997,7 +36019,8 @@ async function n3fjpPull(reason) {
     for (const r of records) r.APP_POTACAT_IMPORTED_FROM = 'N3FJP';
     // Contacts deleted here after an earlier pull are not brought back.
     const { records: wanted, left: keptDeleted } = N3fjpDeleted.withoutDeleted(records, settings.n3fjpDeletedKeys);
-    const { imported, skipped } = importQsoRecords(wanted);
+    // N3FJP's confirmations are merged by n3fjpUpdateConfirmations (its own rules).
+    const { imported, skipped } = importQsoRecords(wanted, { mergeConfirmations: false });
     const confirmed = skipped ? n3fjpUpdateConfirmations(wanted) : 0;
     if (keptDeleted && (full || daily)) sendCatLog(`[N3FJP] ${keptDeleted} contact(s) you deleted here were not brought back`);
     // An empty reply is not a re-read: the next pull tries again.
@@ -50518,7 +50541,7 @@ function cloudShackNotice(text, kind) {
 
     // All files are read before anything is written: one duplicate check
     // across the whole set, one append, one journal write.
-    const { imported: totalImported, skipped: totalSkipped, unique: uniqueCallCount } = importQsoRecords(incoming);
+    const { imported: totalImported, skipped: totalSkipped, updated: totalUpdated, unique: uniqueCallCount } = importQsoRecords(incoming);
 
     // Reload worked callsigns from updated log and push to renderer
     loadWorkedQsos();
@@ -50548,6 +50571,9 @@ function cloudShackNotice(text, kind) {
     const detailLines = [
       `${totalImported.toLocaleString()} QSOs (${uniqueCallCount.toLocaleString()} unique callsigns) added.`,
     ];
+    if (totalUpdated > 0) {
+      detailLines.push(`${totalUpdated.toLocaleString()} ${totalUpdated === 1 ? 'QSO' : 'QSOs'} already in your log updated with QSL or LoTW confirmations from this file.`);
+    }
     if (totalSkipped > 0) {
       detailLines.push(`${totalSkipped.toLocaleString()} skipped: already in your log (same call, mode, frequency and time).`);
     }
@@ -50570,6 +50596,7 @@ function cloudShackNotice(text, kind) {
       success: true,
       imported: totalImported,
       skipped: totalSkipped,
+      updated: totalUpdated,
       unique: uniqueCallCount,
       parksTotal: parksAfter,
       parksAdded,
@@ -52311,11 +52338,11 @@ function cloudShackNotice(text, kind) {
       const records = parseAdifStream(adifText);
       sendCatLog(`[QRZ] Parsed ${records.length} records from ${adifText.length} bytes of ADIF`);
 
-      const { imported, skipped } = importQsoRecords(records);
+      const { imported, skipped, updated } = importQsoRecords(records);
 
-      sendCatLog(`[QRZ] Downloaded ${records.length} QSOs, imported ${imported} new, skipped ${skipped} duplicates`);
-      if (imported > 0) loadWorkedQsos();
-      return { ok: true, imported, total: records.length, skipped };
+      sendCatLog(`[QRZ] Downloaded ${records.length} QSOs, imported ${imported} new, updated confirmations on ${updated}, skipped ${skipped} duplicates`);
+      if (imported > 0 || updated > 0) loadWorkedQsos();
+      return { ok: true, imported, total: records.length, skipped, updated };
     } catch (err) {
       sendCatLog(`[QRZ] Logbook download failed: ${err.message}`);
       return { ok: false, error: err.message };
