@@ -18,6 +18,7 @@ const TESTS = [
   'test/icom-baud-list-test.js', // #238: every baud select offers 4800-115200; Icom path accepts each
   'test/cat-port-presence-test.js',
   'test/cat-connect-gate-test.js',
+  'test/wsjtx-mode-notice-test.js',
   'test/guest-pass-listen-test.js',
   'test/guest-pass-state-541-test.js', // #541: a valid pass is never shown as revoked; Cloud answers, auth-fail codes, retry
   'test/rigctld-spawn-test.js',

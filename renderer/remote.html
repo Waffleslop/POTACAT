@@ -26,6 +26,7 @@
   <!-- jtty-macros-js -->
   <!-- cw-remote-expand-js -->
   <!-- pass-wording-js -->
+  <!-- wsjtx-mode-notice-js -->
   <!-- spot-row-js -->
   <!-- decode-row-js -->
   <!-- worked-roster-js -->
@@ -84,6 +85,8 @@
       </div>
       <div id="member-badge" class="member-badge hidden"></div>
       <div class="status-right">
+        <!-- WSJT-X Mode at the shack (#547): status.wsjtxMode; tap shows the note. -->
+        <button type="button" id="wsjtx-mode-chip" class="wsjtx-mode-chip hidden" title="The shack is in WSJT-X Mode">WSJT-X Mode</button>
         <span id="cat-dot" class="cat-dot disconnected" title="Radio disconnected"></span>
         <span id="audio-dot" class="audio-dot hidden" title="Audio"></span>
         <span id="latency">--ms</span>
@@ -99,6 +102,9 @@
     <!-- Guest Pass banner (ECHOCAT Web over POTACAT Cloud): filled from
          auth-ok.passSession, hidden for owners. -->
     <div id="pass-banner" class="hidden"></div>
+    <!-- WSJT-X Mode note (#547): explain only, no remote turn-off. Words from
+         lib/wsjtx-mode-notice.js. -->
+    <div id="wsjtx-mode-note" class="hidden" role="status"></div>
     <!-- POTACAT Cloud billing: grace / payment problem / expired, and the
          last days of a trial. The server's sentence, one button, dismiss =
          this page load. lib/cloud-billing-ui.js decides. -->

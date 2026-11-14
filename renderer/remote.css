@@ -4629,6 +4629,40 @@ body.popout-mode .popout-only { display: flex; }
 .fav-star svg { width: 18px; height: 18px; }
 .lmk-group.fav-group { color: var(--fav); }
 
+/* WSJT-X Mode at the shack (#547): the caution amber of the theme. */
+:root {
+  --wsjtx-warn: var(--sota);
+  --wsjtx-warn-subtle: color-mix(in srgb, var(--sota) 16%, var(--bg-card));
+}
+:root[data-ds] {
+  --wsjtx-warn: var(--ds-warn);
+  --wsjtx-warn-subtle: var(--ds-warn-subtle);
+}
+.wsjtx-mode-chip {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  margin-right: 6px;
+  border-radius: 4px;
+  border: 1px solid var(--wsjtx-warn);
+  background: var(--wsjtx-warn-subtle);
+  color: var(--wsjtx-warn);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.wsjtx-mode-chip.hidden { display: none; }
+#wsjtx-mode-note {
+  background: var(--wsjtx-warn-subtle);
+  color: var(--text);
+  border-bottom: 1px solid var(--wsjtx-warn);
+  border-left: 3px solid var(--wsjtx-warn);
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 6px 10px;
+}
+#wsjtx-mode-note.hidden { display: none; }
+
 /* ── Mail tab (Winlink) ─────────────────────────────────────────────────
    The W0 layout (2026-11-12): one column on a phone; two panes, the list
    beside the open screen, once the Mail view is 700 px wide. Roles, not

@@ -353,6 +353,8 @@ let activeRigCatLabel = '';
 let remoteShack = { remote: false };
 function catPillLabel() {
   if (remoteShack.remote) return 'RMT';
+  // WSJT-X Mode: POTACAT has no radio link, and the pill says so (#547).
+  if (enableWsjtx && typeof WsjtxModeNotice !== 'undefined') return WsjtxModeNotice.catPill().label;
   const s = String(activeRigCatLabel || '').trim().toUpperCase().slice(0, 4);
   return s || 'CAT';
 }
@@ -1666,21 +1668,38 @@ const catPopoverRigs = document.getElementById('cat-popover-rigs');
 const catPopoverWsjtx = document.getElementById('cat-popover-wsjtx');
 const catPopoverWsjtxPort = document.getElementById('cat-popover-wsjtx-port');
 const catPopoverWsjtxPortInput = document.getElementById('cat-popover-wsjtx-port-input');
-const catPopoverWsjtxWarning = document.getElementById('cat-popover-wsjtx-warning');
-const catPopoverWsjtxWarnPort = document.getElementById('cat-popover-wsjtx-warn-port');
-// True when WSJT-X is currently heartbeating us. N3VD 2026-05-24 hit a dead
-// CAT for ~an hour because WSJT-X Mode was checked but WSJT-X wasn't running —
-// connectCat() bails on enableWsjtx so direct CAT never starts, and the only
-// way out is unchecking the box. We surface that exact state in the popover
-// instead of letting users guess.
+const catPopoverWsjtxPanel = document.getElementById('cat-popover-wsjtx-panel');
+// WSJT-X Mode, impossible to miss (#547). N3VD 2026-05-24 hit a dead CAT for
+// ~an hour because WSJT-X Mode was checked but WSJT-X wasn't running, and the
+// pill was GREEN. Now: an amber "WSJT-X Mode" chip first in the status bar,
+// the CAT pill reads "CAT: off", and the CAT menu opens with a panel that says
+// whether WSJT-X is heard and turns the mode off in one click. Main decides
+// "heard" (a Heartbeat/Status in the last 60 s); lib/wsjtx-mode-notice.js
+// holds the rule and every word.
 let wsjtxConnected = false;
+let wsjtxHeard = false;       // from main, with every wsjtx-status
+let wsjtxEverHeard = false;   // this run: the start notice never shows after it
+let wsjtxNoticeKept = false;  // "Keep it on" on the start notice, until next start
+let wsjtxWatchPort = 2237;    // the UDP port the panel names
+function wsjtxModeWords() {
+  return (typeof WsjtxModeNotice !== 'undefined') ? WsjtxModeNotice : null;
+}
 function updateCatPopoverWsjtxWarning() {
-  if (!catPopoverWsjtxWarning) return;
-  const show = enableWsjtx && !wsjtxConnected;
-  catPopoverWsjtxWarning.classList.toggle('hidden', !show);
-  if (show && catPopoverWsjtxWarnPort) {
-    catPopoverWsjtxWarnPort.textContent = catPopoverWsjtxPortInput.value || '2237';
-  }
+  const W = wsjtxModeWords();
+  if (!catPopoverWsjtxPanel || !W) return;
+  catPopoverWsjtxPanel.classList.toggle('hidden', !enableWsjtx);
+  if (!enableWsjtx) return;
+  const p = W.panel({ heard: wsjtxHeard, port: catPopoverWsjtxPortInput.value || wsjtxWatchPort });
+  document.getElementById('wsjtx-panel-title').textContent = p.title;
+  document.getElementById('wsjtx-panel-line').textContent = p.line;
+  const stateEl = document.getElementById('wsjtx-panel-state');
+  stateEl.textContent = p.state;
+  stateEl.classList.toggle('heard', wsjtxHeard);
+  const hintEl = document.getElementById('wsjtx-panel-hint');
+  hintEl.textContent = p.hint;
+  hintEl.classList.toggle('hidden', !p.hint);
+  document.getElementById('wsjtx-panel-off').classList.toggle('primary', p.primary === 'off');
+  document.getElementById('wsjtx-panel-keep').classList.toggle('primary', p.primary === 'keep');
 }
 let catPopoverOpen = false;
 
@@ -1918,6 +1937,7 @@ async function openCatPopover(anchor) {
   // WSJT-X toggle
   catPopoverWsjtx.checked = settings.enableWsjtx === true;
   catPopoverWsjtxPortInput.value = settings.wsjtxPort || 2237;
+  wsjtxWatchPort = settings.wsjtxPort || 2237;
   catPopoverWsjtxPort.classList.toggle('hidden', !settings.enableWsjtx);
   updateCatPopoverWsjtxWarning();
 
@@ -1966,18 +1986,70 @@ catPopoverWsjtx.addEventListener('change', async () => {
     return;
   }
   catPopoverWsjtxPort.classList.toggle('hidden', !enabled);
-  const port = parseInt(catPopoverWsjtxPortInput.value, 10) || 2237;
+  await setWsjtxMode(enabled);
+});
+
+// Turn WSJT-X Mode on or off: exactly what the CAT menu checkbox always did
+// (save, update the chip, close the menu). Turning it OFF needs no confirm;
+// the panel, the start notice and Station Setup all call this (#547).
+async function setWsjtxMode(enabled) {
+  const port = parseInt(catPopoverWsjtxPortInput.value, 10) || wsjtxWatchPort || 2237;
   await window.api.saveSettings({ enableWsjtx: enabled, wsjtxPort: port });
   enableWsjtx = enabled;
+  if (typeof setEnableWsjtx !== 'undefined' && setEnableWsjtx) {
+    setEnableWsjtx.checked = enabled;
+    if (typeof wsjtxConfig !== 'undefined' && wsjtxConfig) wsjtxConfig.classList.toggle('hidden', !enabled);
+  }
   updateWsjtxStatusVisibility();
   closeCatPopover();
+}
+function turnOffWsjtxMode() { return setWsjtxMode(false); }
+
+document.getElementById('wsjtx-panel-off').addEventListener('click', (e) => { e.stopPropagation(); turnOffWsjtxMode(); });
+document.getElementById('wsjtx-panel-keep').addEventListener('click', (e) => { e.stopPropagation(); closeCatPopover(); });
+
+// The amber chip opens the same menu, anchored to itself.
+function openCatPopoverFromWsjtxChip(e) {
+  if (e) e.stopPropagation();
+  if (catPopoverOpen) { closeCatPopover(); return; }
+  if (typeof closeRigPopover === 'function') closeRigPopover();
+  _catPopoverAnchor = wsjtxStatusEl;
+  openCatPopover();
+}
+wsjtxStatusEl.addEventListener('click', openCatPopoverFromWsjtxChip);
+wsjtxStatusEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openCatPopoverFromWsjtxChip(e); }
 });
+
+// Start notice: 30 s after start, with the mode on and WSJT-X never heard.
+const wsjtxModeCard = document.getElementById('wsjtx-mode-card');
+function updateWsjtxModeCard() {
+  const W = wsjtxModeWords();
+  if (!wsjtxModeCard || !W) return;
+  const n = W.startNotice({ mode: enableWsjtx, heard: wsjtxHeard, everHeard: wsjtxEverHeard, kept: wsjtxNoticeKept });
+  if (!n || !wsjtxModeCard.dataset.due) { wsjtxModeCard.classList.add('hidden'); return; }
+  document.getElementById('wsjtx-card-title').textContent = n.title;
+  document.getElementById('wsjtx-card-text').textContent = n.line;
+  wsjtxModeCard.classList.remove('hidden');
+}
+document.getElementById('wsjtx-card-off').addEventListener('click', () => {
+  wsjtxModeCard.classList.add('hidden');
+  turnOffWsjtxMode();
+});
+document.getElementById('wsjtx-card-keep').addEventListener('click', () => {
+  wsjtxNoticeKept = true;
+  wsjtxModeCard.classList.add('hidden');
+});
+setTimeout(() => {
+  if (wsjtxModeCard) wsjtxModeCard.dataset.due = '1';
+  updateWsjtxModeCard();
+}, (typeof WsjtxModeNotice !== 'undefined' && WsjtxModeNotice.START_NOTICE_DELAY_MS) || 30000);
 
 catPopoverWsjtxPortInput.addEventListener('click', (e) => e.stopPropagation());
 
 // Close popover on outside click
 document.addEventListener('click', (e) => {
-  if (catPopoverOpen && !catPopover.contains(e.target) && e.target !== catStatusEl && e.target !== document.getElementById('activator-cat-status')) {
+  if (catPopoverOpen && !catPopover.contains(e.target) && e.target !== catStatusEl && e.target !== wsjtxStatusEl && e.target !== document.getElementById('activator-cat-status')) {
     closeCatPopover();
   }
 });
@@ -2220,6 +2292,7 @@ async function loadPrefs() {
   activeRigCatLabel = activeRig ? (activeRig.catLabel || '') : '';
   refreshCatPillLabel();
   enableWsjtx = settings.enableWsjtx === true;
+  wsjtxWatchPort = settings.wsjtxPort || 2237;
   updateWsjtxStatusVisibility();
   // CW Keyer: init MIDI + connect saved device on load (requires pi access)
   if (settings.enableCwKeyer) {
@@ -4014,7 +4087,26 @@ function updateDxccButton() {
 }
 
 function updateWsjtxStatusVisibility() {
+  // The chip reads "WSJT-X Mode" whenever the mode is on (#547); whether
+  // WSJT-X is heard is in the panel it opens, not the chip's colour.
+  const W = (typeof WsjtxModeNotice !== 'undefined') ? WsjtxModeNotice : null;
   wsjtxStatusEl.classList.toggle('hidden', !enableWsjtx);
+  if (W) {
+    const c = W.chip();
+    wsjtxStatusEl.textContent = c.label;
+    wsjtxStatusEl.title = c.title;
+  }
+  // The CAT pill follows: "CAT: off" in neutral grey while the mode is on.
+  if (enableWsjtx && !remoteShack.remote && W) {
+    catStatusEl.textContent = catPillLabel();
+    catStatusEl.className = 'status wsjtx-off';
+    catStatusEl.title = W.catPill().title;
+    syncActivatorCatPill('status wsjtx-off', W.catPill().title);
+  } else {
+    refreshCatPillLabel();
+  }
+  if (typeof updateCatPopoverWsjtxWarning === 'function') updateCatPopoverWsjtxWarning();
+  if (typeof updateWsjtxModeCard === 'function') updateWsjtxModeCard();
 }
 
 function updateSettingsConnBar() {
@@ -19071,12 +19163,15 @@ window.api.onCatStatus(({ connected, error, wsjtxMode, noCat }) => {
     syncActivatorCatPill('status', noCatTitle);
     return;
   }
-  if (wsjtxMode) {
+  if (wsjtxMode || (enableWsjtx && !connected)) {
+    // WSJT-X Mode: POTACAT has no radio link. Neutral "CAT: off", never green
+    // (it read green with WSJT-X not even running; #547).
     if (catDisconnectTimer) { clearTimeout(catDisconnectTimer); catDisconnectTimer = null; }
+    const offTitle = (typeof WsjtxModeNotice !== 'undefined') ? WsjtxModeNotice.catPill().title : 'WSJT-X Mode is on: WSJT-X has the radio';
     catStatusEl.textContent = catPillLabel();
-    catStatusEl.className = 'status connected';
-    catStatusEl.title = 'Radio controlled by WSJT-X';
-    syncActivatorCatPill('status connected', 'Radio controlled by WSJT-X');
+    catStatusEl.className = 'status wsjtx-off';
+    catStatusEl.title = offTitle;
+    syncActivatorCatPill('status wsjtx-off', offTitle);
     return;
   }
   if (connected) {
@@ -21996,17 +22091,16 @@ window.api.onClusterStatus((s) => {
 });
 
 // --- WSJT-X listeners ---
-window.api.onWsjtxStatus(({ connected }) => {
-  wsjtxStatusEl.textContent = 'WSJT-X';
-  wsjtxStatusEl.className = 'status ' + (connected ? 'connected' : 'disconnected');
-  if (enableWsjtx) wsjtxStatusEl.classList.remove('hidden');
+window.api.onWsjtxStatus(({ connected, heard }) => {
   if (!connected) {
     wsjtxDecodes = [];
     wsjtxState = null;
   }
-  // Tracked for the CAT popover's "WSJT-X enabled but not heartbeating" hint.
   wsjtxConnected = !!connected;
-  if (catPopoverOpen) updateCatPopoverWsjtxWarning();
+  // "Heard" (a Heartbeat/Status in the last 60 s) is main's decision (#547).
+  wsjtxHeard = !!heard;
+  if (wsjtxHeard) wsjtxEverHeard = true;
+  updateWsjtxStatusVisibility();
 });
 
 window.api.onWsjtxState((state) => {
@@ -22440,14 +22534,14 @@ catLogClearBtn.addEventListener('click', () => {
     // Two settings silently stop POTACAT touching the local radio, and neither
     // was in this report — so a log with no CAT lines at all was unreadable
     // (KK4UDJ 2026-09-03). Operating a remote shack skips the local connect by
-    // design; WSJT-X integration hands the radio over on purpose.
+    // design; WSJT-X Mode hands the radio over on purpose.
     const remoteTarget = s.activeTargetId &&
       (s.connectionTargets || []).find((t) => t && t.id === s.activeTargetId);
     const radioOwner = remoteTarget
       ? 'REMOTE SHACK — ' + (remoteTarget.name ? maskReportText(remoteTarget.name)
         : remoteTarget.host ? maskHost(remoteTarget.host) : 'unnamed target') +
         ' (the local rig is deliberately not connected)'
-      : s.enableWsjtx ? 'WSJT-X integration is ON (POTACAT releases the radio to WSJT-X)'
+      : s.enableWsjtx ? 'WSJT-X (WSJT-X Mode is on; see the first line)'
       : 'this station';
     const enabled = [
       s.enablePota && 'POTA', s.enableSota && 'SOTA', s.enableWwff && 'WWFF', s.enableLlota && 'LLOTA', s.enableWwbota && 'WWBOTA',
@@ -22501,12 +22595,16 @@ catLogClearBtn.addEventListener('click', () => {
     try { if (window.api.launcherDiag) launcherLine = await window.api.launcherDiag(); } catch {}
     let settingsSaved = '(unknown)';
     try { if (window.api.settingsSaveStatus) settingsSaved = await window.api.settingsSaveStatus(); } catch {}
+    // WSJT-X Mode leads the header (#547): it explains a log with no CAT lines.
+    const wsjtxModeLine = (window.WsjtxModeNotice && s.enableWsjtx)
+      ? window.WsjtxModeNotice.reportLine({ mode: true, heard: wsjtxHeard, port: s.wsjtxPort }) : '';
     const md = {
       version: window._appVersion || s.appVersion || 'unknown',
       platform: window.api.platform,
       rig: rigDesc,
       callsign: (s.myCallsign || '(not set)').toUpperCase(),
       radioOwner,
+      wsjtxMode: wsjtxModeLine,
       features: enabled,
       setupNotes,
       stationSetup,
@@ -22589,6 +22687,7 @@ catLogClearBtn.addEventListener('click', () => {
     return [
       '## POTACAT Bug Report',
       '',
+      ...(md.wsjtxMode ? [md.wsjtxMode] : []),
       '**Version:** v' + md.version,
       '**Platform:** ' + md.platform,
       '**Rig:** ' + md.rig,

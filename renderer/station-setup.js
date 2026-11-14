@@ -96,6 +96,8 @@
       : `<strong>${s.requiredTotal - s.requiredLeft} of ${s.requiredTotal}</strong> essential steps are working. ` +
         (s.next ? 'The highlighted step is next.' : '');
 
+    renderNotice(current.notice);
+
     $('ss-hide').textContent = current.prefs && current.prefs.hidden
       ? 'Show reminders again for this radio' : 'Don\'t show this again for this radio';
 
@@ -112,6 +114,28 @@
       stepsEl.appendChild(renderStep(st, st.id === s.next));
     }
     renderShare();
+  }
+
+  // The top line (lib/station-setup.js notice): WSJT-X Mode is on, so the
+  // radio checks are skipped, with a button that turns it off (#547).
+  function renderNotice(n) {
+    const el = $('ss-notice');
+    if (!el) return;
+    el.innerHTML = '';
+    el.classList.toggle('hidden', !n);
+    if (!n) return;
+    const t = document.createElement('span');
+    t.className = 'ss-notice-text';
+    t.textContent = n.text;
+    el.appendChild(t);
+    if (n.action) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'wsjtx-mode-btn primary';
+      b.textContent = n.action.label;
+      b.addEventListener('click', () => runAction({ id: 'notice' }, n.action));
+      el.appendChild(b);
+    }
   }
 
   // --- "Share my working setup" (lib/setup-share.js) -------------------------
@@ -426,6 +450,11 @@
       case 'voice-test':
         confirmTx = { step: st.id, action: a.id };
         return render();
+      case 'wsjtx-mode-off':
+        // Exactly what unticking WSJT-X Mode in the CAT menu does (app.js).
+        if (typeof turnOffWsjtxMode === 'function') await turnOffWsjtxMode();
+        setTimeout(refresh, 1500); // main reconnects the radio; then re-check
+        return refresh();
       case 'open-settings':
         dlg.close();
         if (typeof openSettingsDialog === 'function') openSettingsDialog('station');

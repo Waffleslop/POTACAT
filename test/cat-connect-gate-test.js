@@ -27,8 +27,11 @@ test('WSJT-X Mode holds the radio only when it is on', () => {
 
 test('the wording names the setting by its real labels', () => {
   assert.ok(/> WSJT-X Mode\s*</.test(html), 'the CAT menu checkbox is labelled WSJT-X Mode');
-  assert.ok(/> WSJT-X Integration</.test(html), 'Settings labels it WSJT-X Integration');
-  assert.ok(G.wsjtxDeclineLine().includes('WSJT-X Mode') && G.wsjtxDeclineLine().includes('WSJT-X Integration'));
+  assert.ok(/id="set-enable-wsjtx"> WSJT-X Mode</.test(html), 'Settings labels it WSJT-X Mode too (#547)');
+  assert.ok(!/WSJT-X Integration/.test(html), 'the old name is gone from the window');
+  assert.ok(G.wsjtxDeclineLine().includes('WSJT-X Mode') && !G.wsjtxDeclineLine().includes('WSJT-X Integration'));
+  assert.ok(G.wsjtxDeclineLine().includes('click CAT in the top bar'), 'still says where to untick it');
+  assert.ok(!/WSJT-X Integration/.test(G.WSJTX_MODE_WHERE + G.wsjtxTestNote() + G.tuneRefusal({ wsjtxMode: true }).log));
   assert.ok(G.wsjtxDeclineLine().startsWith('[CAT] Not connecting'));
   assert.ok(!/My Rigs/.test(G.wsjtxDeclineLine()), 'My Rigs is not where WSJT-X Mode lives');
 });
