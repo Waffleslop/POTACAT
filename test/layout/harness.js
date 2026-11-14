@@ -77,7 +77,7 @@ app.whenReady().then(async () => {
         }
         // ECHOCAT Web FT8/FT4/FT2 decode list.
         const decodeRows = fx.DECODES.map(f => `<div class="ft8-row${f.tx ? ' ft8-tx' : ''}" data-fixture="${f.id}">${f.tx
-          ? DecodeRow.txRowInner(f.text, 'ft8')
+          ? DecodeRow.txRowInner(f.text, 'ft8', f.txHz)
           : DecodeRow.webRowInner(f.d, f.d.text, f.badges || '', f.entity ? `<span class="ft8-entity">${f.entity}</span>` : '')}</div>`).join('');
         const dbody = { theme: theme === 'light' ? 'light' : '', html: `<div id="ft8-decode-log" data-list="decodes" data-row-selector=".ft8-row">${decodeRows}</div>` };
         Object.assign(results, prefixKeys(await render(width, webCss, dbody, libScripts), `web-${theme}-${width}-`));
@@ -86,7 +86,7 @@ app.whenReady().then(async () => {
     // Desktop JTCAT window: Band Activity (no time cell) and My Activity (time cell).
     for (const width of [520, 900]) {
       const band = fx.DECODES.map(f => `<div class="jp-row${f.tx ? ' jp-tx' : ''}" data-fixture="${f.id}">${f.tx
-        ? DecodeRow.txRowInner(f.text, 'jp', '--')
+        ? DecodeRow.txRowInner(f.text, 'jp', f.txHz, '--')
         : DecodeRow.popoutRowInner(f.d, { text: f.d.text, badgesHtml: f.badges || '', entityHtml: f.entity ? `<span class="jp-entity">${f.entity}</span>` : '' })}</div>`).join('');
       const mine = fx.DECODES.filter(f => !f.tx).map(f => `<div class="jp-row jp-cq" data-fixture="${f.id}">${DecodeRow.popoutRowInner(f.d, { time: '12:30:45', text: f.d.text })}</div>`).join('');
       const body = { html: `<div id="jp-band-activity" data-list="band" data-row-selector=".jp-row">${band}</div><div id="jp-my-activity" data-list="mine" data-row-selector=".jp-row">${mine}</div>` };

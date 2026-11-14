@@ -1649,7 +1649,9 @@ function _applyPopoutTheme(payload) {
       // evict it like any decode cycle. Without the separator the row is
       // orphaned and accumulates forever (one per TX slot). (78hawkeye, PR #54.)
       var txTime = cycleBoundaryUtc();
-      var txRowHtml = DecodeRow.txRowInner(data.message, 'jp', '--');
+      // df = the offset THIS slot went out on (txFreq is stamped at key-down),
+      // not the slider now: a late reply after a move still lines up (#503).
+      var txRowHtml = DecodeRow.txRowInner(data.message, 'jp', data.txFreq, '--');
       var baEmpty = bandActivity.querySelector('.jp-empty');
       if (baEmpty) baEmpty.remove();
       var baSep = document.createElement('div');
