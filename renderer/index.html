@@ -4017,6 +4017,15 @@
           <span>Last refresh: <strong id="pota-sync-last">never</strong></span>
         </div>
         <p id="pota-sync-error" class="hidden" style="color:var(--accent-red-text);font-size:11px;margin-top:4px;"></p>
+        <div style="margin-top:8px;display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-secondary);">
+          <button type="button" id="pota-hunter-import-preview" class="btn btn-sm" title="Dry run: shows what the import would do without changing your log">Preview import</button>
+          <button type="button" id="pota-hunter-import" class="btn btn-sm">Import hunter log</button>
+          <span id="pota-hunter-import-status"></span>
+        </div>
+        <label class="checkbox-label" style="margin-top:6px;font-size:11px;color:var(--text-secondary);" title="Off by default. Added contacts come from the activator's log: no frequency or signal reports.">
+          <input type="checkbox" id="pota-hunter-import-add"> Also add contacts missing from my log
+        </label>
+        <span class="help-text" style="display:block;margin-top:4px;">Downloads your whole POTA.app hunter log. A QSO in your log with no park gets POTA.app's park; one with a different park is never changed, only listed as a conflict. Missing contacts are only listed unless you tick the box above: then they are added from the activator's log, in the mode the activator logged, with no frequency or signal reports. Duplicates are never added, nor contacts logged only as DATA. Your log is backed up first, and every decision goes in a review CSV. With POTACAT Cloud on, copying the backup back does not undo the import in the Cloud. Preview import changes nothing. If POTA.app stops answering, nothing is changed; try again later.</span>
       </div>
     </fieldset>
 
