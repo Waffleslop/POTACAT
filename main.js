@@ -3790,9 +3790,13 @@ let rigctldTestProc = null;
 // start it again — at most 3 times in 10 minutes, so a rigctld that dies on
 // every start does not become a restart loop.
 let _rigctldRespawns = [];
+// When rigctld last stopped by itself: a link loss right after a CW send is
+// then rigctld crashing (Hamlib's X5105 backend on KEYSPD, #505), not RF.
+let _rigctldDiedAtMs = 0;
 function rigctldDiedOnItsOwn(code, signal) {
   const how = signal ? `signal ${signal}` : `exit code ${code}`;
   const now = Date.now();
+  _rigctldDiedAtMs = now;
   _rigctldRespawns = _rigctldRespawns.filter((t) => now - t < 10 * 60 * 1000);
   const target = settings.catTarget;
   if (!target || target.type !== 'rigctld') {
@@ -4136,16 +4140,35 @@ function sendCatStatus(s) {
         // certainly reset the USB itself (RF into the shared FT-891 CAT+key
         // device). Point the operator at the real cause, not just "check USB".
         const rfSuspect = _lastCwKeyMs && (Date.now() - _lastCwKeyMs < 3000);
-        if (rfSuspect) {
-          sendCatLog('[CAT] The link dropped during a CW transmission — RF is likely resetting the USB device. Add a ferrite choke on the USB cable, improve station grounding, or lower power. POTACAT will force the key line low again once the rig returns.');
-        }
-        if (win && !win.isDestroyed()) {
-          win.webContents.send('app-notice', {
-            message: rfSuspect
-              ? 'Radio link lost during CW TX — RF may be resetting the USB. Add a ferrite/ground; the key line will be released when it returns.'
-              : (flexDirect ? 'Radio link lost — the Flex has no slice for POTACAT; creating one' : 'Radio link lost — check the USB/serial connection'),
-            warn: true, duration: 8000,
-          });
+        const sayLinkLost = (rf) => {
+          if (rf) {
+            sendCatLog('[CAT] The link dropped during a CW transmission — RF is likely resetting the USB device. Add a ferrite choke on the USB cable, improve station grounding, or lower power. POTACAT will force the key line low again once the rig returns.');
+          }
+          if (win && !win.isDestroyed()) {
+            win.webContents.send('app-notice', {
+              message: rf
+                ? 'Radio link lost during CW TX — RF may be resetting the USB. Add a ferrite/ground; the key line will be released when it returns.'
+                : (flexDirect ? 'Radio link lost — the Flex has no slice for POTACAT; creating one' : 'Radio link lost — check the USB/serial connection'),
+              warn: true, duration: 8000,
+            });
+          }
+        };
+        // Over rigctld the link also drops when rigctld itself crashes, and
+        // its exit can be reported just before or just after this status
+        // (#505: SIGSEGV 0.1 s after a CW speed write). Wait a moment and
+        // name the crash instead of blaming RF.
+        const viaRigctld = !!(settings.catTarget && settings.catTarget.type === 'rigctld');
+        if (rfSuspect && viaRigctld) {
+          setTimeout(() => {
+            if (Date.now() - _rigctldDiedAtMs < 3000) {
+              sendCatLog('[CAT] The link dropped because rigctld (Hamlib) stopped during the CW send, not because of RF. POTACAT restarts rigctld; the key line was forced low.');
+              sayLinkLost(false);
+            } else {
+              sayLinkLost(true);
+            }
+          }, 750);
+        } else {
+          sayLinkLost(rfSuspect);
         }
       } else {
         // The transport's connect flips the status up before the radio has
