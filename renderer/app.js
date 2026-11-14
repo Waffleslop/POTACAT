@@ -328,7 +328,7 @@ setInterval(pruneHiddenSpots, 60000);
 let enableLogging = false;
 let enableBannerLogger = false;
 let n1mmRst = false; // N1MM-style single-field RST inputs
-let defaultPower = 100;
+let defaultPower = 0; // the operator's own Default TX Power (W), 0 = none (#523)
 let tuneClick = false;
 let qsoChime = 'off'; // 'off' | 'soft' | 'twotone' | 'bell' | 'morse-r' — see playQsoChime
 let enableSplit = false;
@@ -2180,7 +2180,7 @@ async function loadPrefs() {
   }
   n1mmRst = settings.n1mmRst === true;
   applyRstMode();
-  defaultPower = parseInt(settings.defaultPower, 10) || 100;
+  defaultPower = LogTxPower.operatorDefaultPower(settings);
   updateLoggingVisibility();
   updateBannerLoggerVisibility();
   showBearing = settings.showBearing === true;
@@ -4523,7 +4523,7 @@ async function saveBannerQso() {
       callsign: callsigns.join(','),
       frequency: String(freqKhz),
       mode, qsoDate, timeOn, rstSent, rstRcvd, band,
-      // No txPower: main fills the radio's live power, else the default.
+      // No txPower: main fills the radio's power (read or set), else the operator's default, else none (#523).
       // A park goes with a program only: no sig, no park (main records
       // sigInfo in the worked-parks list).
       sig, sigInfo: sig ? allRefs.filter(Boolean).join(',') : '', potaRef, sotaRef, wwffRef, llotaRef, wwbotaRef,
@@ -13102,7 +13102,7 @@ function openQuickLog() {
     callsign: tunedCall,
     freqKhz: radioFreqKhz || null,
     mode: radioMode || null,
-    power: radioPower || lastLogPower || null,
+    power: logFormPower(),
     ...programFill,
   });
 }
@@ -15589,9 +15589,8 @@ function routeLogForSpot(spot) {
     callsign: spot.callsign || '',
     freqKhz: parseFloat(spot.frequency) || null,
     mode: spot.mode || null,
-    // Same precedence as the overlay: live CAT reading, then last entered,
-    // then the settings default.
-    power: radioPower > 0 ? radioPower : (lastLogPower > 0 ? lastLogPower : (defaultPower || null)),
+    // Same precedence as the overlay (logFormPower, #523).
+    power: logFormPower(),
     type,
     reference: p.refs[type] || '',
     parkName: p.names[type] || '',
@@ -15654,9 +15653,9 @@ function openLogPopup(spot) {
   logDate.value = now.toISOString().slice(0, 10);
   logTime.value = now.toISOString().slice(11, 16);
 
-  // Pre-fill power: prefer the live CAT reading (matches the TX Power slider),
-  // fall back to the user's last-entered value, then the settings default.
-  logPower.value = radioPower > 0 ? radioPower : (lastLogPower > 0 ? lastLogPower : (defaultPower || 100));
+  // Pre-fill power: the radio's power as read or as POTACAT set it, then the
+  // operator's last entry, then their own Default TX Power, else empty (#523).
+  logPower.value = logFormPower() || '';
 
   // Pre-fill RST based on mode
   const isCwDigi = CW_DIGI_MODES_SET.has(mode);
@@ -17622,7 +17621,8 @@ async function openSettingsDialog(tab) {
   } else {
     setAdifLogPath.value = await window.api.getDefaultLogPath();
   }
-  setDefaultPower.value = s.defaultPower || 100;
+  // Blank = no default: an unknown power is logged empty (#523).
+  { const dp = LogTxPower.operatorDefaultPower(s); setDefaultPower.value = dp ? String(dp) : ''; }
   setSendToLogbook.checked = s.sendToLogbook === true;
   setLogbookType.value = s.logbookType || '';
   setLogbookHost.value = s.logbookHost || '127.0.0.1';
@@ -18455,7 +18455,7 @@ settingsSave.addEventListener('click', async () => {
   const loggingEnabled = true; // always on; cloud sync is the choice
   const n1mmRstEnabled = setN1mmRst.checked;
   const adifLogPath = setAdifLogPath.value.trim() || '';
-  const defaultPowerVal = parseInt(setDefaultPower.value, 10) || 100;
+  const defaultPowerVal = LogTxPower.positiveWatts(setDefaultPower.value.trim()); // 0 = none (#523)
   const sendToLogbook = setSendToLogbook.checked;
   const logCommentTagsEnabled = setLogCommentTags ? setLogCommentTags.checked : true;
   const logbookTypeVal = setLogbookType.value;
@@ -18634,7 +18634,8 @@ settingsSave.addEventListener('click', async () => {
     logCommentTags: logCommentTagsEnabled,
     jtcatLogComment: setJtcatLogComment ? setJtcatLogComment.checked : true,
     adifLogPath: adifLogPath,
-    defaultPower: defaultPowerVal,
+    defaultPower: defaultPowerVal || null,
+    defaultPowerSet: defaultPowerVal > 0, // a typed 100 is the operator's, not the old untouched default
     sendToLogbook: sendToLogbook,
     logbookType: logbookTypeVal,
     logbookHost: logbookHostVal,
@@ -22006,7 +22007,17 @@ window.api.onCatMode((mode) => {
 });
 
 let radioPower = 0; // last known TX power from CAT (watts)
+let rigKnownPower = 0; // main's rig-state txPower: read from the radio or last set by POTACAT, 0 = unknown
 let lastLogPower = 0; // last power value entered by user in log dialog (sticky)
+// The power a log form starts with, or null for an empty box: never a
+// guessed 100 W (#523, lib/log-tx-power.js).
+function logFormPower() {
+  return LogTxPower.txPowerForLog({
+    knownW: rigKnownPower > 0 ? rigKnownPower : radioPower, // main's level is the newer (a set lands there first)
+    enteredW: lastLogPower,
+    defaultW: defaultPower,
+  });
+}
 window.api.onCatPower((watts) => {
   radioPower = watts;
   // Feed the TX-but-no-RF detector: any non-zero power within the arm window
@@ -25513,6 +25524,7 @@ window.api.onRigState((state) => {
     rigRfGain.value = state.rfGain;
     rigRfGainLabel.textContent = state.rfGain;
   }
+  if (state.txPower != null) rigKnownPower = Number(state.txPower) > 0 ? Number(state.txPower) : 0;
   if (state.txPower != null && document.activeElement !== rigTxPower && document.activeElement !== rigTxPowerSelect) {
     if (rigUsesPowerSelect() && rigTxPowerSelect) {
       const choices = Array.from(rigTxPowerSelect.options).map(o => parseFloat(o.value));

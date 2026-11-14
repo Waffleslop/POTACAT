@@ -363,6 +363,7 @@ const { getTuneQuirks, resolveSerialHandshake, holdSerialLinesLow } = require('.
 const { gridToLatLon, latLonToGrid, haversineDistanceMiles, bearing } = require('./lib/grid');
 const ActivationMapData = require('./lib/activation-map-data');
 const LogFreq = require('./lib/log-freq');
+const LogTxPower = require('./lib/log-tx-power'); // the power a contact is logged at, never a guessed 100 W (#523)
 const RigBands = require('./lib/rig-bands');
 const SstvStartBand = require('./lib/sstv-start-band');
 const AwardTables = require('./lib/award-tables');
@@ -16394,15 +16395,16 @@ async function saveQsoRecord(qsoData, opts) {
   // logging path did not supply them (lib/activation-station.js).
   Object.assign(qsoData, stationLocationFillFor(qsoData, ops));
 
-  // Auto-fill TX power from the live CAT reading (matches the TX Power slider)
-  // when the caller didn't supply one — typical for the Logbook pop-out's
-  // "+ New QSO" form which has no power field.
+  // Auto-fill TX power when the caller didn't supply one (the Logbook pop-out's
+  // "+ New QSO" form, JTCAT, the banner logger, ECHOCAT): the radio's power as
+  // read or as POTACAT last set it, else the operator's own Default TX Power,
+  // else empty. Never a guessed 100 W (#523, lib/log-tx-power.js).
   // A supplied value is coerced to a String here rather than trusted: the Log
   // QSO pop-out sends a Number while every other log path sends text, and the
   // transports downstream do string work on this field (W9TEF 2026-09-19).
   if (!qsoData.txPower) {
-    if (_currentTxPower > 0) qsoData.txPower = String(_currentTxPower);
-    else if (ops.defaultPower) qsoData.txPower = String(ops.defaultPower);
+    const w = LogTxPower.txPowerForLog({ knownW: _currentTxPower, defaultW: LogTxPower.operatorDefaultPower(ops) });
+    if (w) qsoData.txPower = String(w);
   } else {
     qsoData.txPower = String(qsoData.txPower);
   }

@@ -2872,8 +2872,9 @@
           <span class="help-text" style="display:block;margin-top:4px;">Import QSOs from N3FJP, HRD Logbook, HAMRS, Log4OM, or any other ADIF (.adi) or SQLite (.sqlite) export. Imported QSOs are merged into your POTACAT log; any park references they carry (POTA_REF or SIG=POTA + SIG_INFO) populate the <strong>worked-parks</strong> filter — that's what drives "Hide worked parks" / "Show NEW parks at top" in the spots table.</span>
         </div>
         <label style="margin-top:10px;">Default TX Power (W):
-          <input type="number" id="set-default-power" min="1" max="5000" value="100">
+          <input type="number" id="set-default-power" min="1" max="5000" placeholder="none">
         </label>
+        <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Logged only when the radio's power cannot be read and POTACAT has not set it. Blank: the contact is logged with no power.</span>
         <label class="checkbox-label"><input type="checkbox" id="set-n1mm-rst"> N1MM-style RST logging</label>
         <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">On: one box per digit of each report. Off: one field per report; a full report moves the cursor to RST Rcvd by itself, and a Tab pressed straight after stays there.</span>
         <label class="checkbox-label"><input type="checkbox" id="set-log-comment-tags" checked> Auto park/club tags in comment</label>
@@ -5351,6 +5352,7 @@
   <script src="../lib/dx-rule.js"></script>
   <script src="../lib/audio-device-heal.js"></script>
   <script src="../lib/log-freq.js"></script>
+  <script src="../lib/log-tx-power.js"></script>
   <script src="../lib/release-notes-format.js"></script>
   <script src="../lib/watchlist-groups.js"></script>
   <script src="../lib/activation-program.js"></script>
