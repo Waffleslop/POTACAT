@@ -555,6 +555,7 @@ let activatorParkGrid = '';   // Maidenhead grid for active park (auto from lat/
 let activatorParkGridFromPark = ''; // the primary park's own grid, from its position
 let activatorParkGrids = {};  // settings.activatorParkGrids: the operator's grid per park (lib/park-grid.js, #388)
 let hunterParkRefs = [];      // [{ref:'K-5678', name:'Shenandoah NF', program:'POTA'}]  max MAX_N_FER, resets per QSO; program drives ADIF SIG (default POTA)
+let hunterParkCall = '';      // the callsign their park came with; a different call clears it (lib/p2p-park-entry.js, #506)
 let activatorContacts = []; // in-memory QSO list for current activation session
 
 // Look up whether `call` would be a POTA dupe in the current activation —
@@ -27662,6 +27663,7 @@ function resumeActivation(activation) {
   activatorParkRefs = mainRefs.map(r => ({ ref: r.ref, name: '', program: (r.sig || 'POTA').toUpperCase() }));
   activatorCrossRefs = crossRefs.map(r => ({ program: (r.sig || '').toUpperCase(), ref: r.ref }));
   hunterParkRefs = [];
+  hunterParkCall = '';
   activatorParkRefInput.value = mainRefs.map(r => r.ref).join(',');
   activatorParkNameEl.textContent = '';
   updateParkExtraBadge();
@@ -28874,10 +28876,15 @@ if (window.api.onEchocatAppConnected) window.api.onEchocatAppConnected(() => {
 /** Update hunter park input display and extra badge */
 function updateHunterParkDisplay() {
   const input = document.getElementById('activator-hunter-park');
-  const badge = document.getElementById('activator-hunter-park-extra');
   if (input) {
     input.value = hunterParkRefs[0]?.ref || '';
   }
+  updateHunterParkBadge();
+}
+
+/** The "+N" badge alone: the parks behind it are hunterParkRefs.slice(1). */
+function updateHunterParkBadge() {
+  const badge = document.getElementById('activator-hunter-park-extra');
   if (!badge) return;
   const extra = hunterParkRefs.length - 1;
   if (extra > 0) {
@@ -28985,27 +28992,27 @@ function activatorReadEntry() {
   // Their park(s) as typed. A comma list is an n-fer (WD3D 2026-10-26: "US-1234,
   // US-5678" for a 2-fer logged NO park, silently — the box only ever read one
   // reference). A reference that is not one is refused, never dropped.
+  // What the box shows is what is logged (#506): a reference typed over an
+  // old one replaces it, an empty box logs no park, and only the parks
+  // behind a visible +N badge (multi-park dialog, n-fer spot) are added.
   const hunterInput = document.getElementById('activator-hunter-park');
-  if (hunterInput && hunterInput.value.trim()) {
-    const parsed = parseHunterParkInput(hunterInput.value);
-    if (parsed.bad.length) {
+  if (hunterInput) {
+    const hunterBadge = document.getElementById('activator-hunter-park-extra');
+    const resolved = P2pParkEntry.resolveHunterParks({
+      text: hunterInput.value,
+      stored: hunterParkRefs,
+      badgeShown: !!(hunterBadge && !hunterBadge.classList.contains('hidden')),
+      max: MAX_N_FER,
+      inferProgram: inferParkProgram,
+    });
+    if (resolved.bad.length) {
       hunterInput.style.outline = '1px solid #e94560';
       hunterInput.focus();
-      showLogToast(`Not logged: "${parsed.bad[0]}" is not a park or summit reference. Separate their parks with commas, e.g. US-1234, US-5678.`, { warn: true, duration: 7000 });
+      showLogToast(`Not logged: "${resolved.bad[0]}" is not a park or summit reference. Separate their parks with commas, e.g. US-1234, US-5678.`, { warn: true, duration: 7000 });
       return;
     }
     hunterInput.style.outline = '';
-    if (parsed.refs.length > 1 || hunterParkRefs.length === 0) {
-      // The typed list, plus anything behind the +N badge, names kept.
-      const known = new Map(hunterParkRefs.map(p => [p.ref, p]));
-      const merged = [];
-      for (const ref of [...parsed.refs, ...hunterParkRefs.slice(1).map(p => p.ref)]) {
-        if (merged.some(p => p.ref === ref) || merged.length >= MAX_N_FER) continue;
-        const k = known.get(ref);
-        merged.push({ ref, name: (k && k.name) || '', program: (k && k.program) || inferParkProgram(ref) });
-      }
-      hunterParkRefs = merged;
-    }
+    hunterParkRefs = resolved.refs;
   }
   if (!primaryParkRef()) {
     activatorParkRefInput.focus();
@@ -29172,6 +29179,7 @@ function clearActivatorEntry() {
   if (activatorStateInput) activatorStateInput.value = '';
   resetActivatorRst();
   hunterParkRefs = [];
+  hunterParkCall = '';
   updateHunterParkDisplay();
   activatorCallsignInput.focus();
 }
@@ -29786,6 +29794,7 @@ function fillActivatorFromSpot(s) {
   // "Right now it will only populate 1 park in the P2P log entry" — the
   // operator had to type the second park by hand to get both credits.
   hunterParkRefs = hunterParkRefsFromSpot(s);
+  hunterParkCall = P2pParkEntry.normCall(s.callsign); // the spot's park is that station's (#506)
   updateHunterParkDisplay();
   resetActivatorRst();
   // QRZ lookup for op name and state
@@ -29949,6 +29958,15 @@ let activatorQrzTimeout = null;
 if (activatorCallsignInput) {
   activatorCallsignInput.addEventListener('input', () => {
     clearTimeout(activatorQrzTimeout);
+    // A different station clears their park (#506): an abandoned P2P's park
+    // must not ride along onto the next caller's contact.
+    const own = P2pParkEntry.parkCallAfterEdit(hunterParkCall, activatorCallsignInput.value);
+    hunterParkCall = own.parkCall;
+    const hunterBox = document.getElementById('activator-hunter-park');
+    if (own.clear && (hunterParkRefs.length || (hunterBox && hunterBox.value.trim()))) {
+      hunterParkRefs = [];
+      updateHunterParkDisplay();
+    }
     const val = activatorCallsignInput.value.trim().toUpperCase();
     if (val.length < 3) {
       activatorOpNameEl.textContent = '';
@@ -30140,6 +30158,7 @@ if (multiparkOkBtn) {
       // through the +N badge fell through to 'POTA' at log time and credited
       // the other operator's P2P to the wrong program.
       hunterParkRefs = refs.map(r => ({ ...r, program: r.program || inferParkProgram(r.ref) }));
+      hunterParkCall = P2pParkEntry.normCall(activatorCallsignInput.value);
       updateHunterParkDisplay();
     }
     multiparkDialog.close();
@@ -30168,15 +30187,7 @@ if (hunterParkExtraBadge) {
  *  and WWBOTA bunkers (B/US-1234); the program is tagged from the shape so the
  *  ADIF SIG is right (summit-to-park typed by hand used to log SIG=POTA).
  *  @returns {{refs: string[], bad: string[]}} */
-function parseHunterParkInput(text) {
-  const refs = [], bad = [];
-  for (const tok of String(text || '').toUpperCase().split(/[,;\s]+/).filter(Boolean)) {
-    const ok = /^[A-Z]{1,4}-\d{3,5}$/.test(tok) || /^[A-Z0-9]{1,4}\/[A-Z]{2}-\d{3}$/.test(tok) || /^B\/[A-Z]{1,3}-\d{3,5}$/.test(tok);
-    if (!ok) bad.push(tok);
-    else if (!refs.includes(tok)) refs.push(tok);
-  }
-  return { refs, bad };
-}
+const parseHunterParkInput = P2pParkEntry.parseHunterParkInput; // lib/p2p-park-entry.js
 
 // --- Hunter Park Autocomplete ---
 const hunterParkInput = document.getElementById('activator-hunter-park');
@@ -30187,12 +30198,14 @@ if (hunterParkInput) {
   hunterParkInput.addEventListener('input', () => {
     clearTimeout(hunterParkSearchTimeout);
     hunterParkInput.style.outline = '';
+    // A park typed now is for whoever is in the callsign box (#506).
+    hunterParkCall = P2pParkEntry.normCall(activatorCallsignInput.value);
     // In a comma list, search for the reference being typed (the last one).
     const full = hunterParkInput.value;
     const cut = full.lastIndexOf(',');
     const head = cut >= 0 ? full.slice(0, cut + 1) + ' ' : '';
     const query = (cut >= 0 ? full.slice(cut + 1) : full).trim();
-    if (query.length < 2) { hunterParkDropdown.classList.add('hidden'); if (cut < 0) hunterParkRefs = []; return; }
+    if (query.length < 2) { hunterParkDropdown.classList.add('hidden'); if (cut < 0) { hunterParkRefs = []; updateHunterParkBadge(); } return; }
     hunterParkSearchTimeout = setTimeout(async () => {
       const results = await window.api.searchParks(query);
       if (!results || !results.length) { hunterParkDropdown.classList.add('hidden'); return; }

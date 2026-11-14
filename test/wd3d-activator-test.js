@@ -46,7 +46,7 @@ check('a spot with no creditable reference fills nothing; duplicates collapse', 
   assert.strictEqual(refsFor({ source: 'pota', reference: 'US-1,US-1' }).length, 1);
 });
 check('fillActivatorFromSpot uses it', () => {
-  assert.ok(/hunterParkRefs = hunterParkRefsFromSpot\(s\);\s+updateHunterParkDisplay\(\);/.test(app));
+  assert.ok(/hunterParkRefs = hunterParkRefsFromSpot\(s\);[\s\S]{0,200}?updateHunterParkDisplay\(\);/.test(app));
 });
 
 console.log('The activator toolbar');

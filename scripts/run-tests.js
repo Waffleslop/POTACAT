@@ -411,6 +411,7 @@ const TESTS = [
   'test/github-issues-2026-10-26-test.js', // #107 FT-450 test, #106 interface PTT, #103 Auto RTS trial
   'test/duo-vfo-wire-test.js',        // iPhone Duo VFO pane: tuned-spot, swr-guard-state, atu-tune, tx-eq, status.meters
   'test/activator-hunter-parks-test.js', // WD3D: their parks as a comma list (n-fer P2P)
+  'test/p2p-park-entry-506-test.js', // #506: a new callsign clears their park; the P2P box as shown is what is logged
   'test/vfo-power-button-test.js',    // KQ5O: Power On/Off at the bottom of the VFO window
   'test/dx-rule-test.js',            // G4BFG: DX = another entity, or the operator's HF / 6 m-up distance
   'test/external-atu-carrier-test.js', // N8JMS: RF-sense tuner carrier in AM (CW over CAT is key-up)
