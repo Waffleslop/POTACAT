@@ -277,7 +277,7 @@ test('#227: Tune plays its tone over the LAN, refused with no LAN session or a b
 });
 
 test('#227: SSTV sends its picture over the LAN; HALT and tx-complete stop it on the wire', () => {
-  const enc = bodyOf(main, "sstvEngine.on('encode-complete', (data) => {", "sstvEngine.on('rx-vis'");
+  const enc = bodyOf(main, "sstvEngine.on('encode-complete', SstvSend.guard((data) => {", "sstvEngine.on('rx-vis'");
   assert.ok(/const useYaesuLanTx = settings\.audioSource === 'yaesu-lan' && yaesuLanBufferTxReady\(\);/.test(enc));
   const claim = enc.indexOf("claimYaesuLanTx('sstv', 'SSTV picture', ['sstv', 'echocat'])");
   assert.ok(enc.indexOf('Yaesu LAN TX blocked before PTT') < claim && claim < enc.indexOf('handleRemotePtt(true,'));

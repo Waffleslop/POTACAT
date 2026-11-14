@@ -16,7 +16,8 @@ contextBridge.exposeInMainWorld('api', {
   // Mailbox (invoke → {ok, ...})
   list: (box) => ipcRenderer.invoke('winlink-cmd-list', box),
   read: (box, mid) => ipcRenderer.invoke('winlink-cmd-read', { box, mid }),
-  del: (box, mid) => ipcRenderer.invoke('winlink-cmd-delete', { box, mid }),
+  del: (box, mid) => ipcRenderer.invoke('winlink-cmd-delete', { box, mid }), // to Deleted; in Deleted, for good (#475)
+  move: (box, mid, to) => ipcRenderer.invoke('winlink-cmd-move', { box, mid, to }), // Archive, Move to Inbox / Sent, Restore (#462, #475)
   saveAttachment: (box, mid, name) => ipcRenderer.invoke('winlink-cmd-save-attachment', { box, mid, name }),
   pickAttachments: () => ipcRenderer.invoke('winlink-pick-attachments'),
   send: (msg) => ipcRenderer.invoke('winlink-cmd-send', msg),

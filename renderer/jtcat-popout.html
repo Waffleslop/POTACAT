@@ -749,12 +749,10 @@
             <input type="range" id="jp-wspr-txpct" min="0" max="100" step="5" value="20" style="width:70px;vertical-align:middle;">
             <span id="jp-wspr-txpct-val" class="jp-wspr-num">20%</span>
           </label>
-          <label title="Reported transmit power in dBm — capped at 30 dBm (1 W). WSPR is QRPp; it decodes far below the noise floor, so milliwatts carry. The radio is also commanded to 1 W over CAT before each transmit.">Pwr
+          <label title="Power the beacon reports to WSPRnet. Auto follows the RF power the beacon runs at: 1 W, or the level you set with TX Pwr while it is armed. Pick a value to report a fixed power instead. WSPR decodes far below the noise, so a watt or less carries a long way.">Reported
             <select id="jp-wspr-dbm" class="jp-wspr-select">
-              <option>0</option><option>7</option><option>10</option><option>13</option>
-              <option>17</option><option>20</option><option>23</option><option>27</option>
-              <option selected>30</option>
-            </select><span class="jp-wspr-num" title="30 dBm = 1 W max">dBm ≤1 W</span>
+              <option value="auto" selected>Auto</option>
+            </select>
           </label>
           <label title="How long the beacon runs before it stands down on its own. Until I stop it = continuous (the default). You are responsible for the station while it transmits.">Run
             <select id="jp-wspr-run" class="jp-wspr-select">
@@ -1307,6 +1305,7 @@
   <script src="jtcat-parser.js"></script>
   <script src="cq-target.js"></script>
   <script src="../lib/wspr/stats.js"></script>
+  <script src="../lib/wspr/dbm.js"></script>
   <script src="../lib/scope-axis.js"></script>
   <script src="../lib/scope-view.js"></script>
   <script src="../lib/jtty-macros.js"></script>
@@ -1317,6 +1316,7 @@
   <script src="../lib/prior-contacts.js"></script>
   <script src="../lib/jtty-chats.js"></script>
   <script src="../lib/capture-stall.js"></script>
+  <script src="../lib/mac-mic-access.js"></script>
   <script src="../lib/waterfall-palettes.js"></script>
   <script src="waterfall.js"></script>
   <script src="jtcat-popout.js"></script>

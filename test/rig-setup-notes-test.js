@@ -105,6 +105,62 @@ test('IC-7300 MK II on Icom Network: DATA MOD = LAN, or TX keys with no power (#
   assert.ok(!note(resolve({ model: 'IC-7300 MK II', radioType: 'icom' }), 'icom-network-data-mod-lan'), 'not on USB');
   assert.ok(!note(resolve({ model: 'IC-7300', radioType: 'icom-network' }), 'icom-network-data-mod-lan'), 'only models with a confirmed path');
 });
+test('USB data audio: DATA MOD = USB on the Icoms, per the manual of each (FM_12b p.126, FM_5 p.333, BM_10 p.58)', () => {
+  const cases = [
+    ['IC-7300', 'ic7300-data-mod-usb', 'MENU → SET → Connectors → DATA MOD → USB', 'required'],
+    ['IC-7100', 'ic7100-data-mod-usb', 'Connectors → DATA MOD → USB', 'required'],
+    ['IC-7610', 'ic7610-data1-mod-usb', 'MENU → SET → Connectors → MOD Input → DATA1 MOD → USB', 'required'],
+    ['IC-7300 MK II', 'ic7300mk2-data-mod-usb', 'MENU → SET → Connectors → MOD Input → DATA MOD → USB', 'recommended'],
+  ];
+  for (const [model, id, path, level] of cases) {
+    for (const radioType of ['icom', 'hamlib']) {
+      const n = note(resolve({ model, radioType }), id);
+      assert.ok(n, `${id} missing for ${model}/${radioType}`);
+      assert.strictEqual(n.level, level, id);
+      assert.strictEqual(n.feature, 'Audio', id + ' must reach the Station Setup audio steps');
+      assert.ok(n.steps[0].includes(path), `${id}: ${n.steps[0]}`);
+      assert.ok(/ p\.\d/.test(n.source), id + ' cites a manual page: ' + n.source);
+    }
+    // Over the network the audio is on the LAN: a USB note there is wrong.
+    assert.ok(!note(resolve({ model, radioType: 'icom-network' }), id), id + ' leaked to Icom Network');
+  }
+  // Factory values the manuals give; the MK II's CI-V guide gives none, so its note claims none.
+  assert.ok(/factory it is ACC/.test(note(resolve({ model: 'IC-7300', radioType: 'icom' }), 'ic7300-data-mod-usb').steps[0]));
+  assert.ok(/factory it is ACC/.test(note(resolve({ model: 'IC-7100', radioType: 'icom' }), 'ic7100-data-mod-usb').steps[0]));
+  assert.ok(!/factory/i.test(note(resolve({ model: 'IC-7300 MK II', radioType: 'icom' }), 'ic7300mk2-data-mod-usb').steps.join(' ')));
+  // The original IC-7300 has no MOD Input level (FM_12b p.126, BM_12 p.64).
+  assert.ok(!/MOD Input/.test(note(resolve({ model: 'IC-7300', radioType: 'icom' }), 'ic7300-data-mod-usb').steps.join(' ')));
+  // The IC-7100's 9600 bps is DATA2 pin 3 only (FM_5 p.344).
+  assert.ok(/9600bps Mode/.test(note(resolve({ model: 'IC-7100', radioType: 'icom' }), 'ic7100-data-mod-usb').steps.join(' ')));
+  // No model borrows another model's note.
+  assert.ok(!note(resolve({ model: 'IC-705', radioType: 'icom' }), 'ic7300-data-mod-usb'));
+  assert.ok(!note(resolve({ model: 'IC-7300', radioType: 'icom' }), 'ic7300mk2-data-mod-usb'));
+});
+test('IC-7610: the note names DATA1, the data mode POTACAT selects (civ-codec 1A 06 01)', () => {
+  const codec = readSrc(path.join(ROOT, 'lib', 'codecs', 'civ-codec.js'));
+  assert.ok(/this\._dataByte = 0x01;/.test(codec), 'civ-codec no longer defaults to DATA1: update ic7610-data1-mod-usb');
+  const n = note(resolve({ model: 'IC-7610', radioType: 'icom' }), 'ic7610-data1-mod-usb');
+  assert.ok(/DATA1 MOD/.test(n.title) && /DATA2 or DATA3/.test(n.steps[1]), n.steps[1]);
+});
+test('FT-857 and FT-817/818: DIG MODE = USER-U, with each manual\'s own menu numbers', () => {
+  const codec = readSrc(path.join(ROOT, 'lib', 'codecs', 'yaesu-legacy-codec.js'));
+  assert.ok(/FT8: 0x0A/.test(codec), 'FT8 no longer goes to DIG: the DIG MODE notes no longer apply');
+  const f857 = note(resolve({ model: 'FT-857', radioType: 'serialcat' }), 'ft857-dig-mode-user-u');
+  assert.ok(f857 && f857.level === 'required' && f857.feature === 'Audio');
+  const t857 = f857.steps.join(' ');
+  assert.ok(/No-038 DIG MODE → USER-U/.test(t857) && /RTTY-L/.test(t857), t857);
+  assert.ok(/No-037 DIG GAIN/.test(t857) && /No-073 PKT RATE/.test(t857) && /No-071 PKT1200/.test(t857), t857);
+  assert.ok(/No-001 EXT MENU/.test(t857), 'the FT-857D needs EXT MENU on to reach No-038 (p.67)');
+  const f818 = note(resolve({ model: 'FT-817/818', radioType: 'serialcat' }), 'ft818-dig-mode-user-u');
+  assert.ok(f818 && f818.level === 'required' && f818.feature === 'Audio');
+  const t818 = f818.steps.join(' ');
+  assert.ok(/#26 DIG MODE → USER-U/.test(t818) && /#25 DIG MIC/.test(t818) && /#40 PKT RATE/.test(t818) && /#39 PKT MIC/.test(t818), t818);
+  assert.ok(!/No-0\d\d/.test(t818), 'FT-857 menu numbers in the FT-818 note');
+  assert.ok(/FT-817/.test(f818.steps[0]), 'says the numbers are the FT-818ND\'s');
+  // The FT-897 shares the codec, but its manual has not been read.
+  assert.ok(!note(resolve({ model: 'FT-897', radioType: 'serialcat' }), 'ft857-dig-mode-user-u'));
+  assert.ok(!note(resolve({ model: 'FT-857', radioType: 'serialcat' }), 'ft818-dig-mode-user-u'));
+});
 test('the Icom pickers and the model table agree on every CI-V address the note quotes', () => {
   const opts = [...HTML.matchAll(/<option value="0x([0-9A-Fa-f]+)">(IC-[^<]+)<\/option>/g)];
   assert.ok(opts.length > 5, 'no Icom picker options found');

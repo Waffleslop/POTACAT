@@ -1033,7 +1033,7 @@
           </select>
         </label>
         <span class="dxcc-progress">
-          <span id="dxcc-count">0 / 100</span>
+          <span id="dxcc-count">0 / 100 worked</span>
           <span id="dxcc-award-label"></span>
         </span>
         <span id="dxcc-challenge" class="dxcc-challenge hidden"></span>
@@ -2978,9 +2978,10 @@
               <span class="help-text" style="display:block;margin-top:4px;">Your lotw.arrl.org website login — used only to download which QSOs LoTW has confirmed. This is not the certificate password above.</span>
               <div style="margin-top:6px;">
                 <button type="button" id="lotw-download-btn">Download confirmations</button>
+                <button type="button" id="lotw-download-all-btn" style="margin-left:6px;">Download all confirmations again</button>
                 <span id="lotw-download-result" class="help-text" style="margin-left:8px;"></span>
               </div>
-              <span class="help-text" style="display:block;margin-top:4px;">Confirmed QSOs get the L&#10003; mark in the QSO log window and count as confirmed in the DXCC Tracker. The first download pulls your full history; later ones fetch only new confirmations.</span>
+              <span class="help-text" style="display:block;margin-top:4px;">Confirmed QSOs get the L&#10003; mark in the QSO log window. The DXCC Tracker counts entities worked from an ADIF log, confirmed or not. The first download pulls your full history; later ones fetch only new confirmations. Imported an older log since? Use Download all confirmations again.</span>
             </div>
           </div>
         </div>
@@ -3450,6 +3451,10 @@
         </div>
         <label class="checkbox-label" style="margin-top:6px;"><input type="checkbox" id="set-winlink-prediction" checked> Rank gateways by predicted propagation</label>
         <span class="help-text" style="display:block;">The gateway list is ordered by the path VOACAP expects to be open right now, not by distance. Your grid square and each gateway's are sent to POTACAT's VOACAP service at api.potacat.com; a VOACAP you installed yourself is used instead. Off = nearest first, nothing sent.</span>
+        <label style="margin-top:6px;display:block;">Empty the Deleted mail folder after
+          <select id="set-winlink-deleted-days"><option value="7">7 days</option><option value="30" selected>30 days</option><option value="90">90 days</option><option value="0">Never</option></select>
+        </label>
+        <span class="help-text" style="display:block;">Deleting a Winlink message moves it to the Deleted folder, where you can restore it. After this many days it is removed for good.</span>
         <label class="checkbox-label" style="margin-top:6px;"><input type="checkbox" id="set-winlink-auto-retry" checked> Try again once by itself when a link drops</label>
         <span class="help-text" style="display:block;">If a radio link to a gateway connects and then drops before the mail is exchanged, POTACAT waits 20 seconds, checks that the channel is clear and nothing is transmitting, and calls the same gateway on the same frequency once more. You can cancel it during the wait. Never after you press Abort, and never after "no answer".</span>
         <label style="margin-top:6px;">End a radio session after
@@ -5318,6 +5323,7 @@
 
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>
   <script src="../lib/freq-dots.js"></script>
+  <script src="../lib/net-reminder-row.js"></script>
   <script src="../lib/rig-family.js"></script>
   <script src="../lib/waterfall-palettes.js"></script>
   <script src="../lib/app-theme.js"></script>
@@ -5343,6 +5349,7 @@
   <script src="../lib/prior-contacts.js"></script>
   <script src="../lib/spot-mute-rules.js"></script>
   <script src="../lib/spot-age.js"></script>
+  <script src="../lib/dxcc-progress.js"></script>
   <script src="../lib/call-filter.js"></script>
   <script src="../lib/dx-rule.js"></script>
   <script src="../lib/audio-device-heal.js"></script>
@@ -5358,6 +5365,8 @@
   <script src="../lib/worked-roster.js"></script>
   <script src="../lib/worked-overlay.js"></script>
   <script src="../lib/capture-stall.js"></script>
+  <script src="../lib/winlink-mail-view.js"></script>
+  <script src="../lib/mac-mic-access.js"></script>
   <script src="../lib/jtcat-capture-gate.js"></script>
   <script src="../lib/diagnostic-snapshot.js"></script>
   <script src="was-view.js"></script>

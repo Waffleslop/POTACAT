@@ -1441,6 +1441,7 @@ const setVaraCableIn = document.getElementById('set-vara-cable-in');
 const setVaraCableOut = document.getElementById('set-vara-cable-out');
 const setWinlinkCap = document.getElementById('set-winlink-cap');
 const setWinlinkPrediction = document.getElementById('set-winlink-prediction');
+const setWinlinkDeletedDays = document.getElementById('set-winlink-deleted-days'); // #475: 7 | 30 | 90 | 0 (never)
 const setWinlinkAutoRetry = document.getElementById('set-winlink-auto-retry');
 const setWinlinkRecordAudio = document.getElementById('set-winlink-record-audio');
 const setWinlinkPatPath = document.getElementById('set-winlink-pat-path');
@@ -1776,7 +1777,8 @@ function renderRemotePowerRow(info) {
     window.api.rigControl({ action: 'power-off' });
   });
   row.appendChild(label);
-  row.appendChild(on);
+  // #485: an off-only radio (the FTX-1) gets no Power On.
+  if (info.canPowerOn !== false) row.appendChild(on);
   row.appendChild(off);
   return row;
 }
@@ -2752,6 +2754,11 @@ let currentRigs = []; // local copy of settings.rigs
 // A passing Test checks the EDITOR's port, not the saved radio's, and four
 // operators read "Connected!" as done while the saved rig had no port and the
 // live link kept failing (KK6EZA, arys64/KO6BAH, NJ2DX). Say so on the result.
+// A passing test while WSJT-X Mode holds the radio: main left the radio to
+// WSJT-X instead of keeping the link, and says where to change that (#407).
+function rigTestWsjtxNote(result) {
+  return result && result.wsjtxNote ? ' ' + result.wsjtxNote : '';
+}
 function rigTestSavedNote(portPath) {
   const norm = (p) => String(p || '').trim().toUpperCase();
   const rig = editingRigId ? currentRigs.find(r => r && r.id === editingRigId) : null;
@@ -4919,7 +4926,8 @@ document.getElementById('qrz-download-btn').addEventListener('click', async () =
   try {
     const result = await window.api.qrzDownloadLogbook();
     if (result.ok) {
-      statusEl.textContent = `Imported ${result.imported} new QSOs (${result.total} total in QRZ)`;
+      statusEl.textContent = `Imported ${result.imported} new QSOs (${result.total} total in QRZ)` +
+        (result.updated > 0 ? `, ${result.updated} updated with confirmations` : '');
       statusEl.style.color = '#4ecca3';
     } else {
       statusEl.textContent = result.error || 'Download failed';
@@ -5097,15 +5105,11 @@ function renderNetList(nets) {
     info.className = 'net-item-info';
     const nameEl = document.createElement('div');
     nameEl.className = 'net-item-name';
-    nameEl.textContent = net.name;
+    nameEl.textContent = NetReminderRow.title(net);
+    nameEl.title = nameEl.textContent;
     const detailEl = document.createElement('div');
     detailEl.className = 'net-item-detail';
-    const schedStr = net.schedule?.type === 'weekly'
-      ? ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].filter((_,i) => (net.schedule.days || []).includes(i)).join(', ')
-      : net.schedule?.type === 'dates'
-        ? (net.schedule.dates || []).join(', ')
-        : 'Daily';
-    detailEl.textContent = `${FreqDots.khzMhz(net.frequency) || net.frequency} ${net.mode} \u2022 ${net.startTime} ${net.timeZone === 'utc' ? 'UTC' : 'Local'} \u2022 ${schedStr}`;
+    detailEl.textContent = NetReminderRow.detail(net);
     info.appendChild(nameEl);
     info.appendChild(detailEl);
 
@@ -5769,9 +5773,16 @@ if (setMercuryEnable) {
       acctStatus.textContent = 'Checking… (the first check starts Winlink, a few seconds)';
       const r = await window.api.winlinkAccountCheck();
       if (!r || !r.ok) { acctStatus.textContent = (r && r.error) || 'Could not check'; return; }
-      acctStatus.textContent = r.exists ? `${r.callsign} has a Winlink account.` : `${r.callsign} has no Winlink account yet.`;
+      acctStatus.textContent = r.exists ? `${r.callsign} has a Winlink account. Checking the password…` : `${r.callsign} has no Winlink account yet.`;
       regBox.classList.toggle('hidden', !!r.exists);
-      if (r.exists) showWinlinkRecovery(); else if (recBox) recBox.classList.add('hidden');
+      // Reading the recovery address needs the saved password, so Winlink
+      // checks it there: a wrong password shows now, not at the first
+      // session (#435). No radio, no session, nothing sent.
+      if (r.exists) showWinlinkRecovery().then((pw) => {
+        const said = pw && window.WinlinkMailView ? window.WinlinkMailView.passwordCheck(pw).text : '';
+        acctStatus.textContent = `${r.callsign} has a Winlink account.${said ? ' ' + said : ''}`;
+      });
+      else if (recBox) recBox.classList.add('hidden');
     });
     // An existing account's recovery address: read through Pat with the
     // saved password, changed in place.
@@ -5786,6 +5797,7 @@ if (setMercuryEnable) {
       const r = await window.api.winlinkRecoveryEmailGet();
       if (r && r.ok) recCurrent.textContent = r.email || 'none set';
       else { recCurrent.textContent = 'unknown'; recStatus.textContent = (r && r.error) || 'Could not read it (is your Winlink password saved?)'; }
+      return r || { ok: false, error: '' };
     }
     const recChange = document.getElementById('winlink-recovery-change');
     if (recChange) recChange.addEventListener('click', async () => {
@@ -6007,15 +6019,18 @@ lotwUploadBtn.addEventListener('click', async () => {
   }
   lotwUploadBtn.disabled = false;
 });
-lotwDownloadBtn.addEventListener('click', async () => {
+const lotwDownloadAllBtn = document.getElementById('lotw-download-all-btn');
+async function runLotwDownload(all) {
   if (!window.api || !window.api.lotwDownloadConfirmations) return;
   lotwDownloadBtn.disabled = true;
+  if (lotwDownloadAllBtn) lotwDownloadAllBtn.disabled = true;
   lotwDownloadResult.style.color = '';
   lotwDownloadResult.textContent = 'Downloading from LoTW...';
   try {
     const r = await window.api.lotwDownloadConfirmations({
       login: setLotwLogin.value.trim(),
       password: setLotwWebPassword.value,
+      all: !!all,
     });
     lotwDownloadResult.textContent = r.message || (r.ok ? 'Done.' : 'Download failed.');
     lotwDownloadResult.style.color = r.ok ? '#4ecca3' : '#e94560';
@@ -6024,7 +6039,10 @@ lotwDownloadBtn.addEventListener('click', async () => {
     lotwDownloadResult.style.color = '#e94560';
   }
   lotwDownloadBtn.disabled = false;
-});
+  if (lotwDownloadAllBtn) lotwDownloadAllBtn.disabled = false;
+}
+lotwDownloadBtn.addEventListener('click', () => runLotwDownload(false));
+if (lotwDownloadAllBtn) lotwDownloadAllBtn.addEventListener('click', () => runLotwDownload(true));
 
 // Club Log — checkbox toggles config; bulk button sends the whole log.
 setClublogEnable.addEventListener('change', () => {
@@ -10098,6 +10116,7 @@ async function runAdifImport(resultEl) {
       resultEl.textContent = '';
     } else if (result.success) {
       const parts = [`${result.imported.toLocaleString()} QSOs imported`];
+      if (result.updated > 0) parts.push(`${result.updated.toLocaleString()} updated with confirmations`);
       if (result.skipped > 0) parts.push(`${result.skipped.toLocaleString()} already in the log`);
       if (result.parksAdded > 0) {
         parts.push(`${result.parksAdded.toLocaleString()} new park ref${result.parksAdded === 1 ? '' : 's'}`);
@@ -10212,7 +10231,7 @@ hamlibTestBtn.addEventListener('click', async () => {
     const result = await window.api.testHamlib({ rigId, serialPort, baudRate, dtrOff });
     if (result.success) {
       const freqMHz = FreqDots.hzMhz(parseInt(result.frequency, 10)) || 'unknown';
-      hamlibTestResult.textContent = `Connected! Freq: ${freqMHz}` + rigTestSavedNote(serialPort);
+      hamlibTestResult.textContent = `Connected! Freq: ${freqMHz}` + rigTestSavedNote(serialPort) + rigTestWsjtxNote(result);
       hamlibTestResult.className = 'hamlib-test-success';
     } else {
       hamlibTestResult.textContent = `Failed: ${result.error}`;
@@ -10285,7 +10304,7 @@ serialcatTestBtn.addEventListener('click', async () => {
     const model = rigModelSelect ? rigModelSelect.value : '';
     const result = await window.api.testSerialCat({ portPath, baudRate, dtrOff, serialHandshake, model });
     if (result.success) {
-      serialcatTestResult.textContent = `Connected! Freq: ${FreqDots.mhzMhz(result.frequency) || result.frequency + ' MHz'}` + (result.note ? ` (${result.note})` : '') + rigTestSavedNote(portPath);
+      serialcatTestResult.textContent = `Connected! Freq: ${FreqDots.mhzMhz(result.frequency) || result.frequency + ' MHz'}` + (result.note ? ` (${result.note})` : '') + rigTestSavedNote(portPath) + rigTestWsjtxNote(result);
       serialcatTestResult.className = 'hamlib-test-success';
     } else {
       serialcatTestResult.textContent = `Failed: ${result.error}`;
@@ -10321,7 +10340,7 @@ document.getElementById('icom-test-btn').addEventListener('click', async () => {
   try {
     const result = await window.api.testIcomCiv({ portPath, baudRate, civAddress });
     if (result.success) {
-      resultEl.textContent = `Connected! Freq: ${FreqDots.mhzMhz(result.frequency) || result.frequency + ' MHz'}` + rigTestSavedNote(portPath);
+      resultEl.textContent = `Connected! Freq: ${FreqDots.mhzMhz(result.frequency) || result.frequency + ' MHz'}` + rigTestSavedNote(portPath) + rigTestWsjtxNote(result);
       resultEl.className = 'hamlib-test-success';
     } else {
       resultEl.textContent = `Failed: ${result.error}`;
@@ -10351,7 +10370,7 @@ document.getElementById('civ-tcp-test-btn')?.addEventListener('click', async () 
   try {
     const result = await window.api.testCivTcp({ host, port, civAddress });
     if (result.success) {
-      resultEl.textContent = `Connected! Freq: ${FreqDots.mhzMhz(result.frequency) || result.frequency + ' MHz'}`;
+      resultEl.textContent = `Connected! Freq: ${FreqDots.mhzMhz(result.frequency) || result.frequency + ' MHz'}` + rigTestWsjtxNote(result);
       resultEl.className = 'hamlib-test-success';
     } else {
       resultEl.textContent = `Failed: ${result.error}`;
@@ -10403,7 +10422,7 @@ document.getElementById('yaesu-lan-test-btn')?.addEventListener('click', async (
       const sid = r.sessionId != null ? ' Session 0x' + Number(r.sessionId).toString(16).toUpperCase().padStart(2, '0') + '.' : '';
       const radio = r.radio ? ' ' + r.radio + '.' : (r.id ? ' Radio ID ' + r.id + '.' : '');
       const freq = r.frequency ? ' Freq: ' + (FreqDots.mhzMhz(r.frequency) || r.frequency + ' MHz') + '.' : '';
-      resultEl.textContent = 'Logged in!' + sid + radio + freq + (r.note ? ' ' + r.note : '');
+      resultEl.textContent = 'Logged in!' + sid + radio + freq + (r.note ? ' ' + r.note : '') + rigTestWsjtxNote(r);
       resultEl.className = 'hamlib-test-success';
     } else {
       resultEl.textContent = 'Failed: ' + r.error;
@@ -10451,7 +10470,7 @@ document.getElementById('icom-network-test-btn')?.addEventListener('click', asyn
         ? ` (answered probe 0x${result.probedAddress.toString(16).toUpperCase().padStart(2, '0')})`
         : '';
       const radioName = result.radioName ? ` ${result.radioName}` : '';
-      resultEl.textContent = `Connected!${radioName} Freq: ${FreqDots.mhzMhz(result.frequency) || result.frequency + ' MHz'}${responseAddr}${probeAddr}`;
+      resultEl.textContent = `Connected!${radioName} Freq: ${FreqDots.mhzMhz(result.frequency) || result.frequency + ' MHz'}${responseAddr}${probeAddr}` + rigTestWsjtxNote(result);
       resultEl.className = 'hamlib-test-success';
     } else {
       resultEl.textContent = `Failed: ${result.error}`;
@@ -14639,7 +14658,7 @@ function renderDxccMatrix() {
   if (!dxccData || !dxccData.entities) {
     dxccMatrixBody.innerHTML = '';
     dxccPlaceholder.classList.remove('hidden');
-    dxccCountEl.textContent = '0 / 100';
+    dxccCountEl.textContent = window.DxccProgress.dxccProgressText(0, 'worked').count;
     dxccAwardLabelEl.textContent = '';
     dxccChallengeEl.classList.add('hidden');
     return;
@@ -14687,12 +14706,14 @@ function renderDxccMatrix() {
   }
 
   // Update progress counter
-  dxccCountEl.textContent = `${confirmedCount} / 100`;
-  dxccAwardLabelEl.textContent = confirmedCount >= 100 ? 'DXCC!' : '';
+  // #382: say what is counted, worked (ADIF) or confirmed (Log4OM SQLite).
+  const progress = window.DxccProgress.dxccProgressText(confirmedCount, dxccData.basis, challengeCount);
+  dxccCountEl.textContent = progress.count;
+  dxccAwardLabelEl.textContent = progress.award;
 
   // DXCC Challenge counter (All Bands view only)
   if (isAllBands) {
-    dxccChallengeEl.textContent = `Challenge: ${challengeCount}`;
+    dxccChallengeEl.textContent = progress.challenge;
     dxccChallengeEl.classList.remove('hidden');
   } else {
     dxccChallengeEl.classList.add('hidden');
@@ -16111,6 +16132,19 @@ logSaveBtn.addEventListener('click', async () => {
     logSaveBtn.textContent = origText;
   }
 });
+
+// #463: macOS refuses POTACAT the microphone, so the radio's audio is silent.
+// Main decides when to say it (lib/mac-mic-access.js) and clears it when
+// sound arrives; the sticky warn toast carries the theme's own colours.
+if (window.api.onMacMicNotice) {
+  window.api.onMacMicNotice((d) => {
+    const mine = document.querySelector('.log-toast.mac-mic');
+    if (!d || !d.show) { if (mine) mine.remove(); return; }
+    showLogToast(d.message, { warn: true, sticky: true });
+    const t = document.querySelector('.log-toast');
+    if (t) t.classList.add('mac-mic');
+  });
+}
 
 function showLogToast(message, opts) {
   const existing = document.querySelector('.log-toast');
@@ -17775,6 +17809,7 @@ async function openSettingsDialog(tab) {
     }
     setWinlinkCap.value = s.winlinkSessionCapMin || 30;
     if (setWinlinkPrediction) setWinlinkPrediction.checked = s.winlinkPrediction !== false;
+    if (setWinlinkDeletedDays) setWinlinkDeletedDays.value = String([7, 30, 90, 0].includes(Number(s.winlinkDeletedDays)) && s.winlinkDeletedDays !== '' && s.winlinkDeletedDays != null ? Number(s.winlinkDeletedDays) : 30);
     if (setWinlinkAutoRetry) setWinlinkAutoRetry.checked = s.winlinkAutoRetry !== false;
     if (setWinlinkRecordAudio) setWinlinkRecordAudio.checked = !!s.winlinkRecordModemAudio;
     setWinlinkPatPath.value = s.winlinkPatPath || '';
@@ -18676,6 +18711,7 @@ settingsSave.addEventListener('click', async () => {
       } : {}),
       winlinkSessionCapMin: Math.max(10, Math.min(60, parseInt(setWinlinkCap.value, 10) || 30)),
       winlinkPrediction: setWinlinkPrediction ? setWinlinkPrediction.checked : true,
+      ...(setWinlinkDeletedDays ? { winlinkDeletedDays: Number(setWinlinkDeletedDays.value) } : {}),
       winlinkAutoRetry: setWinlinkAutoRetry ? setWinlinkAutoRetry.checked : true,
       winlinkRecordModemAudio: setWinlinkRecordAudio ? setWinlinkRecordAudio.checked : false,
       winlinkPatPath: setWinlinkPatPath.value.trim(),
@@ -22350,6 +22386,7 @@ catLogClearBtn.addEventListener('click', () => {
       winlink: winlinkLine,
       launcher: launcherLine,
       settingsSaved,
+      micAccess: '',
     };
     // Complete-from-launch log: main reads startup.log + session.log (both
     // capture everything since process start, including the pre-window lines
@@ -22372,6 +22409,7 @@ catLogClearBtn.addEventListener('click', () => {
         }
         body.push(...(pkg.tail || []));
         logSections = [];
+        if (pkg.micAccess) md.micAccess = pkg.micAccess; // #463
         // The crashed run goes FIRST — it is the reason the report exists,
         // and a reader who stops after one code block should still see it.
         if (pkg.prevRunUnclean) {
@@ -22435,6 +22473,7 @@ catLogClearBtn.addEventListener('click', () => {
       ...(md.winlink ? ['**Winlink:** ' + md.winlink] : []),
       ...(md.launcher ? ['**Launcher:** ' + md.launcher] : []),
       '**Settings saved:** ' + md.settingsSaved,
+      ...(md.micAccess ? ['**macOS microphone access:** ' + md.micAccess] : []),
       '',
       '### What I tried to do',
       '<!-- fill in: the steps you took -->',
@@ -25000,7 +25039,8 @@ function rigApplyCapabilities(caps) {
   if (activatorAtuBtn) activatorAtuBtn.style.display = caps.atu ? '' : 'none';
   rigNbBtn.style.display = caps.nb ? '' : 'none';
   if (rigWnbBtn) rigWnbBtn.style.display = caps.wnb ? '' : 'none';
-  rigPowerOnBtn.style.display = caps.power ? '' : 'none';
+  // #485: powerOn false = the radio switches off over CAT but not on (FTX-1).
+  rigPowerOnBtn.style.display = caps.power && caps.powerOn !== false ? '' : 'none';
   rigPowerOffBtn.style.display = caps.power ? '' : 'none';
   rigRfGain.closest('.rig-popover-row').style.display = caps.rfgain ? '' : 'none';
   // Radio-native RF gain steps (Flex): swap the 0-100 slider for a dB select
@@ -30559,6 +30599,7 @@ async function _buildJtcatCapture(ctx) {
       });
       workletNode.port.onmessage = function(e) {
         if (_jtcatStallWatch) _jtcatStallWatch.noteSamples(e.data, Date.now());
+        jtcatMicNote(e.data);
         window.api.jtcatAudio(e.data);
       };
       jtcatRxGainNode.connect(workletNode);
@@ -30615,6 +30656,7 @@ async function _buildJtcatCapture(ctx) {
             samples = Array.from(rawSamples);
           }
           if (_jtcatStallWatch) _jtcatStallWatch.noteSamples(samples, Date.now());
+          jtcatMicNote(samples);
           window.api.jtcatAudio(samples);
         } catch (err) {
           console.error('[JTCAT] Audio processor error:', err.message || err);
@@ -30839,8 +30881,22 @@ window.api.onJtcatSetTxGain(function(level) {
 // does not.
 var _jtcatStallWatch = null;
 var _jtcatStallTimer = null;
+// #463: on a Mac that refuses the microphone, the input is exact zeros from
+// the first buffer (lib/mac-mic-access.js; main decides what to say).
+var _jtcatMicWatch = null;
+function jtcatMicNote(samples) {
+  if (!_jtcatMicWatch) return;
+  var now = Date.now();
+  var ev = _jtcatMicWatch.note(samples, now);
+  if (ev && window.api.macMicSilence) window.api.macMicSilence({ surface: 'jtcat', silent: ev === 'silent', silentMs: _jtcatMicWatch.silentFor(now) });
+}
 function jtcatArmStallWatch(track) {
   var now = Date.now();
+  if (window.MacMicAccess && window.api.platform === 'darwin') {
+    if (_jtcatMicWatch) _jtcatMicWatch.started(now);
+    else _jtcatMicWatch = new window.MacMicAccess.SilenceWatch(now);
+    if (window.api.macMicCaptureStart) window.api.macMicCaptureStart('jtcat').catch(function() {});
+  }
   if (_jtcatStallWatch) _jtcatStallWatch.started(now);
   else _jtcatStallWatch = new window.CaptureStall.CaptureStallWatch(now);
   if (_jtcatStallTimer) clearInterval(_jtcatStallTimer);

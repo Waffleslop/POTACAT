@@ -161,6 +161,7 @@ function loadMail(opts) {
   const toasts = [];
   const win = new El('window');
   win.WinlinkMailView = MailView;
+  win.WinlinkMailActions = require('../lib/winlink-mail-actions');
   win.RigBands = RigBands;
   const ws = { readyState: 1, send: (w) => sent.push(JSON.parse(w)) };
   const clock = { now: Date.parse('2026-11-12T20:00:00Z') };
@@ -582,7 +583,7 @@ test('W4e: Winlink off on the shack shows the tab with where to turn it on, and 
   p.mailOnMessage({ type: 'winlink-state', enabled: false, patReady: false, modes: [], session: { state: 'idle' } });
   assert.strictEqual(p.$('mail-tab-btn').hidden, false, 'the tab shows');
   assert.strictEqual(p.$('mail-off').hidden, false);
-  assert.strictEqual(p.$('mail-off').textContent, 'Turn Winlink on at the shack: Settings > Station > Winlink');
+  assert.strictEqual(p.$('mail-off').textContent, 'Winlink is off at the shack. On the shack computer, open Settings > Station > Winlink and tick Enable Winlink email.');
   assert.ok(p.$('mail-view').classList.contains('mail-is-off'));
   assert.ok(/#mail-view\.mail-is-off > :not\(#mail-off\) \{ display: none !important; \}/.test(MAIL_CSS), 'everything else in the tab is hidden');
   p.mailOnOpen();
@@ -615,14 +616,26 @@ const INBOX = { type: 'winlink-mailbox', box: 'in', messages: [
   { mid: 'A2', from: 'SERVICE', to: ['K3SBP'], subject: 'Your Winlink account is ready', date: '2026-11-10T09:05:00Z', read: true, attachments: [{ name: 'a.txt' }] },
 ] };
 
-test('W0: the inbox: header with the call, folder segments with counts, rows as cards', () => {
+// MailView.shortTime() reads the real Date.now() (the page's FakeDate does not reach the
+// module), and prints a time-only label only for today's UTC date. Pin the real clock to the
+// fake one's instant so these expectations hold on any day, at any hour, in any year.
+function atFixedNow(fn) {
+  return () => {
+    const realNow = Date.now;
+    Date.now = () => Date.parse('2026-11-12T20:00:00Z');
+    try { fn(); } finally { Date.now = realNow; }
+  };
+}
+
+test('W0: the inbox: header with the call, folder segments with counts, rows as cards', atFixedNow(() => {
   const p = loadMail();
   p.mailOnMessage(state({ unread: 1, counts: { in: 2, out: 2, sent: 7, archive: 0 } }));
   p.mailOnOpen();
   p.mailOnMessage(INBOX);
   assert.strictEqual(p.screen(), 'list');
   assert.strictEqual(p.$('mail-head-sub').textContent, 'K3SBP · Winlink');
-  const folders = p.$('mail-folders').children;
+  // An older shack (no deletedDays in winlink-state) has no Deleted folder: its button stays hidden (#475).
+  const folders = p.$('mail-folders').children.filter((b) => !b.classList.contains('hidden'));
   assert.deepStrictEqual(folders.map((b) => [b.textContent, b.getAttribute('aria-pressed')]), [['Inbox 1', 'true'], ['Outbox 2', 'false'], ['Sent', 'false'], ['Archive', 'false']]);
   const rows = p.$('mail-list').querySelectorAll('.mail-row');
   assert.strictEqual(rows.length, 2);
@@ -637,9 +650,9 @@ test('W0: the inbox: header with the call, folder segments with counts, rows as 
   assert.deepStrictEqual(p.take(), [{ type: 'winlink-list', box: 'out' }]);
   assert.strictEqual(p.$('mail-folders').children[1].getAttribute('aria-pressed'), 'true');
   assert.strictEqual(p.$('mail-list').textContent, 'Nothing here.', 'an empty Outbox; the Inbox hint is only on the Inbox');
-});
+}));
 
-test('W0: the last-session card, and the session running now in its place', () => {
+test('W0: the last-session card, and the session running now in its place', atFixedNow(() => {
   const p = loadMail();
   p.mailOnMessage(state({ lastSession: { at: '2026-11-12T14:32:00Z', ok: true, text: 'Sent 1 message via KY4RY (ARDOP); 2 new messages in your Inbox.' } }));
   assert.strictEqual(p.$('mail-last').hidden, false);
@@ -654,7 +667,7 @@ test('W0: the last-session card, and the session running now in its place', () =
   const q = loadMail();
   q.mailOnMessage(state({ lastSession: null }));
   assert.ok(q.$('mail-last').hidden, 'no card before the first session');
-});
+}));
 
 test('W0: screens: a row opens the reader; Back, Write and Send / Receive move between screens', () => {
   const p = loadMail();
@@ -726,7 +739,7 @@ test('W0: Send / Receive: band chips for the mode and the rig, gateway cards wit
   chip(p, '40m').click();
   const ask = p.take().find((m) => m.type === 'winlink-gateways-get');
   assert.deepStrictEqual([ask.mode, ask.band], ['ardop', '40m']);
-  assert.strictEqual(p.$('mail-radio-line').textContent, 'Waiting for the gateway list.');
+  assert.strictEqual(p.$('mail-radio-line').textContent, 'Ranking gateways… This can take a minute or two.');
   assert.ok(p.$('mail-connect').hidden, 'no Connect without a gateway');
   seg(p, 'packet').click();
   assert.deepStrictEqual(p.$('mail-band').children.map((c) => c.textContent), ['2m', '1.25m', '70cm', 'All']);
@@ -794,6 +807,208 @@ test('W0: the Mail rules carry no colour literal; text 16 px except the 12 px sm
   assert.ok(/\.mail-row-who \{[^}]*font-size: 18px;[^}]*font-weight: 800;/.test(block), 'row titles 18 px / 800');
   assert.ok(/@container mail \(min-width: 700px\)/.test(block), 'two panes once the Mail view is 700 px wide');
   assert.ok(/:root\[data-ds\] #mail-view \{[^}]*--m-on-tint: var\(--ds-on-tint\);[^}]*--m-on-ok: var\(--ds-on-ok\);/.test(block), 'text on a fill uses its on- ink');
+});
+
+// ── #462 / #475: Archive, the Deleted folder, Reply all ─────────────────────
+const btnIds = (p) => p.$('mail-read-actions').children.map((b) => b.id + ':' + b.textContent);
+
+test('#462/#475: a shack with mail-folders-v2: Archive, Delete to Deleted, the Deleted folder and its note', () => {
+  const p = loadMail();
+  p.mailOnMessage(state({ deletedDays: 30, counts: { in: 2, out: 0, sent: 0, archive: 0, deleted: 1 } }));
+  p.mailOnOpen();
+  p.mailOnMessage(INBOX);
+  const shown = p.$('mail-folders').children.filter((b) => !b.classList.contains('hidden')).map((b) => b.textContent);
+  assert.deepStrictEqual(shown, ['Inbox', 'Outbox', 'Sent', 'Archive', 'Deleted']);
+  assert.ok(p.$('mail-folders').classList.contains('mail-seg-5'), 'five folders: three over two');
+  p.take();
+  p.mailOnMessage({ type: 'winlink-message', box: 'in', mid: 'A1', message: { from: 'KY4RY', to: ['K3SBP', 'W1AW'], cc: ['k3sbp@winlink.org', 'N0CALL'], subject: 'Net', body: 'Hi' } });
+  assert.deepStrictEqual(btnIds(p), ['mail-reply:Reply', 'mail-reply-all:Reply all', 'mail-archive:Archive', 'mail-del:Delete']);
+  assert.strictEqual(p.$('mail-read-cc').textContent, 'Cc k3sbp@winlink.org, N0CALL');
+  p.$('mail-archive').click();
+  assert.deepStrictEqual(p.take(), [{ type: 'winlink-move', box: 'in', mid: 'A1', to: 'archive' }]);
+  assert.strictEqual(p.screen(), 'list');
+  p.mailOnMessage({ type: 'winlink-result', op: 'move', ok: true });
+  assert.strictEqual(p.toasts.pop(), 'Moved to Archive.');
+  // Delete is undoable here: no second press.
+  p.mailOnMessage({ type: 'winlink-message', box: 'in', mid: 'A2', message: { from: 'SERVICE', to: ['K3SBP'], subject: 'x' } });
+  p.$('mail-del').click();
+  assert.deepStrictEqual(p.take(), [{ type: 'winlink-delete', box: 'in', mid: 'A2' }]);
+  p.mailOnMessage({ type: 'winlink-result', op: 'delete', ok: true });
+  assert.strictEqual(p.toasts.pop(), 'Moved to Deleted.');
+  // The Deleted folder.
+  p.mailOnMessage({ type: 'winlink-mailbox', box: 'deleted', messages: [{ mid: 'D1', box: 'deleted', from: 'KY4RY', to: ['K3SBP'], subject: 'Old', date: '2026-11-01T10:00:00Z', read: true, fromBox: 'in', deletedAt: '2026-11-10T20:00:00Z' }] });
+  p.$('mail-folders').querySelector('[data-box="deleted"]').click();
+  assert.deepStrictEqual(p.take(), [{ type: 'winlink-list', box: 'deleted' }]);
+  assert.strictEqual(p.$('mail-list').querySelector('.mail-del-note').textContent, 'Deleted messages are removed for good after 30 days.');
+  assert.strictEqual(p.$('mail-list').querySelectorAll('.mail-row').length, 1);
+});
+
+test('#475: in Deleted: Restore to where it came from; Delete for good asks once on the button', () => {
+  const p = loadMail();
+  p.mailOnMessage(state({ deletedDays: 30 }));
+  p.mailOnOpen();
+  p.take();
+  p.mailOnMessage({ type: 'winlink-message', box: 'deleted', mid: 'D1', message: { mid: 'D1', from: 'KY4RY', to: ['K3SBP'], subject: 'Old', body: 'b', fromBox: 'sent', deletedAt: '2026-11-10T20:00:00Z', attachments: [{ name: 'p.jpg', size: 4096 }] } });
+  assert.deepStrictEqual(btnIds(p), ['mail-restore:Restore to Sent', 'mail-del:Delete for good']);
+  assert.strictEqual(p.$('mail-read-note').textContent, 'Deleted from Sent. Removed for good in 28 days.');
+  assert.strictEqual(p.$('mail-read-atts').querySelector('button'), null, 'no Save in Deleted: Pat cannot read it there');
+  p.$('mail-del').click();
+  assert.strictEqual(p.$('mail-del').textContent, 'Delete for good? It cannot be brought back.');
+  assert.deepStrictEqual(p.take(), []);
+  p.$('mail-del').click();
+  assert.deepStrictEqual(p.take(), [{ type: 'winlink-delete', box: 'deleted', mid: 'D1' }]);
+  p.mailOnMessage({ type: 'winlink-message', box: 'deleted', mid: 'D1', message: { mid: 'D1', from: 'KY4RY', subject: 'Old', fromBox: 'sent', deletedAt: '2026-11-10T20:00:00Z' } });
+  p.$('mail-restore').click();
+  assert.deepStrictEqual(p.take(), [{ type: 'winlink-move', box: 'deleted', mid: 'D1', to: 'sent' }]);
+});
+
+test('#462: in Archive: Move to Inbox for mail from others, Move to Sent for our own', () => {
+  const p = loadMail();
+  p.mailOnMessage(state({ deletedDays: 7 }));
+  p.mailOnMessage({ type: 'winlink-message', box: 'archive', mid: 'R1', message: { from: 'KY4RY', to: ['K3SBP'], subject: 'a' } });
+  assert.deepStrictEqual(btnIds(p), ['mail-reply:Reply', 'mail-move-back:Move to Inbox', 'mail-del:Delete']);
+  p.mailOnMessage({ type: 'winlink-message', box: 'archive', mid: 'R2', message: { from: 'K3SBP-10', to: ['KY4RY'], subject: 'a' } });
+  assert.deepStrictEqual(btnIds(p), ['mail-move-back:Move to Sent', 'mail-del:Delete']);
+  p.take();
+  p.$('mail-move-back').click();
+  assert.deepStrictEqual(p.take(), [{ type: 'winlink-move', box: 'archive', mid: 'R2', to: 'sent' }]);
+});
+
+test('#475: Reply all fills To with the sender and Cc with everyone else but us; Reply stays To-only', () => {
+  const p = loadMail();
+  p.mailOnMessage(state());
+  p.mailOnMessage({ type: 'winlink-message', box: 'in', mid: 'A1', message: { from: 'KY4RY', to: ['K3SBP', 'W1AW'], cc: ['K3SBP@winlink.org', 'ky4ry@winlink.org', 'N0CALL'], subject: 'Net' } });
+  // An older shack: Reply all still works (it is a compose with Cc); no Archive, and Delete asks first.
+  assert.deepStrictEqual(btnIds(p), ['mail-reply:Reply', 'mail-reply-all:Reply all', 'mail-del:Delete']);
+  p.$('mail-reply-all').click();
+  assert.strictEqual(p.screen(), 'compose');
+  assert.strictEqual(p.$('mail-to').value, 'KY4RY');
+  assert.strictEqual(p.$('mail-cc').value, 'W1AW, N0CALL');
+  assert.strictEqual(p.$('mail-subj').value, 'Re: Net');
+  p.$('mail-body').value = 'ok';
+  p.take();
+  p.$('mail-queue').click();
+  assert.deepStrictEqual(p.take(), [{ type: 'winlink-compose', to: 'KY4RY', subject: 'Re: Net', body: 'ok', cc: 'W1AW, N0CALL' }]);
+  p.mailOnMessage({ type: 'winlink-message', box: 'in', mid: 'A1', message: { from: 'KY4RY', to: ['K3SBP'], subject: 'Net' } });
+  assert.deepStrictEqual(btnIds(p), ['mail-reply:Reply', 'mail-del:Delete'], 'no Reply all when there is nobody else');
+  p.$('mail-reply').click();
+  assert.strictEqual(p.$('mail-cc').value, '');
+});
+
+test('#475: the page carries lib/winlink-mail-actions.js inlined by the server', () => {
+  assert.ok(/<!-- winlink-mail-actions-js -->/.test(HTML));
+  assert.ok(/\['winlink-mail-actions-js', 'winlink-mail-actions\.js'\]/.test(SERVER));
+});
+
+// ── #435: the Winlink first run ──────────────────────────────────────────────
+test('#435: the off line names the real Settings place and the checkbox to tick', () => {
+  const html = readSrc(path.join(ROOT, 'renderer', 'index.html'));
+  assert.ok(/data-tab="station">Station</.test(html), 'Settings has a Station tab');
+  assert.ok(/<legend>Winlink \(email over radio\)<\/legend>/.test(html), 'its Winlink section');
+  assert.ok(/id="set-winlink-enable"[^>]*> Enable Winlink email/.test(html), 'the checkbox the line names');
+  assert.ok(/Enable Winlink email/.test(MailView.OFF_TEXT) && /Settings > Station > Winlink/.test(MailView.OFF_TEXT));
+});
+
+test('#435: a list the shack never answers stops saying Loading and offers Try again', () => {
+  const p = loadMail();
+  p.mailOnMessage(state({ mode: 'ardop' }));
+  p.mailOnOpen();
+  p.$('mail-open-connect').click();
+  const ask = p.take().find((m) => m.type === 'winlink-gateways-get');
+  assert.ok(ask);
+  p.clock.now += MailView.gatewayWait('ardop', true) - 1000;
+  p.tick();
+  assert.strictEqual(p.$('mail-gateway').textContent, 'Loading, predicting propagation…', 'still waiting inside the shack\'s own limit');
+  p.clock.now += 2000;
+  p.tick();
+  assert.strictEqual(p.$('mail-gateway').textContent, 'The list did not load');
+  assert.strictEqual(p.$('mail-gw-note').textContent, 'The shack did not send the gateway list.');
+  assert.strictEqual(p.$('mail-gw-retry').hidden, false);
+  assert.strictEqual(p.$('mail-radio-line').textContent, 'No gateway to call on this band.');
+  p.mailOnMessage({ type: 'winlink-gateways', mode: 'ardop', list: GATEWAYS, predicted: true, reqId: ask.reqId });
+  assert.strictEqual(p.$('mail-gateway').textContent, 'The list did not load', 'a very late answer is not drawn over Try again');
+  assert.strictEqual(MailView.gatewayWait('packet', true), 60000);
+  assert.strictEqual(MailView.gatewayWait('ardop', true), 150000);
+});
+
+test('#435: with no link to the shack the list says so at once, with Try again', () => {
+  const p = loadMail();
+  p.mailOnMessage(state({ mode: 'ardop' }));
+  p.mailOnOpen();
+  p.ws.readyState = 3;
+  p.$('mail-open-connect').click();
+  assert.strictEqual(p.$('mail-gateway').textContent, 'The list did not load');
+  assert.strictEqual(p.$('mail-gw-note').textContent, MailView.NOT_CONNECTED);
+  assert.strictEqual(p.$('mail-gw-retry').hidden, false);
+  p.ws.readyState = 1;
+  p.$('mail-gw-retry').click();
+  assert.ok(p.take().some((m) => m.type === 'winlink-gateways-get'), 'Try again asks once the link is back');
+});
+
+test('#435: a request the shack failed outright (op gateways-get) clears Loading too', () => {
+  const p = loadMail();
+  p.mailOnMessage(state({ mode: 'ardop' }));
+  p.mailOnOpen();
+  p.$('mail-open-connect').click();
+  const ask = p.take().find((m) => m.type === 'winlink-gateways-get');
+  p.mailOnMessage({ type: 'winlink-result', op: 'gateways-get', ok: false, error: 'boom', reqId: ask.reqId });
+  assert.strictEqual(p.$('mail-gw-note').textContent, 'The gateway list did not load: boom.');
+  assert.ok(/result\(type\.replace\(\/\^winlink-\/, ''\)/.test(readSrc(path.join(ROOT, 'main.js'))), 'main answers a thrown request with op gateways-get');
+});
+
+test('#435: while the list is ranked the Connect line says so; FM lists say Loading', () => {
+  assert.strictEqual(MailView.connectWaitText('ardop', true), 'Ranking gateways… This can take a minute or two.');
+  assert.strictEqual(MailView.connectWaitText('ardop', false), 'Loading gateways…');
+  assert.strictEqual(MailView.connectWaitText('packet', true), 'Loading gateways…');
+  assert.ok(/showToast\(mailGwLoaded \? 'Pick a gateway first' : MailView\.connectWaitText/.test(REMOTE), '"Pick a gateway first" only once the list is here');
+});
+
+test('#435: no grid square: the list says what to set and where', () => {
+  assert.strictEqual(MailView.gridNote(''), 'No grid square is set, so the list has no distances and is not ranked for you. Set it in Settings > Station > QTH Grid Square.');
+  assert.strictEqual(MailView.gridNote('FN20'), '');
+  assert.strictEqual(MailView.gridNote('fn20xa'), '');
+  assert.strictEqual(MailView.gridNote('12AB'), MailView.gridNote(''));
+  const html = readSrc(path.join(ROOT, 'renderer', 'index.html'));
+  assert.ok(/QTH Grid Square: <input type="text" id="set-grid"/.test(html), 'the label the note names');
+  assert.ok(/const note = WinlinkMailView\.gridNote\(settings\.grid\) \|\| WinlinkPat\.rankingNote/.test(readSrc(path.join(ROOT, 'main.js'))), 'the shack sends it as the list note');
+  const p = loadMail();
+  p.mailOnMessage(state({ mode: 'ardop' }));
+  p.mailOnOpen();
+  p.$('mail-open-connect').click();
+  const ask = p.take().find((m) => m.type === 'winlink-gateways-get');
+  p.mailOnMessage({ type: 'winlink-gateways', mode: 'ardop', list: GATEWAYS, predicted: false, note: MailView.gridNote(''), reqId: ask.reqId });
+  assert.strictEqual(p.$('mail-gw-note').textContent, MailView.gridNote(''), 'ECHOCAT Web shows it under the list');
+});
+
+test('#435: nothing tells the operator to "restart Winlink" any more; the words say what to do', () => {
+  for (const f of ['main.js', 'renderer/winlink-popout.js', 'renderer/remote.js', 'renderer/app.js']) {
+    assert.ok(!/restart Winlink/i.test(readSrc(path.join(ROOT, f))), f);
+  }
+  const main = readSrc(path.join(ROOT, 'main.js'));
+  assert.strictEqual((main.match(/WinlinkMailView\.SHIM_DOWN/g) || []).length, 2);
+  assert.strictEqual((main.match(/WinlinkMailView\.AUDIO_DOWN/g) || []).length, 1);
+  assert.ok(/Close POTACAT and open it again/.test(MailView.SHIM_DOWN) && /Close POTACAT and open it again/.test(MailView.AUDIO_DOWN));
+});
+
+test('#435: Check my account says whether Winlink accepted the saved password', () => {
+  assert.deepStrictEqual(MailView.passwordCheck({ ok: true, email: 'a@b.c' }), { ok: true, text: 'Winlink accepted your password.' });
+  assert.strictEqual(MailView.passwordCheck({ ok: false, error: 'recovery email: HTTP 500 — Invalid password' }).ok, false);
+  assert.strictEqual(MailView.passwordCheck({ ok: false, error: 'recovery email: HTTP 400 — Missing callsign or password in config' }).text, 'No Winlink password is saved yet. Type it in Winlink password and press Save.');
+  assert.deepStrictEqual(MailView.passwordCheck({ ok: false, error: 'fetch failed' }), { ok: null, text: 'Could not check the password: fetch failed.' });
+  const app = readSrc(path.join(ROOT, 'renderer', 'app.js'));
+  assert.ok(/WinlinkMailView\.passwordCheck\(pw\)/.test(app), 'the Settings check uses it');
+  assert.ok(/<script src="\.\.\/lib\/winlink-mail-view\.js"><\/script>/.test(readSrc(path.join(ROOT, 'renderer', 'index.html'))), 'loaded in the main window');
+});
+
+test('#435: the desktop Mail window: mode reasons whatever is picked; Ranking, not "Pick a gateway first", while the list loads', () => {
+  const pop = readSrc(path.join(ROOT, 'renderer', 'winlink-popout.js'));
+  assert.ok(!/if \(m\.id === 'telnet'\) \{\s*\/\/ Say WHY/.test(pop), 'reasons no longer only on Internet');
+  assert.ok(/WinlinkMailView\.modeNoteLines\(/.test(pop));
+  assert.ok(/gwLoading \? WinlinkMailView\.connectWaitText\(/.test(pop));
+  assert.ok(pop.includes("note.textContent = r.note && r.note === WinlinkMailView.gridNote('') ? r.note : ''"), 'the grid note is shown, not only a tooltip');
+  assert.ok(/<script src="\.\.\/lib\/winlink-mail-view\.js"><\/script>/.test(readSrc(path.join(ROOT, 'renderer', 'winlink-popout.html'))));
+  assert.deepStrictEqual(MailView.modeNoteLines([{ id: 'telnet', label: 'Internet', available: true }, { id: 'ardop', label: 'ARDOP (radio)', available: false, reason: 'Set up a radio first (Settings > My Rigs)' }]),
+    ['ARDOP (radio) is not available: Set up a radio first (Settings > My Rigs).']);
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

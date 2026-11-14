@@ -123,7 +123,7 @@ The `status` message is a kitchen-sink snapshot. The canonical fields are:
 | `swr` | number | live SWR (Gap 10) |
 | `alc` | number | live ALC (Gap 10) |
 | `power` | number | live wattmeter (Gap 10) |
-| `capabilities` | object | per-rig feature flags (filter, nb, atu, vfo, rfgain, txpower, power) |
+| `capabilities` | object | per-rig feature flags (filter, nb, atu, vfo, rfgain, txpower, power, powerOn). `powerOn` (optional boolean, added 2026-11-13, #485): `false` = the radio can be switched OFF over CAT but not on (`power` is still `true`); show Power Off alone and no Power On. Absent (every older desktop, every other radio) = on and off both, as `power` says. Sent as `false` for the Yaesu FTX-1 Field and FTX-1 Optima (Yaesu FTX-1 CAT manual rev 2508-C p.23: PS Set has only P1=0, power off). A `power-on` rig-control for such a radio is refused with a `tune-blocked` reason. |
 | `vfoLocked` | boolean | VFO lock active |
 | `audioState` | string | WebRTC connection state (when ECHOCAT audio bridge is up) |
 
@@ -255,8 +255,8 @@ for the history.
 | `jtcat-decode` | S→C | Single decode result (live feed). |
 | `jtcat-decode-batch` | S→C | Batch of decodes (initial backlog). |
 | `jtcat-wspr-spots` | S→C | Latest 2-min WSPR spot batch `{ spots[], error? }` — host-enriched (dBm, distance, bearing, DXCC). Replaces the list each cycle; replayed on reconnect. |
-| `jtcat-wspr-beacon` | C→S | Drive the WSPR beacon `{ enabled?, txPct?, dBm? }` (partial = leave unchanged). Host clamps power ≤30 dBm (1 W), owns the attended watchdog + TX path. |
-| `jtcat-wspr-beacon-state` | S→C | Authoritative beacon on/off `{ enabled }` — client sets its toggle from this (confirm/revert), never optimistically. |
+| `jtcat-wspr-beacon` | C→S | Drive the WSPR beacon `{ enabled?, txPct?, dBm?, dBmAuto?, runMin?, runAsked? }` (partial = leave unchanged). The client sends intent only: the host owns the beacon's RF power, the reported dBm, the attended watchdog and the TX path. Reported power (since 2026-11-13, #268): `dBmAuto: true` = report the beacon's own RF power (the default); `dBmAuto: false` with `dBm` = report that fixed value. `dBm` is 0..60 and snapped down to a WSPR value (ending in 0, 3 or 7). A `dBm` alone (no `dBmAuto`, no `enabled`) is a fixed pick. A `dBm` that rides an `enabled` toggle without `dBmAuto` (a client from before Auto) never turns Auto off. |
+| `jtcat-wspr-beacon-state` | S→C | Authoritative beacon on/off `{ enabled, runMin?, runAsked?, slotTx?, txPct?, dBm?, dBmAuto?, beaconWatts? }`. The client sets its toggle from this (confirm/revert), never optimistically. Since 2026-11-13 (#268): `dBm` = the value the beacon reports now (Auto: the highest WSPR value not above `beaconWatts`, e.g. 5 W = 37 dBm), `dBmAuto`, `beaconWatts` = the RF power the beacon runs at (1 W, or the level the operator set while armed). Also sent, with `enabled` as it stands, whenever one of these changes (a new pick, or the operator moving the RF power while the beacon is armed); replayed on reconnect. The connect message's `settings.wsprDbm` is likewise the value reported now (it can be above 30) and `settings.wsprDbmAuto` the mode. Show `dBm` as the reported power; offer Auto plus 0..60 dBm (WSPR values) as the choices. |
 | `jtcat-cycle` | S→C | Cycle boundary tick (for slot indicators). |
 | `jtcat-tx-status` | S→C | Currently transmitting? what message? what slot? |
 | `jtcat-qso-state` | S→C | Active QSO phase tracker. |
@@ -359,7 +359,7 @@ and non-private respectively. The predicate is the thread store's own
 | Message | Dir | Purpose |
 |---|---|---|
 | `sstv-open` | C→S | Open SSTV view (starts decoder). |
-| `sstv-photo` | C→S | TX a photo (mode chosen client-side). |
+| `sstv-photo` | C→S | TX a photo (mode chosen client-side). `{image, mode, freqKhz?}`. `freqKhz` (#357, capability `sstv-send-tune`): the SSTV frequency chosen on the client, a number in kHz. The desktop tunes the radio there BEFORE the picture keys, unless the radio is already within 10 kHz of it. Without `freqKhz` it tunes to the SSTV channel of the radio's band (14.230, 7.171 LSB, 3.845 LSB, 18.161, 21.340, 24.975, 28.680, 50.680) unless the radio is within 10 kHz of an SSTV channel, and to 20 m (day) or 40 m (night) from a band with none. Never to a band the radio is not set up for, never with split on, and never for a Guest Pass picture (the pass is checked where the radio is). Rules: lib/sstv-send.js `sendChannel`. |
 | `sstv-stop` | C→S | Close SSTV. |
 | `sstv-halt-tx` | C→S | Cancel an in-progress TX. |
 | `sstv-get-gallery` | C→S | Pull the RX gallery. |
@@ -368,7 +368,7 @@ and non-private respectively. The predicate is the thread store's own
 | `sstv-compose-state` | S→C | Compose state push: `{bgDataUrl, texts[], mode}`. Each text: `key, label, x, y, fontSize, bold, italic, color, rotation, visible`, and (#327, capability `sstv-text-styles`) `face` (`""`, `plain` or a lib/sstv-templates.js FONTS id), `fontCss`/`fontWeight` (the face as drawn), `outline`, `shadow`, `spacing` (px at the canvas size sent, scaled with x and fontSize on a 640-wide mode). Rules: lib/sstv-templates.js layerStyle / layerFont. |
 | `sstv-rx-image` | S→C | A new RX image is ready. |
 | `sstv-rx-progress` | S→C | RX progress (decoded scanlines). |
-| `sstv-tx-status` | S→C | TX progress. |
+| `sstv-tx-status` | S→C | TX progress. `{state, durationSec?, freqKhz?, error?}`. `state`: `tx` (with `durationSec`), `rx`, or `auto-rx` (Idle Mode SSTV, with `freqKhz`). `error` (#357, capability `sstv-send-tune`; guest refusals carried it since `sstv-guest-check`): a picture was NOT sent, one plain line saying why ("Picture not sent: 14.105 MHz phone is outside US Extra privileges. ..."). It comes with `rx` or `auto-rx`. Show it on the SSTV status line in place of "Ready" until the next send or the next `sstv-tx-status`; never as a blocking alert. Every picture that is not sent ends in one of these, never in silence. |
 | `sstv-wf-bins` | S→C | Waterfall bins for SSTV view. |
 
 ### Winlink (email over radio)
@@ -400,7 +400,8 @@ when they change, carry no `reqId`, and are cached on the server: a device that 
 sent the last `winlink-state`, one `winlink-mailbox` per folder already listed, and the last
 `winlink-session`.
 
-Folders (`box`): `in`, `out`, `sent`, `archive`. Mode ids: `telnet` (internet), `ardop`,
+Folders (`box`): `in`, `out`, `sent`, `archive`, and on a shack that lists `mail-folders-v2`
+also `deleted` (see "Folders: Archive, Deleted, Reply all" below). Mode ids: `telnet` (internet), `ardop`,
 `packet`, and `vara` / `varafm` when the operator has turned them on at the shack. A client
 shows the modes it is sent in `winlink-state.modes` and nothing else.
 
@@ -426,7 +427,8 @@ shows the modes it is sent in `winlink-state.modes` and nothing else.
 | `noticeAccepted`, `noticeText` | boolean, string | Whether the operator accepted the Winlink notice, and its text. Sending is refused until it is accepted (`winlink-accept-notice`). |
 | `mode` | string | The mode in use: the saved choice if it is available, else the first that is. |
 | `modes` | array | `[{id, label, available, reason}]`: every mode the shack offers, in display order. `reason` says why an unavailable one is unavailable, in words to show as they are. |
-| `unread`, `counts` | integer, object | Unread messages in `in`; `{in, out, sent, archive}` totals. |
+| `unread`, `counts` | integer, object | Unread messages in `in`; `{in, out, sent, archive}` totals, plus `deleted` from a shack with `mail-folders-v2`. |
+| `deletedDays` | integer | `mail-folders-v2` only: the Deleted folder removes a message for good this many days after it was deleted: `7`, `30` (the default), `90`, or `0` = never. Set at the shack (the Winlink window's Deleted folder, setting `winlinkDeletedDays`). Its presence is how a client knows the shack keeps a Deleted folder. |
 | `session` | object | The same object `winlink-session` carries. |
 | `autoCheck` | object | The internet auto-check: `{enabled, min, lastAt, lastResult}`. Never a radio session. |
 | `lastGateway` | object or null | The gateway of the last radio session: `{call, mode, dialKhz}`. |
@@ -475,10 +477,11 @@ saved password and is not shown.
 |---|---|---|
 | `winlink-list` | C→S | `{box}`: refresh one folder from Pat. Reply: `winlink-mailbox`. An unknown `box` is read as `in`. |
 | `winlink-read` | C→S | `{box, mid}`: one message with its body. Reply: `winlink-message`, else `winlink-result {op: 'read'}`. Reading an unread message in `in` marks it read on the shack; a `winlink-mailbox` and a `winlink-state` push follow. |
-| `winlink-message` | S→C | `{box, mid, message}`: the message as in `winlink-mailbox`, plus `body`. To the asker only. |
+| `winlink-message` | S→C | `{box, mid, message}`: the message as in `winlink-mailbox`, plus `body`, and `sentRoute` when the shack kept one (see below). To the asker only. |
 | `winlink-attachment-get` | C→S | `{box, mid, name}`: one attachment. Reply: `winlink-attachment`, else `winlink-result {op: 'attachment'}`. An attachment over 2 MB is refused with an error. |
 | `winlink-attachment` | S→C | `{box, mid, name, size, dataBase64}`. To the asker only. |
-| `winlink-delete` | C→S | `{box, mid}`: delete a message. Reply: `winlink-result {op: 'delete'}`; the folder is pushed again. |
+| `winlink-delete` | C→S | `{box, mid}`: delete a message. On a shack with `mail-folders-v2` this MOVES it to `deleted` (from `in`, `out`, `sent` or `archive`; from `out` it is no longer sent), and in `deleted` it removes it for good. An older shack removes it for good. Reply: `winlink-result {op: 'delete'}`; the folders are pushed again. |
+| `winlink-move` | C→S | `mail-folders-v2` only. `{box, mid, to}`: move one message. Allowed: `in` or `sent` to `archive` (Archive); `archive` to `in` or `sent` (Move to Inbox / Move to Sent); `in`, `out`, `sent` or `archive` to `deleted` (the same as `winlink-delete`); `deleted` to `in`, `out`, `sent` or `archive` (Restore; `to` empty = the folder it was deleted from). Anything else is refused with an `error`. Reply: `winlink-result {op: 'move'}`; both folders are pushed again. An older shack drops the type and never replies. |
 | `winlink-compose` | C→S | `{to, subject, cc?, body?, p2p?, attachments?}`: put a message in the Outbox; it goes out on the next session. `attachments` = `[{name, dataBase64}]`, the first 10 are taken. Refused until the notice is accepted. A message to the POTA spot address is split into one message per line of its body. Reply: `winlink-result {op: 'compose'}`. |
 | `winlink-template` | C→S | `{op, id?, name?, to?, cc?, subject?, body?}`: `op` `save` (a new template, or the one with `id`) or `delete` (`id`). Reply: `winlink-result {op: 'template'}`; the list follows in `winlink-state.templates`. |
 | `winlink-contact` | C→S | `{op, id?, name?, address?, note?}`: `op` `save` or `delete`, as for templates. Reply: `winlink-result {op: 'contact'}`; the list follows in `winlink-state.contacts`. |
@@ -486,6 +489,55 @@ saved password and is not shown.
 | `winlink-posreport` | C→S | `{lat?, lon?, comment?}`: queue a Winlink position report in the Outbox. Without `lat` and `lon` the shack uses the centre of its grid, and refuses if no grid is set. Reply: `winlink-result {op: 'posreport'}`. |
 | `winlink-pota-spot-get` | C→S | Ask for the POTA spot form, filled in by the shack. Reply: `winlink-pota-spot`. A shack that predates the message does not answer; the device then builds the line itself. |
 | `winlink-pota-spot` | S→C | `{to, subject, call, parks[], freqKhz, mode, comment, body, missing[], hint}`: the spot message ready to send with `winlink-compose`. `parks` = the live activation's POTA references; `freqKhz` and `mode` = where the radio was before Winlink moved it; `missing` names what the shack could not fill in, and `hint` says it in words. To the asker only. |
+
+#### Folders: Archive, Deleted, Reply all (#462, #475)
+
+A shack that lists `mail-folders-v2` in its hello's `capabilities` keeps a fifth folder,
+`deleted`, and answers `winlink-move`. A client that lists `mail-folders-v2` in its own hello is
+pushed `winlink-mailbox {box: 'deleted'}` (in hydration and on every change); an older client is
+never sent that folder. Any client may ask for it with `winlink-list {box: 'deleted'}`.
+
+- **Where it lives.** Inside Pat's mailbox directory for the station (`<mbox>/<MYCALL>/deleted/`),
+  beside Pat's four. Delete saves the message as Pat gives it (body included) to
+  `deleted/<mid>.json` with `fromBox` and `deletedAt`, then Pat moves `<mid>.b2f` there. The folder
+  is listed and read from those copies, so it works while Pat is stopped. Restore is Pat's move back
+  (a message restored to `out` is put back by the shack with the same rename: Pat's API cannot move
+  into the Outbox).
+- **`winlink-mailbox {box: 'deleted'}` rows** are the message as in any folder, plus `fromBox` (the
+  folder it was deleted from) and `deletedAt` (ISO time). `winlink-message` for a deleted message
+  carries the same two fields and the body. `winlink-attachment-get` does not work in `deleted`
+  (Pat cannot read that folder): restore the message first.
+- **Emptying.** At Winlink start and once a day, the shack removes for good every message deleted
+  more than `winlink-state.deletedDays` days ago (`0` = never).
+- **Reply all** is a client action, not a message: `winlink-compose` with `to` = the sender and `cc`
+  = every address in the original To and Cc except the station's own (the bare call and
+  `call@winlink.org`, any case, any SSID) and except the sender, each once
+  (`lib/winlink-mail-actions.js` `replyAll`). It is a separate button beside Reply, never the
+  default. It works with any shack.
+- **Words** (`lib/winlink-mail-actions.js`): buttons `Reply`, `Reply all`, `Forward`, `Archive`,
+  `Move to Inbox` / `Move to Sent` (in Archive: Sent when the station sent it, else Inbox), `Delete`
+  (`Delete (do not send)` in the Outbox), and in Deleted `Restore to <folder>` and `Delete for good`,
+  which asks once on the button itself: `Delete for good? It cannot be brought back.`
+
+#### How a sent message went out (`message.sentRoute`, #442, added 2026-11-13)
+
+Pat records nothing about how a message left. When a session ends, the shack gives each message
+that was in the Outbox when the session started, is gone from it, and is now in Sent one record,
+kept by message id (`lib/winlink-sent-routes.js`). Archive and Deleted keep the id, so they keep it.
+
+- **Where.** `winlink-message.message.sentRoute`, for `box` `sent`, `archive` and `deleted` only,
+  and only when the shack kept a record. Messages sent before 2026-11-13 (POTACAT before this
+  change), or sent by another program, have none: show nothing, never a guess. Never on `in` or
+  `out`, never in `winlink-mailbox` rows.
+- **Fields.** `{mode, transport, sentAt, gateway?, dialKhz?}`. `mode`: `telnet`, `ardop`, `packet`,
+  `vara`, `varafm`, `mercury`. `transport`: `internet` (telnet) or `radio`. `sentAt`: ISO time the
+  session ended (the message left during it). `gateway` (upper case, with SSID) and `dialKhz` (the
+  dial, kHz) on radio routes only, each when known.
+- **Words** (`lib/winlink-mail-actions.js` `sentRouteLine`), one line in the reader:
+  `Sent 13 Nov 2026 at 14:32 UTC via W5ABC on 7.102 MHz (ARDOP).` or
+  `Sent 13 Nov 2026 at 14:32 UTC over the internet.` Mode words: ARDOP, Packet, VARA HF, VARA FM,
+  Mercury. The dial is in MHz with at least three decimals (145.050 MHz, 10.1455 MHz).
+- Additive: an older client ignores the field; an older shack never sends it.
 
 #### Gateways and sessions
 
@@ -504,7 +556,7 @@ saved password and is not shown.
 | `winlink-retry` | C→S | `{op, reqId?}`, `op` = `cancel` or `now`: act on the automatic retry after a dropped link (Cancel, or Try now). Reply: `winlink-result {op: 'retry'}`. Refused for a Guest Pass. |
 | `winlink-prompt` | C→S | `{id, value}`: answer `session.prompt` (the busy prompt above). No reply; a `winlink-session` push follows. |
 | `winlink-watch` | C→S | `{on}`: subscribe this device to `winlink-spectrum`, or stop. No reply. The shack computes the spectrum only while a device watches; a closed socket ends the subscription. |
-| `winlink-result` | S→C | `{op, ok, error?, reqId?}`: the outcome of a request, to the asker only. `error` is a sentence to show. `op` is one of `read`, `attachment`, `delete`, `compose`, `template`, `contact`, `contact-group`, `posreport`, `gateways`, `history`, `favourite`, `qsy`, `qsy-restore`, `connect`, `abort`, `retry`, `accept-notice`, `account-check`, `set-password`, `register`, `recovery-email`. |
+| `winlink-result` | S→C | `{op, ok, error?, reqId?}`: the outcome of a request, to the asker only. `error` is a sentence to show. `op` is one of `read`, `attachment`, `delete`, `move`, `compose`, `template`, `contact`, `contact-group`, `posreport`, `gateways`, `history`, `favourite`, `qsy`, `qsy-restore`, `connect`, `abort`, `retry`, `accept-notice`, `account-check`, `set-password`, `register`, `recovery-email`. |
 
 #### Account
 

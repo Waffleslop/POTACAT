@@ -441,6 +441,7 @@ async function runSettle({ patBody, outboxAfter, queued, connected = true, modem
   state.applyMailbox('out', JSON.parse(mail(queued)).map((m) => ({ mid: m.MID })));
   const ctx = vm.createContext({
     WinlinkOutcome: O, WinlinkDiag: D, WinlinkModes, winlinkState: state,
+    WinlinkTxLevel: require('../lib/winlink-tx-level'), // #300: the session's levels (test/winlink-tx-level-test.js)
     patClient: new WinlinkClient({ port: pat.port }),
     winlinkLog: (m) => logs.push(m),
     winlinkRadioModeText: () => '', // packet and VARA FM only (#128, test/packet-rig-mode-test.js)
@@ -451,10 +452,10 @@ async function runSettle({ patBody, outboxAfter, queued, connected = true, modem
     console, Date, Math, Promise, String, Number,
   });
   const decl = (name) => { const m = new RegExp(`^(?:let|const) ${name} = [^;]+;`, 'm').exec(main); assert.ok(m, `${name} is declared in main.js`); return m[0]; };
-  const src = ['_winlinkCause', '_winlinkDialed', '_winlinkConnectedAt', '_winlinkQueuedAtStart', '_winlinkModemAudioClosed', '_winlinkTxCutMs',
-    '_winlinkPatLastLine', '_winlinkPatReply', '_winlinkReceived', '_winlinkLinkStory', '_winlinkAudioSummary', '_winlinkSummaries',
+  const src = ['_winlinkCause', '_winlinkDialed', '_winlinkConnectedAt', '_winlinkQueuedAtStart', '_winlinkOutMidsAtStart', '_winlinkModemAudioClosed', '_winlinkTxCutMs',
+    '_winlinkPatLastLine', '_winlinkPatReply', '_winlinkReceived', '_winlinkLinkStory', '_winlinkAudioSummary', '_winlinkLevels', '_winlinkSummaries',
     '_winlinkSessionError', '_winlinkSessionErrorKind', '_winlinkPatConnected', '_winlinkSessionSeq', '_patArqTimeoutAskedS'].map(decl).join('\n')
-    + '\n' + ['winlinkOutcomeReset', 'winlinkNoteCause', 'winlinkOutboxCount', 'winlinkOutcomeFacts', 'winlinkOutcomeView', 'winlinkSettleOutcome'].map((f) => fnBody(main, f)).join('\n')
+    + '\n' + ['winlinkOutcomeReset', 'winlinkNoteCause', 'winlinkOutboxCount', 'winlinkOutboxList', 'winlinkOutcomeFacts', 'winlinkOutcomeView', 'winlinkSettleOutcome'].map((f) => fnBody(main, f)).join('\n')
     + `\nglobalThis.api = {
       reset: winlinkOutcomeReset, settle: winlinkSettleOutcome, facts: winlinkOutcomeFacts, view: winlinkOutcomeView, note: winlinkNoteCause,
       set: (o) => { if ('connected' in o) _winlinkPatConnected = o.connected; if ('dialed' in o) _winlinkDialed = o.dialed; if ('connectedAt' in o) _winlinkConnectedAt = o.connectedAt;

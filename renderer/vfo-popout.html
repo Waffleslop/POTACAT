@@ -1185,6 +1185,12 @@ window.api.onRadioState((s) => {
     sec.style.display = s.power ? '' : 'none';
     sec.classList.toggle('visible', !!s.power);
   }
+  // #485: a radio that can be switched off over CAT but not on (the FTX-1)
+  // shows Power Off alone. Absent powerOn (an older main) keeps both.
+  if (s.powerOn != null) {
+    const onBtn = document.getElementById('vfo-power-on');
+    if (onBtn) onBtn.style.display = s.powerOn ? '' : 'none';
+  }
   // Active VFO + split badges — readback-fed from the radio (LZ3AW). The
   // VFO badge only appears once the rig reports B at least this session,
   // so single-VFO workflows keep today's clean strip.

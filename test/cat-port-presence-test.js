@@ -50,7 +50,7 @@ test('Windows: a port serialport does not list but SERIALCOMM records is present
   assert.ok(P.portListed('com3', listed, 'win32'));
   assert.deepStrictEqual(P.parseSerialCommRegistry(''), []);
   const main = readSrc(path.join(__dirname, '..', 'main.js')).replace(/\r\n/g, '\n');
-  assert.ok(/if \(SerialPortPresence\.portListed\(port, list\)\) return true;[\s\S]{0,300}if \(process\.platform === 'win32'\) return SerialPortPresence\.portListed\(port, await windowsSerialCommPorts\(\)\);/.test(main), 'the registry is asked before a port is called missing');
+  assert.ok(/if \(SerialPortPresence\.portListed\(port, list\)\) return true;[\s\S]{0,300}if \(process\.platform === 'win32'\) \{\s*if \(SerialPortPresence\.portListed\(port, await windowsSerialCommPorts\(\)\)\) return true;/.test(main), 'the registry is asked before a port is called missing');
 });
 
 test('Linux/macOS: a /dev path that exists is present before any list is consulted (KM4CFT, /dev/serial/by-id symlink)', () => {

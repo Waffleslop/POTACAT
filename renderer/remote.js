@@ -1854,7 +1854,8 @@
           // sends, so the desktop must not mix a second copy into RX audio.
           // jtcat-qso-logged: this page says which parks a JTCAT contact was
           // logged at when some were read from the activator's spot comment.
-          capabilities: ['chunked-all-qsos', 'qso-delta', 'chunked-worked-qsos', 'local-cw-sidetone', 'jtcat-qso-logged'],
+          // mail-folders-v2: this page shows the Deleted folder (#475), so the shack may push it.
+          capabilities: ['chunked-all-qsos', 'qso-delta', 'chunked-worked-qsos', 'local-cw-sidetone', 'jtcat-qso-logged', 'mail-folders-v2'],
         }));
       } catch {}
       onOpen();
@@ -3081,14 +3082,18 @@
         if (msg.state === 'tx') {
           sstvPhoneStartTxProgress(msg.durationSec || 0);
           if (sstvPhoneStatus) { sstvPhoneStatus.textContent = 'Transmitting...'; sstvPhoneStatus.style.color = 'var(--accent)'; }
-        } else if (msg.state === 'auto-rx') {
+        } else if (msg.state === 'auto-rx' && !msg.error) {
           if (sstvPhoneStatus) {
             sstvPhoneStatus.textContent = 'Auto-SSTV' + (msg.freqKhz ? ' ' + FreqDots.khzMhz(msg.freqKhz) : '');
             sstvPhoneStatus.style.color = 'var(--pota)';
           }
         } else {
           sstvPhoneStopTxProgress();
-          if (sstvPhoneStatus) { sstvPhoneStatus.textContent = 'Ready'; sstvPhoneStatus.style.color = 'var(--text-dim)'; }
+          // error (#357): a picture was not sent; say why until the next send.
+          if (sstvPhoneStatus) {
+            if (msg.error) { sstvPhoneStatus.textContent = String(msg.error); sstvPhoneStatus.style.color = 'var(--accent)'; }
+            else { sstvPhoneStatus.textContent = 'Ready'; sstvPhoneStatus.style.color = 'var(--text-dim)'; }
+          }
         }
         sstvPhoneUpdateSendBtn();
         break;
@@ -3281,6 +3286,12 @@
       if (rcPowerGroup) rcPowerGroup.classList.toggle('hidden', !s.capabilities.power);
       const vfPowerRow = document.getElementById('vf-power-row');
       if (vfPowerRow) vfPowerRow.classList.toggle('hidden', !s.capabilities.power);
+      // #485: powerOn false = off over CAT but not on (FTX-1): Off alone.
+      const offOnly = s.capabilities.powerOn === false;
+      const rcPowerOn = document.getElementById('rc-power-on');
+      if (rcPowerOn) rcPowerOn.classList.toggle('hidden', offOnly);
+      const vfPowerOn = document.getElementById('vf-power-on-btn');
+      if (vfPowerOn) vfPowerOn.classList.toggle('hidden', offOnly);
       // Clamp TX power slider to radio's min/max
       if (s.capabilities.minPower != null) rcTxPowerSlider.min = s.capabilities.minPower;
       if (s.capabilities.maxPower != null) rcTxPowerSlider.max = s.capabilities.maxPower;
@@ -9287,8 +9298,22 @@
         wsprTxPct.value = echoSettings.wsprTxPct;
         wsprTxPctVal.textContent = echoSettings.wsprTxPct + '%';
       }
-      if (typeof echoSettings.wsprDbm === 'number') wsprDbm.value = String(Math.min(30, echoSettings.wsprDbm));
+      if (typeof echoSettings.wsprDbm === 'number') wsprRenderDbm({ dBm: echoSettings.wsprDbm, dBmAuto: echoSettings.wsprDbmAuto });
     }
+  }
+
+  // The Reported power menu: Auto (follows the beacon's RF power, #268) or a
+  // fixed WSPR value 0..60 dBm. Drawn from the host's state by the same
+  // lib/wspr/dbm.js the JTCAT window uses, so both show the same value.
+  function wsprRenderDbm(st) {
+    if (!wsprDbm || !window.WsprDbm || !st || st.dBm == null) return;
+    const m = window.WsprDbm.menu(st);
+    if (wsprDbm.options.length !== m.options.length) {
+      wsprDbm.innerHTML = '';
+      for (const o of m.options) { const el = document.createElement('option'); el.value = o.value; wsprDbm.appendChild(el); }
+    }
+    m.options.forEach((o, i) => { wsprDbm.options[i].textContent = o.text; });
+    wsprDbm.value = m.value;
   }
 
   function wsprHandleSpots(msg) {
@@ -9335,12 +9360,14 @@
     // renders ONLY from here, never from the local tap.
     wsprBeaconOn = !!msg.enabled;
     if (wsprTxEnable) wsprTxEnable.checked = wsprBeaconOn;
+    wsprRenderDbm(msg);
   }
 
   if (wsprTxEnable) wsprTxEnable.addEventListener('change', () => {
     const wanted = wsprTxEnable.checked;
     wsprTxEnable.checked = wsprBeaconOn; // optimistic-free: revert; the state echo flips it
-    ft8Send({ type: 'jtcat-wspr-beacon', enabled: wanted, txPct: parseInt(wsprTxPct.value, 10), dBm: Math.min(30, parseInt(wsprDbm.value, 10)) });
+    // The reported power is the host's (Auto or the fixed pick); not resent here.
+    ft8Send({ type: 'jtcat-wspr-beacon', enabled: wanted, txPct: parseInt(wsprTxPct.value, 10) });
   });
   if (wsprTxPct) wsprTxPct.addEventListener('input', () => {
     wsprTxPctVal.textContent = wsprTxPct.value + '%';
@@ -9349,7 +9376,8 @@
     ft8Send({ type: 'jtcat-wspr-beacon', txPct: parseInt(wsprTxPct.value, 10) });
   });
   if (wsprDbm) wsprDbm.addEventListener('change', () => {
-    ft8Send({ type: 'jtcat-wspr-beacon', dBm: Math.min(30, parseInt(wsprDbm.value, 10)) });
+    if (!window.WsprDbm) return;
+    ft8Send(Object.assign({ type: 'jtcat-wspr-beacon' }, window.WsprDbm.controlFromMenu(wsprDbm.value)));
   });
 
   // 120s cycle phase/countdown — same window math as the popout: the TX
@@ -14418,7 +14446,12 @@ var _paddleHoldTimer = { dit: null, dah: null };
       var dataUrl = sstvPhoneCompose.toDataURL('image/jpeg', 0.9);
       var modeEl = document.getElementById('sstv-mode-phone');
       var mode = modeEl ? modeEl.value : 'martin1';
-      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'sstv-photo', image: dataUrl, mode: mode }));
+      // freqKhz: the channel shown here. The shack tunes there before the
+      // picture keys, unless the radio is already within 10 kHz of it (#357).
+      var sendKhz = sstvFreqPhone ? parseInt(sstvFreqPhone.value, 10) : 0;
+      var photoMsg = { type: 'sstv-photo', image: dataUrl, mode: mode };
+      if (sendKhz > 0) photoMsg.freqKhz = sendKhz;
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(photoMsg));
       if (sstvPhoneStatus) { sstvPhoneStatus.textContent = 'Sending...'; sstvPhoneStatus.style.color = 'var(--accent)'; }
     });
   }
@@ -15552,8 +15585,9 @@ var _paddleHoldTimer = { dit: null, dah: null };
   // on the right (remote.css, a container query). Every word from the shack
   // is set with textContent; rows and cards are built with createElement.
   var MailView = window.WinlinkMailView;
+  var MailActions = window.WinlinkMailActions;
   var mailState = null;
-  var mailLists = { in: [], out: [], sent: [], archive: [] };
+  var mailLists = { in: [], out: [], sent: [], archive: [], deleted: [] };
   var mailBox = 'in';
   var mailGateways = [];
   var mailPick = -1;          // index into mailGateways of the gateway picked
@@ -15630,10 +15664,12 @@ var _paddleHoldTimer = { dit: null, dah: null };
         break;
       case 'winlink-result':
         if (msg.op === 'account-check' || msg.op === 'register' || msg.op === 'set-password') { mailAcctResult(msg); break; }
-        if (msg.op === 'gateways') { if (!msg.ok) mailGatewaysFailed(msg); break; }
+        // 'gateways-get' is the shack's answer when the request itself threw (#435).
+        if (msg.op === 'gateways' || msg.op === 'gateways-get') { if (!msg.ok) mailGatewaysFailed(msg); break; }
         // The shack tuned to the picked gateway: this page now owes it a restore.
         if (msg.op === 'qsy' && msg.ok) { mailQsyMoved = true; mailRenderBar(); }
         if (!msg.ok && msg.error) showToast(msg.error, 5000, true);
+        else if (msg.ok && (msg.op === 'move' || msg.op === 'delete') && mailDoneWord) { showToast(mailDoneWord, 3000); mailDoneWord = ''; }
         else if (msg.ok && msg.op === 'compose') { showToast('In the Outbox. It goes out on the next Send / Receive.', 3000); mailShowList(); }
         break;
       case 'winlink-refused':
@@ -15861,10 +15897,15 @@ var _paddleHoldTimer = { dit: null, dah: null };
   function mailRenderFolders() {
     var box = mailEl('mail-folders');
     if (!box) return;
+    // The Deleted folder only from a shack that keeps one (#475, mail-folders-v2).
+    var v2 = mailFoldersV2();
+    box.className = 'mail-seg mail-seg-' + (v2 ? 5 : 4);
+    if (!v2 && mailBox === 'deleted') mailBox = 'in';
     Array.prototype.forEach.call(box.querySelectorAll('[data-box]'), function (b) {
       var id = b.getAttribute('data-box');
       b.textContent = MailView.folderLabel(id, mailState);
       b.setAttribute('aria-pressed', id === mailBox ? 'true' : 'false');
+      if (id === 'deleted') b.classList.toggle('hidden', !v2);
     });
   }
 
@@ -15997,8 +16038,11 @@ var _paddleHoldTimer = { dit: null, dah: null };
     var el = mailEl('mail-list');
     if (!el) return;
     el.textContent = '';
+    // How long the Deleted folder keeps a message; the choice is made at the shack (#475).
+    if (mailBox === 'deleted') el.appendChild(mailMake('div', 'mail-list-empty mail-del-note', MailActions.deletedFolderNote(mailState && mailState.deletedDays)));
     rows.forEach(function (m) {
-      var who = mailBox === 'in' ? m.from : (m.to || []).join(', ');
+      var fromOther = mailBox === 'in' || ((mailBox === 'archive' || mailBox === 'deleted') && !MailActions.isOwnAddress(m.from, mailState && mailState.mycall));
+      var who = fromOther ? m.from : (m.to || []).join(', ');
       var b = mailMake('button', 'mail-row' + (m.read ? '' : ' mail-unread'));
       b.type = 'button';
       b.setAttribute('data-mid', m.mid);
@@ -16018,13 +16062,36 @@ var _paddleHoldTimer = { dit: null, dah: null };
   }
 
   // ── reading ───────────────────────────────────────────────────────────
+  // The reader's buttons come from lib/winlink-mail-actions.js (#462, #475):
+  // the same buttons, order and words as the desktop Winlink window. Archive,
+  // Move back, Restore and the Deleted folder need a shack that lists
+  // mail-folders-v2 (it sends winlink-state.deletedDays); Reply all is a
+  // compose with Cc and works with any shack.
+  var MAIL_BTN = { reply: 'mail-reply', 'reply-all': 'mail-reply-all', archive: 'mail-archive', 'move-back': 'mail-move-back', delete: 'mail-del', restore: 'mail-restore', 'delete-for-good': 'mail-del' };
+  var MAIL_V2_ONLY = { archive: 1, 'move-back': 1, restore: 1, 'delete-for-good': 1 };
   var mailDelArmed = null;
+  var mailDoneWord = '';      // the toast for the move / delete just asked
+  function mailFoldersV2() { return !!mailState && typeof mailState.deletedDays === 'number'; }
   function mailShowMessage(msg) {
     var m = msg.message || {};
     mailReadMid = msg.mid;
+    var deleted = msg.box === MailActions.DELETED;
     mailEl('mail-read-subject').textContent = m.subject || '(no subject)';
     // The time the way the list says it: "1431z" today, else "Nov 10".
     mailEl('mail-read-meta').textContent = ['From ' + (m.from || ''), 'to ' + (m.to || []).join(', '), m.date ? MailView.shortTime(m.date) : ''].filter(Boolean).join(' · ');
+    var cc = mailEl('mail-read-cc');
+    cc.textContent = m.cc && m.cc.length ? 'Cc ' + m.cc.join(', ') : '';
+    cc.classList.toggle('hidden', !(m.cc && m.cc.length));
+    var note = mailEl('mail-read-note');
+    note.textContent = deleted ? MailActions.deletedNote(m, mailState && mailState.deletedDays, Date.now()) : '';
+    note.classList.toggle('hidden', !deleted);
+    // How it went out (#442): message.sentRoute, from a shack that kept it; nothing otherwise.
+    var route = mailEl('mail-read-route');
+    if (route) {
+      var routeText = MailActions.sentRouteLine(m.sentRoute);
+      route.textContent = routeText;
+      route.classList.toggle('hidden', !routeText);
+    }
     mailEl('mail-read-body').textContent = m.body || '';
     var atts = mailEl('mail-read-atts');
     atts.textContent = '';
@@ -16032,30 +16099,56 @@ var _paddleHoldTimer = { dit: null, dah: null };
       var card = mailMake('div', 'mail-card mail-att');
       var t = mailMake('div', 'mail-att-text');
       t.appendChild(mailMake('div', 'mail-att-name', a.name + (a.size ? ' · ' + Math.max(1, Math.round(a.size / 1024)) + ' kB' : '')));
-      t.appendChild(mailMake('div', 'mail-muted', 'Attachment'));
+      // The shack's Pat cannot read its Deleted folder: Restore first, then Save.
+      t.appendChild(mailMake('div', 'mail-muted', deleted ? 'Restore the message to save it' : 'Attachment'));
       card.appendChild(t);
-      var save = mailMake('button', 'mail-btn mail-btn-fit', 'Save');
-      save.type = 'button';
-      save.setAttribute('aria-label', 'Save ' + a.name);
-      save.onclick = function () { mailSend({ type: 'winlink-attachment-get', box: msg.box, mid: msg.mid, name: a.name }); };
-      card.appendChild(save);
+      if (!deleted) {
+        var save = mailMake('button', 'mail-btn mail-btn-fit', 'Save');
+        save.type = 'button';
+        save.setAttribute('aria-label', 'Save ' + a.name);
+        save.onclick = function () { mailSend({ type: 'winlink-attachment-get', box: msg.box, mid: msg.mid, name: a.name }); };
+        card.appendChild(save);
+      }
       atts.appendChild(card);
     });
-    var rp = mailEl('mail-reply');
-    rp.classList.toggle('hidden', msg.box !== 'in');
-    rp.onclick = function () { mailCompose(m.from, /^re:/i.test(m.subject) ? m.subject : 'Re: ' + m.subject); };
-    var del = mailEl('mail-del');
+    var row = mailEl('mail-read-actions');
+    row.textContent = '';
     if (mailDelArmed) { clearTimeout(mailDelArmed); mailDelArmed = null; }
-    del.textContent = 'Delete';
-    del.onclick = function () {
-      if (!mailDelArmed) {
-        del.textContent = 'Delete this message?';
-        mailDelArmed = setTimeout(function () { mailDelArmed = null; del.textContent = 'Delete'; }, 5000);
-        return;
-      }
-      clearTimeout(mailDelArmed); mailDelArmed = null;
-      mailSend({ type: 'winlink-delete', box: msg.box, mid: msg.mid }); mailShowList();
-    };
+    var v2 = mailFoldersV2();
+    MailActions.readerActions(msg.box, m, mailState && mailState.mycall).forEach(function (a) {
+      if (!MAIL_BTN[a.id] || (MAIL_V2_ONLY[a.id] && !v2)) return;
+      var b = mailMake('button', 'mail-btn mail-btn-fit' + (a.danger ? ' mail-btn-danger' : a.id === 'reply' ? ' mail-btn-main' : ''), a.label);
+      b.type = 'button';
+      b.id = MAIL_BTN[a.id];
+      if (a.id === 'reply') b.onclick = function () { mailCompose(m.from, MailActions.replySubject(m.subject)); };
+      else if (a.id === 'reply-all') b.onclick = function () { var ra = MailActions.replyAll(m, mailState && mailState.mycall); mailCompose(ra.to.join(', '), MailActions.replySubject(m.subject), ra.cc.join(', ')); };
+      else if (a.id === 'delete') b.onclick = function () {
+        // Undoable on a shack with the Deleted folder; an older shack deletes for good, so it asks first.
+        if (!v2 && !mailDelArmed) {
+          b.textContent = 'Delete this message?';
+          mailDelArmed = setTimeout(function () { mailDelArmed = null; b.textContent = a.label; }, 5000);
+          return;
+        }
+        if (mailDelArmed) { clearTimeout(mailDelArmed); mailDelArmed = null; }
+        mailDoneWord = v2 ? 'Moved to Deleted.' : '';
+        mailSend({ type: 'winlink-delete', box: msg.box, mid: msg.mid }); mailShowList();
+      };
+      else if (a.id === 'delete-for-good') b.onclick = function () {
+        if (!mailDelArmed) {
+          b.textContent = MailActions.DELETE_FOR_GOOD_CONFIRM;
+          mailDelArmed = setTimeout(function () { mailDelArmed = null; b.textContent = a.label; }, 6000);
+          return;
+        }
+        clearTimeout(mailDelArmed); mailDelArmed = null;
+        mailDoneWord = 'Deleted for good.';
+        mailSend({ type: 'winlink-delete', box: msg.box, mid: msg.mid }); mailShowList();
+      };
+      else if (a.to) b.onclick = function () {
+        mailDoneWord = 'Moved to ' + MailActions.folderName(a.to) + '.';
+        mailSend({ type: 'winlink-move', box: msg.box, mid: msg.mid, to: a.to }); mailShowList();
+      };
+      row.appendChild(b);
+    });
     mailGo('read');
   }
 
@@ -16065,9 +16158,10 @@ var _paddleHoldTimer = { dit: null, dah: null };
     mailEl('mail-notice-text').textContent = (mailState && mailState.noticeText) || '';
     mailEl('mail-notice').classList.remove('hidden');
   }
-  function mailCompose(to, subj) {
+  function mailCompose(to, subj, cc) {
     mailRequireNotice(function () {
       mailEl('mail-to').value = to || '';
+      mailEl('mail-cc').value = cc || '';
       mailEl('mail-subj').value = subj || '';
       mailEl('mail-body').value = '';
       mailEl('mail-err').textContent = '';
@@ -16143,13 +16237,14 @@ var _paddleHoldTimer = { dit: null, dah: null };
     mailRenderGateways();
     mailGwStatus(MailView.gatewayNote(msg), false);
   }
-  function mailGatewaysFailed(msg) {
+  function mailGatewaysFailed(msg, f) {
     if (msg.reqId && msg.reqId !== mailGwReqId) return;
     mailGwStopTimer();
     mailGwLoaded = true;
+    mailGwReqId = '';   // a late answer to the request given up on is not drawn
     mailGateways = [];
     mailPick = -1;
-    var f = MailView.gatewaysFailed(msg.error);
+    f = f || MailView.gatewaysFailed(msg.error);
     mailGwMessage(f.option);
     mailEl('mail-gw-retry').textContent = f.button;
     mailGwStatus(f.text, true);
@@ -16165,13 +16260,24 @@ var _paddleHoldTimer = { dit: null, dah: null };
     mailGwLoaded = false;
     var head = mailEl('mail-gw-head');
     if (head) head.textContent = 'Gateway';
+    mailGwReqId = 'gw' + (++mailGwSeq);
+    // No link to the shack: the request would be dropped and the list would
+    // say Loading for ever. Say so, with Try again (#435).
+    if (!(ws && ws.readyState === WebSocket.OPEN)) {
+      mailGatewaysFailed({}, { option: MailView.gatewaysTimedOut().option, text: MailView.NOT_CONNECTED, button: MailView.TRY_AGAIN });
+      return;
+    }
     mailGwMessage(MailView.loadingText(mode, s.predictionOn));
     // How long the ranking has run, and about how long the last one took.
+    // The same tick gives up when the shack has not answered in time (#435).
     var t0 = Date.now();
-    var tick = function () { mailGwStatus(MailView.predictText({ mode: mode, predictionOn: s.predictionOn, predictMs: s.predictMs, elapsedMs: Date.now() - t0 }), false); };
+    var waitMs = MailView.gatewayWait(mode, s.predictionOn);
+    var tick = function () {
+      if (Date.now() - t0 > waitMs) { mailGatewaysFailed({}, MailView.gatewaysTimedOut()); return; }
+      mailGwStatus(MailView.predictText({ mode: mode, predictionOn: s.predictionOn, predictMs: s.predictMs, elapsedMs: Date.now() - t0 }), false);
+    };
     tick();
-    if (mailEl('mail-gw-note').textContent) mailGwTimer = setInterval(tick, 1000);
-    mailGwReqId = 'gw' + (++mailGwSeq);
+    mailGwTimer = setInterval(tick, 1000);
     mailRenderBar();
     mailSend({ type: 'winlink-gateways-get', mode: mode, band: mailBand, reqId: mailGwReqId });
   }
@@ -16198,7 +16304,8 @@ var _paddleHoldTimer = { dit: null, dah: null };
     var line = mailEl('mail-radio-line');
     var text = '';
     if (!active && mode !== 'telnet') {
-      if (!g) text = mailGwLoaded ? 'No gateway to call on this band.' : 'Waiting for the gateway list.';
+      // While the list is fetched or ranked (up to about two minutes) the line says so (#435).
+      if (!g) text = mailGwLoaded ? 'No gateway to call on this band.' : MailView.connectWaitText(mode, (mailState || {}).predictionOn);
       else if (mailQsyMoved) text = 'The radio is set for ' + g.call + (g.dialKhz ? ' on ' + FreqDots.khzMhz(g.dialKhz) : '') + '. It goes back when you leave Mail.';
       else text = 'Tap a gateway to tune the radio to it, or connect now.';
     }
@@ -16212,7 +16319,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
       var o = { type: 'winlink-connect', mode: mode };
       if (mode !== 'telnet') {
         var g = mailGateways[mailPick];
-        if (!g) { showToast('Pick a gateway first', 3000, true); return; }
+        if (!g) { showToast(mailGwLoaded ? 'Pick a gateway first' : MailView.connectWaitText(mode, (mailState || {}).predictionOn), 3000, true); return; }
         o.gateway = g.call; o.dialKhz = g.dialKhz; o.url = g.url;
       }
       mailSend(o);
@@ -16247,7 +16354,9 @@ var _paddleHoldTimer = { dit: null, dah: null };
     mailEl('mail-queue').addEventListener('click', function () {
       if (!mailEl('mail-to').value.trim() || !mailEl('mail-subj').value.trim()) { mailEl('mail-err').textContent = 'Add a recipient and a subject'; return; }
       mailEl('mail-err').textContent = '';
-      mailSend({ type: 'winlink-compose', to: mailEl('mail-to').value, subject: mailEl('mail-subj').value, body: mailEl('mail-body').value });
+      var out = { type: 'winlink-compose', to: mailEl('mail-to').value, subject: mailEl('mail-subj').value, body: mailEl('mail-body').value };
+      if (mailEl('mail-cc').value.trim()) out.cc = mailEl('mail-cc').value;
+      mailSend(out);
     });
     mailEl('mail-gw-retry').addEventListener('click', mailLoadGateways);
     mailEl('mail-acct-retry').addEventListener('click', mailAcctCheck);

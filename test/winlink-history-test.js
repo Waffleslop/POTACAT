@@ -153,7 +153,8 @@ test('the mail window: History above Settings, the dial beside the gateway, butt
   assert.ok(/winlinkPopoutWin\.webContents\.send\('cat-frequency', hz\)/.test(main), 'the dial is the radio\'s own reading');
   assert.ok(/\.wl-folders \{ width: 150px/.test(html) && /\.wl-folders \.wl-btn \{ box-sizing: border-box; width: calc\(100% - 20px\)/.test(html), 'Position report fits its column');
   assert.ok(!/id="wl-gw-note"[^>]*>[^<]+</.test(html));
-  assert.ok(/id="wl-forward">Forward/.test(js) && !/id=\\?"wl-fwd\\?">Forward/.test(js), 'Forward no longer shares the PWR meter\'s id');
+  // The reader's buttons are built from lib/winlink-mail-actions.js (#475); Forward's id is in READER_BTN.
+  assert.ok(/forward: 'wl-forward'/.test(js) && !/forward: 'wl-fwd'/.test(js), 'Forward no longer shares the PWR meter\'s id');
 });
 
 test('theme colours only in the new styles', () => {

@@ -366,6 +366,10 @@ contextBridge.exposeInMainWorld('api', {
   onCatLogHistory: (cb) => ipcRenderer.on('cat-log-history', (_e, lines) => cb(lines)),
   markBugReportStart: () => ipcRenderer.invoke('bug-report-mark'),
   getBugReportLog: () => ipcRenderer.invoke('get-bug-report-log'),
+  // #463: macOS microphone permission (lib/mac-mic-access.js; main decides, off macOS a no-op).
+  macMicCaptureStart: (surface) => ipcRenderer.invoke('mac-mic-capture-start', surface),
+  macMicSilence: (o) => ipcRenderer.send('mac-mic-silence', o),
+  onMacMicNotice: (cb) => ipcRenderer.on('mac-mic-notice', (_e, d) => cb(d)),
   lotwLocations: () => ipcRenderer.invoke('lotw-locations'),
   lotwUpload: (opts) => ipcRenderer.invoke('lotw-upload', opts),
   lotwDownloadConfirmations: (opts) => ipcRenderer.invoke('lotw-download-confirmations', opts),
