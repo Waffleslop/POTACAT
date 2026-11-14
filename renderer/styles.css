@@ -3619,6 +3619,11 @@ dialog {
   color: var(--text-primary);
 }
 .displaced-banner.hidden { display: none; }
+/* Guest Pass notices that are a wait, not an ending (#541): warning, not red. */
+.displaced-banner.pass-good {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--warn) 22%, var(--bg-primary)), var(--bg-primary));
+  border-bottom-color: var(--warn);
+}
 .displaced-banner-msg { flex: 1; line-height: 1.4; }
 .displaced-banner-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .displaced-banner-actions button {

@@ -139,6 +139,13 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('remote-client-ptt-released', handler);
     return () => ipcRenderer.removeListener('remote-client-ptt-released', handler);
   },
+  // Guest Pass: the owner took the radio back ({paused:true}) or handed it
+  // back ({paused:false}). #541
+  onRemotePassHold: (cb) => {
+    const handler = (_e, info) => cb(info || {});
+    ipcRenderer.on('remote-pass-hold', handler);
+    return () => ipcRenderer.removeListener('remote-pass-hold', handler);
+  },
   onRemoteClientDisplaced: (cb) => {
     const handler = (_e, info) => cb(info);
     ipcRenderer.on('remote-client-displaced', handler);

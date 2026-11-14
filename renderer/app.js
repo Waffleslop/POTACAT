@@ -7930,6 +7930,7 @@ async function _remoteRadiosRefreshList() {
     const dotClass = (() => {
       if (isActive && status.state === 'connected') return 'connected';
       if (isActive && status.state === 'auth-fail') return 'expired';
+      if (isActive && (status.state === 'waiting' || status.state === 'standby')) return '';
       if (t.expiresAt != null && t.expiresAt < Date.now()) return 'expired';
       if (t.lastConnectedAt && (Date.now() - t.lastConnectedAt > 7 * 86400 * 1000)) return 'unreachable';
       return '';
@@ -7947,8 +7948,31 @@ async function _remoteRadiosRefreshList() {
     else trustBadgeHtml = '<span class="rr-badge guest">Guest</span>';
     const expBadgeHtml = expBadgeRaw ? '<span class="rr-badge leg">' + _esc(expBadgeRaw) + '</span>' : '<span class="rr-badge leg">no expiry</span>';
     const legBadge = (isActive && status.leg) ? '<span class="rr-badge leg">via ' + _esc(status.leg) + '</span>' : '';
+    // Guest Pass wording comes from lib/pass-wording.js, the same words
+    // ECHOCAT Web uses: a waiting pass never reads as a dead one (#541).
+    const passWords = (w) => (w.title ? '<b>' + _esc(w.title) + '</b>' : '') + (w.title && w.line ? ' ' : '') + _esc(w.line || '');
+    const passOwner = t.ownerCallsign || '';
     const stateLine = (() => {
       if (isActive && status.state === 'connected') return '<b>Connected.</b> Last used ' + _esc(fmtAge(t.lastConnectedAt));
+      if (t.kind === 'pass' && window.PassWording) {
+        if (isActive && status.state === 'waiting') {
+          return passWords(PassWording.describe({ kind: 'auth-fail', code: status.code, at: status.passAt, reason: status.passReason, by: status.by, owner: passOwner }));
+        }
+        if (isActive && status.state === 'auth-fail') {
+          return passWords(PassWording.describe({ kind: 'auth-fail', code: status.code, at: status.passAt, reason: status.passReason, owner: passOwner, endsAt: t.expiresAt }));
+        }
+        if (isActive && status.state === 'standby') {
+          return passWords(PassWording.describe({ kind: 'kicked', device: _remoteStandbyDevice, owner: passOwner }));
+        }
+        if (t.passEndReason && PassWording.isTerminalEndReason(t.passEndReason)) {
+          return passWords(PassWording.describe({ kind: 'pass-ended', reason: t.passEndReason, owner: passOwner, endsAt: t.expiresAt }));
+        }
+        if (!isActive && t.passSessionClosed && !(t.expiresAt != null && t.expiresAt <= Date.now())) {
+          return passWords(PassWording.describe({ kind: 'pass-ended', reason: 'left', owner: passOwner }));
+        }
+      }
+      if (isActive && status.state === 'waiting') return '<b>Waiting for the shack.</b> Trying again.';
+      if (isActive && status.state === 'standby') return '<b>Standing by.</b> Another device has the rig.';
       if (isActive && status.state === 'connecting') return '<b>Connecting&hellip;</b>';
       if (isActive && status.state === 'authing') return '<b>Authenticating&hellip;</b>';
       if (isActive && status.state === 'auth-fail') {
@@ -7960,7 +7984,9 @@ async function _remoteRadiosRefreshList() {
       }
       if (isActive && status.state === 'disconnected') return '<b>Reconnecting&hellip;</b>';
       if (t.kind === 'pass' && t.expiresAt != null && t.expiresAt <= Date.now()) {
-        return '<b>Session ended.</b> Ask the owner for a fresh pass to reconnect.';
+        return window.PassWording
+          ? passWords(PassWording.describe({ kind: 'pass-ended', reason: 'expired', owner: passOwner, endsAt: t.expiresAt }))
+          : '<b>Session ended.</b> Ask the owner for a fresh pass to reconnect.';
       }
       return 'Last connected ' + _esc(fmtAge(t.lastConnectedAt));
     })();
@@ -7973,6 +7999,16 @@ async function _remoteRadiosRefreshList() {
       }
       if (isActive && (status.state === 'connecting' || status.state === 'authing' || status.state === 'disconnected')) {
         return '<button type="button" data-act="rr-disconnect" data-id="' + _esc(t.id) + '">Cancel</button>';
+      }
+      // Waiting out a busy rig / a Cloud check, or standing by after another
+      // device took the rig: ask now, or stop asking.
+      if (isActive && (status.state === 'waiting' || status.state === 'standby')) {
+        const label = status.state === 'waiting' ? 'Try now' : (t.kind === 'pass' ? 'Use it here instead' : 'Connect');
+        return '<button type="button" class="primary" data-act="rr-connect" data-id="' + _esc(t.id) + '">' + label + '</button>'
+          + '<button type="button" data-act="rr-disconnect" data-id="' + _esc(t.id) + '">Cancel</button>';
+      }
+      if (t.kind === 'pass' && !isActive && t.passSessionClosed && !(t.expiresAt != null && t.expiresAt <= Date.now())) {
+        return '<button type="button" class="primary" data-act="rr-connect" data-id="' + _esc(t.id) + '">Connect again</button>';
       }
       return '<button type="button" class="primary" data-act="rr-connect" data-id="' + _esc(t.id) + '">Connect</button>';
     })();
@@ -8226,7 +8262,16 @@ if (window.api && window.api.onLogError) {
   window.api.onLogError(_showLogErrorModal);
 }
 
-function _displacedBannerShow(info) {
+// The platform of the device that took the rig, for the Remote Radios row.
+let _remoteStandbyDevice = '';
+// The owner holds the radio this Guest Pass rides on (pass-paused).
+let _remotePassHeld = false;
+
+// Guest Pass notices (#541): waiting for a busy rig or a Cloud check, the
+// owner holding the radio, a session closed with the pass still good, or
+// the pass over. Same bar as the displacement banner; the words come from
+// lib/pass-wording.js (shared with ECHOCAT Web). action: {label, targetId}.
+function _passBannerShow(words, targetId) {
   let banner = document.getElementById('displaced-banner');
   if (!banner) {
     banner = document.createElement('div');
@@ -8234,6 +8279,46 @@ function _displacedBannerShow(info) {
     banner.className = 'displaced-banner';
     document.body.appendChild(banner);
   }
+  banner.classList.toggle('pass-good', !!words.stillGood || !words.terminal);
+  const msg = (words.title ? '<b>' + _esc(words.title) + '</b>' : '') + (words.title && words.line ? ' ' : '') + _esc(words.line || '');
+  banner.innerHTML = '<div class="displaced-banner-msg">' + msg + '</div>'
+    + '<div class="displaced-banner-actions">'
+    + (words.action && targetId ? '<button type="button" id="pass-banner-act" class="primary">' + _esc(words.action) + '</button>' : '')
+    + '<button type="button" id="displaced-dismiss">Dismiss</button>'
+    + '</div>';
+  banner.classList.remove('hidden');
+  banner.dataset.kind = 'pass';
+  document.getElementById('displaced-dismiss').addEventListener('click', () => banner.classList.add('hidden'));
+  const act = document.getElementById('pass-banner-act');
+  if (act) act.addEventListener('click', async () => {
+    banner.classList.add('hidden');
+    try { await window.api.connectionTargetsActivate(targetId); } catch (err) { alert('Connect failed: ' + (err.message || err)); }
+    _remoteRadiosRefreshList();
+  });
+}
+function _passBannerHide() {
+  const banner = document.getElementById('displaced-banner');
+  if (banner && banner.dataset.kind === 'pass') banner.classList.add('hidden');
+}
+
+function _displacedBannerShow(info) {
+  _remoteStandbyDevice = (info && info.byPlatform) || '';
+  if (info && info.kind === 'pass' && window.PassWording) {
+    // A guest's other device has the radio; the pass is fine.
+    window.api.connectionTargetsGetStatus().then((st) => {
+      _passBannerShow(PassWording.describe({ kind: 'kicked', device: info.byPlatform, owner: info.owner }), st && st.targetId);
+    }).catch(() => {});
+    return;
+  }
+  let banner = document.getElementById('displaced-banner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'displaced-banner';
+    banner.className = 'displaced-banner';
+    document.body.appendChild(banner);
+  }
+  banner.dataset.kind = 'displaced';
+  banner.classList.remove('pass-good');
   const platform = (info.byPlatform || '').toLowerCase();
   const friendly = (() => {
     if (platform.includes('ios')) return '📱 Your iPhone took over the rig.';
@@ -8296,7 +8381,8 @@ if (window.api && window.api.onRemoteClientDisplaced) {
       const rtt = Number.isFinite(remoteShack.rttMs) ? (' · ' + remoteShack.rttMs + ' ms') : '';
       const silent = remoteShack.audioElsewhere ? ' · AUDIO ON ANOTHER DEVICE' : (remoteShack.audioSilent ? ' · NO AUDIO' : '');
       const also = (remoteShack.alsoConnected && remoteShack.alsoConnected.length) ? ' · +' + remoteShack.alsoConnected.length : '';
-      chip.textContent = '🔗 ' + name + rig + leg + rtt + also + silent;
+      const held = _remotePassHeld ? ' · OWNER HAS THE RADIO' : '';
+      chip.textContent = '🔗 ' + name + rig + leg + rtt + also + held + silent;
       chip.style.background = '#4ecca3';
       chip.style.color = '#0a1a14';
       // The chip shortens with "..." when the bar is full (#298); the whole line is here.
@@ -8308,21 +8394,43 @@ if (window.api && window.api.onRemoteClientDisplaced) {
       chip.style.background = '#d4a64a';
       chip.style.color = '#1a1a2e';
       chip.title = 'Dialing ' + name + '…';
+    } else if (state.state === 'waiting' || state.state === 'standby') {
+      // Not a dead link: waiting out a busy rig or a Cloud check, or another
+      // device has the rig and this PC stands by (#541).
+      const w = (window.PassWording && state.kind === 'pass')
+        ? (state.state === 'waiting'
+          ? PassWording.describe({ kind: 'auth-fail', code: state.code, at: state.passAt, reason: state.passReason, by: state.by, owner: state.owner })
+          : PassWording.describe({ kind: 'kicked', device: _remoteStandbyDevice, owner: state.owner }))
+        : null;
+      chip.textContent = '🔗 ' + name + (state.state === 'waiting' ? ' · waiting' : ' · standing by');
+      chip.style.background = 'var(--warn)';
+      chip.style.color = 'var(--bg-primary)';
+      chip.title = w ? [w.title, w.line].filter(Boolean).join(' ')
+        : (state.state === 'waiting' ? 'The shack asked this PC to wait — trying again' : 'Another device has the rig — open Remote Radios to take it back');
     } else if (state.state === 'disconnected') {
       chip.textContent = '🔗 ' + name + ' · reconnecting';
       chip.style.background = '#d4a64a';
       chip.style.color = '#1a1a2e';
       chip.title = 'Lost connection to ' + name + ' — auto-reconnecting';
+    } else if (state.state === 'auth-fail' && state.kind === 'pass' && window.PassWording) {
+      const w = PassWording.describe({ kind: 'auth-fail', code: state.code, at: state.passAt, reason: state.passReason, owner: state.owner, endsAt: state.endsAt });
+      chip.textContent = '🎟 ' + name + ' · pass not accepted';
+      chip.style.background = 'var(--accent-red)';
+      chip.style.color = 'var(--on-accent-red)';
+      chip.title = [w.title, w.line].filter(Boolean).join(' ');
     } else if (state.state === 'auth-fail') {
       chip.textContent = '🔗 ' + name + ' · re-pair';
       chip.style.background = '#e94560';
       chip.style.color = '#fff';
       chip.title = 'Auth failed (' + (state.reason || 'expired') + ') — open Remote Radios to re-pair';
     } else if (state.state === 'pass-ended') {
-      chip.textContent = '🎟 Guest Pass ended';
-      chip.style.background = '#e94560';
-      chip.style.color = '#fff';
-      chip.title = 'Guest Pass session ended (' + (state.reason || 'expired') + ') — back on the local rig';
+      const w = window.PassWording
+        ? PassWording.describe({ kind: 'pass-ended', reason: state.reason, owner: state.owner, endsAt: state.endsAt })
+        : { title: 'Guest Pass session ended', line: '', terminal: true };
+      chip.textContent = w.terminal ? '🎟 Guest Pass ended' : '🎟 Guest Pass · disconnected';
+      chip.style.background = w.terminal ? 'var(--accent-red)' : 'var(--warn)';
+      chip.style.color = w.terminal ? 'var(--on-accent-red)' : 'var(--bg-primary)';
+      chip.title = [w.title, w.line, 'Back on the local rig.'].filter(Boolean).join(' ');
     } else if (state.state === 'revoked') {
       chip.textContent = '🔗 pairing revoked';
       chip.style.background = '#e94560';
@@ -8331,6 +8439,19 @@ if (window.api && window.api.onRemoteClientDisplaced) {
     }
   };
   chip.addEventListener('click', _remoteRadiosOpen);
+  // Guest Pass: the owner took the radio back (pass-paused) or handed it
+  // back (pass-resumed). The guest keeps listening meanwhile (#541).
+  if (window.api && window.api.onRemotePassHold) {
+    window.api.onRemotePassHold((h) => {
+      _remotePassHeld = !!(h && h.paused);
+      if (_remotePassHeld && window.PassWording) _passBannerShow(PassWording.describe({ kind: 'paused', owner: h.owner }), null);
+      else _passBannerHide();
+      if (_lastChipState) setChip(_lastChipState);
+    });
+    window.api.onRemoteClientStatus && window.api.onRemoteClientStatus((st) => {
+      if (st && st.state !== 'connected' && _remotePassHeld) { _remotePassHeld = false; }
+    });
+  }
   if (window.api && window.api.onRemoteShackInfo) {
     const applyInfo = (info) => {
       remoteShack = info && info.remote ? info : { remote: false };
@@ -8348,9 +8469,18 @@ if (window.api && window.api.onRemoteClientDisplaced) {
     // Loud, app-wide notice when a Guest Pass session ends — the user may
     // be nowhere near the Remote Radios dialog when the clock runs out.
     window.api.onRemoteClientStatus((s) => {
-      if (s && s.state === 'pass-ended' && typeof showLogToast === 'function') {
+      if (s && s.state === 'pass-ended' && window.PassWording) {
+        const w = PassWording.describe({ kind: 'pass-ended', reason: s.reason, owner: s.owner, endsAt: s.endsAt });
+        _passBannerShow(w, w.terminal ? null : s.targetId);
+      } else if (s && s.state === 'pass-ended' && typeof showLogToast === 'function') {
         showLogToast('Guest Pass session ended (' + (s.reason || 'expired') + ') — switched back to your local rig.', { warn: true, duration: 8000 });
       }
+      // Guest Pass waiting (busy rig, Cloud check) or refused: say which (#541).
+      if (s && s.kind === 'pass' && window.PassWording && (s.state === 'waiting' || s.state === 'auth-fail')) {
+        const w = PassWording.describe({ kind: 'auth-fail', code: s.code, at: s.passAt, reason: s.passReason, by: s.by, owner: s.owner, endsAt: s.endsAt });
+        _passBannerShow(w, w.terminal ? null : s.targetId);
+      }
+      if (s && s.state === 'connected') _passBannerHide();
       if (s && s.state === 'revoked' && typeof showLogToast === 'function') {
         showLogToast('The shack operator revoked this desktop\'s pairing — switched back to your local rig.', { warn: true, duration: 8000 });
       }

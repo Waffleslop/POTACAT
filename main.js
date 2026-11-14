@@ -614,6 +614,7 @@ function healRigAudioMirrorNow(where) {
 // filed AFTER the thing happened (lib/bug-report-log.js, KF0U 2026-10-20).
 const BUG_REPORT_BEFORE_MARKER = 150;
 const { RemoteClient, tsWssUrl } = require('./lib/remote-client');
+const PassWording = require('./lib/pass-wording');
 const { RemoteRigState } = require('./lib/remote-rig');
 const RemoteFeatures = require('./lib/remote-features');
 const RigPower = require('./lib/rig-power');
@@ -7271,7 +7272,7 @@ function resetRemoteMirroredRigState() {
 // rig is active. Pushed on change as 'remote-shack-info'.
 let remoteShackInfo = null;
 let _remoteUnpairingSelf = false; // Remove sent unpair-self; the shack's `revoked` is expected
-let _remoteClientAuthFail = null; // {targetId, reason} — the shack refused this pairing
+let _remoteClientAuthFail = null; // {targetId, reason, code, by, passReason, terminal, retryAt} — the shack refused us (terminal) or asked us to wait (#541)
 function remoteShackInfoNow() {
   if (!isRemoteMode()) return { remote: false };
   const target = (settings.connectionTargets || []).find(t => t && t.id === settings.activeTargetId) || {};
@@ -7789,6 +7790,7 @@ function ensureRemoteClient() {
     // shack says so; pinning the LAN cert's fingerprint there can only fail.
     if (typeof info.tsCertPublic === 'boolean') target.tsCertPublic = info.tsCertPublic;
     _remoteClientAuthFail = null;
+    if (target.kind === 'pass') { delete target.passSessionClosed; delete target.passEndReason; }
     remoteShackCw = { enabled: !!info.cwAvailable, paddle: !!info.cwPaddleAvailable, paddleReason: String(info.cwPaddleReason || '') };
     remoteShackVoice = { labels: [], filled: [] };
     remoteJs8Reset();
@@ -7813,9 +7815,12 @@ function ensureRemoteClient() {
     target.lastReachableLeg = remoteClient.state().leg;
     saveSettings(settings);
   });
-  remoteClient.on('disconnected', ({ wasAuthed }) => {
+  remoteClient.on('disconnected', ({ wasAuthed, waiting, yielded }) => {
     if (win && !win.isDestroyed()) {
-      win.webContents.send('remote-client-status', { state: 'disconnected', wasAuthed, targetId: target.id, name: target.name });
+      // Waiting out a busy rig or a Cloud check keeps its own status; a PC
+      // that gave the rig to another device is standing by, not
+      // reconnecting (#541).
+      if (!waiting) win.webContents.send('remote-client-status', { state: yielded ? 'standby' : 'disconnected', wasAuthed, targetId: target.id, name: target.name, kind: target.kind || '', owner: target.ownerCallsign || '' });
       if (wasAuthed) win.webContents.send('cat-status', { connected: false });
     }
     // Tear the answerer down with the link — its peer is dead and the creds
@@ -7827,17 +7832,32 @@ function ensureRemoteClient() {
     // device that took the rig keeps it until Connect is pressed here again.
     sendCatLog(`[Remote] another device took the rig${info && info.byPlatform ? ' (' + info.byPlatform + ')' : ''} — this PC is standing by; press Connect in Remote Radios to take it back`);
     if (win && !win.isDestroyed()) {
-      win.webContents.send('remote-client-displaced', info);
+      win.webContents.send('remote-client-displaced', { ...info, kind: target.kind || '', owner: target.ownerCallsign || '' });
     }
   });
-  remoteClient.on('auth-fail', ({ reason }) => {
-    _remoteClientAuthFail = { targetId: target.id, reason: reason || 'refused' };
+  remoteClient.on('auth-fail', ({ reason, code, by, passReason, passAt, retryInMs }) => {
+    // A retryable refusal (the owner or another guest has the radio, or the
+    // station could not check the pass with Cloud) is a wait, not a dead
+    // pass: the client asks again on its own timer (#541).
+    const terminal = retryInMs == null;
+    _remoteClientAuthFail = {
+      targetId: target.id, reason: reason || 'refused', code: code || '', by: by || '',
+      passReason: passReason || '', passAt: passAt || '', terminal,
+      retryAt: terminal ? null : Date.now() + retryInMs,
+    };
+    const failCode = code || '';
+    sendCatLog(`[Remote] ${target.kind === 'pass' ? 'Guest Pass' : 'pairing'} ${terminal ? 'refused' : 'waiting'}: ${reason}${failCode ? ' (' + failCode + ')' : ''}`);
     if (win && !win.isDestroyed()) {
-      win.webContents.send('remote-client-status', { state: 'auth-fail', reason });
+      win.webContents.send('remote-client-status', remoteAuthFailStatus(target));
     }
-    // 'expired' / 'revoked' — surface plainly. Re-pair flow not yet
-    // wired (task #13 will add the Re-pair button to the Remote
-    // Radios panel).
+  });
+  remoteClient.on('pass-paused', () => {
+    sendCatLog('[guest-pass] the owner took the radio back; listening until it is handed back');
+    if (win && !win.isDestroyed()) win.webContents.send('remote-pass-hold', { paused: true, owner: target.ownerCallsign || '', targetId: target.id });
+  });
+  remoteClient.on('pass-resumed', () => {
+    sendCatLog('[guest-pass] the owner handed the radio back');
+    if (win && !win.isDestroyed()) win.webContents.send('remote-pass-hold', { paused: false, owner: target.ownerCallsign || '', targetId: target.id });
   });
   remoteClient.on('status', (snap) => {
     _remoteClientLastStatus = snap;
@@ -8078,18 +8098,25 @@ function ensureRemoteClient() {
     }
     sendCatLog(`[architecture-b] log-error from host: reason=${payload.reason} call=${payload.qso && payload.qso.callsign || '?'}`);
   });
-  // Guest Pass session ended (expiry / revoke / owner stop). Mark the
-  // target row expired so the Remote Radios list reflects it, drop back
-  // to the local rig, and tell the renderer why. K3SBP 2026-06-11.
+  // Guest Pass session ended. Drop back to the local rig and tell the
+  // renderer why. Only 'expired' and 'revoked' end the pass itself and mark
+  // the row used up; left / disconnected / superseded / owner_override
+  // closed this session and the pass connects again (#541). K3SBP 2026-06-11.
   remoteClient.on('pass-ended', ({ reason }) => {
     sendCatLog(`[guest-pass] session ended by host: ${reason}`);
-    target.expiresAt = Date.now();
+    const passOver = PassWording.isTerminalEndReason(reason);
+    if (passOver) {
+      target.expiresAt = Math.min(Date.now(), target.expiresAt || Infinity);
+      target.passEndReason = String(reason);
+    } else {
+      target.passSessionClosed = true; // the row says "Your pass is still good." + Connect again
+    }
     settings.activeTargetId = null;
     saveSettings(settings);
     tearDownRemoteClient();
     connectCatSafe('guest pass ended');
     if (win && !win.isDestroyed()) {
-      win.webContents.send('remote-client-status', { state: 'pass-ended', reason });
+      win.webContents.send('remote-client-status', { state: 'pass-ended', reason, passOver, targetId: target.id, name: target.name, owner: target.ownerCallsign || '', endsAt: target.expiresAt || null });
       win.webContents.send('connection-targets-updated', settings.connectionTargets);
     }
   });
@@ -8113,6 +8140,20 @@ function ensureRemoteClient() {
     }
   });
   remoteClient.connect();
+}
+
+// The renderer's view of a refusal: 'waiting' (retryable, the client asks
+// again by itself) or 'auth-fail' (over). #541
+function remoteAuthFailStatus(target) {
+  const f = _remoteClientAuthFail || {};
+  const t = target || {};
+  return {
+    state: f.terminal === false ? 'waiting' : 'auth-fail',
+    targetId: t.id || f.targetId, name: t.name || '', kind: t.kind || '',
+    owner: t.ownerCallsign || '', endsAt: t.expiresAt || null,
+    reason: f.reason || '', code: f.code || '', by: f.by || '', passReason: f.passReason || '', passAt: f.passAt || '',
+    retryAt: f.retryAt || null,
+  };
 }
 
 function tearDownRemoteClient() {
@@ -40211,8 +40252,9 @@ async function redeemGuestPass(rawInput) {
   }
 
   if (r.status === 404) return { ok: false, error: 'Pass not found, expired, or revoked' };
-  if (r.status === 403) return { ok: false, error: (r.body && r.body.error) || 'This pass requires signing in to POTACAT Cloud first (the owner didn’t allow anonymous guests)' };
-  if (r.status !== 200 || !r.body) return { ok: false, error: (r.body && r.body.error) || ('Redeem failed (HTTP ' + r.status + ')') };
+  // Cloud's error codes in words; a raw snake_case code is never shown (#541).
+  if (r.status === 403) return { ok: false, error: PassWording.redeemErrorText(r.body && r.body.error, 'This pass requires signing in to POTACAT Cloud first (the owner didn’t allow anonymous guests)') };
+  if (r.status !== 200 || !r.body) return { ok: false, error: PassWording.redeemErrorText(r.body && r.body.error, 'Redeem failed (HTTP ' + r.status + ')') };
 
   const { session_id, owner_cloud_host, owner_callsign, pass_profile } = r.body;
   if (!session_id || !/^[a-f0-9]{64}$/.test(String(session_id))) {
@@ -41434,6 +41476,7 @@ function cloudShackNotice(text, kind) {
       try { if (remoteServer) remoteServer.broadcastPassEnded(info.reason, info.code); } catch {}
     });
 
+    let _passValidator = null; // one per process: it holds the 429 back-off
     // #46a: wire remoteServer's pass auth-mode handlers.
     // Validator: re-checks pass status via public cloud endpoint.
     // Auth callback: triggers PassEnforcement.loadPass() if idle,
@@ -41443,40 +41486,16 @@ function cloudShackNotice(text, kind) {
     onRemoteServer((rs) => {
       // A rebuilt server inherits a lease in progress.
       if (rs.setLeaseCall) rs.setLeaseCall(passLease && passLease.call ? passLease.call : null);
-      rs.setPassValidator(async (code, sessionToken) => {
-        // Phase 3 (cloud mig 009): every WS pass-auth attempt is
-        // validated against the high-entropy session_token returned
-        // by /redeem, not just the publicly-visible pass code. This
-        // closes the "leaked pass code → direct WSS bypass" gap that
-        // mig 008's single-use claim couldn't fix on its own.
-        //
-        // sessionToken must be a 64-char lower-hex string (256 bits)
-        // — anything else (missing, integer-from-pre-009 mobile,
-        // attacker-crafted) gets refused locally without calling
-        // the cloud. The cloud-side validator does the same shape
-        // check but burning a network round-trip on obviously bad
-        // shapes wastes our rate-limit budget against legitimate
-        // traffic on this droplet.
-        if (typeof sessionToken !== 'string' || !/^[a-f0-9]{64}$/.test(sessionToken)) {
-          sendCatLog('[pass] validator: refusing — missing or malformed session token (legacy pre-mig-009 client?)');
-          return null;
-        }
-        try {
-          const res = await fetch(
-            `https://api.potacat.com/v1/passes/${encodeURIComponent(code)}/validate-session`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ session_id: sessionToken }),
-            }
-          );
-          if (!res.ok) return null;
-          return await res.json();
-        } catch (err) {
-          sendCatLog('[pass] validator fetch failed: ' + (err.message || err));
-          return null;
-        }
-      });
+      // Every WS pass-auth attempt is checked against the 64-hex session
+      // token /redeem returned (cloud mig 009), not just the public pass code.
+      // lib/pass-validate.js keeps Cloud's answers apart (#541): not valid ->
+      // a profile-less answer; rate limit / Cloud down / network -> throws
+      // pass_check_failed, which the guest sees as "trying again", never
+      // as a revoked pass.
+      rs.setPassValidator(_passValidator || (_passValidator = require('./lib/pass-validate').createPassValidator({
+        fetch: (...a) => fetch(...a),
+        log: sendCatLog,
+      })));
       // Grace timer: when the last pass-authed client drops, give the
       // guest 60s to reconnect (WS blip, app relaunch) before ending
       // the enforcement session. Without this the session lingered for
@@ -48547,6 +48566,12 @@ function cloudShackNotice(text, kind) {
     if (settings.activeTargetId === id && isRemoteLinked()) {
       return { ok: true, alreadyActive: true };
     }
+    // The same shack, standing by after another device took it or waiting
+    // out a busy rig: ask now ("Use it here instead", "Try now").
+    if (settings.activeTargetId === id && remoteClient && remoteClient._target && remoteClient._target.id === id) {
+      remoteClient.connect();
+      return { ok: true };
+    }
     settings.activeTargetId = id;
     saveSettings(settings);
     // Quiesce the local CAT subsystem so we don't fight the shack
@@ -48558,12 +48583,16 @@ function cloudShackNotice(text, kind) {
 
   ipcMain.handle('connection-targets-get-status', () => {
     if (_remoteClientAuthFail && _remoteClientAuthFail.targetId === settings.activeTargetId) {
-      return { state: 'auth-fail', targetId: _remoteClientAuthFail.targetId, reason: _remoteClientAuthFail.reason };
+      const t = (settings.connectionTargets || []).find(x => x.id === _remoteClientAuthFail.targetId);
+      // A refusal survives a list refresh: state: 'auth-fail' when it is over,
+      // 'waiting' while the client asks again (#541).
+      const st = remoteAuthFailStatus(t || { id: _remoteClientAuthFail.targetId });
+      return st.state === 'waiting' ? st : { ...st, state: 'auth-fail' };
     }
     if (!remoteClient) return { state: 'idle' };
     const s = remoteClient.state();
     return {
-      state: s.authed ? 'connected' : (s.readyState === 1 ? 'authing' : 'connecting'),
+      state: s.authed ? 'connected' : (s.yielded ? 'standby' : (s.readyState === 1 ? 'authing' : 'connecting')),
       targetId: s.targetId,
       name: s.name,
       leg: s.leg,

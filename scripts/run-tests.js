@@ -19,6 +19,7 @@ const TESTS = [
   'test/cat-port-presence-test.js',
   'test/cat-connect-gate-test.js',
   'test/guest-pass-listen-test.js',
+  'test/guest-pass-state-541-test.js', // #541: a valid pass is never shown as revoked; Cloud answers, auth-fail codes, retry
   'test/rigctld-spawn-test.js',
   'test/echocat-connect-diet-test.js',
   'test/cw-live-watchdog-test.js',
