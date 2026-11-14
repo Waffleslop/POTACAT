@@ -207,10 +207,25 @@ Verify all of these, and report any that fail:
 - `D:\alan\STATE.md`: update or add the POTACAT entry with the version, title and what is
   waiting on Casey.
 
-### 9. Tell Casey
+### 9. Discord release cards (every release, Casey 2026-11-14)
+
+Casey: "Give them to me every time. Make this easy for me." As soon as the GitHub release
+is published, SendMessage the POTACAT triage session one line: `Released v<version>`. Triage
+makes the cards and hands them to Casey. If the triage session is not live, make them
+yourself:
+
+```bash
+python -I D:\Projects\potacat\ops\release-cards\make_cards.py v<version>
+```
+
+It reads the GitHub release and writes up to 9 card PNGs, the full notes as text and a
+ready-to-paste Discord message to `D:\Projects\potacat\ops\release-cards\out-<version>\`.
+Give Casey those files with SendUserFile. Never post them to Discord yourself.
+
+### 10. Tell Casey
 
 Lead with the version and title and whether it is published. Then: the workflow run, the
-asset check, the website check, the handoffs sent, and what is owed. Short.
+asset check, the website check, the handoffs sent, the cards, and what is owed. Short.
 
 ## Rebuild (same version, new installers)
 
