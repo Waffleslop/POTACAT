@@ -44,6 +44,8 @@ function _applyPopoutTheme(payload) {
   var WANTED_CYCLE = ['', 'wanted', 'dxcc', 'grid'];
   var WANTED_LABELS = { '': 'Wanted', wanted: 'Wanted', dxcc: 'New DXCC', grid: 'New grid' };
   function wantedMatches(c) {
+    // A Stations view row (#557 part 2): the station's needed marks, not one decode.
+    if (c.stationMarks) return JtcatStations.wantedMatch(c.stationMarks, wantedFilter);
     if (wantedFilter === 'dxcc') return !!c.d.newDxcc;
     if (wantedFilter === 'grid') return !!c.d.newGrid;
     return !!c.isWanted;
@@ -1288,36 +1290,74 @@ function _applyPopoutTheme(payload) {
     var a = document.querySelector('.jp-band-opt.active');
     return { band: a ? a.dataset.band : '', mode: modeSelect ? modeSelect.value : '', now: Date.now() };
   }
+  // Needed marks (#557 part 2): countries and states from the worked roster
+  // under the map overlay's scope (main owns it: F8, the map's "Scope"), so
+  // the list and the map tints give the same answer. Read here even when the
+  // map was never opened.
+  var stationsRoster = null;
+  var stationsOverlay = { scope: 'band-mode', confirmedOnly: false };
+  function stationsTakeOverlay(st) {
+    if (!st) return;
+    stationsOverlay = { scope: st.scope || 'band-mode', confirmedOnly: !!st.confirmedOnly };
+    renderStations();
+  }
+  if (window.api.getWorkedRoster) Promise.resolve(window.api.getWorkedRoster()).then(function (r) { if (r) { stationsRoster = r; renderStations(); } }).catch(function () {});
+  if (window.api.onWorkedRoster) window.api.onWorkedRoster(function (r) { stationsRoster = r || null; renderStations(); });
+  if (window.api.workedOverlayGet) Promise.resolve(window.api.workedOverlayGet()).then(stationsTakeOverlay).catch(function () {});
+  if (window.api.onWorkedOverlayState) window.api.onWorkedOverlayState(stationsTakeOverlay);
+  function stationsMarksCtx() {
+    return { roster: stationsRoster, scope: stationsOverlay.scope, confirmedOnly: stationsOverlay.confirmedOnly };
+  }
+  // "on 20m digital": the scope at this window's band and mode, for the tooltips and the key.
+  function stationsScopeText() {
+    if (!window.WorkedOverlay || !stationsRoster) return '';
+    var c = jpStationsContext();
+    return WorkedOverlay.scopeText({ scope: stationsOverlay.scope, band: c.band, mode: c.mode }) +
+      (stationsOverlay.confirmedOnly ? ', confirmed only' : '');
+  }
+
   // Band Activity was emptied (Clear, a band or mode change, Stop): so is the list.
   function jpStationsClear() {
     if (!jpStations) return;
     JtcatStations.clear(jpStations);
     renderStations();
   }
-  // The stream's filters, on the station's latest decode. The search also
-  // matches the columns the row shows (call, calling, grid, country, state).
-  function stationVisible(e) {
+  // The Wanted filter keeps the stations with a needed mark (the button's
+  // cycle: any, new country, new grid). The stream's other filters run on the
+  // station's latest decode; the search also matches the columns the row
+  // shows (call, calling, park, grid, country, state).
+  function stationVisible(e, marks) {
+    if (!JtcatStations.wantedMatch(marks, wantedFilter)) return false;
     if (!e.decode) return true;
     var c = classifyDecode(e.decode);
-    c.upper = [e.call, e.calling, e.grid, e.entity, e.state, c.upper].join(' ').toUpperCase();
+    c.upper = [e.call, e.calling, e.park ? e.park.ref : '', e.grid, e.entity, e.state, c.upper].join(' ').toUpperCase();
+    c.stationMarks = marks;
     return decodeVisible(c);
   }
-  function stationRowClass(e) {
+  function stationRowClass(e, marks) {
     var me = (myCallsign || '').toUpperCase();
-    return 'jp-st-row' + (/^CQ\b/.test(e.calling) ? ' jp-st-cq' : '') + (me && e.calling === me ? ' jp-st-me' : '');
+    return 'jp-st-row' + (/^CQ\b/.test(e.calling) ? ' jp-st-cq' : '') + (me && e.calling === me ? ' jp-st-me' : '') +
+      (marks && marks.needed ? ' jp-st-needed' : '');
   }
   function renderStations() {
     if (!stationsView || !stationsEl || !jpStations) return;
     var now = Date.now();
     var all = JtcatStations.list(jpStations, { sort: stationsSort, now: now });
-    var shown = all.filter(stationVisible);
+    var mctx = stationsMarksCtx();
+    var scopeText = stationsScopeText();
+    var shown = [];
+    for (var a = 0; a < all.length; a++) {
+      var marks = JtcatStations.marksOf(all[a], mctx);
+      if (stationVisible(all[a], marks)) shown.push({ e: all[a], marks: marks });
+    }
     var html = '<div class="jp-st-row jp-st-head">' + DecodeRow.stationHeaderInner('jp', stationsSort) + '</div>';
     if (!all.length) html += '<div class="jp-empty">No stations heard yet</div>';
-    else if (!shown.length) html += '<div class="jp-empty">No stations match the current filter</div>';
+    else if (!shown.length) html += '<div class="jp-empty">' + (wantedFilter ? 'No station heard gives you anything new' : 'No stations match the current filter') + '</div>';
     for (var i = 0; i < shown.length; i++) {
-      html += '<div class="' + stationRowClass(shown[i]) + '" data-call="' + esc(shown[i].call) + '">' +
-        DecodeRow.stationRowInner(shown[i], now, 'jp') + '</div>';
+      html += '<div class="' + stationRowClass(shown[i].e, shown[i].marks) + '" data-call="' + esc(shown[i].e.call) + '">' +
+        DecodeRow.stationRowInner(shown[i].e, now, 'jp', { marks: shown[i].marks, scopeText: scopeText }) + '</div>';
     }
+    html += '<div class="jp-st-key" aria-label="What the marks mean">' + DecodeRow.stationKeyHtml('jp', scopeText) + '</div>';
     var top = stationsEl.scrollTop;
     stationsEl.innerHTML = html;
     stationsEl.scrollTop = top;
@@ -1444,6 +1484,8 @@ function _applyPopoutTheme(payload) {
     var n = 0;
     for (var i = 0; i < decodeLog.length; i++) n += DecodeRow.clearWorkedFlags(decodeLog[i].results, w);
     if (n) rebuildBandActivity();
+    // The Stations list holds decodes the stream may have dropped already.
+    if (jpStations) { DecodeRow.clearWorkedFlags(JtcatStations.decodesOf(jpStations), w); renderStations(); }
     // My Activity rows are not rebuilt from the log; drop their badges in place.
     var call = String(w.call || '').toUpperCase(), grid = String(w.grid || '').toUpperCase().slice(0, 4);
     myActivity.querySelectorAll('.jp-badge-call, .jp-badge-grid, .jp-badge-dxcc').forEach(function(b) {

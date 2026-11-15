@@ -18,6 +18,12 @@ lib/ft8_native, renderer/jtcat-popout.* or the ECHOCAT jtcat-* messages.
 - The Stations view (#557) is lib/jtcat-stations.js (one entry per call, folded from the decodes) drawn by
   DecodeRow.stationRowInner. A row double-click is onDecodeRowClick on that station's latest decode. A
   state shows only when QRZ knows it, never from a grid. Band, mode, Clear and Stop empty it.
+  Part 2: the Need marks (D new country, state code, G new grid, C new call) are JtcatStations.marksOf:
+  countries and states from the worked roster under the map overlay's scope (workedOverlayScope, F8),
+  so list and map agree; grid and call are the decode's newGrid / newCall. Worked / confirmed colour the
+  Country and State cells (--accent-blue / --accent-green). Wanted keeps stations with a needed mark.
+  The Park column is d.spotRef (main's jtcatSpotRefEnrichDecode: the spot list Hunt reads, same call,
+  same band) or a reference written in a CQ ("CQ POTA US-1234").
 - The pop-out to shack bridge is lib/remote-bridge.js (a row per channel; the test fails otherwise).
 
 ## Operating rules that are settings (names only; semantics in each module's header)

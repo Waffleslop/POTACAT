@@ -51,8 +51,14 @@
     .jp-view-switch .jtcat-filter-btn:first-child { border-radius: 8px 0 0 8px; }
     .jp-view-switch .jtcat-filter-btn:last-child { border-radius: 0 8px 8px 0; margin-left: -1px; }
     #jp-band-activity[hidden], #jp-stations[hidden] { display: none; }
-    .jp-stations { padding: 0; overflow-x: auto; }
-    .jp-st-row { display: grid; grid-template-columns: 10ch 8ch 4ch minmax(5ch, 1fr) 5ch 3ch 4ch 3ch; column-gap: 8px; padding: 3px 10px; align-items: baseline; cursor: pointer; border-bottom: 1px solid var(--border-primary); }
+    .jp-stations { padding: 0; overflow-x: auto; container: jp-stations / inline-size; }
+    /* Call, Need, Calling, Park, Grid, Country, State, dB, Hz, Age (#557). */
+    .jp-st-row { display: grid; grid-template-columns: 10ch 74px 8ch 10ch 4ch minmax(5ch, 1fr) 5ch 3ch 4ch 3ch; column-gap: 8px; padding: 3px 10px; align-items: baseline; cursor: pointer; border-bottom: 1px solid var(--border-primary); }
+    /* A half-width pane: Grid and Hz step aside (a new grid still shows as G). */
+    @container jp-stations (max-width: 640px) {
+      .jp-st-row { grid-template-columns: 10ch 74px 8ch 10ch minmax(5ch, 1fr) 5ch 3ch 3ch; column-gap: 6px; padding: 3px 8px; }
+      .jp-st-row > .jp-st-grid, .jp-st-row > .jp-st-df { display: none; }
+    }
     .jp-st-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .jp-st-row:hover { background: var(--bg-hover); }
     .jp-st-head { position: sticky; top: 0; z-index: 1; cursor: default; background: var(--bg-secondary); color: var(--text-secondary); font-weight: 700; }
@@ -67,7 +73,25 @@
     .jp-st-head .jp-st-db, .jp-st-head .jp-st-df, .jp-st-head .jp-st-age { text-align: right; }
     /* A station calling me: the accent as a band at the left, as in the stream. */
     .jp-st-row.jp-st-me { box-shadow: inset 4px 0 0 var(--accent-red); }
-    .jp-st-row.jp-st-me .jp-st-calling { color: var(--accent-red); font-weight: 700; }
+    .jp-st-row.jp-st-me .jp-st-calling { color: var(--accent-red-text); font-weight: 700; }
+    /* Needed marks (#557 part 2): the stream's letters (D, state code, G, C)
+       as filled marks, bigger than the stream's badges. Theme tokens only. */
+    .jp-st-row .jp-st-need { display: flex; gap: 3px; align-items: center; align-self: center; }
+    .jp-st-mark { display: inline-block; font-size: 12px; font-weight: 700; line-height: 1.4; padding: 0 3px; border-radius: 3px; font-family: monospace; }
+    .jp-st-mark-dxcc { background: var(--accent-red); color: var(--on-mark-dxcc); }
+    .jp-st-mark-state { background: var(--source-dxc); color: var(--on-source-dxc); }
+    .jp-st-mark-grid { background: var(--accent-blue); color: var(--on-accent-blue); }
+    .jp-st-mark-call { background: var(--source-sota); color: var(--on-source-sota); }
+    /* Worked and confirmed (the map's colours, from the theme). */
+    .jp-st-row .jp-st-worked, .jp-st-key .jp-st-worked { color: var(--accent-blue); font-weight: 600; }
+    /* Confirmed is also underlined: a cue that does not rest on colour alone. */
+    .jp-st-row .jp-st-confirmed, .jp-st-key .jp-st-confirmed { color: var(--accent-green); font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+    .jp-st-row .jp-st-park { color: var(--text-primary); font-weight: 600; }
+    /* Classic Light's green is 4.46:1 on its list: a step toward the text colour reads 4.5:1 or more. */
+    [data-theme="light"]:not([data-ds]) .jp-st-row .jp-st-confirmed, [data-theme="light"]:not([data-ds]) .jp-st-key .jp-st-confirmed,
+    [data-theme="light"]:not([data-ds]) .jp-st-row.jp-st-cq .jp-st-calling { color: color-mix(in srgb, var(--accent-green) 85%, var(--text-primary)); }
+    .jp-st-key { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 6px 10px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; line-height: 1.5; color: var(--text-secondary); background: var(--bg-secondary); border-top: 1px solid var(--border-primary); }
+    .jp-st-key-item { white-space: nowrap; }
 
     /* Decode row styles */
     .jp-cycle-sep { padding: 2px 8px; font-size: 10px; color: var(--text-dim, #666); border-top: 1px solid var(--border-primary); margin-top: 2px; }
@@ -1343,8 +1367,8 @@
   <script src="../lib/scope-view.js"></script>
   <script src="../lib/jtty-macros.js"></script>
   <script src="../lib/decode-row.js"></script>
-  <script src="../lib/jtcat-stations.js"></script>
   <script src="../lib/worked-roster.js"></script>
+  <script src="../lib/jtcat-stations.js"></script>
   <script src="../lib/worked-overlay.js"></script>
   <script src="../lib/worked-matrix.js"></script>
   <script src="../lib/prior-contacts.js"></script>
