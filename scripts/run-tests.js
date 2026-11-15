@@ -30,6 +30,7 @@ const TESTS = [
   'test/yaesu-cw-text-test.js',
   'test/cw-stuck-wiring-test.js',
   'test/cw-tx-lockout-timer-test.js', // #583: the TX lockout ends when its timer fires a millisecond early
+  'test/plain-ssb-for-digital-test.js', // a Winlink session keeps the data mode with JTCAT's plain-USB setting off (FTDX10 on flrig)
   'test/lz3aw-web-parity-test.js',
   'test/lz3aw-round5-test.js',
   'test/call-filter-test.js',
