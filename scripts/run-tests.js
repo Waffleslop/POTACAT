@@ -179,6 +179,7 @@ const TESTS = [
   'test/contest-history-test.js',
   'test/cw-key-line-test.js',
   'test/cw-paddle-availability-test.js',
+  'test/cw-paddle-hint-test.js', // KX2/KX3: the paddle hint names Elecraft's menus, not Yaesu's
   'test/event-banner-pick-test.js',
   'test/event-decode-match-test.js',
   'test/event-geo-test.js',
