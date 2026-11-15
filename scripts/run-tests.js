@@ -354,6 +354,7 @@ const TESTS = [
   'test/tunnel-webui-gate-test.js',
   'test/cloud-session-change-test.js',
   'test/cloud-log-sync-test.js',
+  'test/cloud-sync-log-test.js', // B10: Cloud sync writes its pulls, errors and "not started" reason to the session log
   'test/launch-origin-test.js',
   'test/cloud-merge-dupe-test.js',
   'test/cloud-pull-per-profile-test.js', // #245: profiles sharing one account: each pulls only its own QSOs; the dupe guard and journal stay per profile
