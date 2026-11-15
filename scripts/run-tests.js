@@ -423,6 +423,7 @@ const TESTS = [
   'test/sstv-jtcat-handover-test.js',
   'scripts/validate-sstv-packs.js',
   'test/spot-age-pota-test.js',
+  'test/spot-age-everywhere-test.js', // #502: VFO card, Spots pop-out, ECHOCAT, SmartSDR and TCI use the table's Max Spot Age
   'test/scope-spot-age-test.js', // #239: the scope/bandspread pop-outs apply the table's Max Spot Age, re-checked on a timer
   'test/cw-sidetone-schedule-test.js',
   'test/echocat-web-micgain-test.js',
