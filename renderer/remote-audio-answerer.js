@@ -209,7 +209,21 @@
     }
   }
 
+  // How loud the shack's receive audio plays on this computer. Silent while
+  // this computer transmits: the remote radio's USB audio can carry its own
+  // transmit monitor, so speakers left open fed the laptop's mic back into
+  // the shack and howled (IC-7610 remote, 2026-11-15). ECHOCAT Web mutes its
+  // receive audio during PTT the same way (renderer/remote.js muteRxAudio).
+  function playbackVolume(o) {
+    o = o || {};
+    if (o.muted || o.transmitting) return 0;
+    const v = Number(o.volume);
+    if (!Number.isFinite(v)) return 1;
+    return Math.max(0, Math.min(1, v));
+  }
+
   // CommonJS (renderer require / future test) + browser global (script tag).
-  if (typeof module !== 'undefined' && module.exports) module.exports = { RemoteAudioAnswerer };
+  if (typeof module !== 'undefined' && module.exports) module.exports = { RemoteAudioAnswerer, playbackVolume };
   global.RemoteAudioAnswerer = RemoteAudioAnswerer;
+  global.remoteAudioPlaybackVolume = playbackVolume;
 })(typeof window !== 'undefined' ? window : globalThis);
