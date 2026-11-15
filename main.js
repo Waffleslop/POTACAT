@@ -422,6 +422,7 @@ const { explainRigctldFailure } = require('./lib/rigctld-stderr');
 const RigFamily = require('./lib/rig-family');
 const RigFullPower = require('./lib/rig-full-power');
 const TxAudioInput = require('./lib/tx-audio-input'); // Kenwood TX; vs TX1; per rig (#594)
+const AmpDrive = require('./lib/amp-drive-limit'); // per-rig amplifier drive limit (B10 row 10)
 const { decideBandPowerReapply } = require('./lib/band-power-reapply');
 const AtuWizard = require('./lib/atu-wizard');
 const AppTheme = require('./lib/app-theme');
@@ -3408,6 +3409,22 @@ function noCatBandNote(mhz) {
 // (lib/rig-full-power.js, W5LEE's 5 W Hermes Lite behind deskHPSDR's 100 W
 // TS-2000 emulation). One wrapper, so every return path below gets it: the
 // codecs, the power sliders, the caps and the logged TX power agree.
+// The active rig's amplifier drive limit, read by the radio clients on every
+// power command (lib/amp-drive-limit.js). Read live, so a rig switch or a
+// rig-editor save applies to the next command.
+function activeAmpDriveLimitW() {
+  if (!settings) return 0;
+  const r = (settings.rigs || []).find(x => x && x.id === settings.activeRigId);
+  return AmpDrive.limitW(r);
+}
+AmpDrive.setLimitSource(() => {
+  const watts = activeAmpDriveLimitW();
+  if (!watts) return { watts: 0, fullW: 0 };
+  let fullW = 0;
+  try { const m = getActiveRigModel(); fullW = m && Number(m.maxPower) > 0 ? Number(m.maxPower) : 0; } catch { fullW = 0; }
+  return { watts, fullW };
+});
+
 function getActiveRigModel() {
   const activeRig = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
   return RigFullPower.applyFullPower(_activeRigModelBase(), activeRig);
@@ -3568,6 +3585,13 @@ function getRigCapabilities(rigType) {
       linkType: settings.catTarget && settings.catTarget.type,
       allowOffNoWake: !!(activeRig && activeRig.allowPowerOffNoWake),
     });
+  }
+  // The rig's amplifier drive limit: every power slider stops there.
+  const ampLimitW = AmpDrive.limitW(activeRig);
+  if (ampLimitW > 0) {
+    caps.ampDriveLimitW = ampLimitW;
+    caps.maxPower = caps.maxPower != null ? Math.min(Number(caps.maxPower) || ampLimitW, ampLimitW) : ampLimitW;
+    if (caps.minPower != null && Number(caps.minPower) > caps.maxPower) caps.minPower = caps.maxPower;
   }
   return caps;
 }
@@ -4960,6 +4984,22 @@ function sendCatFwdPower(watts) {
   _fwdPowerClearTimer = setTimeout(() => { _fwdPowerClearTimer = null; _fwdPowerHold.reset(); push(0); }, 3000);
 }
 
+// The radio reports a power above the rig's amplifier drive limit (set on its
+// front panel, by SmartSDR, or found that way on connect): set it down to the
+// limit and say so. At most once every 3 s, so a radio that refuses cannot
+// start a loop. This computer's own radio only, never a remote shack's.
+let _ampDriveGuardAt = 0;
+function ampDriveReadbackGuard(watts) {
+  if (isRemoteMode()) return;
+  const lim = activeAmpDriveLimitW();
+  if (!AmpDrive.overLimit(watts, lim)) return;
+  const now = Date.now();
+  if (now - _ampDriveGuardAt < 3000) return;
+  _ampDriveGuardAt = now;
+  sendCatLog(`[Amp] The radio reports ${watts} W, above this rig's amplifier drive limit of ${lim} W: setting ${lim} W`);
+  try { setRadioTxPowerRaw(lim); } catch (e) { sendCatLog(`[Amp] Could not set ${lim} W: ${e.message}`); }
+}
+
 function sendCatPower(watts) {
   if (win && !win.isDestroyed()) win.webContents.send('cat-power', watts);
   if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('cat-power', watts);
@@ -4967,6 +5007,7 @@ function sendCatPower(watts) {
   _currentTxPower = watts;
   _currentPower = watts;
   broadcastRigState();
+  ampDriveReadbackGuard(watts);
   // A stale WSPR pre-beacon marker with the radio still at the 1 W cap is a
   // restore that never landed — this readback is where it gets put back.
   if (!isRemoteMode()) wsprReconcilePreCapPower(watts);
@@ -5206,6 +5247,7 @@ function setRadioTxPowerRaw(watts) {
   let max = 0;
   try { const m = getActiveRigModel(); max = m && Number(m.maxPower) > 0 ? Number(m.maxPower) : 0; } catch { max = 0; }
   if (max && w > max) w = max;
+  w = AmpDrive.clampW(w, activeAmpDriveLimitW()); // the rig's amplifier drive limit
   const rigType = detectRigType();
   if (rigType === 'flex') {
     if (!smartSdr || !smartSdr.connected) return false;
@@ -27913,7 +27955,8 @@ function connectRemote() {
 
   // TX Power from ECHOCAT — debounce to avoid serial command flooding and feedback loops
   let _txPowerTimer = null;
-  remoteServer.on('set-txpower', ({ value }) => {
+  remoteServer.on('set-txpower', ({ value: asked }) => {
+    const value = AmpDrive.clampW(asked, activeAmpDriveLimitW()); // amplifier drive limit
     _currentTxPower = value;
     // The operator has taken the level over — a WSPR restore must not undo it.
     if (!wsprBeaconArmed()) wsprForgetPreCapPower();
@@ -48009,7 +48052,7 @@ function cloudShackNotice(text, kind) {
       }
       case 'set-tx-power': {
         if (flexNeedsApi) { _flexWarnOnce('TX Power requires SmartSDR API — not connected'); break; }
-        const value = Number(data.value) || 0;
+        const value = AmpDrive.clampW(Number(data.value) || 0, activeAmpDriveLimitW()); // amplifier drive limit
         if (flexSdr()) {
           gatedSmartSdrTxPower(value);
         } else if (cat && cat.connected) {
