@@ -49,8 +49,10 @@ test('no QSO, or no call: nothing to log', () => {
 
 const MAIN = readSrc(path.join(__dirname, '..', 'main.js'));
 test('both reply paths (window and ECHOCAT/phone) use the shared rule', () => {
-  assert.ok(/_jtcatStateMachine\.replaceLogsQso\(popoutJtcatQso, data\.call\)/.test(MAIN), 'window path');
-  assert.ok(/_jtcatStateMachine\.replaceLogsQso\(remoteJtcatQso, call\)/.test(MAIN), 'ECHOCAT path');
+  // Both go through jtcatSupersedeQsos -> supersedeRunningQsos -> replaceLogsQso (#519).
+  assert.ok(/await jtcatSupersedeQsos\(data\.call, 'popout'\)/.test(MAIN), 'window path');
+  assert.ok(/await jtcatSupersedeQsos\(call, 'remote'\)/.test(MAIN), 'ECHOCAT path');
+  assert.ok(/_jtcatStateMachine\.supersedeRunningQsos\(/.test(MAIN), 'the shared rule');
 });
 test('the old "holds their report = log it" test is gone', () => {
   assert.ok(!/Replacing active QSO with .* — auto-logging/.test(MAIN));

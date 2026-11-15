@@ -134,6 +134,7 @@ const TESTS = [
   'test/rigctld-kenwood-power-test.js', // a TS-590/TS-2000 behind Hamlib keeps its power: raw PC, never Hamlib's PC000/PC255 probe
   'test/jtcat-tx-watchdog-test.js',
   'test/jtcat-replace-log-test.js',
+  'test/jtcat-second-caller-test.js',
   'test/port-picker-test.js',
   'test/pota-parks-db-test.js',
   'test/elecraft-data-mode-test.js',
