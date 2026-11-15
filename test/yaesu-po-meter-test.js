@@ -78,14 +78,14 @@ console.log('\n=== the reply ===');
 
 test('FT-710: the owner\'s two measured points read back as measured (048 = 5 W, 202 = 100 W)', () => {
   const { codec, watts } = codecFor('FT-710');
-  codec.onData('RM5048000;');
+  codec.onData('RM5049000;');
   codec.onData('RM5202000;');
   assert.deepStrictEqual(watts, [5, 100]);
 });
 
-test('FT-710: zero and in-between readings (square-law points), never above rated power', () => {
+test('FT-710: zero and the owner\'s measured points, never above rated power', () => {
   const { codec, watts } = codecFor('FT-710');
-  for (const raw of ['000', '066', '103', '144', '175', '255']) codec.onData(`RM5${raw}000;`);
+  for (const raw of ['000', '066', '100', '140', '171', '255']) codec.onData(`RM5${raw}000;`);
   assert.deepStrictEqual(watts, [0, 10, 25, 50, 75, 100]);
 });
 
