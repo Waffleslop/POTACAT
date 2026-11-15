@@ -556,13 +556,31 @@ kept by message id (`lib/winlink-sent-routes.js`). Archive and Deleted keep the 
 | `winlink-favourite` | C→S | `{op, call, mode, dialKhz, url?}`: `op` `add` or `remove` a gateway in My gateways. Reply: `winlink-result {op: 'favourite'}`; the list follows in `winlink-state.favourites`. |
 | `winlink-set-mode` | C→S | `{mode}`: save the mode to use. No reply; a `winlink-state` push follows. A mode the shack does not know is ignored. |
 | `winlink-qsy` | C→S | `{dialKhz, mode?}`: a gateway was picked, not yet called: tune the shack's radio there so the waterfall shows that frequency. Refused while a session runs, while another part of POTACAT has the radio, or for a frequency the radio cannot reach. The dial from before the first pick is remembered. Reply: `winlink-result {op: 'qsy'}`. |
-| `winlink-qsy-restore` | C→S | The device is leaving its Mail tab: put the dial back where it was before the first `winlink-qsy`. Nothing happens if nothing moved; during a session the radio goes back when the session ends. Reply: `winlink-result {op: 'qsy-restore'}`. |
+| `winlink-qsy-restore` | C→S | The device is leaving its Mail tab: put the dial back where it was before the first `winlink-qsy`. Nothing happens if nothing moved; during a session the radio goes back when the session ends; while another Mail view is open (the desktop's mail window or another device's Mail tab) the radio stays until the last one closes. Reply: `winlink-result {op: 'qsy-restore'}`. |
+| `winlink-mail-view` | C→S | `{open}`: this device's Mail tab is open (`true`) or closed (`false`). Send `true` when the tab opens and again after each `auth-ok` while it is open; send `false` when it closes, then `winlink-qsy-restore` as today. Capability `winlink-mail-view`. No reply. See "Staying on the gateway" below. |
 | `winlink-connect` | C→S | `{mode, gateway?, dialKhz?, url?}`: start a session, the same as Send / Receive at the shack. `telnet` needs only `mode`. `url` is the gateway row's own `url` from `winlink-gateways` (it carries the bandwidth) and is checked against `gateway` and `mode`. Refused, with the reason as `error`, until the notice is accepted and a password is saved, while a session runs, for a mode that is not available (its `reason`), and for a frequency the radio cannot reach. Reply: `winlink-result {op: 'connect'}` as soon as the session has started (`ok: true`) or was refused; everything after that, the end included, arrives as `winlink-session` pushes. |
 | `winlink-abort` | C→S | Stop the running session. Reply: `winlink-result {op: 'abort'}`. |
 | `winlink-retry` | C→S | `{op, reqId?}`, `op` = `cancel` or `now`: act on the automatic retry after a dropped link (Cancel, or Try now). Reply: `winlink-result {op: 'retry'}`. Refused for a Guest Pass. |
 | `winlink-prompt` | C→S | `{id, value}`: answer `session.prompt` (the busy prompt above). No reply; a `winlink-session` push follows. |
 | `winlink-watch` | C→S | `{on}`: subscribe this device to `winlink-spectrum`, or stop. No reply. The shack computes the spectrum only while a device watches; a closed socket ends the subscription. |
 | `winlink-result` | S→C | `{op, ok, error?, reqId?}`: the outcome of a request, to the asker only. `error` is a sentence to show. `op` is one of `read`, `attachment`, `delete`, `move`, `compose`, `template`, `contact`, `contact-group`, `posreport`, `gateways`, `history`, `favourite`, `qsy`, `qsy-restore`, `connect`, `abort`, `retry`, `accept-notice`, `account-check`, `set-password`, `register`, `recovery-email`. |
+
+#### Staying on the gateway
+
+After a radio session (finished or failed) the radio stays on the gateway's frequency while a Mail
+view is open, so the operator can look at the band; it goes back to the dial from before the first
+gateway pick when the last view closes. A Mail view is the desktop's mail window or a device's Mail
+tab: a shack that lists `winlink-mail-view` in its hello's `capabilities` counts each device that
+sent `winlink-mail-view {open: true}`, by its connection. With no view open, a session goes back
+1.5 s after it ends, as before.
+
+- A device leaving its Mail tab sends `winlink-mail-view {open: false}` and `winlink-qsy-restore`.
+  The radio goes back only if no other view is open.
+- A closed socket counts as closed. If that device was the only view and a return is pending, the
+  shack waits 30 s (`GONE_GRACE_MS` in `lib/winlink-mail-views.js`) for it to reconnect and say
+  `{open: true}` again before the radio goes back.
+- A Guest Pass is refused (no Mail tab). A shack without the capability does not count devices: do
+  not send the message to it; the radio goes back after a session as before.
 
 #### Account
 

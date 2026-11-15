@@ -182,7 +182,7 @@ test('a gateway pick tunes the radio only outside a session, and the dial goes b
   assert.ok(/if \(isRemoteMode\(\)\) return \{ ok: false/.test(q));
   assert.ok(/tuneRadio\(khz, mode === 'packet' \? \(pickPm && pickPm\.byHand \? undefined : 'FM'\) : 'DIGU'/.test(q));
   assert.ok(/returnTo: radio \? \(_winlinkPreviewReturnTo \|\|/.test(fnBody(main, 'winlinkStartSession')), 'the session returns to the pre-pick dial');
-  assert.ok(/winlinkPreviewRestore\('window closed'\)/.test(main), 'closing the window with no session puts the dial back');
+  assert.ok(/winlinkMailViewClosed\('window closed'\)/.test(main), 'closing the window with no session puts the dial back');
 });
 
 test('the mail window acknowledges audio frames, or main pauses the waterfall every 120 frames', () => {

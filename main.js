@@ -472,6 +472,7 @@ const VaraProcess = require('./lib/vara-process');
 const VaraSetup = require('./lib/vara-setup');
 const WinlinkModes = require('./lib/winlink-modes');
 const WinlinkReturn = require('./lib/winlink-return');
+const WinlinkMailViews = require('./lib/winlink-mail-views');
 const WinlinkTxLevel = require('./lib/winlink-tx-level'); // #300: Winlink's own transmit audio level, and the session's levels
 const ModemAudioServerMod = require('./lib/modem-audio-server');
 const { ModemAudioLane } = require('./lib/modem-audio-lane-client'); // the modem's audio, off the main process (#187)
@@ -12447,6 +12448,57 @@ function winlinkMailWindowOpen() {
   return !!(winlinkPopoutWin && !winlinkPopoutWin.isDestroyed());
 }
 
+// ECHOCAT devices with their Mail tab open (winlink-mail-view), by connection
+// id. They count like the desktop's mail window: the radio stays on the
+// gateway after a session while any of them is open (lib/winlink-mail-views.js).
+const _winlinkMailDevices = WinlinkMailViews.createMailViews();
+let _winlinkMailGoneTimer = null;
+
+/** A mail view is open somewhere: the desktop window or a device's Mail tab. */
+function winlinkMailViewOpen() {
+  return WinlinkMailViews.viewOpen({ windowOpen: winlinkMailWindowOpen(), devices: _winlinkMailDevices.count() });
+}
+
+/** One mail view closed (the window, or a device left its Mail tab): go back only after the last. */
+function winlinkMailViewClosed(why) {
+  const act = WinlinkMailViews.atViewClose({ windowOpen: winlinkMailWindowOpen(), devices: _winlinkMailDevices.count() });
+  if (act === 'keep') {
+    if (_winlinkPreviewReturnTo) winlinkLog(`${why === 'window closed' ? 'the mail window closed' : why}: the radio stays — another Mail view is still open (${winlinkMailWindowOpen() ? 'the mail window' : `${_winlinkMailDevices.count()} ECHOCAT device${_winlinkMailDevices.count() === 1 ? '' : 's'}`})`);
+    return;
+  }
+  winlinkPreviewRestore(why);
+}
+
+/**
+ * A device said winlink-mail-view, or its connection went (gone). A device
+ * that drops its link with the Mail tab open gets GONE_GRACE_MS to come back
+ * before the dial goes back.
+ */
+function winlinkMailViewSet(clientId, open, { gone } = {}) {
+  const was = _winlinkMailDevices.has(clientId);
+  _winlinkMailDevices.set(clientId, open);
+  if (open) {
+    if (_winlinkMailGoneTimer) { clearTimeout(_winlinkMailGoneTimer); _winlinkMailGoneTimer = null; }
+    if (!was) winlinkLog(`an ECHOCAT device opened its Mail tab (${_winlinkMailDevices.count()} open) — the radio stays on the gateway after a session while it is open`);
+    return;
+  }
+  if (!was) return;
+  if (!gone) return; // leaving the tab: the device sends winlink-qsy-restore, which goes back
+  winlinkMailDeviceGone();
+}
+
+/** A device with its Mail tab open is gone: wait for it before going back. */
+function winlinkMailDeviceGone() {
+  const act = WinlinkMailViews.atDeviceGone({ windowOpen: winlinkMailWindowOpen(), devices: _winlinkMailDevices.count(), sessionActive: winlinkSessionActive(), pending: _winlinkPreviewReturnTo });
+  if (act !== 'wait' || _winlinkMailGoneTimer) return;
+  winlinkLog(`the ECHOCAT device with its Mail tab open disconnected — the radio goes back to ${winlinkDialText(_winlinkPreviewReturnTo)} in ${Math.round(WinlinkMailViews.GONE_GRACE_MS / 1000)} s unless it comes back`);
+  _winlinkMailGoneTimer = setTimeout(() => {
+    _winlinkMailGoneTimer = null;
+    if (winlinkMailViewOpen() || winlinkSessionActive()) return;
+    winlinkPreviewRestore('the ECHOCAT device with its Mail tab open did not come back');
+  }, WinlinkMailViews.GONE_GRACE_MS);
+}
+
 /** A return is pending and the dial is not where POTACAT left it: say so, keep the original. */
 function winlinkNoteHandTune() {
   const r = _winlinkPreviewReturnTo;
@@ -12486,7 +12538,7 @@ function winlinkLogLeftAlone(lead, returnTo, leftAtHz) {
 /** Winlink stopped. With the mail window open it is a relaunch: the return point is kept. */
 function winlinkReturnOnStop(quit) {
   const r = _winlinkPreviewReturnTo;
-  const act = WinlinkReturn.atStop({ pending: r, windowOpen: winlinkMailWindowOpen(), quit: !!quit, leftAtHz: _winlinkLeftAtHz, nowHz: _currentFreqHz });
+  const act = WinlinkReturn.atStop({ pending: r, windowOpen: winlinkMailViewOpen(), quit: !!quit, leftAtHz: _winlinkLeftAtHz, nowHz: _currentFreqHz });
   if (act === 'none') return;
   if (act === 'keep') { winlinkLog(`Pat restarts with the mail window open — the radio still goes back to ${winlinkDialText(r)} when it closes`); return; }
   const leftAt = _winlinkLeftAtHz;
@@ -12890,7 +12942,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
   winlinkSessionPush();
   winlinkLog(`session start: ${mode}${radio ? ` → ${String(gateway).toUpperCase()} on ${Number(dialKhz).toFixed(1)} kHz dial` : ''} (${origin || 'operator'})`);
   const _rt = winlinkState.session.returnTo;
-  if (radio && _rt && _rt.freqHz) winlinkLog(`the radio goes back to ${winlinkDialText(_rt)} ${winlinkMailWindowOpen() ? 'when the mail window closes (it stays put between attempts)' : 'when the session ends'}`);
+  if (radio && _rt && _rt.freqHz) winlinkLog(`the radio goes back to ${winlinkDialText(_rt)} ${winlinkMailViewOpen() ? 'when the last Mail view closes (it stays put between attempts)' : 'when the session ends'}`);
   if (radio) {
     settings.winlinkLastGateway = { call: String(gateway).toUpperCase(), mode, dialKhz: Number(dialKhz) || null };
     saveSettings(settings);
@@ -13399,10 +13451,10 @@ function winlinkEndSession(state, text, received = 0) {
     // The radio stays where the session put it while the mail window is open;
     // it goes back once, when the window closes (#187: a return per attempt
     // was two band changes, each an ATU tune). No window: go back now.
-    const _ret = WinlinkReturn.atSessionEnd({ tuned: s.tuned, returnTo: s.returnTo, windowOpen: winlinkMailWindowOpen() || retryWill });
+    const _ret = WinlinkReturn.atSessionEnd({ tuned: s.tuned, returnTo: s.returnTo, windowOpen: winlinkMailViewOpen() || retryWill });
     if (_ret === 'keep') winlinkKeepReturn(s.returnTo);
     else if (_ret === 'return') setTimeout(() => winlinkRestoreDial(s.returnTo), 1500);
-    if (retryWill && _ret === 'keep' && !winlinkMailWindowOpen()) _winlinkRetry.holdsReturn = true; // goes back if the retry is not made
+    if (retryWill && _ret === 'keep' && !winlinkMailViewOpen()) _winlinkRetry.holdsReturn = true; // goes back if the retry is not made
     winlinkFlexDaxRestore();
     releaseRadio('winlink');
     stopModemBridgeCable();
@@ -13550,7 +13602,7 @@ function winlinkRetryStop() {
 
 /** The radio was kept on the gateway for the retry, with no mail window open: put it back now. */
 function winlinkRetryReturnDial() {
-  if (winlinkMailWindowOpen() || winlinkSessionActive() || !_winlinkPreviewReturnTo) return;
+  if (winlinkMailViewOpen() || winlinkSessionActive() || !_winlinkPreviewReturnTo) return;
   const back = _winlinkPreviewReturnTo;
   const leftAt = _winlinkLeftAtHz;
   _winlinkPreviewReturnTo = null; _winlinkLeftAtHz = 0;
@@ -14266,7 +14318,7 @@ function winlinkSetMode(mode) {
 // ECHOCAT: every winlink-* request from a device. Registered through
 // onRemoteServer so it survives connectRemote() rebuilding the server. The
 // server already refused Guest Passes; `reply` answers the device that asked.
-async function winlinkHandleRemote({ type, req = {}, reply }) {
+async function winlinkHandleRemote({ type, req = {}, reply, clientId }) {
   const result = (op, r) => reply({ type: 'winlink-result', op, ok: !!(r && r.ok), ...(r && r.error ? { error: String(r.error) } : {}) });
   // Any request from a device's Mail tab starts Pat (the first one waits ≤ 15 s).
   if (type !== 'winlink-watch') winlinkEnsureStarted();
@@ -14319,7 +14371,9 @@ async function winlinkHandleRemote({ type, req = {}, reply }) {
         result('qsy', winlinkPreviewQsy({ dialKhz: req.dialKhz, mode: req.mode }));
         return;
       case 'winlink-qsy-restore':
-        winlinkPreviewRestore('ECHOCAT device left its Mail tab');
+        // This device left its Mail tab; the radio goes back only when no other Mail view is open.
+        _winlinkMailDevices.remove(clientId);
+        winlinkMailViewClosed('ECHOCAT device left its Mail tab');
         result('qsy-restore', { ok: true });
         return;
       case 'winlink-prompt':
@@ -14402,6 +14456,10 @@ async function winlinkHandleRemote({ type, req = {}, reply }) {
 onRemoteServer((rs) => {
   rs.on('winlink-request', (e) => { winlinkHandleRemote(e); });
   rs.on('winlink-watch', ({ count } = {}) => winlinkSetRemoteWatch(count));
+  // A device's Mail tab open or closed; gone = its connection went with the tab open.
+  rs.on('winlink-mail-view', ({ open, clientId, gone } = {}) => winlinkMailViewSet(clientId, !!open, { gone: !!gone }));
+  // The last device is gone: nothing of theirs is open any more.
+  rs.on('client-disconnected', () => { if (_winlinkMailDevices.any()) { _winlinkMailDevices.clear(); winlinkMailDeviceGone(); } });
   // A freshly built server hydrates new devices from its own cache — on or
   // off: an off shack hydrates {enabled:false} rather than nothing.
   if (typeof rs.broadcastWinlinkState === 'function' && settings) winlinkPush();
@@ -43726,7 +43784,7 @@ function cloudShackNotice(text, kind) {
         settings.winlinkPopoutBounds = winlinkPopoutWin.getBounds(); saveSettings(settings);
       }
     });
-    winlinkPopoutWin.on('closed', () => { winlinkPopoutWin = null; _winlinkWatchAudio = false; winlinkPreviewRestore('window closed'); winlinkSyncModemBridge(); });
+    winlinkPopoutWin.on('closed', () => { winlinkPopoutWin = null; _winlinkWatchAudio = false; winlinkMailViewClosed('window closed'); winlinkSyncModemBridge(); });
     winlinkPopoutWin.webContents.on('did-finish-load', () => {
       winlinkPopoutSend('winlink-state', winlinkPayload());
       if (_winlinkPendingCompose) { winlinkPopoutSend('winlink-compose-prefill', _winlinkPendingCompose); _winlinkPendingCompose = null; }

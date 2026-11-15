@@ -352,7 +352,7 @@ test('main.js passes where Winlink left the radio and where it is now, and logs 
 console.log('main.js wiring of the return');
 test('session end keeps the return point while the mail window is open, and says so', () => {
   const end = fnBody(main, 'winlinkEndSession');
-  assert.ok(/WinlinkReturn\.atSessionEnd\(\{ tuned: s\.tuned, returnTo: s\.returnTo, windowOpen: winlinkMailWindowOpen\(\) \|\| retryWill \}\)/.test(end), 'a pending automatic retry (#425) keeps the radio like an open window');
+  assert.ok(/WinlinkReturn\.atSessionEnd\(\{ tuned: s\.tuned, returnTo: s\.returnTo, windowOpen: winlinkMailViewOpen\(\) \|\| retryWill \}\)/.test(end), 'a pending automatic retry (#425) keeps the radio like an open window');
   assert.ok(/=== 'keep'\) winlinkKeepReturn\(s\.returnTo\)/.test(end));
   assert.ok(/else if \(_ret === 'return'\) setTimeout\(\(\) => winlinkRestoreDial\(s\.returnTo\), 1500\);/.test(end), 'goes back at once only with no mail window');
   const keep = fnBody(main, 'winlinkKeepReturn');
@@ -367,7 +367,7 @@ test('a later gateway pick never replaces the return point; a hand tune between 
   assert.ok(/WinlinkReturn\.movedByHand\(_winlinkLeftAtHz, _currentFreqHz\)/.test(fnBody(main, 'winlinkNoteHandTune')));
 });
 test('closing the mail window goes back once through the guarded restore', () => {
-  assert.ok(/winlinkPreviewRestore\('window closed'\)/.test(main));
+  assert.ok(/winlinkMailViewClosed\('window closed'\)/.test(main));
   const close = fnBody(main, 'winlinkPreviewRestore');
   assert.ok(/WinlinkReturn\.atClose\(/.test(close));
   assert.ok(/_winlinkPreviewReturnTo = null;/.test(close), 'once');
