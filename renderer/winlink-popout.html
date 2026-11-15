@@ -133,6 +133,9 @@
     .wl-wf { display: none; flex-direction: column; border-top: 1px solid var(--border-primary); background: #000; flex-shrink: 0; }
     .wl-wf.show { display: flex; }
     .wl-wf canvas { width: 100%; height: 80px; display: block; }
+    /* Why the waterfall is black: no radio audio reaches POTACAT (lib/winlink-wf-audio.js). */
+    .wl-wf-noaudio { font-size: 12px; color: var(--accent-red-text); background: var(--bg-secondary); padding: 3px 8px; border-top: 1px solid var(--border-primary); }
+    .wl-wf-noaudio[hidden] { display: none; }
     .wl-wf-bar { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--text-dim); padding: 3px 8px; background: var(--bg-secondary); }
     .wl-wf-bar b { color: var(--accent-green, #4ecca3); font-family: monospace; }
     .wl-busy { font-weight: 700; padding: 1px 8px; border-radius: 3px; font-size: 11px; min-width: 54px; text-align: center; background: var(--bg-primary); color: var(--text-dim); }
@@ -533,6 +536,7 @@
       <label>Speed <input type="range" id="wl-wf-speed" min="1" max="60" step="1" value="60"> <span id="wl-wf-speed-val">60</span> lines/s</label>
       <button class="wl-btn" id="wl-wf-hide">Hide</button>
     </div>
+    <div class="wl-wf-noaudio" id="wl-wf-noaudio" role="status" hidden></div>
     <canvas id="wl-wf-canvas" width="640" height="80"></canvas>
     <div class="wl-wf-axis"><span>0</span><span>1000 Hz</span><span>2000 Hz</span><span>3000 Hz</span></div>
   </div>
@@ -551,6 +555,7 @@
   <script src="../lib/waterfall-palettes.js"></script>
   <script src="waterfall.js"></script>
   <script src="../lib/winlink-spectrum.js"></script>
+  <script src="../lib/winlink-wf-audio.js"></script>
   <script src="../lib/rig-bands.js"></script>
   <script src="../lib/winlink-contacts.js"></script>
   <script src="../lib/winlink-mail-actions.js"></script>
