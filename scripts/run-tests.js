@@ -22,6 +22,7 @@ const TESTS = [
   'test/guest-pass-listen-test.js',
   'test/guest-pass-state-541-test.js', // #541: a valid pass is never shown as revoked; Cloud answers, auth-fail codes, retry
   'test/guest-pass-state-step2-test.js', // #541 step 2: pass-state, four states with a reason, one wording table, the claim rule
+  'test/guest-pass-owner-controls-test.js', // #200 / #541 step 3: Take the radio (Now / In 5 minutes), Give it back, Cancel pass
   'test/rigctld-spawn-test.js',
   'test/echocat-connect-diet-test.js',
   'test/cw-live-watchdog-test.js',

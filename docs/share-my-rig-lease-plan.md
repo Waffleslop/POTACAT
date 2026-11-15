@@ -163,7 +163,7 @@ the guest's cloud logbook:
 
 ### 8. The lease ends hard (desktop)
 
-On expiry, revoke, owner's End, 60 s guest absence, or the cloud's 404:
+On expiry, Cancel pass (named Revoke before 2026-11-14), owner's End, 60 s guest absence, or the cloud's 404:
 1. `lease.state = 'ending'`: every `tx_enable` is refused from this instant;
 2. stop what is running: `stopFullAutoCq`, `setJtcatHuntMode('off')`, abort any
    JTCAT TX in flight, WSPR disarm, CW abort (`cw-stop` path), SSTV halt, Mercury

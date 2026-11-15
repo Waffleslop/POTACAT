@@ -4364,6 +4364,39 @@
        are obvious before issuing. -->
   <dialog id="share-rig-dialog">
     <h3 style="display:flex;justify-content:space-between;align-items:baseline;">Share Your Rig <span style="font-size:11px;font-weight:normal;color:#666;">ESC to close</span></h3>
+    <!-- While a guest holds a pass: who has the radio, and the owner's three
+         controls (#200): Take the radio (Now / In 5 minutes, with an optional
+         message), Give it back, Cancel pass (confirmed here, no browser
+         dialog). Filled by _shareRigLiveRender() from pass-owner-get. -->
+    <div id="share-rig-live" class="share-rig-live hidden" role="region" aria-label="Your guest">
+      <div class="share-rig-live-status" id="share-rig-live-status" role="status" aria-live="polite"></div>
+      <div class="share-rig-live-sub" id="share-rig-live-sub"></div>
+      <div class="share-rig-live-msg" id="share-rig-live-msg-row">
+        <label for="share-rig-live-message">Message to the guest (optional)</label>
+        <input type="text" id="share-rig-live-message" maxlength="140" autocomplete="off" placeholder="e.g. I need the radio for the club net">
+        <span class="share-rig-live-count" id="share-rig-live-count">0 / 140</span>
+      </div>
+      <div class="share-rig-live-actions" id="share-rig-live-take-row">
+        <span class="share-rig-live-label">Take the radio:</span>
+        <button type="button" class="primary" id="share-rig-take-now">Now</button>
+        <button type="button" id="share-rig-take-later">In 5 minutes</button>
+        <button type="button" id="share-rig-cancel-take" class="hidden">Let them keep it</button>
+      </div>
+      <div class="share-rig-live-actions hidden" id="share-rig-live-giveback-row">
+        <button type="button" class="primary" id="share-rig-give-back">Give it back</button>
+      </div>
+      <div class="share-rig-live-actions share-rig-live-end" id="share-rig-live-end-row">
+        <button type="button" class="danger" id="share-rig-cancel-pass">Cancel pass</button>
+      </div>
+      <div class="share-rig-live-confirm hidden" id="share-rig-live-confirm" role="alertdialog" aria-labelledby="share-rig-live-confirm-text">
+        <div id="share-rig-live-confirm-text">Cancel this pass for good? Your guest comes off the radio now and the link stops working.</div>
+        <div class="share-rig-live-actions">
+          <button type="button" class="danger" id="share-rig-cancel-pass-yes">Yes, cancel the pass</button>
+          <button type="button" id="share-rig-cancel-pass-no">Keep the pass</button>
+        </div>
+      </div>
+      <div class="share-rig-live-error" id="share-rig-live-error" role="alert"></div>
+    </div>
     <div id="share-rig-form-view">
       <!-- Network-reach notice. Always visible — leads the dialog so
            the operator sees the share-scope boundary BEFORE filling
@@ -4504,7 +4537,7 @@
 
       <div class="dialog-buttons">
         <button type="button" id="share-rig-issue-another">Issue another pass</button>
-        <button type="button" id="share-rig-revoke" class="danger">Revoke this pass</button>
+        <button type="button" id="share-rig-revoke" class="danger">Cancel pass</button>
         <button type="button" id="share-rig-done">Done</button>
       </div>
     </div>
