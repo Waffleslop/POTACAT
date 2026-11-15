@@ -364,6 +364,7 @@ const ActivationMapData = require('./lib/activation-map-data');
 const LogFreq = require('./lib/log-freq');
 const LogTxPower = require('./lib/log-tx-power'); // the power a contact is logged at, never a guessed 100 W (#523)
 const RigBands = require('./lib/rig-bands');
+const SpotBandFilter = require('./lib/spot-band-filter');
 const SstvStartBand = require('./lib/sstv-start-band');
 const AwardTables = require('./lib/award-tables');
 const { activationStationFill } = require('./lib/activation-station'); // N7VBN: station side of activation records
@@ -6025,6 +6026,21 @@ function activeRigBands() {
   return out.length ? out : base;
 }
 
+/**
+ * ECHOCAT's band filter (settings.echoFilters, phone and ECHOCAT Web) re-ticked
+ * for the radio now active: its bands minus the operator's off list, or All
+ * (#291, lib/spot-band-filter.js). Saved and pushed to every client.
+ */
+function echoFiltersFollowRig(prevBands, bands) {
+  const next = SpotBandFilter.followRig(settings.echoFilters, prevBands, bands);
+  if (!next) return;
+  settings.echoFilters = next;
+  saveSettings(settings);
+  if (remoteServer && remoteServer.running) {
+    remoteServer.sendFiltersToClient({ ...next, muteRules: normalizeMuteRules(settings.spotMuteRules) });
+  }
+}
+
 let _rigBandsLastSent = '';
 /** Push the active rig's bands to every window and ECHOCAT client (deduped). */
 function rigBandsBroadcast(force) {
@@ -6032,6 +6048,7 @@ function rigBandsBroadcast(force) {
   const key = JSON.stringify(bands);
   if (!force && key === _rigBandsLastSent) return;
   const changed = key !== _rigBandsLastSent;
+  const prevBands = _rigBandsLastSent ? JSON.parse(_rigBandsLastSent) : bands;
   _rigBandsLastSent = key;
   const payload = { bands, all: RigBands.ALL_BANDS };
   for (const w of [win, jtcatPopoutWin, sstvPopoutWin, vfoPopoutWin, spotsPopoutWin, winlinkPopoutWin]) {
@@ -6043,6 +6060,7 @@ function rigBandsBroadcast(force) {
     sendCatLog(bands ? `[Rig] Bands for this radio: ${bands.join(' ')} (others are hidden everywhere; change them in the rig editor)` : '[Rig] Bands for this radio: not restricted (model not known; tick bands in the rig editor to limit them)');
     // The spot list is filtered by band, so it is rebuilt with the new set.
     try { sendMergedSpots(); } catch { /* window not ready */ }
+    try { echoFiltersFollowRig(prevBands, bands); } catch (e) { console.error('[Rig] echo filters:', e.message); }
   }
 }
 
@@ -27668,7 +27686,9 @@ function connectRemote() {
 
   remoteServer.on('set-echo-filters', (filters) => {
     if (!filters) return;
-    settings.echoFilters = filters;
+    // The client's ticked bands become the operator's off list, read against
+    // this rig, so a rig switch can re-tick them (#291, lib/spot-band-filter.js).
+    settings.echoFilters = SpotBandFilter.fromClient(filters, settings.echoFilters, activeRigBands());
     saveSettings(settings);
   });
 

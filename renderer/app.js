@@ -3976,8 +3976,10 @@ function initMultiDropdown(container, label, onChange) {
       if (radioCb) radioCb.checked = false;
       // If nothing checked, check "All"
       if (itemCbs.every((c) => !c.checked)) allCb.checked = true;
-      // If everything checked, switch to "All"
-      if (itemCbs.every((c) => c.checked)) {
+      // If everything this radio offers is checked, switch to "All" (a band
+      // the radio is not used on is hidden, lib/rig-bands.js, and stays unticked).
+      const shown = itemCbs.filter((c) => { const it = c.closest('.multi-dropdown-item'); return !(it && it.hidden); });
+      if (shown.length && shown.every((c) => c.checked)) {
         allCb.checked = true;
         itemCbs.forEach((c) => { c.checked = false; });
       }
@@ -4008,7 +4010,7 @@ function getDropdownValues(container) {
   return new Set(checked.map((cb) => cb.value));
 }
 
-initMultiDropdown(bandFilterEl, 'Band', () => { updateBandButtonsVisibility(); render(); });
+initMultiDropdown(bandFilterEl, 'Band', () => { noteBandFilterTicks(); updateBandButtonsVisibility(); render(); });
 initMultiDropdown(modeFilterEl, 'Mode');
 // Continent filter is now inline in Spots panel — wire "All" toggle manually
 if (continentFilterEl) {
@@ -4836,6 +4838,44 @@ function playTuneClick() {
 // --- Persist filters to localStorage ---
 const FILTERS_KEY = 'pota-cat-filters';
 
+// The Spots band filter follows the radio (#291, lib/spot-band-filter.js):
+// what is kept is the bands the operator turned OFF, one list for every rig,
+// and a rig shows its own bands minus that list. var, not let: the rig-bands
+// receivers near the end of this file may run first.
+var bandFilterOff = [];
+var bandFilterLegacyTicks = null; // a saved ticked list from before #291, read once the rig's bands are known
+var rigBandsKnown = false;
+
+/** The operator changed the band filter: remember what is now off on this radio. */
+function noteBandFilterTicks() {
+  const SBF = window.SpotBandFilter;
+  if (!SBF) return;
+  const radioCb = bandFilterEl.querySelector('input[value="radio"]');
+  if (radioCb && radioCb.checked) return; // Radio follows the dial, not a list
+  const ticks = getDropdownValues(bandFilterEl);
+  bandFilterOff = SBF.offFromTicks(ticks ? [...ticks] : null, rigBandsList, bandFilterLegacyTicks ? [] : bandFilterOff);
+  bandFilterLegacyTicks = null;
+}
+
+/** Tick the band filter for the active radio: its bands minus the off list, or All. */
+function syncBandFilterToRig() {
+  const SBF = window.SpotBandFilter;
+  if (!SBF || !bandFilterEl) return false;
+  const radioCb = bandFilterEl.querySelector('input[value="radio"]');
+  if (radioCb && radioCb.checked) return false;
+  if (bandFilterLegacyTicks) {
+    if (!rigBandsKnown) return false;
+    bandFilterOff = SBF.offFromTicks(bandFilterLegacyTicks, rigBandsList, []);
+    bandFilterLegacyTicks = null;
+  }
+  const ticks = SBF.ticksForRig(bandFilterOff, rigBandsList);
+  const set = new Set(ticks || []);
+  bandFilterEl.querySelector('input[value="all"]').checked = !ticks;
+  bandFilterEl.querySelectorAll('input:not([value="all"]):not([value="radio"])').forEach((cb) => { cb.checked = !!ticks && set.has(cb.value); });
+  if (bandFilterEl._updateText) bandFilterEl._updateText();
+  return true;
+}
+
 function saveFilters() {
   const bandRadioCb = bandFilterEl.querySelector('input[value="radio"]');
   const bandRadio = bandRadioCb && bandRadioCb.checked;
@@ -4845,7 +4885,10 @@ function saveFilters() {
   const modes = modeRadio ? null : getDropdownValues(modeFilterEl);
   const continents = getDropdownValues(continentFilterEl);
   const data = {
-    bands: bands ? [...bands] : null,
+    // bands: the ticks as they stand (what versions before #291 read back);
+    // bandsOff: what this version reads (lib/spot-band-filter.js).
+    bands: bandFilterLegacyTicks || (bands ? [...bands] : null),
+    ...(bandFilterLegacyTicks ? {} : { bandsOff: bandFilterOff.slice() }),
     bandRadio,
     modes: modes ? [...modes] : null,
     modeRadio,
@@ -4869,7 +4912,14 @@ function restoreFilters() {
       return;
     }
 
-    // Restore band checkboxes
+    // Restore band checkboxes. The off list is what counts (#291); an older
+    // ticked list waits for the rig's bands (syncBandFilterToRig).
+    if (Array.isArray(data.bandsOff) && window.SpotBandFilter) {
+      bandFilterOff = window.SpotBandFilter.offFromSaved(data, null);
+      bandFilterLegacyTicks = null;
+    } else if (Array.isArray(data.bands)) {
+      bandFilterLegacyTicks = data.bands.slice();
+    }
     if (data.bandRadio) {
       bandFilterEl.querySelector('input[value="all"]').checked = false;
       const radioCb = bandFilterEl.querySelector('input[value="radio"]');
@@ -23140,8 +23190,19 @@ function applyRigBandsMain() {
   try { if (currentView === 'directory' && dirvActiveTab === 'landmarks') renderDirectoryView(); } catch { /* not built yet */ }
 }
 if (window.api && window.api.rigBandsGet) {
-  window.api.rigBandsGet().then((d) => { rigBandsList = (d && d.bands) || null; applyRigBandsMain(); }).catch(() => {});
-  window.api.onRigBands((d) => { rigBandsList = (d && d.bands) || null; applyRigBandsMain(); });
+  // A rig switch (or new ticks in the rig editor) re-ticks the Spots band
+  // filter for the new radio (#291): ticks made on an HF radio no longer
+  // empty the table on a VHF one, and a band the new radio adds is shown.
+  const onRigBandsMain = (d) => {
+    rigBandsList = (d && d.bands) || null;
+    rigBandsKnown = true;
+    applyRigBandsMain();
+    if (syncBandFilterToRig()) {
+      try { saveFilters(); updateBandButtonsVisibility(); render(); } catch { /* not built yet */ }
+    }
+  };
+  window.api.rigBandsGet().then(onRigBandsMain).catch(() => {});
+  window.api.onRigBands(onRigBandsMain);
   // The renderer's rig copy is what the editor saves whole: keep the tuner
   // verdict current in it, and redraw the grid if that rig is being edited.
   if (window.api.onRigAtuBands) window.api.onRigAtuBands((d) => {
