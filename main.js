@@ -2512,7 +2512,7 @@ function voiceTxCheckEnd() {
   if (!c) return;
   const model = getActiveRigModel() || {};
   const d = decideVoiceTxHint({ keyedMs: Date.now() - c.startedAt, fwdEvents: c.fwdEvents, peakW: c.peakW,
-    alcEvents: c.alcEvents, peakAlc: c.peakAlc, mode: c.mode || _currentMode, brand: model.brand });
+    alcEvents: c.alcEvents, peakAlc: c.peakAlc, mode: c.mode || _currentMode, brand: model.brand, model: getActiveRigModelName() });
   if (!d) return;
   const k = (settings.activeRigId || '') + '|' + d.key;
   if (_voiceTxHinted.has(k)) return;
@@ -6646,7 +6646,7 @@ async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false 
   // A silent voice path names the radio's input menu (lib/voice-tx-check.js).
   let hint = null;
   if (voice && result === 'no-power') {
-    const d = decideVoiceTxHint({ keyedMs: 3000, fwdEvents: meas.fwdEvents, peakW: 0, alcEvents: 0, peakAlc: 0, mode: modeNow, brand: info.brand });
+    const d = decideVoiceTxHint({ keyedMs: 3000, fwdEvents: meas.fwdEvents, peakW: 0, alcEvents: 0, peakAlc: 0, mode: modeNow, brand: info.brand, model: rig.model });
     hint = d ? d.hint : null;
   }
   return done({ result, watts, swr, keyed: keyedProven, evidence, restored, restoreNote, hint });
