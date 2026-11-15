@@ -695,7 +695,7 @@ for (const serverName of ['zeus', 'thetis']) {
       frame.writeUInt32LE(48000, 4);
       frame.writeUInt32LE(3, 8);
       frame.writeUInt32LE(2, 20);
-      frame.writeUInt32LE(2, 28);
+      frame.writeUInt32LE(serverName === 'zeus' ? 0 : 2, 28);
       frame.writeFloatLE(0.25, 64);
       frame.writeFloatLE(-0.5, 68);
       const iq = once(events, 'iq');
