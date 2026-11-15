@@ -40313,7 +40313,7 @@ async function redeemGuestPass(rawInput) {
     return { ok: false, error: 'Cloud unreachable: ' + (err.message || err) };
   }
 
-  if (r.status === 404) return { ok: false, error: 'Pass not found, expired, or revoked' };
+  if (r.status === 404) return { ok: false, error: 'Pass not found, expired, or cancelled' };
   // Cloud's error codes in words; a raw snake_case code is never shown (#541).
   if (r.status === 403) return { ok: false, error: PassWording.redeemErrorText(r.body && r.body.error, 'This pass requires signing in to POTACAT Cloud first (the owner didn’t allow anonymous guests)') };
   if (r.status !== 200 || !r.body) return { ok: false, error: PassWording.redeemErrorText(r.body && r.body.error, 'Redeem failed (HTTP ' + r.status + ')') };
@@ -41059,7 +41059,7 @@ app.whenReady().then(() => {
       // clients and purges the browser sign-ins for that pass.
       onPassRevoked: (code) => {
         if (passEnforcement && passEnforcement.endPassIfCode(code, 'revoked')) {
-          sendCatLog(`[pass] revoked by the owner: the live Guest Pass session ended`);
+          sendCatLog(`[pass] Cancelled by the owner (Cancel pass): the live Guest Pass session ended`);
         }
       },
       // The signed-in account changed (any sign-in / sign-out path): the
@@ -41609,6 +41609,11 @@ function cloudShackNotice(text, kind) {
         passEnforcement.resume();
         sendCatLog(`[pass] The radio is back with the guest${guestConnected ? '' : ' (not connected: held 60 s)'}${stopped.length ? ' — stopped ' + stopped.join(', ') : ''}`);
       });
+      // Share My Rig's status line and controls follow the owner's hold and a
+      // pending take (#200, lib/pass-owner-controls.js).
+      rs.on('pass-owner-controls', (c) => {
+        if (win && !win.isDestroyed()) win.webContents.send('pass-owner-controls', c);
+      });
       rs.on('pass-guest-left', ({ code }) => {
         clearPassDisconnectTimer();
         if (passEnforcement.endPassIfCode(code, 'left')) sendCatLog(`[pass] The guest left the rig; it is free for the next pass`);
@@ -41673,6 +41678,36 @@ function cloudShackNotice(text, kind) {
   ipcMain.handle('pass-give-back', async () => {
     if (!remoteServer || !remoteServer.resumePass) return { error: 'No guest on the rig' };
     return { ok: remoteServer.resumePass('desktop') };
+  });
+
+  // Share My Rig's owner controls (#200): Take the radio (Now / In 5 minutes,
+  // with an optional message), cancel a pending take, Give it back. Cancel
+  // pass is passes-revoke (Cloud first, then the live session ends).
+  ipcMain.handle('pass-owner-get', () => {
+    const st = passEnforcement ? passEnforcement.getSessionStatus() : { state: 'idle' };
+    const controls = remoteServer && remoteServer.getPassOwnerControls ? remoteServer.getPassOwnerControls() : null;
+    const guestConnected = !!(remoteServer && remoteServer.hasActivePassClient && remoteServer.hasActivePassClient());
+    return { status: st, controls, guestConnected };
+  });
+  ipcMain.handle('pass-owner-take', async (_evt, opts) => {
+    if (!passEnforcement || !remoteServer || !remoteServer.takeOverPass) return { error: 'No guest on the rig' };
+    const o = opts || {};
+    const message = typeof o.message === 'string' ? o.message : '';
+    if (o.when === 'later') {
+      const r = remoteServer.scheduleTakeOverPass({ message });
+      if (r.ok) sendCatLog(`[pass] The owner takes the radio back at ${r.takeAt}; the guest keeps operating until then`);
+      return r.ok ? { ok: true, takeAt: r.takeAt } : { error: r.reason || 'refused' };
+    }
+    return { ok: remoteServer.takeOverPass('desktop', null, { message }) };
+  });
+  ipcMain.handle('pass-owner-cancel-take', async () => {
+    if (!remoteServer || !remoteServer.cancelPassTake) return { error: 'No guest on the rig' };
+    return { ok: remoteServer.cancelPassTake() };
+  });
+  ipcMain.handle('pass-owner-give-back', async () => {
+    if (!remoteServer || !remoteServer.resumePass) return { error: 'No guest on the rig' };
+    // Whoever took it (this PC or an owner device): the owner at the desk gives it back.
+    return { ok: remoteServer.resumePass() };
   });
 
   ipcMain.handle('pass-enforcement-end', async (_evt, reason) => {

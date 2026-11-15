@@ -238,6 +238,12 @@ contextBridge.exposeInMainWorld('api', {
   passEnforcementEnd: (reason) => ipcRenderer.invoke('pass-enforcement-end', reason),
   passTakeOver: () => ipcRenderer.invoke('pass-take-over'),
   passGiveBack: () => ipcRenderer.invoke('pass-give-back'),
+  // Share My Rig's owner controls (#200).
+  passOwnerGet: () => ipcRenderer.invoke('pass-owner-get'),
+  passOwnerTake: (opts) => ipcRenderer.invoke('pass-owner-take', opts),
+  passOwnerCancelTake: () => ipcRenderer.invoke('pass-owner-cancel-take'),
+  passOwnerGiveBack: () => ipcRenderer.invoke('pass-owner-give-back'),
+  onPassOwnerControls: (cb) => ipcRenderer.on('pass-owner-controls', (_e, c) => cb(c)),
   onPassEnforcementState: (cb) => {
     const handler = (_e, status) => cb(status);
     ipcRenderer.on('pass-enforcement-state', handler);
