@@ -615,8 +615,26 @@ message.
 
 | Message | Dir | Purpose |
 |---|---|---|
-| `kiwi-connect` | C→S | Connect to a KiwiSDR / WebSDR station. |
+| `kiwi-connect` | C→S | Connect to an SDR: a KiwiSDR, a WebSDR station or an rtl_tcp server. `{host?, id?, password?}`; no `host` = the station's first listed SDR. |
 | `kiwi-disconnect` | C→S | Disconnect. |
+| `kiwi-tune` | C→S | `{freqKhz, mode?}`: tune the connected SDR (`freqKhz` may be a string, as for `tune`). Ignored when no SDR is connected. |
+| `refused` | S→C | `{reason: 'guest-pass', of, text, reqId?}`: the shack will not do that for this Guest Pass session. Show `text` as it is; `of` is the message type, for the client's own use, never for display. |
+
+**Guest Pass (2026-11-14, #543).** A pass session may send all three SDR
+messages, for the SDRs the owner has already set up at the station (the
+entries in `kiwiSdrList` and the `kiwiSdrHost1..3` slot keys of the settings
+the guest receives). A `kiwi-connect` must name one of them: by the entry's
+`id` when it has one, or by its exact host and port (scheme, trailing slash,
+an inline `password@` and letter case are ignored; no port is 8073), or send
+no `host` for the first one. The shack connects with the owner's own entry,
+never the guest's string or `password`. Any other host or port is answered
+with `refused`, `of: 'kiwi-connect'`, `text: "On a Guest Pass you can use the
+station's own SDRs, not add a new one."`. A guest never edits the list: a
+`save-settings` carrying any SDR key (`kiwiSdrList`, `kiwiSdrHost`,
+`kiwiSdrHost1..3`, `kiwiSdrLabel1..3`) is not saved, is answered with
+`settings-update` (the owner's settings as they are) and then the same
+`refused` text with `of: 'save-settings'`. Rule: lib/guest-sdr.js. Before
+2026-11-14 the shack refused all three SDR messages for a pass session.
 
 (KiwiSDR audio/state events are sent over the existing audio channel and
 the broader `status` message; no dedicated S→C envelope today.)
