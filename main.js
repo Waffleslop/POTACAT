@@ -24697,6 +24697,10 @@ function connectTci() {
   if (!settings.tciSpots) return;
   tciSpotEndpoint = key;
   tciClient = new TciClient();
+  tciClient.on('ready', () => {
+    lastTciPush = 0;
+    pushSpotsToTci(lastMergedSpots);
+  });
   tciClient.on('error', (err) => {
     console.error('TCI:', err.message);
   });
@@ -32342,6 +32346,7 @@ function pushSpotsToTci(spots) {
   // good for the bandscope" — same applies here).
   spots = spotsForPanadapter(spots);
 
+  let sent = 0;
   for (const spot of spots) {
     // Age filter — skip spots older than the effective max age (table age or panadapter age, whichever is smaller)
     const spotMaxAgeMs = spotAgeExempt(spot) ? potaMaxAgeMs : maxAgeMs;
@@ -32350,10 +32355,14 @@ function pushSpotsToTci(spots) {
       const age = now - new Date(t).getTime();
       if (age > spotMaxAgeMs) continue;
     }
-    tciClient.addSpot(spot);
+    if (tciClient.addSpot(spot)) sent++;
   }
   // Remove spots no longer in the list (instead of clear+re-add which causes flashing)
   tciClient.pruneStaleSpots();
+  if (sent && !tciClient.reportedSpotPush) {
+    tciClient.reportedSpotPush = true;
+    sendCatLog(`[TCI spots] Sent ${sent} spots to the panadapter`);
+  }
 }
 
 // --- CW Keyer ---
