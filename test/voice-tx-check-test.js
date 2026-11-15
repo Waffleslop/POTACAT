@@ -20,9 +20,37 @@ t('Yaesu, 0 W and no ALC: SSB MOD SOURCE = REAR, REAR SELECT = USB, and the soun
   const d = decideVoiceTxHint({ ...silent, brand: 'Yaesu' });
   assert.ok(d && /SSB MOD SOURCE to REAR and REAR SELECT to USB/.test(d.hint) && /USB Audio CODEC/.test(d.hint), d && d.hint);
 });
-t('Icom voice in USB names DATA OFF MOD; in USB-D it names DATA MOD', () => {
-  assert.ok(/MOD Input > DATA OFF MOD = USB/.test(decideVoiceTxHint({ ...silent, brand: 'Icom' }).hint));
-  assert.ok(/MOD Input > DATA MOD = USB/.test(decideVoiceTxHint({ ...silent, brand: 'Icom', mode: 'USB-D' }).hint));
+t('Icom voice in USB names DATA OFF MOD; in USB-D it names DATA MOD (IC-7300 MK II has a MOD Input level)', () => {
+  assert.ok(/Connectors > MOD Input > DATA OFF MOD = USB/.test(decideVoiceTxHint({ ...silent, brand: 'Icom', model: 'IC-7300 MK II' }).hint));
+  assert.ok(/Connectors > MOD Input > DATA MOD = USB/.test(decideVoiceTxHint({ ...silent, brand: 'Icom', model: 'IC-7300 MK II', mode: 'USB-D' }).hint));
+});
+t('original IC-7300: no "MOD Input" step (Full Manual rev 12b p.126: the items sit under Connectors)', () => {
+  const v = decideVoiceTxHint({ ...silent, brand: 'Icom', model: 'IC-7300' }).hint;
+  const d = decideVoiceTxHint({ ...silent, brand: 'Icom', model: 'IC-7300', mode: 'USB-D' }).hint;
+  assert.ok(/MENU > SET > Connectors > DATA OFF MOD = USB/.test(v), v);
+  assert.ok(/MENU > SET > Connectors > DATA MOD = USB/.test(d), d);
+  assert.ok(!/MOD Input/.test(v + d));
+});
+t('IC-7610 names DATA1 MOD for data; IC-7100 goes through SET on the controller', () => {
+  assert.ok(/MOD Input > DATA1 MOD = USB/.test(decideVoiceTxHint({ ...silent, brand: 'Icom', model: 'IC-7610', mode: 'USB-D' }).hint));
+  assert.ok(/MOD Input > DATA OFF MOD = USB/.test(decideVoiceTxHint({ ...silent, brand: 'Icom', model: 'IC-7610' }).hint));
+  assert.ok(/push SET on the controller, then Connectors > DATA OFF MOD = USB/.test(decideVoiceTxHint({ ...silent, brand: 'Icom', model: 'IC-7100' }).hint));
+});
+t('an Icom with no verified path gets the item name and no menu path', () => {
+  for (const model of ['IC-705', 'IC-9700', 'IC-7851', undefined]) {
+    const h = decideVoiceTxHint({ ...silent, brand: 'Icom', model }).hint;
+    assert.ok(/in the Connectors settings, set DATA OFF MOD to USB/.test(h), h);
+    assert.ok(!/MENU >|MOD Input/.test(h), h);
+  }
+});
+t('every Icom path in the table is a model POTACAT knows', () => {
+  const { ICOM_MOD_INPUT_PATHS } = require('../lib/rig-setup-notes');
+  const { RIG_MODELS } = require('../lib/rig-models');
+  for (const m of Object.keys(ICOM_MOD_INPUT_PATHS)) assert.ok(RIG_MODELS[m], m);
+});
+t('voice-tx-check.js holds no Icom menu path of its own (they live in rig-setup-notes.js)', () => {
+  const src = readSrc(path.join(__dirname, '..', 'lib', 'voice-tx-check.js'));
+  assert.ok(!/MENU > SET/.test(src.replace(/^\s*\/\/.*$/gm, '')));
 });
 t('no hint when power or ALC moved, when the over was a blip, or when the radio reports no power at all', () => {
   assert.strictEqual(decideVoiceTxHint({ ...silent, brand: 'Yaesu', peakW: 12 }), null);
