@@ -283,6 +283,7 @@ const TESTS = [
   'test/winlink-sent-routes-test.js', // #442: how each sent message went out (gateway, dial, mode or internet, time), kept by message id
   'test/winlink-summary-store-test.js', // #425: the session summary lines survive a restart, so Report a Bug still holds the session that dropped
   'test/winlink-folders-test.js', // #462 #475: Archive and back, the Deleted folder (copies, Restore, purge after N days), Reply all; a real Pat when present
+  'test/winlink-mail-views-test.js', // 2026-11-15 ECHOCAT ask: the dial stays on the gateway while a phone's Mail tab is open; two devices, the window and a phone, a closed socket
   'test/winlink-tx-level-test.js', // #300: Winlink's own TX level; the summary says the RX peak and what our overs sent; the pause between overs is not a gap
   'test/rigctld-shim-hamlib-test.js',
   'test/rigctld-died-test.js',
