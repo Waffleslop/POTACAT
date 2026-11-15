@@ -144,5 +144,57 @@ test('wire: registry, capability, and both clients', () => {
   assert.ok(html.includes('id="jp-tx-slot"'));
 });
 
+// 2026-11-05 FT4 report: the log had no line for when a phone's reply reached
+// the station, so a slow phone and a slow station looked the same.
+test('effectiveTxSlot follows the engine: explicit slot, then its lock, then opposite the last RX', () => {
+  assert.strictEqual(S.effectiveTxSlot({ txSlot: 'odd', lockedTxSlot: 'even', lastRxSlot: 'odd' }), 'odd');
+  assert.strictEqual(S.effectiveTxSlot({ txSlot: 'auto', lockedTxSlot: 'even', lastRxSlot: 'even' }), 'even');
+  assert.strictEqual(S.effectiveTxSlot({ txSlot: 'auto', lockedTxSlot: null, lastRxSlot: 'odd' }), 'even');
+  assert.strictEqual(S.effectiveTxSlot({ txSlot: 'auto' }), null);
+  assert.strictEqual(S.effectiveTxSlot(null), null);
+});
+
+test('replyTxPlan, FT4: the slot it arrived in when in time, else the next slot of its parity', () => {
+  const F = 7500;
+  const base = Date.UTC(2026, 10, 5, 1, 13, 0); // 01:13:00, an even FT4 slot
+  assert.strictEqual(S.slotAt(base, F), 'even');
+  let p = S.replyTxPlan({ nowMs: base + 300, periodMs: F, slot: 'even', lateCapMs: 2500 });
+  assert.deepStrictEqual([p.now, p.lateStart, p.startMs], [true, false, base]);
+  p = S.replyTxPlan({ nowMs: base + 820, periodMs: F, slot: 'even', lateCapMs: 2500 });
+  assert.deepStrictEqual([p.now, p.lateStart, p.startMs], [true, true, base]);
+  // 1.13.10 had no FT4 late start: 0.82 s in waited for 01:13:15, the log's 30 s "repeats".
+  p = S.replyTxPlan({ nowMs: base + 820, periodMs: F, slot: 'even', lateCapMs: 0 });
+  assert.deepStrictEqual([p.now, p.startMs], [false, base + 15000]);
+  p = S.replyTxPlan({ nowMs: base + 3000, periodMs: F, slot: 'even', lateCapMs: 2500 });
+  assert.deepStrictEqual([p.now, p.startMs], [false, base + 15000], 'past the cap: two periods on, same parity');
+  p = S.replyTxPlan({ nowMs: base + 7500 + 1000, periodMs: F, slot: 'even', lateCapMs: 2500 });
+  assert.deepStrictEqual([p.now, p.startMs], [false, base + 15000], 'in the other parity: the very next boundary');
+  p = S.replyTxPlan({ nowMs: base + 300, periodMs: F, slot: 'even', lateCapMs: 2500, firedNow: false });
+  assert.deepStrictEqual([p.now, p.startMs], [false, base + 15000], 'what the engine did wins');
+  p = S.replyTxPlan({ nowMs: base + 300, periodMs: P, slot: 'odd', lateCapMs: 7000 });
+  assert.deepStrictEqual([p.now, p.startMs], [false, base + 15000], 'FT8: the next odd slot');
+});
+
+test('replyArrivalLine names the arrival offset, the slot, and any station-side delay', () => {
+  const F = 7500;
+  const base = Date.UTC(2026, 10, 5, 1, 13, 0);
+  let plan = S.replyTxPlan({ nowMs: base + 830, periodMs: F, slot: 'even', firedNow: true });
+  assert.strictEqual(S.replyArrivalLine({ source: 'ECHOCAT', call: 'KE5ETC', arrivedMs: base + 820, periodMs: F, plan }),
+    '[JTCAT] ECHOCAT reply to KE5ETC reached the station 0.82 s into the 01:13:00 slot (1st (even)); transmits in that slot (late start)');
+  plan = S.replyTxPlan({ nowMs: base + 7500 + 1400, periodMs: F, slot: 'even', firedNow: false });
+  assert.strictEqual(S.replyArrivalLine({ call: 'W3JED', arrivedMs: base + 7500 + 1000, periodMs: F, plan }),
+    '[JTCAT] ECHOCAT reply to W3JED reached the station 1.00 s into the 01:13:07.5 slot (2nd (odd)), scheduled 400 ms later; transmits in the 01:13:15 slot (1st (even)), 6.5 s after it arrived');
+});
+
+test('main: the remote jtcat-reply handler logs its arrival and the slot it went to', () => {
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
+  const h = main.slice(main.indexOf("remoteServer.on('jtcat-reply'"), main.indexOf("remoteServer.on('jtcat-enable-tx'"));
+  assert.ok(/const replyArrivedMs = StationClock\.now\(\);/.test(h.slice(0, 200)), 'arrival stamped first thing');
+  assert.ok(h.includes('const fireReply = () => { replyFiredNow = targetEngine.tryImmediateTx(); replyDecidedMs = StationClock.now(); };'));
+  assert.strictEqual((h.match(/^\s+fireReply\(\);/gm) || []).length, 3, 'every branch records what the engine did');
+  assert.ok(!/^\s+targetEngine\.tryImmediateTx\(\);/m.test(h), 'no branch bypasses it');
+  assert.ok(h.includes('JtcatTxSlot.replyArrivalLine('), 'one log line from the shared formatter');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

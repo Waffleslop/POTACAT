@@ -28812,6 +28812,7 @@ function connectRemote() {
   });
 
   remoteServer.on('jtcat-reply', async (data) => {
+    const replyArrivedMs = StationClock.now(); // for the arrival line below: phone delay vs station delay
     jtcatNoteOperatorAtRadio(); // a tap-to-reply on the phone is the operator, see jtcat-popout-call-cq
     let { call, df, slot, sliceId, snr } = data; // `call` is rebased below (re-derivation / hound)
     // Route TX to correct slice in multi-slice mode
@@ -28930,6 +28931,8 @@ function connectRemote() {
       phase = 'reply';
     }
 
+    let replyFiredNow = false, replyDecidedMs = 0;
+    const fireReply = () => { replyFiredNow = targetEngine.tryImmediateTx(); replyDecidedMs = StationClock.now(); };
     if (phase === '73') {
       const prev = remoteJtcatQso;
       const sameCall = prev && prev.call && prev.call.toUpperCase() === call.toUpperCase();
@@ -28939,7 +28942,7 @@ function connectRemote() {
         myCall, myGrid, txRetries: 0, sliceId: sliceKey };
       await remoteJtcatSetTxMsg(txMsg);
       targetEngine._txEnabled = true;
-      targetEngine.tryImmediateTx();
+      fireReply();
       if (!sameCall) await jtcatAutoLog(remoteJtcatQso);
     } else if (phase === 'reply') {
       // Fresh reply with our grid (or report, in Skip Grid) — new QSO entry.
@@ -28947,14 +28950,25 @@ function connectRemote() {
       if (houndReply) { remoteJtcatQso.hound = true; if (houndFullCall && houndFullCall !== remoteJtcatQso.call) remoteJtcatQso.logCall = houndFullCall; }
       await remoteJtcatSetTxMsg(txMsg);
       targetEngine._txEnabled = true;
-      targetEngine.tryImmediateTx();
+      fireReply();
     } else {
       // QSO already populated above by send-report / send-r-report / send-rr73.
       await remoteJtcatSetTxMsg(txMsg);
       targetEngine._txEnabled = true;
-      targetEngine.tryImmediateTx();
+      fireReply();
     }
     remoteJtcatBroadcastQso();
+    // One line per reply request: how far into its slot it reached the station
+    // and which slot it goes out in (2026-11-05 FT4 report: a log could not tell
+    // a slow phone from a slow station). FT2 has no slots.
+    if (typeof targetEngine._cycleSec === 'function' && targetEngine._mode !== 'FT2') {
+      const periodMs = targetEngine._cycleSec() * 1000;
+      const plan = JtcatTxSlot.replyTxPlan({
+        nowMs: replyDecidedMs || StationClock.now(), periodMs, firedNow: !!replyFiredNow,
+        slot: JtcatTxSlot.effectiveTxSlot({ txSlot: targetEngine._txSlot, lockedTxSlot: targetEngine._lockedTxSlot, lastRxSlot: targetEngine._lastRxSlot }),
+      });
+      sendCatLog(JtcatTxSlot.replyArrivalLine({ source: 'ECHOCAT', call, arrivedMs: replyArrivedMs, periodMs, plan }));
+    }
     console.log('[JTCAT Remote]', nextStep, '→', call, ':', txMsg, 'phase:', phase, 'slot:', targetEngine._txSlot, 'locked:', targetEngine._lockedTxSlot);
   });
 
