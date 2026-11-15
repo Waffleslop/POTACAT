@@ -486,6 +486,7 @@ const TESTS = [
   'test/lotw-split-test.js',
   'test/station-county-test.js', // the operator's own state and county: per park on activations, home only from the home grid
   'test/sdr-scope-test.js',
+  'test/sdr-scope-if-tap-test.js', // #394: an SDR on a radio's IF output stays on the IF
   'test/rtltcp-audio-test.js',
   'test/landmarks-test.js', // Directory > Landmarks: the catalog gate, hours, rig coverage, the NCDXF clock, the feed, wiring
   'test/directory-key-nav-test.js', // #501: Directory arrow keys move from the row you clicked; ends clamp; a tab switch resets
