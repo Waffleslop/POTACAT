@@ -182,6 +182,12 @@ function outbox(fetch, opts = {}) {
     assert.ok(!('APP_POTACAT_STATION_LICENSEE' in buildAdifFields({ callsign: 'W1AW', frequency: '14074', mode: 'FT8' })));
   });
 
+  await check('a Guest Pass contact carries APP_POTACAT_GUEST_PASS:1, and no other contact does (#553)', async () => {
+    const f = buildAdifFields({ callsign: 'W1AW', frequency: '14074', mode: 'FT8', qsoDate: '20261027', timeOn: '1200', guestPass: true });
+    assert.strictEqual(f.APP_POTACAT_GUEST_PASS, '1');
+    assert.ok(!('APP_POTACAT_GUEST_PASS' in buildAdifFields({ callsign: 'W1AW', frequency: '14074', mode: 'FT8' })));
+  });
+
   console.log('main.js wiring');
   const main = readSrc(path.join(ROOT, 'main.js'));
   await check('a guest contact goes to the guest\'s logbook before any capability check, and never to the owner\'s file', async () => {
