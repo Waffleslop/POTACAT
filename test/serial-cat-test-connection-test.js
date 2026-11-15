@@ -66,9 +66,9 @@ function liftProbe(radio) {
     const h = main.slice(main.indexOf("handleCatTest('test-serial-cat'"), main.indexOf("handleCatTest('test-icom-civ'"));
     assert.ok(/resolveSerialHandshake\(model, \{ serialHandshake: config\.serialHandshake \}\)/.test(h));
     assert.ok(/rtscts: hs\.handshake === 'hardware'/.test(h));
-    assert.ok(/hs\.source === 'model' && hs\.handshake !== 'hardware' && !legacy && SerialHsTrial\.trialApplies\(model\)/.test(h));
+    assert.ok(/hs\.source === 'model' && hs\.handshake !== 'hardware' && !legacy && SerialHsTrial\.trialApplies\(model, trialTarget\)/.test(h)); // and never where RTS keys PTT (#544)
     const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
-    assert.ok(/testSerialCat\(\{ portPath, baudRate, dtrOff, serialHandshake, model \}\)/.test(app));
+    assert.ok(/testSerialCat\(\{ portPath, baudRate, dtrOff, serialHandshake, model, ptt \}\)/.test(app));
   });
 
   console.log(`\n${passed} passed, ${failed} failed`);

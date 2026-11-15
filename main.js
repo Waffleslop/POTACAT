@@ -2273,6 +2273,7 @@ const ExtAtuRestore = require('./lib/ext-atu-restore');
 const PowerRestore = require('./lib/power-restore');
 const { withTimeout } = require('./lib/with-timeout');
 const SerialHsTrial = require('./lib/serial-hs-trial');
+const PttFlowConflict = require('./lib/ptt-flow-conflict'); // #544: PTT on RTS + RTS/CTS on one port
 const IdleWsprBand = require('./lib/idle-wspr-band');
 const SetupTestFreq = require('./lib/setup-test-freq');
 const HuntFilters = require('./lib/jtcat-hunt-filters');
@@ -5296,6 +5297,10 @@ function txMetersRestOnRx() {
 
 function sendCatAlc(val) {
   if (typeof val === 'number' && Number.isFinite(val)) noteMeterSeen('alc');
+  if (_stationSetupTxTest && typeof val === 'number' && Number.isFinite(val)) {
+    _stationSetupTxTest.alcEvents++;
+    if (val > _stationSetupTxTest.peakAlc) _stationSetupTxTest.peakAlc = val;
+  }
   if (_voiceTxCheck && typeof val === 'number' && Number.isFinite(val)) {
     _voiceTxCheck.alcEvents++;
     if (val > _voiceTxCheck.peakAlc) _voiceTxCheck.peakAlc = val;
@@ -6037,7 +6042,11 @@ let _stationSetupLaunchLastVersion;
 let _stationSetupNotifyTimer = null;
 const STATION_SETUP_TEST_TONE_HZ = 1000;
 let _stationSetupTxBusy = false;       // a test transmit is running (see runStationSetupTxTest)
-let _stationSetupTxTest = null;        // { peakW, fwdEvents, peakSwr } while a test transmit runs
+let _stationSetupTxTest = null;        // { peakW, fwdEvents, peakSwr, alcEvents, peakAlc, txSeen, startedAt } while a test transmit runs
+// The last PTT line that failed to switch on a key-down ({at, line, port, message}).
+// The error arrives by callback after gatedSetTransmit has returned true, so the
+// test transmit reads it at the end of its window (#544).
+let _pttLineError = null;
 let _lastPowerReadback = null;         // { watts, at } — the radio's own report, never our optimism
 let _setupPowerRestoreAttempt = 0;
 
@@ -6148,6 +6157,8 @@ function stationSetupLive(rig) {
     txDeviceTest: r.txDeviceTest || null,
     txTest: r.txTest || null,
     voiceTest: r.voiceTest || null,
+    // PTT on RTS with RTS/CTS flow control (or RTS held high) on the same port (#544).
+    pttConflict: PttFlowConflict.pttFlowConflict(ct, info && info.serialHandshake),
     scope,
     atu: atuWizardSetupLive(rig),
   };
@@ -6494,9 +6505,14 @@ async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false 
     }
   }
 
-  _stationSetupTxTest = { peakW: 0, fwdEvents: 0, peakSwr: 0 };
+  _stationSetupTxTest = { peakW: 0, fwdEvents: 0, peakSwr: 0, alcEvents: 0, peakAlc: 0, txSeen: false, startedAt: Date.now() };
   const swrPoll = setInterval(() => {
-    if (_stationSetupTxTest && _currentSwrRatio > _stationSetupTxTest.peakSwr) _stationSetupTxTest.peakSwr = _currentSwrRatio;
+    const m = _stationSetupTxTest;
+    if (!m) return;
+    if (_currentSwrRatio > m.peakSwr) m.peakSwr = _currentSwrRatio;
+    // The radio's own TX readback (Kenwood IF / Yaesu TX), taken after the
+    // test began: evidence that it keyed, where the radio reports it (#544).
+    if (cat && cat._codecTxSeen === true && (cat._codecTxSeenAt || 0) >= m.startedAt) m.txSeen = true;
   }, 150);
   sendCatLog(`[Setup] test transmit: 3 s tone at ${keepPower ? 'the radio\'s current power' : Math.min(prevW || testW, testW) + ' W'}`);
   const tuneStartedAt = Date.now();
@@ -6544,28 +6560,30 @@ async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false 
     }
   }
 
-  if (!keyed) return done({ result: 'error', message: 'The radio could not be keyed. The log panel says why.', restored, restoreNote });
+  // "Keyed" needs evidence (lib/station-setup.js judgeTxTest, #544): the key-down
+  // accepted, no PTT line error inside the window, and where the radio reports
+  // it, power, its TX state or ALC. Never "keyed" after a failed key.
+  const lineError = _pttLineError && _pttLineError.at >= tuneStartedAt ? _pttLineError : null;
+  const judged = StationSetup.judgeTxTest({ pttAccepted: keyed, lineError, ...meas });
+  if (judged.result === 'not-keyed') {
+    sendCatLog(`[Setup] ${voice ? 'voice' : 'test'} transmit result: not keyed — ${lineError ? `${lineError.line} on ${lineError.port} failed: ${lineError.message}` : 'transmit was refused'}`);
+    return done({ ...judged, message: lineError ? undefined : 'The radio was not keyed: POTACAT refused to transmit. The log panel says why.', restored, restoreNote });
+  }
   if (audioFault) {
     // POTACAT refused to send the tone (the radio's audio output would not
     // open) and unkeyed at once — not a "no power" radio problem.
     sendCatLog(`[Setup] test transmit: stopped, the radio's audio output could not be opened (${audioFault.reason})`);
     return done({ result: 'error', message: "POTACAT stopped the test because the radio's audio output could not be opened. Choose the output again under Audio in the radio settings (the step above checks it), then test again.", restored, restoreNote });
   }
-  const watts = Math.round(meas.peakW * 10) / 10;
-  const swr = meas.peakSwr > 0 ? Math.round(meas.peakSwr * 10) / 10 : 0;
-  let result;
-  if (meas.fwdEvents === 0) result = 'unmeasured';
-  else if (watts < 0.5) result = 'no-power';
-  else if (swr >= 3) result = 'swr-high';
-  else result = 'ok';
-  sendCatLog(`[Setup] ${voice ? 'voice' : 'test'} transmit result: ${result}${watts ? `, ${watts} W` : ''}${swr ? `, SWR ${swr}` : ''}`);
+  const { result, watts, swr, keyed: keyedProven, evidence } = judged;
+  sendCatLog(`[Setup] ${voice ? 'voice' : 'test'} transmit result: ${result}${watts ? `, ${watts} W` : ''}${swr ? `, SWR ${swr}` : ''}${evidence ? ` (keyed: ${evidence})` : ' (the radio did not confirm it keyed)'}`);
   // A silent voice path names the radio's input menu (lib/voice-tx-check.js).
   let hint = null;
   if (voice && result === 'no-power') {
     const d = decideVoiceTxHint({ keyedMs: 3000, fwdEvents: meas.fwdEvents, peakW: 0, alcEvents: 0, peakAlc: 0, mode: modeNow, brand: info.brand });
     hint = d ? d.hint : null;
   }
-  return done({ result, watts, swr, restored, restoreNote, hint });
+  return done({ result, watts, swr, keyed: keyedProven, evidence, restored, restoreNote, hint });
 }
 
 function getIcomNetworkDataModSpec(target, rigModel, liveCivAddr = null) {
@@ -9343,7 +9361,10 @@ async function connectCat() {
     // nothing came back with RTS held low). Hamlib lists the TS-480 with no
     // flow control, so it is not made a model default; the trial finds the
     // radios that wait for RTS and saves it on that rig.
-    if (hs.source !== 'rig' && SerialHsTrial.trialApplies(model)) armSerialHandshakeNoAnswerTrial(cat, transport, target, hs);
+    // Never on a port whose RTS keys PTT (#544): logged once per port.
+    if (hs.source !== 'rig' && SerialHsTrial.trialSkipReason(model, target) === 'ptt-rts') {
+      if (_serialHsTrial.get(target.path) !== 'ptt-rts') { _serialHsTrial.set(target.path, 'ptt-rts'); sendCatLog(SerialHsTrial.pttRtsSkipLine(target.path)); }
+    } else if (hs.source !== 'rig' && SerialHsTrial.trialApplies(model, target)) armSerialHandshakeNoAnswerTrial(cat, transport, target, hs);
     // Lines low at open on every Yaesu (holdSerialLinesLow): Windows raises DTR/RTS on open.
     transport.connect({ path: target.path, baudRate: target.baudRate || 9600, dtrOff: holdSerialLinesLow(model, target), connectDelay: model.connectDelay, serialHandshake: hs.handshake, stopBits: model.serialStopBits });
   }
@@ -39582,6 +39603,7 @@ function gatedSetTransmit(state, emission) {
       return false;
     }
     cat.setTransmitLine(t.ptt, state, (err) => {
+      if (err && state) _pttLineError = { at: Date.now(), line, port: t.path || 'the CAT port', message: err.message };
       if (err) sendCatLog(`[PTT] FAILED: ${line} on ${t.path || 'the CAT port'}: ${err.message}`);
       else sendCatLog(`[PTT] ${state ? 'TX' : 'RX'} — ${line} ${state ? 'raised' : 'dropped'} on the CAT port`);
     });
@@ -45570,6 +45592,21 @@ function cloudShackNotice(text, kind) {
         sendCatLog('[Setup] tune tone sent for 3 s (no CAT control — did the radio key?)');
         break;
       }
+      case 'ptt-flow-fix': {
+        // The operator pressed one of the two fixes for PTT on RTS with RTS/CTS
+        // flow control on the same port (#544). Only then is a setting changed.
+        const fixRig = stationSetupRigById(rigId);
+        const fix = PttFlowConflict.FIXES.find((f) => f.id === req.step);
+        if (!fixRig || !fixRig.catTarget || !fix) break;
+        fixRig.catTarget = PttFlowConflict.applyFix(fixRig.catTarget, fix.id);
+        const isActive = fixRig.id === settings.activeRigId;
+        if (isActive) settings.catTarget = { ...fixRig.catTarget };
+        try { saveSettings(settings); } catch {}
+        sendCatLog(`[Setup] Transmit (PTT) setting: ${fix.id === 'rts-held-low' ? 'RTS line set to Held low' : 'PTT set to Over CAT'} on ${fixRig.catTarget.path || 'the CAT port'}, as chosen in Station Setup`);
+        message = fix.id === 'rts-held-low' ? 'RTS is now held low, so RTS can key the radio.' : 'POTACAT now keys the radio over CAT.';
+        if (isActive) setTimeout(() => connectCatSafe('ptt-flow-fix'), 300);
+        break;
+      }
       case 'tx-test-confirm': {
         // The operator watched the radio's own meter move: a real observation
         // on a radio POTACAT cannot measure.
@@ -51134,7 +51171,11 @@ function cloudShackNotice(text, kind) {
     if (first.success || first.portError) return first;
     // On Auto, a Kenwood-protocol Yaesu that does not answer with RTS low is
     // tried with RTS/CTS, as the live connect does (#103).
-    if (hs.source === 'model' && hs.handshake !== 'hardware' && !legacy && SerialHsTrial.trialApplies(model)) {
+    // Never on a port whose RTS keys PTT: raising it would transmit (#544).
+    const trialTarget = { ptt: config.ptt };
+    if (hs.source === 'model' && hs.handshake !== 'hardware' && !legacy && SerialHsTrial.trialSkipReason(model, trialTarget) === 'ptt-rts') {
+      sendCatLog(SerialHsTrial.pttRtsSkipLine(portPath));
+    } else if (hs.source === 'model' && hs.handshake !== 'hardware' && !legacy && SerialHsTrial.trialApplies(model, trialTarget)) {
       await new Promise((r) => setTimeout(r, 300));
       const second = await probeSerialCat({ portPath, baudRate, dtrOff, rtscts: true, stopBits: model.serialStopBits || 1, legacy });
       if (second.success) {
