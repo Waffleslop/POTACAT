@@ -3617,6 +3617,20 @@ function syncYaesuLanMuteMonitorRow() {
   if (!ok) { const cb = document.getElementById('set-yaesu-lan-mute-monitor'); if (cb) cb.checked = false; }
 }
 if (rigModelSelect) rigModelSelect.addEventListener('change', syncYaesuLanMuteMonitorRow);
+// Transmit audio input (#594): the Kenwoods whose key-down picks the socket
+// (lib/tx-audio-input.js). The TS-480 has no default: blank = ask on the
+// first transmit; the others are blank = Rear, as before.
+function syncTxAudioInputRow() {
+  const row = document.getElementById('rig-tx-audio-input');
+  const sel = document.getElementById('set-tx-audio-input');
+  if (!row || !sel || !window.TxAudioInput) return;
+  const model = rigModelSelect ? rigModelSelect.value : '';
+  const ok = window.TxAudioInput.hasChoice(model);
+  row.classList.toggle('hidden', !ok);
+  const blank = sel.querySelector('option[value=""]');
+  if (blank) blank.textContent = ok && window.TxAudioInput.MODELS[model] == null ? 'Ask on first transmit' : 'Rear (data / ACC2 socket), the default';
+}
+if (rigModelSelect) rigModelSelect.addEventListener('change', syncTxAudioInputRow);
 {
   const reset = document.getElementById('rig-bands-reset');
   if (reset) reset.addEventListener('click', () => { rigBandsState.touched = false; loadRigBandsForModel(); });
@@ -3640,6 +3654,7 @@ async function openRigEditor(mode, rigId) {
       const catLabelEl = document.getElementById('set-rig-cat-label');
       if (catLabelEl) catLabelEl.value = rig.catLabel || '';
       if (rigModelSelect) { rigModelSelect.value = rig.model || ''; syncYaesuLanMuteMonitorRow(); }
+      { const t = document.getElementById('set-tx-audio-input'); if (t) t.value = rig.txAudioInput === 'front' || rig.txAudioInput === 'rear' ? rig.txAudioInput : ''; syncTxAudioInputRow(); }
       await populateRadioSection(rig.catTarget);
       // Per-rig audio source — populateRadioSection just rebuilt the options
       // for this rig's radio type, so the stored value (validated) sticks.
@@ -3686,6 +3701,7 @@ async function openRigEditor(mode, rigId) {
     setRigName.value = '';
     { const catLabelEl = document.getElementById('set-rig-cat-label'); if (catLabelEl) catLabelEl.value = ''; }
     if (rigModelSelect) { rigModelSelect.value = ''; syncYaesuLanMuteMonitorRow(); }
+    { const t = document.getElementById('set-tx-audio-input'); if (t) t.value = ''; syncTxAudioInputRow(); }
     if (setCwKeyLine) setCwKeyLine.value = 'auto';
     if (setRadioNr) setRadioNr.value = '1';
     setRigFullPowerField(null);
@@ -3834,6 +3850,9 @@ async function saveRigEditor() {
   const rigVoiceAsData = !!(voiceAsDataEl && voiceAsDataEl.checked);
   const allowPowerOffEl = document.getElementById('set-allow-power-off');
   const rigAllowPowerOff = !!(allowPowerOffEl && allowPowerOffEl.checked); // #293
+  const txAudioInputEl = document.getElementById('set-tx-audio-input');
+  const rigTxAudioInput = txAudioInputEl && (txAudioInputEl.value === 'front' || txAudioInputEl.value === 'rear')
+    && window.TxAudioInput && window.TxAudioInput.hasChoice(model) ? txAudioInputEl.value : ''; // #594
   const lanVoiceSsbEl = document.getElementById('set-lan-voice-ssb');
   const rigLanVoiceInSsb = !!(lanVoiceSsbEl && lanVoiceSsbEl.checked);
   const packetModeEl = document.getElementById('set-packet-mode');
@@ -3866,6 +3885,7 @@ async function saveRigEditor() {
       rig.atuKeepOn = rigAtuKeepOn;
       if (rigVoiceAsData) rig.voiceAsData = true; else delete rig.voiceAsData;
       if (rigAllowPowerOff) rig.allowPowerOffNoWake = true; else delete rig.allowPowerOffNoWake;
+      if (rigTxAudioInput) rig.txAudioInput = rigTxAudioInput; else delete rig.txAudioInput;
       if (rigLanVoiceInSsb) rig.lanVoiceInSsb = true; else delete rig.lanVoiceInSsb;
       if (rigPacketMode) rig.packetMode = rigPacketMode; else delete rig.packetMode; // absent = Automatic
       rig.flexBandAntennaMap = flexBandAntennaMap;
@@ -3896,6 +3916,7 @@ async function saveRigEditor() {
       atuKeepOn: rigAtuKeepOn,
       ...(rigVoiceAsData ? { voiceAsData: true } : {}),
       ...(rigAllowPowerOff ? { allowPowerOffNoWake: true } : {}),
+      ...(rigTxAudioInput ? { txAudioInput: rigTxAudioInput } : {}),
       ...(rigLanVoiceInSsb ? { lanVoiceInSsb: true } : {}),
       ...(rigPacketMode ? { packetMode: rigPacketMode } : {}),
       flexBandAntennaMap,
@@ -33304,6 +33325,28 @@ window.api.onJtcatStopForRemote(function() {
 if (window.api.onJtcatTakeoverNotice) {
   window.api.onJtcatTakeoverNotice(function(data) {
     showLogToast((data && data.message) || 'Mobile device took over FT8 — JTCAT popout closed.', { duration: 6000 });
+  });
+}
+// Transmit audio input question (#594): a TS-480 with no answer saved is not
+// keyed; main asks here, saves the answer on the rig and reconnects CAT.
+if (window.api.onTxAudioInputAsk) {
+  window.api.onTxAudioInputAsk(function(data) {
+    const dlg = document.getElementById('tx-audio-input-dialog');
+    if (!dlg || !data || !data.rigId) return;
+    if (dlg.open) return;
+    const text = document.getElementById('tx-audio-input-text');
+    if (text) text.textContent = (data.help || '') + (data.radioName ? ' Radio: ' + data.radioName + '.' : '');
+    const answer = function(choice) {
+      dlg.close();
+      if (!choice) return;
+      const rig = (typeof currentRigs !== 'undefined' && currentRigs) ? currentRigs.find(r => r.id === data.rigId) : null;
+      if (rig) rig.txAudioInput = choice; // keep the editor's copy in step with the saved rig
+      window.api.setTxAudioInput({ rigId: data.rigId, choice: choice });
+    };
+    document.getElementById('tx-audio-input-rear').onclick = function() { answer('rear'); };
+    document.getElementById('tx-audio-input-front').onclick = function() { answer('front'); };
+    document.getElementById('tx-audio-input-later').onclick = function() { answer(null); };
+    dlg.showModal();
   });
 }
 // Generic main-process notices (radio link lost/restored, etc.) — same
