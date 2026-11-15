@@ -1537,7 +1537,6 @@ vfoTxPwrRange.addEventListener('change', () => vfoTxPwrRange.blur());
 vfoTxPwrSelect.addEventListener('change', () => { vfoTxPwrInput(vfoTxPwrSelect); vfoTxPwrSelect.blur(); });
 
 // --- NB / ATU toggles ---
-let zeusNrLevel = null;
 
 // Radio power (bottom of the dial pane). Power On needs no link: the radio is
 // off, so it cannot answer. Power Off asks once: the first press turns the
@@ -1622,10 +1621,6 @@ function buildRigToggles() {
         // Momentary: atu-tune runs a tune cycle on every press (not a toggle;
         // see the rig-controls registry). Its light is the radio's ATU state.
         if (c.momentary) { window.api.rigControl({ action: c.action }); return; }
-        if (c.action === 'set-nr' && zeusNrLevel !== null) {
-          window.api.rigControl({ action: c.action, value: !catState.nr, cycle: true });
-          return;
-        }
         // The handlers read data.value (main.js): the field name must match.
         const on = !catState[c.state];
         if (c.action === 'set-nr' && zeusNrLevel !== null) {
