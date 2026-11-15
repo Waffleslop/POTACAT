@@ -580,7 +580,7 @@
         </div>
         <div class="meter-row" title="Radio audio monitor volume: how loud the click-to-listen (speaker button) audio plays. Independent of your PC's master volume.">
           <span class="meter-label">VOL</span>
-          <input type="range" id="vol-slider" min="0" max="150" value="100" style="flex:1;">
+          <input type="range" id="vol-slider" class="radio-level-slider" min="0" max="150" value="100" style="flex:1;min-width:0;" aria-label="Monitor volume">
           <span class="meter-text" id="vol-text">100%</span>
         </div>
       </div>
@@ -622,6 +622,10 @@
       <div class="vfo-section" id="sec-filter-slider">
         <label class="filter-row">Width
           <input type="range" id="filter-slider" min="50" max="4000" step="50" value="2400" aria-label="Filter width">
+        </label>
+        <label class="filter-row" id="vfo-squelch-row" style="display:none" title="Receiver squelch threshold. Zero turns squelch off.">Squelch
+          <input type="range" id="vfo-squelch" class="radio-level-slider" min="0" max="100" value="0" aria-label="Receiver squelch">
+          <span class="filter-val" id="vfo-squelch-val">Off</span>
         </label>
       </div>
       <!-- TX power (GitHub #199): the Rig panel's TX Pwr slider, from the same
@@ -1040,6 +1044,17 @@ if (window.api.onRemotePttReleased) {
   });
 }
 const filterSlider = document.getElementById('filter-slider');
+const vfoSquelchRow = document.getElementById('vfo-squelch-row');
+const vfoSquelch = document.getElementById('vfo-squelch');
+const vfoSquelchValue = document.getElementById('vfo-squelch-val');
+function paintVfoSquelch() {
+  RigPowerView.paintRange(vfoSquelch);
+  vfoSquelchValue.textContent = Number(vfoSquelch.value) ? vfoSquelch.value + '%' : 'Off';
+}
+vfoSquelch.addEventListener('input', paintVfoSquelch);
+vfoSquelch.addEventListener('change', () => {
+  window.api.rigControl({ action: 'set-squelch', value: Number(vfoSquelch.value) });
+});
 const filterVal = document.getElementById('filter-val');
 
 // --- Panes + settings sheet ---
@@ -1165,6 +1180,13 @@ window.api.onRadioState((s) => {
   }
   if (s.txPower != null) currentTxPower = s.txPower; // so "Save profile" can snapshot it
   if (s.rigPower) applyVfoTxPower(s.rigPower);
+  if (s.tciSquelch !== undefined) {
+    vfoSquelchRow.style.display = s.tciSquelch === null ? 'none' : '';
+    if (s.tciSquelch !== null && !vfoSquelch.matches(':active')) {
+      vfoSquelch.value = s.tciSquelch;
+      paintVfoSquelch();
+    }
+  }
   if (s.rfGain != null) currentRfGain = s.rfGain;   // + RF/AF for "Save current" on a rig preset
   if (s.afGain !== undefined) currentAfGain = s.afGain;
   // CAT buttons light from the radio's own state, whichever ones are shown.
@@ -4107,7 +4129,8 @@ let audioReattachPending = false; // #247: a power-on / dead stream waits for a 
 // Radio audio monitor volume (0–1.5). Drives the monitor's GainNode so the
 // user can throttle click-to-listen audio without touching the PC's master
 // volume. Persisted as a 0–150 percentage.
-let monitorVolume = (parseInt(localStorage.getItem('vfoMonitorVolume') || '100', 10) || 100) / 100;
+const savedMonitorVolume = parseInt(localStorage.getItem('vfoMonitorVolume'), 10);
+let monitorVolume = Number.isFinite(savedMonitorVolume) ? Math.max(0, Math.min(150, savedMonitorVolume)) / 100 : 1;
 
 // opts.deviceId: the input to open instead of the saved one — a reattach
 // after a power cycle that followed the CODEC to a new ID (#247).
@@ -4325,9 +4348,11 @@ window.api.onSmartSdrAudio((d) => {
   if (!slider || !label) return;
   const pct = Math.round(monitorVolume * 100);
   slider.value = pct;
+  RigPowerView.paintRange(slider);
   label.textContent = pct + '%';
   slider.addEventListener('input', () => {
     const p = parseInt(slider.value, 10) || 0;
+    RigPowerView.paintRange(slider);
     label.textContent = p + '%';
     monitorVolume = p / 100;
     localStorage.setItem('vfoMonitorVolume', String(p));
@@ -4811,7 +4836,7 @@ window.api.onKiwiAudio((d) => {
     if (kiwiGainNode) kiwiGainNode.gain.value = kiwiVolume;
     const vs = document.getElementById('vol-slider');
     const vl = document.getElementById('vol-text');
-    if (vs) vs.value = pct;
+    if (vs) { vs.value = pct; RigPowerView.paintRange(vs); }
     if (vl) vl.textContent = pct + '%';
   });
 })();
