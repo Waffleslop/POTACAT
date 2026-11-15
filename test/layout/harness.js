@@ -34,7 +34,7 @@ const MEASURE = `
     out[list.dataset.list] = rows.map(row => ({
       id: row.dataset.fixture || '',
       box: r(row),
-      cells: [...row.children].map(c => ({ cls: c.className, text: c.textContent, ...r(c) })),
+      cells: [...row.children].map(c => ({ cls: c.className, text: c.textContent, sw: c.scrollWidth, cw: c.clientWidth, ...r(c) })),
     }));
   }
   return out;
@@ -91,7 +91,7 @@ app.whenReady().then(async () => {
       const mine = fx.DECODES.filter(f => !f.tx).map(f => `<div class="jp-row jp-cq" data-fixture="${f.id}">${DecodeRow.popoutRowInner(f.d, { time: '12:30:45', text: f.d.text })}</div>`).join('');
       // Stations view (#557): the header row and every station row share one grid.
       const stations = `<div class="jp-st-row jp-st-head" data-fixture="header">${DecodeRow.stationHeaderInner('jp', 'last')}</div>` +
-        fx.STATIONS.map(f => `<div class="jp-st-row${/^CQ/.test(f.e.calling) ? ' jp-st-cq' : ''}" data-fixture="${f.id}">${DecodeRow.stationRowInner(f.e, fx.NOW, 'jp')}</div>`).join('');
+        fx.STATIONS.map(f => `<div class="jp-st-row${/^CQ/.test(f.e.calling) ? ' jp-st-cq' : ''}" data-fixture="${f.id}">${DecodeRow.stationRowInner(f.e, fx.NOW, 'jp', { marks: f.marks, scopeText: fx.STATION_SCOPE_TEXT })}</div>`).join('');
       const body = { html: `<div id="jp-band-activity" data-list="band" data-row-selector=".jp-row">${band}</div><div id="jp-my-activity" data-list="mine" data-row-selector=".jp-row">${mine}</div>` +
         `<div id="jp-stations" class="jp-decode-list jp-stations" data-list="stations" data-row-selector=".jp-st-row">${stations}</div>` };
       Object.assign(results, prefixKeys(await render(width, jtcatCss(), body, libScripts), `jtcat-${width}-`));

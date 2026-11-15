@@ -178,14 +178,14 @@ test('age reads "12s" under a minute, then whole minutes "3m"', () => {
   assert.strictEqual(DecodeRow.formatAge(null), '');
 });
 
-test('a station row: eight cells in column order, whole dB and Hz, escaped text', () => {
+test('a station row: ten cells in column order, whole dB and Hz, escaped text', () => {
   const html = DecodeRow.stationRowInner({ call: 'K1ABC', calling: 'CQ POTA', grid: 'FN42', entity: 'Turks & Caicos Islands', state: '', db: -12.6, df: 1499.6, lastHeard: T0 }, T0 + 12000, 'jp');
   const cells = [...html.matchAll(/<span class="jp-st-(\w+)"[^>]*>([^<]*)<\/span>/g)].map(m => [m[1], m[2]]);
   assert.deepStrictEqual(cells, [
-    ['call', 'K1ABC'], ['calling', 'CQ POTA'], ['grid', 'FN42'], ['country', 'Turks &amp; Caicos Islands'],
+    ['call', 'K1ABC'], ['need', ''], ['calling', 'CQ POTA'], ['park', ''], ['grid', 'FN42'], ['country', 'Turks &amp; Caicos Islands'],
     ['state', ''], ['db', '-13'], ['df', '1500'], ['age', '12s'],
   ]);
-  assert.deepStrictEqual(DecodeRow.STATION_COLUMNS.map(c => c.label), ['Call', 'Calling', 'Grid', 'Country', 'State', 'dB', 'Hz', 'Age']);
+  assert.deepStrictEqual(DecodeRow.STATION_COLUMNS.map(c => c.label), ['Call', 'Need', 'Calling', 'Park', 'Grid', 'Country', 'State', 'dB', 'Hz', 'Age']);
   assert.ok(!/<script/i.test(DecodeRow.stationRowInner({ call: '<script>' }, T0)), 'escaped');
 });
 
@@ -227,9 +227,9 @@ test('a row double-click calls the same handler as a decode double-click, with t
 });
 
 test('rows come only from DecodeRow; the filters, sort and expiry are wired', () => {
-  assert.ok(/DecodeRow\.stationRowInner\(shown\[i\], now, 'jp'\)/.test(block));
+  assert.ok(/DecodeRow\.stationRowInner\(shown\[i\]\.e, now, 'jp', \{ marks: shown\[i\]\.marks, scopeText: scopeText \}\)/.test(block));
   assert.ok(/DecodeRow\.stationHeaderInner\('jp', stationsSort\)/.test(block));
-  assert.ok(!/class="jp-st-(call|calling|grid|country|state|db|df|age)"/.test(block), 'no hand-built cells');
+  assert.ok(!/class="jp-st-(call|need|calling|park|grid|country|state|db|df|age)"/.test(block), 'no hand-built cells');
   assert.ok(/return decodeVisible\(c\);/.test(block), 'the stream\'s filters');
   assert.ok(/renderStations\(\); \/\/ the filters apply to the Stations view too/.test(pop), 'a filter change redraws the list');
   assert.ok(/JtcatStations\.addDecodes\(jpStations, results, jpStationsContext\(\)\);/.test(pop), 'each cycle is folded in');

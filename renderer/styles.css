@@ -135,6 +135,12 @@
      was hard-coded, unreadable on a theme's dark green (She's On Frequency,
      "Set up VARA HF for me"). */
   --on-accent-green-btn: #10131a;
+  /* Text on a filled state (--source-dxc) or new-call (--source-sota) mark:
+     both fills stay light in every theme but light WCAG (JTCAT Stations, #557). */
+  --on-source-dxc: #10131a;
+  --on-source-sota: #10131a;
+  /* Text on the small red new-country mark: white on Navy's #e94560 is 3.8:1. */
+  --on-mark-dxcc: #10131a;
   /* Red used as TEXT (not a fill). The brand red is 4.2:1 on Navy's panels;
      Navy reads a lighter red here, every other theme its own red. */
   --accent-red-text: var(--accent-red);
@@ -270,6 +276,7 @@
      The green button stays #4ecca3 here, so it keeps the dark text. */
   --on-accent-blue: #fff;
   --on-accent-green: #fff;
+  --on-mark-dxcc: #fff;
   /* Warnings as text: the SOTA orange is 1.9:1 on white. */
   --warn: #8a5c00;
   /* Red as text: #c62828 is 4.2:1 on the red tint. */
@@ -365,6 +372,8 @@
   --source-pota: #1b6b48;
   --source-sota: #8a5c00;
   --source-dxc: #8a1aaf;
+  --on-source-sota: #fff;
+  --on-source-dxc: #fff;
   --source-pskr: #b82020;
   --source-wwff: #1a7a6e;
   --source-wwbota: #4a5c66;

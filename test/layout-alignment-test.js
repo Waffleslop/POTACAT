@@ -49,7 +49,7 @@ test('ECHOCAT Web builds spot rows and decode rows only through the shared modul
 test('the JTCAT window builds Stations rows only through DecodeRow (#557)', () => {
   assert.ok(/<script src="\.\.\/lib\/jtcat-stations\.js"><\/script>/.test(popHtml), 'jtcat-popout.html loads lib/jtcat-stations.js');
   assert.ok(/DecodeRow\.stationRowInner\(/.test(pop) && /DecodeRow\.stationHeaderInner\(/.test(pop), 'rows and header from DecodeRow');
-  assert.ok(!/class="jp-st-(call|calling|grid|country|state|db|df|age)"/.test(pop), 'no hand-built station cells');
+  assert.ok(!/class="jp-st-(call|need|calling|park|grid|country|state|db|df|age|mark[\w-]*)"/.test(pop), 'no hand-built station cells or marks');
 });
 
 test('the JTCAT window builds decode rows only through DecodeRow', () => {
@@ -175,8 +175,28 @@ if (!data) {
     test(`${k}: header and station rows, same x for every column, one line, formatted numbers`, () => {
       const rows = data[k];
       assert.strictEqual(rows[0].id, 'header', 'the header row is drawn first');
-      assert.strictEqual(rows[0].cells.length, 8, 'eight columns');
+      assert.strictEqual(rows[0].cells.length, 10, 'ten columns (Need and Park, #557 part 2)');
       columnsAligned(rows, k); oneLine(rows, k); stationNumbers(rows.slice(1), k);
+      // The Need marks and the park are never clipped: the widest Need cell
+      // holds all four marks, the longest reference is a SOTA summit.
+      for (const r of rows) {
+        for (const key of ['st-need', 'st-park']) {
+          const c = cellByPrefix(r, 'jp', key);
+          assert.ok(c && c.width > 0, `${k}: row "${r.id}" shows no ${key} cell`);
+          if (r.id !== 'header') assert.ok(c.sw <= c.cw + PX, `${k}: ${key} on "${r.id}" is cut off (${c.sw}px of content in ${c.cw}px)`);
+        }
+      }
+      // A half-width pane (520) lets Grid, State and Hz step aside; a wide one (900) shows every column.
+      const hidden = ['st-grid', 'st-state', 'st-df'].filter(key => cellByPrefix(rows[1], 'jp', key).width === 0);
+      if (/-520-/.test(k)) assert.deepStrictEqual(hidden, ['st-grid', 'st-state', 'st-df'], `${k}: Grid, State and Hz step aside at 520`);
+      if (/-900-/.test(k)) assert.deepStrictEqual(hidden, [], `${k}: every column shows at 900`);
+      // Room to spare (CI's Linux monospace is about 10% wider than Windows'): Country is
+      // the one flexible column, so it must keep well over its 4ch floor (about 40px) on
+      // every row, the sorted header included, or a wider font pushes Age off the edge.
+      for (const r of rows) {
+        const country = cellByPrefix(r, 'jp', 'st-country');
+        assert.ok(country.width >= 64, `${k}: Country is only ${country.width}px wide on "${r.id}" - too little room left for a wider font`);
+      }
       for (const r of rows) {
         for (const c of r.cells) assert.ok(c.left + c.width <= r.box.left + r.box.width + PX, `${k}: cell "${c.cls}" on "${r.id}" runs past the row's right edge`);
       }

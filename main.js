@@ -17814,6 +17814,15 @@ function jtcatSpottedActivator(call) {
   });
 }
 
+/** The JTCAT Stations view's Park column (#557): the program ref a decoded
+ *  call is spotted at ON THE BAND it was heard on, from the same spot list
+ *  Hunt reads (jtcatSpottedActivator). Run from both decode sites. */
+function jtcatSpotRefEnrichDecode(r, call, band) {
+  if (!band || !lastMergedSpots || !lastMergedSpots.length) return;
+  const hit = HuntedPark.findHuntedRefs(lastMergedSpots, call, { band, sameBandOnly: true, myCall: settings.myCallsign });
+  if (hit) r.spotRef = { sig: hit.sig, ref: hit.primaryRef };
+}
+
 /** Log every park of an n-fer the activator's own spot names (default on, #353). */
 function jtcatNferEnabled() {
   return settings.jtcatNferParks !== false;
@@ -20595,6 +20604,7 @@ function startJtcat(mode) {
           jtcatHeardGrids.note(uc, r.grid);
         }
         workedOverlayEnrichDecode(r, uc, currentBand, data.mode || 'FT8');
+        jtcatSpotRefEnrichDecode(r, uc, currentBand);
         // Chase target highlight (renderer/cq-target.js). One rule for popout + phone.
                 // CQ modifier (NA/EU/POTA/TEST...) for the watchlist tag highlighter.
         // A pure text parse - deliberately NOT gated on chase context. The
@@ -52823,6 +52833,7 @@ function cloudShackNotice(text, kind) {
               jtcatHeardGrids.note(uc, r.grid);
             }
             workedOverlayEnrichDecode(r, uc, currentBand, s.mode || 'FT8');
+            jtcatSpotRefEnrichDecode(r, uc, currentBand);
                         // CQ modifier (NA/EU/POTA/TEST...) for the watchlist tag highlighter.
         // A pure text parse - deliberately NOT gated on chase context. The
         // original insertion inherited an if(chaseCtx) guard from the line it
