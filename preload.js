@@ -37,6 +37,8 @@ contextBridge.exposeInMainWorld('api', {
   // Generic main→renderer toast ({message, warn?, duration?}) — radio-link
   // transitions etc. Rendered via showLogToast in app.js.
   onAppNotice: (cb) => ipcRenderer.on('app-notice', (_e, data) => cb(data)),
+  onTxAudioInputAsk: (cb) => ipcRenderer.on('tx-audio-input-ask', (_e, data) => cb(data)),
+  setTxAudioInput: (data) => ipcRenderer.invoke('set-tx-audio-input', data),
   // A QSO reached the log, whatever path logged it (saveQsoRecord is the one
   // choke point). Drives the QSO-logged chime.
   onQsoLogged: (cb) => ipcRenderer.on('qso-logged', (_e, q) => cb(q)),

@@ -421,6 +421,7 @@ const ScopeOverlay = require('./lib/scope-overlay');
 const { explainRigctldFailure } = require('./lib/rigctld-stderr');
 const RigFamily = require('./lib/rig-family');
 const RigFullPower = require('./lib/rig-full-power');
+const TxAudioInput = require('./lib/tx-audio-input'); // Kenwood TX; vs TX1; per rig (#594)
 const { decideBandPowerReapply } = require('./lib/band-power-reapply');
 const AtuWizard = require('./lib/atu-wizard');
 const AppTheme = require('./lib/app-theme');
@@ -3411,7 +3412,12 @@ function getActiveRigModel() {
   return RigFullPower.applyFullPower(_activeRigModelBase(), activeRig);
 }
 
+// The rig's transmit audio input sets the Kenwood key-down, TX; or TX1; (#594).
 function _activeRigModelBase() {
+  const r = (settings.rigs || []).find(x => x && x.id === settings.activeRigId);
+  return TxAudioInput.applyToModel(_activeRigModelPicked(), r, r && r.model);
+}
+function _activeRigModelPicked() {
   const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
   const modelName = activeRig?.model || null;
   const rigType = detectRigType();
@@ -30401,6 +30407,35 @@ function pttAudioActive(opts = {}) {
     ));
 }
 
+// A TS-480 with no transmit audio input saved is not keyed over CAT until the
+// operator answers which socket the interface is on (#594, Casey 2026-11-15:
+// ask on first transmit). Returns the refusal text, or null when it may key.
+let _txAudioInputAskedAt = 0;
+function txAudioInputRefusal() {
+  const rig = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
+  if (!rig) return null;
+  const t = rig.catTarget || settings.catTarget || {};
+  const overrides = rig.model && settings.rigCommandOverrides && settings.rigCommandOverrides[rig.model];
+  if (!TxAudioInput.needsAnswer(rig, { catType: t.type, ptt: t.ptt, pttOverride: overrides && overrides.setTransmitOn })) return null;
+  return TxAudioInput.refusalText(rig.model);
+}
+function askTxAudioInput(why) {
+  const rig = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
+  sendCatLog(`[PTT] refused — ${why}`);
+  if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', why);
+  if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'tune-blocked', reason: why });
+  // A transmission that keeps asking (JTCAT's next slot) must not keep trying.
+  try { if (jtcatAnyTxActive() || jtcatTuneState.active) jtcatHaltTxNow('the transmit audio input is not set'); } catch {}
+  if (!rig || !win || win.isDestroyed()) return;
+  if (Date.now() - _txAudioInputAskedAt < 3000) return;
+  _txAudioInputAskedAt = Date.now();
+  win.webContents.send('tx-audio-input-ask', {
+    rigId: rig.id, radioName: rig.model || rig.name || '',
+    title: TxAudioInput.QUESTION_TITLE, help: TxAudioInput.QUESTION_HELP,
+  });
+  if (win.isMinimized()) win.restore();
+}
+
 // Returns false when it refuses a key-down (callers with audio must not play it).
 function handleRemotePtt(state, opts = {}) {
   pushActivityState();   // busy.tx edges reach the activity feed (debounced)
@@ -30449,6 +30484,12 @@ function handleRemotePtt(state, opts = {}) {
     sendCatLog(`[PTT] refused — ${why}`);
     if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', why);
     if (remoteServer && remoteServer.hasClient && remoteServer.hasClient()) remoteServer.sendToClient({ type: 'tune-blocked', reason: why });
+    return false;
+  }
+  // A TS-480 whose transmit audio input is not known yet (#594): the wrong
+  // socket is a carrier with no audio, so nothing keys until the shack answers.
+  if (state && txAudioInputRefusal()) {
+    askTxAudioInput(txAudioInputRefusal());
     return false;
   }
   // Yaesu SCU-LAN10 (experimental): the spec has not decoded transmit audio,
@@ -40015,6 +40056,12 @@ function gatedSetTransmit(state, emission) {
       else sendCatLog(`[PTT] ${state ? 'TX' : 'RX'} — ${line} ${state ? 'raised' : 'dropped'} on the CAT port`);
     });
     return true;
+  }
+  // Backstop for key-downs that do not come through handleRemotePtt (FreeDV,
+  // the external-ATU carrier): the same unanswered TS-480 question (#594).
+  if (state && txAudioInputRefusal()) {
+    askTxAudioInput(txAudioInputRefusal());
+    return false;
   }
   if (cat && cat.connected) cat.setTransmit(state);
   return true;
@@ -49936,6 +49983,21 @@ function cloudShackNotice(text, kind) {
       modelName,
       protocol: cat.protocol || 'unknown',
     };
+  });
+
+  // The answer to the transmit audio input question (#594): saved on the rig,
+  // then CAT reconnects so the codec keys with the chosen command.
+  ipcMain.handle('set-tx-audio-input', (_e, data) => {
+    const rigId = data && data.rigId;
+    const choice = data && data.choice;
+    if (choice !== TxAudioInput.FRONT && choice !== TxAudioInput.REAR) return { ok: false };
+    const rig = (settings.rigs || []).find(r => r && r.id === rigId);
+    if (!rig || !TxAudioInput.hasChoice(rig.model)) return { ok: false };
+    rig.txAudioInput = choice;
+    saveSettings(settings);
+    sendCatLog(`[PTT] Transmit audio input for ${rig.model}: ${TxAudioInput.LABELS[choice]} — saved on this rig. Transmit again.`);
+    if (rig.id === settings.activeRigId) connectCatSafe('transmit audio input saved');
+    return { ok: true };
   });
 
   ipcMain.handle('save-rig-command-override', (_e, { key, value }) => {

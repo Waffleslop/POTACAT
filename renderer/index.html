@@ -2383,6 +2383,16 @@
           <label class="checkbox-label"><input type="checkbox" id="set-allow-power-off"> Allow Power Off for a radio POTACAT cannot turn back on</label>
           <span class="help-text" style="display:block;margin:2px 0 0 24px;">Most radios carry their computer connection on their own USB cable. Once the radio is off, that connection is gone, so POTACAT, ECHOCAT and a guest can switch the radio off but not back on. POTACAT therefore hides Power Off for such a radio. Tick this only if someone can reach the radio's power switch, or you know Power On works on your setup. A radio on a Yaesu SCU-LAN10 can always be switched back on and does not need this.</span>
         </div>
+        <div id="rig-tx-audio-input" class="hidden" style="margin-top:8px;">
+          <label>Transmit audio input:
+            <select id="set-tx-audio-input" style="margin-top:2px;">
+              <option value="">Ask on first transmit</option>
+              <option value="rear">Rear (data / ACC2 socket)</option>
+              <option value="front">Front (microphone jack)</option>
+            </select>
+          </label>
+          <span class="help-text" style="display:block;margin:2px 0 0 0;">The socket your sound card interface is plugged into. POTACAT tells the radio which one to send each time it transmits; the wrong one puts a carrier on the air with no audio.</span>
+        </div>
         <div id="rig-voice-as-data" style="margin-top:8px;">
           <label class="checkbox-label"><input type="checkbox" id="set-voice-as-data"> Voice in DATA mode (USB-D / LSB-D)</label>
           <span class="help-text" style="display:block;margin:2px 0 0 24px;">For radios whose data port is silent in USB and LSB, such as the Xiegu G90: POTACAT puts the radio in USB-D or LSB-D for voice, so receive audio reaches your sound card interface and ECHOCAT. Contacts are still logged as SSB. The radio's own microphone is off in these modes, so voice has to come in through the data port.</span>
@@ -4361,6 +4371,18 @@
     </div>
   </dialog>
 
+  <dialog id="tx-audio-input-dialog">
+    <h3 id="tx-audio-input-title">Where is your audio interface plugged into the radio?</h3>
+    <p id="tx-audio-input-text" class="help-text" style="margin-bottom:12px;max-width:440px;"></p>
+    <div class="dialog-buttons" style="justify-content:flex-start;flex-wrap:wrap;margin-top:0;">
+      <button type="button" id="tx-audio-input-rear">Rear (data / ACC2 socket)</button>
+      <button type="button" id="tx-audio-input-front">Front (microphone jack)</button>
+    </div>
+    <div class="dialog-buttons">
+      <button type="button" id="tx-audio-input-later">Not now</button>
+    </div>
+  </dialog>
+
   <!-- Cloud Tunnel diagnostics dialog -->
   <dialog id="tunnel-diag-dialog">
     <h3 style="display:flex;justify-content:space-between;align-items:baseline;">Cloud Tunnel Diagnostics <span style="font-size:11px;font-weight:normal;color:#666;">ESC to close</span></h3>
@@ -5396,6 +5418,7 @@
   <script src="../lib/pass-wording.js"></script>
   <script src="../lib/net-reminder-row.js"></script>
   <script src="../lib/rig-family.js"></script>
+  <script src="../lib/tx-audio-input.js"></script>
   <script src="../lib/ptt-flow-conflict.js"></script>
   <script src="../lib/waterfall-palettes.js"></script>
   <script src="../lib/app-theme.js"></script>
