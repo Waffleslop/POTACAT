@@ -529,6 +529,7 @@ const TESTS = [
   'test/sstv-context-test.js',
   'test/tailscale-detect-test.js',
   'test/yaesu-legacy-codec-test.js',
+  'test/yaesu-audit-ftx1-test.js', // Yaesu CAT audit: FTX-1 width SH00nn from Table 5, RTTY-U/PSK/DATA-FM-N readback
   'test/icom-network-log-routing-test.js',
   'test/icom-network-voice-test.js',
   'test/jtty-chats-test.js',
