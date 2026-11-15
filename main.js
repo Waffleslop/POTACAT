@@ -31,22 +31,17 @@ function _appendStartupLog(line) {
       try { dir = require('electron').app.getPath('userData'); }
       catch { dir = require('os').tmpdir(); }
       try { fsx.mkdirSync(dir, { recursive: true }); } catch {}
-      _startupLogPath = require('path').join(dir, 'startup.log');
-      // Keep the previous launch's copy: a [FATAL] stack from a crash is
-      // useless if the relaunch that reports the bug truncates it first
+      // Rotation and the clean-exit marker live in lib/clean-exit-marker.js,
+      // evaluated ONCE per launch (this block runs before anything else can
+      // fail). Keep the previous launch's copy: a [FATAL] stack from a crash
+      // is useless if the relaunch that reports the bug truncates it first
       // (the ARRL 250 crash report arrived with a healthy startup.log for
-      // exactly this reason).
-      try { if (fsx.existsSync(_startupLogPath)) fsx.copyFileSync(_startupLogPath, _startupLogPath + '.old'); } catch {}
-      // Clean-exit marker, evaluated ONCE per launch beside the log rotation
-      // (this block runs before anything else can fail).
-      try {
-        _cleanExitMarkerPath = require('path').join(dir, 'clean-exit');
-        if (fsx.existsSync(_cleanExitMarkerPath)) {
-          fsx.unlinkSync(_cleanExitMarkerPath); // absent for the whole run
-        } else {
-          _prevRunUnclean = true;
-        }
-      } catch { /* marker is diagnostic only — never block startup */ }
+      // exactly this reason). A side mode (--launcher, --print-cert-fingerprint)
+      // writes its own log and never touches the marker (#550).
+      const prep = require('./lib/clean-exit-marker').prepareStartupLog({ dir, argv: process.argv, fs: fsx });
+      _startupLogPath = prep.logPath;
+      _cleanExitMarkerPath = prep.markerPath;
+      _prevRunUnclean = prep.prevRunUnclean;
       // Fresh file per launch, with an identity header for bug reports.
       const os = require('os');
       let ver = '?';
@@ -53617,9 +53612,7 @@ function gracefulCleanup() {
   // Last thing: stamp the clean-exit marker. Reaching here means we shut down
   // on purpose, so the next launch will not report a crash. Anything that
   // kills us before this point deliberately leaves the marker absent.
-  try {
-    if (_cleanExitMarkerPath) fs.writeFileSync(_cleanExitMarkerPath, new Date().toISOString());
-  } catch {}
+  require('./lib/clean-exit-marker').stampCleanExit(_cleanExitMarkerPath, fs);
 }
 
 app.on('before-quit', (e) => {
