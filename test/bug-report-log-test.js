@@ -135,7 +135,7 @@ console.log('=== maskHomeDir: usernames never reach the paste ===');
   // leaves behind. A marker that lived across the run would prove nothing.
   // The marker logic itself is lib/clean-exit-marker.js (clean-exit-marker-test.js);
   // main.js must take its answer from there, once, at the first log line.
-  check(/require\('\.\/lib\/clean-exit-marker'\)\.prepareStartupLog\(/.test(MAIN),
+  check(/CleanExitMarker\.prepareStartupLog\(/.test(MAIN),
     'startup clears the clean-exit marker (via lib/clean-exit-marker.js)');
   check(/_prevRunUnclean = prep\.prevRunUnclean;/.test(MAIN),
     'a missing marker at boot means the previous run died');

@@ -114,8 +114,12 @@ test('modes: only the GUI session (including --headless) owns the marker', () =>
 
 test('wiring: main.js takes rotation and the marker from the lib, nowhere else', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-  assert.ok(/require\('\.\/lib\/clean-exit-marker'\)\.prepareStartupLog\(\{ dir, argv: process\.argv, fs: fsx \}\)/.test(src),
+  assert.ok(/CleanExitMarker\.prepareStartupLog\(\{ dir, argv: process\.argv, fs: fsx \}\)/.test(src),
     'the first log line prepares the log through the lib with the real argv');
+  const req = src.indexOf("const CleanExitMarker = require('./lib/clean-exit-marker');");
+  const firstStage = src.search(/^logStartupStage\(/m);
+  assert.ok(req > 0 && firstStage > 0 && req < firstStage,
+    'the lib is required before the first log line, or _appendStartupLog hits the const before it exists');
   assert.ok(/stampCleanExit\(_cleanExitMarkerPath, fs\)/.test(src), 'graceful shutdown stamps through the lib');
   assert.ok(!/unlinkSync\(_cleanExitMarkerPath\)/.test(src), 'no second marker removal in main.js');
   assert.ok(!/writeFileSync\(_cleanExitMarkerPath/.test(src), 'no second marker write in main.js');
