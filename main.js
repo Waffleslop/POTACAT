@@ -375,6 +375,7 @@ const { applyQsoEdit, activationSigOf } = require('./lib/qso-edit'); // Logbook 
 const ActivationClock = require('./lib/activation-clock'); // #147: a forgotten activation ends at the UTC day change or after 6 h idle
 const ActivationAnnounce = require('./lib/activation-announce'); // #508: which saved contacts join the live activation list
 const QsoExpand = require('./lib/qso-expand'); // one contact -> its ADIF records (logContact)
+const { dxccCodeForEntity } = require('./lib/dxcc-codes'); // cty.dat entity -> ADIF DXCC number (#554)
 const WatchlistEdit = require('./lib/watchlist-edit'); // watchlist add/remove by operation (ECHOCAT sync)
 const wsprnet = require('./lib/wspr/wsprnet');
 const wsprBands = require('./lib/wspr/bands');
@@ -16073,7 +16074,7 @@ async function qrzStationInfo(call) {
     // The DXCC entity (<land>), not the mailing country: KL7 and KH8 calls
     // were logged as United States (jgedmond, ClubLog flagged them).
     country: q.land || q.country || '', state: q.state || '', county: q.county || '', grid: q.grid || '',
-    qth: q.addr2 || '', cqz: q.cqzone || '', ituz: q.ituzone || '',
+    qth: q.addr2 || '', cqz: q.cqzone || '', ituz: q.ituzone || '', dxcc: q.dxcc || '',
   };
 }
 // An activation contact logged outside the Act screen (the Log window,
@@ -16218,6 +16219,7 @@ async function logContact(entry, opts) {
         name: op.entity.name, away: op.away, cont: op.entity.continent || '',
         cqz: (zones && zones.cqZone) || op.entity.cqZone || '',
         ituz: (zones && zones.ituZone) || op.entity.ituZone || '',
+        dxcc: dxccCodeForEntity(op.entity.name) || '',
       };
     },
     parkInfo: (ref) => {
