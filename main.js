@@ -7843,7 +7843,7 @@ function ensureRemoteClient() {
       win.webContents.send('remote-client-displaced', { ...info, kind: target.kind || '', owner: target.ownerCallsign || '' });
     }
   });
-  remoteClient.on('auth-fail', ({ reason, code, by, passReason, passAt, retryInMs }) => {
+  remoteClient.on('auth-fail', ({ reason, code, by, passReason, passAt, retryInMs, passState }) => {
     // A retryable refusal (the owner or another guest has the radio, or the
     // station could not check the pass with Cloud) is a wait, not a dead
     // pass: the client asks again on its own timer (#541).
@@ -7852,6 +7852,7 @@ function ensureRemoteClient() {
       targetId: target.id, reason: reason || 'refused', code: code || '', by: by || '',
       passReason: passReason || '', passAt: passAt || '', terminal,
       retryAt: terminal ? null : Date.now() + retryInMs,
+      passState: passState || null, // the station's pass-state for the refusal (#541 step 2)
     };
     const failCode = code || '';
     sendCatLog(`[Remote] ${target.kind === 'pass' ? 'Guest Pass' : 'pairing'} ${terminal ? 'refused' : 'waiting'}: ${reason}${failCode ? ' (' + failCode + ')' : ''}`);
@@ -7866,6 +7867,13 @@ function ensureRemoteClient() {
   remoteClient.on('pass-resumed', () => {
     sendCatLog('[guest-pass] the owner handed the radio back');
     if (win && !win.isDestroyed()) win.webContents.send('remote-pass-hold', { paused: false, owner: target.ownerCallsign || '', targetId: target.id });
+  });
+  // Guest Pass state from a station that knows pass-state (#541 step 2):
+  // on-air / waiting / reconnecting / over, with a reason. The renderer words
+  // it with lib/pass-wording.js describeState.
+  remoteClient.on('pass-state', (ps) => {
+    sendCatLog(`[guest-pass] state: ${ps.state} / ${ps.reason}${ps.device ? ' (' + ps.device + ')' : ''}`);
+    if (win && !win.isDestroyed()) win.webContents.send('remote-pass-state', { ...ps, owner: target.ownerCallsign || '', targetId: target.id });
   });
   remoteClient.on('status', (snap) => {
     _remoteClientLastStatus = snap;
@@ -8161,6 +8169,7 @@ function remoteAuthFailStatus(target) {
     owner: t.ownerCallsign || '', endsAt: t.expiresAt || null,
     reason: f.reason || '', code: f.code || '', by: f.by || '', passReason: f.passReason || '', passAt: f.passAt || '',
     retryAt: f.retryAt || null,
+    passState: f.passState || null,
   };
 }
 
@@ -41491,6 +41500,8 @@ function cloudShackNotice(text, kind) {
       const live = state === 'active' || state === 'expiring';
       if (live && !passLease) passLeaseBegin();
       else if (!live && passLease) passLeaseEnd();
+      // The guest's pass-state follows (on-air / ends-soon when expiring, #541 step 2).
+      try { if (remoteServer && remoteServer.broadcastPassState) remoteServer.broadcastPassState(); } catch {}
     });
     passEnforcement.on('expiring', (info) => {
       if (win && !win.isDestroyed()) {
@@ -41567,6 +41578,7 @@ function cloudShackNotice(text, kind) {
         const st = passEnforcement.getState();
         const s = passEnforcement.getSessionStatus();
         return { live: st === 'active' || st === 'expiring' || st === 'paused', paused: st === 'paused',
+          expiring: st === 'expiring', // pass-state on-air / ends-soon (#541 step 2)
           code: s.code || null, call: s.guestCallsign || s.onAirCallsign || '', endsAt: s.expiresAt || null };
       });
       rs.on('pass-paused', ({ source }) => {
@@ -48619,6 +48631,14 @@ function cloudShackNotice(text, kind) {
     return { ok: true };
   });
 
+  // Guest Pass "Use it here instead" while this PC waits for the guest's
+  // other device on the same pass (pass-state waiting / other-device, #541
+  // step 2). The station answers with pass-state either way.
+  ipcMain.handle('remote-pass-claim', () => {
+    if (!remoteClient || !remoteClient.passClaim) return { error: 'Not connected to a station' };
+    return { ok: remoteClient.passClaim() };
+  });
+
   ipcMain.handle('connection-targets-get-status', () => {
     if (_remoteClientAuthFail && _remoteClientAuthFail.targetId === settings.activeTargetId) {
       const t = (settings.connectionTargets || []).find(x => x.id === _remoteClientAuthFail.targetId);
@@ -48631,6 +48651,8 @@ function cloudShackNotice(text, kind) {
     const s = remoteClient.state();
     return {
       state: s.authed ? 'connected' : (s.yielded ? 'standby' : (s.readyState === 1 ? 'authing' : 'connecting')),
+      // A Guest Pass connection's state on a station that sends pass-state (#541 step 2).
+      passState: s.authed ? (s.passState || null) : null,
       targetId: s.targetId,
       name: s.name,
       leg: s.leg,

@@ -762,6 +762,42 @@ html, body {
   white-space: normal;
   font-size: 13px;
 }
+/* pass-state (#541 step 2): the pass is over, in the accent colour; and the
+   one button a notice can carry ("Use it here instead"). Theme tokens only. */
+#pass-banner.pass-over { color: var(--accent); }
+#pass-banner .pass-state-btn {
+  margin-left: 8px;
+  padding: 3px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--sota);
+  border-radius: 4px;
+  cursor: pointer;
+}
+#pass-banner .pass-state-btn:disabled { opacity: 0.6; cursor: default; }
+/* Classic Light: the station orange and POTA green are too pale on the light
+   header to read, so the words take the page's text colour and the notice
+   keeps its colour as a bar on the left. Theme tokens only. */
+:root[data-theme="light"]:not([data-ds]) #pass-banner { color: var(--text); }
+:root[data-theme="light"]:not([data-ds]) #pass-banner.pass-held {
+  color: var(--text);
+  box-shadow: inset 4px 0 0 var(--sota);
+}
+:root[data-theme="light"]:not([data-ds]) #pass-banner.pass-over {
+  color: var(--accent);
+  box-shadow: inset 4px 0 0 var(--accent);
+}
+/* The design-system looks (data-ds on <html>): the same roles from tokens.css. */
+:root[data-ds] #pass-banner { color: var(--ds-ok); }
+:root[data-ds] #pass-banner.pass-held { color: var(--ds-warn); }
+:root[data-ds] #pass-banner.pass-over { color: var(--ds-danger); }
+:root[data-ds] #pass-banner .pass-state-btn {
+  background: var(--ds-surface);
+  color: var(--ds-ink);
+  border-color: var(--ds-warn);
+}
 
 /* --- Filter Toolbar --- */
 #filter-toolbar {
