@@ -15,6 +15,9 @@ lib/ft8_native, renderer/jtcat-popout.* or the ECHOCAT jtcat-* messages.
 - Whole-dB SNR everywhere: `wholeDb()` in lib/ft8-worker.js plus the row formatters.
 - QSO flow is lib/jtcat-state-machine.js (pure). Logging is `jtcatAutoLog` then `logContact`; the
   phone's jtcat-log-qso uses the same path. TIME_ON/OFF from lib/jtcat-qso-clock.js.
+- The Stations view (#557) is lib/jtcat-stations.js (one entry per call, folded from the decodes) drawn by
+  DecodeRow.stationRowInner. A row double-click is onDecodeRowClick on that station's latest decode. A
+  state shows only when QRZ knows it, never from a grid. Band, mode, Clear and Stop empty it.
 - The pop-out to shack bridge is lib/remote-bridge.js (a row per channel; the test fails otherwise).
 
 ## Operating rules that are settings (names only; semantics in each module's header)
@@ -22,7 +25,7 @@ Per profile: jtcatMaxQsoAttempts, jtcatReworkDays, jtcatHuntSpotted, jtcatNferPa
 jtcatRelogCooldownMin, jtcatRunPauseAfter, jtcatModeHop*, jtcatFdMode/jtcatFdExch, jtcatHoundMode,
 jtcatSkipTx1, jtcatApDecode, jtcatLateStartTx, jttyMacroStyle, jttyMacros, pskMacros.
 Machine-wide (GLOBAL_KEY): ultracat, jtcatRxGain, jtcatTxGain (desktop-authoritative, one writer
-`applyJtcatTxGain`), jtcatWaterfallSpeed, jtcatWaterfallFloor, jtcatShowBandScope.
+`applyJtcatTxGain`), jtcatWaterfallSpeed, jtcatWaterfallFloor, jtcatShowBandScope, jtcatStationsExpiryMin.
 Rule: a setting that is operating policy is per profile; a setting about this machine or its display is GLOBAL.
 
 ## Hard rules

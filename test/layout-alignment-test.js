@@ -46,6 +46,12 @@ test('ECHOCAT Web builds spot rows and decode rows only through the shared modul
   assert.ok(/\['spot-row-js', 'spot-row\.js'\]/.test(server) && /\['decode-row-js', 'decode-row\.js'\]/.test(server), 'remote-server inlines both');
 });
 
+test('the JTCAT window builds Stations rows only through DecodeRow (#557)', () => {
+  assert.ok(/<script src="\.\.\/lib\/jtcat-stations\.js"><\/script>/.test(popHtml), 'jtcat-popout.html loads lib/jtcat-stations.js');
+  assert.ok(/DecodeRow\.stationRowInner\(/.test(pop) && /DecodeRow\.stationHeaderInner\(/.test(pop), 'rows and header from DecodeRow');
+  assert.ok(!/class="jp-st-(call|calling|grid|country|state|db|df|age)"/.test(pop), 'no hand-built station cells');
+});
+
 test('the JTCAT window builds decode rows only through DecodeRow', () => {
   assert.ok(/<script src="\.\.\/lib\/decode-row\.js"><\/script>/.test(popHtml), 'jtcat-popout.html loads lib/decode-row.js');
   assert.strictEqual((pop.match(/DecodeRow\.popoutRowInner\(/g) || []).length, 2, 'Band Activity and My Activity rows');
@@ -126,6 +132,14 @@ function decodeNumbers(rows, prefix, label) {
     assert.ok(/^(\d{1,4}|--)?$/.test(df), `${label}: DF "${df}" on row "${r.id}" is not whole Hz`);
   }
 }
+function stationNumbers(rows, label) {
+  for (const r of rows) {
+    const db = cellByPrefix(r, 'jp', 'st-db').text, df = cellByPrefix(r, 'jp', 'st-df').text, age = cellByPrefix(r, 'jp', 'st-age').text;
+    assert.ok(/^([+-]\d{1,2})?$/.test(db), `${label}: dB "${db}" on row "${r.id}" is not a whole signed number`);
+    assert.ok(/^(\d{1,4})?$/.test(df), `${label}: Hz "${df}" on row "${r.id}" is not whole Hz`);
+    assert.ok(/^\d{1,2}[sm]$/.test(age), `${label}: age "${age}" on row "${r.id}" is not like 12s or 3m`);
+  }
+}
 function spotNumbers(rows, label) {
   for (const r of rows) {
     for (const c of r.cells) {
@@ -143,7 +157,7 @@ if (!data) {
 } else {
   const keys = Object.keys(data);
   test('every surface was rendered', () => {
-    for (const want of ['spots', 'decodes', 'band', 'mine']) assert.ok(keys.some(k => k.endsWith('-' + want)), 'missing ' + want);
+    for (const want of ['spots', 'decodes', 'band', 'mine', 'stations']) assert.ok(keys.some(k => k.endsWith('-' + want)), 'missing ' + want);
   });
   for (const k of keys.filter(k => k.endsWith('-spots'))) {
     test(`${k}: one cell per column, same x on every row, one line, formatted numbers`, () => {
@@ -153,6 +167,19 @@ if (!data) {
   for (const k of keys.filter(k => k.endsWith('-decodes'))) {
     test(`${k}: dB/DT/DF/message line up (TX rows too), one line, formatted numbers`, () => {
       decodeColumns(data[k], 'ft8', k); oneLine(data[k], k); decodeNumbers(data[k], 'ft8', k);
+    });
+  }
+  // Stations view (#557): the header is the first row, so every title must sit
+  // over its column; one line each; whole dB and Hz; ages like 12s or 3m.
+  for (const k of keys.filter(k => k.endsWith('-stations'))) {
+    test(`${k}: header and station rows, same x for every column, one line, formatted numbers`, () => {
+      const rows = data[k];
+      assert.strictEqual(rows[0].id, 'header', 'the header row is drawn first');
+      assert.strictEqual(rows[0].cells.length, 8, 'eight columns');
+      columnsAligned(rows, k); oneLine(rows, k); stationNumbers(rows.slice(1), k);
+      for (const r of rows) {
+        for (const c of r.cells) assert.ok(c.left + c.width <= r.box.left + r.box.width + PX, `${k}: cell "${c.cls}" on "${r.id}" runs past the row's right edge`);
+      }
     });
   }
   for (const k of keys.filter(k => /-(band|mine)$/.test(k))) {

@@ -519,6 +519,7 @@ const TESTS = [
   'test/decode-contract-test.js',
   'test/ft8-wasm-bracket-test.js',
   'test/layout-alignment-test.js',
+  'test/jtcat-stations-test.js', // #557: the Stations view, one line per station heard (fold, expiry, clear, sort, row, click)
   'test/jtcat-own-tx-offset-test.js', // #503: our own TX rows show the offset that slot went out on
   'test/net-reminder-row-test.js', // a Net Reminders row always names its net (#284)
   'test/freq-dots-test.js', // every frequency an operator reads is written the VFO way, 14.074.00 (Casey 2026-11-11)
