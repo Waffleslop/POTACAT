@@ -12,12 +12,20 @@
 'use strict';
 let answerer = null;
 let cfg = { outputId: '', inputId: '', volume: 1, muted: false };
+// True while this computer keys the shack: the receive audio is silenced so
+// the speakers cannot feed the mic (see playbackVolume in the answerer).
+let transmitting = false;
+
+function applyVolume() {
+  const el = document.getElementById('rig-audio');
+  el.volume = window.remoteAudioPlaybackVolume({ volume: cfg.volume, muted: cfg.muted, transmitting });
+}
 
 // Output device, volume, mute (main 'rac-config'). A chosen output that will
 // not open is REFUSED and reported, never replaced by the default.
 async function applyOutput() {
   const el = document.getElementById('rig-audio');
-  el.volume = cfg.muted ? 0 : Math.max(0, Math.min(1, Number(cfg.volume)));
+  applyVolume();
   if (typeof el.setSinkId !== 'function') return;
   const want = cfg.outputId || '';
   if (el.sinkId === want) return;
@@ -73,12 +81,17 @@ window.api.onStunConfig((cfg) => { ensureAnswerer().setIceConfig(cfg); });
 window.api.onStart(() => { const a = ensureAnswerer(); a.setMicDeviceId(cfg.inputId); a.start(); });
 window.api.onConfig((c) => { cfg = { ...cfg, ...(c || {}) }; if (answerer) answerer.setMicDeviceId(cfg.inputId); applyOutput(); });
 window.api.onSignal((data) => { ensureAnswerer().handleSignal(data); });
-window.api.onPtt((on) => { if (answerer) answerer.setMicEnabled(on); });
+window.api.onPtt((on) => {
+  transmitting = !!on;
+  applyVolume();
+  if (answerer) answerer.setMicEnabled(on);
+});
 window.api.onStop(() => {
   if (answerer) { answerer.stop(); answerer = null; }
   if (levelTimer) { clearInterval(levelTimer); levelTimer = null; }
   if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; }
   silentReported = null;
+  transmitting = false;
   const el = document.getElementById('rig-audio');
   if (el) el.srcObject = null;
 });
