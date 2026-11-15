@@ -31,22 +31,17 @@ function _appendStartupLog(line) {
       try { dir = require('electron').app.getPath('userData'); }
       catch { dir = require('os').tmpdir(); }
       try { fsx.mkdirSync(dir, { recursive: true }); } catch {}
-      _startupLogPath = require('path').join(dir, 'startup.log');
-      // Keep the previous launch's copy: a [FATAL] stack from a crash is
-      // useless if the relaunch that reports the bug truncates it first
+      // Rotation and the clean-exit marker live in lib/clean-exit-marker.js,
+      // evaluated ONCE per launch (this block runs before anything else can
+      // fail). Keep the previous launch's copy: a [FATAL] stack from a crash
+      // is useless if the relaunch that reports the bug truncates it first
       // (the ARRL 250 crash report arrived with a healthy startup.log for
-      // exactly this reason).
-      try { if (fsx.existsSync(_startupLogPath)) fsx.copyFileSync(_startupLogPath, _startupLogPath + '.old'); } catch {}
-      // Clean-exit marker, evaluated ONCE per launch beside the log rotation
-      // (this block runs before anything else can fail).
-      try {
-        _cleanExitMarkerPath = require('path').join(dir, 'clean-exit');
-        if (fsx.existsSync(_cleanExitMarkerPath)) {
-          fsx.unlinkSync(_cleanExitMarkerPath); // absent for the whole run
-        } else {
-          _prevRunUnclean = true;
-        }
-      } catch { /* marker is diagnostic only — never block startup */ }
+      // exactly this reason). A side mode (--launcher, --print-cert-fingerprint)
+      // writes its own log and never touches the marker (#550).
+      const prep = CleanExitMarker.prepareStartupLog({ dir, argv: process.argv, fs: fsx });
+      _startupLogPath = prep.logPath;
+      _cleanExitMarkerPath = prep.markerPath;
+      _prevRunUnclean = prep.prevRunUnclean;
       // Fresh file per launch, with an identity header for bug reports.
       const os = require('os');
       let ver = '?';
@@ -91,6 +86,9 @@ const { app, BrowserWindow, ipcMain, Menu, dialog, Notification, screen, nativeI
 // Outbound fetch never offers Brotli (CVE-2026-111497; Electron 39 carries
 // no fixed Node). Installed before any module that fetches is loaded.
 require('./lib/fetch-policy').installNoBrotliFetch(globalThis);
+// Startup-log rotation and the clean-exit marker (#550). Required here, after
+// the fetch policy; _appendStartupLog above first runs below this line.
+const CleanExitMarker = require('./lib/clean-exit-marker');
 const FreqDots = require('./lib/freq-dots'); // display only: 14.074.00 MHz, the VFO way
 const RemoteBridge = require('./lib/remote-bridge');
 const WaterfallPalettes = require('./lib/waterfall-palettes');
@@ -53617,9 +53615,7 @@ function gracefulCleanup() {
   // Last thing: stamp the clean-exit marker. Reaching here means we shut down
   // on purpose, so the next launch will not report a crash. Anything that
   // kills us before this point deliberately leaves the marker absent.
-  try {
-    if (_cleanExitMarkerPath) fs.writeFileSync(_cleanExitMarkerPath, new Date().toISOString());
-  } catch {}
+  CleanExitMarker.stampCleanExit(_cleanExitMarkerPath, fs);
 }
 
 app.on('before-quit', (e) => {

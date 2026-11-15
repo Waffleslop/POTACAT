@@ -133,9 +133,11 @@ console.log('=== maskHomeDir: usernames never reach the paste ===');
 
   // The marker must be REMOVED at startup: its absence is what a crash
   // leaves behind. A marker that lived across the run would prove nothing.
-  check(/fsx\.unlinkSync\(_cleanExitMarkerPath\)/.test(MAIN),
-    'startup clears the clean-exit marker');
-  check(/_prevRunUnclean = true;/.test(MAIN),
+  // The marker logic itself is lib/clean-exit-marker.js (clean-exit-marker-test.js);
+  // main.js must take its answer from there, once, at the first log line.
+  check(/CleanExitMarker\.prepareStartupLog\(/.test(MAIN),
+    'startup clears the clean-exit marker (via lib/clean-exit-marker.js)');
+  check(/_prevRunUnclean = prep\.prevRunUnclean;/.test(MAIN),
     'a missing marker at boot means the previous run died');
 
   // ...and WRITTEN only on a graceful shutdown.
@@ -146,7 +148,7 @@ console.log('=== maskHomeDir: usernames never reach the paste ===');
   // this guard (the 2026-09-10 WSPR power restore did exactly that).
   const gcEnd = MAIN.indexOf('\n}\n', gc);
   const gcBody = MAIN.slice(gc, gcEnd === -1 ? gc + 3000 : gcEnd);
-  check(/writeFileSync\(_cleanExitMarkerPath/.test(gcBody),
+  check(/stampCleanExit\(_cleanExitMarkerPath/.test(gcBody),
     'graceful shutdown stamps the marker');
 
   // The report must carry the dead run, and must REDACT it like everything
