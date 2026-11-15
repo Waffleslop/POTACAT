@@ -424,7 +424,8 @@ test('ECHOCAT: an unchanged speed sends the radio no speed command ahead of the 
 
 test('N8JMS: a frequency event keeps the selected spot, and a map Tune finds its own call', () => {
   const app = readSrc(require('path').join(__dirname, '..', 'renderer', 'app.js'));
-  assert.ok(/const onSpot = onPicked \? lastTunedSpot : allSpots\.find/.test(app));
+  // #502: the fallback is the live (not aged-out) spot at the frequency.
+  assert.ok(/const onSpot = onPicked \? lastTunedSpot : liveSpotAtFreq\(/.test(app));
   assert.ok(/s\.callsign === btn\.dataset\.call/.test(app));
   assert.ok(/class="tune-btn" data-call=/.test(app));
 });

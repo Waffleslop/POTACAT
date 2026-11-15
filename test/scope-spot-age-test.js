@@ -39,9 +39,9 @@ try { SpotAge = require('../lib/spot-age'); } catch (e) { /* asserted below */ }
 const lib = () => { assert.ok(SpotAge, 'lib/spot-age.js loads'); return SpotAge; };
 
 // Runs main.js's scope feed with the given settings, using the real
-// spotsForPanadapter / panadapterAllowsSource / spotAgeExempt.
+// spotsForPanadapter / panadapterAllowsSource / spotsWithinMaxAge.
 function scopeFeed(settings, merged) {
-  const names = ['panadapterAllowsSource', 'spotsForPanadapter', 'spotAgeExempt', 'spotsForScope'];
+  const names = ['panadapterAllowsSource', 'spotsForPanadapter', 'spotsWithinMaxAge', 'spotsForScope'];
   const src = names.map((n) => body(main, n)).join('\n');
   // eslint-disable-next-line no-new-func
   const f = new Function('settings', 'SpotAge', 'Date', src + '\nreturn spotsForScope;');
@@ -142,7 +142,8 @@ test('the scope feed and the table agree', () => {
 test('the table and every panadapter pop-out feed use the same age function', () => {
   assert.ok(/SpotAge\.spotWithinAge\(/.test(body(app, 'getFiltered')), 'table');
   assert.ok(/<script src="\.\.\/lib\/spot-age\.js"><\/script>/.test(R('renderer/index.html')), 'renderer loads the lib');
-  assert.ok(/SpotAge\.filterSpotsByAge\(/.test(body(main, 'spotsForScope')), 'main scope feed');
+  assert.ok(/spotsWithinMaxAge\(/.test(body(main, 'spotsForScope')), 'main scope feed');
+  assert.ok(/SpotAge\.filterSpotsByAge\(/.test(body(main, 'spotsWithinMaxAge')), 'main age helper');
   const merged = body(main, 'sendMergedSpots');
   assert.ok(/bandspreadPopoutWin\.webContents\.send\('spots', spotsForScope\(merged\)\)/.test(merged), 'bandspread push');
   assert.ok(/scopePopoutWin\.webContents\.send\('spots', spotsForScope\(merged\)\)/.test(merged), 'scope push');

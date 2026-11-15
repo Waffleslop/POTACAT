@@ -471,6 +471,28 @@ function pushJtcatSpotsHighlight(filtered) {
 // 0.5 kHz, so the log opened blank under a filled card (K3SBP 2026-10-17).
 let vfoCardSpot = null;
 
+// A spot at this frequency that Max Spot Age has not aged out, through the
+// table's own rule (lib/spot-age.js). allSpots also holds spots past the
+// limit, and the VFO card used to name them: a 3-hour-old spot came back on
+// the card whenever the dial crossed its frequency (#502).
+function liveSpotAtFreq(khz) {
+  if (!(khz > 0)) return null;
+  const ageOpts = { maxAgeMin, sotaMaxAgeMin, dxcMaxAgeMin, potaAgeLimit };
+  const nowMs = Date.now();
+  return allSpots.find(s => Math.abs(parseFloat(s.frequency) - khz) < 0.5 &&
+    SpotAge.spotWithinAge(s, ageOpts, nowMs)) || null;
+}
+
+// When the spot list refreshes, a card spot that has aged out leaves the VFO
+// card (a live spot at the same frequency takes its place). The operator's own
+// pick (lastTunedSpot) stays, as the table keeps it pinned (#502).
+function refreshVfoCardAge() {
+  if (!vfoCardSpot || vfoCardSpot === lastTunedSpot) return;
+  const ageOpts = { maxAgeMin, sotaMaxAgeMin, dxcMaxAgeMin, potaAgeLimit };
+  if (SpotAge.spotWithinAge(vfoCardSpot, ageOpts, Date.now())) return;
+  notifyVfoTunedSpot(liveSpotAtFreq(parseFloat(vfoCardSpot.frequency)));
+}
+
 /** Send tuned spot info to VFO popout */
 function notifyVfoTunedSpot(spot) {
   vfoCardSpot = spot || null;
@@ -13815,9 +13837,7 @@ window.api.onLogPopoutStatus((open) => {
 if (window.api.onVfoPopoutStatus) {
   window.api.onVfoPopoutStatus((open) => {
     if (!open) return;
-    const onFreq = radioFreqKhzExact != null
-      ? allSpots.find(s => Math.abs(parseFloat(s.frequency) - radioFreqKhzExact) < 0.5)
-      : null;
+    const onFreq = radioFreqKhzExact != null ? liveSpotAtFreq(radioFreqKhzExact) : null;
     const spot = (lastTunedSpot && (radioFreqKhzExact == null ||
       Math.abs(parseFloat(lastTunedSpot.frequency) - radioFreqKhzExact) < 0.5)) ? lastTunedSpot : onFreq;
     if (spot) notifyVfoTunedSpot(spot);
@@ -19411,6 +19431,7 @@ window.api.onSpots((spots) => {
   }
   allSpots = spots;
   render();
+  refreshVfoCardAge();
 });
 
 window.api.onSpotsError((msg) => {
@@ -22516,7 +22537,7 @@ window.api.onCatFrequency((hz) => {
   // the list at this frequency can be someone else, and the VFO card's first
   // operator fills {op_firstname} (N8JMS 2026-11-02: Joe selected, Michael keyed).
   const onPicked = lastTunedSpot && Math.abs(parseFloat(lastTunedSpot.frequency) - exactKhz) < 0.5;
-  const onSpot = onPicked ? lastTunedSpot : allSpots.find(s => Math.abs(parseFloat(s.frequency) - exactKhz) < 0.5);
+  const onSpot = onPicked ? lastTunedSpot : liveSpotAtFreq(exactKhz);
   if (onSpot) {
     notifyVfoTunedSpot(onSpot);
   } else if (lastTunedSpot && Math.abs(parseFloat(lastTunedSpot.frequency) - exactKhz) >= 0.5) {
