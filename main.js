@@ -36861,7 +36861,7 @@ async function sendToQrzLogbook(qsoData, s = settings) {
 
   // Comment already enriched with park name in saveQsoRecord()
   const record = buildAdifRecord(qsoData);
-  await QrzClient.uploadQso(apiKey, record, s.myCallsign || '');
+  return QrzClient.uploadQso(apiKey, record, s.myCallsign || '');
 }
 
 // --- App lifecycle ---

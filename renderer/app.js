@@ -5069,7 +5069,9 @@ function showQrzLoginStatus(result) {
   if (result.error) {
     qrzSubStatus.textContent = result.text || result.error;
     qrzSubStatus.style.color = '#e94560';
-    setQrzLogbook.disabled = true;
+    // A check that failed never turns uploads off: a box already ticked stays
+    // ticked (and can be unticked); only a new tick waits for a good check.
+    setQrzLogbook.disabled = !setQrzLogbook.checked;
   } else if (result.subscriber) {
     qrzSubStatus.textContent = result.text || `XML Subscriber \u2014 expires ${result.expiry}`;
     qrzSubStatus.style.color = '#4ecca3';
@@ -5079,9 +5081,14 @@ function showQrzLoginStatus(result) {
       ? `QRZ XML subscription expired (${result.expiry})`
       : 'No active QRZ XML subscription');
     qrzSubStatus.style.color = '#f0a500';
-    setQrzLogbook.disabled = true;
-    setQrzLogbook.checked = false;
-    qrzLogbookConfig.classList.add('hidden');
+    // Never untick a saved upload here: a check that briefly missed the
+    // subscription used to untick it, the next Save stored it off, and
+    // contacts silently stopped reaching QRZ. If QRZ refuses an upload, the
+    // log toast says so after that contact.
+    setQrzLogbook.disabled = !setQrzLogbook.checked;
+    if (setQrzLogbook.checked) {
+      qrzSubStatus.textContent += ' Uploads stay on; if QRZ refuses one, POTACAT tells you after that contact.';
+    }
   }
 }
 
@@ -16652,6 +16659,8 @@ logSaveBtn.addEventListener('click', async () => {
           ? 'Could not reach logbook — is it running and configured correctly?'
           : lastResult.logbookError;
         showLogToast(`Logged ${displayCalls} to ADIF, but logbook forwarding failed: ${friendly}`, { warn: true, duration: 8000 });
+      } else if (lastResult.qrzError) {
+        showLogToast(`Logged ${displayCalls}, but QRZ Logbook did not take it: ${lastResult.qrzError}`, { warn: true, duration: 8000 });
       } else {
         // Surface the first re-spot error that fired, with the correct
         // program name so the user knows which network rejected the
