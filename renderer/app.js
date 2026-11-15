@@ -21756,9 +21756,11 @@ function initDirvHeaderMenu(table) {
 }
 
 // Arrow-key row stepping for every Directory tab (Nets, SWL, Landmarks,
-// Channels). The index is remembered per tab because Nets/SWL show a row as
-// tuned only once the radio echoes the frequency back.
-let _dirKeyNav = { tab: null, idx: -1 };
+// Channels). Where the next step moves from is lib/directory-key-nav.js: kept
+// per tab, and set by a click on a row so the arrows go on from the row the
+// operator clicked (#501).
+const DirKeyNav = window.DirectoryKeyNav;
+let _dirKeyNav = DirKeyNav.initial();
 function directoryRows() {
   const body = dirvActiveTab === 'nets' ? dirvNetsBody : dirvActiveTab === 'swl' ? dirvSwlBody
     : dirvActiveTab === 'landmarks' ? document.getElementById('lmk-body') : document.getElementById('chn-body');
@@ -21769,13 +21771,23 @@ function directoryRows() {
 function directoryArrowStep(step) {
   const rows = directoryRows();
   if (!rows.length) return;
-  let idx = _dirKeyNav.tab === dirvActiveTab ? _dirKeyNav.idx : -1;
-  if (idx < 0 || idx >= rows.length) idx = rows.findIndex((r) => r.matches('.lmk-selected, .dirv-tuned, .chn-tuned'));
-  idx = idx < 0 ? (step > 0 ? 0 : rows.length - 1) : Math.max(0, Math.min(rows.length - 1, idx + step));
-  _dirKeyNav = { tab: dirvActiveTab, idx };
+  const selected = rows.findIndex((r) => r.matches('.lmk-selected, .dirv-tuned, .chn-tuned'));
+  _dirKeyNav = DirKeyNav.step(_dirKeyNav, dirvActiveTab, rows.length, selected, step);
+  const idx = _dirKeyNav.idx;
   rows[idx].click();
   const row = directoryRows()[idx]; // Landmarks and Channels re-render on click
   if (row) row.scrollIntoView({ block: 'nearest' });
+}
+// A click on a row is where the next arrow moves from. Capture phase: the
+// row's own handler may re-render the table (Landmarks, Channels) and detach
+// it before the click bubbles up.
+{
+  const dirView = document.getElementById('directory-view');
+  if (dirView) dirView.addEventListener('click', (e) => {
+    const tr = e.target && e.target.closest ? e.target.closest('tr') : null;
+    if (!tr) return;
+    _dirKeyNav = DirKeyNav.clickAt(_dirKeyNav, dirvActiveTab, directoryRows().indexOf(tr));
+  }, true);
 }
 
 // Directory view tab switching
