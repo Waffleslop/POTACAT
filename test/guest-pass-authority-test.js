@@ -97,7 +97,8 @@ test('what the pass promises stays allowed: operate the station', () => {
     'jtcat-start', 'jtcat-call-cq', 'jtcat-reply', 'jtcat-enable-tx', 'jtcat-halt-tx', 'jtcat-set-mode', 'jtcat-log-qso',
     'js8-start', 'js8-send', 'js8-thread-open', 'sstv-open', 'sstv-photo', 'sstv-get-gallery',
     'scope-subscribe', 'scope-span', 'paddle', 'cw-text', 'cw-key', 'voice-macro-play', 'freedv-start', 'freedv-set-tx',
-    'signal', 'restart-audio', 'get-audio-devices', 'ping', 'rig-control', 'tx-eq-set', 'scan-control']) {
+    'signal', 'restart-audio', 'get-audio-devices', 'ping', 'rig-control', 'tx-eq-set', 'scan-control',
+    'kiwi-connect', 'kiwi-disconnect', 'kiwi-tune']) { // #543: the station's own SDRs (lib/guest-sdr.js)
     assert.ok(A.isGuestAllowed(t), t + ' must be allowed');
   }
 });
@@ -107,7 +108,7 @@ test('what the pass does not confer is denied: the owner\'s log, accounts, setti
     'save-custom-cat-buttons', 'save-cw-macros', 'save-echo-pref', 'set-refresh-interval',
     'switch-rig', 'rig-reconnect', 'unpair-self', 'set-audio-device', 'set-atu', 'atu-tune',
     'set-enable-split', 'set-enable-atu', 'vfo-profiles-update', 'apply-vfo-profile',
-    'kiwi-connect', 'kiwi-tune', 'set-freedv', 'toggle-rotor', 'tgxl-select-antenna',
+    'set-freedv', 'toggle-rotor', 'tgxl-select-antenna',
     'voice-macro-sync', 'voice-macro-delete', 'set-activator-park', 'set-park-county', 'jtcat-set-pref']) {
     assert.strictEqual(A.isGuestAllowed(t), false, t + ' must be denied');
   }
