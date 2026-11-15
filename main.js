@@ -407,6 +407,7 @@ const ClusterNodeChoice = require('./lib/cluster-node-choice'); // turn saved cl
 const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseAdifStream, parseSqliteFile, parseSqliteConfirmed, isSqliteFile, parseRecord: parseAdifRecord, normalizeMode: normalizeLogMode } = require('./lib/adif');
 const { qsoDayInScheduleEntry, matchChecklistItem, matchRegionPatterns, activeScheduleEntry, coveringScheduleEntries, matchingRegionEntry, matchEventQsoForStamp, retroStampMatches, retroCorrectStamps } = require('./lib/event-progress');
 const { cwPaddleAvailability } = require('./lib/cw-paddle-availability');
+const { txrxPttOnlyHint } = require('./lib/cw-paddle-hint');
 const { resolveCwKeyPins, resolveKeyPortPins, keyLineLabel } = require('./lib/cw-key-line');
 const { buildPersistentKeyerScript } = require('./lib/cw-keyer-script');
 const { cwTextUnavailablePlan } = require('./lib/cw-text-fallback');
@@ -26703,10 +26704,7 @@ function buildPaddleKeyRig() {
           !(process.platform === 'win32' && _cwKeyPortIoctlLatched && _cwKeyPortPathForPython === settings.cwKeyPort);
         if (!(cwKeyPort && cwKeyPort.isOpen) && !_keyPortPaddlePossible && !_cwTxrxPttOnlyLogged) {
           _cwTxrxPttOnlyLogged = true;
-          sendCatLog('[CW] Paddle keying on this Yaesu/Kenwood rig would only key PTT (TX1;/TX0;) — no CW output or sidetone. ' +
-            'For a real paddle: connect the rig\'s OTHER USB COM port (the one not used for CAT — "Standard" on the FTDX10, "Enhanced/CAT-2" on FT-710/991), ' +
-            'set the rig menu PC KEYING (or USB Keying (CW)) = DTR or RTS, and select that port as the CW Key Port in Settings > ECHOCAT — then set "CW keying line" in the rig editor (Settings > Radio) to match, and enable BK-IN. ' +
-            'Or type in the CW text box — that uses the rig\'s internal keyer and makes real RF. See docs/linux-cw-keying.md.');
+          sendCatLog(txrxPttOnlyHint(rigModel));
           _setCwPaddleAvailability(false, 'txrx-ptt-only');
         }
         // Skip cat-side keying; the dedicated CW Key Port block below (if open) keys.
