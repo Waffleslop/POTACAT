@@ -736,6 +736,9 @@ let radioFreqKhzExact = null;
 let radioMode = null;
 
 let scanning = false;
+// The key chosen under Settings > ECHOCAT > "Hold a key to talk" (a KeyboardEvent.code,
+// '' = off). That key belongs to PTT alone: the Space-starts-scan shortcut steps aside.
+let remoteShackPttKey = '';
 let remoteScanning = false; // ECHOCAT mobile's scan engine is running (scan-state-sync-desktop)
 let scanTimer = null;
 let scanIndex = 0;
@@ -9011,6 +9014,7 @@ if (window.api && window.api.onRemoteClientDisplaced) {
       });
       document.addEventListener('keyup', (e) => {
         if (!_pttKeyHeld || e.code !== _pttKey) return;
+        e.preventDefault(); // a focused button must not click on the release
         _pttKeyHeld = false;
         ptt.up();
       });
@@ -9038,6 +9042,7 @@ if (window.api && window.api.onRemoteClientDisplaced) {
     const applyAudioPrefs = (p) => {
       if (!p) return;
       _pttKey = p.pttKey || '';
+      remoteShackPttKey = _pttKey;
       if (volEl && document.activeElement !== volEl) volEl.value = String(Math.round((p.volume == null ? 1 : p.volume) * 100));
       if (muteEl) { muteEl.textContent = p.muted ? '🔇' : '🔊'; muteEl.title = p.muted ? 'Unmute the shack audio' : 'Mute the shack audio'; }
       showAudioElsewhere(_lastShackInfo);
@@ -12794,7 +12799,7 @@ function startScan() {
     if (match !== -1) scanIndex = match;
   }
   scanBtn.textContent = 'Stop';
-  scanBtn.title = 'Press Stop or Spacebar to stop scanning';
+  scanBtn.title = remoteShackPttKey === 'Space' ? 'Press Stop to stop scanning' : 'Press Stop or Spacebar to stop scanning';
   scanBtn.classList.add('scan-active');
   if (!wasScanning) notifyScanState(true);
   scanStep();
@@ -12956,7 +12961,7 @@ document.addEventListener('keydown', (e) => {
     checkFirstRun(true);
     return;
   }
-  if (e.code === 'Space' && !e.target.matches('input, select, textarea')) {
+  if (e.code === 'Space' && remoteShackPttKey !== 'Space' && !e.target.matches('input, select, textarea')) {
     e.preventDefault();
     if (scanning) { stopScan(); } else { startScan(); }
     return;
