@@ -19687,6 +19687,29 @@ function popoutJtcatOnDone(qso) {
     popoutBroadcastQso();
   };
 }
+// Answering a new caller, from any surface, lets go of the QSO running on
+// every surface: one transmitter, two QSO objects (lib/jtcat-state-machine.js
+// supersedeRunningQsos, #519). A complete one is logged, an unfinished one is
+// dropped and said so, never logged. The click's own surface rebuilds its
+// object in the reply handler; the other surface's is cleared here, so its
+// auto-sequence, retry cap and closeout can no longer log it or key the radio.
+async function jtcatSupersedeQsos(newCall, own) {
+  const out = _jtcatStateMachine.supersedeRunningQsos(
+    { popout: popoutJtcatQso, remote: remoteJtcatQso }, newCall, own);
+  for (const { surface, q, action, clear } of out) {
+    if (action === 'log') {
+      sendCatLog(`[JTCAT] Replacing the finished QSO with ${q.call} — logging it`);
+      await jtcatAutoLog(q, surface === 'popout' ? { fromWindow: true } : undefined);
+    } else if (!q._logged) {
+      sendCatLog(`[JTCAT] Left the QSO with ${q.call} unfinished (${q.phase}) — not logged`);
+    }
+    if (!clear) continue;
+    if (surface === 'popout' && popoutJtcatQso === q) { popoutJtcatQso = null; popoutBroadcastQso(); }
+    if (surface === 'remote' && remoteJtcatQso === q) { remoteJtcatQso = null; remoteJtcatBroadcastQso(); }
+  }
+  // The new station's QSO starts with this click (TIME_ON, lib/jtcat-qso-clock.js).
+  if (newCall) _jtcatQsoClock.note(newCall, Date.now());
+}
 function remoteJtcatOnDone(qso) {
   return async () => {
     await jtcatAutoLog(qso); // use captured ref, not global
@@ -28383,18 +28406,9 @@ function connectRemote() {
       const hound = (!!settings.jtcatHoundMode || fox) && !jtcatFdContext();
       if (!jtcatReplySlot(targetEngine, call, slot, { hound, source: 'remote', retry: data, retryType: 'jtcat-reply' })) return;
     }
-    // Clicking another station abandons the running QSO. Log it only if it was
-    // already complete (lib/jtcat-state-machine.js replaceLogsQso); an
-    // unfinished one is dropped and said so, never logged (level_death 10/31).
-    if (remoteJtcatQso && remoteJtcatQso.call && remoteJtcatQso.call.toUpperCase() !== (call || '').toUpperCase()
-        && remoteJtcatQso.phase !== '73' && remoteJtcatQso.phase !== 'done') {
-      if (_jtcatStateMachine.replaceLogsQso(remoteJtcatQso, call)) {
-        sendCatLog(`[JTCAT] Replacing the finished QSO with ${remoteJtcatQso.call} — logging it`);
-        await jtcatAutoLog(remoteJtcatQso);
-      } else if (!remoteJtcatQso._logged) {
-        sendCatLog(`[JTCAT] Left the QSO with ${remoteJtcatQso.call} unfinished (${remoteJtcatQso.phase}) — not logged`);
-      }
-    }
+    // Clicking another station abandons the running QSO, on this surface and
+    // the window's: logged only if it was already complete (#519).
+    await jtcatSupersedeQsos(call, 'remote');
     // Halt any active TX (e.g. CQ) so reply goes out on next boundary
     if (targetEngine._txActive) targetEngine.txComplete();
     // Hound mode: fox at 300–900 Hz, hounds must call 1000–4000 Hz (see the
@@ -45708,18 +45722,9 @@ function cloudShackNotice(text, kind) {
       const hound = (!!settings.jtcatHoundMode || fox) && !jtcatFdContext();
       if (!jtcatReplySlot(replyEngine, data.call, data.slot, { hound, source: 'popout', retry: data, retryType: 'jtcat-popout-reply' })) return;
     }
-    // Clicking another station abandons the running QSO. Log it only if it was
-    // already complete (lib/jtcat-state-machine.js replaceLogsQso); an
-    // unfinished one is dropped and said so, never logged (level_death 10/31).
-    if (popoutJtcatQso && popoutJtcatQso.call && popoutJtcatQso.call.toUpperCase() !== (data.call || '').toUpperCase()
-        && popoutJtcatQso.phase !== '73' && popoutJtcatQso.phase !== 'done') {
-      if (_jtcatStateMachine.replaceLogsQso(popoutJtcatQso, data.call)) {
-        sendCatLog(`[JTCAT] Replacing the finished QSO with ${popoutJtcatQso.call} — logging it`);
-        await jtcatAutoLog(popoutJtcatQso, { fromWindow: true });
-      } else if (!popoutJtcatQso._logged) {
-        sendCatLog(`[JTCAT] Left the QSO with ${popoutJtcatQso.call} unfinished (${popoutJtcatQso.phase}) — not logged`);
-      }
-    }
+    // Clicking another station abandons the running QSO, in the window and on
+    // ECHOCAT: logged only if it was already complete (#519).
+    await jtcatSupersedeQsos(data.call, 'popout');
     // Halt any active TX (e.g. CQ) so reply goes out on next boundary
     if (replyEngine._txActive) replyEngine.txComplete();
     // Hound mode (FT8 DXpedition): the Fox transmits at 300–900 Hz but
