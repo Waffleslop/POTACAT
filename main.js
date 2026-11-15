@@ -1812,6 +1812,15 @@ let sstvManager = null;      // SSTV multi-slice manager
 let openSstvPopout = null;   // function — assigned in second whenReady block
 let startSstv = null;        // function — assigned in second whenReady block (same reason)
 let openJtcatPopout = null;  // function — assigned in second whenReady block (used by WSPR-on-idle)
+// Every "Open folder" button: make the folder, open it, and hand the window a
+// plain-words failure instead of doing nothing (#546, lib/open-folder.js).
+const OpenFolder = require('./lib/open-folder');
+async function openFolderLogged(dir, label, tag) {
+  const r = await OpenFolder.openFolder(dir, { fsp: fs.promises, shell: require('electron').shell, label });
+  if (!r.ok) sendCatLog(`[${tag}] Open folder failed: ${r.error}`);
+  else if (r.created) sendCatLog(`[${tag}] Made the missing ${label} ${r.dir}`);
+  return r;
+}
 function defaultSstvGalleryDir() {
   return path.join(app.getPath('pictures'), 'POTACAT', 'SSTV-RX');
 }
@@ -44737,9 +44746,7 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('winlink-open-settings', () => {
     if (win && !win.isDestroyed()) { win.show(); win.focus(); win.webContents.send('open-settings-winlink'); }
   });
-  ipcMain.on('winlink-open-folder', () => {
-    try { require('electron').shell.openPath(winlinkPaths().dir); } catch {}
-  });
+  ipcMain.handle('winlink-open-folder', () => openFolderLogged(winlinkPaths().dir, 'Winlink folder', 'Winlink'));
   // The rig's FT8 sound device ids, so the mail window can resolve their names.
   ipcMain.handle('winlink-audio-rig', () => {
     const rig = winlinkActiveRig();
@@ -44803,9 +44810,7 @@ function cloudShackNotice(text, kind) {
   ipcMain.handle('winlink-recovery-email-get', () => winlinkRecoveryEmailGet());
   ipcMain.handle('winlink-recovery-email-set', (_e, email) => winlinkRecoveryEmailSet(email));
   ipcMain.handle('winlink-cmd-set-password', (_e, pw) => winlinkSetPassword(pw, 'mail window'));
-  ipcMain.on('mercury-open-downloads', () => {
-    try { require('electron').shell.openPath(path.join(app.getPath('userData'), 'mercury-downloads')); } catch {}
-  });
+  ipcMain.handle('mercury-open-downloads', () => openFolderLogged(path.join(app.getPath('userData'), 'mercury-downloads'), 'Mercury downloads folder', 'Mercury'));
   // Device discovery wizard: run `mercury -x <ss> -z` and parse the sound-card
   // list so Settings can offer a one-click picker instead of hand-typed names.
   ipcMain.handle('mercury-list-devices', async () => {
@@ -45712,11 +45717,12 @@ function cloudShackNotice(text, kind) {
     if (saved) sendCatLog(`[SSTV] Kept a weak decode at the operator's request: ${saved.filename || ''}`);
     return saved;
   });
-  ipcMain.on('sstv-open-gallery-folder', async () => {
+  ipcMain.handle('sstv-open-gallery-folder', async () => {
     // Made off the main process with a time limit, like the gallery itself: a
     // Pictures folder that does not answer is logged, never a frozen app (#123).
-    const galleryDir = await ensureSstvGalleryDirAsync();
-    if (galleryDir) require('electron').shell.openPath(galleryDir);
+    // Made every time, not only once: a folder deleted after the window opened
+    // made the button do nothing (#546). The window shows a failure.
+    return openFolderLogged(getSstvGalleryDir(), 'SSTV pictures folder', 'SSTV');
   });
 
   // SSTV pop-out window

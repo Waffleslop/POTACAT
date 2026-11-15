@@ -77,7 +77,7 @@ contextBridge.exposeInMainWorld('api', {
   audioSave: (o) => ipcRenderer.invoke('winlink-audio-save', o),
   audioList: () => ipcRenderer.invoke('winlink-list-ardop-devices'),
   openSettings: () => ipcRenderer.send('winlink-open-settings'),
-  openFolder: () => ipcRenderer.send('winlink-open-folder'),
+  openFolder: () => ipcRenderer.invoke('winlink-open-folder'),
 
   // The radio: RF power setting (same payload as the JTCAT window), the
   // measured forward power and SWR, and the ONE dispatcher every surface

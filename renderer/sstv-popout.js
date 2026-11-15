@@ -1814,7 +1814,14 @@ if (rxReplyBtnEl) {
   });
 }
 
-openFolderBtn.addEventListener('click', () => window.api.sstvOpenGalleryFolder());
+// Main makes a missing folder and opens it; a failure is said here, in the
+// status line, never swallowed (#546).
+async function openGalleryFolder() {
+  let r = null;
+  try { r = await window.api.sstvOpenGalleryFolder(); } catch (err) { r = { ok: false, error: 'Could not open the SSTV pictures folder: ' + ((err && err.message) || err) }; }
+  if (r && r.ok === false && statusBar) statusBar.textContent = r.error || 'Could not open the SSTV pictures folder.';
+}
+openFolderBtn.addEventListener('click', openGalleryFolder);
 
 // ===== AUDIO CAPTURE (RX) ==================================================
 
@@ -3202,7 +3209,7 @@ function openImageMenu(x, y, entry, galleryIdx) {
   } });
   if (entry.dataUrl) items.push({ label: 'View full size', action: () => viewImageFullscreen(entry.dataUrl) });
   if (galleryIdx < 0 && entry === lastRxImage) items.push({ label: 'Clear the receive picture', action: () => clearRxPicture() });
-  items.push({ label: 'Open the pictures folder', action: () => window.api.sstvOpenGalleryFolder() });
+  items.push({ label: 'Open the pictures folder', action: openGalleryFolder });
   if (galleryIdx >= 0) {
     items.push({ label: 'Delete', danger: true, action: async () => {
       if (entry.filename) await window.api.sstvDeleteImage(entry.filename);

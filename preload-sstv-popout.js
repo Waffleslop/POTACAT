@@ -63,7 +63,7 @@ contextBridge.exposeInMainWorld('api', {
   },
   // Gallery
   sstvGetGallery: () => ipcRenderer.invoke('sstv-get-gallery'),
-  sstvOpenGalleryFolder: () => ipcRenderer.send('sstv-open-gallery-folder'),
+  sstvOpenGalleryFolder: () => ipcRenderer.invoke('sstv-open-gallery-folder'),
   sstvKeepImage: (d) => ipcRenderer.invoke('sstv-keep-image', d),
   sstvDeleteImage: (filename) => ipcRenderer.invoke('sstv-delete-image', filename),
   sstvLoadFile: () => ipcRenderer.invoke('sstv-load-file'),
