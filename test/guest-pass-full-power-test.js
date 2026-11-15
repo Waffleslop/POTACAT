@@ -37,6 +37,8 @@ function shack(rig) {
     _currentTxPower: 0, _lastPowerReadback: null,
     broadcastRigState: () => {}, sendCatLog: (l) => logs.push(l),
     settings: {}, win: null, setTimeout: () => {},
+    // The amplifier drive limit (B10 row 10): none on this rig.
+    AmpDrive: require('../lib/amp-drive-limit'), activeAmpDriveLimitW: () => 0,
   };
   vm.createContext(ctx);
   vm.runInContext(

@@ -3711,6 +3711,13 @@ async function openRigEditor(mode, rigId) {
       if (voiceAsDataEl) voiceAsDataEl.checked = !!rig.voiceAsData;
       const allowPowerOffEl = document.getElementById('set-allow-power-off');
       if (allowPowerOffEl) allowPowerOffEl.checked = !!rig.allowPowerOffNoWake;
+      { // the amplifier drive limit (lib/amp-drive-limit.js)
+        const on = document.getElementById('set-amp-drive-on');
+        const w = document.getElementById('set-amp-drive-w');
+        const lim = Number(rig.ampDriveLimitW) > 0 ? Number(rig.ampDriveLimitW) : 0;
+        if (on) on.checked = lim > 0;
+        if (w) w.value = lim > 0 ? lim : 10;
+      }
       const lanVoiceSsbEl = document.getElementById('set-lan-voice-ssb');
       if (lanVoiceSsbEl) lanVoiceSsbEl.checked = !!rig.lanVoiceInSsb;
       const packetModeEl = document.getElementById('set-packet-mode');
@@ -3737,6 +3744,8 @@ async function openRigEditor(mode, rigId) {
     fillSdrScopeForm(null);
     { const v = document.getElementById('set-voice-as-data'); if (v) v.checked = false; }
     { const v = document.getElementById('set-allow-power-off'); if (v) v.checked = false; }
+    { const v = document.getElementById('set-amp-drive-on'); if (v) v.checked = false; }
+    { const v = document.getElementById('set-amp-drive-w'); if (v) v.value = 10; }
     { const v = document.getElementById('set-packet-mode'); if (v) v.value = 'auto'; }
     await populateRigAudioDevices('', '');
   }
@@ -3874,6 +3883,15 @@ async function saveRigEditor() {
   const rigVoiceAsData = !!(voiceAsDataEl && voiceAsDataEl.checked);
   const allowPowerOffEl = document.getElementById('set-allow-power-off');
   const rigAllowPowerOff = !!(allowPowerOffEl && allowPowerOffEl.checked); // #293
+  const ampDriveOnEl = document.getElementById('set-amp-drive-on');
+  const ampDriveWEl = document.getElementById('set-amp-drive-w');
+  // The amplifier drive limit: ticked and a positive number, else none. Same
+  // rule as lib/amp-drive-limit.js parseField (0.1 W steps, at most 2000 W).
+  const rigAmpDriveW = (() => {
+    if (!(ampDriveOnEl && ampDriveOnEl.checked)) return 0;
+    const n = parseFloat(ampDriveWEl ? ampDriveWEl.value : '');
+    return Number.isFinite(n) && n > 0 ? Math.min(2000, Math.round(n * 10) / 10) : 0;
+  })();
   const txAudioInputEl = document.getElementById('set-tx-audio-input');
   const rigTxAudioInput = txAudioInputEl && (txAudioInputEl.value === 'front' || txAudioInputEl.value === 'rear')
     && window.TxAudioInput && window.TxAudioInput.hasChoice(model) ? txAudioInputEl.value : ''; // #594
@@ -3909,6 +3927,7 @@ async function saveRigEditor() {
       rig.atuKeepOn = rigAtuKeepOn;
       if (rigVoiceAsData) rig.voiceAsData = true; else delete rig.voiceAsData;
       if (rigAllowPowerOff) rig.allowPowerOffNoWake = true; else delete rig.allowPowerOffNoWake;
+      if (rigAmpDriveW > 0) rig.ampDriveLimitW = rigAmpDriveW; else delete rig.ampDriveLimitW;
       if (rigTxAudioInput) rig.txAudioInput = rigTxAudioInput; else delete rig.txAudioInput;
       if (rigLanVoiceInSsb) rig.lanVoiceInSsb = true; else delete rig.lanVoiceInSsb;
       if (rigPacketMode) rig.packetMode = rigPacketMode; else delete rig.packetMode; // absent = Automatic
@@ -3940,6 +3959,7 @@ async function saveRigEditor() {
       atuKeepOn: rigAtuKeepOn,
       ...(rigVoiceAsData ? { voiceAsData: true } : {}),
       ...(rigAllowPowerOff ? { allowPowerOffNoWake: true } : {}),
+      ...(rigAmpDriveW > 0 ? { ampDriveLimitW: rigAmpDriveW } : {}),
       ...(rigTxAudioInput ? { txAudioInput: rigTxAudioInput } : {}),
       ...(rigLanVoiceInSsb ? { lanVoiceInSsb: true } : {}),
       ...(rigPacketMode ? { packetMode: rigPacketMode } : {}),
