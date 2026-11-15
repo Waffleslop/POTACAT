@@ -471,6 +471,7 @@ const TESTS = [
   'test/sdr-scope-test.js',
   'test/rtltcp-audio-test.js',
   'test/landmarks-test.js', // Directory > Landmarks: the catalog gate, hours, rig coverage, the NCDXF clock, the feed, wiring
+  'test/directory-key-nav-test.js', // #501: Directory arrow keys move from the row you clicked; ends clamp; a tab switch resets
   'test/lz3aw-round14-test.js',
   'test/lz3aw-batch-b-test.js',
   'test/lotw-report-test.js',
