@@ -1046,6 +1046,18 @@ test('Kenwood setFrequencyOther writes the OTHER VFO (FB on A, FA on B) and read
   assert.strictEqual(y.writes.length, 0);
 });
 
+test('FT-991/991A setFrequencyOther writes VFO B directly and reads its TX frequency back', () => {
+  const model = require('../lib/rig-models').RIG_MODELS['FT-991/991A'];
+  const { codec, writes } = captureWrites(KenwoodCodec, model);
+  const other = [];
+  codec._splitOn = true;
+  codec.on('frequencyOther', (hz) => other.push(hz));
+  assert.strictEqual(codec.setFrequencyOther(14345000), true);
+  assert.deepStrictEqual(writes, ['FB014345000;', 'FB;']);
+  codec.onData(Buffer.from('FB014345000;'));
+  assert.deepStrictEqual(other, [14345000]);
+});
+
 test('every Icom model that offers VFO A/B also offers split, and the wiring exists end to end', () => {
   const { RIG_MODELS } = require('../lib/rig-models');
   for (const [id, m] of Object.entries(RIG_MODELS)) {
