@@ -5528,6 +5528,24 @@ a.settings-echocat-badge-link:hover {
   color: var(--accent-red);
 }
 
+/* PTT on RTS with RTS/CTS flow control on the same port (#544). */
+.rig-ptt-conflict {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--warn);
+  background: var(--warn-subtle);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.rig-ptt-conflict.hidden { display: none; }
+.rig-ptt-conflict-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
 /* Welcome dialog */
 .welcome-text {
   font-size: 13px;

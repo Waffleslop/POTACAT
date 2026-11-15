@@ -2816,6 +2816,43 @@ async function loadSerialcatPorts(savedTarget) {
   const pttSel = document.getElementById('set-serialcat-ptt');
   if (pttSel) pttSel.value = savedPttChoice(savedTarget);
   serialcatPortsLoaded = true;
+  updateSerialcatPttConflict();
+}
+
+// PTT on RTS with RTS/CTS flow control (or RTS held high) on the same port
+// can never key the radio (#544, W5PLC FTDX10). Said here while it is being
+// chosen, with the two fixes as buttons; nothing changes until one is pressed.
+function serialcatModelHandshake() {
+  const name = rigModelSelect ? rigModelSelect.value : '';
+  if (!name) return undefined;
+  return rigModelData.some((g) => Array.isArray(g.rtsCts) && g.rtsCts.includes(name)) ? 'hardware' : undefined;
+}
+function updateSerialcatPttConflict() {
+  const box = document.getElementById('serialcat-ptt-conflict');
+  if (!box || typeof PttFlowConflict === 'undefined') return;
+  const target = {
+    type: 'serial',
+    path: getEffectiveSerialcatPort(),
+    serialHandshake: (document.getElementById('set-serialcat-handshake') || {}).value || 'auto',
+    ...pttChoiceField('set-serialcat-ptt'),
+  };
+  const c = PttFlowConflict.pttFlowConflict(target, serialcatModelHandshake());
+  box.classList.toggle('hidden', !c);
+  const text = document.getElementById('serialcat-ptt-conflict-text');
+  if (text) text.textContent = c ? c.message + (c.source === 'model' ? ' (RTS line: Auto uses RTS/CTS flow control for this radio.)' : '') : '';
+}
+for (const id of ['set-serialcat-handshake', 'set-serialcat-ptt']) {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('change', updateSerialcatPttConflict);
+}
+if (rigModelSelect) rigModelSelect.addEventListener('change', updateSerialcatPttConflict);
+for (const btn of document.querySelectorAll('#serialcat-ptt-conflict [data-ptt-fix]')) {
+  btn.addEventListener('click', () => {
+    const fix = btn.getAttribute('data-ptt-fix');
+    if (fix === 'rts-held-low') { const hs = document.getElementById('set-serialcat-handshake'); if (hs) hs.value = 'none'; }
+    if (fix === 'ptt-over-cat') { const ptt = document.getElementById('set-serialcat-ptt'); if (ptt) ptt.value = 'cat'; }
+    updateSerialcatPttConflict();
+  });
 }
 
 // --- Rig profile management ---
@@ -10693,7 +10730,8 @@ serialcatTestBtn.addEventListener('click', async () => {
     // port the same way (RTS/CTS; the FT-817/818/857/897 binary protocol).
     const serialHandshake = (document.getElementById('set-serialcat-handshake') || {}).value || 'auto';
     const model = rigModelSelect ? rigModelSelect.value : '';
-    const result = await window.api.testSerialCat({ portPath, baudRate, dtrOff, serialHandshake, model });
+    const ptt = (document.getElementById('set-serialcat-ptt') || {}).value || 'cat'; // no RTS/CTS trial where RTS keys PTT (#544)
+    const result = await window.api.testSerialCat({ portPath, baudRate, dtrOff, serialHandshake, model, ptt });
     if (result.success) {
       serialcatTestResult.textContent = `Connected! Freq: ${FreqDots.mhzMhz(result.frequency) || result.frequency + ' MHz'}` + (result.note ? ` (${result.note})` : '') + rigTestSavedNote(portPath) + rigTestWsjtxNote(result);
       serialcatTestResult.className = 'hamlib-test-success';

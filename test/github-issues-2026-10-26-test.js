@@ -59,7 +59,7 @@ section('#106 "The audio interface keys it" on a CAT radio');
 section('#103 Auto RTS: a silent Yaesu is tried with RTS/CTS for the session');
 {
   assert(/function armSerialHandshakeNoAnswerTrial\(/.test(main), 'trial exists');
-  assert(/if \(hs\.source !== 'rig' && SerialHsTrial\.trialApplies\(model\)\) armSerialHandshakeNoAnswerTrial\(cat, transport, target, hs\)/.test(main), 'armed on the direct-serial connect on Auto, by lib/serial-hs-trial.js (Yaesu and Kenwood, never the legacy 5-byte protocol, KL4XQ FT-818)');
+  assert(/if \(hs\.source !== 'rig' && SerialHsTrial\.trialApplies\(model, target\)\) armSerialHandshakeNoAnswerTrial\(cat, transport, target, hs\)/.test(main), 'armed on the direct-serial connect on Auto, by lib/serial-hs-trial.js (Yaesu and Kenwood, never the legacy 5-byte protocol, KL4XQ FT-818, never where RTS keys PTT, #544)');
   const fn = main.slice(main.indexOf('function armSerialHandshakeNoAnswerTrial('), main.indexOf('async function connectCat()'));
   // The save lives in serialHandshakeTrialSave; it is CALLED only from the
   // radio-answered handler (after the 2 s keyed-watch, ab8a6716).

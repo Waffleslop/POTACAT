@@ -2046,6 +2046,13 @@
               <option value="vox">The audio interface keys it (SignaLink, the radio's VOX)</option>
             </select>
           </label>
+          <div id="serialcat-ptt-conflict" class="rig-ptt-conflict hidden" role="alert">
+            <span id="serialcat-ptt-conflict-text"></span>
+            <div class="rig-ptt-conflict-actions">
+              <button type="button" data-ptt-fix="rts-held-low">Hold RTS low</button>
+              <button type="button" data-ptt-fix="ptt-over-cat">Key over CAT instead</button>
+            </div>
+          </div>
           <span class="help-text" style="margin-top:2px;display:block;">CAT still tunes and changes mode. Choose <b>The audio interface keys it</b> when a SignaLink or similar on the radio's data jack (TS-2000 ACC2) does the keying: over CAT some radios transmit from the front microphone, so the interface's audio never goes out.</span>
           <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
             <button type="button" id="serialcat-test-btn">Test Connection</button>
@@ -5377,6 +5384,7 @@
   <script src="../lib/pass-wording.js"></script>
   <script src="../lib/net-reminder-row.js"></script>
   <script src="../lib/rig-family.js"></script>
+  <script src="../lib/ptt-flow-conflict.js"></script>
   <script src="../lib/waterfall-palettes.js"></script>
   <script src="../lib/app-theme.js"></script>
   <script src="../lib/look-picker.js"></script>
