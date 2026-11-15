@@ -6205,7 +6205,7 @@ function _applyPopoutTheme(payload) {
     if (persistLocal) { try { localStorage.setItem('jtcat-tx-gain', pct); } catch (e) {} }
   }
   var savedTxPct = parseInt(localStorage.getItem('jtcat-tx-gain'), 10);
-  if (!isNaN(savedTxPct)) jpApplyTxGainPct(savedTxPct, false);
+  if (jpTxGain) jpApplyTxGainPct(isNaN(savedTxPct) ? jpTxGain.value : savedTxPct, false);
   window.api.getSettings().then(function (s) {
     if (s && typeof s.jtcatTxGain === 'number') {
       jpApplyTxGainPct(gainToTxPwr(s.jtcatTxGain), true);
