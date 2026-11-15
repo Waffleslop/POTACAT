@@ -239,6 +239,7 @@ const TESTS = [
   'test/serial-reopen-test.js', // connectCat waits for the old port's release; Access denied on our own handle says so (KK6EZA)
   'test/serial-close-blocked-cts-test.js', // RTS/CTS write stuck on CTS: flush before close, bounded close, None keeps the close (#174)
   'test/yaesu-lines-low-test.js', // every Yaesu drops DTR/RTS at open (stein, G5HOW: keyed on connect)
+  'test/yaesu-po-meter-test.js', // FT-710/FTDX10/FTDX101 read forward power on RM5; no false 'no CAT during TX' line (#581)
   'test/split-first-tune-test.js', // #113 item 2: no split OFF unless POTACAT turned split on
   'test/waterfall-palettes-test.js', // waterfall / band scope palettes = the ECHOCAT app's, wired into every waterfall
   'test/scope-view-test.js', // the scope's shared ticks + trace painter (every surface), the synced tuning step
