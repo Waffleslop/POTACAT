@@ -36,6 +36,12 @@ gh run list --branch master --limit 3   # the Test workflow on HEAD is green, IN
 node .claude/skills/potacat-release/next-version.js     # dry run: prints last and next
 ```
 
+The release runs in the main desktop checkout, which follows master (AGENTS.md, "The main checkout
+follows master"). It must be on master, fast-forwarded to origin/master, with no uncommitted
+tracked changes. If it is behind, `git pull --ff-only origin master` (then `npm ci` if
+package-lock.json changed, `npm run build-natives` if native sources changed). If it holds work
+Casey did not ask to ship, move it to a branch first; never discard, stash, reset or force.
+
 Uncommitted work Casey asked for in the same message ("commit, push and release") is
 committed and pushed FIRST as its own commit(s), with explicit paths, never `git add -A`.
 Anything uncommitted that he did not mention stays out; say so.
@@ -154,6 +160,9 @@ The tag push starts `.github/workflows/release.yml` (Build & Release): Windows, 
 macOS x64, Linux x64, Linux arm64 → `create-release` (uses the .md and .title) →
 `update-website` (rewrites the DOWNLOAD-START/END block of potacat-website `index.html` and
 pushes). About 15 minutes. Installers are never built locally.
+
+After the push the main checkout sits on the release commit, the same as origin/master, so Casey's
+`npm start` runs exactly what shipped. Leave it there; any later merge fast-forwards it as usual.
 
 ### 6. Watch and verify
 
