@@ -31377,6 +31377,7 @@ function sendVfoState() {
     comp: _currentCompState,
     vox: _currentVoxState,
     nrAvailable: !!getRigCapabilities(detectRigType()).nr,
+    zeusNbLevel: tciRigTarget()?.server === 'zeus' ? (tciTestRadio?.noiseBlankerLevel ?? 0) : null,
     zeusNrLevel: tciRigTarget()?.server === 'zeus' ? (tciTestRadio?.noiseReductionLevel ?? 0) : null,
     nr: _currentNrState,
     anf: _currentAnfState,
@@ -31422,7 +31423,7 @@ function vfoWfmAvailable() {
 function vfoCatCaps() {
   try {
     const caps = getRigCapabilities(detectRigType()) || {};
-    const out = {};
+    const out = { tci: !!tciRigTarget() };
     for (const k of ['nb', 'nr', 'anf', 'apf', 'preamp', 'att', 'comp', 'vox', 'mon', 'rit', 'split', 'atu']) out[k] = !!caps[k];
     return out;
   } catch { return null; }
@@ -48466,8 +48467,8 @@ function cloudShackNotice(text, kind) {
         const on = !!data.value;
         const target = tciRigTarget();
         if (target) {
-          const applied = target.server === 'zeus' && source === 'echocat'
-            ? tciTestRadio?.cycleNoiseBlanker(echoCatDspNotice('NB'))
+          const applied = target.server === 'zeus' && (data.cycle === true || source === 'echocat')
+            ? tciTestRadio?.cycleNoiseBlanker(source === 'echocat' ? echoCatDspNotice('NB') : null)
             : tciTestRadio?.setNoiseBlanker(on);
           if (!applied) {
             sendCatLog('[TCI] NB change requires a connected radio in receive');

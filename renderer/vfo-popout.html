@@ -1176,6 +1176,10 @@ window.api.onRadioState((s) => {
     zeusNrLevel = s.zeusNrLevel;
     catChanged = true;
   }
+  if (s.zeusNbLevel !== undefined && zeusNbLevel !== s.zeusNbLevel) {
+    zeusNbLevel = s.zeusNbLevel;
+    catChanged = true;
+  }
   if (catChanged) paintCatButtons();
   if (s.catCaps !== undefined && JSON.stringify(s.catCaps) !== JSON.stringify(vfoCatCaps)) {
     vfoCatCaps = s.catCaps;
@@ -1587,15 +1591,17 @@ vfoTxPwrSelect.addEventListener('change', () => { vfoTxPwrInput(vfoTxPwrSelect);
   });
 })();
 
-// CAT buttons: the operator picks them per size (VFO settings > CAT buttons),
-// from the controls this radio takes (main's catCaps). The Large VFO always
-// had NB and ATU, so those are its defaults (VfoLayout.CAT_DEFAULT_LARGE).
-let vfoCatLarge = VfoLayout.CAT_DEFAULT_LARGE.slice();
+// CAT buttons are configurable per size. A saved Large selection overrides rig defaults.
+let vfoCatLarge = null;
 let vfoSmall = VfoLayout.normalizeSmall(null);   // settings.vfoSmall: { order, on, cat }
 let vfoCatCaps = null;       // null until the radio is known: offer them all
 let zeusNrLevel = null;
+let zeusNbLevel = null;
 const catState = {};         // vfo-radio-state field -> on, e.g. { nb: true }
-function catPicksFor(row) { return row.id === 'mini-cat' ? vfoSmall.cat : vfoCatLarge; }
+function largeCatPicks() {
+  return vfoCatLarge ?? (vfoCatCaps?.tci ? VfoLayout.CAT_DEFAULT_SMALL : VfoLayout.CAT_DEFAULT_LARGE);
+}
+function catPicksFor(row) { return row.id === 'mini-cat' ? vfoSmall.cat : largeCatPicks(); }
 function paintCatButtons() {
   document.querySelectorAll('.cat-builtin').forEach(b => {
     const state = b.dataset.state;
@@ -1604,6 +1610,7 @@ function paintCatButtons() {
     b.classList.toggle('on', on);
     b.setAttribute('aria-pressed', String(on));
     if (state === 'nr') b.textContent = zeusNrLevel > 0 ? `NR${zeusNrLevel}` : 'NR';
+    if (state === 'nb') b.textContent = zeusNbLevel > 0 ? `NB${zeusNbLevel}` : 'NB';
   });
 }
 function buildRigToggles() {
@@ -1623,7 +1630,8 @@ function buildRigToggles() {
         if (c.momentary) { window.api.rigControl({ action: c.action }); return; }
         // The handlers read data.value (main.js): the field name must match.
         const on = !catState[c.state];
-        if (c.action === 'set-nr' && zeusNrLevel !== null) {
+        if ((c.action === 'set-nr' && zeusNrLevel !== null)
+            || (c.action === 'set-nb' && zeusNbLevel !== null)) {
           window.api.rigControl({ action: c.action, value: on, cycle: true });
           return;
         }
@@ -2630,7 +2638,7 @@ function renderLargeLists() {
       },
     }));
     if (k === 'controls' && on) {
-      body.appendChild(catPicker(vfoCatLarge, (next) => {
+      body.appendChild(catPicker(largeCatPicks(), (next) => {
         vfoCatLarge = next;
         window.api.saveSettings({ vfoCatLarge });
         buildRigToggles();
@@ -2752,7 +2760,7 @@ document.getElementById('large-reset').addEventListener('click', () => {
   applyOrder();
   vfoWidgets = { ...DEFAULT_WIDGETS };
   vfoSections = { ...DEFAULT_SECTIONS };
-  vfoCatLarge = VfoLayout.CAT_DEFAULT_LARGE.slice();
+  vfoCatLarge = null;
   window.api.saveSettings({ vfoOrder, vfoCatLarge });
   saveWidgets();
   applyWidgets(); applySections(); syncSettingsCheckboxes(); buildRigToggles();
@@ -2775,7 +2783,7 @@ async function loadWidgets() {
   vfoOrder = normalizeOrder(s.vfoOrder);
   applyOrder();
   vfoSmall = VfoLayout.normalizeSmall(s.vfoSmall);
-  vfoCatLarge = VfoLayout.normalizeCat(s.vfoCatLarge, VfoLayout.CAT_DEFAULT_LARGE);
+  vfoCatLarge = Array.isArray(s.vfoCatLarge) ? VfoLayout.normalizeCat(s.vfoCatLarge) : null;
   buildRigToggles();
   buildCustomCatBtns();
   if (vfoMini) applyMini();
