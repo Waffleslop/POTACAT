@@ -515,6 +515,7 @@ const TESTS = [
   'test/remote-rig-test.js',
   'test/remote-rig-power-test.js', // #152: rig power on/off from a remote POTACAT; no Power Off under a TX
   'test/rig-power-on-cap-test.js', // #485: FTX-1 powers off over CAT but not on; Power On hidden everywhere
+  'test/rig-power-off-guard-test.js', // #293: no Power Off for a radio POTACAT cannot switch back on, unless the rig allows it
   'test/remote-multi-client-test.js',
   'test/remote-bridge-test.js',
   'test/sstv-context-test.js',
