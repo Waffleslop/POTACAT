@@ -137,10 +137,12 @@ test('the legacy copy is no longer synchronous, and no SSTV gallery path has a s
   // used a helper that ran existsSync/mkdirSync on the Pictures folder.
   assert.ok(!/function ensureSstvGalleryDir\(/.test(MAIN), 'the synchronous helper is gone');
   assert.ok(!/ensureSstvGalleryDir\(\)/.test(MAIN), 'nothing calls it');
-  for (const marker of ["ipcMain.handle('sstv-gallery-set-call',", "ipcMain.handle('sstv-delete-image',", "ipcMain.on('sstv-open-gallery-folder',"]) {
+  for (const marker of ["ipcMain.handle('sstv-gallery-set-call',", "ipcMain.handle('sstv-delete-image',", "ipcMain.handle('sstv-open-gallery-folder',"]) {
     assert.ok(!/Sync\(/.test(handlerBody(marker)), marker + ' has no synchronous fs');
   }
-  assert.ok(/await ensureSstvGalleryDirAsync\(\)/.test(handlerBody("ipcMain.on('sstv-open-gallery-folder',")), 'Open folder prepares it with the time limit');
+  // #546: Open folder makes the folder every time (lib/open-folder.js, with a
+  // time limit), so a folder deleted after the first prepare still opens.
+  assert.ok(/return openFolderLogged\(getSstvGalleryDir\(\)/.test(handlerBody("ipcMain.handle('sstv-open-gallery-folder',")), 'Open folder makes it with the time limit');
 });
 
 test('SSTV audio that arrives before the engine starts is dropped, not a throw on every packet', () => {

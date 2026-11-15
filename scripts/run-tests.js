@@ -417,6 +417,7 @@ const TESTS = [
   'test/sstv-template-sync-test.js',
   'test/sstv-gallery-test.js',
   'test/sstv-gallery-dir-test.js', // #123: the gallery folder is prepared async with a time limit, never sync on the SSTV window-open path
+  'test/open-folder-546-test.js', // #546: every Open folder button makes a missing folder, then opens it; a failure is shown, never swallowed
   'test/sstv-keep-test.js',
   'test/sstv-help-test.js',
   'test/sstv-jtcat-handover-test.js',
