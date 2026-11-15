@@ -745,6 +745,7 @@ header {
   min-width: 0;
 }
 .echo-cat-url .echo-cat-ip { color: var(--accent-green); font-weight: bold; }
+.echo-cat-url .echo-cat-ip-label { color: var(--text-secondary); }
 .echo-cat-copy-icon {
   background: none;
   border: none;
