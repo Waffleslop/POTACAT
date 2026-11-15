@@ -2,6 +2,13 @@
 
 In a standard POTACAT launch, select **Radios running Thetis or Zeus (TCI server)** in the welcome wizard or in **Settings → Radio → Add Rig**. Create a rig for each TCI server you want to use. Choose the server application, enter its host and port, and select **Test connection**. The standard rig supports tuning and JTCAT receive and transmit audio for FT8, FT4, FT2, JS8, JTTY, and PSK31. Transmit requires split off, matching receive and transmit dials, USB or DIGU, and Fake It off. WSPR beacon transmit is unavailable until TCI power-cap control is implemented.
 
+
+## Filters, squelch, scope and spots
+
+- Change the receiver passband and squelch in the POTACAT VFO or EchoCAT. Verify the Zeus or Thetis console follows, then change the controls on that console and verify POTACAT follows the confirmed readback. Check USB and LSB passbands and squelch at zero.
+- Open Band Scope and check that a known signal appears at the correct RF frequency. Tune across the display, then close the last scope viewer and verify the IQ stream stops. In EchoCAT, the band scope shows RF activity while the Digi audio waterfall continues to show the audio passband.
+- Enable **Push spots to TCI panadapter** in POTACAT settings. With a TCI rig active, this uses that rig’s configured host and port. Check that a visible park spot appears on the radio’s display and disappears after it is filtered out or expires.
+
 ## Standard rig checks
 
 - Keep separate rig entries for Zeus and Thetis so each recalls its host, port, and AGC choices. The initial ports are 40001 for Zeus and 50001 for Thetis. Use the port shown in the radio application's TCI settings if it differs.

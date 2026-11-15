@@ -3277,7 +3277,7 @@
       </div>
       <span class="help-text" style="display:block;margin-bottom:6px;">FlexRadio panadapter spots are configured per-rig under Settings &rarr; Radio &rarr; your Flex rig.</span>
       <label class="checkbox-label">
-        <input type="checkbox" id="set-tci-spots"> Push spots to Thetis/TCI panadapter
+        <input type="checkbox" id="set-tci-spots"> Push spots to TCI panadapter
       </label>
       <div id="tci-config" class="radio-sub hidden">
         <label>Host:
@@ -3286,7 +3286,7 @@
         <label style="margin-left:8px;">Port:
           <input type="number" id="set-tci-port" placeholder="50001" min="1" max="65535" style="width:80px;">
         </label>
-        <span class="help-text">Connect to Thetis/ExpertSDR3 TCI server (WebSocket). Spots shown on the panadapter match your current table/map filters.</span>
+        <span class="help-text">Uses the active TCI rig’s connection settings. For another rig type, enter the spot server’s host and port here. Spots follow your table and map filters.</span>
         <label style="margin-top:8px;">Max spot age (minutes):
           <input type="number" id="set-tci-max-age" min="0" max="120" value="15" style="width:60px;">
         </label>

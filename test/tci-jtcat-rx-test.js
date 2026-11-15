@@ -665,3 +665,53 @@ test('Thetis RF gain uses only the enabled RX1 step attenuator and shares drive 
     await new Promise(resolve => server.close(resolve));
   }
 });
+
+for (const serverName of ['zeus', 'thetis']) {
+  test(`${serverName}: receives filter and squelch readback and streams IQ only on request`, { timeout: 3000 }, async () => {
+    const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+    await once(server, 'listening');
+    const events = new (require('node:events').EventEmitter)();
+    const commands = [];
+    const client = connectTciJtcatRx(server.address().port, {
+      server: serverName,
+      onFilter: width => events.emit('filter', width),
+      onSquelch: level => events.emit('sql', level),
+      onIq: (...args) => events.emit('iq', ...args),
+      onAudio() {}, onDial() {}, onMode() {}, onSmeter() {}, onTxMeter() {}, log() {},
+    });
+    try {
+      const [peer] = await once(server, 'connection');
+      peer.on('message', command => { commands.push(command.toString()); events.emit('command'); });
+      const filter = once(events, 'filter');
+      const squelch = once(events, 'sql');
+      const wireLevel = serverName === 'thetis' ? -70 : 50;
+      peer.send(`trx:0,false;ready;dds:0,14050000;rx_filter_band:0,100,2700;sql_enable:0,true;sql_level:0,${wireLevel};`);
+      assert.deepEqual(await filter, [2600]);
+      assert.deepEqual(await squelch, [50]);
+      assert.equal(client.setFilterBand(-2800, -100), true);
+      assert.equal(client.setSquelch(50), true);
+      assert.equal(client.setIqEnabled(true), true);
+      const frame = Buffer.alloc(72);
+      frame.writeUInt32LE(48000, 4);
+      frame.writeUInt32LE(3, 8);
+      frame.writeUInt32LE(2, 20);
+      frame.writeUInt32LE(2, 28);
+      frame.writeFloatLE(0.25, 64);
+      frame.writeFloatLE(-0.5, 68);
+      const iq = once(events, 'iq');
+      peer.send(frame);
+      const [payload, rate, center] = await iq;
+      assert.deepEqual(payload, frame.subarray(64));
+      assert.equal(rate, 48000);
+      assert.equal(center, 14050000);
+      assert.equal(client.setIqEnabled(false), true);
+      while (!commands.includes('iq_stop:0;')) await once(events, 'command');
+      assert.ok(commands.includes('dds:0;iq_start:0;'));
+      assert.ok(commands.includes('rx_filter_band:0,-2800,-100;rx_filter_band:0;'));
+      assert.ok(commands.includes(`sql_level:0,${wireLevel};sql_enable:0,true;sql_enable:0;sql_level:0;`));
+    } finally {
+      client.close();
+      await new Promise(resolve => server.close(resolve));
+    }
+  });
+}

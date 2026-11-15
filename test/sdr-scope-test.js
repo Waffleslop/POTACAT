@@ -296,6 +296,29 @@ test('client: the server dropping the connection is recovered', async () => {
 // ─── main.js wiring (source guards) ──────────────────────────────────────────
 
 const MAIN = readSrc(path.join(__dirname, '..', 'main.js'));
+test('TCI Float32 IQ places signed-frequency tones on the correct side of center', () => {
+  const sampleRate = 48000;
+  const toneHz = -6500;
+  const builder = new S.SpectrumBuilder({ sampleRate, float32: true, avg: 1, dcNotchBins: 1 });
+  const payload = Buffer.alloc(2048 * 8);
+  let seed = 1;
+  function noise() {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return (seed / 0x100000000 - 0.5) * 0.1;
+  }
+  for (let i = 0; i < 2048; i++) {
+    const phase = 2 * Math.PI * toneHz * i / sampleRate;
+    payload.writeFloatLE(0.04 * Math.cos(phase) + noise(), 8 * i);
+    payload.writeFloatLE(0.04 * Math.sin(phase) + noise(), 8 * i + 4);
+  }
+  let bins;
+  builder.once('frame', frame => { bins = frame.wf1; });
+  builder.feed(payload.subarray(0, 1025));
+  builder.feed(payload.subarray(1025));
+  const measured = (peakBin(bins) / (bins.length - 1) - 0.5) * builder.spanHz;
+  assert.ok(Math.abs(measured - toneHz) < 250, `peak at ${measured} Hz`);
+});
+
 function bodyOf(name) {
   const start = MAIN.indexOf('function ' + name + '(');
   assert.ok(start >= 0, name + ' not found');

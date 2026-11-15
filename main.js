@@ -3588,6 +3588,10 @@ function getRigCapabilities(rigType) {
     caps.nr = true;
     caps.agc = true;
     caps.agcModes = ['off', 'fast', 'med', 'slow'];
+    caps.filter = !!tciTestRadio?.filterBand;
+    caps.filterType = caps.filter ? 'arbitrary' : 'none';
+    caps.squelch = !!tciTestRadio?.squelchAvailable;
+    caps.nativeScope = 'tci';
   }
   const activeRig = (settings.rigs || []).find(r => r && r.id === settings.activeRigId);
   if (activeRig && activeRig.externalAtu === 'rf-sense') caps.atu = true;
@@ -8780,6 +8784,7 @@ async function connectCat() {
   // The test instance talks to Zeus only over its own TCI session.
   if (tciTestData) return;
   _radioTxWatch.cat(false); // a dropped radio's last TX status is not a transmission (#200)
+  connectTci();
   // A new connection (or another rig) starts with nothing seen this session;
   // what this rig reported before still comes from rig.metersSeen.
   _metersSeenSession.clear();
@@ -20497,6 +20502,7 @@ function connectTciTestRadio() {
       if (!connected) {
         tciSpecRing.clear();
         tciTxSpecRing.clear();
+        if (tciScopeRadio === radio) stopTciScope();
         tciTestRadio = null;
         tciDriveKnown = false;
         tciManualForward = null;
@@ -20508,9 +20514,23 @@ function connectTciTestRadio() {
         }
       } else {
         recallAgc(agcGroup(mode), false);
+        if (yaesuScopeWanted() && scopeSourceKind() === 'tci') startTciScope();
       }
       sendCatStatus({ connected, target: endpoint, freq: dial, mode });
       if (usesTciEchoAudio()) _broadcastEffectiveTxState();
+    },
+    onFilter(width) {
+      if (tciTestRadio !== radio) return;
+      _currentFilterWidth = width;
+      broadcastRigState();
+    },
+    onSquelch(level) {
+      if (tciTestRadio !== radio) return;
+      _currentSquelch = level;
+      broadcastRigState();
+    },
+    onIq(payload, rate, center) {
+      if (tciScopeRadio === radio) feedTciScope(payload, rate, center);
     },
     onTxState(transmitting) {
       if (tciTestRadio !== radio) return;
@@ -20652,6 +20672,7 @@ function closeTciTestRadio() {
   clearTimeout(tciReconnectTimer);
   tciReconnectTimer = null;
   const radio = tciTestRadio;
+  if (radio && tciScopeRadio === radio) stopTciScope();
   tciTestRadio = null;
   tciDriveKnown = false;
   tciManualForward = null;
@@ -24662,17 +24683,26 @@ function pushSpotsToSmartSdr(spots) {
 }
 
 // --- TCI (Thetis/ExpertSDR3) panadapter spots ---
+let tciSpotEndpoint = null;
 function connectTci() {
+  const active = tciTestEchoCat ? configuredTciTestEndpoint() : tciRigTarget();
+  const host = active?.host || settings.tciHost || '127.0.0.1';
+  const port = active?.port || settings.tciPort || 50001;
+  const key = JSON.stringify([host, port]);
+  if (settings.tciSpots && tciClient && tciSpotEndpoint === key) return;
   disconnectTci();
   if (!settings.tciSpots) return;
+  tciSpotEndpoint = key;
   tciClient = new TciClient();
   tciClient.on('error', (err) => {
     console.error('TCI:', err.message);
   });
-  tciClient.connect(settings.tciHost || '127.0.0.1', settings.tciPort || 50001);
+  tciClient.connect(host.includes(':') && !host.startsWith('[') ? `[${host}]` : host, port);
 }
 
 function disconnectTci() {
+  tciSpotEndpoint = null;
+  lastTciPush = 0;
   if (tciPushTimer) {
     clearTimeout(tciPushTimer);
     tciPushTimer = null;
@@ -28272,6 +28302,10 @@ function connectRemote() {
   function flexSdr() { return smartSdr && smartSdr.connected; }
 
   function applyFilter(width) {
+    if (tciRigTarget()) {
+      applyRigControl({ action: 'set-filter-width', value: width }, 'echocat');
+      return;
+    }
     if (flexSdr()) {
       // LSB/DIGL below the carrier, AM/FM centred (#129).
       const { lo, hi } = sliceFilterEdges(_currentMode, width);
@@ -34826,7 +34860,7 @@ function scopeLevelScale() {
     const c = scopeCalibration();
     return Number.isFinite(c.dbmMin) ? { unit: 'dBm', min: c.dbmMin, max: c.dbmMax } : { unit: null, min: 0, max: 255 };
   }
-  if (s.source === 'sdr') return SdrScope.levelScale();
+  if (s.source === 'sdr' || s.source === 'tci') return SdrScope.levelScale();
   // An Icom's levels are on the radio's own scale (Hamlib: 0 = -80 dB, full
   // = 0 dB on a 7300; -100..0 on a 7610), relative to its REF level, so
   // they are labelled "dB (radio)" and never claimed as dBm.
@@ -34854,7 +34888,7 @@ function scopeOverlay() {
     // SDR, the synthetic signal) or the radio (FT-710 / Icom). Both keep it
     // centred on the dial today, so a drag on the trace previews and tunes on
     // release either way; FIX / CURSOR (axis not known) does not drag.
-    owner: yaesuScopeState.kind === 1 || yaesuScopeState.source === 'flex' || yaesuScopeState.source === 'sdr' ? 'potacat' : 'radio',
+    owner: yaesuScopeState.kind === 1 || yaesuScopeState.source === 'flex' || yaesuScopeState.source === 'sdr' || yaesuScopeState.source === 'tci' ? 'potacat' : 'radio',
     passband: ScopeOverlay.passbandFor({ mode: _currentMode, widthHz: _currentFilterWidth, ...flexEdges }),
     txHz: _currentSplit && _currentFreqOther > 0 ? _currentFreqOther : null,
     bandPlan: dialHz > 0 ? ScopeOverlay.bandPlanFor(dialHz, {
@@ -34888,7 +34922,7 @@ function scopeOverlaySync() {
 function scopeSourceFrameMs() {
   // An Icom sweeps at its own pace (about 4 a second on a 7300 at 115200): measured, not set.
   if (yaesuScopeState.source === 'icom') return icomScopeGapMs || 250;
-  const fps = yaesuScopeState.source === 'flex' ? 15 : yaesuScopeState.source === 'sdr' ? 12 : yaesuScopeState.source === 'sculan10' ? 25 : (settings.yaesuScopeFps || 20);
+  const fps = yaesuScopeState.source === 'flex' ? 15 : ['sdr', 'tci'].includes(yaesuScopeState.source) ? 12 : yaesuScopeState.source === 'sculan10' ? 25 : (settings.yaesuScopeFps || 20);
   return 1000 / fps;
 }
 
@@ -34945,7 +34979,7 @@ function yaesuScopeNoteFrequency(hz) {
   }
   // An Icom in Fixed mode holds its window still: its centre comes from the
   // sweep header (icomScopeOnSweep), never from the dial.
-  if (!(icomScopeOn && yaesuScopeState.anchor === 'fixed')) yaesuScopeState.centerHz = hz;
+  if (!tciScopeRadio && !(icomScopeOn && yaesuScopeState.anchor === 'fixed')) yaesuScopeState.centerHz = hz;
   if (yaesuScopeState.status === 'stopped') return;
   sdrScopeFollowDial(hz);
   // The pop-out already receives cat-frequency; ECHOCAT wants the axis re-sent, throttled.
@@ -35016,6 +35050,7 @@ function startYaesuScope() {
   const synth = yaesuScopeSynth;
   const kind = synth ? null : scopeSourceKind();
   if (kind === 'sdr') { startSdrScope(); return; }
+  if (kind === 'tci') { startTciScope(); return; }
   if (kind === 'flex') { startFlexScope(); return; }
   if (kind === 'icom') { startIcomScope(); return; }
   if (kind === 'sculan10') { startSculanScope(); return; }
@@ -35194,6 +35229,7 @@ function stopYaesuScope(why) {
   if (yaesuScopeRestartTimer) { clearTimeout(yaesuScopeRestartTimer); yaesuScopeRestartTimer = null; }
   yaesuScopeStartAfterExit = false;
   if (sdrScopeClient) { stopSdrScope(why); return; }
+  if (tciScopeRadio) { stopTciScope(); return; }
   if (flexScopeOn) { stopFlexScope(why); return; }
   if (sculanScopeOn) { stopSculanScope(why); return; }
   if (k4ScopeOn) { stopK4Scope(why); return; }
@@ -35404,6 +35440,8 @@ function scopeSourceKind() {
   const sculan = sculanScopeAvailable();
   const k4 = k4ScopeAvailable();
   const kenwood = !!kenwoodScopeModel();
+  const tci = !!tciRigTarget();
+  if (tci && !(sdr.enabled && sdr.preferSdr)) return 'tci';
   if (sdr.enabled && (sdr.preferSdr || (!native && !icom && !flex && !sculan && !k4 && !kenwood))) return 'sdr';
   if (sculan) return 'sculan10';
   if (k4) return 'k4';
@@ -36571,6 +36609,60 @@ function icomScopeEnableOnRadio() {
   icomScopePhase = 'idle';
   yaesuScopeSetStatus('starting', null);
   icomScopeTick();
+}
+
+let tciScopeRadio = null;
+let tciScopeBuilder = null;
+let tciScopeWatchdog = null;
+let tciScopeLastFrame = 0;
+
+function startTciScope() {
+  if (tciScopeRadio) return;
+  if (!tciTestRadio?.connected) {
+    yaesuScopeSetStatus('starting', null);
+    return;
+  }
+  tciScopeRadio = tciTestRadio;
+  tciScopeBuilder = null;
+  tciScopeLastFrame = Date.now();
+  Object.assign(yaesuScopeState, {
+    source: 'tci', kind: 0, spanCode: null, spanHz: 0, anchor: 'fixed',
+    centerHz: 0, centerOffsetHz: 0, modeCode: null, speed: null, scuLan: null,
+    frames: 0, misaligned: 0, helperPath: '', catReads: null,
+  });
+  tciScopeRadio.setIqEnabled(true);
+  yaesuScopeSetStatus('starting', null);
+  tciScopeWatchdog = setInterval(() => {
+    if (!tciScopeRadio?.transmitting && Date.now() - tciScopeLastFrame > 3000
+        && yaesuScopeState.status !== 'error') {
+      yaesuScopeSetStatus('error', { key: 'tci-iq', severity: 'notice',
+        headline: 'Waiting for TCI IQ',
+        detail: 'Check that the TCI radio is running and its server supports the IQ stream.' });
+    }
+  }, 1000);
+  tciScopeWatchdog.unref();
+}
+
+function feedTciScope(payload, rate, centerHz) {
+  if (!yaesuScopeWanted()) { stopTciScope(); return; }
+  tciScopeLastFrame = Date.now();
+  if (!tciScopeBuilder || tciScopeBuilder.sampleRate !== rate || yaesuScopeState.centerHz !== centerHz) {
+    tciScopeBuilder = new SdrScope.SpectrumBuilder({ sampleRate: rate, fps: 12, float32: true });
+    tciScopeBuilder.on('frame', yaesuScopeOnFrame);
+    yaesuScopeState.centerHz = centerHz;
+    yaesuScopeState.spanHz = tciScopeBuilder.spanHz;
+    yaesuScopeBroadcastState();
+  }
+  tciScopeBuilder.feed(payload);
+}
+
+function stopTciScope() {
+  clearInterval(tciScopeWatchdog);
+  tciScopeWatchdog = null;
+  tciScopeRadio?.setIqEnabled(false);
+  tciScopeRadio = null;
+  tciScopeBuilder = null;
+  yaesuScopeSetStatus('stopped', null);
 }
 
 function startSdrScope() {
@@ -44496,6 +44588,10 @@ function cloudShackNotice(text, kind) {
       _currentFilterWidth = hz;
       return;
     }
+    if (tciRigTarget()) {
+      applyRigControl({ action: 'set-filter-width', value: hz, mode }, 'vfo');
+      return;
+    }
     // mode: a VFO profile's, sent with its width (#113 item 4); else the radio's.
     if (cat && cat.connected) cat.setFilterWidth(hz, mode || undefined);
     _currentFilterWidth = hz;
@@ -48519,6 +48615,11 @@ function cloudShackNotice(text, kind) {
       }
       case 'set-squelch': {
         if (!getRigCapabilities(rigType).squelch) break;
+        if (tciRigTarget()) {
+          const value = Number(data.value);
+          if (!tciTestRadio?.setSquelch(value)) broadcastRigState();
+          break;
+        }
         if (flexNeedsApi) { _flexWarnOnce('Squelch requires SmartSDR API — not connected'); break; }
         const value = Math.max(0, Math.min(100, Number(data.value) || 0));
         if (flexSdr()) {
@@ -48566,6 +48667,19 @@ function cloudShackNotice(text, kind) {
         if (flexNeedsApi) { sendCatLog('Filter requires SmartSDR API — not connected'); break; }
         const width = Number(data.value) || 0;
         if (width <= 0) break;
+        if (tciRigTarget()) {
+          const band = tciTestRadio?.filterBand;
+          if (!band || !Number.isFinite(width) || width > 50000) break;
+          const currentMode = String(data.mode || _currentMode || '').toUpperCase();
+          const rounded = Math.round(width);
+          let { lo, hi } = sliceFilterEdges(currentMode, rounded);
+          if (['CW', 'CWU', 'CWL', 'CWR'].includes(currentMode)) {
+            lo = Math.round((band.lo + band.hi - rounded) / 2);
+            hi = lo + rounded;
+          }
+          if (!tciTestRadio.setFilterBand(lo, hi)) broadcastRigState();
+          break;
+        }
         if (flexSdr()) {
           // LSB/DIGL below the carrier, AM/FM centred (#129).
           const { lo, hi } = sliceFilterEdges(_currentMode, width);
@@ -51478,6 +51592,7 @@ function cloudShackNotice(text, kind) {
     }
     const tciTargetChanged = JSON.stringify(tciRigTarget()) !== JSON.stringify(previousTciTarget);
     if (tciTargetChanged) {
+      connectTci();
       closeTciTestRadio();
       if (ft8Engine) startJtcat(ft8Engine._mode);
       if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
