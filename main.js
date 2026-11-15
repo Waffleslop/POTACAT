@@ -15748,6 +15748,7 @@ function shouldForwardClientDriven() {
 let passQsoOutbox = null;
 function passGuestLogContact(qsoData, ctx, canReceive, origin) {
   if (!qsoData.stationCallsign) qsoData.stationCallsign = onAirCall();
+  qsoData.guestPass = true; // the guest's own POTACAT forwards it to their loggers (#553)
   if (passLease) {
     if (!qsoData.operator) qsoData.operator = onAirCall();
     qsoData.stationLicensee = String(settings.myCallsign || '').toUpperCase();
