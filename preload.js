@@ -149,6 +149,7 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener('remote-pass-state', handler);
   },
   remotePassClaim: () => ipcRenderer.invoke('remote-pass-claim'),
+  remotePassTakeBack: () => ipcRenderer.invoke('remote-pass-take-back'),
   onRemotePassHold: (cb) => {
     const handler = (_e, info) => cb(info || {});
     ipcRenderer.on('remote-pass-hold', handler);

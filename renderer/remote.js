@@ -6574,7 +6574,8 @@
   // The station's pass-state (#541 step 2): on the air with nothing to say
   // shows the normal Guest Pass line; anything else is a wrapping notice in
   // the shared words, with "Use it here instead" when another of this guest's
-  // devices has the radio (pass-claim, no redial).
+  // devices has the radio (pass-claim, no redial), and "Take the radio" when
+  // the owner has not used it for 5 minutes (pass-take-back).
   function renderPassState(ps) {
     var el = document.getElementById('pass-banner');
     if (!el || !window.PassWording || !PassWording.describeState) return;
@@ -6590,14 +6591,20 @@
     var span = document.createElement('span');
     span.textContent = w.text;
     el.appendChild(span);
-    if (w.action === 'Use it here instead') {
+    // "Use it here instead" claims from this guest's other device; "Take the
+    // radio" (waiting/owner-idle, #200 step 4) takes it back after the
+    // owner's 5 idle minutes. The station answers both with pass-state.
+    var ask = null;
+    if (w.action === 'Use it here instead') ask = { type: 'pass-claim' };
+    else if (w.action === 'Take the radio') ask = { type: 'pass-take-back' };
+    if (ask) {
       var btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'pass-state-btn';
       btn.textContent = w.action;
       btn.addEventListener('click', function() {
         btn.disabled = true;
-        try { ws.send(JSON.stringify({ type: 'pass-claim' })); } catch (e) {}
+        try { ws.send(JSON.stringify(ask)); } catch (e) {}
       });
       el.appendChild(btn);
     }

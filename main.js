@@ -1973,6 +1973,9 @@ let _winlinkTxFailsafeTimer = null;
 let _winlinkCapTimer = null;
 let _winlinkWatchdog = null;
 let _winlinkLastActivity = 0;
+// A session started while a Guest Pass guest had the radio is the guest's:
+// its traffic is never the owner's activity (#200 step 4).
+let _winlinkSessionByGuest = false;
 let _winlinkSessionError = '';
 let _winlinkSessionErrorKind = '';   // 'login-failed' | 'no-answer' | 'transport-down' | 'rig-refused' | 'stopped' | '' — session.errorKind for clients
 // How this session ended, as facts for lib/winlink-outcome.js (#425). The
@@ -2178,6 +2181,24 @@ function onRemoteServer(fn) {
   _remoteServerHooks.push(fn);
   if (remoteServer) fn(remoteServer);
 }
+// Guest Pass hand-back rule (#200 step 4): the owner used the radio at the
+// station. kind is one of lib/pass-owner-activity.js KINDS; remote-server
+// ignores it unless the owner holds a guest's radio. The idle-receive
+// session drives the radio itself and is not the owner.
+function noteOwnerActivity(kind) {
+  if (autoIdleJtcatActive || autoIdleJs8Active) return;
+  if (remoteServer && remoteServer.noteOwnerActivity) { try { remoteServer.noteOwnerActivity(kind); } catch { /* never in the way of the radio */ } }
+}
+// Once per idle offer (the guest was just told the radio is free). The seam
+// for the later push to a closed phone: Cloud's notify {kind: radio_free}
+// goes here. session: {code, call, sessionId, offeredAt}. Nothing yet.
+function onOwnerIdleOffered(session) {
+  void session;
+}
+// The radio's own word that it is transmitting (CAT TX status, forward
+// power), debounced to 1 s: the owner on the hand mic at the radio is using
+// it (#200 step 4). Counts only while the owner holds a lent radio.
+const _radioTxWatch = require('./lib/pass-owner-activity').createRadioTxWatch({ onActive: (kind) => noteOwnerActivity(kind) });
 // Active ALSA capture sessions (Linux raw hw:/plughw: devices). Assigned in the
 // ipcMain handler block below; declared here at module scope so gracefulCleanup()
 // can stop every session on quit. If left running, each session's setInterval
@@ -4885,6 +4906,7 @@ function remoteMeterPush(type, value) {
 
 function sendCatFwdPower(watts) {
   noteMeterSeen('power');
+  if (!isRemoteMode()) _radioTxWatch.fwd(Number(watts) || 0);
   const w = Math.round((Number(watts) || 0) * 10) / 10;
   if (_stationSetupTxTest) {
     _stationSetupTxTest.fwdEvents++;
@@ -8657,6 +8679,7 @@ function serialHandshakeTrialSave(path) {
 }
 
 async function connectCat() {
+  _radioTxWatch.cat(false); // a dropped radio's last TX status is not a transmission (#200)
   // A new connection (or another rig) starts with nothing seen this session;
   // what this rig reported before still comes from rig.metersSeen.
   _metersSeenSession.clear();
@@ -8879,6 +8902,7 @@ async function connectCat() {
     // the next PC; poll overwrote it and no wattmeter ever drew it
     // (LZ3AW's "TX power meter not fixed", 2026-09-14).
     cat.on('powerMeter', sendCatFwdPower);
+    cat.on('ptt', (on) => _radioTxWatch.cat(on)); // the radio's TX status: owner use during a hold (#200)
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
@@ -8963,6 +8987,7 @@ async function connectCat() {
     // showed, and no wattmeter drew during a frame (#268, IC-7100).
     cat.on('power', sendCatPower);
     cat.on('powerMeter', sendCatFwdPower);
+    cat.on('ptt', (on) => _radioTxWatch.cat(on)); // the radio's TX status: owner use during a hold (#200)
     sendCatLog(`Connecting to rigctld on 127.0.0.1:${rigctldPort}`);
     transport.connect({ host: '127.0.0.1', port: rigctldPort });
 
@@ -9003,6 +9028,7 @@ async function connectCat() {
     // showed, and no wattmeter drew during a frame (#268, IC-7100).
     cat.on('power', sendCatPower);
     cat.on('powerMeter', sendCatFwdPower);
+    cat.on('ptt', (on) => _radioTxWatch.cat(on)); // the radio's TX status: owner use during a hold (#200)
     const { host, port } = resolveCatHostPort(target, 4532, 'remote rigctld');
     sendCatLog(`Connecting to remote rigctld on ${host}:${port}`);
     transport.connect({ host, port });
@@ -9028,6 +9054,7 @@ async function connectCat() {
     cat.on('mode', catModeHandler);
     cat.on('power', sendCatPower);
     cat.on('powerMeter', sendCatFwdPower);
+    cat.on('ptt', (on) => _radioTxWatch.cat(on)); // the radio's TX status: owner use during a hold (#200)
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
     const { host, port } = resolveCatHostPort(target, 12345, 'flrig');
@@ -9050,6 +9077,7 @@ async function connectCat() {
     });
     cat.on('frequency', catFrequencyHandler);
     cat.on('mode', catModeHandler);
+    cat.on('ptt', (on) => _radioTxWatch.cat(on)); // the radio's TX status: owner use during a hold (#200)
     const { host, port } = resolveCatHostPort(target, CommanderSequences.DEFAULT_PORT, 'DXLab Commander');
     sendCatLog(`Connecting to DXLab Commander on ${host}:${port}`);
     transport.connect({ host, port });
@@ -9076,6 +9104,7 @@ async function connectCat() {
     // the next PC; poll overwrote it and no wattmeter ever drew it
     // (LZ3AW's "TX power meter not fixed", 2026-09-14).
     cat.on('powerMeter', sendCatFwdPower);
+    cat.on('ptt', (on) => _radioTxWatch.cat(on)); // the radio's TX status: owner use during a hold (#200)
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
@@ -9120,6 +9149,7 @@ async function connectCat() {
     // the next PC; poll overwrote it and no wattmeter ever drew it
     // (LZ3AW's "TX power meter not fixed", 2026-09-14).
     cat.on('powerMeter', sendCatFwdPower);
+    cat.on('ptt', (on) => _radioTxWatch.cat(on)); // the radio's TX status: owner use during a hold (#200)
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
@@ -9147,6 +9177,7 @@ async function connectCat() {
     cat.on('mode', catModeHandler);
     cat.on('power', sendCatPower);
     cat.on('powerMeter', sendCatFwdPower);
+    cat.on('ptt', (on) => _radioTxWatch.cat(on)); // the radio's TX status: owner use during a hold (#200)
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
@@ -9227,6 +9258,7 @@ async function connectCat() {
     // the next PC; poll overwrote it and no wattmeter ever drew it
     // (LZ3AW's "TX power meter not fixed", 2026-09-14).
     cat.on('powerMeter', sendCatFwdPower);
+    cat.on('ptt', (on) => _radioTxWatch.cat(on)); // the radio's TX status: owner use during a hold (#200)
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
 	    cat.on('swr', sendCatSwr);
@@ -9339,6 +9371,7 @@ async function connectCat() {
     // the next PC; poll overwrote it and no wattmeter ever drew it
     // (LZ3AW's "TX power meter not fixed", 2026-09-14).
     cat.on('powerMeter', sendCatFwdPower);
+    cat.on('ptt', (on) => _radioTxWatch.cat(on)); // the radio's TX status: owner use during a hold (#200)
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
@@ -12858,7 +12891,10 @@ function winlinkSessionActive() {
   return ['starting', 'connecting', 'connected', 'disconnecting'].includes(winlinkState.session.state);
 }
 
-function winlinkSessionTouch() { _winlinkLastActivity = Date.now(); }
+function winlinkSessionTouch() {
+  _winlinkLastActivity = Date.now();
+  if (!_winlinkSessionByGuest) noteOwnerActivity('winlink');
+}
 
 /** Pat is holding the call until the frequency clears (its busy-channel prompt is pending). */
 function winlinkWaitingForClearChannel() {
@@ -12957,6 +12993,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
   _winlinkSessionErrorKind = '';
   _winlinkPatConnected = false;
   if (radio) _winlinkPreviewReturnTo = null; // the session's returnTo carries it now
+  _winlinkSessionByGuest = !!(passEnforcement && ['active', 'expiring'].includes(passEnforcement.getState()));
   winlinkSessionTouch();
   winlinkSessionPush();
   winlinkLog(`session start: ${mode}${radio ? ` → ${String(gateway).toUpperCase()} on ${Number(dialKhz).toFixed(1)} kHz dial` : ''} (${origin || 'operator'})`);
@@ -29997,6 +30034,7 @@ function handleRemotePtt(state, opts = {}) {
   // opens this desktop's mic into the audio link. There is no local radio to
   // key, and the shack runs its own SWR guard and PTT watchdog.
   if (isRemoteMode()) { keyRemoteShack(state); return; }
+  if (state) noteOwnerActivity('ptt'); // every key-down is owner use while the owner holds a lent radio (#200)
   // SWR-guard latch backstop — covers every PTT source (voice macros, mobile
   // device PTT, naked PTT) in one place. Releases (state=false) always pass.
   if (state && _swrTripped) {
@@ -41722,6 +41760,11 @@ function cloudShackNotice(text, kind) {
       rs.on('pass-owner-controls', (c) => {
         if (win && !win.isDestroyed()) win.webContents.send('pass-owner-controls', c);
       });
+      // The guest was told the radio is free (#200 step 4): once per offer.
+      rs.on('pass-owner-idle-offered', (session) => {
+        sendCatLog(`[pass] The owner has not used the radio for 5 minutes; ${session.call || 'the guest'} may take it back`);
+        onOwnerIdleOffered(session);
+      });
       rs.on('pass-guest-left', ({ code }) => {
         clearPassDisconnectTimer();
         if (passEnforcement.endPassIfCode(code, 'left')) sendCatLog(`[pass] The guest left the rig; it is free for the next pass`);
@@ -41785,7 +41828,9 @@ function cloudShackNotice(text, kind) {
   });
   ipcMain.handle('pass-give-back', async () => {
     if (!remoteServer || !remoteServer.resumePass) return { error: 'No guest on the rig' };
-    return { ok: remoteServer.resumePass('desktop') };
+    // Whoever took it: an owner device's hold no longer ends on its own
+    // (#200 step 4), so the desk can give it back too.
+    return { ok: remoteServer.resumePass() };
   });
 
   // Share My Rig's owner controls (#200): Take the radio (Now / In 5 minutes,
@@ -43511,6 +43556,7 @@ function cloudShackNotice(text, kind) {
   // existing handlers apply them. Without this the VFO popout's buttons were
   // silent no-ops in remote mode (NA7C 2026-07-17); only 'tune' was routed.
   ipcMain.on('vfo-set-mode', (_e, mode) => {
+    noteOwnerActivity('mode');
     if (isRemoteMode()) { if (isRemoteLinked()) remoteClient.sendSetMode(mode); else refuseRemoteNotLinked(_e.sender); return; }
     if (!_currentFreqHz) return;
     _lastTuneFreq = 0; // reset rate limiter
@@ -47216,6 +47262,7 @@ function cloudShackNotice(text, kind) {
     // The idle-RX session's own QSY (including WSPR band hops) must not read
     // as the operator returning — see markUserActive().
     markUserActive({ selfDriven: isIdleRxSelfAction(_e.sender) });
+    if (!isIdleRxSelfAction(_e.sender)) noteOwnerActivity('tune');
     if (_vfoLocked) {
       _e.sender.send('tune-blocked', 'VFO Locked — Unlock VFO to change frequency');
       return;
@@ -48801,6 +48848,12 @@ function cloudShackNotice(text, kind) {
   ipcMain.handle('remote-pass-claim', () => {
     if (!remoteClient || !remoteClient.passClaim) return { error: 'Not connected to a station' };
     return { ok: remoteClient.passClaim() };
+  });
+  // Guest Pass "Take the radio" after the owner's 5 idle minutes (pass-state
+  // waiting / owner-idle, #200 step 4). The station answers with pass-state.
+  ipcMain.handle('remote-pass-take-back', () => {
+    if (!remoteClient || !remoteClient.passTakeBack) return { error: 'Not connected to a station' };
+    return { ok: remoteClient.passTakeBack() };
   });
 
   ipcMain.handle('connection-targets-get-status', () => {
@@ -53351,9 +53404,11 @@ function cloudShackNotice(text, kind) {
   // --- CW Keyer IPC ---
   // Paddle events go through IambicKeyer, which generates key events -> xmit 1/0
   ipcMain.on('cw-paddle-dit', (_e, pressed) => {
+    if (pressed) noteOwnerActivity('cw');
     if (keyer) keyer.paddleDit(pressed);
   });
   ipcMain.on('cw-paddle-dah', (_e, pressed) => {
+    if (pressed) noteOwnerActivity('cw');
     if (keyer) keyer.paddleDah(pressed);
   });
   ipcMain.on('cw-set-wpm', (e, wpm) => {
@@ -53467,6 +53522,7 @@ function cloudShackNotice(text, kind) {
   // Desktop CW text sending (macros)
   ipcMain.on('send-cw-text', (_e, text, opts) => {
     if (isRemoteMode()) { sendRemoteCwText(text, opts); return; }
+    noteOwnerActivity('cw');
     sendCwTextToRadio(text, opts);
   });
   // Desktop CW cancel / abort — fires from the ESC button in the main

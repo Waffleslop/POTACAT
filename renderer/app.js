@@ -8264,6 +8264,11 @@ async function _remoteRadiosRefreshList() {
         return '<button type="button" class="primary" data-act="rr-pass-claim" data-id="' + _esc(t.id) + '">Use it here instead</button>'
           + '<button type="button" data-act="rr-disconnect" data-id="' + _esc(t.id) + '">Disconnect</button>';
       }
+      // The owner has not used the radio for 5 minutes: take it back (#200 step 4).
+      if (isActive && status.state === 'connected' && passStateShown && passStateWords.action === 'Take the radio') {
+        return '<button type="button" class="primary" data-act="rr-pass-take-back" data-id="' + _esc(t.id) + '">Take the radio</button>'
+          + '<button type="button" data-act="rr-disconnect" data-id="' + _esc(t.id) + '">Disconnect</button>';
+      }
       if (isActive && status.state === 'connected') {
         return '<button type="button" class="primary" data-act="rr-disconnect" data-id="' + _esc(t.id) + '">Disconnect</button>';
       }
@@ -8434,6 +8439,7 @@ async function _remoteRadiosRemove(id) {
     const id = btn.dataset.id;
     if (act === 'rr-connect') return _remoteRadiosConnect(id);
     if (act === 'rr-pass-claim') return _remotePassClaim();
+    if (act === 'rr-pass-take-back') return _remotePassTakeBack();
     if (act === 'rr-disconnect') return _remoteRadiosDisconnect();
     if (act === 'rr-rename') return _remoteRadiosRename(id, btn.dataset.name || '');
     if (act === 'rr-remove') return _remoteRadiosRemove(id);
@@ -8576,16 +8582,26 @@ async function _remotePassClaim() {
     if (r && r.error && typeof showLogToast === 'function') showLogToast(r.error, { warn: true, duration: 6000 });
   } catch (err) { if (typeof showLogToast === 'function') showLogToast('Could not take the radio: ' + (err.message || err), { warn: true, duration: 6000 }); }
 }
+// "Take the radio": the owner has not used it for 5 minutes (waiting /
+// owner-idle, #200 step 4). The station answers with pass-state.
+async function _remotePassTakeBack() {
+  try {
+    const r = window.api.remotePassTakeBack ? await window.api.remotePassTakeBack() : null;
+    if (r && r.error && typeof showLogToast === 'function') showLogToast(r.error, { warn: true, duration: 6000 });
+  } catch (err) { if (typeof showLogToast === 'function') showLogToast('Could not take the radio: ' + (err.message || err), { warn: true, duration: 6000 }); }
+}
 // The Guest Pass state the station last sent (#541 step 2), for the chip.
 let _remotePassState = null;
 // A pass-state in words: the banner, with its one button where this PC can
-// act on it ("Use it here instead" claims; "Try now" asks the station again).
+// act on it ("Use it here instead" claims; "Take the radio" takes it back
+// after the owner's idle minutes; "Try now" asks the station again).
 function _passStateBanner(ps) {
   if (!ps || !window.PassWording || !PassWording.describeState) return;
   if (ps.state === 'on-air' && ps.reason === 'none') { _passBannerHide(); return; }
   const w = PassWording.describeState(ps, { owner: ps.owner });
   if (!w.title) return;
   if (w.action === 'Use it here instead') { _passBannerShow(w, null, _remotePassClaim); return; }
+  if (w.action === 'Take the radio') { _passBannerShow(w, null, _remotePassTakeBack); return; }
   if (w.action === 'Try now') { _passBannerShow(w, ps.targetId || null); return; }
   _passBannerShow({ ...w, action: '' }, null);
 }
