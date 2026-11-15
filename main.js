@@ -424,7 +424,7 @@ const RigFullPower = require('./lib/rig-full-power');
 const { decideBandPowerReapply } = require('./lib/band-power-reapply');
 const AtuWizard = require('./lib/atu-wizard');
 const AppTheme = require('./lib/app-theme');
-const { stripSecrets, restoreSecrets } = require('./lib/settings-secrets');
+const { stripSecrets, restoreSecrets, stripSdrUserinfo, sdrUserinfo } = require('./lib/settings-secrets');
 const { buildContestHistory } = require('./lib/contest-history');
 const contestsDb = require('./lib/contests-db');
 const { ContestsFeed } = require('./lib/contests-feed');
@@ -29505,10 +29505,14 @@ function connectRemote() {
       && settings.kiwiSdrList[0].host) || '';
     const raw = msg.host || settings.kiwiSdrHost1 || settings.kiwiSdrHost || listFirst;
     const clean = raw.replace(/^https?:\/\//, '').replace(/\/+$/, '');
-    sendCatLog(`[WebSDR] ECHOCAT connect: "${clean}"`);
-    const parts = clean.split(':');
+    // An inline station password ("pw@host" or "user:pw@host") is split off
+    // before the host:port split, and never written to the log.
+    const inlinePw = sdrUserinfo(clean);
+    const hostPort = stripSdrUserinfo(clean);
+    sendCatLog(`[WebSDR] ECHOCAT connect: "${hostPort}"`);
+    const parts = hostPort.split(':');
     if (parts[0]) {
-      require('electron').ipcMain.emit('kiwi-connect', { sender: { send: () => {} } }, { host: parts[0], port: parseInt(parts[1], 10) || 8073, password: msg.password });
+      require('electron').ipcMain.emit('kiwi-connect', { sender: { send: () => {} } }, { host: parts[0], port: parseInt(parts[1], 10) || 8073, password: msg.password || inlinePw || undefined });
     }
   });
   remoteServer.on('kiwi-disconnect', () => {
@@ -46956,9 +46960,9 @@ function cloudShackNotice(text, kind) {
     // preview-limited receivers (work item kiwi-preview-bump-too-busy);
     // parsed HERE because every surface funnels through this one intake —
     // desktop field, web client, and phone — so no UI needed a new field.
-    // NOTE: a station saved with the password inline lives in the plain
-    // station string; the discrete per-station field with settings-secrets
-    // registration is the follow-up before exports can carry SDR lists.
+    // The password lives in the plain station string; lib/settings-secrets.js
+    // declares it, so Settings > Export leaves it out and a Guest Pass never
+    // receives it.
     let hostIn = rawHost || '';
     let stationPassword = password;
     const atIdx = hostIn.lastIndexOf('@');
