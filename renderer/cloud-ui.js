@@ -1416,7 +1416,7 @@
       row.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:3px;';
       const label = document.createElement('span');
       label.style.flex = '1';
-      label.textContent = sh.name + (sh.self ? ' (this computer)' : '') + (sh.cloudHost ? ' · ' + sh.cloudHost : '') + (sh.online ? '' : ' · offline');
+      label.textContent = sh.name + (sh.self ? ' (this computer)' : '') + (sh.cloudHost ? ' · ' + sh.cloudHost : '') + (sh.status ? ' · ' + sh.status : (sh.online ? '' : ' · offline'));
       const rm = document.createElement('button');
       rm.type = 'button';
       rm.className = 'btn';
@@ -1646,7 +1646,7 @@
           // grant, a failed card); the subscribe buttons sit right above.
           const b = res.billing || _lastBilling;
           if (ctError) {
-            ctError.textContent = (b && b.message) || 'POTACAT Cloud subscription required. Subscribe in the section above.';
+            ctError.textContent = (b && b.message) || res.message || 'POTACAT Cloud subscription required. Subscribe in the section above.';
             ctError.classList.remove('hidden');
           }
           if (b && b.action && b.action.label && b.state !== 'none' && b.state !== 'trial_expired') {

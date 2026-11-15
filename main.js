@@ -9503,7 +9503,7 @@ async function connectCat() {
       sendCatLog(
         `[CW paddle] DTR keying not supported on ${path} (${error}) — phone-side paddle disabled. ` +
         'Macros/text-send (CI-V 0x17, hamlib send_morse) still work. ' +
-        'For a working paddle: wire an external FTDI/CH340 to the radio\'s CW KEY jack and set it as "CW Key Port" in Settings → Rig.'
+        'For a working paddle: wire an external FTDI/CH340 to the radio\'s CW KEY jack and set it as "CW Key Port" in Settings > ECHOCAT.'
       );
       _setCwPaddleAvailability(false, 'tiocmset-unsupported');
     });
@@ -24959,7 +24959,7 @@ function nocatSerialPtt(state, target) {
     return;
   }
   if (settings.cwKeyPort && settings.cwKeyPort.toLowerCase() === portPath.toLowerCase()) {
-    sendCatLog(`[PTT] FAILED: ${portPath} is also the CW Key Port. One port cannot be both; clear the CW Key Port in Settings > CW or pick another port for PTT.`);
+    sendCatLog(`[PTT] FAILED: ${portPath} is also the CW Key Port. One port cannot be both; clear the CW Key Port in Settings > ECHOCAT or pick another port for PTT.`);
     return;
   }
   const apply = (port) => {
@@ -25808,11 +25808,11 @@ function _sendCwTextToRadioImpl(text, opts) {
         // stop: their CAT KY keys the transmitter with NO morse, which is
         // worse than not sending.
         if (cwCaps.textMethod !== 'dtr-key-port' && cat && cat.connected) {
-          sendCatLog('[CW] CW Key Port did not become ready — falling back to CAT CW text. Fix or clear the CW Key Port in Settings > Rig to remove this delay.');
+          sendCatLog('[CW] CW Key Port did not become ready — falling back to CAT CW text. Fix or clear the CW Key Port in Settings > ECHOCAT to remove this delay.');
           cat.sendCwText(expanded, { live });
           return;
         }
-        sendCatLog('[CW] CW Key Port did not become ready — text not sent. Check the CW Key Port in Settings > Rig (and, on Linux, that python3 + pyserial are installed).');
+        sendCatLog('[CW] CW Key Port did not become ready — text not sent. Check the CW Key Port in Settings > ECHOCAT (and, on Linux, that python3 + pyserial are installed).');
       };
       setTimeout(retryKey, 150);
       return;
@@ -25828,7 +25828,7 @@ function _sendCwTextToRadioImpl(text, opts) {
     // hint so the log names the misconfiguration instead of looking healthy.
     if (!_cwTextKyHintLogged && settings.cwKeyPort && cwCaps.textMethod !== 'dtr-key-port' && rigModel?.brand === 'Yaesu') {
       _cwTextKyHintLogged = true;
-      sendCatLog('[CW] Text is going out via the CAT KY command, not your CW Key Port. If this radio is an FT-891 or FT-710, select that exact model in Settings > Rig — on those rigs KY is unreliable (radio keys TX with no morse) and the correct model routes text through the key port instead.');
+      sendCatLog('[CW] Text is going out via the CAT KY command, not your CW Key Port. If this radio is an FT-891 or FT-710, select that exact model in Settings > Radio — on those rigs KY is unreliable (radio keys TX with no morse) and the correct model routes text through the key port instead.');
     }
     // Say which command keys the text: this path logged nothing, so a stuck
     // radio left no trace of how it was keyed (#127). Not per keystroke.
@@ -26607,7 +26607,7 @@ function buildPaddleKeyRig() {
             sendCatLog('[CW] Rigctld backend can\'t key per-element — paddle keying via dedicated CW Key Port (DTR) instead.');
           } else {
             sendCatLog('[CW] Paddle keying is not supported over rigctld — hamlib has no per-element CW keying command, only mic PTT (T 1/T 0). The radio would TX with no CW output. ' +
-              'Workarounds: (1) type text in the CW widget\'s text box — that uses hamlib\'s send_morse and works correctly; (2) wire an external USB-UART (FTDI / CH340) to the rig\'s CW KEY jack and set it as "CW Key Port" in Settings → Rig.');
+              'Workarounds: (1) type text in the CW widget\'s text box — that uses hamlib\'s send_morse and works correctly; (2) wire an external USB-UART (FTDI / CH340) to the rig\'s CW KEY jack and set it as "CW Key Port" in Settings > ECHOCAT.');
             // Tell the phone its paddle won\'t make RF — suppresses local
             // sidetone and shows a red banner with the workaround. G5HOW
             // FTDx10 + Hamlib v1.5.11 2026-04-30.
@@ -26698,7 +26698,7 @@ function buildPaddleKeyRig() {
           _cwTxrxPttOnlyLogged = true;
           sendCatLog('[CW] Paddle keying on this Yaesu/Kenwood rig would only key PTT (TX1;/TX0;) — no CW output or sidetone. ' +
             'For a real paddle: connect the rig\'s OTHER USB COM port (the one not used for CAT — "Standard" on the FTDX10, "Enhanced/CAT-2" on FT-710/991), ' +
-            'set the rig menu PC KEYING (or USB Keying (CW)) = DTR or RTS, and select that port as the CW Key Port in Settings → Rig — then set Settings → Rig → CW keying line to match, and enable BK-IN. ' +
+            'set the rig menu PC KEYING (or USB Keying (CW)) = DTR or RTS, and select that port as the CW Key Port in Settings > ECHOCAT — then set "CW keying line" in the rig editor (Settings > Radio) to match, and enable BK-IN. ' +
             'Or type in the CW text box — that uses the rig\'s internal keyer and makes real RF. See docs/linux-cw-keying.md.');
           _setCwPaddleAvailability(false, 'txrx-ptt-only');
         }
@@ -41910,7 +41910,7 @@ function cloudShackNotice(text, kind) {
       const msg = err.message || String(err);
       // The 403 body's billing object says WHY (lapsed grant, failed card)
       // and carries the fix; the renderer shows that sentence, not ours.
-      if (msg === 'entitlement-required') return { error: 'entitlement-required', billing: (err.cause && err.cause.body && err.cause.body.billing) || null };
+      if (msg === 'entitlement-required') return { error: 'entitlement-required', billing: (err.cause && err.cause.body && err.cause.body.billing) || null, message: (err.cause && err.cause.message) || '' };
       if (msg === 'cloudflared-missing') return { error: 'cloudflared-missing' };
       if (msg === 'auth-required') return { error: 'auth-required' };
       sendCatLog('[cloud-tunnel] enable failed: ' + msg);

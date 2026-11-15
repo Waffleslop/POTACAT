@@ -1569,7 +1569,6 @@ const setTxEqPreset = document.getElementById('set-tx-eq-preset');
 const setTxEqPresetRow = document.getElementById('set-tx-eq-preset-row');
 const setCwKeyPort = document.getElementById('set-cw-key-port');
 const setCwKeyLine = document.getElementById('set-cw-key-line');
-const remoteUrlDisplay = document.getElementById('remote-url-display');
 // Mobile-app pairing UI (Phase 0 of native app)
 const echocatPairBtn = document.getElementById('echocat-pair-btn');
 const echocatPairedList = document.getElementById('echocat-paired-list');
@@ -7223,12 +7222,12 @@ async function echocatRefreshTailscaleStatus() {
   if (!s.certCached && s.platform === 'linux') {
     echocatTsStatus.innerHTML =
       `Tailscale: <code>${_esc(s.hostname || '')}</code>. On Linux, Tailscale gives certificates only to its operator. ` +
-      `Run once in a terminal: <code>sudo tailscale set --operator=$USER</code>, restart POTACAT, then open the pairing QR.`;
+      `Run once in a terminal: <code>sudo tailscale set --operator=$USER</code>, restart POTACAT, then click <b>Pair my device&hellip;</b> on the ECHOCAT card in Settings &gt; Summary.`;
     return;
   }
   if (!s.certCached) {
     echocatTsStatus.innerHTML =
-      `Tailscale: <code>${s.hostname}</code>. Tap "Open pairing QR" to issue a TLS cert. ` +
+      `Tailscale: <code>${s.hostname}</code>. Click <b>Pair my device&hellip;</b> on the ECHOCAT card in Settings &gt; Summary to issue a TLS cert. ` +
       `If issuance fails, enable HTTPS Certificates at <a href="https://login.tailscale.com/admin/dns" target="_blank" style="color:#4fc3f7;">admin → DNS</a>.`;
     return;
   }
@@ -7504,7 +7503,7 @@ async function _summaryTunnelDiagRefresh() {
     const dim = (s) => '<span style="color:var(--text-tertiary);">' + s + '</span>';
     const lines = [];
     if (d.user && d.user.callsign) {
-      lines.push('<div><strong>User:</strong> ' + _esc(d.user.callsign) + ' (id ' + _esc(d.user.id) + ')</div>');
+      lines.push('<div><strong>User:</strong> ' + _esc(d.user.callsign) + (d.user.id ? ' (id ' + _esc(d.user.id) + ')' : '') + '</div>');
     }
     if (d.db) {
       lines.push('<div><strong>DB row:</strong> tunnelId=' + (d.db.cloudTunnelId ? _esc(d.db.cloudTunnelId.slice(0, 8) + '…') : dim('null')) + ' host=' + (d.db.cloudHost ? _esc(d.db.cloudHost) : dim('null')) + ' sub=' + _esc(d.db.subscriptionStatus || 'none') + '</div>');
@@ -7777,7 +7776,7 @@ async function _shareRigIssue() {
       const errMap = {
         // The 403 body carries the server's own sentence (why access is
         // off, and where it is fixed) — prefer it over the generic line.
-        subscription_required: (res && res.billing && res.billing.message) || 'Sharing your rig needs an active POTACAT Cloud subscription. Subscribe from Settings › Cloud.',
+        subscription_required: (res && res.billing && res.billing.message) || (res && res.message && res.message !== res.error ? res.message : '') || 'Sharing your rig needs an active POTACAT Cloud subscription. Subscribe from Settings › Cloud.',
         unauthorized: 'Sign in to POTACAT Cloud first.',
       };
       status.textContent = errMap[res && res.error] || ('Error: ' + (res && res.error ? res.error : 'unknown'));
@@ -10016,7 +10015,7 @@ function _wireSummaryCardActionsOnce() {
         const r = await window.api.cloudTunnelEnable();
         if (r && r.error) {
           const map = {
-            'entitlement-required': (r.billing && r.billing.message) || 'POTACAT Cloud Tunnel needs an active POTACAT Cloud subscription. Subscribe from the Cloud card to turn it on.',
+            'entitlement-required': (r.billing && r.billing.message) || r.message || 'POTACAT Cloud Tunnel needs an active POTACAT Cloud subscription. Subscribe from the Cloud card to turn it on.',
             'cloudflared-missing': 'POTACAT can\'t find the cloudflared helper. Reinstall POTACAT (the installer bundles it).',
             'auth-required': 'You need to sign in to POTACAT Cloud first. Use the Cloud card above to sign in.',
           };
@@ -10401,54 +10400,6 @@ if (remoteAudioEditLink) {
     e.preventDefault();
     switchSettingsTab('radio');
   });
-}
-
-async function populateRemoteURLs() {
-  try {
-    const ips = await window.api.getLocalIPs();
-    const port = setRemotePort.value || 7300;
-    remoteUrlDisplay.innerHTML = '';
-    for (const ip of ips) {
-      if (ip.tailscale && ip.tailscaleHostname) {
-        const url = `https://${ip.tailscaleHostname}:${port}`;
-        const row = document.createElement('div');
-        const label = document.createElement('strong');
-        label.style.color = '#4ecca3';
-        label.textContent = 'Tailscale: ';
-        const link = document.createElement('span');
-        link.textContent = url;
-        link.style.cssText = 'cursor:pointer;text-decoration:underline;';
-        link.title = 'Click to copy';
-        const hint = document.createElement('span');
-        hint.style.cssText = 'font-size:10px;color:#888;margin-left:6px;';
-        hint.textContent = '(click to copy)';
-        link.addEventListener('click', () => {
-          navigator.clipboard.writeText(url).then(() => {
-            hint.textContent = 'Copied!';
-            setTimeout(() => { hint.textContent = '(click to copy)'; }, 1500);
-          });
-        });
-        row.appendChild(label);
-        row.appendChild(link);
-        row.appendChild(hint);
-        remoteUrlDisplay.appendChild(row);
-        const ipRow = document.createElement('div');
-        ipRow.style.cssText = 'color:#888;font-size:11px;margin-left:12px;';
-        ipRow.textContent = `IP: https://${ip.address}:${port}`;
-        remoteUrlDisplay.appendChild(ipRow);
-      } else {
-        const row = document.createElement('div');
-        row.textContent = `https://${ip.address}:${port}`;
-        if (ip.tailscale) {
-          const tag = document.createElement('strong');
-          tag.style.color = '#4ecca3';
-          tag.textContent = '(Tailscale) ';
-          row.prepend(tag);
-        }
-        remoteUrlDisplay.appendChild(row);
-      }
-    }
-  } catch {}
 }
 
 // CW Keyer checkbox toggles config visibility + auto-connect MIDI
@@ -13639,10 +13590,6 @@ LOG_OTA_TYPES.forEach(type => {
 let quickLogLookupTimer = null;
 
 function openQuickLog() {
-  if (!enableLogging) {
-    showLogToast('Enable QSO Logging in Settings first', { warn: true, duration: 3000 });
-    return;
-  }
   // W9TEF "ragchew logger" — Ctrl+L now opens the persistent log pop-out
   // window (renderer/log-popout.html) instead of the modal dialog. The
   // spot-click → openLogPopup() path is unchanged: that flow has richer
@@ -17614,6 +17561,18 @@ const echoCatCopy = document.getElementById('echo-cat-copy');
 const quickAudioInput = document.getElementById('quick-audio-input');
 const quickAudioOutput = document.getElementById('quick-audio-output');
 
+/** ECHOCAT web addresses, home (LAN) first, each with a label. Tailscale
+ *  prefers its MagicDNS name, which its certificate is valid for. */
+function echoCatWebUrls(ips, port) {
+  const list = Array.isArray(ips) ? ips : [];
+  const out = [];
+  const lan = list.find(ip => !ip.tailscale);
+  const ts = list.find(ip => ip.tailscale);
+  if (lan) out.push({ label: 'At home', url: `https://${lan.address}:${port}` });
+  if (ts) out.push({ label: 'Tailscale', url: `https://${ts.tailscaleHostname || ts.address}:${port}` });
+  return out;
+}
+
 async function refreshEchoCatInfo() {
   const s = await window.api.getSettings();
   // ECHOCAT is always-on as of 2026-06-02. The quick toggle was
@@ -17624,7 +17583,7 @@ async function refreshEchoCatInfo() {
     const port = s.remotePort || 7300;
     const token = s.remoteToken || '';
     const ips = await window.api.getLocalIPs();
-    const best = ips.find(ip => ip.tailscale) || ips[0];
+    const urls = echoCatWebUrls(ips, port);
     // ECHOCAT access (lib/remote-access.js): a local address is only real
     // under "Local network and Cloud".
     const access = ['off', 'cloud', 'lan'].includes(s.remoteAccess) ? s.remoteAccess : (s.enableRemote === false ? 'off' : 'lan');
@@ -17632,8 +17591,11 @@ async function refreshEchoCatInfo() {
       echoCatUrl.textContent = 'ECHOCAT access is Off (Settings > ECHOCAT)';
     } else if (access === 'cloud') {
       echoCatUrl.textContent = 'Cloud only — reach this computer through its POTACAT Cloud address';
-    } else if (best) {
-      echoCatUrl.innerHTML = `<span class="echo-cat-ip">https://${best.address}:${port}</span>`;
+    } else if (urls.length) {
+      // Labelled, home address first (#380): a Tailscale address works only
+      // on the tailnet, so it must not be the one someone at home copies.
+      echoCatUrl.innerHTML = urls.map(u =>
+        `<div><span class="echo-cat-ip-label">${u.label}:</span> <span class="echo-cat-ip">${_esc(u.url)}</span></div>`).join('');
     } else {
       echoCatUrl.textContent = 'No network found';
     }
@@ -17707,8 +17669,8 @@ echoCatCopyUrl.addEventListener('click', async () => {
   const s = await window.api.getSettings();
   const port = s.remotePort || 7300;
   const ips = await window.api.getLocalIPs();
-  const best = ips.find(ip => ip.tailscale) || ips[0];
-  const url = best ? `https://${best.address}:${port}` : '';
+  const first = echoCatWebUrls(ips, port)[0];
+  const url = first ? first.url : '';
   try {
     await navigator.clipboard.writeText(url);
     echoCatCopyUrl.textContent = '\u2705';
@@ -18485,9 +18447,6 @@ async function openSettingsDialog(tab) {
     }
     if (s.cwKeyPort) setCwKeyPort.value = s.cwKeyPort;
   } catch { /* ports unavailable */ }
-  if (enableRemote) {
-    populateRemoteURLs();
-  }
   updateRemoteAudioSummary(s.remoteAudioInput, s.remoteAudioOutput);
   // Remote Launcher
   if (setEnableLauncher) {
