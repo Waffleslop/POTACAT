@@ -205,7 +205,7 @@ check('VFO window: packet-audio paths are not reopened', () => {
   // The direct (SmartSDR / Icom Network / SCU-LAN10) branch is unchanged and
   // decide() is told the monitor is direct.
   assert.ok(/direct:\s*audioMonitorDirect/.test(vfo));
-  assert.ok(/if \(s\.audioSource === 'smartsdr' \|\| s\.audioSource === 'icom-network' \|\| s\.audioSource === 'yaesu-lan'\)/.test(vfo));
+  assert.ok(/if \(s\.tciRx \|\| s\.tciRxTest \|\| s\.audioSource === 'smartsdr' \|\| s\.audioSource === 'icom-network' \|\| s\.audioSource === 'yaesu-lan'\)/.test(vfo));
 });
 check('run-tests registers this file', () => {
   assert.ok(R('scripts/run-tests.js').includes("'test/vfo-audio-power-cycle-test.js'"));

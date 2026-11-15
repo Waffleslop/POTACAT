@@ -4100,7 +4100,7 @@ let audioMonitorStream = null;
 let audioMonitorGain = null;
 let audioMonitorActive = false;
 let audioMonitorMuted = false;
-let audioMonitorDirect = false;   // true = playing the SmartSDR Direct VITA-49 stream
+let audioMonitorDirect = false;   // true = playing receive audio delivered by the radio connection
 let audioMonitorNextPlay = 0;     // AudioContext play cursor for direct-mode packets
 let audioMonitorLabel = '';       // the capture device's name (#247: follow it by name)
 let audioReattachPending = false; // #247: a power-on / dead stream waits for a reopen
@@ -4117,7 +4117,7 @@ async function startAudioMonitor(opts) {
     const s = await window.api.getSettings();
     // The SCU-LAN10's receive audio is network packets too: without it here
     // the button lit up and played the room microphone (review of the LAN work).
-    if (s.audioSource === 'smartsdr' || s.audioSource === 'icom-network' || s.audioSource === 'yaesu-lan') {
+    if (s.tciRx || s.tciRxTest || s.audioSource === 'smartsdr' || s.audioSource === 'icom-network' || s.audioSource === 'yaesu-lan') {
       // Icom Network is the same: its RX audio arrives as packets, and the
       // capture branch below opened this computer's MIC (feedback, no radio).
       // SmartSDR Direct: the Windows DAX RX device is silent (no DAX program
@@ -4293,7 +4293,7 @@ audioBtn.addEventListener('contextmenu', (e) => {
   audioReattachPending = false;
 });
 
-// SmartSDR Direct RX audio — play the VITA-49 frames POTACAT receives, but
+// Network RX audio — play the frames POTACAT receives, but
 // only while the monitor is on AND we're in direct mode. Mirrors the KiwiSDR
 // player: schedule packets back-to-back with a play cursor, snapping the
 // cursor back if a burst pushes it more than 500 ms ahead of now.

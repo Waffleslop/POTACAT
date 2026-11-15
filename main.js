@@ -20542,6 +20542,9 @@ function connectTciTestRadio() {
     onAudio(pcm) {
       if (tciTestRadio !== radio) return;
       if (_mobileWantsSpectrum && usesTciEchoAudio()) tciSpecRing.push(pcm, TCI_RX_RATE);
+      if (!radio.transmitting && vfoPopoutWin && !vfoPopoutWin.isDestroyed()) {
+        audioSafeSend(vfoPopoutWin.webContents, 'smartsdr-audio-frame', { pcm, sampleRate: TCI_RX_RATE });
+      }
       // EchoCAT already accepts PCM from network radios on this bridge.
       if (tciEchoAudioConnected && remoteAudioWin && !remoteAudioWin.isDestroyed()) {
         audioSafeSend(remoteAudioWin.webContents, 'smartsdr-audio-frame', { pcm, sampleRate: TCI_RX_RATE });
