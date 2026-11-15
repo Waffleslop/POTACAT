@@ -29522,6 +29522,7 @@ function disconnectRemote() {
 let _ssbModeBeforePtt = null; // original mode saved during DATA-mode PTT workaround
 let _ssbFreqBeforePtt = 0;    // dial freq saved at swap time — restore re-anchors here, never to a mid-TX polled freq
 let _ssbOverDataYaesuWarned = false; // log the rig-menu hint once per session
+let _ssbOverDataFmAmWarned = false; // log 'SSB-over-DATA does not apply in FM or AM' once per session (#561)
 
 // --- Flex TX audio source (transmit set dax=) -------------------------------
 // The radio transmits POTACAT's direct VITA-49 dax_tx audio ONLY while the
@@ -30086,6 +30087,13 @@ function handleRemotePtt(state, opts = {}) {
     const _inData = !!(pttModeReport() || {}).data;
     const _dataPlan = PttModeSwap.sessionDataPlan({ hold: _holdData, inData: _inData, tried: _holdData && _winlinkDataAskedFor === _winlinkSessionSeq });
     if (_dataPlan === 'switch-hold') _winlinkDataAskedFor = _winlinkSessionSeq; // one switch per session, never one per over (#300)
+    // Which DATA mode, if any (lib/ptt-mode-swap.js pttDataModeFor): FM and AM
+    // switch only on a radio with real FM-D / AM-D forms (KS9B KX3, #561).
+    const _dataRig = getActiveRigModel();
+    const _dataPick = PttModeSwap.pttDataModeFor({
+      mode: curMode, forced: forceData,
+      fmAmData: PttModeSwap.hasFmAmDataMode({ brand: _dataRig && _dataRig.brand, rigType: detectRigType() }),
+    });
     if (_dataPlan === 'keep') {
       if (_pttDataHeldLoggedFor !== _winlinkSessionSeq) {
         _pttDataHeldLoggedFor = _winlinkSessionSeq;
@@ -30093,15 +30101,18 @@ function handleRemotePtt(state, opts = {}) {
           ? '[PTT] the radio is in DATA mode already — keying without a mode change; it stays in DATA until the Winlink session ends'
           : `[PTT] the radio reports ${_currentMode || 'no mode'}, not a DATA mode, after this session asked for one — keying as it is, with no mode change on any frame. If nothing is transmitted, set the radio's modulation source for this mode to USB.`);
       }
-    } else if (curMode === 'USB' || curMode === 'LSB' || curMode === 'SSB' || curMode === 'FM' || curMode === 'AM') {
+    } else if (_dataPick.skip === 'fm-am') {
+      // No FM or AM data form on this radio: USB data on an FM channel is
+      // garbage to every listener, so key in the voice mode and say so once.
+      if (!_ssbOverDataFmAmWarned) {
+        _ssbOverDataFmAmWarned = true;
+        sendCatLog(PttModeSwap.fmAmSkipLog(curMode));
+      }
+    } else if (_dataPick.dataMode) {
       // FM and AM have their own data forms on an Icom (FM-D / AM-D). Sending
       // them to USB-D moved an IC-9700 off FM for every voice over (KG5EIU).
-      const _dataRig = getActiveRigModel();
       const _icomData = !!(_dataRig && _dataRig.brand === 'Icom');
-      const dataMode = (curMode === 'LSB') ? 'DIGL'
-        : (_icomData && curMode === 'FM') ? 'DIGFM'
-        : (_icomData && curMode === 'AM') ? 'DIGAM'
-        : 'DIGU';
+      const dataMode = _dataPick.dataMode;
       _ssbModeBeforePtt = _dataPlan === 'switch-hold' ? null : curMode; // held: the session end puts the mode back, once
       // Capture the dial BEFORE the swap. During TX in DATA mode a Yaesu with
       // DATA MODE = PSK reports the subcarrier-shifted TX carrier (~1.5 kHz
