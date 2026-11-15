@@ -28533,6 +28533,9 @@ function buildActivationAdifQsos(act) {
     callsign: c.callsign,
     frequency: c.freq ? String(Math.round(parseFloat(c.freq) * 1000)) : '',
     mode: c.mode || '',
+    // The record's own MODE/SUBMODE pair (MFSK/JS8), written back as it was (#381).
+    adifMode: c.adifMode || '',
+    submode: c.submode || '',
     band: c.band || '',
     qsoDate: act.date,
     timeOn: c.timeOn || '',
