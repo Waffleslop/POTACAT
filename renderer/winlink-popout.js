@@ -601,6 +601,28 @@
     el.title = v.busy ? 'A signal in the modem’s band, ' + v.peakDb + ' dB over the noise — wait, or pick another gateway' : 'Nothing above the noise in the modem’s band';
   }
   var wfCtx = null, wfStream = null, wfAnalyser = null, wfTimer = null;
+  // Why the waterfall is black (lib/winlink-wf-audio.js): when no radio audio,
+  // or only exact zeros, reaches POTACAT, one plain line says so (N5XHI 2026-11-15).
+  var wfStartedAt = 0, wfLastFrameAt = 0, wfLastSoundAt = 0, wfCaptureErr = '', wfNoAudioTimer = null;
+  function wfListenStart() {
+    wfStartedAt = Date.now(); wfLastFrameAt = 0; wfLastSoundAt = 0; wfCaptureErr = '';
+    if (!wfNoAudioTimer) wfNoAudioTimer = setInterval(wfNoAudioRender, 1000);
+  }
+  function wfNoteFrame(pcm) {
+    var now = Date.now();
+    wfLastFrameAt = now;
+    if (WinlinkWfAudio.hasSound(pcm)) wfLastSoundAt = now;
+  }
+  function wfNoAudioRender() {
+    var el = $('wl-wf-noaudio');
+    var a = (state && state.audio) || {};
+    var text = WinlinkWfAudio.noAudioText({
+      mode: wfMode, now: Date.now(), startedAt: wfStartedAt, lastFrameAt: wfLastFrameAt, lastSoundAt: wfLastSoundAt,
+      bridge: a.bridge || null, captureError: wfCaptureErr,
+    });
+    if (el.textContent !== text) el.textContent = text;
+    el.hidden = !text;
+  }
   var wfRe = new Float32Array(WF_N), wfIm = new Float32Array(WF_N), wfWin = null, wfMags = new Float32Array(WF_BINS);
 
   function fft(re, im) {
@@ -708,12 +730,13 @@
     }
     if (a.viaPotacat) {
       // Frames from main (the same ones the modem gets).
-      if (wfMode !== 'frames') { wfStopCapture(); wfMode = 'frames'; window.api.watchAudio(true); }
+      if (wfMode !== 'frames') { wfStopCapture(); wfMode = 'frames'; wfListenStart(); window.api.watchAudio(true); }
       return;
     }
     // A sound-device rig: capture its input here (the rig's FT8 input device).
     if (wfMode === 'capture') return;
     wfMode = 'capture';
+    wfListenStart();
     window.api.watchAudio(false);
     window.api.audioRig().then(function (rig) {
       var c = { audio: rig && rig.ok && rig.inputId ? { deviceId: { exact: rig.inputId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false } : { echoCancellation: false, noiseSuppression: false, autoGainControl: false } };
@@ -730,9 +753,10 @@
       wfTimer = setInterval(function () {
         if (!wfAnalyser) return;
         wfAnalyser.getFloatTimeDomainData(buf);
+        wfNoteFrame(buf);
         wfAccLen = 0; wfPush(buf, wfCtx.sampleRate);
       }, 90);
-    }).catch(function (e) { $('wl-wf-note').textContent = 'No radio audio: ' + (e && e.message || e); });
+    }).catch(function (e) { wfCaptureErr = String(e && e.message || e); $('wl-wf-note').textContent = 'No radio audio: ' + wfCaptureErr; wfNoAudioRender(); });
   }
   function wfStopCapture() {
     if (wfTimer) { clearInterval(wfTimer); wfTimer = null; }
@@ -744,6 +768,8 @@
     wfStopCapture();
     if (wfMode === 'frames') window.api.watchAudio(false);
     wfMode = 'none';
+    if (wfNoAudioTimer) { clearInterval(wfNoAudioTimer); wfNoAudioTimer = null; }
+    $('wl-wf-noaudio').hidden = true;
     $('wl-wf').classList.remove('show');
     if (!keepShowButton) $('wl-wf-show').classList.remove('show');
   }
@@ -751,6 +777,7 @@
   window.api.onAudioFrame(function (d) {
     if (wfMode !== 'frames' || !d || !d.pcm) return;
     var pcm = d.pcm instanceof Float32Array ? d.pcm : new Float32Array(d.pcm);
+    wfNoteFrame(pcm);
     wfPush(pcm, d.sampleRate || 24000);
   });
   function wfSync() {

@@ -270,6 +270,7 @@ const TESTS = [
   'test/winlink-reach-test.js',      // a radio session goes only where this radio can transmit
   'test/winlink-units-test.js',
   'test/winlink-spectrum-test.js',
+  'test/winlink-wf-audio-test.js', // the Winlink waterfall says why it is black (no radio audio reaching POTACAT)
   'test/winlink-main-wiring-test.js',
   'test/winlink-vara-test.js',
   'test/winlink-vara-anywhere-test.js', // #287: VARA HF and VARA FM on Linux, macOS and Windows, at a host and port; a fake VARA TNC (real Pat when its binary is present)
