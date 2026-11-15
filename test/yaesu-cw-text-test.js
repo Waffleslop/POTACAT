@@ -386,6 +386,34 @@ test('a Yaesu message then an Icom-path message does not keep the watch armed', 
   r.disconnect();
 });
 
+// #582 (DA2PK, FT-710): TX0; is ignored while the radio plays a keyer
+// memory, so Stop let the message run on. Where the CAT manual has a stop
+// (KY P2 0: FT-710 2306-C p.14, FTX-1 2508-C p.18), Stop sends it first and
+// TX0; after, byte for byte. Radios whose manual has none keep TX0; alone.
+for (const id of ['FT-710', 'FTX-1 Field', 'FTX-1 Optima']) {
+  test(`${id}: Stop sends KY00; then TX0; (#582)`, async () => {
+    const { rig: r, writes } = rig(id);
+    r.sendCwText('TEST DE DA2PK');
+    await sleep(20);
+    writes.length = 0;
+    r.stopCwText();
+    assert.deepStrictEqual(writes.filter((w) => /^KY|^TX/.test(w)), ['KY00;', 'TX0;'], JSON.stringify(writes));
+    r.disconnect();
+  });
+}
+for (const id of ['FTDX10', 'FTDX101D/MP', 'FT-991/991A', 'FT-891']) {
+  test(`${id}: no stop in its CAT manual, Stop sends TX0; only (#582)`, async () => {
+    const { rig: r, writes } = rig(id);
+    r.sendCwText('TEST');
+    await sleep(20);
+    writes.length = 0;
+    r.stopCwText();
+    assert.ok(!writes.some((w) => /^KY/.test(w)), 'no KY on stop: ' + JSON.stringify(writes));
+    assert.ok(writes.includes('TX0;'), 'TX0; still sent: ' + JSON.stringify(writes));
+    r.disconnect();
+  });
+}
+
 test('Stop ends the TX state at once, on a radio that sends no readback', async () => {
   const { rig: r, codec } = rig('TS-480');
   const states = [];
