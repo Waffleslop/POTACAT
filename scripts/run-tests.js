@@ -468,6 +468,7 @@ const TESTS = [
   'test/respot-templates-remote-test.js',
   'test/cw-remote-expand-test.js',
   'test/cw-greeting-test.js',
+  'test/tqsl-test.js', // TQSL found where it is installed, Flatpak included; the TQSL program field (#343)
   'test/lotw-flags-test.js',
   'test/lotw-split-test.js',
   'test/station-county-test.js', // the operator's own state and county: per park on activations, home only from the home grid

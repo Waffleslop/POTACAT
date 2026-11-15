@@ -46918,9 +46918,10 @@ function cloudShackNotice(text, kind) {
   // Head/tail selection keeps the clipboard paste Discord-sized; redaction
   // runs here so log lines from disk never reach the paste unmasked.
   // ── LoTW via the operator's TQSL (docs/tqsl-lotw-plan.md, Phase 1) ─────────
-  ipcMain.handle('lotw-locations', () => {
+  // opts.tqslPath: the TQSL program field as typed, before Save (#343).
+  ipcMain.handle('lotw-locations', (_e, opts) => {
     const { findTqsl, stationDataCandidates, parseStationLocations } = require('./lib/tqsl');
-    const tqsl = findTqsl(settings.tqslPath);
+    const tqsl = findTqsl((opts && typeof opts.tqslPath === 'string') ? opts.tqslPath : settings.tqslPath);
     let locations = [];
     for (const sd of stationDataCandidates()) {
       try { locations = parseStationLocations(fs.readFileSync(sd, 'utf8')); break; }
@@ -46930,14 +46931,14 @@ function cloudShackNotice(text, kind) {
   });
   let _lotwJttyNoticed = false; // one JTTY-submode notice per session
   ipcMain.handle('lotw-upload', async (_e, opts) => {
-    const { findTqsl, buildTqslArgs, mapTqslExit } = require('./lib/tqsl');
+    const { findTqsl, buildTqslArgs, mapTqslExit, TQSL_SETTING_PLACE } = require('./lib/tqsl');
     const { splitForLotw, buildActivationTqslArgs, batchAdif } = require('./lib/lotw-split');
     // Live field values from the Settings dialog win over saved settings so
     // the button works before the operator hits Save.
     const location = (opts && opts.location) || settings.lotwStationLocation;
     const password = (opts && typeof opts.password === 'string') ? opts.password : settings.lotwCertPassword;
-    const tqsl = findTqsl(settings.tqslPath);
-    if (!tqsl) return { ok: false, message: 'TQSL not found — install TrustedQSL (arrl.org/tqsl) or set its path in Settings.' };
+    const tqsl = findTqsl((opts && typeof opts.tqslPath === 'string') ? opts.tqslPath : settings.tqslPath);
+    if (!tqsl) return { ok: false, message: `TQSL not found — install TrustedQSL (arrl.org/tqsl) or set where it is in ${TQSL_SETTING_PLACE}.` };
     if (!location) return { ok: false, message: 'Pick your TQSL Station Location first.' };
     const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
     if (!fs.existsSync(logPath)) return { ok: false, message: 'No QSO log to upload yet.' };
@@ -47055,7 +47056,7 @@ function cloudShackNotice(text, kind) {
           // execFile failed BEFORE tqsl could report an exit code — the old
           // "unexpected code -1" hid the real reason (LZ3AW 2026-08-14).
           if (err.code === 'ENOENT') {
-            r = { ok: false, message: `TQSL could not be started — nothing runnable at ${tqsl}. Reinstall TrustedQSL or set its path in Settings.` };
+            r = { ok: false, message: `TQSL could not be started — nothing runnable at ${tqsl}. Reinstall TrustedQSL or set where it is in ${require('./lib/tqsl').TQSL_SETTING_PLACE}.` };
           } else if (err.killed || err.signal) {
             r = { ok: false, message: 'TQSL did not finish within 2 minutes and was stopped. It is probably showing a dialog window (first-run setup, an update prompt, or a question about the log) — open TQSL once by itself, dismiss any prompts, then try again.' };
           } else {

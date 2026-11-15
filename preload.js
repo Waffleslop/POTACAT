@@ -392,7 +392,7 @@ contextBridge.exposeInMainWorld('api', {
   macMicCaptureStart: (surface) => ipcRenderer.invoke('mac-mic-capture-start', surface),
   macMicSilence: (o) => ipcRenderer.send('mac-mic-silence', o),
   onMacMicNotice: (cb) => ipcRenderer.on('mac-mic-notice', (_e, d) => cb(d)),
-  lotwLocations: () => ipcRenderer.invoke('lotw-locations'),
+  lotwLocations: (opts) => ipcRenderer.invoke('lotw-locations', opts || {}),
   lotwUpload: (opts) => ipcRenderer.invoke('lotw-upload', opts),
   lotwDownloadConfirmations: (opts) => ipcRenderer.invoke('lotw-download-confirmations', opts),
   clublogUpload: (opts) => ipcRenderer.invoke('clublog-upload', opts),
