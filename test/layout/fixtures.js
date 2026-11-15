@@ -37,4 +37,18 @@ const DECODES = [
   { id: 'tx', tx: true, text: 'W2XYZ K1ABC -12', txHz: 1523 },
 ];
 
-module.exports = { SPOTS, COLUMN_SETS, DECODES };
+// JTCAT Stations view rows (#557): entries as lib/jtcat-stations.js makes
+// them, rendered at NOW. Long calls and countries must cut off with an
+// ellipsis, never push the later columns along or wrap.
+const NOW = 1800000000000;
+const STATIONS = [
+  { id: 'cq-plain', e: { call: 'K1ABC', calling: 'CQ', grid: 'FN42', entity: 'United States', state: '', db: -12, df: 1500, lastHeard: NOW - 12000 } },
+  { id: 'cq-pota-state', e: { call: 'KN5YVJ', calling: 'CQ POTA', grid: 'EM20', entity: 'United States', state: 'TX', db: -14, df: 892, lastHeard: NOW - 27000 } },
+  // The native FT4 decoder's float dB and a fractional Hz, as they arrive.
+  { id: 'float-db-df', e: { call: 'KF8FTQ', calling: 'KF6JXM', grid: 'EN74', entity: 'United States', state: '', db: 10.9874995727539, df: 232.73, lastHeard: NOW - 3000 } },
+  { id: 'long-everything', e: { call: 'KH6/W1ABCD/P', calling: 'VE3/K1ABCDE/QRP', grid: 'BL11', entity: 'South Sandwich Islands and a very long name', state: '', db: -24.4, df: 3001, lastHeard: NOW - 599000 } },
+  { id: 'no-grid-no-db', e: { call: 'JA1XYZ', calling: 'W2XYZ', grid: '', entity: '', state: '', db: null, df: null, lastHeard: NOW - 125000 } },
+  { id: 'cq-dx', e: { call: '9K2YM', calling: 'CQ DX', grid: 'LL39', entity: 'Kuwait', state: '', db: 0, df: 1384, lastHeard: NOW } },
+];
+
+module.exports = { SPOTS, COLUMN_SETS, DECODES, STATIONS, NOW };

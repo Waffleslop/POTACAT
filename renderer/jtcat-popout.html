@@ -41,6 +41,33 @@
     .jp-map-pane.hidden { display: none; }
     .jp-map { flex: 1; width: 100%; height: 100%; }
     .jp-empty { padding: 20px; text-align: center; color: var(--text-dim); }
+    /* Stations view (#557): the header and every row share one grid, so each
+       title sits over its column (test/layout-alignment-test.js). Tokens only. */
+    /* The switch made the Band Activity header wider than a half-width pane: it
+       wraps onto a second line rather than push Clear out of sight. */
+    .jp-decode-header { flex-wrap: wrap; row-gap: 6px; }
+    .jp-view-switch { display: flex; gap: 0; }
+    .jp-view-switch .jtcat-filter-btn { border-radius: 0; }
+    .jp-view-switch .jtcat-filter-btn:first-child { border-radius: 8px 0 0 8px; }
+    .jp-view-switch .jtcat-filter-btn:last-child { border-radius: 0 8px 8px 0; margin-left: -1px; }
+    #jp-band-activity[hidden], #jp-stations[hidden] { display: none; }
+    .jp-stations { padding: 0; overflow-x: auto; }
+    .jp-st-row { display: grid; grid-template-columns: 10ch 8ch 4ch minmax(5ch, 1fr) 5ch 3ch 4ch 3ch; column-gap: 8px; padding: 3px 10px; align-items: baseline; cursor: pointer; border-bottom: 1px solid var(--border-primary); }
+    .jp-st-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .jp-st-row:hover { background: var(--bg-hover); }
+    .jp-st-head { position: sticky; top: 0; z-index: 1; cursor: default; background: var(--bg-secondary); color: var(--text-secondary); font-weight: 700; }
+    .jp-st-head:hover { background: var(--bg-secondary); }
+    .jp-st-head .jp-st-sortable { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+    .jp-st-head .jp-st-sortable:hover { color: var(--text-primary); }
+    .jp-st-head .jp-st-sorted { color: var(--accent-blue); text-decoration: underline solid; }
+    .jp-st-row .jp-st-call { font-weight: 700; color: var(--text-primary); }
+    .jp-st-row .jp-st-calling, .jp-st-row .jp-st-grid, .jp-st-row .jp-st-country, .jp-st-row .jp-st-state { color: var(--text-secondary); }
+    .jp-st-row.jp-st-cq .jp-st-calling { color: var(--accent-green); font-weight: 700; }
+    .jp-st-row .jp-st-db, .jp-st-row .jp-st-df, .jp-st-row .jp-st-age { text-align: right; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+    .jp-st-head .jp-st-db, .jp-st-head .jp-st-df, .jp-st-head .jp-st-age { text-align: right; }
+    /* A station calling me: the accent as a band at the left, as in the stream. */
+    .jp-st-row.jp-st-me { box-shadow: inset 4px 0 0 var(--accent-red); }
+    .jp-st-row.jp-st-me .jp-st-calling { color: var(--accent-red); font-weight: 700; }
 
     /* Decode row styles */
     .jp-cycle-sep { padding: 2px 8px; font-size: 10px; color: var(--text-dim, #666); border-top: 1px solid var(--border-primary); margin-top: 2px; }
@@ -709,10 +736,12 @@
   <div class="jp-main">
     <div class="jp-decode-pane">
       <div class="jp-decode-section">
-        <div class="jp-decode-header"><span>Band Activity<span id="jp-hidden-note" class="jp-hidden-note" hidden></span></span> <div style="display:flex;gap:4px;align-items:center;"><input type="text" id="jp-search" placeholder="Filter by call or word" title="One or more callsigns or words, separated by commas or spaces: a line shows if it contains any of them" spellcheck="false"><button id="jp-cq-filter" class="jtcat-filter-btn" title="Only CQs, 73s and calls to me">CQ &amp; 73</button><button id="jp-wanted-filter" class="jtcat-filter-btn" title="Show only needed DXCC/grid/call">Wanted</button><button id="jp-sort-signal" class="jtcat-filter-btn" title="Sort by signal strength (strongest first)">dB</button><button id="jp-event-filter" class="jtcat-filter-btn" title="Show only tracked-event stations you still need (13 Colonies etc.)">Event</button><button id="jp-clear" class="jtcat-filter-btn" title="Clear all decodes">Clear</button></div></div>
+        <div class="jp-decode-header"><span>Band Activity<span id="jp-hidden-note" class="jp-hidden-note" hidden></span></span> <div class="jp-view-switch" role="group" aria-label="Show Band Activity as"><button type="button" id="jp-view-stream" class="jtcat-filter-btn active" title="Every decode as it arrives, newest at the bottom">Stream</button><button type="button" id="jp-view-stations" class="jtcat-filter-btn" title="One line per station heard, kept up to date">Stations</button></div> <div style="display:flex;gap:4px;align-items:center;"><input type="text" id="jp-search" placeholder="Filter by call or word" title="One or more callsigns or words, separated by commas or spaces: a line shows if it contains any of them" spellcheck="false"><button id="jp-cq-filter" class="jtcat-filter-btn" title="Only CQs, 73s and calls to me">CQ &amp; 73</button><button id="jp-wanted-filter" class="jtcat-filter-btn" title="Show only needed DXCC/grid/call">Wanted</button><button id="jp-sort-signal" class="jtcat-filter-btn" title="Sort by signal strength (strongest first)">dB</button><button id="jp-event-filter" class="jtcat-filter-btn" title="Show only tracked-event stations you still need (13 Colonies etc.)">Event</button><button id="jp-clear" class="jtcat-filter-btn" title="Clear all decodes">Clear</button></div></div>
         <div id="jp-band-activity" class="jp-decode-list">
           <div class="jp-empty">Waiting for decodes...</div>
         </div>
+        <!-- Stations view (#557): one row per station heard, rows from lib/decode-row.js stationRowInner. -->
+        <div id="jp-stations" class="jp-decode-list jp-stations" hidden></div>
       </div>
       <div id="jp-activity-splitter" class="jp-hsplitter" title="Drag to resize — double-click to reset 50/50"></div>
       <div class="jp-decode-section">
@@ -1243,6 +1272,10 @@
       <span class="jp-opt-label">Edit watchlist colors (opens Settings)</span>
       <span class="jp-opt-help">Decodes matching your watchlist groups fill in each group's color. Edit the lists, colors, and CQ tags (NA, POTA...) in the main window's Settings - this opens them.</span>
     </button>
+    <label class="jp-opt-row jp-opt-num-row">
+      <span class="jp-opt-label">Stations list keeps a station for <select id="jp-stations-expiry"><option value="2">2 minutes</option><option value="5" selected>5 minutes</option><option value="10">10 minutes</option></select></span>
+      <span class="jp-opt-help">The Stations view of Band Activity shows one line per station heard. A station not heard again within this time leaves the list. Changing band or mode, or pressing Clear, empties it.</span>
+    </label>
     <div class="jp-opt-section">The picture</div>
     <label class="jp-opt-row jp-opt-num-row">
       <span class="jp-opt-label">Waterfall speed <input id="jp-wf-speed" type="number" min="1" max="60" step="1" value="60"> lines/sec</span>
@@ -1310,6 +1343,7 @@
   <script src="../lib/scope-view.js"></script>
   <script src="../lib/jtty-macros.js"></script>
   <script src="../lib/decode-row.js"></script>
+  <script src="../lib/jtcat-stations.js"></script>
   <script src="../lib/worked-roster.js"></script>
   <script src="../lib/worked-overlay.js"></script>
   <script src="../lib/worked-matrix.js"></script>

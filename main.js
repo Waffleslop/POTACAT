@@ -870,6 +870,7 @@ const GLOBAL_KEYS = new Set([
   'jtcatWaterfallSpeed', // waterfall lines/sec — display property of this screen
   'jtcatWaterfallFloor', // waterfall display noise floor (0..200) — same nature
   'jtcatShowBandScope',  // band-scope strip in the JTCAT pop-out (FT-710) — display
+  'jtcatStationsExpiryMin', // JTCAT Stations view: minutes a station stays (2/5/10) — display (#557)
   'waterfallPalette',  // waterfall / band scope colours (lib/waterfall-palettes.js) — display
                        // (same reasoning as lightMode/darkVariant above)
   'wsprPreCapPower',   // {watts, rigId, at}: the RF power the WSPR beacon found on the

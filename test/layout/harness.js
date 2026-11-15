@@ -89,7 +89,11 @@ app.whenReady().then(async () => {
         ? DecodeRow.txRowInner(f.text, 'jp', f.txHz, '--')
         : DecodeRow.popoutRowInner(f.d, { text: f.d.text, badgesHtml: f.badges || '', entityHtml: f.entity ? `<span class="jp-entity">${f.entity}</span>` : '' })}</div>`).join('');
       const mine = fx.DECODES.filter(f => !f.tx).map(f => `<div class="jp-row jp-cq" data-fixture="${f.id}">${DecodeRow.popoutRowInner(f.d, { time: '12:30:45', text: f.d.text })}</div>`).join('');
-      const body = { html: `<div id="jp-band-activity" data-list="band" data-row-selector=".jp-row">${band}</div><div id="jp-my-activity" data-list="mine" data-row-selector=".jp-row">${mine}</div>` };
+      // Stations view (#557): the header row and every station row share one grid.
+      const stations = `<div class="jp-st-row jp-st-head" data-fixture="header">${DecodeRow.stationHeaderInner('jp', 'last')}</div>` +
+        fx.STATIONS.map(f => `<div class="jp-st-row${/^CQ/.test(f.e.calling) ? ' jp-st-cq' : ''}" data-fixture="${f.id}">${DecodeRow.stationRowInner(f.e, fx.NOW, 'jp')}</div>`).join('');
+      const body = { html: `<div id="jp-band-activity" data-list="band" data-row-selector=".jp-row">${band}</div><div id="jp-my-activity" data-list="mine" data-row-selector=".jp-row">${mine}</div>` +
+        `<div id="jp-stations" class="jp-decode-list jp-stations" data-list="stations" data-row-selector=".jp-st-row">${stations}</div>` };
       Object.assign(results, prefixKeys(await render(width, jtcatCss(), body, libScripts), `jtcat-${width}-`));
     }
     process.stdout.write('LAYOUT_JSON:' + JSON.stringify(results) + '\n');

@@ -156,6 +156,7 @@ function _applyPopoutTheme(payload) {
     }
     if (typeof s.jtcatWaterfallSpeed === 'number') setWfSpeed(s.jtcatWaterfallSpeed, false);
     if (typeof s.jtcatWaterfallFloor === 'number') setWfFloor(s.jtcatWaterfallFloor, false);
+    if (s.jtcatStationsExpiryMin != null && typeof applyStationsExpiry === 'function') applyStationsExpiry(s.jtcatStationsExpiryMin, false);
     if (typeof s.jtcatShowBandScope === 'boolean') bsSetOn(s.jtcatShowBandScope, false);
     else updateWfSpeedHelp();
     fdMode = !!s.jtcatFdMode;
@@ -1258,7 +1259,125 @@ function _applyPopoutTheme(payload) {
       pruneCyclePanel(bandActivity, MAX_BA_CYCLES);
     }
     if (wasAtBottom) bandActivity.scrollTop = bandActivity.scrollHeight;
+    renderStations(); // the filters apply to the Stations view too
   }
+
+  // --- Stations view (#557) ---
+  // One line per station heard instead of the stream of decodes. The list
+  // is lib/jtcat-stations.js (pure), the rows lib/decode-row.js
+  // (stationRowInner, the copy the layout test renders). A double-click on a
+  // row is a double-click on that station's latest decode: the same
+  // onDecodeRowClick, given the same decode object. The view choice and sort
+  // are a property of this screen (localStorage, like the filters); how long
+  // a station stays is the jtcatStationsExpiryMin setting.
+  var stationsEl = document.getElementById('jp-stations');
+  var viewStreamBtn = document.getElementById('jp-view-stream');
+  var viewStationsBtn = document.getElementById('jp-view-stations');
+  var stationsExpirySelect = document.getElementById('jp-stations-expiry');
+  var VIEW_LS_KEY = 'jtcat-band-view';
+  var STATIONS_SORT_LS_KEY = 'jtcat-stations-sort';
+  var jpStations = JtcatStations.create();
+  var stationsView = false;
+  var stationsSort = 'last';
+  try {
+    stationsView = localStorage.getItem(VIEW_LS_KEY) === 'stations';
+    stationsSort = JtcatStations.normalizeSort(localStorage.getItem(STATIONS_SORT_LS_KEY));
+  } catch (e) {}
+
+  function jpStationsContext() {
+    var a = document.querySelector('.jp-band-opt.active');
+    return { band: a ? a.dataset.band : '', mode: modeSelect ? modeSelect.value : '', now: Date.now() };
+  }
+  // Band Activity was emptied (Clear, a band or mode change, Stop): so is the list.
+  function jpStationsClear() {
+    if (!jpStations) return;
+    JtcatStations.clear(jpStations);
+    renderStations();
+  }
+  // The stream's filters, on the station's latest decode. The search also
+  // matches the columns the row shows (call, calling, grid, country, state).
+  function stationVisible(e) {
+    if (!e.decode) return true;
+    var c = classifyDecode(e.decode);
+    c.upper = [e.call, e.calling, e.grid, e.entity, e.state, c.upper].join(' ').toUpperCase();
+    return decodeVisible(c);
+  }
+  function stationRowClass(e) {
+    var me = (myCallsign || '').toUpperCase();
+    return 'jp-st-row' + (/^CQ\b/.test(e.calling) ? ' jp-st-cq' : '') + (me && e.calling === me ? ' jp-st-me' : '');
+  }
+  function renderStations() {
+    if (!stationsView || !stationsEl || !jpStations) return;
+    var now = Date.now();
+    var all = JtcatStations.list(jpStations, { sort: stationsSort, now: now });
+    var shown = all.filter(stationVisible);
+    var html = '<div class="jp-st-row jp-st-head">' + DecodeRow.stationHeaderInner('jp', stationsSort) + '</div>';
+    if (!all.length) html += '<div class="jp-empty">No stations heard yet</div>';
+    else if (!shown.length) html += '<div class="jp-empty">No stations match the current filter</div>';
+    for (var i = 0; i < shown.length; i++) {
+      html += '<div class="' + stationRowClass(shown[i]) + '" data-call="' + esc(shown[i].call) + '">' +
+        DecodeRow.stationRowInner(shown[i], now, 'jp') + '</div>';
+    }
+    var top = stationsEl.scrollTop;
+    stationsEl.innerHTML = html;
+    stationsEl.scrollTop = top;
+  }
+  // Once a second: drop the stations past the expiry, and move every Age on
+  // in place (a full redraw between the two clicks of a double-click would
+  // lose it).
+  setInterval(function() {
+    if (!stationsView || !jpStations) return;
+    var now = Date.now();
+    if (JtcatStations.expire(jpStations, now)) { renderStations(); return; }
+    var rows = stationsEl.querySelectorAll('.jp-st-row[data-call]');
+    for (var i = 0; i < rows.length; i++) {
+      var e = jpStations.byCall[rows[i].getAttribute('data-call')];
+      var age = rows[i].querySelector('.jp-st-age');
+      if (e && age) age.textContent = DecodeRow.formatAge(now - e.lastHeard);
+    }
+  }, 1000);
+  function stationFromEvent(ev) {
+    var row = ev.target && ev.target.closest ? ev.target.closest('.jp-st-row[data-call]') : null;
+    var e = row ? jpStations.byCall[row.getAttribute('data-call')] : null;
+    return e && e.decode ? e : null;
+  }
+  if (stationsEl) {
+    stationsEl.addEventListener('dblclick', function(ev) {
+      var e = stationFromEvent(ev);
+      if (e) onDecodeRowClick(e.decode);
+    });
+    stationsEl.addEventListener('contextmenu', function(ev) {
+      var e = stationFromEvent(ev);
+      if (e) openRowMenu(ev, e.decode);
+    });
+    stationsEl.addEventListener('click', function(ev) {
+      var h = ev.target && ev.target.closest ? ev.target.closest('.jp-st-head [data-sort]') : null;
+      if (!h) return;
+      stationsSort = JtcatStations.normalizeSort(h.getAttribute('data-sort'));
+      try { localStorage.setItem(STATIONS_SORT_LS_KEY, stationsSort); } catch (e) {}
+      renderStations();
+    });
+  }
+  function setBandView(toStations, save) {
+    stationsView = !!toStations;
+    bandActivity.hidden = stationsView;
+    if (stationsEl) stationsEl.hidden = !stationsView;
+    if (viewStreamBtn) viewStreamBtn.classList.toggle('active', !stationsView);
+    if (viewStationsBtn) viewStationsBtn.classList.toggle('active', stationsView);
+    if (save) { try { localStorage.setItem(VIEW_LS_KEY, stationsView ? 'stations' : 'stream'); } catch (e) {} }
+    if (stationsView) renderStations();
+    else bandActivity.scrollTop = bandActivity.scrollHeight;
+  }
+  if (viewStreamBtn) viewStreamBtn.addEventListener('click', function() { setBandView(false, true); });
+  if (viewStationsBtn) viewStationsBtn.addEventListener('click', function() { setBandView(true, true); });
+  function applyStationsExpiry(v, persist) {
+    var n = JtcatStations.setExpiryMin(jpStations, v);
+    if (stationsExpirySelect) stationsExpirySelect.value = String(n);
+    if (persist) window.api.saveSettings({ jtcatStationsExpiryMin: n });
+    renderStations();
+  }
+  if (stationsExpirySelect) stationsExpirySelect.addEventListener('change', function() { applyStationsExpiry(stationsExpirySelect.value, true); });
+  setBandView(stationsView, false);
 
   function renderDecodes(data) {
     var results = data.results || [];
@@ -1306,6 +1425,11 @@ function _applyPopoutTheme(payload) {
 
       plotDecode(d);
     });
+
+    // Stations view: fold this cycle in (after the slot is stamped on each
+    // decode, so a row click answers in the right slot).
+    JtcatStations.addDecodes(jpStations, results, jpStationsContext());
+    renderStations();
 
     clearOld();
     // Auto-scroll
@@ -1558,6 +1682,7 @@ function _applyPopoutTheme(payload) {
     document.body.classList.toggle('jp-engine-stopped', on);
     if (on) {
       decodeLog = [];
+      jpStationsClear();
       bandActivity.innerHTML = '<div class="jp-empty">Stopped</div>';
     }
     syncBandMode();
@@ -2454,6 +2579,7 @@ function _applyPopoutTheme(payload) {
 
     // Clear decode log
     bandActivity.innerHTML = '<div class="jp-empty">Multi-slice decoding...</div>';
+    jpStationsClear();
     myActivity.innerHTML = '<div class="jp-empty">No activity yet</div>';
 
     // Auto-focus first slice for waterfall
@@ -2644,6 +2770,7 @@ function _applyPopoutTheme(payload) {
 
   document.getElementById('jp-clear').addEventListener('click', function() {
     bandActivity.innerHTML = '<div class="jp-empty">Waiting for decodes...</div>';
+    jpStationsClear();
     myActivity.innerHTML = '<div class="jp-empty">No activity yet</div>';
   });
 
@@ -3585,6 +3712,7 @@ function _applyPopoutTheme(payload) {
     if (btn) btn.classList.add('active');
     bandSelectFollowActive();
     decodeLog = [];
+    jpStationsClear();
     bandActivity.innerHTML = '<div class="jp-empty">Following the radio to ' + esc(d.band || FreqDots.khzMhz(khz)) + '...</div>';
     myActivity.innerHTML = '<div class="jp-empty">No activity yet</div>';
     markerLayer.clearLayers();
@@ -3618,6 +3746,7 @@ function _applyPopoutTheme(payload) {
     btn.classList.add('active');
     // Clear decodes
     decodeLog = [];
+    jpStationsClear();
     bandActivity.innerHTML = '<div class="jp-empty">' + (save ? 'Switching to ' + btn.dataset.band + '...' : 'Waiting for signals...') + '</div>';
     myActivity.innerHTML = '<div class="jp-empty">No activity yet</div>';
     markerLayer.clearLayers();
@@ -3920,6 +4049,7 @@ function _applyPopoutTheme(payload) {
       // band that suddenly went strange, so clear down exactly as a band
       // change does.
       decodeLog = [];
+      jpStationsClear();
       bandActivity.innerHTML = '<div class="jp-empty">' + (d.from || 'That mode') +
         ' was quiet — listening on ' + d.mode + '...</div>';
       myActivity.innerHTML = '<div class="jp-empty">No activity yet</div>';
