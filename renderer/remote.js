@@ -10394,7 +10394,35 @@
     var heldBy = null;   // 'dit' | 'dah': the held contact that chose this element
     var undoState = null; // the keyer before that choice
     var soundAt = 0;     // performance.now() when this element starts to sound
+    var chosenAt = 0;    // performance.now() when the keyer chose it
     var RETRACT_MARGIN_MS = 2;
+    // 1.14.5 retest (#244): the window above ended where the element began
+    // to sound in the PAGE, and it was measured when the release was
+    // PROCESSED. Neither is when the operator acts. His cw-diag on 1.14.5:
+    // 57 ms from choice to speaker, 40 ms of it the device's output, and
+    // paddle input up to 40 ms late, at 25 wpm (48 ms dit and space). So a
+    // release he made before he could hear the element still arrived after
+    // the page had started it, and the element was kept: one more dot or
+    // dash. Now the release counts at the time it HAPPENED (the event's own
+    // timestamp), and it withdraws the element if it happened before the
+    // element reached his ear (start + the device's output latency, at most
+    // HEARD_LAG_MAX_MS). The shack replays the stream at least 120 ms behind
+    // its arrival, so a cancel sent within RETRACT_RF_MAX_MS of the choice
+    // reaches it first; later than that the element is kept, never cut.
+    var RETRACT_RF_MAX_MS = 100;
+    var HEARD_LAG_MAX_MS = 60;
+    function heardLagMs() {
+      var v = (typeof cwHeardLagMs === 'function') ? Number(cwHeardLagMs()) : 0;
+      return (v > 0) ? Math.min(HEARD_LAG_MAX_MS, v) : 0;
+    }
+    // When the contact really opened: the event's timestamp (same origin as
+    // performance.now()) when it is sane, else now.
+    function releaseTime(atMs) {
+      var now = performance.now();
+      var t = Number(atMs);
+      if (!(t > 0) || t > now + 5 || t < now - 200) return now;
+      return Math.min(t, now);
+    }
     function ditMs() { return Math.round(1200 / wpm); }
     function dahMs() { return ditMs() * 3; }
     function clearTimers() {
@@ -10407,8 +10435,9 @@
       bothAtStart = ditPressed && dahPressed;
       ditLatch = false; dahLatch = false;
       heldBy = null; undoState = null;
+      chosenAt = performance.now();
       var lead = onKey(true, isDit ? ditMs() : dahMs(), { continued: !!continued, spaceMs: ditMs() });
-      soundAt = performance.now() + (Number(lead) > 0 ? Number(lead) : 0);
+      soundAt = chosenAt + (Number(lead) > 0 ? Number(lead) : 0);
       clearTimers();
       timerDue = performance.now() + (isDit ? ditMs() : dahMs());
       toneTimer = setTimeout(onToneEnd, isDit ? ditMs() : dahMs());
@@ -10457,9 +10486,14 @@
     }
     // The contact whose hold chose the element now sounding-soon opened: take
     // the element back and choose again as if the release had come in time.
-    function retractHeldBy(contact) {
-      if (state !== TONE || heldBy !== contact || !undoState) return;
-      if (performance.now() >= soundAt - RETRACT_MARGIN_MS) return; // already sounding
+    function retractHeldBy(contact, atMs) {
+      // TONE or the space after it: a dit is over in the keyer's own time
+      // before the operator has heard it (#244), so a late release can land
+      // in the space; heldBy is cleared when the next element starts.
+      if ((state !== TONE && state !== IES) || heldBy !== contact || !undoState) return;
+      var now = performance.now();
+      if (releaseTime(atMs) >= soundAt + heardLagMs() - RETRACT_MARGIN_MS) return; // he could hear it
+      if (now - chosenAt > RETRACT_RF_MAX_MS) return; // the shack may already be keying it
       var u = undoState;
       clearTimers();
       heldBy = null; undoState = null;
@@ -10471,7 +10505,7 @@
       state = IES;
       chooseNext();
     }
-    function handleDit(pressed) {
+    function handleDit(pressed, atMs) {
       ditPressed = pressed;
       if (mode === 'straight') { onKey(pressed); return; }
       if (pressed) {
@@ -10484,10 +10518,10 @@
         // Ghost-press cleanup (Android BT MIDI etc. — matches server keyer)
         var held = Date.now() - ditPressStart;
         if (ditLatch && held < GHOST_MS && state !== IDLE) ditLatch = false;
-        retractHeldBy('dit');
+        retractHeldBy('dit', atMs);
       }
     }
-    function handleDah(pressed) {
+    function handleDah(pressed, atMs) {
       dahPressed = pressed;
       if (mode === 'straight') return;
       if (pressed) {
@@ -10499,12 +10533,13 @@
         dahReleaseAt = Date.now();
         var held = Date.now() - dahPressStart;
         if (dahLatch && held < GHOST_MS && state !== IDLE) dahLatch = false;
-        retractHeldBy('dah');
+        retractHeldBy('dah', atMs);
       }
     }
     return {
-      paddleDit: function(pressed) { swap ? handleDah(pressed) : handleDit(pressed); },
-      paddleDah: function(pressed) { swap ? handleDit(pressed) : handleDah(pressed); },
+      // atMs: when the contact changed (the input event's timeStamp), optional.
+      paddleDit: function(pressed, atMs) { swap ? handleDah(pressed, atMs) : handleDit(pressed, atMs); },
+      paddleDah: function(pressed, atMs) { swap ? handleDit(pressed, atMs) : handleDah(pressed, atMs); },
       setWpm: function(v) { wpm = Math.max(5, Math.min(50, v | 0)); },
       setMode: function(m) {
         if (m === 'iambicA' || m === 'iambicB' || m === 'straight') {
@@ -10574,6 +10609,11 @@
   // he releases late and the keyer honestly sends one more. One line per
   // over in the desktop log says which: cw-diag, sent after 1.5 s of quiet.
   var cwDiag = null, cwDiagTimer = null;
+  // How long after a tone starts on the audio clock the operator hears it:
+  // the device's output latency (the keyer's withdraw window, #244).
+  function cwHeardLagMs() {
+    return cwAudioCtx ? ((cwAudioCtx.baseLatency || 0) + (cwAudioCtx.outputLatency || 0)) * 1000 : 0;
+  }
   function cwDiagNote(kind, ms) {
     ms = Math.max(0, Number(ms) || 0);
     if (!cwDiag) cwDiag = { elements: 0, timerMax: 0, timerSum: 0, timerN: 0, inputMax: 0, aheadMax: 0, aheadSum: 0 };
@@ -10647,8 +10687,19 @@
   // keying at the shack (a cancelling key-up just before its start; the
   // playout drops what is scheduled after that), and give its slot back.
   function retractPaddleElement() {
-    if (paddleGain && cwAudioCtx && paddleLastAt) paddleGain.gain.cancelScheduledValues(paddleLastAt);
-    paddleNextAt = paddleLastAt;
+    if (paddleGain && cwAudioCtx && paddleLastAt) {
+      var g = paddleGain.gain, nowA = cwAudioCtx.currentTime;
+      if (nowA > paddleLastAt) {
+        // The page had already started rendering this tone (the release came
+        // in late, #244): hold where it is and fade out in 3 ms, no click.
+        if (typeof g.cancelAndHoldAtTime === 'function') g.cancelAndHoldAtTime(nowA);
+        else { var v = g.value; g.cancelScheduledValues(nowA); g.setValueAtTime(v, nowA); }
+        g.linearRampToValueAtTime(0, nowA + 0.003);
+      } else {
+        g.cancelScheduledValues(paddleLastAt);
+      }
+      paddleNextAt = Math.max(paddleLastAt, nowA);
+    } else paddleNextAt = paddleLastAt;
     if (cwKeyStreamOk && cwStreamLastAt && ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'cw-key', at: cwStreamLastAt - 1, down: false, cancel: true }));
       cwStreamNextAt = cwStreamLastAt;
@@ -11537,7 +11588,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
   // they sit in (a silent `typeof` miss would bring the stuck key back).
   window.__echocatReleasePaddles = releaseAllPaddles;
 
-  function sendPaddle(contact, state) {
+  function sendPaddle(contact, state, atMs) {
     // Drive the local iambic keyer first (zero-latency sidetone) then forward
     // to the server over WS (which does the real radio keying). Skip both
     // sides when desktop has reported paddle keying can't reach the radio
@@ -11546,8 +11597,9 @@ var _paddleHoldTimer = { dit: null, dah: null };
     // Presses only: a release always goes out (see releaseAllPaddles).
     if (!cwPaddleAvailable && state) return;
     ensureCwAudioCtx();
-    if (contact === 'dit') localCwKeyer.paddleDit(!!state);
-    else if (contact === 'dah') localCwKeyer.paddleDah(!!state);
+    // atMs: the input event's timeStamp (a late release counts when it happened, #244)
+    if (contact === 'dit') localCwKeyer.paddleDit(!!state, atMs);
+    else if (contact === 'dah') localCwKeyer.paddleDah(!!state, atMs);
     if (ws && ws.readyState === WebSocket.OPEN && !cwKeyStreamOk) {
       if (state && !_paddleRttSentAt) _paddleRttSentAt = performance.now();
       ws.send(JSON.stringify({ type: 'paddle', contact: contact, state: state }));
@@ -11632,11 +11684,11 @@ var _paddleHoldTimer = { dit: null, dah: null };
     if (contact === 'dit') {
       e.preventDefault();
       ditDown = false;
-      sendPaddle('dit', 0);
+      sendPaddle('dit', 0, e.timeStamp);
     } else if (contact === 'dah') {
       e.preventDefault();
       dahDown = false;
-      sendPaddle('dah', 0);
+      sendPaddle('dah', 0, e.timeStamp);
     }
   });
 
@@ -11708,10 +11760,10 @@ var _paddleHoldTimer = { dit: null, dah: null };
     // Normal operation — map notes to paddle contacts
     if (note === ecMidiDitNote) {
       if (isNoteOn) { if (!ditDown) { ditDown = true; sendPaddle('dit', 1); } }
-      else if (isNoteOff) { ditDown = false; sendPaddle('dit', 0); }
+      else if (isNoteOff) { ditDown = false; sendPaddle('dit', 0, msg.timeStamp); }
     } else if (note === ecMidiDahNote) {
       if (isNoteOn) { if (!dahDown) { dahDown = true; sendPaddle('dah', 1); } }
-      else if (isNoteOff) { dahDown = false; sendPaddle('dah', 0); }
+      else if (isNoteOff) { dahDown = false; sendPaddle('dah', 0, msg.timeStamp); }
     }
   }
 
