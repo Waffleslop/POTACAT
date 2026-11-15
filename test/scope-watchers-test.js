@@ -32,7 +32,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 console.log('lib/scope-watchers.js');
 unit('two devices: one leaving keeps the scope; the last leaving stops it', () => {
   const w = createScopeWatchers();
-  assert.deepStrictEqual(w.summary(), { wants: false, digital: false, guest: false, count: 0 });
+  assert.deepStrictEqual(w.summary(), { wants: false, digital: false, winlink: false, guest: false, count: 0 });
   assert.strictEqual(w.subscribe('c1', { on: true }).wants, true);
   assert.strictEqual(w.subscribe('c2', { on: true }).count, 2);
   const s = w.subscribe('c1', { on: false });
@@ -57,7 +57,7 @@ unit('a device whose connection is gone is removed, goodbye said or not', () => 
 unit('clear: every device gone at once', () => {
   const w = createScopeWatchers();
   w.subscribe('c1', { on: true, guest: true }); w.setDigital('c1', true); w.subscribe('c2', { on: true });
-  assert.deepStrictEqual(w.clear(), { wants: false, digital: false, guest: false, count: 0 });
+  assert.deepStrictEqual(w.clear(), { wants: false, digital: false, winlink: false, guest: false, count: 0 });
 });
 unit('digital view: counted while that device watches, ends with its view or its connection', () => {
   const w = createScopeWatchers();
@@ -71,6 +71,22 @@ unit('digital view: counted while that device watches, ends with its view or its
   w.setDigital('c1', true); w.subscribe('c3', { on: true });
   assert.strictEqual(w.remove('c1').digital, false, 'its connection gone');
   assert.strictEqual(w.summary().wants, true, 'c3 still watching');
+});
+unit('the Winlink view is counted apart from the JTCAT view, per device', () => {
+  const w = createScopeWatchers();
+  w.subscribe('c1', { on: true });
+  let s = w.setDigital('c1', true, 'winlink');
+  assert.strictEqual(s.winlink, true);
+  assert.strictEqual(s.digital, false, 'the Winlink view is not the FT8 view');
+  s = w.setDigital('c1', true);
+  assert.strictEqual(s.digital, true);
+  s = w.setDigital('c1', false, 'winlink');
+  assert.deepStrictEqual([s.digital, s.winlink], [true, false], 'ending one view keeps the other');
+  w.setDigital('c1', true, 'winlink');
+  assert.strictEqual(w.subscribe('c1', { on: false }).winlink, false, 'ends with its scope view');
+  w.subscribe('c2', { on: true }); w.setDigital('c2', true, 'winlink');
+  assert.strictEqual(w.remove('c2').winlink, false, 'ends with its connection');
+  assert.strictEqual(w.setDigital('c3', true, 'nonsense').digital, false, 'an unknown view is the JTCAT view, counted once c3 watches');
 });
 unit('guest: true while any watching device holds a Guest Pass', () => {
   const w = createScopeWatchers();
@@ -164,7 +180,7 @@ unit('guest: true while any watching device holds a Guest Pass', () => {
   const rsSrc = readSrc(path.join(__dirname, '..', 'lib', 'remote-server.js')).replace(/\r\n/g, '\n');
   check(/remoteServer\.on\('scope-subscribe', \(\{ on, guest, clientId \}\) => \{[\s\S]{0,300}scopeWatchers\.subscribe\(clientId, \{ on, guest \}\)/.test(main), 'scope-subscribe counts the device');
   check(/remoteServer\.on\('scope-client-gone'[\s\S]{0,400}scopeWatchers\.remove\(clientId\)[\s\S]{0,400}stopYaesuScope\(/.test(main), 'a device gone is removed; the scope stops after the last');
-  check(/remoteServer\.on\('scope-digital-view', \(\{ on, clientId \} = \{\}\) => \{[\s\S]{0,200}scopeWatchers\.setDigital\(clientId, on\)/.test(main), 'the digital view is per device');
+  check(/remoteServer\.on\('scope-digital-view', \(\{ on, clientId, view \} = \{\}\) => \{[\s\S]{0,300}scopeWatchers\.setDigital\(clientId, on, view\)/.test(main), 'the digital view is per device, per view');
   const sets = main.split('\n').filter((l) => /^\s*(?!let )\S.*\byaesuScopeRemote(Wants|Digital) = /.test(l) || /^\s*yaesuScopeRemote(Wants|Digital) = /.test(l));
   check(sets.length === 2 && sets.every((l) => /= sum\.(wants|digital);/.test(l)), 'no shared on/off switch: the flags are set only from the watchers (' + sets.length + ' places)');
   // The listeners sit in the same hook as the other scope listeners (remote-server-rewire-test checks they are hooks).

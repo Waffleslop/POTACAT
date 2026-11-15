@@ -171,14 +171,14 @@ check('the view is only for the JTCAT strip, and the operator zoom comes back', 
 check('an ECHOCAT device showing FT8 gets the digital view too (C2S scope-digital-view)', () => {
   const fn = /function flexDigitalViewWanted\(\) \{[\s\S]*?\n\}/.exec(main)[0];
   assert.ok(/yaesuScopeRemoteDigital && yaesuScopeRemoteWants && ft8Engine\._running/.test(fn), 'device + subscribed + engine running');
-  assert.ok(/remoteServer\.on\('scope-digital-view'[\s\S]{0,200}flexDigitalViewSync\(\)/.test(main));
+  assert.ok(/remoteServer\.on\('scope-digital-view'[\s\S]{0,500}flexDigitalViewSync\(\)/.test(main));
   const disc = /remoteServer\.on\('client-disconnected'[\s\S]{0,900}/.exec(main)[0];
   // #358: the flags follow scopeWatchers; the last device gone clears them all.
   assert.ok(/scopeRemoteApply\(scopeWatchers\.clear\(\)\)/.test(disc), 'ends with the socket');
   assert.ok(/remoteServer\.on\('scope-client-gone'[\s\S]{0,600}scopeWatchers\.remove\(clientId\)/.test(main), 'ends with that one device\'s socket too');
   const rs = readSrc(path.join(ROOT, 'lib/remote-server.js'));
-  assert.ok(/'scope-digital-view'\]/.test(rs), 'hello capability');
-  assert.ok(/case 'scope-digital-view':[\s\S]{0,300}this\.emit\('scope-digital-view'/.test(rs));
+  assert.ok(/'scope-digital-view'[,\]]/.test(rs), 'hello capability');
+  assert.ok(/case 'scope-digital-view':[\s\S]{0,600}this\.emit\('scope-digital-view'/.test(rs));
   const proto = require('../lib/echocat-protocol.js');
   const reg = proto.MESSAGES || proto.messages || proto.PROTOCOL || proto;
   assert.ok(JSON.stringify(Object.keys(reg)).includes('scope-digital-view') || readSrc(path.join(ROOT, 'lib/echocat-protocol.js')).includes("'scope-digital-view': { dir: Dir.C2S"));

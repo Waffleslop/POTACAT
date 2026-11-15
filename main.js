@@ -26782,7 +26782,7 @@ function connectRemote() {
     // start for the next one that never asked (mobile handoff, follow-up 2).
     // This fires when the LAST device is gone; one of several leaving is
     // 'scope-client-gone' (#358).
-    const hadRemoteScope = yaesuScopeRemoteWants || yaesuScopeRemoteDigital;
+    const hadRemoteScope = yaesuScopeRemoteWants || yaesuScopeRemoteDigital || yaesuScopeRemoteWinlink;
     scopeRemoteApply(scopeWatchers.clear());
     if (hadRemoteScope) {
       if (!yaesuScopeWanted()) { try { stopYaesuScope('ECHOCAT client disconnected'); } catch { /* not running */ } }
@@ -28283,10 +28283,12 @@ function connectRemote() {
   });
   // The phone's FT8 tab (or its Pan in a digital mode) asks for the digital
   // view on a Flex pan; its Pan outside FT8 keeps the operator's own zoom.
-  remoteServer.on('scope-digital-view', ({ on, clientId } = {}) => {
-    const before = yaesuScopeRemoteDigital;
-    scopeRemoteApply(scopeWatchers.setDigital(clientId, on));
-    if (yaesuScopeRemoteDigital === before) return;
+  // view 'winlink': the phone's Mail tab shows the scope; the pan centres on
+  // the Winlink modem's channel (counted apart from the JTCAT view).
+  remoteServer.on('scope-digital-view', ({ on, clientId, view } = {}) => {
+    const before = yaesuScopeRemoteDigital, beforeWl = yaesuScopeRemoteWinlink;
+    scopeRemoteApply(scopeWatchers.setDigital(clientId, on, view));
+    if (yaesuScopeRemoteDigital === before && yaesuScopeRemoteWinlink === beforeWl) return;
     flexDigitalViewSync();
   });
   remoteServer.on('scope-span', ({ spanHz, guest } = {}) => { setScopeSpan(spanHz, 'ECHOCAT device', { guest }); });
@@ -33625,6 +33627,7 @@ let yaesuScopeStartAfterExit = false;
 let yaesuScopeSynth = false;         // generated signal, no radio (pop-out gear menu)
 let yaesuScopeRemoteWants = false;   // an ECHOCAT client has its Scope view open (any of them: scopeWatchers)
 let yaesuScopeRemoteDigital = false; // C2S scope-digital-view: the client shows FT8 / a digital Pan
+let yaesuScopeRemoteWinlink = false; // C2S scope-digital-view {view: 'winlink'}: a device's Mail tab shows the scope
 let yaesuScopeJtcatWants = false;    // the JTCAT pop-out is showing the band scope strip
 let yaesuScopeBandspreadWants = false;   // the Bandspread window draws the scope trace behind its spots
 let yaesuScopeRemoteIsGuest = false; // ...and that client holds a Guest Pass (may watch, never change the radio)
@@ -33634,6 +33637,7 @@ const scopeWatchers = createScopeWatchers();
 function scopeRemoteApply(sum) {
   yaesuScopeRemoteWants = sum.wants;
   yaesuScopeRemoteDigital = sum.digital;
+  yaesuScopeRemoteWinlink = !!sum.winlink;
   yaesuScopeRemoteIsGuest = sum.guest;
   return sum;
 }
@@ -34688,15 +34692,26 @@ function startFlexScope() {
  */
 let flexDigitalViewKey = '';
 function flexDigitalViewWanted() {
-  if (!flexScopeOn || !ft8Engine) return null;
+  if (!flexScopeOn) return null;
   // The desktop's FT8 strip, or an ECHOCAT device showing FT8 (C2S
   // scope-digital-view) while the engine runs.
-  const strip = yaesuScopeJtcatWants && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed();
-  const device = yaesuScopeRemoteDigital && yaesuScopeRemoteWants && ft8Engine._running
-    && remoteServer && remoteServer.running && remoteServer.hasClient();
-  if (!strip && !device) return null;
+  const strip = !!(ft8Engine && yaesuScopeJtcatWants && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed());
+  const device = !!(ft8Engine && yaesuScopeRemoteDigital && yaesuScopeRemoteWants && ft8Engine._running
+    && remoteServer && remoteServer.running && remoteServer.hasClient());
+  // The Winlink view (2026-11-15): a radio session runs, or a device's Mail
+  // tab shows the scope (C2S scope-digital-view {view: 'winlink'}).
+  const wlSession = winlinkSessionActive() && WinlinkModes.isRadioMode(winlinkState.session.mode);
+  const wlAsked = !!(yaesuScopeRemoteWinlink && yaesuScopeRemoteWants && remoteServer && remoteServer.running && remoteServer.hasClient());
+  const pick = ScopeDigitalView.pickView({ winlinkSession: wlSession, jtcatWanted: strip || device, winlinkAsked: wlAsked });
+  if (!pick) return null;
   const id = smartSdr && (smartSdr.panScopeId || smartSdr.ourPanId);
   const g = (id && flexPanGeometry[id]) || {};
+  if (pick === 'winlink') {
+    const mode = wlSession ? winlinkState.session.mode : WinlinkModes.pickWinlinkMode(winlinkState.snapshot().modes, settings.winlinkDefaultMode || 'telnet');
+    if (!WinlinkModes.isRadioMode(mode)) return null;
+    return ScopeDigitalView.winlinkView({ band: WinlinkSpectrum.markerBand(mode, winlinkModemBw()), rigMode: _currentMode,
+      digOffsetHz: ScopeDigitalView.flexDigOffsetHz(_currentMode, _flexSliceKv), minSpanHz: g.minSpanHz });
+  }
   return ScopeDigitalView.digitalView({ mode: ft8Engine._mode, rigMode: _currentMode, minSpanHz: g.minSpanHz });
 }
 function flexDigitalViewSync() {
@@ -34718,7 +34733,7 @@ function flexDigitalViewSync() {
     smartSdr.setPanBandwidth(v.spanHz);
     yaesuScopeState.spanHz = v.spanHz;   // the pan status confirms (or clamps) it
     if (dial) flexScopeAskCenter(dial + v.offsetHz);
-    sendCatLog(`[Scope] Flex panadapter: ${ft8Engine._mode} view, ${v.spanHz} Hz wide, centred ${v.offsetHz > 0 ? '+' : ''}${v.offsetHz} Hz from the dial (decode window ${v.window.lo} to ${v.window.hi} Hz)`);
+    sendCatLog(`[Scope] Flex panadapter: ${v.kind === 'winlink' ? 'Winlink' : ft8Engine._mode} view, ${v.spanHz} Hz wide, centred ${v.offsetHz > 0 ? '+' : ''}${v.offsetHz} Hz from the dial (${v.kind === 'winlink' ? `the modem's channel ${v.window.lo} to ${v.window.hi} Hz${ScopeDigitalView.flexDigOffsetHz(_currentMode, _flexSliceKv) ? `, with the slice's ${String(_currentMode).toUpperCase()} offset of ${ScopeDigitalView.flexDigOffsetHz(_currentMode, _flexSliceKv)} Hz` : ''}` : `decode window ${v.window.lo} to ${v.window.hi} Hz`})`);
   } else if (wasOn) {
     flexScopeWantOffsetHz = 0;
     flexDigitalView = null;
