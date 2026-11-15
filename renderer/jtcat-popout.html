@@ -54,10 +54,12 @@
     .jp-stations { padding: 0; overflow-x: auto; container: jp-stations / inline-size; }
     /* Call, Need, Calling, Park, Grid, Country, State, dB, Hz, Age (#557). */
     .jp-st-row { display: grid; grid-template-columns: 10ch 74px 8ch 10ch 4ch minmax(5ch, 1fr) 5ch 3ch 4ch 3ch; column-gap: 8px; padding: 3px 10px; align-items: baseline; cursor: pointer; border-bottom: 1px solid var(--border-primary); }
-    /* A half-width pane: Grid and Hz step aside (a new grid still shows as G). */
+    /* A half-width pane: Grid, State and Hz step aside (a new grid or state
+       still shows in Need). Fixed tracks are 34ch + 74px, so the row fits 520px
+       with room to spare even where the monospace runs 10px a character. */
     @container jp-stations (max-width: 640px) {
-      .jp-st-row { grid-template-columns: 10ch 74px 8ch 10ch minmax(5ch, 1fr) 5ch 3ch 3ch; column-gap: 6px; padding: 3px 8px; }
-      .jp-st-row > .jp-st-grid, .jp-st-row > .jp-st-df { display: none; }
+      .jp-st-row { grid-template-columns: 10ch 74px 8ch 10ch minmax(4ch, 1fr) 3ch 3ch; column-gap: 6px; padding: 3px 8px; }
+      .jp-st-row > .jp-st-grid, .jp-st-row > .jp-st-state, .jp-st-row > .jp-st-df { display: none; }
     }
     .jp-st-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .jp-st-row:hover { background: var(--bg-hover); }

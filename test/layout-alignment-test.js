@@ -186,10 +186,17 @@ if (!data) {
           if (r.id !== 'header') assert.ok(c.sw <= c.cw + PX, `${k}: ${key} on "${r.id}" is cut off (${c.sw}px of content in ${c.cw}px)`);
         }
       }
-      // A half-width pane (520) lets Grid and Hz step aside; a wide one (900) shows every column.
-      const hidden = ['st-grid', 'st-df'].filter(key => cellByPrefix(rows[1], 'jp', key).width === 0);
-      if (/-520-/.test(k)) assert.deepStrictEqual(hidden, ['st-grid', 'st-df'], `${k}: Grid and Hz step aside at 520`);
+      // A half-width pane (520) lets Grid, State and Hz step aside; a wide one (900) shows every column.
+      const hidden = ['st-grid', 'st-state', 'st-df'].filter(key => cellByPrefix(rows[1], 'jp', key).width === 0);
+      if (/-520-/.test(k)) assert.deepStrictEqual(hidden, ['st-grid', 'st-state', 'st-df'], `${k}: Grid, State and Hz step aside at 520`);
       if (/-900-/.test(k)) assert.deepStrictEqual(hidden, [], `${k}: every column shows at 900`);
+      // Room to spare (CI's Linux monospace is about 10% wider than Windows'): Country is
+      // the one flexible column, so it must keep well over its 4ch floor (about 40px) on
+      // every row, the sorted header included, or a wider font pushes Age off the edge.
+      for (const r of rows) {
+        const country = cellByPrefix(r, 'jp', 'st-country');
+        assert.ok(country.width >= 64, `${k}: Country is only ${country.width}px wide on "${r.id}" - too little room left for a wider font`);
+      }
       for (const r of rows) {
         for (const c of r.cells) assert.ok(c.left + c.width <= r.box.left + r.box.width + PX, `${k}: cell "${c.cls}" on "${r.id}" runs past the row's right edge`);
       }
