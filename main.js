@@ -2196,6 +2196,10 @@ function noteOwnerActivity(kind) {
 function onOwnerIdleOffered(session) {
   void session;
 }
+// The radio's own word that it is transmitting (CAT TX status, forward
+// power), debounced to 1 s: the owner on the hand mic at the radio is using
+// it (#200 step 4). Counts only while the owner holds a lent radio.
+const _radioTxWatch = require('./lib/pass-owner-activity').createRadioTxWatch({ onActive: (kind) => noteOwnerActivity(kind) });
 // Active ALSA capture sessions (Linux raw hw:/plughw: devices). Assigned in the
 // ipcMain handler block below; declared here at module scope so gracefulCleanup()
 // can stop every session on quit. If left running, each session's setInterval
@@ -4902,6 +4906,7 @@ function remoteMeterPush(type, value) {
 
 function sendCatFwdPower(watts) {
   noteMeterSeen('power');
+  if (!isRemoteMode()) _radioTxWatch.fwd(Number(watts) || 0);
   const w = Math.round((Number(watts) || 0) * 10) / 10;
   if (_stationSetupTxTest) {
     _stationSetupTxTest.fwdEvents++;
@@ -8657,6 +8662,7 @@ function serialHandshakeTrialSave(path) {
 }
 
 async function connectCat() {
+  _radioTxWatch.cat(false); // a dropped radio's last TX status is not a transmission (#200)
   // A new connection (or another rig) starts with nothing seen this session;
   // what this rig reported before still comes from rig.metersSeen.
   _metersSeenSession.clear();
@@ -8879,6 +8885,7 @@ async function connectCat() {
     // the next PC; poll overwrote it and no wattmeter ever drew it
     // (LZ3AW's "TX power meter not fixed", 2026-09-14).
     cat.on('powerMeter', sendCatFwdPower);
+    cat.on('ptt', (on) => _radioTxWatch.cat(on)); // the radio's TX status: owner use during a hold (#200)
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
@@ -8963,6 +8970,7 @@ async function connectCat() {
     // showed, and no wattmeter drew during a frame (#268, IC-7100).
     cat.on('power', sendCatPower);
     cat.on('powerMeter', sendCatFwdPower);
+    cat.on('ptt', (on) => _radioTxWatch.cat(on)); // the radio's TX status: owner use during a hold (#200)
     sendCatLog(`Connecting to rigctld on 127.0.0.1:${rigctldPort}`);
     transport.connect({ host: '127.0.0.1', port: rigctldPort });
 
@@ -9003,6 +9011,7 @@ async function connectCat() {
     // showed, and no wattmeter drew during a frame (#268, IC-7100).
     cat.on('power', sendCatPower);
     cat.on('powerMeter', sendCatFwdPower);
+    cat.on('ptt', (on) => _radioTxWatch.cat(on)); // the radio's TX status: owner use during a hold (#200)
     const { host, port } = resolveCatHostPort(target, 4532, 'remote rigctld');
     sendCatLog(`Connecting to remote rigctld on ${host}:${port}`);
     transport.connect({ host, port });
@@ -9028,6 +9037,7 @@ async function connectCat() {
     cat.on('mode', catModeHandler);
     cat.on('power', sendCatPower);
     cat.on('powerMeter', sendCatFwdPower);
+    cat.on('ptt', (on) => _radioTxWatch.cat(on)); // the radio's TX status: owner use during a hold (#200)
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
     const { host, port } = resolveCatHostPort(target, 12345, 'flrig');
@@ -9050,6 +9060,7 @@ async function connectCat() {
     });
     cat.on('frequency', catFrequencyHandler);
     cat.on('mode', catModeHandler);
+    cat.on('ptt', (on) => _radioTxWatch.cat(on)); // the radio's TX status: owner use during a hold (#200)
     const { host, port } = resolveCatHostPort(target, CommanderSequences.DEFAULT_PORT, 'DXLab Commander');
     sendCatLog(`Connecting to DXLab Commander on ${host}:${port}`);
     transport.connect({ host, port });
@@ -9076,6 +9087,7 @@ async function connectCat() {
     // the next PC; poll overwrote it and no wattmeter ever drew it
     // (LZ3AW's "TX power meter not fixed", 2026-09-14).
     cat.on('powerMeter', sendCatFwdPower);
+    cat.on('ptt', (on) => _radioTxWatch.cat(on)); // the radio's TX status: owner use during a hold (#200)
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
@@ -9120,6 +9132,7 @@ async function connectCat() {
     // the next PC; poll overwrote it and no wattmeter ever drew it
     // (LZ3AW's "TX power meter not fixed", 2026-09-14).
     cat.on('powerMeter', sendCatFwdPower);
+    cat.on('ptt', (on) => _radioTxWatch.cat(on)); // the radio's TX status: owner use during a hold (#200)
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
@@ -9147,6 +9160,7 @@ async function connectCat() {
     cat.on('mode', catModeHandler);
     cat.on('power', sendCatPower);
     cat.on('powerMeter', sendCatFwdPower);
+    cat.on('ptt', (on) => _radioTxWatch.cat(on)); // the radio's TX status: owner use during a hold (#200)
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);
@@ -9227,6 +9241,7 @@ async function connectCat() {
     // the next PC; poll overwrote it and no wattmeter ever drew it
     // (LZ3AW's "TX power meter not fixed", 2026-09-14).
     cat.on('powerMeter', sendCatFwdPower);
+    cat.on('ptt', (on) => _radioTxWatch.cat(on)); // the radio's TX status: owner use during a hold (#200)
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
 	    cat.on('swr', sendCatSwr);
@@ -9339,6 +9354,7 @@ async function connectCat() {
     // the next PC; poll overwrote it and no wattmeter ever drew it
     // (LZ3AW's "TX power meter not fixed", 2026-09-14).
     cat.on('powerMeter', sendCatFwdPower);
+    cat.on('ptt', (on) => _radioTxWatch.cat(on)); // the radio's TX status: owner use during a hold (#200)
     cat.on('nb', sendCatNb);
     cat.on('smeter', sendCatSmeter);
     cat.on('swr', sendCatSwr);

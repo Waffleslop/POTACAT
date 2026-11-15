@@ -82,7 +82,7 @@ const END = '2026-11-14T23:00:00.000Z';
 
   // ------------------------------------------------------------ 2. what counts
   await check('owner activity is one list; passive events do not count', () => {
-    assert.deepStrictEqual([...OA.KINDS], ['ptt', 'cw', 'tune', 'mode', 'jtcat-tx', 'winlink', 'data-tx']);
+    assert.deepStrictEqual([...OA.KINDS], ['ptt', 'cw', 'tune', 'mode', 'jtcat-tx', 'winlink', 'data-tx', 'radio-tx']);
     for (const k of OA.KINDS) assert.ok(OA.isOwnerActivity(k), k);
     for (const k of OA.PASSIVE) assert.ok(!OA.isOwnerActivity(k), 'passive: ' + k);
     for (const k of ['', null, undefined, 'decode', 'spots', 'smeter', 'swr']) assert.ok(!OA.isOwnerActivity(k), String(k));
@@ -104,6 +104,63 @@ const END = '2026-11-14T23:00:00.000Z';
       assert.strictEqual(kind({ type: t }), null, 'passive: ' + t);
     }
     assert.strictEqual(kind(null), null);
+  });
+
+  // ------------------------------------------------------------ 2b. the radio's own TX
+  // A fake clock with timers: run(ms) moves time and fires what is due.
+  function fakeTimers() {
+    const t = { now: 0, q: [], id: 0 };
+    t.setTimeout = (fn, ms) => { const h = { id: ++t.id, at: t.now + ms, fn }; t.q.push(h); return h; };
+    t.clearTimeout = (h) => { t.q = t.q.filter((x) => x !== h); };
+    t.run = (ms) => {
+      const end = t.now + ms;
+      for (;;) {
+        t.q.sort((a, b) => a.at - b.at);
+        const h = t.q[0];
+        if (!h || h.at > end) break;
+        t.q.shift(); t.now = h.at; h.fn();
+      }
+      t.now = end;
+    };
+    return t;
+  }
+  const watch = (t, hits) => OA.createRadioTxWatch({ onActive: (k) => hits.push([t.now, k]), now: () => t.now, setTimeout: t.setTimeout, clearTimeout: t.clearTimeout });
+
+  await check("radio-tx: the radio's TX status held 1 s counts, then every 30 s; a sub-second blip does nothing", () => {
+    const t = fakeTimers(); const hits = []; const w = watch(t, hits);
+    w.cat(true); t.run(400); w.cat(false); t.run(5000);
+    assert.deepStrictEqual(hits, [], 'a 0.4 s blip is not use');
+    w.cat(true); t.run(999);
+    assert.deepStrictEqual(hits, [], 'not before 1 s');
+    t.run(1);
+    assert.deepStrictEqual(hits, [[t.now, 'radio-tx']], 'counted at 1 s');
+    t.run(60 * 1000);
+    assert.strictEqual(hits.length, 3, 'a long over counts again every 30 s: ' + JSON.stringify(hits));
+    w.cat(false); t.run(60 * 1000);
+    assert.strictEqual(hits.length, 3, 'nothing after the over');
+  });
+
+  await check('radio-tx: forward power counts only when it stays above the floor for 1 s; one glitch reading does nothing', () => {
+    const t = fakeTimers(); const hits = []; const w = watch(t, hits);
+    w.fwd(45); t.run(10 * 1000);
+    assert.deepStrictEqual(hits, [], 'a single 45 W reading is a glitch');
+    w.fwd(0.2); t.run(300); w.fwd(0.3); t.run(1000); w.fwd(0.4);
+    assert.deepStrictEqual(hits, [], 'below the floor (noise) never counts');
+    w.fwd(20); t.run(500); w.fwd(21);
+    assert.deepStrictEqual(hits, [], 'only 0.5 s of power');
+    t.run(500); w.fwd(22);
+    assert.strictEqual(hits.length, 1, 'power for 1 s counts');
+    t.run(5000);
+    assert.strictEqual(hits.length, 1, 'readings stopped: the stale reading ends it, no repeat');
+  });
+
+  await check('radio-tx: a TX report that never ends stops counting after 10 minutes', () => {
+    const t = fakeTimers(); const hits = []; const w = watch(t, hits);
+    w.cat(true); t.run(60 * 60 * 1000);
+    assert.ok(hits.length >= 20 && hits.length <= 21, 'capped: ' + hits.length);
+    assert.ok(hits[hits.length - 1][0] <= OA.RADIO_TX_MAX_MS, 'nothing after the cap');
+    w.cat(false); w.cat(true); t.run(1000);
+    assert.strictEqual(hits[hits.length - 1][0], t.now, 'a new over counts again');
   });
 
   // ------------------------------------------------------------ 3. take-back, pure
@@ -239,6 +296,36 @@ const END = '2026-11-14T23:00:00.000Z';
       await until(() => rs.getPassOwnerControls().lastActiveAt === T0 + 3 * MIN);
       assert.strictEqual(rs.getPassOwnerControls().lastActiveAt, T0 + 3 * MIN, 'an owner device tuning is use');
       o.ws.close(); phone.ws.close();
+    } finally { rs.stop(); }
+  });
+
+  await check('station: radio-reported TX during a hold resets the idle wait; the same outside a hold does nothing', async () => {
+    const PORT = 17597;
+    const { rs, clock } = server(PORT);
+    await sleep(400);
+    try {
+      const phone = await guest(PORT, 'ios');
+      clock.now = T0 - MIN;
+      assert.strictEqual(rs.noteOwnerActivity('radio-tx'), false, "no hold: the guest's own TX is not the owner");
+      clock.now = T0;
+      rs.takeOverPass('desktop');
+      await until(() => phone.last('pass-state').reason === 'owner-has-radio');
+      // The owner on the hand mic at minute 4 (the watch fired after 1 s of TX).
+      const tx = OA.createRadioTxWatch({ onActive: (k) => rs.noteOwnerActivity(k), now: () => clock.now, minMs: 0, repeatMs: 30 * MIN });
+      clock.now = T0 + 4 * MIN;
+      tx.cat(true);
+      await sleep(30);
+      tx.stop();
+      assert.strictEqual(rs.getPassOwnerControls().lastActiveAt, T0 + 4 * MIN, 'the over counted');
+      clock.now = T0 + 5 * MIN;
+      rs._ownerIdleCheck();
+      await sleep(80);
+      assert.strictEqual(phone.last('pass-state').reason, 'owner-has-radio', 'no offer mid-QSO');
+      clock.now = T0 + 9 * MIN;
+      rs._ownerIdleCheck();
+      await until(() => phone.last('pass-state').reason === 'owner-idle');
+      assert.strictEqual(phone.last('pass-state').reason, 'owner-idle', '5 minutes after the over');
+      phone.ws.close();
     } finally { rs.stop(); }
   });
 
@@ -408,6 +495,13 @@ const END = '2026-11-14T23:00:00.000Z';
     assert.ok(at > 0 && main.lastIndexOf('onRemoteServer((rs) => {', at) > 0, 'inside onRemoteServer');
     assert.ok(!/remoteServer\.on\('pass-owner-idle-offered'/.test(main));
     assert.ok(/ipcMain\.handle\('remote-pass-take-back'/.test(main));
+    // radio-tx: the radio's TX status from every CAT connection, and forward power.
+    const conn = main.slice(main.indexOf('async function connectCat() {'), main.indexOf('async function connectCat() {') + 40000);
+    assert.ok(/^  _radioTxWatch\.cat\(false\);/m.test(conn), 'a reconnect clears a stuck TX status');
+    assert.strictEqual((conn.match(/cat\.on\('ptt', \(on\) => _radioTxWatch\.cat\(on\)\)/g) || []).length,
+      (conn.match(/cat = new (RigController|CatClient)\(/g) || []).length, 'every CAT connection feeds the watch');
+    assert.ok(/function sendCatFwdPower\(watts\) \{[\s\S]{0,120}_radioTxWatch\.fwd\(/.test(main), 'forward power feeds the watch');
+    assert.ok(/createRadioTxWatch\(\{ onActive: \(kind\) => noteOwnerActivity\(kind\) \}\)/.test(main));
     assert.ok(/remotePassTakeBack: \(\) => ipcRenderer\.invoke\('remote-pass-take-back'\)/.test(read('preload.js')));
     assert.ok(/passTakeBack\(\)/.test(read('lib/remote-client.js')) && /type: 'pass-take-back'/.test(read('lib/remote-client.js')));
     const app = read('renderer/app.js');
