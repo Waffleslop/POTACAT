@@ -599,6 +599,31 @@ message.
 | `winlink-recovery-email-set` | C→S | `{email}`: change it. Reply: `winlink-result {op: 'recovery-email'}`. |
 | `winlink-recovery-email` | S→C | `{email}`. To the asker only. |
 
+#### The Flex pan on the Winlink channel (added 2026-11-15)
+
+A shack that lists `scope-winlink-view` in its hello's `capabilities` centres a Flex panadapter on
+the Winlink modem's channel, so a Mail tab that draws the shack's scope shows the signal in the
+middle.
+
+| Message | Dir | Purpose |
+|---|---|---|
+| `scope-digital-view` | C→S | `{on, view?}`. `view: 'winlink'`: while this device's Mail tab shows the shack's scope (it must also be subscribed with `scope-subscribe`), ask for the Winlink view; `{on: false, view: 'winlink'}` ends it. No `view` (or any other value) is the JTCAT view, as before. Each view is asked and ended on its own, per device; a closed socket ends both. No reply. |
+
+- **The view.** Centred on the modem's channel at its RF position: the centre of
+  `lib/winlink-spectrum.js` `markerBand` (1500 Hz audio for ARDOP, VARA HF and Mercury), above the
+  dial on USB/DIGU, below it on LSB/DIGL. On DIGU/DIGL the slice's `digu_offset` / `digl_offset`
+  moves it to where the signal really is (DIGU: dial + audio - offset; DIGL: dial - audio +
+  offset). 6000 Hz wide, never narrower than the radio's `min_bw`. No view on FM.
+- **When.** While a Winlink radio session runs (the shack does this by itself, whatever any device
+  asks), or while a device asks for it. A running session wins over the JTCAT view; a device's ask
+  comes after the JTCAT view.
+- **What a device sees.** The usual `scope-state`, with `centerOffsetHz` (where the pan really is,
+  Hz from the dial) and `decodeWindow` `{lo, hi}` (the modem's channel, Hz from the dial, negative
+  below it), exactly as for the JTCAT view. Draw the channel marks from `decodeWindow`.
+- **The end.** When the session ends and no device asks, the pan goes back to the operator's own
+  zoom, centred on the dial, as the JTCAT view does.
+- Flex Direct only; other scopes ignore the ask.
+
 ### Cloud (cross-device QSO sync via Cognito)
 
 > **Scope:** These messages exist solely for the in-browser ECHOCAT UI

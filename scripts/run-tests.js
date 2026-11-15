@@ -200,6 +200,7 @@ const TESTS = [
   'test/kenwood-scope-test.js', // #397: the TS-890S bandscope over USB/COM (DD0 5 -> DD4): lines, sweeps, axis, AI/DD0 read-first and put back, 115200, poll not disturbed
   'test/flex-scope-test.js', // the Flex's own panadapter as the band scope (Flex Direct), against a real 8600 capture
   'test/scope-digital-view-test.js', // the scope's tight view on a digital mode's decode window (Flex)
+  'test/winlink-pan-view-test.js', // 2026-11-15 ECHOCAT ask: the Flex pan centres on the Winlink channel (USB, LSB, DIGU offset), 6 kHz, during a session or a device's ask; the operator zoom comes back
   'test/scope-watchers-test.js', // #358: each remote device watching the scope is counted; one leaving does not stop the others
   'test/sdr-failure-test.js', // #390: a WebSDR that would not come on says why in the VFO window, with Try again
   'test/kiwisdr-tls-test.js', // KiwiSDR with HTTPS on: https:// entries and a wss:// retry (DL0HC)
