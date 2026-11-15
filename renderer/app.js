@@ -1799,7 +1799,8 @@ function renderRemotePowerRow(info) {
   row.appendChild(label);
   // #485: an off-only radio (the FTX-1) gets no Power On.
   if (info.canPowerOn !== false) row.appendChild(on);
-  row.appendChild(off);
+  // #293: no Power Off where the shack could not switch the radio back on.
+  if (info.canPowerOff !== false) row.appendChild(off);
   return row;
 }
 
@@ -3647,6 +3648,8 @@ async function openRigEditor(mode, rigId) {
       if (atuKeepOnEl) atuKeepOnEl.checked = !!rig.atuKeepOn;
       const voiceAsDataEl = document.getElementById('set-voice-as-data');
       if (voiceAsDataEl) voiceAsDataEl.checked = !!rig.voiceAsData;
+      const allowPowerOffEl = document.getElementById('set-allow-power-off');
+      if (allowPowerOffEl) allowPowerOffEl.checked = !!rig.allowPowerOffNoWake;
       const lanVoiceSsbEl = document.getElementById('set-lan-voice-ssb');
       if (lanVoiceSsbEl) lanVoiceSsbEl.checked = !!rig.lanVoiceInSsb;
       const packetModeEl = document.getElementById('set-packet-mode');
@@ -3671,6 +3674,7 @@ async function openRigEditor(mode, rigId) {
     buildFlexBandAntennaMap({});
     fillSdrScopeForm(null);
     { const v = document.getElementById('set-voice-as-data'); if (v) v.checked = false; }
+    { const v = document.getElementById('set-allow-power-off'); if (v) v.checked = false; }
     { const v = document.getElementById('set-packet-mode'); if (v) v.value = 'auto'; }
     await populateRigAudioDevices('', '');
   }
@@ -3806,6 +3810,8 @@ async function saveRigEditor() {
   const rigAtuKeepOn = !!(atuKeepOnEl && atuKeepOnEl.checked);
   const voiceAsDataEl = document.getElementById('set-voice-as-data');
   const rigVoiceAsData = !!(voiceAsDataEl && voiceAsDataEl.checked);
+  const allowPowerOffEl = document.getElementById('set-allow-power-off');
+  const rigAllowPowerOff = !!(allowPowerOffEl && allowPowerOffEl.checked); // #293
   const lanVoiceSsbEl = document.getElementById('set-lan-voice-ssb');
   const rigLanVoiceInSsb = !!(lanVoiceSsbEl && lanVoiceSsbEl.checked);
   const packetModeEl = document.getElementById('set-packet-mode');
@@ -3837,6 +3843,7 @@ async function saveRigEditor() {
       rig.externalAtuSeconds = rigExternalAtuSeconds;
       rig.atuKeepOn = rigAtuKeepOn;
       if (rigVoiceAsData) rig.voiceAsData = true; else delete rig.voiceAsData;
+      if (rigAllowPowerOff) rig.allowPowerOffNoWake = true; else delete rig.allowPowerOffNoWake;
       if (rigLanVoiceInSsb) rig.lanVoiceInSsb = true; else delete rig.lanVoiceInSsb;
       if (rigPacketMode) rig.packetMode = rigPacketMode; else delete rig.packetMode; // absent = Automatic
       rig.flexBandAntennaMap = flexBandAntennaMap;
@@ -3866,6 +3873,7 @@ async function saveRigEditor() {
       externalAtuSeconds: rigExternalAtuSeconds,
       atuKeepOn: rigAtuKeepOn,
       ...(rigVoiceAsData ? { voiceAsData: true } : {}),
+      ...(rigAllowPowerOff ? { allowPowerOffNoWake: true } : {}),
       ...(rigLanVoiceInSsb ? { lanVoiceInSsb: true } : {}),
       ...(rigPacketMode ? { packetMode: rigPacketMode } : {}),
       flexBandAntennaMap,
@@ -25590,7 +25598,9 @@ function rigApplyCapabilities(caps) {
   if (rigWnbBtn) rigWnbBtn.style.display = caps.wnb ? '' : 'none';
   // #485: powerOn false = the radio switches off over CAT but not on (FTX-1).
   rigPowerOnBtn.style.display = caps.power && caps.powerOn !== false ? '' : 'none';
-  rigPowerOffBtn.style.display = caps.power ? '' : 'none';
+  // #293: powerOff false = POTACAT could not switch it back on, and the
+  // operator has not allowed Power Off for this rig.
+  rigPowerOffBtn.style.display = caps.power && caps.powerOff !== false ? '' : 'none';
   rigRfGain.closest('.rig-popover-row').style.display = caps.rfgain ? '' : 'none';
   // Radio-native RF gain steps (Flex): swap the 0-100 slider for a dB select
   // populated from the model's step list. The slider's -10..+20 dB mapping

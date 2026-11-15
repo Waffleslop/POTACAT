@@ -3553,6 +3553,15 @@ function getRigCapabilities(rigType) {
   caps.afgain = rigSupportsAfGain(rigType);
   // The bands this radio is used on (null = not restricted), lib/rig-bands.js.
   caps.bands = activeRigBands();
+  // #293: Power Off only where POTACAT can switch the radio back on (an
+  // SCU-LAN10), or where the operator allowed it for this rig. Every client
+  // hides Power Off on false, and main refuses it (lib/rig-power.js).
+  if (caps.power) {
+    caps.powerOff = RigPower.powerOffAvailable(caps, {
+      linkType: settings.catTarget && settings.catTarget.type,
+      allowOffNoWake: !!(activeRig && activeRig.allowPowerOffNoWake),
+    });
+  }
   return caps;
 }
 
@@ -7370,6 +7379,7 @@ function remoteShackInfoNow() {
     radioPowered: remoteRig.radioPowered(), // #152: the CAT popover's Radio: On / Off / Unknown
     canPower: remoteRig.canPower(),
     canPowerOn: remoteRig.canPowerOn(), // #485: false on an off-only radio (FTX-1); Power On hidden
+    canPowerOff: remoteRig.canPowerOff(), // #293: false where the shack could not switch it back on
     audioSilent: !!info.audioSilent,
     audioElsewhere: !!info.audioElsewhere,
     audioHolder: info.audioHolder || '',
@@ -30850,6 +30860,9 @@ function sendVfoState() {
     // #485: false on a radio that can be switched off over CAT but not on
     // (FTX-1); the window then shows Power Off alone.
     powerOn: vfoPowerOnAvailable(),
+    // #293: false where POTACAT could not switch the radio back on and the
+    // operator has not allowed Power Off for this rig; Power Off is hidden.
+    powerOff: vfoPowerOffAvailable(),
     // False while the radio does not answer (switched off, cable out): the
     // window shows dashes, not the last dial, which looked like a radio
     // still on after Power Off.
@@ -30895,6 +30908,9 @@ function vfoPowerAvailable() {
 }
 function vfoPowerOnAvailable() {
   try { return RigPower.powerOnAvailable(getRigCapabilities(detectRigType())); } catch { return false; }
+}
+function vfoPowerOffAvailable() {
+  try { const c = getRigCapabilities(detectRigType()); return !!c.power && c.powerOff !== false; } catch { return false; }
 }
 
 function applyFreedvAudioMute() {
@@ -47889,10 +47905,17 @@ function cloudShackNotice(text, kind) {
       }
       case 'power-off': {
         // #152 rule 1: never switch the radio off under a remote client's over.
-        const offRefused = RigPower.powerOffRefusal({ source, transmitting: _isEffectivelyTransmitting() });
+        // #293: nor, from any surface, a radio POTACAT could not switch back on
+        // (caps.powerOff false) unless the operator allowed it for this rig.
+        let offCaps = null;
+        try { offCaps = getRigCapabilities(rigType); } catch { offCaps = null; }
+        const offRefused = RigPower.powerOffRefusal({
+          source, transmitting: _isEffectivelyTransmitting(),
+          offAllowed: offCaps && offCaps.power ? offCaps.powerOff : undefined,
+        });
         if (offRefused) {
-          sendCatLog('[Power] From a remote device: ' + offRefused);
-          if (remoteServer && remoteServer.running) remoteServer.sendToAsker({ type: 'tune-blocked', reason: offRefused });
+          sendCatLog('[Power] ' + (source === 'desktop' ? '' : 'From a remote device: ') + offRefused);
+          if (source !== 'desktop' && remoteServer && remoteServer.running) remoteServer.sendToAsker({ type: 'tune-blocked', reason: offRefused });
           break;
         }
         if (cat && cat.connected && rigType !== 'flex') {

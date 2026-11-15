@@ -3372,16 +3372,23 @@
       if (rcSplitBtn) rcSplitBtn.classList.toggle('hidden', !s.capabilities.split);
       // Rig On/Off — show wherever the radio's CAT set supports PS0/PS1, 0x18, or equivalent.
       // Applies to both the Settings-overlay group and the VFO widget row.
-      const rcPowerGroup = document.getElementById('rc-power');
-      if (rcPowerGroup) rcPowerGroup.classList.toggle('hidden', !s.capabilities.power);
-      const vfPowerRow = document.getElementById('vf-power-row');
-      if (vfPowerRow) vfPowerRow.classList.toggle('hidden', !s.capabilities.power);
-      // #485: powerOn false = off over CAT but not on (FTX-1): Off alone.
+      // #485: powerOn false = off over CAT but not on (FTX-1): no On.
+      // #293: powerOff false = the shack could not switch it back on: no Off.
       const offOnly = s.capabilities.powerOn === false;
+      const noOff = s.capabilities.powerOff === false;
+      const anyPower = !!s.capabilities.power && !(offOnly && noOff);
+      const rcPowerGroup = document.getElementById('rc-power');
+      if (rcPowerGroup) rcPowerGroup.classList.toggle('hidden', !anyPower);
+      const vfPowerRow = document.getElementById('vf-power-row');
+      if (vfPowerRow) vfPowerRow.classList.toggle('hidden', !anyPower);
       const rcPowerOn = document.getElementById('rc-power-on');
       if (rcPowerOn) rcPowerOn.classList.toggle('hidden', offOnly);
       const vfPowerOn = document.getElementById('vf-power-on-btn');
       if (vfPowerOn) vfPowerOn.classList.toggle('hidden', offOnly);
+      const rcPowerOff = document.getElementById('rc-power-off');
+      if (rcPowerOff) rcPowerOff.classList.toggle('hidden', noOff);
+      const vfPowerOff = document.getElementById('vf-power-off-btn');
+      if (vfPowerOff) vfPowerOff.classList.toggle('hidden', noOff);
       // Clamp TX power slider to radio's min/max
       if (s.capabilities.minPower != null) rcTxPowerSlider.min = s.capabilities.minPower;
       if (s.capabilities.maxPower != null) rcTxPowerSlider.max = s.capabilities.maxPower;

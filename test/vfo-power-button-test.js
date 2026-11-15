@@ -28,7 +28,8 @@ test('it stays below every ordered block', () => {
 test('shown from the model caps, never from the CAT link', () => {
   assert.ok(/power: vfoPowerAvailable\(\)/.test(main), 'vfo-radio-state carries power');
   assert.ok(/function vfoPowerAvailable\(\) \{\s*try \{ return !!getRigCapabilities\(detectRigType\(\)\)\.power;/.test(main));
-  assert.ok(/if \(s\.power != null\) \{[\s\S]{0,120}sec\.style\.display = s\.power \? '' : 'none';\s*sec\.classList\.toggle\('visible', !!s\.power\);/.test(html), 'shown with the class a .tool-card needs');
+  // #293: hidden too when neither button shows (off-only radio, Power Off not allowed).
+  assert.ok(/if \(s\.power != null\) \{[\s\S]{0,260}const shown = !!s\.power && !\(s\.powerOn === false && s\.powerOff === false\);[\s\S]{0,80}sec\.style\.display = shown \? '' : 'none';\s*sec\.classList\.toggle\('visible', shown\);/.test(html), 'shown with the class a .tool-card needs');
   assert.ok(/\.tool-card \{[^}]*display: none;[\s\S]{0,80}\.tool-card\.visible \{ display: flex; \}/.test(html), 'the stylesheet rule the class answers');
 });
 test('a radio that does not answer shows dashes, not its last dial', () => {

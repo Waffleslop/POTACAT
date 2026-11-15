@@ -2379,6 +2379,10 @@
             <span class="help-text" style="margin-left:24px;display:block;">For a Yaesu with a tuner on its TUNER jack (FT-710 + mAT-30): the radio runs the tune, then switches the tuner off. With this on, POTACAT watches the cycle and sends AC001; the moment the radio reports the tuner off, so it stays online.</span>
           </div>
         </details>
+        <div id="rig-power-off-allow" style="margin-top:8px;">
+          <label class="checkbox-label"><input type="checkbox" id="set-allow-power-off"> Allow Power Off for a radio POTACAT cannot turn back on</label>
+          <span class="help-text" style="display:block;margin:2px 0 0 24px;">Most radios carry their computer connection on their own USB cable. Once the radio is off, that connection is gone, so POTACAT, ECHOCAT and a guest can switch the radio off but not back on. POTACAT therefore hides Power Off for such a radio. Tick this only if someone can reach the radio's power switch, or you know Power On works on your setup. A radio on a Yaesu SCU-LAN10 can always be switched back on and does not need this.</span>
+        </div>
         <div id="rig-voice-as-data" style="margin-top:8px;">
           <label class="checkbox-label"><input type="checkbox" id="set-voice-as-data"> Voice in DATA mode (USB-D / LSB-D)</label>
           <span class="help-text" style="display:block;margin:2px 0 0 24px;">For radios whose data port is silent in USB and LSB, such as the Xiegu G90: POTACAT puts the radio in USB-D or LSB-D for voice, so receive audio reaches your sound card interface and ECHOCAT. Contacts are still logged as SSB. The radio's own microphone is off in these modes, so voice has to come in through the data port.</span>
