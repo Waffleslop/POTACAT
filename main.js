@@ -690,7 +690,7 @@ function parkInfoFor(ref) {
 // DXNews + NG3K, refreshed server-side every 6h. See README in that
 // worker for the schema served at /feeds/dxpeditions.json.
 const { getModel, getModelList, RIG_MODELS } = require('./lib/rig-models');
-const { resolveSetupNotes, radioTypeFromCatTarget } = require('./lib/rig-setup-notes');
+const { resolveSetupNotes, radioTypeFromCatTarget, icomScopeBaudAction } = require('./lib/rig-setup-notes');
 const StationSetup = require('./lib/station-setup');
 const ReviewAsk = require('./lib/review-ask'); // one-time "Rate ECHOCAT" card
 const SetupShare = require('./lib/setup-share');
@@ -35650,7 +35650,6 @@ function icomScopeBaudTooSlow(target) {
   return !!target && target.type === 'icom' && b > 0 && b < 57600;
 }
 
-const ICOM_SCOPE_BAUD_ACTION = 'On the radio: MENU > SET > Connectors > CI-V > CI-V USB Baud Rate, choose 115200. In POTACAT: Settings > My Rigs, edit this radio, Baud rate 115200.';
 
 function icomScopeDiag(key, extra = {}) {
   const name = (icomScopeEntry && icomScopeEntry.name) || 'Icom';
@@ -35659,7 +35658,7 @@ function icomScopeDiag(key, extra = {}) {
       severity: 'blocker',
       headline: 'The band scope needs a faster link to the radio',
       detail: `POTACAT talks to the ${name} at ${extra.baud || '?'} baud. Over USB the radio sends its scope only at 115200.`,
-      action: ICOM_SCOPE_BAUD_ACTION,
+      action: icomScopeBaudAction(icomScopeEntry && icomScopeEntry.name),
     },
     'no-link': {
       severity: 'blocker',
@@ -35677,7 +35676,7 @@ function icomScopeDiag(key, extra = {}) {
       severity: 'blocker',
       headline: 'The radio refused to send its scope',
       detail: `The ${name} answered "no" when POTACAT asked for its scope data. Over USB that is the baud rate: the radio sends its scope only at 115200.`,
-      action: ICOM_SCOPE_BAUD_ACTION,
+      action: icomScopeBaudAction(icomScopeEntry && icomScopeEntry.name),
     },
     silent: {
       severity: 'blocker',

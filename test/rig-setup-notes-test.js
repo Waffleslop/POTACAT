@@ -234,5 +234,22 @@ test('the dialout command carries the real username when known, the shell\'s $US
   assert.ok(/linuxUser: \(\(\) => \{ try \{ return require\('os'\)\.userInfo\(\)\.username; \} catch \{ return ''; \} \}\)\(\),/.test(main), 'main passes the login name');
 });
 
+test('IC-7610 band scope: unlink CI-V USB Port from REMOTE before setting 115200 (Basic Manual rev 10 p.8-7)', () => {
+  const { resolveSetupNotes, icomScopeBaudAction } = require('../lib/rig-setup-notes');
+  const n7610 = resolveSetupNotes({ model: 'IC-7610', radioType: 'icom' });
+  const n = n7610.find((x) => x.id === 'ic7610-scope-baud');
+  assert.ok(n, 'IC-7610 gets its own scope-baud note');
+  assert.ok(/CI-V USB Port → Unlink from \[REMOTE\]/.test(n.steps[0]), n.steps[0]);
+  assert.ok(/CI-V USB Baud Rate → 115200/.test(n.steps[1]), n.steps[1]);
+  assert.ok(!n7610.find((x) => x.id === 'icom-scope-baud'), 'the IC-7300 note stays IC-7300 only');
+  const n7300 = resolveSetupNotes({ model: 'IC-7300', radioType: 'icom' });
+  assert.ok(n7300.find((x) => x.id === 'icom-scope-baud') && !n7300.find((x) => x.id === 'ic7610-scope-baud'));
+  assert.ok(/CI-V USB Port, choose Unlink from \[REMOTE\]; then CI-V USB Baud Rate, choose 115200/.test(icomScopeBaudAction('IC-7610')));
+  assert.ok(!/Unlink/.test(icomScopeBaudAction('IC-7300')) && /CI-V USB Baud Rate, choose 115200/.test(icomScopeBaudAction('IC-7300')));
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
+  assert.ok(!main.includes('ICOM_SCOPE_BAUD_ACTION'), 'main has no copy of its own');
+  assert.strictEqual(main.split('action: icomScopeBaudAction(icomScopeEntry && icomScopeEntry.name),').length - 1, 2, 'baud and refused both use it');
+});
+
 console.log(`\nRig setup notes: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
