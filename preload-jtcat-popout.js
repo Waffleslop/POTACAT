@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld('api', {
   // known, minPower, maxPower, powerStep, powerDecimals, powerChoices}.
   // Pushed on every rig-state change and once on load. Sets go back through
   // rigControl({action:'set-tx-power', value}).
+  onTciRxPeak: (cb) => ipcRenderer.on('jtcat-tci-rx-peak', (_e, level) => cb(level)),
   onJtcatRigPower: (cb) => ipcRenderer.on('jtcat-rig-power', (_e, p) => cb(p)),
   jtcatWsprBeacon: (opts) => ipcRenderer.send('jtcat-wspr-beacon', opts),
   jtcatWsprHop: (opts) => ipcRenderer.send('jtcat-wspr-hop', opts),
@@ -99,6 +100,7 @@ contextBridge.exposeInMainWorld('api', {
   onJtcatSetTxGain: (cb) => ipcRenderer.on('jtcat-set-tx-gain', (_e, level) => cb(level)),
   // RX gain — synced through main (settings.jtcatRxGain): report our slider,
   // receive everyone else's moves (main window, ECHOCAT clients).
+  jtcatAutoTciRxLevel: () => ipcRenderer.invoke('jtcat-auto-tci-rx-level'),
   jtcatSetRxGain: (level) => ipcRenderer.send('jtcat-set-rx-gain', level),
   onJtcatSetRxGain: (cb) => ipcRenderer.on('jtcat-set-rx-gain', (_e, level) => cb(level)),
   jtcatTxComplete: () => ipcRenderer.send('jtcat-tx-complete'),

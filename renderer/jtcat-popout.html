@@ -8,6 +8,7 @@
   <script src="popout-theme-bootstrap.js"></script>
   <link rel="stylesheet" href="../node_modules/leaflet/dist/leaflet.css">
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="radio-level-slider.css">
   <style>
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg-primary); color: var(--text-primary); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
     body { display: flex; flex-direction: column; }
@@ -381,6 +382,8 @@
     @keyframes jp-tune-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
     /* S / SWR meters in the audio bar. Narrow on purpose — the bar already
        carries two sliders and has to survive a 600 px window. */
+    .jp-rx-peak { min-width: 104px; font-variant-numeric: tabular-nums; }
+    .jp-rx-peak.near-clip { color: var(--accent-orange, #f0a500); }
     .jp-meter-group { display: flex; align-items: center; gap: 8px; flex-shrink: 0; margin-left: 12px; border-left: 1px solid var(--border-primary); padding-left: 12px; }
     .jp-meter { width: 120px; height: 12px; background: var(--bg-tertiary, #0f1419); border: 1px solid var(--border-primary); border-radius: 3px; overflow: hidden; flex-shrink: 0; }
     .jp-meter-bar { display: block; height: 100%; width: 0; background: #4ecca3; transition: width 0.1s linear; }
@@ -987,8 +990,11 @@
   <!-- Audio controls -->
   <div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;padding:6px 12px;font-size:14px;color:var(--text-secondary);background:var(--bg-secondary);border-top:1px solid var(--border-primary);flex-shrink:0;">
     <span style="flex-shrink:0;">RX</span>
-    <input type="range" id="jp-rx-gain" min="0" max="300" value="100" style="width:110px;" title="RX Gain % — remembered per band, so changing band restores the level you last used there">
+    <input type="range" id="jp-rx-gain" class="radio-level-slider" min="0" max="100" value="100" aria-label="Receive gain percent" title="RX Gain % — remembered per band, so changing band restores the level you last used there">
     <span id="jp-rx-gain-val" style="min-width:32px;text-align:right;">100%</span>
+    <button type="button" id="jp-tci-auto-rx" class="jtcat-filter-btn hidden" title="Measure five seconds of receive audio and adjust the TCI radio level">Auto RX Level</button>
+    <span id="jp-tci-rx-peak" class="jp-rx-peak hidden" title="Peak level of the incoming TCI audio, in dBFS. Near clip means the signal approached digital full scale.">Peak &mdash;</span>
+    <span id="jp-tci-rx-result" class="hidden" role="status"></span>
     <!-- TX Pwr is the RADIO's RF power setting, in watts — the same control as
          the Rig panel's TX Power slider, through the same set-tx-power path.
          Hydrated from main (jtcat-rig-power); disabled when the rig can only be
@@ -997,7 +1003,7 @@
          to leave behind, invisible on Flex Direct). -->
     <span id="jp-rf-power-group" class="jp-meter-group hidden" title="Radio RF power (watts) — the radio's own TX power setting">
       <span style="flex-shrink:0;">TX Pwr</span>
-      <input type="range" id="jp-rf-power" min="0" max="100" step="1" value="0" style="width:110px;accent-color:#e94560;">
+      <input type="range" id="jp-rf-power" class="radio-level-slider" min="0" max="100" step="1" value="0">
       <select id="jp-rf-power-select" class="hidden" style="font-size:11px;background:var(--bg-tertiary,#0f1419);color:var(--text-primary);border:1px solid var(--border-primary);border-radius:3px;padding:0 2px;"></select>
       <span id="jp-rf-power-val" style="min-width:36px;text-align:right;font-variant-numeric:tabular-nums;">&mdash;</span>
     </span>
@@ -1006,8 +1012,8 @@
          SmartSDR Direct route it does nothing at all — the dax_tx feed is
          sent at full scale — so it is dimmed there. -->
     <span id="jp-tx-drive-group" class="jp-meter-group" title="Audio drive % into the radio (logarithmic — fine control at the low end). Sets modulation level, not RF power; TX Pwr is the radio's power.">
-      <span style="flex-shrink:0;">Drive</span>
-      <input type="range" id="jp-tx-gain" min="0" max="100" value="100" style="width:100px;">
+      <span style="flex-shrink:0;">Audio Drive</span>
+      <input type="range" id="jp-tx-gain" class="radio-level-slider" min="0" max="100" value="100" aria-label="Audio drive percent">
       <span id="jp-tx-gain-val" style="min-width:32px;text-align:right;">100%</span>
     </span>
     <!-- Radio meters. S is live on RX; PWR and SWR are only measurable DURING
@@ -1379,6 +1385,7 @@
   <script src="../lib/mac-mic-access.js"></script>
   <script src="../lib/waterfall-palettes.js"></script>
   <script src="waterfall.js"></script>
+  <script src="../lib/rig-power-view.js"></script>
   <script src="jtcat-popout.js"></script>
 </body>
 </html>

@@ -196,5 +196,25 @@ test('CNTY: QRZ county only for the US entities, never the entity name itself', 
   assert.strictEqual(typed[0].county, 'AS,Tutuila');
 });
 
+test('manual TCI log power uses only a recent measurement on the same rig and dial', () => {
+  const vm = require('node:vm');
+  const main = readSrc(path.join(__dirname, '../main.js'));
+  const start = main.indexOf('function measuredTciManualPower(');
+  const end = main.indexOf('async function logContact', start);
+  const now = Date.now();
+  const context = {
+    settings: { activeRigId: 'test-rig' },
+    tciRigTarget: () => ({ server: 'zeus' }),
+    tciManualForward: { rigId: 'test-rig', dialHz: 14285000, watts: 5.9, at: now },
+    ActivationClock: require('../lib/activation-clock'),
+  };
+  const power = vm.runInNewContext(main.slice(start, end) + '; measuredTciManualPower', context);
+  assert.strictEqual(power({ frequency: '14285', qsoAt: now }), 5.9);
+  assert.strictEqual(power({ frequency: '14290', qsoAt: now }), null);
+  assert.strictEqual(power({ frequency: '14285', qsoAt: now - 120000 }), null);
+  context.settings.activeRigId = 'other-rig';
+  assert.strictEqual(power({ frequency: '14285', qsoAt: now }), null);
+});
+
 console.log(`\nQSO expand: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

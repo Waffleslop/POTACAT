@@ -1843,6 +1843,25 @@
       <legend>Radio</legend>
       <div id="my-rigs-list"></div>
       <button type="button" id="rig-add-btn" class="rig-action-btn">+ Add Rig</button>
+      <div id="tci-test-settings-slot"></div>
+      <div id="tci-test-editor" class="hidden">
+        <h4>TCI radio setup</h4>
+        <label>Server <select id="tci-test-server">
+          <option value="zeus">Zeus</option>
+          <option value="thetis">Thetis</option>
+        </select></label>
+        <label>Host <input type="text" id="tci-test-host" placeholder="127.0.0.1" required></label>
+        <label>TCI port <input type="number" id="tci-test-port" required min="1" max="65535" step="1"></label>
+        <details open>
+          <summary id="tci-test-help-title"></summary>
+          <ol id="tci-test-help-steps"></ol>
+          <p id="tci-test-help-why"></p>
+        </details>
+        <p id="tci-test-setup-result" role="status" aria-live="polite"></p>
+        <button type="button" id="tci-test-check" class="rig-action-btn">Test connection</button>
+        <button type="button" id="tci-test-save" class="rig-action-btn">Save and connect</button>
+        <button type="button" id="tci-test-cancel" class="rig-action-btn">Close</button>
+      </div>
       <div id="rig-editor" class="hidden">
         <h4 id="rig-editor-title">Add Rig</h4>
         <label>Rig Name:
@@ -1981,6 +2000,22 @@
               <!-- Per-band rows populated by buildFlexBandAntennaMap() -->
             </div>
           </details>
+        </div>
+        <label class="radio-label"><input type="radio" name="radio-type" value="tci"> Radios running Thetis or Zeus (TCI server)</label>
+        <div id="rig-tci-config" class="radio-sub hidden">
+          <label>Server <select id="rig-tci-server">
+            <option value="zeus">Zeus</option>
+            <option value="thetis">Thetis</option>
+          </select></label>
+          <label>Host <input type="text" id="rig-tci-host" value="127.0.0.1" required></label>
+          <label>Port <input type="number" id="rig-tci-port" value="40001" min="1" max="65535" required></label>
+          <label id="rig-tci-engine-row">Zeus engine port <input type="number" id="rig-tci-engine-port" min="1" max="65535" placeholder="Auto-detect">
+            <span class="help-text">Leave blank to find the local Zeus engine automatically.</span>
+          </label>
+          <label><input type="checkbox" id="rig-tci-auto-start" checked> Start receiver when connecting</label>
+          <button type="button" id="rig-tci-check" class="rig-action-btn">Test connection</button>
+          <p id="rig-tci-result" role="status"></p>
+          <span class="help-text">Uses the TCI server for radio control and JTCAT receive and transmit audio.</span>
         </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="tcpcat"> IP Radio (TCP CAT)</label>
         <div id="tcpcat-config" class="radio-sub hidden">
@@ -2898,8 +2933,8 @@
         <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">On: one box per digit of each report. Off: one field per report; a full report moves the cursor to RST Rcvd by itself, and a Tab pressed straight after stays there.</span>
         <label class="checkbox-label"><input type="checkbox" id="set-log-comment-tags" checked> Auto park/club tags in comment</label>
         <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">On: add <code>[POTA US-1234 …]</code>/club tags to the COMMENT field of logged QSOs. Off: COMMENT is exactly what you type — the park still goes to SIG_INFO/POTA_REF regardless.</span>
-        <label class="checkbox-label"><input type="checkbox" id="set-jtcat-log-comment" checked> "JTCAT FT8" in the comment of FT8/FT4 contacts</label>
-        <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">On: JTCAT writes <code>JTCAT FT8</code> (or FT4, FT2, JTTY) into COMMENT. Off: JTCAT leaves COMMENT empty; the mode is in MODE either way.</span>
+        <label class="checkbox-label"><input type="checkbox" id="set-jtcat-log-comment" checked> Add the operating app and mode to digital contact notes</label>
+        <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">For example, <code>JTCAT FT8</code> for desktop contacts or <code>ECHOCAT FT8</code> for EchoCAT contacts.</span>
         <label class="checkbox-label"><input type="checkbox" id="set-send-to-logbook"> Send Data to Logbook</label>
         <div id="logbook-config" class="hidden" style="margin-left:12px;margin-top:4px;">
           <label>Logbook:
@@ -5233,6 +5268,8 @@
         Additional help can be found on the <a href="#" id="welcome-radio-discord-link">POTACAT Discord</a>.
       </span>
       <div id="welcome-rig-display" class="hidden"></div>
+      <button type="button" id="welcome-tci-setup" class="rig-action-btn hidden">Set up TCI radio</button>
+      <div id="welcome-tci-slot"></div>
       <button type="button" id="welcome-rig-add-btn" class="rig-action-btn">+ Add Rig</button>
       <div id="welcome-rig-editor" class="hidden">
         <label>Rig Name:
@@ -5246,6 +5283,22 @@
             <option value="5004">Slice C (TCP :5004)</option>
             <option value="5005">Slice D (TCP :5005)</option>
           </select></label>
+        </div>
+        <label class="radio-label"><input type="radio" name="welcome-radio-type" value="tci"> Radios running Thetis or Zeus (TCI server)</label>
+        <div id="welcome-tci-config" class="radio-sub hidden">
+          <label>Server <select id="welcome-tci-server">
+            <option value="zeus">Zeus</option>
+            <option value="thetis">Thetis</option>
+          </select></label>
+          <label>Host <input type="text" id="welcome-tci-host" value="127.0.0.1" required></label>
+          <label>Port <input type="number" id="welcome-tci-port" value="40001" min="1" max="65535" required></label>
+          <label id="welcome-tci-engine-row">Zeus engine port <input type="number" id="welcome-tci-engine-port" min="1" max="65535" placeholder="Auto-detect">
+            <span class="help-text">Leave blank to find the local Zeus engine automatically.</span>
+          </label>
+          <label><input type="checkbox" id="welcome-tci-auto-start" checked> Start receiver when connecting</label>
+          <button type="button" id="welcome-tci-check" class="rig-action-btn">Test connection</button>
+          <p id="welcome-tci-result" role="status"></p>
+          <span class="help-text">Uses the TCI server for radio control and JTCAT receive and transmit audio.</span>
         </div>
         <label class="radio-label"><input type="radio" name="welcome-radio-type" value="tcpcat"> IP Radio (TCP CAT)</label>
         <div id="welcome-tcpcat-config" class="radio-sub hidden">

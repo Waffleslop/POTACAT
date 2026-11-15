@@ -153,14 +153,30 @@ test('it renders from s.rigPower and writes through rigControl set-tx-power, deb
   assert.ok(/RigPowerView\.powerView\(/.test(html));
   assert.ok(/RigPowerView\.createPowerSender\(\s*\(?w\)?\s*=>\s*window\.api\.rigControl\(\{ action: 'set-tx-power', value: w \}\)/.test(html));
 });
-test('a readback never yanks the thumb mid-drag', () => {
-  assert.ok(/document\.activeElement === vfoTxPwrRange/.test(html));
+test('readback waits for the VFO slider to settle and then repaints it', () => {
+  assert.ok(/setTimeout\(\(\) => applyVfoTxPower\(p\), wait\)/.test(html));
+  assert.ok(/RigPowerView\.paintRange\(vfoTxPwrRange\)/.test(html));
+});
+test('shared slider fill reaches the end of the rail at maximum', () => {
+  const fills = [];
+  const range = { min: '0', max: '100', value: '100', style: { setProperty: (key, value) => fills.push([key, value]) } };
+  RigPowerView.paintRange(range);
+  assert.deepStrictEqual(fills, [['--radio-level-fill', '100%']]);
 });
 test('the block is in the dial-pane order, after the filter slider', () => {
   // The Large VFO's blocks: names and order in lib/vfo-layout.js, elements in the page.
   const layout = require('fs').readFileSync(path.join(__dirname, '..', 'lib', 'vfo-layout.js'), 'utf8');
   assert.ok(/\{ key: 'filter-slider'[^\n]*\n\s*\{ key: 'txpower',\s+name: 'TX power' \}/.test(layout));
   assert.ok(/txpower: 'sec-txpower'/.test(html));
+});
+
+test('TCI drive shows a confirmed zero as an editable percentage', () => {
+  const view = RigPowerView.powerView({
+    capable: true, settable: true, known: true, watts: 0, powerUnit: '%',
+  });
+  assert.strictEqual(view.enabled, true);
+  assert.strictEqual(view.known, true);
+  assert.strictEqual(view.label, '0%');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -65,7 +65,7 @@ check('SWR guard trip and refused PTT reach the VFO window', () => {
   const main = readSrc(path.join(__dirname, '..', 'main.js'));
   const ann = main.slice(main.indexOf('function swrGuardAnnounce('), main.indexOf('function swrGuardMax('));
   assert.ok(/vfoPopoutWin\.webContents\.send\('tune-blocked', msg\)/.test(ann), 'announce');
-  const ptt = main.slice(main.indexOf('function handleRemotePtt('), main.indexOf('function handleRemotePtt(') + 1200);
+  const ptt = main.slice(main.indexOf('function handleRemotePtt('), main.indexOf('function _isEffectivelyTransmitting('));
   assert.ok(/vfoPopoutWin\.webContents\.send\('tune-blocked', 'PTT blocked/.test(ptt), 'blocked press');
 });
 

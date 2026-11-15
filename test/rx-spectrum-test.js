@@ -57,6 +57,15 @@ check('Flex Direct and Icom Network feed the ring while a phone watches', () => 
   assert.ok(/smartSdrAudio\.on\('audio-frame'[\s\S]{0,200}if \(_mobileWantsSpectrum\) rxSpecRing\.push\(pcm, sampleRate\);/.test(main));
   assert.ok(/if \(_mobileWantsSpectrum && !meta\.lossFill\) rxSpecRing\.push\(pcm, sampleRate\);/.test(main));
 });
+check('TCI feeds the phone waterfall before the desktop engine gate', () => {
+  const callback = main.slice(main.indexOf('    onAudio(pcm) {'), main.indexOf('    // Broadcast confirmed radio state'));
+  assert.match(callback, /if \(_mobileWantsSpectrum && usesTciEchoAudio\(\)\) tciSpecRing\.push\(pcm, TCI_RX_RATE\);[\s\S]*if \(!jtcatManager/);
+  const loop = main.slice(main.indexOf('function startInProcessSpectrum('), main.indexOf('function stopInProcessSpectrum('));
+  assert.match(loop, /if \(usesTciEchoAudio\(\) && !sdrHoldsDial\(\)\)/);
+  assert.match(loop, /const ring = transmitting \? tciTxSpecRing : tciSpecRing;\s*if \(!ring\.fresh\(\)\) return;/);
+  assert.match(callback, /onDigitalTxAudio\(payload\)[\s\S]*tciTxSpecRing\.push\(pcm, TCI_RX_RATE\);/);
+  assert.match(main, /const socketAudio = usesTciEchoAudio\(\) \|\|/);
+});
 check('the engine wins while it runs; the RX ring otherwise; frames say which', () => {
   const loop = main.slice(main.indexOf('function startInProcessSpectrum('), main.indexOf('function stopInProcessSpectrum('));
   assert.ok(loop.indexOf("source = 'engine'") < loop.indexOf("source = 'rx'"));

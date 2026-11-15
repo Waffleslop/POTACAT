@@ -3746,10 +3746,18 @@ function _applyPopoutTheme(payload) {
   // Main moved JTCAT to the band the radio is on (a dial turned onto another
   // band's FT8/FT4/FT2 dial, or "Follow the radio"). The radio is already
   // there: mark the band, never tune (GitHub #115).
-  if (window.api.onJtcatBandFollow) window.api.onJtcatBandFollow(function(d) {
+  function jpApplyBandFollow(d) {
     if (!d) return;
     var khz = Number(d.freqKhz) || 0;
     var btn = (d.band && document.querySelector('.jp-band-opt[data-band="' + d.band + '"]')) || null;
+    if (d.displayOnly) {
+      radioHz = khz * 1000;
+      if (radioFreqEl && khz) radioFreqEl.textContent = (khz / 1000).toFixed(3) + ' MHz';
+      if (!btn || btn.classList.contains('active')) {
+        syncBandMode();
+        return;
+      }
+    }
     document.querySelectorAll('.jp-band-opt').forEach(function(b) { b.classList.remove('active'); });
     if (btn) btn.classList.add('active');
     bandSelectFollowActive();
@@ -3762,8 +3770,10 @@ function _applyPopoutTheme(payload) {
     stations = {};
     qsoArcs = {};
     if (myCallsign && myGrid && map) registerStation(myCallsign, myGrid);
-    if (btn && khz) window.api.saveSettings({ jtcatLastBandFreq: parseFloat(btn.dataset.freq) || khz });
-  });
+    if (btn && khz && !d.displayOnly) window.api.saveSettings({ jtcatLastBandFreq: parseFloat(btn.dataset.freq) || khz });
+    syncBandMode();
+  }
+  if (window.api.onJtcatBandFollow) window.api.onJtcatBandFollow(jpApplyBandFollow);
 
   // Band buttons
   function selectBand(btn, save) {
@@ -5722,7 +5732,9 @@ function _applyPopoutTheme(payload) {
       bandBtn = bestBtn;
     }
     if (!bandBtn) bandBtn = document.querySelector('.jp-band-opt[data-band="20m"]');
-    if (bandBtn) selectBand(bandBtn, false);
+    // The test copy shares the live radio. Its startup follows Zeus's dial.
+    if (s.tciJtcatBand) jpApplyBandFollow(s.tciJtcatBand);
+    else if (bandBtn && !s.tciRxTest && !s.tciRx) selectBand(bandBtn, false);
     if (s.remoteShack) enterRemoteShackMode();
     window.api.jtcatStart(modeSelect.value);
     // IPC is ordered: lands after jtcat-start built the PSK/JTTY slice, so the
@@ -5840,16 +5852,68 @@ function _applyPopoutTheme(payload) {
   // pre-sync builds; the settings value wins when present.
   var jpRxGain = document.getElementById('jp-rx-gain');
   var jpRxGainVal = document.getElementById('jp-rx-gain-val');
+  var jpTciAutoRx = document.getElementById('jp-tci-auto-rx');
+  var jpTciRxResult = document.getElementById('jp-tci-rx-result');
+  var jpTciRxResultTimer;
+  var jpTciRxPeak = document.getElementById('jp-tci-rx-peak');
+  var jpTciPeakTimer;
+  var jpTciClipUntil = 0;
+  function jpClearTciPeak() {
+    clearTimeout(jpTciPeakTimer);
+    jpTciClipUntil = 0;
+    jpTciRxPeak.textContent = 'Peak —';
+    jpTciRxPeak.classList.remove('near-clip');
+  }
+  if (window.api.onTciRxPeak) window.api.onTciRxPeak(function(level) {
+    if (jpTciRxPeak.classList.contains('hidden')) return;
+    clearTimeout(jpTciPeakTimer);
+    if (level.nearClip) jpTciClipUntil = Date.now() + 1000;
+    const nearClip = Date.now() < jpTciClipUntil;
+    jpTciRxPeak.classList.toggle('near-clip', nearClip);
+    const peak = Number.isFinite(level.peakDb) ? Math.round(level.peakDb) + ' dBFS' : '—';
+    jpTciRxPeak.textContent = 'Peak ' + peak + (nearClip ? ' · Near clip' : '');
+    jpTciPeakTimer = setTimeout(jpClearTciPeak, 1000);
+  });
+  jpTciAutoRx.addEventListener('click', async function() {
+    clearTimeout(jpTciRxResultTimer);
+    jpTciAutoRx.disabled = true;
+    jpTciRxResult.textContent = 'Measuring and adjusting RX audio…';
+    try {
+      const result = await window.api.jtcatAutoTciRxLevel();
+      if (result.error) {
+        jpTciRxResult.textContent = result.error;
+        return;
+      }
+      const peak = result.clipped ? `${result.clipped} near-full-scale samples` : `${Math.round(result.peakDb)} dBFS peak`;
+      const levels = [`RX ${result.volume.to}%`];
+      if (result.fixedGain) levels.push(`Fixed gain ${result.fixedGain.to} dB`);
+      levels.push(peak);
+      if (result.limited) levels.push('gain limit reached');
+      else if (result.iterationLimit) levels.push('stopped after four adjustments');
+      else levels.push('level OK');
+      if (result.fixedGainUnavailable) levels.push('volume only; Zeus fixed gain unavailable');
+      jpTciRxResult.textContent = levels.join(' · ');
+      jpTciRxResultTimer = setTimeout(function () { jpTciRxResult.textContent = ''; }, 5000);
+    } catch (error) {
+      jpTciRxResult.textContent = error.message;
+    } finally {
+      jpTciAutoRx.disabled = false;
+    }
+  });
   function jpApplyRxGainPct(pct, persistLocal) {
     pct = Math.round(Number(pct));
     if (!isFinite(pct)) return;
     pct = Math.max(0, Math.min(100, pct));
     if (jpRxGain) {
       jpRxGain.value = pct;
+      jpRxGain.style.setProperty('--radio-level-fill', pct + '%');
       jpRxGainVal.textContent = pct + '%';
     }
     popoutRxGainLevel = pct / 100;
-    if (popoutRxGainNode) popoutRxGainNode.gain.value = popoutRxGainLevel;
+    // The TCI stream already reflects the radio's reported RX volume.
+    if (popoutRxGainNode) {
+      popoutRxGainNode.gain.value = _lastAudioArgs?.audioSource === 'tci' ? 1 : popoutRxGainLevel;
+    }
     if (persistLocal) { try { localStorage.setItem('jtcat-rx-gain', pct); } catch (e) {} }
   }
   var savedRxPct = parseInt(localStorage.getItem('jtcat-rx-gain'), 10);
@@ -5866,11 +5930,19 @@ function _applyPopoutTheme(payload) {
     jpRxGain.addEventListener('input', function() {
       var pct = parseInt(jpRxGain.value, 10);
       jpApplyRxGainPct(pct, true);
-      if (window.api.jtcatSetRxGain) window.api.jtcatSetRxGain(pct / 100);
+      if (_lastAudioArgs?.audioSource !== 'tci' && window.api.jtcatSetRxGain) {
+        window.api.jtcatSetRxGain(pct / 100);
+      }
+    });
+    jpRxGain.addEventListener('change', function() {
+      if (_lastAudioArgs?.audioSource === 'tci' && window.api.jtcatSetRxGain) {
+        window.api.jtcatSetRxGain(Number(jpRxGain.value) / 100);
+      }
     });
   }
   if (window.api.onJtcatSetRxGain) {
     window.api.onJtcatSetRxGain(function (level) {
+      if (_lastAudioArgs?.audioSource === 'tci' && jpRxGain?.matches(':active')) return;
       jpApplyRxGainPct(Number(level) * 100, true);
     });
   }
@@ -5978,6 +6050,7 @@ function _applyPopoutTheme(payload) {
   var jpRfVal = document.getElementById('jp-rf-power-val');
   var jpRfCaps = { minPower: 0, maxPower: 100, powerStep: 1, powerDecimals: 0, powerChoices: null };
   var jpRfLastInputAt = 0;
+  var jpRfReadbackTimer;
   var jpRfSendTimer = null;
   var jpRfPendingWatts = null;
   var jpRfKnown = false;
@@ -5985,7 +6058,7 @@ function _applyPopoutTheme(payload) {
 
   function jpRfFormat(w) {
     var d = jpRfCaps.powerDecimals || 0;
-    return (d > 0 ? Number(w).toFixed(d) : String(Math.round(Number(w)))) + ' W';
+    return (d > 0 ? Number(w).toFixed(d) : String(Math.round(Number(w)))) + (jpRfCaps.powerUnit === '%' ? '%' : ' W');
   }
   function jpRfPaintValue(w, known) {
     if (!jpRfVal) return;
@@ -5994,11 +6067,11 @@ function _applyPopoutTheme(payload) {
     jpRfVal.textContent = jpRfFormat(w);
     // At the beacon cap in a non-WSPR mode = the exact state that hid a month
     // of unanswered CQs. Say so where the number is.
-    var lowForMode = w > 0 && w <= JP_WSPR_CAP_WATTS && modeSelect && modeSelect.value !== 'WSPR';
+    var lowForMode = jpRfCaps.powerUnit !== '%' && w > 0 && w <= JP_WSPR_CAP_WATTS && modeSelect && modeSelect.value !== 'WSPR';
     jpRfVal.style.color = lowForMode ? '#e94560' : '';
     jpRfVal.title = lowForMode
       ? 'The radio is at the WSPR beacon\u2019s ' + JP_WSPR_CAP_WATTS + ' W cap. Raise it here unless QRP is intended.'
-      : 'Radio RF power setting';
+      : jpRfCaps.powerUnit === '%' ? 'Radio TX drive setting' : 'Radio RF power setting';
   }
   function jpRfSend(watts) {
     jpRfPendingWatts = watts;
@@ -6014,14 +6087,16 @@ function _applyPopoutTheme(payload) {
   }
   function jpRfApply(p) {
     if (!p || !jpRfGroup) return;
+    clearTimeout(jpRfReadbackTimer);
     jpRfCaps = {
+      powerUnit: p.powerUnit === '%' ? '%' : 'W',
       minPower: p.minPower != null ? p.minPower : 0,
       maxPower: p.maxPower != null ? p.maxPower : 100,
       powerStep: p.powerStep != null ? p.powerStep : 1,
       powerDecimals: p.powerDecimals != null ? p.powerDecimals : 0,
       powerChoices: Array.isArray(p.powerChoices) && p.powerChoices.length ? p.powerChoices : null,
     };
-    var known = !!p.known && p.watts > 0;
+    var known = !!p.known && (p.watts > 0 || (jpRfCaps.powerUnit === '%' && p.watts === 0));
     // Nothing to show AND nothing to set: no rig, or one with no power control.
     if (!known && !p.settable) { jpRfGroup.classList.add('hidden'); return; }
     jpRfGroup.classList.remove('hidden');
@@ -6046,24 +6121,32 @@ function _applyPopoutTheme(payload) {
       jpRfRange.max = jpRfCaps.maxPower;
       jpRfRange.step = jpRfCaps.powerStep;
       jpRfRange.disabled = !p.settable;
+      var title = jpRfCaps.powerUnit === '%' ? 'Radio TX drive' : 'Radio RF power';
       jpRfRange.title = p.settable
-        ? 'Radio RF power: ' + jpRfCaps.minPower + '\u2013' + jpRfCaps.maxPower + ' W'
-        : 'Radio RF power (read-only \u2014 no live CAT/SmartSDR power control)';
+        ? title + ': ' + jpRfCaps.minPower + '\u2013' + jpRfCaps.maxPower + ' ' + jpRfCaps.powerUnit
+        : title + ' (read-only \u2014 no live radio power control)';
     }
     // Do not yank the knob out from under a drag: the echo of our own set is
     // in flight, and a mid-drag readback would snap the thumb back a pixel.
-    var dragging = document.activeElement === jpRfRange || document.activeElement === jpRfSelect ||
-                   (Date.now() - jpRfLastInputAt) < 600;
-    if (known && !dragging) {
-      if (jpRfRange && !useSelect) jpRfRange.value = p.watts;
+    var wait = 600 - (Date.now() - jpRfLastInputAt);
+    if (wait > 0) {
+      jpRfReadbackTimer = setTimeout(function () { jpRfApply(p); }, wait);
+      return;
+    }
+    if (known) {
+      if (jpRfRange && !useSelect) {
+        jpRfRange.value = p.watts;
+        RigPowerView.paintRange(jpRfRange);
+      }
       if (jpRfSelect && useSelect) jpRfSelect.value = String(p.watts);
     }
-    if (!dragging) jpRfPaintValue(p.watts, known);
+    jpRfPaintValue(p.watts, known);
   }
   if (jpRfRange) {
     jpRfRange.addEventListener('input', function() {
       jpRfLastInputAt = Date.now();
       var w = Number(jpRfRange.value);
+      RigPowerView.paintRange(jpRfRange);
       jpRfPaintValue(w, true);
       jpRfSend(w);
     });
@@ -6115,6 +6198,7 @@ function _applyPopoutTheme(payload) {
     pct = Math.max(0, Math.min(100, pct));
     if (jpTxGain) {
       jpTxGain.value = pct;
+      jpTxGain.style.setProperty('--radio-level-fill', pct + '%');
       jpTxGainVal.textContent = pct + '%';
     }
     popoutTxGainLevel = txPwrToGain(pct);
@@ -6303,10 +6387,15 @@ function _applyPopoutTheme(payload) {
   // JTCAT receiving from the WebSDR (#243): the capture is main's 12 kHz
   // 'jtcat-vita49-audio' frames, whatever the rig's own audio source is.
   function jpCaptureSource(s) {
+    if (s && (s.tciRxTest || s.tciRx)) return 'tci';
     return s && s.jtcatRxSource === 'websdr' ? 'websdr' : (s && s.audioSource);
   }
   async function startPopoutAudio(deviceId, audioSource) {
     _lastAudioArgs = { deviceId: deviceId, audioSource: audioSource };
+    jpClearTciPeak();
+    jpTciRxPeak.classList.toggle('hidden', audioSource !== 'tci');
+    jpTciAutoRx.classList.toggle('hidden', audioSource !== 'tci');
+    jpTciRxResult.classList.toggle('hidden', audioSource !== 'tci');
     jpSetDriveRelevance(audioSource);
     _audioStartStage = 'stop-old';
     if (_audioStartWatchdog) clearTimeout(_audioStartWatchdog);
@@ -6330,7 +6419,7 @@ function _applyPopoutTheme(payload) {
     try {
       // Yaesu SCU-LAN10 audio arrives the same way: main forwards it as
       // 'jtcat-vita49-audio' frames at 24 kHz (handleYaesuLanAudioFrame).
-      if (audioSource === 'smartsdr' || audioSource === 'yaesu-lan' || audioSource === 'websdr') {
+      if (audioSource === 'smartsdr' || audioSource === 'yaesu-lan' || audioSource === 'websdr' || audioSource === 'tci') {
         _audioStartStage = 'ctx-create';
         // SmartSDR Direct: audio is the VITA-49 dax_rx stream that main
         // forwards as 'jtcat-vita49-audio' frames. A single AudioWorkletNode
@@ -6355,7 +6444,7 @@ function _applyPopoutTheme(payload) {
           numberOfInputs: 0,
           numberOfOutputs: 1,
           outputChannelCount: [1],
-          processorOptions: audioSource === 'websdr'
+          processorOptions: ['websdr', 'tci'].includes(audioSource)
             ? { sourceRate: 12000 }
             : { sourceRate: 24000 },
         });
@@ -6425,7 +6514,7 @@ function _applyPopoutTheme(payload) {
       // AnalyserNode for waterfall FFT (driven locally, no IPC needed)
       // RX gain node
       popoutRxGainNode = popoutAudioCtx.createGain();
-      popoutRxGainNode.gain.value = popoutRxGainLevel;
+      popoutRxGainNode.gain.value = audioSource === 'tci' ? 1 : popoutRxGainLevel;
       source.connect(popoutRxGainNode);
 
       popoutAnalyser = popoutAudioCtx.createAnalyser();
@@ -6545,6 +6634,7 @@ function _applyPopoutTheme(payload) {
         }
         window.api.jtcatLog('[JTCAT popout] Audio started: ' +
           (audioSource === 'smartsdr' ? 'SmartSDR Direct (VITA-49)' :
+           audioSource === 'tci' ? 'TCI RX1' :
            audioSource === 'websdr' ? 'WebSDR' :
            audioSource === 'icom-network' ? 'Icom network' :
            audioSource === 'yaesu-lan' ? 'Yaesu LAN (SCU-LAN10)' : 'device capture') +

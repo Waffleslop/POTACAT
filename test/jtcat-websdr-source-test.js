@@ -157,8 +157,8 @@ test('source selection: with the WebSDR chosen, both windows draw the 12 kHz fra
   assert.ok(APP.includes("if (jtcatFromSdr || s.audioSource === 'smartsdr' || s.audioSource === 'icom-network' || s.audioSource === 'yaesu-lan') {"));
   assert.ok(/const vita49SourceOptions = jtcatFromSdr\s*\? \{ sourceRate: 12000 \}/.test(APP));
   assert.ok(POP.includes("return s && s.jtcatRxSource === 'websdr' ? 'websdr' : (s && s.audioSource);"));
-  assert.ok(POP.includes("if (audioSource === 'smartsdr' || audioSource === 'yaesu-lan' || audioSource === 'websdr') {"));
-  assert.ok(/processorOptions: audioSource === 'websdr'\s*\? \{ sourceRate: 12000 \}/.test(POP));
+  assert.ok(POP.includes("if (audioSource === 'smartsdr' || audioSource === 'yaesu-lan' || audioSource === 'websdr' || audioSource === 'tci') {"));
+  assert.ok(/processorOptions: \['websdr', 'tci'\]\.includes\(audioSource\)\s*\? \{ sourceRate: 12000 \}/.test(POP));
   assert.strictEqual((POP.match(/startPopoutAudio\(s\.remoteAudioInput \|\| '', jpCaptureSource\(s\)\)/g) || []).length, 2, 'both pop-out start paths');
   // The window's capture is the SDR audio coming back: main does not feed it twice.
   const ipc = MAIN.slice(MAIN.indexOf("ipcMain.on('jtcat-audio'"), MAIN.indexOf("ipcMain.on('jtcat-slice-audio'"));

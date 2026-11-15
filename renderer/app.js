@@ -1870,8 +1870,16 @@ async function openCatPopover(anchor) {
     return;
   }
   const settings = await window.api.getSettings();
+  if (settings.tciTestLink) {
+    catPopoverRigs.replaceChildren(renderTciTestRig(settings.tciTestLink, 'cat-popover-rig'));
+    positionCatPopover();
+    catPopover.classList.remove('hidden');
+    catPopoverOpen = true;
+    return;
+  }
   const rigs = settings.rigs || [];
   const activeId = settings.activeRigId || null;
+  const activeTci = settings.catTarget?.type === 'tci';
 
   // Build rig list
   catPopoverRigs.innerHTML = '';
@@ -1887,8 +1895,8 @@ async function openCatPopover(anchor) {
     </div>
   `;
   noneEl.addEventListener('click', async () => {
-    window.api.connectCat(null);
-    await window.api.saveSettings({ activeRigId: null });
+    if (!activeTci) window.api.connectCat(null);
+    await window.api.saveSettings({ activeRigId: null, ...(activeTci ? { catTarget: null } : {}) });
     activeRigName = '';
     activeRigCatLabel = '';
     refreshCatPillLabel();
@@ -1915,7 +1923,7 @@ async function openCatPopover(anchor) {
     rigEl.appendChild(dot);
     rigEl.appendChild(info);
     rigEl.addEventListener('click', async () => {
-      window.api.connectCat(rig.catTarget);
+      if (!activeTci && rig.catTarget?.type !== 'tci') window.api.connectCat(rig.catTarget);
       await window.api.saveSettings({
         activeRigId: rig.id,
         catTarget: rig.catTarget,
@@ -2524,11 +2532,62 @@ function rigAudioSourceOf(rig) {
     ? v : window.RigFamily.defaultAudioSourceFor(fam);
 }
 
+function tciRigFields(prefix) {
+  const field = suffix => document.getElementById(`${prefix}-tci-${suffix}`);
+  return { server: field('server'), host: field('host'), port: field('port'),
+    enginePort: field('engine-port'), engineRow: field('engine-row'),
+    autoStart: field('auto-start'), check: field('check'), result: field('result') };
+}
+
+function readTciRigTarget({ server, host, port, enginePort, autoStart }) {
+  const target = { type: 'tci', server: server.value, host: host.value.trim(), port: port.valueAsNumber, autoStart: autoStart.checked };
+  if (server.value === 'zeus' && enginePort.value) target.enginePort = enginePort.valueAsNumber;
+  return target;
+}
+
+function fillTciRigFields(fields, target = {}) {
+  const { server, host, port, enginePort, engineRow, autoStart, result } = fields;
+  autoStart.checked = target.autoStart !== false;
+  server.value = target.server || 'zeus';
+  host.value = target.host || '127.0.0.1';
+  port.value = target.port ?? (server.value === 'thetis' ? 50001 : 40001);
+  enginePort.value = target.enginePort ?? '';
+  engineRow.classList.toggle('hidden', server.value !== 'zeus');
+  result.textContent = '';
+}
+
+function wireTciRigFields(fields) {
+  const { server, port, engineRow, check, result } = fields;
+  server.addEventListener('change', () => {
+    port.value = server.value === 'thetis' ? 50001 : 40001;
+    engineRow.classList.toggle('hidden', server.value !== 'zeus');
+    result.textContent = '';
+  });
+  check.addEventListener('click', async () => {
+    check.disabled = true;
+    result.textContent = 'Checking TCI connection…';
+    try {
+      const response = await window.api.probeTciRig(readTciRigTarget(fields));
+      result.textContent = response.ok ? 'TCI server is ready.' : response.error;
+    } catch (error) {
+      result.textContent = error.message;
+    } finally {
+      check.disabled = false;
+    }
+  });
+}
+
+const rigTciFields = tciRigFields('rig');
+const welcomeTciFields = tciRigFields('welcome');
+wireTciRigFields(rigTciFields);
+wireTciRigFields(welcomeTciFields);
+
 function updateRadioSubPanels() {
   const type = getSelectedRadioType();
   rebuildAudioSourceOptions();
   flexConfig.classList.toggle('hidden', type !== 'flex');
   tcpcatConfig.classList.toggle('hidden', type !== 'tcpcat');
+  document.getElementById('rig-tci-config').classList.toggle('hidden', type !== 'tci');
   if (k4networkConfig) k4networkConfig.classList.toggle('hidden', type !== 'k4network');
   serialcatConfig.classList.toggle('hidden', type !== 'serialcat');
   icomConfig.classList.toggle('hidden', type !== 'icom');
@@ -2586,8 +2645,11 @@ function updateFlexStatus() {
 
 async function populateRadioSection(currentTarget) {
   hamlibFieldsLoaded = false;
+  fillTciRigFields(rigTciFields, currentTarget?.type === 'tci' ? currentTarget : undefined);
   if (!currentTarget) {
     setRadioType('flex');
+  } else if (currentTarget.type === 'tci') {
+    setRadioType('tci');
   } else if (currentTarget.type === 'tcp') {
     // Check if it matches a standard Flex slice (localhost + 5002-5005)
     const isFlexSlice = window.RigFamily.familyFromCatTarget(currentTarget) === 'flex';
@@ -3163,6 +3225,9 @@ function shortSerialPath(path) {
 
 function describeRigTarget(target) {
   if (!target) return 'Not configured';
+  if (target.type === 'tci') {
+    return `${target.server === 'thetis' ? 'Thetis' : 'Zeus'} TCI at ${target.host}:${target.port}`;
+  }
   if (target.type === 'tcp') {
     const host = target.host || '127.0.0.1';
     const port = target.port || 5002;
@@ -3217,11 +3282,117 @@ function describeRigTarget(target) {
   return 'Unknown';
 }
 
-function renderRigList(rigs, activeRigId) {
+// The isolated build stores its TCI setup separately from normal CAT rigs.
+function renderTciTestRig(link, rowClass) {
+  const { connected, host, port, server } = link;
+  const row = document.createElement('div');
+  row.className = rowClass + ' active';
+  const info = document.createElement('div');
+  info.className = rowClass + '-info';
+  const name = document.createElement('div');
+  name.className = rowClass + '-name';
+  name.textContent = server === 'thetis' ? 'Thetis TCI' : 'Zeus TCI';
+  const description = document.createElement('div');
+  description.className = rowClass + '-desc';
+  description.textContent = connected
+    ? `TCI linked on ${host}:${port}`
+    : `TCI disconnected on ${host}:${port} · Open JTCAT to connect`;
+  info.append(name, description);
+  row.append(info);
+  if (rowClass === 'rig-item') {
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.className = 'rig-item-btn';
+    edit.textContent = 'Edit';
+    edit.addEventListener('click', () => openTciTestEditor(link, 'tci-test-settings-slot'));
+    row.append(edit);
+  }
+  return row;
+}
+
+const tciTestEditor = document.getElementById('tci-test-editor');
+const tciTestServer = document.getElementById('tci-test-server');
+const tciTestHost = document.getElementById('tci-test-host');
+const tciTestPortInput = document.getElementById('tci-test-port');
+const tciTestSetupResult = document.getElementById('tci-test-setup-result');
+const tciTestCheck = document.getElementById('tci-test-check');
+const tciTestSave = document.getElementById('tci-test-save');
+const tciTestCancel = document.getElementById('tci-test-cancel');
+const welcomeTciSetup = document.getElementById('welcome-tci-setup');
+let tciTestEndpoints;
+
+function loadTciTestEndpoint() {
+  const { host, port } = tciTestEndpoints[tciTestServer.value];
+  tciTestHost.value = host;
+  tciTestPortInput.value = port;
+  tciTestSetupResult.textContent = '';
+}
+
+function openTciTestEditor({ server, endpoints, setup }, slotId) {
+  tciTestEndpoints = endpoints;
+  tciTestServer.value = server;
+  loadTciTestEndpoint();
+  document.getElementById(slotId).appendChild(tciTestEditor);
+  document.getElementById('tci-test-help-title').textContent = setup.title;
+  document.getElementById('tci-test-help-steps').replaceChildren(...setup.steps.map(step => {
+    const item = document.createElement('li');
+    item.textContent = step;
+    return item;
+  }));
+  document.getElementById('tci-test-help-why').textContent = setup.why;
+  tciTestEditor.classList.remove('hidden');
+  tciTestServer.focus();
+}
+
+welcomeTciSetup.addEventListener('click', async () => {
+  const { tciTestLink } = await window.api.getSettings();
+  if (tciTestLink) openTciTestEditor(tciTestLink, 'welcome-tci-slot');
+});
+tciTestServer.addEventListener('change', loadTciTestEndpoint);
+tciTestCancel.addEventListener('click', () => tciTestEditor.classList.add('hidden'));
+tciTestCheck.addEventListener('click', () => runTciTestSetup(false));
+tciTestSave.addEventListener('click', () => runTciTestSetup(true));
+
+async function runTciTestSetup(apply) {
+  if (!tciTestHost.reportValidity() || !tciTestPortInput.reportValidity()) return;
+  const endpoint = {
+    server: tciTestServer.value,
+    host: tciTestHost.value.trim(),
+    port: tciTestPortInput.valueAsNumber,
+  };
+  const controls = [tciTestServer, tciTestHost, tciTestPortInput, tciTestCheck, tciTestSave, tciTestCancel];
+  for (const control of controls) control.disabled = true;
+  tciTestSetupResult.textContent = `Checking TCI at ${endpoint.host}:${endpoint.port}…`;
+  try {
+    const result = await window.api.tciTestSetup(endpoint, apply);
+    if (!result.ok) {
+      tciTestSetupResult.textContent = result.error;
+      return;
+    }
+    tciTestSetupResult.textContent = apply ? 'Saved. Open JTCAT to check receive audio.' : 'TCI server is ready.';
+    if (apply) {
+      const { tciTestLink } = await window.api.getSettings();
+      tciTestEndpoints = tciTestLink.endpoints;
+      myRigsList.replaceChildren(renderTciTestRig(tciTestLink, 'rig-item'));
+    }
+  } catch (error) {
+    tciTestSetupResult.textContent = error.message;
+  } finally {
+    for (const control of controls) control.disabled = false;
+  }
+}
+
+function renderRigList(rigs, activeRigId, tciTestLink) {
   myRigsList.innerHTML = '';
   currentRigs = rigs || [];
   currentActiveRigId = activeRigId || null;
   if (window.refreshWinlinkAudioRow) window.refreshWinlinkAudioRow();
+  rigAddBtn.hidden = !!tciTestLink;
+  tciTestEditor.classList.add('hidden');
+  if (tciTestLink) {
+    myRigsList.appendChild(renderTciTestRig(tciTestLink, 'rig-item'));
+    return;
+  }
 
   // "None" option
   const noneItem = document.createElement('div');
@@ -3312,6 +3483,7 @@ function renderRigList(rigs, activeRigId) {
 
 function buildCatTargetFromForm() {
   const radioType = getSelectedRadioType();
+  if (radioType === 'tci') return readTciRigTarget(rigTciFields);
   if (radioType === 'flex') {
     // POTACAT talks to the radio directly on 4992; this CAT target is the
     // SmartSDR-Win Kenwood shim (port 5002+slice), used only to DETECT when
@@ -3751,6 +3923,10 @@ async function saveRigEditor() {
   const name = setRigName.value.trim() || 'Unnamed Rig';
   const rigCatLabelVal = (document.getElementById('set-rig-cat-label')?.value || '').trim().toUpperCase().slice(0, 4);
   const catTarget = buildCatTargetFromForm();
+  if (catTarget?.type === 'tci') {
+    const error = await window.api.validateTciRig(catTarget);
+    if (error) { rigTciFields.result.textContent = error; return false; }
+  }
   const model = rigModelSelect ? rigModelSelect.value || null : null;
 
   // The SCU-LAN10 spec covers three radios; anything else has no SCU-LAN10.
@@ -18415,7 +18591,7 @@ async function openSettingsDialog(tab) {
   renderLookPickers();
   hamlibTestResult.textContent = '';
   hamlibTestResult.className = '';
-  renderRigList(s.rigs || [], s.activeRigId || null);
+  renderRigList(s.rigs || [], s.activeRigId || null, s.tciTestLink);
   closeRigEditor();
   // Update connection status pills
   updateSettingsConnBar();
@@ -22497,6 +22673,7 @@ let lastLogPower = 0; // last power value entered by user in log dialog (sticky)
 // The power a log form starts with, or null for an empty box: never a
 // guessed 100 W (#523, lib/log-tx-power.js).
 function logFormPower() {
+  if (rigCurrentCaps.powerUnit === '%') return null;
   return LogTxPower.txPowerForLog({
     knownW: rigKnownPower > 0 ? rigKnownPower : radioPower, // main's level is the newer (a set lands there first)
     enteredW: lastLogPower,
@@ -25340,8 +25517,9 @@ function formatFilterWidth(hz) {
 function rigFormatPower(watts) {
   const decimals = Math.max(0, parseInt(rigCurrentCaps.powerDecimals || 0, 10));
   const numeric = Number(watts);
-  if (!Number.isFinite(numeric)) return watts + 'W';
-  return numeric.toFixed(decimals) + 'W';
+  const unit = rigCurrentCaps.powerUnit === '%' ? '%' : 'W';
+  if (!Number.isFinite(numeric)) return watts + unit;
+  return numeric.toFixed(decimals) + unit;
 }
 
 function rigUsesPowerSelect() {
@@ -27137,6 +27315,7 @@ function getWelcomeRadioType() {
 function updateWelcomeRadioSubPanels() {
   const type = getWelcomeRadioType();
   document.getElementById('welcome-flex-config').classList.toggle('hidden', type !== 'flex');
+  document.getElementById('welcome-tci-config').classList.toggle('hidden', type !== 'tci');
   document.getElementById('welcome-tcpcat-config').classList.toggle('hidden', type !== 'tcpcat');
   document.getElementById('welcome-serialcat-config').classList.toggle('hidden', type !== 'serialcat');
   document.getElementById('welcome-icom-config').classList.toggle('hidden', type !== 'icom');
@@ -27210,6 +27389,7 @@ async function loadWelcomeHamlibFields() {
 
 function buildWelcomeCatTarget() {
   const type = getWelcomeRadioType();
+  if (type === 'tci') return readTciRigTarget(welcomeTciFields);
   if (type === 'flex') {
     return { type: 'tcp', host: '127.0.0.1', port: parseInt(document.getElementById('welcome-flex-slice').value, 10) };
   } else if (type === 'tcpcat') {
@@ -27300,6 +27480,7 @@ document.querySelectorAll('input[name="welcome-radio-type"]').forEach((btn) => {
 document.getElementById('welcome-rig-add-btn').addEventListener('click', () => {
   welcomeHamlibLoaded = false;
   welcomeSerialcatLoaded = false;
+  fillTciRigFields(welcomeTciFields);
   document.getElementById('welcome-rig-editor').classList.remove('hidden');
   document.getElementById('welcome-rig-add-btn').classList.add('hidden');
   document.getElementById('welcome-rig-name').value = '';
@@ -27313,9 +27494,13 @@ document.getElementById('welcome-rig-cancel-btn').addEventListener('click', () =
   document.getElementById('welcome-rig-add-btn').classList.remove('hidden');
 });
 
-document.getElementById('welcome-rig-save-btn').addEventListener('click', () => {
+document.getElementById('welcome-rig-save-btn').addEventListener('click', async () => {
   const name = document.getElementById('welcome-rig-name').value.trim() || 'My Radio';
   const catTarget = buildWelcomeCatTarget();
+  if (catTarget?.type === 'tci') {
+    const error = await window.api.validateTciRig(catTarget);
+    if (error) { welcomeTciFields.result.textContent = error; return; }
+  }
   welcomeRig = { id: 'rig_' + Date.now(), name, catTarget };
   // Keep POTACAT's audio/tune slice in sync with the chosen Flex CAT shim port
   // (5002→A …) so a non-A pick doesn't leave audio on slice A while CAT targets
@@ -27405,6 +27590,7 @@ document.getElementById('welcome-start').addEventListener('click', async () => {
       saveData.rigs = [...existingRigs, welcomeRig];
     }
     saveData.activeRigId = welcomeRig.id;
+    if (welcomeRig.catTarget?.type === 'tci') saveData.catTarget = welcomeRig.catTarget;
     // Per-rig audio source. New Flex setup defaults to SmartSDR Direct so
     // FT8/SSTV audio streams straight to the radio with no DAX program and
     // no device config — the "Local/DAX" default was the #1 "PTT keys but
@@ -27747,7 +27933,9 @@ async function checkFirstRun(force = false) {
     const welcomeRigDisplay = document.getElementById('welcome-rig-display');
     welcomeRigDisplay.innerHTML = '';
     welcomeRigDisplay.classList.add('hidden');
-    document.getElementById('welcome-rig-add-btn').classList.remove('hidden');
+    document.getElementById('welcome-rig-add-btn').classList.toggle('hidden', !!s.tciTestLink);
+    welcomeTciSetup.classList.toggle('hidden', !s.tciTestLink);
+    if (tciTestEditor.parentElement.id === 'welcome-tci-slot') tciTestEditor.classList.add('hidden');
     document.getElementById('welcome-rig-editor').classList.add('hidden');
     // Pre-fill with existing settings when forced (not fresh install)
     if (force) {
@@ -27792,7 +27980,7 @@ async function checkFirstRun(force = false) {
       // Show existing active rig if any
       const rigs = s.rigs || [];
       const activeRig = rigs.find(r => r.id === s.activeRigId) || rigs[0];
-      if (activeRig) {
+      if (activeRig && !s.tciTestLink) {
         welcomeRig = activeRig;
         showWelcomeRigItem(activeRig);
       }
@@ -28232,6 +28420,10 @@ function resumeActivation(activation) {
       timeOn: c.timeOn || '',
       rstSent: c.rstSent || '',
       rstRcvd: c.rstRcvd || '',
+      txPower: c.txPower || '',
+
+      myGridsquare: c.myGridsquare || '',
+      state: c.state || '',
       stationCallsign: myCallsign || '',
       operator: myCallsign || '',
       // Preserve the P2P side so re-export keeps SIG/SIG_INFO
@@ -28839,6 +29031,9 @@ function buildActivationAdifQsos(act) {
     timeOn: c.timeOn || '',
     rstSent: c.rstSent || '',
     rstRcvd: c.rstRcvd || '',
+    txPower: c.txPower || '',
+
+    state: c.state || '',
     mySig: r.sig || 'POTA',
     mySigInfo: r.ref,
     stationCallsign: myCallsign || '',

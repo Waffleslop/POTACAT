@@ -65,8 +65,10 @@ test('wire, bridge and window', () => {
   const bridge = read('lib/remote-bridge.js');
   assert.ok(bridge.includes("'jtcat-follow-radio': () => one({ type: 'jtcat-follow-radio' })") && bridge.includes("'jtcat-band-follow': same('jtcat-band-follow')"));
   const pop = read('renderer/jtcat-popout.js');
-  assert.ok(/onJtcatBandFollow\(function\(d\) \{[\s\S]*?bandSelectFollowActive\(\)/.test(pop), 'the window marks the band');
-  const follow = pop.slice(pop.indexOf('onJtcatBandFollow(function(d)'), pop.indexOf('// Band buttons'));
+  const follow = pop.slice(pop.indexOf('function jpApplyBandFollow(d)'), pop.indexOf('// Band buttons'));
+  assert.ok(follow.includes('bandSelectFollowActive()') && follow.includes('onJtcatBandFollow(jpApplyBandFollow)'), 'the window marks the band');
+  assert.ok(pop.includes('if (s.tciJtcatBand) jpApplyBandFollow(s.tciJtcatBand)'), 'TCI startup displays the confirmed radio band');
+  assert.ok(follow.includes('if (btn && khz && !d.displayOnly)'), 'a TCI display update does not save a tune selection');
   assert.ok(!/window\.api\.tune\(/.test(follow), 'and never retunes the radio');
   assert.ok(/data\.followRadio && window\.api\.jtcatFollowRadio/.test(pop), 'the refusal toast has the button');
 });

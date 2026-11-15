@@ -1243,6 +1243,7 @@
   function renderRigPower(p) {
     if (!p) return;
     pwrLast = p;
+    $('wl-pwr-unit').textContent = p.powerUnit === '%' ? '%' : 'W';
     var choices = Array.isArray(p.powerChoices) && p.powerChoices.length ? p.powerChoices : null;
     pwrSel.classList.toggle('hidden', !choices);
     pwrIn.classList.toggle('hidden', !!choices);

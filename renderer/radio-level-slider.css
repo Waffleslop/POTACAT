@@ -1,0 +1,27 @@
+.radio-level-slider {
+  --radio-level-thumb: 14px;
+  --radio-level-fill: 0%;
+  appearance: none;
+  width: 110px;
+  flex: 0 0 110px;
+  margin: 0;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.radio-level-slider:focus-visible { outline: 2px solid var(--accent-blue, var(--blue)); }
+.radio-level-slider::-webkit-slider-runnable-track {
+  height: var(--radio-level-thumb);
+  background: linear-gradient(to right, var(--accent-blue, var(--blue)) var(--radio-level-fill), var(--border-primary, var(--s3)) 0)
+    center / calc(100% - var(--radio-level-thumb)) 4px no-repeat;
+}
+.radio-level-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: var(--radio-level-thumb);
+  height: var(--radio-level-thumb);
+  border-radius: 50%;
+  background: var(--accent-blue, var(--blue));
+}
+
+.radio-level-slider:disabled { opacity: 0.5; }

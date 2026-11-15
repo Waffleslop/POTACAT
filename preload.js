@@ -287,6 +287,9 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener('open-settings-panel', handler);
   },
   getSettings: () => ipcRenderer.invoke('get-settings'),
+  probeTciRig: endpoint => ipcRenderer.invoke('probe-tci-rig', endpoint),
+  validateTciRig: endpoint => ipcRenderer.invoke('validate-tci-rig', endpoint),
+  tciTestSetup: (endpoint, apply) => ipcRenderer.invoke('tci-test-setup', endpoint, apply),
   getRigModels: () => ipcRenderer.invoke('get-rig-models'),
   getRigSetupNotes: (q) => ipcRenderer.invoke('get-rig-setup-notes', q),
   getPacketRigMode: (q) => ipcRenderer.invoke('get-packet-rig-mode', q),
