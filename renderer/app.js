@@ -1294,6 +1294,7 @@ const setLotwPassword = document.getElementById('set-lotw-password');
 const lotwUploadBtn = document.getElementById('lotw-upload-btn');
 const lotwUploadResult = document.getElementById('lotw-upload-result');
 const setLotwLogin = document.getElementById('set-lotw-login');
+const setLotwTqslPath = document.getElementById('set-lotw-tqsl-path');
 const setLotwWebPassword = document.getElementById('set-lotw-web-password');
 const lotwDownloadBtn = document.getElementById('lotw-download-btn');
 const lotwDownloadResult = document.getElementById('lotw-download-result');
@@ -6138,8 +6139,12 @@ setSotaUpload.addEventListener('change', () => {
 async function refreshLotwLocations(preferred) {
   if (!window.api || !window.api.lotwLocations) return;
   try {
-    const r = await window.api.lotwLocations();
+    const r = await window.api.lotwLocations({ tqslPath: setLotwTqslPath.value.trim() });
     document.getElementById('lotw-missing').classList.toggle('hidden', !!r.tqslPath);
+    const found = document.getElementById('lotw-tqsl-found');
+    if (found) found.textContent = r.tqslPath
+      ? 'Using ' + r.tqslPath
+      : 'Leave blank and POTACAT looks in the usual places, including a Flatpak install on Linux.';
     const want = preferred || setLotwLocation.value || r.configured || '';
     setLotwLocation.innerHTML = '<option value="">Select...</option>';
     for (const name of r.locations || []) {
@@ -6157,6 +6162,18 @@ setLotwEnable.addEventListener('change', () => {
   lotwConfig.classList.toggle('hidden', !setLotwEnable.checked);
   if (setLotwEnable.checked) refreshLotwLocations();
 });
+// The TQSL program (#343): typed or picked, checked at once so "Using ..."
+// and the not-found note follow the field before Save.
+setLotwTqslPath.addEventListener('change', () => refreshLotwLocations());
+document.getElementById('lotw-tqsl-browse').addEventListener('click', async () => {
+  if (!window.api || !window.api.echocatPickFile) return;
+  const isWin = navigator.platform.startsWith('Win');
+  const p = await window.api.echocatPickFile({
+    title: 'Select the TQSL program',
+    filters: isWin ? [{ name: 'Programs', extensions: ['exe'] }, { name: 'All files', extensions: ['*'] }] : [{ name: 'All files', extensions: ['*'] }],
+  });
+  if (p) { setLotwTqslPath.value = p; refreshLotwLocations(); }
+});
 lotwUploadBtn.addEventListener('click', async () => {
   if (!window.api || !window.api.lotwUpload) return;
   lotwUploadBtn.disabled = true;
@@ -6166,6 +6183,7 @@ lotwUploadBtn.addEventListener('click', async () => {
     const r = await window.api.lotwUpload({
       location: setLotwLocation.value,
       password: setLotwPassword.value,
+      tqslPath: setLotwTqslPath.value.trim(),
     });
     // On failure include TQSL's own last words (stderr tail) — "unexpected
     // code" alone gave LZ3AW nothing to act on.
@@ -18226,6 +18244,7 @@ async function openSettingsDialog(tab) {
   sotaUploadConfig.classList.toggle('hidden', !s.sotaUpload);
   setLotwEnable.checked = s.lotwEnable === true;
   setLotwPassword.value = s.lotwCertPassword || '';
+  setLotwTqslPath.value = s.tqslPath || '';
   setLotwLogin.value = s.lotwLogin || '';
   setLotwWebPassword.value = s.lotwPassword || '';
   lotwConfig.classList.toggle('hidden', !s.lotwEnable);
@@ -19107,6 +19126,7 @@ settingsSave.addEventListener('click', async () => {
     lotwEnable: setLotwEnable.checked,
     lotwStationLocation: setLotwLocation.value || '',
     lotwCertPassword: setLotwPassword.value || '',
+    tqslPath: setLotwTqslPath.value.trim(),
     lotwLogin: setLotwLogin.value.trim(),
     lotwPassword: setLotwWebPassword.value || '',
     clublogEnable: setClublogEnable.checked,

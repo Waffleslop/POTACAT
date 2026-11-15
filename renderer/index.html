@@ -2973,7 +2973,12 @@
           <label class="checkbox-label"><input type="checkbox" id="set-lotw-enable"> Upload to ARRL Logbook of the World (via TQSL)</label>
           <span class="help-text" style="margin-left:12px;display:block;">Signs and uploads your POTACAT log with your own TrustedQSL install and callsign certificate. QSOs already at LoTW are skipped automatically.</span>
           <div id="lotw-config" class="hidden" style="margin-left:12px;margin-top:6px;">
-            <div id="lotw-missing" class="hidden help-text" style="margin-bottom:6px;">TQSL was not found. Install <a href="https://www.arrl.org/tqsl-download" id="lotw-tqsl-link" data-external>TrustedQSL</a>, create your callsign certificate and a Station Location in it, then reopen Settings.</div>
+            <div id="lotw-missing" class="hidden help-text" style="margin-bottom:6px;">TQSL was not found. Install <a href="https://www.arrl.org/tqsl-download" id="lotw-tqsl-link" data-external>TrustedQSL</a> and create your callsign certificate and a Station Location in it. If it is installed somewhere else, choose it under TQSL program below.</div>
+            <label style="display:block;margin-bottom:4px;">TQSL program:
+              <input type="text" id="set-lotw-tqsl-path" placeholder="found for you; leave blank" style="width:230px;" autocomplete="off" spellcheck="false">
+              <button type="button" id="lotw-tqsl-browse">Browse&hellip;</button>
+            </label>
+            <span id="lotw-tqsl-found" class="help-text" style="display:block;margin-bottom:6px;">Leave blank and POTACAT looks in the usual places, including a Flatpak install on Linux.</span>
             <label>Station Location:
               <select id="set-lotw-location" style="min-width:180px;"><option value="">Select...</option></select>
             </label>
