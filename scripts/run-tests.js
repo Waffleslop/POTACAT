@@ -244,6 +244,7 @@ const TESTS = [
   'test/serial-close-blocked-cts-test.js', // RTS/CTS write stuck on CTS: flush before close, bounded close, None keeps the close (#174)
   'test/yaesu-lines-low-test.js', // every Yaesu drops DTR/RTS at open (stein, G5HOW: keyed on connect)
   'test/yaesu-po-meter-test.js', // FT-710/FTDX10/FTDX101 read forward power on RM5; no false 'no CAT during TX' line (#581)
+  'test/ftdx5000-power-scale-test.js', // FTDX5000 PC is 000-255, not watts (nicki3fiy 254 W)
   'test/tx-audio-input-test.js', // TS-480/590/890/990 transmit audio input per rig; TS-480 asks on first transmit (#594)
   'test/split-first-tune-test.js', // #113 item 2: no split OFF unless POTACAT turned split on
   'test/waterfall-palettes-test.js', // waterfall / band scope palettes = the ECHOCAT app's, wired into every waterfall
