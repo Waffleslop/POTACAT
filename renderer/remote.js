@@ -7830,7 +7830,8 @@
       var rec = '';
       rec += af('CALL', c.callsign);
       if (c.freq) rec += af('FREQ', c.freq);
-      rec += af('MODE', c.mode);
+      // adifMode + submode: the record's own pair (main.js getPastActivations).
+      rec += afMode(c.adifMode || c.mode, c.adifMode ? c.submode : '');
       rec += af('BAND', c.band);
       rec += af('QSO_DATE', act.date);
       rec += af('TIME_ON', c.timeOn);
@@ -7983,7 +7984,7 @@
       let rec = '';
       rec += af('CALL', c.callsign);
       if (c.freqKhz) rec += af('FREQ', (parseFloat(c.freqKhz) / 1000).toFixed(6));
-      if (c.mode) rec += af('MODE', c.mode);
+      if (c.mode) rec += afMode(c.mode, c.submode);
       if (c.band) rec += af('BAND', c.band);
       if (c.timeUtc) {
         const d = new Date();
@@ -8003,7 +8004,7 @@
       let rec = '';
       rec += af('CALL', c.callsign);
       if (c.freqKhz) rec += af('FREQ', (parseFloat(c.freqKhz) / 1000).toFixed(6));
-      if (c.mode) rec += af('MODE', c.mode);
+      if (c.mode) rec += afMode(c.mode, c.submode);
       if (c.rstSent) rec += af('RST_SENT', c.rstSent);
       if (c.rstRcvd) rec += af('RST_RCVD', c.rstRcvd);
       if (c._ts) {
@@ -8031,6 +8032,14 @@
   function af(name, val) {
     if (!val) return '';
     return `<${name}:${val.length}>${val}\n`;
+  }
+
+  /** MODE (+ SUBMODE) of an app mode, the desktop writer's rule
+   *  (lib/adif-mode.js): JS8 -> MFSK/JS8, PSK31 -> PSK/PSK31 (#381). */
+  function afMode(mode, submode) {
+    if (!mode) return '';
+    const ms = AdifMode.adifModeSubmode(String(mode), submode ? String(submode) : '');
+    return af('MODE', String(ms.mode || '')) + af('SUBMODE', String(ms.submode || ''));
   }
 
   // Refresh spot ages every 30s
@@ -8214,9 +8223,7 @@
    * PSK31/63 are PSK.
    */
   function lbModeFamily(q) {
-    const sub = String(q.SUBMODE || '').toUpperCase();
-    const m = String(q.MODE || '').toUpperCase();
-    const v = (m === 'MFSK' && sub) ? sub : m;
+    const v = AdifMode.recordMode(q);
     if (v === 'USB' || v === 'LSB') return 'SSB';
     if (/^PSK/.test(v)) return 'PSK';
     return v;
@@ -8236,7 +8243,7 @@
       if (from && d < from) return false;
       if (to && d > to) return false;
       if (!query) return true;
-      return [q.CALL, q.SIG_INFO, q.COMMENT, q.MODE, q.BAND].some(v => String(v || '').toUpperCase().includes(query));
+      return [q.CALL, q.SIG_INFO, q.COMMENT, AdifMode.recordMode(q), q.MODE, q.BAND].some(v => String(v || '').toUpperCase().includes(query));
     });
   }
 
@@ -8277,7 +8284,7 @@
       const idx = q.idx;
       const call = esc(q.CALL || '');
       const freqMhz = q.FREQ ? FreqDots.fromMhz(q.FREQ) : '';
-      const mode = esc(q.MODE || '');
+      const mode = esc(AdifMode.recordMode(q));
       const ref = esc(q.SIG_INFO || '');
       const date = formatLbDate(q.QSO_DATE || '');
       const time = formatLbTime(q.TIME_ON || '');
@@ -8303,7 +8310,7 @@
             <div class="log-field"><label>Freq MHz</label><input type="text" data-field="FREQ" value="${esc(q.FREQ || '')}"></div>
           </div>
           <div class="log-row">
-            <div class="log-field"><label>Mode</label><input type="text" data-field="MODE" value="${esc(q.MODE || '')}"></div>
+            <div class="log-field"><label>Mode</label><input type="text" data-field="MODE" value="${mode}"></div>
             <div class="log-field"><label>Band</label><input type="text" data-field="BAND" value="${band}"></div>
           </div>
           <div class="log-row">

@@ -371,7 +371,7 @@ const { activationStationFill } = require('./lib/activation-station'); // N7VBN:
 const { freqToBand, BANDS } = require('./lib/bands');
 const { splitHostPort } = require('./lib/host-port');
 const activationProgram = require('./lib/activation-program');
-const { applyQsoEdit, activationSigOf } = require('./lib/qso-edit'); // Logbook cell edits (#509)
+const { applyQsoEdit, modeEditFields, activationSigOf } = require('./lib/qso-edit'); // Logbook cell edits (#509)
 const ActivationClock = require('./lib/activation-clock'); // #147: a forgotten activation ends at the UTC day change or after 6 h idle
 const ActivationAnnounce = require('./lib/activation-announce'); // #508: which saved contacts join the live activation list
 const QsoExpand = require('./lib/qso-expand'); // one contact -> its ADIF records (logContact)
@@ -475,6 +475,7 @@ const WinlinkTxLevel = require('./lib/winlink-tx-level'); // #300: Winlink's own
 const ModemAudioServerMod = require('./lib/modem-audio-server');
 const { ModemAudioLane } = require('./lib/modem-audio-lane-client'); // the modem's audio, off the main process (#187)
 const { buildAdifFields, buildAdifRecord, sqliteQsoToAdifFields, ADIF_HEADER, adifField } = require('./lib/adif-writer');
+const { adifAppMode, adifModeSubmode } = require('./lib/adif-mode');
 const { PassQsoOutbox } = require('./lib/pass-qso-outbox');
 const { ClublogOutbox } = require('./lib/clublog-outbox');
 const QsoLog = require('./lib/qso-log');
@@ -33174,7 +33175,7 @@ function buildQsoDetailsIndex() {
         call: rec.CALL || key,
         date: rec.QSO_DATE || '',
         time: rec.TIME_ON || '',
-        mode: rec.MODE || '',
+        mode: adifAppMode(rec.MODE, rec.SUBMODE),
         freq: adifFreqToKhz(rec.FREQ),
         band: rec.BAND || '',
         comment: rec.COMMENT || '',
@@ -35848,7 +35849,13 @@ function rawQsoToQsoData(raw) {
   return {
     callsign: raw.CALL || '',
     frequency: (freqMhz * 1000).toFixed(1), // MHz -> kHz
-    mode: raw.MODE || '',
+    // mode is the app mode (MFSK/JS8 -> JS8) for the loggers that take a mode
+    // name (WRL, the log line); adifMode + submode carry the record's own pair
+    // so buildAdifFields writes it back as it was (#381). SUBMODE used to be
+    // dropped here, so a resend or Cloud-pull forward went out as bare MFSK.
+    mode: adifAppMode(raw.MODE, raw.SUBMODE),
+    adifMode: raw.MODE || '',
+    submode: raw.SUBMODE || '',
     qsoDate: raw.QSO_DATE || '',
     timeOn: raw.TIME_ON || '',
     rstSent: raw.RST_SENT || '',
@@ -38000,7 +38007,7 @@ function scanLogForEvents() {
       const qsoData = {
         callsign: call,
         band: rec.BAND || '',
-        mode: rec.MODE || '',
+        mode: adifAppMode(rec.MODE, rec.SUBMODE),
         qsoDate: qsoDateStr,
         frequency: rec.FREQ || '',
       };
@@ -49719,12 +49726,15 @@ function cloudShackNotice(text, kind) {
       // Build ADIF records from progress entries (legacy pre-stamping path)
       for (const [region, qso] of Object.entries(state.progress)) {
         const entry = (event.schedule || []).find(s => s.region === region);
+        // The progress entry keeps the app mode; ADIF wants MFSK/JS8 etc.
+        const ms = adifModeSubmode(qso.mode, '');
         records.push({
           CALL: qso.call,
           QSO_DATE: (qso.date || '').replace(/-/g, ''),
           TIME_ON: qso.time || '0000',
           BAND: qso.band,
-          MODE: qso.mode,
+          MODE: ms.mode,
+          SUBMODE: ms.submode || '',
           FREQ: qso.freq ? (parseFloat(qso.freq) / 1000).toFixed(6) : '',
           RST_SENT: qso.rstSent || '59',
           RST_RCVD: qso.rstRcvd || '59',
@@ -52727,7 +52737,12 @@ function cloudShackNotice(text, kind) {
           callsign: q.CALL || '',
           timeOn: q.TIME_ON || '',
           freq: q.FREQ || '',
-          mode: q.MODE || '',
+          // mode is what the list shows (MFSK/JS8 -> JS8); adifMode + submode
+          // are the record's own pair, which Export ADIF / Upload to POTA.app
+          // write back unchanged (#381).
+          mode: adifAppMode(q.MODE, q.SUBMODE),
+          adifMode: q.MODE || '',
+          submode: q.SUBMODE || '',
           band: q.BAND || '',
           rstSent: q.RST_SENT || '',
           rstRcvd: q.RST_RCVD || '',
@@ -53089,7 +53104,17 @@ function cloudShackNotice(text, kind) {
       mutateQsoLog((qsos) => {
         for (const q of qsos) {
           if (!matches(q)) continue;
-          Object.assign(q, updates);
+          // A Mode edit from the activator log is an app mode (JS8): write it
+          // as MODE + SUBMODE, the same rule as the Logbook cell (#381).
+          if (updates && Object.prototype.hasOwnProperty.call(updates, 'MODE')) {
+            const { MODE, ...rest } = updates;
+            Object.assign(q, rest);
+            for (const [k, v] of Object.entries(modeEditFields(q, MODE).fields)) {
+              if (v == null) delete q[k]; else q[k] = v;
+            }
+          } else {
+            Object.assign(q, updates);
+          }
           updated++;
         }
       });

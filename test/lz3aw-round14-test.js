@@ -59,6 +59,8 @@ test('a tapped spot moves the band dials and a running engine to its mode', () =
 });
 
 // --- Item 6: Logbook filter bar ---
+// The page's AdifMode (inlined lib/adif-mode.js) for the extracted functions.
+globalThis.AdifMode = require('../lib/adif-mode');
 const { lbFilterQsos, lbModeFamily } = fnFrom(['lbModeFamily', 'lbFilterQsos']);
 const qsos = [
   { CALL: 'K1ABC', BAND: '20m', MODE: 'USB', QSO_DATE: '20261001' },

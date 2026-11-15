@@ -77,6 +77,17 @@ function gridToLatLonLocal(grid) {
 //   get    — cell text from a QSO record
 //   w      — default width in px
 //   off    — true to start hidden (the operator opts in from the picker)
+/** The mode a record is: MFSK/JS8 reads JS8, MODE=FT4 reads FT4 (lib/adif-mode.js, #381). */
+function qsoMode(q) { return AdifMode.recordMode(q); }
+/** Does a record pass the Mode filter? PSK31/63 are filed under PSK (the
+ *  option's title says so); otherwise the record's mode, or its raw MODE
+ *  for an option that names one (DIGI). */
+function qsoModeMatches(q, want) {
+  const m = qsoMode(q);
+  if (m === want || String(q.MODE || '').toUpperCase() === want) return true;
+  return want === 'PSK' && /^PSK/.test(m);
+}
+
 const ALL_COLUMNS = [
   { key: 'QSO_DATE', label: 'Date', sort: 'QSO_DATE', field: 'QSO_DATE', w: 82,
     get: (q) => (q.QSO_DATE ? q.QSO_DATE.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : '') },
@@ -84,7 +95,7 @@ const ALL_COLUMNS = [
     get: (q) => (q.TIME_ON ? q.TIME_ON.slice(0, 2) + ':' + q.TIME_ON.slice(2, 4) : '') },
   { key: 'CALL', label: 'Callsign', sort: 'CALL', field: 'CALL', w: 92, get: (q) => q.CALL || '' },
   { key: 'FREQ', label: 'Freq', sort: 'FREQ', field: 'FREQ', w: 72, get: (q) => q.FREQ || '' },
-  { key: 'MODE', label: 'Mode', sort: 'MODE', field: 'MODE', w: 56, get: (q) => q.MODE || '' },
+  { key: 'MODE', label: 'Mode', sort: 'MODE', field: 'MODE', w: 56, get: (q) => qsoMode(q) },
   { key: 'BAND', label: 'Band', sort: 'BAND', w: 52, get: (q) => q.BAND || '' },
   { key: 'TX_PWR', label: 'Pwr', sort: 'TX_PWR', field: 'TX_PWR', w: 46, get: (q) => q.TX_PWR || '' },
   { key: 'RST_SENT', label: 'RST S', field: 'RST_SENT', w: 48, get: (q) => q.RST_SENT || '' },
@@ -247,7 +258,7 @@ function updateStats(list) {
     topBands.map(([b, c]) => `${b}: ${c}`).join(', ') || '-';
 
   const modeCounts = {};
-  for (const q of list) if (q.MODE) modeCounts[q.MODE] = (modeCounts[q.MODE] || 0) + 1;
+  for (const q of list) { const m = qsoMode(q); if (m) modeCounts[m] = (modeCounts[m] || 0) + 1; }
   const topModes = Object.entries(modeCounts).sort((a, b) => b[1] - a[1]).slice(0, 4);
   document.getElementById('qso-stat-modes').textContent =
     topModes.map(([m, c]) => `${m}: ${c}`).join(', ') || '-';
@@ -282,7 +293,7 @@ function render() {
   // Text search
   if (search) {
     filtered = filtered.filter(q => {
-      const hay = [q.CALL, q.SIG_INFO || q.POTA_REF, q.COMMENT, q.MODE, q.BAND].join(' ').toLowerCase();
+      const hay = [q.CALL, q.SIG_INFO || q.POTA_REF, q.COMMENT, qsoMode(q), q.MODE, q.BAND].join(' ').toLowerCase();
       return hay.includes(search);
     });
   }
@@ -294,7 +305,7 @@ function render() {
 
   // Mode filter
   if (filterMode) {
-    filtered = filtered.filter(q => (q.MODE || '').toUpperCase() === filterMode);
+    filtered = filtered.filter(q => qsoModeMatches(q, filterMode));
   }
 
   // Region filter (continent from cty.dat)
@@ -319,6 +330,7 @@ function render() {
   const dir = sortAsc ? 1 : -1;
   filtered.sort((a, b) => {
     let va = (a[sortCol] || ''), vb = (b[sortCol] || '');
+    if (sortCol === 'MODE') { va = qsoMode(a); vb = qsoMode(b); }
     if (sortCol === 'FREQ') return (parseFloat(va) - parseFloat(vb)) * dir;
     if (sortCol === 'CQZ' || sortCol === 'ITUZ') {
       // Numeric, and the derived cty.dat zone counts when the record has none.
@@ -834,7 +846,7 @@ function updateMap() {
     // Build popup content
     const lines = qsos.slice(0, 8).map(q => {
       const d = q.QSO_DATE ? q.QSO_DATE.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3') : '';
-      const parts = [d, q.FREQ ? (FreqDots.mhzMhz(q.FREQ) || q.FREQ + ' MHz') : '', q.MODE || '', q.SIG_INFO || ''].filter(Boolean);
+      const parts = [d, q.FREQ ? (FreqDots.mhzMhz(q.FREQ) || q.FREQ + ' MHz') : '', qsoMode(q), q.SIG_INFO || ''].filter(Boolean);
       return parts.join(' &middot; ');
     });
     if (qsos.length > 8) lines.push(`... +${qsos.length - 8} more`);
@@ -1338,7 +1350,7 @@ function renderDupeGroups() {
       radio.addEventListener('change', () => { g.keep = m.idx; renderDupeGroups(); });
       const date = f.QSO_DATE ? `${f.QSO_DATE.slice(0, 4)}-${f.QSO_DATE.slice(4, 6)}-${f.QSO_DATE.slice(6, 8)}` : '';
       const time = f.TIME_ON ? `${f.TIME_ON.slice(0, 2)}:${f.TIME_ON.slice(2, 4)}:${(f.TIME_ON.slice(4, 6) || '00')}` : '';
-      const mode = f.SUBMODE && /^(MFSK|PSK)$/i.test(f.MODE || '') ? f.SUBMODE : f.MODE;
+      const mode = qsoMode(f);
       const refs = [f.SIG_INFO, f.MY_SIG_INFO && `my ${f.MY_SIG_INFO}`, f.COMMENT].filter(Boolean).join(' · ');
       const filled = Object.values(f).filter((v) => v != null && v !== '').length;
       row.append(
