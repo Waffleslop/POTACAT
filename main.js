@@ -30806,6 +30806,14 @@ function _setCwTxLockout(durationMs) {
   if (_cwTxLockoutTimer) clearTimeout(_cwTxLockoutTimer);
   _cwTxLockoutTimer = setTimeout(() => {
     _cwTxLockoutTimer = null;
+    // The lockout is over: every extension above clears this timer and arms a
+    // new one, so the timer that fires is the last one. Clear it outright
+    // rather than leave it to Date.now(): a timer can fire a millisecond
+    // before Date.now() reaches the target, and the broadcast then said
+    // "transmitting" with no timer left to say otherwise. The VFO window's PTT
+    // stayed on "ON AIR" after CW text macros until PTT was pressed (DA2PK,
+    // FT-710, 2026-11-15).
+    _cwTxLockoutUntilMs = 0;
     // Re-broadcast — _isEffectivelyTransmitting now reflects whether
     // any other TX source is still active (user PTT, FT8 mid-cycle).
     _broadcastEffectiveTxState();
