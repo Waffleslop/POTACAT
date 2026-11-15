@@ -86,12 +86,15 @@ for (const id of ['FTX-1 Field', 'FTX-1 Optima']) {
   });
 }
 
-test('every keyer-memory rig plays the memory it wrote (KY0n; names kmMemory n)', () => {
+// KY0n; on the FT-710 and FTX-1 (KY P1 P2: P1 0 = TEXT memory); KYn; on the
+// FT-991A and FT-891, whose KY has one parameter, P1 1-5 = keyer memory n
+// (FT-991A CAT reference rev 1711-D p. 11, FT-891 rev 1909-C p. 11).
+test('every keyer-memory rig plays the memory it wrote (KY0n; or KYn; names kmMemory n)', () => {
   for (const [id, m] of Object.entries(RIG_MODELS)) {
     const cw = m && m.cw;
     if (!cw || cw.kyMode !== 'km' || !cw.kmPlay) continue;
-    const mm = /^KY0([1-5]);$/.exec(cw.kmPlay);
-    assert.ok(mm, `${id}: kmPlay ${cw.kmPlay} is not KY0n;`);
+    const mm = /^KY0?([1-5]);$/.exec(cw.kmPlay);
+    assert.ok(mm, `${id}: kmPlay ${cw.kmPlay} is not KY0n; or KYn;`);
     assert.strictEqual(Number(mm[1]), cw.kmMemory, `${id}: KM writes ${cw.kmMemory} but ${cw.kmPlay} plays ${mm[1]}`);
   }
 });

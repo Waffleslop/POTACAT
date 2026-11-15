@@ -301,12 +301,12 @@ test('FT-991A: filter width is SH0nn from the 991A chart', () => {
   for (const id of ['FT-991/991A']) {
     const { codec, writes } = captureWrites(KenwoodCodec, RIG_MODELS[id]);
     codec._lastParsedMode = 'USB';
-    codec.setFilterWidth(2400);   // index 13 on the 991A chart
+    codec.setFilterWidth(2400);   // index 14 on the 991A chart (CAT reference p. 16)
     codec.setFilterWidth(3000);   // index 20 (the FTDX chart would say 19)
     codec._lastParsedMode = 'CW';
     codec.setFilterWidth(500);    // index 10
     codec.setFilterWidth(2400);   // index 16
-    assert.deepStrictEqual(writes, ['SH013;', 'SH020;', 'SH010;', 'SH016;'], id);
+    assert.deepStrictEqual(writes, ['SH014;', 'SH020;', 'SH010;', 'SH016;'], id);
   }
 });
 
