@@ -141,6 +141,14 @@ contextBridge.exposeInMainWorld('api', {
   },
   // Guest Pass: the owner took the radio back ({paused:true}) or handed it
   // back ({paused:false}). #541
+  // Guest Pass state from the station ({state, reason, endsAt, takeAt?,
+  // message?, device?, owner, targetId}) and "Use it here instead". #541 step 2
+  onRemotePassState: (cb) => {
+    const handler = (_e, info) => cb(info || {});
+    ipcRenderer.on('remote-pass-state', handler);
+    return () => ipcRenderer.removeListener('remote-pass-state', handler);
+  },
+  remotePassClaim: () => ipcRenderer.invoke('remote-pass-claim'),
   onRemotePassHold: (cb) => {
     const handler = (_e, info) => cb(info || {});
     ipcRenderer.on('remote-pass-hold', handler);

@@ -8044,7 +8044,14 @@ async function _remoteRadiosRefreshList() {
     // ECHOCAT Web uses: a waiting pass never reads as a dead one (#541).
     const passWords = (w) => (w.title ? '<b>' + _esc(w.title) + '</b>' : '') + (w.title && w.line ? ' ' : '') + _esc(w.line || '');
     const passOwner = t.ownerCallsign || '';
+    // The station's pass-state (#541 step 2), when it sends one: the guest's
+    // state and why, worded from the one table in lib/pass-wording.js.
+    const passStateWords = (isActive && t.kind === 'pass' && status.passState && window.PassWording && PassWording.describeState)
+      ? PassWording.describeState(status.passState, { owner: passOwner }) : null;
+    const passStateShown = !!(passStateWords && passStateWords.title
+      && !(status.state === 'connected' && status.passState.state === 'on-air' && status.passState.reason === 'none'));
     const stateLine = (() => {
+      if (passStateShown) return passWords(passStateWords);
       if (isActive && status.state === 'connected') return '<b>Connected.</b> Last used ' + _esc(fmtAge(t.lastConnectedAt));
       if (t.kind === 'pass' && window.PassWording) {
         if (isActive && status.state === 'waiting') {
@@ -8085,6 +8092,11 @@ async function _remoteRadiosRefreshList() {
     const actionBtnHtml = (() => {
       if (isActive && status.state === 'auth-fail' && t.kind !== 'pass') {
         return '<button type="button" class="primary" data-act="rr-repair" data-id="' + _esc(t.id) + '">Re-pair</button>';
+      }
+      // Waiting for the guest's other device on the same pass: take it here.
+      if (isActive && status.state === 'connected' && passStateShown && passStateWords.action === 'Use it here instead') {
+        return '<button type="button" class="primary" data-act="rr-pass-claim" data-id="' + _esc(t.id) + '">Use it here instead</button>'
+          + '<button type="button" data-act="rr-disconnect" data-id="' + _esc(t.id) + '">Disconnect</button>';
       }
       if (isActive && status.state === 'connected') {
         return '<button type="button" class="primary" data-act="rr-disconnect" data-id="' + _esc(t.id) + '">Disconnect</button>';
@@ -8255,6 +8267,7 @@ async function _remoteRadiosRemove(id) {
     const act = btn.dataset.act;
     const id = btn.dataset.id;
     if (act === 'rr-connect') return _remoteRadiosConnect(id);
+    if (act === 'rr-pass-claim') return _remotePassClaim();
     if (act === 'rr-disconnect') return _remoteRadiosDisconnect();
     if (act === 'rr-rename') return _remoteRadiosRename(id, btn.dataset.name || '');
     if (act === 'rr-remove') return _remoteRadiosRemove(id);
@@ -8363,7 +8376,7 @@ let _remotePassHeld = false;
 // owner holding the radio, a session closed with the pass still good, or
 // the pass over. Same bar as the displacement banner; the words come from
 // lib/pass-wording.js (shared with ECHOCAT Web). action: {label, targetId}.
-function _passBannerShow(words, targetId) {
+function _passBannerShow(words, targetId, onAct) {
   let banner = document.getElementById('displaced-banner');
   if (!banner) {
     banner = document.createElement('div');
@@ -8375,7 +8388,7 @@ function _passBannerShow(words, targetId) {
   const msg = (words.title ? '<b>' + _esc(words.title) + '</b>' : '') + (words.title && words.line ? ' ' : '') + _esc(words.line || '');
   banner.innerHTML = '<div class="displaced-banner-msg">' + msg + '</div>'
     + '<div class="displaced-banner-actions">'
-    + (words.action && targetId ? '<button type="button" id="pass-banner-act" class="primary">' + _esc(words.action) + '</button>' : '')
+    + (words.action && (targetId || onAct) ? '<button type="button" id="pass-banner-act" class="primary">' + _esc(words.action) + '</button>' : '')
     + '<button type="button" id="displaced-dismiss">Dismiss</button>'
     + '</div>';
   banner.classList.remove('hidden');
@@ -8384,9 +8397,31 @@ function _passBannerShow(words, targetId) {
   const act = document.getElementById('pass-banner-act');
   if (act) act.addEventListener('click', async () => {
     banner.classList.add('hidden');
+    if (onAct) { onAct(); return; }
     try { await window.api.connectionTargetsActivate(targetId); } catch (err) { alert('Connect failed: ' + (err.message || err)); }
     _remoteRadiosRefreshList();
   });
+}
+// "Use it here instead": take the radio from this guest's other device on
+// the same pass, no redial (#541 step 2). The station answers with pass-state.
+async function _remotePassClaim() {
+  try {
+    const r = window.api.remotePassClaim ? await window.api.remotePassClaim() : null;
+    if (r && r.error && typeof showLogToast === 'function') showLogToast(r.error, { warn: true, duration: 6000 });
+  } catch (err) { if (typeof showLogToast === 'function') showLogToast('Could not take the radio: ' + (err.message || err), { warn: true, duration: 6000 }); }
+}
+// The Guest Pass state the station last sent (#541 step 2), for the chip.
+let _remotePassState = null;
+// A pass-state in words: the banner, with its one button where this PC can
+// act on it ("Use it here instead" claims; "Try now" asks the station again).
+function _passStateBanner(ps) {
+  if (!ps || !window.PassWording || !PassWording.describeState) return;
+  if (ps.state === 'on-air' && ps.reason === 'none') { _passBannerHide(); return; }
+  const w = PassWording.describeState(ps, { owner: ps.owner });
+  if (!w.title) return;
+  if (w.action === 'Use it here instead') { _passBannerShow(w, null, _remotePassClaim); return; }
+  if (w.action === 'Try now') { _passBannerShow(w, ps.targetId || null); return; }
+  _passBannerShow({ ...w, action: '' }, null);
 }
 function _passBannerHide() {
   const banner = document.getElementById('displaced-banner');
@@ -8473,7 +8508,10 @@ if (window.api && window.api.onRemoteClientDisplaced) {
       const rtt = Number.isFinite(remoteShack.rttMs) ? (' · ' + remoteShack.rttMs + ' ms') : '';
       const silent = remoteShack.audioElsewhere ? ' · AUDIO ON ANOTHER DEVICE' : (remoteShack.audioSilent ? ' · NO AUDIO' : '');
       const also = (remoteShack.alsoConnected && remoteShack.alsoConnected.length) ? ' · +' + remoteShack.alsoConnected.length : '';
-      const held = _remotePassHeld ? ' · OWNER HAS THE RADIO' : '';
+      const ps = _remotePassState;
+      const held = (ps && ps.state === 'waiting')
+        ? (ps.reason === 'other-device' ? ' · ON YOUR OTHER DEVICE' : ' · WAITING')
+        : (_remotePassHeld ? ' · OWNER HAS THE RADIO' : '');
       chip.textContent = '🔗 ' + name + rig + leg + rtt + also + held + silent;
       chip.style.background = '#4ecca3';
       chip.style.color = '#0a1a14';
@@ -8542,6 +8580,17 @@ if (window.api && window.api.onRemoteClientDisplaced) {
     });
     window.api.onRemoteClientStatus && window.api.onRemoteClientStatus((st) => {
       if (st && st.state !== 'connected' && _remotePassHeld) { _remotePassHeld = false; }
+      if (st && st.state !== 'connected') _remotePassState = null;
+    });
+  }
+  // Guest Pass state from a station that sends pass-state (#541 step 2):
+  // on-air, waiting, reconnecting or over, with the reason, in the shared words.
+  if (window.api && window.api.onRemotePassState) {
+    window.api.onRemotePassState((ps) => {
+      _remotePassState = ps || null;
+      _passStateBanner(ps);
+      if (_lastChipState) setChip(_lastChipState);
+      _remoteRadiosRefreshList().catch(() => {});
     });
   }
   if (window.api && window.api.onRemoteShackInfo) {
@@ -8569,8 +8618,11 @@ if (window.api && window.api.onRemoteClientDisplaced) {
       }
       // Guest Pass waiting (busy rig, Cloud check) or refused: say which (#541).
       if (s && s.kind === 'pass' && window.PassWording && (s.state === 'waiting' || s.state === 'auth-fail')) {
-        const w = PassWording.describe({ kind: 'auth-fail', code: s.code, at: s.passAt, reason: s.passReason, by: s.by, owner: s.owner, endsAt: s.endsAt });
-        _passBannerShow(w, w.terminal ? null : s.targetId);
+        if (s.passState && PassWording.describeState) _passStateBanner({ ...s.passState, owner: s.owner, targetId: s.targetId });
+        else {
+          const w = PassWording.describe({ kind: 'auth-fail', code: s.code, at: s.passAt, reason: s.passReason, by: s.by, owner: s.owner, endsAt: s.endsAt });
+          _passBannerShow(w, w.terminal ? null : s.targetId);
+        }
       }
       if (s && s.state === 'connected') _passBannerHide();
       if (s && s.state === 'revoked' && typeof showLogToast === 'function') {
