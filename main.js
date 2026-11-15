@@ -2203,11 +2203,17 @@ function noteOwnerActivity(kind) {
   if (autoIdleJtcatActive || autoIdleJs8Active) return;
   if (remoteServer && remoteServer.noteOwnerActivity) { try { remoteServer.noteOwnerActivity(kind); } catch { /* never in the way of the radio */ } }
 }
-// Once per idle offer (the guest was just told the radio is free). The seam
-// for the later push to a closed phone: Cloud's notify {kind: radio_free}
-// goes here. session: {code, call, sessionId, offeredAt}. Nothing yet.
+// Once per idle offer (the guest was just told the radio is free): ask Cloud
+// to push the same news to the guest's phone, which may be closed (#541,
+// lib/pass-radio-free-notify.js). Signed-in owner only; one call, never retried.
+// session: {code, call, sessionId, offeredAt}.
+const radioFreeNotifier = require('./lib/pass-radio-free-notify').createRadioFreeNotifier({
+  getRequest: () => (cloudIpc && cloudIpc.currentOwnerId() ? (m, p, b) => cloudIpc.getCloudSync()._authedRequest(m, p, b) : null),
+});
 function onOwnerIdleOffered(session) {
-  void session;
+  radioFreeNotifier.notify(session)
+    .then((r) => sendCatLog(require('./lib/pass-radio-free-notify').describeOutcome(r)))
+    .catch(() => { /* never in the way of the radio */ });
 }
 // The radio's own word that it is transmitting (CAT TX status, forward
 // power), debounced to 1 s: the owner on the hand mic at the radio is using
