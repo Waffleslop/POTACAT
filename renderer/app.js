@@ -3253,7 +3253,7 @@ function renderRigList(rigs, activeRigId) {
   const noneItem = document.createElement('div');
   noneItem.className = 'rig-item' + (!activeRigId ? ' active' : '');
   noneItem.innerHTML = `
-    <input type="radio" name="active-rig" value="" ${!activeRigId ? 'checked' : ''}>
+    <input type="radio" name="active-rig" value="" aria-label="No radio connected" ${!activeRigId ? 'checked' : ''}>
     <div class="rig-item-info">
       <div class="rig-item-name">None</div>
       <div class="rig-item-desc">No radio connected</div>
@@ -3277,6 +3277,10 @@ function renderRigList(rigs, activeRigId) {
     radio.name = 'active-rig';
     radio.value = rig.id;
     if (isActive) radio.checked = true;
+    // #603: VoiceOver and other screen readers read a bare radio as "radio
+    // button" with no name. Every control in the row says which rig it acts on.
+    const rigLabel = rig.name || 'Unnamed Rig';
+    radio.setAttribute('aria-label', 'Use ' + rigLabel);
 
     const info = document.createElement('div');
     info.className = 'rig-item-info';
@@ -3298,6 +3302,7 @@ function renderRigList(rigs, activeRigId) {
     editBtn.className = 'rig-item-btn';
     editBtn.textContent = 'Edit';
     editBtn.title = 'Edit this rig';
+    editBtn.setAttribute('aria-label', 'Edit ' + rigLabel);
     editBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       openRigEditor('edit', rig.id);
@@ -3308,6 +3313,7 @@ function renderRigList(rigs, activeRigId) {
     deleteBtn.className = 'rig-item-btn rig-delete-btn';
     deleteBtn.textContent = '\u2715';
     deleteBtn.title = 'Delete this rig';
+    deleteBtn.setAttribute('aria-label', 'Delete ' + rigLabel);
     deleteBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       deleteRig(rig.id);
@@ -27387,6 +27393,7 @@ function showWelcomeRigItem(rig) {
   removeBtn.className = 'rig-item-btn rig-delete-btn';
   removeBtn.textContent = '\u2715';
   removeBtn.title = 'Remove';
+  removeBtn.setAttribute('aria-label', 'Remove ' + (rig.name || 'Unnamed Rig'));
   removeBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     welcomeRig = null;
