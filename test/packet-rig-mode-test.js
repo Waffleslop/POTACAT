@@ -250,7 +250,7 @@ test('the radio link down: nothing sent, and the summary will say so', async () 
 });
 test('main.js: the session tunes FM first, then asks for the mode, then Pat dials; a by-hand radio keeps its mode', () => {
   const s = fnSrc(main, 'winlinkStartSession');
-  const tune = s.indexOf("{ origin: 'Winlink session' }");
+  const tune = s.indexOf("{ origin: 'Winlink session', purpose: 'winlink' }");
   const enter = s.indexOf('await winlinkEnterFmDataBeforeDial(mode, pm, tunedAt);');
   const dial = s.indexOf('await patClient.connect(url)');
   assert.ok(tune > 0 && enter > tune && dial > enter, 'after the QSY, before Pat dials');

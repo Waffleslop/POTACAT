@@ -525,6 +525,7 @@ const { PskrClient } = require('./lib/pskreporter');
 const PskrTx = require('./lib/pskreporter-tx');
 const { Ft8Engine, freqsForMode } = require('./lib/ft8-engine');
 const DialSnap = require('./lib/dial-snap');
+const PlainSsbForDigital = require('./lib/plain-ssb-for-digital');
 const { decideDialFollow } = require('./lib/jtcat-dial-follow');
 const JtcatRxSource = require('./lib/jtcat-rx-source'); // #243: JTCAT can hear a WebSDR instead of the radio
 const { StreamResampler } = require('./lib/stream-resampler');
@@ -12561,7 +12562,7 @@ function winlinkPreviewQsy({ dialKhz, mode } = {}) {
   if (!_winlinkPreviewReturnTo && _currentFreqHz) _winlinkPreviewReturnTo = winlinkDialHere('before the gateway pick');
   // FM data the operator sets by hand (#128): the pick moves the dial and leaves the radio's mode alone.
   const pickPm = mode === 'packet' ? winlinkPacketRigMode(mode) : null;
-  tuneRadio(khz, mode === 'packet' ? (pickPm && pickPm.byHand ? undefined : 'FM') : 'DIGU', undefined, { origin: 'Winlink gateway pick' });
+  tuneRadio(khz, mode === 'packet' ? (pickPm && pickPm.byHand ? undefined : 'FM') : 'DIGU', undefined, { origin: 'Winlink gateway pick', purpose: 'winlink' });
   _winlinkLeftAtHz = Math.round(khz * 1000);
   winlinkLog(`listening on ${khz.toFixed(1)} kHz for the picked gateway (the radio goes back to ${_winlinkPreviewReturnTo ? (_winlinkPreviewReturnTo.freqHz / 1e6).toFixed(4) + ' MHz' : 'where it was'} when the mail window closes)`);
   return { ok: true };
@@ -13130,7 +13131,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
         } else {
           const tunedAt = Date.now();
           // FM data the operator sets by hand: the dial moves, the radio's mode is left alone.
-          tuneRadio(Number(dialKhz), WinlinkModes.isFmMode(mode) ? (pm && pm.byHand ? undefined : 'FM') : 'DIGU', undefined, { origin: 'Winlink session' });
+          tuneRadio(Number(dialKhz), WinlinkModes.isFmMode(mode) ? (pm && pm.byHand ? undefined : 'FM') : 'DIGU', undefined, { origin: 'Winlink session', purpose: 'winlink' });
           winlinkState.setSession({ tuned: true });
           await winlinkEnterFmDataBeforeDial(mode, pm, tunedAt);
           if (!live()) throw cancelled();
@@ -40210,7 +40211,7 @@ function bandJumpMode(freqKhz) {
   return sb || undefined;
 }
 
-function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
+function tuneRadio(freqKhz, mode, brng, { clearXit, origin, purpose } = {}) {
   let freqHz = Math.round(parseFloat(freqKhz) * 1000); // kHz -> Hz
   // An FT8/FT4/FT2 spot names the signal (dial + audio offset): tune the
   // mode's dial when the spot is in its passband (lib/dial-snap.js).
@@ -40597,12 +40598,12 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin } = {}) {
   // Guard with !isFreedvMode so a FreeDV tune (which the block above already
   // resolved to DIGU/USB per the independent freedvUseDataMode setting) isn't
   // re-rewritten here.
-  if (settings.jtcatUseDataMode === false && mode && !isFreedvMode) {
-    const dm = String(mode).toUpperCase();
-    if (dm === 'FT8' || dm === 'FT4' || dm === 'FT2' || dm === 'DIGU' || dm === 'PKTUSB' || dm === 'JS8' || dm === 'WSPR' || dm.startsWith('PSK') || dm === 'JTTY') {
-      mode = 'USB';
-    } else if (dm === 'DIGL' || dm === 'PKTLSB') {
-      mode = 'LSB';
+  // A Winlink radio session is not JTCAT and keeps the data mode (lib/plain-ssb-for-digital.js).
+  {
+    const plain = PlainSsbForDigital.plainSsbForDigital(mode, { useDataMode: settings.jtcatUseDataMode !== false, purpose, freedv: isFreedvMode });
+    if (plain !== mode) {
+      sendCatLog(`[tune] ${String(mode).toUpperCase()} -> ${plain}: "Switch radio to DATA mode (PKTUSB) for FT8 / FT4 (JTCAT)" is off`);
+      mode = plain;
     }
   }
 

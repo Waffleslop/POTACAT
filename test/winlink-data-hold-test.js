@@ -109,7 +109,7 @@ test('main.js: the key-down marks the session as asked; FM-D is asked for before
   assert.ok(e.indexOf('_winlinkDataAskedFor = _winlinkSessionSeq;') < e.indexOf('cat.setModeOnly(pm.dataMode'), 'marked before it is sent');
   assert.ok(/noAnchor: true/.test(e), 'an Icom memory channel keeps its duplex: no frequency write');
   const s = fnBody(main, 'winlinkStartSession');
-  const tune = s.indexOf("{ origin: 'Winlink session' }");
+  const tune = s.indexOf("{ origin: 'Winlink session', purpose: 'winlink' }");
   const enter = s.indexOf('await winlinkEnterFmDataBeforeDial(mode, pm, tunedAt);');
   const dial = s.indexOf('await patClient.connect(url)');
   assert.ok(tune > 0 && enter > tune && dial > enter, 'after the QSY, before Pat dials');
