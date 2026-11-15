@@ -145,6 +145,7 @@ const TESTS = [
   'test/port-picker-test.js',
   'test/pota-parks-db-test.js',
   'test/elecraft-data-mode-test.js',
+  'test/elecraft-atu-tune-test.js', // Elecraft tunes with SWT (K3 19, KX3 44, KX2 20 by OM;), never AC
   'test/kenwood-filter-width-test.js',
   'test/cw-key-port-race-test.js',
   'test/guest-pass-emission-test.js',
