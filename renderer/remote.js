@@ -2140,7 +2140,7 @@
       // Pass, anything outside the pass (lib/guest-pass-authority.js). Said
       // out loud, never a silent dead control.
       case 'refused':
-        showToast(msg.text || ('Not available on a Guest Pass: ' + (msg.of || 'that control')), 4000, true);
+        showToast(msg.text || 'That is not available on a Guest Pass.', 4000, true);   // never msg.of: an internal name
         break;
 
       case 'voice-tx-hint':

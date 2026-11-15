@@ -75,6 +75,7 @@ const TESTS = [
   'test/guest-pass-lease-end-test.js', // the end of a pass stops every transmitter and closes the guest socket
   'test/guest-pass-hopping-test.js', // guests hop between rigs; the owner takes over and hands back
   'test/guest-sdr-test.js', // #543: a guest uses the station's own SDRs; a typed-in host and SDR settings writes are refused in words
+  'test/guest-settings-secrets-test.js', // a guest never receives the station's SDR passwords or other settings secrets; refusals in plain words
   'test/guest-pass-authority-test.js', // a Guest Pass is default-deny: the allowlist wall in the demux + the rig-control action wall
   'test/guest-pass-tx-gate-test.js', // the TX gate judges the effective TX frequency (split) and the radio's reported power against the cap
   'test/revoke-device-test.js', // revoking a device closes EVERY socket of that device; a socket whose pairing is gone is closed on its next message
