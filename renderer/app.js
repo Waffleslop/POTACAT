@@ -3500,6 +3500,9 @@ function fillSdrScopeForm(cfg) {
   el('set-sdr-scope-direct').value = c.directSampling || 'off';
   el('set-sdr-scope-ppm').value = c.ppm || 0;
   el('set-sdr-scope-offset').value = c.offsetHz || 0;
+  if (el('set-sdr-scope-tap')) el('set-sdr-scope-tap').value = c.tapMode === 'fixedIf' ? 'fixedIf' : 'follow';
+  if (el('set-sdr-scope-if')) el('set-sdr-scope-if').value = c.ifHz || 0;
+  if (el('set-sdr-scope-invert')) el('set-sdr-scope-invert').checked = c.invertIf === true;
   el('set-sdr-scope-prefer').checked = c.preferSdr === true;
   syncSdrScopeForm();
 }
@@ -3510,6 +3513,13 @@ function syncSdrScopeForm() {
   const prefer = document.getElementById('sdr-scope-prefer-wrap');
   const model = rigModelSelect ? rigModelSelect.value : '';
   if (prefer) prefer.style.display = /FT-?710/i.test(model || '') ? '' : 'none';
+  // #394: a fixed IF tap takes an IF frequency; an antenna or RX OUT takes the offset.
+  const tap = document.getElementById('set-sdr-scope-tap');
+  const fixedIf = !!(tap && tap.value === 'fixedIf');
+  const show = (id, on) => { const w = document.getElementById(id); if (w) w.style.display = on ? '' : 'none'; };
+  show('sdr-scope-offset-wrap', !fixedIf);
+  show('sdr-scope-if-wrap', fixedIf);
+  show('sdr-scope-invert-wrap', fixedIf);
 }
 function readSdrScopeForm() {
   const el = (id) => document.getElementById(id);
@@ -3525,12 +3535,17 @@ function readSdrScopeForm() {
     directSampling: el('set-sdr-scope-direct').value || 'off',
     ppm: parseInt(el('set-sdr-scope-ppm').value, 10) || 0,
     offsetHz: parseInt(el('set-sdr-scope-offset').value, 10) || 0,
+    tapMode: el('set-sdr-scope-tap') && el('set-sdr-scope-tap').value === 'fixedIf' ? 'fixedIf' : 'follow',
+    ifHz: el('set-sdr-scope-if') ? Math.max(0, parseInt(el('set-sdr-scope-if').value, 10) || 0) : 0,
+    invertIf: !!(el('set-sdr-scope-invert') && el('set-sdr-scope-invert').checked),
     preferSdr: el('set-sdr-scope-prefer').checked,
   };
 }
 {
   const en = document.getElementById('set-sdr-scope-enabled');
   if (en) en.addEventListener('change', syncSdrScopeForm);
+  const tap = document.getElementById('set-sdr-scope-tap');
+  if (tap) tap.addEventListener('change', syncSdrScopeForm);
   if (rigModelSelect) rigModelSelect.addEventListener('change', syncSdrScopeForm);
 }
 

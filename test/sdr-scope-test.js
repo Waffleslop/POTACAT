@@ -123,13 +123,13 @@ test('setup: rate, direct sampling, ppm, gain mode, then the dial', () => {
 
 test('settings normalise to safe defaults', () => {
   const d = S.normalizeSdrSettings(undefined);
-  assert.deepStrictEqual(d, { enabled: false, host: '127.0.0.1', port: 1234, sampleRate: 1024000, gain: 'auto', directSampling: 'off', ppm: 0, offsetHz: 0, preferSdr: false });
+  assert.deepStrictEqual(d, { enabled: false, host: '127.0.0.1', port: 1234, sampleRate: 1024000, gain: 'auto', directSampling: 'off', ppm: 0, offsetHz: 0, tapMode: 'follow', ifHz: 0, invertIf: false, preferSdr: false });
   assert.strictEqual(S.normalizeSdrSettings({ sampleRate: 999 }).sampleRate, 1024000, 'an invalid RTL2832 rate falls back');
   assert.strictEqual(S.normalizeSdrSettings({ port: 99999 }).port, 1234);
   assert.strictEqual(S.normalizeSdrSettings({ directSampling: 'Q' }).directSampling, 'q');
 });
 
-test('the SDR tunes to the dial plus the offset (IF tap, upconverter)', () => {
+test('the SDR tunes to the dial plus the offset (RX OUT, upconverter)', () => {
   assert.strictEqual(S.sdrCenterForDial(14074000, 0), 14074000);
   assert.strictEqual(S.sdrCenterForDial(14074000, 125000000), 139074000);
   assert.strictEqual(S.sdrCenterForDial(0, 125000000), 0, 'no dial, no tune');
@@ -318,7 +318,7 @@ test('main: start/stop/follow route through the one scope state', () => {
   assert.ok(/if \(sdrScopeClient\) \{ stopSdrScope\(why\); return; \}/.test(bodyOf('stopYaesuScope')));
   assert.ok(/sdrScopeFollowDial\(hz\)/.test(bodyOf('yaesuScopeNoteFrequency')), 'the dial sink retunes the SDR');
   const st = bodyOf('startSdrScope');
-  assert.ok(/yaesuScopeOnFrame\(f\)/.test(st), 'frames go through the same fan-out as the FT-710');
+  assert.ok(/yaesuScopeOnFrame\(SdrScope\.orientFrame\(f, cfg\)\)/.test(st), 'frames go through the same fan-out as the FT-710');
   assert.ok(/client\.on\('header', \(h\) => \{[\s\S]{0,200}setupCommands\(cfg, sdrScopeTunedHz\)/.test(st), 'setup is re-sent on every (re)connect');
   assert.ok(/anchor: 'center'/.test(st) && /spanForRate\(cfg\.sampleRate\)/.test(st), 'a known, centred axis');
   assert.ok(/setTimeout\([\s\S]*150\)/.test(bodyOf('sdrScopeFollowDial')), 'retune is debounced');

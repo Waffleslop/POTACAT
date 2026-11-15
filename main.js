@@ -36097,8 +36097,8 @@ function startSdrScope() {
   const builder = new SdrScope.SpectrumBuilder({ sampleRate: cfg.sampleRate, fps: Math.min(30, settings.yaesuScopeFps || 12) });
   sdrScopeClient = client;
   sdrScopeBuilder = builder;
-  sdrScopeTunedHz = SdrScope.sdrCenterForDial(dial, cfg.offsetHz);
-  builder.on('frame', (f) => { if (sdrScopeClient === client) yaesuScopeOnFrame(f); });
+  sdrScopeTunedHz = SdrScope.sdrTuneHz(dial, cfg);
+  builder.on('frame', (f) => { if (sdrScopeClient === client) yaesuScopeOnFrame(SdrScope.orientFrame(f, cfg)); });
   client.on('iq', (chunk) => { if (sdrScopeClient === client) builder.feed(chunk); });
   client.on('header', (h) => {
     // Every greeting, not just the first: a restarted rtl_tcp comes back at
@@ -36106,7 +36106,7 @@ function startSdrScope() {
     for (const b of SdrScope.setupCommands(cfg, sdrScopeTunedHz)) client.send(b);
     sendCatLog(`[Scope] SDR connected: ${cfg.host}:${cfg.port}, ${h.tunerName}, ${(cfg.sampleRate / 1e6).toFixed(3)} MS/s, gain ${cfg.gain === 'auto' ? 'auto' : cfg.gain + ' dB'}`
       + (cfg.directSampling !== 'off' ? `, direct sampling ${cfg.directSampling.toUpperCase()}` : '')
-      + (cfg.offsetHz ? `, offset ${cfg.offsetHz} Hz` : ''));
+      + (SdrScope.isFixedIf(cfg) ? `, on the radio's IF output at ${cfg.ifHz} Hz${cfg.invertIf ? ' (mirrored)' : ''}` : (cfg.offsetHz ? `, offset ${cfg.offsetHz} Hz` : '')));
   });
   client.on('state', (st, info) => {
     if (sdrScopeClient !== client) return;
@@ -36129,7 +36129,7 @@ function startSdrScope() {
 // The scope owns it while it runs; the listener demodulates the scope's IQ.
 
 function rtlTcpScopeShareOf(client, cfg) {
-  return { client, sampleRate: cfg.sampleRate, centerHz: () => (sdrScopeClient === client ? sdrScopeTunedHz : 0) };
+  return { client, sampleRate: cfg.sampleRate, centerHz: () => (sdrScopeClient === client ? SdrScope.shareCenterHz(yaesuScopeState.centerHz, sdrScopeTunedHz, cfg) : 0) };
 }
 
 /** The band scope's stream, if the scope is reading host:port right now. */
@@ -36168,13 +36168,13 @@ function stopSdrScope(why) {
 /** Retune the SDR to the dial, debounced so a spun knob is one command per 150 ms. */
 function sdrScopeFollowDial(dialHz) {
   if (!sdrScopeClient || !sdrScopeCfg) return;
-  const target = SdrScope.sdrCenterForDial(dialHz, sdrScopeCfg.offsetHz);
+  const target = SdrScope.sdrTuneHz(dialHz, sdrScopeCfg);
   if (!target || target === sdrScopeTunedHz) return;
   if (sdrScopeRetuneTimer) return;
   sdrScopeRetuneTimer = setTimeout(() => {
     sdrScopeRetuneTimer = null;
     if (!sdrScopeClient || !sdrScopeCfg) return;
-    const hz = SdrScope.sdrCenterForDial(yaesuScopeState.centerHz, sdrScopeCfg.offsetHz);
+    const hz = SdrScope.sdrTuneHz(yaesuScopeState.centerHz, sdrScopeCfg);
     if (hz && hz !== sdrScopeTunedHz) { sdrScopeTunedHz = hz; sdrScopeClient.setFrequency(hz); }
   }, 150);
 }
