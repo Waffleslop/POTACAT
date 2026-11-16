@@ -146,6 +146,7 @@ const TESTS = [
   'test/privileges-one-source-test.js', // #250: lib/privileges.js is the one table (renderer loads it); unverified classes never refuse TX; no change vs master
   'test/privileges-verified-gate-test.js', // #250: the ATU wizard and Guest Pass never refuse for an unverified licence class
   'test/rigctld-power-scale-test.js',
+  'test/rigctld-yaesu-power-read-test.js', // a Yaesu on rigctld reads its power with w PC; (#656); non-Yaesu rigs still send l RFPOWER
   'test/rigctld-kenwood-power-test.js', // a TS-590/TS-2000 behind Hamlib keeps its power: raw PC, never Hamlib's PC000/PC255 probe
   'test/jtcat-tx-watchdog-test.js',
   'test/jtcat-replace-log-test.js',
