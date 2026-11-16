@@ -41,6 +41,8 @@ const VOCAB = {
   TS890S: ['LSB', 'USB', 'CW', 'FM', 'AM', 'FSK', 'CW-R', 'FSK-R', 'LSB-D', 'USB-D', 'FM-D', 'AM-D'],
   KX3: ['LSB', 'USB', 'CW', 'FM', 'AM', 'DATA', 'CW-R', 'DATA-R'],
   G90: ['LSB', 'USB', 'AM', 'CW', 'CW-R'],
+  // flrig src/rigs/yaesu/FT857D.cxx (FT-857D and FT-897D): DIG = 0x0A, PKT = 0x0C (FM packet)
+  FT857D: ['LSB', 'USB', 'CW', 'CW-R', 'AM', 'FM', 'FM-N', 'DIG', 'PKT'],
 };
 
 // --- a fake flrig ---------------------------------------------------------
@@ -210,6 +212,32 @@ function rig(port, { model } = {}) {
     assert.strictEqual(c.resolveMode('PSK31'), 'PKTUSB');
     assert.strictEqual(c.resolveMode('JTTY'), 'PKTUSB');
     assert.strictEqual(c.resolveMode('nonsense'), null);
+  });
+  await test('FT-817/857/897: Winlink FM packet asks for PKT (FM packet), FT8 for DIG; other radios unchanged', () => {
+    const codec = (vocab, xcvr) => { const c = new FlrigCodec(flrigModel(null), () => {}); c._radioModes = vocab; c._xcvr = xcvr; return c; };
+    const ft857 = codec(VOCAB.FT857D, 'FT-857D');
+    assert.strictEqual(ft857.radioModeFor(ft857.resolveMode('PKTFM')), 'PKT', 'packet session: PKT, not plain FM');
+    assert.strictEqual(ft857.radioModeFor(ft857.resolveMode('FT8', 14074000)), 'DIG', 'FT8: DIG');
+    assert.strictEqual(ft857.radioModeFor(ft857.resolveMode('FM')), 'FM', 'plain FM stays FM');
+    const ft897 = codec(VOCAB.FT857D, 'FT-897D');
+    assert.strictEqual(ft897.radioModeFor('PKTFM'), 'PKT');
+    // Another radio that happened to list "PKT": FM data still falls back to FM, as before.
+    const other = codec(VOCAB.FT857D, 'SOME-RIG');
+    assert.strictEqual(other.radioModeFor('PKTFM'), 'FM');
+    // Before rig.get_xcvr has answered: unchanged.
+    assert.strictEqual(codec(VOCAB.FT857D, null).radioModeFor('PKTFM'), 'FM');
+  });
+  await test('FT-857D readback: flrig "PKT" reads as FM data (PKTFM), "DIG" as PKTUSB', () => {
+    const modes = [];
+    const c = new FlrigCodec(flrigModel(null), () => {}); c._radioModes = VOCAB.FT857D; c._xcvr = 'FT-857D';
+    c.on('mode', (m) => modes.push(m));
+    c._handle({ method: 'rig.get_mode', kind: 'mode' }, 'PKT');
+    c._handle({ method: 'rig.get_mode', kind: 'mode' }, 'DIG');
+    assert.ok(modes.length >= 1, 'a mode event fires');
+    assert.strictEqual(c._lastMode, 'PKTUSB');
+    const c2 = new FlrigCodec(flrigModel(null), () => {}); c2._xcvr = 'FT-857D';
+    c2._handle({ method: 'rig.get_mode', kind: 'mode' }, 'PKT');
+    assert.strictEqual(c2._lastMode, 'PKTFM');
   });
   await test('meters: S9 = -73 dBm = 121 on the wire (the rigctld codec\'s rounding of 54*255/114), SWR 1.5 = 30, "0" means no reading', () => {
     assert.strictEqual(smeterFromDbm('-73'), 121);
