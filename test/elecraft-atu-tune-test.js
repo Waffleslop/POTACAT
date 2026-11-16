@@ -65,7 +65,8 @@ test('Elecraft stop sends nothing (no tuner-off command); Yaesu and Kenwood unch
     assert.deepStrictEqual(out, [], m);
     assert.strictEqual(c.getAtuStopCmd(), null, m);
   }
-  const k = codecFor('TS-590S/SG');
+  // A Kenwood still on 'standard' (the TS-590S/SG moved to AC111, #635).
+  const k = codecFor('TS-890S');
   assert.deepStrictEqual(k.c.getAtuStartSequence(), [{ cmd: 'AC011;', delay: 0 }]);
   assert.strictEqual(k.c.getAtuStopCmd(), 'AC000;');
   const y = codecFor('FT-710');
