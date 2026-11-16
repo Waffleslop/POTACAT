@@ -2059,6 +2059,13 @@ let smartSdrAudio = null;     // separate non-GUI TCP for slice audio (DAX-free 
 let _smartAudioResubscribing = false; // guard against re-entrant dax_rx re-subscribe
 let _lastSmartResubscribeMs = 0;      // rate-limit dax_rx re-subscribes to avoid thrash
 let tciClient = null;
+// A Zeus / Thetis rig over TCI (lib/tci-rig.js; glue beside connectTci below).
+const TciRig = require('./lib/tci-rig');
+const TciTarget = require('./lib/tci-target');
+let tciRig = null;              // the open link, or null
+let tciRigReconnectTimer = null;
+let tciRigDial = 0;
+const TCI_TX_REFUSAL = 'Transmitting through TCI is not available in this version of POTACAT';
 let tciPushTimer = null; // throttle timer for TCI spot pushes
 let agClient = null; // 4O3A Antenna Genius client
 let agLastBand = null; // last band we switched to (avoid redundant commands)
@@ -3365,6 +3372,7 @@ function detectRigType() {
   if (target.type === 'rigctld' || target.type === 'rigctldnet') return 'rigctld';
   if (target.type === 'flrig') return 'flrig';
   if (target.type === 'dxlab-commander') return 'commander';
+  if (target.type === 'tci') return 'tci'; // Zeus / Thetis TCI server (lib/tci-rig.js)
   if (target.type === 'tcp') {
     // NOT every TCP CAT target is a Flex. SmartSDR's CAT shim is localhost-only
     // on 5002-5005; a Hermes Lite 2 behind Thetis or Zeus is a TS-2000 emulator
@@ -3604,6 +3612,8 @@ function getRigCapabilities(rigType) {
 }
 
 function _rigCapabilitiesForType(rigType) {
+  // A TCI rig: what its server reported, whatever model the rig names.
+  if (rigType === 'tci') return tciRigCaps();
   // Try model-specific capabilities first
   const model = getActiveRigModel();
   if (model && model.caps) {
@@ -8784,6 +8794,8 @@ async function connectCat() {
     logConnectCatSkip('[CAT] Not connecting: another connection attempt is still in progress.');
     return; // prevent concurrent connectCat() calls
   }
+  // A TCI link belongs to the rig it was opened for: every (re)connect drops it.
+  closeTciRig();
   // If we're in remote-client mode, the "CAT" is a shack on the other
   // end of a WebSocket — skip the local connection chain entirely. Mode, not
   // link: a reconnecting shack must not let this PC open its own port.
@@ -8878,6 +8890,15 @@ async function connectCat() {
       sendCatLog('[CAT] Not connecting: no rig is configured. Add one in Settings > My Rigs.');
       return;
     }
+  }
+  if (target.type === 'tci') {
+    // Zeus / Thetis: the TCI server is the link; no serial port, no CatClient.
+    cat = null;
+    _currentFreqHz = 0;
+    closeNocatPttPort();
+    stopCatPortWatch();
+    connectTciRig();
+    return;
   }
   if (target.type === 'none') {
     // No CAT control (VOX-keyed kits: Pebble HF, uSDX builds without a CAT
@@ -21142,6 +21163,16 @@ function startJtcat(mode) {
       jtcatRefuseTx('Mercury (HF data) owns the radio');
       return;
     }
+    // A TCI rig: no transmit path yet. Refuse before any audio plays.
+    if (tciRigTarget()) {
+      sendCatLog(`[JTCAT] ${TCI_TX_REFUSAL}`);
+      if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+        jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: TCI_TX_REFUSAL });
+      }
+      if (remoteServer && remoteServer.hasClient()) remoteServer.broadcastJtcatQsoState({ phase: 'error', error: TCI_TX_REFUSAL });
+      jtcatRefuseTx('a TCI rig cannot transmit yet');
+      return;
+    }
     // Receiving from the WebSDR (#243): it cannot hear us and is not on the
     // radio's frequency, so nothing is keyed while it is the receive source.
     const sdrRefusal = JtcatRxSource.jtcatTxRefusalForSource(settings.jtcatRxSource);
@@ -24281,6 +24312,147 @@ function pushSpotsToSmartSdr(spots) {
   smartSdr.pruneStaleSpots();
 }
 
+// --- TCI rig: a radio driven through Zeus's or Thetis's TCI server ---
+// lib/tci-rig.js holds the protocol; this is the glue to POTACAT's rig state.
+// Receive and control only: nothing here keys the radio (the link refuses
+// keying frames, and every TX entry point refuses a TCI rig). Based on PR
+// #632 by w5lee.
+// (State: tciRig and friends, declared beside tciClient near the top.)
+
+/** The active TCI catTarget, or null (another rig, None, or driving a remote shack). */
+function tciRigTarget() {
+  const t = settings && settings.catTarget;
+  return t && t.type === 'tci' && !settings.catNone && !isRemoteMode() ? t : null;
+}
+function tciRigLinked() { return !!(tciRig && tciRig.connected); }
+
+function tciRigCaps() {
+  const rig = tciRig;
+  const band = rig && rig.filterBand;
+  return {
+    nb: true, nr: true, agc: true, agcModes: ['off', 'fast', 'med', 'slow'],
+    rfgain: rig ? rig.rfGainAvailable : true,
+    filter: !!band, filterType: band ? 'arbitrary' : 'none',
+    squelch: !!(rig && rig.squelchAvailable),
+    // No transmit controls until TCI transmit lands.
+    txpower: false, atu: false, vfo: false, split: false, power: false,
+  };
+}
+
+function connectTciRig() {
+  if (tciRig) return;
+  clearTimeout(tciRigReconnectTimer);
+  tciRigReconnectTimer = null;
+  const target = tciRigTarget();
+  if (!target) return;
+  const t = TciTarget.normalize(target);
+  const bad = TciTarget.validate(t);
+  if (bad) {
+    sendCatLog(`[TCI] Not connecting: ${bad}. Fix it in Settings > My Rigs.`);
+    sendCatStatus({ connected: false });
+    return;
+  }
+  sendCatLog(`[TCI] Connecting to ${TciTarget.describe(t)}`);
+  const { smeterFromDbm } = require('./lib/codecs/flrig-codec');
+  const rig = TciRig.connectTciRig({
+    host: t.host, port: t.port, server: t.server, autoStart: t.autoStart,
+    log: (m) => sendCatLog(`[TCI] ${m}`),
+    on: {
+      link(up) {
+        if (tciRig !== rig) return;
+        if (!up) {
+          tciRig = null;
+          sendCatStatus({ connected: false });
+          // The program may start after POTACAT: try again until the rig changes.
+          if (tciRigTarget()) {
+            tciRigReconnectTimer = setTimeout(connectTciRig, 5000);
+            if (tciRigReconnectTimer.unref) tciRigReconnectTimer.unref();
+          }
+          return;
+        }
+        sendCatLog(`[TCI] Connected to ${TciTarget.describe(t)}`);
+        sendCatStatus({ connected: true });
+        broadcastRigState();
+      },
+      dial(hz) { if (tciRig !== rig) return; tciRigDial = hz; sendCatFrequency(hz); },
+      mode(m) { if (tciRig === rig && m) sendCatMode(m); },
+      smeter(dbm) { const v = smeterFromDbm(dbm); if (tciRig === rig && v != null) sendCatSmeter(v, dbm); },
+      filter(w) { if (tciRig !== rig) return; _currentFilterWidth = w; broadcastRigState(); },
+      squelch(p) { if (tciRig !== rig) return; _currentSquelch = p; broadcastRigState(); },
+      agc(m) { if (tciRig === rig) sendCatAgc(m); },
+      nb(on) { if (tciRig === rig) sendCatNb(on); },
+      nr(on) { if (tciRig === rig) sendCatNr(on); },
+      rfGain(p) { if (tciRig !== rig) return; if (p != null) _currentRfGain = p; broadcastRigState(); },
+      tx(on) { if (tciRig === rig && on) sendCatLog('[TCI] The radio is transmitting (keyed from its own controls)'); },
+    },
+  });
+  tciRig = rig;
+  if (settings.tciSpots) connectTci(); // panadapter spots follow the TCI rig's server
+}
+
+function closeTciRig() {
+  clearTimeout(tciRigReconnectTimer);
+  tciRigReconnectTimer = null;
+  const rig = tciRig;
+  tciRig = null;
+  tciRigDial = 0;
+  if (rig) rig.close();
+}
+
+/** Rig-control actions for a TCI rig (applyRigControl). true = handled here. */
+function tciRigControl(data) {
+  const rig = tciRig;
+  const refuse = (why) => {
+    sendCatLog(`[TCI] ${data.action}: ${why || 'needs a connected TCI radio in receive'}`);
+    broadcastRigState(); // put the control back where the radio is
+  };
+  switch (data.action) {
+    case 'set-nb': if (!rig || !rig.setNoiseBlanker(!!data.value)) refuse(); return true;
+    case 'set-nr': if (!rig || !rig.setNoiseReduction(!!data.value)) refuse(); return true;
+    case 'set-agc': if (!rig || !rig.setAgcMode(String(data.value || '').toLowerCase())) refuse(); return true;
+    case 'set-rf-gain': if (!rig || !rig.setRfGain(Number(data.value))) refuse(); return true;
+    case 'set-squelch': if (!rig || !rig.setSquelch(Math.max(0, Math.min(100, Number(data.value) || 0)))) refuse(); return true;
+    case 'set-filter-width': if (!tciRigSetFilter(rig, data)) refuse(); return true;
+    // Everything that would key the radio, or switch it, is refused.
+    case 'set-tx-power': case 'atu-tune': case 'power-on': case 'power-off':
+      refuse('not available on a TCI radio in this version of POTACAT');
+      return true;
+    default:
+      return false;
+  }
+}
+
+/** A filter width for a TCI rig: edges as a Flex slice's, CW centred where the radio has it. */
+function tciRigSetFilter(rig, data) {
+  const width = Math.round(Number(data.value) || 0);
+  const band = rig && rig.filterBand;
+  if (!band || width <= 0 || width > 50000) return false;
+  const mode = String(data.mode || _currentMode || '').toUpperCase();
+  let { lo, hi } = sliceFilterEdges(mode, width);
+  if (mode === 'CW' || mode === 'CWU' || mode === 'CWL') {
+    lo = Math.round((band.lo + band.hi - width) / 2);
+    hi = lo + width;
+  }
+  return rig.setFilterBand(Math.round(lo), Math.round(hi));
+}
+
+/** handleRemotePtt's answer to a key-down on a TCI rig: refused, with the reason. */
+function tciRigRefusePtt() {
+  sendCatLog(`[TCI] PTT refused: ${TCI_TX_REFUSAL}`);
+  return false;
+}
+
+/** Tune a TCI rig (tuneRadio). */
+function tciRigTune(freqHz, mode) {
+  const why = !tciRig ? 'The TCI server is not connected'
+    : tciRig.tune(freqHz, mode, { dataMode: settings.jtcatUseDataMode !== false });
+  if (!why) return;
+  sendCatLog(`[TCI] Tune refused: ${why}`);
+  for (const w of [win, jtcatPopoutWin, vfoPopoutWin]) {
+    if (w && !w.isDestroyed()) w.webContents.send('tune-blocked', why);
+  }
+}
+
 // --- TCI (Thetis/ExpertSDR3) panadapter spots ---
 function connectTci() {
   disconnectTci();
@@ -24289,7 +24461,9 @@ function connectTci() {
   tciClient.on('error', (err) => {
     console.error('TCI:', err.message);
   });
-  tciClient.connect(settings.tciHost || '127.0.0.1', settings.tciPort || 50001);
+  // A TCI rig's own server takes the spots; otherwise the spot settings.
+  const rigT = tciRigTarget();
+  tciClient.connect(rigT ? rigT.host : (settings.tciHost || '127.0.0.1'), rigT ? rigT.port : (settings.tciPort || 50001));
 }
 
 function disconnectTci() {
@@ -26996,7 +27170,7 @@ function connectRemote() {
     // Dead rig link must be VISIBLE on the mobile device (K6RBJ tuned a dead
     // COM port for weeks with no error). Reuse the tune-blocked channel the
     // VFO lock already uses — shipped apps render it with zero mobile changes.
-    if (!((smartSdr && smartSdr.canTune) || (cat && cat.connected))) {
+    if (!((smartSdr && smartSdr.canTune) || (cat && cat.connected) || tciRigLinked())) {
       // POTACAT cannot move the radio, but an SDR may hear it (#329): a
       // Channels or Landmarks tap, NOAA on 162.55 MHz, CB 9, with the radio
       // off or no CAT at all, listens through the SDR instead of a refusal.
@@ -27866,6 +28040,7 @@ function connectRemote() {
   function flexSdr() { return smartSdr && smartSdr.connected; }
 
   function applyFilter(width) {
+    if (tciRigTarget()) { applyRigControl({ action: 'set-filter-width', value: width }, 'echocat'); return; }
     if (flexSdr()) {
       // LSB/DIGL below the carrier, AM/FM centred (#129).
       const { lo, hi } = sliceFilterEdges(_currentMode, width);
@@ -27897,6 +28072,7 @@ function connectRemote() {
   });
 
   remoteServer.on('set-nb', ({ on }) => {
+    if (tciRigTarget()) { applyRigControl({ action: 'set-nb', value: on }, 'echocat'); return; }
     if (flexSdr()) {
       smartSdr.setSliceNb(0, on);
     } else if (cat && cat.connected) {
@@ -27932,6 +28108,7 @@ function connectRemote() {
   // RF Gain from ECHOCAT — debounce to avoid serial command flooding and feedback loops
   let _rfGainTimer = null;
   remoteServer.on('set-rfgain', ({ value }) => {
+    if (tciRigTarget()) { applyRigControl({ action: 'set-rf-gain', value }, 'echocat'); return; }
     _currentRfGain = value;
     _rfGainSuppressBroadcast = Date.now() + 500; // suppress echo-back for 500ms
     if (_rfGainEchoTimer) clearTimeout(_rfGainEchoTimer);
@@ -27960,6 +28137,7 @@ function connectRemote() {
   // TX Power from ECHOCAT — debounce to avoid serial command flooding and feedback loops
   let _txPowerTimer = null;
   remoteServer.on('set-txpower', ({ value: asked }) => {
+    if (tciRigTarget()) { applyRigControl({ action: 'set-tx-power', value: asked }, 'echocat'); return; }
     const value = AmpDrive.clampW(asked, activeAmpDriveLimitW()); // amplifier drive limit
     _currentTxPower = value;
     // The operator has taken the level over — a WSPR restore must not undo it.
@@ -30507,6 +30685,7 @@ function handleRemotePtt(state, opts = {}) {
     }
     return false;
   }
+  if (state && tciRigTarget()) return tciRigRefusePtt(); // receive-only link (lib/tci-rig.js)
   // The ATU wizard is keying tune carriers across the bands: a PTT from any
   // surface would land on whatever frequency it is measuring.
   if (state && atuWizardActive()) {
@@ -31043,7 +31222,7 @@ function broadcastRemoteRadioStatus() {
     // Coerced with !! so the wire always carries an explicit boolean — a
     // null here (both objects absent) reads as "missing" to the mobile
     // merge-over-previous logic and would hold a stale connected state.
-    catConnected: !!((cat && cat.connected) || (smartSdr && smartSdr.connected)),
+    catConnected: !!((cat && cat.connected) || (smartSdr && smartSdr.connected) || tciRigLinked()),
     // A "No CAT control (VOX)" rig: nothing reports a mode or keys by CAT; the
     // sound card keys the radio (Digirig Lite + CM108, 2026-10-24). Clients
     // gate PTT on a voice mode — this says there will never be one to wait for.
@@ -40349,6 +40528,8 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin, purpose } = {}) {
     const who = listenSdrArbitrate(freqHz, mode, origin);
     if (who !== 'rig') return;
   }
+  // A TCI rig (Zeus / Thetis) tunes over its own link.
+  if (tciRigTarget()) { tciRigTune(freqHz, mode); return; }
 
   // Auto-tune KiwiSDR WebSDR to follow
   if (kiwiActive && kiwiClient && kiwiClient.connected && freqHz > 100000) {
@@ -47830,7 +48011,7 @@ function cloudShackNotice(text, kind) {
     // VFO lock uses (main window + VFO popout both render it). Before this,
     // a spot click with a dead USB link logged one buried line and the UI
     // moved on as if it worked. (K6RBJ 2026-07-17.)
-    if (!((smartSdr && smartSdr.canTune) || (cat && cat.connected))) {
+    if (!((smartSdr && smartSdr.canTune) || (cat && cat.connected) || tciRigLinked())) {
       if (sdrFollowed) return; // JTCAT listens on the WebSDR; the radio is not needed to hear
       if (settings.catTarget && settings.catTarget.type === 'none') {
         // No CAT control is a choice, not a fault: say what to set by hand.
@@ -47893,6 +48074,8 @@ function cloudShackNotice(text, kind) {
       let _last = 0;
       return (msg) => { const now = Date.now(); if (now - _last > 5000) { _last = now; sendCatLog(msg); } };
     })();
+    // A TCI rig (Zeus / Thetis) takes its controls over the TCI link.
+    if (rigType === 'tci' && tciRigControl(data)) return;
     switch (data.action) {
       case 'set-nb': {
         const on = !!data.value;
@@ -48641,6 +48824,19 @@ function cloudShackNotice(text, kind) {
   // themeNow: the theme in force (Appearance System decided here), for a
   // window that reads the theme from the settings (#376).
   ipcMain.handle('get-settings', () => ({ ...settings, appVersion: getAppDisplayVersion(), remoteShack: isRemoteMode(), themeNow: themeQuery() }));
+  // The rig editor's Test connection for a Zeus / Thetis TCI server: waits
+  // for the server's `ready` and sends nothing (lib/tci-rig.js probeTci).
+  ipcMain.handle('probe-tci-rig', async (_e, target) => {
+    const t = TciTarget.normalize(target);
+    const bad = TciTarget.validate(t);
+    if (bad) return { error: bad };
+    try {
+      await TciRig.probeTci(t.host, t.port);
+      return { ok: true };
+    } catch (err) {
+      return { error: `No TCI server at ${t.host}:${t.port} (${err.code || err.message})` };
+    }
+  });
   // Hidden spots (see changeSpotHides). The window's pre-sync list lived in its
   // localStorage; it is folded in once and then cleared there.
   ipcMain.handle('spot-hides-get', () => ({ hides: spotHidesNow(), skips: spotSkipsNow(), migrated: !!settings.spotHidesMigrated }));
@@ -54288,6 +54484,7 @@ function gracefulCleanup() {
   // surfacing as "WriteFileEx invalid handle" on quit.
   try { disconnectCwKeyPort(); } catch {}
   try { closeNocatPttPort(); } catch {}
+  try { closeTciRig(); } catch {}
   try { stopJtcat(); } catch {}
   try { stopSstv(); } catch {}
   try { stopSstvMulti(); } catch {}

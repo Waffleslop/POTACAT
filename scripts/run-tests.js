@@ -57,6 +57,8 @@ const TESTS = [
   'test/rig-controls-test.js',
   'test/rig-gain-steps-test.js',
   'test/rig-family-test.js',
+  'test/tci-rig-test.js', // #195 (w5lee #632): Zeus / Thetis TCI link against a fake server; receive and control only
+  'test/tci-gating-test.js', // #195: TCI branches gated on the TCI rig; every TX entry point refuses it
   'test/rigctld-attribution-test.js',
   'test/flrig-codec-test.js',
   'test/cw-text-unsupported-link-test.js',

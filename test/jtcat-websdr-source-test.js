@@ -238,9 +238,9 @@ test('wiring: a JTCAT band pick (either window, or ECHOCAT) retunes the SDR, eve
   const tuneAt = MAIN.indexOf("ipcMain.on('tune', (_e, { frequency, mode, bearing, slicePort, origin, pickSideband }) => {");
   const tune = MAIN.slice(tuneAt, MAIN.indexOf('// --- Rig Control Panel IPC ---', tuneAt));
   const follow = tune.indexOf("const sdrFollowed = JtcatRxSource.isJtcatDialMode(mode) && jtcatWebSdrFollowDial(parseFloat(frequency), 'band pick');");
-  const dead = tune.indexOf('if (!((smartSdr && smartSdr.canTune) || (cat && cat.connected))) {');
+  const dead = tune.indexOf('if (!((smartSdr && smartSdr.canTune) || (cat && cat.connected) || tciRigLinked())) {');
   assert.ok(follow > 0 && dead > follow, 'the follow comes before the radio-link refusal');
-  assert.ok(/if \(!\(\(smartSdr && smartSdr\.canTune\) \|\| \(cat && cat\.connected\)\)\) \{\s*if \(sdrFollowed\) return;/.test(tune), 'no "radio not connected" when the SDR took the tune');
+  assert.ok(/if \(!\(\(smartSdr && smartSdr\.canTune\) \|\| \(cat && cat\.connected\) \|\| tciRigLinked\(\)\)\) \{\s*if \(sdrFollowed\) return;/.test(tune), 'no "radio not connected" when the SDR took the tune');
   assert.ok(tune.includes('if (!sdrFollowed && kiwiActive && kiwiClient && kiwiClient.connected) {'), 'the voice-passband auto-tune does not undo it');
   const band = MAIN.slice(MAIN.indexOf("remoteServer.on('jtcat-set-band'"), MAIN.indexOf("remoteServer.on('jtcat-log-qso'"));
   assert.ok(band.includes("jtcatWebSdrFollowDial(freqKhz, 'ECHOCAT band pick');"));
