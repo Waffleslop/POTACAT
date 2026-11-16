@@ -161,6 +161,14 @@ test('FT-857 and FT-817/818: DIG MODE = USER-U, with each manual\'s own menu num
   assert.ok(!note(resolve({ model: 'FT-897', radioType: 'serialcat' }), 'ft857-dig-mode-user-u'));
   assert.ok(!note(resolve({ model: 'FT-857', radioType: 'serialcat' }), 'ft818-dig-mode-user-u'));
 });
+test('FT-891: DATA BFO = USB note, FT-891 only', () => {
+  const n = note(resolve({ model: 'FT-891', radioType: 'serialcat' }), 'ft891-data-bfo-usb');
+  assert.ok(n, 'FT-891 note missing');
+  assert.ok(/08-12 DATA BFO/.test(n.steps.join(' ')), 'menu 08-12 not named');
+  for (const m of ['FT-710', 'FT-991/991A', 'FT-857', 'FTDX10']) {
+    assert.ok(!note(resolve({ model: m, radioType: 'serialcat' }), 'ft891-data-bfo-usb'), m + ' got the FT-891 note');
+  }
+});
 test('the Icom pickers and the model table agree on every CI-V address the note quotes', () => {
   const opts = [...HTML.matchAll(/<option value="0x([0-9A-Fa-f]+)">(IC-[^<]+)<\/option>/g)];
   assert.ok(opts.length > 5, 'no Icom picker options found');
