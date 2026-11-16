@@ -529,6 +529,7 @@ const PskrTx = require('./lib/pskreporter-tx');
 const { Ft8Engine, freqsForMode } = require('./lib/ft8-engine');
 const DialSnap = require('./lib/dial-snap');
 const PlainSsbForDigital = require('./lib/plain-ssb-for-digital');
+const FreedvPtt = require('./lib/freedv-ptt'); // FreeDV mode: voice PTT refused until FreeDV transmit exists
 const { decideDialFollow } = require('./lib/jtcat-dial-follow');
 const JtcatRxSource = require('./lib/jtcat-rx-source'); // #243: JTCAT can hear a WebSDR instead of the radio
 const { StreamResampler } = require('./lib/stream-resampler');
@@ -30958,6 +30959,19 @@ function handleRemotePtt(state, opts = {}) {
     }
     if (remoteServer && remoteServer.running) {
       remoteServer.sendToClient({ type: 'tune-blocked', reason: 'PTT blocked — SWR guard tripped. Run the ATU or change bands on the desktop.' });
+    }
+    return false;
+  }
+  // FreeDV cannot transmit yet: a voice key-down in a FreeDV mode would send
+  // analog voice on a FreeDV frequency. Refused from every surface (FDV1 row 4).
+  const freedvWhy = state ? FreedvPtt.freedvPttRefusal({ state, freedvRunning: !!freedvEngine, emission: opts.emission, forceDataMode: opts.forceDataMode }) : null;
+  if (freedvWhy) {
+    sendCatLog(`[PTT] refused: ${freedvWhy}`);
+    if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', freedvWhy);
+    if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: freedvWhy, warn: true, duration: 10000 });
+    if (remoteServer && remoteServer.running) {
+      remoteServer.sendToClient({ type: 'tune-blocked', reason: freedvWhy });
+      remoteServer.sendToClient({ type: 'ptt-refused', kind: 'freedv', message: freedvWhy });
     }
     return false;
   }
