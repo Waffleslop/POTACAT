@@ -29164,6 +29164,9 @@ function connectRemote() {
       }
     }
     startJtcat(mode);
+    // A band change can restart JTCAT without changing the phone's waterfall
+    // subscription. Resume the TCI feed using the existing subscription.
+    if (_mobileWantsSpectrum && usesTciEchoAudio()) startInProcessSpectrum();
     // A new phone session can start on the radio's current band without a
     // band-pick command. Seed the TX guard from a confirmed TCI digital dial
     // so the saved desktop band cannot become the phone's TX target.
