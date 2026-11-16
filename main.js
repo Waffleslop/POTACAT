@@ -375,6 +375,7 @@ const { applyQsoEdit, modeEditFields, activationSigOf } = require('./lib/qso-edi
 const ActivationClock = require('./lib/activation-clock'); // #147: a forgotten activation ends at the UTC day change or after 6 h idle
 const ActivationAnnounce = require('./lib/activation-announce'); // #508: which saved contacts join the live activation list
 const QsoExpand = require('./lib/qso-expand'); // one contact -> its ADIF records (logContact)
+const QsoLogSource = require('./lib/qso-log-source'); // APP_POTACAT_LOG_SOURCE: ECHOCAT or blank (#634)
 const { dxccCodeForEntity } = require('./lib/dxcc-codes'); // cty.dat entity -> ADIF DXCC number (#554)
 const WatchlistEdit = require('./lib/watchlist-edit'); // watchlist add/remove by operation (ECHOCAT sync)
 const wsprnet = require('./lib/wspr/wsprnet');
@@ -19603,6 +19604,14 @@ const _jtcatQsoClock = new JtcatQsoClock(); // when each QSO under way began
 // Contacts waiting in the Log QSO window (settings.jtcatLogPrompt).
 const jtcatLogReviews = new LogReview.LogReviewQueue();
 
+// ADIF APP_POTACAT_LOG_SOURCE for a contact logged by the operating client
+// (#634): ECHOCAT for the phone or ECHOCAT Web, blank otherwise.
+function echoCatLogSource() {
+  let ctx = null;
+  try { ctx = remoteServer && typeof remoteServer.activeClientContext === 'function' ? remoteServer.activeClientContext() : null; } catch {}
+  return QsoLogSource.logSourceForPlatform(ctx && ctx.platform);
+}
+
 async function jtcatAutoLog(qso, opts) {
   const q = qso || remoteJtcatQso;
   if (!q || !q.call) {
@@ -19687,6 +19696,7 @@ async function jtcatAutoLog(qso, opts) {
     // dcxweaver 2026-11-03: "JTCAT FT8" in every COMMENT is optional
     // (settings.jtcatLogComment, default on). Off = COMMENT left empty.
     comment: settings.jtcatLogComment !== false ? 'JTCAT ' + mode : '',
+    logSource: opts?.fromWindow ? '' : echoCatLogSource(),
   };
 
   // Hunted park (KB2UXB 2026-07-09): SSB spot-click logging carries the
@@ -28589,6 +28599,7 @@ function connectRemote() {
         wwffRef: data.wwffRef || '',
         llotaRef: data.llotaRef || '',
         comment: String(data.userComment || '').trim(),
+        logSource: echoCatLogSource(),
         gridsquare: theirGrid,
         gridHeard: !!theirGrid,
         myGridsquare: data.myGridsquare || '', // the device's own grid; else the park's (saveQsoRecord), never home
@@ -36491,6 +36502,7 @@ function rawQsoToQsoData(raw) {
     submode: raw.SUBMODE || '',
     qsoDate: raw.QSO_DATE || '',
     timeOn: raw.TIME_ON || '',
+    logSource: raw.APP_POTACAT_LOG_SOURCE || '',
     rstSent: raw.RST_SENT || '',
     rstRcvd: raw.RST_RCVD || '',
     txPower: raw.TX_PWR || '',
@@ -53547,6 +53559,7 @@ function cloudShackNotice(text, kind) {
           adifMode: q.MODE || '',
           submode: q.SUBMODE || '',
           band: q.BAND || '',
+          logSource: q.APP_POTACAT_LOG_SOURCE || '',
           rstSent: q.RST_SENT || '',
           rstRcvd: q.RST_RCVD || '',
           name: q.NAME || '',

@@ -28981,6 +28981,7 @@ function buildActivationAdifQsos(act) {
     mode: c.mode || '',
     // The record's own MODE/SUBMODE pair (MFSK/JS8), written back as it was (#381).
     adifMode: c.adifMode || '',
+    logSource: c.logSource || '',
     submode: c.submode || '',
     band: c.band || '',
     qsoDate: act.date,
