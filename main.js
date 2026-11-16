@@ -22011,7 +22011,7 @@ function rxSpectrumEngineLive() {
 }
 /** Sound-card radios: the audio window captures the rig input for the spectrum. */
 function rxSpectrumSync() {
-  const socketAudio = settings.audioSource === 'smartsdr' || settings.audioSource === 'icom-network';
+  const socketAudio = settings.audioSource === 'smartsdr' || settings.audioSource === 'icom-network' || settings.audioSource === 'tci';
   const want = !!(_mobileWantsSpectrum && remoteServer && remoteServer.hasClient()
     && !rxSpectrumEngineLive() && !socketAudio && settings.remoteAudioInput);
   if (want === _rxSpecBridgeOn) return;
@@ -24360,6 +24360,7 @@ function connectTciRig() {
   const { smeterFromDbm } = require('./lib/codecs/flrig-codec');
   const rig = TciRig.connectTciRig({
     host: t.host, port: t.port, server: t.server, autoStart: t.autoStart,
+    audio: settings.audioSource === 'tci', // the rig's audio source (lib/rig-family.js)
     log: (m) => sendCatLog(`[TCI] ${m}`),
     on: {
       link(up) {
@@ -24388,6 +24389,7 @@ function connectTciRig() {
       nr(on) { if (tciRig === rig) sendCatNr(on); },
       rfGain(p) { if (tciRig !== rig) return; if (p != null) _currentRfGain = p; broadcastRigState(); },
       tx(on) { if (tciRig === rig && on) sendCatLog('[TCI] The radio is transmitting (keyed from its own controls)'); },
+      audio(pcm) { if (tciRig === rig) tciRigAudio(pcm); },
     },
   });
   tciRig = rig;
@@ -24444,6 +24446,24 @@ function tciRigSetFilter(rig, data) {
 function tciRigRefusePtt() {
   sendCatLog(`[TCI] PTT refused: ${TCI_TX_REFUSAL}`);
   return false;
+}
+
+/**
+ * RX1's audio from a TCI rig (12 kHz mono): the VFO window's monitor and the
+ * ECHOCAT bridge take it as SmartSDR Direct frames; JTCAT's waterfall and
+ * decoder as the WebSDR's (feedJtcatFromWebSdr). JTCAT on the WebSDR keeps
+ * listening there.
+ */
+function tciRigAudio(pcm) {
+  const frame = { pcm, sampleRate: TciRig.AUDIO_RATE };
+  if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) audioSafeSend(vfoPopoutWin.webContents, 'smartsdr-audio-frame', frame);
+  if (remoteAudioWin && !remoteAudioWin.isDestroyed()) audioSafeSend(remoteAudioWin.webContents, 'smartsdr-audio-frame', frame);
+  if (_mobileWantsSpectrum) rxSpecRing.push(pcm, TciRig.AUDIO_RATE); // the phone's VFO waterfall
+  if (jtcatRxFromWebSdr()) return;
+  if (isJtcatIpAudioReady(jtcatPopoutWin)) audioSafeSend(jtcatPopoutWin.webContents, 'jtcat-vita49-audio', frame);
+  else if (isJtcatIpAudioReady(win)) audioSafeSend(win.webContents, 'jtcat-vita49-audio', frame);
+  if (jtcatManager && jtcatManager.running) jtcatManager.feedAudio('default', pcm);
+  else if (ft8Engine && ft8Engine._running) ft8Engine.feedAudio(pcm);
 }
 
 /** Tune a TCI rig (tuneRadio). */
@@ -51340,6 +51360,8 @@ function cloudShackNotice(text, kind) {
       if (settings.catTarget && settings.catTarget.type === 'icom-network') {
         connectCatSafe('icom-network audio-source change');
       }
+      // A TCI rig streams RX1's audio only while that is its audio source.
+      if (tciRig && tciRigTarget()) tciRig.setAudio(settings.audioSource === 'tci');
     }
 
     // Reconnect TCI if settings changed
@@ -53092,6 +53114,8 @@ function cloudShackNotice(text, kind) {
     // Windows-DAX-device capture so the (often silent) device can't
     // double-feed or overwrite the good VITA-49 audio. K3SBP 2026-05-14.
     if (settings.audioSource === 'smartsdr' && smartSdrAudio) return;
+    // A TCI rig's audio: tciRigAudio feeds the engine from the TCI link.
+    if (settings.audioSource === 'tci' && tciRigTarget()) return;
     // JTCAT receiving from the WebSDR (#243): feedJtcatFromWebSdr feeds the
     // engine; the window's capture is that same audio coming back.
     if (jtcatRxFromWebSdr()) return;

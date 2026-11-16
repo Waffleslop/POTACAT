@@ -6330,7 +6330,7 @@ function _applyPopoutTheme(payload) {
     try {
       // Yaesu SCU-LAN10 audio arrives the same way: main forwards it as
       // 'jtcat-vita49-audio' frames at 24 kHz (handleYaesuLanAudioFrame).
-      if (audioSource === 'smartsdr' || audioSource === 'yaesu-lan' || audioSource === 'websdr') {
+      if (audioSource === 'smartsdr' || audioSource === 'yaesu-lan' || audioSource === 'websdr' || audioSource === 'tci') {
         _audioStartStage = 'ctx-create';
         // SmartSDR Direct: audio is the VITA-49 dax_rx stream that main
         // forwards as 'jtcat-vita49-audio' frames. A single AudioWorkletNode
@@ -6355,7 +6355,7 @@ function _applyPopoutTheme(payload) {
           numberOfInputs: 0,
           numberOfOutputs: 1,
           outputChannelCount: [1],
-          processorOptions: audioSource === 'websdr'
+          processorOptions: (audioSource === 'websdr' || audioSource === 'tci')
             ? { sourceRate: 12000 }
             : { sourceRate: 24000 },
         });
@@ -6371,7 +6371,7 @@ function _applyPopoutTheme(payload) {
         // SmartSDR path sends to both windows and was unaffected, which is
         // why this hid for so long. (K3SBP 2026-08-05.)
         if (window.api.setJtcatIpAudioReady) window.api.setJtcatIpAudioReady(true);
-        console.log('[JTCAT popout] Audio source: ' + (audioSource === 'websdr' ? 'WebSDR' : 'SmartSDR Direct (VITA-49 dax_rx)') + ' via AudioWorklet');
+        console.log('[JTCAT popout] Audio source: ' + (audioSource === 'websdr' ? 'WebSDR' : audioSource === 'tci' ? 'TCI (Zeus / Thetis)' : 'SmartSDR Direct (VITA-49 dax_rx)') + ' via AudioWorklet');
       } else {
         var constraints = {
           channelCount: 1,
@@ -6519,7 +6519,7 @@ function _applyPopoutTheme(payload) {
       popoutWaterfallLoop();
       // Capture-stall watchdog (kc8zp_ryan 2026-11-03, lib/capture-stall.js):
       // sound-card capture only; the SmartSDR / Icom-network feed is main's.
-      if (window.CaptureStall && audioSource !== 'smartsdr' && audioSource !== 'icom-network' && audioSource !== 'yaesu-lan' && audioSource !== 'websdr') {
+      if (window.CaptureStall && audioSource !== 'smartsdr' && audioSource !== 'icom-network' && audioSource !== 'yaesu-lan' && audioSource !== 'websdr' && audioSource !== 'tci') {
         popoutArmStallWatch(popoutAudioStream && popoutAudioStream.getAudioTracks()[0]);
       }
       // Start finished — disarm the stall watchdog and restore the overlay
@@ -6537,7 +6537,7 @@ function _applyPopoutTheme(payload) {
         // and the label is the only way a bug report shows which one fed the
         // decoder. KB2UXB 2026-08-03.
         var capLabel = '';
-        if (audioSource !== 'smartsdr' && audioSource !== 'yaesu-lan') {
+        if (audioSource !== 'smartsdr' && audioSource !== 'yaesu-lan' && audioSource !== 'tci') {
           try {
             var capTrack = popoutAudioStream && popoutAudioStream.getAudioTracks()[0];
             if (capTrack && capTrack.label) capLabel = ' [' + capTrack.label + ']';
@@ -6545,6 +6545,7 @@ function _applyPopoutTheme(payload) {
         }
         window.api.jtcatLog('[JTCAT popout] Audio started: ' +
           (audioSource === 'smartsdr' ? 'SmartSDR Direct (VITA-49)' :
+           audioSource === 'tci' ? 'TCI (Zeus / Thetis)' :
            audioSource === 'websdr' ? 'WebSDR' :
            audioSource === 'icom-network' ? 'Icom network' :
            audioSource === 'yaesu-lan' ? 'Yaesu LAN (SCU-LAN10)' : 'device capture') +

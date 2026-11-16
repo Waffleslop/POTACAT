@@ -25,7 +25,7 @@ const R = (f) => readSrc(path.join(__dirname, '..', f));
 const main = R('main.js');
 
 test('the VFO window plays LAN audio itself, and main sends it the frames', () => {
-  assert.ok(/if \(s\.audioSource === 'smartsdr' \|\| s\.audioSource === 'icom-network' \|\| s\.audioSource === 'yaesu-lan'\) \{/.test(R('renderer/vfo-popout.html')));
+  assert.ok(/if \(s\.audioSource === 'smartsdr' \|\| s\.audioSource === 'icom-network' \|\| s\.audioSource === 'yaesu-lan'( \|\| s\.audioSource === 'tci')?\) \{/.test(R('renderer/vfo-popout.html')));
   const sent = [];
   const fn = main.slice(main.indexOf('function handleYaesuLanAudioFrame('), main.indexOf('function handleK4AudioFrame('));
   const ctx = {
