@@ -28,12 +28,23 @@ function initialState(dialect) {
   };
 }
 
-async function startFakeTciServer({ dialect = 'zeus', running = true, greet = true } = {}) {
+/**
+ * Transmit behaviour (test/tci-tx-safety-test.js):
+ *   chrono      ask for audio with TX_CHRONO frames while keyed (false = a
+ *               half-open server that keys and never asks)
+ *   chronoMs / chronoSamples   how often, and how much, it asks
+ *   ackRelease  answer trx:0,false; with trx:0,false; (false = never confirms)
+ *   moxSticks   Zeus: MOX stays on when the session that keyed it closes
+ */
+async function startFakeTciServer({ dialect = 'zeus', running = true, greet = true, chrono = true, chronoMs = 20, chronoSamples = 240, ackRelease = true, moxSticks = dialect === 'zeus' } = {}) {
   const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   await once(wss, 'listening');
   const port = wss.address().port;
   const state = { ...initialState(dialect), running };
   const frames = [];
+  const txAudio = [];          // every TX audio frame a client sent: { samples, at }
+  const keyedBy = new Set();   // sessions that keyed
+  let chronoTimer = null;
   const peers = new Set();
   let onFrame = null;
 
@@ -66,16 +77,53 @@ async function startFakeTciServer({ dialect = 'zeus', running = true, greet = tr
       case 'rx_nb_enable': state.nb = f[1] === 'true'; return '';
       case 'rx_nr_enable': state.nr = f[1] === 'true'; return '';
       case 'attenuator': case 'rx_step_att_ex': state.att = Number(f[1]); return '';
-      case 'trx': state.trx = f[1] === 'true'; return `trx:0,${state.trx};`;
+      case 'trx': {
+        const on = f[1] === 'true';
+        if (!on && !ackRelease) { state.trx = false; stopChrono(); return ''; }
+        state.trx = on;
+        if (on) startChrono(); else stopChrono();
+        return `trx:0,${state.trx};`;
+      }
       default: return '';
     }
   }
 
+  function chronoFrame(count) {
+    const b = Buffer.alloc(64);
+    b.writeUInt32LE(12000, 4);
+    b.writeUInt32LE(3, 8);
+    b.writeUInt32LE(count, 20);
+    b.writeUInt32LE(3, 24);
+    b.writeUInt32LE(1, 28);
+    return b;
+  }
+  function startChrono() {
+    stopChrono();
+    if (!chrono) return;
+    chronoTimer = setInterval(() => {
+      for (const p of peers) if (keyedBy.has(p) && p.readyState === 1) p.send(chronoFrame(chronoSamples));
+    }, chronoMs);
+  }
+  function stopChrono() { if (chronoTimer) { clearInterval(chronoTimer); chronoTimer = null; } }
+
   wss.on('connection', (peer) => {
     peers.add(peer);
-    peer.on('close', () => peers.delete(peer));
+    peer.on('close', () => {
+      peers.delete(peer);
+      if (keyedBy.has(peer)) {
+        keyedBy.delete(peer);
+        if (!moxSticks) { state.trx = false; stopChrono(); }
+      }
+    });
     peer.on('message', (data, binary) => {
-      if (binary) return;
+      if (binary) {
+        const n = data.readUInt32LE(20);
+        const samples = new Float32Array(n);
+        for (let i = 0; i < n; i++) samples[i] = data.readFloatLE(64 + i * 4);
+        txAudio.push({ type: data.readUInt32LE(24), samples, at: Date.now() });
+        return;
+      }
+      if (/(^|;)s*trx:0,true/.test(data.toString())) keyedBy.add(peer);
       const text = data.toString();
       frames.push(text);
       let reply = '';
@@ -100,7 +148,9 @@ async function startFakeTciServer({ dialect = 'zeus', running = true, greet = tr
   });
 
   return {
-    port, dialect, state, frames,
+    port, dialect, state, frames, txAudio,
+    /** Stop asking for TX audio (a server that went quiet mid-over). */
+    stopChrono,
     /** Push text (or a binary frame) to every connected client. */
     send(data) { for (const p of peers) if (p.readyState === 1) p.send(data); },
     /** Resolve on the next text frame a client sends. */
@@ -109,6 +159,7 @@ async function startFakeTciServer({ dialect = 'zeus', running = true, greet = tr
     /** Drop every client without a close handshake (a half-dead link). */
     terminateClients() { for (const p of peers) p.terminate(); },
     async close() {
+      stopChrono();
       for (const p of peers) p.terminate();
       await new Promise((r) => wss.close(r));
     },
