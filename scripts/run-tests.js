@@ -156,6 +156,7 @@ const TESTS = [
   'test/elecraft-atu-tune-test.js', // Elecraft tunes with SWT (K3 19, KX3 44, KX2 20 by OM;), never AC
   'test/ts590-atu-ac111-test.js', // TS-590S/SG starts a tune with AC111; per its PC command guide (VA2PSL #635); other Kenwoods keep AC011;
   'test/freedv-ptt-refusal-test.js', // FDV1: voice PTT refused in FreeDV modes until FreeDV transmit exists; one sentence on every surface
+  'test/freedv-echocat-test.js', // FDV1: decoded FreeDV speech on the ECHOCAT track, freedv-status, protocol drift fixed (agreed with ECHOCAT)
   'test/kenwood-filter-width-test.js',
   'test/cw-key-port-race-test.js',
   'test/guest-pass-emission-test.js',

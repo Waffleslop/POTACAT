@@ -530,6 +530,7 @@ const { Ft8Engine, freqsForMode } = require('./lib/ft8-engine');
 const DialSnap = require('./lib/dial-snap');
 const PlainSsbForDigital = require('./lib/plain-ssb-for-digital');
 const FreedvPtt = require('./lib/freedv-ptt'); // FreeDV mode: voice PTT refused until FreeDV transmit exists
+const FreedvStatus = require('./lib/freedv-status'); // freedv-status to ECHOCAT: state, modes, sync, SNR, plain reason
 const { decideDialFollow } = require('./lib/jtcat-dial-follow');
 const JtcatRxSource = require('./lib/jtcat-rx-source'); // #243: JTCAT can hear a WebSDR instead of the radio
 const { StreamResampler } = require('./lib/stream-resampler');
@@ -27660,8 +27661,9 @@ function connectRemote() {
         muteRules: normalizeMuteRules(settings.spotMuteRules),
       });
     }
-    // FreeDV enabled state
+    // FreeDV enabled state, and the full FreeDV status (after every auth-ok)
     remoteServer.sendToClient({ type: 'freedv-enabled', enabled: !!settings.enableFreedv });
+    pushFreedvStatus(true);
     // JTCAT Tune + Auto Seq state (Gap 11 + Gap 12, 2026-05-04) — phone
     // FT8 screen renders these controls and needs to reflect current
     // server state on reconnect. Tune state defaults to {active:false}
@@ -29862,6 +29864,7 @@ function connectRemote() {
     }
     // Send confirmation back so checkbox stays in sync
     remoteServer.sendToClient({ type: 'freedv-enabled', enabled });
+    pushFreedvStatus(true);
   });
 
   remoteServer.on('tgxl-select-antenna', ({ port }) => {
@@ -29870,17 +29873,29 @@ function connectRemote() {
 
   // FreeDV from ECHOCAT
   remoteServer.on('freedv-start', ({ mode }) => {
-    if (freedvEngine) freedvEngine.stop();
-    // Trigger the IPC handler via a synthetic event
-    if (win && !win.isDestroyed()) win.webContents.send('freedv-remote-start', mode);
+    // Starts FreeDV here (it only stopped it before: the window it signalled
+    // never listened). Off in settings: freedv-status says so instead.
+    if (!settings.enableFreedv) { pushFreedvStatus(true); return; }
+    startFreedvEngine(freedvCodecFor(mode), 'from ECHOCAT');
   });
   remoteServer.on('freedv-stop', () => {
-    if (win && !win.isDestroyed()) win.webContents.send('freedv-remote-stop');
+    stopFreedvEngine('from ECHOCAT');
   });
   remoteServer.on('freedv-set-mode', ({ mode }) => {
-    if (freedvEngine) freedvEngine.setMode(mode);
+    if (freedvEngine) { freedvEngine.setMode(freedvCodecFor(mode)); pushFreedvStatus(); }
   });
   remoteServer.on('freedv-set-tx', ({ enabled }) => {
+    // FreeDV cannot transmit yet: this keyed CAT PTT directly, around the
+    // dispatcher's FreeDV refusal, and sent whatever audio was there.
+    if (enabled) {
+      const why = FreedvPtt.FREEDV_PTT_REFUSAL;
+      sendCatLog(`[FreeDV] TX refused: ${why}`);
+      if (remoteServer && remoteServer.running) {
+        remoteServer.sendToClient({ type: 'tune-blocked', reason: why });
+        remoteServer.sendToClient({ type: 'ptt-refused', kind: 'freedv', message: why });
+      }
+      return;
+    }
     // FreeDV keys around handleRemotePtt, so it needs the SCU-LAN10 check
     // itself: its modem audio has no way to the radio over the LAN yet.
     if (enabled && yaesuLanTxRefusal()) {
@@ -31482,6 +31497,124 @@ function applyFreedvAudioMute() {
   if (remoteAudioWin && !remoteAudioWin.isDestroyed()) {
     remoteAudioWin.webContents.send('freedv-mute', _freedvAudioMuted);
   }
+}
+
+// --- FreeDV engine lifecycle (FDV1) ---
+// One start and one stop for every surface: a FreeDV spot or tune, this
+// window, and ECHOCAT. Each wires the same things: decoded speech to this
+// window AND onto the ECHOCAT audio track (the phone heard silence before),
+// the raw radio audio to ECHOCAT muted while it runs, and freedv-status.
+let _freedvLastSync = { sync: false, snr: null };
+let _freedvLastError = null;
+let _freedvStatusSent = null;
+let _freedvStatusSentAt = 0;
+let _freedvStatusTimer = null;
+let _freedvDecoders = null;
+function freedvDecoders() {
+  if (_freedvDecoders) return _freedvDecoders;
+  const has = (dir, file) => { try { return fs.existsSync(path.join(__dirname, 'lib', dir, 'build', 'Release', file)); } catch { return false; } };
+  _freedvDecoders = { classic: has('freedv_native', 'freedv_native.node'), rade: has('rade_native', 'rade_native.node') };
+  return _freedvDecoders;
+}
+function freedvStatusNow() {
+  return FreedvStatus.buildFreedvStatus({
+    enabled: !!settings.enableFreedv,
+    decoders: freedvDecoders(),
+    running: !!freedvEngine,
+    mode: freedvEngine ? (freedvEngine.mode || null) : null,
+    sync: _freedvLastSync.sync,
+    snr: _freedvLastSync.snr,
+    error: _freedvLastError,
+  });
+}
+// force: send even if nothing changed (after auth-ok, on start and stop).
+function pushFreedvStatus(force) {
+  if (!remoteServer || !remoteServer.running) return;
+  const next = freedvStatusNow();
+  const now = Date.now();
+  const verdict = force ? true : FreedvStatus.shouldSendStatus(_freedvStatusSent, next, now, _freedvStatusSentAt);
+  if (verdict === 'later') {
+    if (!_freedvStatusTimer) {
+      _freedvStatusTimer = setTimeout(() => { _freedvStatusTimer = null; pushFreedvStatus(); },
+        Math.max(0, FreedvStatus.THROTTLE_MS - (now - _freedvStatusSentAt)));
+    }
+    return;
+  }
+  if (!verdict) return;
+  _freedvStatusSent = next;
+  _freedvStatusSentAt = now;
+  remoteServer.sendToClient({ type: 'freedv-status', ...next });
+}
+function startFreedvEngine(codecMode, why) {
+  if (freedvEngine) {
+    if (codecMode && String(freedvEngine.mode || '').toUpperCase() !== String(codecMode).toUpperCase()) {
+      freedvEngine.setMode(codecMode);
+      pushFreedvStatus();
+    }
+    return;
+  }
+  _freedvLastError = null;
+  _freedvLastSync = { sync: false, snr: null };
+  freedvEngine = new FreedvEngine();
+  pushActivityState();
+  freedvEngine.on('rx-speech', (data) => {
+    if (win && !win.isDestroyed()) win.webContents.send('freedv-rx-speech', data);
+    // The phone hears decoded speech on the same track as the radio audio.
+    if (remoteAudioWin && !remoteAudioWin.isDestroyed() && remoteServer && remoteServer.running) {
+      remoteAudioWin.webContents.send('freedv-speech', { samples: data.samples, rate: data.rate || 8000 });
+    }
+  });
+  freedvEngine.on('tx-modem', (data) => {
+    if (win && !win.isDestroyed()) win.webContents.send('freedv-tx-modem', data);
+  });
+  freedvEngine.on('sync', (data) => {
+    if (win && !win.isDestroyed()) win.webContents.send('freedv-sync', data);
+    if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'freedv-sync', ...data }); // ECHOCAT Web
+    _freedvLastSync = { sync: !!(data && data.sync), snr: data ? data.snr : null };
+    pushFreedvStatus();
+  });
+  freedvEngine.on('status', (data) => {
+    sendCatLog(`[FreeDV] ${data.state} mode=${data.mode}`);
+    if (win && !win.isDestroyed()) win.webContents.send('freedv-status', data);
+    pushFreedvStatus();
+  });
+  freedvEngine.on('error', (data) => {
+    sendCatLog(`[FreeDV] Error: ${data.message}`);
+    _freedvLastError = data && data.message ? data.message : 'FreeDV stopped with an error.';
+    pushFreedvStatus(true);
+  });
+  freedvEngine.start(codecMode);
+  if (settings.freedvSquelch) {
+    freedvEngine.setSquelch(!!settings.freedvSquelch.enabled, Number(settings.freedvSquelch.threshold));
+  }
+  sendCatLog(`[FreeDV] Started (codec ${codecMode})${why ? ' ' + why : ''}`);
+  // ECHOCAT hears the decoded speech in place of the raw radio audio.
+  _freedvAudioMuted = true;
+  applyFreedvAudioMute();
+  // The main window captures the radio's audio for the decoder.
+  if (win && !win.isDestroyed()) win.webContents.send('freedv-auto-start', codecMode);
+  pushFreedvStatus(true);
+}
+function stopFreedvEngine(why) {
+  if (!freedvEngine) return;
+  try { freedvEngine.stop(); } catch {}
+  freedvEngine = null;
+  pushActivityState();
+  sendCatLog(`[FreeDV] Stopped${why ? ' (' + why + ')' : ''}`);
+  if (win && !win.isDestroyed()) win.webContents.send('freedv-auto-stop');
+  _freedvAudioMuted = false;
+  applyFreedvAudioMute();
+  _freedvLastSync = { sync: false, snr: null };
+  pushFreedvStatus(true);
+}
+// FreeDV mode names from a spot or ECHOCAT to the engine's codec name.
+function freedvCodecFor(m) {
+  const u = String(m || '').toUpperCase();
+  if (u.includes('RADE')) return 'RADEV1';
+  if (u.includes('700D')) return '700D';
+  if (u.includes('700C')) return '700C';
+  if (u.includes('1600')) return '1600';
+  return '700E';
 }
 
 function broadcastRemoteRadioStatus() {
@@ -40912,40 +41045,8 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin, purpose } = {}) {
   // FreeDV: auto-start/stop engine based on spot mode
   const isFreedvMode = m.startsWith('FREEDV') || m === 'DV';
   if (isFreedvMode && settings.enableFreedv) {
-    // Start FreeDV engine if not already running
-    if (!freedvEngine) {
-      let codecMode = '700E';
-      if (m.includes('RADE')) codecMode = 'RADEV1';
-      else if (m.includes('700D')) codecMode = '700D';
-      else if (m.includes('700C')) codecMode = '700C';
-      else if (m.includes('1600')) codecMode = '1600';
-
-      freedvEngine = new FreedvEngine();
-      pushActivityState();
-      freedvEngine.on('rx-speech', (data) => {
-        if (win && !win.isDestroyed()) win.webContents.send('freedv-rx-speech', data);
-      });
-      freedvEngine.on('tx-modem', (data) => {
-        if (win && !win.isDestroyed()) win.webContents.send('freedv-tx-modem', data);
-      });
-      freedvEngine.on('sync', (data) => {
-        if (win && !win.isDestroyed()) win.webContents.send('freedv-sync', data);
-        if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'freedv-sync', ...data });
-      });
-      freedvEngine.on('status', (data) => sendCatLog(`[FreeDV] ${data.state} mode=${data.mode}`));
-      freedvEngine.on('error', (data) => sendCatLog(`[FreeDV] Error: ${data.message}`));
-      freedvEngine.start(codecMode);
-      if (settings.freedvSquelch) {
-        freedvEngine.setSquelch(!!settings.freedvSquelch.enabled, Number(settings.freedvSquelch.threshold));
-      }
-      sendCatLog(`[FreeDV] Auto-started for mode ${m} (codec ${codecMode})`);
-      // Mute ECHOCAT audio so user only hears decoded FreeDV speech (not raw USB)
-      _freedvAudioMuted = true;
-      applyFreedvAudioMute();
-      sendCatLog('[FreeDV] Muted ECHOCAT audio');
-      // Tell renderer to start RX audio capture
-      if (win && !win.isDestroyed()) win.webContents.send('freedv-auto-start', codecMode);
-    }
+    // Start FreeDV engine if not already running (one start for every surface)
+    if (!freedvEngine) startFreedvEngine(freedvCodecFor(m), `for mode ${m}`);
     // Override mode for the radio. Two independent dimensions:
     //
     //  freedvUseDataMode (default true): DATA sideband (DIGU/DIGL,
@@ -40980,16 +41081,8 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin, purpose } = {}) {
       mode = upperSideband ? 'USB' : 'LSB';
     }
   } else if (!isFreedvMode && freedvEngine) {
-    // Tuned away from FreeDV — stop the engine
-    sendCatLog('[FreeDV] Auto-stopped (tuned to non-FreeDV mode)');
-    freedvEngine.stop();
-    freedvEngine = null;
-    pushActivityState();
-    if (win && !win.isDestroyed()) win.webContents.send('freedv-auto-stop');
-    // Unmute ECHOCAT audio
-    _freedvAudioMuted = false;
-    applyFreedvAudioMute();
-    sendCatLog('[FreeDV] Unmuted ECHOCAT audio');
+    // Tuned away from FreeDV: stop the engine (unmutes ECHOCAT audio)
+    stopFreedvEngine('tuned to a non-FreeDV mode');
   }
 
   if (settings.enableRotor && settings.rotorActive !== false && settings.rotorMode !== 'manual' && brng != null && !isNaN(brng)) {
@@ -51722,6 +51815,7 @@ function cloudShackNotice(text, kind) {
     if (has('enableFreedv')) {
       if (settings.enableFreedv) connectFreedvReporter();
       else disconnectFreedvReporter();
+      pushFreedvStatus(true); // ECHOCAT's FreeDV strip says on or off
     }
 
     // Reconnect PSKReporter if settings changed (or auto-enable for FreeDV)
@@ -53732,37 +53826,11 @@ function cloudShackNotice(text, kind) {
   // --- FreeDV Digital Voice IPC ---
 
   ipcMain.on('freedv-start', (_e, mode) => {
-    if (freedvEngine) freedvEngine.stop();
-    freedvEngine = new FreedvEngine();
-      pushActivityState();
-    freedvEngine.on('rx-speech', (data) => {
-      if (win && !win.isDestroyed()) win.webContents.send('freedv-rx-speech', data);
-    });
-    freedvEngine.on('tx-modem', (data) => {
-      if (win && !win.isDestroyed()) win.webContents.send('freedv-tx-modem', data);
-    });
-    freedvEngine.on('sync', (data) => {
-      if (win && !win.isDestroyed()) win.webContents.send('freedv-sync', data);
-      if (remoteServer && remoteServer.running) {
-        remoteServer.sendToClient({ type: 'freedv-sync', ...data });
-      }
-    });
-    freedvEngine.on('status', (data) => {
-      sendCatLog(`[FreeDV] ${data.state} mode=${data.mode}`);
-      if (win && !win.isDestroyed()) win.webContents.send('freedv-status', data);
-    });
-    freedvEngine.on('error', (data) => {
-      sendCatLog(`[FreeDV] Error: ${data.message}`);
-    });
-    freedvEngine.start(mode);
-    if (settings.freedvSquelch) {
-      freedvEngine.setSquelch(!!settings.freedvSquelch.enabled, Number(settings.freedvSquelch.threshold));
-    }
+    startFreedvEngine(freedvCodecFor(mode), 'from this window');
   });
 
   ipcMain.on('freedv-stop', () => {
-    if (freedvEngine) { freedvEngine.stop(); freedvEngine = null;
-    pushActivityState(); }
+    stopFreedvEngine('from this window');
   });
 
   ipcMain.on('freedv-set-mode', (_e, mode) => {
