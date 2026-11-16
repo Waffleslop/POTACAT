@@ -1,0 +1,68 @@
+name: FreeDV natives
+
+# FreeDV (codec2) and RADE V1 must build, load and decode a loopback over on
+# every OS a release ships for (#642). Until 1.14.6 every Mac and Linux
+# release shipped with no FreeDV at all: the release job's build-natives step
+# is continue-on-error, so a broken codec2/Opus build passed in silence.
+# This job runs on any change that can break them and fails loudly.
+
+on:
+  pull_request:
+    paths:
+      - 'lib/freedv_native/**'
+      - 'lib/rade_native/**'
+      - 'lib/freedv-worker.js'
+      - 'scripts/build-natives.js'
+      - 'scripts/build-rade.js'
+      - 'scripts/check-freedv-natives.js'
+      - 'test/rade-native-test.js'
+      - 'package-lock.json'
+      - '.github/workflows/freedv-natives.yml'
+      - '.github/workflows/release.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'lib/freedv_native/**'
+      - 'lib/rade_native/**'
+      - 'scripts/build-natives.js'
+      - 'scripts/build-rade.js'
+      - 'scripts/check-freedv-natives.js'
+      - '.github/workflows/freedv-natives.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: freedv-natives (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            arch: x64
+          - os: macos-15
+            arch: arm64
+          - os: macos-15-intel
+            arch: x64
+          - os: ubuntu-22.04
+            arch: x64
+          - os: ubuntu-22.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies (no install scripts; only node-gyp is needed)
+        run: npm ci --ignore-scripts
+      - name: Build freedv_native (codec2)
+        working-directory: lib/freedv_native
+        run: npx node-gyp rebuild --arch=${{ matrix.arch }}
+      - name: Build rade_native (Opus + RADE V1)
+        run: node scripts/build-rade.js --arch=${{ matrix.arch }}
+      - name: Both addons load and decode a loopback over
+        shell: bash
+        run: node scripts/check-freedv-natives.js --expect-arch=${{ matrix.arch }}
+      - name: RADE V1 native test (fails if the addon is missing)
+        shell: bash
+        run: POTACAT_REQUIRE_RADE_NATIVE=1 node test/rade-native-test.js

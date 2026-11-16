@@ -608,10 +608,25 @@
     wfStartedAt = Date.now(); wfLastFrameAt = 0; wfLastSoundAt = 0; wfCaptureErr = '';
     if (!wfNoAudioTimer) wfNoAudioTimer = setInterval(wfNoAudioRender, 1000);
   }
+  // The modem's receive input level beside Busy/Clear (lib/winlink-wf-audio.js
+  // inputLevel): the same frames the waterfall draws, peak held 0.5 s, shown
+  // ~3 times a second; held still while we transmit (that is our own audio).
+  var inHold = new WinlinkWfAudio.PeakHold(), inLastRender = 0;
+  function inputLevelRender(peak) {
+    var v = WinlinkWfAudio.inputLevel(peak);
+    var el = $('wl-wf-input');
+    el.className = 'wl-input ' + v.state;
+    if (el.textContent !== v.text) el.textContent = v.text;
+    el.title = v.title;
+    el.hidden = !v.text;
+  }
   function wfNoteFrame(pcm) {
     var now = Date.now();
     wfLastFrameAt = now;
     if (WinlinkWfAudio.hasSound(pcm)) wfLastSoundAt = now;
+    if (state && state.session && state.session.ptt) return;
+    var pk = inHold.note(WinlinkWfAudio.framePeak(pcm), now);
+    if (now - inLastRender >= 300) { inLastRender = now; inputLevelRender(pk); }
   }
   function wfNoAudioRender() {
     var el = $('wl-wf-noaudio');
@@ -622,6 +637,7 @@
     });
     if (el.textContent !== text) el.textContent = text;
     el.hidden = !text;
+    if (text) inputLevelRender(0); // no audio: the line above says why, the readout steps aside
   }
   var wfRe = new Float32Array(WF_N), wfIm = new Float32Array(WF_N), wfWin = null, wfMags = new Float32Array(WF_BINS);
 
@@ -668,7 +684,7 @@
     fft(wfRe, wfIm);
     for (var b = 0; b < WF_BINS; b++) wfMags[b] = Math.log(wfRe[b] * wfRe[b] + wfIm[b] * wfIm[b] + 1e-12);
     busyUpdate(wfMags); // on every line, before any averaging
-    if (wfRemote && wfMode === 'capture') window.api.spectrumMags(Array.from(wfMags));
+    if (wfRemote && wfMode === 'capture') window.api.spectrumMags(Array.from(wfMags), inHold.peak); // + the held input peak for the devices' readout
     if (!wf || !$('wl-wf').classList.contains('show')) return;
     if (wfSpeed >= 60) { wf.pushFrame(wfMags); return; }
     for (var k = 0; k < WF_BINS; k++) wfAvg[k] += wfMags[k];
@@ -770,6 +786,7 @@
     wfMode = 'none';
     if (wfNoAudioTimer) { clearInterval(wfNoAudioTimer); wfNoAudioTimer = null; }
     $('wl-wf-noaudio').hidden = true;
+    inputLevelRender(0);
     $('wl-wf').classList.remove('show');
     if (!keepShowButton) $('wl-wf-show').classList.remove('show');
   }

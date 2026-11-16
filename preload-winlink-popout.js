@@ -41,7 +41,7 @@ contextBridge.exposeInMainWorld('api', {
   // rig this window is the only thing hearing the radio, so it relays its
   // magnitudes to main (which decides Busy/Clear and pushes the frames).
   onRemoteWatch: (cb) => ipcRenderer.on('winlink-remote-watch', (_e, on) => cb(!!on)),
-  spectrumMags: (mags) => ipcRenderer.send('winlink-spectrum-mags', mags),
+  spectrumMags: (mags, inputPeak) => ipcRenderer.send('winlink-spectrum-mags', mags, inputPeak),
   onAudioFrame: (cb) => {
     // main sends frames through audioSafeSend, which bounds its backlog on
     // ACKs from here (batched, with a periodic flush). Without them main

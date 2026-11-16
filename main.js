@@ -2029,6 +2029,10 @@ let _winlinkWatchAudio = false;      // the mail window shows the waterfall
 const WinlinkSpectrum = require('./lib/winlink-spectrum');
 let _winlinkRemoteWatchers = 0;
 let _winlinkSpecAcc = null;
+// The modem's input level for the watching devices (#669): the same rule as the
+// mail window's readout beside Busy/Clear (lib/winlink-wf-audio.js), peak held 0.5 s.
+const WinlinkWfAudio = require('./lib/winlink-wf-audio');
+const _winlinkRemoteInHold = new WinlinkWfAudio.PeakHold();
 let _winlinkBusy = null; // WinlinkSpectrum.BusyDetector for the band the devices watch, rebuilt when it changes
 let _winlinkSpecLastAt = 0;
 let _winlinkPreviewReturnTo = null;  // dial/mode before a gateway pick tuned the radio; kept across attempts until the mail window closes (#187)
@@ -12555,12 +12559,16 @@ function winlinkFeedRx(pcm, sampleRate, { fromBridge = false } = {}) {
   if (_winlinkWatchAudio && winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) {
     audioSafeSend(winlinkPopoutWin.webContents, 'winlink-audio-frame', { pcm, sampleRate });
   }
-  if (_winlinkRemoteWatchers > 0) winlinkSpecAcc().push(pcm, sampleRate);
+  if (_winlinkRemoteWatchers > 0) {
+    // Held still while we transmit: that is our own audio, not the band's.
+    if (!winlinkTxActive) _winlinkRemoteInHold.note(WinlinkWfAudio.framePeak(pcm), Date.now());
+    winlinkSpecAcc().push(pcm, sampleRate);
+  }
   if (_winlinkRetry) winlinkRetryFeed(pcm, sampleRate); // the automatic retry's channel check (#425)
 }
 
 function winlinkSpecAcc() {
-  if (!_winlinkSpecAcc) _winlinkSpecAcc = new WinlinkSpectrum.SpectrumAccumulator((m) => winlinkSpectrumPublish(m));
+  if (!_winlinkSpecAcc) _winlinkSpecAcc = new WinlinkSpectrum.SpectrumAccumulator((m) => winlinkSpectrumPublish(m, _winlinkRemoteInHold.peak));
   return _winlinkSpecAcc;
 }
 
@@ -12580,8 +12588,9 @@ function winlinkModemBw() {
  * frame so its 3 s hold is right; frames go out at ~10/s). Fed by main's own
  * audio on the Flex Direct / Icom Network routes, or by the mail window's
  * magnitudes on a sound-device rig (winlink-spectrum-mags IPC).
+ * `inputPeak` = the held input peak (0..1) for inputDb / inputHot; 0 = no audio (null on the wire).
  */
-function winlinkSpectrumPublish(mags) {
+function winlinkSpectrumPublish(mags, inputPeak) {
   if (_winlinkRemoteWatchers <= 0 || !remoteServer || !remoteServer.running) return;
   const now = Date.now();
   const mode = WinlinkModes.pickWinlinkMode(winlinkState.snapshot().modes, settings.winlinkDefaultMode || 'telnet');
@@ -12591,7 +12600,7 @@ function winlinkSpectrumPublish(mags) {
   const v = _winlinkBusy.update(mags, now);
   if (now - _winlinkSpecLastAt < 100 && !v.changed) return;
   _winlinkSpecLastAt = now;
-  remoteServer.broadcastWinlinkSpectrum({ bins: WinlinkSpectrum.wireBins(mags), busy: v.busy, peakDb: v.peakDb, lo: band.lo, hi: band.hi, label: band.label });
+  remoteServer.broadcastWinlinkSpectrum({ bins: WinlinkSpectrum.wireBins(mags), busy: v.busy, peakDb: v.peakDb, lo: band.lo, hi: band.hi, label: band.label, ...WinlinkWfAudio.wireInput(inputPeak) });
 }
 
 function winlinkSetRemoteWatch(count) {
@@ -12599,6 +12608,7 @@ function winlinkSetRemoteWatch(count) {
   if (n === _winlinkRemoteWatchers) return;
   _winlinkRemoteWatchers = n;
   if (!n && _winlinkSpecAcc) _winlinkSpecAcc.reset();
+  if (!n) { _winlinkRemoteInHold.peak = 0; _winlinkRemoteInHold.at = 0; }
   // A sound-device rig's audio only the mail window has: it keeps capturing
   // (even with its own waterfall hidden) and relays magnitudes while a device watches.
   winlinkPopoutSend('winlink-remote-watch', n > 0);
@@ -45420,10 +45430,10 @@ function cloudShackNotice(text, kind) {
   // The mail window's own FFT on a sound-device rig, relayed to watching devices
   // (never on the socket routes — main runs its own FFT there, and two sources
   // would double the frame rate).
-  ipcMain.on('winlink-spectrum-mags', (_e, arr) => {
+  ipcMain.on('winlink-spectrum-mags', (_e, arr, inputPeak) => {
     // Kept for an older mail window; every rig's frames now come from main.
     if (!Array.isArray(arr) || arr.length !== WinlinkSpectrum.MAGS || winlinkSocketAudioRoute()) return;
-    winlinkSpectrumPublish(Float32Array.from(arr, Number));
+    winlinkSpectrumPublish(Float32Array.from(arr, Number), Number(inputPeak) || 0); // the window's held input peak rides along
   });
   // Display preferences of the mail window (speed as the JTCAT pop-out's: slower = averaged, never dropped).
   ipcMain.on('winlink-cmd-pref', (_e, { key, value } = {}) => {

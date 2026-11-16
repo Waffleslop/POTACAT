@@ -72,6 +72,8 @@
       "defines": [
         "CODEC2_MODE_EN_WB=0",
         "_USE_MATH_DEFINES",
+        # glibc math.h hides M_PI under strict -std=c99 without a feature macro
+        "_DEFAULT_SOURCE",
         "GIT_HASH=\"potacat\""
       ],
       "cflags": ["-std=c99", "-O2", "-Wno-unused-variable", "-Wno-unused-function"],

@@ -13,6 +13,13 @@ const path = require('path');
 const os = require('os');
 
 const ROOT = path.join(__dirname, '..', 'lib', 'rade_native');
+
+// --arch=x64|arm64: the target, passed through to node-gyp and, on macOS, to
+// the Opus CMake build (the x64 DMG may be built on an Apple Silicon host;
+// both halves must be the same arch or the link fails or the addon will not
+// load on an Intel Mac). Same flag build-natives.js passes to node-gyp.
+const ARCH = (process.argv.find((a) => a.startsWith('--arch=')) || '').slice(7) || os.arch();
+const MAC_ARCH = { x64: 'x86_64', arm64: 'arm64' }[ARCH];
 const OPUS_SRC = path.join(ROOT, 'opus_src');
 const OPUS_LIB_DIR = path.join(ROOT, 'opus_lib');
 
@@ -37,7 +44,15 @@ function buildOpus() {
 
   const libDir = path.join(OPUS_LIB_DIR, plat.dir);
   const libPath = path.join(libDir, plat.file);
+  const stampPath = libPath + '.arch';
 
+  // A libopus.a left over from another arch (a dev Mac building both DMGs)
+  // links into a wrong-arch addon; rebuild when the stamp does not match.
+  const stamp = fs.existsSync(stampPath) ? fs.readFileSync(stampPath, 'utf8').trim() : null;
+  if (fs.existsSync(libPath) && process.platform !== 'win32' && stamp !== ARCH) {
+    console.log(`[build-rade] Opus library is for ${stamp || 'an unknown arch'}, need ${ARCH}: rebuilding`);
+    fs.rmSync(libPath);
+  }
   if (fs.existsSync(libPath)) {
     console.log(`[build-rade] Opus library exists: ${libPath}`);
     return;
@@ -76,11 +91,16 @@ function buildOpus() {
     '-DBUILD_SHARED_LIBS=OFF',
     '-DBUILD_TESTING=OFF',
     '-DBUILD_PROGRAMS=OFF',
+    // The static library is linked into the shared rade_native.node.
+    '-DCMAKE_POSITION_INDEPENDENT_CODE=ON',
   ];
 
   // Windows: specify x64 architecture
   if (process.platform === 'win32') {
     cmakeArgs.push('-A x64');
+  }
+  if (process.platform === 'darwin' && MAC_ARCH) {
+    cmakeArgs.push(`-DCMAKE_OSX_ARCHITECTURES=${MAC_ARCH}`);
   }
 
   run(`cmake ${cmakeArgs.join(' ')}`);
@@ -113,6 +133,7 @@ function buildOpus() {
   }
 
   fs.copyFileSync(builtLib, libPath);
+  fs.writeFileSync(stampPath, `${ARCH}\n`);
   console.log(`[build-rade] Opus library installed: ${libPath}`);
 
   // Cleanup build directory
@@ -121,13 +142,13 @@ function buildOpus() {
 
 function buildRade() {
   console.log('[build-rade] Building rade_native addon...');
-  run('npx node-gyp rebuild', { cwd: ROOT });
+  run(`npx node-gyp rebuild --arch=${ARCH}`, { cwd: ROOT });
   console.log('[build-rade] rade_native build complete!');
 }
 
 // --- Main ---
 console.log('[build-rade] RADE V1 native addon build');
-console.log(`  Platform: ${process.platform} ${os.arch()}`);
+console.log(`  Platform: ${process.platform} ${os.arch()} (target ${ARCH})`);
 console.log(`  Node: ${process.version}`);
 
 try {

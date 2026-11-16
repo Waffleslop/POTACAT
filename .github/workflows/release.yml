@@ -48,7 +48,13 @@ jobs:
         run: npm ci
       - name: Build native addons
         run: npm run build-natives
-        continue-on-error: true # native build failures don't block the release
+        continue-on-error: true # optional addons may fail; ft8/js8 and FreeDV/RADE are gated by their own steps
+      - name: FreeDV and RADE built, load, and decode a loopback over (#642)
+        # build-natives above is continue-on-error for the optional addons;
+        # FreeDV/RADE are not optional any more. Every Mac and Linux release
+        # until 1.14.6 shipped without them because this step did not exist.
+        shell: bash
+        run: node scripts/check-freedv-natives.js --expect-arch=x64
       - name: Set up MSYS2 (for wsprd)
         uses: msys2/setup-msys2@v2
         with:
@@ -92,6 +98,9 @@ jobs:
         # tries to auto-publish to GitHub. The create-release job handles
         # uploads explicitly so we disable the implicit behavior here.
         run: npx electron-builder --win --publish never
+      - name: The packaged app carries FreeDV and RADE and they load (#642)
+        shell: bash
+        run: node scripts/check-freedv-natives.js --packaged --expect-arch=x64
       - uses: actions/upload-artifact@v4
         with:
           name: dist-windows
@@ -128,7 +137,13 @@ jobs:
         run: npm ci # lockfile-pinned — see build-windows for why
       - name: Build native addons
         run: npm run build-natives
-        continue-on-error: true # freedv/rade are known-broken on mac; ft8 is gated below
+        continue-on-error: true # optional addons may fail; ft8, js8 and FreeDV/RADE are gated below
+      - name: FreeDV and RADE built, load, and decode a loopback over (#642)
+        # build-natives above is continue-on-error for the optional addons;
+        # FreeDV/RADE are not optional any more. Every Mac and Linux release
+        # until 1.14.6 shipped without them because this step did not exist.
+        shell: bash
+        run: node scripts/check-freedv-natives.js --expect-arch=arm64
       - name: Verify ft8_native exists and is arm64
         # Mirror of the x64 job's gate — a missing/wrong-arch FT8 decoder
         # must stop the release rather than ship silent WASM fallback.
@@ -219,6 +234,9 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       - name: Check the macOS bundle carries the files the app reads at run time
         run: node scripts/check-mac-bundle.js
+      - name: The packaged app carries FreeDV and RADE and they load (#642)
+        shell: bash
+        run: node scripts/check-freedv-natives.js --packaged --expect-arch=arm64
       - name: Rename channel file so it survives artifact staging
         # Both mac jobs write "latest-mac.yml" (electron-builder's channel
         # filename is fixed per-OS, NOT per-arch). Staged together, one copy
@@ -261,7 +279,13 @@ jobs:
         run: npm ci # lockfile-pinned — see build-windows for why
       - name: Build native addons (cross-compiled for x64)
         run: npm run build-natives -- --arch=x64
-        continue-on-error: true # freedv/rade are known-broken on mac; ft8 is gated below
+        continue-on-error: true # optional addons may fail; ft8, js8 and FreeDV/RADE are gated below
+      - name: FreeDV and RADE built, load, and decode a loopback over (#642)
+        # build-natives above is continue-on-error for the optional addons;
+        # FreeDV/RADE are not optional any more. Every Mac and Linux release
+        # until 1.14.6 shipped without them because this step did not exist.
+        shell: bash
+        run: node scripts/check-freedv-natives.js --expect-arch=x64
       - name: Verify ft8_native exists and is x86_64
         # ft8_native is load-bearing (FT8 decode speed → TX timing). A wrong-
         # arch or missing .node must STOP the release, not ship a WASM-only
@@ -333,6 +357,9 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       - name: Check the macOS bundle carries the files the app reads at run time
         run: node scripts/check-mac-bundle.js
+      - name: The packaged app carries FreeDV and RADE and they load (#642)
+        shell: bash
+        run: node scripts/check-freedv-natives.js --packaged --expect-arch=x64
       - uses: actions/upload-artifact@v4
         with:
           name: dist-macos-x64
@@ -390,7 +417,13 @@ jobs:
         run: npm ci # lockfile-pinned — see build-windows for why
       - name: Build native addons
         run: npm run build-natives
-        continue-on-error: true
+        continue-on-error: true # optional addons may fail; alsa and FreeDV/RADE are gated below
+      - name: FreeDV and RADE built, load, and decode a loopback over (#642)
+        # build-natives above is continue-on-error for the optional addons;
+        # FreeDV/RADE are not optional any more. Every Mac and Linux release
+        # until 1.14.6 shipped without them because this step did not exist.
+        shell: bash
+        run: node scripts/check-freedv-natives.js --expect-arch=x64
       # Same hard-fail check as the arm64 job — see comments there.
       - name: Confirm alsa_native built + loads + can openCapture
         run: |
@@ -480,6 +513,9 @@ jobs:
         run: node scripts/fetch-cloudflared.js --platform=linux --arch=x64
       - name: Build Linux packages
         run: npx electron-builder --linux --publish never
+      - name: The packaged app carries FreeDV and RADE and they load (#642)
+        shell: bash
+        run: node scripts/check-freedv-natives.js --packaged --expect-arch=x64
       - uses: actions/upload-artifact@v4
         with:
           name: dist-linux
@@ -533,7 +569,13 @@ jobs:
         run: npm ci # lockfile-pinned — see build-windows for why
       - name: Build native addons
         run: npm run build-natives
-        continue-on-error: true
+        continue-on-error: true # optional addons may fail; alsa and FreeDV/RADE are gated below
+      - name: FreeDV and RADE built, load, and decode a loopback over (#642)
+        # build-natives above is continue-on-error for the optional addons;
+        # FreeDV/RADE are not optional any more. Every Mac and Linux release
+        # until 1.14.6 shipped without them because this step did not exist.
+        shell: bash
+        run: node scripts/check-freedv-natives.js --expect-arch=arm64
       # alsa_native is critical for the arm64 build's primary audience
       # (Raspberry Pi / sBitx users). build-natives has continue-on-error
       # for optional addons (FreeDV codec2 etc.), which silently shipped
@@ -625,6 +667,9 @@ jobs:
         run: node scripts/fetch-cloudflared.js --platform=linux --arch=arm64
       - name: Build Linux packages (arm64)
         run: npx electron-builder --linux --arm64 --publish never
+      - name: The packaged app carries FreeDV and RADE and they load (#642)
+        shell: bash
+        run: node scripts/check-freedv-natives.js --packaged --expect-arch=arm64
       - uses: actions/upload-artifact@v4
         with:
           name: dist-linux-arm64
