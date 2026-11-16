@@ -34649,7 +34649,8 @@ function scopeLevelScale() {
     const c = scopeCalibration();
     return Number.isFinite(c.dbmMin) ? { unit: 'dBm', min: c.dbmMin, max: c.dbmMax } : { unit: null, min: 0, max: 255 };
   }
-  if (s.source === 'sdr' || s.source === 'tci') return SdrScope.levelScale();
+  if (s.source === 'sdr') return SdrScope.levelScale();
+  if (s.source === 'tci') return SdrScope.levelScale(); // a TCI server's IQ, the same builder
   // An Icom's levels are on the radio's own scale (Hamlib: 0 = -80 dB, full
   // = 0 dB on a 7300; -100..0 on a 7610), relative to its REF level, so
   // they are labelled "dB (radio)" and never claimed as dBm.
@@ -34677,7 +34678,9 @@ function scopeOverlay() {
     // SDR, the synthetic signal) or the radio (FT-710 / Icom). Both keep it
     // centred on the dial today, so a drag on the trace previews and tunes on
     // release either way; FIX / CURSOR (axis not known) does not drag.
-    owner: yaesuScopeState.kind === 1 || yaesuScopeState.source === 'flex' || yaesuScopeState.source === 'sdr' || yaesuScopeState.source === 'tci' ? 'potacat' : 'radio',
+    // A TCI scope reads 'radio': its window is the server's (its dds), fixed
+    // while the dial moves inside it, like an Icom in Fixed mode.
+    owner: yaesuScopeState.kind === 1 || yaesuScopeState.source === 'flex' || yaesuScopeState.source === 'sdr' ? 'potacat' : 'radio',
     passband: ScopeOverlay.passbandFor({ mode: _currentMode, widthHz: _currentFilterWidth, ...flexEdges }),
     txHz: _currentSplit && _currentFreqOther > 0 ? _currentFreqOther : null,
     bandPlan: dialHz > 0 ? ScopeOverlay.bandPlanFor(dialHz, {
@@ -34769,7 +34772,9 @@ function yaesuScopeNoteFrequency(hz) {
   // An Icom in Fixed mode holds its window still: its centre comes from the
   // sweep header (icomScopeOnSweep), never from the dial.
   // A TCI scope's centre is the server's own (its `dds`), not the dial.
-  if (!tciScopeOn && !(icomScopeOn && yaesuScopeState.anchor === 'fixed')) yaesuScopeState.centerHz = hz;
+  const tciCentre = tciScopeOn ? yaesuScopeState.centerHz : null;
+  if (!(icomScopeOn && yaesuScopeState.anchor === 'fixed')) yaesuScopeState.centerHz = hz;
+  if (tciCentre != null) yaesuScopeState.centerHz = tciCentre;
   if (yaesuScopeState.status === 'stopped') return;
   sdrScopeFollowDial(hz);
   // The pop-out already receives cat-frequency; ECHOCAT wants the axis re-sent, throttled.

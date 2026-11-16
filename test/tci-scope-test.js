@@ -119,8 +119,8 @@ test('main.js: the scope source tci, gated on the TCI rig', () => {
   assert.match(kind, /if \(tciRigTarget\(\) && !\(sdr\.enabled && sdr\.preferSdr\)\) return 'tci';/);
   assert.match(MAIN, /if \(kind === 'tci'\) \{ startTciScope\(\); return; \}/);
   assert.match(MAIN, /if \(tciScopeOn\) \{ stopTciScope\(why\); return; \}/);
-  assert.match(MAIN, /if \(s\.source === 'sdr' \|\| s\.source === 'tci'\) return SdrScope\.levelScale\(\);/);
-  assert.match(MAIN, /if \(!tciScopeOn && !\(icomScopeOn && yaesuScopeState\.anchor === 'fixed'\)\) yaesuScopeState\.centerHz = hz;/, 'the centre is the server\'s, not the dial');
+  assert.match(MAIN, /if \(s\.source === 'tci'\) return SdrScope\.levelScale\(\);/);
+  assert.match(MAIN, /const tciCentre = tciScopeOn \? yaesuScopeState\.centerHz : null;[\s\S]{0,140}if \(tciCentre != null\) yaesuScopeState\.centerHz = tciCentre;/, 'the centre is the server\'s, not the dial');
   assert.match(MAIN, /new SdrScope\.SpectrumBuilder\(\{ sampleRate: rate, fps: 12, float32: true \}\)/);
   assert.match(MAIN, /iq\(payload, rate, center\) \{ if \(tciRig === rig && tciScopeOn\) feedTciScope\(payload, rate, center\); \}/);
 });
