@@ -28994,6 +28994,7 @@ function buildActivationAdifQsos(act) {
     name: c.name || '',
     sig: c.sig || '',
     sigInfo: c.sigInfo || '',
+    myRig: c.myRig || '',
     myGridsquare: c.myGridsquare || '',
   })));
 }
