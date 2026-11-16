@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('api', {
   // #463: exact digital silence since the capture started (macOS microphone permission).
   macMicSilence: (o) => ipcRenderer.send('mac-mic-silence', o),
   onFreedvMute: (cb) => ipcRenderer.on('freedv-mute', (_e, muted) => cb(muted)),
+  // Decoded FreeDV speech for the ECHOCAT track: { samples: Int16Array, rate }
+  onFreedvSpeech: (cb) => ipcRenderer.on('freedv-speech', (_e, frame) => cb(frame)),
   // KiwiSDR / WebSDR audio routed through the WebRTC bridge so mobile clients
   // (which don't have Web Audio) hear SDR audio over the same path as rig
   // audio. Main process sends `kiwi-active` (start/stop) and streams PCM

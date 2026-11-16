@@ -339,11 +339,13 @@ and non-private respectively. The predicate is the thread store's own
 
 | Message | Dir | Purpose |
 |---|---|---|
-| `freedv-start` | C→S | Start the FreeDV engine. |
-| `freedv-stop` | C→S | Stop. |
+| `freedv-start` | C→S | Start the FreeDV engine on the shack (`mode` optional). If FreeDV is off in settings the shack replies with `freedv-status` instead. |
+| `freedv-stop` | C→S | Stop. The radio audio returns to the track. |
 | `freedv-set-mode` | C→S | RADE V1 / 700D / etc. |
-| `freedv-set-tx` | C→S | TX enable. |
-| `freedv-set-squelch` | C→S | Squelch level. |
+| `freedv-set-tx` | C→S | TX enable: `on` (the server also reads `enabled`). FreeDV cannot transmit yet: `on: true` is refused with `ptt-refused { kind: 'freedv', message }` and `tune-blocked { reason }`. |
+| `freedv-set-squelch` | C→S | `{ enabled, threshold }` (dB). |
+| `freedv-sync` | S→C | `{ sync, snr }` on every engine change. ECHOCAT Web uses it; the phone uses `freedv-status`. |
+| `freedv-status` | S→C | `{ state: 'off'\|'starting'\|'running'\|'unavailable', mode, modes[], rx, tx, sync, snr (float dB or null), reason, reasonCode, callsign, callsignAt }`. After every auth-ok and on change; sync/SNR at most 4 per second (a sync flip or a 1 dB SNR move). `reason` is a sentence to show as is; `reasonCode` (`disabled`, `no-decoder`, `too-slow`, `tx-not-built`) is for placement and tests. `tx` is false and `callsign` null until FreeDV transmit exists. Capability `freedv-remote-rx`: decoded FreeDV speech is on the audio track while FreeDV runs (the raw radio audio is muted), at about the level of SSB receive audio. |
 | `set-freedv` | C→S | Master FreeDV on/off toggle. |
 | `freedv-enabled` | S→C | Server tells client whether the FreeDV master toggle is on (sent at startup + on changes). |
 
