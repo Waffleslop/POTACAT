@@ -141,6 +141,8 @@
     .wl-busy { font-weight: 700; padding: 1px 8px; border-radius: 3px; font-size: 11px; min-width: 54px; text-align: center; background: var(--bg-primary); color: var(--text-dim); }
     .wl-busy.clear { background: #1f4d3a; color: #4ecca3; }
     .wl-busy.busy { background: #5a2a1a; color: #ffb27a; }
+    .wl-input { font-size: 12px; font-family: Consolas, "Courier New", monospace; white-space: nowrap; color: var(--text-primary); padding: 1px 6px; border-radius: 3px; }
+    .wl-input.hot { font-weight: 700; color: var(--accent-red-text, var(--accent-red)); background: var(--warn-subtle); box-shadow: inset 0 0 0 1px var(--accent-red-text, var(--accent-red)); }
     .wl-wf-bar input[type=range] { width: 110px; vertical-align: middle; }
     .wl-wf-axis { display: flex; justify-content: space-between; font-family: monospace; font-size: 10px; color: var(--text-dim); padding: 1px 6px; background: var(--bg-secondary); }
     .wl-wf-show { display: none; justify-content: flex-end; padding: 2px 8px; border-top: 1px solid var(--border-primary); background: var(--bg-secondary); flex-shrink: 0; }
@@ -531,6 +533,7 @@
   <div class="wl-wf" id="wl-wf">
     <div class="wl-wf-bar">
       <span class="wl-busy" id="wl-wf-busy">—</span>
+      <span class="wl-input" id="wl-wf-input" hidden></span>
       <span><b id="wl-wf-note">Modem band</b></span>
       <span class="wl-spacer"></span>
       <label>Speed <input type="range" id="wl-wf-speed" min="1" max="60" step="1" value="60"> <span id="wl-wf-speed-val">60</span> lines/s</label>
