@@ -71,7 +71,9 @@ test('main.js: each TCI branch is gated on the TCI rig', () => {
   // Every use of the link outside the TCI block goes through a gate.
   const block = MAIN.slice(MAIN.indexOf('// --- TCI rig: a radio driven'), MAIN.indexOf('// --- TCI (Thetis/ExpertSDR3) panadapter spots ---'));
   const outside = MAIN.replace(block, '');
-  for (const m of outside.matchAll(/tciRig\.(\w+)/g)) assert.fail('tciRig.' + m[1] + ' used outside the TCI block');
+  for (const line of outside.split('\n')) {
+    if (/tciRig\.\w+/.test(line)) assert.ok(/tciRigTarget\(\)/.test(line), 'tciRig used outside the TCI block without a gate: ' + line.trim());
+  }
 });
 
 test('every transmit entry point refuses a TCI rig', () => {

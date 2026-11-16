@@ -115,4 +115,17 @@ async function startFakeTciServer({ dialect = 'zeus', running = true, greet = tr
   };
 }
 
-module.exports = { startFakeTciServer };
+/** A binary RX audio frame: 64-byte header, then float32 samples. */
+function rxAudioFrame(values, { rate = 12000, receiver = 0, type = 1, channels = 1, format = 3 } = {}) {
+  const frame = Buffer.alloc(64 + values.length * 4);
+  frame.writeUInt32LE(receiver, 0);
+  frame.writeUInt32LE(rate, 4);
+  frame.writeUInt32LE(format, 8);
+  frame.writeUInt32LE(values.length, 20);
+  frame.writeUInt32LE(type, 24);
+  frame.writeUInt32LE(channels, 28);
+  values.forEach((v, i) => frame.writeFloatLE(v, 64 + i * 4));
+  return frame;
+}
+
+module.exports = { startFakeTciServer, rxAudioFrame };

@@ -31158,8 +31158,10 @@ async function _buildJtcatCapture(ctx) {
     // JTCAT receiving from the WebSDR (#243): main feeds the engine and sends
     // the same audio here as 12 kHz 'jtcat-vita49-audio' frames.
     var jtcatFromSdr = s.jtcatRxSource === 'websdr';
+    // A Zeus / Thetis rig over TCI: main sends RX1's audio the same way, 12 kHz.
+    var jtcatFromTci = !jtcatFromSdr && s.audioSource === 'tci' && !!(s.catTarget && s.catTarget.type === 'tci');
 
-    if (jtcatFromSdr || s.audioSource === 'smartsdr' || s.audioSource === 'icom-network' || s.audioSource === 'yaesu-lan') {
+    if (jtcatFromSdr || jtcatFromTci || s.audioSource === 'smartsdr' || s.audioSource === 'icom-network' || s.audioSource === 'yaesu-lan') {
       // SmartSDR Direct / Icom Network / Yaesu LAN: JTCAT audio is the PCM stream that
       // main forwards as 'jtcat-vita49-audio' frames — not a Windows
       // audio device. Build a synthetic MediaStream from those frames so
@@ -31186,7 +31188,7 @@ async function _buildJtcatCapture(ctx) {
         if (window.api.jtcatLog) window.api.jtcatLog('[JTCAT] VITA-49 source worklet load failed: ' + (e.message || e));
         throw e;
       }
-      const vita49SourceOptions = jtcatFromSdr
+      const vita49SourceOptions = (jtcatFromSdr || jtcatFromTci)
         ? { sourceRate: 12000 }
         : s.audioSource === 'icom-network'
         ? { sourceRate: 24000, bufferMs: 600, startBufferMs: 150, resumeBufferMs: 200 }
@@ -31203,7 +31205,7 @@ async function _buildJtcatCapture(ctx) {
       jtcatAudioStream = jtcatVita49Dest.stream;
       if (window.api.setJtcatIpAudioReady) window.api.setJtcatIpAudioReady(true);
       if (window.api.jtcatLog) {
-        const label = jtcatFromSdr ? 'WebSDR' : s.audioSource === 'icom-network' ? 'Icom Network audio (RS-BA1)' : 'SmartSDR Direct (VITA-49 dax_rx)';
+        const label = jtcatFromSdr ? 'WebSDR' : jtcatFromTci ? 'TCI (Zeus / Thetis)' : s.audioSource === 'icom-network' ? 'Icom Network audio (RS-BA1)' : 'SmartSDR Direct (VITA-49 dax_rx)';
         const bufferText = s.audioSource === 'icom-network' ? ' with low-latency jitter buffer' : '';
         window.api.jtcatLog(`[JTCAT] Audio source: ${label} via AudioWorklet${bufferText}`);
       }
@@ -31416,7 +31418,7 @@ async function _buildJtcatCapture(ctx) {
     // it. lib/capture-stall.js decides; this resumes or rebuilds. Sound-card
     // capture only: the SmartSDR / Icom-network feed comes from main, and a
     // rebuild here cannot restart it.
-    if (window.CaptureStall && !(jtcatFromSdr || s.audioSource === 'smartsdr' || s.audioSource === 'icom-network' || s.audioSource === 'yaesu-lan')) {
+    if (window.CaptureStall && !(jtcatFromSdr || jtcatFromTci || s.audioSource === 'smartsdr' || s.audioSource === 'icom-network' || s.audioSource === 'yaesu-lan')) {
       jtcatArmStallWatch(audioTrack);
     }
 
