@@ -4,10 +4,16 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { syncSummaryLine, syncErrorLine, backgroundSyncLine, createSyncLogger } = require('../lib/cloud-sync-log');
+const { syncSummaryLine, syncErrorLine, backgroundSyncLine, createSyncLogger, shouldRepullHistory, repullLine } = require('../lib/cloud-sync-log');
+const CloudSyncClient = require('../lib/cloud-sync');
 
 let passed = 0;
-function t(name, fn) { fn(); passed++; console.log('  ok ' + name); }
+const pending = [];
+function t(name, fn) {
+  const r = fn();
+  const done = () => { passed++; console.log('  ok ' + name); };
+  if (r && typeof r.then === 'function') pending.push(r.then(done)); else done();
+}
 
 t('a cycle that changed nothing writes nothing', () => {
   assert.strictEqual(syncSummaryLine({ pushed: 0, pulled: 0, conflicts: 0 }), null);
@@ -69,4 +75,34 @@ t('cloud-ipc wires all three and never logs the account email', () => {
   assert.ok(!/email/i.test(mod.replace(/never by its email/, '')), 'the log helper never touches an email');
 });
 
-console.log(`cloud-sync-log-test: ${passed} passed`);
+t('Sync Now re-pulls the history when this log is missing it (2 here, 360 in the Cloud)', () => {
+  assert.strictEqual(shouldRepullHistory({ cloudCount: 360, localCount: 2, hasCursor: true }), true);
+  assert.strictEqual(shouldRepullHistory({ cloudCount: 360, localCount: 360, hasCursor: true }), false);
+  assert.strictEqual(shouldRepullHistory({ cloudCount: 300, localCount: 360, hasCursor: true }), false);
+  assert.strictEqual(shouldRepullHistory({ cloudCount: 360, localCount: 2, hasCursor: false }), false, 'no cursor: the pull is already the whole history');
+  assert.strictEqual(shouldRepullHistory({ cloudCount: null, localCount: 2, hasCursor: true }), false, 'an unknown count changes nothing');
+  assert.strictEqual(shouldRepullHistory({ cloudCount: 360, localCount: null, hasCursor: true }), false);
+  assert.strictEqual(repullLine({ cloudCount: 360, localCount: 2 }),
+    "[Cloud] Sync Now: this log holds 2 QSOs and the Cloud 360: pulling the account's whole history again");
+});
+
+t('resetPullCursor makes the next pull start from the beginning', async () => {
+  const c = new CloudSyncClient({ apiBase: 'https://example.invalid', lastSyncTimestamp: '2026-11-15T00:00:00Z' });
+  const paths = [];
+  c._authedRequest = async (m, p) => { paths.push(p); return { qsos: [], hasMore: false }; };
+  return (async () => {
+    await c.pull();
+    c.resetPullCursor();
+    await c.pull();
+    assert.match(paths[0], /&since=/);
+    assert.doesNotMatch(paths[1], /&since=/);
+  })();
+});
+
+t('cloud-ipc runs the check before Sync Now and clears the saved cursor too', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'cloud-ipc.js'), 'utf8');
+  assert.match(src, /async function syncNow\(\) \{[\s\S]{0,200}await repullIfHistoryMissing\(sync\);[\s\S]{0,80}sync\.sync\(view, getSyncCallbacks\(\)\)/);
+  assert.match(src, /sync\.resetPullCursor\(\);\s*settings\.cloudLastSyncTimestamp = null;/);
+});
+
+Promise.all(pending).then(() => console.log(`cloud-sync-log-test: ${passed} passed`), (err) => { console.error(err); process.exit(1); });
