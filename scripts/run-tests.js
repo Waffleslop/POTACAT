@@ -470,6 +470,7 @@ const TESTS = [
   'test/pota-sync-log-test.js', // #406: the pota.app Connect step logs names and lengths, never a value
   'test/qso-expand-test.js',
   'test/qso-my-rig-test.js', // #633 (w5lee): the radio a contact was logged on is ADIF MY_RIG; Logbook Rig column
+  'test/qso-log-source-test.js', // #634 (w5lee): ECHOCAT contacts carry APP_POTACAT_LOG_SOURCE; Logbook Source column
   'test/dxcc-codes-test.js', // #554: logged contacts carry the ADIF DXCC entity number
   'test/sota-chase-test.js', // #191: a POTA-primary record carrying a sotaRef uploads its SOTA chase
   'test/spot-programs-test.js', // POTA + SOTA spot: both pills, summit in the Ref column

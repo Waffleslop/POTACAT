@@ -96,6 +96,8 @@ const ALL_COLUMNS = [
   { key: 'CALL', label: 'Callsign', sort: 'CALL', field: 'CALL', w: 92, get: (q) => q.CALL || '' },
   { key: 'FREQ', label: 'Freq', sort: 'FREQ', field: 'FREQ', w: 72, get: (q) => q.FREQ || '' },
   { key: 'MODE', label: 'Mode', sort: 'MODE', field: 'MODE', w: 56, get: (q) => qsoMode(q) },
+  { key: 'APP_POTACAT_LOG_SOURCE', label: 'Source', sort: 'APP_POTACAT_LOG_SOURCE', w: 85, off: true,
+    get: (q) => q.APP_POTACAT_LOG_SOURCE || '' },
   { key: 'BAND', label: 'Band', sort: 'BAND', w: 52, get: (q) => q.BAND || '' },
   { key: 'TX_PWR', label: 'Pwr', sort: 'TX_PWR', field: 'TX_PWR', w: 46, get: (q) => q.TX_PWR || '' },
   // ADIF MY_RIG: the radio this contact was logged on (#633). Off by default:
