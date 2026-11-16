@@ -28,6 +28,7 @@ const TESTS = [
   'test/echocat-connect-diet-test.js',
   'test/cw-live-watchdog-test.js',
   'test/yaesu-cw-text-test.js',
+  'test/ftx1-cw-stuck-stop-test.js',
   'test/yaesu-audit-ft991a-test.js', // Yaesu CAT audit: FT-991A widths, AGC, ATT, PROC, power floor, CW text, RTTY-U
   'test/cw-stuck-wiring-test.js',
   'test/cw-tx-lockout-timer-test.js', // #583: the TX lockout ends when its timer fires a millisecond early
