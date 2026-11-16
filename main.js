@@ -16382,6 +16382,9 @@ const QRZ_LOG_WAIT_MS = 2500;
 async function logContact(entry, opts) {
   opts = opts || {};
   if (!entry || !String(entry.callsign || '').trim()) return { success: false, error: 'Missing callsign', records: [] };
+  // Capture the rig before the QRZ lookup. An external logger supplies its own rig.
+  const myRig = entry.myRig || (opts.origin === 'wsjtx-bridge' || isRemoteMode()
+    ? '' : stationSetupRigById()?.name);
   const calls = QsoExpand.splitList(entry.callsign);
   const infos = new Map();
   // QRZ fills names and places, but it must never hold up the save: a slow
@@ -16405,7 +16408,7 @@ async function logContact(entry, opts) {
   const myRefs = ownRef
     ? [{ sig: String(entry.mySig).toUpperCase(), ref: entry.mySigInfo }]
     : (entry.activation === false ? [] : activationRefsAt(actAt));
-  const e = { ...entry };
+  const e = { ...entry, myRig };
   delete e.activation;
   // Never a record with no MODE (pota.app refuses the file; NA4DQ 2026-10-27).
   // A blank mode takes the radio's voice/CW mode; a data mode cannot name the
@@ -17208,6 +17211,7 @@ function connectWsjtx() {
         rstSent: f.RST_SENT || '',
         rstRcvd: f.RST_RCVD || '',
         txPower: f.TX_PWR || '',
+        myRig: f.MY_RIG || '',
         band: f.BAND || '',
         sig: f.SIG || '',
         sigInfo: f.SIG_INFO || '',
@@ -36490,6 +36494,7 @@ function rawQsoToQsoData(raw) {
     rstSent: raw.RST_SENT || '',
     rstRcvd: raw.RST_RCVD || '',
     txPower: raw.TX_PWR || '',
+    myRig: raw.MY_RIG || '',
     band: raw.BAND || '',
     sig: raw.SIG || '',
     sigInfo: raw.SIG_INFO || '',
@@ -53548,6 +53553,7 @@ function cloudShackNotice(text, kind) {
           state: q.STATE || '',
           sig: q.SIG || '',
           sigInfo: q.SIG_INFO || '',
+          myRig: q.MY_RIG || '',
           myGridsquare: q.MY_GRIDSQUARE || '',
         });
       }
