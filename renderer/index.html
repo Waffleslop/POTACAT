@@ -1982,6 +1982,19 @@
             </div>
           </details>
         </div>
+        <label class="radio-label"><input type="radio" name="radio-type" value="tci"> Zeus or Thetis (TCI server)</label>
+        <div id="rig-tci-config" class="radio-sub hidden">
+          <label>Program: <select id="rig-tci-server">
+            <option value="zeus">Zeus</option>
+            <option value="thetis">Thetis</option>
+          </select></label>
+          <label>Host: <input type="text" id="rig-tci-host" value="127.0.0.1" placeholder="127.0.0.1"></label>
+          <label>TCI port: <input type="number" id="rig-tci-port" value="40001" min="1" max="65535"></label>
+          <label class="checkbox-label"><input type="checkbox" id="rig-tci-auto-start" checked> Start the receiver when POTACAT connects</label>
+          <button type="button" id="rig-tci-check" class="rig-action-btn">Test connection</button>
+          <span id="rig-tci-result" role="status" aria-live="polite" style="font-size:12px;"></span>
+          <span class="help-text">POTACAT tunes the radio, follows its dial and sets its receive controls through TCI. Transmitting through TCI comes in a later version.</span>
+        </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="tcpcat"> IP Radio (TCP CAT)</label>
         <div id="tcpcat-config" class="radio-sub hidden">
           <span class="help-text" style="font-size:12px;">Connect to any radio with TCP CAT — Flex on a custom port, or other radios that speak raw Kenwood-style ASCII over TCP with no authentication. For an Elecraft K4 over the network use "K4 Remote (network)" below instead — the K4 uses a different framed + authenticated protocol.</span>
@@ -5293,6 +5306,19 @@
             <option value="5005">Slice D (TCP :5005)</option>
           </select></label>
         </div>
+        <label class="radio-label"><input type="radio" name="welcome-radio-type" value="tci"> Zeus or Thetis (TCI server)</label>
+        <div id="welcome-tci-config" class="radio-sub hidden">
+          <label>Program: <select id="welcome-tci-server">
+            <option value="zeus">Zeus</option>
+            <option value="thetis">Thetis</option>
+          </select></label>
+          <label>Host: <input type="text" id="welcome-tci-host" value="127.0.0.1" placeholder="127.0.0.1"></label>
+          <label>TCI port: <input type="number" id="welcome-tci-port" value="40001" min="1" max="65535"></label>
+          <label class="checkbox-label"><input type="checkbox" id="welcome-tci-auto-start" checked> Start the receiver when POTACAT connects</label>
+          <button type="button" id="welcome-tci-check" class="rig-action-btn">Test connection</button>
+          <span id="welcome-tci-result" role="status" aria-live="polite" style="font-size:12px;"></span>
+          <span class="help-text">POTACAT tunes the radio, follows its dial and sets its receive controls through TCI. Transmitting through TCI comes in a later version.</span>
+        </div>
         <label class="radio-label"><input type="radio" name="welcome-radio-type" value="tcpcat"> IP Radio (TCP CAT)</label>
         <div id="welcome-tcpcat-config" class="radio-sub hidden">
           <span class="help-text" style="font-size:12px;">Connect to any radio with TCP CAT</span>
@@ -5433,6 +5459,7 @@
   <script src="../lib/pass-wording.js"></script>
   <script src="../lib/net-reminder-row.js"></script>
   <script src="../lib/rig-family.js"></script>
+  <script src="../lib/tci-target.js"></script>
   <script src="../lib/tx-audio-input.js"></script>
   <script src="../lib/ptt-flow-conflict.js"></script>
   <script src="../lib/waterfall-palettes.js"></script>

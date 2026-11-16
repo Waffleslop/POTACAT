@@ -2550,11 +2550,56 @@ function rigAudioSourceOf(rig) {
     ? v : window.RigFamily.defaultAudioSourceFor(fam);
 }
 
+// Zeus / Thetis over TCI (lib/tci-target.js). The Settings rig editor and the
+// Welcome editor share these field helpers; prefix 'rig' or 'welcome'.
+function tciRigFields(prefix) {
+  const el = (k) => document.getElementById(`${prefix}-tci-${k}`);
+  return { server: el('server'), host: el('host'), port: el('port'), autoStart: el('auto-start'), check: el('check'), result: el('result') };
+}
+function readTciRigTarget(f) {
+  return window.TciTarget.normalize({ server: f.server.value, host: f.host.value, port: f.port.valueAsNumber, autoStart: f.autoStart.checked });
+}
+function fillTciRigFields(f, target) {
+  const t = window.TciTarget.normalize(target || {});
+  f.server.value = t.server;
+  f.host.value = t.host;
+  f.port.value = t.port;
+  f.autoStart.checked = t.autoStart;
+  f.result.textContent = '';
+}
+function wireTciRigFields(f) {
+  if (!f.server) return;
+  f.server.addEventListener('change', () => {
+    f.port.value = window.TciTarget.SERVERS[f.server.value].port;
+    f.result.textContent = '';
+  });
+  f.check.addEventListener('click', async () => {
+    const target = readTciRigTarget(f);
+    const bad = window.TciTarget.validate(target);
+    if (bad) { f.result.textContent = bad; return; }
+    f.check.disabled = true;
+    f.result.textContent = `Checking ${window.TciTarget.describe(target)}...`;
+    try {
+      const r = await window.api.probeTciRig(target);
+      f.result.textContent = r && r.ok ? 'The TCI server is ready.' : ((r && r.error) || 'No answer from the TCI server.');
+    } catch (err) {
+      f.result.textContent = err.message;
+    } finally {
+      f.check.disabled = false;
+    }
+  });
+}
+const rigTciFields = tciRigFields('rig');
+const welcomeTciFields = tciRigFields('welcome');
+wireTciRigFields(rigTciFields);
+wireTciRigFields(welcomeTciFields);
+
 function updateRadioSubPanels() {
   const type = getSelectedRadioType();
   rebuildAudioSourceOptions();
   flexConfig.classList.toggle('hidden', type !== 'flex');
   tcpcatConfig.classList.toggle('hidden', type !== 'tcpcat');
+  document.getElementById('rig-tci-config').classList.toggle('hidden', type !== 'tci');
   if (k4networkConfig) k4networkConfig.classList.toggle('hidden', type !== 'k4network');
   serialcatConfig.classList.toggle('hidden', type !== 'serialcat');
   icomConfig.classList.toggle('hidden', type !== 'icom');
@@ -2612,8 +2657,11 @@ function updateFlexStatus() {
 
 async function populateRadioSection(currentTarget) {
   hamlibFieldsLoaded = false;
+  fillTciRigFields(rigTciFields, currentTarget && currentTarget.type === 'tci' ? currentTarget : null);
   if (!currentTarget) {
     setRadioType('flex');
+  } else if (currentTarget.type === 'tci') {
+    setRadioType('tci');
   } else if (currentTarget.type === 'tcp') {
     // Check if it matches a standard Flex slice (localhost + 5002-5005)
     const isFlexSlice = window.RigFamily.familyFromCatTarget(currentTarget) === 'flex';
@@ -3189,6 +3237,7 @@ function shortSerialPath(path) {
 
 function describeRigTarget(target) {
   if (!target) return 'Not configured';
+  if (target.type === 'tci') return window.TciTarget.describe(target);
   if (target.type === 'tcp') {
     const host = target.host || '127.0.0.1';
     const port = target.port || 5002;
@@ -3344,6 +3393,7 @@ function renderRigList(rigs, activeRigId) {
 
 function buildCatTargetFromForm() {
   const radioType = getSelectedRadioType();
+  if (radioType === 'tci') return readTciRigTarget(rigTciFields);
   if (radioType === 'flex') {
     // POTACAT talks to the radio directly on 4992; this CAT target is the
     // SmartSDR-Win Kenwood shim (port 5002+slice), used only to DETECT when
@@ -3826,6 +3876,10 @@ async function saveRigEditor() {
   const name = setRigName.value.trim() || 'Unnamed Rig';
   const rigCatLabelVal = (document.getElementById('set-rig-cat-label')?.value || '').trim().toUpperCase().slice(0, 4);
   const catTarget = buildCatTargetFromForm();
+  if (catTarget && catTarget.type === 'tci') {
+    const bad = window.TciTarget.validate(catTarget);
+    if (bad) { rigTciFields.result.textContent = bad; return false; }
+  }
   const model = rigModelSelect ? rigModelSelect.value || null : null;
 
   // The SCU-LAN10 spec covers three radios; anything else has no SCU-LAN10.
@@ -27285,6 +27339,7 @@ function updateWelcomeRadioSubPanels() {
   const type = getWelcomeRadioType();
   document.getElementById('welcome-flex-config').classList.toggle('hidden', type !== 'flex');
   document.getElementById('welcome-tcpcat-config').classList.toggle('hidden', type !== 'tcpcat');
+  document.getElementById('welcome-tci-config').classList.toggle('hidden', type !== 'tci');
   document.getElementById('welcome-serialcat-config').classList.toggle('hidden', type !== 'serialcat');
   document.getElementById('welcome-icom-config').classList.toggle('hidden', type !== 'icom');
   document.getElementById('welcome-hamlib-config').classList.toggle('hidden', type !== 'hamlib');
@@ -27357,6 +27412,7 @@ async function loadWelcomeHamlibFields() {
 
 function buildWelcomeCatTarget() {
   const type = getWelcomeRadioType();
+  if (type === 'tci') return readTciRigTarget(welcomeTciFields);
   if (type === 'flex') {
     return { type: 'tcp', host: '127.0.0.1', port: parseInt(document.getElementById('welcome-flex-slice').value, 10) };
   } else if (type === 'tcpcat') {
@@ -27446,6 +27502,7 @@ document.querySelectorAll('input[name="welcome-radio-type"]').forEach((btn) => {
 });
 
 document.getElementById('welcome-rig-add-btn').addEventListener('click', () => {
+  fillTciRigFields(welcomeTciFields, null);
   welcomeHamlibLoaded = false;
   welcomeSerialcatLoaded = false;
   document.getElementById('welcome-rig-editor').classList.remove('hidden');
@@ -27464,6 +27521,10 @@ document.getElementById('welcome-rig-cancel-btn').addEventListener('click', () =
 document.getElementById('welcome-rig-save-btn').addEventListener('click', () => {
   const name = document.getElementById('welcome-rig-name').value.trim() || 'My Radio';
   const catTarget = buildWelcomeCatTarget();
+  if (catTarget && catTarget.type === 'tci') {
+    const bad = window.TciTarget.validate(catTarget);
+    if (bad) { welcomeTciFields.result.textContent = bad; return; }
+  }
   welcomeRig = { id: 'rig_' + Date.now(), name, catTarget };
   // Keep POTACAT's audio/tune slice in sync with the chosen Flex CAT shim port
   // (5002→A …) so a non-A pick doesn't leave audio on slice A while CAT targets
