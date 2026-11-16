@@ -27491,7 +27491,13 @@ function connectRemote() {
 
   remoteServer.on('ptt', ({ state }) => {
     const _pttT0 = Date.now(); // → ptt-applied latency reply below
+    // One line per press saying whether any microphone audio arrived from the
+    // device while the radio was keyed (the bridge's TX peak meter fed the VFO
+    // window and the phone, never the log). "PTT works but no modulation" is
+    // either this line saying SILENT, or the output device named above it.
+    noteRemoteTxPress(!!state);
     // A TCI rig: the phone's voice goes over the TCI link (lib/tci-tx.js).
+    // A release ends only the voice over, never a JTCAT one.
     if (tciRigTarget()) {
       const why = tciRigVoicePtt(!!state);
       if (why) {
@@ -27501,11 +27507,6 @@ function connectRemote() {
       remoteServer.sendToClient({ type: 'ptt-applied', state: !!state && !why, ms: Date.now() - _pttT0 });
       return;
     }
-    // One line per press saying whether any microphone audio arrived from the
-    // device while the radio was keyed (the bridge's TX peak meter fed the VFO
-    // window and the phone, never the log). "PTT works but no modulation" is
-    // either this line saying SILENT, or the output device named above it.
-    noteRemoteTxPress(!!state);
     // FT8 PTT is engine-owned. A remote voice-PTT *release* must not cut an
     // in-progress engine transmission out from under the rig — the engine keys
     // via handleRemotePtt(true) from tx-start and releases on its own schedule

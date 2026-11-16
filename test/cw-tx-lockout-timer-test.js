@@ -60,6 +60,8 @@ function harness() {
   vm.runInContext(`
     let _remoteTxState = false;
     let _cwTxLockoutUntilMs = 0;
+    let tciRig = null; // #195: a TCI rig's own over also counts as transmitting
+    function tciRigTarget() { return null; }
     let _cwTxLockoutTimer = null;
     ${isTx}
     function _broadcastEffectiveTxState() { h.broadcasts.push(_isEffectivelyTransmitting()); }

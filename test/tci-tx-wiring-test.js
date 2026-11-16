@@ -63,8 +63,9 @@ test('the POTACAT gate: SWR, Guest Pass, CW, the SDR, and voice privileges', () 
 
 test('ECHOCAT voice: the TCI branch answers first, refusals release the phone', () => {
   const ptt = MAIN.slice(MAIN.indexOf("remoteServer.on('ptt', ({ state }) => {"));
-  const head = ptt.slice(0, 900);
-  assert.match(head, /if \(tciRigTarget\(\)\) \{\s*const why = tciRigVoicePtt\(!!state\);/);
+  const head = ptt.slice(0, 3000);
+  assert.match(head, /noteRemoteTxPress\(!!state\);[\s\S]*?if \(tciRigTarget\(\)\) \{\s*const why = tciRigVoicePtt\(!!state\);/, 'after the press diagnostic, before the FT8 guard');
+  assert.ok(head.indexOf('tciRigVoicePtt') < head.indexOf('state === false && ft8Engine && ft8Engine._txActive'));
   assert.match(head, /remoteServer\.forcePttRelease\(why\);/);
   const chunk = MAIN.slice(MAIN.indexOf("ipcMain.on('dax-tx-chunk', (_e, buf) => {"));
   assert.match(chunk.slice(0, 400), /if \(tciRigTarget\(\) && settings\.audioSource === 'tci'\) \{ tciRigVoiceChunk\(buf\); return; \}/);
