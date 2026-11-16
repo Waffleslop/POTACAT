@@ -684,7 +684,7 @@
     fft(wfRe, wfIm);
     for (var b = 0; b < WF_BINS; b++) wfMags[b] = Math.log(wfRe[b] * wfRe[b] + wfIm[b] * wfIm[b] + 1e-12);
     busyUpdate(wfMags); // on every line, before any averaging
-    if (wfRemote && wfMode === 'capture') window.api.spectrumMags(Array.from(wfMags));
+    if (wfRemote && wfMode === 'capture') window.api.spectrumMags(Array.from(wfMags), inHold.peak); // + the held input peak for the devices' readout
     if (!wf || !$('wl-wf').classList.contains('show')) return;
     if (wfSpeed >= 60) { wf.pushFrame(wfMags); return; }
     for (var k = 0; k < WF_BINS; k++) wfAvg[k] += wfMags[k];
