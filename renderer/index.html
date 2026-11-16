@@ -1764,7 +1764,7 @@
         </select>
       </label>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-freedv"> FreeDV Digital Voice</label>
-      <span class="help-text" style="margin-left:12px;display:block;">Receives FreeDV digital voice: click a FreeDV spot to decode it. Transmit is coming in a later update; until then PTT is off in FreeDV modes. The decoder is in the Windows build today; Mac and Linux are being fixed.</span>
+      <span class="help-text" style="margin-left:12px;display:block;">Receives FreeDV digital voice: click a FreeDV spot to decode it. Transmit is coming in a later update; until then PTT is off in FreeDV modes.</span>
       <label class="checkbox-label" style="margin-left:12px;"><input type="checkbox" id="set-freedv-use-data-mode" checked> Switch radio to DATA mode (DIGU/DIGL) for FreeDV</label>
       <span class="help-text" style="margin-left:24px;display:block;">Uncheck for older Yaesu rigs (FTDX3000, FT-450, etc.) where DATA mode caps IF bandwidth at 2.4 kHz — FreeDV needs ~3 kHz. Off keeps the radio in plain USB/LSB; route USB CODEC audio at the rig.</span>
       <label style="margin-left:12px;display:block;margin-top:6px;">FreeDV sideband:
@@ -1993,7 +1993,7 @@
           <label class="checkbox-label"><input type="checkbox" id="rig-tci-auto-start" checked> Start the receiver when POTACAT connects</label>
           <button type="button" id="rig-tci-check" class="rig-action-btn">Test connection</button>
           <span id="rig-tci-result" role="status" aria-live="polite" style="font-size:12px;"></span>
-          <span class="help-text">POTACAT tunes the radio, follows its dial and sets its receive controls through TCI. Transmitting through TCI comes in a later version.</span>
+          <span class="help-text">POTACAT tunes the radio, follows its dial and sets its receive controls through TCI. With Zeus it also transmits FT8 and the other digital modes from JTCAT, and voice from ECHOCAT; the PTT button and CW here do not key it yet. Thetis is receive only until a Thetis owner has confirmed transmit.</span>
         </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="tcpcat"> IP Radio (TCP CAT)</label>
         <div id="tcpcat-config" class="radio-sub hidden">
@@ -5317,7 +5317,7 @@
           <label class="checkbox-label"><input type="checkbox" id="welcome-tci-auto-start" checked> Start the receiver when POTACAT connects</label>
           <button type="button" id="welcome-tci-check" class="rig-action-btn">Test connection</button>
           <span id="welcome-tci-result" role="status" aria-live="polite" style="font-size:12px;"></span>
-          <span class="help-text">POTACAT tunes the radio, follows its dial and sets its receive controls through TCI. Transmitting through TCI comes in a later version.</span>
+          <span class="help-text">POTACAT tunes the radio, follows its dial and sets its receive controls through TCI. With Zeus it also transmits FT8 and the other digital modes from JTCAT, and voice from ECHOCAT; the PTT button and CW here do not key it yet. Thetis is receive only until a Thetis owner has confirmed transmit.</span>
         </div>
         <label class="radio-label"><input type="radio" name="welcome-radio-type" value="tcpcat"> IP Radio (TCP CAT)</label>
         <div id="welcome-tcpcat-config" class="radio-sub hidden">
