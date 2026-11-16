@@ -2066,6 +2066,11 @@ const TciTarget = require('./lib/tci-target');
 let tciRig = null;              // the open link, or null
 let tciRigReconnectTimer = null;
 let tciRigDial = 0;
+// The band scope from a TCI rig's IQ stream (startTciScope).
+let tciScopeOn = false;
+let tciScopeBuilder = null;
+let tciScopeWatchdog = null;
+let tciScopeLastFrame = 0;
 const TCI_TX_REFUSAL = 'Transmitting through TCI is not available in this version of POTACAT';
 let tciPushTimer = null; // throttle timer for TCI spot pushes
 let agClient = null; // 4O3A Antenna Genius client
@@ -24348,6 +24353,8 @@ function tciRigCaps() {
     rfgain: rig ? rig.rfGainAvailable : true,
     filter: !!band, filterType: band ? 'arbitrary' : 'none',
     squelch: !!(rig && rig.squelchAvailable),
+    // The band scope from the server's IQ stream (startTciScope).
+    nativeScope: 'tci',
     // No transmit controls until TCI transmit lands.
     txpower: false, atu: false, vfo: false, split: false, power: false,
   };
@@ -24377,6 +24384,7 @@ function connectTciRig() {
         if (tciRig !== rig) return;
         if (!up) {
           tciRig = null;
+          if (tciScopeOn) stopTciScope('the TCI link closed');
           sendCatStatus({ connected: false });
           // The program may start after POTACAT: try again until the rig changes.
           if (tciRigTarget()) {
@@ -24388,6 +24396,8 @@ function connectTciRig() {
         sendCatLog(`[TCI] Connected to ${TciTarget.describe(t)}`);
         sendCatStatus({ connected: true });
         broadcastRigState();
+        // A scope that was waiting for the link starts on it.
+        if (yaesuScopeWanted() && scopeSourceKind() === 'tci') startTciScope();
       },
       dial(hz) { if (tciRig !== rig) return; tciRigDial = hz; sendCatFrequency(hz); },
       mode(m) { if (tciRig === rig && m) sendCatMode(m); },
@@ -24400,6 +24410,7 @@ function connectTciRig() {
       rfGain(p) { if (tciRig !== rig) return; if (p != null) _currentRfGain = p; broadcastRigState(); },
       tx(on) { if (tciRig === rig && on) sendCatLog('[TCI] The radio is transmitting (keyed from its own controls)'); },
       audio(pcm) { if (tciRig === rig) tciRigAudio(pcm); },
+      iq(payload, rate, center) { if (tciRig === rig && tciScopeOn) feedTciScope(payload, rate, center); },
     },
   });
   tciRig = rig;
@@ -24474,6 +24485,58 @@ function tciRigAudio(pcm) {
   else if (isJtcatIpAudioReady(win)) audioSafeSend(win.webContents, 'jtcat-vita49-audio', frame);
   if (jtcatManager && jtcatManager.running) jtcatManager.feedAudio('default', pcm);
   else if (ft8Engine && ft8Engine._running) ft8Engine.feedAudio(pcm);
+}
+
+// ── The band scope from a TCI rig's IQ (the SDR scope's builder, float32) ──
+function startTciScope() {
+  if (tciScopeOn) return;
+  tciScopeOn = true;
+  tciScopeBuilder = null;
+  tciScopeLastFrame = Date.now();
+  Object.assign(yaesuScopeState, {
+    source: 'tci', kind: 0, spanCode: null, spanHz: 0, anchor: 'fixed',
+    centerHz: 0, centerOffsetHz: 0, modeCode: null, speed: null, scuLan: null,
+    frames: 0, misaligned: 0, helperPath: '', catReads: null,
+  });
+  yaesuScopeSetStatus('starting', null);
+  if (tciRig && tciRig.connected) tciRig.setIq(true); // else the link-up starts it
+  sendCatLog('[Scope] TCI source: asking the server for its IQ stream');
+  clearInterval(tciScopeWatchdog);
+  tciScopeWatchdog = setInterval(() => {
+    if (!tciScopeOn) return;
+    if (tciRig && tciRig.connected && !tciRig.iqStreaming) tciRig.setIq(true);
+    const transmitting = !!(tciRig && tciRig.transmitting);
+    if (!transmitting && Date.now() - tciScopeLastFrame > 3000 && yaesuScopeState.status !== 'error') {
+      yaesuScopeSetStatus('error', { key: 'tci-iq', severity: 'notice', headline: 'Waiting for IQ from the TCI server',
+        detail: 'Check that Zeus or Thetis is running with TCI on. If it still shows nothing, its TCI server may not send IQ.' });
+    }
+  }, 1000);
+  if (tciScopeWatchdog.unref) tciScopeWatchdog.unref();
+}
+
+function feedTciScope(payload, rate, centerHz) {
+  if (!yaesuScopeWanted()) { stopTciScope('nobody is watching'); return; }
+  tciScopeLastFrame = Date.now();
+  // A new rate or centre is a new axis: a new builder.
+  if (!tciScopeBuilder || tciScopeBuilder.sampleRate !== rate || yaesuScopeState.centerHz !== centerHz) {
+    tciScopeBuilder = new SdrScope.SpectrumBuilder({ sampleRate: rate, fps: 12, float32: true });
+    tciScopeBuilder.on('frame', (f) => { if (tciScopeOn) yaesuScopeOnFrame(f); });
+    yaesuScopeState.centerHz = centerHz;
+    yaesuScopeState.spanHz = tciScopeBuilder.spanHz;
+    yaesuScopeBroadcastState();
+  }
+  tciScopeBuilder.feed(payload);
+}
+
+function stopTciScope(why) {
+  if (!tciScopeOn) return;
+  tciScopeOn = false;
+  clearInterval(tciScopeWatchdog);
+  tciScopeWatchdog = null;
+  tciScopeBuilder = null;
+  if (tciRig && tciRig.connected) tciRig.setIq(false);
+  if (why) sendCatLog(`[Scope] TCI source stopped: ${why}`);
+  yaesuScopeSetStatus('stopped', null);
 }
 
 /** Tune a TCI rig (tuneRadio). */
@@ -34598,6 +34661,7 @@ function scopeLevelScale() {
     return Number.isFinite(c.dbmMin) ? { unit: 'dBm', min: c.dbmMin, max: c.dbmMax } : { unit: null, min: 0, max: 255 };
   }
   if (s.source === 'sdr') return SdrScope.levelScale();
+  if (s.source === 'tci') return SdrScope.levelScale(); // a TCI server's IQ, the same builder
   // An Icom's levels are on the radio's own scale (Hamlib: 0 = -80 dB, full
   // = 0 dB on a 7300; -100..0 on a 7610), relative to its REF level, so
   // they are labelled "dB (radio)" and never claimed as dBm.
@@ -34625,6 +34689,8 @@ function scopeOverlay() {
     // SDR, the synthetic signal) or the radio (FT-710 / Icom). Both keep it
     // centred on the dial today, so a drag on the trace previews and tunes on
     // release either way; FIX / CURSOR (axis not known) does not drag.
+    // A TCI scope reads 'radio': its window is the server's (its dds), fixed
+    // while the dial moves inside it, like an Icom in Fixed mode.
     owner: yaesuScopeState.kind === 1 || yaesuScopeState.source === 'flex' || yaesuScopeState.source === 'sdr' ? 'potacat' : 'radio',
     passband: ScopeOverlay.passbandFor({ mode: _currentMode, widthHz: _currentFilterWidth, ...flexEdges }),
     txHz: _currentSplit && _currentFreqOther > 0 ? _currentFreqOther : null,
@@ -34659,7 +34725,7 @@ function scopeOverlaySync() {
 function scopeSourceFrameMs() {
   // An Icom sweeps at its own pace (about 4 a second on a 7300 at 115200): measured, not set.
   if (yaesuScopeState.source === 'icom') return icomScopeGapMs || 250;
-  const fps = yaesuScopeState.source === 'flex' ? 15 : yaesuScopeState.source === 'sdr' ? 12 : yaesuScopeState.source === 'sculan10' ? 25 : (settings.yaesuScopeFps || 20);
+  const fps = yaesuScopeState.source === 'flex' ? 15 : (yaesuScopeState.source === 'sdr' || yaesuScopeState.source === 'tci') ? 12 : yaesuScopeState.source === 'sculan10' ? 25 : (settings.yaesuScopeFps || 20);
   return 1000 / fps;
 }
 
@@ -34716,7 +34782,10 @@ function yaesuScopeNoteFrequency(hz) {
   }
   // An Icom in Fixed mode holds its window still: its centre comes from the
   // sweep header (icomScopeOnSweep), never from the dial.
+  // A TCI scope's centre is the server's own (its `dds`), not the dial.
+  const tciCentre = tciScopeOn ? yaesuScopeState.centerHz : null;
   if (!(icomScopeOn && yaesuScopeState.anchor === 'fixed')) yaesuScopeState.centerHz = hz;
+  if (tciCentre != null) yaesuScopeState.centerHz = tciCentre;
   if (yaesuScopeState.status === 'stopped') return;
   sdrScopeFollowDial(hz);
   // The pop-out already receives cat-frequency; ECHOCAT wants the axis re-sent, throttled.
@@ -34787,6 +34856,7 @@ function startYaesuScope() {
   const synth = yaesuScopeSynth;
   const kind = synth ? null : scopeSourceKind();
   if (kind === 'sdr') { startSdrScope(); return; }
+  if (kind === 'tci') { startTciScope(); return; }
   if (kind === 'flex') { startFlexScope(); return; }
   if (kind === 'icom') { startIcomScope(); return; }
   if (kind === 'sculan10') { startSculanScope(); return; }
@@ -34965,6 +35035,7 @@ function stopYaesuScope(why) {
   if (yaesuScopeRestartTimer) { clearTimeout(yaesuScopeRestartTimer); yaesuScopeRestartTimer = null; }
   yaesuScopeStartAfterExit = false;
   if (sdrScopeClient) { stopSdrScope(why); return; }
+  if (tciScopeOn) { stopTciScope(why); return; }
   if (flexScopeOn) { stopFlexScope(why); return; }
   if (sculanScopeOn) { stopSculanScope(why); return; }
   if (k4ScopeOn) { stopK4Scope(why); return; }
@@ -35175,6 +35246,8 @@ function scopeSourceKind() {
   const sculan = sculanScopeAvailable();
   const k4 = k4ScopeAvailable();
   const kenwood = !!kenwoodScopeModel();
+  // A TCI rig: the server's IQ, unless the rig's SDR scope is preferred.
+  if (tciRigTarget() && !(sdr.enabled && sdr.preferSdr)) return 'tci';
   if (sdr.enabled && (sdr.preferSdr || (!native && !icom && !flex && !sculan && !k4 && !kenwood))) return 'sdr';
   if (sculan) return 'sculan10';
   if (k4) return 'k4';
