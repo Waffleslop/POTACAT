@@ -249,6 +249,7 @@ const TESTS = [
   'test/yaesu-po-meter-test.js', // FT-710/FTDX10/FTDX101 read forward power on RM5; no false 'no CAT during TX' line (#581)
   'test/ftdx5000-power-scale-test.js', // FTDX5000 PC is 000-255, not watts (nicki3fiy 254 W)
   'test/yaesu-audit-ftdx10-test.js', // Yaesu CAT audit: FTDX10 width SH00nn + Table 3, AGC GT0 order, MD0 9/E/F, PC 5-100 (2308-F)
+  'test/yaesu-audit-ftdx101-test.js', // Yaesu CAT audit: FTDX101 width SH00nn + its Table 3, AGC GT0 order, MD0 9/E/F, PC from 5 (2308-L)
   'test/tx-audio-input-test.js', // TS-480/590/890/990 transmit audio input per rig; TS-480 asks on first transmit (#594)
   'test/rig-list-a11y-test.js', // #603: every rig-list control names its rig for VoiceOver
   'test/split-first-tune-test.js', // #113 item 2: no split OFF unless POTACAT turned split on
