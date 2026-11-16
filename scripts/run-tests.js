@@ -458,6 +458,7 @@ const TESTS = [
   'test/window-min-size-test.js',     // N0KAH: no window shrinks past its own controls
   'test/window-rules-test.js',        // every window opens in the theme and remembers its place
   'test/yaesu-fa-digits-test.js',
+  'test/yaesu-audit-ft891-test.js', // Yaesu CAT audit: FT-891 preamp, AGC, PROC, CW text, RTTY
   'test/log-as-test.js',
   'test/save-qso-stall-test.js',
   'test/pota-sync-login-test.js',
