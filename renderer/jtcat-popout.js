@@ -5985,7 +5985,8 @@ function _applyPopoutTheme(payload) {
 
   function jpRfFormat(w) {
     var d = jpRfCaps.powerDecimals || 0;
-    return (d > 0 ? Number(w).toFixed(d) : String(Math.round(Number(w)))) + ' W';
+    // A TCI rig's level is its drive in percent, not watts.
+    return (d > 0 ? Number(w).toFixed(d) : String(Math.round(Number(w)))) + (jpRfCaps.powerUnit === '%' ? '%' : ' W');
   }
   function jpRfPaintValue(w, known) {
     if (!jpRfVal) return;
@@ -5994,7 +5995,7 @@ function _applyPopoutTheme(payload) {
     jpRfVal.textContent = jpRfFormat(w);
     // At the beacon cap in a non-WSPR mode = the exact state that hid a month
     // of unanswered CQs. Say so where the number is.
-    var lowForMode = w > 0 && w <= JP_WSPR_CAP_WATTS && modeSelect && modeSelect.value !== 'WSPR';
+    var lowForMode = jpRfCaps.powerUnit !== '%' && w > 0 && w <= JP_WSPR_CAP_WATTS && modeSelect && modeSelect.value !== 'WSPR';
     jpRfVal.style.color = lowForMode ? '#e94560' : '';
     jpRfVal.title = lowForMode
       ? 'The radio is at the WSPR beacon\u2019s ' + JP_WSPR_CAP_WATTS + ' W cap. Raise it here unless QRP is intended.'
@@ -6015,6 +6016,7 @@ function _applyPopoutTheme(payload) {
   function jpRfApply(p) {
     if (!p || !jpRfGroup) return;
     jpRfCaps = {
+      powerUnit: p.powerUnit === '%' ? '%' : 'W',
       minPower: p.minPower != null ? p.minPower : 0,
       maxPower: p.maxPower != null ? p.maxPower : 100,
       powerStep: p.powerStep != null ? p.powerStep : 1,

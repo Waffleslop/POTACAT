@@ -122,6 +122,7 @@ The `status` message is a kitchen-sink snapshot. The canonical fields are:
 | `filterWidth` | number | Hz |
 | `rfgain` | number | 0–255 |
 | `txpower` | number | TX power *setting* (slider) |
+| `txPowerUnit` | string | Optional, added 2026-11-16 (#195). `'%'` = `txpower` is a drive percentage, not watts (a Zeus or Thetis rig over TCI); label the slider `%` and never show it as watts. Absent = watts, as before. |
 | `smeter` | number | live S-meter (Gap 10) |
 | `swr` | number | live SWR (Gap 10) |
 | `alc` | number | live ALC (Gap 10) |

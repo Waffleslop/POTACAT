@@ -2071,7 +2071,7 @@ let tciScopeOn = false;
 let tciScopeBuilder = null;
 let tciScopeWatchdog = null;
 let tciScopeLastFrame = 0;
-const TCI_TX_REFUSAL = 'Transmitting through TCI is not available in this version of POTACAT';
+const TCI_TX_REFUSAL = 'A TCI rig transmits from JTCAT (FT8 and the other digital modes) and from ECHOCAT voice. This control does not key it.';
 let tciPushTimer = null; // throttle timer for TCI spot pushes
 let agClient = null; // 4O3A Antenna Genius client
 let agLastBand = null; // last band we switched to (avoid redundant commands)
@@ -3609,7 +3609,11 @@ function getRigCapabilities(rigType) {
   }
   // The rig's amplifier drive limit: every power slider stops there.
   const ampLimitW = AmpDrive.limitW(activeRig);
-  if (ampLimitW > 0) {
+  if (ampLimitW > 0 && caps.powerUnit === '%') {
+    // TCI: the limit as a percent of full drive (lib/tci-tx.js enforces it).
+    caps.ampDriveLimitW = ampLimitW;
+    caps.maxPower = Math.max(1, tciDriveCapPct() || 100);
+  } else if (ampLimitW > 0) {
     caps.ampDriveLimitW = ampLimitW;
     caps.maxPower = caps.maxPower != null ? Math.min(Number(caps.maxPower) || ampLimitW, ampLimitW) : ampLimitW;
     if (caps.minPower != null && Number(caps.minPower) > caps.maxPower) caps.minPower = caps.maxPower;
@@ -5518,9 +5522,12 @@ function jtcatPopoutRigPowerPayload() {
   const rigType = detectRigType();
   const caps = getRigCapabilities(rigType) || {};
   const flexApi = !!(smartSdr && smartSdr.connected);
-  const linkUp = rigType === 'flex' ? flexApi : (flexApi || !!(cat && cat.connected));
+  const linkUp = rigType === 'tci' ? tciRigLinked()
+    : rigType === 'flex' ? flexApi : (flexApi || !!(cat && cat.connected));
   return {
     watts: _currentTxPower,
+    // A TCI rig's level is its drive in percent (lib/tci-rig.js), not watts.
+    powerUnit: caps.powerUnit === '%' ? '%' : 'W',
     // Roaming (host-while-roaming) forwards rig-control to the remote shack,
     // so the set takes there even with no local link.
     settable: !!caps.txpower && (linkUp || isRemoteLinked()),
@@ -16759,7 +16766,10 @@ async function saveQsoRecord(qsoData, opts) {
   // QSO pop-out sends a Number while every other log path sends text, and the
   // transports downstream do string work on this field (W9TEF 2026-09-19).
   if (!qsoData.txPower) {
-    const w = LogTxPower.txPowerForLog({ knownW: _currentTxPower, defaultW: LogTxPower.operatorDefaultPower(ops) });
+    // A TCI rig's level is a drive percent: log the watts it measured, or the operator's default.
+    const w = tciRigTarget()
+      ? (tciMeasuredWattsForLog() || LogTxPower.operatorDefaultPower(ops) || 0)
+      : LogTxPower.txPowerForLog({ knownW: _currentTxPower, defaultW: LogTxPower.operatorDefaultPower(ops) });
     if (w) qsoData.txPower = String(w);
   } else {
     qsoData.txPower = String(qsoData.txPower);
@@ -19516,6 +19526,14 @@ function setWsprBeacon(on, opts = {}) {
     tellPopout(false);
     return;
   }
+  // The beacon caps power in watts; a TCI rig's drive is a percent.
+  if (tciRigTarget()) {
+    const why = 'The WSPR beacon caps power in watts, and a TCI rig sets drive in percent: the beacon is off on TCI.';
+    sendCatLog(`[JTCAT] ${why}`);
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('tune-blocked', why);
+    tellPopout(false);
+    return;
+  }
   const call = onAirCall();
   const grid = (settings.grid || '').trim().toUpperCase().slice(0, 4);
   if (!ft8Engine || ft8Engine._mode !== 'WSPR') {
@@ -21182,16 +21200,6 @@ function startJtcat(mode) {
       jtcatRefuseTx('Mercury (HF data) owns the radio');
       return;
     }
-    // A TCI rig: no transmit path yet. Refuse before any audio plays.
-    if (tciRigTarget()) {
-      sendCatLog(`[JTCAT] ${TCI_TX_REFUSAL}`);
-      if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
-        jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: TCI_TX_REFUSAL });
-      }
-      if (remoteServer && remoteServer.hasClient()) remoteServer.broadcastJtcatQsoState({ phase: 'error', error: TCI_TX_REFUSAL });
-      jtcatRefuseTx('a TCI rig cannot transmit yet');
-      return;
-    }
     // Receiving from the WebSDR (#243): it cannot hear us and is not on the
     // radio's frequency, so nothing is keyed while it is the receive source.
     const sdrRefusal = JtcatRxSource.jtcatTxRefusalForSource(settings.jtcatRxSource);
@@ -21223,7 +21231,7 @@ function startJtcat(mode) {
     // rig, or a dead USB link) _currentFreqHz is whatever the previous rig
     // last reported, and comparing that to the JTTY dial blocked every Send
     // on a CAT-less Pebble HF with no visible reason (N4FFF 2026-10-04).
-    const dialLive = !!((cat && cat.connected) || (smartSdr && smartSdr.canTune && smartSdr.connected));
+    const dialLive = !!((cat && cat.connected) || (smartSdr && smartSdr.canTune && smartSdr.connected) || tciRigLinked());
     if (dialLive && _jtcatExpectedDialHz > 0 && _currentFreqHz > 0 &&
         Math.abs(_currentFreqHz - _jtcatExpectedDialHz) > 2500) {
       const bandOf = (hz) => { const b = freqToBand(hz / 1e6); return b ? ` (${b})` : ''; };
@@ -21314,6 +21322,10 @@ function startJtcat(mode) {
     }
 
     const modeForTx = ft8Engine ? ft8Engine._mode : 'FT8';
+    // A TCI rig (Zeus): the over goes out on the TCI link, keyed by
+    // lib/tci-tx.js; no PTT line, no sound card. Refused = jtcatRefuseTx.
+    const tciDirectTx = !!tciRigTarget();
+    if (tciDirectTx && !tciRigJtcatTx(data, modeForTx)) return;
     rigPresetFlushPending(); // a preset still settling for this mode goes on BEFORE the key-down
     jtcatNoteTxPowerForMode(modeForTx, data.message, data.freq, ft8Engine ? ft8Engine._txFreq : undefined);
     // Stamp the period this transmission goes out in — jtcatHandleRetryStall
@@ -21326,13 +21338,13 @@ function startJtcat(mode) {
     // Split "Fake It": the dial moves first, so the key-down leaves the port
     // after it. A dial that cannot move means audio rendered for the wrong
     // dial: skip this transmission rather than send it off frequency.
-    if (!fakeItShiftForTx(data)) {
+    if (!tciDirectTx && !fakeItShiftForTx(data)) {
       if (yaesuLanDirectTxOk) releaseYaesuLanTx('jtcat', 'split dial did not move');
       jtcatRefuseTx('the split (Fake It) dial could not move');
       return;
     }
-    handleRemotePtt(true, { audio: true, emission: 'DATA', txKind: jtcatTxKind(), lanOwner: yaesuLanDirectTxOk ? 'jtcat' : undefined });
-    armJtcatTxFailsafe(settings.audioSource === 'icom-network' ? 'Icom Network RS-BA1' : settings.audioSource === 'smartsdr' ? 'SmartSDR Direct' : yaesuLanDirectTxOk ? 'Yaesu LAN (SCU-LAN10)' : 'local audio', data.samples, 12000, data.offsetMs || 0, networkStartDelayMs);
+    if (!tciDirectTx) handleRemotePtt(true, { audio: true, emission: 'DATA', txKind: jtcatTxKind(), lanOwner: yaesuLanDirectTxOk ? 'jtcat' : undefined });
+    armJtcatTxFailsafe(tciDirectTx ? 'TCI' : settings.audioSource === 'icom-network' ? 'Icom Network RS-BA1' : settings.audioSource === 'smartsdr' ? 'SmartSDR Direct' : yaesuLanDirectTxOk ? 'Yaesu LAN (SCU-LAN10)' : 'local audio', data.samples, 12000, data.offsetMs || 0, networkStartDelayMs);
     if (win && !win.isDestroyed()) {
       // Carry the mode so the main-window TX badge reads the actual mode
       // ("JS8 TX" / "PSK31 TX") instead of always "JTCAT TX" (Casey 2026-08-09).
@@ -21368,7 +21380,10 @@ function startJtcat(mode) {
     //      direct-radio audio stream never completed OR direct send fails
     //      mid-cycle. Audio still goes to settings.remoteAudioOutput;
     //      DAX/USB/virtual audio is required.
-    if (smartSdrDirectTxOk) {
+    if (tciDirectTx) {
+      // 0. TCI: lib/tci-tx.js plays the over as the server asks for it and
+      //    calls txComplete (tciRigJtcatTx) when it ends.
+    } else if (smartSdrDirectTxOk) {
       sendCatLog(`[SmartSDR-Audio] DAX TX direct → radio (bypassing Windows DAX)`);
       smartSdrAudio.sendTxAudio(data.samples, data.offsetMs || 0)
         .then(() => {
@@ -24333,9 +24348,10 @@ function pushSpotsToSmartSdr(spots) {
 
 // --- TCI rig: a radio driven through Zeus's or Thetis's TCI server ---
 // lib/tci-rig.js holds the protocol; this is the glue to POTACAT's rig state.
-// Receive and control only: nothing here keys the radio (the link refuses
-// keying frames, and every TX entry point refuses a TCI rig). Based on PR
-// #632 by w5lee.
+// Transmit goes only through lib/tci-tx.js (its rules are in its header):
+// JTCAT's digital overs from the tx-start handler, and ECHOCAT voice. Desktop
+// PTT, Tune and the radio's ATU never key a TCI rig. Thetis is receive-only
+// until a Thetis owner confirms transmit. Based on PR #632 by w5lee.
 // (State: tciRig and friends, declared beside tciClient near the top.)
 
 /** The active TCI catTarget, or null (another rig, None, or driving a remote shack). */
@@ -24355,9 +24371,137 @@ function tciRigCaps() {
     squelch: !!(rig && rig.squelchAvailable),
     // The band scope from the server's IQ stream (startTciScope).
     nativeScope: 'tci',
-    // No transmit controls until TCI transmit lands.
-    txpower: false, atu: false, vfo: false, split: false, power: false,
+    // TX drive in percent (the server's drive, not watts). Thetis: none
+    // until its transmit is confirmed.
+    txpower: !(rig && rig.isThetis), powerUnit: '%', minPower: 0, maxPower: 100, powerStep: 1,
+    atu: false, vfo: false, split: false, power: false,
   };
+}
+
+/** The rig's amplifier drive limit as a percent of full drive (lib/amp-drive-limit.js), 0 = none. */
+function tciDriveCapPct() {
+  if (!tciRigTarget()) return 0;
+  return AmpDrive.currentFlexPctLimit();
+}
+
+// The last over's measured forward power: a TCI rig's TX_PWR in the log is
+// what the radio measured, never the drive percent.
+let tciLastOverW = null; // { watts, at }
+function tciMeasuredWattsForLog() {
+  return tciLastOverW && Date.now() - tciLastOverW.at < 120000 && tciLastOverW.watts > 0
+    ? Math.round(tciLastOverW.watts * 10) / 10 : 0;
+}
+
+/**
+ * Why a TCI key-down is refused here ('' = go). The radio-side rules
+ * (DIGU, split, drive cap, Thetis) are lib/tci-tx.js's; these are POTACAT's.
+ */
+function tciTxGate(kind, emission) {
+  if (!tciRig || !tciRig.connected) return 'The TCI server is not connected';
+  if (_swrTripped) return 'SWR guard tripped. Run the ATU or change bands to re-enable TX';
+  // A Guest Pass caps power in watts; a TCI rig's drive is a percent, so a
+  // guest never transmits through TCI.
+  if (passEnforcement && passEnforcement.getState && passEnforcement.getState() !== 'idle') return 'Transmitting through TCI is not available during a Guest Pass';
+  if (Date.now() < _cwTxLockoutUntilMs) return 'A CW transmission is still going out';
+  if (listenSdr.live && listenSdr.auto) return 'The SDR is what you hear on this frequency; the radio cannot transmit there';
+  if (kind === 'voice') {
+    if (jtcatAnyTxActive() || jtcatTuneState.active) return 'JTCAT is transmitting';
+    if (radioOwner && radioOwner !== 'none') return `The radio is in use by ${radioOwner}`;
+    if (ownTxPrivilegeRefused(emission || _currentMode, tciRigDial)) return 'Voice transmit is outside your licence privileges';
+  }
+  return tciRig.txRefusal(kind);
+}
+
+/** A meter frame from a TCI rig's own over: the displays, the log and the SWR guard. */
+let tciLastFwd = { w: 0, at: 0 };
+function tciRigTxMeter(kind, value) {
+  if (kind === 'power') {
+    tciLastFwd = { w: value, at: Date.now() };
+    if (tciRig && tciRig.txActive && value > 0) {
+      const prev = tciLastOverW && Date.now() - tciLastOverW.at < 2000 ? tciLastOverW.watts : 0;
+      tciLastOverW = { watts: Math.max(value, prev), at: Date.now() };
+    }
+    sendCatFwdPower(Math.round(value * 10) / 10);
+  } else if (kind === 'alc') {
+    sendCatAlc(Math.round(value * 255 / 100));
+  } else if (kind === 'swr') {
+    for (const w of [win, vfoPopoutWin, jtcatPopoutWin]) if (w && !w.isDestroyed()) w.webContents.send('cat-swr-ratio', value);
+    remoteMeterPush('swr-ratio', value);
+    // The SWR guard, as on a Flex: each frame judged with the power beside it.
+    if (!tciRig || !tciRig.txActive || settings.swrGuard === false || _swrTripped || Date.now() <= _swrGuardSuppressUntil) return;
+    const fwdW = Date.now() - tciLastFwd.at < 500 ? tciLastFwd.w : null;
+    const verdict = SwrGuard.swrFrameVerdict({ swr: value, fwdW, limit: swrGuardMax() });
+    if (verdict === 'over' && ++_swrGuardHits >= 3) {
+      tciRig.stopAllTx('SWR guard tripped');
+      tripSwrGuard(value);
+    } else if (verdict === 'ok') _swrGuardHits = 0;
+  }
+}
+
+/**
+ * JTCAT's over through the TCI link (the tx-start handler, after every
+ * guard and the late-start cut). true = keyed; false = refused (said why).
+ */
+function tciRigJtcatTx(data, mode) {
+  const refuse = (why) => {
+    sendCatLog(`[TCI TX] Refused: ${why}`);
+    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: why });
+    if (remoteServer && remoteServer.hasClient()) remoteServer.broadcastJtcatQsoState({ phase: 'error', error: why });
+    setTimeout(() => jtcatRefuseTx(why), 0);
+    return false;
+  };
+  if (radioOwner !== 'jtcat') return refuse(`the radio is in use by ${radioOwner}`);
+  if (data.dialShiftHz) return refuse('Fake It (split) cannot move the dial of a TCI rig');
+  const why = tciTxGate('digital');
+  if (why) return refuse(why);
+  const { samples: pcm, outputPeak } = conditionDirectTxAudio(data.samples, _jtcatDirectTxGainLevel, 1);
+  if (!(outputPeak >= 0.01)) return refuse('the TX audio was silent');
+  // The same PTT settle every direct route leads with: slot + 500 ms.
+  const lead = Math.round(Math.max(0, 500 - (data.offsetMs || 0)) * TciRig.AUDIO_RATE / 1000);
+  const waveform = new Float32Array(lead + pcm.length);
+  waveform.set(pcm, lead);
+  const engine = ft8Engine;
+  const err = tciRig.startTx(waveform, (result, peakW) => {
+    sendCatLog(`[TCI TX] ${mode} over ${result}${peakW > 0 ? `, ${peakW} W forward` : ''}`);
+    if (result !== 'complete' && result !== 'cancelled' && result !== 'PTT released') jtcatHaltTxNow(`TCI transmit: ${result}`);
+    if (engine && engine._txActive) engine.txComplete();
+  });
+  if (err) return refuse(err);
+  sendCatLog(`[TCI TX] ${mode} over keyed: ${(waveform.length / TciRig.AUDIO_RATE).toFixed(1)} s, ${Math.round(lead * 1000 / TciRig.AUDIO_RATE)} ms settle`);
+  return true;
+}
+
+/** The phone's 24 kHz mic chunk (dax-tx-chunk) into the voice over in flight, at 12 kHz. */
+function tciRigVoiceChunk(buf) {
+  if (!tciRig || !tciRig.voiceTxActive) return;
+  let mic;
+  if (buf instanceof Float32Array) mic = buf;
+  else if (ArrayBuffer.isView(buf) || buf instanceof ArrayBuffer) mic = new Float32Array(buf);
+  else if (Array.isArray(buf)) mic = new Float32Array(buf);
+  else return;
+  const pcm = new Float32Array(mic.length >> 1); // each pair averaged: 24 kHz -> 12 kHz
+  for (let i = 0; i < pcm.length; i++) pcm[i] = (mic[2 * i] + mic[2 * i + 1]) / 2;
+  tciRig.pushVoiceAudio(pcm);
+}
+
+/** ECHOCAT voice PTT on a TCI rig. '' = done, else the refusal. */
+function tciRigVoicePtt(state) {
+  if (!tciRig) return state ? 'The TCI server is not connected' : '';
+  if (!state) { tciRig.stopVoiceTx('PTT released'); return ''; }
+  if (tciRig.voiceTxActive) return '';
+  const why = tciTxGate('voice');
+  if (why) return why;
+  // A JTCAT over in flight makes the link busy, so lib/tci-tx.js refuses; an
+  // engine that owns the radio (Winlink, Mercury) was refused above.
+  const err = tciRig.startVoiceTx((Number(settings.remotePttTimeout) || 180) * 1000, (result) => {
+    sendCatLog(`[TCI] ECHOCAT voice ended: ${result}`);
+    _broadcastEffectiveTxState();
+    if (result !== 'cancelled' && result !== 'PTT released' && remoteServer) remoteServer.forcePttRelease(`PTT released: ${result}`);
+  });
+  if (err) return err;
+  _swrGuardHits = 0;
+  _broadcastEffectiveTxState();
+  return '';
 }
 
 function connectTciRig() {
@@ -24378,6 +24522,7 @@ function connectTciRig() {
   const rig = TciRig.connectTciRig({
     host: t.host, port: t.port, server: t.server, autoStart: t.autoStart,
     audio: settings.audioSource === 'tci', // the rig's audio source (lib/rig-family.js)
+    driveCapPct: tciDriveCapPct,
     log: (m) => sendCatLog(`[TCI] ${m}`),
     on: {
       link(up) {
@@ -24408,7 +24553,20 @@ function connectTciRig() {
       nb(on) { if (tciRig === rig) sendCatNb(on); },
       nr(on) { if (tciRig === rig) sendCatNr(on); },
       rfGain(p) { if (tciRig !== rig) return; if (p != null) _currentRfGain = p; broadcastRigState(); },
-      tx(on) { if (tciRig === rig && on) sendCatLog('[TCI] The radio is transmitting (keyed from its own controls)'); },
+      tx(on) {
+        if (tciRig !== rig) return;
+        if (on && !rig.txActive) sendCatLog('[TCI] The radio is transmitting (keyed from its own controls)');
+        _broadcastEffectiveTxState();
+      },
+      drive(pct) {
+        if (tciRig !== rig) return;
+        // Zeus reports 50 % on every new session until it is written: show
+        // no level until this session has set one (Thetis reports its own).
+        if (!rig.driveKnown && !rig.isThetis) return;
+        _currentTxPower = pct;
+        broadcastRigState();
+      },
+      txMeter(kind, value) { if (tciRig === rig) tciRigTxMeter(kind, value); },
       audio(pcm) { if (tciRig === rig) tciRigAudio(pcm); },
       iq(payload, rate, center) { if (tciRig === rig && tciScopeOn) feedTciScope(payload, rate, center); },
     },
@@ -24440,8 +24598,10 @@ function tciRigControl(data) {
     case 'set-rf-gain': if (!rig || !rig.setRfGain(Number(data.value))) refuse(); return true;
     case 'set-squelch': if (!rig || !rig.setSquelch(Math.max(0, Math.min(100, Number(data.value) || 0)))) refuse(); return true;
     case 'set-filter-width': if (!tciRigSetFilter(rig, data)) refuse(); return true;
-    // Everything that would key the radio, or switch it, is refused.
-    case 'set-tx-power': case 'atu-tune': case 'power-on': case 'power-off':
+    // Drive in percent, clamped to the amplifier limit (lib/tci-tx.js).
+    case 'set-tx-power': if (!rig || !rig.setDrive(Number(data.value))) refuse(); return true;
+    // The radio's tuner and power switch are not reached through TCI.
+    case 'atu-tune': case 'power-on': case 'power-off':
       refuse('not available on a TCI radio in this version of POTACAT');
       return true;
     default:
@@ -24463,9 +24623,15 @@ function tciRigSetFilter(rig, data) {
   return rig.setFilterBand(Math.round(lo), Math.round(hi));
 }
 
-/** handleRemotePtt's answer to a key-down on a TCI rig: refused, with the reason. */
-function tciRigRefusePtt() {
+/**
+ * handleRemotePtt on a TCI rig. A key-down from this desktop (the VFO
+ * window, voice macros, Tune, SSTV) is refused: TCI keys only JTCAT's overs
+ * and ECHOCAT voice, each through lib/tci-tx.js. A release ends any TCI over.
+ */
+function tciRigPtt(state) {
+  if (!state) { if (tciRig) tciRig.stopAllTx('PTT released'); return; }
   sendCatLog(`[TCI] PTT refused: ${TCI_TX_REFUSAL}`);
+  if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', TCI_TX_REFUSAL);
   return false;
 }
 
@@ -27325,6 +27491,16 @@ function connectRemote() {
 
   remoteServer.on('ptt', ({ state }) => {
     const _pttT0 = Date.now(); // → ptt-applied latency reply below
+    // A TCI rig: the phone's voice goes over the TCI link (lib/tci-tx.js).
+    if (tciRigTarget()) {
+      const why = tciRigVoicePtt(!!state);
+      if (why) {
+        sendCatLog(`[TCI] ECHOCAT PTT refused: ${why}`);
+        remoteServer.forcePttRelease(why);
+      }
+      remoteServer.sendToClient({ type: 'ptt-applied', state: !!state && !why, ms: Date.now() - _pttT0 });
+      return;
+    }
     // One line per press saying whether any microphone audio arrived from the
     // device while the radio was keyed (the bridge's TX peak meter fed the VFO
     // window and the phone, never the log). "PTT works but no modulation" is
@@ -27594,6 +27770,7 @@ function connectRemote() {
   });
 
   remoteServer.on('client-disconnected', () => {
+    if (tciRig && tciRigTarget()) tciRig.stopVoiceTx('ECHOCAT disconnected');
     // Band scope: the subscription dies with the socket. The mobile client
     // re-sends scope-subscribe on every auth-ok while a surface is up, so
     // nothing here needs to be sticky — and a flag left true would let a
@@ -30783,7 +30960,7 @@ function handleRemotePtt(state, opts = {}) {
     }
     return false;
   }
-  if (state && tciRigTarget()) return tciRigRefusePtt(); // receive-only link (lib/tci-rig.js)
+  if (tciRigTarget()) return tciRigPtt(state); // TCI keys only through lib/tci-tx.js
   // The ATU wizard is keying tune carriers across the bands: a PTT from any
   // surface would land on whatever frequency it is measuring.
   if (state && atuWizardActive()) {
@@ -31138,7 +31315,7 @@ function handleRemotePtt(state, opts = {}) {
 // all use this composite signal so adding a new TX source only needs
 // to flip one of the inputs.
 function _isEffectivelyTransmitting() {
-  return _remoteTxState || (Date.now() < _cwTxLockoutUntilMs);
+  return _remoteTxState || (Date.now() < _cwTxLockoutUntilMs) || !!(tciRig && tciRig.txActive && tciRigTarget());
 }
 
 function _broadcastEffectiveTxState() {
@@ -31347,6 +31524,8 @@ function broadcastRemoteRadioStatus() {
     rfgain: rfg,
     squelch: _currentSquelch,
     txpower: txp,
+    // A TCI rig (Zeus / Thetis): txpower is its drive in percent, not watts.
+    txPowerUnit: tciRigTarget() ? '%' : undefined,
     // DSP/TX state — without these the phone never learns NR/ANF/AGC/etc.
     // turned on, so its toggle stays stuck sending `true` (can't turn off) and
     // shows the wrong state. NB/ATU were the only ones echoed before; these are
@@ -31907,6 +32086,7 @@ ipcMain.on('mac-mic-silence', (e, o = {}) => {
 function _buildAudioBridgeConfig() {
   const t = settings.catTarget || {};
   const daxTxDirect =
+    (settings.audioSource === 'tci' && !!tciRigTarget()) ||
     (settings.audioSource === 'smartsdr' && smartSdrAudio && smartSdrAudio.txReady) ||
     (t.type === 'k4-network' && cat && cat.connected) ||
     // Icom Network: the client's mic goes over RS-BA1, never to a PC sound
@@ -32086,6 +32266,7 @@ function prewarmRemoteAudioWindow() {
   });
 
   remoteAudioWin.on('closed', () => {
+    if (tciRig && tciRigTarget()) tciRig.stopVoiceTx('ECHOCAT audio window closed');
     remoteAudioWin = null;
     _remoteAudioWinLoaded = false;
     _remoteAudioPendingStart = false;
@@ -32127,6 +32308,7 @@ async function startRemoteAudio() {
 }
 
 function destroyRemoteAudioWindow() {
+  if (tciRig && tciRigTarget()) tciRig.stopVoiceTx('ECHOCAT audio stopped');
   // No live audio → stop chasing TURN re-mints (and let stale creds lapse so
   // the next session mints fresh). The cache means a quick reconnect is cheap.
   _stopTurnRemint();
@@ -53094,6 +53276,9 @@ function cloudShackNotice(text, kind) {
   let _daxTxLastVoiceLogMs = 0;
   let _daxTxLastPeakReport = 0;
   ipcMain.on('dax-tx-chunk', (_e, buf) => {
+    // A TCI rig: the phone's 24 kHz mic chunks, halved to TCI's 12 kHz (each
+    // pair averaged), go to the voice over in flight. Nothing else plays them.
+    if (tciRigTarget() && settings.audioSource === 'tci') { tciRigVoiceChunk(buf); return; }
     // Icom Network: the same 24 kHz mic chunks (VFO window PTT or the ECHOCAT
     // bridge) go to the radio over RS-BA1 while a voice PTT holds the stream.
     if (_icomNetworkTransport && _icomNetworkTransport.voiceTxActive) {

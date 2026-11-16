@@ -61,6 +61,8 @@ const TESTS = [
   'test/tci-gating-test.js', // #195: TCI branches gated on the TCI rig; every TX entry point refuses it
   'test/tci-audio-test.js', // #195: TCI RX1 audio into JTCAT, the VFO monitor and ECHOCAT
   'test/tci-scope-test.js', // #195: the band scope from a TCI server's float32 IQ
+  'test/tci-tx-safety-test.js', // #195 #185: TCI transmit rules against a fake Zeus and Thetis (release, stall, cap, DIGU, Thetis RX-only)
+  'test/tci-tx-wiring-test.js', // #195: JTCAT and ECHOCAT voice reach TCI transmit only through the existing guards
   'test/rigctld-attribution-test.js',
   'test/flrig-codec-test.js',
   'test/cw-text-unsupported-link-test.js',

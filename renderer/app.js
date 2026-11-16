@@ -22685,6 +22685,8 @@ let lastLogPower = 0; // last power value entered by user in log dialog (sticky)
 // The power a log form starts with, or null for an empty box: never a
 // guessed 100 W (#523, lib/log-tx-power.js).
 function logFormPower() {
+  // A TCI rig's level is a drive percent: never offered as watts.
+  if (rigCurrentCaps.powerUnit === '%') return lastLogPower > 0 ? lastLogPower : null;
   return LogTxPower.txPowerForLog({
     knownW: rigKnownPower > 0 ? rigKnownPower : radioPower, // main's level is the newer (a set lands there first)
     enteredW: lastLogPower,
@@ -25538,9 +25540,11 @@ function formatFilterWidth(hz) {
 
 function rigFormatPower(watts) {
   const decimals = Math.max(0, parseInt(rigCurrentCaps.powerDecimals || 0, 10));
+  // A TCI rig's level is its drive in percent, not watts.
+  const unit = rigCurrentCaps.powerUnit === '%' ? '%' : 'W';
   const numeric = Number(watts);
-  if (!Number.isFinite(numeric)) return watts + 'W';
-  return numeric.toFixed(decimals) + 'W';
+  if (!Number.isFinite(numeric)) return watts + unit;
+  return numeric.toFixed(decimals) + unit;
 }
 
 function rigUsesPowerSelect() {
