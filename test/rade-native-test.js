@@ -21,6 +21,12 @@ let rade;
 try {
   rade = require('../lib/rade_native/build/Release/rade_native.node');
 } catch (e) {
+  // CI (freedv-natives.yml) sets POTACAT_REQUIRE_RADE_NATIVE=1: there a
+  // missing or unloadable addon is the failure this test exists to catch.
+  if (process.env.POTACAT_REQUIRE_RADE_NATIVE === '1') {
+    console.log('FAIL rade_native did not load: ' + e.message);
+    process.exit(1);
+  }
   console.log('rade_native not built (npm run build-rade) -- skipping native tests');
   process.exit(0);
 }
