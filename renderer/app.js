@@ -27003,6 +27003,17 @@ function isFreedvMode(mode) {
   return FREEDV_MODES.has(mode.toUpperCase()) || mode.toUpperCase().startsWith('FREEDV');
 }
 
+// #718: the macOS microphone check JTCAT runs (#463), for FreeDV's capture.
+// One rule (lib/mac-mic-access.js); main logs it and shows the notice.
+var FREEDV_MIC_SILENT_MS = 10000;
+var _freedvMicWatch = null;
+function freedvMicNote(samples) {
+  if (!_freedvMicWatch) return;
+  var now = Date.now();
+  var ev = _freedvMicWatch.note(samples, now);
+  if (ev && window.api.macMicSilence) window.api.macMicSilence({ surface: 'freedv', silent: ev === 'silent', silentMs: _freedvMicWatch.silentFor(now), minSilentMs: FREEDV_MIC_SILENT_MS });
+}
+
 async function startFreedvForMode(mode) {
   if (freedvActive) { console.log('[FreeDV] Already active, skipping start'); return; }
   const s = await window.api.getSettings();
@@ -27018,6 +27029,12 @@ async function startFreedvForMode(mode) {
   else if (upper.includes('1600')) codecMode = '1600';
 
   // Engine already started by tuneRadio() in main.js — just start RX audio capture
+  if (window.MacMicAccess && window.api.platform === 'darwin') {
+    var now = Date.now();
+    if (_freedvMicWatch) _freedvMicWatch.started(now);
+    else _freedvMicWatch = new window.MacMicAccess.SilenceWatch(now, FREEDV_MIC_SILENT_MS);
+    if (window.api.macMicCaptureStart) window.api.macMicCaptureStart('freedv').catch(function() {});
+  }
   try {
     const constraints = { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false };
     if (s.remoteAudioInput) constraints.deviceId = { exact: s.remoteAudioInput };
@@ -27031,6 +27048,7 @@ async function startFreedvForMode(mode) {
     });
     let _freedvAudioCount = 0;
     worklet.port.onmessage = function(e) {
+      freedvMicNote(e.data);
       window.api.freedvRxAudio(e.data);
       if (++_freedvAudioCount <= 3 || _freedvAudioCount % 200 === 0) {
         console.log('[FreeDV] RX audio IPC #' + _freedvAudioCount + ' len=' + e.data.length);
