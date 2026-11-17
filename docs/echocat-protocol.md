@@ -182,6 +182,22 @@ for the history.
 | `settings-update` | S→C | One or more server-side settings changed; client refreshes UI. |
 | `save-settings` | C→S | Persist a settings delta. |
 
+### Flex route: through POTACAT or through FlexRadio SmartLink (new 2026-11-16)
+
+A Flex licenses one GUI client (an 8600M answers a second `client gui` with `F3000001`), and a FlexRadio SmartLink client only gets audio when it is the radio's only GUI client. So when the mobile device takes the Flex directly over FlexRadio SmartLink, POTACAT lets go of its Flex Direct GUI slot first and takes it back afterwards. The ECHOCAT link stays up the whole time: spots, logging (`log-qso`) and everything else that does not need the radio keep working. The rule, the states and every sentence: `lib/flex-route.js`. Capability `flex-handback` is in the server `hello` only while the shack's rig is a Flex in Flex Direct (POTACAT is the radio's own GUI client) or the radio is handed over. Owner devices only: a Guest Pass session is refused at the wall.
+
+| Message | Dir | Purpose |
+|---|---|---|
+| `flex-release` | C→S | NEW. `{reason?}`. Hand the radio to this device over FlexRadio SmartLink. Refused (see `flex-released`) while anything transmits (voice PTT, JTCAT, CW, Tune, WSPR, SSTV, a tuner carrier), during a Winlink session, during a Guest Pass, or when POTACAT is not the radio's own GUI client. If the computer was used in the last 2 minutes and POTACAT's window is visible, the person there is asked in the window (30 s; no answer is a refusal). Before it lets go, POTACAT stops JTCAT transmit and automation (Run, Hunt, the WSPR beacon, whose power it puts back) and the scan, puts a test carrier's power back, and returns the radio's transmit source to what it was. It does not change the slice `audio_level` (at 0 the radio lowers its SmartLink audio by about 15 dB). Then it closes its GUI and DAX/audio connections. Already released: `ok:true`. |
+| `flex-released` | S→C | NEW. `{ok, error?}`, the answer to `flex-release`, sent once. `error` is one sentence to show as it is: "The radio is transmitting. Try again when it stops.", "A Winlink session is running on the computer. Try again when it ends.", "A guest has the radio.", "The person at the computer did not agree.", "POTACAT is not running this Flex as its own client (Flex Direct), so there is nothing to hand over.", "POTACAT is already handing the radio over. Try again in a moment." |
+| `flex-reclaim` | C→S | NEW. `{}`. Give the radio back to POTACAT. POTACAT sends `client gui <its own client id>`, so its slices and panadapter come back, and restarts DAX audio. While the radio answers `F3000001` (the mobile device still holds the slot) it tries again every 2 s for 20 s. Send it after letting go of the SmartLink slot. Not released: `ok:true`. |
+| `flex-reclaimed` | S→C | NEW. `{ok, error?}`, the answer to `flex-reclaim`. `error`: "The radio is still held by another client." (20 s of `F3000001`) or "POTACAT could not reach the radio to take it back." |
+| `flex-route` | S→C | NEW. `{state, since, holder?}` after every `auth-ok` (owner devices, while the capability applies) and on every change. `state`: `pc` (POTACAT has the radio), `releasing`, `released` (the mobile device has it), `reclaiming` (POTACAT is taking it back: let go of the SmartLink slot now). `since` is epoch ms of the change; `holder` the device the radio went to. |
+
+While the state is not `pc`, every message that needs the radio (`tune`, `ptt`, `set-mode`, the filters and levels, `rig-control`, `scan-control`, the ATU, CW, voice macros, `sstv-photo`, FreeDV, JTCAT/JS8 starts and transmissions, `winlink-connect`, `rig-reconnect`, the full list is `RIG_TYPES` in `lib/flex-route.js`) is answered `refused {reason:'flex-released', of, text}` with `text` "The radio is on FlexRadio SmartLink with your mobile device." Stopping something (`estop`, a halt, `cw-stop`) is never refused.
+
+The released state is kept in the shack's settings and survives a restart: nothing in POTACAT reconnects to the radio or takes it back on its own. POTACAT keeps a non-GUI connection to the radio (TCP 4992, `sub client all` only, never `client gui` or `client bind`) to watch its GUI clients; when the radio has had no GUI client for 60 s in a row, POTACAT takes it back (state `reclaiming`, then `pc`) and logs why. The desktop shows "The radio is with ECHOCAT through FlexRadio SmartLink." with Take it back, which warns first ("Your mobile device will lose the radio.").
+
 ### PTT / audio signaling (WebRTC)
 
 | Message | Dir | Purpose |

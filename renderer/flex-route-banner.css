@@ -1,0 +1,45 @@
+/* The Flex route banner (renderer/flex-route-banner.js): the main window and
+   the VFO window. Theme tokens only (renderer/tokens.css --ds-*); the
+   fallbacks are the classic palette for a window with no data-ds. */
+#flex-route-banner {
+  flex: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 10px 14px;
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--ds-ink, #e0e0e0);
+  background: var(--ds-warn-subtle, rgba(240, 165, 0, 0.18));
+  border-bottom: 2px solid var(--ds-warn, #f0a500);
+  -webkit-app-region: no-drag;
+  user-select: text;
+}
+#flex-route-banner.hidden { display: none; }
+#flex-route-banner .frb-msg { flex: 1 1 260px; min-width: 0; }
+#flex-route-banner .frb-msg strong { font-weight: 700; }
+#flex-route-banner .frb-warn,
+#flex-route-banner .frb-error { margin-top: 4px; font-weight: 700; }
+#flex-route-banner .frb-error { color: var(--ds-danger, #e94560); }
+#flex-route-banner .frb-count { color: var(--ds-ink-muted, #b4b4c8); font-variant-numeric: tabular-nums; }
+#flex-route-banner .frb-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+#flex-route-banner button {
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 6px 16px;
+  min-height: 34px;
+  border-radius: var(--ds-radius-md, 6px);
+  cursor: pointer;
+  color: var(--ds-ink, #e0e0e0);
+  background: var(--ds-surface, #16213e);
+  border: 1px solid var(--ds-line, rgba(255, 255, 255, 0.25));
+}
+#flex-route-banner button.primary {
+  color: var(--ds-on-tint, #0d1b2a);
+  background: var(--ds-tint, #4fc3f7);
+  border-color: var(--ds-tint, #4fc3f7);
+}
+#flex-route-banner button:hover { filter: brightness(1.08); }
+#flex-route-banner button:focus-visible { outline: 2px solid var(--ds-tint, #4fc3f7); outline-offset: 2px; }
