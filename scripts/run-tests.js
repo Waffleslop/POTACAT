@@ -415,6 +415,7 @@ const TESTS = [
   'test/paddle-bounce-test.js',
   'test/web-keyer-late-release-test.js', // #244: a held paddle's late release withdraws an element not yet sounding
   'test/web-keyer-heard-release-test.js', // #244 1.14.5: a release counts when it happened and against what the operator hears
+  'test/cw-playout-lateness-test.js', // #244 diagnostic: paddle playout edge lateness, one line per over
   'test/spot-hides-test.js',
   'test/mac-titlebar-test.js',
   'test/vfo-and-greyout-test.js',
