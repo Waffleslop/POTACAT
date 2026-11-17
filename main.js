@@ -27313,7 +27313,9 @@ function buildPaddleKeyRig() {
         sendCatLog(`[CW] Keying on the CW Key Port with ${kpLabel}. The radio's PC KEYING (or CW keying) menu must be set to ${kpLabel}${activeRigSetupPointer('CW')}`);
       }
       const pinState = { dtr: kpPins.dtr ? !!down : false, rts: kpPins.rts ? !!down : false };
+      const setStartedAt = Date.now(); // #244 diagnostic: how long the line change takes
       cwKeyPort.set(pinState, (err) => {
+        if (remoteServer) remoteServer.noteCwKeyLineSetMs(Date.now() - setStartedAt);
         if (err && !cwKeyPort._dtrLoggedError) {
           console.log(`[CW Key Port] Pin set error: ${err.message} (pins: ${JSON.stringify(pinState)})`);
           cwKeyPort._dtrLoggedError = true; // log once, don't spam
