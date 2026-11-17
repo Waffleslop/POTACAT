@@ -425,6 +425,7 @@ const { explainRigctldFailure } = require('./lib/rigctld-stderr');
 const RigFamily = require('./lib/rig-family');
 const RigFullPower = require('./lib/rig-full-power');
 const TxAudioInput = require('./lib/tx-audio-input'); // Kenwood TX; vs TX1; per rig (#594)
+const TxChannel = require('./lib/tx-channel'); // transmit on left only or both channels, per rig (#654)
 const AmpDrive = require('./lib/amp-drive-limit'); // per-rig amplifier drive limit (B10 row 10)
 const { decideBandPowerReapply } = require('./lib/band-power-reapply');
 const AtuWizard = require('./lib/atu-wizard');
@@ -12345,7 +12346,7 @@ const _modemBridgeWaiters = [];
 const _modemBridgeCableWaiters = [];
 function modemBridgeDevices() {
   const rig = winlinkActiveRig();
-  return { inputId: (rig && rig.remoteAudioInput) || settings.remoteAudioInput || '', outputId: (rig && rig.remoteAudioOutput) || settings.remoteAudioOutput || '' };
+  return { inputId: (rig && rig.remoteAudioInput) || settings.remoteAudioInput || '', outputId: (rig && rig.remoteAudioOutput) || settings.remoteAudioOutput || '', txChannel: TxChannel.ofRig(rig) };
 }
 /** The virtual cable's two endpoints as POTACAT opens them (rig.modemCable: inputId = the cable VARA plays into, outputId = the cable VARA listens to). */
 function winlinkCableDevices() {
@@ -45511,11 +45512,12 @@ function cloudShackNotice(text, kind) {
       if (s.captureLabel) modemBridge.captureLabel = s.captureLabel;
       if (s.playbackLabel) modemBridge.playbackLabel = s.playbackLabel;
       if (s.playbackSampleRate) modemBridge.playbackSampleRate = s.playbackSampleRate;
+      if (s.playbackChannel) modemBridge.playbackChannel = s.playbackChannel;
       if (s.sampleRate) modemBridge.sampleRate = s.sampleRate;
       if (typeof s.playback === 'boolean') modemBridge.playback = s.playback;
       // Each worklet (re)built gets its own port to the modem audio lane (#187).
       if (winlinkAudio) winlinkAudio.attachBridge(modemBridgeWin.webContents, { tx: !!modemBridge.playback, rx: true });
-      winlinkLog(`modem audio bridge: ${modemBridge.captureLabel || 'input'}${modemBridge.playback ? ' → ' + (modemBridge.playbackLabel || 'output') : ''} ready${modemBridge.sampleRate ? ' at ' + modemBridge.sampleRate + ' Hz' : ''}`);
+      winlinkLog(`modem audio bridge: ${modemBridge.captureLabel || 'input'}${modemBridge.playback ? ' → ' + (modemBridge.playbackLabel || 'output') : ''} ready${modemBridge.sampleRate ? ' at ' + modemBridge.sampleRate + ' Hz' : ''}${modemBridge.playback && modemBridge.playbackChannel === TxChannel.LEFT ? ', transmit on the left channel only' : ''}`);
       modemBridgeSettle(true);
     } else {
       modemBridge.state = 'error'; modemBridge.error = String(s.error || 'unknown error');
