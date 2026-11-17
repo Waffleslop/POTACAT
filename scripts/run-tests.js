@@ -468,6 +468,7 @@ const TESTS = [
   'test/p2p-park-entry-506-test.js', // #506: a new callsign clears their park; the P2P box as shown is what is logged
   'test/vfo-power-button-test.js',    // KQ5O: Power On/Off at the bottom of the VFO window
   'test/dx-rule-test.js',            // G4BFG: DX = another entity, or the operator's HF / 6 m-up distance
+  'test/park-entity-test.js',        // #662: a home call signed in a park abroad takes the park's DXCC entity
   'test/external-atu-carrier-test.js', // N8JMS: RF-sense tuner carrier in AM (CW over CAT is key-up)
   'test/jtcat-map-popout-arcs-test.js', // TacticalIndex: QSO arcs in the JTCAT map pop-out
   'test/ae5je-settings-audio-test.js', // AE5JE: audio devices follow their name; bug report says whether settings saves land
