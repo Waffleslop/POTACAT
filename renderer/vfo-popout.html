@@ -150,6 +150,14 @@
     .freq-display .fq-sub { font-size: 26px; color: var(--t2); }
     .freq-display .fq-unit { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; color: var(--t3); margin-left: 8px; }
     .freq-display:hover .fq-main { color: var(--blue); }
+    /* The Small VFO's frequency while it is being typed (#672): a box in the
+       accent, the typed digits with a caret, and what Enter will tune. */
+    .freq-display.entry { box-shadow: 0 0 0 2px var(--blue); border-radius: 6px; padding: 0 8px; background: var(--in); }
+    .freq-display.entry .fq-main { color: var(--t); min-width: 2ch; }
+    .freq-display.entry .fq-sub { color: var(--blue); margin-left: 10px; }
+    .fq-caret { display: inline-block; width: 2px; height: 0.85em; margin-left: 2px; background: var(--blue); vertical-align: -0.06em; animation: fq-caret-blink 1s steps(1) infinite; }
+    @keyframes fq-caret-blink { 50% { opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) { .fq-caret { animation: none; } }
     /* The OTHER VFO while split is on (TX side), amber like every TX-adjacent accent. */
     .freq-other-row { display: none; align-items: baseline; gap: 6px; margin-top: -4px; }
     .freq-other-row.show { display: flex; }
@@ -915,6 +923,7 @@
 <script src="../lib/rig-bands.js"></script>
 <script src="../lib/vfo-layout.js"></script>
 <script src="../lib/freq-paste.js"></script>
+<script src="../lib/vfo-freq-entry.js"></script>
 <script src="../lib/wheel-tune.js"></script>
 <script src="../lib/mono-upmix.js"></script>
 <script src="../lib/audio-device-heal.js"></script>
@@ -1005,6 +1014,7 @@ vfoLockBtn.addEventListener('click', () => {
 updateLockBtn();
 window.api.onVfoLockState((locked) => {
   vfoLocked = locked;
+  if (locked) stripClose();
   updateLockBtn();
 });
 
@@ -1048,7 +1058,14 @@ const filterVal = document.getElementById('filter-val');
 function showPane(name) {
   document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
   if (name === 'keypad') { kpBuffer = ''; kpRender(); }
+  else if (kpFromMini) { kpFromMini = false; setMini(true, { save: false }); }
 }
+// The Small VFO's frequency (#672, lib/vfo-freq-entry.js). A click grows the
+// window to the Large VFO with the keypad, and Tune or Cancel takes it back to
+// the strip, as the gear does. Typing turns the strip's frequency into the
+// entry in place (stripEntry). A buffer nobody can see is never tuned.
+let kpFromMini = false;
+let stripEntry = false;
 const sheetEl = document.getElementById('tab-settings');
 const sheetBackdrop = document.getElementById('sheet-backdrop');
 // The gear on the Small VFO: the strip has no room for the sheet, so the
@@ -1105,8 +1122,11 @@ function renderFreqDisplay(hz) {
 }
 
 function updateDisplay() {
-  renderFreqDisplay(radioLinkUp ? currentFreqHz : 0);
-  freqDisplay.title = radioLinkUp ? 'Click to type a frequency' : 'The radio is not answering (switched off, or the cable is out)';
+  if (stripEntry) stripRender(); // the operator is typing here: the live dial waits
+  else {
+    renderFreqDisplay(radioLinkUp ? currentFreqHz : 0);
+    freqDisplay.title = radioLinkUp ? 'Click to type a frequency' : 'The radio is not answering (switched off, or the cable is out)';
+  }
   const m = (currentMode || '').toUpperCase();
   modeBadge.textContent = !radioLinkUp ? '---' : m.startsWith('FREEDV') ? 'RADE' : (currentMode || '---');
   if (currentFilterWidth > 0) {
@@ -1383,9 +1403,11 @@ function updateModeHighlight() {
   });
 }
 
-// Frequency display click → type-to-tune pane
+// Frequency display click → type-to-tune pane (the Small VFO grows to show it)
 freqDisplay.addEventListener('click', () => {
-  if (vfoLocked) { window.api.setVfoLock(true); return; }
+  const route = VfoFreqEntry.clickRoute({ mini: vfoMini, locked: vfoLocked });
+  if (route === 'locked') { stripClose(); window.api.setVfoLock(true); return; }
+  if (route === 'grow-keypad') { kpGrowFromMini(); return; }
   showPane('keypad');
 });
 
@@ -2075,6 +2097,63 @@ kpGo.addEventListener('click', () => {
   showPane('dial');
 });
 
+// --- Small VFO: the strip's frequency is the entry (#672) ---
+// On the strip and not hidden for width: only then can typing show there.
+function freqInStrip() {
+  return vfoMini && freqDisplay.parentNode === miniStrip
+    && !freqDisplay.classList.contains('mini-hidden') && freqDisplay.getClientRects().length > 0;
+}
+function stripRender() {
+  const khz = kpTargetKhz(kpBuffer);
+  freqDisplay.innerHTML = '<span class="fq-main">' + kpBuffer + '<span class="fq-caret" aria-hidden="true"></span></span>'
+    + '<span class="fq-sub">' + (khz ? FreqDots.fromKhz(khz) : '') + '</span>';
+  freqDisplay.title = 'Type a frequency, Enter to tune, Esc to cancel';
+  freqDisplay.setAttribute('aria-label', khz ? 'Typing ' + FreqDots.khzMhz(khz) + '. Enter to tune, Esc to cancel.' : 'Type a frequency. Enter to tune, Esc to cancel.');
+  kpRender();
+  if (vfoMini) requestAnimationFrame(fitMini); // the entry is wider: the line refits (frequency and PTT never hide)
+}
+function stripOpen() {
+  if (stripEntry) return;
+  stripEntry = true;
+  kpBuffer = '';
+  freqDisplay.classList.add('entry');
+}
+// Esc, a click elsewhere, a size change: the live frequency comes back.
+function stripClose() {
+  if (!stripEntry) return;
+  stripEntry = false;
+  kpBuffer = '';
+  freqDisplay.classList.remove('entry');
+  freqDisplay.removeAttribute('aria-label');
+  updateDisplay();
+  if (vfoMini) requestAnimationFrame(fitMini);
+}
+// Enter: the same path as the keypad's Tune.
+function stripGo() {
+  if (vfoLocked) { stripClose(); window.api.setVfoLock(true); return; }
+  const khz = kpTargetKhz(kpBuffer);
+  if (!khz) return; // nothing to tune yet: keep typing
+  tuneJumpFromPopout(khz);
+  currentFreqHz = khz * 1000;
+  kpRememberRecent(khz);
+  stripClose();
+}
+// Grow to the Large VFO with the keypad open (what was typed on the strip
+// comes along); Tune or Cancel takes it back to the strip (showPane).
+function kpGrowFromMini() {
+  const carry = stripEntry ? kpBuffer : '';
+  stripClose();
+  kpFromMini = true;
+  setMini(false, { save: false });
+  showPane('keypad');
+  if (carry) { kpBuffer = carry; kpRender(); }
+}
+document.addEventListener('pointerdown', (e) => {
+  if (stripEntry && !freqDisplay.contains(e.target)) stripClose();
+}, true);
+window.addEventListener('blur', () => stripClose());
+freqDisplay.addEventListener('wheel', () => stripClose(), { passive: true });
+
 // Paste a frequency anywhere (or into the box) to fill type-to-tune; Enter
 // tunes as for typed digits (hoogskev 2026-10-31: the box took no paste).
 // lib/freq-paste.js reads "14.074", "14,074", "14074 kHz", "14.074.000".
@@ -2086,6 +2165,9 @@ document.addEventListener('paste', (e) => {
   const khz = window.FreqPaste ? window.FreqPaste.parsePastedFreq(text) : 0;
   if (!khz) return;
   e.preventDefault();
+  const route = VfoFreqEntry.pasteRoute({ mini: vfoMini, freqInStrip: freqInStrip() });
+  if (route === 'strip') { stripOpen(); kpBuffer = fmtMhz(khz); stripRender(); return; }
+  if (route === 'grow') kpGrowFromMini();
   showPane('keypad');
   kpBuffer = fmtMhz(khz);
   kpRender();
@@ -2098,25 +2180,41 @@ document.addEventListener('keydown', (e) => {
   // The "Type a frequency" box (readonly) is ours to type into: clicking it
   // focused an INPUT and every digit was dropped (hoogskev 10-29 / 11-02).
   if (t !== kpInput && t && (t.tagName === 'INPUT' && t.type !== 'checkbox' && t.type !== 'range' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
-  if (e.key === 'Escape') {
-    if (sheetOpen()) { openSheet(false); return; }
-    showPane('dial');
-    return;
-  }
+  if (e.key === 'Escape' && sheetOpen()) { openSheet(false); return; }
   if (sheetOpen()) return;
   const kpActive = document.getElementById('tab-keypad').classList.contains('active');
-  if (e.key >= '0' && e.key <= '9') {
-    if (!kpActive) showPane('keypad');
-    const btn = document.querySelector(`.kp-btn[data-digit="${e.key}"]`);
-    if (btn) btn.click();
-  } else if (e.key === '.' || e.key === ',') {
-    if (!kpActive) showPane('keypad');
-    if (!kpBuffer.includes('.')) { kpBuffer += '.'; kpRender(); }
-  } else if (kpActive && e.key === 'Backspace') {
-    kpBuffer = kpBuffer.slice(0, -1);
-    kpRender();
-  } else if (kpActive && e.key === 'Enter') {
-    kpGo.click();
+  // lib/vfo-freq-entry.js: in the Small VFO the keypad pane is hidden, so
+  // digits go to the strip's frequency (or grow the window) and Enter tunes
+  // only what is on screen.
+  const route = VfoFreqEntry.keyRoute(e.key, {
+    mini: vfoMini, entryOpen: stripEntry, keypadShown: kpActive && !vfoMini,
+    freqInStrip: freqInStrip(), locked: vfoLocked,
+  });
+  if (route.startsWith('strip-')) e.preventDefault(); // Enter never also presses a focused strip button (PTT)
+  switch (route) {
+    case 'cancel':
+      if (stripEntry) stripClose(); else showPane('dial');
+      break;
+    case 'locked': window.api.setVfoLock(true); break;
+    case 'grow-type':
+      kpGrowFromMini();
+      kpBuffer = VfoFreqEntry.addKey(kpBuffer, e.key);
+      kpRender();
+      break;
+    case 'strip-type':
+      stripOpen();
+      kpBuffer = VfoFreqEntry.addKey(kpBuffer, e.key);
+      stripRender();
+      break;
+    case 'strip-back': kpBuffer = kpBuffer.slice(0, -1); stripRender(); break;
+    case 'strip-go': stripGo(); break;
+    case 'keypad-type':
+      if (!kpActive) showPane('keypad');
+      kpBuffer = VfoFreqEntry.addKey(kpBuffer, e.key);
+      kpRender();
+      break;
+    case 'keypad-back': kpBuffer = kpBuffer.slice(0, -1); kpRender(); break;
+    case 'keypad-go': kpGo.click(); break;
   }
 });
 
@@ -3030,6 +3128,8 @@ function miniHeight() {
 }
 
 function setMini(on, { save = true } = {}) {
+  stripClose();
+  if (on) kpFromMini = false;
   vfoMini = !!on;
   document.body.classList.toggle('mini', vfoMini);
   miniBtn.innerHTML = vfoMini ? ICONS.grow : ICONS.shrink;
