@@ -20536,6 +20536,7 @@ function startJtcat(mode) {
     jttyProfile: settings.jttyProfile || 'unknown',
   });
   ft8Engine = jtcatManager.engine; // Phase 0 alias
+  ft8Engine.on('log', (line) => sendCatLog('[JTCAT] ' + line)); // before Hold below, so its line is logged
 
   // Apply persisted JTCAT calibration to the freshly-started engine.
   // Soundcard latency: by default the engine auto-calibrates from the
@@ -20769,8 +20770,8 @@ function startJtcat(mode) {
 
   // Surface engine-level info (which decoder is in use, etc.) in the
   // Verbose CAT log so the user can verify ft8_lib (native) is loaded
-  // without opening DevTools / Node console.
-  ft8Engine.on('log', (line) => sendCatLog('[JTCAT] ' + line));
+  // without opening DevTools / Node console. The listener is attached
+  // right after the engine is built (#688: "Hold TX Freq: ON").
 
   ft8Engine.on('decode', async (data) => {
     // Enrich decodes with "needed" flags for call roster
@@ -29251,6 +29252,9 @@ function connectRemote() {
     // confirm. (Gap 9, mobile dev report 2026-05-03.)
     if (remoteServer.hasClient()) {
       remoteServer.broadcastJtcatStatus({ state: 'running', mode: mode || 'FT8' });
+      // The phone's FT8 screen starts with Hold TX off and learns it only
+      // from this message; a screen opened after connect never saw it (#688).
+      remoteServer.sendToClient({ type: 'jtcat-hold-tx-state', enabled: !!settings.jtcatHoldTxFreq });
     }
   });
 

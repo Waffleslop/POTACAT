@@ -611,6 +611,7 @@ const TESTS = [
   'test/mono-upmix-test.js', // the VFO monitor plays radio audio in both ears (hoogskev, macOS left-channel only)
   'test/setup-test-freq-test.js', // Station Setup test transmit: at the dial if the licence allows, else at the band's FT8 dial and back, else refused with why (w0tlp)
   'test/jtcat-spot-target-after-qso-test.js', // #518: a finished QSO (done, Skip, Cancel) with the spot target's call clears it, armed or engaged; the watcher never calls a worked station again
+  'test/jtcat-hold-tx-resend-test.js', // #688: jtcat-start resends the Hold TX state so a phone FT8 screen opened after connect shows it; Hold TX Freq: ON reaches the CAT log
   'test/jtcat-hunt-filters-test.js', // Hunt filters (plan-jtcat-hunt-priorities): targets ANY, priority, Never answer, auto-skip, CQ DX/continent rule, quiet-reason text
   'test/jtcat-hunt-status-test.js', // Hunt status line (why Hunt is quiet) and Hide decodes below (nj2dx)
   'test/jtcat-hunt-new-grid-test.js', // Hunt: New grids target, Wanted split into New DXCC / New grid (level_death)
