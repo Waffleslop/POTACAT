@@ -161,6 +161,7 @@ const TESTS = [
   'test/ts590-atu-ac111-test.js', // TS-590S/SG starts a tune with AC111; per its PC command guide (VA2PSL #635); other Kenwoods keep AC011;
   'test/freedv-display-mode-test.js', // #716: RADE, not DIGU/PKTUSB, on every surface while FreeDV runs
   'test/freedv-diag-test.js', // #717: FreeDV audio in, sync on/off and capture failures in the session log, rate-limited
+  'test/freedv-mac-mic-test.js', // #718: FreeDV capture runs the macOS microphone check and a 10 s silence watch, the shared rule
   'test/freedv-ptt-refusal-test.js', // FDV1: voice PTT refused in FreeDV modes until FreeDV transmit exists; one sentence on every surface
   'test/freedv-echocat-test.js', // FDV1: decoded FreeDV speech on the ECHOCAT track, freedv-status, protocol drift fixed (agreed with ECHOCAT)
   'test/kenwood-filter-width-test.js',
