@@ -209,8 +209,8 @@ for the history.
 
 | Message | Dir | Purpose |
 |---|---|---|
-| `log-qso` | C→S | Submit a QSO for logging on the desktop. |
-| `log-ok` | S→C | Logging succeeded; includes idx in ADIF. |
+| `log-qso` | C→S | Submit a QSO for logging on the desktop. Idempotent by `uuid` (from 2026-11-17, #733): a `log-qso` whose `uuid` is already in the log (or still being saved) writes nothing and is answered with the first `log-ok` under the new `reqId`, plus `alreadyLogged: true`. A device may resend an unacknowledged `log-qso` with the same `uuid`. Without a `uuid` every `log-qso` is a new QSO. |
+| `log-ok` | S→C | Logging succeeded; includes idx in ADIF. Sent once the records are on disk (from 2026-11-17, #732), before the external-logger and QRZ uploads, respots and SOTA upload. When a respot was asked for, its outcome follows in a second `log-ok` with `followUp: true`: the same reply with `resposted` / `respotError` filled in. A device that already handled the first treats it as a respot notice only. |
 | `get-all-qsos` | C→S | Request the full QSO log. |
 | `all-qsos` | S→C | Full QSO log payload. Chunked when the client hello advertises `chunked-all-qsos`; otherwise one frame capped to the most-recent 2000 records AND 256KB (`truncated: true` when cut). |
 | `qso-added` | S→C | Incremental append after a QSO save, sent only to clients advertising `qso-delta` — replaces the full `all-qsos` re-push on every save. `data` = one record in `all-qsos` shape, `total` = new log length; if `total` ≠ local count + 1 the client should resync via `get-all-qsos`. |

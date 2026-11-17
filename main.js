@@ -378,6 +378,7 @@ const ActivationClock = require('./lib/activation-clock'); // #147: a forgotten 
 const ActivationAnnounce = require('./lib/activation-announce'); // #508: which saved contacts join the live activation list
 const QsoExpand = require('./lib/qso-expand'); // one contact -> its ADIF records (logContact)
 const LogAfterWrite = require('./lib/log-after-write'); // #732: ECHOCAT's log-ok at the disk write, not after the uploads
+const LogQsoReplay = require('./lib/log-qso-replay'); // #733: log-qso is idempotent by uuid
 const QsoLogSource = require('./lib/qso-log-source'); // APP_POTACAT_LOG_SOURCE: ECHOCAT or blank (#634)
 const { dxccCodeForEntity } = require('./lib/dxcc-codes'); // cty.dat entity -> ADIF DXCC number (#554)
 const WatchlistEdit = require('./lib/watchlist-edit'); // watchlist add/remove by operation (ECHOCAT sync)
@@ -17192,6 +17193,19 @@ function announceActivationContact(records, targets) {
   }
 }
 
+// ECHOCAT log-qso replies by uuid (#733, lib/log-qso-replay.js). After a
+// restart the book is empty and the log answers: the saved records holding
+// the uuid, through the log's uuid index (no re-read unless it is there).
+const logQsoReplies = LogQsoReplay.createReplyBook();
+function logQsoReplyFromLog(uuid) {
+  const logPath = qsoLogPath();
+  if (!QsoLog.hasUuid(logPath, uuid)) return null;
+  return LogQsoReplay.replyFromLogRecords(QsoLog.findByUuid(logPath, uuid), {
+    operator: String(settings.myCallsign || '').toUpperCase(),
+    cloudJournal: !!(cloudIpc && typeof cloudIpc.currentOwnerId === 'function' && cloudIpc.currentOwnerId()),
+  });
+}
+
 // The saved record's own fields for a log-ok `records[]` entry (additive;
 // older devices ignore them). Only fields the record actually holds.
 const LOG_OK_SAVED_FIELDS = ['frequency', 'band', 'mode', 'state', 'gridsquare', 'country', 'dxcc', 'name', 'county'];
@@ -17665,7 +17679,11 @@ async function saveQsoRecord(qsoData, opts) {
   // The cloud copy is exactly the record written to the file. (The journal
   // used to upper-case qsoData's own keys: CALLSIGN, QSODATE, FREQUENCY.)
   const sink = logAs ? logAsLogSink(ops, logAs.call) : qsoLogSink;
-  QsoLog.appendRecords(logPath, [buildAdifFields(qsoData)], { existing: [], sink });
+  // The uuid collision check runs against the log's uuid index (#733): a uuid
+  // already in the log gets a fresh one here, never a second record with it.
+  const adifFields = buildAdifFields(qsoData);
+  QsoLog.appendRecords(logPath, [adifFields], { sink });
+  qsoData.uuid = adifFields.APP_POTACAT_UUID; // what log-ok reports is what the file holds
   if (logAs) sendCatLog(`[QSO] Logged ${qsoData.callsign} for ${logAs.call}: their logbook, callsign, QRZ and Cloud settings (the active operator's worked lists are untouched)`);
 
   // Notify QSO pop-out window (it shows the active operator's logbook)
@@ -29883,6 +29901,17 @@ function connectRemote() {
       remoteServer.sendLogResult({ success: false, error: 'Missing callsign', reqId });
       return;
     }
+    // Idempotent by uuid (#733): a device that never heard log-ok sends the
+    // same QSO again under the same uuid. One already logged (or being
+    // logged right now) is not written again; the first reply goes back.
+    const claimUuid = typeof data.uuid === 'string' && QsoLog.isValidUuid(data.uuid) ? data.uuid : '';
+    const claimed = await logQsoReplies.claim(claimUuid, logQsoReplyFromLog);
+    if (claimed.prior) {
+      sendCatLog(`[QSO] ${data.callsign}: already logged (same QSO id) — not logged again`);
+      remoteServer.sendLogResult(LogQsoReplay.replayReply(claimed.prior, reqId));
+      return;
+    }
+    const release = claimed.release;
     try {
       // What the operator logged, as an entry for logContact — which decides
       // the records exactly as every desktop form does (QRZ name per call,
@@ -30007,6 +30036,8 @@ function connectRemote() {
         resposted: result.resposted || false,
         respotError: result.respotError || result.wwffRespotError || result.llotaRespotError || result.wwbotaRespotError || result.dxcRespotError || '',
       };
+      logQsoReplies.remember(claimUuid, reply);
+      release();
       remoteServer.sendLogResult(reply);
       // Several callsigns in one contact: the reply above describes the
       // first; the session list (one row per call) is the truth.
@@ -30014,12 +30045,16 @@ function connectRemote() {
       if (result.after) {
         result.after.then((outcome) => {
           const follow = LogAfterWrite.respotFollowUp(reply, outcome);
-          if (follow) remoteServer.sendLogResult(follow);
+          if (!follow) return;
+          logQsoReplies.patch(claimUuid, { resposted: follow.resposted, respotError: follow.respotError });
+          remoteServer.sendLogResult(follow);
         }).catch((err) => console.error('[Echo CAT] Log QSO follow-up:', err.message));
       }
     } catch (err) {
       console.error('[Echo CAT] Log QSO error:', err.message);
       remoteServer.sendLogResult({ success: false, error: err.message, reqId });
+    } finally {
+      release(); // a refused or failed save remembers nothing: a resend tries again
     }
   });
 
@@ -35038,6 +35073,9 @@ function repairQsoLogMhzFreqs(logPath) {
 function loadWorkedQsos() {
   repairQsoLogFieldNames(qsoLogPath());
   repairQsoLogMhzFreqs(qsoLogPath());
+  // The log's uuid index (#733): built once here, off the startup path, then
+  // kept in step by every write. Free when it is already current.
+  setTimeout(() => { try { QsoLog.uuidIndex(qsoLogPath()); } catch (err) { console.error('[QSO] uuid index:', err.message); } }, 3000);
   if (!settings.adifLogPath) return;
   try {
     workedQsos = parseWorkedQsos(settings.adifLogPath);
