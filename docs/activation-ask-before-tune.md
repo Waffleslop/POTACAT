@@ -95,6 +95,7 @@ Full table: docs/echocat-protocol.md, "Activator mode".
 | Desktop-to-desktop remote client | Sends `set-activator-park` with no frequency; never asked, unchanged. Its tunes are never held. |
 | ECHOCAT Web | Its start screen has no frequency field and never sent a tune, so there is nothing to ask; unchanged. Its tunes are never held. |
 | No answer / timeout | After 120 s the question is dead; the radio stays. An answer after that gets "That question has expired". |
+| The phone sleeps during the question | Re-sent on reconnect (2026-11-17): the question belongs to the paired device, not its socket. If that device reconnects (a new socket, same pairing) while the question is still open, the shack sends the same `activation-tune-ask` again, with the same `id` and contents and `expiresInMs` set to the time that is left; an `activation-tune-answer` from the new socket is accepted. Treat a second ask with an `id` already on screen as the same question. |
 | Answer from another device | Ignored: only the device that started the activation may answer. |
 | VFO locked | A yes gets the usual `tune-blocked` "VFO Locked". |
 | Old phone (no capability) | Its plain tunes (no `channelId`, `bearing`, `pickSideband`) are held 400 ms. A `set-activator-park` from the same phone within that time drops the held tune, starts the activation, and sends the "did not move the radio" notice. Any other held tune goes through 400 ms late. Old phones show `tune-blocked` as an alert, so the operator is told. |

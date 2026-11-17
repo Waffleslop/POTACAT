@@ -201,6 +201,113 @@ test('ending an activation asks nothing', () => {
   assert.strictEqual(e.tuneAskId, '');
 });
 
+// ---- the question follows the device, not the socket (review 2026-11-17, item 8) ----
+test('who asked is the paired device; the re-sent question keeps its id and only the time left', () => {
+  assert.strictEqual(A.askerKey('d1'), 'dev:d1');
+  assert.strictEqual(A.askerKey(''), '');
+  assert.strictEqual(A.askerKey(null), '');
+  const ws1 = {}, ws2 = {};
+  const p = { ws: ws1, askerKey: 'dev:d1', createdAt: 1000, ask: { freqKhz: 14285, mode: 'SSB', text: 'Move?', expiresInMs: A.ASK_TTL_MS } };
+  assert.strictEqual(A.isAsker(p, ws1, ''), true);
+  assert.strictEqual(A.isAsker(p, ws2, 'dev:d1'), true, 'the same device on a new socket');
+  assert.strictEqual(A.isAsker(p, ws2, 'dev:d2'), false, 'another device');
+  assert.strictEqual(A.isAsker({ ws: ws1, askerKey: '', createdAt: 0 }, ws2, ''), false, 'no identity: that socket only');
+  const r = A.resendAsk(p, 'tq1', 1000 + 30000);
+  assert.deepStrictEqual(r, { type: 'activation-tune-ask', id: 'tq1', freqKhz: 14285, mode: 'SSB', text: 'Move?', expiresInMs: A.ASK_TTL_MS - 30000 });
+  assert.strictEqual(A.resendAsk(p, 'tq1', 1000 + A.ASK_TTL_MS), null, 'expired: nothing to re-send');
+  assert.strictEqual(A.resendAsk({ createdAt: 1000 }, 'tq1', 1001), null, 'never asked: nothing to re-send');
+});
+
+function pairedPhone(rs, deviceId, caps) {
+  const sent = [];
+  const ws = { _authenticated: true, readyState: 1, send: (x) => sent.push(JSON.parse(x)), _clientPlatform: 'ios 18.1 phone', _clientCapabilities: caps, _pairedDevice: { id: deviceId, name: 'Phone ' + deviceId } };
+  return { ws, sent, send: (m) => rs._handleMessage(ws, m, {}) };
+}
+function askFrom(rs, phone, events) {
+  phone.send({ type: 'set-activator-park', parkRef: 'US-1234', tuneTo: { freqKhz: 14285, mode: 'SSB' } });
+  const id = events.filter(([e]) => e === 'set-activator-park').pop()[1].tuneAskId;
+  assert.ok(rs.sendActivationTuneAsk(id, A.decide({ want: { freqKhz: 14285, mode: 'SSB' }, canAsk: true, rig: onAir, rigs: twoRigs, activeRigId: 'r1' }).ask));
+  return id;
+}
+function pairedShack() {
+  const rs = new RemoteServer();
+  rs._pairedDevices = [{ id: 'd1', name: 'Phone d1' }, { id: 'd2', name: 'Phone d2' }];
+  const events = [];
+  for (const e of ['tune', 'set-activator-park', 'activation-tune-answer']) rs.on(e, (d) => events.push([e, d]));
+  return { rs, events };
+}
+
+test('the phone slept during the question: on reconnect it gets the same question again, and its yes tunes', () => {
+  const { rs, events } = pairedShack();
+  const a = pairedPhone(rs, 'd1', [A.CAP]);
+  rs._client = a.ws; rs._clients = new Set([a.ws]);
+  const id = askFrom(rs, a, events);
+  const first = a.sent.find(m => m.type === 'activation-tune-ask');
+  assert.ok(first && first.id === id);
+  // the screen sleeps: the socket dies, the same device comes back on a new one
+  a.ws.readyState = 3;
+  rs._tuneAsks.get(id).createdAt -= 40000;
+  const b = pairedPhone(rs, 'd1', [A.CAP]);
+  rs._client = b.ws; rs._clients = new Set([b.ws]);
+  rs._hydrateClient(b.ws);
+  const again = b.sent.filter(m => m.type === 'activation-tune-ask');
+  assert.strictEqual(again.length, 1, 'sent once on reconnect');
+  const { expiresInMs: e1, ...rest1 } = first;
+  const { expiresInMs: e2, ...rest2 } = again[0];
+  assert.deepStrictEqual(rest2, rest1, 'the same question, same id');
+  assert.ok(e2 <= A.ASK_TTL_MS - 40000 && e2 > A.ASK_TTL_MS - 41000, 'only the time left: ' + e2);
+  assert.ok(protocol.validate(again[0], protocol.Dir.S2C).ok, 'the wire format is unchanged');
+  rs._hydrateClient(b.ws);
+  assert.strictEqual(b.sent.filter(m => m.type === 'activation-tune-ask').length, 1, 'not repeated to the same socket');
+  b.send({ type: 'activation-tune-answer', id, tune: true, rigId: 'r2' });
+  assert.deepStrictEqual(events.filter(([e]) => e === 'activation-tune-answer').map(x => x[1]), [{ freqKhz: 14285, mode: 'SSB', rigId: 'r2' }]);
+});
+
+test('a reconnect whose hello comes after auth gets the question at hello', () => {
+  const { rs, events } = pairedShack();
+  const a = pairedPhone(rs, 'd1', [A.CAP]);
+  rs._client = a.ws; rs._clients = new Set([a.ws]);
+  const id = askFrom(rs, a, events);
+  a.ws.readyState = 3;
+  const b = pairedPhone(rs, 'd1', []);
+  rs._client = b.ws; rs._clients = new Set([b.ws]);
+  rs._hydrateClient(b.ws);
+  assert.strictEqual(b.sent.filter(m => m.type === 'activation-tune-ask').length, 0, 'no capability yet');
+  b.send({ type: 'hello', protocolVersion: protocol.PROTOCOL_VERSION, clientPlatform: 'ios 18.1 phone', clientVersion: '1.6.0', capabilities: [A.CAP] });
+  const again = b.sent.filter(m => m.type === 'activation-tune-ask');
+  assert.strictEqual(again.length, 1);
+  assert.strictEqual(again[0].id, id);
+});
+
+test('another paired device, an expired question, or a socket with no pairing: nothing re-sent, no tune', () => {
+  const { rs, events } = pairedShack();
+  const a = pairedPhone(rs, 'd1', [A.CAP]);
+  rs._client = a.ws; rs._clients = new Set([a.ws]);
+  const id = askFrom(rs, a, events);
+  a.ws.readyState = 3;
+  const other = pairedPhone(rs, 'd2', [A.CAP]);
+  rs._hydrateClient(other.ws);
+  assert.strictEqual(other.sent.filter(m => m.type === 'activation-tune-ask').length, 0);
+  other.send({ type: 'activation-tune-answer', id, tune: true });
+  assert.strictEqual(events.filter(([e]) => e === 'activation-tune-answer').length, 0);
+  // expired: the same device comes back too late
+  rs._tuneAsks.get(id).createdAt -= A.ASK_TTL_MS + 1;
+  const late = pairedPhone(rs, 'd1', [A.CAP]);
+  rs._hydrateClient(late.ws);
+  assert.strictEqual(late.sent.filter(m => m.type === 'activation-tune-ask').length, 0);
+  late.send({ type: 'activation-tune-answer', id, tune: true });
+  assert.strictEqual(events.filter(([e]) => e === 'activation-tune-answer').length, 0);
+  // no pairing (shared token): the question stays with its socket, as before
+  const s = shack('ios 18.1 phone', [A.CAP]);
+  s.send({ type: 'set-activator-park', parkRef: 'US-1234', tuneTo: { freqKhz: 14285, mode: 'SSB' } });
+  const id2 = s.events.find(([e]) => e === 'set-activator-park')[1].tuneAskId;
+  s.rs.sendActivationTuneAsk(id2, A.decide({ want: { freqKhz: 14285, mode: 'SSB' }, canAsk: true, rig: onAir, rigs: oneRig, activeRigId: 'r1' }).ask);
+  const sent2 = [];
+  const ws2 = { _authenticated: true, readyState: 1, send: (x) => sent2.push(JSON.parse(x)), _clientPlatform: 'ios', _clientCapabilities: [A.CAP] };
+  s.rs._hydrateClient(ws2);
+  assert.strictEqual(sent2.filter(m => m.type === 'activation-tune-ask').length, 0);
+});
+
 test('the shack advertises the capability; registry, guest wall and main glue', () => {
   const rsSrc = readSrc(path.join(__dirname, '..', 'lib', 'remote-server.js'));
   assert.ok(rsSrc.includes("'activation-ask-tune',"), 'server hello lists activation-ask-tune');
