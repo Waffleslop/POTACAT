@@ -403,6 +403,7 @@ function resolveCallsign(call, db) {
 }
 const CallZones = require('./lib/call-zones'); // CQ/ITU zones for spots + logbook rows (LZ3AW item 30)
 const DxRule = require('./lib/dx-rule'); // what counts as DX: another entity, or the operator's distance (G4BFG)
+const ParkEntity = require('./lib/park-entity'); // a POTA park's DXCC entity, for a home call signed abroad (#662)
 const InstallDefaults = require('./lib/install-defaults'); // always-on features + the one-time defaults (Casey 2026-10-27)
 const ClusterNodeChoice = require('./lib/cluster-node-choice'); // turn saved cluster nodes on/off from the Source menu (LZ3AW item 1)
 const { parseAdifFile, parseWorkedQsos, parseAllQsos, parseAllRawQsos, parseAdifStream, parseSqliteFile, parseSqliteConfirmed, isSqliteFile, parseRecord: parseAdifRecord, normalizeMode: normalizeLogMode } = require('./lib/adif');
@@ -16533,7 +16534,15 @@ async function logContact(entry, opts) {
     },
     parkInfo: (ref) => {
       const p = parkInfoFor(ref);
-      return p ? { states: parkStatesFromLocation(p.locationDesc || ''), grid: p.grid || '' } : null;
+      // The POTA park's DXCC entity: a home call signed abroad is logged in
+      // the park's entity, not the call's (#662). lib/qso-expand.js decides.
+      const pe = ctyEntityByName(ParkEntity.potaParkEntity(ref, p && p.locationDesc));
+      const entity = pe ? {
+        name: pe.name, dxcc: dxccCodeForEntity(pe.name) || '', cont: pe.continent || '',
+        cqz: pe.cqZone || '', ituz: pe.ituZone || '',
+      } : null;
+      if (!p) return entity ? { states: [], grid: '', entity } : null;
+      return { states: parkStatesFromLocation(p.locationDesc || ''), grid: p.grid || '', entity };
     },
   });
   const records = QsoExpand.expandContact(e, expandOpts(false));
@@ -32907,9 +32916,14 @@ function processPotaSpots(raw) {
     // Resolve continent from cty.dat
     const callsign = s.activator || s.callsign || '';
     let continent = '';
+    let parkEntity = '';
     if (ctyDb && callsign) {
       const entity = resolveCallsign(callsign, ctyDb);
       if (entity) continent = entity.continent || '';
+      // A home call signed in a park abroad: the park's entity (#662).
+      parkEntity = ParkEntity.parkEntityOverride(entity ? entity.name : '', ParkEntity.potaParkEntity(s.reference, s.locationDesc), dxccCodeForEntity);
+      const pe = parkEntity ? ctyEntityByName(parkEntity) : null;
+      if (pe) continent = pe.continent || continent;
     }
 
     let spotBearing = null;
@@ -32937,6 +32951,8 @@ function processPotaSpots(raw) {
       band: freqToBand(freqMHz),
       spotTime: s.spotTime || '',
       continent,
+      // Set only when the park lies in another DXCC entity than the call.
+      parkEntity,
       comments: s.comments || '',
       count: typeof s.count === 'number' ? s.count : null,
       wpm: (() => { const m = (s.comments || '').match(/(\d+)\s*WPM/i); return m ? parseInt(m[1], 10) : null; })(),
@@ -33621,6 +33637,8 @@ function dedupeCrossSource(spots) {
       // drop it, so the WPM "Sync" (and auto-sync) had nothing to match on
       // the spots CW hunters work most (KE4WLE 2026-09-25).
       if (s.wpm && !survivor.wpm) survivor.wpm = s.wpm;
+      // The POTA park's entity, when a cluster copy of the spot survives (#662).
+      if (s.parkEntity && !survivor.parkEntity) survivor.parkEntity = s.parkEntity;
     }
     collapsed.push(survivor);
   }
@@ -33643,12 +33661,30 @@ function dxEntityOf(call) {
 function dxRuleOpts() {
   return { hfMi: settings.dxDistanceHf, vhfMi: settings.dxDistanceVhf };
 }
+// A cty.dat entity by its name (a POTA park's entity, lib/park-entity.js).
+function ctyEntityByName(name) {
+  if (!ctyDb || !name) return null;
+  return ctyDb.entities.find((e) => e.name === name) || null;
+}
 function stampSpotDx(spots) {
   const myEntity = dxEntityOf(settings.myCallsign);
   const opts = dxRuleOpts();
   for (const sp of spots) {
     if (!sp || sp.source === 'net') continue;
-    sp.isDx = DxRule.isDx({ myEntity, theirEntity: dxEntityOf(sp.callsign), distanceMi: sp.distance, freqKhz: parseFloat(sp.frequency) }, opts);
+    // A POTA activator signing his home call abroad is DX by the park (#662).
+    const theirEntity = sp.parkEntity || dxEntityOf(sp.callsign);
+    sp.isDx = DxRule.isDx({ myEntity, theirEntity, distanceMi: sp.distance, freqKhz: parseFloat(sp.frequency) }, opts);
+  }
+}
+// Zones of a spot whose POTA park is in another entity than its call: the
+// park entity's, not the home call's (#662).
+function stampParkEntityZones(spots) {
+  for (const sp of spots) {
+    if (!sp || !sp.parkEntity) continue;
+    const e = ctyEntityByName(sp.parkEntity);
+    if (!e) continue;
+    sp.cqZone = e.cqZone || null;
+    sp.ituZone = e.ituZone || null;
   }
 }
 
@@ -33663,6 +33699,7 @@ function sendMergedSpots() {
   // desktop table and ECHOCAT cards — LZ3AW item 30).
   CallZones.stampSpotZones(merged, callZonesOf);
   stampSpotDx(merged);
+  stampParkEntityZones(merged);
   // Only bands this radio is used on (rig editor, lib/rig-bands.js): a spot
   // on a band it cannot work is never shown, on any surface or panadapter.
   const rigBands = activeRigBands();
