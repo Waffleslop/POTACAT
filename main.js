@@ -4355,8 +4355,9 @@ function sendCatStatus(s) {
 // frequency with the audio in the middle of the radio's filter. The dial
 // moves just before the key-down and comes back just after the key-up; the
 // shifted dial never reaches the displays, the log, the JTCAT anchor or the
-// wrong-band guard (fakeItIsEcho in both frequency handlers).
-const _fakeIt = { active: false, dialHz: 0, txDialHz: 0, shiftHz: 0, restoredAt: 0, restorePending: false };
+// wrong-band guard (fakeItIsEcho in both frequency handlers), however late it
+// is read (#681).
+const _fakeIt = { active: false, dialHz: 0, txDialHz: 0, shiftHz: 0, restoredAt: 0, restorePending: false, settled: false, restoreRetries: 0, lastRetryAt: 0 };
 function fakeItEnabled() { return settings.jtcatFakeIt === true; }
 // Who moves the dial: the Flex API (same rule as tuneRadio) or the CAT link.
 function fakeItDialRoute() {
@@ -4380,8 +4381,17 @@ function fakeItSyncEngine() {
   const noCat = !!(settings.catTarget && settings.catTarget.type === 'none');
   ft8Engine.setFakeIt(fakeItEnabled() && !multi && !isRemoteMode() && !noCat);
 }
+// A read at the shifted dial after the restore sends the dial back again
+// (lib/jtcat-fake-it.js onDialRead): a late poll answer or a dropped restore.
 function fakeItIsEcho(hz) {
-  return FakeIt.isShiftEcho(hz, _fakeIt, Date.now());
+  const r = FakeIt.onDialRead(hz, _fakeIt, Date.now());
+  if (r.patch) Object.assign(_fakeIt, r.patch);
+  if (r.action === 'restore' && !_remoteTxState && !(cat && cat._transmitting) && fakeItSetDial(_fakeIt.dialHz)) {
+    sendCatLog(`[JTCAT] Fake It: the radio still reads ${(hz / 1e6).toFixed(6)} MHz after the transmission, dial back to ${(_fakeIt.dialHz / 1e6).toFixed(6)} MHz again (try ${_fakeIt.restoreRetries} of ${FakeIt.RESTORE_RETRIES})`);
+  } else if (r.action === 'accept') {
+    sendCatLog(`[JTCAT] Fake It: the radio stays at ${(hz / 1e6).toFixed(6)} MHz after ${FakeIt.RESTORE_RETRIES} tries to put the dial back to ${(_fakeIt.dialHz / 1e6).toFixed(6)} MHz; taking it as the dial`);
+  }
+  return r.echo;
 }
 // tx-start, right before the key-down. Returns false when the dial could not
 // move: the audio was rendered for the shifted dial, so this transmission
@@ -4395,7 +4405,7 @@ function fakeItShiftForTx(data) {
     sendCatLog(`[JTCAT] Fake It: TX skipped — the dial could not be moved ${shift > 0 ? '+' : ''}${shift} Hz (${!plan ? 'the radio has not reported its dial' : 'no radio link'}). The audio for this transmission is off the passband centre by that much.`);
     return false;
   }
-  Object.assign(_fakeIt, { active: true, dialHz: plan.dialHz, txDialHz: plan.txDialHz, shiftHz: plan.shiftHz, restoredAt: 0, restorePending: false });
+  Object.assign(_fakeIt, { active: true, dialHz: plan.dialHz, txDialHz: plan.txDialHz, shiftHz: plan.shiftHz, restoredAt: 0, restorePending: false, settled: false, restoreRetries: 0, lastRetryAt: 0 });
   sendCatLog(`[JTCAT] ${FakeIt.describeShift(plan, Math.round((data.freq || 0) - shift))}`);
   return true;
 }
