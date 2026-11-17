@@ -172,6 +172,7 @@ const TESTS = [
   'test/g90-fake-rigctld-test.js', // #109: a fake rigctld that dies on CAT in TX; the G90 keeps the link through an over, a generic model's reconnect unkeys first
   'test/wfm-mode-test.js',
   'test/jtcat-dial-follow-test.js',
+  'test/js8-dial-follow-test.js',
   'test/winlink-fault-test.js',
   'test/direwolf-agw-probe-test.js',
   'test/ptt-cat-line-test.js',

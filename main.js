@@ -537,7 +537,7 @@ const FreedvPtt = require('./lib/freedv-ptt'); // FreeDV mode: voice PTT refused
 const FreedvStatus = require('./lib/freedv-status'); // freedv-status to ECHOCAT: state, modes, sync, SNR, plain reason
 const FreedvDisplayMode = require('./lib/freedv-display-mode'); // #716: FREEDV-<codec> on every surface while the engine runs
 const { FreedvDiag } = require('./lib/freedv-diag'); // #717: audio in, sync and a 30 s summary in the session log
-const { decideDialFollow } = require('./lib/jtcat-dial-follow');
+const { decideDialFollow, followsKnob } = require('./lib/jtcat-dial-follow');
 const JtcatRxSource = require('./lib/jtcat-rx-source'); // #243: JTCAT can hear a WebSDR instead of the radio
 const { StreamResampler } = require('./lib/stream-resampler');
 const { isWinlinkSessionFault } = require('./lib/winlink-fault');
@@ -4460,9 +4460,13 @@ function jtcatDialFollow(hz) {
     if (isRemoteMode() || !ft8Engine || !ft8Engine._running || !(_jtcatExpectedDialHz > 0)) return;
     if (jtcatManager && jtcatManager.sliceCount > 1) return;
     const mode = String(ft8Engine._mode || 'FT8').toUpperCase();
-    if (!/^FT[842]$/.test(mode)) return;
-    const d = decideDialFollow({ dialHz: hz, anchorHz: _jtcatExpectedDialHz, freqs: freqsForMode(mode), qsoLive: jtcatQsoLive() });
+    if (!followsKnob(mode)) return;
+    // JS8 (#714) follows onto its own calling dials; a message still going
+    // out (frames queued or keyed) is JS8's "QSO in progress".
+    const js8 = mode === 'JS8';
+    const d = decideDialFollow({ dialHz: hz, anchorHz: _jtcatExpectedDialHz, freqs: js8 ? JS8_DIAL_KHZ : freqsForMode(mode), qsoLive: jtcatQsoLive() || (js8 && !!(ft8Engine._txActive || ft8Engine.txQueueLength > 0)) });
     if (d.action !== 'follow') return;
+    if (js8) { js8FollowBand(d.dialHz, d.band); return; }
     jtcatFollowBand(d.dialHz, d.band, `the radio moved to the ${mode} dial on ${d.band}`);
   } catch { /* the guard still protects TX */ }
 }
@@ -4473,6 +4477,16 @@ function jtcatFollowBand(dialHz, band, why) {
   sendCatLog(`[JTCAT] Following the radio to ${(khz / 1000).toFixed(3)} MHz${band ? ` (${band})` : ''}: ${why}`);
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-band-follow', { band: band || '', freqKhz: khz });
   try { if (remoteServer && remoteServer.running) remoteServer.sendJtcatBandFollow({ band: band || '', freqKhz: khz }); } catch { /* no client */ }
+}
+
+// JS8's follow: the guard anchor moves and the reassembler resets (half a
+// message from the old band must not greet the new one), as js8TuneBand does.
+// The JS8 window's band picker follows the dial through js8PushStatus.
+function js8FollowBand(dialHz, band) {
+  _jtcatExpectedDialHz = Math.round(dialHz);
+  js8RxAssembler = new Js8RxAssembler({});
+  sendCatLog(`[JS8] Following the radio to ${(_jtcatExpectedDialHz / 1e6).toFixed(3)} MHz (${band}): the radio moved to the JS8 dial on ${band}`);
+  pushActivityState();
 }
 
 // "Follow the radio" on the wrong-band refusal: the operator says the radio
@@ -21308,6 +21322,15 @@ function startJtcat(mode) {
       }
       // ...and on the ECHOCAT device: a web/phone-owned session was refused in silence.
       if (remoteServer && remoteServer.hasClient()) remoteServer.broadcastJtcatQsoState({ phase: 'error', error: dialMsg });
+      // JS8 runs in its own window, which never sees jtcat-qso-state: its
+      // refusal reached only the CAT log (#714). Its existing refusal channel.
+      if (ft8Engine._mode === 'JS8') {
+        const js8Msg = 'TX blocked — the radio is on ' + (_currentFreqHz / 1e6).toFixed(3) + ' MHz' + bandOf(_currentFreqHz) +
+          ' but JS8 is set to ' + (_jtcatExpectedDialHz / 1e6).toFixed(3) + ' MHz' + bandOf(_jtcatExpectedDialHz) +
+          '. Turn the radio to a JS8 dial, or pick a band in the JS8 window.';
+        if (js8PopoutWin && !js8PopoutWin.isDestroyed()) js8PopoutWin.webContents.send('js8call-send-result', { ok: false, error: js8Msg });
+        if (remoteServer && remoteServer.hasClient()) remoteServer.sendJs8SendResult({ ok: false, error: js8Msg });
+      }
       jtcatRefuseTx('the radio is on ' + (_currentFreqHz / 1e6).toFixed(3) + ' MHz' + bandOf(_currentFreqHz) +
         ', JTCAT on ' + (_jtcatExpectedDialHz / 1e6).toFixed(3) + ' MHz' + bandOf(_jtcatExpectedDialHz));
       return;
