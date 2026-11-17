@@ -3021,6 +3021,7 @@ if (rigModelSelect) rigModelSelect.addEventListener('change', async () => {
   if (noCat) setRadioType('nocat');           // Pebble HF and friends: nothing to connect to
   else if (shared) { /* keep flrig / DXLab Commander / rigctld Network */ }
   else if (brand === 'Yaesu' && getSelectedRadioType() === 'yaesu-lan') { /* keep the SCU-LAN10 connection */ }
+  else if (groupOf && Array.isArray(groupOf.tcpcat) && groupOf.tcpcat.includes(modelName)) setRadioType('tcpcat'); // Zeus's CAT port (#185)
   else if (brand === 'FlexRadio') setRadioType('flex');
   else if (brand === 'Icom') setRadioType('icom');
   else setRadioType('serialcat');
