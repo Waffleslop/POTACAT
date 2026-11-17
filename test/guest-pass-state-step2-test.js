@@ -18,6 +18,7 @@
 
 const assert = require('assert');
 const fs = require('fs');
+const net = require('net');
 const os = require('os');
 const path = require('path');
 const WebSocket = require('ws');
@@ -193,8 +194,21 @@ const END = '2026-11-14T20:30:00.000Z';
     c.states = () => c.got.filter((m) => m.type === 'pass-state').map((m) => m.state + '/' + m.reason);
     return c;
   }
-  function server(port, opts) {
+  // A port the OS hands out now, so two suites on one machine (parallel
+  // worktrees) never meet on a fixed port. Not 0 to start(): start() maps 0
+  // to 7300, the station's real port.
+  function freePort() {
+    return new Promise((resolve, reject) => {
+      const probe = net.createServer();
+      probe.on('error', reject);
+      probe.listen(0, '0.0.0.0', () => { const { port } = probe.address(); probe.close(() => resolve(port)); });
+    });
+  }
+  // The station on its own port, ready when it says it is listening. No mDNS:
+  // a test server is never advertised on the LAN.
+  async function server(opts) {
     const o = opts || {};
+    const port = await freePort();
     const rs = new RemoteServer();
     rs.on('log', () => {});
     rs.setPassValidator(async (code) => (o.validator ? o.validator(code) : {
@@ -213,8 +227,13 @@ const END = '2026-11-14T20:30:00.000Z';
     rs.setPassLiveCheck(() => ({ ...live }));
     rs.on('pass-paused', () => { live.paused = true; });
     rs.on('pass-resumed', () => { live.paused = false; });
-    rs.start(port, TOKEN, { requireToken: true, certDir: os.tmpdir() });
-    return { rs, live };
+    const started = new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('the station did not listen on port ' + port)), 10000);
+      rs.once('started', () => { clearTimeout(t); resolve(); });
+    });
+    rs.start(port, TOKEN, { requireToken: true, certDir: os.tmpdir(), mdns: false });
+    try { await started; } catch (e) { rs.stop(); throw e; }
+    return { rs, live, port };
   }
   async function guest(port, platform, caps, sid) {
     const g = client(port);
@@ -236,9 +255,7 @@ const END = '2026-11-14T20:30:00.000Z';
   const FLAG = ['pass-state'];
 
   await check('the station advertises pass-state; a guest with the flag gets on-air on connect, one without gets none', async () => {
-    const PORT = 17561;
-    const { rs } = server(PORT);
-    await sleep(400);
+    const { rs, port: PORT } = await server();
     try {
       const a = await guest(PORT, 'ios', FLAG);
       const hello = a.got.find((m) => m.type === 'hello');
@@ -256,9 +273,7 @@ const END = '2026-11-14T20:30:00.000Z';
   });
 
   await check('a second device on the same pass session waits (other-device, naming the device on air); pass-claim swaps with no redial', async () => {
-    const PORT = 17562;
-    const { rs } = server(PORT);
-    await sleep(400);
+    const { rs, port: PORT } = await server();
     try {
       const phone = await guest(PORT, 'ios', FLAG);
       const pc = await guest(PORT, 'desktop-win', FLAG);
@@ -299,9 +314,7 @@ const END = '2026-11-14T20:30:00.000Z';
   });
 
   await check('while the owner holds the radio a claim is refused with the current state; both devices wait for the owner; give it back restores each', async () => {
-    const PORT = 17563;
-    const { rs } = server(PORT);
-    await sleep(400);
+    const { rs, port: PORT } = await server();
     try {
       const phone = await guest(PORT, 'ios', FLAG);
       const pc = await guest(PORT, 'desktop-mac', FLAG);
@@ -321,9 +334,7 @@ const END = '2026-11-14T20:30:00.000Z';
   });
 
   await check('a pending take refuses a claim (shaped for step 3)', async () => {
-    const PORT = 17564;
-    const { rs } = server(PORT);
-    await sleep(400);
+    const { rs, port: PORT } = await server();
     try {
       const phone = await guest(PORT, 'ios', FLAG);
       const pc = await guest(PORT, 'web', FLAG);
@@ -342,9 +353,7 @@ const END = '2026-11-14T20:30:00.000Z';
   });
 
   await check('the device on air leaves: the waiting device takes the radio', async () => {
-    const PORT = 17565;
-    const { rs } = server(PORT);
-    await sleep(400);
+    const { rs, port: PORT } = await server();
     try {
       const phone = await guest(PORT, 'android', FLAG);
       const pc = await guest(PORT, 'desktop-linux', FLAG);
@@ -358,9 +367,7 @@ const END = '2026-11-14T20:30:00.000Z';
   });
 
   await check('older clients keep today\'s behaviour: a second device without the flag takes the radio (kicked)', async () => {
-    const PORT = 17566;
-    const { rs } = server(PORT);
-    await sleep(400);
+    const { rs, port: PORT } = await server();
     try {
       const phone = await guest(PORT, 'ios', FLAG);
       const old = await guest(PORT, 'desktop-win', []);
@@ -373,9 +380,7 @@ const END = '2026-11-14T20:30:00.000Z';
   });
 
   await check('a refused connection carries passState next to the older fields; without the flag, the older fields only', async () => {
-    const PORT = 17567;
-    const { rs } = server(PORT);
-    await sleep(400);
+    const { rs, port: PORT } = await server();
     try {
       const o = await owner(PORT); // operating, no pass on the rig
       const g = await guest(PORT, 'ios', FLAG);
@@ -392,10 +397,8 @@ const END = '2026-11-14T20:30:00.000Z';
   });
 
   await check('refusals for Cloud answers: not valid -> over / not_started waiting; check failed -> reconnecting', async () => {
-    const PORT = 17568;
     let answer = null;
-    const { rs } = server(PORT, { validator: async () => { if (answer instanceof Error) throw answer; return answer; } });
-    await sleep(400);
+    const { rs, port: PORT } = await server({ validator: async () => { if (answer instanceof Error) throw answer; return answer; } });
     try {
       answer = { code: null, notValid: true, reason: 'cancelled', at: null };
       let g = await guest(PORT, 'web', FLAG);
@@ -415,9 +418,7 @@ const END = '2026-11-14T20:30:00.000Z';
   });
 
   await check('an expired or cancelled pass says over before pass-ended; another ending says nothing new', async () => {
-    const PORT = 17569;
-    const { rs } = server(PORT);
-    await sleep(400);
+    const { rs, port: PORT } = await server();
     try {
       const g = await guest(PORT, 'ios', FLAG);
       rs.broadcastPassEnded('expired', CODE);
@@ -434,9 +435,7 @@ const END = '2026-11-14T20:30:00.000Z';
   });
 
   await check('expiring: on-air / ends-soon follows main\'s broadcast', async () => {
-    const PORT = 17570;
-    const { rs, live } = server(PORT);
-    await sleep(400);
+    const { rs, live, port: PORT } = await server();
     try {
       const g = await guest(PORT, 'ios', FLAG);
       const n = g.states().length;
