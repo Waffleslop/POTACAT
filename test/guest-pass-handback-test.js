@@ -496,7 +496,10 @@ const END = '2026-11-14T23:00:00.000Z';
     assert.ok(!/remoteServer\.on\('pass-owner-idle-offered'/.test(main));
     assert.ok(/ipcMain\.handle\('remote-pass-take-back'/.test(main));
     // radio-tx: the radio's TX status from every CAT connection, and forward power.
-    const conn = main.slice(main.indexOf('async function connectCat() {'), main.indexOf('async function connectCat() {') + 40000);
+    // The whole of connectCat (to its closing brace), not a fixed-length window:
+    // a branch added near the top pushed the last connection past 40000 chars.
+    const connAt = main.indexOf('async function connectCat() {');
+    const conn = main.slice(connAt, main.indexOf('\n}\n', connAt));
     assert.ok(/^  _radioTxWatch\.cat\(false\);/m.test(conn), 'a reconnect clears a stuck TX status');
     assert.strictEqual((conn.match(/cat\.on\('ptt', \(on\) => _radioTxWatch\.cat\(on\)\)/g) || []).length,
       (conn.match(/cat = new (RigController|CatClient)\(/g) || []).length, 'every CAT connection feeds the watch');
