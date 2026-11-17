@@ -17245,11 +17245,19 @@ async function logContact(entry, opts) {
   }));
   const ownRef = !!(entry.mySig && entry.mySigInfo);
   const actAt = ActivationClock.contactTime(entry, Date.now()); // #147: its own timestamp decides
-  const myRefs = ownRef
-    ? [{ sig: String(entry.mySig).toUpperCase(), ref: entry.mySigInfo }]
-    : (entry.activation === false ? [] : activationRefsAt(actAt));
+  // entry.deviceMyRef: the phone's own park, kept when this desktop's
+  // activation does not apply at the contact's time (#734, 00Z).
+  const mine = ActivationClock.contactMyRefs({
+    ownRef: ownRef ? { sig: String(entry.mySig).toUpperCase(), ref: entry.mySigInfo } : null,
+    skipActivation: entry.activation === false,
+    activationRefsAt: () => activationRefsAt(actAt),
+    deviceRef: entry.deviceMyRef,
+  });
+  const myRefs = mine.refs;
+  if (mine.from === 'device') sendCatLog(`[Activation] ${entry.callsign}: the desktop's activation has ended; logged at the phone's park ${mine.refs[0].ref}`);
   const e = { ...entry, myRig };
   delete e.activation;
+  delete e.deviceMyRef;
   // Never a record with no MODE (pota.app refuses the file; NA4DQ 2026-10-27).
   // A blank mode takes the radio's voice/CW mode; a data mode cannot name the
   // digital mode worked, and no radio means nothing to go by: refused, with
@@ -17359,7 +17367,7 @@ async function logContact(entry, opts) {
       } else if (!failure) failure = r;
     }
   }
-  if (written.length && !ownRef && myRefs.length) activationNoteContact(actAt);
+  if (written.length && mine.from === 'activation') activationNoteContact(actAt);
   // The live activation list hears of it here, once, whichever surface saved
   // it; the main window's own forms list it themselves (opts.listed). #508
   if (written.length) {
@@ -29967,10 +29975,15 @@ function connectRemote() {
       }
       // A device's own activation ref is used as-is only when this desktop
       // runs no activation; when it does, its full set of parks + cross refs
-      // applies (logContact), as the old cross-product here did.
+      // applies (logContact), as the old cross-product here did. If that
+      // activation has ended by the contact's time (the UTC day change, 6 h
+      // idle; #147), the device's ref still applies (#734): it rides along
+      // as deviceMyRef and logContact decides.
       if (data.mySig && data.mySigInfo && !liveActivationMyRefs().length) {
         entry.mySig = String(data.mySig).toUpperCase();
         entry.mySigInfo = data.mySigInfo;
+      } else if (data.mySig && data.mySigInfo) {
+        entry.deviceMyRef = { sig: String(data.mySig).toUpperCase(), ref: data.mySigInfo };
       }
 
       // The reply goes out once the records are on disk (#732); the uploads,
