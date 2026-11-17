@@ -548,6 +548,7 @@ let _appWindowsClosing = false; // the main window went: POTACAT is quitting
 const { checkClockOffset, syncSystemClock, classifyClockOffset } = require('./lib/ntp');
 const StationClock = require('./lib/station-clock'); // FT8/FT4/FT2/WSPR/JTTY slot clock, correctable from an ECHOCAT device
 const JtcatParser = require('./renderer/jtcat-parser'); // shared FT8 message classifier (also a browser global in the renderers)
+const JtcatSpotTarget = require('./lib/jtcat-spot-target'); // which finished QSO ends the spot target; watcher refuses worked calls (#518)
 const CqTarget = require('./renderer/cq-target'); // shared CQ "chase target" tags + decode-match (also a browser global)
 const { RemoteServer } = require('./lib/remote-server');
 const { buildDiagnosticSnapshot, redactLogLines } = require('./lib/diagnostic-snapshot');
@@ -17578,11 +17579,11 @@ function broadcastSpotTarget(extra) {
   if (remoteServer) remoteServer.broadcastJtcatSpotTarget(payload);
 }
 
-function clearSpotTarget(reason) {
+function clearSpotTarget(reason, logLine) {
   if (!jtcatSpotTarget) return;
   const call = jtcatSpotTarget.call;
   jtcatSpotTarget = null;
-  sendCatLog(`[JTCAT] Spot target ${call} cleared (${reason})`);
+  sendCatLog(logLine || `[JTCAT] Spot target ${call} cleared (${reason})`);
   broadcastSpotTarget({ status: 'cleared', reason, call });
 }
 
@@ -20858,8 +20859,7 @@ function startJtcat(mode) {
     if (remoteJtcatQso && remoteJtcatQso.phase === 'done') {
       // Remote-owned Spot Target completed — same worked-clear the popout
       // done-block does (docs/mobile-handoff-spot-target.md work item 3).
-      if (jtcatSpotTarget && jtcatSpotTarget.status === 'engaged' && remoteJtcatQso.call &&
-          JtcatParser.normalizeCall(remoteJtcatQso.call) === JtcatParser.normalizeCall(jtcatSpotTarget.call)) {
+      if (JtcatSpotTarget.qsoEndClearsTarget(jtcatSpotTarget, remoteJtcatQso.call)) {
         clearSpotTarget('worked');
       }
       if (remoteJtcatQso.call) jtcatSessionMark(remoteJtcatQso.call);
@@ -20872,9 +20872,9 @@ function startJtcat(mode) {
     }
     if (popoutJtcatQso && popoutJtcatQso.phase === 'done') {
       // Spot Target completed — clear it with a "worked" notice before the
-      // QSO object is dropped.
-      if (jtcatSpotTarget && jtcatSpotTarget.status === 'engaged' && popoutJtcatQso.call &&
-          JtcatParser.normalizeCall(popoutJtcatQso.call) === JtcatParser.normalizeCall(jtcatSpotTarget.call)) {
+      // QSO object is dropped. Armed or engaged: a target the operator worked
+      // by hand before the watcher fired must not call them again (#518).
+      if (JtcatSpotTarget.qsoEndClearsTarget(jtcatSpotTarget, popoutJtcatQso.call)) {
         clearSpotTarget('worked');
       }
       if (popoutJtcatQso.call) jtcatSessionMark(popoutJtcatQso.call);
@@ -20996,7 +20996,12 @@ function startJtcat(mode) {
           const hits = tgtResults
             .map((d) => ({ d, trig: JtcatParser.classifySpotTargetTrigger(d.text, tgt.call, onAirCall()) }))
             .filter((h) => h.trig);
-          if (hits.length) {
+          const tgtBm = jtcatCurrentBandMode(ft8Engine);
+          if (hits.length && JtcatSpotTarget.watcherRefusesWorked(tgt, (c) => jtcatIsWorkedCall(c, tgtBm.band, tgtBm.mode))) {
+            // Already worked (this session, waiting in the Log QSO window, or
+            // in the log): never call them again with the grid (#518).
+            clearSpotTarget('worked', JtcatSpotTarget.refusalLogLine(tgt.call, tgtBm.band, tgtBm.mode));
+          } else if (hits.length) {
             hits.sort((a, b) => ((b.d.db == null ? -999 : b.d.db) - (a.d.db == null ? -999 : a.d.db)));
             const hit = hits[0];
             // Owner-aware synthetic reply — popout path when the popout is
@@ -30280,6 +30285,11 @@ function connectRemote() {
   });
 
   remoteServer.on('jtcat-cancel-qso', () => {
+    // Operator abandoned the QSO from the phone: a spot target on that call
+    // ends too, or the watcher would call them again (#518).
+    if (remoteJtcatQso && JtcatSpotTarget.qsoEndClearsTarget(jtcatSpotTarget, remoteJtcatQso.call)) {
+      clearSpotTarget('user');
+    }
     if (ft8Engine) {
       ft8Engine._txEnabled = false;
       ft8Engine.setTxMessage('');
@@ -30317,8 +30327,7 @@ function connectRemote() {
       // They never answered: Skip stops calling them and goes back to
       // listening (Hunt picks its next station), never a made-up exchange.
       sendCatLog(`[JTCAT] Skip: ${q.call} never answered — stopped calling them; listening`);
-      if (jtcatSpotTarget && jtcatSpotTarget.status === 'engaged' &&
-        JtcatParser.normalizeCall(q.call) === JtcatParser.normalizeCall(jtcatSpotTarget.call)) clearSpotTarget('user');
+      if (JtcatSpotTarget.qsoEndClearsTarget(jtcatSpotTarget, q.call)) clearSpotTarget('user');
       remoteJtcatQso = null;
       ft8Engine._txEnabled = false;
       ft8Engine.setTxMessage('');
@@ -47485,8 +47494,7 @@ function cloudShackNotice(text, kind) {
       // They never answered: Skip stops calling them and goes back to
       // listening (Hunt picks its next station), never a made-up exchange.
       sendCatLog(`[JTCAT] Skip: ${q.call} never answered — stopped calling them; listening`);
-      if (jtcatSpotTarget && jtcatSpotTarget.status === 'engaged' &&
-        JtcatParser.normalizeCall(q.call) === JtcatParser.normalizeCall(jtcatSpotTarget.call)) clearSpotTarget('user');
+      if (JtcatSpotTarget.qsoEndClearsTarget(jtcatSpotTarget, q.call)) clearSpotTarget('user');
       popoutJtcatQso = null;
       eng._txEnabled = false;
       eng.setTxMessage('');
@@ -47538,8 +47546,7 @@ function cloudShackNotice(text, kind) {
     const q = popoutJtcatQso;
     // Operator abandoned a Spot Target QSO — clear the target too, or the
     // watcher would re-arm and immediately call them again.
-    if (jtcatSpotTarget && jtcatSpotTarget.status === 'engaged' && q && q.call &&
-        JtcatParser.normalizeCall(q.call) === JtcatParser.normalizeCall(jtcatSpotTarget.call)) {
+    if (q && JtcatSpotTarget.qsoEndClearsTarget(jtcatSpotTarget, q.call)) {
       clearSpotTarget('user');
     }
     popoutJtcatQso = null;
@@ -53718,6 +53725,9 @@ function cloudShackNotice(text, kind) {
         // (same logic as single-engine path in startJtcat)
         jtcatFullAutoCqWatchdog();
         if (popoutJtcatQso && popoutJtcatQso.phase === 'done') {
+          if (JtcatSpotTarget.qsoEndClearsTarget(jtcatSpotTarget, popoutJtcatQso.call)) {
+            clearSpotTarget('worked');
+          }
           if (popoutJtcatQso.call) jtcatSessionMark(popoutJtcatQso.call, { band: (s.freqKhz ? freqToBand(s.freqKhz / 1000) : s.band) || '', mode: s.mode || 'FT8' });
           if (jtcatFullAutoCq && jtcatFullAutoCqOwner === 'popout') {
             rearmCq('popout');
@@ -53729,8 +53739,7 @@ function cloudShackNotice(text, kind) {
         if (remoteJtcatQso && remoteJtcatQso.phase === 'done') {
           // Mirror the popout branch above: a remote-owned Full Auto CQ run
           // re-arms instead of going idle (phone control path).
-          if (jtcatSpotTarget && jtcatSpotTarget.status === 'engaged' && remoteJtcatQso.call &&
-              JtcatParser.normalizeCall(remoteJtcatQso.call) === JtcatParser.normalizeCall(jtcatSpotTarget.call)) {
+          if (JtcatSpotTarget.qsoEndClearsTarget(jtcatSpotTarget, remoteJtcatQso.call)) {
             clearSpotTarget('worked');
           }
           if (remoteJtcatQso.call) jtcatSessionMark(remoteJtcatQso.call, { band: (s.freqKhz ? freqToBand(s.freqKhz / 1000) : s.band) || '', mode: s.mode || 'FT8' });
