@@ -445,6 +445,7 @@ const TESTS = [
   'test/sstv-packs-test.js',
   'test/sstv-redesign-test.js',
   'test/sstv-first-column-test.js',
+  'test/sstv-last-line-test.js', // #660: the last line is painted; clean dark pictures are not discarded
   'test/sstv-mobile-readiness-test.js',
   'test/sstv-template-sync-test.js',
   'test/sstv-gallery-test.js',
