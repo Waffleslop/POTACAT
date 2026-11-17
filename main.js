@@ -16297,6 +16297,7 @@ function liveActivationMyRefs() {
 // The clock lives in its own file in userData, not in settings.
 let _activationClock = null; // { startedAt, lastContactAt, refs }
 let _activationAutoEnding = false;
+let _activationLaunchNotice = null; // #700: an activation ended at launch; shown once the main window has loaded
 function activationClockFile() { return path.join(app.getPath('userData'), 'activation-clock.json'); }
 function activationClockLoad() {
   try { _activationClock = JSON.parse(fs.readFileSync(activationClockFile(), 'utf8')); } catch { _activationClock = null; }
@@ -37945,6 +37946,7 @@ function createWindow() {
   win.webContents.on('did-finish-load', () => {
     setTimeout(kiwiStatusHint, 500);   // the Landmarks tab learns what the SDR can hear
     logStartupStage('main window did-finish-load (renderer ready)');
+    if (_activationLaunchNotice) { win.webContents.send('activation-auto-ended', _activationLaunchNotice); _activationLaunchNotice = null; } // #700
     // Replay the pre-load log history: everything sendCatLog'd before this
     // point never reached the renderer (no window to send to), so without
     // this the log panel — and any bug report built from it — starts blind
@@ -46785,6 +46787,16 @@ function cloudShackNotice(text, kind) {
   setInterval(reviewAskTick, 5 * 60 * 1000);
   // #147: a forgotten activation ends by itself, even with no new contact.
   activationClockLoad();
+  // #700: a saved clock that ran out while POTACAT was closed ends the
+  // activation now, before a window or phone shows it as live.
+  if (activationRunning()) {
+    const refs = activationParkRefList();
+    const atLaunch = ActivationClock.atLaunch(_activationClock, refs.join(','), Date.now());
+    if (atLaunch.action === 'end') {
+      autoEndActivation(atLaunch.reason);
+      _activationLaunchNotice = { refs, reason: atLaunch.reason, text: ActivationClock.noticeText(refs, atLaunch.reason) };
+    }
+  }
   activationClockFollow(false);
   setInterval(activationClockTick, 30 * 1000);
   setTimeout(reviewAskTick, 2 * 60 * 1000 + 5000);
