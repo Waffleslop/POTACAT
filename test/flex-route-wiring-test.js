@@ -294,6 +294,13 @@ test('the banner loads in the main window and the VFO window, warns in-window, n
     for (const k of ['onFlexRoute', 'onFlexRouteAsk', 'onFlexRouteAskDone', 'flexRouteGet', 'flexRouteTakeBack', 'flexRouteAnswer']) assert.ok(s.includes(k + ':'), `${p} ${k}`);
   }
 });
+test('a handover is not reported as a lost radio link (no "check the USB" alarm)', () => {
+  const i = main.indexOf('if (!linkUp && flexRouteHeld())');
+  assert.ok(i > 0, 'the handover branch comes first');
+  const j = main.indexOf('} else if (!linkUp) {', i);
+  assert.ok(j > i, 'the lost-link alarm is the else branch');
+  assert.ok(!main.slice(i, j).includes('app-notice'), 'no notice on a handover');
+});
 test('the wire is documented', () => {
   const doc = readSrc(path.join(root, 'docs', 'echocat-protocol.md'));
   for (const t of ['flex-release', 'flex-released', 'flex-reclaim', 'flex-reclaimed', 'flex-route', 'flex-handback']) {

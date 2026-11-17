@@ -4247,7 +4247,13 @@ function sendCatStatus(s) {
       _catLinkUpLast = linkUp;
       stationSetupNotify();
       sendVfoState(); // the VFO window stops (or starts) showing the radio's dial
-      if (!linkUp) {
+      if (!linkUp && flexRouteHeld()) {
+        // Handed to a mobile device over FlexRadio SmartLink (lib/flex-route.js):
+        // POTACAT left the radio on purpose, so this is not a lost link. No
+        // "check the USB" alarm (seen in the PR #674 radio test).
+        sendCatLog('[CAT] The Flex is with the mobile device through FlexRadio SmartLink; POTACAT is off it until it is taken back (not a lost link).');
+        dropCwKeyLine('radio handed over');
+      } else if (!linkUp) {
         // A Flex Direct station has no USB to drop: "lost" there means the
         // radio holds no slice POTACAT can tune (it will create one).
         const flexDirect = !!(smartSdr && smartSdr.connected && smartSdr.mode === 'self');
