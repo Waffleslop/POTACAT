@@ -92,6 +92,43 @@ function fnBody(src, name) {
     assert.strictEqual(V.describeVara('fm', { enabled: false }), 'VARA FM off');
   });
 
+  await test('accept wait: a port that refuses for a while and then listens is handed on after a settle; one that never listens fails (K8MRD)', async () => {
+    const tmp = net.createServer();
+    await new Promise((r) => tmp.listen(0, '127.0.0.1', r));
+    const port = tmp.address().port;
+    await new Promise((r) => tmp.close(r));
+    const late = net.createServer((sock) => sock.on('error', () => {}));
+    setTimeout(() => late.listen(port, '127.0.0.1'), 400);
+    const t0 = Date.now();
+    const a = await V.waitForPortAccept(port, { intervalMs: 50, timeoutMs: 3000 });
+    const took = Date.now() - t0;
+    late.close();
+    assert.strictEqual(a.ok, true);
+    assert.ok(a.tries > 1, 'refused at first');
+    assert.ok(a.waitedMs >= 350, 'waited for it: ' + a.waitedMs);
+    assert.ok(a.settleMs >= a.waitedMs && took >= a.waitedMs + a.settleMs - 20, 'settled as long again after its own check');
+    const quick = net.createServer((sock) => sock.on('error', () => {}));
+    await new Promise((r) => quick.listen(0, '127.0.0.1', r));
+    const q = await V.waitForPortAccept(quick.address().port, { intervalMs: 50 });
+    quick.close();
+    assert.ok(q.ok && q.tries === 1 && q.settleMs === 50, 'listening already: one try, the minimum settle');
+    const t1 = Date.now();
+    const never = await V.waitForPortAccept(port, { intervalMs: 50, timeoutMs: 300 });
+    assert.strictEqual(never.ok, false);
+    assert.strictEqual(never.error, 'refused');
+    assert.ok(Date.now() - t1 < 1500, 'gives up near timeoutMs');
+    assert.ok(V.patLineSaysVaraRefused("2026/11/16 21:34:47 vara initialization failed: couldn't connect to VARA command port: dial tcp 127.0.0.1:8300: connect: connection refused"));
+    assert.ok(!V.patLineSaysVaraRefused('connected to N5TW'));
+  });
+  await test('main: the accept wait runs after the probe and before Pat is recorded as holding VARA; Pat\'s refusal clears that record', () => {
+    const ready = fnBody(main, 'winlinkVaraReady');
+    const wait = ready.indexOf('await VaraProcess.waitForPortAccept(port, { host })');
+    const hold = ready.indexOf('_patHoldsVara[kind] = patProc');
+    assert.ok(wait > 0 && hold > wait, 'waited for before the hold is recorded');
+    assert.ok(/did not accept a new connection; is another program using it\?/.test(ready));
+    assert.ok(/VaraProcess\.patLineSaysVaraRefused\(line\) && _patVaraKind && _patHoldsVara\[_patVaraKind\] === proc\) _patHoldsVara\[_patVaraKind\] = null/.test(main));
+  });
+
   console.log('winlink-modes');
   await test('VARA is listed only when the operator turned it on; Windows only; the cable lifts the Flex Direct / Icom Network reason', () => {
     const base = { rigFamily: 'serial', audioSource: 'dax', platform: 'win32', mercuryEnabled: true, mercuryPort: 8300, ardopFound: true, direwolfFound: true, ardopSocketAudio: true };

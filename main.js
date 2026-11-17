@@ -11227,6 +11227,7 @@ const _varaLaunch = { hf: null, fm: null }; // { child, at } for a VARA POTACAT 
 // below finds the port taken and every later Send/Receive was refused as "not
 // answering" until VARA was restarted (W7RTA IC-7300, 2026-10-24).
 const _patHoldsVara = { hf: null, fm: null };
+let _patVaraKind = null; // the VARA this session hands Pat: the one to clear above if Pat could not open it
 async function winlinkVaraReady(mode, { configured } = {}) {
   const kind = VaraProcess.kindOfMode(mode);
   const name = VaraProcess.varaName(kind);
@@ -11324,7 +11325,17 @@ async function winlinkVaraReady(mode, { configured } = {}) {
       throw new Error(`${name} is not answering on port ${port} and its program was not found on the shack PC — start it there yourself, or set its path in Settings > Station > Winlink`);
     }
   }
-  _patHoldsVara[kind] = patProc; // Pat opens it this session and keeps it
+  // VARA serves one command client at a time and, under Wine, is not listening
+  // again for a moment after the probe above left: Pat dialled 4 ms later and
+  // was refused (K8MRD, macOS). Wait until it takes a new connection.
+  const accept = await VaraProcess.waitForPortAccept(port, { host });
+  if (!accept.ok) {
+    _winlinkSessionErrorKind = 'vara-not-answering';
+    throw new Error(`${name} did not accept a new connection; is another program using it?`);
+  }
+  if (accept.tries > 1) winlinkLog(`${name}: took ${accept.waitedMs} ms to accept a new connection after the check`);
+  _patVaraKind = kind;
+  _patHoldsVara[kind] = patProc; // Pat opens it this session and keeps it (cleared if Pat says it could not)
   winlinkLog(`${name} ready on ${where}${probe.version ? ' — ' + probe.version : probe.silent ? ' (answered the connection, no VERSION reply)' : ''}`);
 }
 
@@ -11585,6 +11596,7 @@ function spawnPat() {
         if (!_patProgressSaid.keep(line)) continue;
         winlinkLog(`pat: ${line}`);
         if (DirewolfProcess.patLineSaysConnected(line)) _winlinkPatConnected = true;
+        if (VaraProcess.patLineSaysVaraRefused(line) && _patVaraKind && _patHoldsVara[_patVaraKind] === proc) _patHoldsVara[_patVaraKind] = null;
       }
     };
     proc.stdout.on('data', relay);
