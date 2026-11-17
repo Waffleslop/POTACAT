@@ -27041,6 +27041,8 @@ async function startFreedvForMode(mode) {
     freedvProcessor = worklet;
   } catch (err) {
     console.error('[FreeDV] RX audio capture failed:', err.message);
+    // Into the session log too, so Report a Bug carries it (#717).
+    window.api.jtcatLog('[FreeDV] RX audio capture failed: ' + (err && err.message ? err.message : err));
   }
 }
 

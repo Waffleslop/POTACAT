@@ -536,6 +536,7 @@ const PlainSsbForDigital = require('./lib/plain-ssb-for-digital');
 const FreedvPtt = require('./lib/freedv-ptt'); // FreeDV mode: voice PTT refused until FreeDV transmit exists
 const FreedvStatus = require('./lib/freedv-status'); // freedv-status to ECHOCAT: state, modes, sync, SNR, plain reason
 const FreedvDisplayMode = require('./lib/freedv-display-mode'); // #716: FREEDV-<codec> on every surface while the engine runs
+const { FreedvDiag } = require('./lib/freedv-diag'); // #717: audio in, sync and a 30 s summary in the session log
 const { decideDialFollow } = require('./lib/jtcat-dial-follow');
 const JtcatRxSource = require('./lib/jtcat-rx-source'); // #243: JTCAT can hear a WebSDR instead of the radio
 const { StreamResampler } = require('./lib/stream-resampler');
@@ -31633,6 +31634,9 @@ function pushFreedvStatus(force) {
   _freedvStatusSentAt = now;
   remoteServer.sendToClient({ type: 'freedv-status', ...next });
 }
+// FreeDV lines for Report a Bug (#717): first audio, sync on/off, a 30 s summary.
+const _freedvDiag = new FreedvDiag(0);
+let _freedvDiagTimer = null;
 function startFreedvEngine(codecMode, why) {
   if (freedvEngine) {
     if (codecMode && String(freedvEngine.mode || '').toUpperCase() !== String(codecMode).toUpperCase()) {
@@ -31645,7 +31649,11 @@ function startFreedvEngine(codecMode, why) {
   _freedvLastSync = { sync: false, snr: null };
   freedvEngine = new FreedvEngine();
   pushActivityState();
+  _freedvDiag.reset(Date.now());
+  if (_freedvDiagTimer) clearInterval(_freedvDiagTimer);
+  _freedvDiagTimer = setInterval(() => { const l = _freedvDiag.tick(Date.now()); if (l) sendCatLog(l); }, 5000);
   freedvEngine.on('rx-speech', (data) => {
+    _freedvDiag.speech();
     if (win && !win.isDestroyed()) win.webContents.send('freedv-rx-speech', data);
     // The phone hears decoded speech on the same track as the radio audio.
     if (remoteAudioWin && !remoteAudioWin.isDestroyed() && remoteServer && remoteServer.running) {
@@ -31659,6 +31667,8 @@ function startFreedvEngine(codecMode, why) {
     if (win && !win.isDestroyed()) win.webContents.send('freedv-sync', data);
     if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'freedv-sync', ...data }); // ECHOCAT Web
     _freedvLastSync = { sync: !!(data && data.sync), snr: data ? data.snr : null };
+    const syncLine = _freedvDiag.sync(data, Date.now());
+    if (syncLine) sendCatLog(syncLine);
     pushFreedvStatus();
   });
   freedvEngine.on('status', (data) => {
@@ -31687,6 +31697,7 @@ function stopFreedvEngine(why) {
   if (!freedvEngine) return;
   try { freedvEngine.stop(); } catch {}
   freedvEngine = null;
+  if (_freedvDiagTimer) { clearInterval(_freedvDiagTimer); _freedvDiagTimer = null; }
   pushActivityState();
   sendCatLog(`[FreeDV] Stopped${why ? ' (' + why + ')' : ''}`);
   if (win && !win.isDestroyed()) win.webContents.send('freedv-auto-stop');
@@ -53961,6 +53972,8 @@ function cloudShackNotice(text, kind) {
       if (++_freedvRxCount <= 3 || _freedvRxCount % 200 === 0) {
         console.log(`[FreeDV] RX audio #${_freedvRxCount} len=${samples.length} engine=${!!freedvEngine}`);
       }
+      const audioLine = _freedvDiag.audio(samples); // before feedRxAudio hands the buffer to the worker
+      if (audioLine) sendCatLog(audioLine);
       freedvEngine.feedRxAudio(samples);
     }
   });
