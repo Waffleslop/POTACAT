@@ -257,6 +257,33 @@ const GOLDEN_AUDIO = [
     check(sent.length === 1 && sent[0] === 'client udpport 50123' && r.seq === 7, 'LAN sends `client udpport <port>` and returns its sequence number');
   }
 
+  console.log('Transmit status: `transmit band` lines are per-band memory, not live power');
+  {
+    // Verbatim from the D0 capture (8600M v4.2.20, 2026-11-17), handle kept.
+    const live = 'S766257AA|transmit freq=14.100000 rfpower=69 tunepower=4 tx_slice_mode=USB hwalc_enabled=0 inhibit=0 dax=0 sb_monitor=0';
+    const bands = [
+      'S766257AA|transmit band 0 band_name=160 rfpower=100 tunepower=10 hwalc_enabled=0 inhibit=0',
+      'S766257AA|transmit band 2 band_name=80 rfpower=69 tunepower=10 hwalc_enabled=0 inhibit=0',
+      'S766257AA|transmit band 3 band_name=60 rfpower=100 tunepower=10 hwalc_enabled=0 inhibit=0',
+      'S766257AA|transmit band 7 band_name=30 rfpower=70 tunepower=10 hwalc_enabled=0 inhibit=0',
+    ];
+    const c = new SmartSdrClient();
+    const power = [];
+    let statuses = 0;
+    c.on('power', (w) => power.push(w));
+    c.on('transmit-status', () => statuses++);
+    c._handleLine(live);
+    for (const b of bands) c._handleLine(b);
+    check(JSON.stringify(power) === '[69]', `live power 69 W stands after the band lines (emitted ${JSON.stringify(power)})`);
+    check(statuses === 1, 'band lines are not transmit-status');
+    check(c.txDaxOn === false, 'the live line still sets dax=');
+    // The audio connection reads dax= from transmit lines too: band lines leave it alone.
+    const a = new SmartSdrAudio();
+    a._handleLine('S1|transmit dax=1');
+    a._handleLine(bands[0]);
+    check(a._txDaxOn === true, 'the audio connection ignores band lines');
+  }
+
   console.log(`\n${passed} passed, ${failed} failed`);
   assert.strictEqual(failed, 0, 'flex transport tests failed');
   process.exit(0);
