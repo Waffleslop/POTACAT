@@ -8989,6 +8989,7 @@ async function connectCat() {
     if (rigModel) {
       if (rigModel.digiMd != null) {
         cat._digiMd = rigModel.digiMd;
+        if (rigModel.digiMdLower != null) cat._digiMdLower = rigModel.digiMdLower; // Zeus: DIGL stays LSB (#185)
         sendCatLog(`[CAT] rig-model override: _digiMd=${cat._digiMd} (${rigModel.brand || ''})`);
       }
       // commands.setDa is templated ("DT{val};") — derive the bare prefix
