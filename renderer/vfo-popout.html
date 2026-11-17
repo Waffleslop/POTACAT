@@ -928,6 +928,7 @@
 <script src="../lib/mono-upmix.js"></script>
 <script src="../lib/audio-device-heal.js"></script>
 <script src="../lib/vfo-audio-reattach.js"></script>
+<script src="../lib/vfo-monitor-tx-mute.js"></script>
 <script src="../lib/vfo-ptt-mic.js"></script>
 <script src="../lib/sdr-failure.js"></script>
 <script>
@@ -3488,6 +3489,7 @@ async function pttStart() {
   const stale = () => gen !== pttGen;
   setPttVisual(true);
   if (kiwiGainNode) kiwiGainNode.gain.value = 0;
+  applyMonitorGain(); // #713: no radio monitor on the PC speakers while keyed
   // Start mic → radio TX. Built on locals and published to the globals only
   // while this press is still current, so an abandoned start never
   // overwrites (or leaks next to) a newer press's graph.
@@ -3595,6 +3597,7 @@ function pttStop() {
   setPttVisual(false);
   window.api.nakedPtt(false);
   if (kiwiGainNode) kiwiGainNode.gain.value = kiwiVolume;
+  applyMonitorGain(); // #713: back to what the operator had
   // Stop mic + tear down whichever audio context was used.
   if (pttMicStream) { pttMicStream.getTracks().forEach(t => t.stop()); pttMicStream = null; }
   if (pttSourceNode) { try { pttSourceNode.disconnect(); } catch {} pttSourceNode = null; }
@@ -3903,6 +3906,8 @@ document.getElementById('log-btn-vfo').addEventListener('click', () => {
 
 // TX state from radio (external PTT)
 window.api.onTxState((state) => {
+  // #713: the radio monitor follows TX from any source (radio, ECHOCAT, FT8).
+  vfoRadioTx = !!state;
   if (state) {
     setPttVisual(true);
     // VK3AWA: cut SDR audio while transmitting so the user doesn't hear
@@ -3913,6 +3918,7 @@ window.api.onTxState((state) => {
     pttDown = false;
     if (kiwiGainNode) kiwiGainNode.gain.value = kiwiVolume;
   }
+  applyMonitorGain();
 });
 
 // --- CW Macros ---
@@ -4183,6 +4189,21 @@ let audioReattachPending = false; // #247: a power-on / dead stream waits for a 
 // user can throttle click-to-listen audio without touching the PC's master
 // volume. Persisted as a 0–150 percentage.
 let monitorVolume = (parseInt(localStorage.getItem('vfoMonitorVolume') || '100', 10) || 100) / 100;
+// #713: the radio reports TX (any source). With pttDown, the monitor is
+// silent while keyed and comes back to the operator's own state after
+// (lib/vfo-monitor-tx-mute.js). Every monitor gain write goes through here.
+let vfoRadioTx = false;
+function monitorGainNow(sdrLive = kiwiConnected) {
+  return VfoMonitorTxMute.monitorGain({
+    volume: monitorVolume,
+    muted: audioMonitorMuted,
+    sdrLive,
+    transmitting: VfoMonitorTxMute.transmitting(pttDown, vfoRadioTx),
+  });
+}
+function applyMonitorGain() {
+  if (audioMonitorGain) audioMonitorGain.gain.value = monitorGainNow();
+}
 
 // opts.deviceId: the input to open instead of the saved one — a reattach
 // after a power cycle that followed the CODEC to a new ID (#247).
@@ -4203,7 +4224,7 @@ async function startAudioMonitor(opts) {
       audioMonitorCtx = new (window.AudioContext || window.webkitAudioContext)();
       if (audioMonitorCtx.state === 'suspended') await audioMonitorCtx.resume();
       audioMonitorGain = audioMonitorCtx.createGain();
-      audioMonitorGain.gain.value = (audioMonitorMuted || kiwiConnected) ? 0 : monitorVolume;
+      audioMonitorGain.gain.value = monitorGainNow();
       audioMonitorGain.connect(audioMonitorCtx.destination);
       audioMonitorNextPlay = 0;
       audioMonitorActive = true;
@@ -4227,7 +4248,7 @@ async function startAudioMonitor(opts) {
     if (audioMonitorCtx.state === 'suspended') await audioMonitorCtx.resume();
     const source = audioMonitorCtx.createMediaStreamSource(audioMonitorStream);
     audioMonitorGain = audioMonitorCtx.createGain();
-    audioMonitorGain.gain.value = audioMonitorMuted ? 0 : monitorVolume;
+    audioMonitorGain.gain.value = monitorGainNow(false);
     // Both ears: macOS can return the mono capture as two channels with only
     // the left one filled (hoogskev, FTX-1). lib/mono-upmix.js.
     const monoSource = window.MonoUpmix ? window.MonoUpmix.monoToBothSides(audioMonitorCtx, source) : source;
@@ -4280,7 +4301,7 @@ audioBtn.addEventListener('click', async () => {
     const d = VfoAudioReattach.decide(audioReattachState(), 'unmute');
     audioReattachPending = d.pending;
     if (d.reopen) await reattachRadioAudio('unmute');
-    if (audioMonitorGain) audioMonitorGain.gain.value = kiwiConnected ? 0 : monitorVolume;
+    if (audioMonitorGain) audioMonitorGain.gain.value = monitorGainNow();
     updateAudioBtn();
   }
 });
@@ -4323,7 +4344,7 @@ async function reattachRadioAudio(why) {
     stopAudioMonitor();
     await startAudioMonitor({ deviceId: pick.deviceId });
     if (!audioMonitorActive) return false;
-    if (audioMonitorGain) audioMonitorGain.gain.value = (audioMonitorMuted || kiwiConnected) ? 0 : monitorVolume;
+    if (audioMonitorGain) audioMonitorGain.gain.value = monitorGainNow();
     audioReattachPending = false;
     try { window.api.vfoAudioReattached({ why, device: audioMonitorLabel || pick.label }); } catch {}
     return true;
@@ -4408,7 +4429,7 @@ window.api.onSmartSdrAudio((d) => {
     monitorVolume = p / 100;
     localStorage.setItem('vfoMonitorVolume', String(p));
     if (audioMonitorGain && audioMonitorActive && !audioMonitorMuted && !kiwiConnected) {
-      audioMonitorGain.gain.value = monitorVolume;
+      audioMonitorGain.gain.value = monitorGainNow();
     }
     // One knob for whichever receiver you hear: while the SDR is live, it
     // sets the SDR audio (Casey 2026-10-30: the second slider was the fault).
@@ -4828,7 +4849,7 @@ window.api.onKiwiStatus((s) => {
   if (s.connected) {
     if (audioMonitorGain) audioMonitorGain.gain.value = 0;
   } else {
-    if (audioMonitorGain && !audioMonitorMuted) audioMonitorGain.gain.value = monitorVolume;
+    if (audioMonitorGain && !audioMonitorMuted) audioMonitorGain.gain.value = monitorGainNow();
   }
 });
 
