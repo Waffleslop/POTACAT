@@ -2628,6 +2628,13 @@
         break;
 
       case 'log-ok':
+        // A follow-up (#732): the QSO was confirmed already; this only says how
+        // the re-spot went. Never touch the form the operator may be typing in.
+        if (msg.followUp) {
+          if (msg.respotError) showLogToast((msg.callsign || '') + ': re-spot failed', true);
+          else if (msg.resposted) showLogToast('Re-spotted ' + (msg.callsign || ''));
+          break;
+        }
         logSaveBtn.disabled = false;
         ltSave.disabled = false;
         if (msg.success) {
