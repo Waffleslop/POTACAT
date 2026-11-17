@@ -187,6 +187,7 @@
   let clubMember = null;  // { callsign, firstname, role, licenseClass }
   let pingInterval = null;
   let lastPingSent = 0;
+  const wsLiveness = WsLiveness.create();
 
   // WebRTC
   let pc = null;
@@ -1872,23 +1873,45 @@
       onOpen();
     };
     ws.onmessage = function(event) {
+      wsLiveness.messageReceived(Date.now());
       var msg;
       try { msg = JSON.parse(event.data); } catch { return; }
       handleMessage(msg);
     };
-    ws.onclose = function() {
-      clearInterval(pingInterval);
-      pingInterval = null;
-      if (bc) { try { bc.postMessage({ kind: 'connection', online: false, reason: wasKicked ? 'kicked' : 'closed' }); } catch {} }
-      if (wasKicked) return;
-      if (mainUI.classList.contains('hidden')) {
-        connectBtn.textContent = 'Connect';
-        connectBtn.disabled = false;
-      } else {
-        scheduleReconnect();
-      }
-    };
+    ws.onclose = onWsClosed;
     ws.onerror = function() {};
+  }
+
+  function onWsClosed() {
+    clearInterval(pingInterval);
+    pingInterval = null;
+    if (bc) { try { bc.postMessage({ kind: 'connection', online: false, reason: wasKicked ? 'kicked' : 'closed' }); } catch {} }
+    if (wasKicked) return;
+    if (mainUI.classList.contains('hidden')) {
+      connectBtn.textContent = 'Connect';
+      connectBtn.disabled = false;
+    } else {
+      scheduleReconnect();
+    }
+  }
+
+  // A socket that died while the screen was off can still read OPEN, and
+  // anything sent on it is lost (lib/ws-liveness.js decides when). Detach it
+  // first so its late onclose cannot tear down the next socket, then take the
+  // normal close path; `now` skips the reconnect delay unless a retry is
+  // already scheduled (a Guest Pass wait keeps its own backoff).
+  function dropDeadSocket(now) {
+    var retryPending = !!reconnectTimer;
+    var dead = ws;
+    if (dead) {
+      dead.onopen = null; dead.onmessage = null; dead.onclose = null; dead.onerror = null;
+      try { dead.close(); } catch {}
+    }
+    onWsClosed();
+    if (now && !retryPending && !wasKicked && !mainUI.classList.contains('hidden')) {
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      reconnectNow();
+    }
   }
 
   function connect(token) {
@@ -6495,12 +6518,16 @@
   // --- Ping / Latency ---
   function startPing() {
     if (pingInterval) clearInterval(pingInterval);
+    wsLiveness.reset(Date.now());
     pingInterval = setInterval(() => {
       if (ws && ws.readyState === WebSocket.OPEN) {
+        // No pong (or anything else) for about 10 s: the shack is gone.
+        if (wsLiveness.isDead(Date.now())) { dropDeadSocket(false); return; }
         lastPingSent = Date.now();
+        wsLiveness.pingSent(lastPingSent);
         ws.send(JSON.stringify({ type: 'ping', ts: lastPingSent }));
       }
-    }, 3000);
+    }, WsLiveness.PING_INTERVAL_MS);
   }
 
   // --- ECHOCAT Web session (POTACAT Cloud) ---
@@ -12816,6 +12843,16 @@ var _paddleHoldTimer = { dit: null, dah: null };
     if (document.visibilityState === 'visible' && !mainUI.classList.contains('hidden')) {
       requestWakeLock();
     }
+  });
+
+  // Screen back on: a socket that went quiet while it was off is replaced at
+  // once instead of waiting for the pong timeout or the reconnect timer.
+  document.addEventListener('visibilitychange', function() {
+    // A pop-out has no socket of its own (it talks to the main page over BC).
+    if (isPopout || document.visibilityState !== 'visible' || wasKicked || mainUI.classList.contains('hidden')) return;
+    var state = !ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING ? 'closed'
+      : ws.readyState === WebSocket.CONNECTING ? 'connecting' : 'open';
+    if (wsLiveness.reconnectOnWake(Date.now(), state)) dropDeadSocket(true);
   });
 
   // ── Cloud Sync UI (ECHOCAT) ──────────────────────────────────────
