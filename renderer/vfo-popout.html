@@ -1310,9 +1310,12 @@ function buildBandGrid(container) {
     btn.className = 'tog band-btn';
     btn.textContent = b.label;
     btn.dataset.freq = b.freq;
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       if (vfoLocked) return;
-      tuneJumpFromPopout(b.freq);
+      // Back to where this radio last was on the band, or the preset (#680).
+      let khz = b.freq;
+      try { const t = await window.api.bandJumpTarget(b.freq); if (Number(t) > 0) khz = Number(t); } catch {}
+      tuneJumpFromPopout(khz);
     });
     container.appendChild(btn);
   }
