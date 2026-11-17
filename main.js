@@ -341,6 +341,8 @@ const LoggerForward = require('./lib/logger-forward'); // external-logger fan-ou
 const WatchlistGroups = require('./lib/watchlist-groups'); // state tokens in the watchlist (N0KAH)
 const { normalizeSerialPath, normalizeSettingsSerialPaths } = require('./lib/serial-path'); // "COM Port 10" -> COM10 (KF0TDB)
 const { TcpTransport, SerialTransport, calloutTwin } = require('./lib/transport');
+const SerialQuit = require('./lib/serial-quit'); // every serial port closed and its native calls done before exit (#657)
+try { SerialQuit.install(require('serialport')); } catch {}
 const { RsBa1Transport } = require('./lib/rsba1-transport');
 const { Sculan10Transport } = require('./lib/sculan10-transport');
 const Sculan10 = require('./lib/sculan10-protocol');
@@ -55009,6 +55011,8 @@ function gracefulCleanup() {
 }
 
 let _yaesuLanQuitDone = false;
+let _quitWatchdog = null;
+let _serialQuitDone = false;
 app.on('before-quit', (e) => {
   if (jtcatLogReviews.size) {
     // Written while the log, QRZ and the rig are all still up.
@@ -55046,8 +55050,19 @@ app.on('before-quit', (e) => {
   // cannot be closed" loop. Nothing in this app prevents quit, so once
   // before-quit fires we are committed; force the exit if it hasn't happened.
   // unref'd so the timer itself never keeps the process alive.
-  const watchdog = setTimeout(() => { try { app.exit(0); } catch {} }, 5000);
-  if (typeof watchdog.unref === 'function') watchdog.unref();
+  if (!_quitWatchdog) {
+    _quitWatchdog = setTimeout(() => { try { app.exit(0); } catch {} }, 5000);
+    if (typeof _quitWatchdog.unref === 'function') _quitWatchdog.unref();
+  }
+  // #657: a serialport call that finishes while Node frees its environment
+  // aborts the process (SIGABRT on macOS). Close every port and let every
+  // native serial call finish first, at most 1.5 s, then quit for real.
+  if (!_serialQuitDone && SerialQuit.busy()) {
+    e.preventDefault();
+    SerialQuit.settle({ timeoutMs: 1500 }).then((clean) => {
+      if (!clean) _appendStartupLog('[quit] serial ports still busy after 1.5 s; quitting anyway');
+    }).finally(() => { _serialQuitDone = true; app.quit(); });
+  }
 });
 process.on('SIGINT', () => { gracefulCleanup(); process.exit(0); });
 process.on('SIGTERM', () => { gracefulCleanup(); process.exit(0); });
