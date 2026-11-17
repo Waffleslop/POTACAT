@@ -1916,6 +1916,13 @@
           <label style="margin-top:4px;display:block;">TX audio out (to radio):
             <select id="rig-remote-audio-output" style="width:100%;margin-top:2px;"><option value="">-- system default --</option></select>
           </label>
+          <label style="margin-top:4px;display:block;" id="rig-tx-channel-row">Transmit on:
+            <select id="set-tx-channel" style="margin-top:2px;">
+              <option value="both">Both channels (left and right)</option>
+              <option value="left">Left channel only</option>
+            </select>
+            <span class="help-text" style="display:block;">Which side of the TX audio out carries transmit audio for FT8, Tune and Winlink (ARDOP, packet). Leave it on Both unless your interface uses the right channel for something else: a Digirig DR-891 can key the radio from the right channel, so it needs Left channel only.</span>
+          </label>
           <label style="margin-top:6px;display:block;" id="rig-rx-level-row">Receive level to ECHOCAT devices: <span id="rig-rx-level-val">0 dB</span>
             <input type="range" id="rig-rx-level" min="-20" max="20" step="1" value="0" style="width:100%;margin-top:2px;">
             <span class="help-text" style="display:block;">Gain on the radio's audio before it goes to the phone or browser (0 dB = as captured). Raise it when the radio's line output ignores its volume knob, such as a fixed-level ACC jack into a sound-card interface. The TX Drive slider on the device is the transmit twin; JTCAT's own RX gain is separate.</span>
@@ -5461,6 +5468,7 @@
   <script src="../lib/rig-family.js"></script>
   <script src="../lib/tci-target.js"></script>
   <script src="../lib/tx-audio-input.js"></script>
+  <script src="../lib/tx-channel.js"></script>
   <script src="../lib/ptt-flow-conflict.js"></script>
   <script src="../lib/waterfall-palettes.js"></script>
   <script src="../lib/app-theme.js"></script>

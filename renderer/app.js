@@ -3730,6 +3730,7 @@ async function openRigEditor(mode, rigId) {
       if (catLabelEl) catLabelEl.value = rig.catLabel || '';
       if (rigModelSelect) { rigModelSelect.value = rig.model || ''; syncYaesuLanMuteMonitorRow(); }
       { const t = document.getElementById('set-tx-audio-input'); if (t) t.value = rig.txAudioInput === 'front' || rig.txAudioInput === 'rear' ? rig.txAudioInput : ''; syncTxAudioInputRow(); }
+      { const t = document.getElementById('set-tx-channel'); if (t) t.value = rig.txChannel === 'left' ? 'left' : 'both'; } // #654
       await populateRadioSection(rig.catTarget);
       // Per-rig audio source — populateRadioSection just rebuilt the options
       // for this rig's radio type, so the stored value (validated) sticks.
@@ -3784,6 +3785,7 @@ async function openRigEditor(mode, rigId) {
     { const catLabelEl = document.getElementById('set-rig-cat-label'); if (catLabelEl) catLabelEl.value = ''; }
     if (rigModelSelect) { rigModelSelect.value = ''; syncYaesuLanMuteMonitorRow(); }
     { const t = document.getElementById('set-tx-audio-input'); if (t) t.value = ''; syncTxAudioInputRow(); }
+    { const t = document.getElementById('set-tx-channel'); if (t) t.value = 'both'; } // #654
     if (setCwKeyLine) setCwKeyLine.value = 'auto';
     if (setRadioNr) setRadioNr.value = '1';
     setRigFullPowerField(null);
@@ -3950,6 +3952,8 @@ async function saveRigEditor() {
   const txAudioInputEl = document.getElementById('set-tx-audio-input');
   const rigTxAudioInput = txAudioInputEl && (txAudioInputEl.value === 'front' || txAudioInputEl.value === 'rear')
     && window.TxAudioInput && window.TxAudioInput.hasChoice(model) ? txAudioInputEl.value : ''; // #594
+  const txChannelEl = document.getElementById('set-tx-channel');
+  const rigTxLeftOnly = !!(txChannelEl && txChannelEl.value === 'left'); // #654: absent = both channels
   const lanVoiceSsbEl = document.getElementById('set-lan-voice-ssb');
   const rigLanVoiceInSsb = !!(lanVoiceSsbEl && lanVoiceSsbEl.checked);
   const packetModeEl = document.getElementById('set-packet-mode');
@@ -3984,6 +3988,7 @@ async function saveRigEditor() {
       if (rigAllowPowerOff) rig.allowPowerOffNoWake = true; else delete rig.allowPowerOffNoWake;
       if (rigAmpDriveW > 0) rig.ampDriveLimitW = rigAmpDriveW; else delete rig.ampDriveLimitW;
       if (rigTxAudioInput) rig.txAudioInput = rigTxAudioInput; else delete rig.txAudioInput;
+      if (rigTxLeftOnly) rig.txChannel = 'left'; else delete rig.txChannel;
       if (rigLanVoiceInSsb) rig.lanVoiceInSsb = true; else delete rig.lanVoiceInSsb;
       if (rigPacketMode) rig.packetMode = rigPacketMode; else delete rig.packetMode; // absent = Automatic
       rig.flexBandAntennaMap = flexBandAntennaMap;
@@ -4016,6 +4021,7 @@ async function saveRigEditor() {
       ...(rigAllowPowerOff ? { allowPowerOffNoWake: true } : {}),
       ...(rigAmpDriveW > 0 ? { ampDriveLimitW: rigAmpDriveW } : {}),
       ...(rigTxAudioInput ? { txAudioInput: rigTxAudioInput } : {}),
+      ...(rigTxLeftOnly ? { txChannel: 'left' } : {}),
       ...(rigLanVoiceInSsb ? { lanVoiceInSsb: true } : {}),
       ...(rigPacketMode ? { packetMode: rigPacketMode } : {}),
       flexBandAntennaMap,
@@ -33157,7 +33163,9 @@ async function playJtcatTxAudio(data) {
     var txGain = jtcatTxAudioCtx.createGain();
     txGain.gain.value = jtcatTxGainLevel;
     source.connect(txGain);
-    txGain.connect(jtcatTxAudioCtx.destination);
+    // Left only or both channels, per rig (#654, lib/tx-channel.js).
+    if (window.TxChannel) window.TxChannel.connect(jtcatTxAudioCtx, txGain, window.TxChannel.ofSettings(s));
+    else txGain.connect(jtcatTxAudioCtx.destination);
 
     var txDone = false;
     function finishTx() {
@@ -33379,7 +33387,8 @@ async function startJtcatTuneAudio() {
     jtcatTuneGain = jtcatTxAudioCtx.createGain();
     jtcatTuneGain.gain.value = jtcatTxGainLevel;
     jtcatTuneOsc.connect(jtcatTuneGain);
-    jtcatTuneGain.connect(jtcatTxAudioCtx.destination);
+    if (window.TxChannel) window.TxChannel.connect(jtcatTxAudioCtx, jtcatTuneGain, window.TxChannel.ofSettings(s)); // #654
+    else jtcatTuneGain.connect(jtcatTxAudioCtx.destination);
     jtcatTuneOsc.start();
   } catch (err) {
     console.error('[JTCAT] Tune audio start failed:', err.message || err);
