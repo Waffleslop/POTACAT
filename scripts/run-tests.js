@@ -608,6 +608,7 @@ const TESTS = [
   'test/rigctld-passthrough-test.js', // custom CAT over rigctld: a + or \ command goes to rigctld as typed (electricfalcon)
   'test/mono-upmix-test.js', // the VFO monitor plays radio audio in both ears (hoogskev, macOS left-channel only)
   'test/setup-test-freq-test.js', // Station Setup test transmit: at the dial if the licence allows, else at the band's FT8 dial and back, else refused with why (w0tlp)
+  'test/jtcat-spot-target-after-qso-test.js', // #518: a finished QSO (done, Skip, Cancel) with the spot target's call clears it, armed or engaged; the watcher never calls a worked station again
   'test/jtcat-hunt-filters-test.js', // Hunt filters (plan-jtcat-hunt-priorities): targets ANY, priority, Never answer, auto-skip, CQ DX/continent rule, quiet-reason text
   'test/jtcat-hunt-status-test.js', // Hunt status line (why Hunt is quiet) and Hide decodes below (nj2dx)
   'test/jtcat-hunt-new-grid-test.js', // Hunt: New grids target, Wanted split into New DXCC / New grid (level_death)
