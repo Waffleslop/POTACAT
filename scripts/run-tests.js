@@ -645,6 +645,7 @@ const TESTS = [
   'test/rigctld-data-fm-test.js', // #259: DIGFM/DIGAM have rigctld tokens (PKTFM/PKTAM), so a packet key-down on FM sends the DATA mode
   'test/launcher-cert-der-test.js', // Remote Launcher cert: minimal DER serial; a saved cert that doesn't parse is regenerated
   'test/clean-exit-marker-test.js', // #550: a Launcher run never consumes the GUI's clean-exit marker or rotates its startup.log, so a clean quit is not reported as a crash
+  'test/serial-quit-test.js', // #657: every serial port closed and every native serial call finished before quit (macOS SIGABRT)
 ];
 
 const root = path.join(__dirname, '..');
