@@ -168,6 +168,13 @@
     ],
     "extraResources": [
       {
+        "from": "build/smartlink",
+        "to": ".",
+        "filter": [
+          "smartlink.json"
+        ]
+      },
+      {
         "from": "assets/hamlib",
         "to": "hamlib",
         "filter": [
