@@ -7290,7 +7290,7 @@ function scheduleCloudDeviceReRegister(reason, delayMs = 2500) {
   }, delayMs);
 }
 
-async function ensureCloudDeviceRegistered(reason) {
+async function ensureCloudDeviceRegistered(reason, _afterRotate) {
   if (!cloudIpc) return;
   const sync = cloudIpc.getCloudSync();
   if (!sync || !settings.cloudAccessToken) return;
@@ -7324,7 +7324,15 @@ async function ensureCloudDeviceRegistered(reason) {
     _cloudDeviceLastPayloadJson = payloadJson;
   } catch (err) {
     sendCatLog(`[cloud-devices] register failed: ${err.message || err}`);
-    return;
+    // The id is held by another account: two computers once shared a
+    // settings file. This computer takes a new id and registers once more.
+    if (!_afterRotate && require('./lib/cloud-pair-errors').shouldRotateDeviceId(err)) {
+      settings.cloudDeviceId = require('crypto').randomUUID();
+      saveSettings(settings);
+      sendCatLog(`[cloud-devices] device id was in use by another account; this computer now uses ${settings.cloudDeviceId}`);
+      return ensureCloudDeviceRegistered(reason, true);
+    }
+    return { error: err }; // callers that must not go on (pairing) read this
   }
 
   // Heartbeat — fires every 60s while signed in. Cheaper than a full
@@ -50367,6 +50375,12 @@ function cloudShackNotice(text, kind) {
     const sync = cloudIpc.getCloudSync();
     if (!sync) return { error: 'Cloud sync unavailable' };
     if (!shackDeviceId) return { error: 'shackDeviceId required' };
+    const pairErrors = require('./lib/cloud-pair-errors');
+
+    // Register (or refresh) this computer first, as cloud-find-shacks does:
+    // a pair never runs on a stale or missing directory row.
+    const reg = await ensureCloudDeviceRegistered('pair').catch((err) => ({ error: err }));
+    if (reg && reg.error) return { error: pairErrors.cloudRegisterErrorText(reg.error) };
 
     // Mint a pairToken from the cloud. The cloud verifies same-account
     // and binds the token to our clientDeviceId.
@@ -50377,7 +50391,8 @@ function cloudShackNotice(text, kind) {
         clientFingerprint: '', // laptops don't have a server cert; left blank
       });
     } catch (err) {
-      return { error: 'cloud authorize failed: ' + (err.message || err) };
+      sendCatLog(`[cloud-pair] authorize failed: ${err.code || ''} ${err.message || err}`);
+      return { error: pairErrors.cloudPairErrorText(err) };
     }
     if (!authz || !authz.pairToken || !authz.shack) {
       return { error: 'cloud authorize returned no token' };
