@@ -13143,7 +13143,8 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
     // A second Connect may have started a session while Pat was restarting.
     if (clear.restarted && winlinkSessionActive()) return { ok: false, error: 'A Winlink session is already running' };
   }
-  const url = WinlinkPat.sessionUrl({ mode, gateway, dialKhz, bw: mode === 'vara' ? settings.winlinkVaraBw : undefined, rowUrl });
+  // The operator's ARDOP/VARA bandwidth caps the list row's bw for the dial (#663).
+  const url = WinlinkPat.sessionUrl({ mode, gateway, dialKhz, bw: mode === 'vara' ? settings.winlinkVaraBw : undefined, ardopBw: winlinkModemBw().ardop, rowUrl });
   if (!url) return { ok: false, error: 'Pick a gateway first' };
   if (radio) {
     // Never an attempt on a frequency this radio cannot transmit on: nothing
