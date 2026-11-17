@@ -1,0 +1,7 @@
+S766257AA|transmit freq=14.100000 rfpower=69 tunepower=4 tx_slice_mode=USB hwalc_enabled=0 inhibit=0 dax=0 sb_monitor=0 mon_gain_sb=19 mon_pan_sb=50 met_in_rx=1 am_carrier_level=100 mic_selection=PC mic_level=49 mic_boost=1 mic_bias=1 mic_acc=0 compander=1 compander_level=74 vox_enable=1 vox_level=0 vox_delay=17 speech_processor_enable=1 speech_processor_level=1 lo=100 hi=3100 tx_filter_changes_allowed=1 tx_antenna=ANT1 pitch=600 speed=30 iambic=1 iambic_mode=1 swap_paddles=0 break_in=1 break_in_delay=41 cwl_enabled=0 sidetone=1 mon_gain_cw=80 mon_pan_cw=50 synccwx=1 show_tx_in_waterfall=0 max_internal_pa_power=100
+S766257AA|transmit band 0 band_name=160 rfpower=100 tunepower=10 hwalc_enabled=0 inhibit=0
+S766257AA|transmit band 2 band_name=80 rfpower=69 tunepower=10 hwalc_enabled=0 inhibit=0
+S766257AA|transmit band 3 band_name=60 rfpower=100 tunepower=10 hwalc_enabled=0 inhibit=0
+S766257AA|transmit band 5 band_name=40 rfpower=100 tunepower=10 hwalc_enabled=0 inhibit=0
+S766257AA|transmit band 7 band_name=30 rfpower=70 tunepower=10 hwalc_enabled=0 inhibit=0
+S766257AA|transmit band 9 band_name=20 rfpower=78 tunepower=4 hwalc_enabled=0 inhibit=0

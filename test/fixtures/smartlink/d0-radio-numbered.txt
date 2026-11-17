@@ -1,0 +1,15 @@
+V1.4.0.0
+H4A30F977
+S4A30F977|radio slices=3 panadapters=3 lineout_gain=45 lineout_mute=0 headphone_gain=42 headphone_mute=0 remote_on_enabled=1 pll_done=0 freq_error_ppb=-1 cal_freq=15.000000 tnf_enabled=0 nickname= callsign=K3SBP binaural_rx=0 full_duplex_enabled=0 band_persistence_enabled=1 rtty_mark_default=2125 enforce_private_ip_connections=1 backlight=50 mute_local_audio_when_remote=1 daxiq_capacity=16 daxiq_available=16 alpha=0 low_latency_digital_modes=0 mf_enable=0 auto_save=1 external_pa_allowed=1
+S4A30F977|radio static_net_params ip= gateway= netmask=
+S4A30F977|radio front_speaker_mute=0
+S4A30F977|radio oscillator state=tcxo setting=auto locked=1 ext_present=0 gnss_present=1 gpsdo_present=0 tcxo_present=1
+S4A30F977|interlock acc_txreq_enable=0 rca_txreq_enable=0 acc_tx_enabled=0 tx1_enabled=0 tx2_enabled=0 tx3_enabled=0 tx_delay=0 acc_tx_delay=0 tx1_delay=0 tx2_delay=0 tx3_delay=0 acc_txreq_polarity=0 rca_txreq_polarity=0 timeout=0
+M10000001|Client connected from IP 203.0.113.10
+R1|0|
+MF3000001|The maximum number of connected clients has been reached
+R2|F3000001|The maximum number of connected clients has been reached
+R3|10000002|unknown client program
+S0|interlock tx_client_handle=0x00000000 state=READY reason= source= tx_allowed=1 amplifier=
+S4A30F977|client 0x055DCE57 connected local_ptt=1 client_id=00000000-0000-0000-0000-000000000001 station=POTACAT
+R6|500000AA|Invalid command for this client type (SSL vs TCP or GUI vs NON-GUI)

@@ -3393,6 +3393,7 @@ function detectRigType() {
   if (target.type === 'flrig') return 'flrig';
   if (target.type === 'dxlab-commander') return 'commander';
   if (target.type === 'tci') return 'tci'; // Zeus / Thetis TCI server (lib/tci-rig.js)
+  if (target.type === 'smartlink') return 'flex'; // a Flex over FlexRadio SmartLink (lib/smartlink-session.js)
   if (target.type === 'tcp') {
     // NOT every TCP CAT target is a Flex. SmartSDR's CAT shim is localhost-only
     // on 5002-5005; a Hermes Lite 2 behind Thetis or Zeus is a TS-2000 emulator
@@ -8948,6 +8949,16 @@ async function connectCat() {
       sendCatLog('[CAT] Not connecting: no rig is configured. Add one in Settings > My Rigs.');
       return;
     }
+  }
+  if (target.type === 'smartlink') {
+    // A Flex over FlexRadio SmartLink: the Flex API over the internet is the
+    // link (connectSmartSdr -> smartLinkConnect). There is no CAT port to open.
+    cat = null;
+    _currentFreqHz = 0;
+    closeNocatPttPort();
+    stopCatPortWatch();
+    sendCatLog('[CAT] FlexRadio over SmartLink: POTACAT drives the radio through the Flex API; there is no CAT port.');
+    return;
   }
   if (target.type === 'tci') {
     // Zeus / Thetis: the TCI server is the link; no serial port, no CatClient.
@@ -22477,6 +22488,11 @@ function connectSmartSdr() {
   // confirmed from the transmit-status readback, never from the command.
   smartSdr.on('atu-status', (kv) => { if (atuWizardRun) atuWizardRun.noteAtuStatus(kv); });
   smartSdr.on('interlock', (kv) => { if (atuWizardRun) atuWizardRun.noteInterlock(kv); });
+  // The radio's own transmit timeout, filled in when it has none (any Flex,
+  // LAN and SmartLink alike; lib/flex-tx-timeout.js).
+  smartSdr.on('interlock', (kv) => flexTxTimeoutCheck('interlock', kv));
+  // A key-down refused over FlexRadio SmartLink (lib/smartsdr.js backstop).
+  smartSdr.on('tx-refused', ({ reason }) => flexSmartLinkTxRefused(reason));
   smartSdr.on('frequency', (hz) => { if (atuWizardRun) atuWizardRun.noteSliceMoved(hz); });
   smartSdr.on('transmit-status', () => atuWizardOnTransmitStatus());
   smartSdr.on('slice-ready', () => { try { atuWizardRecoverOnConnect(); } catch (err) { sendCatLog(`[ATU wizard] recovery check failed: ${err.message}`); } });
@@ -22494,6 +22510,7 @@ function connectSmartSdr() {
   });
   smartSdr.on('connected', () => {
     _sdrErrorLogged = false;
+    _flexTxTimeoutDone = false; // every connect looks at the radio's timeout again
     // Fresh connection — re-arm DAX-route detection (clear stale state so the
     // first mismatch this session can auto-fix).
     _daxFixAttempted = false;
@@ -22562,6 +22579,12 @@ function connectSmartSdr() {
     if (smartSdr && smartSdr.mode === 'bound') reclaimFlexRadio('bound GUI client (AetherSDR) closed');
   });
   smartSdr.on('give-up', ({ host, attempts }) => {
+    // FlexRadio SmartLink: the named failure was already said (smartLinkConnect);
+    // the LAN advice below (IP address, port 4992) does not apply.
+    if (smartSdr && smartSdr.transportKind === 'smartlink') {
+      sendCatLog(`[SmartLink] gave up after ${attempts} attempts${_smartLinkRoute && _smartLinkRoute.text ? ': ' + _smartLinkRoute.text : ''} POTACAT tries again every minute.`);
+      return;
+    }
     // Reached with a non-Flex active rig only when the operator turned on
     // panadapter spots, which is a deliberate choice (push spots to a Flex
     // while operating something else) — but the Flex-IP advice below is then
@@ -22770,6 +22793,7 @@ function connectSmartSdr() {
     // connection can bind to it. The connect-time 1s timer fires too early
     // (before `client gui` completes), so kick the audio client here.
     if (settings.audioSource === 'smartsdr') startSmartSdrAudio();
+    flexTxTimeoutCheck('gui-ready');
     // Flex Direct is up: this shack can now hand the radio to ECHOCAT
     // (capability flex-handback for the next device that connects).
     if (smartSdr) smartSdr.setReclaimOnly(false);
@@ -22814,8 +22838,13 @@ function connectSmartSdr() {
       } else {
         const wantSpeaker = settings.flexOnboardSpeaker === true;
         const level = wantSpeaker ? (parseInt(settings.flexSpeakerGain, 10) || 50) : 0;
-        smartSdr.setSliceAudioLevel(index, level);
-        sendCatLog(`Flex Direct: radio speaker ${wantSpeaker ? `ON (audio_level=${level})` : 'silenced (audio_level=0) — DAX/PC audio still live'} (slice ${index})`);
+        // Over FlexRadio SmartLink audio_level=0 lowers the Opus audio POTACAT
+        // receives by about 15 dB (D0 2026-11-17), and the radio mutes its own
+        // speaker for a remote client (mute_local_audio_when_remote=1).
+        const keepLevel = !wantSpeaker && smartSdr.transportKind === 'smartlink';
+        if (keepLevel) sendCatLog(`Flex Direct over FlexRadio SmartLink: slice ${index} audio level left as it is (level 0 would quiet the audio POTACAT receives; the radio mutes its own speaker for a remote client)`);
+        else smartSdr.setSliceAudioLevel(index, level);
+        if (!keepLevel) sendCatLog(`Flex Direct: radio speaker ${wantSpeaker ? `ON (audio_level=${level})` : 'silenced (audio_level=0) — DAX/PC audio still live'} (slice ${index})`);
       }
     } else {
       // Bound mode: the host GUI client (SmartSDR-Win / AetherSDR) already
@@ -22952,6 +22981,12 @@ function connectSmartSdr() {
   // Use per-rig flexApiHost if set, else smartSdrHost global, else catTarget host, else localhost
   const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
   const sdrHost = (activeRig && activeRig.flexApiHost) || settings.smartSdrHost || (settings.catTarget && settings.catTarget.host) || '127.0.0.1';
+  // FlexRadio over SmartLink: the LAN when the radio is here, else the internet.
+  if (isSmartLinkRig(activeRig)) {
+    smartLinkConnect(smartSdr, activeRig).catch((err) => sendCatLog('[SmartLink] ' + SmartLinkSession.redact(err.message)));
+    return;
+  }
+  _smartLinkRoute = null;
   sendCatLog(`Connecting SmartSDR API to ${sdrHost}:4992...`);
   smartSdr.connect(sdrHost);
 }
@@ -22967,6 +23002,7 @@ function disconnectSmartSdr() {
     smartSdr.disconnect();
     smartSdr = null;
   }
+  smartLinkCloseServer(); // a SmartLink session belongs to the connection it served
   stopSmartSdrAudio();
 }
 
@@ -23026,6 +23062,338 @@ function checkFlexHandoff(catUp) {
 // the radio). The rule and every sentence: lib/flex-route.js. The non-GUI
 // watch: lib/flex-gui-watch.js. The wire: docs/echocat-protocol.md.
 const FlexRouteLib = require('./lib/flex-route');
+
+// --- The Flex's own transmit timeout (lib/flex-tx-timeout.js) ----------------
+// Any Flex rig, LAN and SmartLink alike: once POTACAT is the GUI client and the
+// radio reports interlock timeout=0, set the rig's "Radio transmit timeout"
+// (default 5 minutes; Off leaves the radio alone). A value set elsewhere is
+// never changed. It is a persistent radio setting every client sees.
+const FlexTxTimeout = require('./lib/flex-tx-timeout');
+let _flexTxTimeoutDone = false;
+function flexTxTimeoutCheck(why) {
+  if (!smartSdr || _flexTxTimeoutDone) return;
+  const rig = (settings.rigs || []).find((r) => r && r.id === settings.activeRigId) || null;
+  const d = FlexTxTimeout.decideFill({ radioTimeout: smartSdr.interlockTimeout, minutes: FlexTxTimeout.minutesFor(rig), isGuiClient: !!smartSdr.guiReady });
+  if (d.action !== 'set') {
+    // Decided for this connection once the radio has said and we hold the seat.
+    if (smartSdr.guiReady && smartSdr.interlockTimeout != null) _flexTxTimeoutDone = true;
+    return;
+  }
+  if (smartSdr.setInterlockTimeout(d.ms) == null) return;
+  _flexTxTimeoutDone = true;
+  sendCatLog(FlexTxTimeout.fillLogText(d.minutes) + ` [${why}]`);
+  if (rig && !rig.flexTxTimeoutNoticed) {
+    rig.flexTxTimeoutNoticed = true;
+    saveSettings(settings);
+    if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: FlexTxTimeout.fillNoticeText(d.minutes), duration: 15000 });
+  }
+}
+
+// A key-down refused over FlexRadio SmartLink: said where the press happened,
+// and JTCAT stops trying.
+let _smartLinkTxNoticeAt = 0;
+function flexSmartLinkTxRefused(why) {
+  sendCatLog('[PTT] refused: ' + why);
+  try { if (jtcatAnyTxActive() || jtcatTuneState.active) jtcatHaltTxNow('transmit over FlexRadio SmartLink was refused'); } catch { /* JTCAT not started */ }
+  if (vfoPopoutWin && !vfoPopoutWin.isDestroyed()) vfoPopoutWin.webContents.send('tune-blocked', why);
+  if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'tune-blocked', reason: why });
+  if (win && !win.isDestroyed() && Date.now() - _smartLinkTxNoticeAt > 60000) {
+    _smartLinkTxNoticeAt = Date.now();
+    win.webContents.send('app-notice', { message: why, warn: true, duration: 15000 });
+  }
+}
+
+// --- FlexRadio SmartLink (lib/smartlink-session.js) ---------------------------
+// A Flex reached over the internet through FlexRadio's SmartLink service. The
+// session dials the radio and hands SmartSdrClient a TLS socket that has already
+// sent `C1|wan validate` (lib/flex-transport.js); from there it is Flex Direct.
+// The client ID comes only from lib/smartlink-config.js, never from the repo. The
+// refresh token is a settings secret (lib/settings-secrets.js), encrypted with
+// safeStorage where the OS offers it. Tokens and the account are never logged.
+const SmartLinkSession = require('./lib/smartlink-session');
+const SmartLinkConfig = require('./lib/smartlink-config');
+const { SmartLinkOpusAudio } = require('./lib/smartlink-opus');
+let _smartLinkServer = null;
+let _smartLinkRoute = null;    // { kind: 'connecting'|'lan'|'smartlink'|'error', serial, ip?, code?, text? }
+let _smartLinkSignInWin = null;
+const _smartLinkPartitions = new Set();
+
+let _smartLinkClientId; // resolved once per run; never logged
+function smartLinkClientId() {
+  if (_smartLinkClientId === undefined) {
+    _smartLinkClientId = SmartLinkConfig.resolveClientId({ resourcesPath: app.isPackaged ? process.resourcesPath : null, packaged: app.isPackaged }).clientId;
+  }
+  return _smartLinkClientId;
+}
+function smartLinkGetRefreshToken() {
+  const v = settings && settings.smartlinkRefreshToken;
+  if (!v) return null;
+  if (typeof v === 'string' && v.startsWith('enc:')) {
+    try { return require('electron').safeStorage.decryptString(Buffer.from(v.slice(4), 'base64')); } catch { return null; }
+  }
+  return v;
+}
+function smartLinkSetRefreshToken(rt) {
+  if (!rt) { delete settings.smartlinkRefreshToken; saveSettings(settings); return; }
+  let stored = rt;
+  try {
+    const { safeStorage } = require('electron');
+    if (safeStorage.isEncryptionAvailable()) stored = 'enc:' + safeStorage.encryptString(rt).toString('base64');
+  } catch { /* kept like the other settings secrets */ }
+  settings.smartlinkRefreshToken = stored;
+  saveSettings(settings);
+}
+function smartLinkHttpsPost(url, form) {
+  return new Promise((resolve, reject) => {
+    const body = new URLSearchParams(form).toString();
+    const u = new URL(url);
+    const req = require('https').request({ host: u.host, path: u.pathname, method: 'POST', timeout: 15000,
+      headers: { 'content-type': 'application/x-www-form-urlencoded', 'content-length': Buffer.byteLength(body) } }, (res) => {
+      let d = '';
+      res.on('data', (c) => { d += c; });
+      res.on('end', () => resolve({ status: res.statusCode, body: d }));
+    });
+    req.on('timeout', () => req.destroy(new Error('timeout')));
+    req.on('error', reject);
+    req.end(body);
+  });
+}
+function smartLinkConnectTls(o) { return require('tls').connect(o); }
+function smartLinkServer() {
+  if (_smartLinkServer) return _smartLinkServer;
+  _smartLinkServer = new SmartLinkSession.SmartLinkServer({
+    clientId: smartLinkClientId(),
+    getRefreshToken: smartLinkGetRefreshToken,
+    connectTls: smartLinkConnectTls,
+    post: smartLinkHttpsPost,
+    platform: SmartLinkSession.platformName(process.platform),
+    appName: 'POTACAT',
+  });
+  _smartLinkServer.on('log', (m) => sendCatLog('[SmartLink] ' + m));
+  return _smartLinkServer;
+}
+function smartLinkCloseServer() {
+  if (!_smartLinkServer) return;
+  try { _smartLinkServer.close('closing'); } catch {}
+  _smartLinkServer.removeAllListeners();
+  _smartLinkServer = null;
+}
+function isSmartLinkRig(rig) {
+  return !!(rig && rig.catTarget && rig.catTarget.type === 'smartlink' && rig.catTarget.serial);
+}
+function smartLinkNotice(text) {
+  sendCatLog('[SmartLink] ' + text);
+  if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: text, warn: true, duration: 12000 });
+}
+function smartLinkStatus() {
+  return {
+    available: !!smartLinkClientId(),
+    signedIn: !!smartLinkGetRefreshToken(),
+    callsign: _smartLinkServer && _smartLinkServer.user ? _smartLinkServer.user.callsign : '',
+    route: _smartLinkRoute,
+  };
+}
+function smartLinkPublish() {
+  if (win && !win.isDestroyed()) win.webContents.send('smartlink-status', smartLinkStatus());
+}
+// Spec section 2: a radio found on the LAN uses the LAN path, decided by where
+// it was found, never by whether a WAN port is listed.
+async function smartLinkLanAddress(serial) {
+  try { const r = (await discoverFlexRadios(1500)).find((x) => x.serial === serial); return r ? r.ip : null; } catch { return null; }
+}
+async function smartLinkConnect(client, rig) {
+  const serial = rig.catTarget.serial;
+  const label = rig.catTarget.name || rig.name || 'the radio';
+  _smartLinkRoute = { kind: 'connecting', serial };
+  smartLinkPublish();
+  const lanIp = await smartLinkLanAddress(serial);
+  if (smartSdr !== client) return; // the rig changed while we looked
+  if (lanIp) {
+    _smartLinkRoute = { kind: 'lan', serial, ip: lanIp };
+    sendCatLog(`[SmartLink] ${label} is on this network at ${lanIp}: POTACAT talks to it directly (port 4992), not through FlexRadio SmartLink.`);
+    client.setTransport(null);
+    client.connect(lanIp);
+    smartLinkPublish();
+    return;
+  }
+  const fail = (code) => {
+    _smartLinkRoute = { kind: 'error', serial, code, text: SmartLinkSession.TEXT[code] };
+    smartLinkNotice(SmartLinkSession.TEXT[code]);
+    smartLinkPublish();
+  };
+  if (!smartLinkClientId()) return fail('not-configured');
+  if (!smartLinkGetRefreshToken()) return fail('signed-out');
+  const server = smartLinkServer();
+  // The radio licenses one GUI client and gives audio only to it: never ride along.
+  client.setGuiOnly(true);
+  client.setTransport(SmartLinkSession.smartLinkTransport({
+    server,
+    serial,
+    connectTls: smartLinkConnectTls,
+    getPins: () => settings.smartlinkCertPins || {},
+    onPin: (p) => {
+      if (p.status === 'first') { settings.smartlinkCertPins = p.pins; saveSettings(settings); }
+      else if (p.status === 'changed') smartLinkNotice(SmartLinkSession.TEXT['cert-changed'] + ' Use Test connection in Settings > My Rigs to trust the new one.');
+    },
+    log: (m) => sendCatLog('[SmartLink] ' + m),
+  }));
+  let noticed = '';
+  client.on('error', (err) => {
+    const code = err && err.code;
+    if (!code || !SmartLinkSession.TEXT[code]) return;
+    _smartLinkRoute = { kind: 'error', serial, code, text: SmartLinkSession.TEXT[code] };
+    if (noticed !== code) { noticed = code; smartLinkNotice(SmartLinkSession.TEXT[code]); }
+    smartLinkPublish();
+    // Trying again cannot fix these; the operator has to act.
+    if (['sign-in', 'signed-out', 'not-configured', 'needs-hole-punch'].includes(code)) {
+      client.disconnect();
+      if (code === 'sign-in') smartLinkCloseServer();
+    }
+  });
+  client.on('connected', () => {
+    noticed = '';
+    _smartLinkRoute = { kind: 'smartlink', serial };
+    sendCatLog(`[SmartLink] connected to ${label} over FlexRadio SmartLink`);
+    smartLinkPublish();
+  });
+  client.on('udp-failed', () => smartLinkNotice(SmartLinkSession.TEXT['udp-blocked']));
+  client.on('gui-rejected', () => {
+    // F3000001: another program holds the radio's one GUI seat. Say who.
+    const text = SmartLinkSession.busySentence(server.radio(serial));
+    _smartLinkRoute = { kind: 'error', serial, code: 'radio-busy', text };
+    smartLinkNotice(text);
+    smartLinkPublish();
+    client.disconnect();
+  });
+  sendCatLog(`[SmartLink] connecting to ${label} through FlexRadio SmartLink...`);
+  client.connect('smartlink');
+}
+
+// Sign in in POTACAT's own window on FlexRadio's page (Auth0, implicit flow).
+// A fresh in-memory session per sign-in, so an old Auth0 cookie cannot complete
+// it silently; only the refresh token from the redirect fragment is kept.
+function smartLinkSignIn() {
+  const clientId = smartLinkClientId();
+  if (!clientId) return Promise.resolve({ ok: false, error: SmartLinkSession.TEXT['not-configured'] });
+  if (_smartLinkSignInWin && !_smartLinkSignInWin.isDestroyed()) {
+    _smartLinkSignInWin.focus();
+    return Promise.resolve({ ok: false, error: 'The FlexRadio sign-in window is already open.' });
+  }
+  const state = require('crypto').randomBytes(16).toString('hex');
+  const partition = 'smartlink-signin-' + state; // no "persist:": memory only
+  _smartLinkPartitions.add(partition);
+  const ses = require('electron').session.fromPartition(partition);
+  return new Promise((resolve) => {
+    let done = false;
+    _smartLinkSignInWin = new BrowserWindow({
+      width: 520, height: 760, minWidth: 420, minHeight: 560,
+      title: 'Sign in to FlexRadio',
+      backgroundColor: getThemeWindowBg(),
+      autoHideMenuBar: true,
+      webPreferences: { session: ses, contextIsolation: true, nodeIntegration: false, sandbox: true },
+    });
+    rememberWindowPlace(_smartLinkSignInWin, 'smartlinkSignInBounds', { minWidth: 420, minHeight: 560 });
+    const signInWin = _smartLinkSignInWin;
+    const finish = (r) => {
+      if (done) return;
+      done = true;
+      ses.clearStorageData().catch(() => {});
+      if (!signInWin.isDestroyed()) signInWin.destroy();
+      if (_smartLinkSignInWin === signInWin) _smartLinkSignInWin = null;
+      smartLinkPublish();
+      resolve(r);
+    };
+    const check = (url) => {
+      if (!SmartLinkSession.isRedirect(url)) return false;
+      const r = SmartLinkSession.parseRedirect(url, state);
+      if (r.refreshToken) {
+        smartLinkCloseServer();
+        smartLinkSetRefreshToken(r.refreshToken);
+        sendCatLog('[SmartLink] signed in to FlexRadio (the sign-in token is stored as a settings secret and never shown)');
+        finish({ ok: true });
+      } else {
+        finish({ ok: false, error: 'FlexRadio sign-in did not finish: ' + r.error });
+      }
+      return true;
+    };
+    const wc = signInWin.webContents;
+    wc.setWindowOpenHandler(() => ({ action: 'deny' }));
+    wc.on('will-redirect', (e, u) => { if (check(u)) e.preventDefault(); });
+    wc.on('will-navigate', (e, u) => { if (check(u)) e.preventDefault(); });
+    wc.on('did-navigate', (_e, u) => { check(u); });
+    signInWin.on('closed', () => finish({ ok: false, error: 'The sign-in window was closed.' }));
+    signInWin.loadURL(SmartLinkSession.authorizeUrl({ clientId, state, device: 'POTACAT' }));
+  });
+}
+async function smartLinkSignOut() {
+  smartLinkCloseServer();
+  smartLinkSetRefreshToken(null);
+  // Clear every sign-in session's cookies, so the next sign-in asks again.
+  for (const p of _smartLinkPartitions) { try { await require('electron').session.fromPartition(p).clearStorageData(); } catch {} }
+  _smartLinkPartitions.clear();
+  sendCatLog('[SmartLink] signed out of FlexRadio; the stored sign-in token was deleted');
+  if (smartSdr && smartSdr.transportKind === 'smartlink') connectSmartSdr(); // it cannot stay on signed out
+  smartLinkPublish();
+  return { ok: true };
+}
+function smartLinkHolding() {
+  return !!(smartSdr && smartSdr.transportKind === 'smartlink');
+}
+async function smartLinkRadios() {
+  if (!smartLinkClientId()) return { ok: false, error: SmartLinkSession.TEXT['not-configured'] };
+  if (!smartLinkGetRefreshToken()) return { ok: false, error: SmartLinkSession.TEXT['signed-out'] };
+  const server = smartLinkServer();
+  try {
+    const radios = await server.open();
+    return {
+      ok: true,
+      callsign: server.user ? server.user.callsign : '',
+      radios: radios.map((r) => ({ serial: r.serial, name: r.name, model: r.model, callsign: r.callsign, status: r.status, who: SmartLinkSession.whoHolds(r), text: SmartLinkSession.describeRadio(r) })),
+    };
+  } catch (err) {
+    if (err.code === 'sign-in') smartLinkCloseServer();
+    return { ok: false, error: SmartLinkSession.TEXT[err.code] || 'FlexRadio SmartLink did not answer.' };
+  } finally {
+    if (!smartLinkHolding()) smartLinkCloseServer(); // no idle session pinging FlexRadio
+    smartLinkPublish();
+  }
+}
+async function smartLinkTest(serial) {
+  if (!serial) return { ok: false, text: 'Pick your radio first.' };
+  if (!smartLinkClientId()) return { ok: false, text: SmartLinkSession.TEXT['not-configured'] };
+  if (!smartLinkGetRefreshToken()) return { ok: false, text: SmartLinkSession.TEXT['signed-out'] };
+  const r0 = _smartLinkRoute;
+  if (smartSdr && smartSdr.connected && r0 && r0.serial === serial && r0.kind === 'smartlink') {
+    return { ok: true, text: 'POTACAT is connected to this radio over FlexRadio SmartLink now.' };
+  }
+  if (smartSdr && smartSdr.connected && r0 && r0.serial === serial && r0.kind === 'lan') {
+    return { ok: true, text: `This radio is on your network at ${r0.ip}, so POTACAT talks to it directly.` };
+  }
+  // A test from the same network as the radio still works (NAT loopback), but
+  // say that POTACAT will use the LAN.
+  const lanIp = await smartLinkLanAddress(serial);
+  const server = smartLinkServer();
+  try {
+    const r = await SmartLinkSession.testRadio({
+      server, serial, connectTls: smartLinkConnectTls,
+      createUdp: () => require('dgram').createSocket('udp4'),
+      pins: settings.smartlinkCertPins || {},
+      log: (m) => sendCatLog('[SmartLink test] ' + m),
+    });
+    if (r.ok && r.pins) { settings.smartlinkCertPins = r.pins; saveSettings(settings); }
+    let text = r.text;
+    if (!r.ok && r.code !== 'sign-in' && r.code !== 'radio-offline') {
+      const port = SmartLinkSession.describePortTest(await server.testConnection(serial).catch(() => null));
+      if (port) text += ' ' + port;
+    }
+    if (lanIp) text += ` This radio is also on your network at ${lanIp}; from here POTACAT talks to it directly.`;
+    sendCatLog('[SmartLink test] ' + text);
+    return { ok: r.ok, text };
+  } finally {
+    if (!smartLinkHolding()) smartLinkCloseServer();
+    smartLinkPublish();
+  }
+}
 const { FlexGuiWatch } = require('./lib/flex-gui-watch');
 let flexRoute = null;          // FlexRoute, built from settings.flexRoute on first use
 let _flexGuiWatch = null;      // the non-GUI LAN watch while the radio is released
@@ -23377,7 +23745,11 @@ function startSmartSdrAudio() {
   if (!smartSdr || smartSdr.mode === 'none') return;
   const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
   const sdrHost = (activeRig && activeRig.flexApiHost) || settings.smartSdrHost || (settings.catTarget && settings.catTarget.host) || '127.0.0.1';
-  smartSdrAudio = new SmartSdrAudio();
+  // FlexRadio SmartLink grants one connection and gives audio only to the GUI
+  // client: Opus on that connection (lib/smartlink-opus.js), same events.
+  smartSdrAudio = (smartSdr && smartSdr.transportKind === 'smartlink')
+    ? new SmartLinkOpusAudio({ client: smartSdr })
+    : new SmartSdrAudio();
   smartSdrAudio.on('log', (msg) => sendCatLog('[SmartSDR-Audio] ' + msg));
   smartSdrAudio.on('audio-frame', ({ pcm, sampleRate }) => {
     winlinkFeedRx(pcm, sampleRate); // Winlink modem over Flex Direct (no DAX)
@@ -31487,6 +31859,12 @@ function handleRemotePtt(state, opts = {}) {
     return false;
   }
   if (tciRigTarget()) return tciRigPtt(state); // TCI keys only through lib/tci-tx.js
+  // FlexRadio SmartLink: lib/smartsdr.js refuses the key-down itself (the
+  // backstop every path passes); asking first lets the dispatcher answer false.
+  if (state && smartSdr && smartSdr.transportKind === 'smartlink') {
+    const why = FlexTxTimeout.smartLinkTxRefusal({ smartLink: true, interlockTimeout: smartSdr.interlockTimeout, cmd: 'xmit 1' });
+    if (why) { flexSmartLinkTxRefused(why); return false; }
+  }
   // The ATU wizard is keying tune carriers across the bands: a PTT from any
   // surface would land on whatever frequency it is measuring.
   if (state && atuWizardActive()) {
@@ -49764,6 +50142,12 @@ function cloudShackNotice(text, kind) {
   ipcMain.handle('get-settings', () => ({ ...settings, appVersion: getAppDisplayVersion(), remoteShack: isRemoteMode(), themeNow: themeQuery() }));
   // The rig editor's Test connection for a Zeus / Thetis TCI server: waits
   // for the server's `ready` and sends nothing (lib/tci-rig.js probeTci).
+  // FlexRadio over SmartLink, for the rig editor (lib/smartlink-session.js).
+  ipcMain.handle('smartlink-status', () => smartLinkStatus());
+  ipcMain.handle('smartlink-sign-in', () => smartLinkSignIn());
+  ipcMain.handle('smartlink-sign-out', () => smartLinkSignOut());
+  ipcMain.handle('smartlink-radios', () => smartLinkRadios());
+  ipcMain.handle('smartlink-test', (_e, serial) => smartLinkTest(String(serial || '')));
   ipcMain.handle('probe-tci-rig', async (_e, target) => {
     const t = TciTarget.normalize(target);
     const bad = TciTarget.validate(t);
