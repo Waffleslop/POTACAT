@@ -17415,7 +17415,12 @@ const { JtcatManager } = require('./lib/jtcat-manager');
 let jtcatManager = null; // initialized on first startJtcat()
 let ft8Engine = null;    // alias for jtcatManager.engine (Phase 0 compatibility)
 let remoteJtcatQso = null;
-let jtcatQuietFreq = 1500; // auto-detected quiet TX frequency from FFT analysis
+// Quiet TX frequency for a CQ: a waterfall window's report while one is drawing,
+// else main's own measurement of the engine audio (lib/jtcat-quiet-freq.js;
+// the measuring loop sits beside the in-process spectrum below).
+const JtcatQuietFreq = require('./lib/jtcat-quiet-freq');
+const jtcatQuietTracker = JtcatQuietFreq.createQuietFreqTracker();
+function jtcatQuietPick() { return jtcatQuietTracker.current(Date.now()); }
 // WSPR beacon state — driven by the IPC handler + a 1 s scheduler tick.
 // The beacon's default RF power, 1 W. Since #268 it runs at the level the
 // operator sets while it is armed, and reports that power (lib/wspr/dbm.js).
@@ -18685,13 +18690,14 @@ async function startFullAutoCq(owner, modifier, opts) {
   // guaranteed the immediate-TX attempt below could never fire. rearmCq
   // deliberately leaves the freq alone so we hold the same frequency cycle to
   // cycle (answerers find us there). Respects Hold TX Freq.
-  ft8Engine.setTxFreq(jtcatQuietFreq);
+  const quietPick = jtcatQuietPick();
+  ft8Engine.setTxFreq(quietPick.hz);
   const qso = await jtcatBuildCqQso(jtcatFullAutoCqModifier);
   if (!qso) { stopFullAutoCq('callsign/grid not set'); return false; }
   if (owner === 'remote') { remoteJtcatQso = qso; remoteJtcatBroadcastQso(); }
   else { popoutJtcatQso = qso; popoutBroadcastQso(); }
   broadcastFullAutoCqState();
-  sendCatLog('[JTCAT] Full Auto CQ STARTED: ' + qso.txMsg + ' @ ' + ft8Engine._txFreq + 'Hz');
+  sendCatLog('[JTCAT] Full Auto CQ STARTED: ' + qso.txMsg + ' @ ' + ft8Engine._txFreq + 'Hz (pick: ' + JtcatQuietFreq.describePick(quietPick) + ')');
   return true;
 }
 
@@ -22092,6 +22098,28 @@ setInterval(() => {
     _jttyLevelsMs += dt;
   } catch { /* a spectrum miss is not worth a crash */ }
 }, 1000).unref();
+// FT8/FT4/FT2: the quiet TX frequency, measured here from the engine's own
+// audio. The waterfall windows measure it in their draw loops, which Chromium
+// pauses while the window is hidden or minimised, so on an unattended shack a
+// phone's CQ always went out at 1500 Hz (ECHOCAT_TO_DESKTOP_HANDOFF_2026-11-16).
+// Same rule, same 0.5 s cadence (lib/jtcat-quiet-freq.js). One 2048-point FFT
+// per tick, only while the engine runs, never while it transmits (RX is muted
+// then), and not at all while a window is reporting. A silent buffer (no audio
+// yet, or a dead capture) is no measurement.
+const JTCAT_QUIET_BINS = 512; // computeSpectrumBins' full resolution over 0..3000 Hz (12000 / 2048 Hz per bin)
+setInterval(() => {
+  const eng = ft8Engine;
+  if (!eng || !eng._running || eng._txActive || !eng._audioBuffer) return;
+  if (eng._mode !== 'FT8' && eng._mode !== 'FT4' && eng._mode !== 'FT2') return;
+  const now = Date.now();
+  if (jtcatQuietTracker.windowFresh(now)) return;
+  try {
+    const bins = computeSpectrumBins(eng._audioBuffer, eng._audioOffset || 0, JTCAT_QUIET_BINS);
+    let heard = false;
+    for (let i = 0; i < bins.length; i++) if (bins[i] > 0) { heard = true; break; }
+    if (heard) jtcatQuietTracker.report('main', JtcatQuietFreq.pickQuietFreq(bins, 3000 / JTCAT_QUIET_BINS), now);
+  } catch { /* a spectrum miss is not worth a crash */ }
+}, 500).unref();
 // Move a JTTY CQ to the clearest spot before it is sent. Says so to the
 // pop-out (its frequency label and note) and to the phones (tx-status).
 function jttyCqToClearSpot(eng, text) {
@@ -29343,7 +29371,8 @@ function connectRemote() {
       return;
     }
     // Auto-place TX on quiet frequency from FFT analysis
-    ft8Engine.setTxFreq(jtcatQuietFreq);
+    const quietPick = jtcatQuietPick();
+    ft8Engine.setTxFreq(quietPick.hz);
     // Honor the phone's chase tag (the bare-CQ gap fix). Falls back to the
     // shared chase target if the phone didn't send one. Same builder as the
     // popout + Full Auto CQ so all three agree and clamp identically.
@@ -29359,7 +29388,7 @@ function connectRemote() {
     // of showing the real 25s wait. K3SBP 2026-05-29.
     if (remoteServer.hasClient()) {
       // Broadcast the engine's ACTUAL TX freq, not the quiet-freq pick — with
-      // Hold TX Freq on the pick was rejected and jtcatQuietFreq was a lie
+      // Hold TX Freq on the pick was rejected and the quiet pick was a lie
       // (same defect class as the popout's optimistic label; KF0U 2026-07-17).
       remoteServer.broadcastJtcatTxStatus({ state: 'rx', txFreq: ft8Engine._txFreq, slot: nextSlot });
     }
@@ -29367,7 +29396,7 @@ function connectRemote() {
     await remoteJtcatSetTxMsg(txMsg); // encode first, then enable TX
     ft8Engine._txEnabled = true;
     ft8Engine.tryImmediateTx();
-    console.log('[JTCAT Remote] CQ:', txMsg, '@ quiet freq', jtcatQuietFreq, 'Hz slot:', nextSlot);
+    console.log('[JTCAT Remote] CQ:', txMsg, '@', ft8Engine._txFreq, 'Hz, quiet pick', JtcatQuietFreq.describePick(quietPick), 'slot:', nextSlot);
   });
 
   remoteServer.on('jtcat-reply', async (data) => {
@@ -47264,7 +47293,8 @@ function cloudShackNotice(text, kind) {
     // CQ. This mirrors the phone CQ path (jtcat-call-cq). setTxFreq is a no-op
     // when Hold TX Freq is on, so a pinned offset is still respected.
     // (K3SBP 2026-06-19 — desktop CQ was stuck at 1500 Hz.)
-    ft8Engine.setTxFreq(jtcatQuietFreq);
+    const quietPick = jtcatQuietPick();
+    ft8Engine.setTxFreq(quietPick.hz);
     // The lock, else our last transmission's slot, else the soonest boundary
     // (never the opposite of whatever decode came in last: an activator's CQ
     // wandered between slots from QSO to QSO).
@@ -47272,7 +47302,7 @@ function cloudShackNotice(text, kind) {
     popoutJtcatQso = { mode: 'cq', call: null, grid: null, phase: 'cq', txMsg, cqMsg: txMsg, report: null, sentReport: null, myCall, myGrid, txRetries: 0 };
     if (fdCtx) { popoutJtcatQso.fd = true; popoutJtcatQso.myExch = fdCtx.myExch; }
     ft8Engine._txEnabled = true;
-    sendCatLog(`[JTCAT] CQ encoding: ${txMsg} slot=${nextSlot} @ ${jtcatQuietFreq}Hz (quiet)`);
+    sendCatLog(`[JTCAT] CQ encoding: ${txMsg} slot=${nextSlot} @ ${ft8Engine._txFreq}Hz, quiet pick ${JtcatQuietFreq.describePick(quietPick)}`);
     await ft8Engine.setTxMessage(txMsg);
     const fired = ft8Engine.tryImmediateTx();
     if (!fired) {
@@ -53822,7 +53852,7 @@ function cloudShackNotice(text, kind) {
   });
 
   ipcMain.on('jtcat-quiet-freq', (_e, hz) => {
-    jtcatQuietFreq = hz;
+    jtcatQuietTracker.report('window', hz, Date.now());
   });
   ipcMain.on('jtcat-spectrum', (_e, bins) => {
     // While a remote client holds a spectrum subscription, the in-process FFT

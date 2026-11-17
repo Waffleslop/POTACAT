@@ -152,6 +152,7 @@ const TESTS = [
   'test/jtcat-tx-watchdog-test.js',
   'test/jtcat-replace-log-test.js',
   'test/jtcat-second-caller-test.js',
+  'test/jtcat-quiet-freq-test.js', // CQ quiet frequency: main measures the engine audio while no waterfall draws (one rule, lib/jtcat-quiet-freq.js)
   'test/port-picker-test.js',
   'test/pota-parks-db-test.js',
   'test/elecraft-data-mode-test.js',
