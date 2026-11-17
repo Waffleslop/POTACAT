@@ -535,6 +535,7 @@ const DialSnap = require('./lib/dial-snap');
 const PlainSsbForDigital = require('./lib/plain-ssb-for-digital');
 const FreedvPtt = require('./lib/freedv-ptt'); // FreeDV mode: voice PTT refused until FreeDV transmit exists
 const FreedvStatus = require('./lib/freedv-status'); // freedv-status to ECHOCAT: state, modes, sync, SNR, plain reason
+const FreedvDisplayMode = require('./lib/freedv-display-mode'); // #716: FREEDV-<codec> on every surface while the engine runs
 const { decideDialFollow } = require('./lib/jtcat-dial-follow');
 const JtcatRxSource = require('./lib/jtcat-rx-source'); // #243: JTCAT can hear a WebSDR instead of the radio
 const { StreamResampler } = require('./lib/stream-resampler');
@@ -4581,15 +4582,8 @@ function sendCatMode(mode) {
   // The old display check only caught USB/LSB, so default-config users
   // saw the renderer flip to "PKTUSB" right after tuning a RADE spot
   // and assumed FreeDV had reverted. (mac OS 26 v1.5.13 user 2026-05-05.)
-  const isFreedvSideband = mode === 'USB' || mode === 'LSB' ||
-    mode === 'DIGU' || mode === 'DIGL' ||
-    mode === 'PKTUSB' || mode === 'PKTLSB' ||
-    mode === 'USB-D' || mode === 'LSB-D';
-  let displayMode = mode;
-  if (freedvEngine && isFreedvSideband) {
-    const codec = String(freedvEngine.mode || 'RADEV1').toUpperCase();
-    displayMode = 'FREEDV-' + codec;
-  }
+  // One rule for every surface: lib/freedv-display-mode.js (#716).
+  const displayMode = FreedvDisplayMode.freedvDisplayMode(mode, freedvDisplayCodec());
   if (win && !win.isDestroyed()) win.webContents.send('cat-mode', displayMode);
   if (bandspreadPopoutWin && !bandspreadPopoutWin.isDestroyed()) {
     bandspreadPopoutWin.webContents.send('bandspread-popout-mode', displayMode);
@@ -31492,13 +31486,17 @@ function _setCwTxLockout(durationMs) {
   }, target - Date.now());
 }
 
+/** The running FreeDV codec for lib/freedv-display-mode.js, null when FreeDV is off. */
+function freedvDisplayCodec() { return freedvEngine ? (freedvEngine.mode || 'RADEV1') : null; }
+
 /** Apply FreeDV audio mute state to ECHOCAT WebRTC — called on state change and audio (re)connect */
 /** Send full radio state to VFO popout */
 function sendVfoState() {
   if (!vfoPopoutWin || vfoPopoutWin.isDestroyed()) return;
   vfoPopoutWin.webContents.send('vfo-radio-state', {
     freq: displayFreqHz() || 0,
-    mode: _currentMode || '',
+    // RADE, not the DIGU/PKTUSB the radio sits in, while FreeDV runs (#716).
+    mode: FreedvDisplayMode.freedvDisplayMode(_currentMode || '', freedvDisplayCodec()),
     filterWidth: _currentFilterWidth || 0,
     nb: _currentNbState,
     atu: _currentAtuState,
@@ -31721,10 +31719,9 @@ function broadcastRemoteRadioStatus() {
   const txp = ((typeof _txPowerSuppressBroadcast !== 'undefined' && now < _txPowerSuppressBroadcast) || !txPowerKnown) ? undefined : _currentTxPower;
   // Suppress stale mode during tune transition — phone has optimistic update, don't overwrite with old mode
   let modeVal = (now < _modeSuppressUntil) ? undefined : (displayMode() || '');
-  // When FreeDV engine is active, show the FreeDV codec mode instead of raw USB/LSB
-  if (modeVal && freedvEngine && (modeVal === 'USB' || modeVal === 'LSB')) {
-    modeVal = 'FREEDV-' + (freedvEngine.mode || 'RADEV1').toUpperCase();
-  }
+  // When FreeDV engine is active, show the FreeDV codec mode instead of the
+  // carrier (USB/LSB and the DATA sidebands, lib/freedv-display-mode.js, #716)
+  if (modeVal) modeVal = FreedvDisplayMode.freedvDisplayMode(modeVal, freedvDisplayCodec());
   // Suppress stale freq during a phone tune transition — same rationale as mode
   // above. Omitting it (undefined → dropped from JSON) tells the phone "no change"
   // so its optimistic VFO holds instead of snapping back to the pre-poll freq.

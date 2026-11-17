@@ -3260,7 +3260,7 @@
       quickLogFollowRadio();
       // Display friendly name for FreeDV modes
       const mUp = s.mode.toUpperCase();
-      modeBadge.textContent = mUp.startsWith('FREEDV') ? (mUp.includes('RADE') ? 'RADE' : 'FreeDV') : s.mode;
+      modeBadge.textContent = FreedvDisplayMode.freedvBadge(s.mode); // lib/freedv-display-mode.js
       // PKTUSB / PKTLSB / DIGU / DIGL are SSB sub-band positions used for
       // FT8/FT4/FreeDV — they're voice-capable carriers, not CW. Without
       // these, FreeDV (which lands the rig on PKTLSB on lower bands and
@@ -3830,8 +3830,7 @@
       currentFreqKhz = parseFloat(freqKhz);
     }
     if (mode) {
-      const mu = mode.toUpperCase();
-      modeBadge.textContent = mu.startsWith('FREEDV') ? (mu.includes('RADE') ? 'RADE' : 'FreeDV') : mode;
+      modeBadge.textContent = FreedvDisplayMode.freedvBadge(mode); // lib/freedv-display-mode.js
     }
     tunedFreqKhz = freqKhz;
     tunedCallsign = callsign;
