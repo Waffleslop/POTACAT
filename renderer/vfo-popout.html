@@ -916,6 +916,7 @@
 <!-- Shared TX EQ chain (Phase 1). Also loaded by remote-audio.html so
      both audio sources apply identical DSP. -->
 <script src="../lib/freq-dots.js"></script>
+<script src="../lib/freedv-display-mode.js"></script>
 <script src="tx-eq-chain.js"></script>
 <script src="../lib/custom-cat-follow.js"></script>
 <script src="../lib/custom-cat-slider.js"></script>
@@ -1129,7 +1130,7 @@ function updateDisplay() {
     freqDisplay.title = radioLinkUp ? 'Click to type a frequency' : 'The radio is not answering (switched off, or the cable is out)';
   }
   const m = (currentMode || '').toUpperCase();
-  modeBadge.textContent = !radioLinkUp ? '---' : m.startsWith('FREEDV') ? 'RADE' : (currentMode || '---');
+  modeBadge.textContent = !radioLinkUp ? '---' : (FreedvDisplayMode.freedvBadge(currentMode) || '---');
   if (currentFilterWidth > 0) {
     filterBadge.textContent = currentFilterWidth >= 1000
       ? (currentFilterWidth / 1000).toFixed(1) + ' kHz'
