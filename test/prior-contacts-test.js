@@ -137,6 +137,45 @@ test('the worked check mark in the hunter table carries the hover summary', () =
   const app = read('renderer/app.js');
   assert.ok(/callTd\.title = PriorContacts\.workedHoverText\(workedQsos\.get\(/.test(app));
 });
+// #659: in the windows the card threw "root is not defined" and never opened.
+// Load both scripts the way the page does (plain <script>, globals on self)
+// against a small stand-in DOM, then open the card.
+test('the card opens in a page (#659: it threw "root is not defined")', () => {
+  const listeners = {};
+  const byId = {};
+  const el = (tag) => ({
+    tagName: tag, id: '', hidden: true, innerHTML: '', offsetWidth: 300, offsetHeight: 120, style: {}, attrs: {},
+    setAttribute(k, v) { this.attrs[k] = v; }, addEventListener() {}, contains: () => false,
+  });
+  const body = { children: [], appendChild(c) { this.children.push(c); if (c.id) byId[c.id] = c; return c; } };
+  const document = {
+    body,
+    createElement: el,
+    getElementById: (id) => byId[id] || null,
+    addEventListener: (t, fn) => { (listeners[t] = listeners[t] || []).push(fn); },
+  };
+  const win = { document, innerWidth: 1280, innerHeight: 800 };
+  win.self = win;
+  const ctx = vm.createContext(win);
+  vm.runInContext(read('lib/worked-matrix.js'), ctx);
+  vm.runInContext(read('lib/prior-contacts.js'), ctx);
+  assert.ok(win.PriorContacts && win.WorkedMatrix);
+  const data = { total: 1, recent: [{ date: '20261105', time: '143200', band: '20m', mode: 'SSB', ref: 'US-1613' }],
+    workedMatrix: WM.buildWorkedMatrix([{ band: '20m', mode: 'SSB' }]) };
+  const card = win.PriorContacts.showCard('N6OBW', data, 1200, 300);
+  assert.ok(card, 'showCard returned the card');
+  assert.strictEqual(card.hidden, false);
+  assert.strictEqual(body.children[0], card);
+  assert.ok(/Prior contacts with N6OBW/.test(card.innerHTML));
+  assert.ok(/US-1613/.test(card.innerHTML));
+  // Kept inside the window: 1280 - 300 - 8.
+  assert.strictEqual(card.style.left, '972px');
+  assert.strictEqual(card.style.top, '300px');
+  // A second open reuses the one card.
+  assert.strictEqual(win.PriorContacts.showCard('N1DJL', { total: 0, recent: [] }, 10, 10), card);
+  assert.ok(/Not worked before/.test(card.innerHTML));
+  assert.strictEqual(body.children.length, 1);
+});
 
 console.log(`\nPrior contacts: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
