@@ -6945,22 +6945,8 @@ function _applyPopoutTheme(payload) {
       // Auto-detect quietest TX frequency (~every 0.5s)
       popoutQuietFreqFrame++;
       if (!remoteShackMode && popoutQuietFreqFrame % 30 === 0) {
-        var binHz = nyquist / freqData.length;
-        var windowBins = Math.round(50 / binHz);
-        var startBin = Math.round(200 / binHz);
-        var endBin = Math.round(2800 / binHz);
-        var bestEnergy = Infinity;
-        var bestBin = Math.round(1500 / binHz);
-        for (var b = startBin; b <= endBin - windowBins; b++) {
-          var energy = 0;
-          for (var j = 0; j < windowBins; j++) energy += freqData[b + j];
-          if (energy < bestEnergy) {
-            bestEnergy = energy;
-            bestBin = b + Math.floor(windowBins / 2);
-          }
-        }
-        var quietHz = Math.round(bestBin * binHz / 10) * 10;
-        window.api.jtcatQuietFreq(Math.max(200, Math.min(2800, quietHz)));
+        // lib/jtcat-quiet-freq.js; main runs the same rule while this loop is paused.
+        window.api.jtcatQuietFreq(window.JtcatQuietFreq.pickQuietFreq(freqData, nyquist / freqData.length));
       }
 
       // Send spectrum to main process for remote/ECHOCAT (~10fps)

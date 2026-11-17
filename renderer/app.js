@@ -32836,23 +32836,9 @@ function jtcatWaterfallLoop() {
   // Auto-detect quietest TX frequency — analyze every ~30 frames (~0.5s)
   jtcatQuietFreqFrame++;
   if (jtcatQuietFreqFrame % 30 === 0) {
-    // Scan 200–2800 Hz in 50Hz windows (avoid edges)
-    var binHz = nyquist / freqData.length;
-    var windowBins = Math.round(50 / binHz); // ~8-9 bins per 50Hz window
-    var startBin = Math.round(200 / binHz);
-    var endBin = Math.round(2800 / binHz);
-    var bestEnergy = Infinity;
-    var bestBin = Math.round(1500 / binHz);
-    for (var b = startBin; b <= endBin - windowBins; b++) {
-      var energy = 0;
-      for (var j = 0; j < windowBins; j++) energy += freqData[b + j];
-      if (energy < bestEnergy) {
-        bestEnergy = energy;
-        bestBin = b + Math.floor(windowBins / 2);
-      }
-    }
-    var quietHz = Math.round(bestBin * binHz / 10) * 10; // snap to 10Hz
-    jtcatQuietFreq = Math.max(200, Math.min(2800, quietHz));
+    // The quietest 50 Hz window in 200-2800 Hz (lib/jtcat-quiet-freq.js; main
+    // runs the same rule on the engine audio while this loop is paused).
+    jtcatQuietFreq = window.JtcatQuietFreq.pickQuietFreq(freqData, nyquist / freqData.length);
     window.api.jtcatQuietFreq(jtcatQuietFreq);
   }
 
