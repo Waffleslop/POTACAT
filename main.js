@@ -2062,6 +2062,9 @@ let js8Threads = new Js8Threads({});
 let js8Heard = [];              // stations audible now, for the right rail
 let js8HeardBy = [];            // stations that reported hearing US (SNR replies) — the other half of the reachability map
 let js8MapWin = null;           // the Heartbeat Map window
+let aprsWin = null;             // More > APRS (phase 1: read-only APRS-IS map and list)
+let aprsFeed = null;            // lib/aprs-is-feed.js, alive only while that window is open
+let aprsBatch = null;           // parsed packets, handed to the window every 500 ms
 // Multi-frame RX reassembly (the MessageBuffer role; lib/js8-rx-assembler.js)
 let js8RxAssembler = new Js8RxAssembler({});
 // The exclusive radio TX/audio path can be held by at most one mode engine at a
@@ -45222,6 +45225,67 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('js8-map-minimize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.minimize(); });
   ipcMain.on('js8-map-maximize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) { w.isMaximized() ? w.unmaximize() : w.maximize(); } });
   ipcMain.on('js8-map-close', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.close(); });
+
+  // --- APRS (phase 1): a read-only APRS-IS map and list. The feed runs only
+  // while the window is open; packets are parsed here (lib/aprs-parser.js) and
+  // handed over in 500 ms batches. Nothing is sent to APRS-IS but the login,
+  // and nothing keys the radio.
+  function aprsHome() {
+    const p = gridToLatLon(settings.grid);
+    return p ? { lat: p.lat, lon: p.lon, grid: String(settings.grid || '').toUpperCase(), call: settings.myCallsign || '' } : null;
+  }
+  function aprsSend(ch, data) {
+    if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send(ch, data);
+  }
+  function aprsStopFeed() {
+    if (aprsBatch) { aprsBatch.stop(); aprsBatch = null; }
+    if (aprsFeed) { aprsFeed.removeAllListeners('line'); aprsFeed.stop(); aprsFeed = null; }
+  }
+  function aprsStartFeed() {
+    aprsStopFeed();
+    const home = aprsHome();
+    if (!home) { aprsSend('aprs-status', { state: 'no-grid' }); return; }
+    const Feed = require('./lib/aprs-is-feed');
+    const AprsParser = require('./lib/aprs-parser');
+    aprsFeed = new Feed.AprsIsFeed({ call: settings.myCallsign, version: app.getVersion(), lat: home.lat, lon: home.lon, km: settings.aprsRangeKm });
+    aprsBatch = Feed.createBatcher((packets) => aprsSend('aprs-packets', packets), 500);
+    aprsFeed.on('line', (line) => { const p = AprsParser.parse(line); if (p && aprsBatch) aprsBatch.push(p); });
+    aprsFeed.on('status', (st) => aprsSend('aprs-status', st));
+    aprsFeed.on('error', () => { /* shown as the window's status mark; reconnects on its own */ });
+    aprsFeed.start();
+  }
+  ipcMain.on('aprs-popout-open', () => {
+    if (aprsWin && !aprsWin.isDestroyed()) { aprsWin.focus(); return; }
+    aprsWin = new BrowserWindow({
+      minWidth: 640, minHeight: 400,
+      width: 1100, height: 680, title: 'APRS',
+      backgroundColor: getThemeWindowBg(), frame: false,
+      icon: getIconPath(),
+      webPreferences: { preload: path.join(__dirname, 'preload-aprs-popout.js'), contextIsolation: true, nodeIntegration: false },
+    });
+    rememberWindowPlace(aprsWin, 'aprsPopoutBounds', { minWidth: 640, minHeight: 400 });
+    aprsWin.setMenuBarVisibility(false);
+    aprsWin.loadFile(path.join(__dirname, 'renderer', 'aprs-popout.html'), { query: themeQuery() });
+    aprsWin.on('closed', () => { aprsStopFeed(); aprsWin = null; });
+    aprsWin.webContents.on('before-input-event', (_e, input) => {
+      if (input.key === 'F12' && input.type === 'keyDown') aprsWin.webContents.toggleDevTools();
+    });
+  });
+  // The window asks once it has drawn: home, units and range, then the feed starts.
+  ipcMain.on('aprs-ready', () => {
+    const Feed = require('./lib/aprs-is-feed');
+    aprsSend('aprs-init', { home: aprsHome(), distUnit: settings.distUnit || 'mi', km: Feed.clampRangeKm(settings.aprsRangeKm) });
+    aprsStartFeed();
+  });
+  ipcMain.on('aprs-set-range', (_e, km) => {
+    const Feed = require('./lib/aprs-is-feed');
+    settings.aprsRangeKm = Feed.clampRangeKm(km);
+    saveSettings(settings);
+    if (aprsFeed) aprsFeed.setRange(null, null, settings.aprsRangeKm);
+  });
+  ipcMain.on('aprs-popout-minimize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.minimize(); });
+  ipcMain.on('aprs-popout-maximize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) { w.isMaximized() ? w.unmaximize() : w.maximize(); } });
+  ipcMain.on('aprs-popout-close', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.close(); });
   ipcMain.on('js8call-popout-minimize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.minimize(); });
   ipcMain.on('js8call-popout-maximize', (e) => {
     const w = BrowserWindow.fromWebContents(e.sender);

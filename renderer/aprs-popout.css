@@ -1,0 +1,101 @@
+/* APRS window (phase 1). Colours come from the theme variables, so every
+   theme draws it in its own palette: station blue (--accent-blue), moving
+   green (--accent-green), weather purple (--source-dxc), object orange
+   (--source-sota), you (--accent-red). */
+html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
+  background: var(--bg-primary); color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 15px; }
+body { display: flex; flex-direction: column; }
+.hidden { display: none !important; }
+
+.aprs-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 7px 12px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); }
+.aprs-mark { display: inline-flex; align-items: center; gap: 7px; color: var(--text-secondary); white-space: nowrap; }
+.aprs-dot { width: 11px; height: 11px; border-radius: 50%; background: var(--text-dim); flex: none; }
+.aprs-dot.ok { background: var(--accent-green); }
+.aprs-dot.wait { background: var(--source-sota); }
+.aprs-dot.bad { background: var(--accent-red); }
+.aprs-spacer { flex: 1; }
+.aprs-range { display: inline-flex; align-items: center; gap: 7px; color: var(--text-secondary); }
+.aprs-range select, #aprs-search { font-size: 15px; padding: 4px 8px; border-radius: 5px;
+  background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-primary); }
+#aprs-search { width: 230px; }
+
+.aprs-main { flex: 1; display: flex; min-height: 0; }
+.aprs-map-wrap { flex: 1; position: relative; min-width: 260px; }
+#aprs-map { position: absolute; inset: 0; background: var(--bg-tertiary); }
+.aprs-side { width: 46%; min-width: 360px; max-width: 640px; display: flex; flex-direction: column;
+  border-left: 1px solid var(--border-primary); background: var(--bg-primary); min-height: 0; }
+.aprs-count { padding: 7px 12px; color: var(--text-secondary); border-bottom: 1px solid var(--border-primary); }
+.aprs-table-wrap { flex: 1; overflow: auto; min-height: 120px; }
+
+.aprs-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.aprs-table th { position: sticky; top: 0; z-index: 1; background: var(--bg-secondary); color: var(--text-secondary);
+  text-align: left; font-weight: 600; padding: 7px 8px; cursor: pointer; user-select: none; white-space: nowrap;
+  border-bottom: 1px solid var(--border-primary); }
+.aprs-table th:hover { color: var(--text-primary); }
+.aprs-table th.sorted::after { content: ' \25B2'; font-size: 10px; }
+.aprs-table th.sorted.desc::after { content: ' \25BC'; }
+.aprs-table td { padding: 6px 8px; border-bottom: 1px solid var(--border-secondary, var(--border-primary)); white-space: nowrap; }
+.aprs-table td.num, .aprs-table th.num { text-align: right; }
+.aprs-table td.call { font-weight: 700; }
+/* A long comment clamps to two lines; the whole of it is in the details. */
+.aprs-table td .cmt { white-space: normal; color: var(--text-secondary); max-width: 240px; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.aprs-table tbody tr { cursor: pointer; }
+.aprs-table tbody tr:hover { background: var(--bg-hover); }
+.aprs-table tbody tr.sel { background: var(--bg-hover); box-shadow: inset 3px 0 0 var(--accent-red); }
+.col-sym { width: 24px; }
+
+/* The four marker shapes: circle station, arrow moving, square weather,
+   diamond object. Used in the list, the legend and on the map. */
+.aprs-sym { display: inline-block; width: 12px; height: 12px; vertical-align: middle;
+  border: 2px solid var(--bg-primary); box-sizing: content-box; }
+.aprs-sym.station { background: var(--accent-blue); border-radius: 50%; }
+.aprs-sym.weather { background: var(--source-dxc); border-radius: 2px; }
+.aprs-sym.object { background: var(--source-sota); transform: rotate(45deg) scale(0.85); }
+.aprs-sym.vehicle { width: 0; height: 0; border: 7px solid transparent; border-bottom: 13px solid var(--accent-green);
+  border-top: 0; box-sizing: border-box; background: none; }
+.aprs-sym.home { background: var(--accent-red); border-radius: 50%; width: 14px; height: 14px; }
+
+/* Leaflet places .leaflet-marker-icon absolutely; never override its position. */
+.aprs-marker .aprs-sym { position: absolute; left: 0; top: 0; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45); }
+.aprs-marker .aprs-sym.vehicle { box-shadow: none; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5)); }
+.aprs-marker .aprs-lbl { position: absolute; left: 19px; top: -3px; white-space: nowrap; font-size: 13px; font-weight: 700;
+  color: var(--text-primary); background: var(--bg-secondary); border: 1px solid var(--border-primary);
+  border-radius: 4px; padding: 0 5px; opacity: 0.92; pointer-events: none; }
+.aprs-marker.sel .aprs-sym { outline: 3px solid var(--accent-red); outline-offset: 2px; }
+.aprs-marker.sel .aprs-lbl { border-color: var(--accent-red); }
+#aprs-map.no-labels .aprs-marker:not(.sel) .aprs-lbl { display: none; }
+
+.aprs-legend { position: absolute; bottom: 10px; left: 10px; z-index: 1000; display: flex; gap: 12px; flex-wrap: wrap;
+  background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 6px;
+  padding: 6px 10px; font-size: 13px; color: var(--text-secondary); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35); }
+.aprs-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.aprs-key { display: inline-block; width: 11px; height: 11px; }
+.aprs-key-station { background: var(--accent-blue); border-radius: 50%; }
+.aprs-key-vehicle { width: 0; height: 0; border: 6px solid transparent; border-bottom: 11px solid var(--accent-green); border-top: 0; }
+.aprs-key-weather { background: var(--source-dxc); border-radius: 2px; }
+.aprs-key-object { background: var(--source-sota); transform: rotate(45deg) scale(0.85); }
+.aprs-key-home { background: var(--accent-red); border-radius: 50%; }
+
+.aprs-empty { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 1000;
+  background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 6px;
+  padding: 8px 14px; color: var(--text-primary); max-width: 80%; text-align: center; }
+
+.aprs-detail { border-top: 1px solid var(--border-primary); background: var(--bg-secondary); padding: 10px 12px 12px;
+  max-height: 45%; overflow: auto; }
+.aprs-detail-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.aprs-detail-call { font-size: 20px; font-weight: 700; }
+.aprs-detail-kind { color: var(--text-secondary); }
+.aprs-detail-head .aprs-spacer { flex: 1; }
+.aprs-qrz { font-size: 14px; color: var(--link, var(--accent-blue)); background: none; border: 1px solid var(--border-primary);
+  border-radius: 5px; padding: 3px 10px; cursor: pointer; }
+.aprs-qrz:hover { background: var(--bg-hover); }
+.aprs-x { font-size: 15px; background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 2px 6px; }
+.aprs-detail dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; font-size: 14px; }
+.aprs-detail dt { color: var(--text-secondary); }
+.aprs-detail dd { margin: 0; word-break: break-word; }
+.aprs-detail .raw { font-family: Consolas, 'Courier New', monospace; font-size: 12px; color: var(--text-secondary); }
+
+.leaflet-container { font-family: inherit; }
