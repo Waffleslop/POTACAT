@@ -477,6 +477,7 @@ const DirewolfAgwMonitor = require('./lib/direwolf-agw-monitor');
 const PacketLinkClose = require('./lib/packet-link-close');
 const PacketRigMode = require('./lib/packet-rig-mode');
 const AprsListen = require('./lib/aprs-listen');           // APRS phase 2: when "Listen on my radio" may start, and why not
+const IdleRadioUse = require('./lib/idle-radio-use');      // Idle Mode yields to anyone using the radio, APRS listening included
 const RadioTuneRoute = require('./lib/radio-tune-route'); // the path tuneRadio drives the radio on: TCI, Flex Direct, CAT, or none
 const AprsRfFrequency = require('./lib/aprs-rf-frequency'); // APRS phase 2: the 2 m APRS frequency by grid square
 const AprsRfFrames = require('./lib/aprs-rf-frames');       // APRS phase 2: Dire Wolf's AGW monitor frames -> APRS packets
@@ -13015,6 +13016,8 @@ const aprsListen = {
   unreportedData: '', // a data mode the radio reads back as FM (the FT-857's PKT)
   devTimer: null,
 };
+/** "Listen on my radio" has the radio, so Idle Mode keeps off it (lib/idle-radio-use.js). */
+function aprsListenHoldsRadio() { return IdleRadioUse.aprsListenHoldsRadio(aprsListen); }
 let _aprsCountries = null;
 let _aprsTickTimer = null;
 let _aprsLastReturnAt = 0;
@@ -40358,6 +40361,7 @@ let autoIdleJtcatActive = false;
 let autoIdlePrevJtcatMode = null;
 let autoIdleJtcatOpenedPopout = false;
 let _autoRxDeferLogged = false; // one "Deferred" line per deferral, not per tick
+let _autoRxAprsDeferLogged = false; // the same, for APRS listening
 let autoIdleJs8Active = false;
 let autoIdleJs8OpenedPopout = false;
 let autoIdleRxLabel = null; // 'WSPR' | 'PSK31' | 'JTTY' | 'JS8' — names the stop log line
@@ -40500,7 +40504,10 @@ function startAutoSstvTimer() {
     // just at the controls (K3SBP 2026-08-17: JS8 opened 17 s after he
     // shut down a CQ run). Petting the shared clock also keeps the idle
     // CAT-polling pause from starving the VFO poll during a session.
-    if (autoSstvBlockedByJtcat()) lastActivityTime = Date.now();
+    // APRS "Listen on my radio" is the operator using the radio too: on air
+    // 2026-11-18 (FLEX-8600M, 30 m) nothing held Idle Mode off while it
+    // listened, and 90 minutes in it would have retuned the radio away.
+    if (IdleRadioUse.radioInUse({ jtcatDecoding: autoSstvBlockedByJtcat(), aprsListening: aprsListenHoldsRadio() })) lastActivityTime = Date.now();
     // A connected ECHOCAT device is someone at the radio, even one only
     // watching: W0TLP sat in his car with the phone on the rig and Idle Mode
     // QSY'd it to the WSPR dial (2026-11-02). Same rule as the idle CAT-poll
@@ -40517,8 +40524,10 @@ function startAutoSstvTimer() {
     // (WSPR-on-idle manages its own bands via the hop scheduler — skip.
     // JS8-on-idle owns its own day/night QSY too — without the exclusion
     // this branch retuned a JS8 idle session to the SSTV frequency.)
-    if (autoSstvActive && autoIdleJtcatActive && autoIdleRxLabel === 'JTTY') autoIdleJttyFollowSun();
-    if (autoSstvActive && !autoIdleJtcatActive && !autoIdleJs8Active) {
+    // Never while APRS listens: the radio is on the APRS frequency for the operator.
+    const mayRetune = IdleRadioUse.idleMayRetune({ aprsListening: aprsListenHoldsRadio() });
+    if (mayRetune && autoSstvActive && autoIdleJtcatActive && autoIdleRxLabel === 'JTTY') autoIdleJttyFollowSun();
+    if (mayRetune && autoSstvActive && !autoIdleJtcatActive && !autoIdleJs8Active) {
       const newBand = getSstvAutoFreq();
       if (newBand && newBand.freqKhz !== autoSstvCurrentFreq) {
         autoSstvCurrentFreq = newBand.freqKhz;
@@ -40559,6 +40568,13 @@ function triggerAutoSstv() {
   _autoRxDeferLogged = false;
   // Driving a remote shack: idle receive is the shack's own setting.
   if (isRemoteMode()) return;
+  // APRS "Listen on my radio" has the radio: no idle mode starts or tunes.
+  const aprsBlock = IdleRadioUse.idleStartBlocker({ jtcatDecoding: false, aprsListening: aprsListenHoldsRadio() });
+  if (aprsBlock) {
+    if (!_autoRxAprsDeferLogged) { _autoRxAprsDeferLogged = true; sendCatLog(IdleRadioUse.deferLine(aprsBlock)); }
+    return;
+  }
+  _autoRxAprsDeferLogged = false;
   // WSPR/PSK31-on-idle variant: open the JTCAT popout in that mode (it owns
   // audio capture + the spot list/map) instead of SSTV. The popout auto-starts
   // from settings.jtcatLastMode and tunes to settings.jtcatLastBandFreq, so
