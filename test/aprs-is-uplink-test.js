@@ -61,12 +61,28 @@ async function until(fn, ms = 3000) {
     await srv.close();
   });
 
+  await test('the server logresp line is handed on as it came, verified or not, before the state changes', async () => {
+    for (const refuseVerify of [false, true]) {
+      const srv = await startFakeAprsIs({ refuseVerify });
+      const c = new AprsIsClient({ call: 'K3ABC-10', host: '127.0.0.1', port: srv.port, version: '1' });
+      const got = [];
+      c.on('logresp', (line) => got.push({ line, state: c.status().state }));
+      c.connect();
+      assert.ok(await until(() => got.length === 1));
+      assert.ok(/^#\s*logresp K3ABC-10 /.test(got[0].line), got[0].line);
+      assert.strictEqual(/ unverified,/.test(got[0].line), refuseVerify, got[0].line);
+      assert.strictEqual(got[0].state, 'connected', 'logged before verified/unverified is set');
+      c.disconnect();
+      await srv.close();
+    }
+  });
+
   await test('the passcode never leaves in an event or the status', async () => {
     const srv = await startFakeAprsIs();
     const code = String(aprsPasscode('K3ABC'));
     const c = new AprsIsClient({ call: 'K3ABC-10', host: '127.0.0.1', port: srv.port, version: '1' });
     const seen = [];
-    for (const ev of ['status', 'line', 'connected', 'verified', 'disconnected', 'error']) c.on(ev, (x) => seen.push(JSON.stringify(x === undefined ? null : x)));
+    for (const ev of ['status', 'line', 'logresp', 'connected', 'verified', 'disconnected', 'error']) c.on(ev, (x) => seen.push(JSON.stringify(x === undefined ? null : x)));
     c.connect();
     await until(() => c.verified);
     seen.push(JSON.stringify(c.status()));

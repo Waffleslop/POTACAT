@@ -152,6 +152,15 @@ test('verified only: "# logresp CALL verified" counts, "unverified" never does',
   assert.strictEqual(Igate.logrespVerified('# aprsc 2.1.14 verified', 'K3ABC-10'), false);
 });
 
+test('logrespForLog: the server line as it came, one line, no passcode ever', () => {
+  assert.strictEqual(Igate.logrespForLog('# logresp K3ABC-10 verified, server T2TEST'), '# logresp K3ABC-10 verified, server T2TEST');
+  assert.strictEqual(Igate.logrespForLog('# logresp K3ABC-10 unverified, server T2TEST\r\n'),'# logresp K3ABC-10 unverified, server T2TEST');
+  const echoed = Igate.logrespForLog('# logresp K3ABC-10 unverified, server T2TEST (user K3ABC-10 pass 12345 vers POTACAT 1)');
+  assert.ok(!/12345/.test(echoed) && /pass \*\*\*/.test(echoed), echoed);
+  assert.strictEqual(Igate.logrespForLog(null), '');
+  assert.ok(Igate.logrespForLog('# logresp ' + 'x'.repeat(500)).length <= 200);
+});
+
 // ── counts ───────────────────────────────────────────────────────────────────
 test('stats: gated count, the last one gated, and what was dropped', () => {
   let t = 5000;

@@ -15564,6 +15564,7 @@ function aprsUplinkWant(user, on) {
   const u = new AprsIsClient({ call: login.call, version: app.getVersion(), host: server.host, port: server.port });
   aprsUplink = u;
   u.on('connected', () => sendCatLog(`[APRS-IS] connected — logging in as ${u.call}`));
+  u.on('logresp', (line) => sendCatLog('[APRS-IS] server answered: ' + AprsIgate.logrespForLog(line)));
   u.on('verified', () => { sendCatLog(`[APRS-IS] login verified (${u.call})`); aprsUplinkChanged(); });
   u.on('status', (st) => { if (st.state === 'unverified') sendCatLog(`[APRS-IS] login NOT verified (${u.call}) — nothing will be sent`); aprsUplinkChanged(); });
   u.on('disconnected', () => { sendCatLog('[APRS-IS] disconnected'); aprsUplinkChanged(); });
