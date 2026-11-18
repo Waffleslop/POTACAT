@@ -6072,7 +6072,7 @@ if (setMercuryEnable) {
         // Labels are blank until the page has held a media permission once.
         let list = await navigator.mediaDevices.enumerateDevices();
         if (!list.some((d) => d.label)) {
-          try { const s = await navigator.mediaDevices.getUserMedia({ audio: true }); s.getTracks().forEach((t) => t.stop()); } catch {}
+          try { await MicLabelProbe.unlockDeviceLabels(navigator.mediaDevices); } catch {}
           list = await navigator.mediaDevices.enumerateDevices();
         }
         devs = list.filter((d) => d.kind === 'audioinput' || d.kind === 'audiooutput').map((d) => ({ kind: d.kind, label: d.label || '', deviceId: d.deviceId }));
@@ -10465,8 +10465,7 @@ async function populateRigAudioDevices(restoreIn, restoreOut) {
   // the Chromium media API) showed them all.
   let getUserMediaError = null;
   try {
-    const s = await navigator.mediaDevices.getUserMedia({ audio: true });
-    s.getTracks().forEach(t => t.stop());
+    await MicLabelProbe.unlockDeviceLabels(navigator.mediaDevices); // #743: voice processing off
   } catch (e) {
     getUserMediaError = e;
     console.warn('getUserMedia failed — device labels may be hidden:', e.message);
@@ -17748,8 +17747,7 @@ async function populateQuickAudioDevices(restoreIn, restoreOut) {
   // not prevent the enumerateDevices call or the dropdown will be stuck on
   // "System Default" while every other app (WSJT-X etc.) sees the devices.
   try {
-    const s = await navigator.mediaDevices.getUserMedia({ audio: true });
-    s.getTracks().forEach(t => t.stop());
+    await MicLabelProbe.unlockDeviceLabels(navigator.mediaDevices); // #743: voice processing off
   } catch (e) {
     console.warn('getUserMedia failed — device labels may be hidden:', e.message);
   }

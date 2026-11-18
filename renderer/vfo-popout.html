@@ -932,6 +932,7 @@
 <script src="../lib/vfo-monitor-tx-mute.js"></script>
 <script src="../lib/vfo-ptt-mic.js"></script>
 <script src="../lib/sdr-failure.js"></script>
+<script src="../lib/mic-label-probe.js"></script>
 <script>
 // --- State ---
 let currentFreqHz = 0;
@@ -3196,9 +3197,8 @@ document.getElementById('eq-btn').addEventListener('click', () => showTxAudioPan
 
 async function populateMicDevices() {
   try {
-    // Trigger permission prompt if needed
-    const tmp = await navigator.mediaDevices.getUserMedia({ audio: true });
-    tmp.getTracks().forEach(t => t.stop());
+    // Trigger permission prompt if needed (#743: voice processing off)
+    await MicLabelProbe.unlockDeviceLabels(navigator.mediaDevices);
     const devices = await navigator.mediaDevices.enumerateDevices();
     const inputs = devices.filter(d => d.kind === 'audioinput');
     micSelect.innerHTML = '<option value="">System Default</option>' +
