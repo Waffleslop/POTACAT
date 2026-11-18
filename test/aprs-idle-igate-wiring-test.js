@@ -66,7 +66,7 @@ test('any radio use ends it at once and the radio goes back, as the other idle m
 });
 
 test('the SSTV day/night band switch never retunes an APRS idle session', () => {
-  assert.ok(/if \(autoSstvActive && !autoIdleJtcatActive && !autoIdleJs8Active && !autoIdleAprsActive\) \{\n\s*const newBand = getSstvAutoFreq\(\);/.test(main));
+  assert.ok(/if \(mayRetune && autoSstvActive && !autoIdleJtcatActive && !autoIdleJs8Active && !autoIdleAprsActive\) \{\n\s*const newBand = getSstvAutoFreq\(\);/.test(main));
 });
 
 test('closing the APRS window leaves an idle session listening', () => {
