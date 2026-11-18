@@ -476,6 +476,11 @@ const DirewolfProcess = require('./lib/direwolf-process');
 const DirewolfAgwMonitor = require('./lib/direwolf-agw-monitor');
 const PacketLinkClose = require('./lib/packet-link-close');
 const PacketRigMode = require('./lib/packet-rig-mode');
+const AprsListen = require('./lib/aprs-listen');           // APRS phase 2: when "Listen on my radio" may start, and why not
+const AprsRfFrequency = require('./lib/aprs-rf-frequency'); // APRS phase 2: the 2 m APRS frequency by grid square
+const AprsRfFrames = require('./lib/aprs-rf-frames');       // APRS phase 2: Dire Wolf's AGW monitor frames -> APRS packets
+const AprsRadioReturn = require('./lib/aprs-radio-return'); // APRS phase 2: the radio goes back after listening
+const AprsParser = require('./lib/aprs-parser');
 const VaraProcess = require('./lib/vara-process');
 const VaraSetup = require('./lib/vara-setup');
 const WinlinkModes = require('./lib/winlink-modes');
@@ -893,6 +898,8 @@ const GLOBAL_KEYS = new Set([
                        // (same reasoning as lightMode/darkVariant above)
   'wsprPreCapPower',   // {watts, rigId, at}: the RF power the WSPR beacon found on the
                        // radio before capping it at 1 W — the radio is this machine's
+  'aprsListenReturn',  // {freqHz, mode, rigId, listenHz, state}: where the radio was before APRS
+                       // listening tuned it (lib/aprs-radio-return.js) — this machine's radio
   'wsprBeaconWatts',   // {watts, rigId}: the beacon's RF power when the operator set one
                        // while it was armed (#268) — also this machine's radio
   'mainMicDeviceId', 'mainPlaybackDeviceId',
@@ -4569,6 +4576,7 @@ function sendCatFrequency(hz) {
   sendVfoState();
   broadcastRemoteRadioStatus();
   sendN1mmRadioInfo();
+  aprsRadioReturnOnDial(hz); // a return a crash or a quit left unfinished (APRS listening)
 }
 
 // Tokens that are never a mode, whatever codec produced them. See the same
@@ -12383,6 +12391,7 @@ function winlinkCableConfigured() {
 }
 function modemBridgeWanted() {
   if (winlinkIpAudioRoute() || isRemoteMode()) return false;
+  if (aprsListenWantsAudio()) return true; // APRS "Listen on my radio": receive audio only, no playback
   if (!winlinkState.snapshot().modes.some((m) => m.available && (m.id === 'ardop' || m.id === 'packet' || ((m.id === 'vara' || m.id === 'varafm') && winlinkCableConfigured())))) return false;
   return !!((winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) || _winlinkRemoteWatchers > 0 || winlinkSessionActive() || _winlinkRetry);
 }
@@ -12703,6 +12712,7 @@ function winlinkPreviewQsy({ dialKhz, mode } = {}) {
   const reach = WinlinkReach.gatewayReach(khz, winlinkReachOpts());
   if (!reach.ok) { winlinkLog(`gateway pick refused: ${reach.why}`); return { ok: false, error: reach.why, reason: 'out-of-reach' }; }
   winlinkNoteHandTune();
+  aprsListenYieldToWinlink('gateway pick'); // the modem and the radio are Winlink's now; APRS's saved place becomes the return point
   if (!_winlinkPreviewReturnTo && _currentFreqHz) _winlinkPreviewReturnTo = winlinkDialHere('before the gateway pick');
   // FM data the operator sets by hand (#128): the pick moves the dial and leaves the radio's mode alone.
   const pickPm = mode === 'packet' ? winlinkPacketRigMode(mode) : null;
@@ -12973,6 +12983,363 @@ async function spawnDirewolf() {
   });
 }
 
+// ── APRS "Listen on my radio" (phase 2: 2 m, receive only) ───────────────────
+// One switch in the APRS window. On: the radio's place is saved (to disk,
+// first), the radio goes to the regional APRS frequency (lib/aprs-rf-frequency.js)
+// in FM or its FM data mode (the packet rule, lib/packet-rig-mode.js), and a
+// SECOND Dire Wolf config — MODEM 1200, NO PTT line (lib/direwolf-process.js
+// buildDirewolfAprsRxConfig) — decodes the radio's audio from the same modem
+// audio lane Winlink packet uses. Its AGW monitor's UI frames go through the
+// phase 1 parser to the window, marked as heard on the radio.
+// Off, the window closing, or quit: the radio goes back (lib/aprs-radio-return.js;
+// a crash is finished on the next start's first readback).
+// One audio user at a time: a Winlink gateway pick or radio session takes the
+// modem (aprsListenYieldToWinlink), and listening resumes once Winlink has
+// given the radio back. FT8 decoding ends it. Nothing here keys the radio.
+const aprsListen = {
+  on: false,          // the operator's switch
+  state: 'off',       // 'off' | 'starting' | 'listening' | 'paused' | 'refused'
+  sentence: '',       // the one sentence when it cannot listen
+  freq: null,         // {hz, mhz, id, country, source}
+  heard: 0,           // frames heard this session
+  lastAt: 0,
+  note: '',           // the rig's setup line (lib/rig-setup-notes.js), verbatim
+  proc: null,         // its Dire Wolf
+  monitor: null,      // its AGW monitor
+  lane: null,         // the winlinkAudio lane Dire Wolf was started on
+  pausedAt: 0,
+  freeSince: 0,       // when Winlink last let go of the radio, for the resume
+  seq: 0,             // the start attempt; a stopped one never finishes a later one
+  restarts: 0,
+  unreportedData: '', // a data mode the radio reads back as FM (the FT-857's PKT)
+  devTimer: null,
+};
+let _aprsCountries = null;
+let _aprsTickTimer = null;
+let _aprsLastReturnAt = 0;
+// Dev only (never in a packaged build): recorded Dire Wolf AGW frames stand in
+// for the radio and the modem, so the window can be checked with no radio.
+// POTACAT_APRS_DEV_REFUSE=ft8|winlink|no2m|rejected|no-cat|no-freq shows that refusal.
+const APRS_DEV_FRAMES = (!app.isPackaged && process.env.POTACAT_APRS_DEV_FRAMES) ? String(process.env.POTACAT_APRS_DEV_FRAMES) : '';
+
+const aprsReturn = AprsRadioReturn.createRadioReturn({
+  load: () => settings.aprsListenReturn || null,
+  save: (m) => {
+    if (m) settings.aprsListenReturn = m; else delete settings.aprsListenReturn;
+    try { saveSettings(settings); } catch (e) { sendCatLog(`[APRS] could not save the radio's place: ${e.message}`); }
+  },
+  tune: (hz, mode) => {
+    _aprsLastReturnAt = Date.now();
+    try { tuneRadio(hz / 1000, mode || undefined, undefined, { origin: 'APRS listening: the radio goes back' }); } catch {}
+    // A radio that reports its packet mode as FM never left FM to POTACAT, so the
+    // mode is sent again by name (the Winlink return does the same, winlinkReturnModeByName).
+    const was = aprsListen.unreportedData;
+    aprsListen.unreportedData = '';
+    if (was && mode) setTimeout(() => { try { if (cat && cat.connected && cat.setModeOnly) cat.setModeOnly(mode, hz, { noAnchor: true }); } catch {} }, 400);
+  },
+  log: (s) => sendCatLog('[APRS] ' + s),
+});
+
+function aprsLog(s) { sendCatLog('[APRS] ' + s); }
+function aprsWinSend(ch, data) { if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send(ch, data); }
+function aprsListenPayload() {
+  return {
+    on: aprsListen.on, state: aprsListen.state, sentence: aprsListen.sentence, band: '2m',
+    mhz: aprsListen.freq ? aprsListen.freq.mhz : '', heard: aprsListen.heard, lastAt: aprsListen.lastAt, note: aprsListen.note,
+  };
+}
+function aprsListenPush() { aprsWinSend('aprs-listen', aprsListenPayload()); }
+
+/** The modem bridge holds the radio's sound card while APRS listens (modemBridgeWanted). */
+function aprsListenWantsAudio() {
+  return !APRS_DEV_FRAMES && aprsListen.on && (aprsListen.state === 'starting' || aprsListen.state === 'listening');
+}
+
+function aprsListenFrequency() {
+  if (!_aprsCountries) {
+    try { _aprsCountries = JSON.parse(fs.readFileSync(path.join(__dirname, 'assets', 'geo', 'countries.json'), 'utf8')); } catch { _aprsCountries = { features: [] }; }
+  }
+  return AprsRfFrequency.frequencyForGrid(settings.grid, _aprsCountries);
+}
+
+function aprsSetupLine() {
+  try {
+    const rig = (settings.rigs || []).find((r) => r && r.id === settings.activeRigId);
+    if (!rig) return '';
+    return AprsListen.setupLine(rigSetupNotesFor({ model: rig.model, catTarget: rig.catTarget, radioType: rig.radioType, cwKeyLine: rig.cwKeyLine }));
+  } catch { return ''; }
+}
+
+/** Winlink holds the radio: a session, its retry, or a dial it will give back when the mail window closes. */
+function aprsWinlinkHoldsRadio() {
+  return winlinkSessionActive() || !!_winlinkPreviewReturnTo || !!_winlinkRetry;
+}
+
+/** A Winlink hold is a pause (the switch stays on and listening resumes after it); anything else is a refusal. */
+function aprsNotNow(no) {
+  if (no.reason === 'winlink') {
+    aprsListen.state = 'paused'; aprsListen.sentence = no.sentence; aprsListen.pausedAt = Date.now(); aprsListen.freeSince = 0;
+    aprsListenPush();
+    return;
+  }
+  aprsRefuse(no);
+}
+
+function aprsRefuse(no) {
+  aprsListen.state = 'refused';
+  aprsListen.sentence = no.sentence;
+  aprsLog(`not listening: ${no.sentence}`);
+  aprsListenPush();
+}
+
+function aprsDevRefusal(freq) {
+  const r = String(process.env.POTACAT_APRS_DEV_REFUSE || '');
+  if (!r) return null;
+  if (r === 'rejected') return { reason: 'rejected', sentence: AprsListen.rejectedSentence(freq || { hz: 144390000, mhz: '144.390' }) };
+  const f = { remote: false, catConnected: true, bands: null, freq: freq || { hz: 144390000, mhz: '144.390' }, modemFound: true, ft8Decoding: false, winlinkHasModem: false };
+  if (r === 'ft8') f.ft8Decoding = true;
+  else if (r === 'winlink') f.winlinkHasModem = true;
+  else if (r === 'no2m') f.bands = ['160m', '80m', '40m', '20m', '15m', '10m', '6m'];
+  else if (r === 'no-cat') f.catConnected = false;
+  else if (r === 'no-freq') f.freq = null;
+  return AprsListen.whyNot(f);
+}
+
+/** Wait for the radio's own readback to show the APRS frequency. */
+async function aprsWaitDial(hz, ms, seq) {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    if (seq !== aprsListen.seq) return false;
+    if (AprsListen.tuneAccepted(hz, _currentFreqHz)) return true;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return AprsListen.tuneAccepted(hz, _currentFreqHz);
+}
+
+/** The modem audio lane at Dire Wolf's rate and the radio's receive audio on it. Receive only: no playback is asked for. */
+async function aprsAudioReady() {
+  if (!winlinkAudio || !winlinkAudio.port || winlinkAudio.modemRate !== DirewolfProcess.DIREWOLF_RATE) await startWinlinkAudio({ modemRate: DirewolfProcess.DIREWOLF_RATE });
+  if (!winlinkAudio || !winlinkAudio.port) throw new Error('The modem audio did not start');
+  if (settings.audioSource === 'smartsdr' && !(smartSdrAudio && smartSdrAudio.connected)) throw new Error('Flex Direct audio is not connected');
+  if (settings.audioSource === 'icom-network' && !_icomNetworkTransport) throw new Error('Icom Network audio is not connected');
+  if (!winlinkIpAudioRoute()) {
+    winlinkSyncModemBridge(); // modemBridgeWanted() is true now: the bridge opens the radio's input, no output
+    const ok = await modemBridgeReady(10000);
+    if (!ok) throw new Error(modemBridge.error || 'The radio\'s sound card did not open in time');
+  }
+  return winlinkAudio;
+}
+
+function aprsOnMonitorFrame(f) {
+  const p = AprsRfFrames.packet(f, AprsParser.parse);
+  if (!p) return;
+  aprsListen.heard++;
+  aprsListen.lastAt = Date.now();
+  if (aprsBatch) aprsBatch.push(p); else aprsWinSend('aprs-packets', [p]);
+  aprsListenPush();
+}
+
+function aprsStopModem() {
+  if (aprsListen.devTimer) { clearInterval(aprsListen.devTimer); aprsListen.devTimer = null; }
+  if (aprsListen.monitor) { const m = aprsListen.monitor; aprsListen.monitor = null; try { m.close(); } catch {} }
+  if (aprsListen.proc) { const p = aprsListen.proc; aprsListen.proc = null; try { p.kill(); } catch {} }
+  aprsListen.lane = null;
+}
+
+/** Dire Wolf with the receive-only APRS config (no PTT line), and its AGW monitor. */
+async function aprsSpawnDirewolf(seq) {
+  aprsStopModem();
+  const bin = findDirewolf();
+  if (!bin.found) throw new Error(AprsListen.SENTENCES.noModem);
+  const lane = await aprsAudioReady();
+  if (seq !== aprsListen.seq) return;
+  const p = winlinkPaths();
+  fs.mkdirSync(p.dir, { recursive: true });
+  const confPath = path.join(p.dir, 'direwolf-aprs.conf');
+  const agw = DirewolfProcess.aprsAgwPort(_winlinkAgwPort());
+  fs.writeFileSync(confPath, DirewolfProcess.buildDirewolfAprsRxConfig({ mycall: settings.myCallsign, audioPort: lane.port, agwPort: agw }));
+  const args = DirewolfProcess.buildDirewolfArgs({ configName: path.basename(confPath) });
+  aprsLog(`Dire Wolf for APRS: 1200 baud, receive only (no PTT line), audio on 127.0.0.1:${lane.port}, AGW ${agw}`);
+  const proc = spawn(bin.path, args, { cwd: p.dir, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  aprsListen.proc = proc;
+  aprsListen.lane = lane;
+  let lines = 0;
+  const onLine = (chunk) => { for (const line of chunk.toString().split(/\r?\n/).filter(Boolean)) if (lines++ < 20) aprsLog('direwolf: ' + line); };
+  proc.stdout.on('data', onLine);
+  proc.stderr.on('data', onLine);
+  proc.on('error', (e) => { if (aprsListen.proc === proc) { aprsListen.proc = null; aprsLog('Dire Wolf did not start: ' + e.message); } });
+  proc.on('exit', (code) => { if (aprsListen.proc === proc) { aprsListen.proc = null; aprsLog(`Dire Wolf stopped (code ${code})`); } });
+  // Ready = the AGW port accepting (Dire Wolf's stdout can arrive late or never on Windows, #128).
+  const until = Date.now() + 15000;
+  while (Date.now() < until) {
+    if (seq !== aprsListen.seq || aprsListen.proc !== proc) return;
+    if ((await DirewolfProcess.probeAgwPort({ port: agw })).ok) break;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  if (seq !== aprsListen.seq || aprsListen.proc !== proc) return;
+  aprsListen.monitor = DirewolfAgwMonitor.createAgwMonitor({
+    port: agw, onLog: aprsLog,
+    onFrame: (f) => aprsOnMonitorFrame(f),
+    onClose: () => {},
+  });
+}
+
+/** Recorded frames instead of a radio (dev only). */
+function aprsDevFeed() {
+  let frames = [];
+  try { frames = JSON.parse(fs.readFileSync(APRS_DEV_FRAMES, 'utf8')).frames.map((f) => ({ ...f, data: Buffer.from(f.dataHex, 'hex') })); } catch (e) { aprsLog('dev frames: ' + e.message); }
+  let i = 0;
+  const next = () => { if (i < frames.length) aprsOnMonitorFrame(frames[i++]); else { clearInterval(aprsListen.devTimer); aprsListen.devTimer = null; } };
+  next();
+  aprsListen.devTimer = setInterval(next, 700);
+}
+
+async function aprsListenStart({ resume = false } = {}) {
+  const seq = ++aprsListen.seq;
+  aprsListen.on = true;
+  aprsListen.sentence = '';
+  aprsListen.restarts = 0;
+  if (!resume) { aprsListen.heard = 0; aprsListen.lastAt = 0; }
+  const freq = aprsListenFrequency();
+  aprsListen.freq = freq;
+  aprsListen.note = aprsSetupLine();
+  if (APRS_DEV_FRAMES) {
+    const no = aprsDevRefusal(freq);
+    if (no) { aprsNotNow(no); return; }
+    aprsListen.state = 'listening';
+    aprsListenPush();
+    aprsDevFeed();
+    return;
+  }
+  const no = AprsListen.whyNot({
+    remote: isRemoteMode(),
+    catConnected: !!(cat && cat.connected),
+    bands: activeRigBands(),
+    freq,
+    modemFound: DirewolfProcess.direwolfSupported(process.platform) && findDirewolf().found,
+    ft8Decoding: autoSstvBlockedByJtcat(),
+    winlinkHasModem: aprsWinlinkHoldsRadio(),
+  });
+  if (no) { aprsNotNow(no); return; }
+  aprsListen.state = 'starting';
+  aprsListenPush();
+  const pm = winlinkPacketRigMode('packet');
+  const plan = AprsListen.listenModePlan(pm);
+  const here = winlinkDialHere('before APRS listening');
+  // The place is on disk before the radio moves.
+  aprsReturn.begin({ freqHz: here.freqHz, mode: here.mode, rigId: settings.activeRigId || null, listenHz: freq.hz }, () => {
+    aprsLog(`listening on ${freq.mhz} MHz ${plan.tuneMode || '(mode set by hand)'}${plan.dataMode ? ' then ' + plan.dataMode : ''} — ${freq.source}`);
+    tuneRadio(freq.hz / 1000, plan.tuneMode, undefined, { origin: 'APRS listening' });
+  });
+  const took = await aprsWaitDial(freq.hz, 4000, seq);
+  if (seq !== aprsListen.seq) return;
+  if (!took) {
+    aprsListen.on = false;
+    aprsReturn.end(freq.hz); // whatever it did take, the radio goes back
+    aprsRefuse({ reason: 'rejected', sentence: AprsListen.rejectedSentence(freq) });
+    return;
+  }
+  if (plan.dataMode && cat && cat.connected && cat.setModeOnly) {
+    await new Promise((r) => setTimeout(r, 500));
+    if (pm && !pm.confirm) aprsListen.unreportedData = plan.dataMode;
+    try { cat.setModeOnly(plan.dataMode, freq.hz, { noAnchor: true }); } catch (e) { aprsLog('the data mode could not be set: ' + e.message); }
+  }
+  try {
+    await aprsSpawnDirewolf(seq);
+  } catch (e) {
+    if (seq !== aprsListen.seq) return;
+    aprsLog('the modem did not start: ' + e.message);
+    aprsListenStop('the modem did not start');
+    aprsRefuse({ reason: 'no-modem', sentence: e.message === AprsListen.SENTENCES.noModem ? e.message : 'The modem did not start. The log has the reason.' });
+    return;
+  }
+  if (seq !== aprsListen.seq) return;
+  aprsListen.state = 'listening';
+  aprsListenPush();
+}
+
+/** Switch off, window closed, quit, or the modem failing. The radio goes back. */
+function aprsListenStop(why) {
+  const was = aprsListen.on || aprsListen.state !== 'off';
+  aprsListen.seq++;
+  aprsListen.on = false;
+  aprsStopModem();
+  if (APRS_DEV_FRAMES) { aprsListen.state = 'off'; aprsListen.sentence = ''; aprsListenPush(); return; }
+  if (aprsListen.state === 'paused') {
+    // Winlink has the radio and gives it back itself (its return point is the place APRS saved).
+    aprsReturn.drop();
+  } else if (was && cat && cat.connected) {
+    aprsReturn.end(_currentFreqHz);
+  }
+  if (was) aprsLog(`stopped (${why})`);
+  aprsListen.state = 'off';
+  aprsListen.sentence = '';
+  aprsListenPush();
+  try { winlinkSyncModemBridge(); } catch {}
+}
+
+/**
+ * A Winlink gateway pick or radio session takes the modem and the radio. APRS
+ * lets go without moving the radio: Winlink is about to tune it, and Winlink's
+ * own return point becomes the place APRS saved, so the radio ends up where the
+ * operator had it. Listening resumes once Winlink has let go (aprsListenTick).
+ */
+function aprsListenYieldToWinlink(why) {
+  if (!aprsListen.on || aprsListen.state === 'paused' || aprsListen.state === 'refused') return;
+  aprsListen.seq++;
+  aprsStopModem();
+  const m = aprsReturn.pending();
+  if (m && m.freqHz && !_winlinkPreviewReturnTo) _winlinkPreviewReturnTo = { freqHz: m.freqHz, mode: m.mode || '', from: 'before APRS listening' };
+  aprsListen.state = 'paused';
+  aprsListen.sentence = AprsListen.SENTENCES.winlink;
+  aprsListen.pausedAt = Date.now();
+  aprsListen.freeSince = 0;
+  aprsLog(`paused: the Winlink ${why} has the modem; listening resumes after it`);
+  aprsListenPush();
+}
+
+/** Every 2 s while the switch is on: resume after Winlink, end for FT8, restart a modem that went away. */
+function aprsListenTick() {
+  if (!aprsListen.on || APRS_DEV_FRAMES) return;
+  if (aprsListen.state === 'paused') {
+    if (aprsWinlinkHoldsRadio()) { aprsListen.freeSince = 0; return; }
+    if (!aprsListen.freeSince) { aprsListen.freeSince = Date.now(); return; }
+    // Winlink's return tune lands 1.5 s after a session; wait past it, then listen again.
+    if (Date.now() - aprsListen.freeSince >= 4000) aprsListenStart({ resume: true }).catch((e) => aprsLog('resume failed: ' + e.message));
+    return;
+  }
+  if (aprsListen.state !== 'listening') return;
+  if (autoSstvBlockedByJtcat()) {
+    aprsListenStop('FT8 started decoding');
+    aprsRefuse({ reason: 'ft8', sentence: AprsListen.SENTENCES.ft8 });
+    return;
+  }
+  // The lane was rebuilt under Dire Wolf (Pat restarting its shim), or Dire Wolf exited: start it again.
+  if ((aprsListen.lane && winlinkAudio !== aprsListen.lane) || !aprsListen.proc) {
+    if (aprsListen.restarts++ >= 3) { aprsListenStop('the modem kept stopping'); aprsRefuse({ reason: 'no-modem', sentence: 'The modem did not start. The log has the reason.' }); return; }
+    const seq = ++aprsListen.seq;
+    aprsSpawnDirewolf(seq).catch((e) => aprsLog('the modem did not restart: ' + e.message));
+  }
+}
+
+/** Every frequency readback: finish a return a crash, a quit or a lost command left (lib/aprs-radio-return.js). */
+function aprsRadioReturnOnDial(hz) {
+  if (!settings.aprsListenReturn || isRemoteMode() || !hz) return;
+  if (aprsListen.on) return; // listening, or paused under Winlink: not ours to move now
+  if (Date.now() - _aprsLastReturnAt < 3000) return; // give the last return time to land
+  setTimeout(() => aprsReturn.onReadback(hz, { rigId: settings.activeRigId || null, listening: aprsListen.on }), 0);
+}
+
+function aprsListenSet(on) {
+  if (on) {
+    if (aprsListen.on && aprsListen.state !== 'refused') return;
+    if (!_aprsTickTimer) _aprsTickTimer = setInterval(aprsListenTick, 2000);
+    aprsListenStart().catch((e) => { aprsLog('start failed: ' + e.message); aprsListenStop('start failed'); });
+  } else {
+    aprsListenStop('switched off');
+  }
+}
+
 function killArdop() {
   if (ardopProc) { try { ardopProc.kill(); } catch {} ardopProc = null; }
 }
@@ -13193,6 +13560,7 @@ async function winlinkStartSession({ mode, gateway, dialKhz, url: rowUrl, origin
     if (!acquireRadio('winlink')) return { ok: false, error: `The radio is in use by ${radioOwner}`, reason: 'radio-busy' };
   }
 
+  if (radio) aprsListenYieldToWinlink('session'); // before the return point is read: it is the place APRS saved
   const capMin = Math.max(10, Math.min(60, parseInt(settings.winlinkSessionCapMin, 10) || 30));
   if (radio) winlinkNoteHandTune(); // a later attempt starts from here; the return point stays the original
   if (radio) winlinkHoldAwake(true, mode);
@@ -45293,7 +45661,7 @@ function cloudShackNotice(text, kind) {
     rememberWindowPlace(aprsWin, 'aprsPopoutBounds', { minWidth: 640, minHeight: 400 });
     aprsWin.setMenuBarVisibility(false);
     aprsWin.loadFile(path.join(__dirname, 'renderer', 'aprs-popout.html'), { query: themeQuery() });
-    aprsWin.on('closed', () => { aprsStopFeed(); aprsWin = null; });
+    aprsWin.on('closed', () => { aprsListenStop('the APRS window closed'); aprsStopFeed(); aprsWin = null; });
     aprsWin.webContents.on('before-input-event', (_e, input) => {
       if (input.key === 'F12' && input.type === 'keyDown') aprsWin.webContents.toggleDevTools();
     });
@@ -45303,7 +45671,10 @@ function cloudShackNotice(text, kind) {
     const Feed = require('./lib/aprs-is-feed');
     aprsSend('aprs-init', { home: aprsHome(), distUnit: settings.distUnit || 'mi', km: Feed.clampRangeKm(settings.aprsRangeKm) });
     aprsStartFeed();
+    aprsListenPush();
   });
+  // APRS phase 2: the "Listen on my radio" switch (receive only).
+  ipcMain.on('aprs-listen-set', (_e, on) => aprsListenSet(!!on));
   ipcMain.on('aprs-set-range', (_e, km) => {
     const Feed = require('./lib/aprs-is-feed');
     settings.aprsRangeKm = Feed.clampRangeKm(km);
@@ -55083,6 +55454,10 @@ function gracefulCleanup() {
   try { atuWizardAbort('app quit'); if (smartSdr && smartSdr.connected && _atuWizardSaved) smartSdr.setTxTune(false); } catch {}
   try { if (clublogOutbox) clublogOutbox.stop(); } catch {} // queue is on disk; resumed on next start
   try { stopLoggerCat(); } catch {}
+  // APRS listening: the radio goes back while the CAT link is still open (the
+  // marker stays on disk until a readback confirms it, so a lost command is
+  // finished at the next start).
+  try { aprsListenStop('quit'); } catch {}
   try { stopModemBridge('quit'); } catch {}
   // A WSPR beacon armed at quit must give the radio its power back NOW, while
   // the CAT/SmartSDR links below are still open — stopJtcat() runs after they

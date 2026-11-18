@@ -18,4 +18,8 @@ contextBridge.exposeInMainWorld('api', {
   setRange: (km) => ipcRenderer.send('aprs-set-range', km),
   openExternal: (url) => ipcRenderer.send('open-external', url),
   ready: () => ipcRenderer.send('aprs-ready'),
+  // Phase 2, "Listen on my radio" (receive only): the switch, and its state
+  // { on, state: 'off'|'starting'|'listening'|'paused'|'refused', sentence, band, mhz, heard, lastAt, note }
+  listenSet: (on) => ipcRenderer.send('aprs-listen-set', !!on),
+  onListen: (cb) => ipcRenderer.on('aprs-listen', (_e, s) => cb(s)),
 });
