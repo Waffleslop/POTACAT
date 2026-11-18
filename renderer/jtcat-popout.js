@@ -1851,23 +1851,12 @@ function _applyPopoutTheme(payload) {
       setTxOnState(false);
       cqBtn.classList.remove('active');
       setTxMsgDisplay(data.error || 'Error');
-      // Raise the same toast slot used for QSO-Logged success so the
-      // "TX stopped" event is visible without DevTools. Red variant
-      // distinguishes it from the green success toast. (K3SBP 2026-05-05:
-      // the retry-limit was previously only logged to console.)
-      showJtcatErrorToast(data.error || 'TX stopped');
-      // The wrong-band refusal: one press moves JTCAT to where the radio is.
-      if (data.followRadio && window.api.jtcatFollowRadio) {
-        var fb = document.createElement('button');
-        fb.className = 'jp-toast-action';
-        fb.textContent = 'Follow the radio';
-        fb.addEventListener('click', function(e) {
-          e.stopPropagation();
-          window.api.jtcatFollowRadio();
-          qsoToast.classList.remove('visible');
-          qsoToast.classList.remove('error');
-        });
-        qsoToast.appendChild(fb);
+      if (data.txRefused || data.followRadio) {
+        txErrorMessage.textContent = data.error || 'TX stopped';
+        txErrorFollow.hidden = !data.followRadio || !window.api.jtcatFollowRadio;
+        txError.hidden = false;
+      } else {
+        showJtcatErrorToast(data.error || 'TX stopped');
       }
       renderQsoTracker();
       return;
@@ -1900,6 +1889,14 @@ function _applyPopoutTheme(payload) {
   });
 
   // --- QSO Logged notification ---
+  var txError = document.getElementById('jp-tx-error');
+  var txErrorMessage = document.getElementById('jp-tx-error-message');
+  var txErrorFollow = document.getElementById('jp-tx-error-follow');
+  txErrorFollow.addEventListener('click', function() { window.api.jtcatFollowRadio(); });
+  document.getElementById('jp-tx-error-dismiss').addEventListener('click', function() {
+    txError.hidden = true;
+  });
+
   var qsoToast = document.getElementById('jp-qso-toast');
   var qsoToastTimer = null;
 
@@ -5722,9 +5719,10 @@ function _applyPopoutTheme(payload) {
       bandBtn = bestBtn;
     }
     if (!bandBtn) bandBtn = document.querySelector('.jp-band-opt[data-band="20m"]');
-    if (bandBtn) selectBand(bandBtn, false);
     if (s.remoteShack) enterRemoteShackMode();
     window.api.jtcatStart(modeSelect.value);
+    // Starting the engine clears the TX dial anchor, so tune after starting.
+    if (bandBtn) selectBand(bandBtn, false);
     // IPC is ordered: lands after jtcat-start built the PSK/JTTY slice, so the
     // restored audio frequency survives the fresh engine's 1500 Hz default.
     if (modeSelect.value === 'PSK31') pskSyncFreq();
