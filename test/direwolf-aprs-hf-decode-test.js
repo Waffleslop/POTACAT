@@ -108,8 +108,17 @@ async function main() {
 
   const queue = [];
   const chunk = RATE / 50 * 2; // 20 ms
+  // Paced by the clock, not by ticks: a 20 ms setInterval runs at about 31 ms
+  // on Windows (timer granularity), which fed audio at two thirds of real time
+  // and left the last frame unsent when the wait ran out. Each tick sends every
+  // 20 ms chunk that is due by now.
   const audio = net.createServer((s) => {
-    const t = setInterval(() => { try { s.write(queue.length ? queue.shift() : Buffer.alloc(chunk)); } catch {} }, 20);
+    const t0 = Date.now();
+    let sent = 0;
+    const t = setInterval(() => {
+      const due = Math.floor((Date.now() - t0) / 20);
+      while (sent < due) { sent++; try { s.write(queue.length ? queue.shift() : Buffer.alloc(chunk)); } catch {} }
+    }, 10);
     s.on('data', () => {});
     s.on('close', () => clearInterval(t));
     s.on('error', () => clearInterval(t));
@@ -127,6 +136,7 @@ async function main() {
 
   const frames = [];
   let sock = null;
+  let unsent = 0;
   try {
     const until = Date.now() + 15000;
     while (Date.now() < until && !(await D.probeAgwPort({ port: agwPort })).ok) await new Promise((r) => setTimeout(r, 200));
@@ -143,9 +153,16 @@ async function main() {
         for (let i = 0; i < pcm.length; i += chunk) queue.push(pcm.subarray(i, i + chunk));
       }
     }
-    const waitMs = queue.length * 20 + 3000;
-    const end = Date.now() + waitMs;
-    while (Date.now() < end && frames.filter((f) => Mon.isReceivedFrame(f)).length < PACKETS.length * 2) await new Promise((r) => setTimeout(r, 200));
+    // Wait until every chunk has gone out, then 3 s for the decoders; the cap
+    // (twice real time) only stops a hung run.
+    const end = Date.now() + queue.length * 40 + 3000;
+    let drainedAt = 0;
+    while (Date.now() < end && frames.filter((f) => Mon.isReceivedFrame(f)).length < PACKETS.length * 2) {
+      if (!queue.length && !drainedAt) drainedAt = Date.now();
+      if (drainedAt && Date.now() - drainedAt > 3000) break;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    unsent = queue.length;
   } finally {
     if (sock) sock.destroy();
     p.kill();
@@ -169,7 +186,7 @@ async function main() {
     assert.strictEqual(got[0].from || got[0].source || got[0].call, 'W1AW-9');
   });
   test('the same frames 70 Hz off tune are decoded too (the staggered decoders)', () => {
-    assert.strictEqual(got.length, PACKETS.length * 2, `got ${got.length}`);
+    assert.strictEqual(got.length, PACKETS.length * 2, `got ${got.length}, ${unsent} audio chunks never sent`);
   });
   test('the digipeater path survives: heard via KB1XYZ-1', () => {
     const viaDigi = got.filter((g) => /KB1XYZ-1/.test(JSON.stringify(g)));
