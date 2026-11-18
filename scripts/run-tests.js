@@ -232,6 +232,7 @@ const TESTS = [
   'test/aprs-idle-igate-wiring-test.js', // APRS phase 4: the APRS idle mode and the iGate wiring in main.js and Settings
   'test/aprs-beacon-test.js', // APRS phase 5: the beacon packet, approximate position, symbols, comment, the 10 min timer floor, refusals
   'test/aprs-beacon-wiring-test.js', // APRS phase 5: the beacon end to end against a local fake APRS-IS server, and its wiring
+  'test/afsk-demod-test.js', // APRS phase 9 core: our own AFSK demodulator (1200 and 300 baud, offsets, noise floors, FCS, stuffing, real 30 m frames, CPU)
   'test/log-comment-test.js',
   'test/raw-cat-command-test.js',
   'test/rigctld-stderr-test.js',
