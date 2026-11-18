@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="../node_modules/leaflet/dist/leaflet.css">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="aprs-popout.css">
+  <link rel="stylesheet" href="aprs-listen-bar.css">
 </head>
 <body>
   <div class="titlebar">
@@ -28,6 +29,20 @@
       <select id="aprs-range"></select>
     </label>
     <input type="search" id="aprs-search" placeholder="Search callsign or comment" spellcheck="false" autocomplete="off">
+  </div>
+
+  <div class="aprs-listen" id="aprs-listen">
+    <label class="aprs-switch" title="Tune your radio to APRS and decode what it hears. Receive only: nothing is transmitted.">
+      <input type="checkbox" id="aprs-listen-on"><span class="aprs-switch-track"></span>Listen on my radio
+    </label>
+    <span class="aprs-chip" title="The band your radio listens on">2 m</span>
+    <span class="aprs-mark hidden" id="aprs-listen-freq"></span>
+    <span class="aprs-mark hidden" id="aprs-listen-state"><span class="aprs-dot" id="aprs-listen-dot"></span><span id="aprs-listen-text"></span></span>
+    <span class="aprs-mark hidden" id="aprs-listen-heard"><span id="aprs-listen-last"></span><span id="aprs-listen-count"></span></span>
+    <span class="aprs-listen-why hidden" id="aprs-listen-why"></span>
+    <span class="aprs-spacer"></span>
+    <label class="aprs-heard-filter" title="Show only the stations your radio heard"><input type="checkbox" id="aprs-heard-only">Heard by me</label>
+    <div class="aprs-listen-note hidden" id="aprs-listen-note"></div>
   </div>
 
   <div class="aprs-main">
@@ -65,5 +80,6 @@
   <script src="../lib/aprs-map.js"></script>
   <script src="aprs-icons.js"></script>
   <script src="aprs-popout.js"></script>
+  <script src="aprs-listen-bar.js"></script>
 </body>
 </html>

@@ -214,6 +214,12 @@ const TESTS = [
   'test/aprs-stations-test.js', // APRS phase 1: the window's station list (distance, bearing, 60-minute age-out, sort, search, list window)
   'test/aprs-symbols-test.js', // APRS phase 1: symbol table and code to the nine map icons
   'test/aprs-map-test.js', // APRS phase 1: map clusterer, marker glide and fade
+  'test/direwolf-aprs-config-test.js', // APRS phase 2: Dire Wolf's APRS config is MODEM 1200 with no PTT; the Winlink config is byte-identical
+  'test/aprs-rf-frequency-test.js', // APRS phase 2: the 2 m APRS frequency by grid square, each entry from a published band plan
+  'test/aprs-radio-return-test.js', // APRS phase 2: the radio goes back on stop, after a crash and after a quit
+  'test/aprs-listen-test.js', // APRS phase 2: the refusal sentences, the packet mode, and the main.js wiring (receive only)
+  'test/aprs-rf-frames-test.js', // APRS phase 2: recorded Dire Wolf AGW frames -> APRS packets, direct or via a digipeater
+  'test/aprs-rf-merge-test.js', // APRS phase 2: a station heard on the radio and on APRS-IS is one row with both marks
   'test/log-comment-test.js',
   'test/raw-cat-command-test.js',
   'test/rigctld-stderr-test.js',

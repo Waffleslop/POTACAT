@@ -48,6 +48,7 @@
   var lastPacketAt = 0;
   var linkState = null;
   var listRows = [];           // the stations matching the search, sorted (the list and the map)
+  var heardOnly = false;       // phase 2: the "Heard by me" filter (list and map)
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -71,6 +72,7 @@
       border: v('--border-primary', '#2a2a4a'),
       cluster: v('--accent-blue', '#4fc3f7'),
       sel: v('--accent-red', '#e94560'),
+      rf: v('--accent-green', '#4ecca3'), // phase 2: the ring on a station the radio heard
     };
     AprsIcons.readColours();
   }
@@ -180,6 +182,11 @@
       ctx.drawImage(sp.canvas, x - half, y - half, sp.size, sp.size);
     }
     var isSel = r.key === selected;
+    if (r.rf) {
+      // Heard on the radio: a solid ring (phase 2).
+      ctx.beginPath(); ctx.arc(x, y, ICON_PX / 2 + 1.5, 0, Math.PI * 2);
+      ctx.lineWidth = 3; ctx.strokeStyle = theme.rf; ctx.stroke();
+    }
     if (isSel) {
       ctx.beginPath(); ctx.arc(x, y, ICON_PX / 2 + 4, 0, Math.PI * 2);
       ctx.lineWidth = 3; ctx.strokeStyle = theme.sel; ctx.stroke();
@@ -342,7 +349,7 @@
     var keys = AprsIcons.ICONS.concat(['you']);
     $('aprs-legend').innerHTML = keys.map(function (k) {
       return '<span title="' + esc(AprsIcons.LABEL[k]) + '">' + symHtml(k, null, 18) + esc(AprsIcons.SHORT[k]) + '</span>';
-    }).join('');
+    }).join('') + '<span title="Stations your radio heard"><i class="aprs-key-rf"></i>Heard by me</span>';
   }
   renderLegend();
 
@@ -405,6 +412,11 @@
   var rowH = 32, rowMeasured = false;
   var rowsPending = false;
 
+  // Phase 2: how the radio heard it ("direct" / "via KB1XYZ-1" / "via a digipeater").
+  function rfText(rf) {
+    if (!rf) return '';
+    return rf.kind === 'digi' ? (rf.digi ? 'via ' + rf.digi : 'via a digipeater') : 'direct';
+  }
   function rowHtml(r, t) {
     var brg = r.bearing == null ? '' : Math.round(r.bearing) + '&deg; ' + AprsStations.compass(r.bearing);
     var cmt = r.comment || r.status;
@@ -414,7 +426,8 @@
       + '<td class="num">' + esc(fmtDist(r.distanceKm)) + '</td>'
       + '<td class="num">' + brg + '</td>'
       + '<td class="num">' + esc(AprsStations.formatAge(t - r.lastHeard)) + '</td>'
-      + '<td class="cmt" title="' + esc(cmt) + '">' + esc(cmt) + '</td>'
+      + '<td class="cmt" title="' + esc((r.rf ? 'Heard by me, ' + rfText(r.rf) + '. ' : '') + (cmt || '')) + '">'
+      + (r.rf ? '<span class="aprs-rf-tag">heard by me, ' + esc(rfText(r.rf)) + '</span>' : '') + esc(cmt) + '</td>'
       + '</tr>';
   }
   function pad(h) { return h > 0 ? '<tr class="aprs-pad"><td colspan="6" style="height:' + h + 'px"></td></tr>' : ''; }
@@ -449,13 +462,13 @@
   /** The search or the data changed: re-sort, redraw the rows in view and the map. */
   function rebuild() {
     var t0 = now();
-    listRows = store.list({ sort: sortKey, desc: sortDesc, query: query });
+    listRows = store.list({ sort: sortKey, desc: sortDesc, query: query, heardByMe: heardOnly });
     perfPush(perf.sort, now() - t0);
     clusterDirty = true;
     renderRows();
     var total = store.size;
     $('aprs-count').textContent = total === 0 ? 'No stations yet'
-      : (query ? listRows.length + ' of ' + total + ' stations' : total + (total === 1 ? ' station' : ' stations')) + ' heard in the last hour';
+      : ((query || heardOnly) ? listRows.length + ' of ' + total + ' stations' : total + (total === 1 ? ' station' : ' stations')) + ' heard in the last hour';
     document.querySelectorAll('.aprs-table th').forEach(function (th) {
       th.classList.toggle('sorted', th.dataset.sort === sortKey);
       th.classList.toggle('desc', th.dataset.sort === sortKey && sortDesc);
@@ -487,6 +500,10 @@
   });
   $('aprs-search').addEventListener('input', function () {
     query = this.value.trim();
+    rebuild();
+  });
+  $('aprs-heard-only').addEventListener('change', function () {
+    heardOnly = this.checked;
     rebuild();
   });
 
@@ -528,6 +545,7 @@
     add('Status', esc(r.status));
     add('Comment', esc(r.comment));
     add('Heard', esc(AprsStations.formatAge(Date.now() - r.lastHeard).replace(/^now$/, 'just now')) + (r.packets > 1 ? ' (' + r.packets + ' packets this hour)' : ''));
+    if (r.rf) add('Heard by me', esc(rfText(r.rf) + ', ' + AprsStations.formatAge(Date.now() - r.rf.lastHeard).replace(/^now$/, 'just now') + (r.rf.packets > 1 ? ' (' + r.rf.packets + ' packets)' : '')));
     if (r.igate) add('Via', esc(r.igate));
     add('Packet', '<span class="raw">' + esc(r.raw) + '</span>');
     var qrzCall = baseCall(r.call);
