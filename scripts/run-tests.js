@@ -658,6 +658,7 @@ const TESTS = [
   'test/launcher-cert-der-test.js', // Remote Launcher cert: minimal DER serial; a saved cert that doesn't parse is regenerated
   'test/clean-exit-marker-test.js', // #550: a Launcher run never consumes the GUI's clean-exit marker or rotates its startup.log, so a clean quit is not reported as a crash
   'test/serial-quit-test.js', // #657: every serial port closed and every native serial call finished before quit (macOS SIGABRT)
+  'test/remote-tune-click-label-test.js', // #756: the ECHOCAT Web tuneClick switch is labelled for the click sound, not "Tap to Tune"
 ];
 
 const root = path.join(__dirname, '..');
