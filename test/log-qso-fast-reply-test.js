@@ -74,6 +74,18 @@ test('respot outcome: merged over the records, follow-up only when there is some
   assert.deepStrictEqual(f, { ...reply, followUp: true, resposted: false, respotError: 'POTA said no' });
 });
 
+test('the follow-up never repeats `error`, even when the first reply had one (app showed "with a problem" twice)', () => {
+  const reply = {
+    success: true, callsign: 'K1ABC', reqId: 'r1', uuid: 'u1', records: [{ uuid: 'u1' }], cloudJournal: true, nr: 4,
+    error: 'not logged for N0CALL: no logbook', resposted: false, respotError: '',
+  };
+  for (const outcome of [{ resposted: true, respotError: '' }, { resposted: false, respotError: 'timeout' }]) {
+    const f = LAW.respotFollowUp(reply, outcome);
+    assert.ok(!('error' in f), 'no error field');
+    assert.deepStrictEqual(Object.keys(f).sort(), ['callsign', 'cloudJournal', 'followUp', 'records', 'reqId', 'resposted', 'respotError', 'success', 'uuid']);
+  }
+});
+
 test('saveQsoRecord says "written" right after the disk write, before the forwarders', () => {
   const body = fnBody('async function saveQsoRecord(qsoData, opts) {');
   const write = body.indexOf('QsoLog.appendRecords(logPath');
@@ -107,6 +119,12 @@ test('ECHOCAT Web shows a follow-up as a toast only, never closing the form', ()
   const c = web.slice(web.indexOf("case 'log-ok':"), web.indexOf("case 'activator-state':"));
   const f = c.indexOf('msg.followUp');
   assert.ok(f > 0 && f < c.indexOf('closeLogSheet()'), 'followUp handled before the form is closed');
+  // The follow-up branch ends in `break` before the form, the counts and the
+  // success toast; inside it only a respot failure shows.
+  const branch = c.slice(f, c.indexOf('break;', f) + 6);
+  assert.ok(!/closeLogSheet|resetLogTabForm|handleLogOkContact|logSaveBtn|ltSave|'Logged /.test(branch), 'no form, count or success toast');
+  assert.strictEqual((branch.match(/showLogToast\(/g) || []).length, 1, 'one toast');
+  assert.ok(/if \(msg\.respotError\) showLogToast\([^;]*, true\);/.test(branch), 'only the failure, as an error toast');
 });
 
 (async () => {
