@@ -48,6 +48,9 @@
 
   sw.addEventListener('change', function () { window.api.listenSet(sw.checked); });
   window.api.onListen(function (d) { s = d || s; render(); });
+  // The push that answers 'aprs-ready' can come before this script has loaded;
+  // ask now that the listener is attached.
+  if (window.api.listenGet) window.api.listenGet();
   setInterval(render, 1000);
   render();
 })();

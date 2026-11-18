@@ -477,6 +477,7 @@ const DirewolfAgwMonitor = require('./lib/direwolf-agw-monitor');
 const PacketLinkClose = require('./lib/packet-link-close');
 const PacketRigMode = require('./lib/packet-rig-mode');
 const AprsListen = require('./lib/aprs-listen');           // APRS phase 2: when "Listen on my radio" may start, and why not
+const RadioTuneRoute = require('./lib/radio-tune-route'); // the path tuneRadio drives the radio on: TCI, Flex Direct, CAT, or none
 const AprsRfFrequency = require('./lib/aprs-rf-frequency'); // APRS phase 2: the 2 m APRS frequency by grid square
 const AprsRfFrames = require('./lib/aprs-rf-frames');       // APRS phase 2: Dire Wolf's AGW monitor frames -> APRS packets
 const AprsRadioReturn = require('./lib/aprs-radio-return'); // APRS phase 2: the radio goes back after listening
@@ -13034,10 +13035,29 @@ const aprsReturn = AprsRadioReturn.createRadioReturn({
     // mode is sent again by name (the Winlink return does the same, winlinkReturnModeByName).
     const was = aprsListen.unreportedData;
     aprsListen.unreportedData = '';
-    if (was && mode) setTimeout(() => { try { if (cat && cat.connected && cat.setModeOnly) cat.setModeOnly(mode, hz, { noAnchor: true }); } catch {} }, 400);
+    if (was && mode) setTimeout(() => { try { if (RadioTuneRoute.modeOverCat(radioTuneRoute()) && cat.setModeOnly) cat.setModeOnly(mode, hz, { noAnchor: true }); } catch {} }, 400);
   },
   log: (s) => sendCatLog('[APRS] ' + s),
 });
+
+/**
+ * The path tuneRadio() drives the radio on now (lib/radio-tune-route.js), from
+ * the same checks tuneRadio makes. On Flex Direct the CAT entry is SmartSDR's
+ * 5002 shim, dead without SmartSDR, while the API tunes the slice: asking
+ * `cat && cat.connected` refused APRS on a FLEX-8600M (2026-11-18).
+ */
+function radioTuneRoute() {
+  return RadioTuneRoute.tuneRoute({
+    tciTarget: !!tciRigTarget(),
+    tciLinked: tciRigLinked(),
+    wsjtxMode: !!settings.enableWsjtx,
+    smartSdrConnected: !!(smartSdr && smartSdr.connected),
+    smartSdrCanTune: !!(smartSdr && smartSdr.canTune),
+    smartSdrSelf: !!(smartSdr && smartSdr.mode === 'self'),
+    catConnected: !!(cat && cat.connected),
+    catTargetType: (settings.catTarget && settings.catTarget.type) || '',
+  });
+}
 
 function aprsLog(s) { sendCatLog('[APRS] ' + s); }
 function aprsWinSend(ch, data) { if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send(ch, data); }
@@ -13210,9 +13230,11 @@ async function aprsListenStart({ resume = false } = {}) {
     aprsDevFeed();
     return;
   }
+  // The radio is reachable when tuneRadio can tune it: Flex Direct, TCI or CAT.
+  const route = radioTuneRoute();
   const no = AprsListen.whyNot({
     remote: isRemoteMode(),
-    catConnected: !!(cat && cat.connected),
+    catConnected: route !== '',
     bands: activeRigBands(),
     freq,
     modemFound: DirewolfProcess.direwolfSupported(process.platform) && findDirewolf().found,
@@ -13224,7 +13246,12 @@ async function aprsListenStart({ resume = false } = {}) {
   aprsListenPush();
   const pm = winlinkPacketRigMode('packet');
   const plan = AprsListen.listenModePlan(pm);
-  const here = winlinkDialHere('before APRS listening');
+  // The place before, from the route's own readback: on Flex Direct the slice
+  // (the dial is mirrored from the SmartSDR API, never the shim); an Icom's
+  // USB + DATA is saved as DIGU on CAT only (winlinkDialHere does the same).
+  const ptt = pttModeReport();
+  const icomData = !!(ptt && ptt.data && cat && cat._codec && cat._codec._dataReportAt);
+  const here = RadioTuneRoute.placeBefore({ route, freqHz: _currentFreqHz, mode: _currentMode, catDataForm: icomData ? PttModeSwap.dataFormOf(_currentMode || '') : '' });
   // The place is on disk before the radio moves.
   aprsReturn.begin({ freqHz: here.freqHz, mode: here.mode, rigId: settings.activeRigId || null, listenHz: freq.hz }, () => {
     aprsLog(`listening on ${freq.mhz} MHz ${plan.tuneMode || '(mode set by hand)'}${plan.dataMode ? ' then ' + plan.dataMode : ''} — ${freq.source}`);
@@ -13238,7 +13265,7 @@ async function aprsListenStart({ resume = false } = {}) {
     aprsRefuse({ reason: 'rejected', sentence: AprsListen.rejectedSentence(freq) });
     return;
   }
-  if (plan.dataMode && cat && cat.connected && cat.setModeOnly) {
+  if (plan.dataMode && RadioTuneRoute.modeOverCat(route) && cat.setModeOnly) {
     await new Promise((r) => setTimeout(r, 500));
     if (pm && !pm.confirm) aprsListen.unreportedData = plan.dataMode;
     try { cat.setModeOnly(plan.dataMode, freq.hz, { noAnchor: true }); } catch (e) { aprsLog('the data mode could not be set: ' + e.message); }
@@ -13267,7 +13294,8 @@ function aprsListenStop(why) {
   if (aprsListen.state === 'paused') {
     // Winlink has the radio and gives it back itself (its return point is the place APRS saved).
     aprsReturn.drop();
-  } else if (was && cat && cat.connected) {
+  } else if (was && radioTuneRoute()) {
+    // The same route the listen start tuned on (Flex Direct included).
     aprsReturn.end(_currentFreqHz);
   }
   if (was) aprsLog(`stopped (${why})`);
@@ -45648,6 +45676,9 @@ function cloudShackNotice(text, kind) {
   });
   // APRS phase 2: the "Listen on my radio" switch (receive only).
   ipcMain.on('aprs-listen-set', (_e, on) => aprsListenSet(!!on));
+  // The bar asks once its listener is attached: the push after 'aprs-ready' can
+  // arrive while its script is still loading (the 8600M's empty bar, 2026-11-18).
+  ipcMain.on('aprs-listen-get', () => aprsListenPush());
   ipcMain.on('aprs-set-range', (_e, km) => {
     const Feed = require('./lib/aprs-is-feed');
     settings.aprsRangeKm = Feed.clampRangeKm(km);
