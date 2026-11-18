@@ -523,6 +523,7 @@ const EventRegistry = require('./lib/event-registry'); // unified Events/Contest
 const { SstvManager } = require('./lib/sstv-manager');
 const sstvPost = require('./lib/sstv-post');
 const { FreedvReporterClient } = require('./lib/freedv-reporter');
+const FreedvSpotMerge = require('./lib/freedv-spot-merge'); // #742: one row per FreeDV station across PSKReporter + FreeDV Reporter
 const { IambicKeyer } = require('./lib/keyer');
 const { WinKeyer } = require('./lib/winkeyer');
 const { parsePotaParksCSV, parsePotaActivationsCSV } = require('./lib/pota-parks');
@@ -15768,6 +15769,19 @@ function connectFreedvReporter() {
   });
   freedvReporter.on('error', (err) => {
     sendCatLog(`[FreeDV Reporter] Error: ${err.message}`);
+  });
+
+  // A station that leaves FreeDV Reporter leaves the list (#742).
+  freedvReporter.on('remove', (ev) => {
+    if (!ev || !ev.callsign) return;
+    const before = freedvReporterSpots.length;
+    freedvReporterSpots = FreedvSpotMerge.dropFreedvStation(freedvReporterSpots, ev.callsign);
+    if (freedvReporterSpots.length !== before && !freedvReporterFlushTimer) {
+      freedvReporterFlushTimer = setTimeout(() => {
+        freedvReporterFlushTimer = null;
+        sendMergedSpots();
+      }, 2000);
+    }
   });
 
   freedvReporter.on('spot', (raw) => {
@@ -33760,7 +33774,8 @@ function stampParkEntityZones(spots) {
 function sendMergedSpots() {
   if (!win || win.isDestroyed()) return;
   const netSpots = getActiveNetSpots();
-  const raw = [...netSpots, ...lastPotaSotaSpots, ...clusterSpots, ...cwSpots, ...rbnWatchSpots, ...pskrSpots, ...freedvReporterSpots];
+  // A PSKReporter FreeDV spot folds into the FreeDV Reporter one (#742).
+  const raw = FreedvSpotMerge.mergeFreedvSpots([...netSpots, ...lastPotaSotaSpots, ...clusterSpots, ...cwSpots, ...rbnWatchSpots, ...pskrSpots, ...freedvReporterSpots]);
   // A CW spot with no speed (POTA/SOTA/WWFF) takes the speed a skimmer
   // measured on the same station and frequency in the last 15 minutes.
   const merged = cwSpeeds.fillSpots(dedupeCrossSource(raw));
