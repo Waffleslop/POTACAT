@@ -137,7 +137,7 @@ const TESTS = [
   'test/vfo-custom-cat-slider-test.js', // #526: a custom CAT slider in the VFO window stays where it is dragged; no rebuild per push
   'test/custom-cat-read-test.js', // #242: a custom toggle's own read command + ON-when rule; unknown, not OFF, when unread; no read during TX
   'test/worked-qsos-chunk-test.js',
-  'test/worked-incremental-test.js', // #731: a worked-incremental client gets the full worked list once per connection, not after every QSO
+  'test/worked-incremental-test.js', // #731: a worked-incremental client gets the full worked list once per connection, not after every QSO; ECHOCAT Web merges qso-added with the full list's entry rule
   'test/web-log-form-test.js',
   'test/bug-report-log-test.js',
   'test/audio-capture-device-test.js',

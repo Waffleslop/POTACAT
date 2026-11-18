@@ -2908,6 +2908,14 @@
           logbookQsos.push(msg.data);
           lbTotal = msg.total || logbookQsos.length;
           renderLogbook();
+          // worked-incremental (#731): the full worked list is not re-sent per
+          // QSO, so merge this one (back-dated ones too) with the same entry
+          // rule as the full list; a same-QSO last entry is replaced, not doubled.
+          if (typeof WorkedEntry !== 'undefined' && WorkedEntry.mergeRecord(workedQsos, msg.data)) {
+            ddPanel(spotsDropdown).querySelector('.rc-hide-worked-row').style.display = '';
+            renderSpots();
+            if (activeTab === 'map') renderMapSpots();
+          }
         }
         break;
 

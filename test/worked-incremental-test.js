@@ -145,5 +145,68 @@ test('ECHOCAT Web declares worked-incremental and merges worked-today into its w
   assert.ok(/workedQsos\.set\(call, list\)/.test(wt), 'worked-today no longer merges into workedQsos');
 });
 
+// ECHOCAT Web merges each qso-added record into its worked map with the same
+// entry rule as the full list (lib/worked-entry.js), so a back-dated QSO shows
+// with no reconnect and nothing counts twice.
+const fs = require('fs');
+const os = require('os');
+const WorkedEntry = require('../lib/worked-entry');
+const WorkedMatrix = require('../lib/worked-matrix');
+const { parseWorkedQsos } = require('../lib/adif');
+const { freqToBand } = require('../lib/bands');
+
+const REC = { CALL: 'w1aw', QSO_DATE: '20240105', BAND: '40m', MODE: 'SSB', SUBMODE: 'LSB', SIG_INFO: 'us-0001', MY_SIG_INFO: 'us-4567', STATE: 'ct', LOTW_QSL_RCVD: 'Y' };
+
+test('a back-dated qso-added shows in the worked matrix with no reconnect', () => {
+  const map = new Map([['W1AW', [{ date: TODAY, ref: '', myRef: '', band: '20M', mode: 'CW' }]]]);
+  assert.strictEqual(WorkedEntry.mergeRecord(map, { idx: 7, ...REC }), 'W1AW');
+  const m = WorkedMatrix.buildWorkedMatrix(WorkedMatrix.entriesForCall(map, 'W1AW'));
+  const phone = m.rows.find((r) => r.family === 'phone');
+  assert.strictEqual(phone.cells['40m'], 'confirmed', '40m phone missing from the matrix');
+  assert.strictEqual(m.total, 2);
+});
+
+test('a duplicate qso-added (the full list already carried it) does not double-count', () => {
+  const map = new Map();
+  WorkedEntry.mergeRecord(map, REC);
+  WorkedEntry.mergeRecord(map, REC);
+  assert.strictEqual(map.get('W1AW').length, 1);
+  // ...nor after the worked-today copy of the same QSO arrived first.
+  const map2 = new Map([['W1AW', [{ date: '20240105', ref: 'US-0001', band: '40M', mode: 'SSB' }]]]);
+  WorkedEntry.mergeRecord(map2, REC);
+  assert.strictEqual(map2.get('W1AW').length, 1);
+  assert.strictEqual(map2.get('W1AW')[0].myRef, 'US-4567', 'the fuller entry should replace the worked-today copy');
+  assert.strictEqual(WorkedMatrix.buildWorkedMatrix(WorkedMatrix.entriesForCall(map2, 'W1AW')).total, 1);
+});
+
+test('qso-added builds exactly the entry the full list builds (one rule)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wi-'));
+  const file = path.join(dir, 'log.adi');
+  const adif = (r) => Object.entries(r).map(([k, v]) => `<${k}:${String(v).length}>${v}`).join('') + '<EOR>\n';
+  const noBand = { CALL: 'K2XX', QSO_DATE: '20250101', FREQ: '7.074', MODE: 'MFSK', SUBMODE: 'FT4' };
+  fs.writeFileSync(file, '<EOH>\n' + adif(REC) + adif(noBand));
+  const full = parseWorkedQsos(file);
+  const live = new Map();
+  WorkedEntry.mergeRecord(live, REC, freqToBand);
+  WorkedEntry.mergeRecord(live, noBand, freqToBand);
+  assert.deepStrictEqual([...live.entries()], [...full.entries()]);
+  assert.deepStrictEqual(full.get('W1AW')[0], { date: '20240105', ref: 'US-0001', myRef: 'US-4567', band: '40M', mode: 'SSB', state: 'CT', confirmed: true });
+  assert.strictEqual(full.get('K2XX')[0].mode, 'FT4');
+  assert.strictEqual(full.get('K2XX')[0].freqBand, '40M');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('ECHOCAT Web gets the helper and merges qso-added (it lists qso-delta, which is what sends qso-added)', () => {
+  const web = readSrc(path.join(__dirname, '..', 'renderer', 'remote.js'));
+  const hello = web.slice(web.indexOf("type: 'hello'"), web.indexOf("type: 'hello'") + 3000);
+  assert.ok(/capabilities:\s*\[[^\]]*'qso-delta'/.test(hello));
+  const qa = web.slice(web.indexOf("case 'qso-added':"), web.indexOf("case 'qso-updated':"));
+  assert.ok(/WorkedEntry\.mergeRecord\(workedQsos, msg\.data\)/.test(qa), 'qso-added does not merge into workedQsos');
+  const html = readSrc(path.join(__dirname, '..', 'renderer', 'remote.html'));
+  assert.ok(html.includes('<!-- worked-entry-js -->'));
+  assert.ok(html.indexOf('<!-- adif-mode-js -->') < html.indexOf('<!-- worked-entry-js -->'), 'worked-entry needs AdifMode loaded first');
+  assert.ok(readSrc(path.join(__dirname, '..', 'lib', 'remote-server.js')).includes("['worked-entry-js', 'worked-entry.js']"));
+});
+
 console.log(`\nWorked incremental (#731): ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
