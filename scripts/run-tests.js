@@ -230,6 +230,8 @@ const TESTS = [
   'test/aprs-igate-test.js', // APRS phase 4: the receive-only iGate's rules, one test each (aprs-is.net IGating, q construct, dupes, login)
   'test/aprs-is-uplink-test.js', // APRS phase 4: the one APRS-IS uplink against a local fake server (verified only, keep-alive, reconnect)
   'test/aprs-idle-igate-wiring-test.js', // APRS phase 4: the APRS idle mode and the iGate wiring in main.js and Settings
+  'test/aprs-beacon-test.js', // APRS phase 5: the beacon packet, approximate position, symbols, comment, the 10 min timer floor, refusals
+  'test/aprs-beacon-wiring-test.js', // APRS phase 5: the beacon end to end against a local fake APRS-IS server, and its wiring
   'test/log-comment-test.js',
   'test/raw-cat-command-test.js',
   'test/rigctld-stderr-test.js',
