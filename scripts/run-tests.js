@@ -224,6 +224,8 @@ const TESTS = [
   'test/aprs-listen-bar-test.js', // APRS phase 2: the listen bar asks for its state on first open (the push can come first)
   'test/aprs-rf-frames-test.js', // APRS phase 2: recorded Dire Wolf AGW frames -> APRS packets, direct or via a digipeater
   'test/aprs-rf-merge-test.js', // APRS phase 2: a station heard on the radio and on APRS-IS is one row with both marks
+  'test/direwolf-aprs-hf-config-test.js', // APRS phase 3: the 30 m config is MODEM 300 1600:1800 A- 7@30 with no PTT; 2 m and Winlink configs byte-identical
+  'test/direwolf-aprs-hf-decode-test.js', // APRS phase 3: generated 300-baud AFSK decoded by the bundled Dire Wolf, on tune and 70 Hz off (skips without the build)
   'test/log-comment-test.js',
   'test/raw-cat-command-test.js',
   'test/rigctld-stderr-test.js',

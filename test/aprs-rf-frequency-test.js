@@ -102,5 +102,53 @@ test('the result carries the MHz text the window shows', () => {
   assert.strictEqual(at('QF56').mhz, '145.175');
 });
 
+// ── Phase 3: 30 m HF APRS, 300 baud (one frequency worldwide) ──────────────
+console.log('APRS 30 m frequency');
+
+test('30 m: dial 10.1476 MHz USB, 1600/1800 Hz tones, centre 10.1493 MHz, 300 baud', () => {
+  const f = F.frequencyForBand('30m');
+  assert.strictEqual(f.hz, 10147600);
+  assert.strictEqual(f.mhz, '10.1476');
+  assert.strictEqual(f.sideband, 'USB');
+  assert.deepStrictEqual(f.tonesHz, [1600, 1800]);
+  assert.strictEqual(f.baud, 300);
+  assert.strictEqual(f.band, '30m');
+  // The RF signal sits where the sources put it: 10.1492 and 10.1494 MHz, centre 10.1493.
+  assert.strictEqual(f.hz + 1600, 10149200);
+  assert.strictEqual(f.hz + 1800, 10149400);
+  assert.strictEqual(f.centreHz, 10149300);
+});
+
+test('30 m: the old "10.151 LSB" convention is the same signal (dial minus the 1700 Hz centre)', () => {
+  assert.strictEqual(10151000 - 1700, F.frequencyForBand('30m').centreHz);
+});
+
+test('30 m is one frequency worldwide: every grid gets it, even where 2 m has no entry', () => {
+  for (const g of ['FM29', 'JO62', 'PM95', 'QF56', 'GG66', 'RE78', 'AA00', 'FK52']) {
+    const f = F.frequencyForBand('30m', g, COUNTRIES);
+    assert.strictEqual(f && f.hz, 10147600, g);
+  }
+  assert.strictEqual(F.frequencyForBand('30m', '', COUNTRIES).hz, 10147600);
+});
+
+test('30 m entry cites at least two independent published sources', () => {
+  const f = F.frequencyForBand('30m');
+  assert.ok(Array.isArray(f.sources) && f.sources.length >= 2, 'sources');
+  assert.ok(f.sources.some((s) => /Dire Wolf User Guide/.test(s)));
+  assert.ok(f.sources.some((s) => /G6GVI|SA7SKY/.test(s)));
+  assert.ok(f.source && f.source.length > 10);
+});
+
+test('2 m by band is the grid-square lookup, unchanged', () => {
+  assert.deepStrictEqual(F.frequencyForBand('2m', 'FM29', COUNTRIES), at('FM29'));
+  assert.deepStrictEqual(F.frequencyForBand('2m', 'JO62', COUNTRIES), at('JO62'));
+  assert.strictEqual(F.frequencyForBand('2m', 'PM95', COUNTRIES), null);
+});
+
+test('an unknown band has no frequency', () => {
+  assert.strictEqual(F.frequencyForBand('20m', 'FM29', COUNTRIES), null);
+  assert.strictEqual(F.frequencyForBand('', 'FM29', COUNTRIES), null);
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

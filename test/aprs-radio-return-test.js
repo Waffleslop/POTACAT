@@ -178,5 +178,40 @@ test('a marker with no frequency is never acted on', () => {
   assert.strictEqual(w.disk, null);
 });
 
+// ── Phase 3: 30 m ─────────────────────────────────────────────────────────
+const HF = 10147600; // 30 m APRS dial, USB
+
+test('30 m: stop, crash and quit put the radio back exactly as on 2 m', () => {
+  const home = { freqHz: 7074000, mode: 'LSB', rigId: 'rig-1' };
+  const w = world();
+  const c = w.make();
+  c.begin({ ...home, listenHz: HF }, () => {});
+  assert.strictEqual(w.disk.listenHz, HF);
+  w.events.length = 0;
+  assert.strictEqual(c.end(HF), 'returned');
+  assert.deepStrictEqual(w.events, ['save:returning', 'tune:7074000:LSB']);
+  assert.strictEqual(c.onReadback(7074000, { rigId: 'rig-1' }), 'confirmed');
+  // Crash on 30 m: the next start's first readback sends it back.
+  const w2 = world();
+  w2.make().begin({ ...home, listenHz: HF }, () => {});
+  w2.events.length = 0;
+  assert.strictEqual(w2.make().onReadback(HF + 300, { rigId: 'rig-1' }), 'returned');
+  assert.deepStrictEqual(w2.events, ['save:returning', 'tune:7074000:LSB']);
+});
+
+test('switching 2 m to 30 m while listening keeps the FIRST place as home, never 144.390', () => {
+  const w = world();
+  const c = w.make();
+  c.begin({ ...HOME, listenHz: APRS }, () => {});
+  // The band chip: begin() again with the radio now on 144.390 FM.
+  c.begin({ freqHz: APRS, mode: 'FM', rigId: 'rig-1', listenHz: HF }, () => {});
+  assert.strictEqual(w.disk.freqHz, 14074000);
+  assert.strictEqual(w.disk.mode, 'DIGU');
+  assert.strictEqual(w.disk.listenHz, HF);
+  w.events.length = 0;
+  assert.strictEqual(c.end(HF), 'returned');
+  assert.deepStrictEqual(w.events, ['save:returning', 'tune:14074000:DIGU']);
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

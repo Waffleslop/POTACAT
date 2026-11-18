@@ -1,0 +1,27 @@
+[
+ {
+  "input": {
+   "mycall": "k3sbp-10",
+   "audioPort": 50200,
+   "agwPort": 8012
+  },
+  "conf": "# Written by POTACAT for APRS listening (receive only, no PTT) — regenerated every launch; do not edit.\nADEVICE tcp:50200\nARATE 48000\nACHANNELS 1\nCHANNEL 0\nMYCALL K3SBP-10\nMODEM 1200\nAGWPORT 8012\nKISSPORT 0\n"
+ },
+ {
+  "input": {
+   "audioPort": 1,
+   "agwPort": 65533
+  },
+  "conf": "# Written by POTACAT for APRS listening (receive only, no PTT) — regenerated every launch; do not edit.\nADEVICE tcp:1\nARATE 48000\nACHANNELS 1\nCHANNEL 0\nMYCALL N0CALL\nMODEM 1200\nAGWPORT 65533\nKISSPORT 0\n"
+ },
+ {
+  "input": {
+   "mycall": "W1AW",
+   "audioPort": 61234,
+   "agwPort": 8012,
+   "shimPort": 4532,
+   "ptt": "COM3 RTS"
+  },
+  "conf": "# Written by POTACAT for APRS listening (receive only, no PTT) — regenerated every launch; do not edit.\nADEVICE tcp:61234\nARATE 48000\nACHANNELS 1\nCHANNEL 0\nMYCALL W1AW\nMODEM 1200\nAGWPORT 8012\nKISSPORT 0\n"
+ }
+]

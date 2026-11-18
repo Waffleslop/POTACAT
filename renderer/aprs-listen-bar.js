@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Casey Stanton
 //
-// APRS window, phase 2: the "Listen on my radio" switch (2 m, receive only)
+// APRS window: the "Listen on my radio" switch (receive only), the band
+// chips (phase 3: 2 m, 30 m, one per band the rig has; main decides which)
 // and its small marks: radio listening, the last packet the radio heard, the
 // count this session, and the one sentence when it cannot listen. Main does
 // the work (main.js aprsListenStart); this only shows its state and sends the
@@ -11,7 +12,32 @@
 
   var $ = function (id) { return document.getElementById(id); };
   var sw = $('aprs-listen-on');
-  var s = { on: false, state: 'off', sentence: '', mhz: '', heard: 0, lastAt: 0, note: '' };
+  var s = { on: false, state: 'off', sentence: '', band: '', bands: [], modeLabel: 'FM', mhz: '', heard: 0, lastAt: 0, note: '' };
+  var LABEL = { '2m': '2 m', '30m': '30 m' };
+  var TITLE = {
+    '2m': 'Listen on 2 m: the regional APRS frequency, FM, 1200 baud',
+    '30m': 'Listen on 30 m: 10.1476 MHz USB, 300 baud (HF APRS, one frequency worldwide)',
+  };
+  var chipsKey = '';
+
+  function renderChips() {
+    var box = $('aprs-listen-bands');
+    var bands = Array.isArray(s.bands) ? s.bands : [];
+    var key = bands.join(',') + '|' + s.band;
+    if (key === chipsKey) return;
+    chipsKey = key;
+    box.textContent = '';
+    bands.forEach(function (b) {
+      var c = document.createElement('button');
+      c.type = 'button';
+      c.className = 'aprs-chip aprs-band-chip' + (b === s.band ? ' on' : '');
+      c.textContent = LABEL[b] || b;
+      c.title = TITLE[b] || '';
+      c.setAttribute('aria-pressed', b === s.band ? 'true' : 'false');
+      c.addEventListener('click', function () { if (b !== s.band) window.api.listenBand(b); });
+      box.appendChild(c);
+    });
+  }
 
   function ago(ms) {
     var sec = Math.max(0, Math.round(ms / 1000));
@@ -24,7 +50,8 @@
   function render() {
     var active = s.on && (s.state === 'starting' || s.state === 'listening' || s.state === 'paused');
     sw.checked = active;
-    $('aprs-listen-freq').textContent = s.mhz ? s.mhz + ' MHz FM' : '';
+    renderChips();
+    $('aprs-listen-freq').textContent = s.mhz ? s.mhz + ' MHz ' + (s.modeLabel || 'FM') : '';
     $('aprs-listen-freq').classList.toggle('hidden', !s.mhz || !active);
 
     var st = $('aprs-listen-state'), dot = $('aprs-listen-dot'), txt = $('aprs-listen-text');
