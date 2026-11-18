@@ -42,6 +42,23 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check(T.fillLogText(5) === '[Flex] the radio had no transmit timeout; set it to 5 minutes (Settings > My Rigs to change)', 'the log line');
   check(/SmartSDR and Maestro/.test(T.fillNoticeText(5)), 'the notice says it is a radio setting other clients see');
 
+
+  console.log('The radio\'s reply and the readback (8600M 2026-11-18: logged "set", radio still read 0)');
+  {
+    const ok = T.replyLogText({ command: 'interlock timeout=300000', status: 0, line: 'R41|0|' });
+    check(ok === '[Flex] the radio accepted "interlock timeout=300000" (reply R41|0|); waiting for its status to show the new timeout', 'an OK reply is logged with the raw R line');
+    const bad = T.replyLogText({ command: 'interlock timeout=300000', status: 0x50000016, line: 'R41|50000016|Invalid parameter' });
+    check(bad === '[Flex] the radio refused "interlock timeout=300000": error 0x50000016, Invalid parameter (reply R41|50000016|Invalid parameter). The transmit timeout is still off.', 'an error reply is said in plain words with its code: ' + bad);
+    const none = T.replyLogText({ command: 'interlock timeout=300000', status: null, line: null });
+    check(/no reply/.test(none) && /interlock timeout=300000/.test(none), 'no reply in time is said too');
+    check(T.replyAccepted({ status: 0 }) === true && T.replyAccepted({ status: 0x50000016 }) === false && T.replyAccepted({ status: null }) === false, 'only status 0 is accepted');
+    check(T.decideConfirm({ pending: true, radioTimeout: 300000 }).action === 'confirmed', 'a later non-zero timeout confirms the fill');
+    check(T.decideConfirm({ pending: true, radioTimeout: 0, replied: true, accepted: true }).action === 'still-zero', 'accepted but still 0 is reported');
+    check(T.decideConfirm({ pending: true, radioTimeout: 0, replied: false }).action === 'wait', 'a 0 before the reply is not a verdict');
+    check(T.decideConfirm({ pending: false, radioTimeout: 300000 }).action === 'none', 'nothing pending: nothing to confirm');
+    check(/still reports timeout=0/.test(T.stillZeroLogText({ command: 'interlock timeout=300000' })), 'the still-0 line');
+  }
+
   console.log('Key-down commands');
   for (const c of ['xmit 1', 'transmit tune 1', 'atu start', 'cw key 1 time=0x0001 index=0', 'cw ptt 1 time=0x0001 index=1', 'cwx send "CQ"', 'transmit set mox=1']) check(T.isKeyDownCommand(c), 'key-down: ' + c);
   for (const c of ['xmit 0', 'transmit tune 0', 'atu bypass', 'cw key 0 time=0x1 index=2', 'cw ptt 0', 'transmit set rfpower=50', 'interlock timeout=300000', 'slice tune 0 14.074']) check(!T.isKeyDownCommand(c), 'not a key-down: ' + c);
@@ -107,6 +124,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const n = l.setInterlockTimeout(300000);
     check(n != null && written.some((w) => /\|interlock timeout=300000$/.test(w)), 'setInterlockTimeout sends interlock timeout=<ms>');
     check(l.setInterlockTimeout(0) === null, 'setInterlockTimeout never sends 0');
+    // The reply to the set is read and handed up, raw line and all.
+    const replies = [];
+    l.on('interlock-timeout-reply', (r) => replies.push(r));
+    const seq2 = l.setInterlockTimeout(180000);
+    l._handleLine(`R${seq2}|50000016|Invalid parameter`);
+    check(replies.length === 1 && replies[0].status === 0x50000016 && replies[0].line === `R${seq2}|50000016|Invalid parameter` && replies[0].command === 'interlock timeout=180000', 'the R<seq>|<code>| reply to interlock timeout= is emitted: ' + JSON.stringify(replies));
+
     l.disconnect();
   }
 
@@ -117,15 +141,25 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     check(i > 0, 'main.js has flexTxTimeoutCheck');
     const f = main.slice(i, main.indexOf('\n}\n', i));
     check(/FlexTxTimeout\.decideFill\(/.test(f) && /smartSdr\.guiReady/.test(f), 'it asks the pure rule, as the GUI client only');
-    check(/smartSdr\.setInterlockTimeout\(/.test(f) && /FlexTxTimeout\.fillLogText\(/.test(f) && /FlexTxTimeout\.fillNoticeText\(/.test(f), 'it sets the timeout, logs it and shows the notice');
-    check(/flexTxTimeoutNoticed/.test(f), 'the notice is once per rig');
-    check(/smartSdr\.on\('interlock', \(kv\) => flexTxTimeoutCheck\(/.test(main) && /flexTxTimeoutCheck\('gui-ready'\)/.test(main), 'checked on the interlock status and when the GUI seat is granted (LAN and SmartLink alike)');
+    check(/smartSdr\.setInterlockTimeout\(/.test(f) && /FlexTxTimeout\.sendLogText\(/.test(f), 'it sends the timeout and logs what it sent');
+    check(!/flexTxTimeoutNoticed/.test(f) && !/fillLogText/.test(f), 'sending is not success: no "set it" line and no notice flag at send time');
+    const j = main.indexOf('function flexTxTimeoutConfirm(');
+    check(j > 0, 'main.js has flexTxTimeoutConfirm');
+    const g = main.slice(j, main.indexOf('\n}\n', j));
+    check(/FlexTxTimeout\.decideConfirm\(/.test(g) && /flexTxTimeoutNoticed = true/.test(g) && /FlexTxTimeout\.fillLogText\(/.test(g), 'the notice flag and the "set it" line wait for a status that shows the new timeout');
+    check(/smartSdr\.on\('interlock-timeout-reply'/.test(main) && /FlexTxTimeout\.replyLogText\(/.test(main), "the radio's reply is logged");
+    check(/smartSdr\.on\('interlock', \(kv\) => \{ flexTxTimeoutConfirm\(kv\); flexTxTimeoutCheck\(/.test(main) && /flexTxTimeoutCheck\('gui-ready'\)/.test(main), 'checked on the interlock status and when the GUI seat is granted (LAN and SmartLink alike)');
     check(/smartSdr\.on\('tx-refused'/.test(main), 'a refused key-down is said where the press happened');
     const html = readSrc(path.join(__dirname, '..', 'renderer', 'index.html'));
     check(/id="set-flex-tx-timeout"/.test(html) && /Radio transmit timeout/.test(html), 'the rig editor has Radio transmit timeout');
     const app = readSrc(path.join(__dirname, '..', 'renderer', 'app.js'));
     check(/flexTxTimeoutMin/.test(app) && /FlexTxTimeout\.minutesFor\(/.test(app), 'the rig editor saves and loads flexTxTimeoutMin');
     check(/<script src="\.\.\/lib\/flex-tx-timeout\.js"><\/script>/.test(html), 'the renderer loads lib/flex-tx-timeout.js');
+    check(/Sign in to FlexRadio to see your radios/.test(app), 'signed out, the SmartLink radio list says to sign in');
+    const k = app.indexOf('function smartLinkFillRadios(');
+    const h = app.slice(k, app.indexOf('\n}\n', k));
+    check(/signedIn/.test(h) && h.indexOf('Sign in to FlexRadio to see your radios') < h.indexOf('No radios on this FlexRadio account'), 'and "No radios on this FlexRadio account" only when signed in');
+
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);

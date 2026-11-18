@@ -22490,7 +22490,8 @@ function connectSmartSdr() {
   smartSdr.on('interlock', (kv) => { if (atuWizardRun) atuWizardRun.noteInterlock(kv); });
   // The radio's own transmit timeout, filled in when it has none (any Flex,
   // LAN and SmartLink alike; lib/flex-tx-timeout.js).
-  smartSdr.on('interlock', (kv) => flexTxTimeoutCheck('interlock', kv));
+  smartSdr.on('interlock', (kv) => { flexTxTimeoutConfirm(kv); flexTxTimeoutCheck('interlock', kv); });
+  smartSdr.on('interlock-timeout-reply', (r) => flexTxTimeoutReply(r));
   // A key-down refused over FlexRadio SmartLink (lib/smartsdr.js backstop).
   smartSdr.on('tx-refused', ({ reason }) => flexSmartLinkTxRefused(reason));
   smartSdr.on('frequency', (hz) => { if (atuWizardRun) atuWizardRun.noteSliceMoved(hz); });
@@ -22511,6 +22512,7 @@ function connectSmartSdr() {
   smartSdr.on('connected', () => {
     _sdrErrorLogged = false;
     _flexTxTimeoutDone = false; // every connect looks at the radio's timeout again
+    _flexTxTimeoutFill = null;
     // Fresh connection — re-arm DAX-route detection (clear stale state so the
     // first mismatch this session can auto-fix).
     _daxFixAttempted = false;
@@ -23070,6 +23072,10 @@ const FlexRouteLib = require('./lib/flex-route');
 // never changed. It is a persistent radio setting every client sees.
 const FlexTxTimeout = require('./lib/flex-tx-timeout');
 let _flexTxTimeoutDone = false;
+// The fill in flight this connection: { command, minutes, replied, accepted, saidZero }.
+// Sending is not success: the "set it" line, the notice and flexTxTimeoutNoticed
+// wait for an interlock status that shows a non-zero timeout (8600M 2026-11-18).
+let _flexTxTimeoutFill = null;
 function flexTxTimeoutCheck(why) {
   if (!smartSdr || _flexTxTimeoutDone) return;
   const rig = (settings.rigs || []).find((r) => r && r.id === settings.activeRigId) || null;
@@ -23081,11 +23087,33 @@ function flexTxTimeoutCheck(why) {
   }
   if (smartSdr.setInterlockTimeout(d.ms) == null) return;
   _flexTxTimeoutDone = true;
-  sendCatLog(FlexTxTimeout.fillLogText(d.minutes) + ` [${why}]`);
+  _flexTxTimeoutFill = { command: d.command, minutes: d.minutes, replied: false, accepted: false, saidZero: false };
+  sendCatLog(FlexTxTimeout.sendLogText(d.command, d.minutes) + ` [${why}]`);
+}
+// The radio's reply to the fill (R<seq>|<code>|<msg>), logged raw. An error
+// reply ends the fill: no flag, the line says the timeout is still off.
+function flexTxTimeoutReply(r) {
+  sendCatLog(FlexTxTimeout.replyLogText(r));
+  const f = _flexTxTimeoutFill;
+  if (!f || f.command !== r.command) return;
+  f.replied = true;
+  f.accepted = FlexTxTimeout.replyAccepted(r);
+  if (!f.accepted) _flexTxTimeoutFill = null;
+}
+// A later interlock status: a non-zero timeout is the only success.
+function flexTxTimeoutConfirm(kv) {
+  const f = _flexTxTimeoutFill;
+  if (!f) return;
+  const c = FlexTxTimeout.decideConfirm({ pending: true, radioTimeout: FlexTxTimeout.radioTimeout(kv), replied: f.replied, accepted: f.accepted });
+  if (c.action === 'still-zero' && !f.saidZero) { f.saidZero = true; sendCatLog(FlexTxTimeout.stillZeroLogText(f)); return; }
+  if (c.action !== 'confirmed') return;
+  _flexTxTimeoutFill = null;
+  sendCatLog(FlexTxTimeout.fillLogText(f.minutes) + ` [radio reports timeout=${kv.timeout}]`);
+  const rig = (settings.rigs || []).find((x) => x && x.id === settings.activeRigId) || null;
   if (rig && !rig.flexTxTimeoutNoticed) {
     rig.flexTxTimeoutNoticed = true;
     saveSettings(settings);
-    if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: FlexTxTimeout.fillNoticeText(d.minutes), duration: 15000 });
+    if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: FlexTxTimeout.fillNoticeText(f.minutes), duration: 15000 });
   }
 }
 

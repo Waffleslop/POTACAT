@@ -2625,7 +2625,10 @@ function smartLinkFillRadios(list, keep) {
   if (!smartLink.radios.length) {
     const o = document.createElement('option');
     o.value = keep || '';
-    o.textContent = keep ? 'Saved radio (not in the list now)' : 'No radios on this FlexRadio account';
+    // Signed out, the list is empty because nobody asked, not because the account has none.
+    const signedIn = !!(smartLink.status && smartLink.status.signedIn);
+    o.textContent = !signedIn ? 'Sign in to FlexRadio to see your radios'
+      : (keep ? 'Saved radio (not in the list now)' : 'No radios on this FlexRadio account');
     sel.appendChild(o);
   }
   for (const r of smartLink.radios) {
