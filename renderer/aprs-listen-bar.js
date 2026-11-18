@@ -73,11 +73,27 @@
     note.classList.toggle('hidden', !(s.note && active));
   }
 
+  // Phase 4: the iGate mark. Shown while the setting is on: the link, the
+  // count gated this run and the last one. A refusal is its one sentence.
+  var ig = null;
+  function renderIgate() {
+    var el = $('aprs-igate');
+    if (!ig || !ig.on) { el.classList.add('hidden'); return; }
+    el.classList.remove('hidden');
+    var dot = $('aprs-igate-dot'), txt = $('aprs-igate-text');
+    if (ig.sentence) { dot.className = 'aprs-dot bad'; txt.textContent = 'iGate: ' + ig.sentence; return; }
+    var ok = ig.active && ig.link === 'verified';
+    dot.className = 'aprs-dot' + (ok ? ' ok' : ig.link === 'unverified' ? ' bad' : ' wait');
+    var link = !ig.active ? 'waits for the radio' : ig.link === 'verified' ? 'connected' : ig.link === 'unverified' ? 'login not verified, nothing sent' : 'connecting';
+    txt.textContent = 'iGate ' + link + ', ' + ig.gated + ' gated' + (ig.lastAt ? ', last ' + ago(Date.now() - ig.lastAt) : '');
+  }
+
   sw.addEventListener('change', function () { window.api.listenSet(sw.checked); });
   window.api.onListen(function (d) { s = d || s; render(); });
+  if (window.api.onIgate) window.api.onIgate(function (d) { ig = d || ig; renderIgate(); });
   // The push that answers 'aprs-ready' can come before this script has loaded;
   // ask now that the listener is attached.
   if (window.api.listenGet) window.api.listenGet();
-  setInterval(render, 1000);
+  setInterval(function () { render(); renderIgate(); }, 1000);
   render();
 })();

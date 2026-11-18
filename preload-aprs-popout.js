@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld('api', {
   // Phase 3: the band chips. The state also carries { bands: ['2m','30m'], modeLabel: 'FM'|'USB' }.
   listenBand: (b) => ipcRenderer.send('aprs-listen-band', String(b || '')),
   onListen: (cb) => ipcRenderer.on('aprs-listen', (_e, s) => cb(s)),
+  // Phase 4: the iGate's marks { on, active, call, sentence, link, gated, lastAt, lastFrom }
+  onIgate: (cb) => ipcRenderer.on('aprs-igate', (_e, s) => cb(s)),
   // Asked once the bar listens; main answers with one 'aprs-listen' push.
   listenGet: () => ipcRenderer.send('aprs-listen-get'),
 });

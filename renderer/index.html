@@ -1783,7 +1783,7 @@
       </div>
       <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-enable-auto-sstv"> Idle Mode</label>
       <span class="help-text" style="margin-left:12px;display:block;">
-        When this station is idle for the defined time, POTACAT opens your chosen program — WSPR, PSK31, JTTY, SSTV, or JS8 (heartbeat net, auto-replies, mailbox, and APRS gateway keep running while you are away).
+        When this station is idle for the defined time, POTACAT opens your chosen program — WSPR, PSK31, JTTY, SSTV, JS8 (heartbeat net, auto-replies, mailbox, and APRS gateway keep running while you are away), or APRS.
         <label style="display:inline-flex;align-items:center;gap:4px;margin-left:8px;">Timeout: <input type="number" id="set-auto-sstv-min" min="5" max="1440" value="90" style="width:50px;font-size:12px;padding:2px 4px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-primary);border-radius:3px;text-align:center;"> min</label>
       </span>
       <div id="idle-rx-opts" style="margin-left:24px;margin-top:4px;display:none;">
@@ -1794,6 +1794,7 @@
             <option value="psk31">PSK31</option>
             <option value="jtty">JTTY</option>
             <option value="js8">JS8</option>
+            <option value="aprs">APRS</option>
           </select>
         </label>
         <div id="idle-psk-opts" style="margin-top:6px;display:none;align-items:center;gap:8px;flex-wrap:wrap;">
@@ -1825,6 +1826,12 @@
           </label>
         </div>
         <span id="idle-sstv-note" class="help-text" style="display:block;margin-top:4px;">SSTV: POTACAT flips to 20m (14.230 MHz) in the daytime and 40m (7.171 MHz) at night, based on your grid square.</span>
+        <div id="idle-aprs-opts" style="display:none;margin-top:6px;">
+          <span class="help-text" style="display:block;">APRS: the radio listens on the APRS frequency, 2 m if it has 2 m, else 30 m. Receive only: nothing is transmitted.</span>
+          <label class="checkbox-label" style="margin-top:6px;"><input type="checkbox" id="set-aprs-igate"> Report what I hear to APRS-IS (iGate)</label>
+          <span class="help-text" style="margin-left:24px;display:block;">Each packet your radio hears goes to APRS-IS under your callsign with -10, so it shows on APRS maps as heard by you. It applies whenever POTACAT listens to APRS on your radio. Nothing from the internet is ever sent on the air.</span>
+          <span id="idle-aprs-igate-marks" class="help-text" style="margin-left:24px;display:block;margin-top:4px;font-weight:600;"></span>
+        </div>
         <span id="idle-jtty-note" class="help-text" style="display:none;margin-top:4px;">JTTY: receive on 20m (14.090 MHz) in the daytime and 40m (7.090 MHz) at night, based on your grid square. Each band change is marked in the JTTY feed.</span>
       </div>
       <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-sstv-post-process" checked> Polish decoded SSTV images (MMSSTV-style)</label>
@@ -5184,6 +5191,7 @@
         <option value="psk31">PSK31</option>
         <option value="jtty">JTTY</option>
         <option value="js8">JS8</option>
+        <option value="aprs">APRS</option>
       </select>
     </div>
     <div id="welcome-idle-psk-opts" style="margin-left:22px;margin-bottom:8px;display:none;align-items:center;gap:6px;font-size:13px;">
