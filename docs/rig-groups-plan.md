@@ -113,13 +113,20 @@ one rig, before the cloud has rig groups.
 
 ## Order of work, one PR each
 
+The build plan, slice by slice with files and tests, is
+docs/rig-groups-implementation.md. The cloud and app work are in
+docs/handoffs/DESKTOP_TO_CLOUD_HANDOFF_2026-11-17_RIG_GROUPS.md and
+docs/handoffs/DESKTOP_TO_ECHOCAT_HANDOFF_2026-11-17_RIG_GROUPS.md.
+
 1. This plan.
-2. Shack: waiting members, `queue-join`, the member idle offer, wording, tests.
-3. The rig-group member message list.
-4. Sharing paused.
-5. The cloud handoff (docs/handoffs/).
-6. Desktop screens, once the cloud has rig groups.
-7. The ECHOCAT handoff.
+2. `lib/rig-group-turns.js`: the queue and the member idle offer, pure.
+3. `pass-state` reasons and wording.
+4. Shack: waiting members, `queue-join`, the handoff between members, standing
+   passes with no end date, and the protocol rows.
+5. The shack reports the rig's state to Cloud.
+6. Share My Rig: rig groups for the owner (needs the cloud work).
+7. POTACAT as a member: "My group's rigs".
+8. ECHOCAT Web.
 
 Not in this plan: metered time, schedules, reservations and volunteer credits
 (#661). They come later and reuse the same pieces.
