@@ -304,17 +304,6 @@ test('a trailing CR/LF is ignored', () => {
   assert.strictEqual(p.comment, 'Test');
 });
 
-test('symbol class: station, vehicle, weather, object', () => {
-  assert.strictEqual(P.symbolClass('/', '-'), 'station');
-  assert.strictEqual(P.symbolClass('/', '>'), 'vehicle');
-  assert.strictEqual(P.symbolClass('/', 'k'), 'vehicle');
-  assert.strictEqual(P.symbolClass('/', '_'), 'weather');
-  assert.strictEqual(P.symbolClass('\\', '_'), 'weather');
-  assert.strictEqual(P.symbolClass('/', '#'), 'station');
-  assert.strictEqual(P.symbolClass('/', 'A', 'item'), 'object');
-  assert.strictEqual(P.symbolClass('/', '>', 'object'), 'object');
-});
-
 test('dual mode: window.AprsParser in a page', () => {
   const fs = require('fs');
   const vm = require('vm');

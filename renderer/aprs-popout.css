@@ -1,7 +1,6 @@
 /* APRS window (phase 1). Colours come from the theme variables, so every
-   theme draws it in its own palette: station blue (--accent-blue), moving
-   green (--accent-green), weather purple (--source-dxc), object orange
-   (--source-sota), you (--accent-red). */
+   theme draws it in its own palette. The nine icons and their colours are in
+   aprs-icons.js; the map itself is one canvas (aprs-popout.js). */
 html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
   background: var(--bg-primary); color: var(--text-primary);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 15px; }
@@ -29,55 +28,41 @@ body { display: flex; flex-direction: column; }
 .aprs-count { padding: 7px 12px; color: var(--text-secondary); border-bottom: 1px solid var(--border-primary); }
 .aprs-table-wrap { flex: 1; overflow: auto; min-height: 120px; }
 
-.aprs-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.aprs-table { width: 100%; border-collapse: collapse; font-size: 14px; table-layout: fixed; }
+.aprs-table col.c-sym { width: 34px; }
+.aprs-table col.c-call { width: 118px; }
+.aprs-table col.c-dist { width: 78px; }
+.aprs-table col.c-brg { width: 82px; }
+.aprs-table col.c-age { width: 70px; }
 .aprs-table th { position: sticky; top: 0; z-index: 1; background: var(--bg-secondary); color: var(--text-secondary);
   text-align: left; font-weight: 600; padding: 7px 8px; cursor: pointer; user-select: none; white-space: nowrap;
-  border-bottom: 1px solid var(--border-primary); }
+  overflow: hidden; text-overflow: ellipsis; border-bottom: 1px solid var(--border-primary); }
 .aprs-table th:hover { color: var(--text-primary); }
 .aprs-table th.sorted::after { content: ' \25B2'; font-size: 10px; }
 .aprs-table th.sorted.desc::after { content: ' \25BC'; }
-.aprs-table td { padding: 6px 8px; border-bottom: 1px solid var(--border-secondary, var(--border-primary)); white-space: nowrap; }
+/* Every row is one line and the same height: the list draws only the rows in view. */
+.aprs-table tbody tr.r td { height: 32px; padding: 0 8px; box-sizing: border-box; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; border-bottom: 1px solid var(--border-secondary, var(--border-primary)); }
+.aprs-table tbody tr.r td:first-child { padding: 0 0 0 8px; text-overflow: clip; }
+.aprs-table tbody tr.aprs-pad td { padding: 0; border: 0; }
 .aprs-table td.num, .aprs-table th.num { text-align: right; }
 .aprs-table td.call { font-weight: 700; }
-/* A long comment clamps to two lines; the whole of it is in the details. */
-.aprs-table td .cmt { white-space: normal; color: var(--text-secondary); max-width: 240px; overflow: hidden;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.aprs-table tbody tr { cursor: pointer; }
-.aprs-table tbody tr:hover { background: var(--bg-hover); }
+.aprs-table td.cmt { color: var(--text-secondary); }
+.aprs-table tbody tr.r { cursor: pointer; }
+.aprs-table tbody tr.r:hover { background: var(--bg-hover); }
 .aprs-table tbody tr.sel { background: var(--bg-hover); box-shadow: inset 3px 0 0 var(--accent-red); }
-.col-sym { width: 24px; }
+.aprs-ico { display: inline-block; vertical-align: middle; flex: none; }
+.aprs-table td .aprs-ico { margin-top: -2px; }
 
-/* The four marker shapes: circle station, arrow moving, square weather,
-   diamond object. Used in the list, the legend and on the map. */
-.aprs-sym { display: inline-block; width: 12px; height: 12px; vertical-align: middle;
-  border: 2px solid var(--bg-primary); box-sizing: content-box; }
-.aprs-sym.station { background: var(--accent-blue); border-radius: 50%; }
-.aprs-sym.weather { background: var(--source-dxc); border-radius: 2px; }
-.aprs-sym.object { background: var(--source-sota); transform: rotate(45deg) scale(0.85); }
-.aprs-sym.vehicle { width: 0; height: 0; border: 7px solid transparent; border-bottom: 13px solid var(--accent-green);
-  border-top: 0; box-sizing: border-box; background: none; }
-.aprs-sym.home { background: var(--accent-red); border-radius: 50%; width: 14px; height: 14px; }
+/* The map's stations are drawn on one canvas; clicks are hit-tested in the script. */
+.aprs-canvas { pointer-events: none; }
+#aprs-map.aprs-hover { cursor: pointer; }
 
-/* Leaflet places .leaflet-marker-icon absolutely; never override its position. */
-.aprs-marker .aprs-sym { position: absolute; left: 0; top: 0; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45); }
-.aprs-marker .aprs-sym.vehicle { box-shadow: none; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5)); }
-.aprs-marker .aprs-lbl { position: absolute; left: 19px; top: -3px; white-space: nowrap; font-size: 13px; font-weight: 700;
-  color: var(--text-primary); background: var(--bg-secondary); border: 1px solid var(--border-primary);
-  border-radius: 4px; padding: 0 5px; opacity: 0.92; pointer-events: none; }
-.aprs-marker.sel .aprs-sym { outline: 3px solid var(--accent-red); outline-offset: 2px; }
-.aprs-marker.sel .aprs-lbl { border-color: var(--accent-red); }
-#aprs-map.no-labels .aprs-marker:not(.sel) .aprs-lbl { display: none; }
-
-.aprs-legend { position: absolute; bottom: 10px; left: 10px; z-index: 1000; display: flex; gap: 12px; flex-wrap: wrap;
+.aprs-legend { position: absolute; bottom: 10px; left: 10px; right: 10px; z-index: 1000; display: flex; gap: 4px 10px; flex-wrap: wrap;
+  width: max-content; max-width: calc(100% - 20px); box-sizing: border-box;
   background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 6px;
-  padding: 6px 10px; font-size: 13px; color: var(--text-secondary); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35); }
-.aprs-legend span { display: inline-flex; align-items: center; gap: 6px; }
-.aprs-key { display: inline-block; width: 11px; height: 11px; }
-.aprs-key-station { background: var(--accent-blue); border-radius: 50%; }
-.aprs-key-vehicle { width: 0; height: 0; border: 6px solid transparent; border-bottom: 11px solid var(--accent-green); border-top: 0; }
-.aprs-key-weather { background: var(--source-dxc); border-radius: 2px; }
-.aprs-key-object { background: var(--source-sota); transform: rotate(45deg) scale(0.85); }
-.aprs-key-home { background: var(--accent-red); border-radius: 50%; }
+  padding: 5px 9px; font-size: 13px; color: var(--text-secondary); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35); }
+.aprs-legend span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 
 .aprs-empty { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 1000;
   background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 6px;
