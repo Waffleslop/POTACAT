@@ -485,6 +485,8 @@ const AprsRadioReturn = require('./lib/aprs-radio-return'); // APRS phase 2: the
 const AprsParser = require('./lib/aprs-parser');
 const AprsIgate = require('./lib/aprs-igate');             // APRS phase 4: the receive-only iGate's rules and the uplink login
 const AprsBeacon = require('./lib/aprs-beacon');           // APRS phase 5: the beacon over APRS-IS (packet, timer, symbols, refusals)
+const AprsRfGate = require('./lib/aprs-rf-gate');          // APRS phase 7: when the 'aprs' owner may key (one manual beacon over the radio)
+const AprsRfBeacon = require('./lib/aprs-rf-beacon');      // APRS phase 7: the RF beacon packet, its cap, and the one-beacon run
 const VaraProcess = require('./lib/vara-process');
 const VaraSetup = require('./lib/vara-setup');
 const WinlinkModes = require('./lib/winlink-modes');
@@ -12164,11 +12166,12 @@ async function startWinlinkAudio({ modemRate = ModemAudioServerMod.MODEM_RATE } 
   // discard cost 44 of 50 ARDOP connect requests their leader (#289).
   srv.on('tx-note', (n) => { if (winlinkTxActive) _winlinkTxBurst.noteLevel(n.samples, n.peak, n.rate); });
   srv.on('tx-out', (mono24k) => { if (winlinkTxActive) winlinkDispatchOut(mono24k); });
+  srv.on('tx-out', (mono24k) => { if (_aprsRfKeyed && !winlinkTxActive) winlinkDispatchOut(mono24k); }); // APRS phase 7: a radio beacon's one frame takes the same road
   srv.on('prekey-sent', (d) => winlinkPreKeyNoted(d.ms));
   srv.on('tx-boost', (l) => winlinkLog(`modem transmit audio raised ${l.boostDb} dB — the modem plays about ${l.inDb} dBFS peak and full scale is the set RF power (the modem's own drive slider does the same)`));
   srv.on('tx-cut', (c) => { _winlinkTxCutMs = Math.max(_winlinkTxCutMs, Number(c.totalMs) || 0); winlinkLog(`modem audio: ${c.ms} ms of transmit audio cut — the sound card stopped taking it (${c.totalMs} ms this session)`); });
   srv.on('over-report', (o) => { const t = modemBridgeOverText({ gaps: Number(o.gaps) || 0, gapMs: Number(o.gapMs) || 0, droppedMs: Number(o.droppedMs) || 0 }); if (t) winlinkLog(t); });
-  srv.on('drained', () => winlinkLaneDrained());
+  srv.on('drained', () => { winlinkLaneDrained(); aprsRfLaneDrained(); });
   srv.on('exit', () => { if (winlinkAudio === srv) { winlinkAudio = null; if (winlinkSessionActive()) winlinkAbortSession('the modem audio process stopped', { kind: 'audio-stopped' }); } });
   try {
     await srv.listen(0);
@@ -12396,6 +12399,7 @@ function winlinkCableConfigured() {
 }
 function modemBridgeWanted() {
   if (winlinkIpAudioRoute() || isRemoteMode()) return false;
+  if (aprsRfInFlight()) return true;       // APRS phase 7: one beacon over the radio, playback for its few seconds
   if (aprsListenWantsAudio()) return true; // APRS "Listen on my radio": receive audio only, no playback
   if (!winlinkState.snapshot().modes.some((m) => m.available && (m.id === 'ardop' || m.id === 'packet' || ((m.id === 'vara' || m.id === 'varafm') && winlinkCableConfigured())))) return false;
   return !!((winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) || _winlinkRemoteWatchers > 0 || winlinkSessionActive() || _winlinkRetry);
@@ -12498,7 +12502,7 @@ function stopModemBridge(why) {
 /** Open or close the bridge to match demand; call whenever demand may have changed. */
 function winlinkSyncModemBridge() {
   const want = modemBridgeWanted();
-  if (want && modemBridge.state === 'off') startModemBridge({ playback: winlinkSessionActive() });
+  if (want && modemBridge.state === 'off') startModemBridge({ playback: winlinkSessionActive() || aprsRfInFlight() });
   else if (!want && modemBridgeWin && modemBridge.cable.state === 'off') stopModemBridge();
   else if (!want && modemBridge.state !== 'off' && modemBridgeWin) {
     // The cable side still runs (a VARA session): drop only the radio side.
@@ -13361,6 +13365,7 @@ function aprsListenStop(why) {
   const was = aprsListen.on || aprsListen.state !== 'off';
   aprsListen.seq++;
   aprsListen.on = false;
+  aprsRfAbort(`listening stopped: ${why}`); // phase 7: a radio beacon in flight unkeys at once
   aprsStopModem();
   aprsReleaseLane();
   if (APRS_DEV_FRAMES) { aprsListen.state = 'off'; aprsListen.sentence = ''; aprsListenPush(); return; }
@@ -13386,6 +13391,7 @@ function aprsListenStop(why) {
  */
 function aprsListenYieldToWinlink(why) {
   if (!aprsListen.on || aprsListen.state === 'paused' || aprsListen.state === 'refused') return;
+  aprsRfAbort(`the Winlink ${why} needs the radio`); // phase 7
   aprsListen.seq++;
   aprsStopModem();
   const m = aprsReturn.pending();
@@ -13409,6 +13415,7 @@ function aprsListenTick() {
     return;
   }
   if (aprsListen.state !== 'listening') return;
+  if (aprsRfInFlight()) return; // phase 7: the beacon's own Dire Wolf has the modem for its few seconds
   if (autoSstvBlockedByJtcat()) {
     aprsListenStop('FT8 started decoding');
     aprsRefuse({ reason: 'ft8', sentence: AprsListen.SENTENCES.ft8 });
@@ -13442,6 +13449,7 @@ function aprsListenSetBand(band) {
   const moving = aprsListen.on && (aprsListen.state === 'starting' || aprsListen.state === 'listening');
   if (moving && next !== aprsListen.band) {
     aprsLog(`band chip: ${aprsListen.band || '?'} -> ${next}`);
+    aprsRfAbort('the band changed'); // phase 7
     aprsListen.seq++;
     aprsStopModem();
     aprsListenStart().catch((e) => { aprsLog('start failed: ' + e.message); aprsListenStop('start failed'); });
@@ -13641,6 +13649,298 @@ function aprsBeaconSet(patch) {
     aprsBeaconSchedule({ arm: true });
   }
   aprsBeaconPush();
+}
+
+// ── APRS phase 7: ONE manual beacon over the radio (2 m and 30 m) ─────────────
+// "Beacon now (radio)" in the APRS window, next to the internet beacon. The
+// press shows one confirmation line (band, frequency, the rig's power as it
+// reads it now; POTACAT never changes power), and only Send transmits. No
+// timer: every RF beacon is a press.
+// The safer of the two designs, a config SWAP: listening runs the receive-only
+// Dire Wolf (no PTT line at all). For the beacon it is stopped, a transmit
+// Dire Wolf (buildDirewolfAprsTxConfig: PTT through a shim of its own) gets
+// the one frame over AGW, and the receive-only config comes back as soon as
+// the frame is sent, refused or cut. Outside those few seconds no process
+// exists that could key the radio for APRS, and inside them every key-down
+// still has to pass lib/aprs-rf-gate.js mayKey (window open, Listen on, a
+// real callsign, the dial on the APRS frequency, nothing else keyed, this
+// beacon in flight). lib/aprs-rf-beacon.js runs it and holds the cap;
+// lib/tx-limit.js (aprs2m / aprs30m) is the ceiling behind it.
+let aprsRf = null;                 // lib/aprs-rf-beacon.js createRfBeacon, made on first use
+let aprsRfShim = null;             // its own loopback rigctld shim, alive only during a beacon
+let _aprsRfKeyed = false;          // POTACAT holds PTT for the beacon now
+let _aprsRfUnkeyTimer = null;
+let _aprsRfUnkeyDone = null;       // the pending graceful unkey (the lane's 'drained' or the timer ends it)
+let _aprsRfTiming = null;          // TXDELAY / TXTAIL of the beacon in flight
+const APRS_RF_CONFIRM_MS = 30000;  // the confirmation line goes away after this
+const APRS_RF_SHIM_PORTS = [4550, 4559];
+const APRS_RF_SENTENCE_MS = 20000; // a result or refusal line stays this long, then the live state shows again
+const aprsRfUi = { confirm: null, sentence: '', sentenceAt: 0, lastAt: 0, lastPacket: '', lastBand: '' };
+function aprsRfSay(sentence) { aprsRfUi.sentence = sentence || ''; aprsRfUi.sentenceAt = Date.now(); }
+
+function aprsRfInFlight() { return !!(aprsRf && aprsRf.inFlight()); }
+
+/** Something other than an APRS beacon is keying the radio, by name ('' = nothing). */
+function aprsRfOtherTx() {
+  try { if (jtcatAnyTxActive()) return 'JTCAT'; } catch {}
+  if (winlinkTxActive) return 'Winlink';
+  if (remoteServer && remoteServer._pttActive) return 'The phone';
+  return '';
+}
+
+/** The live state lib/aprs-rf-gate.js judges. */
+function aprsRfGateState() {
+  return {
+    remote: isRemoteMode(),
+    windowOpen: !!(aprsWin && !aprsWin.isDestroyed()),
+    listenOn: aprsListen.on,
+    listenState: aprsListen.state,
+    band: aprsListen.band,
+    settingsCall: settings.myCallsign,
+    aprsHz: aprsListen.freq ? aprsListen.freq.hz : 0,
+    dialHz: _currentFreqHz,
+    radioOwner,
+    pttKeyed: !!_remoteTxState && !_aprsRfKeyed,
+    otherTx: aprsRfOtherTx(),
+    swrTripped: !!_swrTripped,
+    modemFound: DirewolfProcess.direwolfSupported(process.platform) && findDirewolf().found,
+    inFlight: aprsRfInFlight(),
+  };
+}
+
+/**
+ * Dev only (never packaged, and only with POTACAT_APRS_DEV_FRAMES): a stand-in
+ * gate answer for screenshots. POTACAT_APRS_DEV_RF=ready shows the button
+ * enabled; listen, dial, call, owner, transmitting or busy shows that
+ * refusal. A dev build never transmits: Send is refused.
+ */
+function aprsRfDevReadiness() {
+  const r = APRS_DEV_FRAMES ? String(process.env.POTACAT_APRS_DEV_RF || '') : '';
+  if (!r) return undefined;
+  const band = aprsListen.band || '30m';
+  const hz = aprsListen.freq ? aprsListen.freq.hz : (band === '2m' ? 144390000 : 10147600);
+  const base = { remote: false, windowOpen: true, listenOn: true, listenState: 'listening', band, settingsCall: settings.myCallsign,
+    aprsHz: hz, dialHz: hz, radioOwner: 'none', pttKeyed: false, otherTx: '', swrTripped: false, modemFound: true, inFlight: false };
+  const tweak = { ready: {}, listen: { listenOn: false }, dial: { dialHz: 7171000 }, call: { settingsCall: 'N0CALL' }, owner: { radioOwner: 'jtcat' }, transmitting: { otherTx: 'SSTV' }, busy: { inFlight: true } }[r];
+  return AprsRfGate.readiness({ ...base, ...(tweak || {}) });
+}
+
+function aprsRfMhz(hz) { const n = Number(hz) || 0; return n >= 1e8 ? (n / 1e6).toFixed(3) : (n / 1e6).toFixed(4); }
+function aprsRfReadiness() {
+  const dev = aprsRfDevReadiness();
+  return dev !== undefined ? dev : AprsRfGate.readiness(aprsRfGateState());
+}
+
+function aprsRfPayload() {
+  const no = aprsRfReadiness();
+  const band = aprsListen.band || '';
+  const c = aprsRfUi.confirm && Date.now() - aprsRfUi.confirm.at < APRS_RF_CONFIRM_MS ? aprsRfUi.confirm : null;
+  if (!c) aprsRfUi.confirm = null;
+  return {
+    allowed: !no, reason: no ? no.reason : '', why: no ? no.sentence : '',
+    band, bandLabel: AprsRfBeacon.BAND_LABEL[band] || '', mode: AprsListen.modeLabel(band),
+    mhz: aprsListen.freq ? aprsRfMhz(aprsListen.freq.hz) : '',
+    powerW: Number(_currentTxPower) > 0 ? Math.round(Number(_currentTxPower)) : 0,
+    confirm: c, phase: aprsRf ? aprsRf.state().phase : 'idle', keyed: _aprsRfKeyed,
+    sentence: aprsRfUi.sentence && Date.now() - aprsRfUi.sentenceAt < APRS_RF_SENTENCE_MS ? aprsRfUi.sentence : '', lastAt: aprsRfUi.lastAt, lastPacket: aprsRfUi.lastPacket, lastBand: aprsRfUi.lastBand,
+  };
+}
+function aprsRfPush() { aprsWinSend('aprs-rf', aprsRfPayload()); }
+
+/** The press: the confirmation line, if the gate would allow a beacon now. Nothing is keyed. */
+function aprsRfAsk() {
+  aprsRfSay('');
+  const no = aprsRfReadiness();
+  if (no) { aprsRfUi.confirm = null; aprsRfSay(no.sentence); aprsLog('beacon over the radio not offered: ' + no.sentence); aprsRfPush(); return; }
+  const band = aprsListen.band || '30m';
+  const hz = aprsListen.freq ? aprsListen.freq.hz : (band === '2m' ? 144390000 : 10147600);
+  const pw = Number(_currentTxPower) > 0 ? Math.round(Number(_currentTxPower)) : 0;
+  aprsRfUi.confirm = { at: Date.now(), band, bandLabel: AprsRfBeacon.BAND_LABEL[band], hz, mhz: aprsRfMhz(hz), mode: AprsListen.modeLabel(band), powerW: pw };
+  aprsRfPush();
+}
+function aprsRfCancel() { aprsRfUi.confirm = null; aprsRfPush(); }
+
+/** The confirmed send. Every condition is judged again here, and again at the key-down. */
+async function aprsRfSend() {
+  const c = aprsRfUi.confirm;
+  aprsRfUi.confirm = null;
+  aprsRfSay('');
+  if (!c || Date.now() - c.at >= APRS_RF_CONFIRM_MS) { aprsRfSay('The confirmation expired. Press Beacon now (radio) again.'); aprsRfPush(); return; }
+  if (APRS_DEV_FRAMES) { aprsRfSay('This test build plays recorded packets and transmits nothing.'); aprsRfPush(); return; }
+  const no = AprsRfGate.readiness(aprsRfGateState());
+  if (no) { aprsRfSay(no.sentence); aprsLog('beacon over the radio not sent: ' + no.sentence); aprsRfPush(); return; }
+  if (aprsListen.band !== c.band || !aprsListen.freq || aprsListen.freq.hz !== c.hz) { aprsRfSay('The band or frequency changed. Press Beacon now (radio) again.'); aprsRfPush(); return; }
+  const st = AprsBeacon.beaconSettings(settings);
+  const pos = aprsBeaconPosition();
+  const b = AprsRfBeacon.buildRfBeacon({ settingsCall: settings.myCallsign, band: c.band, lat: pos ? pos.lat : null, lon: pos ? pos.lon : null, symbol: st.symbol, comment: st.comment, approx: st.approx });
+  if (!b.ok) { aprsRfSay(b.sentence); aprsLog('beacon over the radio not sent: ' + b.sentence); aprsRfPush(); return; }
+  _aprsRfTiming = DirewolfProcess.packetTiming(settings);
+  const drainMs = winlinkIpAudioRoute() ? WINLINK_UNKEY_DRAIN_IP_MS : WINLINK_UNKEY_DRAIN_BRIDGE_MS;
+  const cap = AprsRfBeacon.capFor({ band: c.band, packet: b.packet, txDelayMs: _aprsRfTiming.txDelayMs, txTailMs: _aprsRfTiming.txTailMs, drainMs });
+  aprsLog(`beacon over the radio: ${b.packet} on ${c.mhz} MHz ${c.mode}, rig power ${c.powerW ? c.powerW + ' W' : 'not reported'}, about ${(cap.airMs / 1000).toFixed(1)} s on air, cap ${(cap.capMs / 1000).toFixed(1)} s`);
+  const res = await aprsRfRunner().send({ packet: b, capMs: cap.capMs });
+  if (res.ok) {
+    aprsRfUi.lastAt = Date.now(); aprsRfUi.lastPacket = b.packet; aprsRfUi.lastBand = c.band;
+    sendCatLog(`[APRS beacon] sent over the radio (${c.bandLabel}, ${c.mhz} MHz): ${b.packet}`);
+  } else {
+    aprsRfSay(res.sentence || 'The beacon was not sent.');
+    aprsLog('beacon over the radio not sent: ' + aprsRfUi.sentence);
+  }
+  aprsRfPush();
+}
+
+/** Stop a beacon in flight now; PTT drops at once. Safe to call any time. */
+function aprsRfAbort(why) {
+  aprsRfUi.confirm = null;
+  if (aprsRf && aprsRf.inFlight()) aprsRf.abort(why);
+}
+
+/** POTACAT's key-down for the beacon: the same dispatcher, guards and modem audio road as Winlink packet. */
+function aprsRfKey() {
+  const band = aprsListen.band;
+  const icom = detectRigType() === 'icom' || (getActiveRigModel()?.brand === 'Icom');
+  // 2 m: the packet rule (FM or the radio's FM data mode, set when listening started). 30 m: DIGU as listening set it, never swapped.
+  const pttMode = band === '2m' ? PacketRigMode.keyDownOpts({ icom, resolved: winlinkPacketRigMode('packet') }) : { forceDataMode: false, noDataSwap: true };
+  if (settings.audioSource === 'icom-network') icomNetworkVoiceTx(true, 'APRS');
+  let keyed = false;
+  try { keyed = handleRemotePtt(true, { audio: true, ...pttMode, emission: 'DATA', txKind: AprsRfBeacon.TX_KIND[band] || 'aprs30m' }) !== false; }
+  catch (e) { aprsLog('beacon over the radio: PTT failed: ' + e.message); keyed = false; }
+  if (!keyed) {
+    if (winlinkAudio) winlinkAudio.key(false);
+    if (settings.audioSource === 'icom-network') icomNetworkVoiceTx(false, 'APRS');
+    return false;
+  }
+  _aprsRfKeyed = true;
+  modemBridgeOver(true);
+  const saved = settings.winlinkModemTxGain && Number(settings.winlinkModemTxGain.packet);
+  if (winlinkAudio) winlinkAudio.key(true, { seedGain: saved >= 1 && saved <= 8 ? saved : 1, bridge: !winlinkIpAudioRoute() });
+  return true;
+}
+
+/** PTT off: after the frame's audio has played (Dire Wolf's TXTAIL covers part of it), or at once. */
+function aprsRfUnkey(now) {
+  return new Promise((resolve) => {
+    const off = () => {
+      if (_aprsRfUnkeyTimer) { clearTimeout(_aprsRfUnkeyTimer); _aprsRfUnkeyTimer = null; }
+      const pending = _aprsRfUnkeyDone;
+      _aprsRfUnkeyDone = null;
+      if (_aprsRfKeyed) { _aprsRfKeyed = false; try { handleRemotePtt(false); } catch {} }
+      if (winlinkAudio) winlinkAudio.key(false);
+      modemBridgeOver(false);
+      if (settings.audioSource === 'icom-network') icomNetworkVoiceTx(false, 'APRS');
+      if (pending && pending !== off) pending();
+      resolve();
+    };
+    if (now || !_aprsRfKeyed) { off(); return; }
+    const tail = _aprsRfTiming ? _aprsRfTiming.txTailMs : DirewolfProcess.DIREWOLF_DEFAULTS.txTailMs;
+    _aprsRfUnkeyDone = off;
+    if (winlinkLaneDrains()) {
+      winlinkAudio.endOver({ leaveMs: DirewolfProcess.packetUnkeyLeaveMs(tail) });
+      _aprsRfUnkeyTimer = setTimeout(off, WINLINK_UNKEY_DRAIN_BRIDGE_MS + WINLINK_LANE_DRAIN_BACKSTOP_MS); // the beacon's cap cuts this sooner
+    } else {
+      _aprsRfUnkeyTimer = setTimeout(off, DirewolfProcess.packetUnkeyDrainMs(winlinkIpAudioRoute() ? WINLINK_UNKEY_DRAIN_IP_MS : WINLINK_UNKEY_DRAIN_BRIDGE_MS, tail));
+    }
+  });
+}
+/** The bridge has played the beacon's last sample. */
+function aprsRfLaneDrained() { if (_aprsRfUnkeyDone) _aprsRfUnkeyDone(); }
+
+/** The modem lane with transmit: on a sound-card rig the bridge opens the radio's output for the beacon. */
+async function aprsRfAudioReady() {
+  const lane = await aprsAudioReady();
+  if (!winlinkIpAudioRoute() && !modemBridge.playback) {
+    modemBridgePlayback(true);
+    const ok = await modemBridgeReady(8000);
+    if (!ok || !modemBridge.playback) throw new Error(modemBridge.error || 'The radio\'s sound card did not open for transmit');
+  }
+  return lane;
+}
+
+/** The transmit Dire Wolf for one beacon: its config, its process and an AGW socket to hand it the frame. */
+async function aprsRfStartModem({ shimPort }) {
+  aprsStopModem(); // the receive-only Dire Wolf goes; this one stands in for a few seconds
+  const bin = findDirewolf();
+  if (!bin.found) throw new Error(AprsListen.SENTENCES.noModem);
+  const lane = await aprsRfAudioReady();
+  const p = winlinkPaths();
+  fs.mkdirSync(p.dir, { recursive: true });
+  const confPath = path.join(p.dir, 'direwolf-aprs-tx.conf');
+  const agw = DirewolfProcess.aprsTxAgwPort(_winlinkAgwPort());
+  const t = _aprsRfTiming || DirewolfProcess.packetTiming(settings);
+  const band = aprsListen.band;
+  const source = AprsRfBeacon.buildRfBeacon({ settingsCall: settings.myCallsign, band, lat: 0, lon: 0 }).source;
+  fs.writeFileSync(confPath, DirewolfProcess.buildDirewolfAprsTxConfig({ mycall: source, audioPort: lane.port, agwPort: agw, shimPort, band, txDelayMs: t.txDelayMs, txTailMs: t.txTailMs }));
+  const ac = DirewolfProcess.APRS_CHANNEL_ACCESS[band];
+  aprsLog(`Dire Wolf for the beacon: ${DirewolfProcess.APRS_MODEM_LINES[band]}, PTT only through POTACAT's shim :${shimPort}, TXDELAY ${t.txDelayMs} ms, SLOTTIME ${ac.slottime * 10} ms, PERSIST ${ac.persist}, AGW ${agw}`);
+  const proc = spawn(bin.path, DirewolfProcess.buildDirewolfArgs({ configName: path.basename(confPath) }), { cwd: p.dir, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  let lines = 0;
+  const onLine = (chunk) => { for (const line of chunk.toString().split(/\r?\n/).filter(Boolean)) if (lines++ < 20) aprsLog('direwolf (beacon): ' + line); };
+  proc.stdout.on('data', onLine);
+  proc.stderr.on('data', onLine);
+  let exited = null;
+  const exitCbs = [];
+  proc.on('exit', (code) => { exited = code; for (const cb of exitCbs) cb(code); });
+  proc.on('error', (e) => { aprsLog('Dire Wolf (beacon) did not start: ' + e.message); exited = -1; for (const cb of exitCbs) cb(-1); });
+  const kill = (sock) => { try { if (sock) sock.destroy(); } catch {} try { proc.kill(); } catch {} try { fs.unlinkSync(confPath); } catch {} };
+  const until = Date.now() + 15000;
+  let up = false;
+  while (Date.now() < until && exited === null && !(up = (await DirewolfProcess.probeAgwPort({ port: agw })).ok)) await new Promise((r) => setTimeout(r, 250));
+  if (!up || exited !== null) { kill(null); throw new Error(`Dire Wolf for the beacon did not open AGW ${agw}`); }
+  const sock = _wlNet.connect({ host: '127.0.0.1', port: agw });
+  try { await new Promise((resolve, reject) => { sock.once('connect', resolve); sock.once('error', reject); }); }
+  catch (e) { kill(sock); throw e; }
+  sock.on('error', () => {});
+  return {
+    send: (req) => { try { sock.write(AprsRfBeacon.encodeAgwUnproto(req)); return true; } catch (e) { aprsLog('could not hand the beacon to Dire Wolf: ' + e.message); return false; } },
+    kill: () => kill(sock),
+    onExit: (cb) => { if (exited !== null) cb(exited); else exitCbs.push(cb); },
+  };
+}
+
+/** Its own shim, alive only for the beacon: keys only through the runner (owner 'aprs'), never tunes. */
+async function aprsRfStartShim(onPtt) {
+  aprsRfStopShim();
+  const port = await winlinkFreePort(APRS_RF_SHIM_PORTS);
+  if (!port) throw new Error('no free port 4550-4559 for the beacon\'s radio control shim');
+  const shim = createRigctldServer({
+    getFreqHz: () => _currentFreqHz || 0,
+    getPtt: () => _aprsRfKeyed,
+    setFreqHz: (hz) => { aprsLog(`beacon over the radio: refused a tune to ${(hz / 1e6).toFixed(4)} MHz (the beacon never moves the radio)`); return false; },
+    setPtt: (on) => onPtt(!!on),
+  }, { host: '127.0.0.1', log: aprsLog });
+  aprsRfShim = shim;
+  await shim.listen(port);
+  return port;
+}
+function aprsRfStopShim() { if (aprsRfShim) { const s = aprsRfShim; aprsRfShim = null; try { s.close(); } catch {} } }
+
+/** Listening comes back on the receive-only config; the transmit output closes again. */
+function aprsRfRestoreListen() {
+  if (!winlinkIpAudioRoute() && modemBridge.playback && !winlinkSessionActive()) { try { modemBridgePlayback(false); } catch {} }
+  if (aprsListen.on && aprsListen.state === 'listening' && !aprsListen.proc) {
+    const seq = ++aprsListen.seq;
+    aprsSpawnDirewolf(seq).catch((e) => aprsLog('listening did not restart after the beacon: ' + e.message));
+  }
+  try { winlinkSyncModemBridge(); } catch {}
+}
+
+function aprsRfRunner() {
+  if (aprsRf) return aprsRf;
+  aprsRf = AprsRfBeacon.createRfBeacon({
+    now: Date.now, setTimer: setTimeout, clearTimer: clearTimeout,
+    log: (s) => aprsLog('beacon over the radio: ' + s),
+    begin: () => acquireRadio('aprs'),
+    end: () => { releaseRadio('aprs'); },
+    startShim: aprsRfStartShim,
+    stopShim: aprsRfStopShim,
+    startModem: aprsRfStartModem,
+    restoreListen: aprsRfRestoreListen,
+    mayKey: () => AprsRfGate.mayKey(aprsRfGateState()),
+    key: aprsRfKey,
+    unkey: ({ now }) => aprsRfUnkey(now),
+    onState: () => aprsRfPush(),
+  });
+  return aprsRf;
 }
 
 function killArdop() {
@@ -31611,6 +31911,7 @@ function txLimitTrip(t) {
   try { sstvHaltTxNow(); } catch {}
   try { if (win && !win.isDestroyed()) win.webContents.send('stop-voice-macro'); } catch {}
   try { if (mercuryClient) mercuryClient.abort(); } catch {}
+  try { aprsRfAbort('the stuck-TX limit tripped'); } catch {}
   try { if (typeof freedvEngine !== 'undefined' && freedvEngine) freedvEngine.setTxEnabled(false); } catch {}
   try { if (remoteServer && remoteServer._pttActive) remoteServer.forcePttRelease(); } catch {}
   // PTT: the dispatcher's release, then each route directly.
@@ -46077,6 +46378,7 @@ function cloudShackNotice(text, kind) {
     aprsWin.loadFile(path.join(__dirname, 'renderer', 'aprs-popout.html'), { query: themeQuery() });
     aprsWin.on('closed', () => {
       // APRS-on-idle listens with no window: closing it leaves that session running.
+      aprsRfAbort('the APRS window closed'); // phase 7: a radio beacon unkeys at once, whatever owns listening
       if (!(autoIdleAprsActive && autoIdleAprsOwnsListen)) aprsListenStop('the APRS window closed');
       aprsStopFeed(); aprsWin = null;
       aprsBeaconStop(); // phase 5: the beacon timer runs only while the window is open
@@ -46099,6 +46401,11 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('aprs-beacon-get', () => aprsBeaconPush());
   ipcMain.on('aprs-beacon-now', () => { aprsBeaconSend('now').catch((e) => aprsLog('beacon failed: ' + e.message)); });
   ipcMain.on('aprs-beacon-set', (_e, patch) => aprsBeaconSet(patch && typeof patch === 'object' ? patch : {}));
+  // Phase 7: one manual beacon over the radio. Ask shows the confirmation line; Send sends; nothing else keys.
+  ipcMain.on('aprs-rf-get', () => aprsRfPush());
+  ipcMain.on('aprs-rf-ask', () => aprsRfAsk());
+  ipcMain.on('aprs-rf-cancel', () => aprsRfCancel());
+  ipcMain.on('aprs-rf-send', () => { aprsRfSend().catch((e) => aprsLog('beacon over the radio failed: ' + e.message)); });
   // APRS phase 2: the "Listen on my radio" switch (receive only).
   // The operator at the switch is using the radio: an APRS idle session ends first.
   ipcMain.on('aprs-listen-set', (_e, on) => { markUserActive(); aprsListenSet(!!on); });

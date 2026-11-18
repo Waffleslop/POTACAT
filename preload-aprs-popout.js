@@ -34,4 +34,12 @@ contextBridge.exposeInMainWorld('api', {
   beaconSet: (patch) => ipcRenderer.send('aprs-beacon-set', patch || {}),
   // { settings, call, grid, position: {lat, lon, source: 'map'|'grid'} | null, lastAt, lastPacket, sentence, backAt, sending, timerOn, nextAt }
   onBeacon: (cb) => ipcRenderer.on('aprs-beacon', (_e, s) => cb(s)),
+  // Phase 7: ONE manual beacon over the radio. rfAsk shows the confirmation line
+  // (nothing is keyed); only rfSend transmits; rfCancel drops the line.
+  rfGet: () => ipcRenderer.send('aprs-rf-get'),
+  rfAsk: () => ipcRenderer.send('aprs-rf-ask'),
+  rfSend: () => ipcRenderer.send('aprs-rf-send'),
+  rfCancel: () => ipcRenderer.send('aprs-rf-cancel'),
+  // { allowed, reason, why, band, bandLabel, mode, mhz, powerW, confirm, phase, keyed, sentence, lastAt, lastPacket, lastBand }
+  onRf: (cb) => ipcRenderer.on('aprs-rf', (_e, s) => cb(s)),
 });
