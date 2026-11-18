@@ -211,6 +211,9 @@ const TESTS = [
   'test/hunted-park-test.js',
   'test/nfer-refs-test.js', // an n-fer's other parks, read from the activator's own spot comment (#353)
   'test/js8-audio-feed-test.js',
+  'test/aprs-parser-test.js', // APRS phase 1: TNC2 lines (positions, compressed, Mic-E, objects, items, status, messages, weather, third party)
+  'test/aprs-is-feed-test.js', // APRS phase 1: read-only APRS-IS feed (login -1, range filter, framing, keep-alive, backoff, stop)
+  'test/aprs-stations-test.js', // APRS phase 1: the window's station list (distance, bearing, 60-minute age-out, sort, search)
   'test/log-comment-test.js',
   'test/raw-cat-command-test.js',
   'test/rigctld-stderr-test.js',

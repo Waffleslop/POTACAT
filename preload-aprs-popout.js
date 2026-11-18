@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Casey Stanton
+// Preload for the APRS window (phase 1, read-only): window chrome, the feed's
+// three channels, the range, and opening QRZ in the browser.
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('api', {
+  platform: process.platform,
+  minimize: () => ipcRenderer.send('aprs-popout-minimize'),
+  maximize: () => ipcRenderer.send('aprs-popout-maximize'),
+  close: () => ipcRenderer.send('aprs-popout-close'),
+  // { home: {lat, lon, grid, call} | null, distUnit: 'mi'|'km', km }
+  onInit: (cb) => ipcRenderer.on('aprs-init', (_e, d) => cb(d)),
+  // { state: 'connecting'|'connected'|'waiting'|'refused'|'stopped'|'no-grid', server, call, anonymous, km, retryInMs }
+  onStatus: (cb) => ipcRenderer.on('aprs-status', (_e, s) => cb(s)),
+  // [parsed packet, ...] from lib/aprs-parser.js, at most every 500 ms
+  onPackets: (cb) => ipcRenderer.on('aprs-packets', (_e, p) => cb(p)),
+  setRange: (km) => ipcRenderer.send('aprs-set-range', km),
+  openExternal: (url) => ipcRenderer.send('open-external', url),
+  ready: () => ipcRenderer.send('aprs-ready'),
+});

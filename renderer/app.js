@@ -15129,6 +15129,7 @@ bindClick(document.getElementById('view-jtty-btn'), () => {
 });
 bindClick(document.getElementById('view-mercury-btn'), () => { if (window.api.mercuryPopoutOpen) window.api.mercuryPopoutOpen(); });
 bindClick(document.getElementById('view-winlink-btn'), () => { if (window.api.winlinkPopoutOpen) window.api.winlinkPopoutOpen(); });
+bindClick(document.getElementById('view-aprs-btn'), () => { if (window.api.aprsPopoutOpen) window.api.aprsPopoutOpen(); });
 // Unread Winlink mail on the More menu entry (main pushes winlink-state).
 if (window.api.onWinlinkState) window.api.onWinlinkState((st) => {
   const b = document.getElementById('winlink-unread-badge');
