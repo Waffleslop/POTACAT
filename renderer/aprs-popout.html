@@ -33,19 +33,14 @@
   <div class="aprs-main">
     <div class="aprs-map-wrap">
       <div id="aprs-map"></div>
-      <div class="aprs-legend">
-        <span><i class="aprs-key aprs-key-station"></i>Station</span>
-        <span><i class="aprs-key aprs-key-vehicle"></i>Moving</span>
-        <span><i class="aprs-key aprs-key-weather"></i>Weather</span>
-        <span><i class="aprs-key aprs-key-object"></i>Object</span>
-        <span><i class="aprs-key aprs-key-home"></i>You</span>
-      </div>
+      <div class="aprs-legend" id="aprs-legend"></div>
       <div class="aprs-empty hidden" id="aprs-empty"></div>
     </div>
     <div class="aprs-side">
       <div class="aprs-count" id="aprs-count">No stations yet</div>
       <div class="aprs-table-wrap" id="aprs-table-wrap">
         <table class="aprs-table">
+          <colgroup><col class="c-sym"><col class="c-call"><col class="c-dist"><col class="c-brg"><col class="c-age"><col></colgroup>
           <thead>
             <tr>
               <th data-sort="symbol" class="col-sym" title="Sort by kind"></th>
@@ -65,7 +60,10 @@
 
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>
   <script src="../lib/aprs-parser.js"></script>
+  <script src="../lib/aprs-symbols.js"></script>
   <script src="../lib/aprs-stations.js"></script>
+  <script src="../lib/aprs-map.js"></script>
+  <script src="aprs-icons.js"></script>
   <script src="aprs-popout.js"></script>
 </body>
 </html>

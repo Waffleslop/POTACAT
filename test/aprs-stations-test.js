@@ -43,11 +43,11 @@ test('age wording', () => {
   assert.strictEqual(S.formatAge(120 * 60000), '2 h');
 });
 
-test('a position makes a row with distance, bearing and symbol class', () => {
+test('a position makes a row with distance, bearing and icon', () => {
   const s = store();
   const r = s.add(P.parse('W1AW>APRS:=4142.00N/07243.00W-Newington'));
   assert.strictEqual(r.call, 'W1AW');
-  assert.strictEqual(r.cls, 'station');
+  assert.strictEqual(r.cls, 'house');
   assert.ok(r.distanceKm > 20 && r.distanceKm < 40);
   assert.strictEqual(s.size, 1);
   s.add(P.parse('W1AW>APRS:=4142.00N/07243.00W-Newington'));
@@ -72,7 +72,7 @@ test('objects are keyed by name; a killed object leaves at once', () => {
   s.add(P.parse('N2DEF>APRS:;LEADER   *092346z4131.00N/07230.00W>'));
   assert.strictEqual(s.size, 1);
   const r = s.get('obj:LEADER');
-  assert.strictEqual(r.cls, 'object');
+  assert.strictEqual(r.cls, 'car', 'an object is drawn by its own symbol');
   assert.strictEqual(r.label, 'LEADER');
   assert.strictEqual(r.call, 'N2DEF', 'the latest sender');
   s.add(P.parse('N2DEF>APRS:;LEADER   _092347z4131.00N/07230.00W>'));
@@ -111,10 +111,25 @@ test('dual mode: window.AprsStations beside window.AprsParser', () => {
   const sandbox = {};
   sandbox.self = sandbox;
   vm.runInNewContext(fs.readFileSync(require.resolve('../lib/aprs-parser'), 'utf8'), sandbox);
+  vm.runInNewContext(fs.readFileSync(require.resolve('../lib/aprs-symbols'), 'utf8'), sandbox);
   vm.runInNewContext(fs.readFileSync(require.resolve('../lib/aprs-stations'), 'utf8'), sandbox);
   const st = sandbox.AprsStations.createStore({ home: HOME });
   const r = st.add(sandbox.AprsParser.parse('W1AW>APRS:=4142.00N/07243.00W>'));
-  assert.strictEqual(r.cls, 'vehicle');
+  assert.strictEqual(r.cls, 'car');
+});
+
+test('visibleRange: only the rows in view, plus overscan, with the space around them', () => {
+  // 3000 rows of 32 px in a 640 px view scrolled to row 1000.
+  const v = S.visibleRange(32000, 640, 32, 3000, 5);
+  assert.strictEqual(v.start, 995);
+  assert.strictEqual(v.end, 1025);
+  assert.strictEqual(v.top, 995 * 32);
+  assert.strictEqual(v.bottom, (3000 - 1025) * 32);
+  assert.strictEqual(v.top + (v.end - v.start) * 32 + v.bottom, 3000 * 32, 'the scroll height never changes');
+  assert.deepStrictEqual(S.visibleRange(0, 640, 32, 10, 5), { start: 0, end: 10, top: 0, bottom: 0 }, 'short list: all of it');
+  assert.deepStrictEqual(S.visibleRange(0, 640, 32, 0, 5), { start: 0, end: 0, top: 0, bottom: 0 });
+  const past = S.visibleRange(999999, 640, 32, 100, 5);
+  assert.ok(past.start <= past.end && past.end === 100, 'scrolled past the end stays in range');
 });
 
 test('this test is in the list CI runs', () => {

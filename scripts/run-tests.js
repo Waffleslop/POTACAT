@@ -213,7 +213,9 @@ const TESTS = [
   'test/js8-audio-feed-test.js',
   'test/aprs-parser-test.js', // APRS phase 1: TNC2 lines (positions, compressed, Mic-E, objects, items, status, messages, weather, third party)
   'test/aprs-is-feed-test.js', // APRS phase 1: read-only APRS-IS feed (login -1, range filter, framing, keep-alive, backoff, stop)
-  'test/aprs-stations-test.js', // APRS phase 1: the window's station list (distance, bearing, 60-minute age-out, sort, search)
+  'test/aprs-stations-test.js', // APRS phase 1: the window's station list (distance, bearing, 60-minute age-out, sort, search, list window)
+  'test/aprs-symbols-test.js', // APRS phase 1: symbol table and code to the nine map icons
+  'test/aprs-map-test.js', // APRS phase 1: map clusterer, marker glide and fade
   'test/log-comment-test.js',
   'test/raw-cat-command-test.js',
   'test/rigctld-stderr-test.js',
