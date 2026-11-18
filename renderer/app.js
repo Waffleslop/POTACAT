@@ -11382,9 +11382,7 @@ function getFiltered() {
     // on just because it's pinned. (User report 2026-06: "Band = 6M, why does a
     // 20m CW spot show?" — it was the radio-freq-matched pin bypassing the band
     // filter.) The pin clears when the user clicks a different spot or logs.
-    const isPinned = !!(lastTunedSpot &&
-      s.callsign === lastTunedSpot.callsign &&
-      s.frequency === lastTunedSpot.frequency);
+    const isPinned = !!lastTunedSpot && SpotRow.sameSpotRow(s, lastTunedSpot);
     if (isPinned) {
       if (bands && !bands.has(s.band)) return false;
       if (!modeMatches(s.mode, modes)) return false;
@@ -13083,7 +13081,7 @@ document.addEventListener('keydown', (e) => {
     // Find current index
     let idx = -1;
     if (lastTunedSpot) {
-      idx = filtered.findIndex(s => s.callsign === lastTunedSpot.callsign && s.frequency === lastTunedSpot.frequency);
+      idx = filtered.findIndex(s => SpotRow.sameSpotRow(s, lastTunedSpot));
     }
     const step = e.key === 'ArrowDown' ? 1 : -1;
     // No current selection: anchor just outside the list so the first step
@@ -15517,8 +15515,7 @@ function render() {
       //                 always exactly one row.
       //   .on-freq    — everything else within 0.5 kHz of the dial: quiet
       //                 blue left-edge + faint tint (group signal, not alarm).
-      const isClickedSpot = lastTunedSpot && s.callsign === lastTunedSpot.callsign &&
-        s.frequency === lastTunedSpot.frequency;
+      const isClickedSpot = SpotRow.sameSpotRow(s, lastTunedSpot);
       if (isClickedSpot) {
         tr.classList.add('tuned-spot');
       } else if (radioFreqKhzExact !== null && Math.abs(parseFloat(s.frequency) - radioFreqKhzExact) < 0.5) {
@@ -16024,7 +16021,7 @@ function render() {
         if (td) tr.appendChild(td);
       }
 
-      tr.dataset.spotKey = (s.callsign || '') + '|' + s.frequency;
+      tr.dataset.spotKey = SpotRow.spotRowKey(s);
       tbody.appendChild(tr);
     }
     fitNewParkPills();
@@ -16718,9 +16715,7 @@ logSaveBtn.addEventListener('click', async () => {
       // doesn't disappear when "hide worked" removes the logged station
       if (lastTunedSpot && hideWorked) {
         const freq = parseFloat(lastTunedSpot.frequency);
-        const filtered = getFiltered().filter(s =>
-          s.callsign !== lastTunedSpot.callsign || s.frequency !== lastTunedSpot.frequency
-        );
+        const filtered = getFiltered().filter(s => !SpotRow.sameSpotRow(s, lastTunedSpot));
         if (filtered.length > 0) {
           // Find nearest spot by frequency (prefer next higher, then lower)
           const sorted = [...filtered].sort((a, b) => parseFloat(a.frequency) - parseFloat(b.frequency));
