@@ -45951,7 +45951,8 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('aprs-listen-set', (_e, on) => { markUserActive(); aprsListenSet(!!on); });
   // The bar asks once its listener is attached: the push after 'aprs-ready' can
   // arrive while its script is still loading (the 8600M's empty bar, 2026-11-18).
-  ipcMain.on('aprs-listen-get', () => aprsListenPush());
+  // The iGate mark answered 'aprs-ready' the same way, so it comes too.
+  ipcMain.on('aprs-listen-get', () => { aprsListenPush(); aprsIgatePush(); });
   // APRS phase 3: the band chips (2 m, 30 m).
   ipcMain.on('aprs-listen-band', (_e, band) => { markUserActive(); aprsListenSetBand(String(band || '')); });
   // Phase 4: the iGate's marks (Settings asks when it opens).

@@ -209,7 +209,7 @@ test('the place before listening is read for the route (the Flex slice, not the 
 test('the window asks for the listen state once its listener is attached (the first push can arrive before it)', () => {
   const pre = fs.readFileSync(path.join(__dirname, '..', 'preload-aprs-popout.js'), 'utf8');
   assert.ok(/listenGet:\s*\(\)\s*=>\s*ipcRenderer\.send\('aprs-listen-get'\)/.test(pre));
-  assert.ok(/ipcMain\.on\('aprs-listen-get',\s*\(\)\s*=>\s*aprsListenPush\(\)\)/.test(main));
+  assert.ok(/ipcMain\.on\('aprs-listen-get',\s*\(\)\s*=>\s*\{?\s*aprsListenPush\(\)/.test(main));
 });
 
 // Casey 2026-11-19: "stop the modem audio process when APRS stops", unless
