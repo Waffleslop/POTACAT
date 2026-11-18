@@ -22,4 +22,6 @@ contextBridge.exposeInMainWorld('api', {
   // { on, state: 'off'|'starting'|'listening'|'paused'|'refused', sentence, band, mhz, heard, lastAt, note }
   listenSet: (on) => ipcRenderer.send('aprs-listen-set', !!on),
   onListen: (cb) => ipcRenderer.on('aprs-listen', (_e, s) => cb(s)),
+  // Asked once the bar listens; main answers with one 'aprs-listen' push.
+  listenGet: () => ipcRenderer.send('aprs-listen-get'),
 });

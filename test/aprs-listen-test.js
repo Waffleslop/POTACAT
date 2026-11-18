@@ -107,7 +107,7 @@ const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').repl
 const fnBody = (name) => {
   const i = main.indexOf('function ' + name + '(');
   assert.ok(i >= 0, name + ' not found');
-  const open = main.indexOf('{', i);
+  const open = main.indexOf(') {', i) + 2; // past a destructured parameter's braces
   let depth = 0;
   for (let k = open; k < main.length; k++) {
     if (main[k] === '{') depth++;
@@ -157,6 +157,41 @@ test('the radio\'s first readback runs the return check (crash recovery)', () =>
 
 test('the return marker is a machine setting (GLOBAL_KEYS), not a profile one', () => {
   assert.ok(/^\s*'aprsListenReturn',/m.test(main));
+});
+
+// FLEX-8600M on 2026-11-18: Flex Direct up, "Connect your radio to listen to
+// APRS." The start, the return and the mode-only steps ask the one route
+// (lib/radio-tune-route.js), never `cat && cat.connected`.
+test('listening starts when tuneRadio can reach the radio (Flex Direct, TCI, CAT), not only on CAT', () => {
+  const b = fnBody('aprsListenStart');
+  assert.ok(/catConnected:\s*RadioTuneRoute\.canTune\(|catConnected:\s*route\s*!==\s*''|catConnected:\s*!!route/.test(b), 'the gate is the shared route');
+  assert.ok(!/catConnected:\s*!!\(cat && cat\.connected\)/.test(b), 'not cat.connected');
+  assert.ok(/radioTuneRoute\(\)/.test(b));
+});
+
+test('the radio goes back on stop over the same route (Flex Direct included)', () => {
+  const b = fnBody('aprsListenStop');
+  assert.ok(!/was && cat && cat\.connected/.test(b), 'the return is not gated on cat.connected');
+  assert.ok(/radioTuneRoute\(\)/.test(b) && /aprsReturn\.end\(/.test(b));
+});
+
+test('a mode sent on its own goes over CAT only, never the Flex shim', () => {
+  const b = fnBody('aprsListenStart');
+  assert.ok(/RadioTuneRoute\.modeOverCat\(route\)[^\n]*cat\.setModeOnly/.test(b), 'data mode step');
+  const ret = main.slice(main.indexOf('const aprsReturn = AprsRadioReturn.createRadioReturn('), main.indexOf('function aprsLog('));
+  assert.ok(/RadioTuneRoute\.modeOverCat\(radioTuneRoute\(\)\)/.test(ret), 'mode by name after the return');
+  assert.ok(!/cat && cat\.connected && cat\.setModeOnly/.test(ret));
+});
+
+test('the place before listening is read for the route (the Flex slice, not the CAT shim)', () => {
+  const b = fnBody('aprsListenStart');
+  assert.ok(/RadioTuneRoute\.placeBefore\(\{\s*route/.test(b));
+});
+
+test('the window asks for the listen state once its listener is attached (the first push can arrive before it)', () => {
+  const pre = fs.readFileSync(path.join(__dirname, '..', 'preload-aprs-popout.js'), 'utf8');
+  assert.ok(/listenGet:\s*\(\)\s*=>\s*ipcRenderer\.send\('aprs-listen-get'\)/.test(pre));
+  assert.ok(/ipcMain\.on\('aprs-listen-get',\s*\(\)\s*=>\s*aprsListenPush\(\)\)/.test(main));
 });
 
 test('the dev-only frame feed never runs in a packaged build', () => {
