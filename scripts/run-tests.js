@@ -48,6 +48,7 @@ const TESTS = [
   'test/smartsdr-dax-tx-claim-test.js',
   'test/vfo-ptt-race-test.js',
   'test/park-field-length-test.js', // #507: multi-park fields fit six refs
+  'test/mic-label-probe-test.js', // #743: device-name probes open the mic with voice processing off
   'test/vfo-ptt-mic-test.js', // #170: every VFO PTT press logs the mic it opened, the output and the level
   'test/vfo-audio-power-cycle-test.js', // #247: VFO window radio audio reattaches after a radio power cycle
   'test/vfo-monitor-tx-mute-test.js', // #713: VFO window radio monitor is silent while transmitting
