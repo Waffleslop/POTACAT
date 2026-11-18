@@ -77,6 +77,36 @@ test('garbage never throws', () => {
   assert.strictEqual(RF.packet({ datakind: 'U', data: Buffer.alloc(0) }, P.parse), null);
 });
 
+// On air 2026-11-18, Dire Wolf's monitor text for VE2SIL-1's frames ended
+// "\r\r\0" (the packet's own trailing CR plus Dire Wolf's), and one CR stayed
+// on the line, so the iGate refused all of them as bad data. The frame endings
+// seen: "\r\r\0" (real, VE2SIL-1), "\r\0" (the recorded fixture), "\r\n".
+// The head and info are the VE2SIL-1 frame from that night.
+const Igate = require('../lib/aprs-igate');
+const VE2SIL = ' 1:Fm VE2SIL-1 To APU25N <UI pid=F0 Len=26 PF=0 >[22:46:49]\r<IGATE,MSG_CNT=1,LOC_CNT=3';
+for (const [name, end] of [['CR CR NUL (Dire Wolf, VE2SIL-1 on air)', '\r\r\0'], ['CR NUL', '\r\0'], ['CR LF', '\r\n']]) {
+  test('a frame ending ' + name + ': the same line, gated, parsed, listed', () => {
+    const f = { datakind: 'U', data: Buffer.from(VE2SIL + end, 'latin1') };
+    const h = RF.fromMonitorFrame(f);
+    assert.strictEqual(h.line, 'VE2SIL-1>APU25N:<IGATE,MSG_CNT=1,LOC_CNT=3');
+    const g = Igate.gateLine(h.line, 'K3ABC-10');
+    assert.strictEqual(g.ok, true, JSON.stringify(g));
+    assert.strictEqual(g.out, 'VE2SIL-1>APU25N,' + Igate.Q_CONSTRUCT + ',K3ABC-10:<IGATE,MSG_CNT=1,LOC_CNT=3');
+    const pk = RF.packet(f, P.parse);
+    assert.ok(pk && pk.from === 'VE2SIL-1', 'the parser reads it');
+  });
+}
+
+test('only the frame ending goes: spaces and other bytes at the end of the payload stay', () => {
+  const pos = ' 1:Fm VE2SIL-1 To APU25N <UI pid=F0 Len=45 PF=0 >[22:46:18]\r=4530.50N/07347.78W-aprs 10.1476  ';
+  for (const end of ['\r\r\0', '\r\0', '\r\n', '\0']) {
+    const h = RF.fromMonitorFrame({ datakind: 'U', data: Buffer.from(pos + end, 'latin1') });
+    assert.strictEqual(h.line, 'VE2SIL-1>APU25N:=4530.50N/07347.78W-aprs 10.1476  ', JSON.stringify(end));
+  }
+  // A frame whose info is nothing but line ends is no packet.
+  assert.strictEqual(RF.fromMonitorFrame({ datakind: 'U', data: Buffer.from(' 1:Fm W1AW To APRS <UI pid=F0 Len=1 PF=0 >[00:00:01]\r\r\r\0', 'latin1') }), null);
+});
+
 test('the via rule on TNC2 paths', () => {
   assert.deepStrictEqual(RF.viaOf([]), { kind: 'direct', digi: '' });
   assert.deepStrictEqual(RF.viaOf(['WIDE1-1', 'WIDE2-1']), { kind: 'direct', digi: '' });
