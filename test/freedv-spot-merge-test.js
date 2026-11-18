@@ -75,7 +75,8 @@ t('row identity includes the mode: FREEDV and FREEDV-RADEV1 rows are different r
 });
 t('main.js merges the feeds before the cross-source dedupe', () => {
   const main = read('main.js');
-  assert.ok(/dedupeCrossSource\(FreedvSpotMerge\.mergeFreedvSpots\(raw\)\)/.test(main));
+  assert.ok(/const raw = FreedvSpotMerge\.mergeFreedvSpots\(\[[^\]]*\.\.\.pskrSpots, \.\.\.freedvReporterSpots\]\);/.test(main));
+  assert.ok(/cwSpeeds\.fillSpots\(dedupeCrossSource\(raw\)\)/.test(main));
 });
 t("main.js handles the FreeDV Reporter 'remove' event", () => {
   const main = read('main.js');

@@ -33774,11 +33774,11 @@ function stampParkEntityZones(spots) {
 function sendMergedSpots() {
   if (!win || win.isDestroyed()) return;
   const netSpots = getActiveNetSpots();
-  const raw = [...netSpots, ...lastPotaSotaSpots, ...clusterSpots, ...cwSpots, ...rbnWatchSpots, ...pskrSpots, ...freedvReporterSpots];
+  // A PSKReporter FreeDV spot folds into the FreeDV Reporter one (#742).
+  const raw = FreedvSpotMerge.mergeFreedvSpots([...netSpots, ...lastPotaSotaSpots, ...clusterSpots, ...cwSpots, ...rbnWatchSpots, ...pskrSpots, ...freedvReporterSpots]);
   // A CW spot with no speed (POTA/SOTA/WWFF) takes the speed a skimmer
   // measured on the same station and frequency in the last 15 minutes.
-  // A PSKReporter FreeDV spot folds into the FreeDV Reporter one (#742).
-  const merged = cwSpeeds.fillSpots(dedupeCrossSource(FreedvSpotMerge.mergeFreedvSpots(raw)));
+  const merged = cwSpeeds.fillSpots(dedupeCrossSource(raw));
   // CQ/ITU zones on every spot, every source (optional columns/fields on the
   // desktop table and ECHOCAT cards — LZ3AW item 30).
   CallZones.stampSpotZones(merged, callZonesOf);
