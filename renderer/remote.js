@@ -7325,7 +7325,7 @@
     const igRow = document.getElementById('aprs-igate-row');
     igRow.classList.toggle('hidden', st.mayIgate === false);
     document.getElementById('aprs-igate').checked = !!ig.on;
-    document.getElementById('aprs-igate-line').textContent = ig.on ? ((ig.active ? 'Reporting as ' + (ig.call || '') : 'On when the radio listens') + ' · ' + (ig.gated || 0) + ' sent') : '';
+    document.getElementById('aprs-igate-line').textContent = ig.on ? (ig.paused ? ig.paused : (ig.active ? 'Reporting as ' + (ig.call || '') : 'On when the radio listens') + ' · ' + (ig.gated || 0) + ' sent') : '';
     const bRow = document.getElementById('aprs-beacon-row');
     bRow.classList.toggle('hidden', st.mayBeacon === false);
     const bb = document.getElementById('aprs-beacon');

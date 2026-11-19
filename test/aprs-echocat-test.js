@@ -317,6 +317,13 @@ test('state changes inside 500 ms are one aprs-state, with the window\'s own sen
   for (const k of ['on', 'state', 'band', 'bands', 'mhz', 'heard', 'lastAt', 'sentence']) assert.ok(k in s.listen, 'listen.' + k);
   for (const k of ['call', 'lastAt', 'sending', 'sentence', 'backAt']) assert.ok(k in s.beacon, 'beacon.' + k);
 });
+test('the iGate paused by a Guest Pass reaches the device in its own words (Casey 2026-11-19)', () => {
+  const s = E.buildState({ igate: { on: true, active: false, paused: 'iGate paused: a guest has the radio' } });
+  assert.strictEqual(s.igate.paused, 'iGate paused: a guest has the radio');
+  assert.strictEqual(E.buildState({ igate: { on: true } }).igate.paused, '');
+  const remote = require('fs').readFileSync(require('path').join(__dirname, '..', 'renderer', 'remote.js'), 'utf8');
+  assert.ok(/ig\.paused \? ig\.paused :/.test(remote), 'ECHOCAT Web shows it on the iGate line');
+});
 test('a beacon refusal is the refusal when listening is fine', () => {
   const s = E.buildState({ listen: { on: false, state: 'off' }, beacon: { sentence: 'Set your callsign in Settings to beacon.' } });
   assert.strictEqual(s.refusal, 'Set your callsign in Settings to beacon.');

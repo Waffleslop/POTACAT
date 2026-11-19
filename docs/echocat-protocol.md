@@ -660,7 +660,7 @@ beacon (phase 7) is not on the wire.
   listen: { on, state: 'off'|'starting'|'listening'|'paused'|'refused', band, bands: ['2m','30m'],
             modeLabel, mhz, heard, lastAt, sentence, note },
   igate:  { on, active, call, link: 'stopped'|'connecting'|'connected'|'verified'|'unverified'|'waiting',
-            gated, lastAt, lastFrom, sentence },
+            gated, lastAt, lastFrom, sentence, paused },   // paused: "iGate paused: a guest has the radio" while a Guest Pass runs, else ''
   beacon: { call, lastAt, lastPacket, sending, sentence, backAt, timerOn, nextAt,
             position: { lat, lon, source: 'map'|'grid', approx } | null },   // never more exact than the packet: whole minutes unless approx is false
   refusal: string,      // the one sentence to show: listen (refused or paused), else beacon, else iGate; '' = none
