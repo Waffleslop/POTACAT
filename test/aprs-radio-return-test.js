@@ -153,6 +153,24 @@ test('drop() forgets the marker without tuning (Winlink took the radio and owns 
   assert.deepStrictEqual(w.events, ['clear']);
 });
 
+test('stopped while the tune to APRS is still in flight (dial still home): the return is sent and the marker kept', () => {
+  // Switch on, then off (or the window closed, or quit) inside the 4 s the
+  // start waits for the readback: the dial still reads home, but the tune to
+  // 144.390 is already on its way. Treating that as "moved by the operator"
+  // cleared the marker and left the radio on 144.390 when the tune landed.
+  const w = world();
+  const c = w.make();
+  c.begin({ ...HOME, listenHz: APRS }, () => {});
+  w.events.length = 0;
+  assert.strictEqual(c.end(HOME.freqHz), 'returned');
+  assert.deepStrictEqual(w.events, ['save:returning', 'tune:14074000:DIGU']);
+  assert.ok(w.disk, 'the marker stays until the radio confirms');
+  // The late tune lands on 144.390: the next readback sends the radio home again.
+  assert.strictEqual(c.onReadback(APRS, { rigId: 'rig-1' }), 'returned');
+  assert.strictEqual(c.onReadback(HOME.freqHz, { rigId: 'rig-1' }), 'confirmed');
+  assert.strictEqual(w.disk, null);
+});
+
 test('a marker with no frequency is never acted on', () => {
   const w = world();
   w.disk = { state: 'listening', freqHz: 0, mode: '', listenHz: APRS, rigId: 'rig-1' };
