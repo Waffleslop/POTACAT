@@ -59,6 +59,7 @@ const TESTS = [
   'test/flex-route-test.js', // the route choice on a Flex: through POTACAT or FlexRadio SmartLink (states, refusals, 60 s rule)
   'test/flex-gui-watch-test.js', // the non-GUI watch of a Flex's GUI clients while ECHOCAT has the radio
   'test/flex-route-wiring-test.js', // flex-release / flex-reclaim / flex-route wired through smartsdr, remote-server and main
+  'test/flex-transport-test.js', // how POTACAT reaches a Flex: LAN lines unchanged, injected (SmartLink) transport, WAN udp_register, transmit band lines
   'test/bundle-mac-deps-test.js',
   'test/rig-controls-test.js',
   'test/rig-gain-steps-test.js',
