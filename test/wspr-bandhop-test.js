@@ -61,5 +61,89 @@ check('negative slot indices are safe', () => {
   assert.ok(BANDS.includes(B.bandForSlot(-7, BANDS)));
 });
 
+// ---- #766: never hop while our own beacon transmits ---------------------
+// The decode that drives the hop finishes about 15 s into the next slot. When
+// that slot is ours to transmit, a hop retuned the radio mid-frame.
+// runHop mirrors main.js maybeHopBand: tuneRadio only on a 'hop' decision.
+function runHop(state, { slot, engine, scheduler, nowMs, currentBand, bands = ['40m', '20m'], dwell = 1 }) {
+  const d = B.decideHop({
+    slot, bands, dwell,
+    txActive: !!(engine && engine._txActive),
+    txSlot: !!(scheduler && scheduler.isTxSlot(nowMs)),
+    pending: state.pending,
+    currentBand,
+  });
+  state.pending = d.pending;
+  if (d.action === 'hop') state.tuned.push(d.band);
+  if (d.action === 'hold') state.held.push(d.reason);
+  return d;
+}
+const fakeSched = (tx) => ({ isTxSlot: () => tx });
+const newState = () => ({ pending: false, tuned: [], held: [] });
+
+check('#766 engine transmitting: no tuneRadio call, hop held', () => {
+  const st = newState();
+  const d = runHop(st, { slot: 0, engine: { _txActive: true }, scheduler: fakeSched(false), currentBand: '40m' });
+  assert.strictEqual(d.action, 'hold');
+  assert.deepStrictEqual(st.tuned, []);
+  assert.strictEqual(st.pending, true);
+  assert.strictEqual(st.held[0], 'transmitting this slot');
+});
+
+check('#766 not transmitting, listen slot: hops as before', () => {
+  const st = newState();
+  const d = runHop(st, { slot: 0, engine: { _txActive: false }, scheduler: fakeSched(false), currentBand: '40m' });
+  assert.strictEqual(d.action, 'hop');
+  assert.deepStrictEqual(st.tuned, ['20m']);
+  assert.strictEqual(st.pending, false);
+});
+
+check('#766 our TX slot decided but not keyed yet: held', () => {
+  const st = newState();
+  const d = runHop(st, { slot: 0, engine: { _txActive: false }, scheduler: fakeSched(true), currentBand: '40m' });
+  assert.strictEqual(d.action, 'hold');
+  assert.deepStrictEqual(st.tuned, []);
+});
+
+check('#766 held hop happens at the next eligible decode', () => {
+  const st = newState();
+  runHop(st, { slot: 0, engine: { _txActive: true }, scheduler: fakeSched(true), currentBand: '40m' });
+  // Next decode, slot 1: still a TX slot (TX % over 50), so still held.
+  runHop(st, { slot: 1, engine: { _txActive: true }, scheduler: fakeSched(true), currentBand: '40m' });
+  assert.deepStrictEqual(st.tuned, []);
+  // Slot 2 is a listen slot: the schedule wants 20m for slot 3; hop now.
+  const d = runHop(st, { slot: 2, engine: { _txActive: false }, scheduler: fakeSched(false), currentBand: '40m' });
+  assert.strictEqual(d.action, 'hop');
+  assert.deepStrictEqual(st.tuned, ['20m']);
+  assert.strictEqual(st.pending, false);
+});
+
+check('#766 held hop with dwell > 1 catches up where the schedule would stay', () => {
+  // dwell 2 over 40m/20m: slots 0,1 = 40m, 2,3 = 20m. The hop due at slot 1 (to 20m)
+  // is held; at slot 2 bandChangesNext is false, but the radio is still on 40m.
+  const st = newState();
+  runHop(st, { slot: 1, dwell: 2, engine: { _txActive: true }, scheduler: fakeSched(true), currentBand: '40m' });
+  assert.deepStrictEqual(st.tuned, []);
+  const d = runHop(st, { slot: 2, dwell: 2, engine: { _txActive: false }, scheduler: fakeSched(false), currentBand: '40m' });
+  assert.strictEqual(d.action, 'hop');
+  assert.deepStrictEqual(st.tuned, ['20m']);
+});
+
+check('#766 held hop drops when the radio is already on the band the schedule wants', () => {
+  const st = newState();
+  st.pending = true;
+  const d = runHop(st, { slot: 2, dwell: 2, engine: { _txActive: false }, scheduler: fakeSched(false), currentBand: '20m' });
+  assert.strictEqual(d.action, 'stay');
+  assert.deepStrictEqual(st.tuned, []);
+  assert.strictEqual(st.pending, false);
+});
+
+check('#766 dwell with nothing pending still stays put', () => {
+  const st = newState();
+  const d = runHop(st, { slot: 0, dwell: 2, engine: { _txActive: false }, scheduler: fakeSched(false), currentBand: '40m' });
+  assert.strictEqual(d.action, 'stay');
+  assert.deepStrictEqual(st.tuned, []);
+});
+
 console.log(`\nWSPR band-hop: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

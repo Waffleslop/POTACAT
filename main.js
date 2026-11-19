@@ -19242,14 +19242,26 @@ async function maybeFetchWsprHeard(force) {
 // Band hopping — QSY the radio to the next band in the hop set at cycle end.
 // Pure schedule (lib/wspr/bandhop) decides; here we tune + retune the decoder
 // dial. No-op unless hopping is on, in WSPR mode, with >=2 bands.
+// Never during our own beacon's TX slot (#766): the hop is held to the next decode.
+let _wsprHopPending = false;
 function maybeHopBand() {
   if (!jtcatWsprHopEnabled || !ft8Engine || ft8Engine._mode !== 'WSPR') return;
   // Never to a band this radio is not used on (lib/rig-bands.js).
   const bands = IdleWsprBand.hopBandsForRig(jtcatWsprHopBands, activeRigBands());
   if (!Array.isArray(bands) || bands.length < 2) return;
   const curSlot = wsprBandhop.slotNumber(Date.now());
-  if (!wsprBandhop.bandChangesNext(curSlot, bands, jtcatWsprHopDwell)) return; // dwell — stay put
-  const nb = wsprBandhop.nextBand(curSlot, bands, jtcatWsprHopDwell);
+  const curBandEntry = wsprBands.bandForFreq(ft8Engine._wsprDialMHz);
+  const hop = wsprBandhop.decideHop({
+    slot: curSlot, bands, dwell: jtcatWsprHopDwell,
+    txActive: !!ft8Engine._txActive,
+    txSlot: !!(jtcatWsprScheduler && jtcatWsprScheduler.isTxSlot(StationClock.now())),
+    pending: _wsprHopPending,
+    currentBand: curBandEntry ? curBandEntry.band : null,
+  });
+  _wsprHopPending = hop.pending;
+  if (hop.action === 'hold') { sendCatLog('[JTCAT] WSPR band hop held: ' + hop.reason); return; }
+  if (hop.action !== 'hop') return; // dwell — stay put
+  const nb = hop.band;
   const mhz = wsprBands.dialForBand(nb);
   if (!mhz) return;
   ft8Engine.setWsprDial(mhz);
