@@ -27744,6 +27744,14 @@ function _sendCwTextToRadioImpl(text, opts) {
 // node-serialport DTR. Returns a label if it keyed, else false.
 function keyCwTextOnKeyPort(expanded, wpm, txtPins, live) {
   const pinLabel = txtPins.dtr && txtPins.rts ? 'DTR+RTS' : (txtPins.rts ? 'RTS' : 'DTR');
+  // BK-IN on before the first element, as the CAT text path does: an FTX-1
+  // keyed on its KEY input with BK-IN off gives sidetone and no RF (#745).
+  // The rule and the restore live in RigController.cwKeyLineStarting; no CAT
+  // link (or the legacy CatClient) keys exactly as before.
+  const keyPortReady = !!(_cwKeyPortPathForPython || (cwKeyPort && cwKeyPort.isOpen));
+  if (keyPortReady && cat && cat.connected && typeof cat.cwKeyLineStarting === 'function') {
+    try { cat.cwKeyLineStarting(expanded, wpm); } catch { /* the link going down must not stop the keying */ }
+  }
   if (_cwKeyPortPathForPython) {
     // Prefer the persistent keyer (also carries real-time paddle); it owns
     // the port, so the per-message python is only the fallback when the
