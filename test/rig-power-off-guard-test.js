@@ -40,7 +40,7 @@ test('off a direct serial port or an SCU-LAN10, no radio is offered Power Off by
 });
 
 test('a radio on an SCU-LAN10 keeps Power Off', () => {
-  for (const name of ['FT-710', 'FTDX10', 'FTDX101D/MP']) {
+  for (const name of ['FT-710', 'FTDX10', 'FTDX101D', 'FTDX101MP']) {
     const caps = RIG_MODELS[name].caps;
     assert.strictEqual(RigPower.canWakeAfterOff(caps, 'yaesu-lan'), true, name);
     assert.strictEqual(RigPower.powerOffAvailable(caps, { linkType: 'yaesu-lan' }), true, name);

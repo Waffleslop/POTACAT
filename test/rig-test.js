@@ -183,9 +183,9 @@ test('Yaesu ATU ft891 sequence: AC001 + AC002', () => {
 // 2 tuning start. It shipped on the Kenwood-form 'standard' (AC011;) until
 // Artemis asked for AC002 (2026-10-04). Pinned here so a model-table edit
 // can never put it back.
-test('FT-991/991A and FTDX101D/MP ATU are the FT-891 shape (AC001 then AC002), never AC011', () => {
+test('FT-991/991A, FTDX101D and FTDX101MP ATU are the FT-891 shape (AC001 then AC002), never AC011', () => {
   const { RIG_MODELS } = require('../lib/rig-models');
-  for (const id of ['FT-991/991A', 'FTDX101D/MP']) {
+  for (const id of ['FT-991/991A', 'FTDX101D', 'FTDX101MP']) {
     assert.strictEqual(RIG_MODELS[id].atuCmd, 'ft891', id);
     const { codec } = captureWrites(KenwoodCodec, RIG_MODELS[id]);
     const seq = codec.getAtuStartSequence();
@@ -3464,7 +3464,7 @@ if (failed > 0) {
 // so every Yaesu showed its ALC meter as SWR (3.3:1 into a 1.00 match, 2026-10-23).
 test('Yaesu (FT-991A / FTDX10 / FT-891) reads SWR on RM6 and ALC on RM4', () => {
   const { RIG_MODELS } = require('../lib/rig-models');
-  for (const name of ['FT-991/991A', 'FTDX10', 'FT-891', 'FT-710', 'FTDX101D/MP', 'FTDX3000']) {
+  for (const name of ['FT-991/991A', 'FTDX10', 'FT-891', 'FT-710', 'FTDX101D', 'FTDX101MP', 'FTDX3000']) {
     const w = [];
     const c = new KenwoodCodec({ ...RIG_MODELS[name], brand: 'Yaesu' }, (x) => w.push(String(x)));
     c.getSwr(); c.getAlc();

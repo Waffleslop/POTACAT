@@ -720,7 +720,7 @@ function parkInfoFor(ref) {
 // the community feed served by worker/dxpeditions — aggregated DX-World +
 // DXNews + NG3K, refreshed server-side every 6h. See README in that
 // worker for the schema served at /feeds/dxpeditions.json.
-const { getModel, getModelList, RIG_MODELS } = require('./lib/rig-models');
+const { getModel, getModelList, RIG_MODELS, migrateRigModelNames, modelFromYaesuId } = require('./lib/rig-models');
 const { resolveSetupNotes, radioTypeFromCatTarget, icomScopeBaudAction } = require('./lib/rig-setup-notes');
 const StationSetup = require('./lib/station-setup');
 const ReviewAsk = require('./lib/review-ask'); // one-time "Rate ECHOCAT" card
@@ -2678,7 +2678,7 @@ function atuWizardTrend(rigId) {
 /** The Station Setup step's live record for a rig (null = not a Flex with an ATU). */
 function atuWizardSetupLive(rig) {
   if (!rig) return null;
-  const model = rig.model ? (RIG_MODELS[rig.model] || null) : null;
+  const model = rig.model ? (getModel(rig.model, null) || null) : null;
   if (!model || model.protocol !== 'smartsdr' || !(model.caps && model.caps.atu)) return null;
   const runs = atuWizardListRuns(rig.id).filter(r => !r.verify && r.phase === 'done');
   const last = runs[0] ? { at: runs[0].at, total: runs[0].total, green: runs[0].green, problems: runs[0].problems } : null;
@@ -6145,7 +6145,7 @@ function rigSetupNotesFor(q) {
   const model = String(q.model || target.civModel || '').trim();
   return resolveSetupNotes({
     model,
-    modelInfo: model ? (RIG_MODELS[model] || null) : null,
+    modelInfo: model ? (getModel(model, null) || null) : null,
     radioType: q.radioType || radioTypeFromCatTarget(q.catTarget),
     cwKeyLine: q.cwKeyLine || 'auto',
     platform: process.platform,
@@ -6331,7 +6331,7 @@ function stationSetupLive(rig) {
   const isActive = rig.id === settings.activeRigId;
   const catConnected = isActive && (!!_catLinkUpLast || !!(smartSdr && smartSdr.canTune));
   let scope = null;
-  const info = rig.model ? (RIG_MODELS[rig.model] || null) : null;
+  const info = rig.model ? (getModel(rig.model, null) || null) : null;
   if (info && info.caps && info.caps.nativeScope === 'yaesu-ft4222') {
     const f = findFt4222();
     const st = (typeof yaesuScopeState !== 'undefined' && yaesuScopeState) || {};
@@ -6392,7 +6392,7 @@ function stationSetupPayload(rigId) {
       audioSource: rig.audioSource || (rig.id === settings.activeRigId ? settings.audioSource : ''),
       inputDeviceId: rig.remoteAudioInput || '', outputDeviceId: rig.remoteAudioOutput || '',
     },
-    modelInfo: rig.model ? (RIG_MODELS[rig.model] || null) : null,
+    modelInfo: rig.model ? (getModel(rig.model, null) || null) : null,
     platform: process.platform,
     notes: rigSetupNotesFor({ model: rig.model, catTarget: rig.catTarget, cwKeyLine: rig.cwKeyLine, done: rig.setupDone }),
     live: stationSetupLive(rig),
@@ -6515,7 +6515,7 @@ function stationSetupShareBuild(rigId, req = {}) {
     rig,
     radioType: radioTypeFromCatTarget(rig.catTarget),
     family: RigFamily.rigFamily(rig) || '',
-    modelInfo: rig.model ? (RIG_MODELS[rig.model] || null) : null,
+    modelInfo: rig.model ? (getModel(rig.model, null) || null) : null,
     result: res,
     live: stationSetupLive(rig),
     levels: { jtcatTxGain: settings.jtcatTxGain, jtcatRxGain: settings.jtcatRxGain, txDrive: settings.txDrive },
@@ -6698,7 +6698,7 @@ async function _runStationSetupTxTest(rigId, { keepPower = false, voice = false 
     }
   }
 
-  const info = RIG_MODELS[rig.model] || {};
+  const info = getModel(rig.model, null) || {};
   const testW = Math.min(5, Number(info.maxPower) || 100);
   const prevW = Number(_currentTxPower) || 0;
   let lowered = false;
@@ -41942,6 +41942,14 @@ function migrateRigSettings(s) {
     setTimeout(() => { try { sendCatLog(rigPlan.log); } catch { /* no log yet */ } }, 0);
     saveSettings(s);
   }
+  // Renamed model rows: a saved 'FTDX101D/MP' is now the FTDX101D (100 W);
+  // an MP owner picks FTDX101MP once (lib/rig-models.js RENAMED_MODELS, #744).
+  const renamedModels = migrateRigModelNames(s);
+  if (renamedModels.length) {
+    for (const line of renamedModels) console.log(line);
+    setTimeout(() => { try { renamedModels.forEach((line) => sendCatLog(line)); } catch { /* no log yet */ } }, 0);
+    saveSettings(s);
+  }
   // Dedup rigs with identical catTarget (could happen from repeated migration)
   if (s.rigs.length > 1) {
     const seen = new Set();
@@ -51034,7 +51042,7 @@ function cloudShackNotice(text, kind) {
   // Rig editor "Packet mode on the radio": what the choice means for the rig being edited (lib/packet-rig-mode.js).
   ipcMain.handle('get-packet-rig-mode', (_e, q) => {
     q = q || {};
-    const info = RIG_MODELS[String(q.model || '').trim()] || null;
+    const info = getModel(String(q.model || '').trim(), null) || null;
     const o = { choice: q.choice, family: RigFamily.familyFromRadioType(q.radioType), brand: info && info.brand, protocol: info && info.protocol };
     return { ...PacketRigMode.resolvePacketRigMode(o), editorNote: PacketRigMode.editorNote(o) };
   });
@@ -54325,7 +54333,7 @@ function cloudShackNotice(text, kind) {
         });
         t.connect({ host: String(host).trim(), basePort: Number(port) || 50000, username, password, loginTimeoutMs: 5000 });
       });
-      const radio = { '0670': 'FTDX10', '0681': 'FTDX101D', '0682': 'FTDX101MP', '0800': 'FT-710' }[result.id] || null;
+      const radio = modelFromYaesuId(result.id);
       return { ...result, radio, logs: logs.slice(-30) };
     } finally {
       t.disconnect();
