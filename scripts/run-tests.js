@@ -316,6 +316,7 @@ const TESTS = [
   'test/remote-scope-bins-test.js', // #772: the desktop remote asks the shack for 850-point scope frames, the only size its scope window draws
   'test/gpu-status-test.js', // #773: the GPU / WebGL2 state in the session log at startup, and the scope window's no-WebGL2 line
   'test/remote-shack-grid-test.js', // #774: a remote desktop's JTCAT map centres on the shack's grid (auth-ok settings.grid), its own otherwise
+  'test/payload-field-sizes-test.js', // #776: at connect each ECHOCAT push line names its total and five largest fields in KB
   'test/gridtracker-roster-test.js', // GridTracker as JTCAT's call roster: decodes out, its double-click and stop back in
   'test/popout-theme-test.js', // every pop-out follows a theme change, from the quick toggle or Settings
   'test/vfo-voice-macros-test.js', // the VFO window's voice macro bar follows renames and recordings
