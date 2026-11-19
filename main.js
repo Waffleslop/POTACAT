@@ -487,6 +487,7 @@ const AprsRadioReturn = require('./lib/aprs-radio-return'); // APRS phase 2: the
 const AprsParser = require('./lib/aprs-parser');
 const AprsIgate = require('./lib/aprs-igate');             // APRS phase 4: the receive-only iGate's rules and the uplink login
 const AprsBeacon = require('./lib/aprs-beacon');           // APRS phase 5: the beacon over APRS-IS (packet, timer, symbols, refusals)
+const AprsActivation = require('./lib/aprs-activation');   // APRS extra 1: the running activation in the beacon comment (off by default)
 const AprsRfGate = require('./lib/aprs-rf-gate');          // APRS phase 7: when the 'aprs' owner may key (one manual beacon over the radio)
 const AprsRfBeacon = require('./lib/aprs-rf-beacon');      // APRS phase 7: the RF beacon packet, its cap, and the one-beacon run
 const VaraProcess = require('./lib/vara-process');
@@ -13552,10 +13553,35 @@ function aprsBeaconPosition() {
   const st = AprsBeacon.beaconSettings(settings);
   return AprsBeacon.beaconPosition({ lat: st.lat, lon: st.lon, grid: settings.grid, gridToLatLon });
 }
+// APRS extra 1: "Add my activation to the beacon comment" (off by default).
+// While an activation runs, both beacons' comment starts with the park ref(s),
+// the frequency and the mode ("POTA US-1234 14.062 CW", lib/aprs-activation.js,
+// always within the 43-character comment). The window shows the comment that
+// will go out before anything is sent.
+// Dev only (POTACAT_APRS_DEV_FRAMES set, never packaged): POTACAT_APRS_DEV_ACT_FREQ=14062000:CW
+// stands in for the dial and mode, for screenshots with no radio.
+function aprsActivationNow() {
+  if (!activationRunning()) return null;
+  const refs = liveActivationMyRefs();
+  if (!refs.length) return null;
+  const dev = APRS_DEV_FRAMES ? /^(\d+):([A-Za-z0-9-]*)$/.exec(String(process.env.POTACAT_APRS_DEV_ACT_FREQ || '')) : null;
+  const f = dev ? { hz: Number(dev[1]), mode: dev[2] } : AprsActivation.activationFrequency({
+    dialHz: _currentFreqHz, radioMode: _currentMode,
+    jtcatMode: ft8Engine && ft8Engine._running ? String(ft8Engine._mode || 'FT8') : '',
+    listening: !!aprsListen.on, returnTo: settings.aprsListenReturn || null,
+  });
+  return { refs, hz: f.hz, mode: f.mode };
+}
+/** The comment both beacons send now: { comment, added, text, running }. */
+function aprsBeaconComment(st) {
+  const s = st || AprsBeacon.beaconSettings(settings);
+  return AprsActivation.beaconComment({ comment: s.comment, on: s.activation, activation: aprsActivationNow() });
+}
 function aprsBeaconState() {
   aprsBeaconLoad();
   const login = AprsIgate.uplinkLogin(settings.myCallsign);
   return {
+    activation: aprsBeaconComment(),
     settings: AprsBeacon.beaconSettings(settings), call: login.ok ? login.call : '',
     grid: String(settings.grid || '').toUpperCase(), position: aprsBeaconPosition(),
     lastAt: aprsBeacon.lastAt, lastPacket: aprsBeacon.lastPacket, sentence: aprsBeacon.sentence, backAt: aprsBeacon.backAt,
@@ -13581,7 +13607,7 @@ async function aprsBeaconSend(why) {
   aprsBeacon.lastTryAt = Date.now();
   const st = AprsBeacon.beaconSettings(settings);
   const pos = aprsBeaconPosition();
-  const b = AprsBeacon.buildBeacon({ settingsCall: settings.myCallsign, lat: pos ? pos.lat : null, lon: pos ? pos.lon : null, symbol: st.symbol, comment: st.comment, approx: st.approx });
+  const b = AprsBeacon.buildBeacon({ settingsCall: settings.myCallsign, lat: pos ? pos.lat : null, lon: pos ? pos.lon : null, symbol: st.symbol, comment: aprsBeaconComment(st).comment, approx: st.approx });
   if (!b.ok) { aprsBeaconRefuse(b.sentence); return; }
   if (!aprsIsServer()) { aprsBeaconRefuse('This test build plays recorded packets and sends nothing to APRS-IS.'); return; }
   aprsBeacon.sending = true;
@@ -13795,7 +13821,7 @@ async function aprsRfSend() {
   if (aprsListen.band !== c.band || !aprsListen.freq || aprsListen.freq.hz !== c.hz) { aprsRfSay('The band or frequency changed. Press Beacon now (radio) again.'); aprsRfPush(); return; }
   const st = AprsBeacon.beaconSettings(settings);
   const pos = aprsBeaconPosition();
-  const b = AprsRfBeacon.buildRfBeacon({ settingsCall: settings.myCallsign, band: c.band, lat: pos ? pos.lat : null, lon: pos ? pos.lon : null, symbol: st.symbol, comment: st.comment, approx: st.approx });
+  const b = AprsRfBeacon.buildRfBeacon({ settingsCall: settings.myCallsign, band: c.band, lat: pos ? pos.lat : null, lon: pos ? pos.lon : null, symbol: st.symbol, comment: aprsBeaconComment(st).comment, approx: st.approx });
   if (!b.ok) { aprsRfSay(b.sentence); aprsLog('beacon over the radio not sent: ' + b.sentence); aprsRfPush(); return; }
   _aprsRfTiming = DirewolfProcess.packetTiming(settings);
   const drainMs = winlinkIpAudioRoute() ? WINLINK_UNKEY_DRAIN_IP_MS : WINLINK_UNKEY_DRAIN_BRIDGE_MS;

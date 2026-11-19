@@ -54,6 +54,19 @@
     return Math.abs(lat).toFixed(4) + (lat >= 0 ? ' N' : ' S') + ', ' + Math.abs(lon).toFixed(4) + (lon >= 0 ? ' E' : ' W');
   }
 
+  // Extra 1: the comment that will go out, shown before anything is sent.
+  function renderSends() {
+    var el = $('aprs-beacon-sends');
+    var a = s.activation || { comment: s.settings.comment, added: false, text: '', running: false };
+    var line;
+    if (!s.settings.activation) line = a.running ? 'Your activation is not added. Comment sent: ' + (a.comment || '(none)') : '';
+    else if (!a.running) line = 'No activation is running, so the comment goes as typed: ' + (a.comment || '(none)');
+    else line = 'Comment sent: ' + a.comment;
+    el.textContent = line;
+    el.title = line ? 'At most 43 characters (' + (a.comment || '').length + ' now). The internet and radio beacons send the same comment.' : '';
+    el.classList.toggle('hidden', !line);
+  }
+
   function render() {
     if (!s) return;
     renderSymbols();
@@ -62,6 +75,8 @@
     var cm = $('aprs-beacon-comment');
     if (document.activeElement !== cm) cm.value = s.settings.comment;
     $('aprs-beacon-approx').checked = !!s.settings.approx;
+    $('aprs-beacon-activation').checked = !!s.settings.activation;
+    renderSends();
 
     var pos = $('aprs-beacon-pos');
     if (picking) pos.textContent = 'Click the map where you are';
@@ -120,6 +135,7 @@
   $('aprs-beacon-interval').addEventListener('change', function (e) { window.api.beaconSet({ intervalMin: Number(e.target.value) || 0 }); });
   $('aprs-beacon-comment').addEventListener('change', function (e) { window.api.beaconSet({ comment: e.target.value }); });
   $('aprs-beacon-approx').addEventListener('change', function (e) { window.api.beaconSet({ approx: e.target.checked }); });
+  $('aprs-beacon-activation').addEventListener('change', function (e) { window.api.beaconSet({ activation: e.target.checked }); });
   $('aprs-beacon-pick').addEventListener('click', function () { setPicking(!picking); });
   $('aprs-beacon-grid').addEventListener('click', function () { window.api.beaconSet({ lat: null, lon: null }); });
   document.addEventListener('keydown', function (e) { if (picking && e.key === 'Escape') setPicking(false); });
@@ -141,4 +157,6 @@
   window.api.beaconGet();
   new MutationObserver(function () { render(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-ds', 'data-dark-variant'] });
   setInterval(render, 1000);
+  // The activation, the dial and the mode change outside this window: ask for the comment again every few seconds.
+  setInterval(function () { if (!document.hidden) window.api.beaconGet(); }, 3000);
 })();

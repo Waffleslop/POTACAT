@@ -28,11 +28,12 @@ contextBridge.exposeInMainWorld('api', {
   onIgate: (cb) => ipcRenderer.on('aprs-igate', (_e, s) => cb(s)),
   // Asked once the bar listens; main answers with one 'aprs-listen' push.
   listenGet: () => ipcRenderer.send('aprs-listen-get'),
-  // Phase 5: the beacon over APRS-IS. beaconSet takes any of { symbol, comment, approx, intervalMin, lat, lon }.
+  // Phase 5: the beacon over APRS-IS. beaconSet takes any of { symbol, comment, approx, intervalMin, lat, lon, activation }.
   beaconNow: () => ipcRenderer.send('aprs-beacon-now'),
   beaconGet: () => ipcRenderer.send('aprs-beacon-get'), // the state now (the section may load after the window said ready)
   beaconSet: (patch) => ipcRenderer.send('aprs-beacon-set', patch || {}),
   // { settings, call, grid, position: {lat, lon, source: 'map'|'grid'} | null, lastAt, lastPacket, sentence, backAt, sending, timerOn, nextAt }
+  // Extra 1: also activation: { comment, added, text, running }, the comment both beacons send now.
   onBeacon: (cb) => ipcRenderer.on('aprs-beacon', (_e, s) => cb(s)),
   // Phase 7: ONE manual beacon over the radio. rfAsk shows the confirmation line
   // (nothing is keyed); only rfSend transmits; rfCancel drops the line.

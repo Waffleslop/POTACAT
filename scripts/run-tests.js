@@ -233,6 +233,7 @@ const TESTS = [
   'test/aprs-beacon-test.js', // APRS phase 5: the beacon packet, approximate position, symbols, comment, the 10 min timer floor, refusals
   'test/aprs-beacon-wiring-test.js', // APRS phase 5: the beacon end to end against a local fake APRS-IS server, and its wiring
   'test/afsk-demod-test.js', // APRS phase 9 core: our own AFSK demodulator (1200 and 300 baud, offsets, noise floors, FCS, stuffing, real 30 m frames, CPU)
+  'test/aprs-activation-test.js', // APRS extra 1: the activation (park, frequency, mode) in the beacon comment, within 43 characters, off by default
   'test/aprs-rf-gate-test.js', // APRS phase 7: the gate for a beacon over the radio, each refusal (window, listen, callsign, dial match, owner, PTT, in flight)
   'test/aprs-rf-beacon-test.js', // APRS phase 7: the RF packet and path per band, the per-transmission cap, the run against a fake shim and Dire Wolf
   'test/aprs-rf-beacon-wiring-test.js', // APRS phase 7: only Transmit sends, no RF timer, unkey on window close / stop / TX limit, power never changed

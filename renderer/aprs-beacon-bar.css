@@ -36,3 +36,4 @@
 .aprs-rf-confirm { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap;
   padding: 4px 10px; border: 1px solid var(--accent-red); border-radius: 6px; color: var(--text-primary); }
 #aprs-rf-status { white-space: normal; }
+#aprs-beacon-sends { white-space: normal; }
