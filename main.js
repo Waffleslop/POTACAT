@@ -5185,6 +5185,7 @@ function bindRigStateEvents(controller) {
   controller.on('ptt', (on) => txNoteRadioPtt(controller, on));
   controller.on('ptt', (on) => { if (!on && controller === cat) txMetersRestOnRx(); });
   controller.on('ptt', (on) => { if (!on && controller === cat) customCatReader.txEnded(); }); // #242: reads held during TX
+  controller.on('ptt', (on) => { if (on && controller === cat) aprsRfNoteRadioTx(); }); // APRS phase 7: sent only if the radio keyed
   // Something the radio did that the operator must see, not only the log
   // (lib/rig-controller.js: a radio left in transmit after a CW message).
   controller.on('notice', (msg) => {
@@ -13680,6 +13681,23 @@ function aprsRfSay(sentence) { aprsRfUi.sentence = sentence || ''; aprsRfUi.sent
 
 function aprsRfInFlight() { return !!(aprsRf && aprsRf.inFlight()); }
 
+// Sent means the radio transmitted (2026-11-19: the 8600M refused, the app
+// said sent). The existing readbacks feed the runner; no new poll.
+function aprsRfNoteRadioTx() {
+  if (aprsRf && aprsRf.inFlight() && _aprsRfKeyed) aprsRf.noteRadioTx(true);
+}
+function aprsRfNoteRadioRefusal(text) {
+  if (!aprsRf || !aprsRf.inFlight() || !_aprsRfKeyed || !AprsRfBeacon.isTxRefusalText(text)) return;
+  aprsRf.noteRadioRefusal({ message: text, interlockState: smartSdr ? smartSdr.interlockState : '', interlockReason: smartSdr ? smartSdr.interlockReason : '' });
+}
+/** Can the connected radio prove it transmitted (lib/aprs-rf-beacon.js txProofFor)? */
+function aprsRfTxProof() {
+  const flex = !!(smartSdr && smartSdr.connected && smartSdr.interlockState);
+  const m = (cat && cat._model) || {};
+  const catReadsPtt = !!(cat && cat.connected && cat._codec && typeof cat._codec.getPtt === 'function' && cat._codecTxSeenAt > 0 && m.pollDuringTx !== false);
+  return AprsRfBeacon.txProofFor({ flexInterlock: flex ? smartSdr.interlockState : '', catReadsPtt, catPollMs: m.pollIntervalMs || (m.protocol === 'rigctld' ? 500 : 1000) });
+}
+
 /** Something other than an APRS beacon is keying the radio, by name ('' = nothing). */
 function aprsRfOtherTx() {
   try { if (jtcatAnyTxActive()) return 'JTCAT'; } catch {}
@@ -13703,6 +13721,9 @@ function aprsRfGateState() {
     pttKeyed: !!_remoteTxState && !_aprsRfKeyed,
     otherTx: aprsRfOtherTx(),
     swrTripped: !!_swrTripped,
+    // The radio's own "not ready to transmit here", where it reports it (a Flex's interlock NOT_READY).
+    txInterlock: smartSdr && smartSdr.connected ? (smartSdr.interlockState || '') : '',
+    txInterlockReason: smartSdr && smartSdr.connected ? (smartSdr.interlockReason || '') : '',
     modemFound: DirewolfProcess.direwolfSupported(process.platform) && findDirewolf().found,
     inFlight: aprsRfInFlight(),
   };
@@ -13711,7 +13732,7 @@ function aprsRfGateState() {
 /**
  * Dev only (never packaged, and only with POTACAT_APRS_DEV_FRAMES): a stand-in
  * gate answer for screenshots. POTACAT_APRS_DEV_RF=ready shows the button
- * enabled; listen, dial, call, owner, transmitting or busy shows that
+ * enabled; listen, dial, call, owner, transmitting, notready or busy shows that
  * refusal. A dev build never transmits: Send is refused.
  */
 function aprsRfDevReadiness() {
@@ -13721,7 +13742,7 @@ function aprsRfDevReadiness() {
   const hz = aprsListen.freq ? aprsListen.freq.hz : (band === '2m' ? 144390000 : 10147600);
   const base = { remote: false, windowOpen: true, listenOn: true, listenState: 'listening', band, settingsCall: settings.myCallsign,
     aprsHz: hz, dialHz: hz, radioOwner: 'none', pttKeyed: false, otherTx: '', swrTripped: false, modemFound: true, inFlight: false };
-  const tweak = { ready: {}, listen: { listenOn: false }, dial: { dialHz: 7171000 }, call: { settingsCall: 'N0CALL' }, owner: { radioOwner: 'jtcat' }, transmitting: { otherTx: 'SSTV' }, busy: { inFlight: true } }[r];
+  const tweak = { ready: {}, listen: { listenOn: false }, dial: { dialHz: 7171000 }, call: { settingsCall: 'N0CALL' }, owner: { radioOwner: 'jtcat' }, transmitting: { otherTx: 'SSTV' }, notready: { txInterlock: 'NOT_READY' }, busy: { inFlight: true } }[r];
   return AprsRfGate.readiness({ ...base, ...(tweak || {}) });
 }
 
@@ -13779,9 +13800,13 @@ async function aprsRfSend() {
   const cap = AprsRfBeacon.capFor({ band: c.band, packet: b.packet, txDelayMs: _aprsRfTiming.txDelayMs, txTailMs: _aprsRfTiming.txTailMs, drainMs });
   aprsLog(`beacon over the radio: ${b.packet} on ${c.mhz} MHz ${c.mode}, rig power ${c.powerW ? c.powerW + ' W' : 'not reported'}, about ${(cap.airMs / 1000).toFixed(1)} s on air, cap ${(cap.capMs / 1000).toFixed(1)} s`);
   const res = await aprsRfRunner().send({ packet: b, capMs: cap.capMs });
-  if (res.ok) {
+  if (res.ok && res.confirmed) {
+    // Only a beacon the radio reported transmitting counts as sent and gets a last-beacon time.
     aprsRfUi.lastAt = Date.now(); aprsRfUi.lastPacket = b.packet; aprsRfUi.lastBand = c.band;
-    sendCatLog(`[APRS beacon] sent over the radio (${c.bandLabel}, ${c.mhz} MHz): ${b.packet}`);
+    sendCatLog(`[APRS beacon] sent over the radio (${c.bandLabel}, ${c.mhz} MHz; the radio reported transmit): ${b.packet}`);
+  } else if (res.ok) {
+    aprsRfSay(res.sentence || AprsRfBeacon.SENT_SENTENCES.noReadback);
+    sendCatLog(`[APRS beacon] keyed but not confirmed (${c.bandLabel}, ${c.mhz} MHz): ${aprsRfUi.sentence}`);
   } else {
     aprsRfSay(res.sentence || 'The beacon was not sent.');
     aprsLog('beacon over the radio not sent: ' + aprsRfUi.sentence);
@@ -13939,6 +13964,7 @@ function aprsRfRunner() {
     key: aprsRfKey,
     unkey: ({ now }) => aprsRfUnkey(now),
     onState: () => aprsRfPush(),
+    txProof: aprsRfTxProof,
   });
   return aprsRf;
 }
@@ -23493,6 +23519,11 @@ function connectSmartSdr() {
   // confirmed from the transmit-status readback, never from the command.
   smartSdr.on('atu-status', (kv) => { if (atuWizardRun) atuWizardRun.noteAtuStatus(kv); });
   smartSdr.on('interlock', (kv) => { if (atuWizardRun) atuWizardRun.noteInterlock(kv); });
+  // APRS phase 7: a radio beacon counts as sent only when the interlock says
+  // TRANSMITTING; the radio's refusal ends it with the radio's own words.
+  smartSdr.on('interlock', (kv) => { if (kv.state === 'TRANSMITTING') aprsRfNoteRadioTx(); });
+  smartSdr.on('radio-message', (m) => aprsRfNoteRadioRefusal(m && m.text));
+  smartSdr.on('cmd-error', ({ status, line }) => { const t = String(line || '').split('|').pop(); if ((status >>> 0) === 0x50000043 || AprsRfBeacon.isTxRefusalText(t)) aprsRfNoteRadioRefusal(t); });
   smartSdr.on('frequency', (hz) => { if (atuWizardRun) atuWizardRun.noteSliceMoved(hz); });
   smartSdr.on('transmit-status', () => atuWizardOnTransmitStatus());
   smartSdr.on('slice-ready', () => { try { atuWizardRecoverOnConnect(); } catch (err) { sendCatLog(`[ATU wizard] recovery check failed: ${err.message}`); } });

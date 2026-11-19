@@ -145,5 +145,19 @@ test('dialMatches is the frequency match alone, per band', () => {
   assert.deepStrictEqual(G.DIAL_TOLERANCE_HZ, { '2m': 1000, '30m': 100 });
 });
 
+// 2026-11-19: the 8600M's interlock read NOT_READY on 10.1476 MHz and the
+// radio refused the beacon. The button says so before the press.
+test('refused: the radio reports it is not ready to transmit here (Flex interlock NOT_READY)', () => {
+  const r = G.readiness(ready({ txInterlock: 'NOT_READY' }));
+  assert.strictEqual(reason(r), 'radio-not-ready');
+  assert.strictEqual(r.sentence, 'The radio is not ready to transmit on this band: its interlock is preventing transmission.');
+  assert.strictEqual(G.readiness(ready({ txInterlock: 'NOT_READY', txInterlockReason: 'AMP:TG' })).sentence,
+    'The radio is not ready to transmit on this band: its interlock is preventing transmission (AMP:TG).');
+  assert.strictEqual(G.mayKey(keying({ txInterlock: 'NOT_READY' })).reason, 'radio-not-ready');
+  for (const st of ['READY', 'RECEIVE', 'PTT_REQUESTED', 'TRANSMITTING', '']) {
+    assert.strictEqual(G.readiness(ready({ txInterlock: st })), null, st || 'unknown');
+  }
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exitCode = fail ? 1 : 0;

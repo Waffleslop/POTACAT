@@ -140,5 +140,46 @@ test('every new test is in scripts/run-tests.js', () => {
   }
 });
 
+// 2026-11-19: the 8600M refused the 30 m beacon (interlock NOT_READY), yet the
+// log said "sent over the radio" and the window "Last radio beacon 1 min ago".
+test('sent only when the radio reported transmit: the last-beacon time and "sent" line need res.confirmed', () => {
+  const send = fnBody(main, 'aprsRfSend');
+  const i = send.indexOf('if (res.ok && res.confirmed) {');
+  const j = send.indexOf('} else if (res.ok) {', i);
+  assert.ok(i > 0 && j > i, 'confirmed first, then keyed-but-not-confirmed');
+  const confirmed = send.slice(i, j);
+  assert.ok(/aprsRfUi\.lastAt = Date\.now\(\)/.test(confirmed) && /sent over the radio/.test(confirmed));
+  assert.strictEqual((send.match(/aprsRfUi\.lastAt = /g) || []).length, 1, 'no other path records a last beacon');
+  assert.strictEqual((send.match(/sent over the radio/g) || []).length, 1, 'no other path says sent');
+});
+
+test('the radio\'s own readbacks feed the runner (no new poll): Flex interlock and refusals, CAT TX readback', () => {
+  assert.ok(/smartSdr\.on\('interlock', \(kv\) => \{ if \(kv\.state === 'TRANSMITTING'\) aprsRfNoteRadioTx\(\); \}\);/.test(main));
+  assert.ok(/smartSdr\.on\('radio-message', \(m\) => aprsRfNoteRadioRefusal\(m && m\.text\)\);/.test(main));
+  assert.ok(/smartSdr\.on\('cmd-error', \(\{ status, line \}\) => \{[^\n]*aprsRfNoteRadioRefusal\(t\)/.test(main));
+  assert.ok(/controller\.on\('ptt', \(on\) => \{ if \(on && controller === cat\) aprsRfNoteRadioTx\(\); \}\);/.test(main));
+  assert.ok(/txProof: aprsRfTxProof,/.test(fnBody(main, 'aprsRfRunner')));
+  assert.ok(/AprsRfBeacon\.txProofFor\(/.test(fnBody(main, 'aprsRfTxProof')));
+  assert.ok(!/setInterval|setTimeout/.test(fnBody(main, 'aprsRfTxProof') + fnBody(main, 'aprsRfNoteRadioTx') + fnBody(main, 'aprsRfNoteRadioRefusal')), 'no poll of its own');
+});
+
+test('the button reads the radio\'s interlock: NOT_READY disables it before the press', () => {
+  const g = fnBody(main, 'aprsRfGateState');
+  assert.ok(/txInterlock: smartSdr && smartSdr\.connected \? \(smartSdr\.interlockState \|\| ''\) : ''/.test(g));
+  assert.ok(/txInterlockReason: /.test(g));
+});
+
+test('the Flex client: an M line is the radio\'s message; the interlock keeps its reason', () => {
+  const { SmartSdrClient } = require('../lib/smartsdr');
+  const c = new SmartSdrClient();
+  const got = [];
+  c.on('radio-message', (m) => got.push(m));
+  c._handleLine('M31000003|Interlock is preventing transmission');
+  assert.deepStrictEqual(got, [{ code: '31000003', text: 'Interlock is preventing transmission' }]);
+  c._handleLine('S58E318C3|interlock tx_client_handle=0x00000000 state=NOT_READY reason= source= tx_allowed=0 amplifier=');
+  assert.strictEqual(c.interlockState, 'NOT_READY');
+  assert.strictEqual(c.interlockReason, '');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exitCode = fail ? 1 : 0;

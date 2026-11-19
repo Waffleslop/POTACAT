@@ -154,9 +154,18 @@ function harness(o = {}) {
     key: () => { calls.push('key'); if (o.keyFails) return false; radio.keyed = true; if (o.keyThrows) throw new Error('lane gone'); return true; },
     unkey: ({ now }) => { calls.push(now ? 'unkey-now' : 'unkey'); if (now) { radio.keyed = false; return Promise.resolve(); } return new Promise((r) => tm.setTimer(() => { radio.keyed = false; r(); }, 250)); },
     onState: () => {},
+    // The radio's own transmit readback (Flex interlock, a CAT rig's TX poll).
+    txProof: () => (o.proof || { canConfirm: true, minMs: 0 }),
   };
   const run = R.createRfBeacon(deps);
-  return { run, tm, log, calls, radio, ptt: (on) => (onPtt ? onPtt(on) : 'no-shim'), get modem() { return modem; } };
+  // The fake radio reports TRANSMITTING once keyed, unless the test says it refuses or stays silent.
+  const ptt = (on) => {
+    if (!onPtt) return 'no-shim';
+    const res = onPtt(on);
+    if (on && res === true && o.readback !== false) run.noteRadioTx(true);
+    return res;
+  };
+  return { run, tm, log, calls, radio, ptt, get modem() { return modem; } };
 }
 const start = async (h, capMs = 2100) => {
   const p = h.run.send({ packet: pkt({ band: '2m' }), capMs, requestTimeoutMs: 75000 });
@@ -334,6 +343,94 @@ test('a second press while one is in flight is refused', async () => {
   assert.strictEqual(second.reason, 'busy');
   h.run.abort('test over');
   await p;
+});
+
+// ── sent only when the radio keyed (2026-11-19, 8600M on 10.1476 MHz) ───────
+// The radio refused ("The transmitter is not ready", "Interlock is preventing
+// transmission", interlock NOT_READY, 0.0 W out), yet the app logged "sent
+// over the radio" and showed "Last radio beacon 1 min ago".
+
+test('the radio refuses (interlock NOT_READY): not sent, unkeyed at once, the radio\'s reason in plain words', async () => {
+  const h = harness({ readback: false });
+  const { p } = await start(h);
+  assert.strictEqual(h.ptt(true), true, 'POTACAT asked for PTT');
+  h.run.noteRadioRefusal({ message: 'Interlock is preventing transmission', interlockState: 'NOT_READY' });
+  const res = await p;
+  assert.strictEqual(res.ok, false);
+  assert.strictEqual(res.reason, 'not-keyed');
+  assert.strictEqual(res.sentence, 'The radio refused to transmit: Interlock is preventing transmission (not ready on this band).');
+  assert.ok(h.calls.includes('unkey-now'), h.calls.join(','));
+  assert.strictEqual(h.radio.keyed, false);
+  assert.ok(h.log.some((l) => /refused to transmit/.test(l)), h.log.join(' | '));
+});
+
+test('the radio never reports transmit and gives no reason: not sent', async () => {
+  const h = harness({ readback: false });
+  const { p } = await start(h);
+  h.ptt(true);
+  await h.tm.advance(1500);
+  h.ptt(false);
+  await h.tm.advance(300);
+  const res = await p;
+  assert.strictEqual(res.ok, false);
+  assert.strictEqual(res.reason, 'not-keyed');
+  assert.strictEqual(res.sentence, 'The radio never went to transmit, so nothing was sent.');
+});
+
+test('the radio reported transmit: sent, and confirmed', async () => {
+  const h = harness();
+  const { p } = await start(h);
+  h.ptt(true);
+  await h.tm.advance(1500);
+  h.ptt(false);
+  await h.tm.advance(300);
+  const res = await p;
+  assert.strictEqual(res.ok, true);
+  assert.strictEqual(res.confirmed, true);
+});
+
+test('a refusal after the radio already transmitted (the unkey\'s own reply) does not undo the beacon', async () => {
+  const h = harness();
+  const { p } = await start(h);
+  h.ptt(true);
+  h.ptt(false);
+  h.run.noteRadioRefusal({ message: 'The transmitter is not ready' });
+  await h.tm.advance(300);
+  assert.strictEqual((await p).confirmed, true);
+});
+
+test('a radio with no transmit readback: keyed, but not counted as sent', async () => {
+  const h = harness({ readback: false, proof: { canConfirm: false, minMs: 0 } });
+  const { p } = await start(h);
+  h.ptt(true); await h.tm.advance(1500); h.ptt(false); await h.tm.advance(300);
+  const res = await p;
+  assert.strictEqual(res.ok, true);
+  assert.strictEqual(res.confirmed, false);
+  assert.ok(/cannot be confirmed/.test(res.sentence), res.sentence);
+});
+
+test('an over shorter than the rig\'s TX poll: no readback is "not confirmed", not "refused"', async () => {
+  const h = harness({ readback: false, proof: { canConfirm: true, minMs: 1800 } });
+  const { p } = await start(h);
+  h.ptt(true); await h.tm.advance(900); h.ptt(false); await h.tm.advance(300);
+  const res = await p;
+  assert.strictEqual(res.ok, true);
+  assert.strictEqual(res.confirmed, false);
+});
+
+test('refusalSentence: the radio\'s words first, the interlock state in plain words', () => {
+  assert.strictEqual(R.refusalSentence({ message: 'Interlock is preventing transmission', interlockState: 'NOT_READY' }), 'The radio refused to transmit: Interlock is preventing transmission (not ready on this band).');
+  assert.strictEqual(R.refusalSentence({ message: 'The transmitter is not ready.' }), 'The radio refused to transmit: The transmitter is not ready.');
+  assert.strictEqual(R.refusalSentence({ interlockState: 'NOT_READY' }), 'The radio refused to transmit: it is not ready on this band.');
+  assert.strictEqual(R.refusalSentence({ interlockState: 'NOT_READY', interlockReason: 'AMP:TG' }), 'The radio refused to transmit: AMP:TG (not ready on this band).');
+  assert.strictEqual(R.refusalSentence({}), 'The radio refused to transmit, so nothing was sent.');
+});
+
+test('txProofFor: a Flex interlock confirms at once; a CAT TX poll needs an over longer than its poll; none cannot confirm', () => {
+  assert.deepStrictEqual(R.txProofFor({ flexInterlock: 'READY' }), { canConfirm: true, minMs: 0 });
+  assert.deepStrictEqual(R.txProofFor({ catReadsPtt: true, catPollMs: 1000 }), { canConfirm: true, minMs: 1800 });
+  assert.deepStrictEqual(R.txProofFor({ catReadsPtt: true, catPollMs: 500 }), { canConfirm: true, minMs: 1050 });
+  assert.deepStrictEqual(R.txProofFor({}), { canConfirm: false, minMs: 0 });
 });
 
 (async () => {
