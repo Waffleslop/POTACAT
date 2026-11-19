@@ -475,6 +475,7 @@ const WinlinkStateLib = require('./lib/winlink-state');
 const WinlinkMailActions = require('./lib/winlink-mail-actions'); // Archive, Deleted, Reply all: which moves and buttons (#462, #475)
 const WinlinkDeleted = require('./lib/winlink-deleted'); // POTACAT's Deleted folder inside Pat's mailbox, and its purge (#475)
 const WinlinkSentRoutes = require('./lib/winlink-sent-routes'); // how each sent message went out: gateway, dial, mode or internet, when (#442)
+const WinlinkForms = require('./lib/winlink-forms'); // #346: Winlink forms through Pat (1.0.1 or newer), its catalog, and what the form window may load
 const { createRigctldServer } = require('./lib/rigctld-server');
 const ArdopProcess = require('./lib/ardop-process');
 const DirewolfProcess = require('./lib/direwolf-process');
@@ -2052,6 +2053,7 @@ const _patProgressSaid = new WinlinkDiag.PatProgressLog(); // Pat's repainted tr
 let _winlinkMercuryWasConnected = false;
 let _winlinkAutoCheckTimer = null;
 let winlinkPopoutWin = null;
+let winlinkFormWin = null;           // #346: Pat's own form page, locked down (openWinlinkFormWindow)
 let _winlinkWatchAudio = false;      // the mail window shows the waterfall
 // ECHOCAT devices watching the Winlink waterfall (C2S winlink-watch): the
 // shack computes the spectrum AND the Busy/Clear verdict (lib/winlink-spectrum.js)
@@ -15390,7 +15392,7 @@ function winlinkArmAutoCheck() {
 
 // ── mailbox actions shared by every surface ─────────────────────────────────
 
-async function winlinkSend({ to, cc, subject, body, p2p, attachments } = {}) {
+async function winlinkSend({ to, cc, subject, body, p2p, attachments, formId } = {}) {
   if (!patClient) return { ok: false, error: 'Pat is not running' };
   if (!settings.winlinkNoticeAcceptedAt) return { ok: false, error: 'Read and accept the Winlink notice first' };
   // A POTA spot by email: the service reads one line per message, so an
@@ -15405,7 +15407,7 @@ async function winlinkSend({ to, cc, subject, body, p2p, attachments } = {}) {
     winlinkLog(`POTA spot by email: ${sp.bodies.join(' | ')} — in the Outbox`);
     return { ok: true, spots: sp.bodies.length };
   }
-  const r = await winlinkSendOne({ to, cc, subject, body, p2p, attachments });
+  const r = await winlinkSendOne({ to, cc, subject, body, p2p, attachments, formId });
   // The address book ranks people by when you last wrote to them.
   if (r && r.ok) {
     const t = WinlinkContacts.touch(settings.winlinkContacts, WinlinkContacts.splitAddresses(`${to || ''},${cc || ''}`));
@@ -15470,18 +15472,27 @@ function winlinkPotaSpotTemplate(over = {}) {
   return PotaEmailSpot.buildSpotMessage({ call: settings.myCallsign || '', refs, freqKhz, mode, comment: over.comment || '' });
 }
 
-async function winlinkSendOne({ to, cc, subject, body, p2p, attachments } = {}) {
+async function winlinkSendOne({ to, cc, subject, body, p2p, attachments, formId } = {}) {
   const c = WinlinkPat.composeFields({ to, cc, subject, body, p2p });
   if (!c.ok) return c;
+  // A message made with a Winlink form (#346): Pat adds the form's XML itself
+  // when the outbox POST carries that form's instance cookie.
+  const form = formId ? _winlinkFormIds.get(String(formId)) : null;
+  if (formId && !form) return { ok: false, error: 'That form is no longer open in Pat. Fill it in again from Forms.' };
+  if (form && form.readOnly && WinlinkForms.bodyChanged(form.body, body)) {
+    return { ok: false, error: 'This form says its message may not be changed. Fill it in again from Forms.' };
+  }
   const files = (Array.isArray(attachments) ? attachments : []).filter((a) => a && a.name && a.data).map((a) => ({ name: path.basename(String(a.name)), data: Buffer.isBuffer(a.data) ? a.data : Buffer.from(String(a.data), 'base64') }));
   const total = files.reduce((n, f) => n + f.data.length, 0);
   if (total > 2 * 1024 * 1024) return { ok: false, error: `Attachments are ${(total / 1048576).toFixed(1)} MB — Winlink over radio needs them far smaller (keep it under 100 kB for HF)` };
   try {
-    await patClient.send(c.fields, files);
-    winlinkLog(`queued "${c.fields.subject}" to ${c.fields.to}${files.length ? ` with ${files.length} attachment${files.length === 1 ? '' : 's'}` : ''} — it goes out on the next session`);
+    await patClient.send(c.fields, files, form ? { formInstance: String(formId) } : {});
+    if (form) _winlinkFormIds.delete(String(formId));
+    winlinkLog(`queued "${c.fields.subject}" to ${c.fields.to}${files.length ? ` with ${files.length} attachment${files.length === 1 ? '' : 's'}` : ''}${form ? ` with the form "${form.name}"` : ''} — it goes out on the next session`);
     await winlinkRefreshMailboxes(['out']);
     return { ok: true };
   } catch (e) {
+    if (form && /form instance key not valid/i.test(e.message)) return { ok: false, error: 'Pat no longer has this form (Pat was restarted). Fill it in again from Forms.' };
     return { ok: false, error: e.message };
   }
 }
@@ -15501,6 +15512,228 @@ async function winlinkRead(box, mid) {
     }
     return { ok: true, message: winlinkWithSentRoute(box, msg) };
   } catch (e) { return { ok: false, error: e.message }; }
+}
+
+// ── Winlink forms (#346) ────────────────────────────────────────────────────
+// Pat does the forms: its catalog, its form pages, and the message with its
+// RMS_Express_Form XML. POTACAT offers them only on Pat 1.0.1 or newer
+// (lib/winlink-forms.js formsAllowed), shows Pat's own page in a locked-down
+// window (openWinlinkFormWindow), and the filled form comes back to the
+// compose pane, so the Outbox, the address book and Send stay one path. Pat
+// downloads the forms on this machine (POST /api/formsUpdate); none are bundled.
+
+let _patVersionSeen = { port: 0, text: '' };
+// Forms filled in this run, by instance id: { name, path, readOnly, body }.
+const _winlinkFormIds = new Map();
+let _winlinkFormsUpdating = null;
+let _winlinkPendingFormResult = null; // a filled form for a Mail window that was closed meanwhile
+
+/** Are forms offered with the Pat that is running? Starts Pat when it is not. */
+async function winlinkFormsGate() {
+  if (!(await winlinkEnsureStarted()) || !patClient) return { ok: false, why: winlinkState.snapshot().patError || 'Pat is not running.' };
+  if (_patVersionSeen.port !== _patHttpPort || !_patVersionSeen.text) {
+    let text = '';
+    try { text = await patClient.patVersion(); } catch (e) { winlinkLog(`forms: could not read Pat's version: ${e.message}`); }
+    _patVersionSeen = { port: _patHttpPort, text };
+  }
+  const g = WinlinkForms.formsAllowed(_patVersionSeen.text);
+  return { ok: g.ok, why: g.why, version: g.version };
+}
+
+/** The Forms picker's list: installed or not, the version, favourites first, every form. */
+async function winlinkFormsCatalog() {
+  const g = await winlinkFormsGate();
+  if (!g.ok) return { ok: true, allowed: false, why: g.why };
+  try {
+    const cat = WinlinkForms.shapeCatalog(await patClient.formCatalog());
+    return { ok: true, allowed: true, patVersion: g.version, updating: !!_winlinkFormsUpdating, ...cat };
+  } catch (e) {
+    return { ok: false, allowed: true, error: `Pat could not list its forms: ${e.message}` };
+  }
+}
+
+/** "Get the standard forms": Pat downloads the newest Winlink Standard Forms from getpat.io. One at a time. */
+async function winlinkFormsUpdate() {
+  const g = await winlinkFormsGate();
+  if (!g.ok) return { ok: false, text: g.why };
+  if (!_winlinkFormsUpdating) {
+    winlinkLog('forms: asking Pat for the newest Winlink Standard Forms (Pat downloads them from getpat.io)');
+    _winlinkFormsUpdating = patClient.formsUpdate()
+      .then((r) => WinlinkForms.formsUpdateMessage(r, null), (e) => WinlinkForms.formsUpdateMessage(null, e))
+      .finally(() => { _winlinkFormsUpdating = null; });
+  }
+  const m = await _winlinkFormsUpdating;
+  winlinkLog(`forms: ${m.text}`);
+  return m;
+}
+
+/** The template's own "Readonly: True" line, read from Pat's forms folder on this machine. */
+function winlinkTemplateReadOnly(templatePath) {
+  const dir = path.resolve(winlinkPaths().forms);
+  const abs = path.resolve(dir, WinlinkForms.slashPath(templatePath));
+  if (!abs.startsWith(dir + path.sep)) return false;
+  try { return WinlinkForms.templateReadOnly(fs.readFileSync(abs, 'utf8')); } catch { return false; }
+}
+
+/**
+ * Open a form in the form window. o.kind 'new': fill in o.path (Pat's
+ * template_path); 'view': a received form, o.box / o.mid / o.file.
+ * Pat is asked first whether it can render the page, so a missing form set
+ * is said in words, not shown as Pat's error page.
+ */
+async function winlinkFormOpen(o = {}) {
+  const g = await winlinkFormsGate();
+  if (!g.ok) return { ok: false, error: g.why };
+  if (winlinkFormWin && !winlinkFormWin.isDestroyed()) {
+    winlinkFormWin.focus();
+    return { ok: false, error: 'A form is already open in its own window. Submit it or close that window first.' };
+  }
+  const origin = WinlinkForms.patOrigin(_patHttpPort);
+  const kind = o.kind === 'view' ? 'view' : 'new';
+  let url = '', name = '', readOnly = false;
+  if (kind === 'new') {
+    const tpl = String(o.path || '');
+    url = WinlinkForms.fillUrl(origin, tpl);
+    name = WinlinkForms.slashPath(tpl).split('/').pop().replace(/\.txt$/i, '');
+    readOnly = winlinkTemplateReadOnly(tpl);
+  } else {
+    const att = WinlinkForms.formAttachment([String(o.file || '')]);
+    url = WinlinkForms.viewUrl(origin, String(o.box || ''), String(o.mid || ''), String(o.file || ''));
+    name = att ? att.form : '';
+  }
+  if (!url) return { ok: false, error: 'That is not a form POTACAT can open.' };
+  const probe = await patClient.probe(url.slice(origin.length)).catch((e) => ({ status: 0, text: e.message }));
+  if (probe.status !== 200) {
+    winlinkLog(`forms: Pat could not open ${kind === 'view' ? 'the received form' : `"${name}"`}: HTTP ${probe.status} ${probe.text}`);
+    return { ok: false, error: kind === 'view'
+      ? 'Pat cannot show this form: it needs the Winlink Standard Forms on this computer. Use Forms > Get the standard forms, then try again. The form\'s text is in the message itself.'
+      : `Pat could not open the form "${name}". Use Forms > Get the standard forms to get them again.` };
+  }
+  const id = WinlinkForms.newFormInstanceId(require('crypto').randomBytes);
+  if (kind === 'new') _winlinkFormIds.set(id, { name, path: String(o.path), readOnly, body: '' });
+  await openWinlinkFormWindow({ url, origin, id, submit: kind === 'new', title: kind === 'new' ? `Winlink form: ${name}` : `Received form: ${name}` });
+  winlinkLog(`forms: opened ${kind === 'new' ? `"${name}" to fill in` : `the received form "${name}"`}`);
+  return { ok: true };
+}
+
+/** Pat took the form's Submit: fetch what it built and hand it to the compose pane. */
+async function winlinkFormSubmitted(id) {
+  const f = _winlinkFormIds.get(id);
+  if (!f || !patClient) return;
+  let msg;
+  try {
+    const c = WinlinkForms.formResultToCompose(await patClient.formData(id), { readOnly: f.readOnly });
+    f.body = c.body;
+    msg = { id, name: f.name, ...c };
+    winlinkLog(`forms: "${f.name}" filled in; it is in the compose pane`);
+  } catch (e) {
+    msg = { error: `Pat did not give back the filled form: ${e.message}` };
+  }
+  if (winlinkFormWin && !winlinkFormWin.isDestroyed()) winlinkFormWin.close();
+  if (winlinkPopoutWin && !winlinkPopoutWin.isDestroyed()) winlinkPopoutSend('winlink-form-result', msg);
+  else _winlinkPendingFormResult = msg;
+}
+
+let _winlinkFormAsking = false;
+/** A form wants a web page: the operator's browser, after a yes; never inside the form window. */
+async function winlinkFormAskExternal(parent, url) {
+  if (_winlinkFormAsking) return;
+  _winlinkFormAsking = true;
+  try {
+    const r = await dialog.showMessageBox(parent && !parent.isDestroyed() ? parent : undefined, {
+      type: 'question', buttons: ['Open in my browser', 'Cancel'], defaultId: 1, cancelId: 1,
+      title: 'A web page outside POTACAT', message: 'This form wants to open a web page.',
+      detail: `${String(url).slice(0, 300)}\n\nIt opens in your own browser, not in POTACAT.`,
+    });
+    if (r.response === 0) await require('electron').shell.openExternal(url);
+  } catch { /* closed */ } finally { _winlinkFormAsking = false; }
+}
+
+/**
+ * The form window: Pat's own page for a form (Winlink's HTML and script, not
+ * ours). Locked down: sandboxed renderer, context isolation, no Node, NO
+ * preload, web security on, and a fresh in-memory session per form (no
+ * "persist:"), so no other window's cookies or storage are shared. Its
+ * requests reach only Pat's form pages (lib/winlink-forms.js requestAllowed);
+ * a link elsewhere opens in the browser after a confirm; every permission is
+ * refused except geolocation, which is answered with the centre of the grid
+ * in Settings, never the computer's location, and refused with no grid. The
+ * form instance cookie is added to its requests to Pat here, so the page
+ * never needs to set it (Pat v1.0.1 serves form pages with a null origin).
+ */
+async function openWinlinkFormWindow({ url, origin, id, title, submit }) {
+  const { session } = require('electron');
+  const partition = `winlink-form-${id}`;
+  const ses = session.fromPartition(partition, { cache: false });
+  const cookie = WinlinkForms.formCookieHeader(id);
+  let geo = WinlinkForms.geolocationFromGrid(settings.grid);
+  ses.webRequest.onBeforeRequest((d, cb) => {
+    const ok = WinlinkForms.requestAllowed({ url: d.url, method: d.method, resourceType: d.resourceType }, origin, { submit });
+    if (!ok) winlinkLog(`form window: refused ${d.method} ${String(d.url).slice(0, 120)}`);
+    cb({ cancel: !ok });
+  });
+  ses.webRequest.onBeforeSendHeaders({ urls: [`${origin}/*`] }, (d, cb) => cb({ requestHeaders: { ...d.requestHeaders, Cookie: cookie } }));
+  if (submit) {
+    ses.webRequest.onCompleted({ urls: [`${origin}/api/form*`] }, (d) => {
+      if (d.method === 'POST' && d.statusCode === 200 && d.resourceType === 'mainFrame' && WinlinkForms.formUrlKind(d.url, origin) === 'submit') winlinkFormSubmitted(id);
+    });
+  }
+  ses.setPermissionRequestHandler((_wc, permission, cb) => cb(WinlinkForms.permissionAllowed(permission, geo)));
+  ses.setPermissionCheckHandler((_wc, permission) => WinlinkForms.permissionAllowed(permission, geo));
+  ses.setDevicePermissionHandler(() => false);
+  winlinkFormWin = new BrowserWindow({
+    width: 1040, height: 800, minWidth: 560, minHeight: 420,
+    title, backgroundColor: getThemeWindowBg(), show: false, icon: getIconPath(), autoHideMenuBar: true,
+    webPreferences: {
+      sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true,
+      partition, safeDialogs: true, spellcheck: false,
+    },
+  });
+  const w = winlinkFormWin;
+  rememberWindowPlace(winlinkFormWin, 'winlinkFormBounds', { minWidth: 560, minHeight: 420 });
+  w.setMenuBarVisibility(false);
+  w.on('page-title-updated', (e) => e.preventDefault());
+  const wc = w.webContents;
+  const guard = (e, u) => {
+    const v = WinlinkForms.navigationVerdict(u, origin, { submit });
+    if (v.allow) return;
+    e.preventDefault();
+    if (v.external) winlinkFormAskExternal(w, v.external);
+    else winlinkLog(`form window: did not follow ${String(u).slice(0, 120)}`);
+  };
+  wc.on('will-frame-navigate', (e) => guard(e, e.url));
+  wc.on('will-redirect', (e, u) => guard(e, (e && e.url) || u));
+  wc.setWindowOpenHandler(({ url: u }) => {
+    const v = WinlinkForms.navigationVerdict(u, origin, { submit });
+    if (v.external) winlinkFormAskExternal(w, v.external);
+    return { action: 'deny' };
+  });
+  wc.on('will-attach-webview', (e) => e.preventDefault());
+  // A form page is drawn for a browser's white page and sets no background of its
+  // own; the theme's window colour showed through it (black text on the dark
+  // themes). The browser default comes back as a user style, so the form's own
+  // CSS still wins: the page keeps Winlink's look, not ours. Electron has no
+  // prompt(), which the forms call on Submit and for every date and time:
+  // WinlinkForms.PROMPT_SHIM takes what the form suggests (lib/winlink-forms.js).
+  wc.on('dom-ready', () => {
+    wc.insertCSS('html { background-color: #ffffff; color-scheme: light; }', { cssOrigin: 'user' }).catch(() => {});
+    wc.executeJavaScript(WinlinkForms.PROMPT_SHIM).catch(() => {});
+  });
+  if (geo) {
+    try {
+      wc.debugger.attach('1.3');
+      await wc.debugger.sendCommand('Emulation.setGeolocationOverride', geo);
+    } catch (e) {
+      geo = null;
+      winlinkLog(`form window: location from the grid unavailable (${e.message}); location requests are refused`);
+    }
+  }
+  w.once('ready-to-show', () => { if (!w.isDestroyed()) w.show(); });
+  w.on('closed', () => {
+    if (winlinkFormWin === w) winlinkFormWin = null;
+    ses.clearStorageData().catch(() => {});
+  });
+  w.loadURL(url).catch((e) => winlinkLog(`form window: ${e.message}`));
 }
 
 // ── Folders (#462, #475): Archive, the Deleted folder, Restore ───────────
@@ -39225,6 +39458,7 @@ function broadcastAppTheme() {
     + `if(s.theme!=='light'&&s.variant&&s.variant!=='navy'&&!s.ds)e.setAttribute('data-dark-variant',s.variant);else e.removeAttribute('data-dark-variant');`
     + `if(s.ds)e.setAttribute('data-ds',s.ds);else e.removeAttribute('data-ds');})(${JSON.stringify(r)})`;
   for (const w of BrowserWindow.getAllWindows()) {
+    if (w === winlinkFormWin) continue; // Pat's form page is not ours to restyle (#346)
     try { if (!w.isDestroyed()) w.webContents.executeJavaScript(js).catch(() => {}); } catch { /* ignore */ }
   }
 }
@@ -46584,6 +46818,7 @@ function cloudShackNotice(text, kind) {
     winlinkPopoutWin.webContents.on('did-finish-load', () => {
       winlinkPopoutSend('winlink-state', winlinkPayload());
       if (_winlinkPendingCompose) { winlinkPopoutSend('winlink-compose-prefill', _winlinkPendingCompose); _winlinkPendingCompose = null; }
+      if (_winlinkPendingFormResult) { winlinkPopoutSend('winlink-form-result', _winlinkPendingFormResult); _winlinkPendingFormResult = null; }
       for (const box of WinlinkStateLib.FOLDERS) winlinkPopoutSend('winlink-mailbox', { box, messages: winlinkState.list(box) });
       winlinkPopoutSend('winlink-session', winlinkSessionView());
       winlinkPopoutSend('winlink-popout-theme', themeQuery());
@@ -47103,6 +47338,10 @@ function cloudShackNotice(text, kind) {
     ...m, attachments: (m.attachments || []).map((a) => ({ name: a.name, data: a.dataBase64 })),
   }));
   ipcMain.handle('winlink-cmd-posreport', (_e, o = {}) => winlinkPosReport(o));
+  // Winlink forms (#346): the picker's list, Pat's download of the standard forms, the form window.
+  ipcMain.handle('winlink-forms-catalog', () => winlinkFormsCatalog());
+  ipcMain.handle('winlink-forms-update', () => winlinkFormsUpdate());
+  ipcMain.handle('winlink-form-open', (_e, o = {}) => winlinkFormOpen({ kind: String(o.kind || ''), path: String(o.path || ''), box: String(o.box || ''), mid: String(o.mid || ''), file: String(o.file || '') }));
   ipcMain.handle('winlink-cmd-connect', (_e, o = {}) => {
     if (isRemoteMode() && WinlinkModes.isRadioMode(o.mode)) return { ok: false, error: 'Radio sessions key the shack\'s radio — start them on the shack PC' };
     winlinkRetryCancel('connect');

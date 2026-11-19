@@ -324,7 +324,10 @@
       var left = acts.filter(function (a) { return !a.danger; });
       var right = acts.filter(function (a) { return a.danger; });
       var deleted = openBox === WMA.DELETED;
+      // A Winlink form attachment (#346): Pat renders it in the form window.
+      var formAtt = !deleted && window.WinlinkForms ? window.WinlinkForms.formAttachment(m.attachments) : null;
       var html = '<div class="wl-reader-actions">'
+        + (formAtt ? '<button class="wl-btn" id="wl-view-form" title="Open the form this message carries, the way the sender filled it in">View form</button>' : '')
         + left.map(btn).join('')
         + (!deleted && m.from && !contactFor(m.from) && WC.normalizeAddress(m.from) ? '<button class="wl-btn" id="wl-addbook">Add to address book</button>' : '')
         + '<span class="wl-spacer"></span>' + right.map(btn).join('') + '</div>'
@@ -353,6 +356,13 @@
       // Reply all: never the default; To = the sender, Cc = everyone else but this station.
       on('wl-reply-all', function () { var ra = WMA.replyAll(m, mycall); compose({ to: ra.to.join(', '), cc: ra.cc.join(', '), subject: WMA.replySubject(m.subject), body: quoteBody(m) }); });
       on('wl-addbook', function () { openBook({ address: m.from }); });
+      on('wl-view-form', function () {
+        say('Opening the form...');
+        window.api.formOpen({ kind: 'view', box: openBox, mid: mid, file: formAtt.file }).then(function (r) {
+          if (!r || !r.ok) say((r && r.error) || 'Could not open the form.', true);
+          else say('The form is open in its own window.');
+        });
+      });
       // #wl-forward, not #wl-fwd: that id is the PWR meter, which took the click.
       on('wl-forward', function () { compose({ subject: 'Fwd: ' + m.subject, body: '\n\n--- Forwarded from ' + m.from + ':\n' + (m.body || '') }); });
       acts.forEach(function (a) {
@@ -420,6 +430,11 @@
       $('wl-reader').style.display = 'none';
       $('wl-compose').classList.add('show');
       setTemplateMode(pre.template ? { id: pre.id || null } : null);
+      // A form's message (#346): Pat adds the form's data when it goes in the
+      // Outbox. A read-only form's body cannot be changed (the template says so).
+      composeForm = pre.form || null;
+      $('wl-c-body').readOnly = !!(composeForm && composeForm.readOnly);
+      $('wl-c-save-tpl').hidden = !!pre.template || !!composeForm;
       $('wl-c-name').value = pre.name || '';
       setChips('to', pre.to || '');
       setChips('cc', pre.cc || '');
@@ -430,7 +445,8 @@
       $('wl-c-err').textContent = '';
       // A template's instructions go in their own panel above the body.
       $('wl-c-hint').textContent = pre.note || '';
-      $('wl-c-hint').hidden = !pre.note;
+      if (composeForm) $('wl-c-hint').textContent = formNote(composeForm);
+      $('wl-c-hint').hidden = !$('wl-c-hint').textContent;
       (pre.template ? $('wl-c-name') : pre.to ? $('wl-c-body') : chipFields.to.input).focus();
     };
     if (pre && pre.template) go(); else requireNotice(go);
@@ -451,9 +467,10 @@
     $('wl-c-err').textContent = '';
     if (tplEdit) { saveTemplate(); return; }
     $('wl-c-send').disabled = true;
-    window.api.send({ to: chipValue('to'), cc: chipValue('cc'), subject: $('wl-c-subj').value, body: $('wl-c-body').value, attachments: pendingFiles }).then(function (r) {
+    window.api.send({ to: chipValue('to'), cc: chipValue('cc'), subject: $('wl-c-subj').value, body: $('wl-c-body').value, attachments: pendingFiles, formId: composeForm ? composeForm.id : undefined }).then(function (r) {
       $('wl-c-send').disabled = false;
       if (!r || !r.ok) { $('wl-c-err').textContent = (r && r.error) || 'Could not queue it'; return; }
+      composeForm = null;
       showReader('<div class="wl-empty">In the Outbox. It goes out on the next Send / Receive.</div>');
     });
   });
@@ -564,6 +581,88 @@
     setTemplateMode({ id: null });
     $('wl-c-err').textContent = '';
     $('wl-c-name').focus();
+  });
+
+  // ── Winlink forms (#346) ─────────────────────────────────────────────────
+  // Pat's forms (lib/winlink-forms.js): favourites first, then every form,
+  // with a search. A form opens in its own window (Pat's own page); its
+  // Submit brings the message back to the compose pane above. Offered only
+  // with Pat 1.0.1 or newer; otherwise the panel says why in one sentence.
+  var composeForm = null;   // { id, name, readOnly } while the compose pane holds a form's message
+  var formsCat = null;      // main's answer: { ok, allowed, why, installed, version, count, favourites, forms }
+  function formNote(f) {
+    return 'Made with the Winlink form "' + f.name + '". Pat adds the form\'s data as an attachment, so Winlink Express and Pat show it as the form.'
+      + (f.readOnly ? ' This form\'s message may not be changed; fill the form in again to change it.' : '');
+  }
+  function formsSay(t, bad) { var el = $('wl-forms-msg'); el.textContent = t || ''; el.classList.toggle('bad', !!bad); }
+  function formItem(f) {
+    if (f.missing) return '<button type="button" class="wl-tpl-item" data-form-find="' + esc(f.search) + '"><span class="wl-tpl-main">' + esc(f.name) + '<span class="wl-tpl-sub">Not in this forms set by that name. Click to search for it.</span></span></button>';
+    return '<button type="button" class="wl-tpl-item" data-form-path="' + esc(f.path) + '"><span class="wl-tpl-main">' + esc(f.name) + '<span class="wl-tpl-sub">' + esc(f.folder) + '</span></span></button>';
+  }
+  function renderFormsPanel() {
+    var c = formsCat || {};
+    var usable = !!(c.ok && c.allowed);
+    var status = !c.allowed && c.why ? c.why
+      : !c.ok ? (c.error || 'Pat did not answer.')
+      : c.installed ? c.count + ' forms, Winlink Standard Forms version ' + (c.version || 'unknown') + '.'
+      : 'No forms on this computer yet. Pat gets the Winlink Standard Forms (about 3 MB) from getpat.io.';
+    $('wl-forms-status').textContent = status;
+    $('wl-forms-get').hidden = !usable;
+    $('wl-forms-get').textContent = c.installed ? 'Check for newer forms' : 'Get the standard forms';
+    $('wl-forms-find-row').hidden = !(usable && c.installed);
+    var favs = usable && c.installed ? (c.favourites || []) : [];
+    $('wl-forms-favs-wrap').hidden = !favs.length;
+    $('wl-forms-favs').innerHTML = favs.map(formItem).join('');
+    var q = String($('wl-forms-find').value || '').trim();
+    var list = !(usable && c.installed) ? [] : q ? window.WinlinkForms.searchForms(c.forms, q, 60) : (c.forms || []);
+    $('wl-forms-list-wrap').hidden = !(usable && c.installed);
+    $('wl-forms-list-head').textContent = q ? (list.length ? 'Found ' + list.length + (list.length === 60 ? ' (the first 60)' : '') : 'No form has those words') : 'All forms';
+    $('wl-forms-list').innerHTML = list.map(formItem).join('');
+  }
+  function openFormsPanel() {
+    requireNotice(function () {
+      showForm('wl-form-forms');
+      formsSay('');
+      formsCat = null;
+      $('wl-forms-status').textContent = 'Asking Pat for its forms...';
+      $('wl-forms-get').hidden = true;
+      $('wl-forms-find-row').hidden = true;
+      $('wl-forms-favs-wrap').hidden = true;
+      $('wl-forms-list-wrap').hidden = true;
+      window.api.formsCatalog().then(function (c) {
+        formsCat = c || { ok: false, allowed: true, error: 'Pat did not answer.' };
+        renderFormsPanel();
+        if (!$('wl-forms-find-row').hidden) $('wl-forms-find').focus();
+      });
+    });
+  }
+  $('wl-forms-btn').addEventListener('click', function () { closeTemplateMenu(); openFormsPanel(); });
+  $('wl-forms-close').addEventListener('click', function () { showReader('<div class="wl-empty">Pick a message.</div>'); });
+  $('wl-forms-find').addEventListener('input', renderFormsPanel);
+  $('wl-forms-get').addEventListener('click', function () {
+    var b = $('wl-forms-get');
+    b.disabled = true;
+    formsSay('Pat is getting the Winlink Standard Forms from getpat.io (about 3 MB)...');
+    window.api.formsUpdate().then(function (r) {
+      b.disabled = false;
+      formsSay((r && r.text) || 'That did not work. Try again.', !(r && r.ok));
+      return window.api.formsCatalog();
+    }).then(function (c) { if (c) { formsCat = c; renderFormsPanel(); } });
+  });
+  $('wl-form-forms').addEventListener('click', function (e) {
+    var find = e.target.closest('[data-form-find]');
+    if (find) { $('wl-forms-find').value = find.getAttribute('data-form-find'); renderFormsPanel(); $('wl-forms-find').focus(); return; }
+    var it = e.target.closest('[data-form-path]');
+    if (!it) return;
+    formsSay('Opening the form...');
+    window.api.formOpen({ kind: 'new', path: it.getAttribute('data-form-path') }).then(function (r) {
+      if (!r || !r.ok) { formsSay((r && r.error) || 'Could not open the form.', true); return; }
+      formsSay('The form is open in its own window. Fill it in and press its Submit button; the message comes back here for you to put in the Outbox.');
+    });
+  });
+  if (window.api.onFormResult) window.api.onFormResult(function (m) {
+    if (!m || m.error) { showForm('wl-form-forms'); formsSay((m && m.error) || 'The form did not come back.', true); return; }
+    compose({ to: m.to, cc: m.cc, subject: m.subject, body: m.body, form: { id: m.id, name: m.name, readOnly: !!m.readOnly } });
   });
 
   // ── waterfall: is the gateway frequency in use? ──────────────────────────
@@ -1595,6 +1694,7 @@
 
   // ── the forms share the reading pane with the reader and compose ────────
   function hideForms() {
+    $('wl-form-forms').hidden = true;
     $('wl-form-pos').hidden = true;
     $('wl-form-spot').hidden = true;
     closeBook();

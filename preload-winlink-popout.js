@@ -25,6 +25,12 @@ contextBridge.exposeInMainWorld('api', {
   // POTA self-spot by email (spot@pota.tdod.org), filled from the live activation.
   potaSpotTemplate: (o) => ipcRenderer.invoke('winlink-pota-spot-template', o || {}),
   onComposePrefill: (cb) => ipcRenderer.on('winlink-compose-prefill', (_e, m) => cb(m || {})),
+  // Winlink forms (#346): Pat's catalog, Pat's download of the standard forms, the form window,
+  // and the filled form coming back for the compose pane. send() carries its formId.
+  formsCatalog: () => ipcRenderer.invoke('winlink-forms-catalog'),
+  formsUpdate: () => ipcRenderer.invoke('winlink-forms-update'),
+  formOpen: (o) => ipcRenderer.invoke('winlink-form-open', o),
+  onFormResult: (cb) => ipcRenderer.on('winlink-form-result', (_e, m) => cb(m || {})),
 
   // Sessions — Connect is the only way a radio session starts.
   connect: (o) => ipcRenderer.invoke('winlink-cmd-connect', o),
