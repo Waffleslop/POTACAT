@@ -478,7 +478,7 @@ const END = '2026-11-14T20:30:00.000Z';
 
   await check('ECHOCAT Web and the POTACAT renderer read the one table; main stays glue', () => {
     const web = read('renderer/remote.js');
-    assert.ok(/'mail-folders-v2', 'pass-state'\]/.test(web), 'ECHOCAT Web advertises the flag');
+    assert.ok(/'mail-folders-v2', 'pass-state'(, '[a-z0-9-]+')*]/.test(web), 'ECHOCAT Web advertises the flag'); // later capabilities may follow (worked-incremental, #731)
     assert.ok(/case 'pass-state':/.test(web) && /PassWording\.describeState/.test(web) && /type: 'pass-claim'/.test(web));
     const css = read('renderer/remote.css');
     const block = css.slice(css.indexOf('#pass-banner .pass-state-btn'), css.indexOf('#pass-banner .pass-state-btn:disabled'));

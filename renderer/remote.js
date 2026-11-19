@@ -1869,7 +1869,7 @@
           // instead of taking the radio (#541 step 2).
           // worked-incremental: the full worked list comes once per connection;
           // each logged QSO arrives in worked-today, merged below (#731).
-          capabilities: ['chunked-all-qsos', 'qso-delta', 'chunked-worked-qsos', 'worked-incremental', 'local-cw-sidetone', 'jtcat-qso-logged', 'mail-folders-v2', 'pass-state'],
+          capabilities: ['chunked-all-qsos', 'qso-delta', 'chunked-worked-qsos', 'local-cw-sidetone', 'jtcat-qso-logged', 'mail-folders-v2', 'pass-state', 'worked-incremental'],
         }));
       } catch {}
       onOpen();
