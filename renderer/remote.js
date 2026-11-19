@@ -1867,7 +1867,9 @@
           // pass-state: on a Guest Pass, the shack sends pass-state {state,
           // reason, ...} and lets a second device of the same guest wait
           // instead of taking the radio (#541 step 2).
-          capabilities: ['chunked-all-qsos', 'qso-delta', 'chunked-worked-qsos', 'local-cw-sidetone', 'jtcat-qso-logged', 'mail-folders-v2', 'pass-state'],
+          // worked-incremental: the full worked list comes once per connection;
+          // each logged QSO arrives in worked-today, merged below (#731).
+          capabilities: ['chunked-all-qsos', 'qso-delta', 'chunked-worked-qsos', 'local-cw-sidetone', 'jtcat-qso-logged', 'mail-folders-v2', 'pass-state', 'worked-incremental'],
         }));
       } catch {}
       onOpen();
@@ -2913,6 +2915,14 @@
           logbookQsos.push(msg.data);
           lbTotal = msg.total || logbookQsos.length;
           renderLogbook();
+          // worked-incremental (#731): the full worked list is not re-sent per
+          // QSO, so merge this one (back-dated ones too) with the same entry
+          // rule as the full list; a same-QSO last entry is replaced, not doubled.
+          if (typeof WorkedEntry !== 'undefined' && WorkedEntry.mergeRecord(workedQsos, msg.data)) {
+            ddPanel(spotsDropdown).querySelector('.rc-hide-worked-row').style.display = '';
+            renderSpots();
+            if (activeTab === 'map') renderMapSpots();
+          }
         }
         break;
 

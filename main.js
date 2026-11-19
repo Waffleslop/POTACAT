@@ -35427,6 +35427,8 @@ function loadWorkedQsos() {
     if (win && !win.isDestroyed()) {
       win.webContents.send('worked-qsos', [...workedQsos.entries()]);
     }
+    // A full-log change (#731): only a 'worked-incremental' client is sent the list again.
+    if (remoteServer && remoteServer.running) remoteServer.sendWorkedQsos([...workedQsos.entries()], { fullLogChange: true });
     checkRemoteQsoMilestone();
   } catch (err) {
     console.error('Failed to parse worked QSOs:', err.message);

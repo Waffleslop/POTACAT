@@ -99,7 +99,8 @@ Application close codes (mirrored in `CLOSE_CODES` in
 | `set-echo-filters` | C→S | Update server-side filter state. `filters.bands` is the ticked list as the client shows it; the desktop turns it into `bandsOff` against the shack's rig (bands the rig lacks keep their earlier state). Clients need not send `bandsOff`. Does NOT carry muteRules — they are desktop-owned and merged into `echo-filters` at send, so this message can never clobber them. |
 | `set-spot-mute-rules` | C→S | Full-list replace of the per-band region mutes from a client editor. Desktop sanitizes (valid continents, deduped, capped 50) and echoes the accepted set inside the next `echo-filters` push. |
 | `worked-parks` | S→C | List of park refs the user has worked (drives ATNO badges). |
-| `worked-qsos` | S→C | List of recent worked callsigns/refs (drives "worked" highlighting). |
+| `worked-qsos` | S→C | List of recent worked callsigns/refs (drives "worked" highlighting). Sent at connect (chunked when the hello lists `chunked-worked-qsos`). A client without `worked-incremental` is also sent the whole list again after every QSO the shack logs. A client whose hello lists `worked-incremental` (added 2026-11-17, #731) is sent it once per connection and again only after a full-log change (import, edit, delete, reload); after each logged QSO it gets `worked-today` (and `qso-added` if it lists `qso-delta`) and must merge the new QSO into its worked map itself. ECHOCAT Web merges both: `worked-today`, and each `qso-added` record built by lib/worked-entry.js, the rule the full list uses (a same-QSO last entry is replaced, not counted twice). |
+| `worked-today` | S→C | Today's (UTC) worked QSOs: `entries` = `[{call, ref, band, mode, date}]`. Sent at connect and after every logged QSO to the active client, never size-capped. Merge into the worked map (skip exact duplicates); a `worked-incremental` client relies on it for each new QSO. |
 
 ### Rig control / VFO
 
