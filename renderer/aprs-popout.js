@@ -129,6 +129,9 @@
     return AprsMap.glide(m.from, m.to, f);
   }
 
+  // A cluster holding a station the radio heard draws the heard-by-me ring (Casey 2026-11-19).
+  function heardOnRadio(pt) { return !!(pt && pt.row && pt.row.rf); }
+
   function recluster() {
     var z = map.getZoom();
     var pts = [];
@@ -140,7 +143,7 @@
       if (r.key === selected) sel = pt; else pts.push(pt);
     }
     var t0 = now();
-    clusters = z >= CLUSTER_OFF_ZOOM ? { singles: pts, clusters: [] } : AprsMap.cluster(pts, { cell: CELL_PX });
+    clusters = z >= CLUSTER_OFF_ZOOM ? { singles: pts, clusters: [] } : AprsMap.cluster(pts, { cell: CELL_PX, ring: heardOnRadio });
     if (sel) clusters.singles.push(sel);   // the selected station is never hidden in a cluster
     perfPush(perf.cluster, now() - t0);
     clusterZoom = z;
@@ -204,6 +207,11 @@
     ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI * 2);
     ctx.fillStyle = theme.panel; ctx.fill();
     ctx.lineWidth = 2.5; ctx.strokeStyle = theme.cluster; ctx.stroke();
+    if (c.ring) {
+      // The same solid ring a single heard station has, just outside the halo.
+      ctx.beginPath(); ctx.arc(x, y, rad + 6.5, 0, Math.PI * 2);
+      ctx.lineWidth = 3; ctx.strokeStyle = theme.rf; ctx.stroke();
+    }
     var n = c.count >= 10000 ? Math.round(c.count / 1000) + 'k' : c.count >= 1000 ? (c.count / 1000).toFixed(1) + 'k' : String(c.count);
     ctx.fillStyle = theme.text;
     ctx.font = '700 13px "Segoe UI", Roboto, sans-serif';
