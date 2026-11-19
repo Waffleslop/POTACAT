@@ -48,8 +48,9 @@
   </div>
 
   <div class="aprs-beacon" id="aprs-beacon" role="group" aria-label="Beacon">
-    <span class="aprs-beacon-title" title="Your position to APRS-IS, over the internet. Nothing is transmitted on the air.">Beacon</span>
-    <button type="button" class="aprs-btn" id="aprs-beacon-now" title="Send your position to APRS-IS now">Beacon now</button>
+    <span class="aprs-beacon-title" title="Beacon now sends your position to APRS-IS over the internet. Beacon now (radio) sends one packet over your radio, after you confirm.">Beacon</span>
+    <button type="button" class="aprs-btn" id="aprs-beacon-now" title="Send your position to APRS-IS now, over the internet. Nothing is transmitted on the air.">Beacon now</button>
+    <button type="button" class="aprs-btn aprs-btn-rf" id="aprs-rf-now" disabled title="Send one APRS packet with your position over your radio, on the frequency it listens on. You confirm first.">Beacon now (radio)</button>
     <label class="aprs-field" title="Send your position every so often while this window is open">Timer
       <select id="aprs-beacon-interval">
         <option value="0">Off</option>
@@ -67,6 +68,14 @@
       <button type="button" class="aprs-btn-quiet hidden" id="aprs-beacon-grid" title="Use the centre of the grid square in Settings">Use my grid</button>
     </div>
     <div class="aprs-beacon-row"><span class="aprs-mark hidden" id="aprs-beacon-status"><span class="aprs-dot" id="aprs-beacon-dot"></span><span id="aprs-beacon-text"></span></span></div>
+    <div class="aprs-beacon-row" id="aprs-rf-row">
+      <span class="aprs-mark hidden" id="aprs-rf-status"><span class="aprs-dot" id="aprs-rf-dot"></span><span id="aprs-rf-text"></span></span>
+      <span class="aprs-rf-confirm hidden" id="aprs-rf-confirm" role="group" aria-label="Confirm the radio beacon">
+        <span id="aprs-rf-confirm-text"></span>
+        <button type="button" class="aprs-btn aprs-btn-tx" id="aprs-rf-send">Transmit</button>
+        <button type="button" class="aprs-btn-quiet" id="aprs-rf-cancel">Cancel</button>
+      </span>
+    </div>
   </div>
 
   <div class="aprs-main">
@@ -107,5 +116,6 @@
   <script src="aprs-listen-bar.js"></script>
   <script src="../lib/aprs-beacon.js"></script>
   <script src="aprs-beacon-bar.js"></script>
+  <script src="aprs-rf-beacon-bar.js"></script>
 </body>
 </html>

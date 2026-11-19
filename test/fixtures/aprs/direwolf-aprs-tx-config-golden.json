@@ -1,0 +1,26 @@
+[
+ {
+  "input": {
+   "mycall": "k3sbp",
+   "audioPort": 50200,
+   "agwPort": 8014,
+   "shimPort": 4551,
+   "band": "2m",
+   "txDelayMs": 500,
+   "txTailMs": 200
+  },
+  "conf": "# Written by POTACAT for ONE APRS beacon over the radio, keyed only through POTACAT — written for each beacon and removed after; do not edit.\nADEVICE tcp:50200\nARATE 48000\nACHANNELS 1\nCHANNEL 0\nMYCALL K3SBP\nMODEM 1200\nPTT RIG 2 127.0.0.1:4551\nTXDELAY 50\nTXTAIL 20\nDWAIT 0\nSLOTTIME 10\nPERSIST 63\nAGWPORT 8014\nKISSPORT 0\n"
+ },
+ {
+  "input": {
+   "mycall": "K3SBP-9",
+   "audioPort": 61000,
+   "agwPort": 8014,
+   "shimPort": 4555,
+   "band": "30m",
+   "txDelayMs": 300,
+   "txTailMs": 100
+  },
+  "conf": "# Written by POTACAT for ONE APRS beacon over the radio, keyed only through POTACAT — written for each beacon and removed after; do not edit.\nADEVICE tcp:61000\nARATE 48000\nACHANNELS 1\nCHANNEL 0\nMYCALL K3SBP-9\nMODEM 300 1600:1800 A- 7@30\nPTT RIG 2 127.0.0.1:4555\nTXDELAY 30\nTXTAIL 10\nDWAIT 0\nSLOTTIME 30\nPERSIST 63\nAGWPORT 8014\nKISSPORT 0\n"
+ }
+]
