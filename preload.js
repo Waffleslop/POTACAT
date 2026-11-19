@@ -546,6 +546,9 @@ contextBridge.exposeInMainWorld('api', {
   // Winlink (Pat) — the mail window, Settings helpers, the bug-report line.
   winlinkPopoutOpen: () => ipcRenderer.send('winlink-popout-open'),
   aprsPopoutOpen: () => ipcRenderer.send('aprs-popout-open'),
+  // APRS phase 4: the iGate's marks { on, active, call, sentence, link, gated, lastAt, lastFrom }
+  aprsIgateStatus: () => ipcRenderer.invoke('aprs-igate-status'),
+  onAprsIgateStatus: (cb) => ipcRenderer.on('aprs-igate-status', (_e, s) => cb(s)),
   winlinkPotaSpotOpen: (o) => ipcRenderer.send('winlink-pota-spot-open', o || {}),
   winlinkDiag: () => ipcRenderer.invoke('winlink-diag'),
   settingsSaveStatus: () => ipcRenderer.invoke('settings-save-status'),

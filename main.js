@@ -483,6 +483,7 @@ const AprsRfFrequency = require('./lib/aprs-rf-frequency'); // APRS: the 2 m fre
 const AprsRfFrames = require('./lib/aprs-rf-frames');       // APRS phase 2: Dire Wolf's AGW monitor frames -> APRS packets
 const AprsRadioReturn = require('./lib/aprs-radio-return'); // APRS phase 2: the radio goes back after listening
 const AprsParser = require('./lib/aprs-parser');
+const AprsIgate = require('./lib/aprs-igate');             // APRS phase 4: the receive-only iGate's rules and the uplink login
 const VaraProcess = require('./lib/vara-process');
 const VaraSetup = require('./lib/vara-setup');
 const WinlinkModes = require('./lib/winlink-modes');
@@ -13094,7 +13095,7 @@ function aprsListenPayload() {
     mhz: aprsListen.on && aprsListen.freq ? aprsListen.freq.mhz : '', heard: aprsListen.heard, lastAt: aprsListen.lastAt, note: aprsListen.note,
   };
 }
-function aprsListenPush() { aprsWinSend('aprs-listen', aprsListenPayload()); }
+function aprsListenPush() { aprsWinSend('aprs-listen', aprsListenPayload()); aprsIgateSync(); }
 
 /** The modem bridge holds the radio's sound card while APRS listens (modemBridgeWanted). */
 function aprsListenWantsAudio() {
@@ -13184,6 +13185,9 @@ async function aprsAudioReady() {
 }
 
 function aprsOnMonitorFrame(f) {
+  // Phase 4: the iGate takes every UI frame heard (its own rules decide), parsed or not.
+  const heard = AprsRfFrames.fromMonitorFrame(f);
+  if (heard) aprsIgateOfferRf(heard.line);
   const p = AprsRfFrames.packet(f, AprsParser.parse);
   if (!p) return;
   aprsListen.heard++;
@@ -13453,6 +13457,65 @@ function aprsListenSet(on) {
   } else {
     aprsListenStop('switched off');
   }
+}
+
+// ── APRS phase 4: the receive-only iGate ──────────────────────────────────────
+// "Report what I hear to APRS-IS (iGate)" (settings.aprsIgate, off by default):
+// while the radio listens to APRS (the window's switch or the APRS idle mode),
+// each packet Dire Wolf hears goes to APRS-IS through the one uplink under a
+// verified login. Every rule is lib/aprs-igate.js (receive only, never
+// internet to radio; no TCPIP/TCPXX/NOGATE/RFONLY; no generic queries; third
+// party unwrapped; ,qAO,<call> added and nothing else; no duplicate in 30 s).
+// Everything gated is in the log, the audit trail of what went out under the
+// operator's callsign. Small marks in the APRS window and Settings; no pop-ups.
+let aprsIgate = null;      // lib/aprs-igate.js createIgate, for this run (counts survive a stop)
+let _aprsIgateCall = '';
+/** A Guest Pass session is on this station: active, ending soon, or the owner holding the radio back. */
+function aprsGuestPassOn() {
+  const st = passEnforcement && passEnforcement.getState ? passEnforcement.getState() : 'idle';
+  return st !== 'idle' && st !== 'ended';
+}
+/** Why the iGate gates nothing now (a Guest Pass, Casey 2026-11-19), or null (lib/aprs-igate.js igatePause). */
+function aprsIgatePause() { return AprsIgate.igatePause({ guestPass: aprsGuestPassOn() }); }
+function aprsIgateWanted() {
+  return settings.aprsIgate === true && aprsListen.on &&
+    (aprsListen.state === 'starting' || aprsListen.state === 'listening' || aprsListen.state === 'paused') &&
+    !aprsIgatePause(); // a Guest Pass: nothing is gated, whoever started listening, and the uplink is let go
+}
+function aprsIgateSync() {
+  const want = aprsIgateWanted();
+  if (want !== _aprsUplinkUsers.has('igate')) aprsUplinkWant('igate', want);
+}
+/** One line Dire Wolf heard on the radio (TNC2). Gated only with the setting on and a verified login. */
+function aprsIgateOfferRf(line) {
+  if (!aprsIgateWanted() || !aprsUplink) return;
+  if (!aprsIgate || _aprsIgateCall !== aprsUplink.call) {
+    _aprsIgateCall = aprsUplink.call;
+    aprsIgate = AprsIgate.createIgate({ call: _aprsIgateCall, send: (l) => !!(aprsUplink && aprsUplink.send(l)), paused: () => aprsIgatePause() });
+  }
+  const r = aprsIgate.offer(line);
+  if (r.ok) sendCatLog('[APRS iGate] gated: ' + r.out);
+  aprsIgatePush();
+}
+function aprsIgateStatus() {
+  const login = AprsIgate.uplinkLogin(settings.myCallsign);
+  const st = aprsIgate ? aprsIgate.stats() : { gated: 0, lastAt: 0, lastFrom: '' };
+  const link = aprsUplink && _aprsUplinkUsers.has('igate') ? aprsUplink.status().state : 'stopped';
+  const pause = settings.aprsIgate === true ? aprsIgatePause() : null;
+  return {
+    on: settings.aprsIgate === true,
+    active: aprsIgateWanted(),
+    call: login.ok ? login.call : '',
+    sentence: settings.aprsIgate === true && !login.ok ? login.sentence : '',
+    link,               // 'stopped'|'connecting'|'connected'|'verified'|'unverified'|'waiting'
+    paused: pause ? pause.sentence : '', // "iGate paused: a guest has the radio" while a Guest Pass runs
+    gated: st.gated, lastAt: st.lastAt, lastFrom: st.lastFrom,
+  };
+}
+function aprsIgatePush() {
+  const s = aprsIgateStatus();
+  aprsWinSend('aprs-igate', s);
+  if (win && !win.isDestroyed()) { try { win.webContents.send('aprs-igate-status', s); } catch {} }
 }
 
 function killArdop() {
@@ -15342,7 +15405,7 @@ function js8PushStatus() {
     hbAck: js8HbAck,                       // ⚙ auto-reply to heartbeats (session-only)
     swrAutoTune: !!settings.swrAutoTune,   // ⚙ run the ATU once on an SWR-guard trip
     aprsGate: !!settings.js8AprsGate,      // ⚙ RF→APRS-IS gateway opt-in
-    aprsGateUp: !!(aprsGate && aprsGate.verified),
+    aprsGateUp: !!(settings.js8AprsGate && _aprsUplinkUsers.has('js8') && aprsUplink && aprsUplink.verified),
     groups: js8CustomGroups(),             // joined @NETS (⚙ gear)
     mailUnread: _js8Mailbox ? _js8Mailbox.unread : 0,   // count only — content stays owner-side
     mailHold: settings.js8MailHold !== false,        // ⚙ hold mail for other stations
@@ -15470,25 +15533,70 @@ function js8HandleRx(d) {
   if (msg.to === '@APRSIS') js8GateAprs(msg);
 }
 
+// ── The one APRS-IS uplink: JS8 gateway, APRS iGate (phase 4), APRS beacon (phase 5) ──
+// One verified connection (lib/aprs-is.js AprsIsClient), logged in as the
+// Settings callsign with SSID -10 (lib/aprs-igate.js uplinkLogin: the APRS SSID
+// recommendation for internet stations and iGates). Each user asks for it with
+// aprsUplinkWant(user, on); it closes when no user is left. Lines it receives
+// are never read: nothing from APRS-IS reaches the radio. The passcode is
+// computed for the Settings callsign inside the login line and nowhere else.
+let aprsUplink = null;               // AprsIsClient while any user wants it
+const _aprsUplinkUsers = new Set();  // 'js8' | 'igate' | 'beacon'
+// Dev only (never in a packaged build): POTACAT_APRS_IS_SERVER=127.0.0.1:14580
+// points the feed and the uplink at a local fake server
+// (test/fixtures/fake-aprs-is-server.js). With recorded RF frames playing
+// (POTACAT_APRS_DEV_FRAMES) and no fake server, the uplink never connects, so
+// recorded packets can never reach the real APRS-IS.
+const APRS_IS_DEV_SERVER = (() => {
+  if (app.isPackaged || !process.env.POTACAT_APRS_IS_SERVER) return null;
+  const m = /^([^:\s]+):(\d{1,5})$/.exec(String(process.env.POTACAT_APRS_IS_SERVER).trim());
+  return m ? { host: m[1], port: Number(m[2]) } : null;
+})();
+function aprsIsServer() {
+  if (APRS_IS_DEV_SERVER) return APRS_IS_DEV_SERVER;
+  if (!app.isPackaged && process.env.POTACAT_APRS_DEV_FRAMES) return null;
+  return { host: null, port: null }; // the client's own default (rotate.aprs2.net:14580)
+}
+function aprsUplinkWant(user, on) {
+  if (user) { if (on) _aprsUplinkUsers.add(user); else _aprsUplinkUsers.delete(user); }
+  const login = AprsIgate.uplinkLogin(settings.myCallsign);
+  const server = aprsIsServer();
+  const want = _aprsUplinkUsers.size > 0 && login.ok && !!server;
+  if (aprsUplink && (!want || aprsUplink.call !== login.call)) {
+    const u = aprsUplink;
+    aprsUplink = null;
+    try { u.removeAllListeners(); u.disconnect(); } catch { /* gone */ }
+    sendCatLog('[APRS-IS] uplink closed');
+    aprsUplinkChanged();
+  }
+  if (!want || aprsUplink) return;
+  const { AprsIsClient } = require('./lib/aprs-is');
+  const u = new AprsIsClient({ call: login.call, version: app.getVersion(), host: server.host, port: server.port });
+  aprsUplink = u;
+  u.on('connected', () => sendCatLog(`[APRS-IS] connected — logging in as ${u.call}`));
+  u.on('logresp', (line) => sendCatLog('[APRS-IS] server answered: ' + AprsIgate.logrespForLog(line)));
+  u.on('verified', () => { sendCatLog(`[APRS-IS] login verified (${u.call})`); aprsUplinkChanged(); });
+  u.on('status', (st) => { if (st.state === 'unverified') sendCatLog(`[APRS-IS] login NOT verified (${u.call}) — nothing will be sent`); aprsUplinkChanged(); });
+  u.on('disconnected', () => { sendCatLog('[APRS-IS] disconnected'); aprsUplinkChanged(); });
+  u.on('error', (err) => sendCatLog('[APRS-IS] ' + (err.message || err)));
+  u.connect();
+  aprsUplinkChanged();
+}
+function aprsUplinkChanged() {
+  try { js8PushStatus(); } catch { /* JS8 not up */ }
+  try { aprsIgatePush(); } catch { /* not yet */ }
+}
+
 // ── JS8 → APRS-IS gateway ────────────────────────────────────────────────────
-let aprsGate = null;                 // AprsIsClient when the gate is up
 let _aprsGateStamps = [];            // global rate window
 const _aprsGatePerCall = new Map();  // per-source last-gated ms
 
 function connectAprsGate() {
-  if (aprsGate || !settings.js8AprsGate || !settings.myCallsign || passLease) return; // the gate logs in as the owner
-  const { AprsIsClient } = require('./lib/aprs-is');
-  aprsGate = new AprsIsClient({ call: settings.myCallsign, version: app.getVersion() });
-  aprsGate.on('connected', () => sendCatLog('[APRS-IS] connected — logging in'));
-  aprsGate.on('verified', () => { sendCatLog('[APRS-IS] login verified — gateway active'); js8PushStatus(); });
-  aprsGate.on('disconnected', () => { sendCatLog('[APRS-IS] disconnected'); js8PushStatus(); });
-  aprsGate.on('error', (err) => sendCatLog('[APRS-IS] ' + (err.message || err)));
-  aprsGate.connect();
+  if (!settings.js8AprsGate || !settings.myCallsign || passLease) return; // the gate logs in as the owner
+  aprsUplinkWant('js8', true);
 }
 function disconnectAprsGate() {
-  if (!aprsGate) return;
-  try { aprsGate.disconnect(); } catch { /* gone */ }
-  aprsGate = null;
+  aprsUplinkWant('js8', false);
   js8PushStatus();
 }
 
@@ -15496,7 +15604,7 @@ function disconnectAprsGate() {
  *  source 1/min, global 10/min) and fully logged — everything forwarded under
  *  the operator's callsign must be visible to them. */
 function js8GateAprs(msg) {
-  if (!settings.js8AprsGate || !aprsGate || !aprsGate.verified) return;
+  if (!settings.js8AprsGate || !_aprsUplinkUsers.has('js8') || !aprsUplink || !aprsUplink.verified) return; // the uplink is shared: only JS8's own use gates (a Guest Pass drops it)
   const src = String(msg.from || '').toUpperCase();
   if (!src || src.startsWith('<') || src.startsWith('@')) return;
   const now = Date.now();
@@ -15508,7 +15616,7 @@ function js8GateAprs(msg) {
   }
   const { buildGatePacket, buildPositionPacket } = require('./lib/aprs-is');
   const text = String(msg.text || '').replace(/^@APRSIS\s*/i, '').trim();
-  const gate = settings.myCallsign.toUpperCase();
+  const gate = aprsUplink.call; // the uplink's login (the Settings callsign with -10)
   let packet = null;
   let what = '';
   const cmd = /^CMD\s+(.+)$/is.exec(text);
@@ -15516,7 +15624,7 @@ function js8GateAprs(msg) {
   if (cmd) { packet = buildGatePacket(src, gate, cmd[1]); what = 'CMD'; }
   else if (grid) { packet = buildPositionPacket(src, gate, grid[1], 'JS8'); what = 'GRID ' + grid[1].toUpperCase(); }
   if (!packet) return;   // not a gateable form — never guess at raw payloads
-  if (aprsGate.send(packet)) {
+  if (aprsUplink.send(packet)) {
     _aprsGatePerCall.set(src, now);
     _aprsGateStamps.push(now);
     // The full packet in the log IS the audit trail: everything gated under
@@ -40450,7 +40558,13 @@ let _autoRxDeferLogged = false; // one "Deferred" line per deferral, not per tic
 let _autoRxAprsDeferLogged = false; // the same, for APRS listening
 let autoIdleJs8Active = false;
 let autoIdleJs8OpenedPopout = false;
-let autoIdleRxLabel = null; // 'WSPR' | 'PSK31' | 'JTTY' | 'JS8' — names the stop log line
+let autoIdleRxLabel = null; // 'WSPR' | 'PSK31' | 'JTTY' | 'JS8' | 'APRS' — names the stop log line
+// APRS-on-idle (phase 4): the radio parks on the APRS frequency through the
+// window's listen path (aprsListenStart: 2 m if the rig has it, else 30 m) and
+// decodes; with "Report what I hear to APRS-IS (iGate)" on, it gates. Owns the
+// listening only when it started it (the operator's own switch stays theirs).
+let autoIdleAprsActive = false;
+let autoIdleAprsOwnsListen = false;
 let autoIdleJttyBand = null; // the band an idle JTTY session is on ('20m' day / '40m' night)
 
 // Which idle-RX session is running, or null. `autoSstvActive` is the flag
@@ -40460,6 +40574,7 @@ let autoIdleJttyBand = null; // the band an idle JTTY session is on ('20m' day /
 // phone's SSTV tab (K3SBP 2026-09-27).
 function autoRxKind() {
   if (!autoSstvActive) return null;
+  if (autoIdleAprsActive) return 'aprs';
   if (autoIdleJs8Active) return 'js8';
   if (autoIdleJtcatActive) return autoIdleRxLabel === 'PSK31' ? 'psk31' : autoIdleRxLabel === 'JTTY' ? 'jtty' : 'wspr';
   return 'sstv';
@@ -40473,7 +40588,7 @@ const PSK_IDLE_DIALS = {
 // JTTY-on-idle follows the sun like SSTV: 20 m by day, 40 m at night, on the
 // pop-out's own JTTY dials (JTTY_BAND_FREQS — never 14080, FT4's dial).
 const JTTY_IDLE_DIALS = { '20m': 14090, '40m': 7090 };
-const IDLE_RX_MODES = ['sstv', 'wspr', 'psk31', 'js8', 'jtty'];
+const IDLE_RX_MODES = ['sstv', 'wspr', 'psk31', 'js8', 'jtty', 'aprs'];
 // lib/idle-wspr-band.js: 40 m to 10 m and 2 m, only the bands this radio is used on.
 const { IDLE_WSPR_BANDS } = IdleWsprBand;
 const IDLE_TIMEOUT_MIN = 5, IDLE_TIMEOUT_MAX = 1440;
@@ -40581,7 +40696,11 @@ function sstvSendFailed(text, { log } = {}) {
 function startAutoSstvTimer() {
   stopAutoSstvTimer();
   if (!settings.enableAutoSstv) return;
-  const thresholdMs = (settings.autoSstvInactivityMin || 90) * 60 * 1000;
+  // Dev only (never in a packaged build): POTACAT_DEV_IDLE_SEC=20 makes the
+  // idle countdown 20 s and checks every 5 s, so an idle mode can be watched
+  // starting and stopping in a scratch instance.
+  const devIdleSec = (!app.isPackaged && Number(process.env.POTACAT_DEV_IDLE_SEC)) || 0;
+  const thresholdMs = devIdleSec ? devIdleSec * 1000 : (settings.autoSstvInactivityMin || 90) * 60 * 1000;
   autoSstvTimer = setInterval(() => {
     // An active JTCAT session IS the operator using the radio. The defer
     // guard below only BLOCKS the idle program — without this stamp the
@@ -40613,7 +40732,7 @@ function startAutoSstvTimer() {
     // Never while APRS listens: the radio is on the APRS frequency for the operator.
     const mayRetune = IdleRadioUse.idleMayRetune({ aprsListening: aprsListenHoldsRadio() });
     if (mayRetune && autoSstvActive && autoIdleJtcatActive && autoIdleRxLabel === 'JTTY') autoIdleJttyFollowSun();
-    if (mayRetune && autoSstvActive && !autoIdleJtcatActive && !autoIdleJs8Active) {
+    if (mayRetune && autoSstvActive && !autoIdleJtcatActive && !autoIdleJs8Active && !autoIdleAprsActive) {
       const newBand = getSstvAutoFreq();
       if (newBand && newBand.freqKhz !== autoSstvCurrentFreq) {
         autoSstvCurrentFreq = newBand.freqKhz;
@@ -40621,7 +40740,7 @@ function startAutoSstvTimer() {
         console.log('[Auto-SSTV] Band switch to ' + newBand.freqKhz + ' kHz');
       }
     }
-  }, 30000);
+  }, devIdleSec ? 5000 : 30000);
   console.log('[Auto-SSTV] Timer started (' + (settings.autoSstvInactivityMin || 90) + ' min threshold)');
 }
 
@@ -40668,6 +40787,18 @@ function triggerAutoSstv() {
   // from settings.jtcatLastMode and tunes to settings.jtcatLastBandFreq, so
   // configure both first.
   const idleMode = settings.idleRxMode || 'sstv';
+  if (idleMode === 'aprs') {
+    // APRS-on-idle: "Listen on my radio" without the window. The radio's place
+    // is saved first and it goes back when the session ends (lib/aprs-radio-return.js).
+    autoSstvActive = true;
+    autoIdleAprsActive = true;
+    autoIdleRxLabel = 'APRS';
+    autoIdleAprsOwnsListen = !aprsListen.on;
+    if (autoIdleAprsOwnsListen) aprsListenSet(true);
+    sendCatLog('[Auto-RX] APRS receive started — ' + (settings.aprsIgate === true ? 'reporting what it hears to APRS-IS (iGate)' : 'decoding only (the iGate setting is off)'));
+    pushActivityState();
+    return;
+  }
   if (idleMode === 'js8') {
     // JS8-on-idle: the JS8 window owns everything — opening it auto-starts
     // the engine and QSYs to the day/night calling frequency (open = start).
@@ -40767,6 +40898,18 @@ function cancelAutoSstv() {
   // Kept a few seconds: the switch that ends an idle session then listens to APRS (lib/idle-radio-use.js).
   idleRxLast = idleRxHome ? { ...idleRxHome, endedAt: Date.now(), endedHz: Number(_currentFreqHz) || 0 } : null;
   idleRxHome = null;
+  if (autoIdleAprsActive) {
+    // APRS-on-idle teardown: stop listening (the radio goes back to where it
+    // was) unless the operator's own switch started it.
+    autoIdleAprsActive = false;
+    const owned = autoIdleAprsOwnsListen;
+    autoIdleAprsOwnsListen = false;
+    if (owned) aprsListenStop('the radio was used');
+    sendCatLog('[Auto-RX] APRS receive stopped');
+    autoIdleRxLabel = null;
+    pushActivityState();
+    return;
+  }
   if (autoIdleJs8Active) {
     // JS8-on-idle teardown: close the window only if WE opened it — close =
     // stop frees the radio (and the close handler already spares a session a
@@ -43394,6 +43537,8 @@ function cloudShackNotice(text, kind) {
     // the guest's next press keys (lib/pass-enforcement.js tx_enable).
     passEnforcement.on('power-over-cap', ({ watts, max }) => passApplyPowerCap(max, `the radio was at ${watts} W`));
     passEnforcement.on('state-change', (state) => {
+      // APRS: a Guest Pass pauses the iGate and the pass ending resumes it (Casey 2026-11-19).
+      try { aprsIgateSync(); aprsIgatePush(); } catch { /* APRS not set up yet */ }
       if (state === 'paused') scopeGuestRestoreOwner('the owner took the radio');
       if (win && !win.isDestroyed()) {
         win.webContents.send('pass-enforcement-state', passEnforcement.getSessionStatus());
@@ -45777,7 +45922,8 @@ function cloudShackNotice(text, kind) {
     if (!home) { aprsSend('aprs-status', { state: 'no-grid' }); return; }
     const Feed = require('./lib/aprs-is-feed');
     const AprsParser = require('./lib/aprs-parser');
-    aprsFeed = new Feed.AprsIsFeed({ call: settings.myCallsign, version: app.getVersion(), lat: home.lat, lon: home.lon, km: settings.aprsRangeKm });
+    const dev = APRS_IS_DEV_SERVER || {}; // dev builds only: a local fake APRS-IS server
+    aprsFeed = new Feed.AprsIsFeed({ call: settings.myCallsign, version: app.getVersion(), lat: home.lat, lon: home.lon, km: settings.aprsRangeKm, host: dev.host, port: dev.port });
     aprsBatch = Feed.createBatcher((packets) => aprsSend('aprs-packets', packets), 500);
     aprsFeed.on('line', (line) => { const p = AprsParser.parse(line); if (p && aprsBatch) aprsBatch.push(p); });
     aprsFeed.on('status', (st) => aprsSend('aprs-status', st));
@@ -45796,7 +45942,11 @@ function cloudShackNotice(text, kind) {
     rememberWindowPlace(aprsWin, 'aprsPopoutBounds', { minWidth: 640, minHeight: 400 });
     aprsWin.setMenuBarVisibility(false);
     aprsWin.loadFile(path.join(__dirname, 'renderer', 'aprs-popout.html'), { query: themeQuery() });
-    aprsWin.on('closed', () => { aprsListenStop('the APRS window closed'); aprsStopFeed(); aprsWin = null; });
+    aprsWin.on('closed', () => {
+      // APRS-on-idle listens with no window: closing it leaves that session running.
+      if (!(autoIdleAprsActive && autoIdleAprsOwnsListen)) aprsListenStop('the APRS window closed');
+      aprsStopFeed(); aprsWin = null;
+    });
     aprsWin.webContents.on('before-input-event', (_e, input) => {
       if (input.key === 'F12' && input.type === 'keyDown') aprsWin.webContents.toggleDevTools();
     });
@@ -45807,14 +45957,19 @@ function cloudShackNotice(text, kind) {
     aprsSend('aprs-init', { home: aprsHome(), distUnit: settings.distUnit || 'mi', km: Feed.clampRangeKm(settings.aprsRangeKm) });
     aprsStartFeed();
     aprsListenPush();
+    aprsIgatePush();
   });
   // APRS phase 2: the "Listen on my radio" switch (receive only).
-  ipcMain.on('aprs-listen-set', (_e, on) => aprsListenSet(!!on));
+  // The operator at the switch is using the radio: an APRS idle session ends first.
+  ipcMain.on('aprs-listen-set', (_e, on) => { markUserActive(); aprsListenSet(!!on); });
   // The bar asks once its listener is attached: the push after 'aprs-ready' can
   // arrive while its script is still loading (the 8600M's empty bar, 2026-11-18).
-  ipcMain.on('aprs-listen-get', () => aprsListenPush());
+  // The iGate mark answered 'aprs-ready' the same way, so it comes too.
+  ipcMain.on('aprs-listen-get', () => { aprsListenPush(); aprsIgatePush(); });
   // APRS phase 3: the band chips (2 m, 30 m).
-  ipcMain.on('aprs-listen-band', (_e, band) => aprsListenSetBand(String(band || '')));
+  ipcMain.on('aprs-listen-band', (_e, band) => { markUserActive(); aprsListenSetBand(String(band || '')); });
+  // Phase 4: the iGate's marks (Settings asks when it opens).
+  ipcMain.handle('aprs-igate-status', () => aprsIgateStatus());
   ipcMain.on('aprs-set-range', (_e, km) => {
     const Feed = require('./lib/aprs-is-feed');
     settings.aprsRangeKm = Feed.clampRangeKm(km);
@@ -51970,6 +52125,9 @@ function cloudShackNotice(text, kind) {
     setImmediate(() => afterSstvSettingsSaved(newSettings));
     // #475: the Deleted folder's days reach every Winlink surface (winlink-state.deletedDays).
     if (newSettings && 'winlinkDeletedDays' in newSettings) setImmediate(() => { try { winlinkPush(); } catch {} });
+    // APRS phase 4: the iGate switch and the callsign decide whether the uplink runs, and as whom.
+    if (newSettings && 'aprsIgate' in newSettings) newSettings.aprsIgate = newSettings.aprsIgate === true;
+    if (newSettings && ('aprsIgate' in newSettings || 'myCallsign' in newSettings)) setImmediate(() => { try { aprsUplinkWant(null); aprsIgateSync(); aprsIgatePush(); } catch {} });
     if (newSettings && 'jtcatFakeIt' in newSettings) setImmediate(() => { fakeItSyncEngine(); sendCatLog(`[JTCAT] Split operation Fake It: ${fakeItEnabled() ? 'on' : 'off'}`); });
     // An always-on feature has no off: a stale window's false never lands.
     for (const k of InstallDefaults.ALWAYS_ON) if (k in newSettings) newSettings[k] = true;

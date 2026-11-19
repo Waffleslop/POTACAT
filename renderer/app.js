@@ -18334,7 +18334,9 @@ async function openSettingsDialog(tab) {
     const enableEl = document.getElementById('set-enable-auto-sstv');
     const modeEl = document.getElementById('set-idle-rx-mode');
     if (!enableEl || !modeEl) return;
-    modeEl.value = (['wspr', 'psk31', 'js8', 'jtty'].includes(s.idleRxMode)) ? s.idleRxMode : 'sstv';
+    modeEl.value = (['wspr', 'psk31', 'js8', 'jtty', 'aprs'].includes(s.idleRxMode)) ? s.idleRxMode : 'sstv';
+    document.getElementById('set-aprs-igate').checked = s.aprsIgate === true; // APRS phase 4: off by default
+    renderAprsIgateMarks();
     document.getElementById('idle-wspr-band-hop').checked = s.idleWsprBandHop === true;
     document.getElementById('idle-wspr-band-single').checked = s.idleWsprBandHop !== true;
     document.getElementById('set-idle-wspr-band').value = s.idleWsprBand || '20m';
@@ -18347,6 +18349,7 @@ async function openSettingsDialog(tab) {
       document.getElementById('idle-psk-opts').style.display = psk ? 'flex' : 'none';
       document.getElementById('idle-sstv-note').style.display = modeEl.value === 'sstv' ? '' : 'none';
       document.getElementById('idle-jtty-note').style.display = modeEl.value === 'jtty' ? 'block' : 'none';
+      document.getElementById('idle-aprs-opts').style.display = modeEl.value === 'aprs' ? 'block' : 'none';
     };
     if (!enableEl.dataset.idleWired) {
       enableEl.addEventListener('change', upd);
@@ -19230,7 +19233,8 @@ settingsSave.addEventListener('click', async () => {
     freedvForceSideband: freedvForceSidebandVal,
     enableAutoSstv: document.getElementById('set-enable-auto-sstv').checked,
     autoSstvInactivityMin: Math.max(5, Math.min(1440, parseInt(document.getElementById('set-auto-sstv-min').value) || 90)),
-    idleRxMode: ['wspr', 'psk31', 'js8', 'jtty'].includes(document.getElementById('set-idle-rx-mode').value) ? document.getElementById('set-idle-rx-mode').value : 'sstv',
+    idleRxMode: ['wspr', 'psk31', 'js8', 'jtty', 'aprs'].includes(document.getElementById('set-idle-rx-mode').value) ? document.getElementById('set-idle-rx-mode').value : 'sstv',
+    aprsIgate: document.getElementById('set-aprs-igate').checked,
     idleWsprBandHop: document.getElementById('idle-wspr-band-hop').checked,
     idleWsprBand: document.getElementById('set-idle-wspr-band').value || '20m',
     idlePskBand: document.getElementById('set-idle-psk-band').value || '20m',
@@ -27606,7 +27610,7 @@ document.getElementById('welcome-start').addEventListener('click', async () => {
   const hideOobChecked = document.getElementById('welcome-hide-oob').checked;
   const autoSstvChecked = document.getElementById('welcome-enable-auto-sstv').checked;
   const autoSstvMinVal = Math.max(5, Math.min(1440, parseInt(document.getElementById('welcome-auto-sstv-min').value, 10) || 90));
-  const idleRxModeVal = ['wspr', 'psk31', 'js8', 'jtty'].includes(document.getElementById('welcome-idle-rx-mode').value) ? document.getElementById('welcome-idle-rx-mode').value : 'sstv';
+  const idleRxModeVal = ['wspr', 'psk31', 'js8', 'jtty', 'aprs'].includes(document.getElementById('welcome-idle-rx-mode').value) ? document.getElementById('welcome-idle-rx-mode').value : 'sstv';
   const idleWsprBandHopVal = document.getElementById('welcome-idle-wspr-band-hop').checked;
   const idleWsprBandVal = document.getElementById('welcome-idle-wspr-band').value || '20m';
   const idlePskBandVal = document.getElementById('welcome-idle-psk-band').value || '20m';
@@ -28013,7 +28017,7 @@ async function checkFirstRun(force = false) {
       (function () {
         const modeEl = document.getElementById('welcome-idle-rx-mode');
         if (!modeEl) return;
-        modeEl.value = (['wspr', 'psk31', 'js8', 'jtty'].includes(s.idleRxMode)) ? s.idleRxMode : 'sstv';
+        modeEl.value = (['wspr', 'psk31', 'js8', 'jtty', 'aprs'].includes(s.idleRxMode)) ? s.idleRxMode : 'sstv';
         document.getElementById('welcome-idle-wspr-band-hop').checked = s.idleWsprBandHop === true;
         document.getElementById('welcome-idle-wspr-band-single').checked = s.idleWsprBandHop !== true;
         document.getElementById('welcome-idle-wspr-band').value = s.idleWsprBand || '20m';
@@ -33723,3 +33727,33 @@ function firstEmptyKiwiHost() {
   sel.addEventListener('change', () => window.api.setWaterfallPalette(sel.value));
   window.WaterfallPalettes.follow(window.api, (id) => { sel.value = id; });
 })();
+
+// APRS phase 4: the iGate's small marks under its switch in Settings > Idle
+// Mode (no pop-ups): the call it reports as, the internet link, how many
+// packets it has gated this run, and the last one.
+function aprsIgateMarksText(s) {
+  if (!s || !s.on) return 'The iGate is off.';
+  if (s.sentence) return s.sentence;
+  if (s.paused) return s.paused + '. It resumes when the pass ends.'; // a Guest Pass (Casey 2026-11-19)
+  const link = { verified: 'APRS-IS connected, login verified', connecting: 'Connecting to APRS-IS', connected: 'Logging in to APRS-IS',
+    waiting: 'APRS-IS link lost, trying again', unverified: 'APRS-IS did not verify the login: nothing is sent', stopped: 'Not connected' }[s.link] || 'Not connected';
+  const parts = [`As ${s.call}.`, s.active ? link + '.' : 'Waits until POTACAT listens to APRS on your radio.'];
+  parts.push(`${s.gated} ${s.gated === 1 ? 'packet' : 'packets'} gated`);
+  if (s.lastAt) {
+    const min = Math.max(0, Math.round((Date.now() - s.lastAt) / 60000));
+    parts[parts.length - 1] += `, the last ${min < 1 ? 'just now' : min + ' min ago'}${s.lastFrom ? ' (' + s.lastFrom + ')' : ''}`;
+  }
+  parts[parts.length - 1] += '.';
+  return parts.join(' ');
+}
+let _aprsIgateMarks = null;
+function renderAprsIgateMarks(s) {
+  if (s) _aprsIgateMarks = s;
+  const el = document.getElementById('idle-aprs-igate-marks');
+  if (!el) return;
+  if (!s && window.api.aprsIgateStatus) {
+    window.api.aprsIgateStatus().then((x) => { _aprsIgateMarks = x; el.textContent = aprsIgateMarksText(x); }).catch(() => {});
+  }
+  el.textContent = aprsIgateMarksText(_aprsIgateMarks);
+}
+if (window.api.onAprsIgateStatus) window.api.onAprsIgateStatus((s) => renderAprsIgateMarks(s));

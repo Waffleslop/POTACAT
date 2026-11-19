@@ -53,18 +53,18 @@ function fakeDom() {
 function loadBar() {
   const dom = fakeDom();
   const calls = [];
-  let onListen = null;
+  let onListen = null, onIgate = null;
   const api = {
     listenSet: (on) => calls.push(['set', on]),
     listenBand: (b) => calls.push(['band', b]),
     onListen: (cb) => { calls.push(['onListen']); onListen = cb; },
-    onIgate: () => {},
+    onIgate: (cb) => { calls.push(['onIgate']); onIgate = cb; },
     listenGet: () => calls.push(['get']),
   };
   const ctx = { window: { api }, document: dom.document, setInterval: () => 0, Date, Array, String };
   vm.createContext(ctx);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'renderer', 'aprs-listen-bar.js'), 'utf8'), ctx);
-  return { dom, calls, push: (s) => onListen && onListen(s) };
+  return { dom, calls, push: (s) => onListen && onListen(s), pushIgate: (s) => onIgate && onIgate(s) };
 }
 
 console.log('APRS listen bar');
@@ -94,6 +94,19 @@ test('phase 3: the 30 m chip is there from the answer to the first ask (the 8600
   assert.strictEqual(chips.length, 1);
   assert.strictEqual(chips[0].textContent, '30 m');
   assert.strictEqual(chips[0].attrs['aria-pressed'], 'true');
+});
+
+test('phase 4: the ask comes after the iGate listener too, and main answers it with the iGate mark', () => {
+  const { dom, calls, pushIgate } = loadBar();
+  const get = calls.findIndex((c) => c[0] === 'get');
+  const ig = calls.findIndex((c) => c[0] === 'onIgate');
+  assert.ok(ig >= 0 && get > ig, 'asks after the iGate listener (asked at ' + get + ', iGate at ' + ig + ')');
+  pushIgate({ on: true, active: false, sentence: '', link: 'connecting', gated: 0, lastAt: 0 });
+  assert.strictEqual(dom.els['aprs-igate'].classList.contains('hidden'), false);
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  const at = main.indexOf("ipcMain.on('aprs-listen-get'");
+  const h = main.slice(at, main.indexOf('\n', at));
+  assert.ok(at > 0 && /aprsListenPush\(\)/.test(h) && /aprsIgatePush\(\)/.test(h), h);
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

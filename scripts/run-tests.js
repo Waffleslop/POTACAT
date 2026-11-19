@@ -226,6 +226,10 @@ const TESTS = [
   'test/aprs-rf-merge-test.js', // APRS phase 2: a station heard on the radio and on APRS-IS is one row with both marks
   'test/direwolf-aprs-hf-config-test.js', // APRS phase 3: the 30 m config is MODEM 300 1600:1800 A- 7@30 with no PTT; 2 m and Winlink configs byte-identical
   'test/direwolf-aprs-hf-decode-test.js', // APRS phase 3: generated 300-baud AFSK decoded by the bundled Dire Wolf, on tune and 70 Hz off (skips without the build)
+  'test/aprs-passcode-test.js', // APRS phase 4: the APRS-IS passcode against published callsign/passcode pairs
+  'test/aprs-igate-test.js', // APRS phase 4: the receive-only iGate's rules, one test each (aprs-is.net IGating, q construct, dupes, login)
+  'test/aprs-is-uplink-test.js', // APRS phase 4: the one APRS-IS uplink against a local fake server (verified only, keep-alive, reconnect)
+  'test/aprs-idle-igate-wiring-test.js', // APRS phase 4: the APRS idle mode and the iGate wiring in main.js and Settings
   'test/log-comment-test.js',
   'test/raw-cat-command-test.js',
   'test/rigctld-stderr-test.js',
