@@ -13008,6 +13008,8 @@ const aprsListen = {
   proc: null,         // its Dire Wolf
   monitor: null,      // its AGW monitor
   lane: null,         // the winlinkAudio lane Dire Wolf was started on
+  ownLane: null,      // the lane APRS itself started (it stops with listening, aprsReleaseLane)
+  laneWasWinlinks: false, // that start replaced Winlink's idle lane (Pat's shim), which comes back after
   pausedAt: 0,
   freeSince: 0,       // when Winlink last let go of the radio, for the resume
   seq: 0,             // the start attempt; a stopped one never finishes a later one
@@ -13140,7 +13142,14 @@ async function aprsWaitDial(hz, ms, seq) {
 
 /** The modem audio lane at Dire Wolf's rate and the radio's receive audio on it. Receive only: no playback is asked for. */
 async function aprsAudioReady() {
-  if (!winlinkAudio || !winlinkAudio.port || winlinkAudio.modemRate !== DirewolfProcess.DIREWOLF_RATE) await startWinlinkAudio({ modemRate: DirewolfProcess.DIREWOLF_RATE });
+  if (!winlinkAudio || !winlinkAudio.port || winlinkAudio.modemRate !== DirewolfProcess.DIREWOLF_RATE) {
+    const replaced = !!(winlinkAudio && winlinkAudio.port);
+    await startWinlinkAudio({ modemRate: DirewolfProcess.DIREWOLF_RATE });
+    if (aprsListen.ownLane !== winlinkAudio) aprsListen.laneWasWinlinks = replaced || (!!aprsListen.ownLane && aprsListen.laneWasWinlinks);
+    aprsListen.ownLane = winlinkAudio; // APRS started this one: it stops with listening
+  } else if (aprsListen.ownLane !== winlinkAudio) {
+    aprsListen.ownLane = null; // someone else's lane (a Winlink packet session's): never ours to stop
+  }
   if (!winlinkAudio || !winlinkAudio.port) throw new Error('The modem audio did not start');
   if (settings.audioSource === 'smartsdr' && !(smartSdrAudio && smartSdrAudio.connected)) throw new Error('Flex Direct audio is not connected');
   if (settings.audioSource === 'icom-network' && !_icomNetworkTransport) throw new Error('Icom Network audio is not connected');
@@ -13166,6 +13175,31 @@ function aprsStopModem() {
   if (aprsListen.monitor) { const m = aprsListen.monitor; aprsListen.monitor = null; try { m.close(); } catch {} }
   if (aprsListen.proc) { const p = aprsListen.proc; aprsListen.proc = null; try { p.kill(); } catch {} }
   aprsListen.lane = null;
+}
+
+/**
+ * Winlink still needs the modem audio lane: a session, its retry, or its modem
+ * running. Pat's shim alone does not (a session rebuilds the lane at its own
+ * rate); its idle lane is put back instead (aprsReleaseLane).
+ */
+function aprsLaneNeededByOthers() {
+  return !!(winlinkSessionActive() || _winlinkRetry || direwolfProc || ardopProc);
+}
+
+/**
+ * Listening stopped: the modem audio lane APRS started stops too, unless
+ * Winlink or another user still needs it (Casey 2026-11-19; lib/aprs-listen.js mayStopLane).
+ */
+function aprsReleaseLane() {
+  const own = aprsListen.ownLane;
+  const giveBack = aprsListen.laneWasWinlinks;
+  aprsListen.ownLane = null;
+  aprsListen.laneWasWinlinks = false;
+  if (!AprsListen.mayStopLane({ startedByAprs: !!own, isCurrent: !!own && own === winlinkAudio, othersNeed: aprsLaneNeededByOthers() })) return;
+  aprsLog('the modem audio stops with listening');
+  stopWinlinkAudio();
+  // APRS had replaced Winlink's idle lane (Pat's shim is up): Winlink gets its own back, as before.
+  if (giveBack && winlinkShim) startWinlinkAudio().catch((e) => aprsLog('the Winlink modem audio did not restart: ' + e.message));
 }
 
 /** Dire Wolf with the receive-only APRS config (no PTT line), and its AGW monitor. */
@@ -13255,8 +13289,12 @@ async function aprsListenStart({ resume = false } = {}) {
   const ptt = pttModeReport();
   const icomData = !!(ptt && ptt.data && cat && cat._codec && cat._codec._dataReportAt);
   const here = RadioTuneRoute.placeBefore({ route, freqHz: _currentFreqHz, mode: _currentMode, catDataForm: icomData ? PttModeSwap.dataFormOf(_currentMode || '') : '' });
+  // Over an idle session (Auto-SSTV, WSPR, ...) the place is where that session
+  // found the radio, not its idle frequency (Casey 2026-11-19, lib/idle-radio-use.js).
+  const home = IdleRadioUse.listenReturnPoint(here, { active: autoSstvActive, home: idleRxHome, last: idleRxLast, nowHz: _currentFreqHz, now: Date.now() });
+  if (home.from === 'idle') aprsLog(`the radio goes back to ${(home.freqHz / 1e6).toFixed(4)} MHz${home.mode ? ' ' + home.mode : ''} afterwards, where it was before Idle Mode`);
   // The place is on disk before the radio moves.
-  aprsReturn.begin({ freqHz: here.freqHz, mode: here.mode, rigId: settings.activeRigId || null, listenHz: freq.hz }, () => {
+  aprsReturn.begin({ freqHz: home.freqHz, mode: home.mode, rigId: settings.activeRigId || null, listenHz: freq.hz }, () => {
     aprsLog(`listening on ${freq.mhz} MHz ${plan.tuneMode || '(mode set by hand)'}${plan.dataMode ? ' then ' + plan.dataMode : ''} — ${freq.source}`);
     tuneRadio(freq.hz / 1000, plan.tuneMode, undefined, { origin: 'APRS listening' });
   });
@@ -13293,6 +13331,7 @@ function aprsListenStop(why) {
   aprsListen.seq++;
   aprsListen.on = false;
   aprsStopModem();
+  aprsReleaseLane();
   if (APRS_DEV_FRAMES) { aprsListen.state = 'off'; aprsListen.sentence = ''; aprsListenPush(); return; }
   if (aprsListen.state === 'paused') {
     // Winlink has the radio and gives it back itself (its return point is the place APRS saved).
@@ -40320,6 +40359,8 @@ let autoSstvActive = false;
 let autoSstvPrevFreq = null;
 let autoSstvPrevMode = null;
 let autoSstvCurrentFreq = 0;
+let idleRxHome = null; // {freqHz, mode}: where the running idle session (any mode) found the radio
+let idleRxLast = null; // the same for the session that just ended, with endedAt and endedHz
 // Auto-SSTV opened the SSTV window itself (it was not open before), and the
 // operator has not since taken it over. Cancelling Auto-SSTV closes it then,
 // which stops the decoder; otherwise the decoder ran on, reported as
@@ -40548,6 +40589,8 @@ function triggerAutoSstv() {
     return;
   }
   _autoRxAprsDeferLogged = false;
+  // Where every idle mode found the radio: APRS listening's return point (Casey 2026-11-19).
+  idleRxHome = { freqHz: Number(_currentFreqHz) || 0, mode: String(_currentMode || '') };
   // WSPR/PSK31-on-idle variant: open the JTCAT popout in that mode (it owns
   // audio capture + the spot list/map) instead of SSTV. The popout auto-starts
   // from settings.jtcatLastMode and tunes to settings.jtcatLastBandFreq, so
@@ -40649,6 +40692,9 @@ function triggerAutoSstv() {
 function cancelAutoSstv() {
   if (!autoSstvActive) return;
   autoSstvActive = false;
+  // Kept a few seconds: the switch that ends an idle session then listens to APRS (lib/idle-radio-use.js).
+  idleRxLast = idleRxHome ? { ...idleRxHome, endedAt: Date.now(), endedHz: Number(_currentFreqHz) || 0 } : null;
+  idleRxHome = null;
   if (autoIdleJs8Active) {
     // JS8-on-idle teardown: close the window only if WE opened it — close =
     // stop frees the radio (and the close handler already spares a session a

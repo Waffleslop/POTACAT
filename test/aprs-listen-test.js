@@ -194,6 +194,34 @@ test('the window asks for the listen state once its listener is attached (the fi
   assert.ok(/ipcMain\.on\('aprs-listen-get',\s*\(\)\s*=>\s*aprsListenPush\(\)\)/.test(main));
 });
 
+// Casey 2026-11-19: "stop the modem audio process when APRS stops", unless
+// Winlink or another user still needs it.
+test('the modem audio lane stops with listening only when APRS started it and nobody else needs it', () => {
+  const L = require('../lib/aprs-listen');
+  assert.strictEqual(L.mayStopLane({ startedByAprs: true, isCurrent: true, othersNeed: false }), true);
+  assert.strictEqual(L.mayStopLane({ startedByAprs: false, isCurrent: true, othersNeed: false }), false, 'a lane Winlink started');
+  assert.strictEqual(L.mayStopLane({ startedByAprs: true, isCurrent: false, othersNeed: false }), false, 'rebuilt since by Winlink');
+  assert.strictEqual(L.mayStopLane({ startedByAprs: true, isCurrent: true, othersNeed: true }), false, 'Winlink needs it');
+  assert.strictEqual(L.mayStopLane({}), false);
+});
+
+test('main.js: stopping listening lets go of the lane APRS started (aprsReleaseLane)', () => {
+  const ready = fnBody('aprsAudioReady');
+  assert.ok(/aprsListen\.ownLane = winlinkAudio/.test(ready), 'the lane APRS started is remembered');
+  const rel = fnBody('aprsReleaseLane');
+  assert.ok(/AprsListen\.mayStopLane\(\{/.test(rel), 'asks lib/aprs-listen.js');
+  assert.ok(/othersNeed: aprsLaneNeededByOthers\(\)/.test(rel));
+  assert.ok(/stopWinlinkAudio\(\)/.test(rel), 'stops the lane');
+  const others = fnBody('aprsLaneNeededByOthers');
+  for (const w of ['winlinkSessionActive()', '_winlinkRetry', 'direwolfProc', 'ardopProc']) assert.ok(others.includes(w), w);
+  // Pat's idle lane, replaced by APRS's, comes back as it was.
+  assert.ok(/if \(giveBack && winlinkShim\) startWinlinkAudio\(\)/.test(rel), 'the Winlink idle lane is put back');
+  const stop = fnBody('aprsListenStop');
+  assert.ok(stop.indexOf('aprsStopModem()') < stop.indexOf('aprsReleaseLane()'), 'after Dire Wolf stops');
+  // Winlink taking the modem is not a stop: its own session rebuilds the lane.
+  assert.ok(!/aprsReleaseLane\(\)/.test(fnBody('aprsListenYieldToWinlink')));
+});
+
 test('the dev-only frame feed never runs in a packaged build', () => {
   assert.ok(/POTACAT_APRS_DEV_FRAMES/.test(main));
   assert.ok(/!app\.isPackaged && process\.env\.POTACAT_APRS_DEV_FRAMES/.test(main));
