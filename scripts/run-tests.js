@@ -312,6 +312,7 @@ const TESTS = [
   'test/scope-overlay-test.js', // the scope's passband, split TX marker and band plan (Phase 3)
   'test/flex-readback-test.js', // a Flex's controls read back from the radio's own status (real 8600 capture)
   'test/scope-pan-device-test.js', // FT-710 zoom + CENTER over CAT, band scope frames sized and paced per device
+  'test/remote-scope-bins-test.js', // #772: the desktop remote asks the shack for 850-point scope frames, the only size its scope window draws
   'test/gridtracker-roster-test.js', // GridTracker as JTCAT's call roster: decodes out, its double-click and stop back in
   'test/popout-theme-test.js', // every pop-out follows a theme change, from the quick toggle or Settings
   'test/vfo-voice-macros-test.js', // the VFO window's voice macro bar follows renames and recordings
