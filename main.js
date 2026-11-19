@@ -484,6 +484,7 @@ const AprsRfFrames = require('./lib/aprs-rf-frames');       // APRS phase 2: Dir
 const AprsRadioReturn = require('./lib/aprs-radio-return'); // APRS phase 2: the radio goes back after listening
 const AprsParser = require('./lib/aprs-parser');
 const AprsIgate = require('./lib/aprs-igate');             // APRS phase 4: the receive-only iGate's rules and the uplink login
+const AprsBeacon = require('./lib/aprs-beacon');           // APRS phase 5: the beacon over APRS-IS (packet, timer, symbols, refusals)
 const VaraProcess = require('./lib/vara-process');
 const VaraSetup = require('./lib/vara-setup');
 const WinlinkModes = require('./lib/winlink-modes');
@@ -901,6 +902,7 @@ const GLOBAL_KEYS = new Set([
                        // (same reasoning as lightMode/darkVariant above)
   'wsprPreCapPower',   // {watts, rigId, at}: the RF power the WSPR beacon found on the
                        // radio before capping it at 1 W — the radio is this machine's
+  'aprsBeaconLastAt',  // when this station last beaconed over APRS-IS: the timer counts from it after a restart
   'aprsListenReturn',  // {freqHz, mode, rigId, listenHz, state}: where the radio was before APRS
                        // listening tuned it (lib/aprs-radio-return.js) — this machine's radio
   'wsprBeaconWatts',   // {watts, rigId}: the beacon's RF power when the operator set one
@@ -13516,6 +13518,129 @@ function aprsIgatePush() {
   const s = aprsIgateStatus();
   aprsWinSend('aprs-igate', s);
   if (win && !win.isDestroyed()) { try { win.webContents.send('aprs-igate-status', s); } catch {} }
+}
+
+// ── APRS phase 5: the beacon over APRS-IS (never on the air) ──────────────────
+// The APRS window's Beacon section: "Beacon now" and a timer (Off, 10, 20 or
+// 30 min; lib/aprs-beacon.js holds it at 10 min or more and never sooner than
+// the interval after the last beacon). The packet is lib/aprs-beacon.js's
+// (CALL-10>APZPCT,TCPIP*:!pos symbol comment, approximate to the minute by
+// default) and goes through the one uplink under a verified login. With no
+// callsign, a placeholder, no position or no verified login, nothing is sent
+// and the window says why in one sentence. The timer runs only while the APRS
+// window is open. Settings: aprsBeaconSymbol, aprsBeaconComment,
+// aprsBeaconApprox, aprsBeaconIntervalMin, aprsBeaconLat, aprsBeaconLon.
+const aprsBeacon = { timer: null, releaseTimer: null, lastAt: 0, lastTryAt: 0, lastPacket: '', sentence: '', backAt: 0, sending: false, nextAt: 0, armedAt: 0, loaded: false };
+/** The last beacon's time comes back from settings once (a restart never beacons early). */
+function aprsBeaconLoad() {
+  if (aprsBeacon.loaded) return;
+  aprsBeacon.loaded = true;
+  aprsBeacon.lastAt = AprsBeacon.lastBeaconAt(settings, Date.now());
+}
+function aprsBeaconPosition() {
+  const st = AprsBeacon.beaconSettings(settings);
+  return AprsBeacon.beaconPosition({ lat: st.lat, lon: st.lon, grid: settings.grid, gridToLatLon });
+}
+function aprsBeaconState() {
+  aprsBeaconLoad();
+  const login = AprsIgate.uplinkLogin(settings.myCallsign);
+  return {
+    settings: AprsBeacon.beaconSettings(settings), call: login.ok ? login.call : '',
+    grid: String(settings.grid || '').toUpperCase(), position: aprsBeaconPosition(),
+    lastAt: aprsBeacon.lastAt, lastPacket: aprsBeacon.lastPacket, sentence: aprsBeacon.sentence, backAt: aprsBeacon.backAt,
+    sending: aprsBeacon.sending, timerOn: !!aprsBeacon.timer, nextAt: aprsBeacon.timer ? aprsBeacon.nextAt : 0,
+  };
+}
+function aprsBeaconPush() { aprsWinSend('aprs-beacon', aprsBeaconState()); }
+function aprsBeaconRefuse(sentence) {
+  aprsBeacon.sentence = sentence;
+  aprsLog('beacon not sent: ' + sentence);
+  aprsBeaconPush();
+}
+/** A one-off beacon lets the uplink go a few seconds after its write; the timer keeps it. */
+function aprsBeaconRelease() {
+  if (aprsBeacon.releaseTimer) clearTimeout(aprsBeacon.releaseTimer);
+  aprsBeacon.releaseTimer = setTimeout(() => {
+    aprsBeacon.releaseTimer = null;
+    if (!aprsBeacon.timer && !aprsBeacon.sending) aprsUplinkWant('beacon', false);
+  }, 5000);
+}
+async function aprsBeaconSend(why) {
+  if (aprsBeacon.sending) return;
+  aprsBeacon.lastTryAt = Date.now();
+  const st = AprsBeacon.beaconSettings(settings);
+  const pos = aprsBeaconPosition();
+  const b = AprsBeacon.buildBeacon({ settingsCall: settings.myCallsign, lat: pos ? pos.lat : null, lon: pos ? pos.lon : null, symbol: st.symbol, comment: st.comment, approx: st.approx });
+  if (!b.ok) { aprsBeaconRefuse(b.sentence); return; }
+  if (!aprsIsServer()) { aprsBeaconRefuse('This test build plays recorded packets and sends nothing to APRS-IS.'); return; }
+  aprsBeacon.sending = true;
+  aprsBeacon.sentence = '';
+  aprsBeaconPush();
+  aprsUplinkWant('beacon', true);
+  const end = Date.now() + 10000;
+  while (Date.now() < end && !(aprsUplink && (aprsUplink.verified || aprsUplink.state === 'unverified'))) await new Promise((r) => setTimeout(r, 200));
+  aprsBeacon.sending = false;
+  const u = aprsUplink;
+  if (!u || !u.verified) {
+    // Unverified: APRS-IS takes nothing from this login, and nothing is sent.
+    aprsBeaconRefuse(u && u.state === 'unverified'
+      ? `APRS-IS did not verify the login for ${b.call}, so nothing was sent.`
+      : 'APRS-IS could not be reached, so nothing was sent.');
+    aprsBeaconRelease();
+    return;
+  }
+  if (!u.send(b.packet)) { aprsBeaconRefuse('APRS-IS could not be reached, so nothing was sent.'); aprsBeaconRelease(); return; }
+  aprsBeacon.lastAt = Date.now();
+  aprsBeacon.lastPacket = b.packet;
+  settings.aprsBeaconLastAt = aprsBeacon.lastAt; // kept: a restart never beacons early
+  try { saveSettings(settings); } catch (e) { aprsLog('could not save the beacon time: ' + e.message); }
+  sendCatLog(`[APRS beacon] sent (${why}): ${b.packet}`);
+  aprsBeaconRelease();
+  if (why !== 'timer') aprsBeaconSchedule(); // a manual beacon moves the next timed one back
+  aprsBeaconPush();
+}
+/**
+ * The timer: only while the APRS window is open; never under 10 min (lib/aprs-beacon.js).
+ * arm: an interval was just picked or the window just opened. Neither sends at
+ * once: the first timed beacon is one interval after the later of the last
+ * beacon and that moment (Casey 2026-11-19). "Beacon now" is unchanged.
+ */
+function aprsBeaconSchedule({ arm = false } = {}) {
+  aprsBeaconLoad();
+  if (arm) aprsBeacon.armedAt = Date.now();
+  if (aprsBeacon.timer) { clearTimeout(aprsBeacon.timer); aprsBeacon.timer = null; }
+  aprsBeacon.nextAt = 0;
+  const min = AprsBeacon.intervalMinutes(settings.aprsBeaconIntervalMin);
+  if (!aprsWin || aprsWin.isDestroyed() || !min) { aprsBeaconRelease(); aprsBeaconPush(); return; }
+  const last = Math.max(aprsBeacon.lastAt, aprsBeacon.lastTryAt);
+  const due = AprsBeacon.nextDueMs({ intervalMin: min, lastAt: last, armedAt: aprsBeacon.armedAt, now: Date.now() });
+  aprsBeacon.nextAt = Date.now() + due;
+  aprsUplinkWant('beacon', true);
+  aprsBeacon.timer = setTimeout(() => {
+    aprsBeacon.timer = null;
+    aprsBeaconSend('timer').catch((e) => aprsLog('beacon failed: ' + e.message)).finally(() => aprsBeaconSchedule());
+  }, due);
+  aprsBeaconPush();
+}
+/** The APRS window closed: the timer stops and the uplink is let go. */
+function aprsBeaconStop() {
+  if (aprsBeacon.timer) { clearTimeout(aprsBeacon.timer); aprsBeacon.timer = null; }
+  aprsBeacon.nextAt = 0;
+  if (!aprsBeacon.sending) aprsUplinkWant('beacon', false);
+}
+/** A change from the window: only the beacon's own keys, each cleaned (lib/aprs-beacon.js settingsPatch). */
+function aprsBeaconSet(patch) {
+  const o = AprsBeacon.settingsPatch(patch);
+  if (!Object.keys(o).length) { aprsBeaconPush(); return; }
+  Object.assign(settings, o);
+  saveSettings(settings);
+  if ('aprsBeaconLat' in o) aprsLog(o.aprsBeaconLat === null ? 'beacon position: the grid square centre' : 'beacon position: a point picked on the map');
+  aprsBeacon.sentence = '';
+  if ('aprsBeaconIntervalMin' in o) {
+    aprsLog('beacon timer: ' + (o.aprsBeaconIntervalMin ? 'every ' + o.aprsBeaconIntervalMin + ' min while the APRS window is open' : 'off'));
+    aprsBeaconSchedule({ arm: true });
+  }
+  aprsBeaconPush();
 }
 
 function killArdop() {
@@ -45925,7 +46050,15 @@ function cloudShackNotice(text, kind) {
     const dev = APRS_IS_DEV_SERVER || {}; // dev builds only: a local fake APRS-IS server
     aprsFeed = new Feed.AprsIsFeed({ call: settings.myCallsign, version: app.getVersion(), lat: home.lat, lon: home.lon, km: settings.aprsRangeKm, host: dev.host, port: dev.port });
     aprsBatch = Feed.createBatcher((packets) => aprsSend('aprs-packets', packets), 500);
-    aprsFeed.on('line', (line) => { const p = AprsParser.parse(line); if (p && aprsBatch) aprsBatch.push(p); });
+    aprsFeed.on('line', (line) => {
+      const p = AprsParser.parse(line);
+      if (p && aprsBatch) aprsBatch.push(p);
+      // Phase 5: our own beacon came back from APRS-IS (it is on the map now).
+      if (p && aprsBeacon.lastAt) {
+        const login = AprsIgate.uplinkLogin(settings.myCallsign);
+        if (login.ok && AprsBeacon.isOwnBeacon(p, login.call)) { aprsBeacon.backAt = Date.now(); aprsBeaconPush(); }
+      }
+    });
     aprsFeed.on('status', (st) => aprsSend('aprs-status', st));
     aprsFeed.on('error', () => { /* shown as the window's status mark; reconnects on its own */ });
     aprsFeed.start();
@@ -45946,6 +46079,7 @@ function cloudShackNotice(text, kind) {
       // APRS-on-idle listens with no window: closing it leaves that session running.
       if (!(autoIdleAprsActive && autoIdleAprsOwnsListen)) aprsListenStop('the APRS window closed');
       aprsStopFeed(); aprsWin = null;
+      aprsBeaconStop(); // phase 5: the beacon timer runs only while the window is open
     });
     aprsWin.webContents.on('before-input-event', (_e, input) => {
       if (input.key === 'F12' && input.type === 'keyDown') aprsWin.webContents.toggleDevTools();
@@ -45958,7 +46092,13 @@ function cloudShackNotice(text, kind) {
     aprsStartFeed();
     aprsListenPush();
     aprsIgatePush();
+    aprsBeaconSchedule({ arm: true }); // phase 5: the timer (if set) starts with the window, one interval on
+    aprsBeaconPush();
   });
+  // APRS phase 5: the Beacon section.
+  ipcMain.on('aprs-beacon-get', () => aprsBeaconPush());
+  ipcMain.on('aprs-beacon-now', () => { aprsBeaconSend('now').catch((e) => aprsLog('beacon failed: ' + e.message)); });
+  ipcMain.on('aprs-beacon-set', (_e, patch) => aprsBeaconSet(patch && typeof patch === 'object' ? patch : {}));
   // APRS phase 2: the "Listen on my radio" switch (receive only).
   // The operator at the switch is using the radio: an APRS idle session ends first.
   ipcMain.on('aprs-listen-set', (_e, on) => { markUserActive(); aprsListenSet(!!on); });
@@ -52127,7 +52267,7 @@ function cloudShackNotice(text, kind) {
     if (newSettings && 'winlinkDeletedDays' in newSettings) setImmediate(() => { try { winlinkPush(); } catch {} });
     // APRS phase 4: the iGate switch and the callsign decide whether the uplink runs, and as whom.
     if (newSettings && 'aprsIgate' in newSettings) newSettings.aprsIgate = newSettings.aprsIgate === true;
-    if (newSettings && ('aprsIgate' in newSettings || 'myCallsign' in newSettings)) setImmediate(() => { try { aprsUplinkWant(null); aprsIgateSync(); aprsIgatePush(); } catch {} });
+    if (newSettings && ('aprsIgate' in newSettings || 'myCallsign' in newSettings)) setImmediate(() => { try { aprsUplinkWant(null); aprsIgateSync(); aprsIgatePush(); aprsBeaconPush(); } catch {} });
     if (newSettings && 'jtcatFakeIt' in newSettings) setImmediate(() => { fakeItSyncEngine(); sendCatLog(`[JTCAT] Split operation Fake It: ${fakeItEnabled() ? 'on' : 'off'}`); });
     // An always-on feature has no off: a stale window's false never lands.
     for (const k of InstallDefaults.ALWAYS_ON) if (k in newSettings) newSettings[k] = true;

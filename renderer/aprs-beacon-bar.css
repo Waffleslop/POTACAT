@@ -1,0 +1,28 @@
+/* APRS window, phase 5: the Beacon section (your position to APRS-IS, never on
+   the air). Theme variables only, so every theme draws it in its own palette. */
+.aprs-beacon { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 7px 12px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); }
+.aprs-beacon-title { font-weight: 700; color: var(--text-primary); }
+.aprs-btn { font: inherit; font-weight: 600; padding: 4px 12px; border-radius: 5px; cursor: pointer;
+  color: var(--bg-primary); background: var(--accent-blue); border: 1px solid var(--accent-blue); }
+.aprs-btn:hover { filter: brightness(1.1); }
+.aprs-btn:disabled { opacity: 0.55; cursor: default; filter: none; }
+.aprs-btn:focus-visible, .aprs-btn-quiet:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+.aprs-btn-quiet { font: inherit; padding: 3px 10px; border-radius: 5px; cursor: pointer;
+  color: var(--text-primary); background: transparent; border: 1px solid var(--border-primary); }
+.aprs-btn-quiet:hover { border-color: var(--accent-blue); }
+.aprs-field { display: inline-flex; align-items: center; gap: 7px; color: var(--text-secondary); }
+.aprs-field select, .aprs-field input { font-size: 15px; padding: 4px 8px; border-radius: 5px;
+  background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-primary); }
+#aprs-beacon-comment { width: 21em; }
+.aprs-check { display: inline-flex; align-items: center; gap: 7px; color: var(--text-secondary); cursor: pointer; }
+.aprs-check input { width: 16px; height: 16px; accent-color: var(--accent-blue); }
+.aprs-beacon-syms { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.aprs-sym-chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 9px 1px 4px; cursor: pointer;
+  font-family: inherit; color: var(--text-secondary); background: transparent; }
+.aprs-sym-chip:hover { color: var(--text-primary); border-color: var(--accent-blue); }
+.aprs-sym-chip.on { color: var(--text-primary); border-color: var(--accent-blue); box-shadow: inset 0 0 0 1px var(--accent-blue); cursor: default; }
+.aprs-sym-chip:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+.aprs-beacon-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; flex-basis: 100%; }
+#aprs-beacon-status { white-space: normal; }
+.aprs-picking, .aprs-picking .leaflet-interactive { cursor: crosshair !important; }

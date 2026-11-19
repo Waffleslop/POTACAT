@@ -720,6 +720,9 @@
     },
   };
 
+  // Phase 5: the Beacon section picks a point on this map and draws it.
+  window.aprsMapApi = { map: map };
+
   tickMarks();
   rebuild();
   window.api.ready();

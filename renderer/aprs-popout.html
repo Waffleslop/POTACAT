@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="aprs-popout.css">
   <link rel="stylesheet" href="aprs-listen-bar.css">
+  <link rel="stylesheet" href="aprs-beacon-bar.css">
 </head>
 <body>
   <div class="titlebar">
@@ -44,6 +45,28 @@
     <span class="aprs-spacer"></span>
     <label class="aprs-heard-filter" title="Show only the stations your radio heard"><input type="checkbox" id="aprs-heard-only">Heard by me</label>
     <div class="aprs-listen-note hidden" id="aprs-listen-note"></div>
+  </div>
+
+  <div class="aprs-beacon" id="aprs-beacon" role="group" aria-label="Beacon">
+    <span class="aprs-beacon-title" title="Your position to APRS-IS, over the internet. Nothing is transmitted on the air.">Beacon</span>
+    <button type="button" class="aprs-btn" id="aprs-beacon-now" title="Send your position to APRS-IS now">Beacon now</button>
+    <label class="aprs-field" title="Send your position every so often while this window is open">Timer
+      <select id="aprs-beacon-interval">
+        <option value="0">Off</option>
+        <option value="10">10 min</option>
+        <option value="20">20 min</option>
+        <option value="30">30 min</option>
+      </select>
+    </label>
+    <span class="aprs-beacon-syms" id="aprs-beacon-syms" role="radiogroup" aria-label="Symbol"></span>
+    <div class="aprs-beacon-row">
+      <label class="aprs-field">Comment <input type="text" id="aprs-beacon-comment" maxlength="43" spellcheck="false" autocomplete="off"></label>
+      <label class="aprs-check" title="Rounds your position to the nearest minute, about 1 nautical mile (APRS position ambiguity)"><input type="checkbox" id="aprs-beacon-approx">Approximate position</label>
+      <span class="aprs-mark" id="aprs-beacon-pos"></span>
+      <button type="button" class="aprs-btn-quiet" id="aprs-beacon-pick" title="Click the map where you are">Pick on map</button>
+      <button type="button" class="aprs-btn-quiet hidden" id="aprs-beacon-grid" title="Use the centre of the grid square in Settings">Use my grid</button>
+    </div>
+    <div class="aprs-beacon-row"><span class="aprs-mark hidden" id="aprs-beacon-status"><span class="aprs-dot" id="aprs-beacon-dot"></span><span id="aprs-beacon-text"></span></span></div>
   </div>
 
   <div class="aprs-main">
@@ -82,5 +105,7 @@
   <script src="aprs-icons.js"></script>
   <script src="aprs-popout.js"></script>
   <script src="aprs-listen-bar.js"></script>
+  <script src="../lib/aprs-beacon.js"></script>
+  <script src="aprs-beacon-bar.js"></script>
 </body>
 </html>
