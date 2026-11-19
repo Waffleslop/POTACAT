@@ -20,13 +20,18 @@ const hz = (grid) => { const r = at(grid); return r ? r.hz : null; };
 
 console.log('APRS 2 m frequency by grid');
 
-test('North America: 144.390 MHz (US, Canada, Mexico)', () => {
+test('North America: 144.390 MHz (US and Canada)', () => {
   assert.strictEqual(hz('FM29'), 144390000);   // Philadelphia
   assert.strictEqual(hz('CN87'), 144390000);   // Seattle
   assert.strictEqual(hz('BP51'), 144390000);   // Anchorage
   assert.strictEqual(hz('FN25'), 144390000);   // Ottawa
   assert.strictEqual(hz('DO21'), 144390000);   // Calgary
-  assert.strictEqual(hz('EK09'), 144390000);   // Mexico City
+});
+
+test('Mexico has no entry: only the IARU Region 2 regional plan names its frequency (Casey 2026-11-19, verified regions only)', () => {
+  assert.strictEqual(at('EK09'), null);        // Mexico City
+  assert.strictEqual(F.frequencyForCountry('MX'), null);
+  assert.ok(!F.ENTRIES.some((e) => e.id === 'mx'), 'no mx entry');
 });
 
 test('IARU Region 1: 144.800 MHz (Europe, Africa, Middle East, Russia)', () => {
