@@ -84,5 +84,17 @@ test('the answer is drawn: a refusal shows its one sentence', () => {
   assert.strictEqual(dom.els['aprs-listen-why'].classList.contains('hidden'), false);
 });
 
+test('phase 3: the 30 m chip is there from the answer to the first ask (the 8600M\'s empty row)', () => {
+  const { dom, calls, push } = loadBar();
+  assert.strictEqual(dom.els['aprs-listen-bands'].children.length, 0, 'no chips before main answers');
+  assert.ok(calls.some((c) => c[0] === 'get'), 'asked');
+  // main's answer for an HF-only rig (FLEX-8600M): one chip, 30 m, selected.
+  push({ on: false, state: 'off', sentence: '', band: '30m', bands: ['30m'], modeLabel: 'USB', mhz: '', heard: 0, lastAt: 0, note: '' });
+  const chips = dom.els['aprs-listen-bands'].children;
+  assert.strictEqual(chips.length, 1);
+  assert.strictEqual(chips[0].textContent, '30 m');
+  assert.strictEqual(chips[0].attrs['aria-pressed'], 'true');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -37,9 +37,20 @@ test('Winlink: "A Winlink session has the modem."', () => {
   assert.strictEqual(why({ winlinkHasModem: true }).reason, 'winlink');
 });
 
-test('no 2 m: "Your radio has no 2 m. APRS on 30 m is coming."', () => {
-  assert.strictEqual(why({ bands: ['160m', '80m', '40m', '20m', '6m'] }).sentence, 'Your radio has no 2 m. APRS on 30 m is coming.');
-  assert.strictEqual(why({ bands: [] }).reason, 'no-2m');
+test('an HF-only rig listens on 30 m instead of being refused (phase 3)', () => {
+  assert.strictEqual(why({ bands: ['160m', '80m', '40m', '30m', '20m', '6m'], band: '30m', freq: { hz: 10147600, mhz: '10.1476' } }), null);
+});
+
+test('a rig with neither 2 m nor 30 m: "Your radio has neither 2 m nor 30 m."', () => {
+  assert.strictEqual(why({ bands: ['160m', '80m', '40m', '20m', '6m'] }).sentence, 'Your radio has neither 2 m nor 30 m.');
+  assert.strictEqual(why({ bands: [] }).reason, 'no-band');
+  assert.strictEqual(why({ bands: ['70cm', '23cm'] }).reason, 'no-band');
+});
+
+test('the old "APRS on 30 m is coming" sentence is gone from the code and the window', () => {
+  for (const f of ['lib/aprs-listen.js', 'main.js', 'renderer/aprs-listen-bar.js', 'renderer/aprs-popout.html']) {
+    assert.ok(!/30 m is coming/.test(fs.readFileSync(path.join(__dirname, '..', f), 'utf8')), f);
+  }
 });
 
 test('an unknown model (no band list) counts as unrestricted and is tried', () => {
@@ -69,7 +80,7 @@ test('every sentence is one sentence, plain, no emoji', () => {
 });
 
 test('order: a radio problem is named before a busy modem', () => {
-  assert.strictEqual(why({ bands: ['20m'], ft8Decoding: true }).reason, 'no-2m');
+  assert.strictEqual(why({ bands: ['20m'], ft8Decoding: true }).reason, 'no-band');
   assert.strictEqual(why({ catConnected: false, winlinkHasModem: true }).reason, 'no-cat');
 });
 
@@ -107,7 +118,14 @@ const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').repl
 const fnBody = (name) => {
   const i = main.indexOf('function ' + name + '(');
   assert.ok(i >= 0, name + ' not found');
-  const open = main.indexOf(') {', i) + 2; // past a destructured parameter's braces
+  // Skip the parameter list first: a destructured parameter ({ resume = false })
+  // has braces of its own and is not the body.
+  let close = main.indexOf('(', i), pd = 0;
+  for (; close < main.length; close++) {
+    if (main[close] === '(') pd++;
+    else if (main[close] === ')' && --pd === 0) break;
+  }
+  const open = main.indexOf('{', close);
   let depth = 0;
   for (let k = open; k < main.length; k++) {
     if (main[k] === '{') depth++;
@@ -225,6 +243,110 @@ test('main.js: stopping listening lets go of the lane APRS started (aprsReleaseL
 test('the dev-only frame feed never runs in a packaged build', () => {
   assert.ok(/POTACAT_APRS_DEV_FRAMES/.test(main));
   assert.ok(/!app\.isPackaged && process\.env\.POTACAT_APRS_DEV_FRAMES/.test(main));
+});
+
+// ── Phase 3: the band chips and 30 m ──────────────────────────────────────
+console.log('APRS 30 m (phase 3)');
+const RigBands = require('../lib/rig-bands');
+const PlainSsb = require('../lib/plain-ssb-for-digital');
+const bandsOf = (model) => RigBands.bandsForRig({}, model, null);
+
+test('band chips come from lib/rig-bands.js: 2 m, 30 m, or both', () => {
+  assert.deepStrictEqual(L.bandChoices(bandsOf('IC-7300')), ['30m']);       // HF only
+  assert.deepStrictEqual(L.bandChoices(bandsOf('IC-9700')), ['2m']);        // VHF/UHF only
+  assert.deepStrictEqual(L.bandChoices(bandsOf('IC-705')), ['2m', '30m']);  // both
+  assert.deepStrictEqual(L.bandChoices(bandsOf('FT-991/991A')), ['2m', '30m']);
+  assert.deepStrictEqual(L.bandChoices(bandsOf('QDX')), ['30m']);
+  assert.deepStrictEqual(L.bandChoices(null), ['2m', '30m']);             // an unknown model is not restricted
+  assert.deepStrictEqual(L.bandChoices(['6m', '70cm']), []);
+  // The operator's own band list in the rig editor wins.
+  assert.deepStrictEqual(L.bandChoices(RigBands.bandsForRig({ bands: ['20m', '2m'] }, 'IC-7300', null)), ['2m']);
+});
+
+test('a rig with 2 m defaults to 2 m; an HF-only rig defaults to 30 m', () => {
+  assert.strictEqual(L.chooseBand(bandsOf('IC-705')), '2m');
+  assert.strictEqual(L.chooseBand(bandsOf('IC-9700')), '2m');
+  assert.strictEqual(L.chooseBand(bandsOf('IC-7300')), '30m');
+  assert.strictEqual(L.chooseBand(null), '2m');
+  assert.strictEqual(L.chooseBand(['6m']), null);
+});
+
+test('a chip the operator picked holds while the rig has it, and falls back when it does not', () => {
+  assert.strictEqual(L.chooseBand(bandsOf('IC-705'), '30m'), '30m');
+  assert.strictEqual(L.chooseBand(bandsOf('IC-7300'), '2m'), '30m');
+  assert.strictEqual(L.chooseBand(bandsOf('IC-9700'), '30m'), '2m');
+  assert.strictEqual(L.chooseBand(bandsOf('IC-705'), 'nonsense'), '2m');
+});
+
+test('whyNot refuses a band the rig does not have', () => {
+  assert.strictEqual(why({ bands: ['20m', '2m'], band: '30m' }).reason, 'no-band');
+  assert.strictEqual(why({ bands: ['30m'], band: '2m' }).reason, 'no-band');
+});
+
+test('30 m tunes in DIGU, the mode JTCAT uses for FT8 (DATA-U where the rig has it), never FM', () => {
+  const icom = PacketRigMode.resolvePacketRigMode({ choice: 'auto', family: 'icom', brand: 'Icom', protocol: 'civ' });
+  const byHand = PacketRigMode.resolvePacketRigMode({ choice: 'fmdata', family: 'serial', brand: 'Kenwood', protocol: 'kenwood' });
+  for (const pm of [icom, byHand, null]) assert.deepStrictEqual(L.listenModePlan(pm, '30m'), { tuneMode: 'DIGU', dataMode: null });
+  // 2 m is unchanged by the band argument.
+  assert.deepStrictEqual(L.listenModePlan(icom, '2m'), { tuneMode: 'FM', dataMode: 'DIGFM' });
+  assert.deepStrictEqual(L.listenModePlan(icom), { tuneMode: 'FM', dataMode: 'DIGFM' });
+});
+
+test('30 m follows JTCAT\'s "DATA mode for FT8" setting: off means plain USB (lib/plain-ssb-for-digital.js)', () => {
+  const mode = L.listenModePlan(null, '30m').tuneMode;
+  assert.strictEqual(PlainSsb.plainSsbForDigital(mode, { useDataMode: true }), 'DIGU');
+  assert.strictEqual(PlainSsb.plainSsbForDigital(mode, { useDataMode: false }), 'USB');
+});
+
+test('the window names the mode: FM on 2 m, USB on 30 m', () => {
+  assert.strictEqual(L.modeLabel('2m'), 'FM');
+  assert.strictEqual(L.modeLabel('30m'), 'USB');
+});
+
+test('the 30 m setup line is rig-setup-notes\' own sideband step, verbatim', () => {
+  const N = require('../lib/rig-setup-notes');
+  const steps = (model) => N.resolveSetupNotes({ model, radioType: 'serialcat' }).flatMap((n) => n.steps);
+  const ft891 = L.setupLine(N.resolveSetupNotes({ model: 'FT-891', radioType: 'serialcat' }), '30m');
+  assert.ok(/DATA BFO/.test(ft891), ft891);
+  assert.ok(steps('FT-891').includes(ft891));
+  const ft857 = L.setupLine(N.resolveSetupNotes({ model: 'FT-857', radioType: 'serialcat' }), '30m');
+  assert.ok(/DIG MODE → USER-U/.test(ft857), ft857);
+  assert.ok(steps('FT-857').includes(ft857));
+  // 2 m on the same radio still shows the PKT RATE step.
+  assert.ok(/PKT RATE/.test(L.setupLine(N.resolveSetupNotes({ model: 'FT-857', radioType: 'serialcat' }), '2m')));
+  assert.strictEqual(L.setupLine(N.resolveSetupNotes({ model: 'IC-7300', radioType: 'serialcat' }), '30m'), '');
+});
+
+test('a digital filter narrower than 1 kHz gets one plain sentence on 30 m; filters are never changed', () => {
+  assert.strictEqual(L.filterSentence('30m', 500), 'Your digital filter is 500 Hz wide. APRS on 30 m needs 1500 to 1900 Hz to pass.');
+  assert.strictEqual(L.filterSentence('30m', 0), '');      // the radio's own filter: nothing known, nothing said
+  assert.strictEqual(L.filterSentence('30m', 2400), '');
+  assert.strictEqual(L.filterSentence('30m', 1000), '');
+  assert.strictEqual(L.filterSentence('2m', 500), '');      // FM has a fixed bandwidth
+});
+
+test('the 30 m refusal names 10.1476 MHz', () => {
+  assert.strictEqual(L.rejectedSentence({ hz: 10147600, mhz: '10.1476' }), 'The radio did not accept 10.1476 MHz.');
+});
+
+test('main.js: the band chip is wired, the frequency and the modem follow the band', () => {
+  assert.ok(/ipcMain\.on\('aprs-listen-band'/.test(main));
+  assert.ok(/AprsRfFrequency\.frequencyForBand\(/.test(fnBody('aprsListenFrequency')));
+  assert.ok(/band:\s*aprsListen\.band/.test(fnBody('aprsSpawnDirewolf')));
+  assert.ok(/AprsListen\.listenModePlan\(pm, aprsListen\.band\)/.test(fnBody('aprsListenStart')));
+  assert.ok(/AprsListen\.chooseBand\(/.test(main));
+  // A band change while listening never re-saves the APRS frequency as home: it goes through begin() again.
+  assert.ok(!/aprsReturn\.(drop|end)\(/.test(fnBody('aprsListenSetBand')));
+});
+
+test('the window shows a chip per band the rig has, from the payload', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'aprs-popout.html'), 'utf8');
+  assert.ok(/id="aprs-listen-bands"/.test(html));
+  assert.ok(!/<span class="aprs-chip"[^>]*>2 m<\/span>/.test(html), 'no fixed 2 m chip');
+  const bar = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'aprs-listen-bar.js'), 'utf8');
+  assert.ok(/s\.bands/.test(bar) && /listenBand\(/.test(bar));
+  const pre = fs.readFileSync(path.join(__dirname, '..', 'preload-aprs-popout.js'), 'utf8');
+  assert.ok(/listenBand:\s*\(b\)\s*=>\s*ipcRenderer\.send\('aprs-listen-band'/.test(pre));
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

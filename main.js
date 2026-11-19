@@ -479,7 +479,7 @@ const PacketRigMode = require('./lib/packet-rig-mode');
 const AprsListen = require('./lib/aprs-listen');           // APRS phase 2: when "Listen on my radio" may start, and why not
 const IdleRadioUse = require('./lib/idle-radio-use');      // Idle Mode yields to anyone using the radio, APRS listening included
 const RadioTuneRoute = require('./lib/radio-tune-route'); // the path tuneRadio drives the radio on: TCI, Flex Direct, CAT, or none
-const AprsRfFrequency = require('./lib/aprs-rf-frequency'); // APRS phase 2: the 2 m APRS frequency by grid square
+const AprsRfFrequency = require('./lib/aprs-rf-frequency'); // APRS: the 2 m frequency by grid square (phase 2), 30 m worldwide (phase 3)
 const AprsRfFrames = require('./lib/aprs-rf-frames');       // APRS phase 2: Dire Wolf's AGW monitor frames -> APRS packets
 const AprsRadioReturn = require('./lib/aprs-radio-return'); // APRS phase 2: the radio goes back after listening
 const AprsParser = require('./lib/aprs-parser');
@@ -12985,7 +12985,11 @@ async function spawnDirewolf() {
   });
 }
 
-// ── APRS "Listen on my radio" (phase 2: 2 m, receive only) ───────────────────
+// ── APRS "Listen on my radio" (phase 2: 2 m; phase 3: 30 m; receive only) ────
+// Phase 3: a band chip per APRS band the rig has (lib/aprs-listen.js
+// bandChoices, from lib/rig-bands.js). 30 m is 10.1476 MHz in DIGU (JTCAT's
+// data mode, plain USB when its DATA-mode setting is off) and Dire Wolf's
+// MODEM 300 config; everything else below is the same for both bands.
 // One switch in the APRS window. On: the radio's place is saved (to disk,
 // first), the radio goes to the regional APRS frequency (lib/aprs-rf-frequency.js)
 // in FM or its FM data mode (the packet rule, lib/packet-rig-mode.js), and a
@@ -13001,6 +13005,8 @@ async function spawnDirewolf() {
 const aprsListen = {
   on: false,          // the operator's switch
   state: 'off',       // 'off' | 'starting' | 'listening' | 'paused' | 'refused'
+  band: '',           // '2m' | '30m': the band listened on (AprsListen.chooseBand)
+  bandWanted: '',     // the chip the operator picked this session ('' = the rig's default)
   sentence: '',       // the one sentence when it cannot listen
   freq: null,         // {hz, mhz, id, country, source}
   heard: 0,           // frames heard this session
@@ -13025,7 +13031,8 @@ let _aprsTickTimer = null;
 let _aprsLastReturnAt = 0;
 // Dev only (never in a packaged build): recorded Dire Wolf AGW frames stand in
 // for the radio and the modem, so the window can be checked with no radio.
-// POTACAT_APRS_DEV_REFUSE=ft8|winlink|no2m|rejected|no-cat|no-freq shows that refusal.
+// POTACAT_APRS_DEV_REFUSE=ft8|winlink|noband|rejected|no-cat|no-freq shows that refusal.
+// POTACAT_APRS_DEV_BANDS=hf|vu|both|none stands in for the rig's bands (the chips).
 const APRS_DEV_FRAMES = (!app.isPackaged && process.env.POTACAT_APRS_DEV_FRAMES) ? String(process.env.POTACAT_APRS_DEV_FRAMES) : '';
 
 const aprsReturn = AprsRadioReturn.createRadioReturn({
@@ -13067,10 +13074,24 @@ function radioTuneRoute() {
 
 function aprsLog(s) { sendCatLog('[APRS] ' + s); }
 function aprsWinSend(ch, data) { if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send(ch, data); }
+/** The rig's bands for APRS (activeRigBands; a dev stand-in when POTACAT_APRS_DEV_BANDS is set). */
+function aprsRigBands() {
+  const dev = APRS_DEV_FRAMES ? String(process.env.POTACAT_APRS_DEV_BANDS || '') : '';
+  if (dev === 'hf') return RigBands.bandsForRig({}, 'IC-7300', null);
+  if (dev === 'vu') return RigBands.bandsForRig({}, 'IC-9700', null);
+  if (dev === 'both') return RigBands.bandsForRig({}, 'IC-705', null);
+  if (dev === 'none') return ['6m', '70cm'];
+  return activeRigBands();
+}
 function aprsListenPayload() {
+  const rigBands = aprsRigBands();
+  const bands = AprsListen.bandChoices(rigBands);
+  // Switched on: the band it is (or tried) listening on. Off: the chip it would start on.
+  const band = (aprsListen.on && aprsListen.band) ? aprsListen.band : (AprsListen.chooseBand(rigBands, aprsListen.bandWanted) || '');
   return {
-    on: aprsListen.on, state: aprsListen.state, sentence: aprsListen.sentence, band: '2m',
-    mhz: aprsListen.freq ? aprsListen.freq.mhz : '', heard: aprsListen.heard, lastAt: aprsListen.lastAt, note: aprsListen.note,
+    on: aprsListen.on, state: aprsListen.state, sentence: aprsListen.sentence, band, bands,
+    modeLabel: AprsListen.modeLabel(band),
+    mhz: aprsListen.on && aprsListen.freq ? aprsListen.freq.mhz : '', heard: aprsListen.heard, lastAt: aprsListen.lastAt, note: aprsListen.note,
   };
 }
 function aprsListenPush() { aprsWinSend('aprs-listen', aprsListenPayload()); }
@@ -13084,14 +13105,14 @@ function aprsListenFrequency() {
   if (!_aprsCountries) {
     try { _aprsCountries = JSON.parse(fs.readFileSync(path.join(__dirname, 'assets', 'geo', 'countries.json'), 'utf8')); } catch { _aprsCountries = { features: [] }; }
   }
-  return AprsRfFrequency.frequencyForGrid(settings.grid, _aprsCountries);
+  return AprsRfFrequency.frequencyForBand(aprsListen.band || '2m', settings.grid, _aprsCountries);
 }
 
 function aprsSetupLine() {
   try {
     const rig = (settings.rigs || []).find((r) => r && r.id === settings.activeRigId);
     if (!rig) return '';
-    return AprsListen.setupLine(rigSetupNotesFor({ model: rig.model, catTarget: rig.catTarget, radioType: rig.radioType, cwKeyLine: rig.cwKeyLine }));
+    return AprsListen.setupLine(rigSetupNotesFor({ model: rig.model, catTarget: rig.catTarget, radioType: rig.radioType, cwKeyLine: rig.cwKeyLine }), aprsListen.band);
   } catch { return ''; }
 }
 
@@ -13121,10 +13142,10 @@ function aprsDevRefusal(freq) {
   const r = String(process.env.POTACAT_APRS_DEV_REFUSE || '');
   if (!r) return null;
   if (r === 'rejected') return { reason: 'rejected', sentence: AprsListen.rejectedSentence(freq || { hz: 144390000, mhz: '144.390' }) };
-  const f = { remote: false, catConnected: true, bands: null, freq: freq || { hz: 144390000, mhz: '144.390' }, modemFound: true, ft8Decoding: false, winlinkHasModem: false };
+  const f = { remote: false, catConnected: true, bands: aprsRigBands(), band: aprsListen.band, freq: freq || { hz: 144390000, mhz: '144.390' }, modemFound: true, ft8Decoding: false, winlinkHasModem: false };
   if (r === 'ft8') f.ft8Decoding = true;
   else if (r === 'winlink') f.winlinkHasModem = true;
-  else if (r === 'no2m') f.bands = ['160m', '80m', '40m', '20m', '15m', '10m', '6m'];
+  else if (r === 'noband') f.bands = ['160m', '80m', '40m', '20m', '15m', '10m', '6m'];
   else if (r === 'no-cat') f.catConnected = false;
   else if (r === 'no-freq') f.freq = null;
   return AprsListen.whyNot(f);
@@ -13214,9 +13235,9 @@ async function aprsSpawnDirewolf(seq) {
   fs.mkdirSync(p.dir, { recursive: true });
   const confPath = path.join(p.dir, 'direwolf-aprs.conf');
   const agw = DirewolfProcess.aprsAgwPort(_winlinkAgwPort());
-  fs.writeFileSync(confPath, DirewolfProcess.buildDirewolfAprsRxConfig({ mycall: settings.myCallsign, audioPort: lane.port, agwPort: agw }));
+  fs.writeFileSync(confPath, DirewolfProcess.buildDirewolfAprsRxConfig({ mycall: settings.myCallsign, audioPort: lane.port, agwPort: agw, band: aprsListen.band || '2m' }));
   const args = DirewolfProcess.buildDirewolfArgs({ configName: path.basename(confPath) });
-  aprsLog(`Dire Wolf for APRS: 1200 baud, receive only (no PTT line), audio on 127.0.0.1:${lane.port}, AGW ${agw}`);
+  aprsLog(`Dire Wolf for APRS: ${DirewolfProcess.APRS_MODEM_LINES[aprsListen.band || '2m']}, receive only (no PTT line), audio on 127.0.0.1:${lane.port}, AGW ${agw}`);
   const proc = spawn(bin.path, args, { cwd: p.dir, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   aprsListen.proc = proc;
   aprsListen.lane = lane;
@@ -13257,11 +13278,13 @@ async function aprsListenStart({ resume = false } = {}) {
   aprsListen.sentence = '';
   aprsListen.restarts = 0;
   if (!resume) { aprsListen.heard = 0; aprsListen.lastAt = 0; }
-  const freq = aprsListenFrequency();
+  const bands = aprsRigBands();
+  aprsListen.band = AprsListen.chooseBand(bands, aprsListen.bandWanted) || '';
+  const freq = aprsListen.band ? aprsListenFrequency() : null;
   aprsListen.freq = freq;
-  aprsListen.note = aprsSetupLine();
+  aprsListen.note = [aprsSetupLine(), AprsListen.filterSentence(aprsListen.band, settings.digitalFilterWidth)].filter(Boolean).join(' ');
   if (APRS_DEV_FRAMES) {
-    const no = aprsDevRefusal(freq);
+    const no = aprsListen.band ? aprsDevRefusal(freq) : { reason: 'no-band', sentence: AprsListen.SENTENCES.noBand };
     if (no) { aprsNotNow(no); return; }
     aprsListen.state = 'listening';
     aprsListenPush();
@@ -13273,7 +13296,8 @@ async function aprsListenStart({ resume = false } = {}) {
   const no = AprsListen.whyNot({
     remote: isRemoteMode(),
     catConnected: route !== '',
-    bands: activeRigBands(),
+    bands,
+    band: aprsListen.band,
     freq,
     modemFound: DirewolfProcess.direwolfSupported(process.platform) && findDirewolf().found,
     ft8Decoding: autoSstvBlockedByJtcat(),
@@ -13282,8 +13306,8 @@ async function aprsListenStart({ resume = false } = {}) {
   if (no) { aprsNotNow(no); return; }
   aprsListen.state = 'starting';
   aprsListenPush();
-  const pm = winlinkPacketRigMode('packet');
-  const plan = AprsListen.listenModePlan(pm);
+  const pm = aprsListen.band === '2m' ? winlinkPacketRigMode('packet') : null;
+  const plan = AprsListen.listenModePlan(pm, aprsListen.band);
   // The place before, from the route's own readback: on Flex Direct the slice
   // (the dial is mirrored from the SmartSDR API, never the shim); an Icom's
   // USB + DATA is saved as DIGU on CAT only (winlinkDialHere does the same).
@@ -13296,7 +13320,7 @@ async function aprsListenStart({ resume = false } = {}) {
   if (home.from === 'idle') aprsLog(`the radio goes back to ${(home.freqHz / 1e6).toFixed(4)} MHz${home.mode ? ' ' + home.mode : ''} afterwards, where it was before Idle Mode`);
   // The place is on disk before the radio moves.
   aprsReturn.begin({ freqHz: home.freqHz, mode: home.mode, rigId: settings.activeRigId || null, listenHz: freq.hz }, () => {
-    aprsLog(`listening on ${freq.mhz} MHz ${plan.tuneMode || '(mode set by hand)'}${plan.dataMode ? ' then ' + plan.dataMode : ''} — ${freq.source}`);
+    aprsLog(`listening on ${freq.mhz} MHz ${plan.tuneMode || '(mode set by hand)'}${plan.dataMode ? ' then ' + plan.dataMode : ''}${freq.baud ? ', ' + freq.baud + ' baud' : ''} — ${freq.source}`);
     tuneRadio(freq.hz / 1000, plan.tuneMode, undefined, { origin: 'APRS listening' });
   });
   const took = await aprsWaitDial(freq.hz, 4000, seq);
@@ -13398,6 +13422,27 @@ function aprsRadioReturnOnDial(hz) {
   if (aprsListen.on) return; // listening, or paused under Winlink: not ours to move now
   if (Date.now() - _aprsLastReturnAt < 3000) return; // give the last return time to land
   setTimeout(() => aprsReturn.onReadback(hz, { rigId: settings.activeRigId || null, listening: aprsListen.on }), 0);
+}
+
+/**
+ * A band chip. Listening moves to the new band at once; the place saved
+ * before listening stays the place the radio goes back to (aprsReturn.begin
+ * keeps the first one). Paused under Winlink: the resume uses the new band.
+ */
+function aprsListenSetBand(band) {
+  if (AprsListen.BANDS.indexOf(band) < 0) return;
+  aprsListen.bandWanted = band;
+  const next = AprsListen.chooseBand(aprsRigBands(), band) || '';
+  const moving = aprsListen.on && (aprsListen.state === 'starting' || aprsListen.state === 'listening');
+  if (moving && next !== aprsListen.band) {
+    aprsLog(`band chip: ${aprsListen.band || '?'} -> ${next}`);
+    aprsListen.seq++;
+    aprsStopModem();
+    aprsListenStart().catch((e) => { aprsLog('start failed: ' + e.message); aprsListenStop('start failed'); });
+    return;
+  }
+  if (aprsListen.state !== 'paused') { aprsListen.band = next; aprsListen.freq = null; }
+  aprsListenPush();
 }
 
 function aprsListenSet(on) {
@@ -45768,6 +45813,8 @@ function cloudShackNotice(text, kind) {
   // The bar asks once its listener is attached: the push after 'aprs-ready' can
   // arrive while its script is still loading (the 8600M's empty bar, 2026-11-18).
   ipcMain.on('aprs-listen-get', () => aprsListenPush());
+  // APRS phase 3: the band chips (2 m, 30 m).
+  ipcMain.on('aprs-listen-band', (_e, band) => aprsListenSetBand(String(band || '')));
   ipcMain.on('aprs-set-range', (_e, km) => {
     const Feed = require('./lib/aprs-is-feed');
     settings.aprsRangeKm = Feed.clampRangeKm(km);

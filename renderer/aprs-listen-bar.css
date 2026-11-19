@@ -15,6 +15,12 @@
 .aprs-switch input:focus-visible + .aprs-switch-track { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
 .aprs-chip { display: inline-block; padding: 1px 9px; border-radius: 10px; font-size: 13px; font-weight: 700;
   color: var(--text-primary); border: 1px solid var(--border-primary); background: var(--bg-tertiary); }
+/* Phase 3: one chip per band the rig has; the band in use is filled. */
+.aprs-bands { display: inline-flex; gap: 6px; }
+.aprs-band-chip { cursor: pointer; font-family: inherit; color: var(--text-secondary); background: transparent; }
+.aprs-band-chip:hover { color: var(--text-primary); border-color: var(--accent-green); }
+.aprs-band-chip.on { color: var(--bg-primary); background: var(--accent-green); border-color: var(--accent-green); cursor: default; }
+.aprs-band-chip:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
 .aprs-listen-why { color: var(--text-primary); font-weight: 600; }
 .aprs-listen-note { flex-basis: 100%; color: var(--text-secondary); font-size: 14px; }
 .aprs-heard-filter { display: inline-flex; align-items: center; gap: 7px; color: var(--text-secondary); cursor: pointer; }

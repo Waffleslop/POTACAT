@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('api', {
   // Phase 2, "Listen on my radio" (receive only): the switch, and its state
   // { on, state: 'off'|'starting'|'listening'|'paused'|'refused', sentence, band, mhz, heard, lastAt, note }
   listenSet: (on) => ipcRenderer.send('aprs-listen-set', !!on),
+  // Phase 3: the band chips. The state also carries { bands: ['2m','30m'], modeLabel: 'FM'|'USB' }.
+  listenBand: (b) => ipcRenderer.send('aprs-listen-band', String(b || '')),
   onListen: (cb) => ipcRenderer.on('aprs-listen', (_e, s) => cb(s)),
   // Asked once the bar listens; main answers with one 'aprs-listen' push.
   listenGet: () => ipcRenderer.send('aprs-listen-get'),
