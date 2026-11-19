@@ -91,10 +91,24 @@ test('the timer: Off, 10, 20 or 30 minutes; never under 10 minutes, whatever is 
   assert.strictEqual(B.intervalMinutes(-5), 0);
   assert.strictEqual(B.intervalMinutes(9999), 30, 'the longest choice');
   // the next timed beacon never comes sooner than the interval after the last one, manual or timed
-  assert.strictEqual(B.nextDueMs({ intervalMin: 10, lastAt: 0, now: 1000 }), 0);
+  // Casey 2026-11-19: picking an interval, or opening the window with one saved, never sends at once.
+  // The first timed beacon is one interval after the later of the last beacon and the pick/open.
+  assert.strictEqual(B.nextDueMs({ intervalMin: 10, lastAt: 0, now: 1000 }), 600000, 'never beaconed: one interval from now');
+  assert.strictEqual(B.nextDueMs({ intervalMin: 10, lastAt: 0, armedAt: 1000, now: 1000 }), 600000, 'picked now: one interval');
+  assert.strictEqual(B.nextDueMs({ intervalMin: 10, lastAt: 1000, armedAt: 3600000, now: 3600000 }), 600000, 'last beacon an hour ago: still one interval after the open');
+  assert.strictEqual(B.nextDueMs({ intervalMin: 10, lastAt: 300000, armedAt: 200000, now: 400000 }), 500000, 'the last beacon is later: from it');
+  assert.strictEqual(B.nextDueMs({ intervalMin: 10, lastAt: 0, armedAt: 1000, now: 601000 }), 0, 'due once the interval has passed');
   assert.strictEqual(B.nextDueMs({ intervalMin: 10, lastAt: 1000, now: 61000 }), 540000);
   assert.strictEqual(B.nextDueMs({ intervalMin: 1, lastAt: 1000, now: 61000 }), 540000, 'the minimum holds');
   assert.strictEqual(B.nextDueMs({ intervalMin: 0, lastAt: 0, now: 1 }), -1, 'off');
+});
+
+test('the last beacon time read back from settings: a number in the past, else 0', () => {
+  assert.strictEqual(B.lastBeaconAt({ aprsBeaconLastAt: 5000 }, 10000), 5000);
+  assert.strictEqual(B.lastBeaconAt({ aprsBeaconLastAt: 50000 }, 10000), 10000, 'a clock set back counts as now, never as long ago');
+  assert.strictEqual(B.lastBeaconAt({}, 10000), 0);
+  assert.strictEqual(B.lastBeaconAt({ aprsBeaconLastAt: 'x' }, 10000), 0);
+  assert.strictEqual(B.lastBeaconAt(null, 10000), 0);
 });
 
 test('refused in a plain sentence: no callsign, a placeholder, an invalid position', () => {

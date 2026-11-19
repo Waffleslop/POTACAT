@@ -902,6 +902,7 @@ const GLOBAL_KEYS = new Set([
                        // (same reasoning as lightMode/darkVariant above)
   'wsprPreCapPower',   // {watts, rigId, at}: the RF power the WSPR beacon found on the
                        // radio before capping it at 1 W — the radio is this machine's
+  'aprsBeaconLastAt',  // when this station last beaconed over APRS-IS: the timer counts from it after a restart
   'aprsListenReturn',  // {freqHz, mode, rigId, listenHz, state}: where the radio was before APRS
                        // listening tuned it (lib/aprs-radio-return.js) — this machine's radio
   'wsprBeaconWatts',   // {watts, rigId}: the beacon's RF power when the operator set one
@@ -13529,12 +13530,19 @@ function aprsIgatePush() {
 // and the window says why in one sentence. The timer runs only while the APRS
 // window is open. Settings: aprsBeaconSymbol, aprsBeaconComment,
 // aprsBeaconApprox, aprsBeaconIntervalMin, aprsBeaconLat, aprsBeaconLon.
-const aprsBeacon = { timer: null, releaseTimer: null, lastAt: 0, lastTryAt: 0, lastPacket: '', sentence: '', backAt: 0, sending: false, nextAt: 0 };
+const aprsBeacon = { timer: null, releaseTimer: null, lastAt: 0, lastTryAt: 0, lastPacket: '', sentence: '', backAt: 0, sending: false, nextAt: 0, armedAt: 0, loaded: false };
+/** The last beacon's time comes back from settings once (a restart never beacons early). */
+function aprsBeaconLoad() {
+  if (aprsBeacon.loaded) return;
+  aprsBeacon.loaded = true;
+  aprsBeacon.lastAt = AprsBeacon.lastBeaconAt(settings, Date.now());
+}
 function aprsBeaconPosition() {
   const st = AprsBeacon.beaconSettings(settings);
   return AprsBeacon.beaconPosition({ lat: st.lat, lon: st.lon, grid: settings.grid, gridToLatLon });
 }
 function aprsBeaconState() {
+  aprsBeaconLoad();
   const login = AprsIgate.uplinkLogin(settings.myCallsign);
   return {
     settings: AprsBeacon.beaconSettings(settings), call: login.ok ? login.call : '',
@@ -13584,19 +13592,28 @@ async function aprsBeaconSend(why) {
   if (!u.send(b.packet)) { aprsBeaconRefuse('APRS-IS could not be reached, so nothing was sent.'); aprsBeaconRelease(); return; }
   aprsBeacon.lastAt = Date.now();
   aprsBeacon.lastPacket = b.packet;
+  settings.aprsBeaconLastAt = aprsBeacon.lastAt; // kept: a restart never beacons early
+  try { saveSettings(settings); } catch (e) { aprsLog('could not save the beacon time: ' + e.message); }
   sendCatLog(`[APRS beacon] sent (${why}): ${b.packet}`);
   aprsBeaconRelease();
   if (why !== 'timer') aprsBeaconSchedule(); // a manual beacon moves the next timed one back
   aprsBeaconPush();
 }
-/** The timer: only while the APRS window is open; never under 10 min (lib/aprs-beacon.js). */
-function aprsBeaconSchedule() {
+/**
+ * The timer: only while the APRS window is open; never under 10 min (lib/aprs-beacon.js).
+ * arm: an interval was just picked or the window just opened. Neither sends at
+ * once: the first timed beacon is one interval after the later of the last
+ * beacon and that moment (Casey 2026-11-19). "Beacon now" is unchanged.
+ */
+function aprsBeaconSchedule({ arm = false } = {}) {
+  aprsBeaconLoad();
+  if (arm) aprsBeacon.armedAt = Date.now();
   if (aprsBeacon.timer) { clearTimeout(aprsBeacon.timer); aprsBeacon.timer = null; }
   aprsBeacon.nextAt = 0;
   const min = AprsBeacon.intervalMinutes(settings.aprsBeaconIntervalMin);
   if (!aprsWin || aprsWin.isDestroyed() || !min) { aprsBeaconRelease(); aprsBeaconPush(); return; }
   const last = Math.max(aprsBeacon.lastAt, aprsBeacon.lastTryAt);
-  const due = AprsBeacon.nextDueMs({ intervalMin: min, lastAt: last, now: Date.now() });
+  const due = AprsBeacon.nextDueMs({ intervalMin: min, lastAt: last, armedAt: aprsBeacon.armedAt, now: Date.now() });
   aprsBeacon.nextAt = Date.now() + due;
   aprsUplinkWant('beacon', true);
   aprsBeacon.timer = setTimeout(() => {
@@ -13621,7 +13638,7 @@ function aprsBeaconSet(patch) {
   aprsBeacon.sentence = '';
   if ('aprsBeaconIntervalMin' in o) {
     aprsLog('beacon timer: ' + (o.aprsBeaconIntervalMin ? 'every ' + o.aprsBeaconIntervalMin + ' min while the APRS window is open' : 'off'));
-    aprsBeaconSchedule();
+    aprsBeaconSchedule({ arm: true });
   }
   aprsBeaconPush();
 }
@@ -46075,7 +46092,7 @@ function cloudShackNotice(text, kind) {
     aprsStartFeed();
     aprsListenPush();
     aprsIgatePush();
-    aprsBeaconSchedule(); // phase 5: the timer (if set) starts with the window
+    aprsBeaconSchedule({ arm: true }); // phase 5: the timer (if set) starts with the window, one interval on
     aprsBeaconPush();
   });
   // APRS phase 5: the Beacon section.

@@ -86,6 +86,19 @@ const fnBody = (src, name) => {
     assert.ok(/clearTimeout\(aprsBeacon\.timer\)/.test(fnBody(main, 'aprsBeaconStop')));
   });
 
+  await test('main.js: a pick or an open never beacons at once, and the last beacon survives a restart (Casey 2026-11-19)', async () => {
+    const sch = fnBody(main, 'aprsBeaconSchedule');
+    assert.ok(/function aprsBeaconSchedule\(\{ arm = false \} = \{\}\)/.test(sch));
+    assert.ok(/if \(arm\) aprsBeacon\.armedAt = Date\.now\(\);/.test(sch), 'the pick or the open is the start');
+    assert.ok(/armedAt: aprsBeacon\.armedAt/.test(sch), 'the timer counts from it');
+    assert.ok(/aprsBeaconSchedule\(\{ arm: true \}\); \/\/ phase 5: the timer \(if set\) starts with the window/.test(main), 'open arms');
+    assert.ok(/aprsBeaconSchedule\(\{ arm: true \}\);/.test(fnBody(main, 'aprsBeaconSet')), 'a pick arms');
+    const send = fnBody(main, 'aprsBeaconSend');
+    assert.ok(/settings\.aprsBeaconLastAt = aprsBeacon\.lastAt;/.test(send) && /saveSettings\(settings\)/.test(send), 'persisted when sent');
+    assert.ok(/aprsBeacon\.lastAt = AprsBeacon\.lastBeaconAt\(settings, Date\.now\(\)\)/.test(main), 'read back at start');
+    assert.ok(/^\s*'aprsBeaconLastAt',/m.test(main), 'a machine setting');
+  });
+
   await test('main.js: the window\'s changes are only the beacon\'s own settings keys, cleaned', async () => {
     assert.ok(/const o = AprsBeacon\.settingsPatch\(patch\);/.test(fnBody(main, 'aprsBeaconSet')));
     assert.ok(/ipcMain\.on\('aprs-beacon-set'/.test(main) && /ipcMain\.on\('aprs-beacon-now'/.test(main));
