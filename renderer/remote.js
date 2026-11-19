@@ -2628,6 +2628,13 @@
         break;
 
       case 'log-ok':
+        // A follow-up (#732): the QSO was confirmed and counted already; this
+        // only says how the re-spot went. It never touches the form, the
+        // contact list or the counts, and only a failure is shown.
+        if (msg.followUp) {
+          if (msg.respotError) showLogToast((msg.callsign || '') + ': re-spot failed', true);
+          break;
+        }
         logSaveBtn.disabled = false;
         ltSave.disabled = false;
         if (msg.success) {

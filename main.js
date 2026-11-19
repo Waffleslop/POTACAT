@@ -377,6 +377,8 @@ const { applyQsoEdit, modeEditFields, activationSigOf } = require('./lib/qso-edi
 const ActivationClock = require('./lib/activation-clock'); // #147: a forgotten activation ends at the UTC day change or after 6 h idle
 const ActivationAnnounce = require('./lib/activation-announce'); // #508: which saved contacts join the live activation list
 const QsoExpand = require('./lib/qso-expand'); // one contact -> its ADIF records (logContact)
+const LogAfterWrite = require('./lib/log-after-write'); // #732: ECHOCAT's log-ok at the disk write, not after the uploads
+const LogQsoReplay = require('./lib/log-qso-replay'); // #733: log-qso is idempotent by uuid
 const QsoLogSource = require('./lib/qso-log-source'); // APP_POTACAT_LOG_SOURCE: ECHOCAT or blank (#634)
 const { dxccCodeForEntity } = require('./lib/dxcc-codes'); // cty.dat entity -> ADIF DXCC number (#554)
 const WatchlistEdit = require('./lib/watchlist-edit'); // watchlist add/remove by operation (ECHOCAT sync)
@@ -17191,6 +17193,19 @@ function announceActivationContact(records, targets) {
   }
 }
 
+// ECHOCAT log-qso replies by uuid (#733, lib/log-qso-replay.js). After a
+// restart the book is empty and the log answers: the saved records holding
+// the uuid, through the log's uuid index (no re-read unless it is there).
+const logQsoReplies = LogQsoReplay.createReplyBook();
+function logQsoReplyFromLog(uuid) {
+  const logPath = qsoLogPath();
+  if (!QsoLog.hasUuid(logPath, uuid)) return null;
+  return LogQsoReplay.replyFromLogRecords(QsoLog.findByUuid(logPath, uuid), {
+    operator: String(settings.myCallsign || '').toUpperCase(),
+    cloudJournal: !!(cloudIpc && typeof cloudIpc.currentOwnerId === 'function' && cloudIpc.currentOwnerId()),
+  });
+}
+
 // The saved record's own fields for a log-ok `records[]` entry (additive;
 // older devices ignore them). Only fields the record actually holds.
 const LOG_OK_SAVED_FIELDS = ['frequency', 'band', 'mode', 'state', 'gridsquare', 'country', 'dxcc', 'name', 'county'];
@@ -17230,11 +17245,19 @@ async function logContact(entry, opts) {
   }));
   const ownRef = !!(entry.mySig && entry.mySigInfo);
   const actAt = ActivationClock.contactTime(entry, Date.now()); // #147: its own timestamp decides
-  const myRefs = ownRef
-    ? [{ sig: String(entry.mySig).toUpperCase(), ref: entry.mySigInfo }]
-    : (entry.activation === false ? [] : activationRefsAt(actAt));
+  // entry.deviceMyRef: the phone's own park, kept when this desktop's
+  // activation does not apply at the contact's time (#734, 00Z).
+  const mine = ActivationClock.contactMyRefs({
+    ownRef: ownRef ? { sig: String(entry.mySig).toUpperCase(), ref: entry.mySigInfo } : null,
+    skipActivation: entry.activation === false,
+    activationRefsAt: () => activationRefsAt(actAt),
+    deviceRef: entry.deviceMyRef,
+  });
+  const myRefs = mine.refs;
+  if (mine.from === 'device') sendCatLog(`[Activation] ${entry.callsign}: the desktop's activation has ended; logged at the phone's park ${mine.refs[0].ref}`);
   const e = { ...entry, myRig };
   delete e.activation;
+  delete e.deviceMyRef;
   // Never a record with no MODE (pota.app refuses the file; NA4DQ 2026-10-27).
   // A blank mode takes the radio's voice/CW mode; a data mode cannot name the
   // digital mode worked, and no radio means nothing to go by: refused, with
@@ -17314,6 +17337,10 @@ async function logContact(entry, opts) {
   const records = QsoExpand.expandContact(e, expandOpts(false));
   const written = [];
   let first = null, failure = null;
+  // opts.replyOnWrite (ECHOCAT's log-qso, #732): go on once each record is on
+  // disk; the forwarders, respots and SOTA upload finish in the background
+  // and their respot outcome comes back on result.after.
+  const afters = [];
   // Several operators ("Log as: both") are split HERE, not inside
   // saveQsoRecord, so every copy is reported with the uuid it was written
   // under and whose logbook it went into (`operator` on log-ok records).
@@ -17322,7 +17349,17 @@ async function logContact(entry, opts) {
     const targets = LogAs.logAsTargets(rec.logAs);
     const copies = targets.length > 1 ? LogAs.splitForOperators(rec, targets) : [rec];
     for (const q of copies) {
-      const r = await saveQsoRecord(q, opts);
+      let r;
+      if (opts.replyOnWrite) {
+        const w = await LogAfterWrite.untilWritten((onWritten) => saveQsoRecord(q, { ...opts, onWritten }));
+        r = w.result;
+        afters.push(w.after.then((a) => {
+          if (a && a.afterError) sendCatLog(`[QSO] ${q.callsign} is saved; a step after the save failed: ${a.afterError}`);
+          return a;
+        }));
+      } else {
+        r = await saveQsoRecord(q, opts);
+      }
       if (!first) first = r;
       if (r && r.success) {
         q.bookOf = (typeof q.logAs === 'string' && q.logAs.trim()) ? q.logAs.trim().toUpperCase() : activeCall;
@@ -17330,7 +17367,7 @@ async function logContact(entry, opts) {
       } else if (!failure) failure = r;
     }
   }
-  if (written.length && !ownRef && myRefs.length) activationNoteContact(actAt);
+  if (written.length && mine.from === 'activation') activationNoteContact(actAt);
   // The live activation list hears of it here, once, whichever surface saved
   // it; the main window's own forms list it themselves (opts.listed). #508
   if (written.length) {
@@ -17351,6 +17388,7 @@ async function logContact(entry, opts) {
     error: failure ? failure.error : undefined,
     records: written,
     calls,
+    after: opts.replyOnWrite ? Promise.all(afters).then(LogAfterWrite.mergeAfterResults) : undefined,
   };
 }
 
@@ -17649,7 +17687,11 @@ async function saveQsoRecord(qsoData, opts) {
   // The cloud copy is exactly the record written to the file. (The journal
   // used to upper-case qsoData's own keys: CALLSIGN, QSODATE, FREQUENCY.)
   const sink = logAs ? logAsLogSink(ops, logAs.call) : qsoLogSink;
-  QsoLog.appendRecords(logPath, [buildAdifFields(qsoData)], { existing: [], sink });
+  // The uuid collision check runs against the log's uuid index (#733): a uuid
+  // already in the log gets a fresh one here, never a second record with it.
+  const adifFields = buildAdifFields(qsoData);
+  QsoLog.appendRecords(logPath, [adifFields], { sink });
+  qsoData.uuid = adifFields.APP_POTACAT_UUID; // what log-ok reports is what the file holds
   if (logAs) sendCatLog(`[QSO] Logged ${qsoData.callsign} for ${logAs.call}: their logbook, callsign, QRZ and Cloud settings (the active operator's worked lists are untouched)`);
 
   // Notify QSO pop-out window (it shows the active operator's logbook)
@@ -17732,6 +17774,41 @@ async function saveQsoRecord(qsoData, opts) {
   }
   // Debounced POTA.app pull — no-ops unless the user has enabled auto-sync.
   if (!logAs && loggedParkRef && potaSync) { try { potaSync.noteQsoLogged(); } catch {} }
+
+  // The record is on disk: a caller that answers a device now can (ECHOCAT's
+  // log-qso, #732). Everything below is uploads and respots; the yield lets
+  // that answer go out before any of it runs.
+  if (typeof opts.onWritten === 'function') {
+    opts.onWritten({ uuid: qsoData.uuid });
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  // Push the updated log to any connected mobile/browser clients so
+  // their QSO list reflects the new entry without a reconnect.
+  // Mallory KD5ZZU 2026-05-06: she logged a QSO from the desktop UI
+  // and her iOS app's logbook stayed stale until she restarted the
+  // app, because the desktop never told the app the log changed.
+  // Clients advertising 'qso-delta' get just the appended record;
+  // everyone else still gets the full snapshot (chunked or the
+  // byte-capped legacy frame) — re-pushing the whole log on every
+  // save is what produced the 9.6MB frames of BUG-N3VD-20260701.
+  try {
+    // Only with a device connected: this re-parses the WHOLE log, synchronously.
+    // On a 124k-QSO log that held the main process ~1 s after every save with
+    // the ECHOCAT server merely listening, and the FT8 engine missed the 73's
+    // slot (IK4IDF 2026-10-17). A device that connects later gets the log then.
+    if (remoteServer && remoteServer.running && remoteServer.hasClient()) {
+      const logPath = ops.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+      const qsos = parseAllRawQsos(logPath);
+      const mapped = CallZones.withQsoZones(qsos.map((q, i) => ({ idx: i, ...q })), callZonesOf); // + derived CQ/ITU zones (display only)
+      const last = mapped.length ? mapped[mapped.length - 1] : null;
+      if (!last || !remoteServer.sendQsoAdded(last, mapped.length)) {
+        remoteServer.sendAllQsos(mapped);
+      }
+    }
+  } catch (err) {
+    console.warn('[QSO] Broadcast to mobile clients failed:', err.message);
+  }
 
   // Forward to the external loggers if enabled: main logbook, Extra UDP, QRZ
   // Logbook (lib/logger-forward.js — the Cloud pull forwards a phone's
@@ -17915,33 +17992,6 @@ async function saveQsoRecord(qsoData, opts) {
   LoggerForward.queueClublog(qsoData, ops, loggerForwardDeps());
 
   const didRespot = (qsoData.respot && qsoData.sig === 'POTA') || qsoData.wwffRespot || qsoData.llotaRespot || qsoData.dxcRespot;
-
-  // Push the updated log to any connected mobile/browser clients so
-  // their QSO list reflects the new entry without a reconnect.
-  // Mallory KD5ZZU 2026-05-06: she logged a QSO from the desktop UI
-  // and her iOS app's logbook stayed stale until she restarted the
-  // app, because the desktop never told the app the log changed.
-  // Clients advertising 'qso-delta' get just the appended record;
-  // everyone else still gets the full snapshot (chunked or the
-  // byte-capped legacy frame) — re-pushing the whole log on every
-  // save is what produced the 9.6MB frames of BUG-N3VD-20260701.
-  try {
-    // Only with a device connected: this re-parses the WHOLE log, synchronously.
-    // On a 124k-QSO log that held the main process ~1 s after every save with
-    // the ECHOCAT server merely listening, and the FT8 engine missed the 73's
-    // slot (IK4IDF 2026-10-17). A device that connects later gets the log then.
-    if (remoteServer && remoteServer.running && remoteServer.hasClient()) {
-      const logPath = ops.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
-      const qsos = parseAllRawQsos(logPath);
-      const mapped = CallZones.withQsoZones(qsos.map((q, i) => ({ idx: i, ...q })), callZonesOf); // + derived CQ/ITU zones (display only)
-      const last = mapped.length ? mapped[mapped.length - 1] : null;
-      if (!last || !remoteServer.sendQsoAdded(last, mapped.length)) {
-        remoteServer.sendAllQsos(mapped);
-      }
-    }
-  } catch (err) {
-    console.warn('[QSO] Broadcast to mobile clients failed:', err.message);
-  }
 
   return { success: true, resposted: didRespot || false, logbookError, qrzError };
 }
@@ -29859,6 +29909,17 @@ function connectRemote() {
       remoteServer.sendLogResult({ success: false, error: 'Missing callsign', reqId });
       return;
     }
+    // Idempotent by uuid (#733): a device that never heard log-ok sends the
+    // same QSO again under the same uuid. One already logged (or being
+    // logged right now) is not written again; the first reply goes back.
+    const claimUuid = typeof data.uuid === 'string' && QsoLog.isValidUuid(data.uuid) ? data.uuid : '';
+    const claimed = await logQsoReplies.claim(claimUuid, logQsoReplyFromLog);
+    if (claimed.prior) {
+      sendCatLog(`[QSO] ${data.callsign}: already logged (same QSO id) — not logged again`);
+      remoteServer.sendLogResult(LogQsoReplay.replayReply(claimed.prior, reqId));
+      return;
+    }
+    const release = claimed.release;
     try {
       // What the operator logged, as an entry for logContact — which decides
       // the records exactly as every desktop form does (QRZ name per call,
@@ -29914,13 +29975,20 @@ function connectRemote() {
       }
       // A device's own activation ref is used as-is only when this desktop
       // runs no activation; when it does, its full set of parks + cross refs
-      // applies (logContact), as the old cross-product here did.
+      // applies (logContact), as the old cross-product here did. If that
+      // activation has ended by the contact's time (the UTC day change, 6 h
+      // idle; #147), the device's ref still applies (#734): it rides along
+      // as deviceMyRef and logContact decides.
       if (data.mySig && data.mySigInfo && !liveActivationMyRefs().length) {
         entry.mySig = String(data.mySig).toUpperCase();
         entry.mySigInfo = data.mySigInfo;
+      } else if (data.mySig && data.mySigInfo) {
+        entry.deviceMyRef = { sig: String(data.mySig).toUpperCase(), ref: data.mySigInfo };
       }
 
-      const result = await logContact(entry, { origin: 'ws-log-qso' });
+      // The reply goes out once the records are on disk (#732); the uploads,
+      // respots and SOTA chase finish after it (result.after).
+      const result = await logContact(entry, { origin: 'ws-log-qso', replyOnWrite: true });
       if (!result.success) throw new Error(result.error || 'not logged');
 
       // Session contacts (dupe = same call + band in this session), one per call.
@@ -29936,7 +30004,7 @@ function connectRemote() {
         });
         if (!first) first = contact;
       }
-      remoteServer.sendLogResult({
+      const reply = {
         success: true,
         callsign: result.calls.join(', '),
         nr: first.nr,
@@ -29975,15 +30043,31 @@ function connectRemote() {
           if (LogAs.logAsTargets(entry.logAs).some((c) => c !== active)) return true;
           return !!(cloudIpc && typeof cloudIpc.currentOwnerId === 'function' && cloudIpc.currentOwnerId());
         })(),
+        // Not known yet: the respot runs after this reply. Its outcome comes
+        // in a second log-ok with followUp: true (the same reply, so a device
+        // that missed this one still gets the records).
         resposted: result.resposted || false,
         respotError: result.respotError || result.wwffRespotError || result.llotaRespotError || result.wwbotaRespotError || result.dxcRespotError || '',
-      });
+      };
+      logQsoReplies.remember(claimUuid, reply);
+      release();
+      remoteServer.sendLogResult(reply);
       // Several callsigns in one contact: the reply above describes the
       // first; the session list (one row per call) is the truth.
       if (result.calls.length > 1) remoteServer.sendSessionContacts();
+      if (result.after) {
+        result.after.then((outcome) => {
+          const follow = LogAfterWrite.respotFollowUp(reply, outcome);
+          if (!follow) return;
+          logQsoReplies.patch(claimUuid, { resposted: follow.resposted, respotError: follow.respotError });
+          remoteServer.sendLogResult(follow);
+        }).catch((err) => console.error('[Echo CAT] Log QSO follow-up:', err.message));
+      }
     } catch (err) {
       console.error('[Echo CAT] Log QSO error:', err.message);
       remoteServer.sendLogResult({ success: false, error: err.message, reqId });
+    } finally {
+      release(); // a refused or failed save remembers nothing: a resend tries again
     }
   });
 
@@ -35002,6 +35086,9 @@ function repairQsoLogMhzFreqs(logPath) {
 function loadWorkedQsos() {
   repairQsoLogFieldNames(qsoLogPath());
   repairQsoLogMhzFreqs(qsoLogPath());
+  // The log's uuid index (#733): built once here, off the startup path, then
+  // kept in step by every write. Free when it is already current.
+  setTimeout(() => { try { QsoLog.uuidIndex(qsoLogPath()); } catch (err) { console.error('[QSO] uuid index:', err.message); } }, 3000);
   if (!settings.adifLogPath) return;
   try {
     workedQsos = parseWorkedQsos(settings.adifLogPath);
