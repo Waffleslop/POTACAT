@@ -13731,6 +13731,59 @@ function aprsRfTxProof() {
   return AprsRfBeacon.txProofFor({ flexInterlock: flex ? smartSdr.interlockState : '', catReadsPtt, catPollMs: m.pollIntervalMs || (m.protocol === 'rigctld' ? 500 : 1000) });
 }
 
+// 30 m: the beacon's narrow transmit passband (lib/aprs-rf-beacon.js
+// planTxPassband; 2026-11-19 an 8600M refused the 30 m beacon OUT_OF_BAND
+// with its TX filter at 100-3100 Hz). Only a Flex, where POTACAT can set and
+// read the TX filter; any other radio is left alone with one log line. The
+// Flex connection is chosen as for `transmit set dax`: transmit config is
+// per station, so the bound audio connection first (lib/smartsdr-audio.js).
+let _aprsRfTxConn = null;          // the Flex connection the narrow filter was sent on
+const APRS_RF_TX_READY_MS = 1500;  // how long the beacon waits for the radio to read the narrow filter back
+function aprsRfFlexTxConn() {
+  if (smartSdrAudio && smartSdrAudio.connected && typeof smartSdrAudio.setTxFilter === 'function' && smartSdrAudio.txFilter) return smartSdrAudio;
+  if (smartSdr && smartSdr.connected && typeof smartSdr.setTxFilter === 'function') return smartSdr;
+  return null;
+}
+function aprsRfNarrowTx(band) {
+  const conn = aprsRfFlexTxConn();
+  const plan = AprsRfBeacon.planTxPassband({ band, flex: conn ? { connected: true, filter: conn.txFilter, allowed: conn.txFilterChangesAllowed } : null });
+  if (plan.action === 'none') return null;
+  if (plan.action === 'unsupported') { aprsLog('beacon over the radio: ' + plan.log); return null; }
+  const { saved, target } = plan;
+  const dial = aprsListen.freq ? aprsListen.freq.hz : 0;
+  aprsLog(`beacon over the radio: transmit filter ${saved.lo}-${saved.hi} Hz narrowed to ${target.lo}-${target.hi} Hz for the ${AprsRfBeacon.BAND_LABEL[band]} beacon${dial ? ` (top edge ${aprsRfMhz(dial + target.hi)} MHz)` : ''}; it goes back after`);
+  _aprsRfTxConn = conn;
+  try { conn.setTxFilter(target.lo, target.hi); }
+  catch (e) { aprsLog('beacon over the radio: the narrow transmit filter was not sent: ' + e.message); }
+  return saved; // held even if the send threw: the put-back is always attempted
+}
+function aprsRfTxReady() {
+  const conn = _aprsRfTxConn;
+  const t = AprsRfBeacon.TX_PASSBAND['30m'];
+  return new Promise((resolve) => {
+    const until = Date.now() + APRS_RF_TX_READY_MS;
+    const check = () => {
+      const f = conn && conn.txFilter;
+      if (f && f.lo === t.lo && f.hi === t.hi) { resolve(true); return; }
+      if (!conn || !conn.connected || Date.now() >= until) {
+        aprsLog(`beacon over the radio: the radio did not read the narrow transmit filter back within ${APRS_RF_TX_READY_MS / 1000} s${f ? ` (it reads ${f.lo}-${f.hi} Hz)` : ''}; it may refuse 30 m`);
+        resolve(false); return;
+      }
+      setTimeout(check, 50);
+    };
+    check();
+  });
+}
+function aprsRfRestoreTx(saved) {
+  const conn = _aprsRfTxConn && _aprsRfTxConn.connected ? _aprsRfTxConn : aprsRfFlexTxConn();
+  const from = AprsRfBeacon.TX_PASSBAND['30m'];
+  _aprsRfTxConn = null;
+  if (!conn) { aprsLog(`beacon over the radio: the Flex is not connected, so its transmit filter could not be put back to ${saved.lo}-${saved.hi} Hz`); return; }
+  // Both edges, ordered from the narrow filter: a readback that has not caught up must not skip one.
+  conn.setTxFilter(saved.lo, saved.hi, { from, force: true });
+  aprsLog(`beacon over the radio: transmit filter put back to ${saved.lo}-${saved.hi} Hz`);
+}
+
 /** Something other than an APRS beacon is keying the radio, by name ('' = nothing). */
 function aprsRfOtherTx() {
   try { if (jtcatAnyTxActive()) return 'JTCAT'; } catch {}
@@ -13998,6 +14051,9 @@ function aprsRfRunner() {
     unkey: ({ now }) => aprsRfUnkey(now),
     onState: () => aprsRfPush(),
     txProof: aprsRfTxProof,
+    narrowTx: aprsRfNarrowTx,
+    txReady: aprsRfTxReady,
+    restoreTx: aprsRfRestoreTx,
   });
   return aprsRf;
 }
