@@ -54,6 +54,35 @@ test('every point lands once, in a single or a cluster', () => {
   assert.strictEqual(r.clusters.reduce((n, c) => n + c.count, 0) + r.singles.length, 3000);
   assert.ok(ms < 100, 'clustered 3000 points in ' + ms + ' ms');
 });
+// Casey 2026-11-19: "cluster gets the heard-by-me ring when it holds an RF-heard station".
+test('a cluster holding a station the radio heard carries the ring; one without does not', () => {
+  const heard = (p) => !!p.rf;
+  const pts = [{ x: 5, y: 5 }, { x: 15, y: 25, rf: true }, { x: 300, y: 300 }, { x: 310, y: 310 }];
+  const r = M.cluster(pts, { cell: 60, ring: heard });
+  assert.strictEqual(r.clusters.length, 2);
+  const withRf = r.clusters.find((c) => c.members.some((p) => p.rf));
+  const without = r.clusters.find((c) => !c.members.some((p) => p.rf));
+  assert.strictEqual(withRf.ring, true);
+  assert.strictEqual(without.ring, false);
+});
+test('the ring survives a merge: the host takes it from the cluster it absorbs', () => {
+  const pts = [{ x: 55, y: 10 }, { x: 58, y: 12 }, { x: 59, y: 14 }, { x: 62, y: 10, rf: true }, { x: 65, y: 14 }];
+  const r = M.cluster(pts, { cell: 60, ring: (p) => !!p.rf });
+  assert.strictEqual(r.clusters.length, 1);
+  assert.strictEqual(r.clusters[0].ring, true);
+});
+test('with no ring test every cluster has ring false', () => {
+  const r = M.cluster([{ x: 1, y: 1, rf: true }, { x: 2, y: 2 }], { cell: 60 });
+  assert.strictEqual(r.clusters[0].ring, false);
+});
+test('the APRS window asks for the ring and draws it on the cluster', () => {
+  const fs = require('fs');
+  const src = fs.readFileSync(require('path').join(__dirname, '..', 'renderer', 'aprs-popout.js'), 'utf8');
+  assert.ok(/AprsMap\.cluster\(pts, \{ cell: CELL_PX, ring: /.test(src), 'recluster passes the ring test');
+  const fn = src.slice(src.indexOf('function drawCluster('), src.indexOf('function draw(t)'));
+  assert.ok(/if \(c\.ring\)/.test(fn), 'drawCluster checks c.ring');
+  assert.ok(/strokeStyle = theme\.rf/.test(fn), 'in the heard-by-me colour');
+});
 test('bad points are skipped', () => {
   const r = M.cluster([{ x: NaN, y: 1 }, null, { x: 1, y: 1 }]);
   assert.strictEqual(r.singles.length, 1);

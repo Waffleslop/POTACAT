@@ -1,0 +1,35 @@
+[
+ {
+  "input": {
+   "mycall": "k3sbp",
+   "audioPort": 50123,
+   "modem": 1200,
+   "agwPort": 8010,
+   "shimPort": 4532,
+   "txDelayMs": 500,
+   "txTailMs": 200
+  },
+  "conf": "# Written by POTACAT for a Winlink packet session — regenerated every launch; do not edit.\nADEVICE tcp:50123\nARATE 48000\nACHANNELS 1\nCHANNEL 0\nMYCALL K3SBP\nMODEM 1200\nPTT RIG 2 127.0.0.1:4532\nTXDELAY 50\nTXTAIL 20\nAGWPORT 8010\nKISSPORT 0\n"
+ },
+ {
+  "input": {
+   "mycall": "N0CALL-7",
+   "audioPort": 61000,
+   "modem": 9600,
+   "agwPort": 8100,
+   "shimPort": 4600,
+   "txDelayMs": 300,
+   "txTailMs": 100
+  },
+  "conf": "# Written by POTACAT for a Winlink packet session — regenerated every launch; do not edit.\nADEVICE tcp:61000\nARATE 48000\nACHANNELS 1\nCHANNEL 0\nMYCALL N0CALL-7\nMODEM 9600\nPTT RIG 2 127.0.0.1:4600\nTXDELAY 30\nTXTAIL 10\nAGWPORT 8100\nKISSPORT 0\n"
+ },
+ {
+  "input": {
+   "mycall": "W1AW",
+   "capture": "USB Audio CODEC",
+   "playback": "Speakers (USB)",
+   "shimPort": 4532
+  },
+  "conf": "# Written by POTACAT for a Winlink packet session — regenerated every launch; do not edit.\nADEVICE \"USB Audio CODEC\" \"Speakers (USB)\"\nACHANNELS 1\nCHANNEL 0\nMYCALL W1AW\nMODEM 1200\nPTT RIG 2 127.0.0.1:4532\nTXDELAY 50\nTXTAIL 20\nAGWPORT 8010\nKISSPORT 0\n"
+ }
+]

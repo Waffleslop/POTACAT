@@ -216,6 +216,14 @@ const TESTS = [
   'test/aprs-stations-test.js', // APRS phase 1: the window's station list (distance, bearing, 60-minute age-out, sort, search, list window)
   'test/aprs-symbols-test.js', // APRS phase 1: symbol table and code to the nine map icons
   'test/aprs-map-test.js', // APRS phase 1: map clusterer, marker glide and fade
+  'test/direwolf-aprs-config-test.js', // APRS phase 2: Dire Wolf's APRS config is MODEM 1200 with no PTT; the Winlink config is byte-identical
+  'test/aprs-rf-frequency-test.js', // APRS phase 2: the 2 m APRS frequency by grid square, each entry from a published band plan
+  'test/aprs-radio-return-test.js', // APRS phase 2: the radio goes back on stop, after a crash and after a quit
+  'test/aprs-listen-test.js', // APRS phase 2: the refusal sentences, the packet mode, and the main.js wiring (receive only)
+  'test/radio-tune-route-test.js', // the one "radio reachable for tuning" decision: TCI, Flex Direct, CAT (APRS on a FLEX-8600M, 2026-11-18)
+  'test/aprs-listen-bar-test.js', // APRS phase 2: the listen bar asks for its state on first open (the push can come first)
+  'test/aprs-rf-frames-test.js', // APRS phase 2: recorded Dire Wolf AGW frames -> APRS packets, direct or via a digipeater
+  'test/aprs-rf-merge-test.js', // APRS phase 2: a station heard on the radio and on APRS-IS is one row with both marks
   'test/log-comment-test.js',
   'test/raw-cat-command-test.js',
   'test/rigctld-stderr-test.js',
@@ -620,6 +628,7 @@ const TESTS = [
   'test/activator-log-once-test.js', // the Activator log saves once per press, and a slow QRZ never holds up a save (.eddiejames duplicates)
   'test/serial-hs-trial-test.js', // the RTS/CTS no-answer trial covers Kenwood too (jcoreyc TS-480), never the legacy Yaesu protocol
   'test/rts-ptt-flow-voice-test-544-test.js', // #544: PTT on RTS vs RTS/CTS per port, no trial where RTS keys PTT, the voice test says keyed only with evidence
+  'test/idle-radio-use-test.js', // APRS listening is use of the radio: Idle Mode never starts or retunes under it (on air 2026-11-18)
   'test/idle-wspr-band-test.js', // idle-RX WSPR uses only the rig's bands and offers 2 m (artificialjumpprotection IC-7100)
   'test/park-db-check-test.js', // activator: only POTA refs are checked against the parks list (og3e WWFF/SOTA flagged as typos), and the warning never overflows
   'test/rigctld-passthrough-test.js', // custom CAT over rigctld: a + or \ command goes to rigctld as typed (electricfalcon)
