@@ -33734,6 +33734,7 @@ function firstEmptyKiwiHost() {
 function aprsIgateMarksText(s) {
   if (!s || !s.on) return 'The iGate is off.';
   if (s.sentence) return s.sentence;
+  if (s.paused) return s.paused + '. It resumes when the pass ends.'; // a Guest Pass (Casey 2026-11-19)
   const link = { verified: 'APRS-IS connected, login verified', connecting: 'Connecting to APRS-IS', connected: 'Logging in to APRS-IS',
     waiting: 'APRS-IS link lost, trying again', unverified: 'APRS-IS did not verify the login: nothing is sent', stopped: 'Not connected' }[s.link] || 'Not connected';
   const parts = [`As ${s.call}.`, s.active ? link + '.' : 'Waits until POTACAT listens to APRS on your radio.'];

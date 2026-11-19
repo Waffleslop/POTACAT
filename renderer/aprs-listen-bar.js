@@ -82,6 +82,7 @@
     el.classList.remove('hidden');
     var dot = $('aprs-igate-dot'), txt = $('aprs-igate-text');
     if (ig.sentence) { dot.className = 'aprs-dot bad'; txt.textContent = 'iGate: ' + ig.sentence; return; }
+    if (ig.paused) { dot.className = 'aprs-dot wait'; txt.textContent = ig.paused; return; } // a Guest Pass
     var ok = ig.active && ig.link === 'verified';
     dot.className = 'aprs-dot' + (ok ? ' ok' : ig.link === 'unverified' ? ' bad' : ' wait');
     var link = !ig.active ? 'waits for the radio' : ig.link === 'verified' ? 'connected' : ig.link === 'unverified' ? 'login not verified, nothing sent' : 'connecting';

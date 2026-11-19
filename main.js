@@ -13470,9 +13470,17 @@ function aprsListenSet(on) {
 // operator's callsign. Small marks in the APRS window and Settings; no pop-ups.
 let aprsIgate = null;      // lib/aprs-igate.js createIgate, for this run (counts survive a stop)
 let _aprsIgateCall = '';
+/** A Guest Pass session is on this station: active, ending soon, or the owner holding the radio back. */
+function aprsGuestPassOn() {
+  const st = passEnforcement && passEnforcement.getState ? passEnforcement.getState() : 'idle';
+  return st !== 'idle' && st !== 'ended';
+}
+/** Why the iGate gates nothing now (a Guest Pass, Casey 2026-11-19), or null (lib/aprs-igate.js igatePause). */
+function aprsIgatePause() { return AprsIgate.igatePause({ guestPass: aprsGuestPassOn() }); }
 function aprsIgateWanted() {
   return settings.aprsIgate === true && aprsListen.on &&
-    (aprsListen.state === 'starting' || aprsListen.state === 'listening' || aprsListen.state === 'paused');
+    (aprsListen.state === 'starting' || aprsListen.state === 'listening' || aprsListen.state === 'paused') &&
+    !aprsIgatePause(); // a Guest Pass: nothing is gated, whoever started listening, and the uplink is let go
 }
 function aprsIgateSync() {
   const want = aprsIgateWanted();
@@ -13483,7 +13491,7 @@ function aprsIgateOfferRf(line) {
   if (!aprsIgateWanted() || !aprsUplink) return;
   if (!aprsIgate || _aprsIgateCall !== aprsUplink.call) {
     _aprsIgateCall = aprsUplink.call;
-    aprsIgate = AprsIgate.createIgate({ call: _aprsIgateCall, send: (l) => !!(aprsUplink && aprsUplink.send(l)) });
+    aprsIgate = AprsIgate.createIgate({ call: _aprsIgateCall, send: (l) => !!(aprsUplink && aprsUplink.send(l)), paused: () => aprsIgatePause() });
   }
   const r = aprsIgate.offer(line);
   if (r.ok) sendCatLog('[APRS iGate] gated: ' + r.out);
@@ -13493,12 +13501,14 @@ function aprsIgateStatus() {
   const login = AprsIgate.uplinkLogin(settings.myCallsign);
   const st = aprsIgate ? aprsIgate.stats() : { gated: 0, lastAt: 0, lastFrom: '' };
   const link = aprsUplink && _aprsUplinkUsers.has('igate') ? aprsUplink.status().state : 'stopped';
+  const pause = settings.aprsIgate === true ? aprsIgatePause() : null;
   return {
     on: settings.aprsIgate === true,
     active: aprsIgateWanted(),
     call: login.ok ? login.call : '',
     sentence: settings.aprsIgate === true && !login.ok ? login.sentence : '',
     link,               // 'stopped'|'connecting'|'connected'|'verified'|'unverified'|'waiting'
+    paused: pause ? pause.sentence : '', // "iGate paused: a guest has the radio" while a Guest Pass runs
     gated: st.gated, lastAt: st.lastAt, lastFrom: st.lastFrom,
   };
 }
@@ -43527,6 +43537,8 @@ function cloudShackNotice(text, kind) {
     // the guest's next press keys (lib/pass-enforcement.js tx_enable).
     passEnforcement.on('power-over-cap', ({ watts, max }) => passApplyPowerCap(max, `the radio was at ${watts} W`));
     passEnforcement.on('state-change', (state) => {
+      // APRS: a Guest Pass pauses the iGate and the pass ending resumes it (Casey 2026-11-19).
+      try { aprsIgateSync(); aprsIgatePush(); } catch { /* APRS not set up yet */ }
       if (state === 'paused') scopeGuestRestoreOwner('the owner took the radio');
       if (win && !win.isDestroyed()) {
         win.webContents.send('pass-enforcement-state', passEnforcement.getSessionStatus());

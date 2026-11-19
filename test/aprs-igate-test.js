@@ -190,5 +190,24 @@ test('nothing is counted as gated when the send fails (not verified)', () => {
   assert.ok(ig2.offer('W1AW>APRS,WIDE1*:>a').ok);
 });
 
+// Casey 2026-11-19: "iGate off during a Guest Pass", whoever started listening.
+test('during a Guest Pass the iGate gates nothing and says why; it resumes when the pass ends', () => {
+  assert.strictEqual(Igate.igatePause({ guestPass: false }), null);
+  const p = Igate.igatePause({ guestPass: true });
+  assert.strictEqual(p.reason, 'guest-pass');
+  assert.strictEqual(p.sentence, 'iGate paused: a guest has the radio');
+  let guest = true;
+  const sent = [];
+  const ig = Igate.createIgate({ call: CALL, send: (l) => { sent.push(l); return true; }, paused: () => Igate.igatePause({ guestPass: guest }) });
+  const r = ig.offer('W1AW>APRS,WIDE1*:>held');
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.reason, 'guest-pass');
+  assert.strictEqual(sent.length, 0, 'nothing sent');
+  assert.strictEqual(ig.stats().dropped['guest-pass'], 1);
+  guest = false;
+  assert.ok(ig.offer('W1AW>APRS,WIDE1*:>after').ok, 'gates again once the pass is over');
+  assert.strictEqual(sent.length, 1);
+});
+
 console.log(`\nAPRS iGate: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

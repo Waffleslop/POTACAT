@@ -127,5 +127,20 @@ test('the JS8 gateway gates only while JS8 itself holds the shared uplink (a Gue
   assert.ok(/_aprsUplinkUsers\.has\('js8'\)/.test(up), 'the JS8 status shows the gate up only for its own use');
 });
 
+test('a Guest Pass pauses the iGate (any listening), the status says why, and the pass ending resumes it', () => {
+  const on = fnBody(main, 'aprsGuestPassOn');
+  assert.ok(/passEnforcement\.getState\(\)/.test(on));
+  assert.ok(/st !== 'idle' && st !== 'ended'/.test(on), 'active, expiring or the owner holding the radio back');
+  assert.ok(/!aprsIgatePause\(\)/.test(fnBody(main, 'aprsIgateWanted')), 'not wanted while paused: the uplink is let go');
+  assert.ok(/paused: \(\) => aprsIgatePause\(\)/.test(fnBody(main, 'aprsIgateOfferRf')), 'the iGate itself refuses too');
+  const st = fnBody(main, 'aprsIgateStatus');
+  assert.ok(/paused: pause \? pause\.sentence : ''/.test(st), 'the status carries the sentence');
+  const sc = main.slice(main.indexOf("passEnforcement.on('state-change', (state) => {"), main.indexOf("passEnforcement.on('expiring'"));
+  assert.ok(/aprsIgateSync\(\); aprsIgatePush\(\);/.test(sc), 'every pass state change re-decides the iGate');
+  const bar = read('renderer/aprs-listen-bar.js');
+  assert.ok(/if \(ig\.paused\)/.test(bar), 'the APRS window shows it');
+  assert.ok(/if \(s\.paused\) return s\.paused/.test(app), 'Settings shows it');
+});
+
 console.log(`\nAPRS idle mode and iGate wiring: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
