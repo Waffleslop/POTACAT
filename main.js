@@ -4247,7 +4247,13 @@ function sendCatStatus(s) {
       _catLinkUpLast = linkUp;
       stationSetupNotify();
       sendVfoState(); // the VFO window stops (or starts) showing the radio's dial
-      if (!linkUp) {
+      if (!linkUp && flexRouteHeld()) {
+        // Handed to a mobile device over FlexRadio SmartLink (lib/flex-route.js):
+        // POTACAT left the radio on purpose, so this is not a lost link. No
+        // "check the USB" alarm (seen in the PR #674 radio test).
+        sendCatLog('[CAT] The Flex is with the mobile device through FlexRadio SmartLink; POTACAT is off it until it is taken back (not a lost link).');
+        dropCwKeyLine('radio handed over');
+      } else if (!linkUp) {
         // A Flex Direct station has no USB to drop: "lost" there means the
         // radio holds no slice POTACAT can tune (it will create one).
         const flexDirect = !!(smartSdr && smartSdr.connected && smartSdr.mode === 'self');
@@ -22442,7 +22448,16 @@ function needsSmartSdr() {
 function connectSmartSdr() {
   disconnectSmartSdr();
   if (!needsSmartSdr()) return;
+  // The radio is with ECHOCAT through FlexRadio SmartLink (lib/flex-route.js):
+  // no GUI connection, no audio, no reclaim. Every path that (re)connects the
+  // Flex comes through here (startup, rig switch, settings save, the CAT-shim
+  // handoff, reclaimFlexRadio), so this one gate holds them all. Only a
+  // non-GUI watch of the radio's clients runs.
+  if (detectRigType() === 'flex' && flexRouteHeld()) { flexRouteStartWatch(); return; }
   smartSdr = new SmartSdrClient();
+  // Taking the radio back from ECHOCAT: register our own GUI client and report
+  // a refusal (F3000001) instead of riding along with the mobile device.
+  smartSdr.setReclaimOnly(flexRouteState().state === 'reclaiming');
   // SWR-guard hook: every ATU tune start (any call site, incl. future ones)
   // must suppress the guard while the ATU's own carrier sweeps the bad match,
   // and opens the episode whose `atu status=` result decides whether a latch
@@ -22755,6 +22770,10 @@ function connectSmartSdr() {
     // connection can bind to it. The connect-time 1s timer fires too early
     // (before `client gui` completes), so kick the audio client here.
     if (settings.audioSource === 'smartsdr') startSmartSdrAudio();
+    // Flex Direct is up: this shack can now hand the radio to ECHOCAT
+    // (capability flex-handback for the next device that connects).
+    if (smartSdr) smartSdr.setReclaimOnly(false);
+    flexRoutePublish();
   });
   // Start the audio client the moment the GUI mode resolves to 'bound' (or the
   // multiFlex fallback). 'self' starts via gui-ready above once our clientId is
@@ -22966,6 +22985,7 @@ let _flexReclaimTimer = null; // settle timer before reclaiming the radio on clo
 // hosting. Shared by the SmartSDR 5002-shim-drop path and the AetherSDR
 // client-left path (which can both fire) so they coalesce into one reconnect.
 function reclaimFlexRadio(reason) {
+  if (flexRouteHeld()) return; // the radio is ECHOCAT's until flex-route says otherwise
   _flexYieldToExternal = false;
   if (_flexReclaimTimer) clearTimeout(_flexReclaimTimer);
   sendCatLog(`Flex Direct: ${reason} — reclaiming the radio as GUI client…`);
@@ -22974,6 +22994,7 @@ function reclaimFlexRadio(reason) {
 function checkFlexHandoff(catUp) {
   if (catUp === _lastCatUpForHandoff) return; // edge-triggered only
   _lastCatUpForHandoff = catUp;
+  if (flexRouteHeld()) return; // handed to ECHOCAT: no handoff reconnects (lib/flex-route.js)
   // SmartSDR came (back) up while a reclaim was pending — cancel it; stay bound.
   if (catUp && _flexReclaimTimer) { clearTimeout(_flexReclaimTimer); _flexReclaimTimer = null; }
   if (!smartSdr || !smartSdr.connected) return;
@@ -22995,6 +23016,351 @@ function checkFlexHandoff(catUp) {
   // multiFlex + SmartSDR opened while self-hosting: nothing to do — POTACAT
   // stays its own gui client alongside SmartSDR (no reconnect, no audio glitch).
 }
+
+// ── The route choice on a Flex: through POTACAT or through FlexRadio SmartLink ──
+// Casey 2026-11-17: "easy to choose, on a Flex, whether I go through my
+// computer or via Flex SmartLink while on ECHOCAT." The mobile device takes the
+// radio itself over FlexRadio SmartLink; the 8600M licenses one GUI client, so
+// POTACAT lets go of its Flex Direct slot on request (flex-release) and takes
+// it back (flex-reclaim, the desk's Take it back, or 60 s with no GUI client on
+// the radio). The rule and every sentence: lib/flex-route.js. The non-GUI
+// watch: lib/flex-gui-watch.js. The wire: docs/echocat-protocol.md.
+const FlexRouteLib = require('./lib/flex-route');
+const { FlexGuiWatch } = require('./lib/flex-gui-watch');
+let flexRoute = null;          // FlexRoute, built from settings.flexRoute on first use
+let _flexGuiWatch = null;      // the non-GUI LAN watch while the radio is released
+let _flexRouteTimer = null;    // 5 s check of the 60 s no-GUI-client rule
+let _flexRouteBusy = false;    // a release or reclaim is running
+let _flexRouteAsk = null;      // { id, who, until, finish, timer } while the desk is asked
+let _flexRouteAskSeq = 0;
+
+function flexRouteState() {
+  if (!flexRoute) flexRoute = new FlexRouteLib.FlexRoute({ saved: settings ? settings.flexRoute : null });
+  return flexRoute;
+}
+/** The radio is not POTACAT's (released, or being released). */
+function flexRouteHeld() { return !!settings && flexRouteState().held; }
+function flexRouteLog(msg) { sendCatLog('[Flex route] ' + msg); }
+function flexRouteHost() {
+  const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
+  return (activeRig && activeRig.flexApiHost) || settings.smartSdrHost || (settings.catTarget && settings.catTarget.host) || '127.0.0.1';
+}
+function flexRoutePersist() {
+  const saved = flexRouteState().toSaved();
+  if (saved) settings.flexRoute = saved; else delete settings.flexRoute;
+  try { saveSettings(settings); } catch (err) { console.error('[Flex route] could not save:', err.message); }
+}
+/** POTACAT is the radio's own GUI client (Flex Direct), not riding along. */
+function flexDirectActive() {
+  return !!(smartSdr && smartSdr.connected && smartSdr.mode === 'self' && smartSdr.guiReady);
+}
+/** The route choice exists on this shack right now. */
+function flexRouteApplies() {
+  if (!settings || detectRigType() !== 'flex') return false;
+  return flexDirectActive() || flexRouteState().state !== 'pc';
+}
+/** Every surface hears where the radio is: ECHOCAT (capability + flex-route),
+ *  the main window and the VFO window (the banner). */
+function flexRoutePublish() {
+  if (!settings) return;
+  const fr = flexRouteState();
+  const applies = flexRouteApplies();
+  if (remoteServer) {
+    try {
+      if (typeof remoteServer.setFlexHandback === 'function') remoteServer.setFlexHandback(applies);
+      if (typeof remoteServer.setFlexRoute === 'function') remoteServer.setFlexRoute(applies ? fr.snapshot() : null);
+    } catch (err) { console.error('[Flex route] publish:', err.message); }
+  }
+  const payload = flexRouteBannerState();
+  for (const w of [win, vfoPopoutWin]) {
+    if (w && !w.isDestroyed()) w.webContents.send('flex-route', payload);
+  }
+}
+function flexRouteBannerState() {
+  const fr = flexRouteState();
+  return {
+    ...fr.snapshot(), applies: flexRouteApplies(),
+    text: FlexRouteLib.TEXT.banner, warn: FlexRouteLib.TEXT.takeBackWarn,
+    ask: _flexRouteAsk ? { id: _flexRouteAsk.id, who: _flexRouteAsk.who, until: _flexRouteAsk.until, text: FlexRouteLib.TEXT.deskAsk } : null,
+  };
+}
+/** Anything on the air: the PTT dispatcher's state (voice, macros, SSTV,
+ *  data), CW, the radio's own CAT TX, JTCAT/WSPR, the tune tone, a tuner or
+ *  setup carrier, a Flex key-down, and the Flex interlock. */
+function flexRouteTransmitting() {
+  if (_isEffectivelyTransmitting()) return true;
+  if (cat && cat._transmitting) return true;
+  if (jtcatAnyTxActive() || jtcatTuneState.active) return true;
+  if (_externalAtuActive || _stationSetupTxTest || _flexTxRf) return true;
+  if (smartSdr && (smartSdr._cwPttActive || /^(PTT_REQUESTED|TRANSMITTING|UNKEY_REQUESTED)$/i.test(String(smartSdr.interlockState || '')))) return true;
+  return false;
+}
+function flexRouteGuestPass() {
+  const st = passEnforcement && typeof passEnforcement.getState === 'function' ? passEnforcement.getState() : null;
+  return st === 'active' || st === 'expiring' || st === 'paused';
+}
+/** Someone at this computer in the last 2 minutes who can see POTACAT. */
+function flexRouteDeskInUse() {
+  let idle = null;
+  try { idle = require('electron').powerMonitor.getSystemIdleTime(); } catch { idle = null; }
+  return FlexRouteLib.deskInUse({
+    systemIdleSec: idle, headless: HEADLESS,
+    windowVisible: !!(win && !win.isDestroyed() && win.isVisible() && !win.isMinimized()),
+  });
+}
+/** Ask the person at the desk in the main window (and the VFO window). Resolves
+ *  true on yes; false on no or after 30 s with no answer. */
+function flexRouteAskDesk(who) {
+  return new Promise((resolve) => {
+    const id = ++_flexRouteAskSeq;
+    const finish = (yes, why) => {
+      if (!_flexRouteAsk || _flexRouteAsk.id !== id) return;
+      clearTimeout(_flexRouteAsk.timer);
+      _flexRouteAsk = null;
+      for (const w of [win, vfoPopoutWin]) if (w && !w.isDestroyed()) w.webContents.send('flex-route-ask-done', { id });
+      try { if (win && !win.isDestroyed()) win.flashFrame(false); } catch { /* cosmetic */ }
+      flexRouteLog(yes ? 'the person at the computer agreed'
+        : why === 'timeout' ? 'no answer at the computer in 30 s, so the radio stays here' : 'the person at the computer kept the radio');
+      resolve(!!yes);
+    };
+    const until = Date.now() + FlexRouteLib.DESK_ASK_TIMEOUT_MS;
+    _flexRouteAsk = { id, who, until, finish, timer: setTimeout(() => finish(false, 'timeout'), FlexRouteLib.DESK_ASK_TIMEOUT_MS) };
+    const ask = { id, who, until, text: FlexRouteLib.TEXT.deskAsk };
+    for (const w of [win, vfoPopoutWin]) if (w && !w.isDestroyed()) w.webContents.send('flex-route-ask', ask);
+    try { if (win && !win.isDestroyed()) win.flashFrame(true); } catch { /* cosmetic */ }
+  });
+}
+/** Before the radio leaves (plan 6b), in the order lib/flex-route.js
+ *  releaseSteps gives: JTCAT transmit and automation stand down (Run, Hunt,
+ *  the WSPR beacon, with its power put back), the JTCAT session stops, the
+ *  scans stop (this desktop's and a device's), the power ledger puts a test or
+ *  tuner carrier's power back, the transmit source goes back to what it was,
+ *  and the slice audio_level goes back to its normal value (at 0 the radio
+ *  lowers its FlexRadio SmartLink audio by about 15 dB). Nothing is
+ *  transmitting: that was refused before. Returns what was done, for the log. */
+function flexRouteStopAutomation() {
+  const done = [];
+  const speakerLevel = FlexRouteLib.releaseSpeakerLevel({
+    onboardSpeaker: settings.flexOnboardSpeaker === true, speakerGain: settings.flexSpeakerGain,
+    multiflex: !!(smartSdr && smartSdr._discoveredGuiClients && smartSdr._discoveredGuiClients.length > 0),
+  });
+  const steps = FlexRouteLib.releaseSteps({
+    jtcatTxOrAuto: !!(jtcatFullAutoCq || jtcatAutoCqMode !== 'off' || jtcatAnyTxActive() || jtcatTuneState.active
+      || (ft8Engine && ft8Engine._txEnabled)),
+    wsprArmed: !!(wsprBeaconArmed() || jtcatWsprBeaconTimer),
+    jtcatRunning: !!ft8Engine,
+    desktopScanning: !!desktopScanning,
+    phoneScanning: !!_phoneScanning,
+    powerToRestore: !!(settings.setupTxPowerRestore && _currentTxPower > 0),
+    speakerLevel: smartSdr && smartSdr.ourSliceIndex != null && smartSdr.ourSliceIndex >= 0 ? speakerLevel : null,
+  });
+  for (const step of steps) {
+    try {
+      switch (step) {
+        case 'jtcat-halt':
+          jtcatHaltTxNow('The radio went to ECHOCAT through FlexRadio SmartLink');
+          done.push('JTCAT transmit and automation (WSPR included)');
+          break;
+        case 'jtcat-stop':
+          stopJtcat();
+          remoteJtcatQso = null;
+          if (win && !win.isDestroyed()) win.webContents.send('jtcat-stop-for-remote');
+          jtcatWindowStopped();
+          done.push('JTCAT');
+          break;
+        case 'scan-desktop':
+          if (win && !win.isDestroyed()) win.webContents.send('remote-scan-control', { action: 'stop' });
+          done.push('scan');
+          break;
+        case 'scan-phone':
+          if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'scan-control', action: 'stop' });
+          done.push('the device scan');
+          break;
+        case 'power':
+          stationSetupReconcilePower(_currentTxPower);
+          done.push('power put back');
+          break;
+        case 'tx-source':
+          // Mic again, when POTACAT had switched the transmit source to DAX.
+          restoreFlexTxDax();
+          break;
+        case 'audio-level':
+          smartSdr.setSliceAudioLevel(smartSdr.ourSliceIndex, speakerLevel);
+          done.push(`audio_level ${speakerLevel}`);
+          break;
+      }
+    } catch (err) { flexRouteLog(`before letting go, ${step} failed: ${err.message}`); }
+  }
+  return done;
+}
+
+async function flexRouteRelease({ reason, device } = {}) {
+  const who = String(device || 'ECHOCAT').slice(0, 64);
+  const fr = flexRouteState();
+  const ctx = (deskInUse) => ({
+    state: fr.state, flexDirect: detectRigType() === 'flex' && flexDirectActive(),
+    guestPass: flexRouteGuestPass(), transmitting: flexRouteTransmitting(),
+    winlink: winlinkSessionActive(), deskInUse,
+  });
+  if (_flexRouteBusy) return { ok: false, error: FlexRouteLib.TEXT.busy };
+  let d = FlexRouteLib.decideRelease(ctx(flexRouteDeskInUse()));
+  if (d.action === 'done') return { ok: true };
+  if (d.action === 'refuse') { flexRouteLog(`${who} asked for the radio: refused. ${d.error}`); return { ok: false, error: d.error }; }
+  _flexRouteBusy = true;
+  try {
+    if (d.action === 'ask') {
+      flexRouteLog(`${who} asked for the radio; this computer was used in the last 2 minutes, so the person here is asked first`);
+      if (!(await flexRouteAskDesk(who))) return { ok: false, error: FlexRouteLib.TEXT.deskSaidNo };
+      d = FlexRouteLib.decideRelease(ctx(false));
+      if (d.action === 'done') return { ok: true };
+      if (d.action === 'refuse') { flexRouteLog(`refused after all: ${d.error}`); return { ok: false, error: d.error }; }
+    }
+    fr.beginRelease(who);
+    flexRouteLog(`handing the radio to ${who} through FlexRadio SmartLink${reason ? ` (${reason})` : ''}`);
+    flexRoutePublish();
+    // JTCAT, WSPR and scan stop; power, the transmit source and audio_level
+    // go back (plan 6b; the order is lib/flex-route.js releaseSteps).
+    const stopped = flexRouteStopAutomation();
+    if (stopped.length) flexRouteLog(`before letting go: ${stopped.join(', ')}; transmit source restored`);
+    await sleepMs(1200); // let those writes reach the radio before the link closes
+    if (flexRouteTransmitting()) {
+      fr.finishRelease(false);
+      flexRoutePublish();
+      flexRouteLog('the radio started transmitting while it was being handed over, so it stays here');
+      return { ok: false, error: FlexRouteLib.TEXT.transmitting };
+    }
+    if (smartSdr) smartSdr.setRouteHold(true);
+    disconnectSmartSdr(); // the GUI client and, through stopSmartSdrAudio(), the DAX/audio client
+    fr.finishRelease(true);
+    flexRoutePersist();
+    if (!cat || !cat.connected) sendCatStatus({ connected: false });
+    flexRouteStartWatch();
+    flexRoutePublish();
+    flexRouteLog(`the radio is with ${who} through FlexRadio SmartLink. POTACAT closed its GUI and audio connections and will not reconnect until it is taken back (Take it back, the mobile device, or 60 s with no GUI client on the radio).`);
+    return { ok: true };
+  } catch (err) {
+    if (fr.state === 'releasing') { fr.finishRelease(false); flexRoutePublish(); }
+    flexRouteLog(`could not hand the radio over: ${err.message}`);
+    return { ok: false, error: 'POTACAT could not let go of the radio.' };
+  } finally {
+    _flexRouteBusy = false;
+  }
+}
+
+/** One `client gui <our id>` attempt. Resolves {ok} or {ok:false, status}. */
+function flexRouteTryGui() {
+  return new Promise((resolve) => {
+    connectSmartSdr();
+    const c = smartSdr;
+    if (!c) { resolve({ ok: false, status: null }); return; }
+    let timer = null;
+    const done = (r) => {
+      clearTimeout(timer);
+      c.removeListener('gui-ready', onReady);
+      c.removeListener('gui-rejected', onRejected);
+      resolve(r);
+    };
+    const onReady = () => done({ ok: true });
+    const onRejected = ({ status }) => done({ ok: false, status });
+    c.on('gui-ready', onReady);
+    c.on('gui-rejected', onRejected);
+    timer = setTimeout(() => done({ ok: false, status: null }), 8000);
+  });
+}
+
+async function flexRouteReclaim(why) {
+  const fr = flexRouteState();
+  if (fr.state === 'pc') return { ok: true };
+  if (_flexRouteBusy || fr.state !== 'released') return { ok: false, error: FlexRouteLib.TEXT.busy };
+  _flexRouteBusy = true;
+  try {
+    fr.beginReclaim();
+    flexRouteLog(`taking the radio back: ${why}`);
+    flexRoutePublish(); // the mobile device hears 'reclaiming' and lets go of its SmartLink slot
+    _flexYieldToExternal = false;
+    // `client gui <our persistent id>` (lib/smartsdr.js setReclaimOnly), every
+    // 2 s while the radio answers F3000001, for up to 20 s (lib/flex-route.js).
+    const r = await FlexRouteLib.runReclaim({
+      tryGui: async () => {
+        const g = await flexRouteTryGui();
+        if (!g.ok) disconnectSmartSdr();
+        return g;
+      },
+      sleep: sleepMs,
+      stillReclaiming: () => fr.state === 'reclaiming',
+      onRetry: (status) => flexRouteLog(`the radio answered ${FlexRouteLib.statusHex(status)} to client gui; trying again in 2 s`),
+    });
+    if (r.ok) {
+      fr.finishReclaim(true);
+      flexRoutePersist();
+      flexRouteStopWatch();
+      flexRoutePublish();
+      flexRouteLog('POTACAT has the radio again (Flex Direct: its own slices and pan, DAX audio restarted)');
+      return { ok: true };
+    }
+    if (r.aborted) return { ok: false, error: r.error };
+    fr.finishReclaim(false);
+    flexRoutePersist();
+    flexRoutePublish();
+    flexRouteLog(`could not take the radio back after 20 s (last answer ${FlexRouteLib.statusHex(r.status)}): ${r.error}`);
+    return { ok: false, error: r.error };
+  } catch (err) {
+    if (fr.state === 'reclaiming') { fr.finishReclaim(false); flexRoutePublish(); }
+    flexRouteLog(`taking the radio back failed: ${err.message}`);
+    return { ok: false, error: FlexRouteLib.TEXT.unreachable };
+  } finally {
+    _flexRouteBusy = false;
+  }
+}
+
+function flexRouteStartWatch() {
+  if (!settings) return;
+  const host = flexRouteHost();
+  if (!_flexGuiWatch) {
+    _flexGuiWatch = new FlexGuiWatch();
+    _flexGuiWatch.on('connected', () => flexRouteLog(`watching the radio's GUI clients at ${flexRouteHost()}:4992 (a non-GUI connection, no licence slot)`));
+    _flexGuiWatch.on('clients', (list) => {
+      flexRouteState().noteGuiClients(list.length);
+      flexRouteLog(list.length
+        ? `GUI client${list.length === 1 ? '' : 's'} on the radio: ${list.map(c => c.program || c.station || ('0x' + c.handle)).join(', ')}`
+        : 'the radio has no GUI client; POTACAT takes it back after 60 s with none');
+    });
+    _flexGuiWatch.on('lost', () => flexRouteState().noteWatchLost());
+    _flexGuiWatch.on('error', () => { /* 'lost' follows; the watch redials */ });
+  }
+  if (!_flexGuiWatch.running) flexRouteLog(`the radio is with ${flexRouteState().holder || 'ECHOCAT'} through FlexRadio SmartLink; POTACAT stays off it`);
+  _flexGuiWatch.start(host);
+  if (!_flexRouteTimer) _flexRouteTimer = setInterval(flexRouteTick, 5000);
+  flexRoutePublish();
+}
+function flexRouteStopWatch() {
+  if (_flexGuiWatch) _flexGuiWatch.stop();
+  if (_flexRouteTimer) { clearInterval(_flexRouteTimer); _flexRouteTimer = null; }
+}
+function flexRouteTick() {
+  const fr = flexRouteState();
+  if (fr.state !== 'released') return;
+  if (_flexGuiWatch && _flexGuiWatch.connected && _flexGuiWatch.settled) fr.noteGuiClients(_flexGuiWatch.guiClients().length);
+  if (fr.autoReclaimDue() && !_flexRouteBusy && detectRigType() === 'flex') {
+    flexRouteReclaim('the radio has had no GUI client for 60 s (the mobile device let go of it)').catch(() => {});
+  }
+}
+
+onRemoteServer((rs) => {
+  rs.on('flex-release', (req, reply) => {
+    flexRouteRelease(req || {}).then((r) => reply && reply(r), () => reply && reply({ ok: false, error: 'POTACAT could not let go of the radio.' }));
+  });
+  rs.on('flex-reclaim', (req, reply) => {
+    flexRouteReclaim(`${(req && req.device) || 'the mobile device'} asked for it back`)
+      .then((r) => reply && reply(r), () => reply && reply({ ok: false, error: FlexRouteLib.TEXT.unreachable }));
+  });
+  flexRoutePublish();
+});
+ipcMain.handle('flex-route-get', () => (settings ? flexRouteBannerState() : null));
+ipcMain.handle('flex-route-take-back', () => flexRouteReclaim('the person at the computer pressed Take it back'));
+ipcMain.on('flex-route-answer', (_e, a) => {
+  if (_flexRouteAsk && a && a.id === _flexRouteAsk.id) _flexRouteAsk.finish(!!a.yes, a.yes ? 'yes' : 'no');
+});
 
 // --- DAX-free audio path -----------------------------------------------
 // Opens a second TCP connection to the same Flex on port 4992. This
@@ -51381,6 +51747,9 @@ function cloudShackNotice(text, kind) {
     delete newSettings.jtcatRxSource;
     stampSstvTemplatesPatch(newSettings);
     setImmediate(() => afterSstvSettingsSaved(newSettings));
+    // Where the Flex is has one writer too, lib/flex-route.js through main
+    // (flexRoutePersist): a window's old copy must never re-release the radio.
+    delete newSettings.flexRoute;
     // #475: the Deleted folder's days reach every Winlink surface (winlink-state.deletedDays).
     if (newSettings && 'winlinkDeletedDays' in newSettings) setImmediate(() => { try { winlinkPush(); } catch {} });
     if (newSettings && 'jtcatFakeIt' in newSettings) setImmediate(() => { fakeItSyncEngine(); sendCatLog(`[JTCAT] Split operation Fake It: ${fakeItEnabled() ? 'on' : 'off'}`); });
@@ -55039,6 +55408,7 @@ function gracefulCleanup() {
   if (rbn) try { rbn.disconnect(); } catch {}
   try { disconnectWsjtx(); } catch {}
   try { disconnectSmartSdr(); } catch {}
+  try { flexRouteStopWatch(); } catch {}
   try { disconnectTci(); } catch {}
   try { disconnectAntennaGenius(); } catch {}
   try { disconnectTunerGenius(); } catch {}

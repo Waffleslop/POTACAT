@@ -48,6 +48,15 @@ contextBridge.exposeInMainWorld('api', {
   swrGuardOverride: () => ipcRenderer.send('swr-guard-override'),
   onSmartSdrUnreachable: (cb) => ipcRenderer.on('smartsdr-unreachable', (_e, data) => cb(data)),
   onSmartSdrReachable: (cb) => ipcRenderer.on('smartsdr-reachable', () => cb()),
+  // The Flex route banner (renderer/flex-route-banner.js, lib/flex-route.js):
+  // where the radio is, the desk's yes/no when a mobile device asks for it,
+  // and Take it back.
+  onFlexRoute: (cb) => ipcRenderer.on('flex-route', (_e, d) => cb(d)),
+  onFlexRouteAsk: (cb) => ipcRenderer.on('flex-route-ask', (_e, d) => cb(d)),
+  onFlexRouteAskDone: (cb) => ipcRenderer.on('flex-route-ask-done', (_e, d) => cb(d)),
+  flexRouteGet: () => ipcRenderer.invoke('flex-route-get'),
+  flexRouteTakeBack: () => ipcRenderer.invoke('flex-route-take-back'),
+  flexRouteAnswer: (id, yes) => ipcRenderer.send('flex-route-answer', { id, yes: !!yes }),
   onExternalAtuStart: (cb) => ipcRenderer.on('external-atu-start', (_e, d) => cb(d)),
   onExternalAtuComplete: (cb) => ipcRenderer.on('external-atu-complete', () => cb()),
   externalAtuCancel: () => ipcRenderer.send('external-atu-cancel'),

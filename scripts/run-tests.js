@@ -56,6 +56,9 @@ const TESTS = [
   'test/vfo-wheel-direction-test.js', // #192 w0tlp: wheel up = frequency up in the VFO window
   'test/vfo-tx-power-test.js', // #199 w0tlp: TX power slider in the VFO window, the Rig panel's caps and dispatcher
   'test/smartsdr-self-slice-test.js',
+  'test/flex-route-test.js', // the route choice on a Flex: through POTACAT or FlexRadio SmartLink (states, refusals, 60 s rule)
+  'test/flex-gui-watch-test.js', // the non-GUI watch of a Flex's GUI clients while ECHOCAT has the radio
+  'test/flex-route-wiring-test.js', // flex-release / flex-reclaim / flex-route wired through smartsdr, remote-server and main
   'test/bundle-mac-deps-test.js',
   'test/rig-controls-test.js',
   'test/rig-gain-steps-test.js',

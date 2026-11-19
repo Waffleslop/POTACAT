@@ -18,6 +18,15 @@ contextBridge.exposeInMainWorld('api', {
   setVfoLock: (locked) => ipcRenderer.send('vfo-set-lock', locked),
   onVfoLockState: (cb) => ipcRenderer.on('vfo-lock-state', (_e, locked) => cb(locked)),
   onTuneBlocked: (cb) => ipcRenderer.on('tune-blocked', (_e, msg) => cb(msg)),
+  // The Flex route banner (renderer/flex-route-banner.js, lib/flex-route.js):
+  // where the radio is, the desk's yes/no when a mobile device asks for it,
+  // and Take it back.
+  onFlexRoute: (cb) => ipcRenderer.on('flex-route', (_e, d) => cb(d)),
+  onFlexRouteAsk: (cb) => ipcRenderer.on('flex-route-ask', (_e, d) => cb(d)),
+  onFlexRouteAskDone: (cb) => ipcRenderer.on('flex-route-ask-done', (_e, d) => cb(d)),
+  flexRouteGet: () => ipcRenderer.invoke('flex-route-get'),
+  flexRouteTakeBack: () => ipcRenderer.invoke('flex-route-take-back'),
+  flexRouteAnswer: (id, yes) => ipcRenderer.send('flex-route-answer', { id, yes: !!yes }),
   onSwrGuardState: (cb) => ipcRenderer.on('vfo-swr-guard-state', (_e, st) => cb(st)),
   swrGuardOverride: () => ipcRenderer.send('swr-guard-override'),
   setMode: (mode) => ipcRenderer.send('vfo-set-mode', mode),
