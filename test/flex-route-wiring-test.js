@@ -161,8 +161,48 @@ test('while released, a tune is refused in one sentence and never reaches main',
   send({ type: 'tune', freqKhz: 14074 });
   assert.strictEqual(tunes, 0);
   const r = out.filter((m) => m.type === 'refused');
-  assert.deepStrictEqual(r, [{ type: 'refused', reason: 'flex-released', of: 'tune', text: 'The radio is on FlexRadio SmartLink with your mobile device.' }]);
+  assert.deepStrictEqual(r, [{ type: 'refused', reason: 'flex-released', of: 'tune', text: 'The radio is on SmartLink with your mobile device.' }]);
   assert.ok(protocol.validate(r[0], protocol.Dir.S2C).ok);
+});
+test('while released, every message that needs the radio is refused with the 6b sentence, none reaches main', () => {
+  const { rs, out, send } = rig();
+  let reached = 0;
+  for (const t of FR.RIG_TYPES) rs.on(t, () => reached++);
+  rs.setFlexRoute({ state: 'released', since: 1 });
+  for (const t of FR.RIG_TYPES) send({ type: t, reqId: 'r-' + t });
+  assert.strictEqual(reached, 0, 'no rig command reached main');
+  const r = out.filter((m) => m.type === 'refused');
+  assert.strictEqual(r.length, FR.RIG_TYPES.size);
+  for (const m of r) {
+    assert.strictEqual(m.text, 'The radio is on SmartLink with your mobile device.', m.of);
+    assert.strictEqual(m.reqId, 'r-' + m.of);
+  }
+});
+test('releasing and reclaiming refuse rig commands too (the radio is not POTACAT\'s yet)', () => {
+  for (const state of ['releasing', 'reclaiming']) {
+    const { rs, out, send } = rig();
+    rs.setFlexRoute({ state, since: 1 });
+    send({ type: 'set-mode', mode: 'USB' });
+    assert.strictEqual(out.filter((m) => m.type === 'refused').length, 1, state);
+  }
+});
+test('each release refusal reaches the mobile device as its own sentence, verbatim', () => {
+  for (const text of [FR.TEXT.transmitting, FR.TEXT.winlink, FR.TEXT.guest, FR.TEXT.notFlexDirect, FR.TEXT.busy, FR.TEXT.deskSaidNo]) {
+    const { rs, out, send } = rig();
+    rs.on('flex-release', (_req, reply) => reply({ ok: false, error: text }));
+    send({ type: 'flex-release' });
+    const a = out.filter((m) => m.type === 'flex-released');
+    assert.deepStrictEqual(a, [{ type: 'flex-released', ok: false, error: text }]);
+    assert.ok(protocol.validate(a[0], protocol.Dir.S2C).ok);
+  }
+});
+test('each reclaim failure reaches the mobile device as its own sentence, verbatim', () => {
+  for (const text of [FR.TEXT.stillHeld, FR.TEXT.unreachable, FR.TEXT.busy]) {
+    const { rs, out, send } = rig();
+    rs.on('flex-reclaim', (_req, reply) => reply({ ok: false, error: text }));
+    send({ type: 'flex-reclaim' });
+    assert.deepStrictEqual(out.filter((m) => m.type === 'flex-reclaimed'), [{ type: 'flex-reclaimed', ok: false, error: text }]);
+  }
 });
 test('while released, logging still works and an estop still goes through', () => {
   const { rs, send } = rig();
@@ -237,7 +277,7 @@ test('the other reconnect paths are held too', () => {
 test('release order: refuse/ask, stop automation, restore TX source, wait, hold, close GUI + audio, persist, watch', () => {
   const b = fnBody(main, 'flexRouteRelease');
   const order = ['FlexRouteLib.decideRelease(', 'flexRouteAskDesk(', 'fr.beginRelease(', 'flexRouteStopAutomation()',
-    'restoreFlexTxDax()', 'await sleepMs(', 'smartSdr.setRouteHold(true)', 'disconnectSmartSdr()',
+    'await sleepMs(', 'smartSdr.setRouteHold(true)', 'disconnectSmartSdr()',
     'fr.finishRelease(true)', 'flexRoutePersist()', 'flexRouteStartWatch()'];
   let at = -1;
   for (const k of order) {
@@ -245,14 +285,57 @@ test('release order: refuse/ask, stop automation, restore TX source, wait, hold,
     assert.ok(i > at, `${k} out of order or missing`);
     at = i;
   }
-  assert.ok(!/setSliceAudioLevel|audio_level/.test(b.replace(/\/\/.*$/gm, '')), 'the slice audio_level is never touched on release');
+});
+test('before letting go: the steps come from lib/flex-route.js releaseSteps, each one wired', () => {
+  const b = fnBody(main, 'flexRouteStopAutomation');
+  assert.ok(b.includes('FlexRouteLib.releaseSteps('), 'the plan is the lib\'s');
+  assert.ok(b.includes('FlexRouteLib.releaseSpeakerLevel('), 'the audio level is the lib\'s');
+  const wired = {
+    'jtcat-halt': 'jtcatHaltTxNow(',
+    'jtcat-stop': 'stopJtcat()',
+    'scan-desktop': "'remote-scan-control', { action: 'stop' }",
+    'scan-phone': "type: 'scan-control', action: 'stop'",
+    'power': 'stationSetupReconcilePower(',
+    'tx-source': 'restoreFlexTxDax()',
+    'audio-level': 'smartSdr.setSliceAudioLevel(',
+  };
+  for (const [step, call] of Object.entries(wired)) {
+    const i = b.indexOf(`'${step}'`);
+    assert.ok(i > 0, `${step} handled`);
+    assert.ok(b.indexOf(call, i) > i, `${step} -> ${call}`);
+  }
+  assert.ok(b.includes('ft8Engine') && b.includes('_phoneScanning') && b.includes('desktopScanning'), 'the plan reads the live state');
+});
+test('fake radio: the audio level goes back as one slice command before the link closes', () => {
+  const c = new SmartSdrClient();
+  const sent = [];
+  c._send = (cmd) => { sent.push(cmd); return 1; };
+  c.connected = true;
+  const level = FR.releaseSpeakerLevel({ onboardSpeaker: false, speakerGain: undefined });
+  c.setSliceAudioLevel(0, level);
+  assert.deepStrictEqual(sent, ['slice set 0 audio_level=50']);
+  assert.ok(!sent.some((s) => /audio_mute|atu clear/.test(s)));
+});
+test('logging while released records MY_RIG: the shack rig, whatever the radio link', () => {
+  const b = fnBody(main, 'logContact');
+  const m = b.match(/const myRig = [^;]+;/);
+  assert.ok(m, 'myRig is decided in logContact');
+  assert.ok(m[0].includes('stationSetupRigById()'), 'from the shack\'s active rig');
+  assert.ok(!/smartSdr|flexRoute|cat\.connected|catConnected/.test(m[0]), 'not from the radio link');
+  const i = main.indexOf("remoteServer.on('log-qso'");
+  const j = main.indexOf('logContact(', i);
+  assert.ok(i > 0 && j > i, 'ECHOCAT log-qso goes through logContact');
+  assert.ok(!/myRig/.test(main.slice(i, j)), 'ECHOCAT\'s entry carries no myRig, so the shack rig is recorded');
+  const { buildAdifRecord } = require('../lib/adif-writer');
+  assert.ok(/<MY_RIG:9>FLEX-8600/.test(buildAdifRecord({ callsign: 'K3SBP', frequency: '14074', mode: 'FT8', qsoDate: '20261118', timeOn: '1200', myRig: 'FLEX-8600' })));
 });
 test('disconnectSmartSdr closes the audio client too (DAX goes with the GUI client)', () => {
   assert.ok(/stopSmartSdrAudio\(\);\n\}/.test(fnBody(main, 'disconnectSmartSdr')));
 });
 test('reclaim: client gui, retried on refusal, then DAX comes back through gui-ready', () => {
   const b = fnBody(main, 'flexRouteReclaim');
-  assert.ok(b.includes('fr.beginReclaim()') && b.includes('flexRouteTryGui()') && b.includes('FlexRouteLib.reclaimNext('));
+  assert.ok(b.includes('fr.beginReclaim()') && b.includes('flexRouteTryGui()') && b.includes('FlexRouteLib.runReclaim('));
+  assert.ok(b.includes("stillReclaiming: () => fr.state === 'reclaiming'"));
   assert.ok(b.includes('flexRouteStopWatch()'));
   const tg = fnBody(main, 'flexRouteTryGui');
   assert.ok(tg.includes("'gui-ready'") && tg.includes("'gui-rejected'"));

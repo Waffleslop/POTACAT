@@ -234,22 +234,142 @@ test('every listed type is a real ECHOCAT message (registry or demux case)', () 
 
 console.log('the words');
 
-test('one sentence each, no emoji, never a bare "SmartLink"', () => {
+test('one sentence each, no emoji, "mobile device" not "phone"', () => {
   for (const [k, v] of Object.entries(FR.TEXT)) {
     assert.ok(typeof v === 'string' && v.length > 5, k);
+    assert.ok(/^[A-Z]/.test(v) && /\.$/.test(v), `${k}: a sentence`);
     assert.ok(!/[\u{1F300}-\u{1FAFF}☀-➿]/u.test(v), `${k} has an emoji`);
-    assert.ok(!/(^|[^o]\s)SmartLink/.test(v.replace(/FlexRadio SmartLink/g, '')), `${k}: say "FlexRadio SmartLink"`);
     assert.ok(!/\bphone\b/i.test(v), `${k}: "mobile device", not "phone"`);
   }
 });
-test('the sentences Casey and the ECHOCAT session agreed on, word for word', () => {
+test('the sentences plan section 6b fixes, word for word', () => {
   assert.strictEqual(FR.TEXT.guest, 'A guest has the radio.');
+  assert.strictEqual(FR.TEXT.rigRefused, 'The radio is on SmartLink with your mobile device.');
+  assert.strictEqual(FR.TEXT.banner, 'The radio is with ECHOCAT through FlexRadio SmartLink.');
+});
+test('every refusal and failure sentence, word for word', () => {
+  assert.strictEqual(FR.TEXT.transmitting, 'The radio is transmitting. Try again when it stops.');
+  assert.strictEqual(FR.TEXT.winlink, 'A Winlink session is running on the computer. Try again when it ends.');
+  assert.strictEqual(FR.TEXT.notFlexDirect, 'POTACAT is not running this Flex as its own client (Flex Direct), so there is nothing to hand over.');
+  assert.strictEqual(FR.TEXT.busy, 'POTACAT is already handing the radio over. Try again in a moment.');
   assert.strictEqual(FR.TEXT.deskSaidNo, 'The person at the computer did not agree.');
   assert.strictEqual(FR.TEXT.stillHeld, 'The radio is still held by another client.');
-  assert.strictEqual(FR.TEXT.rigRefused, 'The radio is on FlexRadio SmartLink with your mobile device.');
-  assert.strictEqual(FR.TEXT.banner, 'The radio is with ECHOCAT through FlexRadio SmartLink.');
+  assert.strictEqual(FR.TEXT.unreachable, 'POTACAT could not reach the radio to take it back.');
   assert.strictEqual(FR.TEXT.takeBackWarn, 'Your mobile device will lose the radio.');
 });
+test('each refusal reason gives its own sentence from decideRelease', () => {
+  const cases = [
+    [{ transmitting: true }, FR.TEXT.transmitting],
+    [{ winlink: true }, FR.TEXT.winlink],
+    [{ guestPass: true }, FR.TEXT.guest],
+    [{ flexDirect: false }, FR.TEXT.notFlexDirect],
+    [{ state: 'releasing' }, FR.TEXT.busy],
+    [{ state: 'reclaiming' }, FR.TEXT.busy],
+  ];
+  for (const [over, text] of cases) {
+    assert.deepStrictEqual(FR.decideRelease({ ...OK, ...over }), { action: 'refuse', error: text }, JSON.stringify(over));
+  }
+});
 
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed) process.exit(1);
+console.log('before letting go (6b: stop JTCAT, WSPR and scan; power; TX source; audio_level)');
+
+test('a busy station: every step, in order, the TX source and audio level last', () => {
+  assert.deepStrictEqual(FR.releaseSteps({
+    jtcatTxOrAuto: true, wsprArmed: true, jtcatRunning: true, desktopScanning: true,
+    phoneScanning: true, powerToRestore: true, speakerLevel: 50,
+  }), ['jtcat-halt', 'jtcat-stop', 'scan-desktop', 'scan-phone', 'power', 'tx-source', 'audio-level']);
+});
+test('a quiet station: only the TX source goes back', () => {
+  assert.deepStrictEqual(FR.releaseSteps({ speakerLevel: null }), ['tx-source']);
+});
+test('a WSPR beacon alone still halts JTCAT (its power is put back there)', () => {
+  assert.deepStrictEqual(FR.releaseSteps({ wsprArmed: true }), ['jtcat-halt', 'tx-source']);
+});
+test('a JTCAT session with no TX is still stopped', () => {
+  assert.deepStrictEqual(FR.releaseSteps({ jtcatRunning: true }), ['jtcat-stop', 'tx-source']);
+});
+test('audio_level: the speaker silenced (0) goes back to the operator\'s gain, or 50', () => {
+  assert.strictEqual(FR.releaseSpeakerLevel({ onboardSpeaker: false, speakerGain: 35 }), 35);
+  assert.strictEqual(FR.releaseSpeakerLevel({ onboardSpeaker: false }), 50);
+  assert.strictEqual(FR.releaseSpeakerLevel({ onboardSpeaker: false, speakerGain: '0' }), 50);
+  assert.strictEqual(FR.releaseSpeakerLevel({ onboardSpeaker: false, speakerGain: 250 }), 100);
+});
+test('audio_level: already at its normal level, or multiFlex, is left alone', () => {
+  assert.strictEqual(FR.releaseSpeakerLevel({ onboardSpeaker: true, speakerGain: 40 }), null);
+  assert.strictEqual(FR.releaseSpeakerLevel({ onboardSpeaker: false, multiflex: true }), null);
+});
+test('audio_level: the speaker on with no gain saved is set to 50', () => {
+  assert.strictEqual(FR.releaseSpeakerLevel({ onboardSpeaker: true }), 50);
+});
+
+console.log('runReclaim against a fake radio');
+
+/** A radio that answers `client gui` from a script: 'full' = F3000001,
+ *  'none' = no reply, 'ok' = accepted. Every attempt moves the clock 100 ms. */
+function fakeRadio(script, now) {
+  const log = [];
+  return {
+    log,
+    tryGui: async () => {
+      now.add(100);
+      const a = script.length ? script.shift() : script.last;
+      log.push('client gui 11111111-2222-3333-4444-555555555555 -> ' + a);
+      if (a === 'ok') return { ok: true };
+      if (a === 'full') return { ok: false, status: 0xF3000001 };
+      return { ok: false, status: null };
+    },
+    sleep: async (ms) => { log.push('wait ' + ms); now.add(ms); },
+  };
+}
+async function atest(name, fn) {
+  try { await fn(); passed++; console.log('  ok  ' + name); }
+  catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + (e.message || e)); }
+}
+const asyncTests = [];
+asyncTests.push(() => atest('accepted at once: one client gui, no wait', async () => {
+  const now = clock();
+  const r = fakeRadio(['ok'], now);
+  const out = await FR.runReclaim({ tryGui: r.tryGui, sleep: r.sleep, now });
+  assert.deepStrictEqual(out, { ok: true, attempts: 1 });
+  assert.deepStrictEqual(r.log, ['client gui 11111111-2222-3333-4444-555555555555 -> ok']);
+}));
+asyncTests.push(() => atest('F3000001 three times, then the mobile device lets go: retried every 2 s, then ok', async () => {
+  const now = clock();
+  const r = fakeRadio(['full', 'full', 'full', 'ok'], now);
+  const retries = [];
+  const out = await FR.runReclaim({ tryGui: r.tryGui, sleep: r.sleep, now, onRetry: (s) => retries.push(FR.statusHex(s)) });
+  assert.deepStrictEqual(out, { ok: true, attempts: 4 });
+  assert.deepStrictEqual(r.log.filter((l) => l.startsWith('wait')), ['wait 2000', 'wait 2000', 'wait 2000']);
+  assert.deepStrictEqual(retries, ['F3000001', 'F3000001', 'F3000001']);
+}));
+asyncTests.push(() => atest('F3000001 for 20 s: gives up with "still held", never past 20 s', async () => {
+  const now = clock();
+  const t0 = now();
+  const script = []; script.last = 'full';
+  const r = fakeRadio(script, now);
+  const out = await FR.runReclaim({ tryGui: r.tryGui, sleep: r.sleep, now });
+  assert.strictEqual(out.ok, false);
+  assert.strictEqual(out.error, 'The radio is still held by another client.');
+  assert.ok(now() - t0 <= FR.RECLAIM_WINDOW_MS + 200, `took ${now() - t0} ms`);
+  assert.ok(out.attempts >= 9 && out.attempts <= 11, `attempts ${out.attempts}`);
+}));
+asyncTests.push(() => atest('no answer at all for 20 s: "could not reach the radio"', async () => {
+  const now = clock();
+  const script = []; script.last = 'none';
+  const r = fakeRadio(script, now);
+  const out = await FR.runReclaim({ tryGui: r.tryGui, sleep: r.sleep, now });
+  assert.strictEqual(out.error, 'POTACAT could not reach the radio to take it back.');
+}));
+asyncTests.push(() => atest('something else ended the reclaim: it stops after the wait', async () => {
+  const now = clock();
+  const r = fakeRadio(['full', 'ok'], now);
+  const out = await FR.runReclaim({ tryGui: r.tryGui, sleep: r.sleep, now, stillReclaiming: () => false });
+  assert.strictEqual(out.ok, false);
+  assert.strictEqual(out.attempts, 1);
+}));
+
+(async () => {
+  for (const t of asyncTests) await t();
+  console.log(`\n${passed} passed, ${failed} failed`);
+  if (failed) process.exit(1);
+})();

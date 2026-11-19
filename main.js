@@ -23130,21 +23130,68 @@ function flexRouteAskDesk(who) {
     try { if (win && !win.isDestroyed()) win.flashFrame(true); } catch { /* cosmetic */ }
   });
 }
-/** Before the radio leaves: the automatic transmitters stand down (Run, Hunt,
- *  the WSPR beacon, with its power put back), the scan stops, and a test
- *  carrier's power is put back. Nothing is transmitting (refused before). */
+/** Before the radio leaves (plan 6b), in the order lib/flex-route.js
+ *  releaseSteps gives: JTCAT transmit and automation stand down (Run, Hunt,
+ *  the WSPR beacon, with its power put back), the JTCAT session stops, the
+ *  scans stop (this desktop's and a device's), the power ledger puts a test or
+ *  tuner carrier's power back, the transmit source goes back to what it was,
+ *  and the slice audio_level goes back to its normal value (at 0 the radio
+ *  lowers its FlexRadio SmartLink audio by about 15 dB). Nothing is
+ *  transmitting: that was refused before. Returns what was done, for the log. */
 function flexRouteStopAutomation() {
-  const stopped = [];
-  try {
-    const armed = jtcatFullAutoCq || jtcatAutoCqMode !== 'off' || wsprBeaconArmed() || !!jtcatWsprBeaconTimer
-      || jtcatAnyTxActive() || jtcatTuneState.active || !!(ft8Engine && ft8Engine._txEnabled);
-    if (armed) { jtcatHaltTxNow('The radio went to ECHOCAT through FlexRadio SmartLink'); stopped.push('JTCAT transmit and automation'); }
-  } catch (err) { flexRouteLog(`stopping JTCAT failed: ${err.message}`); }
-  try { if (win && !win.isDestroyed()) win.webContents.send('remote-scan-control', { action: 'stop' }); } catch { /* no window */ }
-  try {
-    if (settings.setupTxPowerRestore && _currentTxPower > 0) { stationSetupReconcilePower(_currentTxPower); stopped.push('power put back'); }
-  } catch (err) { flexRouteLog(`putting the power back failed: ${err.message}`); }
-  return stopped;
+  const done = [];
+  const speakerLevel = FlexRouteLib.releaseSpeakerLevel({
+    onboardSpeaker: settings.flexOnboardSpeaker === true, speakerGain: settings.flexSpeakerGain,
+    multiflex: !!(smartSdr && smartSdr._discoveredGuiClients && smartSdr._discoveredGuiClients.length > 0),
+  });
+  const steps = FlexRouteLib.releaseSteps({
+    jtcatTxOrAuto: !!(jtcatFullAutoCq || jtcatAutoCqMode !== 'off' || jtcatAnyTxActive() || jtcatTuneState.active
+      || (ft8Engine && ft8Engine._txEnabled)),
+    wsprArmed: !!(wsprBeaconArmed() || jtcatWsprBeaconTimer),
+    jtcatRunning: !!ft8Engine,
+    desktopScanning: !!desktopScanning,
+    phoneScanning: !!_phoneScanning,
+    powerToRestore: !!(settings.setupTxPowerRestore && _currentTxPower > 0),
+    speakerLevel: smartSdr && smartSdr.ourSliceIndex != null && smartSdr.ourSliceIndex >= 0 ? speakerLevel : null,
+  });
+  for (const step of steps) {
+    try {
+      switch (step) {
+        case 'jtcat-halt':
+          jtcatHaltTxNow('The radio went to ECHOCAT through FlexRadio SmartLink');
+          done.push('JTCAT transmit and automation (WSPR included)');
+          break;
+        case 'jtcat-stop':
+          stopJtcat();
+          remoteJtcatQso = null;
+          if (win && !win.isDestroyed()) win.webContents.send('jtcat-stop-for-remote');
+          jtcatWindowStopped();
+          done.push('JTCAT');
+          break;
+        case 'scan-desktop':
+          if (win && !win.isDestroyed()) win.webContents.send('remote-scan-control', { action: 'stop' });
+          done.push('scan');
+          break;
+        case 'scan-phone':
+          if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'scan-control', action: 'stop' });
+          done.push('the device scan');
+          break;
+        case 'power':
+          stationSetupReconcilePower(_currentTxPower);
+          done.push('power put back');
+          break;
+        case 'tx-source':
+          // Mic again, when POTACAT had switched the transmit source to DAX.
+          restoreFlexTxDax();
+          break;
+        case 'audio-level':
+          smartSdr.setSliceAudioLevel(smartSdr.ourSliceIndex, speakerLevel);
+          done.push(`audio_level ${speakerLevel}`);
+          break;
+      }
+    } catch (err) { flexRouteLog(`before letting go, ${step} failed: ${err.message}`); }
+  }
+  return done;
 }
 
 async function flexRouteRelease({ reason, device } = {}) {
@@ -23171,12 +23218,10 @@ async function flexRouteRelease({ reason, device } = {}) {
     fr.beginRelease(who);
     flexRouteLog(`handing the radio to ${who} through FlexRadio SmartLink${reason ? ` (${reason})` : ''}`);
     flexRoutePublish();
+    // JTCAT, WSPR and scan stop; power, the transmit source and audio_level
+    // go back (plan 6b; the order is lib/flex-route.js releaseSteps).
     const stopped = flexRouteStopAutomation();
-    if (stopped.length) flexRouteLog(`stopped first: ${stopped.join(', ')}`);
-    // The transmit source goes back to what it was (mic, when POTACAT had
-    // switched it to DAX). The slice audio_level is NOT touched: at 0 the
-    // radio lowers its SmartLink Opus audio by about 15 dB (D0, 2026-11-17).
-    try { restoreFlexTxDax(); } catch (err) { flexRouteLog(`restoring the transmit source failed: ${err.message}`); }
+    if (stopped.length) flexRouteLog(`before letting go: ${stopped.join(', ')}; transmit source restored`);
     await sleepMs(1200); // let those writes reach the radio before the link closes
     if (flexRouteTransmitting()) {
       fr.finishRelease(false);
@@ -23233,31 +23278,32 @@ async function flexRouteReclaim(why) {
     flexRouteLog(`taking the radio back: ${why}`);
     flexRoutePublish(); // the mobile device hears 'reclaiming' and lets go of its SmartLink slot
     _flexYieldToExternal = false;
-    const startedAt = Date.now();
-    for (;;) {
-      const r = await flexRouteTryGui();
-      if (r.ok) {
-        fr.finishReclaim(true);
-        flexRoutePersist();
-        flexRouteStopWatch();
-        flexRoutePublish();
-        flexRouteLog('POTACAT has the radio again (Flex Direct: its own slices and pan, DAX audio restarted)');
-        return { ok: true };
-      }
-      disconnectSmartSdr();
-      const next = FlexRouteLib.reclaimNext({ startedAt, now: Date.now(), status: r.status });
-      if (next.action === 'retry') {
-        flexRouteLog(`the radio answered ${FlexRouteLib.statusHex(r.status)} to client gui; trying again in 2 s`);
-        await sleepMs(next.delayMs);
-        if (fr.state !== 'reclaiming') return { ok: false, error: FlexRouteLib.TEXT.busy };
-        continue;
-      }
-      fr.finishReclaim(false);
+    // `client gui <our persistent id>` (lib/smartsdr.js setReclaimOnly), every
+    // 2 s while the radio answers F3000001, for up to 20 s (lib/flex-route.js).
+    const r = await FlexRouteLib.runReclaim({
+      tryGui: async () => {
+        const g = await flexRouteTryGui();
+        if (!g.ok) disconnectSmartSdr();
+        return g;
+      },
+      sleep: sleepMs,
+      stillReclaiming: () => fr.state === 'reclaiming',
+      onRetry: (status) => flexRouteLog(`the radio answered ${FlexRouteLib.statusHex(status)} to client gui; trying again in 2 s`),
+    });
+    if (r.ok) {
+      fr.finishReclaim(true);
       flexRoutePersist();
+      flexRouteStopWatch();
       flexRoutePublish();
-      flexRouteLog(`could not take the radio back after 20 s: ${next.error}`);
-      return { ok: false, error: next.error };
+      flexRouteLog('POTACAT has the radio again (Flex Direct: its own slices and pan, DAX audio restarted)');
+      return { ok: true };
     }
+    if (r.aborted) return { ok: false, error: r.error };
+    fr.finishReclaim(false);
+    flexRoutePersist();
+    flexRoutePublish();
+    flexRouteLog(`could not take the radio back after 20 s (last answer ${FlexRouteLib.statusHex(r.status)}): ${r.error}`);
+    return { ok: false, error: r.error };
   } catch (err) {
     if (fr.state === 'reclaiming') { fr.finishReclaim(false); flexRoutePublish(); }
     flexRouteLog(`taking the radio back failed: ${err.message}`);
