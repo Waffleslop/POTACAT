@@ -17,6 +17,7 @@ const path = require('path');
 const { readSrc } = require('./_src');
 const R = require('../lib/aprs-rf-beacon');
 const F = require('../lib/flex-tx-filter');
+const G = require('../lib/aprs-rf-gate');
 
 let pass = 0, fail = 0;
 const queue = [];
@@ -176,7 +177,9 @@ function harness(o = {}) {
   const tm = fakeTimers();
   const log = [];
   const order = [];
-  const flex = o.noFlex ? null : { filter: o.filter || { lo: 100, hi: 3100 }, allowed: o.allowed !== undefined ? o.allowed : true, sent: [], seen: [] };
+  const flex = o.noFlex ? null : { filter: o.filter || { lo: 100, hi: 3100 }, allowed: o.allowed !== undefined ? o.allowed : true, sent: [], seen: [],
+    // The radio's interlock: OUT_OF_BAND on the wide filter (on-air 2026-11-19); READY once it takes the narrow one, unless o.stays.
+    interlock: o.interlock || { state: 'NOT_READY', reason: 'OUT_OF_BAND' } };
   const flexSet = async (to) => {
     const cmd = F.txFilterCommand(to);
     if (!cmd) return { ok: false, cmd: null, reason: 'invalid' };
@@ -185,6 +188,7 @@ function harness(o = {}) {
     if (reply === 'none') return { ok: false, cmd, reason: 'no-reply' };
     if (reply !== 0) return { ok: false, cmd, status: reply, reason: 'refused' };
     flex.filter = { ...to }; flex.seen.push({ ...to });
+    if (!o.stays && to.lo === 1400 && to.hi === 2000) flex.interlock = { state: 'READY', reason: '' };
     return { ok: true, cmd, status: 0 };
   };
   const radio = { keyed: false };
@@ -214,6 +218,7 @@ function harness(o = {}) {
       return flexSet(plan.target).then((res) => ({ saved: plan.saved, ok: res.ok, reason: res.reason, reply: res.status != null ? 'reply 0x' + res.status.toString(16) : res.reason }));
     },
     restoreTx: (saved) => flexSet(saved),
+    txInterlock: () => { if (!flex) return null; order.push('interlock:' + flex.interlock.state); return { ...flex.interlock }; },
   };
   const run = R.createRfBeacon(deps);
   const ptt = (on) => { if (!onPtt) return 'no-shim'; const res = onPtt(on); if (on && res === true && o.readback !== false) run.noteRadioTx(true); return res; };
@@ -364,11 +369,100 @@ test('a radio without TX passband control: nothing changes, one log line, the be
   assert.ok(!h.order.some((s) => /transmit set/.test(s)));
 });
 
+// ── the gate and the radio's OUT_OF_BAND reading (on-air 2026-11-19) ─────────
+// The 8600M reads interlock NOT_READY OUT_OF_BAND at 100-3100 Hz on 10.1476
+// before any key-down, so the gate disabled the button and the narrow filter
+// never went out.
+const gateReady = (o) => ({
+  remote: false, windowOpen: true, listenOn: true, listenState: 'listening', band: '30m',
+  settingsCall: 'K3SBP', aprsHz: 10147600, dialHz: 10147600, dialMode: 'DIGU',
+  radioOwner: 'none', pttKeyed: false, otherTx: '', swrTripped: false, modemFound: true, inFlight: false,
+  txInterlock: 'NOT_READY', txInterlockReason: 'OUT_OF_BAND', txNarrow: { lo: 1400, hi: 2000 },
+  ...(o || {}),
+});
+const fits = (dialHz, mode) => G.narrowFits({ band: '30m', dialHz, mode, filter: { lo: 1400, hi: 2000 } });
+
+test('narrowFits, from the live dial and mode: fits on 10.1476 DIGU/USB (top 10.1496 MHz), not past either band edge', () => {
+  assert.deepStrictEqual(fits(10147600, 'DIGU'), { fits: true, loHz: 10149000, hiHz: 10149600 });
+  assert.strictEqual(fits(10147600, 'USB').fits, true);
+  assert.strictEqual(fits(10148000, 'DIGU').fits, true, 'top edge exactly 10.150 MHz');
+  assert.strictEqual(fits(10148100, 'DIGU').fits, false, 'top edge 10.1501 MHz');
+  assert.strictEqual(fits(10098600, 'DIGU').fits, true, 'bottom edge exactly 10.100 MHz');
+  assert.strictEqual(fits(10098500, 'DIGU').fits, false, 'bottom edge 10.0999 MHz');
+  assert.strictEqual(fits(10151900, 'DIGL').fits, false, 'lower sideband: dial - 2000 .. dial - 1400 = 10.1499-10.1505 MHz');
+  assert.strictEqual(fits(10151400, 'DIGL').fits, true, 'lower sideband: 10.1494-10.1500 MHz');
+  assert.strictEqual(fits(10147600, 'FM').fits, false, 'not a sideband mode');
+  assert.strictEqual(fits(0, 'DIGU').fits, false);
+  assert.strictEqual(G.narrowFits({ band: '2m', dialHz: 144390000, mode: 'FM', filter: { lo: 1400, hi: 2000 } }).fits, false);
+});
+
+test('the gate: OUT_OF_BAND that the narrow filter will clear (30 m Flex, fits on the live dial and mode) enables the button', () => {
+  assert.strictEqual(G.readiness(gateReady()), null);
+  assert.strictEqual(G.readiness(gateReady({ txInterlock: 'READY', txInterlockReason: '' })), null);
+});
+
+test('the gate: OUT_OF_BAND still refuses with the radio reason when the narrow passband would not fit, there is no narrow filter, or the reason is another', () => {
+  const sentence = 'The radio is not ready to transmit on this band: its interlock is preventing transmission (OUT_OF_BAND).';
+  const off = G.readiness(gateReady({ dialHz: 10148100, aprsHz: 10148100 }));
+  assert.strictEqual(off.reason, 'radio-not-ready');
+  assert.strictEqual(off.sentence, sentence);
+  assert.strictEqual(G.readiness(gateReady({ dialMode: 'FM' })).reason, 'radio-not-ready');
+  assert.strictEqual(G.readiness(gateReady({ txNarrow: null })).sentence, sentence, 'no narrow filter: not a Flex, changes not allowed, 2 m');
+  assert.strictEqual(G.readiness(gateReady({ txInterlockReason: 'AMP:TG' })).reason, 'radio-not-ready');
+  assert.strictEqual(G.readiness(gateReady({ txInterlockReason: '' })).reason, 'radio-not-ready');
+  // The key-down itself never makes the exception.
+  assert.strictEqual(G.mayKey(gateReady({ inFlight: true, radioOwner: 'aprs' })).reason, 'radio-not-ready');
+});
+
+test('order: the narrow filter first, then the radio interlock is judged, then the key-down', async () => {
+  const h = harness();
+  const { p } = await start(h);
+  h.ptt(true); await h.tm.advance(2000); h.ptt(false); await h.tm.advance(300);
+  assert.strictEqual((await p).ok, true);
+  await settle();
+  const i = (s) => h.order.indexOf(s);
+  assert.ok(i(NARROW[0]) >= 0 && i(NARROW[0]) < i('interlock:READY') && i('interlock:READY') < i('shim') && i('shim') < i('key'), h.order.join(','));
+  assert.ok(!h.order.slice(0, i(NARROW[0])).some((s) => /^interlock/.test(s)), 'the interlock is not judged before the narrow filter');
+});
+
+test('the interlock takes a moment to read READY after the narrow filter: the beacon waits for it', async () => {
+  const h = harness({ stays: true });
+  const { p } = await start(h);
+  assert.ok(!h.order.includes('shim'));
+  h.flex.interlock = { state: 'READY', reason: '' };
+  await h.tm.advance(100);
+  await settle();
+  assert.ok(h.order.includes('shim'), h.order.join(','));
+  h.ptt(true); await h.tm.advance(2000); h.ptt(false); await h.tm.advance(300);
+  assert.strictEqual((await p).ok, true);
+});
+
+test('still NOT_READY after the narrow filter (OUT_OF_BAND or any reason): never keyed, the filter put back in one command, the radio reason', async () => {
+  for (const reason of ['OUT_OF_BAND', 'AMP:TG']) {
+    const h = harness({ stays: true, interlock: { state: 'NOT_READY', reason } });
+    const { p } = await start(h);
+    await h.tm.advance(R.INTERLOCK_WAIT_MS);
+    const res = await p;
+    await settle();
+    assert.strictEqual(res.ok, false);
+    assert.strictEqual(res.reason, 'not-keyed');
+    assert.strictEqual(res.sentence, R.refusalSentence({ interlockState: 'NOT_READY', interlockReason: reason }));
+    assert.ok(!h.order.includes('key') && !h.order.includes('shim'), h.order.join(','));
+    assert.deepStrictEqual(h.flex.sent, [...NARROW, ...BACK]);
+    assert.deepStrictEqual(h.flex.filter, { lo: 100, hi: 3100 });
+  }
+});
+
 // ── main wiring (source) ────────────────────────────────────────────────────
 test('main wires narrowTx/restoreTx into the runner, sends whole filters, never refuses by band, never sends atu clear', () => {
   const src = readSrc(path.join(__dirname, '..', 'main.js'));
   const runner = src.slice(src.indexOf('function aprsRfRunner()'), src.indexOf('function killArdop()'));
-  assert.ok(/narrowTx: aprsRfNarrowTx/.test(runner) && /restoreTx: aprsRfRestoreTx/.test(runner), runner);
+  assert.ok(/narrowTx: aprsRfNarrowTx/.test(runner) && /restoreTx: aprsRfRestoreTx/.test(runner) && /txInterlock: aprsRfTxInterlock/.test(runner), runner);
+  const gate = src.slice(src.indexOf('function aprsRfGateState()'), src.indexOf('function aprsRfDevReadiness()'));
+  assert.ok(/txNarrow: /.test(gate) && /dialMode: _currentMode/.test(gate), 'the gate sees the narrow filter and the live mode');
+  // Listening is receive only: the listen start never reads the interlock or the TX filter.
+  const at = src.indexOf('function aprsSpawnDirewolf(');
+  assert.ok(at > 0 && !/interlock|txNarrow|setTxFilter/.test(src.slice(at, at + 4000)));
   const glue = src.slice(src.indexOf('function aprsRfFlexTxConn()'), src.indexOf('function aprsRfOtherTx()'));
   assert.ok(/planTxPassband/.test(glue), 'the plan comes from lib/aprs-rf-beacon.js');
   assert.ok(/setTxFilter\(target\)/.test(glue) && /setTxFilter\(saved\)/.test(glue), 'one whole filter each way');

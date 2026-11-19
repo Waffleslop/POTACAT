@@ -50,7 +50,7 @@ test('only the operator\'s Transmit sends: one IPC path into aprsRfSend, no RF t
 
 test('the press only asks: the confirmation line carries band, frequency, mode and power', () => {
   const ask = fnBody(main, 'aprsRfAsk');
-  assert.ok(/aprsRfUi\.confirm = \{ at: Date\.now\(\), band, bandLabel: .*hz, mhz: .*mode: .*powerW: pw \}/.test(ask));
+  assert.ok(/aprsRfUi\.confirm = \{ at: Date\.now\(\), band, bandLabel: .*hz, mhz: .*mode: .*powerW: pw(, txNarrow: aprsRfTxNarrow\(band\))? \}/.test(ask));
   assert.ok(!/aprsRfRunner|handleRemotePtt/.test(ask), 'asking keys nothing');
   assert.ok(/Transmit one APRS beacon on ' \+ c\.bandLabel \+ ', ' \+ c\.mhz \+ ' MHz ' \+ c\.mode \+ ', ' \+ powerWords\(c\.powerW\)/.test(bar));
   assert.ok(!/confirm\(|alert\(|showMessageBox/.test(bar + block), 'no pop-ups');

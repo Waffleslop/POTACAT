@@ -38,7 +38,8 @@
     var box = $('aprs-rf-confirm');
     if (s.confirm && !busy) {
       var c = s.confirm;
-      $('aprs-rf-confirm-text').textContent = 'Transmit one APRS beacon on ' + c.bandLabel + ', ' + c.mhz + ' MHz ' + c.mode + ', ' + powerWords(c.powerW) + '?';
+      $('aprs-rf-confirm-text').textContent = 'Transmit one APRS beacon on ' + c.bandLabel + ', ' + c.mhz + ' MHz ' + c.mode + ', ' + powerWords(c.powerW) + '?' +
+        (c.txNarrow ? ' The transmit filter will be narrowed to ' + c.txNarrow.lo + '-' + c.txNarrow.hi + ' Hz for the beacon and put back after.' : '');
       box.classList.remove('hidden');
     } else {
       box.classList.add('hidden');
