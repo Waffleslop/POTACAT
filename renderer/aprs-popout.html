@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <script src="popout-theme-boot.js"></script>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://*.tile.openstreetmap.org; connect-src 'self' https://*.tile.openstreetmap.org;">
+  <title>APRS</title>
+  <link rel="stylesheet" href="../node_modules/leaflet/dist/leaflet.css">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="aprs-popout.css">
+</head>
+<body>
+  <div class="titlebar">
+    <div class="titlebar-drag"><span class="titlebar-title">APRS</span></div>
+    <div class="titlebar-controls">
+      <button class="titlebar-btn" id="tb-min" title="Minimize">&#x2014;</button>
+      <button class="titlebar-btn" id="tb-max" title="Maximize">&#x25A1;</button>
+      <button class="titlebar-btn titlebar-close" id="tb-close" title="Close">&#x2715;</button>
+    </div>
+  </div>
+
+  <div class="aprs-bar">
+    <span class="aprs-mark" id="aprs-link" title="The internet link to APRS-IS"><span class="aprs-dot" id="aprs-link-dot"></span><span id="aprs-link-text">Starting</span></span>
+    <span class="aprs-mark" id="aprs-rate" title="Packets received in the last minute">0 packets a minute</span>
+    <span class="aprs-mark" id="aprs-last" title="Time since the last packet">No packets yet</span>
+    <span class="aprs-spacer"></span>
+    <label class="aprs-range" title="How far from your grid square APRS-IS sends stations">Range
+      <select id="aprs-range"></select>
+    </label>
+    <input type="search" id="aprs-search" placeholder="Search callsign or comment" spellcheck="false" autocomplete="off">
+  </div>
+
+  <div class="aprs-main">
+    <div class="aprs-map-wrap">
+      <div id="aprs-map"></div>
+      <div class="aprs-legend" id="aprs-legend"></div>
+      <div class="aprs-empty hidden" id="aprs-empty"></div>
+    </div>
+    <div class="aprs-side">
+      <div class="aprs-count" id="aprs-count">No stations yet</div>
+      <div class="aprs-table-wrap" id="aprs-table-wrap">
+        <table class="aprs-table">
+          <colgroup><col class="c-sym"><col class="c-call"><col class="c-dist"><col class="c-brg"><col class="c-age"><col></colgroup>
+          <thead>
+            <tr>
+              <th data-sort="symbol" class="col-sym" title="Sort by kind"></th>
+              <th data-sort="call">Station</th>
+              <th data-sort="distance" class="num">Distance</th>
+              <th data-sort="bearing" class="num">Bearing</th>
+              <th data-sort="age" class="num">Heard</th>
+              <th data-sort="comment">Comment</th>
+            </tr>
+          </thead>
+          <tbody id="aprs-rows"></tbody>
+        </table>
+      </div>
+      <div class="aprs-detail hidden" id="aprs-detail"></div>
+    </div>
+  </div>
+
+  <script src="../node_modules/leaflet/dist/leaflet.js"></script>
+  <script src="../lib/aprs-parser.js"></script>
+  <script src="../lib/aprs-symbols.js"></script>
+  <script src="../lib/aprs-stations.js"></script>
+  <script src="../lib/aprs-map.js"></script>
+  <script src="aprs-icons.js"></script>
+  <script src="aprs-popout.js"></script>
+</body>
+</html>

@@ -1,0 +1,86 @@
+/* APRS window (phase 1). Colours come from the theme variables, so every
+   theme draws it in its own palette. The nine icons and their colours are in
+   aprs-icons.js; the map itself is one canvas (aprs-popout.js). */
+html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
+  background: var(--bg-primary); color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 15px; }
+body { display: flex; flex-direction: column; }
+.hidden { display: none !important; }
+
+.aprs-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 7px 12px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); }
+.aprs-mark { display: inline-flex; align-items: center; gap: 7px; color: var(--text-secondary); white-space: nowrap; }
+.aprs-dot { width: 11px; height: 11px; border-radius: 50%; background: var(--text-dim); flex: none; }
+.aprs-dot.ok { background: var(--accent-green); }
+.aprs-dot.wait { background: var(--source-sota); }
+.aprs-dot.bad { background: var(--accent-red); }
+.aprs-spacer { flex: 1; }
+.aprs-range { display: inline-flex; align-items: center; gap: 7px; color: var(--text-secondary); }
+.aprs-range select, #aprs-search { font-size: 15px; padding: 4px 8px; border-radius: 5px;
+  background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-primary); }
+#aprs-search { width: 230px; }
+
+.aprs-main { flex: 1; display: flex; min-height: 0; }
+.aprs-map-wrap { flex: 1; position: relative; min-width: 260px; }
+#aprs-map { position: absolute; inset: 0; background: var(--bg-tertiary); }
+.aprs-side { width: 46%; min-width: 360px; max-width: 640px; display: flex; flex-direction: column;
+  border-left: 1px solid var(--border-primary); background: var(--bg-primary); min-height: 0; }
+.aprs-count { padding: 7px 12px; color: var(--text-secondary); border-bottom: 1px solid var(--border-primary); }
+.aprs-table-wrap { flex: 1; overflow: auto; min-height: 120px; }
+
+.aprs-table { width: 100%; border-collapse: collapse; font-size: 14px; table-layout: fixed; }
+.aprs-table col.c-sym { width: 34px; }
+.aprs-table col.c-call { width: 118px; }
+.aprs-table col.c-dist { width: 78px; }
+.aprs-table col.c-brg { width: 82px; }
+.aprs-table col.c-age { width: 70px; }
+.aprs-table th { position: sticky; top: 0; z-index: 1; background: var(--bg-secondary); color: var(--text-secondary);
+  text-align: left; font-weight: 600; padding: 7px 8px; cursor: pointer; user-select: none; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; border-bottom: 1px solid var(--border-primary); }
+.aprs-table th:hover { color: var(--text-primary); }
+.aprs-table th.sorted::after { content: ' \25B2'; font-size: 10px; }
+.aprs-table th.sorted.desc::after { content: ' \25BC'; }
+/* Every row is one line and the same height: the list draws only the rows in view. */
+.aprs-table tbody tr.r td { height: 32px; padding: 0 8px; box-sizing: border-box; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; border-bottom: 1px solid var(--border-secondary, var(--border-primary)); }
+.aprs-table tbody tr.r td:first-child { padding: 0 0 0 8px; text-overflow: clip; }
+.aprs-table tbody tr.aprs-pad td { padding: 0; border: 0; }
+.aprs-table td.num, .aprs-table th.num { text-align: right; }
+.aprs-table td.call { font-weight: 700; }
+.aprs-table td.cmt { color: var(--text-secondary); }
+.aprs-table tbody tr.r { cursor: pointer; }
+.aprs-table tbody tr.r:hover { background: var(--bg-hover); }
+.aprs-table tbody tr.sel { background: var(--bg-hover); box-shadow: inset 3px 0 0 var(--accent-red); }
+.aprs-ico { display: inline-block; vertical-align: middle; flex: none; }
+.aprs-table td .aprs-ico { margin-top: -2px; }
+
+/* The map's stations are drawn on one canvas; clicks are hit-tested in the script. */
+.aprs-canvas { pointer-events: none; }
+#aprs-map.aprs-hover { cursor: pointer; }
+
+.aprs-legend { position: absolute; bottom: 10px; left: 10px; right: 10px; z-index: 1000; display: flex; gap: 4px 10px; flex-wrap: wrap;
+  width: max-content; max-width: calc(100% - 20px); box-sizing: border-box;
+  background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 6px;
+  padding: 5px 9px; font-size: 13px; color: var(--text-secondary); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35); }
+.aprs-legend span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+
+.aprs-empty { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 1000;
+  background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 6px;
+  padding: 8px 14px; color: var(--text-primary); max-width: 80%; text-align: center; }
+
+.aprs-detail { border-top: 1px solid var(--border-primary); background: var(--bg-secondary); padding: 10px 12px 12px;
+  max-height: 45%; overflow: auto; }
+.aprs-detail-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.aprs-detail-call { font-size: 20px; font-weight: 700; }
+.aprs-detail-kind { color: var(--text-secondary); }
+.aprs-detail-head .aprs-spacer { flex: 1; }
+.aprs-qrz { font-size: 14px; color: var(--link, var(--accent-blue)); background: none; border: 1px solid var(--border-primary);
+  border-radius: 5px; padding: 3px 10px; cursor: pointer; }
+.aprs-qrz:hover { background: var(--bg-hover); }
+.aprs-x { font-size: 15px; background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 2px 6px; }
+.aprs-detail dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; font-size: 14px; }
+.aprs-detail dt { color: var(--text-secondary); }
+.aprs-detail dd { margin: 0; word-break: break-word; }
+.aprs-detail .raw { font-family: Consolas, 'Courier New', monospace; font-size: 12px; color: var(--text-secondary); }
+
+.leaflet-container { font-family: inherit; }
