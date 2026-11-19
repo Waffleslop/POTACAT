@@ -15395,7 +15395,7 @@ function js8PushStatus() {
     hbAck: js8HbAck,                       // ⚙ auto-reply to heartbeats (session-only)
     swrAutoTune: !!settings.swrAutoTune,   // ⚙ run the ATU once on an SWR-guard trip
     aprsGate: !!settings.js8AprsGate,      // ⚙ RF→APRS-IS gateway opt-in
-    aprsGateUp: !!(settings.js8AprsGate && aprsUplink && aprsUplink.verified),
+    aprsGateUp: !!(settings.js8AprsGate && _aprsUplinkUsers.has('js8') && aprsUplink && aprsUplink.verified),
     groups: js8CustomGroups(),             // joined @NETS (⚙ gear)
     mailUnread: _js8Mailbox ? _js8Mailbox.unread : 0,   // count only — content stays owner-side
     mailHold: settings.js8MailHold !== false,        // ⚙ hold mail for other stations
@@ -15594,7 +15594,7 @@ function disconnectAprsGate() {
  *  source 1/min, global 10/min) and fully logged — everything forwarded under
  *  the operator's callsign must be visible to them. */
 function js8GateAprs(msg) {
-  if (!settings.js8AprsGate || !aprsUplink || !aprsUplink.verified) return;
+  if (!settings.js8AprsGate || !_aprsUplinkUsers.has('js8') || !aprsUplink || !aprsUplink.verified) return; // the uplink is shared: only JS8's own use gates (a Guest Pass drops it)
   const src = String(msg.from || '').toUpperCase();
   if (!src || src.startsWith('<') || src.startsWith('@')) return;
   const now = Date.now();

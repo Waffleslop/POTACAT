@@ -117,5 +117,15 @@ test('small marks, no pop-ups: the APRS window and Settings', () => {
   assert.ok(!/showMessageBox|dialog\./.test(fnBody(main, 'aprsIgateOfferRf') + fnBody(main, 'aprsUplinkWant')));
 });
 
+test('the JS8 gateway gates only while JS8 itself holds the shared uplink (a Guest Pass drops it)', () => {
+  // The uplink is shared with the iGate and the beacon. A Guest Pass lease
+  // drops only the 'js8' user, so js8GateAprs must ask for that user, or a
+  // guest's JS8 decodes would be gated as the owner while the iGate is up.
+  const gate = fnBody(main, 'js8GateAprs');
+  assert.ok(/_aprsUplinkUsers\.has\('js8'\)/.test(gate.split('\n').slice(0, 3).join('\n')), 'js8GateAprs checks the js8 user');
+  const up = (main.match(/aprsGateUp: [^\n]*/) || [''])[0];
+  assert.ok(/_aprsUplinkUsers\.has\('js8'\)/.test(up), 'the JS8 status shows the gate up only for its own use');
+});
+
 console.log(`\nAPRS idle mode and iGate wiring: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
