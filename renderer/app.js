@@ -2589,6 +2589,119 @@ function wireTciRigFields(f) {
     }
   });
 }
+// FlexRadio over SmartLink (lib/smartlink-session.js in main). The editor
+// signs in, lists the account's radios, tests one, and saves its serial.
+const smartLink = {
+  el: (k) => document.getElementById('rig-smartlink-' + k),
+  radios: [],
+  status: null,
+  wanted: '',            // the serial of the rig being edited
+};
+function smartLinkRenderStatus(st) {
+  smartLink.status = st || smartLink.status || {};
+  const s = smartLink.status;
+  const acct = smartLink.el('account');
+  if (!acct) return;
+  if (!s.available) acct.textContent = 'SmartLink is not available in this build.';
+  else if (!s.signedIn) acct.textContent = 'Not signed in to FlexRadio.';
+  else acct.textContent = 'Signed in to FlexRadio' + (s.callsign ? ' as ' + s.callsign : '') + '.';
+  smartLink.el('signin').classList.toggle('hidden', !!s.signedIn || !s.available);
+  smartLink.el('signout').classList.toggle('hidden', !s.signedIn);
+  smartLink.el('test').disabled = !s.signedIn;
+  smartLink.el('refresh').disabled = !s.signedIn;
+  const r = s.route;
+  const route = smartLink.el('route');
+  const mine = r && r.serial && r.serial === (smartLink.el('radio').value || smartLink.wanted);
+  if (!mine) { route.textContent = ''; route.className = 'flex-status'; return; }
+  if (r.kind === 'lan') { route.textContent = '\u25CF On this network at ' + r.ip + ': POTACAT talks to the radio directly, not through SmartLink.'; route.className = 'flex-status connected'; }
+  else if (r.kind === 'smartlink') { route.textContent = '\u25CF Connected over FlexRadio SmartLink'; route.className = 'flex-status connected'; }
+  else if (r.kind === 'connecting') { route.textContent = '\u25CB Connecting...'; route.className = 'flex-status'; }
+  else if (r.kind === 'error') { route.textContent = '\u25CB ' + (r.text || 'Not connected'); route.className = 'flex-status'; }
+}
+function smartLinkFillRadios(list, keep) {
+  const sel = smartLink.el('radio');
+  smartLink.radios = list || [];
+  sel.innerHTML = '';
+  if (!smartLink.radios.length) {
+    const o = document.createElement('option');
+    o.value = keep || '';
+    // Signed out, the list is empty because nobody asked, not because the account has none.
+    const signedIn = !!(smartLink.status && smartLink.status.signedIn);
+    o.textContent = !signedIn ? 'Sign in to FlexRadio to see your radios'
+      : (keep ? 'Saved radio (not in the list now)' : 'No radios on this FlexRadio account');
+    sel.appendChild(o);
+  }
+  for (const r of smartLink.radios) {
+    const o = document.createElement('option');
+    o.value = r.serial;
+    o.textContent = (r.name || r.callsign || r.model) + ' (' + r.model + ')';
+    sel.appendChild(o);
+  }
+  if (keep && smartLink.radios.some((r) => r.serial === keep)) sel.value = keep;
+  smartLinkShowRadio();
+}
+function smartLinkShowRadio() {
+  const r = smartLink.radios.find((x) => x.serial === smartLink.el('radio').value);
+  smartLink.el('radio-info').textContent = r ? r.text + '.' : '';
+  smartLinkRenderStatus();
+}
+async function smartLinkLoadRadios() {
+  const info = smartLink.el('radio-info');
+  if (!smartLink.status || !smartLink.status.signedIn) { smartLinkFillRadios([], smartLink.wanted); return; }
+  info.textContent = 'Asking FlexRadio for your radios...';
+  const r = await window.api.smartlinkRadios();
+  if (!r || !r.ok) { smartLinkFillRadios([], smartLink.wanted); info.textContent = (r && r.error) || 'FlexRadio SmartLink did not answer.'; return; }
+  smartLinkFillRadios(r.radios, smartLink.wanted || (r.radios[0] && r.radios[0].serial));
+  smartLinkRenderStatus(await window.api.smartlinkStatus());
+}
+async function smartLinkOpenEditor(target) {
+  smartLink.wanted = target && target.type === 'smartlink' ? target.serial : '';
+  smartLink.el('result').textContent = '';
+  smartLinkRenderStatus(await window.api.smartlinkStatus());
+  smartLinkFillRadios([], smartLink.wanted);
+  if (getSelectedRadioType() === 'smartlink') smartLinkLoadRadios();
+}
+function readSmartLinkTarget() {
+  const serial = smartLink.el('radio').value;
+  if (!serial) return null;
+  const r = smartLink.radios.find((x) => x.serial === serial);
+  return { type: 'smartlink', serial, name: r ? (r.name || r.callsign || '') : '', model: r ? r.model : '' };
+}
+(function wireSmartLink() {
+  if (!smartLink.el('signin')) return;
+  smartLink.el('signin').addEventListener('click', async () => {
+    smartLink.el('signin').disabled = true;
+    smartLink.el('result').textContent = "Sign in on FlexRadio's page in the window that opened.";
+    try {
+      const r = await window.api.smartlinkSignIn();
+      smartLink.el('result').textContent = r && r.ok ? 'Signed in.' : ((r && r.error) || 'Not signed in.');
+      smartLinkRenderStatus(await window.api.smartlinkStatus());
+      if (r && r.ok) await smartLinkLoadRadios();
+    } finally { smartLink.el('signin').disabled = false; }
+  });
+  smartLink.el('signout').addEventListener('click', async () => {
+    await window.api.smartlinkSignOut();
+    smartLink.el('result').textContent = 'Signed out. The stored sign-in was deleted from this computer.';
+    smartLinkFillRadios([], smartLink.wanted);
+    smartLinkRenderStatus(await window.api.smartlinkStatus());
+  });
+  smartLink.el('refresh').addEventListener('click', () => smartLinkLoadRadios());
+  smartLink.el('radio').addEventListener('change', smartLinkShowRadio);
+  smartLink.el('test').addEventListener('click', async () => {
+    const serial = smartLink.el('radio').value;
+    const out = smartLink.el('result');
+    if (!serial) { out.textContent = 'Pick your radio first.'; return; }
+    smartLink.el('test').disabled = true;
+    out.textContent = 'Testing: FlexRadio, then your radio, then the audio path...';
+    try {
+      const r = await window.api.smartlinkTest(serial);
+      out.textContent = (r && r.text) || 'No answer.';
+    } catch (err) { out.textContent = err.message; }
+    finally { smartLink.el('test').disabled = false; }
+  });
+  if (window.api.onSmartlinkStatus) window.api.onSmartlinkStatus((st) => smartLinkRenderStatus(st));
+})();
+
 const rigTciFields = tciRigFields('rig');
 const welcomeTciFields = tciRigFields('welcome');
 wireTciRigFields(rigTciFields);
@@ -2600,6 +2713,10 @@ function updateRadioSubPanels() {
   flexConfig.classList.toggle('hidden', type !== 'flex');
   tcpcatConfig.classList.toggle('hidden', type !== 'tcpcat');
   document.getElementById('rig-tci-config').classList.toggle('hidden', type !== 'tci');
+  document.getElementById('rig-smartlink-config').classList.toggle('hidden', type !== 'smartlink');
+  // The radio's own transmit timeout: every Flex rig (lib/flex-tx-timeout.js).
+  document.getElementById('rig-flex-tx-timeout-row').classList.toggle('hidden', type !== 'flex' && type !== 'smartlink');
+  if (type === 'smartlink' && !smartLink.radios.length && smartLink.status && smartLink.status.signedIn) smartLinkLoadRadios();
   if (k4networkConfig) k4networkConfig.classList.toggle('hidden', type !== 'k4network');
   serialcatConfig.classList.toggle('hidden', type !== 'serialcat');
   icomConfig.classList.toggle('hidden', type !== 'icom');
@@ -2662,6 +2779,8 @@ async function populateRadioSection(currentTarget) {
     setRadioType('flex');
   } else if (currentTarget.type === 'tci') {
     setRadioType('tci');
+  } else if (currentTarget.type === 'smartlink') {
+    setRadioType('smartlink');
   } else if (currentTarget.type === 'tcp') {
     // Check if it matches a standard Flex slice (localhost + 5002-5005)
     const isFlexSlice = window.RigFamily.familyFromCatTarget(currentTarget) === 'flex';
@@ -3239,6 +3358,7 @@ function shortSerialPath(path) {
 function describeRigTarget(target) {
   if (!target) return 'Not configured';
   if (target.type === 'tci') return window.TciTarget.describe(target);
+  if (target.type === 'smartlink') return 'FlexRadio over SmartLink' + (target.name ? ': ' + target.name : '') + (target.model ? ' (' + target.model + ')' : '');
   if (target.type === 'tcp') {
     const host = target.host || '127.0.0.1';
     const port = target.port || 5002;
@@ -3395,6 +3515,7 @@ function renderRigList(rigs, activeRigId) {
 function buildCatTargetFromForm() {
   const radioType = getSelectedRadioType();
   if (radioType === 'tci') return readTciRigTarget(rigTciFields);
+  if (radioType === 'smartlink') return readSmartLinkTarget();
   if (radioType === 'flex') {
     // POTACAT talks to the radio directly on 4992; this CAT target is the
     // SmartSDR-Win Kenwood shim (port 5002+slice), used only to DETECT when
@@ -3750,6 +3871,9 @@ async function openRigEditor(mode, rigId) {
       if (flexApiHostEl) flexApiHostEl.value = rig.flexApiHost || '';
       const flexSliceEl = document.getElementById('set-flex-slice');
       if (flexSliceEl) flexSliceEl.value = String(rig.flexSlice != null ? rig.flexSlice : 0);
+      const flexTxTimeoutEl = document.getElementById('set-flex-tx-timeout');
+      if (flexTxTimeoutEl) flexTxTimeoutEl.value = String(window.FlexTxTimeout.minutesFor(rig));
+      smartLinkOpenEditor(rig.catTarget);
       // External ATU (LDG / MFJ) — RF-sensing auto-tuner config
       const extAtuEl = document.getElementById('set-external-atu');
       const extAtuWattsEl = document.getElementById('set-external-atu-watts');
@@ -3791,6 +3915,8 @@ async function openRigEditor(mode, rigId) {
     setRigFullPowerField(null);
     const fh = document.getElementById('set-flex-api-host');
     if (fh) fh.value = '';
+    { const v = document.getElementById('set-flex-tx-timeout'); if (v) v.value = String(window.FlexTxTimeout.DEFAULT_MINUTES); }
+    smartLinkOpenEditor(null);
     setRadioType('flex');
     updateRadioSubPanels();
     buildFlexBandAntennaMap({});
@@ -3883,6 +4009,17 @@ async function saveRigEditor() {
     const bad = window.TciTarget.validate(catTarget);
     if (bad) { rigTciFields.result.textContent = bad; return false; }
   }
+  if (getSelectedRadioType() === 'smartlink' && !catTarget) {
+    smartLink.el('result').textContent = 'Sign in to FlexRadio and pick your radio first.';
+    return false;
+  }
+  // One rig entry per radio serial.
+  if (catTarget && catTarget.type === 'smartlink' && currentRigs.some((r) => r && r.id !== editingRigId && r.catTarget && r.catTarget.type === 'smartlink' && r.catTarget.serial === catTarget.serial)) {
+    smartLink.el('result').textContent = 'This radio already has a rig in My Rigs. Edit that one instead.';
+    return false;
+  }
+  const flexTxTimeoutEl = document.getElementById('set-flex-tx-timeout');
+  const rigFlexTxTimeoutMin = flexTxTimeoutEl ? window.FlexTxTimeout.minutesFor({ flexTxTimeoutMin: flexTxTimeoutEl.value }) : window.FlexTxTimeout.DEFAULT_MINUTES;
   const model = rigModelSelect ? rigModelSelect.value || null : null;
 
   // The SCU-LAN10 spec covers three radios; anything else has no SCU-LAN10.
@@ -3980,6 +4117,7 @@ async function saveRigEditor() {
       rig.radioNr = rigRadioNr;
       rig.flexApiHost = rigFlexApiHost;
       rig.flexSlice = rigFlexSlice;
+      rig.flexTxTimeoutMin = rigFlexTxTimeoutMin;
       rig.externalAtu = rigExternalAtu;
       rig.externalAtuWatts = rigExternalAtuWatts;
       rig.externalAtuSeconds = rigExternalAtuSeconds;
@@ -4013,6 +4151,7 @@ async function saveRigEditor() {
       radioNr: rigRadioNr,
       flexApiHost: rigFlexApiHost,
       flexSlice: rigFlexSlice,
+      flexTxTimeoutMin: rigFlexTxTimeoutMin,
       externalAtu: rigExternalAtu,
       externalAtuWatts: rigExternalAtuWatts,
       externalAtuSeconds: rigExternalAtuSeconds,

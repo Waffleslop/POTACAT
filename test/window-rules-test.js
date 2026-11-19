@@ -38,6 +38,12 @@ const HIDDEN = {
   remoteAudioClientWin: 'hidden WebRTC audio for desktop-to-desktop ECHOCAT',
   remoteAudioWin: 'hidden WebRTC audio for ECHOCAT',
 };
+// Show another site's own page (a sign-in): that page brings its own look, so
+// there is no POTACAT page to load the theme into. They still open on the
+// theme's background and remember their place.
+const EXTERNAL = {
+  _smartLinkSignInWin: "FlexRadio's own sign-in page (lib/smartlink-session.js)",
+};
 // Restore and save their own place (settings key). Do not add to this list:
 // a new window calls rememberWindowPlace().
 const OWN_PLACE = {
@@ -85,6 +91,10 @@ test('found the windows (sanity)', () => {
 for (const w of visible) {
   test(`${w.name} (main.js:${w.line}): opens in the theme`, () => {
     assert.ok(/backgroundColor:\s*getThemeWindowBg\(\)/.test(w.opts), 'needs backgroundColor: getThemeWindowBg() in its options');
+    if (EXTERNAL[w.name]) {
+      assert.ok(/signInWin\.loadURL\(SmartLinkSession\.authorizeUrl\(/.test(main), 'the external page is FlexRadio\'s sign-in, loaded with loadURL');
+      return;
+    }
     const load = main.match(new RegExp(esc(w.name) + "\\.loadFile\\(([^\\n]*?)'(?:renderer/)?([\\w-]+\\.html)'\\)?,\\s*\\{\\s*query:\\s*(\\w+(?:\\(\\))?)\\s*\\}"));
     assert.ok(load, `needs ${w.name}.loadFile(<page>.html, { query: themeQuery() })`);
     const q = load[3];

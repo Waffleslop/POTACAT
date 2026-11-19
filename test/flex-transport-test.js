@@ -284,6 +284,20 @@ const GOLDEN_AUDIO = [
     check(a._txDaxOn === true, 'the audio connection ignores band lines');
   }
 
+  console.log('Transmit status: tune power reads `tunepower=` (8600M) and `tune_power=`');
+  {
+    // The 8600M v4.2.20 sends `tunepower=` (D0 capture); a band memory line
+    // with another tunepower must not overwrite the live value.
+    const c = new SmartSdrClient();
+    c._handleLine('S766257AA|transmit rfpower=5 tunepower=10 tx_slice_mode=USB hwalc_enabled=0 inhibit=0 dax=0');
+    check(c.tunePower === 10, `tunepower=10 sets tunePower (got ${c.tunePower})`);
+    c._handleLine('S766257AA|transmit band 0 band_name=160 rfpower=100 tunepower=25 hwalc_enabled=0 inhibit=0');
+    check(c.tunePower === 10, `a band line's tunepower=25 leaves tunePower at 10 (got ${c.tunePower})`);
+    const d = new SmartSdrClient();
+    d._handleLine('S1|transmit rfpower=50 tune_power=15');
+    check(d.tunePower === 15, `tune_power=15 still sets tunePower (got ${d.tunePower})`);
+  }
+
   console.log(`\n${passed} passed, ${failed} failed`);
   assert.strictEqual(failed, 0, 'flex transport tests failed');
   process.exit(0);

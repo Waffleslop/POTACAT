@@ -2003,6 +2003,30 @@
           <span id="rig-tci-result" role="status" aria-live="polite" style="font-size:12px;"></span>
           <span class="help-text">POTACAT tunes the radio, follows its dial and sets its receive controls through TCI. With Zeus it also transmits FT8 and the other digital modes from JTCAT, and voice from ECHOCAT; the PTT button and CW here do not key it yet. Thetis is receive only until a Thetis owner has confirmed transmit.</span>
         </div>
+        <label class="radio-label"><input type="radio" name="radio-type" value="smartlink"> FlexRadio over SmartLink (internet)</label>
+        <div id="rig-smartlink-config" class="radio-sub hidden">
+          <div id="rig-smartlink-account" class="help-text" style="display:block;">Not signed in to FlexRadio.</div>
+          <div class="smartlink-row">
+            <button type="button" id="rig-smartlink-signin" class="rig-action-btn">Sign in to FlexRadio</button>
+            <button type="button" id="rig-smartlink-signout" class="rig-action-btn hidden">Sign out</button>
+          </div>
+          <label>Radio: <select id="rig-smartlink-radio" style="min-width:220px;"><option value="">Sign in to see your radios</option></select></label>
+          <button type="button" id="rig-smartlink-refresh" class="rig-action-btn">Refresh list</button>
+          <div id="rig-smartlink-radio-info" class="help-text" style="display:block;"></div>
+          <div id="rig-smartlink-route" class="flex-status" role="status" aria-live="polite"></div>
+          <button type="button" id="rig-smartlink-test" class="rig-action-btn">Test connection</button>
+          <span id="rig-smartlink-result" class="help-text" role="status" aria-live="polite" style="display:block;"></span>
+          <span class="help-text" style="display:block;margin-top:8px;">POTACAT runs your Flex over the internet through FlexRadio's SmartLink service: receive audio, tuning, meters and the radio's controls, with nothing running in the shack. CW and Tune transmit once the radio has a transmit timeout (below); voice and digital transmit over SmartLink come in a later version. When the radio is on the same network as this computer, POTACAT talks to it directly instead. You sign in on FlexRadio's own page; POTACAT never sees your password.</span>
+        </div>
+        <div id="rig-flex-tx-timeout-row" class="radio-sub hidden">
+          <label>Radio transmit timeout: <select id="set-flex-tx-timeout">
+            <option value="0">Off</option>
+            <option value="3">3 minutes</option>
+            <option value="5" selected>5 minutes</option>
+            <option value="10">10 minutes</option>
+          </select></label>
+          <span class="help-text" style="display:block;">If the connection to the radio drops while it is transmitting, the radio stops by itself after this time. POTACAT sets it only when the radio has none, and never changes a timeout you set elsewhere. It is a setting in the radio, so SmartSDR and Maestro use it too. Off leaves the radio alone; over SmartLink, Off means POTACAT does not transmit.</span>
+        </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="tcpcat"> IP Radio (TCP CAT)</label>
         <div id="tcpcat-config" class="radio-sub hidden">
           <span class="help-text" style="font-size:12px;">Connect to any radio with TCP CAT — Flex on a custom port, or other radios that speak raw Kenwood-style ASCII over TCP with no authentication. For an Elecraft K4 over the network use "K4 Remote (network)" below instead — the K4 uses a different framed + authenticated protocol. For Zeus, also pick Radio Model "Zeus SDR (TS-2000 CAT)", so FT8 and FT4 go out in DIGU.</span>
@@ -5468,6 +5492,7 @@
   <script src="../lib/net-reminder-row.js"></script>
   <script src="../lib/rig-family.js"></script>
   <script src="../lib/tci-target.js"></script>
+  <script src="../lib/flex-tx-timeout.js"></script>
   <script src="../lib/tx-audio-input.js"></script>
   <script src="../lib/tx-channel.js"></script>
   <script src="../lib/ptt-flow-conflict.js"></script>

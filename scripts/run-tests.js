@@ -59,6 +59,9 @@ const TESTS = [
   'test/flex-route-test.js', // the route choice on a Flex: through POTACAT or FlexRadio SmartLink (states, refusals, 60 s rule)
   'test/flex-gui-watch-test.js', // the non-GUI watch of a Flex's GUI clients while ECHOCAT has the radio
   'test/flex-route-wiring-test.js', // flex-release / flex-reclaim / flex-route wired through smartsdr, remote-server and main
+  'test/smartlink-session-test.js', // FlexRadio SmartLink: sign-in, server, wan validate, failures, Opus, test connection (D0 capture)
+  'test/flex-tx-timeout-test.js', // the Flex's own transmit timeout filled in when 0, and the SmartLink transmit gate
+  'test/smartlink-secret-leak-test.js', // the SmartLink client ID and sign-in tokens are in no committed file
   'test/flex-transport-test.js', // how POTACAT reaches a Flex: LAN lines unchanged, injected (SmartLink) transport, WAN udp_register, transmit band lines
   'test/bundle-mac-deps-test.js',
   'test/rig-controls-test.js',

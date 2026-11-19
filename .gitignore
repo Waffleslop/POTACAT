@@ -84,3 +84,5 @@ assets/direwolf/direwolf
 assets/direwolf/direwolf.exe
 assets/direwolf/*.dll
 assets/direwolf/*.so*
+# FlexRadio SmartLink client ID, written only by the release build (scripts/write-smartlink-resource.js)
+build/smartlink/

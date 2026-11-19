@@ -299,6 +299,13 @@ contextBridge.exposeInMainWorld('api', {
   },
   getSettings: () => ipcRenderer.invoke('get-settings'),
   probeTciRig: (target) => ipcRenderer.invoke('probe-tci-rig', target),
+  // FlexRadio over SmartLink (lib/smartlink-session.js). No token ever crosses here.
+  smartlinkStatus: () => ipcRenderer.invoke('smartlink-status'),
+  smartlinkSignIn: () => ipcRenderer.invoke('smartlink-sign-in'),
+  smartlinkSignOut: () => ipcRenderer.invoke('smartlink-sign-out'),
+  smartlinkRadios: () => ipcRenderer.invoke('smartlink-radios'),
+  smartlinkTest: (serial) => ipcRenderer.invoke('smartlink-test', serial),
+  onSmartlinkStatus: (cb) => ipcRenderer.on('smartlink-status', (_e, d) => cb(d)),
   getRigModels: () => ipcRenderer.invoke('get-rig-models'),
   getRigSetupNotes: (q) => ipcRenderer.invoke('get-rig-setup-notes', q),
   getPacketRigMode: (q) => ipcRenderer.invoke('get-packet-rig-mode', q),
