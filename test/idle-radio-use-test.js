@@ -56,10 +56,49 @@ test('an idle session never retunes the radio while APRS listens', () => {
   assert.strictEqual(IdleRadioUse.idleMayRetune({ aprsListening: false }), true);
 });
 
+// Casey 2026-11-19: "return point is the frequency before idle mode".
+test('listening started over a running idle session goes back to where the idle session found the radio', () => {
+  const here = { freqHz: 14230000, mode: 'USB' };             // the SSTV idle frequency
+  const home = { freqHz: 7074000, mode: 'DIGU' };              // where the radio was before Idle Mode
+  const r = IdleRadioUse.listenReturnPoint(here, { active: true, home });
+  assert.deepStrictEqual([r.freqHz, r.mode, r.from], [7074000, 'DIGU', 'idle']);
+});
+
+test('with no idle session the return point is where the radio is', () => {
+  const here = { freqHz: 14074000, mode: 'USB' };
+  const r = IdleRadioUse.listenReturnPoint(here, { active: false, home: null, last: null });
+  assert.deepStrictEqual([r.freqHz, r.mode, r.from], [14074000, 'USB', 'here']);
+});
+
+test('an idle session the switch itself just ended still gives the place before it, if the radio has not moved', () => {
+  const here = { freqHz: 14095600, mode: 'USB' };              // still on the WSPR dial
+  const last = { freqHz: 7200000, mode: 'LSB', endedAt: 1000, endedHz: 14095600 };
+  const r = IdleRadioUse.listenReturnPoint(here, { active: false, last, nowHz: 14095600, now: 1500 });
+  assert.deepStrictEqual([r.freqHz, r.mode, r.from], [7200000, 'LSB', 'idle']);
+  // SSTV's own cancel already sent the radio home: the same place.
+  const r2 = IdleRadioUse.listenReturnPoint({ freqHz: 7200000, mode: 'LSB' }, { active: false, last, nowHz: 7200000, now: 1500 });
+  assert.strictEqual(r2.freqHz, 7200000);
+  // Long after, or the operator tuned somewhere else since: where the radio is.
+  assert.strictEqual(IdleRadioUse.listenReturnPoint(here, { active: false, last, nowHz: 14095600, now: 1000 + IdleRadioUse.IDLE_HANDOVER_MS + 1 }).from, 'here');
+  assert.strictEqual(IdleRadioUse.listenReturnPoint({ freqHz: 21074000, mode: 'USB' }, { active: false, last, nowHz: 21074000, now: 1500 }).from, 'here');
+});
+
+test('an idle session that never moved the radio keeps the reading now (its mode form, e.g. DIGU)', () => {
+  const r = IdleRadioUse.listenReturnPoint({ freqHz: 14074000, mode: 'DIGU' }, { active: true, home: { freqHz: 14074000, mode: 'USB' } });
+  assert.deepStrictEqual([r.freqHz, r.mode, r.from], [14074000, 'DIGU', 'here']);
+});
+
+test('an idle home with no frequency is never used', () => {
+  const here = { freqHz: 14074000, mode: 'USB' };
+  assert.strictEqual(IdleRadioUse.listenReturnPoint(here, { active: true, home: { freqHz: 0, mode: '' } }).from, 'here');
+  const r = IdleRadioUse.listenReturnPoint(here, { active: true, home: { freqHz: 7074000 } });
+  assert.strictEqual(r.mode, 'USB', 'no idle mode: keep the mode read now');
+});
+
 const main = readSrc(path.join(__dirname, '..', 'main.js'));
 const start = main.indexOf('function startAutoSstvTimer(');
 const tick = main.slice(start, main.indexOf('function stopAutoSstvTimer(', start));
-const trig = main.slice(main.indexOf('function triggerAutoSstv('), main.indexOf('function triggerAutoSstv(') + 1500);
+const trig = main.slice(main.indexOf('function triggerAutoSstv('), main.indexOf('function triggerAutoSstv(') + 2500);
 
 test('main.js: the idle tick asks lib/idle-radio-use.js and restarts the countdown for APRS', () => {
   assert.ok(/require\('\.\/lib\/idle-radio-use'\)/.test(main), 'required');
@@ -82,6 +121,21 @@ test('main.js: the sunrise/sunset band switches (SSTV and JTTY) ask idleMayRetun
   assert.ok(jtty > may && sw > may, 'asked before both switches');
   assert.ok(/if \(mayRetune && autoSstvActive && autoIdleJtcatActive/.test(tick), 'JTTY follow-sun guarded');
   assert.ok(/if \(mayRetune && autoSstvActive && !autoIdleJtcatActive/.test(tick), 'SSTV band switch guarded');
+});
+
+test('main.js: every idle mode records where it found the radio, and cancel keeps it for the switch that ended it', () => {
+  assert.ok(/idleRxHome = \{ freqHz: Number\(_currentFreqHz\) \|\| 0, mode: String\(_currentMode \|\| ''\) \};/.test(trig), 'recorded in triggerAutoSstv');
+  assert.ok(trig.indexOf('idleRxHome = {') < trig.indexOf("settings.idleRxMode || 'sstv'"), 'before the mode branches');
+  const c = main.slice(main.indexOf('function cancelAutoSstv('), main.indexOf('function cancelAutoSstv(') + 600);
+  assert.ok(/idleRxLast = idleRxHome \? \{ \.\.\.idleRxHome, endedAt: Date\.now\(\), endedHz: Number\(_currentFreqHz\) \|\| 0 \} : null;/.test(c));
+  assert.ok(/idleRxHome = null;/.test(c));
+});
+
+test('main.js: listening saves the place before Idle Mode as its return point', () => {
+  const s = main.indexOf('async function aprsListenStart(');
+  const b = main.slice(s, main.indexOf('\n}\n', s));
+  assert.ok(/IdleRadioUse\.listenReturnPoint\(here, \{ active: autoSstvActive, home: idleRxHome, last: idleRxLast, nowHz: _currentFreqHz, now: Date\.now\(\) \}\)/.test(b));
+  assert.ok(/aprsReturn\.begin\(\{ freqHz: home\.freqHz, mode: home\.mode,/.test(b), 'begin saves that place');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
