@@ -48,8 +48,22 @@ const st = { freqHz: 14074000, mode: 'DIGU', ptt: false, smeter: 120, powerW: 60
   ok('a real TCP client gets replies in order and its sets reach POTACAT');
   const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(/createTs2000Server\([\s\S]{0,1200}?\{ host: '127\.0\.0\.1', port \}\)/.test(main), 'loopback only');
-  assert.ok(/if \(_loggerCatPtt && !_loggerCatClients\) \{ _loggerCatPtt = false; handleRemotePtt\(false\);/.test(main), 'a dropped logger releases PTT');
+  assert.ok(/if \(_loggerCatPtt && !_loggerCatClients\) \{ loggerCatAction\(\{ ptt: false \}\);/.test(main), 'a dropped logger releases PTT (on every route)');
   assert.ok(/try \{ stopLoggerCat\(\); \} catch \{\}/.test(main), 'stopped at quit');
   ok('wired in main: loopback, PTT released on disconnect, stopped at quit');
+  // #770: on the Yaesu LAN a logger (fldigi, GTTY, WSJT-X through Hamlib's
+  // TS-2000) keys through the VFO window's own PTT, which sends its PTT
+  // microphone over the LAN; without the window it is refused, never keyed silent.
+  assert.ok(/typeof a\.ptt === 'boolean'\) \{[\s\S]{0,400}if \(yaesuLanVoiceRoute\(\)\) \{ loggerCatLanPtt\(a\.ptt\); return; \}[\s\S]{0,80}if \(a\.ptt && yaesuLanTxRefusal\(\)\)/.test(main), 'the LAN route goes to the window before the old refusal');
+  const lanPtt = main.slice(main.indexOf('function loggerCatLanPtt('), main.indexOf('function startLoggerCat('));
+  assert.ok(/if \(on && !vfo\) \{\s*_loggerCatPtt = false;[\s\S]{0,120}open the VFO window[\s\S]{0,200}return;\s*\}/.test(lanPtt), 'no VFO window: refused, the logger not told TX');
+  assert.ok(/_loggerCatPtt = on;\s*if \(vfo\) vfo\.webContents\.send\('external-ptt', \{ on, who: 'logger CAT' \}\);/.test(lanPtt), 'press and release go to the window');
+  assert.ok(!/handleRemotePtt/.test(lanPtt), 'no key-down of its own: the window keys');
+  const preload = readSrc(path.join(__dirname, '..', 'preload-vfo-popout.js'));
+  assert.ok(/onExternalPtt: \(cb\) => ipcRenderer\.on\('external-ptt', \(_e, d\) => cb\(d\)\),/.test(preload));
+  const vfo = readSrc(path.join(__dirname, '..', 'renderer', 'vfo-popout.html'));
+  assert.ok(/window\.api\.onExternalPtt\(\(d\) => \{ if \(d && d\.on\) pttStart\(\); else pttStop\(\); \}\);/.test(vfo), 'the window presses its PTT');
+  assert.ok(/if \(_loggerCatPtt\) \{ try \{ loggerCatAction\(\{ ptt: false \}\); \} catch \{\} _loggerCatPtt = false; \}/.test(main), 'stopping Logger CAT releases on every route');
+  ok('Yaesu LAN: a logger keys through the VFO window\'s PTT, refused without the window (#770)');
   console.log(`Logger CAT: ${n} passed, 0 failed`);
 })().catch((e) => { console.error('FAIL', e); process.exit(1); });

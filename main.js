@@ -7175,6 +7175,11 @@ function loggerCatAction(a) {
     _lastTuneFreq = 0;
     tuneRadio(_currentFreqHz / 1000, a.setMode, undefined, { origin: 'N1MM+ / logger CAT' });
   } else if (typeof a.ptt === 'boolean') {
+    // SCU-LAN10 (#770): the logger's transmit audio has no way to the radio
+    // but the one the VFO window's PTT uses, so the window keys: its PTT
+    // microphone (a virtual cable from fldigi, GTTY, ...) goes over the LAN,
+    // through every check its own button goes through.
+    if (yaesuLanVoiceRoute()) { loggerCatLanPtt(a.ptt); return; }
     if (a.ptt && yaesuLanTxRefusal()) {
       // Refused (no transmit audio over the SCU-LAN10): the logger must not
       // be told the radio is transmitting.
@@ -7193,6 +7198,19 @@ function loggerCatAction(a) {
     try { applyRigControl({ action: 'set-tx-power', value: a.powerW }, 'logger-cat'); } catch {}
   }
 }
+// A logger key-down on the SCU-LAN10 route: the VFO window presses its PTT.
+// Without the window there is no microphone to send, so it is refused, not
+// keyed silent. A release always goes to the window (it may be keyed).
+function loggerCatLanPtt(on) {
+  const vfo = vfoPopoutWin && !vfoPopoutWin.isDestroyed() ? vfoPopoutWin : null;
+  if (on && !vfo) {
+    _loggerCatPtt = false;
+    sendCatLog('[PTT] logger CAT TX refused — open the VFO window: on the Yaesu LAN it sends its PTT microphone, and that is the only way the logger\'s audio reaches the radio');
+    return;
+  }
+  _loggerCatPtt = on;
+  if (vfo) vfo.webContents.send('external-ptt', { on, who: 'logger CAT' });
+}
 function startLoggerCat() {
   stopLoggerCat();
   if (!settings.enableLoggerCat) return;
@@ -7207,7 +7225,7 @@ function startLoggerCat() {
         sock.on('close', () => {
           _loggerCatClients = Math.max(0, _loggerCatClients - 1);
           // A logger that drops while keyed must not leave the radio keyed.
-          if (_loggerCatPtt && !_loggerCatClients) { _loggerCatPtt = false; handleRemotePtt(false); sendCatLog('[Logger CAT] logger disconnected while transmitting — PTT released'); }
+          if (_loggerCatPtt && !_loggerCatClients) { loggerCatAction({ ptt: false }); _loggerCatPtt = false; sendCatLog('[Logger CAT] logger disconnected while transmitting — PTT released'); }
         });
       },
     }, { host: '127.0.0.1', port });
@@ -7218,7 +7236,7 @@ function startLoggerCat() {
   }
 }
 function stopLoggerCat() {
-  if (_loggerCatPtt) { _loggerCatPtt = false; try { handleRemotePtt(false); } catch {} }
+  if (_loggerCatPtt) { try { loggerCatAction({ ptt: false }); } catch {} _loggerCatPtt = false; }
   if (loggerCatServer) { try { loggerCatServer.close(); } catch {} loggerCatServer = null; }
   _loggerCatClients = 0;
 }
