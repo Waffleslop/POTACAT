@@ -137,7 +137,7 @@ function harness(o = {}) {
     log: (s) => log.push(s),
     begin: () => { calls.push('begin'); if (o.beginFails) return false; radio.owner = 'aprs'; return true; },
     end: () => { calls.push('end'); radio.owner = 'none'; },
-    startShim: async (fn) => { calls.push('shim'); onPtt = fn; return 4551; },
+    startShim: async (fn) => { calls.push('shim'); if (o.shimWait) await o.shimWait; onPtt = fn; if (o.shimWait) calls.push('shim-up'); return 4551; },
     stopShim: () => { calls.push('shim-stop'); onPtt = null; },
     startModem: async ({ shimPort }) => {
       calls.push('modem:' + shimPort);
@@ -151,7 +151,7 @@ function harness(o = {}) {
     },
     restoreListen: () => calls.push('listen'),
     mayKey: () => (o.gate ? o.gate() : gateOk),
-    key: () => { calls.push('key'); if (o.keyFails) return false; radio.keyed = true; return true; },
+    key: () => { calls.push('key'); if (o.keyFails) return false; radio.keyed = true; if (o.keyThrows) throw new Error('lane gone'); return true; },
     unkey: ({ now }) => { calls.push(now ? 'unkey-now' : 'unkey'); if (now) { radio.keyed = false; return Promise.resolve(); } return new Promise((r) => tm.setTimer(() => { radio.keyed = false; r(); }, 250)); },
     onState: () => {},
   };
@@ -184,6 +184,32 @@ test('a beacon: the radio is taken, shim and transmit modem start, one frame is 
   assert.ok(h.calls.indexOf('shim-stop') > 0 && h.calls.indexOf('end') > 0 && h.calls[h.calls.length - 1] === 'listen', h.calls.join(','));
   assert.strictEqual(h.run.state().phase, 'idle');
   assert.strictEqual(h.tm.pending(), 0, 'no timer left behind');
+});
+
+test('stopped while the shim is still starting: the shim that comes up late is closed too', async () => {
+  let open;
+  const h = harness({ shimWait: new Promise((r) => { open = r; }) });
+  const p = h.run.send({ packet: pkt({ band: '2m' }), capMs: 2100, requestTimeoutMs: 75000 });
+  await new Promise((r) => setImmediate(r));
+  assert.strictEqual(h.run.abort('window closed'), true);
+  const res = await p;
+  assert.strictEqual(res.reason, 'aborted');
+  open();
+  await h.tm.advance(10);
+  const up = h.calls.indexOf('shim-up');
+  assert.ok(up > 0, h.calls.join(','));
+  assert.ok(h.calls.indexOf('shim-stop', up) > up, 'the late shim is stopped: ' + h.calls.join(','));
+  assert.ok(!h.calls.some((c) => c.startsWith('modem:')), 'no modem after an abort');
+});
+
+test('a key-down that throws after the radio keyed still unkeys at once', async () => {
+  const h = harness({ keyThrows: true });
+  const { p } = await start(h);
+  assert.strictEqual(h.ptt(true), false);
+  const res = await p;
+  assert.strictEqual(res.ok, false);
+  assert.ok(h.calls.includes('unkey-now'), h.calls.join(','));
+  assert.strictEqual(h.radio.keyed, false, 'the radio is back on receive');
 });
 
 test('the cap fires: POTACAT unkeys on its own, at once, and the beacon ends', async () => {
