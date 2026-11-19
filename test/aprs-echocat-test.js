@@ -322,5 +322,27 @@ test('a beacon refusal is the refusal when listening is fine', () => {
   assert.strictEqual(s.refusal, 'Set your callsign in Settings to beacon.');
 });
 
+test('beacon.position is cut to whole minutes unless approximate is off (as in the packet)', () => {
+  const exact = { lat: 40.123456, lon: -75.654321, source: 'map' };
+  const a = E.buildState({ beacon: { position: exact, settings: { approx: true } } }).beacon.position;
+  assert.deepStrictEqual(a, { lat: 40 + 7 / 60, lon: -(75 + 39 / 60), source: 'map', approx: true });
+  const d = E.buildState({ beacon: { position: exact } }).beacon.position; // default: approximate
+  assert.strictEqual(d.approx, true);
+  assert.ok(!JSON.stringify(d).includes('40.1234'), 'no exact latitude on the wire');
+  const e = E.buildState({ beacon: { position: exact, settings: { approx: false } } }).beacon.position;
+  assert.deepStrictEqual(e, { lat: 40.123456, lon: -75.654321, source: 'map', approx: false });
+});
+
+console.log('\nwith nobody subscribed');
+test('the station store still ages out (no device watching, the window open for hours)', () => {
+  const { c, t } = rig({ windowOpen: true });
+  for (let i = 0; i < 180; i++) {
+    c.packets([pkt(`K${i}AB>APRS:!41${String(10 + (i % 50)).padStart(2, '0')}.00N/07200.00W-x`)]);
+    t.advance(60 * 1000);
+  }
+  // 180 stations, one a minute: only the last hour's (about 60) may be kept.
+  assert.ok(c.size <= 61, 'kept ' + c.size);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
