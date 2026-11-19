@@ -6,9 +6,10 @@
 // Hz) was refused with interlock OUT_OF_BAND. The radio's TX filter was
 // 100-3100 Hz, so the transmit passband's top edge was 10.1507 MHz, past the
 // 30 m band edge. For a 30 m beacon on a Flex POTACAT now narrows the TX
-// filter to 1400-2000 Hz before anything can key and puts the operator's
-// filter back on every way out. 2 m is unchanged; a radio POTACAT cannot set
-// a TX passband on is left alone with one log line.
+// filter to 1400-2000 Hz before anything can key (one command, both edges,
+// as FlexLib's _SetTXFilter sends it), keys only on a zero reply, and puts
+// the operator's filter back on every way out. 2 m is unchanged; a radio
+// POTACAT cannot set a TX passband on is left alone with one log line.
 // Run: node test/aprs-30m-tx-passband-test.js
 
 const assert = require('assert');
@@ -39,6 +40,7 @@ test('the 30 m passband 1400-2000 Hz holds both tones and its top edge is inside
   assert.ok(t.lo < 1600 - 150 && t.hi > 1800 + 150, 'the tones and their 300 baud keying sidebands pass');
   assert.strictEqual(DIAL_30M + t.hi, 10149600);
   assert.ok(BAND_TOP_30M - (DIAL_30M + t.hi) >= 300, 'at least 300 Hz inside the band edge');
+  assert.ok(F.validTxFilter(t), 'within FlexLib\'s limits');
   assert.strictEqual(R.TX_PASSBAND['2m'], undefined, '2 m has no passband plan');
 });
 
@@ -59,15 +61,17 @@ test('planTxPassband: a radio without TX passband control changes nothing and sa
   assert.ok(/may refuse 30 m/.test(p.log) && /wide/.test(p.log), p.log);
 });
 
-test('planTxPassband: a Flex that has not reported its filter, or does not allow changes, is left alone', () => {
+test('planTxPassband: a Flex that has not reported its filter, does not allow changes, or reports one FlexLib would not accept, is left alone', () => {
   assert.strictEqual(R.planTxPassband({ band: '30m', flex: { connected: true, filter: null, allowed: true } }).action, 'unsupported');
   assert.strictEqual(R.planTxPassband({ band: '30m', flex: { connected: true, filter: { lo: 100, hi: null }, allowed: true } }).action, 'unsupported');
   const no = R.planTxPassband({ band: '30m', flex: { connected: true, filter: { lo: 100, hi: 3100 }, allowed: false } });
   assert.strictEqual(no.action, 'unsupported');
   assert.ok(/tx_filter_changes_allowed=0/.test(no.log), no.log);
+  const odd = R.planTxPassband({ band: '30m', flex: { connected: true, filter: { lo: 100, hi: 120 }, allowed: true } });
+  assert.strictEqual(odd.action, 'unsupported', 'a saved filter that could not be sent back is never replaced');
 });
 
-// ── the Flex commands ───────────────────────────────────────────────────────
+// ── the Flex command ────────────────────────────────────────────────────────
 test('parseTxFilter reads lo=/hi=/tx_filter_changes_allowed= from a real 8600M transmit status', () => {
   const body = TX_STATUS.replace(/^.*?\|transmit /, '');
   const t = F.parseTxFilter(body);
@@ -76,16 +80,20 @@ test('parseTxFilter reads lo=/hi=/tx_filter_changes_allowed= from a real 8600M t
   assert.strictEqual(F.parseTxFilter('rfpower=5').filter, null);
 });
 
-test('txFilterCommands: one `transmit set filter_low=` / `filter_high=` per edge, never another command', () => {
-  assert.deepStrictEqual(F.txFilterCommands({ lo: 100, hi: 3100 }, { lo: 1400, hi: 2000 }), ['transmit set filter_low=1400', 'transmit set filter_high=2000']);
-  assert.deepStrictEqual(F.txFilterCommands({ lo: 1400, hi: 2000 }, { lo: 100, hi: 3100 }), ['transmit set filter_low=100', 'transmit set filter_high=3100']);
-  // A new low at or above the current high: the high edge moves first (the radio keeps low 50 Hz under high).
-  assert.deepStrictEqual(F.txFilterCommands({ lo: 100, hi: 1000 }, { lo: 1400, hi: 2000 }), ['transmit set filter_high=2000', 'transmit set filter_low=1400']);
-  assert.deepStrictEqual(F.txFilterCommands({ lo: 1400, hi: 2000 }, { lo: 1400, hi: 2000 }), []);
-  assert.deepStrictEqual(F.txFilterCommands({ lo: 1400, hi: 2000 }, { lo: 1400, hi: 2000 }, { force: true }), ['transmit set filter_low=1400', 'transmit set filter_high=2000']);
+test('txFilterCommand: ONE command with both edges (FlexLib _SetTXFilter), within FlexLib\'s limits or not at all', () => {
+  assert.strictEqual(F.txFilterCommand({ lo: 1400, hi: 2000 }), 'transmit set filter_low=1400 filter_high=2000');
+  assert.strictEqual(F.txFilterCommand({ lo: 100, hi: 3100 }), 'transmit set filter_low=100 filter_high=3100');
+  assert.strictEqual(F.txFilterCommand({ lo: 0, hi: 10000 }), 'transmit set filter_low=0 filter_high=10000');
+  assert.strictEqual(F.txFilterCommand({ lo: 1000, hi: 1050 }), 'transmit set filter_low=1000 filter_high=1050');
+  assert.strictEqual(F.txFilterCommand({ lo: -1, hi: 2000 }), null, 'low below 0');
+  assert.strictEqual(F.txFilterCommand({ lo: 100, hi: 10001 }), null, 'high above 10000');
+  assert.strictEqual(F.txFilterCommand({ lo: 1000, hi: 1049 }), null, 'narrower than 50 Hz');
+  assert.strictEqual(F.txFilterCommand({ lo: 2000, hi: 1400 }), null, 'low at or above high');
+  assert.strictEqual(F.txFilterCommand({ lo: null, hi: 2000 }), null);
+  assert.strictEqual(F.txFilterCommand({ lo: 100.5, hi: 2000 }), null, 'whole Hz only');
 });
 
-test('SmartSdrClient tracks the TX filter from transmit status and sets it edge by edge', () => {
+test('SmartSdrClient tracks the TX filter and sets it in one command; a zero reply is ok, non-zero is refused', async () => {
   const { SmartSdrClient } = require('../lib/smartsdr');
   const c = new SmartSdrClient();
   c._handleLine(TX_STATUS);
@@ -96,24 +104,41 @@ test('SmartSdrClient tracks the TX filter from transmit status and sets it edge 
   c._handleLine('S766257AA|transmit band 7 band_name=30 rfpower=70 lo=1 hi=2'); // per-band memory, not live
   assert.deepStrictEqual(c.txFilter, { lo: 100, hi: 2000 });
   const sent = [];
-  c._send = (s) => { sent.push(s); return 1; };
+  c._sock = { write: (s) => sent.push(s.trim()) };
   c.connected = true;
-  c._handleLine(TX_STATUS);
-  c.setTxFilter(1400, 2000);
-  assert.deepStrictEqual(sent, ['transmit set filter_low=1400', 'transmit set filter_high=2000']);
+  let p = c.setTxFilter({ lo: 1400, hi: 2000 });
+  assert.deepStrictEqual(sent.map((s) => s.replace(/^C\d+\|/, '')), ['transmit set filter_low=1400 filter_high=2000']);
+  c._handleLine(sent[0].replace(/^C(\d+)\|.*/, 'R$1|0|'));
+  assert.deepStrictEqual(await p, { ok: true, cmd: 'transmit set filter_low=1400 filter_high=2000', status: 0 });
+  p = c.setTxFilter({ lo: 100, hi: 3100 });
+  c._handleLine(sent[1].replace(/^C(\d+)\|.*/, 'R$1|50000016|'));
+  const r = await p;
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.reason, 'refused');
+  assert.strictEqual(r.status, 0x50000016);
+  assert.deepStrictEqual(await c.setTxFilter({ lo: 1000, hi: 1020 }), { ok: false, cmd: null, reason: 'invalid' });
+  assert.strictEqual(sent.length, 2, 'an invalid filter is never sent');
   assert.ok(!sent.some((s) => /atu/.test(s)));
 });
 
-test('SmartSdrAudio (the bound station connection) tracks and sets the TX filter the same way', () => {
+test('SmartSdrAudio (the bound station connection) tracks and sets the TX filter the same way', async () => {
   const { SmartSdrAudio } = require('../lib/smartsdr-audio');
   const a = new SmartSdrAudio();
   a._handleLine(TX_STATUS);
   assert.deepStrictEqual(a.txFilter, { lo: 100, hi: 3100 });
   const sent = [];
-  a._sock = {}; a._connected = true;
-  a._send = (s) => { sent.push(s); return 1; };
-  a.setTxFilter(1400, 2000);
-  assert.deepStrictEqual(sent, ['transmit set filter_low=1400', 'transmit set filter_high=2000']);
+  a._sock = { write: (s) => sent.push(s.trim()) }; a._connected = true;
+  let p = a.setTxFilter({ lo: 1400, hi: 2000 });
+  assert.deepStrictEqual(sent.map((s) => s.replace(/^C\d+\|/, '')), ['transmit set filter_low=1400 filter_high=2000']);
+  a._handleLine(sent[0].replace(/^C(\d+)\|.*/, 'R$1|0|'));
+  assert.strictEqual((await p).ok, true);
+  p = a.setTxFilter({ lo: 100, hi: 3100 });
+  a._handleLine(sent[1].replace(/^C(\d+)\|.*/, 'R$1|50000016|'));
+  const r = await p;
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.reason, 'refused');
+  assert.strictEqual((await a.setTxFilter({ lo: 1400, hi: 1400 })).reason, 'invalid');
+  assert.strictEqual(sent.length, 2);
 });
 
 // ── the run, against a fake Flex ────────────────────────────────────────────
@@ -140,19 +165,27 @@ function fakeTimers() {
 }
 
 /**
- * A fake radio: a Flex station (TX filter, commands it was sent) or, with
- * o.noFlex, a radio POTACAT cannot set a TX passband on. narrowTx/restoreTx
- * do what main's glue does: planTxPassband, then the Flex commands.
+ * A fake radio: a Flex station (TX filter, the commands it was sent, its
+ * reply) or, with o.noFlex, a radio POTACAT cannot set a TX passband on.
+ * narrowTx/restoreTx do what main's glue does: planTxPassband, then one
+ * command and the radio's reply. o.reply (to the narrow set): 0 (default),
+ * a non-zero status, or 'none'. o.filter / o.allowed: the station's state.
+ * flex.seen is every filter the radio actually took, in order.
  */
 function harness(o = {}) {
   const tm = fakeTimers();
   const log = [];
   const order = [];
-  const flex = o.noFlex ? null : { filter: { lo: 100, hi: 3100 }, allowed: true, sent: [] };
-  const flexSet = (to, opts = {}) => {
-    const cmds = F.txFilterCommands(opts.from || flex.filter, to, opts);
-    for (const c of cmds) { flex.sent.push(c); order.push(c); }
-    flex.filter = { ...to };
+  const flex = o.noFlex ? null : { filter: o.filter || { lo: 100, hi: 3100 }, allowed: o.allowed !== undefined ? o.allowed : true, sent: [], seen: [] };
+  const flexSet = async (to) => {
+    const cmd = F.txFilterCommand(to);
+    if (!cmd) return { ok: false, cmd: null, reason: 'invalid' };
+    flex.sent.push(cmd); order.push(cmd);
+    const reply = flex.sent.length === 1 && o.reply !== undefined ? o.reply : 0;
+    if (reply === 'none') return { ok: false, cmd, reason: 'no-reply' };
+    if (reply !== 0) return { ok: false, cmd, status: reply, reason: 'refused' };
+    flex.filter = { ...to }; flex.seen.push({ ...to });
+    return { ok: true, cmd, status: 0 };
   };
   const radio = { keyed: false };
   let onPtt = null, modem = null;
@@ -161,7 +194,7 @@ function harness(o = {}) {
     log: (s) => log.push(s),
     begin: () => { order.push('begin'); return true; },
     end: () => { order.push('end'); },
-    startShim: async (fn) => { onPtt = fn; return 4551; },
+    startShim: async (fn) => { order.push('shim'); onPtt = fn; return 4551; },
     stopShim: () => { onPtt = null; },
     startModem: async () => {
       if (o.modemFails) throw new Error('Dire Wolf did not start');
@@ -178,14 +211,12 @@ function harness(o = {}) {
       const plan = R.planTxPassband({ band, flex: flex ? { connected: true, filter: flex.filter, allowed: flex.allowed } : null });
       if (plan.action === 'unsupported') { log.push(plan.log); return null; }
       if (plan.action !== 'narrow') return null;
-      flexSet(plan.target);
-      return plan.saved;
+      return flexSet(plan.target).then((res) => ({ saved: plan.saved, ok: res.ok, reason: res.reason, reply: res.status != null ? 'reply 0x' + res.status.toString(16) : res.reason }));
     },
-    txReady: async () => true,
-    restoreTx: (saved) => { flexSet(saved, { from: R.TX_PASSBAND['30m'], force: true }); },
+    restoreTx: (saved) => flexSet(saved),
   };
   const run = R.createRfBeacon(deps);
-  const ptt = (on) => { const res = onPtt(on); if (on && res === true && o.readback !== false) run.noteRadioTx(true); return res; };
+  const ptt = (on) => { if (!onPtt) return 'no-shim'; const res = onPtt(on); if (on && res === true && o.readback !== false) run.noteRadioTx(true); return res; };
   return { run, tm, log, order, flex, radio, ptt, get modem() { return modem; } };
 }
 const pkt = (band) => R.buildRfBeacon({ settingsCall: 'K3SBP', band, lat: 40.5123, lon: -75.0456, symbol: 'house', comment: 'POTACAT', approx: true });
@@ -194,10 +225,11 @@ async function start(h, band = '30m') {
   for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
   return { p };
 }
-const NARROW = ['transmit set filter_low=1400', 'transmit set filter_high=2000'];
-const BACK = ['transmit set filter_low=100', 'transmit set filter_high=3100'];
+const NARROW = ['transmit set filter_low=1400 filter_high=2000'];
+const BACK = ['transmit set filter_low=100 filter_high=3100'];
+const settle = async () => { for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r)); };
 
-test('30 m sent: the narrow filter is set before the key-down and the saved filter comes back after the unkey', async () => {
+test('30 m sent: the narrow filter is taken before the key-down and the saved filter comes back after the unkey', async () => {
   const h = harness();
   const { p } = await start(h);
   h.ptt(true);
@@ -205,12 +237,13 @@ test('30 m sent: the narrow filter is set before the key-down and the saved filt
   h.ptt(false);
   await h.tm.advance(300);
   const res = await p;
+  await settle();
   assert.strictEqual(res.ok, true);
   assert.strictEqual(res.confirmed, true);
   assert.deepStrictEqual(h.flex.sent, [...NARROW, ...BACK]);
   const i = (s) => h.order.indexOf(s);
-  assert.ok(i(NARROW[1]) < i('key'), h.order.join(','));
-  assert.ok(h.order.lastIndexOf('unkey') < h.order.lastIndexOf(BACK[0]) && h.order.lastIndexOf(BACK[1]) < i('end'), h.order.join(','));
+  assert.ok(i(NARROW[0]) < i('shim') && i(NARROW[0]) < i('key'), h.order.join(','));
+  assert.ok(h.order.lastIndexOf('unkey') < h.order.lastIndexOf(BACK[0]) && h.order.lastIndexOf(BACK[0]) < i('end'), h.order.join(','));
   assert.deepStrictEqual(h.flex.filter, { lo: 100, hi: 3100 });
 });
 
@@ -220,6 +253,7 @@ test('30 m refused by the radio (OUT_OF_BAND): the saved filter comes back', asy
   h.ptt(true);
   h.run.noteRadioRefusal({ message: 'Interlock is preventing transmission', interlockState: 'NOT_READY', interlockReason: 'OUT_OF_BAND' });
   const res = await p;
+  await settle();
   assert.strictEqual(res.ok, false);
   assert.deepStrictEqual(h.flex.sent, [...NARROW, ...BACK]);
   assert.deepStrictEqual(h.flex.filter, { lo: 100, hi: 3100 });
@@ -230,6 +264,7 @@ test('30 m error (the key-down throws): unkeyed and the saved filter comes back'
   const { p } = await start(h);
   h.ptt(true);
   const res = await p;
+  await settle();
   assert.strictEqual(res.ok, false);
   assert.strictEqual(h.radio.keyed, false);
   assert.deepStrictEqual(h.flex.sent, [...NARROW, ...BACK]);
@@ -238,6 +273,7 @@ test('30 m error (the key-down throws): unkeyed and the saved filter comes back'
 test('30 m error before keying (the modem does not start): the saved filter comes back', async () => {
   const h = harness({ modemFails: true });
   const res = await h.run.send({ packet: pkt('30m'), capMs: 3600 });
+  await settle();
   assert.strictEqual(res.ok, false);
   assert.deepStrictEqual(h.flex.sent, [...NARROW, ...BACK]);
 });
@@ -247,6 +283,7 @@ test('30 m timeouts and stops: the channel never clears, the cap, an abort; the 
   let { p } = await start(a);
   await a.tm.advance(75000);
   assert.strictEqual((await p).reason, 'no-clear-channel');
+  await settle();
   assert.deepStrictEqual(a.flex.sent, [...NARROW, ...BACK]);
 
   const b = harness();
@@ -254,13 +291,58 @@ test('30 m timeouts and stops: the channel never clears, the cap, an abort; the 
   b.ptt(true);
   await b.tm.advance(3600);
   assert.strictEqual((await p).reason, 'cap');
+  await settle();
   assert.deepStrictEqual(b.flex.sent, [...NARROW, ...BACK]);
 
   const c = harness();
   ({ p } = await start(c));
   c.run.abort('the APRS window closed');
   assert.strictEqual((await p).reason, 'aborted');
+  await settle();
   assert.deepStrictEqual(c.flex.sent, [...NARROW, ...BACK]);
+});
+
+test('30 m, the radio answers the narrow set with a non-zero reply: never keyed, nothing put back (nothing changed), the reply logged', async () => {
+  const h = harness({ reply: 0x50000016 });
+  const res = await h.run.send({ packet: pkt('30m'), capMs: 3600 });
+  await settle();
+  assert.strictEqual(res.ok, false);
+  assert.strictEqual(res.reason, 'tx-filter');
+  assert.ok(!h.order.includes('key') && !h.order.includes('shim'), h.order.join(','));
+  assert.deepStrictEqual(h.flex.sent, NARROW, 'no put-back');
+  assert.deepStrictEqual(h.flex.filter, { lo: 100, hi: 3100 });
+  assert.ok(h.log.some((l) => /reply 0x50000016/.test(l) && /not keyed/.test(l)), h.log.join(' | '));
+});
+
+test('30 m, no reply to the narrow set: never keyed, and the saved filter is sent back in case it did change', async () => {
+  const h = harness({ reply: 'none' });
+  const res = await h.run.send({ packet: pkt('30m'), capMs: 3600 });
+  await settle();
+  assert.strictEqual(res.ok, false);
+  assert.ok(!h.order.includes('key'));
+  assert.deepStrictEqual(h.flex.sent, [...NARROW, ...BACK]);
+});
+
+test('the put-back is one command: a saved filter above or below 1400-2000 never passes through low >= high', async () => {
+  for (const saved of [{ lo: 2100, hi: 2800 }, { lo: 200, hi: 1300 }]) {
+    const h = harness({ filter: saved });
+    const { p } = await start(h);
+    h.ptt(true); await h.tm.advance(2000); h.ptt(false); await h.tm.advance(300);
+    await p; await settle();
+    assert.deepStrictEqual(h.flex.sent, [NARROW[0], `transmit set filter_low=${saved.lo} filter_high=${saved.hi}`]);
+    assert.deepStrictEqual(h.flex.seen, [{ lo: 1400, hi: 2000 }, saved], 'the radio only ever holds a whole filter');
+    assert.ok(h.flex.seen.every((f) => f.hi - f.lo >= 50));
+  }
+});
+
+test('tx_filter_changes_allowed=0: no filter command, one log line, keyed as before', async () => {
+  const h = harness({ allowed: false });
+  const { p } = await start(h);
+  h.ptt(true); await h.tm.advance(2000); h.ptt(false); await h.tm.advance(300);
+  assert.strictEqual((await p).ok, true);
+  assert.ok(h.order.includes('key'));
+  assert.deepStrictEqual(h.flex.sent, []);
+  assert.strictEqual(h.log.filter((l) => /tx_filter_changes_allowed=0/.test(l)).length, 1, h.log.join(' | '));
 });
 
 test('2 m does not touch the filter', async () => {
@@ -283,15 +365,15 @@ test('a radio without TX passband control: nothing changes, one log line, the be
 });
 
 // ── main wiring (source) ────────────────────────────────────────────────────
-test('main wires narrowTx/txReady/restoreTx into the runner, never refuses by band, never sends atu clear', () => {
+test('main wires narrowTx/restoreTx into the runner, sends whole filters, never refuses by band, never sends atu clear', () => {
   const src = readSrc(path.join(__dirname, '..', 'main.js'));
   const runner = src.slice(src.indexOf('function aprsRfRunner()'), src.indexOf('function killArdop()'));
-  assert.ok(/narrowTx: aprsRfNarrowTx/.test(runner) && /txReady: aprsRfTxReady/.test(runner) && /restoreTx: aprsRfRestoreTx/.test(runner), runner);
+  assert.ok(/narrowTx: aprsRfNarrowTx/.test(runner) && /restoreTx: aprsRfRestoreTx/.test(runner), runner);
   const glue = src.slice(src.indexOf('function aprsRfFlexTxConn()'), src.indexOf('function aprsRfOtherTx()'));
   assert.ok(/planTxPassband/.test(glue), 'the plan comes from lib/aprs-rf-beacon.js');
-  assert.ok(/setTxFilter\(saved\.lo, saved\.hi, \{ from, force: true \}\)/.test(glue), 'the put-back sends both edges');
+  assert.ok(/setTxFilter\(target\)/.test(glue) && /setTxFilter\(saved\)/.test(glue), 'one whole filter each way');
   assert.ok(!/atu clear/.test(glue));
-  assert.ok(!/return false/.test(glue.slice(glue.indexOf('function aprsRfNarrowTx'), glue.indexOf('function aprsRfTxReady'))), 'narrowing never refuses the beacon');
+  assert.ok(!/return false/.test(glue), 'the glue never refuses the beacon by band');
 });
 
 (async () => {
