@@ -629,6 +629,71 @@ middle.
   zoom, centred on the dial, as the JTCAT view does.
 - Flex Direct only; other scopes ignore the ask.
 
+### APRS (phase 6, added 2026-11-18)
+
+APRS on a client through the desktop: the station list and map of the desktop's
+More > APRS window, "Listen on my radio", the receive-only iGate switch and the
+**internet** beacon. Rules: `lib/aprs-echocat.js`; tests:
+`test/aprs-echocat-test.js`, `test/aprs-echocat-wire-test.js`.
+
+**Capability.** The shack's `hello` lists `aprs`. A client that lists `aprs` in
+its own `hello` gets `aprs-state` (on connect and on every change) and, while it
+is subscribed, `aprs-stations`. A client that does not list it gets neither, and
+its APRS requests are ignored, so an older phone sees no change. The radio
+beacon (phase 7) is not on the wire.
+
+| Message | Dir | Purpose |
+|---|---|---|
+| `aprs-subscribe` | C→S | `{on: boolean, rangeKm?: number}`. Start or stop watching. On `on: true` the shack sends this device a snapshot (`aprs-stations` `op: 'snapshot'`), then deltas. The APRS-IS feed runs while the desktop's APRS window is open **or** any device is subscribed, and stops after the last device leaves (unsubscribe or disconnect) with the window closed. `rangeKm` sets the feed's radius (clamped 10 to 1000 km, not saved) only while the desktop window is closed; with the window open the window's range holds. Send it when the APRS view (or the Map's APRS layer) comes on screen and `on: false` when it leaves. A Guest Pass may subscribe. |
+| `aprs-listen` | C→S | `{on: boolean, band?: '2m' \| '30m'}`. The window's "Listen on my radio" switch and band chips, through the same functions (`aprsListenSetBand`, then `aprsListenSet`), so the same gates and refusal sentences apply (they come back in `aprs-state.listen.sentence`). Counts as the operator using the radio (an APRS idle session ends, as at the window). Listening a device turned on stops when that device leaves, unless the desktop APRS window is open (then closing the window stops it, as before). A Guest Pass may listen on the radio it is operating; listening a guest turned on never gates to APRS-IS. |
+| `aprs-igate` | C→S | `{on: boolean}`. The desktop setting "Report what I hear to APRS-IS (iGate)" (`settings.aprsIgate`), saved as Settings saves it. It gates only while the radio listens. **Refused to a Guest Pass** (on or off): `refused` with `of: 'aprs-igate'` and the text "APRS beacons and the iGate go out under the owner's callsign, so they are not part of a Guest Pass." (`lib/pass-wording.js`, kind `callsign`). |
+| `aprs-beacon-is` | C→S | `{}`. The window's "Beacon now": one position beacon over **APRS-IS only** (CALL-10, the desktop's beacon settings, approximate position by default). Nothing is transmitted on the air. Same refusals as the window (no callsign, placeholder callsign, no position, APRS-IS not verified), shown in `aprs-state.beacon.sentence`. The beacon timer stays a desktop-window feature. **Refused to a Guest Pass** with the same `refused` text as `aprs-igate`. |
+| `aprs-state` | S→C | Coalesced to at most one every 500 ms. Fields below. |
+| `aprs-stations` | S→C | Station rows; only to a subscribed `aprs` client. `op: 'snapshot'`: `{stations: Row[], chunk, totalChunks, total}`, byte-bounded chunks (200 KB, like `worked-qsos`), always at least one (an empty store sends one empty chunk); replace the list once the last chunk (`chunk + 1 === totalChunks`) is in. `op: 'delta'`: `{add: Row[], update: Row[], gone: key[], total}`, batched every 1.5 s, never empty. Treat `add` and `update` as upserts by `key`. `gone`: not heard for 60 minutes, or a killed object or item. |
+
+`aprs-state`:
+
+```
+{
+  type: 'aprs-state',
+  feed:   { state: 'off'|'stopped'|'connecting'|'connected'|'waiting'|'refused'|'no-grid', server, km, anonymous, subscribers },
+  listen: { on, state: 'off'|'starting'|'listening'|'paused'|'refused', band, bands: ['2m','30m'],
+            modeLabel, mhz, heard, lastAt, sentence, note },
+  igate:  { on, active, call, link: 'stopped'|'connecting'|'connected'|'verified'|'unverified'|'waiting',
+            gated, lastAt, lastFrom, sentence },
+  beacon: { call, lastAt, lastPacket, sending, sentence, backAt, timerOn, nextAt,
+            position: { lat, lon, source: 'map'|'grid' } | null },
+  refusal: string,      // the one sentence to show: listen (refused or paused), else beacon, else iGate; '' = none
+  mayBeacon: boolean,   // false on a Guest Pass: hide the beacon button
+  mayIgate: boolean     // false on a Guest Pass: hide the iGate switch
+}
+```
+
+`sentence` and `note` are the desktop window's words, shown as they are. Times
+are epoch ms (0 = never). `listen.bands` is what this rig can listen on (empty =
+none); `listen.band` is the band it listens on, or would start on. `beacon.backAt
+>= beacon.lastAt` means the beacon came back over APRS-IS.
+
+Row (one station or object):
+
+```
+{ key, call, label, type: 'position'|'object'|'item'|..., lat, lon,
+  symbol,          // APRS table + code, 2 characters, e.g. '/>'
+  cls,             // 'car'|'house'|'digi'|'igate'|'weather'|'hiker'|'boat'|'aircraft'|'other' (lib/aprs-symbols.js)
+  course, speed,   // degrees and knots, or null
+  altitude, comment, status,
+  lastHeard,       // epoch ms, any source
+  isHeard,         // epoch ms APRS-IS last reported it, or null
+  heardByMe,       // the shack's radio heard it
+  rf: { kind: 'direct'|'digi', digi, lastHeard, packets } | null,
+  distanceKm, bearing }   // from the shack's grid, or null
+```
+
+`key` is the callsign, or `obj:<NAME>` for an object or item. Draw `cls` with
+the desktop's icon set (renderer/aprs-icons.js: a round badge per class, car,
+boat and aircraft turned to `course`). Idle Mode's `aprs` choice stays on
+`set-idle-rx` (capability `idle-mode`).
+
 ### Cloud (cross-device QSO sync via Cognito)
 
 > **Scope:** These messages exist solely for the in-browser ECHOCAT UI

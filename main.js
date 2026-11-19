@@ -490,6 +490,7 @@ const AprsBeacon = require('./lib/aprs-beacon');           // APRS phase 5: the 
 const AprsActivation = require('./lib/aprs-activation');   // APRS extra 1: the running activation in the beacon comment (off by default)
 const AprsRfGate = require('./lib/aprs-rf-gate');          // APRS phase 7: when the 'aprs' owner may key (one manual beacon over the radio)
 const AprsRfBeacon = require('./lib/aprs-rf-beacon');      // APRS phase 7: the RF beacon packet, its cap, and the one-beacon run
+const AprsEchocat = require('./lib/aprs-echocat');         // APRS phase 6: APRS on ECHOCAT devices through this desktop
 const VaraProcess = require('./lib/vara-process');
 const VaraSetup = require('./lib/vara-setup');
 const WinlinkModes = require('./lib/winlink-modes');
@@ -13084,7 +13085,10 @@ function radioTuneRoute() {
 }
 
 function aprsLog(s) { sendCatLog('[APRS] ' + s); }
-function aprsWinSend(ch, data) { if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send(ch, data); }
+function aprsWinSend(ch, data) {
+  if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send(ch, data);
+  try { aprsEcho.tap(ch, data); } catch { /* phase 6: ECHOCAT devices see what the window sees */ }
+}
 /** The rig's bands for APRS (activeRigBands; a dev stand-in when POTACAT_APRS_DEV_BANDS is set). */
 function aprsRigBands() {
   const dev = APRS_DEV_FRAMES ? String(process.env.POTACAT_APRS_DEV_BANDS || '') : '';
@@ -13494,7 +13498,8 @@ function aprsIgatePause() { return AprsIgate.igatePause({ guestPass: aprsGuestPa
 function aprsIgateWanted() {
   return settings.aprsIgate === true && aprsListen.on &&
     (aprsListen.state === 'starting' || aprsListen.state === 'listening' || aprsListen.state === 'paused') &&
-    !aprsIgatePause(); // a Guest Pass: nothing is gated, whoever started listening, and the uplink is let go
+    !aprsIgatePause() && // a Guest Pass: nothing is gated, whoever started listening, and the uplink is let go
+    !aprsEcho.guestListening(); // phase 6: listening a Guest Pass started never gates under the owner's callsign
 }
 function aprsIgateSync() {
   const want = aprsIgateWanted();
@@ -13996,6 +14001,42 @@ function aprsRfRunner() {
   });
   return aprsRf;
 }
+
+// ── APRS phase 6: APRS on ECHOCAT devices through this desktop ────────────────
+// A client whose hello lists 'aprs' gets aprs-state and, while subscribed,
+// aprs-stations (lib/aprs-echocat.js has every rule). Its requests go to the
+// functions the APRS window and Settings call, so every gate and sentence is
+// theirs. The internet beacon only: the radio beacon is not reachable here.
+let aprsFeedHooks = null; // { start, stop, setRange }: the APRS-IS feed, set where the window's IPC is wired
+/** The iGate switch from an owner's device: the same steps as Settings' save. */
+function aprsIgateSetFromDevice(on) {
+  settings.aprsIgate = on === true;
+  saveSettings(settings);
+  aprsLog('iGate ' + (settings.aprsIgate ? 'on' : 'off') + ' from an ECHOCAT device');
+  try { aprsUplinkWant(null); aprsIgateSync(); aprsIgatePush(); aprsBeaconPush(); } catch { /* not yet */ }
+}
+const aprsEcho = AprsEchocat.createController({
+  startFeed: () => { if (aprsFeedHooks) aprsFeedHooks.start(); },
+  stopFeed: () => { if (aprsFeedHooks) aprsFeedHooks.stop(); },
+  feedRunning: () => !!aprsFeed,
+  setFeedRange: (km) => { if (aprsFeedHooks) aprsFeedHooks.setRange(km); },
+  windowOpen: () => !!(aprsWin && !aprsWin.isDestroyed()),
+  listenSet: (on) => aprsListenSet(on),
+  listenSetBand: (b) => aprsListenSetBand(b),
+  igateSet: (on) => aprsIgateSetFromDevice(on),
+  beaconNow: () => aprsBeaconSend('now').catch((e) => aprsLog('beacon failed: ' + e.message)),
+  markUserActive: () => markUserActive(),
+  getState: () => ({ listen: aprsListenPayload(), igate: aprsIgateStatus(), beacon: aprsBeaconState() }),
+  sendState: (st) => { if (remoteServer && remoteServer.broadcastAprsState) remoteServer.broadcastAprsState(st); },
+  sendStations: (id, m) => { if (remoteServer && remoteServer.sendAprsStations) remoteServer.sendAprsStations(id, m); },
+  home: () => { const p = gridToLatLon(settings.grid); return p ? { lat: p.lat, lon: p.lon } : null; },
+  log: (line) => sendCatLog(line),
+});
+onRemoteServer((rs) => {
+  rs.on('aprs-request', ({ clientId, guest, req } = {}) => aprsEcho.handle(clientId, req, { guest: !!guest }));
+  rs.on('aprs-client-gone', ({ clientId } = {}) => aprsEcho.clientGone(clientId));
+  setImmediate(() => { try { aprsEcho.stateNow(); } catch { /* settings not loaded yet */ } });
+});
 
 function killArdop() {
   if (ardopProc) { try { ardopProc.kill(); } catch {} ardopProc = null; }
@@ -46483,6 +46524,7 @@ function cloudShackNotice(text, kind) {
   }
   function aprsSend(ch, data) {
     if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send(ch, data);
+    try { aprsEcho.tap(ch, data); } catch { /* phase 6: ECHOCAT devices see the feed too */ }
   }
   function aprsStopFeed() {
     if (aprsBatch) { aprsBatch.stop(); aprsBatch = null; }
@@ -46510,6 +46552,12 @@ function cloudShackNotice(text, kind) {
     aprsFeed.on('error', () => { /* shown as the window's status mark; reconnects on its own */ });
     aprsFeed.start();
   }
+  // Phase 6: an ECHOCAT device runs the feed with the window closed (lib/aprs-echocat.js).
+  aprsFeedHooks = {
+    start: () => aprsStartFeed(),
+    stop: () => aprsStopFeed(),
+    setRange: (km) => { if (aprsFeed) aprsFeed.setRange(null, null, require('./lib/aprs-is-feed').clampRangeKm(km)); },
+  };
   ipcMain.on('aprs-popout-open', () => {
     if (aprsWin && !aprsWin.isDestroyed()) { aprsWin.focus(); return; }
     aprsWin = new BrowserWindow({
@@ -46525,8 +46573,12 @@ function cloudShackNotice(text, kind) {
     aprsWin.on('closed', () => {
       // APRS-on-idle listens with no window: closing it leaves that session running.
       aprsRfAbort('the APRS window closed'); // phase 7: a radio beacon unkeys at once, whatever owns listening
-      if (!(autoIdleAprsActive && autoIdleAprsOwnsListen)) aprsListenStop('the APRS window closed');
-      aprsStopFeed(); aprsWin = null;
+      // Phase 6: listening a watching ECHOCAT device turned on, and the feed it watches, carry on.
+      if (!aprsEcho.keepsListen()) {
+        if (!(autoIdleAprsActive && autoIdleAprsOwnsListen)) aprsListenStop('the APRS window closed');
+      }
+      if (!aprsEcho.keepsFeed()) aprsStopFeed();
+      aprsWin = null;
       aprsBeaconStop(); // phase 5: the beacon timer runs only while the window is open
     });
     aprsWin.webContents.on('before-input-event', (_e, input) => {
