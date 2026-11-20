@@ -177,13 +177,15 @@
       </section>
       <section class="aprs-set" aria-labelledby="set-pos-h">
         <h3 id="set-pos-h">Position</h3>
+        <!-- Shown only when a FlexRadio reports a GPS (lib/aprs-window-state.js sourceChoices). -->
+        <div class="aprs-radios hidden" id="aprs-pos-source" role="radiogroup" aria-label="Where my position comes from"></div>
         <div class="aprs-radios" id="aprs-precision" role="radiogroup" aria-labelledby="set-pos-h"></div>
         <div class="aprs-more-row">
           <span class="aprs-note" id="aprs-beacon-pos"></span>
           <button type="button" class="aprs-btn-quiet" id="aprs-beacon-pick" title="Click the map where you are">Pick on map</button>
           <button type="button" class="aprs-btn-quiet hidden" id="aprs-beacon-grid" title="Use the centre of the grid square in Settings">Use my grid</button>
         </div>
-        <div class="aprs-note">Your position comes from the grid square in Settings, or a point you pick on the map. POTACAT on a computer has no GPS.</div>
+        <div class="aprs-note">Your position comes from the grid square in Settings, a point you pick on the map, or a FlexRadio's GPS when it has one.</div>
       </section>
       <section class="aprs-set" aria-labelledby="set-sym-h">
         <h3 id="set-sym-h">Symbol on the map</h3>

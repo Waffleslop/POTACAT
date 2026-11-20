@@ -131,8 +131,13 @@
     $('aprs-igate-on').checked = !!(ig && ig.on);
     setText('aprs-igate-state', ig && ig.on ? W.igateLine(ig) : '');
     if (!beacon) return;
-    var box = $('aprs-precision');
-    var choices = W.precisionChoices(beacon);
+    // Where the position comes from: shown only when a FlexRadio reports a GPS.
+    var src = W.sourceChoices(beacon);
+    show('aprs-pos-source', !!src);
+    if (src) renderRadios($('aprs-pos-source'), 'aprs-pos-source', src, function (id) { api.beaconSet({ source: id }); });
+    renderRadios($('aprs-precision'), 'aprs-precision', W.precisionChoices(beacon), function (id) { api.beaconSet({ precision: id }); });
+  }
+  function renderRadios(box, name, choices, pick) {
     var key = JSON.stringify(choices);
     if (box.dataset.key === key) return;
     box.dataset.key = key;
@@ -141,8 +146,8 @@
       var lab = document.createElement('label');
       lab.className = 'aprs-radio' + (c.disabled ? ' off' : '');
       var inp = document.createElement('input');
-      inp.type = 'radio'; inp.name = 'aprs-precision'; inp.value = c.id; inp.checked = c.checked; inp.disabled = c.disabled;
-      inp.addEventListener('change', function () { if (inp.checked) api.beaconSet({ precision: c.id }); });
+      inp.type = 'radio'; inp.name = name; inp.value = c.id; inp.checked = c.checked; inp.disabled = c.disabled;
+      inp.addEventListener('change', function () { if (inp.checked) pick(c.id); });
       var t = document.createElement('span'); t.textContent = c.label;
       var n = document.createElement('span'); n.className = 'aprs-note'; n.textContent = c.note;
       lab.appendChild(inp); lab.appendChild(t); lab.appendChild(n);
@@ -274,6 +279,12 @@
     renderSends();
     var pos = $('aprs-beacon-pos');
     if (picking) pos.textContent = 'Click the map where you are';
+    else if (beacon.settings.source === 'gps') {
+      // The radio's GPS: its grid with a fix, else the radio's own status words.
+      var g = beacon.gps || {};
+      pos.textContent = !g.installed ? 'Radio GPS: no GPS connected'
+        : (beacon.position ? 'Radio GPS ' + (g.grid || '') : 'Radio GPS: no fix (' + (g.line || '') + ')');
+    }
     else if (!beacon.position) pos.textContent = 'No position';
     else if (beacon.position.source === 'map') pos.textContent = 'Map point ' + fmtPoint(beacon.position.lat, beacon.position.lon);
     else pos.textContent = 'Grid ' + (beacon.grid || '') + ' centre';
@@ -344,7 +355,8 @@
       var ll = e.latlng.wrap();
       setPicking(false);
       // A picked point is the exact position (a grid square never uses one).
-      api.beaconSet({ lat: ll.lat, lon: ll.lng, precision: 'exact' });
+      // Picking a point also means "this point", not the radio's GPS.
+      api.beaconSet({ lat: ll.lat, lon: ll.lng, precision: 'exact', source: 'settings' });
     });
   })();
 
@@ -420,6 +432,8 @@
   // ask now that the listeners above are attached (the 8600M's empty bar, 2026-11-18).
   api.listenGet();
   api.onBeacon(function (d) { if (d) { beacon = d; renderBeaconSettings(); renderAll(); } });
+  // The radio's GPS between beacon pushes (it shows or hides the "From my radio's GPS" choice).
+  if (api.onGps) api.onGps(function (g) { if (beacon && g) { beacon.gps = g; renderBeaconSettings(); } });
   api.beaconGet();
   api.onRf(function (d) {
     if (!d) return;

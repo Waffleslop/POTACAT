@@ -1706,6 +1706,9 @@
       <label>Owner callsign (optional): <input type="text" id="set-owner-callsign" maxlength="12" placeholder="same as My Callsign"></label>
       <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">ADIF OWNER_CALLSIGN — the station licensee, when that is not you. Left blank, nothing is written.</span>
       <label>QTH Grid Square: <input type="text" id="set-grid" maxlength="6"></label>
+      <!-- A FlexRadio with a GPS fix (lib/flex-gps.js): offered, never set by itself.
+           The operator presses it, then Save. -->
+      <button type="button" id="set-grid-from-gps" class="hidden" style="margin-left:12px;margin-bottom:6px;">Use my radio's GPS grid</button>
       <!-- The operator's own state and county (ADIF MY_STATE / MY_CNTY;
            lib/station-county.js). AE5JE 2026-10-27. -->
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">

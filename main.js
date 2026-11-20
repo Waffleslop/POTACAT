@@ -502,6 +502,8 @@ const AprsRadioReturn = require('./lib/aprs-radio-return'); // APRS phase 2: the
 const AprsParser = require('./lib/aprs-parser');
 const AprsIgate = require('./lib/aprs-igate');             // APRS phase 4: the receive-only iGate's rules and the uplink login
 const AprsBeacon = require('./lib/aprs-beacon');           // APRS phase 5: the beacon over APRS-IS (packet, timer, symbols, refusals)
+const AprsPosition = require('./lib/aprs-position');       // where both beacons' position comes from: Settings or the radio's GPS
+const FlexGps = require('./lib/flex-gps');                 // a FlexRadio's GPS, read only (sub gps all)
 const AprsActivation = require('./lib/aprs-activation');   // APRS extra 1: the running activation in the beacon comment (off by default)
 const AprsRfGate = require('./lib/aprs-rf-gate');          // APRS phase 7: when the 'aprs' owner may key (one manual beacon over the radio)
 const AprsRfBeacon = require('./lib/aprs-rf-beacon');      // APRS phase 7: the RF beacon packet, its cap, and the one-beacon run
@@ -13639,11 +13641,31 @@ function aprsBeaconLoad() {
   aprsBeacon.loaded = true;
   aprsBeacon.lastAt = AprsBeacon.lastBeaconAt(settings, Date.now());
 }
+// The radio's GPS (lib/flex-gps.js): the latest state lib/smartsdr.js reported
+// from `sub gps all`, null with no Flex connected. Read only; it goes to the
+// APRS window and to Settings and nowhere else. The beacons read it through
+// lib/aprs-position.js when the operator picked "From my radio's GPS".
+let flexGps = null;
+function flexGpsPayload() {
+  const s = flexGps;
+  if (!s) return { installed: false, fix: false, lat: null, lon: null, grid: '', tracked: 0, visible: 0, status: '', line: '' };
+  return Object.assign({}, s, { line: FlexGps.statusLine(s) });
+}
+function flexGpsPush() {
+  const p = flexGpsPayload();
+  if (aprsWin && !aprsWin.isDestroyed()) { try { aprsWin.webContents.send('aprs-gps', p); } catch {} }
+  if (win && !win.isDestroyed()) { try { win.webContents.send('flex-gps', p); } catch {} }
+  if (AprsBeacon.beaconSettings(settings).source === 'gps') { aprsBeaconPush(); try { aprsRfPush(); } catch {} }
+}
+function flexGpsSet(s) {
+  flexGps = s || null;
+  flexGpsPush();
+}
+/** { ok, lat, lon, source } or { ok:false, reason, sentence } (lib/aprs-position.js). */
 function aprsBeaconPosition() {
   const st = AprsBeacon.beaconSettings(settings);
-  // Position precision (the APRS settings panel): a grid square never uses a picked point.
-  const at = AprsBeacon.positionInputs({ precision: st.precision, lat: st.lat, lon: st.lon, grid: settings.grid });
-  return AprsBeacon.beaconPosition({ lat: at.lat, lon: at.lon, grid: at.grid, gridToLatLon });
+  // Position precision (the APRS settings panel) applies to every source; a grid never uses a picked point.
+  return AprsPosition.beaconPositionFrom({ source: st.source, precision: st.precision, gps: flexGps, lat: st.lat, lon: st.lon, grid: settings.grid, gridToLatLon });
 }
 // APRS extra 1: "Add my activation to the beacon comment" (off by default).
 // While an activation runs, both beacons' comment starts with the park ref(s),
@@ -13677,7 +13699,11 @@ function aprsBeaconState() {
     settings: AprsBeacon.beaconSettings(settings), call: login.ok ? login.call : '',
     // "My APRS SSID": the call the radio beacon goes out as (the internet one stays on the login, call).
     rfCall: login.ok ? AprsRfBeacon.rfSource(settings.myCallsign, login.base, AprsBeacon.beaconSettings(settings).rfSsid) : '',
-    grid: String(settings.grid || '').toUpperCase(), position: aprsBeaconPosition(),
+    grid: String(settings.grid || '').toUpperCase(), ...(() => {
+      const p = aprsBeaconPosition();
+      return { position: p.ok ? { lat: p.lat, lon: p.lon, source: p.source } : null, positionSentence: p.ok ? '' : p.sentence };
+    })(),
+    gps: flexGpsPayload(),
     lastAt: aprsBeacon.lastAt, lastPacket: aprsBeacon.lastPacket, sentence: aprsBeacon.sentence, backAt: aprsBeacon.backAt,
     sending: aprsBeacon.sending, timerOn: !!aprsBeacon.timer, nextAt: aprsBeacon.timer ? aprsBeacon.nextAt : 0,
   };
@@ -13700,8 +13726,8 @@ async function aprsBeaconSend(why) {
   if (aprsBeacon.sending) return;
   aprsBeacon.lastTryAt = Date.now();
   const st = AprsBeacon.beaconSettings(settings);
-  const pos = aprsBeaconPosition();
-  const b = AprsBeacon.buildBeacon({ settingsCall: settings.myCallsign, lat: pos ? pos.lat : null, lon: pos ? pos.lon : null, symbol: st.symbol, comment: aprsBeaconComment(st).comment, approx: st.approx });
+  const pos = aprsBeaconPosition(); // the latest GPS fix when the source is the radio's GPS; a refusal with none
+  const b = AprsBeacon.buildBeacon({ settingsCall: settings.myCallsign, lat: pos.ok ? pos.lat : null, lon: pos.ok ? pos.lon : null, positionSentence: pos.ok ? '' : pos.sentence, symbol: st.symbol, comment: aprsBeaconComment(st).comment, approx: st.approx });
   if (!b.ok) { aprsBeaconRefuse(b.sentence); return; }
   if (!aprsIsServer()) { aprsBeaconRefuse('This test build plays recorded packets and sends nothing to APRS-IS.'); return; }
   aprsBeacon.sending = true;
@@ -13979,8 +14005,8 @@ function aprsRfPlan() {
   const band = aprsListen.band || '30m';
   const hz = aprsListen.freq ? aprsListen.freq.hz : (band === '2m' ? 144390000 : 10147600);
   const st = AprsBeacon.beaconSettings(settings);
-  const pos = aprsBeaconPosition();
-  const b = AprsRfBeacon.buildRfBeacon({ settingsCall: settings.myCallsign, band, lat: pos ? pos.lat : null, lon: pos ? pos.lon : null, symbol: st.symbol, comment: aprsBeaconComment(st).comment, approx: st.approx, ssid: st.rfSsid });
+  const pos = aprsBeaconPosition(); // the latest GPS fix when the source is the radio's GPS; a refusal with none
+  const b = AprsRfBeacon.buildRfBeacon({ settingsCall: settings.myCallsign, band, lat: pos.ok ? pos.lat : null, lon: pos.ok ? pos.lon : null, positionSentence: pos.ok ? '' : pos.sentence, symbol: st.symbol, comment: aprsBeaconComment(st).comment, approx: st.approx, ssid: st.rfSsid });
   const timing = DirewolfProcess.packetTiming(settings);
   const drainMs = winlinkIpAudioRoute() ? WINLINK_UNKEY_DRAIN_IP_MS : WINLINK_UNKEY_DRAIN_BRIDGE_MS;
   const cap = b.ok ? AprsRfBeacon.capFor({ band, packet: b.packet, txDelayMs: timing.txDelayMs, txTailMs: timing.txTailMs, drainMs }) : null;
@@ -24146,6 +24172,9 @@ function connectSmartSdr() {
   // TRANSMITTING; the radio's refusal ends it with the radio's own words.
   smartSdr.on('interlock', (kv) => { if (kv.state === 'TRANSMITTING') aprsRfNoteRadioTx(); });
   smartSdr.on('radio-message', (m) => aprsRfNoteRadioRefusal(m && m.text));
+  // The radio's GPS (read only): the APRS position source and the Settings grid offer.
+  smartSdr.on('gps', (s) => flexGpsSet(s));
+  smartSdr.on('disconnected', () => flexGpsSet(null));
   smartSdr.on('cmd-error', ({ status, line }) => { const t = String(line || '').split('|').pop(); if ((status >>> 0) === 0x50000043 || AprsRfBeacon.isTxRefusalText(t)) aprsRfNoteRadioRefusal(t); });
   smartSdr.on('frequency', (hz) => { if (atuWizardRun) atuWizardRun.noteSliceMoved(hz); });
   smartSdr.on('transmit-status', () => atuWizardOnTransmitStatus());
@@ -24634,6 +24663,7 @@ function disconnectSmartSdr() {
     smartSdr.disconnect();
     smartSdr = null;
   }
+  if (flexGps) flexGpsSet(null); // no radio, no GPS
   stopSmartSdrAudio();
 }
 
@@ -47199,6 +47229,7 @@ function cloudShackNotice(text, kind) {
     aprsStopFeed();
     aprsSend('aprs-status', { state: 'stopped' });
   });
+  ipcMain.handle('flex-gps-get', () => flexGpsPayload()); // the radio's GPS for Settings and the APRS window (read only)
   ipcMain.on('aprs-set-range', (_e, km) => {
     const Feed = require('./lib/aprs-is-feed');
     settings.aprsRangeKm = Feed.clampRangeKm(km);

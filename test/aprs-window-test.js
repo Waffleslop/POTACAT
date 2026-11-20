@@ -568,7 +568,9 @@ test('position precision: grid 4, grid 6, exact; each says what it reveals; the 
   assert.deepStrictEqual(B.positionInputs({ precision: null, lat: 40.1, lon: -75.1, grid: 'FN20jb' }), { lat: 40.1, lon: -75.1, grid: 'FN20jb' }, 'today\'s path unchanged');
   assert.deepStrictEqual(B.positionInputs({ precision: 'exact', lat: 40.1, lon: -75.1, grid: 'FN20jb' }), { lat: 40.1, lon: -75.1, grid: 'FN20jb' });
   const main = read('main.js');
-  assert.ok(/AprsBeacon\.positionInputs\(\{ precision: st\.precision/.test(fnBody(main, 'aprsBeaconPosition')), 'both beacons use it (one position function)');
+  // The radio's GPS PR: the precision goes through the one position provider (lib/aprs-position.js), for every source.
+  assert.ok(/AprsPosition\.beaconPositionFrom\(\{[^}]*precision: st\.precision/.test(fnBody(main, 'aprsBeaconPosition')), 'both beacons use it (one position function)');
+  assert.ok(/AprsBeacon\.positionInputs\(\{ precision, lat, lon, grid \}\)/.test(read('lib/aprs-position.js')), 'the provider applies the precision rule');
   assert.ok(/precision: 'exact'/.test(read('renderer/aprs-window.js')), 'picking a point on the map is the exact position');
 });
 
