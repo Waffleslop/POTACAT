@@ -107,12 +107,19 @@
     const filename = e.filename || '';
     const msg = e.message || '';
     if (!filename && !e.lineno && msg === 'Script error.') return;
-    show((e.error && (e.error.stack || e.error.message)) || msg || 'unknown',
+    // Name and message first, then the stack: Safari's stack has no
+    // message in it (#806). lib/error-banner-text.js, inlined above.
+    const EBT = window.ErrorBannerText;
+    if (EBT) { const r = EBT.formatErrorEvent(e); show(r.text, r.src); return; }
+    const err = e.error;
+    show((err && (String(err) + '\n' + (err.stack || ''))) || msg || 'unknown',
          filename + ':' + (e.lineno || '?'));
   });
   window.addEventListener('unhandledrejection', (e) => {
+    const EBT = window.ErrorBannerText;
+    if (EBT) { const r = EBT.formatRejection(e.reason); show(r.text, r.src); return; }
     const r = e.reason || {};
-    show(r.stack || r.message || String(r), 'unhandledrejection');
+    show(String(r) + '\n' + (r.stack || ''), 'unhandledrejection');
   });
 })();
 
