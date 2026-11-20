@@ -3100,8 +3100,32 @@ async function refreshPacketModeNote() {
   note.textContent = (r && r.editorNote) || "";
 }
 
+// "Show Power Off for this radio" (lib/rig-power.js, resolved in main, which
+// has the model table). rigPowerOffChoice is the operator's own choice for the
+// rig being edited: true or false once stored or once the box is clicked,
+// undefined while the rig follows the default for its connection (#768).
+var rigPowerOffChoice; // var: the sub-panel refresh can run before this line does
+var powerOffNoteSeq = 0;
+async function refreshPowerOffNote() {
+  const box = document.getElementById('set-allow-power-off');
+  const note = document.getElementById('power-off-wake-note');
+  if (!box || !window.api.getRigPowerOffInfo) return;
+  const seq = ++powerOffNoteSeq;
+  let r = null;
+  try { r = await window.api.getRigPowerOffInfo({ model: rigSetupModelName(), linkType: (buildCatTargetFromForm() || {}).type }); } catch { r = null; }
+  if (seq !== powerOffNoteSeq) return;
+  box.disabled = !!(r && r.applies === false);
+  box.checked = !box.disabled && (typeof rigPowerOffChoice === 'boolean' ? rigPowerOffChoice : !!(r && r.defaultOn));
+  if (note) note.textContent = (r && r.note) || '';
+}
+{
+  const box = document.getElementById('set-allow-power-off');
+  if (box) box.addEventListener('change', () => { rigPowerOffChoice = box.checked; });
+}
+
 async function refreshRigSetupNotes() {
   refreshPacketModeNote();
+  refreshPowerOffNote();
   refreshIcomScopeCaptureRow();
   if (!rigSetupBtn || !window.api.getRigSetupNotes) return;
   const seq = ++rigSetupSeq;
@@ -3761,8 +3785,6 @@ async function openRigEditor(mode, rigId) {
       if (atuKeepOnEl) atuKeepOnEl.checked = !!rig.atuKeepOn;
       const voiceAsDataEl = document.getElementById('set-voice-as-data');
       if (voiceAsDataEl) voiceAsDataEl.checked = !!rig.voiceAsData;
-      const allowPowerOffEl = document.getElementById('set-allow-power-off');
-      if (allowPowerOffEl) allowPowerOffEl.checked = !!rig.allowPowerOffNoWake;
       { // the amplifier drive limit (lib/amp-drive-limit.js)
         const on = document.getElementById('set-amp-drive-on');
         const w = document.getElementById('set-amp-drive-w');
@@ -3806,6 +3828,7 @@ async function openRigEditor(mode, rigId) {
   {
     const editing = mode === 'edit' ? currentRigs.find(r => r.id === rigId) : null;
     rigSetupDone = new Set((editing && Array.isArray(editing.setupDone)) ? editing.setupDone : []);
+    rigPowerOffChoice = editing && typeof editing.allowPowerOffNoWake === 'boolean' ? editing.allowPowerOffNoWake : undefined;
   }
   rigSetupAutoOpened = false;
   setRigSetupPanelOpen(false);
@@ -3938,8 +3961,9 @@ async function saveRigEditor() {
   const rigAtuKeepOn = !!(atuKeepOnEl && atuKeepOnEl.checked);
   const voiceAsDataEl = document.getElementById('set-voice-as-data');
   const rigVoiceAsData = !!(voiceAsDataEl && voiceAsDataEl.checked);
-  const allowPowerOffEl = document.getElementById('set-allow-power-off');
-  const rigAllowPowerOff = !!(allowPowerOffEl && allowPowerOffEl.checked); // #293
+  // #293, #768: only a choice the operator made is stored (true or false). A
+  // rig with none follows the default for its connection (lib/rig-power.js).
+  const rigPowerOffStored = typeof rigPowerOffChoice === 'boolean' ? rigPowerOffChoice : undefined;
   const ampDriveOnEl = document.getElementById('set-amp-drive-on');
   const ampDriveWEl = document.getElementById('set-amp-drive-w');
   // The amplifier drive limit: ticked and a positive number, else none. Same
@@ -3985,7 +4009,7 @@ async function saveRigEditor() {
       rig.externalAtuSeconds = rigExternalAtuSeconds;
       rig.atuKeepOn = rigAtuKeepOn;
       if (rigVoiceAsData) rig.voiceAsData = true; else delete rig.voiceAsData;
-      if (rigAllowPowerOff) rig.allowPowerOffNoWake = true; else delete rig.allowPowerOffNoWake;
+      if (rigPowerOffStored !== undefined) rig.allowPowerOffNoWake = rigPowerOffStored; else delete rig.allowPowerOffNoWake;
       if (rigAmpDriveW > 0) rig.ampDriveLimitW = rigAmpDriveW; else delete rig.ampDriveLimitW;
       if (rigTxAudioInput) rig.txAudioInput = rigTxAudioInput; else delete rig.txAudioInput;
       if (rigTxLeftOnly) rig.txChannel = 'left'; else delete rig.txChannel;
@@ -4018,7 +4042,7 @@ async function saveRigEditor() {
       externalAtuSeconds: rigExternalAtuSeconds,
       atuKeepOn: rigAtuKeepOn,
       ...(rigVoiceAsData ? { voiceAsData: true } : {}),
-      ...(rigAllowPowerOff ? { allowPowerOffNoWake: true } : {}),
+      ...(rigPowerOffStored !== undefined ? { allowPowerOffNoWake: rigPowerOffStored } : {}),
       ...(rigAmpDriveW > 0 ? { ampDriveLimitW: rigAmpDriveW } : {}),
       ...(rigTxAudioInput ? { txAudioInput: rigTxAudioInput } : {}),
       ...(rigTxLeftOnly ? { txChannel: 'left' } : {}),

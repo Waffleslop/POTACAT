@@ -2409,8 +2409,9 @@
           </div>
         </details>
         <div id="rig-power-off-allow" style="margin-top:8px;">
-          <label class="checkbox-label"><input type="checkbox" id="set-allow-power-off"> Allow Power Off for a radio POTACAT cannot turn back on</label>
-          <span class="help-text" style="display:block;margin:2px 0 0 24px;">Most radios carry their computer connection on their own USB cable. Once the radio is off, that connection is gone, so POTACAT, ECHOCAT and a guest can switch the radio off but not back on. POTACAT therefore hides Power Off for such a radio. Tick this only if someone can reach the radio's power switch, or you know Power On works on your setup. A radio on a Yaesu SCU-LAN10 can always be switched back on and does not need this.</span>
+          <label class="checkbox-label"><input type="checkbox" id="set-allow-power-off"> Show Power Off for this radio</label>
+          <span class="help-text" id="power-off-wake-note" style="display:block;margin:2px 0 4px 24px;"></span>
+          <span class="help-text" style="display:block;margin:2px 0 0 24px;">When this box is ticked, POTACAT, ECHOCAT and a guest get a Power Off button for this radio. It starts ticked where POTACAT can turn the radio back on and unticked where it cannot, and your own choice is kept. Power On only works if the radio keeps its computer connection alive while it is off. If yours does not, untick this box or keep the radio's power button within reach.</span>
         </div>
         <div id="rig-amp-drive" style="margin-top:8px;">
           <label class="checkbox-label"><input type="checkbox" id="set-amp-drive-on"> An amplifier is connected: limit the drive power</label>

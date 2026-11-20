@@ -293,6 +293,7 @@ contextBridge.exposeInMainWorld('api', {
   getRigModels: () => ipcRenderer.invoke('get-rig-models'),
   getRigSetupNotes: (q) => ipcRenderer.invoke('get-rig-setup-notes', q),
   getPacketRigMode: (q) => ipcRenderer.invoke('get-packet-rig-mode', q),
+  getRigPowerOffInfo: (q) => ipcRenderer.invoke('get-rig-power-off-info', q),
   icomScopeCapture: () => ipcRenderer.invoke('icom-scope-capture'),
   stationSetupGet: (rigId) => ipcRenderer.invoke('station-setup-get', rigId),
   stationSetupReport: (q) => ipcRenderer.invoke('station-setup-report', q),

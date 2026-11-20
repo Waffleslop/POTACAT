@@ -3636,13 +3636,14 @@ function getRigCapabilities(rigType) {
   caps.afgain = rigSupportsAfGain(rigType);
   // The bands this radio is used on (null = not restricted), lib/rig-bands.js.
   caps.bands = activeRigBands();
-  // #293: Power Off only where POTACAT can switch the radio back on (an
-  // SCU-LAN10), or where the operator allowed it for this rig. Every client
-  // hides Power Off on false, and main refuses it (lib/rig-power.js).
+  // #293, #768: Power Off where POTACAT can switch the radio back on (a
+  // direct serial port, an SCU-LAN10), unless the operator chose otherwise
+  // for this rig: its stored allowPowerOffNoWake, true or false, wins. Every
+  // client hides Power Off on false, and main refuses it (lib/rig-power.js).
   if (caps.power) {
     caps.powerOff = RigPower.powerOffAvailable(caps, {
       linkType: settings.catTarget && settings.catTarget.type,
-      allowOffNoWake: !!(activeRig && activeRig.allowPowerOffNoWake),
+      allowOffNoWake: activeRig ? activeRig.allowPowerOffNoWake : undefined,
     });
   }
   // The rig's amplifier drive limit: every power slider stops there.
@@ -50961,6 +50962,13 @@ function cloudShackNotice(text, kind) {
     const info = RIG_MODELS[String(q.model || '').trim()] || null;
     const o = { choice: q.choice, family: RigFamily.familyFromRadioType(q.radioType), brand: info && info.brand, protocol: info && info.protocol };
     return { ...PacketRigMode.resolvePacketRigMode(o), editorNote: PacketRigMode.editorNote(o) };
+  });
+  // Rig editor "Show Power Off for this radio": the default and the line under
+  // the box for the rig being edited (lib/rig-power.js, #768).
+  ipcMain.handle('get-rig-power-off-info', (_e, q) => {
+    q = q || {};
+    const info = RIG_MODELS[String(q.model || '').trim()] || null;
+    return RigPower.powerOffEditorInfo({ caps: info && info.caps, linkType: q.linkType });
   });
   ipcMain.handle('get-sdr-directory', () => require('./lib/sdr-directory').STATIONS);
 
