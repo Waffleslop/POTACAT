@@ -47,6 +47,10 @@ Rule: a setting that is operating policy is per profile; a setting about this ma
   and in the server's replay buffer (#517; main.js jtcatOperatorModeChange, lib/jtcat-mode-change.js).
   The Spot Target a spot click just armed survives. An automatic mode hop is not an operator change:
   it calls the engine directly and Run keeps going. Never put the halt in the engine's setMode.
+- A potacat://tune link (web pages carry them) stops every automatic transmission BEFORE it tunes:
+  Run, Hunt, the WSPR beacon, the Spot Target, a QSO in progress, TX left enabled, Tune
+  (main.js tuneLinkStopAutoTx: jtcatHaltTxNow + clearSpotTarget; lib/tune-link-guard.js). Receive
+  keeps going. Spot clicks and every other tune are unchanged (test/tune-link-guard-test.js).
 - Wrong-band and out-of-privilege TX guards trust only a LIVE dial reading.
 - ULTRACAT (hidden, `settings.ultracat`): Run mode and unattended Hunt are the operator's
   responsibility; without it Hunt stops after 30 min idle (test/jtcat-hunt-off-test.js).

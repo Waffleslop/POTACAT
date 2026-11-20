@@ -725,6 +725,7 @@ const TESTS = [
   'test/clean-exit-marker-test.js', // #550: a Launcher run never consumes the GUI's clean-exit marker or rotates its startup.log, so a clean quit is not reported as a crash
   'test/serial-quit-test.js', // #657: every serial port closed and every native serial call finished before quit (macOS SIGABRT)
   'test/remote-tune-click-label-test.js', // #756: the ECHOCAT Web tuneClick switch is labelled for the click sound, not "Tap to Tune"
+  'test/tune-link-guard-test.js', // a potacat://tune link stops Run, Hunt, the WSPR beacon, the Spot Target, a QSO and TX before it tunes; notice in the main and JTCAT windows
 ];
 
 const root = path.join(__dirname, '..');
