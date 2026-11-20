@@ -246,6 +246,10 @@ body { display: flex; flex-direction: column; }
 .aprs-link { font: inherit; font-size: 14px; padding: 0; border: 0; background: none; cursor: pointer; color: var(--accent-blue); text-decoration: underline; }
 .aprs-link:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
 .aprs-card-foot { margin-top: auto; }
+/* The iGate settings link sits to the right of the last line ("iGate off"), not on a row of its own. */
+.aprs-card-row { display: flex; align-items: flex-end; gap: 12px; }
+.aprs-card-row .aprs-card-lines { flex: 1 1 auto; min-width: 0; }
+.aprs-card-row .aprs-link { flex: 0 0 auto; white-space: nowrap; }
 .aprs-sec-head .aprs-link { margin-left: auto; }
 .aprs-strong { font-weight: 600; color: var(--text-primary); }
 
