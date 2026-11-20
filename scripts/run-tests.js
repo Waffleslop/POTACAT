@@ -573,6 +573,7 @@ const TESTS = [
   'test/jtcat-mode-change-test.js',
   'test/activation-map-data-test.js',
   'test/log-freq-test.js',
+  'test/log-freq-resolution-test.js',
   'test/log-tx-power-test.js',
   'test/station-clock-test.js', // ECHOCAT device sets the FT8 slot clock
   'test/rig-bands-test.js',
