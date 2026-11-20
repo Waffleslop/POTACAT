@@ -378,6 +378,7 @@ const TESTS = [
   'test/dial-snap-test.js',
   'test/web-ft8-running-test.js',
   'test/jtcat-band-pick-test.js',
+  'test/jtcat-spot-restarts-stopped-test.js',
   'test/sstv-robot36-spec-test.js',
   'test/ui-batch-2026-11-05-test.js',
   'test/modem-audio-server-test.js',
