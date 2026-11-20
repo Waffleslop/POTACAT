@@ -73,7 +73,7 @@
       const msg = document.createElement('p');
       msg.className = 'ss-detail';
       // Driving a remote shack: the radio is not on this PC (main says why).
-      msg.textContent = (current && current.remote && current.reason) || 'Add your radio first: Settings, then My Rigs, then Add Rig.';
+      msg.textContent = (current && current.remote && current.reason) || 'Add your radio first: Settings > Radio, + Add Rig.';
       stepsEl.appendChild(msg);
       rigSel.classList.add('hidden');
       return;

@@ -163,7 +163,7 @@ start, run it with `--no-sandbox`.
 
 ## 🕐 The First Five Minutes
 
-**1. Connect your rig.** Settings → **My Rigs** → pick a connection type:
+**1. Connect your rig.** Settings → **Radio** → **+ Add Rig** → pick a connection type:
 
 | Your radio | Connection type |
 |---|---|
