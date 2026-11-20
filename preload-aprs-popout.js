@@ -71,4 +71,9 @@ contextBridge.exposeInMainWorld('api', {
   messageStop: (lid) => ipcRenderer.send('aprs-message-stop', String(lid || '')),
   messagesDelete: (call) => ipcRenderer.send('aprs-messages-delete', String(call || '')),
   onMessages: (cb) => ipcRenderer.on('aprs-messages', (_e, s) => cb(s)),
+  // A2: templates (renderer/aprs-templates-panel.js). { context: { park, summit, freq, mode, call, running }, mine: [{ id, name, to, text }] }
+  templatesGet: () => ipcRenderer.send('aprs-templates-get'),
+  templatesSave: (t) => ipcRenderer.invoke('aprs-templates-save', { name: String((t && t.name) || ''), to: String((t && t.to) || ''), text: String((t && t.text) || '') }),
+  templatesDelete: (id) => ipcRenderer.send('aprs-templates-delete', String(id || '')),
+  onTemplates: (cb) => ipcRenderer.on('aprs-templates', (_e, s) => cb(s)),
 });
