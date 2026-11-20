@@ -13781,9 +13781,38 @@ function aprsRfRestoreTx(saved) {
   _aprsRfTxConn = null;
   if (!conn) { aprsLog(`beacon over the radio: the Flex is not connected, so its transmit filter could not be put back to ${saved.lo}-${saved.hi} Hz`); return null; }
   // One command with both edges (FlexLib _SetTXFilter): never an in-between filter.
+  const interlockAtStart = smartSdr && smartSdr.connected ? (smartSdr.interlockState || '') : '';
   return Promise.resolve(conn.setTxFilter(saved)).then((res) => {
-    aprsLog(res.ok ? `beacon over the radio: transmit filter put back to ${saved.lo}-${saved.hi} Hz`
-      : `beacon over the radio: the transmit filter was not put back to ${saved.lo}-${saved.hi} Hz (${aprsRfTxReply(res)})`);
+    if (!res.ok) { aprsLog(`beacon over the radio: the transmit filter was not put back to ${saved.lo}-${saved.hi} Hz (${aprsRfTxReply(res)})`); return null; }
+    aprsLog(`beacon over the radio: transmit filter put back to ${saved.lo}-${saved.hi} Hz (reply 0); confirming from the radio`);
+    return aprsRfConfirmRestore(conn, saved, interlockAtStart);
+  });
+}
+/**
+ * After the put-back's zero reply, confirm it from something that refreshes
+ * (lib/aprs-rf-beacon.js confirmTxRestore): a fresh transmit status after
+ * `sub tx all`, or the interlock going back to OUT_OF_BAND when the saved
+ * filter is out of band on this dial. Never the cached lo=/hi= (stale after
+ * a filter set, on-air 2026-11-20). Not confirmed in 2 s: a warning only;
+ * the beacon is already over.
+ */
+function aprsRfConfirmRestore(conn, saved, interlockAtStart) {
+  const sinceSeq = typeof conn.refreshTxStatus === 'function' ? conn.refreshTxStatus() : (conn.txFilterSeq || 0);
+  const fit = AprsRfGate.narrowFits({ band: aprsListen.band, dialHz: _currentFreqHz, mode: _currentMode, filter: saved });
+  const outOfBandExpected = fit.loHz != null && !fit.fits;
+  return AprsRfBeacon.confirmTxRestore({
+    saved, sinceSeq, outOfBandExpected, interlockAtStart,
+    read: () => ({
+      statusSeq: conn.txFilterSeq || 0, filter: conn.txFilter,
+      interlockState: smartSdr && smartSdr.connected ? smartSdr.interlockState : '',
+      interlockReason: smartSdr && smartSdr.connected ? smartSdr.interlockReason : '',
+    }),
+    setTimer: setTimeout, now: Date.now,
+  }).then((c) => {
+    aprsLog(c.confirmed
+      ? `beacon over the radio: the radio confirmed the transmit filter is back at ${saved.lo}-${saved.hi} Hz (${c.by})`
+      : `beacon over the radio: warning: the radio did not confirm the transmit filter is back at ${saved.lo}-${saved.hi} Hz within 2 s (no fresh transmit status${outOfBandExpected ? ' and no OUT_OF_BAND interlock' : ''}); check it in SmartSDR`);
+    return c;
   });
 }
 

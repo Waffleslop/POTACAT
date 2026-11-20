@@ -453,6 +453,89 @@ test('still NOT_READY after the narrow filter (OUT_OF_BAND or any reason): never
   }
 });
 
+// ── confirming the put-back (on-air 2026-11-20) ─────────────────────────────
+// The put-back got R11|0|, but the cached transmit status still read
+// lo=1400 hi=2000 until the next mode change, and the interlock went back to
+// OUT_OF_BAND 120 ms after it. The cached block is never the proof.
+function confirmRig(o = {}) {
+  const tm = fakeTimers();
+  const radio = { statusSeq: 7, filter: { lo: 1400, hi: 2000 }, interlockState: 'READY', interlockReason: '' };
+  const p = R.confirmTxRestore({
+    saved: { lo: 100, hi: 3100 }, sinceSeq: 7, outOfBandExpected: true, interlockAtStart: 'READY',
+    ...o, read: () => ({ ...radio }), setTimer: tm.setTimer, now: tm.now,
+  });
+  return { tm, radio, p };
+}
+
+test('the put-back is confirmed by the interlock going back to OUT_OF_BAND 120 ms later (the saved filter is out of band on 10.1476)', async () => {
+  const c = confirmRig();
+  await c.tm.advance(100);
+  c.radio.interlockState = 'NOT_READY'; c.radio.interlockReason = 'OUT_OF_BAND';
+  await c.tm.advance(100);
+  assert.deepStrictEqual(await c.p, { confirmed: true, by: 'interlock OUT_OF_BAND' });
+});
+
+test('the put-back is confirmed by a fresh transmit status (newer than the re-subscribe) that reads the saved filter', async () => {
+  const c = confirmRig({ outOfBandExpected: false });
+  await c.tm.advance(100);
+  c.radio.statusSeq = 8; c.radio.filter = { lo: 100, hi: 3100 };
+  await c.tm.advance(100);
+  assert.deepStrictEqual(await c.p, { confirmed: true, by: 'fresh transmit status' });
+});
+
+test('never from the stale cached block: the cached lo/hi alone, even when it reads the saved filter, confirms nothing; a warning after 2 s', async () => {
+  const stale = confirmRig({ outOfBandExpected: false });
+  await stale.tm.advance(2100);
+  assert.deepStrictEqual(await stale.p, { confirmed: false }, 'cached 1400-2000, no fresh line');
+  const cachedRight = confirmRig({ outOfBandExpected: false });
+  cachedRight.radio.filter = { lo: 100, hi: 3100 }; // the cache, not a line after the re-subscribe
+  await cachedRight.tm.advance(2100);
+  assert.deepStrictEqual(await cachedRight.p, { confirmed: false });
+  const freshButWrong = confirmRig({ outOfBandExpected: false });
+  freshButWrong.radio.statusSeq = 8; // a fresh line that still reads 1400-2000
+  await freshButWrong.tm.advance(2100);
+  assert.deepStrictEqual(await freshButWrong.p, { confirmed: false });
+});
+
+test('the interlock confirms only when the saved filter is out of band and the interlock was not already NOT_READY', async () => {
+  const notExpected = confirmRig({ outOfBandExpected: false });
+  notExpected.radio.interlockState = 'NOT_READY'; notExpected.radio.interlockReason = 'OUT_OF_BAND';
+  await notExpected.tm.advance(2100);
+  assert.deepStrictEqual(await notExpected.p, { confirmed: false });
+  const already = confirmRig({ interlockAtStart: 'NOT_READY' }); // the beacon was refused with OUT_OF_BAND still read
+  already.radio.interlockState = 'NOT_READY'; already.radio.interlockReason = 'OUT_OF_BAND';
+  await already.tm.advance(2100);
+  assert.deepStrictEqual(await already.p, { confirmed: false });
+  const otherReason = confirmRig();
+  otherReason.radio.interlockState = 'NOT_READY'; otherReason.radio.interlockReason = 'AMP:TG';
+  await otherReason.tm.advance(2100);
+  assert.deepStrictEqual(await otherReason.p, { confirmed: false });
+});
+
+test('SmartSdrClient and SmartSdrAudio: refreshTxStatus re-subscribes (sub tx all) and returns the lo/hi line count, which only lo/hi lines advance', () => {
+  const { SmartSdrClient } = require('../lib/smartsdr');
+  const { SmartSdrAudio } = require('../lib/smartsdr-audio');
+  const c = new SmartSdrClient();
+  const sent = [];
+  c._send = (s) => { sent.push(s); return 1; };
+  c.connected = true;
+  c._handleLine(TX_STATUS);
+  assert.strictEqual(c.txFilterSeq, 1);
+  c._handleLine('S766257AA|transmit rfpower=5');
+  assert.strictEqual(c.txFilterSeq, 1, 'a line without lo/hi does not count');
+  assert.strictEqual(c.refreshTxStatus(), 1);
+  assert.deepStrictEqual(sent, ['sub tx all']);
+  c._handleLine(TX_STATUS);
+  assert.strictEqual(c.txFilterSeq, 2);
+  const a = new SmartSdrAudio();
+  const aSent = [];
+  a._sock = {}; a._connected = true;
+  a._send = (s) => { aSent.push(s); return 1; };
+  a._handleLine(TX_STATUS);
+  assert.strictEqual(a.refreshTxStatus(), 1);
+  assert.deepStrictEqual(aSent, ['sub tx all']);
+});
+
 // ── main wiring (source) ────────────────────────────────────────────────────
 test('main wires narrowTx/restoreTx into the runner, sends whole filters, never refuses by band, never sends atu clear', () => {
   const src = readSrc(path.join(__dirname, '..', 'main.js'));
@@ -460,6 +543,12 @@ test('main wires narrowTx/restoreTx into the runner, sends whole filters, never 
   assert.ok(/narrowTx: aprsRfNarrowTx/.test(runner) && /restoreTx: aprsRfRestoreTx/.test(runner) && /txInterlock: aprsRfTxInterlock/.test(runner), runner);
   const gate = src.slice(src.indexOf('function aprsRfGateState()'), src.indexOf('function aprsRfDevReadiness()'));
   assert.ok(/txNarrow: /.test(gate) && /dialMode: _currentMode/.test(gate), 'the gate sees the narrow filter and the live mode');
+  // The put-back is confirmed from the radio (a fresh status or the interlock), never the cached block, and logs which.
+  const conf = src.slice(src.indexOf('function aprsRfConfirmRestore('), src.indexOf('function aprsRfOtherTx()'));
+  assert.ok(/refreshTxStatus\(\)/.test(conf) && /confirmTxRestore\(/.test(conf) && /\$\{c\.by\}/.test(conf) && /warning:/.test(conf), conf);
+  const restore = src.slice(src.indexOf('function aprsRfRestoreTx('), src.indexOf('function aprsRfConfirmRestore('));
+  assert.ok(/aprsRfConfirmRestore\(conn, saved, interlockAtStart\)/.test(restore));
+  assert.ok(!/txFilter\.lo|txFilter\.hi/.test(restore + conf), 'no check on the cached lo/hi');
   // Listening is receive only: the listen start never reads the interlock or the TX filter.
   const at = src.indexOf('function aprsSpawnDirewolf(');
   assert.ok(at > 0 && !/interlock|txNarrow|setTxFilter/.test(src.slice(at, at + 4000)));
