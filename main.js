@@ -92,6 +92,7 @@ const CleanExitMarker = require('./lib/clean-exit-marker');
 const FreqDots = require('./lib/freq-dots'); // display only: 14.074.00 MHz, the VFO way
 const RemoteBridge = require('./lib/remote-bridge');
 const WaterfallPalettes = require('./lib/waterfall-palettes');
+const GpuStatus = require('./lib/gpu-status'); // #773: the GPU line in the session log
 {
   const _ipcOn = ipcMain.on.bind(ipcMain);
   ipcMain.on = (channel, fn) => _ipcOn(channel, RemoteBridge.OUT[channel]
@@ -43487,6 +43488,13 @@ function kiwiStatusHint() {
 
 app.whenReady().then(() => {
   logStartupStage('app.whenReady fired');
+  // #773: what Chromium got from the graphics driver, for "WebGL2 is not available" reports.
+  {
+    let gpu = null, hw = null;
+    try { gpu = app.getGPUFeatureStatus(); } catch {}
+    try { hw = app.isHardwareAccelerationEnabled(); } catch {}
+    sendCatLog(GpuStatus.formatGpuStatusLine(gpu, hw));
+  }
   macMicLog('at startup', macMicStatus()); // #463: a no-op off macOS
   // Windows app identity. Without it every toast POTACAT raises (watchlist
   // spot alerts, pair requests) is attributed to the launching executable —
@@ -48512,6 +48520,7 @@ function cloudShackNotice(text, kind) {
     setTimeout(() => { if (yaesuScopeWanted()) startYaesuScope(); }, 400);
   };
   ipcMain.on('scope-restart', () => yaesuScopeRestartLater('restart requested'));
+  ipcMain.on('scope-no-webgl2', () => sendCatLog(GpuStatus.formatNoWebgl2Line('Band Scope')));
   ipcMain.on('scope-set-synth', (_e, on) => {
     yaesuScopeSynth = !!on;
     sendCatLog('[Scope] synthetic signal ' + (on ? 'ON — no radio involved' : 'OFF'));
