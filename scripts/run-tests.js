@@ -223,6 +223,7 @@ const TESTS = [
   'test/aprs-rf-frequency-test.js', // APRS phase 2: the 2 m APRS frequency by grid square, each entry from a published band plan
   'test/aprs-radio-return-test.js', // APRS phase 2: the radio goes back on stop, after a crash and after a quit
   'test/aprs-listen-test.js', // APRS phase 2: the refusal sentences, the packet mode, and the main.js wiring (receive only)
+  'test/aprs-listen-moved-test.js', // APRS listening pauses when the radio moves off the APRS frequency (any cause), the return is dropped; the once-a-minute audio line
   'test/aprs-auto-listen-test.js', // APRS window: listen on open (receive only), once per open, every switch refusal plus TX / JTCAT QSO / owner / Guest Pass, off stays off
   'test/radio-tune-route-test.js', // the one "radio reachable for tuning" decision: TCI, Flex Direct, CAT (APRS on a FLEX-8600M, 2026-11-18)
   'test/aprs-window-test.js', // APRS window layout: status cards (no heading), timer banner only with an interval, on-air banner only while keyed + Stop = the close abort, one-click beacon buttons, TX power -/+, two-line stations, "Within" in round units -> whole km, one-time range conversion
