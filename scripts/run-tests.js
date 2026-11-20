@@ -362,6 +362,7 @@ const TESTS = [
   'test/winlink-pat-recover-test.js', // #430: after an Abort, Connect restarts a Pat that is stuck on the last call; a session never starts on top of a dial (VARA)
   'test/winlink-auto-retry-test.js', // #425: one automatic retry after a dropped link, never after no answer or Abort; countdown, channel check, Cancel
   'test/winlink-arq-timeout-test.js', // #425: the ARDOP link timeout is a setting; it reaches our Pat build through the environment; the summary says the value in force
+  'test/winlink-forms-gate-test.js', // #346 phase 0: forms only on Pat 1.0.1 or newer (v1.0.0 serves form pages same-origin with its unauthenticated API); bundled Pat and Go pins
   'test/winlink-contacts-test.js', // the Winlink address book, and the Position report and POTA spot forms
   'test/winlink-sent-routes-test.js', // #442: how each sent message went out (gateway, dial, mode or internet, time), kept by message id
   'test/winlink-summary-store-test.js', // #425: the session summary lines survive a restart, so Report a Bug still holds the session that dropped
