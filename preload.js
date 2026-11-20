@@ -550,6 +550,9 @@ contextBridge.exposeInMainWorld('api', {
   // APRS phase 4: the iGate's marks { on, active, call, sentence, link, gated, lastAt, lastFrom }
   aprsIgateStatus: () => ipcRenderer.invoke('aprs-igate-status'),
   onAprsIgateStatus: (cb) => ipcRenderer.on('aprs-igate-status', (_e, s) => cb(s)),
+  // The radio's GPS, read only (lib/flex-gps.js): Settings offers its grid, never sets it.
+  getFlexGps: () => ipcRenderer.invoke('flex-gps-get'),
+  onFlexGps: (cb) => ipcRenderer.on('flex-gps', (_e, s) => cb(s)),
   winlinkPotaSpotOpen: (o) => ipcRenderer.send('winlink-pota-spot-open', o || {}),
   winlinkDiag: () => ipcRenderer.invoke('winlink-diag'),
   settingsSaveStatus: () => ipcRenderer.invoke('settings-save-status'),

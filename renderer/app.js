@@ -825,6 +825,31 @@ const settingsDialog = document.getElementById('settings-dialog');
 const settingsSave = document.getElementById('settings-save');
 const settingsCancel = document.getElementById('settings-cancel');
 const setGrid = document.getElementById('set-grid');
+// The radio's GPS grid, offered beside QTH Grid Square when a FlexRadio has a
+// fix and the grid differs from the one in the box. Pressing it fills the box;
+// Save keeps it. Nothing changes the grid without that press (lib/flex-gps.js).
+let _flexGpsNow = null;
+function renderGridGpsOffer() {
+  const b = document.getElementById('set-grid-from-gps');
+  if (!b) return;
+  const g = _flexGpsNow;
+  const gpsGrid = g && g.fix && g.grid ? String(g.grid) : '';
+  const show = !!gpsGrid && gpsGrid.toUpperCase() !== setGrid.value.trim().toUpperCase();
+  b.classList.toggle('hidden', !show);
+  if (show) b.textContent = "Use my radio's GPS grid (" + gpsGrid + ')';
+}
+if (setGrid) {
+  setGrid.addEventListener('input', renderGridGpsOffer);
+  const gpsBtn = document.getElementById('set-grid-from-gps');
+  if (gpsBtn) gpsBtn.addEventListener('click', () => {
+    const g = _flexGpsNow;
+    if (!g || !g.fix || !g.grid) return;
+    setGrid.value = g.grid;
+    setGrid.dispatchEvent(new Event('input', { bubbles: true }));
+    renderGridGpsOffer();
+  });
+  if (window.api.onFlexGps) window.api.onFlexGps((g) => { _flexGpsNow = g || null; renderGridGpsOffer(); });
+}
 const setDistUnit = document.getElementById('set-dist-unit');
 const setMaxAge = document.getElementById('set-max-age');
 const setPotaAgeLimit = document.getElementById('set-pota-age-limit');
@@ -18077,6 +18102,8 @@ async function openSettingsDialog(tab) {
   if (tab) _openSettingsTab = tab;
   const s = await window.api.getSettings();
   setGrid.value = s.grid || '';
+  if (window.api.getFlexGps) window.api.getFlexGps().then((g) => { _flexGpsNow = g || null; renderGridGpsOffer(); }).catch(() => {});
+  renderGridGpsOffer();
   // The owner already has the ECHOCAT app: no download badges.
   { const dl = document.getElementById('settings-echocat-download'); if (dl) dl.classList.toggle('hidden', s.echocatAppConnected === true); }
   homeCountyLoad(s);

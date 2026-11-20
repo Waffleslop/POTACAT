@@ -234,6 +234,9 @@ const TESTS = [
   'test/aprs-idle-igate-wiring-test.js', // APRS phase 4: the APRS idle mode and the iGate wiring in main.js and Settings
   'test/aprs-beacon-test.js', // APRS phase 5: the beacon packet, approximate position, symbols, comment, the 10 min timer floor, refusals
   'test/aprs-beacon-wiring-test.js', // APRS phase 5: the beacon end to end against a local fake APRS-IS server, and its wiring
+  'test/flex-gps-test.js', // the radio's GPS: the gps status parser (# pairs, spaces, deltas), the fix rule, the APRS position source (no fix = refusal, never 0,0)
+  'test/smartsdr-gps-test.js', // the radio's GPS: one sub gps all per connection, a gps event per change, never a set
+  'test/flex-gps-wiring-test.js', // the radio's GPS: both beacons ask one provider; Settings offers the GPS grid, never sets it
   'test/afsk-demod-test.js', // APRS phase 9 core: our own AFSK demodulator (1200 and 300 baud, offsets, noise floors, FCS, stuffing, real 30 m frames, CPU)
   'test/aprs-activation-test.js', // APRS extra 1: the activation (park, frequency, mode) in the beacon comment, within 43 characters, off by default
   'test/aprs-rf-gate-test.js', // APRS phase 7: the gate for a beacon over the radio, each refusal (window, listen, callsign, dial match, owner, PTT, in flight)
