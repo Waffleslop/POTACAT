@@ -7601,7 +7601,9 @@ function remoteShackScopeSubscribe(on) {
     if (on) remoteShackScopeState({ status: 'unavailable', available: false, diag: { key: 'remote-link', severity: 'blocker', headline: 'Waiting for the shack', detail: REMOTE_NOT_LINKED_MSG } });
     return;
   }
-  remoteClient.sendRaw({ type: 'scope-subscribe', on: !!on });
+  // bins: the scope window draws only full 850-point frames; without it the
+  // shack sends a phone's 256 and the window drops every one (#772).
+  remoteClient.sendRaw({ type: 'scope-subscribe', on: !!on, bins: YaesuScope.BINS });
 }
 function remoteShackScopeState(state) {
   const payload = { ...(state || {}), remote: true };
@@ -8030,7 +8032,7 @@ function ensureRemoteClient() {
     // and turn the speaker button into "Operate from this device".
     remoteShackInfo = info.audioHeldBy ? { audioElsewhere: true, audioHolder: String(info.audioHeldBy.name || '') } : null;
     pushRemoteShackInfo();
-    if (_remoteScopeWanted) remoteClient.sendRaw({ type: 'scope-subscribe', on: true });
+    if (_remoteScopeWanted) remoteClient.sendRaw({ type: 'scope-subscribe', on: true, bins: YaesuScope.BINS });
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) { _remoteSstvWindowOpen = false; remoteClient.sendRaw({ type: 'sstv-open' }); }
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() && _remoteJtcatMode) {
       remoteClient.sendRaw({ type: 'jtcat-start', mode: _remoteJtcatMode });
