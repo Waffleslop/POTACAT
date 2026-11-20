@@ -46,7 +46,7 @@ const bk = (writes) => writes.filter((w) => /^BI/.test(w));
 const covered = Object.keys(RIG_MODELS).filter((id) => cwKeysThroughBreakIn(RIG_MODELS[id]));
 
 test('the families covered are the Yaesu KY models (FTX-1, FT-710, FT-891, FTDX10, FTDX101 among them)', () => {
-  for (const id of ['FTX-1 Field', 'FTX-1 Optima', 'FT-710', 'FT-891', 'FTDX10', 'FTDX101D/MP', 'FT-991/991A']) {
+  for (const id of ['FTX-1 Field', 'FTX-1 Optima', 'FT-710', 'FT-891', 'FTDX10', 'FTDX101D', 'FTDX101MP', 'FT-991/991A']) {
     assert.ok(covered.includes(id), id + ' is covered');
   }
   for (const id of ['IC-7300', 'TS-590', 'X6100']) {

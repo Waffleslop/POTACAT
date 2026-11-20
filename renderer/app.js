@@ -3910,7 +3910,7 @@ async function saveRigEditor() {
 
   // The SCU-LAN10 spec covers three radios; anything else has no SCU-LAN10.
   if (catTarget && catTarget.type === 'yaesu-lan' && !YAESU_LAN_MODELS.includes(model || '')) {
-    alert('Yaesu LAN (SCU-LAN10) works with the FTDX10, FT-710 and FTDX101D/MP. Pick one of those in Radio Model, or choose another connection type.');
+    alert('Yaesu LAN (SCU-LAN10) works with the FTDX10, FT-710, FTDX101D and FTDX101MP. Pick one of those in Radio Model, or choose another connection type.');
     return false;
   }
   // The unit takes plain ASCII, at most 32 characters (lib/sculan10-protocol.js
@@ -11053,7 +11053,7 @@ document.getElementById('civ-tcp-test-btn')?.addEventListener('click', async () 
 
 // Icom Network / RS-BA1 test connection
 // --- Yaesu LAN (SCU-LAN10), experimental ---
-const YAESU_LAN_MODELS = ['FTDX10', 'FT-710', 'FTDX101D/MP'];
+const YAESU_LAN_MODELS = ['FTDX10', 'FT-710', 'FTDX101D', 'FTDX101MP'];
 // The same rule as lib/sculan10-protocol.js loginFieldProblem (pinned by
 // test/sculan10-wiring-test.js): at most 32 characters, printable ASCII.
 function yaesuLanLoginProblem(value, what) {
@@ -11086,8 +11086,12 @@ document.getElementById('yaesu-lan-test-btn')?.addEventListener('click', async (
     if (r.success) {
       const sid = r.sessionId != null ? ' Session 0x' + Number(r.sessionId).toString(16).toUpperCase().padStart(2, '0') + '.' : '';
       const radio = r.radio ? ' ' + r.radio + '.' : (r.id ? ' Radio ID ' + r.id + '.' : '');
+      // The radio names itself (ID;): an FTDX101MP saved as the D is held to
+      // 100 W and its power meter reads half (#744). Say so; the operator picks.
+      const picked = rigModelSelect ? rigModelSelect.value : '';
+      const mismatch = r.radio && picked && picked !== r.radio ? ' Radio Model is set to ' + picked + ': pick ' + r.radio + '.' : '';
       const freq = r.frequency ? ' Freq: ' + (FreqDots.mhzMhz(r.frequency) || r.frequency + ' MHz') + '.' : '';
-      resultEl.textContent = 'Logged in!' + sid + radio + freq + (r.note ? ' ' + r.note : '') + rigTestWsjtxNote(r);
+      resultEl.textContent = 'Logged in!' + sid + radio + mismatch + freq + (r.note ? ' ' + r.note : '') + rigTestWsjtxNote(r);
       resultEl.className = 'hamlib-test-success';
     } else {
       resultEl.textContent = 'Failed: ' + r.error;

@@ -302,6 +302,7 @@ const TESTS = [
   'test/serial-close-blocked-cts-test.js', // RTS/CTS write stuck on CTS: flush before close, bounded close, None keeps the close (#174)
   'test/yaesu-lines-low-test.js', // every Yaesu drops DTR/RTS at open (stein, G5HOW: keyed on connect)
   'test/yaesu-po-meter-test.js', // FT-710/FTDX10/FTDX101 read forward power on RM5; no false 'no CAT during TX' line (#581)
+  'test/ftdx101-d-mp-split-test.js', // FTDX101D (100 W) and FTDX101MP (200 W) rows; saved FTDX101D/MP migrates to the D; ID; 0681/0682 (#744)
   'test/ftdx5000-power-scale-test.js', // FTDX5000 PC is 000-255, not watts (nicki3fiy 254 W)
   'test/yaesu-audit-ftdx10-test.js', // Yaesu CAT audit: FTDX10 width SH00nn + Table 3, AGC GT0 order, MD0 9/E/F, PC 5-100 (2308-F)
   'test/yaesu-audit-ftdx101-test.js', // Yaesu CAT audit: FTDX101 width SH00nn + its Table 3, AGC GT0 order, MD0 9/E/F, PC from 5 (2308-L)
