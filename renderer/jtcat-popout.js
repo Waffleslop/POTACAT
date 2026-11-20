@@ -117,7 +117,8 @@ function _applyPopoutTheme(payload) {
   // Load settings
   window.api.getSettings().then(function(s) {
     myCallsign = onAirCallPushed || (s.myCallsign || '').toUpperCase();
-    myGrid = (s.grid || '').toUpperCase().substring(0, 4);
+    // A remote desktop hears at the shack: its grid, not this computer's (#774).
+    myGrid = ((s.remoteShack && s.shackGrid) || s.grid || '').toUpperCase().substring(0, 4);
     updateCqPreview();
     applyUltracat(!!s.ultracat);
     chaseTarget = s.jtcatChaseTarget || '';

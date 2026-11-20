@@ -93,6 +93,7 @@ const FreqDots = require('./lib/freq-dots'); // display only: 14.074.00 MHz, the
 const RemoteBridge = require('./lib/remote-bridge');
 const WaterfallPalettes = require('./lib/waterfall-palettes');
 const GpuStatus = require('./lib/gpu-status'); // #773: the GPU line in the session log
+const ShackGrid = require('./lib/shack-grid'); // #774: the JTCAT map on the shack's grid
 {
   const _ipcOn = ipcMain.on.bind(ipcMain);
   ipcMain.on = (channel, fn) => _ipcOn(channel, RemoteBridge.OUT[channel]
@@ -7553,6 +7554,9 @@ function refuseRemoteFeature(feature) {
 // switch gates both text and paddle; its voice macros are its own recordings
 // (it syncs them to every client at connect), played into its radio there.
 let remoteShackCw = { enabled: false, paddle: false, paddleReason: '' };
+// The driven shack's grid (auth-ok / settings-update settings.grid), so the
+// JTCAT map centres where the decodes are heard (#774). '' = not known.
+let remoteShackGrid = '';
 let remoteShackVoice = { labels: [], filled: [] };
 const REMOTE_CW_OFF_MSG = 'Remote CW is off on the shack. Turn on Settings > ECHOCAT > Remote CW Keyer on the shack PC.';
 function remoteCwRefusal(paddle) {
@@ -8022,6 +8026,7 @@ function ensureRemoteClient() {
     _remoteClientAuthFail = null;
     if (target.kind === 'pass') { delete target.passSessionClosed; delete target.passEndReason; }
     remoteShackCw = { enabled: !!info.cwAvailable, paddle: !!info.cwPaddleAvailable, paddleReason: String(info.cwPaddleReason || '') };
+    remoteShackGrid = ShackGrid.shackGridFrom(info.settings);
     remoteShackVoice = { labels: [], filled: [] };
     remoteJs8Reset();
     _vfoLocked = !!info.vfoLocked;
@@ -8141,6 +8146,7 @@ function ensureRemoteClient() {
   // reached this desktop at all.
   remoteClient.on('message', (msg) => {
     if (bridgeInboundFromShack(msg)) return;
+    if (msg.type === 'settings-update' && msg.settings && typeof msg.settings.grid === 'string') remoteShackGrid = ShackGrid.shackGridFrom(msg.settings);
     // Skip Grid / Hound ride the shack's settings blob, not a JTCAT frame.
     if (msg.type === 'settings-update' && msg.settings && jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
       for (const key of ['jtcatSkipTx1', 'jtcatHoundMode']) {
@@ -50884,7 +50890,7 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('app-relaunch', () => { app.relaunch(); app.exit(0); });
   // themeNow: the theme in force (Appearance System decided here), for a
   // window that reads the theme from the settings (#376).
-  ipcMain.handle('get-settings', () => ({ ...settings, appVersion: getAppDisplayVersion(), remoteShack: isRemoteMode(), themeNow: themeQuery() }));
+  ipcMain.handle('get-settings', () => ({ ...settings, appVersion: getAppDisplayVersion(), remoteShack: isRemoteMode(), shackGrid: isRemoteMode() ? remoteShackGrid : '', themeNow: themeQuery() }));
   // The rig editor's Test connection for a Zeus / Thetis TCI server: waits
   // for the server's `ready` and sends nothing (lib/tci-rig.js probeTci).
   ipcMain.handle('probe-tci-rig', async (_e, target) => {
