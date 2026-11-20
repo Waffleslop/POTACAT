@@ -902,6 +902,7 @@ const GLOBAL_KEYS = new Set([
   'n1mmUdpPort',       // N1MM broadcast port
   'enableLoggerCat',   // TS-2000 CAT over TCP for N1MM+ and other loggers (lib/ts2000-cat-server.js)
   'loggerCatPort',
+  'loggerCatLanTx',    // #770: Logger CAT may key the Yaesu LAN through the VFO window's PTT (default off)
   'audioInputDeviceId', 'audioOutputDeviceId',  // OS audio device picks
   'jtcatRxGain',       // JTCAT RX gain 0–1 — synced slider, machine audio property
   'jtcatRxGainByBand', // per-band memory for the above (same machine property)
@@ -7157,13 +7158,31 @@ let _n1mmLastMode = '';
 // POTACAT — so on a laptop driving a remote shack, N1MM at home tunes, keys
 // and sends CW on the shack's radio (NK8Q 2026-10-23).
 const { createTs2000Server } = require('./lib/ts2000-cat-server');
+const { LoggerCatLanPtt } = require('./lib/logger-cat-lan-ptt');
 let loggerCatServer = null;
 let _loggerCatPtt = false;
 let _loggerCatClients = 0;
+// SCU-LAN10 (#770): an outside program keys through the VFO window's PTT, the
+// only way its audio (a virtual cable as the window's PTT mic) reaches the
+// radio. Off unless the operator turns it on; a hard time limit; released when
+// the program's connection drops. See lib/logger-cat-lan-ptt.js.
+const _loggerCatLan = new LoggerCatLanPtt({
+  enabled: () => settings.loggerCatLanTx === true,
+  press: (on) => {
+    const vfo = vfoPopoutWin && !vfoPopoutWin.isDestroyed() ? vfoPopoutWin : null;
+    if (vfo) { vfo.webContents.send('external-ptt', { on, who: 'logger CAT' }); return true; }
+    if (on) return false;
+    // The window is gone: release the way its own pttStop would.
+    yaesuLanVoicePtt(false, 'logger CAT', 'vfo');
+    return true;
+  },
+  log: (line) => sendCatLog(line),
+  maxMs: () => (Number(settings.remotePttTimeout) || 180) * 1000,
+});
 function loggerCatState() {
-  return { freqHz: _currentFreqHz || 0, mode: _currentMode || 'USB', ptt: _loggerCatPtt, smeter: _currentSmeter || 0, powerW: _currentTxPower || 100, wpm: settings.cwWpm || 20 };
+  return { freqHz: _currentFreqHz || 0, mode: _currentMode || 'USB', ptt: _loggerCatPtt || _loggerCatLan.keyed, smeter: _currentSmeter || 0, powerW: _currentTxPower || 100, wpm: settings.cwWpm || 20 };
 }
-function loggerCatAction(a) {
+function loggerCatAction(a, client) {
   if (a.setFreqHz) {
     const khz = a.setFreqHz / 1000;
     if (isRemoteMode()) { if (isRemoteLinked()) remoteClient.sendTune({ frequency: a.setFreqHz }); return; }
@@ -7179,7 +7198,7 @@ function loggerCatAction(a) {
     // but the one the VFO window's PTT uses, so the window keys: its PTT
     // microphone (a virtual cable from fldigi, GTTY, ...) goes over the LAN,
     // through every check its own button goes through.
-    if (yaesuLanVoiceRoute()) { loggerCatLanPtt(a.ptt); return; }
+    if (yaesuLanVoiceRoute()) { _loggerCatLan.key(a.ptt, client); return; }
     if (a.ptt && yaesuLanTxRefusal()) {
       // Refused (no transmit audio over the SCU-LAN10): the logger must not
       // be told the radio is transmitting.
@@ -7198,19 +7217,6 @@ function loggerCatAction(a) {
     try { applyRigControl({ action: 'set-tx-power', value: a.powerW }, 'logger-cat'); } catch {}
   }
 }
-// A logger key-down on the SCU-LAN10 route: the VFO window presses its PTT.
-// Without the window there is no microphone to send, so it is refused, not
-// keyed silent. A release always goes to the window (it may be keyed).
-function loggerCatLanPtt(on) {
-  const vfo = vfoPopoutWin && !vfoPopoutWin.isDestroyed() ? vfoPopoutWin : null;
-  if (on && !vfo) {
-    _loggerCatPtt = false;
-    sendCatLog('[PTT] logger CAT TX refused — open the VFO window: on the Yaesu LAN it sends its PTT microphone, and that is the only way the logger\'s audio reaches the radio');
-    return;
-  }
-  _loggerCatPtt = on;
-  if (vfo) vfo.webContents.send('external-ptt', { on, who: 'logger CAT' });
-}
 function startLoggerCat() {
   stopLoggerCat();
   if (!settings.enableLoggerCat) return;
@@ -7225,7 +7231,8 @@ function startLoggerCat() {
         sock.on('close', () => {
           _loggerCatClients = Math.max(0, _loggerCatClients - 1);
           // A logger that drops while keyed must not leave the radio keyed.
-          if (_loggerCatPtt && !_loggerCatClients) { loggerCatAction({ ptt: false }); _loggerCatPtt = false; sendCatLog('[Logger CAT] logger disconnected while transmitting — PTT released'); }
+          _loggerCatLan.disconnect(sock);
+          if (_loggerCatPtt && !_loggerCatClients) { _loggerCatPtt = false; handleRemotePtt(false); sendCatLog('[Logger CAT] logger disconnected while transmitting — PTT released'); }
         });
       },
     }, { host: '127.0.0.1', port });
@@ -7236,7 +7243,8 @@ function startLoggerCat() {
   }
 }
 function stopLoggerCat() {
-  if (_loggerCatPtt) { try { loggerCatAction({ ptt: false }); } catch {} _loggerCatPtt = false; }
+  _loggerCatLan.stop('Logger CAT stopped');
+  if (_loggerCatPtt) { _loggerCatPtt = false; try { handleRemotePtt(false); } catch {} }
   if (loggerCatServer) { try { loggerCatServer.close(); } catch {} loggerCatServer = null; }
   _loggerCatClients = 0;
 }
@@ -46421,6 +46429,7 @@ function cloudShackNotice(text, kind) {
     });
     vfoPopoutWin.on('closed', () => {
       vfoPopoutWin = null;
+      _loggerCatLan.stop('the VFO window closed'); // #770: its PTT was the program's way to the radio
       // Closed by the operator: stays closed next start. Closed by the app
       // quitting: the quit path already wrote whether it was open.
       if (!_appWindowsClosing && settings.vfoPopoutOpen) { settings.vfoPopoutOpen = false; saveSettings(settings); }
@@ -53437,6 +53446,7 @@ function cloudShackNotice(text, kind) {
     // Winlink (Pat) relaunches only for keys baked into its config / launch.
     // The password is in pat-config.json, so a new one needs a relaunch too.
     if (['enableLoggerCat', 'loggerCatPort'].some((k) => has(k) && newSettings[k] !== settings[k])) setTimeout(startLoggerCat, 0);
+    if (has('loggerCatLanTx') && newSettings.loggerCatLanTx !== true) _loggerCatLan.stop('keying by an outside program turned off'); // #770
     const winlinkChanged = ['enableWinlink', 'winlinkPassword', 'winlinkPatPath', 'winlinkArdopPort', 'winlinkVaraPort', 'winlinkVaraFmPort', 'winlinkVaraHost', 'winlinkVaraFmHost',
       'winlinkArdopBw', 'winlinkArdopArqTimeout', 'winlinkVaraBw', 'winlinkAgwPort', 'winlinkPrediction', 'winlinkPredictionUrl', 'myCallsign', 'grid']
       .some((k) => has(k) && JSON.stringify(newSettings[k]) !== JSON.stringify(settings[k]));
