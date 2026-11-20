@@ -420,7 +420,8 @@ test('Pat gets a prediction engine on every config write, decided in one place',
   assert.ok(/C:\\\\itshfbc\\\\bin_win\\\\voacapw\.exe/.test(fn), 'the operator\'s own Windows VOACAP wins (and the path keeps its backslashes)');
   assert.ok(/'voacapl'/.test(fn), 'voacapl on PATH elsewhere');
   assert.ok(/WinlinkPat\.predictionConfig\(\{ enabled, localVoacap, serviceUrl: settings\.winlinkPredictionUrl, serviceUp: _voacapService\.up \}\)/.test(fn));
-  assert.ok(/'winlinkPredictionUrl',/.test(read('main.js').slice(0, 60000)), 'the service override is a machine key');
+  const globalKeys = (read('main.js').match(/const GLOBAL_KEYS = new Set\(\[([\s\S]*?)\]\);/) || [])[1] || '';
+  assert.ok(/'winlinkPredictionUrl',/.test(globalKeys), 'the service override is a machine key');
   assert.ok(/'winlinkPrediction', 'winlinkPredictionUrl', 'myCallsign', 'grid'\]/.test(main), 'a change relaunches Pat');
 });
 test('the gateway reply says how it is ordered, on every surface', () => {

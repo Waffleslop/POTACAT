@@ -326,6 +326,16 @@ if (process.platform === 'linux' &&
     'or opt in: sudo chown root:root chrome-sandbox && sudo chmod 4755 chrome-sandbox (next to the binary). ' +
     'See https://github.com/Waffleslop/POTACAT/issues/37');
 }
+// Startup read-ahead (lib/startup-prefetch.js): the files the requires below
+// and the main window's page will read are handed to three reader threads now,
+// so a cold disk reads them in parallel instead of one require at a time. Reads
+// only; POTACAT_NO_PREFETCH=1 turns it off for measuring.
+const StartupPrefetch = require('./lib/startup-prefetch');
+if (process.env.POTACAT_NO_PREFETCH !== '1') {
+  try {
+    StartupPrefetch.start({ appDir: __dirname, userDataDir: app.getPath('userData'), fs, path, Worker: require('worker_threads').Worker, pages: ['renderer/index.html'] });
+  } catch {}
+}
 const { execFile, execFileSync, spawn } = require('child_process');
 const { fetchSpots: fetchPotaSpots, fetchSpotHistory: fetchPotaSpotHistory, parkStatesFromLocation } = require('./lib/pota');
 const { fetchSpots: fetchSotaSpots, fetchSummitCoordsBatch, summitCache, loadAssociations, getAssociationName, SotaUploader, sotaChaseSummits } = require('./lib/sota');
@@ -728,7 +738,11 @@ const { resolveSetupNotes, radioTypeFromCatTarget, icomScopeBaudAction } = requi
 const StationSetup = require('./lib/station-setup');
 const ReviewAsk = require('./lib/review-ask'); // one-time "Rate ECHOCAT" card
 const SetupShare = require('./lib/setup-share');
-const { autoUpdater } = require('electron-updater');
+// electron-updater is about 110 files: 0.1 s warm, close to 3 s from a cold
+// hard disk, all before the first window. Nothing needs it until the update
+// check 5 s after start (or a Settings click), so getAutoUpdater() loads and
+// wires it on first use.
+let _autoUpdater = null;
 let registerCloudIpc;
 try { registerCloudIpc = require('./lib/cloud-ipc').registerCloudIpc; } catch { registerCloudIpc = null; }
 const { CloudTunnelManager } = require('./lib/cloud-tunnel');
@@ -41229,19 +41243,6 @@ function checkEventQso(qsoData) {
 }
 
 // --- Update check (electron-updater for installed, manual fallback for portable) ---
-autoUpdater.autoDownload = false;
-autoUpdater.autoInstallOnAppQuit = false;
-// Route updater activity through sendCatLog, not just the console — a
-// user's "the update didn't apply" report is undiagnosable when the
-// updater's own story never reaches session.log (first Mac field test,
-// 2026-08-14: still on 1.10.3 after Restart, zero evidence in the log).
-autoUpdater.logger = {
-  info: (...args) => sendCatLog('[updater] ' + args.join(' ')),
-  warn: (...args) => sendCatLog('[updater] WARN: ' + args.join(' ')),
-  error: (...args) => sendCatLog('[updater] ERROR: ' + args.join(' ')),
-  debug: (...args) => console.log('[updater:debug]', ...args),
-};
-
 // Squirrel.Mac's ShipIt replaces the .app bundle at quit — and when it
 // can't, it FAILS SILENTLY and relaunches the old version, which reads
 // as "I clicked Restart and I'm still on 1.10.3". Detect the three
@@ -41301,6 +41302,25 @@ function reportManualCheck(outcome, info) {
   return true;
 }
 
+// Loaded on first use (see _autoUpdater). The body keeps its top-level
+// indentation so each handler still reads as it did.
+function getAutoUpdater() {
+if (_autoUpdater) return _autoUpdater;
+const { autoUpdater } = require('electron-updater');
+_autoUpdater = autoUpdater;
+autoUpdater.autoDownload = false;
+autoUpdater.autoInstallOnAppQuit = false;
+// Route updater activity through sendCatLog, not just the console — a
+// user's "the update didn't apply" report is undiagnosable when the
+// updater's own story never reaches session.log (first Mac field test,
+// 2026-08-14: still on 1.10.3 after Restart, zero evidence in the log).
+autoUpdater.logger = {
+  info: (...args) => sendCatLog('[updater] ' + args.join(' ')),
+  warn: (...args) => sendCatLog('[updater] WARN: ' + args.join(' ')),
+  error: (...args) => sendCatLog('[updater] ERROR: ' + args.join(' ')),
+  debug: (...args) => console.log('[updater:debug]', ...args),
+};
+
 autoUpdater.on('update-available', (info) => {
   reportManualCheck('available', { latestVersion: info && info.version });
   if (win && !win.isDestroyed()) {
@@ -41345,8 +41365,10 @@ autoUpdater.on('error', (err) => {
     win.webContents.send('update-error', err?.message || String(err));
   }
 });
+return autoUpdater;
+}
 
-ipcMain.on('start-download', () => { autoUpdater.downloadUpdate(); });
+ipcMain.on('start-download', () => { getAutoUpdater().downloadUpdate(); });
 ipcMain.on('install-update', async () => {
   // Kill cloudflared and WAIT for it to actually exit before the NSIS installer
   // runs. cloudflared.exe ships inside the install tree; a running .exe holds a
@@ -41385,7 +41407,7 @@ ipcMain.on('install-update', async () => {
   }, 20000);
   if (typeof stall.unref === 'function') stall.unref();
   try {
-    autoUpdater.quitAndInstall();
+    getAutoUpdater().quitAndInstall();
   } catch (err) {
     clearTimeout(stall);
     sendCatLog('[update] quitAndInstall threw: ' + (err && err.message || err));
@@ -41499,6 +41521,7 @@ function checkForUpdates(opts) {
   // signed → electron-updater; ad-hoc/unsigned → the manual GitHub-notify
   // fallback, exactly as before. Windows/Linux are unaffected.
   const macOsAutoUpdateUnsupported = process.platform === 'darwin' && !macBuildIsSigned();
+  const autoUpdater = getAutoUpdater();
   if (autoUpdater.isUpdaterActive() && !macOsAutoUpdateUnsupported) {
     // Installed build — use electron-updater
     sendCatLog('[update] checking via electron-updater (installed, Developer ID-signed build)' + (manual ? ' - manual' : ''));
@@ -44127,6 +44150,12 @@ app.whenReady().then(() => {
   // Load SOTA association names (async, non-blocking — falls back to codes if it fails)
   loadAssociations().catch(err => console.error('Failed to load SOTA associations:', err.message));
 
+  // The modules this launch needed before its window: next launch's read-ahead
+  // list (lib/startup-prefetch.js). Written later, off the startup path.
+  {
+    const preWindowModules = Object.keys(require.cache);
+    setTimeout(() => StartupPrefetch.record({ appDir: __dirname, userDataDir: app.getPath('userData'), fs, path, moduleKeys: preWindowModules }), 15000);
+  }
   createWindow();
   logStartupStage('createWindow returned (BrowserWindow constructed)');
   if (HEADLESS) {
