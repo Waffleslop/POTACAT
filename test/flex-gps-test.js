@@ -228,7 +228,7 @@ test('panel: with the GPS chosen, the precision choices name the GPS grid', () =
   assert.ok(c[0].label.includes('FM18'), c[0].label);
   assert.ok(c[1].label.includes('FM18lv'), c[1].label);
   assert.ok(c[1].checked);
-  assert.ok(/GPS/.test(c[2].note));
+  assert.ok(/GPS/.test(c[3].note), 'exact names the GPS (near sits between grid 6 and exact)');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

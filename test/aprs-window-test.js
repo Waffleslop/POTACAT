@@ -589,7 +589,7 @@ test('APRS settings, glue: opens and closes, the iGate checkbox sends igateSet, 
   w.on.onIgate({ on: true, paused: 'iGate paused: a guest has the radio' });
   assert.ok(/iGate paused: a guest has the radio/.test(w.els['is-lines'].textContent), 'paused for a Guest Pass');
   const radios = w.els['aprs-precision'].children;
-  assert.deepStrictEqual(radios.map((r) => r.children[0].value), ['grid4', 'grid6', 'exact']);
+  assert.deepStrictEqual(radios.map((r) => r.children[0].value), ['grid4', 'grid6', 'near', 'exact']);
   radios[0].children[0].checked = true; radios[0].children[0].fire('change');
   assert.strictEqual(JSON.stringify(w.calls[w.calls.length - 1]), JSON.stringify(['beaconSet', { precision: 'grid4' }]));
   w.els['aprs-settings-done'].fire('click');
@@ -597,10 +597,14 @@ test('APRS settings, glue: opens and closes, the iGate checkbox sends igateSet, 
   assert.ok(!w.calls.some((c) => c[0] === 'beaconNow' || c[0] === 'rfSend'), 'no setting sends anything');
 });
 
-test('position precision: grid 4, grid 6, exact; each says what it reveals; the default is today\'s behaviour', () => {
+test('position precision: grid 4, grid 6, near my home, exact; each says what it reveals; the default is near my home', () => {
   const c = W.precisionChoices({ grid: 'FN20JB', settings: { approx: true, precision: null } });
-  assert.deepStrictEqual(c.map((x) => x.label), ['Grid square, 4 characters (FN20)', 'Grid square, 6 characters (FN20jb)', 'Exact position']);
-  assert.deepStrictEqual(c.map((x) => x.checked), [false, true, false], 'not set + approximate (today\'s default) = the 6-character square');
+  assert.deepStrictEqual(c.map((x) => x.label), ['Grid square, 4 characters (FN20)', 'Grid square, 6 characters (FN20jb)', 'Near my home (about 1 mile)', 'Exact position']);
+  assert.deepStrictEqual(c.map((x) => x.checked), [false, false, true, false], 'not set = Near my home (Casey 2026-11-20)');
+  assert.strictEqual(c[2].note, 'aprs.fi shows you within about a mile of home, never at your door.');
+  assert.deepStrictEqual(W.precisionChoices({ grid: 'FN20', precision: 'grid4', settings: { approx: true, precision: null } }).map((x) => x.checked), [true, false, false, false], 'main\'s effective precision is what shows checked');
+  assert.strictEqual(W.precisionChoices({ grid: 'FN20JB', unit: 'km', settings: {} })[2].label, 'Near my home (about 2 km)');
+  assert.strictEqual(W.precisionChoices({ grid: 'FN20JB', settings: { approx: false } })[3].checked, true, 'the old "Approximate position" turned off reads as exact');
   assert.ok(c.every((x) => x.note && x.note.split('. ').length <= 2), 'one line each');
   assert.strictEqual(W.precisionChoices({ grid: 'FN20', settings: { approx: true } })[1].disabled, true, 'a 4-character grid cannot give 6');
   const B = require('../lib/aprs-beacon');
@@ -610,11 +614,13 @@ test('position precision: grid 4, grid 6, exact; each says what it reveals; the 
   assert.deepStrictEqual(B.settingsPatch({ precision: 'street' }), {});
   assert.deepStrictEqual(B.positionInputs({ precision: 'grid4', lat: 40.1, lon: -75.1, grid: 'FN20jb' }), { lat: null, lon: null, grid: 'FN20' }, 'a grid never uses the picked point');
   assert.deepStrictEqual(B.positionInputs({ precision: 'grid6', lat: 40.1, lon: -75.1, grid: 'FN20jb' }), { lat: null, lon: null, grid: 'FN20jb' });
+  assert.deepStrictEqual(B.settingsPatch({ precision: 'near' }), { aprsBeaconPrecision: 'near', aprsBeaconApprox: true });
   assert.deepStrictEqual(B.positionInputs({ precision: null, lat: 40.1, lon: -75.1, grid: 'FN20jb' }), { lat: 40.1, lon: -75.1, grid: 'FN20jb' }, 'today\'s path unchanged');
   assert.deepStrictEqual(B.positionInputs({ precision: 'exact', lat: 40.1, lon: -75.1, grid: 'FN20jb' }), { lat: 40.1, lon: -75.1, grid: 'FN20jb' });
   const main = read('main.js');
   // The radio's GPS PR: the precision goes through the one position provider (lib/aprs-position.js), for every source.
-  assert.ok(/AprsPosition\.beaconPositionFrom\(\{[^}]*precision: st\.precision/.test(fnBody(main, 'aprsBeaconPosition')), 'both beacons use it (one position function)');
+  assert.ok(/AprsPosition\.beaconPositionFrom\(\{[^}]*precision[,: ]/.test(fnBody(main, 'aprsBeaconPosition')), 'both beacons use it (one position function)');
+  assert.ok(/const precision = aprsBeaconPrecision\(\)/.test(fnBody(main, 'aprsBeaconPosition')), 'with the precision that applies (saved, else the default)');
   assert.ok(/AprsBeacon\.positionInputs\(\{ precision, lat, lon, grid \}\)/.test(read('lib/aprs-position.js')), 'the provider applies the precision rule');
   assert.ok(/precision: 'exact'/.test(read('renderer/aprs-window.js')), 'picking a point on the map is the exact position');
 });

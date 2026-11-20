@@ -276,3 +276,7 @@ body { display: flex; flex-direction: column; }
   .aprs-side { width: auto; overflow: visible; border-left: 0; border-top: 1px solid var(--border-primary); }
   .aprs-list-wrap { flex: none; height: 420px; }
 }
+
+/* The Home button under Leaflet's zoom buttons: the same bar and size, a house outline in their text colour. */
+.aprs-home-bar a.aprs-home-btn { display: flex; align-items: center; justify-content: center; }
+.aprs-home-bar a.aprs-home-btn svg { display: block; }

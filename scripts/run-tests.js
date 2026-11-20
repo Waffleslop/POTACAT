@@ -237,6 +237,7 @@ const TESTS = [
   'test/aprs-idle-igate-wiring-test.js', // APRS phase 4: the APRS idle mode and the iGate wiring in main.js and Settings
   'test/aprs-beacon-test.js', // APRS phase 5: the beacon packet, approximate position, symbols, comment, the 10 min timer floor, refusals
   'test/aprs-beacon-wiring-test.js', // APRS phase 5: the beacon end to end against a local fake APRS-IS server, and its wiring
+  'test/aprs-position-ambiguity-test.js', // APRS "Near my home (about 1 mile)": position ambiguity (minutes cut, both lat and lon), home = point/GPS/grid, the default and migration rule, what goes out at each precision, the marker label, the map's saved view and Home button
   'test/flex-gps-test.js', // the radio's GPS: the gps status parser (# pairs, spaces, deltas), the fix rule, the APRS position source (no fix = refusal, never 0,0)
   'test/smartsdr-gps-test.js', // the radio's GPS: one sub gps all per connection, a gps event per change, never a set
   'test/flex-gps-wiring-test.js', // the radio's GPS: both beacons ask one provider; Settings offers the GPS grid, never sets it
