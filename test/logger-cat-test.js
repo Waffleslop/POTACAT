@@ -51,5 +51,6 @@ const st = { freqHz: 14074000, mode: 'DIGU', ptt: false, smeter: 120, powerW: 60
   assert.ok(/if \(_loggerCatPtt && !_loggerCatClients\) \{ _loggerCatPtt = false; handleRemotePtt\(false\);/.test(main), 'a dropped logger releases PTT');
   assert.ok(/try \{ stopLoggerCat\(\); \} catch \{\}/.test(main), 'stopped at quit');
   ok('wired in main: loopback, PTT released on disconnect, stopped at quit');
+  // #770 (keying on the Yaesu LAN): test/logger-cat-lan-ptt-test.js
   console.log(`Logger CAT: ${n} passed, 0 failed`);
 })().catch((e) => { console.error('FAIL', e); process.exit(1); });

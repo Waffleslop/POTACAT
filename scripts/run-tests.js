@@ -486,6 +486,7 @@ const TESTS = [
   'test/nocat-rig-test.js',
   'test/commander-codec-test.js',
   'test/logger-cat-test.js',
+  'test/logger-cat-lan-ptt-test.js', // #770: an outside program keys the Yaesu LAN: VFO PTT path, hard timeout, release on disconnect, off by default
   'test/cm108-ptt-test.js',
   'test/removed-features-test.js',
   'test/dxpedition-contests-test.js',

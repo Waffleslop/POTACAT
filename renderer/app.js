@@ -18189,7 +18189,8 @@ async function openSettingsDialog(tab) {
   setEnableN1mmUdp.checked = s.enableN1mmUdp === true;
   { const e = document.getElementById('set-enable-logger-cat'), c = document.getElementById('logger-cat-config'), p = document.getElementById('set-logger-cat-port');
     if (e) { e.checked = s.enableLoggerCat === true; if (c) c.classList.toggle('hidden', !e.checked); if (!e.dataset.wired) { e.addEventListener('change', () => c && c.classList.toggle('hidden', !e.checked)); e.dataset.wired = '1'; } }
-    if (p) p.value = s.loggerCatPort || 4535; }
+    if (p) p.value = s.loggerCatPort || 4535;
+    const lt = document.getElementById('set-logger-cat-lan-tx'); if (lt) lt.checked = s.loggerCatLanTx === true; }
   setN1mmHost.value = s.n1mmHost || '127.0.0.1';
   setN1mmPort.value = s.n1mmPort || 12060;
   n1mmUdpConfig.classList.toggle('hidden', !s.enableN1mmUdp);
@@ -19309,6 +19310,7 @@ settingsSave.addEventListener('click', async () => {
     tgxlLabels: tgxlLabelsVal,
     enableN1mmUdp: n1mmUdpEnabled,
     ...(document.getElementById('set-enable-logger-cat') ? { enableLoggerCat: document.getElementById('set-enable-logger-cat').checked, loggerCatPort: parseInt(document.getElementById('set-logger-cat-port').value, 10) || 4535 } : {}),
+    ...(document.getElementById('set-logger-cat-lan-tx') ? { loggerCatLanTx: document.getElementById('set-logger-cat-lan-tx').checked } : {}),
     n1mmHost: n1mmHostVal,
     n1mmPort: n1mmPortVal,
     enableSplit: enableSplitEnabled,
