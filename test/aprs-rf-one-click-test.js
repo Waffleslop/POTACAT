@@ -14,7 +14,6 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const vm = require('vm');
 
 let pass = 0, fail = 0;
 function test(name, fn) {
@@ -33,82 +32,13 @@ const fnBody = (src, name) => {
 
 console.log('APRS radio beacon: one click, meters, TX power, My APRS SSID');
 
-// ── a stand-in DOM, enough for the APRS window's bar scripts ─────────────────
-function makeDom(ids) {
-  const els = {};
-  function el(id, tag) {
-    const cls = new Set();
-    const e = {
-      id, tagName: (tag || 'span').toUpperCase(), textContent: '', title: '', disabled: false, hidden: false, value: '',
-      min: '', max: '', step: '', innerHTML: '', className: '', dataset: {}, style: {}, children: [], options: [], attrs: {}, listeners: {},
-      classList: {
-        add: (c) => cls.add(c), remove: (c) => cls.delete(c), contains: (c) => cls.has(c),
-        toggle: (c, on) => { if (on === undefined ? !cls.has(c) : on) cls.add(c); else cls.delete(c); },
-      },
-      setAttribute(k, v) { this.attrs[k] = String(v); },
-      getAttribute(k) { return this.attrs[k]; },
-      appendChild(c) { this.children.push(c); if (c.tagName === 'OPTION') this.options.push(c); return c; },
-      addEventListener(t, fn) { (this.listeners[t] = this.listeners[t] || []).push(fn); },
-      fire(t, ev) { for (const fn of this.listeners[t] || []) fn(ev || { target: this }); },
-      blur() {},
-    };
-    Object.defineProperty(e, 'innerHTML', { get() { return ''; }, set() { e.children = []; e.options = []; } });
-    const tc = { v: '' };
-    Object.defineProperty(e, 'textContent', { get() { return tc.v || e.children.map((c) => c.textContent).join(' '); }, set(v) { tc.v = String(v); if (v === '') e.children = []; } });
-    return e;
-  }
-  for (const id of ids) els[id] = el(id, /select$|-ssid$/.test(id) ? 'select' : /range$/.test(id) ? 'input' : /-now$/.test(id) ? 'button' : 'span');
-  const document = {
-    hidden: false, activeElement: null,
-    documentElement: { getAttribute: () => '' },
-    getElementById: (id) => els[id] || null,
-    createElement: (tag) => el('', tag),
-    addEventListener() {},
-  };
-  return { els, document };
-}
-
-function loadBar({ now = 1000 } = {}) {
-  const ids = ['aprs-rf-now', 'aprs-rf-detail', 'aprs-rf-status', 'aprs-rf-dot', 'aprs-rf-text', 'aprs-rf-meters', 'aprs-rf-last',
-    'aprs-rf-power', 'aprs-rf-power-range', 'aprs-rf-power-select', 'aprs-rf-power-val'];
-  const { els, document } = makeDom(ids);
-  const calls = { rfSend: 0, rfGet: 0, rig: [] };
-  const on = {};
-  const timers = [];
-  const clock = { t: now };
-  const api = {
-    rfGet: () => { calls.rfGet++; }, rfSend: () => { calls.rfSend++; },
-    onRf: (cb) => { on.rf = cb; },
-    rigControl: (d) => { calls.rig.push(d); return Promise.resolve({ ok: true }); },
-    rigPowerGet: () => {}, onRigPower: (cb) => { on.power = cb; },
-    onCatSmeter: (cb) => { on.smeter = cb; }, onCatSwr: (cb) => { on.swr = cb; },
-    onCatSwrRatio: (cb) => { on.swrRatio = cb; }, onCatFwdPower: (cb) => { on.fwd = cb; },
-  };
-  const DateStub = { now: () => clock.t };
-  const ctx = {
-    document, console, Date: DateStub, Math, Number, String, parseFloat, parseInt, isFinite, JSON, Object, Array, Infinity,
-    setTimeout: (fn, ms) => { timers.push({ fn, at: clock.t + ms }); return timers.length; }, clearTimeout: () => {},
-    setInterval: () => 0,
-  };
-  ctx.window = ctx; ctx.self = ctx;
-  ctx.window.api = api;
-  vm.createContext(ctx);
-  vm.runInContext(read('lib/rig-power-view.js'), ctx);
-  vm.runInContext(read('lib/aprs-rf-meters.js'), ctx);
-  vm.runInContext(read('renderer/aprs-rf-beacon-bar.js'), ctx);
-  const runTimers = () => { const due = timers.splice(0); for (const t of due) t.fn(); };
-  return { els, calls, on, clock, runTimers };
-}
-
-const READY = {
-  allowed: true, reason: '', why: '', band: '30m', bandLabel: '30 m', mode: 'USB', mhz: '10.1476', powerW: 5,
-  preview: { button: 'Beacon now on 30 m, 10.1476 MHz at 5 W', detail: 'USB, as K3SBP, path WIDE1-1, about 1.6 s on the air. One click transmits one packet.' },
-  sending: false, phase: 'idle', keyed: false, meters: { smeter: true, swr: true, alc: false, power: true }, lastPeak: null,
-  sentence: '', lastAt: 0, lastPacket: '', lastBand: '',
-};
+// The window redesign (2026-11-19): the radio beacon bar this file used to run
+// in a stand-in DOM is gone; its button, click, meter and power checks run on
+// the new Beacon panel in test/aprs-window-test.js. What stays here is the
+// preview, main's wiring, the meters lib and My APRS SSID.
 
 // ── one click ────────────────────────────────────────────────────────────────
-test('the button reads band, frequency and power before the click, and the line under it mode, call, path and air time', () => {
+test('the preview reads band, frequency and power, and the line under it mode, call, path and air time', () => {
   const R = require('../lib/aprs-rf-beacon');
   const p = R.rfPreview({ bandLabel: '30 m', mhz: '10.1476', mode: 'USB', powerW: 5, path: ['WIDE1-1'], airMs: 1600, source: 'K3SBP' });
   assert.strictEqual(p.button, 'Beacon now on 30 m, 10.1476 MHz at 5 W');
@@ -118,85 +48,40 @@ test('the button reads band, frequency and power before the click, and the line 
   assert.ok(/power set on the radio/.test(unknown.detail) && /WIDE1-1,WIDE2-1/.test(unknown.detail));
   const narrow = R.rfPreview({ bandLabel: '30 m', mhz: '10.1476', mode: 'USB', powerW: 10, path: ['WIDE1-1'], airMs: 1600, source: 'K3SBP', txNarrow: { lo: 1400, hi: 2000 } });
   assert.ok(/narrowed to 1400-2000 Hz/.test(narrow.detail));
-
-  const b = loadBar();
-  b.on.rf(READY);
-  const btn = b.els['aprs-rf-now'];
-  assert.strictEqual(btn.disabled, false);
-  assert.strictEqual(btn.textContent, 'Beacon now on 30 m, 10.1476 MHz at 5 W');
-  assert.ok(/path WIDE1-1/.test(b.els['aprs-rf-detail'].textContent));
 });
 
 test('one click sends: rfSend at once, no confirmation step anywhere', () => {
-  const b = loadBar();
-  b.on.rf(READY);
-  b.els['aprs-rf-now'].fire('click');
-  assert.strictEqual(b.calls.rfSend, 1, 'one click, one send');
-  const all = read('renderer/aprs-popout.html') + read('renderer/aprs-rf-beacon-bar.js') + read('preload-aprs-popout.js');
+  const all = read('renderer/aprs-popout.html') + read('renderer/aprs-window.js') + read('preload-aprs-popout.js');
+  assert.ok(/api\.rfSend\(\);/.test(read('renderer/aprs-window.js')), 'the click sends');
   assert.ok(!/aprs-rf-confirm|aprs-rf-cancel|rfAsk|rfCancel|aprs-rf-ask/.test(all), 'no confirm line, Cancel or ask step in the window');
   const main = read('main.js');
   assert.ok(!/aprs-rf-ask|aprs-rf-cancel|aprsRfAsk|aprsRfCancel|APRS_RF_CONFIRM_MS|aprsRfUi\.confirm/.test(main), 'no confirm step in main');
   assert.ok(/ipcMain\.on\('aprs-rf-send', \(\) => \{ aprsRfSend\(\)/.test(main));
 });
 
-test('a second click while a beacon is going out does nothing (window and main)', () => {
-  const b = loadBar();
-  b.on.rf(READY);
-  const btn = b.els['aprs-rf-now'];
-  btn.fire('click');
-  assert.strictEqual(btn.disabled, true, 'disabled at once');
-  btn.fire('click');
-  b.on.rf(READY); // a push from before the click arrives: still held
-  btn.fire('click');
-  assert.strictEqual(b.calls.rfSend, 1);
-  b.clock.t += 5000;
-  b.on.rf({ ...READY, sending: true, phase: 'waiting' });
-  assert.strictEqual(btn.disabled, true, 'main says a beacon is going out');
-  btn.fire('click');
-  b.on.rf({ ...READY, phase: 'keyed', keyed: true });
-  btn.fire('click');
-  assert.strictEqual(b.calls.rfSend, 1, 'never a second send');
-  b.on.rf(READY);
-  assert.strictEqual(btn.disabled, false, 'ready again after the beacon');
-  // main: the click handler returns at once while one is in flight
+test('a second click while a beacon is going out does nothing (main; the window in test/aprs-window-test.js)', () => {
   const send = fnBody(read('main.js'), 'aprsRfSend');
   assert.ok(/if \(_aprsRfSending \|\| aprsRfInFlight\(\)\) return;/.test(send), send);
   assert.ok(send.indexOf('_aprsRfSending = true') < send.indexOf('aprsRfTransmit()') && /finally \{ _aprsRfSending = false;/.test(send));
 });
 
-test('a refused gate still disables the button, with its sentence', () => {
-  const b = loadBar();
-  const why = 'Turn on Listen on my radio first. The beacon goes out on the frequency it listens on.';
-  b.on.rf({ ...READY, allowed: false, reason: 'listen', why });
-  const btn = b.els['aprs-rf-now'];
-  assert.strictEqual(btn.disabled, true);
-  assert.strictEqual(btn.textContent, 'Beacon now (radio)');
-  assert.strictEqual(btn.title, why);
-  assert.strictEqual(b.els['aprs-rf-text'].textContent, 'Radio beacon: ' + why);
-  btn.fire('click');
-  assert.strictEqual(b.calls.rfSend, 0);
-  // main judges the gate again at the click, before the runner
+test('main judges the gate again at the click, before the runner (the window\'s disabled button in test/aprs-window-test.js)', () => {
   const t = fnBody(read('main.js'), 'aprsRfTransmit');
   assert.ok(t.indexOf('AprsRfGate.readiness(aprsRfGateState())') > 0 && t.indexOf('AprsRfGate.readiness(aprsRfGateState())') < t.indexOf('aprsRfRunner()'));
   assert.ok(t.indexOf('if (APRS_DEV_FRAMES)') < t.indexOf('aprsRfRunner()'), 'a dev build never transmits');
 });
 
 // ── meters ───────────────────────────────────────────────────────────────────
-test('meters: the S-meter while listening, SWR and RF out while the beacon transmits, peaks after', () => {
-  const b = loadBar();
-  b.on.rf(READY);
-  b.on.smeter(100);
-  const txt = () => b.els['aprs-rf-meters'].children.map((c) => c.children.map((x) => x.textContent).join(' ')).join(' | ');
-  assert.ok(/S-meter S8/.test(txt()), txt());
-  assert.ok(/SWR shows while transmitting/.test(txt()), txt());
-  b.on.rf({ ...READY, phase: 'keyed', keyed: true });
-  b.on.swr(30); // wire 30 = 1.5
-  b.on.fwd(5);
-  assert.ok(/SWR 1\.5/.test(txt()) && /RF out 5 W/.test(txt()), txt());
-  b.on.swrRatio(1.3); // the radio's true ratio wins
-  assert.ok(/SWR 1\.3/.test(txt()), txt());
-  b.on.rf({ ...READY, lastPeak: { swr: 1.3, fwdW: 5.1 } });
-  assert.strictEqual(b.els['aprs-rf-last'].textContent, 'Peak on the last radio beacon: SWR 1.3, RF out 5.1 W.');
+test('meters: the S-meter while listening, SWR and RF out while the beacon transmits, peaks after (lib)', () => {
+  const M = require('../lib/aprs-rf-meters');
+  const rx = M.meterView({ txing: false, smeter: 100, available: { smeter: true, swr: true } });
+  assert.strictEqual(rx.items.find((i) => i.key === 'smeter').text, 'S8');
+  const tx = M.meterView({ txing: true, swr: 1.5, fwdW: 5, available: { swr: true, power: true } });
+  assert.strictEqual(tx.items.find((i) => i.key === 'swr').text, '1.5');
+  assert.strictEqual(tx.items.find((i) => i.key === 'fwd').text, '5 W');
+  assert.strictEqual(M.meterView({ last: { swr: 1.3, fwdW: 5.1 }, available: { swr: true } }).last, 'Peak on the last radio beacon: SWR 1.3, RF out 5.1 W.');
+  const glue = read('renderer/aprs-window.js');
+  assert.ok(/M\.sLabel\(meter\.smeter\)/.test(glue) && /meter\.swr = M\.swrFromWire\(v\)/.test(glue) && /meter\.swrRatioSeen = true/.test(glue), 'the window reads the same scale');
 });
 
 test('meters: a radio with no SWR says so and never shows a made-up value', () => {
@@ -208,9 +93,6 @@ test('meters: a radio with no SWR says so and never shows a made-up value', () =
   assert.strictEqual(rx.items.find((i) => i.key === 'smeter').text, 'S9');
   const last = M.meterView({ txing: false, available: { swr: false }, last: { swr: 0, fwdW: 5 } });
   assert.strictEqual(last.last, 'Peak on the last radio beacon: no SWR from this radio, RF out 5 W.');
-  const b = loadBar();
-  b.on.rf({ ...READY, keyed: true, phase: 'keyed', meters: { smeter: true, swr: false, power: true } });
-  assert.ok(/No SWR from this radio/.test(b.els['aprs-rf-meters'].textContent), b.els['aprs-rf-meters'].textContent);
   // the scale is the VFO and JTCAT windows': S9 at 120, S9+60 at 255; SWR 1 + v/60
   assert.strictEqual(M.sLabel(255), 'S9+60');
   assert.strictEqual(M.swrFromWire(60), 2);
@@ -243,24 +125,9 @@ test('main feeds the window the meters every window gets', () => {
 });
 
 // ── TX power ─────────────────────────────────────────────────────────────────
-test('the power control sends set-tx-power through rig-control and shows the radio\'s read-back', () => {
-  const b = loadBar();
-  const payload = { watts: 5, powerUnit: 'W', settable: true, capable: true, known: true, minPower: 5, maxPower: 100, powerStep: 1, powerDecimals: 0, powerChoices: null };
-  b.on.power(payload);
-  const box = b.els['aprs-rf-power'], range = b.els['aprs-rf-power-range'], val = b.els['aprs-rf-power-val'];
-  assert.strictEqual(box.classList.contains('hidden'), false);
-  assert.strictEqual(String(range.min), '5'); assert.strictEqual(String(range.max), '100');
-  assert.strictEqual(val.textContent, 'radio reads 5W');
-  range.value = '20';
-  range.fire('input');
-  assert.strictEqual(val.textContent, 'setting 20W');
-  b.runTimers();
-  assert.strictEqual(JSON.stringify(b.calls.rig), JSON.stringify([{ action: 'set-tx-power', value: 20 }]));
-  b.clock.t += 1000;
-  b.on.power({ ...payload, watts: 20 });
-  assert.strictEqual(val.textContent, 'radio reads 20W', 'the read-back, not the slider');
-  b.on.power({ ...payload, capable: false });
-  assert.strictEqual(box.classList.contains('hidden'), true, 'no txpower capability: no control, as elsewhere');
+test('the power control sends set-tx-power through rig-control (the window\'s minus / plus in test/aprs-window-test.js)', () => {
+  const glue = read('renderer/aprs-window.js');
+  assert.ok(/api\.rigControl\(\{ action: 'set-tx-power', value: w \}\)/.test(glue));
   const main = read('main.js');
   const push = fnBody(main, 'pushAprsRigPower');
   assert.ok(/jtcatPopoutRigPowerPayload\(\)/.test(push) && /'aprs-rig-power'/.test(push), 'the JTCAT / Winlink payload: the rig caps\' min/max');
@@ -327,13 +194,15 @@ test('main uses the pick for the packet and for Dire Wolf\'s MYCALL, and the win
   assert.ok(/ssid: st\.rfSsid/.test(fnBody(main, 'aprsRfPlan')));
   assert.ok(/ssid: AprsBeacon\.beaconSettings\(settings\)\.rfSsid/.test(fnBody(main, 'aprsRfStartModem')));
   assert.ok(/rfCall: login\.ok \? AprsRfBeacon\.rfSource\(settings\.myCallsign, login\.base, /.test(fnBody(main, 'aprsBeaconState')));
+  // The window redesign (2026-11-19): "Call sign ending" in the Beacon panel, the calls in its header.
   const html = read('renderer/aprs-popout.html');
   assert.ok(/id="aprs-rf-ssid"/.test(html) && /id="aprs-beacon-as"/.test(html));
-  const i = html.indexOf('id="aprs-rf-now"'), j = html.indexOf('id="aprs-beacon-as"');
-  assert.ok(j > i && j - i < 400, 'the calls sit next to the beacon buttons');
-  const bar = read('renderer/aprs-beacon-bar.js');
-  assert.ok(/'Internet beacon as ' \+ s\.call/.test(bar) && /radio beacon as ' \+ s\.rfCall/.test(bar));
-  assert.ok(/beaconSet\(\{ rfSsid: /.test(bar));
+  // 2026-11-20: the ending moved to the APRS settings panel; the Beacon panel keeps "Beacons as ..." and a link to it.
+  assert.ok(html.indexOf('id="aprs-rf-ssid"') > html.indexOf('id="aprs-settings" role="dialog"'), 'the ending is in APRS settings');
+  assert.ok(/id="aprs-beacon-as"><\/span>\s*<button type="button" class="aprs-link" id="aprs-beacon-settings"/.test(html), 'the calls and the link head the Beacon panel');
+  const lib = read('lib/aprs-window-state.js');
+  assert.ok(/'Beacons as ' \+ rc/.test(lib) && /' \(internet ' \+ b\.call/.test(lib));
+  assert.ok(/beaconSet\(\{ rfSsid: /.test(read('renderer/aprs-window.js')));
 });
 
 test('the new test is in scripts/run-tests.js', () => {

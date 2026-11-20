@@ -1,58 +1,181 @@
-/* APRS window (phase 1). Colours come from the theme variables, so every
-   theme draws it in its own palette. The nine icons and their colours are in
-   aprs-icons.js; the map itself is one canvas (aprs-popout.js). */
+/* APRS window (Casey 2026-11-19, the approved mock-up): three status cards,
+   the banners, the map, and on the right the Beacon panel over the Stations
+   list. Colours come from the theme variables only (styles.css; with a
+   design-system theme, ds-bridge.css points them at tokens.css), so every
+   theme draws it in its own palette. The icons are aprs-icons.js; the map is
+   one canvas (aprs-popout.js). */
 html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
   background: var(--bg-primary); color: var(--text-primary);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 15px; }
 body { display: flex; flex-direction: column; }
 .hidden { display: none !important; }
+.aprs-scroll { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 
-.aprs-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-  padding: 7px 12px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); }
-.aprs-mark { display: inline-flex; align-items: center; gap: 7px; color: var(--text-secondary); white-space: nowrap; }
-.aprs-dot { width: 11px; height: 11px; border-radius: 50%; background: var(--text-dim); flex: none; }
-.aprs-dot.ok { background: var(--accent-green); }
-.aprs-dot.wait { background: var(--source-sota); }
-.aprs-dot.bad { background: var(--accent-red); }
-.aprs-spacer { flex: 1; }
-.aprs-range { display: inline-flex; align-items: center; gap: 7px; color: var(--text-secondary); }
-.aprs-range select, #aprs-search { font-size: 15px; padding: 4px 8px; border-radius: 5px;
-  background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-primary); }
-#aprs-search { width: 230px; }
+/* ── the dots and bars every card uses ── */
+.aprs-dot { width: 11px; height: 11px; border-radius: 50%; flex: none; box-sizing: border-box;
+  border: 2px solid var(--text-secondary); background: transparent; }
+.aprs-dot.ok { background: var(--accent-green); border-color: var(--accent-green); }
+.aprs-dot.wait { background: var(--warn); border-color: var(--warn); }
+.aprs-dot.bad, .aprs-dot.tx { background: var(--accent-red); border-color: var(--accent-red); }
+.aprs-bar { flex: 1 1 auto; height: 9px; border-radius: 5px; background: var(--bg-tertiary); overflow: hidden; min-width: 60px; }
+.aprs-bar-lg { height: 13px; border-radius: 7px; }
+.aprs-bar-fill { height: 100%; width: 0; background: var(--accent-blue); transition: width 0.15s; }
+.aprs-fill-swr { background: var(--accent-green); }
+.aprs-fill-swr.warn { background: var(--warn); }
+.aprs-fill-swr.high { background: var(--accent-red); }
 
+/* ── the three cards ── */
+.aprs-cards { display: flex; flex-wrap: wrap; align-items: stretch; gap: 12px; padding: 12px 16px;
+  background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); flex: none; }
+.aprs-card { flex: 1 1 240px; display: flex; flex-direction: column; gap: 6px; padding: 11px 14px; min-width: 0;
+  border-radius: 10px; border: 1px solid var(--border-primary); background: var(--bg-primary); }
+.aprs-card.off { border-style: dashed; }
+.aprs-card.tx { border: 2px solid var(--accent-red); }
+.aprs-card.busy { border: 2px solid var(--warn); }
+.aprs-card-heard.some { border: 2px solid var(--accent-green); }
+.aprs-card-head { display: flex; align-items: center; gap: 8px; }
+.aprs-card-title { font-weight: 800; }
+.aprs-card-label { font-size: 14px; font-weight: 700; color: var(--text-secondary); }
+.aprs-card-lines { display: flex; flex-direction: column; gap: 3px; font-size: 14px; color: var(--text-secondary); }
+.aprs-card-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.aprs-card-btns:empty { display: none; }
+.aprs-card-btn { font: inherit; font-size: 14px; font-weight: 700; padding: 8px 14px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--accent-blue); background: var(--bg-tertiary); color: var(--text-primary); }
+.aprs-card-btn:hover { background: var(--bg-hover); }
+.aprs-card-btn:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+.aprs-card-btn.quiet { border-color: var(--border-primary); font-weight: 600; }
+.aprs-card-switch { margin-left: auto; font-weight: 600; font-size: 14px; color: var(--text-secondary); }
+.aprs-smeter { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.aprs-smeter-s { color: var(--text-secondary); min-width: 12px; }
+.aprs-smeter-val { font-weight: 700; min-width: 3.4em; text-align: right; font-variant-numeric: tabular-nums; }
+.aprs-smeter.none .aprs-bar { display: none; }
+.aprs-smeter.none .aprs-smeter-s { display: none; }
+.aprs-smeter.none .aprs-smeter-val { font-weight: 400; color: var(--text-secondary); text-align: left; }
+.aprs-heard-count { display: flex; align-items: baseline; gap: 8px; }
+.aprs-heard-n { font-size: 28px; font-weight: 800; line-height: 1.1; }
+
+/* The switch (listening, the feed). */
+.aprs-switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
+.aprs-switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.aprs-switch-track { position: relative; width: 40px; height: 22px; border-radius: 11px; flex: none;
+  background: var(--bg-input); border: 1px solid var(--border-primary); transition: background 0.15s; }
+.aprs-switch-track::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--text-secondary); transition: transform 0.15s, background 0.15s; }
+.aprs-switch input:checked + .aprs-switch-track { background: var(--accent-green); border-color: var(--accent-green); }
+.aprs-switch input:checked + .aprs-switch-track::after { transform: translateX(18px); background: var(--bg-primary); }
+.aprs-switch input:focus-visible + .aprs-switch-track { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+
+/* ── banners ── */
+.aprs-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 16px; flex: none; }
+.aprs-banner-title { font-weight: 700; }
+.aprs-banner-detail { font-size: 14px; }
+.aprs-banner-btn { margin-left: auto; font: inherit; font-size: 14px; font-weight: 800; padding: 8px 16px; border-radius: 8px; cursor: pointer; background: transparent; }
+.aprs-banner-btn:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.aprs-banner-timer { background: var(--tint-orange); border-bottom: 1px solid var(--warn); color: var(--text-primary); }
+.aprs-banner-timer svg { color: var(--warn); flex: none; }
+.aprs-banner-timer .aprs-banner-detail { color: var(--text-secondary); }
+.aprs-banner-timer .aprs-banner-btn { border: 1px solid var(--warn); color: var(--text-primary); }
+.aprs-banner-air { background: var(--tx-active); color: var(--on-tx-active); }
+.aprs-banner-air .aprs-banner-title { font-weight: 800; font-size: 16px; }
+.aprs-banner-air .aprs-banner-detail { font-variant-numeric: tabular-nums; }
+.aprs-banner-air .aprs-banner-btn { border: 2px solid var(--on-tx-active); color: var(--on-tx-active); }
+
+/* ── map and right column ── */
 .aprs-main { flex: 1; display: flex; min-height: 0; }
-.aprs-map-wrap { flex: 1; position: relative; min-width: 260px; }
+.aprs-map-wrap { flex: 1 1 auto; position: relative; min-width: 260px; }
 #aprs-map { position: absolute; inset: 0; background: var(--bg-tertiary); }
-.aprs-side { width: 46%; min-width: 360px; max-width: 640px; display: flex; flex-direction: column;
-  border-left: 1px solid var(--border-primary); background: var(--bg-primary); min-height: 0; }
-.aprs-count { padding: 7px 12px; color: var(--text-secondary); border-bottom: 1px solid var(--border-primary); }
-.aprs-table-wrap { flex: 1; overflow: auto; min-height: 120px; }
+.aprs-side { flex: none; width: 440px; display: flex; flex-direction: column; min-height: 0; overflow-y: auto;
+  border-left: 1px solid var(--border-primary); background: var(--bg-secondary); }
+.aprs-sec-head { display: flex; align-items: baseline; gap: 6px 10px; flex-wrap: wrap; }
+.aprs-sec-head h2 { margin: 0; font-size: 17px; font-weight: 800; }
+.aprs-sec-sub { font-size: 14px; color: var(--text-secondary); }
 
-.aprs-table { width: 100%; border-collapse: collapse; font-size: 14px; table-layout: fixed; }
-.aprs-table col.c-sym { width: 34px; }
-.aprs-table col.c-call { width: 118px; }
-.aprs-table col.c-dist { width: 78px; }
-.aprs-table col.c-brg { width: 82px; }
-.aprs-table col.c-age { width: 70px; }
-.aprs-table th { position: sticky; top: 0; z-index: 1; background: var(--bg-secondary); color: var(--text-secondary);
-  text-align: left; font-weight: 600; padding: 7px 8px; cursor: pointer; user-select: none; white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis; border-bottom: 1px solid var(--border-primary); }
-.aprs-table th:hover { color: var(--text-primary); }
-.aprs-table th.sorted::after { content: ' \25B2'; font-size: 10px; }
-.aprs-table th.sorted.desc::after { content: ' \25BC'; }
-/* Every row is one line and the same height: the list draws only the rows in view. */
-.aprs-table tbody tr.r td { height: 32px; padding: 0 8px; box-sizing: border-box; white-space: nowrap; overflow: hidden;
-  text-overflow: ellipsis; border-bottom: 1px solid var(--border-secondary, var(--border-primary)); }
-.aprs-table tbody tr.r td:first-child { padding: 0 0 0 8px; text-overflow: clip; }
-.aprs-table tbody tr.aprs-pad td { padding: 0; border: 0; }
-.aprs-table td.num, .aprs-table th.num { text-align: right; }
-.aprs-table td.call { font-weight: 700; }
-.aprs-table td.cmt { color: var(--text-secondary); }
-.aprs-table tbody tr.r { cursor: pointer; }
-.aprs-table tbody tr.r:hover { background: var(--bg-hover); }
-.aprs-table tbody tr.sel { background: var(--bg-hover); box-shadow: inset 3px 0 0 var(--accent-red); }
+.aprs-mapswitch { position: absolute; right: 12px; top: 12px; z-index: 1000; display: flex; gap: 4px; padding: 4px;
+  border-radius: 10px; background: var(--bg-secondary); border: 1px solid var(--border-primary); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25); }
+.aprs-mapswitch button { font: inherit; font-size: 14px; padding: 7px 12px; border-radius: 7px; border: 0; cursor: pointer;
+  background: transparent; color: var(--text-secondary); }
+.aprs-mapswitch button[aria-pressed="true"] { background: var(--bg-tertiary); color: var(--text-primary); font-weight: 700; }
+.aprs-mapswitch button:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 1px; }
+
+/* ── the Beacon panel ── */
+.aprs-beacon { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--border-primary); flex: none; }
+.aprs-grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.aprs-grid-wide { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); }
+.aprs-field { display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: var(--text-secondary); min-width: 0; }
+.aprs-field select, .aprs-field input, .aprs-within select, #aprs-search { font: inherit; font-size: 15px; padding: 7px 9px; border-radius: 8px;
+  background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-primary); min-width: 0; box-sizing: border-box; width: 100%; }
+.aprs-power { display: flex; align-items: center; gap: 6px; }
+.aprs-step { width: 40px; height: 36px; flex: none; font: inherit; font-size: 20px; line-height: 1; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--border-primary); background: var(--bg-input); color: var(--text-primary); }
+.aprs-step:hover:not(:disabled) { border-color: var(--accent-blue); }
+.aprs-step:disabled { opacity: 0.45; cursor: default; }
+.aprs-step:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+.aprs-power-val { flex: 1 1 auto; text-align: center; font-weight: 800; font-size: 16px; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.aprs-note { font-size: 14px; color: var(--text-secondary); line-height: 1.4; }
+.aprs-note.bad { color: var(--accent-red); }
+.aprs-beacon-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.aprs-big { flex: 1 1 160px; display: flex; flex-direction: column; gap: 2px; text-align: left; font: inherit; cursor: pointer;
+  padding: 11px 13px; border-radius: 8px; border: 1px solid var(--border-primary); background: var(--bg-primary); color: var(--text-primary); }
+.aprs-big-label { font-weight: 800; font-size: 15px; }
+.aprs-big-sub { font-size: 13px; color: var(--text-secondary); }
+.aprs-big:hover:not(:disabled) { border-color: var(--accent-blue); }
+.aprs-big:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+.aprs-big:disabled { cursor: default; color: var(--text-secondary); background: var(--bg-primary); border-color: var(--border-primary); }
+/* The radio beacon keys a radio: filled, the theme's brand colour; disabled it goes quiet. */
+.aprs-big-rf:not(:disabled) { background: var(--accent-gold); border-color: var(--accent-gold); color: var(--bg-primary); }
+.aprs-big-rf:not(:disabled) .aprs-big-sub { color: var(--bg-primary); opacity: 0.9; }
+.aprs-big-rf:not(:disabled):hover { filter: brightness(1.08); }
+.aprs-result { font-size: 14px; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--warn); line-height: 1.4; }
+.aprs-result.bad { border-color: var(--accent-red); }
+.aprs-live { display: flex; flex-direction: column; gap: 9px; padding: 12px; border-radius: 10px; background: var(--bg-primary); border: 1px solid var(--border-primary); }
+.aprs-live-grid { display: grid; grid-template-columns: 82px minmax(0, 1fr) 76px; gap: 9px; align-items: center; font-size: 14px; }
+.aprs-live-k { color: var(--text-secondary); }
+.aprs-live-v { font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; }
+.aprs-live-v.none { font-weight: 400; color: var(--text-secondary); grid-column: 2 / 4; text-align: left; }
+.aprs-more { font-size: 14px; color: var(--text-secondary); }
+.aprs-more summary { cursor: pointer; padding: 3px 0; color: var(--text-primary); font-weight: 600; }
+.aprs-more summary:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+.aprs-more[open] { display: flex; flex-direction: column; gap: 9px; }
+.aprs-more-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.aprs-btn-quiet { font: inherit; font-size: 14px; padding: 5px 11px; border-radius: 7px; cursor: pointer;
+  color: var(--text-primary); background: transparent; border: 1px solid var(--border-primary); }
+.aprs-btn-quiet:hover { border-color: var(--accent-blue); }
+.aprs-btn-quiet:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+.aprs-check { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text-primary); }
+.aprs-check input { width: 17px; height: 17px; accent-color: var(--accent-blue); }
+.aprs-beacon-syms { display: flex; gap: 6px; flex-wrap: wrap; }
+.aprs-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px 3px 5px; border-radius: 12px; font: inherit; font-size: 14px;
+  cursor: pointer; color: var(--text-secondary); background: transparent; border: 1px solid var(--border-primary); }
+.aprs-chip:hover { color: var(--text-primary); border-color: var(--accent-blue); }
+.aprs-chip.on { color: var(--text-primary); border-color: var(--accent-blue); box-shadow: inset 0 0 0 1px var(--accent-blue); cursor: default; }
+.aprs-chip:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+.aprs-picking, .aprs-picking .leaflet-interactive { cursor: crosshair !important; }
+
+/* ── the Stations list: two lines a row; only the rows in view are in the page ── */
+.aprs-stations { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 260px; }
+.aprs-stations .aprs-sec-head { padding: 12px 16px 6px; }
+.aprs-within { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; font-size: 14px; color: var(--text-secondary); }
+.aprs-within select { width: auto; padding: 5px 8px; font-size: 14px; }
+.aprs-search-row { display: flex; align-items: center; gap: 10px; padding: 0 16px 8px; }
+.aprs-search-row #aprs-search { flex: 1 1 auto; width: auto; min-width: 0; }
+.aprs-search-row .aprs-within { flex: none; margin-left: 0; }
+#aprs-search { font-size: 14px; padding: 6px 9px; }
+.aprs-list-wrap { flex: 1 1 auto; overflow: auto; min-height: 160px; }
+.aprs-list { list-style: none; margin: 0; padding: 0; }
+.aprs-st { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; grid-template-rows: auto auto; column-gap: 10px; row-gap: 3px;
+  align-items: center; height: 58px; box-sizing: border-box; padding: 8px 16px; border-top: 1px solid var(--border-primary); cursor: pointer; }
+.aprs-st:hover { background: var(--bg-hover); }
+.aprs-st.sel { background: var(--bg-hover); box-shadow: inset 3px 0 0 var(--accent-red); }
+.aprs-st-ico { grid-row: 1 / 3; align-self: center; display: flex; align-items: center; justify-content: center; width: 22px; height: 22px;
+  border-radius: 50%; box-sizing: border-box; }
+.aprs-st.mine .aprs-st-ico { box-shadow: 0 0 0 3px var(--accent-green); }
+.aprs-st-call { font-weight: 700; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.aprs-st-via { font-weight: 400; font-size: 14px; color: var(--text-secondary); }
+.aprs-st.mine .aprs-st-via { color: var(--accent-green); font-weight: 600; }
+.aprs-st-right { font-size: 14px; color: var(--text-secondary); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.aprs-st-cmt { grid-column: 2 / 4; font-size: 14px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1em; }
+.aprs-pad { list-style: none; padding: 0; margin: 0; }
 .aprs-ico { display: inline-block; vertical-align: middle; flex: none; }
-.aprs-table td .aprs-ico { margin-top: -2px; }
 
 /* The map's stations are drawn on one canvas; clicks are hit-tested in the script. */
 .aprs-canvas { pointer-events: none; }
@@ -63,13 +186,15 @@ body { display: flex; flex-direction: column; }
   background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 6px;
   padding: 5px 9px; font-size: 13px; color: var(--text-secondary); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35); }
 .aprs-legend span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.aprs-key-rf { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin: 0 3px;
+  border: 3px solid var(--accent-green); box-sizing: content-box; }
 
-.aprs-empty { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 1000;
+.aprs-empty { position: absolute; top: 64px; left: 50%; transform: translateX(-50%); z-index: 1000;
   background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 6px;
   padding: 8px 14px; color: var(--text-primary); max-width: 80%; text-align: center; }
 
-.aprs-detail { border-top: 1px solid var(--border-primary); background: var(--bg-secondary); padding: 10px 12px 12px;
-  max-height: 45%; overflow: auto; }
+.aprs-detail { border-top: 1px solid var(--border-primary); background: var(--bg-primary); padding: 10px 16px 12px;
+  max-height: 45%; overflow: auto; flex: none; }
 .aprs-detail-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
 .aprs-detail-call { font-size: 20px; font-weight: 700; }
 .aprs-detail-kind { color: var(--text-secondary); }
@@ -81,6 +206,41 @@ body { display: flex; flex-direction: column; }
 .aprs-detail dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; font-size: 14px; }
 .aprs-detail dt { color: var(--text-secondary); }
 .aprs-detail dd { margin: 0; word-break: break-word; }
-.aprs-detail .raw { font-family: Consolas, 'Courier New', monospace; font-size: 12px; color: var(--text-secondary); }
+.aprs-detail .raw { font-family: Consolas, 'Courier New', monospace; font-size: 13px; color: var(--text-secondary); }
 
 .leaflet-container { font-family: inherit; }
+
+/* The title bar's "APRS settings" and the plain-text links that open the same panel. */
+.aprs-settings-open { -webkit-app-region: no-drag; align-self: center; margin-right: 8px; font: inherit; font-size: 14px; font-weight: 600;
+  padding: 3px 12px; border-radius: 6px; cursor: pointer; color: var(--text-primary); background: transparent; border: 1px solid var(--border-primary); }
+.aprs-settings-open:hover, .aprs-settings-open[aria-expanded="true"] { background: var(--bg-hover); }
+.aprs-settings-open:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+.aprs-link { font: inherit; font-size: 14px; padding: 0; border: 0; background: none; cursor: pointer; color: var(--accent-blue); text-decoration: underline; }
+.aprs-link:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+.aprs-card-foot { margin-top: auto; }
+.aprs-sec-head .aprs-link { margin-left: auto; }
+.aprs-strong { font-weight: 600; color: var(--text-primary); }
+
+/* The APRS settings panel: inside the window, over the right column, so the map stays clickable for Pick on map. */
+.aprs-settings { position: fixed; top: var(--titlebar-h, 32px); right: 0; bottom: 0; width: 440px; max-width: 100%; z-index: 2000;
+  display: flex; flex-direction: column; background: var(--bg-secondary); border-left: 1px solid var(--border-primary);
+  box-shadow: -6px 0 18px rgba(0, 0, 0, 0.3); }
+.aprs-settings-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--border-primary); }
+.aprs-settings-head h2 { margin: 0; font-size: 17px; font-weight: 800; flex: 1; }
+.aprs-settings-body { flex: 1; overflow-y: auto; padding: 4px 16px 18px; display: flex; flex-direction: column; gap: 6px; }
+.aprs-set { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--border-primary); }
+.aprs-set h3 { margin: 0; font-size: 15px; font-weight: 800; }
+.aprs-radios { display: flex; flex-direction: column; gap: 8px; }
+.aprs-radio { display: grid; grid-template-columns: 22px 1fr; gap: 2px 6px; cursor: pointer; color: var(--text-primary); }
+.aprs-radio input { width: 17px; height: 17px; margin: 2px 0 0; accent-color: var(--accent-blue); }
+.aprs-radio .aprs-note { grid-column: 2; }
+.aprs-radio.off { cursor: default; color: var(--text-secondary); }
+
+/* Narrow window: the right column stacks under the map and the page scrolls. */
+@media (max-width: 900px) {
+  .aprs-scroll { overflow-y: auto; }
+  .aprs-main { flex: none; flex-direction: column; }
+  .aprs-map-wrap { flex: none; height: 380px; }
+  .aprs-side { width: auto; overflow: visible; border-left: 0; border-top: 1px solid var(--border-primary); }
+  .aprs-list-wrap { flex: none; height: 420px; }
+}

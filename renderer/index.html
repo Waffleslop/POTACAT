@@ -1828,9 +1828,9 @@
         <span id="idle-sstv-note" class="help-text" style="display:block;margin-top:4px;">SSTV: POTACAT flips to 20m (14.230 MHz) in the daytime and 40m (7.171 MHz) at night, based on your grid square.</span>
         <div id="idle-aprs-opts" style="display:none;margin-top:6px;">
           <span class="help-text" style="display:block;">APRS: the radio listens on the APRS frequency, 2 m if it has 2 m, else 30 m. Receive only: nothing is transmitted.</span>
-          <label class="checkbox-label" style="margin-top:6px;"><input type="checkbox" id="set-aprs-igate"> Report what I hear to APRS-IS (iGate)</label>
-          <span class="help-text" style="margin-left:24px;display:block;">Each packet your radio hears goes to APRS-IS under your callsign with -10, so it shows on APRS maps as heard by you. It applies whenever POTACAT listens to APRS on your radio. Nothing from the internet is ever sent on the air.</span>
-          <span id="idle-aprs-igate-marks" class="help-text" style="margin-left:24px;display:block;margin-top:4px;font-weight:600;"></span>
+          <!-- The iGate is set in the APRS window's settings (Casey 2026-11-20); this line only shows it. -->
+          <span id="idle-aprs-igate-line" class="help-text" style="display:block;margin-top:6px;font-weight:600;">iGate: off, set in the APRS window</span>
+          <span id="idle-aprs-igate-marks" class="help-text" style="display:block;margin-top:4px;"></span>
         </div>
         <span id="idle-jtty-note" class="help-text" style="display:none;margin-top:4px;">JTTY: receive on 20m (14.090 MHz) in the daytime and 40m (7.090 MHz) at night, based on your grid square. Each band change is marked in the JTTY feed.</span>
       </div>

@@ -18364,8 +18364,7 @@ async function openSettingsDialog(tab) {
     const modeEl = document.getElementById('set-idle-rx-mode');
     if (!enableEl || !modeEl) return;
     modeEl.value = (['wspr', 'psk31', 'js8', 'jtty', 'aprs'].includes(s.idleRxMode)) ? s.idleRxMode : 'sstv';
-    document.getElementById('set-aprs-igate').checked = s.aprsIgate === true; // APRS phase 4: off by default
-    renderAprsIgateMarks();
+    renderAprsIgateMarks(); // the iGate is set in the APRS window; Idle Mode shows its line
     document.getElementById('idle-wspr-band-hop').checked = s.idleWsprBandHop === true;
     document.getElementById('idle-wspr-band-single').checked = s.idleWsprBandHop !== true;
     document.getElementById('set-idle-wspr-band').value = s.idleWsprBand || '20m';
@@ -19263,7 +19262,6 @@ settingsSave.addEventListener('click', async () => {
     enableAutoSstv: document.getElementById('set-enable-auto-sstv').checked,
     autoSstvInactivityMin: Math.max(5, Math.min(1440, parseInt(document.getElementById('set-auto-sstv-min').value) || 90)),
     idleRxMode: ['wspr', 'psk31', 'js8', 'jtty', 'aprs'].includes(document.getElementById('set-idle-rx-mode').value) ? document.getElementById('set-idle-rx-mode').value : 'sstv',
-    aprsIgate: document.getElementById('set-aprs-igate').checked,
     idleWsprBandHop: document.getElementById('idle-wspr-band-hop').checked,
     idleWsprBand: document.getElementById('set-idle-wspr-band').value || '20m',
     idlePskBand: document.getElementById('set-idle-psk-band').value || '20m',
@@ -33781,13 +33779,22 @@ function aprsIgateMarksText(s) {
   return parts.join(' ');
 }
 let _aprsIgateMarks = null;
+// The one line in Settings > Idle Mode: "iGate: on, set in the APRS window"
+// (the switch itself is in the APRS window's settings, Casey 2026-11-20).
+function aprsIgateLineText(s) {
+  return 'iGate: ' + (s && s.on ? 'on' : 'off') + ', set in the APRS window (APRS settings)';
+}
 function renderAprsIgateMarks(s) {
   if (s) _aprsIgateMarks = s;
+  const line = document.getElementById('idle-aprs-igate-line');
   const el = document.getElementById('idle-aprs-igate-marks');
-  if (!el) return;
+  const draw = () => {
+    if (line) line.textContent = aprsIgateLineText(_aprsIgateMarks);
+    if (el) el.textContent = _aprsIgateMarks && _aprsIgateMarks.on ? aprsIgateMarksText(_aprsIgateMarks) : '';
+  };
   if (!s && window.api.aprsIgateStatus) {
-    window.api.aprsIgateStatus().then((x) => { _aprsIgateMarks = x; el.textContent = aprsIgateMarksText(x); }).catch(() => {});
+    window.api.aprsIgateStatus().then((x) => { _aprsIgateMarks = x; draw(); }).catch(() => {});
   }
-  el.textContent = aprsIgateMarksText(_aprsIgateMarks);
+  draw();
 }
 if (window.api.onAprsIgateStatus) window.api.onAprsIgateStatus((s) => renderAprsIgateMarks(s));

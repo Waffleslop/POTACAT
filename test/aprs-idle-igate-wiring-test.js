@@ -79,10 +79,17 @@ test('ECHOCAT: an APRS idle session is its own kind, never SSTV or an FT8-engine
   assert.ok(/if \(autoSstvActive && !autoIdleJtcatActive && !autoIdleJs8Active\) cancelAutoSstv\(\);/.test(fnBody(main, 'startJtcat')));
 });
 
-test('the iGate setting: its own switch, off by default, saved as aprsIgate', () => {
-  assert.ok(/<input type="checkbox" id="set-aprs-igate"> Report what I hear to APRS-IS \(iGate\)<\/label>/.test(html));
-  assert.ok(/getElementById\('set-aprs-igate'\)\.checked = s\.aprsIgate === true/.test(app));
-  assert.ok(/aprsIgate: document\.getElementById\('set-aprs-igate'\)\.checked/.test(app));
+// Casey 2026-11-20: "iGate should be a setting on the APRS window or APRS Settings, not
+// hidden in idle mode." The switch moved to the APRS window's settings panel; Idle Mode
+// keeps APRS as a choice and one line that shows the iGate, and Settings' save no longer
+// writes aprsIgate (a stale checkbox there could undo a change made in the APRS window).
+test('the iGate setting: one switch, in the APRS window, off by default, saved as aprsIgate; Idle Mode shows it', () => {
+  const pop = read('renderer/aprs-popout.html');
+  assert.ok(/<input type="checkbox" id="aprs-igate-on">Report what I hear to APRS-IS \(iGate\)<\/label>/.test(pop));
+  assert.ok(!/id="set-aprs-igate"/.test(html) && /id="idle-aprs-igate-line"/.test(html));
+  assert.ok(/<option value="aprs"/.test(html), 'APRS is still an Idle Mode choice');
+  assert.ok(!/aprsIgate: document\.getElementById/.test(app));
+  assert.ok(/settings\.aprsIgate = on === true;/.test(fnBody(main, 'aprsIgateSetFromWindow')));
   assert.ok(/return settings\.aprsIgate === true && aprsListen\.on/.test(fnBody(main, 'aprsIgateWanted')));
   assert.ok(!/aprsIgate:\s*true/.test(main), 'no default on');
 });
@@ -109,10 +116,12 @@ test('the dev server override exists only in a dev build; recorded frames never 
 });
 
 test('small marks, no pop-ups: the APRS window and Settings', () => {
+  // The window redesign (2026-11-19): the iGate mark is a line on the APRS-IS card.
   const pop = read('renderer/aprs-popout.html');
-  assert.ok(/id="aprs-igate"/.test(pop));
+  assert.ok(/id="card-is"/.test(pop) && /id="is-lines"/.test(pop));
+  assert.ok(/igateLine\(ig\)/.test(read('lib/aprs-window-state.js')));
   assert.ok(/id="idle-aprs-igate-marks"/.test(html));
-  const bar = read('renderer/aprs-listen-bar.js');
+  const bar = read('renderer/aprs-window.js') + read('lib/aprs-window-state.js');
   assert.ok(!/alert\(|confirm\(|showMessageBox/.test(bar));
   assert.ok(!/showMessageBox|dialog\./.test(fnBody(main, 'aprsIgateOfferRf') + fnBody(main, 'aprsUplinkWant')));
 });
@@ -137,8 +146,8 @@ test('a Guest Pass pauses the iGate (any listening), the status says why, and th
   assert.ok(/paused: pause \? pause\.sentence : ''/.test(st), 'the status carries the sentence');
   const sc = main.slice(main.indexOf("passEnforcement.on('state-change', (state) => {"), main.indexOf("passEnforcement.on('expiring'"));
   assert.ok(/aprsIgateSync\(\); aprsIgatePush\(\);/.test(sc), 'every pass state change re-decides the iGate');
-  const bar = read('renderer/aprs-listen-bar.js');
-  assert.ok(/if \(ig\.paused\)/.test(bar), 'the APRS window shows it');
+  const bar = read('lib/aprs-window-state.js');
+  assert.ok(/if \(ig\.paused\) return ig\.paused;/.test(bar), 'the APRS window shows it (the APRS-IS card)');
   assert.ok(/if \(s\.paused\) return s\.paused/.test(app), 'Settings shows it');
 });
 

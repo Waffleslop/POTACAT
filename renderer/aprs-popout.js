@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Casey Stanton
 //
-// APRS window (phase 1): the stations APRS-IS reports around the operator's
-// grid, on a map and in a list beside it. Read-only: nothing here sends a
-// packet or touches the radio.
+// APRS window: the map and the Stations list. Read-only: nothing here sends
+// a packet or touches the radio. The cards, banners and Beacon panel around
+// them are renderer/aprs-window.js (the layout Casey approved 2026-11-19).
 //
 // Main parses each line (lib/aprs-parser.js) and sends batches every 500 ms;
 // lib/aprs-stations.js keeps one row per station or object and forgets those
 // not heard for an hour. Clicking a row centres the map on it; clicking a
 // marker (or a row) shows the details below the list, with a QRZ link.
-// Status is three small marks in the top bar; there are no pop-ups.
+// The list is two lines a row (lib/aprs-window-state.js stationRow): the
+// stations my radio heard first, marked, then the rest by distance. The map's
+// "Heard by my radio" / "Everyone" switch filters the map only. There are no
+// pop-ups.
 //
 // The map draws every station on one canvas layer (no DOM marker per
 // station), so a few thousand stay fluid:
@@ -29,8 +32,8 @@
   $('tb-max').addEventListener('click', function () { window.api.maximize(); });
   $('tb-close').addEventListener('click', function () { window.api.close(); });
 
-  var RANGES_KM = [25, 50, 100, 150, 250, 400, 600];
-  var KM_PER_MI = 1.609344;
+  var W = window.AprsWindowState;
+  var KM_PER_MI = W.KM_PER_MI;
   var LABEL_ZOOM = 9;          // callsign labels from this zoom in
   var CLUSTER_OFF_ZOOM = 12;   // from this zoom in, every station is drawn on its own
   var CELL_PX = 56;            // cluster grid cell
@@ -41,14 +44,16 @@
   var unit = 'mi';
   var home = null;
   var store = AprsStations.createStore({});
-  var sortKey = 'distance', sortDesc = false;
   var query = '';
   var selected = null;
   var arrivals = [];           // packet times in the last minute
   var lastPacketAt = 0;
   var linkState = null;
-  var listRows = [];           // the stations matching the search, sorted (the list and the map)
-  var heardOnly = false;       // phase 2: the "Heard by me" filter (list and map)
+  var listRows = [];           // the stations matching the search: my radio's first, then by distance (the list)
+  var mapRows = [];            // what the map draws: listRows, or only my radio's with the switch on "Heard by my radio"
+  var heardOnly = false;       // the map's switch (the list always shows everyone, mine marked)
+  var heardKeys = new Set();   // stations my radio heard while this window is open (the "Heard by my radio" card)
+  var lastHeardKey = null, lastHeardAt = 0;
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -136,8 +141,8 @@
     var z = map.getZoom();
     var pts = [];
     var sel = null;
-    for (var i = 0; i < listRows.length; i++) {
-      var r = listRows[i];
+    for (var i = 0; i < mapRows.length; i++) {
+      var r = mapRows[i];
       var p = map.project([r.lat, r.lon], z);
       var pt = { x: p.x, y: p.y, row: r };
       if (r.key === selected) sel = pt; else pts.push(pt);
@@ -357,21 +362,24 @@
     var keys = AprsIcons.ICONS.concat(['you']);
     $('aprs-legend').innerHTML = keys.map(function (k) {
       return '<span title="' + esc(AprsIcons.LABEL[k]) + '">' + symHtml(k, null, 18) + esc(AprsIcons.SHORT[k]) + '</span>';
-    }).join('') + '<span title="Stations your radio heard"><i class="aprs-key-rf"></i>Heard by me</span>';
+    }).join('') + '<span title="Stations your radio heard"><i class="aprs-key-rf"></i>Heard by my radio</span>';
   }
   renderLegend();
 
   // ── range ────────────────────────────────────────────────────────────────
+  // Round numbers in the operator's units (lib/aprs-window-state.js): each
+  // option's value is the whole km APRS-IS is asked for, so the choice reads
+  // back exactly. Main converted an older saved range to the nearest one.
   var rangeSel = $('aprs-range');
   function fillRanges(km) {
     rangeSel.innerHTML = '';
-    var list = RANGES_KM.indexOf(km) < 0 ? RANGES_KM.concat([km]).sort(function (a, b) { return a - b; }) : RANGES_KM;
-    list.forEach(function (k) {
-      var o = document.createElement('option');
-      o.value = String(k);
-      o.textContent = unit === 'km' ? k + ' km' : Math.round(k / KM_PER_MI) + ' mi';
-      if (k === km) o.selected = true;
-      rangeSel.appendChild(o);
+    var pick = W.nearestRange(km, unit).km;
+    W.rangeOptions(unit).forEach(function (o) {
+      var el = document.createElement('option');
+      el.value = String(o.km);
+      el.textContent = o.label;
+      if (o.km === pick) el.selected = true;
+      rangeSel.appendChild(el);
     });
   }
   rangeSel.addEventListener('change', function () {
@@ -380,44 +388,41 @@
     if (home) map.setView([home.lat, home.lon], zoomForKm(km));
   });
 
-  // ── status marks ─────────────────────────────────────────────────────────
+  // ── what the cards read (renderer/aprs-window.js) ────────────────────────
+  // The APRS-IS link, the packets a minute, and the stations my radio heard
+  // while the window is open, with the last one.
+  function feedChanged() { if (window.aprsMapApi && window.aprsMapApi.onFeed) window.aprsMapApi.onFeed(); }
   function setLink(s) {
     linkState = s || {};
-    var dot = $('aprs-link-dot'), text = $('aprs-link-text');
-    dot.className = 'aprs-dot';
-    var st = linkState.state;
-    var msg = '';
-    if (st === 'connected') { dot.classList.add('ok'); msg = 'Connected to APRS-IS' + (linkState.server ? ' (' + linkState.server + ')' : ''); }
-    else if (st === 'connecting') { dot.classList.add('wait'); msg = 'Connecting to APRS-IS'; }
-    else if (st === 'waiting') { dot.classList.add('wait'); msg = 'Not connected, trying again in ' + Math.round((linkState.retryInMs || 0) / 1000) + ' s'; }
-    else if (st === 'refused') { dot.classList.add('bad'); msg = 'APRS-IS refused the login, trying again in a minute'; }
-    else if (st === 'no-grid') { dot.classList.add('bad'); msg = 'No grid square'; }
-    else { msg = 'Not connected'; }
-    text.textContent = msg;
-    $('aprs-link').title = linkState.call ? 'Read-only login as ' + linkState.call + (linkState.anonymous ? ' (no callsign in Settings)' : '') : 'The internet link to APRS-IS';
     showEmpty();
+    feedChanged();
   }
-
   function tickMarks() {
     var t = Date.now();
     while (arrivals.length && arrivals[0] < t - 60000) arrivals.shift();
-    $('aprs-rate').textContent = arrivals.length + (arrivals.length === 1 ? ' packet a minute' : ' packets a minute');
-    $('aprs-last').textContent = lastPacketAt ? 'Last packet ' + AprsStations.formatAge(t - lastPacketAt).replace('now', 'just now') + (t - lastPacketAt >= 60000 ? ' ago' : '') : 'No packets yet';
+  }
+  function feedInfo() {
+    tickMarks();
+    var last = lastHeardKey && store.get(lastHeardKey);
+    return {
+      link: linkState, rate: arrivals.length, lastPacketAt: lastPacketAt, unit: unit,
+      heard: { count: heardKeys.size, last: last ? { label: last.label, at: lastHeardAt, distanceKm: last.distanceKm } : null },
+    };
   }
 
   function showEmpty() {
     var el = $('aprs-empty');
     var msg = '';
     if (linkState && linkState.state === 'no-grid') msg = 'Set your grid square in Settings to see the APRS stations near you.';
-    else if (store.size === 0 && linkState && linkState.state === 'connected') msg = 'Listening. Stations appear here as APRS-IS reports them.';
+    else if (store.size === 0 && linkState && linkState.state === 'connected') msg = 'Connected. Stations appear here as APRS-IS reports them.';
+    else if (heardOnly && store.size > 0 && mapRows.length === 0) msg = 'Your radio has not heard a station yet. Pick Everyone to see the stations from APRS-IS.';
     el.textContent = msg;
     el.classList.toggle('hidden', !msg);
   }
 
-  // ── list (only the rows in view are in the page) ────────────────────────
-  var wrap = $('aprs-table-wrap');
-  var thead = document.querySelector('.aprs-table thead');
-  var rowH = 32, rowMeasured = false;
+  // ── list: two lines a row, only the rows in view are in the page ─────────
+  var wrap = $('aprs-list-wrap');
+  var rowH = 58, rowMeasured = false;
   var rowsPending = false;
 
   // Phase 2: how the radio heard it ("direct" / "via KB1XYZ-1" / "via a digipeater").
@@ -426,32 +431,29 @@
     return rf.kind === 'digi' ? (rf.digi ? 'via ' + rf.digi : 'via a digipeater') : 'direct';
   }
   function rowHtml(r, t) {
-    var brg = r.bearing == null ? '' : Math.round(r.bearing) + '&deg; ' + AprsStations.compass(r.bearing);
-    var cmt = r.comment || r.status;
-    return '<tr class="r' + (r.key === selected ? ' sel' : '') + '" data-key="' + esc(r.key) + '">'
-      + '<td title="' + esc(kindName(r.cls)) + '">' + symHtml(r.cls, r.course, 20) + '</td>'
-      + '<td class="call">' + esc(r.label) + '</td>'
-      + '<td class="num">' + esc(fmtDist(r.distanceKm)) + '</td>'
-      + '<td class="num">' + brg + '</td>'
-      + '<td class="num">' + esc(AprsStations.formatAge(t - r.lastHeard)) + '</td>'
-      + '<td class="cmt" title="' + esc((r.rf ? 'Heard by me, ' + rfText(r.rf) + '. ' : '') + (cmt || '')) + '">'
-      + (r.rf ? '<span class="aprs-rf-tag">heard by me, ' + esc(rfText(r.rf)) + '</span>' : '') + esc(cmt) + '</td>'
-      + '</tr>';
+    var v = W.stationRow(r, { unit: unit, now: t });
+    var right = [v.dist, v.ago].filter(Boolean).join(' · ');
+    return '<li class="aprs-st' + (v.mine ? ' mine' : '') + (r.key === selected ? ' sel' : '') + '" data-key="' + esc(r.key) + '"'
+      + ' title="' + esc(kindName(r.cls) + (v.mine ? '. Heard by my radio, ' + rfText(r.rf) : '') + (v.comment ? '. ' + v.comment : '')) + '">'
+      + '<span class="aprs-st-ico">' + symHtml(r.cls, r.course, 20) + '</span>'
+      + '<span class="aprs-st-call">' + esc(v.call) + ' <span class="aprs-st-via">' + esc(v.via) + '</span></span>'
+      + '<span class="aprs-st-right">' + esc(right) + '</span>'
+      + '<span class="aprs-st-cmt">' + esc(v.comment) + '</span>'
+      + '</li>';
   }
-  function pad(h) { return h > 0 ? '<tr class="aprs-pad"><td colspan="6" style="height:' + h + 'px"></td></tr>' : ''; }
+  function pad(h) { return h > 0 ? '<li class="aprs-pad" aria-hidden="true" style="height:' + h + 'px"></li>' : ''; }
 
   function renderRows() {
     var t0 = now();
-    var headH = thead.offsetHeight;
-    var v = AprsStations.visibleRange(wrap.scrollTop, wrap.clientHeight - headH, rowH, listRows.length, 8);
+    var v = AprsStations.visibleRange(wrap.scrollTop, wrap.clientHeight, rowH, listRows.length, 8);
     var t = Date.now();
     var html = pad(v.top);
     for (var i = v.start; i < v.end; i++) html += rowHtml(listRows[i], t);
     html += pad(v.bottom);
     $('aprs-rows').innerHTML = html;
-    // Rows are one line; if the theme's font makes them a different height,
-    // follow it. Measured once (and after a theme change), not every render.
-    var first = !rowMeasured && document.querySelector('#aprs-rows tr.r');
+    // Rows are a fixed height; if the theme's font makes them differ, follow it.
+    // Measured once (and after a theme change), not every render.
+    var first = !rowMeasured && document.querySelector('#aprs-rows li.aprs-st');
     if (first) {
       var h = first.getBoundingClientRect().height;
       rowMeasured = true;
@@ -470,50 +472,47 @@
   /** The search or the data changed: re-sort, redraw the rows in view and the map. */
   function rebuild() {
     var t0 = now();
-    listRows = store.list({ sort: sortKey, desc: sortDesc, query: query, heardByMe: heardOnly });
+    var all = store.list({ sort: 'distance', query: query });
+    // My radio's stations first (each marked), then the internet's, each by distance.
+    listRows = all.filter(function (r) { return !!r.rf; }).concat(all.filter(function (r) { return !r.rf; }));
+    mapRows = heardOnly ? listRows.filter(function (r) { return !!r.rf; }) : listRows;
     perfPush(perf.sort, now() - t0);
     clusterDirty = true;
     renderRows();
-    var total = store.size;
-    $('aprs-count').textContent = total === 0 ? 'No stations yet'
-      : ((query || heardOnly) ? listRows.length + ' of ' + total + ' stations' : total + (total === 1 ? ' station' : ' stations')) + ' heard in the last hour';
-    document.querySelectorAll('.aprs-table th').forEach(function (th) {
-      th.classList.toggle('sorted', th.dataset.sort === sortKey);
-      th.classList.toggle('desc', th.dataset.sort === sortKey && sortDesc);
-    });
+    var c = W.stationCounts(listRows);
+    $('aprs-count').textContent = store.size === 0 ? 'No stations yet' : (query ? listRows.length + ' of ' + store.size + ': ' : '') + c.text;
     showEmpty();
     requestDraw();
+    feedChanged();
   }
 
   function scrollToRow(key) {
     for (var i = 0; i < listRows.length; i++) {
       if (listRows[i].key !== key) continue;
-      var headH = thead.offsetHeight, view = wrap.clientHeight - headH;
+      var view = wrap.clientHeight;
       var top = i * rowH;
       if (top < wrap.scrollTop || top + rowH > wrap.scrollTop + view) wrap.scrollTop = Math.max(0, top - view / 2);
       return;
     }
   }
 
-  thead.addEventListener('click', function (e) {
-    var th = e.target.closest('th');
-    if (!th || !th.dataset.sort) return;
-    if (sortKey === th.dataset.sort) sortDesc = !sortDesc;
-    else { sortKey = th.dataset.sort; sortDesc = false; }
-    rebuild();
-  });
   $('aprs-rows').addEventListener('click', function (e) {
-    var tr = e.target.closest('tr');
-    if (tr && tr.dataset.key) select(tr.dataset.key, true);
+    var li = e.target.closest('li.aprs-st');
+    if (li && li.dataset.key) select(li.dataset.key, true);
   });
   $('aprs-search').addEventListener('input', function () {
     query = this.value.trim();
     rebuild();
   });
-  $('aprs-heard-only').addEventListener('change', function () {
-    heardOnly = this.checked;
+  // The map's switch: "Heard by my radio" or "Everyone" (the map only; the list keeps everyone, mine first).
+  function setHeardOnly(on) {
+    heardOnly = !!on;
+    $('aprs-map-heard').setAttribute('aria-pressed', heardOnly ? 'true' : 'false');
+    $('aprs-map-all').setAttribute('aria-pressed', heardOnly ? 'false' : 'true');
     rebuild();
-  });
+  }
+  $('aprs-map-heard').addEventListener('click', function () { setHeardOnly(true); });
+  $('aprs-map-all').addEventListener('click', function () { setHeardOnly(false); });
 
   // ── details ──────────────────────────────────────────────────────────────
   function select(key, centre) {
@@ -580,6 +579,7 @@
       var prev = store.get(k);
       var was = prev ? (motion[k] ? shownPos(prev, t) : { lat: prev.lat, lon: prev.lon }) : null;
       var r = store.add(p);
+      if (r && p.rf) { heardKeys.add(k); lastHeardKey = k; lastHeardAt = Date.now(); }
       if (r) {
         if (!was) born[k] = t;
         else if (was.lat !== r.lat || was.lon !== r.lon) motion[k] = { from: was, to: { lat: r.lat, lon: r.lon }, t0: t };
@@ -610,11 +610,10 @@
     for (var i = 0; i < packets.length; i++) arrivals.push(t);
     if (packets.length) lastPacketAt = t;
     ingest(packets);
-    tickMarks();
   });
 
-  // Age-out and the "heard" column move on their own.
-  setInterval(tickMarks, 1000);
+  // Age-out and the ages move on their own.
+  setInterval(function () { tickMarks(); renderRows(); }, 15000);
   setInterval(function () {
     var before = {};
     listRows.forEach(function (r) { before[r.key] = r; });
@@ -692,6 +691,14 @@
     home: function () { return home; },
     select: function (key) { select(key, true); },
     keys: function (icon) { return listRows.filter(function (r) { return !icon || r.cls === icon; }).map(function (r) { return r.key; }); },
+    /** Screenshots without a radio: mark n stations as heard by my radio (the window's own copy only). */
+    heardDemo: function (n) {
+      listRows.slice(0, n || 3).forEach(function (r, i) {
+        r.rf = { kind: i === 1 ? 'digi' : 'direct', digi: i === 1 ? 'W3EKT-1' : '', lastHeard: Date.now() - i * 60000, packets: 1 };
+        heardKeys.add(r.key); lastHeardKey = r.key; lastHeardAt = Date.now() - i * 60000;
+      });
+      rebuild();
+    },
     /** Frame and work times over ms (optionally panning the map), in milliseconds. */
     measure: function (ms, opts) {
       var o = opts || {};
@@ -713,17 +720,18 @@
             clusters: clusters.clusters.length, singles: clusters.singles.length,
             frameInterval: stats(gaps), longFrames: gaps.filter(function (g) { return g > 25; }).length,
             draw: stats(perf.draw), cluster: stats(perf.cluster), listRender: stats(perf.list), sort: stats(perf.sort),
-            listRowsInPage: document.querySelectorAll('#aprs-rows tr.r').length,
+            listRowsInPage: document.querySelectorAll('#aprs-rows li.aprs-st').length,
           });
         }, ms || 5000);
       });
     },
   };
 
-  // Phase 5: the Beacon section picks a point on this map and draws it.
+  // Phase 5: the Beacon section picks a point on this map and draws it; the
+  // cards read the feed from here (aprs-window.js sets onFeed).
   window.aprsMapApi = { map: map };
+  window.aprsMapApi.feedInfo = feedInfo;
 
-  tickMarks();
   rebuild();
   window.api.ready();
 })();

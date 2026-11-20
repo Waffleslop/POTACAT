@@ -494,6 +494,7 @@ const AprsActivation = require('./lib/aprs-activation');   // APRS extra 1: the 
 const AprsRfGate = require('./lib/aprs-rf-gate');          // APRS phase 7: when the 'aprs' owner may key (one manual beacon over the radio)
 const AprsRfBeacon = require('./lib/aprs-rf-beacon');      // APRS phase 7: the RF beacon packet, its cap, and the one-beacon run
 const AprsRfMeters = require('./lib/aprs-rf-meters');      // APRS window: S-meter, SWR and RF out beside the radio beacon, and its peaks
+const AprsWindowState = require('./lib/aprs-window-state'); // APRS window: the cards, banners and the "Within" range choices
 const AprsEchocat = require('./lib/aprs-echocat');         // APRS phase 6: APRS on ECHOCAT devices through this desktop
 const VaraProcess = require('./lib/vara-process');
 const VaraSetup = require('./lib/vara-setup');
@@ -13145,6 +13146,9 @@ function aprsListenPayload() {
     on: aprsListen.on, state: aprsListen.state, sentence: aprsListen.sentence, band, bands,
     modeLabel: AprsListen.modeLabel(band),
     mhz: aprsListen.on && aprsListen.freq ? aprsListen.freq.mhz : '', heard: aprsListen.heard, lastAt: aprsListen.lastAt, note: aprsListen.note,
+    // Off: where the radio is now, so the card can say where it goes back to when listening stops.
+    dialMhz: !aprsListen.on && Number(_currentFreqHz) > 0 ? (Number(_currentFreqHz) / 1e6).toFixed(3) : '',
+    dialMode: !aprsListen.on && Number(_currentFreqHz) > 0 ? String(_currentMode || '') : '',
   };
 }
 function aprsListenPush() { aprsWinSend('aprs-listen', aprsListenPayload()); aprsIgateSync(); }
@@ -13594,7 +13598,9 @@ function aprsBeaconLoad() {
 }
 function aprsBeaconPosition() {
   const st = AprsBeacon.beaconSettings(settings);
-  return AprsBeacon.beaconPosition({ lat: st.lat, lon: st.lon, grid: settings.grid, gridToLatLon });
+  // Position precision (the APRS settings panel): a grid square never uses a picked point.
+  const at = AprsBeacon.positionInputs({ precision: st.precision, lat: st.lat, lon: st.lon, grid: settings.grid });
+  return AprsBeacon.beaconPosition({ lat: at.lat, lon: at.lon, grid: at.grid, gridToLatLon });
 }
 // APRS extra 1: "Add my activation to the beacon comment" (off by default).
 // While an activation runs, both beacons' comment starts with the park ref(s),
@@ -13719,6 +13725,7 @@ function aprsBeaconSet(patch) {
   if ('aprsBeaconLat' in o) aprsLog(o.aprsBeaconLat === null ? 'beacon position: the grid square centre' : 'beacon position: a point picked on the map');
   if ('aprsRfSsid' in o) aprsLog('My APRS SSID for the radio beacon: ' + (o.aprsRfSsid === null ? 'as the Settings callsign' : o.aprsRfSsid === 0 ? 'none' : '-' + o.aprsRfSsid));
   if ('aprsRfSsid' in o) aprsRfPush();
+  if ('aprsBeaconPrecision' in o) { aprsLog('beacon position precision: ' + o.aprsBeaconPrecision); aprsRfPush(); }
   aprsBeacon.sentence = '';
   if ('aprsBeaconIntervalMin' in o) {
     aprsLog('beacon timer: ' + (o.aprsBeaconIntervalMin ? 'every ' + o.aprsBeaconIntervalMin + ' min while the APRS window is open' : 'off'));
@@ -13750,9 +13757,11 @@ let _aprsRfKeyed = false;          // POTACAT holds PTT for the beacon now
 let _aprsRfUnkeyTimer = null;
 let _aprsRfUnkeyDone = null;       // the pending graceful unkey (the lane's 'drained' or the timer ends it)
 let _aprsRfTiming = null;          // TXDELAY / TXTAIL of the beacon in flight
+let _aprsRfKeyedAt = 0;            // when POTACAT keyed for the beacon (the on-air banner's elapsed time)
+let _aprsRfAirMs = 0;              // the beacon in flight's expected time on the air
 const APRS_RF_SHIM_PORTS = [4550, 4559];
 const APRS_RF_SENTENCE_MS = 20000; // a result or refusal line stays this long, then the live state shows again
-const aprsRfUi = { sentence: '', sentenceAt: 0, lastAt: 0, lastPacket: '', lastBand: '', lastPeak: null };
+const aprsRfUi = { sentence: '', sentenceAt: 0, lastAt: 0, lastPacket: '', lastBand: '', lastPeak: null, lastHeldMs: 0 };
 let _aprsRfSending = false;        // a click is being acted on: a second click does nothing
 const _aprsRfPeak = AprsRfMeters.createPeak(); // SWR and RF out peaks while the beacon is keyed
 function aprsRfSay(sentence) { aprsRfUi.sentence = sentence || ''; aprsRfUi.sentenceAt = Date.now(); }
@@ -13953,6 +13962,9 @@ function aprsRfPayload() {
     // The meters the radio has reported (the VFO window's rule): no SWR reading = "No SWR from this radio".
     meters: vfoMetersAvailable(), lastPeak: aprsRfUi.lastPeak,
     sentence: aprsRfUi.sentence && Date.now() - aprsRfUi.sentenceAt < APRS_RF_SENTENCE_MS ? aprsRfUi.sentence : '', lastAt: aprsRfUi.lastAt, lastPacket: aprsRfUi.lastPacket, lastBand: aprsRfUi.lastBand,
+    // The window's on-air banner and its result line: key-down time, the expected air time, how long the last one held PTT.
+    keyedAt: _aprsRfKeyed ? _aprsRfKeyedAt : 0, airMs: _aprsRfAirMs, lastHeldMs: aprsRfUi.lastHeldMs,
+    txNarrow: band ? aprsRfTxNarrow(band) : null,
   };
 }
 function aprsRfPush() { aprsWinSend('aprs-rf', aprsRfPayload()); }
@@ -13978,6 +13990,7 @@ async function aprsRfTransmit() {
   if (!b.ok) { aprsRfSay(b.sentence); aprsLog('beacon over the radio not sent: ' + b.sentence); return; }
   _aprsRfTiming = c.timing;
   const cap = c.cap;
+  _aprsRfAirMs = cap.airMs;
   aprsLog(`beacon over the radio: ${b.packet} on ${c.mhz} MHz ${c.mode}, rig power ${c.powerW ? c.powerW + ' W' : 'not reported'}, about ${(cap.airMs / 1000).toFixed(1)} s on air, cap ${(cap.capMs / 1000).toFixed(1)} s`);
   const res = await aprsRfRunner().send({ packet: b, capMs: cap.capMs });
   if (_aprsRfPeak.active()) aprsRfUi.lastPeak = _aprsRfPeak.end(); // it keyed: its peak SWR and RF out
@@ -14016,6 +14029,7 @@ function aprsRfKey() {
   }
   _aprsRfKeyed = true;
   _aprsRfPeak.start();
+  _aprsRfKeyedAt = Date.now();
   modemBridgeOver(true);
   const saved = settings.winlinkModemTxGain && Number(settings.winlinkModemTxGain.packet);
   if (winlinkAudio) winlinkAudio.key(true, { seedGain: saved >= 1 && saved <= 8 ? saved : 1, bridge: !winlinkIpAudioRoute() });
@@ -14029,7 +14043,11 @@ function aprsRfUnkey(now) {
       if (_aprsRfUnkeyTimer) { clearTimeout(_aprsRfUnkeyTimer); _aprsRfUnkeyTimer = null; }
       const pending = _aprsRfUnkeyDone;
       _aprsRfUnkeyDone = null;
-      if (_aprsRfKeyed) { _aprsRfKeyed = false; try { handleRemotePtt(false); } catch {} }
+      if (_aprsRfKeyed) {
+        _aprsRfKeyed = false;
+        if (_aprsRfKeyedAt) aprsRfUi.lastHeldMs = Date.now() - _aprsRfKeyedAt;
+        try { handleRemotePtt(false); } catch {}
+      }
       if (winlinkAudio) winlinkAudio.key(false);
       modemBridgeOver(false);
       if (settings.audioSource === 'icom-network') icomNetworkVoiceTx(false, 'APRS');
@@ -14163,6 +14181,16 @@ function aprsIgateSetFromDevice(on) {
   settings.aprsIgate = on === true;
   saveSettings(settings);
   aprsLog('iGate ' + (settings.aprsIgate ? 'on' : 'off') + ' from an ECHOCAT device');
+  try { aprsUplinkWant(null); aprsIgateSync(); aprsIgatePush(); aprsBeaconPush(); } catch { /* not yet */ }
+}
+/**
+ * The iGate switch in the APRS window's settings panel: the one setting the
+ * Idle Mode line shows (settings.aprsIgate), the same steps as Settings' save.
+ */
+function aprsIgateSetFromWindow(on) {
+  settings.aprsIgate = on === true;
+  saveSettings(settings);
+  aprsLog('iGate ' + (settings.aprsIgate ? 'on' : 'off') + ' from the APRS window');
   try { aprsUplinkWant(null); aprsIgateSync(); aprsIgatePush(); aprsBeaconPush(); } catch { /* not yet */ }
 }
 const aprsEcho = AprsEchocat.createController({
@@ -46762,7 +46790,7 @@ function cloudShackNotice(text, kind) {
     if (aprsWin && !aprsWin.isDestroyed()) { aprsWin.focus(); return; }
     aprsWin = new BrowserWindow({
       minWidth: 640, minHeight: 400,
-      width: 1100, height: 680, title: 'APRS',
+      width: 1280, height: 860, title: 'APRS', // the approved layout's size; a saved place wins (rememberWindowPlace)
       backgroundColor: getThemeWindowBg(), frame: false,
       icon: getIconPath(),
       webPreferences: { preload: path.join(__dirname, 'preload-aprs-popout.js'), contextIsolation: true, nodeIntegration: false },
@@ -46788,6 +46816,14 @@ function cloudShackNotice(text, kind) {
   // The window asks once it has drawn: home, units and range, then the feed starts.
   ipcMain.on('aprs-ready', () => {
     const Feed = require('./lib/aprs-is-feed');
+    // The "Within" choices are round numbers of the operator's units; a range
+    // saved before them (150 km, shown as "93 mi") becomes the nearest choice, once.
+    const conv = AprsWindowState.convertSavedRange(Feed.clampRangeKm(settings.aprsRangeKm), settings.distUnit === 'km' ? 'km' : 'mi');
+    if (conv.changed) {
+      aprsLog(`range ${Feed.clampRangeKm(settings.aprsRangeKm)} km is now ${conv.km} km, the nearest of the window's choices`);
+      settings.aprsRangeKm = conv.km;
+      saveSettings(settings);
+    }
     aprsSend('aprs-init', { home: aprsHome(), distUnit: settings.distUnit || 'mi', km: Feed.clampRangeKm(settings.aprsRangeKm) });
     aprsStartFeed();
     aprsListenPush();
@@ -46802,8 +46838,12 @@ function cloudShackNotice(text, kind) {
   // Phase 7: one manual beacon over the radio. One click sends (no confirmation step); nothing else keys.
   ipcMain.on('aprs-rf-get', () => aprsRfPush());
   ipcMain.on('aprs-rf-send', () => { aprsRfSend().catch((e) => aprsLog('beacon over the radio failed: ' + e.message)); });
+  // The on-air banner's "Stop transmitting": the same abort the window close uses (PTT drops at once).
+  ipcMain.on('aprs-rf-stop', () => { aprsRfAbort('you pressed Stop transmitting'); aprsRfPush(); });
   // The window's TX power control asks once its listener is attached.
   ipcMain.on('aprs-rig-power-get', () => pushAprsRigPower(true));
+  // The APRS settings panel's iGate switch (the Idle Mode line mirrors it; one setting).
+  ipcMain.on('aprs-igate-set', (_e, on) => aprsIgateSetFromWindow(on === true));
   // APRS phase 2: the "Listen on my radio" switch (receive only).
   // The operator at the switch is using the radio: an APRS idle session ends first.
   ipcMain.on('aprs-listen-set', (_e, on) => { markUserActive(); aprsListenSet(!!on); });
@@ -46815,6 +46855,14 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('aprs-listen-band', (_e, band) => { markUserActive(); aprsListenSetBand(String(band || '')); });
   // Phase 4: the iGate's marks (Settings asks when it opens).
   ipcMain.handle('aprs-igate-status', () => aprsIgateStatus());
+  // The APRS-IS card's switch: off stops the window's feed (an ECHOCAT device
+  // watching the feed keeps it running for itself); on connects again.
+  ipcMain.on('aprs-feed-set', (_e, on) => {
+    if (on) { aprsStartFeed(); return; }
+    if (aprsEcho.keepsFeed()) { aprsLog('APRS-IS stays connected: an ECHOCAT device is watching it'); return; }
+    aprsStopFeed();
+    aprsSend('aprs-status', { state: 'stopped' });
+  });
   ipcMain.on('aprs-set-range', (_e, km) => {
     const Feed = require('./lib/aprs-is-feed');
     settings.aprsRangeKm = Feed.clampRangeKm(km);

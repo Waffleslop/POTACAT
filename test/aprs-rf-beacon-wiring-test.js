@@ -31,7 +31,9 @@ console.log('APRS beacon over the radio: wiring');
 
 const main = read('main.js');
 const html = read('renderer/aprs-popout.html');
-const bar = read('renderer/aprs-rf-beacon-bar.js');
+// The window redesign (2026-11-19): the radio beacon bar became the Beacon panel
+// (renderer/aprs-window.js, its words from lib/aprs-window-state.js beaconPanel).
+const bar = read('renderer/aprs-window.js') + read('lib/aprs-window-state.js');
 const preload = read('preload-aprs-popout.js');
 const list = read('scripts/run-tests.js');
 const block = (() => {
@@ -58,7 +60,8 @@ test('one click: the button carries band, frequency, mode, power, path and air t
   assert.ok(/const p = aprsRfPlan\(\);/.test(pay));
   assert.ok(/AprsRfBeacon\.rfPreview\(\{ bandLabel: p\.bandLabel, mhz: p\.mhz, mode: p\.mode, powerW: p\.powerW, path: p\.b\.path, airMs: p\.cap\.airMs, source: p\.b\.source, txNarrow: p\.txNarrow \}\)/.test(pay));
   assert.ok(!/aprsRfRunner|handleRemotePtt/.test(pay), 'showing keys nothing');
-  assert.ok(/btn\.textContent = pv \? pv\.button : 'Beacon now \(radio\)'/.test(bar));
+  assert.ok(/label: 'Beacon on ' \+ bl, sub: \(r\.mhz \? r\.mhz \+ ' MHz' : bl\) \+ pw \+ ', one click'/.test(bar), 'band, frequency and power on the button');
+  assert.ok(/out\.detail = pv && !busy \? String\(pv\.detail\)/.test(bar), 'mode, call, path and air time under it');
   assert.ok(!/confirm\(|alert\(|showMessageBox/.test(bar + block), 'no pop-ups');
 });
 
@@ -131,14 +134,15 @@ test('the Winlink shim is unchanged: it still keys only for a Winlink radio sess
 });
 
 // Was: "... and has its confirmation row" (Transmit / Cancel). One click now.
+// The window redesign (2026-11-19) put the radio button first, beside the internet one (the mock-up).
 test('the window: the radio button sits next to the internet one, starts disabled, and has no confirmation row', () => {
-  const i = html.indexOf('id="aprs-beacon-now"');
-  const j = html.indexOf('id="aprs-rf-now"');
+  const i = html.indexOf('id="aprs-rf-now"');
+  const j = html.indexOf('id="aprs-beacon-now"');
   assert.ok(i > 0 && j > i && j - i < 400, 'next to it');
   assert.ok(/id="aprs-rf-now" disabled/.test(html));
   assert.ok(!/id="aprs-rf-confirm"|id="aprs-rf-send"|id="aprs-rf-cancel"/.test(html), 'one click: no Transmit / Cancel row');
-  assert.ok(/<script src="aprs-rf-beacon-bar\.js"><\/script>/.test(html));
-  assert.ok(/btn\.disabled = !s\.allowed \|\| busy;/.test(bar));
+  assert.ok(/<script src="aprs-window\.js"><\/script>/.test(html));
+  assert.ok(/btn\.disabled = !!p\.rf\.disabled;/.test(bar) && /if \(busy\) \{/.test(bar) && /\} else if \(!r\.allowed\) \{/.test(bar));
   assert.ok(/rfSend: \(\) => ipcRenderer\.send\('aprs-rf-send'\)/.test(preload) && !/rfAsk|aprs-rf-ask/.test(preload));
 });
 

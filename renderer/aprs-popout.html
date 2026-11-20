@@ -8,130 +8,209 @@
   <link rel="stylesheet" href="../node_modules/leaflet/dist/leaflet.css">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="aprs-popout.css">
-  <link rel="stylesheet" href="aprs-listen-bar.css">
-  <link rel="stylesheet" href="aprs-beacon-bar.css">
 </head>
 <body>
   <div class="titlebar">
     <div class="titlebar-drag"><span class="titlebar-title">APRS</span></div>
     <div class="titlebar-controls">
+      <button type="button" class="aprs-settings-open" id="aprs-settings-btn" aria-haspopup="dialog" aria-controls="aprs-settings" aria-label="APRS settings: iGate, call sign ending, position, symbol and comment">APRS settings</button>
       <button class="titlebar-btn" id="tb-min" title="Minimize">&#x2014;</button>
       <button class="titlebar-btn" id="tb-max" title="Maximize">&#x25A1;</button>
       <button class="titlebar-btn titlebar-close" id="tb-close" title="Close">&#x2715;</button>
     </div>
   </div>
 
-  <div class="aprs-bar">
-    <span class="aprs-mark" id="aprs-link" title="The internet link to APRS-IS"><span class="aprs-dot" id="aprs-link-dot"></span><span id="aprs-link-text">Starting</span></span>
-    <span class="aprs-mark" id="aprs-rate" title="Packets received in the last minute">0 packets a minute</span>
-    <span class="aprs-mark" id="aprs-last" title="Time since the last packet">No packets yet</span>
-    <span class="aprs-spacer"></span>
-    <label class="aprs-range" title="How far from your grid square APRS-IS sends stations">Range
-      <select id="aprs-range"></select>
-    </label>
-    <input type="search" id="aprs-search" placeholder="Search callsign or comment" spellcheck="false" autocomplete="off">
+  <div class="aprs-scroll" id="aprs-scroll">
+  <!-- Three status cards, no heading: the title bar already says APRS (Casey 2026-11-19). -->
+  <header class="aprs-cards">
+    <section class="aprs-card" id="card-radio" aria-label="My radio">
+      <div class="aprs-card-head">
+        <span class="aprs-dot" id="radio-dot" aria-hidden="true"></span>
+        <span class="aprs-card-title" id="radio-title">Not listening on my radio</span>
+        <label class="aprs-switch aprs-card-switch hidden" id="radio-switch" title="Listen to APRS on your radio and decode what it hears. Receive only: nothing is transmitted.">
+          <input type="checkbox" id="aprs-listen-on"><span class="aprs-switch-track"></span>On
+        </label>
+      </div>
+      <div class="aprs-card-lines" id="radio-lines"></div>
+      <div class="aprs-smeter hidden" id="radio-smeter">
+        <span class="aprs-smeter-s" aria-hidden="true">S</span>
+        <div class="aprs-bar" role="img" id="radio-smeter-bar" aria-label="S-meter"><div class="aprs-bar-fill" id="radio-smeter-fill"></div></div>
+        <span class="aprs-smeter-val" id="radio-smeter-val"></span>
+      </div>
+      <div class="aprs-card-btns" id="aprs-listen-bands" role="group" aria-label="Listen on a band"></div>
+    </section>
+
+    <section class="aprs-card" id="card-is" aria-label="APRS-IS">
+      <div class="aprs-card-head">
+        <span class="aprs-dot" id="is-dot" aria-hidden="true"></span>
+        <span class="aprs-card-title" id="is-title">Starting</span>
+        <label class="aprs-switch aprs-card-switch hidden" id="is-switch" title="The read-only internet feed of stations near your grid square">
+          <input type="checkbox" id="aprs-feed-on"><span class="aprs-switch-track"></span>On
+        </label>
+      </div>
+      <div class="aprs-card-lines" id="is-lines"></div>
+      <div class="aprs-card-btns hidden" id="is-btns"><button type="button" class="aprs-card-btn" id="aprs-feed-connect">Connect</button></div>
+      <div class="aprs-card-foot"><button type="button" class="aprs-link" id="aprs-igate-settings" aria-controls="aprs-settings">iGate settings</button></div>
+    </section>
+
+    <section class="aprs-card aprs-card-heard" id="card-heard" aria-label="Heard by my radio">
+      <div class="aprs-card-label">Heard by my radio</div>
+      <div class="aprs-heard-count hidden" id="heard-count-row"><span class="aprs-heard-n" id="heard-n">0</span><span id="heard-n-text"></span></div>
+      <div class="aprs-card-title" id="heard-title">Nothing yet</div>
+      <div class="aprs-card-lines" id="heard-lines"></div>
+    </section>
+  </header>
+
+  <!-- The internet beacon timer: whenever an interval is set. -->
+  <div class="aprs-banner aprs-banner-timer hidden" id="aprs-timer-banner" role="status">
+    <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 3"></path></svg>
+    <span class="aprs-banner-title" id="aprs-timer-title"></span>
+    <span class="aprs-banner-detail" id="aprs-timer-detail"></span>
+    <button type="button" class="aprs-banner-btn" id="aprs-timer-stop">Stop the timer</button>
+  </div>
+  <!-- A radio beacon on the air: only while POTACAT holds PTT for it. -->
+  <div class="aprs-banner aprs-banner-air hidden" id="aprs-air-banner" role="alert">
+    <span class="aprs-banner-title" id="aprs-air-title"></span>
+    <span class="aprs-banner-detail" id="aprs-air-time"></span>
+    <button type="button" class="aprs-banner-btn" id="aprs-rf-stop">Stop transmitting</button>
   </div>
 
-  <div class="aprs-listen" id="aprs-listen">
-    <label class="aprs-switch" title="Tune your radio to APRS and decode what it hears. Receive only: nothing is transmitted.">
-      <input type="checkbox" id="aprs-listen-on"><span class="aprs-switch-track"></span>Listen on my radio
-    </label>
-    <span class="aprs-bands" id="aprs-listen-bands" role="group" aria-label="The band your radio listens on"></span>
-    <span class="aprs-mark hidden" id="aprs-listen-freq"></span>
-    <span class="aprs-mark hidden" id="aprs-listen-state"><span class="aprs-dot" id="aprs-listen-dot"></span><span id="aprs-listen-text"></span></span>
-    <span class="aprs-mark hidden" id="aprs-listen-heard"><span id="aprs-listen-last"></span><span id="aprs-listen-count"></span></span>
-    <span class="aprs-listen-why hidden" id="aprs-listen-why"></span>
-    <span class="aprs-mark hidden" id="aprs-igate" title="Report what I hear to APRS-IS (iGate): Settings, Idle Mode, APRS"><span class="aprs-dot" id="aprs-igate-dot"></span><span id="aprs-igate-text"></span></span>
-    <span class="aprs-spacer"></span>
-    <label class="aprs-heard-filter" title="Show only the stations your radio heard"><input type="checkbox" id="aprs-heard-only">Heard by me</label>
-    <div class="aprs-listen-note hidden" id="aprs-listen-note"></div>
-  </div>
-
-  <div class="aprs-beacon" id="aprs-beacon" role="group" aria-label="Beacon">
-    <span class="aprs-beacon-title" title="Beacon now sends your position to APRS-IS over the internet. The radio button sends one packet over your radio, at once, with one click.">Beacon</span>
-    <button type="button" class="aprs-btn" id="aprs-beacon-now" title="Send your position to APRS-IS now, over the internet. Nothing is transmitted on the air.">Beacon now</button>
-    <button type="button" class="aprs-btn aprs-btn-rf" id="aprs-rf-now" disabled title="Send one APRS packet with your position over your radio, on the frequency it listens on. One click transmits.">Beacon now (radio)</button>
-    <span class="aprs-mark aprs-beacon-as" id="aprs-beacon-as" title="The callsign each beacon goes out as. Your Settings callsign is not changed."></span>
-    <label class="aprs-field" title="Send your position every so often while this window is open">Timer
-      <select id="aprs-beacon-interval">
-        <option value="0">Off</option>
-        <option value="10">10 min</option>
-        <option value="20">20 min</option>
-        <option value="30">30 min</option>
-      </select>
-    </label>
-    <span class="aprs-beacon-syms" id="aprs-beacon-syms" role="radiogroup" aria-label="Symbol"></span>
-    <div class="aprs-beacon-row">
-      <label class="aprs-field">Comment <input type="text" id="aprs-beacon-comment" maxlength="43" spellcheck="false" autocomplete="off"></label>
-      <label class="aprs-check" title="Rounds your position to the nearest minute, about 1 nautical mile (APRS position ambiguity)"><input type="checkbox" id="aprs-beacon-approx">Approximate position</label>
-      <span class="aprs-mark" id="aprs-beacon-pos"></span>
-      <button type="button" class="aprs-btn-quiet" id="aprs-beacon-pick" title="Click the map where you are">Pick on map</button>
-      <button type="button" class="aprs-btn-quiet hidden" id="aprs-beacon-grid" title="Use the centre of the grid square in Settings">Use my grid</button>
-      <label class="aprs-field" title="The SSID your radio beacon goes out with (APRS SSID recommendations, aprs.org). Your Settings callsign is not changed. The internet beacon and the iGate stay on -10.">My APRS SSID
-        <select id="aprs-rf-ssid"></select>
-      </label>
-    </div>
-    <div class="aprs-beacon-row">
-      <label class="aprs-check" title="While an activation runs, the beacon comment starts with your park, frequency and mode, on the internet and radio beacons alike"><input type="checkbox" id="aprs-beacon-activation">Add my activation to the beacon comment</label>
-      <span class="aprs-mark aprs-beacon-sends" id="aprs-beacon-sends"></span>
-    </div>
-    <div class="aprs-beacon-row"><span class="aprs-mark hidden" id="aprs-beacon-status"><span class="aprs-dot" id="aprs-beacon-dot"></span><span id="aprs-beacon-text"></span></span></div>
-    <div class="aprs-beacon-row" id="aprs-rf-row">
-      <span class="aprs-mark aprs-rf-detail hidden" id="aprs-rf-detail"></span>
-      <span class="aprs-mark hidden" id="aprs-rf-status"><span class="aprs-dot" id="aprs-rf-dot"></span><span id="aprs-rf-text"></span></span>
-    </div>
-    <div class="aprs-beacon-row aprs-rf-radio" id="aprs-rf-radio" role="group" aria-label="Your radio">
-      <span class="aprs-rf-meters" id="aprs-rf-meters" aria-live="polite"></span>
-      <span class="aprs-field aprs-rf-power hidden" id="aprs-rf-power">TX power
-        <input type="range" id="aprs-rf-power-range" aria-label="TX power">
-        <select id="aprs-rf-power-select" aria-label="TX power" hidden></select>
-        <span class="aprs-rf-power-val" id="aprs-rf-power-val">&mdash;</span>
-      </span>
-      <span class="aprs-mark aprs-rf-last hidden" id="aprs-rf-last"></span>
-      <span class="aprs-rf-note" id="aprs-rf-power-note">5 W is fine to start. APRS on 2 m commonly runs 5 to 50 W; on 30 m, a few watts to 50 W can reach an iGate, depending on conditions.</span>
-    </div>
-  </div>
-
-  <div class="aprs-main">
-    <div class="aprs-map-wrap">
+  <main class="aprs-main">
+    <section class="aprs-map-wrap" aria-label="Map">
       <div id="aprs-map"></div>
+      <div class="aprs-mapswitch" role="group" aria-label="Show on the map">
+        <button type="button" id="aprs-map-heard" aria-pressed="false" title="Only the stations your radio heard">Heard by my radio</button>
+        <button type="button" id="aprs-map-all" aria-pressed="true" title="Every station, from your radio and from APRS-IS">Everyone</button>
+      </div>
       <div class="aprs-legend" id="aprs-legend"></div>
       <div class="aprs-empty hidden" id="aprs-empty"></div>
-    </div>
-    <div class="aprs-side">
-      <div class="aprs-count" id="aprs-count">No stations yet</div>
-      <div class="aprs-table-wrap" id="aprs-table-wrap">
-        <table class="aprs-table">
-          <colgroup><col class="c-sym"><col class="c-call"><col class="c-dist"><col class="c-brg"><col class="c-age"><col></colgroup>
-          <thead>
-            <tr>
-              <th data-sort="symbol" class="col-sym" title="Sort by kind"></th>
-              <th data-sort="call">Station</th>
-              <th data-sort="distance" class="num">Distance</th>
-              <th data-sort="bearing" class="num">Bearing</th>
-              <th data-sort="age" class="num">Heard</th>
-              <th data-sort="comment">Comment</th>
-            </tr>
-          </thead>
-          <tbody id="aprs-rows"></tbody>
-        </table>
-      </div>
-      <div class="aprs-detail hidden" id="aprs-detail"></div>
-    </div>
+    </section>
+
+    <aside class="aprs-side" aria-label="Beacon and stations">
+      <section class="aprs-beacon" id="aprs-beacon" aria-label="Beacon">
+        <div class="aprs-sec-head">
+          <h2>Beacon</h2>
+          <span class="aprs-sec-sub" id="aprs-beacon-as"></span>
+          <button type="button" class="aprs-link" id="aprs-beacon-settings" aria-controls="aprs-settings">Change</button>
+        </div>
+        <div class="aprs-grid2">
+          <div class="aprs-field" id="aprs-rf-power" role="group" aria-labelledby="aprs-rf-power-label">
+            <span id="aprs-rf-power-label">Power</span>
+            <div class="aprs-power">
+              <button type="button" class="aprs-step" id="aprs-rf-power-down" aria-label="Less power">&minus;</button>
+              <span class="aprs-power-val" id="aprs-rf-power-val" aria-live="polite">&mdash;</span>
+              <button type="button" class="aprs-step" id="aprs-rf-power-up" aria-label="More power">+</button>
+            </div>
+          </div>
+          <label class="aprs-field" title="Send your position to APRS-IS every so often while this window is open. Never over the radio.">Internet timer
+            <select id="aprs-beacon-interval">
+              <option value="0">Off</option>
+              <option value="10">10 min</option>
+              <option value="20">20 min</option>
+              <option value="30">30 min</option>
+            </select>
+          </label>
+        </div>
+        <div class="aprs-note hidden" id="aprs-beacon-sends"></div>
+
+        <!-- While a radio beacon goes out: live power and SWR. -->
+        <div class="aprs-live hidden" id="aprs-rf-live" aria-live="polite">
+          <div class="aprs-live-grid">
+            <span class="aprs-live-k">Power out</span>
+            <div class="aprs-bar aprs-bar-lg" role="img" id="aprs-live-pwr-bar" aria-label="Power out"><div class="aprs-bar-fill" id="aprs-live-pwr-fill"></div></div>
+            <span class="aprs-live-v" id="aprs-live-pwr-val"></span>
+            <span class="aprs-live-k">SWR</span>
+            <div class="aprs-bar aprs-bar-lg" role="img" id="aprs-live-swr-bar" aria-label="SWR"><div class="aprs-bar-fill aprs-fill-swr" id="aprs-live-swr-fill"></div></div>
+            <span class="aprs-live-v" id="aprs-live-swr-val"></span>
+          </div>
+          <div class="aprs-note" id="aprs-live-note"></div>
+        </div>
+
+        <div class="aprs-beacon-btns">
+          <button type="button" class="aprs-big aprs-big-rf" id="aprs-rf-now" disabled><span class="aprs-big-label" id="aprs-rf-now-label">Beacon on the radio</span><span class="aprs-big-sub" id="aprs-rf-now-sub"></span></button>
+          <button type="button" class="aprs-big" id="aprs-beacon-now"><span class="aprs-big-label">Beacon on the internet</span><span class="aprs-big-sub" id="aprs-beacon-now-sub"></span></button>
+        </div>
+        <div class="aprs-note hidden" id="aprs-rf-detail"></div>
+        <div class="aprs-note hidden" id="aprs-rf-last"></div>
+        <div class="aprs-result hidden" id="aprs-rf-result"></div>
+        <div class="aprs-note hidden" id="aprs-beacon-status"></div>
+      </section>
+
+      <section class="aprs-stations" aria-label="Stations">
+        <div class="aprs-sec-head">
+          <h2>Stations</h2>
+          <span class="aprs-sec-sub" id="aprs-count">No stations yet</span>
+        </div>
+        <div class="aprs-search-row">
+          <input type="search" id="aprs-search" placeholder="Search call sign or comment" aria-label="Search call sign or comment" spellcheck="false" autocomplete="off">
+          <label class="aprs-within" title="How far from your grid square APRS-IS sends stations">Within
+            <select id="aprs-range"></select>
+          </label>
+        </div>
+        <div class="aprs-list-wrap" id="aprs-list-wrap">
+          <ol class="aprs-list" id="aprs-rows" aria-label="Stations"></ol>
+        </div>
+        <div class="aprs-detail hidden" id="aprs-detail"></div>
+      </section>
+    </aside>
+  </main>
   </div>
+
+  <!-- APRS settings (Casey 2026-11-20): the set-and-forget choices, inside this window, never a browser dialog. -->
+  <section class="aprs-settings hidden" id="aprs-settings" role="dialog" aria-modal="false" aria-labelledby="aprs-settings-title">
+    <div class="aprs-settings-head">
+      <h2 id="aprs-settings-title">APRS settings</h2>
+      <button type="button" class="aprs-btn-quiet" id="aprs-settings-done">Done</button>
+    </div>
+    <div class="aprs-settings-body">
+      <section class="aprs-set" aria-labelledby="set-igate-h">
+        <h3 id="set-igate-h">iGate</h3>
+        <label class="aprs-check"><input type="checkbox" id="aprs-igate-on">Report what I hear to APRS-IS (iGate)</label>
+        <div class="aprs-note">Each packet your radio hears goes to APRS-IS under your callsign with -10, so it shows on APRS maps as heard by you. It applies whenever POTACAT listens to APRS on your radio, here or in Idle Mode. Nothing from the internet is ever sent on the air.</div>
+        <div class="aprs-note aprs-strong" id="aprs-igate-state"></div>
+      </section>
+      <section class="aprs-set" aria-labelledby="set-ssid-h">
+        <h3 id="set-ssid-h">My APRS SSID</h3>
+        <label class="aprs-field" title="The ending on your callsign for the radio beacon (APRS SSID recommendations, aprs.org). Your Settings callsign is not changed. The internet beacon and the iGate stay on -10.">Call sign ending for the radio beacon
+          <select id="aprs-rf-ssid"></select>
+        </label>
+      </section>
+      <section class="aprs-set" aria-labelledby="set-pos-h">
+        <h3 id="set-pos-h">Position</h3>
+        <div class="aprs-radios" id="aprs-precision" role="radiogroup" aria-labelledby="set-pos-h"></div>
+        <div class="aprs-more-row">
+          <span class="aprs-note" id="aprs-beacon-pos"></span>
+          <button type="button" class="aprs-btn-quiet" id="aprs-beacon-pick" title="Click the map where you are">Pick on map</button>
+          <button type="button" class="aprs-btn-quiet hidden" id="aprs-beacon-grid" title="Use the centre of the grid square in Settings">Use my grid</button>
+        </div>
+        <div class="aprs-note">Your position comes from the grid square in Settings, or a point you pick on the map. POTACAT on a computer has no GPS.</div>
+      </section>
+      <section class="aprs-set" aria-labelledby="set-sym-h">
+        <h3 id="set-sym-h">Symbol on the map</h3>
+        <div class="aprs-beacon-syms" id="aprs-beacon-syms" role="radiogroup" aria-labelledby="set-sym-h"></div>
+      </section>
+      <section class="aprs-set" aria-labelledby="set-cmt-h">
+        <h3 id="set-cmt-h">Comment</h3>
+        <label class="aprs-field">Sent with every beacon, up to 43 characters
+          <input type="text" id="aprs-beacon-comment" maxlength="43" spellcheck="false" autocomplete="off">
+        </label>
+        <label class="aprs-check" title="While an activation runs, the beacon comment starts with your park, frequency and mode, on the internet and radio beacons alike"><input type="checkbox" id="aprs-beacon-activation">Add my activation to the beacon comment</label>
+      </section>
+      <div class="aprs-note" id="aprs-rf-power-note">5 W is fine to start. APRS on 2 m commonly runs 5 to 50 W; on 30 m, a few watts to 50 W can reach an iGate, depending on conditions.</div>
+    </div>
+  </section>
 
   <script src="../node_modules/leaflet/dist/leaflet.js"></script>
   <script src="../lib/aprs-parser.js"></script>
   <script src="../lib/aprs-symbols.js"></script>
   <script src="../lib/aprs-stations.js"></script>
   <script src="../lib/aprs-map.js"></script>
-  <script src="aprs-icons.js"></script>
-  <script src="aprs-popout.js"></script>
-  <script src="aprs-listen-bar.js"></script>
   <script src="../lib/aprs-beacon.js"></script>
-  <script src="aprs-beacon-bar.js"></script>
   <script src="../lib/rig-power-view.js"></script>
   <script src="../lib/aprs-rf-meters.js"></script>
-  <script src="aprs-rf-beacon-bar.js"></script>
+  <script src="../lib/aprs-window-state.js"></script>
+  <script src="aprs-icons.js"></script>
+  <script src="aprs-popout.js"></script>
+  <script src="aprs-window.js"></script>
 </body>
 </html>

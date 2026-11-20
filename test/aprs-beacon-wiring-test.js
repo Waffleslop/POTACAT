@@ -109,18 +109,25 @@ const fnBody = (src, name) => {
     assert.ok(/if \(p && aprsBatch\) aprsBatch\.push\(p\);/.test(main));
   });
 
-  await test('the window: Beacon now, the timer choices, the symbols, a 43-character comment, Approximate position, the map point', async () => {
-    assert.ok(/id="aprs-beacon-now"[^>]*>Beacon now<\/button>/.test(html));
+  // The window redesign (2026-11-19) renamed "Beacon now" to "Beacon on the internet"
+  // (the approved mock-up) and moved the controls from the beacon bar to aprs-window.js.
+  await test('the window: Beacon on the internet, the timer choices, the symbols, a 43-character comment, Approximate position, the map point', async () => {
+    assert.ok(/id="aprs-beacon-now"><span class="aprs-big-label">Beacon on the internet<\/span>/.test(html));
     const sel = html.slice(html.indexOf('id="aprs-beacon-interval"'), html.indexOf('</select>', html.indexOf('id="aprs-beacon-interval"')));
     assert.deepStrictEqual([...sel.matchAll(/<option value="(\d+)">([^<]+)<\/option>/g)].map((m) => m[1] + ':' + m[2]), ['0:Off', '10:10 min', '20:20 min', '30:30 min']);
     assert.ok(/id="aprs-beacon-comment" maxlength="43"/.test(html));
-    assert.ok(/<input type="checkbox" id="aprs-beacon-approx">Approximate position<\/label>/.test(html));
+    // 2026-11-20: "Approximate position" became the APRS settings panel's Position precision
+    // (grid 4 / grid 6 to the minute, exact not): the same aprsBeaconApprox, set with the choice.
+    assert.ok(/id="aprs-precision" role="radiogroup"/.test(html));
+    assert.ok(/o\.aprsBeaconApprox = x\.precision !== 'exact'/.test(read('lib/aprs-beacon.js')));
     assert.ok(/id="aprs-beacon-pick"[^>]*>Pick on map<\/button>/.test(html));
-    assert.ok(html.indexOf('../lib/aprs-beacon.js') < html.indexOf('aprs-beacon-bar.js'));
-    const bar = read('renderer/aprs-beacon-bar.js');
+    assert.ok(html.indexOf('../lib/aprs-beacon.js') < html.indexOf('aprs-window.js'));
+    const bar = read('renderer/aprs-window.js');
     assert.ok(/AprsIcons\.svg\(sym\.icon, 18\)/.test(bar), 'the phase 1 icons');
     assert.ok(!/alert\(|confirm\(/.test(bar));
     assert.ok(/window\.aprsMapApi = \{ map: map \};/.test(read('renderer/aprs-popout.js')));
+    const ivLine = read('renderer/aprs-window.js').split("$('aprs-beacon-interval').addEventListener")[1].split(String.fromCharCode(10))[0];
+    assert.ok(/beaconSet\(\{ intervalMin: /.test(ivLine) && !/beaconNow|rfSend/.test(ivLine), 'picking a timer only sets it');
   });
 
   console.log(`\nAPRS beacon wiring: ${pass} passed, ${fail} failed`);
