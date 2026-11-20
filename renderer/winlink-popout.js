@@ -328,6 +328,8 @@
       var formAtt = !deleted && window.WinlinkForms ? window.WinlinkForms.formAttachment(m.attachments) : null;
       var html = '<div class="wl-reader-actions">'
         + (formAtt ? '<button class="wl-btn" id="wl-view-form" title="Open the form this message carries, the way the sender filled it in">View form</button>' : '')
+        // Reply with form (#346 phase 2): shown once Pat's copy of the form says it names a reply form.
+        + (formAtt && (openBox === 'in' || openBox === 'archive') ? '<button class="wl-btn" id="wl-reply-form" hidden title="Answer with the reply form this form names, already linked to it">Reply with form</button>' : '')
         + left.map(btn).join('')
         + (!deleted && m.from && !contactFor(m.from) && WC.normalizeAddress(m.from) ? '<button class="wl-btn" id="wl-addbook">Add to address book</button>' : '')
         + '<span class="wl-spacer"></span>' + right.map(btn).join('') + '</div>'
@@ -356,6 +358,17 @@
       // Reply all: never the default; To = the sender, Cc = everyone else but this station.
       on('wl-reply-all', function () { var ra = WMA.replyAll(m, mycall); compose({ to: ra.to.join(', '), cc: ra.cc.join(', '), subject: WMA.replySubject(m.subject), body: quoteBody(m) }); });
       on('wl-addbook', function () { openBook({ address: m.from }); });
+      if ($('wl-reply-form') && window.api.formInfo) window.api.formInfo({ box: openBox, mid: mid, file: formAtt.file }).then(function (r) {
+        var b = $('wl-reply-form');
+        if (b && openMid === mid && r && r.ok && r.reply) { b.hidden = false; b.title = 'Answer with the reply form ' + r.replyName + ', already linked to this message'; }
+      });
+      on('wl-reply-form', function () {
+        say('Opening the reply form...');
+        window.api.formOpen({ kind: 'reply', box: openBox, mid: mid, file: formAtt.file }).then(function (r) {
+          if (!r || !r.ok) say((r && r.error) || 'Could not open the reply form.', true);
+          else say('The reply form is open in its own window. Fill it in and press its Submit button; the reply comes back here for you to put in the Outbox.');
+        });
+      });
       on('wl-view-form', function () {
         say('Opening the form...');
         window.api.formOpen({ kind: 'view', box: openBox, mid: mid, file: formAtt.file }).then(function (r) {

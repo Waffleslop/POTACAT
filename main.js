@@ -15631,10 +15631,35 @@ function winlinkTemplateReadOnly(templatePath) {
 }
 
 /**
+ * The reply form a received form names, if any (#346 phase 2): read from the
+ * form's own XML (form_parameters > reply_template), so the reader offers
+ * "Reply with form" only when there is one.
+ */
+async function winlinkFormInfo(o = {}) {
+  const g = await winlinkFormsGate();
+  if (!g.ok) return { ok: false, error: g.why };
+  const box = String(o.box || ''), mid = String(o.mid || ''), file = String(o.file || '');
+  if (!WinlinkForms.formAttachment([file]) || !WinlinkForms.inReplyToRef(box, mid)) return { ok: false, error: 'That is not a form.' };
+  try {
+    const xml = await patClient.attachment(box, mid, file);
+    const reply = WinlinkForms.formReplyTemplate(xml.toString('utf8'));
+    return { ok: true, reply: !!reply, replyName: reply.replace(/\.0$/, '') };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+/**
  * Open a form in the form window. o.kind 'new': fill in o.path (Pat's
- * template_path); 'view': a received form, o.box / o.mid / o.file.
- * Pat is asked first whether it can render the page, so a missing form set
- * is said in words, not shown as Pat's error page.
+ * template_path); 'view': a received form, o.box / o.mid / o.file; 'reply'
+ * (#346 phase 2): the reply form that received form names, pre-linked to it.
+ * A reply is Pat's own: GET the form attachment with ?rendertohtml=true and
+ * in-reply-to=<box>/<mid> renders the reply template with the original's
+ * values (Pat v1.0.1 api/mailbox.go attachmentHandler, forms.go RenderForm),
+ * and its Submit posts to /api/form?in-reply-to=...&template=... (forms.go
+ * PostFormDataHandler). v1.0.1 checks both in-reply-to paths stay inside the
+ * mailbox. Pat is asked first whether it can render the page, so a missing
+ * form set is said in words, not shown as Pat's error page.
  */
 async function winlinkFormOpen(o = {}) {
   const g = await winlinkFormsGate();
@@ -15644,17 +15669,31 @@ async function winlinkFormOpen(o = {}) {
     return { ok: false, error: 'A form is already open in its own window. Submit it or close that window first.' };
   }
   const origin = WinlinkForms.patOrigin(_patHttpPort);
-  const kind = o.kind === 'view' ? 'view' : 'new';
-  let url = '', name = '', readOnly = false;
+  const kind = o.kind === 'view' || o.kind === 'reply' ? o.kind : 'new';
+  let url = '', name = '', readOnly = false, reply = null;
   if (kind === 'new') {
     const tpl = String(o.path || '');
     url = WinlinkForms.fillUrl(origin, tpl);
     name = WinlinkForms.slashPath(tpl).split('/').pop().replace(/\.txt$/i, '');
     readOnly = winlinkTemplateReadOnly(tpl);
   } else {
-    const att = WinlinkForms.formAttachment([String(o.file || '')]);
-    url = WinlinkForms.viewUrl(origin, String(o.box || ''), String(o.mid || ''), String(o.file || ''));
+    const box = String(o.box || ''), mid = String(o.mid || ''), file = String(o.file || '');
+    const att = WinlinkForms.formAttachment([file]);
     name = att ? att.form : '';
+    if (kind === 'view') {
+      url = WinlinkForms.viewUrl(origin, box, mid, file);
+    } else {
+      const info = await winlinkFormInfo({ box, mid, file });
+      if (!info.ok) return { ok: false, error: info.error };
+      if (!info.reply) return { ok: false, error: 'This form names no reply form. Use Reply to answer it as a plain message.' };
+      url = WinlinkForms.viewUrl(origin, box, mid, file, WinlinkForms.inReplyToRef(box, mid));
+      name = info.replyName;
+      // The reply goes back to the sender, as "Re: <subject>", unless the reply form says otherwise.
+      try {
+        const orig = await patClient.message(box, mid);
+        reply = { to: (orig && orig.from) || '', subject: WinlinkMailActions.replySubject((orig && orig.subject) || '') };
+      } catch { reply = { to: '', subject: '' }; }
+    }
   }
   if (!url) return { ok: false, error: 'That is not a form POTACAT can open.' };
   const probe = await patClient.probe(url.slice(origin.length)).catch((e) => ({ status: 0, text: e.message }));
@@ -15662,12 +15701,15 @@ async function winlinkFormOpen(o = {}) {
     winlinkLog(`forms: Pat could not open ${kind === 'view' ? 'the received form' : `"${name}"`}: HTTP ${probe.status} ${probe.text}`);
     return { ok: false, error: kind === 'view'
       ? 'Pat cannot show this form: it needs the Winlink Standard Forms on this computer. Use Forms > Get the standard forms, then try again. The form\'s text is in the message itself.'
-      : `Pat could not open the form "${name}". Use Forms > Get the standard forms to get them again.` };
+      : kind === 'reply'
+        ? `Pat cannot open the reply form "${name}": it needs the Winlink Standard Forms on this computer. Use Forms > Get the standard forms, then try again.`
+        : `Pat could not open the form "${name}". Use Forms > Get the standard forms to get them again.` };
   }
   const id = WinlinkForms.newFormInstanceId(require('crypto').randomBytes);
-  if (kind === 'new') _winlinkFormIds.set(id, { name, path: String(o.path), readOnly, body: '' });
-  await openWinlinkFormWindow({ url, origin, id, submit: kind === 'new', title: kind === 'new' ? `Winlink form: ${name}` : `Received form: ${name}` });
-  winlinkLog(`forms: opened ${kind === 'new' ? `"${name}" to fill in` : `the received form "${name}"`}`);
+  if (kind !== 'view') _winlinkFormIds.set(id, { name, path: String(o.path || ''), readOnly, body: '', reply });
+  const title = kind === 'new' ? `Winlink form: ${name}` : kind === 'reply' ? `Reply with form: ${name}` : `Received form: ${name}`;
+  await openWinlinkFormWindow({ url, origin, id, submit: kind !== 'view', title });
+  winlinkLog(`forms: opened ${kind === 'new' ? `"${name}" to fill in` : kind === 'reply' ? `the reply form "${name}"` : `the received form "${name}"`}`);
   return { ok: true };
 }
 
@@ -15678,6 +15720,9 @@ async function winlinkFormSubmitted(id) {
   let msg;
   try {
     const c = WinlinkForms.formResultToCompose(await patClient.formData(id), { readOnly: f.readOnly });
+    // A reply form (#346 phase 2) that leaves To or Subject empty goes back to the sender as Re: <subject>.
+    if (f.reply && !c.to) c.to = f.reply.to;
+    if (f.reply && !c.subject) c.subject = f.reply.subject;
     f.body = c.body;
     msg = { id, name: f.name, ...c };
     winlinkLog(`forms: "${f.name}" filled in; it is in the compose pane`);
@@ -47417,6 +47462,7 @@ function cloudShackNotice(text, kind) {
   ipcMain.handle('winlink-forms-catalog', () => winlinkFormsCatalog());
   ipcMain.handle('winlink-forms-update', () => winlinkFormsUpdate());
   ipcMain.handle('winlink-form-open', (_e, o = {}) => winlinkFormOpen({ kind: String(o.kind || ''), path: String(o.path || ''), box: String(o.box || ''), mid: String(o.mid || ''), file: String(o.file || '') }));
+  ipcMain.handle('winlink-form-info', (_e, o = {}) => winlinkFormInfo({ box: String(o.box || ''), mid: String(o.mid || ''), file: String(o.file || '') }));
   ipcMain.handle('winlink-cmd-connect', (_e, o = {}) => {
     if (isRemoteMode() && WinlinkModes.isRadioMode(o.mode)) return { ok: false, error: 'Radio sessions key the shack\'s radio — start them on the shack PC' };
     winlinkRetryCancel('connect');
