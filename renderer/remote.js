@@ -1869,7 +1869,9 @@
           // instead of taking the radio (#541 step 2).
           // worked-incremental: the full worked list comes once per connection;
           // each logged QSO arrives in worked-today, merged below (#731).
-          capabilities: ['chunked-all-qsos', 'qso-delta', 'chunked-worked-qsos', 'local-cw-sidetone', 'jtcat-qso-logged', 'mail-folders-v2', 'pass-state', 'worked-incremental'],
+          // aprs: the shack sends aprs-state and, while the APRS tab (or the
+          // Map's APRS layer) is open, aprs-stations (APRS phase 6).
+          capabilities: ['chunked-all-qsos', 'qso-delta', 'chunked-worked-qsos', 'local-cw-sidetone', 'jtcat-qso-logged', 'mail-folders-v2', 'pass-state', 'worked-incremental', 'aprs'],
         }));
       } catch {}
       onOpen();
@@ -2016,6 +2018,7 @@
         break;
 
       case 'auth-ok':
+        try { aprsOnReconnect(); } catch { /* pre-init */ }
         connectScreen.classList.add('hidden');
         mainUI.classList.remove('hidden');
         tabBar.classList.remove('hidden');
@@ -3121,6 +3124,13 @@
         break;
       case 'scope-state':
         scopeApplyState(msg);
+        break;
+      // APRS phase 6 (capability 'aprs'): the shack's APRS window on this page.
+      case 'aprs-state':
+        aprsApplyState(msg);
+        break;
+      case 'aprs-stations':
+        aprsApplyStations(msg);
         break;
 
       case 'jtcat-auto-cq-state':
@@ -7225,6 +7235,174 @@
   }
 
   // =============================================
+  // APRS (phase 6): the shack's APRS window on this page. Only with a shack
+  // that lists the 'aprs' capability (the tab appears with the first
+  // aprs-state). Rows come parsed from the desktop (lib/aprs-echocat.js); the
+  // icons are the APRS window's own (renderer/aprs-icons.js) and the ages and
+  // compass points are lib/aprs-stations.js, both inlined. The internet beacon
+  // only: the radio beacon is not reachable from here.
+  // =============================================
+  const aprsView = document.getElementById('aprs-view');
+  const aprsTabBtn = document.getElementById('aprs-tab-btn');
+  const aprsRows = new Map();          // key -> row
+  let aprsState = null;
+  let aprsSubscribedSent = false;
+  let aprsSnapshotParts = null;        // rows of a snapshot still arriving
+  let aprsMapOn = false;
+  try { aprsMapOn = localStorage.getItem('echocat-aprs-map') === '1'; } catch { /* private window */ }
+  let aprsMapLayer = null;
+  const aprsMarkers = new Map();       // key -> L.marker
+  let aprsMapFitted = false;           // the layer's first stations bring the map to them, once
+  let aprsListTimer = null;
+
+  function aprsSendMsg(m) {
+    try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m)); } catch { /* not connected */ }
+  }
+  /** Watching while the APRS tab is open, or the Map tab with its APRS layer on. */
+  function aprsSyncSubscription(tab) {
+    const want = !!aprsState && (tab === 'aprs' || (tab === 'map' && aprsMapOn));
+    if (want === aprsSubscribedSent) return;
+    aprsSubscribedSent = want;
+    if (!want) { aprsRows.clear(); aprsSnapshotParts = null; aprsMapClear(); }
+    aprsSendMsg({ type: 'aprs-subscribe', on: want });
+  }
+  /** A new connection: the shack starts from nothing, so ask again if watching. */
+  function aprsOnReconnect() { aprsSubscribedSent = false; aprsRows.clear(); aprsMapClear(); }
+
+  function aprsApplyState(st) {
+    aprsState = st;
+    if (aprsTabBtn) aprsTabBtn.classList.remove('hidden');
+    aprsSyncSubscription(activeTab); // the first state, or the first after a reconnect
+    aprsRenderControls();
+  }
+
+  function aprsApplyStations(m) {
+    if (m.op === 'snapshot') {
+      if (m.chunk === 0) aprsSnapshotParts = [];
+      if (!aprsSnapshotParts) return;
+      for (const r of m.stations || []) aprsSnapshotParts.push(r);
+      if (m.chunk + 1 < m.totalChunks) return;
+      aprsRows.clear();
+      for (const r of aprsSnapshotParts) aprsRows.set(r.key, r);
+      aprsSnapshotParts = null;
+      aprsMapClear();
+    } else if (m.op === 'delta') {
+      for (const r of (m.add || []).concat(m.update || [])) aprsRows.set(r.key, r);
+      for (const k of m.gone || []) aprsRows.delete(k);
+    }
+    aprsScheduleRender();
+  }
+
+  function aprsScheduleRender() {
+    if (aprsListTimer) return;
+    aprsListTimer = setTimeout(() => { aprsListTimer = null; if (activeTab === 'aprs') aprsRenderList(); aprsMapSync(); }, 120);
+  }
+
+  function aprsAge(ms) { return window.AprsStations ? window.AprsStations.formatAge(Date.now() - ms) : ''; }
+  function aprsIcon(r, px) { return window.AprsIcons ? window.AprsIcons.svg(r.cls, px, r.course) : ''; }
+  function aprsDist(r) {
+    if (r.distanceKm == null) return '';
+    const mi = distUnit === 'km' ? false : true;
+    const d = mi ? r.distanceKm * 0.621371 : r.distanceKm;
+    const pt = window.AprsStations ? window.AprsStations.compass(r.bearing) : '';
+    return Math.round(d) + (mi ? ' mi' : ' km') + (pt ? ' ' + pt : '');
+  }
+
+  function aprsRenderControls() {
+    const st = aprsState;
+    if (!st || !aprsView) return;
+    const l = st.listen || {}, ig = st.igate || {}, b = st.beacon || {}, f = st.feed || {};
+    const feedWords = { connected: 'Internet: connected', connecting: 'Internet: connecting', waiting: 'Internet: reconnecting', refused: 'Internet: APRS-IS refused the connection', off: 'Internet: off', stopped: 'Internet: off', 'no-grid': 'Set your grid in Settings to see stations near you.' };
+    document.getElementById('aprs-feed').textContent = feedWords[f.state] || ('Internet: ' + (f.state || 'off'));
+    const sw = document.getElementById('aprs-listen');
+    sw.checked = !!l.on;
+    const chips = document.getElementById('aprs-bands');
+    chips.innerHTML = (l.bands || []).map((bd) => '<button type="button" class="aprs-chip' + (bd === l.band ? ' active' : '') + '" data-band="' + esc(bd) + '">' + esc(bd.replace('m', ' m')) + '</button>').join('');
+    let line = '';
+    if (l.on && l.state === 'listening') line = 'Listening on ' + (l.mhz ? l.mhz + ' MHz' : l.band) + (l.modeLabel ? ' ' + l.modeLabel : '') + ' · ' + (l.heard || 0) + ' heard' + (l.lastAt ? ', last ' + aprsAge(l.lastAt) : '');
+    else if (l.on && l.state === 'starting') line = 'Setting up the radio...';
+    document.getElementById('aprs-listen-line').textContent = line;
+    const igRow = document.getElementById('aprs-igate-row');
+    igRow.classList.toggle('hidden', st.mayIgate === false);
+    document.getElementById('aprs-igate').checked = !!ig.on;
+    document.getElementById('aprs-igate-line').textContent = ig.on ? (ig.paused ? ig.paused : (ig.active ? 'Reporting as ' + (ig.call || '') : 'On when the radio listens') + ' · ' + (ig.gated || 0) + ' sent') : '';
+    const bRow = document.getElementById('aprs-beacon-row');
+    bRow.classList.toggle('hidden', st.mayBeacon === false);
+    const bb = document.getElementById('aprs-beacon');
+    bb.disabled = !!b.sending;
+    bb.textContent = b.sending ? 'Sending...' : 'Beacon now (internet)';
+    document.getElementById('aprs-beacon-line').textContent = b.lastAt ? 'Last beacon ' + aprsAge(b.lastAt) + ' ago' + (b.backAt >= b.lastAt ? ', seen on APRS-IS' : '') : '';
+    document.getElementById('aprs-map-on').checked = aprsMapOn;
+    const ref = document.getElementById('aprs-refusal');
+    ref.textContent = st.refusal || '';
+    ref.classList.toggle('hidden', !st.refusal);
+  }
+
+  function aprsRenderList() {
+    const el = document.getElementById('aprs-list');
+    if (!el) return;
+    const q = (document.getElementById('aprs-search').value || '').trim().toUpperCase();
+    const mine = document.getElementById('aprs-mine').checked;
+    let rows = [...aprsRows.values()];
+    if (mine) rows = rows.filter((r) => r.heardByMe);
+    if (q) rows = rows.filter((r) => (r.label || '').toUpperCase().includes(q) || (r.comment || '').toUpperCase().includes(q));
+    rows.sort((a, b) => (a.distanceKm == null ? 1e9 : a.distanceKm) - (b.distanceKm == null ? 1e9 : b.distanceKm));
+    document.getElementById('aprs-count').textContent = rows.length + (rows.length === 1 ? ' station' : ' stations');
+    if (!rows.length) { el.innerHTML = '<div class="dir-empty">' + (aprsRows.size ? 'No station matches.' : 'No stations yet.') + '</div>'; return; }
+    el.innerHTML = rows.slice(0, 300).map((r) => {
+      const heard = r.heardByMe ? '<span class="aprs-heard">' + (r.rf && r.rf.kind === 'digi' ? 'Heard via ' + esc(r.rf.digi || 'digi') : 'Heard direct') + '</span>' : '';
+      const sp = r.speed ? ' · ' + Math.round(r.speed * (distUnit === 'km' ? 1.852 : 1.15078)) + (distUnit === 'km' ? ' km/h' : ' mph') : '';
+      return '<div class="aprs-row' + (r.heardByMe ? ' mine' : '') + '">' + aprsIcon(r, 26)
+        + '<div class="aprs-row-main"><div class="aprs-row-top"><span class="aprs-call">' + esc(r.label) + '</span>' + heard + '<span class="aprs-age">' + esc(aprsAge(r.lastHeard)) + '</span></div>'
+        + '<div class="aprs-row-sub">' + esc(aprsDist(r)) + esc(sp) + (r.comment || r.status ? ' · ' + esc(r.comment || r.status) : '') + '</div></div></div>';
+    }).join('');
+  }
+
+  // The Map tab's APRS layer: one marker per station, the window's icons.
+  function aprsMapClear() {
+    if (aprsMapLayer) aprsMapLayer.clearLayers();
+    aprsMarkers.clear();
+  }
+  function aprsMapSync() {
+    if (!spotMap || typeof L === 'undefined') return;
+    if (!aprsMapOn) { aprsMapFitted = false; if (aprsMapLayer) { spotMap.removeLayer(aprsMapLayer); aprsMapLayer = null; aprsMarkers.clear(); } return; }
+    if (!aprsMapLayer) aprsMapLayer = L.layerGroup().addTo(spotMap);
+    for (const [k, mk] of aprsMarkers) if (!aprsRows.has(k)) { aprsMapLayer.removeLayer(mk); aprsMarkers.delete(k); }
+    const pts = [];
+    for (const r of aprsRows.values()) {
+      if (r.lat == null || r.lon == null) continue;
+      pts.push([r.lat, r.lon]);
+      const icon = L.divIcon({ className: 'aprs-pin' + (r.heardByMe ? ' mine' : ''), html: aprsIcon(r, 22), iconSize: [22, 22], iconAnchor: [11, 11] });
+      let mk = aprsMarkers.get(r.key);
+      if (!mk) {
+        mk = L.marker([r.lat, r.lon], { icon, keyboard: false });
+        mk.addTo(aprsMapLayer);
+        aprsMarkers.set(r.key, mk);
+      } else { mk.setLatLng([r.lat, r.lon]); mk.setIcon(icon); }
+      mk.bindPopup('<b>' + esc(r.label) + '</b><br>' + esc(aprsDist(r)) + (r.comment ? '<br>' + esc(r.comment) : '') + '<br>' + esc(aprsAge(r.lastHeard)) + (r.heardByMe ? ' · heard on my radio' : ''));
+    }
+    if (!aprsMapFitted && pts.length) { aprsMapFitted = true; try { spotMap.fitBounds(pts, { maxZoom: 9, padding: [20, 20] }); } catch { /* map not sized yet */ } }
+  }
+
+  if (aprsView) {
+    document.getElementById('aprs-listen').addEventListener('change', (e) => aprsSendMsg({ type: 'aprs-listen', on: !!e.target.checked }));
+    document.getElementById('aprs-bands').addEventListener('click', (e) => {
+      const b = e.target.closest('.aprs-chip');
+      if (!b) return;
+      aprsSendMsg({ type: 'aprs-listen', on: !!(aprsState && aprsState.listen && aprsState.listen.on), band: b.dataset.band });
+    });
+    document.getElementById('aprs-igate').addEventListener('change', (e) => aprsSendMsg({ type: 'aprs-igate', on: !!e.target.checked }));
+    document.getElementById('aprs-beacon').addEventListener('click', () => aprsSendMsg({ type: 'aprs-beacon-is' }));
+    document.getElementById('aprs-map-on').addEventListener('change', (e) => {
+      aprsMapOn = !!e.target.checked;
+      try { localStorage.setItem('echocat-aprs-map', aprsMapOn ? '1' : '0'); } catch { /* private window */ }
+      aprsMapSync();
+    });
+    document.getElementById('aprs-search').addEventListener('input', () => aprsRenderList());
+    document.getElementById('aprs-mine').addEventListener('change', () => aprsRenderList());
+  }
+
+  // =============================================
   // ACTIVATOR MODE
   // =============================================
 
@@ -7266,6 +7444,7 @@
       }
     } catch { /* pre-init switch — nothing subscribed yet */ }
     try { scopeSyncSubscription(tab); } catch { /* pre-init */ }
+    try { aprsSyncSubscription(tab); } catch { /* pre-init */ }
     // Leaving Mail: a radio moved to a gateway for a look goes back (W1).
     try { if (activeTab === 'mail' && tab !== 'mail') mailOnLeave(); } catch { /* pre-init */ }
     // Leaving FT8: remember where it was, to come back to it (item 15).
@@ -7289,15 +7468,16 @@
     if (sstvView) { sstvView.classList.add('hidden'); sstvView.style.display = 'none'; }
     if (scopeView) { scopeView.classList.add('hidden'); scopeView.style.display = 'none'; }
     if (mailView) { mailView.classList.add('hidden'); mailView.style.display = 'none'; }
+    try { if (aprsView) { aprsView.classList.add('hidden'); aprsView.style.display = 'none'; } } catch { /* pre-init */ }
     // Popout trigger: visible only on the Map tab, and only in non-popout windows
     if (mapPopoutBtn) mapPopoutBtn.classList.toggle('hidden', isPopout || tab !== 'map');
     if (scanning) stopScan();
     // Show/hide PTT button — hide when FT8/SSTV tab is active
-    pttBtn.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope' || tab === 'mail') ? 'none' : '';
+    pttBtn.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope' || tab === 'mail' || tab === 'aprs') ? 'none' : '';
     // Hide entire bottom bar on FT8/SSTV tab
-    bottomBar.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope' || tab === 'mail') ? 'none' : '';
+    bottomBar.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope' || tab === 'mail' || tab === 'aprs') ? 'none' : '';
     // Hide Scan button and freq step arrows on FT8/SSTV tab
-    scanBtn.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope' || tab === 'mail') ? 'none' : '';
+    scanBtn.style.display = (tab === 'ft8' || tab === 'sstv' || tab === 'scope' || tab === 'mail' || tab === 'aprs') ? 'none' : '';
     var freqStepBtns = document.getElementById('freq-step-btns');
     if (freqStepBtns) freqStepBtns.style.display = tab === 'ft8' ? 'none' : '';
     // Hide CW/SSB panels on tabs where they're not relevant
@@ -7325,6 +7505,11 @@
       }
       setTimeout(() => spotMap.invalidateSize(), 100);
       renderMapSpots();
+      try { aprsMapSync(); } catch { /* pre-init */ } // the APRS layer, when it is on (APRS tab)
+    } else if (tab === 'aprs') {
+      if (aprsView) { aprsView.classList.remove('hidden'); aprsView.style.display = 'flex'; }
+      aprsRenderControls();
+      aprsRenderList();
     } else if (tab === 'log') {
       logTabView.classList.remove('hidden');
       refreshLogTabFields();

@@ -240,6 +240,8 @@ const TESTS = [
   'test/aprs-rf-beacon-wiring-test.js', // APRS phase 7: only Transmit sends, no RF timer, unkey on window close / stop / TX limit, power never changed
   'test/direwolf-aprs-tx-config-test.js', // APRS phase 7: the transmit config (PTT via the shim, channel access per band); listen and Winlink configs byte-identical
   'test/direwolf-aprs-tx-offline-test.js', // APRS phase 7: the bundled Dire Wolf keys a fake shim once and its audio decodes back (skips without the build)
+  'test/aprs-echocat-test.js', // APRS phase 6: ECHOCAT devices: snapshot, 1.5 s deltas, feed and listen ownership, Guest Pass, aprs-state
+  'test/aprs-echocat-wire-test.js', // APRS phase 6: the 'aprs' capability on the wire (old clients untouched), guest refusals, main.js glue, ECHOCAT Web
   'test/log-comment-test.js',
   'test/raw-cat-command-test.js',
   'test/rigctld-stderr-test.js',
