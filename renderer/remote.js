@@ -1889,6 +1889,9 @@
   function onWsClosed() {
     clearInterval(pingInterval);
     pingInterval = null;
+    // The shack stops keying when it loses this page; the page's own keyer
+    // and sidetone stop too, so neither goes on without the other (#244).
+    if (cwKeyStreamOk && window.__echocatReleasePaddles) { try { window.__echocatReleasePaddles(false); } catch (e) {} }
     if (bc) { try { bc.postMessage({ kind: 'connection', online: false, reason: wasKicked ? 'kicked' : 'closed' }); } catch {} }
     if (wasKicked) return;
     if (mainUI.classList.contains('hidden')) {
@@ -10609,48 +10612,21 @@
     // a new press; 15 ms is a whole dot at 80 WPM. Same rule in lib/keyer.js.
     var BOUNCE_MS = 15;
     var ditReleaseAt = -1e9, dahReleaseAt = -1e9;
-    // A held paddle's next element is chosen when the space ends, but it is
-    // only HEARD a scheduling lead later (schedulePaddleElement, 20 ms) plus
-    // the device's output latency, and the release reaches this page after
-    // the contact opens (MIDI and keyboard events arrive late). The operator
-    // releases on what he hears, so at 25 wpm (48 ms dit and space) his
-    // release could miss the choice and the keyer sent one more element:
-    // LZ3AW (#244, 1.13.8) measured 54 ms from choice to speaker and paddle
-    // input up to 24 ms late. A release of the contact whose HOLD chose the
-    // element now withdraws it while it has not begun to sound. A latched
-    // element (a real press during the element) is never withdrawn.
+    // A held paddle's next element is chosen when the space ends, a lead
+    // before it sounds (schedulePaddleElement), and the operator releases on
+    // what he hears, so at 25 wpm a release can come after that choice
+    // (LZ3AW, #244). A release of the contact whose HOLD chose the element
+    // asks to withdraw it (a latched element, a real press during the
+    // element, is never withdrawn). The page grants it only while the
+    // element's sidetone has not started (lib/cw-sidetone-commit.js, Casey
+    // 2026-11-19): once it sounds, it is committed and keyed on the air in
+    // full, so the sidetone and the air always agree. Until 1.14.6 a release
+    // could withdraw an element after its tone had started (judged by when
+    // the release happened and what he could have heard): the page cut its
+    // tone into a blip while the shack dropped the element, the extra
+    // elements LZ3AW heard only in his own sidetone.
     var heldBy = null;   // 'dit' | 'dah': the held contact that chose this element
     var undoState = null; // the keyer before that choice
-    var soundAt = 0;     // performance.now() when this element starts to sound
-    var chosenAt = 0;    // performance.now() when the keyer chose it
-    var RETRACT_MARGIN_MS = 2;
-    // 1.14.5 retest (#244): the window above ended where the element began
-    // to sound in the PAGE, and it was measured when the release was
-    // PROCESSED. Neither is when the operator acts. His cw-diag on 1.14.5:
-    // 57 ms from choice to speaker, 40 ms of it the device's output, and
-    // paddle input up to 40 ms late, at 25 wpm (48 ms dit and space). So a
-    // release he made before he could hear the element still arrived after
-    // the page had started it, and the element was kept: one more dot or
-    // dash. Now the release counts at the time it HAPPENED (the event's own
-    // timestamp), and it withdraws the element if it happened before the
-    // element reached his ear (start + the device's output latency, at most
-    // HEARD_LAG_MAX_MS). The shack replays the stream at least 120 ms behind
-    // its arrival, so a cancel sent within RETRACT_RF_MAX_MS of the choice
-    // reaches it first; later than that the element is kept, never cut.
-    var RETRACT_RF_MAX_MS = 100;
-    var HEARD_LAG_MAX_MS = 60;
-    function heardLagMs() {
-      var v = (typeof cwHeardLagMs === 'function') ? Number(cwHeardLagMs()) : 0;
-      return (v > 0) ? Math.min(HEARD_LAG_MAX_MS, v) : 0;
-    }
-    // When the contact really opened: the event's timestamp (same origin as
-    // performance.now()) when it is sane, else now.
-    function releaseTime(atMs) {
-      var now = performance.now();
-      var t = Number(atMs);
-      if (!(t > 0) || t > now + 5 || t < now - 200) return now;
-      return Math.min(t, now);
-    }
     function ditMs() { return Math.round(1200 / wpm); }
     function dahMs() { return ditMs() * 3; }
     function clearTimers() {
@@ -10663,9 +10639,7 @@
       bothAtStart = ditPressed && dahPressed;
       ditLatch = false; dahLatch = false;
       heldBy = null; undoState = null;
-      chosenAt = performance.now();
-      var lead = onKey(true, isDit ? ditMs() : dahMs(), { continued: !!continued, spaceMs: ditMs() });
-      soundAt = chosenAt + (Number(lead) > 0 ? Number(lead) : 0);
+      onKey(true, isDit ? ditMs() : dahMs(), { continued: !!continued, spaceMs: ditMs() });
       clearTimers();
       timerDue = performance.now() + (isDit ? ditMs() : dahMs());
       toneTimer = setTimeout(onToneEnd, isDit ? ditMs() : dahMs());
@@ -10712,20 +10686,18 @@
       }
       state = IDLE;
     }
-    // The contact whose hold chose the element now sounding-soon opened: take
-    // the element back and choose again as if the release had come in time.
-    function retractHeldBy(contact, atMs) {
-      // TONE or the space after it: a dit is over in the keyer's own time
-      // before the operator has heard it (#244), so a late release can land
-      // in the space; heldBy is cleared when the next element starts.
+    // The contact whose hold chose the element about to sound opened: ask for
+    // the element back and, if it has not started to sound, choose again as
+    // if the release had come in time.
+    function retractHeldBy(contact) {
+      // TONE or the space after it (a dit can be over in the keyer's own time
+      // before its tone starts); heldBy is cleared when the next element starts.
       if ((state !== TONE && state !== IES) || heldBy !== contact || !undoState) return;
-      var now = performance.now();
-      if (releaseTime(atMs) >= soundAt + heardLagMs() - RETRACT_MARGIN_MS) return; // he could hear it
-      if (now - chosenAt > RETRACT_RF_MAX_MS) return; // the shack may already be keying it
       var u = undoState;
-      clearTimers();
       heldBy = null; undoState = null;
-      onKey(false, undefined, { cancel: true, retract: true });
+      // true only while its sidetone has not started (lib/cw-sidetone-commit.js)
+      if (onKey(false, undefined, { cancel: true, retract: true }) !== true) return;
+      clearTimers();
       currentIsDit = u.isDit;
       ditLatch = ditLatch || u.ditLatch;
       dahLatch = dahLatch || u.dahLatch;
@@ -10733,7 +10705,7 @@
       state = IES;
       chooseNext();
     }
-    function handleDit(pressed, atMs) {
+    function handleDit(pressed) {
       ditPressed = pressed;
       if (mode === 'straight') { onKey(pressed); return; }
       if (pressed) {
@@ -10746,10 +10718,10 @@
         // Ghost-press cleanup (Android BT MIDI etc. — matches server keyer)
         var held = Date.now() - ditPressStart;
         if (ditLatch && held < GHOST_MS && state !== IDLE) ditLatch = false;
-        retractHeldBy('dit', atMs);
+        retractHeldBy('dit');
       }
     }
-    function handleDah(pressed, atMs) {
+    function handleDah(pressed) {
       dahPressed = pressed;
       if (mode === 'straight') return;
       if (pressed) {
@@ -10761,13 +10733,12 @@
         dahReleaseAt = Date.now();
         var held = Date.now() - dahPressStart;
         if (dahLatch && held < GHOST_MS && state !== IDLE) dahLatch = false;
-        retractHeldBy('dah', atMs);
+        retractHeldBy('dah');
       }
     }
     return {
-      // atMs: when the contact changed (the input event's timeStamp), optional.
-      paddleDit: function(pressed, atMs) { swap ? handleDah(pressed, atMs) : handleDit(pressed, atMs); },
-      paddleDah: function(pressed, atMs) { swap ? handleDit(pressed, atMs) : handleDah(pressed, atMs); },
+      paddleDit: function(pressed) { swap ? handleDah(pressed) : handleDit(pressed); },
+      paddleDah: function(pressed) { swap ? handleDit(pressed) : handleDah(pressed); },
       setWpm: function(v) { wpm = Math.max(5, Math.min(50, v | 0)); },
       setMode: function(m) {
         if (m === 'iambicA' || m === 'iambicB' || m === 'straight') {
@@ -10837,11 +10808,6 @@
   // he releases late and the keyer honestly sends one more. One line per
   // over in the desktop log says which: cw-diag, sent after 1.5 s of quiet.
   var cwDiag = null, cwDiagTimer = null;
-  // How long after a tone starts on the audio clock the operator hears it:
-  // the device's output latency (the keyer's withdraw window, #244).
-  function cwHeardLagMs() {
-    return cwAudioCtx ? ((cwAudioCtx.baseLatency || 0) + (cwAudioCtx.outputLatency || 0)) * 1000 : 0;
-  }
   function cwDiagNote(kind, ms) {
     ms = Math.max(0, Number(ms) || 0);
     if (!cwDiag) cwDiag = { elements: 0, timerMax: 0, timerSum: 0, timerN: 0, inputMax: 0, aheadMax: 0, aheadSum: 0 };
@@ -10888,57 +10854,82 @@
   // second keyer at the shack meant network jitter decided the elements:
   // a dit release that arrived late became two dits (LZ3AW, 400 km from his
   // TS-480, 2026-09-29: "errors ... especially with the dots").
+  //
+  // An iambic element goes to the shack when its sidetone STARTS (#244,
+  // lib/cw-sidetone-commit.js), not when the keyer chooses it: before that
+  // the keyer may still withdraw it, after it nothing is withdrawn, so a
+  // withdrawal never goes on the wire and the air keys exactly what was heard.
   var cwStreamNextAt = 0, cwStreamLastAt = 0;
-  function sendCwKeyStream(down, durMs, info) {
+  // The stream time (`at`) of an iambic element, fixed when it is chosen.
+  function cwStreamElementAt(durMs, info) {
+    // A continued element starts exactly one space after the previous
+    // one, whatever this page's timers did; a new streak starts now.
+    var at = (info && info.continued && cwStreamNextAt) ? cwStreamNextAt : performance.now();
+    cwStreamNextAt = at + durMs + ((info && info.spaceMs) || 0);
+    cwStreamLastAt = at;
+    return at;
+  }
+  // Straight-key edges, and the cancelling key-up of a stop (atMs: where it cuts).
+  function sendCwKeyStream(down, info, atMs) {
     if (!cwKeyStreamOk || !ws || ws.readyState !== WebSocket.OPEN) return;
     var now = performance.now();
     var msg;
-    if (down && durMs) {
-      // A continued element starts exactly one space after the previous
-      // one, whatever this page's timers did; a new streak starts now.
-      var at = (info && info.continued && cwStreamNextAt) ? cwStreamNextAt : now;
-      cwStreamNextAt = at + durMs + ((info && info.spaceMs) || 0);
-      cwStreamLastAt = at;
-      msg = { type: 'cw-key', at: at, down: true, ms: durMs };
-    } else if (down) {
+    if (down) {
       cwStreamNextAt = 0;
       msg = { type: 'cw-key', at: now, down: true };
     } else {
       cwStreamNextAt = 0;
-      msg = { type: 'cw-key', at: now, down: false };
+      msg = { type: 'cw-key', at: (atMs != null ? atMs : now), down: false };
       if (info && info.cancel) msg.cancel = true;
     }
     ws.send(JSON.stringify(msg));
   }
-  // The keyer withdrew an element that has not begun to sound (its held
-  // contact opened in time, #244): drop its tone and, in stream mode, its
-  // keying at the shack (a cancelling key-up just before its start; the
-  // playout drops what is scheduled after that), and give its slot back.
+  // The gate between this keyer and the shack: an element is committed, and
+  // sent, when its sidetone starts on the audio clock.
+  var cwCommit = window.CwSidetoneCommit.createGate({
+    now: function() { return cwAudioCtx ? cwAudioCtx.currentTime * 1000 : 0; },
+    send: function(msg) {
+      if (!cwKeyStreamOk) return true; // an older shack keys from the contacts
+      if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+      ws.send(JSON.stringify(msg));
+      return true;
+    },
+    setTimer: function(fn, ms) { return setTimeout(fn, ms); },
+    clearTimer: function(h) { clearTimeout(h); },
+    // It could not reach the shack (the socket is gone): its tone has not
+    // started, so silence it and stop the keyer; nothing more sounds.
+    onLost: function() { try { localCwKeyer.stop(); } catch (e) { cancelPaddleTones(); } },
+  });
+  // The keyer asks for an element back (its held contact opened). Granted
+  // only while its sidetone has not started: drop its tone and give its slot
+  // back; it was never sent. Once it sounds it is keyed in full (#244).
   function retractPaddleElement() {
-    if (paddleGain && cwAudioCtx && paddleLastAt) {
-      var g = paddleGain.gain, nowA = cwAudioCtx.currentTime;
-      if (nowA > paddleLastAt) {
-        // The page had already started rendering this tone (the release came
-        // in late, #244): hold where it is and fade out in 3 ms, no click.
-        if (typeof g.cancelAndHoldAtTime === 'function') g.cancelAndHoldAtTime(nowA);
-        else { var v = g.value; g.cancelScheduledValues(nowA); g.setValueAtTime(v, nowA); }
-        g.linearRampToValueAtTime(0, nowA + 0.003);
-      } else {
-        g.cancelScheduledValues(paddleLastAt);
-      }
-      paddleNextAt = Math.max(paddleLastAt, nowA);
-    } else paddleNextAt = paddleLastAt;
-    if (cwKeyStreamOk && cwStreamLastAt && ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'cw-key', at: cwStreamLastAt - 1, down: false, cancel: true }));
-      cwStreamNextAt = cwStreamLastAt;
-    }
+    if (!cwCommit.withdraw()) return false;
+    if (paddleGain && cwAudioCtx && paddleLastAt) paddleGain.gain.cancelScheduledValues(paddleLastAt);
+    paddleNextAt = paddleLastAt;
+    cwStreamNextAt = cwStreamLastAt;
+    return true;
+  }
+  // A stop (STOP, mode change, paddle keying lost, the socket closed): the
+  // tone stops now, an element not yet sounding is dropped on both sides, and
+  // the shack cuts the element now sounding at the same point (cutAt).
+  function stopPaddleElements(info) {
+    var cut = cwCommit.stop();
+    cancelPaddleTones();
+    sendCwKeyStream(false, info, cut);
   }
   var localCwKeyer = createLocalCwKeyer(function(down, durMs, info) {
-    if (durMs) { sendCwKeyStream(true, durMs, info); var lead = schedulePaddleElement(durMs); cwDiagNote('ahead', lead); return lead; } // iambic element
+    if (durMs) { // iambic element: sounds `lead` ms from now, is sent when it does
+      var at = cwStreamElementAt(durMs, info);
+      var lead = schedulePaddleElement(durMs); cwDiagNote('ahead', lead);
+      cwCommit.element(at, durMs, paddleLastAt * 1000);
+      return lead;
+    }
     if (durMs === 0) return;                              // its end is already scheduled
-    if (info && info.retract) { retractPaddleElement(); return; }
-    // Straight key, or a keyer stop/mode change.
-    sendCwKeyStream(down, 0, info);
+    if (info && info.retract) return retractPaddleElement(); // true: withdrawn before it sounded
+    if (!down && info && info.cancel) { stopPaddleElements(info); handleCwSidetone(false); return; }
+    // Straight key.
+    sendCwKeyStream(down, info);
     if (!down) cancelPaddleTones();
     handleCwSidetone(down);
   });
@@ -11816,7 +11807,7 @@ var _paddleHoldTimer = { dit: null, dah: null };
   // they sit in (a silent `typeof` miss would bring the stuck key back).
   window.__echocatReleasePaddles = releaseAllPaddles;
 
-  function sendPaddle(contact, state, atMs) {
+  function sendPaddle(contact, state) {
     // Drive the local iambic keyer first (zero-latency sidetone) then forward
     // to the server over WS (which does the real radio keying). Skip both
     // sides when desktop has reported paddle keying can't reach the radio
@@ -11825,9 +11816,8 @@ var _paddleHoldTimer = { dit: null, dah: null };
     // Presses only: a release always goes out (see releaseAllPaddles).
     if (!cwPaddleAvailable && state) return;
     ensureCwAudioCtx();
-    // atMs: the input event's timeStamp (a late release counts when it happened, #244)
-    if (contact === 'dit') localCwKeyer.paddleDit(!!state, atMs);
-    else if (contact === 'dah') localCwKeyer.paddleDah(!!state, atMs);
+    if (contact === 'dit') localCwKeyer.paddleDit(!!state);
+    else if (contact === 'dah') localCwKeyer.paddleDah(!!state);
     if (ws && ws.readyState === WebSocket.OPEN && !cwKeyStreamOk) {
       if (state && !_paddleRttSentAt) _paddleRttSentAt = performance.now();
       ws.send(JSON.stringify({ type: 'paddle', contact: contact, state: state }));
@@ -11912,11 +11902,11 @@ var _paddleHoldTimer = { dit: null, dah: null };
     if (contact === 'dit') {
       e.preventDefault();
       ditDown = false;
-      sendPaddle('dit', 0, e.timeStamp);
+      sendPaddle('dit', 0);
     } else if (contact === 'dah') {
       e.preventDefault();
       dahDown = false;
-      sendPaddle('dah', 0, e.timeStamp);
+      sendPaddle('dah', 0);
     }
   });
 
@@ -11988,10 +11978,10 @@ var _paddleHoldTimer = { dit: null, dah: null };
     // Normal operation — map notes to paddle contacts
     if (note === ecMidiDitNote) {
       if (isNoteOn) { if (!ditDown) { ditDown = true; sendPaddle('dit', 1); } }
-      else if (isNoteOff) { ditDown = false; sendPaddle('dit', 0, msg.timeStamp); }
+      else if (isNoteOff) { ditDown = false; sendPaddle('dit', 0); }
     } else if (note === ecMidiDahNote) {
       if (isNoteOn) { if (!dahDown) { dahDown = true; sendPaddle('dah', 1); } }
-      else if (isNoteOff) { dahDown = false; sendPaddle('dah', 0, msg.timeStamp); }
+      else if (isNoteOff) { dahDown = false; sendPaddle('dah', 0); }
     }
   }
 
