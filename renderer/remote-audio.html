@@ -125,9 +125,9 @@ window.api.onStartAudio(async (config) => {
           error: isAlsaId
             ? 'The radio audio input is a raw ALSA device ("' + config.inputDeviceId + '"), which the audio bridge cannot open — '
               + 'no audio was captured (the microphone was NOT used). Pick the PulseAudio/PipeWire entry for the same '
-              + 'card in Settings > My Rigs > Audio, not the one under "ALSA hardware (raw)".'
+              + 'card in Settings > Radio, Edit the rig, Audio Devices, RX audio in, not the one under "ALSA hardware (raw)".'
             : 'Radio audio input not found, so no audio was captured (the microphone was NOT used). '
-              + 'Pick the radio\'s input again in Settings > My Rigs > Audio. Reason: ' + why,
+              + 'Pick the radio\'s input again in Settings > Radio, Edit the rig, Audio Devices, RX audio in. Reason: ' + why,
         });
         return; // no capture at all — see above
       }
@@ -151,7 +151,7 @@ window.api.onStartAudio(async (config) => {
       if (twinId) {
         localStream = await navigator.mediaDevices.getUserMedia({ audio: { ...baseAudio, deviceId: { exact: twinId } } });
         window.api.sendAudioStatus({
-          warning: 'No radio audio input is configured; used the input of the radio\'s sound card (the same device as its output). Set it in Settings > My Rigs > Audio to make this explicit.',
+          warning: 'No radio audio input is configured; used the input of the radio\'s sound card (the same device as its output). Set it in Settings > Radio, Edit the rig, Audio Devices, RX audio in, to make this explicit.',
         });
       } else if (config.daxTxDirect) {
         // No input configured on a route whose receive audio comes from main
@@ -163,7 +163,7 @@ window.api.onStartAudio(async (config) => {
         localStream = await navigator.mediaDevices.getUserMedia({ audio: baseAudio });
         window.api.sendAudioStatus({
           warning: 'No radio audio input is configured, so the system DEFAULT recording device was opened. '
-            + 'If that is a microphone, set the radio\'s input in Settings > My Rigs > Audio.',
+            + 'If that is a microphone, set the radio\'s input in Settings > Radio, Edit the rig, Audio Devices, RX audio in.',
         });
       }
     }
@@ -253,12 +253,12 @@ window.api.onStartAudio(async (config) => {
       // IC-7300 on Linux, 2026-10-20). Label resolved by id; an unset id is
       // the system default output, which is rarely the radio.
       try {
-        let label = 'the system default output (set the rig\'s audio Output in Settings > My Rigs)';
+        let label = 'the system default output (set it in Settings > Radio, Edit the rig, Audio Devices, TX audio out)';
         if (config.daxTxDirect) label = config.audioSource === 'tci' ? 'the radio over TCI (Zeus)' : config.audioSource === 'icom-network' ? 'the radio over the LAN (Icom Network)' : config.audioSource === 'yaesu-lan' ? 'the radio over the LAN (Yaesu SCU-LAN10)' : 'SmartSDR direct (dax_tx stream)';
         else if (config.outputDeviceId) {
           const devs = await navigator.mediaDevices.enumerateDevices();
           const d = devs.find((x) => x.kind === 'audiooutput' && x.deviceId === config.outputDeviceId);
-          label = d ? (d.label || config.outputDeviceId) : ('an output device that is not present (' + config.outputDeviceId.slice(0, 12) + '…) — re-pick it in Settings > My Rigs');
+          label = d ? (d.label || config.outputDeviceId) : ('an output device that is not present (' + config.outputDeviceId.slice(0, 12) + '…) — pick it again in Settings > Radio, Edit the rig, Audio Devices, TX audio out');
         }
         window.api.sendAudioStatus({ txOutputLabel: label });
       } catch {}

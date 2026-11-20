@@ -335,7 +335,7 @@ function fnBody(src, name) {
     assert.strictEqual(d.ok, true);
     assert.deepStrictEqual(d.vara, { inputName: 'Microphone (USB Audio CODEC)', outputName: 'Speakers (USB Audio CODEC)' });
     assert.strictEqual(S.planDirect({ capture: 'DAX Audio RX 1 (FlexRadio Systems DAX)', playback: 'x' }).vara.inputName, 'DAX Audio RX 1 (FlexRadio Syste');
-    assert.ok(/Settings > My Rigs/.test(S.planDirect({}).advice));
+    assert.ok(/Settings > Radio, Edit the rig, Audio Devices/.test(S.planDirect({}).advice));
     const txt = S.describeSetup({ kind: 'hf', plan: d, path: 'C:\\VARA\\VARA.exe', port: 8300, version: 'VARA HF 4.8.9', iniChanged: true });
     assert.ok(/uses the radio's sound card directly/.test(txt) && /No cable/.test(txt));
     const saved = S.planCablesFromSaved({ inputId: 'hifi-out', outputId: 'cab-in', inputLabel: 'Hi-Fi Cable Output (VB-Audio Hi-Fi Cable)', outputLabel: 'CABLE Input (VB-Audio Virtual Cable)', varaInputName: 'CABLE Output (VB-Audio Virtual ', varaOutputName: 'Hi-Fi Cable Input (VB-Audio Hi-' });
