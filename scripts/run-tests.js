@@ -581,6 +581,7 @@ const TESTS = [
   'test/lotw-flags-test.js',
   'test/lotw-split-test.js',
   'test/station-county-test.js', // the operator's own state and county: per park on activations, home only from the home grid
+  'test/guest-pass-station-location-test.js', // a Guest Pass contact carries the lending station's grid, state and county (#822)
   'test/sdr-scope-test.js',
   'test/sdr-scope-if-tap-test.js', // #394: an SDR on a radio's IF output stays on the IF
   'test/rtltcp-audio-test.js',
