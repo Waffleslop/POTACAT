@@ -373,6 +373,7 @@ const SstvStartBand = require('./lib/sstv-start-band');
 const AwardTables = require('./lib/award-tables');
 const { activationStationFill } = require('./lib/activation-station'); // N7VBN: station side of activation records
 const { freqToBand, BANDS } = require('./lib/bands');
+const BandLastFreq = require('./lib/band-last-freq'); // a band button returns to the rig's last frequency there (#680)
 const { splitHostPort } = require('./lib/host-port');
 const activationProgram = require('./lib/activation-program');
 const { applyQsoEdit, modeEditFields, activationSigOf } = require('./lib/qso-edit'); // Logbook cell edits (#509)
@@ -873,6 +874,7 @@ const GLOBAL_KEYS = new Set([
   'profiles',          // (reserved — currently unused but reserved against name collision)
   'rigs',              // rig hardware definitions
   'activeRigId',       // last-selected rig (global default)
+  'bandLastFreq',      // { rigId: { band: kHz } } the last dial on each band, per rig: band buttons go back there (#680)
   'rigPresets',        // named TX power / RF gain / AF gain sets, per rig (lib/rig-presets.js)
   'rigPresetByMode',   // { rigId|'*': { ssb|cw|digital|fm|am: presetId } } — applied on a mode-family change
   'rigPresetRules',    // { rigId|'*': [{ bands, families, presetId }] } — band + mode rules, first match wins; byMode is the fallback
@@ -4462,7 +4464,27 @@ function catFrequencyHandler(hz) {
   // frequency (kg6odijohn, IC-7100 repeater memory: POTACAT acted on the
   // offset). The controller drops them too; this is the net for every path.
   if (_remoteTxState || (cat && cat._transmitting)) return;
+  noteBandLastFreq(hz);
   sendCatFrequency(hz);
+}
+
+// The radio's last dial on each band, per rig (lib/band-last-freq.js, #680).
+// Kept in memory on every read; written to settings when the band changes, so
+// the frequency left behind on a band is saved without a write per poll.
+let _bandLastFreqBand = null;
+let _bandLastFreqSaveTimer = null;
+let _bandLastFreqSavedAtQuit = false;
+function noteBandLastFreq(hz) {
+  try {
+    if (!settings.bandLastFreq || typeof settings.bandLastFreq !== 'object') settings.bandLastFreq = {};
+    const band = BandLastFreq.noteDial(settings.bandLastFreq, settings.activeRigId, hz);
+    if (!band || band === _bandLastFreqBand) return;
+    const first = _bandLastFreqBand === null;
+    _bandLastFreqBand = band;
+    if (first) return;
+    clearTimeout(_bandLastFreqSaveTimer);
+    _bandLastFreqSaveTimer = setTimeout(() => { try { saveSettings(settings); } catch {} }, 2000);
+  } catch {}
 }
 function catModeHandler(md) {
   if (smartSdr && smartSdr.mode === 'self') return;
@@ -50022,6 +50044,16 @@ function cloudShackNotice(text, kind) {
   // longer auto-follow the kiwi — acceptable; that path needs a real
   // race-protection design before re-introducing.)
 
+  // A band button (VFO window, main window): where to go on that band. The
+  // radio's last frequency there, or the button's own preset (#680). A remote
+  // client gets the preset; the shack's radio is not this PC's to remember.
+  ipcMain.handle('band-jump-target', (_e, presetKhz) => {
+    const preset = parseFloat(presetKhz);
+    if (!Number.isFinite(preset) || preset <= 0) return presetKhz;
+    if (isRemoteMode()) return preset;
+    return BandLastFreq.jumpTarget(settings.bandLastFreq, settings.activeRigId, preset);
+  });
+
   ipcMain.on('tune', (_e, { frequency, mode, bearing, slicePort, origin, pickSideband }) => {
     // The idle-RX session's own QSY (including WSPR band hops) must not read
     // as the operator returning — see markUserActive().
@@ -56592,6 +56624,13 @@ app.on('before-quit', (e) => {
     e.preventDefault();
     Promise.race([jtcatFlushLogReviews(), new Promise((r) => setTimeout(r, 4000))]).finally(() => app.quit());
     return;
+  }
+  // The last frequency on the band the radio is on now (#680): written once,
+  // since a band change is the only other time it is.
+  if (_bandLastFreqBand && !_bandLastFreqSavedAtQuit) {
+    _bandLastFreqSavedAtQuit = true;
+    clearTimeout(_bandLastFreqSaveTimer);
+    try { saveSettings(settings); } catch {}
   }
   winlinkHoldAwake(false); // never leave the Winlink session's App Nap block behind (#187)
   // A Winlink return still pending (#187): the radio goes back while CAT is up.

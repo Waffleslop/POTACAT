@@ -4230,12 +4230,14 @@ function updateBandButtonsVisibility() {
   if (show) updateBandButtonActive();
 }
 
-bandButtonsEl.addEventListener('click', (e) => {
+bandButtonsEl.addEventListener('click', async (e) => {
   const btn = e.target.closest('button');
   if (!btn) return;
   const band = btn.dataset.band;
-  const freq = getBandQsyFreq(band);
+  let freq = getBandQsyFreq(band);
   if (freq) {
+    // Back to where this radio last was on the band, or the preset (#680).
+    try { const t = await window.api.bandJumpTarget(freq); if (Number(t) > 0) freq = Number(t); } catch {}
     const curMode = (radioMode || '').toUpperCase();
     // Voice SSB (or a mode not read yet): main decides, from the radio's own
     // mode and DATA state, whether the band's sideband goes with it (#445,
