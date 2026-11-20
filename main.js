@@ -506,6 +506,7 @@ const AprsPosition = require('./lib/aprs-position');       // where both beacons
 const FlexGps = require('./lib/flex-gps');                 // a FlexRadio's GPS, read only (sub gps all)
 const AprsActivation = require('./lib/aprs-activation');   // APRS extra 1: the running activation in the beacon comment (off by default)
 const AprsMessenger = require('./lib/aprs-messenger');     // APRS A1: messages over the internet (retries, acks, duplicates, unread)
+const AprsTemplates = require('./lib/aprs-templates');     // APRS A2: message templates (fills To and Text; nothing sends until Send)
 const AprsRfGate = require('./lib/aprs-rf-gate');          // APRS phase 7: when the 'aprs' owner may key (one manual beacon over the radio)
 const AprsRfBeacon = require('./lib/aprs-rf-beacon');      // APRS phase 7: the RF beacon packet, its cap, and the one-beacon run
 const AprsRfMeters = require('./lib/aprs-rf-meters');      // APRS window: S-meter, SWR and RF out beside the radio beacon, and its peaks
@@ -13899,6 +13900,41 @@ function aprsMessageSend(d) {
   aprsMessagesRun();
   aprsMessagesPush();
   return { ok: true };
+}
+
+// ── APRS A2: message templates ──────────────────────────────────────────────
+// The list and the fill are lib/aprs-templates.js; the window fills the
+// compose box and nothing sends until Send (A1's path). The fields come from
+// the running activation (park, summit, frequency, mode, as the beacon's
+// activation comment), else the radio's dial and mode, and the Settings
+// callsign. My templates live in the profile's settings (aprsMsgTemplates).
+function aprsTemplatesContext() {
+  const act = aprsActivationNow();
+  const f = act || AprsActivation.activationFrequency({
+    dialHz: _currentFreqHz, radioMode: _currentMode,
+    jtcatMode: ft8Engine && ft8Engine._running ? String(ft8Engine._mode || 'FT8') : '',
+    listening: !!aprsListen.on, returnTo: settings.aprsListenReturn || null,
+  });
+  const refs = act ? act.refs : [];
+  const sig = (r) => String((r && r.sig) || 'POTA').toUpperCase();
+  const park = refs.find((r) => sig(r) !== 'SOTA');
+  const summit = refs.find((r) => sig(r) === 'SOTA');
+  return {
+    park: park ? String(park.ref).toUpperCase() : '', summit: summit ? String(summit.ref).toUpperCase() : '',
+    freq: AprsActivation.freqWord(f.hz), mode: AprsActivation.modeWord(f.mode),
+    call: String(settings.myCallsign || '').toUpperCase().trim(), running: !!act,
+  };
+}
+function aprsTemplatesPush() {
+  aprsWinSend('aprs-templates', { context: aprsTemplatesContext(), mine: AprsTemplates.normalizeMine(settings.aprsMsgTemplates) });
+}
+function aprsTemplatesSave(t) {
+  const r = AprsTemplates.saveMine(settings.aprsMsgTemplates, t || {});
+  if (!r.ok) return { ok: false, sentence: r.sentence };
+  settings.aprsMsgTemplates = r.list;
+  saveSettings(settings);
+  aprsTemplatesPush();
+  return { ok: true, tpl: r.tpl };
 }
 
 // ── APRS phase 7: ONE manual beacon over the radio (2 m and 30 m) ─────────────
@@ -47313,6 +47349,14 @@ function cloudShackNotice(text, kind) {
     aprsMessagesPush();
   });
   ipcMain.on('aprs-message-stop', (_e, lid) => { if (aprsMessenger().stop(String(lid || ''))) { aprsMessagesSave(); aprsMessagesRun(); aprsMessagesPush(); } });
+  // APRS A2: templates. Save keeps the compose box as one of my templates (checked here again).
+  ipcMain.on('aprs-templates-get', () => aprsTemplatesPush());
+  ipcMain.handle('aprs-templates-save', (_e, t) => aprsTemplatesSave(t && typeof t === 'object' ? { name: t.name, to: t.to, text: t.text } : {}));
+  ipcMain.on('aprs-templates-delete', (_e, id) => {
+    settings.aprsMsgTemplates = AprsTemplates.removeMine(settings.aprsMsgTemplates, String(id || ''));
+    saveSettings(settings);
+    aprsTemplatesPush();
+  });
   ipcMain.on('aprs-messages-delete', (_e, call) => {
     if (aprsMessenger().remove(String(call || ''))) { if (String(call || '').toUpperCase() === _aprsMsgViewing) _aprsMsgViewing = ''; aprsMessagesSave(); aprsMessagesPush(); }
   });

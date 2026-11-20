@@ -119,7 +119,9 @@
     count.textContent = c.label;
     count.classList.toggle('over', c.over);
     var callOk = !!(s && s.call);
-    $('aprs-msgs-send').disabled = !(to.ok && c.n > 0 && !c.over && callOk && s.link !== 'test-build');
+    // A2: a template field still in the text (<GROUP>, <TEXT>) is for the operator to replace first.
+    var left = window.AprsTemplates ? window.AprsTemplates.unfilled($('aprs-msgs-text').value) : [];
+    $('aprs-msgs-send').disabled = !(to.ok && c.n > 0 && !c.over && callOk && s.link !== 'test-build' && !left.length);
     var n = $('aprs-msgs-note');
     var text = note.text;
     var bad = note.bad;
@@ -128,6 +130,7 @@
       else if (!callOk) { text = s.sentence || 'Set your callsign in Settings first.'; bad = true; }
       else if (s.link === 'test-build') { text = 'This test build plays recorded packets and sends nothing to APRS-IS.'; bad = true; }
       else if (c.over) { text = 'The message is ' + c.n + ' characters; APRS takes at most ' + c.max + '.'; bad = true; }
+      else if (left.length) { text = 'Replace ' + left.join(' and ') + ' before sending.'; bad = true; }
       else text = 'Goes out over APRS-IS as ' + s.call + '. Retries at 30 s, 1, 2 and 5 min until ' + (to.ok ? to.call : 'the station') + ' acknowledges.';
     }
     n.textContent = text;
@@ -199,11 +202,15 @@
 
   // For A2 (templates) and anything else that fills the box. Nothing here sends.
   window.AprsMessagesView = {
-    setCompose: function (to, text) {
+    setCompose: function (to, text, hint) {
       if (to != null) $('aprs-msgs-to').value = String(to).toUpperCase().slice(0, 9);
       if (text != null) $('aprs-msgs-text').value = String(text);
-      note = { text: '', bad: false };
+      note = { text: hint ? String(hint) : '', bad: false }; // A2: the template's one-line hint, until the first keystroke
       if (view !== 'messages') setView('messages');
+      // The thread follows To: its conversation if there is one, else a new message.
+      var a = M.checkAddressee($('aprs-msgs-to').value);
+      var known = a.ok && s && s.convos.some(function (c) { return c.call === a.call; });
+      window.api.messagesView(known ? a.call : '');
       renderCompose();
     },
     getCompose: function () { return { to: $('aprs-msgs-to').value, text: $('aprs-msgs-text').value }; },
