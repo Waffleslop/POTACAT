@@ -12964,6 +12964,8 @@ function winlinkAgwMonitorStart(attempt = 0) {
       direwolfRingPush(`heard: ${text}`); // Report a Bug's Dire Wolf block: its stdout arrives late or never (#128)
       if (logged++ < 300) winlinkLog(`direwolf heard: ${text}`);
       else if (logged === 301) winlinkLog('direwolf heard: (more frames not logged)');
+      const linkNews = _winlinkPacketWatch ? _winlinkPacketWatch.takeNews() : ''; // #791: the gateway polling the fresh link keeps it
+      if (linkNews) winlinkLog(linkNews);
     },
     onClose: (code) => {
       if (_direwolfMonitor !== mon) return; // stopped by us
@@ -15547,8 +15549,8 @@ function winlinkPacketTimerStart() {
     const v = w.stuck(Date.now());
     if (!v.stuck) return;
     clearInterval(_winlinkPacketTimer); _winlinkPacketTimer = null;
-    winlinkLog(PacketLinkClose.stuckLogText({ why: v.why, gateway: winlinkState.session.gateway }));
-    winlinkAbortSession('the gateway is still holding the last link', { kind: 'stuck-link', detail: v.why });
+    winlinkLog(PacketLinkClose.stuckLogText({ why: v.why, nr: v.nr, gateway: winlinkState.session.gateway }));
+    winlinkAbortSession(PacketLinkClose.stuckAbortWhy(v.why), { kind: 'stuck-link', detail: v.why });
   }, 1000);
 }
 
