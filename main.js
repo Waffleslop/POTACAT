@@ -641,7 +641,7 @@ function describeTargetShort(t) {
 function healActiveRigNow(where) {
   const r = healActiveRig(settings);
   if (r.reason === 'target-followed-rig') {
-    sendCatLog(`[CAT] the connection target (${describeTargetShort(r.staleTarget)}) belonged to no rig in My Rigs; connecting "${r.rig.name || r.rig.model || 'rig'}" on its own port, ${describeTargetShort(r.rig.catTarget)} (${where})`);
+    sendCatLog(`[CAT] the connection target (${describeTargetShort(r.staleTarget)}) belonged to no rig in Settings > Radio; connecting "${r.rig.name || r.rig.model || 'rig'}" on its own port, ${describeTargetShort(r.rig.catTarget)} (${where})`);
     try { saveSettings(settings); } catch {}
   } else if (r.reason === 'other-rig') {
     if (_healOtherRigLogged !== r.otherRig.id + '|' + r.rig.id) {
@@ -3086,7 +3086,7 @@ function tripSwrGuard(swr) {
   _swrTripped = true;
   _swrGuardHits = 0;
   _swrTrippedBand = _currentFreqHz ? (freqToBand(_currentFreqHz / 1e6) || '') : '';
-  const msg = `TX aborted — SWR ${swr.toFixed(1)}:1 exceeded the ${swrGuardMax().toFixed(1)}:1 limit. Run the ATU or change bands to re-enable TX (or turn off the SWR guard in Settings > My Rigs).`;
+  const msg = `TX aborted — SWR ${swr.toFixed(1)}:1 exceeded the ${swrGuardMax().toFixed(1)}:1 limit. Run the ATU or change bands to re-enable TX (or untick SWR guard in Settings > Radio, Edit the rig).`;
   _swrTripMessage = msg;
   _swrTripSwr = swr;
   _swrAtuFailed = false;
@@ -4095,10 +4095,10 @@ function spawnRigctld(target, portOverride) {
       const bridge = HAMLIB_BRIDGE_MODELS[Number(target.rigId)];
       const fixed = await hamlibModelForRadio(rigctldPath);
       if (fixed) {
-        sendCatLog(`[rigctld] Hamlib model ${target.rigId} is ${bridge}, a bridge to another program, not a radio — using ${fixed} (${getActiveRigModelName()}) for ${target.serialPort}. Set the Hamlib model to ${fixed} in Settings > My Rigs to keep it.`);
+        sendCatLog(`[rigctld] Hamlib model ${target.rigId} is ${bridge}, a bridge to another program, not a radio — using ${fixed} (${getActiveRigModelName()}) for ${target.serialPort}. To keep it, set Rig Model to ${fixed} in Settings > Radio, Edit the rig.`);
         target = { ...target, rigId: fixed };
       } else {
-        sendCatLog(`[rigctld] Hamlib model ${target.rigId} is ${bridge}, a bridge to another program, not a radio: rigctld cannot open ${target.serialPort} with it. Pick your radio's own Hamlib model in Settings > My Rigs (the list shows the number beside each radio).`);
+        sendCatLog(`[rigctld] Hamlib model ${target.rigId} is ${bridge}, a bridge to another program, not a radio: rigctld cannot open ${target.serialPort} with it. Pick your radio's own Hamlib model under Rig Model in Settings > Radio, Edit the rig (the list shows the number beside each radio).`);
       }
     }
     // rigctld opens the serial port itself, so SerialTransport's dial-in/
@@ -5404,7 +5404,7 @@ function passNoPowerOwnerNote() {
   const rb = _lastPowerReadback;
   const seen = rb && rb.watts > 0 ? `its last report was ${Math.round((now - rb.at) / 1000)} s ago` : 'it has never reported it this session';
   sendCatLog(`[pass] Owner: the guest's transmissions are refused because the radio is not reporting its RF power over CAT (${seen}). `
-    + 'Check that Settings > My Rigs names this radio\'s exact model (and CI-V address on an Icom), and that this log shows "rig reports mode" after connecting.');
+    + 'Check that the rig in Settings > Radio is this radio\'s exact model (and CI-V address on an Icom), and that this log shows "rig reports mode" after connecting.');
   if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: 'Guest Pass: your radio is not reporting its power, so the guest cannot transmit. See the log for the fix.', warn: true, duration: 15000 });
   return true;
 }
@@ -6181,7 +6181,7 @@ function rigSetupNotesFor(q) {
 }
 
 /**
- * " — see Settings > My Rigs > Setup instructions" when the active rig has a
+ * " — see Settings > Radio, Edit the rig, Setup instructions" when the active rig has a
  * required setup note for this feature that the operator has not ticked, so a
  * log line about a symptom points at the fix. Empty otherwise.
  */
@@ -6191,7 +6191,7 @@ function activeRigSetupPointer(feature) {
     if (!rig) return '';
     const open = rigSetupNotesFor({ model: rig.model, catTarget: rig.catTarget, cwKeyLine: rig.cwKeyLine, done: rig.setupDone })
       .filter(n => n.level === 'required' && !n.done && (!feature || n.feature === feature));
-    return open.length ? ' — see Settings > My Rigs > (this rig) > Setup instructions: "' + open[0].title + '"' : '';
+    return open.length ? ' — see Settings > Radio, Edit the rig, Setup instructions: "' + open[0].title + '"' : '';
   } catch { return ''; }
 }
 
@@ -8929,7 +8929,7 @@ async function connectCat() {
   // link: a reconnecting shack must not let this PC open its own port.
   if (isRemoteMode()) {
     logConnectCatSkip('[CAT] Not connecting to the local radio: POTACAT is operating a REMOTE shack ' +
-      '(Settings > Connections). The rig in Settings > My Rigs is deliberately left alone — ' +
+      '(View > Remote Radios). The rig in Settings > Radio is deliberately left alone — ' +
       'switch back to this station to use it.');
     return;
   }
@@ -8990,7 +8990,7 @@ async function connectCat() {
     stopCatPortWatch();
     cat = null;
     _currentFreqHz = 0;
-    logConnectCatSkip('[CAT] No radio selected (None) — not connecting. Pick a rig in Settings > My Rigs or the CAT menu to connect.');
+    logConnectCatSkip('[CAT] No radio selected (None) — not connecting. Pick a rig in Settings > Radio or the CAT menu to connect.');
     sendCatStatus({ connected: false });
     return;
   }
@@ -9012,10 +9012,10 @@ async function connectCat() {
       target = settings.catTarget;
       sendCatLog('[CAT] No active rig was selected — auto-activating the only configured rig (' + (rig.name || rig.model || 'rig') + ').');
     } else if (rigsWithTarget.length > 1) {
-      sendCatLog('[CAT] Not connecting: ' + rigsWithTarget.length + ' rigs are configured but none is set ACTIVE. Pick one in Settings > My Rigs.');
+      sendCatLog('[CAT] Not connecting: ' + rigsWithTarget.length + ' rigs are configured but none is set ACTIVE. Pick one in Settings > Radio.');
       return;
     } else {
-      sendCatLog('[CAT] Not connecting: no rig is configured. Add one in Settings > My Rigs.');
+      sendCatLog('[CAT] Not connecting: no rig is configured. Add one in Settings > Radio.');
       return;
     }
   }
@@ -9120,7 +9120,7 @@ async function connectCat() {
     cat.on('port-moved', ({ from, to }) => {
       if (win && !win.isDestroyed()) {
         win.webContents.send('app-notice', {
-          message: `Radio's serial port moved: ${from} is gone, same USB device found on ${to} — update Settings > My Rigs`,
+          message: `Radio's serial port moved: ${from} is gone, same USB device found on ${to} — update Settings > Radio, Edit the rig, Serial Port`,
           warn: true, duration: 12000,
         });
       }
@@ -9448,7 +9448,7 @@ async function connectCat() {
       const activeRig = (settings.rigs || []).find((r) => r && r.id === settings.activeRigId);
       if (activeRig && activeRig.catTarget && activeRig.catTarget.type === 'yaesu-lan' && !activeRig.audioSource) {
         const def = RigFamily.defaultAudioSourceFor('yaesu-lan');
-        if (settings.audioSource !== def) sendCatLog(`[SCU-LAN10] this rig has no audio source saved; using ${def === 'yaesu-lan' ? 'Yaesu LAN audio' : def} instead of the previous rig's "${settings.audioSource || 'none'}". Pick one in Settings > My Rigs.`);
+        if (settings.audioSource !== def) sendCatLog(`[SCU-LAN10] this rig has no audio source saved; using ${def === 'yaesu-lan' ? 'Yaesu LAN audio' : def} instead of the previous rig's "${settings.audioSource || 'none'}". Pick one in Settings > Radio, Edit the rig, Audio source for JTCAT / SSTV.`);
         activeRig.audioSource = def;
         settings.audioSource = def;
       }
@@ -9654,10 +9654,10 @@ async function connectCat() {
     let hs = resolveSerialHandshake(model, target);
     if (hs.source === 'model' && _serialHsTrial.get(target.path) === 'hardware') hs = { handshake: 'hardware', source: 'trial' };
     if (hs.handshake === 'hardware') {
-      sendCatLog(`[CAT] RTS/CTS flow control on (${hs.source === 'rig' ? 'set on this rig' : hs.source === 'trial' ? 'trying it: the radio did not answer with RTS held low' : 'the radio model default'}) — RTS stays asserted. If the radio transmits as soon as POTACAT connects, set My Rigs > RTS line to "Held low".`);
+      sendCatLog(`[CAT] RTS/CTS flow control on (${hs.source === 'rig' ? 'set on this rig' : hs.source === 'trial' ? 'trying it: the radio did not answer with RTS held low' : 'the radio model default'}) — RTS stays asserted. If the radio transmits as soon as POTACAT connects, set RTS line to "Held low" (Settings > Radio, Edit the rig).`);
       if (hs.source !== 'rig') armSerialHandshakeFallback(cat, target);
     } else if (hs.handshake === 'asserted') {
-      sendCatLog('[CAT] RTS line: asserted, no flow control (set on this rig) — RTS held high, DTR low. If the radio transmits as soon as POTACAT connects, set My Rigs > RTS line to "Held low".');
+      sendCatLog('[CAT] RTS line: asserted, no flow control (set on this rig) — RTS held high, DTR low. If the radio transmits as soon as POTACAT connects, set RTS line to "Held low" (Settings > Radio, Edit the rig).');
     }
     // The RTS/CTS trial is for the Kenwood-style Yaesus' CAT RTS menu. The
     // FT-817/818/857/897 legacy protocol has no handshake, and asserting RTS
@@ -10095,7 +10095,7 @@ function connectCluster() {
         if (r) {
           settings.clusterNodes = r.nodes;
           saveSettings(settings);
-          sendCatLog(`[cluster] ${r.from} is not answering; trying ${r.to} instead (picked for you — choose your own in Settings > Spot Sources)`);
+          sendCatLog(`[cluster] ${r.from} is not answering; trying ${r.to} instead (picked for you — choose your own in Settings > Spots)`);
           setImmediate(() => { disconnectCluster(); connectCluster(); });
         }
       }
@@ -16361,7 +16361,7 @@ async function winlinkGateways(mode, band) {
       list = list.map((g) => ({ ...g, mercury: tagged.has(g.call) }));
     }
     // Only gateways this radio can call (lib/winlink-reach.js): an amateur
-    // band it is set up for (Settings > My Rigs), inside its range. The Band
+    // band it is set up for (Settings > Radio), inside its range. The Band
     // picker offers only those bands, and "All" means all of them.
     const onBands = WinlinkReach.gatewaysInReach(list, winlinkReachOpts());
     list = onBands.list;
@@ -16384,7 +16384,7 @@ async function winlinkGateways(mode, band) {
   } catch (e) {
     // Said in the log: a list that never arrives was invisible in every bug
     // report (i5ekx: VARA HF, "it no longer downloads the list of gateways").
-    winlinkLog(`gateway list (${mode}) failed after ${Math.round((Date.now() - t0) / 1000)} s: ${e.message}${predicting ? ' (Pat ranks every gateway by propagation first; Settings > Winlink can turn the ranking off)' : ''}`);
+    winlinkLog(`gateway list (${mode}) failed after ${Math.round((Date.now() - t0) / 1000)} s: ${e.message}${predicting ? ' (Pat ranks every gateway by propagation first; Rank gateways by predicted propagation in Settings > Station, Winlink, turns that off)' : ''}`);
     return { ok: false, error: e.message };
   }
 }
@@ -24760,7 +24760,7 @@ function connectSmartSdr() {
     if (_externalGuis > 0) {
       sendCatLog(`Flex multiFlex: ${_externalGuis} other GUI client${_externalGuis === 1 ? '' : 's'} open (SmartSDR / AetherSDR), so POTACAT registered as an INDEPENDENT GUI client and works its OWN slice. `
         + 'Tuning a spot here moves POTACAT\'s slice — the panadapter in your SDR window is a different slice and will not follow it, and the frequency POTACAT shows is its own slice, not the one on screen there. '
-        + 'To drive the slice you are actually watching, turn off "Give POTACAT its own slice when SmartSDR / AetherSDR is open" in Settings > My Rigs > (edit the rig) and reconnect. '
+        + 'To drive the slice you are actually watching, turn off "Give POTACAT its own slice when SmartSDR / AetherSDR is open" (Settings > Radio, Edit the rig) and reconnect. '
         + `(client_id=${clientId})`);
     } else {
       sendCatLog(`Flex Direct active — POTACAT is the GUI client; radio control works with no SmartSDR open (client_id=${clientId})`);
@@ -25836,7 +25836,7 @@ function icomLanVoicePttOpts() {
   if (rig && rig.lanVoiceInSsb) return { audio: true };
   return {
     audio: true, forceDataMode: true,
-    dataReason: 'voice over the LAN: at the radio\'s factory setting LAN audio reaches the transmitter only in DATA mode. If its DATA OFF MOD menu is LAN, tick "Voice over the LAN stays in USB / LSB" in Settings > My Rigs',
+    dataReason: 'voice over the LAN: at the radio\'s factory setting LAN audio reaches the transmitter only in DATA mode. If its DATA OFF MOD menu is LAN, tick "Voice over the LAN stays in USB / LSB" in Settings > Radio, Edit the rig',
   };
 }
 
@@ -26655,7 +26655,7 @@ function connectTciRig() {
   const t = TciTarget.normalize(target);
   const bad = TciTarget.validate(t);
   if (bad) {
-    sendCatLog(`[TCI] Not connecting: ${bad}. Fix it in Settings > My Rigs.`);
+    sendCatLog(`[TCI] Not connecting: ${bad}. Fix it in Settings > Radio, Edit the rig.`);
     sendCatStatus({ connected: false });
     return;
   }
@@ -27590,7 +27590,7 @@ function nocatSerialPtt(state, target) {
   const portPath = String(target.pttPort || '').trim();
   const line = target.pttLine === 'dtr' ? 'dtr' : 'rts';
   if (!portPath) {
-    sendCatLog('[PTT] FAILED: no PTT port is set. Settings > My Rigs > this radio > Transmit (PTT): pick the interface\'s COM port.');
+    sendCatLog('[PTT] FAILED: no PTT port is set. Settings > Radio, Edit the rig, Transmit (PTT): pick the interface\'s COM port.');
     return;
   }
   if (settings.cwKeyPort && settings.cwKeyPort.toLowerCase() === portPath.toLowerCase()) {
@@ -29284,7 +29284,7 @@ function buildPaddleKeyRig() {
           let hint;
           if (brand === 'icom') {
             hint = `IC-7300/705/7610: SET > Connectors > USB SEND/Keying > USB Keying (CW) = ${line}. ` +
-              `POTACAT is driving ${line}; if your radio menu uses the other line, change one to match (Settings > Rig > CW keying line).`;
+              `POTACAT is driving ${line}; if your radio menu uses the other line, change one to match (Settings > Radio, Edit the rig, CW keying line).`;
           } else if (brand === 'yaesu') {
             hint = `Yaesu: OPERATION SETTING > TUNING > CAT PORT setup + CW KEYING source = ${line}.`;
           } else if (brand === 'kenwood') {
@@ -37443,10 +37443,10 @@ function startYaesuScope() {
     if (yaesuScopeState.status !== 'unavailable') sendCatLog('[Scope] start: the active rig has no USB band scope (rig type ' + detectRigType() + ')');
     yaesuScopeSetStatus('unavailable', onLan ? { key: 'no-rig', severity: 'notice',
       headline: 'Waiting for the radio\'s scope over the LAN',
-      detail: 'The SCU-LAN10 sends the radio\'s band scope once it is connected and streaming. If nothing arrives, check the rig is connected (Settings > My Rigs) and that the radio\'s scope is on.' }
+      detail: 'The SCU-LAN10 sends the radio\'s band scope once it is connected and streaming. If nothing arrives, check the rig is connected (Settings > Radio) and that the radio\'s scope is on.' }
       : { key: 'no-rig', severity: 'blocker',
       headline: 'The active rig has no USB band scope',
-      detail: 'POTACAT reads the scope the FT-710 streams over its USB cable, an SCU-LAN10 over the network, or a separate SDR through rtl_tcp (Settings > My Rigs > Band scope from an SDR). Or try the synthetic signal from the gear menu.' });
+      detail: 'POTACAT reads the scope the FT-710 streams over its USB cable, an SCU-LAN10 over the network, or a separate SDR through rtl_tcp (Settings > Radio, Edit the rig, Band scope from an SDR). Or try the synthetic signal from the gear menu.' });
     return;
   }
   const helperPath = findYaesuScopeHelper();
@@ -38727,7 +38727,7 @@ function icomScopeOnSweep(s) {
   const ax = IcomScope.axisFor(s.header);
   if (!icomScopePointsNoted && !s.empty) {
     icomScopePointsNoted = true;
-    sendCatLog(`[Scope] ${icomScopeEntry.name}: sweeps of ${s.levels.length} points` + (s.levels.length !== icomScopeEntry.points ? ` (POTACAT expected ${icomScopeEntry.points}; please send a recording from Settings > My Rigs)` : '')
+    sendCatLog(`[Scope] ${icomScopeEntry.name}: sweeps of ${s.levels.length} points` + (s.levels.length !== icomScopeEntry.points ? ` (POTACAT expected ${icomScopeEntry.points}; please send a recording from Settings > Radio, Edit the rig, Record band scope data)` : '')
       + (icomScopeEntry.unverified ? ' — this model\'s scope format is not yet confirmed by an owner' : ''));
   }
   let changed = false;
@@ -39097,7 +39097,7 @@ function sdrScopeSettingsChanged(before, after) {
 // The Icom scope source (docs/icom-band-scope-plan.md) is written from Icom's
 // CI-V references and Hamlib's parser; no Icom has been in the shack. Before
 // any of it is shown to an operator, an owner records 30 seconds of what
-// their radio sends (Settings > My Rigs > this radio > Record band scope
+// their radio sends (Settings > Radio, Edit the rig, Record band scope
 // data) and the file becomes test/fixtures/icom-scope/. POTACAT turns the
 // radio's scope and scope output on for the recording and puts both back.
 let icomScopeCaptureBusy = false;
@@ -39784,7 +39784,7 @@ function sendWavelogHttp(qsoData, s = settings) {
             // isn't enough.
             const reason = String(json.reason || json.status || 'unknown').toLowerCase();
             let hint = '';
-            if (reason.includes('wrong key') || reason.includes('key'))    hint = ' — check Settings → Logbook → Wavelog API key.';
+            if (reason.includes('wrong key') || reason.includes('key'))    hint = ' — check the Wavelog API Key in Settings > Logging.';
             else if (reason.includes('station'))                            hint = ` — station_profile_id "${stationId}" not found or no permission. Check Wavelog account → Station Profiles for the correct numeric ID.`;
             else if (reason.includes('duplicate'))                          hint = ' — Wavelog flagged this QSO as a duplicate of an existing log entry.';
             else if (reason === 'abort')                                    hint = ` — usually one of: wrong station_profile_id (currently "${stationId}"), API key lacks permission for that profile, or the ADIF FREQ is out of any known amateur band (check the ADIF preview below).`;
@@ -42295,7 +42295,7 @@ function triggerAutoSstv() {
       // 20 m turned off and was sent there anyway).
       const saved = settings.idleWsprBand || '20m';
       const band = IdleWsprBand.pickIdleWsprBand(saved, activeRigBands()) || saved;
-      if (band !== saved) sendCatLog(`[Auto-RX] WSPR: ${saved} is not one of this radio's bands — listening on ${band} instead (Settings > My Rigs sets the bands)`);
+      if (band !== saved) sendCatLog(`[Auto-RX] WSPR: ${saved} is not one of this radio's bands — listening on ${band} instead (tick the bands under Check all bands in Settings > Radio, Edit the rig)`);
       const dialMhz = wsprBands.dialForBand(band) || 14.0956;
       settings.jtcatLastMode = 'WSPR';
       settings.wsprHopEnabled = settings.idleWsprBandHop === true;
@@ -43354,7 +43354,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin, purpose } = {}) {
   // names the setting that holds it.
   if (filterWidth > 0) {
     const fwName = m === 'CW' ? 'CW' : (m === 'SSB' || m === 'USB' || m === 'LSB') ? 'SSB' : 'Digital';
-    sendCatLog(`[Tune] ${fwName} width ${filterWidth} Hz from Settings > Filter Width (clear it there to keep the radio's own width)`);
+    sendCatLog(`[Tune] ${fwName} width ${filterWidth} Hz from ${fwName} Filter Width in Settings > Tuning (clear it there to keep the radio's own width)`);
   }
 
   // FreeDV: auto-start/stop engine based on spot mode
@@ -53936,7 +53936,7 @@ function cloudShackNotice(text, kind) {
     if (has('n3fjpPull') && newSettings.n3fjpPull && !settings.n3fjpPull) {
       setTimeout(() => { n3fjpPull('turned on').catch(() => {}); }, 3000);
     }
-    // "None" in Settings > My Rigs is a choice too: remembered so connectCat
+    // "None" in Settings > Radio is a choice too: remembered so connectCat
     // never auto-activates the only rig over it; picking a rig clears it.
     if (has('activeRigId')) settings.catNone = !newSettings.activeRigId;
 

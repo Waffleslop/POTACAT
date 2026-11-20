@@ -21848,7 +21848,7 @@ function lmkRenderPanel(lm, ok) {
       <span class="lmk-beacon-next"></span>
     </div>` : ''}
     <p class="lmk-p-lead">${esc(lm.line)}</p>
-    ${ok ? '' : '<p class="lmk-p-note">This radio is not set up for this frequency. If it does receive it, add the band in Settings &gt; My Rigs, or listen on a KiwiSDR from the VFO window’s SDR menu.</p>'}
+    ${ok ? '' : '<p class="lmk-p-note">This radio is not set up for this frequency. If it does receive it, tick the band under Check all bands (Settings &gt; Radio, Edit the rig), or listen on a KiwiSDR from the VFO window’s SDR menu.</p>'}
     ${sec('What you’ll hear', lm.hear)}
     ${sec('Why it matters', lm.why)}
     ${sec('Try this', lm.try, 'lmk-try')}
@@ -25275,9 +25275,9 @@ function executeHotkeyAction(binding) {
   if (a === 'tune') {
     if (!binding.param) {
       if (window.api && window.api.jtcatLog) {
-        window.api.jtcatLog('[Hotkey] tune action has no frequency configured — set "<freq kHz> <mode>" (e.g. "14025 CW") in Settings → Hotkeys');
+        window.api.jtcatLog('[Hotkey] tune action has no frequency configured — set "<freq kHz> <mode>" (e.g. "14025 CW") in Settings > Station, Hotkeys');
       }
-      console.warn('[Hotkey] tune action has no param — set "<freq> <mode>" in Settings → Hotkeys');
+      console.warn('[Hotkey] tune action has no param — set "<freq> <mode>" in Settings > Station, Hotkeys');
       return;
     }
     const parts = binding.param.split(/\s+/);

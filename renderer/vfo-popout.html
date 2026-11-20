@@ -4030,7 +4030,7 @@ async function playVoiceMacro(idx, btn, outputDeviceId) {
   if (!outputDeviceId) {
     const ok = confirm('Voice macros play audio through the system audio output and need that ' +
       'output routed to the radio (FLEX DAX-IN, a virtual audio cable, etc.). No output device is ' +
-      'currently selected in Settings → Remote Audio Output, so the macro will play through your ' +
+      'currently selected in Settings > Radio, Edit the rig, Audio Devices, TX audio out, so the macro will play through your ' +
       'default speakers and not reach the radio.\n\nPlay anyway?');
     if (!ok) return;
   }

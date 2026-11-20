@@ -156,7 +156,7 @@
               <label class="spots-toggle" id="spots-hide-callref-label" title="Hide a spot only if you've already worked the same call AT THE SAME park today on the same band/mode. A roving activator at a new park stays visible."><input type="checkbox" id="spots-hide-callref"> Hide worked CALL+park combos</label>
               <label class="spots-toggle" id="spots-prioritize-new-label"><input type="checkbox" id="spots-prioritize-new"> Show NEW parks at top</label>
               <label class="spots-toggle" id="spots-strict-atno-label" title="Mark parks NEW unless they're in your imported POTA hunter CSV. Local-only QSOs that haven't reached pota.app won't suppress the NEW flag (K0OTC)."><input type="checkbox" id="spots-strict-atno"> Strict ATNO (POTA-credited only)</label>
-              <label class="spots-toggle" title="Hide spots your license class can't operate (and any truly out-of-band frequencies). Needs your License Class set in Settings → Operator — if it's None, nothing is hidden."><input type="checkbox" id="spots-hide-oob"> Hide out-of-privilege</label>
+              <label class="spots-toggle" title="Hide spots your license class can't operate (and any truly out-of-band frequencies). Needs your License Class set in Settings &gt; Station — if it's None, nothing is hidden."><input type="checkbox" id="spots-hide-oob"> Hide out-of-privilege</label>
               <label class="spots-toggle"><input type="checkbox" id="spots-hide-qrt" checked> Hide QRT spots</label>
               <label class="spots-toggle" id="spots-dx-only-label" title="Only stations that count as DX: a different country from yours, or farther than your DX distance (Settings)."><input type="checkbox" id="spots-dx-only"> DX only</label>
               <label class="spots-toggle"><input type="checkbox" id="spots-show-hidden"> Show hidden spots <span id="spots-hidden-count" class="spots-hidden-badge hidden">0</span></label>
@@ -2648,7 +2648,7 @@
         </span>
       </label>
       <label class="checkbox-label" title="Hide spots your license class can't operate, plus any truly out-of-band frequencies."><input type="checkbox" id="set-hide-out-of-band"> Hide spots outside my license privileges</label>
-      <span class="help-text" style="display:block;margin:-2px 0 6px;">Uses your <strong>License Class</strong> (Settings → Operator). If that's set to None, nothing is hidden.</span>
+      <span class="help-text" style="display:block;margin:-2px 0 6px;">Uses your <strong>License Class</strong> (Settings &gt; Station). If that's set to None, nothing is hidden.</span>
       <label class="checkbox-label"><input type="checkbox" id="set-hide-worked"> Hide already-worked stations</label>
       <label>Watchlist (callsigns or states, comma-separated, optional band:mode filter):
         <input type="text" id="set-watchlist" placeholder="K3SBP, K4SWL:CW, K0BUF:20m, W1AW:40m:SSB, US-NJ, WY:20m">
@@ -2774,7 +2774,7 @@
       <label class="checkbox-label"><input type="checkbox" id="set-enable-split"> Enable split mode</label>
       <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Send split on/off with each tune command (VFO A = RX, VFO B = TX)</span>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-atu"> Auto-tune ATU on band change</label>
-      <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Trigger the antenna tuner when tuning to a different band. Supports Yaesu, Kenwood, Elecraft, Hamlib rigctld, and FlexRadio. <b>This is the rig's internal ATU command.</b> For external RF-sensing tuners (LDG, MFJ, etc.) that need a tune-up signal: open the FT8 view and use its <b>Tune</b> button (90s steady tone via USB audio), or configure a Custom CAT Command in Settings → Rig if you want a one-click tune from any view.</span>
+      <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Trigger the antenna tuner when tuning to a different band. Supports Yaesu, Kenwood, Elecraft, Hamlib rigctld, and FlexRadio. <b>This is the rig's internal ATU command.</b> For external RF-sensing tuners (LDG, MFJ, etc.) that need a tune-up signal: open the FT8 view and use its <b>Tune</b> button (90s steady tone via USB audio), or add a custom CAT command on the Rig button's Custom tab if you want a one-click tune from any view.</span>
       <label class="checkbox-label"><input type="checkbox" id="set-tune-click"> Tune confirmation sound</label>
       <span class="help-text" style="margin-left:12px;margin-bottom:6px;display:block;">Play a click when the radio confirms it has changed frequency</span>
     </fieldset>
@@ -3561,7 +3561,7 @@
     <fieldset class="source-toggles collapsible" data-settings-tab="station">
       <legend>WebSDR</legend>
       <span class="help-text">Listen through a remote receiver (KiwiSDR or WebSDR.org) while transmitting on your local radio. Useful for local QRM. Click <b>Browse</b> to pick from a curated list, or type a host manually. Port 8073 = KiwiSDR, other ports = WebSDR.org.</span>
-      <span class="help-text" style="display:block;margin-top:4px;">An <b>rtl_tcp</b> server works here too: an RTL-SDR running rtl_tcp, or an SDRplay running rsp_tcp, on this PC or a Pi by your antenna (for example <b>192.168.1.50:1234</b>). POTACAT recognises it when it connects and does the receiving itself. It sends about 4 Mbit/s, so use it on your own network. If that SDR is also your band scope (Settings &gt; My Rigs &gt; Band scope from an SDR), its gain and direct sampling settings are used, and listening shares the scope's connection.</span>
+      <span class="help-text" style="display:block;margin-top:4px;">An <b>rtl_tcp</b> server works here too: an RTL-SDR running rtl_tcp, or an SDRplay running rsp_tcp, on this PC or a Pi by your antenna (for example <b>192.168.1.50:1234</b>). POTACAT recognises it when it connects and does the receiving itself. It sends about 4 Mbit/s, so use it on your own network. If that SDR is also your band scope (Settings &gt; Radio, Edit the rig, Band scope from an SDR), its gain and direct sampling settings are used, and listening shares the scope's connection.</span>
       <div style="display:flex;gap:6px;margin-top:8px;align-items:center;">
         <label style="flex:1;">Label: <input type="text" id="set-kiwi-label-1" placeholder="K3FEF" style="width:100%;max-width:80px;"></label>
         <label style="flex:3;">Host: <input type="text" id="set-kiwi-host-1" placeholder="host:port (e.g. k3fef.com:8073)" style="width:100%;max-width:260px;"></label>
@@ -5449,7 +5449,7 @@
         </div>
         <label class="radio-label"><input type="radio" name="welcome-radio-type" value="dxlab-commander"> DXLab Commander</label>
         <div id="welcome-dxlab-commander-config" class="radio-sub hidden">
-          <span class="help-text">Control the radio through DXLab Commander's TCP port (Commander's Base Port + 2, default 52002). Commander must be running. Add command sequences later in Settings &gt; My Rigs.</span>
+          <span class="help-text">Control the radio through DXLab Commander's TCP port (Commander's Base Port + 2, default 52002). Commander must be running. Add command sequences later in Settings &gt; Radio, Edit the rig, Commander command sequences.</span>
           <label>Host: <input type="text" id="welcome-dxlab-commander-host" placeholder="127.0.0.1" value="127.0.0.1"></label>
           <label>Port: <input type="number" id="welcome-dxlab-commander-port" min="1" max="65535" value="52002"></label>
         </div>

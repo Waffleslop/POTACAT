@@ -11727,7 +11727,7 @@
         'kernel driver rejects DTR control; (b) connecting via Hamlib / rigctld, which has ' +
         'no per-element CW command in its protocol — only mic PTT. ' +
         'Workaround for either case: wire an external USB-UART adapter (FTDI / CH340) to the ' +
-        'radio’s CW KEY jack and set it as <i>CW Key Port</i> in Settings → Rig. ' +
+        'radio’s CW KEY jack and set it as <i>CW Key Port</i> in Settings &gt; ECHOCAT. ' +
         'CW macros and text-send still work without it — only paddle is affected.'
       );
       helpEl.innerHTML = bits.join('<br>');
