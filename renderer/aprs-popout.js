@@ -7,7 +7,13 @@
 //
 // Main parses each line (lib/aprs-parser.js) and sends batches every 500 ms;
 // lib/aprs-stations.js keeps one row per station or object and forgets those
-// not heard for an hour. Clicking a row centres the map on it; clicking a
+// not heard for 6 hours (at most WINDOW_MAX_ROWS of them). "Show the last"
+// (15 min to 6 h, 1 h by default, saved per profile) picks what the list and
+// the map show; a station older than half of it is drawn fainter, in two steps
+// (lib/aprs-window-state.js ageFade), its heard-by-my-radio ring at full
+// colour. Clear forgets this window's stations and its Heard by my radio
+// count; it sends nothing to main, so APRS-IS, listening and the phones'
+// ECHOCAT list (its own store in main) carry on. Clicking a row centres the map on it; clicking a
 // marker (or a row) shows the details below the list, with a QRZ link.
 // The list is two lines a row (lib/aprs-window-state.js stationRow): the
 // stations my radio heard first, marked, then the rest by distance. The map's
@@ -43,7 +49,9 @@
 
   var unit = 'mi';
   var home = null;
-  var store = AprsStations.createStore({});
+  var store = AprsStations.createStore({ maxAgeMs: AprsStations.WINDOW_MAX_AGE_MS, maxRows: AprsStations.WINDOW_MAX_ROWS });
+  var showLastMin = W.DEFAULT_SHOW_LAST_MIN;   // "Show the last", minutes
+  var shownTotal = 0;                          // stations within it (before the search)
   var query = '';
   var selected = null;
   var arrivals = [];           // packet times in the last minute
@@ -175,11 +183,13 @@
     ctx.fillText(text, lx + 5.5, ly + 14);
   }
 
-  function drawStation(ctx, r, x, y, alpha, labels) {
+  // fade: the age fading (W.ageFade) for the icon only; the rings and label keep alpha.
+  function drawStation(ctx, r, x, y, alpha, labels, fade) {
+    if (fade == null) fade = 1;
     var headed = AprsIcons.isHeaded(r.cls) && r.course != null && r.course > 0 && r.course <= 360;
     var sp = AprsIcons.sprite(r.cls, ICON_PX, layer._dpr || 1, headed);
     var half = sp.size / 2;
-    ctx.globalAlpha = alpha;
+    ctx.globalAlpha = alpha * fade;
     if (headed) {
       ctx.save();
       ctx.translate(x, y);
@@ -189,6 +199,7 @@
     } else {
       ctx.drawImage(sp.canvas, x - half, y - half, sp.size, sp.size);
     }
+    ctx.globalAlpha = alpha;
     var isSel = r.key === selected;
     if (r.rf) {
       // Heard on the radio: a solid ring (phase 2).
@@ -241,6 +252,7 @@
     var labels = z >= LABEL_ZOOM;
     var minX = b.min.x - 40, minY = b.min.y - 40, maxX = b.max.x + 160, maxY = b.max.y + 40;
     var busy = false;
+    var wall = Date.now();
     hits = [];
 
     for (var i = 0; i < clusters.clusters.length; i++) {
@@ -278,7 +290,7 @@
         a = AprsMap.fade(born[r.key], t, FADE_IN_MS);
         if (a >= 1) delete born[r.key]; else busy = true;
       }
-      drawStation(ctx, r, x, y, a, labels);
+      drawStation(ctx, r, x, y, a, labels, W.ageFade(wall - r.lastHeard, showLastMin).alpha);
       hits.push({ x: x, y: y, rad: ICON_PX / 2 + 3, row: r });
     }
 
@@ -388,6 +400,42 @@
     if (home) map.setView([home.lat, home.lon], zoomForKm(km));
   });
 
+  // ── "Show the last" ─────────────────────────────────────────────────────
+  var showSel = $('aprs-show-last');
+  function fillShowLast() {
+    showSel.innerHTML = '';
+    W.showLastOptions().forEach(function (o) {
+      var el = document.createElement('option');
+      el.value = String(o.min);
+      el.textContent = o.label;
+      if (o.min === showLastMin) el.selected = true;
+      showSel.appendChild(el);
+    });
+  }
+  fillShowLast();
+  showSel.addEventListener('change', function () {
+    showLastMin = W.normShowLast(showSel.value);
+    window.api.setShowLast(showLastMin);
+    rebuild();
+    if (selected && !listRows.some(function (r) { return r.key === selected; })) select(null, false);
+  });
+
+  // ── Clear: this window's stations only ────────────────────────────────────
+  // No confirm: new packets fill the list again within seconds. Nothing goes
+  // to main, so APRS-IS and listening keep running and ECHOCAT's list (its
+  // own store in main, lib/aprs-echocat.js) is untouched.
+  function clearStations() {
+    store.clear();
+    heardKeys.clear();
+    lastHeardKey = null; lastHeardAt = 0;
+    motion = {}; born = {}; ghosts = [];
+    selected = null;
+    wrap.scrollTop = 0;
+    rebuild();
+    renderDetail();
+  }
+  $('aprs-clear').addEventListener('click', clearStations);
+
   // ── what the cards read (renderer/aprs-window.js) ────────────────────────
   // The APRS-IS link, the packets a minute, and the stations my radio heard
   // while the window is open, with the last one.
@@ -414,8 +462,8 @@
     var el = $('aprs-empty');
     var msg = '';
     if (linkState && linkState.state === 'no-grid') msg = 'Set your grid square in Settings to see the APRS stations near you.';
-    else if (store.size === 0 && linkState && linkState.state === 'connected') msg = 'Connected. Stations appear here as APRS-IS reports them.';
-    else if (heardOnly && store.size > 0 && mapRows.length === 0) msg = 'Your radio has not heard a station yet. Pick Everyone to see the stations from APRS-IS.';
+    else if (shownTotal === 0 && linkState && linkState.state === 'connected') msg = 'Connected. Stations appear here as APRS-IS reports them.';
+    else if (heardOnly && shownTotal > 0 && mapRows.length === 0) msg = 'Your radio has not heard a station yet. Pick Everyone to see the stations from APRS-IS.';
     el.textContent = msg;
     el.classList.toggle('hidden', !msg);
   }
@@ -432,8 +480,9 @@
   }
   function rowHtml(r, t) {
     var v = W.stationRow(r, { unit: unit, now: t });
+    var age = W.ageFade(t - r.lastHeard, showLastMin).step;
     var right = [v.dist, v.ago].filter(Boolean).join(' · ');
-    return '<li class="aprs-st' + (v.mine ? ' mine' : '') + (r.key === selected ? ' sel' : '') + '" data-key="' + esc(r.key) + '"'
+    return '<li class="aprs-st' + (v.mine ? ' mine' : '') + (age === 2 ? ' older' : age === 1 ? ' old' : '') + (r.key === selected ? ' sel' : '') + '" data-key="' + esc(r.key) + '"'
       + ' title="' + esc(kindName(r.cls) + (v.mine ? '. Heard by my radio, ' + rfText(r.rf) : '') + (v.comment ? '. ' + v.comment : '')) + '">'
       + '<span class="aprs-st-ico">' + symHtml(r.cls, r.course, 20) + '</span>'
       + '<span class="aprs-st-call">' + esc(v.call) + ' <span class="aprs-st-via">' + esc(v.via) + '</span></span>'
@@ -472,7 +521,8 @@
   /** The search or the data changed: re-sort, redraw the rows in view and the map. */
   function rebuild() {
     var t0 = now();
-    var all = store.list({ sort: 'distance', query: query });
+    var all = store.list({ sort: 'distance', query: query, withinMs: showLastMin * 60000 });
+    shownTotal = query ? store.list({ sort: 'age', withinMs: showLastMin * 60000 }).length : all.length;
     // My radio's stations first (each marked), then the internet's, each by distance.
     listRows = all.filter(function (r) { return !!r.rf; }).concat(all.filter(function (r) { return !r.rf; }));
     mapRows = heardOnly ? listRows.filter(function (r) { return !!r.rf; }) : listRows;
@@ -480,7 +530,7 @@
     clusterDirty = true;
     renderRows();
     var c = W.stationCounts(listRows);
-    $('aprs-count').textContent = store.size === 0 ? 'No stations yet' : (query ? listRows.length + ' of ' + store.size + ': ' : '') + c.text;
+    $('aprs-count').textContent = shownTotal === 0 ? 'No stations yet' : (query ? listRows.length + ' of ' + shownTotal + ': ' : '') + c.text;
     showEmpty();
     requestDraw();
     feedChanged();
@@ -551,7 +601,7 @@
     if (r.micEMessage) add('Mic-E', esc(r.micEMessage));
     add('Status', esc(r.status));
     add('Comment', esc(r.comment));
-    add('Heard', esc(AprsStations.formatAge(Date.now() - r.lastHeard).replace(/^now$/, 'just now')) + (r.packets > 1 ? ' (' + r.packets + ' packets this hour)' : ''));
+    add('Heard', esc(AprsStations.formatAge(Date.now() - r.lastHeard).replace(/^now$/, 'just now')) + (r.packets > 1 ? ' (' + r.packets + ' packets)' : ''));
     if (r.rf) add('Heard by me', esc(rfText(r.rf) + ', ' + AprsStations.formatAge(Date.now() - r.rf.lastHeard).replace(/^now$/, 'just now') + (r.rf.packets > 1 ? ' (' + r.rf.packets + ' packets)' : '')));
     if (r.igate) add('Via', esc(r.igate));
     add('Packet', '<span class="raw">' + esc(r.raw) + '</span>');
@@ -598,6 +648,8 @@
     d = d || {};
     unit = d.distUnit === 'km' ? 'km' : 'mi';
     fillRanges(d.km || 150);
+    showLastMin = W.normShowLast(d.showLastMin);
+    fillShowLast();
     home = d.home || null;
     store.setHome(home);
     if (home) map.setView([home.lat, home.lon], zoomForKm(d.km || 150));
@@ -614,17 +666,22 @@
 
   // Age-out and the ages move on their own.
   setInterval(function () { tickMarks(); renderRows(); }, 15000);
+  // A station that leaves "Show the last" (or the store) fades away on the map.
   setInterval(function () {
     var before = {};
     listRows.forEach(function (r) { before[r.key] = r; });
-    var gone = store.prune();
+    store.prune();
+    rebuild();
+    var still = {};
+    listRows.forEach(function (r) { still[r.key] = true; });
     var t = now();
-    gone.forEach(function (k) {
-      if (before[k]) ghosts.push({ row: before[k], t0: t });
+    Object.keys(before).forEach(function (k) {
+      if (still[k]) return;
+      ghosts.push({ row: before[k], t0: t });
       delete motion[k]; delete born[k];
       if (selected === k) selected = null;
     });
-    rebuild();
+    if (ghosts.length) requestDraw();
     if (selected) renderDetail(); else $('aprs-detail').classList.add('hidden');
   }, 15000);
 

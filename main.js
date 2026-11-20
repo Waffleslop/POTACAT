@@ -47190,7 +47190,7 @@ function cloudShackNotice(text, kind) {
       settings.aprsRangeKm = conv.km;
       saveSettings(settings);
     }
-    aprsSend('aprs-init', { home: aprsHome(), distUnit: settings.distUnit || 'mi', km: Feed.clampRangeKm(settings.aprsRangeKm) });
+    aprsSend('aprs-init', { home: aprsHome(), distUnit: settings.distUnit || 'mi', km: Feed.clampRangeKm(settings.aprsRangeKm), showLastMin: AprsWindowState.normShowLast(settings.aprsShowLastMin) });
     aprsStartFeed();
     aprsListenPush();
     aprsIgatePush();
@@ -47235,6 +47235,12 @@ function cloudShackNotice(text, kind) {
     settings.aprsRangeKm = Feed.clampRangeKm(km);
     saveSettings(settings);
     if (aprsFeed) aprsFeed.setRange(null, null, settings.aprsRangeKm);
+  });
+  // "Show the last" (15 min to 6 h) for the window's list and map, per profile.
+  // The window filters its own store; APRS-IS and ECHOCAT are not touched.
+  ipcMain.on('aprs-set-show-last', (_e, min) => {
+    settings.aprsShowLastMin = AprsWindowState.normShowLast(min);
+    saveSettings(settings);
   });
   ipcMain.on('aprs-popout-minimize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.minimize(); });
   ipcMain.on('aprs-popout-maximize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) { w.isMaximized() ? w.unmaximize() : w.maximize(); } });
