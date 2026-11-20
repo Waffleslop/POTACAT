@@ -67,9 +67,35 @@
     el.classList.toggle('hidden', !line);
   }
 
+  // "My APRS SSID" for the radio beacon: 0 (none) to 15, each with its usual
+  // meaning (lib/aprs-beacon.js SSID_CHOICES), and the default that keeps
+  // the Settings callsign's own SSID. The call each beacon goes out as is
+  // shown beside the buttons. The Settings callsign is never changed.
+  function renderSsid() {
+    var sel = $('aprs-rf-ssid');
+    if (!sel.options.length) {
+      var d = document.createElement('option');
+      d.value = '';
+      d.textContent = 'As my Settings callsign';
+      sel.appendChild(d);
+      B.SSID_CHOICES.forEach(function (c) {
+        var o = document.createElement('option');
+        o.value = String(c.ssid);
+        o.textContent = (c.ssid === 0 ? 'No SSID' : '-' + c.ssid) + ': ' + c.label.replace(/^none: /, '');
+        sel.appendChild(o);
+      });
+    }
+    var v = s.settings.rfSsid == null ? '' : String(s.settings.rfSsid);
+    if (document.activeElement !== sel) sel.value = v;
+    var as = $('aprs-beacon-as');
+    as.textContent = s.call ? 'Internet beacon as ' + s.call + (s.rfCall ? ', radio beacon as ' + s.rfCall : '') : '';
+    as.classList.toggle('hidden', !as.textContent);
+  }
+
   function render() {
     if (!s) return;
     renderSymbols();
+    renderSsid();
     var iv = $('aprs-beacon-interval');
     if (document.activeElement !== iv) iv.value = String(s.settings.intervalMin || 0);
     var cm = $('aprs-beacon-comment');
@@ -135,6 +161,7 @@
   $('aprs-beacon-interval').addEventListener('change', function (e) { window.api.beaconSet({ intervalMin: Number(e.target.value) || 0 }); });
   $('aprs-beacon-comment').addEventListener('change', function (e) { window.api.beaconSet({ comment: e.target.value }); });
   $('aprs-beacon-approx').addEventListener('change', function (e) { window.api.beaconSet({ approx: e.target.checked }); });
+  $('aprs-rf-ssid').addEventListener('change', function (e) { window.api.beaconSet({ rfSsid: e.target.value === '' ? null : Number(e.target.value) }); });
   $('aprs-beacon-activation').addEventListener('change', function (e) { window.api.beaconSet({ activation: e.target.checked }); });
   $('aprs-beacon-pick').addEventListener('click', function () { setPicking(!picking); });
   $('aprs-beacon-grid').addEventListener('click', function () { window.api.beaconSet({ lat: null, lon: null }); });

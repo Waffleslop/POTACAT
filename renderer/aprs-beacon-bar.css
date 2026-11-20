@@ -26,14 +26,24 @@
 .aprs-beacon-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; flex-basis: 100%; }
 #aprs-beacon-status { white-space: normal; }
 .aprs-picking, .aprs-picking .leaflet-interactive { cursor: crosshair !important; }
-/* Phase 7: one manual beacon over the radio. The button reads as the internet
-   one's quiet sibling; the confirmation's Transmit button is the accent red,
-   the colour POTACAT gives everything that keys a radio. */
+/* Phase 7: one manual beacon over the radio, one click. The button reads as the
+   internet one's sibling with the accent red border, the colour POTACAT gives
+   everything that keys a radio; it carries band, frequency and power. */
 .aprs-btn-rf { color: var(--text-primary); background: transparent; border-color: var(--accent-red); }
 .aprs-btn-rf:disabled { border-color: var(--border-primary); color: var(--text-secondary); }
-.aprs-btn-tx { color: var(--on-accent-red); background: var(--accent-red); border-color: var(--accent-red); }
-.aprs-btn-tx:focus-visible { outline: 2px solid var(--accent-red); outline-offset: 2px; }
-.aprs-rf-confirm { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  padding: 4px 10px; border: 1px solid var(--accent-red); border-radius: 6px; color: var(--text-primary); }
-#aprs-rf-status { white-space: normal; }
+.aprs-btn-rf:focus-visible { outline: 2px solid var(--accent-red); outline-offset: 2px; }
+#aprs-rf-status, #aprs-rf-detail, .aprs-beacon-as { white-space: normal; }
 #aprs-beacon-sends { white-space: normal; }
+/* The radio beside the beacon: meters, TX power, the last beacon's peaks. */
+.aprs-rf-meters { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+.aprs-rf-meter { display: inline-flex; align-items: baseline; gap: 6px; padding: 2px 9px; border-radius: 5px;
+  border: 1px solid var(--border-primary); color: var(--text-secondary); background: var(--bg-primary); }
+.aprs-rf-meter-label { font-size: 13px; }
+.aprs-rf-meter-val { font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.aprs-rf-meter.ok .aprs-rf-meter-val { color: var(--accent-green); }
+.aprs-rf-meter.warn .aprs-rf-meter-val { color: var(--source-sota); }
+.aprs-rf-meter.high .aprs-rf-meter-val { color: var(--accent-red); }
+.aprs-rf-meter.high { border-color: var(--accent-red); }
+.aprs-rf-power input[type=range] { width: 140px; accent-color: var(--accent-red); }
+.aprs-rf-power-val { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.aprs-rf-note { color: var(--text-secondary); font-size: 13px; flex-basis: 100%; }

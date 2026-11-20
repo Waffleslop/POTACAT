@@ -238,7 +238,8 @@ const TESTS = [
   'test/aprs-activation-test.js', // APRS extra 1: the activation (park, frequency, mode) in the beacon comment, within 43 characters, off by default
   'test/aprs-rf-gate-test.js', // APRS phase 7: the gate for a beacon over the radio, each refusal (window, listen, callsign, dial match, owner, PTT, in flight)
   'test/aprs-rf-beacon-test.js', // APRS phase 7: the RF packet and path per band, the per-transmission cap, the run against a fake shim and Dire Wolf
-  'test/aprs-rf-beacon-wiring-test.js', // APRS phase 7: only Transmit sends, no RF timer, unkey on window close / stop / TX limit, power never changed
+  'test/aprs-rf-beacon-wiring-test.js', // APRS phase 7: one click sends (no confirm step), no RF timer, unkey on window close / stop / TX limit, power never changed
+  'test/aprs-rf-one-click-test.js', // APRS window: one-click radio beacon (button shows band/freq/power first, second click ignored), meters, TX power via set-tx-power, My APRS SSID
   'test/aprs-30m-tx-passband-test.js', // APRS 30 m beacon: a Flex's TX filter narrowed to 1400-2000 Hz for the beacon (inside 10.150 MHz) and put back on every way out; 2 m and other radios untouched
   'test/direwolf-aprs-tx-config-test.js', // APRS phase 7: the transmit config (PTT via the shim, channel access per band); listen and Winlink configs byte-identical
   'test/direwolf-aprs-tx-offline-test.js', // APRS phase 7: the bundled Dire Wolf keys a fake shim once and its audio decodes back (skips without the build)

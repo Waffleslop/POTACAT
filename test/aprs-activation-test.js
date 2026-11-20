@@ -129,8 +129,8 @@ const main = read('main.js');
 
 test('wiring: the internet beacon and the radio beacon both take the comment from aprsBeaconComment', () => {
   const is = fnBody(main, 'aprsBeaconSend');
-  const rf = fnBody(main, 'aprsRfSend');
-  for (const [name, body] of [['aprsBeaconSend', is], ['aprsRfSend', rf]]) {
+  const rf = fnBody(main, 'aprsRfPlan'); // the radio packet is built in aprsRfPlan since the one-click beacon (2026-11-19)
+  for (const [name, body] of [['aprsBeaconSend', is], ['aprsRfPlan', rf]]) {
     assert.ok(/comment: aprsBeaconComment\(st\)\.comment/.test(body), name + ' uses aprsBeaconComment');
     assert.ok(!/comment: st\.comment/.test(body), name + ' no longer sends the typed comment alone');
   }

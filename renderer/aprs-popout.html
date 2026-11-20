@@ -48,9 +48,10 @@
   </div>
 
   <div class="aprs-beacon" id="aprs-beacon" role="group" aria-label="Beacon">
-    <span class="aprs-beacon-title" title="Beacon now sends your position to APRS-IS over the internet. Beacon now (radio) sends one packet over your radio, after you confirm.">Beacon</span>
+    <span class="aprs-beacon-title" title="Beacon now sends your position to APRS-IS over the internet. The radio button sends one packet over your radio, at once, with one click.">Beacon</span>
     <button type="button" class="aprs-btn" id="aprs-beacon-now" title="Send your position to APRS-IS now, over the internet. Nothing is transmitted on the air.">Beacon now</button>
-    <button type="button" class="aprs-btn aprs-btn-rf" id="aprs-rf-now" disabled title="Send one APRS packet with your position over your radio, on the frequency it listens on. You confirm first.">Beacon now (radio)</button>
+    <button type="button" class="aprs-btn aprs-btn-rf" id="aprs-rf-now" disabled title="Send one APRS packet with your position over your radio, on the frequency it listens on. One click transmits.">Beacon now (radio)</button>
+    <span class="aprs-mark aprs-beacon-as" id="aprs-beacon-as" title="The callsign each beacon goes out as. Your Settings callsign is not changed."></span>
     <label class="aprs-field" title="Send your position every so often while this window is open">Timer
       <select id="aprs-beacon-interval">
         <option value="0">Off</option>
@@ -66,6 +67,9 @@
       <span class="aprs-mark" id="aprs-beacon-pos"></span>
       <button type="button" class="aprs-btn-quiet" id="aprs-beacon-pick" title="Click the map where you are">Pick on map</button>
       <button type="button" class="aprs-btn-quiet hidden" id="aprs-beacon-grid" title="Use the centre of the grid square in Settings">Use my grid</button>
+      <label class="aprs-field" title="The SSID your radio beacon goes out with (APRS SSID recommendations, aprs.org). Your Settings callsign is not changed. The internet beacon and the iGate stay on -10.">My APRS SSID
+        <select id="aprs-rf-ssid"></select>
+      </label>
     </div>
     <div class="aprs-beacon-row">
       <label class="aprs-check" title="While an activation runs, the beacon comment starts with your park, frequency and mode, on the internet and radio beacons alike"><input type="checkbox" id="aprs-beacon-activation">Add my activation to the beacon comment</label>
@@ -73,12 +77,18 @@
     </div>
     <div class="aprs-beacon-row"><span class="aprs-mark hidden" id="aprs-beacon-status"><span class="aprs-dot" id="aprs-beacon-dot"></span><span id="aprs-beacon-text"></span></span></div>
     <div class="aprs-beacon-row" id="aprs-rf-row">
+      <span class="aprs-mark aprs-rf-detail hidden" id="aprs-rf-detail"></span>
       <span class="aprs-mark hidden" id="aprs-rf-status"><span class="aprs-dot" id="aprs-rf-dot"></span><span id="aprs-rf-text"></span></span>
-      <span class="aprs-rf-confirm hidden" id="aprs-rf-confirm" role="group" aria-label="Confirm the radio beacon">
-        <span id="aprs-rf-confirm-text"></span>
-        <button type="button" class="aprs-btn aprs-btn-tx" id="aprs-rf-send">Transmit</button>
-        <button type="button" class="aprs-btn-quiet" id="aprs-rf-cancel">Cancel</button>
+    </div>
+    <div class="aprs-beacon-row aprs-rf-radio" id="aprs-rf-radio" role="group" aria-label="Your radio">
+      <span class="aprs-rf-meters" id="aprs-rf-meters" aria-live="polite"></span>
+      <span class="aprs-field aprs-rf-power hidden" id="aprs-rf-power">TX power
+        <input type="range" id="aprs-rf-power-range" aria-label="TX power">
+        <select id="aprs-rf-power-select" aria-label="TX power" hidden></select>
+        <span class="aprs-rf-power-val" id="aprs-rf-power-val">&mdash;</span>
       </span>
+      <span class="aprs-mark aprs-rf-last hidden" id="aprs-rf-last"></span>
+      <span class="aprs-rf-note" id="aprs-rf-power-note">5 W is fine to start. APRS on 2 m commonly runs 5 to 50 W; on 30 m, a few watts to 50 W can reach an iGate, depending on conditions.</span>
     </div>
   </div>
 
@@ -120,6 +130,8 @@
   <script src="aprs-listen-bar.js"></script>
   <script src="../lib/aprs-beacon.js"></script>
   <script src="aprs-beacon-bar.js"></script>
+  <script src="../lib/rig-power-view.js"></script>
+  <script src="../lib/aprs-rf-meters.js"></script>
   <script src="aprs-rf-beacon-bar.js"></script>
 </body>
 </html>
