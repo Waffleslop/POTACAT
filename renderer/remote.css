@@ -2786,6 +2786,13 @@ html, body {
   animation: ft8-toast-fade 4s ease-in-out;
   pointer-events: none;
 }
+/* A stopped QSO that can still be finished with a 73 (#807): it stays up
+   and its Send 73 button takes a tap. */
+.ft8-error-toast.ft8-error-toast-action {
+  animation: none;
+  pointer-events: auto;
+}
+.ft8-error-toast-action .ft8-qso-skip-btn { margin-left: 8px; }
 @keyframes ft8-toast-fade {
   0% { opacity: 0; transform: translateX(-50%) translateY(-10px); }
   10% { opacity: 1; transform: translateX(-50%) translateY(0); }

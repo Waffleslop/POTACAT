@@ -188,7 +188,8 @@ contextBridge.exposeInMainWorld('api', {
   jtcatReply: (data) => ipcRenderer.send('jtcat-popout-reply', data),
   jtcatCallCq: (modifier) => ipcRenderer.send('jtcat-popout-call-cq', modifier || ''),
   jtcatCancelQso: () => ipcRenderer.send('jtcat-popout-cancel-qso'),
-  jtcatSkipPhase: () => ipcRenderer.send('jtcat-popout-skip-phase'),
+  // { unconfirmed: true }: only the 73 for a QSO the retry cap stopped (#807).
+  jtcatSkipPhase: (o) => ipcRenderer.send('jtcat-popout-skip-phase', o && o.unconfirmed ? { unconfirmed: true } : undefined),
   openQsoLog: () => ipcRenderer.send('qso-popout-open'),
   jtcatSetAutoCqMode: (mode) => ipcRenderer.send('jtcat-popout-auto-cq-mode', mode),
   onJtcatAutoCqState: (cb) => ipcRenderer.on('jtcat-auto-cq-state', (_e, data) => cb(data)),

@@ -34,6 +34,30 @@ Machine-wide (GLOBAL_KEY): ultracat, jtcatRxGain, jtcatTxGain (desktop-authorita
 `applyJtcatTxGain`), jtcatWaterfallSpeed, jtcatWaterfallFloor, jtcatShowBandScope, jtcatStationsExpiryMin.
 Rule: a setting that is operating policy is per profile; a setting about this machine or its display is GLOBAL.
 
+## When a QSO is logged (#807, Casey 2026-11-20)
+A QSO is logged when WE start transmitting a 73-family message (RR73, RRR or 73) to that station,
+or when THEIR RR73, RRR or 73 for the QSO is received, whichever comes first, once. Not a setting.
+A QSO that breaks before any 73 is not logged. The tx-start dispatch asks `txLogsQso`
+(lib/jtcat-state-machine.js) in `jtcatNoteTxSent`; receipt logs in `advanceJtcatQso`. Every path
+(window, ECHOCAT, Hunt, Auto CQ, Run, spot target, a click on a decode, Skip) reaches one of
+those two points; none logs on its own. "Open the Log QSO window before saving" (jtcatLogPrompt)
+opens at that same moment. The operator's Log button (ECHOCAT jtcat-log-qso) is a manual log.
+WSJT-X raises its Log QSO prompt when it sends a message containing 73 (User Guide 2.7.0,
+11.2 Button Row, "Log QSO"; 4.5 Reporting, "Prompt me to log QSO").
+
+Departures from WSJT-X (do not "fix"):
+1. POTACAT logs when our RR73 / 73 STARTS going out, not after it, so a missed courtesy cycle does
+   not lose the log; and it also logs on receiving their RR73 / RRR / 73. (Until #807 it logged
+   at "reports exchanged": the CQ side on their R+report, before our RR73 went out.)
+2. A hard per-phase TX cap (`jtcatMaxQsoAttempts`, a try = a transmission). WSJT-X has only its Tx
+   watchdog. At the cap with reports exchanged both ways and no RR73 from them, the QSO ends
+   unlogged and no 73 is sent, the same as every other abort; the window (and ECHOCAT through
+   `jtcat-qso-state` `phase: 'error'`, `send73: true`) shows "Not logged: W1ABC never sent RR73.
+   Press Send 73 to log it." Send 73 (or Skip) sends the 73, which logs it. In Run the QSO is
+   dropped and CQ resumes. (Until #807 the cap logged and sent a 73 by itself.)
+3. Field Day, CQ side: the ARRL FD sequence ends on their RR73 and we send no 73; it still logs at
+   our R+exchange. The S&P side follows the rule (logs when our RR73 goes out).
+
 ## Hard rules
 - JTTY dials: 20 m 14090, 40 m 7090. Never 14080 (that is FT4). JTTY refuses more than 80 chars,
   16 frames or 120 s; it never trims. Frequency reported = lowest tone.

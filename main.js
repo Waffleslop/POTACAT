@@ -22063,23 +22063,62 @@ function _autoSeqEnabled() {
   return !eng || eng._autoSeq !== false;
 }
 
-// Shared TX/log callbacks — the state-machine advance AND the give-up
-// closeout (closeoutStalledQso) go through the same plumbing so the final
-// courtesy 73 routes to the same engine and log path as a normal advance.
+// Shared TX/log callbacks — the state-machine advance, the tx-start log
+// (jtcatNoteTxSent) and Skip's final 73 (sendFinal73) go through the same
+// plumbing so the 73 routes to the same engine and log path as a normal advance.
 async function popoutJtcatSetTxMsg(msg) {
   const txEng = jtcatManager ? jtcatManager.txEngine : ft8Engine;
   if (txEng) await txEng.setTxMessage(msg);
   popoutBroadcastQso();
 }
-// The courtesy leg (73 / RR73 after the log) ends only once its message has
-// actually gone out: stamp the QSO(s) whose pending message this transmission
-// carries. Called from the tx-start dispatch, after every TX-block guard, so a
-// refused cycle never counts as sent (lib/jtcat-state-machine.js
-// _courtesyPending; IK4IDF 2026-10-15).
+// Called from the tx-start dispatch, after every TX-block guard, so a refused
+// cycle never counts as sent. Two jobs:
+// - The courtesy leg (73 / RR73) ends only once its message has actually gone
+//   out: stamp the QSO(s) whose pending message this transmission carries
+//   (lib/jtcat-state-machine.js _courtesyPending; IK4IDF 2026-10-15).
+// - The log rule (#807): a QSO is logged when OUR RR73 / RRR / 73 starts going
+//   out (or when theirs is received, in the state machine), never before. This
+//   is the one place "we send a 73" is seen, whether the auto-sequence, Skip or
+//   the operator put the 73 on the air. Each surface logs through its own path,
+//   so the window's "Open the Log QSO window before saving" opens right here.
 function jtcatNoteTxSent(message) {
-  for (const q of [popoutJtcatQso, remoteJtcatQso]) {
-    if (q && q.txMsg && q.txMsg === message) q._txSentMsg = message;
+  for (const surface of ['popout', 'remote']) {
+    const q = surface === 'popout' ? popoutJtcatQso : remoteJtcatQso;
+    if (!q) continue;
+    if (q.txMsg && q.txMsg === message) q._txSentMsg = message;
+    if (_jtcatStateMachine.txLogsQso(q, message)) {
+      sendCatLog(`[JTCAT] ${q.call}: "${message}" is going out — logging the QSO`);
+      const done = surface === 'popout' ? popoutJtcatOnDone(q) : remoteJtcatOnDone(q);
+      done().catch((e) => sendCatLog(`[JTCAT] Log at TX start failed for ${q.call}: ${e && e.message}`));
+    }
   }
+}
+// A QSO the retry cap stopped with reports exchanged both ways but no RR73 from
+// them (#807): not logged and no 73 sent. It is kept for a few minutes so the
+// operator's Send 73 (the notice's button, or Skip) can still send the 73 and
+// log it. Only while nothing else has started on that surface since.
+const JTCAT_UNCONFIRMED_KEEP_MS = 5 * 60 * 1000;
+const _jtcatUnconfirmed = { popout: null, remote: null };
+function jtcatStashUnconfirmed(surface, q, slot) {
+  if (surface !== 'popout' && surface !== 'remote') return;
+  _jtcatUnconfirmed[surface] = { q, slot, at: Date.now() };
+}
+function jtcatTakeUnconfirmed(surface) {
+  const u = _jtcatUnconfirmed[surface];
+  _jtcatUnconfirmed[surface] = null;
+  const current = surface === 'popout' ? popoutJtcatQso : remoteJtcatQso;
+  if (!u || current || u.q._logged || Date.now() - u.at > JTCAT_UNCONFIRMED_KEEP_MS) return null;
+  return u;
+}
+// Send the final 73 for a stopped, unconfirmed QSO: back on its slot, TX on.
+// The 73 going out logs it (jtcatNoteTxSent).
+function jtcatSendStashed73(u, eng, setTxMsg) {
+  if (!_jtcatStateMachine.sendFinal73(u.q, setTxMsg, { log: sendCatLog })) return false;
+  u.q.txRetries = 0;
+  if (u.slot === 'even' || u.slot === 'odd') eng.setTxSlot(u.slot);
+  eng._txEnabled = true;
+  if (typeof eng.tryImmediateTx === 'function') eng.tryImmediateTx();
+  return true;
 }
 function popoutJtcatOnDone(qso) {
   return async () => {
@@ -22226,11 +22265,13 @@ async function jtcatTryAnswerDirectCaller(results, myCall, myGrid) {
 //              cycle since 2026-07 — heard-but-stuck no longer resets it;
 //              that reset let a partner repeating a non-advancing message
 //              hang the QSO forever, KQ4MHD)
-//   closeout → reports exchanged both ways: log + one final courtesy 73 via
-//              the same setTxMsg/onDone plumbing; the QSO stays live so the
-//              courtesy-73 leg can tear down normally (do NOT null it here)
 //   rearm    → Full Auto CQ run mode: drop the stalled QSO, resume CQ
 //   abort    → tear down TX, drop the QSO unlogged, notify
+// With reports exchanged both ways (outcome.unconfirmed) the QSO still ends
+// unlogged and no 73 is sent (#807: a QSO is logged only when a 73 is sent or
+// received). The notice says so and offers Send 73, which sends the 73 and
+// logs it (jtcatTakeUnconfirmed in the Skip handlers). Until #807 the cap
+// logged and sent a 73 on its own (closeoutStalledQso).
 function jtcatHandleRetryStall(o) {
   const qso = o.qso;
   // A courtesy leg (73 / RR73 after the log) waits for its OWN transmission,
@@ -22293,18 +22334,13 @@ function jtcatHandleRetryStall(o) {
   });
   qso.txRetries = outcome.retries;
   const max = qso.phase === 'cq' ? JTCAT_MAX_CQ_RETRIES : maxQso;
-  if (outcome.action === 'closeout') {
-    const notice = _jtcatStateMachine.giveUpMessage({ kind: 'closeout', call: qso.call, max });
-    _jtcatStateMachine.closeoutStalledQso(qso, o.setTxMsg, async () => {
-      await o.onDone();
-      // Notify after the log resolves so the notice wins the shared popout
-      // toast slot from the green "Logged" toast.
-      if (o.notifyCloseout) o.notifyCloseout(notice);
-    }, { log: sendCatLog });
-    qso.txRetries = 0;
-    jtcatFullAutoCqLastActivity = Date.now(); // counts as progress for the watchdog
-  } else if (outcome.action === 'rearm') {
+  if (outcome.action === 'rearm') {
     sendCatLog('[JTCAT] Full Auto CQ — ' + (qso.call || 'partner') + ' stalled, resuming CQ');
+    if (outcome.unconfirmed) {
+      const notice = _jtcatStateMachine.giveUpMessage({ kind: 'unconfirmed', call: qso.call, max, run: true });
+      sendCatLog('[JTCAT] ' + notice);
+      if (o.notifyNotice) o.notifyNotice(notice);
+    }
     if (qso.call) jtcatSessionMark(qso.call);
     // Re-arm under whichever owner is running — was hardcoded 'popout' when
     // run mode was popout-only; the phone control path (jtcat-full-auto-cq)
@@ -22312,10 +22348,12 @@ function jtcatHandleRetryStall(o) {
     // rearmCq into a silent no-op (run stalls after the first stalled QSO).
     rearmCq(jtcatFullAutoCqOwner);
   } else if (outcome.action === 'abort') {
-    const msg = _jtcatStateMachine.giveUpMessage({
-      kind: 'abort', phase: qso.phase, call: qso.call,
-      heard: !!qso._heardThisCycle, hound: !!qso.hound, max,
-    });
+    const msg = outcome.unconfirmed
+      ? _jtcatStateMachine.giveUpMessage({ kind: 'unconfirmed', call: qso.call, max })
+      : _jtcatStateMachine.giveUpMessage({
+        kind: 'abort', phase: qso.phase, call: qso.call,
+        heard: !!qso._heardThisCycle, hound: !!qso.hound, max,
+      });
     // sendCatLog, not console.log: a QSO given up on has to be visible in the
     // bug report, or the log just jumps to the next station with no reason
     // (N2FSM 2026-09-14, KI7SKT -> W0CTX).
@@ -22327,6 +22365,10 @@ function jtcatHandleRetryStall(o) {
       sendCatLog(`[JTCAT] Hunt skips ${qso.call} for ${jtcatAutoSkipMin()} min on ${bm.band || 'this band'} ${bm.mode || ''}`.trimEnd());
     }
     const eng = o.engine;
+    if (outcome.unconfirmed) {
+      const surface = qso === popoutJtcatQso ? 'popout' : (qso === remoteJtcatQso ? 'remote' : null);
+      jtcatStashUnconfirmed(surface, qso, eng && eng._txSlot);
+    }
     if (eng) {
       eng._txEnabled = false;
       eng.setTxMessage('');
@@ -22334,7 +22376,7 @@ function jtcatHandleRetryStall(o) {
       if (eng._txActive) eng.txComplete();
     }
     o.clearQso();
-    if (o.notifyAbort) o.notifyAbort(msg);
+    if (o.notifyAbort) o.notifyAbort(msg, { send73: !!outcome.unconfirmed });
   }
 }
 
@@ -22957,13 +22999,13 @@ function startJtcat(mode) {
           workableCount: runWorkable,
           setTxMsg: remoteJtcatSetTxMsg, onDone: remoteJtcatOnDone(qso),
           clearQso: () => { remoteJtcatQso = null; remoteJtcatBroadcastQso(); },
-          notifyAbort: (msg) => {
+          notifyAbort: (msg, extra) => {
             if (remoteServer.hasClient()) {
-              remoteServer.broadcastJtcatQsoState({ phase: 'error', error: msg });
+              // send73: the stopped QSO can still be finished with a 73 (#807);
+              // the client's Skip (jtcat-skip-phase) sends it.
+              remoteServer.broadcastJtcatQsoState(Object.assign({ phase: 'error', error: msg }, extra && extra.send73 ? { send73: true } : {}));
             }
           },
-          // No closeout notice on the wire — the phone just sees the normal
-          // QSO broadcast advance 73 → done (no new phase values for ECHOCAT).
         });
       } else if (remoteJtcatQso && remoteJtcatQso.phase !== phaseBefore) {
         remoteJtcatQso.txRetries = 0;
@@ -22983,12 +23025,12 @@ function startJtcat(mode) {
           workableCount: runWorkable,
           setTxMsg: popoutJtcatSetTxMsg, onDone: popoutJtcatOnDone(qso),
           clearQso: () => { popoutJtcatQso = null; popoutBroadcastQso(); },
-          notifyAbort: (msg) => {
+          notifyAbort: (msg, extra) => {
             if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
-              jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: msg });
+              jtcatPopoutWin.webContents.send('jtcat-qso-state', Object.assign({ phase: 'error', error: msg }, extra && extra.send73 ? { send73: true } : {}));
             }
           },
-          notifyCloseout: (msg) => {
+          notifyNotice: (msg) => {
             if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
               jtcatPopoutWin.webContents.send('jtcat-qso-notice', { message: msg });
             }
@@ -31633,8 +31675,9 @@ function connectRemote() {
       phase = '73';
     } else if (nextStep === 'send-rr73') {
       // CQ SIDE: they answered our CQ with R+signal → we send RR73. CQ-mode
-      // phase so the state machine advances + the QSO logs (reply mode has no
-      // 'rr73' handler — WZ1H/W7RTA 2026-06-22). Log on setup (past the log pt).
+      // phase so the state machine advances (reply mode has no 'rr73'
+      // handler — WZ1H/W7RTA 2026-06-22). Logged when the RR73 goes out
+      // (jtcatNoteTxSent, #807), not on the click.
       txMsg = jtcatDirectedMsg(call, myCall, 'RR73');
       phase = 'cq-rr73';
       const sameCall = remoteJtcatQso && remoteJtcatQso.call && remoteJtcatQso.call.toUpperCase() === call.toUpperCase();
@@ -31645,8 +31688,8 @@ function connectRemote() {
         report: theirReport || (sameCall ? remoteJtcatQso.report : null),
         sentReport: (sameCall ? remoteJtcatQso.sentReport : null) || ourRpt,
         myCall, myGrid, txRetries: 0, sliceId: sliceKey,
+        _logged: !!(sameCall && remoteJtcatQso._logged),
       };
-      if (!sameCall) await jtcatAutoLog(remoteJtcatQso);
     } else if (nextStep === 'send-r-report') {
       txMsg = jtcatDirectedMsg(call, myCall, 'R' + ourRpt);
       phase = 'r+report';
@@ -31676,7 +31719,7 @@ function connectRemote() {
       remoteJtcatQso = { mode: 'reply', call, grid: theirGrid || (sameCall ? prev.grid : ''), phase, txMsg,
         report: sameCall ? prev.report : null,
         sentReport: sameCall ? prev.sentReport : null,
-        myCall, myGrid, txRetries: 0, sliceId: sliceKey };
+        myCall, myGrid, txRetries: 0, sliceId: sliceKey, _logged: !!(sameCall && prev._logged) };
       await remoteJtcatSetTxMsg(txMsg);
       targetEngine._txEnabled = true;
       fireReply();
@@ -32413,18 +32456,33 @@ function connectRemote() {
 
   remoteServer.on('jtcat-follow-radio', () => { jtcatFollowRadioNow('the ECHOCAT device'); });
 
-  remoteServer.on('jtcat-skip-phase', async () => {
-    if (!remoteJtcatQso || remoteJtcatQso.phase === 'done' || remoteJtcatQso.phase === 'idle') return;
+  remoteServer.on('jtcat-skip-phase', async (opts) => {
+    // The retry cap stopped a QSO whose RR73 never came (#807): the notice's
+    // Send 73 ({ unconfirmed: true }), or Skip with nothing running, sends the
+    // 73 now, and the 73 going out logs it. Send 73 never touches a QSO that
+    // has started since (Hunt may already be calling the next station).
+    const onlyUnconfirmed = !!(opts && opts.unconfirmed);
+    if (!remoteJtcatQso || onlyUnconfirmed) {
+      const u = jtcatTakeUnconfirmed('remote');
+      if (u) {
+        remoteJtcatQso = u.q;
+        jtcatSendStashed73(u, ft8Engine, (m) => { remoteJtcatSetTxMsg(m); });
+        remoteJtcatBroadcastQso();
+      } else if (onlyUnconfirmed) {
+        sendCatLog('[JTCAT] Send 73: that QSO is no longer waiting (another QSO started, or 5 minutes passed)');
+      }
+      return;
+    }
+    if (remoteJtcatQso.phase === 'done' || remoteJtcatQso.phase === 'idle') return;
     const q = remoteJtcatQso;
     const myCall = q.myCall;
     const validCall = q.call && /^[A-Z0-9/]{2,}$/i.test(q.call);
     if (q.mode === 'cq' && _jtcatStateMachine.canCloseoutQso(q)) {
-      // Compressed reply with reports both ways: Skip declares it done —
-      // log + one courtesy 73, the same closeout the retry cap uses.
-      _jtcatStateMachine.closeoutStalledQso(q,
-        (m) => { remoteJtcatSetTxMsg(m); },
-        async () => { await jtcatAutoLog(q); },
-        { log: sendCatLog });
+      // Compressed reply with reports both ways: Skip sends the 73, which
+      // logs the QSO as it goes out (#807).
+      _jtcatStateMachine.sendFinal73(q, (m) => { remoteJtcatSetTxMsg(m); }, { log: sendCatLog });
+      q.txRetries = 0;
+      remoteJtcatBroadcastQso();
       return;
     }
     if (q.mode === 'cq') {
@@ -32451,18 +32509,15 @@ function connectRemote() {
         q.txMsg = jtcatDirectedMsg(q.call, myCall, 'R' + rpt);
         q.phase = 'r+report';
       } else if (q.phase === 'r+report') {
-        // Skip on a reports-both-ways QSO = the operator declaring it done.
+        // Skip on a reports-both-ways QSO = the operator sending the 73.
         // Speed POTA activators often never send RR73 at all (they take the
-        // R-report and CQ the next hunter), so the natural advance-and-log
-        // never fires — and this branch used to move to the 73 phase WITHOUT
-        // calling the logger, so Skip sent 73s but the QSO stayed unlogged
-        // (W8ATE 2026-08-26). Route through the SAME closeout the retry cap
-        // uses: log + one courtesy 73 + normal teardown.
+        // R-report and CQ the next hunter), so the natural advance never
+        // fires (W8ATE 2026-08-26). Skip queues the 73, and the 73 going out
+        // logs the QSO (#807: "we send a 73"), like choosing Tx5 in WSJT-X.
         if (_jtcatStateMachine.canCloseoutQso(q)) {
-          _jtcatStateMachine.closeoutStalledQso(q,
-            (m) => { remoteJtcatSetTxMsg(m); },
-            async () => { await jtcatAutoLog(q); },
-            { log: sendCatLog });
+          _jtcatStateMachine.sendFinal73(q, (m) => { remoteJtcatSetTxMsg(m); }, { log: sendCatLog });
+          q.txRetries = 0;
+          remoteJtcatBroadcastQso();
           return;
         }
         q.txMsg = jtcatDirectedMsg(q.call, myCall, 'RR73');
@@ -49633,8 +49688,8 @@ function cloudShackNotice(text, kind) {
       // sending RR73 (step 5). Use CQ-mode phase 'cq-rr73' so the state machine
       // actually advances it — reply mode has NO 'rr73' handler, so the QSO
       // froze and never logged (WZ1H/W7RTA 2026-06-22: double-clicking a station
-      // answering you didn't log + pathway steps stuck). The log point (their
-      // R-report received) has passed, so log on setup like the send-73 case.
+      // answering you didn't log + pathway steps stuck). Logged when the RR73
+      // goes out (jtcatNoteTxSent, #807), not on the click.
       txMsg = jtcatDirectedMsg(data.call, myCall, 'RR73');
       phase = 'cq-rr73';
       const sameCall = popoutJtcatQso && popoutJtcatQso.call && popoutJtcatQso.call.toUpperCase() === data.call.toUpperCase();
@@ -49645,8 +49700,8 @@ function cloudShackNotice(text, kind) {
         report: data.theirReport || data.report || (sameCall ? popoutJtcatQso.report : null),
         sentReport: (sameCall ? popoutJtcatQso.sentReport : null) || ourRpt,
         myCall, myGrid, txRetries: 0, sliceId: replySliceId,
+        _logged: !!(sameCall && popoutJtcatQso._logged),
       };
-      if (!sameCall) await jtcatAutoLog(popoutJtcatQso, { fromWindow: true });
     } else if (nextStep === 'send-r-report') {
       // Their step 3 (plain signal report) → we send step 4 (R+ourReport).
       txMsg = jtcatDirectedMsg(data.call, myCall, 'R' + ourRpt);
@@ -49718,7 +49773,7 @@ function cloudShackNotice(text, kind) {
       popoutJtcatQso = { mode: 'reply', call: data.call, grid: data.grid || (sameCall ? prev.grid : ''), phase, txMsg,
         report: sameCall ? prev.report : null,
         sentReport: sameCall ? prev.sentReport : null,
-        myCall, myGrid, txRetries: 0, sliceId: replySliceId };
+        myCall, myGrid, txRetries: 0, sliceId: replySliceId, _logged: !!(sameCall && prev._logged) };
       replyEngine._txEnabled = true;
       await replyEngine.setTxMessage(txMsg);
       replyEngine.tryImmediateTx();
@@ -49886,18 +49941,35 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('jtcat-follow-radio', () => { jtcatFollowRadioNow('the JTCAT window'); });
   ipcMain.handle('jtcat-dxpeditions-get', () => _jtcatDxpDials);
 
-  ipcMain.on('jtcat-popout-skip-phase', async () => {
-    if (!popoutJtcatQso || popoutJtcatQso.phase === 'done' || popoutJtcatQso.phase === 'idle') return;
+  ipcMain.on('jtcat-popout-skip-phase', async (_e, opts) => {
+    // The retry cap stopped a QSO whose RR73 never came (#807): the notice's
+    // Send 73 ({ unconfirmed: true }), or Skip with nothing running, sends the
+    // 73 now, and the 73 going out logs it. Send 73 never touches a QSO that
+    // has started since (Hunt may already be calling the next station).
+    const onlyUnconfirmed = !!(opts && opts.unconfirmed);
+    if (!popoutJtcatQso || onlyUnconfirmed) {
+      const u = jtcatTakeUnconfirmed('popout');
+      const ueng = u && ((u.q.sliceId && jtcatManager) ? jtcatManager.getEngine(u.q.sliceId) : ft8Engine);
+      if (u && ueng) {
+        popoutJtcatQso = u.q;
+        jtcatSendStashed73(u, ueng, (m) => { ueng.setTxMessage(m); });
+        popoutBroadcastQso();
+      } else if (onlyUnconfirmed) {
+        sendCatLog('[JTCAT] Send 73: that QSO is no longer waiting (another QSO started, or 5 minutes passed)');
+      }
+      return;
+    }
+    if (popoutJtcatQso.phase === 'done' || popoutJtcatQso.phase === 'idle') return;
     const q = popoutJtcatQso;
     const eng = (q.sliceId && jtcatManager) ? jtcatManager.getEngine(q.sliceId) : ft8Engine;
     if (!eng) return;
     const myCall = q.myCall;
     const validCall = q.call && /^[A-Z0-9/]{2,}$/i.test(q.call);
     if (q.mode === 'cq' && _jtcatStateMachine.canCloseoutQso(q)) {
-      _jtcatStateMachine.closeoutStalledQso(q,
-        (m) => { eng.setTxMessage(m); },
-        async () => { await jtcatAutoLog(q, { fromWindow: true }); },
-        { log: sendCatLog });
+      // Compressed reply with reports both ways: Skip sends the 73, which
+      // logs the QSO as it goes out (#807).
+      _jtcatStateMachine.sendFinal73(q, (m) => { eng.setTxMessage(m); }, { log: sendCatLog });
+      q.txRetries = 0;
       popoutBroadcastQso();
       return;
     }
@@ -49925,18 +49997,14 @@ function cloudShackNotice(text, kind) {
         q.txMsg = jtcatDirectedMsg(q.call, myCall, 'R' + rpt);
         q.phase = 'r+report';
       } else if (q.phase === 'r+report') {
-        // Skip on a reports-both-ways QSO = the operator declaring it done.
+        // Skip on a reports-both-ways QSO = the operator sending the 73.
         // Speed POTA activators often never send RR73 at all (they take the
-        // R-report and CQ the next hunter), so the natural advance-and-log
-        // never fires — and this branch used to move to the 73 phase WITHOUT
-        // calling the logger, so Skip sent 73s but the QSO stayed unlogged
-        // (W8ATE 2026-08-26). Route through the SAME closeout the retry cap
-        // uses: log + one courtesy 73 + normal teardown.
+        // R-report and CQ the next hunter), so the natural advance never
+        // fires (W8ATE 2026-08-26). Skip queues the 73, and the 73 going out
+        // logs the QSO (#807: "we send a 73"), like choosing Tx5 in WSJT-X.
         if (_jtcatStateMachine.canCloseoutQso(q)) {
-          _jtcatStateMachine.closeoutStalledQso(q,
-            (m) => { eng.setTxMessage(m); },
-            async () => { await jtcatAutoLog(q, { fromWindow: true }); },
-            { log: sendCatLog });
+          _jtcatStateMachine.sendFinal73(q, (m) => { eng.setTxMessage(m); }, { log: sendCatLog });
+          q.txRetries = 0;
           popoutBroadcastQso();
           return;
         }
@@ -56211,12 +56279,12 @@ function cloudShackNotice(text, kind) {
               workableCount: runWorkable,
               setTxMsg: popoutJtcatSetTxMsg, onDone: popoutJtcatOnDone(qso),
               clearQso: () => { popoutJtcatQso = null; popoutBroadcastQso(); },
-              notifyAbort: (msg) => {
+              notifyAbort: (msg, extra) => {
                 if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
-                  jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: msg });
+                  jtcatPopoutWin.webContents.send('jtcat-qso-state', Object.assign({ phase: 'error', error: msg }, extra && extra.send73 ? { send73: true } : {}));
                 }
               },
-              notifyCloseout: (msg) => {
+              notifyNotice: (msg) => {
                 if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
                   jtcatPopoutWin.webContents.send('jtcat-qso-notice', { message: msg });
                 }
@@ -56242,9 +56310,9 @@ function cloudShackNotice(text, kind) {
               workableCount: runWorkable,
               setTxMsg: remoteJtcatSetTxMsg, onDone: remoteJtcatOnDone(qso),
               clearQso: () => { remoteJtcatQso = null; remoteJtcatBroadcastQso(); },
-              notifyAbort: (msg) => {
+              notifyAbort: (msg, extra) => {
                 if (remoteServer.hasClient()) {
-                  remoteServer.broadcastJtcatQsoState({ phase: 'error', error: msg });
+                  remoteServer.broadcastJtcatQsoState(Object.assign({ phase: 'error', error: msg }, extra && extra.send73 ? { send73: true } : {}));
                 }
               },
             });
