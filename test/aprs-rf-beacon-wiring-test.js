@@ -2,7 +2,9 @@
 'use strict';
 // APRS phase 7: the radio beacon as wired in main.js, the preload and the APRS
 // window (source-text guards; CRLF and LF both pass). The rules: only the
-// operator's Transmit sends, never a timer; the transmit Dire Wolf exists only
+// operator's click sends (one click since 2026-11-19: Casey asked for a
+// 1-click transmit, so the old confirm-then-Transmit tests below were changed
+// on purpose), never a timer; the transmit Dire Wolf exists only
 // for the beacon and keys only through its own shim and the gate; the window
 // closing, listening stopping or the stuck-TX limit unkey at once; power is
 // shown, never changed; the receive-only listen path is untouched.
@@ -39,7 +41,7 @@ const block = (() => {
   return main.slice(a, b);
 })();
 
-test('only the operator\'s Transmit sends: one IPC path into aprsRfSend, no RF timer', () => {
+test('only the operator\'s click sends: one IPC path into aprsRfSend, no RF timer', () => {
   assert.strictEqual((main.match(/aprsRfSend\(\)\.catch/g) || []).length, 1, 'called from one place');
   assert.strictEqual((main.match(/aprsRfSend\(/g) || []).length, 2, 'the definition and the one call');
   assert.ok(/ipcMain\.on\('aprs-rf-send', \(\) => \{ aprsRfSend\(\)/.test(main));
@@ -48,21 +50,26 @@ test('only the operator\'s Transmit sends: one IPC path into aprsRfSend, no RF t
   assert.ok(!/aprsRfSend|rfSend/.test(fnBody(main, 'aprsBeaconSchedule')), 'the internet timer never sends over the radio');
 });
 
-test('the press only asks: the confirmation line carries band, frequency, mode and power', () => {
-  const ask = fnBody(main, 'aprsRfAsk');
-  assert.ok(/aprsRfUi\.confirm = \{ at: Date\.now\(\), band, bandLabel: .*hz, mhz: .*mode: .*powerW: pw(, txNarrow: aprsRfTxNarrow\(band\))? \}/.test(ask));
-  assert.ok(!/aprsRfRunner|handleRemotePtt/.test(ask), 'asking keys nothing');
-  assert.ok(/Transmit one APRS beacon on ' \+ c\.bandLabel \+ ', ' \+ c\.mhz \+ ' MHz ' \+ c\.mode \+ ', ' \+ powerWords\(c\.powerW\)/.test(bar));
+// Was: "the press only asks: the confirmation line carries band, frequency,
+// mode and power" (the confirm step). Casey 2026-11-19 asked for one click,
+// so the same facts must now be on the button and under it BEFORE the click.
+test('one click: the button carries band, frequency, mode, power, path and air time before the click; no pop-ups', () => {
+  const pay = fnBody(main, 'aprsRfPayload');
+  assert.ok(/const p = aprsRfPlan\(\);/.test(pay));
+  assert.ok(/AprsRfBeacon\.rfPreview\(\{ bandLabel: p\.bandLabel, mhz: p\.mhz, mode: p\.mode, powerW: p\.powerW, path: p\.b\.path, airMs: p\.cap\.airMs, source: p\.b\.source, txNarrow: p\.txNarrow \}\)/.test(pay));
+  assert.ok(!/aprsRfRunner|handleRemotePtt/.test(pay), 'showing keys nothing');
+  assert.ok(/btn\.textContent = pv \? pv\.button : 'Beacon now \(radio\)'/.test(bar));
   assert.ok(!/confirm\(|alert\(|showMessageBox/.test(bar + block), 'no pop-ups');
 });
 
-test('Transmit judges the gate again, refuses an expired or changed confirmation, and a dev build never transmits', () => {
-  const send = fnBody(main, 'aprsRfSend');
-  assert.ok(/Date\.now\(\) - c\.at >= APRS_RF_CONFIRM_MS/.test(send));
+// Was: "Transmit judges the gate again, refuses an expired or changed
+// confirmation". No confirmation exists now; the click judges the gate.
+test('the click judges the gate again and sends the plan the button showed; a dev build never transmits', () => {
+  const send = fnBody(main, 'aprsRfTransmit');
   assert.ok(send.indexOf('if (APRS_DEV_FRAMES)') < send.indexOf('aprsRfRunner()'));
   assert.ok(send.indexOf('AprsRfGate.readiness(aprsRfGateState())') < send.indexOf('aprsRfRunner()'));
-  assert.ok(/aprsListen\.band !== c\.band \|\| !aprsListen\.freq \|\| aprsListen\.freq\.hz !== c\.hz/.test(send));
-  assert.ok(/AprsRfBeacon\.capFor\(/.test(send) && /capMs: cap\.capMs/.test(send));
+  assert.ok(send.indexOf('const c = aprsRfPlan();') > 0 && send.indexOf('const c = aprsRfPlan();') < send.indexOf('aprsRfRunner()'));
+  assert.ok(/AprsRfBeacon\.capFor\(/.test(fnBody(main, 'aprsRfPlan')) && /capMs: cap\.capMs/.test(send));
 });
 
 test('the shim keys only through the runner and the gate; it never tunes', () => {
@@ -123,15 +130,16 @@ test('the Winlink shim is unchanged: it still keys only for a Winlink radio sess
   assert.ok(!/aprs/i.test(w), 'no APRS path through the Winlink shim');
 });
 
-test('the window: the radio button sits next to the internet one, starts disabled, and has its confirmation row', () => {
+// Was: "... and has its confirmation row" (Transmit / Cancel). One click now.
+test('the window: the radio button sits next to the internet one, starts disabled, and has no confirmation row', () => {
   const i = html.indexOf('id="aprs-beacon-now"');
   const j = html.indexOf('id="aprs-rf-now"');
   assert.ok(i > 0 && j > i && j - i < 400, 'next to it');
   assert.ok(/id="aprs-rf-now" disabled/.test(html));
-  assert.ok(/id="aprs-rf-confirm"/.test(html) && /id="aprs-rf-send"/.test(html) && /id="aprs-rf-cancel"/.test(html));
+  assert.ok(!/id="aprs-rf-confirm"|id="aprs-rf-send"|id="aprs-rf-cancel"/.test(html), 'one click: no Transmit / Cancel row');
   assert.ok(/<script src="aprs-rf-beacon-bar\.js"><\/script>/.test(html));
-  assert.ok(/btn\.disabled = !s\.allowed \|\| busy \|\| !!s\.confirm/.test(bar));
-  assert.ok(/rfAsk: \(\) => ipcRenderer\.send\('aprs-rf-ask'\)/.test(preload) && /rfSend: \(\) => ipcRenderer\.send\('aprs-rf-send'\)/.test(preload));
+  assert.ok(/btn\.disabled = !s\.allowed \|\| busy;/.test(bar));
+  assert.ok(/rfSend: \(\) => ipcRenderer\.send\('aprs-rf-send'\)/.test(preload) && !/rfAsk|aprs-rf-ask/.test(preload));
 });
 
 test('every new test is in scripts/run-tests.js', () => {
@@ -143,7 +151,7 @@ test('every new test is in scripts/run-tests.js', () => {
 // 2026-11-19: the 8600M refused the 30 m beacon (interlock NOT_READY), yet the
 // log said "sent over the radio" and the window "Last radio beacon 1 min ago".
 test('sent only when the radio reported transmit: the last-beacon time and "sent" line need res.confirmed', () => {
-  const send = fnBody(main, 'aprsRfSend');
+  const send = fnBody(main, 'aprsRfTransmit');
   const i = send.indexOf('if (res.ok && res.confirmed) {');
   const j = send.indexOf('} else if (res.ok) {', i);
   assert.ok(i > 0 && j > i, 'confirmed first, then keyed-but-not-confirmed');
