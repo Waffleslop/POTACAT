@@ -34,9 +34,14 @@
       <div class="aprs-card-head">
         <span class="aprs-dot" id="radio-dot" aria-hidden="true"></span>
         <span class="aprs-card-title" id="radio-title">Not listening on my radio</span>
-        <label class="aprs-switch aprs-card-switch hidden" id="radio-switch" title="Listen to APRS on your radio and decode what it hears. Receive only: nothing is transmitted.">
-          <input type="checkbox" id="aprs-listen-on"><span class="aprs-switch-track"></span>On
-        </label>
+        <!-- One switch, on or off (Casey 2026-11-20), and the band beside it when the rig has two APRS bands. -->
+        <div class="aprs-card-ctl">
+          <label class="aprs-band-pick hidden" id="aprs-band-pick" title="The band to listen on. Receive only.">
+            <span class="aprs-sr">Band</span><select id="aprs-band-select"></select>
+          </label>
+          <button type="button" class="aprs-switch" id="aprs-listen-on" role="switch" aria-checked="false" aria-label="Listen on my radio"
+            title="Listen to APRS on your radio and decode what it hears. Receive only: nothing is transmitted."><span class="aprs-switch-track" aria-hidden="true"></span><span class="aprs-switch-text" id="aprs-listen-on-text" aria-hidden="true">Off</span></button>
+        </div>
       </div>
       <div class="aprs-card-lines" id="radio-lines"></div>
       <div class="aprs-smeter hidden" id="radio-smeter">
@@ -44,19 +49,18 @@
         <div class="aprs-bar" role="img" id="radio-smeter-bar" aria-label="S-meter"><div class="aprs-bar-fill" id="radio-smeter-fill"></div></div>
         <span class="aprs-smeter-val" id="radio-smeter-val"></span>
       </div>
-      <div class="aprs-card-btns" id="aprs-listen-bands" role="group" aria-label="Listen on a band"></div>
     </section>
 
     <section class="aprs-card" id="card-is" aria-label="APRS-IS">
       <div class="aprs-card-head">
         <span class="aprs-dot" id="is-dot" aria-hidden="true"></span>
         <span class="aprs-card-title" id="is-title">Starting</span>
-        <label class="aprs-switch aprs-card-switch hidden" id="is-switch" title="The read-only internet feed of stations near your grid square">
-          <input type="checkbox" id="aprs-feed-on"><span class="aprs-switch-track"></span>On
-        </label>
+        <div class="aprs-card-ctl">
+          <button type="button" class="aprs-switch" id="aprs-feed-on" role="switch" aria-checked="false" aria-label="APRS-IS"
+            title="The read-only internet feed of stations near your grid square"><span class="aprs-switch-track" aria-hidden="true"></span><span class="aprs-switch-text" id="aprs-feed-on-text" aria-hidden="true">Off</span></button>
+        </div>
       </div>
       <div class="aprs-card-lines" id="is-lines"></div>
-      <div class="aprs-card-btns hidden" id="is-btns"><button type="button" class="aprs-card-btn" id="aprs-feed-connect">Connect</button></div>
       <div class="aprs-card-foot"><button type="button" class="aprs-link" id="aprs-igate-settings" aria-controls="aprs-settings">iGate settings</button></div>
     </section>
 
@@ -109,14 +113,18 @@
               <button type="button" class="aprs-step" id="aprs-rf-power-up" aria-label="More power">+</button>
             </div>
           </div>
-          <label class="aprs-field" title="Send your position to APRS-IS every so often while this window is open. Never over the radio.">Internet timer
-            <select id="aprs-beacon-interval">
+          <div class="aprs-field">
+            <span class="aprs-field-head"><label for="aprs-beacon-interval">Internet timer</label>
+              <!-- A short help on hover and on keyboard focus (Casey 2026-11-20: "What is internet timer?"). -->
+              <span class="aprs-help-wrap"><button type="button" class="aprs-help" id="aprs-timer-help-btn" aria-label="What is the internet timer?" aria-describedby="aprs-timer-help">?</button><span class="aprs-tip" role="tooltip" id="aprs-timer-help">Sends your position to APRS-IS over the internet every 10, 20 or 30 minutes while this window is open. Nothing goes out on your radio.</span></span>
+            </span>
+            <select id="aprs-beacon-interval" aria-describedby="aprs-timer-help">
               <option value="0">Off</option>
               <option value="10">10 min</option>
               <option value="20">20 min</option>
               <option value="30">30 min</option>
             </select>
-          </label>
+          </div>
         </div>
         <div class="aprs-note hidden" id="aprs-beacon-sends"></div>
 
@@ -133,9 +141,16 @@
           <div class="aprs-note" id="aprs-live-note"></div>
         </div>
 
+        <!-- Real buttons with the short label under each (Casey 2026-11-20: "Make buttons and put labels below"). -->
         <div class="aprs-beacon-btns">
-          <button type="button" class="aprs-big aprs-big-rf" id="aprs-rf-now" disabled><span class="aprs-big-label" id="aprs-rf-now-label">Beacon on the radio</span><span class="aprs-big-sub" id="aprs-rf-now-sub"></span></button>
-          <button type="button" class="aprs-big" id="aprs-beacon-now"><span class="aprs-big-label">Beacon on the internet</span><span class="aprs-big-sub" id="aprs-beacon-now-sub"></span></button>
+          <div class="aprs-bcn">
+            <button type="button" class="btn aprs-btn aprs-btn-rf" id="aprs-rf-now" disabled aria-describedby="aprs-rf-now-sub"><span id="aprs-rf-now-label">Beacon on the radio</span></button>
+            <div class="aprs-bcn-sub" id="aprs-rf-now-sub"></div>
+          </div>
+          <div class="aprs-bcn">
+            <button type="button" class="btn aprs-btn" id="aprs-beacon-now" aria-describedby="aprs-beacon-now-sub">Beacon on the internet</button>
+            <div class="aprs-bcn-sub" id="aprs-beacon-now-sub"></div>
+          </div>
         </div>
         <div class="aprs-note hidden" id="aprs-rf-detail"></div>
         <div class="aprs-note hidden" id="aprs-rf-last"></div>

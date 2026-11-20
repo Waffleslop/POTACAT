@@ -169,9 +169,10 @@
     return w;
   }
 
+  // Returns the flag's box, so a click on the flag selects the station like its pin.
   function drawLabel(ctx, x, y, text, selectedOne) {
-    var w = labelWidth(ctx, text) + 10;
-    var lx = Math.round(x + ICON_PX / 2 + 4), ly = Math.round(y - 9);
+    var box = AprsMap.labelBox(x, y, labelWidth(ctx, text), ICON_PX);
+    var w = box.w, lx = box.x, ly = box.y;
     ctx.globalAlpha *= 0.94;
     ctx.fillStyle = theme.panel;
     ctx.strokeStyle = selectedOne ? theme.sel : theme.border;
@@ -181,9 +182,11 @@
     ctx.fill(); ctx.stroke();
     ctx.fillStyle = theme.text;
     ctx.fillText(text, lx + 5.5, ly + 14);
+    return box;
   }
 
   // fade: the age fading (W.ageFade) for the icon only; the rings and label keep alpha.
+  // Returns the label flag's box when one was drawn (null otherwise).
   function drawStation(ctx, r, x, y, alpha, labels, fade) {
     if (fade == null) fade = 1;
     var headed = AprsIcons.isHeaded(r.cls) && r.course != null && r.course > 0 && r.course <= 360;
@@ -210,8 +213,9 @@
       ctx.beginPath(); ctx.arc(x, y, ICON_PX / 2 + 4, 0, Math.PI * 2);
       ctx.lineWidth = 3; ctx.strokeStyle = theme.sel; ctx.stroke();
     }
-    if (labels || isSel) drawLabel(ctx, x, y, r.label, isSel);
+    var box = (labels || isSel) ? drawLabel(ctx, x, y, r.label, isSel) : null;
     ctx.globalAlpha = 1;
+    return box;
   }
 
   function drawCluster(ctx, c, x, y) {
@@ -290,8 +294,8 @@
         a = AprsMap.fade(born[r.key], t, FADE_IN_MS);
         if (a >= 1) delete born[r.key]; else busy = true;
       }
-      drawStation(ctx, r, x, y, a, labels, W.ageFade(wall - r.lastHeard, showLastMin).alpha);
-      hits.push({ x: x, y: y, rad: ICON_PX / 2 + 3, row: r });
+      var flag = drawStation(ctx, r, x, y, a, labels, W.ageFade(wall - r.lastHeard, showLastMin).alpha);
+      hits.push({ x: x, y: y, rad: ICON_PX / 2 + 3, box: flag, row: r });
     }
 
     if (home) {
@@ -317,13 +321,8 @@
   }
   function drawFrame() { if (map._animatingZoom) return; var t = now(); if (draw(t)) requestDraw(); perfPush(perf.draw, now() - t); }
 
-  function hitAt(lp) {
-    for (var i = hits.length - 1; i >= 0; i--) {
-      var h = hits[i], dx = h.x - lp.x, dy = h.y - lp.y;
-      if (dx * dx + dy * dy <= h.rad * h.rad) return h;
-    }
-    return null;
-  }
+  // The pin or its label flag (lib/aprs-map.js hitTest): both select the station.
+  function hitAt(lp) { return AprsMap.hitTest(hits, lp); }
   map.on('click', function (e) {
     var h = hitAt(e.layerPoint);
     if (!h) return;
