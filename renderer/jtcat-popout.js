@@ -2012,7 +2012,9 @@ function _applyPopoutTheme(payload) {
   // jtcatSetMode → persist → selectBand on the active button), which fixes
   // the long-standing "FT4 spot with popout already open in FT8" gap. All
   // checks are mismatch-gated so the heard-refresh broadcasts every cycle
-  // are no-ops here.
+  // are no-ops here. A stopped engine (a voice spot QSY stops it) also goes
+  // through selectBand, which starts it, even on the same band and mode
+  // (VK4KTW #804); once started, the refreshes are no-ops again.
   function spotTargetResync(data) {
     if (!data.mode || !data.freqKhz) return;
     // JS8 is its own window now — it was removed from this popout's mode
@@ -2032,7 +2034,7 @@ function _applyPopoutTheme(payload) {
       bestBtn.classList.add('active');
       modeSelect.value = data.mode;
       modeSelect.dispatchEvent(new Event('change'));
-    } else if (activeBtn !== bestBtn) {
+    } else if (activeBtn !== bestBtn || engineStopped) {
       selectBand(bestBtn, true);
     }
   }
