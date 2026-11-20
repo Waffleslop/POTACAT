@@ -93,6 +93,13 @@
     } catch (_) { /* don't recurse */ }
   }
 
+  function pageHref() {
+    try { return (location && location.href) || ''; } catch (_) { return ''; }
+  }
+  function warnIgnored(txt) {
+    try { console.warn('[ECHOCAT banner] ignored, not our script:', txt); } catch (_) { /* no console */ }
+  }
+
   window.addEventListener('error', (e) => {
     // Suppress Safari's "Script error." cross-origin mask. When an async
     // error fires from a script Safari can't fully introspect (CORS-less
@@ -110,14 +117,26 @@
     // Name and message first, then the stack: Safari's stack has no
     // message in it (#806). lib/error-banner-text.js, inlined above.
     const EBT = window.ErrorBannerText;
-    if (EBT) { const r = EBT.formatErrorEvent(e); show(r.text, r.src); return; }
+    if (EBT) {
+      const r = EBT.formatErrorEvent(e);
+      // Line 1 of the page is "<!doctype html>": an error there is a
+      // browser-injected script (Brave for iOS), not ours. Log, no banner.
+      if (EBT.isForeignErrorEvent(e, pageHref())) { warnIgnored(r.src + ' ' + r.text); return; }
+      show(r.text, r.src);
+      return;
+    }
     const err = e.error;
     show((err && (String(err) + '\n' + (err.stack || ''))) || msg || 'unknown',
          filename + ':' + (e.lineno || '?'));
   });
   window.addEventListener('unhandledrejection', (e) => {
     const EBT = window.ErrorBannerText;
-    if (EBT) { const r = EBT.formatRejection(e.reason); show(r.text, r.src); return; }
+    if (EBT) {
+      const r = EBT.formatRejection(e.reason);
+      if (EBT.isForeignRejection(e.reason, pageHref())) { warnIgnored(r.src + ' ' + r.text); return; }
+      show(r.text, r.src);
+      return;
+    }
     const r = e.reason || {};
     show(String(r) + '\n' + (r.stack || ''), 'unhandledrejection');
   });
