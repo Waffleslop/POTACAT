@@ -40,8 +40,16 @@ contextBridge.exposeInMainWorld('api', {
   // a click while a beacon is going out).
   rfGet: () => ipcRenderer.send('aprs-rf-get'),
   rfSend: () => ipcRenderer.send('aprs-rf-send'),
+  // The on-air banner's "Stop transmitting": main aborts the beacon in flight
+  // the way closing the window does (PTT drops at once).
+  rfStop: () => ipcRenderer.send('aprs-rf-stop'),
+  // The APRS-IS card's switch: the window's read-only feed off or on.
+  feedSet: (on) => ipcRenderer.send('aprs-feed-set', !!on),
+  // The APRS settings panel's "Report what I hear to APRS-IS (iGate)": settings.aprsIgate, the one setting.
+  igateSet: (on) => ipcRenderer.send('aprs-igate-set', !!on),
   // { allowed, reason, why, band, bandLabel, mode, mhz, powerW, preview: {button, detail}, sending, phase, keyed,
-  //   meters: {smeter, swr, alc, power}, lastPeak: {swr, fwdW} | null, sentence, lastAt, lastPacket, lastBand }
+  //   meters: {smeter, swr, alc, power}, lastPeak: {swr, fwdW} | null, sentence, lastAt, lastPacket, lastBand,
+  //   keyedAt, airMs, lastHeldMs, txNarrow: {lo, hi} | null }
   onRf: (cb) => ipcRenderer.on('aprs-rf', (_e, s) => cb(s)),
   // The radio beside the beacon: TX power (the JTCAT and Winlink windows' payload,
   // set through the one rig-control dispatcher, set-tx-power) and the meters every

@@ -48,7 +48,7 @@ test('a rig with neither 2 m nor 30 m: "Your radio has neither 2 m nor 30 m."', 
 });
 
 test('the old "APRS on 30 m is coming" sentence is gone from the code and the window', () => {
-  for (const f of ['lib/aprs-listen.js', 'main.js', 'renderer/aprs-listen-bar.js', 'renderer/aprs-popout.html']) {
+  for (const f of ['lib/aprs-listen.js', 'main.js', 'renderer/aprs-window.js', 'lib/aprs-window-state.js', 'renderer/aprs-popout.html']) {
     assert.ok(!/30 m is coming/.test(fs.readFileSync(path.join(__dirname, '..', f), 'utf8')), f);
   }
 });
@@ -339,12 +339,15 @@ test('main.js: the band chip is wired, the frequency and the modem follow the ba
   assert.ok(!/aprsReturn\.(drop|end)\(/.test(fnBody('aprsListenSetBand')));
 });
 
-test('the window shows a chip per band the rig has, from the payload', () => {
+// Was "a chip per band": the window redesign (2026-11-19) made them the My radio
+// card's buttons, "Listen on 2 m" / "Listen on 30 m", still one per band from the payload.
+test('the window shows a button per band the rig has, from the payload', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'aprs-popout.html'), 'utf8');
   assert.ok(/id="aprs-listen-bands"/.test(html));
-  assert.ok(!/<span class="aprs-chip"[^>]*>2 m<\/span>/.test(html), 'no fixed 2 m chip');
-  const bar = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'aprs-listen-bar.js'), 'utf8');
-  assert.ok(/s\.bands/.test(bar) && /listenBand\(/.test(bar));
+  assert.ok(!/>Listen on 2 m</.test(html) && !/>2 m<\/(span|button)>/.test(html), 'no fixed 2 m button');
+  const lib = fs.readFileSync(path.join(__dirname, '..', 'lib', 'aprs-window-state.js'), 'utf8');
+  const glue = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'aprs-window.js'), 'utf8');
+  assert.ok(/l\.bands/.test(lib) && /api\.listenBand\(/.test(glue));
   const pre = fs.readFileSync(path.join(__dirname, '..', 'preload-aprs-popout.js'), 'utf8');
   assert.ok(/listenBand:\s*\(b\)\s*=>\s*ipcRenderer\.send\('aprs-listen-band'/.test(pre));
 });

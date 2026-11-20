@@ -154,7 +154,7 @@ test('the window: the checkbox "Add my activation to the beacon comment", and th
   assert.ok(/id="aprs-beacon-activation"/.test(html));
   assert.ok(/Add my activation to the beacon comment/.test(html));
   assert.ok(/id="aprs-beacon-sends"/.test(html));
-  const bar = read('renderer/aprs-beacon-bar.js');
+  const bar = read('renderer/aprs-window.js'); // was aprs-beacon-bar.js before the window redesign (2026-11-19)
   assert.ok(/beaconSet\(\{ activation: /.test(bar));
   assert.ok(/aprs-beacon-sends/.test(bar));
 });
