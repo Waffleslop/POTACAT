@@ -6408,14 +6408,14 @@ function _applyPopoutTheme(payload) {
                 // SmartSDR 4.2.18 (W4DLG 2026-10-25). Elsewhere the usual cause
                 // is the device coming back under a new ID ("2- USB Audio Device").
                 + (popoutIsFlex
-                  ? 'If you upgraded to SmartSDR 4.2.18+ (DAXv2), every DAX device changed: re-select your rig audio devices in Settings > My Rigs > Audio.'
-                  : 'The device may have been unplugged or moved to another USB port (Windows then renames it, e.g. "2- USB Audio Device"): re-select it in Settings > My Rigs > Audio.'));
+                  ? 'If you upgraded to SmartSDR 4.2.18+ (DAXv2), every DAX device changed: pick your rig audio devices again in Settings > Radio, Edit the rig, Audio Devices.'
+                  : 'The device may have been unplugged or moved to another USB port (Windows then renames it, e.g. "2- USB Audio Device"): pick it again in Settings > Radio, Edit the rig, Audio Devices, RX audio in.'));
           }
           // NEVER substitute the default input: on a Mac it is the built-in
           // microphone — decodes only with the radio's speaker up, and the room
           // audible to anyone listening (KF0WWL 2026-10-23). Same rule as the
           // ECHOCAT bridge (remote-audio.html). No audio beats the wrong audio.
-          throw new Error('The radio\'s audio input could not be opened, so nothing was captured (the microphone was NOT used). Pick the radio\'s input again in Settings > My Rigs > Audio.');
+          throw new Error('The radio\'s audio input could not be opened, so nothing was captured (the microphone was NOT used). Pick the radio\'s input again in Settings > Radio, Edit the rig, Audio Devices, RX audio in.');
         }
       }
       _audioStartStage = 'capture-ctx (state pending)';

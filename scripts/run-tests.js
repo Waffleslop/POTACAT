@@ -142,6 +142,7 @@ const TESTS = [
   'test/web-log-form-test.js',
   'test/bug-report-log-test.js',
   'test/audio-capture-device-test.js',
+  'test/audio-settings-path-test.js', // #820: audio errors name Settings > Radio, Edit the rig, Audio Devices (labels that exist), never My Rigs > Audio
   'test/ft8-message-buffer-test.js',
   'test/ft8-native-decoder-test.js',
   'test/jtcat-hunt-off-test.js',
