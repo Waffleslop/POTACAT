@@ -165,6 +165,7 @@ const TESTS = [
   'test/freedv-spot-merge-test.js', // #742: one row per FreeDV station across PSKReporter + FreeDV Reporter; departed stations leave; rows keyed by mode too
   'test/freedv-display-mode-test.js', // #716: RADE, not DIGU/PKTUSB, on every surface while FreeDV runs
   'test/ws-liveness-test.js', // ECHOCAT Web: reconnect when no pong comes back or the screen wakes on a dead socket
+  'test/error-banner-text-test.js', // #806: ECHOCAT Web error banner shows the message on iPhone Safari (stack has no message there)
   'test/freedv-diag-test.js', // #717: FreeDV audio in, sync on/off and capture failures in the session log, rate-limited
   'test/freedv-mac-mic-test.js', // #718: FreeDV capture runs the macOS microphone check and a 10 s silence watch, the shared rule
   'test/freedv-ptt-refusal-test.js', // FDV1: voice PTT refused in FreeDV modes until FreeDV transmit exists; one sentence on every surface
