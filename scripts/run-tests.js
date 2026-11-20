@@ -461,8 +461,9 @@ const TESTS = [
   'test/lz3aw-round12-test.js',
   'test/paddle-bounce-test.js',
   'test/web-keyer-late-release-test.js', // #244: a held paddle's late release withdraws an element not yet sounding
-  'test/web-keyer-heard-release-test.js', // #244 1.14.5: a release counts when it happened and against what the operator hears
+  'test/web-keyer-heard-release-test.js', // #244: a late release never takes back an element that has started to sound
   'test/cw-playout-lateness-test.js', // #244 diagnostic: paddle playout edge lateness, one line per over
+  'test/cw-sidetone-air-agree-test.js', // #244: ECHOCAT Web's sidetone and the air agree; an element is committed once it sounds
   'test/spot-hides-test.js',
   'test/mac-titlebar-test.js',
   'test/vfo-and-greyout-test.js',

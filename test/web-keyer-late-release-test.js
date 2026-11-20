@@ -12,11 +12,14 @@
 // handler (ecHandleMidiMessage) run here on a FAKE clock: MIDI note on/off
 // messages are replayed at exact times and the elements keyed are asserted.
 // The sidetone voice is modelled as the page's scheduler does it: each
-// element sounds a 20 ms lead after the keyer chooses it.
+// element sounds a 20 ms lead after the keyer chooses it. The page grants a
+// withdrawal only before that (lib/cw-sidetone-commit.js, 2026-11-19: the
+// sidetone and the air always agree).
 // Run: node test/web-keyer-late-release-test.js
 const assert = require('assert');
 const path = require('path');
 const { readSrc } = require('./_src');
+const Commit = require('../lib/cw-sidetone-commit');
 
 let pass = 0, fail = 0;
 function test(name, fn) {
@@ -74,8 +77,9 @@ function rig({ wpm = 25, mode = 'iambicB' } = {}) {
     if (ms) { scheduled.push({ soundAt: clock.now() + LEAD_MS, el: ms < 2 * Math.round(1200 / wpm) ? '.' : '-' }); return LEAD_MS; }
     if (info && info.retract) {
       const last = scheduled[scheduled.length - 1];
-      assert.ok(last && last.soundAt > clock.now(), 'a withdrawn element had not begun to sound');
+      if (!Commit.canWithdraw(last, clock.now())) return false; // it sounds: committed
       last.retracted = true;
+      return true;
     }
     return undefined;
   };
@@ -181,13 +185,13 @@ test('two quick dot taps are still "I" and a held dot still repeats', () => {
   assert.strictEqual(rig().play([[0, 'on', 'dit'], [500, 'off', 'dit']]), '......');
 });
 
-test('page wiring: the keyer is told when each element sounds, and a withdrawal cancels its tone and its shack keying', () => {
-  assert.ok(/var lead = onKey\(true, isDit \? ditMs\(\) : dahMs\(\)/.test(src), 'keyer reads the lead from onKey');
-  assert.ok(/var lead = schedulePaddleElement\(durMs\); cwDiagNote\('ahead', lead\); return lead;/.test(src), 'onKey returns the sidetone lead');
-  assert.ok(/if \(info && info\.retract\) \{ retractPaddleElement\(\); return; \}/.test(src), 'onKey routes a withdrawal');
+test('page wiring: a withdrawal is asked of the commit gate, drops only its tone, and never goes on the wire', () => {
+  assert.ok(/if \(onKey\(false, undefined, \{ cancel: true, retract: true \}\) !== true\) return;/.test(src), 'the keyer rolls back only when granted');
+  assert.ok(/if \(info && info\.retract\) return retractPaddleElement\(\);/.test(src), 'onKey routes a withdrawal and returns the answer');
   const fn = extract('retractPaddleElement');
+  assert.ok(/if \(!cwCommit\.withdraw\(\)\) return false;/.test(fn), 'the gate decides');
   assert.ok(/cancelScheduledValues\(paddleLastAt\)/.test(fn), 'drops only the withdrawn tone');
-  assert.ok(/type: 'cw-key', at: cwStreamLastAt - 1, down: false, cancel: true/.test(fn), 'cancels the element at the shack');
+  assert.ok(!/ws\.send/.test(fn), 'nothing is sent: the element never was');
 });
 
 test('shack playout: the cancelling key-up drops the withdrawn element and keeps the one before it', () => {
