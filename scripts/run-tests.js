@@ -238,6 +238,7 @@ const TESTS = [
   'test/aprs-rf-gate-test.js', // APRS phase 7: the gate for a beacon over the radio, each refusal (window, listen, callsign, dial match, owner, PTT, in flight)
   'test/aprs-rf-beacon-test.js', // APRS phase 7: the RF packet and path per band, the per-transmission cap, the run against a fake shim and Dire Wolf
   'test/aprs-rf-beacon-wiring-test.js', // APRS phase 7: only Transmit sends, no RF timer, unkey on window close / stop / TX limit, power never changed
+  'test/aprs-30m-tx-passband-test.js', // APRS 30 m beacon: a Flex's TX filter narrowed to 1400-2000 Hz for the beacon (inside 10.150 MHz) and put back on every way out; 2 m and other radios untouched
   'test/direwolf-aprs-tx-config-test.js', // APRS phase 7: the transmit config (PTT via the shim, channel access per band); listen and Winlink configs byte-identical
   'test/direwolf-aprs-tx-offline-test.js', // APRS phase 7: the bundled Dire Wolf keys a fake shim once and its audio decodes back (skips without the build)
   'test/aprs-echocat-test.js', // APRS phase 6: ECHOCAT devices: snapshot, 1.5 s deltas, feed and listen ownership, Guest Pass, aprs-state
