@@ -475,6 +475,7 @@ const WinlinkStateLib = require('./lib/winlink-state');
 const WinlinkMailActions = require('./lib/winlink-mail-actions'); // Archive, Deleted, Reply all: which moves and buttons (#462, #475)
 const WinlinkDeleted = require('./lib/winlink-deleted'); // POTACAT's Deleted folder inside Pat's mailbox, and its purge (#475)
 const WinlinkSentRoutes = require('./lib/winlink-sent-routes'); // how each sent message went out: gateway, dial, mode or internet, when (#442)
+const WinlinkGpsd = require('./lib/winlink-gpsd'); // #346: the Settings grid's centre for Pat's forms, as a GPSd on 127.0.0.1
 const WinlinkForms = require('./lib/winlink-forms'); // #346: Winlink forms through Pat (1.0.1 or newer), its catalog, and what the form window may load
 const { createRigctldServer } = require('./lib/rigctld-server');
 const ArdopProcess = require('./lib/ardop-process');
@@ -11621,6 +11622,27 @@ async function winlinkCheckVoacapService() {
   _voacapService.why = v.why;
 }
 
+// #346: Pat's forms read the position from GPSd only; POTACAT answers as one,
+// with the centre of the Settings grid (no grid: no fix). 127.0.0.1 on a port
+// chosen at start; only POTACAT's own Pat config points at it.
+let _winlinkGpsd = null;
+async function startWinlinkGpsd() {
+  if (_winlinkGpsd) return;
+  const g = WinlinkGpsd.createGridGpsd({ getGrid: () => settings.grid });
+  try {
+    await g.start();
+    _winlinkGpsd = g;
+    winlinkLog(`forms: the grid's position for Pat's forms on 127.0.0.1:${g.port}`);
+  } catch (e) {
+    winlinkLog(`forms: no position for Pat's forms (${e.message})`);
+  }
+}
+function stopWinlinkGpsd() {
+  if (!_winlinkGpsd) return;
+  _winlinkGpsd.stop().catch(() => {});
+  _winlinkGpsd = null;
+}
+
 /** Write Pat's config for this launch / this session. Returns the varahf address written. */
 function writePatConfig({ varaAddr } = {}) {
   const p = winlinkPaths();
@@ -11642,6 +11664,8 @@ function writePatConfig({ varaAddr } = {}) {
       agwPort: _winlinkAgwPort(),
     },
     prediction: winlinkPredictionConfig(),
+    // #346: the Settings grid's centre for Pat's forms, from POTACAT's GPSd stand-in (lib/winlink-gpsd.js).
+    gpsdAddr: _winlinkGpsd ? `127.0.0.1:${_winlinkGpsd.port}` : '',
   });
   // Written owner-only where the OS honours it: it holds the Winlink password.
   fs.writeFileSync(p.config, JSON.stringify(cfg, null, 2), { mode: 0o600 });
@@ -11821,6 +11845,7 @@ async function connectWinlink() {
     return;
   }
   await startWinlinkShim();
+  await startWinlinkGpsd();
   await winlinkCheckVoacapService();
   try { writePatConfig(); }
   catch (e) { winlinkState.setPat({ ready: false, error: e.message }); winlinkLog(`could not write Pat's config: ${e.message}`); winlinkPush(); return; }
@@ -11874,6 +11899,7 @@ function winlinkRestartPat(why) {
       const port = await winlinkFreePort(WinlinkPat.PAT_DEFAULTS.httpPortRange);
       if (!port) throw new Error('no free local port for Pat (8590-8599)');
       _patHttpPort = port;
+      await startWinlinkGpsd();
       writePatConfig({ varaAddr: _patVaraAddr || undefined });
       await spawnPat();
       patClient = new WinlinkClient({ port: _patHttpPort });
@@ -11930,6 +11956,7 @@ function disconnectWinlink({ quit } = {}) {
   killDirewolf();
   killPat();
   stopWinlinkShim();
+  stopWinlinkGpsd();
   winlinkState.setPat({ ready: false, error: '' });
   if (!quit) winlinkPush();
 }
