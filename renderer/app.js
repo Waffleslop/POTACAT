@@ -4432,7 +4432,7 @@ function updateBlClock() {
 
 function updateBlFreqFromRadio() {
   if (blFreqEdited || !radioFreqKhz) return;
-  blFreq.value = (radioFreqKhz / 1000).toFixed(3);
+  LogFreqField.fill(blFreq, radioFreqKhzExact || radioFreqKhz, 'mhz'); // shows 100 Hz, logs the hertz (#794)
 }
 
 function updateBlModeFromRadio() {
@@ -4733,7 +4733,7 @@ function parseBannerFreq(s) {
 async function saveBannerQso() {
   const rawCallsign = blCallsign.value.trim().toUpperCase();
   if (!rawCallsign) { blCallsign.focus(); return; }
-  const frequency = blFreq.value.trim();
+  const frequency = LogFreqField.value(blFreq);
   if (!frequency) { blFreq.focus(); return; }
   const type = blType.value;
   const rawRef = blRef.value.trim().toUpperCase();
@@ -13748,7 +13748,7 @@ function openQuickLog() {
   }
   window.api.openLogPopout({
     callsign: tunedCall,
-    freqKhz: radioFreqKhz || null,
+    freqKhz: radioFreqKhzExact || radioFreqKhz || null, // to the hertz (#794)
     mode: radioMode || null,
     power: logFormPower(),
     ...programFill,
@@ -16255,7 +16255,7 @@ function logFreqFollowRadio(hz) {
   if (!logDialog.open || logFreqFollow.typed || !(hz > 0)) return;
   const khz = hz / 1000;
   if (logFreqFollow.pinnedKhz && Math.abs(khz - logFreqFollow.pinnedKhz) < 0.5) logFreqFollow.pinnedKhz = 0;
-  if (!logFreqFollow.pinnedKhz) logFrequency.value = khz.toFixed(1);
+  if (!logFreqFollow.pinnedKhz) LogFreqField.fill(logFrequency, khz);
 }
 logFrequency.addEventListener('input', () => { logFreqFollow.typed = true; });
 window.api.onCatFrequency((hz) => { logFreqFollowRadio(hz); });
@@ -16269,7 +16269,8 @@ function openLogPopup(spot) {
   logCallsign.value = spot.callsign || '';
   const logQrz = qrzData.get(JtcatParser.baseCall((spot.callsign || '').toUpperCase()));
   logOpName.value = logQrz ? [cleanQrzName(logQrz.nickname) || cleanQrzName(logQrz.fname), cleanQrzName(logQrz.name)].filter(Boolean).join(' ') : '';
-  logFrequency.value = parseFloat(spot.frequency).toFixed(1);
+  // Shows 100 Hz, logs the hertz (lib/log-freq-field.js, #794).
+  LogFreqField.fill(logFrequency, parseFloat(spot.frequency));
 
   // Set mode dropdown. Map common radio CAT mode names to the dropdown's
   // ADIF-style options — without this, modes coming straight from CAT (e.g.
@@ -16522,7 +16523,7 @@ refreshLogAsOperators();
 logSaveBtn.addEventListener('click', async () => {
   if (logAsChosen() === null) return; // Log for: nobody ticked
   const rawCallsign = logCallsign.value.trim().toUpperCase();
-  const frequency = logFrequency.value.trim();
+  const frequency = LogFreqField.value(logFrequency);
   const mode = logMode.value;
   const date = logDate.value;
   const time = logTime.value;
@@ -27135,7 +27136,9 @@ window.api.onOpenLogForm(() => {
   if (spot) {
     routeLogForSpot({
       ...spot,
-      frequency: radioFreqKhz ? String(radioFreqKhz) : spot.frequency,
+      // The dial to the hertz: radioFreqKhz is whole kHz, and a CW contact
+      // on 7035.5 was logged 7.036000 from this button (#794).
+      frequency: radioFreqKhzExact ? String(radioFreqKhzExact) : spot.frequency,
       mode: radioMode || spot.mode,
     });
   } else {
@@ -28217,8 +28220,8 @@ function setAppMode(mode) {
     // Seed freq/mode from current CAT state
     if (radioFreqKhz) {
       activatorFreqKhz = radioFreqKhz;
-      activatorFreqHz = radioFreqKhz * 1000;
-      activatorFreqInput.value = (radioFreqKhz / 1000).toFixed(3);
+      activatorFreqHz = Math.round((radioFreqKhzExact || radioFreqKhz) * 1000);
+      LogFreqField.fill(activatorFreqInput, activatorFreqHz / 1000, 'mhz'); // shows 100 Hz, logs the hertz (#794)
       updateActivatorBandLabel(radioFreqKhz);
     }
     if (radioMode) updateActivatorModeFromCat(radioMode);
@@ -28471,10 +28474,11 @@ function resumeActivation(activation) {
     const timeOn = c.timeOn || '';
     const hh = timeOn.substring(0, 2);
     const mm = timeOn.substring(2, 4);
-    const freqMhz = c.freq ? parseFloat(c.freq).toFixed(3) : '';
+    // The record's FREQ to the hertz; FreqDots rounds it for the list (#794).
+    const freqMhz = c.freq ? String(Number(parseFloat(c.freq).toFixed(6))) : '';
     const base = {
       callsign: c.callsign,
-      frequency: c.freq ? String(Math.round(parseFloat(c.freq) * 1000)) : '',
+      frequency: c.freq ? LogFreqField.exactKhzText(parseFloat(c.freq) * 1000) : '',
       mode: c.mode || '',
       band: c.band || '',
       qsoDate: activation.date,
@@ -28812,7 +28816,7 @@ async function saveActivatorEdit(idx, field, newVal) {
       break;
     case 'freqDisplay': {
       c.freqDisplay = newVal;
-      const freqKhz = Math.round(parseFloat(newVal) * 1000);
+      const freqKhz = Number(LogFreqField.exactKhzText(parseFloat(newVal) * 1000)) || 0; // to the hertz (#794)
       c.band = freqToBandActivator(freqKhz) || c.band;
       adifUpdates.FREQ = (freqKhz / 1000).toFixed(6);
       adifUpdates.BAND = c.band;
@@ -29078,7 +29082,7 @@ function buildActivationAdifQsos(act) {
   const refs = activationRefList(act);
   return act.contacts.flatMap(c => refs.map(r => ({
     callsign: c.callsign,
-    frequency: c.freq ? String(Math.round(parseFloat(c.freq) * 1000)) : '',
+    frequency: c.freq ? LogFreqField.exactKhzText(parseFloat(c.freq) * 1000) : '', // to the hertz (#794)
     mode: c.mode || '',
     // The record's own MODE/SUBMODE pair (MFSK/JS8), written back as it was (#381).
     adifMode: c.adifMode || '',
@@ -29825,8 +29829,10 @@ function activatorReadEntry() {
 
   // Frequency: prefer the input field (may have been manually entered), fall back to CAT
   const typedKhz = readActivatorFreqKhz();
-  const freqKhz = typedKhz > 0 ? Math.round(typedKhz) : (activatorFreqKhz || radioFreqKhz || 0);
-  const freqMhz = freqKhz ? (freqKhz / 1000).toFixed(3) : '';
+  // To the hertz: Math.round here logged a CW contact on 7035.5 as 7.036 (#794).
+  const catKhz = activatorFreqHz && Math.round(activatorFreqHz / 1000) === activatorFreqKhz ? activatorFreqHz / 1000 : activatorFreqKhz;
+  const freqKhz = typedKhz > 0 ? typedKhz : (catKhz || radioFreqKhzExact || radioFreqKhz || 0);
+  const freqMhz = freqKhz ? String(Number((freqKhz / 1000).toFixed(6))) : '';
   const band = freqToBandActivator(freqKhz) || '';
   // No radio reading and nothing typed: a contact with no frequency has no
   // band, and POTA cannot credit it (N7VBN 2026-09-22 logged six this way,
@@ -29885,7 +29891,7 @@ async function activatorLogContactNow(s) {
     if ((xr.program === 'WWFF' || xr.program === 'LLOTA') && xr.ref) {
       window.api.quickRespot({
         callsign: myCallsign,
-        frequency: String(freqKhz),
+        frequency: String(Math.round(freqKhz * 10) / 10), // a spot is to 100 Hz; the log keeps the hertz
         mode,
         wwffRespot: xr.program === 'WWFF',
         wwffReference: xr.program === 'WWFF' ? xr.ref : '',
@@ -30518,7 +30524,7 @@ window.api.onCatFrequency((hz) => {
   activatorFreqHz = hz;
   // Only update the input if it's not focused (don't fight the user while typing)
   if (document.activeElement !== activatorFreqInput) {
-    activatorFreqInput.value = (khz / 1000).toFixed(3);
+    LogFreqField.fill(activatorFreqInput, hz / 1000, 'mhz'); // shows 100 Hz, logs the hertz (#794)
   }
   updateActivatorBandLabel(khz);
   // The ONLY writer that clears home on a return. The tune can be refused —
@@ -30677,7 +30683,7 @@ function returnActivatorHome() {
     activatorModeSelect.value = activatorHomeMode;
   }
   activatorFreqKhz = Math.round(khz);
-  activatorFreqInput.value = (khz / 1000).toFixed(3);
+  LogFreqField.fill(activatorFreqInput, khz, 'mhz');
   updateActivatorBandLabel(Math.round(khz));
   window.api.tune(khz, activatorHomeMode || activatorModeSelect.value);
   clearActivatorEntry();
@@ -30708,12 +30714,12 @@ function updateActivatorHomeUi() {
  * whichever lands in an amateur band. A readable value is shown back in MHz.
  */
 function readActivatorFreqKhz() {
-  const raw = activatorFreqInput.value;
+  // The exact value behind an untouched box, else what was typed (#794).
+  const raw = LogFreqField.value(activatorFreqInput);
   if (!raw || !raw.trim()) return 0;
   const f = window.LogFreq ? window.LogFreq.parseLogFreq(raw) : null;
   if (f && f.kind === 'ok') {
-    const shown = (f.khz / 1000).toFixed(3);
-    if (activatorFreqInput.value !== shown && document.activeElement !== activatorFreqInput) activatorFreqInput.value = shown;
+    if (activatorFreqInput.value !== LogFreqField.shownText(f.khz, 'mhz') && document.activeElement !== activatorFreqInput) LogFreqField.fill(activatorFreqInput, f.khz, 'mhz');
     return f.khz;
   }
   const mhz = parseFloat(raw);

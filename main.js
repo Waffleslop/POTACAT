@@ -366,6 +366,7 @@ const { getTuneQuirks, resolveSerialHandshake, holdSerialLinesLow } = require('.
 const { gridToLatLon, latLonToGrid, haversineDistanceMiles, bearing } = require('./lib/grid');
 const ActivationMapData = require('./lib/activation-map-data');
 const LogFreq = require('./lib/log-freq');
+const LogFreqField = require('./lib/log-freq-field'); // kHz to the hertz (#794)
 const LogTxPower = require('./lib/log-tx-power'); // the power a contact is logged at, never a guessed 100 W (#523)
 const RigBands = require('./lib/rig-bands');
 const SpotBandFilter = require('./lib/spot-band-filter');
@@ -18583,7 +18584,7 @@ function connectWsjtx() {
       const wsjtxMode = f.SUBMODE || f.MODE || '';
       const qsoData = {
         callsign: f.CALL || '',
-        frequency: String(Math.round(freqMHz * 1000)),
+        frequency: LogFreqField.exactKhzText(freqMHz * 1000), // to the hertz: 40 m FT4 is 7047.5 (#794)
         mode: wsjtxMode,
         qsoDate: f.QSO_DATE || '',
         timeOn: f.TIME_ON || '',
@@ -34388,7 +34389,7 @@ async function processSotaSpots(raw) {
     return !isNaN(f) && f > 0;
   }).map((s) => {
     const freqMHz = parseFloat(s.frequency);
-    const freqKHz = Math.round(freqMHz * 1000); // SOTA gives MHz -> convert to kHz
+    const freqKHz = LogFreqField.exactKhzText(freqMHz * 1000); // SOTA gives MHz: kHz to the hertz, 7.0355 is 7035.5 (#794)
     const ref = s._ref;
     const assoc = s.associationCode;
 
@@ -34731,7 +34732,7 @@ function processLlotaSpots(raw) {
     // Frequency may be kHz (14250) or MHz (14.250) — normalize
     let freqNum = typeof s.frequency === 'string' ? parseFloat(s.frequency) : (s.frequency || 0);
     let freqMHz = freqNum >= 1000 ? freqNum / 1000 : freqNum;
-    let freqKhz = freqNum >= 1000 ? Math.round(freqNum) : Math.round(freqNum * 1000);
+    let freqKhz = LogFreqField.exactKhzText(freqNum >= 1000 ? freqNum : freqNum * 1000); // to the hertz (#794)
 
     const callsign = s.callsign || '';
 
@@ -34803,7 +34804,7 @@ function processWwbotaSpots(raw) {
     const refs = Array.isArray(s.references) ? s.references : [];
     const primary = refs[0] || {};
     const freqMHz = Number(s.freq) || 0;
-    const freqKhz = Math.round(freqMHz * 1000);
+    const freqKhz = LogFreqField.exactKhzText(freqMHz * 1000); // to the hertz (#794)
 
     const callsign = (s.call || '').toUpperCase();
     const lat = primary.lat != null ? Number(primary.lat) : null;
@@ -38585,7 +38586,7 @@ function rawQsoToQsoData(raw) {
   const freqMhz = parseFloat(raw.FREQ || '0');
   return {
     callsign: raw.CALL || '',
-    frequency: (freqMhz * 1000).toFixed(1), // MHz -> kHz
+    frequency: LogFreqField.exactKhzText(freqMhz * 1000), // MHz -> kHz, to the hertz (#794)
     // mode is the app mode (MFSK/JS8 -> JS8) for the loggers that take a mode
     // name (WRL, the log line); adifMode + submode carry the record's own pair
     // so buildAdifFields writes it back as it was (#381). SUBMODE used to be

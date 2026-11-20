@@ -487,7 +487,8 @@ function _applyPopoutTheme(payload) {
   function buildQsoData() {
     const callsignRaw = callInput.value.trim().toUpperCase();
     if (!callsignRaw) return { error: 'Callsign required' };
-    const freqKhzNum = parseFloat(freqInput.value);
+    // The exact kHz behind the box unless the operator typed over it (#794).
+    const freqKhzNum = parseFloat(LogFreqField.value(freqInput));
     if (!isFinite(freqKhzNum) || freqKhzNum < 100) return { error: 'Frequency required (kHz)' };
     const date = (dateInput.value || '').replace(/-/g, '');
     // Normalize H:MM / HH:M / 9:5 / 0930 forms → HHMM. Pad each side.
@@ -716,7 +717,7 @@ function _applyPopoutTheme(payload) {
     window.api.onCatFrequency((hz) => {
       if (!hz || hz < 100000) return;
       if (freqUserEdited) return; // user is typing — don't fight them
-      freqInput.value = String(Math.round(hz / 1000));
+      LogFreqField.fill(freqInput, hz / 1000); // shows 100 Hz, logs the hertz (#794)
     });
   }
   if (window.api.onCatMode) {
@@ -750,7 +751,7 @@ function _applyPopoutTheme(payload) {
     callInput.value = String(p.callsign || '').toUpperCase();
     reportCall();
     // Not rounded: 40 m FT4 is 7047.5.
-    if (p.freqKhz) freqInput.value = String(Math.round(p.freqKhz * 1000) / 1000);
+    if (p.freqKhz) LogFreqField.fill(freqInput, p.freqKhz);
     if (p.mode) {
       const m = modeFamily(p.mode);
       if ([...modeSelect.options].some((o) => o.value === m)) modeSelect.value = m;
@@ -856,7 +857,7 @@ function _applyPopoutTheme(payload) {
       if (p.review) { offerReview(p); return; }
       if (reviewId) { showToast('Finish the JTCAT contact first', 'error'); return; }
       if (p.force) { applySpotPrefill(p); return; }
-      if (p.freqKhz && !freqUserEdited) freqInput.value = String(Math.round(p.freqKhz));
+      if (p.freqKhz && !freqUserEdited) LogFreqField.fill(freqInput, p.freqKhz);
       if (p.mode && !modeUserEdited) {
         const m = modeFamily(p.mode);
         if ([...modeSelect.options].some((o) => o.value === m)) modeSelect.value = m;

@@ -358,7 +358,7 @@
       logFreqPinnedKhz = 0;
     }
     if (!logFreqDirty && currentFreqKhz) {
-      logFreq.value = String(Math.round(currentFreqKhz * 10) / 10);
+      LogFreqField.fill(logFreq, currentFreqKhz); // shows 100 Hz, logs the hertz (#794)
     }
     if (!logTimeDirty) logStampNow();
   }
@@ -6802,7 +6802,7 @@
   function refreshLogTabFields() {
     // Pre-fill freq/mode from radio state
     if (currentFreqKhz && !ltFreq.value) {
-      ltFreq.value = String(Math.round(currentFreqKhz * 10) / 10);
+      LogFreqField.fill(ltFreq, currentFreqKhz); // shows 100 Hz, logs the hertz (#794)
     }
     if (currentMode && ltMode.value === 'SSB') {
       ltMode.value = currentMode;
@@ -6887,7 +6887,7 @@
 
   function submitLogTab() {
     const raw = ltCall.value.trim().toUpperCase();
-    const freq = ltFreq.value.trim();
+    const freq = LogFreqField.value(ltFreq);
     if (!raw) { ltCall.focus(); return; }
     if (!freq || isNaN(parseFloat(freq))) { ltFreq.focus(); return; }
 
@@ -7049,7 +7049,7 @@
     logCall.value = p.callsign || '';
     reportTypedCall('log', logCall.value); // a value set in code counts too
     webRenderWorkedMatrix(logCall, 'log-worked-matrix');
-    logFreq.value = p.freqKhz || (currentFreqKhz ? String(Math.round(currentFreqKhz * 10) / 10) : '');
+    LogFreqField.fill(logFreq, p.freqKhz ? parseFloat(p.freqKhz) : (currentFreqKhz || 0)); // shows 100 Hz, logs the hertz (#794)
     // INVARIANT: passing freqKhz means "this frequency is NOT the dial's" —
     // a spot's, a decode's — so it is treated as the operator's choice and
     // frozen. A caller whose frequency IS just the current dial must pass
@@ -7132,7 +7132,7 @@
   logForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const rawCall = logCall.value.trim().toUpperCase();
-    const freq = logFreq.value.trim();
+    const freq = LogFreqField.value(logFreq);
     if (!rawCall) { logCall.focus(); return; }
     if (!freq || isNaN(parseFloat(freq))) { logFreq.focus(); return; }
 
