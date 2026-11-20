@@ -8,11 +8,17 @@
   <link rel="stylesheet" href="../node_modules/leaflet/dist/leaflet.css">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="aprs-popout.css">
+  <link rel="stylesheet" href="aprs-messages.css">
 </head>
 <body>
   <div class="titlebar">
     <div class="titlebar-drag"><span class="titlebar-title">APRS</span></div>
     <div class="titlebar-controls">
+      <!-- A1: the window's two views. Messages takes the place of the map, beacon and stations; the cards and banners stay. -->
+      <nav class="aprs-views" aria-label="APRS views">
+        <button type="button" class="aprs-view-btn" id="aprs-view-map" aria-pressed="true">Map</button>
+        <button type="button" class="aprs-view-btn" id="aprs-view-msgs" aria-pressed="false">Messages <span class="aprs-badge hidden" id="aprs-msgs-badge"></span></button>
+      </nav>
       <button type="button" class="aprs-settings-open" id="aprs-settings-btn" aria-haspopup="dialog" aria-controls="aprs-settings" aria-label="APRS settings: iGate, call sign ending, position, symbol and comment">APRS settings</button>
       <button class="titlebar-btn" id="tb-min" title="Minimize">&#x2014;</button>
       <button class="titlebar-btn" id="tb-max" title="Maximize">&#x25A1;</button>
@@ -154,6 +160,41 @@
       </section>
     </aside>
   </main>
+
+  <!-- A1: the Messages view (renderer/aprs-messages.js): conversations, the thread, compose. Internet only. -->
+  <section class="aprs-msgs hidden" id="aprs-msgs" aria-label="Messages">
+    <section class="aprs-msgs-list" aria-label="Conversations">
+      <div class="aprs-msgs-tools">
+        <label for="aprs-msgs-search" class="aprs-sr">Search messages</label>
+        <input type="search" id="aprs-msgs-search" placeholder="Search calls or text" spellcheck="false" autocomplete="off">
+        <button type="button" class="aprs-msgs-btn" id="aprs-msgs-new">New</button>
+      </div>
+      <div class="aprs-msgs-convos" id="aprs-msgs-convos"></div>
+    </section>
+    <section class="aprs-msgs-thread" id="aprs-msgs-thread-wrap" aria-label="Conversation">
+      <div class="aprs-msgs-head">
+        <h2 id="aprs-msgs-title">New message</h2>
+        <span class="aprs-msgs-sub" id="aprs-msgs-sub"></span>
+        <button type="button" class="aprs-btn-quiet aprs-msgs-delete hidden" id="aprs-msgs-delete">Delete conversation</button>
+      </div>
+      <div class="aprs-msgs-thread-body" id="aprs-msgs-thread" aria-live="polite"></div>
+      <form class="aprs-msgs-compose" id="aprs-msgs-compose" aria-label="Compose" autocomplete="off">
+        <div class="aprs-msgs-row">
+          <label for="aprs-msgs-to">To</label>
+          <input type="text" id="aprs-msgs-to" maxlength="9" spellcheck="false" placeholder="Call">
+          <span class="aprs-msgs-tools-slot" id="aprs-msgs-tools-slot"></span>
+          <span class="aprs-msgs-over">Send over <strong>Internet</strong></span>
+        </div>
+        <div class="aprs-msgs-row">
+          <label for="aprs-msgs-text" class="aprs-sr">Message</label>
+          <input type="text" id="aprs-msgs-text" spellcheck="true" placeholder="Message">
+          <span class="aprs-msgs-count" id="aprs-msgs-count" aria-live="polite">0 / 67</span>
+          <button type="submit" class="aprs-msgs-btn aprs-msgs-send" id="aprs-msgs-send" disabled>Send</button>
+        </div>
+        <p class="aprs-msgs-note" id="aprs-msgs-note"></p>
+      </form>
+    </section>
+  </section>
   </div>
 
   <!-- APRS settings (Casey 2026-11-20): the set-and-forget choices, inside this window, never a browser dialog. -->
@@ -212,5 +253,7 @@
   <script src="aprs-icons.js"></script>
   <script src="aprs-popout.js"></script>
   <script src="aprs-window.js"></script>
+  <script src="../lib/aprs-message.js"></script>
+  <script src="aprs-messages.js"></script>
 </body>
 </html>

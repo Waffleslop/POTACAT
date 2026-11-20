@@ -491,6 +491,7 @@ const AprsParser = require('./lib/aprs-parser');
 const AprsIgate = require('./lib/aprs-igate');             // APRS phase 4: the receive-only iGate's rules and the uplink login
 const AprsBeacon = require('./lib/aprs-beacon');           // APRS phase 5: the beacon over APRS-IS (packet, timer, symbols, refusals)
 const AprsActivation = require('./lib/aprs-activation');   // APRS extra 1: the running activation in the beacon comment (off by default)
+const AprsMessenger = require('./lib/aprs-messenger');     // APRS A1: messages over the internet (retries, acks, duplicates, unread)
 const AprsRfGate = require('./lib/aprs-rf-gate');          // APRS phase 7: when the 'aprs' owner may key (one manual beacon over the radio)
 const AprsRfBeacon = require('./lib/aprs-rf-beacon');      // APRS phase 7: the RF beacon packet, its cap, and the one-beacon run
 const AprsRfMeters = require('./lib/aprs-rf-meters');      // APRS window: S-meter, SWR and RF out beside the radio beacon, and its peaks
@@ -13734,6 +13735,103 @@ function aprsBeaconSet(patch) {
   aprsBeaconPush();
 }
 
+// ── APRS A1: messages over the internet ─────────────────────────────────────
+// The rules are lib/aprs-messenger.js (retries, acks, duplicates, unread) and
+// lib/aprs-message.js (the formats); this is glue. Messages go out as the
+// uplink's login (the Settings callsign with -10) through the one verified
+// APRS-IS uplink, which is wanted ('messages') only while a message is going
+// out or an ack is owed. Messages to any SSID of ours come in over the
+// read-only feed (its g/ filter, lib/aprs-is-feed.js), so they arrive while
+// the feed runs (the APRS window, or an ECHOCAT device watching APRS). Acks
+// for them go out at once, over the internet only. Nothing here keys a radio.
+// The conversations are kept per profile in aprs-messages.json.
+let aprsMsgr = null;
+let _aprsMsgTimer = null;
+let _aprsMsgSaveTimer = null;
+let _aprsMsgViewing = '';
+let _aprsMsgRelease = null;
+function aprsMessagesPath() {
+  return path.join(profileDir(settings.activeProfile || settings.myCallsign || 'default'), 'aprs-messages.json');
+}
+function aprsMessenger() {
+  const login = AprsIgate.uplinkLogin(settings.myCallsign);
+  const call = login.ok ? login.call : '';
+  if (aprsMsgr) { if (aprsMsgr.call !== call) aprsMsgr.setCall(call, login.ok ? login.base : ''); return aprsMsgr; }
+  let saved = null;
+  try { saved = JSON.parse(fs.readFileSync(aprsMessagesPath(), 'utf8')); } catch { /* none yet */ }
+  aprsMsgr = AprsMessenger.createMessenger({
+    myCall: call, myBase: login.ok ? login.base : '', state: saved,
+    canSend: () => !!(aprsUplink && aprsUplink.verified && aprsIsServer()),
+    send: (line) => {
+      if (!aprsUplink || !aprsUplink.verified || !aprsIsServer()) return false;
+      const ok = aprsUplink.send(line);
+      if (ok) sendCatLog('[APRS message] sent: ' + line);
+      return ok;
+    },
+  });
+  return aprsMsgr;
+}
+function aprsMessagesSaveNow() {
+  if (_aprsMsgSaveTimer) { clearTimeout(_aprsMsgSaveTimer); _aprsMsgSaveTimer = null; }
+  if (!aprsMsgr) return;
+  const p = aprsMessagesPath();
+  try {
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p + '.tmp', JSON.stringify(aprsMsgr.serialize()));
+    fs.renameSync(p + '.tmp', p);
+  } catch (e) { aprsLog('could not save the messages: ' + e.message); }
+}
+function aprsMessagesSave() {
+  if (_aprsMsgSaveTimer) return;
+  _aprsMsgSaveTimer = setTimeout(aprsMessagesSaveNow, 1000);
+}
+function aprsMessagesState() {
+  const m = aprsMessenger();
+  const login = AprsIgate.uplinkLogin(settings.myCallsign);
+  const link = !aprsIsServer() ? 'test-build' : !login.ok ? 'no-call'
+    : aprsUplink ? aprsUplink.state : 'stopped';
+  if (_aprsMsgViewing) m.markRead(_aprsMsgViewing);
+  return {
+    call: login.ok ? login.call : '', sentence: login.ok ? '' : login.sentence, link,
+    convos: m.list(), unread: m.unread(), viewing: _aprsMsgViewing, thread: _aprsMsgViewing ? m.thread(_aprsMsgViewing) : [],
+  };
+}
+function aprsMessagesPush() { aprsWinSend('aprs-messages', aprsMessagesState()); }
+/** Run the outbox now and again when tick() says; keep the uplink only while it is needed. */
+function aprsMessagesRun() {
+  const m = aprsMessenger();
+  if (_aprsMsgTimer) { clearTimeout(_aprsMsgTimer); _aprsMsgTimer = null; }
+  if (m.needsLink()) {
+    if (_aprsMsgRelease) { clearTimeout(_aprsMsgRelease); _aprsMsgRelease = null; }
+    aprsUplinkWant('messages', true);
+  }
+  const wake = m.tick();
+  if (m.lastTickChanged) { aprsMessagesSave(); aprsMessagesPush(); }
+  if (wake !== null) _aprsMsgTimer = setTimeout(aprsMessagesRun, Math.max(200, wake));
+  if (!m.needsLink() && _aprsMessagesWanted() && !_aprsMsgRelease) {
+    _aprsMsgRelease = setTimeout(() => { _aprsMsgRelease = null; if (!aprsMsgr || !aprsMsgr.needsLink()) aprsUplinkWant('messages', false); }, 10000);
+  }
+}
+function _aprsMessagesWanted() { return _aprsUplinkUsers.has('messages'); }
+/** A line from the read-only feed: a message, ack or rej for us, or nothing. */
+function aprsMessagesFeedLine(line) {
+  const r = aprsMessenger().receive(line, { via: 'internet' });
+  if (r.kind === 'message') sendCatLog(`[APRS message] from ${r.call}`);
+  if (r.changed) { aprsMessagesSave(); aprsMessagesPush(); }
+  if (r.kind === 'message' || r.kind === 'retry-copy') aprsMessagesRun(); // the ack goes out (or waits for the link)
+}
+function aprsMessageSend(d) {
+  const m = aprsMessenger();
+  if (!aprsIsServer()) return { ok: false, sentence: 'This test build plays recorded packets and sends nothing to APRS-IS.' };
+  const r = m.compose(d && d.to, d && d.text);
+  if (!r.ok) return { ok: false, sentence: r.sentence };
+  _aprsMsgViewing = r.msg.to;
+  aprsMessagesSave();
+  aprsMessagesRun();
+  aprsMessagesPush();
+  return { ok: true };
+}
+
 // ── APRS phase 7: ONE manual beacon over the radio (2 m and 30 m) ─────────────
 // "Beacon now (radio)" in the APRS window, next to the internet beacon. One
 // click transmits (Casey 2026-11-19: "I should just be able to do a 1-click
@@ -16239,7 +16337,7 @@ function js8HandleRx(d) {
 // are never read: nothing from APRS-IS reaches the radio. The passcode is
 // computed for the Settings callsign inside the login line and nowhere else.
 let aprsUplink = null;               // AprsIsClient while any user wants it
-const _aprsUplinkUsers = new Set();  // 'js8' | 'igate' | 'beacon'
+const _aprsUplinkUsers = new Set();  // 'js8' | 'igate' | 'beacon' | 'messages' (A1)
 // Dev only (never in a packaged build): POTACAT_APRS_IS_SERVER=127.0.0.1:14580
 // points the feed and the uplink at a local fake server
 // (test/fixtures/fake-aprs-is-server.js). With recorded RF frames playing
@@ -16283,6 +16381,9 @@ function aprsUplinkWant(user, on) {
 function aprsUplinkChanged() {
   try { js8PushStatus(); } catch { /* JS8 not up */ }
   try { aprsIgatePush(); } catch { /* not yet */ }
+  // A1: a message waiting for the link goes as soon as the login is verified.
+  if (aprsMsgr && aprsMsgr.needsLink()) setImmediate(() => { try { aprsMessagesRun(); } catch { /* not yet */ } });
+  if (aprsWin && !aprsWin.isDestroyed()) setImmediate(() => { try { aprsMessagesPush(); } catch { /* not yet */ } });
 }
 
 // ── JS8 → APRS-IS gateway ────────────────────────────────────────────────────
@@ -46768,6 +46869,7 @@ function cloudShackNotice(text, kind) {
     aprsFeed = new Feed.AprsIsFeed({ call: settings.myCallsign, version: app.getVersion(), lat: home.lat, lon: home.lon, km: settings.aprsRangeKm, host: dev.host, port: dev.port });
     aprsBatch = Feed.createBatcher((packets) => aprsSend('aprs-packets', packets), 500);
     aprsFeed.on('line', (line) => {
+      try { aprsMessagesFeedLine(line); } catch (e) { aprsLog('message: ' + e.message); } // A1: messages, acks and rejs for us
       const p = AprsParser.parse(line);
       if (p && aprsBatch) aprsBatch.push(p);
       // Phase 5: our own beacon came back from APRS-IS (it is on the map now).
@@ -46807,6 +46909,7 @@ function cloudShackNotice(text, kind) {
       }
       if (!aprsEcho.keepsFeed()) aprsStopFeed();
       aprsWin = null;
+      _aprsMsgViewing = ''; // A1: messages still going out carry on; nothing is being read now
       aprsBeaconStop(); // phase 5: the beacon timer runs only while the window is open
     });
     aprsWin.webContents.on('before-input-event', (_e, input) => {
@@ -46830,6 +46933,22 @@ function cloudShackNotice(text, kind) {
     aprsIgatePush();
     aprsBeaconSchedule({ arm: true }); // phase 5: the timer (if set) starts with the window, one interval on
     aprsBeaconPush();
+    aprsMessagesPush();
+  });
+  // APRS A1: messages over the internet. Send queues one (main checks it again);
+  // view says which conversation the window shows (it is read); stop ends a message's retries.
+  ipcMain.on('aprs-messages-get', () => aprsMessagesPush());
+  ipcMain.handle('aprs-message-send', (_e, d) => aprsMessageSend(d && typeof d === 'object' ? d : {}));
+  ipcMain.on('aprs-messages-view', (_e, call) => {
+    const M = require('./lib/aprs-message');
+    const a = M.checkAddressee(call);
+    _aprsMsgViewing = a.ok ? a.call : '';
+    if (_aprsMsgViewing && aprsMessenger().markRead(_aprsMsgViewing)) aprsMessagesSave();
+    aprsMessagesPush();
+  });
+  ipcMain.on('aprs-message-stop', (_e, lid) => { if (aprsMessenger().stop(String(lid || ''))) { aprsMessagesSave(); aprsMessagesRun(); aprsMessagesPush(); } });
+  ipcMain.on('aprs-messages-delete', (_e, call) => {
+    if (aprsMessenger().remove(String(call || ''))) { if (String(call || '').toUpperCase() === _aprsMsgViewing) _aprsMsgViewing = ''; aprsMessagesSave(); aprsMessagesPush(); }
   });
   // APRS phase 5: the Beacon section.
   ipcMain.on('aprs-beacon-get', () => aprsBeaconPush());
@@ -56742,6 +56861,7 @@ app.on('before-quit', (e) => {
     return;
   }
   winlinkHoldAwake(false); // never leave the Winlink session's App Nap block behind (#187)
+  try { aprsMessagesSaveNow(); } catch { /* APRS A1: the conversations are on disk before the process goes */ }
   // A Winlink return still pending (#187): the radio goes back while CAT is up.
   if (winlinkReturnBeforeQuit(() => app.quit())) { e.preventDefault(); return; }
   // SCU-LAN10: unkey (TX0; read back) and put the radio's monitor back
