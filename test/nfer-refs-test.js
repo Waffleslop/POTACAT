@@ -1007,7 +1007,7 @@ test('a single-park contact is forwarded as before: the same object, the same by
   }
 });
 
-test('an n-fer: the first forwarded record carries every POTA park as a comma list in POTA_REF and SIG_INFO, and nothing else changes', async () => {
+test('an n-fer: the first forwarded record carries every POTA park as a comma list in POTA_REF and SIG_INFO (QRZ: POTA_REF only), and nothing else changes', async () => {
   const recs = expandContact({ ...QSO, hunted: [{ sig: 'POTA', ref: 'US-1111' }, { sig: 'POTA', ref: 'US-2222' }, { sig: 'POTA', ref: 'US-3333' }] }, ctx);
   recs.forEach(stamp);
   assert.deepStrictEqual(recs.map((r) => r.potaRef), ['US-1111', 'US-2222', 'US-3333'], 'the local log: one park per record');
@@ -1018,7 +1018,7 @@ test('an n-fer: the first forwarded record carries every POTA park as a comma li
   assert.ok(!/forward/i.test(localAdif), 'the flag is never written');
 
   const sent = await forwarded(recs[0]);
-  for (const path of ['logbook', 'udp', 'qrz']) {
+  for (const path of ['logbook', 'udp']) {
     const q = sent[path][0];
     assert.strictEqual(q.potaRef, 'US-1111,US-2222,US-3333', path);
     assert.strictEqual(q.sigInfo, 'US-1111,US-2222,US-3333', path + ': SIG_INFO names every park too (#805)');
@@ -1031,6 +1031,13 @@ test('an n-fer: the first forwarded record carries every POTA park as a comma li
     assert.ok(adif.includes('<SIG_INFO:23>US-1111,US-2222,US-3333'), adif);
     assert.strictEqual(adif.replace('<POTA_REF:23>US-1111,US-2222,US-3333', '<POTA_REF:7>US-1111').replace('<SIG_INFO:23>US-1111,US-2222,US-3333', '<SIG_INFO:7>US-1111'), localAdif, 'POTA_REF and SIG_INFO are the only differences');
   }
+  // QRZ Logbook: the same one record and POTA_REF list, SIG_INFO stays one park.
+  const qz = sent.qrz[0];
+  assert.strictEqual(sent.qrz.length, 1);
+  assert.strictEqual(qz.potaRef, 'US-1111,US-2222,US-3333', 'qrz POTA_REF');
+  assert.strictEqual(qz.sigInfo, 'US-1111', 'qrz SIG_INFO: one park');
+  assert.strictEqual(qz.forwardPotaRefs, undefined);
+  assert.strictEqual(buildAdifRecord(qz).replace('<POTA_REF:23>US-1111,US-2222,US-3333', '<POTA_REF:7>US-1111'), localAdif, 'qrz: POTA_REF is the only difference');
   assert.strictEqual(recs[0].potaRef, 'US-1111', 'the record that was written locally is not changed by forwarding');
   for (const r of recs.slice(1)) {
     const s = await forwarded(r);
@@ -1063,7 +1070,9 @@ test('#805 an n-fer: the forwarded copy names every park in the COMMENT tag and 
       assert.strictEqual(sent[p].length, 1, p + ': one record, not two');
       const q = sent[p][0];
       assert.strictEqual(q.potaRef, 'US-9389,US-0001', p + ' POTA_REF');
-      assert.strictEqual(q.sigInfo, 'US-9389,US-0001', p + ' SIG_INFO, the same format as POTA_REF');
+      // QRZ keeps SIG_INFO one park: ADIF's SIG_INFO is a String, POTA reads
+      // it as one park, and QRZ re-exports it as sent (nferForwardCopy).
+      assert.strictEqual(q.sigInfo, p === 'qrz' ? 'US-9389' : 'US-9389,US-0001', p + ' SIG_INFO');
       assert.strictEqual(q.sig, 'POTA', p + ' SIG');
       assert.strictEqual(q.comment, forwardedComment, p + ' COMMENT');
     }
@@ -1078,14 +1087,19 @@ test('#805 an n-fer: the forwarded copy names every park in the COMMENT tag and 
   const form = expandContact({ ...QSO, mode: 'SSB', sig: 'POTA', sigInfo: 'US-9389,US-0001', potaRef: 'US-9389,US-0001' }, ctx);
   form.forEach(stamp);
   form[0].comment = '[POTA US-9389]';
-  const f = (await forwarded(form[0])).logbook[0];
+  const fs2 = await forwarded(form[0]);
+  const f = fs2.logbook[0];
   assert.deepStrictEqual([f.potaRef, f.sigInfo, f.comment], ['US-9389,US-0001', 'US-9389,US-0001', '[POTA US-9389,US-0001]']);
+  const fq = fs2.qrz[0];
+  assert.deepStrictEqual([fq.potaRef, fq.sigInfo, fq.comment], ['US-9389,US-0001', 'US-9389', '[POTA US-9389,US-0001]'], 'QRZ: the list in POTA_REF and COMMENT, one park in SIG_INFO');
   // A WWFF-first n-fer: SIG is WWFF, so SIG_INFO and the WWFF tag stay WWFF's.
   const mixed = expandContact({ ...QSO, hunted: [{ sig: 'WWFF', ref: 'KFF-1111' }, { sig: 'POTA', ref: 'US-1111' }, { sig: 'POTA', ref: 'US-2222' }] }, ctx);
   mixed.forEach(stamp);
   mixed[0].comment = '[WWFF KFF-1111]';
-  const m = (await forwarded(mixed[0])).logbook[0];
-  assert.deepStrictEqual([m.sig, m.sigInfo, m.potaRef, m.comment], ['WWFF', 'KFF-1111', 'US-1111,US-2222', '[WWFF KFF-1111]']);
+  const ms = await forwarded(mixed[0]);
+  for (const m of [ms.logbook[0], ms.qrz[0]]) {
+    assert.deepStrictEqual([m.sig, m.sigInfo, m.potaRef, m.comment], ['WWFF', 'KFF-1111', 'US-1111,US-2222', '[WWFF KFF-1111]']);
+  }
 });
 
 test('any surface: the Log QSO form\'s two-park contact and a POTA + WWFF n-fer', () => {
