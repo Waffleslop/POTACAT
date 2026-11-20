@@ -28,6 +28,7 @@ const TESTS = [
   'test/echocat-connect-diet-test.js',
   'test/cw-live-watchdog-test.js',
   'test/yaesu-cw-text-test.js',
+  'test/cw-key-port-break-in-test.js', // #745: the CW Key Port turns BK-IN on like the CAT text path; no CAT keys as before
   'test/ftx1-cw-stuck-stop-test.js',
   'test/yaesu-audit-ft991a-test.js', // Yaesu CAT audit: FT-991A widths, AGC, ATT, PROC, power floor, CW text, RTTY-U
   'test/cw-stuck-wiring-test.js',
