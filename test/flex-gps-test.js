@@ -182,5 +182,54 @@ test('settings: the source is saved as gps or settings, nothing else', () => {
   assert.deepStrictEqual(B.settingsPatch({ source: 'moon' }), { aprsBeaconSource: 'settings' });
 });
 
+test('provider: a grid precision sends the centre of the GPS grid square, never the fix', () => {
+  const g6 = P.beaconPositionFrom({ source: 'gps', precision: 'grid6', gps: fixState, lat: 41.5, lon: -72.1, grid: 'FN31pr', gridToLatLon });
+  assert.deepStrictEqual(g6, Object.assign({ ok: true }, gridToLatLon('FM18lv'), { source: 'gps' }));
+  const g4 = P.beaconPositionFrom({ source: 'gps', precision: 'grid4', gps: fixState, grid: 'FN31pr', gridToLatLon });
+  assert.deepStrictEqual(g4, Object.assign({ ok: true }, gridToLatLon('FM18'), { source: 'gps' }));
+  const ex = P.beaconPositionFrom({ source: 'gps', precision: 'exact', gps: fixState, gridToLatLon });
+  assert.deepStrictEqual(ex, { ok: true, lat: 38.8895, lon: -77.0353, source: 'gps' });
+  assert.strictEqual(P.beaconPositionFrom({ source: 'gps', precision: 'grid4', gps: noFixState, grid: 'FN31pr', gridToLatLon }).ok, false, 'no fix: no grid either');
+});
+
+test('provider: the Settings source keeps the precision rule (a grid never uses a picked point)', () => {
+  const p = P.beaconPositionFrom({ source: 'settings', precision: 'grid4', lat: 41.5, lon: -72.1, grid: 'FN31pr', gridToLatLon });
+  assert.deepStrictEqual(p, Object.assign({ ok: true }, gridToLatLon('FN31'), { source: 'grid' }));
+});
+
+// ── The APRS settings panel ──
+const W = require('../lib/aprs-window-state');
+const withGps = (gps, settings) => ({ grid: 'FN31PR', settings: Object.assign({ approx: true, precision: null, source: 'settings' }, settings || {}), gps: Object.assign({ line: G.statusLine(gps) }, gps) });
+
+test('panel: no GPS in the radio, no choice shown', () => {
+  assert.strictEqual(W.sourceChoices(withGps({ installed: false, fix: false })), null);
+  assert.strictEqual(W.sourceChoices({ settings: { source: 'settings' } }), null);
+});
+
+test('panel: a GPS with no fix shows the choice, disabled, with the status line', () => {
+  const c = W.sourceChoices(withGps(noFixState));
+  assert.strictEqual(c.length, 2);
+  assert.strictEqual(c[0].checked, true);
+  assert.strictEqual(c[1].label, "From my radio's GPS");
+  assert.strictEqual(c[1].disabled, true);
+  assert.ok(c[1].note.includes('Warming Up, 0 of 12 satellites'), c[1].note);
+});
+
+test('panel: with a fix the choice can be picked; once chosen it stays shown and checked', () => {
+  const c = W.sourceChoices(withGps(fixState));
+  assert.strictEqual(c[1].disabled, false);
+  assert.ok(c[1].note.includes('FM18lv'));
+  const lost = W.sourceChoices(withGps({ installed: false, fix: false }, { source: 'gps' }));
+  assert.ok(lost && lost[1].checked, 'the radio dropped: still shown so it can be changed back');
+});
+
+test('panel: with the GPS chosen, the precision choices name the GPS grid', () => {
+  const c = W.precisionChoices(withGps(fixState, { source: 'gps', precision: 'grid6' }));
+  assert.ok(c[0].label.includes('FM18'), c[0].label);
+  assert.ok(c[1].label.includes('FM18lv'), c[1].label);
+  assert.ok(c[1].checked);
+  assert.ok(/GPS/.test(c[2].note));
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -19,7 +19,7 @@ function test(name, fn) {
 }
 
 test('the beacon position comes from the one provider, with the GPS state', () => {
-  assert.match(main, /function aprsBeaconPosition\(\) \{[\s\S]{0,200}AprsPosition\.beaconPositionFrom\(\{ source: st\.source, gps: flexGps,/);
+  assert.match(main, /function aprsBeaconPosition\(\) \{[\s\S]{0,200}AprsPosition\.beaconPositionFrom\(\{ source: st\.source, precision: st\.precision, gps: flexGps,/);
 });
 
 test('both beacons pass the provider refusal as their sentence (no fallback to another position)', () => {
@@ -48,6 +48,16 @@ test('Settings: the GPS grid is an offer the operator presses, never set by itse
   const before = app.slice(Math.max(0, at - 300), at);
   assert.match(before, /gpsBtn\.addEventListener\('click'/, 'and it is the button press');
   assert.ok(!/settings\.grid\s*=[^=][^\n]*(gps|Gps)/.test(main), 'main never writes the grid from the GPS');
+});
+
+test('APRS settings panel: the source choice is hidden until a GPS is reported; a picked point is the Settings source', () => {
+  const w = read('renderer/aprs-window.js');
+  const h = read('renderer/aprs-popout.html');
+  assert.match(h, /id="aprs-pos-source" role="radiogroup"/);
+  assert.match(h, /class="aprs-radios hidden" id="aprs-pos-source"/);
+  assert.match(w, /var src = W\.sourceChoices\(beacon\);\s*show\('aprs-pos-source', !!src\);/);
+  assert.match(w, /api\.beaconSet\(\{ source: id \}\)/);
+  assert.match(w, /precision: 'exact', source: 'settings' \}\)/);
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);
