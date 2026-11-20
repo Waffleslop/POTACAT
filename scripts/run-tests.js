@@ -250,6 +250,9 @@ const TESTS = [
   'test/direwolf-aprs-tx-offline-test.js', // APRS phase 7: the bundled Dire Wolf keys a fake shim once and its audio decodes back (skips without the build)
   'test/aprs-echocat-test.js', // APRS phase 6: ECHOCAT devices: snapshot, 1.5 s deltas, feed and listen ownership, Guest Pass, aprs-state
   'test/aprs-echocat-wire-test.js', // APRS phase 6: the 'aprs' capability on the wire (old clients untouched), guest refusals, main.js glue, ECHOCAT Web
+  'test/aprs-message-test.js', // APRS A1: message, ack, rej and reply-ack formats (APRS 1.0.1 ch. 14), the 67-character limit, ours by SSID, the g/ filter
+  'test/aprs-messenger-test.js', // APRS A1: retries 30 s/60 s/120 s/5 min (5 tries), stop on ack/rej/Stop, acks owed, 30 s duplicates, unread, bounds, the saved file
+  'test/aprs-messages-wiring-test.js', // APRS A1: messages end to end against a fake APRS-IS server, and the main.js/preload/window wiring (internet only)
   'test/log-comment-test.js',
   'test/raw-cat-command-test.js',
   'test/rigctld-stderr-test.js',

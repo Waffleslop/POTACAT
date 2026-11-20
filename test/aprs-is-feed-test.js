@@ -83,6 +83,7 @@ test('login: the operator\'s callsign, else an anonymous PCATnnnn (aprsc refuses
   r.feed.start();
   r.sockets[0].emit('connect');
   assert.ok(r.sockets[0].written[0].startsWith('user PCAT5000 pass -1 vers POTACAT 1.14.6 '));
+  assert.ok(!/ g\//.test(r.sockets[0].written[0]), 'A1: no message filter for the anonymous login');
   r.feed.stop();
 });
 
@@ -141,7 +142,7 @@ test('connects to the rotate address, logs in, passes packets and keeps comments
   assert.strictEqual(r.sockets[0].host, 'rotate.aprs2.net');
   assert.strictEqual(r.sockets[0].port, 14580);
   r.sockets[0].emit('connect');
-  assert.deepStrictEqual(r.sockets[0].written, ['user K3SBP pass -1 vers POTACAT 1.14.6 filter r/41.50/-72.50/150\r\n']);
+  assert.deepStrictEqual(r.sockets[0].written, ['user K3SBP pass -1 vers POTACAT 1.14.6 filter r/41.50/-72.50/150 g/K3SBP/K3SBP-*\r\n']);
   assert.strictEqual(r.feed.state, 'connected');
   r.sockets[0].emit('data', '# aprsc 2.1.14\r\n# logresp K3SBP unverified, server T2TEST\r\nW1AW>APRS:>hi\r\nN0C');
   r.sockets[0].emit('data', 'ALL>APRS:>two\r\n');
@@ -210,11 +211,11 @@ test('setRange sends #filter on a live connection and is used at the next login'
   r.feed.start();
   r.sockets[0].emit('connect');
   r.feed.setRange(null, null, 300);
-  assert.strictEqual(r.sockets[0].written[1], '#filter r/41.50/-72.50/300\r\n');
+  assert.strictEqual(r.sockets[0].written[1], '#filter r/41.50/-72.50/300 g/K3SBP/K3SBP-*\r\n');
   r.sockets[0].emit('close');
   r.clock.advance(2000);
   r.sockets[1].emit('connect');
-  assert.ok(r.sockets[1].written[0].endsWith('filter r/41.50/-72.50/300\r\n'));
+  assert.ok(r.sockets[1].written[0].endsWith('filter r/41.50/-72.50/300 g/K3SBP/K3SBP-*\r\n'));
   r.feed.stop();
 });
 

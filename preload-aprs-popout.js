@@ -68,4 +68,13 @@ contextBridge.exposeInMainWorld('api', {
   onCatSwr: (cb) => ipcRenderer.on('cat-swr', (_e, v) => cb(v)),
   onCatSwrRatio: (cb) => ipcRenderer.on('cat-swr-ratio', (_e, v) => cb(v)),
   onCatFwdPower: (cb) => ipcRenderer.on('cat-fwd-power', (_e, v) => cb(v)),
+  // A1: messages over the internet (renderer/aprs-messages.js). Main checks every send again.
+  // { call, sentence, link, convos: [{ call, unread, updatedAt, last, lastDir, lastState }], unread, viewing,
+  //   thread: [{ lid, dir: 'in'|'out', text, at, id, via, state, tries, status }] }
+  messagesGet: () => ipcRenderer.send('aprs-messages-get'),
+  messageSend: (to, text) => ipcRenderer.invoke('aprs-message-send', { to: String(to || ''), text: String(text || '') }),
+  messagesView: (call) => ipcRenderer.send('aprs-messages-view', String(call || '')),
+  messageStop: (lid) => ipcRenderer.send('aprs-message-stop', String(lid || '')),
+  messagesDelete: (call) => ipcRenderer.send('aprs-messages-delete', String(call || '')),
+  onMessages: (cb) => ipcRenderer.on('aprs-messages', (_e, s) => cb(s)),
 });
