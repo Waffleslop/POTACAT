@@ -62,7 +62,7 @@
     body.classList.toggle('hidden', open);
     if (!open) return;
     var html = '<div class="aprs-tpl-head"><h3>Templates</h3><span>Fills To and Text. Nothing sends until you press Send.</span>' +
-      '<span class="aprs-spacer"></span><button type="button" class="aprs-btn-quiet" id="aprs-tpl-close">Close</button></div>';
+      '<button type="button" class="aprs-btn-quiet aprs-tpl-close" id="aprs-tpl-close">Close</button></div>';
     T.BUILT_IN.forEach(function (g) {
       html += '<div class="aprs-tpl-group">' + esc(g.group) + '</div>' + g.items.map(function (t) { return item(t, false); }).join('');
     });
@@ -73,7 +73,7 @@
     html += '<div class="aprs-tpl-save">';
     if (saving) {
       html += '<label for="aprs-tpl-name">Name</label><input type="text" id="aprs-tpl-name" maxlength="' + T.MAX_NAME + '" spellcheck="false">' +
-        '<button type="button" class="aprs-btn" id="aprs-tpl-save-ok">Save</button><button type="button" class="aprs-btn-quiet" id="aprs-tpl-save-cancel">Cancel</button>';
+        '<button type="button" class="aprs-msgs-btn" id="aprs-tpl-save-ok">Save</button><button type="button" class="aprs-btn-quiet" id="aprs-tpl-save-cancel">Cancel</button>';
     } else {
       html += '<button type="button" class="aprs-btn-quiet" id="aprs-tpl-save"' + (c.to.trim() && c.text.trim() ? '' : ' disabled') + '>Save current message as a template</button>';
     }

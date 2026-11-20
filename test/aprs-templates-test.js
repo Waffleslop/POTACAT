@@ -73,8 +73,9 @@ test('fields from the activation and the radio: park, summit, frequency, mode, c
   assert.strictEqual(f.text, 'CQ POTA K3SBP at US-1234 14.062 CW');
   assert.deepStrictEqual(f.filled, ['CALL', 'PARK', 'FREQ', 'MODE']);
   assert.deepStrictEqual(f.left, []);
-  assert.strictEqual(T.filledWords(f.filled, true), 'Filled from your activation: callsign, park, frequency and mode');
-  assert.strictEqual(T.filledWords(['FREQ', 'MODE'], false), 'Filled from your radio and Settings: frequency and mode');
+  assert.strictEqual(T.filledWords(f.filled, true), 'Filled from your activation: park, frequency and mode; callsign from Settings');
+  assert.strictEqual(T.filledWords(['FREQ', 'MODE'], false), 'Filled from your radio: frequency and mode');
+  assert.strictEqual(T.filledWords(['CALL'], false), 'Filled from Settings: callsign');
   assert.strictEqual(T.filledWords([], true), '');
 });
 

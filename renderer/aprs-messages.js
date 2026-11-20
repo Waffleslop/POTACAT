@@ -207,6 +207,10 @@
       if (text != null) $('aprs-msgs-text').value = String(text);
       note = { text: hint ? String(hint) : '', bad: false }; // A2: the template's one-line hint, until the first keystroke
       if (view !== 'messages') setView('messages');
+      // The thread follows To: its conversation if there is one, else a new message.
+      var a = M.checkAddressee($('aprs-msgs-to').value);
+      var known = a.ok && s && s.convos.some(function (c) { return c.call === a.call; });
+      window.api.messagesView(known ? a.call : '');
       renderCompose();
     },
     getCompose: function () { return { to: $('aprs-msgs-to').value, text: $('aprs-msgs-text').value }; },

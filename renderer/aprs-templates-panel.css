@@ -27,3 +27,4 @@
 .aprs-tpl-note { font-size: 14px; color: var(--text-secondary); }
 .aprs-tpl-note.bad { color: var(--accent-red-text, var(--accent-red)); }
 @media (max-width: 760px) { .aprs-tpl-item { grid-template-columns: 1fr; } }
+.aprs-tpl-close { margin-left: auto; }
