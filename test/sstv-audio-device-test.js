@@ -66,7 +66,7 @@ test('the output follows the same rules', () => {
   assert.strictEqual(resolveSstvAudio({ sstvId: '', rigId: 'codec-out', devices: OUT, kind: 'output' }).deviceId, 'codec-out');
   const gone = resolveSstvAudio({ sstvId: '', rigId: 'x', devices: OUT, kind: 'output' });
   assert.strictEqual(gone.ok, false);
-  assert.match(gone.message, /radio output/);
+  assert.match(gone.message, /Audio Devices, TX audio out/);
 });
 
 test('the SSTV window uses the resolver for RX and TX, and never falls back silently', () => {
