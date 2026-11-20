@@ -339,11 +339,11 @@ test('main.js: the band chip is wired, the frequency and the modem follow the ba
   assert.ok(!/aprsReturn\.(drop|end)\(/.test(fnBody('aprsListenSetBand')));
 });
 
-// Was "a chip per band": the window redesign (2026-11-19) made them the My radio
-// card's buttons, "Listen on 2 m" / "Listen on 30 m", still one per band from the payload.
-test('the window shows a button per band the rig has, from the payload', () => {
+// Was "a chip per band", then (2026-11-19) a button per band; since 2026-11-20 one
+// switch and a band select beside it, filled from the payload's bands (shown with two or more).
+test('the window offers each band the rig has, from the payload (the band select beside the switch)', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'aprs-popout.html'), 'utf8');
-  assert.ok(/id="aprs-listen-bands"/.test(html));
+  assert.ok(/<select id="aprs-band-select"><\/select>/.test(html), 'an empty select: the options come from the payload');
   assert.ok(!/>Listen on 2 m</.test(html) && !/>2 m<\/(span|button)>/.test(html), 'no fixed 2 m button');
   const lib = fs.readFileSync(path.join(__dirname, '..', 'lib', 'aprs-window-state.js'), 'utf8');
   const glue = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'aprs-window.js'), 'utf8');

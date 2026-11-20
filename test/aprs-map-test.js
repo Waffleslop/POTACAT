@@ -124,6 +124,35 @@ test('dual mode: window.AprsMap in a page', () => {
   vm.runInNewContext(fs.readFileSync(require.resolve('../lib/aprs-map'), 'utf8'), sandbox);
   assert.strictEqual(sandbox.AprsMap.cluster([{ x: 1, y: 1 }, { x: 2, y: 2 }]).clusters.length, 1);
 });
+// Casey 2026-11-20: "the pin points are clickable (good) but the flags are not".
+test('the label flag sits right of the pin, as drawn: 4 px past the icon, 18 px tall, the text plus 10 px', () => {
+  assert.deepStrictEqual(M.labelBox(100, 200, 40, 22), { x: 115, y: 191, w: 50, h: 18 });
+});
+test('a click on the label flag hits the station, the same as its pin', () => {
+  const row = { key: 'K3SBP-9' };
+  const hits = [{ x: 100, y: 200, rad: 14, box: M.labelBox(100, 200, 40, 22), row }];
+  assert.strictEqual(M.hitTest(hits, { x: 102, y: 198 }).row, row, 'the pin');
+  assert.strictEqual(M.hitTest(hits, { x: 140, y: 200 }).row, row, 'the middle of the flag');
+  assert.strictEqual(M.hitTest(hits, { x: 164, y: 208 }).row, row, 'the flag\'s far corner');
+  assert.strictEqual(M.hitTest(hits, { x: 175, y: 200 }), null, 'past the flag');
+  assert.strictEqual(M.hitTest(hits, { x: 140, y: 230 }), null, 'below the flag');
+});
+test('no flag drawn (zoomed out): only the pin is a hit; the station drawn last wins an overlap', () => {
+  const a = { key: 'A' }, b = { key: 'B' };
+  assert.strictEqual(M.hitTest([{ x: 100, y: 200, rad: 14, box: null, row: a }], { x: 140, y: 200 }), null);
+  const hits = [{ x: 100, y: 200, rad: 14, box: M.labelBox(100, 200, 60, 22), row: a }, { x: 150, y: 200, rad: 14, box: null, row: b }];
+  assert.strictEqual(M.hitTest(hits, { x: 150, y: 200 }).row, b);
+  assert.strictEqual(M.hitTest(hits, { x: 130, y: 200 }).row, a);
+});
+test('the window draws the flag from labelBox and hit-tests with hitTest (pin and flag alike, hover cursor too)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const pop = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'aprs-popout.js'), 'utf8');
+  assert.ok(/var box = AprsMap\.labelBox\(x, y, labelWidth\(ctx, text\), ICON_PX\);/.test(pop));
+  assert.ok(/hits\.push\(\{ x: x, y: y, rad: ICON_PX \/ 2 \+ 3, box: flag, row: r \}\);/.test(pop));
+  assert.ok(/function hitAt\(lp\) \{ return AprsMap\.hitTest\(hits, lp\); \}/.test(pop));
+  assert.ok(/classList\.toggle\('aprs-hover', !!\(hoverPoint && hitAt\(hoverPoint\)\)\)/.test(pop), 'the pointer cursor over a flag too');
+});
 test('this test is in the list CI runs', () => {
   const fs = require('fs');
   const path = require('path');

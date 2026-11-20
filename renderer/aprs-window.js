@@ -43,6 +43,14 @@
     box.textContent = '';
     (arr || []).forEach(function (t) { var d = document.createElement('div'); d.textContent = t; box.appendChild(d); });
   }
+  // The one switch (role="switch"): on or off, the same slider in both states.
+  function setSwitch(id, on, disabled) {
+    var el = $(id);
+    el.setAttribute('aria-checked', on ? 'true' : 'false');
+    el.disabled = !!disabled;
+    setText(id + '-text', on ? 'On' : 'Off');
+  }
+  function switchOn(id) { return $(id).getAttribute('aria-checked') === 'true'; }
   function dot(id, kind) { $(id).className = 'aprs-dot' + (kind && kind !== 'off' ? ' ' + kind : ''); }
   function feed() { var m = window.aprsMapApi; return m && m.feedInfo ? m.feedInfo() : { link: null, rate: 0, heard: { count: 0, last: null }, unit: 'mi' }; }
   function clickHeld() { return Date.now() - clickedAt < CLICK_HOLD_MS; }
@@ -55,8 +63,8 @@
     card.className = 'aprs-card ' + c.kind;
     dot('radio-dot', c.dot);
     setText('radio-title', c.title);
-    show('radio-switch', c.switchShown);
-    $('aprs-listen-on').checked = !!c.switchOn;
+    setSwitch('aprs-listen-on', !!c.switchOn, !!c.switchDisabled);
+    renderBandSelect(c.bandSelect);
     lines('radio-lines', c.lines);
     var sm = $('radio-smeter');
     sm.classList.toggle('hidden', !c.smeter);
@@ -66,29 +74,36 @@
       $('radio-smeter-bar').setAttribute('aria-label', 'S-meter ' + c.smeter.text);
       setText('radio-smeter-val', c.smeter.text);
     }
-    // Off: one button per band ("Listen on 2 m"); on: a button for each other band.
-    var btns = c.kind === 'off' ? c.bands.map(function (b) { return { band: b.band, text: 'Listen on ' + b.label, quiet: false }; })
-      : c.otherBands.map(function (b) { return { band: b.band, text: 'Switch to ' + b.label, quiet: true }; });
-    var box = $('aprs-listen-bands');
-    var key = btns.map(function (b) { return b.band + b.text; }).join('|');
-    if (box.dataset.key !== key) {
-      box.dataset.key = key;
-      box.textContent = '';
-      btns.forEach(function (b) {
-        var el = document.createElement('button');
-        el.type = 'button';
-        el.className = 'aprs-card-btn' + (b.quiet ? ' quiet' : '');
-        el.textContent = b.text;
-        el.title = b.band === '30m' ? '10.1476 MHz USB, 300 baud (HF APRS, one frequency worldwide). Receive only.'
-          : 'The regional APRS frequency, FM, 1200 baud. Receive only.';
-        el.addEventListener('click', function () {
-          if (c.kind === 'off') { api.listenBand(b.band); api.listenSet(true); } else api.listenBand(b.band);
-        });
-        box.appendChild(el);
+  }
+  // The band beside the switch, only when the rig has more than one APRS band.
+  // Listening: a new band moves listening there at once; off: the switch starts on it.
+  function renderBandSelect(bs) {
+    show('aprs-band-pick', !!bs);
+    if (!bs) return;
+    var sel = $('aprs-band-select');
+    var key = bs.options.map(function (o) { return o.band; }).join('|');
+    if (sel.dataset.key !== key) {
+      sel.dataset.key = key;
+      sel.textContent = '';
+      bs.options.forEach(function (o) {
+        var opt = document.createElement('option');
+        opt.value = o.band;
+        opt.textContent = o.label;
+        sel.appendChild(opt);
       });
     }
+    sel.disabled = !!bs.disabled;
+    if (document.activeElement !== sel) sel.value = bs.value;
+    sel.title = bs.value === '30m' ? '30 m: 10.1476 MHz USB, 300 baud (HF APRS, one frequency worldwide). Receive only.'
+      : '2 m: the regional APRS frequency, FM, 1200 baud. Receive only.';
   }
-  $('aprs-listen-on').addEventListener('change', function (e) { api.listenSet(e.target.checked); });
+  $('aprs-band-select').addEventListener('change', function (e) { api.listenBand(e.target.value); });
+  $('aprs-listen-on').addEventListener('click', function () {
+    if ($('aprs-listen-on').disabled) return;
+    var next = !switchOn('aprs-listen-on');
+    setSwitch('aprs-listen-on', next, false); // moves at once; main's answer confirms it or puts it back
+    api.listenSet(next);
+  });
 
   // ── card 2: APRS-IS ───────────────────────────────────────────────────────
   function renderIs(f) {
@@ -96,14 +111,17 @@
     $('card-is').className = 'aprs-card ' + c.kind;
     dot('is-dot', c.dot);
     setText('is-title', c.title);
-    show('is-switch', c.kind === 'on');
-    $('aprs-feed-on').checked = !!c.switchOn;
+    setSwitch('aprs-feed-on', !!c.switchOn, !!c.switchDisabled);
     lines('is-lines', c.lines);
-    show('is-btns', c.connectShown);
     var l = f.link || {};
     $('card-is').title = l.call ? 'Read-only login as ' + l.call + (l.anonymous ? ' (no callsign in Settings)' : '') : '';
   }
-  $('aprs-feed-on').addEventListener('change', function (e) { api.feedSet(e.target.checked); });
+  $('aprs-feed-on').addEventListener('click', function () {
+    if ($('aprs-feed-on').disabled) return;
+    var next = !switchOn('aprs-feed-on');
+    setSwitch('aprs-feed-on', next, false);
+    api.feedSet(next);
+  });
 
   // ── APRS settings: a panel inside this window (no browser dialog) ─────────
   var settingsFrom = null; // the control that opened it gets the focus back
@@ -154,7 +172,6 @@
       box.appendChild(lab);
     });
   }
-  $('aprs-feed-connect').addEventListener('click', function () { api.feedSet(true); });
 
   // ── card 3: Heard by my radio ─────────────────────────────────────────────
   function renderHeard(f) {

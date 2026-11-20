@@ -112,7 +112,8 @@ const fnBody = (src, name) => {
   // The window redesign (2026-11-19) renamed "Beacon now" to "Beacon on the internet"
   // (the approved mock-up) and moved the controls from the beacon bar to aprs-window.js.
   await test('the window: Beacon on the internet, the timer choices, the symbols, a 43-character comment, Approximate position, the map point', async () => {
-    assert.ok(/id="aprs-beacon-now"><span class="aprs-big-label">Beacon on the internet<\/span>/.test(html));
+    // 2026-11-20: a real button, its short line under it (aprs-beacon-now-sub), not inside it.
+    assert.ok(/id="aprs-beacon-now"[^>]*>Beacon on the internet<\/button>\s*<div class="aprs-bcn-sub" id="aprs-beacon-now-sub">/.test(html));
     const sel = html.slice(html.indexOf('id="aprs-beacon-interval"'), html.indexOf('</select>', html.indexOf('id="aprs-beacon-interval"')));
     assert.deepStrictEqual([...sel.matchAll(/<option value="(\d+)">([^<]+)<\/option>/g)].map((m) => m[1] + ':' + m[2]), ['0:Off', '10:10 min', '20:20 min', '30:30 min']);
     assert.ok(/id="aprs-beacon-comment" maxlength="43"/.test(html));

@@ -91,6 +91,9 @@ test('My radio, listening: band, frequency and baud, the switch on, the S-meter'
   assert.strictEqual(c.smeter.text, 'S5');
   assert.ok(c.smeter.pct > 30 && c.smeter.pct < 40, String(c.smeter.pct));
   assert.deepStrictEqual(c.otherBands.map((b) => b.band), ['2m'], 'the other band to switch to');
+  assert.strictEqual(c.switchDisabled, false);
+  assert.deepStrictEqual(c.bandSelect.options.map((b) => b.band), ['2m', '30m'], 'the band select beside the switch');
+  assert.strictEqual(c.bandSelect.value, '30m');
   assert.strictEqual(W.radioCard({ listen: { ...LISTEN_ON, band: '2m', mhz: '144.390' } }).lines[0], '2 m · 144.390 MHz · 1200 baud');
   assert.strictEqual(W.radioCard({ listen: LISTEN_ON, available: { smeter: false } }).smeter.text, 'No S-meter from this radio');
 });
@@ -101,8 +104,14 @@ test('My radio, off: one button per band the rig has, and where the radio goes b
   assert.strictEqual(c.title, 'Not listening on my radio');
   assert.deepStrictEqual(c.bands.map((b) => b.label), ['2 m', '30 m']);
   assert.ok(c.lines.includes('Your radio goes back to 14.074 MHz USB when you stop.'), c.lines.join('|'));
+  // One switch in both states (Casey 2026-11-20: "a slider when on and a button when off. Make it a slider").
+  assert.strictEqual(c.switchShown, true); assert.strictEqual(c.switchOn, false); assert.strictEqual(c.switchDisabled, false);
+  assert.strictEqual(c.bandSelect.value, '2m');
   const hf = W.radioCard({ listen: { ...LISTEN_OFF, bands: ['30m'], band: '30m' } });
-  assert.deepStrictEqual(hf.bands.map((b) => b.label), ['30 m'], 'an HF-only rig (the 8600M): one button');
+  assert.deepStrictEqual(hf.bands.map((b) => b.label), ['30 m'], 'an HF-only rig (the 8600M): one band');
+  assert.strictEqual(hf.bandSelect, null, 'one band: no band select');
+  const none = W.radioCard({ listen: { ...LISTEN_OFF, bands: [], band: '' } });
+  assert.strictEqual(none.switchShown, true); assert.strictEqual(none.switchDisabled, true, 'no APRS band: the switch cannot move');
   const refused = W.radioCard({ listen: { ...LISTEN_OFF, state: 'refused', sentence: 'Connect your radio to listen to APRS.' } });
   assert.strictEqual(refused.lines[0], 'Connect your radio to listen to APRS.');
   assert.strictEqual(refused.dot, 'bad');
@@ -116,17 +125,21 @@ test('My radio, transmitting: a red card "Transmitting on 30 m" while the beacon
   assert.strictEqual(c.lines[1], 'Listening resumes when it ends');
   const w = W.radioCard({ listen: LISTEN_ON, rf: { ...RF_READY, phase: 'waiting', sending: true } });
   assert.strictEqual(w.kind, 'busy', 'waiting for the channel is not red: nothing is keyed yet');
+  assert.strictEqual(c.switchShown, true); assert.strictEqual(c.switchDisabled, true, 'the switch stays, locked while the beacon has the radio');
+  assert.strictEqual(c.bandSelect.disabled, true);
 });
 
 // ── card 2 and 3 ────────────────────────────────────────────────────────────
-test('APRS-IS card: connected with server and packets a minute, the iGate line; off: a Connect button', () => {
+test('APRS-IS card: connected with server and packets a minute, the iGate line; off: the same switch, off', () => {
   const c = W.isCard({ link: { state: 'connected', server: 'T2SPAIN' }, rate: 160, ig: { on: true, active: true, link: 'verified', gated: 3 } });
   assert.strictEqual(c.title, 'Connected to APRS-IS');
   assert.deepStrictEqual(c.lines, ['Server T2SPAIN · 160 packets a minute', 'iGate on: 3 packets from my radio sent up']);
   assert.strictEqual(c.switchOn, true);
   const off = W.isCard({ link: { state: 'stopped' } });
   assert.strictEqual(off.title, 'Not connected to APRS-IS');
-  assert.strictEqual(off.connectShown, true);
+  assert.strictEqual(off.connectShown, false, 'no Connect button: the switch, off (2026-11-20)');
+  assert.strictEqual(off.switchShown, true); assert.strictEqual(off.switchOn, false); assert.strictEqual(off.switchDisabled, false);
+  assert.strictEqual(W.isCard({ link: { state: 'no-grid' } }).switchDisabled, true, 'no grid: it cannot connect yet');
   assert.ok(/Receive only until you beacon/.test(off.lines[0]));
   assert.strictEqual(W.isCard({ link: { state: 'no-grid' } }).connectShown, false);
   assert.strictEqual(W.igateLine({ on: true, paused: 'iGate paused: a guest has the radio' }), 'iGate paused: a guest has the radio', 'a Guest Pass pause shows');
@@ -190,8 +203,13 @@ test('Beacon panel: the radio button says what it will do; disabled, the gate\'s
 test('Beacon panel: the internet button and the last radio beacon\'s power and SWR', () => {
   const p = W.beaconPanel({ rf: { ...RF_READY, lastAt: 1000, lastBand: '30m', lastHeldMs: 2100, lastPeak: { swr: 1.5, fwdW: 4.1 } }, beacon: { ...BEACON, settings: { ...BEACON.settings, intervalMin: 30 } }, now: 1000 + 8 * 60000 });
   assert.strictEqual(p.net.label, 'Beacon on the internet');
-  assert.strictEqual(p.net.sub, 'Timer: every 30 min');
-  assert.strictEqual(W.beaconPanel({ rf: RF_READY, beacon: { ...BEACON, lastAt: 1000 }, now: 1000 + 3 * 60000 }).net.sub, 'Last 3 min ago. Once, now. Nothing goes on the air.');
+  // Under the button, just the time (Casey 2026-11-20: "just show the timestamp ... Last beacon: TT:TT:TT").
+  assert.strictEqual(p.net.sub, 'Not sent yet');
+  const at = new Date(2026, 10, 20, 9, 5, 7).getTime();
+  assert.strictEqual(W.beaconPanel({ rf: RF_READY, beacon: { ...BEACON, lastAt: at }, now: at + 3 * 60000 }).net.sub, 'Last beacon: 09:05:07');
+  assert.strictEqual(W.beaconPanel({ rf: RF_READY, beacon: { ...BEACON, lastAt: at, sending: true } }).net.sub, 'Sending to APRS-IS');
+  assert.strictEqual(W.lastBeaconText(0), 'Not sent yet');
+  assert.strictEqual(W.lastBeaconText(new Date(2026, 10, 20, 23, 59, 58).getTime()), 'Last beacon: 23:59:58', 'local time, 24 hours, with seconds');
   assert.strictEqual(p.last, 'Last radio beacon 8 min ago · 2.1 s · 4.1 W out · SWR 1.5');
   assert.strictEqual(W.beaconPanel({ rf: { ...RF_READY, band: '2m', lastAt: 1000, lastBand: '30m' }, beacon: BEACON, now: 61000 }).last, 'Last radio beacon 1 min ago on 30 m', 'the band when it differs');
   const nocall = W.beaconPanel({ rf: RF_READY, beacon: { ...BEACON, call: '' } });
@@ -386,24 +404,51 @@ test('glue: asks main for the listen state after its listen and iGate listeners 
   assert.ok(/aprsListenPush\(\)/.test(h) && /aprsIgatePush\(\)/.test(h), 'main answers with the listen state and the iGate mark');
 });
 
-test('glue: off, the 30 m button from the first answer; a click picks the band and turns listening on', () => {
+// 2026-11-20 (Casey: "it's a slider when on and a button when off. Make it a slider"):
+// one switch (role="switch", aria-checked) in both states, the band select beside it.
+test('glue: one switch, off and on; the band select only with two bands; a click turns listening on and off', () => {
   const w = loadWindow();
-  assert.strictEqual(w.els['aprs-listen-bands'].children.length, 0, 'no buttons before main answers');
+  const sw = w.els['aprs-listen-on'] || w.el('aprs-listen-on');
   w.on.onListen({ ...LISTEN_OFF, bands: ['30m'], band: '30m' });
-  const btns = w.els['aprs-listen-bands'].children;
-  assert.strictEqual(btns.length, 1);
-  assert.strictEqual(btns[0].textContent, 'Listen on 30 m');
-  btns[0].fire('click');
-  const tail = w.calls.slice(-2);
-  assert.deepStrictEqual(tail, [['listenBand', '30m'], ['listenSet', true]]);
+  assert.strictEqual(sw.getAttribute('aria-checked'), 'false');
+  assert.strictEqual(sw.disabled, false);
+  assert.strictEqual(w.els['aprs-listen-on-text'].textContent, 'Off');
+  assert.strictEqual(w.els['aprs-band-pick'].classList.contains('hidden'), true, 'one band (the 8600M): no band select');
+  sw.fire('click');
+  assert.deepStrictEqual(w.calls[w.calls.length - 1], ['listenSet', true]);
+  assert.strictEqual(sw.getAttribute('aria-checked'), 'true', 'the switch moves at once');
   w.on.onListen({ ...LISTEN_OFF, state: 'refused', sentence: 'Connect your radio to listen to APRS.' });
+  assert.strictEqual(sw.getAttribute('aria-checked'), 'false', 'main refused: back to off, still the same switch');
   assert.ok(/Connect your radio to listen to APRS\./.test(w.els['radio-lines'].textContent));
   w.on.onListen(LISTEN_ON);
   assert.strictEqual(w.els['radio-title'].textContent, 'Listening on my radio');
-  assert.strictEqual(w.els['aprs-listen-on'].checked, true);
-  w.els['aprs-listen-on'].checked = false;
-  w.els['aprs-listen-on'].fire('change', { target: w.els['aprs-listen-on'] });
+  assert.strictEqual(sw.getAttribute('aria-checked'), 'true');
+  assert.strictEqual(w.els['aprs-listen-on-text'].textContent, 'On');
+  const sel = w.els['aprs-band-select'];
+  assert.strictEqual(w.els['aprs-band-pick'].classList.contains('hidden'), false, 'two bands: the band select');
+  assert.deepStrictEqual(sel.options.map((o) => o.value + ':' + o.textContent), ['2m:2 m', '30m:30 m']);
+  assert.strictEqual(sel.value, '30m');
+  sel.fire('change', { target: { value: '2m' } });
+  assert.deepStrictEqual(w.calls[w.calls.length - 1], ['listenBand', '2m']);
+  sw.fire('click');
   assert.deepStrictEqual(w.calls[w.calls.length - 1], ['listenSet', false]);
+  w.on.onRf({ ...RF_READY, phase: 'keyed', keyed: true, keyedAt: w.clock.t });
+  assert.strictEqual(sw.disabled, true, 'locked while the beacon has the radio');
+  const n = w.calls.length;
+  sw.fire('click');
+  assert.strictEqual(w.calls.length, n, 'a locked switch sends nothing');
+});
+
+test('glue: the APRS-IS card has the same switch, on or off (no Connect button)', () => {
+  const w = loadWindow();
+  assert.ok(!/aprs-feed-connect/.test(html), 'the Connect button is gone');
+  assert.ok(/id="aprs-feed-on" role="switch" aria-checked="false"/.test(html));
+  assert.ok(/id="aprs-listen-on" role="switch" aria-checked="false"/.test(html));
+  const sw = w.el('aprs-feed-on');
+  sw.fire('click');
+  assert.deepStrictEqual(w.calls[w.calls.length - 1], ['feedSet', true]);
+  sw.fire('click');
+  assert.deepStrictEqual(w.calls[w.calls.length - 1], ['feedSet', false]);
 });
 
 test('glue: one click sends one radio beacon; a second click while it goes out does nothing; a refusal disables with its reason', () => {

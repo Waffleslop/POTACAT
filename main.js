@@ -13207,11 +13207,11 @@ function aprsListenWantsAudio() {
   return !APRS_DEV_FRAMES && aprsListen.on && (aprsListen.state === 'starting' || aprsListen.state === 'listening');
 }
 
-function aprsListenFrequency() {
+function aprsListenFrequency(band) {
   if (!_aprsCountries) {
     try { _aprsCountries = JSON.parse(fs.readFileSync(path.join(__dirname, 'assets', 'geo', 'countries.json'), 'utf8')); } catch { _aprsCountries = { features: [] }; }
   }
-  return AprsRfFrequency.frequencyForBand(aprsListen.band || '2m', settings.grid, _aprsCountries);
+  return AprsRfFrequency.frequencyForBand(band || aprsListen.band || '2m', settings.grid, _aprsCountries);
 }
 
 function aprsSetupLine() {
@@ -13556,6 +13556,50 @@ function aprsListenSetBand(band) {
   }
   if (aprsListen.state !== 'paused') { aprsListen.band = next; aprsListen.freq = null; }
   aprsListenPush();
+}
+
+// Listen on open (Casey 2026-11-20): the APRS window starts receive-only
+// listening by itself when it opens, unless something has or is keying the
+// radio (lib/aprs-listen.js autoListenOnOpen decides; the Listen switch's own
+// refusals hold too). Once per window open: a reload is not an open, and once
+// the operator switches listening off it stays off until the window opens again.
+// It only tunes for receive; no beacon is sent and nothing transmits.
+let _aprsAutoListenPending = false;  // set when the window is created; the first 'aprs-ready' uses it
+let _aprsListenOffByOperator = false; // the operator switched listening off since the window opened
+/** Anything is keying the radio now (PTT, CAT, JTCAT, Winlink, the phone, a Flex, a tune). */
+function aprsAutoListenTransmitting() {
+  try { if (rigPresetTransmitting()) return true; } catch {}
+  if (aprsRfOtherTx()) return true;
+  if (_flexTxRf) return true;
+  return !!(jtcatTuneState && jtcatTuneState.active);
+}
+function aprsAutoListenOnOpen() {
+  const firstOpen = _aprsAutoListenPending;
+  _aprsAutoListenPending = false;
+  if (!firstOpen) return; // a reload of the open window, not an open
+  const dev = !!APRS_DEV_FRAMES;
+  const d = AprsListen.autoListenOnOpen({
+    firstOpen,
+    operatorOff: _aprsListenOffByOperator,
+    listening: !!aprsListen.on,
+    transmitting: aprsAutoListenTransmitting(),
+    rfInFlight: aprsRfInFlight(),
+    jtcatQso: jtcatQsoLive(),
+    radioOwner,
+    guestPass: aprsGuestPassOn(),
+    bandWanted: aprsListen.bandWanted,
+    remote: isRemoteMode(),
+    catConnected: dev || radioTuneRoute() !== '',
+    bands: aprsRigBands(),
+    freq: (band) => aprsListenFrequency(band),
+    modemFound: dev || (DirewolfProcess.direwolfSupported(process.platform) && findDirewolf().found),
+    ft8Decoding: autoSstvBlockedByJtcat(),
+    winlinkHasModem: aprsWinlinkHoldsRadio(),
+  });
+  if (!d.start) { aprsLog(`not listening on open (${d.reason}); the switch is off`); return; }
+  aprsLog(`listening on open on ${AprsListen.LABELS[d.band] || d.band} (receive only)`);
+  markUserActive(); // the same as the operator pressing the switch: an idle session lets go of the radio first
+  aprsListenSet(true);
 }
 
 function aprsListenSet(on) {
@@ -47302,6 +47346,8 @@ function cloudShackNotice(text, kind) {
       webPreferences: { preload: path.join(__dirname, 'preload-aprs-popout.js'), contextIsolation: true, nodeIntegration: false },
     });
     rememberWindowPlace(aprsWin, 'aprsPopoutBounds', { minWidth: 640, minHeight: 400 });
+    _aprsAutoListenPending = true;    // listen on open, once this window has drawn (aprsAutoListenOnOpen)
+    _aprsListenOffByOperator = false;
     aprsWin.setMenuBarVisibility(false);
     aprsWin.loadFile(path.join(__dirname, 'renderer', 'aprs-popout.html'), { query: themeQuery() });
     aprsWin.on('closed', () => {
@@ -47335,6 +47381,7 @@ function cloudShackNotice(text, kind) {
     aprsStartFeed();
     aprsListenPush();
     aprsIgatePush();
+    aprsAutoListenOnOpen(); // receive only; once per open, silent when it may not
     aprsBeaconSchedule({ arm: true }); // phase 5: the timer (if set) starts with the window, one interval on
     aprsBeaconPush();
     aprsMessagesPush();
@@ -47377,7 +47424,7 @@ function cloudShackNotice(text, kind) {
   ipcMain.on('aprs-igate-set', (_e, on) => aprsIgateSetFromWindow(on === true));
   // APRS phase 2: the "Listen on my radio" switch (receive only).
   // The operator at the switch is using the radio: an APRS idle session ends first.
-  ipcMain.on('aprs-listen-set', (_e, on) => { markUserActive(); aprsListenSet(!!on); });
+  ipcMain.on('aprs-listen-set', (_e, on) => { markUserActive(); aprsListenSet(!!on); if (!on) _aprsListenOffByOperator = true; });
   // The bar asks once its listener is attached: the push after 'aprs-ready' can
   // arrive while its script is still loading (the 8600M's empty bar, 2026-11-18).
   // The iGate mark answered 'aprs-ready' the same way, so it comes too.
