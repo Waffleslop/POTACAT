@@ -259,5 +259,18 @@ test('IC-7610 band scope: unlink CI-V USB Port from REMOTE before setting 115200
   assert.strictEqual(main.split('action: icomScopeBaudAction(icomScopeEntry && icomScopeEntry.name),').length - 1, 2, 'baud and refused both use it');
 });
 
+test('#821 IC-7300 MK II band scope: nothing to set on the radio over USB; only POTACAT at 115200 (CI-V Reference Guide rev 0 p.3, p.9)', () => {
+  const { icomScopeBaudAction } = require('../lib/rig-setup-notes');
+  const mk2 = icomScopeBaudAction('IC-7300 MK II');
+  assert.ok(!/CI-V USB Baud Rate/.test(mk2), 'the MK II has no CI-V USB Baud Rate item: ' + mk2);
+  assert.ok(/Settings > Radio, Edit the rig, Baud Rate 115200/.test(mk2), 'names POTACAT\'s own CI-V speed: ' + mk2);
+  assert.ok(/nothing to set on the radio/i.test(mk2), 'says the radio needs nothing over USB: ' + mk2);
+  assert.ok(/\[REMOTE\] jack/.test(mk2), 'says the radio\'s baud item is only for the REMOTE jack: ' + mk2);
+  assert.ok(!/My Rigs/.test(mk2), 'names a Settings path that exists: ' + mk2);
+  // Other models keep their text.
+  assert.ok(/CI-V USB Baud Rate, choose 115200/.test(icomScopeBaudAction('IC-7300')));
+  assert.ok(/Unlink from \[REMOTE\]/.test(icomScopeBaudAction('IC-7610')));
+});
+
 console.log(`\nRig setup notes: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
