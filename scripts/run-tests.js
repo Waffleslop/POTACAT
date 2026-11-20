@@ -392,6 +392,7 @@ const TESTS = [
   'test/vfo-sdr-volume-test.js', // #118 df1vb: the SDR Volume row stands in when the VOL knob is hidden
   'test/wspr-power-memory-test.js',
   'test/wspr-scheduler-test.js', // #268: a beacon never keys two slots in a row unless TX % is over 50
+  'test/wspr-hop-atu-test.js', // #747: a receive-only WSPR hop runs no band-change ATU tune
   'test/wspr-beacon-power-test.js', // #268: the beacon keeps the operator's RF power; rigctld reports the radio's power
   'test/wspr-reported-dbm-test.js', // #268: the beacon reports the power it runs at (5 W = 37 dBm), or the operator's fixed pick, 0..60 dBm
   'test/js8-native-test.js',

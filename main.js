@@ -20529,7 +20529,8 @@ function maybeHopBand() {
   const mhz = wsprBands.dialForBand(nb);
   if (!mhz) return;
   ft8Engine.setWsprDial(mhz);
-  tuneRadio(mhz * 1000, 'DIGU'); // kHz dial; WSPR rides USB/DIGU
+  // The purpose lets the band-change ATU tune skip a receive-only hop (#747).
+  tuneRadio(mhz * 1000, 'DIGU', undefined, { purpose: 'wspr-hop' }); // kHz dial; WSPR rides USB/DIGU
   settings.wsprDial = mhz;
   sendCatLog(`[JTCAT] WSPR band hop → ${nb} (${mhz.toFixed(4)} MHz) for the next cycle`);
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-wspr-hop-band', { band: nb });
@@ -20638,6 +20639,10 @@ let _wsprBeaconLevelLogTimer = null;
 // having been *sent* (see wsprReconcilePreCapPower).
 function wsprBeaconArmed() {
   return !!(jtcatWsprScheduler && jtcatWsprScheduler.enabled);
+}
+// Set to transmit: armed with a TX % above 0 (lib/wspr/bandhop.js, #747).
+function wsprBeaconWillTransmit() {
+  return wsprBandhop.beaconWillTransmit({ armed: wsprBeaconArmed(), txPct: jtcatWsprScheduler ? jtcatWsprScheduler.txPct : 0 });
 }
 
 function wsprForgetPreCapPower() {
@@ -20828,6 +20833,8 @@ function wsprBeaconTick() {
     return;
   }
   if (ft8Engine._txActive) return;
+  // An owed band-change tune is running (#747): draw no slot until it is done.
+  if (Date.now() < _wsprOwedTuneHoldUntil) return;
   // Announce each slot's draw to the popout/phone. The random 20% default
   // means MOST slots are listen slots, and a beacon that says nothing during
   // them is indistinguishable from a dead one — N7BBQ armed it, watched 5
@@ -20947,6 +20954,7 @@ function setWsprBeacon(on, opts = {}) {
         ? ` ${restoreWatts} W will be restored when the beacon stands down.`
         : ` No pre-beacon power level was known, so it stays at ${beaconW} W until you raise it.`)
     : `[JTCAT] WSPR: could NOT set radio power automatically (no live CAT/SmartSDR power control) — set your radio to ${beaconW} W or less BY HAND before it transmits.`);
+  wsprRunOwedAtuTune();
   tellPopout(true);
 }
 
@@ -20968,6 +20976,7 @@ function applyWsprBeaconControl(opts) {
   if (jtcatWsprScheduler) {
     if (opts.txPct != null) jtcatWsprScheduler.setTxPct(settings.wsprTxPct);
     if (dbmChanged) jtcatWsprScheduler.setDbm(wsprReportedDbm());
+    if (opts.txPct != null) wsprRunOwedAtuTune();
   }
   if (opts.enabled != null) setWsprBeacon(!!opts.enabled);
   else if (dbmChanged) wsprBroadcastBeaconState();
@@ -42011,6 +42020,8 @@ function discoverFlexRadios(timeoutMs = 3000) {
 let _lastTuneFreq = 0;
 let _lastTuneTime = 0;
 let _lastTuneBand = null; // for ATU auto-tune on band change
+let _atuOwedTune = null;   // { band, start }: a receive-only WSPR hop skipped this band's tune (#747)
+let _wsprOwedTuneHoldUntil = 0; // the beacon draws no slot before this (an owed tune is running)
 let _modeSuppressUntil = 0; // suppress stale mode broadcasts to ECHOCAT during tune transition
 // Suppress stale FREQUENCY echo to ECHOCAT right after a phone-initiated tune.
 // On serial rigs (e.g. IC-7300) _currentFreqHz doesn't update until the next rig
@@ -42690,19 +42701,10 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin, purpose } = {}) {
         smartSdr.setSliceXit(sliceIndex, false);
       }
       // ATU: auto-tune on band change (SmartSDR-only path)
-      if (settings.enableAtu) {
-        const freqMhzSdr = freqHz / 1e6;
-        const tuneBandSdr = freqToBand(freqMhzSdr);
-        if (tuneBandSdr && tuneBandSdr !== _lastTuneBand) {
-          _lastTuneBand = tuneBandSdr;
-          setTimeout(() => {
-            sendCatLog(`[ATU] Band changed to ${tuneBandSdr} -> starting SmartSDR ATU tune`);
-            smartSdr.setAtu(true);
-          }, 1500);
-        } else if (!_lastTuneBand && tuneBandSdr) {
-          _lastTuneBand = tuneBandSdr;
-        }
-      }
+      bandChangeAtuTune(freqHz / 1e6, purpose, (tuneBandSdr) => {
+        sendCatLog(`[ATU] Band changed to ${tuneBandSdr} -> starting SmartSDR ATU tune`);
+        smartSdr.setAtu(true);
+      });
     }
     return;
   }
@@ -42749,18 +42751,10 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin, purpose } = {}) {
       smartSdr.setSliceXit(sliceIndex, false);
     }
     // ATU: auto-tune on band change.
-    if (settings.enableAtu) {
-      const tuneBand = freqToBand(freqHz / 1e6);
-      if (tuneBand && tuneBand !== _lastTuneBand) {
-        _lastTuneBand = tuneBand;
-        setTimeout(() => {
-          sendCatLog(`[ATU] Band changed to ${tuneBand} -> starting SmartSDR ATU tune`);
-          smartSdr.setAtu(true);
-        }, 1500);
-      } else if (!_lastTuneBand && tuneBand) {
-        _lastTuneBand = tuneBand;
-      }
-    }
+    bandChangeAtuTune(freqHz / 1e6, purpose, (tuneBand) => {
+      sendCatLog(`[ATU] Band changed to ${tuneBand} -> starting SmartSDR ATU tune`);
+      smartSdr.setAtu(true);
+    });
     return;
   }
 
@@ -42860,26 +42854,57 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin, purpose } = {}) {
   }
 
   // ATU: auto-tune on band change
-  if (settings.enableAtu) {
-    const freqMhz = freqKhz / 1000;
-    const tuneBand = freqToBand(freqMhz);
-    if (tuneBand && tuneBand !== _lastTuneBand) {
-      _lastTuneBand = tuneBand;
-      // Delay ATU trigger to let the radio settle on the new frequency first
-      setTimeout(() => {
-        if (smartSdr && smartSdr.connected && settings.catTarget && settings.catTarget.type === 'tcp') {
-          sendCatLog(`[ATU] Band changed to ${tuneBand} -> starting SmartSDR ATU tune`);
-          smartSdr.setAtu(true);
-        } else if (cat && cat.connected) {
-          sendCatLog(`[ATU] Band changed to ${tuneBand} -> starting ATU tune`);
-          cat.startTune();
-        }
-      }, 1500);
-    } else if (!_lastTuneBand && tuneBand) {
-      // First tune — just record the band, don't trigger ATU
-      _lastTuneBand = tuneBand;
+  bandChangeAtuTune(freqKhz / 1000, purpose, (tuneBand) => {
+    if (smartSdr && smartSdr.connected && settings.catTarget && settings.catTarget.type === 'tcp') {
+      sendCatLog(`[ATU] Band changed to ${tuneBand} -> starting SmartSDR ATU tune`);
+      smartSdr.setAtu(true);
+    } else if (cat && cat.connected) {
+      sendCatLog(`[ATU] Band changed to ${tuneBand} -> starting ATU tune`);
+      cat.startTune();
     }
+  });
+}
+
+// "Auto-tune ATU on band change" for one tune: lib/wspr/bandhop.js
+// bandChangeAtu decides, `start(band)` is the tune path's own ATU command.
+// A WSPR hop while the beacon is not set to transmit skips the tune (#747);
+// the skipped tune is owed to that band and runs if the beacon is set to
+// transmit there (wsprRunOwedAtuTune); otherwise the next hop decides afresh.
+function bandChangeAtuTune(freqMhz, purpose, start) {
+  const d = wsprBandhop.bandChangeAtu({
+    enableAtu: !!settings.enableAtu,
+    band: freqToBand(freqMhz),
+    lastBand: _lastTuneBand,
+    wsprHop: purpose === 'wspr-hop',
+    beaconTx: wsprBeaconWillTransmit(),
+  });
+  if (d.action === 'none') return;
+  _lastTuneBand = d.lastBand;
+  _atuOwedTune = d.owedBand ? { band: d.owedBand, start } : null;
+  if (d.action === 'skip') {
+    sendCatLog(`[ATU] WSPR hop to ${d.owedBand}: the beacon is not set to transmit, so no band-change tune (receive only)`);
+    return;
   }
+  // Delay ATU trigger to let the radio settle on the new frequency first
+  setTimeout(() => start(d.lastBand), 1500);
+}
+
+// The beacon has just been set to transmit (armed, or TX % raised from 0).
+// When a receive-only hop left this band untuned, run that tune now and hold
+// the beacon's next frame until it is done (wsprBeaconTick), so the beacon
+// never transmits on a band whose band-change tune was skipped (#747).
+function wsprRunOwedAtuTune() {
+  const owed = _atuOwedTune;
+  if (!wsprBandhop.owedTuneDue({
+    owedBand: owed && owed.band, currentBand: _lastTuneBand,
+    beaconTx: wsprBeaconWillTransmit(), enableAtu: !!settings.enableAtu,
+  })) return;
+  _atuOwedTune = null;
+  _wsprOwedTuneHoldUntil = Date.now() + wsprBandhop.OWED_TUNE_TX_HOLD_MS;
+  sendCatLog(`[ATU] WSPR beacon set to transmit on ${owed.band}: running the band-change tune the receive-only hop skipped; the next frame waits for it`);
+  setTimeout(() => {
+    try { owed.start(owed.band); } catch (e) { sendCatLog('[ATU] band-change tune failed: ' + (e && e.message || e)); }
+  }, 1500);
 }
 
 // --- potacat:// protocol handler ---
