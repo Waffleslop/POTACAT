@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('api', {
   formsCatalog: () => ipcRenderer.invoke('winlink-forms-catalog'),
   formsUpdate: () => ipcRenderer.invoke('winlink-forms-update'),
   formOpen: (o) => ipcRenderer.invoke('winlink-form-open', o),
+  formInfo: (o) => ipcRenderer.invoke('winlink-form-info', o), // #346 phase 2: does this received form name a reply form?
   onFormResult: (cb) => ipcRenderer.on('winlink-form-result', (_e, m) => cb(m || {})),
 
   // Sessions — Connect is the only way a radio session starts.
