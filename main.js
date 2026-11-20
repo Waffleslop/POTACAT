@@ -512,6 +512,7 @@ const AprsRfGate = require('./lib/aprs-rf-gate');          // APRS phase 7: when
 const AprsRfBeacon = require('./lib/aprs-rf-beacon');      // APRS phase 7: the RF beacon packet, its cap, and the one-beacon run
 const AprsRfMeters = require('./lib/aprs-rf-meters');      // APRS window: S-meter, SWR and RF out beside the radio beacon, and its peaks
 const AprsWindowState = require('./lib/aprs-window-state'); // APRS window: the cards, banners and the "Within" range choices
+const AprsMap = require('./lib/aprs-map');                 // APRS window: the map's saved view (centre and zoom), cleaned before it is kept
 const AprsEchocat = require('./lib/aprs-echocat');         // APRS phase 6: APRS on ECHOCAT devices through this desktop
 const VaraProcess = require('./lib/vara-process');
 const VaraSetup = require('./lib/vara-setup');
@@ -13798,17 +13799,38 @@ function flexGpsPush() {
   const p = flexGpsPayload();
   if (aprsWin && !aprsWin.isDestroyed()) { try { aprsWin.webContents.send('aprs-gps', p); } catch {} }
   if (win && !win.isDestroyed()) { try { win.webContents.send('flex-gps', p); } catch {} }
-  if (AprsBeacon.beaconSettings(settings).source === 'gps') { aprsBeaconPush(); try { aprsRfPush(); } catch {} }
+  // A fix can be home (the map's centre, the "near my home" beacon) as well as the GPS source.
+  const h = aprsHomePosition();
+  aprsBeaconPush();
+  if (AprsBeacon.beaconSettings(settings).source === 'gps' || (h && h.kind === 'gps')) { try { aprsRfPush(); } catch {} }
 }
 function flexGpsSet(s) {
   flexGps = s || null;
   flexGpsPush();
 }
-/** { ok, lat, lon, source } or { ok:false, reason, sentence } (lib/aprs-position.js). */
+/**
+ * The operator's best known position, "home" (lib/aprs-beacon.js homePosition):
+ * the point picked on the map, else the radio's GPS fix, else the Settings
+ * grid's centre. { lat, lon, kind } or null. The APRS map centres on it and
+ * draws the operator there; it is never the ambiguous beacon position.
+ */
+function aprsHomePosition() {
+  const st = AprsBeacon.beaconSettings(settings);
+  return AprsBeacon.homePosition({ lat: st.lat, lon: st.lon, gps: flexGps, grid: settings.grid, gridToLatLon, source: st.source });
+}
+/** The precision that applies now: the saved choice, else the default (near, or grid4 with only a 4-character grid). */
+function aprsBeaconPrecision() {
+  const st = AprsBeacon.beaconSettings(settings);
+  return AprsBeacon.effectivePrecision({ precision: st.precision, approx: st.approx, source: st.source, home: aprsHomePosition() });
+}
+/** { ok, lat, lon, source, precision, approx } or { ok:false, reason, sentence } (lib/aprs-position.js). */
 function aprsBeaconPosition() {
   const st = AprsBeacon.beaconSettings(settings);
   // Position precision (the APRS settings panel) applies to every source; a grid never uses a picked point.
-  return AprsPosition.beaconPositionFrom({ source: st.source, precision: st.precision, gps: flexGps, lat: st.lat, lon: st.lon, grid: settings.grid, gridToLatLon });
+  const precision = aprsBeaconPrecision();
+  const p = AprsPosition.beaconPositionFrom({ source: st.source, precision, gps: flexGps, lat: st.lat, lon: st.lon, grid: settings.grid, gridToLatLon });
+  // approx: every beacon (internet and radio) sends to the minute unless the precision is exact.
+  return p.ok ? Object.assign(p, { precision, approx: AprsBeacon.approxFor(precision) }) : p;
 }
 // APRS extra 1: "Add my activation to the beacon comment" (off by default).
 // While an activation runs, both beacons' comment starts with the park ref(s),
@@ -13844,8 +13866,11 @@ function aprsBeaconState() {
     rfCall: login.ok ? AprsRfBeacon.rfSource(settings.myCallsign, login.base, AprsBeacon.beaconSettings(settings).rfSsid) : '',
     grid: String(settings.grid || '').toUpperCase(), ...(() => {
       const p = aprsBeaconPosition();
-      return { position: p.ok ? { lat: p.lat, lon: p.lon, source: p.source } : null, positionSentence: p.ok ? '' : p.sentence };
+      return { position: p.ok ? { lat: p.lat, lon: p.lon, source: p.source, approx: p.approx } : null, positionSentence: p.ok ? '' : p.sentence };
     })(),
+    // The precision that applies (the saved choice or the default), home (the map's centre and
+    // the operator's marker, never the ambiguous position) and the units for the words.
+    precision: aprsBeaconPrecision(), home: aprsHomePosition(), unit: settings.distUnit === 'km' ? 'km' : 'mi',
     gps: flexGpsPayload(),
     lastAt: aprsBeacon.lastAt, lastPacket: aprsBeacon.lastPacket, sentence: aprsBeacon.sentence, backAt: aprsBeacon.backAt,
     sending: aprsBeacon.sending, timerOn: !!aprsBeacon.timer, nextAt: aprsBeacon.timer ? aprsBeacon.nextAt : 0,
@@ -13870,7 +13895,7 @@ async function aprsBeaconSend(why) {
   aprsBeacon.lastTryAt = Date.now();
   const st = AprsBeacon.beaconSettings(settings);
   const pos = aprsBeaconPosition(); // the latest GPS fix when the source is the radio's GPS; a refusal with none
-  const b = AprsBeacon.buildBeacon({ settingsCall: settings.myCallsign, lat: pos.ok ? pos.lat : null, lon: pos.ok ? pos.lon : null, positionSentence: pos.ok ? '' : pos.sentence, symbol: st.symbol, comment: aprsBeaconComment(st).comment, approx: st.approx });
+  const b = AprsBeacon.buildBeacon({ settingsCall: settings.myCallsign, lat: pos.ok ? pos.lat : null, lon: pos.ok ? pos.lon : null, positionSentence: pos.ok ? '' : pos.sentence, symbol: st.symbol, comment: aprsBeaconComment(st).comment, approx: pos.ok ? pos.approx : true });
   if (!b.ok) { aprsBeaconRefuse(b.sentence); return; }
   if (!aprsIsServer()) { aprsBeaconRefuse('This test build plays recorded packets and sends nothing to APRS-IS.'); return; }
   aprsBeacon.sending = true;
@@ -14281,7 +14306,7 @@ function aprsRfPlan() {
   const hz = aprsListen.freq ? aprsListen.freq.hz : (band === '2m' ? 144390000 : 10147600);
   const st = AprsBeacon.beaconSettings(settings);
   const pos = aprsBeaconPosition(); // the latest GPS fix when the source is the radio's GPS; a refusal with none
-  const b = AprsRfBeacon.buildRfBeacon({ settingsCall: settings.myCallsign, band, lat: pos.ok ? pos.lat : null, lon: pos.ok ? pos.lon : null, positionSentence: pos.ok ? '' : pos.sentence, symbol: st.symbol, comment: aprsBeaconComment(st).comment, approx: st.approx, ssid: st.rfSsid });
+  const b = AprsRfBeacon.buildRfBeacon({ settingsCall: settings.myCallsign, band, lat: pos.ok ? pos.lat : null, lon: pos.ok ? pos.lon : null, positionSentence: pos.ok ? '' : pos.sentence, symbol: st.symbol, comment: aprsBeaconComment(st).comment, approx: pos.ok ? pos.approx : true, ssid: st.rfSsid });
   const timing = DirewolfProcess.packetTiming(settings);
   const drainMs = winlinkIpAudioRoute() ? WINLINK_UNKEY_DRAIN_IP_MS : WINLINK_UNKEY_DRAIN_BRIDGE_MS;
   const cap = b.ok ? AprsRfBeacon.capFor({ band, packet: b.packet, txDelayMs: timing.txDelayMs, txTailMs: timing.txTailMs, drainMs }) : null;
@@ -14551,7 +14576,7 @@ const aprsEcho = AprsEchocat.createController({
   getState: () => ({ listen: aprsListenPayload(), igate: aprsIgateStatus(), beacon: aprsBeaconState() }),
   sendState: (st) => { if (remoteServer && remoteServer.broadcastAprsState) remoteServer.broadcastAprsState(st); },
   sendStations: (id, m) => { if (remoteServer && remoteServer.sendAprsStations) remoteServer.sendAprsStations(id, m); },
-  home: () => { const p = gridToLatLon(settings.grid); return p ? { lat: p.lat, lon: p.lon } : null; },
+  home: () => { const p = aprsHomePosition(); return p ? { lat: p.lat, lon: p.lon } : null; },
   log: (line) => sendCatLog(line),
 });
 onRemoteServer((rs) => {
@@ -47390,9 +47415,10 @@ function cloudShackNotice(text, kind) {
   // while the window is open; packets are parsed here (lib/aprs-parser.js) and
   // handed over in 500 ms batches. Nothing is sent to APRS-IS but the login,
   // and nothing keys the radio.
+  // Home: the best known position (aprsHomePosition: picked point, GPS fix, grid centre), never the ambiguous beacon.
   function aprsHome() {
-    const p = gridToLatLon(settings.grid);
-    return p ? { lat: p.lat, lon: p.lon, grid: String(settings.grid || '').toUpperCase(), call: settings.myCallsign || '' } : null;
+    const p = aprsHomePosition();
+    return p ? { lat: p.lat, lon: p.lon, kind: p.kind, grid: String(settings.grid || '').toUpperCase(), call: settings.myCallsign || '' } : null;
   }
   function aprsSend(ch, data) {
     if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send(ch, data);
@@ -47472,7 +47498,7 @@ function cloudShackNotice(text, kind) {
       settings.aprsRangeKm = conv.km;
       saveSettings(settings);
     }
-    aprsSend('aprs-init', { home: aprsHome(), distUnit: settings.distUnit || 'mi', km: Feed.clampRangeKm(settings.aprsRangeKm), showLastMin: AprsWindowState.normShowLast(settings.aprsShowLastMin) });
+    aprsSend('aprs-init', { home: aprsHome(), distUnit: settings.distUnit || 'mi', km: Feed.clampRangeKm(settings.aprsRangeKm), showLastMin: AprsWindowState.normShowLast(settings.aprsShowLastMin), mapView: AprsMap.cleanView(settings.aprsMapView) });
     aprsStartFeed();
     aprsListenPush();
     aprsIgatePush();
@@ -47547,6 +47573,13 @@ function cloudShackNotice(text, kind) {
   // The window filters its own store; APRS-IS and ECHOCAT are not touched.
   ipcMain.on('aprs-set-show-last', (_e, min) => {
     settings.aprsShowLastMin = AprsWindowState.normShowLast(min);
+    saveSettings(settings);
+  });
+  // The map's centre and zoom (the window sends it, debounced, after a move); restored on every open.
+  ipcMain.on('aprs-map-view', (_e, v) => {
+    const view = AprsMap.cleanView(v);
+    if (!view || AprsMap.sameView(settings.aprsMapView, view)) return;
+    settings.aprsMapView = view;
     saveSettings(settings);
   });
   ipcMain.on('aprs-popout-minimize', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.minimize(); });

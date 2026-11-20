@@ -372,8 +372,10 @@
       var ll = e.latlng.wrap();
       setPicking(false);
       // A picked point is the exact position (a grid square never uses one).
-      // Picking a point also means "this point", not the radio's GPS.
-      api.beaconSet({ lat: ll.lat, lon: ll.lng, precision: 'exact', source: 'settings' });
+      // Picking a point also means "this point", not the radio's GPS. With
+      // "Near my home" the point becomes home and still goes out to the minute.
+      var keepNear = beacon && beacon.precision === 'near';
+      api.beaconSet(keepNear ? { lat: ll.lat, lon: ll.lng, precision: 'near', source: 'settings' } : { lat: ll.lat, lon: ll.lng, precision: 'exact', source: 'settings' });
     });
   })();
 
@@ -448,7 +450,16 @@
   // The push that answers 'aprs-ready' can come before this script has loaded;
   // ask now that the listeners above are attached (the 8600M's empty bar, 2026-11-18).
   api.listenGet();
-  api.onBeacon(function (d) { if (d) { beacon = d; renderBeaconSettings(); renderAll(); } });
+  api.onBeacon(function (d) { if (d) { beacon = d; renderBeaconSettings(); renderAll(); renderHome(); } });
+  // The operator's marker sits at home (the best known position); its label says
+  // what the beacon shows when that is less exact (lib/aprs-window-state.js homeLabel).
+  function renderHome() {
+    var m = window.aprsMapApi;
+    if (!m || !m.setHome || !beacon) return;
+    var gps = beacon.settings && beacon.settings.source === 'gps' && beacon.gps && beacon.gps.fix ? beacon.gps.grid : '';
+    var call = beacon.rfCall || beacon.call || '';
+    m.setHome(beacon.home || null, W.homeLabel({ call: String(call).replace(/-\d+$/, ''), grid: beacon.grid, gpsGrid: gps, precision: beacon.precision, unit: beacon.unit }));
+  }
   // The radio's GPS between beacon pushes (it shows or hides the "From my radio's GPS" choice).
   if (api.onGps) api.onGps(function (g) { if (beacon && g) { beacon.gps = g; renderBeaconSettings(); } });
   api.beaconGet();

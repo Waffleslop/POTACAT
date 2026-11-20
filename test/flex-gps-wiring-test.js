@@ -19,7 +19,8 @@ function test(name, fn) {
 }
 
 test('the beacon position comes from the one provider, with the GPS state', () => {
-  assert.match(main, /function aprsBeaconPosition\(\) \{[\s\S]{0,200}AprsPosition\.beaconPositionFrom\(\{ source: st\.source, precision: st\.precision, gps: flexGps,/);
+  // The precision that applies (saved, else the default: lib/aprs-beacon.js effectivePrecision).
+  assert.match(main, /function aprsBeaconPosition\(\) \{[\s\S]{0,400}AprsPosition\.beaconPositionFrom\(\{ source: st\.source, precision, gps: flexGps,/);
 });
 
 test('both beacons pass the provider refusal as their sentence (no fallback to another position)', () => {

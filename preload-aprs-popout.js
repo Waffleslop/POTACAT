@@ -9,7 +9,7 @@ contextBridge.exposeInMainWorld('api', {
   minimize: () => ipcRenderer.send('aprs-popout-minimize'),
   maximize: () => ipcRenderer.send('aprs-popout-maximize'),
   close: () => ipcRenderer.send('aprs-popout-close'),
-  // { home: {lat, lon, grid, call} | null, distUnit: 'mi'|'km', km, showLastMin }
+  // { home: {lat, lon, kind, grid, call} | null, distUnit: 'mi'|'km', km, showLastMin, mapView: {lat, lon, zoom} | null }
   onInit: (cb) => ipcRenderer.on('aprs-init', (_e, d) => cb(d)),
   // { state: 'connecting'|'connected'|'waiting'|'refused'|'stopped'|'no-grid', server, call, anonymous, km, retryInMs }
   onStatus: (cb) => ipcRenderer.on('aprs-status', (_e, s) => cb(s)),
@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('api', {
   setRange: (km) => ipcRenderer.send('aprs-set-range', km),
   // "Show the last" in minutes (15, 30, 60, 180, 360), saved per profile.
   setShowLast: (min) => ipcRenderer.send('aprs-set-show-last', min),
+  // The map's centre and zoom { lat, lon, zoom }, sent after a move (debounced); main keeps it in settings.aprsMapView.
+  saveMapView: (v) => ipcRenderer.send('aprs-map-view', v && typeof v === 'object' ? { lat: Number(v.lat), lon: Number(v.lon), zoom: Number(v.zoom) } : null),
   openExternal: (url) => ipcRenderer.send('open-external', url),
   ready: () => ipcRenderer.send('aprs-ready'),
   // Phase 2, "Listen on my radio" (receive only): the switch, and its state

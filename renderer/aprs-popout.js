@@ -48,7 +48,8 @@
   var GLIDE_MS = 1000, FADE_IN_MS = 450, FADE_OUT_MS = 650;
 
   var unit = 'mi';
-  var home = null;
+  var home = null;             // the operator's best known position (main's aprsHome), never the ambiguous beacon
+  var homeLabelText = '';      // "K3SBP (beacon: about 1 mile)": aprs-window.js sets it from the beacon state
   var store = AprsStations.createStore({ maxAgeMs: AprsStations.WINDOW_MAX_AGE_MS, maxRows: AprsStations.WINDOW_MAX_ROWS });
   var showLastMin = W.DEFAULT_SHOW_LAST_MIN;   // "Show the last", minutes
   var shownTotal = 0;                          // stations within it (before the search)
@@ -96,6 +97,45 @@
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 17, attribution: '&copy; OpenStreetMap',
   }).addTo(map);
+
+  // ── the view: home at a local zoom, then wherever it was left ────────────
+  // The first open (no saved view) centres on home about 25 miles across
+  // (lib/aprs-map.js localZoom); every move after that is kept (debounced)
+  // and the next open starts there. The Home button below the zoom buttons
+  // goes back to home at the local zoom.
+  var viewReady = false;       // no saving until the opening view is set
+  var viewTimer = null;
+  function goHome(animate) {
+    if (!home) return;
+    map.setView([home.lat, home.lon], AprsMap.localZoom(map.getSize().x, home.lat), { animate: !!animate });
+  }
+  map.on('moveend', function () {
+    if (!viewReady) return;
+    clearTimeout(viewTimer);
+    viewTimer = setTimeout(function () {
+      var c = map.getCenter().wrap();
+      window.api.saveMapView({ lat: c.lat, lon: c.lng, zoom: map.getZoom() });
+    }, 800);
+  });
+  var HomeControl = L.Control.extend({
+    options: { position: 'topleft' },
+    onAdd: function () {
+      var bar = L.DomUtil.create('div', 'leaflet-bar aprs-home-bar');
+      var a = L.DomUtil.create('a', 'aprs-home-btn', bar);
+      a.href = '#';
+      a.setAttribute('role', 'button');
+      a.setAttribute('aria-label', 'Back to my home area');
+      a.title = 'Back to my home area';
+      // A plain house outline in the text colour (no emoji).
+      a.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">'
+        + '<path d="M2 8.2 8 2.8l6 5.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>'
+        + '<path d="M4 7.2V13.4h3V10h2v3.4h3V7.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
+      L.DomEvent.disableClickPropagation(bar);
+      L.DomEvent.on(a, 'click', function (e) { L.DomEvent.preventDefault(e); goHome(true); });
+      return bar;
+    },
+  });
+  new HomeControl().addTo(map);
 
   // One canvas over the map. Leaflet's renderer base keeps it placed through
   // pans and scales it through the zoom animation; it is redrawn at the end
@@ -302,7 +342,7 @@
       var hp = map.latLngToLayerPoint([home.lat, home.lon]);
       var sp = AprsIcons.sprite('you', HOME_PX, dpr, false);
       ctx.drawImage(sp.canvas, hp.x - sp.size / 2, hp.y - sp.size / 2, sp.size, sp.size);
-      if (labels) drawLabel(ctx, hp.x + 1, hp.y, (home.call || 'You') + ' ' + (home.grid || ''), false);
+      if (labels) drawLabel(ctx, hp.x + 1, hp.y, homeLabelText || (home.call || 'You'), false);
     }
     return busy;
   }
@@ -651,7 +691,10 @@
     fillShowLast();
     home = d.home || null;
     store.setHome(home);
-    if (home) map.setView([home.lat, home.lon], zoomForKm(d.km || 150));
+    // The saved view; else home about 25 miles across; else the whole-country view stays.
+    var v = AprsMap.startView({ saved: d.mapView, home: home, widthPx: map.getSize().x });
+    if (v) map.setView([v.lat, v.lon], v.zoom, { animate: false });
+    viewReady = true;
     rebuild();
   });
   window.api.onStatus(setLink);
@@ -745,6 +788,7 @@
     stop: function () { if (synthTimer) clearInterval(synthTimer); synthTimer = null; },
     map: map,
     home: function () { return home; },
+    goHome: function () { goHome(false); },
     select: function (key) { select(key, true); },
     keys: function (icon) { return listRows.filter(function (r) { return !icon || r.cls === icon; }).map(function (r) { return r.key; }); },
     /** Screenshots without a radio: mark n stations as heard by my radio (the window's own copy only). */
@@ -787,6 +831,18 @@
   // cards read the feed from here (aprs-window.js sets onFeed).
   window.aprsMapApi = { map: map };
   window.aprsMapApi.feedInfo = feedInfo;
+  // The beacon state moves home (a point picked on the map, a GPS fix) and says what the label reads.
+  window.aprsMapApi.setHome = function (h, label) {
+    var lbl = String(label || '');
+    var moved = !!(h && isFinite(h.lat) && isFinite(h.lon) && (!home || home.lat !== h.lat || home.lon !== h.lon));
+    if (moved) {
+      home = Object.assign({}, home || {}, { lat: h.lat, lon: h.lon, kind: h.kind || '' });
+      store.setHome(home);
+      rebuild();
+    }
+    if (moved || lbl !== homeLabelText) { homeLabelText = lbl; requestDraw(); }
+  };
+  window.aprsMapApi.goHome = function () { goHome(true); };
 
   rebuild();
   window.api.ready();
