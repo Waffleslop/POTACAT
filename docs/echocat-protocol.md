@@ -670,7 +670,11 @@ beacon (phase 7) is not on the wire.
 }
 ```
 
-`sentence` and `note` are the desktop window's words, shown as they are. Times
+`sentence` and `note` are the desktop window's words, shown as they are. When the radio
+moves off the APRS frequency or mode while listening (a spot click, a phone tune, the VFO knob),
+listening pauses with `on: false, state: 'refused'` and `sentence` "Paused: your radio moved. Your
+radio is on 14.317 MHz USB. Turn listening on to go back to 30 m." (following the radio as it moves);
+`aprs-listen {on: true}` is the normal start and tunes back to APRS. No new field. Times
 are epoch ms (0 = never). `listen.bands` is what this rig can listen on (empty =
 none); `listen.band` is the band it listens on, or would start on. `beacon.backAt
 >= beacon.lastAt` means the beacon came back over APRS-IS.

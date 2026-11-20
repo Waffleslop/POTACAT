@@ -499,6 +499,7 @@ const RadioTuneRoute = require('./lib/radio-tune-route'); // the path tuneRadio 
 const AprsRfFrequency = require('./lib/aprs-rf-frequency'); // APRS: the 2 m frequency by grid square (phase 2), 30 m worldwide (phase 3)
 const AprsRfFrames = require('./lib/aprs-rf-frames');       // APRS phase 2: Dire Wolf's AGW monitor frames -> APRS packets
 const AprsRadioReturn = require('./lib/aprs-radio-return'); // APRS phase 2: the radio goes back after listening
+const AprsListenAudio = require('./lib/aprs-listen-audio'); // APRS listening: one line a minute about the audio Dire Wolf gets
 const AprsParser = require('./lib/aprs-parser');
 const AprsIgate = require('./lib/aprs-igate');             // APRS phase 4: the receive-only iGate's rules and the uplink login
 const AprsBeacon = require('./lib/aprs-beacon');           // APRS phase 5: the beacon over APRS-IS (packet, timer, symbols, refusals)
@@ -4615,6 +4616,7 @@ function sendCatFrequency(hz) {
   broadcastRemoteRadioStatus();
   sendN1mmRadioInfo();
   aprsRadioReturnOnDial(hz); // a return a crash or a quit left unfinished (APRS listening)
+  aprsListenOnDial(); // listening pauses when the radio moves off the APRS frequency
 }
 
 // Tokens that are never a mode, whatever codec produced them. See the same
@@ -12253,6 +12255,7 @@ async function startWinlinkAudio({ modemRate = ModemAudioServerMod.MODEM_RATE } 
   srv.on('tx-cut', (c) => { _winlinkTxCutMs = Math.max(_winlinkTxCutMs, Number(c.totalMs) || 0); winlinkLog(`modem audio: ${c.ms} ms of transmit audio cut — the sound card stopped taking it (${c.totalMs} ms this session)`); });
   srv.on('over-report', (o) => { const t = modemBridgeOverText({ gaps: Number(o.gaps) || 0, gapMs: Number(o.gapMs) || 0, droppedMs: Number(o.droppedMs) || 0 }); if (t) winlinkLog(t); });
   srv.on('drained', () => { winlinkLaneDrained(); aprsRfLaneDrained(); });
+  srv.on('stats', (d) => { if (_aprsAudioMinute.running()) _aprsAudioMinute.noteStats(d); }); // APRS listening's audio line (lib/aprs-listen-audio.js)
   srv.on('exit', () => { if (winlinkAudio === srv) { winlinkAudio = null; if (winlinkSessionActive()) winlinkAbortSession('the modem audio process stopped', { kind: 'audio-stopped' }); } });
   try {
     await srv.listen(0);
@@ -13091,7 +13094,9 @@ async function spawnDirewolf() {
 // a crash is finished on the next start's first readback).
 // One audio user at a time: a Winlink gateway pick or radio session takes the
 // modem (aprsListenYieldToWinlink), and listening resumes once Winlink has
-// given the radio back. FT8 decoding ends it. Nothing here keys the radio.
+// given the radio back. FT8 decoding ends it. The radio moving off the APRS
+// frequency or mode, whoever moved it, pauses it and the radio stays where it
+// was put (aprsListenMovedOff). Nothing here keys the radio.
 const aprsListen = {
   on: false,          // the operator's switch
   state: 'off',       // 'off' | 'starting' | 'listening' | 'paused' | 'refused'
@@ -13113,12 +13118,17 @@ const aprsListen = {
   restarts: 0,
   unreportedData: '', // a data mode the radio reads back as FM (the FT-857's PKT)
   devTimer: null,
+  watch: null,        // AprsListen.createMoveWatch while listening: has the radio moved off?
+  moved: null,        // {hz, mode, band}: listening paused because the radio moved (state 'refused', switch off)
+  movedPushedHz: 0,   // the dial the paused card last showed
+  movedPushedMode: '',
 };
 /** "Listen on my radio" has the radio, so Idle Mode keeps off it (lib/idle-radio-use.js). */
 function aprsListenHoldsRadio() { return IdleRadioUse.aprsListenHoldsRadio(aprsListen); }
 let _aprsCountries = null;
 let _aprsTickTimer = null;
 let _aprsLastReturnAt = 0;
+const _aprsAudioMinute = AprsListenAudio.createAudioMinute(); // one log line a minute while listening
 // Dev only (never in a packaged build): recorded Dire Wolf AGW frames stand in
 // for the radio and the modem, so the window can be checked with no radio.
 // POTACAT_APRS_DEV_REFUSE=ft8|winlink|noband|rejected|no-cat|no-freq shows that refusal.
@@ -13192,13 +13202,26 @@ function aprsListenPayload() {
   // Switched on: the band it is (or tried) listening on. Off: the chip it would start on.
   const band = (aprsListen.on && aprsListen.band) ? aprsListen.band : (AprsListen.chooseBand(rigBands, aprsListen.bandWanted) || '');
   return {
-    on: aprsListen.on, state: aprsListen.state, sentence: aprsListen.sentence, band, bands,
+    on: aprsListen.on, state: aprsListen.state, band, bands,
     modeLabel: AprsListen.modeLabel(band),
     mhz: aprsListen.on && aprsListen.freq ? aprsListen.freq.mhz : '', heard: aprsListen.heard, lastAt: aprsListen.lastAt, note: aprsListen.note,
     // Off: where the radio is now, so the card can say where it goes back to when listening stops.
     dialMhz: !aprsListen.on && Number(_currentFreqHz) > 0 ? (Number(_currentFreqHz) / 1e6).toFixed(3) : '',
     dialMode: !aprsListen.on && Number(_currentFreqHz) > 0 ? String(_currentMode || '') : '',
+    // Paused because the radio moved: the card's title and line, from where the radio is now.
+    // ECHOCAT gets the same words in sentence (state 'refused', as when FT8 ends listening).
+    moved: aprsListenMovedView(band),
+    sentence: aprsListen.moved && !aprsListen.on ? AprsListen.movedSentence(aprsListenMovedPlace(band)) : aprsListen.sentence,
   };
+}
+function aprsListenMovedPlace(band) {
+  const hz = Number(_currentFreqHz) > 0 ? Number(_currentFreqHz) : (aprsListen.moved && aprsListen.moved.hz) || 0;
+  const mode = Number(_currentFreqHz) > 0 ? String(_currentMode || '') : (aprsListen.moved && aprsListen.moved.mode) || '';
+  return { hz, mode, band: band || (aprsListen.moved && aprsListen.moved.band) || '' };
+}
+function aprsListenMovedView(band) {
+  if (!aprsListen.moved || aprsListen.on) return null;
+  return { title: AprsListen.MOVED_TITLE, line: AprsListen.movedLine(aprsListenMovedPlace(band)) };
 }
 function aprsListenPush() { aprsWinSend('aprs-listen', aprsListenPayload()); aprsIgateSync(); }
 
@@ -13290,6 +13313,7 @@ async function aprsAudioReady() {
 }
 
 function aprsOnMonitorFrame(f) {
+  _aprsAudioMinute.noteFrame(); // every frame Dire Wolf decoded, for the minute's audio line
   // Phase 4: the iGate takes every UI frame heard (its own rules decide), parsed or not.
   const heard = AprsRfFrames.fromMonitorFrame(f);
   if (heard) aprsIgateOfferRf(heard.line);
@@ -13386,6 +13410,8 @@ async function aprsListenStart({ resume = false } = {}) {
   aprsListen.on = true;
   aprsListen.sentence = '';
   aprsListen.restarts = 0;
+  aprsListen.moved = null; // turning it on again after the radio moved: the normal start, it tunes back to APRS
+  aprsListen.watch = null;
   if (!resume) { aprsListen.heard = 0; aprsListen.lastAt = 0; }
   const bands = aprsRigBands();
   aprsListen.band = AprsListen.chooseBand(bands, aprsListen.bandWanted) || '';
@@ -13456,6 +13482,9 @@ async function aprsListenStart({ resume = false } = {}) {
   }
   if (seq !== aprsListen.seq) return;
   aprsListen.state = 'listening';
+  // From here a move off the APRS frequency or mode is the operator's (or a spot's, or the phone's): it pauses listening.
+  aprsListen.watch = AprsListen.createMoveWatch({ band: aprsListen.band, listenHz: freq.hz });
+  _aprsAudioMinute.start();
   aprsListenPush();
 }
 
@@ -13464,6 +13493,9 @@ function aprsListenStop(why) {
   const was = aprsListen.on || aprsListen.state !== 'off';
   aprsListen.seq++;
   aprsListen.on = false;
+  aprsListen.watch = null;
+  aprsListen.moved = null;
+  _aprsAudioMinute.stop();
   aprsRfAbort(`listening stopped: ${why}`); // phase 7: a radio beacon in flight unkeys at once
   aprsStopModem();
   aprsReleaseLane();
@@ -13492,6 +13524,8 @@ function aprsListenYieldToWinlink(why) {
   if (!aprsListen.on || aprsListen.state === 'paused' || aprsListen.state === 'refused') return;
   aprsRfAbort(`the Winlink ${why} needs the radio`); // phase 7
   aprsListen.seq++;
+  aprsListen.watch = null; // Winlink is about to tune the radio: that is not the operator moving it
+  _aprsAudioMinute.stop();
   aprsStopModem();
   const m = aprsReturn.pending();
   if (m && m.freqHz && !_winlinkPreviewReturnTo) _winlinkPreviewReturnTo = { freqHz: m.freqHz, mode: m.mode || '', from: 'before APRS listening' };
@@ -13503,7 +13537,64 @@ function aprsListenYieldToWinlink(why) {
   aprsListenPush();
 }
 
-/** Every 2 s while the switch is on: resume after Winlink, end for FT8, restart a modem that went away. */
+/**
+ * While listening: has the radio left the APRS frequency or mode? Any cause
+ * counts (a spot click, ECHOCAT, the VFO knob, another window); POTACAT's own
+ * tune to APRS is over before the watch exists, and an APRS radio beacon in
+ * flight never counts (lib/aprs-listen.js createMoveWatch). On air 2026-11-20
+ * a FLEX-8600M went from 30 m APRS to 10 m FT8 and 20 m SSB and the window
+ * kept saying "Listening on my radio" on 30 m for an hour.
+ */
+function aprsListenCheckMoved() {
+  if (APRS_DEV_FRAMES || !aprsListen.on || aprsListen.state !== 'listening' || !aprsListen.watch) return false;
+  const m = aprsListen.watch.check({ hz: _currentFreqHz, mode: _currentMode, rfInFlight: aprsRfInFlight() });
+  if (!m) return false;
+  aprsListenMovedOff(m);
+  return true;
+}
+
+/**
+ * The radio moved: listening pauses with the switch off and lets go of the
+ * radio. The return to the place saved before listening is DROPPED, not run:
+ * the operator moved on deliberately, so the radio stays where they put it.
+ * This is aprs-radio-return's own rule ("a radio the operator moved since is
+ * left where they put it", end() and onReadback() leave a radio off the APRS
+ * frequency alone); dropping the marker now also keeps a later readback or the
+ * next start from ever tuning it back. Turning listening on again is the
+ * normal start: it saves the new place and tunes to APRS.
+ */
+function aprsListenMovedOff(m) {
+  const listenMhz = aprsListen.freq ? aprsListen.freq.mhz : '';
+  aprsListen.seq++;
+  aprsListen.on = false;
+  aprsListen.watch = null;
+  _aprsAudioMinute.stop();
+  aprsStopModem();
+  aprsReleaseLane();
+  aprsReturn.drop();
+  aprsListen.moved = { hz: Number(m.hz) || 0, mode: String(m.mode || ''), band: aprsListen.band };
+  aprsListen.state = 'refused'; // switch off, the card says why (ECHOCAT: as when FT8 ends listening)
+  aprsListen.sentence = '';
+  aprsListen.movedPushedHz = Number(_currentFreqHz) || 0;
+  aprsListen.movedPushedMode = String(_currentMode || '');
+  aprsLog(AprsListen.movedLogLine({ hz: m.hz, mode: m.mode, listenMhz, why: m.why }));
+  aprsListenPush();
+  try { winlinkSyncModemBridge(); } catch {}
+}
+
+/** Every frequency readback: a move pauses listening; once paused, the card follows the radio. */
+function aprsListenOnDial() {
+  if (aprsListen.on) { aprsListenCheckMoved(); return; }
+  if (!aprsListen.moved) return;
+  const hz = Number(_currentFreqHz) || 0;
+  const mode = String(_currentMode || '');
+  if (Math.abs(hz - aprsListen.movedPushedHz) <= AprsListen.MOVED_TOL_HZ && mode === aprsListen.movedPushedMode) return;
+  aprsListen.movedPushedHz = hz;
+  aprsListen.movedPushedMode = mode;
+  aprsListenPush();
+}
+
+/** Every 2 s while the switch is on: resume after Winlink, end for FT8, pause when the radio moved, restart a modem that went away. */
 function aprsListenTick() {
   if (!aprsListen.on || APRS_DEV_FRAMES) return;
   if (aprsListen.state === 'paused') {
@@ -13514,6 +13605,10 @@ function aprsListenTick() {
     return;
   }
   if (aprsListen.state !== 'listening') return;
+  // Once a minute: the audio Dire Wolf gets, and what it decoded (lib/aprs-listen-audio.js).
+  const audioLine = _aprsAudioMinute.due({ mhz: aprsListen.freq ? aprsListen.freq.mhz : '' });
+  if (audioLine) aprsLog(audioLine);
+  if (aprsListenCheckMoved()) return; // a mode change, or a readback the dial hook has not seen
   if (aprsRfInFlight()) return; // phase 7: the beacon's own Dire Wolf has the modem for its few seconds
   if (autoSstvBlockedByJtcat()) {
     aprsListenStop('FT8 started decoding');
