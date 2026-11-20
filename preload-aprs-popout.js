@@ -9,13 +9,15 @@ contextBridge.exposeInMainWorld('api', {
   minimize: () => ipcRenderer.send('aprs-popout-minimize'),
   maximize: () => ipcRenderer.send('aprs-popout-maximize'),
   close: () => ipcRenderer.send('aprs-popout-close'),
-  // { home: {lat, lon, grid, call} | null, distUnit: 'mi'|'km', km }
+  // { home: {lat, lon, grid, call} | null, distUnit: 'mi'|'km', km, showLastMin }
   onInit: (cb) => ipcRenderer.on('aprs-init', (_e, d) => cb(d)),
   // { state: 'connecting'|'connected'|'waiting'|'refused'|'stopped'|'no-grid', server, call, anonymous, km, retryInMs }
   onStatus: (cb) => ipcRenderer.on('aprs-status', (_e, s) => cb(s)),
   // [parsed packet, ...] from lib/aprs-parser.js, at most every 500 ms
   onPackets: (cb) => ipcRenderer.on('aprs-packets', (_e, p) => cb(p)),
   setRange: (km) => ipcRenderer.send('aprs-set-range', km),
+  // "Show the last" in minutes (15, 30, 60, 180, 360), saved per profile.
+  setShowLast: (min) => ipcRenderer.send('aprs-set-show-last', min),
   openExternal: (url) => ipcRenderer.send('open-external', url),
   ready: () => ipcRenderer.send('aprs-ready'),
   // Phase 2, "Listen on my radio" (receive only): the switch, and its state

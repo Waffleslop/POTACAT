@@ -140,11 +140,15 @@
         <div class="aprs-sec-head">
           <h2>Stations</h2>
           <span class="aprs-sec-sub" id="aprs-count">No stations yet</span>
+          <button type="button" class="aprs-text-btn" id="aprs-clear" title="Forget every station heard so far: the list, the map and the Heard by my radio count start again from empty. APRS-IS and listening on your radio keep running, and new packets fill the list again. Phones on ECHOCAT keep their own list.">Clear</button>
         </div>
         <div class="aprs-search-row">
           <input type="search" id="aprs-search" placeholder="Search call sign or comment" aria-label="Search call sign or comment" spellcheck="false" autocomplete="off">
           <label class="aprs-within" title="How far from your grid square APRS-IS sends stations">Within
             <select id="aprs-range"></select>
+          </label>
+          <label class="aprs-within" title="How long a station stays in the list and on the map after it was last heard. Older stations are drawn fainter.">Show the last
+            <select id="aprs-show-last"></select>
           </label>
         </div>
         <div class="aprs-list-wrap" id="aprs-list-wrap">

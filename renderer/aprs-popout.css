@@ -156,8 +156,8 @@ body { display: flex; flex-direction: column; }
 .aprs-stations .aprs-sec-head { padding: 12px 16px 6px; }
 .aprs-within { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; font-size: 14px; color: var(--text-secondary); }
 .aprs-within select { width: auto; padding: 5px 8px; font-size: 14px; }
-.aprs-search-row { display: flex; align-items: center; gap: 10px; padding: 0 16px 8px; }
-.aprs-search-row #aprs-search { flex: 1 1 auto; width: auto; min-width: 0; }
+.aprs-search-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 0 16px 8px; }
+.aprs-search-row #aprs-search { flex: 1 1 180px; width: auto; min-width: 0; }
 .aprs-search-row .aprs-within { flex: none; margin-left: 0; }
 #aprs-search { font-size: 14px; padding: 6px 9px; }
 .aprs-list-wrap { flex: 1 1 auto; overflow: auto; min-height: 160px; }
@@ -173,6 +173,12 @@ body { display: flex; flex-direction: column; }
 .aprs-st-via { font-weight: 400; font-size: 14px; color: var(--text-secondary); }
 .aprs-st.mine .aprs-st-via { color: var(--accent-green); font-weight: 600; }
 .aprs-st-right { font-size: 14px; color: var(--text-secondary); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.aprs-text-btn { margin-left: auto; font: inherit; font-size: 14px; padding: 2px 4px; border: 0; background: none; color: var(--accent-blue); cursor: pointer; }
+.aprs-text-btn:hover { text-decoration: underline; }
+.aprs-text-btn:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; border-radius: 4px; }
+/* Older than half / three quarters of "Show the last": fainter text and icon; the heard-by-my-radio ring keeps its colour. */
+.aprs-st.old .aprs-st-call, .aprs-st.old .aprs-st-right, .aprs-st.old .aprs-st-cmt, .aprs-st.old .aprs-st-ico > * { opacity: 0.75; }
+.aprs-st.older .aprs-st-call, .aprs-st.older .aprs-st-right, .aprs-st.older .aprs-st-cmt, .aprs-st.older .aprs-st-ico > * { opacity: 0.55; }
 .aprs-st-cmt { grid-column: 2 / 4; font-size: 14px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1em; }
 .aprs-pad { list-style: none; padding: 0; margin: 0; }
 .aprs-ico { display: inline-block; vertical-align: middle; flex: none; }
