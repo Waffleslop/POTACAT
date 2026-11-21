@@ -45,6 +45,7 @@ const TESTS = [
   'test/serial-callout-twin-test.js',
   'test/clock-offset-test.js',
   'test/require-exports-test.js',
+  'test/scope-no-frames-log-test.js', // K3SBP 2026-11-21: a scope that shows nothing says so in the log (no frames vs misaligned)
   'test/smartsdr-meter-test.js',
   'test/flex-slice-filter-test.js',
   'test/smartsdr-dax-tx-claim-test.js',
