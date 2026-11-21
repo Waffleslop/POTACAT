@@ -13377,7 +13377,7 @@ async function aprsSpawnDirewolf(seq) {
   const agw = DirewolfProcess.aprsAgwPort(_winlinkAgwPort());
   fs.writeFileSync(confPath, DirewolfProcess.buildDirewolfAprsRxConfig({ mycall: settings.myCallsign, audioPort: lane.port, agwPort: agw, band: aprsListen.band || '2m' }));
   const args = DirewolfProcess.buildDirewolfArgs({ configName: path.basename(confPath) });
-  aprsLog(`Dire Wolf for APRS: ${DirewolfProcess.APRS_MODEM_LINES[aprsListen.band || '2m']}, receive only (no PTT line), audio on 127.0.0.1:${lane.port}, AGW ${agw}`);
+  aprsLog(`Dire Wolf for APRS: ${DirewolfProcess.APRS_RX_MODEM_LINES[aprsListen.band || '2m']}, receive only (no PTT line), audio on 127.0.0.1:${lane.port}, AGW ${agw}`);
   const proc = spawn(bin.path, args, { cwd: p.dir, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   aprsListen.proc = proc;
   aprsListen.lane = lane;
