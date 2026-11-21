@@ -14,6 +14,7 @@ const path = require('path');
 
 const TESTS = [
   'test/syntax-check-test.js', // every source file parses (a main.js syntax error passed every other test)
+  'test/icom-civ-address-learn-test.js', // sweep 3c: a USB Icom at another CI-V address is found from its own replies, used and saved
   'test/icom-usb-data-mod-test.js', // sweep 1a: over USB CI-V, DATA MOD to USB for a data session and put back (IC-7300, MK II, IC-7100, IC-7610 DATA1/2/3)
   'test/icom-network-data-mod-test.js', // #853: over the network the IC-7610's LAN source follows the DATA number in use (DATA1/2/3 MOD 00 92/93/94)
   'test/rig-test.js',
