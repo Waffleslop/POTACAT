@@ -14,6 +14,7 @@ const path = require('path');
 
 const TESTS = [
   'test/syntax-check-test.js', // every source file parses (a main.js syntax error passed every other test)
+  'test/icom-network-data-mod-test.js', // #853: over the network the IC-7610's LAN source follows the DATA number in use (DATA1/2/3 MOD 00 92/93/94)
   'test/rig-test.js',
   'test/icom-baud-list-test.js', // #238: every baud select offers 4800-115200; Icom path accepts each
   'test/cat-port-presence-test.js',
