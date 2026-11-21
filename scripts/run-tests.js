@@ -652,6 +652,7 @@ const TESTS = [
   'test/amp-drive-limit-test.js', // B10 row 10: a per-rig amplifier drive limit, enforced in every radio client
   'test/remote-multi-client-test.js',
   'test/remote-bridge-test.js',
+  'test/aprs-remote-shack-test.js', // #868: a desktop driving a remote shack starts APRS listening there (aprs-listen), shows the shack's aprs-state and the stations its radio heard
   'test/sstv-context-test.js',
   'test/tailscale-detect-test.js',
   'test/yaesu-legacy-codec-test.js',
