@@ -9119,14 +9119,14 @@ async function connectCat() {
       }
     });
     cat.on('frequency', catFrequencyHandler);
-    // Serial CAT port opened but the radio never echoes our tune — classically a
-    // Yaesu (FTDX1200/3000/5000) with menu "CAT RTS" enabled while we de-assert
-    // RTS, or a DTR/RTS-blocked USB interface. The port connects (so QRZ/logging
-    // look fine) but FA tune commands are silently dropped. Surface the fix.
+    // A network CAT link (this CatClient branch: TCP or K4 network) answers but
+    // never echoes our tune. No serial line is involved, so the cause is the
+    // program or radio at the other end, not a CAT RTS menu (#849; a direct-
+    // serial radio waiting for RTS is handled by the serial handshake trial).
     cat.on('tune-unconfirmed', (info) => {
       const fKhz = info && info.targetHz ? (info.targetHz / 1000).toFixed(1) : '?';
-      sendCatLog(`[CAT] Radio not responding to tune commands (${fKhz} kHz never echoed after ${info && info.attempts} tries). ` +
-        `Likely CAT RTS / DTR-RTS handshake — check the radio's CAT menu and the "Disable DTR/RTS on connect" setting.`);
+      sendCatLog(`[CAT] Radio not responding to tune commands (${fKhz} kHz never echoed after ${info && info.attempts} tries) on a network CAT link: ` +
+        `the program or radio at the other end did not take the frequency (no serial RTS/DTR is involved).`);
       if (win && !win.isDestroyed()) {
         win.webContents.send('cat-tune-unconfirmed', info || {});
       }
@@ -13440,7 +13440,9 @@ async function aprsListenStart({ resume = false } = {}) {
   aprsListen.band = AprsListen.chooseBand(bands, aprsListen.bandWanted) || '';
   const freq = aprsListen.band ? aprsListenFrequency() : null;
   aprsListen.freq = freq;
-  aprsListen.note = [aprsSetupLine(), AprsListen.filterSentence(aprsListen.band, settings.digitalFilterWidth)].filter(Boolean).join(' ');
+  aprsListen.noteBase = [aprsSetupLine(), AprsListen.filterSentence(aprsListen.band, settings.digitalFilterWidth)].filter(Boolean).join(' ');
+  aprsListen.sideband = '';
+  aprsListen.note = aprsListen.noteBase;
   if (APRS_DEV_FRAMES) {
     const no = aprsListen.band ? aprsDevRefusal(freq) : { reason: 'no-band', sentence: AprsListen.SENTENCES.noBand };
     if (no) { aprsNotNow(no); return; }
@@ -13507,6 +13509,7 @@ async function aprsListenStart({ resume = false } = {}) {
   aprsListen.state = 'listening';
   // From here a move off the APRS frequency or mode is the operator's (or a spot's, or the phone's): it pauses listening.
   aprsListen.watch = AprsListen.createMoveWatch({ band: aprsListen.band, listenHz: freq.hz });
+  aprsListen.listeningSince = Date.now();
   _aprsAudioMinute.start();
   aprsListenPush();
 }
@@ -13571,9 +13574,25 @@ function aprsListenYieldToWinlink(why) {
 function aprsListenCheckMoved() {
   if (APRS_DEV_FRAMES || !aprsListen.on || aprsListen.state !== 'listening' || !aprsListen.watch) return false;
   const m = aprsListen.watch.check({ hz: _currentFreqHz, mode: _currentMode, rfInFlight: aprsRfInFlight() });
-  if (!m) return false;
+  if (!m) { aprsListenSidebandNote(); return false; }
   aprsListenMovedOff(m);
   return true;
+}
+
+/**
+ * A 30 m radio on lower sideband hears none of the tones (#843): the note line
+ * says so while it lasts (lib/aprs-listen.js sidebandSentence), and goes when
+ * the radio reads back upper sideband.
+ */
+function aprsListenSidebandNote() {
+  // Readbacks settle (the data mode is set after the tune) before a sideband counts, as for a move.
+  if (Date.now() - (aprsListen.listeningSince || 0) < AprsListen.MOVED_GRACE_MS) return;
+  const sb = AprsListen.sidebandSentence(aprsListen.band, _currentMode);
+  if (sb === (aprsListen.sideband || '')) return;
+  aprsListen.sideband = sb;
+  aprsListen.note = [aprsListen.noteBase || '', sb].filter(Boolean).join(' ');
+  if (sb) aprsLog('the radio reads back ' + _currentMode + ' (lower sideband) while listening on 30 m: nothing will decode until its data mode is USB');
+  aprsListenPush();
 }
 
 /**
