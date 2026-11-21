@@ -1909,7 +1909,7 @@
     switch (msg.type) {
       case 'hello':
         // Server's protocol-version + version banner. Store on the ws
-        // for later UI use; no behavior change today.
+        // and show the shack version in Settings (#687).
         // `now`: the desktop's wall clock at send time. The FT8 period bar
         // and countdown run on it, not on this device's clock, which can be
         // seconds off (LZ3AW 2026-10-16: "moving line for the period is not
@@ -1918,6 +1918,8 @@
         try {
           ws._serverProtocolVersion = msg.protocolVersion | 0;
           ws._serverVersion = String(msg.serverVersion || '');
+          var shackVersionEl = document.getElementById('so-shack-version');
+          if (shackVersionEl) shackVersionEl.textContent = ws._serverVersion ? 'Shack POTACAT v' + ws._serverVersion : '';
           // This page came from the desktop that answered the FIRST hello.
           // A reconnect to an updated desktop leaves an open tab running the
           // old page against the new server: LZ3AW kept a tab open across
