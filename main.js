@@ -6924,6 +6924,45 @@ async function prepareIcomNetworkDataMod(controller, target, rigModel, sessionId
   controller.setDataMod(spec.settingId, spec.networkValue);
 }
 
+// Sweep 3c (Casey 2026-11-21): learn the CI-V address from the radio's own
+// replies. An Icom ignores every frame not addressed to it, so a wrong address
+// in the rig editor was a healthy-looking link and a radio that never answered,
+// and the setup note asked the operator to find the address in the radio's
+// menu. Now: if the configured address has not answered 5 s after the port
+// opens, POTACAT asks for the frequency (a read) at every address an Icom in
+// its model list uses; the radio answers only to its own address, from its own
+// address (lib/codecs/civ-codec.js huntAddress / _noteFromAddr). A transceive
+// broadcast from another address (the operator turns the knob) is learned the
+// same way. The address found is used at once and saved on this rig.
+const ICOM_CIV_HUNT_MS = 5000;
+function icomCivHuntAddrs(first) {
+  const addrs = Object.values(RIG_MODELS).filter((m) => m && m.protocol === 'civ' && Number.isInteger(m.civAddr)).map((m) => m.civAddr);
+  return [first, ...addrs];
+}
+function icomCivAddressLearn(controller, codec, transport, target) {
+  codec.on('address-learned', ({ was, now, by }) => {
+    const hex = (a) => '0x' + Number(a).toString(16).toUpperCase().padStart(2, '0');
+    sendCatLog(`[CI-V] the radio answers at CI-V address ${hex(now)}, not ${hex(was)} (${by === 'reply' ? 'it answered the address search' : 'its own transceive frames'}); using ${hex(now)} and saving it for this radio`);
+    let saved = false;
+    for (const r of settings.rigs || []) {
+      const ct = r && r.catTarget;
+      if (ct && ct.type === 'icom' && ct.path === target.path) { ct.civAddress = now; saved = true; }
+    }
+    if (settings.catTarget && settings.catTarget.type === 'icom' && settings.catTarget.path === target.path) { settings.catTarget.civAddress = now; saved = true; }
+    if (saved) saveSettings(settings);
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('app-notice', { message: `Your radio answers at CI-V address ${hex(now)}, not ${hex(was)}. POTACAT now uses ${hex(now)} and saved it for this radio.`, duration: 12000 });
+    }
+  });
+  transport.once('connect', () => {
+    setTimeout(() => {
+      if (cat !== controller || !controller.connected || codec.heardFromRadio) return;
+      const n = codec.huntAddress(icomCivHuntAddrs(codec.radioAddress));
+      if (n) sendCatLog(`[CI-V] no answer at CI-V address 0x${codec.radioAddress.toString(16).toUpperCase().padStart(2, '0')} in ${ICOM_CIV_HUNT_MS / 1000} s: asking for the frequency at ${n} other Icom addresses (a read; nothing is changed on the radio)`);
+    }, ICOM_CIV_HUNT_MS);
+  });
+}
+
 async function restoreIcomNetworkDataMod(reason = 'disconnect') {
   const state = _icomNetworkDataModRestore;
   if (!state) return false;
@@ -9339,10 +9378,11 @@ async function connectCat() {
     // CI-V pacing (CivPacer): 'auto' keeps the old burst timing and switches
     // to one command at a time only on a radio seen dropping replies (NA4DQ
     // IC-7300, 2026-11-05); the rig editor can force it either way.
-    codec = new CivCodec(model, (data) => transport.write(data), { pace: civPaceFor(target) });
+    codec = new CivCodec(model, (data) => transport.write(data), { pace: civPaceFor(target), learnAddress: true }); // sweep 3c: one radio on a USB link
     civPaceRemember(codec);
     cat = new RigController(model, transport, codec);
     cat._debug = true;
+    icomCivAddressLearn(cat, codec, transport, target); // sweep 3c: a wrong CI-V address is found and fixed, not a silent radio
     cat.on('log', sendCatLog);
     cat.on('status', sendCatStatus);
     cat.on('frequency', catFrequencyHandler);

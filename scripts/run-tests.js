@@ -14,6 +14,7 @@ const path = require('path');
 
 const TESTS = [
   'test/syntax-check-test.js', // every source file parses (a main.js syntax error passed every other test)
+  'test/icom-civ-address-learn-test.js', // sweep 3c: a USB Icom at another CI-V address is found from its own replies, used and saved
   'test/rig-test.js',
   'test/icom-baud-list-test.js', // #238: every baud select offers 4800-115200; Icom path accepts each
   'test/cat-port-presence-test.js',
