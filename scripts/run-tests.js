@@ -15,6 +15,7 @@ const path = require('path');
 const TESTS = [
   'test/syntax-check-test.js', // every source file parses (a main.js syntax error passed every other test)
   'test/icom-usb-data-mod-test.js', // sweep 1a: over USB CI-V, DATA MOD to USB for a data session and put back (IC-7300, MK II, IC-7100, IC-7610 DATA1/2/3)
+  'test/icom-network-data-mod-test.js', // #853: over the network the IC-7610's LAN source follows the DATA number in use (DATA1/2/3 MOD 00 92/93/94)
   'test/rig-test.js',
   'test/icom-baud-list-test.js', // #238: every baud select offers 4800-115200; Icom path accepts each
   'test/cat-port-presence-test.js',
@@ -45,7 +46,9 @@ const TESTS = [
   'test/serial-callout-twin-test.js',
   'test/clock-offset-test.js',
   'test/require-exports-test.js',
+  'test/scope-no-frames-log-test.js', // K3SBP 2026-11-21: a scope that shows nothing says so in the log (no frames vs misaligned)
   'test/smartsdr-meter-test.js',
+  'test/smartsdr-udpport-reconnect-test.js', // K3SBP 2026-11-21: after a network drop the new Flex connection is told client udpport again (pan FFT, meters)
   'test/flex-slice-filter-test.js',
   'test/smartsdr-dax-tx-claim-test.js',
   'test/vfo-ptt-race-test.js',
@@ -227,6 +230,8 @@ const TESTS = [
   'test/aprs-rf-frequency-test.js', // APRS phase 2: the 2 m APRS frequency by grid square, each entry from a published band plan
   'test/aprs-radio-return-test.js', // APRS phase 2: the radio goes back on stop, after a crash and after a quit
   'test/aprs-listen-test.js', // APRS phase 2: the refusal sentences, the packet mode, and the main.js wiring (receive only)
+  'test/aprs-rx-filter-test.js', // #840: 30 m listening widens a narrow Flex receive filter to pass 1450-1950 Hz and puts it back (fake Flex left narrow); RIT warned, never changed
+  'test/aprs-beacon-tx-readback-test.js', // #856: the radio beacon hears the radio's TX readback while POTACAT holds PTT (IC-7300 over CI-V), not only TX-state changes
   'test/aprs-listen-moved-test.js', // APRS listening pauses when the radio moves off the APRS frequency (any cause), the return is dropped; the once-a-minute audio line
   'test/aprs-auto-listen-test.js', // APRS window: listen on open (receive only), once per open, every switch refusal plus TX / JTCAT QSO / owner / Guest Pass, off stays off
   'test/tune-link-pending-test.js', // a potacat://tune link that launches POTACAT waits for the radio (link up + a readback), tunes once; 60 s then a notice; only the latest link counts
@@ -235,7 +240,7 @@ const TESTS = [
   'test/aprs-show-last-test.js', // APRS window: "Show the last" 15 min to 6 h (per profile, list and map), the 6 h store with a row cap, two-step age fading (ring at full colour), Clear local to the window (no IPC, ECHOCAT untouched)
   'test/aprs-rf-frames-test.js', // APRS phase 2: recorded Dire Wolf AGW frames -> APRS packets, direct or via a digipeater
   'test/aprs-rf-merge-test.js', // APRS phase 2: a station heard on the radio and on APRS-IS is one row with both marks
-  'test/direwolf-aprs-hf-config-test.js', // APRS phase 3: the 30 m config is MODEM 300 1600:1800 A- 7@30 with no PTT; 2 m and Winlink configs byte-identical
+  'test/direwolf-aprs-hf-config-test.js', // APRS phase 3: the 30 m receive config is MODEM 300 1600:1800 A- 9@30 (the beacon keeps 7@30) with no PTT; 2 m and Winlink configs byte-identical
   'test/direwolf-aprs-hf-decode-test.js', // APRS phase 3: generated 300-baud AFSK decoded by the bundled Dire Wolf, on tune and 70 Hz off (skips without the build)
   'test/aprs-passcode-test.js', // APRS phase 4: the APRS-IS passcode against published callsign/passcode pairs
   'test/aprs-igate-test.js', // APRS phase 4: the receive-only iGate's rules, one test each (aprs-is.net IGating, q construct, dupes, login)
@@ -677,6 +682,8 @@ const TESTS = [
   'test/sculan10-read-first-test.js', // FT-710 scope Enable reads SCU-LAN10 (EX030126) before writing: already ON is left alone and not turned off at close; no answer means no blind write (#113 item 7)
   'test/sculan10-scope-test.js', // SCU-LAN10 band scope: spec-shaped frames, inverted amplitude, the line is the first 850 bytes of a 4096-byte frame (#143), the boundary marker and its lock, 850-point resampling, bin-to-frequency
   'test/rig-full-power-test.js', // a radio's real full power (rig.fullPowerW): W5LEE's 5 W Hermes Lite behind deskHPSDR's 100 W TS-2000 emulation, slider, PC command, readback and log in real watts
+  'test/cat-rts-advice-test.js', // #849: no surface says to set the radio's CAT RTS menu to Enable; the network-link tune warning says what it saw
+  'test/kenwood-ts890-om-test.js', // #850: the TS-890S sets and reads its mode with OM (USB-D = OM0D;), never MD/DA (TS-890S reference rev1 p.51)
   'test/kenwood-pc-power-test.js', // the TCP Kenwood client (deskHPSDR, Zeus) sends PC on the model's scale, Full power included (6 W = PC100, not PC006), never drops the last slider level, and a radio that cannot report its power gets it again after a band change (#184)
   'test/zeus-cat-digu-test.js', // #185: Zeus through its TS-2000-style CAT port: FT8/FT4 go out as MD9 (DIGU), DIGL as plain LSB, no DA; other Kenwoods unchanged
   'test/power-restore-test.js', // the external-tuner / test restore: never a 100 W guess, never against the operator's own knob (GitHub #111, 1.13.10 regression)

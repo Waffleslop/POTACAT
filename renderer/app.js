@@ -6762,22 +6762,28 @@ async function _gpRevokeFromOwnerBanner() {
       console.warn('[Guest Pass] blocked:', info);
     });
   }
-  // Serial CAT connected but the radio isn't honoring tune commands — point the
-  // user at the usual culprit (CAT RTS / Disable DTR/RTS) with a sticky warning
-  // rather than letting them assume "connected" means tuning works. (FTDX3000)
+  // A network CAT link (Flex / TS-2000 emulation over TCP, a K4 on the network:
+  // the only links lib/cat.js CatClient drives) answers but does not follow
+  // tune commands. Say what POTACAT saw, and where the cause can be. No serial
+  // RTS or DTR is involved on a network link, so no radio CAT RTS menu (#849:
+  // the old toast told the operator to turn the CAT RTS menu on, the opposite of the setup notes;
+  // a direct-serial radio that waits for RTS is tried with RTS/CTS by POTACAT
+  // itself, main.js serial handshake trial).
   if (window.api && window.api.onCatTuneUnconfirmed) {
     window.api.onCatTuneUnconfirmed((info) => {
-      const yaesuHint = info && info.isYaesu
-        ? ' On Yaesu (FTDX1200/3000/5000), set the radio’s CAT RTS menu to Enable.'
-        : '';
-      showLogToast(
-        'Radio connected but not responding to frequency changes. ' +
-        'Check your radio’s CAT settings and uncheck "Disable DTR/RTS on connect" in rig setup.' +
-        yaesuHint,
-        { warn: true, sticky: true });
+      showLogToast(catTuneUnconfirmedText(info), { warn: true, sticky: true });
     });
   }
 })();
+
+/** The sticky warning when a network CAT link answers but never moves to the frequency asked (#849). */
+function catTuneUnconfirmedText(info) {
+  const khz = info && info.targetHz ? (info.targetHz / 1000).toFixed(1) + ' kHz' : 'the frequency asked';
+  const tries = info && info.attempts ? ' after ' + info.attempts + ' tries' : '';
+  return 'The radio answers but did not move to ' + khz + tries + '. ' +
+    'This is a network CAT link, so it is not a cable or RTS setting: check that the program at the other end ' +
+    '(SmartSDR CAT, the TS-2000 emulation, the K4) lets POTACAT change the frequency.';
+}
 
 // ── Settings → ECHOCAT → Guest Pass generate form ──
 
