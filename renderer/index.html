@@ -3936,6 +3936,10 @@
     <fieldset class="source-toggles" data-settings-tab="cloud">
       <legend>POTACAT Cloud</legend>
       <div id="cloud-login-section">
+        <!-- Cloud signed this computer out: it was removed from the account
+             (device_revoked, lib/cloud-revoked.js). The server's words, or
+             ours. Cleared by the next sign-in or Sign Out. -->
+        <div id="cloud-signed-out-notice" class="share-rig-notice warn hidden" role="status"></div>
         <div style="margin-bottom:12px;">
           <p style="font-size:13px;color:var(--text-primary);margin-bottom:8px;">Your log, always backed up and available on every shack computer.</p>
           <ul style="font-size:12px;color:var(--text-secondary);margin:0 0 8px 16px;padding:0;line-height:1.8;">
@@ -4457,6 +4461,9 @@
          controls (#200): Take the radio (Now / In 5 minutes, with an optional
          message), Give it back, Cancel pass (confirmed here, no browser
          dialog). Filled by _shareRigLiveRender() from pass-owner-get. -->
+    <!-- Signed out of POTACAT Cloud: passes already sent keep validating,
+         but this computer cannot create, cancel or notify passes. -->
+    <div id="share-rig-signed-out" class="share-rig-notice warn hidden" role="status"></div>
     <div id="share-rig-live" class="share-rig-live hidden" role="region" aria-label="Your guest">
       <div class="share-rig-live-status" id="share-rig-live-status" role="status" aria-live="polite"></div>
       <div class="share-rig-live-sub" id="share-rig-live-sub"></div>

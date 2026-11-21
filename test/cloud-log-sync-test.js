@@ -568,7 +568,9 @@ check('checkMissing: batches at 5000 and lower-cases the answer', async () => {
 
 check('wiring: sign-in schedules the catch-up (never on sign-out); boot runs it once; status is owner-scoped', () => {
   const ipc = readSrc(path.join(__dirname, '..', 'lib', 'cloud-ipc.js'));
-  assert.ok(/if \(reason !== 'signout'\) \{[\s\S]{0,200}reconcileWithCloud\(reason\)/.test(ipc));
+  // Never on a sign-out, whether chosen or forced by Cloud (device_revoked).
+  assert.ok(/if \(!isSignOutReason\(reason\)\) \{[\s\S]{0,200}reconcileWithCloud\(reason\)/.test(ipc));
+  assert.ok(/function isSignOutReason\(reason\) \{\n\s*return reason === 'signout' \|\| reason === 'revoked';/.test(ipc));
   assert.ok(/sync\.startInterval\(interval, myJournal\(\), getSyncCallbacks\(\)\)/.test(ipc), 'background sync uses the owner view');
   const main = readSrc(path.join(__dirname, '..', 'main.js'));
   assert.ok(/cloudIpc\.reconcileWithCloud\('boot'\)/.test(main));
