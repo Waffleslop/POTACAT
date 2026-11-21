@@ -3755,6 +3755,13 @@ function syncTxAudioInputRow() {
   if (blank) blank.textContent = ok && window.TxAudioInput.MODELS[model] == null ? 'Ask on first transmit' : 'Rear (data / ACC2 socket), the default';
 }
 if (rigModelSelect) rigModelSelect.addEventListener('change', syncTxAudioInputRow);
+// Sweep 1a: the DATA MOD to USB box, only for the Icoms POTACAT can set it on (lib/icom-usb-data-mod.js).
+function syncIcomUsbDataModRow() {
+  const row = document.getElementById('rig-icom-usb-data-mod');
+  if (!row || !window.IcomUsbDataMod) return;
+  row.classList.toggle('hidden', !window.IcomUsbDataMod.hasChoice(rigModelSelect ? rigModelSelect.value : ''));
+}
+if (rigModelSelect) rigModelSelect.addEventListener('change', syncIcomUsbDataModRow);
 {
   const reset = document.getElementById('rig-bands-reset');
   if (reset) reset.addEventListener('click', () => { rigBandsState.touched = false; loadRigBandsForModel(); });
@@ -3780,6 +3787,7 @@ async function openRigEditor(mode, rigId) {
       if (rigModelSelect) { rigModelSelect.value = rig.model || ''; syncYaesuLanMuteMonitorRow(); }
       { const t = document.getElementById('set-tx-audio-input'); if (t) t.value = rig.txAudioInput === 'front' || rig.txAudioInput === 'rear' ? rig.txAudioInput : ''; syncTxAudioInputRow(); }
       { const t = document.getElementById('set-tx-channel'); if (t) t.value = rig.txChannel === 'left' ? 'left' : 'both'; } // #654
+      { const t = document.getElementById('set-icom-usb-data-mod'); if (t) t.checked = !rig.icomUsbDataModOff; syncIcomUsbDataModRow(); } // sweep 1a: absent = on
       await populateRadioSection(rig.catTarget);
       // Per-rig audio source — populateRadioSection just rebuilt the options
       // for this rig's radio type, so the stored value (validated) sticks.
@@ -3844,6 +3852,7 @@ async function openRigEditor(mode, rigId) {
     fillSdrScopeForm(null);
     { const v = document.getElementById('set-voice-as-data'); if (v) v.checked = false; }
     { const v = document.getElementById('set-allow-power-off'); if (v) v.checked = false; }
+    { const v = document.getElementById('set-icom-usb-data-mod'); if (v) v.checked = true; syncIcomUsbDataModRow(); } // sweep 1a: a new rig starts on
     { const v = document.getElementById('set-amp-drive-on'); if (v) v.checked = false; }
     { const v = document.getElementById('set-amp-drive-w'); if (v) v.value = 10; }
     { const v = document.getElementById('set-packet-mode'); if (v) v.value = 'auto'; }
@@ -4001,6 +4010,8 @@ async function saveRigEditor() {
   const txAudioInputEl = document.getElementById('set-tx-audio-input');
   const rigTxAudioInput = txAudioInputEl && (txAudioInputEl.value === 'front' || txAudioInputEl.value === 'rear')
     && window.TxAudioInput && window.TxAudioInput.hasChoice(model) ? txAudioInputEl.value : ''; // #594
+  const icomUsbDataModEl = document.getElementById('set-icom-usb-data-mod');
+  const rigIcomUsbDataModOff = !!(icomUsbDataModEl && !icomUsbDataModEl.checked); // sweep 1a: stored only when off
   const txChannelEl = document.getElementById('set-tx-channel');
   const rigTxLeftOnly = !!(txChannelEl && txChannelEl.value === 'left'); // #654: absent = both channels
   const lanVoiceSsbEl = document.getElementById('set-lan-voice-ssb');
@@ -4038,6 +4049,7 @@ async function saveRigEditor() {
       if (rigAmpDriveW > 0) rig.ampDriveLimitW = rigAmpDriveW; else delete rig.ampDriveLimitW;
       if (rigTxAudioInput) rig.txAudioInput = rigTxAudioInput; else delete rig.txAudioInput;
       if (rigTxLeftOnly) rig.txChannel = 'left'; else delete rig.txChannel;
+      if (rigIcomUsbDataModOff) rig.icomUsbDataModOff = true; else delete rig.icomUsbDataModOff;
       if (rigLanVoiceInSsb) rig.lanVoiceInSsb = true; else delete rig.lanVoiceInSsb;
       if (rigPacketMode) rig.packetMode = rigPacketMode; else delete rig.packetMode; // absent = Automatic
       rig.flexBandAntennaMap = flexBandAntennaMap;
@@ -4071,6 +4083,7 @@ async function saveRigEditor() {
       ...(rigAmpDriveW > 0 ? { ampDriveLimitW: rigAmpDriveW } : {}),
       ...(rigTxAudioInput ? { txAudioInput: rigTxAudioInput } : {}),
       ...(rigTxLeftOnly ? { txChannel: 'left' } : {}),
+      ...(rigIcomUsbDataModOff ? { icomUsbDataModOff: true } : {}),
       ...(rigLanVoiceInSsb ? { lanVoiceInSsb: true } : {}),
       ...(rigPacketMode ? { packetMode: rigPacketMode } : {}),
       flexBandAntennaMap,
