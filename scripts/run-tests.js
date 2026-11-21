@@ -48,6 +48,7 @@ const TESTS = [
   'test/clock-offset-test.js',
   'test/require-exports-test.js',
   'test/scope-no-frames-log-test.js', // K3SBP 2026-11-21: a scope that shows nothing says so in the log (no frames vs misaligned)
+  'test/cloud-tunnel-auto-test.js', // ECHOCAT ask 2026-11-21: the Cloud Tunnel turns on when the account gets access; never after the operator turned it off
   'test/smartsdr-meter-test.js',
   'test/smartsdr-udpport-reconnect-test.js', // K3SBP 2026-11-21: after a network drop the new Flex connection is told client udpport again (pan FFT, meters)
   'test/flex-slice-filter-test.js',

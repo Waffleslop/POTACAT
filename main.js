@@ -3189,6 +3189,36 @@ const JtcatTxSlot = require('./lib/jtcat-tx-slot');
 // lib/typed-call.js for the rule (most recently changed non-empty field wins).
 const { TypedCallTracker } = require('./lib/typed-call');
 const CloudBillingUi = require('./lib/cloud-billing-ui');
+const CloudTunnelAuto = require('./lib/cloud-tunnel-auto'); // ECHOCAT ask 2026-11-21 item 1: the tunnel on when the account gets access
+/**
+ * On every billing state: the account getting Cloud access (a trial starting,
+ * or no access to paid) switches the Cloud Tunnel on, unless the operator
+ * turned it off themselves (lib/cloud-tunnel-auto.js).
+ */
+function cloudTunnelOnWithAccess(sub) {
+  try {
+    // The first run of this rule only records where the account already is: an
+    // account that had access before it existed is not a new start, so its
+    // tunnel is left as the operator had it.
+    if (settings.cloudAccessSeen === undefined) {
+      settings.cloudAccessSeen = settings.cloudAccessToken ? CloudTunnelAuto.accessOf(settings.cloudSubscriptionCache, CloudBillingUi) : 'none';
+      saveSettings(settings);
+    }
+    const now = CloudTunnelAuto.accessOf(sub, CloudBillingUi);
+    const prev = settings.cloudAccessSeen || 'none';
+    if (now !== prev) { settings.cloudAccessSeen = now; saveSettings(settings); }
+    const d = CloudTunnelAuto.decide({
+      prev, now, signedIn: !!settings.cloudAccessToken,
+      tunnelOn: !!(cloudTunnel && cloudTunnel.getState().enabled),
+      userOff: settings.cloudTunnelUserOff === true,
+    });
+    if (!d.enable || !cloudTunnel) return;
+    sendCatLog(`[cloud-tunnel] the account has Cloud access now (${now}): turning the Cloud Tunnel on`);
+    cloudTunnel.enable({}).then(() => {
+      if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: 'POTACAT Cloud is on: your phone can now reach this radio from anywhere. Turn the tunnel off in Settings > Cloud if you do not want that.', duration: 15000 });
+    }).catch((err) => sendCatLog('[cloud-tunnel] could not turn on with the new access: ' + (err && err.message ? err.message : err)));
+  } catch (err) { sendCatLog('[cloud-tunnel] access check failed: ' + (err && err.message ? err.message : err)); }
+}
 const typedCalls = new TypedCallTracker();
 const CwRemoteExpand = require('./lib/cw-remote-expand');
 const CwGreeting = require('./lib/cw-greeting'); // {greeting} = GM/GA/GE by the other station's local time
@@ -44956,7 +44986,7 @@ app.whenReady().then(() => {
       getLocalQsoCount: () => localQsoCount(),
       // A billing state or checkout result also reaches every ECHOCAT
       // client (web + app) so a trial ending or a failed card shows there.
-      onBillingState: (payload) => { if (remoteServer) remoteServer.broadcastCloudBilling(payload); },
+      onBillingState: (payload) => { if (remoteServer) remoteServer.broadcastCloudBilling(payload); cloudTunnelOnWithAccess(payload && payload.subscription); },
       onCheckoutState: (payload) => { if (remoteServer) remoteServer.broadcastCloudCheckout(payload); },
       // Owner revoked a Guest Pass here: end the guest riding it NOW.
       // PassEnforcement's 'ended' → broadcastPassEnded() kicks the WS
@@ -44970,6 +45000,10 @@ app.whenReady().then(() => {
       // device heartbeat captured the previous client and its early
       // return would keep the new account unregistered — start over.
       onCloudSessionChanged: (reason) => {
+        // A new account (the desktop form or ECHOCAT cloud-register) has its trial now: read it at once,
+        // so the tunnel comes on without waiting for the next status check (cloudTunnelOnWithAccess).
+        if (reason === 'register' && cloudIpc) setTimeout(() => { cloudIpc.refreshSubscription('register').catch(() => {}); }, 1000);
+        if (reason === 'signout' && settings.cloudAccessSeen !== 'none') { settings.cloudAccessSeen = 'none'; saveSettings(settings); }
         teardownCloudDeviceHeartbeat();
         setImmediate(() => ensureCloudDeviceRegistered(reason).catch(() => {}));
         // A new account brings its own templates (and takes this machine's).
@@ -44977,6 +45011,8 @@ app.whenReady().then(() => {
       },
     });
     cloudIpc.startBackgroundSync();
+    // Seed the access the tunnel rule compares against before any status arrives (cloudTunnelOnWithAccess).
+    if (settings.cloudAccessSeen === undefined) { settings.cloudAccessSeen = settings.cloudAccessToken ? CloudTunnelAuto.accessOf(settings.cloudSubscriptionCache, CloudBillingUi) : 'none'; saveSettings(settings); }
     // SSTV templates follow the account (GET/PUT /v1/sstv/templates). Any
     // signed-in account, no subscription; a 404 means the route is not
     // deployed yet and templates simply stay local.
@@ -45294,6 +45330,7 @@ function cloudShackNotice(text, kind) {
       const typed = opts && typeof opts.shackName === 'string' ? CloudShacks.sanitizeShackName(opts.shackName) : '';
       if (typed && typed !== settings.cloudShackName) { settings.cloudShackName = typed; saveSettings(settings); }
       const state = await cloudTunnel.enable(typed ? { shackName: typed } : {});
+      if (settings.cloudTunnelUserOff) { delete settings.cloudTunnelUserOff; saveSettings(settings); } // turned on again by hand
       return { ok: true, state };
     } catch (err) {
       const msg = err.message || String(err);
@@ -45363,6 +45400,8 @@ function cloudShackNotice(text, kind) {
   ipcMain.handle('cloud-tunnel-disable', async () => {
     if (!cloudTunnel) return { error: 'cloud-tunnel module not initialized' };
     try {
+      // The operator's own choice: a later trial or payment never turns it back on (cloudTunnelOnWithAccess).
+      if (settings.cloudTunnelUserOff !== true) { settings.cloudTunnelUserOff = true; saveSettings(settings); }
       const state = await cloudTunnel.disable();
       return { ok: true, state };
     } catch (err) {
