@@ -401,6 +401,7 @@ const wsprlive = require('./lib/wspr/wsprlive');
 const wsprBandhop = require('./lib/wspr/bandhop');
 const jtcatModehop = require('./lib/jtcat-modehop');
 const { operatorModeChange: jtcatModeChangeRule } = require('./lib/jtcat-mode-change');
+const TuneLinkGuard = require('./lib/tune-link-guard'); // a potacat://tune link stops automatic JTCAT TX before it tunes
 const FakeIt = require('./lib/jtcat-fake-it'); // split operation "Fake It" (fakeItShiftForTx / fakeItRestoreDial)
 const { WsprScheduler } = require('./lib/wspr/scheduler');
 const WsprPowerMemory = require('./lib/wspr-power-memory'); // pre-beacon RF power remember/restore decisions
@@ -43660,6 +43661,42 @@ if (!app.isDefaultProtocolClient('potacat')) {
   app.setAsDefaultProtocolClient('potacat');
 }
 
+/**
+ * A potacat://tune link is about to move the radio (web pages carry these).
+ * Stop every automatic JTCAT transmission first, through the same paths as
+ * the operator's own Halt TX and Spot Target clear, so the JTCAT window, the
+ * main window and ECHOCAT all show it stopped. Receive keeps going (a voice or
+ * CW link stops the engine inside tuneRadio, as before). Nothing is logged to
+ * the logbook. Rules: lib/tune-link-guard.js. Only handleProtocolUrl calls it;
+ * spot clicks and every other tune are unchanged.
+ */
+function tuneLinkStopAutoTx(freqKhz, mode) {
+  const qsoNow = !!(popoutJtcatQso || remoteJtcatQso);
+  const engineTx = (eng) => !!(eng && (eng._txActive || (eng._txEnabled && eng._txMessage)));
+  let tx = engineTx(ft8Engine);
+  if (!tx && jtcatManager) {
+    for (const id of jtcatManager.sliceIds) { if (engineTx(jtcatManager.getEngine(id))) { tx = true; break; } }
+  }
+  const plan = TuneLinkGuard.tuneLinkPlan({
+    run: !!jtcatFullAutoCq,
+    hunt: jtcatAutoCqMode !== 'off' || !!jtcatHuntFallbackMode,
+    wsprBeacon: wsprBeaconArmed() || !!jtcatWsprBeaconTimer,
+    spotTarget: !!jtcatSpotTarget,
+    qso: qsoNow,
+    tx,
+    tune: !!jtcatTuneState.active,
+  });
+  if (!plan.stopped.length) return plan;
+  sendCatLog(TuneLinkGuard.tuneLinkLogLine(freqKhz, mode, plan));
+  // 'qsy' is the Spot Target's existing "the dial left the spot" reason.
+  if (plan.clearSpotTarget) { try { clearSpotTarget('qsy'); } catch (e) { console.error('[tune-link] Spot Target:', e); } }
+  if (plan.halt) { try { jtcatHaltTxNow('Tune link'); } catch (e) { console.error('[tune-link] halt:', e); } }
+  const message = TuneLinkGuard.tuneLinkNotice(freqKhz, plan);
+  if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message, warn: true, duration: 12000 });
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-qso-notice', { message });
+  return plan;
+}
+
 function handleProtocolUrl(url) {
   // potacat://tune/14074/USB         → tune to 14074 kHz USB
   // potacat://pair?host=…&token=…&fp=… → redeem a desktop-to-desktop pair link
@@ -43672,7 +43709,10 @@ function handleProtocolUrl(url) {
       const freqKhz = segments[0];
       const mode = (segments[1] || '').toUpperCase();
       if (freqKhz && !isNaN(parseFloat(freqKhz))) {
-        tuneRadio(parseFloat(freqKhz), mode);
+        // A web page can carry this link: stop anything JTCAT transmits on its
+        // own first, so it does not carry on at the new frequency.
+        tuneLinkStopAutoTx(parseFloat(freqKhz), mode);
+        tuneRadio(parseFloat(freqKhz), mode, undefined, { origin: 'link' });
       }
     } else if (action === 'pair') {
       // Async — fire and forget. Result lands in the renderer via the
