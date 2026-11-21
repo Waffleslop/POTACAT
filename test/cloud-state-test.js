@@ -66,7 +66,7 @@ test('main: access is trial / paid / none from the cached subscription; the tunn
   assert.strictEqual(run({ cloudAccessToken: 't', cloudSubscriptionCache: { status: 'active' } }, false).access, 'paid');
   assert.strictEqual(run({ cloudAccessToken: 't', cloudSubscriptionCache: { status: 'expired', trialActive: false, trialExpiresAt: '2026-01-01' } }, false).access, 'none');
   // Pushed on billing state, sign-in/out and tunnel changes, and seeded when the server starts.
-  assert.ok(/onBillingState: \(payload\) => \{ if \(remoteServer\) remoteServer\.broadcastCloudBilling\(payload\); pushCloudState\(\); \}/.test(main));
+  assert.ok(/onBillingState: \(payload\) => \{ if \(remoteServer\) remoteServer\.broadcastCloudBilling\(payload\); pushCloudState\(\);/.test(main));
   assert.ok(/onCloudSessionChanged: \(reason\) => \{\n\s*pushCloudState\(\);/.test(main));
   assert.ok(/cloudTunnel\.on\('change', \(state\) => \{[\s\S]{0,200}pushCloudState\(\);/.test(main));
   assert.ok(/remoteServer = new RemoteServer\(\);[\s\S]{0,300}\n  pushCloudState\(\); \/\/ auth-ok carries/.test(main));
