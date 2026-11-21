@@ -677,6 +677,7 @@ const TESTS = [
   'test/sculan10-scope-test.js', // SCU-LAN10 band scope: spec-shaped frames, inverted amplitude, the line is the first 850 bytes of a 4096-byte frame (#143), the boundary marker and its lock, 850-point resampling, bin-to-frequency
   'test/rig-full-power-test.js', // a radio's real full power (rig.fullPowerW): W5LEE's 5 W Hermes Lite behind deskHPSDR's 100 W TS-2000 emulation, slider, PC command, readback and log in real watts
   'test/cat-rts-advice-test.js', // #849: no surface says to set the radio's CAT RTS menu to Enable; the network-link tune warning says what it saw
+  'test/kenwood-ts890-om-test.js', // #850: the TS-890S sets and reads its mode with OM (USB-D = OM0D;), never MD/DA (TS-890S reference rev1 p.51)
   'test/kenwood-pc-power-test.js', // the TCP Kenwood client (deskHPSDR, Zeus) sends PC on the model's scale, Full power included (6 W = PC100, not PC006), never drops the last slider level, and a radio that cannot report its power gets it again after a band change (#184)
   'test/zeus-cat-digu-test.js', // #185: Zeus through its TS-2000-style CAT port: FT8/FT4 go out as MD9 (DIGU), DIGL as plain LSB, no DA; other Kenwoods unchanged
   'test/power-restore-test.js', // the external-tuner / test restore: never a 100 W guess, never against the operator's own knob (GitHub #111, 1.13.10 regression)
