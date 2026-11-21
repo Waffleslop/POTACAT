@@ -5228,7 +5228,8 @@ function bindRigStateEvents(controller) {
   controller.on('ptt', (on) => txNoteRadioPtt(controller, on));
   controller.on('ptt', (on) => { if (!on && controller === cat) txMetersRestOnRx(); });
   controller.on('ptt', (on) => { if (!on && controller === cat) customCatReader.txEnded(); }); // #242: reads held during TX
-  controller.on('ptt', (on) => { if (on && controller === cat) aprsRfNoteRadioTx(); }); // APRS phase 7: sent only if the radio keyed
+  // APRS phase 7: sent only if the radio keyed. Every readback, not only a change of POTACAT's TX state (#856).
+  controller.on('ptt-readback', (on) => { if (on && controller === cat) aprsRfNoteRadioTx(); });
   // Something the radio did that the operator must see, not only the log
   // (lib/rig-controller.js: a radio left in transmit after a CW message).
   controller.on('notice', (msg) => {
