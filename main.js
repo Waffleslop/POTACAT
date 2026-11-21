@@ -42836,6 +42836,7 @@ let _lastTuneFreq = 0;
 let _lastTuneTime = 0;
 let _lastTuneBand = null; // for ATU auto-tune on band change
 let _atuOwedTune = null;   // { band, start }: a receive-only WSPR hop skipped this band's tune (#747)
+let _tuneLinkAtuSkipped = false; // the last potacat://tune link skipped a band-change tune (its notice says so)
 let _wsprOwedTuneHoldUntil = 0; // the beacon draws no slot before this (an owed tune is running)
 let _modeSuppressUntil = 0; // suppress stale mode broadcasts to ECHOCAT during tune transition
 // Suppress stale FREQUENCY echo to ECHOCAT right after a phone-initiated tune.
@@ -43516,7 +43517,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin, purpose } = {}) {
         smartSdr.setSliceXit(sliceIndex, false);
       }
       // ATU: auto-tune on band change (SmartSDR-only path)
-      bandChangeAtuTune(freqHz / 1e6, purpose, (tuneBandSdr) => {
+      bandChangeAtuTune(freqHz / 1e6, { purpose, origin }, (tuneBandSdr) => {
         sendCatLog(`[ATU] Band changed to ${tuneBandSdr} -> starting SmartSDR ATU tune`);
         smartSdr.setAtu(true);
       });
@@ -43566,7 +43567,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin, purpose } = {}) {
       smartSdr.setSliceXit(sliceIndex, false);
     }
     // ATU: auto-tune on band change.
-    bandChangeAtuTune(freqHz / 1e6, purpose, (tuneBand) => {
+    bandChangeAtuTune(freqHz / 1e6, { purpose, origin }, (tuneBand) => {
       sendCatLog(`[ATU] Band changed to ${tuneBand} -> starting SmartSDR ATU tune`);
       smartSdr.setAtu(true);
     });
@@ -43669,7 +43670,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin, purpose } = {}) {
   }
 
   // ATU: auto-tune on band change
-  bandChangeAtuTune(freqKhz / 1000, purpose, (tuneBand) => {
+  bandChangeAtuTune(freqKhz / 1000, { purpose, origin }, (tuneBand) => {
     if (smartSdr && smartSdr.connected && settings.catTarget && settings.catTarget.type === 'tcp') {
       sendCatLog(`[ATU] Band changed to ${tuneBand} -> starting SmartSDR ATU tune`);
       smartSdr.setAtu(true);
@@ -43685,7 +43686,10 @@ function tuneRadio(freqKhz, mode, brng, { clearXit, origin, purpose } = {}) {
 // A WSPR hop while the beacon is not set to transmit skips the tune (#747);
 // the skipped tune is owed to that band and runs if the beacon is set to
 // transmit there (wsprRunOwedAtuTune); otherwise the next hop decides afresh.
-function bandChangeAtuTune(freqMhz, purpose, start) {
+// A potacat://tune link (origin 'link', a web page) never starts the tune: it
+// keys a carrier (lib/tune-link-guard.js tuneLinkAutoAtu). _lastTuneBand stays
+// put, so the operator's next tune on that band runs it as before.
+function bandChangeAtuTune(freqMhz, { purpose, origin } = {}, start) {
   const d = wsprBandhop.bandChangeAtu({
     enableAtu: !!settings.enableAtu,
     band: freqToBand(freqMhz),
@@ -43694,6 +43698,13 @@ function bandChangeAtuTune(freqMhz, purpose, start) {
     beaconTx: wsprBeaconWillTransmit(),
   });
   if (d.action === 'none') return;
+  const linkAtu = TuneLinkGuard.tuneLinkAutoAtu({ origin, action: d.action });
+  if (linkAtu.linkSkipped) {
+    _atuOwedTune = null; // the radio left any band a WSPR hop owed a tune
+    _tuneLinkAtuSkipped = true;
+    sendCatLog(TuneLinkGuard.tuneLinkAtuLogLine(d.lastBand));
+    return;
+  }
   _lastTuneBand = d.lastBand;
   _atuOwedTune = d.owedBand ? { band: d.owedBand, start } : null;
   if (d.action === 'skip') {
@@ -43757,10 +43768,19 @@ function tuneLinkStopAutoTx(freqKhz, mode) {
   // 'qsy' is the Spot Target's existing "the dial left the spot" reason.
   if (plan.clearSpotTarget) { try { clearSpotTarget('qsy'); } catch (e) { console.error('[tune-link] Spot Target:', e); } }
   if (plan.halt) { try { jtcatHaltTxNow('Tune link'); } catch (e) { console.error('[tune-link] halt:', e); } }
-  const message = TuneLinkGuard.tuneLinkNotice(freqKhz, plan);
+  return plan;
+}
+
+/**
+ * The tune link's notice, sent after tuneRadio so it can say the automatic
+ * ATU tune was skipped (bandChangeAtuTune). Shown only when something was
+ * stopped; a skipped tune alone is a CAT log line, nothing more.
+ */
+function tuneLinkNotify(freqKhz, plan, atuSkipped) {
+  const message = TuneLinkGuard.tuneLinkNotice(freqKhz, plan, { atuSkipped });
+  if (!message) return;
   if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message, warn: true, duration: 12000 });
   if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('jtcat-qso-notice', { message });
-  return plan;
 }
 
 function handleProtocolUrl(url) {
@@ -43778,8 +43798,11 @@ function handleProtocolUrl(url) {
       if (freqKhz && !isNaN(parseFloat(freqKhz))) {
         // A web page can carry this link: stop anything JTCAT transmits on its
         // own first, so it does not carry on at the new frequency.
-        tuneLinkStopAutoTx(parseFloat(freqKhz), mode);
+        const plan = tuneLinkStopAutoTx(parseFloat(freqKhz), mode);
+        // A link never starts the automatic ATU tune (bandChangeAtuTune).
+        _tuneLinkAtuSkipped = false;
         tuneRadio(parseFloat(freqKhz), mode, undefined, { origin: 'link' });
+        tuneLinkNotify(parseFloat(freqKhz), plan, _tuneLinkAtuSkipped);
       }
     } else if (action === 'pair') {
       // Async — fire and forget. Result lands in the renderer via the
