@@ -497,6 +497,7 @@ const PacketRigMode = require('./lib/packet-rig-mode');
 const AprsListen = require('./lib/aprs-listen');           // APRS phase 2: when "Listen on my radio" may start, and why not
 const IdleRadioUse = require('./lib/idle-radio-use');      // Idle Mode yields to anyone using the radio, APRS listening included
 const RadioTuneRoute = require('./lib/radio-tune-route'); // the path tuneRadio drives the radio on: TCI, Flex Direct, CAT, or none
+const IcomNetworkDataMod = require('./lib/icom-network-data-mod'); // #853: which DATA MOD item gets LAN over the network (DATA1/2/3 on an IC-7610)
 const AprsRfFrequency = require('./lib/aprs-rf-frequency'); // APRS: the 2 m frequency by grid square (phase 2), 30 m worldwide (phase 3)
 const AprsRfFrames = require('./lib/aprs-rf-frames');       // APRS phase 2: Dire Wolf's AGW monitor frames -> APRS packets
 const AprsRadioReturn = require('./lib/aprs-radio-return'); // APRS phase 2: the radio goes back after listening
@@ -1958,6 +1959,7 @@ async function _awaitPendingCatClose(ms) {
 let _icomNetworkTransport = null;
 let _icomNetworkDataModRestore = null;
 let _icomNetworkDataModSession = 0;
+let _icomNetworkDataModActive = null; // #853: the DATA number whose DATA MOD this session set to LAN (radios with DATA1/2/3 MOD)
 const DEFAULT_JTCAT_TX_PWR_PCT = 100;
 const DEFAULT_JTCAT_TX_GAIN = (DEFAULT_JTCAT_TX_PWR_PCT / 100) * (DEFAULT_JTCAT_TX_PWR_PCT / 100);
 const DIRECT_TX_PEAK_LIMIT = 0.95;
@@ -6124,47 +6126,9 @@ function applyRaisedCosineFade(samples, sampleRate = 48000, fadeMs = 10) {
   return samples;
 }
 
-const ICOM_NETWORK_DATA_MOD_SPECS = [
-  {
-    models: ['IC-7610'],
-    civAddrs: [0x98],
-    settingId: 0x0092,
-    label: 'DATA1 MOD',
-    networkLabel: 'LAN',
-    networkValue: 0x05,
-    values: { 0x00: 'MIC', 0x01: 'ACC', 0x02: 'MIC+ACC', 0x03: 'USB', 0x04: 'MIC+USB', 0x05: 'LAN' },
-  },
-  {
-    models: ['IC-9700'],
-    civAddrs: [0xA2],
-    settingId: 0x0116,
-    label: 'DATA MOD',
-    networkLabel: 'LAN',
-    networkValue: 0x05,
-    values: { 0x00: 'MIC', 0x01: 'ACC', 0x02: 'MIC+ACC', 0x03: 'USB', 0x04: 'MIC+USB', 0x05: 'LAN' },
-  },
-  {
-    models: ['IC-705'],
-    civAddrs: [0xA4],
-    settingId: 0x0119,
-    label: 'DATA MOD',
-    networkLabel: 'WLAN',
-    networkValue: 0x03,
-    values: { 0x00: 'MIC', 0x01: 'USB', 0x02: 'MIC+USB', 0x03: 'WLAN' },
-  },
-  {
-    // IC-7760 CI-V Reference Guide: set-mode item 0130 "DATA1 MOD" (0131 =
-    // DATA2, 0132 = DATA3 — each data mode has its own source; POTACAT uses
-    // DATA1, which is what `1A 06 01` selects). Value 09 = LAN.
-    models: ['IC-7760'],
-    civAddrs: [0xB2],
-    settingId: 0x0130,
-    label: 'DATA1 MOD',
-    networkLabel: 'LAN',
-    networkValue: 0x09,
-    values: { 0x00: 'MIC', 0x01: 'USB', 0x02: 'LINE-IN', 0x03: 'ACC', 0x04: 'MIC+USB', 0x05: 'MIC+LINE-IN', 0x06: 'MIC+ACC', 0x07: 'MIC+USB+ACC', 0x08: 'MIC+LINE-IN+ACC', 0x09: 'LAN' },
-  },
-];
+// The Icom DATA MOD auto-LAN table and the per-DATA-number choice live in
+// lib/icom-network-data-mod.js (#853: the IC-7610 has DATA1/2/3 MOD).
+const ICOM_NETWORK_DATA_MOD_SPECS = IcomNetworkDataMod.SPECS;
 
 /**
  * Setup notes for a rig as the editor (or a saved rig) describes it. Icoms are
@@ -6886,11 +6850,34 @@ function waitForIcomDataMod(controller, settingId, timeoutMs = 1500) {
   });
 }
 
-async function prepareIcomNetworkDataMod(controller, target, rigModel, sessionId, liveCivAddr = null) {
+/**
+ * #853: the DATA number the radio uses (1/2/3), for a radio with one DATA MOD
+ * per data mode (IC-7610). Waits briefly for the radio's first 1A 06 report,
+ * since POTACAT re-selects the number the radio reported; unknown = 1.
+ */
+async function icomNetworkDataNumber(dataNumberOf, timeoutMs = 1500) {
+  if (typeof dataNumberOf !== 'function') return 1;
+  const until = Date.now() + timeoutMs;
+  for (;;) {
+    const n = Number(dataNumberOf()) || 0;
+    if (n >= 1 && n <= 3) return n;
+    if (Date.now() >= until) return 1;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
+async function prepareIcomNetworkDataMod(controller, target, rigModel, sessionId, liveCivAddr = null, dataNumberOf = null) {
   if (!controller || !controller.connected) return;
   if (!target || target.type !== 'icom-network') return;
   if (settings.audioSource !== 'icom-network') return;
-  const spec = getIcomNetworkDataModSpec(target, rigModel, liveCivAddr);
+  const baseSpec = getIcomNetworkDataModSpec(target, rigModel, liveCivAddr);
+  let spec = baseSpec;
+  if (baseSpec && baseSpec.perData) {
+    const n = await icomNetworkDataNumber(dataNumberOf);
+    if (sessionId !== _icomNetworkDataModSession || cat !== controller || !controller.connected) return;
+    spec = IcomNetworkDataMod.specForDataNumber(baseSpec, n);
+    _icomNetworkDataModActive = { sessionId, dataNumber: spec.dataNumber, baseSpec, target, rigModel, liveCivAddr, dataNumberOf };
+  }
   if (!spec) {
     logIcomNetworkAudio('[Icom-Network-Audio] DATA MOD auto-LAN is not configured for this Icom model; leaving radio MOD input unchanged.');
     return;
@@ -9561,10 +9548,23 @@ async function connectCat() {
     cat.on('status', (s) => {
       if (!s || !s.connected || !enableTxAudio) return;
       setTimeout(() => {
-        prepareIcomNetworkDataMod(networkCat, target, model, dataModSession, networkCodec.radioAddress).catch((err) => {
+        prepareIcomNetworkDataMod(networkCat, target, model, dataModSession, networkCodec.radioAddress, icomDataNumberOf).catch((err) => {
           sendCatLog(`[Icom-Network-Audio] DATA MOD auto-LAN failed: ${err.message || err}`);
         });
       }, 700);
+    });
+    // #853: the DATA number the radio reports (it is what POTACAT re-selects). When
+    // the operator moves to another one (USB-D1 -> USB-D2), the LAN source moves with
+    // it: the old item goes back to the operator's value, the new one is set to LAN.
+    const icomDataNumberOf = () => (networkCodec._dataModeSeen ? networkCodec._dataByte : 0);
+    networkCodec.on('data-mode', ({ on, data }) => {
+      const act = _icomNetworkDataModActive;
+      if (!on || !data || !act || act.sessionId !== dataModSession || act.dataNumber === data || !enableTxAudio) return;
+      logIcomNetworkAudio(`[Icom-Network-Audio] the radio is on DATA${data} now (was DATA${act.dataNumber}): moving the LAN source to DATA${data} MOD`);
+      _icomNetworkDataModActive = null;
+      restoreIcomNetworkDataMod(`DATA${data} selected`).then(() =>
+        prepareIcomNetworkDataMod(networkCat, act.target, act.rigModel, dataModSession, act.liveCivAddr, icomDataNumberOf)
+      ).catch((err) => sendCatLog(`[Icom-Network-Audio] DATA MOD auto-LAN failed: ${err.message || err}`));
     });
     transport.on('audio-ready', () => {
       const msg = `[Icom-Network-Audio] audio stream ready${transport.txReady ? ' (RX/TX)' : ' (RX only)'}`;
