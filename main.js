@@ -13292,10 +13292,10 @@ async function aprsWaitDial(hz, ms, seq) {
   const until = Date.now() + ms;
   while (Date.now() < until) {
     if (seq !== aprsListen.seq) return false;
-    if (AprsListen.tuneAccepted(hz, _currentFreqHz)) return true;
+    if (AprsListen.tuneAccepted(hz, _currentFreqHz, aprsListen.band)) return true;
     await new Promise((r) => setTimeout(r, 200));
   }
-  return AprsListen.tuneAccepted(hz, _currentFreqHz);
+  return AprsListen.tuneAccepted(hz, _currentFreqHz, aprsListen.band);
 }
 
 /** The modem audio lane at Dire Wolf's rate and the radio's receive audio on it. Receive only: no playback is asked for. */
