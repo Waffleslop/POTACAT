@@ -3233,6 +3233,27 @@ const JtcatTxSlot = require('./lib/jtcat-tx-slot');
 // lib/typed-call.js for the rule (most recently changed non-empty field wins).
 const { TypedCallTracker } = require('./lib/typed-call');
 const CloudBillingUi = require('./lib/cloud-billing-ui');
+/**
+ * The shack's Cloud state for its own ECHOCAT devices (ECHOCAT ask 2026-11-21,
+ * item 2): signed in, access (trial / paid / none, from the cached
+ * subscription the Cloud card already reads), the trial's end, and whether the
+ * Cloud Tunnel is on. lib/remote-server.js setCloudState sends it in auth-ok
+ * and pushes changes as cloud-state.
+ */
+function cloudStateNow() {
+  const signedIn = !!settings.cloudAccessToken;
+  const sub = signedIn && settings.cloudSubscriptionCache && typeof settings.cloudSubscriptionCache === 'object' ? settings.cloudSubscriptionCache : null;
+  const access = !sub ? 'none' : (CloudBillingUi.hasAccess(sub) ? (CloudBillingUi.isTrial(sub) ? 'trial' : 'paid') : 'none');
+  const out = { signedIn, access, tunnel: cloudTunnel && cloudTunnel.getState().enabled ? 'on' : 'off' };
+  if (access === 'trial' && sub.trialExpiresAt) {
+    const t = new Date(sub.trialExpiresAt);
+    if (!isNaN(t.getTime())) out.trialEndsAt = t.toISOString();
+  }
+  return out;
+}
+function pushCloudState() {
+  try { if (remoteServer && typeof remoteServer.setCloudState === 'function') remoteServer.setCloudState(cloudStateNow()); } catch { /* best effort */ }
+}
 const typedCalls = new TypedCallTracker();
 const CwRemoteExpand = require('./lib/cw-remote-expand');
 const CwGreeting = require('./lib/cw-greeting'); // {greeting} = GM/GA/GE by the other station's local time
@@ -29677,6 +29698,7 @@ function connectRemote() {
   for (const hook of _remoteServerHooks) {
     try { hook(remoteServer); } catch (err) { sendCatLog('[Echo CAT] wiring hook failed: ' + (err && err.message ? err.message : err)); }
   }
+  pushCloudState(); // auth-ok carries `cloud` from the first device on
   // Seed the activity cache at birth. Without this a phone connecting to a
   // freshly-launched idle desktop gets NO activity-state despite the hello
   // advertising the capability — "idle" must be a stated fact, not an
@@ -45025,7 +45047,7 @@ app.whenReady().then(() => {
       getLocalQsoCount: () => localQsoCount(),
       // A billing state or checkout result also reaches every ECHOCAT
       // client (web + app) so a trial ending or a failed card shows there.
-      onBillingState: (payload) => { if (remoteServer) remoteServer.broadcastCloudBilling(payload); },
+      onBillingState: (payload) => { if (remoteServer) remoteServer.broadcastCloudBilling(payload); pushCloudState(); },
       onCheckoutState: (payload) => { if (remoteServer) remoteServer.broadcastCloudCheckout(payload); },
       // Owner revoked a Guest Pass here: end the guest riding it NOW.
       // PassEnforcement's 'ended' → broadcastPassEnded() kicks the WS
@@ -45039,6 +45061,7 @@ app.whenReady().then(() => {
       // device heartbeat captured the previous client and its early
       // return would keep the new account unregistered — start over.
       onCloudSessionChanged: (reason) => {
+        pushCloudState(); // signed in or out: the devices' cloud-state follows
         teardownCloudDeviceHeartbeat();
         setImmediate(() => ensureCloudDeviceRegistered(reason).catch(() => {}));
         // A new account brings its own templates (and takes this machine's).
@@ -45204,6 +45227,7 @@ function cloudShackNotice(text, kind) {
     cloudTunnel.on('others', (o) => { if (o) cloudShackNotice(TunnelClaim.sharedNotice(o.connectors, o.unclaimed), 'shared'); });
     cloudTunnel.on('change', (state) => {
       if (win && !win.isDestroyed()) win.webContents.send('cloud-tunnel-state', state);
+      pushCloudState(); // tunnel on/off reaches the devices' cloud-state
       refreshCloudTray(state);
       // Mirror the public-exposure state into the WS auth layer.
       // Using `enabled` (not `status === 'live'`) deliberately: even
