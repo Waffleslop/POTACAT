@@ -227,6 +227,7 @@ const TESTS = [
   'test/aprs-listen-test.js', // APRS phase 2: the refusal sentences, the packet mode, and the main.js wiring (receive only)
   'test/aprs-listen-moved-test.js', // APRS listening pauses when the radio moves off the APRS frequency (any cause), the return is dropped; the once-a-minute audio line
   'test/aprs-auto-listen-test.js', // APRS window: listen on open (receive only), once per open, every switch refusal plus TX / JTCAT QSO / owner / Guest Pass, off stays off
+  'test/tune-link-pending-test.js', // a potacat://tune link that launches POTACAT waits for the radio (link up + a readback), tunes once; 60 s then a notice; only the latest link counts
   'test/radio-tune-route-test.js', // the one "radio reachable for tuning" decision: TCI, Flex Direct, CAT (APRS on a FLEX-8600M, 2026-11-18)
   'test/aprs-window-test.js', // APRS window layout: status cards (no heading), timer banner only with an interval, on-air banner only while keyed + Stop = the close abort, one-click beacon buttons, TX power -/+, two-line stations, "Within" in round units -> whole km, one-time range conversion
   'test/aprs-show-last-test.js', // APRS window: "Show the last" 15 min to 6 h (per profile, list and map), the 6 h store with a row cap, two-step age fading (ring at full colour), Clear local to the window (no IPC, ECHOCAT untouched)

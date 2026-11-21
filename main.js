@@ -511,6 +511,7 @@ const AprsMessenger = require('./lib/aprs-messenger');     // APRS A1: messages 
 const AprsTemplates = require('./lib/aprs-templates');     // APRS A2: message templates (fills To and Text; nothing sends until Send)
 const AprsRfGate = require('./lib/aprs-rf-gate');          // APRS phase 7: when the 'aprs' owner may key (one manual beacon over the radio)
 const AprsRfBeacon = require('./lib/aprs-rf-beacon');      // APRS phase 7: the RF beacon packet, its cap, and the one-beacon run
+const TuneLinkPending = require('./lib/tune-link-pending'); // a tune link that launches POTACAT waits for the radio
 const AprsRfMeters = require('./lib/aprs-rf-meters');      // APRS window: S-meter, SWR and RF out beside the radio beacon, and its peaks
 const AprsWindowState = require('./lib/aprs-window-state'); // APRS window: the cards, banners and the "Within" range choices
 const AprsMap = require('./lib/aprs-map');                 // APRS window: the map's saved view (centre and zoom), cleaned before it is kept
@@ -4285,6 +4286,7 @@ function sendCatStatus(s) {
     s = { ...s, connected: true };
   }
   customCatLinkSeen(!!(s && s.connected));
+  tuneLinkPendingNoteLinkUp(!!(s && s.connected)); // a held potacat://tune link waits for this
   // Loud radio-link transitions (see _catLinkUpLast decl). Runs on the
   // EFFECTIVE state (post canTune adjustment) and only on change — status
   // pushes are frequent. The very first status of the session is silent
@@ -4558,6 +4560,9 @@ function sendCatFrequency(hz) {
     console.warn(`[CAT] Ignoring suspicious frequency: ${hz} Hz (below 100 kHz)`);
     return;
   }
+  // A held potacat://tune link waits for the radio's own readback: never our
+  // tune echo, never a listen SDR's frequency.
+  if (hz > 0 && !_jtcatTuneEcho && !(sdrHoldsDial() && hz === listenSdr.hz)) tuneLinkPendingNoteFrequency(hz);
   // SWR-guard latch: leaving the band it tripped on plausibly changes the
   // match (different antenna/resonance) — re-enable TX. Single sink for every
   // frequency source (tune, knob, scan, remote), so no per-path hooks needed.
@@ -43704,6 +43709,7 @@ function handleProtocolUrl(url) {
     const parsed = new URL(url);
     const action = parsed.hostname || (parsed.pathname.match(/^\/?([^/]+)/) || [])[1] || '';
     if (action === 'tune') {
+      if (tuneLinkHold(url)) return; // a launch link waits until the radio is ready (tune-link-pending)
       const parts = parsed.pathname.replace(/^\/+/, '').split('/');
       const segments = parts.filter(p => p && p.toLowerCase() !== 'tune');
       const freqKhz = segments[0];
@@ -43738,6 +43744,57 @@ function handleProtocolUrl(url) {
   } catch (err) {
     console.error('Failed to parse protocol URL:', url, err);
   }
+}
+
+// ─── A tune link that launches POTACAT waits for the radio ───────────────────
+// Cold start used to tune 2 s after launch, before most radios are connected.
+// The link is now held until the radio link is up and a frequency has been read
+// back, then tuned once; 60 s without that drops it with a notice. Only the
+// latest link counts. Rules: lib/tune-link-pending.js.
+const _tuneLinkPending = TuneLinkPending.createPendingTuneLink();
+let _tuneLinkPendingTimer = null;
+
+function tuneLinkRigConfigured() {
+  try {
+    if (isRemoteMode()) return false; // a remote shack keeps today's behaviour
+    const t = settings && settings.catTarget;
+    return !!(t && t.type !== 'none' && !settings.catNone);
+  } catch { return false; }
+}
+
+/** True when the link was held (the caller returns); false = tune it now. */
+function tuneLinkHold(url) {
+  const freqKhz = TuneLinkPending.tuneLinkFreqKhz(url);
+  if (!(freqKhz > 0)) return false; // not a valid tune link: handleProtocolUrl ignores it as before
+  const r = _tuneLinkPending.offer(url, Date.now(), tuneLinkRigConfigured());
+  if (r.action !== 'hold') return false;
+  clearTimeout(_tuneLinkPendingTimer);
+  _tuneLinkPendingTimer = setTimeout(tuneLinkPendingCheck, r.waitMs + 50);
+  sendCatLog(`[tune-link] potacat://tune to ${freqKhz} kHz held until the radio is connected and reads back a frequency (up to ${Math.round(r.waitMs / 1000)} s)`
+    + (r.replaced ? '; it replaces the link held before it' : ''));
+  return true;
+}
+
+function tuneLinkPendingRun(r) {
+  if (!r) return;
+  clearTimeout(_tuneLinkPendingTimer);
+  _tuneLinkPendingTimer = null;
+  if (r.action === 'tune') {
+    sendCatLog('[tune-link] the radio is ready: tuning the held link');
+    // Out of the status / frequency fan-out that noticed it.
+    setImmediate(() => handleProtocolUrl(r.link));
+  } else if (r.action === 'give-up') {
+    sendCatLog(`[tune-link] ${TuneLinkPending.GIVE_UP_NOTICE} within ${Math.round(TuneLinkPending.TUNE_LINK_WAIT_MS / 1000)} s; the held link was dropped`);
+    if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message: TuneLinkPending.GIVE_UP_NOTICE, warn: true, duration: 12000 });
+  }
+}
+function tuneLinkPendingCheck() { tuneLinkPendingRun(_tuneLinkPending.check(Date.now())); }
+// Called from sendCatStatus / sendCatFrequency, hot paths: never throw there.
+function tuneLinkPendingNoteLinkUp(up) {
+  try { tuneLinkPendingRun(_tuneLinkPending.noteLinkUp(up)); } catch (e) { console.error('[tune-link] link note:', e); }
+}
+function tuneLinkPendingNoteFrequency(hz) {
+  try { tuneLinkPendingRun(_tuneLinkPending.noteFrequency(hz)); } catch (e) { console.error('[tune-link] frequency note:', e); }
 }
 
 /**
@@ -45487,7 +45544,9 @@ function cloudShackNotice(text, kind) {
     }
   }
 
-  // Cold start: check if app was launched via potacat:// URL
+  // Cold start: check if app was launched via potacat:// URL. A tune link is
+  // then held until the radio is ready (tuneLinkHold); pair and pass links
+  // keep the 2 s for the window to load.
   const protocolUrl = process.argv.find(a => a.startsWith('potacat://'));
   if (protocolUrl) {
     setTimeout(() => handleProtocolUrl(protocolUrl), 2000);
