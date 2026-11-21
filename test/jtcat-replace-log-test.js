@@ -33,8 +33,12 @@ test('reply side, only our grid sent: not logged', () => {
 test('CQ side, we sent their report, waiting for R: not logged', () => {
   assert.strictEqual(replaceLogsQso(q({ mode: 'cq', phase: 'cq-report', sentReport: '-05' }), 'K1ABC'), false);
 });
-test('CQ side, their R-report in and our RR73 out, not yet logged: logged', () => {
-  assert.strictEqual(replaceLogsQso(q({ mode: 'cq', phase: 'cq-rr73', report: '-08', sentReport: '-05' }), 'K1ABC'), true);
+const rr73 = (o) => q(Object.assign({ mode: 'cq', phase: 'cq-rr73', report: '-08', sentReport: '-05', myCall: 'K3SBP', txMsg: 'W1AW K3SBP RR73' }, o));
+test('CQ side, our RR73 went out but the log was missed: logged', () => {
+  assert.strictEqual(replaceLogsQso(rr73({ _txSentMsg: 'W1AW K3SBP RR73' }), 'K1ABC'), true);
+});
+test('CQ side, their R-report in, our RR73 queued but never sent: NOT logged (#807)', () => {
+  assert.strictEqual(replaceLogsQso(rr73(), 'K1ABC'), false);
 });
 test('an already logged QSO is never logged again', () => {
   assert.strictEqual(replaceLogsQso(q({ mode: 'cq', phase: 'cq-rr73', report: '-08', _logged: true }), 'K1ABC'), false);

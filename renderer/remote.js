@@ -3129,8 +3129,20 @@
           const toast = document.createElement('div');
           toast.className = 'ft8-error-toast';
           toast.textContent = msg.error || 'Error';
+          // The retry cap stopped a QSO whose RR73 never came: not logged
+          // (#807). Send 73 puts the 73 on the air, which logs it.
+          if (msg.send73) {
+            toast.classList.add('ft8-error-toast-action');
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'ft8-qso-skip-btn';
+            b.textContent = 'Send 73';
+            b.addEventListener('click', () => { ft8Send({ type: 'jtcat-skip-phase', unconfirmed: true }); toast.remove(); });
+            toast.appendChild(document.createTextNode(' '));
+            toast.appendChild(b);
+          }
           ft8View.appendChild(toast);
-          setTimeout(() => toast.remove(), 4000);
+          setTimeout(() => toast.remove(), msg.send73 ? 60000 : 4000);
           break;
         }
         ft8QsoState = (msg.phase && msg.phase !== 'idle') ? msg : null;

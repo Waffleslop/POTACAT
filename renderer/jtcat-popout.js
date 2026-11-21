@@ -1870,6 +1870,26 @@ function _applyPopoutTheme(payload) {
         });
         qsoToast.appendChild(fb);
       }
+      // The retry cap stopped a QSO whose RR73 never came: not logged (#807).
+      // Send 73 puts the 73 on the air, which logs it. Stays up for a minute.
+      if (data.send73) {
+        var sb = document.createElement('button');
+        sb.className = 'jp-toast-action';
+        sb.textContent = 'Send 73';
+        sb.addEventListener('click', function(e) {
+          e.stopPropagation();
+          window.api.jtcatSkipPhase({ unconfirmed: true });
+          qsoToast.classList.remove('visible');
+          qsoToast.classList.remove('error');
+        });
+        qsoToast.appendChild(sb);
+        if (qsoToastTimer) clearTimeout(qsoToastTimer);
+        qsoToastTimer = setTimeout(function() {
+          qsoToast.classList.remove('visible');
+          qsoToast.classList.remove('error');
+          delete qsoToast.dataset.errorToast;
+        }, 60000);
+      }
       renderQsoTracker();
       return;
     } else {

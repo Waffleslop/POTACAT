@@ -122,7 +122,8 @@ section('REPLY mode — happy paths');
     const r = drive(baseQ(), [decode('K3SBP W1ABC R-05', { db: -8 })], eng);
     assertEq(r.q.phase, '73', 'reply → 73 (skip r+report) when they sent R+report');
     assertEq(r.lastTx, 'W1ABC K3SBP RR73', 'TX is RR73 since their R+report confirmed');
-    assertEq(r.doneCount, 1, 'logged at first R+report');
+    assertEq(r.doneCount, 0, 'not logged at their R+report: it logs when our RR73 goes out (#807)');
+    assert(sm.txLogsQso(r.q, 'W1ABC K3SBP RR73') === true, 'our RR73 going on the air logs it');
   }
 
   // Step 4 → 5: in r+report, they confirmed with RR73 → 73 and LOG
@@ -315,7 +316,7 @@ section('Stalled QSO — canCloseoutQso eligibility matrix');
   assert(sm.canCloseoutQso(null) === false, 'null QSO → not eligible');
 }
 
-section('Stalled QSO — closeoutStalledQso (log + final 73)');
+section('Skip to the 73 — sendFinal73 queues the 73; the log waits for it to go out (#807)');
 {
   const mkQ = () => ({
     mode: 'reply', phase: 'r+report', call: 'W1ABC', myCall: 'K3SBP',
@@ -323,34 +324,35 @@ section('Stalled QSO — closeoutStalledQso (log + final 73)');
   });
   {
     const q = mkQ();
-    let lastTx = null, doneCount = 0;
-    const ok = sm.closeoutStalledQso(q, (m) => { lastTx = m; }, () => { doneCount++; }, { log: () => {} });
-    assertEq(ok, true, 'closeout accepted');
-    assertEq(q.phase, '73', 'phase forced to courtesy 73');
-    assertEq(lastTx, 'W1ABC K3SBP 73', 'final TX is the courtesy 73');
-    assertEq(doneCount, 1, 'logged exactly once (onDone)');
+    let lastTx = null;
+    const ok = sm.sendFinal73(q, (m) => { lastTx = m; }, { log: () => {} });
+    assertEq(ok, true, 'Skip to the 73 accepted');
+    assertEq(q.phase, '73', 'phase moves to the 73 leg');
+    assertEq(lastTx, 'W1ABC K3SBP 73', 'the 73 is queued');
+    assert(!q._logged, 'not logged when the 73 is only queued');
+    assert(sm.txLogsQso(q, lastTx) === true, 'logged when the 73 goes on the air (WSJT-X: choosing Tx5)');
   }
   {
     const q = Object.assign(mkQ(), { hound: true });
-    let lastTx = null, doneCount = 0;
-    const ok = sm.closeoutStalledQso(q, (m) => { lastTx = m; }, () => { doneCount++; }, {});
-    assertEq(ok, false, 'hound closeout refused');
+    let lastTx = null;
+    const ok = sm.sendFinal73(q, (m) => { lastTx = m; }, {});
+    assertEq(ok, false, 'hound refused (hounds send no 73)');
     assertEq(q.phase, 'r+report', 'phase unchanged on refusal');
     assertEq(lastTx, null, 'no TX queued on refusal');
-    assertEq(doneCount, 0, 'not logged on refusal');
   }
-  // Closeout hands off to the EXISTING courtesy-73 leg, which tears down.
+  // Hands off to the EXISTING courtesy-73 leg, which tears down.
   {
     const q = mkQ();
-    sm.closeoutStalledQso(q, () => {}, () => {}, {});
+    sm.sendFinal73(q, () => {}, {});
     const eng = makeEngine();
     eng._txEnabled = true;
     let r = drive(q, [], eng);
-    assertEq(r.q.phase, '73', 'courtesy cycle waits until the 73 has gone out');
+    assertEq(r.q.phase, '73', 'the 73 leg waits until the 73 has gone out');
     assertEq(r.q._courtesyWaits, 1, 'one courtesy wait counted');
     q._txSentMsg = q.txMsg; // the 73 went out
     r = drive(q, [], eng);
     assertEq(r.q.phase, 'done', 'cycle after the 73 went out → done');
+    assertEq(r.doneCount, 0, 'the state machine itself never logs the Skip 73 (the TX-start hook does)');
     assertEq(eng._txEnabled, false, 'engine TX disabled by courtesy teardown');
     assertEq(eng._lastTxMsg, '', 'TX message cleared');
     assertEq(eng._lastSlot, 'auto', 'TX slot back to auto');
@@ -360,13 +362,25 @@ section('Stalled QSO — closeoutStalledQso (log + final 73)');
     const JtcatParser = require('../renderer/jtcat-parser');
     const q = Object.assign(mkQ(), { call: 'PJ4/K1ABC' });
     let lastTx = null;
-    sm.closeoutStalledQso(q, (m) => { lastTx = m; }, () => {}, {});
+    sm.sendFinal73(q, (m) => { lastTx = m; }, {});
     assertEq(lastTx, JtcatParser.formatDirectedMsg('PJ4/K1ABC', 'K3SBP', '73'),
       'nonstandard call routes through formatDirectedMsg bracket rules');
+    assert(sm.txLogsQso(q, lastTx) === true, 'the bracketed 73 is recognised as our 73');
+  }
+  // Both Skip handlers (window and ECHOCAT) send the 73 through sendFinal73
+  // and never log on the press itself.
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
+  for (const h of ["remoteServer.on('jtcat-skip-phase'", "ipcMain.on('jtcat-popout-skip-phase'"]) {
+    const at = main.indexOf(h);
+    const body = main.slice(at, main.indexOf('\n  });', at));
+    assert(body.includes('_jtcatStateMachine.sendFinal73('), h + ' sends the 73 through sendFinal73');
+    assert(!body.includes('jtcatAutoLog('), h + ' does not log on the press; the 73 going out logs it');
+    assert(!body.includes('closeoutStalledQso'), h + ' no longer uses the old closeout');
+    assert(body.includes('jtcatTakeUnconfirmed('), h + ' can finish a QSO the retry cap stopped');
   }
 }
 
-section('Stalled QSO — end-to-end KQ4MHD scenario (partner heard, never sends RR73)');
+section('Stalled QSO — retry cap with R+report sent and no RR73: not logged, no 73 (#807)');
 {
   // We answered W1ABC's CQ; they sent a report; we advanced to r+report.
   const q = {
@@ -378,45 +392,157 @@ section('Stalled QSO — end-to-end KQ4MHD scenario (partner heard, never sends 
   eng._txEnabled = true;
   drive(q, [decode('K3SBP W1ABC -05', { db: -8 })], eng);
   assertEq(q.phase, 'r+report', 'setup: reached r+report');
-  // The partner now repeats their report every cycle (HEARD each time) but
-  // never sends RR73 — the old heard-reset pinned retries at 0 and hung
-  // here forever. Apply the policy per cycle exactly as main.js's
-  // jtcatHandleRetryStall does.
-  let action = null;
+  // The partner repeats their report every cycle (HEARD each time) but never
+  // sends RR73. Apply the policy per cycle as jtcatHandleRetryStall does.
+  let out = null;
   let cycles = 0;
+  let done = 0;
+  let lastTx = q.txMsg;
   for (let i = 0; i < 40 && q.phase === 'r+report'; i++) {
     q._heardThisCycle = false;
     const before = q.phase;
-    drive(q, [decode('K3SBP W1ABC -05')], eng);
+    sm.advanceJtcatQso(q, [decode('K3SBP W1ABC -05')], (m) => { lastTx = m; }, () => { done++; }, { engine: eng, log: () => {} });
     if (q.phase !== before) break;
     cycles++;
-    const out = sm.decideRetryOutcome({
+    out = sm.decideRetryOutcome({
       phase: q.phase, txRetries: q.txRetries,
       maxCq: 15, maxQso: 12, runMode: false,
       closeoutEligible: sm.canCloseoutQso(q),
     });
     q.txRetries = out.retries;
-    action = out.action;
-    if (action !== 'continue') break;
+    if (out.action !== 'continue') break;
   }
   assertEq(cycles, 12, 'cap trips on the 12th stuck cycle (default jtcatMaxQsoAttempts)');
-  assertEq(action, 'closeout', 'reports were exchanged → closeout, not abort');
-  let lastTx = null, doneCount = 0;
-  sm.closeoutStalledQso(q, (m) => { lastTx = m; }, () => { doneCount++; }, {});
-  assertEq(doneCount, 1, 'QSO logged exactly once');
-  assertEq(lastTx, 'W1ABC K3SBP 73', 'final 73 queued');
-  drive(q, [], eng);
-  assertEq(q.phase, '73', 'courtesy leg holds until the 73 has gone out');
-  q._txSentMsg = q.txMsg; // the 73 went out
-  drive(q, [], eng);
-  assertEq(q.phase, 'done', 'courtesy leg completes');
-  assertEq(eng._txEnabled, false, 'TX disabled at done');
+  assertEq(out.action, 'abort', 'the cap ends the QSO the same as the other abort paths');
+  assertEq(out.unconfirmed, true, 'flagged: reports both ways, their RR73 never came');
+  assertEq(done, 0, 'not logged');
+  assertEq(lastTx, 'W1ABC K3SBP R-08', 'no 73 queued: the last TX is still our R-report');
+  assertEq(sm.giveUpMessage({ kind: 'unconfirmed', call: 'W1ABC', max: 12 }),
+    'Not logged: W1ABC never sent RR73. Press Send 73 to log it.', 'operator notice');
+  // main.js: the stall handler never sends a 73 and never logs.
+  const main = readSrc(path.join(__dirname, '..', 'main.js'));
+  const at = main.indexOf('function jtcatHandleRetryStall(');
+  const body = main.slice(at, main.indexOf('\n}\n', at));
+  assert(!body.includes('sendFinal73') && !body.includes('closeoutStalledQso'), 'retry cap sends no 73');
+  assert(!/o\.onDone\(/.test(body), 'retry cap does not log');
+  assert(body.includes("kind: 'unconfirmed'"), 'retry cap shows the not-logged notice');
+  assert(body.includes('jtcatStashUnconfirmed('), 'retry cap keeps the QSO for a later Skip to the 73');
+  assert(body.includes('send73: !!outcome.unconfirmed'), 'the notice offers Send 73');
+  // The window and ECHOCAT Web show a Send 73 button that sends the stopped QSO's 73.
+  const pop = readSrc(path.join(__dirname, '..', 'renderer', 'jtcat-popout.js'));
+  assert(/if \(data\.send73\)[\s\S]{0,300}'Send 73'[\s\S]{0,200}window\.api\.jtcatSkipPhase\(\{ unconfirmed: true \}\)/.test(pop), 'JTCAT window: Send 73 button on the notice');
+  const web = readSrc(path.join(__dirname, '..', 'renderer', 'remote.js'));
+  assert(/if \(msg\.send73\)[\s\S]{0,400}'Send 73'[\s\S]{0,200}type: 'jtcat-skip-phase', unconfirmed: true/.test(web), 'ECHOCAT Web: Send 73 button on the notice');
+}
+
+section('Logging rule — only when our RR73/RRR/73 goes out or theirs arrives (#807)');
+{
+  const cqQ = () => ({
+    mode: 'cq', phase: 'cq-report', call: 'A1BCD', grid: 'AB20',
+    txMsg: 'A1BCD K3SBP -06', report: null, sentReport: '-06',
+    myCall: 'K3SBP', myGrid: 'FN20', txRetries: 0,
+  });
+  // CQ side: their R+report queues our RR73; the log waits for it to go out.
+  {
+    const q = cqQ();
+    const r = drive(q, [decode('K3SBP A1BCD R-12')], makeEngine());
+    assertEq(q.phase, 'cq-rr73', 'CQ side: their R+report → RR73 leg');
+    assertEq(r.lastTx, 'A1BCD K3SBP RR73', 'CQ side: RR73 queued');
+    assertEq(r.doneCount, 0, 'CQ side: NOT logged at their R+report decode');
+    assert(sm.txLogsQso(q, 'A1BCD K3SBP -06') === false, 'CQ side: our report going out again does not log');
+    assert(sm.txLogsQso(q, 'A1BCD K3SBP RR73') === true, 'CQ side: logs when our RR73 starts going out');
+  }
+  // Halting before the RR73 goes out: never logged.
+  {
+    const q = cqQ();
+    let done = 0;
+    const eng = makeEngine();
+    const step = (res) => sm.advanceJtcatQso(q, res, () => {}, () => { done++; }, { engine: eng, log: () => {} });
+    step([decode('K3SBP A1BCD R-12')]);
+    for (let i = 0; i <= sm.COURTESY_MAX_WAIT_CYCLES && q.phase !== 'done'; i++) step([]);
+    assertEq(q.phase, 'done', 'the RR73 leg closes when the RR73 never went out');
+    assertEq(done, 0, 'halted before the RR73 went out: not logged');
+  }
+  // Reply side: their RR73 / RRR / 73 after our R+report logs on receipt,
+  // and our 73 going out afterwards does not log it twice.
+  for (const ack of ['RR73', 'RRR', '73']) {
+    const q = {
+      mode: 'reply', phase: 'r+report', call: 'W1ABC', myCall: 'K3SBP',
+      report: '-05', sentReport: '-08', txMsg: 'W1ABC K3SBP R-08', txRetries: 0,
+    };
+    const r = drive(q, [decode('K3SBP W1ABC ' + ack)], makeEngine());
+    assertEq(r.doneCount, 1, `reply side: logged on their ${ack}`);
+    assertEq(r.lastTx, 'W1ABC K3SBP 73', `reply side: our 73 queued after their ${ack}`);
+    q._logged = true; // what jtcatAutoLog does
+    assert(sm.txLogsQso(q, 'W1ABC K3SBP 73') === false, `reply side: our 73 after their ${ack} is not a second log`);
+  }
+  // Reply side, their R+report (they took our report-first opener): we send
+  // RR73 and log when it goes out.
+  {
+    const q = {
+      mode: 'reply', phase: 'reply', call: 'W1ABC', myCall: 'K3SBP',
+      report: null, sentReport: '-07', txMsg: 'W1ABC K3SBP -07', txRetries: 0,
+    };
+    const r = drive(q, [decode('K3SBP W1ABC R-12')], makeEngine());
+    assertEq(r.lastTx, 'W1ABC K3SBP RR73', 'reply side: RR73 queued on their R+report');
+    assertEq(r.doneCount, 0, 'reply side: their R+report alone does not log');
+    assert(sm.txLogsQso(q, 'W1ABC K3SBP RR73') === true, 'reply side: our RR73 going out logs it');
+  }
+  // No double log: our RR73 went out (logged), then their 73 arrives.
+  {
+    const q = cqQ();
+    drive(q, [decode('K3SBP A1BCD R-12')], makeEngine());
+    assert(sm.txLogsQso(q, q.txMsg) === true, 'RR73 on the air: log');
+    q._logged = true; q._txSentMsg = q.txMsg;
+    const r = drive(q, [decode('K3SBP A1BCD 73')], makeEngine());
+    assertEq(r.doneCount, 0, 'their 73 after our RR73 is not a second log');
+    assert(sm.txLogsQso(q, q.txMsg) === false, 'a repeat of the RR73 is not a second log');
+  }
+  // What counts as "our 73".
+  {
+    const q = Object.assign(cqQ(), { phase: 'cq-rr73', report: '-12', txMsg: 'A1BCD K3SBP RR73' });
+    assert(sm.txLogsQso(q, 'A1BCD K3SBP RRR') === true, 'RRR is a 73-family message');
+    assert(sm.txLogsQso(q, 'A1BCD K3SBP 73') === true, '73 is a 73-family message');
+    assert(sm.txLogsQso(q, 'W9XYZ K3SBP RR73') === false, 'a 73 to another station does not log this QSO');
+    assert(sm.txLogsQso(q, 'A1BCD K3SBP R-06') === false, 'an R-report is not a 73');
+    assert(sm.txLogsQso(q, 'CQ K3SBP FN20') === false, 'a CQ is not a 73');
+    assert(sm.txLogsQso(Object.assign(q, { hound: true }), 'A1BCD K3SBP RR73') === false, 'a hound never logs on its own TX');
+    assert(sm.txLogsQso(null, 'A1BCD K3SBP RR73') === false, 'no QSO: no log');
+    assert(sm.txLogsQso({ mode: 'cq', phase: 'cq-rr73', call: 'A1BCD', myCall: 'K3SBP', report: null, sentReport: null },
+      'A1BCD K3SBP RR73') === false, 'no report either way: nothing to log');
+    const fd = { mode: 'reply', phase: '73', call: 'W1ABC', myCall: 'K3SBP', fd: true, theirExch: '6A WI' };
+    assert(sm.txLogsQso(fd, 'W1ABC K3SBP RR73') === true, 'Field Day S&P: our RR73 with their exchange in hand logs');
+    assert(sm.txLogsQso(Object.assign({}, fd, { theirExch: '' }), 'W1ABC K3SBP RR73') === false, 'Field Day with no exchange: no log');
+  }
+  // main.js wiring: the TX-start hook logs; a click on their R-report no
+  // longer logs before our RR73 has gone out; supersede follows the rule.
+  {
+    const main = readSrc(path.join(__dirname, '..', 'main.js'));
+    const at = main.indexOf('function jtcatNoteTxSent(');
+    const hook = main.slice(at, main.indexOf('\n}\n', at));
+    assert(hook.includes('_jtcatStateMachine.txLogsQso('), 'tx-start dispatch asks txLogsQso');
+    assert(hook.includes('popoutJtcatOnDone(') && hook.includes('remoteJtcatOnDone('), 'tx-start logs through each surface\'s own log path (window keeps the Log QSO prompt)');
+    let from = 0; let n = 0;
+    for (;;) {
+      const i = main.indexOf("nextStep === 'send-rr73'", from);
+      if (i < 0) break;
+      const j = main.indexOf("nextStep === 'send-r-report'", i);
+      const branch = main.slice(i, j);
+      assert(!branch.includes('jtcatAutoLog('), 'send-rr73 click does not log before the RR73 goes out (' + (++n) + ')');
+      from = j;
+    }
+    assertEq(n, 2, 'both reply handlers (window and ECHOCAT) checked');
+    assert(sm.replaceLogsQso({ call: 'W1AW', mode: 'cq', phase: 'cq-rr73', report: '-08', sentReport: '-05', txMsg: 'W1AW K3SBP RR73' }, 'K1ABC') === false,
+      'clicking away before our RR73 went out does not log');
+  }
 }
 
 section('Stalled QSO — giveUpMessage flavors');
 {
-  assertEq(sm.giveUpMessage({ kind: 'closeout', call: 'W1ABC', max: 12 }),
-    'W1ABC stopped responding after 12 tries — QSO logged, sending final 73.', 'closeout notice');
+  assertEq(sm.giveUpMessage({ kind: 'unconfirmed', call: 'W1ABC', max: 12 }),
+    'Not logged: W1ABC never sent RR73. Press Send 73 to log it.', 'unconfirmed notice');
+  assertEq(sm.giveUpMessage({ kind: 'unconfirmed', call: 'W1ABC', max: 12, run: true }),
+    'Not logged: W1ABC never sent RR73. Calling CQ again.', 'unconfirmed notice in Run');
   assertEq(sm.giveUpMessage({ kind: 'abort', phase: 'cq', call: null, max: 15 }),
     'CQ: no answer after 15 calls — TX stopped.', 'cq abort');
   assertEq(sm.giveUpMessage({ kind: 'abort', phase: 'r+report', call: 'KH1/KH7Z', hound: true, max: 12 }),
@@ -443,7 +569,7 @@ section('Skip — a station that never answered is abandoned, not advanced (KB2U
   const main = readSrc(path.join(__dirname, '..', 'main.js'));
   for (const h of ["remoteServer.on('jtcat-skip-phase'", "ipcMain.on('jtcat-popout-skip-phase'"]) {
     const at = main.indexOf(h);
-    const body = main.slice(at, at + 2500);
+    const body = main.slice(at, main.indexOf('\n  });', at)); // the whole handler
     assert(body.includes('_jtcatStateMachine.skipAbandonsQso(q)'), h + ' asks skipAbandonsQso before advancing');
     assert(body.indexOf('skipAbandonsQso') < body.indexOf("'R' + rpt"), h + ' abandons before the R-report advance');
   }
@@ -491,7 +617,8 @@ section('CQ mode — happy path');
     assertEq(r.q.phase, 'cq-rr73', 'cq-report → cq-rr73 on R+report');
     assertEq(r.q.report, '-12', 'captured their report');
     assertEq(r.lastTx, 'A1BCD K3SBP RR73', 'TX is RR73');
-    assertEq(r.doneCount, 1, 'logged at R+report');
+    assertEq(r.doneCount, 0, 'not logged at their R+report decode (#807)');
+    assert(sm.txLogsQso(r.q, 'A1BCD K3SBP RR73') === true, 'logs when our RR73 goes on the air');
   }
 
   // Their response had no report yet (heard but no advance)
@@ -561,14 +688,14 @@ section('CQ mode — happy path');
     assertEq(r.doneCount, 0, 'their RR73 to someone else does not confirm ours');
   }
   {
-    // They vanish after exchanging reports: the retry cap's close-out logs.
+    // They vanish after exchanging reports: Skip sends the 73, which logs as it goes out.
     const q = compressedQ();
-    assert(sm.canCloseoutQso(q) === true, 'compressed reply with reports both ways is close-out eligible');
-    let logged = 0; let tx = '';
-    assert(sm.closeoutStalledQso(q, (m) => { tx = m; }, () => { logged++; }) === true, 'close-out runs');
-    assertEq(logged, 1, 'close-out logs the compressed QSO');
-    assertEq(tx, 'A1BCD K3SBP 73', 'close-out sends a final 73');
-    assertEq(q.phase, 'cq-rr73', 'close-out uses the CQ ladder courtesy leg');
+    assert(sm.canCloseoutQso(q) === true, 'compressed reply with reports both ways can be finished with a 73');
+    let tx = '';
+    assert(sm.sendFinal73(q, (m) => { tx = m; }) === true, 'Skip to the 73 runs');
+    assertEq(tx, 'A1BCD K3SBP 73', 'Skip sends a final 73');
+    assertEq(q.phase, 'cq-rr73', 'the 73 uses the CQ ladder courtesy leg');
+    assert(sm.txLogsQso(q, tx) === true, 'and logs when it goes out');
     assert(sm.replaceLogsQso(compressedQ(), 'W9XYZ') === false, 'clicking away mid compressed reply does not log it');
   }
 
@@ -817,7 +944,8 @@ section('End-to-end QSO arcs');
   let d2 = 0;
   sm.advanceJtcatQso(q2, [decode('K3SBP N4XYZ R-15')], () => {}, () => { d2++; }, { engine: makeEngine(), log: () => {} });
   assertEq(q2.phase, 'cq-rr73', 'cq-arc-2: → cq-rr73');
-  assertEq(d2, 1, 'cq-arc-2: logged at R-report');
+  assertEq(d2, 0, 'cq-arc-2: not logged at their R-report (#807)');
+  assert(sm.txLogsQso(q2, q2.txMsg) === true, 'cq-arc-2: logs when the RR73 goes out');
   drive(q2, [], makeEngine()); // courtesy
   assertEq(q2.phase, 'cq-rr73', 'cq-arc-3: courtesy wait');
   q2._txSentMsg = q2.txMsg; // the RR73 went out
@@ -1011,7 +1139,8 @@ section('Nonstandard callsigns — CQ-side ladder (GB13COL answers our CQ)');
   r = drive(q, [decode('K3SBP <GB13COL> R-03')], makeEngine());
   assertEq(q.phase, 'cq-rr73', 'bracketed R-report advances to cq-rr73');
   assertEq(r.lastTx, 'GB13COL <K3SBP> RR73', 'RR73 leg is type 4 (their call in full)');
-  assertEq(r.doneCount, 1, 'logs when both reports are in hand');
+  assertEq(r.doneCount, 0, 'not logged until the RR73 goes out (#807)');
+  assert(sm.txLogsQso(q, 'GB13COL <K3SBP> RR73') === true, 'the type-4 RR73 going out logs it');
 }
 
 // ============================================================
@@ -1031,7 +1160,8 @@ section('Skip Grid — report-first reply');
   assertEq(r.lastTx, 'W1ABC K3SBP RR73', 'skip-grid: we close with RR73');
   assertEq(q.sentReport, '-07', 'sentReport preserves the report we actually transmitted');
   assertEq(q.report, '-12', 'their report captured');
-  assertEq(r.doneCount, 1, 'logs at R-report receipt');
+  assertEq(r.doneCount, 0, 'skip-grid: not logged at their R-report (#807)');
+  assert(sm.txLogsQso(q, 'W1ABC K3SBP RR73') === true, 'skip-grid: logs when our RR73 goes out');
 }
 {
   // Partner ignores our report-opener and sends a plain report (treated it
@@ -1200,7 +1330,7 @@ section('Own-TX echo guard — addressed-to-us matching (N3VD)');
     ], makeEngine());
     assertEq(q.phase, 'cq-rr73', 'real R-report still advances');
     assertEq(q.report, '-05', 'THEIR report recorded, not our echo');
-    assertEq(r.doneCount, 1, 'logs on the real R-report');
+    assertEq(r.doneCount, 0, 'the real R-report queues the RR73; the log waits for it to go out (#807)');
   }
   // Leniency preserved: plain (R-less) report addressed to us still advances.
   {
@@ -1208,7 +1338,7 @@ section('Own-TX echo guard — addressed-to-us matching (N3VD)');
     const r = drive(q, [decode('N3VD AD9AR -05', { db: -12 })], makeEngine());
     assertEq(q.phase, 'cq-rr73', 'plain report addressed to us still advances');
     assertEq(q.report, '-05', 'plain report captured');
-    assertEq(r.doneCount, 1, 'and logs');
+    assertEq(r.doneCount, 0, 'and logs only when the RR73 goes out (#807)');
   }
   // Reply mode + Skip Grid: our echoed opener carries a report — must not
   // advance with our own report recorded as theirs.
@@ -1477,7 +1607,8 @@ section('Pre-encode race — concurrent setTxFreq + setTxMessage');
       assertEq(r.q.theirClass, '6A', 'FD S&P: captured their class');
       assertEq(r.q.theirSection, 'WI', 'FD S&P: captured their section');
       assertEq(r.lastTx, 'W1ABC K3SBP RR73', 'FD S&P: TX RR73');
-      assertEq(r.doneCount, 1, 'FD S&P: logs on RR73');
+      assertEq(r.doneCount, 0, 'FD S&P: not logged at their R+exchange (#807)');
+      assert(sm.txLogsQso(r.q, 'W1ABC K3SBP RR73') === true, 'FD S&P: logs when our RR73 goes out');
     }
 
     // Late RR73 (we missed their R+exchange) still closes the QSO with a 73
@@ -1596,11 +1727,11 @@ section('Pre-encode race — concurrent setTxFreq + setTxMessage');
       assertEq(D({ phase: 'r+report', txRetries: 11, maxCq: 15, maxQso: 12, runMode: true, closeoutEligible: false }),
         { retries: 12, action: 'rearm' }, 'cap re-arms CQ in run mode');
       assertEq(D({ phase: 'r+report', txRetries: 11, maxCq: 15, maxQso: 12, runMode: false, closeoutEligible: true }),
-        { retries: 12, action: 'closeout' }, 'cap with reports exchanged both ways → graceful closeout');
+        { retries: 12, action: 'abort', unconfirmed: true }, 'cap with reports both ways: stops unlogged, flagged unconfirmed (#807)');
       assertEq(D({ phase: 'r+report', txRetries: 11, maxCq: 15, maxQso: 12, runMode: true, closeoutEligible: true }),
-        { retries: 12, action: 'closeout' }, 'closeout beats rearm — run mode logs before moving on');
+        { retries: 12, action: 'rearm', unconfirmed: true }, 'run mode re-arms CQ, unlogged (#807)');
       assertEq(D({ phase: 'r+report', txRetries: 3, maxCq: 15, maxQso: 12, runMode: false, closeoutEligible: true }),
-        { retries: 4, action: 'continue' }, 'closeout eligibility alone never trips the cap early');
+        { retries: 4, action: 'continue' }, 'reports both ways never trip the cap early');
       assertEq(D({ phase: 'cq', txRetries: 99, maxCq: 15, maxQso: 12, runMode: true, closeoutEligible: false }),
         { retries: 0, action: 'continue' }, 'cq phase never aborts in run mode (CQ forever)');
       assertEq(D({ phase: 'cq', txRetries: 14, maxCq: 15, maxQso: 12, runMode: false, closeoutEligible: false }),
