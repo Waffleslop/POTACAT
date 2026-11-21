@@ -74,7 +74,8 @@ contextBridge.exposeInMainWorld('api', {
   // { call, sentence, link, convos: [{ call, unread, updatedAt, last, lastDir, lastState }], unread, viewing,
   //   thread: [{ lid, dir: 'in'|'out', text, at, id, via, state, tries, status }] }
   messagesGet: () => ipcRenderer.send('aprs-messages-get'),
-  messageSend: (to, text) => ipcRenderer.invoke('aprs-message-send', { to: String(to || ''), text: String(text || '') }),
+  messageSend: (to, text, over) => ipcRenderer.invoke('aprs-message-send', { to: String(to || ''), text: String(text || ''), over: over === 'radio' ? 'radio' : 'internet' }),
+  messageRetry: (lid) => ipcRenderer.invoke('aprs-message-retry', String(lid || '')), // A3: one more try on the radio
   messagesView: (call) => ipcRenderer.send('aprs-messages-view', String(call || '')),
   messageStop: (lid) => ipcRenderer.send('aprs-message-stop', String(lid || '')),
   messagesDelete: (call) => ipcRenderer.send('aprs-messages-delete', String(call || '')),

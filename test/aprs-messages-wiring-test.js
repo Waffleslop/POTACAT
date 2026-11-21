@@ -80,12 +80,15 @@ const fnBody = (src, name) => {
     assert.ok(/aprsUplinkWant\('messages', false\)/.test(run), 'let go when nothing waits');
   });
 
-  await test('main.js: messages go out as the uplink login (-10) through the verified uplink only, never a radio', () => {
+  await test('main.js: messages go out as the uplink login (-10) through the verified uplink only; the radio (A3) is one door out of this block', () => {
     const block = main.slice(main.indexOf('// ── APRS A1: messages over the internet'), main.indexOf('// ── APRS phase 7'));
     assert.ok(block.length > 500);
     assert.ok(/AprsIgate\.uplinkLogin\(settings\.myCallsign\)/.test(block));
     assert.ok(/aprsUplink\.verified/.test(block) && /aprsUplink\.send\(line\)/.test(block));
-    assert.ok(!/aprsRf|direwolf|Direwolf|ptt|PTT|setTransmit|keyRadio/.test(block), 'no radio in A1');
+    assert.ok(!/aprsRf|direwolf|Direwolf|ptt|PTT|setTransmit|keyRadio/.test(block), 'no radio code in A1');
+    // A3 (Casey 2026-11-21): a radio message or radio ack leaves A1 only through the messenger's sendRadio hook.
+    assert.strictEqual((block.match(/aprsMsgRadioStart\(/g) || []).length, 1, 'one door to the radio');
+    assert.ok(/sendRadio: \(job\) => aprsMsgRadioStart\(job\)/.test(block));
     assert.ok(/aprs-messages\.json/.test(block) && /profileDir\(/.test(block), 'kept per profile');
   });
 
@@ -94,6 +97,41 @@ const fnBody = (src, name) => {
     assert.ok(/if \(!aprsIsServer\(\)\) return \{ ok: false/.test(fnBody(main, 'aprsMessageSend')));
     const quit = main.slice(main.indexOf("app.on('before-quit'"), main.indexOf("app.on('before-quit'") + 1500);
     assert.ok(/aprsMessagesSaveNow\(\)/.test(quit));
+  });
+
+  await test('A3 main.js: a radio message goes through the radio beacon run and gate, one packet at a time', () => {
+    const start = fnBody(main, 'aprsMsgRadioStart');
+    assert.ok(/if \(_aprsRfSending \|\| aprsRfInFlight\(\)\) return false;/.test(start), 'never two packets at once');
+    assert.ok(/radioDone\(job\.key, r\)/.test(start) && /AprsRfMessage\.messageWords\(/.test(start));
+    const tx = fnBody(main, 'aprsMsgRadioTransmit');
+    assert.ok(tx.indexOf('if (APRS_DEV_FRAMES)') < tx.indexOf('aprsRfRunner()'), 'a test build never transmits');
+    assert.ok(tx.indexOf('AprsRfGate.readiness(aprsRfGateState())') < tx.indexOf('aprsRfRunner()'), 'the gate first');
+    assert.ok(/AprsRfBeacon\.capFor\(/.test(tx) && /aprsRfRunner\(\)\.send\(\{ packet: f, capMs: cap\.capMs \}\)/.test(tx), 'the cap and the one run');
+    assert.ok(!/setTimeout|setInterval/.test(start + tx), 'no timer here: the messenger decides when');
+    assert.ok(/aprsMsgRadioHeard\(heard\.line\)/.test(fnBody(main, 'aprsOnMonitorFrame')), 'frames heard on the radio reach the messenger');
+    assert.ok(/via: 'radio'/.test(fnBody(main, 'aprsMsgRadioHeard')));
+    const send = fnBody(main, 'aprsMessageSend');
+    assert.ok(send.indexOf('aprsMsgRadioRefusal()') < send.indexOf('m.compose('), 'Radio is refused before anything is queued');
+    const auto = fnBody(main, 'aprsMsgRadioAuto');
+    assert.ok(/settings\.aprsRadioMsgAutoAck === true/.test(auto) && /settings\.aprsRadioMsgAutoRetry === true/.test(auto), 'on only when turned on');
+    assert.ok(/AprsRfMessage\.autoAllowed\(on, aprsListen\.band\)/.test(auto), '2 m only');
+    assert.ok(/aprsMsgRadioStop\(String\(lid/.test(main) && /aprsRfAbort\('Stop was pressed'\)/.test(fnBody(main, 'aprsMsgRadioStop')), 'Stop drops PTT at once');
+    assert.ok(/ipcMain\.handle\('aprs-message-retry'/.test(main));
+  });
+
+  await test('A3 window: Send over Internet | Radio (Radio starts disabled), Try again, heard on radio, the two settings', () => {
+    const html = read('renderer/aprs-popout.html');
+    assert.ok(/id="aprs-msgs-over-net" role="radio" aria-checked="true"/.test(html));
+    assert.ok(/id="aprs-msgs-over-radio" role="radio" aria-checked="false" disabled/.test(html));
+    assert.ok(html.indexOf('../lib/aprs-rf-message.js') < html.indexOf('aprs-messages.js"'));
+    assert.ok(/id="aprs-rfmsg-retry"/.test(html) && /id="aprs-rfmsg-ack"/.test(html));
+    assert.ok(!/id="aprs-rfmsg-(retry|ack)" checked/.test(html), 'both unchecked');
+    const js = read('renderer/aprs-messages.js');
+    assert.ok(/RM\.radioChoice\(rf\)/.test(js) && /if \(over === 'radio' && !rc\.enabled\) over = 'internet';/.test(js));
+    assert.ok(/heard on radio/.test(js) && /data-retry=/.test(js) && /messageRetry\(/.test(js));
+    assert.ok(/messageSend\(to, text, over\)/.test(js));
+    const pre = read('preload-aprs-popout.js');
+    assert.ok(/messageRetry:/.test(pre) && /over: over === 'radio' \? 'radio' : 'internet'/.test(pre));
   });
 
   await test('preload and window: the channels, the Messages view, the 67-character counter', () => {
