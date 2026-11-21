@@ -433,6 +433,10 @@ section('Stalled QSO — retry cap with R+report sent and no RR73: not logged, n
   assert(/if \(data\.send73\)[\s\S]{0,300}'Send 73'[\s\S]{0,200}window\.api\.jtcatSkipPhase\(\{ unconfirmed: true \}\)/.test(pop), 'JTCAT window: Send 73 button on the notice');
   const web = readSrc(path.join(__dirname, '..', 'renderer', 'remote.js'));
   assert(/if \(msg\.send73\)[\s\S]{0,400}'Send 73'[\s\S]{0,200}type: 'jtcat-skip-phase', unconfirmed: true/.test(web), 'ECHOCAT Web: Send 73 button on the notice');
+  // The tries help text says the same rule: the cap never logs or sends a 73 by itself.
+  const popHtml = readSrc(path.join(__dirname, '..', 'renderer', 'jtcat-popout.html'));
+  assert(!/QSO is logged and a final 73 is sent/.test(popHtml), 'tries help no longer promises a log and a 73 at the cap');
+  assert(/logged only when a 73 is sent or received/.test(popHtml), 'tries help states the 73 rule');
 }
 
 section('Logging rule — only when our RR73/RRR/73 goes out or theirs arrives (#807)');
