@@ -10010,7 +10010,7 @@ function _buildEchocatCardHTML(tunnel, tail, devices, web) {
     detail = (tail.notReady || 'Tailscale is installed but not signed in.') + ' Or enable POTACAT Cloud Tunnel.';
   }
   if (pillCls === '' && !detail) {
-    detail = 'Available only on the local network. Enable POTACAT Cloud Tunnel or connect to your tailnet for remote access.';
+    detail = 'Available only on the local network. Turn on Cloud Tunnel, or connect to your tailnet, for remote access.';
   }
   // ECHOCAT access (lib/remote-access.js) overrides the reachability story:
   // Off = nothing listens; Cloud only = the LAN and tailnet see a closed port.
@@ -10362,7 +10362,7 @@ function _pairRenderState() {
       '<span class="pair-state-title">POTACAT Cloud Tunnel</span>' +
       '<span class="pair-state-body">' + statusText + ' Enable it for one-tap remote pairing.</span>' +
       '<div class="pair-state-actions">' +
-        '<button type="button" id="pair-enable-tunnel-btn" class="btn btn-primary btn-sm">Enable POTACAT Cloud Tunnel</button>' +
+        '<button type="button" id="pair-enable-tunnel-btn" class="btn btn-primary btn-sm">Turn on Cloud Tunnel</button>' +
       '</div>';
     const enableBtn = document.getElementById('pair-enable-tunnel-btn');
     if (enableBtn) {

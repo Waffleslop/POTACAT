@@ -388,7 +388,12 @@
     if (stripeNote) {
       stripeNote.classList.toggle('hidden', !d.subscribe.show);
       // With Stripe unavailable the BMAC link is the primary way to pay.
-      if (subscribeBtn) subscribeBtn.textContent = d.subscribe.stripe ? 'Prefer Buy Me a Coffee?' : 'Subscribe on Buy Me a Coffee';
+      // Buy Me a Coffee is for people already paying there (the verify box below),
+      // and the way to pay only while Stripe is unavailable (ECHOCAT ask 2026-11-21, item 4).
+      if (subscribeBtn) {
+        subscribeBtn.textContent = 'Subscribe on Buy Me a Coffee';
+        subscribeBtn.classList.toggle('hidden', !!d.subscribe.stripe);
+      }
     }
     if (bmacVerifyDetails) bmacVerifyDetails.classList.toggle('hidden', !d.verify.show);
   }
@@ -578,6 +583,16 @@
     if (loginError) loginError.classList.add('hidden');
   }
   if (showRegisterLink) showRegisterLink.addEventListener('click', (e) => { e.preventDefault(); setCloudAuthMode('register'); });
+  // A desktop that never had an account opens on creating one (ECHOCAT ask
+  // 2026-11-21, item 4): the trial is the likely reason anyone is here, and the
+  // form used to open on Sign In with "Create" behind a small link.
+  try {
+    if (window.api && window.api.getSettings) {
+      window.api.getSettings().then((s) => {
+        if (s && !s.cloudAccessToken && !s.cloudUser && !s.cloudEverSignedIn) setCloudAuthMode('register');
+      }).catch(() => {});
+    }
+  } catch { /* the form stays on Sign In */ }
   if (showSigninLink) showSigninLink.addEventListener('click', (e) => { e.preventDefault(); setCloudAuthMode('signin'); });
 
   // ── Account callsign (add when missing, or change) ────────────────
@@ -1685,7 +1700,7 @@
         }
       } finally {
         ctEnableBtn.disabled = false;
-        ctEnableBtn.textContent = 'Enable POTACAT Cloud';
+        ctEnableBtn.textContent = 'Turn on Cloud Tunnel';
       }
     });
   }
