@@ -317,12 +317,30 @@ test('the 30 m setup line is rig-setup-notes\' own sideband step, verbatim', () 
   assert.strictEqual(L.setupLine(N.resolveSetupNotes({ model: 'IC-7300', radioType: 'serialcat' }), '30m'), '');
 });
 
-test('a digital filter narrower than 1 kHz gets one plain sentence on 30 m; filters are never changed', () => {
-  assert.strictEqual(L.filterSentence('30m', 500), 'Your digital filter is 500 Hz wide. APRS on 30 m needs 1500 to 1900 Hz to pass.');
+test('a digital filter that would cut a 30 m tone gets one plain sentence; filters are never changed', () => {
+  assert.strictEqual(L.filterSentence('30m', 500), 'Your digital filter is 500 Hz wide. APRS on 30 m needs 1450 to 1950 Hz to pass.');
   assert.strictEqual(L.filterSentence('30m', 0), '');      // the radio's own filter: nothing known, nothing said
   assert.strictEqual(L.filterSentence('30m', 2400), '');
-  assert.strictEqual(L.filterSentence('30m', 1000), '');
   assert.strictEqual(L.filterSentence('2m', 500), '');      // FM has a fixed bandwidth
+});
+
+// #839: a Flex DIGU filter of width w passes 100 to 100 + w Hz, so 1000 to
+// 1800 Hz cut the 1800 Hz tone while only a filter under 1000 Hz was named.
+test('#839: the warning follows the real passband edges, not a 1 kHz threshold', () => {
+  assert.strictEqual(L.filterSentence('30m', 1000), 'Your digital filter is 1000 Hz wide. APRS on 30 m needs 1450 to 1950 Hz to pass.');
+  assert.strictEqual(L.filterSentence('30m', 1500), 'Your digital filter is 1500 Hz wide. APRS on 30 m needs 1450 to 1950 Hz to pass.');
+  assert.ok(L.filterSentence('30m', 1800) !== '', '100 to 1900 Hz still trims the upper sideband of the 1800 Hz tone');
+  assert.strictEqual(L.filterSentence('30m', 1850), '');    // 100 to 1950 Hz passes both tones
+  assert.strictEqual(L.filterSentence('30m', 3000), '');
+});
+
+test('#839: the radio\'s own filter edges decide when POTACAT has them', () => {
+  assert.strictEqual(L.filterSentence('30m', 0, { lo: 100, hi: 2900 }), '');
+  assert.strictEqual(L.filterSentence('30m', 3000, { lo: 1500, hi: 2700 }), 'Your receive filter passes 1500 to 2700 Hz. APRS on 30 m needs 1450 to 1950 Hz to pass.');
+  assert.strictEqual(L.filterSentence('30m', 0, { lo: 200, hi: 1700 }), 'Your receive filter passes 200 to 1700 Hz. APRS on 30 m needs 1450 to 1950 Hz to pass.');
+  assert.strictEqual(L.filterSentence('2m', 0, { lo: 200, hi: 1700 }), '');
+  assert.strictEqual(L.HF_NEED_LO_HZ, 1450);
+  assert.strictEqual(L.HF_NEED_HI_HZ, 1950);
 });
 
 test('the 30 m refusal names 10.1476 MHz', () => {
