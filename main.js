@@ -37429,9 +37429,35 @@ function yaesuScopeBroadcastState() {
   stationSetupNotify();
 }
 
+// A scope that starts and then shows nothing used to leave nothing in the log
+// either (K3SBP 2026-11-21: a Flex pan subscribed, "frames flowing" never came,
+// and the bug report could not say whether no frame arrived or every frame was
+// thrown away as misaligned). Now: one line if no usable frame has arrived
+// SCOPE_NO_FRAMES_MS after a start, with what did arrive, and one line on the
+// first misaligned frame of a start (yaesuScopeOnFrame).
+const SCOPE_NO_FRAMES_MS = 6000;
+let _scopeNoFramesTimer = null;
+function yaesuScopeSourceName() {
+  const s = yaesuScopeState.source;
+  return s === 'flex' ? 'Flex panadapter' : s === 'sdr' ? 'SDR' : s === 'icom' ? ((icomScopeEntry && icomScopeEntry.name) || 'Icom') + ' scope over CI-V'
+    : s === 'sculan10' ? 'SCU-LAN10 scope' : s === 'k4' ? 'K4 panadapter' : s === 'kenwood' ? 'TS-890S bandscope' : 'radio scope';
+}
 function yaesuScopeSetStatus(status, diag) {
   yaesuScopeState.status = status;
   yaesuScopeState.diag = diag || null;
+  if (status === 'starting') {
+    if (!_scopeNoFramesTimer) {
+      _scopeNoFramesTimer = setTimeout(() => {
+        _scopeNoFramesTimer = null;
+        if (yaesuScopeState.status !== 'starting') return;
+        const n = yaesuScopeState.frames || 0, bad = yaesuScopeState.misaligned || 0;
+        sendCatLog(`[Scope] no picture from the ${yaesuScopeSourceName()} ${SCOPE_NO_FRAMES_MS / 1000} s after it started: ${n} frame${n === 1 ? '' : 's'} arrived${bad ? `, ${bad} of them misaligned and dropped` : ''}${n ? '' : ' (nothing reached POTACAT from the radio)'}`);
+      }, SCOPE_NO_FRAMES_MS);
+    }
+  } else if (_scopeNoFramesTimer) {
+    clearTimeout(_scopeNoFramesTimer);
+    _scopeNoFramesTimer = null;
+  }
   yaesuScopeBroadcastState();
 }
 
@@ -37751,7 +37777,11 @@ function stopYaesuScope(why) {
 
 function yaesuScopeOnFrame(f) {
   yaesuScopeState.frames++;
-  if (!f.aligned) { yaesuScopeState.misaligned++; return; }
+  if (!f.aligned) {
+    yaesuScopeState.misaligned++;
+    if (yaesuScopeState.misaligned === 1) sendCatLog(`[Scope] a frame from the ${yaesuScopeSourceName()} arrived misaligned and was dropped (frame ${yaesuScopeState.frames} of this start); later ones are counted, not logged`);
+    return;
+  }
   if (!yaesuScopeWanted()) { stopYaesuScope('nobody is watching'); return; }
   if (yaesuScopeState.status !== 'live') {
     yaesuScopeRestarts = 0;
