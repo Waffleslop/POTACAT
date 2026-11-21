@@ -100,11 +100,100 @@ test('the app the launcher STARTED is the app; only the launcher\'s own helpers 
 
 test('Stop closes the app gracefully first and force-kills only what is left', () => {
   const stop = src.slice(src.indexOf('async function stopPotacat('), src.indexOf('async function restartPotacat('));
-  const soft = stop.indexOf('taskkill /PID ${pid} /T`'), hard = stop.indexOf('taskkill /PID ${pid} /T /F');
+  const soft = stop.indexOf('taskkillEach(plan.kill, false)'), hard = stop.indexOf('taskkillEach(forced.kill, true)');
   assert.ok(soft >= 0 && hard > soft, 'a plain taskkill (WM_CLOSE) before the /F kill');
   assert.ok(/GRACEFUL_STOP_MS = (\d+)/.test(src) && +/GRACEFUL_STOP_MS = (\d+)/.exec(src)[1] > 5000,
     'the wait outlasts the app\'s 5 s before-quit watchdog');
-  assert.ok(/getOtherPids\(\) : pids\)/.test(stop), 'the forced pass re-reads the table after the graceful wait');
+  assert.ok(/const now = readWindowsProcessTable\(\);/.test(stop) && /getOtherPids\(\), \.\.\.stillAlive\(/.test(stop),
+    'the forced pass re-reads the table after the graceful wait');
+});
+
+// #819: POTACAT's Install / Start now buttons spawn the launcher, so the
+// launcher is a child in POTACAT's tree, and `taskkill /T` on POTACAT killed
+// it with the app: a restart from the phone stopped POTACAT and never started
+// it again. Process tables below are { pid, ppid, created (ms) }.
+const L = require('../scripts/launcher.js');
+
+test('#819: the launcher POTACAT started survives the stop; the app and every helper do not', () => {
+  const t = 1000;
+  const rows = [
+    { pid: 900, ppid: 4, created: 1 },               // explorer
+    { pid: 7000, ppid: 900, created: t },             // POTACAT main
+    { pid: 7001, ppid: 7000, created: t + 1 },        // renderer
+    { pid: 7002, ppid: 7000, created: t + 1 },        // GPU
+    { pid: 7100, ppid: 7000, created: t + 5 },        // rigctld (holds COM3, TCP 4532)
+    { pid: 7101, ppid: 7000, created: t + 6 },        // direwolf
+    { pid: 7102, ppid: 7000, created: t + 7 },        // cloudflared (POTACAT's tunnel)
+    { pid: 7103, ppid: 7000, created: t + 8 },        // pat
+    { pid: 7104, ppid: 7103, created: t + 9 },        // conhost under pat
+    { pid: ME, ppid: 7000, created: t + 10 },         // this launcher (Start now)
+    { pid: 5100, ppid: ME, created: t + 11 },         // the launcher's own cloudflared replica
+    { pid: 8000, ppid: 900, created: t + 12 },        // something unrelated
+  ];
+  const plan = L.treeKillPlan(rows, [7000, 7001, 7002], ME);
+  assert.deepStrictEqual(plan.kill, [7000, 7001, 7002, 7100, 7101, 7102, 7103, 7104]);
+  assert.ok(plan.launcherInTree);
+  assert.ok(!plan.kill.includes(ME) && !plan.kill.includes(5100), 'the launcher and its replica live');
+  assert.ok(!plan.kill.includes(8000) && !plan.kill.includes(900), 'nothing outside the app is touched');
+  assert.strictEqual(plan.kill[0], 7000, 'the parent goes first, so it cannot start a new child');
+});
+
+test('#819: the app the launcher started (the launcher\'s child) is still stopped, with its helpers', () => {
+  const rows = [
+    { pid: ME, ppid: 4, created: 10 },
+    { pid: 5100, ppid: ME, created: 11 },   // replica cloudflared
+    { pid: 5001, ppid: ME, created: 11 },   // the launcher's GPU helper (--launcher mode)
+    { pid: 7000, ppid: ME, created: 20 },   // POTACAT, started by the launcher
+    { pid: 7001, ppid: 7000, created: 21 },
+    { pid: 7100, ppid: 7000, created: 25 },  // rigctld
+  ];
+  const plan = L.treeKillPlan(rows, [7000, 7001], ME);
+  assert.deepStrictEqual(plan.kill, [7000, 7001, 7100]);
+  assert.ok(!plan.launcherInTree);
+  assert.deepStrictEqual(plan.spared.sort((a, b) => a - b), [ME, 5001, 5100]);
+});
+
+test('#819: a reused parent PID does not adopt an older, unrelated process', () => {
+  const rows = [
+    { pid: 7000, ppid: 900, created: 5000 },  // POTACAT, got a PID that an old process's parent once had
+    { pid: 6000, ppid: 7000, created: 100 },  // older than POTACAT: not its child
+    { pid: 7100, ppid: 7000, created: 5005 },
+  ];
+  assert.deepStrictEqual(L.treeKillPlan(rows, [7000], ME).kill, [7000, 7100]);
+});
+
+test('#819: a helper whose POTACAT already exited is still found from the first snapshot', () => {
+  const before = [
+    { pid: 7000, ppid: 900, created: 1000 },
+    { pid: 7100, ppid: 7000, created: 1005 },  // rigctld
+    { pid: 7101, ppid: 7000, created: 1006 },  // exited during the graceful wait
+    { pid: 7102, ppid: 7000, created: 1007 },  // PID reused by a new process since
+  ];
+  const now = [
+    { pid: 7100, ppid: 7000, created: 1005 },
+    { pid: 7102, ppid: 900, created: 9000 },
+  ];
+  assert.deepStrictEqual(L.stillAlive([7000, 7100, 7101, 7102], before, now), [7100]);
+  assert.deepStrictEqual(L.treeKillPlan(now, [7100], ME).kill, [7100]);
+});
+
+test('#819: the Windows process-table lines parse (and junk lines are skipped)', () => {
+  const rows = L.parseProcessTable('0 0 0\r\n4 0 13400000000000\r\n\r\nWARNING: x\r\n7000 900 13400000005000\r\n');
+  assert.deepStrictEqual(rows, [
+    { pid: 0, ppid: 0, created: null },
+    { pid: 4, ppid: 0, created: 13400000000000 },
+    { pid: 7000, ppid: 900, created: 13400000005000 },
+  ]);
+});
+
+test('#819: the stop never walks the tree with /T while the process table can be read', () => {
+  const stop = src.slice(src.indexOf('async function stopPotacat('), src.indexOf('async function restartPotacat('));
+  assert.ok(/plan = treeKillPlan\(table, pids, MY_PID\)/.test(stop));
+  // /T remains only in the fallbacks for a machine where PowerShell/CIM fails.
+  const each = src.slice(src.indexOf('function taskkillEach('), src.indexOf('/** Get all PIDs of POTACAT.exe'));
+  assert.ok(!/\/T\b/.test(each), 'the planned kill names each PID alone');
+  assert.ok(/if \(plan\) \{\s*if \(mains\.length\) taskkillEach\(plan\.kill, false\);\s*\} else \{/.test(stop));
+  assert.ok(/if \(forced\) \{/.test(stop));
 });
 
 test('a SECOND launcher (old --launcher login item + new launcher.js) is not the app either', () => {
