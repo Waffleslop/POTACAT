@@ -83,6 +83,7 @@ const TESTS = [
   'test/echocat-protocol.test.js',
   'test/protocol-demux-parity-test.js',
   'test/jtcat-test.js',
+  'test/jtcat-qso-view-test.js',     // #807: an older phone sees the RR73 step only once the QSO is logged
   'test/jtcat-parser-test.js',
   'test/jtcat-qso-card-test.js',     // QSO logged is a centred card in theme colours
   'test/ft8-engine-rebaseline-test.js',

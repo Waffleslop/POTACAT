@@ -21913,7 +21913,9 @@ async function jtcatAutoLog(qso, opts) {
   if (JtcatAutoRespot.applyAutoRespot(qsoData, respotPlan, settings)) {
     sendCatLog(`[JTCAT] Re-spot after the contact: ${qsoData.callsign} @ ${[respotPlan.pota && `POTA ${respotPlan.pota}`, respotPlan.wwff && `WWFF ${respotPlan.wwff}`].filter(Boolean).join(', ')}`);
   }
-  await jtcatWriteLog(qsoData, relogKeyStr);
+  const res = await jtcatWriteLog(qsoData, relogKeyStr);
+  // Not written: an older phone must not be told it was (lib/jtcat-qso-view.js).
+  if (!res || !res.success) q._logFailed = true;
 }
 
 // Re-spot a hunted activator after a JTCAT contact (#351, opt-in, the JTCAT
