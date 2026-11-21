@@ -1596,6 +1596,9 @@ function _applyPopoutTheme(payload) {
 
   function applyClock(d) {
     if (!syncEl) return;
+    // Only the buttons this OS can honour (main's canFix / canOpenSettings, lib/ntp.js).
+    if (d && clockSyncBtn) clockSyncBtn.style.display = d.canFix === false ? 'none' : '';
+    if (d && clockSetBtn) clockSetBtn.style.display = d.canOpenSettings === false ? 'none' : '';
     lastClockState = d; // remembered so engine-stop can keep a bad banner up
     syncEl.classList.remove('jtcat-synced');
     syncEl.style.color = '';

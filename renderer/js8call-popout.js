@@ -641,6 +641,8 @@
   function fmtOffset(ms) { return (ms > 0 ? '+' : '') + (ms / 1000).toFixed(1) + 's'; }
   function applyClock(d) {
     if (clockHideTimer) { clearTimeout(clockHideTimer); clockHideTimer = null; }
+    // Only the buttons this OS can honour (main's canFix / canOpenSettings, lib/ntp.js).
+    if (d) { el('jc-clock-sync').hidden = d.canFix === false; el('jc-clock-set').hidden = d.canOpenSettings === false; }
     if (!d || d.level === 'ok') {
       if (d && d.rebaselined) {
         clockMsgEl.textContent = 'Clock corrected — JS8 timing re-baselined, decoding resumed.';
