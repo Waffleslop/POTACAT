@@ -556,7 +556,8 @@ const TESTS = [
   'test/ae5je-settings-audio-test.js', // AE5JE: audio devices follow their name; bug report says whether settings saves land
   'test/page-script-globals-test.js', // one top-level scope per page: a second const of the same name stops a script (WB3EGD, the dead 1.13.5 audio heal)
   'test/window-min-size-test.js',     // N0KAH: no window shrinks past its own controls
-  'test/window-rules-test.js',        // every window opens in the theme and remembers its place
+  'test/window-rules-test.js',
+  'test/mac-frameless-windows-test.js', // #866: every visible frameless window keeps the macOS traffic lights; the APRS and JTCAT map title bars keep their own controls on a Mac        // every window opens in the theme and remembers its place
   'test/yaesu-fa-digits-test.js',
   'test/yaesu-audit-ft891-test.js', // Yaesu CAT audit: FT-891 preamp, AGC, PROC, CW text, RTTY
   'test/log-as-test.js',
