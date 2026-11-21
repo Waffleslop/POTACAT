@@ -14,6 +14,7 @@ const path = require('path');
 
 const TESTS = [
   'test/syntax-check-test.js', // every source file parses (a main.js syntax error passed every other test)
+  'test/icom-civ-address-learn-test.js', // sweep 3c: a USB Icom at another CI-V address is found from its own replies, used and saved
   'test/icom-usb-data-mod-test.js', // sweep 1a: over USB CI-V, DATA MOD to USB for a data session and put back (IC-7300, MK II, IC-7100, IC-7610 DATA1/2/3)
   'test/icom-network-data-mod-test.js', // #853: over the network the IC-7610's LAN source follows the DATA number in use (DATA1/2/3 MOD 00 92/93/94)
   'test/icom-filter-readback-test.js', // NJ2DX 2026-11-21: an Icom's IF filter width is read back (1A 03), also right after a mode change, so the VFO shows the real width
@@ -48,6 +49,8 @@ const TESTS = [
   'test/clock-offset-test.js',
   'test/require-exports-test.js',
   'test/scope-no-frames-log-test.js', // K3SBP 2026-11-21: a scope that shows nothing says so in the log (no frames vs misaligned)
+  'test/scan-run-test.js', // #37: a phone-started scan run on the desktop: the phone's 13 filter vectors, the desktop's exclusions, start/step/end rules, wire and glue
+  'test/clock-platform-test.js', // NJ2DX 2026-11-21: each OS gets only the clock buttons it can honour; Time settings opens on a Mac
   'test/smartsdr-meter-test.js',
   'test/smartsdr-udpport-reconnect-test.js', // K3SBP 2026-11-21: after a network drop the new Flex connection is told client udpport again (pan FFT, meters)
   'test/flex-slice-filter-test.js',

@@ -346,6 +346,7 @@ const { RigController } = require('./lib/rig-controller');
 const { RIG_CONTROLS } = require('./lib/rig-controls');
 const _rigGainSteps = require('./lib/rig-gain-steps'); // preamp/ATT ladders (KB2UXB)
 const { normalizeMuteRules } = require('./lib/spot-mute-rules'); // per-band region mutes (N7BBQ)
+const ScanRun = require('./lib/scan-run'); // #37: a phone-started scan the desktop runs in main (phone locked or not)
 const SpotAge = require('./lib/spot-age'); // Max Spot Age, shared with the table (#239)
 const SpotHides = require('./lib/spot-hides'); // hidden spots, one list for every surface (K8IKO)
 const LogAs = require('./lib/log-as'); // log a QSO for another operator on this machine (KD9WI)
@@ -594,7 +595,7 @@ const { HeardGrids } = require('./lib/heard-grids');
 const jtcatHeardGrids = new HeardGrids();
 let _logPopoutQuiet = false; // the next log-popout-open leaves the keyboard alone
 let _appWindowsClosing = false; // the main window went: POTACAT is quitting
-const { checkClockOffset, syncSystemClock, classifyClockOffset } = require('./lib/ntp');
+const { checkClockOffset, syncSystemClock, classifyClockOffset, clockFixSupported, timeSettingsTargets } = require('./lib/ntp');
 const StationClock = require('./lib/station-clock'); // FT8/FT4/FT2/WSPR/JTTY slot clock, correctable from an ECHOCAT device
 const JtcatParser = require('./renderer/jtcat-parser'); // shared FT8 message classifier (also a browser global in the renderers)
 const JtcatSpotTarget = require('./lib/jtcat-spot-target'); // which finished QSO ends the spot target; watcher refuses worked calls (#518)
@@ -1978,6 +1979,49 @@ let solarTimer = null;
 let rigctldProc = null;
 let cluster = null; // legacy — replaced by clusterClients Map
 let desktopScanning = false; // mirror of the renderer scan engine's on/off, for ECHOCAT scan-state sync (scan-state-sync-desktop)
+// #37: a scan a phone started and the desktop runs (lib/scan-run.js). Created
+// on first use; every phone sees scanning while either this or the desktop's
+// own scan runs.
+let _phoneScanRun = null;
+function scanStateNow() { return !!(desktopScanning || (_phoneScanRun && _phoneScanRun.scanning)); }
+function broadcastScanState() {
+  if (remoteServer && remoteServer.running) remoteServer.sendToClient({ type: 'scan-state', scanning: scanStateNow() });
+  sendVfoScanState();
+}
+function phoneScanRun() {
+  if (_phoneScanRun) return _phoneScanRun;
+  _phoneScanRun = ScanRun.createScanRun({
+    getSpots: () => spotsWithinMaxAge(lastMergedSpots || []),
+    ctx: () => {
+      const hides = spotHidesNow();
+      const skips = spotSkipsNow();
+      const now = Date.now();
+      const d = new Date(now);
+      const today = d.getUTCFullYear().toString() + String(d.getUTCMonth() + 1).padStart(2, '0') + String(d.getUTCDate()).padStart(2, '0');
+      return {
+        muteRules: normalizeMuteRules(settings.spotMuteRules),
+        isHidden: (sp) => ScanRun.hiddenBy(hides, sp, now),
+        isSkipped: (sp) => skips.includes(SpotHides.skipKey(sp.callsign, sp.frequency)),
+        isWorkedToday: (sp) => ScanRun.workedToday(sp, workedQsos.get(String(sp.callsign || '').toUpperCase()), today),
+      };
+    },
+    tune: (sp) => {
+      if (_vfoLocked || isRemoteMode()) return false;
+      if (!((smartSdr && smartSdr.canTune) || (cat && cat.connected) || tciRigLinked())) return false;
+      _freqSuppressUntil = Date.now() + 3000; // as a phone's own tune: no stale echo snaps its VFO back
+      tuneRadio(sp.frequency, sp.mode, sp.bearing, { origin: 'scan' });
+      return true;
+    },
+    dialKhz: () => (Number(_currentFreqHz) || 0) / 1000,
+    txActive: () => { try { return aprsAutoListenTransmitting() || !!(cat && cat._transmitting); } catch { return false; } },
+    onState: () => broadcastScanState(),
+    log: (line) => sendCatLog('[Scan] ' + line),
+    now: () => Date.now(),
+    setTimer: (fn, ms) => setTimeout(fn, ms),
+    clearTimer: (h) => clearTimeout(h),
+  });
+  return _phoneScanRun;
+}
 let clusterSpots = []; // streaming DX cluster spots (FIFO, max 500)
 // Non-deduped spot histories so the "spot history" popover can show prior
 // spots of the same callsign (clusterSpots itself is deduped per call+band so
@@ -4567,6 +4611,8 @@ function sendCatFrequency(hz) {
   // A held potacat://tune link waits for the radio's own readback: never our
   // tune echo, never a listen SDR's frequency.
   if (hz > 0 && !_jtcatTuneEcho && !(sdrHoldsDial() && hz === listenSdr.hz)) tuneLinkPendingNoteFrequency(hz);
+  // #37: a phone-started scan ends when the radio is tuned by hand.
+  if (hz > 0 && _phoneScanRun && _phoneScanRun.scanning) _phoneScanRun.noteDial(hz / 1000);
   // SWR-guard latch: leaving the band it tripped on plausibly changes the
   // match (different antenna/resonance) — re-enable TX. Single sink for every
   // frequency source (tune, knob, scan, remote), so no per-path hooks needed.
@@ -6914,6 +6960,44 @@ async function prepareIcomNetworkDataMod(controller, target, rigModel, sessionId
   controller.setDataMod(spec.settingId, spec.networkValue);
 }
 
+// Sweep 3c (Casey 2026-11-21): learn the CI-V address from the radio's own
+// replies. An Icom ignores every frame not addressed to it, so a wrong address
+// in the rig editor was a healthy-looking link and a radio that never answered,
+// and the setup note asked the operator to find the address in the radio's
+// menu. Now: if the configured address has not answered 5 s after the port
+// opens, POTACAT asks for the frequency (a read) at every address an Icom in
+// its model list uses; the radio answers only to its own address, from its own
+// address (lib/codecs/civ-codec.js huntAddress / _noteFromAddr). A transceive
+// broadcast from another address (the operator turns the knob) is learned the
+// same way. The address found is used at once and saved on this rig.
+const ICOM_CIV_HUNT_MS = 5000;
+function icomCivHuntAddrs(first) {
+  const addrs = Object.values(RIG_MODELS).filter((m) => m && m.protocol === 'civ' && Number.isInteger(m.civAddr)).map((m) => m.civAddr);
+  return [first, ...addrs];
+}
+function icomCivAddressLearn(controller, codec, transport, target) {
+  codec.on('address-learned', ({ was, now, by }) => {
+    const hex = (a) => '0x' + Number(a).toString(16).toUpperCase().padStart(2, '0');
+    sendCatLog(`[CI-V] the radio answers at CI-V address ${hex(now)}, not ${hex(was)} (${by === 'reply' ? 'it answered the address search' : 'its own transceive frames'}); using ${hex(now)} and saving it for this radio`);
+    let saved = false;
+    for (const r of settings.rigs || []) {
+      const ct = r && r.catTarget;
+      if (ct && ct.type === 'icom' && ct.path === target.path) { ct.civAddress = now; saved = true; }
+    }
+    if (settings.catTarget && settings.catTarget.type === 'icom' && settings.catTarget.path === target.path) { settings.catTarget.civAddress = now; saved = true; }
+    if (saved) saveSettings(settings);
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('app-notice', { message: `Your radio answers at CI-V address ${hex(now)}, not ${hex(was)}. POTACAT now uses ${hex(now)} and saved it for this radio.`, duration: 12000 });
+    }
+  });
+  transport.once('connect', () => {
+    setTimeout(() => {
+      if (cat !== controller || !controller.connected || codec.heardFromRadio) return;
+      const n = codec.huntAddress(icomCivHuntAddrs(codec.radioAddress));
+      if (n) sendCatLog(`[CI-V] no answer at CI-V address 0x${codec.radioAddress.toString(16).toUpperCase().padStart(2, '0')} in ${ICOM_CIV_HUNT_MS / 1000} s: asking for the frequency at ${n} other Icom addresses (a read; nothing is changed on the radio)`);
+    }, ICOM_CIV_HUNT_MS);
+  });
+}
 // Sweep 1a (Casey 2026-11-21): over a USB CI-V link, DATA MOD to USB while
 // POTACAT has the radio in a DATA mode, put back afterwards (lib/icom-usb-data-mod.js).
 let _icomUsbDataMod = null; // { guard, controller }
@@ -9359,10 +9443,11 @@ async function connectCat() {
     // CI-V pacing (CivPacer): 'auto' keeps the old burst timing and switches
     // to one command at a time only on a radio seen dropping replies (NA4DQ
     // IC-7300, 2026-11-05); the rig editor can force it either way.
-    codec = new CivCodec(model, (data) => transport.write(data), { pace: civPaceFor(target) });
+    codec = new CivCodec(model, (data) => transport.write(data), { pace: civPaceFor(target), learnAddress: true }); // sweep 3c: one radio on a USB link
     civPaceRemember(codec);
     cat = new RigController(model, transport, codec);
     cat._debug = true;
+    icomCivAddressLearn(cat, codec, transport, target); // sweep 3c: a wrong CI-V address is found and fixed, not a silent radio
     icomUsbDataModAttach(cat, codec); // sweep 1a: DATA MOD to USB for a data session, put back after
     cat.on('log', sendCatLog);
     cat.on('status', sendCatStatus);
@@ -23844,7 +23929,9 @@ function broadcastJtcatClock(payload) {
 // the correction in use (how far the computer's clock is ahead, ms).
 function stationClockFields() {
   const sc = StationClock.info();
-  return { source: sc ? 'device' : 'ntp', correctionMs: StationClock.aheadMs() };
+  // canFix / canOpenSettings: which clock buttons this OS can honour (lib/ntp.js).
+  return { source: sc ? 'device' : 'ntp', correctionMs: StationClock.aheadMs(),
+    canFix: clockFixSupported(process.platform), canOpenSettings: timeSettingsTargets(process.platform).length > 0 };
 }
 
 // What NTP last said about the computer's RAW clock: 'ok'|'warn'|'bad', or
@@ -23897,6 +23984,17 @@ function stationClockClear(why) {
 // resync that only SLEWS the clock was reported as success while the banner
 // stayed exactly where it was (K3SBP 2026-10-15), and a button that does
 // nothing visible with no word why is worse than no button.
+// "Time settings" on every surface: the OS date and time page (lib/ntp.js
+// timeSettingsTargets). It used to do nothing on a Mac (NJ2DX 2026-11-21).
+async function openTimeSettings() {
+  const { shell } = require('electron');
+  for (const url of timeSettingsTargets(process.platform)) {
+    try { await shell.openExternal(url); return true; }
+    catch (err) { sendCatLog(`[Clock] Could not open ${url}: ${err && err.message ? err.message : err}`); }
+  }
+  return false;
+}
+
 async function runClockFix() {
   const before = jtcatLastClock && Number.isFinite(jtcatLastClock.offsetMs) ? jtcatLastClock.offsetMs : null;
   const sync = await syncSystemClock();
@@ -29862,7 +29960,16 @@ function connectRemote() {
 
   // Scan on/off sync (scan-state-sync-desktop). The scan engine lives in the
   // renderer, so these inbound peer messages are forwarded over IPC.
-  remoteServer.on('scan-control', ({ action }) => {
+  remoteServer.on('scan-control', ({ action, filters, dwellSec, fromFreqKhz }) => {
+    // #37 (scan-remote-v1): a start that carries the phone's own scan runs here,
+    // in main, with the phone's filters; the desktop's own scan stops first.
+    if (action === 'start' && filters && !isRemoteMode()) {
+      if (desktopScanning && win && !win.isDestroyed()) win.webContents.send('remote-scan-control', { action: 'stop' });
+      markUserActive();
+      phoneScanRun().start({ filters, dwellSec, fromFreqKhz });
+      return;
+    }
+    if (action === 'stop' && _phoneScanRun && _phoneScanRun.scanning) _phoneScanRun.stop('stop');
     // Mobile asks us to start/stop the desktop scan. The renderer acts and
     // then emits scan-state-changed, which broadcasts the new state back.
     if (win && !win.isDestroyed()) win.webContents.send('remote-scan-control', { action });
@@ -29928,7 +30035,7 @@ function connectRemote() {
     pushSstvDecoderState({ force: true });
     // Seed the (re)connecting phone with the desktop's current scan state so a
     // mid-scan reconnect shows the in-progress scan (scan-state-sync-desktop).
-    remoteServer.sendToClient({ type: 'scan-state', scanning: desktopScanning });
+    remoteServer.sendToClient({ type: 'scan-state', scanning: scanStateNow() });
     // Send current source toggles to phone
     remoteServer.sendSourcesToClient({
       pota: settings.enablePota !== false,
@@ -33351,6 +33458,7 @@ function handleRemotePtt(state, opts = {}) {
     }
     return false;
   }
+  if (state && _phoneScanRun && _phoneScanRun.scanning) _phoneScanRun.noteTransmit(); // #37: a key-down ends a phone-started scan
   // FreeDV cannot transmit yet: a voice key-down in a FreeDV mode would send
   // analog voice on a FreeDV frequency. Refused from every surface (FDV1 row 4).
   const freedvWhy = state ? FreedvPtt.freedvPttRefusal({ state, freedvRunning: !!freedvEngine, emission: opts.emission, forceDataMode: opts.forceDataMode }) : null;
@@ -33854,7 +33962,7 @@ function vfoCatCaps() {
 }
 function sendVfoScanState() {
   if (!vfoPopoutWin || vfoPopoutWin.isDestroyed()) return;
-  vfoPopoutWin.webContents.send('vfo-scan-state', { on: !!(desktopScanning || _phoneScanning) });
+  vfoPopoutWin.webContents.send('vfo-scan-state', { on: !!(desktopScanning || _phoneScanning || (_phoneScanRun && _phoneScanRun.scanning)) });
 }
 function vfoRadioLinkUp() {
   if (isRemoteMode() || sdrHoldsDial()) return true; // the dial shown is the shack's or the SDR's
@@ -49613,6 +49721,7 @@ function cloudShackNotice(text, kind) {
         break;
       }
       case 'check-clock': await runJtcatClockCheck(); break;
+      case 'open-time-settings': await openTimeSettings(); break;
       case 'sync-clock': {
         const { sync: res } = await runClockFix();
         if (res && res.success === false && res.message) message = res.message;
@@ -50907,14 +51016,14 @@ function cloudShackNotice(text, kind) {
   // so there's no feedback loop with the mutual-exclusion stop. (scan-state-sync-desktop)
   ipcMain.on('scan-state-changed', (_e, scanning) => {
     desktopScanning = !!scanning;
-    if (remoteServer && remoteServer.running) {
-      remoteServer.sendToClient({ type: 'scan-state', scanning: desktopScanning });
-    }
-    sendVfoScanState();
+    // The desktop's own Scan button takes over from a phone-started run (#37).
+    if (desktopScanning && _phoneScanRun && _phoneScanRun.scanning) _phoneScanRun.stop('desktop-scan');
+    broadcastScanState();
   });
   // The Small VFO's Scan button: stops whichever scan is running (this
   // desktop's or the phone's), else starts the main window's spot scan.
   ipcMain.on('vfo-scan-toggle', () => {
+    if (_phoneScanRun && _phoneScanRun.scanning) { _phoneScanRun.stop('stop'); return; }
     if (desktopScanning) {
       if (win && !win.isDestroyed()) win.webContents.send('remote-scan-control', { action: 'stop' });
     } else if (_phoneScanning && remoteServer && remoteServer.running) {
@@ -56256,11 +56365,7 @@ function cloudShackNotice(text, kind) {
   ipcMain.handle('jtcat-get-clock', () => jtcatLastClock);
   ipcMain.handle('jtcat-check-clock', async () => await runJtcatClockCheck());
   ipcMain.handle('jtcat-sync-clock', async () => await runClockFix());
-  ipcMain.handle('jtcat-open-time-settings', async () => {
-    const { shell } = require('electron');
-    if (process.platform === 'win32') return shell.openExternal('ms-settings:dateandtime');
-    return false;
-  });
+  ipcMain.handle('jtcat-open-time-settings', async () => openTimeSettings());
 
   // DAX TX direct chunks from remote-audio.html (iOS phone mic → WebRTC →
   // renderer downsample → IPC chunk → here → VITA-49 to radio). Bypasses
