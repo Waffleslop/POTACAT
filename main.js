@@ -13334,6 +13334,8 @@ function aprsOnMonitorFrame(f) {
 
 function aprsStopModem() {
   if (aprsListen.devTimer) { clearInterval(aprsListen.devTimer); aprsListen.devTimer = null; }
+  aprsListen.monitorToken = null; // a monitor closed on purpose is not lost (#841)
+  aprsListen.monitorLost = false;
   if (aprsListen.monitor) { const m = aprsListen.monitor; aprsListen.monitor = null; try { m.close(); } catch {} }
   if (aprsListen.proc) { const p = aprsListen.proc; aprsListen.proc = null; try { p.kill(); } catch {} }
   aprsListen.lane = null;
@@ -13389,16 +13391,30 @@ async function aprsSpawnDirewolf(seq) {
   proc.on('exit', (code) => { if (aprsListen.proc === proc) { aprsListen.proc = null; aprsLog(`Dire Wolf stopped (code ${code})`); } });
   // Ready = the AGW port accepting (Dire Wolf's stdout can arrive late or never on Windows, #128).
   const until = Date.now() + 15000;
+  let ready = false;
   while (Date.now() < until) {
     if (seq !== aprsListen.seq || aprsListen.proc !== proc) return;
-    if ((await DirewolfProcess.probeAgwPort({ port: agw })).ok) break;
+    if ((await DirewolfProcess.probeAgwPort({ port: agw })).ok) { ready = true; break; }
     await new Promise((r) => setTimeout(r, 250));
   }
   if (seq !== aprsListen.seq || aprsListen.proc !== proc) return;
+  // #841: a port that never opened means nothing Dire Wolf decodes can reach POTACAT; say so, never "Listening".
+  if (!ready) {
+    aprsStopModem();
+    throw new Error(`Dire Wolf did not open its AGW port ${agw} for POTACAT within 15 s`);
+  }
+  // The monitor closing on its own (not by aprsStopModem) is lost: the tick starts the modem again.
+  const token = {};
+  aprsListen.monitorToken = token;
+  aprsListen.monitorLost = false;
   aprsListen.monitor = DirewolfAgwMonitor.createAgwMonitor({
     port: agw, onLog: aprsLog,
     onFrame: (f) => aprsOnMonitorFrame(f),
-    onClose: () => {},
+    onClose: (code) => {
+      if (aprsListen.monitorToken !== token) return;
+      aprsListen.monitorLost = true;
+      aprsLog(`the Dire Wolf monitor connection closed (${code}); the modem starts again`);
+    },
   });
 }
 
@@ -13641,8 +13657,8 @@ function aprsListenTick() {
     aprsRefuse({ reason: 'ft8', sentence: AprsListen.SENTENCES.ft8 });
     return;
   }
-  // The lane was rebuilt under Dire Wolf (Pat restarting its shim), or Dire Wolf exited: start it again.
-  if ((aprsListen.lane && winlinkAudio !== aprsListen.lane) || !aprsListen.proc) {
+  // The lane was rebuilt under Dire Wolf (Pat restarting its shim), Dire Wolf exited, or its monitor connection closed (#841): start it again.
+  if (AprsListen.modemRestartWhy({ laneChanged: !!(aprsListen.lane && winlinkAudio !== aprsListen.lane), procAlive: !!aprsListen.proc, monitorLost: !!aprsListen.monitorLost })) {
     if (aprsListen.restarts++ >= 3) { aprsListenStop('the modem kept stopping'); aprsRefuse({ reason: 'no-modem', sentence: 'The modem did not start. The log has the reason.' }); return; }
     const seq = ++aprsListen.seq;
     aprsSpawnDirewolf(seq).catch((e) => aprsLog('the modem did not restart: ' + e.message));

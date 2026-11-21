@@ -385,5 +385,26 @@ test('the window offers each band the rig has, from the payload (the band select
   assert.ok(/listenBand:\s*\(b\)\s*=>\s*ipcRenderer\.send\('aprs-listen-band'/.test(pre));
 });
 
+// #841: a monitor that never opened, or closed later, left the window saying
+// Listening while nothing Dire Wolf decoded could reach POTACAT.
+test('#841: the modem starts again when its lane changed, it exited, or its monitor closed', () => {
+  assert.strictEqual(L.modemRestartWhy({ laneChanged: false, procAlive: true, monitorLost: false }), '');
+  assert.strictEqual(L.modemRestartWhy({ laneChanged: true, procAlive: true }), 'lane');
+  assert.strictEqual(L.modemRestartWhy({ procAlive: false }), 'process');
+  assert.strictEqual(L.modemRestartWhy({ procAlive: true, monitorLost: true }), 'monitor');
+});
+
+test('#841: main refuses a start whose AGW port never opened, and marks a monitor that closes on its own', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const spawnFn = main.slice(main.indexOf('async function aprsSpawnDirewolf('), main.indexOf('function aprsDevFeed('));
+  assert.ok(/if \(!ready\) \{[\s\S]*?throw new Error\(/.test(spawnFn), 'no open port: the start fails with a reason');
+  assert.ok(/onClose: \(code\) => \{[\s\S]*?aprsListen\.monitorLost = true/.test(spawnFn), 'a lost monitor is noted');
+  assert.ok(!/onClose: \(\) => \{\}/.test(spawnFn), 'the monitor closing is no longer ignored');
+  const stopFn = main.slice(main.indexOf('function aprsStopModem('), main.indexOf('function aprsLaneNeededByOthers('));
+  assert.ok(/aprsListen\.monitorToken = null/.test(stopFn) && /aprsListen\.monitorLost = false/.test(stopFn), 'a monitor closed on purpose is not lost');
+  const tick = main.slice(main.indexOf('function aprsListenTick('), main.indexOf('function aprsRadioReturnOnDial('));
+  assert.ok(/AprsListen\.modemRestartWhy\(\{[^}]*monitorLost: !!aprsListen\.monitorLost/.test(tick), 'the tick restarts on a lost monitor');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
