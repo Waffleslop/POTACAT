@@ -258,7 +258,7 @@ section('Source guards');
   }
   // Every billing push from cloud-ipc reaches the web/app clients via main.
   const main = read('main.js');
-  assert(/onBillingState: \(payload\) => \{ if \(remoteServer\) remoteServer\.broadcastCloudBilling\(payload\); \}/.test(main), 'main fans cloud-ipc billing state out to ECHOCAT clients');
+  assert(/onBillingState: \(payload\) => \{ if \(remoteServer\) remoteServer\.broadcastCloudBilling\(payload\);( pushCloudState\(\);)? \}/.test(main), 'main fans cloud-ipc billing state out to ECHOCAT clients');
   // The web bridge's cloud-status carries the live subscription (the old
   // bridge returned a cached stub with no subscription at all).
   assert(/cloudBridge\('cloud-get-status'[\s\S]{0,900}refreshSubscription\('web-status'\)/.test(main), 'web cloud-status carries the live subscription');
