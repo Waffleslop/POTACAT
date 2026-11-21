@@ -1006,22 +1006,25 @@ button:hover {
   bottom: 46px;
   right: 8px;
   z-index: 100;
-  background: rgba(22, 33, 62, 0.92);
-  border: 1px solid #333;
+  /* The theme's own panel colours (every design-system theme maps these in
+     ds-bridge.css), not the classic navy: the box was dark navy with grey text
+     on every theme, light ones included. */
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
   border-radius: 8px;
   padding: 6px 10px;
   font-family: monospace;
   font-size: 11px;
-  backdrop-filter: blur(4px);
+  box-shadow: 0 2px 8px var(--shadow, rgba(0, 0, 0, 0.35));
   cursor: grab;
   user-select: none;
 }
 .meter-box.dragging { cursor: grabbing; opacity: 0.8; }
 .meter-box.hidden { display: none; }
 .meter-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
-.meter-label { color: #888; font-weight: 600; min-width: 28px; text-align: right; }
-.meter-tx-hint { color: #555; font-weight: 400; font-size: 9px; margin-left: 2px; vertical-align: middle; }
-.meter-val { color: #ccc; min-width: 42px; text-align: right; font-weight: 700; }
+.meter-label { color: var(--text-secondary); font-weight: 600; min-width: 28px; text-align: right; }
+.meter-tx-hint { color: var(--text-dim); font-weight: 400; font-size: 9px; margin-left: 2px; vertical-align: middle; }
+.meter-val { color: var(--text-primary); min-width: 42px; text-align: right; font-weight: 700; }
 
 /* Floating CW Macro box — draggable */
 .cw-macro-box {

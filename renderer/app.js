@@ -2222,7 +2222,7 @@ async function loadPrefs() {
     meterBoxVisible = settings.showMeterBox;
     try { localStorage.setItem('meterBoxVisible', meterBoxVisible); } catch {}
     if (typeof meterBox !== 'undefined' && meterBox) {
-      meterBox.classList.toggle('hidden', !meterBoxVisible);
+      syncMeterBoxShown();
     }
     if (typeof quickShowMeter !== 'undefined' && quickShowMeter) {
       quickShowMeter.checked = meterBoxVisible;
@@ -17732,7 +17732,7 @@ quickShowMeter.addEventListener('change', () => {
   // (Electron session partition), which made the checkbox spring back to
   // enabled for users who disabled it. Reported by bjh 2026-04-23.
   window.api.saveSettings({ showMeterBox: meterBoxVisible });
-  meterBox.classList.toggle('hidden', !meterBoxVisible);
+  syncMeterBoxShown();
   document.getElementById('set-show-meter').checked = meterBoxVisible;
 });
 
@@ -18385,7 +18385,7 @@ async function openSettingsDialog(tab) {
     meterBoxVisible = s.showMeterBox;
     localStorage.setItem('meterBoxVisible', meterBoxVisible);
     quickShowMeter.checked = meterBoxVisible;
-    meterBox.classList.toggle('hidden', !meterBoxVisible);
+    syncMeterBoxShown();
   }
   document.getElementById('set-show-meter').checked = meterBoxVisible;
   setEnableBandActivity.checked = s.enableBandActivity === true;
@@ -19087,7 +19087,7 @@ settingsSave.addEventListener('click', async () => {
   meterBoxVisible = document.getElementById('set-show-meter').checked;
   localStorage.setItem('meterBoxVisible', meterBoxVisible);
   quickShowMeter.checked = meterBoxVisible;
-  meterBox.classList.toggle('hidden', !meterBoxVisible);
+  syncMeterBoxShown();
   const bandActivityEnabled = setEnableBandActivity.checked;
   const showBearingEnabled = setShowBearing.checked;
   const enableSplitViewVal = setEnableSplitView.checked;
@@ -22801,6 +22801,24 @@ function clampFloatingBox(box, storageKey) {
   box.style.right = 'auto';
   box.style.bottom = 'auto';
 }
+/**
+ * Show the meter box, and when it was hidden, put it inside the window first.
+ * It stays hidden until the radio's first reading, and clampFloatingBox skips
+ * a hidden box, so a box saved on a bigger window used to appear wherever it
+ * was saved: off the edge of a smaller one, with nothing pulling it back
+ * (NJ2DX 2026-11-21, IC-7300: "the S-meter floating panel disappeared";
+ * making the window bigger brought it back). Every way the box appears runs
+ * through here, so it always lands where it can be seen.
+ */
+function syncMeterBoxShown() {
+  if (!meterBox) return;
+  const wasHidden = meterBox.classList.contains('hidden');
+  meterBox.classList.toggle('hidden', !meterBoxVisible);
+  if (meterBoxVisible && wasHidden) clampFloatingBox(meterBox, 'meterBoxPos');
+}
+function showMeterBox() {
+  if (meterBoxVisible && meterBox && meterBox.classList.contains('hidden')) syncMeterBoxShown();
+}
 let _floatingBoxResizeTimer = null;
 window.addEventListener('resize', () => {
   clearTimeout(_floatingBoxResizeTimer);
@@ -22855,6 +22873,7 @@ window.addEventListener('resize', () => {
       left: parseInt(meterBox.style.left, 10),
       top: parseInt(meterBox.style.top, 10),
     }));
+    clampFloatingBox(meterBox, 'meterBoxPos'); // dropped past an edge: shown inside, the drop point kept
   });
 })();
 const smeterBarCanvas = document.getElementById('smeter-bar');
@@ -22864,27 +22883,40 @@ const swrTextEl = document.getElementById('swr-text');
 const alcBarCanvas = document.getElementById('alc-bar');
 const alcTextEl = document.getElementById('alc-text');
 
+// The meter's colours come from the theme (styles.css roles, which every
+// design-system theme points at its own through ds-bridge.css): the track is
+// the window's background, the ticks a border line, and a reading is ok /
+// warn / bad. Read when drawn, so a theme change shows at the next reading.
+function meterThemeColor(name, fallback) {
+  try { const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim(); return v || fallback; } catch { return fallback; }
+}
+function meterLevelColor(kind) {
+  if (kind === 'bad') return meterThemeColor('--bad', '#e94560');
+  if (kind === 'warn') return meterThemeColor('--warn', '#f0a500');
+  if (kind === 'idle') return meterThemeColor('--border-primary', '#333');
+  return meterThemeColor('--ok', '#4ecca3');
+}
 function drawMeterBar(canvas, level, color) {
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
   const w = canvas.width, h = canvas.height;
   ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = '#1a1a2e';
+  ctx.fillStyle = meterThemeColor('--bg-primary', '#1a1a2e');
   ctx.fillRect(0, 0, w, h);
   const barW = Math.round(Math.max(0, Math.min(1, level)) * w);
   ctx.fillStyle = color;
   ctx.fillRect(0, 0, barW, h);
   // Tick marks
-  ctx.fillStyle = 'rgba(255,255,255,0.15)';
+  ctx.fillStyle = meterThemeColor('--border-secondary', 'rgba(255,255,255,0.15)');
   for (let i = 1; i <= 9; i++) {
     ctx.fillRect(Math.round(i * w / 12), 0, 1, h);
   }
 }
 
 window.api.onCatSmeter((val) => {
-  if (meterBoxVisible) meterBox.classList.remove('hidden');
+  showMeterBox();
   const level = val / 255;
-  const color = val < 80 ? '#4ecca3' : val < 160 ? '#ffd740' : '#e94560';
+  const color = meterLevelColor(val < 80 ? 'ok' : val < 160 ? 'warn' : 'bad');
   drawMeterBar(smeterBarCanvas, level, color);
   if (val <= 120) {
     smeterTextEl.textContent = 'S' + Math.round(val * 9 / 120);
@@ -22896,15 +22928,15 @@ window.api.onCatSmeter((val) => {
 
 window.api.onCatSwr((val) => {
   if (val <= 0) {
-    drawMeterBar(swrBarCanvas, 0, '#333');
+    drawMeterBar(swrBarCanvas, 0, meterLevelColor('idle'));
     swrTextEl.textContent = '—';
-    swrTextEl.style.color = '#666';
+    swrTextEl.style.color = meterThemeColor('--text-dim', '#666');
     return;
   }
-  if (meterBoxVisible) meterBox.classList.remove('hidden');
+  showMeterBox();
   const swr = 1.0 + (val / 60);
   const level = Math.min(1, (swr - 1) / 4);
-  const color = swr <= 1.5 ? '#4ecca3' : swr <= 2.0 ? '#ffd740' : swr <= 3.0 ? '#f0a500' : '#e94560';
+  const color = meterLevelColor(swr <= 1.5 ? 'ok' : swr <= 3.0 ? 'warn' : 'bad');
   drawMeterBar(swrBarCanvas, level, color);
   swrTextEl.textContent = swr < 10 ? swr.toFixed(1) : '>10';
   swrTextEl.style.color = color;
@@ -22919,36 +22951,36 @@ if (window.api.onCatFwdPower && pwrBarCanvas) {
   window.api.onCatFwdPower((watts) => {
     const w = Number(watts) || 0;
     if (w <= 0) {
-      drawMeterBar(pwrBarCanvas, 0, '#333');
+      drawMeterBar(pwrBarCanvas, 0, meterLevelColor('idle'));
       pwrTextEl.textContent = '—';
-      pwrTextEl.style.color = '#666';
+      pwrTextEl.style.color = meterThemeColor('--text-dim', '#666');
       return;
     }
-    if (meterBoxVisible) meterBox.classList.remove('hidden');
+    showMeterBox();
     const full = radioPower > 0 ? radioPower : 100;
     const level = Math.min(1, w / full);
-    drawMeterBar(pwrBarCanvas, level, '#4ecca3');
+    drawMeterBar(pwrBarCanvas, level, meterLevelColor('ok'));
     pwrTextEl.textContent = (w < 10 ? w.toFixed(1) : Math.round(w)) + ' W';
-    pwrTextEl.style.color = '#4ecca3';
+    pwrTextEl.style.color = meterLevelColor('ok');
   });
 }
 
 // Direct SWR ratio from FlexRadio vita49 (bypasses RM1 conversion)
 window.api.onCatSwrRatio((swr) => {
-  if (meterBoxVisible) meterBox.classList.remove('hidden');
+  showMeterBox();
   const level = Math.min(1, (swr - 1) / 4);
-  const color = swr <= 1.5 ? '#4ecca3' : swr <= 2.0 ? '#ffd740' : swr <= 3.0 ? '#f0a500' : '#e94560';
+  const color = meterLevelColor(swr <= 1.5 ? 'ok' : swr <= 3.0 ? 'warn' : 'bad');
   drawMeterBar(swrBarCanvas, level, color);
   swrTextEl.textContent = swr < 10 ? swr.toFixed(1) : '>10';
   swrTextEl.style.color = color;
 });
 
 window.api.onCatAlc((val) => {
-  if (meterBoxVisible) meterBox.classList.remove('hidden');
+  showMeterBox();
   // Radios report ALC on 0..255 scale (Kenwood RM3 / Yaesu RM2). Anything
   // above ~40% ALC is into compression — color accordingly.
   const pct = Math.min(1, val / 255);
-  const color = pct <= 0 ? '#666' : pct < 0.4 ? '#4ecca3' : pct < 0.7 ? '#ffd740' : pct < 0.9 ? '#f0a500' : '#e94560';
+  const color = pct <= 0 ? meterThemeColor('--text-dim', '#666') : meterLevelColor(pct < 0.4 ? 'ok' : pct < 0.9 ? 'warn' : 'bad');
   drawMeterBar(alcBarCanvas, pct, pct <= 0 ? '#333' : color);
   // A reading of ZERO is a reading. Rendering it as an em dash made it
   // identical to "this rig reports no ALC at all", so a K3 running with
