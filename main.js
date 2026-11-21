@@ -495,8 +495,11 @@ const DirewolfAgwMonitor = require('./lib/direwolf-agw-monitor');
 const PacketLinkClose = require('./lib/packet-link-close');
 const PacketRigMode = require('./lib/packet-rig-mode');
 const AprsListen = require('./lib/aprs-listen');           // APRS phase 2: when "Listen on my radio" may start, and why not
+const AprsRxFilter = require('./lib/aprs-rx-filter');      // #840: 30 m listening widens a narrow Flex receive filter and puts it back
 const IdleRadioUse = require('./lib/idle-radio-use');      // Idle Mode yields to anyone using the radio, APRS listening included
 const RadioTuneRoute = require('./lib/radio-tune-route'); // the path tuneRadio drives the radio on: TCI, Flex Direct, CAT, or none
+const IcomNetworkDataMod = require('./lib/icom-network-data-mod'); // #853: which DATA MOD item gets LAN over the network (DATA1/2/3 on an IC-7610)
+const IcomUsbDataMod = require('./lib/icom-usb-data-mod'); // sweep 1a: DATA MOD to USB for a data session over USB, put back after
 const AprsRfFrequency = require('./lib/aprs-rf-frequency'); // APRS: the 2 m frequency by grid square (phase 2), 30 m worldwide (phase 3)
 const AprsRfFrames = require('./lib/aprs-rf-frames');       // APRS phase 2: Dire Wolf's AGW monitor frames -> APRS packets
 const AprsRadioReturn = require('./lib/aprs-radio-return'); // APRS phase 2: the radio goes back after listening
@@ -1958,6 +1961,7 @@ async function _awaitPendingCatClose(ms) {
 let _icomNetworkTransport = null;
 let _icomNetworkDataModRestore = null;
 let _icomNetworkDataModSession = 0;
+let _icomNetworkDataModActive = null; // #853: the DATA number whose DATA MOD this session set to LAN (radios with DATA1/2/3 MOD)
 const DEFAULT_JTCAT_TX_PWR_PCT = 100;
 const DEFAULT_JTCAT_TX_GAIN = (DEFAULT_JTCAT_TX_PWR_PCT / 100) * (DEFAULT_JTCAT_TX_PWR_PCT / 100);
 const DIRECT_TX_PEAK_LIMIT = 0.95;
@@ -5226,7 +5230,8 @@ function bindRigStateEvents(controller) {
   controller.on('ptt', (on) => txNoteRadioPtt(controller, on));
   controller.on('ptt', (on) => { if (!on && controller === cat) txMetersRestOnRx(); });
   controller.on('ptt', (on) => { if (!on && controller === cat) customCatReader.txEnded(); }); // #242: reads held during TX
-  controller.on('ptt', (on) => { if (on && controller === cat) aprsRfNoteRadioTx(); }); // APRS phase 7: sent only if the radio keyed
+  // APRS phase 7: sent only if the radio keyed. Every readback, not only a change of POTACAT's TX state (#856).
+  controller.on('ptt-readback', (on) => { if (on && controller === cat) aprsRfNoteRadioTx(); });
   // Something the radio did that the operator must see, not only the log
   // (lib/rig-controller.js: a radio left in transmit after a CW message).
   controller.on('notice', (msg) => {
@@ -6124,47 +6129,9 @@ function applyRaisedCosineFade(samples, sampleRate = 48000, fadeMs = 10) {
   return samples;
 }
 
-const ICOM_NETWORK_DATA_MOD_SPECS = [
-  {
-    models: ['IC-7610'],
-    civAddrs: [0x98],
-    settingId: 0x0092,
-    label: 'DATA1 MOD',
-    networkLabel: 'LAN',
-    networkValue: 0x05,
-    values: { 0x00: 'MIC', 0x01: 'ACC', 0x02: 'MIC+ACC', 0x03: 'USB', 0x04: 'MIC+USB', 0x05: 'LAN' },
-  },
-  {
-    models: ['IC-9700'],
-    civAddrs: [0xA2],
-    settingId: 0x0116,
-    label: 'DATA MOD',
-    networkLabel: 'LAN',
-    networkValue: 0x05,
-    values: { 0x00: 'MIC', 0x01: 'ACC', 0x02: 'MIC+ACC', 0x03: 'USB', 0x04: 'MIC+USB', 0x05: 'LAN' },
-  },
-  {
-    models: ['IC-705'],
-    civAddrs: [0xA4],
-    settingId: 0x0119,
-    label: 'DATA MOD',
-    networkLabel: 'WLAN',
-    networkValue: 0x03,
-    values: { 0x00: 'MIC', 0x01: 'USB', 0x02: 'MIC+USB', 0x03: 'WLAN' },
-  },
-  {
-    // IC-7760 CI-V Reference Guide: set-mode item 0130 "DATA1 MOD" (0131 =
-    // DATA2, 0132 = DATA3 — each data mode has its own source; POTACAT uses
-    // DATA1, which is what `1A 06 01` selects). Value 09 = LAN.
-    models: ['IC-7760'],
-    civAddrs: [0xB2],
-    settingId: 0x0130,
-    label: 'DATA1 MOD',
-    networkLabel: 'LAN',
-    networkValue: 0x09,
-    values: { 0x00: 'MIC', 0x01: 'USB', 0x02: 'LINE-IN', 0x03: 'ACC', 0x04: 'MIC+USB', 0x05: 'MIC+LINE-IN', 0x06: 'MIC+ACC', 0x07: 'MIC+USB+ACC', 0x08: 'MIC+LINE-IN+ACC', 0x09: 'LAN' },
-  },
-];
+// The Icom DATA MOD auto-LAN table and the per-DATA-number choice live in
+// lib/icom-network-data-mod.js (#853: the IC-7610 has DATA1/2/3 MOD).
+const ICOM_NETWORK_DATA_MOD_SPECS = IcomNetworkDataMod.SPECS;
 
 /**
  * Setup notes for a rig as the editor (or a saved rig) describes it. Icoms are
@@ -6886,11 +6853,34 @@ function waitForIcomDataMod(controller, settingId, timeoutMs = 1500) {
   });
 }
 
-async function prepareIcomNetworkDataMod(controller, target, rigModel, sessionId, liveCivAddr = null) {
+/**
+ * #853: the DATA number the radio uses (1/2/3), for a radio with one DATA MOD
+ * per data mode (IC-7610). Waits briefly for the radio's first 1A 06 report,
+ * since POTACAT re-selects the number the radio reported; unknown = 1.
+ */
+async function icomNetworkDataNumber(dataNumberOf, timeoutMs = 1500) {
+  if (typeof dataNumberOf !== 'function') return 1;
+  const until = Date.now() + timeoutMs;
+  for (;;) {
+    const n = Number(dataNumberOf()) || 0;
+    if (n >= 1 && n <= 3) return n;
+    if (Date.now() >= until) return 1;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
+async function prepareIcomNetworkDataMod(controller, target, rigModel, sessionId, liveCivAddr = null, dataNumberOf = null) {
   if (!controller || !controller.connected) return;
   if (!target || target.type !== 'icom-network') return;
   if (settings.audioSource !== 'icom-network') return;
-  const spec = getIcomNetworkDataModSpec(target, rigModel, liveCivAddr);
+  const baseSpec = getIcomNetworkDataModSpec(target, rigModel, liveCivAddr);
+  let spec = baseSpec;
+  if (baseSpec && baseSpec.perData) {
+    const n = await icomNetworkDataNumber(dataNumberOf);
+    if (sessionId !== _icomNetworkDataModSession || cat !== controller || !controller.connected) return;
+    spec = IcomNetworkDataMod.specForDataNumber(baseSpec, n);
+    _icomNetworkDataModActive = { sessionId, dataNumber: spec.dataNumber, baseSpec, target, rigModel, liveCivAddr, dataNumberOf };
+  }
   if (!spec) {
     logIcomNetworkAudio('[Icom-Network-Audio] DATA MOD auto-LAN is not configured for this Icom model; leaving radio MOD input unchanged.');
     return;
@@ -6962,8 +6952,37 @@ function icomCivAddressLearn(controller, codec, transport, target) {
     }, ICOM_CIV_HUNT_MS);
   });
 }
+// Sweep 1a (Casey 2026-11-21): over a USB CI-V link, DATA MOD to USB while
+// POTACAT has the radio in a DATA mode, put back afterwards (lib/icom-usb-data-mod.js).
+let _icomUsbDataMod = null; // { guard, controller }
+function icomUsbDataModAttach(controller, codec) {
+  const modelName = getActiveRigModelName();
+  _icomUsbDataMod = null;
+  if (!IcomUsbDataMod.specFor(modelName)) return;
+  const rigOf = () => (settings.rigs || []).find((r) => r && r.id === settings.activeRigId);
+  const guard = IcomUsbDataMod.createGuard({
+    model: modelName,
+    enabled: () => { const r = rigOf(); return !(r && r.icomUsbDataModOff); },
+    read: async (id) => { const d = await waitForIcomDataMod(controller, id, 1500); return d ? d.value : null; },
+    write: (id, v) => controller.setDataMod(id, v),
+    log: (line) => sendCatLog('[Icom DATA MOD] ' + line),
+    notice: (message) => { if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message, duration: 15000 }); },
+  });
+  _icomUsbDataMod = { guard, controller };
+  codec.on('data-set', (ev) => {
+    if (cat !== controller || !_icomUsbDataMod || _icomUsbDataMod.guard !== guard) return;
+    guard.onDataSet(ev).catch((e) => sendCatLog('[Icom DATA MOD] ' + e.message));
+  });
+}
+function restoreIcomUsbDataMod(reason) {
+  const h = _icomUsbDataMod;
+  _icomUsbDataMod = null;
+  if (!h || !h.controller || !h.controller.connected) return;
+  try { h.guard.restore(reason); } catch (e) { sendCatLog('[Icom DATA MOD] ' + e.message); }
+}
 
 async function restoreIcomNetworkDataMod(reason = 'disconnect') {
+  restoreIcomUsbDataMod(reason); // every disconnect path calls this one: the USB DATA MOD goes back first
   const state = _icomNetworkDataModRestore;
   if (!state) return false;
   _icomNetworkDataModRestore = null;
@@ -9171,14 +9190,14 @@ async function connectCat() {
       }
     });
     cat.on('frequency', catFrequencyHandler);
-    // Serial CAT port opened but the radio never echoes our tune — classically a
-    // Yaesu (FTDX1200/3000/5000) with menu "CAT RTS" enabled while we de-assert
-    // RTS, or a DTR/RTS-blocked USB interface. The port connects (so QRZ/logging
-    // look fine) but FA tune commands are silently dropped. Surface the fix.
+    // A network CAT link (this CatClient branch: TCP or K4 network) answers but
+    // never echoes our tune. No serial line is involved, so the cause is the
+    // program or radio at the other end, not a CAT RTS menu (#849; a direct-
+    // serial radio waiting for RTS is handled by the serial handshake trial).
     cat.on('tune-unconfirmed', (info) => {
       const fKhz = info && info.targetHz ? (info.targetHz / 1000).toFixed(1) : '?';
-      sendCatLog(`[CAT] Radio not responding to tune commands (${fKhz} kHz never echoed after ${info && info.attempts} tries). ` +
-        `Likely CAT RTS / DTR-RTS handshake — check the radio's CAT menu and the "Disable DTR/RTS on connect" setting.`);
+      sendCatLog(`[CAT] Radio not responding to tune commands (${fKhz} kHz never echoed after ${info && info.attempts} tries) on a network CAT link: ` +
+        `the program or radio at the other end did not take the frequency (no serial RTS/DTR is involved).`);
       if (win && !win.isDestroyed()) {
         win.webContents.send('cat-tune-unconfirmed', info || {});
       }
@@ -9383,6 +9402,7 @@ async function connectCat() {
     cat = new RigController(model, transport, codec);
     cat._debug = true;
     icomCivAddressLearn(cat, codec, transport, target); // sweep 3c: a wrong CI-V address is found and fixed, not a silent radio
+    icomUsbDataModAttach(cat, codec); // sweep 1a: DATA MOD to USB for a data session, put back after
     cat.on('log', sendCatLog);
     cat.on('status', sendCatStatus);
     cat.on('frequency', catFrequencyHandler);
@@ -9601,10 +9621,23 @@ async function connectCat() {
     cat.on('status', (s) => {
       if (!s || !s.connected || !enableTxAudio) return;
       setTimeout(() => {
-        prepareIcomNetworkDataMod(networkCat, target, model, dataModSession, networkCodec.radioAddress).catch((err) => {
+        prepareIcomNetworkDataMod(networkCat, target, model, dataModSession, networkCodec.radioAddress, icomDataNumberOf).catch((err) => {
           sendCatLog(`[Icom-Network-Audio] DATA MOD auto-LAN failed: ${err.message || err}`);
         });
       }, 700);
+    });
+    // #853: the DATA number the radio reports (it is what POTACAT re-selects). When
+    // the operator moves to another one (USB-D1 -> USB-D2), the LAN source moves with
+    // it: the old item goes back to the operator's value, the new one is set to LAN.
+    const icomDataNumberOf = () => (networkCodec._dataModeSeen ? networkCodec._dataByte : 0);
+    networkCodec.on('data-mode', ({ on, data }) => {
+      const act = _icomNetworkDataModActive;
+      if (!on || !data || !act || act.sessionId !== dataModSession || act.dataNumber === data || !enableTxAudio) return;
+      logIcomNetworkAudio(`[Icom-Network-Audio] the radio is on DATA${data} now (was DATA${act.dataNumber}): moving the LAN source to DATA${data} MOD`);
+      _icomNetworkDataModActive = null;
+      restoreIcomNetworkDataMod(`DATA${data} selected`).then(() =>
+        prepareIcomNetworkDataMod(networkCat, act.target, act.rigModel, dataModSession, act.liveCivAddr, icomDataNumberOf)
+      ).catch((err) => sendCatLog(`[Icom-Network-Audio] DATA MOD auto-LAN failed: ${err.message || err}`));
     });
     transport.on('audio-ready', () => {
       const msg = `[Icom-Network-Audio] audio stream ready${transport.txReady ? ' (RX/TX)' : ' (RX only)'}`;
@@ -13332,10 +13365,10 @@ async function aprsWaitDial(hz, ms, seq) {
   const until = Date.now() + ms;
   while (Date.now() < until) {
     if (seq !== aprsListen.seq) return false;
-    if (AprsListen.tuneAccepted(hz, _currentFreqHz)) return true;
+    if (AprsListen.tuneAccepted(hz, _currentFreqHz, aprsListen.band)) return true;
     await new Promise((r) => setTimeout(r, 200));
   }
-  return AprsListen.tuneAccepted(hz, _currentFreqHz);
+  return AprsListen.tuneAccepted(hz, _currentFreqHz, aprsListen.band);
 }
 
 /** The modem audio lane at Dire Wolf's rate and the radio's receive audio on it. Receive only: no playback is asked for. */
@@ -13374,6 +13407,8 @@ function aprsOnMonitorFrame(f) {
 
 function aprsStopModem() {
   if (aprsListen.devTimer) { clearInterval(aprsListen.devTimer); aprsListen.devTimer = null; }
+  aprsListen.monitorToken = null; // a monitor closed on purpose is not lost (#841)
+  aprsListen.monitorLost = false;
   if (aprsListen.monitor) { const m = aprsListen.monitor; aprsListen.monitor = null; try { m.close(); } catch {} }
   if (aprsListen.proc) { const p = aprsListen.proc; aprsListen.proc = null; try { p.kill(); } catch {} }
   aprsListen.lane = null;
@@ -13417,7 +13452,7 @@ async function aprsSpawnDirewolf(seq) {
   const agw = DirewolfProcess.aprsAgwPort(_winlinkAgwPort());
   fs.writeFileSync(confPath, DirewolfProcess.buildDirewolfAprsRxConfig({ mycall: settings.myCallsign, audioPort: lane.port, agwPort: agw, band: aprsListen.band || '2m' }));
   const args = DirewolfProcess.buildDirewolfArgs({ configName: path.basename(confPath) });
-  aprsLog(`Dire Wolf for APRS: ${DirewolfProcess.APRS_MODEM_LINES[aprsListen.band || '2m']}, receive only (no PTT line), audio on 127.0.0.1:${lane.port}, AGW ${agw}`);
+  aprsLog(`Dire Wolf for APRS: ${DirewolfProcess.APRS_RX_MODEM_LINES[aprsListen.band || '2m']}, receive only (no PTT line), audio on 127.0.0.1:${lane.port}, AGW ${agw}`);
   const proc = spawn(bin.path, args, { cwd: p.dir, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   aprsListen.proc = proc;
   aprsListen.lane = lane;
@@ -13429,16 +13464,30 @@ async function aprsSpawnDirewolf(seq) {
   proc.on('exit', (code) => { if (aprsListen.proc === proc) { aprsListen.proc = null; aprsLog(`Dire Wolf stopped (code ${code})`); } });
   // Ready = the AGW port accepting (Dire Wolf's stdout can arrive late or never on Windows, #128).
   const until = Date.now() + 15000;
+  let ready = false;
   while (Date.now() < until) {
     if (seq !== aprsListen.seq || aprsListen.proc !== proc) return;
-    if ((await DirewolfProcess.probeAgwPort({ port: agw })).ok) break;
+    if ((await DirewolfProcess.probeAgwPort({ port: agw })).ok) { ready = true; break; }
     await new Promise((r) => setTimeout(r, 250));
   }
   if (seq !== aprsListen.seq || aprsListen.proc !== proc) return;
+  // #841: a port that never opened means nothing Dire Wolf decodes can reach POTACAT; say so, never "Listening".
+  if (!ready) {
+    aprsStopModem();
+    throw new Error(`Dire Wolf did not open its AGW port ${agw} for POTACAT within 15 s`);
+  }
+  // The monitor closing on its own (not by aprsStopModem) is lost: the tick starts the modem again.
+  const token = {};
+  aprsListen.monitorToken = token;
+  aprsListen.monitorLost = false;
   aprsListen.monitor = DirewolfAgwMonitor.createAgwMonitor({
     port: agw, onLog: aprsLog,
     onFrame: (f) => aprsOnMonitorFrame(f),
-    onClose: () => {},
+    onClose: (code) => {
+      if (aprsListen.monitorToken !== token) return;
+      aprsListen.monitorLost = true;
+      aprsLog(`the Dire Wolf monitor connection closed (${code}); the modem starts again`);
+    },
   });
 }
 
@@ -13450,6 +13499,41 @@ function aprsDevFeed() {
   const next = () => { if (i < frames.length) aprsOnMonitorFrame(frames[i++]); else { clearInterval(aprsListen.devTimer); aprsListen.devTimer = null; } };
   next();
   aprsListen.devTimer = setInterval(next, 700);
+}
+
+/** Our Flex slice now, for the receive filter guard (#840): null when no Flex is connected or its status has not arrived. */
+function aprsFlexSliceNow() {
+  if (!smartSdr || !smartSdr.connected) return null;
+  const idx = smartSdr.ourSliceIndex != null ? smartSdr.ourSliceIndex : getFlexSliceIndex();
+  if (idx == null || _flexSliceKvIndex !== idx) return null;
+  const kv = _flexSliceKv || {};
+  return { idx, lo: kv.filter_lo, hi: kv.filter_hi, mode: kv.mode || '', ritOn: kv.rit_on, ritHz: kv.rit_freq };
+}
+const aprsRxFilter = AprsRxFilter.createRxFilterGuard({
+  read: aprsFlexSliceNow,
+  set: (idx, lo, hi) => { if (smartSdr && smartSdr.connected) smartSdr.setSliceFilter(idx, lo, hi); },
+  log: (line) => aprsLog(line),
+});
+/**
+ * After the tune: wait for the slice's status in the listening mode (the radio
+ * reports the new mode's filter edges), then widen a filter that would cut a
+ * tone. The note line says what changed; RIT gets its sentence. No Flex: the
+ * width warning set at the start stays (lib/aprs-listen.js filterSentence).
+ */
+async function aprsRxFilterWiden(seq) {
+  if (!smartSdr || !smartSdr.connected) return;
+  const until = Date.now() + 1500;
+  while (Date.now() < until) {
+    if (seq !== aprsListen.seq) return;
+    const s = aprsFlexSliceNow();
+    if (s && AprsListen.modeFamily(s.mode) === 'usb') break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  if (seq !== aprsListen.seq) return;
+  const r = aprsRxFilter.widen(aprsListen.band);
+  if (r.action === 'unknown') return; // nothing usable read: the width warning stays
+  aprsListen.note = [aprsSetupLine(), r.sentence, r.rit].filter(Boolean).join(' ');
+  aprsListenPush();
 }
 
 async function aprsListenStart({ resume = false } = {}) {
@@ -13464,7 +13548,9 @@ async function aprsListenStart({ resume = false } = {}) {
   aprsListen.band = AprsListen.chooseBand(bands, aprsListen.bandWanted) || '';
   const freq = aprsListen.band ? aprsListenFrequency() : null;
   aprsListen.freq = freq;
-  aprsListen.note = [aprsSetupLine(), AprsListen.filterSentence(aprsListen.band, settings.digitalFilterWidth)].filter(Boolean).join(' ');
+  aprsListen.noteBase = [aprsSetupLine(), AprsListen.filterSentence(aprsListen.band, settings.digitalFilterWidth)].filter(Boolean).join(' ');
+  aprsListen.sideband = '';
+  aprsListen.note = aprsListen.noteBase;
   if (APRS_DEV_FRAMES) {
     const no = aprsListen.band ? aprsDevRefusal(freq) : { reason: 'no-band', sentence: AprsListen.SENTENCES.noBand };
     if (no) { aprsNotNow(no); return; }
@@ -13518,6 +13604,11 @@ async function aprsListenStart({ resume = false } = {}) {
     if (pm && !pm.confirm) aprsListen.unreportedData = plan.dataMode;
     try { cat.setModeOnly(plan.dataMode, freq.hz, { noAnchor: true }); } catch (e) { aprsLog('the data mode could not be set: ' + e.message); }
   }
+  // 30 m on a Flex: a receive filter that does not pass 1450 to 1950 Hz is widened now and put back when listening stops (#840).
+  if (aprsListen.band === '30m') {
+    await aprsRxFilterWiden(seq);
+    if (seq !== aprsListen.seq) return;
+  }
   try {
     await aprsSpawnDirewolf(seq);
   } catch (e) {
@@ -13531,6 +13622,7 @@ async function aprsListenStart({ resume = false } = {}) {
   aprsListen.state = 'listening';
   // From here a move off the APRS frequency or mode is the operator's (or a spot's, or the phone's): it pauses listening.
   aprsListen.watch = AprsListen.createMoveWatch({ band: aprsListen.band, listenHz: freq.hz });
+  aprsListen.listeningSince = Date.now();
   _aprsAudioMinute.start();
   aprsListenPush();
 }
@@ -13546,6 +13638,7 @@ function aprsListenStop(why) {
   aprsRfAbort(`listening stopped: ${why}`); // phase 7: a radio beacon in flight unkeys at once
   aprsStopModem();
   aprsReleaseLane();
+  aprsRxFilter.restore(why); // #840: before the radio goes back, while the slice is still in the listening mode
   if (APRS_DEV_FRAMES) { aprsListen.state = 'off'; aprsListen.sentence = ''; aprsListenPush(); return; }
   if (aprsListen.state === 'paused') {
     // Winlink has the radio and gives it back itself (its return point is the place APRS saved).
@@ -13574,6 +13667,7 @@ function aprsListenYieldToWinlink(why) {
   aprsListen.watch = null; // Winlink is about to tune the radio: that is not the operator moving it
   _aprsAudioMinute.stop();
   aprsStopModem();
+  aprsRxFilter.restore(`the Winlink ${why} needs the radio`); // #840: the resume widens it again if it needs to
   const m = aprsReturn.pending();
   if (m && m.freqHz && !_winlinkPreviewReturnTo) _winlinkPreviewReturnTo = { freqHz: m.freqHz, mode: m.mode || '', from: 'before APRS listening' };
   aprsListen.state = 'paused';
@@ -13595,9 +13689,25 @@ function aprsListenYieldToWinlink(why) {
 function aprsListenCheckMoved() {
   if (APRS_DEV_FRAMES || !aprsListen.on || aprsListen.state !== 'listening' || !aprsListen.watch) return false;
   const m = aprsListen.watch.check({ hz: _currentFreqHz, mode: _currentMode, rfInFlight: aprsRfInFlight() });
-  if (!m) return false;
+  if (!m) { aprsListenSidebandNote(); return false; }
   aprsListenMovedOff(m);
   return true;
+}
+
+/**
+ * A 30 m radio on lower sideband hears none of the tones (#843): the note line
+ * says so while it lasts (lib/aprs-listen.js sidebandSentence), and goes when
+ * the radio reads back upper sideband.
+ */
+function aprsListenSidebandNote() {
+  // Readbacks settle (the data mode is set after the tune) before a sideband counts, as for a move.
+  if (Date.now() - (aprsListen.listeningSince || 0) < AprsListen.MOVED_GRACE_MS) return;
+  const sb = AprsListen.sidebandSentence(aprsListen.band, _currentMode);
+  if (sb === (aprsListen.sideband || '')) return;
+  aprsListen.sideband = sb;
+  aprsListen.note = [aprsListen.noteBase || '', sb].filter(Boolean).join(' ');
+  if (sb) aprsLog('the radio reads back ' + _currentMode + ' (lower sideband) while listening on 30 m: nothing will decode until its data mode is USB');
+  aprsListenPush();
 }
 
 /**
@@ -13618,6 +13728,7 @@ function aprsListenMovedOff(m) {
   _aprsAudioMinute.stop();
   aprsStopModem();
   aprsReleaseLane();
+  aprsRxFilter.restore('the radio moved'); // #840: put back only if the slice is still in the mode it was widened in
   aprsReturn.drop();
   aprsListen.moved = { hz: Number(m.hz) || 0, mode: String(m.mode || ''), band: aprsListen.band };
   aprsListen.state = 'refused'; // switch off, the card says why (ECHOCAT: as when FT8 ends listening)
@@ -13662,8 +13773,8 @@ function aprsListenTick() {
     aprsRefuse({ reason: 'ft8', sentence: AprsListen.SENTENCES.ft8 });
     return;
   }
-  // The lane was rebuilt under Dire Wolf (Pat restarting its shim), or Dire Wolf exited: start it again.
-  if ((aprsListen.lane && winlinkAudio !== aprsListen.lane) || !aprsListen.proc) {
+  // The lane was rebuilt under Dire Wolf (Pat restarting its shim), Dire Wolf exited, or its monitor connection closed (#841): start it again.
+  if (AprsListen.modemRestartWhy({ laneChanged: !!(aprsListen.lane && winlinkAudio !== aprsListen.lane), procAlive: !!aprsListen.proc, monitorLost: !!aprsListen.monitorLost })) {
     if (aprsListen.restarts++ >= 3) { aprsListenStop('the modem kept stopping'); aprsRefuse({ reason: 'no-modem', sentence: 'The modem did not start. The log has the reason.' }); return; }
     const seq = ++aprsListen.seq;
     aprsSpawnDirewolf(seq).catch((e) => aprsLog('the modem did not restart: ' + e.message));
@@ -37433,9 +37544,35 @@ function yaesuScopeBroadcastState() {
   stationSetupNotify();
 }
 
+// A scope that starts and then shows nothing used to leave nothing in the log
+// either (K3SBP 2026-11-21: a Flex pan subscribed, "frames flowing" never came,
+// and the bug report could not say whether no frame arrived or every frame was
+// thrown away as misaligned). Now: one line if no usable frame has arrived
+// SCOPE_NO_FRAMES_MS after a start, with what did arrive, and one line on the
+// first misaligned frame of a start (yaesuScopeOnFrame).
+const SCOPE_NO_FRAMES_MS = 6000;
+let _scopeNoFramesTimer = null;
+function yaesuScopeSourceName() {
+  const s = yaesuScopeState.source;
+  return s === 'flex' ? 'Flex panadapter' : s === 'sdr' ? 'SDR' : s === 'icom' ? ((icomScopeEntry && icomScopeEntry.name) || 'Icom') + ' scope over CI-V'
+    : s === 'sculan10' ? 'SCU-LAN10 scope' : s === 'k4' ? 'K4 panadapter' : s === 'kenwood' ? 'TS-890S bandscope' : 'radio scope';
+}
 function yaesuScopeSetStatus(status, diag) {
   yaesuScopeState.status = status;
   yaesuScopeState.diag = diag || null;
+  if (status === 'starting') {
+    if (!_scopeNoFramesTimer) {
+      _scopeNoFramesTimer = setTimeout(() => {
+        _scopeNoFramesTimer = null;
+        if (yaesuScopeState.status !== 'starting') return;
+        const n = yaesuScopeState.frames || 0, bad = yaesuScopeState.misaligned || 0;
+        sendCatLog(`[Scope] no picture from the ${yaesuScopeSourceName()} ${SCOPE_NO_FRAMES_MS / 1000} s after it started: ${n} frame${n === 1 ? '' : 's'} arrived${bad ? `, ${bad} of them misaligned and dropped` : ''}${n ? '' : ' (nothing reached POTACAT from the radio)'}`);
+      }, SCOPE_NO_FRAMES_MS);
+    }
+  } else if (_scopeNoFramesTimer) {
+    clearTimeout(_scopeNoFramesTimer);
+    _scopeNoFramesTimer = null;
+  }
   yaesuScopeBroadcastState();
 }
 
@@ -37755,7 +37892,11 @@ function stopYaesuScope(why) {
 
 function yaesuScopeOnFrame(f) {
   yaesuScopeState.frames++;
-  if (!f.aligned) { yaesuScopeState.misaligned++; return; }
+  if (!f.aligned) {
+    yaesuScopeState.misaligned++;
+    if (yaesuScopeState.misaligned === 1) sendCatLog(`[Scope] a frame from the ${yaesuScopeSourceName()} arrived misaligned and was dropped (frame ${yaesuScopeState.frames} of this start); later ones are counted, not logged`);
+    return;
+  }
   if (!yaesuScopeWanted()) { stopYaesuScope('nobody is watching'); return; }
   if (yaesuScopeState.status !== 'live') {
     yaesuScopeRestarts = 0;
