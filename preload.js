@@ -786,6 +786,10 @@ contextBridge.exposeInMainWorld('api', {
   cloudSetCallsign: (callsign) => ipcRenderer.invoke('cloud-set-callsign', callsign),
   cloudLogout: () => ipcRenderer.invoke('cloud-logout'),
   cloudGetStatus: () => ipcRenderer.invoke('cloud-get-status'),
+  // Signed in or not (no network), and the reason when Cloud signed this
+  // computer out (removed from the account, lib/cloud-revoked.js).
+  cloudSessionGet: () => ipcRenderer.invoke('cloud-session-get'),
+  onCloudSignedOut: (cb) => ipcRenderer.on('cloud-signed-out', (_e, data) => cb(data)),
   cloudSyncNow: () => ipcRenderer.invoke('cloud-sync-now'),
   cloudBulkPrepare: () => ipcRenderer.invoke('cloud-bulk-prepare'),
   cloudBulkUpload: () => ipcRenderer.invoke('cloud-bulk-upload'),
