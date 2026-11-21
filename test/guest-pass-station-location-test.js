@@ -58,9 +58,47 @@ check('a grid, state or county the guest\'s device sent is replaced: it is where
   const g = hostStamp({ callsign: 'W1AW', myGridsquare: 'FM18lv', myState: 'VA', myCounty: 'VA,Fairfax' });
   assert.deepStrictEqual(g, { myGridsquare: 'FN20jc', myState: 'PA', myCounty: 'PA,Bucks' });
 });
-check('an activation takes the park\'s location, blanks only', () => {
-  assert.deepStrictEqual(hostStamp({ mySigInfo: 'US-1352' }), { myState: 'PA', myCounty: 'PA,Bucks' });
-  assert.deepStrictEqual(hostStamp({ mySigInfo: 'US-1352', myState: 'NJ' }), {}, 'a supplied state is kept; no county across states');
+check('an activation takes the park\'s location', () => {
+  assert.deepStrictEqual(hostStamp({ mySigInfo: 'US-1352' }), { myGridsquare: '', myState: 'PA', myCounty: 'PA,Bucks' });
+});
+
+// main.js stationLocationFillFor WITH the park list: activationStationFill
+// (the park DB's grid and state), then the station's own state and county.
+const { activationStationFill } = require('../lib/activation-station');
+const PARK_DB = { 'US-1352': { latitude: '40.33', longitude: '-75.05', locationDesc: 'US-PA' } };
+function parkFillFor(home, parks = {}) {
+  return (rec) => {
+    if (!rec || !SC.ownStationFillApplies(rec)) return {};
+    const a = activationStationFill(rec, {
+      myCallsign: 'K3SBP', park: PARK_DB[rec.mySigInfo] || null,
+      latLonToGrid: () => 'FN20LH', parkStates: (d) => (d ? [d.replace(/^US-/, '')] : []),
+    });
+    return { ...a, ...SC.stationLocationFor({ ...rec, ...a }, { home, parkCounty: (r) => parks[r] || null }) };
+  };
+}
+const hostParkStamp = (rec) => SC.guestPassStationFor(rec, { grid: HOST.grid, fill: parkFillFor(HOST, HOST_PARKS) });
+check('an activation ignores the grid, state and county the guest\'s phone sent: the park\'s location', () => {
+  const q = { callsign: 'W1AW', mySigInfo: 'US-1352', myGridsquare: 'FM18lv', myState: 'VA', myCounty: 'VA,Fairfax' };
+  const g = hostParkStamp(q);
+  assert.deepStrictEqual(Object.keys(g).sort(), ['myCounty', 'myGridsquare', 'myState'], 'location fields only');
+  Object.assign(q, g);
+  assert.deepStrictEqual([q.myGridsquare, q.myState, q.myCounty], ['FN20LH', 'PA', 'PA,Bucks']);
+});
+check('an activation in a park the list does not know: blank (not the phone\'s, not the station\'s home), held from LoTW', () => {
+  const q = { callsign: 'W1AW', mySigInfo: 'US-9999', myGridsquare: 'FM18lv', myState: 'VA', myCounty: 'VA,Fairfax' };
+  Object.assign(q, hostParkStamp(q));
+  assert.deepStrictEqual([q.myGridsquare, q.myState, q.myCounty], ['', '', '']);
+  const f = buildAdifFields({ ...q, guestPass: true });
+  assert.ok(!f.MY_GRIDSQUARE && !f.MY_STATE && !f.MY_CNTY, 'no station location on the record');
+  const rec = { CALL: 'W1AW', QSO_DATE: '20261120', STATION_CALLSIGN: 'W7RTA', MY_SIG: 'POTA', MY_SIG_INFO: 'US-9999', APP_POTACAT_GUEST_PASS: '1' };
+  const { home, activations } = splitForLotw([rec], { myCallsign: 'W7RTA' });
+  assert.strictEqual(home.length, 0);
+  assert.strictEqual(activations.length, 1);
+  assert.ok(/no grid/.test(activations[0].skip || ''), String(activations[0].skip));
+});
+check('a non-activation contact is unchanged: the station\'s grid over the phone\'s', () => {
+  const g = hostParkStamp({ callsign: 'W1AW', myGridsquare: 'FM18lv', myState: 'VA', myCounty: 'VA,Fairfax' });
+  assert.deepStrictEqual(g, { myGridsquare: 'FN20jc', myState: 'PA', myCounty: 'PA,Bucks' });
 });
 check('a station with no grid or home set stamps nothing it does not know', () => {
   const g = SC.guestPassStationFor({ callsign: 'W1AW' }, { grid: '', fill: fillFor({}) });
