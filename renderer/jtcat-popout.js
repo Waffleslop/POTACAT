@@ -6601,14 +6601,24 @@ function _applyPopoutTheme(payload) {
   var mapPane = document.querySelector('.jp-map-pane');
   var mapToggleBtn = document.getElementById('jp-map-toggle');
   var mapPopoutBtn = document.getElementById('jp-map-popout');
+  var MAP_VISIBLE_LS_KEY = 'jtcat-popout-map-visible';
   var mapVisible = true;
+  try {
+    var savedMapVisible = localStorage.getItem(MAP_VISIBLE_LS_KEY);
+    if (savedMapVisible !== null) mapVisible = savedMapVisible === 'true';
+  } catch (e) {}
 
-  mapToggleBtn.addEventListener('click', function() {
-    mapVisible = !mapVisible;
+  function applyMapVisibility() {
     mapPane.classList.toggle('hidden', !mapVisible);
     mapToggleBtn.classList.toggle('active', mapVisible);
     if (splitterEl) splitterEl.style.display = mapVisible ? '' : 'none';
     if (mapVisible && map) setTimeout(function() { map.invalidateSize(); }, 100);
+  }
+
+  mapToggleBtn.addEventListener('click', function() {
+    mapVisible = !mapVisible;
+    try { localStorage.setItem(MAP_VISIBLE_LS_KEY, String(mapVisible)); } catch (e) {}
+    applyMapVisibility();
   });
   // "Worked": the worked-states / countries box on the map. One preference
   // for every map window on this machine (lib/worked-overlay.js keeps it).
@@ -6639,6 +6649,7 @@ function _applyPopoutTheme(payload) {
   var splitterEl = document.getElementById('jp-splitter');
   var decodePaneEl = document.querySelector('.jp-decode-pane');
   var SPLIT_LS_KEY = 'jtcat-popout-split-pct';
+  applyMapVisibility();
   // The left side is the FT8 decode pane OR, in PSK31/JTTY, that mode's own
   // pane (the decode pane is hidden then). Every one of them gets the split:
   // set on the decode pane alone, the map's 20-80 weight fought a keyboard
