@@ -33053,6 +33053,9 @@ function fmtJtcatOffset(ms) {
 
 function applyJtcatClock(d) {
   if (!jtcatSyncStatus) return;
+  // Only the buttons this OS can honour (main's canFix / canOpenSettings, lib/ntp.js).
+  if (d && jtcatClockSyncBtn) jtcatClockSyncBtn.style.display = d.canFix === false ? 'none' : '';
+  if (d && jtcatClockSetBtn) jtcatClockSetBtn.style.display = d.canOpenSettings === false ? 'none' : '';
   jtcatSyncStatus.classList.remove('jtcat-synced');
   jtcatSyncStatus.style.color = '';
   if (jtcatClockBanner) jtcatClockBanner.classList.add('hidden');
