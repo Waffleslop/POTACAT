@@ -169,7 +169,7 @@ test('the radio\'s own readbacks feed the runner (no new poll): Flex interlock a
   assert.ok(/smartSdr\.on\('interlock', \(kv\) => \{ if \(kv\.state === 'TRANSMITTING'\) aprsRfNoteRadioTx\(\); \}\);/.test(main));
   assert.ok(/smartSdr\.on\('radio-message', \(m\) => aprsRfNoteRadioRefusal\(m && m\.text\)\);/.test(main));
   assert.ok(/smartSdr\.on\('cmd-error', \(\{ status, line \}\) => \{[^\n]*aprsRfNoteRadioRefusal\(t\)/.test(main));
-  assert.ok(/controller\.on\('ptt', \(on\) => \{ if \(on && controller === cat\) aprsRfNoteRadioTx\(\); \}\);/.test(main));
+  assert.ok(/controller\.on\('ptt-readback', \(on\) => \{ if \(on && controller === cat\) aprsRfNoteRadioTx\(\); \}\);/.test(main));
   assert.ok(/txProof: aprsRfTxProof,/.test(fnBody(main, 'aprsRfRunner')));
   assert.ok(/AprsRfBeacon\.txProofFor\(/.test(fnBody(main, 'aprsRfTxProof')));
   assert.ok(!/setInterval|setTimeout/.test(fnBody(main, 'aprsRfTxProof') + fnBody(main, 'aprsRfNoteRadioTx') + fnBody(main, 'aprsRfNoteRadioRefusal')), 'no poll of its own');
