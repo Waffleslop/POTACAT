@@ -43,7 +43,7 @@ test('never: trial to paid, already on, the operator turned it off, no access, s
 
 test('main: every billing state checks; a sign-up reads its trial at once; off/on by hand is remembered; first run only records', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-  assert.ok(/onBillingState: \(payload\) => \{ if \(remoteServer\) remoteServer\.broadcastCloudBilling\(payload\); cloudTunnelOnWithAccess\(payload && payload\.subscription\); \}/.test(main));
+  assert.ok(/onBillingState: \(payload\) => \{ if \(remoteServer\) remoteServer\.broadcastCloudBilling\(payload\);[^}]* cloudTunnelOnWithAccess\(payload && payload\.subscription\); \}/.test(main));
   assert.ok(/if \(reason === 'register' && cloudIpc\) setTimeout\(\(\) => \{ cloudIpc\.refreshSubscription\('register'\)/.test(main), 'desktop and ECHOCAT sign-ups both end in cloudSessionChanged(register)');
   const dis = main.slice(main.indexOf("ipcMain.handle('cloud-tunnel-disable'"), main.indexOf("ipcMain.handle('cloud-tunnel-disable'") + 600);
   assert.ok(/settings\.cloudTunnelUserOff = true/.test(dis), 'off by hand is remembered');
