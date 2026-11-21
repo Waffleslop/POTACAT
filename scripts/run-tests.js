@@ -229,6 +229,7 @@ const TESTS = [
   'test/aprs-rf-frequency-test.js', // APRS phase 2: the 2 m APRS frequency by grid square, each entry from a published band plan
   'test/aprs-radio-return-test.js', // APRS phase 2: the radio goes back on stop, after a crash and after a quit
   'test/aprs-listen-test.js', // APRS phase 2: the refusal sentences, the packet mode, and the main.js wiring (receive only)
+  'test/aprs-rx-filter-test.js', // #840: 30 m listening widens a narrow Flex receive filter to pass 1450-1950 Hz and puts it back (fake Flex left narrow); RIT warned, never changed
   'test/aprs-beacon-tx-readback-test.js', // #856: the radio beacon hears the radio's TX readback while POTACAT holds PTT (IC-7300 over CI-V), not only TX-state changes
   'test/aprs-listen-moved-test.js', // APRS listening pauses when the radio moves off the APRS frequency (any cause), the return is dropped; the once-a-minute audio line
   'test/aprs-auto-listen-test.js', // APRS window: listen on open (receive only), once per open, every switch refusal plus TX / JTCAT QSO / owner / Guest Pass, off stays off
