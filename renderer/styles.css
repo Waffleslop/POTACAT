@@ -466,6 +466,18 @@ body {
   display: none;
 }
 
+/* A title bar that also holds the window's own controls (the APRS views and
+   settings, the JTCAT map's Worked button) keeps them on macOS; only the
+   drawn minimise / maximise / close go, the traffic lights do that (#866). */
+.platform-darwin .titlebar-controls.titlebar-keep-on-mac {
+  display: flex;
+}
+.platform-darwin .titlebar-controls.titlebar-keep-on-mac #tb-min,
+.platform-darwin .titlebar-controls.titlebar-keep-on-mac #tb-max,
+.platform-darwin .titlebar-controls.titlebar-keep-on-mac #tb-close {
+  display: none;
+}
+
 /* macOS draws the traffic lights over the page (titleBarStyle hiddenInset),
    so a modal that reaches the top of a small window — Settings fills the
    window minus 16 px — had close/minimize/zoom sitting on its heading.

@@ -14,6 +14,8 @@ const path = require('path');
 
 const TESTS = [
   'test/syntax-check-test.js', // every source file parses (a main.js syntax error passed every other test)
+  'test/icom-civ-address-learn-test.js', // sweep 3c: a USB Icom at another CI-V address is found from its own replies, used and saved
+  'test/icom-usb-data-mod-test.js', // sweep 1a: over USB CI-V, DATA MOD to USB for a data session and put back (IC-7300, MK II, IC-7100, IC-7610 DATA1/2/3)
   'test/icom-network-data-mod-test.js', // #853: over the network the IC-7610's LAN source follows the DATA number in use (DATA1/2/3 MOD 00 92/93/94)
   'test/rig-test.js',
   'test/icom-baud-list-test.js', // #238: every baud select offers 4800-115200; Icom path accepts each
@@ -555,8 +557,9 @@ const TESTS = [
   'test/ae5je-settings-audio-test.js', // AE5JE: audio devices follow their name; bug report says whether settings saves land
   'test/page-script-globals-test.js', // one top-level scope per page: a second const of the same name stops a script (WB3EGD, the dead 1.13.5 audio heal)
   'test/window-min-size-test.js',     // N0KAH: no window shrinks past its own controls
-  'test/window-rules-test.js',
-  'test/meter-box-test.js', // NJ2DX 2026-11-21: the S-meter box is clamped on screen as it appears, and draws with the theme's colours        // every window opens in the theme and remembers its place
+  'test/window-rules-test.js',        // every window opens in the theme and remembers its place
+  'test/mac-frameless-windows-test.js', // #866: every visible frameless window keeps the macOS traffic lights; the APRS and JTCAT map title bars keep their own controls on a Mac
+  'test/meter-box-test.js', // NJ2DX 2026-11-21: the S-meter box is clamped on screen as it appears, and draws with the theme's colours
   'test/yaesu-fa-digits-test.js',
   'test/yaesu-audit-ft891-test.js', // Yaesu CAT audit: FT-891 preamp, AGC, PROC, CW text, RTTY
   'test/log-as-test.js',

@@ -499,6 +499,7 @@ const AprsRxFilter = require('./lib/aprs-rx-filter');      // #840: 30 m listeni
 const IdleRadioUse = require('./lib/idle-radio-use');      // Idle Mode yields to anyone using the radio, APRS listening included
 const RadioTuneRoute = require('./lib/radio-tune-route'); // the path tuneRadio drives the radio on: TCI, Flex Direct, CAT, or none
 const IcomNetworkDataMod = require('./lib/icom-network-data-mod'); // #853: which DATA MOD item gets LAN over the network (DATA1/2/3 on an IC-7610)
+const IcomUsbDataMod = require('./lib/icom-usb-data-mod'); // sweep 1a: DATA MOD to USB for a data session over USB, put back after
 const AprsRfFrequency = require('./lib/aprs-rf-frequency'); // APRS: the 2 m frequency by grid square (phase 2), 30 m worldwide (phase 3)
 const AprsRfFrames = require('./lib/aprs-rf-frames');       // APRS phase 2: Dire Wolf's AGW monitor frames -> APRS packets
 const AprsRadioReturn = require('./lib/aprs-radio-return'); // APRS phase 2: the radio goes back after listening
@@ -6913,7 +6914,75 @@ async function prepareIcomNetworkDataMod(controller, target, rigModel, sessionId
   controller.setDataMod(spec.settingId, spec.networkValue);
 }
 
+// Sweep 3c (Casey 2026-11-21): learn the CI-V address from the radio's own
+// replies. An Icom ignores every frame not addressed to it, so a wrong address
+// in the rig editor was a healthy-looking link and a radio that never answered,
+// and the setup note asked the operator to find the address in the radio's
+// menu. Now: if the configured address has not answered 5 s after the port
+// opens, POTACAT asks for the frequency (a read) at every address an Icom in
+// its model list uses; the radio answers only to its own address, from its own
+// address (lib/codecs/civ-codec.js huntAddress / _noteFromAddr). A transceive
+// broadcast from another address (the operator turns the knob) is learned the
+// same way. The address found is used at once and saved on this rig.
+const ICOM_CIV_HUNT_MS = 5000;
+function icomCivHuntAddrs(first) {
+  const addrs = Object.values(RIG_MODELS).filter((m) => m && m.protocol === 'civ' && Number.isInteger(m.civAddr)).map((m) => m.civAddr);
+  return [first, ...addrs];
+}
+function icomCivAddressLearn(controller, codec, transport, target) {
+  codec.on('address-learned', ({ was, now, by }) => {
+    const hex = (a) => '0x' + Number(a).toString(16).toUpperCase().padStart(2, '0');
+    sendCatLog(`[CI-V] the radio answers at CI-V address ${hex(now)}, not ${hex(was)} (${by === 'reply' ? 'it answered the address search' : 'its own transceive frames'}); using ${hex(now)} and saving it for this radio`);
+    let saved = false;
+    for (const r of settings.rigs || []) {
+      const ct = r && r.catTarget;
+      if (ct && ct.type === 'icom' && ct.path === target.path) { ct.civAddress = now; saved = true; }
+    }
+    if (settings.catTarget && settings.catTarget.type === 'icom' && settings.catTarget.path === target.path) { settings.catTarget.civAddress = now; saved = true; }
+    if (saved) saveSettings(settings);
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('app-notice', { message: `Your radio answers at CI-V address ${hex(now)}, not ${hex(was)}. POTACAT now uses ${hex(now)} and saved it for this radio.`, duration: 12000 });
+    }
+  });
+  transport.once('connect', () => {
+    setTimeout(() => {
+      if (cat !== controller || !controller.connected || codec.heardFromRadio) return;
+      const n = codec.huntAddress(icomCivHuntAddrs(codec.radioAddress));
+      if (n) sendCatLog(`[CI-V] no answer at CI-V address 0x${codec.radioAddress.toString(16).toUpperCase().padStart(2, '0')} in ${ICOM_CIV_HUNT_MS / 1000} s: asking for the frequency at ${n} other Icom addresses (a read; nothing is changed on the radio)`);
+    }, ICOM_CIV_HUNT_MS);
+  });
+}
+// Sweep 1a (Casey 2026-11-21): over a USB CI-V link, DATA MOD to USB while
+// POTACAT has the radio in a DATA mode, put back afterwards (lib/icom-usb-data-mod.js).
+let _icomUsbDataMod = null; // { guard, controller }
+function icomUsbDataModAttach(controller, codec) {
+  const modelName = getActiveRigModelName();
+  _icomUsbDataMod = null;
+  if (!IcomUsbDataMod.specFor(modelName)) return;
+  const rigOf = () => (settings.rigs || []).find((r) => r && r.id === settings.activeRigId);
+  const guard = IcomUsbDataMod.createGuard({
+    model: modelName,
+    enabled: () => { const r = rigOf(); return !(r && r.icomUsbDataModOff); },
+    read: async (id) => { const d = await waitForIcomDataMod(controller, id, 1500); return d ? d.value : null; },
+    write: (id, v) => controller.setDataMod(id, v),
+    log: (line) => sendCatLog('[Icom DATA MOD] ' + line),
+    notice: (message) => { if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message, duration: 15000 }); },
+  });
+  _icomUsbDataMod = { guard, controller };
+  codec.on('data-set', (ev) => {
+    if (cat !== controller || !_icomUsbDataMod || _icomUsbDataMod.guard !== guard) return;
+    guard.onDataSet(ev).catch((e) => sendCatLog('[Icom DATA MOD] ' + e.message));
+  });
+}
+function restoreIcomUsbDataMod(reason) {
+  const h = _icomUsbDataMod;
+  _icomUsbDataMod = null;
+  if (!h || !h.controller || !h.controller.connected) return;
+  try { h.guard.restore(reason); } catch (e) { sendCatLog('[Icom DATA MOD] ' + e.message); }
+}
+
 async function restoreIcomNetworkDataMod(reason = 'disconnect') {
+  restoreIcomUsbDataMod(reason); // every disconnect path calls this one: the USB DATA MOD goes back first
   const state = _icomNetworkDataModRestore;
   if (!state) return false;
   _icomNetworkDataModRestore = null;
@@ -9328,10 +9397,12 @@ async function connectCat() {
     // CI-V pacing (CivPacer): 'auto' keeps the old burst timing and switches
     // to one command at a time only on a radio seen dropping replies (NA4DQ
     // IC-7300, 2026-11-05); the rig editor can force it either way.
-    codec = new CivCodec(model, (data) => transport.write(data), { pace: civPaceFor(target) });
+    codec = new CivCodec(model, (data) => transport.write(data), { pace: civPaceFor(target), learnAddress: true }); // sweep 3c: one radio on a USB link
     civPaceRemember(codec);
     cat = new RigController(model, transport, codec);
     cat._debug = true;
+    icomCivAddressLearn(cat, codec, transport, target); // sweep 3c: a wrong CI-V address is found and fixed, not a silent radio
+    icomUsbDataModAttach(cat, codec); // sweep 1a: DATA MOD to USB for a data session, put back after
     cat.on('log', sendCatLog);
     cat.on('status', sendCatStatus);
     cat.on('frequency', catFrequencyHandler);
@@ -47688,7 +47759,8 @@ function cloudShackNotice(text, kind) {
     js8MapWin = new BrowserWindow({
       minWidth: 400, minHeight: 300, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 700, height: 500, title: 'JS8 Heartbeat Map',
-      backgroundColor: getThemeWindowBg(), frame: false,
+      backgroundColor: getThemeWindowBg(),
+      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }), // #866: the macOS traffic lights, as every other pop-out
       icon: getIconPath(),
       webPreferences: { preload: path.join(__dirname, 'preload-js8-map-popout.js'), contextIsolation: true, nodeIntegration: false },
     });
@@ -47757,7 +47829,8 @@ function cloudShackNotice(text, kind) {
     aprsWin = new BrowserWindow({
       minWidth: 640, minHeight: 400,
       width: 1280, height: 860, title: 'APRS', // the approved layout's size; a saved place wins (rememberWindowPlace)
-      backgroundColor: getThemeWindowBg(), frame: false,
+      backgroundColor: getThemeWindowBg(),
+      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }), // #866: plain frame:false left a Mac with no way to close it
       icon: getIconPath(),
       webPreferences: { preload: path.join(__dirname, 'preload-aprs-popout.js'), contextIsolation: true, nodeIntegration: false },
     });
@@ -48371,7 +48444,7 @@ function cloudShackNotice(text, kind) {
       minWidth: 360, minHeight: 300, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 700, height: 500,
       backgroundColor: getThemeWindowBg(),
-      frame: false,
+      ...(isMac ? { titleBarStyle: 'hiddenInset' } : { frame: false }), // #866: same as the APRS window, the Mac had no way to close it
       webPreferences: { preload: path.join(__dirname, 'preload-jtcat-popout.js'), contextIsolation: true, nodeIntegration: false },
     });
     rememberWindowPlace(jtcatMapPopoutWin, 'jtcatMapPopoutBounds', { minWidth: 360, minHeight: 300 });
