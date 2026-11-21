@@ -18048,6 +18048,9 @@ function shouldForwardClientDriven() {
 let passQsoOutbox = null;
 function passGuestLogContact(qsoData, ctx, canReceive, origin) {
   if (!qsoData.stationCallsign) qsoData.stationCallsign = onAirCall();
+  // Where the contact was made: this station's grid, state and county, as it
+  // logs its own (#822). The guest's POTACAT keeps them over its own home.
+  Object.assign(qsoData, StationCounty.guestPassStationFor(qsoData, { grid: settings.grid, fill: (r) => stationLocationFillFor(r, settings) }));
   qsoData.guestPass = true; // the guest's own POTACAT forwards it to their loggers (#553)
   if (passLease) {
     if (!qsoData.operator) qsoData.operator = onAirCall();
@@ -18140,9 +18143,12 @@ function activationStationFillFor(rec, s = settings) {
  * operator's own state and county (lib/station-county.js; AE5JE 2026-10-27):
  * an activation takes the county chosen for that park, anything else the
  * home state and county when made from the home grid. Blanks only.
+ * A Guest Pass contact keeps the lending station's location and never takes
+ * this operator's home (#822, StationCounty.ownStationFillApplies).
  */
 function stationLocationFillFor(rec, s = settings) {
   if (!rec) return {};
+  if (!StationCounty.ownStationFillApplies(rec)) return {};
   const a = activationStationFillFor(rec, s);
   const b = StationCounty.stationLocationFor({ ...rec, ...a }, {
     home: { state: s.homeState, county: s.homeCounty, grid: s.grid },
@@ -50322,6 +50328,7 @@ function cloudShackNotice(text, kind) {
           mySigInfo: q.MY_POTA_REF || q.MY_SIG_INFO || q.MY_SOTA_REF || q.MY_WWFF_REF,
           operator: q.OPERATOR, stationCallsign: q.STATION_CALLSIGN,
           myGridsquare: q.MY_GRIDSQUARE, myState: q.MY_STATE, myCounty: q.MY_CNTY,
+          guestPass: q.APP_POTACAT_GUEST_PASS,
         });
         return { MY_GRIDSQUARE: f.myGridsquare, MY_STATE: f.myState, MY_CNTY: f.myCounty };
       },
