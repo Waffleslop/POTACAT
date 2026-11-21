@@ -546,7 +546,7 @@ test('glue: My APRS SSID picks the radio beacon\'s ending; the header shows both
 
 // ── APRS settings (Casey 2026-11-20: "iGate should be a setting on the APRS window ... not hidden in idle mode") ──
 test('APRS settings: a plain-text, labelled button top right opens a panel inside the window, no browser dialog', () => {
-  const tb = html.slice(html.indexOf('<div class="titlebar-controls">'), html.indexOf('id="tb-min"'));
+  const tb = html.slice(html.indexOf('<div class="titlebar-controls'), html.indexOf('id="tb-min"'));
   assert.ok(/id="aprs-settings-btn" aria-haspopup="dialog" aria-controls="aprs-settings" aria-label="APRS settings[^"]*">APRS settings<\/button>/.test(tb), 'in the title bar, before the window buttons');
   assert.ok(/<section class="aprs-settings hidden" id="aprs-settings" role="dialog"/.test(html));
   const panel = html.slice(html.indexOf('id="aprs-settings" role="dialog"'));

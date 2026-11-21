@@ -2369,7 +2369,7 @@
         </div>
         <label class="radio-label"><input type="radio" name="radio-type" value="nocat"> No CAT control (VOX)</label>
         <div id="nocat-config" class="radio-sub hidden">
-          <span class="help-text" style="font-size:12px;">For radios with no computer control at all — VOX-keyed kits such as the <b>Pebble HF</b> or a uSDX without a CAT port, a handheld such as a Baofeng on a sound-card interface, or a mobile FM radio such as the <b>Yaesu FTM-510D</b> through its DATA jack. You tune the radio by hand (spot clicks and band buttons show you the frequency to set). Set the audio Input and Output below to the sound card that connects to the radio.</span>
+          <span class="help-text" style="font-size:12px;">For radios with no computer control at all — VOX-keyed kits such as the <b>Pebble HF</b> or a uSDX without a CAT port, a handheld such as a Baofeng on a sound-card interface, or a mobile FM radio such as the <b>Yaesu FTM-510D</b> or <b>FTM-100D</b> through its DATA jack. You tune the radio by hand (spot clicks and band buttons show you the frequency to set). Set the audio Input and Output below to the sound card that connects to the radio.</span>
           <label style="display:block;margin-top:6px;">Transmit (PTT):
             <select id="set-nocat-ptt">
               <option value="vox">The radio's VOX keys on POTACAT's audio</option>
@@ -2432,6 +2432,10 @@
             </select>
           </label>
           <span class="help-text" style="display:block;margin:2px 0 0 0;">The socket your sound card interface is plugged into. POTACAT tells the radio which one to send each time it transmits; the wrong one puts a carrier on the air with no audio.</span>
+        </div>
+        <div id="rig-icom-usb-data-mod" class="hidden" style="margin-top:8px;">
+          <label class="checkbox-label"><input type="checkbox" id="set-icom-usb-data-mod" checked> Set DATA MOD to USB while POTACAT sends data</label>
+          <span class="help-text" style="display:block;margin:2px 0 0 24px;">For FT8, Winlink and SSTV over the USB cable. When POTACAT puts the radio in a data mode it sets the radio's DATA MOD to USB, says so, and puts your setting back afterwards. Untick this if your sound card interface is on the ACC socket (a SignaLink, for example).</span>
         </div>
         <div id="rig-voice-as-data" style="margin-top:8px;">
           <label class="checkbox-label"><input type="checkbox" id="set-voice-as-data"> Voice in DATA mode (USB-D / LSB-D)</label>
@@ -5482,6 +5486,7 @@
   <script src="../lib/rig-family.js"></script>
   <script src="../lib/tci-target.js"></script>
   <script src="../lib/tx-audio-input.js"></script>
+  <script src="../lib/icom-usb-data-mod.js"></script>
   <script src="../lib/tx-channel.js"></script>
   <script src="../lib/ptt-flow-conflict.js"></script>
   <script src="../lib/waterfall-palettes.js"></script>
