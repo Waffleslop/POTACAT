@@ -643,6 +643,14 @@ is subscribed, `aprs-stations`. A client that does not list it gets neither, and
 its APRS requests are ignored, so an older phone sees no change. The radio
 beacon (phase 7) is not on the wire.
 
+A POTACAT desktop driving a remote shack (More > Remote Radios) lists `aprs`
+too, from #868 (2026-11-21): its APRS window's listen switch and band picker
+send `aprs-listen`, it subscribes while that window is open (and unsubscribes
+when it closes, so the shack stops listening the desktop started), and it shows
+the shack's `aprs-state.listen` and the `aprs-stations` rows with `rf` (the ones
+the shack's radio heard). No new message or field; `lib/remote-bridge.js` and
+`lib/aprs-remote-shack.js` hold the mapping.
+
 | Message | Dir | Purpose |
 |---|---|---|
 | `aprs-subscribe` | C→S | `{on: boolean, rangeKm?: number}`. Start or stop watching. On `on: true` the shack sends this device a snapshot (`aprs-stations` `op: 'snapshot'`), then deltas. The APRS-IS feed runs while the desktop's APRS window is open **or** any device is subscribed, and stops after the last device leaves (unsubscribe or disconnect) with the window closed. `rangeKm` sets the feed's radius (clamped 10 to 1000 km, not saved) only while the desktop window is closed; with the window open the window's range holds. Send it when the APRS view (or the Map's APRS layer) comes on screen and `on: false` when it leaves. A Guest Pass may subscribe. |

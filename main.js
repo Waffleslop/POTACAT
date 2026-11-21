@@ -91,6 +91,7 @@ require('./lib/fetch-policy').installNoBrotliFetch(globalThis);
 const CleanExitMarker = require('./lib/clean-exit-marker');
 const FreqDots = require('./lib/freq-dots'); // display only: 14.074.00 MHz, the VFO way
 const RemoteBridge = require('./lib/remote-bridge');
+const AprsRemoteShack = require('./lib/aprs-remote-shack'); // #868: APRS listening on the shack from this desktop
 const WaterfallPalettes = require('./lib/waterfall-palettes');
 const GpuStatus = require('./lib/gpu-status'); // #773: the GPU line in the session log
 const ShackGrid = require('./lib/shack-grid'); // #774: the JTCAT map on the shack's grid
@@ -7751,7 +7752,23 @@ function pushActivationToRemoteShack() {
 
 // The JTCAT bridge (lib/remote-bridge.js): pop-out IPC → the shack's wire,
 // and the shack's JTCAT frames → the pop-out channels.
-const _remoteBridgeState = { holdTx: false, fullAuto: false, tune: false, running: false };
+const _remoteBridgeState = { holdTx: false, fullAuto: false, tune: false, running: false, aprs: false, aprsListenOn: false, aprsRfSeen: new Map() };
+// APRS on the shack (#868): the APRS window's listening card shows the shack's
+// own state (its aprs-state, mapped by lib/remote-bridge.js IN), and this
+// desktop watches the shack's APRS while the window is open, so the stations
+// its radio hears arrive and listening this desktop started stops when the
+// window closes (the shack's lib/aprs-echocat.js rule for any device).
+let _remoteAprsListen = null; // the window's 'aprs-listen' payload from the shack, or null
+let _remoteAprsWanted = false;
+function remoteAprsWatch(on) {
+  _remoteAprsWanted = !!on;
+  if (on) _remoteBridgeState.aprsRfSeen.clear(); // a fresh window store: the shack's snapshot fills it
+  if (isRemoteLinked()) remoteClient.sendRaw({ type: 'aprs-subscribe', on: !!on });
+}
+/** The listening card says a refusal made on this desktop (the link is down, the shack is too old). */
+function remoteAprsRefusedHere(sentence) {
+  if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send('aprs-listen', AprsRemoteShack.refusedHere(sentence, _remoteAprsListen));
+}
 let _remoteJtcatMode = '';
 let _remoteSpectrumTimers = [];
 function remoteJtcatSubscribeSpectrum(on) {
@@ -7774,9 +7791,11 @@ function bridgeIpcToShack(channel, args, e) {
   const r = rule(args || [], _remoteBridgeState) || { drop: true };
   if (r.drop) return true;
   const fromSstv = !!(sstvPopoutWin && !sstvPopoutWin.isDestroyed() && e && e.sender === sstvPopoutWin.webContents);
+  const fromAprs = !!(aprsWin && !aprsWin.isDestroyed() && e && e.sender === aprsWin.webContents);
   if (r.refuse) {
     sendCatLog('[Remote] ' + r.refuse);
-    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() && e && e.sender === jtcatPopoutWin.webContents) jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: r.refuse });
+    if (fromAprs) remoteAprsRefusedHere(r.refuse);
+    else if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() && e && e.sender === jtcatPopoutWin.webContents) jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: r.refuse });
     else { try { if (e && e.sender && !e.sender.isDestroyed()) e.sender.send('tune-blocked', r.refuse); } catch {} }
     return true;
   }
@@ -7787,6 +7806,7 @@ function bridgeIpcToShack(channel, args, e) {
     }
     // An SSTV send left on "Encoding..." with HALT showing is the failure to avoid.
     if (fromSstv) sstvPopoutWin.webContents.send('sstv-tx-status', { state: 'rx', error: REMOTE_NOT_LINKED_MSG });
+    if (fromAprs) remoteAprsRefusedHere(REMOTE_NOT_LINKED_MSG);
     return true;
   }
   if (r.photo) {
@@ -7819,8 +7839,13 @@ function bridgeInboundFromShack(msg) {
   const rule = RemoteBridge.IN[msg.type];
   if (!rule) return false;
   RemoteBridge.trackState(_remoteBridgeState, msg);
-  const out = rule(msg) || [];
+  const out = rule(msg, _remoteBridgeState) || [];
   for (const [ch, payload] of out) {
+    if (ch.startsWith('aprs-')) {
+      if (ch === 'aprs-listen') _remoteAprsListen = payload;
+      if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send(ch, payload);
+      continue;
+    }
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send(ch, payload);
     if (js8PopoutWin && !js8PopoutWin.isDestroyed()) js8PopoutWin.webContents.send(ch, payload);
     if (ch.startsWith('sstv-') && sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send(ch, payload);
@@ -8146,6 +8171,9 @@ function ensureRemoteClient() {
     remoteShackInfo = info.audioHeldBy ? { audioElsewhere: true, audioHolder: String(info.audioHeldBy.name || '') } : null;
     pushRemoteShackInfo();
     if (_remoteScopeWanted) remoteClient.sendRaw({ type: 'scope-subscribe', on: true, bins: YaesuScope.BINS });
+    // APRS (#868): this shack's aprs-state follows (an older shack sends none); watch again while the window is open.
+    _remoteBridgeState.aprs = false; _remoteBridgeState.aprsListenOn = false; _remoteAprsListen = null;
+    if (aprsWin && !aprsWin.isDestroyed()) remoteAprsWatch(true);
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) { _remoteSstvWindowOpen = false; remoteClient.sendRaw({ type: 'sstv-open' }); }
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() && _remoteJtcatMode) {
       remoteClient.sendRaw({ type: 'jtcat-start', mode: _remoteJtcatMode });
@@ -8168,6 +8196,8 @@ function ensureRemoteClient() {
     // Tear the answerer down with the link — its peer is dead and the creds
     // are tied to this session. A fresh connect re-starts audio explicitly.
     stopRemoteClientAudio();
+    // APRS (#868): the shack stops listening a device it lost started; the card says the link is down until the shack answers again.
+    if (wasAuthed && _remoteAprsListen) { _remoteAprsListen = AprsRemoteShack.refusedHere(REMOTE_NOT_LINKED_MSG, _remoteAprsListen); aprsListenPush(); }
   });
   remoteClient.on('kicked', (info) => {
     // This PC stops driving the shack and does not reconnect by itself: the
@@ -8522,6 +8552,9 @@ function tearDownRemoteClient() {
   remoteShackVoice = { labels: [], filled: [] };
   // A scope window left open goes back to this PC's own source (or says why not).
   if (_remoteScopeWanted) { _remoteScopeWanted = false; if (yaesuScopeWanted()) startYaesuScope(); }
+  // APRS (#868): the listening card goes back to this PC's own radio.
+  _remoteAprsWanted = false; _remoteBridgeState.aprs = false; _remoteBridgeState.aprsListenOn = false; _remoteAprsListen = null;
+  try { aprsListenPush(); } catch { /* the APRS state is declared further down; nothing to show yet */ }
   if (_remotePaddleHoldTimer) { clearInterval(_remotePaddleHoldTimer); _remotePaddleHoldTimer = null; }
   // The shack's VFO lock was mirrored here; this PC's radio starts unlocked.
   if (_vfoLocked) {
@@ -13303,7 +13336,12 @@ function aprsListenMovedView(band) {
   if (!aprsListen.moved || aprsListen.on) return null;
   return { title: AprsListen.MOVED_TITLE, line: AprsListen.movedLine(aprsListenMovedPlace(band)) };
 }
-function aprsListenPush() { aprsWinSend('aprs-listen', aprsListenPayload()); aprsIgateSync(); }
+function aprsListenPush() {
+  // Driving a remote shack, the card shows the shack's listening (#868), not this PC's.
+  if (isRemoteMode() && _remoteAprsListen) { if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send('aprs-listen', _remoteAprsListen); }
+  else aprsWinSend('aprs-listen', aprsListenPayload());
+  aprsIgateSync();
+}
 
 /** The modem bridge holds the radio's sound card while APRS listens (modemBridgeWanted). */
 function aprsListenWantsAudio() {
@@ -47860,6 +47898,7 @@ function cloudShackNotice(text, kind) {
         if (!(autoIdleAprsActive && autoIdleAprsOwnsListen)) aprsListenStop('the APRS window closed');
       }
       if (!aprsEcho.keepsFeed()) aprsStopFeed();
+      if (_remoteAprsWanted) remoteAprsWatch(false); // #868: the shack stops listening this desktop started, as closing its own window would
       aprsWin = null;
       _aprsMsgViewing = ''; // A1: messages still going out carry on; nothing is being read now
       aprsBeaconStop(); // phase 5: the beacon timer runs only while the window is open
@@ -47881,6 +47920,7 @@ function cloudShackNotice(text, kind) {
     }
     aprsSend('aprs-init', { home: aprsHome(), distUnit: settings.distUnit || 'mi', km: Feed.clampRangeKm(settings.aprsRangeKm), showLastMin: AprsWindowState.normShowLast(settings.aprsShowLastMin), mapView: AprsMap.cleanView(settings.aprsMapView) });
     aprsStartFeed();
+    if (isRemoteMode()) remoteAprsWatch(true); // #868: listening and the heard stations are the shack's
     aprsListenPush();
     aprsIgatePush();
     aprsAutoListenOnOpen(); // receive only; once per open, silent when it may not
