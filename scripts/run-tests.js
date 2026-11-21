@@ -46,6 +46,7 @@ const TESTS = [
   'test/clock-offset-test.js',
   'test/require-exports-test.js',
   'test/scope-no-frames-log-test.js', // K3SBP 2026-11-21: a scope that shows nothing says so in the log (no frames vs misaligned)
+  'test/scan-run-test.js', // #37: a phone-started scan run on the desktop: the phone's 13 filter vectors, the desktop's exclusions, start/step/end rules, wire and glue
   'test/smartsdr-meter-test.js',
   'test/smartsdr-udpport-reconnect-test.js', // K3SBP 2026-11-21: after a network drop the new Flex connection is told client udpport again (pan FFT, meters)
   'test/flex-slice-filter-test.js',
