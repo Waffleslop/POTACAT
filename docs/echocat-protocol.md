@@ -719,6 +719,8 @@ boat and aircraft turned to `course`). Idle Mode's `aprs` choice stays on
 | `cloud-register` | C→S | Sign up. |
 | `cloud-register-result` | S→C | Sign-up result. |
 | `cloud-logout` | C→S | Log out. |
+| `cloud-tunnel-enable` | C→S | (capability `cloud-tunnel-enable`, 2026-11-21) An owner device turns the shack's Cloud Tunnel ON. Only while the account is signed in and has Cloud access (trial or paid); it also clears the desktop's remembered "turned off by hand". Refused to a Guest Pass (`guest_pass`). Turning the tunnel off is not offered to a device. |
+| `cloud-tunnel-result` | S→C | `{ok, error?, message?}`: `ok:true` when the tunnel is on (or already was); `error` is `guest_pass`, `signed_out`, `no_access` or `not_ready`, with `message` in plain words. The tunnel's new state also arrives as `cloud-state` where that is supported. |
 | `cloud-logout-result` | S→C | Logout confirmation. |
 | `cloud-get-status` | C→S | Sync status query. |
 | `cloud-status` | S→C | Status response. |

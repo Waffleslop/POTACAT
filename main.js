@@ -30411,6 +30411,21 @@ function connectRemote() {
     });
   };
 
+  // ECHOCAT ask 2026-11-21 item 3 (Casey: yes; this one case changes "the door
+  // is set at the desktop only"): an owner device turns the Cloud Tunnel ON,
+  // only while the account has Cloud access. A Guest Pass never reaches here
+  // (remote-server refuses it). Off stays a desktop choice.
+  cloudBridge('cloud-tunnel-enable', async () => {
+    if (!cloudTunnel) return { ok: false, error: 'not_ready', message: 'The Cloud Tunnel is not ready on the desktop yet.' };
+    if (!settings.cloudAccessToken) return { ok: false, error: 'signed_out', message: 'Sign in to POTACAT Cloud first.' };
+    if (!CloudBillingUi.hasAccess(settings.cloudSubscriptionCache)) return { ok: false, error: 'no_access', message: 'This account has no Cloud access. Start a trial or subscribe first.' };
+    if (cloudTunnel.getState().enabled) return { ok: true };
+    await cloudTunnel.enable({});
+    if (settings.cloudTunnelUserOff) { delete settings.cloudTunnelUserOff; saveSettings(settings); }
+    sendCatLog('[cloud-tunnel] turned on from an ECHOCAT device (the account has Cloud access)');
+    return { ok: true };
+  });
+
   // Remove the direct handler above and use the bridge pattern for all cloud events
   remoteServer.removeAllListeners('cloud-login');
   cloudBridge('cloud-login', async (msg) => {
