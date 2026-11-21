@@ -245,5 +245,28 @@ test('the audio line: the lane\'s stats feed it, frames are counted, the tick lo
   assert.ok(/rxPeak: srv\.takeRxPeak\(\)/.test(lane), 'the lane reports the peak of the audio written to Dire Wolf');
 });
 
+// #843: a data mode on LSB at 10.1476 MHz hears none of the tones, and the
+// move watch never pauses for it (the right family was never read back).
+test('#843: a 30 m radio on lower sideband gets one sentence; upper sideband and 2 m get none', () => {
+  assert.strictEqual(L.sidebandSentence('30m', 'LSB'), 'Your radio is on lower sideband (LSB). APRS on 30 m is upper sideband: set the radio\'s data mode to USB, or nothing will decode.');
+  assert.ok(L.sidebandSentence('30m', 'DATA-L'));
+  assert.ok(L.sidebandSentence('30m', 'PKTLSB'));
+  assert.ok(L.sidebandSentence('30m', 'DIGL'));
+  assert.strictEqual(L.sidebandSentence('30m', 'DIGU'), '');
+  assert.strictEqual(L.sidebandSentence('30m', 'USB'), '');
+  assert.strictEqual(L.sidebandSentence('30m', ''), '');      // no readback yet: nothing said
+  assert.strictEqual(L.sidebandSentence('30m', 'XYZ'), '');   // a name POTACAT does not know: nothing said
+  assert.strictEqual(L.sidebandSentence('2m', 'LSB'), '');
+});
+
+test('#843: main shows the sentence in the note line while listening, after the settle time', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const fn = main.slice(main.indexOf('function aprsListenSidebandNote()'), main.indexOf('function aprsListenMovedOff('));
+  assert.ok(/AprsListen\.sidebandSentence\(aprsListen\.band, _currentMode\)/.test(fn));
+  assert.ok(/MOVED_GRACE_MS/.test(fn), 'waits for readbacks to settle');
+  assert.ok(/aprsListen\.note = \[aprsListen\.noteBase/.test(fn), 'keeps the setup and filter lines');
+  assert.ok(/if \(!m\) \{ aprsListenSidebandNote\(\); return false; \}/.test(main), 'checked on every readback that is not a move');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
