@@ -594,7 +594,7 @@ const { HeardGrids } = require('./lib/heard-grids');
 const jtcatHeardGrids = new HeardGrids();
 let _logPopoutQuiet = false; // the next log-popout-open leaves the keyboard alone
 let _appWindowsClosing = false; // the main window went: POTACAT is quitting
-const { checkClockOffset, syncSystemClock, classifyClockOffset } = require('./lib/ntp');
+const { checkClockOffset, syncSystemClock, classifyClockOffset, clockFixSupported, timeSettingsTargets } = require('./lib/ntp');
 const StationClock = require('./lib/station-clock'); // FT8/FT4/FT2/WSPR/JTTY slot clock, correctable from an ECHOCAT device
 const JtcatParser = require('./renderer/jtcat-parser'); // shared FT8 message classifier (also a browser global in the renderers)
 const JtcatSpotTarget = require('./lib/jtcat-spot-target'); // which finished QSO ends the spot target; watcher refuses worked calls (#518)
@@ -23883,7 +23883,9 @@ function broadcastJtcatClock(payload) {
 // the correction in use (how far the computer's clock is ahead, ms).
 function stationClockFields() {
   const sc = StationClock.info();
-  return { source: sc ? 'device' : 'ntp', correctionMs: StationClock.aheadMs() };
+  // canFix / canOpenSettings: which clock buttons this OS can honour (lib/ntp.js).
+  return { source: sc ? 'device' : 'ntp', correctionMs: StationClock.aheadMs(),
+    canFix: clockFixSupported(process.platform), canOpenSettings: timeSettingsTargets(process.platform).length > 0 };
 }
 
 // What NTP last said about the computer's RAW clock: 'ok'|'warn'|'bad', or
@@ -23936,6 +23938,17 @@ function stationClockClear(why) {
 // resync that only SLEWS the clock was reported as success while the banner
 // stayed exactly where it was (K3SBP 2026-10-15), and a button that does
 // nothing visible with no word why is worse than no button.
+// "Time settings" on every surface: the OS date and time page (lib/ntp.js
+// timeSettingsTargets). It used to do nothing on a Mac (NJ2DX 2026-11-21).
+async function openTimeSettings() {
+  const { shell } = require('electron');
+  for (const url of timeSettingsTargets(process.platform)) {
+    try { await shell.openExternal(url); return true; }
+    catch (err) { sendCatLog(`[Clock] Could not open ${url}: ${err && err.message ? err.message : err}`); }
+  }
+  return false;
+}
+
 async function runClockFix() {
   const before = jtcatLastClock && Number.isFinite(jtcatLastClock.offsetMs) ? jtcatLastClock.offsetMs : null;
   const sync = await syncSystemClock();
@@ -49652,6 +49665,7 @@ function cloudShackNotice(text, kind) {
         break;
       }
       case 'check-clock': await runJtcatClockCheck(); break;
+      case 'open-time-settings': await openTimeSettings(); break;
       case 'sync-clock': {
         const { sync: res } = await runClockFix();
         if (res && res.success === false && res.message) message = res.message;
@@ -56295,11 +56309,7 @@ function cloudShackNotice(text, kind) {
   ipcMain.handle('jtcat-get-clock', () => jtcatLastClock);
   ipcMain.handle('jtcat-check-clock', async () => await runJtcatClockCheck());
   ipcMain.handle('jtcat-sync-clock', async () => await runClockFix());
-  ipcMain.handle('jtcat-open-time-settings', async () => {
-    const { shell } = require('electron');
-    if (process.platform === 'win32') return shell.openExternal('ms-settings:dateandtime');
-    return false;
-  });
+  ipcMain.handle('jtcat-open-time-settings', async () => openTimeSettings());
 
   // DAX TX direct chunks from remote-audio.html (iOS phone mic → WebRTC →
   // renderer downsample → IPC chunk → here → VITA-49 to radio). Bypasses

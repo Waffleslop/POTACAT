@@ -48,6 +48,7 @@ const TESTS = [
   'test/clock-offset-test.js',
   'test/require-exports-test.js',
   'test/scope-no-frames-log-test.js', // K3SBP 2026-11-21: a scope that shows nothing says so in the log (no frames vs misaligned)
+  'test/clock-platform-test.js', // NJ2DX 2026-11-21: each OS gets only the clock buttons it can honour; Time settings opens on a Mac
   'test/smartsdr-meter-test.js',
   'test/smartsdr-udpport-reconnect-test.js', // K3SBP 2026-11-21: after a network drop the new Flex connection is told client udpport again (pan FFT, meters)
   'test/flex-slice-filter-test.js',
