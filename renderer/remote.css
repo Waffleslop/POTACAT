@@ -609,6 +609,7 @@ html, body {
 
 .so-footer { text-align: center; margin-top: 24px; padding: 16px 0 8px; border-top: 1px solid #333; }
 .so-footer-by { font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+.so-footer-version { font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
 .so-footer-links { display: flex; justify-content: center; gap: 8px; font-size: 12px; }
 .so-footer-links a { color: #4fc3f7; text-decoration: none; }
 .so-footer-links a:active { text-decoration: underline; }
