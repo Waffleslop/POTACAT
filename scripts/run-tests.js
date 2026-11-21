@@ -385,6 +385,7 @@ const TESTS = [
   'test/lz3aw-round9-test.js',
   'test/lz3aw-round10-test.js',
   'test/lz3aw-round11-test.js',
+  'test/shack-version-test.js', // #687: Settings shows the shack POTACAT version
   'test/lz3aw-round12-test.js',
   'test/paddle-bounce-test.js',
   'test/web-keyer-late-release-test.js', // #244: a held paddle's late release withdraws an element not yet sounding
