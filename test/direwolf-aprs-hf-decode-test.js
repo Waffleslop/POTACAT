@@ -5,8 +5,9 @@
 // 1600/1800 Hz pair (no recording needed), feeds them to the bundled Dire Wolf
 // over its socket audio input with the config lib/direwolf-process.js writes
 // for 30 m (no PTT line, offline, no radio), and reads them back from the AGW
-// monitor. The second pass is 70 Hz off tune, which only the seven staggered
-// decoders ("7@30") are there for.
+// monitor. The second pass is 70 Hz off tune and the third 190 Hz off, which
+// only the nine staggered receive decoders ("9@30") reach: seven reached about
+// 100 Hz, and a radio a little off lost every packet (2026-11-21 review).
 //
 // Needs the POTACAT build of Dire Wolf (its socket audio patch): assets/direwolf/
 // after `scripts/build-winlink-helpers.sh`, or POTACAT_DIREWOLF_BIN. Without it
@@ -26,6 +27,7 @@ const AprsRfFrames = require('../lib/aprs-rf-frames');
 const AprsParser = require('../lib/aprs-parser');
 
 const RATE = D.DIREWOLF_RATE;
+const SHIFTS = [0, 70, 190]; // Hz off tune: 190 is past what seven decoders reached
 const BAUD = 300;
 
 // ── AX.25 UI frame -> NRZI bits -> AFSK ─────────────────────────────────────
@@ -147,7 +149,7 @@ async function main() {
     sock.write(Mon.encodeAgwFrame({ datakind: 'm' }));
     await new Promise((r) => setTimeout(r, 300));
 
-    for (const shift of [0, 70]) {
+    for (const shift of SHIFTS) {
       for (const t of PACKETS) {
         const pcm = afsk(bits(frame(t)), shift);
         for (let i = 0; i < pcm.length; i += chunk) queue.push(pcm.subarray(i, i + chunk));
@@ -157,7 +159,7 @@ async function main() {
     // (twice real time) only stops a hung run.
     const end = Date.now() + queue.length * 40 + 3000;
     let drainedAt = 0;
-    while (Date.now() < end && frames.filter((f) => Mon.isReceivedFrame(f)).length < PACKETS.length * 2) {
+    while (Date.now() < end && frames.filter((f) => Mon.isReceivedFrame(f)).length < PACKETS.length * SHIFTS.length) {
       if (!queue.length && !drainedAt) drainedAt = Date.now();
       if (drainedAt && Date.now() - drainedAt > 3000) break;
       await new Promise((r) => setTimeout(r, 200));
@@ -175,9 +177,9 @@ async function main() {
   };
   const got = frames.map((f) => AprsRfFrames.packet(f, AprsParser.parse)).filter(Boolean);
 
-  test('Dire Wolf read the 30 m config with no complaint (seven decoders, no config error)', () => {
+  test('Dire Wolf read the 30 m receive config with no complaint (nine decoders, no config error)', () => {
     assert.ok(/300 baud, AFSK 1600 & 1800 Hz/.test(out), 'channel line');
-    assert.ok(/0\.0: A 1510 & 1710/.test(out) && /0\.6: A 1690 & 1890/.test(out), 'seven decoders');
+    assert.ok(/0\.0: A 1480 & 1680/.test(out) && /0\.8: A 1720 & 1920/.test(out), 'nine decoders: ' + out.slice(0, 600));
     assert.ok(!/^Line \d+:/m.test(out), 'a config line was rejected');
     assert.ok(!/can't be combined/.test(out), 'decoder options clash');
   });
@@ -185,8 +187,8 @@ async function main() {
     assert.ok(got.length >= 2, `got ${got.length}: ${out.slice(-400)}`);
     assert.strictEqual(got[0].from || got[0].source || got[0].call, 'W1AW-9');
   });
-  test('the same frames 70 Hz off tune are decoded too (the staggered decoders)', () => {
-    assert.strictEqual(got.length, PACKETS.length * 2, `got ${got.length}, ${unsent} audio chunks never sent`);
+  test('the same frames 70 and 190 Hz off tune are decoded too (the nine staggered decoders)', () => {
+    assert.strictEqual(got.length, PACKETS.length * SHIFTS.length, `got ${got.length}, ${unsent} audio chunks never sent`);
   });
   test('the digipeater path survives: heard via KB1XYZ-1', () => {
     const viaDigi = got.filter((g) => /KB1XYZ-1/.test(JSON.stringify(g)));

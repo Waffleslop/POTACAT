@@ -6,7 +6,7 @@
    "agwPort": 8012,
    "band": "30m"
   },
-  "conf": "# Written by POTACAT for APRS listening (receive only, no PTT) — regenerated every launch; do not edit.\nADEVICE tcp:50200\nARATE 48000\nACHANNELS 1\nCHANNEL 0\nMYCALL K3SBP-10\nMODEM 300 1600:1800 A- 7@30\nAGWPORT 8012\nKISSPORT 0\n"
+  "conf": "# Written by POTACAT for APRS listening (receive only, no PTT) — regenerated every launch; do not edit.\nADEVICE tcp:50200\nARATE 48000\nACHANNELS 1\nCHANNEL 0\nMYCALL K3SBP-10\nMODEM 300 1600:1800 A- 9@30\nAGWPORT 8012\nKISSPORT 0\n"
  },
  {
   "input": {
@@ -14,7 +14,7 @@
    "agwPort": 65533,
    "band": "30m"
   },
-  "conf": "# Written by POTACAT for APRS listening (receive only, no PTT) — regenerated every launch; do not edit.\nADEVICE tcp:1\nARATE 48000\nACHANNELS 1\nCHANNEL 0\nMYCALL N0CALL\nMODEM 300 1600:1800 A- 7@30\nAGWPORT 65533\nKISSPORT 0\n"
+  "conf": "# Written by POTACAT for APRS listening (receive only, no PTT) — regenerated every launch; do not edit.\nADEVICE tcp:1\nARATE 48000\nACHANNELS 1\nCHANNEL 0\nMYCALL N0CALL\nMODEM 300 1600:1800 A- 9@30\nAGWPORT 65533\nKISSPORT 0\n"
  },
  {
   "input": {
@@ -25,6 +25,6 @@
    "ptt": "COM3 RTS",
    "band": "30m"
   },
-  "conf": "# Written by POTACAT for APRS listening (receive only, no PTT) — regenerated every launch; do not edit.\nADEVICE tcp:61234\nARATE 48000\nACHANNELS 1\nCHANNEL 0\nMYCALL W1AW\nMODEM 300 1600:1800 A- 7@30\nAGWPORT 8012\nKISSPORT 0\n"
+  "conf": "# Written by POTACAT for APRS listening (receive only, no PTT) — regenerated every launch; do not edit.\nADEVICE tcp:61234\nARATE 48000\nACHANNELS 1\nCHANNEL 0\nMYCALL W1AW\nMODEM 300 1600:1800 A- 9@30\nAGWPORT 8012\nKISSPORT 0\n"
  }
 ]
