@@ -2433,6 +2433,10 @@
           </label>
           <span class="help-text" style="display:block;margin:2px 0 0 0;">The socket your sound card interface is plugged into. POTACAT tells the radio which one to send each time it transmits; the wrong one puts a carrier on the air with no audio.</span>
         </div>
+        <div id="rig-icom-usb-data-mod" class="hidden" style="margin-top:8px;">
+          <label class="checkbox-label"><input type="checkbox" id="set-icom-usb-data-mod" checked> Set DATA MOD to USB while POTACAT sends data</label>
+          <span class="help-text" style="display:block;margin:2px 0 0 24px;">For FT8, Winlink and SSTV over the USB cable. When POTACAT puts the radio in a data mode it sets the radio's DATA MOD to USB, says so, and puts your setting back afterwards. Untick this if your sound card interface is on the ACC socket (a SignaLink, for example).</span>
+        </div>
         <div id="rig-voice-as-data" style="margin-top:8px;">
           <label class="checkbox-label"><input type="checkbox" id="set-voice-as-data"> Voice in DATA mode (USB-D / LSB-D)</label>
           <span class="help-text" style="display:block;margin:2px 0 0 24px;">For radios whose data port is silent in USB and LSB, such as the Xiegu G90: POTACAT puts the radio in USB-D or LSB-D for voice, so receive audio reaches your sound card interface and ECHOCAT. Contacts are still logged as SSB. The radio's own microphone is off in these modes, so voice has to come in through the data port.</span>
@@ -5482,6 +5486,7 @@
   <script src="../lib/rig-family.js"></script>
   <script src="../lib/tci-target.js"></script>
   <script src="../lib/tx-audio-input.js"></script>
+  <script src="../lib/icom-usb-data-mod.js"></script>
   <script src="../lib/tx-channel.js"></script>
   <script src="../lib/ptt-flow-conflict.js"></script>
   <script src="../lib/waterfall-palettes.js"></script>
