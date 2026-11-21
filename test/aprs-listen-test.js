@@ -91,6 +91,21 @@ test('the frequency took when the readback is within 1 kHz', () => {
   assert.strictEqual(L.tuneAccepted(144390000, 0), false);
 });
 
+// #842: the 300 baud decoder holds about 100 Hz of offset, so 1 kHz on 30 m
+// took a radio a few hundred hertz off as tuned, and it never decoded.
+test('#842: on 30 m the readback must be within 50 Hz; 2 m keeps 1 kHz', () => {
+  assert.strictEqual(L.tuneTolHz('30m'), 50);
+  assert.strictEqual(L.tuneTolHz('2m'), 1000);
+  assert.strictEqual(L.tuneAccepted(10147600, 10147600, '30m'), true);
+  assert.strictEqual(L.tuneAccepted(10147600, 10147610, '30m'), true, '10 Hz steps');
+  assert.strictEqual(L.tuneAccepted(10147600, 10147650, '30m'), true);
+  assert.strictEqual(L.tuneAccepted(10147600, 10147900, '30m'), false, '300 Hz off: the decoder hears nothing');
+  assert.strictEqual(L.tuneAccepted(10147600, 10147100, '30m'), false);
+  assert.strictEqual(L.tuneAccepted(144390000, 144390500, '2m'), true);
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.strictEqual((main.match(/AprsListen\.tuneAccepted\(hz, _currentFreqHz, aprsListen\.band\)/g) || []).length, 2, 'the start waits with the tolerance of the band');
+});
+
 test('the mode comes from the packet rule: Icom FM-D, FT-857 PKT, plain FM elsewhere, by hand left alone', () => {
   const icom = PacketRigMode.resolvePacketRigMode({ choice: 'auto', family: 'icom', brand: 'Icom', protocol: 'civ' });
   assert.deepStrictEqual(L.listenModePlan(icom), { tuneMode: 'FM', dataMode: 'DIGFM' });

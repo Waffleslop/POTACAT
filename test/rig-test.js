@@ -3222,7 +3222,9 @@ test('main.js adopts the reported address and probes it first (source-text guard
   assert.ok(src.includes('networkCodec.setRadioAddress(reported)'), 'live path re-addresses the codec');
   assert.ok(src.includes('probeAddrs = uniq([reported, ...probeAddrs])'), 'test probe puts the reported address first');
   assert.ok(src.includes('0xB2, // IC-7760'), 'IC-7760 is in the probe list');
-  assert.ok(/models: \['IC-7760'\],\s*civAddrs: \[0xB2\],\s*settingId: 0x0130,/.test(src), 'IC-7760 DATA1 MOD spec');
+  // The spec table moved to lib/icom-network-data-mod.js (#853).
+  const specSrc = readSrc(require('path').join(__dirname, '..', 'lib', 'icom-network-data-mod.js'));
+  assert.ok(/models: \['IC-7760'\],\s*civAddrs: \[0xB2\],\s*settingId: 0x0130,/.test(specSrc), 'IC-7760 DATA1 MOD spec');
   assert.ok(src.includes('if (civAddr != null) merged.civAddr = civAddr;'), 'getActiveRigModel borrows the picked CI-V address');
 });
 
