@@ -43,9 +43,13 @@ const block = (() => {
   return main.slice(a, b);
 })();
 
-test('only the operator\'s click sends: one IPC path into aprsRfSend, no RF timer', () => {
-  assert.strictEqual((main.match(/aprsRfSend\(\)\.catch/g) || []).length, 1, 'called from one place');
-  assert.strictEqual((main.match(/aprsRfSend\(/g) || []).length, 2, 'the definition and the one call');
+// Casey 2026-11-21 ("go on the APRS radio beacon handoff"): the owner's phone
+// press is the second way in (aprsRfSendFromPhone). Still no timer.
+test('only an operator press sends: the window click and the phone press into aprsRfSend, no RF timer', () => {
+  assert.strictEqual((main.match(/aprsRfSend\(\)\.catch/g) || []).length, 1, 'the window click');
+  assert.strictEqual((main.match(/await aprsRfSend\(\);/g) || []).length, 1, 'the phone press');
+  assert.strictEqual((main.match(/aprsRfSend\(/g) || []).length, 3, 'the definition and the two presses');
+  assert.ok(/beaconRf: \(req\) => aprsRfSendFromPhone\(req\)/.test(main), 'the phone press comes only from aprs-beacon-rf');
   assert.ok(/ipcMain\.on\('aprs-rf-send', \(\) => \{ aprsRfSend\(\)/.test(main));
   assert.ok(!/setInterval\(/.test(block), 'no interval in the RF block');
   for (const t of (block.match(/setTimeout\([^;]*/g) || [])) assert.ok(!/aprsRfSend|send\(/.test(t), 'no timed send: ' + t);

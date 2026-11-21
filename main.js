@@ -14128,6 +14128,7 @@ function aprsBeaconState() {
     gps: flexGpsPayload(),
     lastAt: aprsBeacon.lastAt, lastPacket: aprsBeacon.lastPacket, sentence: aprsBeacon.sentence, backAt: aprsBeacon.backAt,
     sending: aprsBeacon.sending, timerOn: !!aprsBeacon.timer, nextAt: aprsBeacon.timer ? aprsBeacon.nextAt : 0,
+    rf: aprsRfPhoneState(), // the radio beacon for the phone's "Send over the radio" (2026-11-21)
   };
 }
 function aprsBeaconPush() { aprsWinSend('aprs-beacon', aprsBeaconState()); }
@@ -14386,6 +14387,7 @@ const APRS_RF_SHIM_PORTS = [4550, 4559];
 const APRS_RF_SENTENCE_MS = 20000; // a result or refusal line stays this long, then the live state shows again
 const aprsRfUi = { sentence: '', sentenceAt: 0, lastAt: 0, lastPacket: '', lastBand: '', lastPeak: null, lastHeldMs: 0 };
 let _aprsRfSending = false;        // a click is being acted on: a second click does nothing
+let _aprsRfPhoneAsk = false;       // the beacon in hand was asked for by the owner's phone (aprs-beacon-rf)
 const _aprsRfPeak = AprsRfMeters.createPeak(); // SWR and RF out peaks while the beacon is keyed
 function aprsRfSay(sentence) { aprsRfUi.sentence = sentence || ''; aprsRfUi.sentenceAt = Date.now(); }
 
@@ -14506,6 +14508,8 @@ function aprsRfGateState() {
   return {
     remote: isRemoteMode(),
     windowOpen: !!(aprsWin && !aprsWin.isDestroyed()),
+    // The owner's phone pressed "Send over the radio": that one beacon counts as the window (2026-11-21).
+    askedFrom: _aprsRfPhoneAsk ? 'phone' : 'window',
     listenOn: aprsListen.on,
     listenState: aprsListen.state,
     band: aprsListen.band,
@@ -14617,6 +14621,8 @@ async function aprsRfTransmit() {
   aprsLog(`beacon over the radio: ${b.packet} on ${c.mhz} MHz ${c.mode}, rig power ${c.powerW ? c.powerW + ' W' : 'not reported'}, about ${(cap.airMs / 1000).toFixed(1)} s on air, cap ${(cap.capMs / 1000).toFixed(1)} s`);
   const res = await aprsRfRunner().send({ packet: b, capMs: cap.capMs });
   if (_aprsRfPeak.active()) aprsRfUi.lastPeak = _aprsRfPeak.end(); // it keyed: its peak SWR and RF out
+  // What the phone shows after its press: did the RADIO transmit (the 2026-11-19 interlock case).
+  aprsRfUi.lastResult = res.ok ? (res.confirmed ? 'confirmed' : 'unconfirmed') : 'not-sent';
   if (res.ok && res.confirmed) {
     // Only a beacon the radio reported transmitting counts as sent and gets a last-beacon time.
     aprsRfUi.lastAt = Date.now(); aprsRfUi.lastPacket = b.packet; aprsRfUi.lastBand = c.band;
@@ -14627,6 +14633,83 @@ async function aprsRfTransmit() {
   } else {
     aprsRfSay(res.sentence || 'The beacon was not sent.');
     aprsLog('beacon over the radio not sent: ' + aprsRfUi.sentence);
+  }
+}
+
+// ── The radio beacon from the owner's phone (ECHOCAT ask 2026-11-21, Casey's go) ──
+// One press, one beacon: the window's own run (aprsRfSend), gate and caps. The
+// press counts as the window. With Listen off the desktop sets the radio up for
+// the beacon by starting listening on the band (the same tune, mode and filter,
+// with the same return), sends, and stops listening again so the radio goes
+// back where it was. A Guest Pass never gets here.
+const APRS_RF_PHONE_SETUP_MS = 20000; // how long the radio may take to be listening before the press is refused
+
+/** The band the phone's press would use: the one listening on, else the one asked for, else the chosen band. */
+function aprsRfPhoneBand(asked) {
+  if (aprsListen.on && aprsListen.band) return aprsListen.band;
+  return AprsListen.chooseBand(aprsRigBands(), asked || aprsListen.bandWanted || aprsListen.band || '2m') || '';
+}
+
+/** aprs-state.beacon.rf: may one press send now, and what it would send (band, MHz, mode, power, air time). */
+function aprsRfPhoneState() {
+  try {
+    const band = aprsRfPhoneBand('');
+    const f = band ? aprsListenFrequency(band) : null;
+    const s = { ...aprsRfGateState(), band, aprsHz: aprsListen.on && aprsListen.freq ? aprsListen.freq.hz : (f && f.hz) || 0 };
+    const r = AprsRfGate.phoneReadiness(s);
+    let airSeconds = 0;
+    if (aprsListen.on) { try { const p = aprsRfPlan(); if (p.cap) airSeconds = Math.round(p.cap.airMs / 100) / 10; } catch {} }
+    return {
+      ready: r.ready, setup: r.setup, sentence: r.ready ? '' : (r.sentence || ''),
+      band, mhz: s.aprsHz ? aprsRfMhz(s.aprsHz) : '', modeLabel: band ? AprsListen.modeLabel(band) : '',
+      powerW: Number(_currentTxPower) > 0 ? Math.round(Number(_currentTxPower)) : 0, airSeconds,
+      sending: _aprsRfSending || aprsRfInFlight(), lastAt: aprsRfUi.lastAt, lastResult: aprsRfUi.lastResult || '',
+      lastSentence: aprsRfUi.sentence && Date.now() - aprsRfUi.sentenceAt < APRS_RF_SENTENCE_MS ? aprsRfUi.sentence : '',
+    };
+  } catch (e) { return { ready: false, setup: false, sentence: 'The radio beacon is not available: ' + e.message }; }
+}
+
+/** Wait until listening is up on the APRS frequency, refused, or out of time. */
+function aprsRfPhoneWaitListening() {
+  return new Promise((resolve) => {
+    const until = Date.now() + APRS_RF_PHONE_SETUP_MS;
+    const look = () => {
+      if (!aprsListen.on || aprsListen.state === 'refused') return resolve({ ok: false, sentence: aprsListenPayload().sentence || 'The radio could not be set up for APRS.' });
+      if (aprsListen.state === 'listening') return resolve({ ok: true });
+      if (Date.now() > until) return resolve({ ok: false, sentence: 'The radio did not get to the APRS frequency in time, so nothing was sent.' });
+      setTimeout(look, 250);
+    };
+    look();
+  });
+}
+
+/** The phone's press. reply(refused) goes back to that device only. */
+async function aprsRfSendFromPhone({ clientId, band } = {}) {
+  const refuse = (reason, text) => {
+    aprsLog('radio beacon from the phone not sent: ' + text);
+    if (remoteServer && remoteServer.sendAprsTo) remoteServer.sendAprsTo(clientId, { type: 'refused', of: 'aprs-beacon-rf', reason, text });
+  };
+  if (_aprsRfSending || aprsRfInFlight() || _aprsRfPhoneAsk) return refuse('busy', AprsRfGate.SENTENCES.busy);
+  const st = aprsRfPhoneState();
+  if (!st.ready) return refuse('not-ready', st.sentence || 'The radio cannot send a beacon now.');
+  _aprsRfPhoneAsk = true;
+  let startedListen = false;
+  try {
+    if (!aprsListen.on) {
+      const b = aprsRfPhoneBand(band);
+      startedListen = true;
+      aprsLog(`radio beacon from the phone: setting the radio to ${AprsListen.LABELS[b] || b} APRS for the beacon; it goes back afterwards`);
+      if (b) aprsListenSetBand(b);
+      aprsListenSet(true);
+      const w = await aprsRfPhoneWaitListening();
+      if (!w.ok) return refuse('setup', w.sentence);
+    }
+    await aprsRfSend();
+    if (aprsRfUi.lastResult === 'not-sent') refuse('not-sent', aprsRfUi.sentence || 'The beacon was not sent.');
+  } finally {
+    _aprsRfPhoneAsk = false;
+    if (startedListen) aprsListenSet(false); // the radio back where it was (aprsListenStop's return)
+    try { aprsEcho.stateChanged(); } catch {}
   }
 }
 
@@ -14826,6 +14909,7 @@ const aprsEcho = AprsEchocat.createController({
   listenSetBand: (b) => aprsListenSetBand(b),
   igateSet: (on) => aprsIgateSetFromDevice(on),
   beaconNow: () => aprsBeaconSend('now').catch((e) => aprsLog('beacon failed: ' + e.message)),
+  beaconRf: (req) => aprsRfSendFromPhone(req).catch((e) => aprsLog('radio beacon from the phone failed: ' + e.message)),
   markUserActive: () => markUserActive(),
   getState: () => ({ listen: aprsListenPayload(), igate: aprsIgateStatus(), beacon: aprsBeaconState() }),
   sendState: (st) => { if (remoteServer && remoteServer.broadcastAprsState) remoteServer.broadcastAprsState(st); },
