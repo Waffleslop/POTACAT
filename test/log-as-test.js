@@ -106,7 +106,7 @@ test('saveQsoRecord resolves logAs first and reads identity, logbook and uploads
   // #267: the fan-out moved to lib/logger-forward.js (the Cloud pull shares
   // it); saveQsoRecord hands it `ops`, and it hands `ops` to each sender.
   assert.ok(/LoggerForward\.forwardToLoggers\(qsoData, ops, loggerForwardDeps\(\)\)/.test(saveBody), 'the fan-out gets ops');
-  assert.ok(/d\.forwardToLogbook\(qsoData, ops\)/.test(fwdLib) && /d\.sendToQrzLogbook\(qsoData, ops\)/.test(fwdLib));
+  assert.ok(/d\.forwardToLogbook\(qsoData, ops\)/.test(fwdLib) && /d\.sendToQrzLogbook\(qrzQso, ops\)/.test(fwdLib)); // QRZ gets its own copy (#805), still with ops
   for (const k of ['sendToLogbook', 'logbookType', 'qrzApiKey', 'qrzLogbook', 'extraUdpEnabled']) {
     assert.ok(!new RegExp('\\bsettings\\.' + k + '\\b').test(fwdLib), 'settings.' + k + ' must be ops.' + k + ' in the fan-out');
   }
