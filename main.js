@@ -496,7 +496,8 @@ const PacketLinkClose = require('./lib/packet-link-close');
 const PacketRigMode = require('./lib/packet-rig-mode');
 const AprsListen = require('./lib/aprs-listen');           // APRS phase 2: when "Listen on my radio" may start, and why not
 const IdleRadioUse = require('./lib/idle-radio-use');      // Idle Mode yields to anyone using the radio, APRS listening included
-const RadioTuneRoute = require('./lib/radio-tune-route'); // the path tuneRadio drives the radio on: TCI, Flex Direct, CAT, or none
+const RadioTuneRoute = require('./lib/radio-tune-route');
+const IcomUsbDataMod = require('./lib/icom-usb-data-mod'); // sweep 1a: DATA MOD to USB for a data session over USB, put back after // the path tuneRadio drives the radio on: TCI, Flex Direct, CAT, or none
 const AprsRfFrequency = require('./lib/aprs-rf-frequency'); // APRS: the 2 m frequency by grid square (phase 2), 30 m worldwide (phase 3)
 const AprsRfFrames = require('./lib/aprs-rf-frames');       // APRS phase 2: Dire Wolf's AGW monitor frames -> APRS packets
 const AprsRadioReturn = require('./lib/aprs-radio-return'); // APRS phase 2: the radio goes back after listening
@@ -6924,7 +6925,37 @@ async function prepareIcomNetworkDataMod(controller, target, rigModel, sessionId
   controller.setDataMod(spec.settingId, spec.networkValue);
 }
 
+// Sweep 1a (Casey 2026-11-21): over a USB CI-V link, DATA MOD to USB while
+// POTACAT has the radio in a DATA mode, put back afterwards (lib/icom-usb-data-mod.js).
+let _icomUsbDataMod = null; // { guard, controller }
+function icomUsbDataModAttach(controller, codec) {
+  const modelName = getActiveRigModelName();
+  _icomUsbDataMod = null;
+  if (!IcomUsbDataMod.specFor(modelName)) return;
+  const rigOf = () => (settings.rigs || []).find((r) => r && r.id === settings.activeRigId);
+  const guard = IcomUsbDataMod.createGuard({
+    model: modelName,
+    enabled: () => { const r = rigOf(); return !(r && r.icomUsbDataModOff); },
+    read: async (id) => { const d = await waitForIcomDataMod(controller, id, 1500); return d ? d.value : null; },
+    write: (id, v) => controller.setDataMod(id, v),
+    log: (line) => sendCatLog('[Icom DATA MOD] ' + line),
+    notice: (message) => { if (win && !win.isDestroyed()) win.webContents.send('app-notice', { message, duration: 15000 }); },
+  });
+  _icomUsbDataMod = { guard, controller };
+  codec.on('data-set', (ev) => {
+    if (cat !== controller || !_icomUsbDataMod || _icomUsbDataMod.guard !== guard) return;
+    guard.onDataSet(ev).catch((e) => sendCatLog('[Icom DATA MOD] ' + e.message));
+  });
+}
+function restoreIcomUsbDataMod(reason) {
+  const h = _icomUsbDataMod;
+  _icomUsbDataMod = null;
+  if (!h || !h.controller || !h.controller.connected) return;
+  try { h.guard.restore(reason); } catch (e) { sendCatLog('[Icom DATA MOD] ' + e.message); }
+}
+
 async function restoreIcomNetworkDataMod(reason = 'disconnect') {
+  restoreIcomUsbDataMod(reason); // every disconnect path calls this one: the USB DATA MOD goes back first
   const state = _icomNetworkDataModRestore;
   if (!state) return false;
   _icomNetworkDataModRestore = null;
@@ -9343,6 +9374,7 @@ async function connectCat() {
     civPaceRemember(codec);
     cat = new RigController(model, transport, codec);
     cat._debug = true;
+    icomUsbDataModAttach(cat, codec); // sweep 1a: DATA MOD to USB for a data session, put back after
     cat.on('log', sendCatLog);
     cat.on('status', sendCatStatus);
     cat.on('frequency', catFrequencyHandler);
