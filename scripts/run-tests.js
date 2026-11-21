@@ -226,6 +226,7 @@ const TESTS = [
   'test/aprs-rf-frequency-test.js', // APRS phase 2: the 2 m APRS frequency by grid square, each entry from a published band plan
   'test/aprs-radio-return-test.js', // APRS phase 2: the radio goes back on stop, after a crash and after a quit
   'test/aprs-listen-test.js', // APRS phase 2: the refusal sentences, the packet mode, and the main.js wiring (receive only)
+  'test/aprs-rx-filter-test.js', // #840: 30 m listening widens a narrow Flex receive filter to pass 1450-1950 Hz and puts it back (fake Flex left narrow); RIT warned, never changed
   'test/aprs-listen-moved-test.js', // APRS listening pauses when the radio moves off the APRS frequency (any cause), the return is dropped; the once-a-minute audio line
   'test/aprs-auto-listen-test.js', // APRS window: listen on open (receive only), once per open, every switch refusal plus TX / JTCAT QSO / owner / Guest Pass, off stays off
   'test/tune-link-pending-test.js', // a potacat://tune link that launches POTACAT waits for the radio (link up + a readback), tunes once; 60 s then a notice; only the latest link counts

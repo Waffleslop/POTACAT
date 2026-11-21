@@ -495,6 +495,7 @@ const DirewolfAgwMonitor = require('./lib/direwolf-agw-monitor');
 const PacketLinkClose = require('./lib/packet-link-close');
 const PacketRigMode = require('./lib/packet-rig-mode');
 const AprsListen = require('./lib/aprs-listen');           // APRS phase 2: when "Listen on my radio" may start, and why not
+const AprsRxFilter = require('./lib/aprs-rx-filter');      // #840: 30 m listening widens a narrow Flex receive filter and puts it back
 const IdleRadioUse = require('./lib/idle-radio-use');      // Idle Mode yields to anyone using the radio, APRS listening included
 const RadioTuneRoute = require('./lib/radio-tune-route'); // the path tuneRadio drives the radio on: TCI, Flex Direct, CAT, or none
 const AprsRfFrequency = require('./lib/aprs-rf-frequency'); // APRS: the 2 m frequency by grid square (phase 2), 30 m worldwide (phase 3)
@@ -13412,6 +13413,41 @@ function aprsDevFeed() {
   aprsListen.devTimer = setInterval(next, 700);
 }
 
+/** Our Flex slice now, for the receive filter guard (#840): null when no Flex is connected or its status has not arrived. */
+function aprsFlexSliceNow() {
+  if (!smartSdr || !smartSdr.connected) return null;
+  const idx = smartSdr.ourSliceIndex != null ? smartSdr.ourSliceIndex : getFlexSliceIndex();
+  if (idx == null || _flexSliceKvIndex !== idx) return null;
+  const kv = _flexSliceKv || {};
+  return { idx, lo: kv.filter_lo, hi: kv.filter_hi, mode: kv.mode || '', ritOn: kv.rit_on, ritHz: kv.rit_freq };
+}
+const aprsRxFilter = AprsRxFilter.createRxFilterGuard({
+  read: aprsFlexSliceNow,
+  set: (idx, lo, hi) => { if (smartSdr && smartSdr.connected) smartSdr.setSliceFilter(idx, lo, hi); },
+  log: (line) => aprsLog(line),
+});
+/**
+ * After the tune: wait for the slice's status in the listening mode (the radio
+ * reports the new mode's filter edges), then widen a filter that would cut a
+ * tone. The note line says what changed; RIT gets its sentence. No Flex: the
+ * width warning set at the start stays (lib/aprs-listen.js filterSentence).
+ */
+async function aprsRxFilterWiden(seq) {
+  if (!smartSdr || !smartSdr.connected) return;
+  const until = Date.now() + 1500;
+  while (Date.now() < until) {
+    if (seq !== aprsListen.seq) return;
+    const s = aprsFlexSliceNow();
+    if (s && AprsListen.modeFamily(s.mode) === 'usb') break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  if (seq !== aprsListen.seq) return;
+  const r = aprsRxFilter.widen(aprsListen.band);
+  if (r.action === 'unknown') return; // nothing usable read: the width warning stays
+  aprsListen.note = [aprsSetupLine(), r.sentence, r.rit].filter(Boolean).join(' ');
+  aprsListenPush();
+}
+
 async function aprsListenStart({ resume = false } = {}) {
   const seq = ++aprsListen.seq;
   aprsListen.on = true;
@@ -13478,6 +13514,11 @@ async function aprsListenStart({ resume = false } = {}) {
     if (pm && !pm.confirm) aprsListen.unreportedData = plan.dataMode;
     try { cat.setModeOnly(plan.dataMode, freq.hz, { noAnchor: true }); } catch (e) { aprsLog('the data mode could not be set: ' + e.message); }
   }
+  // 30 m on a Flex: a receive filter that does not pass 1450 to 1950 Hz is widened now and put back when listening stops (#840).
+  if (aprsListen.band === '30m') {
+    await aprsRxFilterWiden(seq);
+    if (seq !== aprsListen.seq) return;
+  }
   try {
     await aprsSpawnDirewolf(seq);
   } catch (e) {
@@ -13506,6 +13547,7 @@ function aprsListenStop(why) {
   aprsRfAbort(`listening stopped: ${why}`); // phase 7: a radio beacon in flight unkeys at once
   aprsStopModem();
   aprsReleaseLane();
+  aprsRxFilter.restore(why); // #840: before the radio goes back, while the slice is still in the listening mode
   if (APRS_DEV_FRAMES) { aprsListen.state = 'off'; aprsListen.sentence = ''; aprsListenPush(); return; }
   if (aprsListen.state === 'paused') {
     // Winlink has the radio and gives it back itself (its return point is the place APRS saved).
@@ -13534,6 +13576,7 @@ function aprsListenYieldToWinlink(why) {
   aprsListen.watch = null; // Winlink is about to tune the radio: that is not the operator moving it
   _aprsAudioMinute.stop();
   aprsStopModem();
+  aprsRxFilter.restore(`the Winlink ${why} needs the radio`); // #840: the resume widens it again if it needs to
   const m = aprsReturn.pending();
   if (m && m.freqHz && !_winlinkPreviewReturnTo) _winlinkPreviewReturnTo = { freqHz: m.freqHz, mode: m.mode || '', from: 'before APRS listening' };
   aprsListen.state = 'paused';
@@ -13578,6 +13621,7 @@ function aprsListenMovedOff(m) {
   _aprsAudioMinute.stop();
   aprsStopModem();
   aprsReleaseLane();
+  aprsRxFilter.restore('the radio moved'); // #840: put back only if the slice is still in the mode it was widened in
   aprsReturn.drop();
   aprsListen.moved = { hz: Number(m.hz) || 0, mode: String(m.mode || ''), band: aprsListen.band };
   aprsListen.state = 'refused'; // switch off, the card says why (ECHOCAT: as when FT8 ends listening)
