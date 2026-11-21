@@ -78,6 +78,14 @@ test('a radio that settles a little off (its first readback on the frequency) st
   assert.ok(w.check({ hz: 146520000, mode: 'FM' }), 'to the simplex calling frequency: a move');
 });
 
+test('#842: a 30 m radio that settles 300 Hz off is not taken as the listening place', () => {
+  const now = clock();
+  const w = L.createMoveWatch({ band: '30m', listenHz: HF, now });
+  w.check({ hz: HF + 300, mode: 'DIGU' }); // outside the 30 m tolerance: never the anchor
+  now.add(5000);
+  assert.ok(w.check({ hz: HF + 300, mode: 'DIGU' }), 'off the frequency the decoder hears');
+});
+
 test('grace: readbacks settle for ' + L.MOVED_GRACE_MS + ' ms after listening starts; a move after it still counts', () => {
   const now = clock();
   const w = L.createMoveWatch({ band: '30m', listenHz: HF, now });
