@@ -700,18 +700,16 @@ the desktop's icon set (renderer/aprs-icons.js: a round badge per class, car,
 boat and aircraft turned to `course`). Idle Mode's `aprs` choice stays on
 `set-idle-rx` (capability `idle-mode`).
 
-### Cloud (cross-device QSO sync via Cognito)
+### Cloud (the shack's POTACAT Cloud account)
 
-> **Scope:** These messages exist solely for the in-browser ECHOCAT UI
-> (`renderer/remote.html` Settings → Cloud Sync, wired in
-> `renderer/remote.js:8132-8289`), which piggybacks on the desktop's
-> cloud session over WebSocket. The iOS and Android apps do **not** use
-> these — they speak to `api.potacat.com` directly over HTTPS via their
-> own `CloudAuth` / `CloudSync` clients. Don't infer from the protocol
-> registry that mobile is expected to send them; that path was never
-> wired on the native apps and was retired from the mobile protocol
-> registry in the 2026-05-27 cleanup. The desktop-side handlers stay in
-> place to serve the browser ECHOCAT.
+> **Scope (updated 2026-11-21):** the browser ECHOCAT (`renderer/remote.html`
+> Settings > Cloud Sync) and the ECHOCAT phone apps both use these. They act on
+> the account the desktop is signed in to, through the desktop's own session:
+> signing up from a phone (`cloud-register`) starts the desktop's trial and turns
+> on its Cloud Sync, and a payment started on the phone (`cloud-stripe-checkout`)
+> pays for that account. The phone apps also talk to `api.potacat.com` directly
+> for the phone's own sign-in. A Guest Pass session gets none of them (each is
+> refused with `guest_pass` or at the wall).
 
 | Message | Dir | Purpose |
 |---|---|---|
@@ -733,6 +731,11 @@ boat and aircraft turned to `course`). Idle Mode's `aprs` choice stays on
 | `cloud-verify-result` | S→C | Subscription tier response. |
 | `cloud-save-bmac-email` | C→S | Save Buy-Me-A-Coffee email for benefit lookup. |
 | `cloud-bmac-result` | S→C | BMAC lookup result. |
+| `cloud-stripe-checkout` | C→S | `{plan: 'monthly'\|'yearly'}`: a Stripe checkout URL for the desktop's account. The client opens it itself; the desktop watches for the payment and pushes `cloud-billing-state` when it lands. Capability `cloud-billing`. |
+| `cloud-stripe-portal` | C→S | The Stripe customer portal URL for the desktop's account. |
+| `cloud-stripe-result` | S→C | `{kind: 'checkout'\|'portal', url?, plan?, error?, message?}`. |
+| `cloud-billing-state` | S→C | `{subscription?, reason?, localQsos?}`: pushed when the account's billing changes (a payment landed, a trial ended). |
+| `cloud-checkout-state` | S→C | `{phase, plan?, stripeConfigured?}`: where a checkout the desktop is watching stands. |
 
 ### KiwiSDR / WebSDR
 

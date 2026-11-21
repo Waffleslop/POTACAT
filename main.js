@@ -30572,6 +30572,8 @@ function connectRemote() {
     settings.cloudAccessToken = result.accessToken;
     settings.cloudRefreshToken = result.refreshToken;
     settings.cloudUser = result.user;
+    // Same as the desktop's own sign-up (lib/cloud-ipc.js): a new account syncs from the first contact.
+    settings.cloudSyncEnabled = true;
     saveSettings(settings);
     // Fresh client + device registration (see cloud-login above) so the
     // welcome screen's "find your shacks" flow has this desktop at once.
@@ -45111,6 +45113,8 @@ app.whenReady().then(() => {
         // so the tunnel comes on without waiting for the next status check (cloudTunnelOnWithAccess).
         if (reason === 'register' && cloudIpc) setTimeout(() => { cloudIpc.refreshSubscription('register').catch(() => {}); }, 1000);
         if (reason === 'signout' && settings.cloudAccessSeen !== 'none') { settings.cloudAccessSeen = 'none'; saveSettings(settings); }
+        // Remembered so the Cloud form opens on Sign In, not Start a trial, after a sign-out (renderer/cloud-ui.js).
+        if (reason !== 'signout' && settings.cloudAccessToken && !settings.cloudEverSignedIn) { settings.cloudEverSignedIn = true; saveSettings(settings); }
         teardownCloudDeviceHeartbeat();
         setImmediate(() => ensureCloudDeviceRegistered(reason).catch(() => {}));
         // A new account brings its own templates (and takes this machine's).

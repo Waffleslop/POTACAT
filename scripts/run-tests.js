@@ -49,6 +49,7 @@ const TESTS = [
   'test/clock-offset-test.js',
   'test/require-exports-test.js',
   'test/scope-no-frames-log-test.js', // K3SBP 2026-11-21: a scope that shows nothing says so in the log (no frames vs misaligned)
+  'test/cloud-signup-tidy-test.js', // ECHOCAT ask 2026-11-21: trial-first form, one tunnel label, BMAC for existing members, phone sign-up syncs
   'test/cloud-tunnel-enable-remote-test.js', // ECHOCAT ask 2026-11-21: an owner device turns the Cloud Tunnel on with Cloud access; never a Guest Pass
   'test/cloud-tunnel-auto-test.js', // ECHOCAT ask 2026-11-21: the Cloud Tunnel turns on when the account gets access; never after the operator turned it off
   'test/cloud-state-test.js', // ECHOCAT ask 2026-11-21: auth-ok carries the shack's Cloud state and cloud-state follows it; never to a Guest Pass
