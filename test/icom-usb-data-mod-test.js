@@ -4,7 +4,8 @@
 // POTACAT has the radio in a DATA mode, and put back afterwards. Items and
 // values from the makers' documents (ops manuals): IC-7300 00 67 (USB 03),
 // IC-7300 MK II 00 85 (USB 01), IC-7100 00 91 (USB 03), IC-7610 DATA1/2/3
-// MOD 00 92/93/94 (USB 03). See lib/icom-usb-data-mod.js for the pages.
+// MOD 00 92/93/94 (USB 03), IC-9700 01 16 (USB 03, #892, CI-V Reference
+// Guide rev 4 p.7). See lib/icom-usb-data-mod.js for the pages.
 // Run: node test/icom-usb-data-mod-test.js
 
 const assert = require('assert');
@@ -44,6 +45,7 @@ test('the verified items and USB values per radio', () => {
   const s = M.specFor('IC-7610');
   assert.deepStrictEqual([1, 2, 3].map((n) => M.itemFor(s, n).settingId), [0x0092, 0x0093, 0x0094]);
   assert.strictEqual(s.usbValue, 0x03);
+  assert.deepStrictEqual([M.itemFor(M.specFor('IC-9700'), 1).settingId, M.specFor('IC-9700').usbValue], [0x0116, 0x03]);
   assert.strictEqual(M.specFor('IC-705'), null, 'any other radio is left alone');
   assert.strictEqual(M.specFor('FT-891'), null);
 });
@@ -143,7 +145,100 @@ test('the rig editor shows the box only for these radios and keeps the choice', 
   assert.ok(/IcomUsbDataMod\.hasChoice/.test(app));
   assert.ok(/rig\.icomUsbDataModOff = true; else delete rig\.icomUsbDataModOff/.test(app));
   assert.strictEqual(M.hasChoice('IC-7300'), true);
-  assert.strictEqual(M.hasChoice('IC-9700'), false);
+  assert.strictEqual(M.hasChoice('IC-9700'), true, '#892');
+  assert.strictEqual(M.hasChoice('IC-705'), false);
+});
+
+// #892: the IC-9700, byte for byte against the IC-9700 CI-V Reference Guide
+// rev 4: frame FE FE A2 E0 Cn Sc data FD, default address A2, reply FE FE E0 A2
+// (p.3); 1A 05 01 16 = SET > Connectors > MOD Input > DATA MOD, 00 MIC, 01 ACC,
+// 02 MIC,ACC, 03 USB, 04 MIC,USB, 05 LAN (p.7); 1A 06 01 = DATA mode on (p.19).
+const hex = (b) => Array.from(b).map((x) => x.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+
+/** An IC-9700 CI-V codec wired to the guard the way main.js wires it, with a radio that answers. */
+function ic9700OverUsb(dataModValue, { enabled = true } = {}) {
+  const sent = [];
+  const radio = { dataMod: dataModValue };
+  let codec = null;
+  codec = new CivCodec(getModel('IC-9700'), (buf) => {
+    sent.push(hex(buf));
+    const b = Array.from(buf);
+    // The radio answers a DATA MOD read (1A 05 01 16, no data) with its value, and takes a write.
+    if (b[4] === 0x1A && b[5] === 0x05 && b[6] === 0x01 && b[7] === 0x16) {
+      if (b.length === 9) setImmediate(() => codec.onData(Buffer.from([0xFE, 0xFE, 0xE0, 0xA2, 0x1A, 0x05, 0x01, 0x16, radio.dataMod, 0xFD])));
+      else if (b.length === 10) radio.dataMod = b[8];
+    }
+  });
+  const guard = M.createGuard({
+    model: 'IC-9700',
+    enabled: () => enabled,
+    read: (id) => new Promise((resolve) => {
+      const t = setTimeout(() => { codec.removeListener('data-mod', on); resolve(null); }, 500);
+      const on = (d) => { if (d.settingId !== id) return; clearTimeout(t); codec.removeListener('data-mod', on); resolve(d.value); };
+      codec.on('data-mod', on);
+      codec.getDataMod(id);
+    }),
+    write: (id, v) => codec.setDataMod(id, v),
+  });
+  const events = [];
+  codec.on('data-set', (ev) => events.push(guard.onDataSet(ev)));
+  const dataModFrames = () => sent.filter((f) => f.startsWith('FE FE A2 E0 1A 05 01 16'));
+  return { codec, guard, radio, sent, events, dataModFrames, settle: () => Promise.all(events) };
+}
+
+test('IC-9700 bytes: APRS on FM-D reads DATA MOD, sets USB, and the voice mode puts ACC back', async () => {
+  const r = ic9700OverUsb(0x01); // ACC
+  assert.strictEqual(r.codec.radioAddress, 0xA2, 'default CI-V address A2 (guide p.3)');
+  r.codec.setMode('DIGFM', 144390000); // APRS: FM-D (lib/packet-rig-mode.js)
+  assert.ok(r.sent.some((f) => f.startsWith('FE FE A2 E0 06 05 ')), 'FM (mode 05)');
+  assert.ok(r.sent.some((f) => f.startsWith('FE FE A2 E0 1A 06 01')), 'DATA on (guide p.19)');
+  await r.settle();
+  assert.deepStrictEqual(r.dataModFrames(), [
+    'FE FE A2 E0 1A 05 01 16 FD',    // read DATA MOD
+    'FE FE A2 E0 1A 05 01 16 03 FD', // set USB
+  ]);
+  assert.strictEqual(r.radio.dataMod, 0x03);
+  r.codec.setMode('FM', 145520000); // voice again: DATA off
+  await r.settle();
+  assert.deepStrictEqual(r.dataModFrames().slice(2), ['FE FE A2 E0 1A 05 01 16 01 FD']); // ACC back
+  assert.strictEqual(r.radio.dataMod, 0x01);
+  assert.ok(!r.sent.some((f) => f.startsWith('FE FE A2 E0 1A 05 01 15')), 'DATA OFF MOD (01 15) is never touched');
+});
+
+test('IC-9700 bytes: FT8 on USB-D from MIC, put back at disconnect', async () => {
+  const r = ic9700OverUsb(0x00); // MIC
+  r.codec.setMode('FT8', 144174000);
+  await r.settle();
+  assert.strictEqual(r.guard.restore('disconnect').action, 'restored');
+  assert.deepStrictEqual(r.dataModFrames(), [
+    'FE FE A2 E0 1A 05 01 16 FD',
+    'FE FE A2 E0 1A 05 01 16 03 FD',
+    'FE FE A2 E0 1A 05 01 16 00 FD',
+  ]);
+});
+
+test('IC-9700 bytes: MIC,USB (04) is left alone; LAN (05) becomes USB and goes back', async () => {
+  const a = ic9700OverUsb(0x04);
+  a.codec.setMode('FT8', 144174000);
+  await a.settle();
+  assert.deepStrictEqual(a.dataModFrames(), ['FE FE A2 E0 1A 05 01 16 FD'], 'a read, no write');
+  const b = ic9700OverUsb(0x05);
+  b.codec.setMode('FT8', 144174000);
+  await b.settle();
+  b.codec.setMode('USB', 144200000);
+  await b.settle();
+  assert.deepStrictEqual(b.dataModFrames(), [
+    'FE FE A2 E0 1A 05 01 16 FD',
+    'FE FE A2 E0 1A 05 01 16 03 FD',
+    'FE FE A2 E0 1A 05 01 16 05 FD',
+  ]);
+});
+
+test('IC-9700 bytes: the rig editor box off sends no DATA MOD frame at all', async () => {
+  const r = ic9700OverUsb(0x01, { enabled: false });
+  r.codec.setMode('DIGFM', 144390000);
+  await r.settle();
+  assert.deepStrictEqual(r.dataModFrames(), []);
 });
 
 Promise.all(pending).then(() => {
