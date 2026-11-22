@@ -216,6 +216,27 @@
   const wsLiveness = WsLiveness.create();
   // When to let go of PTT, and whether the shack still owes hearing it (#935).
   const pttRelease = PttRelease.create();
+  // #941: this page's own random id, sent in hello. A reconnect with it lets
+  // the shack release PTT that this page's dead socket still holds, at once.
+  // Kept in sessionStorage so a reload keeps it. A duplicated tab copies
+  // sessionStorage, so the pages check on a BroadcastChannel and the newer
+  // page takes a new id. Pop-outs have no socket and take no part.
+  let pttClientId = null;
+  if (!isPopout && window.PttClientId && window.crypto && window.crypto.getRandomValues) {
+    const ss = (function () { try { return window.sessionStorage; } catch (e) { return null; } })();
+    const rand = (b) => window.crypto.getRandomValues(b);
+    pttClientId = PttClientId.load(ss, rand);
+    try {
+      const idChannel = new BroadcastChannel('echocat-ptt-client-id');
+      idChannel.onmessage = (ev) => {
+        const m = ev.data || {};
+        if (m.id !== pttClientId) return;
+        if (m.kind === 'claim') idChannel.postMessage({ kind: 'taken', id: m.id });
+        else if (m.kind === 'taken') pttClientId = PttClientId.renew(ss, rand);
+      };
+      idChannel.postMessage({ kind: 'claim', id: pttClientId });
+    } catch (e) {}
+  }
 
   // WebRTC
   let pc = null;
@@ -1900,6 +1921,8 @@
           // aprs: the shack sends aprs-state and, while the APRS tab (or the
           // Map's APRS layer) is open, aprs-stations (APRS phase 6).
           capabilities: ['chunked-all-qsos', 'qso-delta', 'chunked-worked-qsos', 'local-cw-sidetone', 'jtcat-qso-logged', 'mail-folders-v2', 'pass-state', 'worked-incremental', 'aprs'],
+          // #941: this page, so a reconnect releases PTT its old socket holds.
+          pttClientId: pttClientId || undefined,
         }));
       } catch {}
       onOpen();
