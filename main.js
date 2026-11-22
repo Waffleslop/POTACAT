@@ -463,6 +463,7 @@ const { DxClusterClient, looksLikeCallsign: clusterCallsignOk } = require('./lib
 const { RbnClient } = require('./lib/rbn');
 const mercuryProcess = require('./lib/mercury-process');
 const { MercuryClient } = require('./lib/mercury-client');
+const MercuryOffer = require('./lib/mercury-offer');
 const { Js8Threads } = require('./lib/js8call-threads');
 const js8Addr = require('./lib/js8call-threads');   // composeDirected / isAddressed
 const { Js8RxAssembler } = require('./lib/js8-rx-assembler');
@@ -11156,8 +11157,7 @@ function onMercuryReady() {
   if (!mercuryClient || !mercuryClient.connected) return;
   const call = (settings.myCallsign || '').trim();
   if (call) mercuryClient.myCall(call);
-  const bw = parseInt(settings.mercuryBw, 10);
-  if (bw === 500 || bw === 2300 || bw === 2750) mercuryClient.setBandwidth(bw);
+  mercuryClient.setBandwidth(MercuryOffer.bandwidthChoice(settings.mercuryBw));
   if (settings.mercuryListen && call) {
     if (acquireRadio('mercury')) {
       mercuryClient.listen('ON');
@@ -13001,7 +13001,7 @@ function winlinkModemBw() {
   return {
     ardop: pick(settings.winlinkArdopBw, [200, 500, 1000, 2000], 500),
     vara: pick(settings.winlinkVaraBw, [500, 2300, 2750], 2300),
-    mercury: pick(settings.mercuryBw, [500, 2300, 2750], 2300),
+    mercury: MercuryOffer.bandwidthChoice(settings.mercuryBw), // 2750 hidden: same speed as 2300 today
   };
 }
 
@@ -48720,7 +48720,7 @@ function cloudShackNotice(text, kind) {
   });
   ipcMain.on('mercury-cmd-bw', (_e, bw) => {
     const n = parseInt(bw, 10);
-    if (n === 500 || n === 2300 || n === 2750) { settings.mercuryBw = n; saveSettings(settings); if (mercuryClient) mercuryClient.setBandwidth(n); }
+    if (MercuryOffer.BANDWIDTHS.includes(n)) { settings.mercuryBw = n; saveSettings(settings); if (mercuryClient) mercuryClient.setBandwidth(n); }
   });
   ipcMain.on('mercury-cmd-send-text', (_e, text) => {
     const t = String(text || '');

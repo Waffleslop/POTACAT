@@ -387,6 +387,7 @@ const TESTS = [
   'test/state-backfill-test.js', // #389: QRZ state fill counts only tracked entities (never VK) and names the QSOs left
   'test/diagnostic-snapshot-test.js',
   'test/mercury-process-test.js',
+  'test/mercury-offer-test.js', // Mercury experimental: no 2750 bandwidth; the chat window hidden until on-air use (Casey 2026-11-22)
   'test/winlink-pat-test.js',
   'test/winlink-reach-test.js',      // a radio session goes only where this radio can transmit
   'test/winlink-units-test.js',
