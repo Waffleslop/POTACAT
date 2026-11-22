@@ -53,7 +53,7 @@ function rigFor(id) {
 
 console.log('=== the request ===');
 
-for (const id of ['FT-710', 'FTDX10', 'FTDX101D/MP']) {
+for (const id of ['FT-710', 'FTDX10', 'FTDX101D', 'FTDX101MP']) {
   test(`${id}: the power meter asks RM5; (PO), nothing else`, () => {
     const { codec, writes } = codecFor(id);
     assert.strictEqual(codec.getPowerMeter(), true);
@@ -89,16 +89,17 @@ test('FT-710: zero and the owner\'s measured points, never above rated power', (
   assert.deepStrictEqual(watts, [0, 10, 25, 50, 75, 100]);
 });
 
-test('FTDX101 (left/right meter answer): P2 is the reading, P3 is ignored', () => {
-  const { codec, watts } = codecFor('FTDX101D/MP');
+test('FTDX101MP (left/right meter answer): P2 is the reading, P3 is ignored', () => {
+  const { codec, watts } = codecFor('FTDX101MP');
   codec.onData('RM5202037;');
   assert.deepStrictEqual(watts, [200], 'a 200 W model: 202 is full scale on the borrowed FT-710 table');
 });
 
-test('the table is a fraction of rated power, so a 100 W FTDX101D (fullPowerW) reads 100 W', () => {
-  const { codec, watts } = codecFor('FTDX101D/MP', { maxPower: 100 });
+test('the table is a fraction of rated power, so a 100 W FTDX101D reads 100 W at full scale, not 200 (#744)', () => {
+  const { codec, watts } = codecFor('FTDX101D');
   codec.onData('RM5202000;');
-  assert.deepStrictEqual(watts, [100]);
+  codec.onData('RM5140000;');
+  assert.deepStrictEqual(watts, [100, 50]);
 });
 
 test('the raw reading is logged once per new value', () => {

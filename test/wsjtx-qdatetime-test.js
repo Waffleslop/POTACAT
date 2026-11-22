@@ -4,7 +4,7 @@
 // as Julian day 0, which a Delphi logger shows as 30/12/1899. Guarded.
 'use strict';
 const assert = require('assert');
-const { encodeQsoLogged, encodeLoggedAdif, BinaryReader, parseQsoLogged, MSG, QSO_LOGGED_COMMENT_MAX } = require('../lib/wsjtx');
+const { encodeQsoLogged, encodeLoggedAdif, BinaryReader, parseQsoLogged, MSG, QSO_LOGGED_COMMENT_MAX, qsoLoggedComment } = require('../lib/wsjtx');
 
 let pass = 0, fail = 0;
 function t(name, fn) {
@@ -27,7 +27,8 @@ t('an invalid date never goes out as Julian day 0', () => {
 });
 // #520 (I3FIY, Logger32): a type 5 comments string longer than 50 characters
 // made Logger32 lose the fields after it, so the QSO was dated 30/12/1899.
-// The comment is capped at 50 characters; the ADIF record keeps it whole.
+// The comment is capped at 50 UTF-8 bytes (#754: an accented park name is
+// under 50 characters and over 50 bytes); the ADIF record keeps it whole.
 function decodeQsoLogged(buf) {
   const r = new BinaryReader(buf);
   r.readUInt32BE(); r.readUInt32BE();            // magic, schema
@@ -48,7 +49,7 @@ function qsoWith(comments) {
   };
 }
 console.log('\nWSJT-X QSO Logged comment cap (#520):');
-t('the cap is 50 characters', () => assert.strictEqual(QSO_LOGGED_COMMENT_MAX, 50));
+t('the cap is 50', () => assert.strictEqual(QSO_LOGGED_COMMENT_MAX, 50));
 t('a 63-character comment goes out as 50 characters', () => {
   assert.strictEqual(POTA63.length, 63);
   const q = decodeQsoLogged(encodeQsoLogged('POTACAT', qsoWith(POTA63)));
@@ -68,11 +69,85 @@ t('the cut drops trailing whitespace', () => {
   const c = 'A'.repeat(49) + ' ' + 'B'.repeat(10);
   assert.strictEqual(decodeQsoLogged(encodeQsoLogged('POTACAT', qsoWith(c))).comments, 'A'.repeat(49));
 });
-t('the cut falls on a character boundary', () => {
-  const c = 'A'.repeat(49) + '\u{1D11E}' + 'tail';  // a two-unit character at position 50
-  const out = decodeQsoLogged(encodeQsoLogged('POTACAT', qsoWith(c))).comments;
-  assert.strictEqual(out, 'A'.repeat(49) + '\u{1D11E}');
-  assert.ok(!/�/.test(out), 'no broken surrogate');
+// #754: Logger32 counts bytes. The cap is 50 UTF-8 bytes, cut between
+// characters, so what goes out is valid UTF-8 and never longer than 50 bytes.
+console.log('\nWSJT-X QSO Logged comment cap in UTF-8 bytes (#754):');
+const bytes = (s) => Buffer.byteLength(s, 'utf8');
+// The comments field as it sits in the datagram: a length, then the bytes.
+function wireComment(comments) {
+  const buf = encodeQsoLogged('POTACAT', qsoWith(comments));
+  const r = new BinaryReader(buf);
+  r.readUInt32BE(); r.readUInt32BE(); r.readUInt32BE(); r.readUtf8();   // magic, schema, type, id
+  r.readQDateTime();                                                    // dateTimeOff
+  for (let i = 0; i < 2; i++) r.readUtf8();                             // dxCall, dxGrid
+  r.readUInt64BE();                                                     // txFrequency
+  for (let i = 0; i < 4; i++) r.readUtf8();                             // mode, sent, received, txPower
+  const len = buf.readUInt32BE(r.offset);
+  return buf.subarray(r.offset + 4, r.offset + 4 + len);
+}
+function sentOk(comments) {
+  const raw = wireComment(comments);
+  assert.ok(raw.length <= 50, raw.length + ' bytes on the wire');
+  const text = new TextDecoder('utf-8', { fatal: true }).decode(raw);   // throws on a cut character
+  assert.ok(!/\ufffd/.test(text), 'no replacement character');
+  return text;
+}
+t('an accented park name under 50 characters and over 50 bytes is cut to 50 bytes', () => {
+  const park = '[POTA CA-0456 CA-QC Parc national de la Jacques-Cartier, Qu\u00e9bec]';
+  const short = '[POTA ES-0123 Parque Do\u00f1ana M\u00e1laga \u00c5land K\u00f6ln \u00e9t]';
+  assert.ok(short.length < 50 && bytes(short) > 50, short.length + ' chars, ' + bytes(short) + ' bytes');
+  const out = sentOk(short);
+  assert.ok(bytes(out) <= 50);
+  assert.ok(short.startsWith(out), 'a prefix of the comment, whole characters only');
+  assert.ok(bytes(out) >= 48, 'no more is dropped than the cut needs');
+  assert.ok(park.startsWith(sentOk(park)));
+});
+t('the fields after an accented comment still arrive', () => {
+  const c = '[POTA SE-0001 ' + '\u00e5'.repeat(30) + ']';       // 45 characters, 75 bytes
+  assert.ok(c.length < 50 && bytes(c) > 50);
+  const q = decodeQsoLogged(encodeQsoLogged('POTACAT', qsoWith(c)));
+  assert.strictEqual(bytes(q.comments), 50);
+  assert.strictEqual(q.name, 'Test');
+  assert.strictEqual(q.dateTimeOn.toISOString(), ON.toISOString());
+  assert.strictEqual(q.myGrid, 'FM19');
+});
+t('exactly 50 bytes is untouched, ASCII or accented', () => {
+  const a = 'A'.repeat(50);
+  const b = 'A'.repeat(48) + '\u00e9';
+  const c = 'A'.repeat(46) + '\u{1D11E}';
+  for (const s of [a, b, c]) {
+    assert.strictEqual(bytes(s), 50);
+    assert.strictEqual(qsoLoggedComment(s), s);
+    assert.strictEqual(sentOk(s), s);
+  }
+});
+t('51 ASCII bytes becomes 50', () => {
+  assert.strictEqual(sentOk('A'.repeat(51)), 'A'.repeat(50));
+});
+t('a 2-byte character straddling byte 50 is dropped whole', () => {
+  assert.strictEqual(sentOk('A'.repeat(49) + '\u00f1' + 'tail'), 'A'.repeat(49));
+});
+t('a 3-byte character straddling byte 50 is dropped whole', () => {
+  assert.strictEqual(sentOk('A'.repeat(49) + '\u20ac' + 'tail'), 'A'.repeat(49));
+  assert.strictEqual(sentOk('A'.repeat(48) + '\u20ac' + 'tail'), 'A'.repeat(48));
+});
+t('a 4-byte character straddling byte 50 is dropped whole', () => {
+  for (const n of [47, 48, 49]) {
+    assert.strictEqual(sentOk('A'.repeat(n) + '\u{1D11E}' + 'tail'), 'A'.repeat(n));
+  }
+});
+t('empty and missing comments are safe', () => {
+  for (const v of ['', undefined, null]) {
+    assert.strictEqual(qsoLoggedComment(v), '');
+    assert.strictEqual(sentOk(v), '');
+  }
+  assert.strictEqual(qsoLoggedComment(12345), '12345');
+});
+t('the cap does not change the QSO it was given', () => {
+  const c = '[POTA SE-0001 ' + '\u00e5'.repeat(30) + ']';
+  const qso = qsoWith(c);
+  encodeQsoLogged('POTACAT', qso);
+  assert.strictEqual(qso.comments, c);
 });
 t('dateTimeOn and every field after the comment round-trip', () => {
   const q = decodeQsoLogged(encodeQsoLogged('POTACAT', qsoWith(POTA63)));

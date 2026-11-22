@@ -27,6 +27,12 @@ const mk = (a, b) => new StreamingResampler(a, b);
     assert.ok(Math.abs(back[1] - 0.5) < 0.001);
   });
 
+  await test('no modem connected: nothing is written, so the receive peak stays 0', () => {
+    const srv = new ModemAudioServer({ makeResampler: mk });
+    srv.feedRx(new Float32Array(256).fill(0.5), 12000);
+    assert.strictEqual(srv.takeRxPeak(), 0);
+  });
+
   await test('loopback only', () => {
     const s = new ModemAudioServer({ makeResampler: mk });
     assert.throws(() => s.listen(0, '0.0.0.0'), /loopback only/);
@@ -87,6 +93,10 @@ const mk = (a, b) => new StreamingResampler(a, b);
     let maxDiff = 0;
     for (let i = 100; i < 1100; i++) maxDiff = Math.max(maxDiff, Math.abs(s[i] - s[i + 12]));
     assert.ok(maxDiff < 0.08, `period preserved (max drift ${maxDiff.toFixed(3)})`);
+    // The peak of what was written to the modem (APRS's once-a-minute audio line), then it starts again.
+    const pk = srv.takeRxPeak();
+    assert.ok(pk > 0.45 && pk < 0.55, `receive peak about 0.5, got ${pk}`);
+    assert.strictEqual(srv.takeRxPeak(), 0);
     // The modem transmits: 1200 samples (100 ms) of 12 kHz s16.
     const tx = new Float32Array(1200);
     for (let i = 0; i < tx.length; i++) tx[i] = 0.8 * Math.sin(2 * Math.PI * 1500 * i / 12000);

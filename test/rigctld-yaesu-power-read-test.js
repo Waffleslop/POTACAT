@@ -28,8 +28,8 @@ function codec(model, opts) {
   return { c, writes, feed, powers };
 }
 
-test('FTDX101D/MP on rigctld: the power poll is w PC; and PC050; reads 50 W', () => {
-  const { c, writes, feed, powers } = codec(RIG_MODELS['FTDX101D/MP']);
+test('FTDX101D on rigctld: the power poll is w PC; and PC050; reads 50 W', () => {
+  const { c, writes, feed, powers } = codec(RIG_MODELS['FTDX101D']);
   c.getPower();
   assert.deepStrictEqual(writes, ['w PC;\n']);
   let hz = null;
@@ -41,14 +41,14 @@ test('FTDX101D/MP on rigctld: the power poll is w PC; and PC050; reads 50 W', ()
 });
 
 test('FTDX101MP at full power: PC200; reads 200 W', () => {
-  const { c, feed, powers } = codec(RIG_MODELS['FTDX101D/MP']);
+  const { c, feed, powers } = codec(RIG_MODELS['FTDX101MP']);
   c.getPower();
   feed('PC200;\n');
   assert.deepStrictEqual(powers, [200]);
 });
 
 test('a second power poll while one is unanswered sends nothing more', () => {
-  const { c, writes, feed } = codec(RIG_MODELS['FTDX101D/MP']);
+  const { c, writes, feed } = codec(RIG_MODELS['FTDX101MP']);
   c.getPower();
   c.getPower();
   assert.deepStrictEqual(writes, ['w PC;\n']);
@@ -58,7 +58,7 @@ test('a second power poll while one is unanswered sends nothing more', () => {
 });
 
 test('the Station Setup round trip: set 5 W writes PC005;, the read says 5 W', () => {
-  const { c, writes, feed, powers } = codec(RIG_MODELS['FTDX101D/MP']);
+  const { c, writes, feed, powers } = codec(RIG_MODELS['FTDX101MP']);
   c.setTxPowerWatts(5);
   assert.strictEqual(writes[writes.length - 1], 'w PC005;\n');
   c.getPower();
@@ -106,7 +106,7 @@ test('FTDX5000: setting 200 W writes PC255;, 100 W writes PC127; as the serial c
 });
 
 test('a Yaesu without powerScale still writes plain watts (FTDX101MP 150 W -> PC150;)', () => {
-  const { c, writes } = codec(RIG_MODELS['FTDX101D/MP']);
+  const { c, writes } = codec(RIG_MODELS['FTDX101MP']);
   c.setTxPowerWatts(150);
   assert.strictEqual(writes[writes.length - 1], 'w PC150;\n');
 });
