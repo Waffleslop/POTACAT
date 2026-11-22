@@ -454,6 +454,7 @@ const TESTS = [
   'test/ssb-sideband-tune-test.js', // a 60 m SSB spot tunes USB
   'test/ssb-sideband-one-rule-test.js', // #445: band buttons and typed frequencies pick LSB/USB by band in voice SSB; one copy of the rule
   'test/mac-mic-access-test.js', // #463: a Mac that refuses the microphone is named, logged and in Report a Bug
+  'test/rx-direct-source-test.js', // #936: JTCAT/SSTV pop-outs hear Icom network audio, not the local input
   'test/capture-stall-test.js', // kc8zp_ryan: JTCAT capture rebuilt when the OS mutes/suspends it or it stops delivering
   'test/jtcat-capture-gate-test.js', // #133: a remote-started FT8 capture is restarted like a desktop one; one capture build at a time
   'test/remote-off-release-test.js', // #746: ECHOCAT turned off releases the radio input a phone-started FT8/JS8 held
