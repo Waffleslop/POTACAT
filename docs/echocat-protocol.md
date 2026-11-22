@@ -397,6 +397,14 @@ call, how a session's end is worded) is decided on the shack and sent as data. G
 `lib/remote-server.js` (`case 'winlink-list'` onward). Handlers: `winlinkHandleRemote` in
 `main.js`.
 
+A POTACAT desktop driving a remote shack (More > Remote Radios) is one of these devices
+too, from #299 (2026-11-22): its Winlink Mail window sends the same `winlink-*` messages
+and shows the shack's `winlink-state`, `winlink-mailbox`, `winlink-session` and
+`winlink-spectrum`, so radio sessions run on the shack's radio. Its hello adds
+`mail-folders-v2`. Winlink forms are not on the wire, so that window offers them only on
+the shack PC. No new message or field; `lib/remote-bridge.js` and
+`lib/winlink-remote-shack.js` hold the mapping.
+
 **Who may send.** The owner's devices only. A Guest Pass session gets
 `winlink-refused {reason: 'guest-pass', reqId}` for every C→S message below, is never sent
 `winlink-state`, `winlink-mailbox`, `winlink-session` or `winlink-spectrum`, and is not

@@ -679,6 +679,7 @@ const TESTS = [
   'test/remote-multi-client-test.js',
   'test/remote-bridge-test.js',
   'test/aprs-remote-shack-test.js', // #868: a desktop driving a remote shack starts APRS listening there (aprs-listen), shows the shack's aprs-state and the stations its radio heard
+  'test/winlink-remote-shack-test.js', // #299: a desktop driving a remote shack uses the shack's Winlink (mailbox, gateways, radio sessions) over the winlink-* wire
   'test/sstv-context-test.js',
   'test/tailscale-detect-test.js',
   'test/yaesu-legacy-codec-test.js',
