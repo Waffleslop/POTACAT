@@ -14814,14 +14814,14 @@ function aprsRfRunner() {
 // the radio reported transmit). One packet at a time: a beacon and a message
 // never overlap (_aprsRfSending). Nothing transmits unless the operator
 // pressed Send or Try again, or turned on one of the two settings that are
-// off by default (automatic retries, automatic acks), and those two run on
-// 2 m only (lib/aprs-rf-message.js AUTO_BANDS). Desktop window only: the
+// off by default (automatic retries, automatic acks): retries on 2 m and
+// 30 m, acks on 2 m only (lib/aprs-rf-message.js AUTO_BANDS). Desktop window only: the
 // ECHOCAT wire is unchanged.
 let _aprsMsgRadioJob = null;       // the messenger job on the air now
 /** A default-off automatic radio transmission ('retry' or 'ack'): on, and on a band that allows it. */
 function aprsMsgRadioAuto(kind) {
   const on = kind === 'ack' ? settings.aprsRadioMsgAutoAck === true : settings.aprsRadioMsgAutoRetry === true;
-  return AprsRfMessage.autoAllowed(on, aprsListen.band);
+  return AprsRfMessage.autoAllowed(on, aprsListen.band, kind === 'ack' ? 'ack' : 'retry');
 }
 /** The call the radio frames go out as (the beacon's RF source), or '' with no real callsign. */
 function aprsMsgRadioSource() {

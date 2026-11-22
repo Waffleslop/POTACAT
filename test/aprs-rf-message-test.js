@@ -202,10 +202,13 @@ test('a restart: a radio message going out comes back as not sent, with no radio
 });
 
 test('automatic radio transmissions run on 2 m only; 30 m stays one press each', () => {
-  assert.strictEqual(RM.autoAllowed(true, '2m'), true);
-  assert.strictEqual(RM.autoAllowed(true, '30m'), false);
-  assert.strictEqual(RM.autoAllowed(false, '2m'), false);
-  assert.strictEqual(RM.autoAllowed(undefined, '2m'), false, 'off unless turned on');
+  // Casey 2026-11-21: "Automatic retries on 30m too"; acks stay 2 m only.
+  assert.strictEqual(RM.autoAllowed(true, '2m', 'retry'), true);
+  assert.strictEqual(RM.autoAllowed(true, '30m', 'retry'), true);
+  assert.strictEqual(RM.autoAllowed(true, '2m', 'ack'), true);
+  assert.strictEqual(RM.autoAllowed(true, '30m', 'ack'), false);
+  assert.strictEqual(RM.autoAllowed(false, '2m', 'retry'), false);
+  assert.strictEqual(RM.autoAllowed(undefined, '30m', 'retry'), false, 'off unless turned on');
 });
 
 test('the frame: source, tocall and path as the radio beacon, the chapter 14 field', () => {
@@ -286,8 +289,8 @@ function station(o = {}) {
   const results = [];
   const m = createMessenger({
     now: tm.now, myCall: 'K3SBP-10', myBase: 'K3SBP', send: () => { throw new Error('APRS-IS must not be used'); }, canSend: () => false,
-    radioAutoRetry: () => RM.autoAllowed(o.autoRetry === true, st.band),
-    radioAutoAck: () => RM.autoAllowed(o.autoAck === true, st.band),
+    radioAutoRetry: () => RM.autoAllowed(o.autoRetry === true, st.band, 'retry'),
+    radioAutoAck: () => RM.autoAllowed(o.autoAck === true, st.band, 'ack'),
     sendRadio: (job) => {
       if (runner.inFlight()) return false;
       // main's order: the gate, then the frame, then the run.

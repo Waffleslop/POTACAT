@@ -114,7 +114,7 @@ const fnBody = (src, name) => {
     assert.ok(send.indexOf('aprsMsgRadioRefusal()') < send.indexOf('m.compose('), 'Radio is refused before anything is queued');
     const auto = fnBody(main, 'aprsMsgRadioAuto');
     assert.ok(/settings\.aprsRadioMsgAutoAck === true/.test(auto) && /settings\.aprsRadioMsgAutoRetry === true/.test(auto), 'on only when turned on');
-    assert.ok(/AprsRfMessage\.autoAllowed\(on, aprsListen\.band\)/.test(auto), '2 m only');
+    assert.ok(/AprsRfMessage\.autoAllowed\(on, aprsListen\.band, kind === 'ack' \? 'ack' : 'retry'\)/.test(auto), 'the band rule per kind (retries 2 m and 30 m, acks 2 m)');
     assert.ok(/aprsMsgRadioStop\(String\(lid/.test(main) && /aprsRfAbort\('Stop was pressed'\)/.test(fnBody(main, 'aprsMsgRadioStop')), 'Stop drops PTT at once');
     assert.ok(/ipcMain\.handle\('aprs-message-retry'/.test(main));
   });
