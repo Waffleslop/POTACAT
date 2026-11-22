@@ -27304,6 +27304,8 @@ let freedvTxOutputCtx = null;
 let freedvMicStream = null;
 let freedvMicCtx = null;
 let freedvMicProcessor = null;
+// #905: a stop during the async open wins (lib/capture-open-guard.js).
+const _freedvOpen = window.CaptureOpenGuard.createOpenGuard();
 
 const FREEDV_MODES = new Set(['FREEDV', 'DV', 'FREEDV-700E', 'FREEDV-700D', 'FREEDV-1600']);
 
@@ -27325,7 +27327,9 @@ function freedvMicNote(samples) {
 
 async function startFreedvForMode(mode) {
   if (freedvActive) { console.log('[FreeDV] Already active, skipping start'); return; }
+  const openToken = _freedvOpen.begin();
   const s = await window.api.getSettings();
+  if (!_freedvOpen.isCurrent(openToken)) return; // stopped while the settings were read
   if (!s.enableFreedv) { console.log('[FreeDV] Not enabled in settings, skipping'); return; }
   freedvActive = true;
   console.log('[FreeDV] Auto-starting for mode:', mode);
@@ -27347,12 +27351,21 @@ async function startFreedvForMode(mode) {
   try {
     const constraints = { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false };
     if (s.remoteAudioInput) constraints.deviceId = { exact: s.remoteAudioInput };
-    freedvAudioStream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
-    freedvAudioCtx = new AudioContext();
-    const source = freedvAudioCtx.createMediaStreamSource(freedvAudioStream);
-    const dsRatio = freedvAudioCtx.sampleRate / 8000;
-    await freedvAudioCtx.audioWorklet.addModule('freedv-audio-worklet.js');
-    const worklet = new AudioWorkletNode(freedvAudioCtx, 'freedv-processor', {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+    if (!_freedvOpen.isCurrent(openToken)) { window.CaptureOpenGuard.releaseStream(stream); return; }
+    freedvAudioStream = stream;
+    const audioCtx = new AudioContext();
+    freedvAudioCtx = audioCtx;
+    const source = audioCtx.createMediaStreamSource(stream);
+    const dsRatio = audioCtx.sampleRate / 8000;
+    await audioCtx.audioWorklet.addModule('freedv-audio-worklet.js');
+    if (!_freedvOpen.isCurrent(openToken)) {
+      // stopFreedv already released the globals; release what this open built.
+      window.CaptureOpenGuard.releaseStream(stream);
+      audioCtx.close().catch(() => {});
+      return;
+    }
+    const worklet = new AudioWorkletNode(audioCtx, 'freedv-processor', {
       processorOptions: { dsRatio },
     });
     let _freedvAudioCount = 0;
@@ -27364,7 +27377,7 @@ async function startFreedvForMode(mode) {
       }
     };
     source.connect(worklet);
-    worklet.connect(freedvAudioCtx.destination);
+    worklet.connect(audioCtx.destination);
     freedvProcessor = worklet;
   } catch (err) {
     console.error('[FreeDV] RX audio capture failed:', err.message);
@@ -27374,6 +27387,7 @@ async function startFreedvForMode(mode) {
 }
 
 function stopFreedv() {
+  _freedvOpen.cancel(); // an open still in flight releases its capture and keeps nothing
   if (!freedvActive) return;
   freedvActive = false;
   console.log('[FreeDV] Auto-stopping');

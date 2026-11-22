@@ -195,6 +195,7 @@ const TESTS = [
   'test/error-banner-text-test.js', // #806: ECHOCAT Web error banner shows the message on iPhone Safari (stack has no message there)
   'test/freedv-diag-test.js', // #717: FreeDV audio in, sync on/off and capture failures in the session log, rate-limited
   'test/freedv-mac-mic-test.js', // #718: FreeDV capture runs the macOS microphone check and a 10 s silence watch, the shared rule
+  'test/freedv-stop-during-open-test.js', // #905: a FreeDV stop during the capture open wins: the late stream is stopped and nothing is kept
   'test/freedv-ptt-refusal-test.js', // FDV1: voice PTT refused in FreeDV modes until FreeDV transmit exists; one sentence on every surface
   'test/freedv-echocat-test.js', // FDV1: decoded FreeDV speech on the ECHOCAT track, freedv-status, protocol drift fixed (agreed with ECHOCAT)
   'test/kenwood-filter-width-test.js',
