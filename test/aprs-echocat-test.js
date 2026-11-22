@@ -82,14 +82,15 @@ const W1b = 'W1AW-9>APRS,WIDE1-1:!4141.00N/07241.00W>095/050Mobile';
 const N2 = 'N2XYZ>APRS:=4030.00N/07400.00W-Home';
 
 console.log('requests');
-test('the four requests are cleaned; anything else (a radio beacon too) is not ours', () => {
+test('the five requests are cleaned (the radio beacon since 2026-11-21); anything else is not ours', () => {
+  assert.deepStrictEqual(E.parseRequest({ type: 'aprs-beacon-rf' }), { type: 'aprs-beacon-rf', band: '' });
   assert.deepStrictEqual(E.parseRequest({ type: 'aprs-listen', on: true, band: '30m' }), { type: 'aprs-listen', on: true, band: '30m' });
   assert.deepStrictEqual(E.parseRequest({ type: 'aprs-listen', on: 'yes', band: '6m' }), { type: 'aprs-listen', on: false, band: '' });
   assert.deepStrictEqual(E.parseRequest({ type: 'aprs-igate', on: true }), { type: 'aprs-igate', on: true });
   assert.deepStrictEqual(E.parseRequest({ type: 'aprs-beacon-is' }), { type: 'aprs-beacon-is' });
   assert.deepStrictEqual(E.parseRequest({ type: 'aprs-subscribe', on: true, rangeKm: '150' }), { type: 'aprs-subscribe', on: true, rangeKm: 150 });
   assert.deepStrictEqual(E.parseRequest({ type: 'aprs-subscribe', on: true, rangeKm: -3 }), { type: 'aprs-subscribe', on: true, rangeKm: null });
-  for (const t of ['aprs-beacon', 'aprs-beacon-rf', 'aprs-beacon-radio', 'tune', undefined]) assert.strictEqual(E.parseRequest({ type: t }), null, String(t));
+  for (const t of ['aprs-beacon', 'aprs-beacon-radio', 'tune', undefined]) assert.strictEqual(E.parseRequest({ type: t }), null, String(t));
   assert.strictEqual(E.parseRequest(null), null);
 });
 

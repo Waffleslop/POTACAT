@@ -91,6 +91,7 @@ require('./lib/fetch-policy').installNoBrotliFetch(globalThis);
 const CleanExitMarker = require('./lib/clean-exit-marker');
 const FreqDots = require('./lib/freq-dots'); // display only: 14.074.00 MHz, the VFO way
 const RemoteBridge = require('./lib/remote-bridge');
+const AprsRemoteShack = require('./lib/aprs-remote-shack'); // #868: APRS listening on the shack from this desktop
 const WaterfallPalettes = require('./lib/waterfall-palettes');
 const GpuStatus = require('./lib/gpu-status'); // #773: the GPU line in the session log
 const ShackGrid = require('./lib/shack-grid'); // #774: the JTCAT map on the shack's grid
@@ -7851,7 +7852,23 @@ function pushActivationToRemoteShack() {
 
 // The JTCAT bridge (lib/remote-bridge.js): pop-out IPC → the shack's wire,
 // and the shack's JTCAT frames → the pop-out channels.
-const _remoteBridgeState = { holdTx: false, fullAuto: false, tune: false, running: false };
+const _remoteBridgeState = { holdTx: false, fullAuto: false, tune: false, running: false, aprs: false, aprsListenOn: false, aprsRfSeen: new Map() };
+// APRS on the shack (#868): the APRS window's listening card shows the shack's
+// own state (its aprs-state, mapped by lib/remote-bridge.js IN), and this
+// desktop watches the shack's APRS while the window is open, so the stations
+// its radio hears arrive and listening this desktop started stops when the
+// window closes (the shack's lib/aprs-echocat.js rule for any device).
+let _remoteAprsListen = null; // the window's 'aprs-listen' payload from the shack, or null
+let _remoteAprsWanted = false;
+function remoteAprsWatch(on) {
+  _remoteAprsWanted = !!on;
+  if (on) _remoteBridgeState.aprsRfSeen.clear(); // a fresh window store: the shack's snapshot fills it
+  if (isRemoteLinked()) remoteClient.sendRaw({ type: 'aprs-subscribe', on: !!on });
+}
+/** The listening card says a refusal made on this desktop (the link is down, the shack is too old). */
+function remoteAprsRefusedHere(sentence) {
+  if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send('aprs-listen', AprsRemoteShack.refusedHere(sentence, _remoteAprsListen));
+}
 let _remoteJtcatMode = '';
 let _remoteSpectrumTimers = [];
 function remoteJtcatSubscribeSpectrum(on) {
@@ -7874,9 +7891,11 @@ function bridgeIpcToShack(channel, args, e) {
   const r = rule(args || [], _remoteBridgeState) || { drop: true };
   if (r.drop) return true;
   const fromSstv = !!(sstvPopoutWin && !sstvPopoutWin.isDestroyed() && e && e.sender === sstvPopoutWin.webContents);
+  const fromAprs = !!(aprsWin && !aprsWin.isDestroyed() && e && e.sender === aprsWin.webContents);
   if (r.refuse) {
     sendCatLog('[Remote] ' + r.refuse);
-    if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() && e && e.sender === jtcatPopoutWin.webContents) jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: r.refuse });
+    if (fromAprs) remoteAprsRefusedHere(r.refuse);
+    else if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() && e && e.sender === jtcatPopoutWin.webContents) jtcatPopoutWin.webContents.send('jtcat-qso-state', { phase: 'error', error: r.refuse });
     else { try { if (e && e.sender && !e.sender.isDestroyed()) e.sender.send('tune-blocked', r.refuse); } catch {} }
     return true;
   }
@@ -7887,6 +7906,7 @@ function bridgeIpcToShack(channel, args, e) {
     }
     // An SSTV send left on "Encoding..." with HALT showing is the failure to avoid.
     if (fromSstv) sstvPopoutWin.webContents.send('sstv-tx-status', { state: 'rx', error: REMOTE_NOT_LINKED_MSG });
+    if (fromAprs) remoteAprsRefusedHere(REMOTE_NOT_LINKED_MSG);
     return true;
   }
   if (r.photo) {
@@ -7919,8 +7939,13 @@ function bridgeInboundFromShack(msg) {
   const rule = RemoteBridge.IN[msg.type];
   if (!rule) return false;
   RemoteBridge.trackState(_remoteBridgeState, msg);
-  const out = rule(msg) || [];
+  const out = rule(msg, _remoteBridgeState) || [];
   for (const [ch, payload] of out) {
+    if (ch.startsWith('aprs-')) {
+      if (ch === 'aprs-listen') _remoteAprsListen = payload;
+      if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send(ch, payload);
+      continue;
+    }
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send(ch, payload);
     if (js8PopoutWin && !js8PopoutWin.isDestroyed()) js8PopoutWin.webContents.send(ch, payload);
     if (ch.startsWith('sstv-') && sstvPopoutWin && !sstvPopoutWin.isDestroyed()) sstvPopoutWin.webContents.send(ch, payload);
@@ -8246,6 +8271,9 @@ function ensureRemoteClient() {
     remoteShackInfo = info.audioHeldBy ? { audioElsewhere: true, audioHolder: String(info.audioHeldBy.name || '') } : null;
     pushRemoteShackInfo();
     if (_remoteScopeWanted) remoteClient.sendRaw({ type: 'scope-subscribe', on: true, bins: YaesuScope.BINS });
+    // APRS (#868): this shack's aprs-state follows (an older shack sends none); watch again while the window is open.
+    _remoteBridgeState.aprs = false; _remoteBridgeState.aprsListenOn = false; _remoteAprsListen = null;
+    if (aprsWin && !aprsWin.isDestroyed()) remoteAprsWatch(true);
     if (sstvPopoutWin && !sstvPopoutWin.isDestroyed()) { _remoteSstvWindowOpen = false; remoteClient.sendRaw({ type: 'sstv-open' }); }
     if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed() && _remoteJtcatMode) {
       remoteClient.sendRaw({ type: 'jtcat-start', mode: _remoteJtcatMode });
@@ -8268,6 +8296,8 @@ function ensureRemoteClient() {
     // Tear the answerer down with the link — its peer is dead and the creds
     // are tied to this session. A fresh connect re-starts audio explicitly.
     stopRemoteClientAudio();
+    // APRS (#868): the shack stops listening a device it lost started; the card says the link is down until the shack answers again.
+    if (wasAuthed && _remoteAprsListen) { _remoteAprsListen = AprsRemoteShack.refusedHere(REMOTE_NOT_LINKED_MSG, _remoteAprsListen); aprsListenPush(); }
   });
   remoteClient.on('kicked', (info) => {
     // This PC stops driving the shack and does not reconnect by itself: the
@@ -8622,6 +8652,9 @@ function tearDownRemoteClient() {
   remoteShackVoice = { labels: [], filled: [] };
   // A scope window left open goes back to this PC's own source (or says why not).
   if (_remoteScopeWanted) { _remoteScopeWanted = false; if (yaesuScopeWanted()) startYaesuScope(); }
+  // APRS (#868): the listening card goes back to this PC's own radio.
+  _remoteAprsWanted = false; _remoteBridgeState.aprs = false; _remoteBridgeState.aprsListenOn = false; _remoteAprsListen = null;
+  try { aprsListenPush(); } catch { /* the APRS state is declared further down; nothing to show yet */ }
   if (_remotePaddleHoldTimer) { clearInterval(_remotePaddleHoldTimer); _remotePaddleHoldTimer = null; }
   // The shack's VFO lock was mirrored here; this PC's radio starts unlocked.
   if (_vfoLocked) {
@@ -13403,7 +13436,13 @@ function aprsListenMovedView(band) {
   if (!aprsListen.moved || aprsListen.on) return null;
   return { title: AprsListen.MOVED_TITLE, line: AprsListen.movedLine(aprsListenMovedPlace(band)) };
 }
-function aprsListenPush() { aprsWinSend('aprs-listen', aprsListenPayload()); aprsIgateSync(); aprsRfTimerSync(); }
+function aprsListenPush() {
+  // Driving a remote shack, the card shows the shack's listening (#868), not this PC's.
+  if (isRemoteMode() && _remoteAprsListen) { if (aprsWin && !aprsWin.isDestroyed()) aprsWin.webContents.send('aprs-listen', _remoteAprsListen); }
+  else aprsWinSend('aprs-listen', aprsListenPayload());
+  aprsIgateSync();
+  aprsRfTimerSync();
+}
 
 /** The modem bridge holds the radio's sound card while APRS listens (modemBridgeWanted). */
 function aprsListenWantsAudio() {
@@ -14134,6 +14173,7 @@ function aprsBeaconState() {
     sending: aprsBeacon.sending, timerOn: !!aprsBeacon.timer, nextAt: aprsBeacon.timer ? aprsBeacon.nextAt : 0,
     // The 2 m radio timer: pending or not, when, and why not (30 m, window).
     rfTimerOn: !!aprsRfTimer.timer, rfNextAt: aprsRfTimer.timer ? aprsRfTimer.nextAt : 0, rfTimerSentence: aprsRfTimer.sentence, rfBand: aprsListen.band || '',
+    rf: aprsRfPhoneState(), // the radio beacon for the phone's "Send over the radio" (2026-11-21)
   };
 }
 function aprsBeaconPush() { aprsWinSend('aprs-beacon', aprsBeaconState()); }
@@ -14407,6 +14447,7 @@ const APRS_RF_SHIM_PORTS = [4550, 4559];
 const APRS_RF_SENTENCE_MS = 20000; // a result or refusal line stays this long, then the live state shows again
 const aprsRfUi = { sentence: '', sentenceAt: 0, lastAt: 0, lastPacket: '', lastBand: '', lastPeak: null, lastHeldMs: 0 };
 let _aprsRfSending = false;        // a click is being acted on: a second click does nothing
+let _aprsRfPhoneAsk = false;       // the beacon in hand was asked for by the owner's phone (aprs-beacon-rf)
 const _aprsRfPeak = AprsRfMeters.createPeak(); // SWR and RF out peaks while the beacon is keyed
 function aprsRfSay(sentence) { aprsRfUi.sentence = sentence || ''; aprsRfUi.sentenceAt = Date.now(); }
 
@@ -14527,6 +14568,8 @@ function aprsRfGateState() {
   return {
     remote: isRemoteMode(),
     windowOpen: !!(aprsWin && !aprsWin.isDestroyed()),
+    // The owner's phone pressed "Send over the radio": that one beacon counts as the window (2026-11-21).
+    askedFrom: _aprsRfPhoneAsk ? 'phone' : 'window',
     listenOn: aprsListen.on,
     listenState: aprsListen.state,
     band: aprsListen.band,
@@ -14638,6 +14681,8 @@ async function aprsRfTransmit(why = 'click') {
   aprsLog(`beacon over the radio: ${b.packet} on ${c.mhz} MHz ${c.mode}, rig power ${c.powerW ? c.powerW + ' W' : 'not reported'}, about ${(cap.airMs / 1000).toFixed(1)} s on air, cap ${(cap.capMs / 1000).toFixed(1)} s`);
   const res = await aprsRfRunner().send({ packet: b, capMs: cap.capMs });
   if (_aprsRfPeak.active()) aprsRfUi.lastPeak = _aprsRfPeak.end(); // it keyed: its peak SWR and RF out
+  // What the phone shows after its press: did the RADIO transmit (the 2026-11-19 interlock case).
+  aprsRfUi.lastResult = res.ok ? (res.confirmed ? 'confirmed' : 'unconfirmed') : 'not-sent';
   if (res.ok && res.confirmed) {
     // Only a beacon the radio reported transmitting counts as sent and gets a last-beacon time.
     aprsRfUi.lastAt = Date.now(); aprsRfUi.lastPacket = b.packet; aprsRfUi.lastBand = c.band;
@@ -14650,6 +14695,83 @@ async function aprsRfTransmit(why = 'click') {
   } else {
     aprsRfSay(res.sentence || 'The beacon was not sent.');
     aprsLog('beacon over the radio not sent: ' + aprsRfUi.sentence);
+  }
+}
+
+// ── The radio beacon from the owner's phone (ECHOCAT ask 2026-11-21, Casey's go) ──
+// One press, one beacon: the window's own run (aprsRfSend), gate and caps. The
+// press counts as the window. With Listen off the desktop sets the radio up for
+// the beacon by starting listening on the band (the same tune, mode and filter,
+// with the same return), sends, and stops listening again so the radio goes
+// back where it was. A Guest Pass never gets here.
+const APRS_RF_PHONE_SETUP_MS = 20000; // how long the radio may take to be listening before the press is refused
+
+/** The band the phone's press would use: the one listening on, else the one asked for, else the chosen band. */
+function aprsRfPhoneBand(asked) {
+  if (aprsListen.on && aprsListen.band) return aprsListen.band;
+  return AprsListen.chooseBand(aprsRigBands(), asked || aprsListen.bandWanted || aprsListen.band || '2m') || '';
+}
+
+/** aprs-state.beacon.rf: may one press send now, and what it would send (band, MHz, mode, power, air time). */
+function aprsRfPhoneState() {
+  try {
+    const band = aprsRfPhoneBand('');
+    const f = band ? aprsListenFrequency(band) : null;
+    const s = { ...aprsRfGateState(), band, aprsHz: aprsListen.on && aprsListen.freq ? aprsListen.freq.hz : (f && f.hz) || 0 };
+    const r = AprsRfGate.phoneReadiness(s);
+    let airSeconds = 0;
+    if (aprsListen.on) { try { const p = aprsRfPlan(); if (p.cap) airSeconds = Math.round(p.cap.airMs / 100) / 10; } catch {} }
+    return {
+      ready: r.ready, setup: r.setup, sentence: r.ready ? '' : (r.sentence || ''),
+      band, mhz: s.aprsHz ? aprsRfMhz(s.aprsHz) : '', modeLabel: band ? AprsListen.modeLabel(band) : '',
+      powerW: Number(_currentTxPower) > 0 ? Math.round(Number(_currentTxPower)) : 0, airSeconds,
+      sending: _aprsRfSending || aprsRfInFlight(), lastAt: aprsRfUi.lastAt, lastResult: aprsRfUi.lastResult || '',
+      lastSentence: aprsRfUi.sentence && Date.now() - aprsRfUi.sentenceAt < APRS_RF_SENTENCE_MS ? aprsRfUi.sentence : '',
+    };
+  } catch (e) { return { ready: false, setup: false, sentence: 'The radio beacon is not available: ' + e.message }; }
+}
+
+/** Wait until listening is up on the APRS frequency, refused, or out of time. */
+function aprsRfPhoneWaitListening() {
+  return new Promise((resolve) => {
+    const until = Date.now() + APRS_RF_PHONE_SETUP_MS;
+    const look = () => {
+      if (!aprsListen.on || aprsListen.state === 'refused') return resolve({ ok: false, sentence: aprsListenPayload().sentence || 'The radio could not be set up for APRS.' });
+      if (aprsListen.state === 'listening') return resolve({ ok: true });
+      if (Date.now() > until) return resolve({ ok: false, sentence: 'The radio did not get to the APRS frequency in time, so nothing was sent.' });
+      setTimeout(look, 250);
+    };
+    look();
+  });
+}
+
+/** The phone's press. reply(refused) goes back to that device only. */
+async function aprsRfSendFromPhone({ clientId, band } = {}) {
+  const refuse = (reason, text) => {
+    aprsLog('radio beacon from the phone not sent: ' + text);
+    if (remoteServer && remoteServer.sendAprsTo) remoteServer.sendAprsTo(clientId, { type: 'refused', of: 'aprs-beacon-rf', reason, text });
+  };
+  if (_aprsRfSending || aprsRfInFlight() || _aprsRfPhoneAsk) return refuse('busy', AprsRfGate.SENTENCES.busy);
+  const st = aprsRfPhoneState();
+  if (!st.ready) return refuse('not-ready', st.sentence || 'The radio cannot send a beacon now.');
+  _aprsRfPhoneAsk = true;
+  let startedListen = false;
+  try {
+    if (!aprsListen.on) {
+      const b = aprsRfPhoneBand(band);
+      startedListen = true;
+      aprsLog(`radio beacon from the phone: setting the radio to ${AprsListen.LABELS[b] || b} APRS for the beacon; it goes back afterwards`);
+      if (b) aprsListenSetBand(b);
+      aprsListenSet(true);
+      const w = await aprsRfPhoneWaitListening();
+      if (!w.ok) return refuse('setup', w.sentence);
+    }
+    await aprsRfSend();
+    if (aprsRfUi.lastResult === 'not-sent') refuse('not-sent', aprsRfUi.sentence || 'The beacon was not sent.');
+  } finally {
+    _aprsRfPhoneAsk = false;
+    if (startedListen) aprsListenSet(false); // the radio back where it was (aprsListenStop's return)
+    try { aprsEcho.stateChanged(); } catch {}
   }
 }
 
@@ -14873,14 +14995,14 @@ function aprsRfRunner() {
 // the radio reported transmit). One packet at a time: a beacon and a message
 // never overlap (_aprsRfSending). Nothing transmits unless the operator
 // pressed Send or Try again, or turned on one of the two settings that are
-// off by default (automatic retries, automatic acks), and those two run on
-// 2 m only (lib/aprs-rf-message.js AUTO_BANDS). Desktop window only: the
+// off by default (automatic retries, automatic acks): retries on 2 m and
+// 30 m, acks on 2 m only (lib/aprs-rf-message.js AUTO_BANDS). Desktop window only: the
 // ECHOCAT wire is unchanged.
 let _aprsMsgRadioJob = null;       // the messenger job on the air now
 /** A default-off automatic radio transmission ('retry' or 'ack'): on, and on a band that allows it. */
 function aprsMsgRadioAuto(kind) {
   const on = kind === 'ack' ? settings.aprsRadioMsgAutoAck === true : settings.aprsRadioMsgAutoRetry === true;
-  return AprsRfMessage.autoAllowed(on, aprsListen.band);
+  return AprsRfMessage.autoAllowed(on, aprsListen.band, kind === 'ack' ? 'ack' : 'retry');
 }
 /** The call the radio frames go out as (the beacon's RF source), or '' with no real callsign. */
 function aprsMsgRadioSource() {
@@ -14998,6 +15120,7 @@ const aprsEcho = AprsEchocat.createController({
   listenSetBand: (b) => aprsListenSetBand(b),
   igateSet: (on) => aprsIgateSetFromDevice(on),
   beaconNow: () => aprsBeaconSend('now').catch((e) => aprsLog('beacon failed: ' + e.message)),
+  beaconRf: (req) => aprsRfSendFromPhone(req).catch((e) => aprsLog('radio beacon from the phone failed: ' + e.message)),
   markUserActive: () => markUserActive(),
   getState: () => ({ listen: aprsListenPayload(), igate: aprsIgateStatus(), beacon: aprsBeaconState() }),
   sendState: (st) => { if (remoteServer && remoteServer.broadcastAprsState) remoteServer.broadcastAprsState(st); },
@@ -48079,6 +48202,7 @@ function cloudShackNotice(text, kind) {
   // --- JS8 Heartbeat Map (RX-only reachability: heard / heard-by / both) ---
   ipcMain.on('js8-map-popout', () => {
     if (js8MapWin && !js8MapWin.isDestroyed()) { js8MapWin.focus(); return; }
+    const isMac = process.platform === 'darwin'; // #866: main.js has no file-wide isMac (each function declares its own)
     js8MapWin = new BrowserWindow({
       minWidth: 400, minHeight: 300, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 700, height: 500, title: 'JS8 Heartbeat Map',
@@ -48149,6 +48273,7 @@ function cloudShackNotice(text, kind) {
   };
   ipcMain.on('aprs-popout-open', () => {
     if (aprsWin && !aprsWin.isDestroyed()) { aprsWin.focus(); return; }
+    const isMac = process.platform === 'darwin'; // #866: main.js has no file-wide isMac (each function declares its own)
     aprsWin = new BrowserWindow({
       minWidth: 640, minHeight: 400,
       width: 1280, height: 860, title: 'APRS', // the approved layout's size; a saved place wins (rememberWindowPlace)
@@ -48170,6 +48295,7 @@ function cloudShackNotice(text, kind) {
         if (!(autoIdleAprsActive && autoIdleAprsOwnsListen)) aprsListenStop('the APRS window closed');
       }
       if (!aprsEcho.keepsFeed()) aprsStopFeed();
+      if (_remoteAprsWanted) remoteAprsWatch(false); // #868: the shack stops listening this desktop started, as closing its own window would
       aprsWin = null;
       _aprsMsgViewing = ''; // A1: messages still going out carry on; nothing is being read now
       aprsBeaconStop(); // phase 5: the beacon timer runs only while the window is open
@@ -48192,6 +48318,7 @@ function cloudShackNotice(text, kind) {
     }
     aprsSend('aprs-init', { home: aprsHome(), distUnit: settings.distUnit || 'mi', km: Feed.clampRangeKm(settings.aprsRangeKm), showLastMin: AprsWindowState.normShowLast(settings.aprsShowLastMin), mapView: AprsMap.cleanView(settings.aprsMapView) });
     aprsStartFeed();
+    if (isRemoteMode()) remoteAprsWatch(true); // #868: listening and the heard stations are the shack's
     aprsListenPush();
     aprsIgatePush();
     aprsAutoListenOnOpen(); // receive only; once per open, silent when it may not
@@ -48773,6 +48900,7 @@ function cloudShackNotice(text, kind) {
       jtcatMapPopoutWin.focus();
       return;
     }
+    const isMac = process.platform === 'darwin'; // #866: main.js has no file-wide isMac (each function declares its own)
     jtcatMapPopoutWin = new BrowserWindow({
       minWidth: 360, minHeight: 300, // never smaller than its own controls (N0KAH 2026-10-24)
       width: 700, height: 500,
