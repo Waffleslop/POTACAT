@@ -406,6 +406,7 @@ const wsprlive = require('./lib/wspr/wsprlive');
 const wsprBandhop = require('./lib/wspr/bandhop');
 const jtcatModehop = require('./lib/jtcat-modehop');
 const { operatorModeChange: jtcatModeChangeRule } = require('./lib/jtcat-mode-change');
+const ProtocolRegistration = require('./lib/protocol-registration'); // who may claim potacat:// links
 const TuneLinkGuard = require('./lib/tune-link-guard'); // a potacat://tune link stops automatic JTCAT TX before it tunes
 const FakeIt = require('./lib/jtcat-fake-it'); // split operation "Fake It" (fakeItShiftForTx / fakeItRestoreDial)
 const JtcatCaptureGate = require('./lib/jtcat-capture-gate'); // #746: ECHOCAT off releases a phone-driven capture
@@ -44652,8 +44653,27 @@ function wsprRunOwedAtuTune() {
 }
 
 // --- potacat:// protocol handler ---
-if (!app.isDefaultProtocolClient('potacat')) {
-  app.setAsDefaultProtocolClient('potacat');
+// A packaged POTACAT claims it; a development run only from the main checkout
+// with the default user data folder, and with its app path (lib/protocol-registration.js).
+{
+  let appIsWorktree = false;
+  try { appIsWorktree = fs.statSync(path.join(app.getAppPath(), '.git')).isFile(); } catch { /* no .git: not a worktree */ }
+  const reg = ProtocolRegistration.decideProtocolRegistration({
+    isPackaged: app.isPackaged,
+    execPath: process.execPath,
+    appPath: app.getAppPath(),
+    userDataPath: app.getPath('userData'),
+    defaultUserDataPath: path.join(app.getPath('appData'), app.getName()),
+    hasUserDataSwitch: app.commandLine.hasSwitch('user-data-dir'),
+    appIsWorktree,
+  });
+  if (!reg.register) {
+    console.log(`[protocol] potacat:// links left alone: ${reg.why}`);
+  } else if (reg.args) {
+    if (!app.isDefaultProtocolClient('potacat', reg.path, reg.args)) app.setAsDefaultProtocolClient('potacat', reg.path, reg.args);
+  } else if (!app.isDefaultProtocolClient('potacat')) {
+    app.setAsDefaultProtocolClient('potacat');
+  }
 }
 
 /**
