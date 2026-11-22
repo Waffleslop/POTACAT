@@ -55807,11 +55807,13 @@ function cloudShackNotice(text, kind) {
     const { portPath, baudRate, civAddress } = config;
     const { SerialPort } = require('serialport');
 
-    // Temporarily disconnect live CAT to release the serial port
+    // Temporarily disconnect live CAT + kill rigctld to release the serial port
+    // (a Hamlib rig entry's rigctld holds the COM port: "Access denied", #910)
     if (cat) {
       await restoreIcomNetworkDataMod('Icom CI-V test');
       cat.disconnect();
     }
+    killRigctld();
 
     await new Promise((r) => setTimeout(r, 500));
 
