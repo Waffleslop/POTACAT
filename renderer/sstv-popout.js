@@ -1965,6 +1965,7 @@ async function startRxAudio() {
     // Icom network: the radio's audio is the network stream; the local input
     // is only its fallback, so naming it "(from the radio)" was wrong (#936).
     if (settings.audioSource === 'icom-network') setStatusDevice('Icom network audio', true, heard);
+    else if (settings.audioSource === 'yaesu-lan') setStatusDevice('Yaesu LAN audio', true, heard); // #951
     else setStatusDevice(heard, !audioInputSelect.value);
     statusBar.textContent = (pick.notice && !directStream) ? pick.notice : 'Listening (' + actualRate + ' Hz)';
   } catch (err) {

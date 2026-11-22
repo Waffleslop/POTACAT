@@ -61,9 +61,14 @@ if (R) {
     assert.strictEqual(R.sstvLocalCaptureYields('smartsdr', 0, 11000), false);
   });
   test('SSTV sound-card sources never yield', () => {
-    for (const s of [undefined, '', 'device', 'yaesu-lan', 'tci']) {
+    for (const s of [undefined, '', 'device', 'tci']) {
       assert.strictEqual(R.sstvLocalCaptureYields(s, 10000, 10001), false, String(s));
     }
+  });
+  test('#951 SSTV yields to a live Yaesu SCU-LAN10 stream, not to a quiet one', () => {
+    assert.strictEqual(R.sstvLocalCaptureYields('yaesu-lan', 10000, 11000), true);
+    assert.strictEqual(R.sstvLocalCaptureYields('yaesu-lan', 10000, 13000), false);
+    assert.strictEqual(R.sstvLocalCaptureYields('yaesu-lan', 0, 11000), false);
   });
 }
 
@@ -85,6 +90,7 @@ test('SSTV pop-out loads the module and gates its local capture with it', () => 
 test('SSTV names Icom network audio, not the local device, as the radio source', () => {
   const pop = read('renderer/sstv-popout.js');
   assert.ok(/'Icom network audio'/.test(pop), 'status line names Icom network audio');
+  assert.ok(/'Yaesu LAN audio'/.test(pop), 'status line names Yaesu LAN audio (#951)');
 });
 
 console.log(passed + ' passed');
