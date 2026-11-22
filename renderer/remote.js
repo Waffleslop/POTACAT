@@ -214,6 +214,8 @@
   let pingInterval = null;
   let lastPingSent = 0;
   const wsLiveness = WsLiveness.create();
+  // When to let go of PTT, and whether the shack still owes hearing it (#935).
+  const pttRelease = PttRelease.create();
 
   // WebRTC
   let pc = null;
@@ -1904,6 +1906,7 @@
     };
     ws.onmessage = function(event) {
       wsLiveness.messageReceived(Date.now());
+      pttRelease.heard(); // the socket was alive after any release sent on it
       var msg;
       try { msg = JSON.parse(event.data); } catch { return; }
       handleMessage(msg);
@@ -1913,6 +1916,9 @@
   }
 
   function onWsClosed() {
+    // A PTT release that went out and was never answered may not have
+    // arrived: it is sent again after the next auth-ok (#935).
+    pttRelease.socketClosed();
     clearInterval(pingInterval);
     pingInterval = null;
     // The shack stops keying when it loses this page; the page's own keyer
@@ -2047,6 +2053,7 @@
         break;
 
       case 'auth-ok':
+        flushOwedPttOff(); // first: a release lost while the socket was down (#935)
         try { aprsOnReconnect(); } catch { /* pre-init */ }
         connectScreen.classList.add('hidden');
         mainUI.classList.remove('hidden');
@@ -4817,25 +4824,97 @@
     // Re-mute mic track to prevent VOX/feedback TX cycling
     if (localAudioStream) localAudioStream.getAudioTracks().forEach(t => { t.enabled = false; });
     if (typeof smConnected !== 'undefined' && smConnected && smMicTrack) smMicTrack.enabled = false;
+    // A release on a socket that is not open would be lost and the shack
+    // would stay keyed until its heartbeat or PTT Safety Timeout: remember it
+    // and send it after the next auth-ok (#935, K4DZC).
+    var open = !!(ws && ws.readyState === WebSocket.OPEN);
+    if (open) {
+      ws.send(JSON.stringify({ type: 'ptt', state: false }));
+    }
+    pttRelease.offSent(open);
+  }
+
+  // Called first on auth-ok: the shack drops anything sent before it admits
+  // this page, so that is the earliest an owed release can land. Only ever
+  // sends PTT off.
+  function flushOwedPttOff() {
+    if (!pttRelease.takeOwed()) return;
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'ptt', state: false }));
+      pttRelease.offSent(true);
+    } else {
+      pttRelease.offSent(false);
     }
   }
 
-  pttBtn.addEventListener('touchstart', (e) => { e.preventDefault(); pttStart(); });
-  pttBtn.addEventListener('touchend', (e) => { e.preventDefault(); pttStop(); });
-  pttBtn.addEventListener('touchcancel', (e) => { e.preventDefault(); pttStop(); });
-  pttBtn.addEventListener('mousedown', (e) => { e.preventDefault(); pttStart(); });
-  pttBtn.addEventListener('mouseup', (e) => { e.preventDefault(); pttStop(); });
-  pttBtn.addEventListener('mouseleave', (e) => { if (pttDown) pttStop(); });
+  // Press and hold on a PTT button (#935). Pointer events cover mouse, touch
+  // and pen. Touch and pen take pointer capture, so the release reaches the
+  // button wherever the finger lifts; a mouse keeps "drag off the button
+  // lets go" (pointerleave). Every way a press can end lets go: up, leave,
+  // cancel (the browser took the gesture), lost capture, touchcancel.
+  function wirePttHoldButton(btn, onDown, onUp) {
+    if (!btn) return;
+    btn.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      e.preventDefault();
+      if (e.pointerType !== 'mouse') {
+        try { btn.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+      }
+      pttRelease.press('pointer');
+      onDown(e);
+    });
+    const up = (e) => {
+      if (e && e.type === 'pointerup') e.preventDefault();
+      pttRelease.release('pointer');
+      onUp(e);
+    };
+    btn.addEventListener('pointerup', up);
+    btn.addEventListener('pointercancel', up);
+    btn.addEventListener('lostpointercapture', up);
+    btn.addEventListener('pointerleave', (e) => { if (pttRelease.holding('pointer')) up(e); });
+    // Touch: keep the page from scrolling or zooming off a held button, and
+    // let go if the system cancels the touch.
+    btn.addEventListener('touchstart', (e) => { e.preventDefault(); }, { passive: false });
+    btn.addEventListener('touchcancel', up);
+    btn.addEventListener('contextmenu', (e) => { e.preventDefault(); }); // long-press menu on a phone
+  }
 
-  // Spacebar PTT (iPad keyboard)
+  wirePttHoldButton(pttBtn, () => { pttStart(); }, () => { pttStop(); });
+
+  // Spacebar PTT (iPad keyboard). Starts only outside a text box; lets go on
+  // keyup whatever has focus while Space holds PTT (#935).
   document.addEventListener('keydown', (e) => {
-    if (e.code === 'Space' && !e.repeat && !isInputFocused()) { e.preventDefault(); pttStart(); }
+    if (pttRelease.spaceStarts(e, PttRelease.isTypingTarget(document.activeElement))) {
+      e.preventDefault();
+      pttRelease.press('space');
+      pttStart();
+    }
   });
   document.addEventListener('keyup', (e) => {
-    if (e.code === 'Space' && !isInputFocused()) { e.preventDefault(); pttStop(); }
+    if (pttRelease.spaceReleases(e, PttRelease.isTypingTarget(document.activeElement))) {
+      e.preventDefault();
+      pttRelease.release('space');
+      pttStop();
+    }
   });
+
+  // The page lost the operator: a held Space or press never sends its keyup
+  // or pointerup once the window is behind another, the tab is hidden, or the
+  // page is going away. Let go of every gesture hold (#935). The Bluetooth
+  // headset and speaker-mic toggles are not gesture holds; they keep their
+  // own release (and work with the screen off).
+  function releaseGestureHolds() {
+    if (pttRelease.releaseAll()) {
+      var vfBtn = document.getElementById('vf-ptt');
+      if (vfBtn) vfBtn.classList.remove('active');
+      pttStop();
+    }
+  }
+  window.addEventListener('blur', releaseGestureHolds);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') releaseGestureHolds();
+  });
+  window.addEventListener('pagehide', releaseGestureHolds);
   function isInputFocused() {
     const el = document.activeElement;
     return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
@@ -4949,14 +5028,17 @@
 
   estopBtn.addEventListener('click', () => {
     if (typeof ssbPlayingIdx !== 'undefined' && ssbPlayingIdx >= 0) stopSsbPlayback();
+    pttRelease.releaseAll();
     pttDown = false;
     pttBtn.classList.remove('active');
     txBanner.classList.add('hidden');
     muteRxAudio(false);
     if (localAudioStream) localAudioStream.getAudioTracks().forEach(t => { t.enabled = false; });
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    var open = !!(ws && ws.readyState === WebSocket.OPEN);
+    if (open) {
       ws.send(JSON.stringify({ type: 'estop' }));
     }
+    pttRelease.offSent(open); // an E-stop pressed while offline still unkeys after the reconnect (#935)
   });
 
   // --- Earbud/headset PTT (Media Session API + MediaPlayPause key) ---
@@ -15454,14 +15536,10 @@ var _paddleHoldTimer = { dit: null, dah: null };
     });
 
     // --- PTT (delegate to existing pttStart/pttStop so all state stays in sync) ---
-    function vfPttDown(e) { e.preventDefault(); vfPttBtn.classList.add('active'); pttStart(); }
-    function vfPttUp(e) { e.preventDefault(); vfPttBtn.classList.remove('active'); pttStop(); }
-    vfPttBtn.addEventListener('touchstart', vfPttDown, { passive: false });
-    vfPttBtn.addEventListener('touchend', vfPttUp, { passive: false });
-    vfPttBtn.addEventListener('touchcancel', vfPttUp);
-    vfPttBtn.addEventListener('mousedown', vfPttDown);
-    vfPttBtn.addEventListener('mouseup', vfPttUp);
-    vfPttBtn.addEventListener('mouseleave', (e) => { if (vfPttBtn.classList.contains('active')) vfPttUp(e); });
+    // Same press-and-hold wiring as the main PTT button (#935).
+    wirePttHoldButton(vfPttBtn,
+      () => { vfPttBtn.classList.add('active'); pttStart(); },
+      () => { vfPttBtn.classList.remove('active'); pttStop(); });
 
     // --- Band quick-tune ---
     fullview.querySelectorAll('.vf-band').forEach((btn) => {
