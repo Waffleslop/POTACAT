@@ -7779,6 +7779,7 @@ function _shareRigOpen() {
   // Reset to form view, pre-fill callsigns from current settings.
   _shareRigShowFormView();
   _shareRigUpdateClassDetail();
+  _shareRigUpdateSignedOut();
   _shareRigUpdateReachNotice();
   _shareRigResetWhenSection();
   _shareRigRefreshList();
@@ -7840,6 +7841,25 @@ function _shareRigSelectedWhen() {
 // network reach state. Goal: never let an operator generate a pass
 // expecting "share anywhere" when they're actually on LAN-only and
 // the recipient won't be able to reach them.
+// Signed out of POTACAT Cloud (by hand, or because this computer was removed
+// from the account): one line saying passes cannot be created, cancelled or
+// notified from here. Passes already sent keep working; nothing is revoked.
+async function _shareRigUpdateSignedOut() {
+  const box = document.getElementById('share-rig-signed-out');
+  if (!box || !window.api.cloudSessionGet) return;
+  let st = null;
+  try { st = await window.api.cloudSessionGet(); } catch {}
+  const text = st && !st.loggedIn ? (st.guestPassNotice || '') : '';
+  box.textContent = text;
+  box.classList.toggle('hidden', !text);
+}
+if (window.api && window.api.onCloudSignedOut) {
+  window.api.onCloudSignedOut(() => {
+    const dlg = document.getElementById('share-rig-dialog');
+    if (dlg && dlg.open) _shareRigUpdateSignedOut();
+  });
+}
+
 async function _shareRigUpdateReachNotice() {
   const box = document.getElementById('share-rig-reach-notice');
   if (!box) return;

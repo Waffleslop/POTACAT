@@ -776,7 +776,7 @@ boat and aircraft turned to `course`). Idle Mode's `aprs` choice stays on
 | `cloud-tunnel-result` | S→C | `{ok, error?, message?}`: `ok:true` when the tunnel is on (or already was); `error` is `guest_pass`, `signed_out`, `no_access` or `not_ready`, with `message` in plain words. The tunnel's new state also arrives as `cloud-state` where that is supported. |
 | `cloud-logout-result` | S→C | Logout confirmation. |
 | `cloud-get-status` | C→S | Sync status query. |
-| `cloud-status` | S→C | Status response. |
+| `cloud-status` | S→C | Status response. Also pushed unasked, as `{ loggedIn: false }`, to owner clients (never Guest Pass clients) when POTACAT Cloud signs the shack out because it was removed from the account (`device_revoked`, 2026-11-20). |
 | `cloud-sync-now` | C→S | Force a sync. |
 | `cloud-sync-result` | S→C | Sync result. |
 | `cloud-bulk-upload` | C→S | Push all local QSOs to cloud. |

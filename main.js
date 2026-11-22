@@ -44891,6 +44891,11 @@ async function redeemGuestPass(rawInput) {
   try {
     if (settings.cloudAccessToken) {
       r = await post('/redeem', settings.cloudAccessToken);
+      // This computer was removed from its Cloud account: signed out here
+      // too (lib/cloud-revoked.js), and the pass is tried anonymously.
+      if (require('./lib/cloud-revoked').classifyCloudResponse(r.status, r.body) === 'device_revoked' && cloudIpc) {
+        cloudIpc.signOutRevoked(r.body);
+      }
       if (r.status === 401 || r.status === 403) {
         sendCatLog(`[guest-pass] authed redeem refused (HTTP ${r.status}) — retrying anonymously`);
         r = await post('/redeem-anonymous', null);
@@ -45678,7 +45683,22 @@ app.whenReady().then(() => {
         teardownCloudDeviceHeartbeat();
         setImmediate(() => ensureCloudDeviceRegistered(reason).catch(() => {}));
         // A new account brings its own templates (and takes this machine's).
-        if (reason !== 'signout' && sstvTemplateSync) setTimeout(() => sstvTemplateSync.sync('signin').catch(() => {}), 2000);
+        if (!require('./lib/cloud-ipc').isSignOutReason(reason) && sstvTemplateSync) setTimeout(() => sstvTemplateSync.sync('signin').catch(() => {}), 2000);
+      },
+      // Cloud answered device_revoked: this computer was removed from the
+      // account and is signed out (lib/cloud-revoked.js). cloud-ipc has
+      // cleared the tokens and stopped sync; these are main's loops.
+      deviceRevokedSteps: {
+        stopDevice: () => teardownCloudDeviceHeartbeat(),
+        stopTunnel: () => { if (cloudTunnel && typeof cloudTunnel.stopSignedOut === 'function') cloudTunnel.stopSignedOut(); },
+        stopOther: () => { _stopTurnRemint(); _turnIceServers = null; _turnExpiresAt = 0; },
+        notify: (text) => {
+          sendCatLog('[Cloud] ' + text);
+          // ECHOCAT clients (web + app) repaint their Cloud section signed out.
+          if (remoteServer && typeof remoteServer.broadcastCloudStatus === 'function') {
+            try { remoteServer.broadcastCloudStatus({ loggedIn: false }); } catch {}
+          }
+        },
       },
     });
     cloudIpc.startBackgroundSync();

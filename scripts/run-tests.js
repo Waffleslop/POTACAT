@@ -490,6 +490,7 @@ const TESTS = [
   'test/echocat-web-gate-test.js',
   'test/tunnel-webui-gate-test.js',
   'test/cloud-session-change-test.js',
+  'test/cloud-device-revoked-test.js', // a computer removed from the Cloud account is signed out: tokens cleared, loops and tunnel stopped
   'test/cloud-log-sync-test.js',
   'test/cloud-sync-log-test.js', // B10: Cloud sync writes its pulls, errors and "not started" reason to the session log
   'test/cloud-pair-errors-test.js', // a second desktop registers before Cloud pairing; Cloud answers in plain words; its device id never leaves in an export
